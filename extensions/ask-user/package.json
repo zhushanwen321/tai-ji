@@ -36,7 +36,7 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*",
     "@types/node": "^24.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

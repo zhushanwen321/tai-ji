@@ -55,6 +55,6 @@
     "@vue/test-utils": "^2.4.6",
     "happy-dom": "^20.9.0",
     "typescript": "^5.8",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.10"
   }
 }

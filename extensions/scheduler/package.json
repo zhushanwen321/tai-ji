@@ -20,7 +20,7 @@
     "croner": "^9.0.0"
   },
   "devDependencies": {
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.10"
   },
   "files": [
     "index.ts",
