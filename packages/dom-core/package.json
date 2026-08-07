@@ -26,6 +26,6 @@
   },
   "devDependencies": {
     "typescript": "^5.8",
-    "jsdom": "^29.1.1"
+    "jsdom": "^30.0.1"
   }
 }
