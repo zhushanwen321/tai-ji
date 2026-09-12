@@ -38,6 +38,10 @@ export function useSidebarCounts(focusedSessionId: Ref<string | null>) {
     const sessions = sessionStore.list
     return sessions.length - sessions.filter((s) => isMarkedDone(s.id)).length
   })
+  // file tab 计数 = 文件树根层条目数（目录计入），刻意不做递归全量：文件树懒加载
+  // （children 未展开前 undefined）决定 renderer 内存中没有全量文件清单，递归计数需
+  // eager 拉整树（一次大 IPC + 常驻内存），为一个小数字付出真实开销——根层口径与
+  // 数字删除前用户所见一致，无感知差异（sidebar-tab-count-restore 决策 2）。
   const fileCount = computed(() => {
     const sid = focusedSessionId.value
     if (!sid) return 0
