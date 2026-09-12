@@ -22,6 +22,10 @@
  * - `cleanup(sid)`：从 Map 移除指定 sid 分区（下次访问重新 init）
  * - 切 sid 不丢旧数据（Map 保留），切回恢复
  *
+ * 例外登记（ADR-0049 §例外清单）：不采用本工厂的 per-session 状态（全局 sid
+ * 协调器 / Pinia factory 单例 / shallowRef 容器等例外类）必须逐个在该 ADR 的
+ * 例外清单登记「偏离点 + 判据 + 审批来源」，新增例外 = 同批登记，review 按此核对。
+ *
  * **响应式契约（重要）**：init 工厂**必须返回 reactive 容器**（`reactive({...})` / `reactive([])`），
  * 不能是 plain object/array。原因：update/updateFor 内 mutate 分区对象，下游 computed
  * （如 `computed(() => state.current.value.find(...))`）需要在 reactive 容器上建立依赖才能
