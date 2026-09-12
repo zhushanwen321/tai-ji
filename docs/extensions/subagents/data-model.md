@@ -191,4 +191,4 @@ error          → record.lastError = message
 
 - [architecture.md](./architecture.md) — 三层架构与文件归属
 - [execution-flow.md](./execution-flow.md) — create/update/complete 由谁何时调用
-- [session-runner.md](./session-runner.md) — （已退役，历史记录）进程内事件处理架构；现行事件链 = 引擎包 spawn 事件翻译上抛 core
+- session-runner.md — （已退役并删除，git 可追溯）进程内事件处理架构；现行事件链 = 引擎包 spawn 事件翻译上抛 core

@@ -159,4 +159,4 @@ sequenceDiagram
 
 - [architecture.md](./architecture.md) — 双 Service 在 Runtime 层的位置
 - [data-model.md](./data-model.md) — ExecutionRecord 的状态机与 completeRecord
-- [session-runner.md](./session-runner.md) — （已退役，历史记录）进程内 SessionRunner 架构；现行执行链见本文 §3 与 [architecture.md](./architecture.md)
+- session-runner.md — （已退役并删除，git 可追溯）进程内 SessionRunner 架构；现行执行链见本文 §3 与 [architecture.md](./architecture.md)
