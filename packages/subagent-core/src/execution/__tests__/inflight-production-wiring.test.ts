@@ -9,13 +9,20 @@
 //
 // 三视角：
 //   ①使用者（extension reporter 视角）——注册 setInFlightListener 后，生产迁移点
-//     （idle 相位 arm / 续聊 disarm / 守护击杀 / dispose 批量回收 / 引擎反向通道
-//     childSpawned/childStateChanged）每一处都推来含该 record 贡献的绝对计数快照。
+//     （轮终 arm（Continuation.settleRoundSuccess）/ 续聊派发 disarm
+//     （Continuation.dispatchRound）/ dispose 批量回收（disposeAllRecords）/
+//     引擎反向通道 childSpawned/childStateChanged）每一处都推来含该 record 贡献的
+//     绝对计数快照。
 //   ②构建者——推送携带的是双谓词过滤后的真实计数：活句柄 + 无 armed idle timer
 //     才计在途；镜像置死后计数即刻回落（EngineClient 镜像桥接投影）。
 //   ③观察者——EngineClient 镜像 → core 镜像的单向投影可从镜像面观察（core 镜像
 //     条目随反向通道事件出现/置死），壳层监听者异常不反噬主链（既有出口测试覆盖，
 //     此处不重复）。
+//
+// [dev-0.9.19 符号适配] 旧生产链（handleChatRoundPhase 相位帧 / armChatIdleTimer /
+// interact 面 message 投递）已随 H1 U6 相位机退役；现生产链 = Continuation
+// （轮终簿记 settleRoundSuccess arm / 派发入口 dispatchRound disarm）+ 协议 run
+// 承载续聊投递（无 interact 面），本文件断言相应对齐 dev 现名。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -37,7 +44,7 @@ import { ModelConfigService } from "../model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
 import type { RecordStore } from "../record-store.ts";
 import { SubagentService, type PiLike } from "../subagent-service.ts";
-import { _resetLifecycleState, hasIdleTimer } from "../lifecycle-manager.ts";
+import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle-manager.ts";
 import {
   registerSpawnedChildForRecord,
   _resetCoreSpawnedChildrenMirrorForTest,
@@ -132,8 +139,11 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("idle 相位 arm（生产路径 = handleChatRoundPhase → armChatIdleTimer）：活句柄翻入保活，推送 inFlight=0", async () => {
+  it("轮终 arm（生产路径 = Continuation.settleRoundSuccess 轮终簿记）：活句柄翻入保活，推送 inFlight=0", async () => {
     const handle = await service.execute({ task: "first round", slug: "t", ctxModel: CTX_MODEL, conversation: true });
+    // detached 派发链异步（dispatchRoundAsync → kickOffChatRound → pool acquire）：
+    // 等协议 run 被 fake 捕获（与 delivery-methods.test.ts 同款等待惯例）。
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     const run = fake.runs[0]!;
     // 引擎侧活句柄（生产经 EngineClient 反向通道桥接投影——此处直接落 core 镜像，
     // 桥接本体在下方 EngineClient 套件独立验证）
@@ -141,20 +151,24 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     expect(getInFlightSnapshot().inFlight).toBe(1); // 前置：在途句柄在场
 
     seen.length = 0;
-    run.emitLifecycle({ phase: "idle" });
-    expect(hasIdleTimer(handle.subagentId)).toBe(true); // idle 相位 = timer armed
+    run.settle({ content: "round 1 done" }); // run 应答 = agent_settled（轮终分流触发器）
+    await vi.waitFor(() => expect(hasIdleTimer(handle.subagentId)).toBe(true)); // 轮终 = timer armed
     expect(seen.at(-1)).toEqual({ inFlight: 0 }); // 保活不算在途（D5 谓词）
   });
 
-  it("续聊投递 disarm（生产路径 = deliverChatMessage）：翻回正在执行，推送 inFlight=1", async () => {
+  it("续聊投递 disarm（生产路径 = deliverChatMessage → Continuation.dispatchRound）：翻回正在执行，推送 inFlight=1", async () => {
     const record = makeResumableRecord("sa-wiring-disarm");
+    record.sessionFile = path.join(agentDir, "child-session.jsonl"); // 续聊锚点（dispatchRound 守卫必需）
     store.register(record);
     registerSpawnedChildForRecord(record.id, makeFakeChild());
+    armIdleTimer(record.id, () => {}); // 预置保活态（上轮已 settle 的形态）——disarm 挂点的真实生效面
 
     seen.length = 0;
-    await service.chatActions.deliverChatMessage(record, "next round msg", false);
+    await service.chatActions.deliverChatMessage(record, "next round msg");
 
-    expect(fake.interacts[0]!.action).toEqual({ kind: "message", payload: "next round msg", interrupt: false });
+    // 续聊投递 = 新协议 run 承载（H1 U6 后无 interact 面；task.prompt = 聚合消息正文）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(fake.runs[0]!.task.prompt).toBe("next round msg");
     expect(hasIdleTimer(record.id)).toBe(false);
     expect(seen.at(-1)).toEqual({ inFlight: 1 }); // disarm 后该 record 计在途
   });

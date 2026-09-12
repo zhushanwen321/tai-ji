@@ -1279,9 +1279,10 @@ export class RunOrchestration {
   //     → settle 交棒 = run 应答驱动（Continuation onRunSettled 内
   //     noteRoundSettledFromProtocol，先于轮终簿记）；armMidRoundNoProgress 挂载 =
   //     kickOffChatRound 轮开跑 arm；中段刷新 = run 事件通道 9 种既有事件。
-  //   - armChatIdleTimer（idle 相位帧 → idle timer 挂载）→ 随长驻消亡退役
-  //    （每轮 = 新 run，轮末进程随 agent_settled 回收，「5min idle 关闭」无对象——
-  //     设计 §2.2#5；30 天 idle-gc 只归档不终态化不变）。
+  //   - armChatIdleTimer（idle 相位帧 → idle timer 挂载）→ 相位帧消费面退役；
+  //     [u7a 重接] arm 语义由 Continuation.settleRoundSuccess 轮终簿记后的
+  //     armIdleKeepalive 承载（活句柄保活 + D5 在途推送，见 conversation-continuation.ts）
+  //     ——30 天 idle-gc 只归档不终态化不变。
   //   - backfillChatAnchor（idle 帧锚点回填）→ sessionFile 回填改由 run 应答
   //     outcome.sessionFile 承载（+ writeBindingForRecord 落盘，UF-1）。
   //   - onChatRoundFailed（failed 相位分诊）→ Continuation.onRunSettled 失败分支
