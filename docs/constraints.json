@@ -946,7 +946,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "todo/context-consistency-design.md",
+        "../taste-lint/base.mjs",
         "adr/0049-session-isolation-map-partition.md"
       ],
       "dimensions": [
@@ -2243,7 +2243,7 @@
         "extensions/universal/rename-session/**"
       ],
       "authority": [
-        "design/rename-session-three-modes.md#d7issubagentsession-跨包耦合登记-c-ext-21吸收-ext-simplify-15-d3选定登记--双端注释"
+        "../extensions/universal/rename-session/src/llm.ts"
       ],
       "dimensions": [
         "arch-boundary"
