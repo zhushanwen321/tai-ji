@@ -91,3 +91,6 @@ xyz-agent 的架构决策记录。每条 ADR 记录一个不可逆的架构/技�
 | 0061 | 2026-08-06 | cw store 键控基准改为 repo 级（git common dir）（Superseded，被引擎层方案 A 取代） |
 | 0062 | 2026-08-19 | 单一数据 owner + 绝对写规则（Accepted） |
 | 0063 | 2026-08-19 | session 附着不变量 I1-I5（Accepted） |
+| 0064 | 2026-08-28 | pi 语义吸收层四支柱（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫）（Accepted） |
+| 0065 | 2026-09-08 | mutation RPC 回复取生效值、禁乐观写（Accepted） |
+| 0066 | 2026-08-02 | 视觉色相定为太极·玄纯灰重克制 V3（Accepted；2026-09-13 自 page-design 临时决策文档转正） |

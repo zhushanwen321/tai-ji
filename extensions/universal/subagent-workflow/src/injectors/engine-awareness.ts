@@ -1,7 +1,7 @@
 // src/injectors/engine-awareness.ts
 //
 // [engine-awareness U3] 引擎感知检测编排。设计权威源：
-// docs/design/subagent-engine-awareness-injection.md §2.3 物理数据流 /
+// docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）§2.3 物理数据流 /
 // §3.3 D1（per-turn poll）、D1b（lastEngine 初始化与静默基线化）、D2（reload 先行）、
 // D3（通知通道）、D5（三态读取语义）。
 //

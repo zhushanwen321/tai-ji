@@ -1,6 +1,6 @@
 // pr-lifecycle — PR 全生命周期 workflow 入口（zsw 1.2.0 core 契约）
 //
-// 设计：docs/design/pr-lifecycle-workflow.md；实施计划：docs/design/pr-lifecycle-workflow.impl-plan.md
+// 设计：docs/design/pr-lifecycle-workflow.md（含 impl-plan，均已删除，git 可追溯）
 // 结构：本入口只做 io 适配层组装（引擎注入 → 纯逻辑库），全部状态机/守卫/walker
 // 在 ./pr-lifecycle/lib.cjs（依赖注入，node 直测：test/run-tests.js）。
 // lib.createPrSteps 产出 §3.3 完整十二 step 注册表

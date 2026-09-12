@@ -5,6 +5,11 @@
  * <dataDir>/base-tool-enhance/<sessionId>/<task_id>.log（append fd，不占内存、
  * 无 pipe backpressure）+ child.unref()（pi 不等它）。abort/interrupt 不传播到
  * 后台任务（D15）——execute 立即返回，本模块不接触 signal。
+ *
+ * D6：本包不强加任务寿命上限（无 TTL/墙钟）——vitest watch、dev server 这类任务
+ * 的合法寿命就是「跑到用户叫停」，强加上限会把长任务误判死、完成通知链路随之失效。
+ * 寿命出口只有三个：自然退出 / 显式 timeout（LLM 传值或配置 backgroundTimeoutSeconds）
+ * / bash_kill。
  */
 
 import { spawn } from "node:child_process";

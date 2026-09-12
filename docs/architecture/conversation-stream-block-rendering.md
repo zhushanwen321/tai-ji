@@ -315,7 +315,29 @@ pi `text_start/toolcall_start` 在 `event-adapter.ts:106` 是 noop。无需改�
 | compact/fork/handoff | 读 content | **不影响**（content 角色不变） |
 | **v6 spec §12.6** | 容器/文字/cursor 定义变更 | **必须同步更新**（纳入清单） |
 | 既有测试 | contentBlocks 填充测试不变 | Turn.vue 渲染断言需更新 + **新增零跳变回归测试**（§8） |
-| **trace 折叠 stick-guard 通路** | 删 `<Transition>` 后 `StickGuardDepsKey` provide 落空（无 inject 方）、`useTraceTransition` hooks 零调用 → 孤儿 | **清理退役**：删除 `useStickGuard.ts` / `stick-guard-deps.ts` + barrel export + MessageStream provide + 3 处测试 mock。guarded 回归（完成时 trace 收缩 → scrollTop clamp → stickToBottom 翻 false）**结构上不可能**：`useVirtuaFollow` INVAR-M4-2′ 复合判据下，`onScroll` 翻 false 仅由「offset 递减 ∧ 距底 >40px」的用户上滑信号驱动（程序性写入回声 offset 递增不命中第一合取；clamp 回声 distance≤0 走恢复分支翻 true），且 force 后收敛抑制窗内暂停翻 false；现行语义见 docs/design/chat-pin-bottom-fix.md §4.3 D7（INVAR-M4-2 原文「onScroll 只单向翻真」已废止）。**已实测无回归**（真实 session + 探针验证，2026-08-12）：① 手动折叠（v-if 移除 thinking/tool block，scrollHeight 794→762）不触发 virtua `onScroll`；② 对话完成（isSessionActive true→false + trace 折叠 + watch scrollToBottom）无 `onScroll`、无 stickToBottom 翻真，`followIfStuck` rAF 重读 `stickToBottom=false` 时跳过滚动，界面停留在上滑位置（scrollTop 不变）。`pause/resumeStickGuard` 计数器已随删除退役（`useVirtuaFollow` 无 pause/resume 函数、无计数逻辑，勿据旧文档重建） |
+| **trace 折叠 stick-guard 通路** | 删 `<Transition>` 后 `StickGuardDepsKey` provide 落空（无 inject 方）、`useTraceTransition` hooks 零调用 → 孤儿 | **清理退役**：删除 `useStickGuard.ts` / `stick-guard-deps.ts` + barrel export + MessageStream provide + 3 处测试 mock。guarded 回归（完成时 trace 收缩 → scrollTop clamp → stickToBottom 翻 false）**结构上不可能**：`useVirtuaFollow` INVAR-M4-2′ 复合判据下，`onScroll` 翻 false 仅由「offset 递减 ∧ 距底 >40px」的用户上滑信号驱动（程序性写入回声 offset 递增不命中第一合取；clamp 回声 distance≤0 走恢复分支翻 true），且 force 后收敛抑制窗内暂停翻 false；权威定义见 §7.3.1（INVAR-M4-2 原文「onScroll 只单向翻真」已废止）。**已实测无回归**（真实 session + 探针验证，2026-08-12）：① 手动折叠（v-if 移除 thinking/tool block，scrollHeight 794→762）不触发 virtua `onScroll`；② 对话完成（isSessionActive true→false + trace 折叠 + watch scrollToBottom）无 `onScroll`、无 stickToBottom 翻真，`followIfStuck` rAF 重读 `stickToBottom=false` 时跳过滚动，界面停留在上滑位置（scrollTop 不变）。`pause/resumeStickGuard` 计数器已随删除退役（`useVirtuaFollow` 无 pause/resume 函数、无计数逻辑，勿据旧文档重建） |
+
+### 7.3.1 INVAR-M4-2′ 权威定义（消息流交互全局不变量）
+
+> **权威定义迁自 docs/design/chat-pin-bottom-fix.md §4.3 D7（该文档已删除，git 可追溯）；代码侧 SSOT 注释 = `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 文件头。**
+
+脱离锚定（`useVirtuaFollow` 的 `stickToBottom = false`）**只由用户输入信号驱动**，两条通路：
+
+1. **wheel**：`onWheel deltaY < 0`（滚轮/触控板上滑）——恒即时生效，不受任何抑制窗约束（覆盖「已在顶部仍上滚」等不产生 scroll 事件的边缘）；
+2. **onScroll 复合判据**：`offset 递减 ∧ 距底 > BOTTOM_THRESHOLD(40px)` → 翻 false——覆盖滚动条拖拽、键盘 PageUp/Home 等不产生 wheel 事件的上滑路径（旧 INVAR-M4-2 的 wheel-only 判据对这两类用户结构性失效：`stickToBottom` 恒 true，任何跟随触发都把人扯回）。
+
+配套规则：
+
+- **恢复分支**：距底 ≤ 40px → 翻 true，不受抑制窗影响；
+- **收敛抑制窗**：`followToBottom(force=true)` 与 session 重建后开窗，窗内暂停判据 2 的翻 false（lastOffset 快照照常维护、恢复分支照常生效）；RO 静默 ≥120ms 关窗（测量收敛完成信号；不用「静默 ≥2 帧」——流式 markdown 渲染是 rAF 逐帧 trailing 节流，帧级增长间隙会误关窗），硬上限 1500ms；
+- **lastOffset NaN 哨兵**：初始 / force / session 重建置 NaN，下一个 scroll 事件只建快照不判定——消除「重建归零回声与 force 写入送达先后」的时序分叉；
+- **核心保护不变**：任何程序性跟随不得把用户扯回底部（跟随一律走 `followIfStuck` 的 rAF 内重读 stickToBottom guard）；force 是唯一例外（用户显式点「回到底部」）。
+
+判据为何长成这样（两类被击穿的简化形态，防后人简化回归）：
+
+- 程序性写入回声逐路径安全性：follow 原语写入目标恒为底部方向 → offset 递增，第一合取不命中；clamp 回声（scrollHeight 收缩后 offset 被夹到新真实底部）→ distance ≤ 0，走恢复分支；virtua `$fixScrollJump` 负向补偿 → offset 递减 ∧ distance 不变，仅在与「同窗未补偿的底部增长把 distance 顶到 >40」交集时命中——该交集几乎只在估算→实测收敛风暴期出现，由抑制窗罩住；
+- 纯 distance 阈值双向化（`distance > 40 → false`）被击穿：scroll 事件回声异步送达且读实时 store 值，估算→实测收敛期回声可见 distance > 40 → 误脱离且静默（spacer 变化不标 unread，无浮层提示）；
+- 纯复合判据无抑制窗被击穿：session 切换混合收敛期「底部增长顶起 distance + 顶部收缩负补偿」同窗共存 → 双合取命中 → 误脱离。
 
 ### 7.4 运行时行为断言与探针
 

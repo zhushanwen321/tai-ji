@@ -270,7 +270,7 @@ pi 边界可靠性设计的测试面落地（2026-08-27 事故对 → 四支柱�
 
 ## 修复后验证纪律 [from: structured-output-redesign R3-R6 审计]
 
-> 沉淀来源：structured-output 重设计实施后的四轮对抗式审计（R3-R6，commits `f69766b44`→`9438940c0`→`1dfd93b1a`→`3f934637c`）。R4 与 R5 各发现一次「上轮修复自身引入回归」且均非单测可抓——回归只在资源面暴露，结果面（error 文案）完全正确。语义总览见 [docs/design/structured-output-redesign.md](docs/design/structured-output-redesign.md) §6.3/§7 补记。
+> 沉淀来源：structured-output 重设计实施后的四轮对抗式审计（R3-R6，commits `f69766b44`→`9438940c0`→`1dfd93b1a`→`3f934637c`）。R4 与 R5 各发现一次「上轮修复自身引入回归」且均非单测可抓——回归只在资源面暴露，结果面（error 文案）完全正确。语义总览见原设计文档 structured-output-redesign.md §6.3/§7 补记（已删除，git 历史可追溯）。
 
 修复 ≠ 局部补丁。任何声称「修复完成」的变更必须同时交出两件验证产物，缺一即验收不完整：
 

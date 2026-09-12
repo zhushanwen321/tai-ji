@@ -1,6 +1,6 @@
 // engine-awareness 单测（[engine-awareness U3]）
 //
-// 覆盖（设计 docs/design/subagent-engine-awareness-injection.md 验收挂钩 D1/D1b/D2/D3/D5）：
+// 覆盖（设计 docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）验收挂钩 D1/D1b/D2/D3/D5）：
 // 1. normalizeEngineId：缺省/空白归一到 'pi'（单一权威源 registry.ts，直连导入）
 // 2. buildEngineChangeNotice：§3.1 文案骨架、pi/非 pi 指路段分界、不含任何模型清单（D4）
 // 3. runEngineAwarenessTurn 编排：
