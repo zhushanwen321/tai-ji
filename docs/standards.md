@@ -117,7 +117,7 @@ pi 的一次 agent 调用会产生多个 message（thinking 段、tool call 段�
 
 ### 4.2 Session 文件格式
 
-xyz-agent 的 session 文件存储在 `~/.xyz-agent/sessions/`（通过 pi 的 `--session-dir` 参数隔离）。
+session 文件存储在 `<dataDir>/agent/sessions/`（路径从 `packages/shared/src/paths.ts` 动态推导，禁止写死；2026-09 pi 布局 v2 迁移后 `pi/` 层已退役）。权威口径以 paths.ts 与 `packages/runtime/src/infra/pi/session-file-utils.ts` 注释为准。
 
 文件格式（`.jsonl`）：
 ```
@@ -133,14 +133,7 @@ xyz-agent 的 session 文件存储在 `~/.xyz-agent/sessions/`（通过 pi 的 `
 
 ### 4.3 消息格式转换
 
-pi 的消息 content 是数组，xyz-agent 的 Message.content 是字符串。转换规则：
-
-| pi content part | xyz-agent 字段 |
-|-----------------|---------------|
-| `{type: "text", text: "..."}` | `content`（拼接为字符串） |
-| `{type: "thinking", thinking: "..."}` | `thinking: [{content: "..."}]` |
-| `{type: "toolCall", name, arguments}` | `toolCalls: [{toolName, input}]` |
-| `role: "toolResult"` | 合并到前一条 assistant 消息的对应 `toolCall.output` |
+pi 的消息 content 是数组；xyz-agent 侧 `Message.content` 为 `string | Segment[]`（ADR-0043：user 消息富内容化为 Segment[]，`normalizeContent()` 归一化；类型 SSOT 在 `packages/shared/src/message.ts` 注释）。转换职责在 `packages/runtime/src/infra/pi/` 适配层（EventAdapter / session-entry-mapper），规则细节以适配层代码注释为准，本节不维护逐字段转换表。
 
 ---
 
