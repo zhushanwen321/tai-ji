@@ -597,6 +597,13 @@ export class EventInterpreter {
    * composer-gen-stats（D2/genstats-speed-llm-window D1）：LLM 请求窗口起算本地时钟
    *（assistant message_start 到达时记——turn-start kind 的物理来源，event-adapter :786-797/:853-858；
    * assistant message_end 结算后清 null；无配对 turn-usage 消费的残留由下轮 turn-start 重锚覆写）。
+   *
+   * 起算点刻意选 message_start 到达而非请求发出时刻：message_start 是 turn 的定义性事件
+   *（每轮必到，异常配对才有唯一锚），且不把 provider 首包延迟（TTFT 段）敏感度引入
+   *「生成速度」语义。代价 = 窗口不含「请求发出→首事件」准备段（context 转换 + HTTP 握手），
+   * 测得值略偏乐观——设计内接受的偏差（D1 量级声明）；重审触发 = 用户反馈显示值系统性
+   * 高于体感。被否：以 pi turn_start 为起算——该事件不翻译（adapter NULL_EVENTS），为其
+   * 新增翻译面纯增量，且窗口会混入 steering 注入段，语义更差。
    */
   private turnStartedAt: number | null = null
   /**
