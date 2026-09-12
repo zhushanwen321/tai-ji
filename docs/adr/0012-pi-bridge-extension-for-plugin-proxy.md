@@ -1,5 +1,7 @@
 # ADR 0012: Pi Bridge Extension for Plugin Tool Proxy
 
+- 状态：Accepted
+
 ## Context
 
 xyz-agent plugin 运行在 sidecar 的 Worker Thread 中，但 LLM 的 tool call 决策和执行在 pi 进程内。需要一个机制让 pi 能调用 Worker Thread 中的 plugin tool handler。

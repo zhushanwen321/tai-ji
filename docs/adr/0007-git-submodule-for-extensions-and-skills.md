@@ -1,5 +1,7 @@
 # ADR-0007: Git submodule for extension and skill dependencies
 
+- 状态：Superseded（被 ADR-0011 取代）
+
 ## Context
 
 xyz-agent bundles pi extensions (subagent, goal, todo) from `xyz-pi-extensions` repo and skills (19 xyz-harness skills) from `xyz-harness` repo. We need a mechanism to include these files in the build.

@@ -1,5 +1,7 @@
 # ADR-0026: 文件树懒加载策略
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（加载策略）。本文档定义策略，不含实现细节。
 > **关联**：[ADR-0025 File View 语义](0025-file-view-full-project-tree.md)、[ADR-0027 FileService 三层](0027-fileservice-three-layer.md)。
 > **溯源**：`[from: 2026-06-28-sidebar-project-file-tree §5,§7, decisions D-009]`

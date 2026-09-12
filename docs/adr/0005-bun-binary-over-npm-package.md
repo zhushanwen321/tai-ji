@@ -1,5 +1,7 @@
 # ADR-0005: Use Bun-compiled binary instead of npm package
 
+- 状态：Accepted
+
 ## Context
 
 pi is available both as an npm package (`@mariozechner/pi-coding-agent`, 179MB with node_modules) and as a Bun-compiled standalone binary (70-120MB, from GitHub Release). We need to bundle pi into xyz-agent's Electron app.

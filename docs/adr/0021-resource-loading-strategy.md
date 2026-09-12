@@ -132,13 +132,4 @@ agent 和 skill 的加载模式同构（多来源扫描 + 启用/禁用 + 全局
 - **项目级 agent 受单例约束**：AgentRegistry 是 app 级单例，项目 `agentDirs` 只在会话启动时生效，切换项目需重开会话（决策 `ui_limit`）；skill 不受影响，per-session 切换。
 - **强制目录覆盖可选目录**：放在 `~/.xyz-agent/` · `.xyz-agent/` 的资源（强制）永远覆盖同名可选资源（§1.1）。用户想确保某资源生效，放强制目录；想可替换/可关，放可选目录。可选目录内部靠拖动排序决定胜负。
 
-## 后续步骤
-
-1. 落地 `infra/pi/`：强制目录（`~/.xyz-agent/` + `.xyz-agent/`）桥接层硬编码注入；可选目录 skill 走 `additionalSkillPaths`、agent 扩 `listAgentFiles` 多目录扫描 + 同名去重（按 discovery.json 数组顺序，靠前胜出）。
-2. UI 三件套（`draft-settings-agent.html` + `draft-settings-skill.html` + `draft-project-settings-drawer.html`）统一为「**只读预览 + 加载路径配置**」模式：
-   - **全局 settings（agent/skill 两页）= 唯一配置面**：层 A 加载路径配置——**强制目录只读置顶 + 可选目录可勾选可拖排序**（决策 `global_configures_project`）；层 B 实体列表**只读预览**（搜索 + 来源 tab + **来源 badge 生效标注**，无开关、无 CRUD、无黑名单）；
-   - **项目抽屉 = 只读生效视图**：展示当前项目全局维度 + 项目维度各生效了什么，同名标注「项目覆盖全局」；无任何配置控件；补 skill 段；
-   - pi-install skill 只读呈现（来源 A，锁死，标 `pi-install`）；
-   - 项目抽屉 agent 段标 `ui_limit`（会话启动时生效，切项目需重开）；
-   - 去掉任何「扫描并导入/复制/symlink/黑名单」语义。
-3. 抽「资源管理」交互模式为共享组件（agent / skill 复用），数据层区分全局 / 项目。
+> 落地步骤已删除：实现由代码承载（源码内 // ADR-0021 锚点可回链），git 历史可追溯（2026-09-13 ADR 瘦身）

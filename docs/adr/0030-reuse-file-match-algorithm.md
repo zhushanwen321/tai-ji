@@ -1,5 +1,7 @@
 # ADR-0030: 文件匹配算法单一管线复用（composer # 与 SearchModal）
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（DRY + 算法归位）。本文文档定义架构约束。
 > **关联**：[ADR-0028 搜索编排归 composable](0028-search-orchestration-in-composable.md)。
 > **溯源**：`[from: 2026-06-30-search-modal §code, decisions D-029]`

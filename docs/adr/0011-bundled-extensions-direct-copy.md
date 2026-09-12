@@ -1,5 +1,7 @@
 # ADR-0011: Bundled extensions via direct copy (supersede ADR-0007)
 
+- 状态：Accepted
+
 ## Context
 
 ADR-0007 规划使用 git submodule 管理外部 extension/skill 依赖。实际实施中，submodule 方案增加了 CI 复杂度（需 submodule init + copy 步骤），且 extension 源码变更频率低、体量小（~60 个 TS 文件，总计约 400KB）。

@@ -1,5 +1,7 @@
 # ADR-0031: 跨组件 slash 命令注入用 store 驱动的一次性消息通道
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（跨组件协调模式归位）。本文档定义架构约束。
 > **关联**：[ADR-0028 搜索编排归 composable](0028-search-orchestration-in-composable.md)、[ADR-0029 领域类型 SSOT](0029-domain-types-ssot-in-lib.md)。
 > **溯源**：`[from: 2026-07-01-search-slash-injection §plan, §技术改动点]`

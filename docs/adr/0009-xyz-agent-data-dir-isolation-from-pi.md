@@ -1,5 +1,7 @@
 # ADR-0009: xyz-agent 数据目录与 pi 数据目录完全隔离
 
+- 状态：Accepted
+
 ## 上下文
 
 xyz-agent 通过 RPC 模式调用 pi 子进程，两者共享同一台机器。pi 有自己的数据目录（`~/.pi/agent/`），包含 extensions、skills、config 等。如果 xyz-agent 直接读写 pi 的数据目录来管理 extension，当用户已经独立使用 pi 时，两边的 extension 列表和配置会互相干扰。

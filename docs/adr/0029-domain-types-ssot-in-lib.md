@@ -1,5 +1,7 @@
 # ADR-0029: 领域类型 SSOT 归 lib 层（非 mock）
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（类型归位）。本文档定义架构约束。
 > **关联**：[ADR-0028 搜索编排归 composable](0028-search-orchestration-in-composable.md)。
 > **溯源**：`[from: 2026-06-30-search-modal §code, decisions D-028]`

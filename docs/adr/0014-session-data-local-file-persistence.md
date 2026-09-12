@@ -1,5 +1,7 @@
 # ADR-0014: SessionData 本地文件持久化
 
+- 状态：Accepted
+
 ## 上下文
 
 Plugin 系统的 `api.sessionData` 提供 per-session KV 存储。原始设计（ADR-0013）通过 Pi Bridge 走 `pi.appendEntry()` 将数据持久化在 pi 的 session JSONL 文件中。

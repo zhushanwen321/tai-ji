@@ -1,5 +1,7 @@
 # ADR-0027: FileService 三层架构 + ignore 纯函数范式
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（分层 + 范式）。本文档定义架构约束。
 > **关联**：[ADR-0025 File View 语义](0025-file-view-full-project-tree.md)、[ADR-0026 懒加载](0026-file-tree-lazy-loading.md)、[ADR-0009 数据目录隔离](0009-xyz-agent-data-dir-isolation-from-pi.md)。
 > **溯源**：`[from: 2026-06-28-sidebar-project-file-tree §6,§10, decisions D-008/D-013]`

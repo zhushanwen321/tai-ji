@@ -1,5 +1,7 @@
 # ADR-0024: FileChanges 数据通道（runtime 解析方案）
 
+- 状态：Accepted
+
 > **性质**：契约/设计先行，本文档不含代码实现。为 flow-2（代码变更审查，[ADR-0020](0020-core-user-flows.md)）启动铺数据地基。
 > **关联**：[ADR-0020 核心用户流](0020-core-user-flows.md)、`docs/page-design/archive/v3/flow-2-code-review/spec.md`（flow-2 SSOT）、（v3 重建审计档案 wave-W11/W14 已随 `.v3-audit/` 清理，需求追溯见 git 历史）。
 > **类型契约**：见 `src-electron/shared/src/message.ts` 的 `FileChange` / `ChangeSetStatus` / `ReviewDecision`（F2-1 已落地）。
@@ -141,14 +143,7 @@ git status 的 `XY` 码映射到 `FileChangeStatus`：`A`/`??`→added，`M`→m
 - 非 git 仓库的降级 UI 文案
 - 跨多 turn 的 superseded 变更集归档时机（属前端，非本通道）
 
-## flow-2 完整实施时序（本 ADR 之后的路线图）
-
-1. ✅ 本 Wave F2：types（F2-1）+ 本解析方案（F2-2 ADR）+ store 骨架（F2-3）
-2. runtime 实现：event-adapter write/edit 分派 + git 对账器 + emit `message.file_changes`
-3. chat store：`message.file_changes` case 落地（填 F2-3 骨架）+ 变更集累加/状态机
-4. `FileChanges.vue` 变更集卡 + Turn.vue 集成（W11 WP-L3-11）
-5. `ChangeSetDetail.vue` Diff + Accept/Reject 5 态（W14 WP-L3-34）
-6. 反向联动（变更集卡点击 → drawer 打开）
+> 落地步骤已删除：实现由代码承载（源码内 // ADR-0024 锚点可回链），git 历史可追溯（2026-09-13 ADR 瘦身）
 
 ## 调研证据索引
 
