@@ -5,8 +5,9 @@
 > 当前态权威文档：
 > - 范式 SSOT：[docs/page-design/v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
 > - 值 SSOT：[docs/page-design/v6-tokens.css](page-design/v6-tokens.css)（hook 守卫；原 design-tokens.md 已删除）
-> - 过程参考：[v6-design.md](page-design/v6-design.md)（五原则原始定稿，被 master-spec 取代为"实现细节参考"）
 > - 视觉规格：`docs/page-design/v6-spec-*.html`（部分已滞后，以 master-spec + demo 为准）
+>
+> 已删除过程文档（2026-09-13 收口，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）
 
 ---
 
@@ -50,13 +51,13 @@ Warm & Soft 被整体推翻。[ADR-0019](adr/0019-visual-direction.md) 裁决视
 - 组织方法：L0-L4 递归骨架（recursive-skeleton），每个设计单元 = spec.md + draft HTML
 - 验收：W01-W20 共 20 波视觉验收全部 PASS
 
-v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收口为 `v6-tokens.css`）和组件原语层（`design-system.md`）。
+v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收口为 `v6-tokens.css`）和组件原语层（原 `design-system.md`，2026-09-13 已删除，活跃裁决并入 v6-master-spec.md）。
 
 **标志文档**：
 - [ADR-0019](adr/0019-visual-direction.md)（视觉方向裁决）
 - [ADR-0022](adr/0022-default-theme-direction.md)（默认主题裁决）
 - [v6-tokens.css](page-design/v6-tokens.css)（值 SSOT；原 design-tokens.md 已删除，git 可追溯）
-- [design-system.md](page-design/design-system.md)（原语层）
+- ~~design-system.md~~（原语层；2026-09-13 已删除，git 可追溯）
 
 ---
 
@@ -80,7 +81,7 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 4. **内容列收窄**——对话流 max-width 720px 居中
 5. **彩色降噪**——状态指示极小化（图标 → 圆点），exit≠0 中性化表达
 
-[v6-design.md](page-design/v6-design.md) 在此基线上确立最终决策（D1-D14），成为范式 SSOT。后续整合为 [v6-master-spec.md](page-design/v6-master-spec.md)（单一权威源）。
+v6-design.md（2026-09-13 已删除，git 可追溯）在此基线上确立最终决策（D1-D14），成为范式 SSOT。后续整合为 [v6-master-spec.md](page-design/v6-master-spec.md)（单一权威源）。
 
 实施过程经历了两轮严格审查：
 - **第一轮**（v6-review-2026-07-31）：5 路并行逐字审查 349 条断言。结论：「五原则的魂保住了，形散了」——发现"被选中"出现三种视觉语言、两份定稿互相否定等问题
@@ -91,8 +92,8 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 **标志文档**：
 - [v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
-- [v6-design.md](page-design/v6-design.md)（五原则原始定稿，D1-D14 决策）
-- [v6-summary.md](page-design/v6-summary.md)（索引/摘要）
+- ~~v6-design.md~~（五原则原始定稿，D1-D14 决策；2026-09-13 已删除，git 可追溯）
+- ~~v6-summary.md~~（索引/摘要；2026-09-13 已删除，git 可追溯）
 - `v6-spec-*.html`（15 个视觉规格稿）
 
 ---
@@ -124,10 +125,10 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 ```
 v6-master-spec.md（v6 单一权威源：决策与范式）
-  ↑ 整合自 v6-design.md + demo，冲突时以此为准
+  ↑ 整合自 v6-design.md（已删除）+ demo，冲突时以此为准
 v6-tokens.css（值 SSOT：色/字/距/影/动效登记对照面；原 design-tokens.md 已删除）
   ↑ token 层以此为准
-v6-design.md / v6-spec-*.html（过程文档：实现细节参考）
+v6-spec-*.html（视觉标注参考）
   ↑ 已被 master-spec 取代，部分滞后
 .tmp/v6/ demo（token 真值与组件实现的活验证层）
 ```

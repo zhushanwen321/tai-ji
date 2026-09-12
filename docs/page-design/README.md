@@ -10,13 +10,10 @@ xyz-agent 前端设计的权威目录。设计系统的 SSOT 与设计稿集中�
 page-design/
 ├── README.md                          本文件（索引 + 归属判定）
 ├── v6-tokens.css                      值 SSOT（hook check_css_token_ssot.py 对照面；运行时真值 = style.css :root，逐 token why 注释在两处 css 内）
-├── design-system.md                   组件原语层（Card/Input/Button 等如何用 tokens；历史参考，冲突以 v6 为准）
 ├── v6-master-spec.md                  ★ v6 单一权威源（决策与范式，整合自 28 份过程文档 + demo）
-├── v6-design.md                       v6 五原则原始定稿（被 master-spec 取代为实现细节参考）
-├── v6-summary.md                      v6 设计稿总览（索引与摘要）
 ├── ui-design-principles.md            UI/UX 设计方法论（认知负荷/格式塔/WCAG，色相无关）
 ├── pi-launch-presets.md               pi 启动预设设计（被 packages/ 5 处源文件引用）
-├── v6-spec-tokens.html                v6 token 集 + 标注规范
+├── v6-spec-tokens.html                v6 token 集 + 标注规范（token 值已滞后，真值以 v6-tokens.css 为准）
 ├── v6-spec-*.html                     v6 各视图视觉稿（15 个文件，部分已滞后于 master-spec）
 ├── v6-spec-base.css                   对话流共享 CSS
 ├── v6-plugin-max-demo.html            plugin 最大化交互原型
@@ -42,7 +39,7 @@ style.css :root        ← 运行时真值（逐 token why 注释；新增 token
 
 - **v6-master-spec.md 是 v6 单一权威源**：整合自 v6-design.md / v6-summary.md / v6-review-* / v6-fix-plan / v6-spec-*.html 等 28 份过程文档 + demo。冲突时以 master-spec §4 + v6-tokens.css 为准
 - **v6-tokens.css 是值登记的唯一对照面**（2026-09-13 收口，原 design-tokens.md 已删除，git 可追溯）
-- **过程文档已降级**：v6-design.md / v6-spec-*.html 作为实现细节参考保留，不代表当前最新决策
+- **已删除过程文档**（2026-09-13 收口，残值并入 master-spec 并标注来源，git 可追溯）：v6-design.md（五原则原始定稿）/ v6-summary.md（索引摘要）/ design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）；v6-spec-*.html 保留为视觉标注参考，不代表当前最新决策
 
 ## archive/ 目录说明
 
@@ -76,7 +73,7 @@ v3 视觉稿（shell/sidebar/panel/settings 等）已被 v6 取代并删除。�
 |------|------|
 | 色值/字体/圆角/阴影/动效的值定义？ | `v6-tokens.css`（登记对照面；运行时值在 style.css） |
 | v6 决策与范式？ | `v6-master-spec.md` |
-| 组件原语（Card 族、Input、Button）的形态/状态？ | `design-system.md` |
+| 组件原语（Card 族、Input、Button）的形态/状态？ | `v6-master-spec.md` §5（原语范式 SSOT）/ xyz-ui 组件实现 |
 | v6 视觉稿（某视图的标注规范）？ | `v6-spec-*.html`（参考，以 master-spec 为准） |
 | 跨模块的用户流程（如 code-review 流）？ | `archive/v3/flow-*/spec.md`（活跃能力 spec） |
 | Fork/Handoff/Merge 联动能力？ | `archive/v3/fast-*/spec.md`（活跃能力 spec） |

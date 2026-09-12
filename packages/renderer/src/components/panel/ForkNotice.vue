@@ -3,7 +3,7 @@
     展示组件 · Fork 反馈行（FR-12，spec §3）。
     fork 成功后在主线对话流插一条 transient 反馈行（非 banner，遵循架构约定 #3）。
 
-    规范（2026-08-19 收敛到 v6 卡片语言，design-system.md §2.5 通知族二分裁决）：
+    规范（2026-08-19 收敛到 v6 卡片语言，通知族二分裁决见 v6-master-spec.md §6.1）：
     - 容器：info-soft 单手段分隔（无 border，v6「Card 去 border 走 bg 层级」）+ radius + px-3 py-1.5
     - 宽度：mx-auto max-w content-max-w，与对话流内容列对齐（Turn/SystemNotice 同体系）
     - 图标：GitFork（info 色）

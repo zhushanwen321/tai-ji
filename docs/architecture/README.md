@@ -15,7 +15,7 @@ docs/architecture/
 └── history/             # 历史版本归档（被 supersede 的旧架构与重构期过程文档）
 ```
 
-> ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 设计稿** 在 `docs/page-design/archive/v3/`（L0-L4 递归骨架 spec + draft），基础件 `design-tokens.md` / `design-system.md` 在 `docs/page-design/` 根。
+> ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 设计稿** 在 `docs/page-design/archive/v3/`（L0-L4 递归骨架 spec + draft），设计系统权威文档在 `docs/page-design/` 根（原 design-tokens.md / design-system.md 已删除，残值并入 v6-master-spec.md，git 可追溯）。
 
 ## 三条核心规则
 
@@ -49,7 +49,7 @@ docs/architecture/
 | 属于本目录 | 不属于（留 docs/ 其他位置） |
 |-----------|---------------------------|
 | 系统分层 / 模块边界 / 依赖方向 | UI 设计稿（`docs/page-design/`） |
-| 跨进程通信 / 数据流 | 设计规范（`docs/page-design/design-system.md`） |
+| 跨进程通信 / 数据流 | 设计规范（`docs/page-design/v6-master-spec.md`） |
 | 架构决策（ADR） | 编码规范（`docs/standards.md`） |
 | 子系统设计（plugin 等） | 功能规划（`docs/feature-map/`） |
 | 架构调研（打包/路径安全/RPC 通道） | UI 调研（TUI→GUI 映射等，留 `docs/extensions/`） |

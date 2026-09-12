@@ -6,4 +6,4 @@ pre-v3 的 UI 探索稿（Warm & Soft 时期 demo HTML、过程审查日志等�
 
 - `v3/` — v3 时期的**能力设计 spec**（视觉稿已删，仅保留 v6 无对应物的功能/跨区联动设计 SSOT）。详见 [v3/README.md](v3/README.md)
 
-设计系统当前态权威文档在 `docs/page-design/` 根（design-tokens.md / design-system.md / v6-design.md）。
+设计系统当前态权威文档在 `docs/page-design/` 根（v6-master-spec.md；原 design-tokens.md / design-system.md / v6-design.md 已删除，git 可追溯）。

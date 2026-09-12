@@ -1,5 +1,8 @@
 <!--
   UsageCacheMix · 缓存构成：命中/新输入/输出 百分比构成条。
+  为什么缓存命中率值得独立成节：coding agent 上下文复用使 cacheRead 通常占
+  70-90%，它是用量健康度的一等公民指标，不只是 totalTokens 的拆分明细
+  （原用量设计提案裁决，提案文档已删除，git 可追溯）。
 -->
 <template>
   <div class="flex flex-col gap-3">

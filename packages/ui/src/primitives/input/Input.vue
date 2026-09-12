@@ -6,6 +6,8 @@ import { cn } from "../../lib/utils"
 const props = defineProps<{
   defaultValue?: string | number
   modelValue?: string | number
+  // 只触发 border-danger 边框态，不自带错误文案：文案归表单层（FormMessage 惯例）承载，
+  // Input 内嵌文案会破坏表单分层（P1-3 裁决，范式见 docs/page-design/v6-master-spec.md §5.1）
   error?: boolean
   class?: HTMLAttributes["class"]
 }>()

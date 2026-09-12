@@ -26,8 +26,8 @@ v3 视觉稿（shell/sidebar/panel/settings/overlays/workspace/overview/new-task
 ## 视觉稿去哪了
 
 v3 视觉稿（spec.md + draft-*.html）已被 v6 视觉规格取代：
-- 当前视觉 SSOT：`docs/page-design/v6-design.md` + `docs/page-design/v6-spec-*.html`
-- 当前原子 SSOT：`docs/page-design/design-tokens.md`
+- 当前视觉 SSOT：`docs/page-design/v6-master-spec.md` + `docs/page-design/v6-spec-*.html`（原 v6-design.md 已删除，git 可追溯）
+- 当前原子 SSOT：`docs/page-design/v6-tokens.css`（原 design-tokens.md 已删除）
 - 术语/拓扑定义：`docs/architecture/context.md`（v3 UI 结构术语章节）
 
 v3 → v6 的完整演变叙事见 `docs/design-evolution.md`。

@@ -2,7 +2,7 @@
  * 用量统计前端聚合工具。
  *
  * 从 UsageRow[] 行集切片聚合出七个子组件所需的视图数据。
- * 移植自 docs/page-design/usage-dashboard.html 的 aggregate() 逻辑。
+ * 移植自用量设计提案 demo 的 aggregate() 逻辑（提案文档 usage-dashboard.md 已删除，git 可追溯）。
  *
  * totalTokens 口径：input + output + cacheRead + cacheWrite 四项，不含 reasoning。
  * pi 落盘的 totalTokens 含 reasoning，本模块按四项和计算，与 demo 对齐。

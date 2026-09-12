@@ -2,7 +2,7 @@
 
 > **状态**：权威整合主文档（Master Spec）。整合自 28 份 v6 过程文档 + `.tmp/v6/` 可运行 demo（2026-08-02 最新）。token 值真值固化见 [`v6-tokens.css`](./v6-tokens.css)（自 demo 固化，随仓库提交）。
 > **性质**：视觉语言层 + 前端架构重构的完整设计。授权大刀阔斧，不考虑兼容性。
-> **取代关系**：本文档是 v6 的单一权威源。过程文档（`v6-design.md` / `v6-summary.md` / `v6-spec-*.html`）降级为**实现细节参考**，与本文档冲突时以本文档 + demo 为准。（`v6-review-*.md` / `v6-fix-plan.md` 等审查/修复文档已删除，裁决收敛进本文档 §9。）
+> **取代关系**：本文档是 v6 的单一权威源。`v6-spec-*.html` 降级为**视觉标注参考**，与本文档冲突时以本文档 + demo 为准。（`v6-design.md` / `v6-summary.md` 已删除（2026-09-13 收口，残值已并入本文档并标注来源，git 可追溯）；`v6-review-*.md` / `v6-fix-plan.md` 等审查/修复文档已删除，裁决收敛进本文档 §9；v3 期 `design-system.md` 已删除（2026-09-13 收口，活跃裁决并入本文档 §3.2/§5.1/§5.13/§6.1）。）
 > **真相源优先级**：本文档（决策与范式） > [`v6-tokens.css`](./v6-tokens.css)（token 值真值，随仓库提交） > `.tmp/v6/` demo（组件实现活验证） > `v6-spec-*.html`（视觉标注稿，部分已滞后） > 过程文档（审查/修复计划，已收敛进本文档）。
 >
 > **2026-08-02 修订**：新增 §3.5 实践原则（8 条，demo 迭代沉淀）；§5.6 状态指示圆点范式范围限缩（SessionList 改用 §3.5.2）；§9 新增 D12/D13/D14 裁决（SessionList 信号编排 / TurnRail 滚动条二合一 / Project 一级导航）。
@@ -93,7 +93,7 @@ v6 过程文档已积累 28 份（30000+ 行），存在三类问题：
 
 ### 3.2 impeccable 禁令（违反必返工）
 
-- **禁 >1px 彩色侧边条**做选中/强调/分隔（改用 bg 实色块 + 蓝字）
+- **禁 >1px 彩色侧边条**做选中/强调/分隔（改用 bg 实色块 + 蓝字）。**豁免**：编辑式 admonition（`.note` / `.warn` callout）的左色条是文档内联提示的分类标记（note=accent / warn=danger），不是卡片选中手段，不属此禁令〔2026-09-13 自 design-system.md 边界澄清并入〕
 - **禁嵌套卡片**（一个表面色容器不叠加 border；嵌套层级不超过 3 层明度递进）
 - **禁 AI slop**：uppercase tracking-wider 装饰文字、emoji（用内联 SVG）、无意义渐变、装饰性 pill
 - **禁自创组件样式**：必须用 SSOT class（`.btn-*`）或 token；**class 名正确不代表 CSS 值正确，需逐字核对视觉值**
@@ -196,7 +196,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ## §4 Design Tokens
 
 > **真相源**：[`v6-tokens.css`](./v6-tokens.css)（2026-08-02 太极·玄定稿值，自 .tmp/v6 demo 固化、随仓库提交）。以下值与该文件逐字对齐。
-> 本节取代 `v6-design.md §2` / `v6-summary.md §3` / `v6-spec-tokens.html`（三者均滞后于 demo）。
+> 本节取代 `v6-design.md §2` / `v6-summary.md §3`（两文档已删除，残值并入本文档）与 `v6-spec-tokens.html`（滞后于 demo，仅存作标注规范参考）。
 
 ### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
 
@@ -376,6 +376,10 @@ demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：�
 - 链接/行级可点元素 = inset 单环（与 Input 一致）
 - composer-box focus = 3px 外环（对齐真实代码，非 inset 单环）
 
+> Button 外环 vs Input inset 单环是**故意不统一**：Button 是操作型原语，外环 + offset（shadcn 惯例）表达可点击焦点；Input 是容器型原语，inset 表达边界聚焦。两语境不合并。〔2026-09-13 自 design-system.md P1-2 裁决并入〕
+
+> Input 的 `error` prop 只触发 `border-danger` 边框态，**不自带错误文案**——「下方错误文案」归表单层（FormMessage 惯例）承载，防止 Input 内嵌文案形成表单分层破洞。〔2026-09-13 自 design-system.md P1-3 裁决并入〕
+
 ### 5.2 控件范式（独立 .vue 组件，用 scoped + token）
 
 | 控件 | 规格 |
@@ -515,6 +519,19 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 **composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-elevated + border-strong + shadow-2 + radius-lg`。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
+### 5.13 标签族语义四分 + 空状态三要素〔2026-09-13 自 design-system.md 并入〕
+
+四者形态相近，按语义强制区分，禁止混用：
+
+| 原语 | 语义 | 形态 |
+|---|---|---|
+| Pill | 分类/状态标签（`running` `done`、分支名） | 圆角 999，soft 底，mono 字 |
+| Chip | 引用实体（@mention） | 圆角 999，带前缀图标 |
+| Badge | 计数角标 | 小圆，accent/danger 底 |
+| Status Dot | 极简状态 | 6-8px 圆点，状态色 |
+
+空状态三要素：图标（subtle）+ 一句说明 + 一个 Primary 入口；禁止纯「暂无数据」。
+
 ---
 
 ## §6 分区设计（逐视图：v6 方案）
@@ -524,10 +541,11 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.1 对话流（assistant 居中 720）
 
 - **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-w-76%）；隐藏原生滚动条由 TurnRail 接管
-- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap
-- **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 双环 loader（13px）；exit≠0 加 mono 标签
+- **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：RetryIndicator 不放 composer，重试期间 TurnMeta label 切「重试中 N/M」+ warn 色 spinner（区别 streaming 的 accent）〔2026-09-13 自 v6-design.md 并入〕
+- **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 双环 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
-- **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）
+- **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠，exit 标签色 0=`success` / N=`warn` / timeout=`dim`）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）〔exit 标签色 2026-09-13 自 v6-design.md 并入〕
+- **TurnSummary hover actions 方案 A**：3 个扁平 icon button（Copy / GitFork / HandHelping），无 split-button、无 MD/+Q badge；fork/handoff 点击 = `+Q` 带提问变体进 composer，composer 直接 Enter = 无内容变体〔2026-09-13 自 v6-design.md 并入〕
 - **Block·subagent/workflow**：collapsed only，点击 → drawer tab
 - **UserBubble**：删 border，仅 `bg-surface-hover`；删 pending 态（迁 QueueBubble 内嵌）
 - **Composer**：6 区（QueueBubble / staging chip / inline chip bar / landing meta / input / composer-bar）；宽度对齐 720 居中
@@ -544,6 +562,14 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **ChangeSetCard**：去 border 改 `bg-surface` + 10px 圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
 - **PanelHeader**：去 `border-b`，用 `bg-elevated` 浮起分层
 - **goal/todo 回归对话流**（D3）：移除 tasks tab + `HIDDEN_TOOL_NAMES`，走 GuiComponent 统一渲染
+- **通知族二分**（2026-08-19 裁决，2026-09-13 自 design-system.md §2.5 并入）：对话流「非对话内容行」按**可交互性**二分，两形态不得混用——
+
+  | 形态 | 判据 | 样式 |
+  |---|---|---|
+  | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
+  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线 + 居中 text-xs + 12px 图标 |
+
+  共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
 ### 6.2 侧栏（5 tab + 容器）
 
@@ -559,7 +585,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.3 右侧 Drawer（D2 一体化 + 7 tab）
 
-- **一体化生长**：drawer 与 main 共享 `--surface` 浮起体，从 main 右缘生长挤占 main 宽度；去 border-l。〔2026-09-09〕原「保留弱投影 `--shadow-drawer`(0.16) 分隔」已移除（overflow-hidden 裁剪，从未可见）
+- **一体化生长**：drawer 与 main 共享 `--surface` 浮起体，从 main 右缘生长挤占 main 宽度；去 border-l。〔2026-09-09〕原「保留弱投影 `--shadow-drawer`(0.16) 分隔」已移除（overflow-hidden 裁剪，从未可见）。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕
 - **形态 B**：icon 一级 + 各 tab 自治二级
   - detail：多文件 tab（点文件新开/切换/关闭）—— **阶段 B 衔接点**（useDetailPane 单值→map 重构）
   - terminal：多实例 tab + 新增按钮占位 —— **阶段 B 衔接点**（单 PTY→多 PTY）
@@ -568,6 +594,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - subagent（新增）：嵌套只读对话流（无 composer）
   - workflow（新增）：phase 分组 + agent call 列表
 - **tasks tab 移除**（D3）：goal/todo 回归对话流
+- **GitPanel MVP 三功能**（v6-design 决策 #16 授权，2026-09-13 自 v6-design.md 并入）：per-file stage/unstage toggle / BranchSelectPopover 分支切换 / CreateBranchModal 新建分支 / commit 快捷键 `⌘/Ctrl+Enter`（见 §5.12 快捷键表）；零后端改动的纯前端能力
 - **L1 icon 栏结构**：`surface` 同色 + `border-bottom: 1px hairline`（0.05，方案 G 弱分隔）+ icon 30×30（active 见 §3.4 例外）+ spacer + unread badge（accent 胶囊 + 6px `accent-fg` 脉动点 + mono 计数）+ pin 按钮（pinned 染 accent）+ close 按钮
 - **SplitterHandle**：6px 宽视觉 + 10px 命中区（margin 负值扩展）；1px transparent → hover `border-strong` → active `accent + 2px`；`cursor: col-resize`
 
@@ -760,8 +787,8 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 |---|---|---|
 | **权威主文档** | **本文档（v6-master-spec.md）** | ✅ 单一权威源 |
 | 可运行参考 | `.tmp/v6/`（demo 项目） | ✅ token 真值与组件实现 |
-| 设计 SSOT | `v6-design.md` | 降级为决策参考（token 值已被本文档 §4 取代） |
-| 设计总览 | `v6-summary.md` | 降级为索引（部分值滞后） |
+| 设计 SSOT | `v6-design.md` | 已删除（2026-09-13，残值并入本文档 §5/§6 并标注来源，git 可追溯） |
+| 设计总览 | `v6-summary.md` | 已删除（2026-09-13，纯索引/摘要无独立残值，git 可追溯） |
 | 架构 SSOT | `../architecture/renderer-target-architecture.md` / `../architecture/v6-architecture-refactor.md` | ✅ 保留（架构细节本文档 §7-§8 摘要引用） |
 | HTML spec（15 份） | `v6-spec-*.html` | 降级为视觉标注参考（部分已滞后于 demo） |
 | HTML demo（3 份） | `v6-demo.html` / `v6-drawer-tabs-demo.html` / `v6-plugin-max-demo.html` | 降级为早期 HTML 探索稿（已被 `.tmp/v6/` Vue demo 取代） |
@@ -785,7 +812,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ## 附录 A：demo 项目结构（`.tmp/v6/`）
 
-完整 Vue 3 可运行参考实现，27 张截图覆盖全部视图。技术栈：原生 CSS + tokens + 迷你组件（刻意不绑 Tailwind/xyz-ui，真实实施按 v6-design 阶段 C 映射到项目技术栈）。
+完整 Vue 3 可运行参考实现，27 张截图覆盖全部视图。技术栈：原生 CSS + tokens + 迷你组件（刻意不绑 Tailwind/xyz-ui，真实实施按本文档 §8.4 阶段 C 映射到项目技术栈）。
 
 ```
 .tmp/v6/src/

@@ -1,6 +1,10 @@
 <!--
   UsageLedger · 摘要台账行。
   一行内联数字，竖 hairline 分隔。从 demo ledger 移植。
+
+  为什么 Token 是 lead 主指标而费用条件展示：订阅制 provider（kimi/zai/xiaomi 等）
+  cost 恒为 0（USD 口径），以费用为中心会让订阅用户大面积看到 $0.00，故 cost=0 时
+  显「—」并降 dim（原用量设计提案裁决，提案文档已删除，git 可追溯）。
 -->
 <template>
   <div data-testid="usage-ledger" class="flex flex-wrap gap-y-[18px]">
