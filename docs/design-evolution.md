@@ -4,7 +4,7 @@
 >
 > 当前态权威文档：
 > - 范式 SSOT：[docs/page-design/v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
-> - 原子 SSOT：[docs/page-design/design-tokens.md](page-design/design-tokens.md)
+> - 值 SSOT：[docs/page-design/v6-tokens.css](page-design/v6-tokens.css)（hook 守卫；原 design-tokens.md 已删除）
 > - 过程参考：[v6-design.md](page-design/v6-design.md)（五原则原始定稿，被 master-spec 取代为"实现细节参考"）
 > - 视觉规格：`docs/page-design/v6-spec-*.html`（部分已滞后，以 master-spec + demo 为准）
 
@@ -50,12 +50,12 @@ Warm & Soft 被整体推翻。[ADR-0019](adr/0019-visual-direction.md) 裁决视
 - 组织方法：L0-L4 递归骨架（recursive-skeleton），每个设计单元 = spec.md + draft HTML
 - 验收：W01-W20 共 20 波视觉验收全部 PASS
 
-v3 确立了设计 tokens SSOT（`design-tokens.md`）和组件原语层（`design-system.md`），这两个文件至今仍是原子/原语层权威。
+v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收口为 `v6-tokens.css`）和组件原语层（`design-system.md`）。
 
 **标志文档**：
 - [ADR-0019](adr/0019-visual-direction.md)（视觉方向裁决）
 - [ADR-0022](adr/0022-default-theme-direction.md)（默认主题裁决）
-- [design-tokens.md](page-design/design-tokens.md)（原子 SSOT，此后持续迭代）
+- [v6-tokens.css](page-design/v6-tokens.css)（值 SSOT；原 design-tokens.md 已删除，git 可追溯）
 - [design-system.md](page-design/design-system.md)（原语层）
 
 ---
@@ -125,7 +125,7 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 ```
 v6-master-spec.md（v6 单一权威源：决策与范式）
   ↑ 整合自 v6-design.md + demo，冲突时以此为准
-design-tokens.md（原子真值：色/字/距/影/动效）
+v6-tokens.css（值 SSOT：色/字/距/影/动效登记对照面；原 design-tokens.md 已删除）
   ↑ token 层以此为准
 v6-design.md / v6-spec-*.html（过程文档：实现细节参考）
   ↑ 已被 master-spec 取代，部分滞后

@@ -55,7 +55,7 @@ def extract_css_tokens(css_path: Path) -> set[str]:
 
 
 def extract_ssot_tokens(md_path: Path) -> set[str]:
-    """从 design-tokens.md 提取所有出现的 --xxx"""
+    """从 v6-tokens.css 提取所有出现的 --xxx"""
     if not md_path.exists():
         return set()
     text = md_path.read_text(encoding='utf-8')

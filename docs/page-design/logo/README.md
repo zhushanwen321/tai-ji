@@ -25,7 +25,7 @@ logo 已应用到以下位置：
 - **侧边栏品牌区**：`.tmp/v6/src/components/sidebar/Brand.vue` — 旋转太极双鱼（28px，8s 旋转）
 - **可复用组件**：`.tmp/v6/src/components/icons/TaijiLogo.vue` — 带 spin 动画 + prefers-reduced-motion 降级
 - **App Icon**：`apps/electron/build/` — icon.svg（矢量源）→ icon.icns（mac）/ icon.ico（win）/ icon-512.png（linux）
-- **配色统一**：logo 配色与 [太极 V3 纯灰](../2026-08-02-taiji-v3-color-decision.md) 一致（neutral-fg 描边，无彩色 accent）
+- **配色统一**：logo 配色与太极 V3 纯灰方向一致（neutral-fg 描边，无彩色 accent；决策见 [ADR-0066](../../adr/0066-taiji-pure-grey-color-direction.md)）
 
 ## 历史探索（已归档）
 
@@ -54,5 +54,5 @@ logo 已应用到以下位置：
 相关：
 - [`assets/README.md`](./assets/README.md) — 素材索引与筛选标准
 - [`assets/qianwen/README.md`](./assets/qianwen/README.md) — 定案素材说明
-- [太极 V3 配色决策](../2026-08-02-taiji-v3-color-decision.md) — 纯灰配色方向
-- [`design-tokens.md`](../design-tokens.md) — 设计 tokens SSOT
+- [ADR-0066](../../adr/0066-taiji-pure-grey-color-direction.md) — 纯灰配色方向
+- [`v6-tokens.css`](../v6-tokens.css) — 设计 tokens 值 SSOT
