@@ -152,8 +152,11 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     expect(closed.task).toBe("closed task");
     expect(closed.sessionFile).toBe(fileA);
     const running = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-running.json"), "utf-8")) as Record<string, unknown>;
+    // [U3 / §3.2.4] 磁盘重建恒 idle（无 sidecar → interrupted-by-restart）：权威词汇
+    // executionStatus=idle；legacy status 走 §3.2.8 下行映射（idle ∧ 无 closedReason →
+    // "running"——session-reader 视角的活跃成员）
     expect(running.status).toBe("running");
-    expect(running.executionStatus).toBe("running");
+    expect(running.executionStatus).toBe("idle");
     expect(running.completedAt).toBeUndefined();
 
     // junk 文件不产生 manifest（扫描集外静默跳过）

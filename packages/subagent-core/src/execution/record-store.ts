@@ -1,9 +1,10 @@
 // src/execution/record-store.ts
 //
-// Record 的统一容器。内存只留 running record；终态从 session.jsonl 重建。
+// Record 的统一容器。内存只留 running record；磁盘 record 从 session.jsonl + `.state`
+// 按 §3.2.4 重建单规则重建（一律 idle + stopReason 单源）。
 //
 // 职责：
-//   - 持有 running record（终态 record 在 archive 时立即从内存移除）
+//   - 持有 running record（归档/回收 record 在 archive 时立即从内存移除）
 //   - onChange 订阅（TUI widget/list 据此重渲）
 //   - collectRecords：内存(running) ∪ 磁盘(sessions/*.jsonl 重建) ∪ manifest(sessions-index.json 补充) 三源合并
 //   - 提供 snapshot() 只读视图给 TUI（永不返回可变引用）
@@ -232,62 +233,6 @@ interface SidecarPayloads {
   state: StateMarker | undefined;
   /** [UF-1] record 绑定载荷（identity miss 时的身份重建源）。 */
   binding: RecordBinding | undefined;
-}
-
-/** 孤儿判定的末行读取初始窗口（常规 entry 远小于此，避免全文件读）。 */
-// eslint-disable-next-line no-magic-numbers -- 64KB = 64 * 1024 bytes 字节换算常数
-const LAST_LINE_WINDOW_BYTES = 64 * 1024;
-/** 末行超出初始窗口时的扩窗倍数（64KB → 256KB → 1MB → …，上限=文件头）。
- *  [HISTORICAL] 曾断言「64KB 足以容纳任何单行 entry（task 上限 ~62KB 实测）」并被
- *  V1 探针推翻：真实库 4822 个子文件中 28 个末行为 65KB-776KB 的完整 entry
- *  （subagent-identity 的 task 内嵌大 payload）——固定尾窗会把超长末行从中间切开
- *  误判截断，孤儿恢复错落 error。 */
-const WINDOW_GROWTH_FACTOR = 4;
-/** 窗口内 ≥2 个非空段 = 末行之前存在换行边界（首段可能被窗口切开，末段完整到 EOF）。 */
-const MIN_SEGMENTS_WITH_BOUNDARY = 2;
-
-/**
- * 读 JSONL 文件的最后一个非空行（孤儿终态判定用，residual-fixes §5.2）。
- * 读文件尾部窗口起步；窗口内只有单个非空段且未到文件头时，该段可能是被窗口切开的
- * 超长末行，按 WINDOW_GROWTH_FACTOR 扩窗直到看见末行前的换行边界或抵达文件头。
- * 返回 ok=false 表示 IO 错误（open/read 阶段抛出，含权限/磁盘故障——可能是暂时
- * 状态，调用方按保守方向处理）。
- */
-function readLastJsonlLine(sessionFile: string): { ok: true; line: string } | { ok: false } {
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(sessionFile, "r");
-    const size = fs.fstatSync(fd).size;
-    let windowBytes = LAST_LINE_WINDOW_BYTES;
-    let windowStart = Math.max(0, size - windowBytes);
-    let lines: string[] = [];
-    while (true) {
-      const buf = Buffer.alloc(size - windowStart);
-      fs.readSync(fd, buf, 0, buf.length, windowStart);
-      lines = buf.toString("utf-8").split("\n").filter((l) => l.length > 0);
-      // 末行完整可提取 = 窗口内末行之前还有换行（≥2 个非空段）或已覆盖到文件头。
-      if (windowStart === 0 || lines.length >= MIN_SEGMENTS_WITH_BOUNDARY) break;
-      windowBytes *= WINDOW_GROWTH_FACTOR;
-      const nextStart = Math.max(0, size - windowBytes);
-      if (nextStart === windowStart) break;
-      windowStart = nextStart;
-    }
-    // 窗口仍可能从行中间开始（首段被切开）——丢掉第一段；到文件头则首段是完整首行。
-    const candidates = windowStart > 0 && lines.length > 0 ? lines.slice(1) : lines;
-    const last = candidates.length > 0 ? candidates[candidates.length - 1] : lines[lines.length - 1];
-    if (last === undefined) return { ok: true, line: "" }; // 空文件：视为不可判终态的截断形态由 parse 失败兜住
-    return { ok: true, line: last };
-  } catch {
-    return { ok: false };
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch (_e) {
-        void _e; // 关闭失败不影响已读结果（对齐 state-marker best-effort 模式）
-      }
-    }
-  }
 }
 
 /** unknown → subagent-record entry 的运行时守卫（taste/no-unsafe-cast：断言前收窄）。 */
@@ -798,9 +743,9 @@ export class RecordStore {
    * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
    * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
    *
-   * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 意愿动作
-   * 接线退役（正常收口归 markSettled、归档归 markArchived、编排性关闭归新编排）；
-   * `.state` 仍写旧格式（U3 切换新格式读侧后随退役清理）。
+ * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 意愿动作
+ * 接线退役（正常收口归 markSettled、归档归 markArchived、编排性关闭归新编排）；
+ * `.state` 旧格式由 U3 读侧单规则上行映射（finalized → idle + stopReason=reason）。
    *
    * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
    * @deprecated U5 退役（归 markSettled / markArchived / 编排性关闭新编排承接）。
@@ -1604,121 +1549,53 @@ export class RecordStore {
   }
 
   /**
-   * 孤儿终态恢复：对重建矩阵兜底分支（running 且无异宿主在持声明；编号沿用设计
-   * D3b 文档的「分支 4」表述，分支 3 已随 externalInstance 投影移除）的 record
-   * 判定真实终态并落 entry，消除「父扩展死后再无人写终态 → 侧栏永久 running」。
+   * 孤儿恢复（§3.2.4 降权后的残职责：entry 面纠偏）。重建单规则下磁盘重建恒 idle
+   * （§3.2.4：两态下 running 只在轮次在飞时有意义，崩溃后必然空闲），磁盘面已无
+   * 「终态化」职责；本方法只纠一处残留——**主 session 末条 entry 仍停在 running**
+   * （父扩展死在轮中，再无人写收口 entry → runtime 侧栏 spinner 永久）时，落一条
+   * idle entry 纠偏（一律保留 idle——锚在，等 revive 续聊，不直断不终态化）。
    *
-   * 判定（residual-fixes §5.2 三判据 + chat 分流）：
-   * - chatMode = true → 不终态化（跨重启可续聊是产品语义，v4 B-1），落 resumable
-   *   entry 供侧栏 waiting 细分；
-   * - 子 JSONL 末行完整 JSON.parse → closed（closedReason=gc，与分支 2 重建映射一致；
-   *   done/failed 细分由 error 字段经 deriveClosedDisplay 派生）+ 写 .state sidecar
-   *   （防重锚——下次重建走分支 2 不再进判定）；
-   * - 末行截断 → closed + error（保守，错误方向安全）+ sidecar；
-   * - 文件不可读（IO 错误，可能暂时）→ 不判终态，落 resumable entry（防御性路径，
-   *   IO 恢复后重开可重判）。
+   * 判据链：entry 末条 running（磁盘重建 idle 的 entry 面投影滞后）→ 无异宿主在持
+   * （[U4a / D3b (a″)] findForeignLiveInstance 现查探针：pid 活 = record 可能在真跑，
+   * 持有宿主的轮终链会写 entry，本宿主不代写）→ 未判过（orphanJudged 防重，appendEntry
+   * 失败时的次级防线——纠正 entry 落盘后末条变 idle，判据自然不再命中）。
    *
-   * [v2 D3] mainSessionFile = 覆写 merge 数据源（主 session 每 id 末条 entry，与 E1
-   * 的 scanLastRecordEntries 同款通路）：崩溃前的批域标记（collectMode/batchFinalized）
-   * 与轮终 result/model 只活在主文件 entry——重建矩阵（buildRecord）的数据源
-   * （sidecar/子文件 identity）不含它们，覆写前不 merge 就会被抹掉（v2 §2.2 断链 2：
-   * E1 候选集恒空的真根因）。缺省（undefined）时 merge 无源，行为与旧版一致。
-   * 参数为追加式第二参（rootSessionFilter 保持首参）：既有调用面只传过滤参。
-   *
-   * 防重：orphanJudged 实例级缓存（resumable 形态无 sidecar 锚，同进程重复调用跳过；
-   * 终态形态双重防护 = sidecar + 缓存）。调用方：index.ts session_start 恢复段（一次）。
+   * [v2 D3] mainSessionFile = merge 数据源（主 session 每 id 末条 entry）：崩溃前的批域
+   * 标记（collectMode/batchFinalized）与轮终 result/model 只活在主文件 entry，覆写前
+   * 不 merge 就会被抹掉。缺省（undefined）时扫描空集，方法空转（与既有 best-effort
+   * 语义一致）。调用方：record-access initSession 恢复段（一次）。
    */
   recoverOrphanRecords(rootSessionFilter?: string, mainSessionFile?: string): void {
     const lastById = new Map(this.scanLastRecordEntries(mainSessionFile).map((r) => [r.id, r]));
     for (const rec of this.reconstructAll(rootSessionFilter)) {
-      if (rec.status !== "running") continue; // 分支 1/2 已 closed：无需恢复
-      // [U4a / D3b (a″)] 活实例跳过换 findForeignLiveInstance 现查探针（pid 单判据）：
-      // marker pid 活 = 异宿主在持声明，不可清——boot 误终态化会击穿跨进程写权防御
-      // （同 root 双宿主下宿主 A 会把宿主 B 持有中的 record 直断 gc）。比重建时缓存
-      // 的 externalInstance 更新鲜（resurrect 回边可随时改写 marker）。self-pid 排除下，
-      // pid 复用到本进程的残留 marker 同样放行清理——原持有者已死，record 确为孤儿。
+      const lastEntry = lastById.get(rec.id);
+      // 纠偏对象 = entry 面残留 running：末条缺失（无 entry 可纠）或已收口/轮终非
+      // running（entry 自洽）都跳过。
+      if (lastEntry === undefined || lastEntry.status !== "running") continue;
       if (rec.sessionFile !== undefined && findForeignLiveInstance(rec.sessionFile) !== undefined) {
         continue;
       }
       if (this.orphanJudged.has(rec.id)) continue;
       this.orphanJudged.add(rec.id);
-      this.finalizeOrphanRecord(rec, lastById.get(rec.id));
+      this.finalizeOrphanRecord(rec, lastEntry);
     }
   }
 
   /**
-   * 单孤儿 record 的终态判定与落 entry（residual-fixes §5.2 三判据 + chat 分流）。
-   * 防重锚（orphanJudged 标记）已由调用方完成。
+   * 单孤儿 record 的 entry 纠偏落盘（§3.2.4 孤儿恢复简化后唯一职责）。防重锚
+   * （orphanJudged 标记）已由调用方完成。
    *
-   * [v2 D3] 覆写前 merge（lastEntry = 主 session 同 id 末条 entry 重建，调用方构建）：
-   * 覆写是状态迁移不是信息重建，迁移不应丢末条既有信息。三个落 entry 分支（chatMode
-   * 分流 / IO 保守 / 终态覆写）统一基于 merge 后的 rec，同款口径。
+   * 一律保留 idle（锚在，等 revive）：旧直断分支（SP-5 完成态 closed+gc / in-flight
+   * closed+gc+error / chatMode-resumable 分流 / 末行截断判读）随「不存在不可逆终态」
+   * 整体删除——record 的 stopReason 已由重建单规则从 `.state` 或 interrupted-by-restart
+   * 兜底给出，本方法不做任何终态判定（子文件末行内容不再参与，超长/截断行无感知）。
+   *
+   * 覆写前 merge（lastEntry）保留既有信息（批域标记 + 轮终正文/模型 + resumable 信号）：
+   * 覆写是状态迁移不是信息重建。
    */
-  private finalizeOrphanRecord(rec: SubagentRecord, lastEntry?: SubagentRecord): void {
-    // 仅补 undefined/空值字段、不覆盖已有值——覆写自带的 status/closedReason/endedAt/
-    // error 不在 merge 字段集，天然不受影响。批域字段（collectMode/batchFinalized）对
-    // 非 sync 成员恒 no-op（末条 entry collectMode undefined → 无值可补）；result/model
-    // 的修补对 async/chat 成员同样生效——拉齐 light 重建丢 result/model 与 full 重建的
-    // 既有形态不一致（v2 D3 影响面诚实口径），不触碰任何通知文案（golden 不锁 entry 字节）。
-    const rec0 = lastEntry === undefined ? rec : RecordStore.mergeOrphanLastEntry(rec, lastEntry);
-    // [W4 boot 分区 · 裁决表行 3] 重认领保留分支的判据 = resumable 且**无完成产出**：
-    // 非 chatMode 的 resumable=true 且 result 有值是 SP-5 one-shot 完成态（任务已完成，
-    // 直断 closed/gc 无损）；resumable=true 且 result 缺失是「监督器死亡纳管态」（W4：
-    // 引擎死亡接管后宿主重启）——保留 running 交 round-supervisor boot 重认领继续
-    // 管辖（注册存续 process 档），误判 closed 会制造「指向已终态 record 的残留注册」
-    // 并损失 resume 可能。
-    if (rec0.chatMode === true || (rec0.resumable === true && rec0.result === undefined)) {
-      // chat 会话跨重启等续聊：保留 running（可续聊），仅落执行态信号。
-      this.reportSubagentRecord({ ...rec0, resumable: true });
-      return;
-    }
-    const sessionFile = rec0.sessionFile;
-    if (sessionFile === undefined) return; // 无子文件锚（目录扫描源不可达，防御）
-    const lastLine = readLastJsonlLine(sessionFile);
-    if (!lastLine.ok) {
-      // IO 错误可能暂时——判终态不可逆，保守落 resumable 等重开重判。
-      this.reportSubagentRecord({ ...rec0, resumable: true });
-      return;
-    }
-    let parseOk = false;
-    try {
-      JSON.parse(lastLine.line);
-      parseOk = true;
-    } catch {
-      parseOk = false;
-    }
-    // .state sidecar：防重锚（同 doFinalizeRecord 终态路径的收尾标记）。
-    // 显式携 reason="gc"：孤儿判定「末行完整 = 自然完成」，与 doFinalizeRecord 写入的
-    // 真实 reason 同层——否则无 reason sidecar 在磁盘重建时被兜底为 disconnected，
-    // 把正常完成的记录误标成断联。
-    writeFinalizedState(sessionFile, "gc");
-    // [F3 boot 直断语义，设计表 3 行 2] 走到本分支的 record 分两类：
-    //  - resumable=true（上方分流保证此时 result 有值）= SP-5 one-shot 完成态——任务
-    //    真实完成，直断 closed/gc 无 error，投影 completed 不变；
-    //  - 其余 = in-flight（重启前在途、无 resumable 信号）——宿主重启中断了在途任务，
-    //    投影不得是 completed（事故环 3：异常中断被谎报完成，违反 G3）。error 载体经
-    //    deriveOutcome("gc", error) = "failed"（execution-record.ts 唯一权威派生）
-    //    投影 failed，文案供 GUI/主 agent 明确「任务因宿主重启中断」；ClosedReason
-    //    枚举不扩展（sidecar/entry 面最小改动，"gc" 由 error 载体补足失败语义）。
-    const inFlightAbortedError =
-      rec0.resumable === true
-        ? undefined
-        : "orphan recovery: task aborted by host restart (in-flight at shutdown; session context lost" +
-          (parseOk ? "" : "; truncated last line") + ")";
-    // [U2 两态桥接] 旧 closed 终态落 idle + closedReason/stopReason 双写（桥接不变量）；
-    // 本直断分支的「保留 idle / 删直断」简化归 U3 孤儿恢复重写。
-    this.reportSubagentRecord({
-      ...rec0,
-      status: "idle",
-      closedReason: "gc",
-      stopReason: "gc",
-      endedAt: Date.now(),
-      ...(inFlightAbortedError !== undefined
-        ? { error: inFlightAbortedError }
-        : parseOk
-          ? {}
-          : { error: "orphan recovery: subagent session ended abnormally (truncated last line)" }),
-    });
+  private finalizeOrphanRecord(rec: SubagentRecord, lastEntry: SubagentRecord): void {
+    const rec0 = RecordStore.mergeOrphanLastEntry(rec, lastEntry);
+    this.reportSubagentRecord({ ...rec0, status: "idle" });
   }
 
   /** [v2 D3] 孤儿覆写 merge 字段集：末条 entry 的批域标记 + 轮终正文/模型，仅补 rec 侧
@@ -1737,9 +1614,8 @@ export class RecordStore {
       // `?? ""`），pickStr 签名宽返回 string|undefined —— `?? ""` 运行时不可达，
       // 仅满足 model 非可选类型，空串回退语义不变（cur 空 → src，src 也空 → ""）。
       model: pickStr(rec.model, last.model) ?? "",
-      // [W4 boot 分区] 轮终执行态信号（resumable）随末条 entry 保留：子文件侧重建
-      // （reconstructAll）不带该信号，boot 分区的「already-resumable-idle 重认领 vs
-      // in-flight 直断」分流（finalizeOrphanRecord）只能从主 session 末条 entry 取证。
+      // 轮终执行态信号（resumable）随末条 entry 保留：子文件侧重建（reconstructAll）
+      // 不带该信号，merge 保真（信息不丢失；消费面判据随 U4/U5 意愿动作统一重写）。
       resumable: rec.resumable ?? last.resumable,
     };
   }
@@ -1752,8 +1628,11 @@ export class RecordStore {
    *
    * 判定：读主 session 的 subagent-record entry，取每 id 末条；末条 status=running 且
    * 无子文件锚（不在 reconstructAll 结果中）且不在内存活 record（防误杀刚 register 的
-   * 在途 spawn）→ 按无文件判据收敛：chatMode=true → resumable（分流语义一致）；否则
-   * closed+gc+error（子文件由子进程创建，无文件 = 子进程从未开跑，error 方向安全）。
+   * 在途 spawn）→ 落 idle entry 纠偏（一律保留 idle，不直断）。
+   *
+   * [U3 / §3.2.4] 直断分支（closed+gc+error）删除：entry-born 无 transcript 锚的
+   * 续聊拒绝由 U4 准入判据单点给出唯一占用拒绝文案（zcode 锚 U6 落地前，无锚
+   * record 保持 idle 可见、不可续聊——本单元只删直断、保留记录可见）。
    * 调用点：initSession 的 recoverOrphanRecords 之后（session_start，内存恒空）。
    */
   recoverEntryOnlyOrphans(mainSessionFile: string | undefined, rootSessionFilter?: string): void {
@@ -1772,7 +1651,7 @@ export class RecordStore {
       this.orphanJudged.add(id);
       const rec = rebuildEntryRecord(id, d);
       if (rec === null) continue; // 损坏 entry：跳过（orphanJudged 已标记，不重判）
-      this.finalizeEntryOnlyOrphan(rec, d.chatMode === true);
+      this.finalizeEntryOnlyOrphan(rec);
     }
   }
 
@@ -1786,31 +1665,23 @@ export class RecordStore {
     rootSessionFilter: string | undefined,
     anchoredIds: Set<string>,
   ): boolean {
-    if (d.status !== "running") return false; // 末条已终态/轮终：entry 自洽，无需恢复
+    if (d.status !== "running") return false; // 末条已收口/轮终：entry 自洽，无需恢复
     if (rootSessionFilter !== undefined && d.rootSessionId !== rootSessionFilter) return false;
-    if (anchoredIds.has(id)) return false; // 有子文件锚：主循环已判（或 sidecar 已终态）
+    if (anchoredIds.has(id)) return false; // 有子文件锚：主循环已判（或 sidecar 已收口）
     if (this.records.has(id)) return false; // 内存活 record：在途 spawn，不得误杀
     return !this.orphanJudged.has(id);
   }
 
-  /** entry-born 孤儿按无文件判据收敛落 entry：chatMode → resumable（分流语义一致）；
-   *  否则 closed+gc+error（entry-born 是 zcode 引擎 record 的常态形态——无子 session 文件
-   *  非异常，D8 第五行 entry-born 作用域注记；one-shot 直断 closed/gc，续聊对无 transcript
-   *  形态结构性不成立，承接通道仅 start fresh）。
-   *  [U2 两态桥接] 直断落 idle + closedReason/stopReason 双写（桥接不变量）；分支删除
-   *  （transcriptRef 锚统一后续聊）归 U3/U6。 */
-  private finalizeEntryOnlyOrphan(rec: SubagentRecord, chatMode: boolean): void {
+  /**
+   * entry-born 孤儿纠偏落 entry：一律保留 idle（§3.2.4——spawn 窗口期死亡 = 在途中断，
+   * stopReason 兜底 interrupted-by-restart；无直断、无终态化）。锚在等 revive：zcode
+   * transcriptRef 锚（U6）落地前无锚形态的续聊拒绝走 U4 准入判据文案。
+   */
+  private finalizeEntryOnlyOrphan(rec: SubagentRecord): void {
     this.reportSubagentRecord({
       ...rec,
-      ...(chatMode
-        ? { resumable: true }
-        : {
-          status: "idle" as const,
-          closedReason: "gc" as const,
-          stopReason: "gc" as const,
-          endedAt: Date.now(),
-          error: "orphan recovery: closed by gc (entry-born form has no child session file to resume from; start a fresh subagent)",
-        }),
+      status: "idle",
+      stopReason: rec.stopReason ?? "interrupted-by-restart",
     });
   }
 
@@ -1878,12 +1749,11 @@ export class RecordStore {
   /**
    * /resume /fork /new 后复活（dispose 的逆操作）。
    *
-   * [PS-10/T6④] 同步复位 orphanJudged 防重缓存：resumable 形态（IO-error 保守分支 /
-   * chatMode 分流）没有 .state sidecar 锚，重判资格完全由本缓存承载——dispose 时
-   * 有 clear（session 结束），但 revive 此前不复位，导致「同进程内曾经的 IO 失败记录
-   * 永久停留 resumable」，与本文件 recoverOrphanRecords 注释承诺的「IO 恢复后重开可重判」
-   * 不符。/new 复活正是「重开」语义：IO 已恢复的记录下次 recoverOrphanRecords 重新判定
-   * 收敛终态；仍不可读的记录重判再落一次 resumable entry（幂等，末条语义不变）。
+   * [PS-10/T6④] 同步复位 orphanJudged 防重缓存：纠偏 entry 写失败（appendEntry 异常）
+   * 时判据（末条 running）不会自愈，重判资格完全由本缓存承载——dispose 时有 clear
+   *（session 结束），revive 此前不复位会让「写失败 record 永久停留未纠偏」。
+   * /new 复活正是「重开」语义：下次 recoverOrphanRecords 对仍残留 running entry 的
+   * record 重新纠偏（幂等——已落盘的 idle entry 使判据不再命中）。
    */
   revive(): void {
     this._disposed = false;
@@ -2262,7 +2132,7 @@ export class RecordStore {
     };
   }
 
-  /** identity 基底（头部 light 或全量 recon）+ sidecar 状态矩阵（终态 marker / 兜底两态）→ SubagentRecord。 */
+  /** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。 */
   private static buildRecord(
     base: IdentityHeaderRecon | ReconstructedRecord,
     m: SidecarMatrix,
@@ -2330,41 +2200,47 @@ export class RecordStore {
       };
     }
 
-    // ── 分支 1: 终态 sidecar（.state 优先，旧 .finalized/.cancelled 兼容归一）──
-    // [U2 两态迁移] 旧 closed 终态 → idle + closedReason/stopReason 双写（桥接
-    // 不变量读侧半边；读侧新格式 {status:"idle"} 的完整切换归 U3）。
-    if (m.state !== undefined && m.state.status === "cancelled") {
-      // v4 B-1: cancelled 折入终态（closedReason='cancelled' 保留 L2 区分）。
-      markReconstructedStatus(rec, "idle");
+    // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自 `.state`
+    //（无则 interrupted-by-restart）。崩溃恢复不再区分「终态不可逆 / 纳管可保留 /
+    //  直断 gc」——不存在不可逆终态；崩溃后 running 只在轮次在飞时有意义，必然空闲。
+    markReconstructedStatus(rec, "idle");
+    if (m.state !== undefined && m.state.status === "idle") {
+      // 新格式收条（markSettled 写面）：stopReason = 收口 reason（值域 StopReason；
+      // 非法/缺失 → interrupted-by-restart——「死因不可考 = 被打断」同族兜底）。
+      // closedReason 不写（桥接不变量新侧：settle 产出的 idle 无旧终态遗留位，
+      // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存
+      // settle 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+      const reason = m.state.reason?.trim();
+      rec.stopReason = isValidStopReason(reason) ? reason : "interrupted-by-restart";
+    } else if (m.state !== undefined && m.state.status === "cancelled") {
+      // 旧值上行映射（§3.2.4：cancelled → interrupted）：closedReason 保留
+      // "cancelled"（U2 桥接判据 idle ∧ closedReason 有值 → legacy closed/cancelled
+      // 投影，旧 session-reader 兼容面）；stopReason 切新词表。
       rec.closedReason = "cancelled";
-      rec.stopReason = "cancelled";
+      rec.stopReason = "interrupted";
       rec.error = "cancelled by user";
-      // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（新写侧恒携带，
+      // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（旧写侧恒携带，
       // 兼容手写残留）回落全量末 entry ts / light mtime。
       rec.endedAt = m.state.endedAt ?? m.fullEndedAt ?? m.jsonlMtimeMs;
-    }
-    // ── 分支 2: finalized（同 sidecar，status=finalized）──
-    else if (m.state !== undefined) {
-      // 旧统一终态：done/failed/crashed 合并。closedReason 优先用
-      // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。
-      // 空内容（旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因
-      // 不可考，但「正常结束过」信号仍在——替代旧的误导性 gc 兜底（自然完成 vs
-      // 断联不分）。非枚举值（外部损坏/手写垃圾内容）同 treated as unknown → disconnected。
-      markReconstructedStatus(rec, "idle");
+    } else if (m.state !== undefined) {
+      // 旧值上行映射（finalized → idle + stopReason=reason）：closedReason 优先用
+      // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。空内容
+      // （旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因不可考，
+      // 但「正常结束过」信号仍在；非枚举值（外部损坏/手写垃圾内容）同 treated as
+      // unknown → disconnected。**旧版读新值的回滚降级链**（§3.2.4 双向兼容②）：
+      // 未知 status 在 readNewStateMarker 落 {status:"finalized"} 无 reason → 本分支
+      // disconnected ∈ 旧版可重连集，回滚方向良性。
       const reason = m.state.reason?.trim();
       rec.closedReason = isValidClosedReason(reason) ? (reason as ClosedReason) : "disconnected";
       rec.stopReason = rec.closedReason;
       // 全量路径用最后 entry ts（精确）；light 路径用 jsonl mtime 近似（finalize 后
       // 文件不再变化，误差 <1s），避免重建后耗时随墙钟无限增长。
       rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
-    }
-    // ── 分支 4: 兜底（其余一切——无 sidecar / .alive 在持 / pid 死）──
-    // v4 B-1：跨重启可续聊态落点 = running。endedAt 保持 undefined（非终态）。
-    // [U4a / D3b (a)] 原分支 3（.alive + pid 活 → running + externalInstance 投影）
-    // 已移除：非终态统一落此兜底，探活读面由 (a′)(a″) findForeignLiveInstance
-    // 现查探针承担（防御保留、数据源换新——fork-from 守卫与孤儿恢复跳过）。
-    else {
-      markReconstructedStatus(rec, "running");
+    } else {
+      // 无 sidecar：在途中断（崩溃）或尚未收口（§3.2.4「文件不存在」行）——
+      // interrupted-by-restart 纯展示值（G2：为什么停不参与资格判定）。closedReason
+      // 不写（无终态遗留位 → legacy 投影 running「活跃会话」）、endedAt 不写（非终态）。
+      rec.stopReason = "interrupted-by-restart";
     }
     return rec;
   }

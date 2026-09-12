@@ -191,16 +191,30 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
 
-  it("idToFile 索引直查返回非 running 态 → 回退磁盘全扫兜底定位（closed 候选仍可重连）", () => {
+  it("idToFile 索引直查返回不可续聊形态（旧终态遗留位 ∉ 可重连集）→ 回退磁盘全扫兜底定位", () => {
     const sessionFile = writeSessionFixture();
     const found = makeFound({ sessionFile });
-    // direct 命中但 status=closed → 不直接采用，落到 collectRecords 兜底
-    const deps = makeDeps({ direct: found, disk: [found] });
+    // direct 命中但旧终态遗留位不可重连（closedReason=gc）→ 不直接采用，
+    // 落到 collectRecords 兜底（全扫返回可重连候选）
+    const direct = makeFound({ sessionFile, closedReason: "gc" });
+    const deps = makeDeps({ direct, disk: [found] });
 
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
 
     expect(record.status).toBe("running");
     expect(vi.mocked(deps.collectRecords)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
+  });
+
+  it("[U3 / §3.2.4 桥接] idToFile 索引直查命中可重连 closed 候选 → 直接采用（无需回退全扫）", () => {
+    const sessionFile = writeSessionFixture();
+    const found = makeFound({ sessionFile });
+    const deps = makeDeps({ direct: found, disk: [found] });
+
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+
+    expect(record.status).toBe("running");
+    expect(vi.mocked(deps.collectRecords)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
   });
 

@@ -20,7 +20,8 @@ export interface ManifestRecord {
    * 终态枚举：finalizeRecord 写 running/closed/cancelled 三态。
    * SP-1 重构：旧 completed/failed 合并为 closed（L1 统一终态）。
    * cancelled 保持独立（用户取消语义）。crashed 不进 manifest——
-   * crashed 是重启重建时靠 sidecar 四分支推断的派生态（见 record-store.ts reconstructAll）。
+   * crashed 曾是重启重建时的派生态，随永久会话模型 §3.2.4 重建单规则退役
+   *（磁盘重建恒 idle，无派生终态）。
    * 历史 "error"/"completed"/"failed" 值由读侧 mapManifestStatus 向后兼容映射。
    */
   status: "running" | "closed" | "cancelled";

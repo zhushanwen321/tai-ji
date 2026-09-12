@@ -311,11 +311,9 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
     const runningRecords = store.collectRecords(100, "running", ROOT_SESSION);
     const ids = runningRecords.map((r) => r.id);
 
-    // v4 B-1：磁盘 A/B 旧 idle 现重建为 running（idle 折入 running），与内存 C 一起返回
-    expect(ids).toHaveLength(3);
-    expect(ids).toContain("sa-a");
-    expect(ids).toContain("sa-b");
-    expect(ids).toContain("sa-c");
+    // [U3 / §3.2.4] 重建单规则：磁盘 A/B 恒 idle（running 只在轮次在飞时有意义），
+    // filter=running 只剩内存 C
+    expect(ids).toEqual(["sa-c"]);
   });
 
   it("无 rootSessionFilter 时不过滤（向后兼容）", () => {

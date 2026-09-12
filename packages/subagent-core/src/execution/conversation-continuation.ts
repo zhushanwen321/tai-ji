@@ -28,7 +28,7 @@ import { getLogger } from "../core/logger.ts";
 
 import { bestEffort } from "./best-effort.ts";
 import { notifyInFlightChanged } from "./engine/inflight-snapshot.ts";
-import { resurrectClosed } from "./execution-record.ts";
+import { resurrectClosed, tryEnterRunning } from "./execution-record.ts";
 // 轮终 outcome 入参（权威定义在 finalize-record.ts，本文件 re-export 供 host 契约引用；
 // finalize-record 不反向依赖本模块，无循环）。
 import { type RoundSettlementOutcome } from "./finalize-record.ts";
@@ -557,6 +557,21 @@ export class ConversationContinuation {
    */
   private reviveOrThrow(): void {
     const record = this.record;
+    // [U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined——markSettled 轮收口 /
+    // 磁盘重建单规则产出）= 可续聊形态：无旧终态遗留位，直接翻回 running 派发
+    //（与旧「跨重启 running 候选接管」等价——不过 chatMode 升级 gate，与既有链路
+    // 行为一致）。守卫段与本分支的合并重写归 U4 准入判据单点。
+    if (record.status === "idle" && record.closedReason === undefined) {
+      if (!tryEnterRunning(record)) {
+        // 判据刚确认 idle——竞态窗口（close/cancel 抢先翻位）的防御分支。
+        throw new Error(
+          `subagent ${record.id} was closed while the message was being processed — it cannot be messaged. ` +
+          `Recovery: start a new subagent (action:'start').`,
+        );
+      }
+      this.host.reviveClosedRecord(record);
+      return;
+    }
     // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
     // 迁移不变量；本守卫与 resurrectClosed 回边的合并重写归 U4 准入判据单点）。
     if (!(record.status === "idle" && record.closedReason !== undefined)

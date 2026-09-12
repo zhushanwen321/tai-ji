@@ -1,40 +1,43 @@
 // src/execution/state-marker.ts
 //
-// 终态 sidecar 单一入口（`.state`）：subagent 收尾时宿主侧写，collectRecords 磁盘
-// 重建时读——判「正常结束过」与死因。
+// 轮收口 sidecar 单一入口（`.state`）：宿主侧写，collectRecords 磁盘重建时读——
+// 「上一轮已收口 + 为什么停」（永久会话模型 §3.2.4：收条，不是死亡证明）。
 //
-// 背景（L4 合并）：原有两个互斥 sidecar 是同一概念（宿主侧终态标记）的两份形态——
-// `.finalized`（内容 = 可选关闭原因字符串，v8.5 起）与 `.cancelled`（JSON tombstone，
-// 带 id/agent/startedAt/endedAt）。按设计「一个 session 要么 finalized 要么 cancelled」，
-// 形态分叉只因历史写入点不同。现统一为 `<session>.state`：
+// 形态（三值演进，读侧全兼容）：
 //
-//   { "status": "finalized" | "cancelled", "reason"?: string, "endedAt"?: number }
+//   { "status": "idle" | "finalized" | "cancelled", "reason"?: string, "endedAt"?: number }
 //
-//   - finalized：reason = 关闭原因（旧格式空内容 → 空串 = 死因不可考 → 重建兜底
-//     closedReason=disconnected，不再误导为 gc）；endedAt 不携带（重建用 jsonl 末
-//     entry ts / mtime，既有语义不变）。
-//   - cancelled：endedAt = 精确结束时间（原 tombstone.endedAt，判定分支消费它）；
-//     reason 不携带（原 tombstone 其余字段 id/agent/startedAt 无消费方，随合并删除）。
+//   - idle（现行，U2 写侧 / U3 读侧）：轮收口新格式 `{status:"idle", stopReason?,
+//     endedAt?}`——stopReason 承载在 reason 字段（值域 = types.ts StopReason）。
+//     上一轮收条：round/usage 真相源在 binding，本 sidecar 不冗余承载。
+//   - finalized（旧值，读侧上行映射）：reason = 关闭原因（旧格式空内容 → 空串 =
+//     死因不可考 → 重建兜底 closedReason=disconnected）；endedAt 不携带（重建用
+//     jsonl 末 entry ts / mtime）。
+//   - cancelled（旧值，读侧上行映射）：endedAt = 精确结束时间；reason 不携带。
 //
 // 读侧**兼容旧两名**（存量文件不迁移重写）：`.state` 优先，缺失时回退 `.finalized`
 // /`.cancelled` 并归一为同一 StateMarker。`.alive`（跨进程写权声明，D3 v7——acquire/
 // release 归口 RecordStore 意图原语）不并入。
 //
-// 写侧语义（record 持久化收敛 §3.4 / D8 v7，U1 改造）：**权威同步写 + 响亮重试**——
-// `.state` 是终态判定权威（D1），写失败不再静默：重试 3 次指数退避（100ms 起），
-// 仍失败 logger.error 响亮暴露并返回 false（不抛出，收尾主流程可继续；调用方据
-// 返回值保持 record 不翻终态——record 留 running，boot 孤儿恢复终态化承接）。
-// 迁移已完成（D7）：写函数唯一生产调用方 = record-store 内部（意图原语消费返回
-// 值，失败面从旧 best-effort 静默吞错变为响亮留痕 + 显式处置）。
+// **双向兼容 §3.2.4**：①新版读旧值 = 上行映射（finalized/cancelled → idle + 对应
+// stopReason，见 record-store.buildRecord 单规则）；②旧版读新值（回滚场景）：旧版
+// readNewStateMarker 对未知 status（"idle"）落入下方「结构不合法 → 存在性降级」分支
+// （{status:"finalized"}）→ reason 缺失 → 重建兜底 disconnected——disconnected ∈
+// 旧版可重连集，回滚后 message 同 id 续聊仍可达，回滚方向行为良性。本降级分支对
+// 未知 status 永久保留（未来 v3 格式的回滚安全性同构）。
+//
+// 写侧语义（record 持久化收敛 §3.4 / D8 v7）：**权威同步写 + 响亮重试**——写失败
+// 重试 3 次指数退避（100ms 起），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
+// 迁移已完成（D7）：写函数唯一生产调用方 = record-store 内部（意图原语消费返回值）。
 //
 // [UF-1] record 绑定 sidecar（`.record-binding`）同挂本载体族：宿主侧在 record.sessionFile
 // 回填点写「record id → session 文件」映射（engine-CLI 化后子 session 文件无身份 entry，
 // 旧 PI_SUBAGENT_SELF_RECORD_ID 注入链消失，collectRecords/findLightById 失去 id→file
-// 工件——本 sidecar 是该映射的宿主侧落盘权威）。与终态 sidecar 的关系：
+// 工件——本 sidecar 是该映射的宿主侧落盘权威）。与收口 sidecar 的关系：
 //   - 读侧消费（record-store scanFile）：仅当子文件无 identity entry 时用绑定重建身份，
-//     status 判定仍走 buildRecord 四分支矩阵——`.state`（终态）优先级天然高于绑定的
-//     running 形态，二者并存无冲突（终态后绑定保留：resurrect 回边删 .state 后绑定
-//     仍在，再崩溃仍可恢复）；
+//     status/stopReason 判定走 buildRecord 重建单规则（§3.2.4）——`.state`（收口）
+//     优先级天然高于绑定的在途形态，二者并存无冲突（收口后绑定保留：resurrect 回边
+//     删 .state 后绑定仍在，再崩溃仍可恢复）；
 //   - GC：session-file-gc 的 sidecar 名单暂未含本扩展名（孤儿绑定在 jsonl 被 GC 后
 //     残留，量级 = 崩溃 record 数，接受；名单扩展归 GC 领地批次）。
 
@@ -98,19 +101,19 @@ export function _setStateMarkerSleepForTest(fn: ((ms: number) => void) | undefin
 // ============================================================
 
 /**
- * `.state` status 值域：旧终态二态（finalized/cancelled）+ 新收口语（idle，永久会话
- * 模型 §3.2.4——「上一轮收条」而非死亡证明，U2 写侧先行，读侧兼容归 U3）。
+ * `.state` status 值域：新收口语 idle（永久会话模型 §3.2.4——「上一轮收条」而非
+ * 死亡证明）+ 旧终态二态 finalized/cancelled（写侧已不再产出，读侧上行映射兼容）。
  */
-export type TerminalState = "finalized" | "cancelled" | "idle";
+export type TerminalState = "idle" | "finalized" | "cancelled";
 
 /** `.state` sidecar 归一形态（新名直读 / 旧名兼容读出共用）。 */
 export interface StateMarker {
   status: TerminalState;
-  /** finalized 的关闭原因；空串 = 旧格式空文件（死因不可考）；cancelled 恒 undefined；
-   *  idle = 收口 stopReason（新格式，§3.2.4——读侧映射归 U3）。 */
+  /** idle = 收口 stopReason（新格式 §3.2.4，值域 StopReason）；finalized 的关闭原因
+   *  （空串 = 旧格式空文件，死因不可考）；cancelled 恒 undefined。 */
   reason?: string;
-  /** cancelled 的精确结束时间；finalized 恒 undefined（重建走 jsonl 末 entry ts）；
-   *  idle = 收口时间（新格式）。 */
+  /** idle = 收口时间（新格式）；cancelled 的精确结束时间（重建判定消费）；
+   *  finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
   endedAt?: number;
 }
 
@@ -155,13 +158,12 @@ export function writeCancelledState(sessionFile: string, endedAt: number): boole
  * stopReason?, endedAt?}`——「上一轮收条」而非死亡证明）。响应重试语义与两终态
  * 写函数同源（writeStateMarker 响亮重试）。
  *
- * [U2/U3 接口对齐] 本函数是 markSettled 意图原语的 `.state` 写面；**读侧兼容
- * （新格式 → idle + stopReason 的重建映射）归 U3**——U2/U3 窗口期内现有读侧
- * （readNewStateMarker）对本格式落「存在性信号」降级分支（结构不合法 → finalized
- * 存在性），即设计 §3.2.4 声明的「旧版读新值」良性降级形态（disconnected ∈ 可续）。
+ * 本函数是 markSettled 意图原语的 `.state` 写面；读侧（readNewStateMarker 的 idle
+ * 分支 → buildRecord 单规则映射 idle + stopReason）已随 U3 切换，live ≡ reload
+ * 构造性成立。
  *
  * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
- *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义，U3 定）。
+ *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义）。
  * @param endedAt 收口时间（收条精度；调用方传 Date.now()）。
  * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
  */
@@ -220,7 +222,7 @@ function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
 // ============================================================
 
 /**
- * 读终态 sidecar（.state 优先，缺失回退旧名）。
+ * 读轮收口 sidecar（.state 优先，缺失回退旧名）。
  *
  * 旧名回退顺序 **.cancelled → .finalized**：与合并前判定分支的优先级逐点一致
  * （原实现分支 1 = tombstone，分支 2 = finalized；两者共存时 cancelled 胜出——
@@ -229,9 +231,14 @@ function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
  * 返回 undefined：三者皆无 / 内容无法判读（旧 .cancelled 损坏时不认 cancelled——
  * 对齐旧语义，避免把损坏残留误判成终态）。
  *
- * 边界对齐（与合并前逐点等价）：
- *   - `.state` 存在但内容损坏 → {status:"finalized"}（对齐旧 .finalized「存在性即
- *     信号」的宽语义；不误判 cancelled）；
+ * 边界对齐：
+ *   - `.state` status=idle（新格式收条）→ {status:"idle", reason?, endedAt?}
+ *     （reason/endedAt 经类型守卫归一，非法值丢弃不抛）；
+ *   - `.state` status=cancelled / finalized → 旧值原样读出（上行映射到
+ *     idle+stopReason 在 record-store.buildRecord 单规则，本层不做语义翻译）；
+ *   - `.state` 存在但 status 未知/内容损坏 → {status:"finalized"}（存在性即信号；
+ *     §3.2.4 双向兼容②的降级分支——旧版读新值（"idle" 在旧版即未知 status）走
+ *     本分支 → disconnected 兜底 → 回滚方向良性可重连。永久保留，服务未来格式）；
  *   - 旧 `.finalized` 存在 → reason = 内容 trim（读失败 → undefined → 重建 disconnected）；
  *   - 旧 `.cancelled` 存在且结构合法 → {status:"cancelled", endedAt}。
  */
@@ -248,10 +255,19 @@ function readNewStateMarker(sessionFile: string): StateMarker | undefined {
   try {
     raw = fs.readFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, "utf-8");
   } catch {
-    return undefined; // sidecar 不存在（正常——未终态化的 record 无 sidecar）。
+    return undefined; // sidecar 不存在（正常——未收口的 record 无 sidecar）。
   }
   try {
     const parsed = JSON.parse(raw) as Partial<StateMarker>;
+    // 新格式收条（§3.2.4）：{status:"idle", reason?=stopReason, endedAt?}——可选域
+    // 类型守卫归一（非法/缺省 → undefined，重建面按「无则」兜底，见 buildRecord）。
+    if (parsed.status === "idle") {
+      return {
+        status: "idle",
+        ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
+        ...(typeof parsed.endedAt === "number" ? { endedAt: parsed.endedAt } : {}),
+      };
+    }
     if (parsed.status === "cancelled") {
       return typeof parsed.endedAt === "number"
         ? { status: "cancelled", endedAt: parsed.endedAt }
@@ -262,7 +278,7 @@ function readNewStateMarker(sessionFile: string): StateMarker | undefined {
         ? { status: "finalized", reason: parsed.reason }
         : { status: "finalized" };
     }
-    return { status: "finalized" }; // 结构不合法 → 存在性信号（降级，不误判 cancelled）。
+    return { status: "finalized" }; // 未知 status（含旧版读新值/未来 v3）→ 存在性信号（降级，不误判 cancelled）。
   } catch {
     return { status: "finalized" }; // JSON 损坏 → 同上。
   }

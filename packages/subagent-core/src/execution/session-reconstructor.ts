@@ -644,8 +644,8 @@ export interface IdentityHeaderRecon {
  *
  * 与 reconstructFromFile 的行为差异（有意）：本函数只要头部有 identity 就返回，
  * 不要求存在 assistant message——pi 延迟写入策略下无 assistant 的文件几乎不存在，
- * 若存在（崩溃前 flush）也按分支 4 running 呈现（v4 B-1 可续聊语义），
- * 而非静默不可见。
+ * 若存在（崩溃前 flush）也按 §3.2.4 重建单规则呈现（无 sidecar → idle +
+ * interrupted-by-restart），而非静默不可见。
  *
  * 返回 undefined：文件缺失/读失败/头部无 identity。不抛。
  * 头部无 identity ≠ 文件无 identity（续聊场景 identity 在尾部附近）——需要覆盖全文件

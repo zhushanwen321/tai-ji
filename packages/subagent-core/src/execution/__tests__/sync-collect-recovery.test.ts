@@ -664,12 +664,16 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 重建矩阵不含这些字段，不 merge 就会被覆写抹掉（E1 候选集恒空的真根因）。
     const overwritten = readMainFileLastEntries().get("sa-kill9")!;
     expect(overwritten.status).toBe("idle");
-    expect(overwritten.closedReason).toBe("gc");
+    // [U3 / §3.2.4] 纠偏一律保留 idle：无旧终态遗留位（closedReason），stopReason
+    // 走重建单规则兜底
+    expect(overwritten.closedReason).toBeUndefined();
+    expect(overwritten.stopReason).toBe("interrupted-by-restart");
     expect(overwritten.collectMode).toBe("sync");
     expect(overwritten.result).toBe("kill-9 full result body");
     expect(overwritten.model).toBe("prov/round-m");
-    // 防重锚落盘（覆写已判终态，二次重启不再进判定）
-    expect(fs.existsSync(`${childFile}.state`)).toBe(true);
+    // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删；幂等由「纠偏
+    // entry 落盘后末条变 idle，判据不再命中」构造性承接）
+    expect(fs.existsSync(`${childFile}.state`)).toBe(false);
 
     // ── E1 真实跑：末条（覆写后 closed entry）候选命中 → 补发 + 落标 ──
     const spy = spyNotifier(recovery);
@@ -690,8 +694,10 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
 
     // [v2 D1] E1 路径 manifest：写账前屏障 await 补写 records/<sa-id>.json（时序
     // 竞态修订：原为落标出口 fire-and-forget），反查索引随补发就位（指针行消费前
-    // 可得——await 返回时屏障已完成，无需轮询）。覆写后 closed 重建快照 → status
-    // 如实投影 "closed"；sessionFile 来自 W1 的 rebuildEntryRecord 投影扩展。
+    // 可得——await 返回时屏障已完成，无需轮询）。[U3 / §3.2.4] 纠偏 entry 无旧终态
+    // 遗留位 → legacyManifestStatusFields 按桥接判据投影 legacy "running"（§3.2.8
+    // 下行映射：idle∧无 closedReason → 活跃成员）；sessionFile 来自 W1 的
+    // rebuildEntryRecord 投影扩展。
     const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-kill9.json");
     expect(fs.existsSync(manifestFile)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as Record<string, unknown>;
@@ -699,7 +705,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       id: "sa-kill9",
       rootSessionId: ROOT_SESSION,
       agentName: "/agents/worker.md",
-      status: "closed",
+      status: "running",
       sessionFile: childFile,
     });
 
@@ -952,8 +958,10 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       .find((d) => d.id === "sa-p-rebuild");
     expect(entry).toBeDefined();
     expect(entry!.status).toBe("idle");
-    expect(entry!.closedReason).toBe("gc");
-    expect(String(entry!.error)).toContain("no child session file");
+    // [U3 / §3.2.4] entry-born 纠偏一律保留 idle（直断 closed+gc+error 退役）
+    expect(entry!.closedReason).toBeUndefined();
+    expect(entry!.stopReason).toBe("interrupted-by-restart");
+    expect(entry!.error).toBeUndefined();
   });
 
   // ============================================================
@@ -984,9 +992,12 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const withManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     const pm = withManifest.find((r) => r.id === "sa-pm");
     expect(pm).toBeDefined();
-    // 投影来自子文件 sidecar 重建（closed+gc），非 manifest（status="running"）
+    // 投影来自子文件锚重建（[U3 / §3.2.4] 纠偏 idle + interrupted-by-restart，无
+    // sidecar 落盘），非 manifest（status="running" 下行投影）——closedReason 有无
+    // 仍是可辨差异位
     expect(pm!.status).toBe("idle");
-    expect(pm!.closedReason).toBe("gc");
+    expect(pm!.closedReason).toBeUndefined();
+    expect(pm!.stopReason).toBe("interrupted-by-restart");
 
     // 删 manifest 文件 → 同款重建 → 投影逐字段一致（不变量：manifest 的存在不改变
     // list 形态——补充投影只服务「entry/子文件源完全缺失」的孤儿）

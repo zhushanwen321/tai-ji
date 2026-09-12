@@ -219,7 +219,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("collectRecords：无 identity 子文件 + 绑定 → 重建 running light（id/rootSessionId/chatMode/round/sessionFile）", () => {
+  it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/chatMode/round/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
     const store = new RecordStore(sessionsDir);
@@ -228,7 +228,9 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     expect(records).toHaveLength(1);
     const rec = records[0]!;
     expect(rec.id).toBe("sa-bind-1");
-    expect(rec.status).toBe("running"); // v4 B-1 跨重启可续聊语义（无 .state → 分支 4）
+    // [U3 / §3.2.4 重建单规则] 无 .state → idle + interrupted-by-restart 兜底
+    expect(rec.status).toBe("idle");
+    expect(rec.stopReason).toBe("interrupted-by-restart");
     expect(rec.rootSessionId).toBe("root-session");
     expect(rec.chatMode).toBe(true);
     expect(rec.round).toBe(1);
@@ -250,7 +252,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     const light = store.findLightById("sa-bind-1");
     expect(light?.id).toBe("sa-bind-1");
     expect(light?.sessionFile).toBe(file);
-    expect(light?.status).toBe("running");
+    expect(light?.status).toBe("idle");
   });
 
   it("rootSessionId 过滤仍生效：异树过滤排除绑定 record（session 隔离不因绑定旁路）", () => {

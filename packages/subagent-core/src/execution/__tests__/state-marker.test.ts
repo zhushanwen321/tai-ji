@@ -49,6 +49,7 @@ import {
   statStateStamp,
   writeCancelledState,
   writeFinalizedState,
+  writeSettledState,
 } from "../state-marker.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
@@ -178,11 +179,27 @@ describe("state-marker", () => {
   });
 
   // ============================================================
-  // 读侧：无 sidecar / .state 边界
+  // 读侧：无 sidecar / .state 边界 + [U3 / §3.2.4] 新格式识别与双向兼容
   // ============================================================
   describe("读侧 .state", () => {
-    it("无任何 sidecar → undefined（未终态化）", () => {
+    it("无任何 sidecar → undefined（未收口）", () => {
       expect(readStateMarker(sessionFile)).toBeUndefined();
+    });
+
+    // ── [U3 / §3.2.4] 新格式识别（writeSettledState 写面 → 读侧原样归一）──
+    it(".state 新格式收条（idle + stopReason + endedAt）→ 原样读出", () => {
+      writeSettledState(sessionFile, { stopReason: "interrupted", endedAt: 6600 });
+      expect(readStateMarker(sessionFile)).toEqual({ status: "idle", reason: "interrupted", endedAt: 6600 });
+    });
+
+    it(".state 新格式收条缺 stopReason/endedAt → {status:idle}（可选域缺省归一）", () => {
+      fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle" }), "utf-8");
+      expect(readStateMarker(sessionFile)).toEqual({ status: "idle" });
+    });
+
+    it(".state 新格式字段类型非法 → 非法域丢弃不抛（idle + 合法域保留）", () => {
+      fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: 42, endedAt: "x" }), "utf-8");
+      expect(readStateMarker(sessionFile)).toEqual({ status: "idle" });
     });
 
     it(".state JSON 损坏 → {status:finalized}（存在性即信号；不误判 cancelled）", () => {
@@ -190,9 +207,19 @@ describe("state-marker", () => {
       expect(readStateMarker(sessionFile)).toEqual({ status: "finalized" });
     });
 
-    it(".state status 非枚举值 → {status:finalized}（结构不合法降级）", () => {
+    // ── [§3.2.4 双向兼容②] 旧版读新值的回滚降级链锁定 ──
+    // 旧版 readNewStateMarker 无 idle 分支："idle" 是未知 status → 落本降级分支
+    // {status:"finalized"}（无 reason）→ 旧版 buildRecord 分支 2 reason 缺失兜底
+    // disconnected → closed 终态投影，但 disconnected ∈ 旧版可重连集 → 回滚后
+    // message 同 id 续聊仍可达（设计声明：回滚方向行为良性）。本断言锁定新版对
+    // 未知 status 的降级形态与旧版同构（未来 v3 格式的回滚安全性同此链）。
+    it("status 未知值（含旧版视角下的 'idle' 新值）→ {status:finalized} 存在性降级（回滚良性链锚）", () => {
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "bogus" }), "utf-8");
-      expect(readStateMarker(sessionFile)).toEqual({ status: "finalized" });
+      const marker = readStateMarker(sessionFile);
+      expect(marker).toEqual({ status: "finalized" });
+      // 降级链终点（buildRecord 侧）：无 reason → disconnected（可重连集），
+      // 而非 cancelled/gc 等不可重连形态——回滚方向可续聊的关键不变量
+      expect(marker).not.toHaveProperty("reason");
     });
 
     it(".state finalized 且 reason 非字符串 → 忽略 reason 字段（不抛）", () => {

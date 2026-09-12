@@ -121,14 +121,27 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("running");
   });
 
-  it("终态 closed record → throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
+  it("旧终态遗留位 record（idle + closedReason ∉ 可重连集）→ throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
     record.status = "idle";
-    // [H1 U2] D4 表 closed 硬拒格：closedReason 非 可重连集（undefined/gc）→ 硬拒 +
-    // start 新的指引（Continuation reviveOrThrow 文案）
+    // [H1 U2 → U3 桥接] D4 表 closed 硬拒格：旧终态遗留位 ∉ 可重连集（gc）→ 硬拒 +
+    // start 新的指引（Continuation reviveOrThrow 文案）。[U3 / §3.2.4] 桥接后
+    // closedReason=undefined 的 idle 是「轮间空闲」可续聊形态（走接管分支不再硬拒），
+    // 硬拒格由旧终态遗留位（closedReason 有值且不可重连）承载。
+    record.closedReason = "gc";
     await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
       /cannot be messaged or resumed/,
     );
     expect(fake.runs.length).toBe(0);
+  });
+
+  it("[U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined，轮间空闲）→ 直接接管派发，不硬拒", async () => {
+    record.status = "idle";
+    // markSettled 轮收口 / 磁盘重建单规则产出的 idle 无旧终态遗留位——message 到达
+    // 直接翻回 running 派发新轮（万物可续）
+    expect(record.closedReason).toBeUndefined();
+    await service.chatActions.deliverChatMessage(record, "msg after settle");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(record.status).toBe("running");
   });
 
   it("record 无 sessionFile → 同步拒绝（D4 表锚点缺失格：no transcript anchor + re-dispatch 指引），不触发 kickOff", async () => {

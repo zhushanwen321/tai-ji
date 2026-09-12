@@ -37,14 +37,14 @@ vi.mock("../sessions-index.ts", async (importOriginal) => {
 
 import { writeAliveMarker } from "../alive-store.ts";
 import { completeRecord, createRecord, projectOutcome, tryTransition } from "../execution-record.ts";
-import { writeCancelledState, writeFinalizedState } from "../state-marker.ts";
+import { writeCancelledState, writeFinalizedState, writeSettledState } from "../state-marker.ts";
 import type { ManifestRecord } from "../manifest-store.ts";
 import { ManifestStore } from "../manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
 import type { StatusFilter } from "../record-store.ts";
 import { RecordStore } from "../record-store.ts";
-import type { AliveMarker, ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
 /** 构造 ExecutionRecord（base 默认 running，over 覆盖任意字段）。 */
@@ -166,16 +166,17 @@ describe("RecordStore", () => {
       expect(ids).toContain("run-1");
     });
 
-    it("磁盘 session.jsonl 重建的 record 出现在结果中（无 sidecar → running, SP-2 跨重启可恢复）", () => {
+    it("磁盘 session.jsonl 重建的 record 出现在结果中（无 sidecar → idle + interrupted-by-restart，§3.2.4 单规则）", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
       });
-      // 无 sidecar → 四分支兜底 running（v4 B-1：旧 idle 折入 running，SP-2 跨重启可恢复）
+      // 无 sidecar → 重建单规则兜底 idle + interrupted-by-restart（§3.2.4「文件不存在」行）
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === "bg-1");
       expect(found).toBeDefined();
-      expect(found?.status).toBe("running");
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
       expect(found?.agent).toBe("worker");
       // [perf] 列表是 light（头部 identity，详情字段缺省）——turns/tokens/result 走 getFullRecord 懒加载
       expect(found?.turns).toBe(0);
@@ -184,10 +185,10 @@ describe("RecordStore", () => {
       expect(full?.turns).toBe(1);
       expect(full?.totalTokens).toBe(30);
       expect(full?.result).toBe("result text");
-      expect(full?.status).toBe("running"); // 状态矩阵在全量路径同样套用
+      expect(full?.status).toBe("idle"); // 单规则在全量路径同样套用
     });
 
-    it("磁盘 session.jsonl + .state sidecar（finalized） → done", () => {
+    it("磁盘 session.jsonl + .state sidecar（finalized） → idle", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-b.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-2", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
@@ -199,7 +200,7 @@ describe("RecordStore", () => {
       expect(found?.status).toBe("idle");
     });
 
-    it("statusFilter='running' 含内存 + 磁盘跨重启 running（v4 B-1：旧 idle 折入 running）", () => {
+    it("statusFilter='running' 只剩内存 running（§3.2.4：磁盘重建恒 idle，running 只在轮次在飞时有意义）", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
@@ -208,8 +209,8 @@ describe("RecordStore", () => {
       store.register(makeRecord({ id: "run-1", mode: "background", startedAt: 1000 }));
       const filter: StatusFilter = "running";
       const ids = store.collectRecords(100, filter).map((r) => r.id);
-      // 内存 run-1 + 磁盘跨重启 bg-1 都是 running（旧 idle 折入）；startedAt desc → bg-1(5000) 先
-      expect(ids).toEqual(["bg-1", "run-1"]);
+      // 磁盘 bg-1 重建为 idle（单规则），filter=running 只剩内存 run-1
+      expect(ids).toEqual(["run-1"]);
     });
 
     it("statusFilter='all'（默认）返回内存 + 磁盘", () => {
@@ -389,9 +390,10 @@ describe("RecordStore", () => {
   });
 
   // ============================================================
-  // 四分支 sidecar 矩阵（D-006 + D-021）
+  // [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自 .state
+  //（无则 interrupted-by-restart）；四输入 = 新格式 / 旧 finalized / 旧 cancelled / 无 sidecar
   // ============================================================
-  describe("四分支 sidecar 矩阵", () => {
+  describe("重建单规则（§3.2.4）", () => {
     const SESSION_ID = "bg-1";
     const STARTED_AT = 1000;
 
@@ -403,111 +405,98 @@ describe("RecordStore", () => {
       return sessionFile;
     }
 
-    // ── 分支 1: 终态 sidecar status=cancelled ──
-    it(".state sidecar（cancelled） → closed + closedReason=cancelled", () => {
+    // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
+    it(".state 新格式收条 → idle + stopReason=收口 reason；closedReason/endedAt 不投影（live ≡ reload）", () => {
+      const sessionFile = writeBaseSession();
+      writeSettledState(sessionFile, { stopReason: "interrupted", endedAt: 6000 });
+      const store = new RecordStore(tmpDir);
+      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted");
+      // 桥接不变量新侧：settle 产出的 idle 无旧终态遗留位（与内存 markSettled 一致）
+      expect(found?.closedReason).toBeUndefined();
+      // 非终态语义：endedAt 不投影（收条时间不冒充终态结束时间）
+      expect(found?.endedAt).toBeUndefined();
+      expect(found?.error).toBeUndefined();
+    });
+
+    it(".state 新格式收条无 stopReason → idle + interrupted-by-restart 兜底", () => {
+      const sessionFile = writeBaseSession();
+      writeSettledState(sessionFile, { endedAt: 6000 });
+      const store = new RecordStore(tmpDir);
+      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+    });
+
+    it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
+      const sessionFile = writeBaseSession();
+      fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
+      const store = new RecordStore(tmpDir);
+      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+    });
+
+    // ── 输入 2: 旧 finalized → idle + closedReason/stopReason=reason（上行映射）──
+    it(".state 旧 finalized（携 reason）→ idle + stopReason=closedReason=reason", () => {
+      const sessionFile = writeBaseSession();
+      writeFinalizedState(sessionFile, "user-close");
+      const store = new RecordStore(tmpDir);
+      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
+      expect(found?.status).toBe("idle");
+      expect(found?.closedReason).toBe("user-close");
+      expect(found?.stopReason).toBe("user-close");
+    });
+
+    // ── 输入 2b: 旧 finalized 空 reason（死因不可考）→ disconnected 兜底 ──
+    it(".state 旧 finalized（空 reason）→ idle + disconnected 兜底（旧数据兼容回归）", () => {
+      const sessionFile = writeBaseSession();
+      writeFinalizedState(sessionFile);
+      const store = new RecordStore(tmpDir);
+      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
+      expect(found?.status).toBe("idle");
+      expect(found?.closedReason).toBe("disconnected");
+      expect(found?.stopReason).toBe("disconnected");
+    });
+
+    // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 投影判据）
+    //    + stopReason=interrupted（§3.2.4 上行映射）──
+    it(".state 旧 cancelled → idle + stopReason=interrupted + closedReason=cancelled（双写与 U2 桥接对齐）", () => {
       const sessionFile = writeBaseSession();
       writeCancelledState(sessionFile, 6000);
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      // v4 B-1：cancelled 折入 closed（closedReason='cancelled' 区分用户取消）
       expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted");
+      // closedReason 保留旧词：U2 桥接判据（idle ∧ closedReason 有值 → legacy
+      // closed/cancelled 投影，旧 session-reader 兼容面）依赖此值
       expect(found?.closedReason).toBe("cancelled");
       expect(found?.error).toBe("cancelled by user");
       expect(found?.endedAt).toBe(6000);
     });
 
-    // ── 分支 2: 终态 sidecar status=finalized（done）──
-    it(".state sidecar（finalized） + stopReason=stop → done", () => {
+    // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收口）──
+    it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();
-      writeFinalizedState(sessionFile);
+      // .alive 在持（异宿主探活形态）不参与 status 判定——探活读面走 findForeignLiveInstance 现查
+      writeAliveMarker(sessionFile, { pid: process.pid, id: SESSION_ID, startedAt: STARTED_AT });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+      expect(found?.closedReason).toBeUndefined();
+      expect(found?.endedAt).toBeUndefined();
+      expect(found).not.toHaveProperty("externalInstance");
     });
 
-    // ── 分支 2: 终态 sidecar status=finalized（failed）──
-    it(".state sidecar（finalized） + stopReason=error → failed", () => {
-      // 写一个 stopReason=error 的 session.jsonl
-      const sessionFile = path.join(tmpDir, "2026-01-01-uuid-fail.jsonl");
-      const header = JSON.stringify({
-        type: "session", version: 3, id: "sess-uuid", timestamp: new Date(STARTED_AT).toISOString(), cwd: "/tmp",
-      });
-      const identityEntry = JSON.stringify({
-        type: "custom", id: "id-1", parentId: null, timestamp: new Date(STARTED_AT).toISOString(),
-        customType: "subagent-identity",
-        data: { id: SESSION_ID, agent: "worker", mode: "background", task: "do it", startedAt: STARTED_AT },
-      });
-      const assistantMsg = JSON.stringify({
-        type: "message", id: "msg-1", parentId: "id-1",
-        timestamp: new Date(STARTED_AT + 1000).toISOString(),
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "error output" }],
-          usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 30, cost: { total: 0 } },
-          stopReason: "error",
-          errorMessage: "something went wrong",
-          timestamp: STARTED_AT + 1000,
-        },
-      });
-      fs.writeFileSync(sessionFile, `${header}\n${identityEntry}\n${assistantMsg}\n`, "utf-8");
-
-      writeFinalizedState(sessionFile);
+    it(".alive + 死 pid（崩溃残留）→ 同款 idle + interrupted-by-restart", () => {
+      const sessionFile = writeBaseSession();
+      writeAliveMarker(sessionFile, { pid: 9999999, id: SESSION_ID, startedAt: STARTED_AT });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
-    });
-
-    // ── 分支 3→4: .alive + 活 pid → running 兜底（U4a / D3b (a)：投影退役）──
-    it(".alive + 存活 pid → running 兜底，无 externalInstance 投影（探活读面走现查探针）", () => {
-      const sessionFile = writeBaseSession();
-      const recentStartedAt = Date.now() - 1000; // 1 秒前
-      const marker: AliveMarker = { pid: process.pid, id: SESSION_ID, startedAt: recentStartedAt };
-      writeAliveMarker(sessionFile, marker);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("running");
-      // externalInstance 字段链已删（D3b (a)：重建投影不再携带探活缓存，
-      // fork-from 守卫/孤儿恢复改 findForeignLiveInstance 现查）。
-      expect(found).not.toHaveProperty("externalInstance");
-    });
-
-    // ── 分支 3→4: .alive + 死 pid → running（SP-2：跨重启可恢复）──
-    it(".alive + 死 pid → running（SP-2 跨重启可恢复）", () => {
-      const sessionFile = writeBaseSession();
-      const marker: AliveMarker = { pid: 9999999, id: SESSION_ID, startedAt: STARTED_AT };
-      writeAliveMarker(sessionFile, marker);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("running");
-      expect(found).not.toHaveProperty("externalInstance");
-    });
-
-    // ── 分支 4: 都无 sidecar → running（SP-2：跨重启可恢复）──
-    it("无任何 sidecar → running（SP-2 跨重启可恢复）", () => {
-      writeBaseSession();
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("running");
-    });
-
-    // ── 分支 4: 老旧 .alive（原 >24h 软超时形态）→ running（status 与 .alive 解耦）──
-    it(".alive 存在即不影响 status 判定 → running 兜底（软超时/探活读面已退役）", () => {
-      const sessionFile = writeBaseSession();
-      // startedAt 设为 25 小时前（旧三判据形态下的软超时区——现已无判定参与）
-      const oldStartedAt = Date.now() - 25 * 60 * 60 * 1000;
-      const marker: AliveMarker = { pid: process.pid, id: SESSION_ID, startedAt: oldStartedAt };
-      writeAliveMarker(sessionFile, marker);
-
-      // 重写 session.jsonl 使 startedAt 匹配
-      fs.unlinkSync(sessionFile);
-      writeSessionJsonl(sessionFile, {
-        id: SESSION_ID, agent: "worker", mode: "background", task: "do it", startedAt: oldStartedAt,
-      });
-
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("running");
-      expect(found).not.toHaveProperty("externalInstance");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
     });
 
     // ── 兼容读回归：存量旧名共存时 .cancelled 优先于 .finalized ──
@@ -519,13 +508,13 @@ describe("RecordStore", () => {
       });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      // v4 B-1：cancelled 优先级不变，但 status 折入 closed（closedReason='cancelled'）
       expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
+      expect(found?.stopReason).toBe("interrupted");
     });
 
     // ── 新名权威：.state 与存量旧名共存时 .state 胜出 ──
-    it(".state 优先于存量旧名（新写侧权威，旧文件残留不覆盖新终态）", () => {
+    it(".state 优先于存量旧名（新写侧权威，旧文件残留不覆盖新收口）", () => {
       const sessionFile = writeBaseSession();
       writeLegacyCancelledSidecar(sessionFile, {
         id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 6000,
@@ -535,29 +524,6 @@ describe("RecordStore", () => {
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("user-close");
-    });
-
-    // ── 回归：旧名单分支行为不变（存量 .finalized / .cancelled 仍被读出）──
-    it("兼容读：旧 .finalized 单分支行为不变（存量空文件 → disconnected）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyFinalizedSidecar(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("disconnected");
-    });
-
-    it("兼容读：旧 .cancelled 单分支行为不变（回归，status 折入 closed）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyCancelledSidecar(sessionFile, {
-        id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 7000,
-      });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.error).toBe("cancelled by user");
-      expect(found?.endedAt).toBe(7000);
     });
   });
 
@@ -658,7 +624,7 @@ describe("RecordStore", () => {
       expect(store.getFullRecord("bg-1")?.endedAt).toBe(9000);
     });
 
-    it("无 sidecar（running, SP-2）→ endedAt 保持 undefined（非终态）", () => {
+    it("无 sidecar（idle, §3.2.4 单规则）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
       const sessionFile = path.join(tmpDir, "crash.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "w", mode: "background", task: "t",
@@ -666,12 +632,12 @@ describe("RecordStore", () => {
       });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
-      expect(found?.status).toBe("running");
-      // SP-2: running 是非终态（旧 idle 折入），endedAt 保持 undefined（待续聊）
+      expect(found?.status).toBe("idle");
+      // 非终态语义：endedAt 保持 undefined（待续聊；与内存 markSettled 形态一致）
       expect(found?.endedAt).toBeUndefined();
     });
 
-    it(".alive running → endedAt 保持 undefined（running 耗时继续增长是正确的）", () => {
+    it(".alive 在持 → endedAt 保持 undefined（.alive 不参与 status 判定，耗时继续增长是正确的）", () => {
       const sessionFile = path.join(tmpDir, "alive.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "w", mode: "background", task: "t",
@@ -680,7 +646,7 @@ describe("RecordStore", () => {
       writeAliveMarker(sessionFile, { pid: process.pid, id: "bg-1", startedAt: Date.now() - 1000 });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
-      expect(found?.status).toBe("running");
+      expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeUndefined();
     });
   });
@@ -769,27 +735,28 @@ describe("RecordStore", () => {
   });
 
   // ============================================================
-  // SP-2: reconstructAll 兜底分支输出 running（非 crashed；v4 两态后旧 idle 折入 running）
+  // [U3 / §3.2.4] 重建单规则回归锚（原 SP-2 兜底 running 语义随单规则收敛为 idle）
   // ============================================================
-  describe("SP-2: reconstructAll 兜底 running（跨重启恢复）", () => {
-    // TC-1: 兜底分支输出 running（非 crashed）
-    it("TC-1: 无 sidecar + 死 pid → reconstructAll 输出 running（可冷路径 resume）", () => {
+  describe("重建单规则回归锚（原 SP-2）", () => {
+    // TC-1: 无 sidecar 兜底输出 idle（非 crashed——两态下无派生终态）
+    it("TC-1: 无 sidecar + 死 pid → reconstructAll 输出 idle + interrupted-by-restart（可冷路径续聊）", () => {
       const sessionFile = path.join(tmpDir, "sp2-tc1.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-sp2-1", agent: "worker", mode: "background", task: "cross-restart task",
         startedAt: 1000, rootSessionId: "sess-sp2",
       });
-      // 无任何 sidecar marker → 分支 4 兜底
+      // 无任何 sidecar marker → 单规则兜底
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-1");
       expect(found).toBeDefined();
-      expect(found?.status).toBe("running");
-      // SP-2: running 是非终态（旧 idle 折入），endedAt 保持 undefined
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+      // 非终态：endedAt 保持 undefined
       expect(found?.endedAt).toBeUndefined();
     });
 
-    // TC-2: 有 .state marker（finalized） 的 record 仍归档为 done（不回归）
-    it("TC-2: .state marker（finalized） → done（分支 1/2 不回归）", () => {
+    // TC-2: 旧 .state marker（finalized） → idle（上行映射不回归）
+    it("TC-2: .state marker（finalized） → idle（旧值上行映射不回归）", () => {
       const sessionFile = path.join(tmpDir, "sp2-tc2.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-sp2-2", agent: "worker", mode: "background", task: "finalized task",
@@ -799,13 +766,12 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2");
       expect(found).toBeDefined();
-      // 分支 2 仍归档为 done，不受 SP-2 影响
       expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeDefined();
     });
 
-    // TC-2b: .state marker（cancelled） → closed+cancelled（分支 1 不回归）
-    it("TC-2b: .state marker（cancelled） → closed+cancelled reason（分支 1 不回归）", () => {
+    // TC-2b: 旧 .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted
+    it("TC-2b: .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted（旧值映射不回归）", () => {
       const sessionFile = path.join(tmpDir, "sp2-tc2b.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-sp2-2b", agent: "worker", mode: "background", task: "cancelled task",
@@ -817,13 +783,14 @@ describe("RecordStore", () => {
       expect(found).toBeDefined();
       expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
+      expect(found?.stopReason).toBe("interrupted");
     });
   });
 
   // ============================================================
-  // 孤儿终态恢复（residual-fixes）：分支 4 兜底 record 的判定与落盘
+  // [U3 / §3.2.4] 孤儿恢复简化：entry 面纠偏（一律保留 idle，锚在等 revive）
   // ============================================================
-  describe("recoverOrphanRecords 孤儿终态恢复", () => {
+  describe("recoverOrphanRecords 孤儿 entry 纠偏", () => {
     /** 带真实磁盘 fixture + appendEntry 捕获的 store。 */
     function makeRecoveryStore(): { store: RecordStore; appended: Array<{ customType: string; data: Record<string, unknown> }> } {
       const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
@@ -835,46 +802,50 @@ describe("RecordStore", () => {
       return { store, appended };
     }
 
-    it("末行完整（in-flight，无 resumable）→ closed + 重启中断 error，投影 failed（[F3] 表 3 行 2）", () => {
+    /** 写主 session fixture（含指定 subagent-record entry 序列）。 */
+    function writeMainSession(entries: Array<Record<string, unknown>>): string {
+      const mainFile = path.join(tmpDir, "main-session.jsonl");
+      const lines = entries.map((d) => JSON.stringify({ type: "custom", id: `e-${Math.random()}`, parentId: null, customType: "subagent-record", data: d }));
+      fs.writeFileSync(mainFile, lines.join("\n") + "\n", "utf-8");
+      return mainFile;
+    }
+
+    it("in-flight 孤儿（entry 残留 running）→ 纠正 idle entry + interrupted-by-restart，无直断无 sidecar（[F3] 旧 closed+gc+error 直断退役）", () => {
       const sessionFile = path.join(tmpDir, "orphan-done.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-1", agent: "worker", mode: "background", task: "orphan done",
         startedAt: 1000, rootSessionId: "sess-orphan",
       });
+      const mainFile = writeMainSession([
+        { id: "sa-orphan-1", agent: "worker", task: "orphan done", startedAt: 1000, status: "running" },
+      ]);
       const { store, appended } = makeRecoveryStore();
-      store.recoverOrphanRecords("sess-orphan");
+      store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-1");
       expect(entry?.customType).toBe("subagent-record");
+      // 一律保留 idle（锚在，等 revive）：不终态化、不写死因 error
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.closedReason).toBe("gc");
-      expect(entry?.data.endedAt).toEqual(expect.any(Number));
-      // [F3] in-flight 直断 = boot 直断 failed 语义：任务因宿主重启中断，不得投影
-      // completed（事故环 3 残留）。error 载体 → deriveOutcome("gc", error) = failed。
-      expect(entry?.data.error).toContain("host restart");
-      expect(projectOutcome({
-        status: "idle",
-        closedReason: entry?.data.closedReason as never,
-        error: entry?.data.error as string | undefined,
-      })).toBe("failed");
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
-      // 防重：sidecar 使下次重建走分支 2（closed），不再进判定
+      expect(entry?.data.closedReason).toBeUndefined();
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
+      expect(entry?.data.error).toBeUndefined();
+      expect(entry?.data.endedAt).toBeUndefined();
+      // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删——磁盘重建面已收敛 idle）
+      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+      // 幂等：纠正 entry 落盘后末条变 idle，判据自然不再命中
       const again = [...appended];
-      store.recoverOrphanRecords("sess-orphan");
+      store.recoverOrphanRecords("sess-orphan", mainFile);
       expect(appended.length).toBe(again.length);
       const found = store.collectRecords(100, "all", "sess-orphan").find((r) => r.id === "sa-orphan-1");
       expect(found?.status).toBe("idle");
     });
 
-    it("SP-5 完成态（resumable + result 有值）→ completed 无 error（不误标重启失败，[F3] 不回归）", () => {
+    it("SP-5 完成态残留（resumable + result）→ 同款 idle 纠正，merge 保留 result（直断分支退役）", () => {
       const sessionFile = path.join(tmpDir, "orphan-sp5.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-sp5", agent: "worker", mode: "background", task: "sp5 done",
         startedAt: 6000, rootSessionId: "sess-orphan",
       });
-      // 主 session 末条 entry（v2 D3 merge 数据源）携 resumable+result——W4 起轮终
-      // 执行态信号随 entry 保留，子文件侧重建不带该信号。data 需过 rebuildEntryRecord
-      // 形状守卫（agent/task/startedAt 必带）。
       const mainFile = writeMainSession([
         { id: "sa-orphan-sp5", agent: "worker", task: "sp5 done", startedAt: 6000, status: "running", resumable: true, result: "final answer text" },
       ]);
@@ -883,15 +854,13 @@ describe("RecordStore", () => {
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-sp5");
       expect(entry?.data.status).toBe("idle");
+      expect(entry?.data.closedReason).toBeUndefined();
+      // merge 保真：末条 entry 的 result 保留（覆写是状态迁移不是信息重建）
+      expect(entry?.data.result).toBe("final answer text");
       expect(entry?.data.error).toBeUndefined();
-      expect(projectOutcome({
-        status: "idle",
-        closedReason: entry?.data.closedReason as never,
-        error: entry?.data.error as string | undefined,
-      })).toBe("completed");
     });
 
-    it("resumable 无产出 → 保持 running 落 resumable entry（W4 死亡纳管态跨重启，boot 重认领源，不直断）", () => {
+    it("轮终 resumable 残留（无产出）→ idle 纠正 + resumable 信号随 entry 保留（信息不丢）", () => {
       const sessionFile = path.join(tmpDir, "orphan-resumable.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-res", agent: "worker", mode: "background", task: "resumable orphan",
@@ -904,97 +873,74 @@ describe("RecordStore", () => {
       store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-res");
-      expect(entry?.data.status).toBe("running");
+      expect(entry?.data.status).toBe("idle");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.resumable).toBe(true);
-      // 保留分支不写终态 sidecar
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
-    it("末行截断 → closed + error（保守方向；[F3] in-flight 同时携重启中断语义）", () => {
+    it("子文件末行截断 → 纠偏与子文件正文解耦：照常 idle、无截断 error（末行判读路径已删）", () => {
       const sessionFile = path.join(tmpDir, "orphan-truncated.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-2", agent: "worker", mode: "background", task: "orphan truncated",
         startedAt: 2000, rootSessionId: "sess-orphan",
       });
-      // 制造截断：append 半行 JSON（无换行结尾）
+      // 制造截断：append 半行 JSON（无换行结尾）——旧实现判「truncated」落 error
       fs.appendFileSync(sessionFile, '{"type":"message","id":"msg-2","pare', "utf-8");
+      const mainFile = writeMainSession([
+        { id: "sa-orphan-2", agent: "worker", task: "orphan truncated", startedAt: 2000, status: "running" },
+      ]);
       const { store, appended } = makeRecoveryStore();
-      store.recoverOrphanRecords("sess-orphan");
+      store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-2");
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.error).toContain("truncated");
-      expect(entry?.data.error).toContain("host restart");
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
+      expect(entry?.data.error).toBeUndefined();
     });
 
-    it("末行 >64KB 完整 JSON → 不误判截断，[F3] in-flight 携重启中断 error（无 truncated）", () => {
-      const sessionFile = path.join(tmpDir, "orphan-longline.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "sa-orphan-5", agent: "worker", mode: "background", task: "orphan long line",
-        startedAt: 5000, rootSessionId: "sess-orphan",
-      });
-      // 真实库实测形态：末行为超长完整 entry（subagent-identity 的 task 内嵌大 payload，
-      // 28/4822 个文件末行 65KB-776KB）——固定 64KB 尾窗曾把这类行从中间切开误判截断。
-      const bigEntry = JSON.stringify({
-        type: "custom", id: "id-big", parentId: null,
-        timestamp: new Date(5000).toISOString(), customType: "subagent-identity",
-        data: { id: "sa-orphan-5", agent: "worker", mode: "background", task: "x".repeat(70 * 1024), startedAt: 5000 },
-      });
-      fs.appendFileSync(sessionFile, bigEntry + "\n", "utf-8");
-      const { store, appended } = makeRecoveryStore();
-      store.recoverOrphanRecords("sess-orphan");
-
-      const entry = appended.find((c) => c.data.id === "sa-orphan-5");
-      expect(entry?.data.status).toBe("idle");
-      // [F3] in-flight 重启中断 error 必有；「不误判截断」= error 不含 truncated 标记
-      expect(entry?.data.error).toContain("host restart");
-      expect(entry?.data.error).not.toContain("truncated");
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
-    });
-
-    it("chatMode 孤儿 → 不终态化，落 resumable entry（可续聊产品语义）", () => {
+    it("chatMode 孤儿 → 同款 idle 纠正（无 running/chatMode 分流），chatMode 域保留", () => {
       const sessionFile = path.join(tmpDir, "orphan-chat.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-3", agent: "worker", mode: "background", task: "orphan chat",
         startedAt: 3000, rootSessionId: "sess-orphan", chatMode: true,
       });
+      const mainFile = writeMainSession([
+        { id: "sa-orphan-3", agent: "worker", task: "orphan chat", startedAt: 3000, status: "running", chatMode: true },
+      ]);
       const { store, appended } = makeRecoveryStore();
-      store.recoverOrphanRecords("sess-orphan");
+      store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-3");
-      expect(entry?.data.status).toBe("running");
-      expect(entry?.data.resumable).toBe(true);
+      expect(entry?.data.status).toBe("idle");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.chatMode).toBe(true);
-      // chat 分流不写终态 sidecar
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      // orphanJudged 缓存：同 store 重复调用不重复 append
-      const count = appended.length;
-      store.recoverOrphanRecords("sess-orphan");
-      expect(appended.length).toBe(count);
     });
 
-    it("非分支 4 record（closed / 活进程）不进判定", () => {
+    it("entry 已收口（末条非 running）/ 无 entry 残留 → 不进判定（零 append）", () => {
       const closedFile = path.join(tmpDir, "orphan-closed.jsonl");
       writeSessionJsonl(closedFile, {
-        id: "sa-orphan-4", agent: "worker", mode: "background", task: "already closed",
+        id: "sa-orphan-4", agent: "worker", mode: "background", task: "already settled",
         startedAt: 4000, rootSessionId: "sess-orphan",
       });
       writeFinalizedState(closedFile);
+      const noEntryFile = path.join(tmpDir, "orphan-noentry.jsonl");
+      writeSessionJsonl(noEntryFile, {
+        id: "sa-orphan-6", agent: "worker", mode: "background", task: "no main entry",
+        startedAt: 4500, rootSessionId: "sess-orphan",
+      });
+      const mainFile = writeMainSession([
+        // sa-orphan-4 无 entry；sa-orphan-6 末条已收口（idle）
+        { id: "sa-orphan-6", agent: "worker", task: "no main entry", startedAt: 4500, status: "idle" },
+      ]);
       const { store, appended } = makeRecoveryStore();
-      store.recoverOrphanRecords("sess-orphan");
+      store.recoverOrphanRecords("sess-orphan", mainFile);
       expect(appended.find((c) => c.data.id === "sa-orphan-4")).toBeUndefined();
+      expect(appended.find((c) => c.data.id === "sa-orphan-6")).toBeUndefined();
     });
 
-    /** 写主 session fixture（含指定 subagent-record entry 序列）。 */
-    function writeMainSession(entries: Array<Record<string, unknown>>): string {
-      const mainFile = path.join(tmpDir, "main-session.jsonl");
-      const lines = entries.map((d) => JSON.stringify({ type: "custom", id: `e-${Math.random()}`, parentId: null, customType: "subagent-record", data: d }));
-      fs.writeFileSync(mainFile, lines.join("\n") + "\n", "utf-8");
-      return mainFile;
-    }
-
-    it("entry-born 孤儿（无子文件，spawn 窗口期死亡）→ closed+gc+error（E2E 实测回归）", () => {
+    it("entry-born 孤儿（无子文件，spawn 窗口期死亡）→ idle + interrupted-by-restart（直断 closed+gc+error 退役）", () => {
       const mainFile = writeMainSession([
         { v: 1, id: "sa-entryonly-1", agent: "worker", task: "spawn interrupted", slug: "s", status: "running", mode: "background", startedAt: 6000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
       ]);
@@ -1002,16 +948,18 @@ describe("RecordStore", () => {
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-entryonly-1");
+      // 保持 idle 可见（无锚判据的续聊拒绝文案归 U4 准入判据，不在恢复面直断）
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.closedReason).toBe("gc");
-      expect(entry?.data.error).toContain("no child session file");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
+      expect(entry?.data.closedReason).toBeUndefined();
+      expect(entry?.data.error).toBeUndefined();
       // 防重：orphanJudged 缓存拦截二次判定
       const count = appended.length;
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
       expect(appended.length).toBe(count);
     });
 
-    it("entry-born chatMode 孤儿 → 不终态化，落 resumable entry", () => {
+    it("entry-born 各形态统一 idle（原 chatMode-resumable 分流并入单规则）", () => {
       const mainFile = writeMainSession([
         { v: 1, id: "sa-entryonly-2", agent: "worker", task: "chat spawn interrupted", slug: "s", status: "running", mode: "background", startedAt: 7000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [], chatMode: true },
       ]);
@@ -1019,12 +967,12 @@ describe("RecordStore", () => {
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-entryonly-2");
-      expect(entry?.data.status).toBe("running");
-      expect(entry?.data.resumable).toBe(true);
+      expect(entry?.data.status).toBe("idle");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();
     });
 
-    it("有子文件锚 / 末条已终态 / 他 session 的 entry-born id 不进判定", () => {
+    it("有子文件锚 / 末条已收口 / 他 session 的 entry-born id 不进判定", () => {
       const anchoredFile = path.join(tmpDir, "orphan-anchored.jsonl");
       writeSessionJsonl(anchoredFile, {
         id: "sa-anchored", agent: "worker", mode: "background", task: "has file",

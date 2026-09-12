@@ -1,16 +1,16 @@
 /**
- * readLastJsonlLine 孤儿终态判定用例（W2 移交 CRAP 43.1；私有函数，经公共 API
- * RecordStore.recoverOrphanRecords 驱动——appendEntry 捕获判定结果）。
+ * [U3 / §3.2.4 迁移] 孤儿恢复与子文件末行内容解耦的回归锚。
  *
- * [HISTORICAL] 回归锚点（record-store.ts 窗口扩容注释 / V1 探针）：真实库存在
- * 28 个末行 65KB-776KB 的完整 entry（subagent-identity 的 task 内嵌大 payload）。
- * 旧实现固定 64KB 尾窗把超长末行从中间切开 → JSON.parse 失败 → 误判「截断」→
- * 孤儿恢复错落 error。本文件的 300KB 完整末行用例在旧实现上会红。
+ * [HISTORICAL] 原文件验证 readLastJsonlLine 判定矩阵（超长末行扩窗 / 截断行识别）。
+ * 永久会话模型 §3.2.4 重建单规则落地后：磁盘重建恒 idle、孤儿恢复只做 entry 面纠偏
+ *（一律保留 idle，锚在等 revive），**子文件末行内容不再参与任何判定**——
+ * readLastJsonlLine 的扩窗/截断判定机制随直断分支整体删除。
  *
- * 判定矩阵（finalizeOrphanRecord）：
- *   - 末行完整 JSON（含超长行）→ closed/gc 且无 error
- *   - 末行截断（无尾换行的半行 JSON）→ closed/gc + error "truncated last line"
- *   - 超长且截断的组合 → 仍按截断判 error（不因行长放宽）
+ * 本文件保留的回归价值（原 V1 探针事故锚）：真实库存在 28 个末行 65KB-776KB 的
+ * 完整 entry（subagent-identity 的 task 内嵌大 payload）。旧实现固定 64KB 尾窗把
+ * 超长末行从中间切开 → JSON.parse 失败 → 误判「截断」→ 孤儿恢复错落 error。
+ * 新实现下这类文件照常被扫描（identity 在头部）并完成 entry 纠偏——超长/截断/
+ * 异构末行对孤儿恢复完全无感知（不抛错、不落 error、照常 idle）。
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -46,7 +46,7 @@ function makePiHook() {
   };
 }
 
-describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", () => {
+describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行无感知）", () => {
   let rootDir: string;
   let sessionsDir: string;
 
@@ -60,7 +60,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** 写一个会被重建为 running 孤儿的子 session 文件（首行 identity + 自定义末行）。 */
+  /** 写子 session 文件（首行 identity + 自定义末行）+ 主 session 的 running 残留 entry。 */
   function writeOrphanSession(id: string, lastLine: string, opts: { trailingNewline?: boolean } = {}): string {
     const identity = JSON.stringify({
       type: "custom",
@@ -74,63 +74,63 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     const middle = JSON.stringify({ type: "message", role: "assistant", content: "mid" });
     const body = [identity, middle, lastLine].join("\n") + (opts.trailingNewline === false ? "" : "\n");
     fs.writeFileSync(file, body, "utf8");
-    return file;
+    // 主 session 末条 entry 残留 running——entry 纠偏判据的命中前提
+    const mainFile = path.join(rootDir, "main-session.jsonl");
+    const mainEntry = JSON.stringify({
+      type: "custom", id: `e-${id}`, parentId: null, customType: "subagent-record",
+      data: { id, agent: "worker", task: "t", startedAt: 1000, status: "running" },
+    });
+    fs.writeFileSync(mainFile, mainEntry + "\n", "utf8");
+    return mainFile;
   }
 
-  function recovered(id: string) {
+  function recovered(id: string, mainFile: string) {
     const { pi, entries } = makePiHook();
     const store = new RecordStore(sessionsDir, new ManifestStore(path.join(rootDir, "records")), pi);
-    store.recoverOrphanRecords("session-main");
+    store.recoverOrphanRecords("session-main", mainFile);
     const hits = entries.filter((e) => e.data && (e.data as { id?: string }).id === id);
     if (hits.length === 0) throw new Error("orphan record not reported for " + id);
     return hits[hits.length - 1].data as Record<string, unknown>;
   }
 
-  it("300KB 完整超长末行 → closed/gc 无 error（64KB 固定尾窗的旧实现会误判截断）", () => {
+  it("300KB 完整超长末行 → 照常 idle 纠偏、无 error（旧 64KB 尾窗实现会误判截断）", () => {
     // 300KB 单行 entry：> 64KB 初始窗 × 4 扩窗一档（64K→256K 仍不够 → 1M 覆盖到文件头）
     const bigPayload = "x".repeat(300 * 1024);
-    writeOrphanSession("orphan-bigline", JSON.stringify({ type: "custom", customType: "subagent-record", data: { task: bigPayload, status: "done" } }));
-    const rec = recovered("orphan-bigline");
+    const mainFile = writeOrphanSession("orphan-bigline", JSON.stringify({ type: "custom", customType: "subagent-record", data: { task: bigPayload, status: "done" } }));
+    const rec = recovered("orphan-bigline", mainFile);
+    // [U3 / §3.2.4] 一律保留 idle：无 closedReason、无任何 error 载体
     expect(rec.status).toBe("idle");
-    expect(rec.closedReason).toBe("gc");
-    // 回归锚点本体：300KB 完整行不误判截断（[F3] in-flight 重启中断 error 在场，
-    // 但无截断标记——64KB 固定尾窗的旧实现会把本行从中间切开判「truncated」）。
-    expect(rec.error).toContain("host restart");
-    expect(rec.error).not.toContain("truncated");
+    expect(rec.closedReason).toBeUndefined();
+    expect(rec.stopReason).toBe("interrupted-by-restart");
+    expect(rec.error).toBeUndefined();
   });
 
-  it("末行截断（无尾换行的半行 JSON）→ closed/gc + error 标记截断", () => {
+  it("末行截断（无尾换行的半行 JSON）→ 照常 idle 纠偏、无截断 error（末行判读路径已删）", () => {
     // 半写入形态：最后一行 JSON 被切断且无尾换行
     const truncated = '{"type":"message","role":"assistant","content":"half-written line without clos';
-    writeOrphanSession("orphan-truncated", truncated, { trailingNewline: false });
-    const rec = recovered("orphan-truncated");
+    const mainFile = writeOrphanSession("orphan-truncated", truncated, { trailingNewline: false });
+    const rec = recovered("orphan-truncated", mainFile);
     expect(rec.status).toBe("idle");
-    expect(rec.closedReason).toBe("gc");
-    // [F3] 无 resumable 信号 = in-flight：截断判定并入重启中断文案（"— last line truncated"）
-    expect(rec.error).toContain("host restart");
-    expect(rec.error).toContain("truncated");
+    expect(rec.closedReason).toBeUndefined();
+    expect(rec.error).toBeUndefined();
   });
 
-  it("超长且截断的末行 → 仍判截断 error（扩窗是为完整行服务，不放宽截断判定）", () => {
+  it("超长且截断的末行 → 同款无感知（不因行长/截断形态改变纠偏行为）", () => {
     const bigTruncated = JSON.stringify({ type: "custom", customType: "subagent-record", data: { task: "y".repeat(300 * 1024) } }).slice(0, 300 * 1024);
-    writeOrphanSession("orphan-bigcut", bigTruncated, { trailingNewline: false });
-    const rec = recovered("orphan-bigcut");
+    const mainFile = writeOrphanSession("orphan-bigcut", bigTruncated, { trailingNewline: false });
+    const rec = recovered("orphan-bigcut", mainFile);
     expect(rec.status).toBe("idle");
-    // [F3] 无 resumable 信号 = in-flight：截断判定并入重启中断文案
-    expect(rec.error).toContain("host restart");
-    expect(rec.error).toContain("truncated");
+    expect(rec.error).toBeUndefined();
   });
 
-  it("常规末行（多行文件、完整 JSON）→ closed/gc；无 resumable 信号 = in-flight 重启中断（[F3]）", () => {
-    writeOrphanSession("orphan-normal", JSON.stringify({ type: "message", role: "assistant", content: "final" }));
-    const rec = recovered("orphan-normal");
+  it("常规末行（多行文件、完整 JSON）→ 照常 idle 纠偏", () => {
+    const mainFile = writeOrphanSession("orphan-normal", JSON.stringify({ type: "message", role: "assistant", content: "final" }));
+    const rec = recovered("orphan-normal", mainFile);
     expect(rec.status).toBe("idle");
-    expect(rec.closedReason).toBe("gc");
-    // [F3] 末行完整但无 resumable/result 信号 = 在途被重启中断：投影不得谎报 completed
-    expect(rec.error).toContain("host restart");
+    expect(rec.error).toBeUndefined();
   });
 
-  it("仅 identity 单行文件（首行即末行，合法 JSON）→ closed 无 error", () => {
+  it("仅 identity 单行文件（首行即末行，合法 JSON）→ 照常 idle 纠偏", () => {
     const identity = JSON.stringify({
       type: "custom",
       customType: "subagent-identity",
@@ -139,12 +139,18 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
         startedAt: 1000, rootSessionId: "session-main", depth: 0,
       },
     });
-    // identity 首行 + 紧跟空行结尾：非空段只剩 identity（窗口到文件头，首段完整）
-    fs.writeFileSync(path.join(sessionsDir, "2026-07-18T12-00-00-000Z_orphan-empty.jsonl"), identity + "\n", "utf8");
-    const rec = recovered("orphan-empty");
-    // 唯一非空行 = identity 首行（合法 JSON）→ 无截断标记；[F3] in-flight 重启中断 error 在场
+    // identity 首行 + 紧跟空行结尾：非空段只剩 identity
+    const file = path.join(sessionsDir, "2026-07-18T12-00-00-000Z_orphan-empty.jsonl");
+    fs.writeFileSync(file, identity + "\n", "utf8");
+    const mainFile = path.join(rootDir, "main-session.jsonl");
+    const mainEntry = JSON.stringify({
+      type: "custom", id: "e-orphan-empty", parentId: null, customType: "subagent-record",
+      data: { id: "orphan-empty", agent: "worker", task: "t", startedAt: 1000, status: "running" },
+    });
+    fs.writeFileSync(mainFile, mainEntry + "\n", "utf8");
+
+    const rec = recovered("orphan-empty", mainFile);
     expect(rec.status).toBe("idle");
-    expect(rec.error).toContain("host restart");
-    expect(rec.error).not.toContain("truncated");
+    expect(rec.error).toBeUndefined();
   });
 });

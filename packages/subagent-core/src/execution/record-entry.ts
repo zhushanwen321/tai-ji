@@ -18,6 +18,7 @@ import type {
   ExecutionMode,
   ExecutionStatus,
   RecordOrigin,
+  StopReason,
   SubagentRecord,
 } from "./types.ts";
 
@@ -53,6 +54,12 @@ export interface SubagentRecordEntryData {
   status: ExecutionStatus;
   /** L2 关闭原因（仅 status="closed" 时有意义）。 */
   closedReason?: ClosedReason;
+  /**
+   * [U3 / §3.2.4] 展示停因（上一轮为什么停，值域 StopReason）。additive 字段：
+   * undefined（存量 entry）自然缺省零迁移，读侧 readEntryTerminalFields 按回落链
+   * （stopReason ?? closedReason）归一。
+   */
+  stopReason?: StopReason;
   mode: ExecutionMode;
   startedAt: number;
   /** 根 Pi session ID（session 隔离过滤用）。 */
@@ -137,6 +144,7 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     slug: record.slug,
     status: record.status,
     closedReason: record.closedReason,
+    stopReason: record.stopReason,
     mode: record.mode,
     startedAt: record.startedAt,
     rootSessionId: record.rootSessionId,

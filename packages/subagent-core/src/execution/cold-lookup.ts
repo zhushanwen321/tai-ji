@@ -43,19 +43,38 @@ export interface ColdLookupDeps {
   getBaselineRecordId: () => string | undefined;
 }
 
-/** 冷查候选定位（coldLookupForAction 步骤 1）：idToFile 索引直查 running 命中，
- *  未命中再全目录 collectRecords 兜底（running，或 allowReconnect 且可重连 closed）。
+/** 冷查候选谓词（findColdLookupCandidate 的候选形态判定，判据单点）。
  *
- *  [T5③ / PS-7b] running 候选异进程活实例守卫：冷查 running 候选（跨重启 / 内存重建）
- *  此前不经任何探针直接 resurrect + resume spawn——若其 .alive marker 仍指向活着的
- *  异进程实例（父进程重启后旧子进程尚存的窗口），resume 会 spawn 第二个 pi 子进程
- *  写同一 session JSONL（本代码最忌惮的双写者形态，v4 A-5/P7 事故模式）。closed 候选
- *  的同款守卫已在 assertReconnectAllowed（v8.5 D）；本守卫闭合 running 候选的防御
- *  不对称。marker 的 pid 是**宿主进程** pid（D3d 失实注释修正：写者 = 宿主的写权声明
- *  acquire——resurrect 回边 / running 接管 / spawn 锚点确立，非子进程 pi 自写），本
- *  进程持有的 running record 恒在内存（archive 才移出），可达本冷查分支的 running
- *  候选必然来自磁盘重建——探针命中即拒绝（ResurrectDeniedError，与 closed 候选守卫
- *  同异常类型，错误含 pid 与恢复指引）。 */
+ *  [U3 / §3.2.4 桥接] 磁盘重建单规则产出恒 idle，候选形态从「running 或可重连
+ *  closed」切换为三维：
+ *   - running：内存接管形态（重建面已不产出，保留判据防形态回退）；
+ *   - idle ∧ closedReason undefined：新侧可续聊形态（markSettled 轮收口 / 磁盘
+ *     重建单规则无 sidecar 兜底——旧终态遗留位不存在，天然可续）；
+ *   - idle ∧ closedReason ∈ 可重连集：旧 closed 数据兼容（allowReconnect 把门，
+ *     message 专属）。
+ *  其余 idle（旧终态遗留位 ∉ 可重连集）不进候选。守卫段与 Continuation.reviveOrThrow
+ *  的合并重写归 U4 准入判据单点。 */
+function isColdLookupCandidate(r: SubagentRecord, allowReconnect: boolean): boolean {
+  if (r.status === "running") return true;
+  if (r.status === "idle") {
+    return r.closedReason === undefined || (allowReconnect && isReconnectableClosed(r));
+  }
+  return false;
+}
+
+/** 冷查候选定位（coldLookupForAction 步骤 1）：idToFile 索引直查命中，未命中再
+ *  全目录 collectRecords 兜底（谓词见 isColdLookupCandidate）。
+ *
+ *  [T5③ / PS-7b] 候选异进程活实例守卫：冷查候选（跨重启 / 内存重建）此前不经任何
+ *  探针直接 resurrect + resume spawn——若其 .alive marker 仍指向活着的异进程实例
+ * （父进程重启后旧子进程尚存的窗口），resume 会 spawn 第二个 pi 子进程写同一
+ *  session JSONL（本代码最忌惮的双写者形态，v4 A-5/P7 事故模式）。closed 候选的
+ *  同款守卫已在 assertReconnectAllowed（v8.5 D）；本守卫闭合其余候选的防御不对称。
+ *  marker 的 pid 是**宿主进程** pid（D3d 失实注释修正：写者 = 宿主的写权声明
+ *  acquire——resurrect 回边 / 接管 / spawn 锚点确立，非子进程 pi 自写），本进程持有
+ *  的 running record 恒在内存（archive 才移出），可达本冷查分支的候选必然来自磁盘
+ *  重建——探针命中即拒绝（ResurrectDeniedError，与 closed 候选守卫同异常类型，
+ *  错误含 pid 与恢复指引）。 */
 function findColdLookupCandidate(
   deps: ColdLookupDeps,
   id: string,
@@ -63,11 +82,13 @@ function findColdLookupCandidate(
 ): SubagentRecord | undefined {
   const direct = deps.findLightById(id);
   const found =
-    (direct?.status === "running" ? direct : undefined) ??
+    (direct !== undefined && isColdLookupCandidate(direct, allowReconnect) ? direct : undefined) ??
     deps
       .collectRecords(COLD_LOOKUP_SCAN_LIMIT, "all", undefined)
-      .find((r) => r.id === id && (r.status === "running" || (allowReconnect && isReconnectableClosed(r))));
-  if (found?.status === "running" && found.sessionFile) {
+      .find((r) => r.id === id && isColdLookupCandidate(r, allowReconnect));
+  // 旧 closed 形态（idle ∧ closedReason 有值）的守卫在 assertReconnectAllowed
+  // （worktree + 探活双道）；其余候选在此探活。
+  if (found !== undefined && !(found.status === "idle" && found.closedReason !== undefined) && found.sessionFile) {
     const foreign = findForeignLiveInstance(found.sessionFile);
     if (foreign) {
       throw new ResurrectDeniedError(
