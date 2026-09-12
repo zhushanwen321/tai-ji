@@ -1,18 +1,28 @@
 # 架构文档目录规范
 
-本目录存放 xyz-agent 所有架构相关文档。入口是上一级的 [`../architecture.md`](../../architecture.md)，本 README 只说明**组织规则**。
+本目录存放 xyz-agent 所有架构相关文档。入口是上一级的 [`../architecture.md`](../architecture.md)，本 README 只说明**组织规则**。
 
 ## 目录结构
 
 ```
 docs/architecture/
-├── README.md            # 本文件（规范说明）
-├── design.md            # 当前生效的完整架构设计
-├── terminology.md       # 术语对齐计划（R1–R3 生效 · R4/R5 已被 v3 推翻标注过时）
-├── context.md           # 领域术语表（Session/Panel/Runtime 等）
-├── subsystems/          # 子系统架构（如 plugin/）
-├── research/            # 架构调研（非 UI 调研）
-└── history/             # 历史版本归档（被 supersede 的旧架构与重构期过程文档）
+├── README.md                            # 本文件（规范说明）
+├── design.md                            # 当前生效的完整架构设计
+├── context.md                           # 领域术语表（Session/Panel/Runtime 等）
+├── renderer-rebuild-architecture.md     # renderer 终态包拓扑 SSOT（§3 包拓扑 / §4 core 分层）
+├── runtime-three-layer-design.md        # runtime transport/services/infra 三层设计
+├── project-session-model.md             # Project–Session 关系模型 SSOT
+├── conversation-stream-block-rendering.md # 对话流分块渲染架构（live ≡ reload 等价）
+├── data-source-governance.md            # 数据源治理（跨进程写协议/锁/损坏隔离）
+├── data-source-registry.md              # 数据源登记表（SSOT 索引）
+├── integrity-hardening.md               # 架构完整性加固（进程生命周期自愈/安全不变量机制化）
+├── extension-gui-protocol.md            # Extension GUI 渲染协议规范（含 §13 决策日志 / §15 挂载现状）
+├── architecture-overview.drawio/.png    # 全局架构图源文件与导出
+├── subsystems/                          # 子系统架构（plugin/）
+├── research/                            # 架构调研（打包/路径安全/RPC 通道，非 UI）
+├── renderer-rebuild/                    # renderer-rebuild-v2 波次活规格（ws-client invariants，it.todo 未清零）
+├── refactor-2026-08/                    # extension 冻结候选设计（⛔ 解冻后实施依据，非归档）
+└── history/                             # 历史版本归档（被 supersede 的旧架构与重构期过程文档）
 ```
 
 > ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 设计稿** 在 `docs/page-design/archive/v3/`（L0-L4 递归骨架 spec + draft），设计系统权威文档在 `docs/page-design/` 根（原 design-tokens.md / design-system.md 已删除，残值并入 v6-master-spec.md，git 可追溯）。
