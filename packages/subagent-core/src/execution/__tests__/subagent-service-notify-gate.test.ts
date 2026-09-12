@@ -78,18 +78,35 @@ function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
   return { agentDir, service, store, pi };
 }
 
-describe("T4① notify gate closedReason whitelist", () => {
-  it("blocks cancelled, parent-new, parent-fork; allows real closures and undefined (CAS-winner path)", () => {
-    expect(notifyGateAllowsDelivery("cancelled")).toBe(false);
-    expect(notifyGateAllowsDelivery("parent-new")).toBe(false);
-    expect(notifyGateAllowsDelivery("parent-fork")).toBe(false);
-    expect(notifyGateAllowsDelivery("user-close")).toBe(true);
-    expect(notifyGateAllowsDelivery("gc")).toBe(true);
-    expect(notifyGateAllowsDelivery("parent-shutdown")).toBe(true);
-    expect(notifyGateAllowsDelivery(undefined)).toBe(true);
+describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮标记阻断 / 其余放行）", () => {
+  it("blocks archived (gate ①) and abandoned-round hits (gate ②); allows settled/running without marks", () => {
+    // ① intent=archived 静默（承接原 parent-new/parent-fork 阻断——编排性关闭即自动收起）。
+    expect(notifyGateAllowsDelivery({ intent: "archived" })).toBe(false);
+    // ② 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
+    expect(
+      notifyGateAllowsDelivery({ lastAbandonedRound: { epoch: 0, round: 2 }, round: 2 }),
+    ).toBe(false);
+    // ② 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
+    expect(
+      notifyGateAllowsDelivery(
+        { epoch: 1, lastAbandonedRound: { epoch: 0, round: 2 } },
+        { epoch: 0, round: 2 },
+      ),
+    ).toBe(false);
+    // ② 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
+    expect(
+      notifyGateAllowsDelivery({ epoch: 1, round: 1, lastAbandonedRound: { epoch: 0, round: 2 } }),
+    ).toBe(true);
+    // 正常轮（round 已推进越过旧标记）放行——重复帧由 notifyId 去重兜底。
+    expect(
+      notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
+    ).toBe(true);
+    // 无标记无归档（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    expect(notifyGateAllowsDelivery({})).toBe(true);
+    expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);
   });
 
-  it("kickOffChatRound 应答回注不注入 parent-new closed records（notify 门白名单）", async () => {
+  it("kickOffChatRound 应答回注不注入 archived records（[U5] 编排性关闭自动收起 → gate ①静默）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -103,14 +120,13 @@ describe("T4① notify gate closedReason whitelist", () => {
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注。
-    // [H4/U5 适配] 终态形态对齐生产：disposeAllRecords 走 markFinalized（status
-    // closed + endedAt + archive）——只设 closedReason 不设 status 会让 settle 路径
-    // tryTransition(running→closed) 抢成赢家覆写 user-close，门判据随之漂移；record
-    // 补 register 进 store 对齐「store 外 record 无编排性关闭可达」的生产形态。
+    // 模拟 disposeAllRecords 先行编排性关闭（自动收起）后，迟到的 kickOffChatRound
+    // 应答回注。[U5 适配] 新形态 = idle + intent=archived + 放弃轮标记（gate ①②
+    // 双重阻断）——record 补 register 进 store 对齐「store 外 record 无编排性关闭
+    // 可达」的生产形态。
     record.status = "idle";
-    record.endedAt = Date.now();
-    record.closedReason = "parent-new";
+    record.intent = "archived";
+    record.lastAbandonedRound = { epoch: 0, round: 0 };
     store.register(record);
     // [W3] 轮次编排入口 kickOffChatRound（私有，bracket 调用先例）——协议 run 发起后
     // 挂起，编排性关闭先行，再模拟引擎应答（迟到回注被门拦）。
@@ -135,7 +151,7 @@ describe("T4① notify gate closedReason whitelist", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("kickOffChatRound 应答回注对真实失败关闭（gc）仍通知", async () => {
+  it("kickOffChatRound 应答回注对真实失败收口（gc 遗留形态）仍通知", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -149,8 +165,8 @@ describe("T4① notify gate closedReason whitelist", () => {
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 同上 [H4/U5 适配]：失败终态化（closed/gc/endedAt）+ register 进 store 的完整
-    // 生产形态——迟到回注按 CAS 输家路径走，门判据读真实 gc 关闭原因。
+    // 同上：失败收口（idle + gc 遗留展示位——[U2 桥接] 旧终态形态读侧兼容）+
+    // register 进 store 的完整生产形态——迟到回注按 CAS 输家路径走，三元组无阻断。
     record.status = "idle";
     record.endedAt = Date.now();
     record.closedReason = "gc";

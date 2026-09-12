@@ -31,9 +31,9 @@ describe("M6: worktree cleanup not gated by patchOk", () => {
 
   it("worktree cleanup condition does not reference patchOk", () => {
     // 找到 worktree cleanup 调用前的条件判断
-    // [H3/R3] cleanup 通道字面随依赖注入改造为 deps.getWorktreeManager().cleanup
-    //（this.worktreeManager → this.deps.getWorktreeManager()，方法体其余逐字节保留）。
-    const cleanupMatch = src.match(/if\s*\([^)]*worktreeHandle[^)]*\)\s*\{[\s\S]*?getWorktreeManager\(\)\.cleanup/);
+    // [U5] cleanup 通道随归档编排改造为 archiveWorktreeResources（patch 前移 +
+    // cleanup 串行链——handle 提取后判空 return，manager.cleanup 无条件跟随）。
+    const cleanupMatch = src.match(/const handle = record\.worktreeHandle;[\s\S]*?manager\.cleanup\(handle\)/);
     expect(cleanupMatch).toBeTruthy();
     const condition = cleanupMatch![0];
     // 条件中不应包含 patchOk（解耦后 worktree cleanup 只依赖 worktreeHandle 存在）

@@ -626,16 +626,18 @@ export async function messageHandler(
 // ============================================================
 
 /**
- * close action handler：结束 subagent（对话模式为主，one-shot 同样支持）。
+ * close action handler：收起 subagent（[U5 / §3.2.5] close = 归档（archived）——
+ * 列表隐藏可寻回，不终态化；对话模式为主，one-shot 同样支持）。
  *
- * force 语义（设计决策 5/10）：
- *   force:false（默认）= 优雅关闭——
- *     无在跑轮（等待续聊 timer armed / 无活进程）→ 立即终态化（closed + user-close，回收保活进程）
- *     有活进程在跑轮 → 置 closeAfterRound，轮完成时终态化——返回 {closed:true} 即承诺轮结束后资源已释放
- *   force:true = 立即终止——running 立即 SIGTERM（cancelBackground 显式 kill）+ closed+cancelled
+ * force 语义（设计决策 5/10 × [U5] 意愿动作重定义）：
+ *   force:false（默认）= 优雅收口——
+ *     无在跑轮（timer armed / 无活进程）→ 立即归档收口（回收保活进程 + markArchived）
+ *     有活进程在跑轮 → 置 closeAfterRound 挂起，收口轮 settle → 轮次通知送达 → 归档
+ *     （顺序约束 [写死]）——返回 {closed:true} 即承诺轮结束后资源已释放
+ *   force:true = 立即终止——cancel 语义（abort 轮 + settle interrupted + 放弃轮
+ *     标记）+ 随即归档
  *
  * 行为分流委托 chatActions.closeSubagent（归属守卫由 chatActions.getRecordForAction 把关）。
- * 已终态 record 由 getRecordForAction throw not found（「已结束的不能再操作」语义）。
  */
 export async function closeHandler(
   service: SubagentService,

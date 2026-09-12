@@ -26,33 +26,86 @@ import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "..
 
 import { deriveOutcome } from "./execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
-import type { ClosedReason, ExecutionOutcome } from "./types.ts";
+import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome, Intent } from "./types.ts";
 
 // ============================================================
-// [T4① / PS-2] notify 门（H1 U2 自 subagent-service.ts 迁入——Continuation
-// 成功/失败分支双闸共用；原位置 re-export 保持既有 import 路径不变）
+// [T4① / PS-2 → U5 三元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
+// Continuation 成功/失败分支双闸共用；原位置 re-export 保持既有 import 路径不变）
 // ============================================================
-
-/** notify 门拦截集：disposeAllRecords 因这两类原因关闭的 record，其迟到的
- *  轮次完成回注不得注入新 session——/new、/fork 的决策（[v4 A-6]）
- *  是「被关 record 的告知改由 list 的 closedReason 表达」，不主动通知；旧门只排除
- *  cancelled，parent-new/parent-fork 放行 → 新对话被「Subagent X failed: closed due to
- *  parent-new」的僵尸回执 triggerTurn 唤醒，已废弃会话的通知注入新上下文。 */
-const NOTIFY_BLOCKED_CLOSED_REASONS: ReadonlySet<ClosedReason> = new Set(["parent-new", "parent-fork"]);
 
 /**
- * [T4① / PS-2] 轮次完成回注的 notify 门（按 closedReason 白名单放行）。
- *
- * cancelled（cancelBackground 自己 notify）与 parent-new/parent-fork（编排性关闭，
- * 告知由 list 的 closedReason 表达）不放行；其余（undefined = 本路径抢到 CAS 尚未
- * 终态化的迟到回调、user-close/gc 等真实终态）照旧回注。导出供测试与调用点复用。
- * [H1 U2] 消费面扩为三处：Continuation 成功分支（route 前）、失败分支（独立载荷
- * 发出前，B#19 投递门照迁移）、泛化派发主干尾部（one-shot 回注，现状不变）。
+ * notify 门的 record 状态入参（永久会话模型 §3.2.7 通知 gate 三元组的判据源，
+ * 全部从 ExecutionRecord 同名字段直传——调用点 `notifyGateAllowsDelivery(record)`）。
  */
-export function notifyGateAllowsDelivery(closedReason: ClosedReason | undefined): boolean {
-  if (closedReason === undefined) return true;
-  if (closedReason === "cancelled") return false;
-  return !NOTIFY_BLOCKED_CLOSED_REASONS.has(closedReason);
+export interface NotifyGateRecordState {
+  /** 意愿位（gate ①）：archived = 静默（归档后一切回注不打扰）。 */
+  readonly intent?: Intent;
+  /** record 当前世代（两步判定的比较基准——非标记槽 epoch，§3.2.7 显式两步）。 */
+  readonly epoch?: Epoch;
+  /** 放弃轮标记（gate ②判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
+  readonly lastAbandonedRound?: AbandonedRoundMark | null;
+  /** 当前轮次（gate ②第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
+   *  越过旧标记；被中断轮不推进，迟到回注轮 ≤ 标记轮被丢弃）。 */
+  readonly round?: number;
+}
+
+/**
+ * notify 门的回注声明身份（迟到帧自带；缺省 = 读 record 自身——同世代、当前轮）。
+ * 现有消费点的回注均从 record 投影（无独立世代/轮载体），缺省路径恒命中「同世代」，
+ * 拦截由第二步标记判定承担；跨世代重复帧的最终防线 = notifyId（id:epoch:round）
+ * 账本去重（reopen 前最后轮必已同步入账，晚到回注必为重复帧——设计 §3.2.7 论证）。
+ */
+export interface NotifyGateInbound {
+  /** 回注声明世代（缺省 = record 当前 epoch，第一步恒同世代）。 */
+  readonly epoch?: Epoch;
+  /** 回注声明轮（缺省 = record.round ?? 0）。 */
+  readonly round?: number;
+}
+
+/**
+ * [U5 / §3.2.7 通知 gate 三元组] 轮次完成回注的投递门。
+ *
+ * 三个阻断分支逐一承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
+ * 防双发），判据源从「形态枚举（closedReason）」切换为「意愿 + 放弃标记」两维：
+ *
+ *   ① intent=archived → 静默（承接原 parent-new/parent-fork 阻断——编排性关闭在新
+ *      模型即自动收起；用户 close 后迟到回注不再打扰）；
+ *   ② 放弃轮标记命中 → 阻断（承接原 cancelled 阻断防双发）。**显式两步**（比较基准
+ *      = record 当前 epoch，非标记槽 epoch——reopen 后标记残留旧 epoch，按标记槽比较
+ *      会把新世代全部正常轮通知吞掉）：
+ *        第一步：回注 epoch ≠ record 当前 epoch → 丢弃；
+ *        第二步：同 epoch 时标记非空、标记槽世代 = 当前世代且回注轮 ≤ 标记轮 → 丢弃。
+ *   ③ 收口轮豁免：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常送达——
+ *      构造性豁免：归档（intent 翻转）编排挂在轮次通知送达之后（§3.2.5 顺序约束
+ *      [写死]），settle 时点 intent 尚未 archived、收口轮非放弃轮（close 不置标记），
+ *      ①②均不命中——豁免无需独立判据，静默只作用于收口轮之后新产生的回注。
+ *
+ * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
+ * 后 round 已推进（markRoundIdle +1），回注轮 = record.round > 标记轮 → 放行，重复帧由
+ * notifyId 去重兜底；只有「被显式放弃的轮」才进标记（stopReason 单值会被新轮覆盖，
+ * 无法承载 per-round 终局）。
+ *
+ * 消费面：Continuation 成功/失败分支双闸 + drain 丢弃通知 + 泛化派发主干尾部
+ *（one-shot 回注）+ watchdog 失败通知（run-orchestration）。
+ */
+export function notifyGateAllowsDelivery(
+  state: NotifyGateRecordState,
+  inbound: NotifyGateInbound = {},
+): boolean {
+  // ① 归档静默。
+  if (state.intent === "archived") return false;
+  const currentEpoch = state.epoch ?? 0;
+  // ② 第一步：跨世代回注丢弃（比较基准 = record 当前 epoch）。
+  const inboundEpoch = inbound.epoch ?? currentEpoch;
+  if (inboundEpoch !== currentEpoch) return false;
+  // ② 第二步：标记槽在当前世代且回注轮 ≤ 标记轮 → 丢弃（防双发）。标记槽世代 ≠
+  // 当前世代（reopen 残留）→ 标记自然失效，跨世代重复帧由 notifyId 去重承接。
+  const mark = state.lastAbandonedRound;
+  if (mark != null && mark.epoch === currentEpoch) {
+    const inboundRound = inbound.round ?? state.round ?? 0;
+    if (inboundRound <= mark.round) return false;
+  }
+  return true;
 }
 
 /** U4：delivery warn 出口注入用——facade 同 component 同引用，与 index.ts 的
@@ -101,10 +154,17 @@ export interface BgNotifyRecord {
    *  "Full transcript: <path>" 指针行，父 LLM 可按需读全文；one-shot 不透传，
    *  通知输出逐字节不变。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
-  /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`）。账本条目 /
-   *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
-   *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
+  /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
+   *  epoch>0 时扩为 `id:epoch:round`——reopen 后 round 归零不与历史轮撞键，epoch=0
+   *  恒旧格式，磁盘账本零迁移）。账本条目 / 回执匹配 / 幂等去重共用——details 携带
+   *  （不进文案，G4 字节锁定不受影响），重复注入条目凭此可识别为同一条（G2
+   *  at-least-once 幂等键）。 */
   notifyId?: string;
+  /**
+   * [U5 / §3.2.3] 通知所属世代（reopen 防撞维度）：notifyId 构造消费——epoch>0 的
+   *  轮次通知 key 带 epoch 段。缺省（undefined）= epoch 0 旧格式。
+   */
+  epoch?: number;
   /**
    * [drain-drop 修复] notifyId 构造的显式覆盖（notify() 优先消费；缺省 = 既有
    *  `id` / `id:round` 语义零变化）。供「同轮先导通知与派生通知必须区分」的场景使用：
@@ -543,9 +603,16 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
       // dedupe key 与账本身份键同源，details 携带供回执匹配）。
       // notifyId 构造：dedupKey 显式覆盖优先（drain 丢弃通知等派生通知的独立去重
-      // 身份），缺省维持既有 `id:round` / `id` 语义（既有通知面 key 零变化）。
-      const notifyId =
-        record.dedupKey ?? (record.round != null ? `${record.id}:${record.round}` : record.id);
+      // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 扩为
+      // `id:epoch:round`（reopen 后 round 归零不与历史轮撞键，同 key 撞车吞通知是
+      // 本代码库已修复过的事故类——epoch 是同族防御的构造性根治）。
+      const roundKey =
+        record.round != null
+          ? (record.epoch !== undefined && record.epoch > 0
+            ? `${record.id}:${record.epoch}:${record.round}`
+            : `${record.id}:${record.round}`)
+          : record.id;
+      const notifyId = record.dedupKey ?? roundKey;
       const payload: BgNotifyRecord =
         record.status === "closed"
           ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error), notifyId }

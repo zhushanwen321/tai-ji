@@ -277,7 +277,11 @@ function parseUnregisterEvent(data: unknown): ParsedUnregister | null {
 	};
 }
 
-/** 将事件 reason 映射为 pending:unregister entry 的 status 字段（落盘契约组成部分） */
+/** 将事件 reason 映射为 pending:unregister entry 的 status 字段（落盘契约组成部分）。
+ *  [U5 / 永久会话模型 §3.2.5 通知词表对齐] subagent-core 新 stopReason 展示值经注销
+ *  reason 通道到达（interrupted/interrupted-by-restart/interrupted-by-parent → aborted、
+ *  reopened → completed）——防新词落 default 被记为 completed 的误标（cancelled 同族
+ *  事故先例：新枚举值漏映射静默落兜底）。 */
 function mapReasonToStatus(reason: string): PendingStatus {
 	switch (reason) {
 		case "completed": return "completed";
@@ -287,6 +291,12 @@ function mapReasonToStatus(reason: string): PendingStatus {
 		case "time_limited": return "time_limited";
 		case "budget_limited": return "failed";
 		case "aborted": return "aborted";
+		case "interrupted":
+		case "interrupted-by-restart":
+		case "interrupted-by-parent":
+			return "aborted";
+		case "reopened":
+			return "completed";
 		default: return "completed";
 	}
 }

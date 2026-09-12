@@ -322,11 +322,13 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     service.initSession({ pi: makePi(), sessionId: "test-session" });
 
     const handle = await service.execute(baseOpts(agentDir));
-    // 不可用 stub：轮次派发在首次 engine.run 拒绝（engine_not_found）→ chatMode=false
-    // 一次性 run 终态销毁（无孤儿 record——拒绝点唯一化在 run）。
+    // 不可用 stub：轮次派发在首次 engine.run 拒绝（engine_not_found）→ [U5] 失败轮
+    // settle（markRoundIdle 保持 running-resumable——MF-6 回退可恢复，不终态化销毁；
+    // 拒绝点唯一化在 run）。
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
-      expect(rec?.status).toBe("idle");
+      expect(rec?.status).toBe("running");
+      expect(rec?.resumable).toBe(true);
     });
   });
 

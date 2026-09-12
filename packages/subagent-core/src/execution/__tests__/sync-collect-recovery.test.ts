@@ -1115,6 +1115,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(h1Last).toBeDefined();
     expect(h1Last!.batchFinalized).toBe(true);
     expect(h1Last!.collectMode).toBe("sync");
-    expect(h1Last!.status).toBe("idle");
+    // [U5] 失败轮 settle（markRoundIdle 保持 running-resumable）——entry status 投影
+    // 随之 running（不终态化）
+    expect(h1Last!.status).toBe("running");
   });
 });

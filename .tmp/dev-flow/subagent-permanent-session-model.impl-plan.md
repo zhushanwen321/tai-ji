@@ -88,17 +88,27 @@ graph TD
 
 | 偏差 | 来源 | 处置 |
 |------|------|------|
+| U5-D1 workflow D7 例外族扩大保留（失败/取消轮 settle 会触发 hasRunning 绑架/idle-gc 恒挂/误升级/goal defer 四面连带），finalizeFailed/finalizeAborted/settleOneShotOutcome 按 origin==='workflow' 分流终态化 | U5 | 依 §1.4 out-of-scope「维持现状」；已发生证据 = D7 四面连带 |
+| U5-D2 round-supervisor 放弃路径保留终态化（service-binding.ts 领地外）；isBootReadoptable 谓词不删（单一权威 + 5 处测试引用），消费点经 bootPartition status 守卫构造性失配 | U5 | U3 后孤儿恢复恒 idle，boot 重认领空转零副作用 |
+| U5-D3 续轮窗内 worktree 重建形态①不推进世代（markReopened CAS 仅收 idle），降级走 fresh session + 摘要注入 | U5 | 与 U4-D2「续轮降级无 epoch/round 重置」同族 |
+| U5-D4 gate ③收口轮豁免为构造性豁免（顺序约束保证，gate 函数无 closeAfterRound 参数），order 断言锁定 | U5 | 设计意图等价实现 |
+| U5-D5 notifyId epoch 化提前实施（设计归 §3.2.3/U8 行未列）：gate ②跨 epoch 去重论证的构造性依赖；epoch=0 恒旧格式零迁移 | U5 | 提前量有依赖锚 |
+| U5-D6 close「无在跑轮」判据 = !hasActiveContinuationRound && (isIdle\|\|isResumable)：isResumable 单判据在 fake/协议轮 spawn 窗下会误判（测试实证） | U5 | Continuation.activeRunId 为在飞权威 |
+| U5-D7 close 优雅收口的排队消息 = 置挂起标志 + clearQueue（不打断在飞轮）；新增 Continuation.clearQueue 与 abortAndClearQueue 区分 | U5 | 设计表格未明说，取「收起=后续不跑」语义 |
+| U5-D8 worktree 重建 repo 定位依赖注册表 branch 反查，归档 cleanup 已移除条目 → 反查落空归形态①降级 reopen | U5 | 重建依据消亡的自然处置 |
+| U5-D9 worktree-manager 收纳 reconstruct 后超 max-lines(500)，对账族拆出 worktree-reconcile.ts（RECONCILE 常量 re-export 保持测试 import 路径） | U5 | MANDATORY 行限修复规则 |
+| U5-D10 manifest archived 下行映射（archived→closed）与 intent 持久化归 U7/U8；本次 archived record 派生投影 legacy running | U5 | 领地边界，U8 承接 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u-foundation | pending | 0 | - |
-| U1 | pending | 0 | - |
-| U2 | pending | 0 | - |
-| U3 | pending | 0 | - |
-| U4 | pending | 0 | - |
-| U5 | pending | 0 | - |
+| u-foundation | committed | 1 | tsc 零错 + vitest 3000 passed + write-surface 绿 + flake 修复；deviations 7 条（V2 转正推迟 U2 / barrel 推迟 U8 等） |
+| U1 | wip-checkpoint | 1 | 第 1 轮速率限制中断（1302）；半成品已 WIP commit 8ab4461eb 保护（pi-rpc 五模块 + runtime 侧接线）；未完成：pi-subagent-cli 归并 + 双侧验收测试；等 U3 完成后串行重派（附证据包续作） |
+| U2 | committed | 1 | 部分在制文件被外部 docs 批次 commit 56898e3cfa 捎带（边界污染已记录）；增量补全 commit 0487bbab2：两态转正 + 四原语填肉 + 桥接不变量 12 文件 + extensions 测试迁移；tsc 0 / vitest 3024 passed / write-surface 绿 / extensions 三连绿；deviations 8 条（桥接判据 SSOT、tryEnterRunning 新增、closedReason 保留等） |
+| U3 | committed | 1 | commit 42e3498b4：.state 读侧新格式 + 旧值映射 + 重建单规则四输入 + 孤儿恢复直断删除 + entry stopReason 投影 + cold-lookup/Continuation 桥接（U4 重写锚点已注）；tsc 0 / vitest 3027 passed / runtime 5945 passed / 守卫绿；deviations 8 条（E1 批投影 running 化归 U8、boot 重认领源消亡归 U5、worktree/GC 消费方核实免改） |
+| U4 | committed | 1 | commit 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
+| U5 | committed | 1 | 四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
 | U6 | pending | 0 | - |
 | U7 | pending | 0 | - |
 | U8 | pending | 0 | - |
@@ -107,10 +117,12 @@ graph TD
 ## 7 残留风险与变更历史
 
 **残留风险**：
-1. merge 决策遗留：lifecycle-predicates.ts:15-16 / lifecycle-manager.ts:14-18 / notify-host.ts:135 / types.ts:52 有「arm 链失活」过时注释——U2/U5 改到时顺带清扫（登记勿忘）。
-2. u7a 推送链 3 处活路径未补推送（closeChatIdle / cancelBackground / watchdog 镜像置死）——U5 重写意愿动作时随新语义统一接线。
+1. ~~merge 决策遗留：「arm 链失活」过时注释~~ 已处理（U5 清扫 lifecycle-predicates/lifecycle-manager/notify-host/types 四处）。
+2. ~~u7a 推送链 3 处活路径未补推送~~ 已处理（U5 随新语义统一接线完毕）。
 3. zcode -32031 上游缺陷：U6 选型已绕开（历史注入），若上游修复可升级原地 resume（设计 K6）。
 4. 探针产物 .tmp/probe/*.mjs 不进 git（gitignore），U6 集成测试需自含协议驱动代码。
 
 **变更历史**：
 - 2026-09-13 计划创建（基线 c2c111170：merge dev-0.9.19 + u7a re-arm 之后）。
+- 2026-09-13 u-foundation committed；U1 速率限制中断半程，WIP checkpoint 8ab4461eb；U2 committed 0487bbab2（部分 src 被外部 docs 批次 56898e3cfa 捎带——并行会话活跃于本 worktree，后续单元验收后立即 commit 缩短在制暴露窗）。
+- 2026-09-13 U3 committed 42e3498b4；U4 committed；U5 committed（27 文件：cancel/close/编排性关闭/寻回四动作 + gate 三元组 + worktree 重建；vitest 3066 / extensions 三连绿；10 偏差入 §5）。

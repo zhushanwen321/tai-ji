@@ -120,7 +120,10 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
    *  v4 B-1：守卫放行 closed（终态，含 cancelled）、isIdle（对话模式轮次完成，notify 主 agent G1）
    *  或 isResumable（running + 无活进程——SP-5 one-shot 成功完成 / MF-6 失败轮回退）。
    *  正在执行（running + 活进程 + 非 timer-armed）返回 undefined（调用方 notifyComplete 跳过）。
-   *  SP-1: closed 统一终态，closedReason 由 BgNotifyRecord 携带。 */
+   *  SP-1: closed 统一终态，closedReason 由 BgNotifyRecord 携带。
+   *  [U5] archived 放行：归档编排的 notifyClosed「已收起」提示载体——归档后 record
+   *  idle 且无 closedReason（新 settle 语义），旧三判据全 false 会吞掉提示；archived
+   *  → closed 载荷（completed 文案族）。 */
   const toNotifyRecord = (record: ExecutionRecord): BgNotifyRecord | undefined => {
     // [H2 W2 / D6] workflow origin 回注全静默（单漏斗 origin gate）：完成/关闭/失败
     // 回注经此全部拒绝——workflow agent 结果由脚本返回值承载（无 message 对端），
@@ -131,23 +134,23 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     if (record.origin === "workflow") return undefined;
     const snap = snapshot(record);
     // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-    // 迁移不变量；通知 gate 三元组重写归 U5/U8）。
+    // 迁移不变量）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
+    // 不携带 closedReason——gate 三元组（notifier.notifyGateAllowsDelivery）在消费点
+    // 承担归档静默/放弃轮标记阻断，本映射只管载荷形态。
     const legacyClosed = record.status === "idle" && record.closedReason !== undefined;
-    // [N1] isResumable 放行：SP-5 one-shot 成功完成后 finalizeRoundToIdle 把 record 回退
-    // running-resumable——进程已死且永不 arm idle timer（armIdleTimer 的 arm 链随 H1 U6
-    // 长驻退役消亡，全仓无生产调用，见 lifecycle-predicates.ts 头注释），旧守卫
-    // （closed / isIdle only）对其恒拒绝 → 完成通知静默丢失，
-    // 而 one-shot 失败走 finalizeRecord 保持 closed 反而通知——与 tool 契约「runs once,
-    // notifies on completion」完全倒置。isResumable = running + 无活进程，恰为该完成态；
+    const archived = record.intent === "archived";
+    // [N1] isResumable 放行：SP-5 one-shot 成功完成后 markRoundIdle 把 record 保持
+    // running-resumable——失败轮 settle 同形态（[U5] 万物可续），失败通知可达。
     // 在跑轮的 record 有活进程，不会被误放行。
-    if (!legacyClosed && !isIdle(record) && !isResumable(record)) return undefined;
-    // legacyClosed → BgNotifyRecord.closed（cancelled 区分靠 closedReason）；chatMode 的 isIdle/
-    // isResumable（轮次完成或 MF-6 失败轮回退，对话可续）→ running（轮次完成）。
-    // isResumable 且非 chatMode（SP-5 one-shot 成功完成）→ closed：对主 agent 的语义是
-    // completed（非对话轮次），且只有 closed 分支文案携带 worktree patchFile 的 git apply
-    // 提示——one-shot worktree 模式的改动回收依赖该提示（running 分支文案不含 patchFile）。
+    if (!legacyClosed && !archived && !isIdle(record) && !isResumable(record)) return undefined;
+    // legacyClosed/archived → BgNotifyRecord.closed（终态/已收起文案族）；chatMode 的
+    // isIdle/isResumable（轮次完成或失败轮回退，对话可续）→ running（轮次完成）。
+    // 非 chatMode 且非归档（SP-5 one-shot 成功完成 / 失败轮 settle）→ closed：对主
+    // agent 的语义是 completed/failed（非对话轮次），且只有 closed 分支文案携带
+    // worktree patchFile 的 git apply 提示——one-shot worktree 模式的改动回收依赖
+    // 该提示（running 分支文案不含 patchFile）。
     const notifyStatus: BgNotifyRecord["status"] =
-      legacyClosed || !record.chatMode ? "closed" : "running";
+      legacyClosed || archived || !record.chatMode ? "closed" : "running";
     return {
       id: snap.id,
       status: notifyStatus,
@@ -160,6 +163,9 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       patchFile: record.patchFile,
       // round 透传给 notifier 的 dedup key（对话模式按轮次去重，G1 决策 9）。
       round: record.round,
+      // [U5 / §3.2.3] 世代透传（notifyId 的 epoch 防撞段——reopen 后 round 归零不与
+      // 历史轮撞键）。
+      epoch: record.epoch,
       // SP-1: closedReason 透传给 notifier（L2 原因，供通知文案按需展示）。
       closedReason: record.closedReason,
       // [wave2] chatMode 条件透传 sessionFile：通知末尾追加 Full transcript 指针行

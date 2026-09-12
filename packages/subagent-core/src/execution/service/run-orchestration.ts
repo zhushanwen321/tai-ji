@@ -52,7 +52,6 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
-import { bestEffort } from "../best-effort.ts";
 import type { CollectCoordinator } from "../collect-coordinator.ts";
 import type { ConcurrencyPool } from "../concurrency-pool.ts";
 import {
@@ -148,9 +147,9 @@ function delay(ms: number): Promise<void> {
  * - 会话基线 getter（getExecNesting/getSessionRootId/getStreamSink/getUiObservability）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
- *   buildEarlyFailedHandle/finalizeRecord/finalizeFailed/finalizeAborted/closeChatIdle）：
- *   身份解析/record 创建/终态迁移的跨聚合协作（壳装配指 RecordAccess/
- *   RecordLifecycle 实例方法，聚合间零私有互调——G2）。
+ *   buildEarlyFailedHandle/finalizeRecord/finalizeFailed/finalizeAborted/
+ *   idleTimeoutRecycle/archiveRecord）：身份解析/record 创建/意愿动作收口的跨聚合协作
+ *  （壳装配指 RecordAccess/RecordLifecycle 实例方法，聚合间零私有互调——G2）。
  */
 export interface RunOrchestrationDeps {
   /** [D4 下沉] assertReady 断言（本体在 SessionBaselines，壳转发）。 */
@@ -215,11 +214,14 @@ export interface RunOrchestrationDeps {
   ) => Promise<void>;
   /** [R3 RecordLifecycle 显式接口] run() 创建期异常的收尾。 */
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
-  /** [R3 RecordLifecycle 显式接口] 排队中被 abort 的 cancelled 终态收尾。 */
+  /** [R3 RecordLifecycle 显式接口] 排队中被 abort 的收尾（[U5] cancel 语义 settle）。 */
   readonly finalizeAborted: (record: ExecutionRecord) => Promise<AgentResult>;
-  /** [R3 RecordLifecycle 显式接口] 无在跑轮 record 的手动终态化（Continuation
-   *  closeNow 回调面）。 */
-  readonly closeChatIdle: (record: ExecutionRecord) => Promise<void>;
+  /** [R3 RecordLifecycle 显式接口 / U5] idle 超时进程回收（Continuation closeNow
+   *  回调面——归档是用户意愿位，超时回收不动 intent/占用位）。 */
+  readonly idleTimeoutRecycle: (record: ExecutionRecord) => Promise<void>;
+  /** [R3 RecordLifecycle 显式接口 / U5] 归档资源编排（closeAfterRound 挂起消费点——
+   *  source 供留痕，调用方保证在收口轮通知送达之后）。 */
+  readonly archiveRecord: (record: ExecutionRecord, source: string) => Promise<void>;
 }
 
 /**
@@ -379,9 +381,11 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（cancel/
-        // dispose 抢先经 tryTransition 桥接写入；两态迁移不变量）。
-        if (record.status === "idle" && record.closedReason !== undefined) {
+        // [U5 判据] cancel/dispose 抢先 = record 已离 running（markSettled settle 为
+        // idle——新语义不写 closedReason，status 单判据即收口判读；两态状态机下
+        // running 才有在飞任务）。赋值后同同步段检查：已收口则主动 cleanup（幂等，
+        // 抢先路径的收起回收覆盖）+ throw cancelled（不进轮次——避免子进程白跑）。
+        if (record.status !== "running") {
           cancelledDuringCreate = true;
         }
       } catch (err) {
@@ -595,14 +599,13 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可 CAS 把 record
-        // 转成已收口态（桥接判据：idle ∧ closedReason 有值——cancelBackground 当时读到的
-        // worktreeHandle 可能仍是 undefined（cleanup 被跳过）。赋值后同同步段检查终态：
-        // 已收口则主动 cleanup（幂等，抢先的 fire-and-forget 清理无害）+ early-failed 返回，
-        // 不进轮次 kick-off（避免子进程白跑）。
-        // 实现约束：赋值 → 终态检查 → kick-off 必须在同一同步段，中间禁止插入 await。
-        // [U2 桥接判据] 旧「closed 终态」读形态（两态迁移不变量）。
-        if (record.status === "idle" && record.closedReason !== undefined) {
+        // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可把 record
+        // settle 成已收口态（[U5 判据] status 离 running 即已收口——cancel/dispose
+        // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收起回收被跳过）。
+        // 赋值后同同步段检查：已收口则主动 cleanup（幂等，抢先的 fire-and-forget
+        // 清理无害）+ early-failed 返回，不进轮次 kick-off（避免子进程白跑）。
+        // 实现约束：赋值 → 收口检查 → kick-off 必须在同一同步段，中间禁止插入 await。
+        if (record.status !== "running") {
           await this.deps.getWorktreeManager().cleanup(worktreeHandle);
           return this.deps.buildEarlyFailedHandle(record);
         }
@@ -948,50 +951,55 @@ export class RunOrchestration {
   }
 
   /**
-   * one-shot（非 chatMode）终态收口（原 settleOneShotOutcome 分支）：成功轮消费
-   * closeAfterRound 挂起标志；失败/取消一次性销毁。CAS 抢锁失败（cancel/dispose 抢先
-   * 终态化）静默跳过。runAndFinalize（workflow 域）与 kickOffChatRound 非 chatMode
-   * 分支共用。
+   * one-shot（非 chatMode）轮终收口（[U5 / §3.2.2 事件表 settle 行] 终态化退役）：
+   * 成功/失败轮 settle（markRoundIdle——保持 running-resumable 等续聊/升级，万物可续
+   * G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。CAS 前置检查失败
+   *（cancel/dispose 抢先 settle）静默跳过。runAndFinalize（workflow 域）与
+   * kickOffChatRound 非 chatMode 分支共用。closeAfterRound 挂起标志不清——归档消费
+   * 在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 → 归档，
+   * 见 kickOffChatRound 尾部 consumePendingArchive）。
    */
   async settleOneShotOutcome(
     record: ExecutionRecord,
     result: AgentResult,
     aborted: boolean,
   ): Promise<void> {
-    // [H2 W2 / D7] workflow origin 成功收口 = 立即终态化（closed/"gc"）——G1 显式例外：
-    // SP-5 running-resumable 为「父 agent 可 message 续聊」设计，workflow agent 结果
-    // 由脚本返回值承载、无 message 对端，保持 running-idle 会绑架 hasRunning / 恒挂
-    // 30 天 idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。
-    // 分支置于现有 CAS 之前：防其先把 memory closedReason 写成 "user-close" 与
-    // finalizeRecord 的 "gc" 参数分叉。条件含 !aborted：aborted+success 竞态边缘
-    // 照旧落现有 cancelled 分支，不漂移为 gc。自带 tryTransition 抢锁（承接现状
-    // 「cancel/dispose 抢先 → 静默跳过」守卫语义）；失败/取消分支照旧终态化
-    // （下方既有四分支零改动）。
-    if (record.origin === "workflow" && !aborted && result.success) {
-      if (tryTransition(record, "closed", "gc")) {
-        await this.deps.finalizeRecord(record, result, "closed", "gc");
+    // [H2 W2 / D7 例外族维持现状（§1.4 out-of-scope）] workflow origin 成功 = 立即
+    // 终态化（closed/"gc"）；aborted/失败 = closed+cancelled/gc——workflow agent 结果
+    // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
+    // idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。自带 CAS
+    // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
+    if (record.origin === "workflow") {
+      if (!aborted && result.success) {
+        if (tryTransition(record, "closed", "gc")) {
+          await this.deps.finalizeRecord(record, result, "closed", "gc");
+        }
+      } else {
+        if (tryTransition(record, "closed", aborted ? "cancelled" : "gc")) {
+          await this.deps.finalizeRecord(record, result, "closed", aborted ? "cancelled" : "gc");
+        }
       }
       return;
     }
-    if (!tryTransition(record, "closed", aborted ? "cancelled" : result.success ? "user-close" : "gc")) return;
-    if (!aborted && result.success && record.closeAfterRound === true) {
-      // [M5] busy 时 close(force:false) 置的标志在本轮完成时消费终态化。
-      await this.consumeCloseAfterRound(record, result, "user-close");
-    } else if (!aborted && result.success) {
-      // [SP-5] one-shot 成功完成 → 保持 running（旧 idle），等待 message 触发 upgrade。
-      // [H1 U2 / D7] 共享调用点恒传 success（行为零变化 G3——成功空文本回退
-      // markRoundIdle 的 one-shot 兜底 前值 ?? "(empty)"）。
-      // [U2b] 轮终簿记①-⑨归口 store.markRoundIdle（SP-5 成功分支与 chat 轮末共享轮终
-      // 语义；`.alive` 跨轮保留 [D3a/B5]——release 出口 = 终态原语/idle-GC 归档）。
-      // [W4 发射点② / U5 收口项②] pending 注销已随 store 簿记⑧统一发射（SubagentService
-      // 构造点 setPendingUnregister 接线），本分支不再双轨重复发射。
+    // CAS 前置 + 簿记之间无 await（单线程同步段原子——cancel/dispose 抢先判定可靠）。
+    if (record.status !== "running") return;
+    if (aborted) {
+      // [U5] cancel 语义（abort 到达本收口 = cancel/dispose 未及处理的竞态补位）：
+      // settle interrupted + 放弃轮标记（与 cancelBackground 同构——经 store.markSettled
+      // CAS，竞态抢先时静默跳过）。closeAfterRound 挂起作废（用户已 cancel）。
+      record.closeAfterRound = undefined;
+      record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
+      this.deps.getStore().markSettled(record, "interrupted");
+      return;
+    }
+    if (result.success) {
+      // [SP-5] one-shot 成功完成 → 保持 running-resumable，等待 message 触发 upgrade。
+      // [U2b] 轮终簿记①-⑨归口 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
+      // pending 注销已随 store 簿记⑧统一发射）。
       this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
-    } else if (!aborted && record.closeAfterRound === true) {
-      // [M5] 优雅关闭挂起的失败轮：轮已完成即兑现 close 意图终态化（含本轮 result）。
-      await this.consumeCloseAfterRound(record, result, "gc");
     } else {
-      // 非 chatMode 失败/取消 或其他终态：一次性销毁（archive + worktree cleanup）。
-      await this.deps.finalizeRecord(record, result, "closed", aborted ? "cancelled" : "gc");
+      // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
+      this.deps.getStore().markRoundIdle(record.id, { kind: "failed", reason: result.error ?? "round failed" });
     }
   }
 
@@ -1016,15 +1024,16 @@ export class RunOrchestration {
     };
   }
 
-  /** [U04 提取·终态收口] closeAfterRound 挂起标志消费（原三处分支的公共收尾序列）：
-   *  清标志 + 终态化 closed。reason：成功轮恒 user-close；失败/取消轮用派生值。 */
-  async consumeCloseAfterRound(
-    record: ExecutionRecord,
-    result: AgentResult,
-    reason: ClosedReason,
-  ): Promise<void> {
+  /**
+   * [U5 / §3.2.5 close 顺序约束] closeAfterRound 挂起标志的归档消费（原「清标志 +
+   * 终态化」退役——终态化改归档）。**调用时序 [写死]**：本方法必须在收口轮的轮次
+   * 通知送达之后执行（Continuation settle 分支 / kickOffChatRound 主干尾部——
+   * route 已过 gate ③收口轮豁免并写账；随后 intent 翻转，归档静默 gate ①只作用于
+   * 收口轮之后新产生的回注）。
+   */
+  private async consumePendingArchive(record: ExecutionRecord, source: string): Promise<void> {
     record.closeAfterRound = undefined;
-    await this.deps.finalizeRecord(record, result, "closed", reason);
+    await this.deps.archiveRecord(record, source);
   }
 
   /**
@@ -1177,14 +1186,18 @@ export class RunOrchestration {
           const result = this.outcomeToAgentResult(record, outcome);
           await this.settleOneShotOutcome(record, result, signal?.aborted === true);
         }
-        // background 回注：仅当本路径抢到 CAS 才 notify。cancel 抢先时 closedReason=
-        // 'cancelled'（cancelBackground 自己 notify）；[T4①/PS-2] parent-new/parent-fork
-        // 是 disposeAllRecords 的编排性关闭（record 已关、告知由 list 的 closedReason
-        // 表达）——迟到的完成回注不注入（可能已切换的）新 session。
+        // background 回注：仅当本路径抢到 CAS 才 notify。gate 三元组（[U5 / §3.2.7]）：
+        // intent=archived 静默（编排性关闭自动收起）/ 放弃轮标记命中丢弃（cancel 中断
+        // 轮防双发）/ 其余放行。
         // [H1 U2] Continuation 轮跳过——通知归属 Continuation 双闸（成功 gate→route /
         // 失败独立载荷过门），本段回注即双 route。
-        if (continuation === undefined && notifyGateAllowsDelivery(record.closedReason)) {
+        if (continuation === undefined && notifyGateAllowsDelivery(record)) {
           this.deps.getCollectCoordinator().route(record);
+          // [U5 / §3.2.5 close 顺序约束] 收口轮 settle（settleOneShotOutcome）→ 通知
+          // 送达（本 route）→ 归档——closeAfterRound 挂起标志的 one-shot 消费点。
+          if (record.closeAfterRound === true) {
+            await this.consumePendingArchive(record, "closeAfterRound (one-shot)");
+          }
         }
       } catch (err) {
         // 轮次 run 失败（prepare 期 reject / 引擎进程死亡 / cancel 后未收敛合成终态）：
@@ -1238,44 +1251,44 @@ export class RunOrchestration {
     );
     killRecordChildWithEscalation(record.id, "settled watchdog (one-shot)");
     // abort 轮 signal（ctx.signal 接 record controller——引擎侧杀链驱动）；在途 run 收敛
-    // 后走 kickOffChatRound 既有吞错面（CAS 已终态化，其 finalizeFailed 抢锁失败 no-op）。
+    // 后走 kickOffChatRound 既有吞错面（CAS 已收口，其 finalizeFailed 前置检查跳过）。
     record.controller?.abort();
     // fire = 本轮等待窗口终结（timer 回调已自删 entry，此处幂等清防御收尾段残留）。
     disarmRoundFromProtocol(record.id);
-    if (!tryTransition(record, "closed", "gc")) {
-      return; // 已被 cancel/dispose 抢先终态化——不重复收尾（watchdog disarm 由对方承接）
+    // [U5] 失败轮 settle（不终态化——markRoundIdle 保持 running-resumable 万物可续；
+    // watchdog 杀轮非用户放弃，不置放弃轮标记——失败通知必须送达，gate ①②不拦）。
+    if (record.status !== "running") {
+      return; // 已被 cancel/dispose 抢先收口——不重复收尾（watchdog disarm 由对方承接）
     }
+    const failReason =
+      `subagent did not reach agent_settled (${windowDesc}; settled watchdog); ` +
+      `the process was terminated to bound the wait. ` +
+      `Recovery: check state with subagents action:'list', then re-send your message to continue.`;
     const failedResult: AgentResult = {
       text: "",
       turns: record.turnCount,
       durationMs: Date.now() - record.startedAt,
       success: false,
-      error:
-        `subagent did not reach agent_settled (${windowDesc}; settled watchdog); ` +
-        `the process was terminated to bound the wait. ` +
-        `Recovery: check state with subagents action:'list', then re-send your message to continue.`,
+      error: failReason,
       sessionId: record.id,
       toolCalls: [],
     };
-    void this.deps.finalizeRecord(record, failedResult, "closed", "gc")
-      .then(() => {
-        // 失败通知（独立载荷过 notifyGate 门——门拦 cancelled/编排性关闭竞态窗）。
-        if (!notifyGateAllowsDelivery(record.closedReason)) return;
-        // 载荷形态对齐 Continuation settleRoundFailed（closed+failed 文案载体）；
-        // sessionFile 不透传（G4：one-shot 通知逐字节——指针行仅 chatMode 语义）。
-        this.deps.getNotifyHost().notify({
-          id: record.id,
-          status: "closed",
-          closedReason: "gc",
-          outcome: "failed",
-          agent: record.agent,
-          ...(record.model !== undefined ? { model: record.model } : {}),
-          error: failedResult.error,
-          startedAt: record.startedAt,
-          endedAt: record.endedAt ?? Date.now(),
-        });
-      })
-      .catch((err: unknown) => bestEffort(err, "settled watchdog one-shot finalize", "error"));
+    this.deps.getStore().markRoundIdle(record.id, { kind: "failed", reason: failReason });
+    // 失败通知（独立载荷过 notifyGate 三元组门——①归档静默/②放弃轮标记阻断）。
+    if (!notifyGateAllowsDelivery(record)) return;
+    // 载荷形态对齐 Continuation settleRoundFailed（closed+failed 文案载体）；
+    // sessionFile 不透传（G4：one-shot 通知逐字节——指针行仅 chatMode 语义）。
+    this.deps.getNotifyHost().notify({
+      id: record.id,
+      status: "closed",
+      closedReason: "gc",
+      outcome: "failed",
+      agent: record.agent,
+      ...(record.model !== undefined ? { model: record.model } : {}),
+      error: failedResult.error,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt ?? Date.now(),
+    });
   }
 
   // [H1 U6] chat 域相位机整族已随旧协议轮次相位通道退役删除（语义迁移归属）：
@@ -1342,7 +1355,28 @@ export class RunOrchestration {
       markRoundStarted: (rec) => {
         this.deps.getStore().markRoundStarted(rec.id);
       },
-      closeNow: (rec) => this.deps.closeChatIdle(rec),
+      // [U5] idle keepalive 超时 = 进程回收（不归档——归档是用户意愿位 close 专属，
+      // 超时不是用户动作；record 保持 idle 可续聊，锚在）。
+      closeNow: (rec) => this.deps.idleTimeoutRecycle(rec),
+      // [U5 / §3.2.5 顺序约束] closeAfterRound 挂起的 chat 域归档消费点（Continuation
+      // settle 分支在轮次通知送达后调用）——清标志 + 归档（one-shot 主干与 chat 域
+      // 共用 consumePendingArchive 单点，防标志清写漂移）。
+      archiveAfterClosingRound: (rec) => this.consumePendingArchive(rec, "closeAfterRound (chat)"),
+      // [U5 / §3.2.5] worktree 绑定丢失自动重建（三失败形态在 outcome 判别联合内）。
+      rebuildWorktree: (rec) =>
+        this.deps.getWorktreeManager().reconstruct(rec.id, rec.patchFile),
+      // [U5 / §3.2.2] message 隐含寻回（intent 翻回 active + manifest 投影）。
+      reactivateRecord: (rec) => {
+        this.deps.getStore().markReactivated(rec);
+      },
+      // [U5 / §3.2.5 形态②] apply 冲突用户可见提示（entry 落主 session，含 patch
+      // 备份路径——prompt 前缀通道由 Continuation worktreeNotice 承担，双通道互补）。
+      notifyWorktreeConflict: (recordId, patchFile) => {
+        this.deps.getPi()?.appendEntry?.("subagent:worktree-rebuild-conflict", {
+          id: recordId,
+          patchFile,
+        });
+      },
     });
     this.continuations.set(record.id, created);
     return created;
@@ -1530,5 +1564,22 @@ export class RunOrchestration {
    */
   abortContinuationQueue(recordId: string): void {
     this.continuations.get(recordId)?.abortAndClearQueue();
+  }
+
+  /**
+   * [U5] Continuation 仅清队接口（不打断在飞轮）——close 优雅收口的排队消息作废
+   * （close 意愿优先；在飞轮照常跑完，轮终 settle 后归档）。
+   */
+  clearContinuationQueue(recordId: string): void {
+    this.continuations.get(recordId)?.clearQueue();
+  }
+
+  /**
+   * [U5] 在飞轮查询（Continuation.activeRunId 权威）——close 优雅收口 vs 立即归档
+   * 的分流判据。进程镜像判据（isResumable）对协议轮存在 spawn 窗/镜像未注册的
+   * 误判面，在飞轮状态是单一权威。
+   */
+  hasActiveContinuationRound(recordId: string): boolean {
+    return this.continuations.get(recordId)?.hasActiveRound === true;
   }
 }

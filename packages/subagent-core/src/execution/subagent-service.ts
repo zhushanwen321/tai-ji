@@ -304,12 +304,11 @@ export class SubagentService {
       getMainSessionFile: () => this.mainSessionFile,
       getExecNesting: () => this.execNesting,
     });
-    // [R3] 域 #4/#11/#17/#18 聚合（record 终态迁移写面：dispose 批量回收/close 三路/
-    // cancel/finalize 簇——D5「store 与终态迁移入口的唯一宿主」，H4 落点）。跨聚合边
+    // [R3] 域 #4/#11/#17/#18 聚合（[U5] 意愿动作写面：dispose 批量收起/close 归档三路/
+    // cancel 中断/finalize 簇——D5「store 与写面入口的唯一宿主」，H4 落点）。跨聚合边
     // 收敛：C-5（onRecordFinalizedCleanup 汇聚点 + Continuation 队列清空，本体在壳
-    // #14 协作面）经 deps 回调；cancelBackground 的 collectCoordinator.route 经 #5
-    // 显式 getter 投影现读（聚合间零私有互调）。C-6（roundSupervisor/reconcile sweep
-    // 装配闭包调 finalizeRecord）经壳转发方法 late-bound 读取，装配点零改动。
+    // #14 协作面）经 deps 回调。C-6（roundSupervisor/reconcile sweep 装配闭包调
+    // finalizeRecord）经壳转发方法 late-bound 读取，装配点零改动。
     this.recordLifecycle = new RecordLifecycle({
       assertReady: () => this.assertReady(),
       getStore: () => this.store,
@@ -318,7 +317,6 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getSessionsDir: () => this.sessionsDir,
       getPi: () => this.pi,
-      getCollectCoordinator: () => this.collectCoordinator,
       // [R4 / C-5 兑现] Continuation 协作面本体（continuations 队列 +
       // onRecordFinalizedCleanup + abortAndClearQueue）已迁 RunOrchestration 聚合——
       // R3 装配时指向壳闭包的两个回调改指聚合显式接口（r0-inventory 清单① C-5
@@ -327,6 +325,12 @@ export class SubagentService {
       abortContinuationQueue: (id) => {
         this.runOrchestration.abortContinuationQueue(id);
       },
+      // [U5] close 优雅收口的排队消息作废（不打断在飞轮）。
+      clearContinuationQueue: (id) => {
+        this.runOrchestration.clearContinuationQueue(id);
+      },
+      // [U5] 在飞轮查询（close 分流判据——Continuation.activeRunId 权威）。
+      hasActiveContinuationRound: (id) => this.runOrchestration.hasActiveContinuationRound(id),
     });
     // [R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排 + Continuation 协作面 + pool/
     // worktree 资源）。deps 全晚绑定闭包（构造期零求值——#1 留壳共享依赖经 getter
@@ -358,7 +362,11 @@ export class SubagentService {
         this.recordLifecycle.finalizeRecord(record, result, status, closedReason),
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
-      closeChatIdle: (record) => this.recordLifecycle.closeChatIdle(record),
+      // [U5] closeNow 语义切分：idle 超时 = 进程回收（不归档——归档是用户意愿位）；
+      // close action 的归档收口走 archiveRecord（Continuation settle 分支 / 主干尾部
+      // 顺序约束消费点）。
+      idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
+      archiveRecord: (record, source) => this.recordLifecycle.archiveRecord(record, source),
     });
     // [R4 / D-R4-1 拆分] workflow 族聚合（executeWorkflowAgent + runWorkflowEngineTask
     // + 类外派发 helper）——与 RunOrchestration 组间零互调零 import，跨文件协作
@@ -654,7 +662,8 @@ export class SubagentService {
 
   // [H1 U6] closeAfterRoundSettled（[M5] chat 域「轮完成时终态化」消费面）已随 chat 域
   // closeAfterRound 挂起标志退役删除：D4 close = abort 在途 + 清空队列 + 立即终态化
-  //（closeChatIdle），不等轮终；one-shot 域的 closeAfterRound 消费走 consumeCloseAfterRound
+  //（[U5] 旧 closeChatIdle 语义 = abort + 清队 + 立即终态化，已改优雅收口归档）；
+  // one-shot 域的 closeAfterRound 消费走 consumePendingArchive（主干尾部 route 后归档）
   //（settleOneShotOutcome，照旧）。
 
   // ── 域 #17 取消 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──

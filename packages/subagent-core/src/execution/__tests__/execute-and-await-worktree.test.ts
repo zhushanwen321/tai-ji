@@ -94,7 +94,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
   });
 
   // ============================================================
-  // worktreeManager.create 抛错 → record 收尾为 failed + 原错外抛
+  // worktreeManager.create 抛错 → [U5] 失败轮 settle（不终态化）+ 原错外抛
   // ============================================================
   it("worktreeManager.create 失败时 finalizeFailed 收尾 record 并抛原错", async () => {
     const { service, worktreeManager } = setup();
@@ -104,9 +104,8 @@ describe("executeAndAwait worktree 失败收尾", () => {
       throw createErr;
     });
 
-    // spy store.archive：finalizeFailed 真实收尾链（CAS→completeRecord→archive）的最末一步。
-    // 捕获传入 archive 的 record，断言其 status 已被推向 "failed"（证明 finalizeFailed 完整执行，
-    // 而非仅 tryTransition 中途返回）。archive 真实执行（不 mockImplementation）以保留移出 running map 的语义。
+    // spy store.archive：[U5] 失败轮 settle（markRoundIdle）不终态化——archive
+    // 必须零调用（旧终态化退役）；失败收口 = record 保持 running-resumable 等续聊。
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
 
@@ -120,14 +119,14 @@ describe("executeAndAwait worktree 失败收尾", () => {
       }),
     ).rejects.toBe(createErr);
 
-    // finalizeFailed 完整执行：record 经 CAS→completeRecord 推到 failed 终态后 archive。
-    expect(archiveSpy).toHaveBeenCalledTimes(1);
-    // store 现已强类型为 RecordStore → archive 入参为 ExecutionRecord，无需 `as` 断言。
-    const archivedRecord = archiveSpy.mock.calls[0]![0];
-    expect(archivedRecord.status).toBe("idle");
-    // archive 后 record 已移出 running map → listRunning 空、getMutable 取不到。
-    expect(store.listRunning()).toHaveLength(0);
-    expect(store.getMutable(archivedRecord.id)).toBeUndefined();
+    // [U5] 失败 settle 完整执行：archive 零调用 + lastError 落 record（markRoundIdle
+    // 簿记⑨——失败原因可达）+ record 留内存（万物可续，可续聊）。
+    expect(archiveSpy).toHaveBeenCalledTimes(0);
+    const records = store.listAllActive();
+    expect(records).toHaveLength(1);
+    expect(records[0]!.lastError).toBe("worktree create boom");
+    expect(records[0]!.resumable).toBe(true);
+    expect(store.getMutable(records[0]!.id)).toBeDefined();
   });
 
   // ============================================================

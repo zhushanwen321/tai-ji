@@ -1020,12 +1020,16 @@ export class RecordStore {
       // 滞后由下次收口/接管补写；错误已在 state-marker 层 error 级响亮暴露）。
       writeSettledState(record.sessionFile, { stopReason, endedAt: settledAt });
       // ② binding 快照（best-effort——binding 缺失不造残缺身份，updateRecordBinding
-      // 既有语义；round 随快照推进，light 重建面恢复轮次）。
+      // 既有语义；round 随快照推进，light 重建面恢复轮次）。[U5 / §3.2.7] epoch 与
+      // 放弃轮标记同批落盘（cancel/编排性关闭的中断轮 settle 是标记的置位点——
+      // gate ②判据跨重启有效是硬要求，丢标记 = 中断轮迟到回注防双发失效）。
       updateRecordBinding(record.sessionFile, {
         totalTokens: record.totalTokens,
         turns: record.turnCount,
         endedAt: record.endedAt,
         round: record.round ?? 0,
+        epoch: record.epoch,
+        lastAbandonedRound: record.lastAbandonedRound,
       });
     } else {
       logger.warn("[subagents] markSettled: no sessionFile anchor, .state/binding faces skipped", {
@@ -1033,6 +1037,27 @@ export class RecordStore {
       });
     }
     // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
+    this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
+    this.reportRecordTransition(record);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 意图原语：message 隐含寻回（§3.2.2 事件表 archived+message → running+active 行、
+   * §3.2.5 寻回行——「寻回不需要显式动作」）。intent 翻回 active（{@link markArchived}
+   * 的对称反向原语，U4 留桩的本单元接线点）。纯列表意愿位：占用位（status）与资格
+   * 判据（§3.2.3 三件套）均不涉本原语——续聊链在寻回前后行为一致。
+   *
+   * manifest 投影随翻回刷新（archived→closed 下行映射归 U8，桥接期经 derived 投影
+   * 保持索引在册）。幂等：intent 已 active/undefined 时 no-op（寻回只对 archived 有
+   * 语义——挂点调用方已在 archived 分支内）。
+   *
+   * @returns true = 写面完成（含幂等 no-op）；false = 无（恒 true，签名对称性保留）。
+   */
+  markReactivated(record: ExecutionRecord): boolean {
+    if (record.intent !== "archived") return true;
+    record.intent = "active";
     this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
     this.reportRecordTransition(record);
     this.notifyChange();

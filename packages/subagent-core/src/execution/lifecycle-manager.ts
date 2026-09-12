@@ -9,17 +9,15 @@
 // 只管状态记账 + 调度顺序。这让模块可独立编译 + 单测，无需拉起真实子进程。
 //
 // 唯一职责（V2 §5.2 五项职责的存留）：
-//   1. idle timer —— agent_settled arm / 新 turn disarm / 超时触发 onTimeout（决策 4）
-//      【[H1 U6 后现状] arm 链已失活：旧「subagent-service.ts chat 域 arm/disarm」接线
-//      随 chat 域退役删除，armIdleTimer 唯一剩余接线在 createHostBridge
-//      （host-bridge.ts）——而后者全仓无生产调用点。运行时 timer 永不 armed，
-//      disarmIdleTimer 仅剩 record-lifecycle 终态化路径的幂等清扫（对永不 armed
-//      的 timer 为 no-op，保持收口清扫完整性）。模块与函数保留 = 既有判据形态
-//      （lifecycle-predicates.isIdle 消费 hasIdleTimer）与 env/API 面
-//      （ExecuteOptions.idleTimeoutMs 校验文案引用 DEFAULT_IDLE_TIMEOUT_MS）不删，
-//      语义变化/显式 idle 状态设计属独立议题（impl-plan Gate B 收口 backlog）】
-//      [U2 注记] 两态迁移（running|idle）不改变本模块地位——「终态清扫」词汇随
-//      终态概念删除改为「收口清扫」；arm 链是否随意愿动作重接线归 U5。
+//   1. idle timer —— 轮终 arm / 新轮 disarm / 超时触发 onTimeout（决策 4）
+//      【[u7a 补挂 → U5 现状] arm 链已复活并收敛单点：chat 轮终 armIdleKeepalive
+//      （conversation-continuation.ts settleRoundSuccess）是唯一生产 arm 接线
+//      ——轮终「正在执行 → 保活」翻转边界挂 idle timer，超时处置 =
+//      RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不归档——归档是用户
+//      意愿位）。disarm 面 = 新轮派发（dispatchRoundGuarded）+ cancel/close/
+//      dispose 收口清扫（幂等）。isIdle 谓词（hasIdleTimer）据此生产可真。】
+//      [U2 注记 → 已消化] 两态迁移（running|idle）下「收口清扫」语义由 U5 意愿
+//      动作重写定形（close = 归档编排 / cancel = 中断 settle）。
 // 其余四项已删除：职责 2 全局 ceiling / 职责 3 shutdown 收割 / 职责 4 孤儿扫描自
 // 落地起无生产接线；职责 5 activate 互斥的历史接线点（冷路径 resume 前）随协议化
 // 重构消失、仅余自持单测。未来需要时按

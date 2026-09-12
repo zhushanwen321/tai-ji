@@ -50,11 +50,11 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障，不参与资格判定）；
  * 旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
  *
- * [U2 桥接不变量] 旧「closed 终态」读判据在迁移期构造性等价于
- * `status === "idle" && closedReason !== undefined`：旧终态路径（tryTransition /
- * completeRecord 桥接）置 idle 时同步双写 closedReason（U5 重写意愿动作后随旧
- * 原语退役）；新 settle 路径（markSettled）只写 stopReason 不写 closedReason
- * （不终态化——正是新语义）。ClosedReason 字段保留为读侧兼容位（U3+ 收缩）。
+ * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
+ * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
+ * （out-of-scope 维持现状）；意愿动作（U5）走 markSettled 只写 stopReason 不写
+ * closedReason（不终态化），markArchived 翻 intent 位——closedReason 不再由
+ * cancel/close/编排性关闭产出。
  */
 export type ExecutionStatus = "running" | "idle";
 

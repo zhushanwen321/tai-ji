@@ -13,13 +13,12 @@
 // 两种 running 子态（v4 B-1；[H1 U6 后现状] 长驻保活形态已退役——每轮 = 新进程，
 // 轮末进程随 agent_settled 回收，权威注释见 run-orchestration.ts [H1 U6] 段）：
 //   - 等待续聊：轮完成后进程已回收 → isResumable=true（无活进程），
-//     续聊走 deliverMessage 冷路径 resume（续写原 session 文件）。旧设计另有
-//     「agent_settled arm idle timer 保活进程待热路径 prompt」一路——该 arm 链随
-//     H1 U6 长驻退役消亡（armIdleTimer 唯一剩余接线在 createHostBridge
-//     （host-bridge.ts，全仓无生产调用点），运行时 hasIdleTimer 恒 false，
-//     故 isIdle 生产恒 false），notify 守卫（notify-host.ts）实际生效的放行谓词 =
-//     旧终态遗留（idle ∧ closedReason 有值，U2 桥接判据）或 isResumable。
-//     isIdle 谓词保留 = 既有判据形态不删（显式 idle 状态设计归后续单元）。
+//     续聊走 deliverMessage 冷路径 resume（续写原 session 文件）。chat 轮终经
+//     armIdleKeepalive（conversation-continuation.ts，[u7a 补挂] 唯一生产 arm
+//     接线）挂 idle timer 保活 → isIdle=true——超时处置 =
+//     RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动意愿位/占用位）。
+//     notify 守卫（notify-host.ts）的放行谓词 = 旧终态遗留（idle ∧ closedReason
+//     有值，U2 桥接判据）/ [U5] archived（归档提示载荷）或 isResumable。
 //   - 正在执行：isIdle=false、isResumable=false（有活进程）。
 
 import { hasIdleTimer } from "./lifecycle-manager.ts";
@@ -46,10 +45,9 @@ export function hasLiveProcessHandle(recordId: string): boolean {
  *
  * 判据：该 record 有 armed idle timer（lifecycle-manager.hasIdleTimer）。
  *
- * [H1 U6 后现状] arm 链随长驻形态退役失活（armIdleTimer 唯一生产接线在
- * createHostBridge，全仓无生产调用点）——运行时本谓词恒 false，notify 守卫的
- * 轮次完成放行实际由 {@link isResumable} 承担。谓词保留为既有判据形态
- * （notify 合批 hasRunningBackground / 守卫散点消费），删除属语义变更待独立议题。
+ * [u7a 补挂后现状] arm 链已复活（chat 轮终 armIdleKeepalive——轮终保活，超时 =
+ * [U5] idleTimeoutRecycle 进程回收），本谓词生产可真：closeSubagent 的「无在跑轮」
+ * 分流（Path A timer armed）与 notify 合批 hasRunningBackground 消费。
  */
 export function isIdle(record: ExecutionRecord): boolean {
   return hasIdleTimer(record.id);
@@ -62,8 +60,9 @@ export function isIdle(record: ExecutionRecord): boolean {
  * 进程句柄；跨重启重建同理）。deliverMessage 冷路径、GC、close action 的
  * 「无活进程立即终态化」分支据此判定。
  *
- * 与 {@link isIdle} 的关系：isIdle 生产恒 false（见其 JSDoc），本谓词是
- * 「等待续聊」唯一运行时生效的派生判据。
+ * 与 {@link isIdle} 的关系：isIdle = idle timer armed（chat 轮终保活态）、
+ * isResumable = 无活进程的 running（轮终进程已回收的等待续聊态）——两谓词分别
+ * 表达「保活待续聊」与「无进程可续聊」，由 closeSubagent 分流与 notify 守卫分别消费。
  *
  * [v4 A-6] 签名泛化为 Pick<"id"|"status">：ExecutionRecord（活态）与 SubagentRecord
  * （list 快照）均结构兼容——recordToListItem 据此为 list 输出派生 resumable 字段。

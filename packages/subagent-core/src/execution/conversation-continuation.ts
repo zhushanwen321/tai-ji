@@ -47,6 +47,8 @@ import {
 } from "./settled-watchdog.ts";
 // [U4 / §3.2.3] 准入判据单点消费：锚可解析性判据（判据一）定义在 cold-lookup.ts。
 import { isAnchorResolvable } from "./cold-lookup.ts";
+// [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
+import type { WorktreeRebuildOutcome } from "./worktree-manager.ts";
 import type { ExecutionRecord } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -143,8 +145,30 @@ export interface ContinuationHost {
   /** 轮始簿记（store.markRoundStarted：status=running + result/resumable 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写）。 */
   markRoundStarted(record: ExecutionRecord): void;
-  /** D4 close 行的立即终态化收口（closeChatIdle：doFinalizeRecord 语义 + notifyClosed）。 */
+  /** [U5] idle keepalive 超时的进程回收（idleTimeoutRecycle——归档是用户意愿位，
+   *  超时回收不动 intent/占用位，record 保持 idle 可续聊）。 */
   closeNow(record: ExecutionRecord): Promise<void>;
+  /**
+   * [U5 / §3.2.5 顺序约束] closeAfterRound 挂起标志的归档消费点（chat 域）：收口轮
+   * 通知送达（route/notify 已过 gate 并写账）之后调用——归档即 gate ①静默，提前
+   * 调用会吞掉收口轮通知。
+   */
+  archiveAfterClosingRound(record: ExecutionRecord): Promise<void>;
+  /**
+   * [U5 / §3.2.5 worktree 续聊重建] 绑定丢失的自动重建（worktree-manager reconstruct）：
+   * 三失败形态在 outcome 判别联合内表达（形态③ IO 错 = throw 响亮）。
+   */
+  rebuildWorktree(record: ExecutionRecord): Promise<WorktreeRebuildOutcome>;
+  /**
+   * [U5 / §3.2.2 事件表] message 隐含寻回的宿主面：store.markReactivated（intent 翻回
+   * active + manifest 投影）。
+   */
+  reactivateRecord(record: ExecutionRecord): void;
+  /**
+   * [U5 / §3.2.5 形态②] apply 冲突的用户可见提示通道（appendEntry 落主 session，
+   * 含 patch 备份路径）。
+   */
+  notifyWorktreeConflict(recordId: string, patchFile: string): void;
 }
 
 /** host 契约内的 outcome 形态（RoundSettlementOutcome，见顶部 import）。 */
@@ -204,22 +228,28 @@ export class ConversationContinuation {
    *
    * [U4 / §3.2.2 事件表] 两态分流：
    *   - idle → reviveOrThrow（万物可续：升级 gate + tryEnterRunning 翻边；锚失效
-   *     在派发守卫走 reopen 降级）；
+   *     在派发守卫走 reopen 降级；archived → 隐含寻回）；
    *   - running（有在途轮）→ D2 打断：abort 在途轮 signal（record 不终态化）+
    *     入队，abort 收敛后 drain；
    *   - running（轮间 idle）→ 直接派发新轮。
    *
-   * @throws Error 升级 gate 拒绝 / worktree 绑定丢失 / reopen CAS 竞态（同步拒绝，
-   *   文案即指引）。
+   * @throws Error 升级 gate 拒绝 / reopen CAS 竞态（同步拒绝，文案即指引）。
    */
   onMessage(text: string): void {
     const record = this.record;
+    // [U5 / §3.2.2 事件表] archived + message = **隐含寻回**——挂点独立于 revive 格：
+    // 轮间 running（markRoundIdle 保持 running-resumable）同样可达 close 归档后的
+    // 续聊，寻回不能只在 idle 分流内。幂等：非 archived 时 markReactivated no-op。
+    this.host.reactivateRecord(record);
     if (record.status !== "running") {
       this.reviveOrThrow();
     }
     if (this.activeRunId !== undefined) {
       // D2 打断语义：消息即时生效，永不「忙」拒绝。占位窗（activeController 未建）
       // 到达的消息仅入队——派发完成后轮终 drain 承接。
+      // [U5] 在飞轮存在 = 用户继续对话——close 优雅收口挂起作废（closeAfterRound
+      // 是「这轮结束后收起」的意愿，新 message 表达了相反意愿）。
+      record.closeAfterRound = undefined;
       this.activeController?.abort();
       this.queue.push(text);
       return;
@@ -227,15 +257,24 @@ export class ConversationContinuation {
     this.dispatchRoundGuarded([text], false);
   }
 
-  // ── D4 状态迁移表：close 行（abort + 清队列；立即终态化由 host.closeNow 承接）──
+  // ── [U5] 立即打断面（cancel / 编排性关闭的 Continuation 侧触发）────────────
 
   /**
-   * close 的 Continuation 侧职责：abort 在途轮 + 清空队列（D4——chat 域不再置
-   * closeAfterRound 挂起标志，不等轮终）。终态化（closed/user-close + notifyClosed）
-   * 由 host.closeNow（closeChatIdle 收口序列）承接，二者由 service.closeSubagent 编排。
+   * abort 在途轮 + 清空队列（[U5] 消费方变化：原 close 行专用——close 改优雅收口后
+   * 现消费方 = cancelBackground / disposeAllRecords 的立即打断路径）。record 的
+   * settle/归档由调用方编排（store 意图原语），本方法只做轮级打断。
    */
   abortAndClearQueue(): void {
     this.activeController?.abort();
+    this.queue.length = 0;
+  }
+
+  /**
+   * 仅清空队列（不打断在飞轮）——[U5] close 优雅收口的排队消息处置：close 意愿
+   * 优先于排队消息（「这件事告一段落」——close 前打断入队的消息随收起作废，在飞轮
+   * 照常跑完）。与 {@link abortAndClearQueue} 的差异 = 不 abort activeController。
+   */
+  clearQueue(): void {
     this.queue.length = 0;
   }
 
@@ -307,8 +346,8 @@ export class ConversationContinuation {
    *     应答回填 writeBindingForRecord 保证）——世代推进仅 idle-message 触发的完整
    *     reopen 承担（偏差登记：续轮降级无 epoch/round 重置）；
    *   - 锚可解析：原样 resume 续写（透明续聊）。
-   *  worktree 绑定丢失守卫保留（防 spawn cwd 静默回落主 repo）；[U5 接管] 拒绝动作
-   *  将改为自动重建 + patch 恢复（§3.2.5），本单元保留拒绝语义。
+   *  [U5 / §3.2.5] worktree 绑定丢失守卫改为自动重建（异步——移入 dispatchRoundAsync，
+   *  三失败形态处置见其方法头；原同步 throw 拒绝语义退役）。
    */
   private dispatchRoundGuarded(msgs: string[], firstRound: boolean): void {
     const record = this.record;
@@ -319,15 +358,6 @@ export class ConversationContinuation {
     this.pendingReopenSummary = undefined;
     if (summaryPrefix !== undefined) freshSession = true; // reopen 降级轮 = fresh session
     if (!firstRound) {
-      if (record.hadWorktree === true && !record.worktreeHandle) {
-        // 跨重启 worktree 绑定丢失守卫（承接 resumeColdRound 同款）：防 resume 的
-        // spawn cwd 静默回落主 repo，子 agent 直接编辑主仓库。
-        throw new Error(
-          `subagent ${record.id} was created with worktree isolation, but that binding was lost when the parent process restarted; ` +
-          `resuming it now would run in the main repository and bypass the isolation. ` +
-          `Recovery: use action:'close' to release this subagent, then action:'start' a new one with worktree isolation.`,
-        );
-      }
       if (summaryPrefix === undefined && record.sessionFile === undefined) {
         // [U4] 锚字段缺失（从未开跑）：全新 session 直派；无历史轮可摘要（binding
         // 只在首轮 run 后存在），不注入 reopen 摘要。
@@ -385,10 +415,57 @@ export class ConversationContinuation {
       void err;
     }
     if (record.status !== "running") {
-      // 兜底窗内 close/cancel 抢先终态化 → 本轮作废（终态守卫同构语义）。
+      // 兜底窗内 close/cancel 抢先收口 → 本轮作废（终态守卫同构语义）。
       this.clearActiveRound();
       this.queue.length = 0;
       return;
+    }
+    // ①' [U5 / §3.2.5 worktree 续聊重建] 绑定丢失（跨重启 / 归档后 worktreeHandle
+    //    恒 undefined）→ 自动重建。原同步 throw 拒绝语义退役（拒绝会阻断万物可续；
+    //    放行 = spawn cwd 静默回落主 repo——重建是两害的唯一正确解）。三失败形态：
+    //      rebuilt      → handle 回填 record（后续轮/归档回收复用）；
+    //      conflict     → 干净基线 handle 回填 + 原地续聊 + 用户可见提示（patch
+    //                     备份路径进本轮 prompt 前缀 + appendEntry——不降级 reopen）；
+    //      degrade-reopen → 形态①（patch 丢失/分支不存在）→ 摘要注入全新 session
+    //                     直派（同上方 [U4] 续轮 transcript 丢失分支同构——不推进
+    //                     世代，markReopened CAS 仅收 idle，偏差同族登记）；
+    //      throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具
+    //                     错误面/失败通知可见，不静默回落）。
+    let worktreeNotice: string | undefined;
+    if (!firstRound && record.hadWorktree === true && !record.worktreeHandle) {
+      let rebuild: WorktreeRebuildOutcome;
+      try {
+        rebuild = await this.host.rebuildWorktree(record);
+      } catch (err) {
+        // 形态③：重建 IO 错（GitRunError/DirtyWorktreeError）——转失败轮末分流
+        //（失败通知 + 恢复指引；record 保持 running-resumable）。
+        this.clearActiveRound();
+        this.onRoundRejected(err);
+        return;
+      }
+      if (rebuild.kind === "degrade-reopen") {
+        freshSession = true;
+        summaryPrefix = buildReopenSummaryPrompt({
+          id: record.id,
+          task: record.task,
+          agent: record.agent,
+          round: record.round ?? 0,
+          ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
+          ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
+          ...(record.result !== undefined ? { lastResult: record.result } : {}),
+        });
+      } else {
+        type MutableRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+        (record as MutableRecord).worktreeHandle = rebuild.handle;
+        if (rebuild.kind === "conflict") {
+          worktreeNotice =
+            `[Worktree rebuilt on a clean baseline] The worktree from before archiving was ` +
+            `rebuilt, but its uncommitted changes could not be re-applied automatically ` +
+            `(the branch moved on while archived). A patch backup is preserved at: ${rebuild.patchFile} ` +
+            `— apply it manually with \`git apply ${rebuild.patchFile}\` if still needed.\n\n`;
+          this.host.notifyWorktreeConflict(record.id, rebuild.patchFile);
+        }
+      }
     }
 
     // ② 载荷组装：轮级 signal（record controller 级联 + 打断通道）。
@@ -419,10 +496,14 @@ export class ConversationContinuation {
         // 多条聚合为一轮输入（§3.1：cancel 宽限窗内多条消息按序聚合）。
         // [U4] reopen 降级轮：摘要前缀在前 + 用户消息在后（buildReopenSummaryPrompt
         // 契约——「接续旧工作」框架先行，指令随后）。
+        // [U5] worktree 重建形态②：干净基线提示前缀（patch 备份路径——子 agent 与
+        // 用户双通道可见）。
         task:
-          summaryPrefix !== undefined
-            ? summaryPrefix + msgs.join("\n\n")
-            : msgs.join("\n\n"),
+          worktreeNotice !== undefined
+            ? worktreeNotice + (summaryPrefix ?? "") + msgs.join("\n\n")
+            : summaryPrefix !== undefined
+              ? summaryPrefix + msgs.join("\n\n")
+              : msgs.join("\n\n"),
         // [U4 / §3.2.3] resume 锚点分流：freshSession（首轮 / 锚字段缺失 / reopen
         // 降级）→ undefined（引擎开新 session，新锚由 run 应答回填）；正常续轮 →
         // resumeAnchor()（sessionFile 续写原文件）。
@@ -472,7 +553,8 @@ export class ConversationContinuation {
     disarmRoundFromProtocol(this.record.id);
   }
 
-  /** 成功分支：轮终簿记（success）→ notifyGate 门 → route（次序：route 晚于簿记）。 */
+  /** 成功分支：轮终簿记（success）→ notifyGate 三元组门 → route（次序：route 晚于簿记）
+   *  → closeAfterRound 归档消费（[U5] 顺序约束：通知送达后才归档）。 */
   private async settleRoundSuccess(outcome: AgentOutcome): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, { kind: "success", content: outcome.content });
@@ -483,11 +565,17 @@ export class ConversationContinuation {
     // 相位帧只在成功收敛后到达，同构）；drain 派发排队消息时经 dispatchRoundGuarded
     // disarm 接回「正在执行」。
     this.armIdleKeepalive();
-    // 成功通知：「门 → route」双闸（v6 显式迁移自 settleChatRoundFromResponse——
-    // 门判 closedReason 编排面，拦 parent-new/parent-fork 编排性关闭的迟到应答与
-    // cancelled 的迟到帧；route 正文权威 = record.result = 本轮 content）。
-    if (notifyGateAllowsDelivery(record.closedReason)) {
+    // 成功通知：「门 → route」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
+    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本 route 之后，settle 时点
+    // intent 尚未翻转；route 正文权威 = record.result = 本轮 content）。
+    if (notifyGateAllowsDelivery(record)) {
       this.host.routeRecord(record);
+      // [U5 / §3.2.5 close 顺序约束] 收口轮通知送达后归档（closeAfterRound 挂起消费，
+      // chat 域挂点）。归档后 drain：record 已 archived（intent 翻转，占用位 idle
+      // 化由后续流程承接）——drain 的 status 守卫决定排队消息去留。
+      if (record.closeAfterRound === true) {
+        await this.host.archiveAfterClosingRound(record);
+      }
     }
     this.drain();
   }
@@ -497,15 +585,15 @@ export class ConversationContinuation {
    * 失败摘要）+ 失败通知（独立构造载荷——不经 route(record)：其正文恒读
    * record.result = 前值，直接复用会以旧正文冒充失败通知；正文 = 失败摘要 + 恢复
    * 指引，可达性迁移自 [T2-③/LC-1]）+ record 保持 running-resumable（MF-6）。
-   * 发前过 notifyGate 门（B#19 投递门照迁移：拦 cancelled 竞态窗防双发、
-   * parent-new/parent-fork 竞态窗防僵尸回执注入已切换 session——守卫是入口一次性
-   * 判定，覆盖不了簿记 await 链内的中途关闭窗）。
+   * 发前过 notifyGate 三元组门（[U5]：①归档静默——编排性关闭自动收起后迟到应答 /
+   * ②放弃轮标记命中——cancel 中断轮防双发；守卫是入口一次性判定，覆盖不了簿记
+   * await 链内的中途归档窗）。
    */
   private async settleRoundFailed(reason: string): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, { kind: "failed", reason });
     this.disarmRoundWatchdog();
-    if (!notifyGateAllowsDelivery(record.closedReason)) {
+    if (!notifyGateAllowsDelivery(record)) {
       this.drain();
       return;
     }
@@ -528,6 +616,11 @@ export class ConversationContinuation {
       ...(record.sessionFile !== undefined ? { sessionFile: record.sessionFile } : {}),
     };
     this.host.notifyRecord(notify);
+    // [U5 / §3.2.5 close 顺序约束] 失败收口轮通知送达后归档（closeAfterRound 挂起
+    // 消费——优雅 close 后轮失败，失败通知必须先送达，归档静默只作用于其后的回注）。
+    if (record.closeAfterRound === true) {
+      await this.host.archiveAfterClosingRound(record);
+    }
     this.drain();
   }
 
@@ -560,7 +653,7 @@ export class ConversationContinuation {
         `[subagent] queued message dispatch rejected for ${this.record.id}: ${reason} — ` +
         `${next.length} queued message(s) dropped`,
       );
-      if (notifyGateAllowsDelivery(this.record.closedReason)) {
+      if (notifyGateAllowsDelivery(this.record)) {
         // dedup 身份必须独立于同轮失败通知（settleRoundFailed 缺省 key = `id:round`）：
         // 主可达场景「首轮崩溃 → 失败 settle（通知1 发出）→ drain 守卫 throw → 丢弃
         // 通知（通知2）」中两通知同轮同 key，沿用缺省 key 会被 ledger/内核按 key 永久
@@ -692,8 +785,7 @@ export class ConversationContinuation {
     // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);
-    // [U5 挂点留桩] archived + message = 隐含寻回（§3.2.2 事件表：intent 自动翻回
-    // active）。intent 的「翻回 active」写面原语未接线（markArchived 已有，反向
-    // 原语归 U5 意愿动作单元），本单元放行续聊不拒、寻回翻转留桩 U5 接管。
+    // [U5] 寻回挂点在 onMessage 入口（独立于 revive 格——轮间 running 的 archived
+    // record 同样可达续聊，见 onMessage 头注）。
   }
 }
