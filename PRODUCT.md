@@ -32,7 +32,7 @@ product
 
 **太极 · 纯灰水墨工作台**
 
-> 2026-08-02 视觉方向裁决：推翻早期冷蓝暗色定位（ADR-0018），收敛到太极纯灰水墨系。配色 SSOT 见 [V3 配色决策](docs/page-design/2026-08-02-taiji-v3-color-decision.md)，原子值见 [docs/page-design/design-tokens.md](docs/page-design/design-tokens.md)。品牌名「太极」取自阴阳鱼 logo——双鱼咬尾、阴阳相生，隐喻 Agent 协作中人与 AI 的动态平衡。
+> 2026-08-02 视觉方向裁决：推翻早期冷蓝暗色定位（ADR-0018），收敛到太极纯灰水墨系。色相决策记录见 [ADR-0066](docs/adr/0066-taiji-pure-grey-color-direction.md)，原子值见 [docs/page-design/v6-tokens.css](docs/page-design/v6-tokens.css)。品牌名「太极」取自阴阳鱼 logo——双鱼咬尾、阴阳相生，隐喻 Agent 协作中人与 AI 的动态平衡。
 
 三个关键词：**克制**、**周而复始**、**阴阳分明**。
 
@@ -73,7 +73,7 @@ product
 - **不是传统 SaaS 仪表盘**：拒绝 big-number hero metrics、渐变文字、玻璃拟态卡片、彩色背景分区
 - **不是 ChatGPT/Claude Web UI 的极简聊天**：我们需要展示 SubAgent 并行状态和任务树，不是单线对话
 - **不是"黑底绿字"的粗糙极客感**：暗色是默认且优先打磨方向，但区别于终端绿字、高对比硬核 IDE——追求水墨克制的暗色，非刺眼粗糙的极客感
-- **不是冷蓝系**：冷蓝（`#4f8ef7`）已在 2026-08-02 推翻——长时间用眼下冷蓝相会产生色疲劳，纯灰更中性更耐久。V3 决策详见 [配色方向文档](docs/page-design/2026-08-02-taiji-v3-color-decision.md)
+- **不是冷蓝系**：冷蓝（`#4f8ef7`）已在 2026-08-02 推翻——长时间用眼下冷蓝相会产生色疲劳，纯灰更中性更耐久。V3 决策详见 [ADR-0066](docs/adr/0066-taiji-pure-grey-color-direction.md)
 - **不是 AI slop**：如果有人看界面能直接说"AI 做的"，就失败了。拒绝默认卡片网格、侧边彩色条纹、模态框作为第一选择、鲜艳饱和的状态色
 
 ## Design Principles

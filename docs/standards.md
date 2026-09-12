@@ -92,7 +92,7 @@ function onError(sessionId: string, errorText: string) {
 
 ### 3.2 自动滚动
 
-对话流渲染载体是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（chat-pin-bottom-fix / use-virtua-follow）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**；非对话流的自写滚动列表才用「数据变化后 `scrollTop = scrollHeight`」的常规范式。
+对话流渲染载体是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（权威定义见 docs/architecture/conversation-stream-block-rendering.md §7.3.1）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**；非对话流的自写滚动列表才用「数据变化后 `scrollTop = scrollHeight`」的常规范式。
 
 ### 3.3 Streaming message 生命周期
 
@@ -166,7 +166,7 @@ pi 的消息 content 是数组，xyz-agent 的 Message.content 是字符串。�
 
 ### 7.1 Border-radius 约束
 
-三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威见 [v6-tokens.css](./page-design/v6-tokens.css) 与 [v6-master-spec.md](./page-design/v6-master-spec.md)；style.css 的 CSS 变量与 design-tokens.md 的 token 收录同步由 `.githooks/check_css_token_ssot.py` 机器守卫。
+三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威见 [v6-tokens.css](./page-design/v6-tokens.css) 与 [v6-master-spec.md](./page-design/v6-master-spec.md)；style.css 的 CSS 变量与 v6-tokens.css 的 token 收录同步由 `.githooks/check_css_token_ssot.py` 机器守卫。
 
 ### 7.2 Markdown 文本元素样式规范
 

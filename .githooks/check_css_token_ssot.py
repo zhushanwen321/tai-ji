@@ -3,11 +3,15 @@
 CSS token SSOT 一致性检查
 
 规则：packages/renderer/src/style.css 的 :root 中定义的 CSS 变量，
-必须全部能在 docs/page-design/design-tokens.md 中找到（token 名称出现）。
+必须全部能在 docs/page-design/v6-tokens.css 中找到（token 名称出现）。
 
 目的：防止开发者在 style.css 自行追加 token（如 --reasoning），而 SSOT
-（design-tokens.md）未同步，导致双源不一致（v3 重建 Wave 1 曾发生：
-style.css 有 --reasoning:#a78bfa，design-tokens.md 未收录）。
+（v6-tokens.css）未同步，导致双源不一致（v3 重建 Wave 1 曾发生：
+style.css 有 --reasoning:#a78bfa，SSOT 未收录）。
+
+[2026-09-13] SSOT 由 design-tokens.md 改为 v6-tokens.css（css 唯一权威，
+ADR-0066；原 design-tokens.md 已删除）。值真值在 style.css（含行内 why
+注释），本守卫只做「新增 token 必须登记」的名字集合校验。
 
 豁免：以 `_` 开头的内部变量（非设计 token，如布局辅助）。
 
@@ -15,7 +19,7 @@ style.css 有 --reasoning:#a78bfa，design-tokens.md 未收录）。
   python3 .githooks/check_css_token_ssot.py
 
 退出码:
-  0 — 通过（或 style.css/design-tokens.md 不存在）
+  0 — 通过（或 style.css/v6-tokens.css 不存在）
   2 — 有违规（style.css 含 SSOT 未收录的 token）
 """
 
@@ -29,7 +33,7 @@ YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
 STYLE_CSS = 'packages/renderer/src/style.css'
-DESIGN_TOKENS = 'docs/page-design/design-tokens.md'
+DESIGN_TOKENS = 'docs/page-design/v6-tokens.css'
 
 # 豁免：非设计 token 的 CSS 变量（布局辅助、第三方 shim 等）
 # 命名约定：内部变量以 _ 开头自动豁免
@@ -78,7 +82,7 @@ def main() -> int:
     missing = css_tokens - ssot_tokens
 
     if not missing:
-        print(f"{GREEN}[OK] style.css 的 {len(css_tokens)} 个 token 全部收录于 design-tokens.md SSOT{NC}")
+        print(f"{GREEN}[OK] style.css 的 {len(css_tokens)} 个 token 全部收录于 v6-tokens.css SSOT{NC}")
         return 0
 
     print(f"{RED}[ERROR] style.css 含 {len(missing)} 个 SSOT 未收录的 token：{NC}")

@@ -9,20 +9,17 @@ xyz-agent 前端设计的权威目录。设计系统的 SSOT 与设计稿集中�
 ```
 page-design/
 ├── README.md                          本文件（索引 + 归属判定）
-├── design-tokens.md                   原子 SSOT（色/字/距/影/动效）— 所有值的唯一来源
-├── v6-tokens.css                      v6 token 值真值固化（自 .tmp/v6 demo，随仓库提交）
-├── design-system.md                   组件原语层（Card/Input/Button 等如何用 tokens）
+├── v6-tokens.css                      值 SSOT（hook check_css_token_ssot.py 对照面；运行时真值 = style.css :root，逐 token why 注释在两处 css 内）
+├── design-system.md                   组件原语层（Card/Input/Button 等如何用 tokens；历史参考，冲突以 v6 为准）
 ├── v6-master-spec.md                  ★ v6 单一权威源（决策与范式，整合自 28 份过程文档 + demo）
 ├── v6-design.md                       v6 五原则原始定稿（被 master-spec 取代为实现细节参考）
 ├── v6-summary.md                      v6 设计稿总览（索引与摘要）
 ├── ui-design-principles.md            UI/UX 设计方法论（认知负荷/格式塔/WCAG，色相无关）
 ├── pi-launch-presets.md               pi 启动预设设计（被 packages/ 5 处源文件引用）
-├── 2026-08-02-taiji-v3-color-decision.md  太极 V3 纯灰配色决策记录
 ├── v6-spec-tokens.html                v6 token 集 + 标注规范
 ├── v6-spec-*.html                     v6 各视图视觉稿（15 个文件，部分已滞后于 master-spec）
 ├── v6-spec-base.css                   对话流共享 CSS
 ├── v6-plugin-max-demo.html            plugin 最大化交互原型
-├── markdown-filepath-redesign/        Markdown 文件路径识别重构设计（已落地）
 ├── logo/                              品牌 logo 素材与设计稿
 │   ├── assets/qianwen/                当前唯一活跃素材库（千问双鱼）
 │   └── archive/pre-2026-08-qianwen/   已淘汰素材（butterfly/taiji/taiji-fish + concepts）
@@ -36,15 +33,15 @@ page-design/
 ```
 v6-master-spec.md      ← v6 单一权威源（决策与范式）
         ↑ 冲突时以此为准
-design-tokens.md       ← 原子真值（色/字/距/影/动效）
-        ↑ token 层以此为准
-v6-tokens.css          ← token 值真值固化（自 .tmp/v6 demo，随仓库提交）
-        ↑ 值以此为准（.tmp 不随仓库提交）
+v6-tokens.css          ← token 值 SSOT（hook 守卫的登记对照面；色相决策见 ADR-0066）
+        ↑ 值以此为准
+style.css :root        ← 运行时真值（逐 token why 注释；新增 token 必须同批登记进 v6-tokens.css）
+        ↑ 组件实现
 .tmp/v6/ demo          ← 活验证层（组件实现对照，值以 v6-tokens.css 为准）
 ```
 
 - **v6-master-spec.md 是 v6 单一权威源**：整合自 v6-design.md / v6-summary.md / v6-review-* / v6-fix-plan / v6-spec-*.html 等 28 份过程文档 + demo。冲突时以 master-spec §4 + v6-tokens.css 为准
-- **design-tokens.md 是值的唯一来源**：CSS 变量必须全部能在此找到
+- **v6-tokens.css 是值登记的唯一对照面**（2026-09-13 收口，原 design-tokens.md 已删除，git 可追溯）
 - **过程文档已降级**：v6-design.md / v6-spec-*.html 作为实现细节参考保留，不代表当前最新决策
 
 ## archive/ 目录说明
@@ -77,7 +74,7 @@ v3 视觉稿（shell/sidebar/panel/settings 等）已被 v6 取代并删除。�
 
 | 问题 | 去向 |
 |------|------|
-| 色值/字体/圆角/阴影/动效的值定义？ | `design-tokens.md` |
+| 色值/字体/圆角/阴影/动效的值定义？ | `v6-tokens.css`（登记对照面；运行时值在 style.css） |
 | v6 决策与范式？ | `v6-master-spec.md` |
 | 组件原语（Card 族、Input、Button）的形态/状态？ | `design-system.md` |
 | v6 视觉稿（某视图的标注规范）？ | `v6-spec-*.html`（参考，以 master-spec 为准） |
@@ -88,13 +85,13 @@ v3 视觉稿（shell/sidebar/panel/settings 等）已被 v6 取代并删除。�
 
 ## 关键约束
 
-1. **tokens 是唯一值源**：`packages/renderer/src/style.css` 的 CSS 变量必须全部能在 `design-tokens.md` 找到（pre-commit hook `check_css_token_ssot.py` 强制校验）
+1. **tokens 是唯一值源**：`packages/renderer/src/style.css` 的 CSS 变量必须全部能在 `v6-tokens.css` 找到（pre-commit hook `check_css_token_ssot.py` 强制校验）
 2. **ADR 归架构目录**：设计决策记录放 `docs/adr/`，不放本目录
 
 ## 相关文档
 
 - [ADR-0019 视觉方向](../adr/0019-visual-direction.md) — v3 冷蓝暗色确立
-- [太极 V3 配色决策](./2026-08-02-taiji-v3-color-decision.md) — 纯灰配色方向定案
+- [ADR-0066 太极纯灰配色](../adr/0066-taiji-pure-grey-color-direction.md) — 纯灰配色方向定案（原配色决策文档已删除，git 可追溯）
 - [UI 设计演变史](../design-evolution.md) — Warm&Soft → v3 → v6 → 太极纯灰完整叙事
 - [领域术语表](../architecture/context.md) — UI 结构术语
 - [编码规范 §设计](../standards.md) — 前端设计规则

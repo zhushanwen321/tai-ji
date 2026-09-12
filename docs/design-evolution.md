@@ -101,7 +101,7 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 用户想把产品做成符合**太极/阴阳鱼/圆/相生相克/周而复始**概念的风格。v6 的冷蓝 accent 与太极概念无关。
 
-[2026-08-02-taiji-v3-color-decision.md](page-design/2026-08-02-taiji-v3-color-decision.md) 经三轮对比后确定方向：
+换色决策经三轮对比后确定方向（决策记录现居 [ADR-0066](adr/0066-taiji-pure-grey-color-direction.md)；原 2026-08-02-taiji-v3-color-decision.md 已删除，git 可追溯）：
 
 1. **色相方案**：墨青 / 墨朱 / 纯太极 → 选定**纯太极**（纯灰系）。墨青基底仍冷、太极纯粹感不够；墨朱红久盯会燥且与 danger 语义冲突
 2. **克制梯度**：浅 / 中 / 重 / 极简 → 选定**重克制 V3**（`--accent #cfcfd4`）。V4 极简灰度完全零色相，导致 M/A/D 变更集 badge 无法靠颜色分辨，语义损失过大
@@ -110,11 +110,11 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 太极概念的三层拆解中，V3 只覆盖「色」层。「形」（圆/环，需加大圆角或 S 曲线分割）和「动」（周而复始，需太极旋转 loader）是独立工作线，不在本次换色范围。
 
-换色已落地到 `design-tokens.md`（V3 纯灰真值）和 `.tmp/v6/` Vue demo（taiji 预设）。
+换色已落地到 `v6-tokens.css`（V3 纯灰值 SSOT，hook 守卫）和 `.tmp/v6/` Vue demo（taiji 预设）。
 
 **标志文档**：
-- [2026-08-02-taiji-v3-color-decision.md](page-design/2026-08-02-taiji-v3-color-decision.md)（换色决策，含完整色值对比表和否决方案）
-- [design-tokens.md](page-design/design-tokens.md)（V3 纯灰真值，当前 SSOT）
+- [ADR-0066](adr/0066-taiji-pure-grey-color-direction.md)（换色决策与被否方案；原配色决策文档已删除，git 可追溯）
+- [v6-tokens.css](page-design/v6-tokens.css)（V3 纯灰值 SSOT）
 
 ---
 

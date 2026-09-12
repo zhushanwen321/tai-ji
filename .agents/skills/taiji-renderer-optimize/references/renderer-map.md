@@ -82,5 +82,5 @@ node scripts/dev-smoke.mjs                                               # exit 
 - `docs/adr/0049-session-isolation-map-partition.md` — Map 分区范式 SSOT（含 CR checklist）
 - `docs/standards.md` — §2.2 refCount、§3 聊天 UI 布局/自动滚动/streaming 生命周期、§7 样式规范
 - `docs/architecture/conversation-stream-block-rendering.md` — block 渲染顺序/streaming 零跳变设计
-- `docs/page-design/design-tokens.md` + `v6-master-spec.md` — 设计 token SSOT
+- `docs/page-design/v6-tokens.css` + `v6-master-spec.md` — 设计 token 值 SSOT（hook 守卫）
 - 代码注释引用的"perf 07 文档"不在 docs/ 下（在 cw harness 目录），以代码注释为准

@@ -79,7 +79,7 @@ components:
 ---
 
 > ⚠️ **DEPRECATED by [ADR-0019](docs/adr/0019-visual-direction.md)** (2026-06-18).
-> Warm & Soft 设计系统已被推翻。真身见 [docs/page-design/design-tokens.md](docs/page-design/design-tokens.md)（原子 SSOT）+ [docs/page-design/design-system.md](docs/page-design/design-system.md)（原语层）。
+> Warm & Soft 设计系统已被推翻。真身见 [docs/page-design/v6-tokens.css](docs/page-design/v6-tokens.css)（原子值 SSOT）+ [docs/page-design/v6-master-spec.md](docs/page-design/v6-master-spec.md)（范式 SSOT；原 design-tokens.md / design-system.md 已删除，git 可追溯）。
 > 本文件保留作历史参考，不再作为当前规范。
 
 # Design System: xyz-agent (DEPRECATED · Warm & Soft)

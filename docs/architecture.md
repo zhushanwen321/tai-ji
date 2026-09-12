@@ -38,7 +38,7 @@
 
 ## 渲染进程（renderer）
 
-Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + xyz-ui 组件库。设计系统为太极纯灰暗色（token SSOT：[design-tokens.md](./page-design/design-tokens.md)，范式：[v6-master-spec.md](./page-design/v6-master-spec.md)）。
+Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + xyz-ui 组件库。设计系统为太极纯灰暗色（token 值 SSOT：[v6-tokens.css](./page-design/v6-tokens.css)，范式：[v6-master-spec.md](./page-design/v6-master-spec.md)）。
 
 | 职责 | 位置 | 说明 |
 |------|------|------|
@@ -107,7 +107,7 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 ## 视觉与交互层
 
-- [设计 Tokens（SSOT）](./page-design/design-tokens.md) — 太极纯灰暗色原子值 · [v6 主规范](./page-design/v6-master-spec.md)
+- [设计 Tokens（值 SSOT）](./page-design/v6-tokens.css) — 太极纯灰暗色原子值 · [v6 主规范](./page-design/v6-master-spec.md)
 - [v3 UI 设计稿（归档）](./page-design/archive/v3/README.md) — L0–L4 递归骨架 + 22 个 draft
 - 视觉/交互 ADR 0019–0023（见下）
 

@@ -1,4 +1,17 @@
-/* v6 视觉 token 块（默认 = 太极 · 玄 定稿值，2026-08-02；主题预设见 TokenDebugPage）*/
+/* v6 视觉 token 块（默认 = 太极 · 玄 定稿值，2026-08-02；主题预设见 TokenDebugPage）
+ *
+ * 值唯一权威（2026-09-13 收口，ADR-0066）：运行时真值在 packages/renderer/src/style.css
+ * 的 :root 与 [data-theme="light"]（含逐 token 行内 why 注释与亮色族完整覆盖）。
+ * 本文件是同一套值的固化镜像，作为「新增 token 必须登记」的机器守卫对照面
+ * （.githooks/check_css_token_ssot.py 校验 style.css :root ⊆ 本文件）。
+ * 新增/修改 token：先改 style.css，同批在此登记。
+ *
+ * 明度阶梯决策史（详见 ADR-0066 与 git 历史设计文档）：
+ * - 2026-07-09 提亮对标 VS Code Dark+（bg L 0.0041 → 0.0110，长时使用体感「太暗」修复）
+ * - 2026-07-12 拉大层级间距（相邻层 Δ<3% 肉眼不可辨 → bg→surface 拉到 Δ13≈5%，逐层 ≥Δ5）
+ * - subtle 系对比度校准至 ≥4.5:1（WCAG AA，原 2.85:1 不达标）
+ * - 2026-08-02 冷蓝 → 纯灰系（太极·玄定稿，色相决策见 ADR-0066）
+ */
 :root {
   /* 背景层级（阶梯上抬+加宽级差，暗端防糊） */
   --bg-stage: #0a0a0c; /* 舞台深底（最外层衬底，低于 --bg）。亮色（皓族）覆盖 #dbd9d4 见 style.css [data-theme=light]；本文件仅固化玄·暗 :root 定稿值（亮色族值见 design-tokens.md 亮色表） */
@@ -135,6 +148,31 @@
   --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
   --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
   --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+
+  /* ── style.css 同步组（2026-09-13 收口补登记，语义详见 style.css 行内注释）── */
+  --bubble-bg: var(--surface-hover);        /* 用户气泡底（暗浮起灰 / 亮纯白白纸化） */
+  --composer-bg: var(--bg-input);           /* composer 输入区底 */
+  --bar-fill-soft: 55%;                     /* progress-bar fill 柔化档 */
+  --message-stream-pad-top: 20px;           /* 消息流顶部留白（scrollEl pt 与 TurnMeta sticky 同源） */
+  --font-scale-sidebar: 1;                  /* 分区字号倍率（[data-fs-scope] 子树链乘） */
+  --font-scale-chat: 1;
+  --font-scale-drawer: 1;
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
+  /* shadcn-vue 命名空间别名（映射到 v6 语义，不引入新色值；语义分歧登记见 style.css :root 注释） */
+  --primary: var(--accent);
+  --primary-foreground: var(--neutral-fg);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--neutral-fg);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--neutral-fg);
+  --muted-foreground: var(--neutral-mid);
+  --accent-foreground: var(--neutral-fg);
+  --background: var(--bg);
+  --foreground: var(--neutral-fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--neutral-fg);
+  --input: var(--border);
+  --ring: var(--accent);
 }
 
 /* 视口自适应字号（与 :root 的 --font-scale-mq 配合）：
