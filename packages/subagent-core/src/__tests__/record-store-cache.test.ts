@@ -130,7 +130,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     const records = store.collectRecords(100, "all", "root-1");
     const a = records.find((r) => r.id === "sa-1");
     const b = records.find((r) => r.id === "sa-2");
-    expect(a?.status).toBe("closed");
+    expect(a?.status).toBe("idle");
     // [v8.5 A2] 空 sidecar 兜底 disconnected（旧格式：死因不可考），不再误导为 gc。
     // reason 读回的正向用例在 ended-message-and-fork-from.test.ts。
     expect(a?.closedReason).toBe("disconnected");
@@ -150,7 +150,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     );
 
     const rec = store.collectRecords(100, "all", "root-1")[0];
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("cancelled");
     expect(rec.error).toBe("cancelled by user");
     expect(rec.endedAt).toBe(3000);
@@ -175,7 +175,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
 
     const light = store.collectRecords(100, "all", "root-1")[0];
     expect(light.id).toBe("sa-1");
-    expect(light.status).toBe("closed");
+    expect(light.status).toBe("idle");
     expect(light.result).toBeUndefined();
     expect(light.eventLog).toEqual([]);
     expect(light.displayItems).toEqual([]);
@@ -194,7 +194,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     expect(full?.totalTokens).toBe(15); // input 10 + output 5
     expect(full?.eventLog.length).toBeGreaterThan(0); // turn_end 派生事件
     expect(full?.displayItems.length).toBeGreaterThan(0);
-    expect(full?.status).toBe("closed"); // 状态矩阵同样套用
+    expect(full?.status).toBe("idle"); // 状态矩阵同样套用
 
     // 已缓存：去掉读权限再取，仍返回全量（不重读文件）
     fs.chmodSync(f, 0o000);

@@ -189,7 +189,7 @@ A 的关键约束（不是自由设计）：
 | U2-1 契约定义 | registry.json schema/目录布局/终态枚举/ownerPiPid 语义入 `@xyz-agent/extension-protocol`（新 section + zod/TS 类型） | `packages/extension-protocol/src/background-task.ts`（新）、index.ts 导出 | 跨层契约 SSOT（P2）；D2 决策 |
 | U2-2 runtime 收殓器（双触发面） | 判定逻辑移植（reaper.ts 三分支 + isPidAlive/getProcessStartTimeSec/pid 复用防御，Node 环境实现）；**触发面 A**：onSessionDestroyed 汇聚点挂接，fire-and-forget（void + catch warn，含 spawnSync ps 5s 超时不阻塞销毁链）；**触发面 B**：startup-background-init 新增启动期全量扫描（扫 `<agentDir>/base-tool-enhance/*/registry.json`，**硬序：链式 await reapOrphanPiProcesses 完成后执行**，时序论证见 §2.3），顺带 rmdir stale reaper.lock 残留；写 registry 用统一锁 sync 版 | `packages/runtime/src/services/session/background-task-reaper.ts`（新）、`session-service.ts` 挂接（onSessionDestroyed 汇聚点本体 removeSessionEntry——transport/server.ts 为注册方而非汇聚点，DE2 澄清）、`startup-background-init.ts` 挂接（与孤儿 pi 收殓定时器的链式编排）、装配 | 职责归位 + 兜底等价承接（P2）；S4a/S4b |
 | U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@xyz-agent/extension-protocol` 依赖 | 触发面消失（P2）；S4a/S4b/S6 |
-| U2-4 文档同步 | base-tool-enhance 设计文档 §3.5 收殓章节标注下沉（历史沿革 + 新链路指引）；release note 段落：npm 旧装残留卸载指引（参照 unified-hooks 先例） | `docs/design/base-tool-enhance.md`、发布说明草稿 | 文档符号漂移守护（C-proc-10）；S5 |
+| U2-4 文档同步 | base-tool-enhance 设计文档 §3.5 收殓章节标注下沉（历史沿革 + 新链路指引）；release note 段落：npm 旧装残留卸载指引（参照 unified-hooks 先例） | `docs/design/base-tool-enhance.md`（已随 2026-09 docs 清理删除，git 可追溯）、发布说明草稿 | 文档符号漂移守护（C-proc-10）；S5 |
 
 ### 批次 3：pi 环境守卫 + 观测补齐
 

@@ -275,7 +275,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     // 治理面不过滤：workflow origin 孤儿照样被收敛终态（无文件判据 closed+gc+error）
     const finalized = recovered.find((e) => e.id === "wf-orphan");
     expect(finalized).toBeDefined();
-    expect(finalized?.status).toBe("closed");
+    expect(finalized?.status).toBe("idle");
     expect(finalized?.closedReason).toBe("gc");
     // 终态 entry 保留来源身份（origin/parentRunId 不因恢复链丢失）
     expect(finalized?.origin).toBe("workflow");

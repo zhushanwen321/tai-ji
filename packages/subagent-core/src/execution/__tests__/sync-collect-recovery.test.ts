@@ -364,7 +364,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     store.reportSubagentRecord(
       memberRecord({
         id: "sa-a",
-        status: "closed",
+        status: "idle",
         closedReason: "gc",
         endedAt: 2000,
         result: "done-A",
@@ -373,15 +373,15 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 成员 B：failed 终态（error 字段）
     store.reportSubagentRecord(memberRecord({ id: "sa-b" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-b", status: "closed", closedReason: "gc", endedAt: 3000, error: "boom" }),
+      memberRecord({ id: "sa-b", status: "idle", closedReason: "gc", endedAt: 3000, error: "boom" }),
     );
     // 成员 C：已落标（batchFinalized，E9/flush 后形态）
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-c", status: "closed", closedReason: "gc", endedAt: 4000, batchFinalized: true }),
+      memberRecord({ id: "sa-c", status: "idle", closedReason: "gc", endedAt: 4000, batchFinalized: true }),
     );
     // 成员 D：async（无 collectMode）终态
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-d", status: "closed", closedReason: "gc", endedAt: 5000, collectMode: undefined }),
+      memberRecord({ id: "sa-d", status: "idle", closedReason: "gc", endedAt: 5000, collectMode: undefined }),
     );
 
     // 恢复侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问，与
@@ -393,7 +393,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 终态五字段 + 两标记字段全可见（末条 last-writer-wins）
     const a = byId.get("sa-a");
     expect(a).toBeDefined();
-    expect(a!.status).toBe("closed");
+    expect(a!.status).toBe("idle");
     expect(a!.endedAt).toBe(2000);
     expect(a!.closedReason).toBe("gc");
     expect(a!.result).toBe("done-A");
@@ -413,23 +413,23 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
     store.reportSubagentRecord(memberRecord({ id: "sa-b" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-b", status: "closed", closedReason: "gc", endedAt: 3000, error: "boom" }),
+      memberRecord({ id: "sa-b", status: "idle", closedReason: "gc", endedAt: 3000, error: "boom" }),
     );
     // 排除面 1：async 终态成员不入批
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-async", status: "closed", closedReason: "gc", endedAt: 4000, collectMode: undefined }),
+      memberRecord({ id: "sa-async", status: "idle", closedReason: "gc", endedAt: 4000, collectMode: undefined }),
     );
     // 排除面 2：已标记成员（E9 转换后重启形态）不入批
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-marked", status: "closed", closedReason: "gc", endedAt: 5000, batchFinalized: true }),
+      memberRecord({ id: "sa-marked", status: "idle", closedReason: "gc", endedAt: 5000, batchFinalized: true }),
     );
     // 排除面 3：异根成员不入批
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-foreign", status: "closed", closedReason: "gc", endedAt: 6000, rootSessionId: "other-root" }),
+      memberRecord({ id: "sa-foreign", status: "idle", closedReason: "gc", endedAt: 6000, rootSessionId: "other-root" }),
     );
 
     const pi = makeAssertPi();
@@ -503,7 +503,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
 
     // 第一次恢复：notifyBatch 返回 false（模拟「批闭合写账成功、落标前崩溃」后账本已在该批）
@@ -523,7 +523,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 标记真实落盘（写文件 pi 把补标 entry 追加进主文件——flush 后形态）
     const seedForMark = makeSeedStore();
     seedForMark.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A", batchFinalized: true }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A", batchFinalized: true }),
     );
 
     // 第二次恢复：全员已标记 → 零补发零 notify（收敛，无振荡）
@@ -538,7 +538,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
     // 在跑成员：末条 running（子进程活到重启后的形态）
     store.reportSubagentRecord(memberRecord({ id: "sa-running" }));
@@ -617,7 +617,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
     // 写 config（collectSync 预算字段）+ reload —— 与 getCollectSyncDefault 同款访问链
     const configPath = path.join(agentDir, "subagents", "config.json");
@@ -663,7 +663,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 断链 2 核心断言：覆写 entry（主文件末条）保留批域标记与轮终正文/模型——
     // 重建矩阵不含这些字段，不 merge 就会被覆写抹掉（E1 候选集恒空的真根因）。
     const overwritten = readMainFileLastEntries().get("sa-kill9")!;
-    expect(overwritten.status).toBe("closed");
+    expect(overwritten.status).toBe("idle");
     expect(overwritten.closedReason).toBe("gc");
     expect(overwritten.collectMode).toBe("sync");
     expect(overwritten.result).toBe("kill-9 full result body");
@@ -720,7 +720,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     makeRecoveryService(recoveryPi); // initSession 内 orphan 覆写真实跑
 
     const overwritten = readMainFileLastEntries().get("sa-async-ctl")!;
-    expect(overwritten.status).toBe("closed");
+    expect(overwritten.status).toBe("idle");
     // 批域字段对非 sync 成员恒 no-op：序列化产物不含这两键（merge 无值可补）
     expect(Object.hasOwn(overwritten, "collectMode")).toBe(false);
     expect(Object.hasOwn(overwritten, "batchFinalized")).toBe(false);
@@ -740,7 +740,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     makeRecoveryService(recoveryPi); // initSession 内 orphan 覆写（merge 生效点）真实跑
 
     const overwritten = readMainFileLastEntries().get("sa-merge-dir")!;
-    expect(overwritten.status).toBe("closed");
+    expect(overwritten.status).toBe("idle");
     // rec 侧 A（identity 重建值）胜出：merge 是「仅补 undefined/空值、不覆盖已有值」，
     // 恒取 src 的覆盖语义会把这里改写成 B —— pickStr 的 cur 半边由此锁定。
     expect(overwritten.model).toBe("prov-child/child-m-a");
@@ -808,7 +808,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
     // 在跑成员：末条 running（子进程活到重启后的形态，与既有 waiting 用例同构造）
     store.reportSubagentRecord(memberRecord({ id: "sa-late" }));
@@ -827,7 +827,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 成员延迟终态：冷路径 resume → 正常流终态落 entry（reportSubagentRecord 真实写点同构）
     const lateStore = makeSeedStore();
     lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-late", status: "closed", endedAt: 9000, result: "late full result" }),
+      memberRecord({ id: "sa-late", status: "idle", closedReason: "gc", endedAt: 9000, result: "late full result" }),
     );
 
     // settled 边沿 → 重扫一次（await 完整补发链：manifest 屏障 → 写账 → 落标）：
@@ -878,7 +878,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 第 9 次驱动时成员已补种终态：disposed 不再扫描（零补发 + waiting 日志不增）
     const lateStore = makeSeedStore();
     lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-stuck", status: "closed", endedAt: 9500, result: "too late" }),
+      memberRecord({ id: "sa-stuck", status: "idle", endedAt: 9500, result: "too late" }),
     );
     await pi.emitAgentSettled();
     expect(spy.notifyBatch).not.toHaveBeenCalled();
@@ -894,7 +894,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "closed", closedReason: "gc", endedAt: 2000, result: "done-A" }),
+      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
     );
     // 在跑成员：末条 running → E1 走等待分支并注册 settled 重扫
     store.reportSubagentRecord(memberRecord({ id: "sa-late" }));
@@ -912,7 +912,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // 成员补种终态 + trailing settled 边沿：handler 已惰化 → 零扫描（无 E1 日志）
     const lateStore = makeSeedStore();
     lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-late", status: "closed", endedAt: 9000, result: "late full result" }),
+      memberRecord({ id: "sa-late", status: "idle", endedAt: 9000, result: "late full result" }),
     );
     loggerMock.debug.mockClear();
     loggerMock.warn.mockClear();
@@ -951,7 +951,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       .map((c) => c[1] as Record<string, unknown>)
       .find((d) => d.id === "sa-p-rebuild");
     expect(entry).toBeDefined();
-    expect(entry!.status).toBe("closed");
+    expect(entry!.status).toBe("idle");
     expect(entry!.closedReason).toBe("gc");
     expect(String(entry!.error)).toContain("no child session file");
   });
@@ -985,7 +985,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const pm = withManifest.find((r) => r.id === "sa-pm");
     expect(pm).toBeDefined();
     // 投影来自子文件 sidecar 重建（closed+gc），非 manifest（status="running"）
-    expect(pm!.status).toBe("closed");
+    expect(pm!.status).toBe("idle");
     expect(pm!.closedReason).toBe("gc");
 
     // 删 manifest 文件 → 同款重建 → 投影逐字段一致（不变量：manifest 的存在不改变
@@ -1104,6 +1104,6 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(h1Last).toBeDefined();
     expect(h1Last!.batchFinalized).toBe(true);
     expect(h1Last!.collectMode).toBe("sync");
-    expect(h1Last!.status).toBe("closed");
+    expect(h1Last!.status).toBe("idle");
   });
 });

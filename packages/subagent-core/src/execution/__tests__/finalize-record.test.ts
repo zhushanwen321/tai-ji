@@ -571,7 +571,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-idle", sessionFile, chatMode: true, round: 0 });
     // tryTransition 已把 status 设为 done，模拟 runAndFinalize 调用前的状态
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
 
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
@@ -588,7 +588,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const record = makeMinimalRecord({ id: "rec-frozen", chatMode: true });
     // closeChatIdle / disposeAllRecords 等完整终态化路径的产物：completeRecord 已跑
     //（endedAt 冻结）+ status=closed。迟到的轮末分流调用必须被断言拒绝。
-    record.status = "closed";
+    record.status = "idle";
     record.closedReason = "user-close";
     record.endedAt = 12345;
     store.register(record);
@@ -599,7 +599,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     );
     // 断言先于任何簿记副作用：round 不推进、状态不回滚、无迁移上报
     expect(record.round).toBeUndefined();
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(transitionSpy).not.toHaveBeenCalled();
     expect(deps.emitUnregister).not.toHaveBeenCalled();
   });
@@ -608,7 +608,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const { deps, store } = makeDeps();
     const transitionSpy = vi.spyOn(store, "reportRecordTransition");
     const record = makeMinimalRecord({ id: "rec-report", chatMode: true, round: 2 });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(transitionSpy).toHaveBeenCalledTimes(1);
@@ -620,7 +620,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("record.round 已为 N → round 变 N+1", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-round", round: 3 });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(record.round).toBe(4);
@@ -631,7 +631,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const { deps, store } = makeDeps();
     const archiveSpy = vi.spyOn(store, "archive");
     const record = makeMinimalRecord({ id: "rec-noarchive" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(archiveSpy).not.toHaveBeenCalled();
@@ -644,7 +644,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
       id: "rec-noworktree",
       worktreeHandle: { path: "/tmp/x", branch: "b", baseCommit: "c", mainCwd: "/tmp" } as never,
     });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(deps.worktreeManager.cleanup).not.toHaveBeenCalled();
@@ -657,7 +657,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const unregisterSpy = vi.fn();
     store.setPendingUnregister(unregisterSpy);
     const record = makeMinimalRecord({ id: "rec-emit" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(unregisterSpy).toHaveBeenCalledWith("rec-emit", "running");
@@ -666,7 +666,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("不调 completeRecord：record 不冻结（endedAt / agentResult 仍 undefined）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-nofreeze" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(record.endedAt).toBeUndefined();
@@ -676,7 +676,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("不写 manifest（idle 非终态，manifest 是终态诊断辅助）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-nomanifest" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     const manifest = await manifestStore.readManifest("rec-nomanifest");
@@ -686,7 +686,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("MF-2: record.result 设为轮终 content（否则 notifier idle 回复恒为 (empty)，G1/G2 不成立）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-result" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     // [H1 U2 / D7] outcome 入参适配：成功轮正文 = content
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "review done, found 3 issues" });
@@ -697,7 +697,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("MF-2 兑底：失败轮次（无前值）record.result 用失败摘要填充（D7 outcome 入参：前值 ?? 失败摘要）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-result-err" });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "failed", reason: "spawn timeout" });
     // 失败轮次的 notify 需可读：无前值可保 → 兜底失败摘要
@@ -707,7 +707,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("D7 失败轮前值保留：有最后成功正文时 result 不被失败摘要覆盖（GUI record 视图不被失败污染）+ lastError 写失败原因", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-fail-keep-prev", chatMode: true });
-    record.status = "closed";
+    record.status = "idle";
     record.result = "last successful round output"; // 前值（有最后成功正文则保留）
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "failed", reason: "watchdog kill" });
@@ -719,7 +719,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("D7 失败轮 lastError 写失败原因（排障面——renderer 在 result 非 undefined 时不显示 error，无视觉影响）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-fail-last-error", chatMode: true });
-    record.status = "closed";
+    record.status = "idle";
     record.lastError = undefined;
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "failed", reason: "engine_round_crashed: x" });
@@ -730,7 +730,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("D7 成功轮 lastError 不混入正文：空 content 成功轮兜底 '(no output this round)'（旧 lastError 混入形态退役）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-success-no-mix", chatMode: true });
-    record.status = "closed";
+    record.status = "idle";
     record.lastError = "stale error from previous round";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "" });
@@ -741,7 +741,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("T2-③/LC-1: 失败轮 record.result 写失败摘要、不回显轮内旧正文（D7：可达性从 result 字段迁移到通知 outcome——失败通知由 Continuation 独立承载失败原因 + 恢复指引）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-result-err-text", chatMode: true });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     const failureReason =
       "subagent did not reach agent_settled within 10 min (settled watchdog); the process was terminated to bound the wait. Recovery: check state with subagents action:'list', then re-send your message to continue.";
@@ -754,7 +754,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("C1TC10: chatMode 空增量轮占位——record.result 固定 (no output this round)，不含上一轮文本（D5）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-increment-empty", chatMode: true });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     // 预置上一轮通知文本（模拟增量语义前的 record.result 残留）
     record.result = "PREV-ROUND-TEXT";
@@ -767,7 +767,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("C1TC11 [R2-1]: one-shot 首轮空文本成功完成 → record.result 补占位「(empty)」（非 undefined）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-oneshot-empty", chatMode: false });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     // one-shot 成功空文本完成路径（collectResult getFullText 返回 ""、success=true）：
     // result 前值 undefined
@@ -784,7 +784,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("C1TC11b [R2-1]: one-shot 续轮空文本 → 沿用前值（one-shot 无增量语义，不覆盖为占位）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-oneshot-cont", chatMode: false });
-    record.status = "closed";
+    record.status = "idle";
     store.register(record);
     // 上一轮真实产出（续轮 record.result 前值）
     record.result = "first round output";

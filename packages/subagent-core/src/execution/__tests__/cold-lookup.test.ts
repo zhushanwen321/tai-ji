@@ -43,7 +43,7 @@ function makeFound(overrides: Partial<SubagentRecord> = {}): SubagentRecord {
     agent: "general-purpose",
     task: "cold recovery task",
     slug: "cold-test",
-    status: "closed",
+    status: "idle",
     closedReason: "parent-shutdown",
     mode: "background",
     startedAt: 1_700_000_000_000,

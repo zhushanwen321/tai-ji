@@ -46,7 +46,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
     expect(records).toHaveLength(1);
     expect(records[0].id).toBe("orphan-1");
     expect(records[0].agent).toBe("worker");
-    expect(records[0].status).toBe("closed");
+    expect(records[0].status).toBe("idle");
     expect(records[0].startedAt).toBe(1000);
     expect(records[0].endedAt).toBe(2000);
   });
@@ -152,9 +152,9 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
     const records = store.collectRecords(100, "all", "session-main");
     expect(records).toHaveLength(3);
 
-    expect(records.find((r) => r.id === "status-completed")?.status).toBe("closed");
-    expect(records.find((r) => r.id === "status-failed")?.status).toBe("closed");
-    expect(records.find((r) => r.id === "status-cancelled")?.status).toBe("closed");
+    expect(records.find((r) => r.id === "status-completed")?.status).toBe("idle");
+    expect(records.find((r) => r.id === "status-failed")?.status).toBe("idle");
+    expect(records.find((r) => r.id === "status-cancelled")?.status).toBe("idle");
   });
 
   it("mapManifestStatus 越界值返回 null：collectRecords 跳过损坏 record（不降级 failed）", async () => {
@@ -185,7 +185,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
     // 只剩 good——损坏 record 被跳过 + console.warn,不误显示为 failed
     expect(records).toHaveLength(1);
     expect(records[0].id).toBe("good");
-    expect(records[0].status).toBe("closed");
+    expect(records[0].status).toBe("idle");
   });
 
   it("in-memory records should take priority over manifest records", async () => {

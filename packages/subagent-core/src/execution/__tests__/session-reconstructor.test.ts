@@ -108,7 +108,7 @@ describe("reconstructFromFile", () => {
       expect(rec!.agent).toBe("worker");
       expect(rec!.mode).toBe("background");
       expect(rec!.task).toBe("do it");
-      expect(rec!.status).toBe("closed");
+      expect(rec!.status).toBe("idle");
       expect(rec!.turns).toHaveLength(1);
       expect(rec!.turns[0].text).toBe("hello world");
       expect(rec!.turnCount).toBe(1);
@@ -290,7 +290,7 @@ describe("reconstructFromFile", () => {
       const rec = reconstructFromFile(filePath);
       expect(rec!.lastError).toBe("API timeout");
       expect(rec!.error).toBe("API timeout");
-      expect(rec!.status).toBe("closed"); // error stopReason → failed
+      expect(rec!.status).toBe("idle"); // error stopReason → failed
     });
 
     it("stopReason=aborted 无 errorMessage → lastError = 'aborted'", () => {
@@ -301,7 +301,7 @@ describe("reconstructFromFile", () => {
       ]);
       const rec = reconstructFromFile(filePath);
       expect(rec!.lastError).toBe("aborted");
-      expect(rec!.status).toBe("closed");
+      expect(rec!.status).toBe("idle");
     });
 
     it("前序 error 但最后 stop → lastError 清除（镜像 turn_end 语义），status=done", () => {
@@ -315,7 +315,7 @@ describe("reconstructFromFile", () => {
       ]);
       const rec = reconstructFromFile(filePath);
       expect(rec!.lastError).toBeUndefined(); // 后续 stop 清除了 error
-      expect(rec!.status).toBe("closed");
+      expect(rec!.status).toBe("idle");
       expect(rec!.result).toBe("oops\n\nrecovered");
     });
   });

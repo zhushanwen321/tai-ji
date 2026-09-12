@@ -19,6 +19,7 @@
     "@xyz-agent/session-delivery": "workspace:*",
     "@xyz-agent/shared": "workspace:*",
     "@zhushanwen/pi-file-lock": "workspace:*",
+    "@zhushanwen/pi-rpc": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
     "xyz-agent-plugin-sdk": "workspace:*",
     "chokidar": "^4.0.1",

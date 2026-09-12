@@ -183,8 +183,8 @@ describe("T2④ service-side kill convergence", () => {
     expect(hasIdleTimer(idle.id)).toBe(false);
     expect(hasSettledWatchdog(idle.id)).toBe(false);
     // record 终态化
-    expect(running.status).toBe("closed");
-    expect(idle.status).toBe("closed");
+    expect(running.status).toBe("idle");
+    expect(idle.status).toBe("idle");
     expect(running.closedReason).toBe("parent-new");
   });
 });

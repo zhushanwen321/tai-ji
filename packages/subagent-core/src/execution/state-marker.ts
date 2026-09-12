@@ -42,11 +42,11 @@ import * as fs from "node:fs";
 
 import { getLogger } from "../core/logger.ts";
 
-import type { AbandonedRoundMark, Epoch, RecordOrigin, TranscriptRef } from "./types.ts";
+import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "./types.ts";
 
 const logger = getLogger("subagents");
 
-/** 终态 sidecar 扩展名（写侧新名 + 读侧兼容旧名；GC 清理名单与此同源语义）。 */
+/** 终态/收口 sidecar 扩展名（写侧新名 + 读侧兼容旧名；GC 清理名单与此同源语义）。 */
 export const STATE_SIDECAR_EXT = ".state";
 
 /** record 绑定 sidecar 扩展名（UF-1：宿主侧 id→file 映射载体）。 */
@@ -97,15 +97,20 @@ export function _setStateMarkerSleepForTest(fn: ((ms: number) => void) | undefin
 // 类型
 // ============================================================
 
-/** 终态二态（互斥）。 */
-export type TerminalState = "finalized" | "cancelled";
+/**
+ * `.state` status 值域：旧终态二态（finalized/cancelled）+ 新收口语（idle，永久会话
+ * 模型 §3.2.4——「上一轮收条」而非死亡证明，U2 写侧先行，读侧兼容归 U3）。
+ */
+export type TerminalState = "finalized" | "cancelled" | "idle";
 
-/** 终态 sidecar 归一形态（新名直读 / 旧名兼容读出共用）。 */
+/** `.state` sidecar 归一形态（新名直读 / 旧名兼容读出共用）。 */
 export interface StateMarker {
   status: TerminalState;
-  /** finalized 的关闭原因；空串 = 旧格式空文件（死因不可考）；cancelled 恒 undefined。 */
+  /** finalized 的关闭原因；空串 = 旧格式空文件（死因不可考）；cancelled 恒 undefined；
+   *  idle = 收口 stopReason（新格式，§3.2.4——读侧映射归 U3）。 */
   reason?: string;
-  /** cancelled 的精确结束时间；finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
+  /** cancelled 的精确结束时间；finalized 恒 undefined（重建走 jsonl 末 entry ts）；
+   *  idle = 收口时间（新格式）。 */
   endedAt?: number;
 }
 
@@ -143,6 +148,32 @@ export function writeFinalizedState(sessionFile: string, reason?: string): boole
  */
 export function writeCancelledState(sessionFile: string, endedAt: number): boolean {
   return writeStateMarker(sessionFile, { status: "cancelled", endedAt });
+}
+
+/**
+ * [U2 / 永久会话模型 §3.2.4] 写轮收口 sidecar（新格式：`{status:"idle",
+ * stopReason?, endedAt?}`——「上一轮收条」而非死亡证明）。响应重试语义与两终态
+ * 写函数同源（writeStateMarker 响亮重试）。
+ *
+ * [U2/U3 接口对齐] 本函数是 markSettled 意图原语的 `.state` 写面；**读侧兼容
+ * （新格式 → idle + stopReason 的重建映射）归 U3**——U2/U3 窗口期内现有读侧
+ * （readNewStateMarker）对本格式落「存在性信号」降级分支（结构不合法 → finalized
+ * 存在性），即设计 §3.2.4 声明的「旧版读新值」良性降级形态（disconnected ∈ 可续）。
+ *
+ * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
+ *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义，U3 定）。
+ * @param endedAt 收口时间（收条精度；调用方传 Date.now()）。
+ * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
+ */
+export function writeSettledState(
+  sessionFile: string,
+  payload: { stopReason?: StopReason; endedAt?: number },
+): boolean {
+  return writeStateMarker(sessionFile, {
+    status: "idle",
+    ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
+    ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
+  });
 }
 
 /**

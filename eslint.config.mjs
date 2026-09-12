@@ -98,7 +98,7 @@ export default [
   },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
   // 生命周期挂钩）：runtime index.ts 是进程组装 barrel，main 基线 501 行即超，本次 +41。
-  // 拆分归独立重构单元（见 docs/design/idle-pi-reclamation.impl-plan.md），
+  // 拆分归独立重构单元（设计文档已删除，git 历史可追溯），
   // 禁止在 lint 收敛批次内拆文件重构。短期 max-lines override 避免阻塞。
   // [merge dev-0.9.17 2026-09] session-service.ts 已从本 off 块移除——config 末尾的
   // 软上限块（warn 650）语义更严且后位覆盖，双块并存 = 冲突；以末尾块为唯一权威。

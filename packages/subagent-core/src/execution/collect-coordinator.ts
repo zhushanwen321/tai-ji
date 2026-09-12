@@ -67,6 +67,9 @@ import type { ExecutionRecord } from "./types.ts";
  *  完整；纯注入测试的 SubagentRecord stub 结构兼容零改动。 */
 export interface CollectScanRecord {
   status: string;
+  /** [U2 桥接判据] 旧「closed 终态」读形态 = idle ∧ closedReason 有值（两态迁移
+   *  不变量；装配点从 ExecutionRecord/SubagentRecord 投影，字段自然携带）。 */
+  closedReason?: string;
   collectMode?: "sync";
   batchFinalized?: boolean;
   /** SP-5 执行态信号：true = 无活进程驱动的 running（one-shot 成功回退态）。
@@ -180,7 +183,9 @@ export class CollectCoordinator {
   }
 
   /** 是否存在非终态 sync 成员（collectMode=sync && 无 batchFinalized && 非终态）。
-   *  非终态口径（⛔3 U1 已核实 + U3 resumable 补丁）：status 非 closed 且非 resumable
+   *  非终态口径（⛔3 U1 已核实 + U3 resumable 补丁）：非已收口且非 resumable
+   *  （[U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值——两态迁移
+   *  不变量；markSettled 的轮间 idle 不携带 closedReason，同样不阻止闭合）。
    *  ——池排队/在跑成员在 store.register 时即 status="running"，自动计入（闭合等待它）；
    *  batchFinalized=true 的已离场成员不阻止闭合；running+resumable（SP-5 one-shot
    *  成功回退态，进程已死结果已定格）视为已完成，不阻止闭合。 */
@@ -190,7 +195,7 @@ export class CollectCoordinator {
         record.collectMode === "sync" &&
         record.batchFinalized !== true &&
         record.resumable !== true &&
-        record.status !== "closed"
+        !(record.status === "idle" && record.closedReason !== undefined)
       ) {
         return true;
       }

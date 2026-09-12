@@ -59,9 +59,9 @@ describe("deriveOutcome — 单一权威终态派生（行为锚定）", () => {
 describe("projectOutcome — 投影唯一出口（行为锚定）", () => {
   it("running → undefined；closed 一等 outcome 直读；存量 record 兜底派生", () => {
     expect(projectOutcome({ status: "running" })).toBeUndefined();
-    expect(projectOutcome({ status: "closed", outcome: "failed" })).toBe("failed");
-    expect(projectOutcome({ status: "closed", closedReason: "gc", error: "boom" })).toBe("failed");
-    expect(projectOutcome({ status: "closed" })).toBe("completed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "failed" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", error: "boom" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
   });
 });
 

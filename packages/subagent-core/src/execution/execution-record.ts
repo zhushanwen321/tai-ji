@@ -29,6 +29,7 @@ import type {
   InternalToolCall,
   ProjectedOutcome,
   RecordSnapshot,
+  StopReason,
   SubagentToolDetails,
   ToolCall,
   ToolCallResult,
@@ -682,19 +683,21 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
 // ============================================================
 
 /**
- * status 状态机的 CAS 互斥锁。仅当 `record.status === "running"` 时改为 target
- * 并返回 true，否则返回 false。**status 状态机本身就是互斥锁**——终态
- * （closed/cancelled）不可逆，check-then-set 在 JS 单线程事件循环里天然原子。
+ * status 状态机的 CAS 互斥锁（settle 方向：running → idle）。仅当
+ * `record.status === "running"` 时收口并返回 true，否则返回 false。**status 状态机
+ * 本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
  *
  * 用途：executor 的收尾竞争。cancelBackground 与 background detached 完成回调
  * 都调 tryTransition 抢锁：抢到负责完整收尾，没抢到闭嘴不做事。
  *
- * target 仅限正常执行流的两终态（closed + cancelled）。
- * closed 携带 closedReason（L2 原因子枚举），由重建路径或正常执行流写入。
- * 重建路径也可用 markReconstructedStatus 直接赋值（跳过 CAS）。
+ * [U2 桥接] 永久会话模型两态下旧「closed 终态」不再存在——本函数桥接为
+ * running→idle 收口 + closedReason/stopReason 双写（桥接不变量「closed ⟺ idle ∧
+ * closedReason≠undefined」的写侧半边，保持全部既有读侧 gate 语义零漂移）。
+ * target 参数保留旧字面量（调用方零改动）；新代码应改调 store.markSettled
+ * （U5 意愿动作接线时本函数随旧终态编排一并退役）。
  *
- * @param closedReason closed 终态的 L2 关闭原因。仅 target="closed" 时有意义；
- *   target="cancelled" 时忽略。缺省 "gc"（通用完成/失败）。
+ * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
+ *   缺省 "gc"（通用完成/失败）。
  */
 export function tryTransition(
   record: ExecutionRecord,
@@ -702,26 +705,51 @@ export function tryTransition(
   closedReason?: ClosedReason,
 ): boolean {
   if (record.status !== "running") return false;
-  record.status = target;
+  void target; // 桥接期唯一合法值（类型位保留）；新两态下收口目标恒 idle。
+  record.status = "idle";
   record.closedReason = closedReason ?? "gc";
+  record.stopReason = record.closedReason;
   return true;
 }
 
 /**
- * [v8.5 D] 透明重生唯一回边：closed → running，清除终态语义位。
+ * status 状态机的 CAS 互斥锁（wake 方向：idle → running，U2 新增）。仅当
+ * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在飞）/
+ * 其他形态一律拒绝。与 tryTransition（settle 方向）共同构成两态状态机的
+ * running↔idle 迁移面，非法迁移（对 running 重复 settle / 对 running 重复 wake）
+ * 由 CAS 前置判据拒绝。
  *
- * 与 tryTransition 单向语义的关系：tryTransition 只负责 running→closed 终化且不可逆；
- * 本函数是刻意豁免的逆向特例——仅服务 message action 对可重连记录（finalizedReason
- * ∈ RECONNECTABLE_FINAL_REASONS）的同 id 重生。调用方必须先通过四守卫（sessionFile
- * 存在 / 非 tombstone / 可重连 reason / worktree+alive 探针），禁止在正常执行流程中
- * 使用。running 入态防御性 no-op：重生是 closed 的专属回边，不是万能改写器。
+ * 用途：message 链对 idle record 的接管（U4 准入单点接线）；不清收口位——
+ * stopReason/closedReason 的清除归接管编排（对齐 resurrectClosed 桥接语义），
+ * 本原语只做占用位翻转。
+ */
+export function tryEnterRunning(record: ExecutionRecord): boolean {
+  if (record.status !== "idle") return false;
+  record.status = "running";
+  return true;
+}
+
+/**
+ * [v8.5 D → U2 桥接] 已收口 record 的接管回边：idle → running，清除收口语义位。
+ *
+ * 旧语义（closed → running 透明重生）随终态概念删除而迁移：磁盘重建/内存中的
+ * 「已收口」形态在两态下即 idle（桥接不变量，closedReason 有值为旧终态遗留），
+ * message 链接管时经本函数翻回 running。running 入态防御性 no-op：接管是已收口
+ * record 的专属回边，不是万能改写器。U4 准入判据单点重写（reviveOrThrow 合并）
+ * 后本函数由新接管原语承接。
  */
 export function resurrectClosed(
-  record: { status: ExecutionStatus; closedReason?: ClosedReason; endedAt?: number },
+  record: {
+    status: ExecutionStatus;
+    closedReason?: ClosedReason;
+    stopReason?: StopReason;
+    endedAt?: number;
+  },
 ): boolean {
-  if (record.status !== "closed") return false;
+  if (record.status !== "idle") return false;
   record.status = "running";
   record.closedReason = undefined;
+  record.stopReason = undefined;
   record.endedAt = undefined;
   return true;
 }
@@ -746,8 +774,11 @@ export function markReconstructedStatus(
  *
  * ⚠ 前置条件：调用方必须先通过 tryTransition 抢到锁（status 已被 CAS 设为 target）。
  *
- * @param closedReason closed 终态的 L2 关闭原因。仅 status="closed" 时写入；
- *   "cancelled" 时忽略。
+ * [U2 桥接] status 参数保留旧字面量（调用方零改动）；两态下冻结为 idle +
+ * closedReason/stopReason 双写（桥接不变量写侧半边，与 tryTransition 同构）。
+ * U5 意愿动作接线后本函数随旧终态编排退役（轮收口归 markSettled）。
+ *
+ * @param closedReason 旧终态 L2 关闭原因（同时镜像进 stopReason 展示位）。
  */
 export function completeRecord(
   record: ExecutionRecord,
@@ -755,8 +786,10 @@ export function completeRecord(
   status: "closed",
   closedReason?: ClosedReason,
 ): void {
-  record.status = status;
+  void status; // 桥接期唯一合法值（类型位保留）；两态下冻结目标恒 idle。
+  record.status = "idle";
   record.closedReason = closedReason ?? "gc";
+  record.stopReason = record.closedReason;
   // U3 C-outcome：outcome 唯一写入点——终态语义在此一次定形（D6），下游消费方
   // （project/list/notify 文案/渲染器）只读 record.outcome，不再各自推导。
   record.outcome = deriveOutcome(record.closedReason, result.error);
@@ -804,10 +837,11 @@ export function deriveOutcome(
 }
 
 /**
- * 投影层 outcome 唯一出口：running → undefined（终态语义不适用活跃态）；closed →
- * 一等 outcome 字段直读优先，字段缺失（存量/磁盘重建 record——outcome 持久化不在
- * U3 领地内）时回退 deriveOutcome(closedReason, error) 兜底——单一权威函数，
- * 消费方零手写推导。返回值联合含 "closed-legacy" 预留态，消费方必须处理。
+ * 投影层 outcome 唯一出口：running / 轮间 idle → undefined（outcome 语义只适用
+ * 旧终态遗留形态）；旧终态（桥接不变量：idle ∧ closedReason 有值）→ 一等 outcome
+ * 字段直读优先，字段缺失（存量/磁盘重建 record——outcome 持久化不在 U3 领地内）
+ * 时回退 deriveOutcome(closedReason, error) 兜底——单一权威函数，消费方零手写推导。
+ * 返回值联合含 "closed-legacy" 预留态，消费方必须处理。
  */
 export function projectOutcome(record: {
   status: ExecutionStatus;
@@ -815,7 +849,9 @@ export function projectOutcome(record: {
   closedReason?: ClosedReason;
   error?: string;
 }): ProjectedOutcome | undefined {
-  if (record.status !== "closed") return undefined;
+  // 桥接判据：旧「closed」读形态 ⟺ idle ∧ closedReason 有值（markSettled 的轮间
+  // idle 无 closedReason，不投影 outcome——非终态语义）。
+  if (!(record.status === "idle" && record.closedReason !== undefined)) return undefined;
   return record.outcome ?? deriveOutcome(record.closedReason, record.error);
 }
 

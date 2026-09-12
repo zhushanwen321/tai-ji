@@ -96,7 +96,7 @@ export type ClientMessageType =
   // session.writeImage 粘贴截图落地 attachments；session.migrateImage landing tmpdir→attachments 迁移；
   // session.writeSegments 追加/覆盖 segments.json sidecar。原 main IPC handler，现 runtime session-service。
   | 'session.writeImage' | 'session.migrateImage' | 'session.writeSegments'
-  // session.importCandidates / session.import（docs/design/import-session.md §3.3 D5）：导入 pi 会话
+  // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：导入 pi 会话
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
   | 'message.send' | 'message.abort' | 'message.steer' | 'message.follow_up'
@@ -452,7 +452,7 @@ export interface ClientMessageMap {
   // 不调也安全——ws 断开时 ConnectionManager.onClose → bus.unsubscribeAll 兜底。
   // reply 'session.unsubscribe' undefined（ack 型，ReplyPayloadMap 已定 void）。
   'session.unsubscribe': { sessionId: string }
-  // session.importCandidates / session.import（docs/design/import-session.md §3.3 D5）：
+  // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
   // 导入 pi 会话两步流：importCandidates 拉候选列表（对话框/搜索/切目录），import 执行导入。
   'session.importCandidates': ImportCandidatesRequest
   'session.import': ImportRequest
@@ -844,7 +844,7 @@ export type ServerMessageType =
   // w21 data-source-governance：message_end 重构 entry 的实时 feed 载体帧（见 ServerMessageMapBase 条目注释）
   | 'message.message_end'
   | 'session.commands'
-  // session.importCandidates / session.import（docs/design/import-session.md §3.3 D5）：reply 与 request
+  // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
   | 'session.exited'
@@ -1452,7 +1452,7 @@ export interface ServerMessageMapBase {
   // session.commands：pi 扩展命令列表（fetchAndBroadcastCommands 广播）
   // sourceInfo 透传自 pi get_commands 的 RpcSlashCommand（SKILL.md / extension 文件路径等），可选（旧消费方向后兼容）
   'session.commands': { sessionId: string; commands: Array<{ name: string; description?: string; source: string; sourceInfo?: CommandSourceInfo }> }
-  // session.importCandidates / session.import reply（docs/design/import-session.md §3.3 D5）：
+  // session.importCandidates / session.import reply（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
@@ -2143,7 +2143,7 @@ export interface ReplyPayloadMap {
   'session.getWorkflows': ServerMessageMap['session.workflows']
   'session.history': ServerMessageMap['session.history']
   'config.sessions': ServerMessageMap['config.sessions']
-  // session.importCandidates / session.import（docs/design/import-session.md §3.3 D5）：reply 与 request 同名
+  // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request 同名
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：

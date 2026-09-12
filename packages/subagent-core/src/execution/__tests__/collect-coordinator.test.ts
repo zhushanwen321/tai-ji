@@ -36,6 +36,7 @@ function makeRec(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     parentRecordId: undefined,
     depth: 0,
     status: "closed",
+    closedReason: "gc",
     turns: [],
     turnCount: 1,
     totalTokens: 10,
@@ -70,6 +71,7 @@ function makeStoreRec(over: Partial<SubagentRecord> = {}): SubagentRecord {
     task: "t",
     slug: "worker",
     status: "closed",
+    closedReason: "gc",
     mode: "background",
     startedAt: 1000,
     rootSessionId: "root-A",
@@ -157,7 +159,7 @@ describe("CollectCoordinator sync buffering + closure", () => {
   it("buffers a finished sync member while another sync member is still running", () => {
     // store：sa-2 仍在跑（非终态）→ sa-1 终态入缓冲不闭合
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
       makeStoreRec({ id: "sa-2", collectMode: "sync", status: "running" }),
     ]);
     const result = h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }));
@@ -171,8 +173,8 @@ describe("CollectCoordinator sync buffering + closure", () => {
     // → 闭合 flush 两成员。
     let sa2Running = true;
     const storeRecords = (): SubagentRecord[] => [
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
-      makeStoreRec({ id: "sa-2", collectMode: "sync", status: sa2Running ? "running" : "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
+      makeStoreRec({ id: "sa-2", collectMode: "sync", status: sa2Running ? "running" : "idle" }),
     ];
     const h = makeHarness();
     (h as { listRecords: ReturnType<typeof vi.fn> }).listRecords.mockImplementation(storeRecords);
@@ -188,7 +190,7 @@ describe("CollectCoordinator sync buffering + closure", () => {
 
   it("a lone sync member flushes via the coalescing window (单成员即闭合)", async () => {
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
     ]);
     const result = h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }));
     expect(result).toBe("sync-flushed");
@@ -215,7 +217,7 @@ describe("CollectCoordinator sync buffering + closure", () => {
     // dispose 到来时挂起排程取消、缓冲原样保留（convertPendingSyncBufferToAsync
     // 仍读得到全部成员转 async）——service 侧 E9 交互的单元级前置。
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
     ]);
     expect(h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }))).toBe("sync-flushed");
     h.coordinator.cancelScheduledFlush();
@@ -228,7 +230,7 @@ describe("CollectCoordinator sync buffering + closure", () => {
   it("pool-queued sync members (status=running) block closure (⛔3 非终态口径)", () => {
     // sa-2 在池排队：store.register 起即 status=running（无独立排队态）→ 阻止闭合
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
       makeStoreRec({ id: "sa-2", collectMode: "sync", status: "running" }),
     ]);
     const result = h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }));
@@ -238,8 +240,8 @@ describe("CollectCoordinator sync buffering + closure", () => {
 
   it("batchFinalized members do not block closure (已离场成员)", async () => {
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
-      makeStoreRec({ id: "sa-2", collectMode: "sync", status: "closed", batchFinalized: true }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
+      makeStoreRec({ id: "sa-2", collectMode: "sync", status: "idle", batchFinalized: true }),
     ]);
     const result = h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }));
     expect(result).toBe("sync-flushed");
@@ -249,7 +251,7 @@ describe("CollectCoordinator sync buffering + closure", () => {
 
   it("async records never block sync closure (混派正交，A8 前置)", async () => {
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
       makeStoreRec({ id: "sa-async", status: "running" }), // 无 collectMode：async 在跑
     ]);
     const result = h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }));
@@ -309,13 +311,13 @@ describe("CollectCoordinator cross-turn accumulation (D2)", () => {
   it("starts a fresh batch after a flush (闭合后新派开新批)", async () => {
     // sa-2 在跑（阻止闭合）：sa-1 终态入缓冲；sa-2 终态闭合后，新派 sa-3 终态开新批。
     const store: SubagentRecord[] = [
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
       makeStoreRec({ id: "sa-2", collectMode: "sync", status: "running" }),
     ];
     const h = makeHarness();
     (h as { listRecords: ReturnType<typeof vi.fn> }).listRecords.mockImplementation(() => store);
     expect(h.coordinator.route(makeRec({ id: "sa-1", collectMode: "sync" }))).toBe("sync-buffered");
-    store[1] = makeStoreRec({ id: "sa-2", collectMode: "sync", status: "closed" });
+    store[1] = makeStoreRec({ id: "sa-2", collectMode: "sync", status: "idle" });
     expect(h.coordinator.route(makeRec({ id: "sa-2", collectMode: "sync" }))).toBe("sync-flushed");
     await settleFlush(); // 第一批投出（合批窗口开）
     // 闭合后新 sync 终态 → 新批缓冲（不复活旧成员）：store 无 running sync → 但
@@ -334,12 +336,12 @@ describe("CollectCoordinator cross-turn accumulation (D2)", () => {
 describe("CollectCoordinator cancel/watchdog terminal states enter the batch", () => {
   it("routes a cancelled sync member into the buffer (E6：cancel 计入批)", async () => {
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
     ]);
     const record = makeRec({
       id: "sa-1",
       collectMode: "sync",
-      status: "closed",
+      status: "idle",
       closedReason: "cancelled",
       result: "",
       error: "cancelled by user",
@@ -353,12 +355,12 @@ describe("CollectCoordinator cancel/watchdog terminal states enter the batch", (
 
   it("routes a watchdog/gc-failed sync member into the buffer (E3：orphan 类终态计入批)", async () => {
     const h = makeHarness([
-      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "closed" }),
+      makeStoreRec({ id: "sa-1", collectMode: "sync", status: "idle" }),
     ]);
     const record = makeRec({
       id: "sa-1",
       collectMode: "sync",
-      status: "closed",
+      status: "idle",
       closedReason: "gc",
       result: "",
       error: "settled watchdog timeout",

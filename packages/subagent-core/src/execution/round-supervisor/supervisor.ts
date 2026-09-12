@@ -409,7 +409,8 @@ export class RoundSupervisor {
   private toView(record: ExecutionRecord): SupervisorRecordView {
     return {
       id: record.id,
-      status: record.status === "closed" ? "closed" : "running",
+      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+      status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
       resumable: record.resumable === true,
       hasResult: record.result !== undefined,
       chatMode: record.chatMode === true,

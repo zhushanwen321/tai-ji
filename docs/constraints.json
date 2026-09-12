@@ -2140,7 +2140,6 @@
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "design/session-occupancy-send-closure.md",
         "../packages/runtime/src/services/session/event-interpreter.ts"
       ],
       "dimensions": [
@@ -2285,7 +2284,7 @@
         "packages/runtime/src/services/session/replicated-states.config.ts"
       ],
       "authority": [
-        "design/idle-pi-reclamation.md#33-关键决策与权衡"
+        "../packages/runtime/src/services/session/idle-pi-reaper.ts"
       ],
       "dimensions": [
         "business-logic"

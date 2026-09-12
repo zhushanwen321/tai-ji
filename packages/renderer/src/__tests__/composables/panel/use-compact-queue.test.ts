@@ -2,7 +2,7 @@
  * useCompactQueue 单测（compact-queued-messages W1，TC1-TC8 + S1/S2 加固 TC9-TC11
  * + u4a 确认机制 CD1-CD3 + u4b flush 投递确认驱动 F1-F5）。
  *
- * 覆盖契约（/tmp/cw-plan-w1.json contracts C1 + session-occupancy-send-closure u4b / D5）：
+ * 覆盖契约（/tmp/cw-plan-w1.json contracts C1 + session-occupancy-send-closure——已删除，git 可追溯——u4b / D5）：
  * - enqueue 追加并返回含 id 条目（TC1）
  * - remove 按 id 精确取消，未知 id no-op（TC2）；已提交条目（mode 已写）no-op——记账
  *   不变量下沉（R3-U2，TC2b），未提交条目正常移除

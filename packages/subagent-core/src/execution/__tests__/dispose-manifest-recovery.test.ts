@@ -89,7 +89,7 @@ function closedEntryLine(rec: Partial<SubagentRecord> & { id: string; closedReas
     agent: rec.agent ?? "general-purpose",
     task: rec.task ?? "gate b task",
     slug: rec.slug ?? "gate-b",
-    status: "closed",
+    status: "idle",
     closedReason: rec.closedReason,
     mode: "background",
     startedAt: 1000,
@@ -162,7 +162,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(manifest.agentName).toBe("general-purpose");
     expect(manifest.createdAt).toBe(1000);
     // [U4c / G2] 词汇双写过渡字段随终态写面落盘（session-reader 前向兼容锚）
-    expect(manifest.executionStatus).toBe("closed");
+    expect(manifest.executionStatus).toBe("idle");
     // 原子写无 tmp 残留（0 字节/半写 tmp 只在崩溃打断 writeAtomicFile 时出现）
     const residue = fs.readdirSync(path.dirname(manifestFile)).filter((f) => f.includes(".tmp."));
     expect(residue).toEqual([]);
@@ -219,7 +219,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     const snap = restarted.queries.lookupRecordAnyState("sa-m1");
     expect(snap).toBeDefined();
-    expect(snap?.status).toBe("closed");
+    expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBe("parent-shutdown");
 
     const err = endedMessageGuard(restarted, "sa-m1", new Error("subagent not found or not owned: sa-m1"));
@@ -250,7 +250,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(manifest.rootSessionId).toBe("root-session");
     // 动作链同步恢复：message 分流可查（不再 not found）
     const snap = restarted.queries.lookupRecordAnyState("sa-remat");
-    expect(snap?.status).toBe("closed");
+    expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBe("parent-shutdown");
   });
 
@@ -313,7 +313,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     const restarted = makeServiceOn(agentDir);
     extraServices.push(restarted);
     const snap = restarted.queries.lookupRecordAnyState("sa-cx");
-    expect(snap?.status).toBe("closed");
+    expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBe("cancelled");
 
     // 曾报原始 not-found（Gate B sq-c）——现走「主动关闭」专属文案
@@ -448,7 +448,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       service.disposeAllRecords("parent-shutdown");
 
       // 归口后内存终态：completeRecord 已跑（result 合成 ""——空串非 undefined）
-      expect(record.status).toBe("closed");
+      expect(record.status).toBe("idle");
       expect(record.closedReason).toBe("parent-shutdown");
       const marker = readDisposedState(sessionFile);
       expect(marker.reason).toBe("parent-shutdown");

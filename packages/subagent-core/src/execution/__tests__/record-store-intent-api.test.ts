@@ -238,7 +238,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.getMutable("bg-1")).toBeUndefined();
       expect(appendEntryMock).toHaveBeenCalledWith(
         "subagent-record",
-        expect.objectContaining({ id: "bg-1", status: "closed" }),
+        expect.objectContaining({ id: "bg-1", status: "idle" }),
       );
     });
 

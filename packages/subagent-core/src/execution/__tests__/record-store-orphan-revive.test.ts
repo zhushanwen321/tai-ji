@@ -124,7 +124,7 @@ describe("[PS-10] revive() 复位 orphanJudged（IO 恢复后重开可重判）"
 
     expect(appended).toHaveLength(2); // 未修复时 orphanJudged 残留 → 零新 entry，此处红
     const rejudged = appended[1];
-    expect(rejudged?.data.status).toBe("closed");
+    expect(rejudged?.data.status).toBe("idle");
     expect(rejudged?.data.closedReason).toBe("gc");
     expect(rejudged?.data.resumable).toBeUndefined(); // 不再停留 resumable
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
@@ -204,7 +204,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
 
     expect(appended).toHaveLength(1);
     expect(appended[0]?.customType).toBe("subagent-record");
-    expect(appended[0]?.data.status).toBe("closed");
+    expect(appended[0]?.data.status).toBe("idle");
     expect(appended[0]?.data.closedReason).toBe("gc");
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
   });
@@ -221,7 +221,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     store.recoverOrphanRecords("sess-orphan");
 
     expect(appended).toHaveLength(1);
-    expect(appended[0]?.data.status).toBe("closed");
+    expect(appended[0]?.data.status).toBe("idle");
     expect(appended[0]?.data.closedReason).toBe("gc");
   });
 });

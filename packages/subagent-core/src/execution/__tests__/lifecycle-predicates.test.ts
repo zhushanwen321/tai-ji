@@ -108,11 +108,11 @@ describe("lifecycle-predicates (v4 B-1)", () => {
     });
 
     it("closed + no live process → false (终态不可 resume)", () => {
-      expect(isResumable(makeRecord({ status: "closed" }))).toBe(false);
+      expect(isResumable(makeRecord({ status: "idle" }))).toBe(false);
     });
 
     it("closed + live process → false (终态优先)", () => {
-      const rec = makeRecord({ status: "closed" });
+      const rec = makeRecord({ status: "idle" });
       coreSpawnedChildrenMirror().register(rec.id, { pid: 1, killed: false });
       expect(isResumable(rec)).toBe(false);
     });

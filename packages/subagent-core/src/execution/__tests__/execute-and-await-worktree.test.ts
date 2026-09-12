@@ -124,7 +124,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
     expect(archiveSpy).toHaveBeenCalledTimes(1);
     // store 现已强类型为 RecordStore → archive 入参为 ExecutionRecord，无需 `as` 断言。
     const archivedRecord = archiveSpy.mock.calls[0]![0];
-    expect(archivedRecord.status).toBe("closed");
+    expect(archivedRecord.status).toBe("idle");
     // archive 后 record 已移出 running map → listRunning 空、getMutable 取不到。
     expect(store.listRunning()).toHaveLength(0);
     expect(store.getMutable(archivedRecord.id)).toBeUndefined();

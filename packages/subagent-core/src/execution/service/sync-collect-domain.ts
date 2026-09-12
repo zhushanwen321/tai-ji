@@ -375,7 +375,10 @@ export class SyncCollectDomain {
     // resumable 视为已完成、不阻止补发——成功成员崩溃时的末条 entry 恒为轮终
     // running+resumable（SP-5 有意语义），旧口径只看 status !== "closed" 会把主场景
     // （批内含成功成员）顶死在「等自然终态」永不补发（v2 §2.3 断链 3）。
-    const running = candidates.filter((r) => r.resumable !== true && r.status !== "closed");
+    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+    const running = candidates.filter(
+      (r) => r.resumable !== true && !(r.status === "idle" && r.closedReason !== undefined),
+    );
     if (running.length > 0) {
       logger.debug(
         `[subagents] E1 sync batch recovery: ${running.length} member(s) still running, wait for natural completion`,

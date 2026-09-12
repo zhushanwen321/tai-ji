@@ -1,7 +1,7 @@
 /**
  * useImportSession —— 「导入会话」对话框状态编排（import-session U5）。
  *
- * 来源设计：docs/design/import-session.md §3.3 D5（RPC 契约）+ §3.1 终态交互样例。
+ * 来源设计：docs/design/import-session.md（已删除，git 可追溯）§3.3 D5（RPC 契约）+ §3.1 终态交互样例。
  *
  * 职责边界：纯状态编排（query debounce 拉候选 / 目录过滤 / 选中 / 执行导入 /
  * 「选择其他目录」切扫描根重拉），不含 DOM 与 i18n 文案映射（错误码 → 恢复指引

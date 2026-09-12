@@ -260,7 +260,7 @@ describe("SubagentService", () => {
         controller,
       });
       // 直接改 status 模拟终态（不走 CAS——测试不关心状态机，只关心 dispose 的 abort 过滤）
-      record.status = "closed";
+      record.status = "idle";
       getStore(service).register(record);
       return record;
     }
@@ -558,7 +558,7 @@ describe("SubagentService", () => {
       injectRunningBackground(service, "bg-running-1");
       injectRunningBackground(service, "bg-running-2");
       const terminal = injectRunningBackground(service, "bg-done");
-      terminal.status = "closed"; // 模拟终态，dispose 不应为其 emit
+      terminal.status = "idle"; // 模拟终态，dispose 不应为其 emit
 
       service.dispose();
 

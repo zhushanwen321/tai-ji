@@ -237,7 +237,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
     await adoptThenExpire(supervisor, makeRecord());
 
     // CAS 终态化已落（closed + gc），finalizeClosed 收失败语义 result
-    expect(h.store.memory.get("bg-1")?.status).toBe("closed");
+    expect(h.store.memory.get("bg-1")?.status).toBe("idle");
     expect(h.store.memory.get("bg-1")?.closedReason).toBe("gc");
     expect(h.finalizeClosed).toHaveBeenCalledTimes(1);
     const [record, result] = (h.finalizeClosed.mock.calls[0] ?? []) as [ExecutionRecord, Record<string, unknown>];
@@ -277,7 +277,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
         viewChecked = true;
         return rec;
       }
-      return { ...rec, status: "closed", closedReason: "cancelled" } as ExecutionRecord;
+      return { ...rec, status: "idle", closedReason: "cancelled" } as ExecutionRecord;
     };
     const supervisor = createRoundSupervisorForService(h.binding);
 
@@ -330,7 +330,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
     await expect(adoptThenExpire(supervisor, makeRecord())).resolves.toBeUndefined();
 
     expect(h.finalizeClosed).toHaveBeenCalledTimes(1);
-    expect(h.store.memory.get("bg-1")?.status).toBe("closed");
+    expect(h.store.memory.get("bg-1")?.status).toBe("idle");
   });
 });
 
@@ -383,7 +383,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "bg-disk",
-      status: "closed",
+      status: "idle",
       closedReason: "gc",
       endedAt: expect.any(Number),
       error: expect.stringContaining("safe to re-dispatch"),
@@ -410,7 +410,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     const entries = subagentEntries(h.pi);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "closed", closedReason: "gc" });
+    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "idle", closedReason: "gc" });
   });
 
   it("entry 面抛错（pi.appendEntry 炸）→ best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {
@@ -549,7 +549,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     setup();
     writeRegister("bg-done", "subagent");
     const h = makeBinding({ sessionFile });
-    h.store.memory.set("bg-done", makeRecord({ id: "bg-done", status: "closed", closedReason: "cancelled" }));
+    h.store.memory.set("bg-done", makeRecord({ id: "bg-done", status: "idle", closedReason: "cancelled" }));
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
       { customType: "pending:unregister", data: { id: "bg-done", reason: "cancelled", status: "cancelled" } },
@@ -557,17 +557,17 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.emitted).toEqual([{ channel: "pending:unregister", data: { id: "bg-done", reason: "cancelled" } }]);
   });
 
-  it("终态 subagent record（磁盘 closed，closedReason 缺失）→ 补发注销 reason=completed 兜底", () => {
+  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason）", () => {
     setup();
     writeRegister("bg-old", "subagent");
     const h = makeBinding({ sessionFile });
     h.store.disk.set(
       "bg-old",
-      makeDiskRecord(sessionFile, { id: "bg-old", status: "closed", resumable: false }),
+      makeDiskRecord(sessionFile, { id: "bg-old", status: "idle", closedReason: "gc", resumable: false }),
     );
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
-      { customType: "pending:unregister", data: { id: "bg-old", reason: "completed", status: "completed" } },
+      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "gc" } },
     ]);
   });
 

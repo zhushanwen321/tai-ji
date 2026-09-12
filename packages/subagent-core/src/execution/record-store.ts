@@ -77,11 +77,13 @@ import * as path from "node:path";
 import { getLogger } from "../core/logger.ts";
 
 import { getCurrentActivity, getDisplayItems, getEventLog, markReconstructedStatus, resurrectClosed, snapshot as toSnapshot, updateFromEvent } from "./execution-record.ts";
-import { readStateMarker, statStateStamp, writeFinalizedState, writeCancelledState, updateRecordBinding, STATE_SIDECAR_EXT } from "./state-marker.ts";
+import { readStateMarker, statStateStamp, writeFinalizedState, writeCancelledState, writeSettledState, updateRecordBinding, STATE_SIDECAR_EXT } from "./state-marker.ts";
 import type { StateMarker } from "./state-marker.ts";
 // [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
-import { readRecordBinding, RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
+// [U2] writeRecordBinding 供 markReopened 在新 pi 锚旁落盘完整 binding（epoch 跨重启
+// 单调硬要求的持久化面）。
+import { readRecordBinding, writeRecordBinding, RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
 import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
@@ -106,7 +108,7 @@ import type {
   SubagentRecord,
   TranscriptRef,
 } from "./types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST } from "./types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST, isPiTranscriptRef, isValidStopReason } from "./types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
@@ -119,12 +121,12 @@ const logger = getLogger("subagents");
 // 常量
 // ============================================================
 
-/** status → 排序优先级（值小排前）：running < closed。
- *  v4 B-1：idle/cancelled 折入 running/closed，两态收敛。closed = 统一终态
- *  （done/failed/crashed/cancelled 合并），按 closedReason 派生对外语义。 */
+/** status → 排序优先级（值小排前）：running < idle。
+ *  [U2 两态] 永久会话模型：running（在飞）排前，idle（已收口/等续聊）随后；
+ *  旧 closed 终态排序位随终态概念删除折入 idle（closedReason 遗留位区分死因）。 */
 const STATUS_PRIORITY: Record<ExecutionStatus, number> = {
   running: 0,
-  closed: 3,
+  idle: 1,
 };
 
 /** [D8 v7] manifest 同步写的 JSON 缩进空格数——与 ManifestStore.writeManifest 字节
@@ -134,20 +136,24 @@ const MANIFEST_INDENT_SPACES = 2;
 /**
  * manifest status → ExecutionStatus 运行时守卫映射。
  *
- * manifest 写 running/closed/cancelled 三态（ManifestRecord.status union），但磁盘
- * 文件可能陈旧（含历史 "completed"/"failed"/"error" 值、被外部篡改）。越界值返回 null——
- * manifestToSubagent 据此返回 null，collectRecords 跳过损坏 record 并 console.warn，不因单个
- * 坏文件崩溃，也不把损坏 record 错误降级为 closed（closed 触发告警，是误报）。
+ * manifest 写 running/closed/cancelled 三态（ManifestRecord.status union——
+ * session-reader 兼容契约，保留），但磁盘文件可能陈旧（含历史 "completed"/"failed"/
+ * "error" 值、被外部篡改）。越界值返回 null——manifestToSubagent 据此返回 null，
+ * collectRecords 跳过损坏 record 并 console.warn，不因单个坏文件崩溃。
+ *
+ * [U2 两态迁移] 旧终态三值（closed/completed/failed/cancelled）统一映射 idle；
+ * closedReason 兼容位由 manifestToSubagent 投影（桥接不变量：idle ∧ closedReason
+ * 有值 ⟺ 旧终态形态）。
  *
  * 提取为纯函数：同时解决 PR#85 反射问题（三元 + `as ExecutionStatus` cast）。
  * [HISTORICAL] SP-1 重构：旧 "completed" → closed，旧 "failed" → closed（L1 统一终态）。
  */
 function mapManifestStatus(s: string): ExecutionStatus | null {
-  if (s === "closed") return "closed";
-  if (s === "completed") return "closed"; // 向后兼容旧 manifest 数据
-  if (s === "failed") return "closed";     // 向后兼容旧 manifest 数据
+  if (s === "closed") return "idle";
+  if (s === "completed") return "idle"; // 向后兼容旧 manifest 数据
+  if (s === "failed") return "idle";     // 向后兼容旧 manifest 数据
   if (s === "running") return "running";
-  if (s === "cancelled") return "closed"; // v4 B-1: manifest cancelled 折入 closed（closedReason 信息丢失，manifest 仅诊断辅助）
+  if (s === "cancelled") return "idle"; // v4 B-1: manifest cancelled 折入终态（closedReason 信息丢失，manifest 仅诊断辅助）
   return null; // 越界=数据损坏（含历史 "error" 值），返回 null 让调用方跳过
 }
 
@@ -336,15 +342,28 @@ function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord,
   };
 }
 
-/** 终态域投影：status 只认 "closed" 字面量（其余含缺省 → "running"，旧调用方行为不变）；
- *  closedReason 经枚举守卫（非法/缺省 → undefined）。 */
+/**
+ * 终态域投影（U2 两态迁移映射）。已收口 entry 的两种形态：
+ *   ① 存量旧写侧：status:"closed" + closedReason → 迁移映射 idle + stopReason
+ *     （StopReason ⊇ ClosedReason，§3.2.2 展示迁移）；
+ *   ② 新写侧投影（recordToSubagent/markSettled 后 U2 起产 status:"idle"）：直投，
+ *     stopReason 优先取 entry 的 stopReason 字段（新写侧 additive），缺失回落
+ *     closedReason 迁移映射。
+ * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位；
+ * stopReason 经 isValidStopReason 守卫（非法/缺省 → 回落链）。
+ */
 function readEntryTerminalFields(
   d: Record<string, unknown>,
-): Pick<SubagentRecord, "status" | "closedReason"> {
+): Pick<SubagentRecord, "status" | "closedReason" | "stopReason"> {
   const closedReason = entryStr(d, "closedReason");
+  const validClosed = isValidClosedReason(closedReason) ? closedReason : undefined;
+  const stopReasonRaw = entryStr(d, "stopReason");
+  const validStop = isValidStopReason(stopReasonRaw) ? stopReasonRaw : undefined;
+  const settledEntry = d.status === "closed" || d.status === "idle";
   return {
-    status: d.status === "closed" ? "closed" : "running",
-    closedReason: isValidClosedReason(closedReason) ? closedReason : undefined,
+    status: settledEntry ? "idle" : "running",
+    closedReason: settledEntry ? validClosed : undefined,
+    stopReason: settledEntry ? (validStop ?? validClosed) : undefined,
   };
 }
 
@@ -769,8 +788,8 @@ export class RecordStore {
   /**
    * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
    * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
-   * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition）
-   * 亦留调用方——状态机操作非文件布局。
+   * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
+   * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
    *
    * 内部写序（D8 v7）：`.state` writeSync **先**（终态权威优先落）→ entry/archive →
    * manifest writeSync 后 → `.alive` 删除（release 出口①）。
@@ -779,7 +798,12 @@ export class RecordStore {
    * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
    * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
    *
+   * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 意愿动作
+   * 接线退役（正常收口归 markSettled、归档归 markArchived、编排性关闭归新编排）；
+   * `.state` 仍写旧格式（U3 切换新格式读侧后随退役清理）。
+   *
    * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
+   * @deprecated U5 退役（归 markSettled / markArchived / 编排性关闭新编排承接）。
    */
   markFinalized(record: ExecutionRecord, closedReason?: ClosedReason): boolean {
     const reason = closedReason ?? record.closedReason ?? "gc";
@@ -807,6 +831,11 @@ export class RecordStore {
    * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；区别
    * 仅 `.state` 载荷 = {status:"cancelled", endedAt}（重建判定分支消费精确结束时间）。
    * 归口写点：cancelBackground 终态写面（record-lifecycle，U2a 迁移）。
+   *
+   * [U2 桥接期] 新模型下 cancel = 中断当前轮回 idle（不终态化，stopReason=interrupted）
+   * ——U5 意愿动作接线后本原语退役为 markSettled("interrupted") 路径。
+   *
+   * @deprecated U5 退役（cancel 语义归 markSettled("interrupted") + 放弃轮标记）。
    */
   markCancelled(record: ExecutionRecord): boolean {
     if (record.sessionFile !== undefined) {
@@ -955,19 +984,33 @@ export class RecordStore {
    * 可接管；归档 ≠ 放弃可重连性，故不写 `.state`「gc」——那会把「可接管」变「不可
    * 重连硬拒」，D3a 被否分支）。
    *
-   * 写序（D3a/轮 5）：store.archive **先**、`.alive` release **后**——archive 抛错则
-   * 原语整体失败、marker 必未删（持有与声明一致）；release 失败 best-effort 留痕
-   * （removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断 interval，泄漏窗 = 至
-   * 宿主退出，已接受）。归档 record 后续被接管时统一 acquireWriteLease 重新声明。
+   * [U2 更名] 统一语言更名 markIdleEvicted（「内存回收」义），本名保留为 deprecated
+   * 别名（存量调用方 idle-gc.ts 零改动；U5 编排切换后清理）。实现完整委托。
    *
-   * [U4c / G2] 归档点补写 manifest（投影 running——磁盘确仍 running）：record 离开
-   * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
-   * identity entry 随 30 天 GC 衰减），归档时不落盘则该 record 在 manifest 面长期
-   * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
+   * @deprecated 改用 {@link RecordStore.markIdleEvicted}。
    */
   markIdleArchived(record: ExecutionRecord): void {
+    this.markIdleEvicted(record);
+  }
+
+  /**
+   * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。markIdleArchived 的统一
+   * 语言更名（30 天 TTL 内存回收，用户不可见，非终态化——磁盘不动、可重建）。
+   *
+   * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
+   * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
+   * best-effort 留痕（removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断
+   * interval，泄漏窗 = 至宿主退出，已接受）。回收 record 后续被接管时统一
+   * acquireWriteLease 重新声明。
+   *
+   * [U4c / G2] 回收点补写 manifest（投影 running——磁盘确仍 running）：record 离开
+   * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
+   * identity entry 随 30 天 GC 衰减），回收时不落盘则该 record 在 manifest 面长期
+   * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
+   */
+  markIdleEvicted(record: ExecutionRecord): void {
     this.archive(record);
-    // [U4c / G2] 归档点补写：经状态派生投影（running 如实投影——非终态化语义，
+    // [U4c / G2] 回收点补写：经状态派生投影（running 如实投影——非终态化语义，
     // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
     this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
     if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
@@ -986,32 +1029,69 @@ export class RecordStore {
   }
 
   // ════════════════════════════════════════════════════════════
-  // [永久会话模型 / u-foundation] 新意图原语骨架（设计
-  // subagent-permanent-session-model.md；签名 + 语义注释已定，实现 U2 填肉）。
-  // 全部 throw not-implemented——生产路径禁调；骨架落在 store 内即满足
-  // C-data-20 写面唯一入口约束（实现不外泄到类外）。
+  // [永久会话模型 / U2] 新意图原语（设计 subagent-permanent-session-model.md
+  // §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 意愿动作表；u-foundation 骨架填肉）。
+  // 实现收在 store 内即满足 C-data-20 写面唯一入口约束（不外泄到类外）。
   // ════════════════════════════════════════════════════════════
 
   /**
    * 意图原语：轮收口（settle）。§3.2.2 事件表 settle 行——「轮完成 / 失败 / 中断
-   * 收口」统一落 idle（ExecutionStatusV2 目标词汇）+ stopReason 展示值写入；
-   * 替代 markFinalized / markCancelled 的轮收口角色（二者退役归 U3 切换）。
+   * 收口」统一落 idle + stopReason 展示值写入；承接 markFinalized / markCancelled
+   * 的轮收口角色（两旧原语 U5 退役）。**不终态化**：record 留内存 idle（随时可接
+   * 下一条 message），closedReason 不写（桥接不变量的新侧——settle 产出的 idle 不
+   * 携带旧终态遗留位）。
    *
-   * U2 实装语义：usage 快照落 binding（§3.2.7 统计口径——binding 快照为基准）+
-   * manifest 投影；**`.alive` 跨轮保留**（§3.2.4——settle 不释放写权声明，idle
-   * record 随时可能续写同一 transcript）；副作用编排（进程按 idle timer 回收等）
-   * 留调用方。
+   * CAS：仅 running 可收口（对 idle record 重复 settle = 非法迁移，拒绝返回 false
+   * + warn 留痕——与 tryTransition 抢锁语义同族）。
    *
-   * @param stopReason 展示值（成功/失败轮用旧值 gc + error 载体、中断轮用
-   *        interrupted 族——值域见 types.ts StopReason）。
-   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   * 写序（D8：`.state` 先 → binding → manifest 后）：
+   *   ① `.state` 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState；
+   *      U2/U3 窗口期现有读侧对本格式落存在性降级分支，读侧兼容归 U3）；
+   *   ② usage 快照落 binding（§3.2.7 统计口径——binding 快照为基准；含 round 推进）；
+   *   ③ manifest 派生投影（settle 非终态 → legacy "running"——session-reader 视角
+   *      的活跃成员，§3.2.8 下行映射）。
+   *
+   * **`.alive` 跨轮保留**（§3.2.4——settle 不释放写权声明，idle record 随时可能
+   * 续写同一 transcript）；副作用编排（进程按 idle timer 回收等）留调用方。
+   * record.endedAt 不写（非终态，duration 语义保持 running 起算）。
+   *
+   * @param stopReason 展示值（成功/失败轮用旧值族、中断轮用 interrupted 族——
+   *        值域见 types.ts StopReason；纯展示 + 排障，不参与资格判定）。
+   * @returns true = 收口完成；false = CAS 拒绝（record 非 running）。
    */
   markSettled(record: ExecutionRecord, stopReason: StopReason): boolean {
-    throw new Error(
-      `markSettled(${record.id}, stopReason=${stopReason}): not implemented (u-foundation type skeleton). ` +
-        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
-        `do not call from production paths until then.`,
-    );
+    if (record.status !== "running") {
+      logger.warn("[subagents] markSettled: CAS rejected (record not running)", {
+        detail: { id: record.id, status: record.status, stopReason },
+      });
+      return false;
+    }
+    record.status = "idle";
+    record.stopReason = stopReason;
+    record.idleSince = Date.now();
+    const settledAt = Date.now();
+    if (record.sessionFile !== undefined) {
+      // ① `.state` 收条（失败 warn 留痕不抛——轮收口非终态，内存态已收口，磁盘面
+      // 滞后由下次收口/接管补写；错误已在 state-marker 层 error 级响亮暴露）。
+      writeSettledState(record.sessionFile, { stopReason, endedAt: settledAt });
+      // ② binding 快照（best-effort——binding 缺失不造残缺身份，updateRecordBinding
+      // 既有语义；round 随快照推进，light 重建面恢复轮次）。
+      updateRecordBinding(record.sessionFile, {
+        totalTokens: record.totalTokens,
+        turns: record.turnCount,
+        endedAt: record.endedAt,
+        round: record.round ?? 0,
+      });
+    } else {
+      logger.warn("[subagents] markSettled: no sessionFile anchor, .state/binding faces skipped", {
+        detail: { id: record.id },
+      });
+    }
+    // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
+    this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
+    this.reportRecordTransition(record);
+    this.notifyChange();
+    return true;
   }
 
   /**
@@ -1020,17 +1100,62 @@ export class RecordStore {
    * stopReason=reopened；首轮 prompt 的历史摘要注入编排留调用方（U4 reopen 降级
    * 路径接线）。触发方式：仅用户显式 message（不自动重开）。
    *
-   * U2 实装语义：epoch / 新锚随 binding 持久化（跨重启单调是硬要求）；残留
-   * lastAbandonedRound 不迁移（跨 epoch 自然失效，§3.2.7）。
+   * CAS：仅 idle 可重开（running = 一轮在飞，非法迁移拒绝）。
    *
-   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   * epoch 持久化（跨重启单调是硬要求，丢 epoch 会被二次 reopen 击穿）：pi 锚经
+   * writeRecordBinding 在新 sessionFile 旁落盘完整 binding（新锚旁无存量 binding 可
+   * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；zcode
+   * 锚（无文件载体）的 binding 面归 U6（会话库锚承载）接线。残留 lastAbandonedRound
+   * 不迁移（跨 epoch 自然失效，§3.2.7——判定第一步以 record 当前 epoch 为基准丢弃
+   * 旧世代回注）。`.alive` 写权声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
+   *
+   * @returns true = 重开完成；false = CAS 拒绝（record 非 idle）。
    */
   markReopened(record: ExecutionRecord, transcriptRef: TranscriptRef): boolean {
-    throw new Error(
-      `markReopened(${record.id}, transcriptRef.engine=${transcriptRef.engine}): not implemented ` +
-        `(u-foundation type skeleton). Recovery: implementation lands in U2 ` +
-        `(permanent-session-model domain vocabulary); do not call from production paths until then.`,
-    );
+    if (record.status !== "idle") {
+      logger.warn("[subagents] markReopened: CAS rejected (record not idle)", {
+        detail: { id: record.id, status: record.status, engine: transcriptRef.engine },
+      });
+      return false;
+    }
+    record.transcriptRef = transcriptRef;
+    record.round = 0;
+    record.epoch = (record.epoch ?? 0) + 1;
+    record.stopReason = "reopened";
+    if (isPiTranscriptRef(transcriptRef)) {
+      writeRecordBinding(transcriptRef.sessionFile, {
+        v: 1,
+        recordId: record.id,
+        rootSessionId: record.rootSessionId,
+        parentRecordId: record.parentRecordId,
+        depth: record.depth,
+        agent: record.agent,
+        task: record.task,
+        slug: record.slug,
+        mode: "background",
+        startedAt: record.startedAt,
+        chatMode: record.chatMode === true,
+        round: record.round,
+        model: record.model,
+        thinkingLevel: record.thinkingLevel,
+        worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
+        origin: record.origin,
+        parentRunId: record.parentRunId,
+        totalTokens: record.totalTokens,
+        turns: record.turnCount,
+        endedAt: record.endedAt,
+        epoch: record.epoch,
+        transcriptRef,
+        lastAbandonedRound: record.lastAbandonedRound,
+      });
+    } else {
+      logger.debug("[subagents] markReopened: non-pi anchor, binding persistence deferred to U6", {
+        detail: { id: record.id, engine: transcriptRef.engine },
+      });
+    }
+    this.reportRecordTransition(record);
+    this.notifyChange();
+    return true;
   }
 
   /**
@@ -1042,39 +1167,28 @@ export class RecordStore {
    * 落盘前移到归档点）与 pending 注销补发的编排留调用方（U5 意愿动作接线）；
    * 本原语只吸收 intent 位 + 写权声明两写面。
    *
-   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   * 幂等：intent 恒置 archived、release 对缺失 marker 静默（重复 close 无害）。
+   * record 留内存（archived ≠ 内存回收——列表可见性由 intent 承载，占用位不动）。
+   * session-reader 的 archived 下行映射（archived→closed）归 U8 manifest 双写映射；
+   * 桥接期经 derived 投影保持索引在册。
+   *
+   * @returns true = 归档写面完成（幂等，恒 true）。
    */
   markArchived(record: ExecutionRecord): boolean {
-    throw new Error(
-      `markArchived(${record.id}): not implemented (u-foundation type skeleton). ` +
-        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
-        `do not call from production paths until then.`,
-    );
-  }
-
-  /**
-   * 意图原语：内存回收（evicted）。markIdleArchived 的统一语言更名（§3.2.4
-   * release 出口②：「原 markIdleArchived 出口保留（原语随统一语言更名
-   * markIdleEvicted，语义不变）」）——30 天 TTL 内存回收，用户不可见，非终态化。
-   *
-   * U2 实装语义：与 markIdleArchived 同写序（store.archive 先 → manifest 投影 →
-   * `.alive` release 后）；更名切换与旧名退役归 U2/U5 编排。
-   *
-   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
-   */
-  markIdleEvicted(record: ExecutionRecord): void {
-    throw new Error(
-      `markIdleEvicted(${record.id}): not implemented (u-foundation type skeleton). ` +
-        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
-        `do not call from production paths until then.`,
-    );
+    record.intent = "archived";
+    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+    this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
+    this.reportRecordTransition(record);
+    this.notifyChange();
+    return true;
   }
 
   /** 终态 manifest 投影（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
    *  现状投影——status 统一 closed，closedReason 随投影携带）。
-   *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 二态）随终态写面双写——
+   *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 两态）随终态写面双写——
    *  旧 status 三态是 session-reader 直读的投影字段（永久保留），新字段是内部权威
-   *  词汇的写面过渡锚（D5 词汇全景①③并存）。 */
+   *  词汇的写面过渡锚（D5 词汇全景①③并存）。[U2 两态] 内部权威词汇无 closed——
+   *  终态化后的 executionStatus = idle（closedReason 遗留位区分死因）。 */
   private static terminalManifestRecord(record: ExecutionRecord): ManifestRecord {
     return {
       id: record.id,
@@ -1082,7 +1196,7 @@ export class RecordStore {
       parentRecordId: record.parentRecordId,
       agentName: record.agent,
       status: "closed",
-      executionStatus: "closed",
+      executionStatus: "idle",
       closedReason: record.closedReason,
       createdAt: record.startedAt,
       completedAt: record.endedAt ?? Date.now(),
@@ -1095,14 +1209,16 @@ export class RecordStore {
 
   /** 批成员 manifest 投影（markBatchFinalized 用；原 writeBatchMemberManifest，
    *  已随 U3 归口删除——status 如实投影[成功成员此刻 running+resumable]，后续
-   *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。 */
+   *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。
+   *  [U2 两态桥接] 旧 status 三态经桥接判据派生（idle ∧ closedReason 有值 → 终态投影），
+   *  executionStatus 直投两态词汇。 */
   private static batchManifestRecord(rec: SubagentRecord): ManifestRecord {
     return {
       id: rec.id,
       rootSessionId: rec.rootSessionId ?? "",
       parentRecordId: rec.parentRecordId,
       agentName: rec.agent,
-      status: rec.status,
+      ...RecordStore.legacyManifestStatusFields(rec),
       executionStatus: rec.status,
       closedReason: rec.closedReason,
       createdAt: rec.startedAt,
@@ -1115,21 +1231,38 @@ export class RecordStore {
   }
 
   /**
+   * [U2 两态桥接] 旧 status 三态（session-reader 兼容契约）的派生单点：
+   * 旧「closed 终态」读形态（idle ∧ closedReason 有值）→ cancelled/closed 二分；
+   * 其余（running / 轮间 idle）→ running。derivedManifestRecord 与 batchManifestRecord
+   * 共用（防两处手写判据漂移）。
+   */
+  private static legacyManifestStatusFields(
+    rec: SubagentRecord,
+  ): Pick<ManifestRecord, "status"> {
+    const legacySettled = rec.status === "idle" && rec.closedReason !== undefined;
+    return {
+      status: legacySettled
+        ? (rec.closedReason === "cancelled" ? "cancelled" : "closed")
+        : "running",
+    };
+  }
+
+  /**
    * [U4c / G1+G2] 状态派生 manifest 投影（rebuildIndexes / 反查 miss 惰性通道 /
-   * markIdleArchived 归档点共用）。数据源 = SubagentRecord 投影（identity entry/
-   * binding + `.state` sidecar 矩阵，D1「.state 权威 + entry 尽力」）——词汇双写
-   * 同终态写面。旧 status 三态从 closedReason 派生 cancelled（对齐 markCancelled
-   * 的 `.state` cancelled 分支重建语义：buildRecord 分支 1 closedReason="cancelled"）。
+   * markIdleEvicted 回收点 / markSettled 收口点 / markArchived 归档点共用）。
+   * 数据源 = SubagentRecord 投影（identity entry/binding + `.state` sidecar 矩阵，
+   * D1「.state 权威 + entry 尽力」）——词汇双写同终态写面。
+   * [U2 两态桥接] 旧 status 三态派生收口 legacyManifestStatusFields 单点：
+   * markSettled 的轮间 idle（无 closedReason）如实投影 legacy "running"
+   * （session-reader 视角的活跃成员，§3.2.8 下行映射）。
    */
   private static derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
-    const legacyStatus: ManifestRecord["status"] =
-      rec.status === "closed" ? (rec.closedReason === "cancelled" ? "cancelled" : "closed") : "running";
     return {
       id: rec.id,
       rootSessionId: rec.rootSessionId ?? "",
       parentRecordId: rec.parentRecordId,
       agentName: rec.agent,
-      status: legacyStatus,
+      ...RecordStore.legacyManifestStatusFields(rec),
       executionStatus: rec.status,
       closedReason: rec.closedReason,
       createdAt: rec.startedAt,
@@ -1572,10 +1705,13 @@ export class RecordStore {
         ? undefined
         : "orphan recovery: task aborted by host restart (in-flight at shutdown; session context lost" +
           (parseOk ? "" : "; truncated last line") + ")";
+    // [U2 两态桥接] 旧 closed 终态落 idle + closedReason/stopReason 双写（桥接不变量）；
+    // 本直断分支的「保留 idle / 删直断」简化归 U3 孤儿恢复重写。
     this.reportSubagentRecord({
       ...rec0,
-      status: "closed",
+      status: "idle",
       closedReason: "gc",
+      stopReason: "gc",
       endedAt: Date.now(),
       ...(inFlightAbortedError !== undefined
         ? { error: inFlightAbortedError }
@@ -1660,15 +1796,18 @@ export class RecordStore {
   /** entry-born 孤儿按无文件判据收敛落 entry：chatMode → resumable（分流语义一致）；
    *  否则 closed+gc+error（entry-born 是 zcode 引擎 record 的常态形态——无子 session 文件
    *  非异常，D8 第五行 entry-born 作用域注记；one-shot 直断 closed/gc，续聊对无 transcript
-   *  形态结构性不成立，承接通道仅 start fresh）。 */
+   *  形态结构性不成立，承接通道仅 start fresh）。
+   *  [U2 两态桥接] 直断落 idle + closedReason/stopReason 双写（桥接不变量）；分支删除
+   *  （transcriptRef 锚统一后续聊）归 U3/U6。 */
   private finalizeEntryOnlyOrphan(rec: SubagentRecord, chatMode: boolean): void {
     this.reportSubagentRecord({
       ...rec,
       ...(chatMode
         ? { resumable: true }
         : {
-          status: "closed" as const,
+          status: "idle" as const,
           closedReason: "gc" as const,
+          stopReason: "gc" as const,
           endedAt: Date.now(),
           error: "orphan recovery: closed by gc (entry-born form has no child session file to resume from; start a fresh subagent)",
         }),
@@ -2192,10 +2331,13 @@ export class RecordStore {
     }
 
     // ── 分支 1: 终态 sidecar（.state 优先，旧 .finalized/.cancelled 兼容归一）──
+    // [U2 两态迁移] 旧 closed 终态 → idle + closedReason/stopReason 双写（桥接
+    // 不变量读侧半边；读侧新格式 {status:"idle"} 的完整切换归 U3）。
     if (m.state !== undefined && m.state.status === "cancelled") {
-      // v4 B-1: cancelled 折入 closed（closedReason='cancelled' 保留 L2 区分）。
-      markReconstructedStatus(rec, "closed");
+      // v4 B-1: cancelled 折入终态（closedReason='cancelled' 保留 L2 区分）。
+      markReconstructedStatus(rec, "idle");
       rec.closedReason = "cancelled";
+      rec.stopReason = "cancelled";
       rec.error = "cancelled by user";
       // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（新写侧恒携带，
       // 兼容手写残留）回落全量末 entry ts / light mtime。
@@ -2203,14 +2345,15 @@ export class RecordStore {
     }
     // ── 分支 2: finalized（同 sidecar，status=finalized）──
     else if (m.state !== undefined) {
-      // closed 统一终态：done/failed/crashed 合并为 closed。closedReason 优先用
+      // 旧统一终态：done/failed/crashed 合并。closedReason 优先用
       // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。
       // 空内容（旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因
       // 不可考，但「正常结束过」信号仍在——替代旧的误导性 gc 兜底（自然完成 vs
       // 断联不分）。非枚举值（外部损坏/手写垃圾内容）同 treated as unknown → disconnected。
-      markReconstructedStatus(rec, "closed");
+      markReconstructedStatus(rec, "idle");
       const reason = m.state.reason?.trim();
       rec.closedReason = isValidClosedReason(reason) ? (reason as ClosedReason) : "disconnected";
+      rec.stopReason = rec.closedReason;
       // 全量路径用最后 entry ts（精确）；light 路径用 jsonl mtime 近似（finalize 后
       // 文件不再变化，误差 <1s），避免重建后耗时随墙钟无限增长。
       rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
@@ -2283,6 +2426,9 @@ export class RecordStore {
       agent: r.agent,
       status: r.status,
       closedReason: r.closedReason,
+      // [U2 additive] 展示维度随投影持久化（register/archive/reportRecordTransition
+      // 全部写点均经本投影 → toSubagentRecordEntry）；undefined 自然缺省，旧 entry 零迁移。
+      stopReason: r.stopReason,
       mode: r.mode,
       slug: r.slug,
       startedAt: r.startedAt,

@@ -483,7 +483,7 @@ describe("getEventLog", () => {
 // ============================================================
 describe("getCurrentActivity", () => {
   it("returns undefined when status is not running", () => {
-    const r = makeRecord({ status: "closed" });
+    const r = makeRecord({ status: "idle" });
     expect(getCurrentActivity(r)).toBeUndefined();
   });
 
@@ -662,22 +662,22 @@ describe("tryTransition", () => {
   it("returns true and sets status when transitioning from running", () => {
     const r = makeRecord({ status: "running" });
     expect(tryTransition(r, "closed")).toBe(true);
-    expect(r.status).toBe("closed");
+    expect(r.status).toBe("idle");
   });
 
   it("returns false when already terminal (closed)", () => {
-    const r = makeRecord({ status: "closed" });
+    const r = makeRecord({ status: "idle" });
     expect(tryTransition(r, "closed")).toBe(false);
-    expect(r.status).toBe("closed");
+    expect(r.status).toBe("idle");
   });
 
   it("returns false when already terminal (closed, cancelled reason)", () => {
-    const r = makeRecord({ status: "closed", closedReason: "cancelled" });
+    const r = makeRecord({ status: "idle", closedReason: "cancelled" });
     expect(tryTransition(r, "closed")).toBe(false);
   });
 
   it("returns false when already terminal (closed, gc reason)", () => {
-    const r = makeRecord({ status: "closed", closedReason: "gc" });
+    const r = makeRecord({ status: "idle", closedReason: "gc" });
     expect(tryTransition(r, "closed")).toBe(false);
   });
 
@@ -685,7 +685,7 @@ describe("tryTransition", () => {
     const r = makeRecord({ status: "running" });
     expect(tryTransition(r, "closed")).toBe(true);
     expect(tryTransition(r, "closed")).toBe(false);
-    expect(r.status).toBe("closed");
+    expect(r.status).toBe("idle");
   });
 
   it("running 入态时 resurrectClosed 防御性 no-op（终态回边仅限 closed）", () => {
@@ -698,33 +698,33 @@ describe("tryTransition", () => {
 describe("markReconstructedStatus", () => {
   it("directly sets status without CAS check", () => {
     const r = makeRecord({ status: "running" });
-    markReconstructedStatus(r, "closed");
-    expect(r.status).toBe("closed");
+    markReconstructedStatus(r, "idle");
+    expect(r.status).toBe("idle");
   });
 
   it("can overwrite terminal status (bypass CAS)", () => {
     // 重建场景：旧 record 可能已有终态，重建时需要直接覆盖
-    const r = makeRecord({ status: "closed" });
-    markReconstructedStatus(r, "closed");
-    expect(r.status).toBe("closed");
+    const r = makeRecord({ status: "idle" });
+    markReconstructedStatus(r, "idle");
+    expect(r.status).toBe("idle");
   });
 
   it("can overwrite running status", () => {
     const r = makeRecord({ status: "running" });
-    markReconstructedStatus(r, "closed");
-    expect(r.status).toBe("closed");
+    markReconstructedStatus(r, "idle");
+    expect(r.status).toBe("idle");
   });
 
   it("can set closed on running record", () => {
     const r = makeRecord({ status: "running" });
-    markReconstructedStatus(r, "closed");
-    expect(r.status).toBe("closed");
+    markReconstructedStatus(r, "idle");
+    expect(r.status).toBe("idle");
   });
 
   it("can re-set closed on closed record (reconstruction override)", () => {
-    const r = makeRecord({ status: "closed" });
-    markReconstructedStatus(r, "closed");
-    expect(r.status).toBe("closed");
+    const r = makeRecord({ status: "idle" });
+    markReconstructedStatus(r, "idle");
+    expect(r.status).toBe("idle");
   });
 });
 
@@ -734,9 +734,9 @@ describe("markReconstructedStatus", () => {
 describe("completeRecord", () => {
   it("writes outcome fields without resetting turnCount/totalTokens", () => {
     const r = makeRecord({ turnCount: 5, totalTokens: 42 });
-    r.status = "closed";
+    r.status = "idle";
     completeRecord(r, SAMPLE_RESULT, "closed");
-    expect(r.status).toBe("closed");
+    expect(r.status).toBe("idle");
     expect(r.endedAt).toBeTypeOf("number");
     expect(r.agentResult).toBe(SAMPLE_RESULT);
     expect(r.result).toBe("done");
@@ -747,7 +747,7 @@ describe("completeRecord", () => {
 
   it("stores error from result", () => {
     const r = makeRecord();
-    r.status = "closed";
+    r.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
     completeRecord(r, failedResult, "closed");
     expect(r.error).toBe("oops");
@@ -757,20 +757,20 @@ describe("completeRecord", () => {
 
   it("[U3] 唯一写入点冻结 outcome：completed / failed / cancelled", () => {
     const ok = makeRecord();
-    ok.status = "closed";
+    ok.status = "idle";
     completeRecord(ok, SAMPLE_RESULT, "closed", "gc");
     expect(ok.outcome).toBe("completed");
     expect(ok.closedReason).toBe("gc");
 
     const failed = makeRecord();
-    failed.status = "closed";
+    failed.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
     completeRecord(failed, failedResult, "closed", "gc");
     expect(failed.outcome).toBe("failed");
 
     // 取消优先于 error（abort 合成 result 可能携带 error，取消语义优先）
     const cancelled = makeRecord();
-    cancelled.status = "closed";
+    cancelled.status = "idle";
     completeRecord(
       cancelled,
       { ...SAMPLE_RESULT, success: false, error: "aborted by user" },
@@ -784,7 +784,7 @@ describe("completeRecord", () => {
     // disposeAllRecords 合成 result 恒写 success:false + error:"closed due to ${reason}"
     // ——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏。
     const r = makeRecord();
-    r.status = "closed";
+    r.status = "idle";
     completeRecord(
       r,
       { ...SAMPLE_RESULT, success: false, error: "closed due to parent-shutdown" },
@@ -796,7 +796,7 @@ describe("completeRecord", () => {
 
   it("[U3] patchFile 语义不变：completeRecord 不触碰 patchFile/result，仅新增 outcome", () => {
     const r = makeRecord({ patchFile: "/tmp/patches/sa-x.patch" });
-    r.status = "closed";
+    r.status = "idle";
     completeRecord(r, SAMPLE_RESULT, "closed", "gc");
     expect(r.patchFile).toBe("/tmp/patches/sa-x.patch");
     expect(r.result).toBe("done");
@@ -840,17 +840,17 @@ describe("projectOutcome（投影唯一出口）", () => {
   });
 
   it("closed + 一等 outcome → 直读透传", () => {
-    expect(projectOutcome({ status: "closed", outcome: "failed" })).toBe("failed");
-    expect(projectOutcome({ status: "closed", outcome: "cancelled" })).toBe("cancelled");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "failed" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "cancelled" })).toBe("cancelled");
   });
 
   it("closed + 无 outcome（存量/重建 record）→ deriveOutcome(closedReason, error) 兑底", () => {
-    expect(projectOutcome({ status: "closed", closedReason: "gc", error: "boom" })).toBe("failed");
-    expect(projectOutcome({ status: "closed", closedReason: "cancelled" })).toBe("cancelled");
-    expect(projectOutcome({ status: "closed", closedReason: "gc" })).toBe("completed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", error: "boom" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "cancelled" })).toBe("cancelled");
+    expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
     // 连 closedReason/error 都缺失的最旧存量：兜底为 completed（与旧 closedReason??'gc'
     // 兑底显示语义一致）
-    expect(projectOutcome({ status: "closed" })).toBe("completed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
   });
 });
 
@@ -882,7 +882,7 @@ describe("projections", () => {
     });
 
     it("currentActivity is undefined when status is not running", () => {
-      const r = makeRecord({ status: "closed" });
+      const r = makeRecord({ status: "idle" });
       expect(project(r).currentActivity).toBeUndefined();
     });
 
@@ -895,9 +895,9 @@ describe("projections", () => {
     });
 
     it("[U3] project 投影携带 outcome：一等字段直读 / 存量兑底 / running undefined", () => {
-      const done = makeRecord({ status: "closed", outcome: "completed", closedReason: "gc" });
+      const done = makeRecord({ status: "idle", outcome: "completed", closedReason: "gc" });
       expect(project(done).outcome).toBe("completed");
-      const legacy = makeRecord({ status: "closed", closedReason: "gc", error: "boom" });
+      const legacy = makeRecord({ status: "idle", closedReason: "gc", error: "boom" });
       expect(project(legacy).outcome).toBe("failed");
       expect(project(makeRecord({ status: "running" })).outcome).toBeUndefined();
     });
@@ -937,13 +937,13 @@ describe("projections", () => {
 
   describe("snapshot", () => {
     it("returns a readonly snapshot with identity + status fields", () => {
-      const r = makeRecord({ turnCount: 2, status: "closed", endedAt: 5000, result: "ok" });
+      const r = makeRecord({ turnCount: 2, status: "idle", endedAt: 5000, result: "ok" });
       const s = snapshot(r);
       expect(s.id).toBe("test-1");
       expect(s.agent).toBe("worker");
       expect(s.mode).toBe("background");
       expect(s.task).toBe("test task");
-      expect(s.status).toBe("closed");
+      expect(s.status).toBe("idle");
       expect(s.turns).toBe(2);
       expect(s.endedAt).toBe(5000);
       expect(s.result).toBe("ok");

@@ -108,7 +108,7 @@ describe("T4① notify gate closedReason whitelist", () => {
     // closed + endedAt + archive）——只设 closedReason 不设 status 会让 settle 路径
     // tryTransition(running→closed) 抢成赢家覆写 user-close，门判据随之漂移；record
     // 补 register 进 store 对齐「store 外 record 无编排性关闭可达」的生产形态。
-    record.status = "closed";
+    record.status = "idle";
     record.endedAt = Date.now();
     record.closedReason = "parent-new";
     store.register(record);
@@ -151,7 +151,7 @@ describe("T4① notify gate closedReason whitelist", () => {
     });
     // 同上 [H4/U5 适配]：失败终态化（closed/gc/endedAt）+ register 进 store 的完整
     // 生产形态——迟到回注按 CAS 输家路径走，门判据读真实 gc 关闭原因。
-    record.status = "closed";
+    record.status = "idle";
     record.endedAt = Date.now();
     record.closedReason = "gc";
     store.register(record);

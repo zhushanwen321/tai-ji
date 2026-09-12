@@ -379,7 +379,9 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        if (record.status === "closed") {
+        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（cancel/
+        // dispose 抢先经 tryTransition 桥接写入；两态迁移不变量）。
+        if (record.status === "idle" && record.closedReason !== undefined) {
           cancelledDuringCreate = true;
         }
       } catch (err) {
@@ -594,11 +596,13 @@ export class RunOrchestration {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
         // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可 CAS 把 record
-        // 转成 closed 终态——cancelBackground 当时读到的 worktreeHandle 可能仍是 undefined
-        // （cleanup 被跳过）。赋值后同同步段检查终态：closed 则主动 cleanup（幂等，抢先的
-        // fire-and-forget 清理无害）+ early-failed 返回，不进轮次 kick-off（避免子进程白跑）。
+        // 转成已收口态（桥接判据：idle ∧ closedReason 有值——cancelBackground 当时读到的
+        // worktreeHandle 可能仍是 undefined（cleanup 被跳过）。赋值后同同步段检查终态：
+        // 已收口则主动 cleanup（幂等，抢先的 fire-and-forget 清理无害）+ early-failed 返回，
+        // 不进轮次 kick-off（避免子进程白跑）。
         // 实现约束：赋值 → 终态检查 → kick-off 必须在同一同步段，中间禁止插入 await。
-        if (record.status === "closed") {
+        // [U2 桥接判据] 旧「closed 终态」读形态（两态迁移不变量）。
+        if (record.status === "idle" && record.closedReason !== undefined) {
           await this.deps.getWorktreeManager().cleanup(worktreeHandle);
           return this.deps.buildEarlyFailedHandle(record);
         }

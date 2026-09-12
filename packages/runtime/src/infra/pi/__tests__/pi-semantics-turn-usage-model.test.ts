@@ -8,7 +8,7 @@
  * `responseModel?` = 仅 openai-completions 在 provider 报告模型 ≠ 请求 id 时才设置
  * （OpenRouter auto 路由场景）——gen-stats 分桶 key 采 model 不采 responseModel 的裁定依据。
  *
- * ── 追加探针组（genstats-speed-llm-window，docs/design/genstats-speed-llm-window.md §2.4）──
+ * ── 追加探针组（genstats-speed-llm-window，docs/design/genstats-speed-llm-window.md——已删除，git 可追溯——§2.4）──
  * LLM 请求窗口时序契约（runtime 速度采样闭合点前移到 assistant message_end 所依赖的 pi 事件时序）：
  * P1 成功路径 assistant message_end 先于 turn_end；P3① error/aborted 分支在流内收敛真实 partial
  * message 的 message_end 后才 turn_end+return；P3② agent.js handleRunFailure 合成四事件

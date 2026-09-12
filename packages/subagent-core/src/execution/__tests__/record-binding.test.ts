@@ -270,7 +270,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
-    expect(records[0]!.status).toBe("closed");
+    expect(records[0]!.status).toBe("idle");
     expect(records[0]!.closedReason).toBe("gc");
     // 保留选项锁定：终态后绑定不删——resurrect 回边删 .state 后绑定仍在，再崩溃仍可恢复
     expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true);
@@ -425,7 +425,7 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
-    expect(visible[0]!.status).toBe("closed");
+    expect(visible[0]!.status).toBe("idle");
     expect(visible[0]!.origin).toBe("workflow");
     expect(visible[0]!.parentRunId).toBe("wf-run-2");
   });

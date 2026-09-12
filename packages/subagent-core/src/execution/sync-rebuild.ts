@@ -29,8 +29,11 @@ import type { SubagentRecord } from "./types.ts";
  *   不含），正常 flush 路径经 toNotifyRecord 特意携带，恢复批不得缺失。
  */
 export function syncRebuildToNotifyMember(rec: SubagentRecord): BgNotifyRecord {
+  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
   const status: BgNotifyRecord["status"] =
-    rec.status === "closed" || !rec.chatMode ? "closed" : "running";
+    (rec.status === "idle" && rec.closedReason !== undefined) || !rec.chatMode
+      ? "closed"
+      : "running";
   return {
     id: rec.id,
     status,
@@ -64,8 +67,12 @@ export function bufferedMemberFallbackRecord(
     agent: m.agent,
     task: "",
     slug: "",
-    status: "closed",
-    closedReason: m.closedReason,
+    // [U2 两态桥接] 旧终态形态落 idle + closedReason 兜底 disconnected（桥接不变量：
+    // idle ∧ closedReason 有值 ⟺ 旧 closed；BgNotifyRecord 无 closedReason 时兜底
+    // disconnected——「已收口但死因不可考」的既有读侧兜底语义）。
+    status: "idle",
+    closedReason: m.closedReason ?? "disconnected",
+    stopReason: m.closedReason ?? "disconnected",
     mode: "background",
     startedAt: m.startedAt,
     rootSessionId,

@@ -206,7 +206,7 @@ const CTX_MODEL = { id: "m1", name: "Model One", provider: "prov", reasoning: tr
 describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-sw 实测）", () => {
   it("ExecutionStatus → ExternalState 两态映射", () => {
     expect(mapExternalState("running")).toBe("active");
-    expect(mapExternalState("closed")).toBe("ended");
+    expect(mapExternalState("idle")).toBe("idle");
   });
 
   it("running record → item（displayAgentName 短名 + duration 实时 + resumable）", () => {
@@ -246,7 +246,7 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       recordToListItem(
         makeRec({
           id: "bg-c1",
-          status: "closed",
+          status: "idle",
           closedReason: "gc",
           outcome: "completed",
           startedAt: 1000,
@@ -258,8 +258,8 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       subagentId: "bg-c1",
       agent: "reader",
       slug: "src-slug",
-      state: "ended",
-      status: "closed",
+      state: "idle",
+      status: "idle",
       mode: "background",
       duration: 8,
       model: "prov/m1",
@@ -272,7 +272,7 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
   });
 
   it("closed 存量（无 outcome 字段）→ deriveOutcome 兜底派生四形态", () => {
-    const base = { id: "bg-c2", status: "closed" as const, startedAt: 1000, endedAt: 3000 };
+    const base = { id: "bg-c2", status: "idle" as const, startedAt: 1000, endedAt: 3000 };
     // gc + 无 error → completed
     expect(recordToListItem(makeRec({ ...base, closedReason: "gc" })).outcome).toBe("completed");
     // cancelled → cancelled
@@ -406,7 +406,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
   it("includeFinished:true → collectRecords(20,'all') + getFullRecord 补全投影", () => {
     const collectRecords = vi.fn(() => [
       makeRec({ id: "bg-1", slug: "one" }),
-      makeRec({ id: "bg-2", slug: "two", status: "closed", endedAt: 5000 }),
+      makeRec({ id: "bg-2", slug: "two", status: "idle", closedReason: "gc", endedAt: 5000 }),
     ]);
     const getFullRecord = vi.fn((id: string) =>
       id === "bg-1" ? makeRec({ id: "bg-1", slug: "one", model: "prov/full", totalTokens: 77 }) : undefined,
@@ -434,8 +434,8 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
             subagentId: "bg-2",
             agent: "reader",
             slug: "two",
-            state: "ended",
-            status: "closed",
+            state: "idle",
+            status: "idle",
             mode: "background",
             duration: 4,
             model: "prov/m1",
@@ -513,7 +513,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     expect(
       await errOf(() =>
         cancelHandler(
-          makeService({ collectRecords: vi.fn(() => [makeRec({ id: "bg-9", status: "closed", endedAt: 5000 })]) }),
+          makeService({ collectRecords: vi.fn(() => [makeRec({ id: "bg-9", status: "idle", endedAt: 5000 })]) }),
           { subagentId: "bg-9" },
         ),
       ),
@@ -586,7 +586,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
               calls += 1;
               return calls === 1
                 ? makeRec({ id: "bg-1", chatMode: undefined })
-                : makeRec({ id: "bg-1", status: "closed", endedAt: 5000 });
+                : makeRec({ id: "bg-1", status: "idle", endedAt: 5000 });
             }),
             cancel: vi.fn(() => false),
           }),
@@ -595,7 +595,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
       ),
     ).toEqual({
       errorName: "Error",
-      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: closed)",
+      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: idle)",
     });
   });
 
@@ -703,7 +703,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
           getRecordForAction: vi.fn(() => {
             throw original;
           }),
-          lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "closed", closedReason: "disconnected" })),
+          lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "idle", closedReason: "disconnected" })),
         }),
         { subagentId: "bg-1", text: "hi" },
       );
@@ -721,7 +721,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
           throw new Error("not found or not owned");
         }),
         lookupRecordAnyState: vi.fn(() =>
-          makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile: "sess-1.jsonl" }),
+          makeRec({ id: "bg-1", status: "idle", closedReason, sessionFile: "sess-1.jsonl" }),
         ),
       });
     expect(await errOf(() => messageHandler(mkSvc("user-close"), { subagentId: "bg-1", text: "hi" }))).toEqual({
@@ -746,7 +746,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
         getRecordForAction: vi.fn(() => {
           throw new Error("not found or not owned");
         }),
-        lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile })),
+        lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "idle", closedReason, sessionFile })),
       });
     const expectedTail =
       'Recovery: resume from that history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}, ' +
@@ -763,10 +763,13 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
         " — it ended in a previous session (exact cause unknown)" +
         "). Its conversation history is intact at sess-1.jsonl. " + expectedTail,
     );
-    // 无 closedReason → "unknown" + 空短语；无 sessionFile → "(session file unavailable)"
-    expect((await errOf(() => messageHandler(mkSvc(undefined, undefined), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is ended but reconnectable (closedReason: unknown). " +
-        "Its conversation history is intact at (session file unavailable). " + expectedTail,
+    // [U2 两态] 「已收口且 closedReason 缺失」生产不可达（磁盘重建兜底 disconnected，
+    // 桥接判据 idle ∧ closedReason 有值）——原「closedReason: unknown」兜底分支随形态
+    // 消亡；无 sessionFile → "(session file unavailable)" 文案分支以 disconnected 载荷保留。
+    expect((await errOf(() => messageHandler(mkSvc("disconnected", undefined), { subagentId: "bg-1", text: "hi" }))).message).toBe(
+      "subagent bg-1 is ended but reconnectable (closedReason: disconnected" +
+        " — it ended in a previous session (exact cause unknown)" +
+        "). Its conversation history is intact at (session file unavailable). " + expectedTail,
     );
   });
 
@@ -927,7 +930,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
       expect(
         await errOf(() =>
           forkFromHandler(
-            makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile: "sess-1.jsonl" })),
+            makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason, sessionFile: "sess-1.jsonl" })),
             { sourceSubagentId: "bg-1" },
           ),
         ),
@@ -945,7 +948,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(
       await errOf(() =>
         forkFromHandler(
-          makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason: "gc", worktree: true, sessionFile: "sess-1.jsonl" })),
+          makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason: "gc", worktree: true, sessionFile: "sess-1.jsonl" })),
           { sourceSubagentId: "bg-1" },
         ),
       ),
@@ -963,7 +966,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(
       await errOf(() =>
         forkFromHandler(
-          makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason: "gc", sessionFile: undefined })),
+          makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason: "gc", sessionFile: undefined })),
           { sourceSubagentId: "bg-1" },
         ),
       ),

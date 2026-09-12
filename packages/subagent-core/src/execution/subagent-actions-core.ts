@@ -236,7 +236,9 @@ export function endedMessageGuard(service: SubagentService, id: string, original
   if (!snap) {
     return original instanceof Error ? original : new Error(String(original));
   }
-  if (snap.status === "closed") {
+  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
+  // 迁移不变量，U4 endedMessageGuard 缩型时重写本段）。
+  if (snap.status === "idle" && snap.closedReason !== undefined) {
     if (snap.closedReason === "cancelled" || snap.closedReason === "user-close") {
       return new Error(
         `subagent ${id} was deliberately closed by user (closedReason: ${snap.closedReason}) — ` +
@@ -288,10 +290,11 @@ function assertNever(value: never): string {
 }
 
 /**
- * 内部 ExecutionStatus → 对外 state 映射（设计决策 10 细则 3）。
- * 两态收敛后的真实映射只有两条：
- *   running → active / closed → ended（closed 统一终态，含 cancelled）
- * ExternalState 即两态联合（历史 waiting/error 死值成员已随 L2 清扫删除）。
+ * 内部 ExecutionStatus → 对外 state 映射（永久会话模型两态，U2 迁移）。
+ * 真实映射只有两条：
+ *   running → active / idle → idle（永久会话无 ended 形态——空闲即可续聊；旧
+ *   closed→ended 映射随终态概念删除，「上一轮为什么停」经 stopReason 披露，U8 投影面）。
+ * ExternalState 即两态联合。
  * 未来内部加态必须扩展此处，漏加会在 default 分支编译报错（而非静默返回 undefined
  * 让 state 字段以无主值进入 listResponse JSON）。
  */
@@ -299,9 +302,9 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
   switch (status) {
     case "running":
       return "active";
-    case "closed":
-      // closed 统一终态（含 cancelled）。对外映射为 ended。
-      return "ended";
+    case "idle":
+      // 已收口/等续聊。对外映射为 idle（可续聊语义，替代旧 ended）。
+      return "idle";
     default:
       throw new Error(`mapExternalState: unhandled ExecutionStatus ${assertNever(status)}`);
   }
@@ -729,7 +732,10 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
   // 守卫 4：主动告别（cancelled tombstone / user-close 正式关闭）——close 语义无旁路：
   // fork-from 与 message 一致拒绝（guard 一致性规格），文案升级为统一「主动关闭」形态
   //（含 closedReason 显式列入），与 deliverChatMessage 的同类分支同语系不同落地（此处强调不可 branch）。
-  if (source.status === "closed" && (source.closedReason === "cancelled" || source.closedReason === "user-close")) {
+  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
+  // 迁移不变量；守卫 4 的删除/缩型归 U4 准入判据切换）。
+  if (source.status === "idle" && source.closedReason !== undefined
+    && (source.closedReason === "cancelled" || source.closedReason === "user-close")) {
     throw new Error(
       `subagent ${id} was deliberately closed by user (closedReason: ${source.closedReason}) — ` +
       `deliberately-closed records cannot be resumed or branched from; nothing can reattach to them. ` +

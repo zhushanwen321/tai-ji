@@ -64,13 +64,13 @@ describe("record-entry serialization: collect fields (U1 foundation)", () => {
       makeRecord({
         collectMode: "sync",
         batchFinalized: true,
-        status: "closed",
+        status: "idle",
         endedAt: 2000,
       }),
     );
     expect(entry.collectMode).toBe("sync");
     expect(entry.batchFinalized).toBe(true);
-    expect(entry.status).toBe("closed");
+    expect(entry.status).toBe("idle");
   });
 
   it("round-trips both fields through JSON serialization (persisted form)", () => {

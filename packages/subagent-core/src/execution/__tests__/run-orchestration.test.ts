@@ -194,6 +194,6 @@ describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {
     expect(cleanupSpy).toHaveBeenCalledWith(handle);
     // 返回 early-failed 形态（details.status 已 closed），而非 kickOff 的 running 形态
     expect(ret.mode).toBe("background");
-    expect(ret.details).toMatchObject({ status: "closed" });
+    expect(ret.details).toMatchObject({ status: "idle" });
   });
 });

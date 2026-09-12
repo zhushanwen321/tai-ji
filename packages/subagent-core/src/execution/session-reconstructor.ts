@@ -502,8 +502,10 @@ function buildReconstructedRecord(
   thinkingLevel: string | undefined,
 ): ReconstructedRecord {
   // 终态 status：最后一条 assistant message 的 stopReason 推导（与 finalizeRecord 的判定一致）。
-  // SP-1：done/failed 合并为 closed，cancelled 由 tombstone override（record-store 层），本函数不感知。
-  const status: ExecutionStatus = "closed";
+  // SP-1：done/failed 合并为统一收口态，cancelled 由 tombstone override（record-store 层），本函数不感知。
+  // [U2 两态] 内部词汇无 closed——重建基底 status 恒 idle（已收口语义），终态遗留位
+  // closedReason="gc" 保留（buildRecord sidecar 矩阵随后覆盖/校正）。
+  const status: ExecutionStatus = "idle";
   // closedReason 统 gc（通用完成/失败）。error/aborted 的区分由 error 字段保留。
   const closedReason: import("./types.ts").ClosedReason = "gc";
 

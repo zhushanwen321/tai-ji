@@ -139,7 +139,7 @@ describe("RecordStore", () => {
   describe("archive 立即移除", () => {
     it("archive 后 record 立即从内存移除（不再 linger）", () => {
       const store = new RecordStore(tmpDir);
-      const r = makeRecord({ id: "sync-1", mode: "background", status: "closed" });
+      const r = makeRecord({ id: "sync-1", mode: "background", status: "idle" });
       store.register(r);
       expect(store.getMutable("sync-1")).toBeDefined();
       store.archive(r);
@@ -148,7 +148,7 @@ describe("RecordStore", () => {
 
     it("background record 同样立即移除（不再 FIFO）", () => {
       const store = new RecordStore(tmpDir);
-      const r = makeRecord({ id: "bg-1", mode: "background", status: "closed" });
+      const r = makeRecord({ id: "bg-1", mode: "background", status: "idle" });
       store.register(r);
       store.archive(r);
       expect(store.getMutable("bg-1")).toBeUndefined();
@@ -196,7 +196,7 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === "bg-2");
       expect(found).toBeDefined();
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
     });
 
     it("statusFilter='running' 含内存 + 磁盘跨重启 running（v4 B-1：旧 idle 折入 running）", () => {
@@ -285,7 +285,7 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === "bg-1");
       // v4 B-1：cancelled 折入 closed，closedReason='cancelled' 保留用户取消语义
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
       expect(found?.error).toBe("cancelled by user");
     });
@@ -410,7 +410,7 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       // v4 B-1：cancelled 折入 closed（closedReason='cancelled' 区分用户取消）
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
       expect(found?.error).toBe("cancelled by user");
       expect(found?.endedAt).toBe(6000);
@@ -422,7 +422,7 @@ describe("RecordStore", () => {
       writeFinalizedState(sessionFile);
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
     });
 
     // ── 分支 2: 终态 sidecar status=finalized（failed）──
@@ -454,7 +454,7 @@ describe("RecordStore", () => {
       writeFinalizedState(sessionFile);
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
     });
 
     // ── 分支 3→4: .alive + 活 pid → running 兜底（U4a / D3b (a)：投影退役）──
@@ -520,7 +520,7 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       // v4 B-1：cancelled 优先级不变，但 status 折入 closed（closedReason='cancelled'）
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
     });
 
@@ -533,7 +533,7 @@ describe("RecordStore", () => {
       writeFinalizedState(sessionFile, "user-close");
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("user-close");
     });
 
@@ -543,7 +543,7 @@ describe("RecordStore", () => {
       writeLegacyFinalizedSidecar(sessionFile);
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("disconnected");
     });
 
@@ -554,7 +554,7 @@ describe("RecordStore", () => {
       });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
       expect(found?.error).toBe("cancelled by user");
       expect(found?.endedAt).toBe(7000);
@@ -800,7 +800,7 @@ describe("RecordStore", () => {
       const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2");
       expect(found).toBeDefined();
       // 分支 2 仍归档为 done，不受 SP-2 影响
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeDefined();
     });
 
@@ -815,7 +815,7 @@ describe("RecordStore", () => {
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2b");
       expect(found).toBeDefined();
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
       expect(found?.closedReason).toBe("cancelled");
     });
   });
@@ -846,14 +846,14 @@ describe("RecordStore", () => {
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-1");
       expect(entry?.customType).toBe("subagent-record");
-      expect(entry?.data.status).toBe("closed");
+      expect(entry?.data.status).toBe("idle");
       expect(entry?.data.closedReason).toBe("gc");
       expect(entry?.data.endedAt).toEqual(expect.any(Number));
       // [F3] in-flight 直断 = boot 直断 failed 语义：任务因宿主重启中断，不得投影
       // completed（事故环 3 残留）。error 载体 → deriveOutcome("gc", error) = failed。
       expect(entry?.data.error).toContain("host restart");
       expect(projectOutcome({
-        status: "closed",
+        status: "idle",
         closedReason: entry?.data.closedReason as never,
         error: entry?.data.error as string | undefined,
       })).toBe("failed");
@@ -863,7 +863,7 @@ describe("RecordStore", () => {
       store.recoverOrphanRecords("sess-orphan");
       expect(appended.length).toBe(again.length);
       const found = store.collectRecords(100, "all", "sess-orphan").find((r) => r.id === "sa-orphan-1");
-      expect(found?.status).toBe("closed");
+      expect(found?.status).toBe("idle");
     });
 
     it("SP-5 完成态（resumable + result 有值）→ completed 无 error（不误标重启失败，[F3] 不回归）", () => {
@@ -882,10 +882,10 @@ describe("RecordStore", () => {
       store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-sp5");
-      expect(entry?.data.status).toBe("closed");
+      expect(entry?.data.status).toBe("idle");
       expect(entry?.data.error).toBeUndefined();
       expect(projectOutcome({
-        status: "closed",
+        status: "idle",
         closedReason: entry?.data.closedReason as never,
         error: entry?.data.error as string | undefined,
       })).toBe("completed");
@@ -922,7 +922,7 @@ describe("RecordStore", () => {
       store.recoverOrphanRecords("sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-2");
-      expect(entry?.data.status).toBe("closed");
+      expect(entry?.data.status).toBe("idle");
       expect(entry?.data.error).toContain("truncated");
       expect(entry?.data.error).toContain("host restart");
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
@@ -946,7 +946,7 @@ describe("RecordStore", () => {
       store.recoverOrphanRecords("sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-5");
-      expect(entry?.data.status).toBe("closed");
+      expect(entry?.data.status).toBe("idle");
       // [F3] in-flight 重启中断 error 必有；「不误判截断」= error 不含 truncated 标记
       expect(entry?.data.error).toContain("host restart");
       expect(entry?.data.error).not.toContain("truncated");
@@ -1002,7 +1002,7 @@ describe("RecordStore", () => {
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-entryonly-1");
-      expect(entry?.data.status).toBe("closed");
+      expect(entry?.data.status).toBe("idle");
       expect(entry?.data.closedReason).toBe("gc");
       expect(entry?.data.error).toContain("no child session file");
       // 防重：orphanJudged 缓存拦截二次判定
@@ -1121,7 +1121,7 @@ describe("RecordStore", () => {
       expect(data).toMatchObject({
         v: 1,
         id: "r1",
-        status: "closed",
+        status: "idle",
         closedReason: "gc",
         result: "task done",
         endedAt: expect.any(Number) as number,

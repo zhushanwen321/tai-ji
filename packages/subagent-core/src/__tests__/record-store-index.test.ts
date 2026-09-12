@@ -551,7 +551,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     // 必须被感知——命中分支读 tombstone override 状态（否则退回兜底 running）
     const storeB = new RecordStore(sessionsDir);
     const sa1 = storeB.collectRecords(100, "all", "root-1").find((r) => r.id === "sa-1");
-    expect(sa1?.status).toBe("closed");
+    expect(sa1?.status).toBe("idle");
     expect(sa1?.closedReason).toBe("cancelled");
     expect(sa1?.error).toBe("cancelled by user");
     expect(sa1?.endedAt).toBe(3000); // tombstone 的精确结束时间，非 mtime 近似

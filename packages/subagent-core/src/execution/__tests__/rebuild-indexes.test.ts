@@ -146,7 +146,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     // manifest 重建产物：词汇双写（旧三态 + executionStatus）+ identity 富字段
     const closed = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-closed.json"), "utf-8")) as Record<string, unknown>;
     expect(closed.status).toBe("closed");
-    expect(closed.executionStatus).toBe("closed");
+    expect(closed.executionStatus).toBe("idle");
     expect(closed.closedReason).toBe("gc");
     expect(closed.agentName).toBe("worker");
     expect(closed.task).toBe("closed task");
@@ -259,12 +259,12 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
     const sessionFile = path.join(sessionsDir, "20260912T000006_fin.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
-    const record = makeRecord("sa-fin", { sessionFile, status: "closed", closedReason: "parent-shutdown", endedAt: 2000 });
+    const record = makeRecord("sa-fin", { sessionFile, status: "idle", closedReason: "parent-shutdown", endedAt: 2000 });
 
     expect(store.markFinalized(record, "parent-shutdown")).toBe(true);
     const manifest = readManifest("sa-fin");
     expect(manifest.status).toBe("closed");
-    expect(manifest.executionStatus).toBe("closed");
+    expect(manifest.executionStatus).toBe("idle");
     expect(manifest.closedReason).toBe("parent-shutdown");
     store.dispose();
   });
@@ -278,7 +278,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     expect(store.markCancelled(record)).toBe(true);
     const manifest = readManifest("sa-cx2");
     expect(manifest.status).toBe("closed");
-    expect(manifest.executionStatus).toBe("closed");
+    expect(manifest.executionStatus).toBe("idle");
     store.dispose();
   });
 
@@ -322,7 +322,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.rebuildIndexes();
     const manifest = readManifest("sa-cxl");
     expect(manifest.status).toBe("cancelled");
-    expect(manifest.executionStatus).toBe("closed");
+    expect(manifest.executionStatus).toBe("idle");
     expect(manifest.closedReason).toBe("cancelled");
     store.dispose();
   });

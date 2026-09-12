@@ -93,7 +93,9 @@ function isReconnectableClosed(r: SubagentRecord): boolean {
  *  必须原样透传，不得改写为 fork-from 指引误导 agent 走已被判死的通道）；拒绝时
  *  内存不得残留该记录（findRecord 契约）。 */
 function assertReconnectAllowed(found: SubagentRecord, id: string): void {
-  if (found.status !== "closed") return;
+  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
+  // 迁移不变量；判据集合替换归 U4 准入切换）。
+  if (!(found.status === "idle" && found.closedReason !== undefined)) return;
   if (found.worktree === true) {
     throw new ResurrectDeniedError(
       `subagent ${id} cannot be transparently resumed: it was created with worktree isolation, ` +

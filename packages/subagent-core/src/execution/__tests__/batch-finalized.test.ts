@@ -110,7 +110,7 @@ describe("batch-finalized 归口（U3/D1）——barrier：manifest 落盘完成
     for (const id of ["sa-bf-a", "sa-bf-b"]) {
       seedStore.reportSubagentRecord(memberRecord({ id }));
       seedStore.reportSubagentRecord(
-        memberRecord({ id, status: "closed", closedReason: "gc", endedAt: 2000, result: `done-${id}` }),
+        memberRecord({ id, status: "idle", closedReason: "gc", endedAt: 2000, result: `done-${id}` }),
       );
     }
 

@@ -61,7 +61,8 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
   if (memory !== undefined) {
     return {
       id: memory.id,
-      status: memory.status === "closed" ? "closed" : "running",
+      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+      status: memory.status === "idle" && memory.closedReason !== undefined ? "closed" : "running",
       resumable: memory.resumable === true,
       hasResult: memory.result !== undefined,
       chatMode: memory.chatMode === true,
@@ -77,7 +78,7 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
   if (disk === undefined) return undefined;
   return {
     id: disk.id,
-    status: disk.status === "closed" ? "closed" : "running",
+    status: disk.status === "idle" && disk.closedReason !== undefined ? "closed" : "running",
     resumable: disk.resumable === true,
     hasResult: disk.result !== undefined,
     chatMode: disk.chatMode === true,
@@ -288,15 +289,16 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
     runReconcileSweep({
       sessionFile: binding.getMainSessionFile(),
       lookupRecordState: (id) => {
+        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
         const memory = binding.getStore().getMutable(id);
         if (memory !== undefined) {
-          return memory.status === "closed"
+          return memory.status === "idle" && memory.closedReason !== undefined
             ? { terminal: true, closedReason: memory.closedReason }
             : "active";
         }
         const disk = binding.getStore().findLightById(id);
         if (disk === undefined) return "missing";
-        return disk.status === "closed"
+        return disk.status === "idle" && disk.closedReason !== undefined
           ? { terminal: true, closedReason: disk.closedReason }
           : "active";
       },

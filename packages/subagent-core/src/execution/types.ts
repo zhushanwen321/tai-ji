@@ -43,20 +43,28 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
 // ============================================================
 
 /**
- * 唯一执行状态。所有路径共用。v4 B-1 两态收敛：旧 idle 折入 running、
- * 旧 cancelled 折入 closed（closedReason='cancelled' 区分）。
+ * 唯一执行状态（永久会话模型两态，设计 subagent-permanent-session-model.md
+ * §3.2.1/§3.2.2；U2 自 u-foundation 的 ExecutionStatusV2 转正，终态概念删除）：
+ *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
  *
- * running = 活跃态。含两种子态（由派生谓词区分，见 lifecycle-predicates.ts）：
- *   - 对话模式等待续聊（旧 idle）：进程已回收，待冷路径 resume
- *     （isResumable=running && 无活进程句柄）。旧「进程保活待热路径」形态随
- *     H1 U6 长驻退役消亡，isIdle（hasIdleTimer）生产恒 false。
- *   - 正在执行（有活进程句柄）。
+ * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障，不参与资格判定）；
+ * 旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
  *
- * closed = 统一终态（done/failed/crashed/cancelled 合并）。具体关闭原因由
- * {@link ClosedReason} 子枚举表达（如 user-close / gc / cancelled / parent-shutdown）。
- * ExecutionRecord.closedReason 携带 L2 原因，投影层按需派生对外语义（error / ended）。
+ * [U2 桥接不变量] 旧「closed 终态」读判据在迁移期构造性等价于
+ * `status === "idle" && closedReason !== undefined`：旧终态路径（tryTransition /
+ * completeRecord 桥接）置 idle 时同步双写 closedReason（U5 重写意愿动作后随旧
+ * 原语退役）；新 settle 路径（markSettled）只写 stopReason 不写 closedReason
+ * （不终态化——正是新语义）。ClosedReason 字段保留为读侧兼容位（U3+ 收缩）。
  */
-export type ExecutionStatus = "running" | "closed";
+export type ExecutionStatus = "running" | "idle";
+
+/**
+ * 占用维度两态别名（u-foundation 骨架期名称，U2 转正后与 {@link ExecutionStatus}
+ * 同一类型）。保留至 U3 消化存量引用后删除。
+ *
+ * @deprecated 改用 {@link ExecutionStatus}。
+ */
+export type ExecutionStatusV2 = ExecutionStatus;
 
 /**
  * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1 建议新增）：
@@ -69,9 +77,15 @@ export type ExecutionStatus = "running" | "closed";
 export type RecordOrigin = "tool" | "workflow";
 
 /**
- * closed 终态的 L2 关闭原因子枚举。
+ * 旧 closed 终态的 L2 关闭原因子枚举。
  *
- * 与 ExecutionStatus="closed" 配合使用，表达「为什么关闭」：
+ * [U2 桥接期地位] 终态概念已删除（{@link ExecutionStatus} 两态），本枚举退役为
+ * **读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed 的展示迁移）。
+ * 迁移期旧终态路径（tryTransition/completeRecord 桥接、`.state`/entry/manifest 读侧
+ * 迁移映射）继续写本字段 + stopReason 双写，消费方（deriveOutcome/notifier 等）
+ * 零改动；U3+ 逐单元收缩后本字段随旧原语一并退役。
+ *
+ * 值语义（历史）：
  *   parent-shutdown  — 父进程 session_shutdown 时回收子进程
  *   parent-fork     — 父进程 fork 新 session 时清理旧子进程
  *   parent-new      — 父进程创建新 subagent 时清理旧子进程
@@ -144,16 +158,18 @@ export type ExecutionOutcome = "completed" | "failed" | "cancelled";
 export type ProjectedOutcome = ExecutionOutcome | "closed-legacy";
 
 /**
- * 对外两态（设计决策 10 细则 3）：内部 ExecutionStatus（v4 B-1 两态）收敛为 agent
- * 可理解的状态语义。真实映射只有两条：
- *   running → active / closed → ended（closed 统一终态，含 cancelled）。
- * mapExternalState 不消费 ClosedReason——closed 恒映射 ended。
+ * 对外两态（永久会话模型 U2 迁移）：内部 ExecutionStatus 两态收敛为 agent 可理解的
+ * 状态语义。映射只有两条：
+ *   running → active / idle → idle（永久会话无 ended 形态——空闲即可续聊，不再有
+ *   「已结束」；旧 closed→ended 映射随终态概念删除，idle 的「上一轮为什么停」经
+ *   stopReason 披露）。
+ * mapExternalState 不消费 StopReason——状态映射与停因展示正交。
  *
  * 原始 ExecutionStatus 进 list item 的 status 字段供调试；state 是对外主字段。
  * 映射实现见 subagent-actions-core.ts mapExternalState——未来内部加态必须扩展该处，
  * 漏加会在 default 分支编译报错，不影响对外契约。
  */
-export type ExternalState = "active" | "ended";
+export type ExternalState = "active" | "idle";
 
 /** 执行模式。background = 调用方立即拿 handle 返回，子 agent 在 detached promise 里跑。 */
 export type ExecutionMode = "background";
@@ -163,19 +179,8 @@ export type ExecutionMode = "background";
 // u-foundation 类型骨架先行，U2 实装状态机）
 // ============================================================
 
-/**
- * 占用维度目标两态（§3.2.1 领域模型 / §3.2.2 状态机）：
- *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
- * 终态概念删除（closed 消亡）；「旧 running 的隐性子态（resumable/纳管态）」由
- * 「idle + transcriptRef 在」统一表达。
- *
- * 过渡策略（u-foundation 决策，U2 切换点）：本类型暂**不并入** {@link ExecutionStatus}
- * 联合——exhaustive 消费方（subagent-actions-core mapExternalState 的 assertNever
- * default 分支、extensions subagent-workflow format.ts statusGlyph 无 default 穷尽
- * switch）在 u-foundation 领地外，直接扩联合会破坏其编译。U2（领地含 types.ts）落地
- * 状态机改造时将 ExecutionStatus 收敛为本联合并同批迁移全部消费方。
- */
-export type ExecutionStatusV2 = "running" | "idle";
+// [U2] ExecutionStatusV2 骨架别名已随两态转正并入 {@link ExecutionStatus}
+//（定义见「执行状态机」section；过渡别名随本体保留至 U3 清理）。
 
 /**
  * 旧终态值独立类型：仅供读侧兼容映射（§3.2.4——旧 `.state` finalized/cancelled
@@ -565,9 +570,13 @@ export interface ExecutionRecord {
 
   // ── 状态（实时更新）──
   status: ExecutionStatus;
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。表达「为什么关闭」。
-   *  由 tryTransition(record, "closed", reason) 写入；投影层按需派生对外语义。
-   *  向后兼容：旧 record 无此字段，按 gc 处理（通用完成/失败）。 */
+  /**
+   * 旧 closed 终态的 L2 关闭原因（桥接期兼容位，见 {@link ClosedReason}）。
+   * 桥接不变量：本字段非 undefined ⟺ 旧「closed 终态」（配合 status="idle"）；
+   * 新 settle 路径（markSettled）不写本字段（不终态化）。新权威展示位 =
+   * {@link stopReason}；U3+ 收缩后本字段退役。
+   * 向后兼容：旧 record 无此字段，按 gc 处理（通用完成/失败）。
+   */
   closedReason?: ClosedReason;
   /**
    * 终态三态对外语义（U3 C-outcome）。completeRecord 唯一写入点按 deriveOutcome
@@ -951,8 +960,18 @@ export interface SubagentRecord {
   /** 短标签（≤35 字符）。磁盘重建源旧文件可能缺失→兜底空串。 */
   slug: string;
   status: ExecutionStatus;
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。SP-1 新增。 */
+  /**
+   * 旧 closed 终态的 L2 关闭原因（桥接期兼容位，与 {@link ExecutionRecord.closedReason}
+   * 同源投影/entry 重建；closed→idle 迁移映射后配合 status="idle" 判读终态遗留）。
+   * SP-1 新增；U2 起新权威展示位 = stopReason（随 entry/重建投影 additive）。
+   */
   closedReason?: ClosedReason;
+  /**
+   * 展示维度（永久会话模型 §3.2.1，U2 additive 投影）：上一轮为什么停。内存源经
+   * recordToSubagent 投影、entry 重建经 readEntryTerminalFields 映射（存量 entry
+   * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收口 / 旧数据。
+   */
+  stopReason?: StopReason;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
   outcome?: ExecutionOutcome;
   mode: ExecutionMode;

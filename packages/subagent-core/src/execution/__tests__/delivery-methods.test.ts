@@ -122,7 +122,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
   });
 
   it("终态 closed record → throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
-    record.status = "closed";
+    record.status = "idle";
     // [H1 U2] D4 表 closed 硬拒格：closedReason 非 可重连集（undefined/gc）→ 硬拒 +
     // start 新的指引（Continuation reviveOrThrow 文案）
     await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(

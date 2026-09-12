@@ -91,7 +91,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     const bigPayload = "x".repeat(300 * 1024);
     writeOrphanSession("orphan-bigline", JSON.stringify({ type: "custom", customType: "subagent-record", data: { task: bigPayload, status: "done" } }));
     const rec = recovered("orphan-bigline");
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("gc");
     // 回归锚点本体：300KB 完整行不误判截断（[F3] in-flight 重启中断 error 在场，
     // 但无截断标记——64KB 固定尾窗的旧实现会把本行从中间切开判「truncated」）。
@@ -104,7 +104,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     const truncated = '{"type":"message","role":"assistant","content":"half-written line without clos';
     writeOrphanSession("orphan-truncated", truncated, { trailingNewline: false });
     const rec = recovered("orphan-truncated");
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("gc");
     // [F3] 无 resumable 信号 = in-flight：截断判定并入重启中断文案（"— last line truncated"）
     expect(rec.error).toContain("host restart");
@@ -115,7 +115,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     const bigTruncated = JSON.stringify({ type: "custom", customType: "subagent-record", data: { task: "y".repeat(300 * 1024) } }).slice(0, 300 * 1024);
     writeOrphanSession("orphan-bigcut", bigTruncated, { trailingNewline: false });
     const rec = recovered("orphan-bigcut");
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     // [F3] 无 resumable 信号 = in-flight：截断判定并入重启中断文案
     expect(rec.error).toContain("host restart");
     expect(rec.error).toContain("truncated");
@@ -124,7 +124,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
   it("常规末行（多行文件、完整 JSON）→ closed/gc；无 resumable 信号 = in-flight 重启中断（[F3]）", () => {
     writeOrphanSession("orphan-normal", JSON.stringify({ type: "message", role: "assistant", content: "final" }));
     const rec = recovered("orphan-normal");
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("gc");
     // [F3] 末行完整但无 resumable/result 信号 = 在途被重启中断：投影不得谎报 completed
     expect(rec.error).toContain("host restart");
@@ -143,7 +143,7 @@ describe("readLastJsonlLine 孤儿终态判定（超长末行 / 截断行）", (
     fs.writeFileSync(path.join(sessionsDir, "2026-07-18T12-00-00-000Z_orphan-empty.jsonl"), identity + "\n", "utf8");
     const rec = recovered("orphan-empty");
     // 唯一非空行 = identity 首行（合法 JSON）→ 无截断标记；[F3] in-flight 重启中断 error 在场
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.error).toContain("host restart");
     expect(rec.error).not.toContain("truncated");
   });

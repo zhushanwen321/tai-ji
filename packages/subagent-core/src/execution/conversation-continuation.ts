@@ -557,7 +557,10 @@ export class ConversationContinuation {
    */
   private reviveOrThrow(): void {
     const record = this.record;
-    if (record.status !== "closed" || !isReconnectableFinalReason(record.closedReason)) {
+    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
+    // 迁移不变量；本守卫与 resurrectClosed 回边的合并重写归 U4 准入判据单点）。
+    if (!(record.status === "idle" && record.closedReason !== undefined)
+      || !isReconnectableFinalReason(record.closedReason)) {
       const reasonDesc = record.closedReason !== undefined ? ` (closedReason: ${record.closedReason})` : "";
       throw new Error(
         `subagent ${record.id} was deliberately closed by user${reasonDesc} — ` +

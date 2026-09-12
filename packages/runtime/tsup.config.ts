@@ -54,7 +54,11 @@ export default defineConfig({
   // @zhushanwen/subagent-engine-sdk [W11/A5]：runtime 经 subagent-core 协议面传递消费
   // SDK 原语（buildEngineChildEnv / spawnEngineChild 等），workspace TS 源码包无 dist
   // 解析面，必须内联进 bundle（否则打包态 Cannot find module）
-  noExternal: ['ws', 'semver', 'fast-glob', 'tar', '@xyz-agent/shared', '@xyz-agent/extension-protocol', '@xyz-agent/session-delivery', '@xyz-agent/core', '@zhushanwen/subagent-core', '@zhushanwen/subagent-engine-sdk', '@zhushanwen/pi-file-lock', '@earendil-works/pi-ai', 'chokidar', '@iarna/toml', 'xyz-agent-plugin-sdk'],
+  // @zhushanwen/pi-rpc [U1 subagent-permanent-session-model]：pi 进程 RPC 公共层
+  // （argv 构造 / LF-only 分帧 / pending 表 / 命令帧组装 / 杀链 / 出站 env 组装），
+  // rpc-client 薄壳消费——同 pi-file-lock 形态（exports 直指 src 的纯 TS 源码包，
+  // esbuild 直接编译无需 build 前置）
+  noExternal: ['ws', 'semver', 'fast-glob', 'tar', '@xyz-agent/shared', '@xyz-agent/extension-protocol', '@xyz-agent/session-delivery', '@xyz-agent/core', '@zhushanwen/subagent-core', '@zhushanwen/subagent-engine-sdk', '@zhushanwen/pi-file-lock', '@zhushanwen/pi-rpc', '@earendil-works/pi-ai', 'chokidar', '@iarna/toml', 'xyz-agent-plugin-sdk'],
   // platform: 'node' 已自动处理所有 node:* 内置模块，无需手动 external
   // node-pty 是 native module（含 .node 二进制），不能打包进 JS bundle：
   // 其 JS 入口用 node-gyp-build 动态 require prebuilds/<platform>/*.node，

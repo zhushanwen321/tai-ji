@@ -271,20 +271,18 @@ describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
   });
 });
 
-// ── ⑤ store 新意图原语骨架 ──────────────────────────────────────────────────
+// ── ⑤ store 新意图原语（U2 已实装，冒烟）────────────────────────────────────
+// 详细行为矩阵（CAS 语义 / 原语副作用面 / epoch 递增）见
+// permanent-session-state-machine.test.ts；此处仅锁定「骨架已填肉、可调用」。
 
-describe("store 新意图原语骨架（throw not implemented）", () => {
-  it("markSettled / markReopened / markArchived / markIdleEvicted 均抛 not implemented", () => {
+describe("store 新意图原语（U2 实装冒烟）", () => {
+  it("markSettled：running record 收口为 idle + stopReason（骨架 throw 已移除）", () => {
     const store = new RecordStore(path.join(dir, "sessions"));
     const rec = baseRecord();
+    store.register(rec);
 
-    expect(() => store.markSettled(rec, "interrupted")).toThrow(
-      /markSettled\(bg-1, stopReason=interrupted\): not implemented/,
-    );
-    expect(() =>
-      store.markReopened(rec, { engine: "pi", sessionFile: "a.jsonl" }),
-    ).toThrow(/markReopened\(bg-1, transcriptRef\.engine=pi\): not implemented/);
-    expect(() => store.markArchived(rec)).toThrow(/markArchived\(bg-1\): not implemented/);
-    expect(() => store.markIdleEvicted(rec)).toThrow(/markIdleEvicted\(bg-1\): not implemented/);
+    expect(store.markSettled(rec, "interrupted")).toBe(true);
+    expect(rec.status).toBe("idle");
+    expect(rec.stopReason).toBe("interrupted");
   });
 });

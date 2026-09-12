@@ -88,7 +88,7 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
 function viewOf(record: ExecutionRecord, overrides: Partial<SupervisorRecordView> = {}): SupervisorRecordView {
   return {
     id: record.id,
-    status: record.status === "closed" ? "closed" : "running",
+    status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
     resumable: record.resumable === true,
     hasResult: record.result !== undefined,
     chatMode: record.chatMode === true,

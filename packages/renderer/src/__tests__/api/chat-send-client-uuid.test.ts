@@ -1,5 +1,5 @@
 /**
- * chat domain send clientUuid 透传单测（session-occupancy-send-closure u3-p1-renderer 验收 4）。
+ * chat domain send clientUuid 透传单测（session-occupancy-send-closure——已删除，git 可追溯——u3-p1-renderer 验收 4）。
  *
  * 覆盖：
  * - send 带 options.clientUuid → message.send payload 含 clientUuid（RPC 参数透传，

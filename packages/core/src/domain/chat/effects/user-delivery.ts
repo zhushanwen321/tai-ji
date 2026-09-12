@@ -1,5 +1,5 @@
 /**
- * message_end(user) 投递确认子域（session-occupancy-send-closure u4a / D5.3）。
+ * message_end(user) 投递确认子域（session-occupancy-send-closure——已删除，git 可追溯——u4a / D5.3）。
  *
  * 承载三分支处理序的 ①（defer 分区 FIFO 文本匹配）与其注入点（defer 队列 provider），
  * 以及 ①③ 共用的帧文本提取 / 快照剔除 helper。归位动机：registry.ts 为 message.*
@@ -82,7 +82,7 @@ export function removeQueuedTextFromSnapshot(
 }
 
 /**
- * [session-occupancy-send-closure u4a / D5.3] defer 队列（compactQueue）provider——
+ * [session-occupancy-send-closure——已删除，git 可追溯——u4a / D5.3] defer 队列（compactQueue）provider——
  * message_end(user) 三分支处理序 ①（defer 分区 FIFO 文本匹配）的注入点。
  *
  * 为什么模块级 provider 而非 MessageEffectContext 成员：createChatStore 是无参 factory、

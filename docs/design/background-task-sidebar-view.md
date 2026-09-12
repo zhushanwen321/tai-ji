@@ -296,7 +296,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 
 ## 附：关键事实源（调研锚点）
 
-- 本仓两份 explorer 调研报告（2026-09-04，已固化入库）：`docs/design/background-task-sidebar-view.research-data.md`（数据源全景）、`docs/design/background-task-sidebar-view.research-view-flow.md`（view/drawer/widget 链路；原始落盘 /tmp/bg-bash-design/ 与 /tmp/view-flow-research.md）
-- `docs/design/base-tool-enhance.md` §3.5（任务生命周期数据流、两层存储分工、跨进程边界）
+- 本仓两份 explorer 调研报告（2026-09-04，已固化入库；原文件已删除，git 可追溯）：`background-task-sidebar-view.research-data.md`（数据源全景）、`background-task-sidebar-view.research-view-flow.md`（view/drawer/widget 链路；原始落盘 /tmp/bg-bash-design/ 与 /tmp/view-flow-research.md）
+- 原 `docs/design/base-tool-enhance.md` §3.5（任务生命周期数据流、两层存储分工、跨进程边界；已删除，git 可追溯，决策沉淀在 base-tool-enhance 包内源码注释）
 - `packages/extension-protocol/src/background-task.ts`（registry 契约 SSOT）
 - R1 对抗审查报告：`docs/design/background-task-sidebar-view.review.md`（20+ 锚点核实记录 + 攻击面核验）
