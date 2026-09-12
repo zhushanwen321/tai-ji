@@ -1,5 +1,7 @@
 # 子代理引擎协议化与外移 实施计划
 
+> **[HISTORICAL] 部分退役注记（2026-09-11，U7 符号清扫批）**：本计划已全部交付；其中 chat 域协议面（W11 收口的 `host/roundLifecycle` 第 9 反向通道 + `RunParams.chat` 会话形态 + `interact` 方法）已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）二次退役——续聊改「新 run + resume 锚点」，类型闭包清单中的 `InteractAction` 已从 SDK 删除。文中相关行（§2.1 类型闭包 / W11 收口行）保留作交付史实，不逐处改写；现行协议面以 `packages/subagent-engine-sdk/src/protocol/{methods,reverse-channels}.ts` 为准。
+
 基线: df0139a39 | 来源设计: docs/design/subagent-engine-protocolization.md（v11，设计层收敛、实现级细节已下沉本文件） | 日期: 2026-09-08
 
 > 本计划承接设计文档 §5 的 W1–W12 拆分，把**实现级细节**（env 变量名、pidfile 命名、清理谓词、

@@ -64,6 +64,8 @@
       <!-- segmented tab（会话 | 文件 | Agents | Flows | Plugins） -->
       <SegmentedTab
         v-model="sidebar.activeTab"
+        :session-count="sessionCount"
+        :file-count="fileCount"
         :subagent-running-count="subagentRunningCount"
         :workflow-running-count="workflowRunningCount"
       />
@@ -268,7 +270,7 @@ const importOpen = ref(false)
 function onSessionImported(payload: ImportSessionImportedPayload): void {
   markImportedFresh(payload.sessionId)
 }
-const { subagentRunningCount, subagentList, workflowRunningCount, workflowList, currentWorkflow } = useSidebarCounts(focusedSessionId)
+const { sessionCount, fileCount, subagentRunningCount, subagentList, workflowRunningCount, workflowList, currentWorkflow } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
 const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, onRetryWorkflows, onRetrySubagents, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ focusedSessionId, selectSession, restoreSession, newSession, goOverview, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })

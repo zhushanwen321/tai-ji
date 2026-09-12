@@ -917,6 +917,47 @@ describe("createNotifier — ledger 四步接线（U2）", () => {
     notifier.dispose();
   });
 
+  it("dedupKey 显式覆盖 notifyId（drain 丢弃通知独立身份）：同轮失败通知 key 不互吞，同 key 重放仍幂等；缺省回退 `id` / `id:round` 不变", () => {
+    const ledgerMock = makeLedgerHost();
+    const notifierHost = makeNotifierHost();
+    // 桥接：ledger sendDelivery → notifier host.sendMessage（模拟 index.ts 装配）
+    ledgerMock.host.sendDelivery = (message) => {
+      notifierHost.sendMessage(message, { triggerTurn: true });
+      if (ledgerMock.deliverPersists.value) {
+        ledgerMock.sessionEntries.push({
+          type: "custom_message",
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+        });
+      }
+    };
+    bindNotifyLedgerHost(ledgerMock.host);
+
+    const notifier = createNotifier(notifierHost);
+    // 场景复刻（conversation-continuation drain 丢弃修复）：同 id 同轮——失败单发缺省
+    // key `id:round`，丢弃通知 dedupKey `id:round:drain-drop` → 两条都写账送达（修复
+    // 前丢弃通知沿用缺省 key 被幂等吞，「队列消息被丢」反馈永不可达）。
+    const failedRound = { id: "sa-drain", status: "closed" as const, outcome: "failed" as const, agent: "w", round: 1, startedAt: 1, endedAt: 2 };
+    notifier.notify({ ...failedRound, error: "round did not complete: crash" });
+    notifier.notify({ ...failedRound, error: "queued message could not be dispatched", dedupKey: "sa-drain:1:drain-drop" });
+    // 同 dedupKey 重放 = 同一显式反馈 → 幂等吞（去重语义保留，非全量放行）
+    notifier.notify({ ...failedRound, error: "dropped again", dedupKey: "sa-drain:1:drain-drop" });
+
+    expect(notifierHost.sentMessages).toHaveLength(2);
+    expect(notifierHost.sentMessages[0]?.details).toMatchObject({ notifyId: "sa-drain:1" });
+    expect(notifierHost.sentMessages[1]?.details).toMatchObject({ notifyId: "sa-drain:1:drain-drop" });
+
+    // 缺省回退（dedupKey 未设）：无 round → 裸 id（notifyClosed 终态通知消费形态），
+    // 与 `id:round` / `id:round:drain-drop` 互不吞——key 空间三形态互斥
+    notifier.notify({ ...failedRound, round: undefined, error: "closed" });
+    expect(notifierHost.sentMessages).toHaveLength(3);
+    expect(notifierHost.sentMessages[2]?.details).toMatchObject({ notifyId: "sa-drain" });
+
+    notifier.dispose();
+  });
+
   it("ledger 未 bind 时退回内核路径（向后兼容，options 仍单通道 triggerTurn）", () => {
     const notifierHost = makeNotifierHost();
     const notifier = createNotifier(notifierHost);
@@ -982,7 +1023,7 @@ describe("createNotifier — ledger 四步接线（U2）", () => {
 // ─── MF-5: settled 监听单例化 ──────────────────────────────
 //
 // 回归背景：index.ts:428-430 每次 session_start 注册新 pi.on("agent_settled")
-// handler，旧实例 dispose 只置标志不移除物理监听（pi 0.84.1 on() 无 off）——
+// handler，旧实例 dispose 只置标志不移除物理监听（pi 0.84.4 on() 无 off）——
 // 长会话 N 次切换累积 N 个死 handler。修复：bind 路径首次注册模块级单例
 // handler（settledEdgeDispatch），后续 bind 只换 boundLedger 引用。
 

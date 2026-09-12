@@ -33,9 +33,6 @@ function fakeEngine(id: string, models: Array<{ id: string; name?: string }> | n
     run: async () => {
       throw new Error("not used in this test");
     },
-    interact: async () => {
-      throw new Error("not used in this test");
-    },
     read: async () => ({ engineId: id, turns: [], source: "outcome-only" }),
     ...(models !== null ? { listModels: () => models } : {}),
   };

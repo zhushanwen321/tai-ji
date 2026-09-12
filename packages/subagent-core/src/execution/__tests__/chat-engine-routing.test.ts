@@ -334,6 +334,16 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   // 2. pi 缺省守护（D5 字节级）
   // ============================================================
 
+  it("[F6] pi 路由 kickOffChatRound：runCtx 带 sessionRootId（initSession 注入的根 id，relay 归属键权威源）", async () => {
+    const { service, piEngine } = setup(agentDir);
+    const handle = await service.execute(baseOpts(agentDir));
+    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
+    // initSession({sessionId: "test-session"}) 无 env → sessionRootId = "test-session"；
+    // kickOffChatRound 是 pi 引擎 background 派发主路径（isPiRoute 恒路由至此，含
+    // workflow 域一次性 run），漏注 = GUI pi 派发 relay 拒绝 exit 13（Gate B F6 形态）。
+    expect(piEngine.runs[0]!.ctx.sessionRootId).toBe("test-session");
+  });
+
   it("[D5] 全缺省 pi record：engine===undefined 且 entry JSON 不含 engine 键", async () => {
     const { service, piEngine } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir));
@@ -367,7 +377,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
       .execute(baseOpts(agentDir, { engine: "zcode", conversation: true }))
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("不支持 conversation");
+    expect((err as Error).message).toContain("不支持 resume 续聊");
     // 恢复指引（EngineError.recovery）：W3 协议化口径——调参数 / 修 manifest / 升级
     // 引擎包（引擎包是能力声明载体；「改用 engine: pi」内置兜底指引已随协议化删除）
     expect((err as { recovery?: string }).recovery).toContain("去掉 conversation 参数");
@@ -519,6 +529,47 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     // 按句移除断言（W10 注）：inproc 双模不回灌 childStateChanged，镜像移除由
     // protocol-blackbox 承载（同 subprocess-agent-runner-routing D10 注）。
   });
+
+  // ============================================================
+  // 6. [F6] sessionRootId 注入（execute / executeAndAwait 两 runCtx 构造点）
+  // ============================================================
+
+  it("[F6] service.sessionRootId 注入 runCtx（根 session id 贯穿引擎派发——relay 归属键 SESSION_ID 权威源）", async () => {
+    // 根进程形态：env 无 PI_SUBAGENT_ROOT_SESSION_ID 时 sessionRootId = init.sessionId。
+    // 删除防外层 env 污染（该键存在时 initSession 走子进程形态，断言基准漂移）。
+    const prevRootEnv = process.env["PI_SUBAGENT_ROOT_SESSION_ID"];
+    delete process.env["PI_SUBAGENT_ROOT_SESSION_ID"];
+    try {
+      const { service, zcode, piEngine } = setup(agentDir);
+      zcode.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
+      piEngine.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
+
+      // chat 域 background 派发（runEngineTask 的 runCtx 构造点）
+      await service.execute(baseOpts(agentDir, { engine: "zcode" }));
+      await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+      expect(zcode.runs[0].ctx.sessionRootId).toBe("test-session");
+
+      // workflow 域 sync 派发（runAndFinalize 的 runCtx 构造点；其引擎解析恒走
+      // registry 'pi'——resolveChatEnginePort，不消费 opts.engine）。fire-and-forget：
+      // 本 harness 无 idle-notify 驱动面，收尾链（finalizeRoundToIdle）不收敛——
+      // 只断言构造点（runs 捕获在收尾之前），与既有用例的挂起 record 同等形态。
+      let awaitErr: unknown;
+      void service
+        .executeAndAwait(baseOpts(agentDir, { slug: "f6-await" }))
+        .catch((e: unknown) => {
+          awaitErr = e;
+        });
+      await vi.waitFor(() => {
+        if (awaitErr !== undefined) {
+          throw new Error(`executeAndAwait rejected before engine.run: ${String(awaitErr)}`);
+        }
+        expect(piEngine.runs.length).toBe(1);
+      });
+      expect(piEngine.runs[0].ctx.sessionRootId).toBe("test-session");
+    } finally {
+      if (prevRootEnv !== undefined) process.env["PI_SUBAGENT_ROOT_SESSION_ID"] = prevRootEnv;
+    }
+  }, 10_000);
 });
 
 // ============================================================
@@ -670,6 +721,66 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     });
     // 回填 entry 的 journalPath 与 onPoolResolved retarget 后的实际落盘路径一致（同源）
     expect(fs.existsSync(resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId))).toBe(false);
+
+    // 终态收口（防 dangling）
+    releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
+    await vi.waitFor(() => expect(service["findRecord"](handle.subagentId)).toBeUndefined());
+  }, 10_000);
+
+  it("[onHandleReady F1] sessionId 先落 + 迟到只补 sessionFile → 按字段补缺落位；已有值不被迟到值覆盖（幂等）", async () => {
+    process.env.XYZ_AGENT_DATA_DIR = agentDir;
+    const { service, zcode, pi } = setup(agentDir);
+    const POOL = "zcode-appserver-home";
+    const LATE_SESSION_FILE = "/tmp/late/session-abc.jsonl";
+    let releaseRun!: (v: { handle: EngineHandle; outcome: AgentOutcome }) => void;
+    zcode.runImpl = (task, ctx) => {
+      ctx.onPoolResolved?.(POOL);
+      // ① create 应答：只带 sessionId（本 replay 批次新打通的可达面——close 期 LC-4
+      // 后缀反查在 sessionId 已知后才补发 sessionFile）。
+      ctx.onHandleReady?.({
+        sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
+        poolKey: POOL,
+      });
+      // ② 迟到 handleReady：只补 sessionFile——旧守卫「有 sessionId 即整条 return」
+      // 会把它整条吞掉，sessionFile 永不落位（消费点：冷续 resume 锚点 / interact 定位）。
+      ctx.onHandleReady?.({
+        sessionRef: { sessionId: "sess-live-1", sessionFile: LATE_SESSION_FILE },
+        poolKey: POOL,
+      });
+      // ③ 再迟到一次且带冲突值：已有值必须原样保留（幂等），poolKey 不被重置。
+      ctx.onHandleReady?.({
+        sessionRef: { sessionId: "sess-OVERWRITE", sessionFile: "/tmp/late/other.jsonl" },
+        poolKey: "hijacked-pool",
+      });
+      return new Promise((resolve) => {
+        releaseRun = resolve;
+      });
+    };
+    const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
+    await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
+
+    const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
+    // 补缺落位：sessionFile 进 record.engineHandle（①级会话取证 / 冷续 resume 锚点钥匙）
+    expect(running?.engineHandle?.sessionRef["sessionFile"]).toBe(LATE_SESSION_FILE);
+    expect(running?.engineHandle).toEqual({
+      sessionRef: {
+        dbPath: ".zcode/cli/db/db.sqlite",
+        sessionId: "sess-live-1",
+        sessionFile: LATE_SESSION_FILE,
+      },
+      poolKey: POOL,
+      journalPath: resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId),
+    });
+    // 补缺经 entry 持久化（运行中 GUI 经 entry 重建 record 即可见），且 ③ 的
+    // 「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条）。
+    const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
+    const withLateSessionFile = entries.filter(
+      (c) =>
+        ((c[1] as Record<string, unknown>).engineHandle as
+          | { sessionRef?: Record<string, string> }
+          | undefined)?.sessionRef?.["sessionFile"] === LATE_SESSION_FILE,
+    );
+    expect(withLateSessionFile).toHaveLength(1);
 
     // 终态收口（防 dangling）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });

@@ -5,7 +5,7 @@
 //
 //   core EngineClient（spawn+握手+请求关联+反向路由） ←NDJSON stdio→ 本服务器
 //
-// 10 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
+// 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onPoolResolved/onHandleReady/stream 经
 // host/* 反向请求上抛。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
 // cwd/schemaEnv/engineFallback 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
@@ -17,7 +17,7 @@
 // REVERSE_CHANNEL_TIMEOUT_CLASS。
 //
 // 本单元验收口径（任务书）：协议服务器以「能被 W2 EngineClient 驱动完成
-// initialize→run→终态应答往返」为目标；conformance 全套（10 方法 + 8 反向通道 +
+// initialize→run→终态应答往返」为目标；conformance 全套（方法 + 反向通道 +
 // 错误帧）归 W10。
 
 import {
@@ -30,8 +30,6 @@ import {
   type EngineHandleData,
   type InitializeParams,
   type InitializeResult,
-  type InteractAction,
-  type InteractResult,
   type ProbeReport,
   type ReadParams,
   type ReverseRequestClock,
@@ -132,7 +130,7 @@ export class EngineProtocolServer {
     // 无法归类的帧：静默忽略（stdout 是独占协议通道，不回显坏帧防对端解析器混乱）。
   }
 
-  /** 10 正向方法分发（表驱动：method → 处理器；未知方法 → engine_protocol_unknown_method）。 */
+  /** 9 正向方法分发（表驱动：method → 处理器；未知方法 → engine_protocol_unknown_method）。 */
   private async dispatch(id: number, method: string, params: unknown): Promise<unknown> {
     const handler = this.methodHandlers[method];
     if (handler === undefined) {
@@ -146,7 +144,7 @@ export class EngineProtocolServer {
   }
 
   /**
-   * 10 正向方法 → 处理器映射（每个处理器消费原始 params 并自行收敛类型——
+   * 9 正向方法 → 处理器映射（每个处理器消费原始 params 并自行收敛类型——
    * 与原 switch case 表达式一一对应）。
    */
   private readonly methodHandlers: Record<string, (params: unknown) => unknown> = {
@@ -154,7 +152,6 @@ export class EngineProtocolServer {
     probe: (p) => this.engine.probe(probeParamsOf(p)) as Promise<ProbeReport>,
     run: (p) => this.run(p as RunParams),
     cancel: (p) => this.cancel(p as { runId: string; reason: string }),
-    interact: (p) => this.interact(p as { handle: EngineHandleData; action: InteractAction }),
     read: (p) => this.read(p as ReadParams),
     listModels: () => ({ models: this.engine.listModels?.() ?? null }),
     validateModel: (p) => this.validateModel(p as { modelRef?: string }),
@@ -238,10 +235,6 @@ export class EngineProtocolServer {
     const active = this.activeRuns.get(params.runId);
     if (active !== undefined) active.controller.abort(new Error(`cancelled by host: ${params.reason}`));
     return { ok: true };
-  }
-
-  private async interact(params: { handle: EngineHandleData; action: InteractAction }): Promise<InteractResult> {
-    return this.engine.interact({ data: params.handle }, params.action);
   }
 
   private read(params: ReadParams): Promise<SessionView> {

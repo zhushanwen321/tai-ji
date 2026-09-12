@@ -120,6 +120,8 @@ export interface SupervisorRecordView {
   /** 已有完成产出（record.result !== undefined）——SP-5 upgrade 等待态判据。 */
   hasResult: boolean;
   chatMode: boolean;
+  /** [H2 W2] 来源身份（adopt 链豁免域判据——classifySupervisorDomain 消费）。 */
+  origin?: "tool" | "workflow";
   rootSessionId: string | undefined;
   agent: string;
   slug: string;
@@ -141,6 +143,8 @@ export interface SupervisorCandidateRecord {
   agent: string;
   slug: string;
   startedAt: number;
+  /** [H2 W2] 来源身份（superseded 对账的 workflow 候选豁免判据）。 */
+  origin?: "tool" | "workflow";
 }
 
 /** RoundSupervisor 的依赖（SubagentService 注入；全部单测替身友好）。 */
@@ -231,9 +235,12 @@ export class RoundSupervisor {
     for (const candidate of this.deps.listCandidateRecords()) {
       const view = this.deps.getRecordView(candidate.id);
       if (view === undefined || view.status !== "running") continue;
-      if (view.chatMode) continue; // conversation 豁免（现状，轮终 idle 机制管辖）
+      // [H2 W2] adopt 链豁免域门（conversation 豁免 + workflow origin 豁免）：
+      // classifySupervisorDomain 不把 workflow record 归入可 adopt 域（"run"）——
+      // boot 重认领对 workflow 形态不生效（豁免落空面无「重认领后 2h 看门狗挂账」）。
+      if (classifySupervisorDomain(view) !== "run") continue;
       // boot 分区只处理「孤儿恢复保留下来的 resumable 且无完成产出的形态」（W4 死亡
-      // 纳管态跨重启）——in-flight 已被孤儿恢复直断（见头注时序），不再此处重复
+      // 纳管态跨重启）——in-flight 已被孤儿恢复直断（见头注），不再此处重复
       // 终态化（双收尾防线）；resumable 且 result 有值是 SP-5 完成态（已完成挂账，
       // idle-gc 锚归档收口，无需监督）。谓词与 record-store 孤儿恢复保留分支同源
       // （isBootReadoptable，domain.ts）。
@@ -314,16 +321,22 @@ export class RoundSupervisor {
       return;
     }
     // 该唤醒 → 通知对账（送指引前查替代）。
+    // [H2 W2 / superseded 豁免] workflow origin 候选不参与替代判定——parallel 同
+    // slug/同 agent 并行是 workflow 常态而非替代关系（replacedNotice「was already
+    // replaced by your new task」会把并行任务误述为替代并错误终态化原任务）。
     const windowMs = getSupervisorWatchdogMs();
     const verdict = classifyReplacement(
       { id: view.id, rootSessionId: view.rootSessionId, agentName: view.agent, slug: view.slug },
-      this.deps.listCandidateRecords().map((c) => ({
-        id: c.id,
-        rootSessionId: c.rootSessionId,
-        agentName: c.agent,
-        slug: c.slug,
-        startedAt: c.startedAt,
-      })),
+      this.deps
+        .listCandidateRecords()
+        .filter((c) => c.origin !== "workflow")
+        .map((c) => ({
+          id: c.id,
+          rootSessionId: c.rootSessionId,
+          agentName: c.agent,
+          slug: c.slug,
+          startedAt: c.startedAt,
+        })),
       windowMs,
       this.deps.now(),
     );
@@ -400,6 +413,7 @@ export class RoundSupervisor {
       resumable: record.resumable === true,
       hasResult: record.result !== undefined,
       chatMode: record.chatMode === true,
+      origin: record.origin,
       rootSessionId: record.rootSessionId,
       agent: record.agent,
       slug: record.slug,

@@ -18,7 +18,7 @@
 
 import type { ExtensionMode } from "./host-mode.ts";
 import { resolveHostMode } from "./host-mode.ts";
-import { isRelayActive } from "./relay-env.ts";
+import { isRelayActive } from "@zhushanwen/subagent-engine-sdk";
 
 /** UI streaming sink 的最小接口（ctx.ui.setWidget 的 duck-typed 子集）。
  *

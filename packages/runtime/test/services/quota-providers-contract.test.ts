@@ -264,32 +264,42 @@ describe('mimoFetcher — A2-1 错误通道', () => {
 
   it('HTTP 401 → reason=unauthorized', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 401))
-    const outcome = await mimoFetcher.fetchQuota('cookie-val', 'cookie')
+    const outcome = await mimoFetcher.fetchQuota('session=abc', 'cookie')
     expect(outcome).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
   it('fetch 网络异常（reject）→ reason=network', async () => {
     mockFetch.mockRejectedValue(new TypeError('fetch failed'))
-    const outcome = await mimoFetcher.fetchQuota('cookie-val', 'cookie')
+    const outcome = await mimoFetcher.fetchQuota('session=abc', 'cookie')
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
   it('200 但响应体非法 JSON → reason=parse', async () => {
     mockFetch.mockResolvedValue(new Response('gateway', { status: 200 }))
-    const outcome = await mimoFetcher.fetchQuota('cookie-val', 'cookie')
+    const outcome = await mimoFetcher.fetchQuota('session=abc', 'cookie')
     expect(outcome).toEqual({ ok: false, reason: 'parse' })
   })
 
   it('200 响应决策字段形态漂移（code 为 string 而非 number）→ reason=parse（shape guard）', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ code: '401', message: 'unauthorized' }))
-    const outcome = await mimoFetcher.fetchQuota('cookie-val', 'cookie')
+    const outcome = await mimoFetcher.fetchQuota('session=abc', 'cookie')
     expect(outcome).toEqual({ ok: false, reason: 'parse' })
   })
 
   it('code 非 0（响应可解析但无订阅数据）→ reason=no-subscription', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ code: 401, message: 'unauthorized' }))
-    const outcome = await mimoFetcher.fetchQuota('cookie-val', 'cookie')
+    mockFetch.mockResolvedValue(jsonResponse({ code: 1, message: 'no subscription' }))
+    const outcome = await mimoFetcher.fetchQuota('session=abc', 'cookie')
     expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
+  })
+
+  it('code 401/403（在体凭证过期）→ reason=unauthorized，不被归为 no-subscription', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ code: 401, message: 'unauthorized' }))
+    const outcome401 = await mimoFetcher.fetchQuota('session=abc', 'cookie')
+    expect(outcome401).toEqual({ ok: false, reason: 'unauthorized' })
+
+    mockFetch.mockResolvedValue(jsonResponse({ code: 403, message: 'forbidden' }))
+    const outcome403 = await mimoFetcher.fetchQuota('session=abc', 'cookie')
+    expect(outcome403).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
   it('成功：percent 0~1 → 0~100，请求带 cookie 头', async () => {
@@ -320,41 +330,44 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
     'monthlyUsage:$R[3]={status:"active",resetInSec:300,usagePercent:60}',
   ].join('')
 
+  // [8e7d407de] 凭证拦截先于配置检查：normalizeCookieHeader 归一化为空 → 直接 unauthorized
+  // （fetch 不发出），故 credential 必须用合法形态 'k=v'，否则本 describe 用例不可达。
+  // 顺序语义（凭证 vs 配置谁先）如有异议需另裁决——当前实现以凭证检查在前为准。
   it('未配置 workspace → not_configured，不发任何 HTTP 请求（D1-3）', async () => {
     mockFetch.mockResolvedValue(new Response(openCodeHtml, { status: 200 }))
-    const noConfig = await opencodeFetcher.fetchQuota('cookie-val', 'cookie')
+    const noConfig = await opencodeFetcher.fetchQuota('session=abc', 'cookie')
     expect(noConfig).toEqual({ ok: false, reason: 'not_configured' })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('HTTP 302（cookie 过期）→ reason=unauthorized（原 isCredentialValid 语义）', async () => {
     mockFetch.mockResolvedValue(new Response(null, { status: 302 }))
-    const outcome = await opencodeFetcher.fetchQuota('cookie-val', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
   it('HTTP 500 → reason=network', async () => {
     mockFetch.mockResolvedValue(new Response(null, { status: 500 }))
-    const outcome = await opencodeFetcher.fetchQuota('cookie-val', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
   it('fetch 网络异常 → reason=network', async () => {
     mockFetch.mockRejectedValue(new TypeError('fetch failed'))
-    const outcome = await opencodeFetcher.fetchQuota('cookie-val', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
   it('200 但 HTML 中无三窗口数据 → reason=no-subscription', async () => {
     mockFetch.mockResolvedValue(new Response('<html>empty</html>', { status: 200 }))
-    const outcome = await opencodeFetcher.fetchQuota('cookie-val', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
   })
 
   it('成功：三窗口正则解析，请求目标 = 注入的 workspaceUrl（D1-4 URL 只来自配置）', async () => {
     mockFetch.mockResolvedValue(new Response(openCodeHtml, { status: 200 }))
 
-    const outcome = await opencodeFetcher.fetchQuota('cookie-val', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
 
     expect(mockFetch).toHaveBeenCalledWith(OPENCODE_WS_URL, expect.anything())
     expect(outcome.ok).toBe(true)

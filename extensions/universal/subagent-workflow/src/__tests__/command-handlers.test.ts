@@ -229,8 +229,8 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     // 转义协议：字面 \n 传输，解析侧还原（P3）
     await runHandler("message sa-1 第一条消息\\n带换行");
 
-    // 真实 messageHandler 跑通：deliverChatMessage(record, 还原后文本, interrupt=false)
-    expect(deliverChatMessage).toHaveBeenCalledWith(record, "第一条消息\n带换行", false);
+    // 真实 messageHandler 跑通：deliverChatMessage(record, 还原后文本)（[H1 U6] interrupt 退役）
+    expect(deliverChatMessage).toHaveBeenCalledWith(record, "第一条消息\n带换行");
     // 留痕：subagent-directive custom_message（§3.3.3——customType/content/details 契约）
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     const [msg, options] = sendMessageMock.mock.calls[0] as [
@@ -265,7 +265,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
 
     await runHandler("message sa-1 turn 进行中的定向消息");
 
-    // pi 0.84.1 sendCustomMessage：isStreaming 且无 deliverAs 时默认 steer 当前
+    // pi 0.84.4 sendCustomMessage：isStreaming 且无 deliverAs 时默认 steer 当前
     // turn——分流契约要求显式 nextTurn（入 _pendingNextTurnMessages 队列，下个
     // turn 注入，不打断当前 turn）
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
@@ -276,7 +276,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     expect(msg.customType).toBe("subagent-directive");
     expect(options).toEqual({ deliverAs: "nextTurn" });
     // 派发与通知不受 streaming 状态影响
-    expect(deliverChatMessage).toHaveBeenCalledWith(record, "turn 进行中的定向消息", false);
+    expect(deliverChatMessage).toHaveBeenCalledWith(record, "turn 进行中的定向消息");
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Message delivered to subagent build-api (sa-1)",
       "info",

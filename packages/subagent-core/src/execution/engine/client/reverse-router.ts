@@ -24,7 +24,6 @@ import {
   type HostLogParams,
   type HostPermissionParams,
   type HostPoolResolvedParams,
-  type HostRoundLifecycleParams,
   type HostStreamDeltaParams,
   type UiRequest,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -45,8 +44,6 @@ export interface ReverseRouterDeps {
   log?: (params: HostLogParams) => void;
   /** run 作用域通知路由表（EngineClient 持有，EngineClient 生命周期内同一引用）。 */
   runRoutes: Map<string, RunRoute>;
-  /** [W3 v1.x] chat 轮次路由表（recordId 键；EngineClient 持有，同上）。 */
-  recordRoutes: Map<string, RunRoute>;
   /** childSpawned/childStateChanged 的镜像落点。 */
   mirror: SpawnedChildrenMirror;
   /** handleReady 的 partial handle 回填（崩溃合成 handle 数据源）。 */
@@ -159,11 +156,11 @@ function handleDataPlaneRequest(deps: ReverseRouterDeps, frame: { id: string; me
 /** 数据面单通道分发器（params 形态自证——发帧前引擎侧自检，分发层只做强转）。 */
 type DataPlaneHandler = (deps: ReverseRouterDeps, params: unknown) => Promise<void> | void;
 
-/** method → 分发器表（表外 method = 无操作；路由面准入已由 REVERSE_CHANNEL_TIMEOUT_CLASS 收敛为 data-plane）。 */
+/** method → 分发器表（表外 method = 无操作；路由面准入已由 REVERSE_CHANNEL_TIMEOUT_CLASS 收敛为 data-plane）。
+ *  [H1 U6] 旧轮次相位反向通道已随 chat 域相位机退役删除（交棒改 run 应答驱动）。 */
 const DATA_PLANE_HANDLERS: Record<string, DataPlaneHandler> = {
   "host/log": (deps, params) => dispatchLog(deps, params as HostLogParams),
   "host/streamDelta": (deps, params) => dispatchStreamDelta(deps, params as HostStreamDeltaParams),
-  "host/roundLifecycle": (deps, params) => dispatchRoundLifecycle(deps, params as HostRoundLifecycleParams),
   "host/poolResolved": (deps, params) => dispatchPoolResolved(deps, params as HostPoolResolvedParams),
   "host/handleReady": (deps, params) => dispatchHandleReady(deps, params as HostHandleReadyParams),
   "host/childSpawned": (deps, params) => dispatchChildSpawned(deps, params as HostChildSpawnedParams),
@@ -180,29 +177,11 @@ function dispatchLog(deps: ReverseRouterDeps, p: HostLogParams): void {
 }
 
 async function dispatchStreamDelta(deps: ReverseRouterDeps, p: HostStreamDeltaParams): Promise<void> {
-  // [W3 v1.x 接线（W1 偏差 #1 的替换落地）] 关联键分路（D1-A）：
-  //   - recordId 键 = chat 续聊轮 delta（interact 发起，无独立 runId）→ recordRoutes；
-  //   - runId 键 = run 域轮（含 run 会话形态首轮）→ runRoutes（v1 现状不变）。
-  // 无注册路由 = 该轮宿主消费面未挂（诊断形态）——静默丢弃（数据面已 ack，
-  // 引擎侧不重发；路由缺席非引擎故障）。
-  if (p.recordId !== undefined) {
-    await deps.recordRoutes.get(p.recordId)?.onStreamDelta?.(p.delta);
-    return;
-  }
+  // [H1 U6] 关联键收敛为 runId 单键（recordId 分路随 chat 续聊轮 interact 面退役——
+  // 每轮 = 新 run，delta 恒经 run 作用域路由）。无注册路由 = 该轮宿主消费面未挂
+  //（诊断形态）——静默丢弃（数据面已 ack，引擎侧不重发；路由缺席非引擎故障）。
+  if (p.runId === undefined) return;
   await deps.runRoutes.get(p.runId)?.onStreamDelta?.(p.delta);
-}
-
-async function dispatchRoundLifecycle(deps: ReverseRouterDeps, p: HostRoundLifecycleParams): Promise<void> {
-  // [W3 v1.x] 第 9 反向通道消费（settled/idle/failed 三相位 × runId|recordId 键）。
-  // 相位语义（arm/disarm/交棒/失败分诊）归宿主编排层——本路由只做键分发，
-  // 消费方 = RunContext.onRoundLifecycle（首轮 runId 键）与 registerChatRoundRoute
-  // 路由（续聊轮 recordId 键）。载荷形状自证（isHostRoundLifecycleParams）归
-  // 引擎侧发帧前自检 + 消费方，分发层不重复判别（与 streamDelta 一致的薄分发）。
-  if (p.recordId !== undefined) {
-    await deps.recordRoutes.get(p.recordId)?.onRoundLifecycle?.(p);
-    return;
-  }
-  await deps.runRoutes.get(p.runId)?.onRoundLifecycle?.(p);
 }
 
 async function dispatchPoolResolved(deps: ReverseRouterDeps, p: HostPoolResolvedParams): Promise<void> {

@@ -1,10 +1,18 @@
 // src/orchestration/__tests__/agent-call-stream.test.ts
 //
-// U4: dispatchAgentCall 创建 SubagentStream 并在 agent call 结束后 dispose
-// U5: dispatchAgentCall widgetKey 格式 = subagent-stream-<runId>-<stepIndex>
-// U6: streamSink 为 undefined 时 dispatchAgentCall 不创建 stream 不报错
+// [H2 W3] 原 U4/U5（dispatchAgentCall 创建 SubagentStream + widgetKey 格式）与
+// U6（streamSink undefined 降级）锁定的是 pump 旁路 streaming 通道——该族随设计
+// subagent-workflow-record-unification.md D2「stream 通道承接」退役：pump 不再
+// 构造 SubagentStream（streaming 由 service 派发路径既有通道承载）。
 //
-// 通过 handleWorkerMessage 触发 dispatchAgentCall（内部函数不 export）。
+// [R2-5] streamSink 注入面已彻底删除（LifecycleDeps 死字段清理）：U4' 的运行时
+// 负向断言（「streamSink 已注入 → setWidget 零调用」）前提消失，改为**编译期结构
+// 断言**（下方 HasStreamSink）——字段若被重新引入，keyof LifecycleDeps 重新出现
+// "streamSink"，类型断言立即编译红；比运行时负向用例更强的永久护栏。
+//
+// 本文件现锁定：
+// - U4'（编译期）：LifecycleDeps 不再有 streamSink 注入面
+// - U6（运行时）：最简 deps（无 stream 通道）下 runner.run 仍被调用，无异常
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,9 +60,8 @@ function makeRunningRun(runId: string): WorkflowRun {
   } as unknown as WorkflowRun;
 }
 
-/** LifecycleDeps mock，runner.run 可控制返回值，streamSink 可配置 */
+/** LifecycleDeps mock（runner.run 可控制返回值；streamSink 注入面已随 [R2-5] 删除） */
 function makeDeps(opts: {
-  streamSink?: { setWidget: ReturnType<typeof vi.fn> };
   runnerResult?: AgentResult;
 } = {}): LifecycleDeps {
   return {
@@ -65,7 +72,6 @@ function makeDeps(opts: {
     eventBus: { emit: vi.fn() },
     onRunDone: vi.fn(),
     log: vi.fn(),
-    streamSink: opts.streamSink,
   } as unknown as LifecycleDeps;
 }
 
@@ -87,50 +93,20 @@ function makeAgentCallMsg(callId: number): unknown {
   };
 }
 
-// ── U4: dispatchAgentCall 创建 SubagentStream 并 dispose ──
+// ── U4': stream 通道退役（编译期结构断言，[R2-5]） ──
 
-describe("U4: dispatchAgentCall stream dispose", () => {
-  it("agent call 结束后 stream.dispose 被调用（setWidget 末次 lines=undefined）", async () => {
-    const setWidget = vi.fn();
-    const deps = makeDeps({ streamSink: { setWidget } });
-    const run = makeRunningRun("wf-test-123");
-    const handlers = makeHandlers();
+/** "streamSink" ∈ keyof LifecycleDeps 时为 true——与下方显式 false 标注冲突即编译红。 */
+type HasStreamSink = "streamSink" extends keyof LifecycleDeps ? true : false;
+// 结构断言本体：字段已删 = false。若有人重新引入 streamSink 字段，本行类型错误，
+// tsc / vue-tsc 拦截（vitest 转译不做类型检查；类型门由 pre-commit/CI 的 tsc 面
+// 覆盖——比运行时负向用例更强的注入面消失护栏）。
+const assertNoStreamSinkField: HasStreamSink = false;
+void assertNoStreamSinkField;
 
-    await handleWorkerMessage(run, makeAgentCallMsg(0), deps, handlers);
-    // dispatchAgentCall 内部 void withSlot(...)（fire-and-forget），需等 microtask 完成
-    await vi.waitFor(() => {
-      expect(setWidget.mock.calls.length).toBeGreaterThanOrEqual(1);
-    });
+// ── U6: 最简 deps 下派发不报错 ──
 
-    const calls = setWidget.mock.calls;
-    const lastCall = calls[calls.length - 1];
-    expect(lastCall[1]).toBeUndefined();
-  });
-});
-
-// ── U5: widgetKey 格式 ──
-
-describe("U5: widgetKey 格式", () => {
-  it("widgetKey = subagent-stream-<runId>-<stepIndex>", async () => {
-    const setWidget = vi.fn();
-    const deps = makeDeps({ streamSink: { setWidget } });
-    const run = makeRunningRun("wf-test-123");
-    const handlers = makeHandlers();
-
-    await handleWorkerMessage(run, makeAgentCallMsg(2), deps, handlers);
-    await vi.waitFor(() => {
-      expect(setWidget.mock.calls.length).toBeGreaterThanOrEqual(1);
-    });
-
-    const widgetKey = setWidget.mock.calls[0]![0] as string;
-    expect(widgetKey).toBe("subagent-stream-wf-test-123-2");
-  });
-});
-
-// ── U6: streamSink 为 undefined 时不报错 ──
-
-describe("U6: streamSink undefined 降级", () => {
-  it("streamSink=undefined → runner.run 仍被调用，无异常", async () => {
+describe("U6: 最简 deps（无 stream 通道）→ runner.run 仍被调用，无异常", () => {
+  it("dispatchAgentCall 不依赖 stream 注入面 → runner.run 正常派发", async () => {
     const runnerRun = vi.fn(async () => makeMockResult());
     const deps = {
       store: { save: vi.fn(async () => {}) },
@@ -140,7 +116,6 @@ describe("U6: streamSink undefined 降级", () => {
       eventBus: { emit: vi.fn() },
       onRunDone: vi.fn(),
       log: vi.fn(),
-      // streamSink 不设 = undefined
     } as unknown as LifecycleDeps;
     const run = makeRunningRun("wf-test-456");
     const handlers = makeHandlers();

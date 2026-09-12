@@ -249,22 +249,29 @@ export class DialogGlobalQueue {
    * 不影响其他 child 的 pending dialog（TC-E4 case 2 子测试 2）。
    */
   rejectChildDialogs(child: DialogChildRef): void {
-    // 先处理正在处理的项（可能永不 settle，必须由这里解阻塞）
+    // [清理顺序] 先把同 child 的排队项摘出队列，再 settle current——settleItem(current)
+    // 会推进队列（processNext 把队首提升为 current），若顺序反了，同 child 的排队项在
+    // 摘除前已被提升为 current 并逃过本次清理（残留到 30min 队列级超时才释放）。
+    const matched: QueueItem[] = [];
+    if (this.queue.length > 0) {
+      const remaining: QueueItem[] = [];
+      for (const item of this.queue) {
+        if (item.childPid === child.pid) {
+          matched.push(item);
+        } else {
+          remaining.push(item);
+        }
+      }
+      this.queue = remaining;
+    }
+    // 正在处理的项（可能永不 settle，必须由这里解阻塞并推进下一个）
     if (this.current && this.current.childPid === child.pid) {
       this.settleItem(this.current, { cancelled: true });
     }
-    // 再处理队列中等待的项
-    if (this.queue.length === 0) return;
-    const remaining: QueueItem[] = [];
-    for (const item of this.queue) {
-      if (item.childPid === child.pid) {
-        // settle 该 child 的 pending Promise 为 cancelled
-        this.settleItem(item, { cancelled: true });
-      } else {
-        remaining.push(item);
-      }
+    // 已摘除的排队项：settle Promise（非 current，不触发推进）
+    for (const item of matched) {
+      this.settleItem(item, { cancelled: true });
     }
-    this.queue = remaining;
   }
 
   /**
@@ -358,4 +365,45 @@ export class DialogGlobalQueue {
   get size(): number {
     return this.queue.length;
   }
+}
+
+// ============================================================
+// 活跃队列登记 + 子进程退出取消（SR-4 接线的宿主侧触达面）
+// ============================================================
+
+/**
+ * 进程级活跃 dialog 队列（生产单实例：宿主壳创建后经 createUiRequestHandlerForMode
+ * 传入，登记点在该工厂内——壳侧无需额外接线）。
+ *
+ * 为什么需要模块级登记：队列实例由宿主壳持有（它是跨子进程的全局串行队列），而
+ * 「子进程退出」信号从 core 的引擎镜像层（SpawnedChildrenMirror）到达——两者之间
+ * 没有实例引用链，模块级登记点是交界面（对齐 host-ui-endpoint 的
+ * setHostUiRequestEndpoint 先例）。
+ */
+let activeDialogQueue: DialogGlobalQueue | undefined;
+
+/** 登记活跃队列（createUiRequestHandlerForMode 调用；undefined = 注销）。 */
+export function registerActiveDialogQueue(queue: DialogGlobalQueue | undefined): void {
+  activeDialogQueue = queue;
+}
+
+/**
+ * 子进程退出通知：取消该 pid 的全部挂起 dialog（current + 排队项，经
+ * rejectChildDialogs 的既有语义）。
+ *
+ * 调用点 = 引擎镜像层（SpawnedChildrenMirror 的 exited 分支与 killAll 整体置死）。
+ * 语义 = SR-4 原设计「child close → 取消其 pending」在协议化架构下的落点：宿主不再
+ * 持有 pi 子进程句柄，改由引擎经 host/childStateChanged 上报，本函数是消费端——
+ * 未接线的后果是「子进程已死、宿主仍占着队列串行位等应答」，直到队列级 30min 超时
+ * 才释放（延迟清理，非死锁）。
+ *
+ * 未登记队列（headless / 无 UI 通道宿主）或该 pid 无 pending 时 no-op。
+ */
+export function notifyChildProcessExited(pid: number): void {
+  activeDialogQueue?.rejectChildDialogs({ pid });
+}
+
+/** 测试钩子：读当前登记队列（undefined = 未登记）。 */
+export function _getActiveDialogQueueForTest(): DialogGlobalQueue | undefined {
+  return activeDialogQueue;
 }

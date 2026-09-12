@@ -11,7 +11,9 @@
  *
  * 注入面（pi 子进程 env）：
  *  - XYZ_AGENT_ENGINE_ROOTS：staged 引擎根绝对路径（目录存在才注入——dev 未跑
- *    bundle-extensions 时不注入，发现回落 L2/L3 常规通道）；
+ *    bundle-extensions 时不注入，发现回落 L2/L3 常规通道；2026-09 起 dev 启动链
+ *    已前置 bundle-extensions.mjs 恒重建 staged 引擎（F7 修复），正常 dev 形态
+ *    目录恒存在且新鲜，此回落仅覆盖绕过 dev 链直接起 Electron 的形态）；
  *  - XYZ_AGENT_ENGINE_NODE + ELECTRON_RUN_AS_NODE=1：仅打包态注入（矩阵①：pi 扩展
  *    宿主的 process.execPath 是 pi binary，必须用注入执行器跑引擎 CLI；执行器 =
  *    runtime 自身 execPath，打包态即宿主 Electron 二进制，故同点带 RUN_AS_NODE）。

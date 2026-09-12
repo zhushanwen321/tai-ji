@@ -16,7 +16,7 @@
 //   （那是对 in-process run() 的旧 mock，在 spawn 改造后是死代码）。
 //
 //   mock 模块工厂已收敛 ./helpers/subagent-service-mocks.ts（四文件共享单源，含
-//   spawn → FakeChild / fs 同步方法 / temp-prompt / alive-store / finalized-marker /
+//   spawn → FakeChild / fs 同步方法 / temp-prompt / alive-store / state-marker /
 //   manifest-store 的完整桩形与动机注释）。
 //
 //   所有断言语义不变：它们测的是 SubagentService 的 **编排逻辑**
@@ -29,7 +29,7 @@ import {
   aliveStoreModule,
   childProcessModule,
   driveChildToCompletion,
-  finalizedMarkerModule,
+  stateMarkerModule,
   fsSyncModule,
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
@@ -37,7 +37,7 @@ import {
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
 vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../finalized-marker.ts", () => finalizedMarkerModule());
+vi.mock("../state-marker.ts", () => stateMarkerModule());
 vi.mock("../manifest-store.ts", () => manifestStoreModule());
 
 import { spawn } from "node:child_process";
@@ -138,7 +138,9 @@ describe("嵌套护栏 / 并发池 / 节流（D-030~D-033 回归锁）", () => {
   it("[D-033] execCtxAls depth=MAX 时 execute 抛错（nestingDepth=MAX+1 被拒）", async () => {
     const { service } = setup();
 
-    const execNesting = Reflect.get(service, "execNesting") as ExecCtxAls;
+    // [R1 深绑改写] execNesting 随域 #2 聚合迁入 SessionBaselines（壳转发 getter 透传），
+    // 深绑路径改为 service → baselines 聚合实例（断言对象与强度不变，路径对齐终态结构）。
+    const execNesting = (Reflect.get(service, "baselines") as { execNesting: ExecCtxAls }).execNesting;
 
     await expect(
       execNesting.run({ recordId: "parent", depth: MAX_FORK_DEPTH }, () =>
@@ -155,7 +157,8 @@ describe("嵌套护栏 / 并发池 / 节流（D-030~D-033 回归锁）", () => {
   it("[D-033] execCtxAls depth=MAX-1 时 execute 不抛（nestingDepth=MAX 允许）", async () => {
     const { service, fake } = setupWithFakeEngine();
 
-    const execNesting = Reflect.get(service, "execNesting") as ExecCtxAls;
+    // [R1 深绑改写] 同上：execNesting 经 baselines 聚合路径取用。
+    const execNesting = (Reflect.get(service, "baselines") as { execNesting: ExecCtxAls }).execNesting;
 
     const execPromise = execNesting.run({ recordId: "parent", depth: MAX_FORK_DEPTH - 1 }, () =>
       service.execute({ task: "at limit", slug: "test", ctxModel }),

@@ -5,9 +5,10 @@
  * worktree-registry / engine-discovery / zcode preparer / zcode appserver-home），
  * tmp 命名各异（`.tmp.<pid>` / `.tmp_<pid>_<rand>` / `.tmp-<pid>-<ts>`）、失败路径
  * 清理纪律不齐（worktree-registry 失败时漏清残留 tmp）。本模块给出统一原语供全
- * 部写点收敛（调用点迁移归 u-wire 单元，本单元只建原语）。现存消费方 4 处：
- * manifest-store / sessions-index / worktree-registry / engine-discovery——zcode
- * preparer 与 zcode appserver-home 两处写点已随 2026-09 共享宿主 HOME 重构删除。
+ * 部写点收敛（调用点迁移归 u-wire 单元，本单元只建原语）。现存消费方 5 处：
+ * manifest-store / sessions-index / worktree-registry / engine-discovery / record-store
+ * （manifest writeSync 面）——zcode preparer 与 zcode appserver-home 两处写点已随
+ * 2026-09 共享宿主 HOME 重构删除。
  *
  * **统一 tmp 命名约定**：`<最终路径>.tmp.<pid>.<seq>-<rand>`。
  * - `.tmp.` 标记向后兼容 manifest-store 既有扫描（`x.json` 的 tmp 名为
@@ -23,8 +24,8 @@
  *
  * **两种耐久档位**（对齐现存两族写点的生产模式）：
  * - sync（writeAtomicFileSync）：writeFileSync + renameSync，无 fsync——对齐
- *   worktree-registry / engine-discovery 两处同步写点现状（注册表/发现缓存类，
- *   进程崩溃窗口可容忍）；
+ *   worktree-registry / engine-discovery / record-store（manifest writeSync 面）
+ *   同步写点现状（注册表/发现缓存/索引类，进程崩溃窗口可容忍）；
  * - async（writeAtomicFile）：fsync 文件 → rename → 尽力 fsync 目录——对齐
  *   manifest-store / sessions-index 的生产耐久模式（掉电也不丢已确认写入）。
  */
@@ -219,8 +220,9 @@ export async function writeAtomicFile(
  *
  * 供两类消费方：
  * - cleanupStaleTmpFiles 的内部步骤；
- * - 需要按域校验内容再决定「删 or 提升为正式文件」的宿主恢复逻辑
- *   （manifest-store.recoverTmpFiles 模式：tmp 合法且目标缺失 → rename 提升）。
+ * - 需要按域校验内容再决定「删 or 提升为正式文件」的宿主恢复逻辑（基于
+ *   listStaleTmpFiles + parseAtomicTmpPath().targetPath 组合实现；曾有的
+ *   manifest promote 消费方已随 U4c 缓存降级退役为 sweepTmpFiles 纯删除）。
  *
  * 目录不存在 → 返回空数组（恢复扫描对未初始化布局宽容）。非约定形态文件
  * 一律不认（用户数据零误伤边界见 parseAtomicTmpPath 注释）。
@@ -270,7 +272,7 @@ export interface CleanupStaleTmpResult {
 /**
  * 清理目录内约定形态的 tmp 残留（单条失败不阻断其余条目，逐条结果回传）。
  *
- * 恢复语义（对齐 manifest-store.recoverTmpFiles 的删除分支泛化）：本函数只做
+ * 恢复语义（删除级恢复；曾对齐的 manifest-store promote 分支已随 U4c 退役）：本函数只做
  * 「删除」级恢复；「校验后提升为正式文件」需域知识（manifest 记录合法性），
  * 由调用方基于 listStaleTmpFiles + parseAtomicTmpPath().targetPath 自行实现。
  */

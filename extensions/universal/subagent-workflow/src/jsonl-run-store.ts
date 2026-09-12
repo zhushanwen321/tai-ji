@@ -50,7 +50,7 @@
  * - pi 侧版本不匹配静默跳过语义保持（D-5）；「缺 v 宽容」是 core FileRunStore
  *   侧的存量预处理职责，不内聚进 codec（D4 裁决②），故本侧零改动即保持。
  *
- * [S3 查证结论] pi 0.84.1 实装（node_modules/@earendil-works/pi-coding-agent/dist，
+ * [S3 查证结论] pi 0.84.4 实装（node_modules/@earendil-works/pi-coding-agent/dist，
  * core/session-manager.js，PS-19）的 session 生命周期管理不含自动 GC：
  * listSessionsFromDir 只做只读扫描（readdir + `.jsonl` 过滤 + header 解析，:548-571，
  * 非递归——`<sessionDir>/workflow-state/` 子目录完全不在 pi 的任何扫描/清理范围内），

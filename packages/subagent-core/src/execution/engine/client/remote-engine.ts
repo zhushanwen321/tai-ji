@@ -1,7 +1,8 @@
 // src/execution/engine/client/remote-engine.ts
 //
 // RemoteEngine：cli 形态 EnginePort 适配（W2，impl-plan §2.2「RemoteEngine 同步成员
-// 形态映射」必写死）。把 core EnginePort 的 9 成员映射到 EngineClient 协议请求；
+// 形态映射」必写死；[H1 U6] 交互控制面与 recordId 键路由面已随 chat 域退役删除）。
+// 把 core EnginePort 的成员映射到 EngineClient 协议请求；
 // 同步成员（capabilities / listModels / validateModel）**只读 manifest 注册期快照**
 // ——单源化原则（设计 §3.3「同步成员清单」v6 减法）：无握手缓存、无失效时机，
 // initialize 应答仅诊断（warn 由 EngineClient 留痕）。
@@ -12,31 +13,31 @@
 //
 // W3 消费契约：routing/registry 的 cli 形态 EnginePort 实例 = 本类（先写后读）。
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import {
   CANCEL_SETTLE_GRACE_MS,
   EngineSdkError,
   type AgentCallOpts as SdkAgentCallOpts,
   type AgentOutcome as SdkAgentOutcome,
   type EngineHandleData as SdkEngineHandleData,
-  type InteractAction as SdkInteractAction,
-  type InteractResult as SdkInteractResult,
   type ModelCatalogEntry,
   type ProbeReport as SdkProbeReport,
   type SessionView as SdkSessionView,
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import { getSubagentSessionDir } from "../../path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
   EngineCapabilities,
   EngineHandle,
   EngineHandleData,
-  InteractAction,
-  InteractResult,
   ProbeReport,
   SessionView,
 } from "../types.ts";
-import type { ChatRoundRoute, EnginePort, EngineRunResult, RunContext } from "../port.ts";
+import type { EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
 
 /** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
@@ -232,24 +233,6 @@ export class RemoteEngine implements EnginePort {
     }
   }
 
-  async interact(handle: EngineHandle, action: InteractAction): Promise<InteractResult> {
-    await this.opts.client.ensureConnected();
-    const result = (await this.opts.client.request("interact", {
-      handle: handle.data,
-      action: action as SdkInteractAction,
-    })) as SdkInteractResult;
-    return result;
-  }
-
-  /**
-   * [W3 v1.x] chat 轮次反向通道路由注册（recordId 键，EnginePort 可选面实现）：
-   * interact 续聊轮的 streamDelta / roundLifecycle 分发目标。薄委托 EngineClient
-   * 的 recordRoutes（键分发见 reverse-router.ts）。
-   */
-  registerChatRoundRoute(recordId: string, route: ChatRoundRoute): () => void {
-    return this.opts.client.registerRecordRoute(recordId, route as RunRoute);
-  }
-
   /** 协议 read（dataDir 必填——引擎数据根，构造注入）。 */
   async read(handle: EngineHandle): Promise<SessionView> {
     await this.opts.client.ensureConnected();
@@ -308,16 +291,47 @@ interface WireRunParams {
     ctxModel: string | undefined;
     engineFallback: RunContext["engineFallback"];
     streamMode: "stream" | undefined;
+    sessionRootId?: string;
+    /** [Option C] 恒有值（宿主注入 ?? 同源 env 推导）——与 sessionRootId 的
+     * "undefined 不上 wire" 不同，本字段派生恒产出字符串。 */
+    sessionDir: string;
   };
-  chat?: NonNullable<RunContext["chat"]>;
+  resume?: NonNullable<RunContext["resume"]>;
+}
+
+// pi 壳宿主进程内贯穿的两条 env（与 subagent-service / workflow-state-root 同源推导）：
+//   - PI_CODING_AGENT_DIR：pi SDK getAgentDir 的 env 覆盖通道——xyz-agent 生产链路由
+//     runtime spawn pi 时显式注入（rpc-client buildPiOutboundEnv，经
+//     buildOutboundChildEnv 共享构建器出站）；缺省 ~/.pi/agent 与 pi
+//     实装版 dist config.js getAgentDir 逐字同构（锚定先例 workflow-state-root.ts）。
+//   - PI_SUBAGENT_ROOT_CWD：真 ROOT 的 cwd（MF-3 贯穿）——嵌套 subagent 场景宿主
+//     spawn 子进程时注入，与 subagent-service 构造处的 rootCwd 同 env 同值。
+const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+const PI_ROOT_CWD_ENV = "PI_SUBAGENT_ROOT_CWD";
+
+/**
+ * [Option C 协议化] 宿主权威 subagent session 目录（Gate B S6 修复）：宿主进程内
+ * 同源 env 推导 agentDir/rootCwd 后调 getSubagentSessionDir（宿主单一权威推导，
+ * path-encoding.ts——引擎本地推导与宿主布局三处不等价，已降级 [LEGACY] fallback）。
+ * 每次调用重新解析（env 读取零成本，不缓存防测试/宿主切换读旧值，对齐
+ * common/data-dir.ts getEngineDataDir 惯例）。rootCwd 缺省 process.cwd()：pi 壳
+ * ctx.cwd = pi 进程启动 cwd（session-lifecycle 侧同用进程 cwd 的既有锚定）。
+ */
+function deriveHostSubagentSessionDir(): string {
+  const agentDir = process.env[PI_AGENT_DIR_ENV];
+  const resolvedAgentDir =
+    agentDir !== undefined && agentDir !== "" ? agentDir : join(homedir(), ".pi", "agent");
+  const rootCwd = process.env[PI_ROOT_CWD_ENV];
+  const resolvedRootCwd = rootCwd !== undefined && rootCwd !== "" ? rootCwd : process.cwd();
+  return getSubagentSessionDir(resolvedAgentDir, resolvedRootCwd);
 }
 
 /**
  * run 帧 wire 载荷构建。协议 ctx 承载（RunContext 字段映射表）：cwd 取任务声明值
  * （缺省进程 cwd）；ctxModel 投影 canonical 词形（provider/id，ModelInfo 字段裁决）。
- * [W3 v1.x] chat 会话形态参数直传（RunContext.chat → run.params.chat；结构由
- * RunContext.chat 注释与 SDK RunChatParams 的 implements 互证承载）。非 chat 轮
- * ctx.chat === undefined → wire 上不出现该键（协议 additive 语义）。
+ * [H1 U6] 会话形态参数直传（RunContext.resume → run.params.resume；结构由
+ * RunContext.resume 注释与 SDK RunResumeParams 的 implements 互证承载）。一次性轮
+ * ctx.resume === undefined → wire 上不出现该键（协议 additive 语义）。
  */
 function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): WireRunParams {
   const ctxModelRef = ctx.ctxModel ? `${ctx.ctxModel.provider}/${ctx.ctxModel.id}` : undefined;
@@ -332,21 +346,25 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       ctxModel: ctxModelRef,
       engineFallback: ctx.engineFallback,
       streamMode: ctx.stream !== undefined ? ("stream" as const) : undefined,
+      // [F6] 根 session id（relay 归属键 SESSION_ID 权威源）——undefined 不上 wire
+      //（additive 语义，与顶层 chat 参数同写法）。
+      ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
+      // [Option C 协议化] 权威 subagent session 目录（Gate B S6）：宿主注入值优先，
+      // 缺省同源 env 推导（deriveHostSubagentSessionDir）——恒有值恒上 wire，引擎
+      // 据此组装 --session-dir 不自推导（引擎本地推导降级 [LEGACY] fallback）。
+      sessionDir: ctx.sessionDir ?? deriveHostSubagentSessionDir(),
     },
-    ...(ctx.chat !== undefined ? { chat: ctx.chat } : {}),
+    ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
   };
 }
 
-/** run 作用域事件路由（event / streamDelta / poolResolved / handleReady / roundLifecycle）。 */
+/** run 作用域事件路由（event / streamDelta / poolResolved / handleReady）。 */
 function buildRunRouteHandlers(ctx: RunContext): RunRoute {
   return {
     onEvent: (event) => ctx.onEvent?.(event as Parameters<NonNullable<RunContext["onEvent"]>>[0]),
     onStreamDelta: (delta) => ctx.stream?.onDelta(delta),
     onPoolResolved: (poolKey) => ctx.onPoolResolved?.(poolKey),
     onHandleReady: (partial) => ctx.onHandleReady?.(partial),
-    // [W3 v1.x] 首轮（run 会话形态）轮次生命周期帧（runId 键）→ 宿主消费口。
-    onRoundLifecycle: (phase) =>
-      ctx.onRoundLifecycle?.(phase as Parameters<NonNullable<RunContext["onRoundLifecycle"]>>[0]),
   };
 }
 

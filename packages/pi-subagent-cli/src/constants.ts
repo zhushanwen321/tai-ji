@@ -3,6 +3,8 @@
 // pi 引擎包的常量面（W7 迁移自 core engines/pi/pi-engine.ts / session-runner.ts，
 // 逐值等价）。core 侧原件过渡期保留（W11 删），本包是引擎进程内的权威。
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
+
 /** pi 引擎的 registry key（D9：缺省引擎 = 'pi'）。 */
 export const PI_ENGINE_ID = "pi";
 
@@ -10,7 +12,7 @@ export const PI_ENGINE_ID = "pi";
 export const PI_ADAPTER_VERSION = "1.0.0";
 
 /** pi 无隔离池（PI_CODING_AGENT_DIR 全局一份，设计 §3.3.9），poolKey 恒 'shared'。 */
-export const PI_POOL_KEY = "shared";
+export const PI_POOL_KEY = SHARED_POOL_KEY;
 
 /** pi 域 schema env 名（宿主侧唯一活定义；structured-output 扩展读取它注册 tool——
  *  跨包契约另一端为该扩展的 ENV_SCHEMA 副本，等值由其

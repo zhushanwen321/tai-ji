@@ -12,10 +12,15 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@xyz-agent/shared'
 import type { SubagentRecord, WorkflowRunRecord } from '@xyz-agent/shared'
 import { useBackgroundWork } from '../features/chat/useBackgroundWork'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
+// R3-1④：跨包消费 runtime extractor 真实投影产物构造 fixture——手工拼 origin 的
+// SubagentRecord 会掩盖 runtime 投影白名单断链（origin 恒 undefined 时下游过滤用例
+// 照样绿，假绿）。投影白名单删 origin 时本文件的投影断言与下游判定断言共同转红。
+import { scanSubagentEntries } from '../../../../runtime/src/services/session/subagent-extractor.js'
 
 /** 构造最小合法 SubagentRecord（仅必填字段）。 */
 function makeSubagent(overrides: Partial<SubagentRecord>): SubagentRecord {
@@ -121,6 +126,71 @@ describe('useBackgroundWork', () => {
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(true)
   })
+
+  // H2 W1（record-unification D1③）：workflow 脚本派发的 subagent（origin='workflow'）
+  // 不算本 session 的后台工作——其生命周期由 workflow run 承载，混入会让主 session
+  // 在 workflow 运行期间被误判 working（列表恒亮「工作中」）。
+  it('W1: 仅 workflow origin 的 subagent running → false（不被 workflow 派发 record 绑架）', () => {
+    const sub = useSubagentStore()
+    sub.applyRecords('s1', [
+      makeSubagent({ subagentId: 'sub-wf-1', status: 'running', origin: 'workflow' }),
+      makeSubagent({ subagentId: 'sub-wf-2', status: 'running', origin: 'workflow' }),
+    ])
+    const { hasBackgroundWork } = useBackgroundWork()
+    expect(hasBackgroundWork('s1')).toBe(false)
+  })
+
+  it('W1: workflow origin + 手动 tool running 混合 → true（tool record 判定不受影响）', () => {
+    const sub = useSubagentStore()
+    sub.applyRecords('s1', [
+      makeSubagent({ subagentId: 'sub-wf-1', status: 'running', origin: 'workflow' }),
+      makeSubagent({ subagentId: 'sub-tool-1', status: 'running' }),
+    ])
+    const { hasBackgroundWork } = useBackgroundWork()
+    expect(hasBackgroundWork('s1')).toBe(true)
+  })
+
+  it('W1: origin 缺省（存量 record，undefined = tool 语义）仍参与判定（零迁移保障）', () => {
+    const sub = useSubagentStore()
+    sub.applyRecords('s1', [makeSubagent({ subagentId: 'sub-legacy', status: 'running' })])
+    const { hasBackgroundWork } = useBackgroundWork()
+    expect(hasBackgroundWork('s1')).toBe(true)
+  })
+})
+
+// R3-1④（H2 阶段 3 一致性审查修复）：fixture 源 = runtime extractor 真实投影。
+// 上方 W1 用例手工拼 origin 只验证谓词本身；runtime 投影白名单断链时它们照样绿。
+// 本组用例经 scanSubagentEntries 从自描述 entry 派生——白名单删 origin → 投影断言
+// undefined → hasBackgroundWork 判定断言同步转红（红锚联动）。
+describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）', () => {
+  /** 自描述 subagent-record entry 构造（pi JSONL 持久化形态 = runtime extractor 输入）。 */
+  function recordEntry(data: Record<string, unknown>): Record<string, unknown> {
+    return { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data }
+  }
+
+  it('投影透传 + 判定：extractor 产出的 workflow record 不绑架 hasBackgroundWork（投影白名单删 origin 即红）', () => {
+    const records = scanSubagentEntries([
+      recordEntry({ v: 1, id: 'sub-proj-wf', status: 'running', origin: 'workflow' }),
+      recordEntry({ v: 1, id: 'sub-proj-wf-idle', status: 'running', result: '轮终产出', origin: 'workflow' }),
+    ])
+    // fixture 源证明：origin 由 runtime 投影产出，非手工拼装
+    expect(records.find((r) => r.subagentId === 'sub-proj-wf')?.origin).toBe('workflow')
+
+    const sub = useSubagentStore()
+    sub.applyRecords('s-proj', records)
+    const { hasBackgroundWork } = useBackgroundWork()
+    expect(hasBackgroundWork('s-proj')).toBe(false)
+  })
+
+  it('零迁移：extractor 缺省投影（存量 record，origin undefined）仍判定为后台工作', () => {
+    const records = scanSubagentEntries([recordEntry({ v: 1, id: 'sub-proj-legacy', status: 'running' })])
+    expect(records[0]?.origin).toBeUndefined()
+
+    const sub = useSubagentStore()
+    sub.applyRecords('s-proj-legacy', records)
+    const { hasBackgroundWork } = useBackgroundWork()
+    expect(hasBackgroundWork('s-proj-legacy')).toBe(true)
+  })
 })
 
 /**
@@ -176,6 +246,24 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
 
     // 轮终回写 running + result（resumable）→ 不算 working，回落 done
     sub.applyRecords(sessionId, [makeSubagent({ subagentId: 'sub-tc9c', status: 'running', result: '本轮产出' })])
+    expect(derivedStatus(sessionId).value).toBe('done')
+  })
+
+  // [H2 W1] 仅 workflow origin 的 subagent running → derivedStatus 不进 working
+  //（用户可见行为：session 列表不亮「工作中」——workflow 派发 record 由 run 视图承载）。
+  it('W1: 仅 workflow origin subagent running → derivedStatus = done（非 working）', async () => {
+    const { useSessionDerivations, invalidateStatusCache } = await import(
+      '@/composables/features/chat/useSessionDerivations'
+    )
+    invalidateStatusCache()
+
+    const { derivedStatus } = useSessionDerivations()
+    const sub = useSubagentStore()
+    const sessionId = 's-wf-only'
+
+    sub.applyRecords(sessionId, [
+      makeSubagent({ subagentId: 'sub-wf-only', status: 'running', origin: 'workflow' }),
+    ])
     expect(derivedStatus(sessionId).value).toBe('done')
   })
 

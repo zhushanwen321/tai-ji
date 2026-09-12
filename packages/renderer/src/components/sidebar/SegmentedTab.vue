@@ -1,7 +1,9 @@
 <template>
   <!--
     展示组件 · segmented 视图切换 tab（v6-master-spec §5.3）。
-    icon-only 模式：4 tab 等宽均分（flex-1），只显示 icon，label 收进 title（count 数字已移除，克制原则）。
+    icon-only 模式：5 tab 等宽均分（flex-1），只显示 icon，label 收进 title；
+    第 5 个 plugins 为挂载点占位（无 plugin 贡献时 ViewHost 空态自隐藏，见下方 tabs 定义）；
+    图标右侧渲染 count 数字（count > 0 才渲染，0 不出数字；sidebar-tab-count-restore 设计 §3.1/决策 4）。
     外层凹陷容器 bg-bg-input + rounded-lg + p-[3px]；active = bg-bg-elevated 中性浮起（去蓝染）。
     inactive hover 只提亮文字（text-neutral-fg），不加底色——凹陷槽内加底色会显脏（demo SegmentedTab 同源）。
   -->
@@ -20,10 +22,7 @@
       @click="emit('update:modelValue', tab.value)"
     >
       <component :is="tab.icon" class="size-[15px] shrink-0" />
-      <span
-        v-if="tab.badge"
-        class="absolute right-1 top-1 size-[7px] rounded-full bg-accent"
-      />
+      <span v-if="tab.count > 0" class="text-[length:var(--text-3xs)] text-neutral-mid">{{ tab.count }}</span>
     </Button>
   </div>
 </template>
@@ -41,8 +40,13 @@ const { t } = useI18n()
 
 const props = defineProps<{
   modelValue: SidebarTab
-  /** 进行中桶数量（badge 精确化：仅 >0 亮蓝点；done 投影不计入，D8 与「进行中」桶同源 isDoneProjection） */
+  /** 全局会话计数（非归档口径，全局作用域，不随焦点 session 变化） */
+  sessionCount: number
+  /** 当前焦点 session 根层文件数（目录计入，不递归） */
+  fileCount: number
+  /** 进行中 subagent 数（非结束口径，D8 active 桶同源） */
   subagentRunningCount: number
+  /** 进行中 workflow 数（running/paused） */
   workflowRunningCount: number
 }>()
 
@@ -54,21 +58,20 @@ interface TabDef {
   value: SidebarTab
   label: string
   icon: Component
-  /** 活跃任务时显示蓝点（进行中桶 > 0 时，D8 口径） */
-  badge: boolean
+  count: number
 }
 
 /**
- * tabs 静态定义（count 数字已移除，不消费计数 props）。
- * badge 精确化：仅进行中桶 > 0 亮蓝点（需关注的任务），已结束任务不亮（D8，与计数同源 isDoneProjection）。
+ * tabs 静态定义：count 为 0 不渲染数字（决策 4，避免一排 0 的噪音）。
+ * 计数 SSOT 在 useSidebarCounts（与 SubagentList/WorkflowList 列表同源，不穿帮）。
  */
 const tabs = computed<TabDef[]>(() => [
-  { value: 'sessions', label: t('sidebar.segmentedTab.session'), icon: MessageSquare, badge: false },
-  { value: 'files', label: t('sidebar.segmentedTab.file'), icon: File, badge: false },
-  { value: 'subagents', label: t('sidebar.segmentedTab.subagent'), icon: Bot, badge: props.subagentRunningCount > 0 },
-  { value: 'workflows', label: t('sidebar.segmentedTab.workflow'), icon: Workflow, badge: props.workflowRunningCount > 0 },
+  { value: 'sessions', label: t('sidebar.segmentedTab.session'), icon: MessageSquare, count: props.sessionCount },
+  { value: 'files', label: t('sidebar.segmentedTab.file'), icon: File, count: props.fileCount },
+  { value: 'subagents', label: t('sidebar.segmentedTab.subagent'), icon: Bot, count: props.subagentRunningCount },
+  { value: 'workflows', label: t('sidebar.segmentedTab.workflow'), icon: Workflow, count: props.workflowRunningCount },
   // ExtensionHost sidebar view 宿主（MountPointRegistry sidebar.tab，W4 接线）。
-  // 无 plugin 贡献时 ViewHost 空态自隐藏，tab 仅作挂载点占位（badge 不适用）。
-  { value: 'plugins', label: t('sidebar.segmentedTab.plugin'), icon: Puzzle, badge: false },
+  // 无 plugin 贡献时 ViewHost 空态自隐藏，tab 仅作挂载点占位（count 不适用，恒 0）。
+  { value: 'plugins', label: t('sidebar.segmentedTab.plugin'), icon: Puzzle, count: 0 },
 ])
 </script>

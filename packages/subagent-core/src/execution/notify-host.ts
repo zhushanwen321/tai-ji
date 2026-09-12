@@ -25,7 +25,7 @@ export interface PiLike {
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }, // g4-allow: 类型注解——PiLike 接口形状（pi.sendMessage 签面子集），非投递调用
   ): void;
   /** 订阅 pi 事件（D8：notifier 的 settled 边沿订阅用 'agent_settled'）。
-   *  pi 0.84.1 的 on 返回 void 且无 off——退订语义由调用侧 disposed 标志包装兑现。
+   *  pi 0.84.4 的 on 返回 void 且无 off——退订语义由调用侧 disposed 标志包装兑现。
    *  可选：旧测试 mock pi 可能未实现 on，缺省时 notifier 退化为内核退避路径。 */
   on?(event: "agent_settled", handler: () => void): void;
 }
@@ -122,11 +122,19 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
    *  正在执行（running + 活进程 + 非 timer-armed）返回 undefined（调用方 notifyComplete 跳过）。
    *  SP-1: closed 统一终态，closedReason 由 BgNotifyRecord 携带。 */
   const toNotifyRecord = (record: ExecutionRecord): BgNotifyRecord | undefined => {
+    // [H2 W2 / D6] workflow origin 回注全静默（单漏斗 origin gate）：完成/关闭/失败
+    // 回注经此全部拒绝——workflow agent 结果由脚本返回值承载（无 message 对端），
+    // 回注只会把已隐藏的 record 通知主 agent（设计 D6 出口枚举化；失败回注同静默，
+    // v3 扩）。单漏斗盖住全部调用点（notifyComplete/notifyClosed/collectCoordinator
+    // route 六调用面全经此，禁止散改调用点）；监督器 steer 通知族不经本漏斗——随
+    // adopt 豁免对 workflow record 零触发。
+    if (record.origin === "workflow") return undefined;
     const snap = snapshot(record);
     const s = snap.status;
     // [N1] isResumable 放行：SP-5 one-shot 成功完成后 finalizeRoundToIdle 把 record 回退
-    // running-resumable——进程已死且永不 arm idle timer（armIdleTimer 只在 agent_settled 的
-    // chatMode 分支调用），旧守卫（closed / isIdle only）对其恒拒绝 → 完成通知静默丢失，
+    // running-resumable——进程已死且永不 arm idle timer（armIdleTimer 的 arm 链随 H1 U6
+    // 长驻退役失活，全仓无生产调用，见 lifecycle-predicates.ts 头注释），旧守卫
+    // （closed / isIdle only）对其恒拒绝 → 完成通知静默丢失，
     // 而 one-shot 失败走 finalizeRecord 保持 closed 反而通知——与 tool 契约「runs once,
     // notifies on completion」完全倒置。isResumable = running + 无活进程，恰为该完成态；
     // 在跑轮的 record 有活进程，不会被误放行。
@@ -177,7 +185,8 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
      *  收不到带指针行的终态通知（审查 C-1）。故 round 置 undefined（key 回退为裸 id），
      *  轮数改经 totalRounds 进文案 "completed after N rounds."（C-2）。
      *
-     *  仅 chatMode close 语义调用（closeChatIdle / closeAfterRoundSettled 终态化成功后）。
+     *  仅 chatMode close 语义调用（closeChatIdle 终态化成功后；[H1 U6] 旧
+     *  closeAfterRoundSettled 消费点已随 chat 域退役）。
      *  one-shot 显式拒绝（G4：one-shot close 路径现状无终态通知，字节不变）；cancel 走
      *  cancelBackground 自己的 notifyComplete，不经本方法。幂等性：两条 close 路径均由
      *  closeSubagent 的 status 分流守卫（closed 后幂等 no-op）/ CAS 抢锁保证只执行一次，

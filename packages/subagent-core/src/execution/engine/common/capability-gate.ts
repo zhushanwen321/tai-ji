@@ -168,6 +168,33 @@ export function assertGateCapabilitiesMatched(
   }
 }
 
+// ============================================================
+// 能力位方向判定③：SP-5 升级 gate（H1 U2 / D5 双写点共用文案单源）
+// ============================================================
+
+/**
+ * [H1 U2 / D5 双写点] SP-5 升级（one-shot → chatMode）被 conversation 位拒绝时的
+ * 统一错误构造（文案/错误码/恢复指引单一权威）。
+ *
+ * 两个写点共同消费（现场契约「改动这两处必须协同」的 gate 化落点）：
+ *   - 写点①进程内热升级：subagent-actions-core messageHandler；
+ *   - 写点②跨重启冷升级（D4 revive 格）：conversation-continuation（U6 已删
+ *     cold-resurrect 无条件置位——语义迁入本格，磁盘重建只水合持久化 chatMode）。
+ *
+ * unsupported 引擎（zcode）的 one-shot 收到 message 不升级——升级后续聊行为悬空
+ * （Continuation 续聊轮依赖引擎 resume 能力），guard 文案指引 fork/重派。
+ */
+export function engineConversationUpgradeUnsupportedError(engineId: string): EngineError {
+  return new EngineError(
+    "engine_capability_unsupported",
+    `subagent completed as one-shot on engine '${engineId}' (capabilities.conversation = 'unsupported') — ` +
+      `it cannot be upgraded to a resumable conversation, so the message is rejected.`,
+    `Recovery: re-dispatch the follow-up as a new subagent (action:'start'), ` +
+      `or branch from its session history with action:'fork-from', ` +
+      `or pick an engine that declares the conversation capability.`,
+  );
+}
+
 /** engine_capability_mismatch 的统一构造（manifest 权威 + 恢复指引 = 修 manifest / 升级引擎包）。 */
 function gateMismatchError(engineId: string, cap: string, declared: string, answered: string): EngineError {
   return new EngineError(

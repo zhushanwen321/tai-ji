@@ -116,6 +116,16 @@ function optBoolean(v: unknown): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined
 }
 
+/**
+ * origin 字面量守卫（H2 R3-1 修复：自描述投影透传 origin，renderer 侧栏计数 / 后台工作
+ * 指示 / 列表桶按 `origin === 'workflow'` 负向过滤）。守卫语义对齐 core record-store.ts
+ * readEntryOriginFields：仅认 'tool' | 'workflow' 字面量，非法值/缺省 → undefined =
+ * "tool" 语义（存量 record 零迁移）。
+ */
+function projectOrigin(v: unknown): 'tool' | 'workflow' | undefined {
+  return v === 'workflow' || v === 'tool' ? v : undefined
+}
+
 /** plain object 判定（LLM 可控的 JSON.parse 产物 shape 守卫用） */
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -290,6 +300,10 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // 存量 entry，消费端按保守方向处理）；resumable = 无活进程驱动的 running。
     chatMode: optBoolean(d.chatMode),
     resumable: optBoolean(d.resumable),
+    // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
+    // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
+    // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
+    origin: projectOrigin(d.origin),
     ...projectEngineSpreadFields(d),
   }
 }

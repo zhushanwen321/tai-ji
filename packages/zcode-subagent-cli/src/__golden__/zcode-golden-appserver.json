@@ -2,7 +2,7 @@
   "_meta": {
     "description": "zcode app-server 常驻通道 golden 帧序列语料（R3）。四类样本：create 应答 / 推送流 / 终态帧 / read 应答（NDJSON 逐行，附录 A.2 任务生命周期帧序）",
     "source": "synthesized-from-A2-protocol-authority",
-    "synthesisNote": "非真机实录——按设计附录 A.2（协议权威，zcode.cjs 0.16.5 二进制字符串级验证命中）+ 旧 zsw 实现真机抓包形态（zsw 仓 84b63a0^ runner-appserver.js 实测注释）合成。真机冒烟（RA 跨仓段）后应替换为实录并同步双副本。telemetry 帧不带 sessionId（A.2 未标）——归因走唯一在途兜底；session/event 帧带 sessionId",
+    "synthesisNote": "非真机实录——按设计附录 A.2（协议权威，zcode.cjs 0.16.5 二进制字符串级验证命中）+ 旧 zsw 实现真机抓包形态（zsw 仓 84b63a0^ runner-appserver.js 实测注释）合成。真机冒烟（RA 跨仓段）后应替换为实录并同步双副本。telemetry 帧不带 sessionId（A.2 未标）——归因走唯一在途兜底；session/event 帧带 sessionId。真机帧序补充（P-Z2 实证，2026-09）：终态双帧先后两种序均可达——本语料 terminal[0] 先于收尾帧仅为合成序；真机常态路径是收尾帧（final-frame）先落定 + 权威 turn.terminal 迟到（success 常态迟到，session-channel 按权威 status 分级记录不改写落定）；failed 形态实证 terminal 帧独到、无 final-frame",
     "engineVersion": "0.16.5 (app-server)",
     "protocolVersion": 1,
     "recordedAt": "2026-08-30",

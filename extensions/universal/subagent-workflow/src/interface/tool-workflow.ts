@@ -52,7 +52,7 @@ import {
   type ReentryGuardRef,
   releaseReentryGuard,
 } from "./reentry-guard.ts";
-import { formatElapsed, renderTextFallback } from "./format.ts";
+import { formatRunStatusElapsed, renderTextFallback } from "./format.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Parameter schema ─────────────────────────────────────────
@@ -489,7 +489,9 @@ function actionStatus(deps: LauncherDeps): ToolResult {
   }
   const summaries = runs.map((r) => toRunSummary(r, deps.store));
   const lines = summaries.map((s) => {
-    const duration = s.startedAt ? ` (${formatElapsed(s.startedAt)})` : "";
+    // [H2 A2] run done 后 elapsed 冻结于 completedAt（formatRunStatusElapsed 内切
+    // now 基准），不再随每次 status 查询的墙钟增长。
+    const duration = s.startedAt ? ` (${formatRunStatusElapsed(s.startedAt, s.completedAt)})` : "";
     const reasonSuffix = s.reason && s.reason !== "completed" ? ` [${s.reason}]` : "";
     return `[${s.status}${reasonSuffix}] ${s.name} (${s.runId.slice(0, RUNID_SHORT)})${duration}${s.error ? ` error: ${s.error}` : ""}`;
   });

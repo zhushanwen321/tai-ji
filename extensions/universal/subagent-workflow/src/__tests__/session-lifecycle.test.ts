@@ -43,15 +43,28 @@ vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
   getModelConfigService: () => null,
   setModelConfigService: vi.fn(),
 }));
+// [H3/R6 连带] R6 把单例访问器族外移 service/service-bootstrap.ts（barrel 改从 bootstrap
+// re-export），SubagentService 类仍从壳直接导出——mock 必须按 barrel 实际取符号的两条
+// 路径分开挂：壳 mock 留 SubagentService 假类（拦 new 分支构造），bootstrap mock 经
+// importOriginal 只替换单例访问器（拦槽读写；真实 createSubagentService 保留——其内部
+// new 的是模块图中已被 mock 的假壳类，行为等价 R6 前）。
 vi.mock("@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
   SubagentService: class {
     initSession = vi.fn();
     recoverManifestTmpFiles = vi.fn(async () => ({ deleted: 0, recovered: 0 }));
+    // [U4c/G1] boot 全量重建钩子（runProcessLevelMaintenance 消费面）
+    rebuildIndexes = vi.fn(() => 0);
     startGcTimer = vi.fn();
   },
-  getSubagentService: () => null,
-  setSubagentService: vi.fn(),
 }));
+vi.mock(
+  "@zhushanwen/subagent-core/execution/service/service-bootstrap.ts",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<typeof import("@zhushanwen/subagent-core/execution/service/service-bootstrap.ts")>();
+    return { ...actual, getSubagentService: () => null, setSubagentService: vi.fn() };
+  },
+);
 
 // 守卫组（挂载 index.ts）的 store 可控点：index.ts 走默认 createRunStore（真实
 // JsonlRunStore 类经 mock 替换），loadAll 行为由 mountWithLoadAll 注入。
@@ -222,6 +235,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     const { pi } = createFakePi();
     const fakeService = {
       recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+      rebuildIndexes: vi.fn(() => 0),
     };
     const fakeModelService = {
       reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),

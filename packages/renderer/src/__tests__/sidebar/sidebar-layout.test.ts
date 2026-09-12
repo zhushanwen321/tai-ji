@@ -1,6 +1,6 @@
 /**
  * sidebar 布局优化单测（CW topic: sidebar-layout-optimization）。
- * 验证 5 项改动（D1-D5）：宽度缩窄、slug 去除、model 降级、hover 重定位、badge 微调。
+ * 验证 5 项改动（D1-D5）：宽度缩窄、slug 去除、model 降级、hover 重定位、count 数字渲染。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/sidebar-layout.test.ts
@@ -129,38 +129,45 @@ describe('D4: SessionItem hover 按钮定位', () => {
   })
 })
 
-// ── D5: SegmentedTab badge 位置 ─────────────────────────
-describe('D5: SegmentedTab badge 位置', () => {
-  it('badge 蓝点在 right-1 top-1（v6 count 数字移除后无重叠，位置保留）', () => {
+// ── D5: SegmentedTab count 数字渲染 ─────────────────────────
+// [HISTORICAL] 原「badge 蓝点位置」用例已改写：badge 随 count 数字恢复一并移除
+// （sidebar-tab-count-restore 设计决策 1，一态一手段——数字是「进行中 > 0」的精确表达）。
+describe('D5: SegmentedTab count 数字渲染', () => {
+  it('count > 0 渲染数字 span，badge 蓝点不再存在（数字取代 badge）', () => {
     const wrapper = mount(SegmentedTab, {
       props: {
         modelValue: 'subagents',
         sessionCount: 3,
         fileCount: 10,
-        subagentCount: 2,
-        workflowCount: 1,
-        subagentRunningCount: 1,
-        workflowRunningCount: 0,
+        subagentRunningCount: 2,
+        workflowRunningCount: 1,
       },
     })
-    // badge 蓝点（absolute 定位的 span，v6 spec 对齐后回 right-1 top-1，size 7px）
-    const badge = wrapper.find('.absolute.right-1.top-1')
-    expect(badge.exists()).toBe(true)
+    // badge 蓝点（原 absolute 定位 span）已移除
+    expect(wrapper.find('.absolute.right-1.top-1').exists()).toBe(false)
+    // 各 tab 图标右侧渲染 count 数字
+    const buttons = wrapper.findAll('button')
+    expect(buttons[0].text()).toContain('3')
+    expect(buttons[1].text()).toContain('10')
+    expect(buttons[2].text()).toContain('2')
+    expect(buttons[3].text()).toContain('1')
   })
 
-  it('badge 精确化：running 为 0 时 subagents tab 不亮蓝点', () => {
+  it('count = 0 不渲染数字 span（决策 4：避免一排 0 的噪音）', () => {
     const wrapper = mount(SegmentedTab, {
       props: {
         modelValue: 'subagents',
-        sessionCount: 3,
-        fileCount: 10,
-        subagentCount: 2,
-        workflowCount: 1,
+        sessionCount: 0,
+        fileCount: 0,
         subagentRunningCount: 0,
         workflowRunningCount: 0,
       },
     })
     expect(wrapper.find('.absolute.right-1.top-1').exists()).toBe(false)
+    const buttons = wrapper.findAll('button')
+    for (const btn of buttons) {
+      expect(btn.find('span').exists()).toBe(false)
+    }
   })
 })
 

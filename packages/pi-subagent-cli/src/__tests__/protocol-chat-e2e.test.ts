@@ -1,14 +1,19 @@
 // src/__tests__/protocol-chat-e2e.test.ts
 //
-// [v1.x] chat 会话形态 e2e（真机 NDJSON 往返）：spawn bin/pi-subagent-cli.mjs +
-// fake-pi-chat.mjs（PATH 注入，长驻形态）。覆盖 chat 轮次四路径的线上形态：
-//   ① 首轮 run chat（resume 缺省）→ 反向帧链（poolResolved/childSpawned[recordId]/
-//      handleReady/streamDelta[runId]/roundLifecycle settled+idle[runId]）→ run 应答；
-//   ② 续聊 interact message → recordId 键 streamDelta + settled/idle；
-//   ③ 冷续 run chat + resume（--session 续写——fake 沿用 resume 文件定位）；
-//   ④ 关断 interact close force（idle 态收割）→ 会话消亡（message 冷拒绝）。
-// cancel 收敛的升级路径（fake timers 杀链）在 chat-session.test 单元覆盖——e2e 面在
-// 此验证 idle 态 cancel 的进程回收。
+// [H1 U3] chat 轮 run 派发形态 e2e（真机 NDJSON 往返）：spawn bin/pi-subagent-cli.mjs
+// + fake-pi-chat.mjs（PATH 注入，每轮一进程——agent_settled 后引擎杀链收割）。
+// 覆盖 chat-run 统一的线上形态（设计 docs/design/subagent-chat-run-unification.md
+// §3.3 D6/D7 + §5 U3 验收「resume run 续写同文件、历史召回」）：
+//   ① 首轮 run chat（无 resume）→ 反向帧链（poolResolved/childSpawned[recordId]/
+//      handleReady/streamDelta[runId]）→ run 应答（handle 锚 recordId）→ 收割
+//      （childStateChanged exited 上报）；不经 ChatSessionRegistry——无轮次相位帧；
+//   ② 续聊 = 新 run chat + resume（首轮 sessionFile）→ fake 从同文件读到首轮写入
+//      的历史（构造性召回断言：当且仅当 --session 穿透正确）→ run 应答 sessionFile
+//      与首轮一致（同文件续写）；
+//   ③ 反向帧面收缩断言：全部反向帧 ∈ run 域 8 通道白名单（[H1 U5] 轮次相位
+//      通道已退役——轮终 = run 应答本身，无相位帧）。
+// cancel 收敛的升级路径（fake timers 杀链）见 run-spawn-once 集成面；one-shot 收割
+// 对照见 run-spawn-once.integration。
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -130,7 +135,14 @@ async function initialize(host: FakeHost, dataDir: string): Promise<void> {
   expect(init.error).toBeUndefined();
 }
 
-describe("pi-subagent-cli chat 会话形态 e2e（bin 真机 NDJSON 往返）", () => {
+/** 收割链自动应答：等 childStateChanged exited（数据面）并回 ack，防引擎侧反向等待挂起。 */
+async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
+  const exited = await host.waitForReverse("host/childStateChanged");
+  expect(exited.params).toMatchObject({ recordId, state: "exited" });
+  host.replyReverse(String(exited.id), { ok: true });
+}
+
+describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往返）", () => {
   let dataDir: string | undefined;
   let host: FakeHost | undefined;
 
@@ -143,18 +155,17 @@ describe("pi-subagent-cli chat 会话形态 e2e（bin 真机 NDJSON 往返）", 
     }
   });
 
-  it("首轮 → 续聊 → 冷续 → 关断 全链", async () => {
+  it("首轮 → resume 续聊（同文件续写 + 历史召回）→ 收割 + 反向帧面收缩", async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cli-chat-"));
     host = new FakeHost(dataDir);
     await initialize(host, dataDir);
-    const handle = { v: 1, engineId: "pi", sessionRef: { recordId: "rec-chat-1" }, poolKey: "shared", adapterVersion: "1.0.0" };
 
-    // ① 首轮 run chat：反向帧链 + runId 键相位 → run 应答（进程保活）
+    // ① 首轮 run chat（无 resume）：反向帧链（recordId 锚定）→ run 应答
     const runP = host.request("run", {
       runId: "run-chat-1",
       task: { prompt: "hello", conversation: true, description: "chat-e2e" },
       ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model", streamMode: "stream" },
-      chat: { recordId: "rec-chat-1" },
+      resume: { recordId: "rec-chat-1" },
     });
     const poolResolved = await host.waitForReverse("host/poolResolved");
     expect((poolResolved.params as { poolKey: string }).poolKey).toBe("shared");
@@ -173,82 +184,58 @@ describe("pi-subagent-cli chat 会话形态 e2e（bin 真机 NDJSON 往返）", 
     expect(firstDelta.params).toEqual({ runId: "run-chat-1", delta: "chat-first-answer" });
     host.replyReverse(String(firstDelta.id), { ok: true });
 
-    const settled1 = await host.waitForReverse("host/roundLifecycle");
-    expect(settled1.params).toMatchObject({ runId: "run-chat-1", phase: "settled", usage: { input: 42, output: 21 } });
-    host.replyReverse(String(settled1.id), { ok: true });
-    const idle1 = await host.waitForReverse("host/roundLifecycle");
-    expect(idle1.params).toMatchObject({
-      runId: "run-chat-1",
-      phase: "idle",
-      anchor: { sessionRef: { recordId: "rec-chat-1", sessionFile }, poolKey: "shared" },
-    });
-    host.replyReverse(String(idle1.id), { ok: true });
-
     const runFrame = await runP;
     expect(runFrame.error).toBeUndefined();
     const runResult = runFrame.result as { handle: { sessionRef: Record<string, string> }; outcome: { content: string } };
     expect(runResult.handle.sessionRef.recordId).toBe("rec-chat-1");
     expect(runResult.handle.sessionRef.sessionFile).toBe(sessionFile);
-    expect(runResult.outcome.content).toContain("chat-first-answer");
+    expect(runResult.outcome.content).toBe("chat-first-answer");
 
-    // ② 续聊 interact message：recordId 键 delta + settled/idle
-    const msg = await host.request("interact", {
-      handle: { ...handle, sessionRef: { recordId: "rec-chat-1", sessionFile } },
-      action: { kind: "message", payload: "next" },
-    });
-    expect(msg.result).toEqual({ ok: true, delivered: true });
-    const followUpDelta = await host.waitForReverse("host/streamDelta");
-    expect(followUpDelta.params).toEqual({ recordId: "rec-chat-1", delta: "chat-followUp-answer" });
-    host.replyReverse(String(followUpDelta.id), { ok: true });
-    const settled2 = await host.waitForReverse("host/roundLifecycle");
-    expect(settled2.params).toMatchObject({ recordId: "rec-chat-1", phase: "settled" });
-    host.replyReverse(String(settled2.id), { ok: true });
-    const idle2 = await host.waitForReverse("host/roundLifecycle");
-    expect(idle2.params).toMatchObject({ recordId: "rec-chat-1", phase: "idle" });
-    host.replyReverse(String(idle2.id), { ok: true });
+    // agent_settled 后杀链收割（每轮一进程）：exited 镜像上报（killed）
+    await awaitReaped(host, "rec-chat-1");
 
-    // idle 态 cancel：受理即回收（无在途轮——进程退出，无 failed 相位）
-    const cancel = await host.request("interact", {
-      handle: { ...handle, sessionRef: { recordId: "rec-chat-1", sessionFile } },
-      action: { kind: "cancel" },
-    });
-    expect(cancel.result).toEqual({ ok: true, delivered: true });
-    const afterCancel = await host.request("interact", {
-      handle: { ...handle, sessionRef: { recordId: "rec-chat-1", sessionFile } },
-      action: { kind: "message", payload: "cold?" },
-    });
-    expect((afterCancel.result as { ok: boolean; code: string }).ok).toBe(false);
-    expect((afterCancel.result as { code: string }).code).toBe("engine_session_not_resumable");
+    // [H1 U5] 反向帧面收缩（收割后 = 首轮全程帧齐备）：全部反向帧 ∈ run 域 8 通道
+    // 白名单（轮次相位通道已随协议退役——轮终 = agent_settled 的 run 应答本身，
+    // 无相位帧）
+    expect([...new Set(host.reverseFrames.filter((f) => f.method !== "event").map((f) => f.method))].sort()).toEqual([
+      "host/childSpawned",
+      "host/childStateChanged",
+      "host/handleReady",
+      "host/poolResolved",
+      "host/streamDelta",
+    ]);
 
-    // ③ 冷续 run chat + resume：--session 续写（fake 沿用 resume 文件定位）
-    const coldP = host.request("run", {
-      runId: "run-cold-1",
+    // ② 续聊 = 新 run chat + resume（首轮 sessionFile，--session 续写同文件）：
+    //    fake 从同文件读到首轮写入的 1 行历史 → 回复 resumed-history:1（构造性召回
+    //    断言——历史可见当且仅当 resume 锚点穿透到 spawn 参数）
+    const resumeP = host.request("run", {
+      runId: "run-resume-1",
       task: { prompt: "continue", conversation: true },
       ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model" },
-      chat: { recordId: "rec-chat-1", resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }, poolKey: "shared" } },
+      resume: {
+        recordId: "rec-chat-1",
+        resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }, poolKey: "shared" },
+      },
     });
-    const coldSettled = await host.waitForReverse("host/roundLifecycle");
-    expect(coldSettled.params).toMatchObject({ runId: "run-cold-1", phase: "settled" });
-    host.replyReverse(String(coldSettled.id), { ok: true });
-    const coldIdle = await host.waitForReverse("host/roundLifecycle");
-    expect(coldIdle.params).toMatchObject({ runId: "run-cold-1", phase: "idle" });
-    host.replyReverse(String(coldIdle.id), { ok: true });
-    const coldFrame = await coldP;
-    expect(coldFrame.error).toBeUndefined();
-    const coldResult = coldFrame.result as { handle: { sessionRef: Record<string, string> } };
-    expect(coldResult.handle.sessionRef.sessionFile).toBe(sessionFile);
+    const resumeSpawned = await host.waitForReverse("host/childSpawned");
+    expect((resumeSpawned.params as { recordId: string }).recordId).toBe("rec-chat-1");
+    host.replyReverse(String(resumeSpawned.id), { ok: true });
 
-    // ④ 关断 interact close force：idle 态收割 → 会话消亡
-    const close = await host.request("interact", {
-      handle: { ...handle, sessionRef: { recordId: "rec-chat-1", sessionFile } },
-      action: { kind: "close", payload: { force: true } },
-    });
-    expect(close.result).toEqual({ ok: true, delivered: true });
-    const afterClose = await host.request("interact", {
-      handle: { ...handle, sessionRef: { recordId: "rec-chat-1", sessionFile } },
-      action: { kind: "message", payload: "gone?" },
-    });
-    expect((afterClose.result as { ok: boolean; code: string }).ok).toBe(false);
-    expect((afterClose.result as { code: string }).code).toBe("engine_session_not_resumable");
+    const resumeReady = await host.waitForReverse("host/handleReady");
+    // 同文件续写：resume 轮的 session 身份 = 首轮文件（--session 定位不变）
+    expect((resumeReady.params as { sessionRef: Record<string, string> }).sessionRef.sessionFile).toBe(sessionFile);
+    host.replyReverse(String(resumeReady.id), { ok: true });
+
+    const resumeFrame = await resumeP;
+    expect(resumeFrame.error).toBeUndefined();
+    const resumeResult = resumeFrame.result as { handle: { sessionRef: Record<string, string> }; outcome: { content: string } };
+    expect(resumeResult.handle.sessionRef.sessionFile).toBe(sessionFile);
+    // 历史召回：第二轮进程读到首轮进程写入的内容（1 行）
+    expect(resumeResult.outcome.content).toBe("resumed-history:1");
+
+    await awaitReaped(host, "rec-chat-1");
+
+    // ③ [H1 U5] 收割后进程无保活——续聊只能经 ② 的 resume run 形态（interact 面
+    // 已随协议退役，此处不再有冷拒绝断言载体）。
   }, 60_000);
 });

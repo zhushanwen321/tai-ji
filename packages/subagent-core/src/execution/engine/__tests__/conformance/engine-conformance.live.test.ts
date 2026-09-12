@@ -38,7 +38,7 @@ import {
   RELAY_ENV_SOCKET,
   RELAY_PROTOCOL_VERSION,
   isRelayActive,
-} from "../../../relay-env.ts";
+} from "@zhushanwen/subagent-engine-sdk";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
 
 const LIVE = process.env["ENGINE_CONFORMANCE_LIVE"] === "1";

@@ -54,8 +54,10 @@ export interface WorkflowRunGcStore {
  * 启动 idle record GC 定时器，返回 stop 函数（清理 interval；幂等）。
  * 每个扫描周期：
  *  - record 面：对 store 内全部 active record 中 resumable 的，锚点（idleSince
- *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的归档。archive
- *    单条失败不阻断其余（bestEffort 留痕）。**只归档不补注销**（见文件头注）。
+ *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的归档
+ *    （[U2b] markIdleArchived：archive 先 + `.alive` release 后——归档 = 放弃持有
+ *    即放弃写权声明，D3a release 出口②）。单条失败不阻断其余（bestEffort 留痕）。
+ *    **只归档不补注销**（见文件头注）。
  *  - workflow 面（注入 workflowRuns 时）：running 且 meta.startedAt 超
  *    IDLE_TTL_MS 的 run 终态化归档（transition + save），单 run 失败不阻断。
  *
@@ -83,7 +85,11 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
           `[subagents] GC: archiving idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
         );
         try {
-          store.archive(record);
+          // [U2b / D3a release 出口②] 归口 markIdleArchived：store.archive 先、`.alive`
+          // release 后（写序在 store 内部——归档 = 放弃持有 = 放弃写权声明，残留声明
+          // 会把 idle 归档后的预期通道 fork-from/新 start 拦死至宿主退出，纯成本零防御
+          // 收益；归档 record 后续被接管时统一 acquireWriteLease 重新声明）。
+          store.markIdleArchived(record);
         } catch (err) {
           bestEffort(err, `GC archive record ${record.id}`);
         }

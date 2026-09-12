@@ -68,11 +68,6 @@
       "canonicalRef": "fake/fake-1"
     }
   },
-  "interact": {
-    "result": {
-      "accepted": true
-    }
-  },
   "read": {
     "result": {
       "entries": [],

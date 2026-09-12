@@ -1,12 +1,13 @@
 // src/execution/__tests__/get-record-for-action-restart.test.ts
 //
-// [M10] getRecordForAction 跨重启磁盘重建分支测试（subagent-service.ts L933-951）。
+// [M10] getRecordForAction 跨重启磁盘重建分支测试（cold-lookup.coldLookupForAction）。
 //
 // 背景：内存 miss → collectRecords(1000,"all",undefined).find(status==="running") →
-// createRecord({chatMode: true}) → register → 回填 sessionFile/round。代码注释
-// （L946-949）自设强制约束「改动此处必须带 S3 回归场景（跨重启 message 续聊验证）」
-// ——该 S3 场景此前不存在，分支零测试。该分支含多个仅此处独有的决策：
-//   - 无条件 chatMode: true（v4 A-3 跨重启恢复入口，V3 方案 A 方向）
+// createRecord({chatMode: 持久化值}) → register → 回填 sessionFile/round。
+// [H1 U6] 原「无条件 chatMode: true」（v4 A-3）已改水合保留持久化 chatMode
+//（D4/D5：升级置位迁 Continuation revive 格 + messageHandler gate 双写点）。
+// 该分支含多个仅此处独有的决策：
+//   - chatMode 水合保留（磁盘无持久化 → false；升级在 message 链 gate 化）
 //   - rootSessionFilter 传 undefined 后置校验（异树仍 throw not owned）
 //   - sessionFile/round 从磁盘重建结果回填（round 无磁盘持久化 → undefined）
 //
@@ -25,11 +26,10 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-// [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——deliverChatMessage 走
-// 协议 seam（registerFakePiEngine 替身；跨重启无活进程 = 引擎冷路径拒绝，续聊落
-// resumeColdRound 守卫链）。
+// [W3 改写 → H1 U6] deliverChatMessage 走协议 seam（registerFakePiEngine 替身）——
+// 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
 
-import { writeFinalized } from "../finalized-marker.ts";
+import { writeFinalizedState } from "../state-marker.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../model-config-service.ts";
@@ -158,16 +158,17 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
-  it("内存 miss + 磁盘 running（无 .alive）→ 重建 record：chatMode 无条件 true、sessionFile 回填、register 进内存", () => {
-    // identity entry 故意不带 chatMode 字段——证明重建分支的无条件 chatMode:true
-    //（不依赖磁盘是否记录过对话模式标志）
+  it("内存 miss + 磁盘 running（无 .alive）→ 重建 record：chatMode 水合保留（无持久化为 false，[H1 U6]）、sessionFile 回填、register 进内存", () => {
+    // identity entry 故意不带 chatMode 字段——证明重建分支只水合持久化 chatMode
+    //（[H1 U6] 无条件置位已迁 Continuation revive 格 + gate；one-shot 跨重启重建
+    // false 后经 message 链 gate 升级置位）
     const file = writeSessionJsonl(sessionsDir, { id: "sa-restart-1", rootSessionId: "root-session" });
     expect(store.getMutable("sa-restart-1")).toBeUndefined(); // 前置：内存确无
 
     const record = service.chatActions.getRecordForAction("sa-restart-1");
 
-    // [v4 A-3] 无条件 chatMode=true（跨重启恢复入口）
-    expect(record.chatMode).toBe(true);
+    // [v4 A-3 → H1 U6] 水合保留：磁盘无 chatMode → false（升级在 message 链 gate 化）
+    expect(record.chatMode).toBe(false);
     // sessionFile 从磁盘重建结果回填
     expect(record.sessionFile).toBe(file);
     // round 从 found 回填：light 磁盘重建无 round（内存态字段，跨重启不恢复）→ undefined
@@ -204,9 +205,9 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(() => service.chatActions.getRecordForAction("sa-grand")).toThrow(/direct parent/);
   });
 
-  it(".finalized sidecar（closed 终态）不重建 → throw not found or not owned", () => {
+  it(".state sidecar（closed 终态）不重建 → throw not found or not owned", () => {
     const file = writeSessionJsonl(sessionsDir, { id: "sa-fin", rootSessionId: "root-session" });
-    writeFinalized(file); // sidecar 矩阵分支 2 → status=closed → find(status==="running") miss
+    writeFinalizedState(file); // sidecar 矩阵分支 2 → status=closed → find(status==="running") miss
 
     expect(() => service.chatActions.getRecordForAction("sa-fin")).toThrow(/not found or not owned/);
     expect(store.getMutable("sa-fin")).toBeUndefined(); // 未重建注册
@@ -221,12 +222,8 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   it("[review round2] worktree record 跨重启重建 → hadWorktree 标记 + 续聊被拒（行动语言）", async () => {
     clearEngines();
     const fake = registerFakePiEngine();
-    // 跨重启无活进程 → 引擎冷路径拒绝 → 续聊落 resumeColdRound 守卫链
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_session_not_resumable",
-      message: "no live process (cold path)",
-    };
+    // [H1 U6] 每轮 = 新 run + resume 锚点（旧 interact 冷路径替身注入随 interact 面退役），
+    // 续聊守卫链归 Continuation（dispatchRoundGuarded）。
     writeSessionJsonl(sessionsDir, {
       id: "sa-wt",
       rootSessionId: "root-session",
@@ -240,7 +237,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(record.worktreeHandle).toBeUndefined();
 
     // 冷路径续聊（无活进程）→ 续轮守卫拒绝，不 spawn 回落主 repo
-    await expect(service.chatActions.deliverChatMessage(record, "resume after restart", false)).rejects.toThrow(
+    await expect(service.chatActions.deliverChatMessage(record, "resume after restart")).rejects.toThrow(
       /worktree isolation.*lost when the parent process restarted/,
     );
   });
@@ -248,11 +245,6 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   it("[review round2] 非 worktree record 跨重启重建 → 续聊不受 worktree 守卫拦截（向后兼容）", async () => {
     clearEngines();
     const fake = registerFakePiEngine();
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_session_not_resumable",
-      message: "no live process (cold path)",
-    };
     // identity entry 无 worktree 字段（旧文件）→ found.worktree undefined → hadWorktree false
     writeSessionJsonl(sessionsDir, { id: "sa-nowt", rootSessionId: "root-session" });
 
@@ -261,6 +253,6 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
 
     // 冷路径续聊不被 worktree 守卫拦截（resume 正常发起；后续 spawn 编排
     // 超出本用例关注点——runSpawn 在本文件是 no-op mock）
-    await expect(service.chatActions.deliverChatMessage(record, "resume normal", false)).resolves.toBeUndefined();
+    await expect(service.chatActions.deliverChatMessage(record, "resume normal")).resolves.toBeUndefined();
   });
 });

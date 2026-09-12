@@ -40,7 +40,6 @@ function makeFakeEngine(id: string, probeOk: boolean): EnginePort {
             } satisfies ProbeReport,
       ),
     run: (_t: AgentCallOpts, _c: RunContext) => Promise.reject(new Error("fake: run not implemented")),
-    interact: () => Promise.resolve({ ok: false, code: "engine_capability_unsupported", message: "stub" }),
     read: (_h: Parameters<EnginePort["read"]>[0]): Promise<SessionView> =>
       Promise.resolve({ engineId: id, turns: [], source: "outcome-only" }),
   };

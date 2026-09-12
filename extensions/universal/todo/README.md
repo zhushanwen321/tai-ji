@@ -32,6 +32,8 @@ pi install npm:@zhushanwen/pi-todo
 - `status` 枚举：`pending` / `in_progress` / `completed`
 - `add` 不接受 `status`（恒为 pending），不存在 `verifyTexts`（goal 侧的对应概念是 `successCriteria`）
 - 全部 completed 后由 **auto-clear 机制**延迟 2 轮自动清空并重置 `nextId=1`（无手动 clear action）
+- **add 时 auto-GC**：旧列表全部 completed 时，add 自动清空旧列表再新增（`nextId` 重置 1），开启新任务无需先手动清理
+- **规模软上限**：建议 todo 总数不超过 10 个；add 后总数超过 10 时在结果中附加提醒（不拒绝，合并细粒度步骤或 delete 瘦身由模型自决）
 
 ### 错误处理约定
 

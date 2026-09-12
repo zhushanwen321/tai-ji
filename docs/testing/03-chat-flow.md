@@ -10,7 +10,7 @@
 
 - **发送链路**：`chat.send` → `chatApi.send`（ack）+ `streamSubscribe`（长订阅收 chunk）
 - **流式 chunk 处理**：`chatStore.appendAssistantChunk` → `applyChunk` 分发到 messages Map
-- **回合分组**：`messageTurns.toRenderItems` 纯函数动态计算（user + assistants 成一组）
+- **回合分组**：`messageTurns.toRenderItems` 纯函数动态计算（user + assistants 成一组）；三车道含 `toRenderItemsIncremental` 尾部快车道——streaming 每合帧批只处理尾部变化区（O(n)→O(delta)），`toRenderItems` 并存签名零变化
 - **session 隔离**：所有状态按 sessionId 分区（messages/retry/queue/changeSetStatuses）
 
 ## 2. 组件树
@@ -41,14 +41,7 @@ Panel.vue (sessionId 存在, messageCount > 0)
 |--------|---------|------|
 | `composer-box` | Composer.vue:25 | composer 容器（唯一有 testid 的对话流相关元素） |
 
-> ⚠️ **关键缺口**：`MessageStream.vue` / `Turn.vue` / `Block.vue` / `ChangeSetCard.vue` / `SystemNotice.vue` **均无 data-testid**。E2E 测试对话流**必须先补 testid**（或用文本/class 锚点，但脆弱）。
->
-> **建议补的 testid**（落地 E2E 前需加）：
-> - `MessageStream.vue` → `data-testid="message-stream-root"`
-> - `Turn.vue` → `data-testid="turn-{index}"`（回合索引）
-> - `Block.vue` → `data-testid="block-{type}-{toolCallId|thinkingId}"`（thinking/tool 块）
-> - `ChangeSetCard.vue` → `data-testid="changeset-card-{messageId}"`
-> - `SystemNotice.vue` → `data-testid="system-notice"`
+> ✅ **testid 已大量落地**（原「关键缺口」前置已失效）：`Turn.vue` → `turn-{index}` / `turn-meta-{index}`；`Block.vue` → `block-text`（文本块）/ `tool-block-header`（工具块 header）；`ChangeSetCard.vue` → `change-set-card` / `change-set-header` / `change-set-file`；`SystemNotice.vue` → `subagent-directive-bubble`（subagent 指令行）；`MessageStream.vue` → `pending-bubble-list` / `load-more-history`。以源码 grep 为准，新增交互面随组件补。
 
 **当前可用的文本锚点**（无需 testid，按 mock 固定文案断言）：
 
@@ -66,11 +59,10 @@ Panel.vue (sessionId 存在, messageCount > 0)
 ### 4.1 send 调用链（`useChat.ts`）
 
 ```
-Composer.onSend(text)
-  ├─ 守卫1: session.activeId 空 → return
-  ├─ 守卫2: text.trim() 空 → return
-  ├─ 守卫3: chat.isStreaming === true → return（不重复发）
-  ├─ chat.appendUser(sid, trimmed)           ← 立即写 user 消息（status:complete）
+Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑定，不读全局 session.activeId，防 standby panel 串台）
+  ├─ 守卫1: segmentsToPrompt(segments).trim() 空 → return
+  ├─ 守卫2: chat.isActive(sid) === true → 自动转 steer(sid, segments)（busy 时追加上下文，不丢弃）
+  ├─ chat.appendUser(sid, segments)           ← 立即写 user 消息；返回 clientUuid（segments 数组 + clientUuid↔pi 映射 + inflight 占位挂钩）
   ├─ ensureStreamSubscription(sid, chat)     ← 幂等：首次订阅，二次 no-op
   │    └─ chatApi.streamSubscribe(sid, handler)
   │         handler 对每条 ServerMessage:
@@ -78,7 +70,7 @@ Composer.onSend(text)
   │           + 按类型翻转 isStreaming:
   │             message.message_start → setStreaming(true)
   │             message.complete / error / stream_error → setStreaming(false)
-  └─ await chatApi.send(sid, trimmed)        ← ack（pi 已接收，非生成完成）
+  └─ await chatApi.send(sid, promptText)      ← ack（pi 已接收，非生成完成）
 ```
 
 ### 4.2 关键设计点（[HISTORICAL]）
@@ -91,18 +83,18 @@ Composer.onSend(text)
 
 | 步骤 | 输入 | 输出 |
 |------|------|------|
-| `chat.appendUser(sid, text)` | `(sid, text)` | messages Map[sid] 追加 `{id:'u-{uuid}', role:'user', status:'complete'}` |
+| `chat.appendUser(sid, segments)` | `(sid, segments: Segment[])` | messages Map[sid] 追加 `{id:'u-{uuid}', role:'user', status:'complete'}`；返回 clientUuid |
 | `chatApi.streamSubscribe(sid, handler)` | `(sid, handler)` | 返回 unsub 函数；handler 接收 ServerMessage |
 | `chatApi.send(sid, text)` | `(sid, text)` | `Promise<void>`（ack 即 resolve） |
 | mock `chat.send` | `(sid, text)` | sleep(40ms) → resolve；同时 `void runSendStream(...)` fire-and-forget |
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
-定义在 [`shared/src/protocol.ts`](../../packages/shared/src/protocol.ts) line 207-347。`applyChunk`（[`chat-chunk-processor.ts`](../../packages/renderer/src/stores/chat-chunk-processor.ts)）消费的核心类型：
+定义在 [`shared/src/protocol.ts`](../../packages/shared/src/protocol.ts) line 207-347。`applyChunk`（[`chunk-processor.ts`](../../packages/core/src/domain/chat/chunk-processor.ts) + [`effects/registry.ts`](../../packages/core/src/domain/chat/effects/registry.ts)——原 renderer 21 case 已迁移 core）消费的核心类型：
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
-| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；清 queueState |
+| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；G-023 条件清 queueState（仅快照深度==0 才清 + 同点僵尸清理；快照是腿 2 includes 判据源） |
 | `message.text_delta` | `{ sessionId, delta }` | content += delta（追加最后 assistant） |
 | `message.thinking_start` | `{ sessionId, thinkingId }` | 追加 ThinkingBlock（content:'', collapsed:true） |
 | `message.thinking_delta` | `{ sessionId, delta }` | 追加最后 ThinkingBlock.content |
@@ -126,7 +118,7 @@ Composer.onSend(text)
 
 ## 6. chatStore API（session 隔离）
 
-[`stores/chat.ts`](../../packages/renderer/src/stores/chat.ts)。核心是 `messages: Map<sessionId, Message[]>` 按 sessionId 分区。
+[`stores/chat.ts`](../../packages/renderer/src/stores/chat.ts) 是 renderer 薄壳（31 行：defineStore 注册 + re-export），store 主体在 [`@xyz-agent/core/domain/chat/store.ts`](../../packages/core/src/domain/chat/store.ts) 的 `createChatStore` factory（P3 chat 域绞杀 w4）。核心是 `messages: Map<sessionId, Message[]>` 按 sessionId 分区。
 
 | 方法 | 作用 |
 |------|------|
@@ -144,7 +136,7 @@ Composer.onSend(text)
 
 ## 7. mock 流式数据（`run-send-stream.ts`）
 
-[`api/mock/run-send-stream.ts`](../../packages/renderer/src/api/mock/run-send-stream.ts) 模拟完整流式序列。`chat.send` 后 fire-and-forget，全程序检查 `isCancelled(sessionId)`：
+[`run-send-stream.ts`](../../packages/core/src/transport/mock/run-send-stream.ts) 模拟完整流式序列。`chat.send` 后 fire-and-forget，全程序检查 `isCancelled(sessionId)`：
 
 ```
 message.message_start {sessionId, messageId}
@@ -202,6 +194,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 | [`__tests__/panel/block-working.test.ts`](../../packages/renderer/src/__tests__/panel/block-working.test.ts) | Block working 态折叠（thinking/tool/end_not_received） |
 | [`__tests__/panel/turn-working.test.ts`](../../packages/renderer/src/__tests__/panel/turn-working.test.ts) | Turn working 态（完成复位/elapsed 计时/非 working 静态） |
 | [`__tests__/stores/toolcall-anchor.test.ts`](../../packages/renderer/src/__tests__/stores/toolcall-anchor.test.ts) | toolCallId 锚定（findToolCallOwner 乱序无害化） |
+| [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份钉扎，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
 
 **运行**：
 ```bash
@@ -248,19 +241,19 @@ pnpm dev
 
 ## 10. Playwright E2E 测试
 
-### 10.1 前置：补 data-testid（必须）
+### 10.1 前置：data-testid 已落地
 
-对话流组件**当前无 data-testid**。E2E 前需给 `MessageStream.vue` / `Turn.vue` / `Block.vue` / `ChangeSetCard.vue` / `SystemNotice.vue` 补 testid（见 §3 建议）。补完后才能稳定 E2E。
+对话流组件已大量补齐 testid（`turn-{index}` / `block-text` / `tool-block-header` / `change-set-card` 等，见 §3 清单），E2E 可直接以 testid 锚定；未覆盖的交互面再随用例补。
 
-### 10.2 测试场景（补 testid 后）
+### 10.2 测试场景
 
-| 场景 | 锚点（补 testid 后） | 期望 |
-|------|---------------------|------|
+| 场景 | 锚点 | 期望 |
+|------|------|------|
 | E2E-CF-1：发消息 → user 气泡 | user 气泡文本 / `turn-0` | user 消息可见 |
-| E2E-CF-2：流式 thinking | `block-thinking-{id}` | thinking 块可见 |
-| E2E-CF-3：流式 tool call | `block-tool-{toolCallId}` | tool 块可见，含工具名 |
+| E2E-CF-2：流式 thinking | `block-text`（thinking 块 header） | thinking 块可见 |
+| E2E-CF-3：流式 tool call | `tool-block-header` | tool 块可见，含工具名 |
 | E2E-CF-4：流式完成 → 收尾 summary | 收尾文本「好的，我来处理」 | summary 可见 |
-| E2E-CF-5：fileChanges 变更集卡 | `changeset-card-{msgId}` | 卡片可见，含文件路径 |
+| E2E-CF-5：fileChanges 变更集卡 | `change-set-card` | 卡片可见，含文件路径 |
 | E2E-CF-6：retry（输入 retry） | retry 指示器 | 输入含 'retry' 触发重试指示 |
 | E2E-CF-7：session 隔离 | 两个 session 消息独立 | 切 session 消息不串扰 |
 
@@ -405,7 +398,7 @@ test.describe('对话流 E2E', () => {
 
 | 约束 | 说明 |
 |------|------|
-| ❌ **data-testid 缺口** | MessageStream/Turn/Block/ChangeSetCard/SystemNotice 无 testid。E2E 前必须补，否则只能用脆弱的文本/class 锚点 |
+| ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/pending-bubble-list/load-more-history 等已可用（见 §3 清单）；新增交互面随组件补，未覆盖处才退回文本/class 锚点 |
 | ⚠️ mock 流式耗时 | 一轮约 3-4 秒。E2E timeout 给 15s，用 `toBeVisible({timeout})` 等终态，禁止固定 sleep |
 | ❌ mock 不模拟失败 | 错误路径（message.error/stream_error）无法 mock E2E 触发，只能单测验证（chat-streaming-reset.test.ts） |
 | ❌ mock 不模拟 WS 断连 | WS 生命周期（断连/重连）只能非 MOCK 测 |
@@ -425,10 +418,10 @@ test.describe('对话流 E2E', () => {
 
 ## 14. 相关文档
 
-- 组件源码：[`components/panel/MessageStream.vue`](../../packages/renderer/src/components/panel/MessageStream.vue) / [`message-stream/`](../../packages/renderer/src/components/panel/message-stream/)
-- 流式处理：[`stores/chat-chunk-processor.ts`](../../packages/renderer/src/stores/chat-chunk-processor.ts)
-- useChat：[`composables/features/useChat.ts`](../../packages/renderer/src/composables/features/useChat.ts)
+- 组件源码：MessageStream 容器 [`components/panel/MessageStream.vue`](../../packages/renderer/src/components/panel/MessageStream.vue) / [`message-stream/`](../../packages/renderer/src/components/panel/message-stream/)；Turn/Block/ChangeSetCard/SystemNotice 在 [`packages/ui/src/features/chat/`](../../packages/ui/src/features/chat/)
+- 流式处理：[`domain/chat/chunk-processor.ts`](../../packages/core/src/domain/chat/chunk-processor.ts)（@xyz-agent/core）
+- useChat 真身：[`domain/chat/useChat.ts`](../../packages/core/src/domain/chat/useChat.ts)（@xyz-agent/core；renderer 仅薄壳 [`composables/features/chat/useChat.ts`](../../packages/renderer/src/composables/features/chat/useChat.ts)）
 - 集成测试：[`__tests__/fg5-message-stream.test.ts`](../../packages/renderer/src/__tests__/fg5-message-stream.test.ts)
-- mock 流式：[`api/mock/run-send-stream.ts`](../../packages/renderer/src/api/mock/run-send-stream.ts)
+- mock 流式：[`transport/mock/run-send-stream.ts`](../../packages/core/src/transport/mock/run-send-stream.ts)（@xyz-agent/core）
 - 发送入口：[02-composer.md](./02-composer.md)（Composer.onSend → chat.send）
 - FileChanges 通道：[ADR-0024](../adr/0024-filechanges-channel.md)

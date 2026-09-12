@@ -9,7 +9,7 @@
  *    pending:unregister → onRunDone」终态序列的唯一定义点（D5-② 单点化，收敛原
  *    8 处逐字复制；OR-8 收口步骤与 OR-4/B-4 双围栏内化于本函数）
  *
- * 4 个导出函数（domain-models.md §失败处理矩阵）：
+ * 4 个 handle* 路由函数（domain-models.md §失败处理矩阵）+ 终态化/重建/防御 helper 若干：
  * - handleWorkerMessage(run, raw, deps, handlers) — 路由 agent_call/return/error/log
  * - handleWorkerError(run, err, deps, handlers) — worker uncaught error
  * - handleWorkerExit(run, code, handle, deps, handlers) — worker exit
@@ -39,14 +39,10 @@
 
 import { getLogger } from "../core/logger.ts";
 
-import { SLUG_MAX_LENGTH } from "./models/types.ts";
-import { createRecord, updateFromEvent } from "../execution/execution-record.ts";
-import { SubagentStream } from "../execution/stream-sink.ts";
-import type { AgentEvent } from "../shared/agent-event.ts";
 import { resolveAgentOpts } from "./agent-opts-resolver.ts";
 import { executeAgentCall } from "./execute-agent-call.ts";
 import { AgentCall } from "./models/agent-call.ts";
-import type { LifecycleDeps, WorkerHandlers } from "./models/ports.ts";
+import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type { AgentCallOpts, AgentResult, DoneReason, ExecutionTraceNode } from "./models/types.ts";
@@ -400,7 +396,7 @@ function discardInFlightCalls(run: WorkflowRun): number[] {
  *   result 以 IN_FLIGHT_CALL_CANCELLED_MSG 承载取消原因；
  * - trace 节点置 failed + 固定取消文案 + completedAt（「failed + Cancelled 文案」
  *   即取消的既有表达形态，不新增状态枚举）；
- * - node.live 清除（终态 run 无 TUI 轮询，防 ExecutionRecord 滞留）。
+ * - node 无运行期附属对象（[H2 W3] trace.live 退役后节点只剩终态摘要字段）。
  *
  * 调用点约定：每个 transition("done") 成功后、store.save 之前——先收口再落盘，
  * 内存态与持久化快照在同一时点收敛（「run-snapshot 落盘前」的实现形态）。
@@ -419,7 +415,6 @@ export function closeOutInFlightCalls(run: WorkflowRun): number[] {
     if (call.status === "running") {
       call.markDone({ content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG });
     }
-    call.traceNode.live = undefined;
     run.state.trace.update(callId, {
       status: "failed",
       result: { content: "", error: IN_FLIGHT_CALL_CANCELLED_MSG },
@@ -697,24 +692,13 @@ function dispatchAgentCall(
     return;
   }
 
-  // 构建 trace 节点 + live record（TUI 实时进度）
+  // 构建 trace 节点（[H2 W3] trace.live 退役——实时进度改由 views 经 store 订阅
+  // collectRecordsByParentRunId(parentRunId) 查询真实 record，设计 D2；节点保留
+  // 终态摘要 result，终态由 executeAgentCall → finalizeCall 写入）。
   const agentName = msg.opts.description ?? msg.opts.agent ?? "unknown";
-  // slug 复用 agentName（超长截断），live record 的 slug 仅用于 TUI 展示。
-  const liveSlug = agentName.length > SLUG_MAX_LENGTH ? agentName.slice(0, SLUG_MAX_LENGTH) : agentName;
   const now = new Date().toISOString();
-  // 未显式指定 model 的展示口径（live record 与 trace node 共用，两处一致）。
+  // 未显式指定 model 的展示口径。
   const model = msg.opts.model ?? "default";
-  // live record：收口 agent 执行过程中的 text/thinking/toolCalls/usage，
-  // 供 TUI 在 agent 运行期间显示进度（getEventLog/getCurrentActivity）。
-  // 完成时由下方 .then 清除（终态由 node.result 承载）。
-  const liveRecord = createRecord(String(msg.callId), {
-    agent: agentName,
-    model,
-    mode: "background",
-    task: msg.opts.prompt,
-    slug: liveSlug,
-    startedAt: Date.now(),
-  });
   const node: ExecutionTraceNode = {
     stepIndex: msg.callId,
     agent: agentName,
@@ -723,7 +707,6 @@ function dispatchAgentCall(
     status: "running" as const,
     phase: msg.phase,
     startedAt: now,
-    live: liveRecord,
   };
   run.state.trace.append(node);
 
@@ -750,8 +733,6 @@ function dispatchAgentCall(
     const errorResult: AgentResult = { content: "", error: resolved.error };
     call.markDone(errorResult);
     run.state.calls.set(msg.callId, call);
-    // 无子进程执行，清除空 live record（终态由 result 承载）
-    node.live = undefined;
     run.state.trace.update(msg.callId, {
       status: "failed",
       result: errorResult,
@@ -777,19 +758,20 @@ function dispatchAgentCall(
   // 后者已守 terminal（isTerminal）早期 return）。fallback new AbortController 已移除。
   const runtime = run.runtime!;
   const signal = runtime.controller.signal;
-  // D-005: onEvent 签名升级——executeAndAwait 直接出 AgentEvent（强类型，
-  // session-runner handleSdkEvent 出口），不再有 raw JSONL 中间层。
-  // 删 jsonlToAgentEvent 翻译——直接 updateFromEvent。
-  // TUI 靠 tick 轮询 trace.toArray() 读 node.live，无需显式通知。
-  const onEvent = (event: AgentEvent): void => {
-    updateFromEvent(liveRecord, event);
-  };
-  // 创建 streaming sink：widgetKey = subagent-stream-<runId>-<stepIndex>。
-  // 复用 background subagent 的 SubagentStream → setWidget → RPC 链路（agent-call-streaming-extension.md）。
-  // streamSink 缺失（无 UI 模式）时 stream=undefined，executeAgentCall 正常执行不 streaming。
-  const stream = deps.streamSink
-    ? new SubagentStream(`${run.runId}-${msg.callId}`, deps.streamSink)
-    : undefined;
+  // [H2 W3] 执行 port 切换（设计 §3.5 终态数据流：pump 薄化为「消息转调 + run 级
+  // 收尾」）：workflowAgentDispatch = SubagentService.executeWorkflowAgent 的注入
+  // 形态——真实 record（origin:"workflow" + parentRunId=run.runId）进 store、事件
+  // 流经 service 内 journal 接线进 record、streaming/守护/池归 service 派发路径。
+  // 未注入时（旧测试 deps）回退 deps.runner——[H2 W4] SAR.run 已掏空为纯转调
+  // executeWorkflowAgent，两分支执行体归一（同一 service 编排），仅 parentRunId
+  // 来源不同（注入路径闭包携带真实 run.runId；回退路径为 SAR 直调占位）。生产
+  // 装配恒注入 dispatch（extension index.ts makeDeps），回退分支生产不可达。
+  // 旁路 progress record 族（createRecord + updateFromEvent + SubagentStream +
+  // trace.live 挂载）随本切换整体退役——TUI/GUI 实时进度改从 store 订阅（D2）。
+  const dispatch = deps.workflowAgentDispatch;
+  const runner: AgentRunner = dispatch
+    ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal) }
+    : deps.runner;
   // 原 gate.withSlot(fn, signal) 语义内联：pre-aborted 时 reject AbortError（
   // 下方 .catch 依赖此约定不记错），否则直接执行——并发调度归 ConcurrencyPool。
   const dispatchCall = async (): Promise<void> => {
@@ -798,22 +780,17 @@ function dispatchAgentCall(
       abortErr.name = "AbortError";
       throw abortErr;
     }
-    try {
-      // OB2（S7 残留）：isOrphaned 谓词注入——旧代际 finalize 在 trace.update 前被
-      // 拦截（判定语义与下方 .then/.catch 守卫同一 isOrphanedCall，详见
-      // execute-agent-call.ts finalizeCall 文档注释）。
-      await executeAgentCall(call, deps.runner, run.state.budget, signal, run.state.trace, onEvent, stream, () => isOrphanedCall(run, msg.callId, call));
-    } finally {
-      stream?.dispose();
-    }
+    // OB2（S7 残留）：isOrphaned 谓词注入——旧代际 finalize 在 trace.update 前被
+    // 拦截（判定语义与下方 .then/.catch 守卫同一 isOrphanedCall，详见
+    // execute-agent-call.ts finalizeCall 文档注释）。onEvent/stream 两实参显式
+    // undefined 占位（[H2 W3] live record 更新与 SubagentStream 已随旁路退役；
+    // 位置参数不得前移——isOrphaned 是第 8 形参）。
+    await executeAgentCall(call, runner, run.state.budget, signal, run.state.trace, undefined, undefined, () => isOrphanedCall(run, msg.callId, call));
   };
   void dispatchCall()
     .then(() => {
-      // 清除 live record：终态已由 executeAgentCall → finalizeCall 写入 node.result，
-      // live 不再需要（且含可变状态，不保留）。无论 stale 与否都清，避免内存泄漏。
-      // M4: 必须在 stale guard 之前清，否则跨 rebuild 的迟到 completion 会累积 live record。
-      node.live = undefined;
-      // run 终止（终态）后到达的 stale completion 不写 state
+      // run 终止（终态）后到达的 stale completion 不写 state（终态由
+      // executeAgentCall → finalizeCall 写入 node.result，node 无运行期附属对象）。
       if (run.state.status !== "running") return;
       // 孤儿 call 守卫（S7-second 竞态）：rebuild 的 discardInFlightCalls 已移除本
       // call、或重跑 dispatch 已用新实例替换同 callId 条目时，本 completion 属于旧
@@ -852,13 +829,12 @@ function dispatchAgentCall(
       // 兜底回发：executeAgentCall 抛非 Abort 异常时（如 runner undefined 的 TypeError、
       // dispatchCall 内部 bug）原 catch 仅 console.error，worker 内对 callId 的 pending
       // Promise 永不 resolve → agent() 永久 await → worker 脚本挂死。构造 failed AgentResult
-      //（与 resolveAgentOpts 失败路径 L262-275 一致的模式）postAgentResult 回 worker，
+      //（与 resolveAgentOpts 失败路径一致的模式）postAgentResult 回 worker，
       // 让 pending Promise resolve（结果为 error），脚本可继续或失败退出。
       // 孤儿 call 守卫（与 .then 对称，S7-second 竞态）：rebuild 后本 call 已被 discard
       // 移除/替换——markDone 虽在孤儿实例上无害，但 trace.update 会污染重跑新建的同
       // stepIndex 节点、postAgentResult 会劫持新 worker 的同 callId pending。孤儿时只
-      // 留日志，全部跳过。node.live 无条件先清（旧节点已脱离 trace，防御性统一）。
-      node.live = undefined;
+      // 留日志，全部跳过。
       if (isOrphanedCall(run, msg.callId, call)) {
         deps.log?.("debug", "workflow:worker-message-pump", "orphan agent call failure dropped", { runId: run.runId, callId: msg.callId });
         return;
@@ -871,8 +847,8 @@ function dispatchAgentCall(
         if (call.status === "pending") call.markRunning();
         call.markDone(errorResult);
       }
-      // state 一致性三件套（与 resolveAgentOpts 失败 L268-276 / .then L319-325 对等）：
-      // trace 标 failed + 清 live record（防泄漏）+ 持久化（catch 恰是最需留证的场景）。
+      // state 一致性三件套（与 resolveAgentOpts 失败 / .then 路径对等）：
+      // trace 标 failed + 持久化（catch 恰是最需留证的场景）。
       // stale 终态（run 已 done）时 run.runtime 为 undefined，postAgentResult 用
       // optional chaining 跳过 worker 回发；trace/state 写入仍执行（无害，终态快照已存）。
       run.state.trace.update(msg.callId, {

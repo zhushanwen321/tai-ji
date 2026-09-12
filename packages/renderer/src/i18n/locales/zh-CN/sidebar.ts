@@ -149,7 +149,7 @@ export default {
     loadFailed: '加载失败（{error}）',
     retry: '重试',
     empty: '暂无后台任务',
-    emptyHint: '在对话中让主 agent 调用 @subagent 工具发起后台任务，运行中的任务会显示在这里',
+    emptyHint: "在对话中让主 agent 调用 {'@'}subagent 工具发起后台任务，运行中的任务会显示在这里",
     cancel: '取消',
     cancelConfirm: '确认取消？',
     turnsUnit: 'turns',

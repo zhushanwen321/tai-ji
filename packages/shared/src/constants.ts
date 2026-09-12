@@ -226,11 +226,6 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   // 误继承会把孙帧归到父 record
   'XYZ_SUBAGENT_RELAY_SESSION_ID',
   'XYZ_SUBAGENT_RELAY_RECORD_ID',
-  // 防御性剥除（workspace 纪律死名登记）：全仓零生产写入方，仅历史探针文档提及；
-  // 剥除防未来写入方复活旧值，登记见 impl-plan §2.12 偏差登记段
-  'XYZ_SUBAGENT_RELAY_STDIN',
-  'XYZ_SUBAGENT_RELAY_STDOUT',
-  'XYZ_SUBAGENT_RELAY_STDERR',
 ]
 
 /**

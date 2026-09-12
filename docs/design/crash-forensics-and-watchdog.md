@@ -24,7 +24,7 @@
 | main | Electron 主进程 | render-process-gone 自动 reload（60s 滑窗 ≤3 次熔断，C-proc-16）；runtime supervisor 崩溃自动重启（1s-16s 退避，MAX 5）+ liveness 假死探针 | main-logger（含 stderr rotation）+ renderer-error-*.log（IPC 落盘）+ 重启决策日志（trigger: process_exit / liveness_unhealthy / restart_failure） |
 | runtime | Node WS 服务，托管全部 session | pi respawn（5s 延迟 + 连续 2 次熔断 + join）；空闲回收（2h idle 且 30min 未查看，最小摘除）；孤儿收割（启动 5s 后 spawn marker 清单 + argv + ppid=1 判据，v2 marker 化） | runtime-*.log（date+size 轮转）+ 水位行（5min）+ 杀链决策日志 |
 | renderer | Vue GUI | 错误捕获三件套 + 恢复提示条 | （经 IPC 落 main） |
-| pi | 每 session 一个 | guardStaleCtx 守卫（C-pi-16）；SIGTERM 优雅退出（P1 实测 flush 完整） | pi-crash-*.log（崩溃上下文 + stderr 尾）+ pi-*.jsonl tee（无 size 轮转——本设计 D7 补课） |
+| pi | 每 session 一个 | guardStaleCtx 守卫（C-pi-17，2026-09-13 合并改号——原 C-pi-16 与 dev-0.9.19 重排撞车）；SIGTERM 优雅退出（P1 实测 flush 完整） | pi-crash-*.log（崩溃上下文 + stderr 尾）+ pi-*.jsonl tee（无 size 轮转——本设计 D7 补课） |
 
 关键既有设施（本设计复用不重造）：`restart-policy.ts` 纯逻辑状态机（idle→counting→exhausted，稳定 10s 清零）；`reap-orphan-pi.ts`（误杀防线：spawn marker 清单 + argv + ppid=1 判据【v2 marker 化】+ 单实例锁分工）；respawn 抑制（destroy 先删 `clientToId`/`processes` Map，exit handler 反查无条目即静默——process-manager.ts 源码实证）；`startup-background-init` 编排启动期后台任务；完整 shutdown 序（index.ts，现行 13 步打点序见 rolling-restart.ts `SHUTDOWN_STEP_SEQUENCE`：cancel-rolling-restart → 停水位定时器 → 停 watchdog → 取消 pending respawn → 停 reaper → store flushAll → skillRegistry.dispose → completionBackflow.dispose → relay 杀链 → server.stop → 引擎池 dispose → close-crash-journal → closeLogger 尾部 flush）。
 

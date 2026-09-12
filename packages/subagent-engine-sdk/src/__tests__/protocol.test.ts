@@ -35,6 +35,8 @@ import {
   type ProtocolMethod,
   type ProtocolParamsMap,
   type ProtocolResultMap,
+  type RunContextParams,
+  type RunParams,
 } from "../protocol/methods.ts";
 import type { AssertMutuallyAssignable } from "../protocol/contract-types.ts";
 import {
@@ -114,15 +116,14 @@ describe("量级常量（impl-plan §2.1 逐项写死）", () => {
   });
 });
 
-describe("10 正向方法全集", () => {
-  it("恰好 10 个方法，无多无少（v1 方法集冻结）", () => {
-    expect(PROTOCOL_METHODS).toHaveLength(10);
+describe("9 正向方法全集", () => {
+  it("恰好 9 个方法，无多无少（v1 方法集；[H1] interact 已随 chat-run 统一退役）", () => {
+    expect(PROTOCOL_METHODS).toHaveLength(9);
     expect([...PROTOCOL_METHODS]).toEqual([
       "initialize",
       "probe",
       "run",
       "cancel",
-      "interact",
       "read",
       "listModels",
       "validateModel",
@@ -142,9 +143,9 @@ describe("10 正向方法全集", () => {
   });
 });
 
-describe("9 反向通道全集与超时二分（R9-2；v1.x 增 host/roundLifecycle）", () => {
-  it("恰好 9 个通道", () => {
-    expect(REVERSE_CHANNELS).toHaveLength(9);
+describe("8 反向通道全集与超时二分（R9-2；[H1] v1.x 曾增的轮次相位通道已退役）", () => {
+  it("恰好 8 个通道", () => {
+    expect(REVERSE_CHANNELS).toHaveLength(8);
     expect([...REVERSE_CHANNELS]).toEqual([
       "host/log",
       "host/askUser",
@@ -154,11 +155,10 @@ describe("9 反向通道全集与超时二分（R9-2；v1.x 增 host/roundLifecy
       "host/handleReady",
       "host/childSpawned",
       "host/childStateChanged",
-      "host/roundLifecycle",
     ]);
   });
 
-  it("二分：数据面 7 通道 10s 超时；人机交互 2 通道不设统一超时", () => {
+  it("二分：数据面 6 通道 10s 超时；人机交互 2 通道不设统一超时", () => {
     const dataPlane = REVERSE_CHANNELS.filter(
       (ch) => REVERSE_CHANNEL_TIMEOUT_CLASS[ch] === "data-plane",
     );
@@ -172,7 +172,6 @@ describe("9 反向通道全集与超时二分（R9-2；v1.x 增 host/roundLifecy
       "host/handleReady",
       "host/childSpawned",
       "host/childStateChanged",
-      "host/roundLifecycle",
     ]);
     expect(interaction).toEqual(["host/askUser", "host/permission"]);
   });
@@ -255,5 +254,41 @@ describe("帧判别守卫（四帧型互斥判别，W2 行解析器消费）", (
     expect(isReverseRequestFrame(rev)).toBe(true);
     expect(isReverseRequestFrame({ id: "x", method: "run", params: {} })).toBe(false);
     expect(isReverseRequestFrame(req)).toBe(false);
+  });
+});
+
+describe("run.params.ctx 增量字段（F6 sessionRootId：relay 归属键 SESSION_ID 权威源）", () => {
+  const v1Ctx: RunContextParams = { poolKey: "shared", cwd: "/tmp" };
+
+  it("带 sessionRootId 的 run ctx 可构造（RunParams 形态承载）", () => {
+    const run: RunParams = {
+      runId: "run-1",
+      task: { prompt: "do" },
+      ctx: { ...v1Ctx, sessionRootId: "root-sess-9" },
+    };
+    expect(run.ctx.sessionRootId).toBe("root-sess-9");
+  });
+
+  it("v1 形态（无 sessionRootId）零破坏——additive 可选，旧宿主/引擎语义不变", () => {
+    const run: RunParams = { runId: "run-1", task: { prompt: "do" }, ctx: v1Ctx };
+    expect(run.ctx.sessionRootId).toBeUndefined();
+  });
+});
+
+describe("run.params.ctx 增量字段（Option C sessionDir：宿主权威 subagent session 目录）", () => {
+  const v1Ctx: RunContextParams = { poolKey: "shared", cwd: "/tmp" };
+
+  it("带 sessionDir 的 run ctx 可构造（引擎据此组装 --session-dir，不自推导）", () => {
+    const run: RunParams = {
+      runId: "run-1",
+      task: { prompt: "do" },
+      ctx: { ...v1Ctx, sessionDir: "/agent/subagents/--Users-x-proj--/sessions" },
+    };
+    expect(run.ctx.sessionDir).toBe("/agent/subagents/--Users-x-proj--/sessions");
+  });
+
+  it("v1 形态（无 sessionDir）零破坏——additive 可选，旧引擎走 [LEGACY] fallback", () => {
+    const run: RunParams = { runId: "run-1", task: { prompt: "do" }, ctx: v1Ctx };
+    expect(run.ctx.sessionDir).toBeUndefined();
   });
 });

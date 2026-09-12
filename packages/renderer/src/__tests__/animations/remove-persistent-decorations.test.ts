@@ -18,11 +18,16 @@ const styleCss = read('src/style.css')
 const PULSE_ANIM = 'animate-[pulse-dot_1.8s_ease-in-out_infinite]'
 
 describe('plan 04 删除常驻装饰性动画', () => {
-  it('TC1: SegmentedTab badge 为静态（无 pulse-dot / motion-reduce 动画 class）', () => {
+  it('TC1: SegmentedTab 无 pulse-dot / motion-reduce 动画 class，badge 本体已移除，count 数字渲染存在', () => {
+    // [HISTORICAL] badge 本体断言随 sidebar-tab-count-restore 决策 1 改写：原断言守护的
+    // 静态 badge 蓝点已被该设计显式移除（docs/design/sidebar-tab-count-restore.md §3.3
+    // 决策 1），改为守护「badge 已移除 + count 数字渲染存在」。
     expect(segmentedTab).not.toContain(PULSE_ANIM)
     expect(segmentedTab).not.toContain('motion-reduce:animate-none')
-    // 静态 badge 本体保留
-    expect(segmentedTab).toContain('absolute right-1 top-1 size-[7px] rounded-full bg-accent')
+    // badge 本体已移除（静态蓝点随数字恢复设计一并删除）
+    expect(segmentedTab).not.toContain('absolute right-1 top-1 size-[7px] rounded-full bg-accent')
+    // count 数字渲染存在
+    expect(segmentedTab).toContain('v-if="tab.count > 0"')
   })
 
   it('TC2: SessionItem running 态保留旋转动画（7px spinning icon 范式）', () => {

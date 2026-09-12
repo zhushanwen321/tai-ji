@@ -7,7 +7,7 @@
  *
  * 这两个测试是"机械闸门"——任何漏网的中文 UI 文案或 locale desync 都会被捕获。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -39,6 +39,20 @@ function flattenKeys(obj: LocaleObject, prefix = ''): Set<string> {
       for (const sub of flattenKeys(v, fullKey)) out.add(sub)
     } else {
       out.add(fullKey)
+    }
+  }
+  return out
+}
+
+/** 拍平嵌套对象为 [key 路径, 消息值] 对（仅叶子字符串）——U9 用（需要值不只 key） */
+function flattenEntries(obj: LocaleObject, prefix = ''): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  for (const [k, v] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${k}` : k
+    if (v && typeof v === 'object') {
+      out.push(...flattenEntries(v, fullKey))
+    } else {
+      out.push([fullKey, v])
     }
   }
   return out
@@ -122,6 +136,50 @@ describe('U8: 组件 <template> 无新增 CJK 字符（豁免清单外）', () =
       throw new Error(
         `${rel} 模板含 ${cjkMatches.length} 个 CJK 字符，首个在第 ${firstLine} 行: ${cjkMatches.slice(0, 3).join('')}`,
       )
+    }
+  })
+})
+
+/**
+ * U9: locale 消息字符串无裸 `@`（vue-i18n linked-message 语法冲突守卫）。
+ *
+ * 背景：vue-i18n message format 里 `@` 是 linked message 起始符，消息值里的字面 `@`
+ * （如「调用 @subagent 工具」）会被编译器按 linked 语法解析 → 运行时 console 编译
+ * 告警（2026-09-12 Gate B 真机验收在 sidebar.subagentList.emptyHint 实测）。修法 =
+ * vue-i18n 字面量插值 `{'@'}` 转义（t() 输出仍为字面 @）。本守卫扫双侧全部消息
+ * 字符串，剥掉合法 `{'@'}` 后仍含 `@` 即红——覆盖未来新增的任何 key，不只事故两处
+ * （sidebar.subagentList.emptyHint / settings.preset.builtinExtensionHint）。
+ */
+describe('U9: locale 消息无裸 @（linked-message 语法冲突守卫）', () => {
+  it.each(['zh-CN', 'en-US'] as const)('%s 全部消息字符串无未转义 @', (locale) => {
+    const violations: string[] = []
+    for (const file of listTsFiles(join(LOCALES_DIR, locale))) {
+      const name = file.split('/').pop()
+      for (const [key, value] of flattenEntries(loadLocaleObject(file))) {
+        const stripped = value.split("{'@'}").join('')
+        if (stripped.includes('@')) violations.push(`${locale}/${name} ${key}`)
+      }
+    }
+    expect(
+      violations,
+      `裸 @ 触发 vue-i18n linked-message 编译告警，需用 {'@'} 转义：\n${violations.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('事故两 key 转义后 t() 输出含字面 @ 且编译零告警', async () => {
+    const { createI18n } = await import('vue-i18n')
+    const zhCN = (await import('../../i18n/locales/zh-CN')).default
+    const logs: string[] = []
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args) => logs.push(`warn: ${String(args[0])}`))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => logs.push(`error: ${String(args[0])}`))
+    try {
+      const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
+      expect(i18n.global.t('sidebar.subagentList.emptyHint')).toContain('@subagent')
+      expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-agent-ext')
+      expect(logs).toEqual([])
+    } finally {
+      warnSpy.mockRestore()
+      errorSpy.mockRestore()
     }
   })
 })

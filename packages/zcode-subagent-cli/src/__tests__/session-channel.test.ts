@@ -14,7 +14,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  configureLoggerSink,
+  resetLoggerSinkForTests,
+  type LogLevel,
+} from "@zhushanwen/subagent-engine-sdk";
 
 import {
   AppServerConnection,
@@ -477,6 +483,196 @@ describe("终态判定", () => {
     expect(thinking).toEqual(["先想一想：", "答案是「你好」"]);
     expect(deltas).toEqual(["你好", "，", "任务完成"]); // text 流不含 reasoning
     expect(r.response).toBe(GOLDEN_FULL_TEXT); // response 聚合不含 reasoning
+  }, 10_000);
+});
+
+// ============================================================
+// [PR3] onActivity：非终态非增量 session/event 帧的活性回调
+// ============================================================
+
+describe("onActivity（tool 执行期活性）", () => {
+  // 真机探针实证（/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期
+  // session/event 每隔 ~1.0s 推一帧 tool.updated {kind:"progress"}——既非
+  // final-frame（无 response）也非 delta（无 delta 字段），此前不产生任何宿主可见
+  // 回调，「仅工具执行、零正文」形态下宿主侧无进展守护饿死误杀。onActivity 即该
+  // 帧族的宿主刷新面（引擎映射 AgentEvent {type:"activity"}）。
+  function toolUpdatedProgressFrame(
+    elapsedMs: number,
+    stdoutTail: string
+  ): string {
+    return JSON.stringify({
+      method: "session/event",
+      params: {
+        sessionId: GOLDEN_SESSION_ID,
+        type: "tool.updated",
+        payload: {
+          toolCallId: "call_e914fc9643b7459da05127a6",
+          toolName: "Bash",
+          elapsedMs,
+          pid: 2824,
+          stdoutBytes: 11,
+          stdoutTail,
+          kind: "progress",
+        },
+      },
+    });
+  }
+
+  it("无 delta 无 response 的帧（探针同款 tool.updated progress）→ onActivity 恰调用一次/帧", async () => {
+    const onActivity = vi.fn();
+    // 三帧 progress 夹在 delta 流与终态之间（turn 中途——工具执行期形态）
+    const { ch, workspacePath } = makeChannel({
+      replaceSendPushes: [
+        ...ZCODE_APPSERVER_GOLDEN.pushStream,
+        toolUpdatedProgressFrame(2134, "progress-1\n"),
+        toolUpdatedProgressFrame(3200, "progress-2\n"),
+        toolUpdatedProgressFrame(4260, "progress-3\n"),
+        ZCODE_APPSERVER_GOLDEN.terminal[0],
+        ZCODE_APPSERVER_GOLDEN.terminal[1],
+      ],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
+      onActivity,
+    });
+    expect(onActivity).toHaveBeenCalledTimes(3); // 恰一次/帧，无重复发射
+    expect(r.terminal).toEqual({ status: "success", source: "turn.terminal" }); // progress 帧不干扰终态判定
+  }, 10_000);
+
+  it("payload.delta 帧 → onActivity 不调（delta 回调已是宿主可见进展，不双发活性）", async () => {
+    const onActivity = vi.fn();
+    const deltas: string[] = [];
+    const { ch, workspacePath } = makeChannel(); // golden 序：session/event 全是 delta 帧
+    await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
+      onTextDelta: (d) => deltas.push(d),
+      onActivity,
+    });
+    expect(deltas).toEqual(["你好", "，", "任务完成"]); // delta 路径确实走了
+    expect(onActivity).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("final-frame（payload.response）→ onActivity 不调（终态帧非活性语义）", async () => {
+    const onActivity = vi.fn();
+    // dropTurnTerminal：终态仅由收尾帧宽松判定——final-frame 路径直达断言面
+    const { ch, workspacePath } = makeChannel({ dropTurnTerminal: true });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
+      onActivity,
+    });
+    expect(r.terminal).toEqual({ status: "success", source: "final-frame" });
+    expect(onActivity).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("已落定 turn 的迟到非 delta 帧 → onActivity 不调（settle 后 run 已收尾）", async () => {
+    const onActivity = vi.fn();
+    // extraSendPushes 追加在终态帧之后：turn.terminal 已落定，迟到的 progress 帧不产活性
+    const { ch, workspacePath } = makeChannel({
+      extraSendPushes: [toolUpdatedProgressFrame(9_000, "progress-late\n")],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
+      onActivity,
+    });
+    expect(r.terminal).toEqual({ status: "success", source: "turn.terminal" });
+    expect(onActivity).not.toHaveBeenCalled();
+  }, 10_000);
+});
+
+// ============================================================
+// 权威终态迟到分级日志（P-Z2 常态迟到降噪：final-frame 先落定 + turn.terminal 迟到）
+// ============================================================
+
+describe("权威终态迟到分级日志", () => {
+  // 真机实证（P-Z2）：该形态唯一可达路径是 success 终态常态迟到——每个成功任务
+  // 必经。原无条件 warn 经 SDK cli-entry stderr 兜底 → runtime [rpc:stderr] 全量
+  // console.error 链路，每个成功任务产一条零区分度 ERROR 级日志。此处分级断言
+  // （stderr 链路侧的取证在 protocol-e2e：bin 真进程 stderr 捕获）。
+  interface CapturedLog {
+    level: LogLevel;
+    component: string;
+    message: string;
+  }
+  let logs: CapturedLog[];
+
+  beforeEach(() => {
+    logs = [];
+    configureLoggerSink({
+      log(level, component, message) {
+        logs.push({ level, component, message });
+      },
+    });
+  });
+  afterEach(() => {
+    resetLoggerSinkForTests();
+  });
+
+  /** 迟到的权威 turn.terminal 帧（final-frame 先落定场景注入）。 */
+  function lateTerminalFrame(
+    status: string,
+    extra?: Record<string, unknown>
+  ): string {
+    return JSON.stringify({
+      method: "v4/telemetry/event",
+      params: { kind: "turn.terminal", status, ...extra },
+    });
+  }
+
+  function lateTerminalLogs(): CapturedLog[] {
+    return logs.filter((l) => l.message.includes("权威终态晚于落定"));
+  }
+
+  it("迟到 success（常态迟到）：零日志；lastTerminalStatus 仍入账（识破依据不受分级影响）", async () => {
+    const { ch, workspacePath } = makeChannel({
+      dropTurnTerminal: true,
+      extraSendPushes: [lateTerminalFrame("success")],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
+    expect(r.terminal).toEqual({ status: "success", source: "final-frame" }); // 落定语义不变
+    expect(r.lastTerminalStatus).toBe("success"); // 入账路径不动
+    expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪根修点）
+  }, 10_000);
+
+  it("迟到 failed：warn 保留（假成功识破防御面），文案含原样 status；lastTerminalError 照常入账", async () => {
+    const { ch, workspacePath } = makeChannel({
+      dropTurnTerminal: true,
+      extraSendPushes: [
+        lateTerminalFrame("failed", {
+          errorCode: "E_MODEL",
+          errorMessage: "boom",
+        }),
+      ],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
+    expect(r.terminal).toEqual({ status: "success", source: "final-frame" }); // 仍不改写落定
+    expect(r.lastTerminalStatus).toBe("failed");
+    expect(r.lastTerminalError).toEqual({ code: "E_MODEL", message: "boom" }); // 入账路径不动
+    const warns = lateTerminalLogs();
+    expect(warns).toHaveLength(1);
+    expect(warns[0].level).toBe("warn");
+    expect(warns[0].message).toContain('status="failed"'); // 原样 status 在案
+  }, 10_000);
+
+  it("迟到 interrupted（用户中断形态）：降 debug 不打 warn", async () => {
+    const { ch, workspacePath } = makeChannel({
+      dropTurnTerminal: true,
+      extraSendPushes: [lateTerminalFrame("interrupted")],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
+    expect(r.lastTerminalStatus).toBe("interrupted");
+    const hits = lateTerminalLogs();
+    expect(hits).toHaveLength(1);
+    expect(hits[0].level).toBe("debug");
+    expect(hits[0].message).toContain('status="interrupted"');
+  }, 10_000);
+
+  it("迟到未知 status（协议漂移防御）：保守 warn，原样 status 写入文案", async () => {
+    const { ch, workspacePath } = makeChannel({
+      dropTurnTerminal: true,
+      extraSendPushes: [lateTerminalFrame("cancelled-weird")],
+    });
+    const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
+    expect(r.lastTerminalStatus).toBe("cancelled-weird");
+    const warns = lateTerminalLogs();
+    expect(warns).toHaveLength(1);
+    expect(warns[0].level).toBe("warn");
+    expect(warns[0].message).toContain('status="cancelled-weird"');
   }, 10_000);
 });
 

@@ -101,12 +101,13 @@ export function engineProtocolMismatchError(engineVersion: number): EngineSdkErr
 }
 
 // ============================================================
-// [v1.x] conversation gate 位负向：chat 请求（run 会话形态）同步拒
+// [v1.x] conversation gate 位负向：conversation 请求（resume 续聊会话形态）同步拒
 // ============================================================
 
 /**
- * [v1.x] chat 会话形态的 gate 拒绝具名错误（chat-domain 设计 §3.2 D1-A +
- * 验收 A6：manifest 无 conversation gate 位的引擎收到 chat 请求 → 同步拒）。
+ * [v1.x] resume 会话形态（run.params.resume）的 gate 拒绝具名错误（chat-domain
+ * 设计 §3.2 D1-A + 验收 A6：manifest 无 conversation gate 位的引擎收到
+ * conversation 请求 → 同步拒；[H1] 文案随 D5 语义收窄——续聊 = resume 续聊）。
  * 文案契约对齐 core capability-gate.ts conversation 分支（错误码
  * engine_capability_unsupported + 「去掉参数 / 修 manifest / 升级引擎包」恢复指引）
  * ——W3 chat 路由切协议客户端时以本构造器替换 core 内联文案，保持两侧一致。
@@ -114,15 +115,15 @@ export function engineProtocolMismatchError(engineVersion: number): EngineSdkErr
 export function engineConversationUnsupportedError(engineId: string): EngineSdkError {
   return new EngineSdkError(
     "engine_capability_unsupported",
-    `engine '${engineId}' 不支持 conversation（capabilities.conversation = 'unsupported'，` +
-      `manifest 无 conversation gate 位——无同进程 idle 复用，message/close 交互控制面不可用）`,
+    `engine '${engineId}' 不支持 resume 续聊（capabilities.conversation = 'unsupported'，` +
+      `manifest 无 conversation gate 位）`,
     `去掉 conversation 参数（一次性任务默认形态），或修 manifest capabilities / 升级引擎包（若引擎实际支持该能力）`,
     { engineId, capability: "conversation", declared: "unsupported" },
   );
 }
 
 /**
- * [v1.x] chat 会话形态（run.params.chat / task.conversation=true）派发前的同步 gate：
+ * [v1.x] resume 会话形态（run.params.resume / task.conversation=true）派发前的同步 gate：
  * manifest conversation 位 unsupported 即抛 engineConversationUnsupportedError——
  * 进程/record 创建前同步拒（A6：run 域不受影响，仅 chat 面被拦）。
  * 判据单源：core 侧 capability-gate.assertTaskShapeSupported 的 conversation 分支

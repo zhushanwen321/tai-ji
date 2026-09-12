@@ -4,11 +4,13 @@
 //
 // 形态对齐协议 v1（stdout 独占 NDJSON；stdin 帧驱动）：
 // - FAKE_PROTOCOL_FIXTURE：fixture JSON 路径（必填）；本件 = 该 fixture 的回放引擎；
-// - 正向方法（10 个）：initialize / probe / run / cancel / interact / read /
-//   listModels / validateModel / dispose / ping——结果取 fixture 对应段；
+// - 正向方法（9 个）：initialize / probe / run / cancel / read / listModels /
+//   validateModel / dispose / ping——结果取 fixture 对应段（[H1 U5] interact 已随
+//   chat-run 统一退役）；
 // - 反向通道（8 个）：host/log / host/askUser / host/permission / host/streamDelta /
 //   host/poolResolved / host/handleReady / host/childSpawned / host/childStateChanged
-//   ——run 期间按 fixture.run.script 逐动作播放；
+//   ——run 期间按 fixture.run.script 逐动作播放（[H1 U5] 曾有的轮次相位通道已随
+//   chat-run 统一退役）；
 // - 错误帧：FAKE_PROTOCOL_ERROR=run_failed（run 回错误帧）| unknown_method（对任意
 //   未知名方法回 engine_method_unknown——不在 v1 错误码表内的码也必须原样透传，
 //   断言的是帧形态而非码表）；FAKE_PROTOCOL_VERSION 越界 → initialize 回
@@ -20,18 +22,16 @@
 // - FAKE_PID_FILE：启动时写自身 pid（SIGTERM 用例的 kill 定位锚——core 侧 pidfile
 //   归 EngineClient 所有，fake 侧不触碰，路径自建自删归测试）；
 // - FAKE_CAPABILITIES_CONVERSATION：覆写 initialize 应答的
-//   capabilities.conversation（chat gate 负向：旧形态引擎 manifest 无该位）；
+//   capabilities.conversation（resume 能力位 gate 负向：旧形态引擎 manifest 无该位）；
 // - 新 script op（env 注入 script，沿 FAKE_RUN_HANG 先例）：
 //     { op:"stderr", text }                    → 引擎 stderr 写点（engine_crashed
 //                                                的 stderr 尾 400 窗口实证）；
-//     { op:"roundLifecycle", keyedBy, key,
-//       phase, error?, anchor? }               → host/roundLifecycle 帧（三相位 ×
-//                                                runId|recordId 关联键分路）；
-//     streamDelta op 支持 action.recordId      → recordId 键 delta（续聊轮关联键）；
-// - 数据面应答回声：roundLifecycle / recordId-delta 帧的②应答到达时回发
-//   host/log("ack <label>")——core 侧断言「宿主确认收到」回执链闭合的观测锚；
-// - FAKE_RUN_LIFECYCLE=1 / FAKE_RUN_RECORD_DELTA=1 / FAKE_RUN_STDERR_HANG=1：
-//   run script 注入上述动作段（三相位 × 双键 / recordId 键 delta / stderr+hang）。
+//     streamDelta op 支持 action.recordId      → recordId 键 delta（chat 续聊轮关联键）；
+// - 数据面应答回声：recordId-delta 帧的②应答到达时回发 host/log("ack <label>")——
+//   core 侧断言「宿主确认收到」回执链闭合的观测锚；
+// - FAKE_RUN_RECORD_DELTA=1 / FAKE_RUN_STDERR_HANG=1：run script 注入上述动作段
+//   （recordId 键 delta / stderr+hang）。[H1 U5] FAKE_RUN_LIFECYCLE（轮次相位 ×
+//   双键注入段）已随通道退役删除。
 
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -119,8 +119,8 @@ async function playRunScript(runId, script) {
         });
         break;
       case "streamDelta": {
-        // [W6] action.recordId 有值 = 续聊轮 recordId 键 delta（关联键分路——
-        // D1-A：interact 发起的轮无 runId，经 handle.sessionRef 的 recordId 关联）。
+        // [W6] action.recordId 有值 = chat 续聊轮 recordId 键 delta（关联键分路——
+        // D1-A：续聊轮经 handle.sessionRef 的 recordId 关联）。
         const streamReqId = `rev-stream-${nextRequestId++}`;
         if (action.recordId !== undefined) {
           ackEchoLabels.set(streamReqId, `streamDelta recordId=${action.recordId}`);
@@ -141,24 +141,6 @@ async function playRunScript(runId, script) {
         // 后续动作可用 host/log 做到达锚）。
         process.stderr.write(action.text ?? "");
         break;
-      case "roundLifecycle": {
-        // [W6] host/roundLifecycle 帧（三相位 × runId|recordId 双关联键）。
-        // failed 相位必含 error{code,message}（isHostRoundLifecycleParams 判据）。
-        const lcReqId = `rev-lc-${nextRequestId++}`;
-        const keyed =
-          action.keyedBy === "recordId"
-            ? { recordId: action.key }
-            : { runId: action.key };
-        ackEchoLabels.set(lcReqId, `roundLifecycle ${action.key} ${action.phase}`);
-        reverseRequest(lcReqId, "host/roundLifecycle", {
-          ...keyed,
-          phase: action.phase,
-          ...(action.usage !== undefined ? { usage: action.usage } : {}),
-          ...(action.error !== undefined ? { error: action.error } : {}),
-          ...(action.anchor !== undefined ? { anchor: action.anchor } : {}),
-        });
-        break;
-      }
       case "permission":
         reverseRequest(`rev-perm-${nextRequestId++}`, "host/permission", {
           runId,
@@ -187,7 +169,7 @@ async function playRunScript(runId, script) {
 }
 
 const KNOWN_METHODS = new Set([
-  "initialize", "probe", "run", "cancel", "interact", "read",
+  "initialize", "probe", "run", "cancel", "read",
   "listModels", "validateModel", "dispose", "ping",
 ]);
 
@@ -205,9 +187,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
 
   // 帧②（core 对反向请求的应答）：askUser 最终结果到达——回放层记录后继续。
-  // [W6] 数据面（roundLifecycle / recordId-delta）应答到达 → 回发 host/log 回声
-  // （core 侧「宿主确认收到」回执链闭合的观测锚；NDJSON 单连接有序，回声先于
-  // run 应答帧到达）。
+  // [W6] 数据面（recordId-delta）应答到达 → 回发 host/log 回声（core 侧「宿主
+  // 确认收到」回执链闭合的观测锚；NDJSON 单连接有序，回声先于 run 应答帧到达）。
   if (typeof frame.id === "string") {
     const echoLabel = ackEchoLabels.get(frame.id);
     if (echoLabel !== undefined) {
@@ -278,9 +259,6 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "validateModel":
       send({ id, result: fixture.validateModel.result });
       return;
-    case "interact":
-      send({ id, result: fixture.interact.result });
-      return;
     case "read":
       send({ id, result: fixture.read.result });
       return;
@@ -325,18 +303,6 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           { op: "stderr", text: process.env.FAKE_STDERR_SAMPLE ?? "" },
           { op: "log", level: "info", component: "fake", message: "stderr-flushed" },
           { op: "hang" },
-        );
-      }
-      if (process.env.FAKE_RUN_LIFECYCLE === "1") {
-        injected.push(
-          // 三相位 × 双关联键（settled 带 usage；idle/failed 带 anchor；failed 带
-          // error{code,message}——isHostRoundLifecycleParams 的相位居留形状）。
-          { op: "roundLifecycle", keyedBy: "runId", key: "run-smoke-1", phase: "settled", usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
-          { op: "roundLifecycle", keyedBy: "runId", key: "run-smoke-1", phase: "idle", anchor: { sessionRef: { sessionId: "sess-fixture" }, poolKey: "shared" } },
-          { op: "roundLifecycle", keyedBy: "runId", key: "run-smoke-1", phase: "failed", error: { code: "engine_run_failed", message: "round failed (scripted)", recovery: "Inspect the task and retry." } },
-          { op: "roundLifecycle", keyedBy: "recordId", key: "rec-chat-1", phase: "settled" },
-          { op: "roundLifecycle", keyedBy: "recordId", key: "rec-chat-1", phase: "idle", anchor: { sessionRef: { sessionId: "sess-chat-1" }, poolKey: "shared" } },
-          { op: "roundLifecycle", keyedBy: "recordId", key: "rec-chat-1", phase: "failed", error: { code: "engine_run_failed", message: "chat round failed (scripted)", recovery: "Inspect the task and retry." } },
         );
       }
       if (process.env.FAKE_RUN_RECORD_DELTA === "1") {

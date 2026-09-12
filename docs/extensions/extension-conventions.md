@@ -32,8 +32,9 @@
 - 同一进程可能有多个 session。模块级 `let` 变量会被所有 session 共享，必须用闭包或 `session_start` 重建
 - 扩展不能依赖 fs 之外的 Node.js 原生模块（网络、child_process 等由 Pi 核心控制）。已知例外：
   - `@zhushanwen/pi-subagent-workflow` 走单执行链——SubprocessAgentRunner 委托 SubagentService.executeAndAwait（`executeAndAwait` → `runSpawn` → `spawn("pi", ["--mode","json"])` 子进程，进程隔离），`session-runner.runSpawn` 是**唯一**的 Pi 子进程 spawn 点（ADR-030 决策 2）
+  - `@zhushanwen/pi-base-tool-enhance` 的 bash 后台任务 spawn：`detached: true` 子进程 + per-session registry 目录 + 模块级轮询器单例判活（任务生命周期绑定 pi 进程而非 session，[base-tool-enhance.md](../design/base-tool-enhance.md) D7/D17）
   - `execFileSync("git", ...)` 等只读子进程调用可使用 child_process
-  - 引擎抽象（[subagent-engine-abstraction.md](../architecture/subagent-engine-abstraction.md)，2026-08-25）新增的使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内
+  - 引擎抽象（[subagent-engine-abstraction.md](../architecture/subagent-engine-abstraction.md)，2026-08-25）曾新增使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内。（终态更新：zcode 引擎已迁独立包 `packages/zcode-subagent-cli`，只走 app-server RPC 常驻子进程、不走 CLI spawn；zcode reader 的 `node:sqlite` 直读已随读链外移迁入引擎进程）
 - 旧包 `pi-workflow`/`pi-subagents` 的双 spawn 路径已废弃（见 [pi-ext-030](./adr/pi-ext-030-subagents-workflow-merge.md)）；旧包 `pi-subagents` 曾用的进程内 `createAgentSession()` 路径已回退为 spawn（进程隔离优先，见 pi-ext-030 决策记录）
 
 ## 资源自包含
@@ -54,7 +55,7 @@
 ## Session 隔离（进程内层面）
 
 - 状态必须存储在 `session_start` 重建的闭包变量或 `ctx.sessionManager` entries 中
-- `todo` 扩展的 `let todos` 是已知的违反——当前单 session 使用不会有问题，但多 session 时需要重构为闭包内状态
+- `todo` 扩展历史上的模块级 `let todos` 反例已重构为工厂闭包状态（`createTodoSessionState()` + session_start 回放最后一条 todo toolResult 重建），不再是已知违反
 
 > 注意：这是 **extension 进程内**的 session 隔离，与 xyz-agent 前端的 per-session Map 分区（AGENTS.md §7）是不同层面。前者防 extension 模块级变量被多 session 共享，后者防 Vue 组件状态串台。
 
@@ -125,7 +126,7 @@ streamSink: ctx.mode === "rpc"
 - 新增/修改 SDK 调用必须有契约测试覆盖（模板：`extensions/universal/subagent-workflow/src/execution/__tests__/sdk-contract.test.ts`）
 - `registerTool` 的 schema 必填字段在所有执行模式下都必须真的必填；条件必填用 Optional + 运行时校验，避免 schema 与描述矛盾
 
-> 本项目已将 `@earendil-works/pi-coding-agent@0.84.1` 作为根 devDependency 安装（真实 SDK 类型），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
+> 本项目已将 `@earendil-works/pi-coding-agent` 作为根 devDependency 安装（真实 SDK 类型，当前 0.84.4——版本不在文档写死，以根 `package.json` 为准并由 C-build-07 守卫 `scripts/check-pi-sync.mjs` 跟随），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
 
 ## Event handler 消息注入
 
@@ -158,7 +159,7 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 
 ## 模型引用解析 [MANDATORY]
 
-扩展域内任何「字符串 → 模型身份」的转换（用户输入、配置、workflow 参数里的模型名），只允许经 `shared/model-ref.ts` 的 `assertCanonicalModelRef` 全等裁决（subagent-workflow 内路径；其余扩展复用该模块或同等全等裁决实现）——**禁止裸串拼 `--model`、禁止本地 find/includes 式模糊匹配**。
+扩展域内任何「字符串 → 模型身份」的转换（用户输入、配置、workflow 参数里的模型名），只允许经 `assertCanonicalModelRef` 全等裁决（模块路径 `packages/subagent-core/src/shared/model-ref.ts`，已随执行域从 subagent-workflow 抽包迁移；其余扩展复用该模块或同等全等裁决实现）——**禁止裸串拼 `--model`、禁止本地 find/includes 式模糊匹配**。
 
 - **原因**：pi CLI 的 `--model` 是 pattern 非精确 ID（toLowerCase 相等 → canonical 双命中判歧义作废 → contains 模糊 → localeCompare 取最大，PS-01；机器登记 [docs/pi-semantics.json](../pi-semantics.json)）——「扩展层校验通过」不代表「子进程按此名执行」，models-store 刷新引入大小写家族条目后被静默换模 429（2026-08-27 事故 A）
 - **守卫**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
@@ -167,6 +168,8 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 ## 扩展安装红线 [强制]
 
 **所有扩展必须通过 npm 包（`pi install`）加载，禁止通过本地目录（`~/.pi/agent/extensions/`）加载，dev 环境测试除外。**
+
+> **builtin 打包内置例外**：随 xyz-agent 桌面分发的 `@zhushanwen/pi-*` 包经 esbuild bundle staged 到 `apps/electron/resources/extensions/` 随应用打包，由 runtime 经 `XYZ_EXTENSION_PATHS` 注入加载，**不走 npm install**——数量与分组以 `packages/shared/src/mandatory-extensions.json` 为 SSOT。
 
 | 方式 | 场景 | 是否允许 |
 |------|------|----------|

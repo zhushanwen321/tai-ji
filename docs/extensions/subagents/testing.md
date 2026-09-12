@@ -12,7 +12,7 @@ subagent-workflow 有三层测试，覆盖度逐层提升，执行成本也逐�
 |----|---------|---------|--------|------|
 | **L1 字符串断言** | `worker-script-builder.test.ts` | 生成的 worker 源码**包含**特定子串（函数声明、消息协议字面量） | 最低——只读字符串，从不执行 | 极低（2ms） |
 | **L2 Worker 运行时** | `worker-script-builder-runtime.test.ts` | 生成的 worker 源码在**真实 `node:worker_threads` Worker** 里执行正确（return/throw/agent/abort/workflow 链路） | 中——真实 Worker thread，mock 主线程回发消息 | 低（~100ms） |
-| **L3 Workflow E2E** | `workflows-e2e.test.ts` | 4 个内置 workflow 通过**完整编排链路**（registry→lint→runWorkflow→真实 Worker→脚本→agent/parallel 编排→outcome 聚合） | 高——唯一 mock 的是 LLM 本身（AgentRunner） | 中（~2s） |
+| **L3 Workflow E2E** | `workflows-e2e.test.ts` | 5 个内置 workflow 通过**完整编排链路**（registry→lint→runWorkflow→真实 Worker→脚本→agent/parallel 编排→outcome 聚合） | 高——唯一 mock 的是 LLM 本身（AgentRunner） | 中（~2s） |
 
 ### 为什么需要三层
 
@@ -25,7 +25,7 @@ subagent-workflow 有三层测试，覆盖度逐层提升，执行成本也逐�
 
 ## L1：字符串断言（快速守护）
 
-文件：`src/orchestration/__tests__/worker-script-builder.test.ts`
+文件：`packages/subagent-core/src/orchestration/__tests__/worker-script-builder.test.ts`
 
 **用途**：快速验证生成的 worker 源码结构——注入了哪些全局函数、消息协议字面量、postMessage 防御包装。
 
@@ -40,7 +40,7 @@ expect(script).toMatch(/_safePost[\s\S]*?try \{ _parentPort\.postMessage\(msg\)/
 
 ## L2：Worker 运行时执行（核心回归防线）
 
-文件：`src/orchestration/__tests__/worker-script-builder-runtime.test.ts`
+文件：`packages/subagent-core/src/orchestration/__tests__/worker-script-builder-runtime.test.ts`
 
 **用途**：起真实的 `node:worker_threads.Worker`，执行 `buildWorkerScript(userScript)` 的产物，验证生成的代码在真实 Worker 线程里行为正确。
 
@@ -83,9 +83,9 @@ new Worker(buildWorkerScript(   →   执行注入的 infra + 用户脚本
 
 ## L3：Workflow E2E（完整编排链路）
 
-文件：`src/orchestration/__tests__/workflows-e2e.test.ts`
+文件：`extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`
 
-**用途**：验证 4 个内置 workflow（parallel/chain/map-reduce/scatter-gather）通过真实的 `runAndWait()` 编排链路执行成功。
+**用途**：验证 5 个内置 workflow（parallel/chain/map-reduce/scatter-gather/review-fix-loop）通过真实的 `runAndWait()` 编排链路执行成功。
 
 ### 设计：真实一切，除 LLM
 
@@ -96,7 +96,7 @@ new Worker(buildWorkerScript(   →   执行注入的 infra + 用户脚本
 4. 脚本内 `agent()`/`parallel()` → worker `postMessage(agent-call)` → 主线程 `deps.runner.run()`
 5. 脚本聚合 → `return outcome` → `runAndWait` 返回 `WorkflowRunResult`
 
-**唯一 mock：`deps.runner`（AgentRunner 接口）**。真实 runner 会 `spawn("pi", ["--mode","rpc"])` 子进程调 LLM，这在 CI 里不可控（需 API key + 模型 provider）。mock runner 根据 `opts.schema` 用 `generateFromSchema()` 生成符合 schema 的占位数据。
+**唯一 mock：`deps.runner`（AgentRunner 接口）**。真实 runner 会经引擎 CLI 进程（pi-subagent-cli）按协议执行 run——引擎再 spawn pi rpc 任务子进程调 LLM（两层进程嵌套），这在 CI 里不可控（需 API key + 模型 provider）。mock runner 根据 `opts.schema` 用 `generateFromSchema()` 生成符合 schema 的占位数据。
 
 ```
 真实组件                          mock 组件
@@ -117,7 +117,7 @@ runAndWait → runWorkflow 链路
 
 ### 为什么 registry 要绕过
 
-`WorkflowScriptRegistryImpl` 扫描固定约定目录（`.pi/workflows/`、`~/.pi/agent/workflows/`），无法指向 `extensions/universal/subagent-workflow/workflows/`。测试用 `loadWorkflowsFromDir()` 直接读 `.js` 文件 + 手动构造 `WorkflowScript` 对象，包装为满足 `WorkflowScriptRegistry` 接口的自定义 registry。**不修改源码。**
+`WorkflowScriptRegistryImpl` 扫描固定约定目录（`.pi/workflows/`、`~/.pi/agent/workflows/`），无法指向 `packages/subagent-core/workflows/`。测试用 `loadWorkflowsFromDir()` 直接读 `.js` 文件 + 手动构造 `WorkflowScript` 对象，包装为满足 `WorkflowScriptRegistry` 接口的自定义 registry。**不修改源码。**
 
 ### mock runner 的 schema 驱动数据生成
 
@@ -140,11 +140,12 @@ runAndWait → runWorkflow 链路
 ## 运行命令
 
 ```bash
-# 单独跑三层测试
-cd extensions/universal/subagent-workflow
+# 单独跑三层测试（L1/L2 在 subagent-core，L3 在 shell 包）
+cd packages/subagent-core
 npx vitest run src/orchestration/__tests__/worker-script-builder.test.ts           # L1
 npx vitest run src/orchestration/__tests__/worker-script-builder-runtime.test.ts   # L2
-npx vitest run src/orchestration/__tests__/workflows-e2e.test.ts                   # L3
+cd extensions/universal/subagent-workflow
+npx vitest run src/__tests__/workflows-e2e.test.ts                                  # L3
 
 # 全量
 pnpm test

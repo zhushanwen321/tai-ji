@@ -110,9 +110,6 @@ function fakeEngine(id: string, models: Array<{ id: string; name?: string }>): E
 		run: async () => {
 			throw new Error("not used in this test");
 		},
-		interact: async () => {
-			throw new Error("not used in this test");
-		},
 		read: async () => ({ engineId: id, turns: [], source: "outcome-only" }),
 		// 每次调用返回新数组实例（模拟 registry 每 turn 现值）——渲染必须与实例无关
 		listModels: () => models.map((m) => ({ ...m })),

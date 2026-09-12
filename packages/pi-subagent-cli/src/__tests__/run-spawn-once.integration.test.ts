@@ -10,7 +10,9 @@
 //   - 失败退出（exit 3）→ success=false + failureKind 分诊；
 //   - message_end stopReason=aborted → record.lastError → success=false（stale 分诊）；
 //   - abort signal → SIGTERM → 128+signal 折算退出码；
-//   - chatMode：agent_end 不 kill、agent_settled resolve（exit 0，进程保活）；
+//   - spawn 失败（relay node 不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
+//   - chatMode（[H1 U3] run 派发形态）：agent_end 不 kill、agent_settled resolve
+//     （exit 0）+ 杀链收割（每轮一进程，续聊 = 新 run + resume）；
 //   - model 缺失 → prepare 期抛错（不 spawn）。
 //
 // fake pi 脚本落 mkdtemp 临时目录；process.argv[1] 临时指向它（getPiInvocation
@@ -37,6 +39,8 @@ import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
 /** fake pi 脚本：stdin JSONL 命令 → stdout JSONL 事件（pi rpc mode 行为模拟）。 */
 const FAKE_PI_SCRIPT = `
 import readline from "node:readline";
+import fs from "node:fs";
+import { join } from "node:path";
 const mode = process.env.FAKE_PI_MODE ?? "success";
 const send = (obj) => { process.stdout.write(JSON.stringify(obj) + "\\n"); };
 process.stderr.write("fake-pi stderr boot\\n");
@@ -56,6 +60,11 @@ rl.on("line", (line) => {
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.type === "extension_ui_response") return;
   if (msg.type === "get_state") {
+    if (mode === "id-only") {
+      // V2 契约形态：应答只带 sessionId（缺 sessionFile）→ 握手视同未应答（走满 3 轮）
+      send({ type: "response", command: "get_state", success: true, id: msg.id, data: { sessionId: SESSION_ID } });
+      return;
+    }
     if (mode === "header") {
       const file = sessionDirArg + "/2026-09-10T01-02-03-000Z_hdr-sess.jsonl";
       send({ type: "response", command: "get_state", success: true, id: msg.id, data: { sessionFile: file, sessionId: "hdr-sess" } });
@@ -67,6 +76,17 @@ rl.on("line", (line) => {
   if (msg.type !== "prompt") return;
   if (mode === "exit-3") { process.exit(3); return; }
   if (mode === "hang") { setInterval(() => {}, 1000); return; }
+  if (mode === "id-only") {
+    // 落一个 <ts>_<sessionId>.jsonl（LC-4 后缀反查目标）
+    fs.writeFileSync(
+      join(sessionDirArg, "20260910T010101_" + SESSION_ID + ".jsonl"),
+      JSON.stringify({ type: "message", id: "e1", parentId: null, timestamp: "2026-09-10T01:01:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "另一个 session 的历史内容" }] } }) + "\\n",
+    );
+    send({ type: "message_end", message: { stopReason: "stop" } });
+    send({ type: "agent_end", willRetry: false, reason: "end_turn" });
+    return;
+  }
   if (mode === "stop-aborted") {
     send({ type: "message_end", message: { stopReason: "aborted", errorMessage: "aborted by user" } });
     send({ type: "agent_end", willRetry: false, reason: "aborted" });
@@ -86,7 +106,7 @@ rl.on("line", (line) => {
   send({ type: "message_end", message: { usage: { input: 11, output: 7, cacheRead: 2, cacheWrite: 3, cost: { total: 0.42 } }, stopReason: "stop" } });
   send({ type: "agent_end", willRetry: false, reason: "end_turn" });
   send({ type: "agent_settled" });
-  // 一次性模式：宿主 agent_end → SIGTERM 收割；chatMode：settled resolve 后进程保活
+  // 一次性模式：宿主 agent_end → SIGTERM 收割；chatMode：settled resolve 后杀链收割（U3 每轮一进程）
 });
 `;
 
@@ -257,6 +277,28 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
+  it("V2 契约（M1 打通的组合）：get_state 只回 sessionId → 3 轮耗尽带 sessionId → close 后 sessionFile 经 LC-4 落位", async () => {
+    const h = await makeHarness("id-only");
+    try {
+      const result: SpawnRunResult = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      const lc4File = join(h.sessionDir, "20260910T010101_fake-sess-1.jsonl");
+
+      expect(fs.existsSync(lc4File)).toBe(true);
+      expect(result.success).toBe(true);
+      // 握手三轮应答都缺 sessionFile（S2 契约：视同未应答 → 3 轮耗尽 resolve 已收集字段）
+      // → 身份只有 sessionId；sessionFile 只可能来自 close 期的 LC-4 后缀反查
+      expect(result.sessionId).toBe("fake-sess-1");
+      expect(result.sessionFile).toBe(lc4File);
+      // handleReady 恰一次且携带 sessionFile：spawn 期应答无 sessionFile（不发通知），
+      // 故这一条只能由 close 期的 LC-4 落位产生 ——「只在 close 后发一次」
+      expect(h.handleReady).toEqual([
+        { sessionRef: { sessionId: "fake-sess-1", sessionFile: lc4File }, poolKey: "shared" },
+      ]);
+    } finally {
+      restoreHarness(h);
+    }
+  }, 20_000);
+
   it("失败退出（exit 3）→ success=false + 结构化 error + unknown 分诊", async () => {
     const h = await makeHarness("exit-3");
     try {
@@ -301,7 +343,37 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("chatMode：agent_end 不 kill；agent_settled resolve（exit 0）且进程保活", async () => {
+  it("spawn 失败（relay node 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）", async () => {
+    const h = await makeHarness("success");
+    // relay 三键激活 → getPiInvocation 分支 0：command = RELAY_NODE（真实不存在的
+    // 绝对路径）。不经任何 mock——Node spawn 的 'error' 事件（ENOENT）+ 迟到
+    // close(code=-2) 全真实时序，锁「从未启动的子进程不得判成功」。
+    const ghostNode = join(h.rootDir, "nonexistent-node-bin");
+    process.env.XYZ_SUBAGENT_RELAY_SOCKET = join(h.rootDir, "relay.sock");
+    process.env.XYZ_SUBAGENT_RELAY_NODE = ghostNode;
+    process.env.XYZ_SUBAGENT_RELAY_SCRIPT = join(h.rootDir, "relay.mjs");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+
+      expect(result.success).toBe(false); // 从未启动 → 失败，不得 success=true 空内容
+      expect(result.error).toContain("pi child error:");
+      expect(result.error).toContain("ENOENT"); // 原始 errno code 可诊断
+      expect(result.error).toContain(ghostNode); // 失败的命令路径可诊断
+      expect(result.error).toContain("127"); // 失败折算退出码
+      expect(result.failureKind).toBe("unknown"); // 不命中 stale 词表（可重试口径）
+      expect(result.content).toBe("");
+      expect(result.turns).toBe(0);
+      // 子进程从未运行：无 pid 可上报（reportChildSpawned 的 pid 缺失守卫）
+      expect(h.childSpawned).toHaveLength(0);
+    } finally {
+      delete process.env.XYZ_SUBAGENT_RELAY_SOCKET;
+      delete process.env.XYZ_SUBAGENT_RELAY_NODE;
+      delete process.env.XYZ_SUBAGENT_RELAY_SCRIPT;
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("chatMode（[H1 U3] run 派发形态）：agent_end 不 kill；agent_settled resolve（exit 0）并收割子进程", async () => {
     const h = await makeHarness("success");
     let roundEnded = 0;
     let settled = 0;
@@ -323,15 +395,12 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       // agent_settled 消费面按轮重置 turnCount（SP-9：chat 续聊轮独立预算）
       expect(result.turns).toBe(0);
 
-      // 进程保活：agent_settled resolve 后未收割（chat-session 长驻语义的 runner 半边）
-      const child = getActiveChild("rec-int-1");
-      expect(child).toBeDefined();
-      expect(child!.killed).toBe(false);
-      expect(h.stateChanges.map((s) => s.state)).toEqual(["running"]);
-
-      // 收尾清理（fake pi 进程）
-      child!.kill("SIGTERM");
-      await waitFor(() => child!.exitCode !== null || child!.signalCode !== null);
+      // [H1 U3] agent_settled resolve 后杀链收割（每轮一进程——续聊 = 新 run +
+      // resume 锚点；不再保活）：active-children 注销 + exited 镜像上报（killed）
+      await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
+      const exited = h.stateChanges.find((s) => s.state === "exited")!;
+      expect(exited.killed).toBe(true);
+      expect(getActiveChild("rec-int-1")).toBeUndefined();
     } finally {
       restoreHarness(h);
     }

@@ -255,9 +255,6 @@ if (MODE === "hang") {
           send({ id: runFrameId, result: runOutcomeAborted() });
         }
         break;
-      case "interact":
-        send({ id, result: { ok: true, delivered: true } });
-        break;
       case "read":
         send({
           id,

@@ -150,7 +150,7 @@ export default {
     loadFailed: 'Load failed ({error})',
     retry: 'Retry',
     empty: 'No background tasks',
-    emptyHint: 'Ask the main agent to call the @subagent tool to start a background task; running tasks appear here',
+    emptyHint: "Ask the main agent to call the {'@'}subagent tool to start a background task; running tasks appear here",
     cancel: 'Cancel',
     cancelConfirm: 'Confirm cancel?',
     turnsUnit: 'turns',

@@ -13,7 +13,8 @@
  * 本测通过「kind 全集三态互斥 + 无 bgNotify/gui 渲染」抓出。
  *
  * 为什么 mock virtua/vue：happy-dom 无真实布局/ResizeObserver，真 <Virtualizer> 的
- * viewportSize=0 → 不窗口化渲染任何项（MessageStream-bash.test.ts T10/gap3 因同因 skip）。
+ * viewportSize=0 → 不窗口化渲染任何项（MessageStream-bash.test.ts T10/gap3 曾因同因
+ * skip，已由该文件内 virtua mock 恢复）。
  * 本测把 Virtualizer mock 成全量渲染 scoped slot 的 stub，让模板 v-if/v-else-if/v-else
  * 链对每项真实执行——这正是「查表分发」的断言对象（组件选中逻辑在模板，不在 virta）。
  * [U0] 起另消费 :keep-mounted 并复刻越界直传 slot 语义（见下方 [U0] 注释）。

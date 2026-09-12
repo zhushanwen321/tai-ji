@@ -12,12 +12,13 @@
 //   3. 空 .finalized 兼容：旧格式空文件 → disconnected → 可重生。
 //   4. guard 一致性：fork-from 与 message 在 user-close 上行为一致地拒绝，各有文案断言。
 //   外加：parent-shutdown 同样可重生、gc 完成记录维持 fork-from 指引不重生、
-//        陈旧 .alive（软超时外）不拦截重生、resurrectClosed 单元语义、close action 维持严格。
+//        本进程自有 .alive 声明（self-pid 排除，U1 后判据）不拦截重生、resurrectClosed
+//        单元语义、close action 维持严格。
 //
 // mock 手法（[W3 改写]）：registerFakePiEngine 协议替身 + logger；record-store /
-// finalized-marker / alive-store / tombstone-store 走真实实现（fixture 用临时目录写真实
+// state-marker / alive-store 走真实实现（fixture 用临时目录写真实
 // .jsonl + sidecar）。执行链观测点从 runAndFinalize 边界捕获（rafCapture/drainChains）
-// 换成 fake.runs 捕获（协议 engine.run 的 task/ctx——冷路径 resume 锚点在 ctx.chat.resume）。
+// 换成 fake.runs 捕获（协议 engine.run 的 task/ctx——resume 锚点在 ctx.resume.resume，[H1 U6] 键切换后唯一会话形态键）。
 //
 // 注意：本测试进程可能运行在 pi subagent 环境（PI_SUBAGENT_* env 被继承会污染
 // rootSessionId 基线与 rootCwd 编码），beforeEach/afterEach 清理同 IDENTITY_ENV_KEYS；
@@ -38,7 +39,7 @@ import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagen
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
 import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/alive-store.ts";
 import { resurrectClosed } from "@zhushanwen/subagent-core/execution/execution-record.ts";
-import { writeFinalized } from "@zhushanwen/subagent-core/execution/finalized-marker.ts";
+import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/state-marker.ts";
 import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
@@ -51,6 +52,12 @@ const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_ROOT_CWD",
   "PI_SUBAGENT_FORK_DEPTH",
 ] as const;
+
+/** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
+ *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」
+ *  保守判活（self-pid 排除后不能再以本测试进程 pid 模拟异进程实例，同 subagent-core
+ *  cold-lookup.test.ts FOREIGN_LIVE_PID 手法）。 */
+const FOREIGN_LIVE_PID = 1;
 
 function makePi() {
   return {
@@ -124,6 +131,7 @@ function writeSessionJsonl(
   return file;
 }
 
+/** 存量旧名 .cancelled sidecar fixture（L4 后生产只写 .state，此处覆盖兼容读路径）。 */
 function writeTombstone(sessionFile: string, id: string): void {
   fs.writeFileSync(
     `${sessionFile}.cancelled`,
@@ -163,10 +171,9 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
     pi = makePi();
     service.initSession({ pi, sessionId: "root-session-cur" });
 
-    // 协议替身引擎：重生记录的引擎侧活会话不存在（interact 拒绝 not_resumable → 冷路径
-    // resume run）——与本文件全部执行链场景一致。
+    // 协议替身引擎（[H1 U6] 旧 interact 冷路径拒绝注入随 interact 面退役——续聊恒
+    // 派发新 run + resume 锚点，与本文件全部执行链场景一致）。
     fake = registerFakePiEngine();
-    fake.interactMessageResult = { ok: false, code: "engine_session_not_resumable", message: "no live session" };
   });
 
   afterEach(async () => {
@@ -185,7 +192,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   describe("happy path", () => {
     it("closed(disconnected) 记录 message → 内部状态翻 running + resume 触达 + 原 sessionFile 作为续写目标", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-happy", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "disconnected");
+      writeFinalizedState(file, "disconnected");
       expect(service.queries.findRecord("sa-d-happy")).toBeUndefined(); // 前置：内存无
 
       const result = await messageHandler(service, { subagentId: "sa-d-happy", text: "continue the work" });
@@ -205,7 +212,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(snap?.chatMode).toBe(true);
 
       // resume 触达（[W3 观测点改写] 原 runAndFinalize 边界捕获 → 协议 engine.run 捕获）：
-      // 原 sessionFile 作为续写锚点传递（ctx.chat.resume.sessionRef.sessionFile = --session
+      // 原 sessionFile 作为续写锚点传递（ctx.resume.resume.sessionRef.sessionFile = --session
       // 续写目标的协议承载位）；model 从 record identity 复原（fixture 的 model_change
       // entry → ctxModel 解析兜底）。thinkingLevel 锚点随协议化归引擎侧覆盖解析
       //（resume.sessionRef 只承载 sessionFile——引擎从 session 历史的 thinking_level_change
@@ -213,7 +220,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       await vi.waitFor(() => expect(fake.runs.length).toBe(1));
       expect(fake.runs[0].ctx.taskId).toBe("sa-d-happy");
       expect(fake.runs[0].task.prompt).toBe("continue the work");
-      expect(fake.runs[0].ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(file);
+      expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
       expect(fake.runs[0].ctx.ctxModel).toMatchObject({ provider: "p", id: "m-1" });
 
       // subagent-record entry 落盘（register/reportRecordTransition）→ live/reload 视图恢复。
@@ -229,12 +236,12 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     it("closed(parent-shutdown) 同样可重生（可重连集第二员）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-shut", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "parent-shutdown");
+      writeFinalizedState(file, "parent-shutdown");
 
       const result = await messageHandler(service, { subagentId: "sa-d-shut", text: "pick up where left" });
       expect(result.response.delivered).toBe(true);
       await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-      expect(fake.runs[0].ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(file);
+      expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
     it("完成后第二条完成通知 dedup key 含 round（round 从 0 重建 → key=id:1），不与终态通知互吞", async () => {
@@ -246,7 +253,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       // 形态下轮次 settle 不经 finalize 分流（live 态派生，entry 位不写）——resumable 断言
       // 无对应行为，随原观测点一并废弃。
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-notify", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "disconnected");
+      writeFinalizedState(file, "disconnected");
 
       await messageHandler(service, { subagentId: "sa-d-notify", text: "go" });
       // 收链：本轮 detached 协议 run 在用例内 settle（防跨用例竞态）
@@ -283,7 +290,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     it("user-close → 保持「主动关闭」拒绝文案（close 正式语义完整保留）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-uclose", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "user-close");
+      writeFinalizedState(file, "user-close");
 
       await expect(messageHandler(service, { subagentId: "sa-d-uclose", text: "hi" })).rejects.toThrow(
         /deliberately closed by user \(closedReason: user-close\)[\s\S]*nothing can reattach/,
@@ -298,7 +305,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
         rootSessionId: "root-session-cur",
         worktree: true,
       });
-      writeFinalized(file, "disconnected");
+      writeFinalizedState(file, "disconnected");
 
       const err = await messageHandler(service, { subagentId: "sa-d-wt", text: "hi" }).catch((e: unknown) => e);
       const msg = (err as Error).message;
@@ -308,10 +315,12 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs.length).toBe(0);
     });
 
-    it("异进程活实例（.alive + 存活 pid + 未超软超时）→ 拒绝（防双写 jsonl）", async () => {
+    it("异进程活实例（.alive + 存活 pid）→ 拒绝（防双写 jsonl）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-alive", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "disconnected");
-      writeAliveMarker(file, process.pid, Date.now()); // 本测试进程 pid 必然存活
+      writeFinalizedState(file, "disconnected");
+      // [U1/A4] 探针判据 = pid 单判据 + self-pid 排除（软超时已退役）——「异进程」模拟
+      // 不能再用本测试进程 pid（会被 self-pid 排除放行），改恒活外部 pid 1。
+      writeAliveMarker(file, FOREIGN_LIVE_PID, Date.now());
       expect(findForeignLiveInstance(file)).toBeDefined(); // 探针前置自检
 
       await expect(messageHandler(service, { subagentId: "sa-d-alive", text: "hi" })).rejects.toThrow(
@@ -321,11 +330,14 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs.length).toBe(0);
     });
 
-    it("陈旧 .alive（超过软超时）不再拦截 → 可重生（软超时判据 e2e）", async () => {
+    it("本进程自有 .alive 声明（marker.pid = 本进程）不拦截本进程 → 可重生（self-pid 排除判据 e2e）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-stale", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "disconnected");
-      // pid 本身还活着（本进程），但 startedAt 已超 1h 软超时 → marker 视为陈旧
-      writeAliveMarker(file, process.pid, Date.now() - 2 * 3_600_000);
+      writeFinalizedState(file, "disconnected");
+      // [U1/D3b] 软超时判据已退役，此前「超软超时放行」用例的真实放行原因已变——
+      // 现行判据下 marker.pid === process.pid 被视同本进程自有声明（无论 startedAt
+      // 新旧），探针前置自检确认放行由 self-pid 排除给出。
+      writeAliveMarker(file, process.pid, Date.now());
+      expect(findForeignLiveInstance(file)).toBeUndefined(); // 探针前置自检：self-pid 排除放行
 
       const result = await messageHandler(service, { subagentId: "sa-d-stale", text: "revive" });
       expect(result.response.delivered).toBe(true);
@@ -334,7 +346,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     it("gc 完成记录（自然 done）→ 维持 fork-from 指引、不透明重生", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-gc", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "gc");
+      writeFinalizedState(file, "gc");
 
       await expect(messageHandler(service, { subagentId: "sa-d-gc", text: "follow up" })).rejects.toThrow(
         /reconnectable[\s\S]*fork-from/,
@@ -350,7 +362,8 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
   it("空 .finalized（v8.5 前旧格式）→ 磁盘重建兜底 disconnected → 透明重生成功", async () => {
     const file = writeSessionJsonl(sessionsDir, { id: "sa-d-legacy", rootSessionId: "root-session-cur" });
-    writeFinalized(file); // 无 reason 参数 → 空内容文件
+    // 存量旧格式 fixture（L4 后生产只写 .state，旧名靠 fs 直写仿真）
+    fs.writeFileSync(`${file}.finalized`, "", "utf-8");
 
     // A 档兼容读：磁盘层 closedReason=disconnected
     const diskRec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-d-legacy");
@@ -361,7 +374,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
     const result = await messageHandler(service, { subagentId: "sa-d-legacy", text: "legacy continues" });
     expect(result.response.delivered).toBe(true);
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-    expect(fake.runs[0].ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(file);
+    expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
   });
 
   // ============================================================
@@ -371,7 +384,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   describe("guard 一致性（fork-from × message 在 user-close 上）", () => {
     it("fork-from 对 user-close 源拒绝（与 message 的 X 拒绝对齐，close 语义无旁路）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-fkclose", rootSessionId: "old-root" });
-      writeFinalized(file, "user-close");
+      writeFinalizedState(file, "user-close");
 
       await expect(forkFromHandler(service, { sourceSubagentId: "sa-d-fkclose" })).rejects.toThrow(
         /deliberately closed by user \(closedReason: user-close\)[\s\S]*cannot be resumed or branched from/,
@@ -391,7 +404,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     it("message 对同一 user-close 记录拒绝——两边各有独立断言（文案分叉但语义一致：都拒）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-both", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "user-close");
+      writeFinalizedState(file, "user-close");
 
       // message 侧：X 分支专属文案
       await expect(messageHandler(service, { subagentId: "sa-d-both", text: "hi" })).rejects.toThrow(
@@ -412,7 +425,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   describe("回归边界", () => {
     it("close action 对断联类 ended 记录维持严格拒绝（默认无放宽）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-closestrict", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "disconnected");
+      writeFinalizedState(file, "disconnected");
 
       await expect(closeHandler(service, { subagentId: "sa-d-closestrict" })).rejects.toThrow(
         /not found or not owned/,

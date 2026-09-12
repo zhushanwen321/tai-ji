@@ -240,7 +240,7 @@ export class FileRunStore implements RunStore {
     // mkdir recursive 每次 save 前执行：幂等零成本（目录已存在时仅一次 stat），
     // 且免「构造时预建」——构造时建会在宿主尚未 configureCore 的窗口抛错。
     await mkdir(this.stateDir(), { recursive: true });
-    // toRunSnapshot 补 v 字段（D4 裁决②写入侧）+ strip live 落盘
+    // toRunSnapshot 补 v 字段（D4 裁决②写入侧）；live strip 已随 [H2 W3] live 字段删除退役
     const line = JSON.stringify(toRunSnapshot(run));
     await appendFile(this.stateFilePath(run.runId), line + "\n", "utf8");
     if (isTerminal) {

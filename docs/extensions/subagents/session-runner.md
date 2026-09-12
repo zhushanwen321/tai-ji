@@ -1,5 +1,7 @@
 # SessionRunner 深化
 
+> **[HISTORICAL] 退役声明（2026-09-12，引擎协议化）**：`session-runner.ts` 已随引擎协议化删除，其职责拆入 core 引擎子域与 `packages/pi-subagent-cli`（spawn-run-pump / spawn-event-translator / output-collector / turn-limiter）。本篇描述的进程内架构、steer 重试（MAX_SCHEMA_STEERS 已删，现状 = workflow 模式 `PI_WORKFLOW_SCHEMA` env 注入 + structured-output 扩展唯一校验）、旧 H1/H2 收口编号均为历史记录。**现行执行链**（两层进程嵌套）读 [subagent-agent-end-recovery-replay.md §1.2](../../design/subagent-agent-end-recovery-replay.md) 与 [architecture.md](./architecture.md)。§5 的 sessionDir 布局结论近似成立，但决定机制已变：权威 = 宿主 `getSubagentSessionDir` per-run 经 `ctx.sessionDir` 注入（`pi-engine.ts:78-85`），引擎侧推导仅为缺省 fallback。
+
 > SessionRunner 是 sync/background 共用的 session 执行核心，零 mode 感知。
 > 本文细化 `run()` 的 SDK 事件处理（内联，原 EventBridge）、session 组装、collectResult 字段来源、失败路径与资源清理。
 > 执行流总览见 [execution-flow.md](./execution-flow.md)，状态对象见 [data-model.md](./data-model.md)。

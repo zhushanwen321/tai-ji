@@ -3,15 +3,13 @@
 // SP-5 one-shot upgrade：非 chatMode active record 收到 message 时自动升级 chatMode。
 //
 // 场景：one-shot subagent（conversation=false）完成首轮后 record 仍在内存（running），
-// LLM 调 message 续聊 → messageHandler 检测非 chatMode + active → 置 chatMode=true（upgrade）→
-// 走 deliverChatMessage 统一路径（热路径 interact 受理或冷路径 resume 续轮）。
+// LLM 调 message 续聊 → messageHandler 检测非 chatMode + active → gate 放行 →
+// 置 chatMode=true（upgrade）→ deliverChatMessage 统一路径（Continuation 派发新轮）。
 //
-// [W3 改写] mock 策略：真实 SubagentService + registerFakePiEngine 协议替身
-//（原 vi.mock inproc session-runner / spawnedChildren Map 语义随 inproc pi 引擎目录
-// 删除消亡）。热/冷分流观测面从「mock child 存在性 / mock runSpawn 调用」换成协议 seam：
-//   - 热路径 = engine.interact(message) 受理（fake 默认 {ok:true, delivered:true}）；
-//   - 冷路径 = interact 拒绝 engine_session_not_resumable → resumeColdRound →
-//     kickOffChatRound → engine.run（fake.runs 捕获，resume 锚点在 ctx.chat.resume）。
+// [W3 改写 → H1 U6] mock 策略：真实 SubagentService + registerFakePiEngine 协议替身。
+// [H1 U6] 旧 interact 热/冷分流观测面随 interact 面退役：upgrade 后 message 一律经
+// Continuation 派发新 run（fake.runs 捕获，resume 锚点在 ctx.resume——键切换后唯一
+// 会话形态键）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -85,7 +83,7 @@ function makeOneShotRecord(
   record.status = status;
   record.controller = new AbortController();
   // v4 B-1：one-shot 完成后 record 为 running（idle 折入 running）+ isResumable（无活进程）。
-  // sessionFile 总设（冷路径 resume 锚点校验需要，热路径无害）。
+  // sessionFile 总设（[H1 U6] resume 锚点形态键——续聊轮统一经新 run + ctx.resume 续写）。
   record.sessionFile = "/tmp/fake-session.jsonl";
   record.round = 1;
   return record;
@@ -95,7 +93,7 @@ function makeOneShotRecord(
 // SP-5 one-shot upgrade
 // ============================================================
 
-describe("SP-5 one-shot upgrade（message → chatMode + 冷 resume）", () => {
+describe("SP-5 one-shot upgrade（message → chatMode + resume 锚点续聊）", () => {
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
@@ -111,7 +109,7 @@ describe("SP-5 one-shot upgrade（message → chatMode + 冷 resume）", () => {
     const internals = service as unknown as ServiceInternals;
     store = internals.store;
     sessionRootId = internals.sessionRootId!;
-    // 协议替身引擎（registry 'pi'）：冷/热分流由 fake.interactMessageResult 逐用例注入。
+    // 协议替身引擎（registry 'pi'）。
     fake = registerFakePiEngine();
   });
 
@@ -123,38 +121,34 @@ describe("SP-5 one-shot upgrade（message → chatMode + 冷 resume）", () => {
   });
 
   // TC-1: one-shot done 后 message 触发 upgrade（chatMode=true）
-  // 场景：one-shot running record → message → chatMode 被置 true → 热路径投递
-  //（引擎侧活会话：interact message 受理）
-  it("TC-1: one-shot running record 收到 message → chatMode 升级为 true", async () => {
+  // 场景：one-shot running record → message → chatMode 被置 true → Continuation
+  // 派发新轮（[H1 U6] 每轮 = 新 run + resume 锚点，无 interact 热路径）
+  it("TC-1: one-shot running record 收到 message → chatMode 升级为 true + Continuation 派发新轮", async () => {
     const record = makeOneShotRecord(sessionRootId, "running");
     store.register(record);
 
-    // 热路径前提：引擎侧活会话受理 message（fake 默认 {ok:true, delivered:true}）
     expect(record.chatMode).toBeFalsy();
 
     await messageHandler(service, { subagentId: record.id, text: "follow-up" });
 
-    // 验证升级前后的 chatMode 与投递形态
+    // 验证升级后的 chatMode 与投递形态：Continuation 派发新 run（resume 锚点续写）
     expect(record.chatMode).toBe(true);
-    // 热路径：engine.interact(message) 恰 1 次（受理即热路径，无 resume run）
-    expect(fake.interacts).toHaveLength(1);
-    expect(fake.interacts[0].action).toMatchObject({ kind: "message", payload: "follow-up" });
-    expect(fake.runs).toHaveLength(0);
-    // 验证 record 仍为 running（热路径投递设 running）
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
+    expect(fake.runs[0]!.task.prompt).toBe("follow-up");
+    expect(fake.runs[0]!.ctx.resume?.recordId).toBe(record.id);
+    expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
+    // 验证 record 仍为 running
     expect(record.status).toBe("running");
     // 验证 record 在内存中（非终态，未被 archive）
     expect(store.getMutable(record.id)).toBeDefined();
   });
 
-  // TC-2: upgrade 后走冷路径 resume
-  // 场景：one-shot idle record（引擎侧无活会话）→ message → chatMode=true →
-  // 冷路径续轮（interact 拒绝 not_resumable → resume run）
-  it("TC-2: one-shot idle record 收到 message → chatMode 升级 + 冷路径 resume", async () => {
+  // TC-2: upgrade 后续聊派发（resume 锚点续写原文件）
+  // 场景：one-shot running-resumable record → message → chatMode=true →
+  // Continuation 派发新轮（[H1 U6] 新 run + resume 锚点）
+  it("TC-2: one-shot running-resumable record 收到 message → chatMode 升级 + 新 run resume", async () => {
     const record = makeOneShotRecord(sessionRootId);
     store.register(record);
-
-    // 引擎侧无活会话：interact 拒绝 not_resumable → 冷路径续轮（resume run）
-    fake.interactMessageResult = { ok: false, code: "engine_session_not_resumable", message: "no live session" };
 
     expect(record.chatMode).toBeFalsy();
 
@@ -162,10 +156,10 @@ describe("SP-5 one-shot upgrade（message → chatMode + 冷 resume）", () => {
 
     // 验证 chatMode 被升级
     expect(record.chatMode).toBe(true);
-    // 验证走了冷路径 resume（resumeColdRound → kickOffChatRound → engine.run）
+    // 验证续聊派发（Continuation → kickOffChatRound → engine.run）
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
-    // resume 锚点 = record 身份（sessionFile 原样携带——W3 协议 ResumeAnchor）
-    expect(fake.runs[0].ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
+    // resume 锚点 = record 身份（sessionFile 原样携带——ctx.resume 唯一会话形态键）
+    expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
     // record 被 resumeRound 设为 running，轮次收尾后保持 running（v4 B-1 idle 折入 running）
     // 关键是 record 不在终态
     expect(record.status).not.toBe("closed");
@@ -176,8 +170,6 @@ describe("SP-5 one-shot upgrade（message → chatMode + 冷 resume）", () => {
   it("TC-3: upgrade 后 record 可续聊（非终态，仍在内存）", async () => {
     const record = makeOneShotRecord(sessionRootId);
     store.register(record);
-
-    fake.interactMessageResult = { ok: false, code: "engine_session_not_resumable", message: "no live session" };
 
     await messageHandler(service, { subagentId: record.id, text: "first resume" });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));

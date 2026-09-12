@@ -3,7 +3,7 @@
 // [PS-10/T6④] revive() 复位 orphanJudged——落实 recoverOrphanRecords 注释承诺
 // 「IO 恢复后重开可重判」。
 //
-// 缺陷（设计 §4.3 PS-10）：resumable 形态（IO-error 保守分支）无 .finalized sidecar
+// 缺陷（设计 §4.3 PS-10）：resumable 形态（IO-error 保守分支）无 .state sidecar
 // 锚，重判资格完全由 orphanJudged 实例级缓存承载；dispose 有 clear 但 /new 复活路径
 // revive() 此前不复位 → 同进程内曾经的 IO 失败记录永久停留 resumable。
 //
@@ -36,6 +36,7 @@ vi.mock("node:fs", async (importOriginal) => {
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { RecordStore } from "../record-store.ts";
+import { writeAliveMarker } from "../alive-store.ts";
 
 let tmpDir = "";
 
@@ -114,7 +115,7 @@ describe("[PS-10] revive() 复位 orphanJudged（IO 恢复后重开可重判）"
     expect(appended[0]?.customType).toBe("subagent-record");
     expect(appended[0]?.data.status).toBe("running");
     expect(appended[0]?.data.resumable).toBe(true);
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false); // 保守分支无 sidecar 锚
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 保守分支无 sidecar 锚
 
     // ── 阶段 2：IO 恢复 + /new 复活（revive 复位 orphanJudged）→ 重判收敛终态 ──
     allowReads = Infinity;
@@ -126,7 +127,7 @@ describe("[PS-10] revive() 复位 orphanJudged（IO 恢复后重开可重判）"
     expect(rejudged?.data.status).toBe("closed");
     expect(rejudged?.data.closedReason).toBe("gc");
     expect(rejudged?.data.resumable).toBeUndefined(); // 不再停留 resumable
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(true); // 终态防重锚落盘
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
   });
 
   it("未 revive 时重判资格保持（防重缓存语义不回归）：重复 recover 零新 entry", () => {
@@ -155,5 +156,72 @@ describe("[PS-10] revive() 复位 orphanJudged（IO 恢复后重开可重判）"
     allowReads = Infinity;
     store.recoverOrphanRecords("sess-orphan");
     expect(appended).toHaveLength(1);
+  });
+});
+
+// ── [U4a / D3b (a″)] 孤儿恢复活实例跳过：findForeignLiveInstance 现查探针 ──
+//
+// 原判据 = 重建时缓存的 rec.externalInstance（分支 3 填充）；externalInstance 字段链
+// 删除后换直接探针（pid 单判据 + self-pid 排除）。验收（F2）：
+//   - 探针活（异宿主 pid 在持声明）→ 跳过终态化——boot 不得误杀异宿主持有中 record
+//     （同 root 双宿主形态下，宿主 A 的 boot 把宿主 B 持有中的 record 直断 gc 会
+//     击穿跨进程写权防御，设计 D3b (a″)）；
+//   - pid 死（无在持声明）→ 正常终态化（closed+gc + .state 防重锚）。
+describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid 单判据）", () => {
+  /** openSync 透传真实实现（本 describe 的判定路径需要真实 IO；mockReset 后默认
+   *  实现返回 undefined，readLastJsonlLine 会拿到非法 fd）。 */
+  function passthroughOpenSync(): void {
+    const realOpenSync = fsActualHolder.fs!.openSync;
+    openSyncMock.mockImplementation(
+      (p: Parameters<typeof realOpenSync>[0], flags: Parameters<typeof realOpenSync>[1]) =>
+        realOpenSync(p, flags),
+    );
+  }
+
+  it("探针活（异宿主 pid 在持声明）→ 跳过终态化：零 entry + 无 .state 防重锚", () => {
+    const sessionFile = path.join(tmpDir, "orphan-foreign-live.jsonl");
+    writeOrphanSession(sessionFile, "sa-probe-1");
+    // pid 1（launchd）必然存活且非本测试进程——异宿主「在持声明」的确定性形态
+    writeAliveMarker(sessionFile, { pid: 1, id: "sa-probe-1", startedAt: Date.now() });
+    passthroughOpenSync();
+
+    const { store, appended } = makeStore();
+    store.recoverOrphanRecords("sess-orphan");
+
+    expect(appended).toHaveLength(0); // 跳过：不落任何终态/resumable entry
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 未终态化 = 无防重锚
+  });
+
+  it("pid 死（marker 残留但持有者已退）→ 正常终态化：closed+gc entry + .state 防重锚", () => {
+    const sessionFile = path.join(tmpDir, "orphan-dead-pid.jsonl");
+    writeOrphanSession(sessionFile, "sa-probe-2");
+    // 大 pid 用户空间必然不存在（ESRCH 判死）——原持有宿主已退出的残留 marker 形态
+    writeAliveMarker(sessionFile, { pid: 9999999, id: "sa-probe-2", startedAt: Date.now() });
+    passthroughOpenSync();
+
+    const { store, appended } = makeStore();
+    store.recoverOrphanRecords("sess-orphan");
+
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.customType).toBe("subagent-record");
+    expect(appended[0]?.data.status).toBe("closed");
+    expect(appended[0]?.data.closedReason).toBe("gc");
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
+  });
+
+  it("self-pid marker（pid 复用到本进程的残留声明）→ 放行清理：原持有者已死，record 确为孤儿", () => {
+    const sessionFile = path.join(tmpDir, "orphan-self-pid.jsonl");
+    writeOrphanSession(sessionFile, "sa-probe-3");
+    // self-pid 排除：findForeignLiveInstance 视同无 foreign——复用窗口内残留 marker
+    // 不构成「异宿主在持」，record 是真孤儿应照常终态化
+    writeAliveMarker(sessionFile, { pid: process.pid, id: "sa-probe-3", startedAt: Date.now() });
+    passthroughOpenSync();
+
+    const { store, appended } = makeStore();
+    store.recoverOrphanRecords("sess-orphan");
+
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.data.status).toBe("closed");
+    expect(appended[0]?.data.closedReason).toBe("gc");
   });
 });

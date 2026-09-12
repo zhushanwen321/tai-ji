@@ -37,7 +37,15 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-import { DEFAULT_DIALOG_TIMEOUT_MS, DialogGlobalQueue, type UiRequest, type UiResponse } from "../dialog-queue.ts";
+import {
+  DEFAULT_DIALOG_TIMEOUT_MS,
+  DialogGlobalQueue,
+  _getActiveDialogQueueForTest,
+  notifyChildProcessExited,
+  registerActiveDialogQueue,
+  type UiRequest,
+  type UiResponse,
+} from "../dialog-queue.ts";
 
 // ── 类型助手 ────────────────────────────────────────────────
 // UiRequest 最小形状（method + id）。dialog 类：select/confirm/input/editor。
@@ -287,8 +295,9 @@ describe("DialogGlobalQueue — #19 单一推进点 + child close 集成语义",
   });
 
   it("child close 集成语义：queue 中同一 child 的多个 pending 被 rejectChildDialogs 一次全部 settle cancelled", async () => {
-    // 模拟 session-runner child 'close' 事件 → dialogQueue.rejectChildDialogs(child) 清理路径。
-    // 绑定点在 session-runner（非 dialog-queue 内部），本测试验证 rejectChildDialogs 公共方法语义。
+    // 模拟子进程退出事件 → dialogQueue.rejectChildDialogs(child) 清理路径。
+    // 生产绑定点 = 宿主侧引擎镜像层（SpawnedChildrenMirror → notifyChildProcessExited，
+    // 见 mirror.test.ts 的接线用例）；本用例聚焦 rejectChildDialogs 本身的批量语义。
     // 用 blocker 占 current（另一 child）使被测 child 的项全排队，聚焦验证 queue 批量 cancel。
     const queue = new DialogGlobalQueue();
     const blocker = { pid: 70000 };
@@ -493,5 +502,63 @@ describe("DialogGlobalQueue — reject 抢先 settle 后超时 timer 清理（A2
 
     await vi.advanceTimersByTimeAsync(2000);
     expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("DialogGlobalQueue — 活跃队列登记 + 子进程退出通知（SR-4 接线）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    registerActiveDialogQueue(undefined);
+    vi.useRealTimers();
+  });
+
+  it("notifyChildProcessExited：取消该 pid 的当前项与排队项（该 pid 的 pending 全 settle cancelled）", async () => {
+    const queue = new DialogGlobalQueue();
+    registerActiveDialogQueue(queue);
+    const handler = vi.fn((): Promise<UiResponse> => new Promise<UiResponse>(() => {}));
+
+    // 同 pid：1 项占住 current（永不 settle）+ 1 项排队
+    const current = queue.enqueue(dialogReq("r1"), handler, { child: { pid: 20001 } });
+    const queued = queue.enqueue(dialogReq("r2"), handler, { child: { pid: 20001 } });
+    expect(queue.size).toBe(1); // r2 仍在排队（enqueue 同步入队，current 立即置位）
+
+    notifyChildProcessExited(20001);
+
+    await expect(current).resolves.toEqual({ cancelled: true });
+    await expect(queued).resolves.toEqual({ cancelled: true });
+    expect(queue.size).toBe(0);
+  });
+
+  it("notifyChildProcessExited：不影响其他 pid 的挂起项", async () => {
+    const queue = new DialogGlobalQueue();
+    registerActiveDialogQueue(queue);
+    const handler = vi.fn((): Promise<UiResponse> => new Promise<UiResponse>(() => {}));
+
+    const other = queue.enqueue(dialogReq("r1"), handler, { child: { pid: 30001 } });
+
+    notifyChildProcessExited(30002); // 另一个 pid 退出
+
+    let settled = false;
+    void other.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(queue.size).toBe(0); // 该项仍是 current，未被动过
+  });
+
+  it("未登记队列时 notifyChildProcessExited 为 no-op（不抛）", () => {
+    expect(_getActiveDialogQueueForTest()).toBeUndefined();
+    expect(() => notifyChildProcessExited(40001)).not.toThrow();
+  });
+
+  it("登记后 _getActiveDialogQueueForTest 可读；注销后回落 undefined", () => {
+    const queue = new DialogGlobalQueue();
+    registerActiveDialogQueue(queue);
+    expect(_getActiveDialogQueueForTest()).toBe(queue);
+    registerActiveDialogQueue(undefined);
+    expect(_getActiveDialogQueueForTest()).toBeUndefined();
   });
 });

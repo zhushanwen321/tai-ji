@@ -1,7 +1,7 @@
 // protocol-blackbox.test.ts —— W10 协议黑盒套件（基线三层①的自动层）。
 //
 // 覆盖（impl-plan §2.10 / 设计 §4 探针挂钩①）：
-//   - 10 正向方法（initialize/probe/run/cancel/interact/read/listModels/
+//   - 9 正向方法（initialize/probe/run/cancel/read/listModels/
 //     validateModel/dispose/ping）× fake 引擎 CLI 往返；
 //   - 8 反向通道（host/log、host/askUser、host/permission、host/streamDelta、
 //     host/poolResolved、host/handleReady、host/childSpawned、host/childStateChanged）
@@ -137,8 +137,8 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
   return h;
 }
 
-describe("协议黑盒：10 正向方法 × fake 引擎回放", () => {
-  it("initialize/probe/listModels/validateModel/interact/read/ping 往返（fixture 白名单比对）", async () => {
+describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
+  it("initialize/probe/listModels/validateModel/read/ping 往返（fixture 白名单比对）", async () => {
     const h = makeHarness();
     try {
       await h.client.ensureConnected();
@@ -162,12 +162,8 @@ describe("协议黑盒：10 正向方法 × fake 引擎回放", () => {
       )) as { canonicalRef: string };
       expect(validated.canonicalRef).toBe("fake/fake-1");
 
-      const interact = (await h.client.request(
-        "interact",
-        { handle: fixture.run.result.handle, action: { kind: "message", text: "hi" } },
-        { timeoutMs: 5_000 },
-      )) as { accepted: boolean };
-      expect(interact.accepted).toBe(true);
+      // [H1 U5] interact 方法已随 chat-run 统一退役（D5）——往返断言随之删除，
+      // fake 引擎对未知方法回 engine_method_unknown（unknown_method 模式覆盖）。
 
       const view = (await h.client.request(
         "read",

@@ -385,6 +385,9 @@ export default {
     taskFailed: '任务创建失败：{error}',
     sendFailed: '消息发送失败：{error}',
   },
+  widget: {
+    details: '详情',
+  },
   ambiguous: {
     title: '「{basename}」有 {count} 个匹配，选择要打开的文件',
   },

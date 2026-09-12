@@ -28,11 +28,12 @@ export type UiMethod =
   | "set_editor_text"
   | (string & {});
 
-/** UI 请求（session-runner 构造后传给 handler）。
+/** UI 请求（引擎侧构造后经 host/askUser 送达宿主 handler）。
  *
  *  method 是判别字段，决定排队策略（dialog 排队）和业务路由（channel 分发）。
- *  method 特定字段按 method 可选出现（与 ExtensionUiRequest 1:1，由 session-runner 从
- *  ExtensionUiRequest 平铺构造）。channel/channelPayload 由 parseChannel 填充。
+ *  method 特定字段按 method 可选出现（与 ExtensionUiRequest 1:1，由引擎侧
+ *  ui-request-queue 从 ExtensionUiRequest 平铺构造）。channel/channelPayload 由
+ *  parseChannel 填充。
  *
  *  契约来源：.fix-plans/00-master-summary.md §二 2.2。 */
 export interface UiRequest {
@@ -61,8 +62,10 @@ export interface UiRequest {
   /** channel 解析后的结构化 payload（已 JSON.parse）。
    *  ask_user: {questions, allowCancel}；gui_widget: {component}；无 channel: undefined。 */
   channelPayload?: unknown;
-  /** 内部元数据字段：发起该 UI 请求的子进程 pid（由 session-runner.handleUiRequest 从
-   *  child.pid 填入）。L2 队列据此关联 rejectChildDialogs（child close 时批量 reject）。
+  /** 内部元数据字段：发起该 UI 请求的子进程 pid（由引擎侧 ui-request-queue 从
+   *  child.pid 填入——session-runner 已随协议化重构删除，填充点现住 pi 引擎包）。
+   *  L2 队列据此关联 rejectChildDialogs（子进程退出时批量取消，见
+   *  notifyChildProcessExited 的接线链）。
    *  下划线前缀表示内部字段，非 Pi 协议字段，不参与 stdin 回写。 */
   _childPid?: number;
 }

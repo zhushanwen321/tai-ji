@@ -22,11 +22,12 @@
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { abortRun } from "@zhushanwen/subagent-core";
+import { abortRun, getSubagentService } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { parseWorkflowRpcCommand, type WorkflowRpcAction } from "./command-actions.ts";
 import { createWorkflowsView, type ViewActions } from "./views/WorkflowsView.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { LIST_LIMIT } from "./list-shared.ts";
 
 /** runId 截断长度（显示用）。 */
 const RUNID_SHORT = 8;
@@ -248,6 +249,12 @@ function sortedRuns(runs: Map<string, WorkflowRun>): WorkflowRun[] {
  *
  * ViewActions 通过 deps 调 lifecycle（abort），与 view 解耦——
  * view 单测可注入 mock actions（见 views/__tests__/WorkflowsView-signature.test.ts）。
+ *
+ * [H2 W3] live 进度数据源（设计 D2 进度源切换）：view 经 store 查询
+ * collectRecordsByParentRunId(run.runId)（内存 ∪ 磁盘重建 ∪ manifest，LIST_LIMIT
+ * 口径）配对 running trace node 渲染实时进度。service 单例未就绪（理论上 run 只能
+ * 于 session 内存在，session_start 后必在；防御分支）时不注入——view 走终态
+ * result 渲染路径。
  */
 async function openView(
   run: WorkflowRun,
@@ -256,7 +263,11 @@ async function openView(
   deps: LauncherDeps,
 ): Promise<void> {
   const actions: ViewActions = {
-    abort: (runId: string) => abortRun(runId, deps),
+    abort: (runId) => abortRun(runId, deps),
   };
-  await createWorkflowsView(run, theme, ctx, actions, deps.store.stateFilePath(run.runId));
+  const service = getSubagentService();
+  const liveRecords = service
+    ? () => service.queries.collectRecordsByParentRunId(run.runId, LIST_LIMIT)
+    : undefined;
+  await createWorkflowsView(run, theme, ctx, actions, deps.store.stateFilePath(run.runId), liveRecords);
 }

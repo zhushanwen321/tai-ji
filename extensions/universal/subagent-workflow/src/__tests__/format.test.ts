@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatElapsed,
   formatElapsedSeconds,
+  formatRunStatusElapsed,
   formatTokens,
   formatToolCall,
   padToVisible,
@@ -97,6 +98,34 @@ describe("formatElapsed", () => {
     expect(formatElapsed(startedAt(3600), NOW)).toBe("1h0m");
     expect(formatElapsed(startedAt(4500), NOW)).toBe("1h15m");
     expect(formatElapsed(startedAt(7325), NOW)).toBe("2h2m");
+  });
+});
+
+// ============================================================
+// formatRunStatusElapsed（[H2 A2] run done 后 elapsed 冻结）
+// ============================================================
+describe("formatRunStatusElapsed", () => {
+  const NOW = 1_700_000_000_000;
+  const startedAt = (msOffset: number) => new Date(NOW + msOffset).toISOString();
+
+  it("done run（completedAt 有值）→ 冻结于 completedAt - startedAt，与查询墙钟无关", () => {
+    const start = startedAt(0);
+    const completed = startedAt(65_000); // 运行 65s 后完成
+    // 查询墙钟在完成 1 小时 / 1 天后：elapsed 仍恒为 65s（1m5s），不增长
+    expect(formatRunStatusElapsed(start, completed, NOW + 3_600_000)).toBe("1m5s");
+    expect(formatRunStatusElapsed(start, completed, NOW + 86_400_000)).toBe("1m5s");
+  });
+
+  it("running run（completedAt 缺省）→ 沿用 now 基准实时跳动", () => {
+    const start = startedAt(0);
+    expect(formatRunStatusElapsed(start, undefined, NOW + 12_000)).toBe("12s");
+  });
+
+  it("startedAt 缺省 → '-' 兜底；时钟回拨（completedAt < startedAt）→ 钳 0", () => {
+    expect(formatRunStatusElapsed(undefined, startedAt(1000), NOW)).toBe("-");
+    const lateStart = startedAt(5_000);
+    const earlierCompleted = startedAt(1_000);
+    expect(formatRunStatusElapsed(lateStart, earlierCompleted, NOW)).toBe("0s");
   });
 });
 

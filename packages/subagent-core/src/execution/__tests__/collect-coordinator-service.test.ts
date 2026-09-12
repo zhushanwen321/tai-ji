@@ -159,7 +159,7 @@ describe("collectCoordinator service integration (U2)", () => {
     expect(batches[0]!.map((m) => m.id)).toEqual([handle.subagentId]);
   });
 
-  it("flushBatch accepted=false（幂等拒绝）时不落标：零带 batchFinalized 的 entry", async () => {
+  it("flushBatch accepted=false（幂等拒绝）时落标已前置完成（U3 归口：合一原语幂等覆写）", async () => {
     const spy = spyNotifier(service);
     spy.notifyBatch.mockReturnValue(false); // 模拟同成员集批已在账（E1 重建重发形态）
     const handle = await service.execute({ task: "collect me", slug: "collect-me", collect: "sync" });
@@ -167,14 +167,16 @@ describe("collectCoordinator service integration (U2)", () => {
     await settleLast();
     await until(() => spy.notifyBatch.mock.calls.length > 0);
     expect(handle.subagentId).toMatch(/^sa-/);
-    // 落标出口①绑「写账成功」：accepted=false → 无带 batchFinalized 标记的 subagent-record
-    // entry（register/archive 常规 entry 经 recordToSubagent 投影携带 batchFinalized=
-    // undefined——未离场成员，非 true；U5 投影扩展后缺省键不落值，断言语义不变）
+    // [U3 批写归口] 落标随 markBatchFinalized 前置到写账前（合一原语形态下「屏障 →
+    // 写账 → 落标」三段不可兼得，构造性 barrier 优先）：accepted=false（同成员集批
+    // 已在账 = 该批此前成功投递时已落标）时本次落标属幂等覆写（appendEntry
+    // last-writer-wins），E1 排除判据（collectMode=sync + batchFinalized）不受写账
+    // 拒绝影响——防该成员以无标记形态被 E1 重收（异成员集 hash 不触发账本幂等）。
     const recordEntries = pi.appendEntry.mock.calls
       .filter((c) => c[0] === "subagent-record")
       .map((c) => c[1] as Record<string, unknown>);
     expect(recordEntries.length).toBeGreaterThan(0); // execute 链自身的 register/archive 在场
-    expect(recordEntries.some((d) => d["batchFinalized"] === true)).toBe(false);
+    expect(recordEntries.some((d) => d["id"] === handle.subagentId && d["batchFinalized"] === true)).toBe(true);
   });
 
   it("routes an async member through the same notifyAsync path (现状直通)", async () => {

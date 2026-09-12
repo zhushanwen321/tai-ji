@@ -12,7 +12,7 @@ import {
   RELAY_ENV_SCRIPT,
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_SOCKET,
-} from "../relay-env.ts";
+} from "@zhushanwen/subagent-engine-sdk";
 
 // [验收门修复] getPiInvocation 的 relay 分支优先读宿主 RELAY env——根级 pnpm test
 // 进程若继承宿主（pi 子进程链）的 RELAY 身份，直连分支用例的 execPath/argv 断言

@@ -1,686 +1,131 @@
 // src/execution/__tests__/subprocess-agent-runner.test.ts
 //
-// Wave 4: SubprocessAgentRunner 委托重写测试
+// [H2 W4] SAR 壳装配契约测试——run() 已掏空为纯转调
+// SubagentService.executeWorkflowAgent（编排归 service 单点，设计
+// subagent-workflow-record-unification.md §5 W4 / §3.5 终态数据流）。
 //
-// 覆盖 test-matrix 用例：
-//   T3.1  (正常): SAR 委托 executeAndAwait 返回 content
-//   T3.2  (正常): parsedOutput 透传
-//   T3.4  (边界): cwd 透传（非 git worktree）
-//   T3.5  (边界): model 填底（opts.model 空 → ctxModel）
-//   T3.6  (异常): timeoutMs 超时 → signal abort → error
-//   T3.7  (正常): onEvent 桥接 AgentEvent 透传
-//   T3.17 (NFR): mergeTimeoutSignal listener 清理
-//   T3.18 (NFR): dispose 兜底覆盖（delegate 后子进程进 spawnedChildren）
-//   T3.19 (NFR): AgentCallOpts→ExecuteOptions 直出保真（D6 合流后映射在 PiEngine 边界，
-//                本组用例经真实 PiEngine 链路锁定 spawn 参数形态）
+// 本文件只锁壳契约面：
+//   1. 构造签名（deps.subagentService + ctxModel 兼容——session-lifecycle.ts
+//      装配点零改定的锚点）；
+//   2. run() 纯转调（opts/signal/onEvent/stream 原样透传 + parentRunId 用直调
+//      占位 SAR_UNATTACHED_PARENT_RUN_ID + 返回值原样返回，零映射零吞错）；
+//   3. updateCtxModel 装配链兼容（model_select 刷新不炸；run() 不再消费 ctxModel）；
+//   4. mergeRunSignals re-export 可用（既有 import 路径契约）。
+//
+// [H2 W4 删除面] 旧编排内部用例（路由集成 / model 填底 / ctxModel 孪生守卫 /
+// timeoutMs 合并 / onEvent-journal 桥接 / 直传保真 / no-progress 守护落点 /
+// 全链 killAll）随 SAR 编排退役删除——service 落点的行为守护由
+// workflow-agent-dispatch.test.ts（W2 承接：注册面/池顺序/守护 arm 键 record.id/
+// 双刷新源/fire 追注/stream 自构/D7/D6/adopt 豁免）与 engine/__tests__/routing.test.ts
+// （路由 helper 单点：三层优先级 + 守卫 a/b/c + strict + fallback）承接。
 
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// u0-data-discovery 注入化：getEngineDataDir 回退段经 HostServices.dataRoot() 端口，
-// 未 configureCore 即消费会抛 core_host_not_configured（SAR.run 内部调用，dataRoot
-// 值不被本文件断言）——端口态显式配置，测试隔离经 resetCoreForTests
-import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
+import { describe, expect, it, vi } from "vitest";
 
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import { ModelConfigService, setModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import { replayJournal } from "../engine/common/event-journal.ts";
-import { clearEngines, registerEngine } from "../engine/registry.ts";
-import type { EnginePort, RunContext } from "../engine/port.ts";
-import type {
-  AgentOutcome,
-  EngineCapabilities,
-  ProbeReport,
-} from "../engine/types.ts";
-import type { SubprocessAgentRunnerDeps } from "../subprocess-agent-runner.ts";
+import type { ModelInfo } from "../model-resolver.ts";
+import { SubagentStream } from "../stream-sink.ts";
 import type { SubagentService } from "../subagent-service.ts";
-import { SubprocessAgentRunner } from "../subprocess-agent-runner.ts";
+import {
+  SAR_UNATTACHED_PARENT_RUN_ID,
+  SubprocessAgentRunner,
+  type SubprocessAgentRunnerDeps,
+} from "../subprocess-agent-runner.ts";
+import { mergeRunSignals } from "../engine/common/run-signals.ts";
 
-// ── 测试辅助 ──
-
-/** 构造 mock SubagentService.executeAndAwait 返回值 */
-function makeMockResult(overrides: Partial<AgentResult> = {}): AgentResult {
-  return {
-    content: "OK",
-    parsedOutput: undefined,
-    durationMs: 100,
-    error: undefined,
-    sessionId: undefined,
-    toolCalls: [],
-    ...overrides,
-  };
+function makeOpts(): AgentCallOpts {
+  return { prompt: "test task", agent: "worker" };
 }
 
-/** 协议替身的引擎内「任务声明 → 执行选项」映射（原 core PiEngine
- *  agentCallToExecuteOptions 的最小同构还原——[W3] 该映射本体已随 inproc pi 引擎目录 迁入
- *  pi-subagent-cli 引擎包，此处仅为保留 executeAndAwait 委托断言面）。 */
-function fakeAgentCallToExecuteOptions(task: AgentCallOpts, ctxModel?: ModelInfo): Record<string, unknown> {
-  const rawSlug = task.description ?? task.agent ?? "workflow-agent";
-  return {
-    task: task.prompt,
-    slug: rawSlug.length > 35 ? rawSlug.slice(0, 35) : rawSlug,
-    agent: task.agent,
-    model: task.model,
-    thinkingLevel: task.thinkingLevel,
-    skillPath: task.skillPath,
-    appendSystemPrompt: task.appendSystemPrompt,
-    schema: task.schema,
-    schemaEnv: task.schemaEnv,
-    maxTurns: task.maxTurns,
-    graceTurns: task.graceTurns,
-    ctxModel,
-    fork: task.fork,
-    worktree: task.worktree,
-    cwd: task.cwd,
-    conversation: task.conversation,
-    idleTimeoutMs: task.idleTimeoutMs,
-  };
+function makeResult(): AgentResult {
+  return { content: "OK", durationMs: 100, toolCalls: [] };
 }
 
-/** 引擎 run 捕获面（T3.19 直传保真断言用：SAR → engine.run 的 task 原样性）。 */
-const engineRunSpy = vi.fn();
-
-/** 创建 mock SubagentService（只实现 executeAndAwait）。
- *  [D4 聚合连带] SAR 构造器经 asEngineService 显式视图取引擎服务面——fake 的 face
- *  即自身，getter 直接返回 self。
- *  [W3 改写] 同步注册「委托式」替身 pi 引擎：run() 还原引擎内 task→ExecuteOptions
- *  映射后委托 mock 的 executeAndAwait（原 inproc PiEngine 的 workflow 分支形态）——
- *  resolveHostPiEnginePort 对已注册 port 原样返回，SAR 路由命中替身。 */
-function createMockService(impl?: typeof vi.fn): SubagentService {
-  const executeAndAwait = impl ?? vi.fn().mockResolvedValue(makeMockResult());
-  // partial mock（仅 executeAndAwait + asEngineService self-引用）——SAR 测试路径
-  // 不触达其余成员，经 unknown 双跳收敛到 SubagentService 视图
-  const partial: { executeAndAwait: typeof executeAndAwait; asEngineService?: unknown } = { executeAndAwait };
-  const service = partial as unknown as SubagentService;
-  partial.asEngineService = service;
-
-  const fakePort: EnginePort = {
-    id: "pi",
-    capabilities: (): EngineCapabilities => ({
-      schemaEnforcement: "native",
-      steer: "unsupported",
-      conversation: "native",
-      personaInjection: "flag",
-      eventGranularity: "stream",
-      sandbox: "emulated",
-      sessionRead: "full",
-      resume: "native",
-      interrupt: "kill-only",
-      permissionMode: "native",
-      maxTurns: true,
-    }),
-    probe: async (): Promise<ProbeReport> => ({ ok: true, engineVersion: "fake", checks: [] }),
-    run: async (task: AgentCallOpts, ctx: RunContext) => {
-      engineRunSpy(task, ctx);
-      const wfResult = await executeAndAwait(
-        fakeAgentCallToExecuteOptions(task, ctx.ctxModel),
-        ctx.signal,
-        ctx.onEvent,
-        ctx.stream,
-      ) as { content: string; parsedOutput?: unknown; durationMs?: number; error?: string };
-      const outcome: AgentOutcome = {
-        content: wfResult.content,
-        parsedOutput: wfResult.parsedOutput,
-        durationMs: wfResult.durationMs,
-        error: wfResult.error,
-        engineId: "pi",
-      };
-      return {
-        handle: {
-          data: { v: 1, engineId: "pi", sessionRef: {}, poolKey: "shared", adapterVersion: "fake-sar" },
-        },
-        outcome,
-      };
-    },
-    interact: async () => ({ ok: false, code: "engine_interact_failed", message: "not supported in this test" }),
-    read: async () => ({ engineId: "pi", turns: [], source: "outcome-only" }),
-  };
-  clearEngines();
-  registerEngine("pi", () => fakePort);
-  return service;
+/** mock SubagentService——只实现 executeWorkflowAgent（转调目标），其余成员不触达。 */
+function createMockService(impl?: ReturnType<typeof vi.fn>): SubagentService {
+  const executeWorkflowAgent = impl ?? vi.fn().mockResolvedValue(makeResult());
+  const partial = { executeWorkflowAgent };
+  return partial as unknown as SubagentService;
 }
 
-function makeBaseOpts(): AgentCallOpts {
-  return {
-    prompt: "test task",
-    agent: "worker",
-    cwd: "/some/path",
-    schema: undefined,
-    model: undefined,
-    scene: undefined,
-    description: undefined,
-    timeoutMs: undefined,
-    skill: undefined,
-    skillPath: undefined,
-    appendSystemPrompt: undefined,
-    schemaEnv: undefined,
-  };
-}
+describe("SubprocessAgentRunner (H2 W4 纯转调壳)", () => {
+  it("run() 纯转调 executeWorkflowAgent：opts/signal/onEvent/stream 原样透传，parentRunId 用直调占位", async () => {
+    const executeWorkflowAgent = vi.fn().mockResolvedValue(makeResult());
+    const deps: SubprocessAgentRunnerDeps = { subagentService: createMockService(executeWorkflowAgent) };
+    const sar = new SubprocessAgentRunner(deps);
 
-// ── T3.1: 正常路径 ──
+    const opts = makeOpts();
+    const controller = new AbortController();
+    const onEvent = vi.fn();
+    const stream = new SubagentStream("sar-test-stream", { setWidget: () => {} });
+    const result = await sar.run(opts, controller.signal, onEvent, stream);
 
-describe("SubprocessAgentRunner (wave-4 delegate)", () => {
-  beforeEach(() => {
-    configureCore({ dataRoot: () => "/fake-sar-data-root", log: () => {} });
-    // [U-2 一致性修复] pi 未注册时 resolveHostPiEnginePort 返回 engine_not_found stub
-    // ——替身 pi 引擎在 createMockService 内按测试服务注册（[W3] 委托式协议替身）。
-    engineRunSpy.mockClear();
+    expect(executeWorkflowAgent).toHaveBeenCalledTimes(1);
+    expect(executeWorkflowAgent).toHaveBeenCalledWith(
+      opts,
+      SAR_UNATTACHED_PARENT_RUN_ID,
+      controller.signal,
+      onEvent,
+      stream,
+    );
+    // 返回值原样返回（executeWorkflowAgent 返回类型即 orchestration AgentResult，零映射）
+    expect(result).toEqual(makeResult());
   });
 
-  afterEach(() => {
-    resetCoreForTests();
+  it("onEvent/stream 缺省时占位 undefined 透传（位置参数对齐 service 签名）", async () => {
+    const executeWorkflowAgent = vi.fn().mockResolvedValue(makeResult());
+    const sar = new SubprocessAgentRunner({ subagentService: createMockService(executeWorkflowAgent) });
+
+    const controller = new AbortController();
+    await sar.run(makeOpts(), controller.signal);
+
+    expect(executeWorkflowAgent).toHaveBeenCalledWith(
+      makeOpts(),
+      SAR_UNATTACHED_PARENT_RUN_ID,
+      controller.signal,
+      undefined,
+      undefined,
+    );
   });
 
-  // ────────────────────────────────────────────────
-  // T3.1: 正常路径 — SAR 委托 executeAndAwait 返回 content
-  // ────────────────────────────────────────────────
-  describe("T3.1 主流程", () => {
-    it("委托 executeAndAwait 并返回 content", async () => {
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult({ content: "hello world" })),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
+  it("service 同步抛错（路由失败/预检命中/嵌套超限）原样传播——壳不吞错不包装", async () => {
+    const boom = new Error("engine_not_found: zcode not registered");
+    const executeWorkflowAgent = vi.fn().mockRejectedValue(boom);
+    const sar = new SubprocessAgentRunner({ subagentService: createMockService(executeWorkflowAgent) });
 
-      const opts = makeBaseOpts();
-      const signal = new AbortController().signal;
-
-      const result = await sar.run(opts, signal);
-
-      expect(result.content).toBe("hello world");
-      expect(mockService.executeAndAwait).toHaveBeenCalledTimes(1);
-    });
-
-    it("不 reject — 失败信息入 result.error", async () => {
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult({ error: "some error" })),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-      expect(result.error).toBe("some error");
-    });
+    await expect(sar.run(makeOpts(), new AbortController().signal)).rejects.toThrow(boom);
   });
 
-  // ────────────────────────────────────────────────
-  // T3.2: parsedOutput 透传
-  // ────────────────────────────────────────────────
-  describe("T3.2 parsedOutput 透传", () => {
-    it("parsedOutput 直通", async () => {
-      const parsedData = { x: 1, y: 2 };
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult({ content: "ok", parsedOutput: parsedData })),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
+  it("构造签名兼容：ctxModel 可选注入（装配点零改定锚点）+ updateCtxModel 刷新不炸", async () => {
+    const ctxModel: ModelInfo = {
+      id: "test/model-x",
+      name: "Model X",
+      provider: "test",
+      reasoning: false,
+      contextWindow: 128_000,
+    };
+    const executeWorkflowAgent = vi.fn().mockResolvedValue(makeResult());
+    // ctxModel 注入构造（session-lifecycle.ts:537 形态）
+    const sar = new SubprocessAgentRunner({ subagentService: createMockService(executeWorkflowAgent), ctxModel });
+    // model_select 刷新链（extension index.ts 调用形态）：不炸且不影响转调
+    sar.updateCtxModel(undefined);
+    sar.updateCtxModel(ctxModel);
 
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-      expect(result.parsedOutput).toEqual(parsedData);
-    });
+    await sar.run(makeOpts(), new AbortController().signal);
+    // run() 不再消费 ctxModel：转调用参只有 opts/parentRunId/signal/onEvent/stream
+    expect(executeWorkflowAgent).toHaveBeenCalledWith(
+      makeOpts(),
+      SAR_UNATTACHED_PARENT_RUN_ID,
+      expect.any(AbortSignal),
+      undefined,
+      undefined,
+    );
   });
 
-  // ────────────────────────────────────────────────
-  // T3.4: cwd 透传
-  // ────────────────────────────────────────────────
-  describe("T3.4 cwd 透传", () => {
-    it("cwd 传入 executeAndAwait 的 ExecuteOptions", async () => {
-      let capturedOpts: Record<string, unknown> | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((opts: Record<string, unknown>) => {
-          capturedOpts = opts;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts = { ...makeBaseOpts(), cwd: "/custom/cwd" };
-      await sar.run(opts, new AbortController().signal);
-
-      expect(capturedOpts).toBeDefined();
-      expect(capturedOpts!.cwd).toBe("/custom/cwd");
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.5: model 填底
-  // ────────────────────────────────────────────────
-  describe("T3.5 model 填底 (D-008)", () => {
-    it("opts.model 优先", async () => {
-      let capturedOpts: Record<string, unknown> | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((opts: Record<string, unknown>) => {
-          capturedOpts = opts;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const ctxModel: ModelInfo = { id: "ctx-model", name: "Ctx Model", provider: "test", reasoning: false };
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService, ctxModel };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts = { ...makeBaseOpts(), model: "explicit-model" };
-      await sar.run(opts, new AbortController().signal);
-
-      expect(capturedOpts!.model).toBe("explicit-model");
-    });
-
-    it("opts.model 空 → ctxModel", async () => {
-      let capturedOpts: Record<string, unknown> | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((opts: Record<string, unknown>) => {
-          capturedOpts = opts;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const ctxModel: ModelInfo = { id: "ctx-model", name: "Ctx Model", provider: "test", reasoning: false };
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService, ctxModel };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts = { ...makeBaseOpts(), model: undefined };
-      await sar.run(opts, new AbortController().signal);
-
-      // 修复后：opts.model 不再从 ctxModel.id 填底，ctxModel 作为完整对象透传
-      expect(capturedOpts!.model).toBeUndefined();
-      expect(capturedOpts!.ctxModel).toBe(ctxModel);
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // [U1 D2] RunContext.modelRef 接入：ctxModel 继承路径孪生守卫
-  // ────────────────────────────────────────────────
-  describe("U1 ctxModel twin guard (RunContext.modelRef 接入)", () => {
-    const prevDataDir = process.env["XYZ_AGENT_DATA_DIR"];
-    let tmpRoot = "";
-
-    /** 装配含指定快照的 ModelConfigService 单例（initModel 注入 registry）。 */
-    function installModelService(registry: ModelRegistryLike): void {
-      tmpRoot = mkdtempSync(join(tmpdir(), "sar-model-ref-"));
-      process.env["XYZ_AGENT_DATA_DIR"] = join(tmpRoot, "engine-data");
-      const svc = new ModelConfigService({ agentDir: join(tmpRoot, "agent"), cwd: tmpRoot });
-      svc.initModel({ modelRegistry: registry, sessionId: "sar-guard" });
-      setModelConfigService(svc);
-    }
-
-    afterEach(() => {
-      // 单例 slot 无 reset API，重装一个空注册服务隔离后续用例（同文件后续
-      // describe 不消费 ctxModel 守卫，getGlobalConfig 对空目录返回默认值）
-      if (tmpRoot) {
-        const svc = new ModelConfigService({ agentDir: join(tmpRoot, "agent"), cwd: tmpRoot });
-        svc.initModel({ modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => false }, sessionId: "cleanup" });
-        setModelConfigService(svc);
-        rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-        tmpRoot = "";
-      }
-      if (prevDataDir === undefined) delete process.env["XYZ_AGENT_DATA_DIR"];
-      else process.env["XYZ_AGENT_DATA_DIR"] = prevDataDir;
-    });
-
-    it("P-A2 拒单路径：ctxModel 命中但 registry 含孪生 → run 返回 error（ambiguous），executeAndAwait 未被调", async () => {
-      const models = [
-        { id: "GLM-5.3-Flash", name: "flash", provider: "zai-coding-cn", reasoning: false },
-        { id: "glm-5.3-flash", name: "flash lower", provider: "zai-coding-cn", reasoning: false },
-      ];
-      installModelService({
-        getAvailable: () => models,
-        find: (p, id) => models.find((m) => m.provider === p && m.id === id),
-        hasConfiguredAuth: () => true,
-      });
-      const mockService = createMockService();
-      const sar = new SubprocessAgentRunner({
-        subagentService: mockService as unknown as SubprocessAgentRunnerDeps["subagentService"],
-        ctxModel: { id: "GLM-5.3-Flash", name: "flash", provider: "zai-coding-cn", reasoning: false },
-      });
-
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-
-      expect(result.error).toMatch(/ambiguous case variants/);
-      expect(result.content).toBe("");
-      // 守卫在 engine.run 之前：不产生任何 record/spawn（委托零发生）
-      expect(mockService.executeAndAwait).not.toHaveBeenCalled();
-    });
-
-    it("P-A2 放行路径：无孪生 registry 下同 ctxModel 正常委托（守卫零误伤）", async () => {
-      const models = [
-        { id: "GLM-5.3-Flash", name: "flash", provider: "zai-coding-cn", reasoning: false },
-      ];
-      installModelService({
-        getAvailable: () => models,
-        find: (p, id) => models.find((m) => m.provider === p && m.id === id),
-        hasConfiguredAuth: () => true,
-      });
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult({ content: "ok" })),
-      );
-      const sar = new SubprocessAgentRunner({
-        subagentService: mockService as unknown as SubprocessAgentRunnerDeps["subagentService"],
-        ctxModel: { id: "GLM-5.3-Flash", name: "flash", provider: "zai-coding-cn", reasoning: false },
-      });
-
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-
-      expect(result.error).toBeUndefined();
-      expect(result.content).toBe("ok");
-      expect(mockService.executeAndAwait).toHaveBeenCalledTimes(1);
-    });
-
-    it("ctxModel 未指定时守卫跳过（无单例也不阻断）", async () => {
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult({ content: "ok" })),
-      );
-      const sar = new SubprocessAgentRunner({
-        subagentService: mockService as unknown as SubprocessAgentRunnerDeps["subagentService"],
-      });
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-      expect(result.content).toBe("ok");
-      expect(mockService.executeAndAwait).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // H1: SAR ctxModel 刷新（model_select 后不再 stale）
-  // ────────────────────────────────────────────────
-  describe("H1 ctxModel refresh via updateCtxModel", () => {
-    it("updateCtxModel 后 run() 传入新的 ctxModel 而非旧值", async () => {
-      let capturedOpts: Record<string, unknown> | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((opts: Record<string, unknown>) => {
-          capturedOpts = opts;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const oldModel: ModelInfo = { id: "old-model", name: "Old Model", provider: "test", reasoning: false };
-      const newModel: ModelInfo = { id: "new-model", name: "New Model", provider: "test", reasoning: false };
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService, ctxModel: oldModel };
-      const sar = new SubprocessAgentRunner(deps);
-
-      // 模拟 model_select：刷新 ctxModel
-      sar.updateCtxModel(newModel);
-
-      const opts = { ...makeBaseOpts(), model: undefined };
-      await sar.run(opts, new AbortController().signal);
-
-      expect(capturedOpts!.ctxModel).toBe(newModel);
-      expect(capturedOpts!.ctxModel).not.toBe(oldModel);
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.6: timeoutMs 超时 → signal abort → error
-  // ────────────────────────────────────────────────
-  describe("T3.6 timeoutMs 超时", () => {
-    it("timeoutMs > 0 → merged signal 传给 executeAndAwait", async () => {
-      let capturedSignal: AbortSignal | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((_opts: Record<string, unknown>, signal?: AbortSignal) => {
-          capturedSignal = signal;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts = { ...makeBaseOpts(), timeoutMs: 5000 };
-      await sar.run(opts, new AbortController().signal);
-
-      // 有 timeoutMs 时 merged signal 不等于原始 signal
-      expect(capturedSignal).toBeDefined();
-    });
-
-    it("timeoutMs 到期 → merged signal.aborted=true", async () => {
-      vi.useFakeTimers();
-      let capturedSignal: AbortSignal | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((_opts: Record<string, unknown>, signal?: AbortSignal) => {
-          capturedSignal = signal;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts = { ...makeBaseOpts(), timeoutMs: 50 };
-      sar.run(opts, new AbortController().signal);
-
-      // 推进 51ms 后 merged signal 应 abort
-      vi.advanceTimersByTime(51);
-
-      expect(capturedSignal?.aborted).toBe(true);
-      vi.useRealTimers();
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.7: onEvent 桥接
-  // ────────────────────────────────────────────────
-  describe("T3.7 onEvent 桥接", () => {
-    it("executeAndAwait 的 onEvent 透传到 workflow onEvent", async () => {
-      const mockService = createMockService(
-        vi.fn().mockImplementation(
-          (_opts: Record<string, unknown>, _signal?: AbortSignal, onEvent?: (e: Record<string, unknown>) => void) => {
-            // 模拟 executeAndAwait 触发 onEvent
-            onEvent?.({ type: "tool_start", toolName: "read", args: { path: "/a.txt" } });
-            return Promise.resolve(makeMockResult());
-          },
-        ),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const workflowOnEvent = vi.fn();
-      await sar.run(makeBaseOpts(), new AbortController().signal, workflowOnEvent);
-
-      // workflow 的 onEvent 应被调用
-      expect(workflowOnEvent).toHaveBeenCalledTimes(1);
-      expect(workflowOnEvent).toHaveBeenCalledWith({
-        type: "tool_start",
-        toolName: "read",
-        args: { path: "/a.txt" },
-      });
-    });
-
-    it("无 workflow onEvent → 引擎仍收到包装 onEvent（P2 journal 通道恒开）", async () => {
-      let engineOnEvent: ((e: Record<string, unknown>) => void) | undefined;
-      const mockService = createMockService(
-        vi.fn().mockImplementation(
-          (_opts: Record<string, unknown>, _signal?: AbortSignal, onEvent?: (e: Record<string, unknown>) => void) => {
-            engineOnEvent = onEvent;
-            return Promise.resolve(makeMockResult());
-          },
-        ),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      await sar.run(makeBaseOpts(), new AbortController().signal);
-
-      // P2 接线（设计 D6 第②级）：SAR 包装 onEvent 写 journal 后转发——原 onEvent
-      // 未传时也恒传包装版（全引擎免费获得 journal；P1「undefined 透传」细节已被
-      // 有意变更，本用例锁定新语义：引擎侧 onEvent 通道恒开）
-      expect(typeof engineOnEvent).toBe("function");
-      // 包装版不向外抛（journal append 是同步入队）
-      expect(() => engineOnEvent?.({ type: "turn_end" })).not.toThrow();
-    });
-
-    it("P2 journal 接线：run 期间事件落盘 journal-<taskId>.jsonl（中立格式，可重放）", async () => {
-      vi.useFakeTimers({ toFake: [] }); // 真实 timers：journal 写盘走真实 fs
-      const dataDir = mkdtempSync(join(tmpdir(), "sar-journal-test-"));
-      const prevEnv = process.env.XYZ_AGENT_DATA_DIR;
-      process.env.XYZ_AGENT_DATA_DIR = dataDir;
-      try {
-        const mockService = createMockService(
-          vi.fn().mockImplementation(
-            (_opts: Record<string, unknown>, _signal?: AbortSignal, onEvent?: (e: Record<string, unknown>) => void) => {
-              onEvent?.({ type: "tool_start", toolName: "bash", args: { cmd: "ls" } });
-              onEvent?.({ type: "turn_end" });
-              return Promise.resolve(makeMockResult());
-            },
-          ),
-        );
-        const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-        const sar = new SubprocessAgentRunner(deps);
-
-        const workflowOnEvent = vi.fn();
-        await sar.run(makeBaseOpts(), new AbortController().signal, workflowOnEvent);
-
-        // journal 落在 <dataDir>/inproc pi 引擎目录/shared/journal-<taskId>.jsonl
-        const journalFile = join(dataDir, "engines", "pi", "shared");
-        const files = readdirSync(journalFile).filter((f) => f.startsWith("journal-") && f.endsWith(".jsonl"));
-        expect(files.length).toBe(1);
-        const replayed = replayJournal(join(journalFile, files[0] ?? ""));
-        expect(replayed).toEqual([
-          { type: "tool_start", toolName: "bash", args: { cmd: "ls" } },
-          { type: "turn_end" },
-        ]);
-        // workflow onEvent 照常透传（journal 包装不吞事件）
-        expect(workflowOnEvent).toHaveBeenCalledTimes(2);
-      } finally {
-        if (prevEnv === undefined) delete process.env.XYZ_AGENT_DATA_DIR;
-        else process.env.XYZ_AGENT_DATA_DIR = prevEnv;
-        rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      }
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.17: mergeTimeoutSignal listener 清理
-  // ────────────────────────────────────────────────
-  describe("T3.17 mergeTimeoutSignal listener 清理", () => {
-    it("外部 signal abort → timer 清理", async () => {
-      vi.useFakeTimers();
-      const mockService = createMockService(
-        vi.fn().mockResolvedValue(makeMockResult()),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const ctrl = new AbortController();
-      const opts = { ...makeBaseOpts(), timeoutMs: 5000 };
-
-      // 启动 run（不 await，让它在后台）
-      const runPromise = sar.run(opts, ctrl.signal);
-
-      // 外部 abort
-      ctrl.abort();
-
-      await runPromise;
-
-      // 推进时间——timer 应已清理，不会造成副作用
-      vi.advanceTimersByTime(6000);
-      // 无异常 = listener 已正确清理
-      vi.useRealTimers();
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.19: SAR → engine.run 任务声明直传保真
-  //   [W3 改写] 「AgentCallOpts → ExecuteOptions 映射点在 PiEngine 边界」随 inproc pi 引擎目录
-  //   删除迁入 pi-subagent-cli（引擎包 spawn-args 测试守护）；core 侧存留契约 =
-  //   SAR 对 AgentCallOpts 直传零映射（engine.run 的 task 原样性）。
-  // ────────────────────────────────────────────────
-  describe("T3.19 直传保真（D6：SAR 直传零映射，任务声明原样到达 engine.run）", () => {
-    it("prompt/agent/skillPath/schemaEnv 原样到达 engine.run", async () => {
-      const mockService = createMockService();
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const opts: AgentCallOpts = {
-        ...makeBaseOpts(),
-        prompt: "do the thing",
-        agent: "code-reviewer",
-        schemaEnv: '{"type":"object"}',
-        skillPath: "/skills/code-review.md",
-      };
-      await sar.run(opts, new AbortController().signal);
-
-      expect(engineRunSpy).toHaveBeenCalledTimes(1);
-      const [task] = engineRunSpy.mock.calls[0] as [AgentCallOpts, unknown];
-      expect(task.prompt).toBe("do the thing");
-      expect(task.agent).toBe("code-reviewer");
-      expect(task.skillPath).toBe("/skills/code-review.md");
-      expect(task.schemaEnv).toBe('{"type":"object"}');
-    });
-
-    it("schema 原样透传为原始对象", async () => {
-      const mockService = createMockService();
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const schema = { type: "object", properties: { name: { type: "string" } } };
-      await sar.run({ ...makeBaseOpts(), schema }, new AbortController().signal);
-
-      const [task] = engineRunSpy.mock.calls[0] as [AgentCallOpts, unknown];
-      expect(task.schema).toEqual(schema);
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // T3.18: executeAndAwait throw → catch → error
-  // ────────────────────────────────────────────────
-  describe("T3.18 异常处理", () => {
-    it("executeAndAwait throw → 不 reject，返回 error", async () => {
-      const mockService = createMockService(
-        vi.fn().mockRejectedValue(new Error("nesting depth exceeded")),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-      expect(result.error).toContain("nesting depth exceeded");
-      expect(result.content).toBe("");
-    });
-
-    it("非 Error throw → error 字段含 message", async () => {
-      const mockService = createMockService(
-        vi.fn().mockRejectedValue("raw string error"),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const result = await sar.run(makeBaseOpts(), new AbortController().signal);
-      expect(result.error).toBe("raw string error");
-    });
-  });
-
-  // ────────────────────────────────────────────────
-  // U1: stream 透传给 executeAndAwait
-  // ────────────────────────────────────────────────
-  describe("U1 stream 透传", () => {
-    it("SAR.run 传 stream → executeAndAwait 第 4 参收到同一 stream 对象", async () => {
-      let capturedStream: unknown;
-      const mockService = createMockService(
-        vi.fn().mockImplementation((_opts, _sig, _onEvt, stream) => {
-          capturedStream = stream;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      const fakeStream = { onDelta: vi.fn(), dispose: vi.fn() };
-      await sar.run(makeBaseOpts(), new AbortController().signal, undefined, fakeStream as never);
-
-      expect(capturedStream).toBe(fakeStream);
-    });
-
-    it("SAR.run 不传 stream → executeAndAwait 第 4 参为 undefined", async () => {
-      let capturedStream: unknown = "sentinel";
-      const mockService = createMockService(
-        vi.fn().mockImplementation((_opts, _sig, _onEvt, stream) => {
-          capturedStream = stream;
-          return Promise.resolve(makeMockResult());
-        }),
-      );
-      const deps: SubprocessAgentRunnerDeps = { subagentService: mockService };
-      const sar = new SubprocessAgentRunner(deps);
-
-      await sar.run(makeBaseOpts(), new AbortController().signal);
-
-      expect(capturedStream).toBeUndefined();
-    });
+  it("re-export 契约：mergeRunSignals 经本模块路径可用（既有 import 面）", () => {
+    // no-progress-killall 测试经本模块 import mergeRunSignals——锁 re-export 行存活
+    //（行为本体由 engine/common/run-signals 权威实现及其测试锁定）。
+    const handle = mergeRunSignals(new AbortController().signal, 60_000);
+    expect(handle.signal.aborted).toBe(false);
+    handle.dispose();
   });
 });

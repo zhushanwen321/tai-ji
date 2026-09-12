@@ -3,11 +3,14 @@
 // PiEngine 协议化引擎适配器（W7，impl-plan §2.7）——core engines/pi/pi-engine.ts
 // 的引擎进程内形态。
 //
-// 归属对照（设计 §3.8 D2 表；v1.x chat-domain 设计 §3.2 D1-A 后形态）：
+// 归属对照（设计 §3.8 D2 表；[H1 U3/U5] chat-run 统一 docs/design/subagent-chat-run-unification.md
+// §3.3 D6/D7 后形态）：
 //   - spawn 执行链（runSpawn 本体 / sendPromptCommand / EPIPE 兜底 / stdin 驱动）
 //     → 本包 spawn-runner（迁移物）；
-//   - chat 域轮次 → [v1.x] 本包承载（chat-session 会话管理器 + run 会话形态分支）：
-//     长驻子进程 / 轮终 roundLifecycle 上报 / 冷续 resume / interact 控制面；
+//   - chat 轮次 → run 派发形态（每轮一进程：首轮无锚点新建，续聊 resume 锚点
+//     --session 续写原文件；agent_settled resolve + 收割——D7）。U5 起 registry 本体
+//     与 interact 控制面已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
+//     ConversationContinuation 后的 run 域派发）；
 //   - HostBridge 编排面（executeAndAwait / record 状态回写 / idle+activate lock 定时器）
 //     → core（W3 改线消费本引擎的事件面）；
 //   - read：①级 pi 原生读取依赖 core session-reconstructor（§2.7「保持 core」），
@@ -28,8 +31,6 @@ import {
   type AgentEvent,
   type AgentOutcome,
   type EngineCapabilities,
-  type InteractAction,
-  type InteractResult,
   type ProbeReport,
   type SessionView,
   type UiRequest,
@@ -41,22 +42,14 @@ import { toErrorMessage } from "./error-message.ts";
 import type { AgentCallOpts, EngineHandle, EnginePort, EngineCtxModel, RunContext } from "./port-types.ts";
 import type { PiInvocation } from "./pi-invocation.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
+import { resetAllEpipeFailures } from "./stdin-writer.ts";
 import {
-  clearEpipeFailure,
-  EPIPE_FAILURE_THRESHOLD,
-  recordEpipeFailure,
-  sendPromptCommand,
-  resetAllEpipeFailures,
-} from "./stdin-writer.ts";
-import {
-  getActiveChild,
   killAllActiveChildren,
   type SpawnRunCallbacks,
   type SpawnRunParams,
   type SpawnRunResult,
   runSpawnOnce,
 } from "./spawn-runner.ts";
-import { ChatSessionRegistry, type ChatHostChannels, type ChatRoundStartOptions } from "./chat-session.ts";
 import { replayJournalToSessionView } from "./read-fallback.ts";
 
 const logger = getLogger("pi-engine");
@@ -67,9 +60,12 @@ const PROBE_VERSION_TIMEOUT_MS = 10_000;
 /** PiEngine 构造依赖。 */
 export interface PiEngineDeps {
   /**
-   * 数据根（协议 initialize 的 hostInfo.dataRoot；subagent session 目录相对它推导）。
-   * 缺省读 env XYZ_AGENT_DATA_DIR——两者皆无时 probe 报错（resolveEngineDataDir 语义，
-   * 显式报 engine_not_found 附期望路径，不猜 cwd）。
+   * 数据根（session 目录 [LEGACY] fallback 与 journal 重放的锚）。来源 = 显式注入
+   * 或 env XYZ_AGENT_DATA_DIR——注意协议 initialize 的 hostInfo.dataRoot 引擎**不
+   * 消费**（initialize 仅版本协商 + capabilities 应答）；权威 session 目录也不由
+   * 它推导（ctx.sessionDir 宿主注入，Option C）。两者皆无时 run 报错
+   * （resolveEngineDataRootOrThrow 语义，显式报 engine_not_found 附期望路径，不猜
+   * cwd）。
    */
   dataDir?: string;
   /** 版本探测执行器（测试注入 fake 避免真实子进程）。 */
@@ -78,8 +74,12 @@ export interface PiEngineDeps {
   spawnRunner?: (params: Parameters<typeof runSpawnOnce>[0], callbacks: SpawnRunCallbacks) => Promise<SpawnRunResult>;
 }
 
-/** subagent session 目录（core getSubagentSessionDir 的包内等价形态：
- *  <dataDir>/subagents/sessions/<encoded(cwd)>）。 */
+/** subagent session 目录的 [LEGACY] fallback（仅独立运行/测试形态）：旧推导
+ *  <dataDir>/subagents/sessions/<encoded(cwd)> 与宿主权威布局
+ *  <agentDir>/subagents/<encodeCwd(rootCwd)>/sessions 三处不等价（根/段序/编码），
+ *  曾致 session 文件与 .record-binding 落到宿主冷查扫描根之外（Gate B S6 全灭）。
+ *  权威 = 宿主注入 ctx.sessionDir（协议化 Option C，宿主 getSubagentSessionDir
+ *  单一权威）；本函数只在 ctx.sessionDir 缺省（旧宿主/直构引擎/测试）时兜底。 */
 function resolveSessionDir(dataDir: string, cwd: string): string {
   const encoded = cwd.replace(/[^a-zA-Z0-9_-]+/g, "_");
   return path.join(dataDir, "subagents", "sessions", encoded);
@@ -98,14 +98,9 @@ export class PiEngine implements EnginePort {
 
   private readonly deps: PiEngineDeps;
   private probeCache: ProbeReport | undefined;
-  /** [v1.x] chat 会话注册表（长驻会话状态面——见 chat-session.ts 文件头）。 */
-  private readonly chatSessions: ChatSessionRegistry;
 
   constructor(deps: PiEngineDeps = {}) {
     this.deps = deps;
-    this.chatSessions = new ChatSessionRegistry(
-      deps.spawnRunner !== undefined ? { spawnRunner: deps.spawnRunner } : {},
-    );
   }
 
   /** pi 链路实际接通的能力（与 core PiEngine.capabilities() 逐位一致——manifest 同源）。 */
@@ -115,8 +110,8 @@ export class PiEngine implements EnginePort {
       schemaEnforcement: "native",
       // pi RPC 有 steer，但 spawn 链路未接通（turn-limiter steer no-op）
       steer: "unsupported",
-      // chatMode idle 复用 + message/close/cancel 交互面已接通（v1.x 协议路径：
-      // run 会话形态 + chat-session 会话管理器承载轮次）
+      // chat 轮 = run 派发形态（每轮新 run + resume 锚点续写，D7）——conversation 位
+      // 语义收窄为 resume 能力位（D5）
       conversation: "native",
       // persona 经 --skill / --append-system-prompt flag 通道注入
       personaInjection: "flag",
@@ -126,7 +121,7 @@ export class PiEngine implements EnginePort {
       sandbox: "emulated",
       // pi session JSONL 完整重建（session-reconstructor）
       sessionRead: "full",
-      // chatMode 同进程 idle 复用（热）+ --session 冷续写
+      // 每轮新 run + resume 锚点（--session 续写原文件，冷续链路经真机验收）
       resume: "native",
       // 现链路 abort = SIGTERM（pi 子进程 trap 后 graceful shutdown）
       interrupt: "kill-only",
@@ -185,143 +180,24 @@ export class PiEngine implements EnginePort {
     return report;
   }
 
-  /** run 的引擎侧实现：协议 RunParams → spawn-runner 单次执行。
+  /** run 的引擎侧实现：协议 RunParams → spawn-runner 单次执行（chat 轮 = run 派发
+   * 形态，[H1 U3] 不再经 ChatSessionRegistry——见 buildRunParams）。
    *
    * run 期间事件经 ctx.onEvent（server 层 → `event` 通知）；session 身份经
    * ctx.onHandleReady（→ host/handleReady）；子进程 pid/状态经镜像回调上报。
-   * 抛错语义（core PiEngine.run ①）：prepare 期失败 reject，不产生 handle。
-   *
-   * [v1.x] ctx.chat 存在 = chat 会话形态（首轮/冷续）：委托 chat-session 长驻执行
-   * （agent_end 不 kill、agent_settled resolve——本轮收口进程保活，续聊经 interact）。 */
+   * 抛错语义（core PiEngine.run ①）：prepare 期失败 reject，不产生 handle。 */
   async run(task: AgentCallOpts, ctx: RunContext): Promise<{ handle: EngineHandle; outcome: AgentOutcome }> {
     const dataDir = resolveEngineDataRootOrThrow(this.deps.dataDir);
     // pi 无隔离池（poolKey 恒 'shared'）——恒值声明，宿主 journal writer 无需重定向
     ctx.onPoolResolved?.(PI_POOL_KEY);
 
     const cwd = task.cwd ?? process.cwd();
-    if (ctx.chat !== undefined) {
-      return this.runChatRound(task, ctx, dataDir, cwd);
-    }
     const spawn = this.deps.spawnRunner ?? runSpawnOnce;
     const result = await spawn(
-      buildOneShotRunParams(task, ctx, dataDir, cwd),
+      buildRunParams(task, ctx, dataDir, cwd),
       buildRunCallbacks(ctx, this.askUserHandler),
     );
-    return buildEngineRunResult(ctx.taskId, result);
-  }
-
-  /**
-   * [v1.x] run 会话形态主体（首轮/冷续，chat-domain 设计 §3.2 D1-A）：spawn 长驻子进程
-   * + 首轮 prompt，本轮 agent_settled（真空闲）resolve（进程保活）。record 锚定键 =
-   * chat.recordId（区别于一次性 run 的 runId 锚定——interact/roundLifecycle 据此定位）；
-   * resume 锚点存在 = 冷续（--session 续写原文件），不存在 = 首轮新建。
-   */
-  private async runChatRound(
-    task: AgentCallOpts,
-    ctx: RunContext,
-    dataDir: string,
-    cwd: string,
-  ): Promise<{ handle: EngineHandle; outcome: AgentOutcome }> {
-    const chat = ctx.chat!;
-    const resumeFile = refString(chat.resume?.sessionRef ?? {}, "sessionFile");
-    const result = await this.chatSessions.startRound(
-      buildChatRoundParams(task, ctx, dataDir, cwd, chat.recordId, resumeFile),
-      buildChatRoundCallbacks(ctx),
-    );
-    return buildEngineRunResult(chat.recordId, result);
-  }
-
-  /**
-   * D1 交互控制面。[v1.x] chat 会话（chat-session 命中）优先路由：
-   *   - message：热路径 sendPromptCommand + streamingBehavior（interrupt=steer 抢占/
-   *     缺省 followUp 排队——pi 上游语义）+ EPIPE 兜底（耗尽 → roundLifecycle failed）；
-   *     冷路径（进程死）→ engine_session_not_resumable + 冷续指引（宿主发新 run chat+resume）；
-   *   - close：force=杀链立即收割 / 缺省=优雅（轮收口后收割）；
-   *   - cancel：D3 收敛语义（受理 → 等轮终相位 → 超 CANCEL_SETTLE_GRACE_MS 杀链升级）。
-   *
-   * 未命中（一次性 run 的活跃子进程 / 冷句柄）走下方既有路径：message 热路径直写、
-   * close = SIGTERM、cancel = SIGTERM（无收敛等待——run 域 cancel 帧另有 AbortController
-   * 通道，收敛由 run 应答承载）。
-   */
-  async interact(handle: EngineHandle, action: InteractAction): Promise<InteractResult> {
-    try {
-      const recordId = refString(handle.data.sessionRef, "recordId");
-      if (recordId === undefined) return notResumable(handle);
-      if (this.chatSessions.has(recordId)) return this.interactChatSession(recordId, action);
-      return this.interactRunDomain(recordId, action);
-    } catch (err) {
-      return {
-        ok: false,
-        code: "engine_interact_failed",
-        message: toErrorMessage(err),
-      };
-    }
-  }
-
-  /** chat 会话命中分支（长驻）：cancel/close/message 直派 chat-session
-   *  （close force=杀链立即收割 / 缺省=优雅；message streamingBehavior 由 interrupt 决定）。 */
-  private async interactChatSession(recordId: string, action: InteractAction): Promise<InteractResult> {
-    if (action.kind === "cancel") return this.chatSessions.cancel(recordId);
-    if (action.kind === "close") return this.chatSessions.close(recordId, action.payload?.force === true);
-    return this.chatSessions.deliverMessage(recordId, action.payload, action.interrupt === true);
-  }
-
-  /** 未命中分支：一次性 run 的活跃子进程 / 冷句柄——message 热路径直写 stdin、
-   *  close/cancel = SIGTERM（run 域 cancel 帧另有 AbortController 通道，收敛由 run 应答承载）。 */
-  private interactRunDomain(recordId: string, action: InteractAction): InteractResult {
-    if (action.kind === "cancel") {
-      const child = getActiveChild(recordId);
-      if (child === undefined) return { ok: true, delivered: true };
-      child.kill("SIGTERM");
-      return { ok: true, delivered: true };
-    }
-    if (action.kind === "close") {
-      killRecordChild(recordId);
-      return { ok: true, delivered: true };
-    }
-    return this.deliverHotPathMessage(recordId, action);
-  }
-
-  /** message 热路径（进程活）sendPromptCommand 直写 stdin + EPIPE 兜底
-   *  （连续失败达阈值 → 抛错升级为 engine_interact_failed；未达 → not_resumable 降级）。 */
-  private deliverHotPathMessage(
-    recordId: string,
-    action: Extract<InteractAction, { kind: "message" }>,
-  ): InteractResult {
-    const child = getActiveChild(recordId);
-    if (child === undefined || child.killed) {
-      return {
-        ok: false,
-        code: "engine_session_not_resumable",
-        message:
-          `the pi session behind this handle has no live process in this engine instance (cold path). ` +
-          `Recovery: dispatch a new run with ctx resume (pi --session cold resume), or start a new subagent.`,
-      };
-    }
-    try {
-      sendPromptCommand(child, action.payload, {
-        streamingBehavior: action.interrupt === true ? "steer" : "followUp",
-      });
-      clearEpipeFailure(recordId);
-      return { ok: true, delivered: true };
-    } catch (err) {
-      if (err instanceof Error && err.message.includes("EPIPE")) {
-        const count = recordEpipeFailure(recordId);
-        if (count >= EPIPE_FAILURE_THRESHOLD) {
-          clearEpipeFailure(recordId);
-          throw new Error(
-            `[subagents] EPIPE fallback exhausted for ${recordId}: ${count} consecutive EPIPE failures. ` +
-              `Recovery: use action:'close' to clean up, then action:'start' a new subagent.`,
-          );
-        }
-        return {
-          ok: false,
-          code: "engine_session_not_resumable",
-          message: `EPIPE on hot path for ${recordId} (stdin pipe broken, child likely exited; attempt ${count}/${EPIPE_FAILURE_THRESHOLD}). Recovery: retry after close, or start a new subagent run.`,
-        };
-      }
-      throw err;
-    }
+    return buildEngineRunResult(ctx.resume?.recordId ?? ctx.taskId, result);
   }
 
   /**
@@ -351,15 +227,6 @@ export class PiEngine implements EnginePort {
   bindAskUser(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void {
     this.askUserHandler = handler;
   }
-
-  /**
-   * server 层注入 [v1.x] chat 会话的反向通道发射面（host/roundLifecycle、recordId 键
-   * host/streamDelta、会话级 host/askUser）。会话跨 run 存活，绑定是引擎进程生命周期
-   * 级（区别于一次性 run 的 per-run askUser 绑定）。
-   */
-  bindHostChannels(channels: ChatHostChannels | undefined): void {
-    this.chatSessions.bindHostChannels(channels);
-  }
 }
 
 /** 数据根解析：显式注入 > env；皆无 → engine_not_found（prepare 期失败 reject，不产生 handle）。 */
@@ -368,27 +235,40 @@ function resolveEngineDataRootOrThrow(explicit: string | undefined): string {
   if (dataDir !== undefined) return dataDir;
   throw new EngineSdkError(
     "engine_not_found",
-    "pi-subagent-cli cannot resolve the engine data root (neither initialize hostInfo.dataRoot nor env XYZ_AGENT_DATA_DIR is set)",
-    "The host must pass hostInfo.dataRoot at initialize, or inject XYZ_AGENT_DATA_DIR into the engine child env. Expected shape: <xyz-agent dataDir> (sessions live under <dataDir>/subagents/sessions/).",
+    "pi-subagent-cli cannot resolve the engine data root (neither the explicit deps.dataDir nor env XYZ_AGENT_DATA_DIR is set)",
+    "The host must inject XYZ_AGENT_DATA_DIR into the engine child env (initialize hostInfo.dataRoot is "
+      + "not consumed by this engine). Expected shape: <xyz-agent dataDir> (legacy fallback sessions live "
+      + "under <dataDir>/subagents/sessions/; authoritative sessionDir arrives per-run via ctx.sessionDir).",
   );
 }
 
-/** 一次性 run 的 spawn 入参还原（协议 RunParams → SpawnRunParams）。 */
-function buildOneShotRunParams(
+/** run 的 spawn 入参还原（协议 RunParams → SpawnRunParams；一次性 run 与续聊轮
+ * 共用同一派发形态——[H1 U3/U6] chat-run 统一 + resume 键为唯一会话形态键，设计 §3.3 D6/D7）：
+ *   - record 锚：续聊轮 = ctx.resume.recordId（childSpawned 帧的关联键），
+ *     一次性 run = runId；
+ *   - resume 锚点穿透：ctx.resume.resume.sessionRef.sessionFile → resumeSessionFile →
+ *     spawn-args `--session` 续写原文件（首轮无锚点 = 新建）；
+ *   - chatMode（agent_settled resolve + 收割，D7）仅在会话形态轮置位。 */
+function buildRunParams(
   task: AgentCallOpts,
   ctx: RunContext,
   dataDir: string,
   cwd: string,
 ): SpawnRunParams {
+  const resumeParams = ctx.resume;
+  const resumeFile = resumeParams === undefined ? undefined : refString(resumeParams.resume?.sessionRef ?? {}, "sessionFile");
   return {
-    recordId: ctx.taskId,
+    recordId: resumeParams?.recordId ?? ctx.taskId,
     task: task.prompt,
-    agentName: task.description ?? task.agent ?? "workflow-agent",
+    agentName: task.description ?? task.agent ?? (resumeParams !== undefined ? "chat-agent" : "workflow-agent"),
     model: ctx.ctxModel !== undefined
       ? `${(ctx.ctxModel as EngineCtxModel).provider}/${(ctx.ctxModel as EngineCtxModel).id}`
       : task.model,
     ...(task.thinkingLevel !== undefined ? { thinkingLevel: task.thinkingLevel } : {}),
-    sessionDir: resolveSessionDir(dataDir, cwd),
+    // [Option C 协议化] session 目录：宿主注入 ctx.sessionDir 权威优先（宿主
+    // getSubagentSessionDir 推导）；缺省走 [LEGACY] fallback（独立运行/测试形态，
+    // 旧推导与宿主布局不等价——见 resolveSessionDir 注释）。
+    sessionDir: ctx.sessionDir ?? resolveSessionDir(dataDir, cwd),
     cwd,
     ...(task.schemaEnv !== undefined ? { schemaEnv: task.schemaEnv } : {}),
     ...(task.maxTurns !== undefined ? { maxTurns: task.maxTurns } : {}),
@@ -396,9 +276,13 @@ function buildOneShotRunParams(
     ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
     ...(task.skillPath !== undefined ? { skillPaths: [task.skillPath] } : {}),
     ...(task.appendSystemPrompt !== undefined ? { appendSystemPrompt: task.appendSystemPrompt } : {}),
-    // fork-from 显式分叉源（协议 task.forkSource → --fork；一次性 run 承载——
-    // fork-from 无 chatMode，chat 轮续写走 resumeSessionFile 通路互不相交）。
+    // fork-from 显式分叉源（协议 task.forkSource → --fork）。fork-from 与会话形态轮
+    // 互不相交（fork-from 无 resume 键——宿主保证，续写走 resumeSessionFile）。
     ...(task.forkSource !== undefined ? { forkSource: task.forkSource } : {}),
+    // [F6] 根 session id 透传（relay 归属键 SESSION_ID 权威源；undefined 不挂键）。
+    ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
+    ...(resumeParams !== undefined ? { chatMode: true } : {}),
+    ...(resumeFile !== undefined ? { resumeSessionFile: resumeFile } : {}),
   };
 }
 
@@ -413,54 +297,15 @@ function buildRunCallbacks(
     onChildSpawned: (pid) => {
       ctx.onChildSpawned?.({ pid, killed: false });
     },
+    onChildStateChanged: (p) => {
+      ctx.onChildStateChanged?.(p);
+    },
     ...(ctx.stream !== undefined
       ? { onDelta: (delta: string) => ctx.stream?.onDelta(delta) }
       : {}),
     ...(askUserHandler !== undefined
       ? { askUser: (req: UiRequest) => askUserHandler(req) }
       : {}),
-  };
-}
-
-/** chat 轮 startRound 入参装配（resume 锚点存在 = 冷续 --session 续写原文件）。 */
-function buildChatRoundParams(
-  task: AgentCallOpts,
-  ctx: RunContext,
-  dataDir: string,
-  cwd: string,
-  recordId: string,
-  resumeFile: string | undefined,
-): SpawnRunParams {
-  return {
-    recordId,
-    task: task.prompt,
-    agentName: task.description ?? task.agent ?? "chat-agent",
-    model: ctx.ctxModel !== undefined
-      ? `${(ctx.ctxModel as EngineCtxModel).provider}/${(ctx.ctxModel as EngineCtxModel).id}`
-      : task.model,
-    ...(task.thinkingLevel !== undefined ? { thinkingLevel: task.thinkingLevel } : {}),
-    sessionDir: resolveSessionDir(dataDir, cwd),
-    cwd,
-    ...(task.schemaEnv !== undefined ? { schemaEnv: task.schemaEnv } : {}),
-    ...(task.maxTurns !== undefined ? { maxTurns: task.maxTurns } : {}),
-    ...(task.graceTurns !== undefined ? { graceTurns: task.graceTurns } : {}),
-    ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-    ...(task.skillPath !== undefined ? { skillPaths: [task.skillPath] } : {}),
-    ...(task.appendSystemPrompt !== undefined ? { appendSystemPrompt: task.appendSystemPrompt } : {}),
-    ...(resumeFile !== undefined ? { resumeSessionFile: resumeFile } : {}),
-  };
-}
-
-/** chat 轮宿主回调装配（首轮事件/runId 键 delta/handle 回填/子进程镜像）。 */
-function buildChatRoundCallbacks(ctx: RunContext): ChatRoundStartOptions {
-  return {
-    runId: ctx.taskId,
-    onEvent: (event: AgentEvent) => ctx.onEvent?.(event),
-    ...(ctx.stream !== undefined ? { stream: ctx.stream } : {}),
-    onHandleReady: (partial) => ctx.onHandleReady?.(partial),
-    onChildSpawned: (pid) => {
-      ctx.onChildSpawned?.({ pid, killed: false });
-    },
   };
 }
 
@@ -526,25 +371,6 @@ function toOutcomeUsage(result: SpawnRunResult): import("@zhushanwen/subagent-en
 function refString(ref: Record<string, string>, key: string): string | undefined {
   const v = ref[key];
   return typeof v === "string" ? v : undefined;
-}
-
-/** 杀单个 record 的活跃子进程（SIGTERM；升级链由 killAll 兜底）。 */
-function killRecordChild(recordId: string): void {
-  const child = getActiveChild(recordId);
-  if (child === undefined || child.killed) return;
-  child.kill("SIGTERM");
-}
-
-/** 死/不可定位 handle 的统一拒绝（D1 推论：指向冷续路径）。 */
-function notResumable(handle: EngineHandle): InteractResult {
-  return {
-    ok: false,
-    code: "engine_session_not_resumable",
-    message:
-      `the pi session behind this handle is not resumable via interact (record not found for ` +
-      `sessionRef ${JSON.stringify(handle.data.sessionRef)}). Recovery: use a cold resume path ` +
-      `(pi --session with the session file), or start a new subagent.`,
-  };
 }
 
 /** 默认版本探测：spawn `<command> --version`（probe 超时按探针失败处理）。 */

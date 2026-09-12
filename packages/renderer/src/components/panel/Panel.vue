@@ -76,9 +76,10 @@
       <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.panel.selectSession') }}</p>
     </div>
 
-    <!-- M17 对话流 widget 面板（todo/goal 等常驻状态卡，ViewHostStore 经 inject 消费）。
-         挂载条件映射（D5）：kind ∈ {trace, conversation, empty-with-session}——null session
-         无分区可枚举不渲染；dead 主区已被重开占位接管，防状态矛盾；landing 无 session 承接。 -->
+    <!-- M17 对话流 widget 状态带（D 方案：单行 pill + 详情浮层，todo/goal 等常驻状态，
+         ViewHostStore 经 inject 消费）。挂载条件映射（D5）：kind ∈ {trace, conversation,
+         empty-with-session}——null session 无分区可枚举不渲染；dead 主区已被重开占位接管，
+         防状态矛盾；landing 无 session 承接。 -->
     <WidgetArea v-if="widgetSessionId" :session-id="widgetSessionId" />
 
     <!-- ④ composer companion zone（③ progress-zone 已删——真实任务态未接入，state 恒 null

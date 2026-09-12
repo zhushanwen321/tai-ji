@@ -349,6 +349,10 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     case "compaction":
       return;
 
+    // ── activity：纯活性信号，reducer no-op（协议语义见 contract-types）──
+    case "activity":
+      return;
+
     default: {
       // 穷尽性检查：新增 AgentEvent variant 时编译期报错
       const _exhaustive: never = event;

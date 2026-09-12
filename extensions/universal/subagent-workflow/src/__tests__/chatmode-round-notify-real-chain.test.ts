@@ -7,12 +7,12 @@
 //（此时 record.result 从未被写）→ 轮次通知正文恒 "(empty)"。inproc 修复 = onRoundSettled
 // 从本轮 turns 派生回复文本写入 record.result。
 //
-// [W3 改写] 契约变更：chat 轮次经协议引擎（registry 'pi' cli 形态 port），live turns 留在
-// 引擎进程内，core 的轮次文本增量权威 = run 应答 outcome.content（W2「outcome = 本轮内容」
-// 契约，settleChatRoundFromResponse 消费）。原「FakeChild 驱动 stdout 协议行」的 inproc
-// session-runner 链随删件消亡——本测试改用 registerFakePiEngine 协议替身驱动同一链路：
-// execute(conversation:true) → kickOffChatRound → engine.run → idle 相位帧 → run 应答
-// settle，断言「通知正文含本轮真实回复（非 (empty)）」的行为语义在协议形态下保持。
+// [W3 改写 → H1 U6] 契约变更：会话形态轮经协议引擎（registry 'pi' cli 形态 port），
+// live turns 留在引擎进程内，core 的轮次文本增量权威 = run 应答 outcome.content。
+// 本测试用 registerFakePiEngine 协议替身驱动同一链路：execute(conversation:true) →
+// kickOffChatRound → engine.run → run 应答 settle（[H1 U6] 轮末分流 = run 应答驱动，
+// sessionFile 锚点回填 = outcome.sessionFile 承载——旧 idle 相位帧驱动随相位机退役），
+// 断言「通知正文含本轮真实回复（非 (empty)）」的行为语义保持。
 // 禁止手工预置 record.result——正文必须从应答 settle 真实流入。
 //
 // 原 inproc 专有断言「record.turns[0].text 累积」随 turns 留守引擎进程消亡（core 侧
@@ -118,14 +118,13 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     const run = fake.runs[0];
-    expect(run.ctx.chat?.recordId).toBe(handle.subagentId);
+    expect(run.ctx.resume?.recordId).toBe(handle.subagentId);
 
-    // 真实事件链（协议时序）：首轮流式 delta（text 增量 → stream widget 面）→ idle 相位
-    //（真空闲：armIdleTimer，帧先于应答帧）→ run 应答 settle（= 首轮 agent_settled，
-    // outcome.content = 本轮增量权威 → record.result 写入 → notify）。
+    // 真实事件链（[H1 U6] 协议时序）：轮内流式 delta（text 增量 → stream widget 面）→
+    // run 应答 settle（= agent_settled，outcome.content = 本轮增量权威 → record.result
+    // 写入 → notify；sessionFile 锚点经 outcome.sessionFile 回填 + 绑定落盘）。
     run.emitDelta(ROUND_REPLY);
-    run.emitLifecycle({ phase: "idle", anchor: { sessionRef: { sessionFile: SESSION_FILE }, poolKey: "shared" } });
-    run.settle({ content: ROUND_REPLY });
+    run.settle({ content: ROUND_REPLY, sessionFile: SESSION_FILE });
 
     // settle → notifyComplete（record.result 从应答 content 写入）→ 无其他 busy background
     // → 立即 flush → pi.sendMessage。
@@ -146,8 +145,8 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     expect(record!.result).toBe(ROUND_REPLY);
     expect(record!.status).toBe("running");
     expect(record!.round).toBe(1);
-    // 锚点回填：idle 相位 anchor 的 sessionFile 已回填 record（原 session-runner header
-    // 回填的协议等价承载）
+    // 锚点回填：run 应答 outcome.sessionFile 已回填 record（[H1 U6] 旧 idle 相位
+    // anchor 驱动退役后的唯一回填点，+ record-binding sidecar 落盘）
     expect(record!.sessionFile).toBe(SESSION_FILE);
 
     // 收尾：settle 后 run 续体的 collectCoordinator 回注与 settle 内 notify 同 id:round →

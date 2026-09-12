@@ -18,7 +18,10 @@
 // 读 Date.now()——本文件用 fake timers 固定时钟（now = 探针首跑实值 1788189209000），
 // 使快照期望值与实测值逐字可比。
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import {
   BG_MESSAGE,
@@ -38,6 +41,7 @@ import {
   wrapForkFromPrompt,
 } from "../subagent-actions-core.ts";
 import { ResurrectDeniedError } from "../types.ts";
+import { writeAliveMarker } from "../alive-store.ts";
 import type {
   ExecutionHandle,
   ExecutionRecord,
@@ -48,6 +52,11 @@ import type { SubagentService } from "../subagent-service.ts";
 
 // ── 时钟固定（duration 快照确定性，见文件头）──
 const FROZEN_NOW = 1788189209000;
+
+/** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
+ *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」
+ *  保守判活（self-pid 排除后不能再以本进程 pid 模拟异进程实例，同 cold-lookup.test.ts）。 */
+const FOREIGN_LIVE_PID = 1;
 
 beforeAll(() => {
   vi.useFakeTimers({ now: FROZEN_NOW });
@@ -144,6 +153,9 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     getRecordForAction: vi.fn(),
     closeSubagent: vi.fn(),
     deliverChatMessage: vi.fn(),
+    // [H1 U2 / D5 双写点①] messageHandler 升级 gate 判据读 service.canUpgradeToConversation
+    //（stub 缺省放行 = pi 默认引擎语义；gate 拒绝面专项见 conversation-continuation.test.ts）。
+    canUpgradeToConversation: vi.fn(() => true),
     // [U2] startHandler 缺省 collect 解析读真实 config（偏差#3 接线）：stub 缺省 async
     //（本文件不测 collect 语义，专项见 start-collect-guard.test.ts）。
     getCollectSyncDefault: vi.fn(() => "async" as const),
@@ -152,6 +164,9 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
   return {
     execute: m.execute,
     cancel: m.cancel,
+    // [H1 U2 / D5 双写点①] messageHandler 升级 gate 判据经平铺访问器（真实 service 为
+    // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
+    canUpgradeToConversation: m.canUpgradeToConversation,
     // [U2 偏差#3 接线] startHandler 经平铺访问器读 config 缺省 collect（真实 service
     // 为平铺方法 subagent-service.ts:1786，非 queries 聚合面成员），stub 须同构挂载。
     getCollectSyncDefault: m.getCollectSyncDefault,
@@ -433,7 +448,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
         ],
       },
     });
-    expect(collectRecords).toHaveBeenCalledWith(20, "all");
+    expect(collectRecords).toHaveBeenCalledWith(20, "all", false);
     // light record（getFullRecord undefined）回退原样投影
     expect(getFullRecord).toHaveBeenCalledWith("bg-2");
   });
@@ -441,17 +456,17 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
   it("缺省 → collectRecords(20,'running')", () => {
     const collectRecords = vi.fn(() => [] as SubagentRecord[]);
     listHandler(makeService({ collectRecords }), undefined);
-    expect(collectRecords).toHaveBeenCalledWith(20, "running");
+    expect(collectRecords).toHaveBeenCalledWith(20, "running", false);
   });
 
   it("limit 夹紧：500 → 100 上限；0 → 1 下限（非默认值）", () => {
     const high = vi.fn(() => [] as SubagentRecord[]);
     listHandler(makeService({ collectRecords: high }), { includeFinished: true, limit: 500 });
-    expect(high).toHaveBeenCalledWith(100, "all");
+    expect(high).toHaveBeenCalledWith(100, "all", false);
 
     const low = vi.fn(() => [] as SubagentRecord[]);
     listHandler(makeService({ collectRecords: low }), { includeFinished: true, limit: 0 });
-    expect(low).toHaveBeenCalledWith(1, "all");
+    expect(low).toHaveBeenCalledWith(1, "all", false);
 
     expect(DEFAULT_LIST_LIMIT).toBe(20);
     expect(MAX_LIST_LIMIT).toBe(100);
@@ -473,7 +488,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     expect(await errOf(() => cancelHandler(makeService(), { subagentId: "bg-x" }))).toEqual({
       errorName: "Error",
       message:
-        'No subagent record with id "bg-x". It may have finished — use action:\'list\' with includeFinished:true to verify.',
+        'No subagent record with id "bg-x". It may have finished — use action:\'list\' with includeFinished:true to verify (add includeWorkflow:true to also see workflow-dispatched subagents).',
     });
   });
 
@@ -505,7 +520,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     ).toEqual({
       errorName: "Error",
       message:
-        'No subagent record with id "bg-9". It may have finished — use action:\'list\' with includeFinished:true to verify.',
+        'No subagent record with id "bg-9". It may have finished — use action:\'list\' with includeFinished:true to verify (add includeWorkflow:true to also see workflow-dispatched subagents).',
     });
   });
 
@@ -613,7 +628,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     });
   });
 
-  it("chatMode record → deliverChatMessage(text trim + interrupt) + 领域对象", async () => {
+  it("chatMode record → deliverChatMessage(text trim) + 领域对象（[H1 U6] interrupt 退役）", async () => {
     const deliverChatMessage = vi.fn(async () => {});
     const chatRecord = makeExecRecord({ id: "bg-1", chatMode: true, slug: "src-slug" });
     const r = await messageHandler(
@@ -626,7 +641,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
       slug: "src-slug",
       response: { delivered: true },
     });
-    expect(deliverChatMessage).toHaveBeenCalledWith(chatRecord, "go on", true);
+    expect(deliverChatMessage).toHaveBeenCalledWith(chatRecord, "go on");
   });
 
   it("one-shot upgrade：非 chatMode running record 收 message → 置位 chatMode 后投递", async () => {
@@ -637,7 +652,27 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
       { subagentId: "bg-1", text: "hi" },
     );
     expect(upgradeRec.chatMode).toBe(true);
-    expect(deliverChatMessage).toHaveBeenCalledWith(upgradeRec, "hi", false);
+    expect(deliverChatMessage).toHaveBeenCalledWith(upgradeRec, "hi");
+  });
+
+  it("[H1 U2 / D5 双写点①] one-shot upgrade gate 拒绝：unsupported 引擎（canUpgradeToConversation=false）→ 硬拒 + fork/重派指引，chatMode 不置位", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const zcodeRec = makeExecRecord({ id: "bg-z", chatMode: false, status: "running", engine: "zcode" });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({
+          getRecordForAction: vi.fn(() => zcodeRec),
+          deliverChatMessage,
+          canUpgradeToConversation: vi.fn(() => false),
+        }),
+        { subagentId: "bg-z", text: "hi" },
+      ),
+    );
+    // 文案 = engineConversationUpgradeUnsupportedError 单源（错误码前缀 + 拒绝依据）
+    expect(err.errorName).toBe("EngineError");
+    expect(err.message).toContain("cannot be upgraded to a resumable conversation");
+    expect(zcodeRec.chatMode).toBe(false);
+    expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
   it("getRecordForAction 拒绝 + 无终态快照 → 原错误透传（文案最准原则）", async () => {
@@ -694,14 +729,14 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
       message:
         "subagent bg-1 was deliberately closed by user (closedReason: user-close) — " +
         "it cannot be messaged or resumed; nothing can reattach to it. " +
-        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output.",
+        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
     });
     expect(await errOf(() => messageHandler(mkSvc("cancelled"), { subagentId: "bg-1", text: "hi" }))).toEqual({
       errorName: "Error",
       message:
         "subagent bg-1 was deliberately closed by user (closedReason: cancelled) — " +
         "it cannot be messaged or resumed; nothing can reattach to it. " +
-        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output.",
+        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
     });
   });
 
@@ -800,6 +835,16 @@ describe("⛔4 closeHandler（force 语义透传，快照 = pi-sw 实测）", ()
 // forkFromHandler（守卫链 1–6）
 // ============================================================
 describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快照 = pi-sw 实测）", () => {
+  // [U4b/E2] 双宿主探针 fixture 目录：守卫 3 现查探针读真实 .alive 侧车（不再读
+  // rec.externalInstance 缓存字段），用临时目录落盘驱动，自建自删。
+  let forkDir: string;
+  beforeEach(() => {
+    forkDir = fs.mkdtempSync(path.join(os.tmpdir(), "actions-core-fork-"));
+  });
+  afterEach(() => {
+    fs.rmSync(forkDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
   function makeForkService(source: SubagentRecord | undefined, execute = vi.fn(async (_opts: { task: string; slug?: string; agent?: string }): Promise<ExecutionHandle> => ({
     mode: "background",
     subagentId: "bg-new-1",
@@ -838,15 +883,21 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
       errorName: "Error",
       message:
         'No subagent record with id "bg-404". It may never have existed or been garbage-collected — ' +
-        "use action:'list' with includeFinished:true to verify the id.",
+        "use action:'list' with includeFinished:true to verify the id (add includeWorkflow:true to also see workflow-dispatched subagents).",
     });
   });
 
-  it("守卫 3：externalInstance 活 pid marker → another-process 文案", async () => {
+  it("守卫 3：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
+    // [U4b/E2] 双宿主形态：宿主 A 持有中的 record（.alive = A 进程的活 pid 声明）被
+    // 宿主 B 冷查重建，B fork-from 该源时守卫 3 现查探针命中 → 拒绝（源仍在异进程
+    // 运行，接续会读到半截历史）。[U1/A4] self-pid 排除后「异进程」不能用本测试进程
+    // pid 模拟，改恒活外部 pid 1（launchd/init：kill(1,0) → EPERM → isProcessAlive 判活）。
+    const sessionFile = path.join(forkDir, "sess-foreign.jsonl");
+    writeAliveMarker(sessionFile, { pid: FOREIGN_LIVE_PID, id: "bg-1", startedAt: 5 });
     expect(
       await errOf(() =>
         forkFromHandler(
-          makeForkService(makeRec({ id: "bg-1", externalInstance: { pid: 4321, id: "p-1", startedAt: 5 } })),
+          makeForkService(makeRec({ id: "bg-1", status: "running", sessionFile })),
           { sourceSubagentId: "bg-1" },
         ),
       ),
@@ -885,7 +936,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
         message:
           `subagent bg-1 was deliberately closed by user (closedReason: ${closedReason}) — ` +
           "deliberately-closed records cannot be resumed or branched from; nothing can reattach to them. " +
-          "Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output.",
+          "Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
       });
     }
   });

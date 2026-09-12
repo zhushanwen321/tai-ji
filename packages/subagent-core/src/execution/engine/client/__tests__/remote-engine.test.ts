@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EngineClient } from "../engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "../remote-engine.ts";
 import { SubagentStream } from "../../../stream-sink.ts";
+import { getSubagentSessionDir } from "../../../path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 
@@ -253,6 +254,49 @@ describe("RemoteEngine run 帧映射", () => {
     await cleanup();
   });
 
+  it("ctx.sessionRootId → wire ctx.sessionRootId 逐字保真；缺省不传 → wire 无该键（F6 additive）", async () => {
+    // 正向：根 session id 上 wire（pi 引擎 relay 归属键 SESSION_ID 的权威来源）
+    const withRoot = makeEngine();
+    const { ctx: ctxRoot, events: eventsRoot } = makeCtx({ sessionRootId: "root-sess-f6" });
+    await withRoot.engine.run({ prompt: "p" }, ctxRoot);
+    expect(extractRunParams(eventsRoot).ctx.sessionRootId).toBe("root-sess-f6");
+
+    // 负向：缺省 → wire ctx 不出现该键（undefined 不上 wire，旧引擎 additive 兼容）
+    const bare = makeEngine();
+    const { ctx: ctxBare, events: eventsBare } = makeCtx();
+    await bare.engine.run({ prompt: "p" }, ctxBare);
+    expect(extractRunParams(eventsBare).ctx).not.toHaveProperty("sessionRootId");
+
+    await withRoot.cleanup();
+    await bare.cleanup();
+  });
+
+  it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {
+    // stub env 固定推导输入（测试进程可能已带这两键——stub 后期望值确定）
+    vi.stubEnv("PI_CODING_AGENT_DIR", join(dataDir, "agent-dir"));
+    vi.stubEnv("PI_SUBAGENT_ROOT_CWD", join(dataDir, "root-cwd"));
+    try {
+      // 正向：env 同源推导值上 wire（宿主单一权威 getSubagentSessionDir，引擎不自推导）
+      const derived = makeEngine();
+      const { ctx, events } = makeCtx();
+      await derived.engine.run({ prompt: "p" }, ctx);
+      expect(extractRunParams(events).ctx.sessionDir).toBe(
+        getSubagentSessionDir(join(dataDir, "agent-dir"), join(dataDir, "root-cwd")),
+      );
+
+      // 宿主编排层显式注入（ctx.sessionDir）优先于 env 推导
+      const injected = makeEngine();
+      const { ctx: ctxInj, events: eventsInj } = makeCtx({ sessionDir: "/explicit/session-dir" });
+      await injected.engine.run({ prompt: "p" }, ctxInj);
+      expect(extractRunParams(eventsInj).ctx.sessionDir).toBe("/explicit/session-dir");
+
+      await derived.cleanup();
+      await injected.cleanup();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("poolResolved / handleReady → RunContext 回调（journal 路径权威 + 运行中句柄回填）", async () => {
     const pools: string[] = [];
     const readies: Array<{ sessionRef: Record<string, string>; poolKey: string }> = [];
@@ -393,7 +437,7 @@ describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs ini
   });
 });
 
-describe("interact / read / probe / dispose 门面", () => {
+describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact 面退役删除）", () => {
   it("read 协议帧携带 dataDir（必填：存量池时代相对 dbPath 定位）", async () => {
     const { engine, cleanup } = makeEngine();
     const view = await engine.read({
@@ -411,21 +455,11 @@ describe("interact / read / probe / dispose 门面", () => {
     await cleanup();
   });
 
-  it("probe → ProbeReport；interact → delivered；dispose → client 停机（幂等）", async () => {
+  it("probe → ProbeReport；dispose → client 停机（幂等）", async () => {
     const { engine, cleanup } = makeEngine();
     const report = await engine.probe();
     expect(report.ok).toBe(true);
     expect(report.engineVersion).toBe("fake-1.0.0");
-    const interact = await engine.interact({
-      data: {
-        v: 1,
-        engineId: "fake",
-        sessionRef: { sessionId: "s-1" },
-        poolKey: "shared",
-        adapterVersion: "fake-adapter",
-      },
-    }, { kind: "message", payload: "hi" });
-    expect(interact).toEqual({ ok: true, delivered: true });
     await engine.dispose();
     await expect(engine.dispose()).resolves.toBeUndefined(); // 幂等
     await cleanup();

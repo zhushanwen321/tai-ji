@@ -59,7 +59,7 @@ export class EngineError extends Error {
     this.recovery = recovery;
   }
 
-  /** 结构化投影（InteractResult.code/message 与 GUI 警告条共用形态）。 */
+  /** 结构化投影（code/message 与 GUI 警告条共用形态）。 */
   toStructured(): { code: EngineErrorCode; message: string; recovery: string } {
     return { code: this.code, message: this.message, recovery: this.recovery };
   }

@@ -4,8 +4,8 @@
 //
 // 为什么需要它：WorkflowRun 的 JSONL 快照投影此前两宿主各写一份（core
 // file-run-store.ts 的 toSnapshot/fromSnapshot 与 pi 壳 jsonl-run-store.ts 的
-// serializeRun/deserializeRun）——字段集一致但语义细节分叉（live-strip、版本
-// guard、budgetRef 剔除），修一处漏一处。本模块收敛为单源 codec：字段演进
+// serializeRun/deserializeRun）——字段集一致但语义细节分叉（版本 guard、
+// budgetRef 剔除），修一处漏一处。本模块收敛为单源 codec：字段演进
 // 单点（G2），两宿主（FileRunStore / pi JsonlRunStore）各自只保留 IO 策略
 // （rewrite/append/去抖），投影与版本衔接语义全部经此模块。
 //
@@ -103,10 +103,9 @@ export interface RunSnapshot {
  * WorkflowRun → 单行快照。
  *
  * - 补 v 字段（D4 裁决②：写入恒带当前版本）。
- * - strip live（防御内聚）：calls[].traceNode 与 trace 数组节点的 `live` 运行期
- *   对象剥除——ExecutionRecord 含可变 turns[]/controller，不可序列化且跨进程
- *   必死（重跑时由 dispatchAgentCall 重建）；strip 产出新对象，不 mutate 内存
- *   中的 run（save 后 run 可继续跑）。
+ * - trace 节点全量序列化（[H2 W3] live strip 分支随 ExecutionTraceNode.live 字段
+ *   删除而退役——节点不再携带运行期对象，无需防御性剥离；旧快照经 fromRunSnapshot
+ *   重水合时多余键自然丢弃，存量行零迁移）。
  * - spec.budgetRef 剔除：父 Budget 共享引用是进程内优化（嵌套 workflow 预算
  *   共享），非持久化数据；Budget 实例若混入 spec 落盘将退化为普通对象投影
  *   （重水合后类型不符的脏字段）——重水合后 budget 从 state.budget 独立重建，
@@ -131,22 +130,19 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
         usedCost: run.state.budget.usedCost,
         totalCallCount: run.state.budget.totalCallCount,
       },
-      calls: Array.from(run.state.calls.values(), (c) => {
-        // strip live（同 trace 序列化，不持久化运行期对象）
-        const { live: _live, ...traceNodeRest } = c.traceNode;
-        return {
-          id: c.id,
-          opts: c.opts,
-          status: c.status,
-          attempts: c.attempts,
-          result: c.result,
-          sessionId: c.sessionId,
-          sessionFile: c.sessionFile,
-          traceNode: traceNodeRest,
-        };
-      }),
-      // trace 节点浅拷贝时 strip live 字段
-      trace: run.state.trace.toArray().map(({ live: _live, ...rest }) => rest),
+      calls: Array.from(run.state.calls.values(), (c) => ({
+        id: c.id,
+        opts: c.opts,
+        status: c.status,
+        attempts: c.attempts,
+        result: c.result,
+        sessionId: c.sessionId,
+        sessionFile: c.sessionFile,
+        traceNode: c.traceNode,
+      })),
+      // trace 节点全量拷贝序列化（toArray 返回内部数组只读引用，拷贝为可变数组
+      // 落盘——节点不再携带运行期对象，无需防御性剥离）
+      trace: [...run.state.trace.toArray()],
       errorLogs: run.state.errorLogs,
       error: run.state.error,
       scriptResult: run.state.scriptResult,

@@ -9,15 +9,6 @@ export { EngineProtocolServer, createDefaultPiEngine } from "./server.ts";
 export { PiEngine, type PiEngineDeps } from "./pi-engine.ts";
 export { PI_ADAPTER_VERSION, PI_ENGINE_ID, PI_POOL_KEY } from "./constants.ts";
 
-// ── [v1.x] chat 会话管理器（chat-domain 设计 §3.2 D1-A 引擎侧）──
-export {
-  ChatSessionRegistry,
-  type ChatHostChannels,
-  type ChatRoundStartOptions,
-  type ChatSessionRegistryDeps,
-  type ChatSpawnExecutor,
-} from "./chat-session.ts";
-
 // ── 迁移的引擎侧原语（core engines/pi 同名件的包内权威） ──
 export {
   buildSpawnArgs,

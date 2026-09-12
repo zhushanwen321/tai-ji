@@ -4,6 +4,10 @@
 // 只归档不补注销（archive 不发 pending:unregister——注销统一交对账 sweep）、
 // WorkflowRun store 纳入（startedAt 锚终态化 + save）。fake timers 推进 GC
 // interval；RecordStore 用 mkdtemp 自建目录 + pi=null（archive 纯内存，零磁盘写）。
+//
+// [U2b / C1] markIdleArchived 归口：归档时 `.alive` 写权声明同步 release（D3a
+// release 出口②）——S6 验收锚点链的单元级断言（fake clock 推进 30 天 → 归档 →
+// marker 已删 → fork-from 探针放行 → 接管 acquire 重声明）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -11,6 +15,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { findForeignLiveInstance } from "../alive-store.ts";
 import { createRecord } from "../execution-record.ts";
 import { startIdleGc } from "../idle-gc.ts";
 import { RecordStore } from "../record-store.ts";
@@ -52,6 +57,61 @@ function makeRecord(id: string, overrides: Partial<ExecutionRecord> = {}): Execu
   Object.assign(record, overrides);
   return record;
 }
+
+describe("idle-GC 归口 markIdleArchived（U2b/C1——D3a release 出口②闭环链，S6 锚点）", () => {
+  it("fake clock 推进 30 天 → 归档 + `.alive` 已删 + fork-from 探针放行 + 接管 acquire 重声明（闭环链）", async () => {
+    const store = makeStore();
+    const sessionFile = path.join(tmpDir, "lease-session.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    const rec = makeRecord("bg-lease", {
+      startedAt: Date.now() - 31 * DAY_MS,
+      idleSince: Date.now() - 31 * DAY_MS,
+      sessionFile,
+    });
+    store.register(rec);
+    // 持有期声明在位（模拟 spawn 侧 acquireWriteLease 已声明写权的 resumable record）。
+    store.acquireWriteLease(sessionFile, rec.id);
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
+
+    stop = startIdleGc(store);
+    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+
+    // ① 归档生效（内存移除——record 磁盘仍 running 可接管，非终态化）。
+    expect(store.getMutable("bg-lease")).toBeUndefined();
+    // ② marker 已删（release 生效——归档 = 放弃持有 = 放弃写权声明）。
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
+    // ③ fork-from 放行：探针无 marker 即无声明，不再被残留声明拦。
+    expect(findForeignLiveInstance(sessionFile)).toBeUndefined();
+    // ④ message 接管 acquire 重声明：接管时统一 acquireWriteLease（接管链经
+    //    markResurrected 的 acquire-first，本处以 store 内部 acquire 动作直驱同语义）。
+    store.acquireWriteLease(sessionFile, "bg-lease");
+    const marker = JSON.parse(fs.readFileSync(`${sessionFile}.alive`, "utf-8")) as {
+      pid: number;
+      id: string;
+    };
+    expect(marker).toMatchObject({ pid: process.pid, id: "bg-lease" });
+    // 重声明后探针对本进程仍放行（self-pid 排除——自有声明不构成 foreign）。
+    expect(findForeignLiveInstance(sessionFile)).toBeUndefined();
+  });
+
+  it("锚窗内的 record 不归档且 `.alive` 不 release（无早释）", async () => {
+    const store = makeStore();
+    const sessionFile = path.join(tmpDir, "lease-fresh.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    const rec = makeRecord("bg-hold", {
+      startedAt: Date.now() - 1 * DAY_MS,
+      sessionFile,
+    });
+    store.register(rec);
+    store.acquireWriteLease(sessionFile, rec.id);
+
+    stop = startIdleGc(store);
+    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+
+    expect(store.getMutable("bg-hold")).toBeDefined();
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
+  });
+});
 
 describe("idle-gc record 锚扩展（W4）", () => {
   it("无 idleSince 的 resumable record 以 startedAt 为锚：超 30 天归档", async () => {

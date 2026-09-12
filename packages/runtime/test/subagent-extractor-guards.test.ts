@@ -117,6 +117,24 @@ describe('自描述 subagent-record 投影守卫（projectSelfDescribedSubagentR
     const closed = scanSubagentEntries([recordEntry(validRecordData({ status: 'closed', closedReason: 'gc' }))])
     expect(closed[0].closedReason).toBe('gc')
   })
+
+  // R3-1（H2 阶段 3 一致性审查修复）：origin 透传断言——此前投影白名单漏 origin，
+  // renderer 过滤面（badge 计数 / hasRunning / 列表桶）origin 恒 undefined，workflow
+  // record 运行期虚亮。守卫语义对齐 core readEntryOriginFields：仅认 'tool'|'workflow'
+  // 字面量，非法值/缺省 → undefined（= tool 语义，存量 entry 零迁移）。
+  it('origin 字面量透传：workflow/tool 透传，非法值与缺省 → undefined（renderer 过滤面数据源契约）', () => {
+    const projected = scanSubagentEntries([
+      recordEntry(validRecordData({ id: 'sub-wf', origin: 'workflow' })),
+      recordEntry(validRecordData({ id: 'sub-tool', origin: 'tool' })),
+      recordEntry(validRecordData({ id: 'sub-bogus', origin: 'bogus' })), // 非法字面量
+      recordEntry(validRecordData({ id: 'sub-legacy' })), // 缺省（v1 前存量 entry）
+    ])
+    const byId = (id: string): SubagentRecord | undefined => projected.find((r) => r.subagentId === id)
+    expect(byId('sub-wf')?.origin).toBe('workflow')
+    expect(byId('sub-tool')?.origin).toBe('tool')
+    expect(byId('sub-bogus')?.origin).toBeUndefined()
+    expect(byId('sub-legacy')?.origin).toBeUndefined()
+  })
 })
 
 describe('legacy toolCall arguments 守卫（parseLegacyToolCallBlock + projectSubagentStartArgs）', () => {

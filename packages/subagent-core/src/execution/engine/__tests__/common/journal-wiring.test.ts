@@ -27,7 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   if (PREV_DATA_DIR === undefined) delete process.env["XYZ_AGENT_DATA_DIR"];
   else process.env["XYZ_AGENT_DATA_DIR"] = PREV_DATA_DIR;
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  fs.rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 function makeHandle(): EngineHandle {
@@ -62,6 +62,21 @@ describe("wireEventJournal（D3-③ host helper 唯一实现）", () => {
     wiring.onEvent({ type: "turn_end" });
     await wiring.close();
     expect(fs.existsSync(wiring.path)).toBe(true);
+  });
+
+  it("activity 豁免 journal.append：journal 文件无对应行，forwardEvents 仍收到（纯活性信号不进持久面）", async () => {
+    const forwarded: AgentEvent[] = [];
+    const wiring = wireEventJournal({ engineId: "zcode", taskId: "sa-6", forwardEvents: (e) => forwarded.push(e) });
+    wiring.onEvent({ type: "activity" });
+    wiring.onEvent({ type: "turn_end" });
+    wiring.onEvent({ type: "activity" });
+    await wiring.close();
+    // forwardEvents 照发（workflow liveRecord reducer no-op / 守护刷新面上游）
+    expect(forwarded.map((e) => e.type)).toEqual(["activity", "turn_end", "activity"]);
+    // journal 只落 turn_end 一行（activity 过滤在 append 前，无 seq 空洞）
+    const lines = fs.readFileSync(wiring.path, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).event.type).toBe("turn_end");
   });
 
   it("handle 回填：backfillHandle 写 retarget 后的终态路径（read ②级自描述定位符）", async () => {

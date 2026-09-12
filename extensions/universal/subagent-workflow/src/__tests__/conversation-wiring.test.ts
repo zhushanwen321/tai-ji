@@ -116,7 +116,7 @@ describe("[M9] conversation:true 接线：execute → createRecordForMode", () =
     // execute 走到 kickOffChatRound（engine.run 已派发）——完整接线而非 early return
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     // chat 会话形态接线：run ctx 携带 chat.recordId（协议 run.params.chat 承载位）
-    expect(fake.runs[0].ctx.chat?.recordId).toBe(handle.subagentId);
+    expect(fake.runs[0].ctx.resume?.recordId).toBe(handle.subagentId);
     expect(fake.runs[0].task.conversation).toBe(true);
   });
 

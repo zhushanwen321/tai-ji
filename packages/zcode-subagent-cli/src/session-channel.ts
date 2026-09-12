@@ -61,6 +61,7 @@ import {
   ZCODE_TURN_IDLE_TIMEOUT_MS,
   ZCODE_TURN_MAX_TIMEOUT_ENV,
   ZCODE_TURN_MAX_TIMEOUT_MS,
+  isFailedTerminalStatus,
   parseZcodeTurnTimeoutEnv,
 } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
@@ -291,6 +292,17 @@ export interface SessionTurnCallbacks {
    * 都挂在这个时点——runTurn 的 resolve 形态在终态前拿不到 sessionId。
    */
   onSessionCreated?: (sessionId: string) => void;
+  /**
+   * [PR3] 非终态、非增量的 session/event 帧到达回调（tool.updated progress /
+   * turn.started / hook 事件等引擎可见但宿主不可见的进展）。真机探针实证
+   * （/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期服务端每 ~1.0s 推一帧
+   * {type:"tool.updated", payload:{kind:"progress", toolCallId, toolName, elapsedMs,
+   * stdoutBytes, stdoutTail, pid}}——既非 final-frame 也非 delta，宿主刷新面只有
+   * delta 回调，「仅工具执行、零正文」形态下宿主侧 30min 中段无进展守护会饿死
+   * 误杀，本回调补 tool 执行期活性（引擎映射 AgentEvent {type:"activity"}——
+   * 零载荷纯活性信号）。cadence ~1s，不加节流：服务端天然限频（探针实证），无放大面。
+   */
+  onActivity?: () => void;
 }
 
 /** turn 超时的判定形态（P0-1 D1：idle 主判定 / 总上界兜底——引擎分流与文案的判据）。 */
@@ -701,7 +713,13 @@ export class SessionChannel {
     });
     const turn: ActiveTurn = {
       sessionId,
-      callbacks: { onTextDelta: opts.onTextDelta, onThinkingDelta: opts.onThinkingDelta },
+      callbacks: {
+        onTextDelta: opts.onTextDelta,
+        onThinkingDelta: opts.onThinkingDelta,
+        // [PR3] tool 执行期活性回调（SessionTurnCallbacks.onActivity 注释——宿主侧
+        // 无进展守护的工具执行期刷新面）
+        onActivity: opts.onActivity,
+      },
       settled: false,
       deltas: [],
       finalText: undefined,
@@ -828,7 +846,16 @@ export class SessionChannel {
     // 事件到达即刷新 idle 主判定（P0-1 D1——本 turn 的任何 session/event 都算进展）
     this.refreshIdle(turn);
     if (this.applyFinalFrame(turn, payload)) return;
-    this.applyStreamDelta(turn, payload);
+    // [PR3] 非 final-frame 且非 delta 的帧 = 引擎可见但宿主不可见的进展
+    //（tool.updated progress / turn.started / hook 事件）：宿主刷新面只有 delta
+    // 回调，「仅工具执行、零正文」形态下宿主侧无进展守护饿死误杀——onActivity 补
+    // 该缺口。已落定 turn 不发（settle 后 run 已收尾，迟到帧只是收尾窗口噪声）。
+    // 不加节流：服务端 tool.updated 天然 ~1s cadence（探针实证）。v4/telemetry 路径
+    //（handleTelemetry/applyStreamChunkTelemetry）不加同款——session/event 镜像帧
+    // 已覆盖（同 eventId），双发无增益。
+    if (!this.applyStreamDelta(turn, payload) && !turn.settled) {
+      turn.callbacks.onActivity?.();
+    }
   }
 
   /**
@@ -864,12 +891,15 @@ export class SessionChannel {
   /** 增量 delta 分发：非空 delta 入账 + 回调；终态后迟到丢弃（不变量 2）。
    *  kind 区分两通道（F2）：reasoning_delta 只走 thinking 回调（不入 deltas 账本
    *  ——deltas 是 response 兜底聚合，推理文本不是答案正文）；text_delta / kind
-   *  缺席走 text 路径。 */
+   *  缺席走 text 路径。
+   *  返回值（[PR3]）：帧被 delta 路径消费（thinking 或 text，回调若注册则已触发）
+   *  → true；无 delta / 空 delta / 终态后迟到丢弃 → false（handleSessionEvent 据
+   *  此分流 onActivity——delta 帧已是宿主可见进展，不双发活性信号）。 */
   private applyStreamDelta(
     turn: ActiveTurn,
     payload: Record<string, unknown>
-  ): void {
-    if (typeof payload.delta !== "string" || payload.delta === "") return;
+  ): boolean {
+    if (typeof payload.delta !== "string" || payload.delta === "") return false;
     if (turn.settled) {
       logger.warn(
         `终态后迟到的 delta 丢弃（会话 ${
@@ -879,14 +909,15 @@ export class SessionChannel {
           DELTA_LOG_CHARS
         )}`
       );
-      return;
+      return false;
     }
     if (payload.kind === "reasoning_delta") {
       turn.callbacks.onThinkingDelta?.(payload.delta);
-      return;
+      return true;
     }
     turn.deltas.push(payload.delta);
     turn.callbacks.onTextDelta?.(payload.delta);
+    return true;
   }
 
   private handleTelemetry(params: unknown): void {
@@ -912,14 +943,42 @@ export class SessionChannel {
     turn.lastTerminalStatus = status;
     this.recordTerminalError(turn, params);
     if (turn.settled) {
-      logger.warn(
-        `权威终态晚于落定结果到达（会话 ${turn.sessionId}，已落定 source=${
-          turn.terminal?.source
-        }）：turn.terminal status="${status}" 仅记录不改写（P0-1 D5①）`
-      );
+      this.logLateTerminal(turn, status);
       return;
     }
     turn.settle({ status, source: "turn.terminal" });
+  }
+
+  /**
+   * 已落定 turn 的迟到权威终态分级日志（P-Z2 后续：常态迟到降噪）。真机实证该
+   * 形态的唯一可达路径是 success 终态常态迟到（final-frame 先落定 + 权威
+   * turn.terminal 迟到）——即每个成功任务必经；原无条件 warn 经 SDK cli-entry
+   * 的 stderr 兜底 → runtime [rpc:stderr] 全量 console.error 链路，每个成功任务
+   * 产一条零异常区分度的 ERROR 级日志。按权威 status 分级（落定语义不动——
+   * lastTerminalStatus/lastTerminalError 的入账在上游无条件路径完成）：
+   *   - "success"：常态迟到，零日志；
+   *   - "interrupted"：用户中断形态，debug（stderr 兜底对 debug no-op——对齐
+   *     SDK logger CONSOLE_SINK 语义，host/log 反向请求侧仍可观测）；
+   *   - 失败类（isFailedTerminalStatus，与引擎失败分流同口径）与 unknown/未识别
+   *     status：保守 warn（原样 status 已写入文案）——假成功识破的防御面，理论
+   *     不可达但保留，宁可误报不静默。
+   */
+  private logLateTerminal(turn: ActiveTurn, status: string): void {
+    if (status === "success") return;
+    const message = `权威终态晚于落定结果到达（会话 ${
+      turn.sessionId
+    }，已落定 source=${
+      turn.terminal?.source
+    }）：turn.terminal status="${status}" 仅记录不改写（P0-1 D5①）`;
+    if (isFailedTerminalStatus(status)) {
+      logger.warn(message);
+      return;
+    }
+    if (status === "interrupted") {
+      logger.debug(message);
+      return;
+    }
+    logger.warn(message);
   }
 
   /** terminal 帧专属错误信息入账（⛔P-Z2 实证：真实 failed 终态的 errorCode/errorMessage

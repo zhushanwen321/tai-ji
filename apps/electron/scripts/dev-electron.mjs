@@ -155,7 +155,12 @@ function setPlist(plistPath, key, value) {
 
 // ─── 启动 ────────────────────────────────────────────────
 const binary = resolveDevBinary()
-const args = process.argv.slice(2) // 透传给 electron（如 ['.'] + ['--remote-debugging-port=9222']）
+const args = process.argv.slice(2) // 透传给 electron（如 ['.']）
+// CDP 端口：per-worktree 派生（dev-instance.mjs 注入 XYZ_CDP_PORT，C-dev-01），
+// 未注入保持 9222（裸启动兼容）。argv 显式传了 --remote-debugging-port 则尊重不覆盖。
+if (!args.some((a) => a.startsWith('--remote-debugging-port'))) {
+  args.push(`--remote-debugging-port=${process.env.XYZ_CDP_PORT ?? '9222'}`)
+}
 
 if (process.env.XYZ_DEV_ELECTRON_VERBOSE === '1') {
   console.log('[dev-electron] binary:', binary)

@@ -12,6 +12,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 | 主题 | 文档 |
 |------|------|
+| **功能与用例分级（P0-P3 SSOT）** | [docs/feature-priorities.md](docs/feature-priorities.md)——tech-design 风险打分锚定源 / 测试回归排序依据 / dev-flow 收尾同步登记目标；功能挂掉后果变化须同 commit 更新 |
 | **架构约束登记表（SSOT）** | [docs/constraints.json](docs/constraints.json)（机器权威）· [docs/constraints.md](docs/constraints.md)（生成式人读视图）——全部架构级约束的 id/scope/权威源/执行方式登记处；新增约束先登记再写代码，改 json 后跑 `node scripts/render-constraints.mjs` 重新生成 md；CR 动态加载：`node scripts/select-constraints.mjs --base main` |
 | 完整编码规范 / UI 设计演变 / 术语表 | [docs/standards.md](docs/standards.md) · [design-evolution.md](docs/design-evolution.md) · [architecture/context.md](docs/architecture/context.md) |
 | 设计系统（tokens / 原语层 / v6 SSOT / 视觉规格） | [docs/page-design/](docs/page-design/)（design-tokens.md · design-system.md · v6-master-spec.md · v6-spec-*.html；能力设计 spec 在 `archive/v3/`。禁止创建 `demos/`、`impeccable/` 目录） |
@@ -23,6 +24,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | Release Notes 写作规范 | 全局规范 SSOT `~/.agents/guide/release-notes.md`（三节结构 / 30 字模糊化 / 双语强制；merge 阶段 5 撰写 notes 前必读）+ 项目特化 [docs/release-notes.md](docs/release-notes.md)（展示位 / release.sh 草稿行为） |
 | 问题排查（日志/诊断/常见问题/历史排查规则） | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Pi Extension 开发 | [docs/extensions/development-guide.md](docs/extensions/development-guide.md)（指南）· [extension-conventions.md](docs/extensions/extension-conventions.md)（强约束）· [logging-conventions.md](docs/extensions/logging-conventions.md)（日志现行 SSOT）· [glossary.md](docs/extensions/glossary.md) · [local-dev-guide.md](docs/extensions/local-dev-guide.md) |
+| Subagent 体系架构（包拓扑 / 协议面 / 机制落点） | [docs/extensions/subagents/architecture.md](docs/extensions/subagents/architecture.md)（现状 SSOT 导航页：5 类包拓扑 · engine-protocol v1 · 关键机制落点表 · 主题文档指针） |
 | 待执行架构任务 | [docs/todo/remote-use-merge-architecture.md](docs/todo/remote-use-merge-architecture.md)（合并 remote-use 后删除） |
 
 **外部依赖 pi**：[badlogic/pi-mono](https://github.com/badlogic/pi-mono) 上游（npm `@earendil-works/pi-coding-agent@0.84.4`，曾用 fork xyz-pi 已切回）。**[MANDATORY] 不修改 pi 源码、不提 PR、不 fork**——pi 没有的能力由 xyz-agent 自实现。**pi 语义断言的权威源 = node_modules 实装版**（断言前 `npm ls @earendil-works/pi-coding-agent` 核对版本，以 dist 编译 JS 为准）；clone `~/Code/git-fork/pi-mono-workspace/main/packages/`（coding-agent/src 核心逻辑、ai/src/providers provider 层）仅作可读 TS 参照，引用前须核对 clone 版本与实装一致（clone 领先/落后实装均属常态——曾因按 0.80.3 clone 断言 0.84.1 行为连产 4 条漂移 bug，审计 C #6）。不靠网络搜索。pi 版本 bump 受 C-proc-08 版本门禁机器拦截（`node scripts/check-pi-semantics.mjs`：四包版本一致 + verifiedWith 比对 + 探针族重验；升级 PR 必查 pi-ai exports 的 `./compat` 与 changelog ModelManager 迁移——登记细节以 constraints.json 为准）。构建期派生锚点（build.yml env / prepare 脚本默认值 / 快照 / extensions peerDeps / KNOWN_PI_API_TYPES / pi-tui）由 `node scripts/check-pi-sync.mjs` 守卫跟随（约束登记 C-build-07，pre-commit 按路径触发 + CI invariants）——升级 pi 后必须执行 `pnpm gen:builtin-providers` 重生成快照并随升级 PR 提交，锚点漏同步会被守卫拦截。
@@ -35,7 +37,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 新增/删包时更新此列举与所在分组。校验：`pnpm extensions:typecheck` / `extensions:lint` / `extensions:test`。
 
 - **[MANDATORY] extension 改动优先在本地 pi CLI 实测**（不是 xyz-agent 桌面）：`pi --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <path>` + stdin JSONL 发 prompt；`XYZ_AGENT_DEBUG=1` 看 `~/.pi/agent/logs/` 扩展日志。xyz-agent 的 builtin 打包/数据隔离/runtime 中转层会掩盖版本差异
-- **structured-output 方案 A [HISTORICAL]**：workflow 模式 `PI_WORKFLOW_SCHEMA` 注入的权威 schema 是唯一校验权威，LLM 自报 schema 不参与校验（曾因校验自报 schema 致修复静默丢失）
+- **structured-output 方案 A [HISTORICAL]**：workflow 模式 `PI_WORKFLOW_SCHEMA` 注入的权威 schema 是唯一校验权威，LLM 自报 schema 不参与校验（曾因校验自报 schema 致修复静默丢失）。终态补强（structured-output-redesign D1/D3/D4）：workflow 模式已重设计为单参数合成工具——parameters 即权威 schema（根级 `additionalProperties:false` 结构性拒绝 schema 字段，模型结构上不可自报）+ 同签名 3 次闸门硬终止
 - 本地开发调试（live edit ↔ npm 版切换）：`.agents/skills/dev-link/`
 - **Review 工作流**：`pr-cr-fix` skill 是 PR 完整生命周期入口（开 PR → 8 维 review → 修 must-fix → pre-merge → push；review agent 内化在 `pr-cr-fix/agents/`，不全局暴露）
 
@@ -52,10 +54,12 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 ## 前端调试（Playwright 连 dev app）
 
-`pnpm dev` 后 Electron 开 `--remote-debugging-port=9222`，用 browser-automation skill 连 `http://localhost:9222`（截图/DOM/执行 JS，不抢焦点）。
+`pnpm dev` 走 `apps/electron/scripts/dev-instance.mjs` 装配器（C-dev-01）：按 worktree 名 hash 稳定派生端口（Vite/CDP/runtime 段）+ 数据目录 `~/.xyz-agent-dev/instances/<worktree>/`（首启从只读模板 `~/.xyz-agent-dev.template/` 复制，默认模型预置 mimo-v2.5-pro），多 worktree 并行 dev 互不干扰。**AI agent 真机验收必须 `XYZ_DEV_BACKGROUND=1 pnpm dev`**（showInactive 不抢前台焦点，遵循 browser-automation skill 对策 2）；连接前 `node apps/electron/scripts/dev-instance.mjs --print` 查本实例 CDP 端口，browser-automation 连 `http://localhost:<cdp-port>`（截图/DOM/执行 JS）。验收要干净环境时加 `--fresh`。
 
-- 多实例坑：打包版太极.app 可能同跑（占 3210）；dev renderer 在 9222、runtime 在 3310。连错看到旧代码——先确认 `list-pages` URL 是 `localhost:1420`
+- 实例排查：单实例锁按数据目录 userData 区分（多实例天然共存）；连错实例看旧代码——先确认 `list-pages` URL 是本实例的 `localhost:<vite-port>`；模板调整后 `node apps/electron/scripts/dev-instance.mjs init-template --force` 重建（只读模板勿直改）
+- 打包版太极.app 可能同跑（占 3210）；裸跑（不经装配器）时 dev CDP 9222 / Vite 1420 / runtime 3310
 - runtime 改动不热重载（tsx 非 watch）：改 runtime 源码必须重启 `pnpm dev`；renderer 走 vite HMR
+- **staged 引擎副本 dev 恒重建 [F7]**：dev 的 subagent 引擎加载 gitignored 产物 `apps/electron/resources/engines/<id>/index.js`（非源码——extensions 走源码但引擎没有 dev/build 分流）；`pnpm dev` 启动链已前置 `bundle-extensions.mjs`（<1s）重建，改 subagent CLI 源码后重启 dev 即生效。曾因 staged 滞后致 GUI 真机跑旧引擎代码（Gate B 发现 F7）。绕过 dev 链直接起 Electron 时须手动 `node scripts/bundle-extensions.mjs`
 
 ## 关键规则（违反必出 bug）
 
@@ -88,7 +92,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 16. **Plugin System**：PluginService 是唯一适配层（WS → server.ts → PluginService）；trusted 插件跑 Worker Thread、sandbox 跑独立 fork 子进程；hook 按 priority 串行（单 handler 5s 超时放行）；sessionData 写入 debounce 缓存 + shutdown flushAll；WS 命名 Client→Server 点号（`plugin.xxx`）/ Server→Client 冒号 camelCase（`plugin:statusBarUpdate`）
 17. **Builtin pi-extensions 打包内置（现行）**： `@zhushanwen/pi-*` 包 esbuild bundle 后 staged 到 `apps/electron/resources/extensions/` 随应用打包（不走 npm 安装；数量以 `packages/shared/src/mandatory-extensions.json` SSOT 为准，不在此写死）。清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁、都不可卸，组内包数以该 JSON 为准；守卫抛 `builtin_cannot_*`）。[HISTORICAL] 演化：builtin 依赖 → 推荐安装 → mandatory npm → 打包内置（2026-08-12）；「删除打包所需依赖致产物缺失」教训始终适用（pi binary、builtin 扩展包如 `@zhushanwen/pi-system-prompt` 同理）
 18. **子进程 env 出站契约（C-proc-09）**：进程创建点的子 env 必须经 `buildOutboundChildEnv` 构建（deny 清单剥 `XYZ_AGENT_PACKAGED` / `XYZ_RUNTIME_TOKEN`），与 `ENV_WHITELIST_PREFIXES` 入站准入正交——入站管准入、出站管外泄；守卫 `.githooks/check_spawn_env_boundary.py`，设计依据 [docs/design/env-propagation-boundary.md](docs/design/env-propagation-boundary.md)
-19. **超时默认原则（任务级默认无超时，量级按对象粒度校准）**：subagent turn / workflow `agent()` / 引擎 run 等**任务执行正常路径禁止自带墙钟超时**——用户显式指定（`timeoutMs` / `budgetTimeMs` / watchdog env）才生效，调用方未传就是不限时。必须设防挂死兜底时，量级必须按**被保护对象的粒度**校准：任务级（subagent / workflow run）= 小时级或「无进展检测」（idle / ping，ADR-0047：静默 ≠ 卡死，活跃产出不得判死）；控制面单请求（RPC 帧 / 探针 / 握手）= 秒级；禁止跨粒级挪用（单 turn 分钟级预算 ≠ 整任务总预算）。回收层（dispose / kill / idle timer）防挂死兜底允许默认有界（opt-out）——权威裁决见 [subagent-core-unbounded-wait-audit.md](docs/design/subagent-core-unbounded-wait-audit.md)「正常路径逐点根修 + 回收层统一有界兜底」。[HISTORICAL] 反例：zcode appserver `turnTimeoutMs` 固定 300s 墙钟（`ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS`，2026-09 实测 21% 任务误杀——343s/541s 正常完成的任务被 300s 判死，死后 app-server 继续烧 token；且流式 delta 不刷新计时）。
+19. **超时默认原则（任务级默认无超时，量级按对象粒度校准）**：subagent turn / workflow `agent()` / 引擎 run 等**任务执行正常路径禁止自带墙钟超时**——用户显式指定（`timeoutMs` / `budgetTimeMs` / watchdog env）才生效，调用方未传就是不限时。必须设防挂死兜底时，量级必须按**被保护对象的粒度**校准：任务级（subagent / workflow run）= 小时级或「无进展检测」（idle / ping，ADR-0047：静默 ≠ 卡死，活跃产出不得判死）；控制面单请求（RPC 帧 / 探针 / 握手）= 秒级；禁止跨粒级挪用（单 turn 分钟级预算 ≠ 整任务总预算）。回收层（dispose / kill / 上界 / idle timer 四族）防挂死兜底允许默认有界（opt-out）——权威裁决见 [subagent-core-unbounded-wait-audit.md](docs/design/subagent-core-unbounded-wait-audit.md)「正常路径逐点根修 + 回收层统一有界兜底」。[HISTORICAL] 反例：zcode appserver `turnTimeoutMs` 固定 300s 墙钟（`ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS`，2026-09 实测 21% 任务误杀——343s/541s 正常完成的任务被 300s 判死，死后 app-server 继续烧 token；且流式 delta 不刷新计时）。
 20. **pnpm store 布局双向翻转（沙箱 HOME × pnpm store）**：zsw 引擎 worker 等沙箱执行体覆写 HOME，其 pre-commit 内 verify-*.sh 自含 `pnpm install` 会把沙箱侧 store 写进 `node_modules/.modules.yaml` 的 storeDir；本地（正常 HOME）后续 install 判布局过期 → `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 硬崩（pre-commit 随机红，`CI=true` 治标会复发）。护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0）翻转即红并给 [FIX]；恢复：`CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install`（约 6-7s）。根因/排障见 [docs/troubleshooting.md](docs/troubleshooting.md)；引擎侧修复落地后护栏应恒绿，红 = HOME 覆盖回退的验收信号
 21. **看门狗/滚动重启默认不武装（Gate W 数据门，C-proc-19）**：`XYZ_RUNTIME_WATCHDOG_ARMED` 缺失时 runtime watchdog 纯观测（采样进环，无 relief / 无滚动重启 / 无通知）——armed 动作必须显式 env 开启，且武装前置 = V6 soak 水位数据 + 评估器 watermark-daily 趋势复审通过（阈值校准 + 重启循环风险排除），禁未经数据复审先武装（兜底先行掩盖问题）；滚动重启走专用退出码 86 + supervisor 零退避零计数，推迟上限 30min（`XYZ_ROLLING_RESTART_DEFER_LIMIT_MS`）。设计依据 [docs/design/crash-forensics-and-watchdog.md](docs/design/crash-forensics-and-watchdog.md) §3.2 方案 B / D5
 
@@ -141,7 +145,7 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 发布与 CI 验证 [HISTORICAL]
 
-两条独立管线：Electron 打包（`v*` tag → release.yml → `verify-ci-release.sh` 验证）与 npm 发布（`npm-*` tag → release-npm.yml）。npm 两条机制：main 稳定发布（人工定 type + `check-version-changes.sh` + `apply-version.sh`，merge skill 阶段 4N 封装，**禁止本地 `changeset publish`**，曾因 registry 最终一致性 E403）与 dev-npm 预发布（changeset pre，`scripts/npm-prerelease.sh`）。
+两条独立管线：Electron 打包（`v*` tag → release.yml → `verify-ci-release.sh` 验证）与 npm 发布（`npm-*` tag → release-npm.yml）。npm 两条机制：main 稳定发布（人工定 type + `check-version-changes.sh` + `apply-version.sh`，merge skill 阶段 4N 封装，**禁止本地 `changeset publish`**，曾因 registry 最终一致性 E403）与 dev-npm 预发布（changeset pre，`scripts/npm-prerelease.sh`）。补强（npm-publish-surface-guard D2，C-proc-11）：npm 发布实为三条路径（正式 `release-npm.yml` / dev 线推 `dev-npm-*` 分支触发 `release-npm-dev.yml` / 本地 `npm-prerelease.sh`），publish 前均挂 `scripts/check-publish-surface.mjs` 硬拦截（幽灵 files 条目 / 产物目录反向覆盖 / 自包含探针）——「push tag 后验证 CI」流程中守卫红灯是合法失败形态。
 
 - changeset 准则（PR 阶段）：type 是初判最终人工定；body 认真写（进 CHANGELOG）；dep 传播不在 PR 声明（merge 时自动闭包）
 - **[MANDATORY] push tag 后必须验证 CI 产物**：push 发布 tag 后禁直接宣布完成，轮询 CI 验证产物直到脚本 exit 0（预发布 `prerelease-test.sh` 内置 / 正式 `bash scripts/verify-ci-release.sh v<version>`）。exit 非 0 修到 0，禁说「应该没问题」

@@ -30,9 +30,6 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   'XYZ_AGENT_API_KEY',
   'XYZ_SUBAGENT_RELAY_SESSION_ID',
   'XYZ_SUBAGENT_RELAY_RECORD_ID',
-  'XYZ_SUBAGENT_RELAY_STDIN',
-  'XYZ_SUBAGENT_RELAY_STDOUT',
-  'XYZ_SUBAGENT_RELAY_STDERR',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

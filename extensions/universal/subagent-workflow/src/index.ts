@@ -5,10 +5,13 @@
  * 注册项：3 tool（subagent + workflow + workflow-script）+ 2 command（subagents + workflows）
  * + messageRenderer（subagent-bg-notify）+ pi.__workflowRun + session 事件。
  *
- * 三层架构：
- *   interface/ → 注册胶水（tools/commands/tui）
- *   orchestration/ → workflow engine（launcher/lifecycle/error-recovery）
- *   execution/ → subagents 执行运行时（SubagentService/session-runner/concurrency-pool）
+ * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册面与宿主适配）：
+ *   interface/ → 注册胶水（tools / commands / TUI 渲染 / GUI mappers）
+ *   host/      → pi 宿主端口实现（HostServices / NotifyDomain 的 pi 侧兑现）
+ *   injectors/ → 提示注入器（engine-awareness / model-list / resource-list …）
+ *   session-lifecycle.ts → 会话生命周期装配 seam（测试可注入 fake 依赖）
+ *
+ * 架构导航见 docs/extensions/subagents/architecture.md。
  *
  * 设计基线：D-004（旧包不动）/ ADR-025（进程内执行）/ D-8（pi.__workflowRun 签名）。
  */
@@ -26,7 +29,7 @@ import { createPiHostServices, createPiNotifyDomainPorts } from "./host/pi-host.
 import { createInFlightReporter } from "./host/inflight-reporter.ts";
 
 import { bestEffort } from "@zhushanwen/subagent-core";
-// ═══ execution/ 层（subagents 核心 + 运行时） ═══
+// ═══ 经 core barrel 消费执行域（执行运行时住 packages/subagent-core） ═══
 // [U7] 引擎列表状态文件（registry → engines.json，GUI 引擎选择器数据源）
 import { syncEnginesFile } from "@zhushanwen/subagent-core";
 // [W11/DoD#5] registerPiEngine（inproc 'pi' 注册）已随内建引擎删除：registry 'pi'
@@ -53,7 +56,7 @@ import { registerSubagentTool } from "./interface/subagent-tool.ts";
 import { registerSubagentsCommand } from "./interface/subagents.ts";
 import { registerWorkflowTool } from "./interface/tool-workflow.ts";
 import { registerWorkflowScriptTool } from "./interface/tool-workflow-script.ts";
-// ═══ orchestration/ 层（workflow engine + infra） ═══
+// ═══ 经 core barrel 消费 workflow 域（引擎与 worker 住 packages/subagent-core） ═══
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { executeNestedWorkflow, runAndWait, type WorkflowRunResult } from "@zhushanwen/subagent-core";
 import {
@@ -273,7 +276,18 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
         scheduleTimeBudget(runId, deps, budgetTimeMs),
       onWorkflowCall: (name: string, args: Record<string, unknown>, parentRun: WorkflowRun) =>
         executeNestedWorkflow(name, args, parentRun, deps),
-      streamSink: getSubagentService()?.getStreamSink() ?? undefined,
+      // [H2 W3] workflow agent() 统一派发入口（设计 §3.5）：pump 侧 dispatchAgentCall
+      // 经此转调 SubagentService.executeWorkflowAgent——真实 record（origin:"workflow"
+      // + parentRunId）进 store、共享池/守护/journal 归 service 编排；parentRunId 由
+      // pump 补 run.runId。service 单例在 session_start 后必在（run 只能于 session 内
+      // 派发）；null 时抛错由 pump 的 dispatchCall catch 兜底回发 failed result。
+      workflowAgentDispatch: (opts, parentRunId, signal) => {
+        const service = getSubagentService();
+        if (!service) {
+          throw new Error("workflow agent dispatch unavailable: subagent service not initialized");
+        }
+        return service.executeWorkflowAgent(opts, parentRunId, signal);
+      },
       log,
     };
     return deps;
@@ -486,9 +500,11 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //  - beforeExit 是退出前最后事件，不 exit（自然退出）。
   //  - idempotent guard（reapSpawnedChildrenOnShutdown 内）防多信号叠加重复 kill。
   //
-  //  防线 iii（activate 互斥）已接入：subagent-service.ts 冷路径 resume 调
-  //  acquireActivateLock（含 30s 超时兜底，见 lifecycle-manager.ts ACTIVATE_LOCK_TIMEOUT_MS）。
-  //  防线 ii（启动 scanOrphanProcesses）骨架就位，启动时接入待实现。
+  //  防线 iii（activate 互斥）：未接线——acquireActivateLock 机制已随简化清扫删除
+  //  （历史接线点随协议化重构消失，仅余自持单测）。当前的双写者防护由
+  //  subagent-service 的 resumesInFlight 集合守卫承担。
+  //  防线 ii（启动孤儿扫描）：未接线，骨架已随 L2 死代码清扫删除（当前 piped stdio
+  //  下 stdin-EOF 自灭链覆盖崩溃路径，见 docs/design/v2-defense-ii-iii-resolution.md）。
   // ════════════════════════════════════════════════════════════
   process.on("SIGTERM", () => {
     reapSpawnedChildrenOnShutdown();

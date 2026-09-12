@@ -1,18 +1,24 @@
 /**
- * Panel.widget-area.test.ts —— M17 Panel 挂载 WidgetArea 链路测试（design.json TC8/TC9）。
+ * Panel.widget-area.test.ts —— M17 Panel 挂载 WidgetArea 链路测试（design.json TC8/TC9）
+ * + D 方案（单行 pill 状态带 + 详情 popover）行为测试。
  *
  * 覆盖：
- *  - TC8 WidgetArea 在 MessageStream 与 composer-band 之间（DOM 顺序断言，消息分支链后）
+ *  - TC8 WidgetArea 在 MessageStream 与 composer-band 之间（DOM 顺序断言，消息分支链后）；
+ *    D 方案形态：widget-area 内是单行 pill（非多卡面板）
  *  - TC9 挂载条件：①isSessionDead=true 不渲染；②sessionId=null 不渲染（IF4）
+ *  - TC10 点击 pill → PopoverContent（teleport 到 body）展开完整列表；再点收起
+ *  - TC11 guiTree 有 running 条目 → pill 显示进行中项预览
  *
  * 策略（design WQ1 resolution）：mount 真实 Panel（非 shallowMount）+ stub 重型子组件
  * （MessageStream/Composer/Landing/AskUserOverlay），WidgetArea 不 stub——经 @xyz-agent/ui
  * 真实渲染，保 DOM 顺序断言可行。store/composable mock 对齐 MessageStream.wire.test.ts
  * 模式（vi.hoisted + vi.mock 模块替换，隔离 store 副作用）。
+ * reka Popover 的 PopoverContent teleport 到 body：浮层断言在 document.body 内做
+ * （对齐 add-menu-popover.test.ts 模式），mount 需 attachTo: document.body。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/Panel.widget-area.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { createPinia } from 'pinia'
@@ -72,7 +78,7 @@ vi.mock('@/composables/useExtensionUI', () => ({
   askUserFilter: () => true,
 }))
 
-// ── 固定 widget source（WidgetArea 经 inject 消费，TC8 真实渲染一张卡）──
+// ── 固定 widget source（WidgetArea 经 inject 消费，TC8 真实渲染 pill）──
 
 const WIDGET_GUI: GuiComponent = { type: 'ansi-text', props: { lines: ['widget todo line'] } }
 const widgetSource: ViewHostSource = {
@@ -83,18 +89,39 @@ const widgetSource: ViewHostSource = {
       : undefined,
 }
 
+/** TC11 用：list-tree 带 running 条目（活动项预览的数据形态，对齐 todo 扩展 buildGui 产物） */
+const LIST_TREE_GUI: GuiComponent = {
+  type: 'list-tree',
+  props: {
+    numbered: true,
+    items: [
+      { label: '已完成步骤', status: 'done' },
+      { label: '正在跑的步骤', status: 'running' },
+      { label: '等待中的步骤' },
+    ],
+  },
+}
+const listTreeSource: ViewHostSource = {
+  getViewIds: (sessionId: string) => (sessionId === 's1' ? ['todo'] : []),
+  getView: (sessionId: string, viewId: string) =>
+    sessionId === 's1' && viewId === 'todo'
+      ? { viewId: 'todo', pluginId: 'p1', guiTree: [LIST_TREE_GUI], updatedAt: 1 }
+      : undefined,
+}
+
 /** MessageStream stub（render 函数，不依赖运行时模板编译器）——DOM 顺序断言的左侧锚点 */
 const MessageStreamStub = defineComponent({
   name: 'MessageStream',
   render: () => h('div', { 'data-testid': 'message-stream-stub' }),
 })
 
-function mountPanel(sessionId: string | null) {
+function mountPanel(sessionId: string | null, source: ViewHostSource = widgetSource) {
   return mount(Panel, {
     props: { panelId: 'p1', sessionId, sessionDir: '/tmp/x' },
+    attachTo: document.body,
     global: {
       plugins: [createPinia()],
-      provide: { [VIEW_HOST_SOURCE_KEY as symbol]: widgetSource },
+      provide: { [VIEW_HOST_SOURCE_KEY as symbol]: source },
       stubs: {
         MessageStream: MessageStreamStub,
         Composer: true,
@@ -111,10 +138,15 @@ beforeEach(() => {
   chatMock.isCompacting.mockReturnValue(false)
   chatMock.failedHistory.clear()
   sessionMock.list = []
+  document.body.innerHTML = ''
+})
+
+afterEach(() => {
+  document.body.innerHTML = ''
 })
 
 describe('Panel 挂载 WidgetArea（M17）', () => {
-  it('TC8: session 有效且非 dead → widget-area 位于 MessageStream 与 composer-band 之间', async () => {
+  it('TC8: session 有效且非 dead → widget-area（单行 pill）位于 MessageStream 与 composer-band 之间', async () => {
     // 有消息（messageCount>0 → MessageStream 分支命中）+ session 非 dead
     chatMock.getMessages.mockReturnValue([{ id: 'm1' }])
     sessionMock.list = [{ id: 's1', status: 'idle' }]
@@ -122,10 +154,11 @@ describe('Panel 挂载 WidgetArea（M17）', () => {
     const wrapper = mountPanel('s1')
     await wrapper.vm.$nextTick()
 
-    // WidgetArea 真实渲染（未 stub）：容器 + 卡 + widgetKey 标签
+    // WidgetArea 真实渲染（未 stub）：D 方案形态 = 单行 pill 状态带（非多卡面板）
     const area = wrapper.find('[data-testid="widget-area"]')
     expect(area.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="widget-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="widget-pill"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="widget-pill-seg"]').exists()).toBe(true)
     expect(area.text()).toContain('todo')
 
     // DOM 顺序（section 直接子元素比较）：message-stream-stub < widget-area < composer-band。
@@ -161,5 +194,63 @@ describe('Panel 挂载 WidgetArea（M17）', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="widget-area"]').exists()).toBe(false)
+  })
+})
+
+describe('WidgetArea D 方案：pill + 详情 popover', () => {
+  it('TC10: 点击 pill → body 内展开浮层显示完整列表；再点收起', async () => {
+    chatMock.getMessages.mockReturnValue([{ id: 'm1' }])
+    sessionMock.list = [{ id: 's1', status: 'idle' }]
+
+    const wrapper = mountPanel('s1')
+    await wrapper.vm.$nextTick()
+
+    // 初始收起：body 无浮层
+    expect(document.body.querySelector('[data-testid="widget-popover"]')).toBeNull()
+
+    // 点击 pill → PopoverContent teleport 到 body，渲染 guiTree 完整内容
+    const pill = wrapper.find('[data-testid="widget-pill"]')
+    await pill.trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const popover = document.body.querySelector('[data-testid="widget-popover"]')
+    expect(popover).not.toBeNull()
+    expect(popover!.textContent).toContain('widget todo line')
+    expect(document.body.querySelector('[data-testid="widget-popover-card"]')).not.toBeNull()
+
+    // 再点 pill → 收起（浮层从 body 移除）
+    await pill.trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('[data-testid="widget-popover"]')).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('TC11: guiTree 有 running 条目 → pill 显示进行中项预览（用户可见的当前项）', async () => {
+    chatMock.getMessages.mockReturnValue([{ id: 'm1' }])
+    sessionMock.list = [{ id: 's1', status: 'idle' }]
+
+    const wrapper = mountPanel('s1', listTreeSource)
+    await wrapper.vm.$nextTick()
+
+    const active = wrapper.find('[data-testid="widget-pill-active"]')
+    expect(active.exists()).toBe(true)
+    expect(active.text()).toBe('正在跑的步骤')
+
+    wrapper.unmount()
+  })
+
+  it('TC12: 无 running 条目（全完成）→ pill 不渲染活动项预览', async () => {
+    chatMock.getMessages.mockReturnValue([{ id: 'm1' }])
+    sessionMock.list = [{ id: 's1', status: 'idle' }]
+
+    const wrapper = mountPanel('s1') // ansi-text source：无 list-tree 条目
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="widget-pill-active"]').exists()).toBe(false)
+
+    wrapper.unmount()
   })
 })

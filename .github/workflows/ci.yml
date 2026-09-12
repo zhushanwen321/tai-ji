@@ -479,6 +479,22 @@ jobs:
       - name: Subagent-core closure guard (D9-①)
         run: node scripts/check-subagent-core-closure.mjs
 
+      # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
+      # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /
+      # 跨聚合私有访问禁 / 支撑文件方向门 + 环检测——本地 hook 仅单一 worktree 生效
+      #（core.hooksPath 局部安装），CI 面是跨 worktree 的等价拦截点（D7 通则，
+      # 同上行 D9-① 的挂载理由）。
+      - name: Subagent-service boundary guard (H3)
+        run: node scripts/check-subagent-service-boundary.mjs
+
+      # H4 record 持久化写面守卫（与 pre-commit 同源直调；守卫全量扫描
+      # packages/*/src + extensions/**/src 不依赖 staged 上下文）：store 外 record
+      # 写面直写（R1 六名写函数 + R2 subagent-record entry）零命中——本地 hook 按
+      # staged 路径触发，触发面外的包在 CI 面等价拦截（D7 通则，同上行 H3 /
+      # D9-① 的挂载理由）。
+      - name: Record write surface guard (H4)
+        run: node scripts/check-record-write-surface.mjs
+
       # 流写逃逸护栏（2026-09-04 runtime 整机崩溃事故护栏，与 pre-commit 同源直调）：
       # 裸流写 / socket error 未挂载静态扫描——防新增代码在事件回调里裸写半关闭/
       # destroyed 流，逃逸为 uncaughtException → 整机 shutdown（D7 通则，CI 面同源拦截）。

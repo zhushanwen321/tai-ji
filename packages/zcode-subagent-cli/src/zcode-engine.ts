@@ -60,8 +60,6 @@ import type {
   AgentEvent,
   AgentOutcome,
   EngineCapabilities,
-  InteractAction,
-  InteractResult,
   ProbeReport,
   SessionView,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -79,6 +77,7 @@ import {
   ZCODE_KILL_GRACE_MS,
   ZCODE_SHARED_POOL_KEY,
   ZCODE_TURN_MAX_TIMEOUT_ENV,
+  isFailedTerminalStatus,
   parseZcodeTurnTimeoutEnv,
 } from "./constants.ts";
 import { zcodeDbPathAllowlist, zcodeSessionDbPath } from "./db-path.ts";
@@ -452,6 +451,11 @@ export class ZcodeEngine implements EnginePort {
       // 不变量 3a 的拼接比对不含 reasoning）
       onTextDelta: (delta) => ctx.onEvent?.({ type: "text_delta", delta }),
       onThinkingDelta: (delta) => ctx.onEvent?.({ type: "thinking_delta", delta }),
+      // [PR3] 工具执行期活性：非终态非增量的 session/event 帧（tool.updated progress
+      // 等，真机探针实证每 ~1s 一帧）→ activity 事件（零载荷纯活性信号——宿主无进展
+      // 守护对任何事件类型刷新；reducer no-op、不落 journal）。zcode 引擎
+      // conversation:"unsupported"，run 域是唯一发射面（无 chat 域接线）。
+      onActivity: () => ctx.onEvent?.({ type: "activity" }),
       onSessionCreated: (sessionId) => {
         currentSessionId = sessionId;
         rt.activeSessions.add(sessionId);
@@ -873,21 +877,6 @@ export class ZcodeEngine implements EnginePort {
     for (const ev of synthesizeCoarseEvents(payload.response, payload.usage)) emit(ev);
   }
 
-  /**
-   * D1 可选面：zcode 首期不支持 conversation（capabilities 声明）——同步拒绝、
-   * 不创建进程，文案给可操作建议（A11）。
-   */
-  async interact(_handle: EngineHandle, _action: InteractAction): Promise<InteractResult> {
-    return {
-      ok: false,
-      code: "engine_capability_unsupported",
-      message:
-        "zcode 引擎不支持 conversation 交互控制面（capabilities.conversation = 'unsupported'，" +
-        "每任务自包含会话，无同进程 idle 复用）。恢复指引：改用单次 subagent 调用重新派发任务，" +
-        "或使用 engine: 'pi'（chatMode idle 复用，支持 message/close/cancel）。",
-    };
-  }
-
   /** [U7] 模型可发现性：v2 桌面登录态聚合（带凭据 provider × models），失败安全返回清单本身可能为空。 */
   listModels(): Array<{ id: string; name?: string }> {
     return listZcodeModels(this.deps.sources);
@@ -1248,18 +1237,9 @@ function authoritativeTerminalStatus(r: SessionTurnResult): string | undefined {
 }
 
 /**
- * 失败终态判据（⛔P-Z2 门修正）：真实 status 枚举 = ["success","interrupted",
- * "failed"]（app-server dist schema f.enum 实证，**无 "error"**——v1 判据
- * `=== "error"` 对真实 failed 终态漏分流即假成功，本修复轮根修）。裁决：
- *   - "failed" → run-failed（模型/服务端真实失败——§5.2 F-3）；
- *   - "interrupted" → 不分流（用户中断，不属引擎失败——随宿主 abort 主路径收口，
- *     引擎侧不抢先把它终态化为失败）；
- *   - "error" → 保留为容错分支（非真实枚举，防协议漂移/旧版本形态再滑入假成功；
- *     假成功代价 >> 误报失败代价，取并集防御）。
+ * 失败终态判据已收编 constants.ts（isFailedTerminalStatus）：session-channel 的
+ * 迟到终态分级日志与引擎失败分流共用同一口径，模块私有会迫使对面复制判据双轨。
  */
-function isFailedTerminalStatus(status: string | undefined): boolean {
-  return status === "failed" || status === "error";
-}
 
 /**
  * [P0-1 U3/D5②] appserver 轮成功收口的 parsed 三态（read 兜底后的 response + schema

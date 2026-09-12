@@ -1,5 +1,7 @@
 # subagent 引擎协议化与外移（engine 插件化：pi-subagent-cli / zcode-subagent-cli）技术设计
 
+> **[HISTORICAL] 部分退役注记（2026-09-11，U7 符号清扫批）**：本文「引擎协议 + 编排壳」主体（发现注册 / NDJSON stdio / manifest 能力位 / conformance 套件）仍现行；但文中 chat 域协议面已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）退役——EnginePort 的 `interact` 成员（§3.3.5 契约签名 F1 行）、协议正向方法 `interact`（方法映射表，现存方法 9 个）、第 9 反向通道 `host/roundLifecycle`（现存通道 8 条）、契约类型 SSOT 清单中的 `InteractAction`/`InteractResult` 均已删除；续聊 = 新 run + resume 锚点（`RunParams.resume`）。W11 收口注记与 A2 的 chat 域验收描述为 v1.x 时代史实记录，不逐处改写。读现行协议面以 `packages/subagent-engine-sdk/src/protocol/{methods,reverse-channels}.ts` 与 [subagent-chat-run-unification.md](subagent-chat-run-unification.md) 为准。
+
 > **一句话结论**：把 subagent-core 从「内建多引擎实现」改成「**引擎协议 + 编排壳**」——
 > core 只保留路由 / 公共降级层 / journal / record / 协议客户端 / conformance 套件；
 > 每个引擎成为独立 CLI 包（`pi-subagent-cli` / `zcode-subagent-cli` …），用**元数据自注册**

@@ -20,7 +20,9 @@ function resolveFromLocale(key: string): string {
     if (obj == null || typeof obj !== 'object') return key
     obj = (obj as Record<string, unknown>)[p]
   }
-  return typeof obj === 'string' ? obj : key
+  // mock 需对齐 message compiler 的字面量转义语义：生产路径经 @intlify 编译 {'@'} 渲染为字面量 @，
+  // 本 mock 原样返回会把 {'@'} 带进断言文本（f47ed9dee 引入该转义后组件测试断言失败），故返回前还原。
+  return typeof obj === 'string' ? obj.replace(/\{\s*'@'\s*\}/g, '@') : key
 }
 
 vi.mock('vue-i18n', async (importOriginal) => {

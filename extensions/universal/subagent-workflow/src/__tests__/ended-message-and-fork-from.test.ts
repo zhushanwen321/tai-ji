@@ -3,16 +3,16 @@
 // [v8.5 A1/A2/B] 三块改动的集成测试：
 //   A1 — message 拒绝文案分流（endedMessageGuard）：user-close/cancelled →「主动关闭，
 //        无法续聊」；断联/自然完成/异归属 →「fork-from 可行动指引」。两种形态各有断言。
-//   A2 — `.finalized` sidecar 真实 reason 读回矩阵：带 reason 用 reason / 空（旧格式）
+//   A2 — `.state` sidecar 真实 reason 读回矩阵：带 reason 用 reason / 空（旧格式）
 //        兜底 disconnected（向后兼容）/ 非法内容兜底 disconnected。
 //   B  — fork-from handler：正常接续（新 id + prompt 注入 + forkSource 指向源文件）、
 //        cancelled 拒绝、worktree 记录拒绝、不存在 id 拒绝、本进程 running 拒绝。
 //
 // mock 手法（[W3 改写]）：registerFakePiEngine 协议替身（原 mock inproc session-runner
 // 不 spawn 真子进程的形态随 inproc pi 引擎目录删除消亡）+ logger；record-store /
-// finalized-marker / tombstone-store 走真实实现（fixture 用临时目录写真实 .jsonl + sidecar）。
+// state-marker 走真实实现（fixture 用临时目录写真实 .jsonl + sidecar）。
 // 执行链观测点从 runAndFinalize 边界捕获（rafCapture）换成 fake.runs 捕获（协议 engine.run
-// 的 task/ctx——冷路径 resume 锚点在 ctx.chat.resume，fork/续写语义落点）。
+// 的 task/ctx——冷路径 resume 锚点在 ctx.resume.resume，fork/续写语义落点）。
 //
 // 注意：本测试进程可能运行在 pi subagent 环境（PI_SUBAGENT_* env 被继承会污染
 // rootSessionId 基线与 rootCwd 编码），beforeEach/afterEach 清理同 IDENTITY_ENV_KEYS。
@@ -30,7 +30,7 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => lo
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { writeFinalized } from "@zhushanwen/subagent-core/execution/finalized-marker.ts";
+import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/state-marker.ts";
 import type { ModelRegistryLike } from "@zhushanwen/subagent-core/execution/model-resolver.ts";
 import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
@@ -113,6 +113,7 @@ function writeSessionJsonl(
   return file;
 }
 
+/** 存量旧名 .cancelled sidecar fixture（L4 后生产只写 .state，此处覆盖兼容读路径）。 */
 function writeTombstone(sessionFile: string, id: string): void {
   fs.writeFileSync(
     `${sessionFile}.cancelled`,
@@ -152,10 +153,9 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
     service = new SubagentService({ cwd: agentDir, modelService });
     service.initSession({ pi: makePi(), sessionId: "root-session-cur" });
 
-    // 协议替身引擎：重生/续聊轮的引擎侧活会话缺省不存在（interact 拒绝 not_resumable
-    // → 冷路径 resume）——与本文件全部执行链场景一致。
+    // 协议替身引擎（[H1 U6] 旧 interact 冷路径拒绝注入随 interact 面退役——续聊恒
+    // 派发新 run + resume 锚点，与本文件全部执行链场景一致）。
     fake = registerFakePiEngine();
-    fake.interactMessageResult = { ok: false, code: "engine_session_not_resumable", message: "no live session" };
   });
 
   afterEach(async () => {
@@ -168,13 +168,13 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
   });
 
   // ============================================================
-  // A2：`.finalized` sidecar reason 读回矩阵（磁盘重建侧）
+  // A2：`.state` sidecar reason 读回矩阵（磁盘重建侧）
   // ============================================================
 
   describe("A2 finalized sidecar reason 矩阵", () => {
     it("带合法 reason 的 sidecar → 重建 closedReason 为真实值（非 gc）", () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-userclose", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "user-close");
+      writeFinalizedState(file, "user-close");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-userclose");
       expect(rec?.status).toBe("closed");
@@ -183,7 +183,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("parent-shutdown reason 同样读回真实值", () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-shutdown", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "parent-shutdown");
+      writeFinalizedState(file, "parent-shutdown");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-shutdown");
       expect(rec?.closedReason).toBe("parent-shutdown");
@@ -191,7 +191,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("显式 gc reason（孤儿恢复写入形态）保持 gc", () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-gc", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "gc");
+      writeFinalizedState(file, "gc");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-gc");
       expect(rec?.closedReason).toBe("gc");
@@ -199,7 +199,8 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("向后兼容：旧格式空内容 sidecar → disconnected（不再误导为 gc），message 不崩", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-legacy", rootSessionId: "root-session-cur" });
-      writeFinalized(file); // v8.5 前：空文件
+      // 存量旧格式 fixture（L4 后生产只写 .state，旧名靠 fs 直写仿真）
+      fs.writeFileSync(`${file}.finalized`, "", "utf-8");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-legacy");
       expect(rec?.status).toBe("closed");
@@ -210,15 +211,16 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
       const res = await messageHandler(service, { subagentId: "sa-a2-legacy", text: "hi" });
       expect(res.response.delivered).toBe(true);
       // [W3 观测点改写] 冷路径续写锚点：原 rafCapture（runAndFinalize args[8].sessionFile）
-      // 换成协议 engine.run 的 ctx.chat.resume.sessionRef.sessionFile（--session 续写原
+      // 换成协议 engine.run 的 ctx.resume.resume.sessionRef.sessionFile（--session 续写原
       // 文件的协议承载位）。
       await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-      expect(fake.runs[0].ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(file);
+      expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
     it("sidecar 内容非法（外部损坏/手写垃圾）→ 兜底 disconnected", () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-junk", rootSessionId: "root-session-cur" });
-      fs.writeFileSync(`${file}.finalized`, "some random junk", "utf-8");
+      // .state 非 JSON（损坏形态）→ 读侧存在性宽语义 → 无 reason → disconnected
+      fs.writeFileSync(`${file}.state`, "some random junk", "utf-8");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-junk");
       expect(rec?.closedReason).toBe("disconnected");
@@ -241,7 +243,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
   describe("A1 message 拒绝文案分流", () => {
     it("形态 X：user-close 终态 →「已主动关闭」文案，不再误报 not found", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-x-close", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "user-close");
+      writeFinalizedState(file, "user-close");
 
       const err = await messageHandler(service, { subagentId: "sa-x-close", text: "hi" }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(Error);
@@ -264,7 +266,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("形态 Y-closed：gc 完成的 done 记录追问 → fork-from 可行动指引 + sessionFile 路径", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-y-done", rootSessionId: "root-session-cur" });
-      writeFinalized(file, "gc");
+      writeFinalizedState(file, "gc");
 
       const err = await messageHandler(service, { subagentId: "sa-y-done", text: "follow up?" }).catch((e: unknown) => e);
       const msg = (err as Error).message;
@@ -300,7 +302,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
   describe("B fork-from action", () => {
     it("正常接续：done 记录 → 新 id + prompt 注入引导语（含源文件指引面）", async () => {
       const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src", rootSessionId: "old-root" });
-      writeFinalized(sourceFile, "gc");
+      writeFinalizedState(sourceFile, "gc");
 
       const result = await forkFromHandler(service, {
         sourceSubagentId: "sa-src",
@@ -329,7 +331,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("无 prompt → 注入默认接管框架（reconstruct state 引导语）", async () => {
       const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src2", rootSessionId: "old-root" });
-      writeFinalized(sourceFile, "gc");
+      writeFinalizedState(sourceFile, "gc");
 
       await forkFromHandler(service, { sourceSubagentId: "sa-src2" });
 
@@ -352,7 +354,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("worktree 记录拒绝（binding 已丢，防 cwd 回落主仓破坏隔离）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-wtxx", rootSessionId: "old-root", worktree: true });
-      writeFinalized(file, "gc");
+      writeFinalizedState(file, "gc");
 
       await expect(forkFromHandler(service, { sourceSubagentId: "sa-wtxx" })).rejects.toThrow(
         /worktree isolation/,

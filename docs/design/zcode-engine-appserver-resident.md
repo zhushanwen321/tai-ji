@@ -310,6 +310,10 @@ stdio NDJSON，非标准 JSON-RPC（**不带 `jsonrpc` 字段**，未知键被 s
    state.updated {patch:{status:"running"}, reason:"prompt_started"}
    v4/telemetry/event {kind:"stream.chunk", channel:"text", chunkLength, firstChunk, assistantMessageId}  ← 无文本
    session/event {sessionId, payload:{delta:"<实时文本>", assistantMessageId}}                            ← 文本在此
+   工具执行期（2026-09-10 真机探针实证，~1.0s 固定 cadence）：
+   session/event {type:"tool.updated", payload:{kind:"progress", toolCallId, toolName, elapsedMs, pid,
+                    stdoutBytes, stderrBytes, outputBytes, stdoutTail}}                                  ← 工具进度（宿主活性面）
+   v4/telemetry/event {kind:"tool.lifecycle", phase:"progress", toolCallId, toolName}                     ← 同 eventId 镜像
 ⑤ 终态权威：v4/telemetry/event {kind:"turn.terminal", status:"success"|...}
    收尾帧：session/event {payload:{response:"<全文>", usage:{inputTokens,outputTokens}}}
 ⑥ session/read {sessionId} → {messages:[{info:{role}, parts:[{type:'text',text} | {type:'step-finish',tokens}]}], ...}

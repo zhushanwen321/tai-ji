@@ -12,6 +12,7 @@ import {
   buildOutboundChildEnv,
   ENGINE_ENV_DENY_LIST,
   ENGINE_ENV_L0_INFRA_KEYS,
+  SHARED_POOL_KEY,
   type LoggerSink,
   configureLoggerSink,
   resetLoggerSinkForTests,
@@ -42,9 +43,6 @@ describe("buildEngineChildEnv 三层契约", () => {
         XYZ_AGENT_API_KEY: "k",
         XYZ_SUBAGENT_RELAY_SESSION_ID: "parent",
         XYZ_SUBAGENT_RELAY_RECORD_ID: "r",
-        XYZ_SUBAGENT_RELAY_STDIN: "x",
-        XYZ_SUBAGENT_RELAY_STDOUT: "x",
-        XYZ_SUBAGENT_RELAY_STDERR: "x",
       },
       { dataDir: "/d" },
     );
@@ -162,7 +160,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
         XYZ_RUNTIME_TOKEN: "tok",
         XYZ_AGENT_API_KEY: "k",
         XYZ_SUBAGENT_RELAY_SESSION_ID: "s",
-        XYZ_SUBAGENT_RELAY_STDOUT: "x",
       },
     });
     expect(env.PATH).toBe("/usr/bin");
@@ -171,7 +168,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
     expect(env.XYZ_RUNTIME_TOKEN).toBeUndefined();
     expect(env.XYZ_AGENT_API_KEY).toBeUndefined();
     expect(env.XYZ_SUBAGENT_RELAY_SESSION_ID).toBeUndefined();
-    expect(env.XYZ_SUBAGENT_RELAY_STDOUT).toBeUndefined();
   });
 
   it("extras 注入 / undefined 删除语义", () => {
@@ -194,5 +190,9 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
 describe("常量镜像自洽", () => {
   it("ENGINE_ENV_L0_INFRA_KEYS 无重复", () => {
     expect(new Set(ENGINE_ENV_L0_INFRA_KEYS).size).toBe(ENGINE_ENV_L0_INFRA_KEYS.length);
+  });
+
+  it("SHARED_POOL_KEY 值锚定 'shared'（存量 journal 落盘路径分段，L3 收编后改名不改值）", () => {
+    expect(SHARED_POOL_KEY).toBe("shared");
   });
 });

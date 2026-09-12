@@ -883,6 +883,8 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
         model: 'p/m',
         sessionFile: '/data/sa-1.jsonl',
         error: 'boom',
+        // R3-1：origin 进全量快照断言——投影白名单漏字段时本用例 toEqual 红
+        origin: 'workflow',
       }),
     ])
 
@@ -903,6 +905,7 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
       // elapsedSeconds 派生：entry 无 duration，从 startedAt/endedAt 差值（60s）
       elapsedSeconds: 60,
       error: 'boom',
+      origin: 'workflow',
     }])
   })
 

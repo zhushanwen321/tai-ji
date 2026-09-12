@@ -94,7 +94,7 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     const cases: Array<[TaskShapeForGate, RegExp]> = [
       [{ fork: true }, /不支持 fork/],
       [{ forkFromSessionFile: "/tmp/sess.jsonl" }, /fork-from 同为父 session 上下文继承/],
-      [{ conversation: true }, /不支持 conversation/],
+      [{ conversation: true }, /不支持 resume 续聊/],
       [{ maxTurns: 10 }, /不支持 maxTurns/],
       [{ worktree: true }, /不支持 worktree 隔离/],
       [{ worktree: { path: "/tmp/wt" } }, /不支持 worktree 隔离/],

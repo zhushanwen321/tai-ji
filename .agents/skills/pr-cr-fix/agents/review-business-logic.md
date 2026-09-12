@@ -45,6 +45,10 @@ task prompt 中必须包含：
    - 错误路径是否重置 `isGenerating` + `streamingMessage`（否则 UI 卡在「思考中」）
    - emit 是否只传单个 payload 对象（禁止 `emit('event', a, b)`）
    - 独立数据源是否用 `Promise.allSettled`（禁止 `Promise.all`）
+   - **分级匹配的错误处理策略**（契约见 [docs/feature-priorities.md](../../../docs/feature-priorities.md) §1「分级与错误处理契约」）：先按 diff 触及的模块查功能分级，再逐接入点核对——
+     - P0/P1 功能的改动：故障是否响亮（fail-fast + 结构化日志 + 可定位恢复动作）？静默吞错 / 启发式兜底掩盖 = MUST_FIX（类别 `grading-error-policy`）
+     - 主流程衔接 P2/P3 功能的接入点：是否有降级边界（catch + 日志 + 关闭/占位兜底）？P2/P3 异常向上传播可打断 P0/P1 主流程 = MUST_FIX（同类别）
+     - 跨级调用点按被调功能契约判：调用方不因辅助功能故障而崩，但降级路径必须有日志（无日志的静默降级 = 吞错，同级别 MUST_FIX）
 6. **streaming message 生命周期（standards.md §3.3）**：pi 一次 agent 调用产生多 message，每个 `message_start` 应完成前一个 streaming message、开始新的。检查变更是否破坏这个时序（`message_start` → 完成 current → 新建 → `text_delta` 追加 → `tool_execution_start/end` → 下一个 `message_start` → 最终 `agent_end` completeStreaming）。漏掉「完成 current」步骤会导致消息内容错乱合并。
 7. **session 双状态处理（standards.md §4.1）**：所有 session 操作必须处理两种状态：
    - **活跃 session**：有运行中的 pi 进程，可实时通信（prompt/get_messages）
@@ -78,7 +82,7 @@ must_fix: <数字>
 | MUST_FIX | src/foo.ts | 42 | boundary | 未处理空数组 | 添加空数组 early return |
 ```
 
-类别包括：root-cause / boundary / regression / error-state-reset / emit-payload / promise-allsettled / streaming-lifecycle / session-dual-state / store-sync
+类别包括：root-cause / boundary / regression / error-state-reset / emit-payload / promise-allsettled / streaming-lifecycle / session-dual-state / store-sync / grading-error-policy
 
 优先级：MUST_FIX / SUGGESTION / INFO
 

@@ -69,6 +69,13 @@ const { loggerMock } = vi.hoisted(() => ({
 // 经 ../core/logger.ts 引用的同一模块）。曾写 ../core/logger.ts 指向不存在的
 // src/execution/core/，vi.mock 静默失效（D4 上限用例首次断言日志时暴露）。
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+// [U3 适配] RecordStore 构造点接线 manifestDir 后，markBatchFinalized 的 manifest 面走
+// writeAtomicFileSync 同步写（不再经 manifestStore.writeManifest）——屏障失败注入面
+// 随之迁移到本模块（默认透传真实现，仅「屏障失败」用例内 mockImplementationOnce）。
+vi.mock("../../shared/atomic-write.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/atomic-write.ts")>();
+  return { ...actual, writeAtomicFileSync: vi.fn(actual.writeAtomicFileSync) };
+});
 
 // [W3 改写] mock session-runner（execute 链 runSpawn 替身）随 inproc pi 引擎目录 删除消亡——
 // execute 链改为协议 seam（registerFakePiEngine 替身 + 显式 settle 应答）。
@@ -83,6 +90,7 @@ import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.t
 import { RecordStore } from "../record-store.ts";
 import type { SubagentRecord } from "../types.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
 /** 剥身份/relay env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描），
  *  relay env 属 pi-invocation/relay-env 存量测试的敏感面（测试纪律：env 剥离）。 */
@@ -295,7 +303,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   }
 
   /** 在 sessionsDir 手工构造子 session 文件（session 头 + identity entry + 末行完整
-   *  JSON record entry，E9 用例同款形态）且**不写** `.finalized`/`.cancelled`/`.alive`
+   *  JSON record entry，E9 用例同款形态）且**不写** `.state`/`.alive`
    *  三 sidecar——重建矩阵分支 4 命中条件，保证 orphan 恢复走 finalizeOrphanRecord
    *  真实路径（entry-born 兜底测不到 D3 merge 所在路径 = 假绿）。
    *  identity 含 reconstructAll 过滤必需字段：id/agent/task string + mode 枚举 +
@@ -462,34 +470,33 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(marks.map((m) => m.id).sort()).toEqual(["sa-a", "sa-b"]);
   });
 
-  it("屏障失败 warn 留痕（D6 #7a/SC-1）：manifest 写失败不阻断补发，warn 含成员 id 与 manifest 路径", async () => {
+  it("屏障失败 warn 留痕（D6 #7a/SC-1）：manifest 同步写失败不阻断补发，warn 含成员 id（U1 同步分支形态）", async () => {
     const childFile = writeChildSessionFile("sa-bar-fail", "barrier fail task");
     seedRoundTerminalEntries("sa-bar-fail", childFile, "barrier result", "prov/bar-m", "sync");
 
     const recovery = makeRecoveryService(makeAssertPi());
     const spy = spyNotifier(recovery);
     loggerMock.warn.mockClear(); // logger 模块级共享，计数从本用例起算
-    // 私有 manifestStore 打桩（TS private 仅编译期可见性）：单成员写失败（EACCES 类），
-    // 屏障 allSettled 语义 = 不阻断写账投递
-    const internal = recovery as unknown as {
-      manifestStore: { writeManifest: (r: { id: string }) => Promise<void> };
-    };
-    vi.spyOn(internal.manifestStore, "writeManifest").mockRejectedValueOnce(
-      Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
-    );
+    // [U3 适配] 构造点接线 manifestDir 后屏障走 writeAtomicFileSync 同步分支——失败
+    // 注入面从 manifestStore.writeManifest（异步降级分支打桩）迁至原子写模块。单成员
+    // 批 = 单次调用，mockImplementationOnce 恰好命中；同步分支 try/catch 吞错 =
+    // 不阻断落标/写账投递（best-effort 与旧 allSettled 同源）。
+    vi.mocked(writeAtomicFileSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    });
 
     await recovery.recoverSyncCollectBatch();
 
     // best-effort 语义：写账照常推进（反查索引缺失只影响指针行反查，不构成写账失败）
     expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    // D6 #7a：原 debug 级排障不可见 → warn，且含成员 id + manifest 路径两个定位线索
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-bar-fail.json");
+    // D6 #7a 适配（U1 同步分支 warn 形态）：message 含 sync write failed 语义 +
+    // detail.id 定位成员（manifest 路径由 recordsDir/<id>.json 推导——异步分支的
+    // 路径直书线索未纳入 U1 同步分支实装，按现行为断言）。
     const barrierWarns = loggerMock.warn.mock.calls.filter((c) =>
-      String(c[0]).startsWith("[subagents] batch-finalized manifest write failed"),
+      String(c[0]).startsWith("[subagents] batch-finalized manifest sync write failed"),
     );
     expect(barrierWarns).toHaveLength(1);
-    expect(String(barrierWarns[0]![0])).toContain("record=sa-bar-fail");
-    expect(String(barrierWarns[0]![0])).toContain(manifestFile);
+    expect((barrierWarns[0]![1] as { detail?: { id?: string } }).detail?.id).toBe("sa-bar-fail");
   });
 
   it("E1 幂等窗口：账本同 hash 拒绝（accepted=false）也统一补标 → 标记落盘后二次恢复零补发", async () => {
@@ -662,7 +669,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(overwritten.result).toBe("kill-9 full result body");
     expect(overwritten.model).toBe("prov/round-m");
     // 防重锚落盘（覆写已判终态，二次重启不再进判定）
-    expect(fs.existsSync(`${childFile}.finalized`)).toBe(true);
+    expect(fs.existsSync(`${childFile}.state`)).toBe(true);
 
     // ── E1 真实跑：末条（覆写后 closed entry）候选命中 → 补发 + 落标 ──
     const spy = spyNotifier(recovery);

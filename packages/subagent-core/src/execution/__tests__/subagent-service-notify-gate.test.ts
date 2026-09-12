@@ -90,7 +90,7 @@ describe("T4① notify gate closedReason whitelist", () => {
   });
 
   it("kickOffChatRound 应答回注不注入 parent-new closed records（notify 门白名单）", async () => {
-    const { agentDir, service, pi } = setup();
+    const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
     const record = createRecord("sa-gate-new", {
@@ -103,19 +103,28 @@ describe("T4① notify gate closedReason whitelist", () => {
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注
+    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注。
+    // [H4/U5 适配] 终态形态对齐生产：disposeAllRecords 走 markFinalized（status
+    // closed + endedAt + archive）——只设 closedReason 不设 status 会让 settle 路径
+    // tryTransition(running→closed) 抢成赢家覆写 user-close，门判据随之漂移；record
+    // 补 register 进 store 对齐「store 外 record 无编排性关闭可达」的生产形态。
+    record.status = "closed";
+    record.endedAt = Date.now();
     record.closedReason = "parent-new";
+    store.register(record);
     // [W3] 轮次编排入口 kickOffChatRound（私有，bracket 调用先例）——协议 run 发起后
     // 挂起，编排性关闭先行，再模拟引擎应答（迟到回注被门拦）。
-    const kickOffChatRound = (
-      service as unknown as Record<string, (...args: unknown[]) => void>
-    )["kickOffChatRound"];
+    // [R4 深绑改写] kickOffChatRound 本体已迁 RunOrchestration 聚合——bracket 路径
+    // 改经聚合实例（断言对象与强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
+    const orchestration = (
+      service as unknown as { runOrchestration: { kickOffChatRound: (...args: unknown[]) => void } }
+    ).runOrchestration;
     const identity = {
       agent: "general-purpose",
       agentConfig: undefined,
       resolved: { model: { id: "model", name: "Model", provider: "test", reasoning: false }, thinkingLevel: undefined },
     };
-    kickOffChatRound.call(service, record, { task: "t", slug: "gate" }, identity, undefined, 1000);
+    orchestration.kickOffChatRound(record, { task: "t", slug: "gate" }, identity, undefined, 1000);
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     fake.runs[0]!.settle({ content: "late round text" });
     await Promise.resolve();
@@ -127,7 +136,7 @@ describe("T4① notify gate closedReason whitelist", () => {
   });
 
   it("kickOffChatRound 应答回注对真实失败关闭（gc）仍通知", async () => {
-    const { agentDir, service, pi } = setup();
+    const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
     const record = createRecord("sa-gate-gc", {
@@ -140,16 +149,23 @@ describe("T4① notify gate closedReason whitelist", () => {
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
+    // 同上 [H4/U5 适配]：失败终态化（closed/gc/endedAt）+ register 进 store 的完整
+    // 生产形态——迟到回注按 CAS 输家路径走，门判据读真实 gc 关闭原因。
+    record.status = "closed";
+    record.endedAt = Date.now();
     record.closedReason = "gc";
-    const kickOffChatRound = (
-      service as unknown as Record<string, (...args: unknown[]) => void>
-    )["kickOffChatRound"];
+    store.register(record);
+    // [R4 深绑改写] kickOffChatRound 本体已迁 RunOrchestration 聚合——bracket 路径
+    // 改经聚合实例（断言对象与强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
+    const orchestration = (
+      service as unknown as { runOrchestration: { kickOffChatRound: (...args: unknown[]) => void } }
+    ).runOrchestration;
     const identity = {
       agent: "general-purpose",
       agentConfig: undefined,
       resolved: { model: { id: "model", name: "Model", provider: "test", reasoning: false }, thinkingLevel: undefined },
     };
-    kickOffChatRound.call(service, record, { task: "t", slug: "gate" }, identity, undefined, 1000);
+    orchestration.kickOffChatRound(record, { task: "t", slug: "gate" }, identity, undefined, 1000);
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     fake.runs[0]!.settle({ content: "round" });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());

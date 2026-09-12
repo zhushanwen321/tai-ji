@@ -114,7 +114,10 @@ describe("ManifestStore", () => {
     });
   });
 
-  describe("recoverTmpFiles", () => {
+  // [U4c / G3] tmp 恢复退役（D6）：manifest 已是可丢可重建缓存（权威 = `.state`，
+  // 重建 = RecordStore.rebuildIndexes），promote 半写 tmp 的恢复语义失效——[H4/U5
+  // 更名收口] recoverTmpFiles → sweepTmpFiles（名实对齐静默删除），返回删除计数。
+  describe("sweepTmpFiles", () => {
     it("should delete tmp when manifest exists", async () => {
       const id = "test-recovery-1";
       const manifestPath = path.join(tmpDir, `${id}.json`);
@@ -123,20 +126,20 @@ describe("ManifestStore", () => {
       fs.writeFileSync(manifestPath, '{"id":"test-recovery-1"}');
       fs.writeFileSync(tmpPath, '{"id":"test-recovery-1"}');
 
-      const result = await store.recoverTmpFiles();
+      const result = await store.sweepTmpFiles();
 
-      expect(result.deleted).toBe(1);
+      expect(result).toBe(1);
       expect(fs.existsSync(tmpPath)).toBe(false);
       expect(fs.existsSync(manifestPath)).toBe(true);
     });
 
-    it("should rename valid tmp when manifest missing", async () => {
+    it("should delete valid tmp when manifest missing (promote retired)", async () => {
       const id = "test-recovery-2";
       const tmpPath = path.join(tmpDir, `${id}.json.tmp.12345`);
       const manifestPath = path.join(tmpDir, `${id}.json`);
 
-      // F2 后 recoverTmpFiles 用 isValidManifest 严格校验——tmp 必须含全部必填字段
-      // （id/rootSessionId/agentName/createdAt/status）才会 promote，否则走删除分支 3b。
+      // 旧 promote 分支形态（合法完整 manifest 的 tmp + 正式文件缺失）也删——
+      // 半写 tmp 不再被复活成「看似权威」的索引，缺员由 rebuildIndexes 重建。
       fs.writeFileSync(tmpPath, JSON.stringify({
         id,
         rootSessionId: "session-123",
@@ -145,10 +148,10 @@ describe("ManifestStore", () => {
         createdAt: Date.now(),
       }));
 
-      const result = await store.recoverTmpFiles();
+      const result = await store.sweepTmpFiles();
 
-      expect(result.recovered).toBe(1);
-      expect(fs.existsSync(manifestPath)).toBe(true);
+      expect(result).toBe(1);
+      expect(fs.existsSync(manifestPath)).toBe(false);
       expect(fs.existsSync(tmpPath)).toBe(false);
     });
 
@@ -158,20 +161,18 @@ describe("ManifestStore", () => {
 
       fs.writeFileSync(tmpPath, "invalid json {{{");
 
-      const result = await store.recoverTmpFiles();
+      const result = await store.sweepTmpFiles();
 
-      expect(result.deleted).toBe(1);
+      expect(result).toBe(1);
       expect(fs.existsSync(tmpPath)).toBe(false);
     });
 
-    // F2：合法 JSON 但缺必填字段（非合法 manifest）应走删除（分支 3b），不能 promote
     it("should delete tmp when JSON valid but not a valid manifest (missing required fields)", async () => {
       const id = "test-recovery-4";
       const tmpPath = path.join(tmpDir, `${id}.json.tmp.12345`);
       fs.writeFileSync(tmpPath, JSON.stringify({ foo: "bar" })); // 合法 JSON，非 manifest
-      const result = await store.recoverTmpFiles();
-      expect(result.deleted).toBe(1);
-      expect(result.recovered).toBe(0);
+      const result = await store.sweepTmpFiles();
+      expect(result).toBe(1);
       expect(fs.existsSync(tmpPath)).toBe(false);
     });
   });

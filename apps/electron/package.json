@@ -11,10 +11,10 @@
   "type": "module",
   "main": "dist/main/main.cjs",
   "scripts": {
-    "dev": "node scripts/electron-ensure.mjs && concurrently \"pnpm run dev:vite\" \"pnpm run dev:electron\"",
-    "dev:mock": "node scripts/electron-ensure.mjs && VITE_MOCK=true XYZ_MOCK=1 concurrently \"pnpm run dev:vite\" \"pnpm run dev:electron\"",
+    "dev": "node scripts/dev-instance.mjs",
+    "dev:mock": "node scripts/dev-instance.mjs --mock",
     "dev:vite": "pnpm --filter @xyz-agent/frontend run dev",
-    "dev:electron": "pnpm run build:main && pnpm run build:preload && node scripts/dev-electron.mjs . --remote-debugging-port=9222",
+    "dev:electron": "pnpm run build:main && pnpm run build:preload && node scripts/dev-electron.mjs .",
     "build:runtime": "pnpm --filter @zhushanwen/subagent-core run build && pnpm --filter @xyz-agent/runtime run build",
     "build:main": "vite build --config vite.config.main.ts",
     "build:preload": "vite build --config vite.config.preload.ts",

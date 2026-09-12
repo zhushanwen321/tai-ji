@@ -6,6 +6,7 @@ import { getLogger } from "../core/logger.ts";
 
 import { bestEffort } from "./best-effort.ts";
 import { writeAtomicFile } from "../shared/atomic-write.ts";
+import type { ClosedReason, ExecutionStatus } from "./types.ts";
 
 const logger = getLogger("subagents");
 
@@ -23,6 +24,23 @@ export interface ManifestRecord {
    * 历史 "error"/"completed"/"failed" 值由读侧 mapManifestStatus 向后兼容映射。
    */
   status: "running" | "closed" | "cancelled";
+  /**
+   * [U4c / D5 词汇双写过渡] 内部权威状态词汇（ExecutionStatus 二态）。
+   * 与上方旧 status 三态投影**永久双写**——无版本磁盘 schema 不做破坏性变更；
+   * session-reader（独立 npm 包独立进程）直读旧 status 做 identity 富字段投影
+   * 与孤儿判定，删字段 = 外部消费方富字段降级。旧 status 只降权威地位不删字段。
+   * 宿主内消费方不读本字段（终态判定走 `.state` 权威，D1）；本字段是词汇收口
+   * （全景① ExecutionStatus+ClosedReason）在 manifest 写面的过渡锚。
+   */
+  executionStatus?: ExecutionStatus;
+  /**
+   * [M2 Gate B] closed 终态的 L2 关闭原因（status="closed" 时有意义）。旧 manifest 无
+   * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建
+   * 的快照丢 closedReason，endedMessageGuard 把 user-close/cancelled 误分流进
+   * 「reconnectable/fork-from」分支——本字段是 manifest 源快照三分流的唯一依据
+   * （磁盘 sidecar 源由 .state reason 承载，不经本字段）。
+   */
+  closedReason?: ClosedReason;
   createdAt: number;
   completedAt?: number;
   sessionFile?: string;
@@ -99,7 +117,9 @@ export class ManifestStore {
    * 不阻塞 event loop）。
    *
    * 失败时原语尽力清理残留 tmp（debug 记录，不掩盖原错误）并原样上抛——
-   * 调用方（finalizeRecord）决定降级策略。
+   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / 批写 barrier /
+   * rebuildIndexes 重建降级（debug 留痕）/ rematerializeManifest（warn 语义））
+   * 决定降级策略——各面降级策略分化见各调用点。
    */
   async writeManifest(record: ManifestRecord): Promise<void> {
     const filePath = path.join(this.dir, `${record.id}.json`);
@@ -177,20 +197,23 @@ export class ManifestStore {
   }
 
   /**
-   * 启动时恢复 tmp 文件。
-   * 3 分支逻辑：
-   * 1. manifest 已存在 → 删 tmp（陈旧）
-   * 2. tmp 合法 + manifest 缺失 → rename tmp 为 manifest
-   * 3. tmp 非法 + manifest 缺失 → 删 tmp
+   * 启动时清扫 tmp 残留（[U4c / D6] tmp 恢复退役后的语义——[H4/U5 收口] 更名
+   * recoverTmpFiles → sweepTmpFiles，名实对齐「静默删除」）。
    *
-   * [T5④ / PS-13] per-file 容错：单个 tmp 文件操作失败（ENOENT——并发回收/外部清理
-   * 抢先、EACCES 等）只 warn + 跳过该文件，不再中断整轮——旧实现单文件 ENOENT 即抛，
-   * 剩余 tmp 本轮不再处理，自愈但不可见（残留顺延下次启动）。跳过数经 warn 汇总留痕，
-   * 调用方返回值形态不变（跳过者不计数）。
+   * 旧语义（ADR-035 三分支：manifest 已存在删 tmp / tmp 合法且 manifest 缺失
+   * promote / tmp 非法删）已随缓存降级退役——manifest 现为可丢可重建缓存
+   * （权威 = `.state`，重建 = RecordStore.rebuildIndexes，D5），promote 半写 tmp
+   * 只会把陈旧快照复活成「看似权威」的索引，语义失效；统一**静默删除**全部
+   * tmp（含 0 字节/半写形态——D8 停机窗残留由本清扫顺带清理）。
+   *
+   * [T5④ / PS-13] per-file 容错保留：单个 tmp 删除失败（ENOENT——并发回收/外部
+   * 清理抢先、EACCES 等）只 warn + 跳过该文件，不再中断整轮。promote 退役后
+   * 无恢复形态，返回值简化为删除计数。
+   *
+   * @returns 删除的 tmp 文件数。
    */
-  async recoverTmpFiles(): Promise<{ deleted: number; recovered: number }> {
+  async sweepTmpFiles(): Promise<number> {
     let deleted = 0;
-    let recovered = 0;
     let failed = 0;
 
     const files = fs.readdirSync(this.dir);
@@ -198,39 +221,14 @@ export class ManifestStore {
 
     for (const tmpFile of tmpFiles) {
       const tmpPath = path.join(this.dir, tmpFile);
-      const manifestId = tmpFile.split(".json.tmp.")[0];
-      const manifestPath = path.join(this.dir, `${manifestId}.json`);
-
       try {
-        if (fs.existsSync(manifestPath)) {
-          // 分支 1: manifest 已存在，删 tmp
-          fs.unlinkSync(tmpPath);
-          deleted++;
-        } else {
-          // 试解析 tmp
-          try {
-            const content = fs.readFileSync(tmpPath, "utf-8");
-            const parsed: unknown = JSON.parse(content);
-            if (isValidManifest(parsed)) {
-              // 分支 2: tmp 是合法 manifest，rename 为正式文件
-              fs.renameSync(tmpPath, manifestPath);
-              recovered++;
-            } else {
-              // 分支 3b: 合法 JSON 但非合法 manifest（缺必填字段），删
-              fs.unlinkSync(tmpPath);
-              deleted++;
-            }
-          } catch {
-            // 分支 3a: JSON.parse 失败，删
-            fs.unlinkSync(tmpPath);
-            deleted++;
-          }
-        }
+        fs.unlinkSync(tmpPath);
+        deleted++;
       } catch (fileErr) {
         // [T5④/PS-13] 单文件失败不中断整轮：warn 留痕（含文件名与原因）后继续处理
         // 剩余 tmp。常见于 tmp 已被并发回收/外部清理删除（ENOENT）——自愈场景不再放大。
         failed++;
-        logger.warn(`[subagents] recoverTmpFiles: failed to recover ${tmpFile}, skipping (leftovers retry on next startup)`, {
+        logger.warn(`[subagents] sweepTmpFiles: failed to remove ${tmpFile}, skipping (leftovers retry on next startup)`, {
           detail: fileErr instanceof Error ? fileErr.message : String(fileErr),
         });
       }
@@ -238,10 +236,10 @@ export class ManifestStore {
 
     if (failed > 0) {
       logger.warn(
-        `[subagents] recoverTmpFiles: ${failed} of ${tmpFiles.length} tmp file(s) could not be recovered`,
+        `[subagents] sweepTmpFiles: ${failed} of ${tmpFiles.length} tmp file(s) could not be removed`,
       );
     }
 
-    return { deleted, recovered };
+    return deleted;
   }
 }

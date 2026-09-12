@@ -8,7 +8,7 @@
  *   1. identity env→appendEntry 重建（类型 13 字段含 1 个 @deprecated，写入 12）
  *   2. notify ledger host 装配 + 重启恢复
  *   3. 双 Service 装配 + initSession（createOrReuseServices 封装，单例语义 D8）
- *   4. GC / manifest tmp / worktree 恢复
+ *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复
  *   5. per-session run store + kill-9 恢复循环 + evictDoneRunsBeyondCap
  *   6. SAR + engine 基线（经 SessionLifecycleResult 返回，sessionState 写入留在组合根）
  *
@@ -408,17 +408,33 @@ async function runProcessLevelMaintenance(
     });
   }
 
-  // ADR-035 启动恢复：扫描 manifest tmp 残留（崩溃打断的 writeManifest 留下，promote/unlink）。
+  // ADR-035 启动清扫：manifest tmp 残留（崩溃打断的 writeManifest 留下）。
+  // [U4c / D6] tmp 恢复退役为静默删除——manifest 已是可丢可重建缓存（权威 =
+  // `.state`，重建走下方 rebuildIndexes 钩子），promote 半写 tmp 的恢复语义失效。
   // 扫描属进程级维护——oncePerProcess 守卫防双跑（u-audit-fix）；第二派发重放首次
-  // Promise（结果缓存语义），recovered 计数日志可能重打，无文件副作用。
+  // Promise（结果缓存语义），deleted 计数日志可能重打，无文件副作用。
   try {
-    const recovered = await oncePerProcess("subagent-workflow:recover-manifest-tmp-files", () =>
+    const swept = await oncePerProcess("subagent-workflow:sweep-manifest-tmp-files", () =>
       service.recoverManifestTmpFiles());
-    if (recovered.recovered > 0 || recovered.deleted > 0) {
-      logger.warn(`[subagents] manifest tmp recovery: ${recovered.recovered} promoted, ${recovered.deleted} deleted`);
+    if (swept.deleted > 0) {
+      logger.warn(`[subagents] manifest tmp sweep: ${swept.deleted} stale tmp file(s) removed (manifest is rebuildable cache)`);
     }
   } catch (err) {
-    logger.warn("[subagents] manifest tmp recovery failed", {
+    logger.warn("[subagents] manifest tmp sweep failed", {
+      reason: toErrorMessage(err),
+    });
+  }
+
+  // [U4c / G1] 缓存降级重建（boot 全量腿）：boot revive 已完成（createOrReuseServices
+  // 内 initSession 的孤儿恢复/可重连 entry 重物化先于本 helper），此处全量重建可丢
+  // 缓存——manifest 幂等补缺 + sessions-index 经首扫自愈重写。进程级维护（磁盘域
+  // 全量），oncePerProcess 守卫防双跑；/resume /fork 同进程复用实例时跳过（查询面
+  // 惰性通道兜底，且终态写点本身维持 manifest 就位）。
+  try {
+    oncePerProcess("subagent-workflow:rebuild-record-indexes", () =>
+      service.rebuildIndexes());
+  } catch (err) {
+    logger.warn("[subagents] record index rebuild failed", {
       reason: toErrorMessage(err),
     });
   }

@@ -40,11 +40,16 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
     expect(err({ id: 1, error: { code: "boom", message: "m", recovery: "r" } })).toBe(false);
   });
 
-  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 限 8 种", () => {
+  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 限 9 种", () => {
     const validate = ajv.compile(ENGINE_PROTOCOL_SCHEMAS.notification);
     expect(validate({
       method: "event",
       params: { runId: "r1", seq: 1, event: { type: "text_delta", delta: "x" } },
+    })).toBe(true);
+    // activity 活性信号变体（无载荷字段，仅 type）
+    expect(validate({
+      method: "event",
+      params: { runId: "r1", seq: 1, event: { type: "activity" } },
     })).toBe(true);
     // 未知 event.type
     expect(validate({

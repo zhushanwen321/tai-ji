@@ -4,10 +4,11 @@
 // §3.3.5（EnginePort 与中立类型完整契约）+ §3.3.6（EngineHandle/journal/SessionView 格式）。
 //
 // [S4 簇 3 收编] 契约类型单源化（type-only）：AgentOutcome / EngineHandleData /
-// ReplayedTurn / SessionView / EngineCapabilities / ProbeReport / InteractAction /
-// InteractResult 的本地定义已删除，自 @zhushanwen/subagent-engine-sdk re-export
-// （SDK protocol/contract-types.ts 是类型闭包 SSOT，core 反向 re-export 保上层消费面
-// ——import 方路径零改动；结构等价由 protocol-closure.test.ts 断言族守卫）。
+// ReplayedTurn / SessionView / EngineCapabilities / ProbeReport 的本地定义已删除，
+// 自 @zhushanwen/subagent-engine-sdk re-export（SDK protocol/contract-types.ts 是
+// 类型闭包 SSOT，core 反向 re-export 保上层消费面——import 方路径零改动；结构等价
+// 由 protocol-closure.test.ts 断言族守卫）。[H1 U5/U6] InteractAction / InteractResult
+// 已随 chat 域 interact 面退役删除。
 // EngineHandle 留守本地：SDK 无此类型（协议面用裸 data 载荷），宿主侧句柄包装接口
 // 是 core 域概念。
 //
@@ -20,7 +21,7 @@
 
 import type { EngineHandleData } from "@zhushanwen/subagent-engine-sdk";
 
-// AgentEvent 8 种事件：权威定义在 SDK contract-types，经 execution/types.ts re-export
+// AgentEvent 9 种事件：权威定义在 SDK contract-types，经 execution/types.ts re-export
 // → shared/agent-event.ts 转发层 → 本文件（链条保持，维持「shared/ 是类型共享层」的
 // 架构约定）。新增粗粒度约束（coarse 引擎至少合成一次 message_end + 一次 turn_end）
 // 由 conformance 套件断言（P4），不在类型层编码。
@@ -34,26 +35,22 @@ export type {
   AgentOutcome,
   EngineCapabilities,
   EngineHandleData,
-  InteractAction,
-  InteractResult,
   ProbeReport,
   ReplayedTurn,
   SessionView,
 } from "@zhushanwen/subagent-engine-sdk";
 
 // ============================================================
-// EngineHandle（run/interact/read 三面的连接件，D1/§3.3.6）——core 域类型留宿主侧
+// EngineHandle（run/read 两面的连接件，D1/§3.3.6）——core 域类型留宿主侧
 // ============================================================
 
 /**
- * 引擎会话句柄（run 返回、interact/read 入参）。
+ * 引擎会话句柄（run 返回、read 入参；[H1 U5/U6] interact 面退役后不再有 interact
+ * 消费方）。
  *
  * 契约三条（D1）：不透明（上层不解构——唯一例外是 record 持久化层序列化 data 字段与
- * read 降级链）、可持久化（data 是纯 JSON，主会话 reload 后 read/interact 仍可用）、
- * 自描述（data 含 engineId + 引擎 session 定位符 + pool key + adapter 版本）。
- *
- * 对进程已死的 handle 调 interact 必须返回 engine_session_not_resumable（指向 cold
- * resume 路径），而非笼统失败——由各引擎 interact 实现保证。
+ * read 降级链）、可持久化（data 是纯 JSON，主会话 reload 后 read 仍可用）、自描述
+ * （data 含 engineId + 引擎 session 定位符 + pool key + adapter 版本）。
  */
 export interface EngineHandle {
   /** 持久化数据。上层不得解构其内部字段（见契约三条）。 */

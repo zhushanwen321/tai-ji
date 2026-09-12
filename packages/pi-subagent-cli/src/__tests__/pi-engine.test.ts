@@ -9,8 +9,9 @@
 //   - run 一次性任务：SpawnRunParams 还原（字段透传 / ctxModel 覆盖 / forkSource）、
 //     回调接线（onEvent/onHandleReady/onChildSpawned/onDelta/askUser）、
 //     EngineHandle + AgentOutcome 应答装配（usage 域映射 / toolCalls 投影）；
-//   - run chat 轮：chatMode + resume 锚点透传、recordId 锚定 handle；
-//   - interact 三分派：chat 命中直派 / run 域热路径（EPIPE 兜底）/ 冷句柄拒绝；
+//   - run chat 轮（[H1 U3] run 派发形态，续聊 = 新 run + resume 锚点——[H1 U5] 起
+//     引擎侧无 interact 面）：chatMode 分派 + resume 锚点透传（--session 穿透）+
+//     recordId 锚定 handle；
 //   - read 三级降级形态（journal 重放 / outcome-only）、dispose 收割幂等；
 //   - dataDir 缺失 → engine_not_found（prepare 期 reject，不产生 handle）。
 
@@ -27,7 +28,6 @@ import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
 import { PiEngine, type PiEngineDeps } from "../pi-engine.ts";
 import type {
   AgentCallOpts,
-  EngineHandle,
   RunContext,
 } from "../port-types.ts";
 import {
@@ -40,7 +40,7 @@ import {
 import { resetAllEpipeFailures } from "../stdin-writer.ts";
 import { PI_ADAPTER_VERSION, PI_ENGINE_ID, PI_POOL_KEY } from "../constants.ts";
 
-/** fake 子进程：stdin 写捕获 + EPIPE 注入 + kill 观测（同 chat-session.test 形态）。 */
+/** fake 子进程：stdin 写捕获 + EPIPE 注入 + kill 观测（原 chat-session.test 形态，该文件已随 U5 删除）。 */
 class FakeChild extends EventEmitter {
   readonly pid = 7331;
   killed = false;
@@ -311,6 +311,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
         onHandleReady: (p) => handleReady.push(p),
         onChildSpawned: (c) => childSpawned.push(c),
         onPoolResolved: (p) => pools.push(p),
+        sessionRootId: "root-sess-f6",
       },
     );
 
@@ -328,8 +329,10 @@ describe("PiEngine.run（一次性任务形态）", () => {
       skillPaths: ["/skills/x"],
       appendSystemPrompt: ["extra prompt"],
       forkSource: "/tmp/fork-source.jsonl",
+      sessionRootId: "root-sess-f6",
       signal,
-      // resolveSessionDir：<dataDir>/subagents/sessions/<encoded(cwd)>（cwd 未传 = process.cwd()）
+      // [LEGACY fallback] ctx.sessionDir 缺省 → 旧推导 <dataDir>/subagents/sessions/
+      // <encoded(cwd)>（cwd 未传 = process.cwd()）；权威 = 宿主注入（见下方优先用例）
       sessionDir: join("/tmp/engine-data", "subagents", "sessions", process.cwd().replace(/[^a-zA-Z0-9_-]+/g, "_")),
     });
     expect(cap.params.chatMode).toBeUndefined();
@@ -392,6 +395,8 @@ describe("PiEngine.run（一次性任务形态）", () => {
     const { engine, captured } = makeEngine();
     const runP = engine.run({ prompt: "x" }, { taskId: "run-fb", poolKey: PI_POOL_KEY });
     expect(captured[0]!.params.agentName).toBe("workflow-agent");
+    // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义，one-shot 形态）
+    expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
     await settleRun(
       captured[0]!,
       spawnRunResult({
@@ -412,6 +417,19 @@ describe("PiEngine.run（一次性任务形态）", () => {
     await runP2;
   });
 
+  it("[Option C] ctx.sessionDir 优先——引擎不再自推导（宿主权威 getSubagentSessionDir 值直通 --session-dir）", async () => {
+    const { engine, captured } = makeEngine();
+    const hostAuthoritative = "/host/agent-dir/subagents/--Users-x-proj--/sessions";
+    const runP = engine.run(
+      { prompt: "sessionDir priority" },
+      { taskId: "run-sd-priority", poolKey: PI_POOL_KEY, sessionDir: hostAuthoritative },
+    );
+    // ctx.sessionDir 有值 → 原样直通（[LEGACY] fallback 不参与——即使其推导值不同）
+    expect(captured[0]!.params.sessionDir).toBe(hostAuthoritative);
+    await settleRun(captured[0]!, spawnRunResult());
+    await runP;
+  });
+
   it("bindAskUser 注入后 run 回调 askUser 转发 host handler", async () => {
     const { engine, captured } = makeEngine();
     const asked: string[] = [];
@@ -428,15 +446,16 @@ describe("PiEngine.run（一次性任务形态）", () => {
   });
 });
 
-describe("PiEngine.run（chat 会话形态）", () => {
-  it("chatMode 分派：recordId 锚定 + resume 锚点透传 + runId 键回调", async () => {
+describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
+  it("会话形态轮：recordId 锚定 + resume 锚点透传（--session 穿透）+ chatMode 分派，不经 ChatSessionRegistry", async () => {
     const { engine, captured } = makeEngine();
     const runP = engine.run(
       { prompt: "chat turn" },
       {
         taskId: "run-chat-1",
         poolKey: PI_POOL_KEY,
-        chat: {
+        sessionRootId: "root-sess-f6",
+        resume: {
           recordId: "rec-chat-9",
           resume: { sessionRef: { recordId: "rec-chat-9", sessionFile: "/tmp/sess-c9.jsonl" }, poolKey: PI_POOL_KEY },
         },
@@ -446,165 +465,78 @@ describe("PiEngine.run（chat 会话形态）", () => {
     expect(cap.params).toMatchObject({
       recordId: "rec-chat-9",
       task: "chat turn",
+      // [H1 U3] 会话形态轮 = run 派发形态：chatMode 仅作 spawn-runner 的 agent_settled
+      // resolve+收割分派（D7），不再经 ChatSessionRegistry.startRound
       chatMode: true,
       resumeSessionFile: "/tmp/sess-c9.jsonl",
+      sessionRootId: "root-sess-f6",
+      // [LEGACY fallback] ctx.sessionDir 缺省 → 旧推导不变（LEGACY 语义锁定）
       sessionDir: join("/tmp/engine-data", "subagents", "sessions", process.cwd().replace(/[^a-zA-Z0-9_-]+/g, "_")),
     });
     expect(cap.params.agentName).toBe("chat-agent");
 
-    // chat 轮回调：onEvent / onHandleReady / onChildSpawned 直通 ctx
-    const events: unknown[] = [];
+    // 会话形态轮回调：onEvent / onHandleReady / onChildSpawned / onChildStateChanged
+    // 全走 ctx 直通（与 one-shot 共用 buildRunCallbacks）
     cap.callbacks.onEvent?.({ type: "turn_end" });
     cap.callbacks.onHandleReady?.({ sessionRef: { sessionFile: "/tmp/sess-c9.jsonl" }, poolKey: PI_POOL_KEY });
     cap.callbacks.onChildSpawned?.(555, "rec-chat-9");
-    void events;
 
-    // 未 bindHostChannels 时 askUser 自动 cancelled（chat 会话反向通道缺省面）
-    const answer = await cap.callbacks.askUser?.({ method: "select", id: "ui-3", title: "q", options: ["a"] });
-    expect(answer).toEqual({ cancelled: true });
+    // per-run askUser 绑定：bindAskUser 未注入时无 askUser 回调
+    // （chat 会话级固定绑定随 registry 解耦退役）
+    expect(cap.callbacks.askUser).toBeUndefined();
 
     cap.resolve(spawnRunResult({ sessionId: "sess-c9", sessionFile: "/tmp/sess-c9.jsonl" }));
     await Promise.resolve();
     const { handle, outcome } = await runP;
-    // chat 轮 handle 以 recordId 锚定（非 runId）
+    // 会话形态轮 handle 以 recordId 锚定（非 runId）
     expect(handle.data.sessionRef.recordId).toBe("rec-chat-9");
     expect(outcome.content).toBe("done");
   });
 
-  it("chat 轮无 resume 锚点（首轮新建）→ resumeSessionFile 不挂键", async () => {
+  it("会话形态轮无 resume 锚点（首轮新建）→ resumeSessionFile 不挂键", async () => {
     const { engine, captured } = makeEngine();
     const runP = engine.run({ prompt: "first" }, {
       taskId: "run-chat-2",
       poolKey: PI_POOL_KEY,
-      chat: { recordId: "rec-new" },
+      resume: { recordId: "rec-new" },
     });
     expect(captured[0]!.params.resumeSessionFile).toBeUndefined();
+    expect(captured[0]!.params.chatMode).toBe(true);
+    // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义）
+    expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
     await settleRun(captured[0]!, spawnRunResult());
     const { handle } = await runP;
     expect(handle.data.sessionRef.recordId).toBe("rec-new");
   });
-});
 
-describe("PiEngine.interact", () => {
-  it("sessionRef 无 recordId → not_resumable（恢复指引指向冷续路径）", async () => {
-    const { engine } = makeEngine();
-    const handle: EngineHandle = {
-      data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { sessionId: "s1" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
-    };
-    const r = await engine.interact(handle, { kind: "message", payload: "hi" });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.code).toBe("engine_session_not_resumable");
-      expect(r.message).toContain("cold resume path");
-    }
-  });
-
-  it("run 域热路径：message 直写 stdin（followUp / steer）+ close/cancel SIGTERM", async () => {
-    const { engine } = makeEngine();
-    const child = new FakeChild();
-    registerActiveChild("rec-hot", child as unknown as ChildProcess);
-    const handle: EngineHandle = {
-      data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-hot" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
-    };
-
-    const delivered = await engine.interact(handle, { kind: "message", payload: "next" });
-    expect(delivered).toEqual({ ok: true, delivered: true });
-    expect(JSON.parse(child.stdinWrites[0]!)).toMatchObject({ type: "prompt", message: "next" });
-    // run 域热路径缺省挂 followUp（interrupt 缺省 ≠ 省略 streamingBehavior）
-    expect(JSON.parse(child.stdinWrites[0]!).streamingBehavior).toBe("followUp");
-
-    await engine.interact(handle, { kind: "message", payload: "urgent", interrupt: true });
-    expect(JSON.parse(child.stdinWrites[1]!).streamingBehavior).toBe("steer");
-
-    const closed = await engine.interact(handle, { kind: "close", payload: { force: true } });
-    expect(closed).toEqual({ ok: true, delivered: true });
-    expect(child.kills).toEqual(["SIGTERM"]);
-
-    const cancelled = await engine.interact(handle, { kind: "cancel" });
-    expect(cancelled).toEqual({ ok: true, delivered: true });
-    expect(child.kills).toHaveLength(2);
-  });
-
-  it("run 域冷路径：无活进程 message 拒绝；无 child 的 close/cancel 受理即返回", async () => {
-    const { engine } = makeEngine();
-    const handle: EngineHandle = {
-      data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-gone" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
-    };
-    const cold = await engine.interact(handle, { kind: "message", payload: "hi" });
-    expect(cold.ok).toBe(false);
-    if (!cold.ok) expect(cold.code).toBe("engine_session_not_resumable");
-
-    const killedChild = new FakeChild();
-    killedChild.killed = true; // 已死子进程：killRecordChild 不重复杀
-    registerActiveChild("rec-dead", killedChild as unknown as ChildProcess);
-    const closeDead = await engine.interact(
-      { data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-dead" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION } },
-      { kind: "close" },
-    );
-    expect(closeDead).toEqual({ ok: true, delivered: true });
-    expect(killedChild.kills).toHaveLength(0);
-
-    // cancel：无 child（未注册）→ 受理即返回
-    const cancelNoop = await engine.interact(handle, { kind: "cancel" });
-    expect(cancelNoop).toEqual({ ok: true, delivered: true });
-  });
-
-  it("EPIPE 兜底：未达阈值 not_resumable 降级；达阈值抛错 → interact catch 转 engine_interact_failed", async () => {
-    const { engine } = makeEngine();
-    const child = new FakeChild();
-    child.epipeMode = true;
-    registerActiveChild("rec-epipe", child as unknown as ChildProcess);
-    const handle: EngineHandle = {
-      data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-epipe" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
-    };
-
-    const first = await engine.interact(handle, { kind: "message", payload: "m1" });
-    expect(first.ok).toBe(false);
-    if (!first.ok) {
-      expect(first.code).toBe("engine_session_not_resumable");
-      expect(first.message).toContain("attempt 1/2");
-    }
-
-    const exhausted = await engine.interact(handle, { kind: "message", payload: "m2" });
-    expect(exhausted.ok).toBe(false);
-    if (!exhausted.ok) expect(exhausted.code).toBe("engine_interact_failed");
-
-    // 成功写清零计数（阈值重启）
-    child.epipeMode = false;
-    const ok = await engine.interact(handle, { kind: "message", payload: "m3" });
-    expect(ok).toEqual({ ok: true, delivered: true });
-  });
-
-  it("chat 会话命中：message/close/cancel 直派 chat-session（close force 杀链收割）", async () => {
-    const { engine, captured, children } = makeEngine();
-    const runP = engine.run({ prompt: "chat" }, {
-      taskId: "run-i1",
-      poolKey: PI_POOL_KEY,
-      chat: { recordId: "rec-i1" },
+  it("会话形态轮 bindAskUser 注入后回调转发 host handler（per-run 绑定与 one-shot 同构）", async () => {
+    const { engine, captured } = makeEngine();
+    const asked: string[] = [];
+    engine.bindAskUser(async (req) => {
+      asked.push(req.title ?? "");
+      return { value: "picked" };
     });
-    const cap = captured[0]!;
-    cap.resolve(spawnRunResult({ sessionId: "s-i1", sessionFile: "/tmp/s-i1.jsonl" }));
-    await Promise.resolve();
+    const runP = engine.run({ prompt: "chat" }, {
+      taskId: "run-chat-ask",
+      poolKey: PI_POOL_KEY,
+      resume: { recordId: "rec-ask" },
+    });
+    const answer = await captured[0]!.callbacks.askUser?.({ method: "select", id: "ui-4", title: "q", options: ["a"] });
+    expect(answer).toEqual({ value: "picked" });
+    expect(asked).toEqual(["q"]);
+    await settleRun(captured[0]!, spawnRunResult());
     await runP;
-
-    const handle: EngineHandle = {
-      data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-i1", sessionFile: "/tmp/s-i1.jsonl" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
-    };
-    // message 热路径（fake child stdin 捕获）
-    const delivered = await engine.interact(handle, { kind: "message", payload: "round 2" });
-    expect(delivered).toEqual({ ok: true, delivered: true });
-    expect(children[0]!.stdinWrites.some((w) => w.includes("round 2"))).toBe(true);
-
-    // close force：杀链收割 → 会话消亡 → 后续 message 冷拒绝
-    const closed = await engine.interact(handle, { kind: "close", payload: { force: true } });
-    expect(closed).toEqual({ ok: true, delivered: true });
-    children[0]!.die(null, "SIGTERM");
-    await Promise.resolve();
-    const afterClose = await engine.interact(handle, { kind: "message", payload: "ghost" });
-    expect(afterClose.ok).toBe(false);
   });
 });
 
+// [H1 U5] PiEngine.interact 三分派用例族（message 投递 / close / cancel / 冷路径 /
+// EPIPE 兜底 / chat 轮 run 域分支过渡兼容面）已随 interact 方法退役删除：
+//   - 续聊投递的 run 通道形态覆盖 = 上方「PiEngine.run（chat 轮 run 派发形态）」
+//     （resume 锚点透传 + chatMode 分派 + recordId 锚定 handle）；
+//   - EPIPE 兜底语义由 stdin-writer.test（writeStdinLine EPIPE 检测）单元直测；
+//   - cancel/abort 通道 = run 域 cancel 帧（server AbortController → signal），
+//     server.test cancel 用例覆盖；
+//   - 收割链（agent_settled resolve + 杀链）由 run-spawn-once.integration 覆盖。
 describe("PiEngine.read / dispose", () => {
   it("journalPath 在 → ②级 journal 重放（source journal）；不在 → ③级 outcome-only", async () => {
     const dir = fs.mkdtempSync(join(tmpdir(), "pi-cli-test-engine-read-"));

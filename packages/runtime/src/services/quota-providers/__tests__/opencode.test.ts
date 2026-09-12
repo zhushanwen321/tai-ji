@@ -107,11 +107,30 @@ describe('opencodeFetcher · 既有语义回归', () => {
     expect(ok.ok).toBe(true)
   })
 
-  it('SSR HTML 缺三窗口数据 → no-subscription', async () => {
+  it('SSR HTML 三窗口全缺 → no-subscription（部分缺失容忍，全缺才失败）', async () => {
     setupFetch(() => new Response('<html>no data</html>', { status: 200 }))
     expect(await opencodeFetcher.fetchQuota('cookie=1', 'cookie', { workspaceUrl: WORKSPACE_URL })).toEqual({
       ok: false,
       reason: 'no-subscription',
+    })
+  })
+
+  it('部分窗口缺失（上游字段漂移）→ 缺失窗口 INFINITE_WIN 降级，不整体失败', async () => {
+    setupFetch(() => {
+      const win = (name: string, pct: number, reset: number) =>
+        `${name}:$R[1]={status:"active",usagePercent:${pct},resetInSec:${reset}}`
+      return new Response(`<html><script>${win('rollingUsage', 42, 3600)}</script></html>`, { status: 200 })
+    })
+    expect(await opencodeFetcher.fetchQuota('cookie=1', 'cookie', { workspaceUrl: WORKSPACE_URL })).toEqual({
+      ok: true,
+      data: {
+        label: 'opencode.go',
+        wins: [
+          { pct: 42, resetSec: 3600 },
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+        ],
+      },
     })
   })
 

@@ -387,6 +387,9 @@ export default {
     taskFailed: 'Task creation failed: {error}',
     sendFailed: 'Failed to send message: {error}',
   },
+  widget: {
+    details: 'Details',
+  },
   ambiguous: {
     title: '「{basename}」 has {count} matches, choose a file to open',
   },

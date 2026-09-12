@@ -8,7 +8,7 @@
 // ── mock 策略 ──
 //
 // 复用 execute-nesting.test.ts 的 spawn / node:fs / manifest-store / temp-prompt / alive-store
-// / finalized-marker mock 范式，已收敛到 ./helpers/subagent-service-mocks.ts 单源（四文件
+// / state-marker mock 范式，已收敛到 ./helpers/subagent-service-mocks.ts 单源（四文件
 // 共享）。本文件 **不驱动 FakeChild 完成**——被测的两个分支都在 runSpawn 之前抛/收尾
 // （worktree create 在步骤 2.5，runSpawn 在步骤 5），因此 spawn 即使被调也无人驱动，
 // 测试在抛错后立即断言即可结束。
@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aliveStoreModule,
   childProcessModule,
-  finalizedMarkerModule,
+  stateMarkerModule,
   fsSyncModule,
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
@@ -29,7 +29,7 @@ import {
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
 vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../finalized-marker.ts", () => finalizedMarkerModule());
+vi.mock("../state-marker.ts", () => stateMarkerModule());
 vi.mock("../manifest-store.ts", () => manifestStoreModule());
 
 import { ModelConfigService } from "../model-config-service.ts";

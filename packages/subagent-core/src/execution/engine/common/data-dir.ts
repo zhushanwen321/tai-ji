@@ -5,8 +5,9 @@
 // 顶层（journal / 隔离池的父目录），extension 写侧与 runtime 校验侧同源推导。
 //
 // 通道调查结论（2026-08-25，P2 实测证据链）：
-//   - runtime spawn pi 主会话时 RpcClient.buildSafeEnv 从 runtime process.env 继承
-//     XYZ_ 前缀白名单变量（rpc-client.ts:14-30），且显式设置 PI_CODING_AGENT_DIR；
+//   - runtime spawn pi 主会话时 RpcClient 出站 env 从 runtime process.env 继承
+//     XYZ_ 前缀白名单变量（调查当时经私有 buildSafeEnv，现已被 buildPiOutboundEnv
+//     → buildOutboundChildEnv 共享构建器取代），且显式设置 PI_CODING_AGENT_DIR；
 //   - dev 模式 Electron main 设置 XYZ_AGENT_DATA_DIR（apps/electron/main/main.ts:122），
 //     经 process-control.ts:262 透传给 runtime → 透传链成立；
 //   - prod 默认路径（~/.xyz-agent 缺省）下 runtime 进程 env 中**没有**该变量

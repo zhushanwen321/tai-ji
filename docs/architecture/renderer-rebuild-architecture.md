@@ -125,7 +125,7 @@ mobile-renderer 与桌面壳同为 Vue 3（feat-remote-use 实测）。Pinia sto
 |---|---|---|
 | Shell | `renderer/src/shell/` + `mobile-renderer/src/shell/` | 各端自己的壳：窗口拓扑、view 路由、快捷键。桌面 AppShell/AsideRegion/traffic-light；移动底部 tab |
 | Workspace | `renderer/src/workspace/` + 移动对应物 | 双 panel/drawer 容器是桌面形态；移动端自己的导航容器 |
-| Feature | `core/src/domain/*/` | **业务域 headless 化**：每域 = store + composable + logic 内聚一个目录（chat/ session/ composer/ sidebar/ settings/ search/ new-task/ drawer/）。域内组件分两类：跨端共享的进 `ui/src/features/<域>/`，桌面独占的留壳 |
+| Feature | `core/src/domain/*/` | **业务域 headless 化**：每域 = store + composable + logic 内聚一个目录（chat/ session/ composer/ sidebar/ settings/ search/ new-task/ drawer/）。域内组件分两类：跨端共享的进 `ui/src/features/<域>/`，桌面独占的留壳。实施终态（2026-09-12 核验）：实际 `core/src/domain` = chat / composer / drawer / new-task-search / session / session-trace / settings（sidebar 未独立成域、search 与 new-task 合并为 new-task-search、新增 session-trace） |
 | ExtensionHost | `core/src/extension-host/`（headless）+ `ui/src/extension-host/`（ViewHost 等渲染件） | 见 §6 |
 | RenderingProtocol | `core/src/rendering-protocol/`（类型/注册/降级逻辑）+ `ui/src/rendering-protocol/`（7 原语组件） | 见 §7 |
 | T&C | `core/src/transport/` + `core/src/coordination/` | 见 §5 |
@@ -143,7 +143,7 @@ mobile-renderer 与桌面壳同为 Vue 3（feat-remote-use 实测）。Pinia sto
 
 ADR-0049 原样继承并强化：
 
-- `useSessionScopedState` 在 `core/foundation/`，所有 per-session composable 强制使用（ESLint 自定义规则：禁止模块级 `new Map<string, ...>` 存 session 状态，工厂内部除外）。
+- `useSessionScopedState` 在 `core/foundation/`，所有 per-session composable 强制使用（原计划的 ESLint 自定义规则——禁止模块级 `new Map<string, ...>` 存 session 状态——已被 [ADR-0049](../../adr/0049-session-isolation-map-partition.md) spec_review D4 放弃：AST 判定 ref/let 是否 per-session 语义铺天盖地误报，不可行；现行防护 = ADR-0049 Code Review Checklist + taste-lint `no-instance-level-session-state`）。
 - **显式例外只有两个**：presence（全局协同态）与 lease（runtime TTL 管控），住 `core/coordination/`，并在文件头标注例外依据。
 - `triggerSessionCleanups(id)` 订阅 `session.deleted` 广播（remote-use 已引入的两步删除），保证他端删 session 时本地分区同步清除。
 
@@ -406,6 +406,8 @@ interface PlatformPort {
 ---
 
 ## §11 迁移与实施策略（v2 主线修正：逐域绞杀）
+
+> **实施状态（2026-09-12 核验）**：P1/P2/P3 已落地——`packages/core` / `packages/ui` 已建成，chat 域等已迁入 core（renderer `stores/chat.ts` 为 31 行薄壳）；§10 映射表多数已执行。读者按「现状」读 §3/§4（包拓扑与 core 分层），按「已执行」读本章迁移计划（P4-P6 余项以实际进度为准）。
 
 ### 11.0 P0 开工前必须落地的 4 项架构决策（审查新增）
 

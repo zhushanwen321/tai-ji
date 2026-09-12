@@ -12,6 +12,10 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../apps/electron/pack
 // resolveRendererEntry(process.env.NEW_ARCH)（同源同值，避免 main loadFile 与 renderer 自认架构不一致）。
 const newArch = process.env.NEW_ARCH === '1'
 
+// 裸跑（不经 dev-instance.mjs 装配器）时的 Vite 端口；与 runtime dev 端口 3310 / CDP 9222
+// 同属「裸跑端口组」，改值须同步 dev-instance.mjs 旧用法兼容注释与 troubleshooting 文档。
+const DEFAULT_VITE_PORT = 1420
+
 export default defineConfig(({ mode }) => {
   // loadEnv 读取 renderer 目录下的 .env + 按前缀过滤；同时并入 process.env 中已存在的 VITE_ 变量
   // （E2E 构建时由 e2e/fixtures 注入 VITE_MOCK / VITE_E2E）。
@@ -38,7 +42,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 1420,
+      // per-worktree dev 实例端口（dev-instance.mjs 按 worktree 名 hash 派生，C-dev-01）；
+      // 未注入时保持默认 1420（裸 vite / dev-smoke 等旧用法兼容）。strictPort 保留：被占即
+      // fail-fast，杜绝「Electron 加载到别的实例的 1420 跑旧代码」的静默错配。
+      port: Number(process.env.XYZ_VITE_PORT) || DEFAULT_VITE_PORT,
       strictPort: true,
       // HMR file watcher：本机环境（Node 24 + macOS 15）下 Vite 8 默认的 fsevents 后端不派发变更事件
       //（独立 chokidar 同路径/同 fsevents 绑定可正常收到，问题仅在 Vite 运行时触发），导致改 .vue/.ts 不热更新。

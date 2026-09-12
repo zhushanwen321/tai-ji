@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aliveStoreModule,
   childProcessModule,
-  finalizedMarkerModule,
+  stateMarkerModule,
   fsSyncModule,
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
@@ -29,7 +29,7 @@ import { clearEngines } from "../engine/registry.ts";
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
 vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../finalized-marker.ts", () => finalizedMarkerModule());
+vi.mock("../state-marker.ts", () => stateMarkerModule());
 vi.mock("../manifest-store.ts", () => manifestStoreModule());
 
 import { spawn } from "node:child_process";
@@ -101,7 +101,9 @@ describe("TC-3: PI_SUBAGENT_ROOT_SESSION_ID env 贯穿正确", () => {
 
   it("TC-3a: 根进程 initSession：无 env → sessionRootId = sessionId（自己是 ROOT）", () => {
     const service = setupService("root-it");
-    const sessionRootId = Reflect.get(service, "sessionRootId") as string;
+    // [R1 深绑改写] sessionRootId 随域 #2 聚合迁入 SessionBaselines，深绑路径改为
+    // service → baselines 聚合实例（断言对象与强度不变，路径对齐终态结构）。
+    const sessionRootId = (Reflect.get(service, "baselines") as { sessionRootId: string | null }).sessionRootId as string;
     expect(sessionRootId).toBe("root-it");
   });
 
@@ -109,7 +111,8 @@ describe("TC-3: PI_SUBAGENT_ROOT_SESSION_ID env 贯穿正确", () => {
     process.env[ENV_ROOT_SESSION_ID] = "real-root-session";
     const service = setupService("child-session");
 
-    const sessionRootId = Reflect.get(service, "sessionRootId") as string;
+    // [R1 深绑改写] 同上：sessionRootId 经 baselines 聚合路径读取。
+    const sessionRootId = (Reflect.get(service, "baselines") as { sessionRootId: string | null }).sessionRootId as string;
     expect(sessionRootId).toBe("real-root-session"); // env 贯穿，不是 child-session
   });
 
@@ -122,11 +125,12 @@ describe("TC-3: PI_SUBAGENT_ROOT_SESSION_ID env 贯穿正确", () => {
     const service = setupService("b-session");
 
     // B 的 sessionRootId 仍为 ROOT（env 贯穿，不被 B 自己的 sessionId 覆盖）
-    const sessionRootId = Reflect.get(service, "sessionRootId") as string;
+    // [R1 深绑改写] 同上：sessionRootId / execNesting 经 baselines 聚合路径读取。
+    const sessionRootId = (Reflect.get(service, "baselines") as { sessionRootId: string | null }).sessionRootId as string;
     expect(sessionRootId).toBe("root-main-session");
 
     // B 的嵌套基线记录了 B 自己的身份（recordId + depth；[D3-⑤] execNesting 公共层）
-    const baseline = (Reflect.get(service, "execNesting") as { baseline(): { recordId: string; depth: number } | null }).baseline()!;
+    const baseline = ((Reflect.get(service, "baselines") as { execNesting: { baseline(): { recordId: string; depth: number } | null } }).execNesting).baseline()!;
     expect(baseline.recordId).toBe("sa-a-record");
     expect(baseline.depth).toBe(1);
   });

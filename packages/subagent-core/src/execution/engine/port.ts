@@ -16,20 +16,16 @@
 //     （滚动重启推迟谓词输入）。权威源：
 //     docs/design/crash-forensics-and-watchdog.md §3.3 D5。
 //
-// 四个能力面（D1）：
-//   run        —— 主语义：一次性 fire-to-completion 任务执行；
-//   interact   —— 交互控制面（chatMode 的 message/close/cancel + idle，可选能力面，
-//                 capabilities.conversation 声明接通与否）；
+// 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
+//   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
+//                 resume 锚点经 RunContext.resume 携带）；
 //   read       —— session 历史读取（D6 三级降级链）；
 //   probe      —— 探针（D7：二进制存在/版本解析/干跑校验）。
 // capabilities() 同步无副作用——「调用前拒绝」（D11 处置三级）的判据。
 
 import type { ChildProcess } from "node:child_process";
 
-import type {
-  HostRoundLifecycleParams,
-  ResumeAnchor,
-} from "@zhushanwen/subagent-engine-sdk";
+import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "../model-resolver.ts";
@@ -40,8 +36,6 @@ import type {
   EngineCapabilities,
   EngineHandle,
   EngineHandleData,
-  InteractAction,
-  InteractResult,
   ProbeReport,
   SessionView,
 } from "./types.ts";
@@ -97,6 +91,25 @@ export interface RunContext {
    */
   engineFallback?: { from: string; reason: string };
   /**
+   * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 relay 归属键
+   * SESSION_ID 的权威来源（经 wire ctx.sessionRootId → server 还原 → SpawnRunParams
+   * → buildChildEnv）。刻意走 per-run ctx 而非 EngineClient 的进程级 env：客户端按
+   * 引擎缓存为惰性单例，进程级 env 在 pi fork 换 sessionId 后会陈旧；per-run ctx 恒
+   * 新鲜，且与 RECORD_ID 已有的 per-run 形态一致。additive：undefined/null/空串不
+   * 上 wire，zcode 等引擎忽略。
+   */
+  sessionRootId?: string;
+  /**
+   * [Option C 协议化] 权威 subagent session 目录（getSubagentSessionDir(agentDir,
+   * rootCwd) 宿主推导值）——经 wire ctx.sessionDir 送达 pi 引擎组装 `--session-dir`。
+   * 生产注入方 = RemoteEngine（cli 形态引擎的唯一宿主侧适配点，env 同源推导，见
+   * remote-engine buildRunParams）；编排层显式注入（ctx.sessionDir 有值）时优先于
+   * RemoteEngine 自推导。zcode 等不消费 session 目录的引擎忽略本字段。编排层可
+   * 不注入；RemoteEngine 缺省以同源 env 推导值补齐后恒上 wire；[LEGACY] fallback
+   * 仅旧宿主/独立运行引擎形态可达。
+   */
+  sessionDir?: string;
+  /**
    * [P4 对齐点③] 引擎声明实际隔离池 key（journal 落盘路径权威）。宿主创建 journal
    * writer 时只能用缺省占位 poolKey（pi 恒 'shared'），非池化稳定的引擎（zcode 按
    * provider+model 池化）在 prepare 期确定 poolKey 后回调本方法重定向 writer——
@@ -129,33 +142,16 @@ export interface RunContext {
    */
   onChildSpawned?: (child: ChildProcess) => void;
   /**
-   * [W3 v1.x] chat 会话形态参数（协议 run.params.chat 的 RunContext 承载位）：
-   *   - recordId：core 预建 record 的关联键（引擎据此上报首轮 runId 键之外的反向
-     *     载荷与 interact 定位）——task.conversation === true 的 chat 轮必传；
-   *   - resume：冷续锚点（重开已 idle 的 session 续聊；pi 消费 sessionRef.sessionFile
-     *     ——对照协议化设计前 SpawnResumeOpts.sessionFile 的锚点面）。
-   * 类型权威 = SDK RunChatParams（remote-engine 直传，结构互证由 implements 关系
-   * 在 typecheck 期承载）。非 chat 轮不传，wire 上不出现该键。
+   * [W3 v1.x → H1 U6 终态] 会话形态参数（协议 run.params.resume 的 RunContext
+   * 承载位，键已随 U6 键切换从 `chat` 泛化为 `resume`）：
+   *   - recordId：core 预建 record 的关联键（引擎据此上报 childSpawned/childStateChanged
+   *     的 record 键形态与 handle 锚定）——会话形态轮（task.conversation === true）必传；
+   *   - resume：续聊锚点（record.sessionFile 续写原文件；pi 消费
+   *     sessionRef.sessionFile——对照协议化设计前 SpawnResumeOpts.sessionFile 的锚点面）。
+   * 类型权威 = SDK RunResumeParams（remote-engine 直传，结构互证由 implements 关系
+   * 在 typecheck 期承载）。一次性轮不传，wire 上不出现该键。
    */
-  chat?: { recordId: string; resume?: ResumeAnchor };
-  /**
-   * [W3 v1.x] host/roundLifecycle 轮次生命周期消费口（第 9 反向通道，settled/idle/
-   * failed 三相位；关联键 runId|recordId 互斥）。首轮（run 会话形态）经 run 作用域
-   * 路由到达（runId 键）；续聊轮（interact）无 runId——经 EnginePort
-   * registerChatRoundRoute 的 recordId 键路由到达（见下）。消费语义（arm/disarm/
-   * settled 交棒）归宿主编排层（settled-watchdog 协议事件面接线，W4 三入口）。
-   */
-  onRoundLifecycle?: (phase: HostRoundLifecycleParams) => void;
-}
-
-/**
- * [W3 v1.x] chat 轮次反向通道路由（recordId 键）——interact 续聊轮的 streamDelta /
- * roundLifecycle 分发目标（协议关联键裁定 D1-A：续聊轮无独立 runId）。与 run 作用域
- * RunRoute 同构的薄消费面；注册/注销时机归宿主 chat 编排（轮开始注册、record 终态注销）。
- */
-export interface ChatRoundRoute {
-  onStreamDelta?: (delta: string) => void | Promise<void>;
-  onRoundLifecycle?: (phase: HostRoundLifecycleParams) => void | Promise<void>;
+  resume?: { recordId: string; resume?: ResumeAnchor };
 }
 
 // ============================================================
@@ -197,28 +193,12 @@ export interface EnginePort {
   probe(opts?: { force?: boolean }): Promise<ProbeReport>;
 
   /** D1 主语义：fire-to-completion。[D6 合流] task = AgentCallOpts（单一任务形状，
-   *  原 AgentTaskSpec 已并入——字段裁定见 orchestration/models/types.ts）。 */
+   *  原 AgentTaskSpec 已并入——字段裁定见 orchestration/models/types.ts）。会话形态
+   *  续聊轮同走本方法（resume 锚点经 ctx.resume 携带，[H1 U6] interact 面退役）。 */
   run(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult>;
-
-  /**
-   * D1 可选面：交互控制面。pi 首期原生实现（现有 chatMode 行为直通）；不支持
-   * conversation 的引擎返回 engine_capability_unsupported（同步拒绝、不创建进程）。
-   */
-  interact(handle: EngineHandle, action: InteractAction): Promise<InteractResult>;
 
   /** D6 三级降级链：①引擎原生读取 → ②宿主 event journal（P2）→ ③outcome-only。 */
   read(handle: EngineHandle): Promise<SessionView>;
-
-  /**
-   * [W3 v1.x] 可选面：chat 轮次反向通道路由注册（recordId 键）。interact 续聊轮的
-   * streamDelta / roundLifecycle 按 recordId 关联（无 runId，D1-A），引擎进程发射后
-   * 经协议客户端分发到本路由。与 validateModel/listModels 同款的 additively-optional
-   * 演进：宿主 feature-detect（`typeof registerChatRoundRoute === "function"`），
-   * 未实现的引擎（不支持 chat 域或旧客户端）续聊轮 delta/生命周期静默不可达——
-   * conversation gate 已在派发前拦住无 chat 能力的引擎，本缺省只在「能力声明与
-   * 客户端实现错位」的诊断形态出现。返回注销函数（record 终态时宿主调用）。
-   */
-  registerChatRoundRoute?(recordId: string, route: ChatRoundRoute): () => void;
 
   /**
    * [U7] 可选面：模型可发现性——引擎自带 provider/model 体系时（如 zcode 的 v2 桌面

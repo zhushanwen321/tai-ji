@@ -118,6 +118,19 @@ describe("journal-replay reducer 边界契约", () => {
     expect(record.turns).toHaveLength(1);
     expect(record.turnCount).toBe(0);
   });
+
+  it("activity 事件 no-op：不开 turn、不计数、不写 lastError（纯活性信号，reducer 双侧 no-op 契约）", () => {
+    const record = replayRecord([
+      { type: "text_delta", delta: "t" },
+      { type: "activity" },
+      { type: "activity" },
+    ]);
+    expect(record.lastError).toBeUndefined();
+    expect(record.turns).toHaveLength(1);
+    expect(record.turnCount).toBe(0);
+    expect(record.totalTokens).toBe(0);
+    expect(record.turns[0]).toMatchObject({ text: "t", thinking: "", toolCalls: [] });
+  });
 });
 
 describe("eventsToSessionView 投影与 sessionIdFromHandle", () => {

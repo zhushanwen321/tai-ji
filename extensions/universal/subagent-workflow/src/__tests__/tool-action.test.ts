@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { adapter, cancelHandler, listHandler, startHandler } from "../interface/subagent-actions.ts";
+import { SubagentParams } from "../interface/subagent-tool-schema.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type {
   ExecutionHandle,
@@ -193,16 +194,16 @@ describe("listHandler", () => {
     // includeFinished=true 时 filter="all"，验证 limit 夹紧：
     // 0 → 1
     listHandler(svc, { includeFinished: true, limit: 0 });
-    expect(collect).toHaveBeenLastCalledWith(1, "all");
+    expect(collect).toHaveBeenLastCalledWith(1, "all", false);
     // 100000 → 100
     listHandler(svc, { includeFinished: true, limit: 100000 });
-    expect(collect).toHaveBeenLastCalledWith(100, "all");
+    expect(collect).toHaveBeenLastCalledWith(100, "all", false);
     // undefined → 20（默认）
     listHandler(svc, { includeFinished: true });
-    expect(collect).toHaveBeenLastCalledWith(20, "all");
+    expect(collect).toHaveBeenLastCalledWith(20, "all", false);
     // 负数 → 1
     listHandler(svc, { includeFinished: true, limit: -5 });
-    expect(collect).toHaveBeenLastCalledWith(1, "all");
+    expect(collect).toHaveBeenLastCalledWith(1, "all", false);
   });
 
   it("includeFinished=false → collectRecords 收到 filter='running'（C2 回归）", () => {
@@ -210,10 +211,10 @@ describe("listHandler", () => {
     const svc = makeService({ collectRecords: collect });
     // includeFinished=false → filter="running"（防截断下沉到 store）
     listHandler(svc, { includeFinished: false, limit: 5 });
-    expect(collect).toHaveBeenLastCalledWith(5, "running");
+    expect(collect).toHaveBeenLastCalledWith(5, "running", false);
     // includeFinished=true → filter="all"
     listHandler(svc, { includeFinished: true, limit: 5 });
-    expect(collect).toHaveBeenLastCalledWith(5, "all");
+    expect(collect).toHaveBeenLastCalledWith(5, "all", false);
   });
 
   it("includeFinished=false → collectRecords 返回 running-only（过滤在 store 层）", () => {
@@ -255,7 +256,7 @@ describe("listHandler", () => {
     // listHandler 透传 collectRecords 的结果（截断是 store 的责任）。
     expect(r.response.items).toHaveLength(3);
     // 验证 limit 确实透传给了 collectRecords。
-    expect(collect).toHaveBeenCalledWith(2, "all");
+    expect(collect).toHaveBeenCalledWith(2, "all", false);
   });
 
   // TC-2: running 态实时 duration（Date.now()-startedAt）随时间增长，
@@ -485,5 +486,73 @@ describe("adapter", () => {
     const r = adapter({ action: "cancel", domain: { subagentId: "bg-1", response: { cancelled: true } } });
     expect(r.details.cancelResponse).toEqual({ cancelled: true });
     expect(r.details.subagentId).toBe("bg-1");
+  });
+});
+
+// ============================================================
+// [H2 W1] listHandler includeWorkflow（record-unification D1①）
+//
+// 过滤责任在 store 层（collectRecords 第三参），listHandler 只透传——stub 的
+// collectRecords 按第三参分流返回，模拟 store 的缺省过滤 / includeWorkflow 放行。
+// ============================================================
+describe("listHandler includeWorkflow（H2 W1：workflow record 投影过滤面）", () => {
+  const toolRecord: SubagentRecord = {
+    id: "tool-1", agent: "w", status: "running", mode: "background",
+    startedAt: 1, endedAt: undefined, turns: 0, totalTokens: 0, model: "m", thinkingLevel: undefined, eventLog: [],
+  };
+  const wfRecord: SubagentRecord = {
+    id: "wf-1", agent: "w", status: "running", mode: "background",
+    startedAt: 2, endedAt: undefined, turns: 0, totalTokens: 0, model: "m", thinkingLevel: undefined, eventLog: [],
+    origin: "workflow", parentRunId: "run-1",
+  };
+
+  /** stub collectRecords：模拟 store 层行为（第三参 false = 缺省滤 workflow，true = 全量）。 */
+  function storeLikeCollect(limit: number, _filter: string, includeWorkflow?: boolean): SubagentRecord[] {
+    void limit;
+    return includeWorkflow === true ? [toolRecord, wfRecord] : [toolRecord];
+  }
+
+  it("缺省（includeWorkflow 未传）→ collectRecords 第三参 false，workflow record 不可见", () => {
+    const collect = vi.fn(storeLikeCollect);
+    const svc = makeService({ collectRecords: collect });
+    const r = listHandler(svc, { includeFinished: true });
+    expect(collect).toHaveBeenLastCalledWith(20, "all", false);
+    expect(r.response.items.map((i) => i.subagentId)).toEqual(["tool-1"]);
+  });
+
+  it("includeWorkflow:true → 第三参 true，workflow record 可见（排查通道）", () => {
+    const collect = vi.fn(storeLikeCollect);
+    const svc = makeService({ collectRecords: collect });
+    const r = listHandler(svc, { includeFinished: true, includeWorkflow: true });
+    expect(collect).toHaveBeenLastCalledWith(20, "all", true);
+    expect(r.response.items.map((i) => i.subagentId)).toEqual(expect.arrayContaining(["tool-1", "wf-1"]));
+  });
+
+  it("includeWorkflow:false 显式传 → 同缺省（第三参 false）", () => {
+    const collect = vi.fn(storeLikeCollect);
+    const svc = makeService({ collectRecords: collect });
+    const r = listHandler(svc, { includeFinished: true, includeWorkflow: false });
+    expect(collect).toHaveBeenLastCalledWith(20, "all", false);
+    expect(r.response.items.map((i) => i.subagentId)).toEqual(["tool-1"]);
+  });
+
+  it("schema 面：listParam.includeWorkflow 声明存在且 optional（D1① 工具契约）", () => {
+    // 本包 typebox 被 alias 到 mock（丢 options）：JSON 往返断言数据形态；
+    // 真实 typebox 编译契约由 structured-output cross-package-contract.test.ts 承担。
+    const raw: unknown = JSON.parse(JSON.stringify(SubagentParams));
+    if (!(typeof raw === "object" && raw !== null)) throw new Error("SubagentParams is not an object schema");
+    const props = (raw as { properties?: unknown }).properties;
+    if (!(typeof props === "object" && props !== null)) throw new Error("SubagentParams has no properties");
+    const listParam = (props as Record<string, unknown>).listParam;
+    if (!(typeof listParam === "object" && listParam !== null)) throw new Error("listParam missing");
+    const listProps = (listParam as { properties?: unknown }).properties;
+    if (!(typeof listProps === "object" && listProps !== null)) throw new Error("listParam has no properties");
+    expect(Object.keys(listProps)).toEqual(expect.arrayContaining(["includeFinished", "includeWorkflow", "limit"]));
+    const includeWorkflow = (listProps as Record<string, unknown>).includeWorkflow;
+    expect(includeWorkflow).toBeDefined();
+    const req = (listParam as { required?: unknown }).required;
+    if (Array.isArray(req)) {
+      expect(req).not.toContain("includeWorkflow");
+    }
   });
 });

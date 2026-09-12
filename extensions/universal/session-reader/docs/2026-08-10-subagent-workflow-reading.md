@@ -1,5 +1,7 @@
 # session-reader 扩展:支持读取 subagent / workflow 执行记录(含任意深度嵌套)
 
+> 功能分级：P2（依据见 [docs/feature-priorities.md](../../../docs/feature-priorities.md) §6——通知链 session_read 指针解析依赖，挂了通知退化但主链路完整）。
+>
 > **一句话结论**:扩展 `session_read` 工具,让 LLM 能用现有的渐进式读取流程(outline→expand→detail)直接消费 subagent 对话、workflow 编排记录、以及**任意深度嵌套的执行树**(subagent/workflow 相互嵌套)。核心 gap 是**读取入口未接通**(引擎已通用、jsonl 已同构),分四层补齐——M0 打通入口、M1 富化导航、M2 workflow 概览渲染、M3 嵌套执行树。**pi-subagent-workflow 仅补 2 行**(manifest 落盘时带上运行时已有的 `parentRecordId`,直接父关系本就存在、只是落盘漏了);嵌套建树靠 `parentRecordId` 精确父子链 + workflow 指针递归。不做衍生工具。
 
 ---

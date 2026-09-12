@@ -298,13 +298,15 @@ describe("FileRunStore — 版本衔接与 live-strip（U8 / ⛔5，D4 裁决）
     expect(JSON.parse(raw).v).toBe("wf-run-v2");
 
     // 存量行宽容读 → 再 save：落盘行升级为带 v 当前版本（不做自动迁移的
-    // 渐进收敛——D4 裁决②「写入时补 v」）
+    // 渐进收敛——D4 裁决②「写入时补 v」）。[H2 W3] live 字段退役后 codec 不再
+    // 承担键清洗（strip 分支随字段删除退役）——存量行的多余键原样透传（类型
+    // 层面已无写点，新写行不可能再产生 live 键；真实存量行经旧 codec strip 也不带）。
     writeStateFile("wf-legacy-2.jsonl", LEGACY_LINE + "\n");
     const legacy = (await store.loadAll()).find((r) => r.runId === "wf-legacy-1")!;
     await store.save(legacy);
     const migrated = readFileSync(store.stateFilePath("wf-legacy-1"), "utf8").trim();
     expect(JSON.parse(migrated).v).toBe("wf-run-v2");
-    expect(migrated.includes('"live"')).toBe(false);
+    expect(JSON.parse(migrated).state.status).toBe("running");
   });
 
   it("⛔5 未知更高版本行跳过 + warn（消息含实际版本值，可定位）", async () => {
@@ -326,7 +328,7 @@ describe("FileRunStore — 版本衔接与 live-strip（U8 / ⛔5，D4 裁决）
     expect(warnMessages().some((m) => m.includes("unsupported version") && m.includes("wf-run-v3"))).toBe(true);
   });
 
-  it("⛔5 live 字段 strip 后落盘（落盘行无 live 键，内存 run 不受影响）", async () => {
+  it("⛔5 [H2 W3] live 字段退役：落盘行无 live 键（类型层面收敛的端到端回归）", async () => {
     const run = makeRun("wf-livestrip-1");
     const node: import("../models/types.ts").ExecutionTraceNode = {
       stepIndex: 0,
@@ -334,20 +336,16 @@ describe("FileRunStore — 版本衔接与 live-strip（U8 / ⛔5，D4 裁决）
       task: "do work",
       model: "test-model",
       status: "running",
-      live: undefined,
     };
     run.state.trace.append(node);
     const AgentCallMod = await import("../models/agent-call.ts");
     const call = new AgentCallMod.AgentCall(0, { prompt: "do work" }, node);
     run.state.calls.set(0, call);
-    node.live = { id: "run-0", turns: [] } as unknown as import("../../execution/types.ts").ExecutionRecord;
 
     await store.save(run);
 
     const raw = readFileSync(store.stateFilePath("wf-livestrip-1"), "utf8");
     expect(raw.includes('"live"')).toBe(false);
-    // strip 产出快照副本：内存中 run 的 live 保留（save 后 run 可继续跑）
-    expect(node.live).toBeDefined();
   });
 
   it("pi 现网形态行（带 v）经 store 端到端恢复", async () => {

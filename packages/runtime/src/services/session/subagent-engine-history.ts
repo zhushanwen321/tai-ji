@@ -54,14 +54,6 @@ const ENGINE_IDLE_REUSE_MS = 5 * 60 * 1000
  *  不被单个挂死引擎的杀链收尾无限拖住——杀链已发起，SIGKILL 升级由 reaper 兜底）。 */
 const DISPOSE_AGGREGATE_CAP_MS = 3_000
 
-/** idle 窗口当前值（测试钩子可覆盖；生产恒 ENGINE_IDLE_REUSE_MS）。 */
-let idleReuseMs = ENGINE_IDLE_REUSE_MS
-
-/** 测试钩子：覆盖 idle 回收窗口（生产禁用——窗口是设计规格常量）。 */
-export function setEngineIdleReuseMsForTests(ms: number): void {
-  idleReuseMs = ms
-}
-
 /** 管理器条目：自持协议引擎实例 + idle 定时器句柄。 */
 interface RuntimeEngineEntry {
   engine: EnginePort
@@ -111,25 +103,43 @@ function ensureRuntimeEngineWiring(): void {
   }
 }
 
-/** idle 定时器：touch 重置；触发 → dispose + 出表（dispose 后实例不可重建，出表让
- *  下次 read 走重建路径拿新实例）。 */
+/** idle 到期回收：dispose + 出表（dispose 后实例不可重建，出表让下次 read 走重建
+ *  路径拿新实例）。真实定时器回调与测试钩子共用本函数——测试驱动的是同一实现路径。 */
+function expireIdleEntry(engineId: string, engine: EnginePort): void {
+  const entry = protocolEntries.get(engineId)
+  if (entry === undefined || entry.engine !== engine) return
+  protocolEntries.delete(engineId)
+  // EnginePort.dispose?() 可选成员（RemoteEngine 恒实装）——optional call 后判空。
+  const disposing = engine.dispose?.()
+  if (disposing !== undefined) {
+    void disposing.catch((err: unknown) => {
+      console.warn(
+        `[subagent-engine-history] idle dispose failed for engine '${engineId}': ${toErrorMessage(err)}`,
+      )
+    })
+  }
+}
+
+/** idle 定时器：touch 重置；触发 → expireIdleEntry。 */
 function armIdleTimer(engineId: string, engine: EnginePort): NodeJS.Timeout {
-  const timer = setTimeout(() => {
-    const entry = protocolEntries.get(engineId)
-    if (entry === undefined || entry.engine !== engine) return
-    protocolEntries.delete(engineId)
-    // EnginePort.dispose?() 可选成员（RemoteEngine 恒实装）——optional call 后判空。
-    const disposing = engine.dispose?.()
-    if (disposing !== undefined) {
-      void disposing.catch((err: unknown) => {
-        console.warn(
-          `[subagent-engine-history] idle dispose failed for engine '${engineId}': ${toErrorMessage(err)}`,
-        )
-      })
-    }
-  }, idleReuseMs)
+  const timer = setTimeout(() => expireIdleEntry(engineId, engine), ENGINE_IDLE_REUSE_MS)
   timer.unref()
   return timer
+}
+
+/**
+ * 测试钩子：显式触发 idle 到期回收（与真实定时器回调共用 expireIdleEntry——同一
+ * 实现路径，非并行仿真）。生产窗口 5min 不可等待，「窗口内复用 / 过期重建」又必须
+ * 确定性验证：由用例显式驱动「窗口到期」，避免用例与真实 read 耗时竞速。
+ * 生产禁用——生产恒由 armIdleTimer 的真实定时器驱动。
+ */
+export function expireIdleEngineClientsForTests(): void {
+  for (const [engineId, entry] of [...protocolEntries]) {
+    // 定时器尚未真正到期——先撤销句柄再走同一到期路径（真实到期时该 clear 为 no-op，
+    // 故生产路径零差异）。
+    entry.clearIdleTimer()
+    expireIdleEntry(engineId, entry.engine)
+  }
 }
 
 /** 自持实例创建：三级发现装载（幂等）→ cli descriptor portFactory 新实例。 */

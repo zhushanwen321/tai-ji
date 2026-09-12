@@ -1,5 +1,7 @@
 # pi chat 域协议 v1.x 入引擎进程 与 轮次活性治理 技术设计
 
+> **[HISTORICAL] superseded（2026-09-11）**：本文描述的 chat 域独立协议面——`host/roundLifecycle` 反向通道族（含 active 轮内心跳相位）与 `interact` 控制面方法、`RunParams.chat` 会话形态键、chat 域长驻会话状态机（ChatSessionRegistry / 轮终等待体 / 冷续复活）——已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）整族退役。现行权威形态：续聊轮 = 新 run + resume 锚点（`RunParams.resume`，pi `--session` 续写原 session 文件）、活性 = run 事件 + run 应答驱动、settle 交棒 = Continuation onRunSettled；约束权威已改挂 C-proc-13（authority → subagent-chat-run-unification.md）。本文保留作 v1.x 时代交付史与 ③pending 注册表 / ④goal 熔断 / ⑤abort 阶梯三段机制的设计溯源，正文中的通道族与相位机描述**不再对应当前代码**。
+
 > **一句话结论**：用一次**协议 v1.x 增量扩展**（激活既有 `interact` chat 控制面 + run 会话形态 + 反向通道轮次生命周期载荷）把 pi 引擎最后一块 inproc 豁免面——**chat 续聊域**——迁入 `pi-subagent-cli` 引擎进程并删除 inproc 分支；同批把 2026-09-08 真机事故暴露的「轮次活性」缺口（goal continuation 死循环 / 异常死亡误报 completed / abort 落不了地被宿主误判强杀）收敛为**三层显式语义**：goal 扩展无进展熔断（带正交封顶）、core 编排层轮次活性权威（record 去向单一裁决表 + 注销枚举点 + 对账 sweep）、runtime 强杀前置活性判据（快超时探测×事件窗组合，升级阶梯有终点）。
 
 > 层声明：当前层 = **技术方案设计**（协议 v1.x 载荷语义 + chat 域迁移策略 + 轮次活性治理机制与边界）；

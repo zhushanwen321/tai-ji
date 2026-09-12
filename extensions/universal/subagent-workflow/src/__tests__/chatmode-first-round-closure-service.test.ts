@@ -3,26 +3,23 @@
 //
 // [V2 决策 2/3 → W3 协议形态改写] chatMode 首轮闭环。
 //
-// W3 契约变更：chat 轮次改走协议引擎（registry 'pi' cli 形态 port），原 inproc 面
-// buildSessionRunnerContext().onRoundSettled 注入与 runAndFinalize chatMode early-return
-// 分流随 inproc pi 引擎目录删除消亡。承接同一业务语义的新权威：
-//   - 轮次收敛 = kickOffChatRound 的 run 应答（= 首轮 agent_settled，W2 契约）→
-//     settleChatRoundFromResponse：round 0→1 + record.result = outcome.content（协议
-//     形态下 live turns 留在引擎进程，core 以应答 content 为增量权威）+ collectCoordinator
-//     路由 notify（chatMode running → status="running"，round 透传供 dedup key 递增）；
-//   - idle 定时器挂载 = host/roundLifecycle idle 相位帧（协议时序：idle 帧先于应答帧）；
-//   - 原「runAndFinalize early return 不终态化首轮」的正语义（首轮完成 record 留内存
-//     可续聊、round 恰 +1 不二次递增、result 单写点）由本文件 T1/T2 直接钉住——
-//     原 T3/T4（early-return 守卫分支与「不误伤正常分流」对照组）钉的是已删除的
-//     runAndFinalize 内部分支结构，正语义已被 T1/T2 覆盖，按「③已无对应行为」废弃。
+// W3 契约变更 → [H1 U6] chat-run 统一定形：会话形态轮走协议引擎（registry 'pi'
+// cli 形态 port），原 inproc 面与 runAndFinalize 分流随删件消亡；[H1 U6] 轮末结算
+// 载体 settleChatRoundFromResponse 语义按 D7 迁移清单并入 Continuation（onRunSettled），
+// 旧轮次相位帧消费面随相位机退役。承接同一业务语义的现权威：
+//   - 轮次收敛 = kickOffChatRound 的 run 应答（= agent_settled）→ Continuation
+//     onRunSettled 成功分支：round 0→1 + record.result = outcome.content + 门→route
+//     notify（chatMode running → status="running"，round 透传供 dedup key 递增）；
+//   - settle 交棒 = run 应答驱动（onRunSettled 内 noteRoundSettledFromProtocol）；
+//   - 原「首轮完成 record 留内存可续聊、round 恰 +1 不二次递增、result 单写点」的
+//     正语义由本文件 T1/T2 直接钉住（T3/T4 废弃理由不变）。
 //
 // mock 结构：registerFakePiEngine 协议替身（run 应答由测试显式驱动）+ logger；
 // 通知域注入真实 createDelivery（dedupe 语义参与断言）。
 //
-// [W3 契约变更记录] 原文件「double-notify 防护：onRoundSettled notify + kickOffChatRound
-// .then notifyComplete 同 id:round」在协议形态下的对应 = settleChatRoundFromResponse 内
-// notify + run 续体 collectCoordinator.route 回注，同 id:round → notifier dedup 吞第二次
-//（notifier 去重集语义不变），由 [M3] 用例锁定。
+// [契约变更记录] 原文件「double-notify 防护」的现对应 = Continuation onRunSettled
+// 内 notify（门→route）与主干回注同 id:round → notifier dedup 吞第二次（notifier 去重集
+// 语义不变），由 [M3] 用例锁定。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -154,11 +151,10 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     const handle = await service.execute({ task: "do something", slug: "test", conversation: true });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     const run = fake.runs[0];
-    expect(run.ctx.chat?.recordId).toBe(handle.subagentId); // chat 会话形态已声明
+    expect(run.ctx.resume?.recordId).toBe(handle.subagentId); // 会话形态已声明（[H1 U6] resume 键）
 
-    // 协议时序：idle 相位帧先于应答帧（W2 交接契约——idle 定时器挂载在引擎侧空闲即达）
-    run.emitLifecycle({ phase: "idle" });
-    // run 应答（= 首轮 agent_settled）：本轮内容为增量权威（协议形态 live turns 留引擎进程）
+    // run 应答（= agent_settled，[H1 U6] settle 交棒 run 应答驱动——旧 idle 相位帧
+    // 随相位机退役）：本轮内容为增量权威（live turns 留引擎进程）
     run.settle({ content: "first-round-done" });
 
     // [改动 2 承接] 轻量 idle 化（v4 B-1：idle 折入 running）：status=running（notify 守卫放行）
@@ -185,21 +181,18 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     const handle = await service.execute({ task: "do something", slug: "test", conversation: true });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     const run1 = fake.runs[0];
-    run1.emitLifecycle({ phase: "idle" });
-    // sessionFile 经应答回填（冷续锚点校验需要）
+    // [H1 U6] settle 交棒 = run 应答驱动（旧 idle 相位帧随相位机退役）
     run1.settle({ content: "round one", sessionFile: path.join(agentDir, "round-1.jsonl") });
     await vi.waitFor(() => {
       expect(internals.store.getMutable(handle.subagentId)?.round).toBe(1); // 第一轮已完成
     });
 
-    // 第二轮：引擎侧无活会话（fake 冷路径拒绝）→ message → resumeColdRound → 新 run
-    fake.interactMessageResult = { ok: false, code: "engine_session_not_resumable", message: "no live session" };
+    // 第二轮：message → Continuation 派发新 run（[H1 U6] 每轮 = 新 run + resume 锚点）
     const { messageHandler } = await import("../interface/subagent-actions.ts");
     await messageHandler(service, { subagentId: handle.subagentId, text: "second round" });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(2));
 
     const run2 = fake.runs[1];
-    run2.emitLifecycle({ phase: "idle" });
     run2.settle({ content: "round two" });
 
     const record = internals.store.getMutable(handle.subagentId);
@@ -227,8 +220,7 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     const handle = await service.execute({ task: "do something", slug: "test", conversation: true });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     const run = fake.runs[0];
-    run.emitLifecycle({ phase: "idle" }); // 模拟 agent_settled 前的空闲相位（Path A 前提）
-    run.settle({ content: "first-round-done" });
+    run.settle({ content: "first-round-done" }); // [H1 U6] run 应答 settle（= agent_settled）
 
     // [M3] 立即 flush——同步断言 sendMessage 已发出（旧实现此处挂 60s timer，0 次调用）
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));

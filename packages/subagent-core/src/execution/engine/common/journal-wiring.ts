@@ -1,8 +1,9 @@
 // src/execution/engine/common/journal-wiring.ts
 //
-// [D3-③ journal 接线合一] host 侧 event journal 接线的共享 helper（唯一实现，两调用
-// 点——SubagentService.runEngineTask（chat 域）与 SubprocessAgentRunner.run（workflow
-// 域））。设计权威源：docs/design/subagent-dual-track-convergence.md §3.3 D3-③（writer +
+// [D3-③ journal 接线合一] host 侧 event journal 接线的共享 helper（唯一实现，调用
+// 点全部在 SubagentService：workflow 域 runWorkflowEngineTask（wireEventJournal
+// taskId=record.id）+ chat 域 runEngineTask 与 tool 域 runAndFinalize 两处（同
+// record.id））。设计权威源：docs/design/subagent-dual-track-convergence.md §3.3 D3-③（writer +
 // retarget + handle 回填两份提为 common 层共享 helper）+ 双轨清单 #6。
 //
 // 收敛前形态（两份同构接线）：
@@ -17,6 +18,7 @@
 // fsync 一次，§3.3.6 写入纪律；写失败已由 writer 内部 warn + failed 收口，close 不抛，
 // journal 是②级尽力而为数据源）。
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import type { AgentEvent } from "../../../shared/agent-event.ts";
 import { getEngineDataDir } from "./data-dir.ts";
 import { JournalWriter } from "./event-journal.ts";
@@ -26,16 +28,17 @@ import type { EngineHandle } from "../types.ts";
 /**
  * journal 初始占位池 key（= pi 的恒定池 key 'shared'）。pi 无隔离池
  * （PI_CODING_AGENT_DIR 全局一份，设计 §3.3.9），占位即终值；zcode 在 prepare 期
- * retarget 到实际池 key。值与 RunContext.poolKey 的初始占位同源——本常量是该值在
- * common 层的单一权威（原先 Service 用 'shared' 字面量、SAR 用 PI_POOL_KEY，等值异名）。
+ * retarget 到实际池 key。值与 RunContext.poolKey 的初始占位同源——值单源
+ * SDK SHARED_POOL_KEY（L3 收编：原先 Service 用 'shared' 字面量、SAR 用 PI_POOL_KEY，
+ * 等值异名；本名保留 journal 占位语义，值不再本地声明）。
  */
-export const JOURNAL_INITIAL_POOL_KEY = "shared";
+export const JOURNAL_INITIAL_POOL_KEY = SHARED_POOL_KEY;
 
 /** wireEventJournal 的参数。 */
 export interface JournalWiringOptions {
   /** 实际执行引擎 id（journal 路径分段 + line 元数据）。 */
   engineId: string;
-  /** 宿主侧任务标识（journal 文件名与池引用计数 key：chat 域 = record.id；workflow 域 = 'sa-' 前缀占位）。 */
+  /** 宿主侧任务标识（journal 文件名与池引用计数 key；三处调用点统一 = record.id）。 */
   taskId: string;
   /**
    * journal 落盘后的事件转发（workflow 域的 liveRecord 通道）。缺省不转发（chat 域
@@ -77,9 +80,15 @@ export function wireEventJournal(opts: JournalWiringOptions): JournalWiring {
   });
   return {
     // 先落盘再转发（原 onEvent 未传时也恒传包装版——下游 onEvent 通道是事件生成后的
-    // 纯转发，无行为分支，仅多一次入队）
+    // 纯转发，无行为分支，仅多一次入队）。
+    //
+    // activity 豁免 append：纯活性信号不进持久/重放面——双侧 reducer（SDK
+    // journal-replay / core execution-record）对其 no-op，豁免不破坏 live≡reload
+    // 重放等价性；seq 由 append 铸造、过滤在 append 前故无 seq 空洞；
+    // forwardEvents 照发（workflow liveRecord reducer no-op，chat/守护刷新面在
+    // observedEvent 上游不受影响）；取证面由 pi stdout/stderr tee 覆盖。
     onEvent: (event) => {
-      journal.append(event);
+      if (event.type !== "activity") journal.append(event);
       opts.forwardEvents?.(event);
     },
     onPoolResolved: (poolKey) => {

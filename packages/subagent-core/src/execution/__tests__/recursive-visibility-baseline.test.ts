@@ -16,7 +16,7 @@
 //   4. forkDepth 基线：env PI_SUBAGENT_FORK_DEPTH → fork spawn env 递增
 //
 // mock 策略与 execute-nesting.test.ts 一致（spawn → FakeChild，fs 同步方法 mock，
-// temp-prompt / alive-store / finalized-marker / manifest-store mock；已收敛
+// temp-prompt / alive-store / state-marker / manifest-store mock；已收敛
 // ./helpers/subagent-service-mocks.ts 四文件共享单源）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aliveStoreModule,
   childProcessModule,
-  finalizedMarkerModule,
+  stateMarkerModule,
   fsSyncModule,
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
@@ -34,7 +34,7 @@ import {
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
 vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../finalized-marker.ts", () => finalizedMarkerModule());
+vi.mock("../state-marker.ts", () => stateMarkerModule());
 vi.mock("../manifest-store.ts", () => manifestStoreModule());
 
 import { spawn } from "node:child_process";
@@ -167,7 +167,9 @@ describe("进程级基线兜底（ALS 断裂修复，pi 事件回调模型）", 
 
     const { service, store } = setup({});
     registerHangingEngine();
-    const execNesting = Reflect.get(service, "execNesting") as ExecCtxAls;
+    // [R1 深绑改写] execNesting 随域 #2 聚合迁入 SessionBaselines，深绑路径改为
+    // service → baselines 聚合实例（断言对象与强度不变，路径对齐终态结构）。
+    const execNesting = (Reflect.get(service, "baselines") as { execNesting: ExecCtxAls }).execNesting;
 
     const handle = await execNesting.run({ recordId: "sa-inline-parent", depth: 3 }, () =>
       service.execute({ task: "inline nested", slug: "test", ctxModel }),
@@ -191,7 +193,8 @@ describe("进程级基线兜底（ALS 断裂修复，pi 事件回调模型）", 
     const { service } = setup({});
     registerHangingEngine();
 
-    expect(Reflect.get(service, "forkDepthBaseline")).toBe(1);
+    // [R1 深绑改写] forkDepthBaseline 经 baselines 聚合路径读取（同一权威字段，等价强度）。
+    expect((Reflect.get(service, "baselines") as { forkDepthBaseline: number }).forkDepthBaseline).toBe(1);
 
     // fork 请求照常派发（引擎侧承载深度传递）——不因基线读取抛错
     await expect(service.execute({ task: "fork child", slug: "test", ctxModel, fork: true })).resolves.toBeDefined();

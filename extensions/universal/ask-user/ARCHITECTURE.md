@@ -1,5 +1,7 @@
 # ask-user — Architecture
 
+> 功能分级：P0（依据见 [docs/feature-priorities.md](../../../docs/feature-priorities.md) §6 边界判例 #3——agent↔用户交互闭环的唯一通道，2026-09-12 用户裁决升 P0）。
+
 Internals reference for maintainers. For the usage contract (what the tool does, when an agent should call it), see [README.md](./README.md). This document covers how the code is structured, the state machine, the defensive execute flow, and where each design invariant is enforced — so a change does not silently break an invariant.
 
 Source: 10 files in `src/`, ~1970 lines total.

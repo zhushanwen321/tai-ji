@@ -59,6 +59,15 @@ describe("todo description — 中文版（动作 + 规则）", () => {
 		expect(DESCRIPTION_REGION).toContain("未真正完成不得标记 completed");
 	});
 
+	it("含规模控制规则（建议不超过 10 个）", () => {
+		expect(DESCRIPTION_REGION).toContain("建议 todo 总数不超过 10 个");
+		expect(DESCRIPTION_REGION).toContain("细粒度步骤优先合并");
+	});
+
+	it("含 auto-GC 行为说明（旧任务全部 completed 后 add 自动清理）", () => {
+		expect(DESCRIPTION_REGION).toContain("旧任务全部 completed 后再 add 会自动清理旧列表");
+	});
+
 	it("已删除旧英文 Examples 段与 Don't 段", () => {
 		expect(DESCRIPTION_REGION).not.toContain("Available actions");
 		expect(DESCRIPTION_REGION).not.toContain("Don't");
@@ -102,5 +111,9 @@ describe("todo tool prompt — snippet & guidelines", () => {
 	it("promptGuidelines 含 [自动闭合] / [批量优先] 核心条目", () => {
 		expect(TOOL_SRC).toContain("[自动闭合] 全部完成后自动清理");
 		expect(TOOL_SRC).toContain("[批量优先] 完成多项任务时使用 updates[] 批量更新");
+	});
+
+	it("promptGuidelines 含 [规模控制] 条目（不超过 10 个）", () => {
+		expect(TOOL_SRC).toContain("[规模控制] todo 总数建议不超过 10 个");
 	});
 });

@@ -30,14 +30,12 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
 import {
-  countAllToolCalls,
-  getAllToolCalls,
-  projectLiveProgress,
+  displayAgentName,
+  saveWorkflow,
 } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
+import type { SubagentRecord } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
-import { saveWorkflow } from "@zhushanwen/subagent-core";
-import { displayAgentName } from "@zhushanwen/subagent-core";
 import {
   buildPhaseGroups,
   ELLIPSIS,
@@ -65,7 +63,15 @@ import {
 } from "./view-constants.ts";
 
 // L2 详情内容构建 + 滚动按键（纯函数）抽到 detail-content.ts（view 与其测试直接 import）。
-import { buildDetailContent, detailContentLength, type DetailScrollContext, processDetailKey } from "./detail-content.ts";
+// [H2 W3] live 进度数据源 = store record 投影（LiveProgressView，替代 node.live）。
+import {
+  buildDetailContent,
+  detailContentLength,
+  projectRecordProgress,
+  type DetailScrollContext,
+  type LiveProgressView,
+  processDetailKey,
+} from "./detail-content.ts";
 
 // ── TUI layout constants ──────────────────────────────────────
 
@@ -111,10 +117,60 @@ export interface ViewActions {
 
 // ── 渲染签名（IF11/TC7/DM6：tick 条件失效的判据，渲染动态字段 SSOT）──────
 
+// ── [H2 W3] live 数据源：store record 配对（设计 D2 进度源切换）─────────
+
+/**
+ * 查询 + 配对：本 run 的 store records → running trace node 的 live 进度投影。
+ *
+ * **record ↔ trace node 对应关系（opts 标签映射 + 时间最近邻）**：
+ *   - 候选 = 查询结果中 status==="running" 的 record（执行期 record 恒在内存源；
+ *     archive 后的终态 record 从磁盘 light 重建，无 eventLog——但终态节点的渲染走
+ *     node.result 终态摘要路径，不消费 record 投影）；
+ *   - 标签匹配 = `record.task === node.task`（record.task = opts.prompt，与
+ *     node.task 同源——workflowCallToExecuteOptions 的 task 映射单点）；
+ *   - 多候选（parallel 同 prompt）时取 startedAt 与 node.startedAt 差绝对值最小者
+ *     （record 创建紧随 dispatch，pi 快路径下仅隔数个 microtask；非 pi 引擎 probe
+ *     异步时仍是最优最近邻）；配对后从候选池移除（贪心一一）。
+ *
+ * 精度语义：不同 prompt/agent 的节点精确匹配；完全同构（prompt+agent 均同）的
+ * parallel 孪生节点匹配到两者之一（数值可能在孪生间互换，形态不变）。running
+ * node 无匹配 record（重试间隙——上个 record 已 failed、新 record 未创建）时
+ * 走终态 fallback 渲染（与旧 live 缺失路径同形态）。
+ */
+export function collectNodeLiveProgress(
+  run: WorkflowRun,
+  records: SubagentRecord[],
+): Map<number, LiveProgressView> {
+  const candidates = records.filter((r) => r.status === "running");
+  const result = new Map<number, LiveProgressView>();
+  for (const node of run.state.trace.toArray()) {
+    if (node.status !== "running") continue;
+    const nodeStarted = node.startedAt !== undefined ? Date.parse(node.startedAt) : Number.NaN;
+    let bestIdx = -1;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < candidates.length; i++) {
+      const rec = candidates[i]!;
+      if (rec.task !== node.task) continue;
+      // startedAt 解析失败（防御，正常不可达）排最后——不与有限值比较出假精度。
+      const delta = Number.isFinite(nodeStarted)
+        ? Math.abs(rec.startedAt - nodeStarted)
+        : Number.POSITIVE_INFINITY;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx === -1) continue;
+    const [matched] = candidates.splice(bestIdx, 1);
+    if (matched) result.set(node.stepIndex, projectRecordProgress(matched));
+  }
+  return result;
+}
+
 /**
  * computeRenderSignature — 渲染输出中全部动态决定字段的签名（now 参数化，供测试）。
  *
- * 纯度说明：now 是显式参数，但 live 节点的 elapsedSeconds 经 projectLiveProgress
+ * 纯度说明：now 是显式参数，但 live 节点的 elapsedSeconds 经 projectRecordProgress
  * 内的 computeElapsedSeconds 现算（record.endedAt 缺省时取 Date.now()）——即使两次
  * 调用传同一 now，跨秒的真实时钟也会使签名变。该内含实时源只朝「多失效」方向
  * 偏离（多失效、不多绘、更不漏绘），对「签名同 → 跳过重绘」的单向判据安全。
@@ -125,25 +181,26 @@ export interface ViewActions {
  * ES7；签名取原始值时粒度细于显示量化值，只多失效不多绘不漏绘）。
  *
  * **字段核对表**（每字段 ↔ 渲染消费点 file:line，完备性唯一证据——测试只能证
- * 「已入字段变 → 签名变」，不能证无漏字段）：
+ * 「已入字段变 → 签名变」，不能证无漏字段）。live 七字段经 collectNodeLiveProgress
+ * 的 store record 投影（[H2 W3] 数据源从 node.live 切换，字段口径不变）：
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | run.state.status | WorkflowsView.ts renderHeader :629 / detail-content.ts :75（statusDotStr+statusLabel）/ renderFooter :666-678 |
- * | 秒桶 Math.floor(now/1000) | renderHeader :628 formatElapsed（现算 elapsed）+ detail-content.ts :69-72（now 参与未完成节点 elapsed）|
- * | completed/total（节点 status 推导）| renderHeader :626-629 |
- * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 :631 同精度——第 3-4 位小数变化是可见变化）| renderHeader :631 / saveTraceToFile :980 |
- * | run.state.errorLogs 指纹 = length+末条 level:message（errorLogs 仅经 push + slice(-MAX_ERROR_LOGS) 变异——append-only + 前向淘汰、条目不可变；封顶后 length 不变内容移，单取 length 会漏失效，而任何可见变化必伴随 length 变或末条变，故 length+末条是完备且最小的指纹）| detail-content.ts :174-191（renderWorkerLogSection：total 标签 + 末 20 条）|
- * | 节点 stepIndex | nodeParts 首字段（trace 数组序参与拼接，节点重排→签名变）/ saveTraceToFile :987（trace 导出 `### [#stepIndex]` 标题）|
- * | 节点 sessionFile | detail-content.ts :314-317（renderSessionSection）|
- * | 节点 status | 节点行 :844 statusDotStr / detail :75 |
- * | live.totalTokens | 节点行 :819 / detail :79 / :275 |
- * | 工具计数（签名路径用 countAllToolCalls 免克隆计数，与 getAllToolCalls(node.live).length 恒等——projectLiveProgress 投影无 toolCallCount 字段，不得引用）| 节点行 :820 / detail :80 / :223 |
- * | live.elapsedSeconds | 节点行 :821 / detail :81 / :276 |
- * | live.turns | detail :224 / :276 |
- * | live.eventLog.length（append-only，长度变化即尾部窗口右移出新事件）| detail :222（filter turn_end）+ :231-235 |
- * | live.currentActivity（type+label 均入签名）| detail :227-228 |
- * | live.lastError（内容入签名，防同存在性不同文本漏绘）| detail :277-278 |
+ * | run.state.status | WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
+ * | completed/total（节点 status 推导）| renderHeader |
+ * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
+ * | run.state.errorLogs 指纹 = length+末条 level:message（errorLogs 仅经 push + slice(-MAX_ERROR_LOGS) 变异——append-only + 前向淘汰、条目不可变；封顶后 length 不变内容移，单取 length 会漏失效，而任何可见变化必伴随 length 变或末条变，故 length+末条是完备且最小的指纹）| detail-content.ts（renderWorkerLogSection：total 标签 + 末 20 条）|
+ * | 节点 stepIndex | nodeParts 首字段（trace 数组序参与拼接，节点重排→签名变）/ saveTraceToFile（trace 导出 `### [#stepIndex]` 标题）|
+ * | 节点 sessionFile | detail-content.ts（renderSessionSection）|
+ * | 节点 status | 节点行 statusDotStr / detail statusLabel |
+ * | live.totalTokens | 节点行（level1AgentCells）/ detail（buildDetailContent 用量行）|
+ * | live.toolCallCount（store 投影：eventLog tool_start 计数，与 getAllToolCalls(record).length 恒等——LiveProgressView 无别的计数字段，不得另引）| 节点行 / detail（用量行 + Activity 标签）|
+ * | live.elapsedSeconds | 节点行 / detail（用量行 + Outcome Running 行）|
+ * | live.turns | detail（Activity 标签 + Outcome Running 行）|
+ * | live.eventLog.length（append-only，长度变化即尾部窗口右移出新事件）| detail（Activity 区 filter turn_end + 最近 N 条）|
+ * | live.currentActivity（type+label 均入签名）| detail（Activity 当前活动行）|
+ * | live.lastError（内容入签名，防同存在性不同文本漏绘）| detail（Outcome ⚠ 行）|
  *
  * 维护约定（DS8）：WorkflowsView/detail-content 新增任何动态展示字段必须同步
  * 并入本签名并更新上表，否则该字段渲染滞后一拍。本文件编辑会使表内 WorkflowsView
@@ -152,7 +209,11 @@ export interface ViewActions {
 /** 秒桶宽度（ms）：签名取 Math.floor(now / SECOND_MS)，秒桶推进 = 可见 elapsed 变化。 */
 const SECOND_MS = 1000;
 
-export function computeRenderSignature(run: WorkflowRun, now: number): string {
+export function computeRenderSignature(
+  run: WorkflowRun,
+  liveProgress: Map<number, LiveProgressView>,
+  now: number,
+): string {
   const traceArr = run.state.trace.toArray();
   const completed = traceArr.filter((n) => n.status === "completed").length;
   const budget = run.state.budget;
@@ -166,8 +227,8 @@ export function computeRenderSignature(run: WorkflowRun, now: number): string {
   const lastLog = logs && logs.length > 0 ? `${logs[logs.length - 1].level}:${logs[logs.length - 1].message}` : "-";
   const errorLogsPart = `${logs?.length ?? 0}:${lastLog}`;
   const nodeParts = traceArr.map((n) => {
-    const live = n.live ? projectLiveProgress(n.live) : undefined;
-    return `${n.stepIndex}:${n.status}:${n.sessionFile ?? "-"}:${live?.totalTokens ?? -1}:${n.live ? countAllToolCalls(n.live) : -1}:${live?.elapsedSeconds ?? -1}:${live?.turns ?? -1}:${live?.eventLog.length ?? -1}:${live?.currentActivity ? `${live.currentActivity.type}:${live.currentActivity.label}` : "-"}:${live?.lastError ?? "-"}`;
+    const l = liveProgress.get(n.stepIndex);
+    return `${n.stepIndex}:${n.status}:${n.sessionFile ?? "-"}:${l?.totalTokens ?? -1}:${l?.toolCallCount ?? -1}:${l?.elapsedSeconds ?? -1}:${l?.turns ?? -1}:${l?.eventLog.length ?? -1}:${l?.currentActivity ? `${l.currentActivity.type}:${l.currentActivity.label}` : "-"}:${l?.lastError ?? "-"}`;
   });
   return [run.state.status, Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
 }
@@ -224,6 +285,13 @@ function createInitialState(): ViewState {
  * @param theme ThemeLike（避免直接 import Pi runtime）
  * @param ctx ExtensionContext（调 ui.custom 渲染 + ui.notify 错误反馈）
  * @param actions lifecycle 操作（abort），由调用方注入
+ * @param runStateFile run 状态快照路径（可选，header 展示）
+ * @param liveRecords 本 run 的 store record 查询（[H2 W3] 设计 D2 进度源切换：
+ *   经 SubagentService.queries.collectRecordsByParentRunId 查询（内存 ∪ 磁盘重建 ∪
+ *   manifest，LIST_LIMIT 口径），view 在 200ms tick 与 render 时重查并按
+ *   collectNodeLiveProgress 配对到 running trace node。未注入（无 service 的测试
+ *   环境）时 live 投影恒空，渲染走终态 result 路径。终态 record archive 出内存后
+ *   由下次重查从磁盘重建面取终态快照——无需带 payload 的新事件类型（D2 实现锚点）。
  */
 export function createWorkflowsView(
   run: WorkflowRun,
@@ -231,10 +299,16 @@ export function createWorkflowsView(
   ctx: ExtensionContext,
   actions: ViewActions,
   runStateFile?: string,
+  liveRecords?: () => SubagentRecord[],
 ): Promise<void> {
   return ctx.ui.custom<void>((_tui: unknown, _t: unknown, _kb: unknown, done: (result: void) => void) => {
     const state = createInitialState();
     const tui = _tui as TuiLike;
+
+    /** 查询 + 配对：本 run running 节点的 live 进度投影（liveRecords 未注入时恒空）。 */
+    function collectLive(): Map<number, LiveProgressView> {
+      return liveRecords === undefined ? new Map() : collectNodeLiveProgress(run, liveRecords());
+    }
 
     function currentPhaseAgents() {
       const live = buildPhaseGroups([...run.state.trace.toArray()]);
@@ -253,16 +327,17 @@ export function createWorkflowsView(
     const cache = { key: undefined as string | undefined, lines: undefined as string[] | undefined };
     const requestRender = () => tui.requestRender();
 
- // ── 轮询 tick：engine 无事件推送，view 自轮询 trace 变化 ──
- // 每 200ms 条件失效（IF11/TC7）：先算渲染签名（computeRenderSignature，
- // 覆盖 header/节点行/L2 detail 全部动态字段），与上次相同 → 该帧内容无可见
- // 变化，直接 return（不清 cache、不 requestRender——纯等待场景零重建零重绘）；
- // 不同 → 现状路径（清缓存 + requestRender）。lastSignature 初始 undefined，
- // 首 tick 必失效（保证首绘）。签名计算 O(N)（N=trace 节点数）远低于全量 render。
+ // ── 轮询 tick：engine 无事件推送，view 自轮询 trace + store record 变化 ──
+ // 每 200ms 条件失效（IF11/TC7）：先查 store（parentRunId 查询域）配对 live 投影，
+ // 再算渲染签名（computeRenderSignature，覆盖 header/节点行/L2 detail 全部动态
+ // 字段），与上次相同 → 该帧内容无可见变化，直接 return（不清 cache、不
+ // requestRender——纯等待场景零重建零重绘）；不同 → 现状路径（清缓存 +
+ // requestRender）。lastSignature 初始 undefined，首 tick 必失效（保证首绘）。
+ // 签名计算 O(N)（N=trace 节点数）远低于全量 render。
     let lastSignature: string | undefined;
     const tick = setInterval(() => {
       if (state.disposed) return;
-      const signature = computeRenderSignature(run, Date.now());
+      const signature = computeRenderSignature(run, collectLive(), Date.now());
       if (signature === lastSignature) return;
       lastSignature = signature;
       cache.key = undefined;
@@ -332,7 +407,7 @@ export function createWorkflowsView(
       if (!node) return false;
       const detailCtx: DetailScrollContext = {
         viewportHeight: detailViewportHeight(),
-        contentLines: detailContentLength(node, state, run, theme),
+        contentLines: detailContentLength(node, state, run, theme, collectLive().get(node.stepIndex)),
         isRunning: node.status === "running",
       };
       const r = processDetailKey(
@@ -514,9 +589,10 @@ export function createWorkflowsView(
         if (cache.lines && cache.key === key) return cache.lines;
         clampSelections();
  // 缺陷 #1 修复：每次 render 从 run.state.trace 实时读（toArray 返回内部数组引用，
- // 后续 trace.append 会反映到 view），不再用 factory 时的冻结快照。
+ // 后续 trace.append 会反映到 view），不再用 factory 时的冻结快照。live 进度同源
+ // 重查 store（[H2 W3]：进度源 = collectRecordsByParentRunId 查询域）。
         const liveGroups = buildPhaseGroups([...run.state.trace.toArray()]);
-        const raw = renderLayout(run, state, liveGroups, theme, width, height, runStateFile);
+        const raw = renderLayout(run, state, liveGroups, theme, width, height, runStateFile, collectLive());
  // Pad to terminal height so the overlay fills the screen (matches main 行为）
         const lines = raw.length < height
           ? [...raw, ...Array.from({ length: height - raw.length }, () => "")]
@@ -567,6 +643,7 @@ function renderLayout(
   screenWidth: number,
   screenHeight: number,
   runStateFile?: string,
+  live?: Map<number, LiveProgressView>,
 ): string[] {
   const lines: string[] = [];
   const contentWidth = screenWidth - BOX_BORDER_CHARS;
@@ -585,10 +662,10 @@ function renderLayout(
   if (state.level === 0) {
     renderLevel0(lines, run, phaseGroups, state, theme, mainWidth, now, viewH);
   } else if (state.level === 1) {
-    renderLevel1(lines, run, phaseGroups, state, theme, mainWidth, now, viewH);
+    renderLevel1(lines, run, phaseGroups, state, theme, mainWidth, now, viewH, live);
   } else {
     // L2 详情走固定高度 viewport（右侧滚动），高度 = minBody（与 L0/L1 最小一致）
-    renderLevel2(lines, run, agents, state, theme, mainWidth, now, viewH);
+    renderLevel2(lines, run, agents, state, theme, mainWidth, now, viewH, live);
   }
 
  // Padding 已在各 renderLevel 内部处理，无需额外 padding
@@ -807,18 +884,18 @@ function pushLevel1Header(
   }
 }
 
-/** L1 agent 行统计三元组：live 路径优先（运行中从 node.live 读实时 token/tool + elapsed），
+/** L1 agent 行统计三元组：live 路径优先（运行中从 store record 投影读实时 token/tool + elapsed），
  *  终态回退 result 统计。 */
 function level1AgentCells(
   node: ExecutionTraceNode,
+  liveView: LiveProgressView | undefined,
   now: number,
 ): { tokStr: string; tcCount: number; elapsed: string } {
-  if (node.live) {
-    const live = projectLiveProgress(node.live);
+  if (liveView) {
     return {
-      tokStr: live.totalTokens > 0 ? `${Math.round(live.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "",
-      tcCount: getAllToolCalls(node.live).length,
-      elapsed: formatElapsedSeconds(live.elapsedSeconds),
+      tokStr: liveView.totalTokens > 0 ? `${Math.round(liveView.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "",
+      tcCount: liveView.toolCallCount,
+      elapsed: formatElapsedSeconds(liveView.elapsedSeconds),
     };
   }
   const elapsed = formatElapsed(
@@ -837,12 +914,13 @@ function level1AgentCells(
 function formatLevel1AgentLine(
   node: ExecutionTraceNode,
   theme: ThemeLike,
+  liveView: LiveProgressView | undefined,
   now: number,
   selected: boolean,
 ): string {
   const pointer = selected ? "❯ " : "  ";
   const dot = statusDotStr(node.status, theme);
-  const { tokStr, tcCount, elapsed } = level1AgentCells(node, now);
+  const { tokStr, tcCount, elapsed } = level1AgentCells(node, liveView, now);
   return `${pointer}${dot} ${displayAgentName(node.agent)}    ${node.model}    ${tokStr} · ${tcCount} tools · ${elapsed}`;
 }
 
@@ -855,6 +933,7 @@ function renderLevel1(
   mainWidth: number,
   now: number,
   bodyH: number,
+  live?: Map<number, LiveProgressView>,
 ): void {
   const leftLines = buildLevelSidebar(phases, state, theme, bodyH);
 
@@ -865,7 +944,7 @@ function renderLevel1(
   const agents = currentPhase?.nodes ?? [];
   const { startIdx: agentStart, viewportH: agentViewportH } = computeViewport(agents.length, state.agentIdx, bodyH);
   for (let i = agentStart; i < agentStart + agentViewportH && i < agents.length; i++) {
-    rightLines.push(formatLevel1AgentLine(agents[i], theme, now, i === state.agentIdx));
+    rightLines.push(formatLevel1AgentLine(agents[i], theme, live?.get(agents[i]!.stepIndex), now, i === state.agentIdx));
   }
   state.agentScrollOffset = agentStart;
   while (rightLines.length < bodyH) rightLines.push("");
@@ -886,6 +965,7 @@ function renderLevel2(
   mainWidth: number,
   now: number,
   viewH: number,
+  live?: Map<number, LiveProgressView>,
 ): void {
   const leftLines: string[] = [];
   const rightLines: string[] = [];
@@ -908,7 +988,7 @@ function renderLevel2(
  // Right: full detail（viewport 截断 + 滚动，对齐 subagents renderRightDetail）
   const node = agents[state.agentIdx];
   if (node) {
-    const content = buildDetailContent(node, state, run, theme, mainWidth, now);
+    const content = buildDetailContent(node, state, run, theme, mainWidth, now, live?.get(node.stepIndex));
     const maxOff = Math.max(0, content.length - viewH);
     // running 且 followTail → 钉底部（最新输出始终可见，用户 PgUp 后停止跟随）
     if (node.status === "running" && state.followTail) {

@@ -1,6 +1,6 @@
-// HostBridge 契约 + core 实现 单测（W6，impl-plan §2.6 第 2 条 / 设计 §3.8 最小示例 9 方法）。
-// 覆盖：9 方法委托行为、getRecordForAction 异常 → null、cancel 的 void 包装、
-// takeChatRound 未提供 → null、armIdleTimer/disarmIdleTimer 对 lifecycle-manager 的
+// HostBridge 契约 + core 实现 单测（W6；[H1 U6] takeChatRound 交接面用例随 chat 域
+// 退役删除）。覆盖：方法委托行为、getRecordForAction 异常 → null、cancel 的 void 包装、
+// armIdleTimer/disarmIdleTimer 对 lifecycle-manager 的
 // 接线（含超时回调 onIdleTimeout 触发，fake timers）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -9,7 +9,6 @@ import {
   createHostBridge,
   type HostBridge,
   type HostBridgeServiceFace,
-  type HostChatRoundTicket,
 } from "../host-bridge.ts";
 import {
   _resetLifecycleState,
@@ -32,7 +31,6 @@ function makeService(): HostBridgeServiceFace & {
     closeSubagent: vi.fn(async () => {}),
     cancel: vi.fn(() => true),
     collectRecords: vi.fn((): SubagentRecord[] => [{ id: "r1" } as SubagentRecord]),
-    takeChatRound: vi.fn(() => undefined),
     reportRecordTransition: vi.fn(() => {}),
   };
   return {
@@ -42,7 +40,6 @@ function makeService(): HostBridgeServiceFace & {
     closeSubagent: spies.closeSubagent,
     cancel: spies.cancel,
     collectRecords: spies.collectRecords,
-    takeChatRound: spies.takeChatRound as HostBridgeServiceFace["takeChatRound"],
     reportRecordTransition: spies.reportRecordTransition,
   };
 }
@@ -94,18 +91,6 @@ describe("HostBridge（W6，设计 §3.8 最小示例 9 方法）", () => {
   it("cancel：服务面 boolean → 契约 void（resolve 语义归引擎侧判 notResumable）", async () => {
     await expect(bridge.cancel("r1")).resolves.toBeUndefined();
     expect(service.spies.cancel).toHaveBeenCalledWith("r1");
-  });
-
-  it("takeChatRound：有票 → 透传；无票 / 服务面未提供 → null", () => {
-    expect(bridge.takeChatRound("t1")).toBeNull();
-    const ticket: HostChatRoundTicket = {
-      record: fakeRecord("r1"),
-      opts: {} as HostChatRoundTicket["opts"],
-      signal: undefined,
-      priority: 1,
-    };
-    (service.spies.takeChatRound as ReturnType<typeof vi.fn>).mockReturnValue(ticket);
-    expect(bridge.takeChatRound("t1")).toBe(ticket);
   });
 
   it("reportRecordTransition 委托（record 整体上报，无 patch 形态——见契约头注释）", () => {

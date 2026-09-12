@@ -159,6 +159,14 @@ export interface SubagentRecord {
    */
   resumable?: boolean
   /**
+   * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：
+   * 'tool' = 主 agent 经 subagent 工具手动派发；'workflow' = workflow 脚本 agent()
+   * 派发（生产写入方 W2 接线，W1 契约与过滤面先行）。缺省（undefined，存量 record
+   * 与未透传的投影）= 'tool' 语义，消费方零迁移——renderer 侧栏计数 / 后台工作指示
+   * 按 `origin === 'workflow'` 负向过滤。
+   */
+  origin?: 'tool' | 'workflow'
+  /**
    * 实际执行引擎 id（P4 路由留痕，设计 D9①/D3：engine 三字段贯通）。缺省 = pi，
    * 由读侧映射（runtime subagent-engine-history 的 extractRecordEngine：undefined/
    * 空串 → 'pi'，非空透传）——投影层只透传不填默认值，存量 record 零迁移。

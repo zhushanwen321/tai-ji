@@ -127,7 +127,7 @@ function delay(ms: number): Promise<void> {
  * @param budget Budget 值对象（consume + isExceeded 检查）
  * @param signal AbortSignal（runner.run 传播；abort 后不重试）
  * @param trace Trace 值对象（finalizeCall 时 update）
- * @param onEvent 实时事件回调（live record 更新用）
+ * @param onEvent 透传 service 派发路径（journal 转发 + 守护刷新源）
  * @param stream streaming sink（透传 runner.run）
  * @param isOrphaned 孤儿判定谓词（OB2，可选，默认恒 false）：true 时 finalizeCall
  *   跳过 trace.update（判定语义与正确性论证见 finalizeCall 文档注释）。递归重试

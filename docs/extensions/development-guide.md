@@ -122,7 +122,7 @@ extensions/
   "license": "MIT",
   "keywords": ["pi-package", "pi", "pi-coding-agent", "extension"], // 必须含 "pi-package"
   "bin": {
-    "pi-extension-name": "install.mjs" // [指南] 安装脚本入口，供 pi install 使用
+    "pi-extension-name": "install.mjs" // [历史形态] 早期安装脚本入口；现行活跃包 0 个含 install.mjs，pi 字段原生发现（见 §15.3）
   },
   "files": [
     "index.ts",
@@ -152,17 +152,17 @@ extensions/
 
 **[规范]** `keywords` 必须包含 `"pi-package"` 以便 Pi 包管理器识别。
 
-**[指南]** `bin` 指向 `install.mjs` 供 `pi install npm:xxx` 使用。安装脚本负责将扩展注册到 `~/.pi/agent/extensions/` 目录。
+**[指南]** `bin` 指向 `install.mjs` 供 `pi install npm:xxx` 使用。安装脚本负责将扩展注册到 `~/.pi/agent/extensions/` 目录。（[历史形态] 本仓现行活跃包 0 个含 install.mjs——pi 通过 package.json `pi` 字段原生发现 npm 包资源，无需安装脚本。）
 
 ### 1.4 Pi SDK 包引用
 
 **[规范]** Pi SDK 包始终用 `peerDependencies`（非 `dependencies`），由 Pi 运行时提供。`peerDependencies` 必须 `optional: true`，因为扩展运行在 Pi 进程内。
 
-当前 xyz-pi 的 SDK scope 分布（xyz-pi v0.75.5-xyz-0.4）：
+当前 Pi SDK 的 scope 分布（上游 npm `@earendil-works/pi-coding-agent@0.84.4`；曾用 fork xyz-pi 已废弃切回）：
 
 | 包 | 作用域 | 说明 |
 |---|---|---|
-| `pi-coding-agent` | `@mariozechner` | **主 API 包**。来源：xyz-pi 的 dist/index.d.ts。TUI/AI 的入口 |
+| `pi-coding-agent` | `@earendil-works` | **主 API 包**。TUI/AI 的入口 |
 | `pi-tui` | `@earendil-works` | TUI 组件库（Container/Text/Box/Markdown 等） |
 | `pi-ai` | `@earendil-works` | AI 工具（StringEnum / complete / getModel 等） |
 | `pi-agent-core` | `@earendil-works` | Agent 核心类型（仅 subagent 场景） |
@@ -186,7 +186,7 @@ extensions/
 
 **[规范]** `@earendil-works/pi-coding-agent` 是核心依赖，**不能设为 optional**。
 
-> **注意**：不同维护者的包使用不同的 scope。`nicobailon/pi-subagents` 使用 `@earendil-works`，`baphuongna/pi-crew` 使用 `@mariozechner`。这是 Pi 生态中不同 fork 的区别。开发时请确认你目标平台的实际包名。
+> **注意**：不同维护者的包可能使用不同的 scope。`nicobailon/pi-subagents` 使用 `@earendil-works`；`baphuongna/pi-crew` 使用的 `@mariozechner` 是**已废弃 namespace**（Pi 团队已重命名并被 npmjs 标记 deprecated），本仓禁用、不得作为合法选项（见 [extension-conventions.md](./extension-conventions.md)「禁止使用已废弃的 Pi SDK namespace」）。开发时一律使用 `@earendil-works/pi-*`。
 
 **[指南]** TUI 和 AI 包按需声明，设为 optional 可降低纯工具扩展的依赖要求。
 
@@ -909,14 +909,14 @@ Pi 的 extension loader 使用 [jiti](https://github.com/unjs/jiti) 加载 TypeS
 
 | 模式 | 机制 | 对非 SDK 包 import 的支持 |
 |------|------|--------------------------|
-| **Node.js 模式**（当前 xyz-pi） | `alias` | 标准 node_modules 查找，能找到依赖就能 import |
+| **Node.js 模式**（当前上游 pi） | `alias` | 标准 node_modules 查找，能找到依赖就能 import |
 | **Bun binary 模式**（上游 pi-mono 的编译产物） | `virtualModules` + `tryNative: false` | 注意：仅 virtualModules 中的包可被解析，其他 import 会失败 |
 
-当前 xyz-pi 以 Node.js 脚本运行（`cli.js` 首行为 `#!/usr/bin/env node`），因此扩展的 import 走标准 node_modules 解析。
+当前 pi 以 Node.js 脚本运行（`cli.js` 首行为 `#!/usr/bin/env node`），因此扩展的 import 走标准 node_modules 解析。
 
 **[规范]** 如果扩展依赖第三方 npm 包，必须在其 `package.json` 的 `dependencies` 中声明。安装扩展后这些包会被下载到 node_modules，jiti 就能找到。
 
-**[规范]** 禁止依赖 xyz-pi 自身的 node_modules 中碰巧存在的包（如 `diff`）。这不是 API 契约——不同版本的 xyz-pi 可能增减内部依赖。
+**[规范]** 禁止依赖 pi 自身的 node_modules 中碰巧存在的包（如 `diff`）。这不是 API 契约——不同版本的 pi 可能增减内部依赖。
 
 ### 9.2 依赖类型决策
 
@@ -965,7 +965,7 @@ Pi Interactive 模式下，extension 的 `console.*` 输出直接写入 pi 主�
 |------|---------|----------|
 | AI 需实时感知（hook block、tool 执行错误） | tool result / `return { block: true, reason }`（pi 原生链路） | 经 logger 转发 |
 | 事后排查（内部降级、竞态、IO 清理失败） | `logger.warn` / `logger.error` → `pi.appendEntry` custom entry | `console.warn("[ext] ...")`、`ctx.ui.notify` |
-| 开发者调试 | `logger.debug` → 文件日志（`XYZ_AGENT_DEBUG=1` 开启） | 自造 `PI_*_DEBUG` 环境变量 + console |
+| 开发者调试 | `logger.debug` → 文件日志（`XYZ_AGENT_DEBUG=1` DEBUG 全量 / `XYZ_AGENT_EXT_LOG=1` INFO 级） | 自造 `PI_*_DEBUG` 环境变量 + console |
 | 用户操作反馈（用户主动触发命令的结果） | `ctx.ui.notify(msg, "info"/"warning"/"error")` | 诊断信息用 notify（刷屏） |
 | Worker 线程 | 拦截 console.* → 收集数组 → postMessage 回传 | 直接 console.* 输出 |
 
@@ -976,7 +976,7 @@ Pi Interactive 模式下，extension 的 `console.*` 输出直接写入 pi 主�
 1. **禁止 `console.log` / `console.info`** — 输出到 stdout，Interactive 模式下泄漏到用户输入区域，干扰 TUI 渲染
 2. **禁止 `console.warn` / `console.error`** — raw stderr 在 TUI alternate-screen 下越过渲染层污染 input 区，且不落盘。历史「带 `[ext-name]` 前缀的 warn/error」方案已废弃（前缀只解决来源区分，不解决污染与不落盘）
 3. **不可恢复错误用 `throw`** — 由 Pi 框架的 `ExtensionRunner.onError()` 捕获并渲染到 TUI，比手动 console 输出更规范
-4. **生产默认静默** — 正常运行时不输出诊断信息；调试经统一开关 `XYZ_AGENT_DEBUG=1` 开文件日志，禁止新增 per-extension 的 `PI_*_DEBUG` / `<EXT>_DEBUG` 变量
+4. **生产默认静默** — 正常运行时不输出诊断信息；文件日志双开关：`XYZ_AGENT_DEBUG=1`（DEBUG 全量）与 `XYZ_AGENT_EXT_LOG=1`（INFO 级落盘，xyz 托管环境由 runtime spawn 时注入 + 7 天清理）；禁止新增 per-extension 的 `PI_*_DEBUG` / `<EXT>_DEBUG` 变量
 5. **重复警告去重** — 可能反复触发的警告用 `Set` 去重，防止刷屏
 
 ### 10.3 ctx.ui.notify() 使用
@@ -1364,7 +1364,7 @@ pi install ./path/to/my-extension
 pi uninstall my-extension
 ```
 
-安装脚本 (`install.mjs`) 负责将扩展注册到 `~/.pi/agent/extensions/` 目录。
+安装脚本 (`install.mjs`) 负责将扩展注册到 `~/.pi/agent/extensions/` 目录。（[历史形态] 现行活跃包 0 个含 install.mjs——pi 字段原生发现即注册，无安装脚本环节。）
 
 ---
 
@@ -1520,7 +1520,9 @@ function buildChildArgs(config: {
   }
 
   if (config.modelOverride) {
-    args.push("--model", config.modelOverride);
+    // 必须先经 assertCanonicalModelRef 全等裁决再拼 --model（packages/subagent-core/src/shared/model-ref.ts）
+    const canonical = assertCanonicalModelRef(config.modelOverride);
+    args.push("--model", canonical);
   }
 
   if (config.tools?.length) {
@@ -1535,6 +1537,8 @@ function buildChildArgs(config: {
   return args;
 }
 ```
+
+> **为何禁止裸拼 `--model`**：pi CLI 的 `--model` 是 pattern 非精确 ID（toLowerCase / contains 模糊匹配），「扩展层校验通过」不代表「子进程按此名执行」——裸拼曾致静默换模 429（2026-08-27 事故 A 根因 F1），且白名单外的 `"--model"` 字面量会被 `.githooks/check_subagent_channels.py`（pre-commit + CI）拦截。规则全文见 [extension-conventions.md](./extension-conventions.md)「模型引用解析 [MANDATORY]」。
 
 ### 18.3 执行与结果收集
 
@@ -1670,6 +1674,8 @@ function createResultWatcher(pi, state, resultsDir, intervalMs) {
   output-<n>.log       # 实时人类可读日志
   subagent-log-<id>.md # Markdown 格式日志
 ```
+
+> 后台任务的**结果语义通知**（完成/终态投递）必须走确认式送达——持久账本 + notifyId 幂等 + settled 边沿 courier，禁依赖 steer/followUp/nextTurn 内存队列的 at-most-once 通道（约束 C-ext-19，设计见 [pi-boundary-reliability.md](../design/pi-boundary-reliability.md)）。
 
 ---
 
@@ -1824,6 +1830,8 @@ async function deliverSubagentResultIntercomEvent(
   return true;
 }
 ```
+
+> 结果语义的跨会话投递同样受 C-ext-19 确认式送达约束（账本 + 幂等键 + courier，见 [pi-boundary-reliability.md](../design/pi-boundary-reliability.md)）。
 
 ---
 
@@ -2055,8 +2063,10 @@ function createLiveResultComponent(
 | 场景 | 推荐 |
 |------|------|
 | 单元测试 | `vitest` |
-| 快速验证 | `node --test` |
+| 快速验证 | `vitest run <file>`（单文件） |
 | 集成测试 | `vitest` |
+
+> **本仓红线**：测试框架统一 vitest，禁止 `node --test` / `node:test` / `tsx --test`（配置在子包 `vitest.config.ts`，从子包目录运行；见项目根 AGENTS.md「测试」节）。
 
 ### 25.2 测试分层 🟠
 
@@ -2104,9 +2114,9 @@ describe("state", () => {
 ```jsonc
 {
   "scripts": {
-    "test:unit": "node --experimental-strip-types --test test/unit/*.test.ts",
-    "test:integration": "node --experimental-transform-types --import ./test/support/register-loader.mjs --test test/integration/*.test.ts",
-    "test:all": "npm run test:unit && npm run test:integration"
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:all": "vitest run"
   }
 }
 ```
@@ -2312,7 +2322,7 @@ src/
 - [ ] 配置加载失败抛有意义错误
 - [ ] 反序列化向后兼容旧 Entry 格式
 - [ ] 无模块级 global let 变量
-- [ ] 无 `console.log` / `console.info`（用 `ctx.ui.notify` 或 `console.warn`/`error`）
+- [ ] 无 `console.log` / `console.info` / `console.warn` / `console.error`（`console.*` 全禁，统一接 `@zhushanwen/pi-extension-logger`；用户操作反馈用 `ctx.ui.notify`）
 - [ ] Worker 线程拦截 `console.*`（不泄漏到输入区域）
 - [ ] 热重载安全：globalThis 存储清理函数，新实例先清理旧资源（见 §6.4）
 

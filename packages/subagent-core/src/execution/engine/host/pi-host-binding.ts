@@ -23,11 +23,12 @@
 // （pi-subagent-cli spawn-runner 的 spawn watchdog）保持同源常量，漂移由 conformance
 // chat golden（spawn-args 断言）在引擎包侧守护。
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import type { EnginePort } from "../port.ts";
 import { EngineNotFoundError, getEngine, hasEngine, listEngines } from "../registry.ts";
 
 /** pi 无隔离池（PI_CODING_AGENT_DIR 全局一份，协议化设计 §3.3.9），poolKey 恒 'shared'。 */
-export const PI_POOL_KEY = "shared";
+export const PI_POOL_KEY = SHARED_POOL_KEY;
 
 /** watchdog 换算下限（分钟）：与引擎包 spawn-runner 的 floor 同源（30min）。 */
 const WATCHDOG_FLOOR_MINUTES = 30;
@@ -46,9 +47,9 @@ export function maxTurnsToWatchdogMs(maxTurns: number): number {
 }
 
 /**
- * 宿主侧 pi EnginePort 解析（SAR / chat 域路由）：registry 的 'pi'（发现器装载的
- * cli descriptor → RemoteEngine）直接返回——chat 轮次与 run 域同路（协议 run(interact)
- * 发往 pi-subagent-cli 引擎进程）。
+ * 宿主侧 pi EnginePort 解析（SAR / 会话形态轮路由）：registry 的 'pi'（发现器装载的
+ * cli descriptor → RemoteEngine）直接返回——续聊轮与 run 域同路（协议 run 帧发往
+ * pi-subagent-cli 引擎进程）。
  * [U-2 一致性修复] pi **未注册**（引擎包未装/发现失败）时返回不可用 stub，不静默
  * 直构任何本地实例——保留设计 D4「全不可用 → 派发期 engine_not_found + 安装指引」
  * 错误契约（zcode 侧 d8-compat 同语义，两引擎对称）。
@@ -85,7 +86,6 @@ function piUnavailableEnginePort(): EnginePort {
     }),
     probe: () => fail(),
     run: () => fail(),
-    interact: () => fail(),
     read: () => fail(),
   };
 }

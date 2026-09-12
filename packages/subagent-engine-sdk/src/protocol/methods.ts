@@ -1,11 +1,12 @@
 // src/protocol/methods.ts
 //
-// 10 正向方法（core → 引擎）params/result 逐方法写死（v1）。设计权威源：
-// 设计 §3.3 方法集表 + impl-plan §2.1「10 正向方法」。
+// 9 正向方法（core → 引擎）params/result 逐方法写死（v1）。设计权威源：
+// 设计 §3.3 方法集表 + impl-plan §2.1「10 正向方法」（[H1] 收敛为 9）。
 //
-// [v1.x 增量（chat-domain 设计 §3.2 D1-A）]：方法集不变（chat 轮次 = run 会话形态
-// + 既有 interact，不新造 chatRound 方法——D1-B 被否）；增量以可选参数形态落在
-// run.params.chat（会话形态参数 + 冷续 resume 锚点），major 不 bump。
+// [v1.x 增量（chat-domain 设计 §3.2 D1-A）]：增量以可选参数形态落在 run.params.chat
+// （会话形态参数 + 冷续 resume 锚点），major 不 bump。[H1] chat-run 统一后续聊 =
+// 新 run + resume 锚点（docs/design/subagent-chat-run-unification.md §3.3 D5/D7），
+// 既有 interact 方法已随 U5 删除，方法集收敛为 9 个。
 //
 // 应答面补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
 // 不参与同步成员判据；唯一阻断面 = 被 gate 能力位多声明 → engine_capability_mismatch）；
@@ -17,21 +18,22 @@ import type {
   EngineCapabilities,
   EngineHandleData,
   AgentOutcome,
-  InteractAction,
-  InteractResult,
   ModelCatalogEntry,
   ProbeReport,
   ResumeAnchor,
   SessionView,
 } from "./contract-types.ts";
 
-/** 正向方法名联合（恰好 10 个；PROTOCOL_METHODS 常量数组与之同源互证）。 */
+/**
+ * 正向方法名联合（恰好 9 个；PROTOCOL_METHODS 常量数组与之同源互证）。
+ * [H1] `interact` 成员已随 chat-run 统一退役（docs/design/subagent-chat-run-unification.md
+ * §3.3 D5：续聊轮统一为「新 run + resume 锚点」，U5 删除）。
+ */
 export type ProtocolMethod =
   | "initialize"
   | "probe"
   | "run"
   | "cancel"
-  | "interact"
   | "read"
   | "listModels"
   | "validateModel"
@@ -44,7 +46,6 @@ export const PROTOCOL_METHODS = [
   "probe",
   "run",
   "cancel",
-  "interact",
   "read",
   "listModels",
   "validateModel",
@@ -74,24 +75,40 @@ export interface RunContextParams {
   engineFallback?: { from: string; reason: string };
   /** 事件粒度请求（引擎按 capabilities.eventGranularity 实际能力执行）。 */
   streamMode?: "stream" | "coarse";
+  /**
+   * [F6] 根 session id——pi 引擎 relay 归属键 SESSION_ID 的权威来源（生产三来源
+   * ①本字段 ②宿主 env ③根进程 env 中，宿主派发恒走①）。additive 可选：旧引擎忽略
+   * 未知字段，undefined 不上 wire。
+   */
+  sessionRootId?: string;
+  /**
+   * [Option C 协议化] 权威 subagent session 目录——宿主以 getSubagentSessionDir
+   * (agentDir, rootCwd) 推导（宿主单一权威，Fix Gate B S6：引擎本地推导与宿主布局
+   * 三处不等价 → 跨重启续聊链断裂）。引擎用它组装 pi `--session-dir`，不自推导；
+   * 缺省（独立运行/测试）走引擎内 [LEGACY] fallback。additive 可选：旧引擎忽略
+   * 未知字段，undefined 不上 wire。
+   */
+  sessionDir?: string;
 }
 
 // ============================================================
-// [v1.x] run 的 chat 会话形态参数（chat-domain 设计 §3.2 D1-A）
+// [H1] run 的 resume 会话形态参数（chat-run 统一终态；原 v1.x chat 键已退役）
 // ============================================================
 
 /**
- * [v1.x] chat 会话形态参数——HostChatRoundTicket 五字段过协议映射中「record」的
- * 承载位（docs/design/chat-domain-v1x-liveness-governance.md §3.2 D1 五字段映射）：
+ * [H1] run 的 resume 会话形态参数（设计 docs/design/subagent-chat-run-unification.md
+ * §3.3 D3 + §5 U1/U6 行）：原 RunChatParams（v1.x chat 会话形态参数）的泛化改名终态，
+ * 载荷同形（recordId + resume 锚点，ResumeAnchor 不变），仅键名从「chat 会话形态」
+ * 泛化为「resume 续聊」。
  *   - recordId：core 预建 record 的关联键（引擎据此回填 handle.sessionRef、上报
- *     host/childSpawned|childStateChanged 与 host/roundLifecycle 的 record 键形态）；
+ *     host/childSpawned|childStateChanged 的 record 键形态）；
  *   - resume：冷续锚点（重开已 idle 的 session 续聊；缺省 = 新 session）。对照
  *     core SpawnResumeOpts——sessionFile 经 anchor.sessionRef 携带，model/
  *     thinkingLevel 防漂移覆盖走既有 task/ctx 字段，不双写。
- * task.conversation === true 时必传（chat 路由前置 gate：manifest conversation 位
- * unsupported 的引擎同步拒 engine_capability_unsupported——见 error-codes.ts）。
+ * [H1 U6 已切换] `chat` 键整体退役（读写端同批切换，无「写新读旧」窗口），本键为
+ * 唯一会话形态参数。载荷 schema 权威 = runSessionParamsSchema（schema.ts）。
  */
-export interface RunChatParams {
+export interface RunResumeParams {
   recordId: string;
   resume?: ResumeAnchor;
 }
@@ -127,11 +144,11 @@ export interface RunParams {
   task: AgentCallOpts;
   ctx: RunContextParams;
   /**
-   * [v1.x 可选增量] chat 会话形态参数（task.conversation=true 的 chat 路由承载）。
-   * 缺省 = 一次性任务形态，v1 引擎/宿主语义不变（向后兼容：旧引擎忽略未知字段，
-   * 帧级 schema params 不做深校验）。续聊/关断不经此参数——走既有 interact。
+   * [H1 U6 终态] resume 续聊参数（唯一会话形态键；原 v1.x `chat` 键已随键切换退役，
+   * 见 RunResumeParams）。缺省 = 一次性任务形态（向后兼容：旧引擎忽略未知字段，
+   * 帧级 schema params 不做深校验）。additive 可选：undefined 不上 wire。
    */
-  chat?: RunChatParams;
+  resume?: RunResumeParams;
 }
 
 /** run 终态应答（期间事件经 event 通知；长运行方法，应答到达即终态）。 */
@@ -151,11 +168,6 @@ export interface CancelParams {
  */
 export interface CancelResult {
   ok: true;
-}
-
-export interface InteractParams {
-  handle: EngineHandleData;
-  action: InteractAction;
 }
 
 export interface ReadParams {
@@ -206,7 +218,6 @@ export interface ProtocolParamsMap {
   probe: ProbeParams;
   run: RunParams;
   cancel: CancelParams;
-  interact: InteractParams;
   read: ReadParams;
   listModels: ListModelsParams;
   validateModel: ValidateModelParams;
@@ -220,7 +231,6 @@ export interface ProtocolResultMap {
   probe: ProbeReport;
   run: RunResult;
   cancel: CancelResult;
-  interact: InteractResult;
   read: SessionView;
   listModels: ListModelsResult;
   validateModel: ValidateModelResult;

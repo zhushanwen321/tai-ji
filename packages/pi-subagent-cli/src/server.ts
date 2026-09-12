@@ -6,7 +6,7 @@
 //
 //   core EngineClient（spawn+握手+请求关联+反向路由） ←NDJSON stdio→ 本服务器
 //
-// 10 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
+// 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onPoolResolved/onHandleReady/onChildSpawned/
 // stream 经 host/* 反向请求上抛。
 //
@@ -15,6 +15,10 @@
 //     （PiEngine.bindAskUser → ui-request-queue 两阶段等待体；ack 后等待不计
 //     in-flight 自灭计时——R9-2）；
 //   - host/childSpawned / host/childStateChanged：spawn-runner 镜像回调 → 协议帧。
+//
+// [H1 U5] chat 会话反向通道面（bindHostChannels：轮次相位帧/active 心跳/
+// recordId 键 streamDelta/会话级 askUser）已随 chat-session.ts 删除——chat 轮 =
+// run 派发形态（每轮一进程），askUser 与镜像帧同走 per-run 绑定（run ctx 还原面）。
 //
 // 反向请求客户端：帧④ {id:"rev-N", method:"host/*", params} 必须应答；每个请求
 // 登记进 ReverseRequestClock（armEngineSelfDestruct 的辅助判据面）。
@@ -30,8 +34,6 @@ import {
   type EngineHandleData,
   type InitializeParams,
   type InitializeResult,
-  type InteractAction,
-  type InteractResult,
   type ProbeReport,
   type ReadParams,
   type ReverseRequestClock,
@@ -44,7 +46,6 @@ import {
 
 import { PI_ADAPTER_VERSION } from "./constants.ts";
 import { PiEngine } from "./pi-engine.ts";
-import type { ChatHostChannels } from "./chat-session.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
 
@@ -58,8 +59,6 @@ export interface EngineProtocolServerOptions {
   /** 引擎实例（缺省 createDefaultPiEngine——测试注入 fake/DI 实例）。 */
   engine?: EnginePort & {
     bindAskUser?(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
-    /** [v1.x] chat 会话反向通道发射面绑定（roundLifecycle / recordId 键 streamDelta）。 */
-    bindHostChannels?(channels: ChatHostChannels | undefined): void;
   };
   /** 反向请求计时面（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
   reverseClock?: ReverseRequestClock;
@@ -98,7 +97,7 @@ export class EngineProtocolServer {
   private readonly reverseTimeoutMs: number;
   private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly reversePending = new Map<string, ReversePending>();
-  /** 10 正向方法 → EnginePort 装配表（构造期冻结；表驱动分发）。 */
+  /** 9 正向方法 → EnginePort 装配表（构造期冻结；表驱动分发）。 */
   private readonly dispatchTable: Record<string, (params: unknown) => unknown>;
   private revSeq = 0;
   private initialized = false;
@@ -109,18 +108,6 @@ export class EngineProtocolServer {
     this.reverseClock = opts.reverseClock;
     this.reverseTimeoutMs = opts.reverseTimeoutMs ?? REVERSE_TIMEOUT_DEFAULT_MS;
     this.dispatchTable = this.buildDispatchTable();
-    // [v1.x] chat 会话反向通道发射面绑定（进程生命周期级——会话跨 run 存活）：
-    // roundLifecycle 三相位 + 续聊轮 recordId 键 streamDelta + 会话级 askUser。
-    this.engine.bindHostChannels?.({
-      streamDelta: (p) => {
-        void this.reverseRequestInternal("host/streamDelta", p);
-      },
-      roundLifecycle: (p) => {
-        void this.reverseRequestInternal("host/roundLifecycle", p);
-      },
-      askUser: (runId, request) =>
-        this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
-    });
   }
 
   /** 入站帧消费（请求帧 + 反向请求应答帧；main.ts 的行解析器拆行后喂入）。 */
@@ -157,7 +144,7 @@ export class EngineProtocolServer {
     // 无法归类的帧：静默忽略（stdout 是独占协议通道，不回显坏帧防对端解析器混乱）。
   }
 
-  /** 10 正向方法 → EnginePort 装配表（协议载荷 cast 收敛在各方法适配行）。 */
+  /** 9 正向方法 → EnginePort 装配表（协议载荷 cast 收敛在各方法适配行）。 */
   private buildDispatchTable(): Record<string, (params: unknown) => unknown> {
     return {
       initialize: (params) => this.initialize(params as InitializeParams),
@@ -165,7 +152,6 @@ export class EngineProtocolServer {
         this.engine.probe(typeof params === "object" && params !== null ? (params as { force?: boolean }) : undefined) as Promise<ProbeReport>,
       run: (params) => this.run(params as RunParams),
       cancel: (params) => this.cancel(params as { runId: string; reason: string }),
-      interact: (params) => this.interact(params as { handle: EngineHandleData; action: InteractAction }),
       read: (params) => this.read(params as ReadParams),
       listModels: () => ({ models: this.engine.listModels?.() ?? null }),
       validateModel: (params) => this.validateModel(params as { modelRef?: string }),
@@ -177,7 +163,7 @@ export class EngineProtocolServer {
     };
   }
 
-  /** 10 正向方法分发（表驱动；未知方法 → engine_protocol_unknown_method）。 */
+  /** 9 正向方法分发（表驱动；未知方法 → engine_protocol_unknown_method）。 */
   private async dispatch(id: number, method: string, params: unknown): Promise<unknown> {
     const handler = this.dispatchTable[method];
     if (handler === undefined) {
@@ -222,21 +208,19 @@ export class EngineProtocolServer {
         "The host must complete the initialize handshake before dispatching runs.",
       );
     }
-    if (params.chat !== undefined) this.assertChatRunFrame(params.chat);
+    if (params.resume !== undefined) this.assertResumeRunFrame(params.resume);
     const { runId, task, ctx } = params;
     const controller = new AbortController();
     this.activeRuns.set(runId, { controller, seq: 0 });
 
     // pi 专有：host/askUser 两阶段等待体绑定进引擎（ui-request-queue 消费；
     // ack 后等待不计 in-flight 自灭计时——R9-2；run 结束解绑防跨 run 串扰）。
-    // chat 会话形态跳过：会话跨 run 存活，askUser 由 hostChannels 以 spawn 轮 runId
-    // 固定绑定（per-run 绑定会在 run 应答后解绑，把长驻会话的 UI 请求断流）。
-    const isChatRun = params.chat !== undefined;
-    if (!isChatRun) {
-      this.engine.bindAskUser?.((request: UiRequest) =>
-        this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
-      );
-    }
+    // [H1 U3] chat 轮 = run 派发形态（每轮一进程，agent_settled 收敛即收割），
+    // 同走 per-run 绑定；「会话跨 run 存活、askUser 固定绑定」的 chat 特判随
+    // ChatSessionRegistry 退役（bindHostChannels 面已随 U5 删除）。
+    this.engine.bindAskUser?.((request: UiRequest) =>
+      this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
+    );
 
     // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）
     const fullTask: AgentCallOpts = { ...task, ...(ctx.model !== undefined ? { model: ctx.model } : {}) };
@@ -244,25 +228,26 @@ export class EngineProtocolServer {
     try {
       const r = await this.engine.run(
         fullTask,
-        this.buildRunContext(params, controller, params.chat?.recordId),
+        this.buildRunContext(params, controller, params.resume?.recordId),
       );
       return { handle: r.handle.data, outcome: r.outcome };
     } finally {
       this.activeRuns.delete(runId);
-      if (!isChatRun) this.engine.bindAskUser?.(undefined);
+      this.engine.bindAskUser?.(undefined);
     }
   }
 
-  /** run.chat 帧校验 + chat 能力位 gate（A6 方向防御）：recordId 非空 + conversation
-   *  位 unsupported 同步拒——判据单源 = SDK assertChatConversationSupported（与 core
-   *  capability-gate 同一能力位，防两侧判据漂移）。本引擎 manifest 声明 native，
-   *  此处仅防御 manifest/实装漂移。 */
-  private assertChatRunFrame(chat: { recordId: unknown }): void {
-    if (typeof chat.recordId !== "string" || chat.recordId === "") {
+  /** run.resume 帧校验 + conversation 能力位 gate（A6 方向防御）：recordId 非空 +
+   *  conversation 位 unsupported 同步拒——判据单源 = SDK assertChatConversationSupported
+   *  （与 core capability-gate 同一能力位，防两侧判据漂移；[H1 D5] 位语义已收窄为
+   *  resume 能力位，判据与消费方不变）。本引擎 manifest 声明 native，此处仅防御
+   *  manifest/实装漂移。[H1 U6] 协议键已切 `resume`（唯一会话形态键）。 */
+  private assertResumeRunFrame(resumeParams: { recordId: unknown }): void {
+    if (typeof resumeParams.recordId !== "string" || resumeParams.recordId === "") {
       throw new EngineSdkError(
         "engine_protocol_bad_frame",
-        `run.chat requires a non-empty recordId (got: ${JSON.stringify(chat.recordId)})`,
-        "The host must mint a record id before dispatching a chat-form run; it keys interact routing and roundLifecycle association.",
+        `run.resume requires a non-empty recordId (got: ${JSON.stringify(resumeParams.recordId)})`,
+        "The host must mint a record id before dispatching a session-form run; it keys the record-anchored handle and child mirror frames.",
       );
     }
     assertChatConversationSupported(this.engine.id, this.engine.capabilities());
@@ -289,7 +274,12 @@ export class EngineProtocolServer {
       ...(stream !== undefined ? { stream } : {}),
       ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
-      ...(params.chat !== undefined ? { chat: params.chat } : {}),
+      // [F6] 根 session id 还原（relay 归属键 SESSION_ID 权威源；undefined 不挂键）
+      ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
+      // [Option C 协议化] 权威 subagent session 目录还原（宿主 getSubagentSessionDir
+      // 推导值透传引擎消费——undefined 不挂键，引擎走 [LEGACY] fallback）
+      ...(ctx.sessionDir !== undefined ? { sessionDir: ctx.sessionDir } : {}),
+      ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onPoolResolved: (poolKey) => {
         void this.reverseRequestInternal("host/poolResolved", { runId, poolKey });
       },
@@ -300,6 +290,19 @@ export class EngineProtocolServer {
         if (child.pid === undefined) return;
         void this.reverseRequestInternal("host/childSpawned", { pid: child.pid, recordId: chatRecordId ?? runId });
       },
+      // [SR-4 接线] 子进程退出态上报（宿主镜像据此取消该 pid 的挂起 dialog）。
+      // 只报 exited——running 由上方 childSpawned 帧覆盖，不重复上报。
+      onChildStateChanged: (p) => {
+        if (p.state !== "exited") return;
+        void this.reverseRequestInternal("host/childStateChanged", {
+          pid: p.pid,
+          recordId: chatRecordId ?? runId,
+          state: p.state,
+          killed: p.killed,
+          ...(p.exitCode !== undefined ? { exitCode: p.exitCode } : {}),
+          ...(p.signal !== undefined ? { signal: p.signal } : {}),
+        });
+      },
     };
   }
 
@@ -307,10 +310,6 @@ export class EngineProtocolServer {
     const active = this.activeRuns.get(params.runId);
     if (active !== undefined) active.controller.abort(new Error(`cancelled by host: ${params.reason}`));
     return { ok: true };
-  }
-
-  private async interact(params: { handle: EngineHandleData; action: InteractAction }): Promise<InteractResult> {
-    return this.engine.interact({ data: params.handle }, params.action);
   }
 
   private read(params: ReadParams): Promise<SessionView> {

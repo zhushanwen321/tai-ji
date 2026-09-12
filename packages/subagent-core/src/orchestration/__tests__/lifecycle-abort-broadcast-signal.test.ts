@@ -160,14 +160,13 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     const deps = makeDeps();
     const runId = await runWorkflow(makeSpec(), deps);
     const run = deps.runs.get(runId)!;
-    // 注入 in-flight call（真实 AgentCall 实例：running + live record）
+    // 注入 in-flight call（真实 AgentCall 实例：running）
     const node: ExecutionTraceNode = {
       stepIndex: 1,
       agent: "a",
       task: "t",
       model: "m",
       status: "running",
-      live: { turns: [] } as never,
     };
     run.state.trace.append(node);
     const call = new AgentCall(1, { prompt: "t" }, node);
@@ -176,7 +175,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
 
     await abortRun(runId, deps, "mid-flight abort");
 
-    // 收口：call done + trace failed（Cancelled 文案）+ live 清除
+    // 收口：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
     expect(call.status).toBe("done");
     expect(call.result?.error).toContain("Cancelled");
     expect(run.state.trace.find(1)?.status).toBe("failed");

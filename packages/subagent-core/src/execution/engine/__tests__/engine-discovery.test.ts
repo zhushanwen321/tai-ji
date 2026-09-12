@@ -32,9 +32,6 @@ function stubEngine(id: string): EnginePort {
     run: async () => {
       throw new Error("unused");
     },
-    interact: async () => {
-      throw new Error("unused");
-    },
     read: async () => ({ engineId: id, turns: [], source: "outcome-only" }),
   };
 }

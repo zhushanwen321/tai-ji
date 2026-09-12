@@ -19,6 +19,8 @@
 
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
 
+import { notifyChildProcessExited } from "../../dialog-queue.ts";
+
 const logger = getLogger("subagents");
 
 /** 镜像项（childSpawned/childStateChanged 载荷的落库形态）。 */
@@ -90,6 +92,11 @@ export class SpawnedChildrenMirror {
     };
     this.entries.set(patch.pid, entry);
     this.emit({ reason: "childStateChanged", pid: patch.pid, recordId: patch.recordId });
+    // [SR-4 接线] 子进程退出 → 取消其挂起 dialog：原绑定点（宿主 spawn pi 子进程时代
+    // 的 session-runner child close）随协议化消失（宿主不再持句柄），新落点 = 引擎经
+    // host/childStateChanged 上报 → 本镜像消费。未接线时该子进程的 pending dialog 要
+    // 占住队列串行位直到 30min 队列级超时（延迟清理，非死锁）。
+    if (patch.state === "exited") notifyChildProcessExited(patch.pid);
   }
 
   /**
@@ -106,6 +113,8 @@ export class SpawnedChildrenMirror {
       entry.state = "exited";
       entry.updatedAt = Date.now();
       this.emit({ reason: "killedAll", pid: entry.pid, recordId: entry.recordId });
+      // [SR-4 接线] 引擎进程消亡 = 其全部子进程已死 → 逐 pid 取消挂起 dialog
+      notifyChildProcessExited(entry.pid);
     }
     this.entries.clear();
   }

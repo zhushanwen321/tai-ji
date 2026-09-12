@@ -1,12 +1,50 @@
-// src/runtime/execution/record-store.ts
+// src/execution/record-store.ts
 //
 // Record 的统一容器。内存只留 running record；终态从 session.jsonl 重建。
 //
 // 职责：
 //   - 持有 running record（终态 record 在 archive 时立即从内存移除）
 //   - onChange 订阅（TUI widget/list 据此重渲）
-//   - collectRecords：内存(running) + 磁盘(sessions/*.jsonl 重建) 合并
+//   - collectRecords：内存(running) ∪ 磁盘(sessions/*.jsonl 重建) ∪ manifest(sessions-index.json 补充) 三源合并
 //   - 提供 snapshot() 只读视图给 TUI（永不返回可变引用）
+//
+// ════════════════════════════════════════════════════════════════════
+// [U1 / record 持久化收敛 §3.1] 意图级操作 API 立面（store 唯一写入口）
+// ════════════════════════════════════════════════════════════════════
+// 调用方说「发生了什么」，不说「写哪个文件」——文件布局知识收在本类内部。
+// 迁移已完成：全部写点经本 API，旧直写路径已删除（守卫见 D7）。
+//
+// | 意图原语 | 语义 | 内部写面 |
+// |---------|------|---------|
+// | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
+// | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
+// | markRoundStarted(id) | 轮始重置（status=running + result/resumable 清除） | entry（best-effort） |
+// | markRoundIdle(id, outcome) | 轮末收口（保持 running-resumable，非置 idle；簿记全集①-⑨见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a） | entry + 注销发射点② |
+// | markFinalized(record, reason) | 正常终态（含 disposeAllRecords 编排性关闭，D8 矩阵；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | `.state` writeSync 先 → binding（updateRecordBinding）→ entry/archive → manifest writeSync → `.alive` 删（D8 v7 写序） |
+// | markCancelled(record) | 取消终态（tombstone endedAt） | 同 markFinalized 写序（writeCancelledState） |
+// | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
+// | adoptEngineDeath(id, {error}) | 引擎死亡收养（error/result/resumable 三写；监督器接管编排留调用方） | entry（best-effort） |
+// | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
+// | markIdleArchived(record) | idle-GC 归档（30 天 TTL 内存回收，非终态化——磁盘仍 running 可接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
+// | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
+//
+// ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
+//   ① status      —— 轮始重置→markRoundStarted；轮终保持 running→markRoundIdle；
+//                    终态→markFinalized/markCancelled（内存冻结由调用方 completeRecord/
+//                    tryTransition 先行，store 收口持久化面）
+//   ② result      —— 轮始清→markRoundStarted；轮终写→markRoundIdle(outcome)；终态→
+//                    markFinalized 序言（completeRecord 冻结后随 entry/manifest 投影）
+//   ③ round       —— 轮终 +1→markRoundIdle
+//   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
+//   ⑤ resumable   —— 轮始清/轮终置 true→markRoundStarted/markRoundIdle；收养→
+//                    adoptEngineDeath
+//   ⑥ idleSince   —— 轮终刷新→markRoundIdle
+//   ⑦ sessionFile —— 回填族（run 应答/promote）归调用方内存回填 + register/
+//                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
+//                    声明写权（D3a 时机①）
+//   ⑧ turns       —— 事件累积族→appendEvent（execution-record.updateFromEvent 归约）
+//   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷
+//   ⑩ error       —— 收养/失败→adoptEngineDeath/markRoundIdle
 //
 // [perf] 两级读写设计（修复 /subagents 打开慢）：
 //   1. 列表扫描 = light：只读文件头部 identity（readIdentityHeader，64KB）+ sidecar
@@ -21,14 +59,23 @@
 //      磁盘种子——冷启动首扫读一次（惰性装载），dirty 扫描后按 60s 节流落盘
 //      （fileCache 投影，fire-and-forget）；运行期 L0/L1 语义不变，损坏/低版本
 //      静默回退全扫，高版本忽略不重写。见 sessions-index.ts。
+//   5. [U4c / D5 缓存降级] manifest 与 sessions-index 均为可丢缓存（权威 = `.state`）：
+//      重建双通道 = boot revive 完成后全量（rebuildIndexes，宿主 boot 钩子接线）+
+//      查询面惰性（mergedRecords 对 manifest 缺员的磁盘重建 record 单点补建，每 id
+//      每进程一次）；重建失败静默降级（子 session 已 GC/损坏 → 该条跳过，整轮不抛）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { getLogger } from "../core/logger.ts";
 
-import { getCurrentActivity, getDisplayItems, getEventLog, markReconstructedStatus, snapshot as toSnapshot } from "./execution-record.ts";
-import { readFinalizedReason, writeFinalized } from "./finalized-marker.ts";
+import { getCurrentActivity, getDisplayItems, getEventLog, markReconstructedStatus, resurrectClosed, snapshot as toSnapshot, updateFromEvent } from "./execution-record.ts";
+import { readStateMarker, statStateStamp, writeFinalizedState, writeCancelledState, updateRecordBinding, STATE_SIDECAR_EXT } from "./state-marker.ts";
+import type { StateMarker } from "./state-marker.ts";
+// [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
+// entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
+import { readRecordBinding, RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
+import type { RecordBinding } from "./state-marker.ts";
 import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
@@ -43,17 +90,19 @@ import {
   reconstructFromFile,
 } from "./session-reconstructor.ts";
 import type {
-  AliveMarker,
+  AgentEvent,
   ClosedReason,
   ExecutionRecord,
   ExecutionStatus,
   RecordSnapshot,
   SubagentRecord,
 } from "./types.ts";
-import type { CancelledTombstone } from "./tombstone-store.ts";
 import { CLOSED_REASONS as CLOSED_REASON_LIST } from "./types.ts";
-import { isProcessAlive, readAliveMarker, ALIVE_SOFT_TIMEOUT_MS } from "./alive-store.ts";
-import { readCancelledTombstone } from "./tombstone-store.ts";
+// [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
+// 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
+import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
+import type { RoundSettlementOutcome } from "./finalize-record.ts";
+import { writeAtomicFileSync } from "../shared/atomic-write.ts";
 
 const logger = getLogger("subagents");
 
@@ -69,7 +118,9 @@ const STATUS_PRIORITY: Record<ExecutionStatus, number> = {
   closed: 3,
 };
 
-// .alive 软超时常量已迁移至 alive-store.ts（v8.5 D 透明重生探针共用同一判据 SSOT）。
+/** [D8 v7] manifest 同步写的 JSON 缩进空格数——与 ManifestStore.writeManifest 字节
+ *  形态一致（读写两侧格式互认，外部 session-reader 直读不感知差异）。 */
+const MANIFEST_INDENT_SPACES = 2;
 
 /**
  * manifest status → ExecutionStatus 运行时守卫映射。
@@ -103,19 +154,16 @@ interface Stamp {
   size: number;
 }
 
-/** sidecar 状态矩阵输入（buildLightRecord / getFullRecord 共享）。 */
+/** sidecar 状态矩阵输入（buildLightRecord / getFullRecord 共享）。
+ *  [U4a / D3b (a)] alive 维度已随 externalInstance 投影移除——非终态统一兜底 running，
+ *  探活读面由 (a′)(a″) 的 findForeignLiveInstance 现查探针承担（不在重建缓存）。 */
 interface SidecarMatrix {
-  tomb: CancelledTombstone | undefined;
-  finalized: boolean;
-  /** [v8.5 A2] `.finalized` sidecar 内容携带的关闭原因（readFinalizedReason 读出）。
-   *  旧格式空文件 → 空串（死因不可考）；sidecar 不存在 → undefined。 */
-  finalizedReason: string | undefined;
-  alive: AliveMarker | undefined;
+  /** 终态 sidecar（.state 优先，兼容旧 .finalized/.cancelled 归一）。undefined = 未终态化。 */
+  state: StateMarker | undefined;
   /** jsonl mtime（light 分支 2 的 endedAt 近似——finalize 后文件不再变化）。 */
   jsonlMtimeMs: number;
   /** 全量重建可得的精确结束时间（最后 entry ts）；light 传 undefined 回落 mtime。 */
   fullEndedAt?: number;
-  now: number;
 }
 
 /**
@@ -126,7 +174,7 @@ interface SidecarMatrix {
  *          full === light 是哨兵（「已尝试但无详情可补」，如无 assistant message
  *          的文件），避免重复全文重读；stat 戳变化时随 light 一起重置重试。
  *
- * 校验：jsonl + 3 sidecar 的 stat 戳对比。任何写操作至少改变一个戳 →
+ * 校验：jsonl + 终态 sidecar + record 绑定（[UF-1]）的 stat 戳对比（终态戳为该组文件 .state/.finalized/.cancelled 的合并戳，见 state-marker.statStateStamp；[U4a / D3b (a)] alive 戳已随 externalInstance 投影移除——light 态不依赖 .alive，探活读面走现查探针）。任何写操作至少改变一个戳 →
  * 只重建该文件，其余 N-1 个复用缓存（statSync 毫秒级，取代旧的整体失效重扫）。
  */
 interface FileCacheEntry {
@@ -135,15 +183,11 @@ interface FileCacheEntry {
   light: SubagentRecord;
   full: SubagentRecord | undefined;
   jsonl: Stamp;
-  cancelled: Stamp | null;
-  finalized: Stamp | null;
-  alive: Stamp | null;
-  /** 最近一次重建时读到的 sidecar 原始内容（校验命中路径复用，不重读文件）。 */
-  tomb: CancelledTombstone | undefined;
-  aliveData: AliveMarker | undefined;
-  /** [v8.5 A2] 最近一次重建时读到的 `.finalized` 内容 reason（同上，校验命中复用）。
-   *  sidecar 不存在时恒 undefined（与「存在但空串」区分，后者是旧格式空文件）。 */
-  finalReason: string | undefined;
+  state: Stamp | null;
+  /** [UF-1] record 绑定 sidecar 戳（null = 无绑定文件）。 */
+  binding: Stamp | null;
+  /** 最近一次重建时读到的终态 sidecar 内容（校验命中路径复用，不重读文件）。 */
+  stateMarker: StateMarker | undefined;
 }
 
 /** 负缓存条目：确认无 identity 的文件（损坏/异构）。缓存「没有」这一事实，
@@ -151,27 +195,28 @@ interface FileCacheEntry {
 interface NegativeFileEntry {
   negative: true;
   jsonl: Stamp;
-  cancelled: Stamp | null;
-  finalized: Stamp | null;
-  alive: Stamp | null;
+  state: Stamp | null;
+  /** [UF-1] 绑定戳纳入负缓存：绑定文件后到（run 应答回填点落盘）改变戳，
+   *  打破负缓存触发重探测——「先扫描后绑定落盘」时序的恢复能力锚点。 */
+  binding: Stamp | null;
 }
 
 /** fileCache 值类型：正常条目或负缓存条目。 */
 type FileCacheValue = FileCacheEntry | NegativeFileEntry;
 
-/** scanFile 单文件本轮 stat 戳集合（jsonl + 3 sidecar）。 */
+/** scanFile 单文件本轮 stat 戳集合（jsonl + 终态 sidecar（含旧名合并戳）+ record 绑定；
+ *  [U4a / D3b (a)] alive 戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。 */
 interface FileStamps {
   jsonl: Stamp;
-  cancelled: Stamp | null;
-  finalized: Stamp | null;
-  alive: Stamp | null;
+  state: Stamp | null;
+  binding: Stamp | null;
 }
 
 /** sidecar payload 读取结果（索引命中与探测重建两分支共享的读点）。 */
 interface SidecarPayloads {
-  tomb: CancelledTombstone | undefined;
-  aliveData: AliveMarker | undefined;
-  finalReason: string | undefined;
+  state: StateMarker | undefined;
+  /** [UF-1] record 绑定载荷（identity miss 时的身份重建源）。 */
+  binding: RecordBinding | undefined;
 }
 
 /** 孤儿判定的末行读取初始窗口（常规 entry 远小于此，避免全文件读）。 */
@@ -224,7 +269,7 @@ function readLastJsonlLine(sessionFile: string): { ok: true; line: string } | { 
       try {
         fs.closeSync(fd);
       } catch (_e) {
-        void _e; // 关闭失败不影响已读结果（对齐 finalized-marker best-effort 模式）
+        void _e; // 关闭失败不影响已读结果（对齐 state-marker best-effort 模式）
       }
     }
   }
@@ -267,6 +312,19 @@ function entryStr(d: Record<string, unknown>, k: string): string | undefined {
 /** entry data 字段的安全 number 读取（非 number → undefined）。 */
 function entryNum(d: Record<string, unknown>, k: string): number | undefined {
   return typeof d[k] === "number" ? (d[k] as number) : undefined;
+}
+
+/**
+ * 来源域投影（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：origin 经
+ * 字面量守卫（非法值/缺省 → undefined = "tool" 语义，存量 entry 零迁移）；parentRunId
+ * 经安全 string 读取。缺省语义对齐 ExecutionRecord.origin 注释——消费面按
+ * `=== "workflow"` 负向判定，缺省（undefined）恒视为手动 tool 派发。
+ */
+function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord, "origin" | "parentRunId"> {
+  return {
+    origin: d.origin === "workflow" || d.origin === "tool" ? d.origin : undefined,
+    parentRunId: entryStr(d, "parentRunId"),
+  };
 }
 
 /** 终态域投影：status 只认 "closed" 字面量（其余含缺省 → "running"，旧调用方行为不变）；
@@ -341,6 +399,9 @@ function rebuildEntryRecord(id: string, d: Record<string, unknown>): SubagentRec
     rootSessionId: entryStr(d, "rootSessionId"),
     parentRecordId: entryStr(d, "parentRecordId"),
     depth: entryNum(d, "depth") ?? 0,
+    // [H2 W1] 来源域透传（origin/parentRunId）：漏本行则主 session entry 重建路径
+    // 丢 origin，重启后 workflow record 逃过投影过滤（D1 ①-④ 全失效）。
+    ...readEntryOriginFields(d),
     endedAt: entryNum(d, "endedAt"),
     turns: entryNum(d, "turns") ?? 0,
     totalTokens: entryNum(d, "totalTokens") ?? 0,
@@ -413,13 +474,12 @@ function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
   return sameStamp(a, b);
 }
 
-/** 缓存条目与本轮 stat 戳全同（jsonl + 3 sidecar，null 语义对齐）→ 零读取复用。 */
+/** 缓存条目与本轮 stat 戳全同（jsonl + 终态 sidecar + alive + record 绑定，null 语义对齐）→ 零读取复用。 */
 function isFreshCache(cached: FileCacheValue, stamps: FileStamps): boolean {
   return (
     sameStamp(cached.jsonl, stamps.jsonl) &&
-    sameNullableStamp(cached.cancelled, stamps.cancelled) &&
-    sameNullableStamp(cached.finalized, stamps.finalized) &&
-    sameNullableStamp(cached.alive, stamps.alive)
+    sameNullableStamp(cached.state, stamps.state) &&
+    sameNullableStamp(cached.binding, stamps.binding)
   );
 }
 
@@ -436,15 +496,14 @@ function detectIdentity(file: string, size: number): IdentityHeaderRecon | undef
 }
 
 /**
- * sidecar payload 读取（读顺序：tombstone → alive marker → finalized reason）。
- * tombstone/alive 是活态数据，调用方沿用每轮重读语义；finalized reason 静态数据
- * 仅在 sidecar 存在时读一次（文件小，成本可忽略）。
+ * sidecar payload 读取（读顺序：终态 marker → record 绑定）。
+ * 两者都是活态数据，调用方沿用每轮重读语义；终态 marker 静态数据仅在戳非空时读
+ * （文件小，成本可忽略）。
  */
 function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPayloads {
   return {
-    tomb: stamps.cancelled !== null ? readCancelledTombstone(file) : undefined,
-    aliveData: stamps.alive !== null ? readAliveMarker(file) : undefined,
-    finalReason: stamps.finalized !== null ? readFinalizedReason(file) : undefined,
+    state: stamps.state !== null ? readStateMarker(file) : undefined,
+    binding: stamps.binding !== null ? readRecordBinding(file) : undefined,
   };
 }
 
@@ -504,6 +563,27 @@ export class RecordStore {
    *  落盘（防 v1/v2 last-writer-wins 覆盖振荡），直至下次 loadIndex 重新评估。 */
   private indexHigherVersion = false;
 
+  /** [U4c / G1] manifest 惰性重建的每 id 尝试守卫（mergedRecords 高频路径防磁盘写
+   *  放大：每 id 每进程至多一次；dispose/revive 随其余缓存态一并重置）。 */
+  private manifestRebuildTried = new Set<string>();
+
+  /**
+   * [D8 v7] manifest 同步写目录（与 manifestStore 同一 records 目录，由构造方提供——
+   * manifestStore.dir 私有，本类不经反射访问）。提供时终态原语（markFinalized /
+   * markCancelled / markBatchFinalized）走 writeAtomicFileSync 同步落盘——停机窗
+   * fire-and-forget 竞态构造性消灭（disposeAllRecords 同步链全链同步段内完成）；
+   * 已接线（subagent-service.ts 构造点 recordsDir）；缺省分支仅纯内存测试形态。
+   */
+  private readonly manifestDir: string | undefined;
+
+  /**
+   * [§3.1 markRoundIdle 簿记⑧] pending-notifications 轮终注销（发射点②）的注入面。
+   * store 不直接依赖 pending 注册表（「零副作用编排」边界——文件布局收口 ≠ 通知
+   * 注册表依赖）；由 SubagentService 构造点注入 emitPendingUnregister 闭包（U5 收口
+   * 接线），缺省 no-op（纯内存测试形态不发射）。
+   */
+  private pendingUnregister: ((id: string, status: string) => void) | undefined;
+
   constructor(
     private readonly sessionsDir: string,
     private readonly manifestStore?: ManifestStore,
@@ -511,8 +591,11 @@ export class RecordStore {
      *  SubagentService 构造时 this.pi 尚未注入（session_start 之前），传 undefined 兜底；
      *  后续通过 setPi() 注入（见下）。允许 null = 兼容 PiLike 字段类型。 */
     pi?: RecordStorePi,
+    /** [D8 v7] manifest 同步写目录（见 manifestDir 字段注释）。 */
+    manifestDir?: string,
   ) {
     this.pi = pi ?? null;
+    this.manifestDir = manifestDir;
   }
 
   /** session_start 后由 SubagentService.initSession 调，注入真实 Pi handle。
@@ -535,7 +618,7 @@ export class RecordStore {
   /**
    * 归档：record 已被 completeRecord 设置了终态 status。
    * 立即从内存移除（终态 record 下次读时从 session.jsonl 重建）。
-   * cancelled record 由调用方先写 tombstone（cancel 路径），此处只负责移除。
+   * cancelled record 由调用方先写终态 sidecar（cancel 路径），此处只负责移除。
    *
    * W16 [D4]：终态冻结字段（result/endedAt/closedReason）在 completeRecord 已就绪，
    * 此处 append 的快照即完整终态记录（所有终态路径的必经锚点）。
@@ -558,6 +641,550 @@ export class RecordStore {
     this.pi?.appendEntry?.("subagent-record", toSubagentRecordEntry(RecordStore.recordToSubagent(record)));
   }
 
+  // ════════════════════════════════════════════════════════════
+  // [U1 / §3.1] 意图级操作 API 立面（store 唯一写入口；映射表见模块头）
+  // ════════════════════════════════════════════════════════════
+
+  /**
+   * 注入 pending-notifications 轮终注销闭包（markRoundIdle 簿记⑧发射点②，见字段
+   * pendingUnregister 注释）。装配点 = SubagentService 构造器（U5 收口接线）。
+   */
+  setPendingUnregister(fn: ((id: string, status: string) => void) | undefined): void {
+    this.pendingUnregister = fn;
+  }
+
+  /**
+   * 意图原语：事件追加（过程记录）。turns/eventLog/totalTokens 经 execution-record
+   * 事件归约累积（字段⑧），随后 entry 变迁上报（best-effort——过程面可丢，重建由
+   * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
+   * 放大 entry 写面，编排粒度属调用方职责）。
+   *
+   * @returns false = id 不在内存（未注册/已归档）——事件丢弃并 debug 留痕。
+   */
+  appendEvent(id: string, event: AgentEvent): boolean {
+    const rec = this.records.get(id);
+    if (rec === undefined) {
+      logger.debug("[subagents] appendEvent: record not in memory (not registered / archived)", {
+        detail: { id, eventType: event.type },
+      });
+      return false;
+    }
+    updateFromEvent(rec, event);
+    this.reportRecordTransition(rec);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 意图原语：轮始重置（字段①②⑤）。status=running + result/resumable 清除——
+   * §5.4 isStreaming 公式要求 result undefined 才显示 streaming，不清则续轮流仍显示
+   * waiting。归口写点：热路径轮始与冷启动 resume 续轮（subagent-service，U3 迁移）。
+   *
+   * @returns false = id 不在内存（debug 留痕，无副作用）。
+   */
+  markRoundStarted(id: string): boolean {
+    const rec = this.records.get(id);
+    if (rec === undefined) {
+      logger.debug("[subagents] markRoundStarted: record not in memory", { detail: { id } });
+      return false;
+    }
+    rec.status = "running";
+    rec.result = undefined;
+    rec.resumable = undefined;
+    this.reportRecordTransition(rec);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 意图原语：轮末收口——**保持 running-resumable**（名称沿用，非置 idle：status 写
+   * idle 会断 SP-5 升级链与 hasRunning 判据）。簿记全集（①-⑨，= doFinalizeRoundToIdle
+   * 现状簿记 + D3a 修订）：
+   *   ① status 保持 running；② result 按 outcome 写入（成功=content / 失败=前值??
+   *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable=true
+   *      （GUI waiting 判据）；⑥ idleSince 刷新（idle-GC 判据）；⑦ **`.alive` 保留**
+   *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
+   *      record 仍 resumable 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
+   *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
+   *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
+   *      携带新 round 与本轮 result）。
+   * worktree/通知等副作用编排留调用方。
+   *
+   * @param outcome 轮终结果（kind 判别：success=content / failed=reason）
+   * @returns false = id 不在内存（debug 留痕，无副作用）。
+   * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
+   *         fail-fast，对齐 doFinalizeRoundToIdle A3 断言）。
+   */
+  markRoundIdle(id: string, outcome: RoundSettlementOutcome): boolean {
+    const rec = this.records.get(id);
+    if (rec === undefined) {
+      logger.debug("[subagents] markRoundIdle: record not in memory", { detail: { id } });
+      return false;
+    }
+    if (rec.endedAt !== undefined) {
+      throw new Error(
+        `markRoundIdle(${id}): terminal bookkeeping already frozen ` +
+          `(status: ${rec.status}${rec.closedReason !== undefined ? `/${rec.closedReason}` : ""}, endedAt: ${rec.endedAt}) — ` +
+          `round-idle finalization would resurrect a finalized record. ` +
+          `Recovery: caller must gate on record.status === "running" before settling a round.`,
+      );
+    }
+    // ② result 写入规则（D7）：成功轮 = content（chat 空 content 兜底占位）；失败轮 =
+    // 前值保真 ?? 失败摘要 + lastError 写失败原因（字段⑨）。
+    let nextResult: string | undefined;
+    if (outcome.kind === "failed") {
+      rec.lastError = outcome.reason;
+      nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
+    } else if (rec.chatMode) {
+      nextResult = outcome.content || "(no output this round)";
+    } else {
+      nextResult = outcome.content || rec.result || "(empty)";
+    }
+    rec.result = nextResult;
+    // ①③④⑤⑥：保持 running + 轮次推进 + 清残留死因 + 执行态信号 + idle 锚。
+    rec.status = "running";
+    rec.closedReason = undefined;
+    rec.round = (rec.round ?? 0) + 1;
+    rec.idleSince = Date.now();
+    rec.resumable = true;
+    // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
+    // ⑧ pending 注销发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
+    // 测试形态 no-op）。
+    this.pendingUnregister?.(id, "running");
+    // ⑨ entry 上报（best-effort 过程面）。
+    this.reportRecordTransition(rec);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
+   * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
+   * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition）
+   * 亦留调用方——状态机操作非文件布局。
+   *
+   * 内部写序（D8 v7）：`.state` writeSync **先**（终态权威优先落）→ entry/archive →
+   * manifest writeSync 后 → `.alive` 删除（release 出口①）。
+   *
+   * 失败语义（§3.4）：`.state` 重试耗尽仍未落 → 返回 false，**零持久化副作用**（不
+   * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
+   * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
+   *
+   * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
+   */
+  markFinalized(record: ExecutionRecord, closedReason?: ClosedReason): boolean {
+    const reason = closedReason ?? record.closedReason ?? "gc";
+    if (record.sessionFile !== undefined) {
+      if (!writeFinalizedState(record.sessionFile, reason)) return false;
+      // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
+      // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
+      updateRecordBinding(record.sessionFile, {
+        totalTokens: record.totalTokens,
+        turns: record.turnCount,
+        endedAt: record.endedAt,
+      });
+    } else {
+      logger.warn("[subagents] markFinalized: no sessionFile anchor, .state face skipped", {
+        detail: { id: record.id },
+      });
+    }
+    this.archive(record);
+    this.writeTerminalManifest(record);
+    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+    return true;
+  }
+
+  /**
+   * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；区别
+   * 仅 `.state` 载荷 = {status:"cancelled", endedAt}（重建判定分支消费精确结束时间）。
+   * 归口写点：cancelBackground 终态写面（record-lifecycle，U2a 迁移）。
+   */
+  markCancelled(record: ExecutionRecord): boolean {
+    if (record.sessionFile !== undefined) {
+      if (!writeCancelledState(record.sessionFile, record.endedAt ?? Date.now())) return false;
+      updateRecordBinding(record.sessionFile, {
+        totalTokens: record.totalTokens,
+        turns: record.turnCount,
+        endedAt: record.endedAt,
+      });
+    } else {
+      logger.warn("[subagents] markCancelled: no sessionFile anchor, .state face skipped", {
+        detail: { id: record.id },
+      });
+    }
+    this.archive(record);
+    this.writeTerminalManifest(record);
+    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+    return true;
+  }
+
+  /**
+   * 意图原语：sync 批终态（统一写点）。内部写序显式复刻 barrier：manifest 落盘
+   * **完成**先于批通知写账（batchFinalized 落标 entry）——「通知可达 ⇒ 索引就位」
+   * 构造性保证（session-reader 指针行反查依赖；缓存降级下 barrier 不可删，D4②/D5）。
+   * manifestDir 提供时为同步写（写完即返回）；缺省降级 allSettled 异步屏障（原
+   * writeSyncBatchManifestBarrier，已随 U3 归口删除）。
+   */
+  async markBatchFinalized(records: readonly SubagentRecord[]): Promise<void> {
+    if (this.manifestDir !== undefined) {
+      for (const rec of records) {
+        try {
+          writeAtomicFileSync(
+            path.join(this.manifestDir, `${rec.id}.json`),
+            JSON.stringify(RecordStore.batchManifestRecord(rec), null, MANIFEST_INDENT_SPACES),
+          );
+        } catch (err) {
+          logger.warn("[subagents] batch-finalized manifest sync write failed (pointer lookup index missing for this member)", {
+            detail: { id: rec.id, error: err instanceof Error ? err.message : String(err) },
+          });
+        }
+      }
+    } else if (this.manifestStore !== undefined) {
+      // 缺省降级分支（仅纯内存测试形态可达）：异步屏障 allSettled（失败 warn 不
+      // 阻断写账——反查索引缺失只影响指针行反查，session-reader 错误文案已指引
+      // 绝对路径兜底）。
+      const results = await Promise.allSettled(
+        records.map((rec) => this.manifestStore!.writeManifest(RecordStore.batchManifestRecord(rec))),
+      );
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!;
+        if (result.status === "rejected") {
+          logger.warn("[subagents] batch-finalized manifest write failed", {
+            detail: { id: records[i]!.id, error: result.reason instanceof Error ? result.reason.message : String(result.reason) },
+          });
+        }
+      }
+    }
+    // 批通知写账（barrier 之后）：显式覆写 collectMode/batchFinalized 落标——防非
+    // entry 源重建（getFullRecord sidecar/manifest 分支）丢标记（对齐
+    // appendBatchFinalizedEntry 现状）。
+    for (const rec of records) {
+      this.reportSubagentRecord({ ...rec, collectMode: "sync", batchFinalized: true });
+    }
+  }
+
+  /**
+   * 意图原语：引擎死亡收养（字段⑤⑩——error/result/resumable 三写，record 保持
+   * resumable 交监督器接管，禁 completed 谎报 / closed 直接终局）。归口写点：
+   * adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
+   * 监督器 adoptOnProcessDeath 编排留调用方。
+   *
+   * @returns false = id 不在内存（debug 留痕，无副作用）。
+   */
+  adoptEngineDeath(id: string, opts: { error: string }): boolean {
+    const rec = this.records.get(id);
+    if (rec === undefined) {
+      logger.debug("[subagents] adoptEngineDeath: record not in memory", { detail: { id } });
+      return false;
+    }
+    rec.error = opts.error;
+    rec.result = undefined;
+    rec.resumable = true;
+    this.reportRecordTransition(rec);
+    this.notifyChange();
+    return true;
+  }
+
+  /**
+   * 意图原语：磁盘终态位翻回活态（透明重生回边整体收编，D3c 规格）。
+   *
+   * acquire-first 顺序（单 try 域原子收敛）：写 `.alive` 写权声明（acquire）→ 删
+   * `.state` → 删 `.finalized`/`.cancelled` legacy（读侧兼容回退认领旧名，残留未删
+   * 则重建仍读出终态），随后 resurrectClosed 内存翻回 + register——
+   * 任一步失败**响亮抛错**（禁止 best-effort 吞错续跑：acquire 失败 = 双写风险敞口；
+   * acquire-first 顺序保证失败时磁盘保持 closed 可读形态——极端形态下经 legacy
+   * 文件名回退仍读出终态，见 catch 文案）。reportTransition（entry 上报）留编排层
+   * （纯投递副作用，失败不破坏状态一致性）。
+   *
+   * 两种接管形态统一（wasClosed 判别）：closed 候选 = 三件套全量；running 候选接管
+   * （跨重启磁盘重建）= 跳过删终态位（无 `.state` 可删）**仍 acquire marker**
+   * （「接管即声明」——现状此路径不写 marker 的双写窗随归口消灭）。
+   * 中间形态推演（G3 单点论证）见设计 D3c (i)(ii)(iii)：三形态无卡死态、无双写窗。
+   *
+   * @param record 调用方重建的可变 record（createRecord 产物）
+   * @param wasClosed 磁盘候选是否为 closed 形态（cold-lookup 的 found.status 判定）
+   * @throws Error acquire 或终态位删除失败（含 sessionFile 缺失——无锚点无法声明写权）
+   */
+  markResurrected(record: ExecutionRecord, wasClosed: boolean): void {
+    const { id, sessionFile } = record;
+    if (sessionFile === undefined) {
+      throw new Error(
+        `markResurrected(${id}): no sessionFile anchor — cannot acquire write lease; ` +
+          `resurrect aborted without touching disk or memory (no half-state).`,
+      );
+    }
+    try {
+      // acquire-first：先声明写权——失败即中止，终态位未删（D3c (i)/(ii) 形态锚）。
+      writeAliveMarker(sessionFile, { pid: process.pid, id, startedAt: Date.now() });
+      if (wasClosed) {
+        fs.rmSync(`${sessionFile}${STATE_SIDECAR_EXT}`, { force: true });
+        // 旧名两名全量清理（与 writeStateMarker 写侧清理对称）：readStateMarker 在 .state
+        // 缺失时回退旧名——残留任一旧终态文件都会让重建读出 cancelled/finalized，破坏
+        // live ≡ reload。
+        fs.rmSync(`${sessionFile}.finalized`, { force: true });
+        fs.rmSync(`${sessionFile}.cancelled`, { force: true });
+      }
+    } catch (err) {
+      logger.error(
+        `[subagents] markResurrected(${id}) failed to acquire/flip terminal position; ` +
+          `resurrect aborted loudly (disk keeps a closed-readable shape (possibly via legacy filename), memory unregistered)`,
+        { detail: { sessionFile, error: err instanceof Error ? err.message : String(err) } },
+      );
+      throw new Error(
+        `markResurrected(${id}): write-lease acquire/terminal-position flip failed for ${sessionFile} ` +
+          `(${err instanceof Error ? err.message : String(err)}). Recovery: inspect disk (permissions/full) and retry message; ` +
+          `terminal state remains closed (possibly via legacy filename), the record stays resurrectable.`,
+        { cause: err },
+      );
+    }
+    resurrectClosed(record);
+    this.register(record);
+  }
+
+  /**
+   * 意图原语：idle-GC 归档（30 天 TTL 内存回收，**非终态化**——record 磁盘仍 running
+   * 可接管；归档 ≠ 放弃可重连性，故不写 `.state`「gc」——那会把「可接管」变「不可
+   * 重连硬拒」，D3a 被否分支）。
+   *
+   * 写序（D3a/轮 5）：store.archive **先**、`.alive` release **后**——archive 抛错则
+   * 原语整体失败、marker 必未删（持有与声明一致）；release 失败 best-effort 留痕
+   * （removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断 interval，泄漏窗 = 至
+   * 宿主退出，已接受）。归档 record 后续被接管时统一 acquireWriteLease 重新声明。
+   *
+   * [U4c / G2] 归档点补写 manifest（投影 running——磁盘确仍 running）：record 离开
+   * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
+   * identity entry 随 30 天 GC 衰减），归档时不落盘则该 record 在 manifest 面长期
+   * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
+   */
+  markIdleArchived(record: ExecutionRecord): void {
+    this.archive(record);
+    // [U4c / G2] 归档点补写：经状态派生投影（running 如实投影——非终态化语义，
+    // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
+    this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
+    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+  }
+
+  /**
+   * [A6 / D3a 时机①] store 内部 acquire 动作——writeAliveMarker 的唯一包装（G1 口径
+   * = store 内部写面；非新意图原语）。spawn 侧 sessionFile 锚点确立（run 应答回填 /
+   * 冷启动 resume 续轮）时由调用方挂钩（U2b），宿主开始往 session 文件写即声明写权。
+   *
+   * @throws Error 写失败原样上抛（acquire 失败 = 双写风险敞口，调用方响亮处理——
+   *         禁止 best-effort 吞错续跑，D3c 失败语义）。
+   */
+  acquireWriteLease(sessionFile: string, recordId: string): void {
+    writeAliveMarker(sessionFile, { pid: process.pid, id: recordId, startedAt: Date.now() });
+  }
+
+  /** 终态 manifest 投影（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
+   *  现状投影——status 统一 closed，closedReason 随投影携带）。
+   *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 二态）随终态写面双写——
+   *  旧 status 三态是 session-reader 直读的投影字段（永久保留），新字段是内部权威
+   *  词汇的写面过渡锚（D5 词汇全景①③并存）。 */
+  private static terminalManifestRecord(record: ExecutionRecord): ManifestRecord {
+    return {
+      id: record.id,
+      rootSessionId: record.rootSessionId ?? "",
+      parentRecordId: record.parentRecordId,
+      agentName: record.agent,
+      status: "closed",
+      executionStatus: "closed",
+      closedReason: record.closedReason,
+      createdAt: record.startedAt,
+      completedAt: record.endedAt ?? Date.now(),
+      sessionFile: record.sessionFile,
+      task: record.task,
+      slug: record.slug,
+      model: record.model,
+    };
+  }
+
+  /** 批成员 manifest 投影（markBatchFinalized 用；原 writeBatchMemberManifest，
+   *  已随 U3 归口删除——status 如实投影[成功成员此刻 running+resumable]，后续
+   *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。 */
+  private static batchManifestRecord(rec: SubagentRecord): ManifestRecord {
+    return {
+      id: rec.id,
+      rootSessionId: rec.rootSessionId ?? "",
+      parentRecordId: rec.parentRecordId,
+      agentName: rec.agent,
+      status: rec.status,
+      executionStatus: rec.status,
+      closedReason: rec.closedReason,
+      createdAt: rec.startedAt,
+      completedAt: rec.endedAt,
+      sessionFile: rec.sessionFile,
+      task: rec.task,
+      slug: rec.slug,
+      model: rec.model,
+    };
+  }
+
+  /**
+   * [U4c / G1+G2] 状态派生 manifest 投影（rebuildIndexes / 反查 miss 惰性通道 /
+   * markIdleArchived 归档点共用）。数据源 = SubagentRecord 投影（identity entry/
+   * binding + `.state` sidecar 矩阵，D1「.state 权威 + entry 尽力」）——词汇双写
+   * 同终态写面。旧 status 三态从 closedReason 派生 cancelled（对齐 markCancelled
+   * 的 `.state` cancelled 分支重建语义：buildRecord 分支 1 closedReason="cancelled"）。
+   */
+  private static derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
+    const legacyStatus: ManifestRecord["status"] =
+      rec.status === "closed" ? (rec.closedReason === "cancelled" ? "cancelled" : "closed") : "running";
+    return {
+      id: rec.id,
+      rootSessionId: rec.rootSessionId ?? "",
+      parentRecordId: rec.parentRecordId,
+      agentName: rec.agent,
+      status: legacyStatus,
+      executionStatus: rec.status,
+      closedReason: rec.closedReason,
+      createdAt: rec.startedAt,
+      completedAt: rec.endedAt,
+      sessionFile: rec.sessionFile,
+      task: rec.task,
+      slug: rec.slug,
+      model: rec.model,
+    };
+  }
+
+  /**
+   * [D8 v7] manifest 落盘统一通道：manifestDir 提供时 writeAtomicFileSync 同步写
+   * （停机竞态构造性消灭；与 ManifestStore.writeManifest 字节形态一致——2 空格缩进
+   * JSON，读侧/外部 session-reader 不感知差异）；缺省 fire-and-forget 异步写（仅纯
+   * 内存测试形态）。写失败响亮（error 日志 + 用户可见 entry，对齐 writeManifestBestEffort）。
+   */
+  private writeManifestPersisted(id: string, manifest: ManifestRecord): void {
+    if (this.manifestDir !== undefined) {
+      try {
+        writeAtomicFileSync(
+          path.join(this.manifestDir, `${id}.json`),
+          JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES),
+        );
+      } catch (err) {
+        RecordStore.reportManifestWriteFailure(id, err, this.pi);
+      }
+      return;
+    }
+    if (this.manifestStore !== undefined) {
+      void this.manifestStore.writeManifest(manifest).catch((err: unknown) => {
+        RecordStore.reportManifestWriteFailure(id, err, this.pi);
+      });
+    }
+  }
+
+  /**
+   * [D8 v7] 终态 manifest 落盘（markFinalized/markCancelled 共用，投影 status 恒
+   * closed）。同步性与失败语义见 writeManifestPersisted。
+   */
+  private writeTerminalManifest(record: ExecutionRecord): void {
+    this.writeManifestPersisted(record.id, RecordStore.terminalManifestRecord(record));
+  }
+
+  // ── [U4c / D5] 缓存降级重建通道 ──────────────────────────────
+
+  /**
+   * [U4c / G1] 全量重建可丢缓存（boot 通道：boot revive 完成后由宿主调用）。
+   *
+   * manifest 与 sessions-index 均为可丢缓存（D5）：权威 = `.state`，重建源 =
+   * `.state` + entry 尽力。本方法：
+   *   1. 触发全量扫描（reconstructAll）——sessions-index 的重建隐式完成于既有机制
+   *      （loadIndex 空/损坏 → 探测 → dirty → saveIndex，「损坏静默回退全扫」同款
+   *      先例），不另设第二条索引写路径；
+   *   2. 对扫描重建出的每个 record，manifest 缺失时补写（幂等补缺，不覆写幸存
+   *      manifest——幸存者可能比重建源新鲜，覆写 = 用尽力数据降级权威快照）。
+   *
+   * 失败降级（D5 三要素）：单 record 重建源不可用（子 session 已 GC/损坏 → 不在
+   * 扫描集）或 manifest 写失败 → debug 留痕跳过该条，整轮不抛（S5「重建照常无错
+   * 误静默吞」）——缓存补缺失败不构成宿主错误。
+   *
+   * @returns 补写的 manifest 数（诊断/日志用）。
+   */
+  rebuildIndexes(): number {
+    const records = this.reconstructAll(undefined);
+    let rebuilt = 0;
+    for (const rec of records) {
+      if (this.rebuildManifestIfMissing(rec)) rebuilt++;
+    }
+    return rebuilt;
+  }
+
+  /**
+   * [U4c / G1] 单 record 的 manifest 惰性补建（rebuildIndexes 全量轮 + mergedRecords
+   * 惰性通道共用）。manifest 已存在 → 跳过；无 manifest 落点（manifestDir/manifestStore
+   * 均缺省，纯内存测试形态）→ 跳过；每 id 每进程至多尝试一次（manifestRebuildTried
+   * 守卫——boot 全量轮与惰性通道共享，防重复磁盘写）。写失败 debug 留痕不抛
+   * （缓存面，§3.4「缓存损坏」行——无需动作）。
+   *
+   * @returns true = 本次实际补写。
+   */
+  private rebuildManifestIfMissing(rec: SubagentRecord): boolean {
+    if (this.manifestDir === undefined && this.manifestStore === undefined) return false;
+    if (this.manifestRebuildTried.has(rec.id)) return false;
+    this.manifestRebuildTried.add(rec.id);
+    if (this.manifestDir !== undefined) {
+      const manifestPath = path.join(this.manifestDir, `${rec.id}.json`);
+      try {
+        if (fs.existsSync(manifestPath)) return false;
+        writeAtomicFileSync(manifestPath, JSON.stringify(RecordStore.derivedManifestRecord(rec), null, MANIFEST_INDENT_SPACES));
+        return true;
+      } catch (err) {
+        logger.debug("[subagents] rebuildIndexes: manifest rebuild skipped (write failed)", {
+          detail: { id: rec.id, error: err instanceof Error ? err.message : String(err) },
+        });
+        return false;
+      }
+    }
+    // 缺省降级形态（manifestDir 缺省、manifestStore 在，纯内存测试形态外的测试分支）：
+    // 异步写，失败同样静默降级。
+    void this.manifestStore!.writeManifest(RecordStore.derivedManifestRecord(rec)).catch((err: unknown) => {
+      logger.debug("[subagents] rebuildIndexes: manifest rebuild skipped (write failed)", {
+        detail: { id: rec.id, error: err instanceof Error ? err.message : String(err) },
+      });
+    });
+    return true;
+  }
+
+  /** manifest 写失败的双通道上报（error 日志给开发者 + entry 给用户，对齐
+   *  writeManifestBestEffort 现状）。 */
+  private static reportManifestWriteFailure(
+    id: string,
+    err: unknown,
+    pi: RecordStorePi,
+  ): void {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`[subagents] manifest write failed (record=${id}): ${msg}`);
+    pi?.appendEntry?.("subagent:manifest-write-failed", { id, error: msg });
+  }
+
+  /**
+   * [H4 收口 / G1] entry 重物化腿的 manifest 投影补写（record-access 可重连终态
+   * 重物化通道的唯一入口——store 外零 manifest 直写）。manifest 是可丢缓存（D5），
+   * 本方法只做缺员补写：失败 warn 留痕不响亮（缓存补缺失败不构成宿主错误，对齐
+   * U4c rebuildIndexes 的降级语义——区别于终态面 writeManifestPersisted 的响亮）；
+   * manifestDir 接线时为同步写（停机窗防护与终态面同源）。
+   */
+  rematerializeManifest(manifest: ManifestRecord): void {
+    const warnFailure = (err: unknown): void => {
+      logger.warn("[subagents] rematerialize manifest write failed (cache backfill)", {
+        detail: { id: manifest.id, error: err instanceof Error ? err.message : String(err) },
+      });
+    };
+    if (this.manifestDir !== undefined) {
+      try {
+        writeAtomicFileSync(
+          path.join(this.manifestDir, `${manifest.id}.json`),
+          JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES),
+        );
+      } catch (err) {
+        warnFailure(err);
+      }
+      return;
+    }
+    if (this.manifestStore !== undefined) {
+      void this.manifestStore.writeManifest(manifest).catch(warnFailure);
+    }
+  }
+
   /** 按 id 查找。返回可变 record（仅 runtime 内部用）。 */
   getMutable(id: string): ExecutionRecord | undefined {
     return this.records.get(id);
@@ -566,7 +1193,7 @@ export class RecordStore {
   /**
    * abort 所有 running record 的 controller（background 子进程 SIGTERM）。
    *
-   * 仅在 SubagentService.dispose（进程退出路径）调用。不做 CAS/tombstone——dispose
+   * 仅在 SubagentService.dispose（进程退出路径）调用。不做 CAS/终态标记——dispose
    * 是终局，状态机收尾无意义；目的是让 background 子进程的 AbortSignal 触发 →
    * runSpawn 的 signal listener → child.kill("SIGTERM")，防止主进程退出后子进程成孤儿。
    *
@@ -606,7 +1233,7 @@ export class RecordStore {
    *   ╔══════════════════════════════════════════════════════════════════╗
    *   ║  1. 磁盘源：扫 sessionsDir 的 .jsonl，逐个 scanFile（[perf] 头部    ║
    *   ║     identity 轻量重建 + stat 戳缓存命中零读取）。cancelled          ║
-   *   ║     tombstone override status。详情字段（eventLog/result/turns）    ║
+   *   ║     终态 sidecar override status。详情字段（eventLog/result/turns）    ║
    *   ║     缺省，由 getFullRecord(id) 懒加载                              ║
    *   ║  2. 内存源覆盖（同 id 内存优先——running record 更新鲜）          ║
    *   ║  3. session 过滤：只留 rootSessionId === rootSessionFilter 的       ║
@@ -624,12 +1251,64 @@ export class RecordStore {
    *
    * session 隔离：同一 cwd 下多个 Pi session 共享 sessionsDir，靠 rootSessionId
    * 区分。内存与磁盘源都按 rootSessionFilter 过滤后再 merge/sort/slice。
+   *
+   * [H2 W1] includeWorkflow（设计 subagent-workflow-record-unification §3.3 D1）：
+   * 缺省 false = 过滤 origin==="workflow" 的 record（subagents tool list / TUI
+   * /subagents 等消费面默认不展示 workflow 派发的 record）；true = 全量（排查通道）。
+   * 过滤只在查询消费面——治理路径（recoverOrphanRecords / recoverEntryOnlyOrphans /
+   * revive）与本参数无关，永远全量可见（D1 ⑥ 负向规格）。
    */
   collectRecords(
     limit: number,
     statusFilter: StatusFilter = "all",
     rootSessionFilter?: string,
+    includeWorkflow: boolean = false,
   ): SubagentRecord[] {
+    let result = [...this.mergedRecords(rootSessionFilter).values()];
+
+    // 3. statusFilter。
+    if (statusFilter === "running") {
+      result = result.filter((r) => r.status === "running");
+    }
+
+    // 3.5 [H2 W1] origin 过滤（缺省排除 workflow 来源）。负向判定：origin 缺省
+    // （undefined = "tool" 语义）与显式 "tool" 均保留。
+    if (!includeWorkflow) {
+      result = result.filter((r) => r.origin !== "workflow");
+    }
+
+    // 4-5. 排序 + slice。
+    return result
+      .sort(RecordStore.compareRecords)
+      .slice(0, limit);
+  }
+
+  /**
+   * [H2 W1] 按 workflow run id 列 record（parentRunId 查询入口，W2 run 视图进度 /
+   * W3 下钻消费）。查询域 = collectRecords 现状口径（内存 ∪ 磁盘重建 ∪ manifest 补充，
+   * 设计 D2「查询域显式」）。不过滤 origin——按 parentRunId 显式查询即下钻/治理语义
+   * （tool 来源 record parentRunId 恒 undefined，不会被误中）。
+   *
+   * 返回排序与 slice 口径同 collectRecords（STATUS_PRIORITY + startedAt desc + limit）。
+   */
+  collectRecordsByParentRunId(
+    parentRunId: string,
+    limit: number,
+    rootSessionFilter?: string,
+  ): SubagentRecord[] {
+    return [...this.mergedRecords(rootSessionFilter).values()]
+      .filter((r) => r.parentRunId === parentRunId)
+      .sort(RecordStore.compareRecords)
+      .slice(0, limit);
+  }
+
+  /**
+   * collectRecords / collectRecordsByParentRunId 共用的三源合并（磁盘重建 ∪ manifest
+   * 补充 ∪ 内存覆盖）。返回 byId Map（内存优先——running record 是活态比磁盘重建新）。
+   * [D1 ⑤] 磁盘重建投影本身不做任何 origin 过滤——record 全量重建，过滤只在上层
+   * 查询消费面按参数生效。
+   */
+  private mergedRecords(rootSessionFilter?: string): Map<string, SubagentRecord> {
     const byId = new Map<string, SubagentRecord>();
 
     // 1. 磁盘源（重建终态 record）。 reconstructAll 已按 rootSessionFilter 过滤。
@@ -671,16 +1350,19 @@ export class RecordStore {
       byId.set(r.id, RecordStore.recordToSubagent(r));
     }
 
-    // 3. statusFilter。
-    let result = [...byId.values()];
-    if (statusFilter === "running") {
-      result = result.filter((r) => r.status === "running");
+    // 3. [U4c / G1 惰性通道] manifest 反查 miss 的惰性重建（D5 双通道的惰性腿）：
+    //    磁盘源已重建的 record 若在 manifest 索引缺员（缓存被删/boot 全量轮漏扫），
+    //    此处补建——manifest 是外部 session-reader 的 identity 富字段主路径与指针
+    //    行反查索引，缺员窗口不应等到下次 boot。在途 record（内存持有，本 host 的
+    //    终态写点会落 manifest——「创建时不写」契约保持）不在补建集；每 id 每进程
+    //    只尝试一次（rebuildManifestIfMissing 内 manifestRebuildTried 守卫，防高频
+    //    collectRecords 放大磁盘写）。
+    for (const rec of byId.values()) {
+      if (this.records.has(rec.id)) continue;
+      this.rebuildManifestIfMissing(rec);
     }
 
-    // 4-5. 排序 + slice。
-    return result
-      .sort(RecordStore.compareRecords)
-      .slice(0, limit);
+    return byId;
   }
 
   // ── 孤儿终态恢复（residual-fixes 设计 §6.1.2）──────────────────
@@ -695,14 +1377,15 @@ export class RecordStore {
   }
 
   /**
-   * 孤儿终态恢复：对重建矩阵分支 4 兜底（running 且无 externalInstance）的 record
+   * 孤儿终态恢复：对重建矩阵兜底分支（running 且无异宿主在持声明；编号沿用设计
+   * D3b 文档的「分支 4」表述，分支 3 已随 externalInstance 投影移除）的 record
    * 判定真实终态并落 entry，消除「父扩展死后再无人写终态 → 侧栏永久 running」。
    *
    * 判定（residual-fixes §5.2 三判据 + chat 分流）：
    * - chatMode = true → 不终态化（跨重启可续聊是产品语义，v4 B-1），落 resumable
    *   entry 供侧栏 waiting 细分；
    * - 子 JSONL 末行完整 JSON.parse → closed（closedReason=gc，与分支 2 重建映射一致；
-   *   done/failed 细分由 error 字段经 deriveClosedDisplay 派生）+ 写 .finalized sidecar
+   *   done/failed 细分由 error 字段经 deriveClosedDisplay 派生）+ 写 .state sidecar
    *   （防重锚——下次重建走分支 2 不再进判定）；
    * - 末行截断 → closed + error（保守，错误方向安全）+ sidecar；
    * - 文件不可读（IO 错误，可能暂时）→ 不判终态，落 resumable entry（防御性路径，
@@ -721,8 +1404,15 @@ export class RecordStore {
   recoverOrphanRecords(rootSessionFilter?: string, mainSessionFile?: string): void {
     const lastById = new Map(this.scanLastRecordEntries(mainSessionFile).map((r) => [r.id, r]));
     for (const rec of this.reconstructAll(rootSessionFilter)) {
-      // 分支 4 命中集 = running 且无活进程实例（分支 3 带 externalInstance，分支 1/2 已 closed）。
-      if (rec.status !== "running" || rec.externalInstance !== undefined) continue;
+      if (rec.status !== "running") continue; // 分支 1/2 已 closed：无需恢复
+      // [U4a / D3b (a″)] 活实例跳过换 findForeignLiveInstance 现查探针（pid 单判据）：
+      // marker pid 活 = 异宿主在持声明，不可清——boot 误终态化会击穿跨进程写权防御
+      // （同 root 双宿主下宿主 A 会把宿主 B 持有中的 record 直断 gc）。比重建时缓存
+      // 的 externalInstance 更新鲜（resurrect 回边可随时改写 marker）。self-pid 排除下，
+      // pid 复用到本进程的残留 marker 同样放行清理——原持有者已死，record 确为孤儿。
+      if (rec.sessionFile !== undefined && findForeignLiveInstance(rec.sessionFile) !== undefined) {
+        continue;
+      }
       if (this.orphanJudged.has(rec.id)) continue;
       this.orphanJudged.add(rec.id);
       this.finalizeOrphanRecord(rec, lastById.get(rec.id));
@@ -770,11 +1460,11 @@ export class RecordStore {
     } catch {
       parseOk = false;
     }
-    // .finalized sidecar：防重锚（同 doFinalizeRecord 终态路径的收尾标记）。
+    // .state sidecar：防重锚（同 doFinalizeRecord 终态路径的收尾标记）。
     // 显式携 reason="gc"：孤儿判定「末行完整 = 自然完成」，与 doFinalizeRecord 写入的
     // 真实 reason 同层——否则无 reason sidecar 在磁盘重建时被兜底为 disconnected，
     // 把正常完成的记录误标成断联。
-    writeFinalized(sessionFile, "gc");
+    writeFinalizedState(sessionFile, "gc");
     // [F3 boot 直断语义，设计表 3 行 2] 走到本分支的 record 分两类：
     //  - resumable=true（上方分流保证此时 result 有值）= SP-5 one-shot 完成态——任务
     //    真实完成，直断 closed/gc 无 error，投影 completed 不变；
@@ -874,7 +1564,9 @@ export class RecordStore {
   }
 
   /** entry-born 孤儿按无文件判据收敛落 entry：chatMode → resumable（分流语义一致）；
-   *  否则 closed+gc+error（子文件由子进程创建，无文件 = 子进程从未开跑，error 方向安全）。 */
+   *  否则 closed+gc+error（entry-born 是 zcode 引擎 record 的常态形态——无子 session 文件
+   *  非异常，D8 第五行 entry-born 作用域注记；one-shot 直断 closed/gc，续聊对无 transcript
+   *  形态结构性不成立，承接通道仅 start fresh）。 */
   private finalizeEntryOnlyOrphan(rec: SubagentRecord, chatMode: boolean): void {
     this.reportSubagentRecord({
       ...rec,
@@ -884,7 +1576,7 @@ export class RecordStore {
           status: "closed" as const,
           closedReason: "gc" as const,
           endedAt: Date.now(),
-          error: "orphan recovery: no child session file (spawn interrupted or file removed externally)",
+          error: "orphan recovery: closed by gc (entry-born form has no child session file to resume from; start a fresh subagent)",
         }),
     });
   }
@@ -947,13 +1639,14 @@ export class RecordStore {
     this.indexDirty = false;
     this.lastIndexWriteAt = 0;
     this.indexHigherVersion = false;
+    this.manifestRebuildTried.clear();
   }
 
   /**
    * /resume /fork /new 后复活（dispose 的逆操作）。
    *
    * [PS-10/T6④] 同步复位 orphanJudged 防重缓存：resumable 形态（IO-error 保守分支 /
-   * chatMode 分流）没有 .finalized sidecar 锚，重判资格完全由本缓存承载——dispose 时
+   * chatMode 分流）没有 .state sidecar 锚，重判资格完全由本缓存承载——dispose 时
    * 有 clear（session 结束），但 revive 此前不复位，导致「同进程内曾经的 IO 失败记录
    * 永久停留 resumable」，与本文件 recoverOrphanRecords 注释承诺的「IO 恢复后重开可重判」
    * 不符。/new 复活正是「重开」语义：IO 已恢复的记录下次 recoverOrphanRecords 重新判定
@@ -962,18 +1655,25 @@ export class RecordStore {
   revive(): void {
     this._disposed = false;
     this.orphanJudged.clear();
+    // [U4c / G1] /new /resume 重开后 manifest 态可能已变（外部删除/异宿主写入），
+    // 惰性重建守卫随缓存态一并复位（对齐 orphanJudged 的「重开重判」语义）。
+    this.manifestRebuildTried.clear();
   }
 
   // ── 内部 ──────────────────────────────────────────────────
 
   /**
-   * 四分支 sidecar 矩阵重建（[perf] light 版）。
+   * 三分支状态矩阵重建（终态 marker / 兜底；[perf] light 版）。
    *
    * 优先级：
-   *   1. .cancelled → closed（closedReason=cancelled）
-   *   2. .finalized → closed（closedReason=sidecar 内容 reason；空/旧格式 → disconnected）
-   *   3. .alive + pid 存活 + 未超软超时 → running, externalInstance=true
-   *   4. 兜底（无 marker、pid 死、超时）→ running（v4 B-1 可续聊语义）
+   *   1. 终态 sidecar status=cancelled → closed（closedReason=cancelled）
+   *   2. 终态 sidecar status=finalized → closed（closedReason=内容 reason；空/旧格式 → disconnected）
+   *   （旧名 .finalized/.cancelled 由 readStateMarker 归一，判定分支不区分来源）
+   *   3. 兜底（其余一切，含 .alive 在持形态）→ running（v4 B-1 可续聊语义）
+   *
+   * [U4a / D3b (a)] 原分支 3（.alive + pid 活 → running + externalInstance 投影）已
+   * 移除：探活缓存的读面角色由 (a′)(a″) 的 findForeignLiveInstance 现查探针替代，
+   * status 判定与 .alive 解耦（终态判定由 `.state` 权威分支承接）。
    *
    * [perf]：逐文件 scanFile（stat 戳校验 + 头部 identity 轻量重建）。命中缓存的
    * 文件零文件读取；变化的文件只重建自身，其余 N-1 个复用缓存。
@@ -985,15 +1685,11 @@ export class RecordStore {
     // [perf] 目录 mtime 快路径：sessionsDir mtime 未变 ⇒ 文件集合与 sidecar 集合都未变
     //（任何文件新建/删除/重命名都改目录 mtime），且 jsonl append 不影响 light 态
     //（identity/status 由首行与 sidecar 决定，进度重数据走 getFullRecord 的独立 stat
-    //校验）→ 跳过 readdir + N×4 statSync，直接复用缓存 light。/subagents overlay 打开
-    //期间 250ms 动画 timer + 120ms debounce 双驱动高频扫描，快路径把 ~N×4 stat 降到
-    // 1 次（目录本身）+ 少量 pid 探活（refreshAlive，内存无 IO）。
+    //校验）→ 跳过 readdir + N×3 statSync，直接复用缓存 light。/subagents overlay 打开
+    //期间 250ms 动画 timer + 120ms debounce 双驱动高频扫描，快路径把 ~N×3 stat 降到
+    // 1 次（目录本身）。
     // 已知局限（与 mtime 缓存同族）：目录 mtime 粒度粗糙的文件系统（NFS/2s FAT）
-    // 可能漏判——APFS 微秒级可靠。invalidate 语义由文件写入侧保证，但**仅限 sidecar
-    // 新建/删除/重命名**（这些操作必改目录 mtime）；覆盖写已存在的 sidecar 不改目录
-    // mtime——`.alive` 覆盖写（resume spawn 后 pid 变化重写 marker）后快路径会复用旧
-    // aliveData（旧 pid/旧 startedAt），refreshAlive 探活与 1h 软超时判定可能滞后一拍
-    //（status 判定不受影响：分支 3 探活失败只清 externalInstance，不改 status）。
+    // 可能漏判——APFS 微秒级可靠。
     let dirMtimeMs: number;
     try {
       dirMtimeMs = fs.statSync(this.sessionsDir).mtimeMs;
@@ -1009,11 +1705,9 @@ export class RecordStore {
       this.indexHigherVersion = loaded.higherVersion;
     }
     if (this.dirStamp !== null && this.dirStamp.mtimeMs === dirMtimeMs) {
-      const now = Date.now();
       const out: SubagentRecord[] = [];
       for (const entry of this.fileCache.values()) {
         if (entry.negative) continue;
-        RecordStore.refreshAlive(entry, now);
         out.push(entry.light);
       }
       return rootSessionFilter === undefined
@@ -1043,10 +1737,9 @@ export class RecordStore {
       }
     }
 
-    const now = Date.now();
     const out: SubagentRecord[] = [];
     for (const file of files) {
-      const entry = this.scanFile(file, now);
+      const entry = this.scanFile(file);
       if (entry) out.push(entry.light);
     }
     this.dirStamp = { mtimeMs: dirMtimeMs };
@@ -1056,13 +1749,14 @@ export class RecordStore {
   }
 
   /**
-   * 扫描单文件：stat 戳（jsonl + 3 sidecar）校验，全同 → 复用缓存（零文件读取，
-   * 含负缓存直接返回 null）；否则重建 light。
+   * 扫描单文件：stat 戳（jsonl + 终态 sidecar + record 绑定）校验，全同 →
+   * 复用缓存（零文件读取，含负缓存直接返回 null）；否则重建 light。
    * identity 定位两级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
-   * append 在尾部）；两级都找不到 → 写负缓存（防每轮全文重读）。
-   * 返回 null：文件消失/读失败/无 identity → 跳过。
+   * append 在尾部）；两级都找不到 → [UF-1] record 绑定 sidecar 回退（宿主侧身份
+   * 载荷重建 light）→ 仍无 → 写负缓存（防每轮全文重读）。
+   * 返回 null：文件消失/读失败/无 identity 且无绑定 → 跳过。
    */
-  private scanFile(file: string, now: number): FileCacheEntry | null {
+  private scanFile(file: string): FileCacheEntry | null {
     const jsonl = statStamp(file);
     if (!jsonl) {
       this.fileCache.delete(file);
@@ -1070,53 +1764,105 @@ export class RecordStore {
     }
     const stamps: FileStamps = {
       jsonl,
-      cancelled: statStamp(`${file}.cancelled`),
-      finalized: statStamp(`${file}.finalized`),
-      alive: statStamp(`${file}.alive`),
+      state: statStateStamp(file),
+      binding: statStamp(`${file}${RECORD_BINDING_SIDECAR_EXT}`),
     };
 
     const cached = this.fileCache.get(file);
     if (cached !== undefined && isFreshCache(cached, stamps)) {
       if (cached.negative) return null; // 负缓存命中：确认无 identity，零读取跳过
-      // pid 探活结果不落盘（进程死亡无 IO）——分支 3 的 running 项每扫重查，
-      // 保留原语义（旧实现每次 collectRecords 都重新 isProcessAlive）。
-      RecordStore.refreshAlive(cached, now);
       return cached;
     }
 
     // [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
     // 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。undefined = 未命中
     // （落到下方探测），null = 负条目命中（零探测跳过）。
-    const fromIndex = this.buildEntryFromIndex(file, stamps, now);
-    if (fromIndex !== undefined) return fromIndex;
+    // [UF-1] 绑定 sidecar 存在的文件跳过索引投影：SessionsIndexEntry 不含
+    // chatMode/round（身份域子集），索引命中会把绑定承载的对话形态域抹成 undefined。
+    if (stamps.binding === null) {
+      const fromIndex = this.buildEntryFromIndex(file, stamps);
+      if (fromIndex !== undefined) return fromIndex;
+    }
 
     // [perf L-1] 索引 miss/戳不匹配落到原三级探测：本轮探测结果必须进索引（含负探测）。
     // 覆盖两种形态：首扫（映像已装载但 miss/不匹配）与后续轮次（映像已释放，凡进重建分支必是戳变化）。
     this.indexDirty = true;
 
+    const payloads = readSidecarPayloads(file, stamps);
     const header = detectIdentity(file, jsonl.size);
-    if (!header) {
-      // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写）自动重试。
+    // [UF-1] 身份源两级：子文件 identity entry（历史权威，命中时绑定不参与）→
+    // record 绑定 sidecar（engine-CLI 化后子文件无身份 entry，宿主在 sessionFile
+    // 回填点落盘的 id→file 映射承担恢复能力）。两者皆缺 → 负缓存。
+    const base = header ?? RecordStore.identityFromBinding(payloads.binding, file);
+    if (!base) {
+      // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
+      // 绑定后到落盘）自动重试。
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
-    const payloads = readSidecarPayloads(file, stamps);
-    const entry = RecordStore.buildFileCacheEntry(header, file, stamps, payloads, now);
+    const entry = RecordStore.buildFileCacheEntry(base, file, stamps, payloads);
+    // [UF-1] 绑定承载的对话形态域补投影：IdentityHeaderRecon 无 round 槽位
+    //（既有语义：identity entry 磁盘重建不恢复 round），绑定路径在其上恢复——
+    // 续聊轮数随绑定快照可滞后一拍（state-marker.RecordBinding.round 契约）。
+    if (header === undefined && payloads.binding?.round !== undefined) {
+      entry.light.round = payloads.binding.round;
+    }
+    // [H2 A3] 终态 usage 快照补投影（round 同款先例）：binding 快照只在终态写点
+    // （finalizeRecord Step3a）更新，存在即代表终值——light 列表面据此恢复
+    // totalTokens/turns/endedAt，不再恒 0（list 与通知显示消耗真实值）。
+    if (header === undefined && payloads.binding) {
+      const b = payloads.binding;
+      if (b.totalTokens !== undefined) entry.light.totalTokens = b.totalTokens;
+      if (b.turns !== undefined) entry.light.turns = b.turns;
+      if (b.endedAt !== undefined) entry.light.endedAt = b.endedAt;
+    }
     this.fileCache.set(file, entry);
-    this.idToFile.set(header.id, file);
+    this.idToFile.set(base.id, file);
     return entry;
   }
 
   /**
+   * [UF-1] record 绑定载荷 → light 身份基底（IdentityHeaderRecon 同形投影）。
+   * 绑定缺失/损坏返回 undefined（调用方落负缓存，不把损坏残留误判成身份）。
+   * forkDepth/model_change/thinking_level_change 等头部途经信息绑定期不存在：
+   * forkDepth 恒 undefined、model/thinkingLevel 取绑定快照值。
+   */
+  private static identityFromBinding(binding: RecordBinding | undefined, file: string): IdentityHeaderRecon | undefined {
+    if (binding === undefined) return undefined;
+    return {
+      id: binding.recordId,
+      agent: binding.agent,
+      mode: binding.mode,
+      task: binding.task,
+      slug: binding.slug,
+      startedAt: binding.startedAt,
+      rootSessionId: binding.rootSessionId,
+      parentRecordId: binding.parentRecordId,
+      depth: binding.depth,
+      forkDepth: undefined,
+      chatMode: binding.chatMode,
+      worktree: binding.worktree,
+      // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
+      // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
+      // binding 读侧（readRecordBinding）已字面量守卫归一，此处直传。
+      origin: binding.origin,
+      parentRunId: binding.parentRunId,
+      model: binding.model,
+      thinkingLevel: binding.thinkingLevel,
+      sessionFile: file,
+    };
+  }
+
+  /**
    * [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
-   * 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。sidecar payload（tombstone/
-   * alive）是活态数据，沿用探测分支的每轮重读语义；finalized reason 静态数据仅在
-   * sidecar 存在时读一次（文件小，成本可忽略）。
+   * 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。sidecar payload（终态 marker）
+   * 是活态数据，沿用探测分支的每轮重读语义；终态 reason 静态数据仅在 sidecar 存在
+   * 时读一次（文件小，成本可忽略）。
    *
    * 返回 undefined = 索引未命中/戳不匹配（调用方落到原三级探测）；null = 负条目命中
    * （「确认无 identity」跨实例持久，零探测跳过，与内存负缓存同款形态）。
    */
-  private buildEntryFromIndex(file: string, stamps: FileStamps, now: number): FileCacheEntry | null | undefined {
+  private buildEntryFromIndex(file: string, stamps: FileStamps): FileCacheEntry | null | undefined {
     if (this.indexEntries === null) return undefined;
     const hit = this.indexEntries.get(path.basename(file));
     if (hit === undefined || hit.mtimeMs !== stamps.jsonl.mtimeMs || hit.size !== stamps.jsonl.size) {
@@ -1127,7 +1873,20 @@ export class RecordStore {
       return null;
     }
     const payloads = readSidecarPayloads(file, stamps);
-    const entry = RecordStore.buildFileCacheEntry({ ...hit, forkDepth: undefined, sessionFile: file }, file, stamps, payloads, now);
+    const entry = RecordStore.buildFileCacheEntry(
+      {
+        ...hit,
+        forkDepth: undefined,
+        sessionFile: file,
+        // [H2 S3] 显式归一（exactOptionalPropertyTypes：索引可选属性 → recon 必填）；
+        // 值已过 loadIndex 守卫（undefined/字面量白名单），直传即安全。
+        origin: hit.origin,
+        parentRunId: hit.parentRunId,
+      },
+      file,
+      stamps,
+      payloads,
+    );
     this.fileCache.set(file, entry);
     this.idToFile.set(hit.id, file);
     return entry;
@@ -1194,6 +1953,10 @@ export class RecordStore {
           depth: cached.light.depth,
           model: cached.light.model,
           thinkingLevel: cached.light.thinkingLevel,
+          // [H2 S3] 来源域随投影入索引：light→索引→重建往返闭合（origin 丢失面与
+          // binding 缺失面互补，索引命中路径不再静默抹掉 workflow 身份）。
+          origin: cached.light.origin,
+          parentRunId: cached.light.parentRunId,
         });
       }
     }
@@ -1204,12 +1967,13 @@ export class RecordStore {
    * [perf] byId 索引直查 light record（单文件 stat 校验，不触发 getFullRecord 的
    * 全量重建）。idToFile 未热（进程重启后尚未扫描过）时返回 undefined，调用方
    * 自行兜底全目录扫描——用于把「跨重启后每条 message 一次 collectRecords 全扫」
-   * 降为 O(1) 索引命中。
+   * 降为 O(1) 索引命中。（反查 miss 的索引自愈不在此层——miss 契约被 cold-lookup
+   * 链与 record-binding 测试钉死；manifest 惰性重建挂 mergedRecords，见其注释。）
    */
   findLightById(id: string): SubagentRecord | undefined {
     const file = this.idToFile.get(id);
     if (!file) return undefined;
-    return this.scanFile(file, Date.now())?.light;
+    return this.scanFile(file)?.light;
   }
 
   /**
@@ -1228,19 +1992,15 @@ export class RecordStore {
 
     const file = this.idToFile.get(id);
     if (!file) return undefined;
-    const entry = this.scanFile(file, Date.now());
+    const entry = this.scanFile(file);
     if (!entry) return undefined;
     if (entry.full === undefined) {
       const recon = reconstructFromFile(file);
       if (recon) {
         entry.full = RecordStore.buildRecord(recon, {
-          tomb: entry.tomb,
-          finalized: entry.finalized !== null,
-          finalizedReason: entry.finalized !== null ? (entry.finalReason ?? "") : undefined,
-          alive: entry.aliveData,
+          state: entry.stateMarker,
           jsonlMtimeMs: entry.jsonl.mtimeMs,
           fullEndedAt: recon.endedAt,
-          now: Date.now(),
         });
       } else {
         entry.full = entry.light; // 哨兵：无详情可补，后续直取 light（戳变化时重置重试）
@@ -1249,46 +2009,27 @@ export class RecordStore {
     return entry.full;
   }
 
-  /** alive 探活刷新（scanFile 缓存命中与 reconstructAll 快路径共用）：
-   *  分支 3 的 running + alive 条目每扫重查 pid（结果不落盘，进程死亡无 IO），
-   *  保留旧实现「每次 collectRecords 重新 isProcessAlive」的语义。 */
-  private static refreshAlive(entry: FileCacheEntry, now: number): void {
-    if (entry.alive === null || entry.light.status !== "running") return;
-    const marker = entry.aliveData;
-    if (!marker) return;
-    const live = isProcessAlive(marker.pid) && now - marker.startedAt < ALIVE_SOFT_TIMEOUT_MS;
-    entry.light.externalInstance = live ? marker : undefined;
-  }
-
   /** identity 基底 + sidecar 状态矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。 */
   private static buildFileCacheEntry(
     base: IdentityHeaderRecon,
     file: string,
     stamps: FileStamps,
     payloads: SidecarPayloads,
-    now: number,
   ): FileCacheEntry {
     return {
       light: RecordStore.buildRecord(base, {
-        tomb: payloads.tomb,
-        finalized: stamps.finalized !== null,
-        finalizedReason: payloads.finalReason,
-        alive: payloads.aliveData,
+        state: payloads.state,
         jsonlMtimeMs: stamps.jsonl.mtimeMs,
-        now,
       }),
       full: undefined,
       jsonl: stamps.jsonl,
-      cancelled: stamps.cancelled,
-      finalized: stamps.finalized,
-      alive: stamps.alive,
-      tomb: payloads.tomb,
-      aliveData: payloads.aliveData,
-      finalReason: payloads.finalReason,
+      state: stamps.state,
+      binding: stamps.binding,
+      stateMarker: payloads.state,
     };
   }
 
-  /** identity 基底（头部 light 或全量 recon）+ 四分支 sidecar 状态矩阵 → SubagentRecord。 */
+  /** identity 基底（头部 light 或全量 recon）+ sidecar 状态矩阵（终态 marker / 兜底两态）→ SubagentRecord。 */
   private static buildRecord(
     base: IdentityHeaderRecon | ReconstructedRecord,
     m: SidecarMatrix,
@@ -1306,6 +2047,9 @@ export class RecordStore {
         rootSessionId: base.rootSessionId,
         parentRecordId: base.parentRecordId,
         depth: base.depth,
+        // [H2 S3] 来源域落位（identity 面已守卫归一）：缺省 undefined = "tool" 语义。
+        origin: base.origin,
+        parentRunId: base.parentRunId,
         endedAt: undefined,
         turns: base.turnCount,
         totalTokens: base.totalTokens,
@@ -1333,6 +2077,9 @@ export class RecordStore {
         rootSessionId: base.rootSessionId,
         parentRecordId: base.parentRecordId,
         depth: base.depth,
+        // [H2 S3] 来源域落位（同全量分支）。
+        origin: base.origin,
+        parentRunId: base.parentRunId,
         endedAt: undefined,
         turns: 0,
         totalTokens: 0,
@@ -1350,39 +2097,35 @@ export class RecordStore {
       };
     }
 
-    // ── 分支 1: .cancelled ──
-    // v4 B-1: cancelled 折入 closed（closedReason='cancelled' 保留 L2 区分）。
-    if (m.tomb) {
+    // ── 分支 1: 终态 sidecar（.state 优先，旧 .finalized/.cancelled 兼容归一）──
+    if (m.state !== undefined && m.state.status === "cancelled") {
+      // v4 B-1: cancelled 折入 closed（closedReason='cancelled' 保留 L2 区分）。
       markReconstructedStatus(rec, "closed");
       rec.closedReason = "cancelled";
       rec.error = "cancelled by user";
-      rec.endedAt = m.tomb.endedAt;
+      // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（新写侧恒携带，
+      // 兼容手写残留）回落全量末 entry ts / light mtime。
+      rec.endedAt = m.state.endedAt ?? m.fullEndedAt ?? m.jsonlMtimeMs;
     }
-    // ── 分支 2: .finalized ──
-    else if (m.finalized) {
+    // ── 分支 2: finalized（同 sidecar，status=finalized）──
+    else if (m.state !== undefined) {
       // closed 统一终态：done/failed/crashed 合并为 closed。closedReason 优先用
       // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。
       // 空内容（旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因
       // 不可考，但「正常结束过」信号仍在——替代旧的误导性 gc 兜底（自然完成 vs
       // 断联不分）。非枚举值（外部损坏/手写垃圾内容）同 treated as unknown → disconnected。
       markReconstructedStatus(rec, "closed");
-      const reason = m.finalizedReason?.trim();
+      const reason = m.state.reason?.trim();
       rec.closedReason = isValidClosedReason(reason) ? (reason as ClosedReason) : "disconnected";
       // 全量路径用最后 entry ts（精确）；light 路径用 jsonl mtime 近似（finalize 后
       // 文件不再变化，误差 <1s），避免重建后耗时随墙钟无限增长。
       rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
     }
-    // ── 分支 3: .alive + pid 存活 + 未超软超时 ──
-    else if (
-      m.alive !== undefined &&
-      isProcessAlive(m.alive.pid) &&
-      m.now - m.alive.startedAt < ALIVE_SOFT_TIMEOUT_MS
-    ) {
-      markReconstructedStatus(rec, "running");
-      rec.externalInstance = m.alive;
-    }
-    // ── 分支 4: 兜底（都无 / .alive 但 pid 死 / 超时）──
+    // ── 分支 4: 兜底（其余一切——无 sidecar / .alive 在持 / pid 死）──
     // v4 B-1：跨重启可续聊态落点 = running。endedAt 保持 undefined（非终态）。
+    // [U4a / D3b (a)] 原分支 3（.alive + pid 活 → running + externalInstance 投影）
+    // 已移除：非终态统一落此兜底，探活读面由 (a′)(a″) findForeignLiveInstance
+    // 现查探针承担（防御保留、数据源换新——fork-from 守卫与孤儿恢复跳过）。
     else {
       markReconstructedStatus(rec, "running");
     }
@@ -1407,7 +2150,10 @@ export class RecordStore {
 
   /** FR-8: ManifestRecord → SubagentRecord（manifest 源投影）。
    *  task/slug/model 从 manifest 真实值投影（配合 writeManifest 补字段），缺失兜底空串。
-   *  status 越界（mapManifestStatus 返回 null）时返回 null，由 collectRecords 跳过。 */
+   *  status 越界（mapManifestStatus 返回 null）时返回 null，由 collectRecords 跳过。
+   *  [M2 Gate B] closedReason 投影（枚举守卫，同 mapManifestStatus 的越界容错口径）：
+   *  旧 manifest 无此字段 / 损坏值 → undefined。缺失曾让 manifest 源快照在
+   *  endedMessageGuard 丢失三分流依据（user-close/cancelled 误入 reconnectable 分支）。 */
   private static manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
     const status = mapManifestStatus(m.status);
     if (status === null) return null;
@@ -1417,6 +2163,7 @@ export class RecordStore {
       task: m.task ?? "",
       slug: m.slug ?? "",
       status,
+      closedReason: isValidClosedReason(m.closedReason) ? m.closedReason : undefined,
       mode: "background" as const,
       startedAt: m.createdAt,
       rootSessionId: m.rootSessionId || undefined,
@@ -1474,10 +2221,16 @@ export class RecordStore {
       // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本投影），无则 undefined 自然省略
       engineHandle: r.engineHandle,
       // [U5 修复 U2 披露的投影缺口] 同步收集两字段随本投影持久化（register entry /
-      // archive entry 双写点）——原缺失时闭合判定 flushBatch 重建、E1 重建扫描等消费方
-      // 读不到原始值。undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
+      // archive entry 双写点均经本投影），原缺失时闭合判定 flushBatch 重建、E1 重建扫描等
+      // 消费方读不到原始值。undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
       collectMode: r.collectMode,
       batchFinalized: r.batchFinalized,
+      // [H2 W1] 来源身份两字段随本投影持久化（register/archive/reportRecordTransition
+      // 全部写点均经本投影 → toSubagentRecordEntry）。漏投影则 entry 无 origin，重启后
+      // 重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5 缺字段事故）。
+      // undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节不变（零迁移）。
+      origin: r.origin,
+      parentRunId: r.parentRunId,
     };
   }
 }

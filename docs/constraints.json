@@ -1777,26 +1777,6 @@
       ]
     },
     {
-      "id": "C-ext-21",
-      "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的 <agentDir>/subagents/<enc(cwd)>/sessions 布局互为跨包隐式契约——改任一端路径形态另一端必同步（改 path-encoding 布局须同步 llm.ts 嗅探；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该守卫",
-      "scope": [
-        "packages/subagent-core/src/execution/path-encoding.ts",
-        "extensions/universal/rename-session/**"
-      ],
-      "authority": [
-        "design/rename-session-three-modes.md#d7issubagentsession-跨包耦合登记-c-ext-21吸收-ext-simplify-15-d3选定登记--双端注释"
-      ],
-      "dimensions": [
-        "arch-boundary"
-      ],
-      "enforcement": [
-        {
-          "type": "review",
-          "agent": "review-arch-boundary"
-        }
-      ]
-    },
-    {
       "id": "C-proc-08",
       "summary": "pi 语义依赖机器登记 + 探针 + 版本门禁：docs/pi-semantics.json（PS-xx 条目，probe/observe 分型）是唯一机器登记源，scripts/check-pi-semantics.mjs（pre-commit + CI）守 schema/探针存在性/四包版本一致（pi-coding-agent ≡ pi-ai ≡ pi-agent-core ≡ runtime pin）；pi 升级 PR 必查两项——pi-ai exports 是否移除 ./compat、changelog 是否提及 ModelManager 迁移（PS-15 时间炸弹）；探针族红 = 语义漂移，先复核锚点再更新 verifiedWith",
       "scope": [
@@ -2081,6 +2061,30 @@
       ]
     },
     {
+      "id": "C-pi-16",
+      "summary": "引擎任务子进程生命周期上报契约（引擎协议 v1.x 反向通道）：任务子进程 spawn 时上报 host/childSpawned、退出/被杀/崩溃时上报 host/childStateChanged，payload {pid, recordId, state: running|exited, killed 必含（类型层 required）, exitCode?, signal?}。宿主双依赖：①core 镜像 recordStateChanged（置死镜像项——hasLiveProcessHandle/isResumable/收割判据源）②SR-4 dialog 取消（notifyChildProcessExited 摘除该 pid 挂起 dialog，否则占串行位至 30min 队列超时）。缺失后果 = 镜像活态残留（单写者判据失真）+ dialog 假占位。引擎自身崩溃前的末次上报为尽力而为（已由宿主崩溃分诊兜底）",
+      "scope": [
+        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/pi-subagent-cli/src/**",
+        "packages/subagent-core/src/execution/engine/client/mirror.ts",
+        "packages/subagent-core/src/execution/dialog-queue.ts"
+      ],
+      "authority": [
+        "../docs/design/subagent-engine-protocolization.md",
+        "../docs/design/chat-domain-v1x-liveness-governance.md"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "test-coverage"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
       "id": "C-data-18",
       "summary": "对账机制三分处置框架：renderer 副本 vs runtime/pi 真值的对账机制按「对抗外部异步真值（保留）/ 同构重复 ≥3 处（收编共享原语）/ 根修后失去存在理由（删除）」裁决——in-flight 去重族收编 createInflightDedup()、KV 单键族收编 createKVSlot()（均 core foundation，新增对账禁再手写同构实现），FR-15 perCwd 默认预设特性全链随本设计 U9 删除（零消费死链）；新增/修改对账机制须过三分裁决并在 impl-plan 处置表登记",
       "scope": [
@@ -2105,7 +2109,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x chat 域语义与轮次活性权威：①协议面——第 9 反向通道 host/roundLifecycle 承载 chat 轮次生命周期（settled=轮收敛 / idle=收口进稳态+resume 锚回填 / failed=引擎自知失败三相位；关联键 {runId}|{recordId} 互斥联合，首轮 run 键、interact 续聊轮 recordId 键；priority 不进协议留 core 侧调度）；run 会话形态 RunParams.chat{recordId,resume} 路由 chat 轮次，manifest 无 conversation gate 位引擎同步拒（engine_capability_unsupported + 升级指引）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层（round-supervisor）——三态判定（该等/该唤醒=通知主 agent 决策/该放弃）钉死 record 级状态源：引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；record 去向单一裁决表（宿主存活×进程死亡→failed+保持 resumable+接管；boot in-flight→直断 failed+注销；boot already-resumable-idle 非 conversation→重认领；conversation→轮终 idle 现状）；注销发射点枚举制（record 终态化/chatMode 轮末 idle/workflow run 终态/监督器放弃/对账 sweep 补发五语义，进程退出本身永远不是注销理由）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器；session 档机器已随 ext-simplify-12 删除，回翻须先推翻本约束=显式设计决策）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/pending_notifications 工具投影（entries 现算）/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发对 unsupported 引擎同步拒照常、mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2116,8 +2120,7 @@
         "packages/runtime/src/infra/pi/rpc-client.ts"
       ],
       "authority": [
-        "../docs/design/chat-domain-v1x-liveness-governance.md#32-解决方案",
-        "../docs/design/chat-domain-v1x-liveness-governance.impl-plan.md"
+        "../docs/design/subagent-chat-run-unification.md#33-关键决策"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2190,6 +2193,69 @@
       ]
     },
     {
+      "id": "C-build-08",
+      "summary": "per-worktree dev 实例装配器唯一入口（2026-09-12）：`pnpm dev` 必须经 apps/electron/scripts/dev-instance.mjs——按 worktree 名 hash 稳定派生 Vite/CDP 端口与 XYZ_AGENT_PORT_OFFSET（runtime 段，offset 步进 10 不重叠），数据目录隔离到 ~/.xyz-agent-dev/instances/<worktree>/（首启从只读模板 ~/.xyz-agent-dev.template/ 复制，模板只含配置面、运行时状态白名单排除，默认模型预置 mimo-v2.5-pro）；AI agent 真机验收必须 XYZ_DEV_BACKGROUND=1（showInactive 不抢前台焦点）。禁止绕过装配器多开 dev（固定端口互占 + 共享数据目录互写，验收证据无法绑定 worktree——2026-09-12 H3 Gate B 归因困境成因）；Electron userData/单实例锁从 XYZ_AGENT_DATA_DIR 派生，装配器是四点联动（vite server/electron loadURL/CDP/runtime 段）一致性的唯一保证，单点手改端口必致静默错配",
+      "scope": [
+        "apps/electron/scripts/dev-instance.mjs",
+        "apps/electron/package.json",
+        "apps/electron/scripts/dev-electron.mjs",
+        "packages/renderer/vite.config.ts",
+        "apps/electron/main/window/window-factory.ts"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "electron-build",
+        "monorepo-impact"
+      ],
+      "enforcement": [
+        {
+          "type": "none"
+        }
+      ]
+    },
+    {
+      "id": "C-data-20",
+      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 终态权威 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry）的写面全部归 RecordStore 意图原语（markFinalized/markCancelled/markBatchFinalized/markRoundStarted/markRoundIdle/adoptEngineDeath/markResurrected/markIdleArchived/register/appendEvent），store 外零直写。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。终态原语持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
+      "scope": [
+        "packages/subagent-core/src/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "design/subagent-record-persistence-consolidation.md#33-关键决策"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-record-write-surface.mjs"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-21",
+      "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的 <agentDir>/subagents/<enc(cwd)>/sessions 布局互为跨包隐式契约——改任一端路径形态另一端必同步（改 path-encoding 布局须同步 llm.ts 嗅探；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该守卫",
+      "scope": [
+        "packages/subagent-core/src/execution/path-encoding.ts",
+        "extensions/universal/rename-session/**"
+      ],
+      "authority": [
+        "design/rename-session-three-modes.md#d7issubagentsession-跨包耦合登记-c-ext-21吸收-ext-simplify-15-d3选定登记--双端注释"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
       "id": "C-comm-14",
       "summary": "runtime→renderer 出站帧双档大小守卫：push 帧经 outbound-frame-guard 在 seq 语义内截断（8MB 告警哨兵 / 32MB 截断档；序列化恰一次，注册表 miss 丢弃时 rollbackSeq 回退计数，截断占位帧正常占用 seq 入 ring/快照——客户端、断连回放、重订阅拿到同一份截断版；禁止「占 seq 后整条丢弃」形态，会造成 gap 检测误判 → 重订阅全量拉取死循环）；reply 帧（带 pending id）超限整帧替换 payload_too_large error envelope 收口（禁前端 Promise 悬挂）；新增 publish 点的大字段形态必须同步登记 outbound-frame-registry（miss 整条丢弃是最后防线，8MB 告警档先于截断暴露 miss）；pi 工具上游自截（read/bash 50KB/2000 行、图片 ≤16MB）是常态防线而非本守卫的替代；【2026-09-12 恢复登记】本条随 dev-0.9.17 合并对侧重写 constraints.json 被顶出，原编号无撞车原位恢复",
       "scope": [
@@ -2232,38 +2298,6 @@
       ]
     },
     {
-      "id": "C-pi-16",
-      "summary": "extension 异步回调 stale ctx 守卫：跨 session 生命周期存活的异步回调（compact 的 onComplete/onError、timer tick、延迟回调）禁止裸调捕获的 pi/ctx——必须经 ext-guards guardStaleCtx 包裹（前置代际检查 isCtxStale 主判 + pi stale 错误文案 'stale after session replacement' 兜底分诊；stale 静默降级走 onStale 观测，非 stale 原样上抛不吞真实 bug）；接入包须在 ext-guards/docs/stale-ctx-audit.md 登记「stale 静默语义」判定（stale 静默意味着什么 + 用户出路）。文案是 pi 语义断言（PS-30），随 pi 版本门禁自动重验，文案变更时守卫退化为全部上抛（有痕，门禁报红）；【2026-09-12 恢复登记】原 C-pi-15 被 dev-0.9.17 合并对侧重写顶出（该号现被 mutation reply 约束占用），改登 C-pi-16",
-      "scope": [
-        "extensions/shared/ext-guards/**",
-        "extensions/universal/smart-context/**",
-        "extensions/universal/plan/**",
-        "extensions/universal/scheduler/**",
-        "extensions/universal/structured-output/**",
-        "extensions/universal/subagent-workflow/**",
-        "docs/pi-semantics.json",
-        "docs/design/crash-resilience.md"
-      ],
-      "authority": [
-        "design/crash-resilience.md#d1extension-异步回调守卫泛化-scheduler-范式到-ext-guards短期对应-r1g1",
-        "pi-semantics.json"
-      ],
-      "dimensions": [
-        "arch-boundary",
-        "error-handling"
-      ],
-      "enforcement": [
-        {
-          "type": "machine",
-          "hook": "check-pi-semantics.mjs"
-        },
-        {
-          "type": "review",
-          "agent": "review-arch-boundary"
-        }
-      ]
-    },
-    {
       "id": "C-proc-16",
       "summary": "renderer 进程崩溃自动恢复必须经 recovery-policy 熔断：render-process-gone 按窗口自动 reload 以 windowId 为键、60s 滑动窗口 ≤3 次，超限停静态错误页 + 手动重试（重试重置预算），禁止无限 reload 循环（OOM 类崩溃 reload 后大概率再崩）；多窗口熔断计数互不影响；崩溃详情落盘 + renderer JS 错误现场经 renderer-log IPC 落 main 侧日志（每窗口每分钟限流 100 条，超限合并为汇总行，防错误风暴分钟级刷 GB）；恢复必须用户可见（一次性 CrashRecoveredBar 提示条，禁静默恢复）；renderer 侧错误捕获三件套抑制 Vue 默认整树卸载；【2026-09-12 恢复登记】原 C-proc-12 被 dev-0.9.17 合并对侧条目撞号占用（该号现为引擎协议边界），改登 C-proc-16",
       "scope": [
@@ -2284,33 +2318,6 @@
         {
           "type": "review",
           "agent": "review-arch-boundary"
-        }
-      ]
-    },
-    {
-      "id": "C-data-20",
-      "summary": "崩溃台账双文件单写者 + 写入点矩阵（crash-forensics D1）：main.jsonl（main 进程写：main 自身 + renderer 事件）与 runtime.jsonl（runtime 写：runtime + pi + plugin-worker 事件）各写各的——崩溃瞬间两进程死亡顺序不可控，双文件消除跨进程写竞争，禁单一统一台账由一方代写；schema SSOT = packages/shared/src/crash-journal-schema.ts（event 闭合枚举 + CRASH_JOURNAL_KNOWN_REASONS 分层覆盖锁，新 reason 值须登记元组或声明开放形态）；写入点矩阵钉死抑制语义挂点——deleted 挂 removeSessionEntry 汇聚点、pi 计划内终止挂杀链发起处（destroySession 先删 Map 使 exit handler 反查无条目静默，挂 exit handler 事件永不产生）、runtime 自身 shutdown 行由 main 侧写（before-quit 上下文带 runtime.isRunning 在场性 guard / planned 按退出码 86 / 判别式「非 before-quit 且 ≠86 且 stopping=false」才写 crash / liveness 强杀在 forceRestartForLiveness 杀链发起处双写 unresponsive），runtime shutdown 序内禁写 shutdown 行防计划内归因污染；main 自身崩溃走 run/main-running.marker 残留下次启动补记（reason=unclean-exit，先记后删）；条件类信号（frame-truncated / registry-miss / watermark-daily）一并事件化——台账是触发条件评估器的唯一输入，禁让评估器解析日志文本行",
-      "scope": [
-        "packages/runtime/src/infra/crash-journal.ts",
-        "packages/shared/src/crash-journal-schema.ts",
-        "apps/electron/main/logs/crash-journal.ts",
-        "packages/runtime/src/services/session/**",
-        "packages/runtime/src/services/reap-orphan-pi.ts",
-        "packages/runtime/src/infra/pi/event-adapter.ts",
-        "apps/electron/main/supervisor/**",
-        "apps/electron/main/window/**",
-        "apps/electron/main/logs/renderer-log-handler.ts"
-      ],
-      "authority": [
-        "design/crash-forensics-and-watchdog.md"
-      ],
-      "dimensions": [
-        "data-governance"
-      ],
-      "enforcement": [
-        {
-          "type": "review",
-          "agent": "review-data-governance"
         }
       ]
     },
@@ -2425,8 +2432,67 @@
       ]
     },
     {
-      "id": "C-build-08",
-      "summary": "pi tee 单文件有界（crash-forensics D7）：createPiStreamWriter size 轮转与主日志共用 MAX_FILE_BYTES（XYZ_LOG_MAX_BYTES env 单旋钮，默认 50MB）——达阈值 end 旧流等待 flush → zlib gzip 归档 <file>.1.gz（单代，tmp→rename 原子覆盖，gzip 兜底超时防挂死）→ 新流截断续写原路径，轮转窗口行入队回放防丢、openPiStreams 注册表引用随轮转更新（退出 flush 走新流）；段文件必须保持 pi- 前缀（架构 D6③ 不变量：否则旋段逃出 cleanExpiredLogs 7 天清理白名单，变成新的无清理写入面）；[推翻登记] logger.ts 旧注释裁决「不轮转：单 session 事件量可控」被 198MB 实测证伪 [HISTORICAL]；字节计数起点 = writer 创建时 0（跨重启打开时预滚未实现，reattach 重开同 date 大文件最坏约 2× 阈值才轮转——登记接受，跨重启 size 封顶属后续独立工作）",
+      "id": "C-pi-17",
+      "summary": "extension 异步回调 stale ctx 守卫：跨 session 生命周期存活的异步回调（compact 的 onComplete/onError、timer tick、延迟回调）禁止裸调捕获的 pi/ctx——必须经 ext-guards guardStaleCtx 包裹（前置代际检查 isCtxStale 主判 + pi stale 错误文案 'stale after session replacement' 兜底分诊；stale 静默降级走 onStale 观测，非 stale 原样上抛不吞真实 bug）；接入包须在 ext-guards/docs/stale-ctx-audit.md 登记「stale 静默语义」判定（stale 静默意味着什么 + 用户出路）。文案是 pi 语义断言（PS-30），随 pi 版本门禁自动重验，文案变更时守卫退化为全部上抛（有痕，门禁报红）；【2026-09-12 恢复登记】原 C-pi-15 被 dev-0.9.17 合并对侧重写顶出（该号现被 mutation reply 约束占用），改登 C-pi-16；【2026-09-13 合并改号】原编号 C-pi-16 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
+      "scope": [
+        "extensions/shared/ext-guards/**",
+        "extensions/universal/smart-context/**",
+        "extensions/universal/plan/**",
+        "extensions/universal/scheduler/**",
+        "extensions/universal/structured-output/**",
+        "extensions/universal/subagent-workflow/**",
+        "docs/pi-semantics.json",
+        "docs/design/crash-resilience.md"
+      ],
+      "authority": [
+        "design/crash-resilience.md#d1extension-异步回调守卫泛化-scheduler-范式到-ext-guards短期对应-r1g1",
+        "pi-semantics.json"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "error-handling"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-pi-semantics.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-data-21",
+      "summary": "崩溃台账双文件单写者 + 写入点矩阵（crash-forensics D1）：main.jsonl（main 进程写：main 自身 + renderer 事件）与 runtime.jsonl（runtime 写：runtime + pi + plugin-worker 事件）各写各的——崩溃瞬间两进程死亡顺序不可控，双文件消除跨进程写竞争，禁单一统一台账由一方代写；schema SSOT = packages/shared/src/crash-journal-schema.ts（event 闭合枚举 + CRASH_JOURNAL_KNOWN_REASONS 分层覆盖锁，新 reason 值须登记元组或声明开放形态）；写入点矩阵钉死抑制语义挂点——deleted 挂 removeSessionEntry 汇聚点、pi 计划内终止挂杀链发起处（destroySession 先删 Map 使 exit handler 反查无条目静默，挂 exit handler 事件永不产生）、runtime 自身 shutdown 行由 main 侧写（before-quit 上下文带 runtime.isRunning 在场性 guard / planned 按退出码 86 / 判别式「非 before-quit 且 ≠86 且 stopping=false」才写 crash / liveness 强杀在 forceRestartForLiveness 杀链发起处双写 unresponsive），runtime shutdown 序内禁写 shutdown 行防计划内归因污染；main 自身崩溃走 run/main-running.marker 残留下次启动补记（reason=unclean-exit，先记后删）；条件类信号（frame-truncated / registry-miss / watermark-daily）一并事件化——台账是触发条件评估器的唯一输入，禁让评估器解析日志文本行；【2026-09-13 合并改号】原编号 C-data-20 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
+      "scope": [
+        "packages/runtime/src/infra/crash-journal.ts",
+        "packages/shared/src/crash-journal-schema.ts",
+        "apps/electron/main/logs/crash-journal.ts",
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/services/reap-orphan-pi.ts",
+        "packages/runtime/src/infra/pi/event-adapter.ts",
+        "apps/electron/main/supervisor/**",
+        "apps/electron/main/window/**",
+        "apps/electron/main/logs/renderer-log-handler.ts"
+      ],
+      "authority": [
+        "design/crash-forensics-and-watchdog.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-build-09",
+      "summary": "pi tee 单文件有界（crash-forensics D7）：createPiStreamWriter size 轮转与主日志共用 MAX_FILE_BYTES（XYZ_LOG_MAX_BYTES env 单旋钮，默认 50MB）——达阈值 end 旧流等待 flush → zlib gzip 归档 <file>.1.gz（单代，tmp→rename 原子覆盖，gzip 兜底超时防挂死）→ 新流截断续写原路径，轮转窗口行入队回放防丢、openPiStreams 注册表引用随轮转更新（退出 flush 走新流）；段文件必须保持 pi- 前缀（架构 D6③ 不变量：否则旋段逃出 cleanExpiredLogs 7 天清理白名单，变成新的无清理写入面）；[推翻登记] logger.ts 旧注释裁决「不轮转：单 session 事件量可控」被 198MB 实测证伪 [HISTORICAL]；字节计数起点 = writer 创建时 0（跨重启打开时预滚未实现，reattach 重开同 date 大文件最坏约 2× 阈值才轮转——登记接受，跨重启 size 封顶属后续独立工作）；【2026-09-13 合并改号】原编号 C-build-08 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
       "scope": [
         "packages/runtime/src/infra/logger.ts"
       ],

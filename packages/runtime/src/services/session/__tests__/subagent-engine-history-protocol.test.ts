@@ -5,8 +5,10 @@
 // ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，投影复用）；
 // ③ 协议失败降②级 journal / 引擎未发现降③级 outcome-only（GUI source 标注的
 //    数据源契约 = SessionView.source，降级事实 warn 留痕）；
-// ④ idle 5min 复用（可注入窗口）：复用窗口内同实例（spawn 计数不增），过期 dispose
-//    后重建（spawn 计数 +1）；
+// ④ idle 5min 复用：复用窗口内同实例（spawn 计数不增），过期 dispose 后重建
+//    （spawn 计数 +1）。窗口状态确定性控制——生产窗口 5min 保证「窗口内」与真实
+//    read 耗时无关；「过期」由 expireIdleEngineClientsForTests 显式驱动 idle 回收
+//    路径（真实定时器回调同函数），不靠真实等待，全载下零时序敏感；
 // ⑤ 退出钩子聚合上界：挂死引擎下 disposeRuntimeEngineClients 在上界返回不被拖死。
 //    真实短窗口替代 fake timers——协议 IO 与杀链是真实 OS 异步，fake timers 推不动
 //    子进程退出，真实 150ms 窗口是上界语义的直接证据（index.ts 内「dispose 与 relay
@@ -20,9 +22,9 @@ import { fileURLToPath } from 'node:url'
 import type { SubagentRecord } from '@xyz-agent/shared'
 import {
   disposeRuntimeEngineClients,
+  expireIdleEngineClientsForTests,
   readEngineSubagentHistory,
   resetRuntimeEngineWiringForTests,
-  setEngineIdleReuseMsForTests,
 } from '../subagent-engine-history.js'
 
 const FIXTURE_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/fake-engine-cli.mjs')
@@ -150,19 +152,17 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
   })
 
   it('④ idle 复用：窗口内二次 read 零新 spawn；窗口过期 dispose 后重建 +1', async () => {
-    // 窗口按负载容差标定（3s）：idle 定时器在实例创建时启动，并行全量测试下子进程
-    // 冷启动可超秒级，窗口过小会让「窗口内复用」假红；生产恒 5min，不受此钩子影响。
-    setEngineIdleReuseMsForTests(3_000)
     truncateSpawnLog()
+    // 窗口内：生产窗口 5min ≫ 任何真实 read 耗时 → 复用判定与负载无关。
     await readEngineSubagentHistory(makeRecord(), dataDir)
     await readEngineSubagentHistory(makeRecord(), dataDir)
     expect(spawnLogPids()).toHaveLength(1) // idle 窗口内复用同一引擎实例
 
-    await new Promise((r) => setTimeout(r, 4_500)) // 过期 → idle dispose（协议帧 + 20ms 退出）
+    // 窗口过期：显式驱动 idle 回收（同一到期路径）→ dispose + 出表。
+    expireIdleEngineClientsForTests()
     await readEngineSubagentHistory(makeRecord(), dataDir)
-    expect(spawnLogPids()).toHaveLength(2) // dispose 后新实例
-    setEngineIdleReuseMsForTests(5 * 60 * 1000)
-  }, 30_000)
+    expect(spawnLogPids()).toHaveLength(2) // 过期 dispose 后新实例
+  }, 20_000)
 
   it('③ 协议 read 失败降②级 journal：journalPath 白名单内事件重放投影', async () => {
     setEnv('FAKE_READ_MODE', 'error')

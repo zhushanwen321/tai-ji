@@ -23,8 +23,9 @@
 │  主进程（Electron main · Node）│  │  Runtime 子进程（Node · spawn）│
 │  apps/electron/main/           │  │  packages/runtime/        │
 │  窗口管理 · runtime 生命周期   │──→│  transport → services → infra │
-│  快捷键 · IPC/bridge gateway  │  │  → pi 子进程 RPC              │
-└──────────────────────────────┘  └──────────────────────────────┘
+│  快捷键 · IPC/bridge gateway  │  │  → pi 子进程 RPC（主会话）      │
+└──────────────────────────────┘  │  → subagent 引擎进程（③）       │
+                                  └──────────────────────────────┘
                       │                          │
                       └──── @xyz-agent/shared ───┘
                         协议类型（ClientMessage/ServerMessage/...）
@@ -33,6 +34,7 @@
 
 - **① preload 边界**：渲染进程不直接用 `ipcRenderer`，通过 `window.electronAPI`（preload 注入）调主进程的 ipc/bridge/privileged handler。主进程是渲染进程访问原生能力（窗口、文件系统、Runtime spawn）的唯一通道。
 - **② WebSocket 边界**：主进程用 `ELECTRON_RUN_AS_NODE=1` spawn Runtime 为独立 Node 进程，前端通过 WS 与之双向通信。ServerMessage 流式回推（pi 的 assistant 输出、工具调用、文件变更等）。
+- **③ subagent 引擎进程层**：subagent 执行经 engine-protocol v1（NDJSON stdio）派发到独立引擎 CLI 进程——pi 引擎两层嵌套（subagent-core → `pi-subagent-cli` 引擎 CLI → pi 任务子进程）；zcode 引擎常驻 app-server 子进程（spawn env 覆写 `ZCODE_SESSION_DB_PATH`，会话库隔离 `<engineDataDir>/engines/zcode/session-db/`，不进 ZCode GUI 侧边栏）。设计见 [zcode-engine-appserver-resident.md](design/zcode-engine-appserver-resident.md) / [zcode-session-db-isolation.md](design/zcode-session-db-isolation.md)，结构导航见 [subagents 架构](extensions/subagents/architecture.md)。
 
 ## 渲染进程（renderer）
 
@@ -65,11 +67,11 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 | 层 | 位置 | 职责 | 铁律 |
 |----|------|------|------|
-| transport | `src/transport/` (7 file) | 路由 ClientMessage → service，管理 WS，广播 ServerMessage | 零业务逻辑 |
-| services | `src/services/` (49 file) | 业务逻辑 + 定义 `ports/` 接口（config/session/pi-engine/model/installer/tree/workspace 七域） | **零 infra 直连**，经 ports 访问 |
+| transport | `src/transport/` (21 file) | 路由 ClientMessage → service，管理 WS，广播 ServerMessage | 零业务逻辑 |
+| services | `src/services/` (179 file) | 业务逻辑 + 定义 `ports/` 接口（config/session/pi-engine/model/installer/tree/workspace 七域） | **零 infra 直连**，经 ports 访问 |
 
 > **workspace 域（2026-07-03 新增）**：`services/workspace/`（workspace-service 编排 + recent-workspaces-store LRU/去重/持久化）。pull-only RPC（`workspace.listRecent`，不做 broadcast），写入时机挂在 `session-lifecycle.create` + `message-dispatcher.sendPrompt`。详见 [ADR-0034](adr/0034-recent-workspaces-pull-only-rpc.md) / [ADR-0035](adr/0035-recent-workspaces-writeback-atomicwrite.md)。
-| infra | `src/infra/` (18 file) | 外部系统连接器（pi RPC / npm / git / HTTP），实现 ports 接口 | 唯一与 pi/npm/git 打交道的位置 |
+| infra | `src/infra/` (50 file) | 外部系统连接器（pi RPC / npm / git / HTTP），实现 ports 接口 | 唯一与 pi/npm/git 打交道的位置 |
 
 组合根 `index.ts` 构造 infra 实现 → 注入 services → 启动 server。依赖方向：`transport → services → ports ← infra`。
 
@@ -126,6 +128,7 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 ## 子系统架构
 
 - [Plugin 子系统](architecture/subsystems/plugin/README.md) — Worker Thread 隔离 + Hook 链 + Tool RPC 路由
+- [Subagent 子系统](extensions/subagents/architecture.md) — 5 类包拓扑（subagent-workflow extension / subagent-core / subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli）+ engine-protocol v1（NDJSON stdio，引擎外移独立 CLI 包）
 - **文件树子系统**（FileService + fileTreeStore）— 三层架构（[ADR-0027](adr/0027-fileservice-three-layer.md)）+ 懒加载（[ADR-0026](adr/0026-file-tree-lazy-loading.md)）。runtime FileService 编排（cwd 守门/越界校验/ignore 双模式）→ 前端 fileTreeStore（D-021 per-session 4 facet + setNodeState 原子入口）→ FileView/FileTreeRow 渲染 + DetailPane 预览（禁 v-html）。工程约束见 [NFR.md](../NFR.md) `[from: 2026-06-28-sidebar-project-file-tree §子系统]`
 
 ## 演进 / 调研 / 历史

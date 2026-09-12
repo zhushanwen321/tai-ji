@@ -2,7 +2,7 @@
 
 > 覆盖范围：侧边栏 SegmentedTab 的 Agents/Flows 两个新 tab；subagent 列表加载、卡片渲染、点击进入对话流、返回主 session；workflow 空态占位。
 >
-> 先读 [00 总览](00-test-strategy-overview.md) 了解双轨制和三视角模型。执行计划见 [test-plan-subagent-workflow.md](test-plan-subagent-workflow.md)。
+> 先读 [00 总览](00-test-strategy-overview.md) 了解双轨制和三视角模型。执行计划原见 test-plan-subagent-workflow.md（已退役，git 历史 `eb884da68` 前版本可查）。
 
 ## §1 功能概述
 
@@ -248,7 +248,7 @@ pnpm dev → Electron (--remote-debugging-port=9222)
 
 ### 详细执行步骤
 
-见 [test-plan-subagent-workflow.md](test-plan-subagent-workflow.md)（含完整命令和断言）。
+详细执行计划原见 test-plan-subagent-workflow.md（已退役，git 历史 `eb884da68` 前版本可查，含完整命令和断言）。
 
 ## §7 Playwright E2E（real-track CDP）
 

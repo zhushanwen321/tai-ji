@@ -7,6 +7,7 @@
 // UiRequest / UiResponse / UiRequestHandler / UiMethod 的 core 侧出口 =
 // execution/dialog-queue.ts 的 SDK 再导出（W7 已切换，SSOT = SDK ui-types）——
 // 本断言的 Core* 别名现在与 Sdk* 同源，保留断言形态防未来回退为本地定义后漂移。
+// [H1 U5/U6] InteractAction / InteractResult 断言对已随 chat 域 interact 面退役删除。
 
 import { describe, expect, it } from "vitest";
 
@@ -17,8 +18,6 @@ import type {
   AgentOutcome as SdkAgentOutcome,
   EngineCapabilities as SdkEngineCapabilities,
   EngineHandleData as SdkEngineHandleData,
-  InteractAction as SdkInteractAction,
-  InteractResult as SdkInteractResult,
   ProbeReport as SdkProbeReport,
   SessionView as SdkSessionView,
   UiRequest as SdkUiRequest,
@@ -37,8 +36,6 @@ import type {
   AgentOutcome as CoreAgentOutcome,
   EngineCapabilities as CoreEngineCapabilities,
   EngineHandleData as CoreEngineHandleData,
-  InteractAction as CoreInteractAction,
-  InteractResult as CoreInteractResult,
   ProbeReport as CoreProbeReport,
   SessionView as CoreSessionView,
 } from "../../types.ts";
@@ -54,8 +51,6 @@ type _CoreSdkAgentEvent = AssertMutuallyAssignable<CoreAgentEvent, SdkAgentEvent
 type _CoreSdkAgentOutcome = AssertMutuallyAssignable<CoreAgentOutcome, SdkAgentOutcome>;
 type _CoreSdkEngineCapabilities = AssertMutuallyAssignable<CoreEngineCapabilities, SdkEngineCapabilities>;
 type _CoreSdkEngineHandleData = AssertMutuallyAssignable<CoreEngineHandleData, SdkEngineHandleData>;
-type _CoreSdkInteractAction = AssertMutuallyAssignable<CoreInteractAction, SdkInteractAction>;
-type _CoreSdkInteractResult = AssertMutuallyAssignable<CoreInteractResult, SdkInteractResult>;
 type _CoreSdkProbeReport = AssertMutuallyAssignable<CoreProbeReport, SdkProbeReport>;
 type _CoreSdkSessionView = AssertMutuallyAssignable<CoreSessionView, SdkSessionView>;
 type _CoreSdkWorktreeHandle = AssertMutuallyAssignable<CoreWorktreeHandle, SdkWorktreeHandle>;
@@ -75,8 +70,6 @@ const _assertions: Array<true> = [
   true as _CoreSdkAgentOutcome,
   true as _CoreSdkEngineCapabilities,
   true as _CoreSdkEngineHandleData,
-  true as _CoreSdkInteractAction,
-  true as _CoreSdkInteractResult,
   true as _CoreSdkProbeReport,
   true as _CoreSdkSessionView,
   true as _CoreSdkWorktreeHandle,
@@ -89,7 +82,7 @@ const _assertions: Array<true> = [
 
 describe("协议契约类型双向可赋值（编译期断言的运行时锚）", () => {
   it("全部断言成立（漂移会在 tsc --noEmit 报 never → 本文件编译失败）", () => {
-    expect(_assertions).toHaveLength(14);
+    expect(_assertions).toHaveLength(12);
     expect(_assertions.every((v) => v === true)).toBe(true);
   });
 });

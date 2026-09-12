@@ -249,6 +249,57 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     expect(String(handle.data.sessionRef["dbPath"]).startsWith("/")).toBe(true);
   }, 15_000);
 
+  it("[PR3] 工具执行期活性接线：turn 中途 tool.updated progress 帧 → ctx.onEvent 收到 {type:'activity'}（零载荷严格相等）", async () => {
+    // 真机探针实证（/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期
+    // session/event 每隔 ~1.0s 推 {type:"tool.updated", payload:{kind:"progress",…}}
+    // ——既非 final-frame 也非 delta。宿主刷新面只有 delta 事件，该帧族必须经
+    // activity 变体透出，否则「仅工具执行、零正文」形态下宿主 30min 中段无进展
+    // 守护饿死误杀。引擎接线 = channel onActivity → ctx.onEvent({type:"activity"})。
+    const toolUpdatedProgress = JSON.stringify({
+      method: "session/event",
+      params: {
+        sessionId: GOLDEN_SESSION_ID,
+        type: "tool.updated",
+        payload: {
+          toolCallId: "call_e914fc9643b7459da05127a6",
+          toolName: "Bash",
+          elapsedMs: 2134,
+          pid: 2824,
+          stdoutBytes: 11,
+          stdoutTail: "progress-1\n",
+          kind: "progress",
+        },
+      },
+    });
+    const { engine, workspace } = makeEngine({
+      replaceSendPushes: [
+        ...ZCODE_APPSERVER_GOLDEN.pushStream,
+        toolUpdatedProgress,
+        ZCODE_APPSERVER_GOLDEN.terminal[0],
+        ZCODE_APPSERVER_GOLDEN.terminal[1],
+      ],
+    });
+    const events: AgentEvent[] = [];
+    const { outcome } = await engine.run(
+      makeTask({ cwd: workspace }),
+      makeCtx({ onEvent: (e) => events.push(e) }),
+    );
+    expect(outcome.error).toBeUndefined();
+    // activity 事件恰一次（一帧一事件）、零载荷字段面严格相等（无多余键）
+    const activities = events.filter((e) => e.type === "activity");
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toStrictEqual({ type: "activity" });
+    // 事件序：activity 夹在 delta 流与终态合成事件之间（turn 中途到达）
+    expect(events.map((e) => e.type)).toEqual([
+      "text_delta",
+      "text_delta",
+      "text_delta",
+      "activity",
+      "message_end",
+      "turn_end",
+    ]);
+  }, 15_000);
+
   it("回调时点：onPoolResolved（prepare 期）先于 onHandleReady（create 应答后）先于首事件", async () => {
     const { engine, workspace } = makeEngine();
     const order: string[] = [];

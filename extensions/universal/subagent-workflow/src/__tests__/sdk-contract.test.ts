@@ -37,12 +37,23 @@ vi.mock("typebox", () => ({
 }));
 
 // Mock getSubagentService：execute plumb-through 契约测试需要拦截 service.execute 调用。
+// [H3/R6 连带] 单例访问器族自壳外移 service/service-bootstrap.ts（barrel 改从 bootstrap
+// re-export）——mock 挂 bootstrap 并经 importOriginal 保留其余真实导出；不挂则被测侧
+// 经 barrel 拿到真实未初始化服务（"subagents runtime not initialized" 假失败）。
 const { mockServiceExecute } = vi.hoisted(() => ({
   mockServiceExecute: vi.fn(),
 }));
-vi.mock( "@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
-  getSubagentService: () => ({ execute: mockServiceExecute, getCollectSyncDefault: () => "async" }),
-}));
+vi.mock(
+  "@zhushanwen/subagent-core/execution/service/service-bootstrap.ts",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<typeof import("@zhushanwen/subagent-core/execution/service/service-bootstrap.ts")>();
+    return {
+      ...actual,
+      getSubagentService: () => ({ execute: mockServiceExecute, getCollectSyncDefault: () => "async" }),
+    };
+  },
+);
 
 import { registerWorkflowsCommand } from "../interface/commands.ts";
 import { registerSubagentTool } from "../interface/subagent-tool.ts";

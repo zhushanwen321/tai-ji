@@ -18,19 +18,36 @@ import { describe, expect, it, vi } from "vitest";
 import { performGetStateHandshake, requestGetStateOnce } from "../get-state-handshake.ts";
 import type { ChildProcess } from "node:child_process";
 
-/** 最小 FakeChild：只需 stdin.write 行为（成功 / 可注入同步 throw）。 */
-function makeFakeStdin(behavior?: { throwOnWrite?: Error }): { child: ChildProcess; writes: string[] } {
+/**
+ * 最小 FakeChild：只需 stdin.write 行为（成功 / 可注入同步 throw）。
+ *
+ * @param behavior.throwOnWriteTimes 前 N 次调用抛错（缺省 = 每次都抛）；
+ *        抛错调用不记入 writes（writes = 成功写出的行）。
+ */
+function makeFakeStdin(behavior?: { throwOnWrite?: Error; throwOnWriteTimes?: number }): { child: ChildProcess; writes: string[] } {
   const writes: string[] = [];
+  let calls = 0;
   const child = {
     stdin: {
       write(line: string): boolean {
-        if (behavior?.throwOnWrite) throw behavior.throwOnWrite;
+        calls++;
+        if (
+          behavior?.throwOnWrite &&
+          (behavior.throwOnWriteTimes === undefined || calls <= behavior.throwOnWriteTimes)
+        ) {
+          throw behavior.throwOnWrite;
+        }
         writes.push(line);
         return true;
       },
     },
   } as unknown as ChildProcess;
   return { child, writes };
+}
+
+/** EPIPE 形态的 stdin 同步写失败（stdin-writer.ts writeStdinLine rethrow 的错误形状）。 */
+function epipeError(): Error {
+  return Object.assign(new Error("write after end"), { code: "EPIPE" });
 }
 
 /** 可控的监听表：模拟 stdout pump 的 get_stateListeners（注册返回注销函数）。 */
@@ -103,8 +120,7 @@ describe("requestGetStateOnce（[T1/RC-1] 惰性回补单次请求）", () => {
   it("stdin 同步写失败（EPIPE code，writeStdinLine rethrow 路径）→ 立即 resolve 空对象、永不 reject", async () => {
     // writeStdinLine 只对 code 为 EPIPE / ERR_STREAM_DESTROYED 的错误 rethrow（[R3]），
     // requestGetStateOnce 的 catch 捕获后按「回补失败」resolve 空对象（同超时语义）。
-    const epipeErr = Object.assign(new Error("write after end"), { code: "EPIPE" });
-    const { child } = makeFakeStdin({ throwOnWrite: epipeErr });
+    const { child } = makeFakeStdin({ throwOnWrite: epipeError() });
     const reg = makeListenerRegistry();
 
     await expect(requestGetStateOnce(child, reg.add, 1000)).resolves.toEqual({});
@@ -160,12 +176,12 @@ describe("performGetStateHandshake（FR-4 重试握手）", () => {
     }
   });
 
-  it("response 只带 sessionId（无 sessionFile）→ 现存行为：timer 被清但不排 retry，握手悬挂", async () => {
-    // [疑似缺陷登记，仅测现存行为] resolver 到达即 clearTimeout(timer)（行 84），但
-    // retry 只在 timer 超时回调里排（行 70-79）——响应缺 sessionFile 时本轮 timer 被
-    // 清、retry 永不排、resolved 不置位：握手 promise 悬挂（fire-and-forget 消费面
-    // 不阻塞 run，timer 已 unref 不拖进程退出；真实 RPC 层 get_state 应答恒带
-    // sessionFile，该形态未在生产链路观测到）。
+  it("response 只带 sessionId（无 sessionFile）→ 视同未应答：剩余重试照发，3 轮耗尽 resolve 已收集字段", async () => {
+    // [S2 契约修复，方案 A] 不完整应答不清任何驱动（clearTimeout 移入 sessionFile
+    // 命中分支）——本轮 timer 超时照常排 retry，剩余轮次照发（writes 推进到 3）；
+    // 3 轮耗尽 resolve collected（带已收集的 sessionId），不悬挂。与头注「最多重试
+    // GET_STATE_MAX_RETRIES（3）次」契约一致（真实 RPC 层 get_state 应答恒带
+    // sessionFile，此形态为纯契约构造的防御面，生产未观测）。
     vi.useFakeTimers();
     try {
       const { child, writes } = makeFakeStdin();
@@ -177,15 +193,32 @@ describe("performGetStateHandshake（FR-4 重试握手）", () => {
         settled = true;
       });
 
+      // 第 1 轮应答缺 sessionFile（仅 sessionId）：不 resolve，驱动保留
       const firstId = (JSON.parse(writes[0]!) as { id: string }).id;
       reg.resolvers.get(firstId)?.({ sessionId: "only-id" });
       await vi.advanceTimersByTimeAsync(0);
       expect(settled).toBe(false);
 
-      // 推进远超全部重试窗（7s+）：无 retry 发生（writes 恒 1）、promise 悬挂
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(writes).toHaveLength(1);
-      expect(settled).toBe(false);
+      // 2s 超时 + 500ms 间隔 → 第 2 轮照发（重试轮未丢失）
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(writes).toHaveLength(2);
+
+      // 第 2 轮应答仍缺 sessionFile → 第 3 轮照发
+      const secondId = (JSON.parse(writes[1]!) as { id: string }).id;
+      reg.resolvers.get(secondId)?.({ sessionId: "only-id" });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(writes).toHaveLength(3);
+
+      // 第 3 轮应答缺 sessionFile → 3 轮耗尽必 settle：resolve 已收集字段（非悬挂）
+      const thirdId = (JSON.parse(writes[2]!) as { id: string }).id;
+      reg.resolvers.get(thirdId)?.({ sessionId: "only-id" });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(promise).resolves.toEqual({ sessionId: "only-id" });
+      expect(settled).toBe(true);
+
+      // 耗尽后不再发起新请求（attempts 封顶 3）
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(writes).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
@@ -201,6 +234,58 @@ describe("performGetStateHandshake（FR-4 重试握手）", () => {
       await vi.advanceTimersByTimeAsync(7_000);
       await expect(promise).resolves.toEqual({});
       expect(writes).toHaveLength(3); // MAX_RETRIES 次请求
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sendGetStateCommand 抛错（stdin EPIPE）：按「本轮未应答」处理——3 轮耗尽必 settle，不 reject 也不逃逸", async () => {
+    // [U-A1] 抛错路径的两条后果都必须消除：① 首轮经 promise executor 逃出 → reject；
+    // ② 重试轮经 setTimeout 回调进入 → 逃出即宿主 uncaughtException（比悬挂更糟）。
+    // 本用例三轮全部同步抛错：断言 promise resolve（非 reject）、3 次尝试后 settle，
+    // 且抛错轮不注册监听（无请求在途）。
+    vi.useFakeTimers();
+    try {
+      const { child } = makeFakeStdin({ throwOnWrite: epipeError() });
+      const reg = makeListenerRegistry();
+
+      let settled = false;
+      const promise = performGetStateHandshake(child, reg.add);
+      void promise.then(() => {
+        settled = true;
+      });
+
+      // 2 轮间隔 500ms（RETRY_INTERVAL_MS）——抛错路径不设 2s timer，1.5s 足够跑满 3 轮
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      await expect(promise).resolves.toEqual({});
+      expect(settled).toBe(true);
+      expect(reg.resolvers.size).toBe(0); // 抛错轮未发出请求 → 无监听注册
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("首轮抛错后恢复：第 2 轮照发且应答带 sessionFile → 握手成功 resolve（抛错不吞后续轮次）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { child, writes } = makeFakeStdin({ throwOnWrite: epipeError(), throwOnWriteTimes: 1 });
+      const reg = makeListenerRegistry();
+
+      const promise = performGetStateHandshake(child, reg.add);
+      expect(reg.resolvers.size).toBe(0); // 首轮抛错：未发出请求
+
+      // 500ms 后第 2 轮照发（抛错只吞掉本轮，不改写轮次节奏）
+      await vi.advanceTimersByTimeAsync(500);
+      expect(writes).toHaveLength(1);
+      const sent = JSON.parse(writes[0]!) as { id: string; type: string };
+      expect(sent.type).toBe("get_state");
+
+      reg.resolvers.get(sent.id)?.({ sessionFile: "/tmp/sessions/recovered.jsonl", sessionId: "sess-recover" });
+      await expect(promise).resolves.toEqual({
+        sessionFile: "/tmp/sessions/recovered.jsonl",
+        sessionId: "sess-recover",
+      });
     } finally {
       vi.useRealTimers();
     }

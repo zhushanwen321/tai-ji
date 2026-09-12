@@ -27,12 +27,13 @@ const FAKE_CLI = fileURLToPath(new URL("./__fixtures__/fake-appserver.mjs", impo
 const GOLDEN_SESSION_ID = "sess_golden_r3_01";
 const FINAL_TEXT = "你好，任务完成";
 
+let root: string;
 let dataDir: string;
 let fakeHome: string;
 let scenarioFile: string;
 
 beforeAll(() => {
-  const root = mkdtempSync(joinTmp("zcode-cli-e2e-"));
+  root = mkdtempSync(joinTmp("zcode-cli-e2e-"));
   dataDir = path.join(root, "engine-data");
   fakeHome = path.join(root, "fake-home");
   mkdirSync(path.join(fakeHome, ".zcode", "v2"), { recursive: true });
@@ -85,15 +86,16 @@ class EngineProc {
   private readonly frames: Inbound[] = [];
   private waiters: Array<{ test: (f: Inbound) => boolean; resolve: (f: Inbound) => void }> = [];
   private closed = false;
+  private stderrText = "";
 
-  constructor() {
+  constructor(scenarioPath: string = scenarioFile) {
     this.child = spawn(process.execPath, [BIN], {
       env: {
         ...process.env,
         XYZ_AGENT_DATA_DIR: dataDir,
         HOME: fakeHome,
         XYZ_ZCODE_CLI: FAKE_CLI,
-        FAKE_SESSION_SCENARIO: scenarioFile,
+        FAKE_SESSION_SCENARIO: scenarioPath,
         // 剥可能干扰的宿主继承面（CI/本地环境差异面收敛）
         ZCODE_SESSION_DB_PATH: "",
         ZCODE_SESSION_DB: "",
@@ -113,7 +115,11 @@ class EngineProc {
       }
     });
     this.child.stderr?.setEncoding("utf8");
-    this.child.stderr?.on("data", (c: string) => process.stderr.write(`[engine-stderr] ${c}`));
+    this.child.stderr?.on("data", (c: string) => {
+      // 全量取证（分级日志断言数据源）+ 转发宿主 stderr（本地调试可见性）
+      this.stderrText += c;
+      process.stderr.write(`[engine-stderr] ${c}`);
+    });
     this.child.on("close", () => {
       this.closed = true;
       for (const w of this.waiters.splice(0)) w.resolve({ kind: "notification", method: "__closed__" });
@@ -182,6 +188,11 @@ class EngineProc {
 
   get allFrames(): readonly Inbound[] {
     return this.frames;
+  }
+
+  /** 子进程 stderr 全量（分级日志断言数据源——进程 close 后已 flush 完整）。 */
+  get stderrOutput(): string {
+    return this.stderrText;
   }
 
   kill(): void {
@@ -280,6 +291,105 @@ describe("bin e2e：initialize → run → 终态应答 协议往返", () => {
       // stdin 关闭（宿主退出面）→ 进程自灭（EOF 主判据的隐式验证）
       engine.endStdin();
       expect(await engine.exited()).toBe(true);
+    } finally {
+      engine.kill();
+    }
+  });
+});
+
+// ============================================================
+// 权威终态迟到分级日志：stderr 兜底链路取证（bin 真进程全链——session-channel
+// 分级 → SDK logger facade → cli-entry stderr 兜底 sink → 子进程 stderr）
+// ============================================================
+
+describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stderr 分级", () => {
+  /** 合成「pushStream + 收尾帧（先落定）+ 迟到 turn.terminal(status)」场景文件。 */
+  function writeLateTerminalScenario(status: string): string {
+    const file = path.join(root, `scenario-late-${status}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        createResult: JSON.parse(ZCODE_APPSERVER_GOLDEN.createResponse),
+        sendPushes: [
+          ...ZCODE_APPSERVER_GOLDEN.pushStream.map(
+            (l) => JSON.parse(l) as Record<string, unknown>,
+          ),
+          JSON.parse(ZCODE_APPSERVER_GOLDEN.terminal[1]) as Record<string, unknown>, // 收尾帧先落定（final-frame）
+          { method: "v4/telemetry/event", params: { kind: "turn.terminal", status } }, // 迟到的权威终态
+        ],
+        readResult: JSON.parse(ZCODE_APPSERVER_GOLDEN.readResponse),
+      }),
+    );
+    return file;
+  }
+
+  /** 走完 initialize → run → 退出全链，返回 run 应答与已退出的引擎实例。 */
+  async function runOnce(scenarioPath: string): Promise<{ engine: EngineProc; runResp: Inbound }> {
+    const engine = new EngineProc(scenarioPath);
+    try {
+      engine.write({
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: 1, hostInfo: { name: "vitest-e2e", version: "0.0.0", dataRoot: dataDir }, engineConfig: {} },
+      });
+      const init = await engine.waitFor((f) => f.kind === "response" && f.id === 1);
+      expect(init.error).toBeUndefined();
+      engine.write({
+        id: 2,
+        method: "run",
+        params: {
+          runId: "run-late-terminal",
+          task: { prompt: "做点什么" },
+          ctx: { poolKey: "shared", cwd: dataDir, model: "test-provider/m1" },
+        },
+      });
+      const runResp = await engine.waitFor((f) => f.kind === "response" && f.id === 2);
+      // 退出后 stdio 管道已 flush（close 事件语义）——stderr 取证无竞态
+      engine.endStdin();
+      expect(await engine.exited()).toBe(true);
+      return { engine, runResp };
+    } catch (err) {
+      engine.kill();
+      throw err;
+    }
+  }
+
+  it("迟到 success（常态迟到）：run 成功，stderr 无迟到终态日志（降噪根修点）", { timeout: 60_000 }, async () => {
+    const { engine, runResp } = await runOnce(writeLateTerminalScenario("success"));
+    try {
+      expect(runResp.error).toBeUndefined();
+      const outcome = (runResp.result as { outcome: { content: string } }).outcome;
+      expect(outcome.content).toBe(FINAL_TEXT);
+      expect(engine.stderrOutput).not.toContain("权威终态晚于落定");
+      expect(engine.stderrOutput).not.toContain("[error]");
+    } finally {
+      engine.kill();
+    }
+  });
+
+  it("迟到 interrupted：降 debug 且 stderr 无输出（依赖 SDK cli-entry sink 对 debug 跳过写）", { timeout: 60_000 }, async () => {
+    const { engine, runResp } = await runOnce(writeLateTerminalScenario("interrupted"));
+    try {
+      // interrupted 不属失败终态（isFailedTerminalStatus 口径）——run 仍成功收口
+      expect(runResp.error).toBeUndefined();
+      expect(engine.stderrOutput).not.toContain("权威终态晚于落定");
+      expect(engine.stderrOutput).not.toContain("[debug]"); // debug 级不落 stderr（CONSOLE_SINK 语义对齐）
+      expect(engine.stderrOutput).not.toContain("[error]");
+    } finally {
+      engine.kill();
+    }
+  });
+
+  it("迟到 failed：stderr 保留 warn（假成功识破防御面），文案含原样 status", { timeout: 60_000 }, async () => {
+    const { engine, runResp } = await runOnce(writeLateTerminalScenario("failed"));
+    try {
+      // 权威 status=failed 经 lastTerminalStatus 分流为 run-failed（P-Z2 门修正）
+      expect(runResp.error).toBeUndefined(); // run-failed 落 outcome.error，非协议 error 帧
+      const outcome = (runResp.result as { outcome: { error?: string } }).outcome;
+      expect(outcome.error).toContain("engine_run_failed");
+      expect(engine.stderrOutput).toContain("权威终态晚于落定");
+      expect(engine.stderrOutput).toContain('[warn]');
+      expect(engine.stderrOutput).toContain('status="failed"');
     } finally {
       engine.kill();
     }

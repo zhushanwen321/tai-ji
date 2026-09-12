@@ -2,7 +2,7 @@
  * i18n-frontend-p2 U5 + U6: panel + sidebar 关键 UI 走 i18n（W3 + W4）。
  *
  * U5: GitPanel en-US locale 下 Stage/Unstage/Commit 按钮显示英文，pill 显示 Dirty。
- * U6: Sidebar zh-CN locale 下 sessionList 错误态重试按钮 === '重试'，SegmentedTab 4 tab label 走 i18n。
+ * U6: Sidebar zh-CN locale 下 sessionList 错误态重试按钮 === '重试'，SegmentedTab tab label 走 i18n。
  *
  * 验证策略：i18n key 的 en-US/zh-CN 值 + 源码 readFileSync 确认模板走 t()（不 mount 组件，
  * 避免 git provide/store 完整 mock 的脆弱性）。
@@ -47,13 +47,13 @@ describe('U5: GitPanel en-US locale 显示英文按钮 + 状态 pill', () => {
   })
 })
 
-describe('U6: Sidebar zh-CN locale + SegmentedTab 4 tab i18n', () => {
+describe('U6: Sidebar zh-CN locale + SegmentedTab tab label i18n', () => {
   it('sessionList 错误态重试按钮 === \'重试\'（zh-CN）', async () => {
     await setLocale('zh-CN')
     expect(i18n.global.t('sidebar.retry')).toBe('重试')
   })
 
-  it('SegmentedTab 4 tab label 走 i18n key（subagent/workflow 已新增 key）', async () => {
+  it('SegmentedTab tab label 走 i18n key（subagent/workflow 已新增 key）', async () => {
     await setLocale('zh-CN')
     const subagentLabel = i18n.global.t('sidebar.segmentedTab.subagent')
     const workflowLabel = i18n.global.t('sidebar.segmentedTab.workflow')

@@ -1,34 +1,32 @@
-// src/runtime/execution/alive-store.ts
+// src/execution/alive-store.ts
 //
-// .alive sidecar 生产者 + pid 探活。
+// .alive sidecar：跨进程写权声明的生产者 + pid 探活。
 //
-// 子进程启动时写 .alive（pid+id+startedAt），心跳检测时读它 + isProcessAlive
-// 判活。finalize/cancel 收尾时 remove。与 .cancelled/.finalized 构成三件套。
-//
-// 设计对齐 tombstone-store：单文件 sidecar、best-effort I/O、无全局 index。
+// [U4a / D3 v7] 角色重定义（D3d 模块头权威表述）：
+//   - 宿主 resurrect/接管归口写：写权声明 acquire（markResurrected/acquireWriteLease）
+//     / release（markFinalized/markCancelled/markIdleArchived 内部删）；
+//   - 判活 = pid 单判据（findForeignLiveInstance：self-pid 排除 + isProcessAlive，
+//     软超时已退役——谱系 #12，跨轮保留 × startedAt 一次性不刷新的组合下超时会
+//     误判在持声明陈旧）。
+// 写/删动作均经 RecordStore 意图原语归口（G1：本模块不直接面向调用方，write/remove
+// 是 store 内部写面的实现件）。
 
 import * as fs from "node:fs";
 
+import { getLogger } from "../core/logger.ts";
+
 import type { AliveMarker } from "./types.ts";
 
-// ============================================================
-// 常量
-// ============================================================
-
-/**
- * .alive marker 的软超时（1h，自 record-store.ts 迁移为共享常量）：超过此时长的
- * alive 视为陈旧——pid 复用窗口有限（[防] 缩短窗口降误判），且长时间 marker 多半
- * 是异常退出后的残留。v8.5 D 透明重生的异进程探针复用同一判据（findForeignLiveInstance）。
- */
-export const ALIVE_SOFT_TIMEOUT_MS = 3_600_000;
+const logger = getLogger("subagents");
 
 // ============================================================
 // 公开函数
 // ============================================================
 
 /**
- * 在 sessionFile 旁写 .alive sidecar（单行 JSON）。
+ * 在 sessionFile 旁写 .alive sidecar（单行 JSON，跨进程写权声明 acquire）。
  * 覆盖写——同一 sessionFile 只有最后一个 alive marker 有意义。
+ * 失败原样上抛（IO 错不吞——acquire 失败 = 双写风险敞口，调用方响亮处理，D3c）。
  */
 export function writeAliveMarker(sessionFile: string, marker: AliveMarker): void {
   const alivePath = `${sessionFile}.alive`;
@@ -62,14 +60,20 @@ export function readAliveMarker(sessionFile: string): AliveMarker | undefined {
 }
 
 /**
- * 删除 sessionFile 旁的 .alive sidecar。
- * best-effort：不存在不抛（finalize/cancel 收尾调，sidecar 可能已被清理）。
+ * 删除 sessionFile 旁的 .alive sidecar（写权声明 release）。
+ * best-effort：不存在不抛（finalize/cancel 收尾调，sidecar 可能已被清理）；
+ * 存在但删除失败（权限/磁盘错）warn 留痕——release 失败 = 残留声明可能误拦异宿主，
+ * 排障需要线索（D3a：泄漏窗 = 至宿主退出，已接受但必须可见）。
  */
 export function removeAliveMarker(sessionFile: string): void {
   try {
     fs.unlinkSync(`${sessionFile}.alive`);
-  } catch {
-    void 0; // best-effort
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return; // 不存在 = 已释放（幂等终态，正常）
+    logger.warn("[subagents] alive marker release failed (stale lease may block foreign hosts)", {
+      detail: { sessionFile, error: err instanceof Error ? err.message : String(err) },
+    });
   }
 }
 
@@ -95,18 +99,23 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * [v8.5 D] 异进程活实例探针：sessionFile 是否仍有「另一进程」的活跃实例。
+ * [v8.5 D → D3c/D3b v7] 异进程活实例探针：sessionFile 是否仍有「另一进程」持有的
+ * 写权声明。调用方在 resurrect / fork-from 前必须经此确认无他方持有，防双写同一
+ * session jsonl。
  *
- * 三判据与 record-store buildRecord 分支 3 同源（readAliveMarker + isProcessAlive +
- * 软超时）：marker 存在 && pid 存活 && 未超软超时才返回 marker；其余返回 undefined
- * （视为确死/陈旧，允许透明重生）。调用方在 resurrect 前必须经此确认源进程确死，
- * 防双写同一 session jsonl。
+ * 判据 = **pid 单判据 + self-pid 排除**（D3 v7，谱系 #12：软超时退役——跨轮保留 ×
+ * startedAt 一次性不刷新的组合下，>1h idle 的在持声明会被误判陈旧，探针超时放行
+ * 开双写窗）：
+ *   - marker.pid === process.pid → undefined（self-pid 排除：本进程的自有声明视同
+ *     无 foreign——消除本进程被自己 marker 拦死的重试死锁，D3c）；
+ *   - marker.pid 活（isProcessAlive）→ marker（他方在持，拦截）；
+ *   - pid 死 / marker 缺失/损坏 → undefined（确死/无声明，放行）。
  */
-export function findForeignLiveInstance(sessionFile: string, now: number = Date.now()): AliveMarker | undefined {
+export function findForeignLiveInstance(sessionFile: string): AliveMarker | undefined {
   const marker = readAliveMarker(sessionFile);
   if (!marker) return undefined;
+  if (marker.pid === process.pid) return undefined;
   if (!isProcessAlive(marker.pid)) return undefined;
-  if (now - marker.startedAt >= ALIVE_SOFT_TIMEOUT_MS) return undefined;
   return marker;
 }
 

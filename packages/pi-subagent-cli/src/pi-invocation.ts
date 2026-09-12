@@ -1,7 +1,7 @@
 // src/pi-invocation.ts
 //
 // 定位 pi 二进制并组装 spawn 调用（W7 迁 pi 包，core engines/pi/pi-invocation.ts
-// 逐字等价副本；relay 常量改包内 relay-env.ts）。
+// 逐字等价副本；relay 常量经 @zhushanwen/subagent-engine-sdk 单源）。
 //
 // 处理三种运行时：
 //   1. bun bundle（/$bunfs/root/ 虚拟脚本）→ 退化到 pi-in-PATH
@@ -14,7 +14,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { isRelayActive, RELAY_ENV_NODE, RELAY_ENV_SCRIPT } from "./relay-env.ts";
+import { isRelayActive, RELAY_ENV_NODE, RELAY_ENV_SCRIPT } from "@zhushanwen/subagent-engine-sdk";
 
 /** spawn 调用描述符：command + args（透传给 spawnEngineChild）。 */
 export interface PiInvocation {

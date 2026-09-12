@@ -26,7 +26,7 @@ import * as path from "node:path";
 import { getLogger } from "../core/logger.ts";
 import { writeAtomicFile } from "../shared/atomic-write.ts";
 
-import type { ExecutionMode } from "./types.ts";
+import type { ExecutionMode, RecordOrigin } from "./types.ts";
 
 const logger = getLogger("subagents");
 
@@ -74,6 +74,14 @@ export interface SessionsIndexEntry {
   /** 空串合法：尾部探测（readIdentityTail）拿不到 model 时的合法结果，不当损坏。 */
   model: string;
   thinkingLevel: string | undefined;
+  /**
+   * 来源身份（H2 S3 修复：light→索引→重建往返闭合）。undefined 表示缺失
+   * （旧索引文件/origin 缺省 = "tool" 语义），可选字段不升 INDEX_VERSION——
+   * 对齐 rootSessionId/parentRecordId 先例（宽容守卫 + 序列化自然缺省）。
+   */
+  origin?: RecordOrigin;
+  /** origin="workflow" 时所属 workflow run id（undefined = 缺失/tool 来源）。 */
+  parentRunId?: string;
 }
 
 /**
@@ -133,11 +141,19 @@ function hasSessionDescFields(v: Record<string, unknown>): boolean {
   return typeof v.task === "string" && typeof v.slug === "string" && typeof v.startedAt === "number";
 }
 
-/** 可选 string 字段组（rootSessionId/parentRecordId：undefined 表示缺失，合法）。 */
+/** 可选 string 字段组（rootSessionId/parentRecordId/parentRunId：undefined 表示缺失，合法）。 */
 function hasOptionalStringFields(v: Record<string, unknown>): boolean {
   return (
     (v.rootSessionId === undefined || typeof v.rootSessionId === "string") &&
-    (v.parentRecordId === undefined || typeof v.parentRecordId === "string")
+    (v.parentRecordId === undefined || typeof v.parentRecordId === "string") &&
+    (v.parentRunId === undefined || typeof v.parentRunId === "string")
+  );
+}
+
+/** 来源域字段组（origin 守卫宽容：undefined 缺省合法，字面量白名单对齐 readEntryOriginFields）。 */
+function hasOriginFields(v: Record<string, unknown>): boolean {
+  return (
+    v.origin === undefined || v.origin === "workflow" || v.origin === "tool"
   );
 }
 
@@ -158,6 +174,7 @@ function isPositiveIndexEntry(raw: unknown): raw is SessionsIndexEntry {
     hasStampAndIdentityFields(v) &&
     hasSessionDescFields(v) &&
     hasOptionalStringFields(v) &&
+    hasOriginFields(v) &&
     hasModelFields(v)
   );
 }

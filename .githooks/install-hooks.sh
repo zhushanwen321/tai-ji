@@ -57,7 +57,15 @@ mkdir -p "$GIT_HOOKS_DIR"
 # 生成 pre-commit hook
 echo -e "${BLUE}[INFO] 安装 pre-commit hook...${NC}"
 
-cat > "$GIT_HOOKS_DIR/pre-commit" << 'HOOK_EOF'
+# [F5] 原子写：先写同目录临时文件，成功后 mv 到目标。禁止 cat > 直接截断目标——
+# pre-commit 执行中内部跑 pnpm install → prepare → 本脚本重写「正在被执行的」钩子
+# 文件时，truncate 使 bash 读偏移失步，脚本片段被当命令执行（假语法错误中止
+# commit，2026-09-10 实发一次）。mktemp 同目录保证同一文件系统、rename 原子：
+# 执行中的 bash 要么看到完整旧文件要么完整新文件，truncate 永不发生在目标路径上。
+# 写入/chmod 失败由 EXIT trap 清理临时文件，随 set -e 以原退出码失败（既有语义不变）。
+PRE_COMMIT_TMP=$(mktemp "$GIT_HOOKS_DIR/pre-commit.tmp.XXXXXX")
+trap 'rm -f "$PRE_COMMIT_TMP"' EXIT
+cat > "$PRE_COMMIT_TMP" << 'HOOK_EOF'
 #!/bin/bash
 # Git pre-commit hook: 代码质量检查
 #
@@ -1364,6 +1372,72 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
 fi
 
 # ============================================================================
+# subagent-service 聚合边界守卫（H3/R5，subagent-service-decomposition S3 依赖单向）
+#   staged 命中六聚合（packages/subagent-core/src/execution/service/）或壳
+#   （subagent-service.ts）或守卫脚本自身时触发：
+#   scripts/check-subagent-service-boundary.mjs —— 三方向检查（聚合→聚合 import
+#   台账门 + 环检测 / 聚合→壳 import 禁则 / 跨聚合私有访问 grep 门）+ 支撑文件
+#   方向门（service-bootstrap/service-constants，H3/R6 扩）。
+#   合法边台账（ALLOWED_EDGES）以符号级精确登记在守卫脚本内（现状两条：
+#   ResolvedIdentity type-only ×2，依据 D-R4-8；[HISTORICAL] 建立时第三条
+#   ENV_SELF_RECORD_ID 常量单向 D-R3-2 已随 R6 常量归位删除）。
+#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   守卫脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SUBAGENT_SVC_BOUNDARY_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src/execution/service/ packages/subagent-core/src/execution/subagent-service.ts scripts/check-subagent-service-boundary.mjs)
+if echo "$SUBAGENT_SVC_BOUNDARY_STAGED" | grep -qE "^packages/subagent-core/src/execution/service/|^packages/subagent-core/src/execution/subagent-service\.ts$|^scripts/check-subagent-service-boundary\.mjs$"; then
+    print_section "[subagent-service 聚合边界守卫]"
+    if [ ! -f "scripts/check-subagent-service-boundary.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-service-boundary.mjs（H3/R5 守卫交付物缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-subagent-service-boundary.mjs; then
+        echo -e "${RED}[ERROR] subagent-service 聚合边界守卫未通过——聚合间协作走壳 deps 注入或显式接口，聚合读壳能力经注入函数非 import（设计 D4）${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-service 聚合边界守卫通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无 service 聚合/壳变更，跳过 subagent-service 聚合边界守卫${NC}"
+fi
+
+# ============================================================================
+# ============================================================================
+# record 持久化写面守卫（H4/S4/D7，subagent-record-persistence-consolidation）
+#   staged 命中 record 写面载体（packages/subagent-core/src/）、extensions 扫描根
+#   全域（extensions/**/src，与守卫脚本扫描根对齐）或守卫脚本自身时触发：
+#   [HISTORICAL] 原触发面仅 extensions/universal/subagent-workflow/src 一包，触发
+#   面外的包（如 session-reader）违规只能延迟暴露（阶段 3 一致性审查 P2）——扩为
+#   结构无关的 glob 全域匹配，新增分组/包零维护（同上方 EXTENSION_PKG_FILES
+#   两段式改造的教训：禁止与目录结构耦合的清单式写法）。
+#   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 六名写函数直调 +
+#   R2 subagent-record entry 直写，store 外零命中）。一级拦截 = eslint
+#   no-restricted-imports（eslint.config.mjs subagent-core 块，模块边界级）；
+#   本门拦的是 import 层拦不住的类方法调用（ManifestStore.writeManifest）与
+#   字面量写形态。触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
+#   单独 staged 删除守卫脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景
+#   的防线。不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+RECORD_WRITE_SURFACE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src/ ':(glob)extensions/**/src/**' scripts/check-record-write-surface.mjs)
+if echo "$RECORD_WRITE_SURFACE_STAGED" | grep -qE "^packages/subagent-core/src/|^extensions/.*/src/|^scripts/check-record-write-surface\.mjs$"; then
+    print_section "[record 持久化写面守卫]"
+    if [ ! -f "scripts/check-record-write-surface.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-record-write-surface.mjs（H4/U5 守卫交付物缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-record-write-surface.mjs; then
+        echo -e "${RED}[ERROR] record 持久化写面守卫未通过——store 外 record 写面直写，按上方 ✗ 明细与 Recovery 指引改调 RecordStore 意图原语${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] record 持久化写面守卫通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无 record 写面载体变更，跳过 record 持久化写面守卫${NC}"
+fi
+
 # 文档-代码符号漂移守卫（C-proc-10）
 #   staged 命中映射设计文档（docs/design/）或 update 源码模块或守卫脚本自身时触发：
 #   scripts/check-doc-symbol-drift.mjs —— TypeScript AST 提取源码符号表 × 设计文档
@@ -1534,7 +1608,12 @@ echo ""
 exit 0
 HOOK_EOF
 
-chmod +x "$GIT_HOOKS_DIR/pre-commit"
+# chmod 755 对齐原产物权限（原路径 cat 创建 644 + chmod +x = 755；mktemp 基础
+# 权限 600，仅 +x 会得 700，静默改变权限位）。mv 前任何失败：set -e 退出触发
+# EXIT trap 清理临时文件，目标路径保持完整旧内容。
+chmod 755 "$PRE_COMMIT_TMP"
+mv -f "$PRE_COMMIT_TMP" "$GIT_HOOKS_DIR/pre-commit"
+trap - EXIT
 
 # [2026-09-11 独立 hooks 改造] worktree 模式：将本 worktree 的 hooksPath 指向独立目录并自检。
 # worktree 级 core.hooksPath 覆盖 commondir 共享副本，是本 worktree 隔离生效的开关本身——
@@ -1600,6 +1679,7 @@ echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编�
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
 echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记守卫 / G3 档位差分探针 / G4 subagent 通道禁则）"
 echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包守卫（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
+echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界守卫（H3/R5：聚合间 import 台账 + 聚合→壳禁则 + 私有互调门）"
 echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移守卫（C-proc-10：设计文档引用已删除/改名符号即拦截）"
 echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路守卫（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"

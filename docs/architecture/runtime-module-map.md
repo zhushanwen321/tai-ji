@@ -1,14 +1,14 @@
 # Runtime 模块架构图
 
 **关联**：[runtime-three-layer-design.md](runtime-three-layer-design.md)（设计原理）· [runtime-migration-progress.md](runtime-migration-progress.md)（R0–R9 迁移记录）
-**快照时点**：R9 后（三层迁移 + 例外清理 + ports 按域拆分完结）
+**快照时点**：R9 后（三层迁移 + 例外清理 + ports 按域拆分完结）；文件数/行数于 **2026-09-12 重数**（口径：`find ... -name '*.ts'` 剔除 `__tests__/` 与 `*.test.ts` 的生产代码）
 
 ---
 
 ## 分层骨架
 
 ```
-                    runtime/src/   (76 .ts · 14030 行 · Electron 子进程)
+                    runtime/src/   (269 .ts · 63537 行 · Electron 子进程)
 ══════════════════════════════════════════════════════════════════════════════════════
 
     ┌──────────────────────────────────────────────────────────────────────────┐
@@ -25,7 +25,7 @@
   ╔════════════════════╗              ╔════════════════════════╗    ╔════════════════════╗
   ║   transport/       ║   调用       ║      services/         ║    ║      infra/        ║
   ║   路由·连接·广播    ║─────────────→║   业务逻辑 + ports 定义 ║    ║   外部系统连接器    ║
-  ║   7 files · 1133行 ║   IService   ║   48 files · 8165行     ║    ║   18 files·4089行  ║
+  ║  21 files · 5031行 ║   IService   ║  179 files · 42016行 ║    ║  50 files·13185行 ║
   ╚════════════════════╝   接口       ╚════════════╤═══════════╝    ╚════════╤═══════════╝
                                         │                          │        │
                                         │    services 定义 ports/   │        │
@@ -47,9 +47,9 @@
                                                                    ▼        ▼
 ```
 
-- **transport/**（7 files · 1133 行）：路由 ClientMessage → service 调用，管理 WS 连接，广播 ServerMessage。零业务逻辑。
-- **services/**（48 files · 8165 行）：业务逻辑，定义 ports/ 接口。**零 infra 直连**（R5/R7 达成）。
-- **infra/**（18 files · 4089 行）：外部系统连接器（design.md T4：唯一与 pi/npm/git/HTTP 打交道的位置），实现 ports/ 接口。
+- **transport/**（21 files · 5031 行）：路由 ClientMessage → service 调用，管理 WS 连接，广播 ServerMessage。零业务逻辑。
+- **services/**（179 files · 42016 行）：业务逻辑，定义 ports/ 接口。**零 infra 直连**（R5/R7 达成）。
+- **infra/**（50 files · 13185 行）：外部系统连接器（design.md T4：唯一与 pi/npm/git/HTTP 打交道的位置），实现 ports/ 接口。
 
 ---
 
@@ -67,6 +67,9 @@
 ║                                            └────────────────┘ └──────┬─────┘
 ║  子目录:                                                        组合 3 子模块:
 ║  services/session/  (Lifecycle·Dispatcher·Scanner，经 ISessionServiceInternal 接口)
+║    + subagent 读链：subagent-engine-history.ts（协议客户端①级读——三级发现装载
+║      cli descriptor 后按需 spawn 引擎 CLI 调协议 read，idle 5min dispose）
+║      · subagent-extractor.ts · subagent-status.ts（engine-protocolization §3.6 + D9）
 ║  services/scanners/ (skill·agent·base —— R6 从 infra 归位，纯 fs 非 pi 协议)
 ║  services/plugin-service/  ◄── 见下方独立切片
 ╚═══════════════════════════════════════════════════════════════════════════════════
@@ -89,6 +92,10 @@
 ║  └──────────┘└────────────┘└(511行)─────┘└──────────────┘└──────────────┘
 ║  + session-tree-reader(ITreeReader)·navigate-interceptor(Factory)·pi-config-bridge
 ║    ·pi-protocol(388行)·pi-provider-store·pi-paths·message-converter
+║
+║  infra/relay/  (5 files · 宿主侧 relay 通道——engine-protocolization v5 R4)
+║  relay-server·relay-registry·relay-tee·relay-env·relay-paths
+║    （tee 引擎 CLI 输出转发宿主；父身份键 SESSION_ID/RECORD_ID 剥除覆写防误归属）
 ║
 ║  infra/installers/   infra/顶层        infra/system/
 ║  NpmGitInstaller    ModelApiDiscoverer  trash

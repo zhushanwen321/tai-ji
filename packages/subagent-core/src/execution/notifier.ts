@@ -28,6 +28,33 @@ import { deriveOutcome } from "./execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
 import type { ClosedReason, ExecutionOutcome } from "./types.ts";
 
+// ============================================================
+// [T4① / PS-2] notify 门（H1 U2 自 subagent-service.ts 迁入——Continuation
+// 成功/失败分支双闸共用；原位置 re-export 保持既有 import 路径不变）
+// ============================================================
+
+/** notify 门拦截集：disposeAllRecords 因这两类原因关闭的 record，其迟到的
+ *  轮次完成回注不得注入新 session——/new、/fork 的决策（[v4 A-6]）
+ *  是「被关 record 的告知改由 list 的 closedReason 表达」，不主动通知；旧门只排除
+ *  cancelled，parent-new/parent-fork 放行 → 新对话被「Subagent X failed: closed due to
+ *  parent-new」的僵尸回执 triggerTurn 唤醒，已废弃会话的通知注入新上下文。 */
+const NOTIFY_BLOCKED_CLOSED_REASONS: ReadonlySet<ClosedReason> = new Set(["parent-new", "parent-fork"]);
+
+/**
+ * [T4① / PS-2] 轮次完成回注的 notify 门（按 closedReason 白名单放行）。
+ *
+ * cancelled（cancelBackground 自己 notify）与 parent-new/parent-fork（编排性关闭，
+ * 告知由 list 的 closedReason 表达）不放行；其余（undefined = 本路径抢到 CAS 尚未
+ * 终态化的迟到回调、user-close/gc 等真实终态）照旧回注。导出供测试与调用点复用。
+ * [H1 U2] 消费面扩为三处：Continuation 成功分支（route 前）、失败分支（独立载荷
+ * 发出前，B#19 投递门照迁移）、泛化派发主干尾部（one-shot 回注，现状不变）。
+ */
+export function notifyGateAllowsDelivery(closedReason: ClosedReason | undefined): boolean {
+  if (closedReason === undefined) return true;
+  if (closedReason === "cancelled") return false;
+  return !NOTIFY_BLOCKED_CLOSED_REASONS.has(closedReason);
+}
+
 /** U4：delivery warn 出口注入用——facade 同 component 同引用，与 index.ts 的
  *  getLogger("subagents") 共享单例；configureCore 后透明切换到宿主实现。 */
 const notifyLogger = getLogger("subagents");
@@ -78,6 +105,14 @@ export interface BgNotifyRecord {
    *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
    *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
   notifyId?: string;
+  /**
+   * [drain-drop 修复] notifyId 构造的显式覆盖（notify() 优先消费；缺省 = 既有
+   *  `id` / `id:round` 语义零变化）。供「同轮先导通知与派生通知必须区分」的场景使用：
+   *  现行唯一消费方 = drain 队列丢弃通知（`${id}:${round}:drain-drop`）——同轮
+   *  settleRoundFailed 失败通知缺省 key 为 `id:round`，丢弃通知若沿用同 key 会被
+   *  ledger/内核按 key 永久去重吞掉（「队列消息被丢」的显式反馈永不可达）。
+   */
+  dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
    *  仅 chatMode close 语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
@@ -507,7 +542,10 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
       // dedupe key 与账本身份键同源，details 携带供回执匹配）。
-      const notifyId = record.round != null ? `${record.id}:${record.round}` : record.id;
+      // notifyId 构造：dedupKey 显式覆盖优先（drain 丢弃通知等派生通知的独立去重
+      // 身份），缺省维持既有 `id:round` / `id` 语义（既有通知面 key 零变化）。
+      const notifyId =
+        record.dedupKey ?? (record.round != null ? `${record.id}:${record.round}` : record.id);
       const payload: BgNotifyRecord =
         record.status === "closed"
           ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error), notifyId }

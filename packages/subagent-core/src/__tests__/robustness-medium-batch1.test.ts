@@ -1,6 +1,9 @@
 // Medium batch 1 robustness fixes verification
 //
-// M4: dispatchAgentCall .then() clears node.live BEFORE stale guard (not after)
+// M4: [H2 W3 改写] dispatchAgentCall 的 node.live 清理已随 trace.live 字段退役
+//     （设计 subagent-workflow-record-unification.md D2——旁路 progress record 族
+//     整体删除，节点无运行期附属对象）。原「live 清理先于 stale guard」的顺序
+//     断言改为退役回归：pump 无 node.live 写点。
 // M7: handleWorkerMessage validates msg shape before dereferencing msg.opts
 // M8: session-reconstructor guards Array.isArray(msg.content) before for...of
 
@@ -17,24 +20,17 @@ function readSrc(relPath: string): string {
   return readFileSync(join(PKG_ROOT, relPath), "utf-8");
 }
 
-// ── M4: node.live cleared before stale guard ─────────────────
+// ── M4: node.live 写点已退役（[H2 W3] 回归锁定） ─────────────
 
-describe("M4: dispatchAgentCall .then() clears node.live before stale guard", () => {
+describe("M4: [H2 W3] dispatchAgentCall 不再写 node.live", () => {
   const src = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
 
-  it("node.live = undefined appears before the stale guard return", () => {
-    // 找到 .then 回调中的 stale guard 和 node.live 清理的相对顺序
+  it("整个 pump 源码无 .live 写点（旁路 record 族退役），stale guard 仍在", () => {
+    expect(src).not.toMatch(/\.live\s*=/);
+    // .then 的 stale guard 仍在（原顺序断言的对象消失，守卫本身保留）
     const thenMatch = src.match(/\.then\(\(\)\s*=>\s*\{[\s\S]*?\}\)/);
     expect(thenMatch).toBeTruthy();
-    const thenBlock = thenMatch![0];
-
-    const liveIdx = thenBlock.indexOf("node.live = undefined");
-    const guardIdx = thenBlock.indexOf('run.state.status !== "running"');
-
-    expect(liveIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeGreaterThan(-1);
-    // node.live 清理必须在 stale guard 之前（代码行号更小）
-    expect(liveIdx).toBeLessThan(guardIdx);
+    expect(thenMatch![0]).toContain('run.state.status !== "running"');
   });
 });
 

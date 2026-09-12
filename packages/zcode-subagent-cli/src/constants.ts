@@ -181,3 +181,19 @@ export const ZCODE_APPSERVER_ERR_BUSY_SESSION = -32010;
  * 触发，本窗口兜底防 `close` 永不到达时 dispose 挂死。
  */
 export const ZCODE_APPSERVER_HARVEST_GRACE_MS = 1_000;
+
+/**
+ * 失败终态判据（⛔P-Z2 门修正）：真实 status 枚举 = ["success","interrupted",
+ * "failed"]（app-server dist schema f.enum 实证，**无 "error"**——v1 判据
+ * `=== "error"` 对真实 failed 终态漏分流即假成功，本修复轮根修）。裁决：
+ *   - "failed" → run-failed（模型/服务端真实失败——§5.2 F-3）；
+ *   - "interrupted" → 不分流（用户中断，不属引擎失败——随宿主 abort 主路径收口，
+ *     引擎侧不抢先把它终态化为失败）；
+ *   - "error" → 保留为容错分支（非真实枚举，防协议漂移/旧版本形态再滑入假成功；
+ *     假成功代价 >> 误报失败代价，取并集防御）。
+ * 收编自 zcode-engine.ts（原模块私有）：session-channel 的迟到终态分级日志与引擎
+ * 失败分流共用同一口径（分类集合单源，禁止双轨漂移）。
+ */
+export function isFailedTerminalStatus(status: string | undefined): boolean {
+  return status === "failed" || status === "error";
+}

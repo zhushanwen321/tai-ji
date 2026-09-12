@@ -728,3 +728,81 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
     expect(readIdentityHeader(filePath)?.id).toBe("bg-prefilter");
   });
 });
+
+// ============================================================
+// [H2 S3] identity 面 origin/parentRunId 透传（写 → 读 → 重建往返保真）
+// ============================================================
+//
+// Gate B S3 FAIL 根因的 identity entry 侧防线：identity custom entry 携带
+// origin/parentRunId 时，reconstructFromFile（全量重建面）与 readIdentityHeader
+// （light 列表面）必须透传；缺省/非法值守卫归一 undefined（= "tool" 语义），
+// 对齐 readEntryOriginFields 主 entry 重建侧守卫。
+describe("[H2 S3] identity 面 origin/parentRunId 透传", () => {
+  let tmpDir: string;
+  let filePath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sr-origin-"));
+    filePath = path.join(tmpDir, "origin.jsonl");
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function writeOriginJsonl(identity: object): void {
+    const fd = fs.openSync(filePath, "w");
+    writeLine(fd, headerLine());
+    writeLine(fd, identityEntry(identity));
+    writeLine(fd, assistantEntry([{ type: "text", text: "done" }]));
+    fs.closeSync(fd);
+  }
+
+  it("往返保真：identity(origin=workflow, parentRunId) → 全量重建 + 轻量扫描均透传", () => {
+    writeOriginJsonl({
+      id: "bg-wf", agent: "worker", mode: "background", task: "wf task", startedAt: 10,
+      origin: "workflow", parentRunId: "wf-run-9",
+    });
+
+    const full = reconstructFromFile(filePath);
+    expect(full).toBeDefined();
+    expect(full!.origin).toBe("workflow");
+    expect(full!.parentRunId).toBe("wf-run-9");
+
+    const light = readIdentityHeader(filePath);
+    expect(light).toBeDefined();
+    expect(light!.origin).toBe("workflow");
+    expect(light!.parentRunId).toBe("wf-run-9");
+  });
+
+  it("缺省负向：旧 identity（无 origin/parentRunId）→ 重建两字段 undefined（= tool 语义）", () => {
+    writeOriginJsonl({ id: "bg-old", agent: "w", mode: "background", task: "t", startedAt: 1 });
+
+    expect(reconstructFromFile(filePath)!.origin).toBeUndefined();
+    expect(reconstructFromFile(filePath)!.parentRunId).toBeUndefined();
+    expect(readIdentityHeader(filePath)!.origin).toBeUndefined();
+    expect(readIdentityHeader(filePath)!.parentRunId).toBeUndefined();
+  });
+
+  it("非法值守卫：origin 非白名单 / parentRunId 非 string → 守卫归一 undefined（不抛）", () => {
+    writeOriginJsonl({
+      id: "bg-bad", agent: "w", mode: "background", task: "t", startedAt: 1,
+      origin: "bogus", parentRunId: 42,
+    });
+
+    const full = reconstructFromFile(filePath);
+    expect(full!.origin).toBeUndefined();
+    expect(full!.parentRunId).toBeUndefined();
+    const light = readIdentityHeader(filePath)!;
+    expect(light.origin).toBeUndefined();
+    expect(light.parentRunId).toBeUndefined();
+  });
+
+  it("origin=tool 显式值 → 透传保留（负向判定 `!== \"workflow\"` 依赖真实值）", () => {
+    writeOriginJsonl({
+      id: "bg-tool", agent: "w", mode: "background", task: "t", startedAt: 1,
+      origin: "tool",
+    });
+    expect(reconstructFromFile(filePath)!.origin).toBe("tool");
+    expect(readIdentityHeader(filePath)!.origin).toBe("tool");
+  });
+});

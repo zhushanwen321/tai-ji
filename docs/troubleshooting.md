@@ -9,6 +9,7 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 | **Electron 主进程** | 终端直接看 | 终端启动 `/Applications/太极.app/Contents/MacOS/TaiJi` 或 `log show --process TaiJi` |
 | **Runtime** | 终端 `[runtime:out]` / `[runtime:err]` 前缀 + `~/.xyz-agent-dev/logs/runtime-*.log` | 同主进程转发 + `~/.xyz-agent/logs/runtime-*.log` |
 | **pi 子进程** | 终端 pi 自身输出 + `~/.xyz-agent-dev/logs/pi-<date>-<sessionId>.jsonl` | `~/.xyz-agent/logs/pi-<date>-<sessionId>.jsonl` + pi 日志目录 `~/.xyz-agent/agent/logs/` |
+| **升级子系统** | `~/.xyz-agent-dev/update/update-error.log`（JSONL 512KB×2 轮转；失败登记含 errorCode/rawCause/engine/releaseSource，成功登记 source-selection/source-failover/download-success） | `~/.xyz-agent/update/update-error.log`（同左） |
 | **前端 DevTools** | Cmd+Option+I 打开 | 同左 |
 
 **打包模式启动应用获取完整日志**：
@@ -37,11 +38,11 @@ Resources/
 │   ├── agent/                         # agent skills/extensions
 │   └── assets/                        # agent 资源文件
 ├── extensions/                        # builtin pi extensions
-│   └── @zhushanwen/<pkg>/             # 13 个 @zhushanwen/pi-*（esbuild bundle 产物）
+│   └── @zhushanwen/<pkg>/             # 18 个 @zhushanwen/pi-*（esbuild bundle 产物）
 └── bin/xyz-settings                   # xyz-settings CLI（pi Skill 引用）
 ```
 
-> **注**：builtin pi extensions（13 个 `@zhushanwen/pi-*`）随应用打包内置在 `Resources/extensions/@zhushanwen/` 下，离线可用、无需安装。其中 infrastructure 级 6 个（`pi-pending-notifications` / `pi-session-reader` / `pi-structured-output` / `pi-agent-ext` / `pi-system-prompt` / `pi-msg-id-mapper`）不可禁用，feature 级 7 个可在 Settings → Extensions 中禁用/启用。第三方扩展（任意 npm 包 / 本地目录 / git）经 Settings → Extensions 安装到数据目录。
+> **注**：builtin pi extensions（18 个 `@zhushanwen/pi-*`，数量与分组以 `packages/shared/src/mandatory-extensions.json` 为 SSOT）随应用打包内置在 `Resources/extensions/@zhushanwen/` 下，离线可用、无需安装。其中 infrastructure 级 6 个（`pi-pending-notifications` / `pi-session-reader` / `pi-structured-output` / `pi-agent-ext` / `pi-system-prompt` / `pi-msg-id-mapper`）不可禁用，feature 级可在 Settings → Extensions 中禁用/启用。第三方扩展（任意 npm 包 / 本地目录 / git）经 Settings → Extensions 安装到数据目录。
 
 **数据目录** (`~/.xyz-agent/`)：
 
@@ -51,8 +52,9 @@ Resources/
 ├── config.toml           # pi 配置
 ├── runtime.port          # runtime 端口号（文本文件）
 ├── session-data/         # session 持久化数据
-├── pi/agent/logs/        # pi 日志
-└── plugins/              # 插件数据
+├── agent/logs/          # pi 日志（extension-logger 写 <agentDir>/logs/，agentDir = <dataDir>/agent）
+├── plugins/              # 插件数据
+└── update/               # 升级子系统（update-error.log 登记 + manual/ 手动认领目录：断网逃生通道，name+size+sha256 三重校验）
 ```
 
 **开发模式差异**：数据目录 `~/.xyz-agent-dev/`，端口 +100（3310-3320），Electron userData 隔离。
@@ -116,7 +118,7 @@ lsof -i :3210-3220 -P | grep LISTEN | awk '{print $2}' | sort -u
 
 ### 4. Extension 相关问题
 
-builtin pi extensions（13 个 `@zhushanwen/pi-*`）随应用打包内置，不经过 npm 安装，离线可用：
+builtin pi extensions（18 个 `@zhushanwen/pi-*`，数量与分组以 `packages/shared/src/mandatory-extensions.json` 为 SSOT）随应用打包内置，不经过 npm 安装，离线可用：
 
 ```bash
 # 检查打包产物中的 builtin extensions
@@ -243,7 +245,88 @@ grep storeDir node_modules/.modules.yaml
 CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 6-7s 重建本地布局，然后重试 commit
 ```
 
-**防护与根治**：护栏 `.githooks/check_pnpm_store_layout.sh` 挂在 pre-commit 第 0 段（install-hooks.sh 生成）与 validate-runtime-bundle.sh Gate 0，翻转即红并输出 [FIX] 指引——同时也兼作引擎侧「不覆写 HOME」修复的验收探针（修复落地后护栏应恒绿，红 = 回退信号）。根治在引擎侧不覆写 HOME（2026-09-03 开发中）；备选方案 `.npmrc` pin `store-dir` 评估结论：`~` 展开仍 HOME 相对（无效）、相对路径解析基准未验证（有 per-package store 撕裂风险）、写死绝对路径不可移植——均不采用。
+**防护与根治**：护栏 `.githooks/check_pnpm_store_layout.sh` 挂在 pre-commit 第 0 段（install-hooks.sh 生成）与 validate-runtime-bundle.sh Gate 0，翻转即红并输出 [FIX] 指引。根治已落地（2026-09 zcode 引擎共享宿主 HOME 修订，HOME 池化删除——spawn env 不再覆写 HOME）；护栏继续保留，语义是防 HOME 覆写回退（正常应恒绿，红 = 引擎侧覆写 HOME 回退的信号）。备选方案 `.npmrc` pin `store-dir` 评估结论：`~` 展开仍 HOME 相对（无效）、相对路径解析基准未验证（有 per-package store 撕裂风险）、写死绝对路径不可移植——均不采用。
+
+### 12. subagent 完成后不回收 / 回收慢：sessionFile 获取链与 workflow 域守护特征串判读（2026-09-10 重放移植重写；2026-09-11 H1 续聊链修订）
+
+> **本节 2026-09-10 按 replay port 重写**（权威 SSOT：[design/subagent-agent-end-recovery-replay.md](design/subagent-agent-end-recovery-replay.md)）。线 B 原实现宿主（`packages/subagent-core/src/execution/engine/engines/pi/` 整目录）已随 M0 整树重置到 dev-0.9.16 删除，旧特征串（`backfilled via late get_state response` / `located via sessionDir scan` / `unobtainable after 15s recovery window` / `no-descendant fast path` / `process killed before handshake settled` 等）**在现树已全部不存在**——按旧串 grep 恒零命中是预期，不是日志丢失。
+>
+> **2026-09-11 H1 修订**（[design/subagent-chat-run-unification.md](design/subagent-chat-run-unification.md)）：chat 域独立状态机整族退役——**续聊轮 = 新 run + resume 锚点**（`RunParams.resume`，pi `--session` 续写原 session 文件），无长驻 chat 进程、无热路径相位机（`roundLifecycle` 通道 / `interact` 方法 / ChatSessionRegistry 已删，grep 零命中是预期）。sessionFile 四路获取链与下方三条特征串**全部仍现行**（每轮 run 都是新 pi 子进程，握手/回补/反查照走）；新增宿主侧锚点回填路：**run 终态应答 `outcome.sessionFile`**（chatMode 续聊轮唯一锚点落点，宿主回填 record.sessionFile 并落 `.record-binding` 绑定 sidecar，见下「H1 后续聊排障要点」）。
+
+新架构结果回收链 = 两层进程嵌套（core → `pi-subagent-cli` 引擎 CLI 进程 → `pi --mode rpc` 任务子进程）。**sessionFile 四路获取**（全部在 `pi-subagent-cli`；交付后修订 2026-09-10：原第 5 路 M4 prompt 头扫描已移除）：
+
+1. spawn 期 get_state 握手 3×2s + 500ms 间隔（M1 契约修复：应答缺 sessionFile 不再悬挂，照常排 retry 至 3 轮耗尽 resolve 已收集字段）；
+2. 握手窗口后的迟到 response（identity tracker 监听表驻留至 close，回填走 `applyGetStateFields` 同步路径 + handleReady）；
+3. agent_end 惰性 get_state 单查（**M2**，1s 超时；one-shot 域专用——chat 域已随 H1 退役，chatMode 续聊轮同为 run 链、宿主侧锚点落 run 应答 `outcome.sessionFile`）；
+4. close 收尾 LC-4 后缀反查（`findSessionFileByHeaderId`，需 sessionId 已知；静默回填、无独立特征串）。
+
+**agent_end 处置**在新架构是「无条件 kill」（agent_end 即终态，无保守等待分支）；**workflow 域静默楔死**由 **M3** 在 core `SAR.run` 挂 30min 无进展守护（复用 `settled-watchdog` 原语）。
+
+日志落盘：宿主 core 与引擎 CLI 的日志统一进 **`<dataDir>/agent/logs/subagents-<date>.log`**（core logger component = `subagents`；引擎 CLI 经 stderr + `host/log` 反向请求转投宿主日志）。桌面 runtime spawn pi 时恒注入 `XYZ_AGENT_EXT_LOG=1`，warn 级默认落盘：
+
+```bash
+# 桌面环境：runtime spawn pi 时恒注入 XYZ_AGENT_EXT_LOG=1，warn 级特征串默认落盘
+# （dev 数据目录前缀换成 ~/.xyz-agent-dev/agent/logs/）
+grep -E "\[sessionfile\]|agent_end get_state backfill|workflow no-progress watchdog" \
+  ~/.xyz-agent/agent/logs/subagents-*.log
+```
+
+裸 pi CLI 场景默认**不落盘**（extension-logger 双开关均未注入时 no-op）：需 `XYZ_AGENT_EXT_LOG=1`（info 观测档，debug 重标 info 一并写入）或 `XYZ_AGENT_DEBUG=1`（全量）。
+
+**三条现行特征串**（均为 warn 级；①③ 来自 `pi-subagent-cli`，② 来自 `subagent-core`。交付后修订 2026-09-10：M4 的四条特征串随其移除而消失，现树 grep 恒零命中是预期）：
+
+**① `unobtainable for ... (all acquisition paths missed)` — 四路全 miss 的响亮异常信号（交付后新增形态）**
+
+- 日志：`[sessionfile] unobtainable for <recordId> (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。`
+- 含义：四路获取全 miss——子进程从握手起就从未应答任何 get_state（stdin 断/楔死形态），这本身是应有响亮报错的异常信号（不做启发式自动认领，2026-09-10 用户裁定移除 M4 扫描）。run 仍正常终态、通知照发（结果正文来自 stdout 事件累积，不依赖 sessionFile）；`session_read` 指针行仍生成，session-reader 侧降级为明确「session file not found」而非悬挂。
+- 下一步：该 record 的 transcript 锚点缺失但**不会误配**（无自动认领即无错绑风险）。按 warn 尾句人工处置：session-reader 列 sessionDir 内 mtime ∈ 本次 run 生命周期的 `.jsonl` 人工归档，或重派任务。**高频出现说明握手链系统性故障**（如 F6 的 relay 身份键缺失形态），应排查握手失败根因而非逐条归档。
+
+**② `agent_end get_state backfill failed` — M2 惰性回补链抛错（kill 仍必达）**
+
+- 日志：`[session-runner] agent_end get_state backfill failed for <recordId> (treated as miss; kill proceeds): <msg>`
+- 含义：agent_end 惰性回补（1s 单查）的**结果处理链**抛错（`requestGetStateOnce` 自身永不 reject；抛点在上层回填/组帧）。`killChild` 放 finally 必达——run 不因回补失败挂死；回补超时/子进程不应答则静默 resolve 空对象（无任何串），交 close 收尾第 4 路（LC-4）兜底，全 miss 走 ① 的 warn。
+
+**③ `workflow no-progress watchdog ... fired` — workflow 域静默楔死熔断（M3）**
+
+- 日志：`[subagents] workflow no-progress watchdog (<phase>) fired for <recordId>: no valid protocol event for <n> min after run dispatched — aborting run (cancel frame → settle grace window → killAll if the engine does not settle). Note: a killAll group-kills the engine CLI process, so other concurrent runs on the same engine may end as engine_crashed (they still get a failure result and retry). Recovery: check state with subagents action:'list' includeFinished:true (add includeWorkflow:true to also see workflow-dispatched subagents), then re-dispatch the workflow.`
+- 含义（2026-09-11 H2 修订）：workflow 域 agent() 经 `SubagentService.executeWorkflowAgent` 统一派发——**创建真实 ExecutionRecord（origin=workflow）进 RecordStore**，守护 arm 键 = record.id（原「SAR.run 直调、`sa-` 占位 taskId、不创建 ExecutionRecord」口径随 H2 W2/W4 退役——回退分支实体在 pump：无 dispatch 注入时直调 SAR.run 纯转调壳）。派发后 30min 无任何协议事件/stream delta → `AbortController.abort()` → mergedSignal → `wireAbortSignal` 阶梯（cancel 帧 → 3s 收敛窗 → killAll）。失败结果附后缀 `workflow no-progress watchdog fired: the run was aborted after a long silence window with no protocol event or stream delta. Recovery: check state with subagents action:'list' includeFinished:true (add includeWorkflow:true to also see workflow-dispatched subagents), then re-dispatch the workflow.`。30min 中段阈值是原语内**纯常量**（`settled-watchdog.ts` 注释「中段阈值 v1 不开 env」），`XYZ_SUBAGENT_SETTLED_WATCHDOG_MS` 只覆盖收尾段或两段全关，**不可缩短**——无法用 env 在真机快速构造（测试侧另有仅测试可达的窗长注入口，生产不可达）。
+- **env `XYZ_SUBAGENT_SETTLED_WATCHDOG_MS<=0` 会连带关掉本节这个熔断**：`subagent-service.ts` 的 `armWorkflowNoProgressWatchdog`（原 SAR.run 挂载点，[H2 W4] 掏空归位）经同一原语入口挂载，watchdog 不 arm 则 workflow 域静默楔死同样没有独立回收计时——排查「workflow 又挂死且无终态通知」时先确认该 env 没被设成非正值（warn 文案已明示这层连带，`settled-watchdog.ts` 头注同步登记）。
+- 工具执行期**不会**误 fire：pi 内置 bash 无默认超时，其执行期流式输出（`tool_execution_update`）自 2026-09-10 起被计入活性信号（1s 节流、不进正文槽）——长构建/长测试即使超过 30min 也持续刷新；静默楔死的工具仍在 30min 后被照常回收。
+- 下一步：同引擎并发 run 可能被 killAll **连带** engine_crashed 失败终态化（有失败通知 + `executeAgentCall` 退避重试通道，四要素见设计决策 9）；check `subagents action:'list' includeFinished:true` (add `includeWorkflow:true` to also see workflow-dispatched subagents) 后重派 workflow。产出仍在刷新（事件/delta 持续到达）时不 fire——fire 只在连续静默满窗时发生。
+- **H2 排查通道（workflow record 默认隐藏）**：workflow origin record 在五处投影**默认过滤**——subagents 工具 list / TUI /subagents / 侧栏 badge 与计数 / 后台工作指示 / GUI subagent 列表（三桶全滤）——排查 workflow 子代理必须带 `includeFinished:true` + `includeWorkflow:true` 成对（fire 后 record 必然终态，缺 includeFinished 只查 running 得空列表；成功 record 终态 = closed + reason gc，D7 成功即终态化，非异常，成败判读看 outcome 不看 closedReason）；run 视图实时进度经 parentRunId 查询（record 为真相）。
+
+**旧文案去留（明确，防按旧串误判）**：
+
+- **已随旧实现消失（现树 grep 恒零命中）**：`backfilled via late get_state response`、`backfilled via lazy get_state (spawn handshake had failed)`、`located via sessionDir scan`、`backfilled via sessionDir scan (close finalization)`、`unobtainable after 15s recovery window`、`entering 15s recovery window`、`retry window round N`、`no-descendant fast path`、`process killed before handshake settled`。原「区分提示」里 late vs lazy 的两路对比也随之失效（现树只有 M2 一条主动回补链，且命中不落串）。
+- **已随 M4 移除消失（2026-09-10 `dbe0a60d4`，现树 grep 恒零命中）**：`recovered for ... by M4 prompt-head scan (single match)`、`M4 prompt-head scan gave up`、`M4 prompt-head scan not wired`、`M4 prompt-head scan threw`。全 miss 形态由 ① 的 `all acquisition paths missed` warn 承接。
+- **已随 H1 chat 域退役消失（2026-09-11，现树 grep 恒零命中）**：chat 域热路径/相位机家族的日志面（roundLifecycle 相位帧、`interact` 投递拒收、ChatSessionRegistry superseded 抑制等）与 `chat-round-first-round-watchdog` 首轮看门狗——续聊排障不再有这些串；旧排障动作「查 chat 相位帧时序」改查 run 事件流与 run 终态应答。
+- **仍存在的现行面**：本节 ①-③ 全部；`findSessionFileByHeaderId`（LC-4 后缀反查，第 4 路）仍存在但其回填静默无独立特征串；M1 握手契约修复自身无日志面。
+
+**H1 后续聊排障要点（2026-09-11，chat 域统一进 run 域）**：
+
+- **每轮续聊 = 一个独立 run**：message 到达 → Continuation（`conversation-continuation.ts`，每 chatMode record 一个实例）派新 run（`RunParams.resume`）→ 新 pi 子进程 `--session` 续写原文件 → run 终态应答（resolve = agent_settled）→ 轮终簿记。排障「续聊轮卡住/无通知」按 run 链查（引擎 CLI 池 → 任务子进程 → run 应答），不存在「长驻 chat 进程忙碌/拒绝」形态——原 busy 拒绝 / superseded 串扰 / EPIPE 兜底等 chat 域失败模式已随域退役。
+- **跨重启续聊数据源 = `.record-binding` 绑定 sidecar**（UF-1）：宿主在 record.sessionFile 回填点落 `<sessionFile>.record-binding`（id→file + rootSessionId，`state-marker.ts` 载体族）。重启后 message 报「subagent not found or not owned」时按序查：① record 是否存在（列表可见 = 展示层重建正常，动作链走绑定解析）② 对应 session 文件旁有无 `.record-binding`（无 = 绑定写点未触达，查续聊 run 的终态应答是否到达 / `outcome.sessionFile` 是否回填——绑定写点在 run 应答回填处，handshake 面只回填 engineHandle.sessionRef 不写绑定）③ `cold-lookup.ts`（原 cold-resurrect 语义收敛为 cold-lookup：`findLightById` + `collectRecords` 经 sidecar 恢复 id→file 映射）。close 终态翻转写 `.state`，不破坏绑定文件。
+- **崩溃/失败轮语义**：轮在途引擎崩溃 → 失败通知单发（Continuation 独立构造载荷，正文 = 失败摘要 + 恢复指引，dedup key `record:round`）+ record 保持 running-resumable（不被终态化短路）——「失败后无通知」或「失败即 closed」都属异常，查 Continuation onRunSettled 失败分支与 `notifyGateAllowsDelivery` 门（cancelled / parent-new / parent-fork 竞态窗拦发是设计行为）。
+- **孤儿收割**：引擎 CLI 意外死亡时宿主在镜像置死前收割任务子进程（POSIX 组杀 / Windows 快照逐 pid taskkill，非主动死亡路径触发）。session 文件出现交错行 = 收割链失效证据，按设计登记升级文件锁/写者探测（红线③残余窗口：宿主重启窗）。
+
+### 13. record 直写守卫拦截（eslint no-restricted-imports / check-record-write-surface，2026-09-12 H4 收敛）
+
+> **权威 SSOT**：[design/subagent-record-persistence-consolidation.md](design/subagent-record-persistence-consolidation.md)（§3.3 D7 守卫分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
+
+record 持久化写面（`.state` 终态权威 / `.alive` 写权声明 / manifest 投影 / sessions-index 缓存 / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/record-store.ts`）。两级守卫：
+
+**① eslint 报错「store 外禁 import 终态 sidecar 写函数 / .alive 写删函数 / sessions-index 落盘函数」**（`no-restricted-imports`，模块边界一级拦截）
+
+- 触发形态：store 外（`record-store.ts` 之外，测试豁免）import `writeFinalizedState` / `writeCancelledState`（state-marker.ts）、`writeAliveMarker` / `removeAliveMarker`（alive-store.ts）、`saveIndex`（sessions-index.ts）。
+- 下一步：改调 RecordStore 意图原语——终态 = `markFinalized` / `markCancelled`（内部 `.state` writeSync 先 + manifest writeSync 后 + `.alive` 删，D8 写序单点）；写权声明 acquire = `acquireWriteLease`；归档 = `markIdleArchived`。**读函数（`readStateMarker` / `isProcessAlive` / `findForeignLiveInstance` 等）不受限**，按需 import。绑定 sidecar（`writeRecordBinding` / `updateRecordBinding`，UF-1 面）不在终态写面收敛范围。
+
+**② pre-commit 报错「record 持久化写面守卫未通过——store 外 record 写面直写」**（`scripts/check-record-write-surface.mjs`，grep 门兜底）
+
+- 触发形态（eslint 拦不住的写形态）：R1 六名写函数直调——类方法形态（`manifestStore.writeManifest(...)`，ManifestStore 实例方法 import 层拦不住）与独立函数形态（`saveIndex(...)` 等）；R2 `appendEntry` 调用行含 `subagent-record` 字面量（对象参数 customType 形态，record 主记录 entry 归 store 的 register/archive/reportRecordTransition 内置）。
+- 下一步：manifest 投影补写走 `RecordStore.rematerializeManifest`（entry 重物化腿唯一入口）；批量终态走 `markBatchFinalized`（barrier 语义内置）；状态上报走 `reportRecordTransition` / `reportSubagentRecord`。notify-ledger 投递账、reconcile-sweep 注销、pending:register/unregister 通道的 customType 不属 `subagent-record`，天然不在拦截面。
+- 复跑：`node scripts/check-record-write-surface.mjs`（应输出 `OK：... store 外 record 写面零命中`）。
+
+**误拦判定**：新写面确属 store 职责之外（如独立 extension 自有域）时，须在守卫脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即台账），禁止行内豁免绕过。
 
 ### 12. catalog provider 自定义网关失效 / 端点与官网不符：启动清洗剥除了手编网关（2026-09-10 D2 已接受代价）
 
@@ -330,6 +413,9 @@ rm -rf ~/.xyz-agent/pi.backup-v2-<ts>
 | `ELECTRON_RUN_AS_NODE` | Node 模式 | `1`（runtime 子进程） | 未设置 |
 | `VITE_MOCK=true` | Mock 模式 | — | 可选 |
 | `XYZ_RUNTIME_BASH_RPC_TIMEOUT_MS` | bash RPC 超时逃生门（0=不限时） | 未设置（默认 1h） | 可选 |
+| `XYZ_SUBAGENT_SETTLED_WATCHDOG_MS` | settled-watchdog 收尾段/两段全关（≤0 会连带关闭 workflow no-progress 熔断，见 §12 ③） | 未设置 | 可选 |
+| `XYZ_ZCODE_TURN_IDLE_TIMEOUT_MS` | zcode turn idle 判定（静默超时判死） | 未设置（默认 30min） | 可选 |
+| `XYZ_ZCODE_TURN_MAX_TIMEOUT_MS` | zcode turn 总上界（>0 覆盖、≤0 关闭） | 未设置（默认 60min） | 可选 |
 
 > 注意：`XYZ_RUNTIME_BASH_RPC_TIMEOUT_MS` 在 runtime 进程生命周期内**读一次即缓存**（`rpc-client.ts` resolveBashRpcTimeoutMs——中途改 env 不生效且无提示，超时决策须进程内稳定）。改后必须重启应用/`pnpm dev` 才生效。
 
@@ -397,7 +483,20 @@ bare repo + worktree 结构下，`.bare/hooks/pre-commit` 是全部 worktree 共
 - 排障提示：GitCode 报 `pre-receive hook declined` 且无 `remote:` 详情时，先二分 refspec 找被拒的具体引用（单引用逐个推），不要当瞬时故障重试
 - 平台行为依赖（未契约化，链路断时先查这里）：GitCode 的 release API 创建 release 时会自动打 tag 指向默认分支当前位置（非该版本 commit，v0.9.14 实测打到了旧提交），当前链路靠 push-repo 的 force-push 纠正该 tag——若 GitCode 未来对已存在 tag 拒绝强推，6.5.3 会在 verifyMirrorAlignment 处响亮失败（缺失/改动清单），按清单核对平台侧行为是否变更，勿先怀疑脚本
 
-## 周期轮询/兜底定时器的合法性判定（2026-08-28）
+### 归因排障默认优先序：读日志 → 代码定界 → 对照实验（2026-09-12 基线实验教训）
+
+症状跨多个候选改动窗口（如「上周还是绿的」类回归）需要归因时，**默认按固定优先序推进，禁止跳级上对照实验**：
+
+1. **读日志**：relay 镜像日志 / `<dataDir>/logs/` / pi 会话 jsonl / 引擎 stdout——现有日志常常已含断点位置（本案例中 relay 镜像日志 1 分钟就给出「断点在 pi 会话进程内收尾链」）
+2. **代码定界**：`git log`/`git blame` 圈出「涉事链路代码在嫌疑窗口内是否被改过」——2 分钟级成本，且能直接否决错误线索（本案例中定界发现「GUI 派发链路代码零改动」，当场作废实验依据的『布局翻转』线索——那其实是多 worktree 各写各的正确布局）
+3. **对照实验**（基线树重跑等）：仅当①②穷尽、且两个候选的**修复路径真实分叉**（归因结果会改变下一步动作）时才启动；派发实验前必须已完成②
+
+反例（2026-09-12，sess_b05ad2ea H3 Gate B 5 FAIL 归因）：法证发现 record 布局差异后直接派发「基线树重跑」实验（预期 25-40min），未先做 2min 的代码定界；被用户质疑后停掉时实验 17.6min 零产出，而事后代码定界直接推翻实验依据。核心教训两条：
+
+- **归因标签与修复动作解耦时，实验无价值**——无论 bug 归哪个窗口，最终都要修最新代码；`git blame` 到具体行后归因免费获得
+- **实验判据本身未经校验时，实验连归因都给不了**——本次 5 FAIL 的判据（record 卡 running）与产品 idle 语义冲突（可续聊形态 running 是 by design），基线跑完只会输出错误归因
+
+### 周期轮询/兜底定时器的合法性判定（2026-08-28）
 
 新增任何周期定时器（setInterval / 递归 setTimeout 循环 / 轮询兜底）前，必须按下表归类并回答该类的问题；处置台账与外部对照证据见 [design/pi-boundary-reliability.md 附录 C](design/pi-boundary-reliability.md#附录-c轮询定时器处置全清单2026-08-28d9-执行台账)。**判定原则：变化时对方会主动 push 的信息，禁止用周期 pull 兜底**——兜底轮询会掩盖主链路 bug（事故 B 的 30s 轮询就让「回执丢失」隐性存在了很久）。
 
@@ -405,7 +504,7 @@ bare repo + worktree 结构下，`.bare/hooks/pre-commit` 是全部 worktree 共
 |---|---|---|---|
 | ① 自有状态对账 | 状态变化 100% 经由自身请求/事件路径 | **禁止周期轮询**。主链路 = 回执 + 事件失效；周期 pull 会掩盖主链路 bug | thinkingLevel 30s 轮询（已随设计定案删除，附录 C.4） |
 | ② 活性探测 | 对端死掉/卡死时无法自报 | 允许，但**优先升级式触发**（事件静默超时 / 请求失败再探），无条件周期须论证 | pingPi 60s、WS 15s ping+45s watchdog、Electron 30s /health |
-| ③ 外部世界 | 数据源在外部、无 push 通道 | 允许轮询；频率 = 外部约束（API 限额 / 下游缓存 TTL），不做无依据加密 | 应用更新检查（GitHub 限额 60 次/h → 60min 间隔） |
+| ③ 外部世界 | 数据源在外部、无 push 通道 | 允许轮询；频率 = 外部约束（API 限额 / 下游缓存 TTL），不做无依据加密 | 应用更新检查（GitHub + AtomGit 双源，全源限流退避——rateLimited = 全部源均在退避窗口才报；周期 60min 不变） |
 | ④ 空转 | 有 push 通道仍轮询，或产出数据无消费者 | **删除或事件化** | plugin-host 30s memory monitor（lastActiveAt 只写不读，已删）、handoff 2s 轮询（onExit 多播化后已事件化） |
 
 新增定时器必须自答三个问题（写进代码注释）：**这个信息会变吗？变的时候对方为什么不 push？轮询周期掩盖的是什么主链路缺口？** 答不出第三个问题 = 该定时器在代偿某个未修的主链路 bug，先修主链路。
@@ -428,7 +527,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 ### 2. F10：jsonl-run-store「首写立即可见」在 pi 延迟首写窗口内不成立（PS-14）
 
 - **pi 锚点**：`dist/core/session-manager.js:724-752`（`_persist` 无 assistant message 且未 flush 时仅内存记账不落盘；首条 assistant 到达才 `openSync("wx")` 全量写出）
-- **机制**：`extensions/subagent-workflow/src/orchestration/jsonl-run-store.ts` 期望「run entry 写入即跨 session 重启可从 jsonl 发现」。新 session 经 /wf 命令启动 workflow（主 session 尚无 assistant）的窗口内 crash，run entry 只在内存，盘上无文件
+- **机制**：`extensions/universal/subagent-workflow/src/jsonl-run-store.ts` 期望「run entry 写入即跨 session 重启可从 jsonl 发现」。新 session 经 /wf 命令启动 workflow（主 session 尚无 assistant）的窗口内 crash，run entry 只在内存，盘上无文件
 - **触发条件**：全新 session + 首条 assistant 产出前 + 窗口内进程 crash/被杀 的三重组合（概率低，未实测可达性）
 - **处置建议**：现有兜底已生效——读序 entry > state 文件（store 自写）> 空，crash 恢复仍可发现 run，无需改动。升级 pi 时核对 `_persist` 的 hasAssistant 延迟首写分支是否仍在；若 pi 改为立即落盘，此观察项可关闭
 
@@ -490,7 +589,9 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **机制**：appendEntry 写的 custom entry 是持久化状态记录，AI 看不到；想让 AI 看到必须走 custom_message（sendCustomMessage）或 sendUserMessage
 - **处置建议**：这正是 extension 日志规范选 appendEntry 做「事后排查」通道的技术依据（不耗 token，见 logging-conventions.md）；反向地，靠 appendEntry「通知 AI」的代码是 bug——结果语义通知走账本 courier（C-ext-19）
 
-### 12. chat 轮 cancel 后子进程退出原因呈 exit code 143 而非 signal SIGTERM（协议 v1.x）
+### 12. chat 轮 cancel 后子进程退出原因呈 exit code 143 而非 signal SIGTERM（协议 v1.x）[HISTORICAL]
+
+> **2026-09 H1 修订**：锚点 `packages/pi-subagent-cli/src/chat-session.ts` 已随 chat 域整族退役（续聊轮 = 新 run + resume 锚点，见上 §12 subagent 大节头部 H1 修订注记），其产物 `engine_round_aborted`/`engine_round_crashed` 错误码一并消失（现树 grep 恒零命中是预期）。pi 的 SIGTERM trap → 自行 `exit(143)` 语义仍适用 run 链任务子进程，观察对象改挂 run 域（`packages/pi-subagent-cli/src/spawn-runner.ts`）——run 任务子进程被 SIGTERM 杀死时同样呈 exit code 143 而非 signal。
 
 - **现象**：chat 轮被 cancel/强关后，record/journal 的失败原因显示 `exit code 143` 而非 `signal SIGTERM`（对比：run 域引擎进程死亡呈 `signal SIGTERM`，见 conformance engine-crash 用例）。
 - **根因**：pi rpc-mode 对 SIGTERM 的 trap 是优雅收口后自行 `process.exit(143)`（`dist/modes/rpc/rpc-mode.js` trap 段）——子进程以**主动 exit** 结束，OS 层无信号终止事件，chat-session 只能拿到 (143, null)。

@@ -66,8 +66,6 @@ export type {
   EngineCapabilities,
   EngineHandle,
   EngineHandleData,
-  InteractAction,
-  InteractResult,
   ProbeReport,
   ReplayedTurn,
   SessionView,
@@ -212,13 +210,16 @@ export {
 // globalThis[Symbol.for] slot 防 jiti 多实例分裂，/resume /fork 复用既有实例
 // （SR-3/SR-4 语义）。createSubagentService / SubagentServiceInit 为构造依赖参数
 // 注入形态（modelService 等，无全局查找，@experimental U10 / D6）。
+// [H3/R6] 单例访问器 + Init 接口外移支撑文件 service/service-bootstrap.ts，本
+// barrel 直接改指向该文件（导出符号面不变；壳对 bootstrap 零 re-export——防壳↔
+// bootstrap 值环，设计 v4 import 纪律）。对外消费方零感知。
+export { SubagentService } from "./execution/subagent-service.ts";
 export {
-  SubagentService,
   getSubagentService,
   setSubagentService,
   createSubagentService,
   type SubagentServiceInit,
-} from "./execution/subagent-service.ts";
+} from "./execution/service/service-bootstrap.ts";
 // notifyGateAllowsDelivery：closedReason → 投递许可判定（通知门）——
 // 投递内核与壳侧 notify 链的共同语义锚点（execution 生产域消费，A2a）。
 export { notifyGateAllowsDelivery } from "./execution/subagent-service.ts";

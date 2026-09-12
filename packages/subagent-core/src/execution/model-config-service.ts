@@ -1,4 +1,4 @@
-// src/runtime/model-config-service.ts
+// src/execution/model-config-service.ts
 //
 // 配置 + 模型解析领域 Service。"给定 agent 名 + 用户参数 + 主 agent 模型，用哪个模型？"
 //

@@ -32,7 +32,7 @@ import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "./client/remote-engine.ts";
 import {
   readRelayForwardEnv,
-} from "../relay-env.ts";
+} from "@zhushanwen/subagent-engine-sdk";
 import { getEngineDataDir } from "./common/data-dir.ts";
 import {
   CONSERVATIVE_CAPABILITIES,

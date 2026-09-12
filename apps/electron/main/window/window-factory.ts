@@ -346,9 +346,13 @@ export async function createWindow(
   })
 
   win.once('ready-to-show', () => {
-    // E2E 模式用 showInactive：窗口渲染但不抢焦点，避免跑 E2E 时打断用户工作
-    // （Playwright Electron 不支持 headless，macOS 无 xvfb；showInactive 是不抢焦点的唯一干净方案）
-    if (process.env.XYZ_E2E === '1') {
+    // 不抢前台焦点的两类场景都走 showInactive（窗口渲染但不激活，macOS 下 Playwright
+    // Electron 不支持 headless，showInactive 是不抢焦点的唯一干净方案——见
+    // browser-automation skill 对策 2）：
+    //   - XYZ_E2E=1：E2E 构建产物形态
+    //   - XYZ_DEV_BACKGROUND=1：AI agent 真机验收的 dev 实例（C-dev-01，多 agent 并行
+    //     dev 时不得打断用户前台工作）
+    if (process.env.XYZ_E2E === '1' || process.env.XYZ_DEV_BACKGROUND === '1') {
       win.showInactive()
     } else {
       win.show()

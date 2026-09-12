@@ -12,7 +12,7 @@ import {
 } from "../model";
 import { renderWidgetLines } from "../render";
 import { createTodoSessionState } from "../state";
-import { handleSingleUpdate } from "../tool";
+import { handleAdd, handleSingleUpdate } from "../tool";
 
 // ── 数据模型 + 向后兼容 ──────────────────────────────
 
@@ -105,6 +105,84 @@ describe("todo add", () => {
 	});
 });
 
+// ── todo add — auto-GC（全部 completed 后 add 自动清理旧列表）──
+
+describe("todo add auto-GC", () => {
+	it("旧列表全部 completed → 清空旧列表，新 id 从 1 开始，nextId 重置", () => {
+		const existing: Todo[] = [
+			{ id: 1, text: "old A", status: "completed" },
+			{ id: 2, text: "old B", status: "completed" },
+		];
+		const result = addTodos(existing, 3, ["new task"]);
+
+		expect(result.autoCleared).toBe(true);
+		expect(result.newTodos).toHaveLength(1);
+		expect(result.newTodos[0]).toEqual({ id: 1, text: "new task", status: "pending" });
+		expect(result.newNextId).toBe(2);
+	});
+
+	it("存在未完成项（pending/in_progress）→ 不清理，正常追加", () => {
+		const existing: Todo[] = [
+			{ id: 1, text: "done", status: "completed" },
+			{ id: 2, text: "wip", status: "in_progress" },
+			{ id: 3, text: "waiting", status: "pending" },
+		];
+		const result = addTodos(existing, 4, ["more"]);
+
+		expect(result.autoCleared).toBe(false);
+		expect(result.newTodos).toHaveLength(4);
+		expect(result.newTodos[3].id).toBe(4);
+	});
+
+	it("空列表 → 不触发 auto-GC（autoCleared=false）", () => {
+		const result = addTodos([], 1, ["first"]);
+		expect(result.autoCleared).toBe(false);
+		expect(result.newTodos[0].id).toBe(1);
+	});
+
+	it("resultText 说明自动清理了旧列表", () => {
+		const existing: Todo[] = [{ id: 1, text: "old", status: "completed" }];
+		const result = addTodos(existing, 2, ["new task"]);
+		expect(result.resultText).toContain("Auto-cleared 1 completed todo(s)");
+	});
+});
+
+// ── todo add — 超限软提醒（> RECOMMENDED_MAX_TODOS）──
+
+describe("todo add over-limit reminder", () => {
+	function makeTodos(n: number): Todo[] {
+		return Array.from({ length: n }, (_, i) => ({
+			id: i + 1,
+			text: `task ${i + 1}`,
+			status: "pending" as const,
+		}));
+	}
+
+	it("总数超过 10 → resultText 附加提醒（含建议上限值）", () => {
+		const result = addTodos(makeTodos(9), 10, ["x", "y"]);
+		expect(result.newTodos).toHaveLength(11);
+		expect(result.resultText).toContain("recommended max of 10");
+	});
+
+	it("总数恰为 10 → 不提醒", () => {
+		const result = addTodos(makeTodos(9), 10, ["x"]);
+		expect(result.newTodos).toHaveLength(10);
+		expect(result.resultText).not.toContain("recommended max");
+	});
+
+	it("旧列表全部 completed 的 auto-GC 场景，新列表 ≤10 → 不误报提醒", () => {
+		const completed = Array.from({ length: 12 }, (_, i) => ({
+			id: i + 1,
+			text: `old ${i + 1}`,
+			status: "completed" as const,
+		}));
+		const result = addTodos(completed, 13, ["fresh task"]);
+		expect(result.autoCleared).toBe(true);
+		expect(result.newTodos).toHaveLength(1);
+		expect(result.resultText).not.toContain("recommended max");
+	});
+});
+
 // ── todo update batch ───────────────────────────────
 
 describe("todo update batch", () => {
@@ -194,6 +272,37 @@ describe("handleSingleUpdate guards (tool single path)", () => {
 		const out = handleSingleUpdate(state, { action: "update", id: 1, status: "completed" });
 		expect(out).not.toContain("All todos completed");
 		expect(out).toContain("Updated todo #1");
+	});
+});
+
+// ── handleAdd — auto-GC 重置完成周期跟踪 ────────────
+
+describe("handleAdd auto-GC resets completion-cycle tracking", () => {
+	it("全部 completed 后 add → completionSteered / allCompletedAtCount 重置，新一轮完成可再次 steer", () => {
+		const state = createTodoSessionState();
+		state.todos = [{ id: 1, text: "old", status: "completed" }];
+		state.completionSteered = true;
+		state.allCompletedAtCount = 3;
+
+		handleAdd(state, { action: "add", texts: ["new task"] });
+
+		expect(state.completionSteered).toBe(false);
+		expect(state.allCompletedAtCount).toBeNull();
+		expect(state.todos).toHaveLength(1);
+		expect(state.todos[0].id).toBe(1);
+		expect(state.nextId).toBe(2);
+	});
+
+	it("存在未完成项时 add → 完成周期跟踪不受影响", () => {
+		const state = createTodoSessionState();
+		state.todos = [{ id: 1, text: "wip", status: "in_progress" }];
+		state.nextId = 2;
+		state.completionSteered = false;
+
+		handleAdd(state, { action: "add", texts: ["more"] });
+
+		expect(state.todos).toHaveLength(2);
+		expect(state.nextId).toBe(3);
 	});
 });
 

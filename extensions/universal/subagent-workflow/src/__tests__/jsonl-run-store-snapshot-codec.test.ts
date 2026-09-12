@@ -3,18 +3,21 @@
 // ⛔5 codec 存量往返等值（下沉收口 D4/U11——jsonl-run-store 切 core run-snapshot codec）。
 //
 // 防的 bug：切换 codec 后快照投影漂移——pi 存量 session（wf-run-v2 行）必须逐字节
-// 可读可写。golden 行 = 切换前本地 serializeRun 对含 live 字段 done run 的真实落盘
-// 字节（改造前经临时探针采集，fixture 与本文件 makeDoneRunWithLive 同一构造）。
+// 可读可写。golden 行 = 切换前本地 serializeRun 对 done run 的真实落盘字节
+// （改造前经临时探针采集，fixture 与本文件 makeDoneRunWithLive 同一构造；
+// [H2 W3] live 字段随 ExecutionTraceNode 类型退役，构造不再 attach——golden 行
+// 本就无 live 键，字节不变）。
 //
 // 断言结构：
-// 1. golden 逐字节——切 codec 后 state 文件落盘行与切换前逐字节一致（含 live strip、
+// 1. golden 逐字节——切 codec 后 state 文件落盘行与切换前逐字节一致（含
 //    v="wf-run-v2"、键序）；
 // 2. entry ≡ state 文件——workflow-record entry 的 snapshot 与 state 文件同一份
 //    （W17「不二次序列化」语义在 codec 切换后保持）；
-// 3. spec.budgetRef 剔除——codec 单源裁决的唯一投影差异（嵌套 run 落盘少一脏字段，
-//    性质同 strip live），用例钉住防无意回退；
+// 3. spec.budgetRef 剔除——codec 单源裁决的唯一投影差异（嵌套 run 落盘少一脏字段），
+//    用例钉住防无意回退；
 // 4. 往返幂等——toRunSnapshot → fromRunSnapshot → toRunSnapshot 深等值（重水合保真）；
-// 5. live-strip 隔离——落盘副本剥 live，内存 run 的 live 保留（save 后 run 可继续跑）。
+// 5. [H2 W3] live 字段退役回归——节点无运行期附属对象，落盘行自然无 live 键
+//    （原 live-strip 隔离断言随字段删除退役）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -23,7 +26,6 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
-import type { ExecutionRecord } from "@zhushanwen/subagent-core/execution/types.ts";
 import { AgentCall } from "@zhushanwen/subagent-core/orchestration/models/agent-call.ts";
 import { Budget } from "@zhushanwen/subagent-core/orchestration/models/budget.ts";
 import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
@@ -43,25 +45,6 @@ const SESSION_FILE = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-
 const GOLDEN_SNAPSHOT_LINE =
   '{"v":"wf-run-v2","runId":"wf-golden-noref","spec":{"scriptSource":"module.exports = async () => {};","args":{"topic":"demo"},"scriptName":"test-script","scriptPath":"/tmp/test.js","description":"test"},"state":{"status":"done","reason":"completed","budget":{"maxTokens":4096,"maxCost":1.5,"maxTimeMs":60000,"usedTokens":4321,"usedCost":0.42,"totalCallCount":3},"calls":[{"id":0,"opts":{"prompt":"task","agent":"worker","cwd":"/tmp"},"status":"done","attempts":1,"result":{"content":"done","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"},"sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl","traceNode":{"stepIndex":0,"agent":"worker","task":"do thing","model":"default","status":"completed","startedAt":"2026-08-30T00:00:01.000Z","completedAt":"2026-08-30T00:00:02.000Z","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"}}],"trace":[{"stepIndex":0,"agent":"worker","task":"do thing","model":"default","status":"completed","startedAt":"2026-08-30T00:00:01.000Z","completedAt":"2026-08-30T00:00:02.000Z","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"}],"errorLogs":[{"level":"warn","message":"worker retry 1"}],"scriptResult":{"ok":true}},"meta":{"startedAt":"2026-08-30T00:00:00.000Z","completedAt":"2026-08-30T00:00:03.000Z","workerErrorCount":1,"scriptErrorCount":0}}';
 
-/** 最小 live 执行进度对象（strip 逻辑只解构键名——对齐 core run-snapshot.test.ts
- *  的 partial + as ExecutionRecord 先例）。 */
-function makeLiveRecord(id: string): ExecutionRecord {
-  return {
-    id,
-    agent: "worker",
-    model: "default",
-    thinkingLevel: undefined,
-    mode: "sync",
-    task: "do thing",
-    slug: "do-thing",
-    startedAt: 0,
-    rootSessionId: undefined,
-    parentRecordId: undefined,
-    depth: 0,
-    turns: [],
-  } as ExecutionRecord;
-}
-
 function makeSpec(withBudgetRef: boolean): RunSpec {
   const spec: RunSpec = {
     scriptSource: "module.exports = async () => {};",
@@ -74,9 +57,12 @@ function makeSpec(withBudgetRef: boolean): RunSpec {
   return spec;
 }
 
-/** 含 live 字段的 done run（calls 带 result/sessionId/sessionFile，budget 全字段）。 */
+/**
+ * done run（calls 带 result/sessionId/sessionFile，budget 全字段）。
+ * [H2 W3] 原「含 live 字段」构造随 ExecutionTraceNode.live 字段退役删除——节点
+ * 不再携带运行期附属对象（设计 D2），golden 行（本就无 live 键）字节不变。
+ */
 function makeDoneRunWithLive(runId: string, withBudgetRef: boolean): WorkflowRun {
-  const live = makeLiveRecord("run-0");
   const node = {
     stepIndex: 0,
     agent: "worker",
@@ -87,7 +73,6 @@ function makeDoneRunWithLive(runId: string, withBudgetRef: boolean): WorkflowRun
     completedAt: "2026-08-30T00:00:02.000Z",
     sessionId: "session-abc",
     sessionFile: SESSION_FILE,
-    live,
   };
   const trace = new Trace();
   trace.append(node);
@@ -152,7 +137,7 @@ describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", (
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("含 live 字段 run 落盘行 === 改造前 serializeRun golden 字节", async () => {
+  it("done run 落盘行 === 改造前 serializeRun golden 字节（[H2 W3] 节点无 live 字段）", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
 
@@ -207,7 +192,7 @@ describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", (
     expect(rehydrated!.state.calls.get(0)!.sessionFile).toBe(SESSION_FILE);
   });
 
-  it("live-strip 隔离：落盘行无 live 键，内存 run 的 live 保留（save 后 run 可继续跑）", async () => {
+  it("[H2 W3] live 字段退役回归：节点无运行期附属对象，落盘行自然无 live 键", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
     const run = makeDoneRunWithLive("wf-live-isolation", false);
@@ -217,9 +202,9 @@ describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", (
     const parsed: unknown = JSON.parse(readStateLine(tmpDir, "wf-live-isolation"));
     if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
     const state = (parsed as { state: { calls: Array<{ traceNode: Record<string, unknown> }>; trace: Array<Record<string, unknown>> } }).state;
+    // [H2 W3] ExecutionTraceNode.live 已删除（设计 D2）——strip 分支随字段退役，
+    // 节点不再携带运行期对象，落盘行无 live 键由类型层面收敛（回归锁定）。
     expect("live" in state.calls[0]!.traceNode).toBe(false);
     expect("live" in state.trace[0]!).toBe(false);
-    // 内存对象不受序列化 strip 影响（D-10：AgentCall.traceNode 与 trace 节点同引用）
-    expect(run.state.trace.toArray()[0]!.live).toBeDefined();
   });
 });

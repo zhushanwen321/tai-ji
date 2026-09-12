@@ -109,7 +109,7 @@ Goal 的资源约束：Token Budget（token 上限）+ Time Budget（时间上�
 Workflow 脚本中 Subagent 的执行模式：Single（单 agent 单 task 阻塞）/ Parallel（多 agent 并发）/ Pipeline（串行链式）。
 
 **Background Job**
-`background: true` 模式下的 Subagent 运行实例。结果通过 Pi 的 `sendMessage({ deliverAs: "followUp", triggerTurn: true })` 自动注入主对话。
+`background: true` 模式下的 Subagent 运行实例。结果走**确认式送达**（见上方「确认式送达」词条）：notify-ledger 持久账本 + settled 边沿 courier + notifyId 幂等 at-least-once，内核单通道 `pi.sendMessage({ triggerTurn: true })` 投递——steer/followUp/nextTurn 通道已删除，禁依赖内存队列 at-most-once（C-ext-19）。
 
 **AgentRuntime**
 Subagent 执行的底层运行时。提供 agent session 管理、agent 发现、配置合并、模型解析、tool 过滤、并发控制、事件桥接等能力。编排层（workflow）通过 `runAgent()` 或 `createSession()` 调用。

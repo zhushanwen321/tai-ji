@@ -18,6 +18,19 @@ import { createTurnLimiter } from "./turn-limiter.ts";
 /** 默认 grace turns（soft limit 后宽限轮数，core 现状值）。 */
 const DEFAULT_GRACE_TURNS = 2;
 
+/** [U-A6] 工具执行期活性信号的最小发射间隔（ms）；量级依据见 handleToolExecutionUpdate。 */
+const TOOL_ACTIVITY_MIN_INTERVAL_MS = 1_000;
+
+/**
+ * [U-A6] 工具执行期活性信号载体（`tool_execution_update` → onEvent 通道，不产数据）。
+ *
+ * 第一类 `activity` 变体已落地（F2 清账）：协议闭合联合的专用纯活性信号——双侧
+ * reducer no-op、core journal-wiring 豁免 append（不进持久/重放面），语义见 SDK
+ * contract-types AgentEvent 注释。历史借用形态（usage/error 双缺省的零写入
+ * message_end）见 git 历史。
+ */
+const TOOL_ACTIVITY_EVENT: AgentEvent = { type: "activity" };
+
 /** tool_call_id → 工具名/args 的 transient 寄存器（tool_end 缺 args 时回填）。 */
 type PendingToolRegistry = Map<string, { toolName: string; args?: unknown }>;
 
@@ -69,6 +82,47 @@ function handleToolExecutionEnd(
 function handleAssistantMessageUpdate(raw: SdkEvent, agentEvent: AgentEventSink): void {
   const mapped = mapAssistantMessageDelta(raw.assistantMessageEvent ?? {});
   if (mapped) agentEvent(mapped);
+}
+
+/**
+ * [U-A6] tool_execution_update → 工具执行期活性信号（进 onEvent，不进 onDelta）。
+ *
+ * 证据链（实装 pi 0.84.4 dist 逐行核对，2026-09-10）：
+ *   - 内置 bash 无默认超时：`dist/core/tools/bash.js` schema 描述「Timeout in seconds
+ *     (optional, no default timeout)」+ `resolveTimeoutMs(undefined) → undefined`；
+ *   - 执行期以 100ms 节流推 tool_execution_update（bash.js `BASH_UPDATE_THROTTLE_MS=100`
+ *     + emitOutputUpdate 仅在 updateDirty 时发）；除节流刷新外还有两条固定刷新：执行入口
+ *     **无条件**发一条空 content（bash.js:287 `onUpdate({content: [], details: undefined})`），
+ *     finishOutput 收尾再发一条（同文件 :299；updateDirty 为假即无产出时不重发）。故实装
+ *     「静默工具」的形态是**启动瞬间恰一条、此后零 update**，不是零 update。事件对象
+ *     `{type,toolCallId,toolName,args,partialResult}` 由 pi-agent-core agent-loop 逐次产出，
+ *     agent-session `_emit` 原样转发，rpc-mode `session.subscribe` → `output(toJsonEvent(event))`
+ *     逐行写 stdout（json-event.js 对非 message_update 原样透传）→ parseSpawnLine 归
+ *     kind="event" 的 SdkEvent。
+ *   - 该事件此前落在本 switch 的 default 丢弃 → 长工具调用（长构建/测试/安装，可达
+ *     >30min）期间 workflow/chat 两域的无进展守护「刷新两路同时失明」→ 合法任务被判
+ *     无进展取消并重试（设计 §3.3 决策 9 误杀面②）。
+ *
+ * 把「工具持续产出」计为活性信号：opts.onEvent → 宿主 RunContext.onEvent →
+ * 两域刷新面（workflow = SAR 的 journal.onEvent 包装；chat = ctx.onEvent →
+ * refreshFromProtocolEvent）。两条硬约束：
+ *   ① 不把 partialResult 文本推给 onDelta——正文槽（text_delta 专用，见 agentEvent），
+ *      工具输出混进 assistant 正文不可接受；
+ *   ② 只在工具真产出时才发（纯信号，无心跳）——静默楔死工具**启动后零 update**（启动
+ *      瞬间那条固定刷新至多让守卫多等一次窗口），照常被 30min 无进展守护回收，不因本信号
+ *      永续命。
+ *
+ * 节流：pi 已按 100ms 节流，这里再按 1s 收敛（对 30min 窗仍是密刷新；把合成事件的
+ * journal/wire 体量压到 1/10——30min 长构建从约 18k 条降到约 1.8k 条）。
+ */
+function handleToolExecutionUpdate(
+  agentEvent: AgentEventSink,
+  clock: { lastEmittedAtMs: number },
+): void {
+  const nowMs = Date.now();
+  if (nowMs - clock.lastEmittedAtMs < TOOL_ACTIVITY_MIN_INTERVAL_MS) return;
+  clock.lastEmittedAtMs = nowMs;
+  agentEvent(TOOL_ACTIVITY_EVENT);
 }
 
 /** agent_end → 终结语义分派（非 willRetry 才是轮终）。 */
@@ -136,6 +190,9 @@ export function createSdkEventTranslator(
   // a. transient 寄存器（tool_end 缺 args 时回填）
   const pendingTools: PendingToolRegistry = new Map();
 
+  // a2. [U-A6] 工具执行期活性信号的节流时钟（per-translator，即 per-run）
+  const activityClock = { lastEmittedAtMs: 0 };
+
   // b. turnLimiter（spawn 版：abort = kill 子进程；steer 未接通，靠 WRAP_UP_HINT 补偿）
   const limiter = createTurnLimiter({
     maxTurns: opts.maxTurns ?? 0,
@@ -159,6 +216,10 @@ export function createSdkEventTranslator(
     switch (raw.type) {
       case "tool_execution_start":
         handleToolExecutionStart(raw, pendingTools, agentEvent);
+        return;
+      case "tool_execution_update":
+        // [U-A6] 工具执行期活性信号（不产数据、不进正文槽；原先被 default 丢弃）
+        handleToolExecutionUpdate(agentEvent, activityClock);
         return;
       case "tool_execution_end":
         handleToolExecutionEnd(raw, pendingTools, agentEvent);

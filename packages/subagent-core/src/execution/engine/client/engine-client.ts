@@ -104,8 +104,7 @@ export type EngineClientState =
 /**
  * run 作用域反向通知路由（RemoteEngine.run 注册，终态后注销）。
  * 回调允许返回 Promise（数据面 10s 应答守卫的计时对象；同步回调不受守卫影响）。
- * [W3 v1.x] onRoundLifecycle：host/roundLifecycle 消费口（首轮 runId 键；续聊轮
- * recordId 键走 registerRecordRoute，D1-A 关联键分路）。
+ * [H1 U6] 轮次相位消费口（旧第 9 反向通道）已随 chat 域相位机退役删除。
  */
 export interface RunRoute {
   onEvent?: (event: unknown) => void | Promise<void>;
@@ -114,7 +113,6 @@ export interface RunRoute {
   onHandleReady?: (
     partial: Pick<EngineHandleData, "sessionRef" | "poolKey">,
   ) => void | Promise<void>;
-  onRoundLifecycle?: (phase: unknown) => void | Promise<void>;
 }
 
 /** spawn 引擎 CLI 平台形态（impl-plan §2.2 必写死的两行）。 */
@@ -163,9 +161,6 @@ export class EngineClient {
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
-  /** [W3 v1.x] chat 轮次路由（recordId 键，D1-A——续聊轮无 runId）；注册经
-   *  RemoteEngine.registerChatRoundRoute，record 终态注销。 */
-  private readonly recordRoutes = new Map<string, RunRoute>();
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
   private connectInFlight: Promise<void> | undefined;
@@ -186,7 +181,6 @@ export class EngineClient {
       permissionHandler: opts.permissionHandler,
       log: opts.log,
       runRoutes: this.runRoutes,
-      recordRoutes: this.recordRoutes,
       mirror: this.mirror,
       setPartialHandle: (partial) => {
         this.lastPartialHandle = partial;
@@ -560,15 +554,6 @@ export class EngineClient {
     };
   }
 
-  /** [W3 v1.x] 注册 chat 轮次路由（recordId 键）；分发见 reverse-router.ts
-   *  （与 runRoutes 同构，键空间互斥：runId=run 帧分配 / recordId=宿主铸造）。 */
-  registerRecordRoute(recordId: string, route: RunRoute): () => void {
-    this.recordRoutes.set(recordId, route);
-    return () => {
-      if (this.recordRoutes.get(recordId) === route) this.recordRoutes.delete(recordId);
-    };
-  }
-
   /** 健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）。 */
   async ping(): Promise<void> {
     await this.ensureConnected();
@@ -637,8 +622,41 @@ export class EngineClient {
   /**
    * 进程死亡 / 失败后的统一清理：镜像整体置死（失效语义 2+3：killed=true 广播后
    * 清空）→ pidfile 删 → 在途请求 engine_crashed（附 stderr 尾）→ run 路由清空。
+   *
+   * [H1 U2 / 红线①收割链] 非主动死亡且引擎已死的路径，在镜像置死**之前**补发收割
+   * 信号：孤儿真因 = 引擎意外死时宿主未发收割信号（原先 alreadyDead 分支直接跳过
+   * killProcessTree），任务子进程留在无主进程组继续写 session 文件。插入点约束：
+   *   - 位置 = mirror.killAll() 置死清空之前——Windows 通道依赖镜像快照过滤活孤儿
+   *     （置死后全量项 killed=true 不可过滤）；
+   *   - 条件 = !intentionalKill && alreadyDead——主动 dispose 链已有两层杀（引擎
+   *     killAllActiveChildren SIGTERM+30s + 宿主 killAll 组杀 5s 升级），跳过即不叠加、
+   *     优雅窗零压缩、pi trap-flush 零截断；进程仍活的路径（握手失败重建）由下方
+   *     既有组杀兜底承接。
    */
   private teardownProcess(detail: string): void {
+    if (!this.intentionalKill && this.child !== undefined) {
+      const dying = this.child;
+      const alreadyDead = dying.exitCode !== null || dying.signalCode !== null;
+      if (alreadyDead && dying.pid !== undefined) {
+        if (process.platform === "win32") {
+          // Windows：killProcessTree 的 taskkill 以引擎 pid 为树根，树根已死 → not
+          // found → 空操作（不可复用）——镜像通道收割（置死前快照，见下）。
+          this.reapOrphansViaMirrorSnapshot(detail);
+        } else {
+          // POSIX：复用 killProcessTree 负 pid 组杀（SIGTERM → 5s grace → SIGKILL
+          // 升级链内建，fire-and-forget 不阻塞同步 teardown）。组长死后进程组存活到
+          // 最后一员退出，组杀可达任务子进程（引擎 detached:true spawn = 组长，任务
+          // 子进程 detached:false 同组，组杀目标 -child.pid 不依赖镜像）。
+          // 无外层逐 pid 兜底（SIGTERM 同步返回后 5s 窗内孤儿必然仍活，同步校验恒
+          // 命中、立即兜底 = 优雅窗归零截断 trap-flush——升级链已覆盖残余职责）。
+          killProcessTree(
+            dying.pid,
+            `reap orphaned children after unexpected engine death (${detail})`,
+            { engineId: this.engineId },
+          );
+        }
+      }
+    }
     this.mirror.killAll();
     if (this.pidfileWritten !== undefined) {
       removePidfile(this.pidfileWritten);
@@ -651,7 +669,6 @@ export class EngineClient {
     }
     this.pending.clear();
     this.runRoutes.clear();
-    this.recordRoutes.clear();
     this.lastPartialHandle = undefined;
     if (this.child !== undefined) {
       const child = this.child;
@@ -668,6 +685,34 @@ export class EngineClient {
     }
     if (this.state !== "unavailable" && this.state !== "disposed") {
       this.state = "exited";
+    }
+  }
+
+  /**
+   * [H1 U2 / 红线①Windows 通道] 镜像快照收割活孤儿：镜像快照同步抓清单（置死前，
+   * 全量项含引擎一生历史死 pid——镜像对已退出子进程只改 state 不删项、唯一清空点 =
+   * killAll）→ 过滤活孤儿（state === "running" && !killed，活孤儿 ≤ 并发数）→ 逐 pid
+   * **异步 spawn** taskkill /T /F fire-and-forget（树根 = 活着的任务子进程自身，树杀
+   * 有效；快照同步抓、杀动作异步发——与 POSIX fire-and-forget 对称；禁 spawnSync：
+   * 逐个同步 N×10s 上界会冻结 onEngineExit 同步回调、推迟 pending reject（Continuation
+   * 失败通知链源头）与宿主事件循环）。
+   */
+  private reapOrphansViaMirrorSnapshot(detail: string): void {
+    const liveOrphans = this.mirror.snapshot().filter((e) => e.state === "running" && !e.killed);
+    if (liveOrphans.length === 0) return;
+    logger.warn(
+      `[engine-client:${this.engineId}] reaping ${liveOrphans.length} orphaned task child(ren) via mirror snapshot after unexpected engine death (${detail})`,
+    );
+    for (const entry of liveOrphans) {
+      const killer = spawn("taskkill", ["/PID", String(entry.pid), "/T", "/F"], { stdio: "ignore" });
+      killer.unref();
+      killer.on("error", (err: Error) => {
+        // spawn 失败（taskkill 缺失等）留 debug 痕迹——残余孤儿由红线③登记承接
+        //（下一轮派发前兜底 / 宿主重启窗口）。
+        logger.debug(
+          `[engine-client:${this.engineId}] taskkill spawn failed for orphan pid ${entry.pid} (${err.message})`,
+        );
+      });
     }
   }
 

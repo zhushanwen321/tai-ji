@@ -1,6 +1,8 @@
 # todo 扩展架构
 
 > 现状架构文档。对外契约见 `README.md`。
+>
+> 功能分级：P2（依据见 [docs/feature-priorities.md](../../../docs/feature-priorities.md) §6——面板能力，挂了主链路完整）。
 
 ## 1. 模块依赖
 
@@ -34,7 +36,7 @@
 | 字段 | 类型 | 用途 |
 |------|------|------|
 | `todos` | `Todo[]` | 当前任务列表 |
-| `nextId` | `number` | 自增 ID 计数器（auto-clear 清空时重置为 1） |
+| `nextId` | `number` | 自增 ID 计数器（auto-clear 清空或 add auto-GC 时重置为 1） |
 | `userMessageCount` | `number` | **agent 轮次计数**（命名误导，仅在 `agent_start` 递增，非"用户消息数"）。auto-clear 延迟判定的基准 |
 | `allCompletedAtCount` | `number\|null` | 首次全 completed 时的轮次锚点，用于 auto-clear 延迟判定 |
 | `completionSteered` | `boolean` | completion steer 单次锁（防重复注入"检查交付质量"） |
@@ -97,8 +99,16 @@ if handled → (cleared 则 refreshDisplay) return
 | 机制 | 常量 | 值 | 设计意图 |
 |------|------|----|---------|
 | auto-clear | `AUTO_CLEAR_DELAY_ROUNDS` | 2 | 全完成后给 2 轮缓冲（让 completion steer 有机会消费）再清空 |
+| add auto-GC | （条件式，无常量） | — | 旧列表全部 completed 时 add 先清空旧列表再新增（`model.addTodos`），开启新任务即时刻清理，不等 auto-clear 的 2 轮缓冲 |
+| over-limit reminder | `RECOMMENDED_MAX_TODOS` | 10 | add 后总数超过 10 → resultText 附加提醒（软约束不拒绝），引导合并细粒度步骤或 delete 瘦身 |
 
-### 4.3 反直觉点
+### 4.3 add 时 auto-GC（tool 层）
+
+`handleAdd` 调用 `addTodos` 后，若返回 `autoCleared=true`（旧列表全部 completed 被清理），
+同步重置 `allCompletedAtCount=null` + `completionSteered=false`——语义是「开启新任务周期」。
+不重置会让上一任务的 `completionSteered=true` 屏蔽新任务全部完成时的质量检查 steer。
+
+### 4.4 反直觉点
 
 1. **`agent_end` 短路顺序不对称**：completion-steer 不 `return`，auto-clear 命中（`handled`）则 `return`。即使即将 auto-clear，本轮 completion steer 仍会先被置位。
 2. **completion-steer 与 auto-clear 的竞态**：全 completed 后 completion-steer 先置 steer，但 auto-clear 可能在 steer 被 `before_agent_start` 消费前就清空 todos。下一 turn 消费 steer 时 todos 已空，"检查交付质量"steer 仍有意义。

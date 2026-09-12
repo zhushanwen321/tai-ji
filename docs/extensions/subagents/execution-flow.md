@@ -15,9 +15,11 @@
 
 三条路径的差异**只有交付方式**，执行本体完全相同。poll 不创建新 record，只读既有 record 的 snapshot。
 
+**workflow 域同链**：workflow 脚本内的 `agent()` 调用已归一进 SubagentService（`executeWorkflowAgent` 统一编排）——创建真实 ExecutionRecord（origin=workflow + parentRunId）、共享并发池与治理保障、成功即终态化（无 message 对端，不进 running-idle 等升级）。详见 [subagent-workflow-record-unification.md](../../design/subagent-workflow-record-unification.md)。
+
 ## 2. 统一执行流
 
-`SubagentService.execute(opts)` 是 sync/bg 共用的唯一入口。分七步，mode 分叉集中在第 3 步。执行编排逻辑（原 executor）已合并进 SubagentService——组件（pool/store/notifier）全 private，编排方法（runAndFinalize/finalizeRecord/notifyComplete 等）全 private，作为同类方法直接访问组件。
+`SubagentService.execute(opts)` 是 sync/bg 共用的唯一入口。分七步，mode 分叉集中在第 3 步。执行编排逻辑已合并进 SubagentService（编排方法 private，作为同类方法直接访问组件）。执行本体不再是进程内 session——宿主经 engine-protocol v1 向引擎进程发 run 帧（两层进程嵌套：core → pi-subagent-cli → pi 任务子进程）；池/journal/守护在 core 引擎子域，spawn 与事件翻译在引擎包。
 
 ```mermaid
 flowchart TD
@@ -25,7 +27,7 @@ flowchart TD
     S1[1. IDENTITY 解析<br/>resolveModel<br/>5级 fallback]
     S2[2. RECORD 创建+注册<br/>createRecord + store.register]
     S3{3. MODE 分叉<br/>仅 4 处差异}
-    S4[4. 执行 SessionRunner.run<br/>pool.acquire → run → pool.release]
+    S4[4. 执行：引擎进程 run 帧<br/>engine-protocol v1<br/>pool.acquire → run → pool.release]
     S5[5. FINALIZE<br/>status 判定 + tryTransition CAS<br/>finalizeRecord]
     S6{6. background 回注?}
     S7[7. 返回 handle]
@@ -57,26 +59,22 @@ executor 没有独立状态、独立生命周期、独立调用方（只有 Suba
 | ③ signal | `opts.signal`（Pi tool 框架传入） | `controller.signal`（runtime 自建） | background 需 runtime 持有 controller 供 cancel |
 | ④ notifier | 无（调用方还在 await） | `notifier.notify`（调用方已 return，靠事件回流） | 结果交付方式不同 |
 
-`SessionRunner.run` **完全不感知 mode**——它只负责跑一次 session + 更新 record。这是重构的核心收敛点：旧实现的 `runAgent`（sync）与 `startBackground`（bg）两份近似逻辑，统一为一份。
+引擎 run **完全不感知 mode**——它只负责跑一次任务 + 上抛事件。这是重构的核心收敛点：旧实现的 `runAgent`（sync）与 `startBackground`（bg）两份近似逻辑，统一为一份。
 
-## 3. SessionRunner.run（mode 无关）
+## 3. 引擎进程执行链（mode 无关）
 
-SessionRunner 是 sync/bg 共用的执行核心。流程细化见 [session-runner.md](./session-runner.md)，此处只列职责边界：
+执行是**两层进程嵌套**：宿主 subagent-core 经 engine-protocol v1 向引擎 CLI 进程（packages/pi-subagent-cli）发 run 帧，引擎再 spawn pi rpc 任务子进程执行。此处只列职责边界（包拓扑见 [architecture.md](./architecture.md)）：
 
 ```
-SessionRunner.run(record, task, opts, ctx)
-  ├─ pool.acquire(priority)          ← 外层（executor）已传入 priority
-  ├─ createAndConfigureSession(model, tools, skills)   ← H2: post-create try/catch + dispose
-  ├─ EventBridge.subscribe → updateFromEvent(record)   ← record 唯一更新点
-  ├─ turnLimiter + signal 监听
-  ├─ schema enforcement（漏调 structured-output 则 steer）
-  ├─ session.prompt(task)
-  ├─ collectResult → AgentResult
-  └─ session.dispose()
-finally: pool.release()              ← H1: runAndFinalize catch + finalizeFailed（swallow）
+宿主 core（SubagentService 编排）
+  ├─ pool.acquire(priority) + journal + 守护挂载   ← 池/journal/守护在 core 引擎子域
+  ├─ RemoteEngine.run(run 帧) → 引擎 CLI 进程（NDJSON stdio）
+  │    └─ spawn pi rpc 任务子进程 → spawn 事件翻译（引擎包）→ AgentEvent 上抛 → updateFromEvent(record)
+  └─ run 应答（终态 outcome）→ finalizeRecord
+finally: pool.release()
 ```
 
-关键：record 在此函数内被 `updateFromEvent` 实时更新，但**不被 `completeRecord`**——完成态由 executor 统一写，保证 status 判定逻辑单点。
+关键：record 在宿主侧被 `updateFromEvent` 实时更新（事件经引擎翻译上抛），但**不被 `completeRecord`**——完成态由 finalize 统一写，保证 status 判定逻辑单点。
 
 ## 4. background detached 时序
 
@@ -85,8 +83,8 @@ background 的步骤 4-6 不在 `execute` 内 await，而是包进 detached prom
 ```mermaid
 sequenceDiagram
     participant Tool as subagent-tool
-    participant Exec as executor.execute
-    participant Run as SessionRunner.run
+    participant Exec as SubagentService.execute
+    participant Run as 引擎进程 run（engine-protocol v1）
     participant Notifier
     participant Main as 主对话
 
@@ -96,12 +94,12 @@ sequenceDiagram
     Note over Tool: 调用方 turn 结束
 
     par detached promise
-        Exec->>Run: run(record, ...)
-        Run-->>Exec: AgentResult
+        Exec->>Run: RemoteEngine.run(run 帧)
+        Run-->>Exec: run 应答（终态 outcome）
         Exec->>Exec: completeRecord + archive（终态移出内存）
         Exec->>Notifier: notify(snapshot)
-        Notifier->>Main: sendMessage({triggerTurn:true, deliverAs:"followUp"})
-        Note over Main: 唤醒父 agent 下一 turn
+        Notifier->>Main: sendCustomMessage({customType:"subagent-bg-notify", triggerTurn:true})
+        Note over Main: courier 单通道——settled 边沿送达，唤醒父 agent 下一 turn
     end
 ```
 
@@ -116,24 +114,25 @@ sequenceDiagram
     participant Then as detached .then/.catch
 
     Cancel->>Record: controller.abort()
-    Cancel->>Record: tryTransition("cancelled")
+    Cancel->>Record: tryTransition("closed", "cancelled")
     Record-->>Cancel: CAS 成功（status was "running"）
-    Cancel->>Record: completeRecord + 写 tombstone + archive + notify(cancelled)
-    Note over Cancel: 写 .cancelled sidecar（session.jsonl 被 abort 截断）
+    Cancel->>Record: completeRecord + 写 .state sidecar + archive + notify(cancelled)
+    Note over Cancel: cancel 帧 → 引擎 settle 收敛窗（3s）→ killAll 阶梯（引擎进程侧）
 
     Then->>Record: .then/.catch 触发
     Then->>Record: tryTransition(...)
-    Record-->>Then: CAS 失败（status 已是 "cancelled"，非 running）
+    Record-->>Then: CAS 失败（status 已是 "closed"，非 running）
     Note over Then: 什么都不做——status 状态机已锁
 ```
 
-`tryTransition(record, target)` 是唯一的 CAS 入口：仅当 `record.status === "running"` 时改为 target 并返回 true，否则返回 false。**status 状态机本身就是互斥锁**——不需要额外的 `_settled` 字段。谁先把 status 从 running 转走，谁负责完整收尾（completeRecord + archive + notify）；后来的 `tryTransition` 必然失败，自然跳过所有副作用。
+`tryTransition(record, "closed", closedReason)` 是唯一的 CAS 入口：仅当 `record.status === "running"` 时改为 closed（closedReason 携带原因）并返回 true，否则返回 false。**status 状态机本身就是互斥锁**——不需要额外的 `_settled` 字段。谁先把 status 从 running 转走，谁负责完整收尾（completeRecord + archive + notify）；后来的 `tryTransition` 必然失败，自然跳过所有副作用。
 
-**为何不用 `_settled` 字段**：`_settled` 是早期防御性设计，把"收尾互斥"和"业务 status"拆成两个字段，增加理解成本。但两者本质是同一个锁——status 终态本就不可逆（done/failed/cancelled 都是终态），用它当锁更简单自洽：被锁的字段（status）自身不可逆，check-then-set 在 JS 单线程事件循环里天然原子。
+**为何不用 `_settled` 字段**：`_settled` 是早期防御性设计，把"收尾互斥"和"业务 status"拆成两个字段，增加理解成本。但两者本质是同一个锁——status 终态本就不可逆（closed 不可逆，原因由 closedReason 携带），用它当锁更简单自洽：被锁的字段（status）自身不可逆，check-then-set 在 JS 单线程事件循环里天然原子。
 
 ### notifier 合并窗口与去重
 
-- **合并窗口**：60000ms 内多个 background 完成，合并为一条通知注入主对话
+- **合并窗口**：账本路径在 settled 边沿合批——busy 期间到达的多条 pending 合并为单条送达；60s 滑动窗口仅存于内核降级路径
+- **sync collect**：派发侧 `start collect:"sync"` 声明——一批 sync 后台全部终态后单条批量通知，超预算条目截断并经 `session_read action:"result"` 取回全文
 - **去重 TTL**：同 id 短时间内不重复通知（cancel 已 notify 并抢到 CAS，detached 的 tryTransition 失败不 notify）
 
 ## 5. cancelled 路径一致性
@@ -145,7 +144,7 @@ sequenceDiagram
 | `execute` finalize | `signal.aborted ? cancelled : failed` | 同（经 `tryTransition` 抢锁） |
 | bg `.then` | `controller.signal.aborted ? cancelled : ...` | 删除——交由 execute finalize |
 | bg `.catch` | `record.controller?.signal.aborted ?? signal.aborted` | 删除——交由 execute finalize |
-| `cancelBackground` | 设 status + notify | `tryTransition("cancelled")` 抢锁 + notify |
+| `cancelBackground` | 设 status + notify | `tryTransition("closed", "cancelled")` 抢锁 + notify |
 
 `completeRecord` 由抢到 CAS 的一方唯一调用，status 参数已确定。`project()` 读取 record 的 turns/totalTokens（updateFromEvent 累积值，completeRecord 不清零），三路径（sync 返回 / bg poll / list 显示）字段完全一致。
 
@@ -154,10 +153,10 @@ sequenceDiagram
 旧实现 sync 路径在 `runAgent` 写一条 history、background 在 `.then`/`.catch` 各写一条，且 cancel 会产生同 id 双写（cancelled + failed）。新设计：
 
 - **唯一收尾点**：`finalizeRecord`（抢到 CAS 的一方调用），内部完成 completeRecord + store.archive 两步。archive 立即将终态 record 移出内存（读时从 session.jsonl 重建）
-- **cancel 写 tombstone**：cancel 抢到 CAS 后 completeRecord + 写 `.cancelled` sidecar（session.jsonl 被 abort 截断，cancelled 状态靠 sidecar 标记）+ archive + notify。collectRecords 重建时读 tombstone override status=cancelled
+- **cancel 写终态 sidecar**：cancel 抢到 CAS 后 completeRecord + 写 `<session>.state` sidecar（closedReason=cancelled；session.jsonl 被 abort 截断，cancelled 状态靠 sidecar 标记）+ archive + notify。collectRecords 重建时读 sidecar override status=cancelled（`.cancelled` 旧名仅读侧兼容）
 
 ## 相关文档
 
 - [architecture.md](./architecture.md) — 双 Service 在 Runtime 层的位置
 - [data-model.md](./data-model.md) — ExecutionRecord 的状态机与 completeRecord
-- [session-runner.md](./session-runner.md) — SessionRunner.run 的 EventBridge 契约与 collectResult 细节
+- [session-runner.md](./session-runner.md) — （已退役，历史记录）进程内 SessionRunner 架构；现行执行链见本文 §3 与 [architecture.md](./architecture.md)

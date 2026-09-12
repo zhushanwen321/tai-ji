@@ -39,9 +39,6 @@ function makeRecord(worktreeHandle?: WorktreeHandle): ExecutionRecord {
 
 function makeDeps(cleanup: ReturnType<typeof vi.fn>): FinalizeDeps {
   return {
-    manifestStore: {
-      writeManifest: vi.fn(async () => undefined),
-    } as unknown as FinalizeDeps["manifestStore"],
     worktreeManager: { cleanup } as unknown as FinalizeDeps["worktreeManager"],
     store: { archive: vi.fn() } as unknown as FinalizeDeps["store"],
     modelService: { getAgentDir: () => "/tmp/w3-test-agentdir" } as unknown as FinalizeDeps["modelService"],

@@ -8,7 +8,7 @@
 //   中段（prompt → agent_end）：工作段，输出即进展——无进展检测
 //     （armMidRoundNoProgress，锚点：prompt 发出时 arm；有效协议事件行刷新；
 //     连续静默 SETTLED_MID_ROUND_NO_PROGRESS_MS=30min → kill + 该轮失败终态化）。
-//     对齐 keep-alive 无进展检测先例（KEEP_ALIVE_NO_PROGRESS_TIMEOUT_MS 同构：
+//     对齐既有 keep-alive 无进展检测先例的 30min 量级（同构思路：
 //     「仍在推进」由 stdout 有效事件定义而非总时长，修复旧 10min 全程固定窗对
 //     >10min 合法 chatMode 单轮的误杀）。
 //
@@ -31,14 +31,22 @@
 // spawn watchdog 默认关」的三无窗口，warn 明示后果），未设/非法 = 默认 600s。
 // 中段阈值 v1 不开 env（减法：与 keep-alive 先例同为纯常量）。
 //
-// 双挂载点共用同一原语——同一组常量 + 同一组挂载/交棒/清除 helper，仅两个 prompt
-// 发出点（设计 T2-③ 明示架构，两处各写一套恰是被否的「散布姿势」微缩复发）：
-//   - 首轮：session-runner.ts runSpawn（prompt 发出后 arm 中段）
-//   - 后续轮次热路径：subagent-service.ts deliverMessage（发出新一轮 prompt 后 arm 中段）
-// 事件侧接线（两路径共用同一 stdout pump 闭包，均在 session-runner.ts）：
-//   - 有效协议事件行 → refreshMidRoundNoProgress（中段刷新）
-//   - agent_end（chatMode，!willRetry）→ handoverMidRoundToSettled（交棒收尾段）
-//   - agent_settled / close / 收尾 → disarmSettledWatchdog（两段一并清）
+// [M3 耦合登记] 本原语自 M3 起被 workflow 域复用（[H2 W2/W4] 起挂载点 = subagent-service.ts
+// armWorkflowNoProgressWatchdog（runWorkflowEngineTask 内 arm；原 SAR.run per-call 守护
+// 随 W4 掏空归位），armMidRoundNoProgress 同一入口）——故 env ≤0 的「关闭两段」不再是
+// chat 域局部行为：workflow 域 G1 熔断（静默楔死 run 的 30min 无进展回收）一并失效。
+// warn 文案已明示该连带后果（env 开关语义本身不动：设计明文「中段阈值 v1 不开 env」，
+// 有界兜底的处置必须可解释，规则 19）。
+//
+// 挂载点（同一原语——同一组常量 + 同一组挂载/交棒/清除 helper；[H1 U6] 收敛为单挂载）：
+//   - 会话形态轮：subagent-service.ts kickOffChatRound（轮开跑 arm 中段；[H1 U6] 旧
+//     热路径 deliverChatMessage 第二挂载点随 interact 面退役）
+//   - workflow 域：subagent-service.ts armWorkflowNoProgressWatchdog（[H2 W2]；原
+//     SAR.run per-call 守护随 [H2 W4] 掏空归位，M3 起复用）
+// 事件侧接线（[H1 U6] 刷新源 = run 事件通道既有事件；交棒 = run 应答驱动）：
+//   - 有效协议事件行 → refreshMidRoundNoProgress / refreshFromProtocolEvent（中段刷新）
+//   - run 应答收敛 → noteRoundSettledFromProtocol（交棒收尾段，Continuation onRunSettled）
+//   - 轮终簿记 / close / 终态化 → disarmRoundFromProtocol / disarmSettledWatchdog（两段一并清）
 //
 // 与 lifecycle-manager 的 idle timer 互补：idle timer 管 settled 已到达后的空闲
 // 回收，本原语管 settled 永不到达的 wedged——两条正交通道不互相替代。
@@ -53,11 +61,11 @@ import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 
 const logger = getLogger("subagents");
 
-/** 时间单位换算常量（命名后供 watchdog 常量组合，对齐 session-runner 同名先例，消除裸乘法字面量）。 */
+/** 时间单位换算常量（命名后供 watchdog 常量组合，消除裸乘法字面量）。 */
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 
-/** 中段无进展阈值（分钟）：对齐 KEEP_ALIVE_NO_PROGRESS_TIMEOUT_MS 的 30min 量级。 */
+/** 中段无进展阈值（分钟）：对齐既有 keep-alive 无进展检测先例的 30min 量级。 */
 const MID_ROUND_MINUTES = 30;
 
 /**
@@ -73,7 +81,7 @@ export const SETTLED_WATCHDOG_TIMEOUT_MS = 600_000;
 /**
  * 中段（prompt → agent_end）无进展检测的连续静默阈值（30min）。
  *
- * 对齐 KEEP_ALIVE_NO_PROGRESS_TIMEOUT_MS 先例（30min 无进展检测，量级同源）。
+ * 对齐既有 keep-alive 无进展检测先例（30min 无进展检测，量级同源）。
  * 刷新面严格限定 stdout pump 解析出的**有效协议事件行**（message_* 与 tool_* 与 turn_end
  * 等 SdkEvent）——LC-9 的 invalid 行（非法 JSON / 缺 type 字段的调试噪音）不刷新，
  * 防调试输出续命。v1 不开 env（设计 §6-D9 定案：与 keep-alive 同为纯常量）。
@@ -82,13 +90,40 @@ export const SETTLED_WATCHDOG_TIMEOUT_MS = 600_000;
 export const SETTLED_MID_ROUND_NO_PROGRESS_MS = MID_ROUND_MINUTES * SECONDS_PER_MINUTE * MS_PER_SECOND;
 
 /**
+ * [M6，仅测试可达] 中段窗长覆盖值（秒级窗真跑全链测试的注入口）。
+ *
+ * 生产恒 undefined → 生效值 = SETTLED_MID_ROUND_NO_PROGRESS_MS（30min，默认值由单测
+ * 断言守护）。形态对齐既有测试钩子先例 `_resetSettledWatchdogsForTest`（模块级状态 +
+ * `_` 前缀导出），不新造第二套模式；`_resetSettledWatchdogsForTest` 一并复位，防用例间
+ * 污染。刻意不做 env：设计明文「中段阈值 v1 不开 env」（每个 knob 都是误配置通道，
+ * 用户调短会误杀正常长任务）。
+ */
+let midRoundWindowOverrideMs: number | undefined;
+
+/** 中段生效窗长：测试注入优先，否则常量默认（生产恒 30min）。arm 与 refresh 共用单一读取点。 */
+export function getMidRoundNoProgressWindowMs(): number {
+  return midRoundWindowOverrideMs ?? SETTLED_MID_ROUND_NO_PROGRESS_MS;
+}
+
+/**
+ * [仅测试] 覆盖中段无进展窗长（传 undefined 复位）。生产路径零调用——生产生效值恒为
+ * SETTLED_MID_ROUND_NO_PROGRESS_MS。
+ */
+export function _setMidRoundNoProgressWindowMsForTest(ms: number | undefined): void {
+  midRoundWindowOverrideMs = ms;
+}
+
+/**
  * 收尾段定值的用户覆盖 env（规则 19：用户显式指定才生效）。
  *
  * >0 覆盖收尾段（SETTLED_WATCHDOG_TIMEOUT_MS 默认）；≤0 关闭两段（回到三无窗口，
- * warn 明示后果）；未设 = 默认 600s；非数字 = 非法回落默认 + warn 留痕（对齐
- * XYZ_SUBAGENT_IDLE_TIMEOUT_MS 的 LC-7 教训：非法回落必须可见）。前缀用
- * XYZ_SUBAGENT_*（ENV_WHITELIST_PREFIXES 白名单，PI_ 前缀在桌面 spawn 链被静默
- * 丢弃——同 XYZ_SUBAGENT_IDLE_TIMEOUT_MS 改名教训）。
+ * warn 明示后果——[M3 耦合登记] 自 M3 起该 no-op 同时关掉 workflow 域 G1 熔断：
+ * subagent-service.ts armWorkflowNoProgressWatchdog（原 SAR.run per-call 守护，[H2 W4]
+ * 掏空归位）的 no-progress 守护经 armMidRoundNoProgress 同一入口挂载，watchdog 不 arm
+ * 则 workflow 域静默楔死同样无独立回收计时）；未设 = 默认 600s；非数字 = 非法回落
+ * 默认 + warn 留痕（对齐 XYZ_SUBAGENT_IDLE_TIMEOUT_MS 的 LC-7 教训：非法回落必须
+ * 可见）。前缀用 XYZ_SUBAGENT_*（ENV_WHITELIST_PREFIXES 白名单，PI_ 前缀在桌面
+ * spawn 链被静默丢弃——同 XYZ_SUBAGENT_IDLE_TIMEOUT_MS 改名教训）。
  */
 export const SETTLED_WATCHDOG_ENV = "XYZ_SUBAGENT_SETTLED_WATCHDOG_MS";
 
@@ -134,9 +169,13 @@ function resolveSettledWatchdogEnv(): { disabled: boolean; overrideMs?: number }
   if (parsed <= 0) {
     logger.warn(
       `[settled-watchdog] ${SETTLED_WATCHDOG_ENV}=${parsed} disables BOTH watchdog phases (mid-round ` +
-        `no-progress + settled phase limit). Consequence: a wedged chatMode round (no agent_end, or ` +
-        `agent_settled never arriving) has NO independent recovery timer — the process leaks until the ` +
-        `host exits (the "three-no-window" shape). Recovery: unset the env or set a positive ms value.`,
+        `no-progress + settled phase limit) for ALL domains. Consequences: (1) a wedged chatMode round ` +
+        `(no agent_end, or agent_settled never arriving) has NO independent recovery timer — the process ` +
+        `leaks until the host exits (the "three-no-window" shape); (2) the workflow-domain no-progress ` +
+        `fuse (M3: workflow dispatch arms through this same primitive — ` +
+        `SubagentService.runWorkflowEngineTask, see [H2 W4]) is silently disabled too — a wedged workflow ` +
+        `run then stalls with no terminal notification even though the chat-domain docs only describe (1). ` +
+        `Recovery: unset the env or set a positive ms value.`,
     );
     envCache.disabled = true;
     return envCache;
@@ -180,7 +219,8 @@ function clearEntry(recordId: string): void {
  * - 到期行为由调用方注入（kill 进程 + 该轮失败终态化）——本模块不持有
  *   ChildProcess / record，与 lifecycle-manager 同构（副作用能力由调用方注入，
  *   本模块只管 timer 生命周期，可独立编译 + 单测）。
- * - env 显式关闭（≤0）时 no-op（解析时已 warn 明示后果）。
+ * - env 显式关闭（≤0）时 no-op（解析时已 warn 明示后果——含 workflow 域熔断连带的
+ *   明示文案；M3 复用本入口，故本 no-op 不是 chat 域局部行为）。
  */
 export function armMidRoundNoProgress(
   recordId: string,
@@ -191,15 +231,17 @@ export function armMidRoundNoProgress(
 ): void {
   if (isSettledWatchdogDisabled()) return;
   clearEntry(recordId);
-  // 常量恒在安全域内；入口统一校验防未来值改可配置时静默引入 1ms 溢出语义反转。
-  assertSafeTimerDelay(SETTLED_MID_ROUND_NO_PROGRESS_MS, "settled watchdog (mid-round)");
+  // 生产恒为常量（安全域内）；测试注入的秒级窗同样过校验——入口统一校验防未来值改
+  // 可配置时静默引入 1ms 溢出语义反转。
+  const windowMs = getMidRoundNoProgressWindowMs();
+  assertSafeTimerDelay(windowMs, "settled watchdog (mid-round)");
   const timer = setTimeout(() => {
     armedEntries.delete(recordId);
     logger.debug(
-      `[settled-watchdog] mid-round fired for ${recordId} after ${SETTLED_MID_ROUND_NO_PROGRESS_MS}ms without a valid protocol event`,
+      `[settled-watchdog] mid-round fired for ${recordId} after ${windowMs}ms without a valid protocol event`,
     );
-    handlers.onMidTimeout({ phase: "mid-round", waitedMs: SETTLED_MID_ROUND_NO_PROGRESS_MS });
-  }, SETTLED_MID_ROUND_NO_PROGRESS_MS);
+    handlers.onMidTimeout({ phase: "mid-round", waitedMs: windowMs });
+  }, windowMs);
   timer.unref();
   armedEntries.set(recordId, {
     timer,
@@ -263,15 +305,16 @@ export function refreshMidRoundNoProgress(recordId: string): void {
   const entry = armedEntries.get(recordId);
   if (!entry || entry.phase !== "mid-round") return;
   clearTimeout(entry.timer);
-  assertSafeTimerDelay(SETTLED_MID_ROUND_NO_PROGRESS_MS, "settled watchdog (mid-round refresh)");
+  const windowMs = getMidRoundNoProgressWindowMs();
+  assertSafeTimerDelay(windowMs, "settled watchdog (mid-round refresh)");
   const onMidTimeout = entry.onMidTimeout;
   const timer = setTimeout(() => {
     armedEntries.delete(recordId);
     logger.debug(
-      `[settled-watchdog] mid-round fired for ${recordId} after ${SETTLED_MID_ROUND_NO_PROGRESS_MS}ms without a valid protocol event`,
+      `[settled-watchdog] mid-round fired for ${recordId} after ${windowMs}ms without a valid protocol event`,
     );
-    onMidTimeout?.({ phase: "mid-round", waitedMs: SETTLED_MID_ROUND_NO_PROGRESS_MS });
-  }, SETTLED_MID_ROUND_NO_PROGRESS_MS);
+    onMidTimeout?.({ phase: "mid-round", waitedMs: windowMs });
+  }, windowMs);
   timer.unref();
   entry.timer = timer;
 }
@@ -299,8 +342,9 @@ export function disarmSettledWatchdog(recordId: string): void {
 }
 
 /**
- * 清空全部 armed entry + env 解析缓存（测试隔离用，beforeEach 调；命名对齐
- * _resetLifecycleState 先例。清缓存使测试内 vi.stubEnv 改 env 后重新解析生效）。
+ * 清空全部 armed entry + env 解析缓存 + 中段窗测试覆盖（测试隔离用，beforeEach/afterEach
+ * 调；命名对齐 _resetLifecycleState 先例。清缓存使测试内 vi.stubEnv 改 env 后重新解析
+ * 生效；复位 midRoundWindowOverrideMs 防 M6 秒级窗污染其他用例）。
  */
 export function _resetSettledWatchdogsForTest(): void {
   for (const entry of armedEntries.values()) {
@@ -308,42 +352,41 @@ export function _resetSettledWatchdogsForTest(): void {
   }
   armedEntries.clear();
   envCache = undefined;
+  midRoundWindowOverrideMs = undefined;
 }
 
-// ── [W4] 协议事件面接线 API（W3 删件重接的 core 半边）──────────────────
+// ── [W4] 协议事件面接线 API ────────────────────────────────────────────
 //
 // 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2 前置 1 +
 // D5「settled-watchdog 生产接线重接」：两段守护的 refresh 源随 chat 域 cli 化改挂
-// 协议事件流（arm 点 = 轮开始；refresh 源 = host/streamDelta + host/roundLifecycle
-// 事件；kill/终态 = 既有杀链）。现状 refresh/handover/disarm 的驱动源在待删的
-// session-runner.ts stdout pump（inproc 过渡形态，W3 删件前不得删除——本 API 面即
-// 其替换目标：W3 删旧接线时改调下面三个命名入口，语义逐一同构）。
+// 协议事件流（arm 点 = 轮开跑；中段刷新源 = host/streamDelta 与 run 事件通道
+// 事件；kill/终态 = 既有杀链）。旧 inproc stdout-pump 接线（session-runner.ts）已随
+// W3 删件移除，下面三个命名入口是协议事件面的唯一驱动入口。
 //
-// 命名入口与既有原语的映射（刻意薄委托、零新语义——本单元「把新接线立起来」，
-// W3 负责删旧，两套接线并存期由原语幂等吸收重复调用）：
+// 命名入口与既有原语的映射（刻意薄委托、零新语义）：
 //   refreshFromProtocolEvent      ↔ refreshMidRoundNoProgress（协议事件行到达）
-//   noteRoundSettledFromProtocol  ↔ handoverMidRoundToSettled（roundLifecycle
+//   noteRoundSettledFromProtocol  ↔ handoverMidRoundToSettled（轮次收敛交棒
 //                                    settled 相位 = 轮收敛，中段让位收尾段）
 //   disarmRoundFromProtocol       ↔ disarmSettledWatchdog（idle 相位 / close / 终态）
 //
 // 监督器域 resume 轮的 refresh 覆盖：resume 轮的 arm 点在 subagent-service
 // deliverChatMessage（interact 返回点，冷热路径同点），其轮内协议事件（streamDelta /
-// roundLifecycle）到达时经 refreshFromProtocolEvent 刷新——W3 接线后两域轮（chat 轮
+// 协议事件行）到达时经 refreshFromProtocolEvent 刷新——W3 接线后两域轮（chat 轮
 // 与监督器域 resume 轮）共用同一事件面。
 
-/** [W4 协议事件面] 协议事件行（host/streamDelta / host/roundLifecycle）到达：刷新
+/** [W4 协议事件面] 协议事件行（host/streamDelta / run 事件通道）到达：刷新
  *  中段无进展计时。未挂载 / 已交棒（收尾段不刷新）/ 已 fire 时幂等 no-op。 */
 export function refreshFromProtocolEvent(recordId: string): void {
   refreshMidRoundNoProgress(recordId);
 }
 
-/** [W4 协议事件面] roundLifecycle settled 相位（轮收敛）：中段让位收尾段
+/** [W4] 轮次收敛（run 应答 settle，[H1 U6] run 应答驱动交棒）：中段让位收尾段
  *  （两段独立计时，交棒语义见 handoverMidRoundToSettled）。未挂载时幂等 no-op。 */
 export function noteRoundSettledFromProtocol(recordId: string): void {
   handoverMidRoundToSettled(recordId);
 }
 
-/** [W4 协议事件面] roundLifecycle idle 相位 / close / 终态化处置：两段一并清。
+/** [W4] 轮终簿记 / close / 终态化处置：两段一并清。
  *  不存在 armed entry 时幂等 no-op。 */
 export function disarmRoundFromProtocol(recordId: string): void {
   disarmSettledWatchdog(recordId);

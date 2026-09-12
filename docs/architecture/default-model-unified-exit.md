@@ -15,7 +15,7 @@
 
 ### 系统是什么
 
-默认模型链路涉及三层（详见 [provider 双体系聚合架构](provider-config-pi-alignment.md)）：
+默认模型链路涉及三层（详见 provider 双体系聚合架构 `provider-config-pi-alignment.md`，已退役——git 历史 `eb884da68` 前版本可查）：
 
 1. **数据文件**（`<dataDir>/pi/agent/`）：`models.json`（custom provider 全配置 + catalog override）、`auth.json`（凭据）、`settings.json`（`defaultProvider` + `defaultModel` + `enabledModels` 白名单）。**xyz-agent 与 pi 共用这三个文件**（`pi-settings-store.ts` 直读写同一路径）。
 2. **runtime 读写与编排层**：

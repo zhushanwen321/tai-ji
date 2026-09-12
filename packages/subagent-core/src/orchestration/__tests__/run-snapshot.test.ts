@@ -3,7 +3,8 @@
 // 四视角：
 // ①使用者——toRunSnapshot/fromRunSnapshot 往返等值（含 pi 壳 jsonl-run-store
 //   serializeRun 现网形态样本：键序/v 字段/无 live 的快照行，⛔5 往返逐字节一致）；
-// ②隔离者——live-strip 产出新对象，不 mutate 内存中的 run（save 后 run 可继续跑）；
+// ②隔离者——[H2 W3] ExecutionTraceNode.live 字段退役后节点无运行期附属对象，
+//   序列化直出无 live 键（strip 分支随字段删除退役，防御回归锁定）；
 // ③幸存者——版本 guard（D4 裁决③：v 不匹配即拒，字符串无大小序）+ 形状校验
 //   全分支不抛（返回 undefined）；
 // ④接线者——「缺 v 宽容」不内聚进 codec（D4 裁决②归属：store 层预处理职责，
@@ -47,33 +48,10 @@ function makeRun(runId: string, opts: { status?: "running" | "done" } = {}): Wor
   );
 }
 
-/** 最小 live 执行进度对象（strip 逻辑只解构键名，值形态不可达——对齐
- *  lifecycle-predicates.test.ts 的 partial + as ExecutionRecord 先例）。 */
-function makeLiveRecord(id: string): ExecutionRecord {
-  return {
-    id,
-    agent: "coder",
-    model: "test-model",
-    thinkingLevel: undefined,
-    mode: "background",
-    task: "do work",
-    slug: "do-work",
-    startedAt: 0,
-    rootSessionId: undefined,
-    parentRecordId: undefined,
-    depth: 0,
-    status: "running",
-    turns: [],
-    turnCount: 0,
-    totalTokens: 0,
-    lastError: undefined,
-    round: 0,
-    endedAt: undefined,
-    result: undefined,
-    error: undefined,
-    agentResult: undefined,
-    controller: undefined,
-  } as ExecutionRecord;
+/** 最小多余键载体（[H2 W3] live 字段退役后的防御样本——模拟旧版本运行期对象
+ *  残留的多余键，重水合链路的丢弃行为回归用）。 */
+function makeStaleExtraKey(): Record<string, unknown> {
+  return { stale: "legacy-key" };
 }
 
 /**
@@ -204,49 +182,55 @@ describe("run-snapshot — toRunSnapshot/fromRunSnapshot 往返等值", () => {
   });
 });
 
-describe("run-snapshot — live-strip 防御内聚", () => {
-  it("trace 节点与 calls[].traceNode 带 live → 序列化输出无 live 键", () => {
-    const run = makeRun("wf-live-1");
+describe("run-snapshot — [H2 W3] live 字段退役后的序列化行为", () => {
+  it("running 节点（类型已无 live 字段）全量直出：序列化无 live 键且往返保真", () => {
+    const run = makeRun("wf-nolive-1");
     const node: ExecutionTraceNode = {
       stepIndex: 0,
       agent: "coder",
       task: "do work",
       model: "test-model",
       status: "running",
-      live: undefined,
     };
     run.state.trace.append(node);
     const call = new AgentCall(0, { prompt: "do work" }, node);
     run.state.calls.set(0, call);
-    // D-10：call.traceNode 与 trace 节点共享引用，live 挂节点上（running 态常态）
-    node.live = makeLiveRecord("run-0");
 
     const snap = toRunSnapshot(run);
     const serialized = JSON.stringify(snap);
 
+    // strip 分支随 ExecutionTraceNode.live 字段删除退役——节点不再携带运行期对象，
+    // 序列化直出即无 live 键（类型层面收敛的行为回归锁定）
     expect(serialized.includes('"live"')).toBe(false);
     expect(snap.state.trace[0]).not.toHaveProperty("live");
     expect(snap.state.calls[0].traceNode).not.toHaveProperty("live");
+
+    const back = fromRunSnapshot(JSON.parse(serialized))!;
+    expect(back.state.trace.toArray()[0]?.status).toBe("running");
+    expect(back.state.trace.toArray()[0]?.task).toBe("do work");
   });
 
-  it("strip 产出新对象，不 mutate 内存 run（save 后 run 可继续跑）", () => {
-    const run = makeRun("wf-live-2");
+  it("运行期多余键残留不进重水合快照的往返链（防御回归）", () => {
+    const run = makeRun("wf-stale-1");
     const node: ExecutionTraceNode = {
       stepIndex: 0,
       agent: "coder",
       task: "do work",
       model: "test-model",
       status: "running",
-      live: undefined,
     };
-    run.state.trace.append(node);
-    node.live = makeLiveRecord("run-0");
+    // 模拟旧版本运行期对象残留的多余键（类型外 attach）
+    const withStale = Object.assign(node, makeStaleExtraKey()) as ExecutionTraceNode;
+    run.state.trace.append(withStale);
 
-    toRunSnapshot(run);
+    const snap = toRunSnapshot(run);
+    // trace 直出拷贝会带多余键（codec 不再承担键清洗——多余键是调用方脏数据，
+    // 正常路径类型层面已无写点）；但 JSON 往返后重水合按 Trace.fromArray 拷贝，
+    // 快照行保持可解析、状态保真
+    expect(JSON.parse(JSON.stringify(snap)).state.trace[0].status).toBe("running");
 
-    // 原节点 live 保留（运行期消费面——TUI 事件流投影——不受落盘影响）
-    expect(node.live).toBeDefined();
-    expect(node.live!.id).toBe("run-0");
+    const back = fromRunSnapshot(JSON.parse(JSON.stringify(snap)))!;
+    expect(back.state.trace.toArray()[0]?.status).toBe("running");
   });
 });
 

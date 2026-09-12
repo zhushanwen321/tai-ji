@@ -3,15 +3,13 @@
  *
  * 验证：含 bashExecution 的 system 消息 → 路由到 BashOutputBlock 而非 SystemNotice。
  *
- * [cw wave w3] T10/gap3/W5T1 三用例整体 skip：MessageStream.vue 已切到 virtua <Virtualizer>，
- *   该三用例 mount MessageStream 后断言「bash 消息 DOM 在视口」——依赖手写虚拟滚动在 happy-dom
- *   下「视口外也渲染」的旧行为（viewportSize=0 时手写窗口仍渲染末项钉扎 + scrollTop=0 全窗口）。
- *   virta 在 happy-dom 无真实 ResizeObserver/布局时 viewportSize=0 → 未被 :keepMounted 钉扎的项
- *   （bash 是 system item，非 streaming 非 editing）不进渲染窗口 → DOM 找不到 BashOutputBlock。
- *   这不是真实回归（virta 在真实 Chromium 有 RO 会正常窗口化），是 happy-dom 测试环境限制。
- *   BashOutputBlock 组件自身的渲染 / exit tag / output 展示覆盖由 BashOutputBlock.test.ts 维持；
- *   MessageStream 的 bash 路由分支（item.kind==='system' && message.bashExecution → BashOutputBlock）
- *   是模板单行分支，code review 可直接核验。
+ * [cw wave w3] T10/gap3/W5T1 三用例曾整体 skip（[HISTORICAL] 溯源）：MessageStream.vue 切到
+ *   virtua <Virtualizer> 后，happy-dom 无真实 ResizeObserver/布局 → viewportSize=0 → 未被
+ *   :keepMounted 钉扎的项（bash 是 system item，非 streaming 非 editing）不进渲染窗口 →
+ *   DOM 找不到 BashOutputBlock。这是 happy-dom 测试环境限制而非真实回归（真实 Chromium 有 RO
+ *   会正常窗口化）。现以 virtua mock 修复（Virtualizer → 全量渲染 scoped slot 的 stub，
+ *   模式复用 MessageStream-kind.test.ts），三用例恢复运行。
+ *   BashOutputBlock 组件自身的渲染 / exit tag / output 展示覆盖由 BashOutputBlock.test.ts 维持。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/MessageStream-bash.test.ts
  */
@@ -29,6 +27,63 @@ import { bashEffects } from '@xyz-agent/core'
 import type { MessageEffectContext } from '@xyz-agent/core'
 import type { Message } from '@xyz-agent/shared'
 import { defineComponent, h } from 'vue'
+
+// ── virtua mock：Virtualizer → 全量渲染 scoped slot 的 stub（模式复用 MessageStream-kind.test.ts
+// 简化版：无需其 slotKeyCollector / keepMountedCollector 断言收集器）──────────────────────
+// 为什么 mock：happy-dom 无真实布局/ResizeObserver，真 <Virtualizer> 的 viewportSize=0 →
+// 非 keepMounted 项（bash 是 system item）不进渲染窗口 → DOM 找不到。stub 让模板
+// v-if/v-else-if/v-else 链对每项真实执行。handle 兼容字段保留：MessageStream 的
+// rail/useVirtuaFollow 在 mount 期读取 scrollSize/findItemIndex 等（vi.fn 保证不会调崩）。
+// 注意 1：vi.mock factory 会被 hoist 到文件顶部，不能引用顶层变量——vue/vi 全部动态 import。
+// 注意 2：defineExpose 是 <script setup> 编译宏，普通 setup 函数里调用不生效（实测）。
+//   mock 改由 setup 返回 handle 对象（自动成为 setupState，proxy 可读）+ render 选项渲染 slot。
+vi.mock('virtua/vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  const { vi: vitest } = await import('vitest')
+  return {
+    Virtualizer: defineComponent({
+      name: 'MockVirtualizer',
+      props: {
+        data: { type: Array, default: () => [] },
+        keepMounted: { type: Array, default: () => [] },
+        // MessageStream 传 :scroll-ref，必须声明为 prop 吸收（不声明则落 reactive attrs，
+        // dev 下 mock render 经 dev proxy 读 attrs 会跟踪它触发额外交互）。
+        scrollRef: { type: Object, default: null },
+      },
+      setup() {
+        // setup 返回对象 → 键暴露在 public instance proxy（模板 ref 指向它），
+        // MessageStream 经 vlistRef.value.scrollSize/findItemIndex 等读取。
+        return {
+          scrollSize: 600,
+          scrollOffset: 0,
+          viewportSize: 400,
+          cache: {},
+          scrollToIndex: vitest.fn(),
+          getItemOffset: vitest.fn(() => 0),
+          getItemSize: vitest.fn(() => 200),
+          findItemIndex: vitest.fn(() => 0),
+          scrollTo: vitest.fn(),
+          scrollBy: vitest.fn(),
+        }
+      },
+      render(ctx) {
+        const data = ctx.data as unknown[]
+        // Set 迭代序 = 插入序：keepMounted 先入、可视范围后入（与 virtua 实装 m([...e]) 一致）；
+        // 无真实布局下视口恒 0，全量并入 0..n-1 =「全部项都在渲染窗口内」。
+        const indexes = new Set<number>((ctx.keepMounted as number[]) ?? [])
+        for (let i = 0; i < data.length; i += 1) indexes.add(i)
+        return h(
+          'div',
+          { class: 'mock-virtualizer' },
+          [...indexes].flatMap((idx) => {
+            // 刻意不做越界过滤：data[idx] 越界 → item=undefined 直传 slot（virtua 实装行为）
+            return ctx.$slots.default?.({ item: data[idx], index: idx }) ?? []
+          }),
+        )
+      },
+    }),
+  }
+})
 
 // 壳 deps mock（MessageStream 装配 useChatViewDeps，测试聚焦路由分支不需真 deps）
 const chatDepsMock = vi.hoisted(() => ({
@@ -86,7 +141,7 @@ describe('MessageStream bashExecution 路由', () => {
     HTMLElement.prototype.scrollTo = vi.fn()
   })
 
-  it.skip('T10: messages 含 bashExecution system 消息 → BashOutputBlock 渲染，SystemNotice 不渲染', () => {
+  it('T10: messages 含 bashExecution system 消息 → BashOutputBlock 渲染，SystemNotice 不渲染', () => {
     const chat = useChatStore()
     const sid = 'sess-bash-route'
     const bashMsg: Message = {
@@ -126,7 +181,7 @@ describe('MessageStream bashExecution 路由', () => {
    * 前置确认：BashOutputBlock.vue 已具备三个 testid（G4 新增了 bash-output-truncated），
    * 无需改产品代码暴露 testid。
    */
-  it.skip('gap3: hydrate bash 消息 → DOM 同时存在 bash-output-block + bash-output + bash-status-tag 三 testid', async () => {
+  it('gap3: hydrate bash 消息 → DOM 同时存在 bash-output-block + bash-output + bash-status-tag 三 testid', async () => {
     const chat = useChatStore()
     const sid = 'sess-bash-smoke'
     const bashMsg: Message = {
@@ -177,18 +232,33 @@ describe('MessageStream bashExecution 路由', () => {
  * 验证（mount 后）：
  * - streaming assistant turn 的 DOM 节点存在（在窗口内、未被虚拟列表卸载）
  * - bash 消息 DOM 存在（BashOutputBlock 真组件渲染）
- * - bash DOM 在 streaming turn DOM 之后（DOM 顺序与 renderItems 一致）
+ * - bash DOM 由 streaming turn 内 notices 渲染（[W3 v2] rule 4 归因，位于 turn-stub 根 div 内部）
  *
- * 钉扎算法的单元覆盖已由 use-virtual-turn-list.test.ts W3T1-T3 保证；happy-dom 无真实
- * 滚动/视口，本用例聚焦「mount 后共存双挂载 + 顺序正确」（spec 允许的降级断言）。
+ * 钉扎算法的单元覆盖由 use-streaming-pin.test.ts（W3 共存防护系列）保证，顶层顺序守护同样
+ * 由该单测 + core message-turns.incremental.test.ts R4 接管；happy-dom 下经本文件的 virtua
+ * mock（全量渲染 stub）驱动真实模板分支，本用例聚焦「mount 后共存双挂载 + rule 4 归因成立」。
  */
 // 共存测试的 Turn stub：渲染带 turn index testid 的 div，便于断言 DOM 存在 + 顺序。
 // 用 defineComponent 而非 template 字符串：props.turn 是对象，模板字符串取不到字段。
+// [W3 v2 适配] streaming bash system 消息归当前 turn 内 notices（message-turns D4 规则 4
+// appendInlineNotice，顶层不再产出独立 bashExecution 渲染项），由真实 Turn.vue 内部
+// v-for notices 渲染 BashOutputBlock——stub 同构渲染 notices 的 bash 消息（真 BashOutputBlock），
+// 否则共存场景 bash DOM 永不出现。
 const TurnStub = defineComponent({
   name: 'Turn',
-  props: { turn: { type: Object, required: true } },
+  props: {
+    turn: { type: Object, required: true },
+    sessionId: { type: String, default: undefined },
+  },
   setup(props) {
-    return () => h('div', { 'data-testid': `turn-stub-${props.turn.index}` })
+    return () => {
+      const turn = props.turn as { index: number; notices?: Message[] }
+      return h('div', { 'data-testid': `turn-stub-${turn.index}` }, [
+        ...(turn.notices ?? [])
+          .filter((n) => n.bashExecution !== undefined)
+          .map((n) => h(BashOutputBlock, { message: n, sessionId: props.sessionId })),
+      ])
+    }
   },
 })
 
@@ -206,7 +276,7 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
     HTMLElement.prototype.scrollTo = vi.fn()
   })
 
-  it.skip('W5T1: 共存场景 mount → streaming turn DOM + bash DOM 双挂载，bash 在 streaming turn 之后', async () => {
+  it('W5T1: 共存场景 mount → streaming turn DOM + bash DOM 双挂载，bash 由 turn 内 notices 渲染', async () => {
     const chat = useChatStore()
     const sid = 'sess-coexist'
     // 1) streaming assistant turn：user + status:'streaming' 的 assistant（最后一条 assistant
@@ -259,16 +329,19 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
     const turnEl = wrapper.find('[data-testid="turn-stub-1"]')
     expect(turnEl.exists()).toBe(true)
 
-    // bash 消息 DOM 存在（BashOutputBlock 真组件渲染，未被 stub）
-    const bashBlock = wrapper.findComponent(BashOutputBlock)
-    expect(bashBlock.exists()).toBe(true)
-    const bashEl = bashBlock.element as HTMLElement
+    // bash 消息存在（findComponent 证明 BashOutputBlock 真组件渲染、未被 stub）
+    expect(wrapper.findComponent(BashOutputBlock).exists()).toBe(true)
+    // [W3 v2 适配] bash DOM 经 testid 下钻取元素（gap3 同款模式）。[HISTORICAL] 不用
+    // findComponent().element：BashOutputBlock 模板根前有顶层注释 → dev 下 subTree 是
+    // fragment（注释锚点 + 根 div），VTU 对 fragment 根组件的 .element 归一化错位
+    // （实测指向 stub 根 div 而非 bash-output-block）——本用例 skip 期间从未真跑故未暴露。
+    const bashEl = wrapper.find('[data-testid="bash-output-block"]').element as HTMLElement
 
-    // DOM 顺序：bash 在 streaming turn 之后（renderItems 顺序 = messages 顺序）
-    // 用 compareDocumentPosition：bashEl 包含 turnEl 时 NODE_PRECEDING=2 成立（bash 在 turn 之前）
-    const relation = turnEl.element.compareDocumentPosition(bashEl)
-    // 期望 bash 在 turn 之后 → turn 在 bash 之前 → relation 含 Node.DOCUMENT_POSITION_FOLLOWING (4)
-    expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 归因断言：bash 由 turn 内 notices 渲染（[W3 v2] rule 4 归因）→ bash-output-block 必在
+    // turn-stub 根 div 内部。rule 4 回归（bash 逃逸回顶层渲染项）时 bashEl 在 turn-stub 之外，
+    // contains 为 false → 红。顶层顺序守护已由 use-streaming-pin.test.ts（W3 共存防护）+
+    // core message-turns.incremental.test.ts R4 单测接管，此处不做文档序断言。
+    expect(turnEl.element.contains(bashEl)).toBe(true)
   })
 })
 
@@ -282,8 +355,8 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
  * 覆盖（出现/消失生命周期 + 内容）：
  * - bashStart 帧置位 → ActivityStrip bash 行出现，含 i18n 前缀（zh locale「正在执行」）+ mono 命令
  * - bashResult 到达（abort 哨兵帧 command:''+cancelled:true 只清执行态不产 entry）→ 行消失
- * - 行位于 Virtualizer 之外（文档流），空消息 session 也可见——不依赖 virtua 窗口（与 skip 的
- *   T10/gap3 相反，本用例不受 happy-dom viewportSize=0 限制）
+ * - 行位于 Virtualizer 之外（文档流），空消息 session 也可见——不依赖 virtua 渲染窗口（T10/gap3/
+ *   W5T1 依赖本文件的 Virtualizer stub 才能在 happy-dom 下渲染，本用例有无该 mock 均可跑）
  *
  * 状态说明：executingBash 是 core 模块级 per-session Map（不进 messages）；bashStartEffect /
  * bashResultEffect 哨兵分支均不解构使用 ctx，传最小 fake ctx 即可驱动真实 effect 代码路径。

@@ -10,8 +10,9 @@
  * - OR-6 主线程半边：{type:"log"} 计入 errorLogs + deps.log debug 留痕（含上限裁剪）；
  *   未知 type warn 留痕（协议漂移防线）
  * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收口为取消终态
- *   （call done + trace failed + Cancelled 文案 + completedAt + live 清除），
- *   先收口再落盘——done 快照不含 running 节点
+ *   （call done + trace failed + Cancelled 文案 + completedAt；[H2 W3] trace.live
+ *   字段已删除——节点无运行期附属对象可滞留），先收口再落盘——done 快照不含
+ *   running 节点
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -320,12 +321,11 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     // call 收口为 done + 取消文案（不删除条目——保留调用痕迹）
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
-    // trace 节点 failed + completedAt + live 清除（快照/GUI 不再显示 running 步骤）
+    // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
     const node = run.state.trace.find(1);
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    expect(node?.live).toBeUndefined();
     // 持久化快照（收口先于 save）不含 running 形态
     const snap = toRunSnapshot(run);
     expect(snap.state.calls.map((c) => c.status)).toEqual(["done"]);

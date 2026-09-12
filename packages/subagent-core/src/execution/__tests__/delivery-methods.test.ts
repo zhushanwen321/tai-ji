@@ -1,14 +1,17 @@
 // src/execution/__tests__/delivery-methods.test.ts
 //
-// 冷路径续轮 + chatMode 统一投递单元测试（M2-B1 投递基础设施）。
+// 会话形态续聊投递单元测试（M2-B1 投递基础设施 → H1 chat-run 统一定形）。
 //
 // [W3 改写] 投递链路协议化：deliverChatMessage → pi EnginePort（registry cli 形态
-// port 的替身 registerFakePiEngine）interact(message)；冷路径 =
-// engine_session_not_resumable → resumeColdRound → run chat + resume 锚点。
+// port 的替身 registerFakePiEngine）。
+// [H1 U2/U6 改写] 每轮 = 新 run + resume 锚点（ctx.resume，键切换后唯一会话形态键），
+// Continuation 单飞承接防双写者守卫（原 resumeColdRound resumesInFlight 守卫退役）；
+// 轮末分流 = run 应答驱动（onRunSettled，D7）——[H1 U6] 旧 interact 热路径/冷路径
+// 分流与 settleChatRoundFromResponse 结算载体的断言段随载体退役删除。
 // 原 inproc stdin 字节断言（sendPromptCommand/streamingBehavior/EPIPE 写后死检测）
-// 随 inproc pi 引擎目录 删除归 pi-subagent-cli 包内测试（chat-session.test.ts 同语义覆盖）。
+// 随 inproc pi 引擎目录 删除归 pi-subagent-cli 包内测试。
 //
-// 本文件断言的编排语义（分流/守卫/状态迁移/在途守卫）与改线前逐点同构。
+// 本文件断言的编排语义（守卫/状态迁移/单飞隔离）与改线前逐点同构。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -62,7 +65,7 @@ function makeIdleRecord(id = "sa-chat"): ExecutionRecord {
   return record;
 }
 
-describe("冷路径续轮（M2-B1 idle 投递；engine_session_not_resumable → run chat + resume）", () => {
+describe("会话形态续聊投递（run + resume 锚点）", () => {
   let agentDir: string;
   let service: SubagentService;
   let record: ExecutionRecord;
@@ -78,12 +81,9 @@ describe("冷路径续轮（M2-B1 idle 投递；engine_session_not_resumable →
     record = makeIdleRecord();
     // sessionFile 用 agentDir 下路径（finalizeRoundToIdle 写 .idle sidecar 不留 /tmp 垃圾）
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
-    // 冷路径替身：interact 返回 engine_session_not_resumable（引擎无活进程）
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_session_not_resumable",
-      message: "no live process (cold path). Recovery: dispatch a new run with ctx chat resume.",
-    };
+    // [U2a/B5] 轮终簿记归口 store.markRoundIdle（按 id 查内存）——record 须 register 进
+    // store（生产链路 getRecordForAction/run 流程的 record 恒在内存，测试补齐同形态）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
   });
 
   afterEach(() => {
@@ -92,20 +92,20 @@ describe("冷路径续轮（M2-B1 idle 投递；engine_session_not_resumable →
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("冷路径续轮(running) → run chat 收到 resume 锚点；chatMode+done 回 running/round+1", async () => {
+  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 保持 running", async () => {
     const beforeRound = record.round;
 
-    await service.chatActions.deliverChatMessage(record, "next round msg", false);
+    await service.chatActions.deliverChatMessage(record, "next round msg");
 
-    // 冷路径守卫通过后：status 已手动设回 running（M2-A 边界，绕过 tryTransition）
+    // Continuation：锚点校验通过后派发（record 保持 running）
     expect(record.status).toBe("running");
 
-    // detached：等协议 run 被调（冷续 = chat.resume 锚点）
+    // detached：等协议 run 被调（续聊 = ctx.resume 锚点）
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     const run = fake.runs[0]!;
     expect(run.task.prompt).toBe("next round msg");
     expect(run.task.conversation).toBe(true);
-    expect(run.ctx.chat).toEqual({
+    expect(run.ctx.resume).toEqual({
       recordId: record.id,
       resume: {
         sessionRef: { recordId: record.id, sessionFile: record.sessionFile },
@@ -113,40 +113,44 @@ describe("冷路径续轮（M2-B1 idle 投递；engine_session_not_resumable →
       },
     });
 
-    // 模拟引擎首轮 agent_settled 应答（idle 帧先于应答帧）
-    run.emitLifecycle({ phase: "idle", anchor: { sessionRef: { recordId: record.id, sessionFile: record.sessionFile }, poolKey: "shared" } });
+    // 模拟引擎 agent_settled 应答（轮末分流 = run 应答驱动，D7）
     run.settle({ content: "round text" });
 
-    // 等 detached 完成：chatMode+done→running（v4 B-1 idle 折入 running，M2-A 分流），round 累加
+    // 等 detached 完成：round 累加、record 保持 running-resumable（v4 B-1 idle 折入 running）
     await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1));
     expect(record.status).toBe("running");
   });
 
-  it("终态 closed record → throw 行动语言（MF-4，仅 running 可续聊），不触发 interact", async () => {
+  it("终态 closed record → throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
     record.status = "closed";
-    // MF-4：行动语言（spec §3.1），不暴露 resume/controller 内部词汇
-    await expect(service.chatActions.deliverChatMessage(record, "msg", false)).rejects.toThrow(/not ready for a new message/);
-    expect(fake.interacts.length).toBe(0);
-  });
-
-  it("record 无 sessionFile → 冷路径续轮 throw 行动语言（MF-4 canonical session unavailable），不触发 kickOff", async () => {
-    record.sessionFile = undefined;
-    await expect(service.chatActions.deliverChatMessage(record, "msg", false)).rejects.toThrow(/session unavailable/);
+    // [H1 U2] D4 表 closed 硬拒格：closedReason 非 可重连集（undefined/gc）→ 硬拒 +
+    // start 新的指引（Continuation reviveOrThrow 文案）
+    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
+      /cannot be messaged or resumed/,
+    );
     expect(fake.runs.length).toBe(0);
   });
 
-  it("record 无 controller → 冷路径续轮 throw 行动语言（MF-4），不触发 kickOff", async () => {
+  it("record 无 sessionFile → 同步拒绝（D4 表锚点缺失格：no transcript anchor + re-dispatch 指引），不触发 kickOff", async () => {
+    record.sessionFile = undefined;
+    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
+      /no transcript anchor/,
+    );
+    expect(fake.runs.length).toBe(0);
+  });
+
+  it("record 无 controller → 投递 throw 行动语言（MF-4），不触发 kickOff", async () => {
     record.controller = undefined;
-    await expect(service.chatActions.deliverChatMessage(record, "msg", false)).rejects.toThrow(/not ready for a new message/);
+    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(/not ready for a new message/);
     expect(fake.runs.length).toBe(0);
   });
 });
 
 // ============================================================
-// deliverChatMessage（V2 决策 3 chatMode 统一投递：协议 interact message 分流）
+// deliverChatMessage（chatMode 统一投递入口 → Continuation 编排）
 // ============================================================
 
-describe("deliverChatMessage (V2 决策 3 chatMode 统一投递；协议 interact)", () => {
+describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）", () => {
   let agentDir: string;
   let service: SubagentService;
   let record: ExecutionRecord;
@@ -159,9 +163,11 @@ describe("deliverChatMessage (V2 决策 3 chatMode 统一投递；协议 interac
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     service = new SubagentService({ cwd: agentDir, modelService });
     service.initSession({ pi: makePi(), sessionId: "root-session" });
-    record = makeIdleRecord(); // chatMode:true, idle, round=1
-    // sessionFile：冷路径续轮需要（热路径不用，设了无害）
+    record = makeIdleRecord(); // chatMode:true, running, round=1
+    // sessionFile：续聊锚点需要
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();
   });
 
@@ -172,91 +178,49 @@ describe("deliverChatMessage (V2 决策 3 chatMode 统一投递；协议 interac
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("热路径 interrupt=false：引擎受理 → interact(message, interrupt:false) + status=running + 执行态信号清除", async () => {
+  it("轮间 message → Continuation 派发新轮 + 执行态信号清除（[H1 U2] 承接原冷路径语义）", async () => {
     record.result = "上一轮增量";
     record.resumable = true;
 
-    await service.chatActions.deliverChatMessage(record, "after you finish", false);
+    await service.chatActions.deliverChatMessage(record, "after you finish");
 
-    expect(fake.interacts.length).toBe(1);
-    const call = fake.interacts[0]!;
-    expect(call.action).toEqual({ kind: "message", payload: "after you finish", interrupt: false });
-    expect(call.handle.data.sessionRef["recordId"]).toBe(record.id);
-    // 受理成功：status 回 running + 上一轮执行态信号清除（§5.4 isStreaming 公式）
+    // [H1 U2] 每轮 = 新 run + resume 锚点（§3.4 dispatchRound）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    const run = fake.runs[0]!;
+    expect(run.task.prompt).toBe("after you finish");
+    expect(run.ctx.resume?.recordId).toBe(record.id);
+    expect(run.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
+    // 轮始执行态信号清除（§5.4 isStreaming 公式）+ 迁移上报
     expect(record.status).toBe("running");
     expect(record.result).toBeUndefined();
     expect(record.resumable).toBeUndefined();
   });
 
-  it("热路径 interrupt=true：引擎受理 → interact(message, interrupt:true)（steer 抢占）", async () => {
-    await service.chatActions.deliverChatMessage(record, "stop now", true);
-
-    expect(fake.interacts[0]!.action).toEqual({ kind: "message", payload: "stop now", interrupt: true });
-    expect(record.status).toBe("running");
-  });
-
-  it("冷路径：engine_session_not_resumable → 续轮 run chat + resume 锚点", async () => {
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_session_not_resumable",
-      message: "no live process (cold path)",
-    };
-
-    await service.chatActions.deliverChatMessage(record, "resume msg", false);
-
+  it("settle 交棒 = run 应答驱动（D7）：派发后挂中段守护，应答 settle 后轮终守护清空", async () => {
+    await service.chatActions.deliverChatMessage(record, "msg");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-    const run = fake.runs[0]!;
-    expect(run.task.prompt).toBe("resume msg");
-    expect(run.ctx.chat?.recordId).toBe(record.id);
-    expect(run.ctx.chat?.resume?.sessionRef["sessionFile"]).toBe(record.sessionFile);
-  });
-
-  it("业务拒绝（EPIPE 兜底耗尽等）→ 原样 throw（错误文本逐字节保持），不进冷路径", async () => {
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_interact_failed",
-      message: `EPIPE fallback exhausted for ${record.id}: 3 consecutive failures.`,
-    };
-
-    await expect(service.chatActions.deliverChatMessage(record, "msg", false)).rejects.toThrow(
-      /EPIPE fallback exhausted/,
-    );
-    expect(fake.runs.length).toBe(0); // 不进冷路径
-  });
-
-  it("热路径 disarm idle timer：arm 后投递 → timer 清除（防 turn 期间误杀）", async () => {
-    // 先 arm idle timer（模拟首轮 agent_settled 后 armed）
-    lifecycle.armIdleTimer(record.id, () => {}, 10000);
-    expect(lifecycle.hasIdleTimer(record.id)).toBe(true);
-
-    await service.chatActions.deliverChatMessage(record, "msg", false);
-
-    // disarmIdleTimer 被调 → timer 清除（新 turn 不被 idle timer 误杀）
-    expect(lifecycle.hasIdleTimer(record.id)).toBe(false);
-  });
-
-  it("受理后挂中段守护（settled-watchdog mid-round armed）；settled 相位交棒收尾段", async () => {
-    await service.chatActions.deliverChatMessage(record, "msg", false);
 
     const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../settled-watchdog.ts");
     expect(hasSettledWatchdog(record.id)).toBe(true);
     expect(getSettledWatchdogPhase(record.id)).toBe("mid-round");
 
-    // 引擎 settled 相位（recordId 键）→ 中段让位收尾段（W4 noteRoundSettledFromProtocol）
-    fake.emitRecordLifecycle(record.id, { phase: "settled" });
-    expect(getSettledWatchdogPhase(record.id)).toBe("settled");
+    // [H1 U2 / D7] settle 交棒 = run 应答驱动（onRunSettled 内 noteRoundSettledFromProtocol）：
+    // 应答后轮终簿记完成，两段守护一并清（不残留 armed——收尾段 fire 会对已收敛轮误杀）
+    fake.runs[0]!.settle({ content: "round text" });
+    await vi.waitFor(() => expect(record.round).toBe(2));
+    expect(hasSettledWatchdog(record.id)).toBe(false);
   });
 });
 
 // ============================================================
-// 冷路径并发守卫（review round2 MF1：同 turn 批量两条 message 双冷路径双 spawn）
+// 续聊并发守卫（review round2 MF1：同 turn 批量两条 message 双 kickOff 双 spawn）
 // ============================================================
 // 复现链（reviewer 探针实证）：pi 对同一条 assistant message 的 tool calls 顺序执行，
-// tool1 的投递在冷路径续轮返回即 resolve——早于协议 run 完成（pool.acquire await 等
-// 异步点）；tool2 立即执行 → 引擎仍无活进程 → 再次冷路径。v4 两态收敛后续轮的
-// `status !== "running"` 守卫对 idle-resumable record 恒放行 → 两次 kickOff →
-// 两个 pi 子进程以 --session 同一 JSONL 双写 + 第一个进程脱离记账成孤儿。
-describe("deliverChatMessage 冷路径并发守卫（review round2 MF1）", () => {
+// tool1 的投递在续聊返回即 resolve——早于协议 run 完成（pool.acquire await 等
+// 异步点）；tool2 立即执行 → 第二次 kickOff。v4 两态收敛后的 status 守卫对
+// running-resumable record 恒放行 → 两次 kickOff → 两个 pi 子进程以 --session 同一
+// JSONL 双写 + 第一个进程脱离记账成孤儿。
+describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
   let agentDir: string;
   let service: SubagentService;
   let record: ExecutionRecord;
@@ -266,16 +230,13 @@ describe("deliverChatMessage 冷路径并发守卫（review round2 MF1）", () =
     agentDir = makeTmpAgentDir();
     clearEngines();
     fake = registerFakePiEngine();
-    fake.interactMessageResult = {
-      ok: false,
-      code: "engine_session_not_resumable",
-      message: "no live process (cold path)",
-    };
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     service = new SubagentService({ cwd: agentDir, modelService });
     service.initSession({ pi: makePi(), sessionId: "root-session" });
     record = makeIdleRecord();
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();
   });
 
@@ -286,96 +247,49 @@ describe("deliverChatMessage 冷路径并发守卫（review round2 MF1）", () =
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("同 record 连续两条 message 冷路径 → 第二条 throw 行动语言，协议 run 仅 1 次", async () => {
-    // 第一条：正常冷路径 resume（run 挂起不 resolve——模拟 pool.acquire 排队窗口）
-    await expect(service.chatActions.deliverChatMessage(record, "first msg", false)).resolves.toBeUndefined();
+  it("同 record 轮在途连续两条 message → 第二条入队不打断单飞（构造性单写者），轮终 drain 聚合派发", async () => {
+    // 第一条：派发新轮（run 挂起不 resolve——模拟在途轮）
+    await expect(service.chatActions.deliverChatMessage(record, "first msg")).resolves.toBeUndefined();
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    // 第二条：run 仍在途（引擎侧仍无活进程）→ 再走冷路径。
-    // 修复前：续轮守卫恒放行 → 第二次 kickOff → 2 个 run（双 spawn 双写 session）。
-    // 修复后：in-flight 守卫 throw 行动语言（MF-4）。
-    await expect(service.chatActions.deliverChatMessage(record, "second msg", false)).rejects.toThrow(
-      /already starting a new round/,
-    );
+    // 第二条：run 在途 → [H1 U2 / D2 打断语义] abort 在途轮 signal + 入队（不打断单飞、
+    // 不二次派发——修复前双 kickOff 双写 session 的守卫由 Continuation 单飞构造性承接）
+    await expect(service.chatActions.deliverChatMessage(record, "second msg")).resolves.toBeUndefined();
     expect(fake.runs.length).toBe(1);
+    const continuation = (
+      // [R4 深绑改写] continuations 队列已迁 RunOrchestration 聚合——读取路径改经
+      // 聚合实例（断言对象与强度不变）。
+      service as unknown as {
+        runOrchestration: { continuations: Map<string, { pendingCount: number }> };
+      }
+    ).runOrchestration.continuations.get(record.id);
+    expect(continuation?.pendingCount).toBe(1);
 
-    // 轮次完成 → 守卫清除 → 后续冷路径可再 resume（守卫不得永久死锁 record）
+    // 轮终（应答收敛）→ drain → 队列消息派发为下一轮（单写者前置满足）
     fake.runs[0]!.settle({ content: "done" });
-    await vi.waitFor(() =>
-      expect((service as unknown as { resumesInFlight: Set<string> }).resumesInFlight.has(record.id)).toBe(false),
-    );
-    await expect(service.chatActions.deliverChatMessage(record, "third msg", false)).resolves.toBeUndefined();
     await vi.waitFor(() => expect(fake.runs.length).toBe(2));
-    expect(fake.runs[1]!.task.prompt).toBe("third msg");
+    expect(fake.runs[1]!.task.prompt).toBe("second msg");
   });
 
-  it("守卫是 record 级：A 在途 resume 不拦截 B 的冷路径 message", async () => {
+  it("守卫是 record 级：A 在途轮不拦截 B 的 message", async () => {
     const recordB = makeIdleRecord("sa-chat-b");
     recordB.sessionFile = path.join(agentDir, "fake-session-b.jsonl");
+    // [U2a/B5] 同 beforeEach——recordB 须 register 进 store（markRoundIdle 内存查）。
+    (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(recordB);
 
-    await service.chatActions.deliverChatMessage(record, "A msg", false);
+    await service.chatActions.deliverChatMessage(record, "A msg");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    // B 的冷路径不受 A 在途影响
-    await expect(service.chatActions.deliverChatMessage(recordB, "B msg", false)).resolves.toBeUndefined();
+    // B 的续聊轮不受 A 在途影响（Continuation per-record 实例）
+    await expect(service.chatActions.deliverChatMessage(recordB, "B msg")).resolves.toBeUndefined();
     await vi.waitFor(() => expect(fake.runs.length).toBe(2));
-    expect(fake.runs[1]!.ctx.chat?.recordId).toBe(recordB.id);
+    expect(fake.runs[1]!.ctx.resume?.recordId).toBe(recordB.id);
 
     fake.runs[0]!.settle({ content: "A done" });
     fake.runs[1]!.settle({ content: "B done" });
-    await vi.waitFor(() =>
-      expect((service as unknown as { resumesInFlight: Set<string> }).resumesInFlight.has(recordB.id)).toBe(false),
-    );
-  });
-});
-
-// ============================================================
-// 本轮 settle（协议形态：run 应答 = 首轮 agent_settled）
-// ============================================================
-
-describe("settleChatRoundFromResponse（W3：协议形态的本轮结算）", () => {
-  let agentDir: string;
-  let service: SubagentService;
-  let record: ExecutionRecord;
-
-  beforeEach(() => {
-    agentDir = makeTmpAgentDir();
-    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
-    service = new SubagentService({ cwd: agentDir, modelService });
-    service.initSession({ pi: makePi(), sessionId: "root-session" });
-    record = makeIdleRecord();
-    record.sessionFile = path.join(agentDir, "fake-session.jsonl");
-  });
-
-  afterEach(() => {
-    service.dispose();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("应答到达 → round+1 + result=本轮内容 + 通知回注（W2 契约：outcome = 本轮内容）", () => {
-    const notifyRouted: string[] = [];
-    const coord = (service as unknown as { collectCoordinator: { route(r: ExecutionRecord): void } }).collectCoordinator;
-    const original = coord.route.bind(coord);
-    Object.assign(coord, { route: (r: ExecutionRecord) => { notifyRouted.push(r.id); original(r); } });
-
-    const settle = (service as unknown as {
-      settleChatRoundFromResponse(record: ExecutionRecord, outcome: { content: string }): void;
-    }).settleChatRoundFromResponse.bind(service);
-    settle(record, { content: "本轮回复文本" });
-
-    expect(record.round).toBe(2);
-    expect(record.result).toBe("本轮回复文本");
-    expect(notifyRouted).toEqual([record.id]);
-  });
-
-  it("closeAfterRound 挂起 → 轮终兑现终态化（closed + user-close）", async () => {
-    record.closeAfterRound = true;
-    const settle = (service as unknown as {
-      settleChatRoundFromResponse(record: ExecutionRecord, outcome: { content: string }): void;
-    }).settleChatRoundFromResponse.bind(service);
-    settle(record, { content: "final" });
-
-    await vi.waitFor(() => expect(record.status).toBe("closed"));
-    expect(record.closeAfterRound).toBeUndefined();
+    // 轮终簿记完成（Continuation 无全局在途集合——终态守卫由 per-record 实例承载），
+    // 断言两轮各自 round+1 即单飞收口的可观察结果。
+    await vi.waitFor(() => expect(record.round).toBe(2));
+    await vi.waitFor(() => expect(recordB.round).toBe(2));
   });
 });

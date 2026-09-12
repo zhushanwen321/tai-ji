@@ -47,8 +47,9 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  * 旧 cancelled 折入 closed（closedReason='cancelled' 区分）。
  *
  * running = 活跃态。含两种子态（由派生谓词区分，见 lifecycle-predicates.ts）：
- *   - 对话模式等待续聊（旧 idle）：进程可能保活（isIdle=hasIdleTimer）或已回收
- *     待冷路径 resume（isResumable=running && 无活进程句柄）。
+ *   - 对话模式等待续聊（旧 idle）：进程已回收，待冷路径 resume
+ *     （isResumable=running && 无活进程句柄）。旧「进程保活待热路径」形态随
+ *     H1 U6 长驻退役消亡，isIdle（hasIdleTimer）生产恒 false。
  *   - 正在执行（有活进程句柄）。
  *
  * closed = 统一终态（done/failed/crashed/cancelled 合并）。具体关闭原因由
@@ -56,6 +57,16 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  * ExecutionRecord.closedReason 携带 L2 原因，投影层按需派生对外语义（error / ended）。
  */
 export type ExecutionStatus = "running" | "closed";
+
+/**
+ * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1 建议新增）：
+ *   "tool"     — 主 agent 经 subagent 工具手动派发（现状全部 record）；
+ *   "workflow" — workflow 脚本内 agent() 调用派发（生产写入方 W2 executeWorkflowAgent 接线）。
+ * 缺省语义 = "tool"：存量 record / 未传字段的 entry 反序列化产物一律视为手动派发，
+ * 四个投影消费面（subagents tool list / renderer 侧栏计数 / renderer 后台工作指示 /
+ * TUI /subagents）对缺省 record 的可见性与历史行为完全一致（零迁移）。
+ */
+export type RecordOrigin = "tool" | "workflow";
 
 /**
  * closed 终态的 L2 关闭原因子枚举。
@@ -79,7 +90,7 @@ export type ClosedReason = 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'u
  * sessionFile（resurrectClosed 回边），不再要求 fork-from 换新 id。
  *
  * 取值以 `.finalized` sidecar 实际写入的 ClosedReason 字面量为准：
- *   disconnected    — 断联（sidecar 空/损坏兜底 + pi-invocation 中断写入）
+ *   disconnected    — 断联（sidecar 空/损坏兜底；in-proc 时代写点已随 engine-CLI 化消失）
  *   parent-shutdown — 父进程 session_shutdown 回收
  * 其余 reason 刻意排除：user-close/cancelled 是用户主动告别（close 语义不可旁路）；
  * gc 是自然完成（追问走 fork-from 或新 start）；parent-fork/parent-new 同理是编排性
@@ -133,19 +144,16 @@ export type ExecutionOutcome = "completed" | "failed" | "cancelled";
 export type ProjectedOutcome = ExecutionOutcome | "closed-legacy";
 
 /**
- * 对外四态（设计决策 10 细则 3）：内部 ExecutionStatus（v4 B-1 两态）收敛为 agent
+ * 对外两态（设计决策 10 细则 3）：内部 ExecutionStatus（v4 B-1 两态）收敛为 agent
  * 可理解的状态语义。真实映射只有两条：
  *   running → active / closed → ended（closed 统一终态，含 cancelled）。
  * mapExternalState 不消费 ClosedReason——closed 恒映射 ended。
  *
- * waiting / error 是历史多态映射（idle→waiting / failed+crashed→error）的遗留声明：
- * 对外四态联合契约不变，但当前状态机不产生这两个值。
- *
  * 原始 ExecutionStatus 进 list item 的 status 字段供调试；state 是对外主字段。
- * 映射实现见 subagent-actions.ts mapExternalState——未来内部加态必须扩展该处，
+ * 映射实现见 subagent-actions-core.ts mapExternalState——未来内部加态必须扩展该处，
  * 漏加会在 default 分支编译报错，不影响对外契约。
  */
-export type ExternalState = "active" | "waiting" | "ended" | "error";
+export type ExternalState = "active" | "ended";
 
 /** 执行模式。background = 调用方立即拿 handle 返回，子 agent 在 detached promise 里跑。 */
 export type ExecutionMode = "background";
@@ -172,6 +180,8 @@ export type ExecutionMode = "background";
 //     tool_start / tool_end      ↔ ACP tool_call / tool_call_update
 //     turn_end / message_end     ↔ ACP prompt turn 终态（stop_reason + usage）
 //     compaction                 ↔ ACP session/compaction
+//     activity                   ↔ 无 ACP 对应（协议内生活性信号：reducer no-op、
+//                                 不落 journal，仅供无进展守护刷新判活）
 //   本协议以 pi 为语义锚点（D3）——命名不迁移，对照表仅保证未来 AcpEngine 适配器
 //   与跨引擎 trace 映射的翻译成本最低。
 export type {
@@ -279,7 +289,8 @@ export interface AgentResult {
 // Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager / worktree-git-ops）。
 export type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 
-/** alive marker：子进程存活标记，用于心跳检测和 crash 推断。 */
+/** alive marker：跨进程写权声明载体（写者 = 宿主进程；acquire/release 见
+ *  alive-store 模块头；startedAt 仅载体字段，判活不消费——pid 单判据）。 */
 export interface AliveMarker {
   readonly pid: number;
   readonly id: string;
@@ -367,6 +378,19 @@ export interface ExecutionRecord {
   /** subagent 递归深度。顶层（主 session 直接创建）=0，每层嵌套 +1。 */
   readonly depth: number;
   /**
+   * 来源身份（H2 W1，D1）。缺省（undefined）语义 = "tool"（存量 record 零迁移）；
+   * "workflow" = workflow 脚本 agent() 派发（生产写入方 W2 接线）。过滤在投影/查询
+   * 消费面（list 默认滤 workflow origin），store 治理面（孤儿恢复/revive）全量可见。
+   * 持久化经 subagent-record entry。
+   */
+  readonly origin?: RecordOrigin;
+  /**
+   * origin="workflow" 时所属 workflow run 的 id（W2 写入）；tool 来源恒 undefined。
+   * W2 run 视图进度 / W3 下钻按本 id 查询本 run 的 record 集（内存 ∪ 磁盘重建口径，
+   * collectRecordsByParentRunId）。持久化经 subagent-record entry。
+   */
+  readonly parentRunId?: string;
+  /**
    * 对话模式标志（可持续对话 subagent）。true = 轮次完成进 idle 态（保留 record +
    * worktree）等待续聊，而非一次性终态化。
    * undefined/false = 一次性模式（默认，行为完全不变）。
@@ -443,32 +467,9 @@ export interface ExecutionRecord {
    * 进 idle）+1。undefined 时视为 0。非 chatMode 不自增。
    */
   round?: number;
-  /**
-   * [增量通知] 当前轮次增量的 turns[] 起始下标（仅 chatMode 有意义；内存态记账，D4 不持久化）。
-   *
-   * - 生命周期：undefined 视为 0（首轮增量 = 全量，与改造前首轮通知逐字节一致，向后兼容旧
-   *   record）；唯一写点 onRoundSettled 第 5 步（notify 之后推进），唯一读点同回调第 2 步
-   *   （`getFullTextFrom(record, record.roundBaseTurnIndex ?? 0)`）。非 chatMode 恒
-   *   undefined（onRoundSettled 是 session-runner chatMode 分支专属回调）。
-   * - D1 滞后空 turn 防丢文本（防御性）：pi 当前事件序下该形态不可达——带 usage 的
-   *   message_end 恒先于 turn_end（@earendil-works/pi-agent-core dist/agent-loop.js
-   *   :240/:253/:547 三处 message_end emit 均在 :131 正常路径 turn_end 之前），settle 时
-   *   turn 全闭合。防 pi 未来事件序变化：若 settle 时刻末 turn 是滞后 message_end 开出的
-   *   空 turn（execution-record.ts message_end 分支经 currentTurn，需同时过两层 usage 守卫：
-   *   session-runner.ts 转发层 `if (msg?.usage)`（bare message_end 不转发）+ execution-record.ts
-   *   累积层 `if (event.usage)`（bare message_end 不开 turn）），推进公式
-   *   nextRoundBaseTurnIndex 把它留在下一轮增量内（新轮首个 text_delta 经 currentTurn 复用该
-   *   空 turn，复用累积被 slice 覆盖）；直用 turns.length 推进会把下轮首段文本挤出 slice
-   *   范围静默丢失。
-   * - D4 不持久化：磁盘重建走 createRecord（turns 仅为初始 [emptyTurn()]），base=0 对空 turn
-   *   的增量派生等价为空、天然产出仅新轮增量，持久化是死数据。故不写 manifest、不参与重建。
-   * - pi 内部序锚定依据（R1 mitigation）：@earendil-works/pi-agent-core 0.84.2
-   *   dist/agent-loop.js :108-111（error/aborted stopReason 也先 emit turn_end 再 agent_end）
-   *   与 :131（正常路径 turn_end 收尾）；agent_settled 在 agent_end 之后 emit，故未闭合
-   *   turn 只可能来自滞后事件。pi 升级若改变 turn_end/agent_end 时序，onRoundSettled 推进前
-   *   的观测哨（末 turn 未闭合且 text 非空 → logger.warn）会留痕。
-   */
-  roundBaseTurnIndex?: number;
+  // [H1 U6 / D7 ③] roundBaseTurnIndex（增量通知 base 记账）已退役删除——消费函数
+  // getFullTextFrom/nextRoundBaseTurnIndex 与唯一写点 settleChatRoundFromResponse 随
+  // chat 域载体退役，生产零调用（base 推进 = 死记账）。
   /**
    * record 进入 idle 态的时间戳（ms）。finalizeRoundToIdle 设值；GC 定时器据此计算
    * 剩余 TTL。undefined = 非 idle 态（running/closed/cancelled）或旧 record 缺失字段。
@@ -493,12 +494,11 @@ export interface ExecutionRecord {
   sessionFile?: string;
 
   /**
-   * [V2 决策 3] 子进程 pid（spawn 后由 session-runner 回填到内存 record）。
+   * [V2 决策 3] 子进程 pid（spawn 后回填到内存 record，并随 record 持久化落盘）。
    *
-   * 用于 lifecycle-manager 孤儿扫描（V2 §5.2 职责 4：父进程重启时按持久化 pid 扫收
-   * 上次崩溃遗留的孤儿）。本字段仅在内存记账，持久化留 Step 5（record
-   * 文件写入 pid + 启动时 scanOrphanProcesses 消费）。undefined = 尚未 spawn / 已退出。
-   * 向后兼容：旧 record 无此字段，按无 pid 处理（孤儿扫描跳过）。
+   * 诊断字段：排障时对照 record 文件与进程表核实 spawn 事实。原职责 4 孤儿扫描
+   * （按持久化 pid 扫收上次崩溃遗留孤儿）自落地起未接线，已随 L2 死代码清扫删除。
+   * undefined = 尚未 spawn / 已退出。向后兼容：旧 record 无此字段，按无 pid 处理。
    */
   pid?: number;
 
@@ -805,6 +805,17 @@ export interface SubagentRecord {
   parentRecordId: string | undefined;
   /** subagent 递归深度。顶层 =0，每层嵌套 +1。 */
   depth: number;
+  /**
+   * 来源身份（H2 W1，D1，与 ExecutionRecord.origin 同源投影/entry 重建）。
+   * 缺省（undefined / 存量磁盘重建源）语义 = "tool"；消费面按 `=== "workflow"`
+   * 负向判定，list 查询缺省过滤（includeWorkflow 缺省 false）。
+   */
+  origin?: RecordOrigin;
+  /**
+   * origin="workflow" 时所属 workflow run id（与 ExecutionRecord.parentRunId 同源）。
+   * W2/W3 run 视图下钻按 collectRecordsByParentRunId 查询；tool 来源恒 undefined。
+   */
+  parentRunId?: string;
   endedAt: number | undefined;
   turns: number;
   totalTokens: number;
@@ -842,8 +853,6 @@ export interface SubagentRecord {
    * （轮终 idle / 重建孤儿兜底），GUI 侧据此排除「真在跑」判定。
    */
   resumable?: boolean;
-  /** 外部 Pi 实例（进程隔离模式下由外部启动的子进程）。 */
-  externalInstance?: AliveMarker;
   /** fork 模式下的 worktree handle。 */
   worktreeHandle?: WorktreeHandle;
   /**

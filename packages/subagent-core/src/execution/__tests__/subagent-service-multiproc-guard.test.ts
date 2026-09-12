@@ -29,7 +29,6 @@ vi.mock("../alive-store.ts", () => ({
   removeAliveMarker: vi.fn(),
   readAliveMarker: vi.fn(() => undefined),
   isProcessAlive: vi.fn(() => false),
-  ALIVE_SOFT_TIMEOUT_MS: 3_600_000,
   findForeignLiveInstance: foreignLiveSpy,
 }));
 

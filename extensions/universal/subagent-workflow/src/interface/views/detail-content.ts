@@ -12,8 +12,9 @@
 
 import { Key, matchesKey } from "@earendil-works/pi-tui";
 
-import { getAllToolCalls, projectLiveProgress } from "@zhushanwen/subagent-core";
+import { computeElapsedSeconds } from "@zhushanwen/subagent-core";
 import type { AgentEventLogEntry } from "@zhushanwen/subagent-core";
+import type { SubagentRecord } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
@@ -41,6 +42,49 @@ import {
 /** 探测宽度：足够大避免截断折行影响行数统计（对齐 subagents DETAIL_LEN_PROBE_WIDTH）。 */
 const DETAIL_LEN_PROBE_WIDTH = 9999;
 
+// ── [H2 W3] store record 的 live 进度投影（设计 D2：进度源从 node.live 切 store）──
+
+/**
+ * running record 的实时进度投影——消费面七字段口径与旧 projectLiveProgress(node.live)
+ * 逐字段对齐（totalTokens / 工具计数 / elapsedSeconds / turns / eventLog /
+ * currentActivity / lastError）。
+ */
+export interface LiveProgressView {
+  totalTokens: number;
+  toolCallCount: number;
+  elapsedSeconds: number;
+  turns: number;
+  eventLog: AgentEventLogEntry[];
+  currentActivity?: { type: "tool" | "text" | "thinking"; label: string };
+  lastError?: string;
+}
+
+/**
+ * SubagentRecord（store 查询投影）→ LiveProgressView。与旧路径
+ * projectLiveProgress(node.live) 的字段等价性（构造性论证，S1 等价表依据）：
+ *   - totalTokens / turns：recordToSubagent 直读 record.totalTokens / turnCount，同源；
+ *   - toolCallCount：eventLog 里 tool_start 计数——getEventLog 对每个 toolCall 恰产
+ *     一条 tool_start，与 getAllToolCalls(record).length 恒等；
+ *   - elapsedSeconds：computeElapsedSeconds 同一函数（startedAt/endedAt 同字段）；
+ *   - eventLog / currentActivity：recordToSubagent 内部即调 getEventLog /
+ *     getCurrentActivity（同源 API，仅内存 running record 有 currentActivity）；
+ *   - lastError：eventLog 末条 type==="error" 的 label——getEventLog 仅当
+ *     record.lastError 非空时追加该条且必在末尾，存在性 ⟺ 非空，label 即原文。
+ */
+export function projectRecordProgress(rec: SubagentRecord): LiveProgressView {
+  const eventLog = rec.eventLog;
+  const last = eventLog[eventLog.length - 1];
+  return {
+    totalTokens: rec.totalTokens,
+    toolCallCount: eventLog.filter((e) => e.type === "tool_start").length,
+    elapsedSeconds: computeElapsedSeconds(rec),
+    turns: rec.turns,
+    eventLog,
+    currentActivity: rec.currentActivity,
+    lastError: last !== undefined && last.type === "error" ? last.label : undefined,
+  };
+}
+
 /** status → 语义色标签（L2 detail 头用）。 */
 export function statusLabel(status: string, theme: ThemeLike): string {
   switch (status) {
@@ -57,7 +101,9 @@ export function statusLabel(status: string, theme: ThemeLike): string {
  * 构建 L2 右侧详情的完整内容行。
  *
  * 纯函数：无 Pi runtime、无副作用，可单测。入参 promptExpanded 用结构化类型，
- * 不依赖完整 ViewState（便于测试构造）。
+ * 不依赖完整 ViewState（便于测试构造）。liveView = 该节点配对的 running record 投影
+ * （[H2 W3] 从 trace.live 切 store 订阅，经 WorkflowsView.collectNodeLiveProgress
+ * 配对注入；缺省走终态 result 路径）。
  */
 export function buildDetailContent(
   node: ExecutionTraceNode,
@@ -66,6 +112,7 @@ export function buildDetailContent(
   theme: ThemeLike,
   mainWidth: number,
   now: number,
+  liveView?: LiveProgressView,
 ): string[] {
   const rightLines: string[] = [];
   const elapsed = formatElapsed(
@@ -75,20 +122,18 @@ export function buildDetailContent(
   rightLines.push(theme.fg("muted", "Detail"));
   rightLines.push("─".repeat(mainWidth));
   rightLines.push(`${statusDotStr(node.status, theme)} ${statusLabel(node.status, theme)} · ${node.model}`);
-  // Live 路径优先：运行中用 node.live 的实时 usage/toolCalls/elapsed；否则用终态 result。
-  if (node.live) {
-    const live = projectLiveProgress(node.live);
-    const tokK = live.totalTokens > 0 ? `${Math.round(live.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "0 tok";
-    const tcCount = getAllToolCalls(node.live).length;
-    rightLines.push(theme.fg("dim", `${tokK} · ${tcCount} tool calls · ${formatElapsedSeconds(live.elapsedSeconds)}`));
+  // Live 路径优先：运行中用 store record 投影的实时 usage/toolCalls/elapsed；否则用终态 result。
+  if (liveView) {
+    const tokK = liveView.totalTokens > 0 ? `${Math.round(liveView.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "0 tok";
+    rightLines.push(theme.fg("dim", `${tokK} · ${liveView.toolCallCount} tool calls · ${formatElapsedSeconds(liveView.elapsedSeconds)}`));
   } else {
     rightLines.push(theme.fg("dim", formatTokenStat(node.result?.usage, node.result?.toolCalls, elapsed)));
   }
   rightLines.push("");
   renderWorkerLogSection(rightLines, run, mainWidth, theme);
   renderPromptSection(rightLines, node, state, theme);
-  renderActivitySection(rightLines, node, mainWidth, theme);
-  renderOutcomeSection(rightLines, node, mainWidth, theme);
+  renderActivitySection(rightLines, node, liveView, mainWidth, theme);
+  renderOutcomeSection(rightLines, node, liveView, mainWidth, theme);
   renderSessionSection(rightLines, node, mainWidth, theme);
   return rightLines;
 }
@@ -99,8 +144,9 @@ export function detailContentLength(
   state: { promptExpanded: boolean },
   run: WorkflowRun,
   theme: ThemeLike,
+  live?: LiveProgressView,
 ): number {
-  return buildDetailContent(node, state, run, theme, DETAIL_LEN_PROBE_WIDTH, Date.now()).length;
+  return buildDetailContent(node, state, run, theme, DETAIL_LEN_PROBE_WIDTH, Date.now(), live).length;
 }
 
 // ── L2 详情滚动按键（纯函数，对齐 subagents processKey）─────────
@@ -214,20 +260,20 @@ function renderPromptSection(
 function renderActivitySection(
   rightLines: string[],
   node: ExecutionTraceNode,
+  liveView: LiveProgressView | undefined,
   mainWidth: number,
   theme: ThemeLike,
 ): void {
-  // Live 路径：agent 运行中，从 node.live 派生实时 eventLog + currentActivity。
+  // Live 路径：agent 运行中，从 store record 投影派生实时 eventLog + currentActivity。
   // 与 subagents TUI 一致：当前活动行 + 最近 N 条离散事件（tool/turn_end/error）。
-  if (node.live) {
-    const live = projectLiveProgress(node.live);
-    const eventLog = live.eventLog.filter((e) => e.type !== "turn_end");
-    const totalCount = getAllToolCalls(node.live).length;
-    const label = `Activity · ${totalCount} tool call${totalCount !== 1 ? "s" : ""} · ${live.turns} turn${live.turns !== 1 ? "s" : ""}`;
+  if (liveView) {
+    const eventLog = liveView.eventLog.filter((e) => e.type !== "turn_end");
+    const totalCount = liveView.toolCallCount;
+    const label = `Activity · ${totalCount} tool call${totalCount !== 1 ? "s" : ""} · ${liveView.turns} turn${liveView.turns !== 1 ? "s" : ""}`;
     rightLines.push(theme.fg("muted", label));
     // 当前活动行（running tool / thinking / text）
-    if (live.currentActivity) {
-      rightLines.push(theme.fg("accent", `  ⎿ ${live.currentActivity.type}: ${live.currentActivity.label}`.slice(0, mainWidth - BOX_BORDER_CHARS)));
+    if (liveView.currentActivity) {
+      rightLines.push(theme.fg("accent", `  ⎿ ${liveView.currentActivity.type}: ${liveView.currentActivity.label}`.slice(0, mainWidth - BOX_BORDER_CHARS)));
     }
     // 最近 N 条事件
     const showCount = Math.min(MAX_TOOL_CALLS_DISPLAY, eventLog.length);
@@ -236,7 +282,7 @@ function renderActivitySection(
       const entry = eventLog[i] as AgentEventLogEntry;
       rightLines.push(theme.fg("dim", `  ${formatTraceEventLine(entry, theme)}`.slice(0, mainWidth - BOX_BORDER_CHARS)));
     }
-    if (totalCount === 0 && !live.currentActivity) {
+    if (totalCount === 0 && !liveView.currentActivity) {
       rightLines.push(theme.fg("dim", "  (starting...)"));
     }
     rightLines.push("");
@@ -267,17 +313,17 @@ function renderActivitySection(
 function renderOutcomeSection(
   rightLines: string[],
   node: ExecutionTraceNode,
+  liveView: LiveProgressView | undefined,
   mainWidth: number,
   theme: ThemeLike,
 ): void {
   rightLines.push(theme.fg("muted", "Outcome"));
-  if (node.status === "running" && node.live) {
+  if (node.status === "running" && liveView) {
     // 运行中：显示实时指标（elapsed/tokens/turns）替代空荡的 "Still running..."
-    const live = projectLiveProgress(node.live);
-    const tokK = live.totalTokens > 0 ? `${Math.round(live.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "0 tok";
-    rightLines.push(theme.fg("dim", `  Running · ${formatElapsedSeconds(live.elapsedSeconds)} · ${tokK} · ${live.turns} turn${live.turns !== 1 ? "s" : ""}`));
-    if (live.lastError) {
-      rightLines.push(theme.fg("warning", `  ⚠ ${live.lastError.slice(0, mainWidth - BOX_BORDER_CHARS)}`));
+    const tokK = liveView.totalTokens > 0 ? `${Math.round(liveView.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "0 tok";
+    rightLines.push(theme.fg("dim", `  Running · ${formatElapsedSeconds(liveView.elapsedSeconds)} · ${tokK} · ${liveView.turns} turn${liveView.turns !== 1 ? "s" : ""}`));
+    if (liveView.lastError) {
+      rightLines.push(theme.fg("warning", `  ⚠ ${liveView.lastError.slice(0, mainWidth - BOX_BORDER_CHARS)}`));
     }
   } else if (node.status === "running") {
     rightLines.push(theme.fg("dim", "  Still running..."));

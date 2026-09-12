@@ -1,4 +1,4 @@
-// src/runtime/worktree-registry.ts
+// src/execution/worktree-registry.ts
 //
 // 全局 worktree 注册表：跨 repo 记录所有活 pi-sub-* worktree。
 //

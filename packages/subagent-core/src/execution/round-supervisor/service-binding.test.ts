@@ -10,11 +10,12 @@
 //        分支，替身 getMutable 受控注入驱动契约）；
 //      - finalizeClosed 异常 best-effort（不向上抛、终止通知仍发）；
 //      - superseded：errorText 带替代 id、不发终止通知；
-//      - 磁盘态（boot 重认领后看门狗到期）：writeFinalized sidecar 落盘 +
-//        reportSubagentRecord 终态 entry（closed/gc/endedAt/error）、无 pi 通知；
-//      - 磁盘态无 sessionFile / writeFinalized 抛错（sidecar catch）/ 双 miss 收尾
-//        竞争 / reportSubagentRecord 抛错（entry catch，须先经 boot 重认领武装
-//        看门狗——无候选则 giveUp 不执行，用例空转）。
+//      - 磁盘态（boot 重认领后看门狗到期）：[U2b] store.markFinalized 归口——
+//        `.state` sidecar + subagent-record 终态 entry（closed/gc/endedAt/error）+
+//        `.alive` release 一体落齐、无 pi 通知；
+//      - 磁盘态无 sessionFile / writeFinalizedState 返回 false（§3.4 零持久化
+//        副作用 + 响亮 entry）/ 双 miss 收尾竞争 / entry 面抛错（appendEntry catch，
+//        须先经 boot 重认领武装看门狗——无候选则 giveUp 不执行，用例空转）。
 //   2. runPendingReconcileSweepForService 的 lookupRecordState 闭包 subagent 判据
 //      （workflow 判据回归钉在 workflow-state-root.test.ts，此处补 subagent 两方向：
 //      活跃 record 不被 sweep 注销 + 终态/missing 差集补发注销）。
@@ -32,11 +33,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-resurrect.ts";
-import * as finalizedMarker from "../finalized-marker.ts";
+import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-lookup.ts";
+import * as stateMarker from "../state-marker.ts";
 import type { PiLike } from "../notify-host.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+import { RecordStore } from "../record-store.ts";
+import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../types.ts";
 import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type SupervisorCandidateRecord } from "./index.ts";
 import {
   createRoundSupervisorForService,
@@ -44,13 +45,13 @@ import {
   type RoundSupervisorBinding,
 } from "./service-binding.ts";
 
-// writeFinalized 实装自吞 IO 错（内部 try/catch，finalized-marker.ts），give-up
-// sidecar 的 catch（service-binding.ts:164）是防御分支——真实 ENOENT 无法驱动，
-// 仅本文件的 sidecar 抛错用例经模块替身注入抛错；默认委托真实实现，相邻用例行为
-// 不变（vi.spyOn 对跨模块具名导入绑定不可拦截，必须走 vi.mock）。
-vi.mock("../finalized-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../finalized-marker.ts")>();
-  return { ...actual, writeFinalized: vi.fn(actual.writeFinalized) };
+// writeFinalizedState 实装（U1 后）为响亮重试 + 失败返回 false（不抛——state-marker
+// 内部 3 次退避重试），give-up 的 §3.4 false 分支真实磁盘故障无法稳定驱动，仅本文件
+// 的「重试耗尽」用例经模块替身注入 false 返回；默认委托真实实现，相邻用例行为不变
+//（vi.spyOn 对跨模块具名导入绑定不可拦截，必须走 vi.mock）。
+vi.mock("../state-marker.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../state-marker.ts")>();
+  return { ...actual, writeFinalizedState: vi.fn(actual.writeFinalizedState) };
 });
 
 // ============================================================
@@ -92,6 +93,8 @@ function makePi(): TestPi {
 
 interface StoreHarness {
   store: RecordStore;
+  /** 真实 RecordStore（磁盘态放弃分支 markFinalized 的委托目标——终态四面真写）。 */
+  realStore: RecordStore;
   memory: Map<string, ExecutionRecord>;
   disk: Map<string, SubagentRecord>;
   /** collectRecords 返回的候选（替身投影；默认从 memory 生成）。 */
@@ -100,14 +103,17 @@ interface StoreHarness {
   reported: SubagentRecord[];
 }
 
-/** duck-typed RecordStore 替身（service-binding 只消费 getMutable / findLightById /
- *  collectRecords / reportSubagentRecord 四个读写点）。 */
+/** duck-typed RecordStore 替身（service-binding 消费 getMutable / findLightById /
+ *  collectRecords / reportSubagentRecord / markFinalized 五个读写点——markFinalized
+ *  [U2b] 委托真实 store（`.state`/entry/manifest/marker release 真写），其余读点走
+ *  替身 map（真实磁盘发现需 session 文件扫描，与本文件断言面无关）。 */
 function makeStore(): StoreHarness {
   const memory = new Map<string, ExecutionRecord>();
   const disk = new Map<string, SubagentRecord>();
   const collectResult: SupervisorCandidateRecord[] = [];
   const collectCalls: StoreHarness["collectCalls"] = [];
   const reported: SubagentRecord[] = [];
+  const realStore = new RecordStore(path.join(tmpDir, "sessions"));
   const store = {
     getMutable: (id: string) => memory.get(id),
     findLightById: (id: string) => disk.get(id),
@@ -118,8 +124,10 @@ function makeStore(): StoreHarness {
     reportSubagentRecord: (record: SubagentRecord) => {
       reported.push(record);
     },
+    markFinalized: (record: ExecutionRecord, closedReason?: ClosedReason) =>
+      realStore.markFinalized(record, closedReason),
   };
-  return { store: store as unknown as RecordStore, memory, disk, collectResult, collectCalls, reported };
+  return { store: store as unknown as RecordStore, realStore, memory, disk, collectResult, collectCalls, reported };
 }
 
 interface BindingHarness {
@@ -329,6 +337,9 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
 describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () => {
   function makeDiskBinding(diskRecord: SubagentRecord): BindingHarness {
     const h = makeBinding({ sessionFile });
+    // [U2b] 终态 entry/manifest 面 = markFinalized 经真实 store 落 pi.appendEntry
+    //（archive 面），绑定 pi 注入真实 store。
+    h.store.realStore.setPi(h.pi ?? null);
     h.store.disk.set(diskRecord.id, diskRecord);
     // boot 分区候选（真实 collectRecords 的 running 投影形态）
     h.store.collectResult.push({
@@ -341,37 +352,54 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     return h;
   }
 
-  it("writeFinalized sidecar 落盘 + reportSubagentRecord 终态 entry（closed/gc/endedAt/error）；磁盘态不发终止通知", async () => {
+  /** pi.appended 中 customType=subagent-record 的终态 entry 载荷。 */
+  function subagentEntries(pi: ReturnType<typeof makePi> | null): Array<Record<string, unknown>> {
+    return (pi?.appended ?? [])
+      .filter((a) => a.customType === "subagent-record")
+      .map((a) => a.data as Record<string, unknown>);
+  }
+
+  it("markFinalized 归口：.state sidecar + subagent-record 终态 entry（closed/gc/endedAt/error）+ .alive release 一体落齐；磁盘态不发终止通知", async () => {
     const diskRecord = makeDiskRecord(sessionFile);
     const h = makeDiskBinding(diskRecord);
+    // 持有期声明在位（boot 重认领形态——磁盘 running record 携带写权声明）。
+    h.store.realStore.acquireWriteLease(sessionFile, diskRecord.id);
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
     const supervisor = createRoundSupervisorForService(h.binding);
 
     // 纳管经磁盘兜底视图（内存 Map 空）——boot 分区重认领形态
     supervisor.bootPartition();
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
-    // sidecar：sessionFile 旁 .finalized 内容 = "gc"；finalizeClosed 不适用（无内存 record）
-    expect(fs.readFileSync(`${sessionFile}.finalized`, "utf-8")).toBe("gc");
+    // sidecar：sessionFile 旁 .state 内容 = {status:finalized, reason:"gc"}；finalizeClosed 不适用（无内存 record）
+    expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
+      status: "finalized",
+      reason: "gc",
+    });
     expect(h.finalizeClosed).not.toHaveBeenCalled();
 
-    // 终态 entry 落盘（reportSubagentRecord）：磁盘 record + 终态语义位
-    expect(h.store.reported).toHaveLength(1);
-    const reported = h.store.reported[0]!;
-    expect(reported).toMatchObject({
+    // 终态 entry 落盘（markFinalized → archive → pi.appendEntry）：磁盘 record + 终态语义位
+    const entries = subagentEntries(h.pi);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
       id: "bg-disk",
       status: "closed",
       closedReason: "gc",
       endedAt: expect.any(Number),
       error: expect.stringContaining("safe to re-dispatch"),
     });
-    expect(reported.error).not.toContain("superseded");
+    expect(String(entries[0]!["error"])).not.toContain("superseded");
+
+    // [D3a release 出口①] 终态原语删写权声明——磁盘态放弃同样释放（残留声明会
+    // 误拦异宿主接管）。
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
 
     // 磁盘态分支无终止通知（sent 仅 boot 重认领的 decision guidance 一条）
     expect(h.pi?.sent).toHaveLength(1);
     expect(h.pi?.sent.every((s) => !s.message.content.includes(TERMINATION_NOTICE_MARK))).toBe(true);
   });
 
-  it("磁盘态无 sessionFile → 跳过 sidecar，仍 reportSubagentRecord 终态化", async () => {
+  it("磁盘态无 sessionFile → 跳过 sidecar，仍终态 entry（markFinalized 无锚点降级路径）", async () => {
     const diskRecord = makeDiskRecord(undefined);
     const h = makeDiskBinding(diskRecord);
     const supervisor = createRoundSupervisorForService(h.binding);
@@ -379,19 +407,20 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     supervisor.bootPartition();
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
-    expect(h.store.reported).toHaveLength(1);
-    expect(h.store.reported[0]?.status).toBe("closed");
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+    const entries = subagentEntries(h.pi);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "closed", closedReason: "gc" });
   });
 
-  it("reportSubagentRecord 抛错 → best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {
+  it("entry 面抛错（pi.appendEntry 炸）→ best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {
     // 候选入 collectResult → boot 重认领（readopted）武装看门狗——没有这一步
     // listCandidateRecords 返回空、giveUp 永不执行、entry catch 不可达（MF-R2-2）。
     const diskRecord = makeDiskRecord(sessionFile);
     const h = makeDiskBinding(diskRecord);
-    h.store.store.reportSubagentRecord = () => {
+    (h.pi!.appendEntry as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("entry write exploded");
-    };
+    });
     const supervisor = createRoundSupervisorForService(h.binding);
 
     const { readopted } = supervisor.bootPartition();
@@ -400,39 +429,46 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
     // sidecar 与终态 entry 是两段独立 best-effort：entry 抛错不回滚已落 sidecar
-    expect(fs.readFileSync(`${sessionFile}.finalized`, "utf-8")).toBe("gc");
-    // 终态 entry 写入抛错被 give-up entry catch 吞掉 → reported 空
-    expect(h.store.reported).toHaveLength(0);
+    //（markFinalized 写序 = .state 先、archive/entry 后，D8）。
+    expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
+      status: "finalized",
+      reason: "gc",
+    });
+    expect(subagentEntries(h.pi)).toHaveLength(0);
   });
 
-  it("writeFinalized 抛错 → best-effort 吞掉，终态 entry 照常落盘", async () => {
-    const diskRecord = makeDiskRecord(path.join(tmpDir, "gone-dir", "s.jsonl"));
+  it("writeFinalizedState 返回 false（重试耗尽）→ 零持久化副作用：无终态 entry、无 state-write-failed 之外的写入面、响亮 entry 上报", async () => {
+    const diskRecord = makeDiskRecord(sessionFile);
     const h = makeDiskBinding(diskRecord);
     const supervisor = createRoundSupervisorForService(h.binding);
-    // 模块替身注入抛错（见文件头 vi.mock 注释）；finally 恢复委托真实实现。
-    const actual = await vi.importActual<typeof import("../finalized-marker.ts")>(
-      "../finalized-marker.ts",
+    // 模块替身注入失败返回（U1 后 writeFinalizedState 不抛——重试耗尽返回 false）；
+    // finally 恢复委托真实实现。
+    const actual = await vi.importActual<typeof import("../state-marker.ts")>(
+      "../state-marker.ts",
     );
-    const writeSpy = vi.mocked(finalizedMarker.writeFinalized);
-    writeSpy.mockImplementation(() => {
-      throw new Error("sidecar write exploded");
-    });
+    const writeSpy = vi.mocked(stateMarker.writeFinalizedState);
+    writeSpy.mockImplementation(() => false);
     try {
       supervisor.bootPartition();
       await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
     } finally {
-      writeSpy.mockImplementation(actual.writeFinalized);
+      writeSpy.mockImplementation(actual.writeFinalizedState);
     }
 
-    // 替身确实被 giveUp 消费（否则异常被 writeFinalized 实装自吞，用例假绿）
+    // 替身确实被 giveUp 消费（否则用例假绿）
     expect(writeSpy).toHaveBeenCalled();
-    expect(fs.existsSync(`${diskRecord.sessionFile}.finalized`)).toBe(false);
-    expect(h.store.reported).toHaveLength(1);
-    expect(h.store.reported[0]).toMatchObject({ id: diskRecord.id, status: "closed", closedReason: "gc" });
+    // [§3.4] record 留 running：.state 未落 + 无终态 entry（零持久化副作用）
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+    expect(subagentEntries(h.pi)).toHaveLength(0);
+    // 响亮上报腿：subagent:state-write-failed entry（GUI 通知面，对齐 doFinalizeRecord）
+    const failNotices = (h.pi?.appended ?? []).filter((a) => a.customType === "subagent:state-write-failed");
+    expect(failNotices).toHaveLength(1);
+    expect(failNotices[0]?.data).toMatchObject({ id: diskRecord.id, status: "closed", closedReason: "gc" });
   });
 
   it("giveUp 执行时 record 已被 archive（内存移除 + 磁盘无 light）→ 双 miss 直接 return，零副作用", async () => {
     const h = makeBinding({ sessionFile });
+    h.store.realStore.setPi(h.pi ?? null);
     const rec = makeRecord();
     h.store.memory.set("bg-1", rec);
     // 视图检查（内存 running）之后、giveUp 磁盘兜底之前被 archive 的收尾竞争替身投影
@@ -451,8 +487,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(h.finalizeClosed).not.toHaveBeenCalled();
     expect(h.pi?.sent).toHaveLength(2); // 纳管期通知照常，终止通知不发（零通知放弃）
     expect(h.pi?.sent.every((s) => !s.message.content.includes(TERMINATION_NOTICE_MARK))).toBe(true);
-    expect(h.store.reported).toHaveLength(0);
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
+    expect(subagentEntries(h.pi)).toHaveLength(0);
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
   });
 });
 

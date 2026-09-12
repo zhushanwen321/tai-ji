@@ -1,8 +1,8 @@
 // src/active-children.ts
 //
-// 当前活跃子进程记账（自 spawn-runner.ts 提取）：interact 热路径 / dispose 收割
+// 当前活跃子进程记账（自 spawn-runner.ts 提取）：镜像上报 / dispose 收割
 // 消费；引擎进程内权威。spawn-runner.ts re-export 全部导出保持既有导入面
-// （index.ts / pi-engine.ts / chat-session.ts / __tests__ 均从 spawn-runner 导入）。
+// （index.ts / pi-engine.ts / __tests__ 均从 spawn-runner 导入）。
 
 import type { ChildProcess } from "node:child_process";
 

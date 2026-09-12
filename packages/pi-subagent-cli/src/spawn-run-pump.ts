@@ -2,13 +2,15 @@
 //
 // stdout pump + close 收尾 + session 身份回填（自 runSpawnOnce 行为等价提取的
 // 子进程生命周期接线面）。身份三路同源：header 行 / get_state 应答（响应行同步
-// 路径 + 握手 promise 兜底）/ LC-4 后缀反查——写入口收敛在 identity tracker。
+// 路径 + 握手 promise 兜底）/ LC-4 后缀反查——写入口收敛在 identity tracker；
+// close 收尾时三路全 miss = 应响亮报错的异常信号，warn 留痕不自动认领。
 
 import type { ChildProcess } from "node:child_process";
 
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
 
 import { unregisterActiveChild } from "./active-children.ts";
+import { PI_POOL_KEY } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
 import {
@@ -30,10 +32,24 @@ const INVALID_LINE_LOG_CHARS = 160;
 /** 信号退出码合成值（close 无 code 只有 signal 时按 128+ 约定折算非零）。 */
 const SIGNAL_EXIT_CODE_BASE = 128;
 
+/**
+ * child 'error' 事件（spawn 失败——子进程从未运行）的收尾退出码。POSIX
+ * command-not-found 惯例值：与 128+ 信号折算族同为非零异常口径，且语义上贴近
+ * 「找不到可执行文件」（典型 ENOENT）。
+ */
+const SPAWN_ERROR_EXIT_CODE = 127;
+
 /** run 收尾状态（agent_end / agent_settled 与 close 收尾共享的可变句柄）。 */
 export interface RunEndState {
   /** agent_end 置位：主动终结的 close 按成功口径（exit 0）收尾。 */
   endedCleanly: boolean;
+  /**
+   * child 'error' 事件的消息快照（spawn 失败形态：子进程从未运行）。error 事件
+   * 先于真实 close 到达且 promise 已被手动收尾 settle——真实 close 的退出码参数
+   * 不再生效，终态装配只能靠此快照区分「从未启动」与正常退出（exitCode 判定链
+   * 见 spawn-runner collectOutcome）。
+   */
+  childErrorMessage?: string;
   /** [chatMode] agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
   resolveChatRun?: (code: number) => void;
 }
@@ -79,7 +95,7 @@ export function createSessionIdentityTracker(
           ...(sessionId !== undefined ? { sessionId } : {}),
           sessionFile: fields.sessionFile,
         },
-        poolKey: "shared",
+        poolKey: PI_POOL_KEY,
       });
     }
   };
@@ -99,7 +115,7 @@ export function createSessionIdentityTracker(
           ...(sessionId !== undefined ? { sessionId } : {}),
           ...(sessionFile !== undefined ? { sessionFile } : {}),
         },
-        poolKey: "shared",
+        poolKey: PI_POOL_KEY,
       });
     },
     addStateListener(id, resolver) {
@@ -118,9 +134,14 @@ export function createSessionIdentityTracker(
     },
     applyGetStateFields,
     fallbackSessionFileByHeaderId() {
-      if (sessionFile === undefined && sessionId !== undefined) {
-        sessionFile = findSessionFileByHeaderId(sessionDir, sessionId);
-      }
+      if (sessionFile !== undefined || sessionId === undefined) return;
+      const found = findSessionFileByHeaderId(sessionDir, sessionId);
+      if (found === undefined) return;
+      // 走既有回填面（与 M2 回补同一条路）：sessionFile 落位（collectOutcome 的
+      // outcome.sessionFile 生效）+ handleReady 通知宿主回写 record——chat 域的 run
+      // 在 agent_settled 已应答，close 兜底是 record 补 transcript 锚点的最后时机
+      // （只补 sessionFile，sessionId 已知不再变更）。
+      applyGetStateFields({ sessionFile: found });
     },
     clearStateListeners() {
       stateListeners.clear();
@@ -197,21 +218,67 @@ function normalizeExitCode(
   return endedCleanly ? 0 : code ?? (signal !== null ? SIGNAL_EXIT_CODE_BASE : 0);
 }
 
-/** close/exit 收尾：监听表清理 + tee 关闭 + 镜像上报 + LC-4 反查 + 退出码折算 resolve。 */
+/**
+ * close 收尾的 sessionFile 仍缺响亮 warn：握手 / 迟到应答 / agent_end 补查 / LC-4
+ * 后缀反查全 miss 本身是应响亮报错的异常信号，不做启发式自动认领（prompt 头键
+ * 误配的代价——错 sessionFile 让冷续 resume 共写他 session 文件——高于收益，且旗舰
+ * 并发形态头部同质必然多命中、结构性地采不中）。warn 附人工排查指引，不静默。
+ */
+function warnSessionFileUnobtainable(deps: StdoutPumpDeps): void {
+  const { recordId, identity } = deps;
+  if (identity.sessionFile !== undefined) return;
+  logger.warn(
+    `[sessionfile] unobtainable for ${recordId} (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); ` +
+      `record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。`,
+  );
+}
+
+/**
+ * close/exit 收尾：监听表清理 + tee 关闭 + 镜像上报 + LC-4 反查 + sessionFile 仍缺 warn + 退出码折算 resolve。
+ *
+ * 必达契约（U-A5，G1 破口）：链上任一步抛错都不许跳过后续步骤，尤其不许跳过
+ * `resolveExit`——`reportChildExited` 直调宿主回调（server 组帧链）且原先无包裹，
+ * 宿主回调抛出即让 LC-4 兜底与 resolveExit 全部丢失 = run 永挂（G1 要根除的形态）。
+ * 故每步独立 best-effort（单个步骤抛错只降级该步并 warn 留痕），resolveExit 放
+ * finally 必达区；异常也不得逃出 close 监听器（逃出即宿主 uncaughtException）。
+ */
 function createCloseFinalizer(
   deps: StdoutPumpDeps,
   resolveExit: (code: number) => void,
 ): (code: number | null, signal: NodeJS.Signals | null) => void {
   const { child, recordId, callbacks, identity, stderrTee, runEnd } = deps;
+  const bestEffort = (step: string, fn: () => void): void => {
+    try {
+      fn();
+    } catch (err) {
+      logger.warn(
+        `[session-runner] close finalizer step '${step}' failed for ${recordId} `
+          + `(degraded; remaining steps and resolveExit still run)`,
+        { detail: toErrorMessage(err) },
+      );
+    }
+  };
   return (code, signal) => {
-    identity.clearStateListeners();
-    stderrTee?.close();
-    unregisterActiveChild(recordId, child);
-    reportChildExited(child, recordId, callbacks, code, signal);
-    identity.fallbackSessionFileByHeaderId();
-    // agent_end 主动终结的 close 是正常完成（exit code 0 口径）；其余信号退出
-    // 保持 128+ 折算（异常路径判据）。
-    resolveExit(normalizeExitCode(runEnd.endedCleanly, code, signal));
+    try {
+      bestEffort("clearStateListeners", () => identity.clearStateListeners());
+      bestEffort("stderrTee.close", () => stderrTee?.close());
+      bestEffort("unregisterActiveChild", () => unregisterActiveChild(recordId, child));
+      // 宿主回调（onChildStateChanged → server 组帧链）：抛错不得阻断下面的兜底链
+      bestEffort("reportChildExited", () => reportChildExited(child, recordId, callbacks, code, signal));
+      bestEffort("LC-4 suffix lookup", () => identity.fallbackSessionFileByHeaderId());
+      // LC-4 之后仍缺 = 全路 miss 的异常信号：响亮 warn + 人工排查指引（不自动认领）
+      bestEffort("sessionfile unobtainable warn", () => warnSessionFileUnobtainable(deps));
+    } finally {
+      // agent_end 主动终结的 close 是正常完成（exit code 0 口径）；其余信号退出
+      // 保持 128+ 折算（异常路径判据）。child 'error'（spawn 失败，子进程从未
+      // 运行）必须按失败码收尾——(code=null, signal=null) 落回 0 折算会把从未
+      // 启动的 run 伪成功（F4）。resolveExit 无条件必达。
+      resolveExit(
+        runEnd.childErrorMessage !== undefined
+          ? SPAWN_ERROR_EXIT_CODE
+          : normalizeExitCode(runEnd.endedCleanly, code, signal),
+      );
+    }
   };
 }
 
@@ -233,6 +300,12 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       logger.error(`[session-runner] child ${deps.recordId} error event`, {
         detail: toErrorMessage(err),
       });
+      // spawn 失败（典型 ENOENT）：error 事件先于真实 close 到达，promise 在此处
+      // 手动收尾时 settle——真实 close 携带的退出码参数（negated errno）不再生效。
+      // 先快照错误消息让收尾按失败口径 resolve（终态装配携带可诊断文案），不落回
+      // (null, null) 的 0 折算伪成功。清理链仍复用 onClose（U-A5 必达契约的步骤
+      // 一个不少；真实 close 再达时各步骤幂等）。
+      deps.runEnd.childErrorMessage = toErrorMessage(err);
       onClose(null, null);
     });
     // stdin 异步 error（EPIPE 半面②）：计数留痕（热路径投递据此判死）

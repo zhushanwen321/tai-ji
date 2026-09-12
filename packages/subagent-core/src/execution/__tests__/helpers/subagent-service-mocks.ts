@@ -88,11 +88,15 @@ export function aliveStoreModule(actual: typeof import("../../alive-store.ts")) 
   };
 }
 
-/** ../finalized-marker.ts mock 模块（避免真实 fs 写 sidecar）。 */
-export function finalizedMarkerModule() {
+/** ../state-marker.ts mock 模块（避免真实 fs 写 sidecar；读侧恒「无终态标记」，
+ *  对齐原 finalized-marker mock 的 no-finalized 语义）。 */
+export function stateMarkerModule() {
   return {
-    writeFinalized: vi.fn(),
-    readFinalized: vi.fn(() => false),
+    writeFinalizedState: vi.fn(),
+    writeCancelledState: vi.fn(),
+    readStateMarker: vi.fn(() => undefined),
+    statStateStamp: vi.fn(() => null),
+    STATE_SIDECAR_EXT: ".state",
   };
 }
 
@@ -107,7 +111,7 @@ export function manifestStoreModule() {
     writeManifest = vi.fn(async () => {});
     readManifest = vi.fn(async () => null);
     listAllSync = vi.fn(() => []);
-    recoverTmpFiles = vi.fn(async () => []);
+    sweepTmpFiles = vi.fn(async () => 0);
   }
   return { ManifestStore: vi.fn(function (_recordsDir: string) { return new FakeManifestStore(); }) };
 }

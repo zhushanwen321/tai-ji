@@ -51,7 +51,12 @@ export function runEngineCliEntry(opts: RunEngineCliEntryOptions): void {
     log(level, component, message, data) {
       // stderr 兜底先落（反向通道未就绪/失败时日志不丢）；host/log 为数据面反向请求
       // （10s 应答分类），失败吞掉——日志面不能拖垮主链路。
-      process.stderr.write(`[${level}] [${component}] ${message}${data !== undefined ? ` ${JSON.stringify(data)}` : ""}\n`);
+      // debug 不写 stderr：对齐 logger.ts CONSOLE_SINK 的「debug no-op」语义——
+      // 引擎 stderr 落宿主 [rpc:stderr] 全量 ERROR 级链路，debug 刷屏会淹没真异常
+      // （常态路径的分级降噪依赖此跳过）；host/log 反向请求仍全级别透传。
+      if (level !== "debug") {
+        process.stderr.write(`[${level}] [${component}] ${message}${data !== undefined ? ` ${JSON.stringify(data)}` : ""}\n`);
+      }
       void server.reverseRequest("host/log", { level, component, message }).catch(() => undefined);
     },
   });

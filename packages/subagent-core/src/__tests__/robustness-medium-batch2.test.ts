@@ -24,11 +24,16 @@ function readSrc(relPath: string): string {
 // ── M6: worktree cleanup decoupled from patchOk ──────────────
 
 describe("M6: worktree cleanup not gated by patchOk", () => {
-  const src = readSrc(join("src", "execution", "subagent-service.ts"));
+  // [H3/R3] worktree cleanup 调用点（disposeAllRecords / cancelBackground）已随终态
+  // 写面迁 execution/service/record-lifecycle.ts（strangler 抽取，壳只留单行转发）——
+  // 源文本守卫随被守卫本体改读聚合文件，断言强度不变（patchOk 解耦锁）。
+  const src = readSrc(join("src", "execution", "service", "record-lifecycle.ts"));
 
   it("worktree cleanup condition does not reference patchOk", () => {
     // 找到 worktree cleanup 调用前的条件判断
-    const cleanupMatch = src.match(/if\s*\([^)]*worktreeHandle[^)]*\)\s*\{[\s\S]*?worktreeManager\.cleanup/);
+    // [H3/R3] cleanup 通道字面随依赖注入改造为 deps.getWorktreeManager().cleanup
+    //（this.worktreeManager → this.deps.getWorktreeManager()，方法体其余逐字节保留）。
+    const cleanupMatch = src.match(/if\s*\([^)]*worktreeHandle[^)]*\)\s*\{[\s\S]*?getWorktreeManager\(\)\.cleanup/);
     expect(cleanupMatch).toBeTruthy();
     const condition = cleanupMatch![0];
     // 条件中不应包含 patchOk（解耦后 worktree cleanup 只依赖 worktreeHandle 存在）

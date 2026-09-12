@@ -17,6 +17,7 @@ import type {
   DisplayItem,
   ExecutionMode,
   ExecutionStatus,
+  RecordOrigin,
   SubagentRecord,
 } from "./types.ts";
 
@@ -30,10 +31,11 @@ export const SUBAGENT_RECORD_CUSTOM_TYPE = "subagent-record";
  * `subagent-record` entry 的 data schema（v1）。
  *
  * = 完整 SubagentRecord 快照（GUI 侧列表/详情需要的全部持久化字段）+ 版本号。
- * 显式排除三个非持久化字段（与 SubagentRecord 的差集）：
+ * 显式排除两个非持久化字段（与 SubagentRecord 的差集）：
  *   - currentActivity：running 时的瞬时流态，重开 session 无重建价值；
- *   - externalInstance：跨重启探活态（pid/startedAt），由 .alive sidecar 重建；
  *   - worktreeHandle：不可 JSON 序列化的运行时句柄（布尔投影 worktree 保留）。
+ *（[U4a / D3b (a)] externalInstance 投影已随字段链删除——探活态由 .alive sidecar
+ * 现查探针承担，不再进 record 快照。）
  *
  * undefined 字段经 JSON.stringify 自然缺省（与 SubagentRecord 重建侧语义一致）。
  *
@@ -109,6 +111,18 @@ export interface SubagentRecordEntryData {
    * 未离开批 / 旧 entry 零迁移。消费方：U5 E1 重建扫描只收无标记成员（防双重通知）。
    */
   batchFinalized?: boolean;
+  /**
+   * 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）。
+   * undefined（存量 entry）= "tool" 语义，消费方零迁移。重启后 origin 过滤面
+   * （subagents list / renderer / TUI）生效的唯一持久化载体——漏本字段则重启后
+   * workflow record 逃过全部投影过滤。
+   */
+  origin?: RecordOrigin;
+  /**
+   * origin="workflow" 时所属 workflow run id（W2 写入）；tool 来源恒缺省。
+   * W2/W3 run 视图按 collectRecordsByParentRunId 从本字段回查本 run 的 record 集。
+   */
+  parentRunId?: string;
 }
 
 /** SubagentRecord → 自描述 entry data（快照投影，不 mutate 源）。
@@ -150,5 +164,9 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     // 旧记录/旧 entry 序列化产物字节不变（零迁移）。
     collectMode: record.collectMode,
     batchFinalized: record.batchFinalized,
+    // 来源身份两字段（H2 W1）：undefined 经 JSON.stringify 自然缺省，存量 entry
+    // 序列化字节不变（零迁移）。
+    origin: record.origin,
+    parentRunId: record.parentRunId,
   };
 }

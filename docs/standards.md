@@ -90,17 +90,16 @@ onUnmounted(() => {
 })
 ```
 
-### 2.3 错误必须重置生成状态
+### 2.3 错误必须收口生成状态
 
-任何错误处理路径都必须重置 `isGenerating` 和 `streamingMessage`，否则 UI 会卡在 "思考中"：
+任何错误处理路径都必须收口生成状态，否则 UI 会卡在 "思考中"。`setStreaming` / `streamingMessage` 符号已消亡（chat 域绞杀迁移 @xyz-agent/core），现行统一收口单一入口：`finalizeSession` + `clearPendingSend`（正常/异常收口）与 `markSessionError`（session 级错误——追加 error assistant 消息 + finalize，见 `packages/core/src/domain/chat/effect-types.ts`）：
 
 ```ts
-// 错误处理的标准模式
-function onError(msg: ServerMessage) {
-  store.setGenerating(false)
-  store.setStreaming(null)
-  // 将错误作为 assistant 消息插入聊天流，不要用顶部 banner
-  store.addMessage({ role: 'assistant', content: `**Error:** ${errMsg}`, status: 'error', ... })
+// 错误处理的标准模式（收口 + 错误入聊天流，不要用顶部 banner）
+function onError(sessionId: string, errorText: string) {
+  chat.markSessionError(sessionId, errorText)
+  // 有 streaming entity → finalizeSession('error')；否则追加 error assistant 消息
+  // 两条路径都连带 clearPendingSend，UI 活跃态（isActive）随之复位
 }
 ```
 
@@ -120,11 +119,13 @@ function onError(msg: ServerMessage) {
 }
 ```
 
-**禁止**在消息列表内使用 `position: absolute`——这会导致新消息出现在视口顶部而非底部。
+**禁止**在消息列表内使用 `position: absolute`——这会导致新消息出现在视口顶部而非底部。（对话流主列表例外：已迁移 virtua `Virtualizer`，item 定位由 virtua 接管，见 §3.2；本节约束针对自写滚动容器。）
 
 ### 3.2 自动滚动
 
-消息列表必须监听消息变化并自动滚动到底部：
+对话流渲染载体已是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（chat-pin-bottom-fix / use-virtua-follow）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**。
+
+[HISTORICAL] 迁移 virtua 前的 watch + scrollTop 范式（非对话流的自写滚动列表仍可参考）：
 
 ```ts
 watch(
@@ -143,8 +144,8 @@ pi 的一次 agent 调用会产生多个 message（thinking 段、tool call 段�
 ```
 message_start → 完成 current streaming → 创建新 streaming
 text_delta × N → appendToStreaming
-tool_execution_start → addToolCall to streaming
-tool_execution_end → updateToolCall in streaming
+message.tool_call_start → addToolCall to streaming
+message.tool_call_end → updateToolCall in streaming
 message_start → 完成 current streaming → 创建新 streaming
 text_delta × N → appendToStreaming
 agent_end → 最终 completeStreaming
@@ -216,7 +217,9 @@ pi 的消息 content 是数组，xyz-agent 的 Message.content 是字符串。�
 ```
 packages/
   shared/src/      共享 TypeScript 类型
-  renderer/src/    Vue 前端（组件、composables、stores、lib）
+  core/src/        跨端 domain 层（domain: chat/composer/session 等；transport（含 mock/）/coordination/foundation）
+  ui/src/          跨端组件库（features: chat/composer 等 / primitives / overlays）
+  renderer/src/    Vue 前端（Electron 桌面壳：组件、composables、stores、lib）
   runtime/src/     Node.js Runtime 服务（三层架构 transport/services/infra）
 apps/electron/
   main/            Electron 主进程
@@ -362,23 +365,28 @@ skillRenderedContent.value = await renderFull(payload.content, theme, { codeThem
 
 ### 8.1 核心原则：只 Mock 后端接口返回数据，禁止 Mock 页面数据
 
-前端 mock 有且只有一个合法入口：**`api/mock/` 层**。该层镜像 `api/domains/` 的接口签名，模拟 runtime WS 协议返回的数据（`session`、`chat`、`config`、`model`、`extension`、`plugin`、`settings`）。`api/index.ts` 通过 `VITE_MOCK` 环境变量切换 real/mock 实现。
+前端 mock 有且只有一个合法入口：**`packages/core/src/transport/mock/` 层**（@xyz-agent/core）。该层模拟 runtime WS 协议返回的数据（`session`、`chat`、`config`、`model`、`extension`、`plugin`、`settings`）。`api/index.ts` 通过 `VITE_MOCK` 环境变量切换 real/mock 实现（true 时直接 import `@xyz-agent/core/transport/mock`，不走 transport）。
 
 **允许的 mock 方式：**
-- `api/mock/data.ts` — 模拟 runtime 的 `session.list` / `chat.getHistory` 返回的会话和消息数据
-- `api/mock/index.ts` — 模拟 runtime WS 协议的全部 domain（`session`/`chat`/`config`/`model`/`extension`/`plugin`/`settings`）
-- `api/mock/settings-data.ts` — 模拟 `config.listProviders` 等返回的 providers/skills/agents 数据
-- `api/mock/composer-data.ts` — 模拟 runtime 推送的 models/mentions/files/slash-commands 数据
-- `api/mock/git.ts` — 模拟 `git.status` 返回的仓库状态数据
-- `api/mock/run-send-stream.ts` — 模拟 `chat.send` 后的流式 ServerMessage 序列
-- `mock/mock-ws.ts` — 模拟 WebSocket 连接生命周期（connecting → connected）
+- `transport/mock/data.ts` — 模拟 runtime 的 `session.list` / `chat.getHistory` 返回的会话和消息数据
+- `transport/mock/index.ts` — 模拟 runtime WS 协议的全部 domain（`session`/`chat`/`config`/`model`/`extension`/`plugin`/`settings`）
+- `transport/mock/settings-data.ts` — 模拟 `config.listProviders` 等返回的 providers/skills/agents 数据
+- `transport/mock/composer-data.ts` — 模拟 runtime 推送的 models/mentions/files/slash-commands 数据
+- `transport/mock/search-data.ts` — 模拟全局搜索浮层（⌘K）预制数据
+- `transport/mock/workflow-data.ts` — 模拟 Workflow/subagent fixture（Flows/Agents tab）
+- `transport/mock/git.ts` — 模拟 `git.status` 返回的仓库状态数据
+- `transport/mock/file.ts` — 模拟 file domain（内存最小文件树 fixture）
+- `transport/mock/run-send-stream.ts` — 模拟 `chat.send` 后的流式 ServerMessage 序列
+- `transport/mock/run-send-stream-branches.ts` — mock 流式回复的 tool_call + widget 分支序列（read/todo/goal 按输入分发）
+- `transport/mock/subscription.ts` — mock 订阅工厂（注册后微任务触发初始值）
+- `transport/mock/mock-ws.ts` — 模拟 WebSocket 连接生命周期（connecting → connected）
 
 上述文件均通过 `api/index.ts` 门面统一接入，调用方（composables/features）只依赖 `@/api` 的接口，不感知底层是 real 还是 mock。
 
 **禁止的 mock 方式：**
 - **禁止在 Vue 组件（`.vue`）中内联硬编码 mock 数据** — 包括但不限于 `const MOCK = [...]`、`const RECENTS = [...]`、`const SUGGESTED = [...]` 等
-- **禁止在 panel/composables/lib 中定义静态 fixture 数据供组件直接消费** — 所有 mock 数据必须流经 `api/mock/` 层，走统一的 WS 协议模拟通路
-- **禁止组件直接 `import` `api/mock/` 下的任何文件** — 组件应通过 `@/api` 或 `events` 获取数据
+- **禁止在 panel/composables/lib 中定义静态 fixture 数据供组件直接消费** — 所有 mock 数据必须流经 core 的 `transport/mock/` 层，走统一的 WS 协议模拟通路
+- **禁止组件直接 `import` `@xyz-agent/core/transport/mock` 下的任何文件** — 组件应通过 `@/api` 或 `events` 获取数据
 
 ### 8.2 为什么禁止组件级 mock
 
@@ -387,18 +395,18 @@ skillRenderedContent.value = await renderFull(payload.content, theme, { codeThem
 | **真 runtime 联调时遗漏** | 组件内联 mock 数据在 `VITE_MOCK=false` 时仍存在，真联调时容易遗忘替换，导致上线后混入伪造数据 |
 | **数据一致性无保证** | 组件级 mock 数据不与 runtime 协议对齐，真数据到达时字段/结构不一致会导致 UI 崩溃或静默丢失 |
 | **mock/real 切换不彻底** | 整个应用的 mock 切换应通过 `VITE_MOCK` 一个开关完成。组件级 mock 绕过此机制，造成部分数据 mock、部分真实，调试困难 |
-| **阻碍联调进度** | 同一数据源存在两套实现（api/mock 层 + 组件内联），联调时需要改多处，增加遗漏风险 |
+| **阻碍联调进度** | 同一数据源存在两套实现（core transport/mock 层 + 组件内联），联调时需要改多处，增加遗漏风险 |
 
 ### 8.3 正确的 mock 扩展方式
 
 新增功能需要 mock 数据时：
 
-1. 在 `api/mock/` 目录下定义 fixture 数据
-2. 在 `api/mock/index.ts` 中实现对应的 domain 方法（签名与 `api/domains/` 一致）
+1. 在 `packages/core/src/transport/mock/` 目录下定义 fixture 数据
+2. 在 `transport/mock/index.ts` 中实现对应的 domain 方法（签名与 real domain 一致）
 3. 组件通过 `@/api` 的 domain 接口获取数据（不感知 real/mock）
 
 ```ts
-// ✅ 正确：api/mock/index.ts 中新增 domain 方法
+// ✅ 正确：transport/mock/index.ts 中新增 domain 方法
 export const search = {
   async query(q: string): Promise<SearchResult[]> {
     await sleep(TIMING.ack)

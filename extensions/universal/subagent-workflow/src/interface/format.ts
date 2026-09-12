@@ -495,6 +495,22 @@ export function formatElapsed(startedAt?: string, now: number = Date.now()): str
 }
 
 /**
+ * Run status 行的 elapsed（[H2 A2] done 后冻结）。
+ *
+ * 与 formatElapsed 的差异仅在 now 基准：completedAt 有值（run 已终态）时以
+ * completedAt 为基准 → elapsed 恒等于 completedAt - startedAt，不再随墙钟增长；
+ * running（completedAt 缺省）沿用 Date.now() 缺省实时跳动。时钟异常
+ * （completedAt < startedAt）由 formatElapsed 钳 0 兜底（"0s"）。
+ */
+export function formatRunStatusElapsed(
+  startedAt?: string,
+  completedAt?: string,
+  now: number = Date.now(),
+): string {
+  return formatElapsed(startedAt, completedAt ? new Date(completedAt).getTime() : now);
+}
+
+/**
  * Format a live eventLog entry（live 路径 Activity 区用）。
  *
  *   tool_start → "→ {label}"

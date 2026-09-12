@@ -12,13 +12,12 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaFetcherConfig } from './types.js'
-import { statusToReason } from './types.js'
+import { INFINITE_WIN, normalizeCookieHeader, statusToReason } from './types.js'
 import { logger } from '../../infra/logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 const FETCH_TIMEOUT_MS = 8000
 const HTTP_OK = 200
-const HTTP_REDIRECT = 302
 
 interface WindowUsage {
   status: string
@@ -56,7 +55,8 @@ export const opencodeFetcher: ProviderQuotaFetcher = {
   auth: ['cookie'],
 
   async fetchQuota(credential: string, _kind: QuotaAuthKind, config?: QuotaFetcherConfig): Promise<QuotaFetchOutcome> {
-    if (!credential) return { ok: false, reason: 'unauthorized' }
+    const cookie = normalizeCookieHeader(credential)
+    if (!cookie) return { ok: false, reason: 'unauthorized' }
 
     // D1-3：未配置 workspace = 可区分失败 not_configured，不发任何 HTTP 请求——
     // 绝不 fallback 别的页面/缓存（G1：未配置得到明确指引，不查他人数据）
@@ -72,15 +72,14 @@ export const opencodeFetcher: ProviderQuotaFetcher = {
         {
           headers: {
             accept: 'text/html',
-            cookie: credential,
+            cookie,
             'user-agent': 'Mozilla/5.0',
           },
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           redirect: 'manual',
         },
       )
-      // 302 重定向 = cookie 过期（原 isCredentialValid 语义归入 unauthorized，A2-1）
-      if (resp.status === HTTP_REDIRECT) return { ok: false, reason: 'unauthorized' }
+      // 3xx（实际为 302 到登录页）= cookie 过期（statusToReason 统一映射，A2-1）
       if (resp.status !== HTTP_OK) return { ok: false, reason: statusToReason(resp.status) }
 
       let html: string
@@ -93,14 +92,19 @@ export const opencodeFetcher: ProviderQuotaFetcher = {
       const rolling = extractWindow(html, 'rollingUsage')
       const weekly = extractWindow(html, 'weeklyUsage')
       const monthly = extractWindow(html, 'monthlyUsage')
-      // SSR HTML 中无三窗口数据 = 响应可解析但无订阅数据
-      if (!rolling || !weekly || !monthly) return { ok: false, reason: 'no-subscription' }
+      // 三窗口全缺 = 无订阅数据；部分缺失容忍（上游改名单窗口字段名时降级少显示，
+      // 不让整个查询失败——对齐 dsh-opencode-go-usage 的逐窗口可选解析）
+      if (!rolling && !weekly && !monthly) return { ok: false, reason: 'no-subscription' }
 
       return {
         ok: true,
         data: {
           label: 'opencode.go',
-          wins: [toWin(rolling), toWin(weekly), toWin(monthly)],
+          wins: [
+            rolling ? toWin(rolling) : INFINITE_WIN,
+            weekly ? toWin(weekly) : INFINITE_WIN,
+            monthly ? toWin(monthly) : INFINITE_WIN,
+          ],
         },
       }
     } catch (err) {

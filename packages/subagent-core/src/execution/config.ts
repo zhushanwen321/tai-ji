@@ -1,4 +1,4 @@
-// src/runtime/config/config.ts
+// src/execution/config.ts
 //
 // 全局配置（~/.pi/agent/subagents/config.json）。
 // 仅保留 maxConcurrent（pool 大小）。模型解析已退化为「主 agent model 优先」，

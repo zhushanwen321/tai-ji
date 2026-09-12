@@ -1,4 +1,4 @@
-// src/runtime/session-file-gc.ts
+// src/execution/session-file-gc.ts
 //
 // 概率性清理过期 subagent session 文件（TTL 30 天）。
 // session_start 时调用，best-effort（失败不影响启动）。
@@ -63,11 +63,12 @@ function cleanupEnginePoolsBestEffort(): void {
   }
 }
 
-/** 孤儿 sidecar 名判定：.cancelled/.finalized/.alive，以及 [MF#2] patch 回传
- *  （<branch>.patch 按 branch 命名，与 .jsonl basename 无关联，删除 .jsonl 时无法同删；
- *  作为孤儿按 TTL 清理，避免永久堆积）。 */
+/** 孤儿 sidecar 名判定：终态 `.state` + 兼容期旧名（.finalized/.cancelled/.alive），
+ *  以及 [MF#2] patch 回传（<branch>.patch 按 branch 命名，与 .jsonl basename 无关联，
+ *  删除 .jsonl 时无法同删；作为孤儿按 TTL 清理，避免永久堆积）。 */
 function isOrphanSidecarName(name: string): boolean {
   return (
+    name.endsWith(".state") ||
     name.endsWith(".cancelled") ||
     name.endsWith(".finalized") ||
     name.endsWith(".alive") ||
@@ -100,8 +101,8 @@ function cleanExpiredJsonl(full: string, now: number): void {
         return; // 活进程 → 跳过，不清理
       }
       fs.unlinkSync(full);
-      // 同名 sidecar 一起清理。
-      for (const ext of [".cancelled", ".finalized", ".alive"]) {
+      // 同名 sidecar 一起清理（终态 .state + 兼容期旧名 + 探活 .alive）。
+      for (const ext of [".state", ".cancelled", ".finalized", ".alive"]) {
         try { fs.unlinkSync(`${full}${ext}`); } catch (_e) { void _e; /* sidecar 可能不存在 */ }
       }
     }
@@ -123,7 +124,7 @@ function cleanDirent(dir: string, entry: fs.Dirent, now: number, allowManifestJs
   } else if (
     allowManifestJson &&
     entry.name.endsWith(".json") &&
-    // 跳过 .tmp.：recoverTmpFiles（session_start）同步处理 tmp，GC 不重复。
+    // 跳过 .tmp.：sweepTmpFiles（session_start）同步处理 tmp，GC 不重复。
     // 不校验内容——30 天 mtime 已是强 orphan 信号，扩展名 + 文件名足够。
     !entry.name.includes(".tmp.")
   ) {
@@ -138,7 +139,7 @@ function cleanDirent(dir: string, entry: fs.Dirent, now: number, allowManifestJs
 
 /** 递归扫描目录，unlink 超 TTL 的 .jsonl 文件及其 .cancelled sidecar。
  *  [F2] 进入名为 records 的子目录时，额外清理超 TTL 的 manifest .json（跳过 .tmp.——
- *  recoverTmpFiles 同步处理）。allowManifestJson 仅由父调用按目录名开启，其他位置
+ *  sweepTmpFiles 同步处理）。allowManifestJson 仅由父调用按目录名开启，其他位置
  *  （如 subagents/worktrees.json）不匹配 .json，避免误删 worktree reaper 状态文件。 */
 function walkAndClean(dir: string, now: number, allowManifestJson = false): void {
   let entries: fs.Dirent[];

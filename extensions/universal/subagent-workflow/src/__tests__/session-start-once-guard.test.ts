@@ -14,6 +14,7 @@
 //   ⑨ recoverManifestTmpFiles = 1（promote/unlink 在函数内部）
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
 //   ⑪ recoverCrashedRuns = 1 + pending:unregister emit 恰 1 条（落盘 save 在函数内部）
+//   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）
 //
 // 守卫 Map 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例。
 
@@ -51,6 +52,7 @@ const {
   mockMaybeCleanup,
   mockStartGcTimer,
   mockRecoverManifestTmpFiles,
+  mockRebuildIndexes,
   mockRecoverCrashedRuns,
   mockBindNotifyLedgerHost,
   mockRecoverFromSession,
@@ -69,6 +71,8 @@ const {
     mockStartGcTimer: vi.fn(),
     // ⑨ manifest tmp 恢复
     mockRecoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+    // ⑫ [U4c/G1] boot 全量索引重建
+    mockRebuildIndexes: vi.fn(() => 0),
     // ⑪ 崩溃 run 恢复（onRunRecovered 由用例注入行为，emit 断言经真实 pi.events 链路）
     mockRecoverCrashedRuns: vi.fn(),
     // ④ 通知账本 bind（防误伤：每 session_start 执行）
@@ -118,18 +122,27 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
 });
 
 // ⑦⑨⑥ SubagentService mock：方法全部挂 hoisted spy（跨实例聚合计数）。
+// [H3/R6 连带] SubagentService 类仍从壳导出（壳 mock 保留）；单例访问器族外移
+// service/service-bootstrap.ts，经 importOriginal 只替换 get/set（同 session-lifecycle）。
 vi.mock("@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
   SubagentService: class {
     initSession = mockInitSession;
     setUiRequestHandler = vi.fn();
     startGcTimer = mockStartGcTimer;
     recoverManifestTmpFiles = mockRecoverManifestTmpFiles;
+    rebuildIndexes = mockRebuildIndexes;
     getStreamSink = () => null;
     dispose = vi.fn();
   },
-  getSubagentService: () => null,
-  setSubagentService: vi.fn(),
 }));
+vi.mock(
+  "@zhushanwen/subagent-core/execution/service/service-bootstrap.ts",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<typeof import("@zhushanwen/subagent-core/execution/service/service-bootstrap.ts")>();
+    return { ...actual, getSubagentService: () => null, setSubagentService: vi.fn() };
+  },
+);
 
 vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
   ModelConfigService: class {
@@ -295,6 +308,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     expect(mockStartGcTimer).toHaveBeenCalledTimes(1);
     expect(mockMaybeCleanup).toHaveBeenCalledTimes(1);
     expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
+    expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);
     expect(mockScan).toHaveBeenCalledTimes(1);
     // 探针 e：recoverCrashedRuns 落盘链（loadAll → 转 failed → save）入口 =1
     expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(1);

@@ -128,6 +128,13 @@ export const SubagentParams = Type.Object({
     includeFinished: Type.Optional(Type.Boolean({
       description: "Include finished (done/failed/cancelled) records. Default false (running only).",
     })),
+    includeWorkflow: Type.Optional(Type.Boolean({
+      description:
+        "Include records dispatched by workflow scripts (agent() calls). Default false — subagents " +
+        "spawned inside workflows are hidden from list output. Set true only when troubleshooting a " +
+        "workflow run's subagents (e.g. a workflow step failed and you need to inspect its records). " +
+        "Pair with includeFinished:true — finished workflow records stay hidden unless both flags are set.",
+    })),
     limit: Type.Optional(Type.Number({
       description: "Max items to return. Default 20, clamped to [1, 100].",
     })),

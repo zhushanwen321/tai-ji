@@ -18,8 +18,6 @@ import {
   type EngineCapabilities,
   type EngineHandleData,
   type InitializeParams,
-  type InteractAction,
-  type InteractResult,
   type ProbeReport,
   type SessionView,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -109,7 +107,6 @@ function makeEngine(overrides: Partial<EnginePort> = {}): EnginePort {
     run: vi.fn(async (_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> => {
       return { handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } };
     }),
-    interact: vi.fn(async (): Promise<InteractResult> => ({ ok: true, delivered: true })),
     read: vi.fn(async (): Promise<SessionView> => ({ ...SESSION_VIEW })),
     listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "prov/m1", name: "M1" }]),
     validateModel: vi.fn((modelRef: string | undefined) => ({ canonicalRef: modelRef ?? "" })),
@@ -285,14 +282,10 @@ describe("methodHandlers 表驱动路由（逐方法 → EnginePort 成员）", 
     expect(r2.error?.code).toBe("engine_capability_unsupported");
   });
 
-  it("interact/read：handle 以 {data} 包装传给引擎（协议面裸 handle），action 透传", async () => {
+  it("read：handle 以 {data} 包装传给引擎（协议面裸 handle）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
-    const action: InteractAction = { kind: "message", payload: "继续", interrupt: false };
-    const r1 = await request(server, sink, 1, "interact", { handle: HANDLE, action });
-    expect(r1.result).toEqual({ ok: true, delivered: true });
-    expect(vi.mocked(engine.interact)).toHaveBeenLastCalledWith({ data: HANDLE }, action);
-
+    // [H1 U5] interact dispatch 已随协议方法退役删除（zcode 桩同步移除）
     const r2 = await request(server, sink, 2, "read", { handle: HANDLE, dataDir: "/d" });
     expect(r2.result).toEqual(SESSION_VIEW);
     expect(vi.mocked(engine.read)).toHaveBeenLastCalledWith({ data: HANDLE });

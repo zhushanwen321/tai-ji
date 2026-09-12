@@ -10,7 +10,7 @@
  *
  * 层归属：Engine。零 infra 依赖（AC-1）。
  */
-import type { StreamSink, SubagentStream } from "../../execution/stream-sink.ts";
+import type { SubagentStream } from "../../execution/stream-sink.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";
@@ -22,11 +22,11 @@ import type { WorkflowRun } from "./workflow-run.ts";
 /**
  * Agent 子进程执行 port。Infra 实现：SubprocessAgentRunner。
  *
- * run 执行单次 agent 调用（委托 SubagentService.executeAndAwait），返回结构化结果。
- * signal 用于 abort 传播。
+ * run 执行单次 agent 调用（委托 SubagentService.executeWorkflowAgent，[H2 W4] 纯转调），
+ * 返回结构化结果。signal 用于 abort 传播。
  *
- * onEvent（可选）：强类型 AgentEvent 回调，供调用方实时更新 live record 供 TUI 展示进度。
- * 不传则不回调（向后兼容；现有调用点不传不受影响）。
+ * onEvent（可选）：强类型 AgentEvent 回调，透传 service 派发路径（journal 转发/守护
+ * 刷新源），生产 pump 侧恒 undefined。
  *
  * D-005: onEvent 签名从 raw Record<string,unknown> 升级为 AgentEvent——委托后不再有
  * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent，session-runner handleSdkEvent 出口）。
@@ -153,12 +153,19 @@ export interface LifecycleDeps {
     parentRun: WorkflowRun,
   ) => Promise<unknown>;
  /**
- * UI streaming sink（ctx.ui.setWidget），workflow agent call 创建 SubagentStream 用。
- *
- * 由 Interface 层 makeDeps 注入（从 SubagentService.getStreamSink() 取）。
- * dispatchAgentCall 用它创建 SubagentStream（widgetKey=subagent-stream-<runId>-<stepIndex>），
- * 使 workflow agent call 的 text_delta 走与 background subagent 相同的 streaming 链路。
- * 可选——无 UI 模式（TUI/RPC 无 setWidget）时为 undefined，dispatchAgentCall 不创建 stream。
- */
-  streamSink?: StreamSink;
+  * [H2 W3] workflow 域 agent() 统一派发入口（SubagentService.executeWorkflowAgent 的
+  * deps 注入形态，设计 §3.5 终态数据流）。窄函数类型——不引 execution 层具体类，
+  * 保持本 ports 文件零 infra/execution 依赖。由组合根（extension index.ts makeDeps）
+  * 注入：闭包捕获 getSubagentService() 单例，parentRunId 由 pump 侧补 run.runId。
+  *
+  * 可选——未注入时（旧测试 deps）dispatchAgentCall 回退 deps.runner（[H2 W4] 后
+  * SAR 已掏空为纯转调 executeWorkflowAgent，两分支执行体归一非双轨，差异仅 parentRunId
+  * 来源：注入 = 真实 run.runId，回退 = SAR_UNATTACHED_PARENT_RUN_ID 占位；生产装配
+  * 两字段同时注入，dispatch 恒优先）。
+  */
+  workflowAgentDispatch?: (
+    opts: AgentCallOpts,
+    parentRunId: string,
+    signal?: AbortSignal,
+  ) => Promise<AgentResult>;
 }

@@ -115,16 +115,25 @@ export function buildGui(todos: Todo[]): GuiRenderResult {
 
 // ── Add 逻辑 ─────────────────────────────────────────
 
+/** 建议的单 session todo 数上限（软约束：超限提醒，不硬拒绝） */
+export const RECOMMENDED_MAX_TODOS = 10;
+
 export interface AddResult {
 	newTodos: Todo[];
 	newNextId: number;
 	resultText: string;
+	/** 旧列表全部 completed 被自动清理时为 true（handleAdd 据此重置完成周期跟踪） */
+	autoCleared: boolean;
 }
 
 /**
  * 批量新增 todo。
  * texts 整体 trim；任一项 trim 后为空串则 throw（不再静默 filter 丢弃——
  * 模型应学到传有效项，C1 决策）。
+ *
+ * auto-GC：旧列表非空且全部 completed 时视为「上一任务已结束、开启新任务」，
+ * 先清空旧列表再新增（nextId 重置为 1，与 handlers.handleAutoClear 的清理
+ * 语义一致），避免已完结任务长期堆积在列表里。
  */
 export function addTodos(
 	currentTodos: Todo[],
@@ -141,9 +150,13 @@ export function addTodos(
 		throw new Error("texts must not contain empty or whitespace-only items");
 	}
 
-	const startId = currentNextId;
-	const newTodos = [...currentTodos];
-	let nextId = currentNextId;
+	const autoCleared =
+		currentTodos.length > 0 && currentTodos.every((t) => t.status === "completed");
+	const baseTodos = autoCleared ? [] : currentTodos;
+	const startId = autoCleared ? 1 : currentNextId;
+
+	const newTodos = [...baseTodos];
+	let nextId = startId;
 	for (let i = 0; i < trimmed.length; i++) {
 		newTodos.push({
 			id: nextId++,
@@ -153,10 +166,21 @@ export function addTodos(
 	}
 	const endId = nextId - 1;
 
+	let resultText = `Added ${trimmed.length} todos (#${startId}-#${endId})`;
+	if (autoCleared) {
+		resultText += `\nAuto-cleared ${currentTodos.length} completed todo(s) from the previous task`;
+	}
+
+	// 软上限提醒：总数超过建议值时附加提醒（不拒绝，把决策留给模型）
+	if (newTodos.length > RECOMMENDED_MAX_TODOS) {
+		resultText += `\nNote: ${newTodos.length} todos exceeds the recommended max of ${RECOMMENDED_MAX_TODOS}. Prefer consolidating fine-grained steps or deleting items no longer needed.`;
+	}
+
 	return {
 		newTodos,
 		newNextId: nextId,
-		resultText: `Added ${trimmed.length} todos (#${startId}-#${endId})`,
+		resultText,
+		autoCleared,
 	};
 }
 

@@ -1,4 +1,4 @@
-// src/runtime/worktree-manager.ts
+// src/execution/worktree-manager.ts
 //
 // git worktree 生命周期管理：创建、清理、patch 回传、孤儿 reaper。
 //

@@ -154,7 +154,35 @@ describe("maybeCleanupExpiredSessionFiles", () => {
     expect(() => maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd")).not.toThrow();
   });
 
-  // ---- .finalized sidecar 清理 ----
+  // ---- 终态 .state sidecar 清理（L4 合并后新名）+ 兼容期旧名保留清理 ----
+
+  it("deletes .state sidecar along with expired .jsonl", () => {
+    forceCleanupTrigger();
+    const jsonl = createSessionFile("sess-state.jsonl", 31);
+    const state = `${jsonl}.state`;
+    fs.writeFileSync(state, JSON.stringify({ status: "finalized", reason: "gc" }), "utf-8");
+    const targetTime = Date.now() / 1000 - 31 * 86400;
+    fs.utimesSync(state, targetTime, targetTime);
+
+    maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
+
+    expect(fs.existsSync(jsonl)).toBe(false);
+    expect(fs.existsSync(state)).toBe(false);
+  });
+
+  it("cleans orphan .state sidecar when .jsonl already gone", () => {
+    forceCleanupTrigger();
+    const subagentsDir = path.join(tmpAgentDir, "subagents");
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    const orphan = path.join(subagentsDir, "dead-session.jsonl.state");
+    fs.writeFileSync(orphan, JSON.stringify({ status: "cancelled", endedAt: 1 }), "utf-8");
+    const targetTime = Date.now() / 1000 - 31 * 86400;
+    fs.utimesSync(orphan, targetTime, targetTime);
+
+    maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
+
+    expect(fs.existsSync(orphan)).toBe(false);
+  });
 
   it("deletes .finalized sidecar along with expired .jsonl", () => {
     forceCleanupTrigger();
@@ -230,12 +258,14 @@ describe("maybeCleanupExpiredSessionFiles", () => {
     expect(fs.existsSync(orphan)).toBe(false);
   });
 
-  it("deletes .jsonl + all sidecars (.cancelled, .finalized, .alive) together", () => {
+  it("deletes .jsonl + all sidecars (.state, 兼容期 .cancelled/.finalized, .alive) together", () => {
     forceCleanupTrigger();
     const jsonl = createSessionFile("sess-all-sidecars.jsonl", 31);
+    const state = `${jsonl}.state`;
     const cancelled = `${jsonl}.cancelled`;
     const finalized = `${jsonl}.finalized`;
     const alive = `${jsonl}.alive`;
+    fs.writeFileSync(state, JSON.stringify({ status: "finalized", reason: "gc" }), "utf-8");
     fs.writeFileSync(cancelled, "", "utf-8");
     fs.writeFileSync(finalized, "", "utf-8");
     fs.writeFileSync(alive, JSON.stringify({ pid: 99999, id: "s4", startedAt: Date.now() }), "utf-8");
@@ -246,6 +276,7 @@ describe("maybeCleanupExpiredSessionFiles", () => {
     maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
 
     expect(fs.existsSync(jsonl)).toBe(false);
+    expect(fs.existsSync(state)).toBe(false);
     expect(fs.existsSync(cancelled)).toBe(false);
     expect(fs.existsSync(finalized)).toBe(false);
     expect(fs.existsSync(alive)).toBe(false);
@@ -286,8 +317,8 @@ describe("maybeCleanupExpiredSessionFiles", () => {
     expect(fs.existsSync(worktrees)).toBe(true);
   });
 
-  it("[F2] preserves .json.tmp.* inside records/ (recoverTmpFiles owns them)", () => {
-    // 跳过 .tmp.：session_start 的 recoverTmpFiles 同步处理 tmp，GC 不重复。
+  it("[F2] preserves .json.tmp.* inside records/ (sweepTmpFiles owns them)", () => {
+    // 跳过 .tmp.：session_start 的 sweepTmpFiles 同步处理 tmp，GC 不重复。
     forceCleanupTrigger();
     const tmp = createSessionFile(
       path.join("--Users-x-proj--", "records", "rec-2.json.tmp.123"),

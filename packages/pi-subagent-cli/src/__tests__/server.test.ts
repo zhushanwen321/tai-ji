@@ -4,14 +4,15 @@
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
 // stdout 写入面注入内存 sink。覆盖：
 //   ① 帧分类路由：请求帧分发 / 反向应答落位 / 入站反向请求 bad_frame / 坏帧静默；
-//   ② 10 正向方法表驱动路由（逐方法 → EnginePort 成员）+ 未知方法
-//      engine_protocol_unknown_method（错误原文含方法名与 request id）；
+//   ② 9 正向方法表驱动路由（逐方法 → EnginePort 成员；[H1 U5] interact 已退役）+
+//      未知方法 engine_protocol_unknown_method（错误原文含方法名与 request id）；
 //   ③ run 协议载荷还原：ctx.model 合回 task / ctxModel canonical 词形解析 /
 //      streamMode onDelta → host/streamDelta / 事件通知 seq 单调 / cancel abort /
 //      onChildSpawned 记录键锚定（非 chat = runId，chat = recordId）；
-//   ④ pi 专有通道：bindAskUser 两阶段绑定体（非 chat 才绑定 + run 结束解绑 +
-//      chat 跳过——会话级 askUser 走 bindHostChannels）、bindHostChannels 构造期
-//      三分通道接线、run.chat recordId 前置校验 + conversation 能力位 gate；
+//   ④ pi 专有通道：bindAskUser 两阶段绑定体（run 前绑定 + run 结束解绑；[H1 U3]
+//      会话形态轮 = run 派发形态同走 per-run 绑定）、run.resume recordId 前置校验 +
+//      conversation 能力位 gate（[H1 U5] bindHostChannels 构造期三分通道面已随
+//      chat-session.ts 删除）；
 //   ⑤ 反向请求客户端：rev-N 帧形状 / {ack:true} 两阶段第一段只 ack 不终结等待
 //      （R9-2，zcode 姊妹包无此语义）/ result+error 应答落位 / 超时兜底（fake timers）。
 
@@ -23,8 +24,6 @@ import {
   type EngineCapabilities,
   type EngineHandleData,
   type InitializeParams,
-  type InteractAction,
-  type InteractResult,
   type ProbeReport,
   type SessionView,
   type UiRequest,
@@ -33,7 +32,6 @@ import {
 
 import { EngineProtocolServer } from "../server.ts";
 import { PI_ADAPTER_VERSION } from "../constants.ts";
-import type { ChatHostChannels } from "../chat-session.ts";
 import type { AgentCallOpts, EnginePort, EngineRunResult, RunContext } from "../port-types.ts";
 
 // ── fixture（合成的引擎数据形态；sessionFile 等路径只是内存字符串，无 fs 语义）──
@@ -108,11 +106,10 @@ function makeSink() {
   };
 }
 
-/** EnginePort 内存 fake（含 pi 专有 bindAskUser / bindHostChannels 双绑定面）：
+/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定面）：
  * 逐成员 vi.fn，overrides 直替换（undefined = 未实现分支）。 */
 type FakeEngine = EnginePort & {
   bindAskUser(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
-  bindHostChannels(channels: ChatHostChannels | undefined): void;
 };
 
 function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
@@ -123,13 +120,11 @@ function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
     run: vi.fn(async (_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> => {
       return { handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } };
     }),
-    interact: vi.fn(async (): Promise<InteractResult> => ({ ok: true, delivered: true })),
     read: vi.fn(async (): Promise<SessionView> => ({ ...SESSION_VIEW })),
     listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "prov/m1", name: "M1" }]),
     validateModel: vi.fn((modelRef: string | undefined) => ({ canonicalRef: modelRef ?? "" })),
     dispose: vi.fn(async (): Promise<void> => undefined),
     bindAskUser: vi.fn((_handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void => undefined),
-    bindHostChannels: vi.fn((_channels: ChatHostChannels | undefined): void => undefined),
   };
   return { ...base, ...overrides };
 }
@@ -301,14 +296,9 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     expect(r2.error?.code).toBe("engine_capability_unsupported");
   });
 
-  it("interact/read：handle 以 {data} 包装传给引擎（协议面裸 handle），action 透传", async () => {
+  it("read：handle 以 {data} 包装传给引擎（协议面裸 handle）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
-    const action: InteractAction = { kind: "message", payload: "继续", interrupt: false };
-    const r1 = await request(server, sink, 1, "interact", { handle: HANDLE, action });
-    expect(r1.result).toEqual({ ok: true, delivered: true });
-    expect(vi.mocked(engine.interact)).toHaveBeenLastCalledWith({ data: HANDLE }, action);
-
     const r2 = await request(server, sink, 2, "read", { handle: HANDLE, dataDir: "/d" });
     expect(r2.result).toEqual(SESSION_VIEW);
     expect(vi.mocked(engine.read)).toHaveBeenLastCalledWith({ data: HANDLE });
@@ -361,6 +351,8 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
           streamMode: "stream",
           schemaEnv: "PI_WORKFLOW_SCHEMA=1",
           engineFallback: { from: "zcode", reason: "manifest" },
+          sessionRootId: "root-sess-9",
+          sessionDir: "/host/agent-dir/subagents/--Users-x-proj--/sessions",
         },
       },
     });
@@ -393,9 +385,12 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
     expect(captured?.ctx.schemaEnv).toBe("PI_WORKFLOW_SCHEMA=1");
     expect(captured?.ctx.engineFallback).toEqual({ from: "zcode", reason: "manifest" });
+    expect(captured?.ctx.sessionRootId).toBe("root-sess-9");
+    // [Option C 协议化] ctx.sessionDir 还原透传（宿主权威值，引擎不自推导）
+    expect(captured?.ctx.sessionDir).toBe("/host/agent-dir/subagents/--Users-x-proj--/sessions");
     expect(captured?.ctx.stream).toBeDefined();
     expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);
-    expect(captured?.ctx.chat).toBeUndefined();
+    expect(captured?.ctx.resume).toBeUndefined();
 
     // 一次性 run：onChildSpawned 以 runId 锚定；pid 缺省不发包
     captured?.ctx.onChildSpawned?.({ pid: 4242, killed: false });
@@ -404,6 +399,20 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     const spawnedCount = sink.frames.filter((f) => f.method === "host/childSpawned").length;
     captured?.ctx.onChildSpawned?.({ pid: undefined, killed: false });
     expect(sink.frames.filter((f) => f.method === "host/childSpawned")).toHaveLength(spawnedCount);
+
+    // [SR-4] onChildStateChanged：只有 exited 发帧（宿主镜像据此取消该 pid 的挂起 dialog）；
+    // running 由 childSpawned 覆盖，不发重复帧
+    const stateChangedCount = sink.frames.filter((f) => f.method === "host/childStateChanged").length;
+    captured?.ctx.onChildStateChanged?.({ pid: 4242, recordId: "run-1", state: "running", killed: false });
+    expect(sink.frames.filter((f) => f.method === "host/childStateChanged")).toHaveLength(stateChangedCount);
+
+    captured?.ctx.onChildStateChanged?.({
+      pid: 4242, recordId: "run-1", state: "exited", killed: true, exitCode: 1,
+    });
+    const exitedFrame = await sink.waitFor((f) => f.method === "host/childStateChanged", "childStateChanged");
+    expect(exitedFrame.params).toEqual({
+      pid: 4242, recordId: "run-1", state: "exited", killed: true, exitCode: 1,
+    });
 
     // 反向请求必须先于事件到达（journal 归属契约的帧序证据）
     expect(sink.frames.indexOf(pool)).toBeLessThan(sink.frames.indexOf(ev1));
@@ -436,6 +445,19 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       const ctx = (engine.run as Mock).mock.calls[i]?.[1] as RunContext;
       expect(ctx.ctxModel, `ctxModel=${JSON.stringify(ref)} 应归一为 undefined`).toBeUndefined();
     }
+  });
+
+  it("[F6] ctx.sessionRootId 缺省 → 还原后的 RunContext 无该键（additive 语义，relay 权威源缺省不注入）", async () => {
+    const engine = makeEngine();
+    const { server, sink } = makeServer(engine);
+    await request(server, sink, 0, "initialize", INIT_PARAMS);
+    await request(server, sink, 20, "run", {
+      runId: "run-f6",
+      task: { prompt: "p" },
+      ctx: { poolKey: "shared", cwd: "/w" },
+    });
+    const ctx = (engine.run as Mock).mock.calls[0]?.[1] as RunContext;
+    expect(ctx).not.toHaveProperty("sessionRootId");
   });
 
   it("cancel：活跃 run 的 signal 被 abort（reason 透传）；收尾后 cancel 幂等 ok；迟到事件 seq 回落 0", async () => {
@@ -480,7 +502,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
   });
 });
 
-// ── pi 专有：askUser 绑定面 + run.chat 帧校验 ──
+// ── pi 专有：askUser 绑定面 + run.resume 帧校验 ──
 
 describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
   it("非 chat run：run 前绑定 askUser 等待体（host/askUser 载荷 {runId, request}），run 结束解绑", async () => {
@@ -517,8 +539,14 @@ describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
     expect(vi.mocked(engine.bindAskUser)).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("chat run：跳过 per-run 绑定（会话跨 run 存活，askUser 走 bindHostChannels 固定绑定）", async () => {
-    const engine = makeEngine();
+  it("chat run：同走 per-run 绑定（[H1 U3] 每轮一进程，run 结束解绑）；recordId 锚定镜像帧", async () => {
+    let release!: (value: EngineRunResult) => void;
+    const engine = makeEngine({
+      run: vi.fn((_task: AgentCallOpts, _ctx: RunContext): Promise<EngineRunResult> =>
+        new Promise<EngineRunResult>((resolve) => {
+          release = resolve;
+        })),
+    });
     const { server, sink } = makeServer(engine);
     await request(server, sink, 1, "initialize", INIT_PARAMS);
 
@@ -529,25 +557,44 @@ describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
         runId: "run-chat",
         task: { prompt: "hi", conversation: true },
         ctx: { poolKey: "shared", cwd: "/w" },
-        chat: { recordId: "rec-chat-9" },
+        resume: { recordId: "rec-chat-9" },
       },
     });
-    const resp = await sink.waitFor(
-      (f) => f.id === 2 && (f.result !== undefined || f.error !== undefined),
-      "run response",
-    );
-    expect(resp.error).toBeUndefined();
-    expect(vi.mocked(engine.bindAskUser)).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(vi.mocked(engine.bindAskUser)).toHaveBeenCalledTimes(1));
+    const handler = vi.mocked(engine.bindAskUser).mock.calls[0]![0]!;
+    expect(handler).toBeTypeOf("function");
 
-    // chat run：onChildSpawned 以 chat recordId 锚定（区别于一次性 run 的 runId 锚定）
+    // 会话形态轮 ctx.resume 透传（引擎读端锚定 recordId）
     const ctx = (engine.run as Mock).mock.calls[0]![1] as RunContext;
-    expect(ctx.chat).toEqual({ recordId: "rec-chat-9" });
+    expect(ctx.resume).toEqual({ recordId: "rec-chat-9" });
+
+    // run 期间 askUser 等待体可用（per-run 绑定与 one-shot 同构——chat 轮短命 run）
+    const req: UiRequest = { method: "select", id: "ui-2", title: "选一个" };
+    const answerP = handler(req);
+    const ask = await sink.waitFor((f) => f.method === "host/askUser", "chat askUser frame");
+    expect(ask.params).toEqual({ runId: "run-chat", request: req });
+    server.handleFrame({ id: ask.id, result: { value: "B" } });
+    await expect(answerP).resolves.toEqual({ value: "B" });
+
+    // 会话形态轮 run：onChildSpawned 以 recordId 锚定（区别于一次性 run 的 runId 锚定）
     ctx.onChildSpawned?.({ pid: 777, killed: false });
     const spawned = await sink.waitFor((f) => f.method === "host/childSpawned", "childSpawned");
     expect(spawned.params).toEqual({ pid: 777, recordId: "rec-chat-9" });
+
+    // [SR-4] 会话形态同键锚定：childStateChanged 用 recordId（非 runId）
+    ctx.onChildStateChanged?.({ pid: 777, recordId: "rec-chat-9", state: "exited", killed: true });
+    const exitedChat = await sink.waitFor((f) => f.method === "host/childStateChanged", "childStateChanged");
+    expect(exitedChat.params).toEqual({
+      pid: 777, recordId: "rec-chat-9", state: "exited", killed: true,
+    });
+
+    // run 结束（finally）：bindAskUser(undefined) 解绑，防跨 run 串扰
+    release({ handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } });
+    await sink.waitFor((f) => f.id === 2 && f.result !== undefined, "run response");
+    expect(vi.mocked(engine.bindAskUser)).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("run.chat 空 recordId → engine_protocol_bad_frame（前置校验，run 不进引擎）", async () => {
+  it("run.resume 空 recordId → engine_protocol_bad_frame（前置校验，run 不进引擎）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     await request(server, sink, 1, "initialize", INIT_PARAMS);
@@ -555,14 +602,14 @@ describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
       runId: "run-bad",
       task: { prompt: "p" },
       ctx: { poolKey: "shared", cwd: "/w" },
-      chat: { recordId: "" },
+      resume: { recordId: "" },
     });
     expect(resp.error?.code).toBe("engine_protocol_bad_frame");
     expect(resp.error?.message).toContain("recordId");
     expect(vi.mocked(engine.run)).not.toHaveBeenCalled();
   });
 
-  it("run.chat conversation 位 unsupported 引擎 → engine_capability_unsupported（能力位 gate）", async () => {
+  it("run.resume conversation 位 unsupported 引擎 → engine_capability_unsupported（能力位 gate）", async () => {
     const engine = makeEngine({
       capabilities: vi.fn((): EngineCapabilities => ({ ...CAPABILITIES, conversation: "unsupported" })),
     });
@@ -572,44 +619,16 @@ describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
       runId: "run-gate",
       task: { prompt: "hi", conversation: true },
       ctx: { poolKey: "shared", cwd: "/w" },
-      chat: { recordId: "rec-gate" },
+      resume: { recordId: "rec-gate" },
     });
     expect(resp.error?.code).toBe("engine_capability_unsupported");
     expect(vi.mocked(engine.run)).not.toHaveBeenCalled();
   });
 });
 
-describe("bindHostChannels 构造期接线（会话级反向通道）", () => {
-  it("构造期注入三分通道：streamDelta/roundLifecycle → host/* 反向帧；askUser 应答闭环", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
-    expect(vi.mocked(engine.bindHostChannels)).toHaveBeenCalledTimes(1);
-    const channels = vi.mocked(engine.bindHostChannels).mock.calls[0]![0]!;
-    expect(channels).toBeDefined();
-
-    channels.streamDelta({ recordId: "rec-1", delta: "d" });
-    const delta = await sink.waitFor((f) => f.id === "rev-1" && f.method === "host/streamDelta", "ch delta");
-    expect(delta.params).toEqual({ recordId: "rec-1", delta: "d" });
-    server.handleFrame({ id: "rev-1", result: { ok: true } });
-
-    channels.roundLifecycle({ recordId: "rec-1", phase: "idle" });
-    const lifecycle = await sink.waitFor((f) => f.id === "rev-2" && f.method === "host/roundLifecycle", "ch lifecycle");
-    expect(lifecycle.params).toEqual({ recordId: "rec-1", phase: "idle" });
-    server.handleFrame({ id: "rev-2", result: { ok: true } });
-
-    const askP = channels.askUser("run-chat", { method: "confirm", id: "ui-9" });
-    const ask = await sink.waitFor((f) => f.id === "rev-3" && f.method === "host/askUser", "ch askUser");
-    expect(ask.params).toEqual({ runId: "run-chat", request: { method: "confirm", id: "ui-9" } });
-    server.handleFrame({ id: "rev-3", result: { confirmed: true } });
-    await expect(askP).resolves.toEqual({ confirmed: true });
-  });
-
-  it("引擎未实现 bindHostChannels：构造不抛（可选绑定面）", () => {
-    const engine = makeEngine();
-    delete (engine as Partial<FakeEngine>).bindHostChannels;
-    expect(() => new EngineProtocolServer({ write: () => undefined, engine })).not.toThrow();
-  });
-});
+// [H1 U5] bindHostChannels 构造期三分通道接线（streamDelta/轮次相位/会话级
+// askUser）已随 chat-session.ts 删除——askUser/runId 键 streamDelta/childStateChanged
+// 的 run 域形态断言保留在上方「run：协议载荷还原」与「bindAskUser」用例中。
 
 // ── 反向请求客户端 ──
 

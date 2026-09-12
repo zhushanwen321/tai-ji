@@ -25,6 +25,7 @@ import type {
   ExecutionMode,
   ExecutionStatus,
   InternalToolCall,
+  RecordOrigin,
   Turn,
 } from "./types.ts";
 import { extractLabelFromArgs } from "./execution-record.ts";
@@ -111,6 +112,14 @@ export interface SubagentIdentityData {
   worktree?: boolean;
   /** @deprecated 兼容旧文件：旧 identity entry 写的是 parentSessionId，读取时 fallback 到 rootSessionId。 */
   parentSessionId?: string;
+  /**
+   * 来源身份（H2 S3 修复）。旧文件缺失 → undefined（= "tool" 语义，缺省零迁移）。
+   * standalone 形态（identity entry 链）的 workflow record 经本字段在重建面保留
+   * origin 过滤语义；读取侧经 normalizeReconOrigin 守卫归一（非法值 → undefined）。
+   */
+  origin?: RecordOrigin;
+  /** origin="workflow" 时所属 workflow run id。旧文件缺失 → undefined。 */
+  parentRunId?: string;
 }
 
 /** SDK jsonl entry（getEntries() 返回，header 已排除）。 */
@@ -157,6 +166,14 @@ export interface ReconstructedRecord {
   chatMode?: boolean;
   /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
   worktree?: boolean;
+  /**
+   * 来源身份（H2 S3 修复，来自 identity custom entry 经守卫归一；旧文件 undefined =
+   * "tool" 语义）。漏本字段则全量重建面（getFullRecord → reconstructFromFile）丢
+   * origin，workflow record 逃过 D1 投影过滤。
+   */
+  origin: RecordOrigin | undefined;
+  /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
+  parentRunId: string | undefined;
   /**
    * 对话轮次计数（非 identity entry 字段，reconstructFromFile 不填）。
    * V2 idle record 的 round 只在内存维护（doFinalizeRoundToIdle 递增），磁盘重建不恢复。
@@ -259,6 +276,21 @@ function isIdentityData(data: unknown): data is SubagentIdentityData {
     typeof d.task === "string" &&
     typeof d.startedAt === "number"
   );
+}
+
+/**
+ * 来源域守卫归一（H2 S3 修复）：origin 非法值/缺省 → undefined（= "tool" 语义）。
+ * 字面量守卫与 record-store.readEntryOriginFields（主 entry 重建侧）逐字对齐——
+ * identity entry 的 data 经 JSON.parse 后 origin 运行时值不可信，TS 类型只是断言，
+ * 消费投影点必须守卫。
+ */
+function normalizeReconOrigin(v: unknown): RecordOrigin | undefined {
+  return v === "workflow" || v === "tool" ? v : undefined;
+}
+
+/** parentRunId 安全读取（非 string → undefined），与 normalizeReconOrigin 同消费点。 */
+function normalizeReconParentRunId(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
 }/**
  * 待匹配的 toolCall（assistant 发起，等 toolResult 回填）。
  * 记录在 assistant Turn 上，toolResult 到达时按 toolCallId 找到并填充。
@@ -485,6 +517,9 @@ function buildReconstructedRecord(
   const rootSessionId = identity.rootSessionId ?? identity.parentSessionId;
   // slug 兜底：旧 identity entry 无 slug 字段 → 空串（与 SubagentRecord.slug: string 契约一致）。
   const slug = identity.slug ?? "";
+  // 来源域归一（H2 S3）：非法值/缺省 → undefined = "tool" 语义（守卫见 normalizeReconOrigin）。
+  const origin = normalizeReconOrigin(identity.origin);
+  const parentRunId = normalizeReconParentRunId(identity.parentRunId);
   return {
     ...identity,
     slug,
@@ -492,6 +527,8 @@ function buildReconstructedRecord(
     parentRecordId: identity.parentRecordId,
     depth: identity.depth ?? 0,
     forkDepth: identity.forkDepth,
+    origin,
+    parentRunId,
     sessionFile,
     status,
     closedReason,
@@ -587,6 +624,10 @@ export interface IdentityHeaderRecon {
   chatMode?: boolean;
   /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
   worktree?: boolean;
+  /** 来源身份（H2 S3 修复，守卫归一后；缺省 undefined = "tool" 语义）。light 列表投影用。 */
+  origin: RecordOrigin | undefined;
+  /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
+  parentRunId: string | undefined;
   model: string;
   thinkingLevel: string | undefined;
   sessionFile: string;
@@ -743,7 +784,7 @@ function absorbScannedEntry(state: LightIdentityScan, entry: JsonlEntry): boolea
   return false;
 }
 
-/** 扫描态 → IdentityHeaderRecon（归一化与全量 recon 同源：rootSessionId fallback 旧字段、slug 兜底空串）。 */
+/** 扫描态 → IdentityHeaderRecon（归一化与全量 recon 同源：rootSessionId fallback 旧字段、slug 兜底空串、origin/parentRunId 守卫归一）。 */
 function toIdentityRecon(
   state: LightIdentityScan,
   identity: SubagentIdentityData,
@@ -763,6 +804,8 @@ function toIdentityRecon(
     forkDepth: identity.forkDepth,
     chatMode: identity.chatMode,
     worktree: identity.worktree,
+    origin: normalizeReconOrigin(identity.origin),
+    parentRunId: normalizeReconParentRunId(identity.parentRunId),
     model: state.model,
     thinkingLevel: state.thinkingLevel,
     sessionFile,

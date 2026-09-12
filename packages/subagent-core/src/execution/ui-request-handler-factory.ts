@@ -26,6 +26,7 @@ import { getLogger } from "../core/logger.ts";
 import {
   DialogGlobalQueue,
   isValidDialogTimeout,
+  registerActiveDialogQueue,
   type UiRequest,
   type UiRequestHandler,
   type UiResponse,
@@ -93,6 +94,10 @@ export function createUiRequestHandlerForMode(
 ): UiRequestHandler | undefined {
   const hostMode = resolveHostMode(ctx.mode);
   if (hostMode === "headless") return undefined;
+
+  // [SR-4 接线登记] 队列是跨子进程全局单例（宿主壳创建），而子进程退出信号来自 core
+  // 引擎镜像层——本工厂是两者交汇点，在返回 handler 的同一路径上登记，壳侧无需改动。
+  registerActiveDialogQueue(dialogQueue);
 
   const realHandler = createRealHandler(ctx, hostMode, registry);
 

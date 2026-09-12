@@ -204,6 +204,50 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [H4 record 持久化收敛 / D7 守卫分级] store 外禁 import record 写面函数——
+  // eslint no-restricted-imports 是模块边界一级拦截（新增写者在 import 面即报错），
+  // grep 门（scripts/check-record-write-surface.mjs）降为文本级兜底（拦类方法调用
+  // 与字面量写形态）。写面唯一入口 = RecordStore（packages/subagent-core/src/
+  // execution/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
+  // 边界登记：manifest 写面是 ManifestStore 实例方法（writeManifest）——import 层
+  // 拦不住（装配点构造合法），该面由 grep 门 R1 兜底；writeRecordBinding /
+  // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写面收敛范围，不拦。
+  // barrel（packages/subagent-core/src/index.ts）零导出本组写函数，公开面不外泄。
+  {
+    files: ['packages/subagent-core/src/**/*.ts'],
+    ignores: [
+      'packages/subagent-core/src/execution/record-store.ts',
+      'packages/subagent-core/src/**/__tests__/**',
+      'packages/subagent-core/src/**/*.test.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/state-marker.ts'],
+              importNames: ['writeFinalizedState', 'writeCancelledState'],
+              message:
+                'store 外禁 import 终态 sidecar 写函数（.state 是终态权威）——经 RecordStore.markFinalized/markCancelled 意图原语落盘（H4/G1，D7 守卫分级）',
+            },
+            {
+              group: ['**/alive-store.ts'],
+              importNames: ['writeAliveMarker', 'removeAliveMarker'],
+              message:
+                'store 外禁 import .alive 写/删函数（跨进程写权声明）——acquire/release 归 RecordStore 意图原语内部（H4/G1，D7 守卫分级）',
+            },
+            {
+              group: ['**/sessions-index.ts'],
+              importNames: ['saveIndex'],
+              message:
+                'store 外禁 import sessions-index 落盘函数（索引是可丢缓存）——索引维护归 RecordStore 内部（H4/G1，D7 守卫分级）',
+            },
+          ],
+        },
+      ],
+    },
+  },
   // [HISTORICAL] useContenteditableInput.ts 是 composer 富文本输入的唯一聚合点：
   // 视觉行移动（getClientRects+caretRangeFromPoint）+ segments 解析（getSegmentsFromEl）
   // + 草稿/光标/IME/粘贴事件处理 + Cmd+V 双通路图片粘贴。各职责共享 savedRange/preferredX
@@ -483,12 +527,23 @@ export default [
   {
     files: [
       'packages/subagent-core/src/execution/execution-record.ts',
-      'packages/subagent-core/src/execution/record-store.ts',
       'packages/subagent-core/src/orchestration/worker-message-pump.ts',
       'packages/subagent-core/src/shared/resource-discovery.ts',
     ],
     rules: {
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [H4 record 持久化收敛] record-store.ts 单独提额：H4 设计（docs/design/
+  // subagent-record-persistence-consolidation.md）把 record 全部写面收编进
+  // RecordStore（十意图原语 + 同步写权威），U1 API 立面落地后 800→1207，
+  // U4a 读面收尾 / U4c rebuildIndexes 还将增长。写面收口与行数守卫是显式
+  // 冲突，提额至 1400 过渡；H4 全落地后按意图原语族拆分（终态原语/轮次
+  // 簿记/重建三轴）属独立重构任务，登记于 H4 impl-plan 残留风险。
+  {
+    files: ['packages/subagent-core/src/execution/record-store.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1400, skipBlankLines: true, skipComments: true }],
     },
   },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
@@ -502,29 +557,30 @@ export default [
     },
   },
   // engine-client.ts：协议客户端聚合中心（spawn/握手/帧路由/崩溃重建/收割 + [W3]
-  // chat 轮次 recordId 路由面）。超限 10 行，按仓内惯例（偏差 #2 message-dispatcher
-  // 同款）登记 override，长期拆分方向：正向请求面 / 反向路由面 / 收割面。
+  // chat 轮次 recordId 路由面）。H1 chat-run 统一期间收割链与轮次活性承载并入后
+  // 541 行，按仓内惯例（偏差 #2 message-dispatcher 同款）登记 override；结构性拆分
+  // （正向请求面 / 反向路由面 / 收割面）登记为后续重构债，随 H3 service 拆分轮处置。
   {
     files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
     rules: {
-      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 545, skipBlankLines: true, skipComments: true }],
     },
   },
-  // subagent-service.ts 单列：旧位 2141 行即超 extensions 域 1000 上限（基线存量，
-  // 迁移前已在告警），抽离后 1245 行；无界等待修复（OR-3 消息层超时 + 收殓下沉）
-  // 后 1415 行；u-h2 engine-aware model validation（route first、按目标 engine
-  // 校验，2026-09-05）+21 行 → 1471 行；chat-domain-v1x-liveness-governance W4 轮次
-  // 活性监督器接线（死亡分诊 + 在途记账 + boot 分区/sweep 挂点，2026-09-09；装配面
-  // 已抽 round-supervisor/service-binding.ts）→ 1548 行；chat-domain-v1x-liveness-
-  // governance W3 chat 域协议化（chat 轮次走协议客户端：轮次路由/生命周期相位/冷续
-  // 锚点/settle 分诊的编排承接 inproc PiEngine 消亡后的宿主半边，2026-09-09）→
-  // 1684 行。该文件是编排聚合点（与 event-adapter 同型先例），不拆文件；短期
-  // override 至 1700 避免阻塞，长期拆分（service 门面 / record 子图 / chat 轮次编排
-  // / spawn 编排）待独立重构。
+  // [H3/R4 已消解] subagent-service.ts 单列 override（max 1700）已移除——R4 抽取
+  // RunOrchestration（域 #6/#7/#12/#14/#15，strangler 第五单元）+ WorkflowDispatch
+  //（[D-R4-1] workflow 族拆分）后壳折算行低于 packages 域 500 上限，warning 消解
+  //（impl-plan §7 ⑤ 预授权动作：移除而非抬阈值；演化史——旧位 2141 行即超限，抽离
+  // 1245 → 无界等待修复 1415 → u-h2 1471 → W4 监督器 1548 → W3 协议化 1684 →
+  // R0 重排折算 1842 → R1 1785 → R2 1640 → R3 后触发告警 → R4 移除本 override）。
+  // run-orchestration.ts 单列：R4 核心编排聚合——[D-R4-1] G1 容量偏差的 lint 面
+  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限，备选第三
+  // 文件 chat-rounds.ts 未采纳，理由见 impl-plan §5 D-R4-1）。终态实测（阶段3 复核）：
+  // 本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts 527 物理行
+  // 合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
   {
-    files: ['packages/subagent-core/src/execution/subagent-service.ts'],
+    files: ['packages/subagent-core/src/execution/service/run-orchestration.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1700, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
   // session-reader tool-handler：聚合工具处理中枢（多工具入口 + 渲染调度），

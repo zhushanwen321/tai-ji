@@ -12,6 +12,7 @@ vi.mock('../../../infra/logger.js', () => ({
 }))
 
 import type { ProviderQuotaFetcher, QuotaAuthKind } from '../types.js'
+import { normalizeCookieHeader } from '../types.js'
 import { kimiFetcher } from '../kimi.js'
 import { mimoFetcher } from '../mimo.js'
 import { minimaxFetcher } from '../minimax.js'
@@ -27,7 +28,9 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function setupFetch(impl: () => Response | Promise<Response>): ReturnType<typeof vi.fn> {
+function setupFetch(
+  impl: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
+): ReturnType<typeof vi.fn> {
   const mock = vi.fn(impl)
   vi.stubGlobal('fetch', mock)
   return mock
@@ -35,7 +38,8 @@ function setupFetch(impl: () => Response | Promise<Response>): ReturnType<typeof
 
 async function fetchOk(fetcher: ProviderQuotaFetcher, body: unknown) {
   setupFetch(() => jsonResponse(body))
-  return fetcher.fetchQuota('cred', 'api-key' as QuotaAuthKind)
+  // 凭证用带 = 的真实形态：mimo fetcher 会对粘贴 cookie 归一化，无 = 的裸串被判空 → unauthorized
+  return fetcher.fetchQuota('sid=1', 'api-key' as QuotaAuthKind)
 }
 
 describe('kimiFetcher', () => {
@@ -123,7 +127,10 @@ describe('kimiFetcher', () => {
 })
 
 describe('mimoFetcher', () => {
-  beforeEach(() => vi.useFakeTimers())
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW_MS)
+  })
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
@@ -135,25 +142,38 @@ describe('mimoFetcher', () => {
 
   it('401 → unauthorized，500 → network', async () => {
     setupFetch(() => jsonResponse({}, 401))
-    expect(await mimoFetcher.fetchQuota('c', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
     setupFetch(() => jsonResponse({}, 500))
-    expect(await mimoFetcher.fetchQuota('c', 'cookie')).toEqual({ ok: false, reason: 'network' })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'network' })
+  })
+
+  it('会话过期 3xx（redirect manual 不跟随）→ unauthorized', async () => {
+    setupFetch(() => new Response(null, { status: 302 }))
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
+  })
+
+  it('在体 401/403（HTTP 200 + body code）→ unauthorized', async () => {
+    expect(await fetchOk(mimoFetcher, { code: 401, message: 'login required' })).toEqual({
+      ok: false,
+      reason: 'unauthorized',
+    })
+    expect(await fetchOk(mimoFetcher, { code: 403 })).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
   it('非法 JSON → parse；code 类型漂移 → parse', async () => {
     setupFetch(() => new Response('not json'))
-    expect(await mimoFetcher.fetchQuota('c', 'cookie')).toEqual({ ok: false, reason: 'parse' })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'parse' })
     expect(await fetchOk(mimoFetcher, { code: '401' })).toEqual({ ok: false, reason: 'parse' })
   })
 
-  it('code 非 0 → no-subscription', async () => {
+  it('code 非 0（非过期码）→ no-subscription', async () => {
     expect(await fetchOk(mimoFetcher, { code: 1, message: 'no plan' })).toEqual({
       ok: false,
       reason: 'no-subscription',
     })
   })
 
-  it('成功路径：仅 month 窗口，percent ×100', async () => {
+  it('成功路径：仅 month 窗口，percent ×100，5h/week 恒无限', async () => {
     const out = await fetchOk(mimoFetcher, {
       code: 0,
       message: 'ok',
@@ -173,6 +193,79 @@ describe('mimoFetcher', () => {
         ],
       },
     })
+  })
+
+  it('month 窗口补 token 绝对量 + detail.currentPeriodEnd → resetSec', async () => {
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) {
+        return jsonResponse({ code: 0, message: 'ok', data: { planCode: 'standard', currentPeriodEnd: '2026-08-24 00:00:00' } })
+      }
+      return jsonResponse({
+        code: 0,
+        message: 'ok',
+        data: {
+          monthUsage: {
+            percent: 0.25,
+            items: [{ used: 2_600_000_000, limit: 11_000_000_000 }],
+          },
+          usage: { percent: 0.1, items: [] },
+        },
+      })
+    })
+    const out = await mimoFetcher.fetchQuota('sid=1', 'cookie')
+    expect(out).toEqual({
+      ok: true,
+      data: {
+        label: 'MiMo Coding',
+        wins: [
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+          // currentPeriodEnd 无时区标记按 UTC 解析：2026-08-23T10:00Z → 2026-08-24T00:00Z = 14h
+          { pct: 25, used: 2_600_000_000, limit: 11_000_000_000, unit: 'tokens', resetSec: 50_400 },
+        ],
+      },
+    })
+  })
+
+  it('detail 失败 → 降级 resetSec=null，不影响用量主数据', async () => {
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) return jsonResponse({}, 500)
+      return jsonResponse({
+        code: 0,
+        message: 'ok',
+        data: {
+          monthUsage: { percent: 0.34, items: [{ used: 3, limit: 0 }] },
+          usage: { percent: 0.1, items: [] },
+        },
+      })
+    })
+    const out = await mimoFetcher.fetchQuota('sid=1', 'cookie')
+    expect(out).toEqual({
+      ok: true,
+      data: {
+        label: 'MiMo Coding',
+        wins: [
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+          // limit=0 不采信绝对量，只输出 pct
+          { pct: 34, resetSec: null },
+        ],
+      },
+    })
+  })
+})
+
+describe('normalizeCookieHeader', () => {
+  it.each([
+    ['a=1; b=2', 'a=1; b=2'],
+    ['a = 1 ; b = 2', 'a=1; b=2'],
+    ['k="v w"; b=2', 'k="v w"; b=2'],
+    ['; a=1; ; b=2;', 'a=1; b=2'],
+    ['   ', ''],
+  ])('%j → %j', (input, expected) => {
+    expect(normalizeCookieHeader(input)).toBe(expected)
   })
 })
 

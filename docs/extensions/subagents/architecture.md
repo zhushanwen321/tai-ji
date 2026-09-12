@@ -1,286 +1,166 @@
-# Subagents 架构
+# Subagents 架构（现状 SSOT）
 
-> 本文件是 subagents 扩展内部架构的**真相源**：记录已落地的分层结构与契约。
-> 设计动机、缺陷诊断、重构目标见
-> 决策溯源见源仓库归档：`xyz-pi-extensions-workspace/main/.xyz-harness/2026-06-15-subagent-architecture-consolidation/spec.md`
+> **本文件定位**：subagent 体系的**结构导航页**——回答「这套能力现在由哪些包组成、各包边界在哪、关键机制落在哪个模块」，并指向各主题的权威文档。机制细节不在本文件展开（避免与设计文档双源漂移）。
+>
+> **最后校准**：2026-09-11（对照当时的源码结构与 package 拓扑逐项核实）。
+> **历史**：本文件此前描述的是 M0 拆分前的**单包三层实现**（TUI / Runtime / Core 全在 extension 内，`session-runner.ts` / `session-factory.ts` / `executor` 等文件）。那些结构已随 core 抽包、引擎协议化、双轨收敛退役，对应实现迁至 `packages/subagent-core` 与两个引擎包（见 §7 历史沿革）。
 
 ---
 
-## 1. 三层架构
+## 1. 包拓扑
+
+subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 引擎，走 engine-protocol v1 NDJSON stdio）。
 
 ```
-            ┌─────────────────────────────────────────────┐
-            │              外壳（薄壳）                    │
-            │  tools/subagent-tool   commands/subagents   │
-            │           index.ts（装配 tool/command/messageRenderer）  │
-            └────────────────────┬────────────────────────┘
-                                 │ 调用
-                                 ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │                     TUI 层（展示）                       │
-   │  tool-render · list-view · bg-notify-render · format        │
-   │  职责：只读消费 RecordSnapshot / Details，永不回写状态   │
-   └────────────────────────▲────────────────────────────────┘
-                            │ 投影（snapshot/project）
-                            │
-   ┌────────────────────────┴────────────────────────────────┐
-   │                   Runtime 层（编排）                     │
-   │  ── 双 Service（按领域划分）──                           │
-   │  ModelConfigService（配置/模型域）                       │
-   │  SubagentService（执行/记录/通知域）                     │
-   │  ── 编排与基础设施 ──                                    │
-   │  executor · record-store · notifier · tombstone-store     │
-   │  config · session-file-gc                                │
-   │  职责：编排 Core，管理 record 生命周期，回注通知           │
-   └────────────────────────▲────────────────────────────────┘
-                            │ 委托
-                            │
-   ┌────────────────────────┴────────────────────────────────┐
-   │                    Core 层（核心）                       │
-   │                                                          │
-   │  ── 编排子层（Orchestration）──                          │
-   │  session-runner（一次性，含原 session-factory 组装       │
-   │  + EventBridge 事件翻译，已内联）                        │
-   │                                                          │
-   │  ── 基础子层（Foundation）──                              │
-   │  output-collector（拆：Record → AgentResult）            │
-   │                                                          │
-   │  ── 叶子原语 ──                                          │
-   │  execution-record · model-resolver · agent-registry      │
-   │  concurrency-pool · turn-limiter · path-encoding         │
-   │  职责：零 Pi 依赖的执行与状态原语，可独立单测            │
-   └──────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│ shell（宿主进程内）                                                     │
+│  extensions/universal/subagent-workflow   @zhushanwen/pi-subagent-workflow │
+│   - 工具面 / 命令 / TUI 渲染 / injectors / 宿主端口实现 / relay.mjs 代理  │
+└──────────────────────────────┬────────────────────────────────────────┘
+                               │ 经 core barrel（semver 契约面）消费
+┌──────────────────────────────▼────────────────────────────────────────┐
+│ host core（宿主进程内）                                                 │
+│  packages/subagent-core                @zhushanwen/subagent-core        │
+│   - execution/（执行·记录·通知域 + 引擎子域）                            │
+│   - orchestration/（workflow 域：脚本生成/校验/worker/运行存储）          │
+│   - core/（宿主端口）+ shared/（零依赖原语）                             │
+│   - 通过 HostServices 端口反向依赖宿主（禁 pi SDK：闭包红线）             │
+└──────────────────────────────┬────────────────────────────────────────┘
+                               │ 同一份契约（SDK）
+┌──────────────────────────────▼────────────────────────────────────────┐
+│ engine（独立子进程）                                                    │
+│  packages/pi-subagent-cli      @zhushanwen/pi-subagent-cli              │
+│  packages/zcode-subagent-cli   @zhushanwen/zcode-subagent-cli           │
+│   - 协议 server + 引擎适配（pi：spawn pi 子进程；zcode：app-server RPC） │
+└──────────────────────────────┬────────────────────────────────────────┘
+                               │ 协议 + 契约类型闭包
+┌──────────────────────────────▼────────────────────────────────────────┐
+│ contract                                                               │
+│  packages/subagent-engine-sdk  @zhushanwen/subagent-engine-sdk          │
+│   - protocol/（方法/载荷/反向通道）+ port-contract + env/spawn/relay/    │
+│     journal/kill-chain/nesting-guard/ui-* + node-executor + paths       │
+└────────────────────────────────────────────────────────────────────────┘
+        ▲
+        │ 宿主侧 relay 通道（tee 帧归属）
+   packages/runtime/src/infra/relay/（relay-env / relay-paths / relay-registry / relay-server / relay-tee）
 ```
 
-## 2. 分层铁律
+## 2. 各包职责与关键模块
 
-依赖方向严格自上而下。违反即为架构缺陷。
+### 2.1 shell — `extensions/universal/subagent-workflow`
 
-| 层 | 可 import | 禁止 import |
-|---|---|---|
-| **Core** | 自身 + `types.ts` + Node 内置 | Runtime / TUI / Pi SDK 实例 |
-| **Runtime** | Core + `types.ts` + Pi SDK（动态 import） | TUI |
-| **TUI** | `types.ts` + Runtime 的只读快照类型 | Core 可变状态、Pi SDK 执行 API |
-| **外壳** | Runtime 公共 API + Pi SDK 注册 API | Core 内部实现 |
+宿主进程内的薄壳。**不含执行运行时**（已迁 core），职责 = 注册面 + 宿主适配 + 渲染。
 
-Core 零 Pi 依赖是可测试性的根基——`execution-record`、`concurrency-pool` 等纯函数可在无 Pi 进程下单测。Pi SDK 只在 `session-runner`（`getSdk` 动态 import + `createAgentSession` 装配）和外壳（注册）两处出现。
-
-### Core 子层依赖铁律
-
-Core 内部进一步分两子层，依赖严格自上而下，禁止反向或同层横穿：
-
-| 子层 | 文件 | 可 import | 禁止 import |
-|---|---|---|---|
-| **编排（Orchestration）** | session-runner | 基础子层 + 叶子原语 + types | 基础子层禁止反向引用 |
-| **基础（Foundation）** | output-collector | 自身 + types + 叶子原语 | 编排子层 |
-| **叶子原语** | execution-record · model-resolver · agent-registry · concurrency-pool · turn-limiter · path-encoding | 自身 + types | 编排/基础子层 |
-
-> **[HISTORICAL]** 早期实现有独立的 `session-factory.ts`（造 bundle：input → BuiltSession）和 `event-bridge.ts`（SDK 事件翻译 + 累积）。技术债治理（debt-governance Wave 1/3）把它们内联进 `session-runner.ts`——session-factory 是 session-runner 的唯一调用方（四步组装中两步是一行包装），EventBridge 的 switch 翻译逻辑无独立状态、无独立生命周期。合并后 session-runner 完整表达「跑一次 session」，依赖方向不变。详见决策溯源见源仓库归档：`xyz-pi-extensions-workspace/main/.xyz-harness/2026-06-22-subagent-debt-governance/spec.md`。
-
-## 3. 文件归属
-
-按层 + 状态标注。状态：✅ 已实现 ｜ ⬜ 骨架（签名+流程图，待填）。
-
-### Core 层（9）
-
-> 分编排 / 基础 / 叶子三个子层（依赖方向见 §2 Core 子层依赖铁律）。
-
-#### 编排子层（Orchestration）— 1
-
-| 文件 | 职责 | 状态 |
-|---|---|---|
-| `session-runner.ts` | 一次性 session 执行编排，sync/bg 共用，零 mode 感知。含原 session-factory 的 session 组装（四步 → BuiltSession）+ EventBridge 的 SDK 事件翻译（已内联） | ✅ |
-
-#### 基础子层（Foundation）— 1
-
-| 文件 | 职责 | 状态 |
-|---|---|---|
-| `output-collector.ts` | Record → AgentResult 收集（text/usage/toolCalls/parsedOutput 字段单源，全部从 record.turns[].content 派生） | ✅ |
-
-#### 叶子原语（Primitives）— 7
-
-| 文件 | 职责 | 状态 |
-|---|---|---|
-| `execution-record.ts` | 唯一状态对象（turns[] 收口）+ 创建/更新/完成/投影/派生入口 | ✅ |
-| `session-reconstructor.ts` | session.jsonl → turns[]/usage/result/error 重建（含 tombstone override + 防御性降级） | ✅ |
-| `model-resolver.ts` | 5 级 fallback 模型解析链 + category 推断 | ✅ |
-| `agent-registry.ts` | agent `.md` 文件发现与解析（hot-reload） | ✅ |
-| `concurrency-pool.ts` | 并发控制 + 优先级排队（仅 background 进池，bg=1000），maxConcurrent 下限 1。sync 不进池（D-032），避免嵌套持有槽位死锁 | ✅ |
-| `turn-limiter.ts` | soft/hard turn 限制器（steer + abort） | ✅ |
-| `path-encoding.ts` | cwd → 安全目录名编码（session-runner + session-file-gc 共享，消除旧重复） | ✅ |
-
-### Runtime 层（7）
-
-> 按**领域**拆为双 Service：ModelConfigService（配置/模型解析域）+ SubagentService（执行/记录/通知域）。
-> 两个 Service 平级——SubagentService 持有 ModelConfigService 引用（execute 内部调 resolveModel），
-> 但 command/wizard 直接用 ModelConfigService（不经 SubagentService，配置操作不碰执行）。
-> executor 逻辑已合并进 subagent-service.ts（不独立文件——无独立状态/生命周期）。
-> 主入口（两个 Service）+ discovery-config/session-file-gc 留在 `runtime/` 根；
-> 执行域组件下沉 `runtime/execution/`，配置域下沉 `runtime/config/`。
-
-| 文件 | 职责 | 状态 |
-|---|---|---|
-| `model-config-service.ts` | 配置/模型域 Service：globalConfig + sessionState + agentRegistry + modelRegistry + resolveModel | ✅ |
-| `subagent-service.ts` | 执行/记录/通知域 Service：execute 编排（含原 executor 逻辑）+ query/cancel + 组件持有（pool/store/notifier，全 private） | ✅ |
-| `execution/record-store.ts` | Record 容器：内存(running) + 磁盘(session.jsonl 重建) 合并 + statusFilter | ✅ |
-| `execution/notifier.ts` | background 完成回注主对话（滑动窗口合并 + 去重 TTL） | ✅ |
-| `execution/tombstone-store.ts` | cancelled 状态 sidecar 持久化（.cancelled 文件读写） | ✅ |
-| `config/config.ts` | 全局配置（单一真相源读 config.json）+ session 级状态（纯函数，被 ModelConfigService 调用） | ✅ |
-| `session-file-gc.ts` | 过期 subagent session 文件清理 | ✅ |
-
-> 另：`discovery-config.ts`（ADR-028 资源发现契约）留在 `runtime/` 根——被 index.ts（resources_discover）与 ModelConfigService 双消费，不归任一 Service 子目录。
-
-### TUI 层（4）
-
-| 文件 | 职责 | 状态 |
-|---|---|---|
-| `tool-render.ts` | 对话流 tool block 渲染（renderCall + renderResult） | ✅ |
-| `list-view.ts` | `/subagents` 全屏左右分屏 overlay（含 list + 详情） | ✅ |
-| `bg-notify-render.ts` | background 完成通知的对话流渲染（messageRenderer） | ✅ |
-| `format.ts` | 纯格式化函数（tokens/duration/firstLine/extractAgentName 共享 helper） | ✅ |
-
-> **[HISTORICAL]** 早期 TUI 层曾有 `progress-widget.ts`（aboveEditor 常驻进度 widget）、`config-wizard.ts`（`/subagents config` 交互向导）、`format-helpers.ts`（配置摘要格式化）、`category-confirm.ts`（首次 category 确认组件）。均已删除：progress-widget 因 ghosting 反复修复无效移除（8a23d5db1）；config-wizard/format-helpers/saveGlobalConfig 因 `/subagents` 精简为仅 list overlay 而连带删除（c7eaea6e6，FR-10）；category-confirm 因 D-1 决策取消（80448bd53）。详见 §5.3。
-
-### 测试（24 文件）
-
-`src/__tests__/` 下 24 个 `.test.ts` 测试文件（另含 `helpers/` 目录）覆盖 Core + Runtime + TUI 关键模块。详见 [development-guide.md](../development-guide.md) §7 测试要求。
-
-| 文件 | 覆盖 |
+| 路径 | 职责 |
 |---|---|
-| `turn-limiter.test.ts` | steer/abort 时序 + didSteer/didAbort getter |
-| `concurrency-pool.test.ts` | 满载阻塞/优先级抢占/FIFO/maxConcurrent=0 clamp/防负 |
-| `throttle.test.ts` | leading/trailing edge/flush/默认 150ms |
-| `execution-record.test.ts` | turns[] 收口累积/派生视图(getEventLog/getFullText/getAllToolCalls/getTotalUsage)/tryTransition CAS/project/snapshot |
-| `output-collector.test.ts` | collectResult 字段单源（从 record 派生）+ extractParsedOutput |
-| `session-runner.test.ts` | run() 编排骨架 + 事件处理内联 |
-| `session-factory.test.ts` | session-runner 内联纯函数（applyToolFilter/buildAppendSystemPrompt/buildEnvBlock/getSubagentSessionDir）——文件名为历史遗留，测的是合并进 session-runner 的函数 |
-| `record-store.test.ts` | 内存(running) + 磁盘(session.jsonl 重建) 合并 + statusFilter + tombstone override + 重建缓存 |
-| `session-reconstructor.test.ts` | session.jsonl → turns[]/usage/result/error 重建 + toolCall 配对 + 防御性降级 |
-| `tombstone-store.test.ts` | cancelled sidecar write/read 往返 + 降级 |
-| `notifier.test.ts` | 滑窗合并/dedup TTL/dispose 清 dedup/buildLlmContent |
-| `subagent-service.test.ts` | execute 编排 + mode 分叉 + CAS 收尾竞争 |
-| `execute-integration.test.ts` | execute() 集成（run() 事件处理 → record 投影） |
-| `model-resolver.test.ts` | 5 级 fallback 模型解析链 |
-| `agent-registry.test.ts` | agent `.md` 发现与 hot-reload |
-| `config.test.ts` | 全局配置 + session 状态 |
-| `discovery-config.test.ts` | ADR-028 资源发现契约 |
-| `session-file-gc.test.ts` | 过期 session 文件清理 |
-| `path-encoding.test.ts` | cwd → 安全目录名编码 |
-| `format.test.ts` | formatTokens/formatElapsedSeconds/truncLine(ANSI SGR)/segFillColored/formatEventLine |
-| `tool-render-spinner.test.ts` | 对话流 block spinner 启停（sync running gate） |
-| `bg-notify-render.test.ts` | background 完成通知渲染 |
-| `tool-action.test.ts` | tool action 分发（start/list/cancel）契约 |
-| `sdk-contract.test.ts` | 命令/工具注册契约/notifier sendMessage followUp/session_start 编译期契约 |
+| `src/index.ts` | 组合根（装配点）：注册 3 tool + 2 command + messageRenderer + `pi.__workflowRun` + session 事件；接线 core 宿主端口（`configureCore` / `configureNotifyDomain`） |
+| `src/session-lifecycle.ts` | 会话生命周期装配 seam（bootstrap seam）：让测试注入 fake 依赖验证装配行为，不必挂载整个组合根 |
+| `src/host/pi-host.ts` | pi 宿主端口实现（`HostServices` 的 pi 侧兑现），核心抽包时的宿主契约落点 |
+| `src/injectors/` | 提示注入器：engine-awareness / model-list / resource-list / subagent-list / workflow-list |
+| `src/interface/` | 注册胶水与展示：`subagent-tool` / `tool-workflow-script` / `commands` / `list-view` / `tool-render` / `bg-notify-render` / `gui-mappers` / `subagent-actions` |
+| `src/jsonl-run-store.ts` | workflow 运行存储（RunStore 端口的 JSONL 落盘实现） |
+| `relay/relay.mjs` | 零依赖代理脚本（tee 子进程 stdout/stderr）；常量内嵌镜像，与 SDK 单源一致性由 conformance 断言锁定 |
 
-### 外壳（4）
+### 2.2 host core — `packages/subagent-core`
 
-| 文件 | 职责 | 状态 |
+宿主侧执行/记录/通知/编排的全部运行时。消费契约 = `src/index.ts` 的 barrel（D5 定稿：exports 面即 semver 契约，收窄不放宽）。
+
+| 子域 | 内容 |
+|---|---|
+| `src/execution/` | 执行域主体：`subagent-service.ts`（装配壳）+ `service/`（六聚合：`session-baselines` / `sync-collect-domain` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` + `service-bootstrap`）、`conversation-continuation.ts`（chat→run 统一，H1 唯一新增组件）、`subprocess-agent-runner.ts`（workflow 域 run 入口）、`record-store.ts`（内存 + 磁盘重建容器）、`execution-record.ts`（唯一状态对象与 CAS）、`concurrency-pool.ts`（background 并发与优先级排队）、`state-marker.ts` / `alive-store.ts`（终态与探活 sidecar）、`lifecycle-manager.ts`（idle timer）、`settled-watchdog.ts`（轮次活性守护）、`notifier.ts` / `notify-ledger.ts`（确认式送达）、`worktree-manager.ts` / `worktree-git-ops.ts` / `worktree-registry.ts`（worktree 隔离）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts` / `session-file-gc.ts` / `idle-gc.ts`（持久化与回收）、`dialog-queue.ts` / `ui-request-handler-factory.ts`（反向 UI 通道） |
+| `src/execution/engine/` | 引擎接入面：发现（`engine-discovery-roots` / `engine-discovery-scan` / `engine-inspect-package` / `engine-manifest`）、注册与路由（`registry` / `routing` / `types` / `port`）、`client/`（`client-options` / `engine-client` / `mirror` / `pid-file` / `reaper` / `remote-engine` 协议客户端 / `reverse-router`）、`common/`（`capability-gate` / `event-journal` / `journal-wiring` / `journal-replay` / `kill-chain` / `nesting-guard` / `pool-manager` / `persona-router` / `session-view-*` / `data-dir`）、`host/`（`host-bridge` / `host-ui-endpoint` / `pi-host-binding` / `spawned-children`） |
+| `src/execution/round-supervisor/` | 轮次监督器：看门狗与待决重认领（`supervisor` / `service-binding` / `notify-accounting` / `reconcile-sweep`） |
+| `src/orchestration/` | workflow 域：脚本生成与校验（`script-generate` / `script-lint` / `args-validator` / `workflow-files`）、执行（`execute-agent-call` / `launcher` / `lifecycle`）、worker（`worker-host` / `worker-script-builder` / `worker-message-pump`）、运行存储与快照（`file-run-store` / `run-snapshot`）、资源发现（`skill-discovery` / `config-loader` / `agent-opts-resolver`） |
+| `src/core/` | 宿主端口与日志（`host-services` / `notify-ports` / `logger` / `error-message`） |
+| `src/shared/` | 零依赖原语（`agent-event` / `atomic-write` / `injection-render` / `timer-delay` / `schema-jsonify` / `resource-discovery` 等） |
+
+外部消费者形态：workspace 走 TS 源码，npm 走 dist（ESM + CJS 双形态）——细节见 `package.json` 的 `exports` 与 D5 说明。
+
+### 2.3 engine — `packages/pi-subagent-cli` / `packages/zcode-subagent-cli`
+
+两个独立引擎进程，各自实现同一份 engine-protocol v1 契约：
+
+- **pi 引擎**：spawn `pi` 子进程（RPC 模式），stdout pump 解析事件、握手取 session 身份、relay 身份键注入；`base-tool-enhance` 等扩展负责子进程侧行为。
+- **zcode 引擎**：只走 app-server RPC（禁 CLI spawn 链，约束 C-ext-20），共享宿主 HOME，会话库隔离到独立 sqlite（不进 GUI 侧边栏）。
+
+两包均只依赖 SDK（不依赖 core），保证引擎侧无宿主耦合。
+
+### 2.4 contract — `packages/subagent-engine-sdk`
+
+跨进程契约与两侧共用的零依赖原语。协议面按「可序列化」收窄（`protocol/` 子入口），进程内类型与端口契约走主 barrel。
+
+## 3. 协议面（engine-protocol v1）
+
+正向方法恰好 9 个（`packages/subagent-engine-sdk/src/protocol/methods.ts`）：
+
+`initialize` · `probe` · `run` · `cancel` · `read` · `listModels` · `validateModel` · `dispose` · `ping`
+
+反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../design/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。
+
+`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `poolKey` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。
+
+## 4. 关键机制（落点索引）
+
+| 机制 | 落点 | 说明 |
 |---|---|---|
-| `index.ts`（根） | 工厂函数，注册 tool/command/messageRenderer/session 事件 | ✅ |
-| `types.ts` | 跨层共享类型契约 | ✅ |
-| `tools/subagent-tool.ts` | `subagent` LLM 工具薄壳 | ✅ |
-| `commands/subagents.ts` | `/subagents [<id>]` 命令薄壳（打开 list overlay） | ✅ |
+| 状态单一真源 | `execution-record.ts` + `record-store.ts` | 内存 record 与 `session.jsonl` 磁盘重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`） |
+| 终态标记 | `state-marker.ts` | 单一 `<session>.state` sidecar（`{status, reason?, endedAt?}`）标记 finalized / cancelled；旧名 `.finalized` / `.cancelled` 只读兼容；record 绑定 sidecar `<session>.record-binding`（UF-1：id→file + rootSessionId，跨重启续聊数据源）同挂本载体族 |
+| 进程探活 | `alive-store.ts` | `.alive`（pid + 启动时刻）探活面——写者未随 H1 消亡：随 U6 从 cold-resurrect.ts 改名迁入 cold-lookup.ts，resurrect 回边（跨重启续聊活链）仍调 `writeAliveMarker`（`cold-lookup.ts:157`，把 `.alive` 刷新为当前进程以翻回磁盘活态）——非零写者；[subagent-record-persistence-consolidation.md](../../design/subagent-record-persistence-consolidation.md) D3 的「零写者后删除」清理执行前须先处置该写点 |
+| chat→run 统一 | `conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（终态 guard 分流 / 在途轮 abort 入队 / 空则派发）、`dispatchRound` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`onRunSettled` 轮末收口（doFinalizeRoundToIdle + 通知门路由）；[subagent-chat-run-unification.md](../../design/subagent-chat-run-unification.md) §3.4 |
+| 空闲回收 | `lifecycle-manager.ts` | per-record idle timer——chat 域长驻消亡后 arm 面（armChatIdleTimer）随 H1 退役，仅存 disarm 防误杀与超时回落常量（`XYZ_SUBAGENT_IDLE_TIMEOUT_MS`） |
+| 楔死回收 | `settled-watchdog.ts` | settled 永不到达的两段式守护：中段无进展检测（刷新源 = run 事件通道既有事件）+ 收尾段固定上界（交棒 = run 应答驱动）；run 域（含 chatMode 续聊轮）与 workflow 域共用同一原语 |
+| 引擎装载 | `engine/engine-discovery*.ts` → `registry.ts` → `routing.ts` | 三级发现装载 cli descriptor；core 壳侧零内建引擎（`pi` 亦经发现装载） |
+| 协议客户端 | `engine/client/remote-engine.ts` + `engine-client.ts` | 宿主侧唯一协议适配点：帧编解码、能力门、反向路由、句柄镜像 |
+| journal | `engine/common/event-journal.ts` + `journal-wiring.ts` | 事件落盘（②级数据源）；池 key 占位 + `onPoolResolved` retarget，路径与 handle 声明同源 |
+| relay 通道 | shell `relay/relay.mjs` + `runtime/src/infra/relay/` | 代理脚本 tee 子进程输出；父身份键（SESSION_ID / RECORD_ID）由引擎按 `run.params.ctx` 重写，防误归属 |
+| 结果通知 | `notifier.ts` + `notify-ledger.ts` | 结果语义通知必须走确认式送达（持久账本 + 幂等键），约束 C-ext-19 |
+| 反向 UI | `dialog-queue.ts` + `ui-request-handler-factory.ts` + `host/host-ui-endpoint.ts` | 引擎 `host/askUser` → 宿主 UI 请求队列 → 应答回传 |
+| worktree 隔离 | `worktree-manager.ts` / `worktree-git-ops.ts` | 子 agent 在 worktree 内改动，收尾回传 patch |
 
-## 4. 核心设计原则
+## 5. 测试与验证
 
-三条原则是旧实现 bug 的结构性根治。详见专题文档。
+- 单元/集成测试按包分布：`packages/subagent-core/src/**/__tests__/`、两个引擎包的 `src/__tests__/`、shell 的 `src/**/__tests__/`。
+- 协议一致性由 conformance 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）。
+- 分层与测试策略见仓库根 [TEST-STRATEGY.md](../../../TEST-STRATEGY.md) 与 [docs/testing/](../../testing/)。
 
-**1. 唯一状态源** — 所有执行路径共用一个 `ExecutionRecord` 对象，由 Core 层 `execution-record.ts` 的四个入口（create/update/complete/project）唯一操作。消灭旧实现 11 种状态形状、6 个 turns 累加器、双状态构建。
-→ 详见 [data-model.md](./data-model.md)
+## 6. 约束与权威文档
 
-**2. 统一执行入口** — sync/background 共用一条 `SubagentService.execute()` 路径，mode 分叉点集中在此函数顶部（原独立 `executor.ts` 已合并进 SubagentService，见 §5.2）。`session-runner.run()` 完全不感知 mode。消灭旧实现 runAgent + startBackground 两份重复逻辑、死 state。
-→ 详见 [execution-flow.md](./execution-flow.md)
+**约束登记**（机器权威 [docs/constraints.json](../../constraints.json)，人读视图 [docs/constraints.md](../../constraints.md)）：
 
-**3. 投影单点** — `ExecutionRecord` 到展示层（Details/Snapshot/Persisted）的转换各只有一个入口，三路径字段一致。消灭旧实现 6 处手工构造 Details 导致的字段丢失（Mode 3 cancelled 丢 turns/tokens、poll 无 model 等）。
-→ 详见 [data-model.md](./data-model.md) §6 投影入口
+| id | 内容 |
+|---|---|
+| C-ext-19 | 结果语义通知必须走确认式送达（持久账本 + 幂等键） |
+| C-ext-20 | zcode 引擎单一 app-server 形态（禁 CLI spawn 链回归） |
+| C-proc-13 | 引擎协议 v1.x chat 域语义与轮次活性权威 |
+| C-pi-12 / C-pi-13 | pi 能力事实单点 / 改状态 RPC 回生效值 |
+| C-proc-09 | 子进程 env 出站契约（`buildOutboundChildEnv` + deny 清单） |
 
-## 5. 架构决策记录
+**主题文档**：
 
-记录骨架深化过程中讨论并落地的关键架构决策。每条包含"问题 → 推理 → 决策 → 代价"。
+| 主题 | 文档 |
+|---|---|
+| 引擎中立抽象 | [docs/architecture/subagent-engine-abstraction.md](../../architecture/subagent-engine-abstraction.md) |
+| GUI 可见性链（协议帧 → 前端） | [docs/architecture/subagent-engine-gui-visibility.md](../../architecture/subagent-engine-gui-visibility.md) |
+| 实时通道 | [docs/architecture/subagent-realtime-channel.md](../../architecture/subagent-realtime-channel.md) |
+| 体系深化设计（方案层，含体系图与术语） | [docs/design/subagent-post-convergence-architecture.md](../../design/subagent-post-convergence-architecture.md) |
+| core 抽包与 barrel/semver 契约（D5） | [docs/design/subagent-core-package-extraction.md](../../design/subagent-core-package-extraction.md) |
+| 双轨收敛（双份实现归一） | [docs/design/subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md) |
+| 引擎协议化（引擎外移独立 CLI 进程） | [docs/design/subagent-engine-protocolization.md](../../design/subagent-engine-protocolization.md) |
+| SubagentService 六聚合拆分（壳 + 聚合） | [docs/design/subagent-service-decomposition.md](../../design/subagent-service-decomposition.md) |
+| 不通知根因与恢复链（F 系列） | [docs/design/subagent-agent-end-recovery-replay.md](../../design/subagent-agent-end-recovery-replay.md) |
+| 无界等待与回收层上界审计 | [docs/design/subagent-core-unbounded-wait-audit.md](../../design/subagent-core-unbounded-wait-audit.md) |
+| zcode 引擎形态与会话库隔离 | [docs/design/zcode-engine-appserver-resident.md](../../design/zcode-engine-appserver-resident.md) · [docs/design/zcode-session-db-isolation.md](../../design/zcode-session-db-isolation.md) |
 
-### 5.1 为什么拆双 Service（ModelConfigService + SubagentService）
+## 7. 历史沿革（本节为归档说明，不描述现状）
 
-**问题**：runtime.ts（361 行）同时承担配置管理、模型解析、执行编排、状态容器、生命周期五种职责，是典型的"上帝类"。（注：该文件已删除，拆为 `ModelConfigService` + `SubagentService`，本节为拆分决策的历史语境。）
+早期实现是**单包三层**：`extensions/universal/subagent-workflow` 内部同时容纳 TUI 层（`tool-render` / `list-view` / `bg-notify-render` / `format`）、Runtime 层（双 Service + `executor` + `record-store` + `notifier` + `tombstone-store` + `session-file-gc`）、Core 层（`session-runner`（含内联 session-factory / EventBridge）+ `output-collector` + 叶子原语），依赖方向自下而上严格单向，Pi SDK 只在 `session-runner` 与外壳注册两处出现。
 
-**推理**：用"变化轴"分析——哪些东西会**一起变**？
-- globalConfig/sessionState/agentRegistry/modelRegistry → 配置变化（用户改 config.json、注入新 modelRegistry）
-- pool/store/notifier → 执行状态变化（并发槽分配、record 生命周期、回注通知）
+该结构随后被三步重构取代：
 
-这两组东西**从不一起变**。command 只碰配置（注：`config-wizard` 已于 c7eaea6e6 删除，`/subagents` 现仅为 list overlay，但配置域与执行域的解耦关系不变），不碰执行；executor 只碰执行组件，不碰配置。是**正交的关注点**。
+1. **core 抽包**（[subagent-core-package-extraction.md](../../design/subagent-core-package-extraction.md)）：Runtime/Core 两层整体迁入 `packages/subagent-core`，壳只留注册面、宿主适配与渲染。
+2. **引擎协议化**（W 系列）：进程内引擎退役，pi / zcode 各自成为独立引擎进程，宿主经 engine-protocol v1 通信；`session-runner` 及其内联件随之删除，其职责拆入 core 的引擎子域与引擎包。
+3. **双轨收敛**（[subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md)）：chat 域与 workflow 域的双份实现归一到单份。
 
-> **[HISTORICAL]** 以下「进一步验证」是拆分当时（c7eaea6e6 之前）的论证，引用了现已删除的 `/subagents config` wizard 与 `saveGlobalConfig()`。保留作历史记录——共论证逻辑（配置域与执行域已解耦）仍成立，现在 command 只读 config 更印证了这一点。
+已删除的旧文件（本节仅作索引，勿按名查找）：`session-runner.ts`、`session-factory.ts`、`event-bridge.ts`、`executor.ts`、`tombstone-store.ts`、`finalized-marker.ts`、`progress-widget.ts`、`config-wizard.ts`。
 
-进一步验证：`/subagents config` wizard 接收 `globalConfig` 作为函数参数，修改后调 `saveGlobalConfig()`——它**根本不 import runtime.ts**，只碰 config 函数。这证明配置域和执行域已经是解耦的，runtime.ts 只是强行把它们塞进同一个类。
-
-**决策**：按领域拆为两个平级 Service：
-- ModelConfigService（配置/模型域）：globalConfig + sessionState + agentRegistry + modelRegistry + resolveModel
-- SubagentService（执行/记录/通知域）：pool + store + notifier + execute/query/cancel
-
-**代价**：index.ts 从一个 `rt.initSession(...)` 变成两个 init 调用（modelService.initModel + service.initSession）。但这两个调用的时序是确定的（先配置后执行），index.ts 作为装配层承担这个协调是合理的。
-
-### 5.2 为什么 executor 合并进 SubagentService（不独立文件）
-
-**问题**：executor 原本是独立文件 `executor.ts`，访问 SubagentService 的 pool/store/notifier 需要这些组件可跨文件访问。TS 的 `private` 只在类内有效——跨文件的模块级函数访问不到 private 成员。这逼出了 5 个 public 行为方法（acquireSlot/releaseSlot/registerRecord/finalizeRecord/notifyComplete），名义上是"契约抽象"，实际是实现约束倒逼的妥协。
-
-**推理**：executor 不是一个独立概念域——它是 `SubagentService.execute()` 的编排逻辑，没有独立状态、没有独立生命周期、没有独立调用方（只有 SubagentService.execute 调它）。独立文件带来的不是模块化，而是封装漏洞：为了让 executor 能操作组件，不得不把本该 private 的行为方法升为 public。
-
-合并进 SubagentService.ts 后，行为方法自然降为 private——TS 的 `private` 在同类内生效，executor 逻辑作为 SubagentService 的 private 方法访问组件，无需任何妥协。
-
-**决策**：executor 逻辑合并进 `subagent-service.ts`，作为 SubagentService 的 private 方法（resolveIdentity/createRecordForMode/runAndFinalize/kickOffBackground/cancelBackground/finalizeRecord/notifyComplete/onEventThrottled）。删除 `executor.ts` 文件。组件（pool/store/notifier）全 private，编排方法全 private，SubagentService 对外只有业务方法。
-
-**代价**：subagent-service.ts 从 ~240 行增到 ~400 行。但 SubagentService 本来就是这个文件的主角，400 行可接受——它现在完整表达了"执行编排"这个领域。
-
-### 5.3 为什么用 ensureConfirmed + ConfirmCancelledError（已废弃，D-1）
-
-> **状态：已整体移除（D-1 + FR-10）**。首次 category 确认拦截已取消；category/fallback/yoloByDefault 等 config.json 字段现读取时忽略（`config.ts` 仅留 `maxConcurrent`）。`/subagents config` wizard 与 `saveGlobalConfig()` 亦已于 c7eaea6e6 删除。本节保留作历史决策记录。
-
-**原问题**：category 确认是 async（UI 交互），但 `resolveModel` 是 sync（纯 5 级 fallback）。async 函数内调 sync 函数没问题，但 sync 函数内**触发 async 确认**再继续——怎么表达？
-
-**原方案**（已移除）：方案 C + 信号类。`ensureConfirmed(onConfirm)` 是 async（可 await），`resolveModel` 保持 sync（纯解析）。
-
-**为什么废弃**：首次确认增加交互摩擦且无实际收益——category 概念后续亦整体移除（FR-10），执行路径直接解析（5 级 fallback 兜底，解析失败抛错让用户感知）。
-
-### 5.4 双 Service 依赖方向 + mode 判定归属
-
-```
-SubagentService ──引用──→ ModelConfigService（单向）
-                              ↑
-SubagentService 内部调：       │
-  resolveMode()               │  → modelService.getAgentConfig()（判 defaultBackground）
-  resolveIdentity()           │  → resolveModel()
-  buildSessionRunnerContext() │ → modelService.getModelRegistry()/getAgentDir()
-  collectRecords()            │  → statusFilter（running/all）
-```
-
-**铁律**：SubagentService → ModelConfigService 单向引用，**禁止反向**。ModelConfigService 不知道 SubagentService 的存在。tool/command 层不穿透 SubagentService 调 ModelConfigService——tool 只传 `wait` 意图，mode 判定（wait + defaultBackground → ExecutionMode）完全内化在 SubagentService.resolveMode()。
-
-**mode 判定归属**（从 tool 层移入 Service）：tool 层不再预判 mode（不调 getAgentConfig/assertAgentExists），只传 `wait?: boolean`。SubagentService.resolveMode 按 `wait > agentConfig.defaultBackground > sync` 判定。这是业务规则，归 Service，不归 tool。
-
-**初始化时序**：index.ts session_start 时先 `modelService.initModel(...)` 再 `service.initSession(...)`——因为 SubagentService 构造时需要 `modelService.getGlobalConfig().maxConcurrent`（初始化 pool）。如果反序，pool 拿不到 maxConcurrent。
-
-### 5.5 深拷贝访问器的 trade-off
-
-**问题**：globalConfig / sessionState 是配置数据对象，wizard 需要读改。暴露 public 字段（哪怕 readonly）等于宣布外部可依赖其结构——改内部形状时所有调用方跟着改。
-
-**决策**：`getGlobalConfig()` 返回 `structuredClone()` 深拷贝。调用方拿到的是**副本**，改不影响 Service 内部。
-
-> **[HISTORICAL]** 原决策还包含「改完后调 `modelService.saveGlobalConfig(config)` 写回」——该写回路径与 config-wizard 已于 c7eaea6e6 一并删除（config.json 现为只读 `maxConcurrent` 单字段）。深拷贝读仍保留，避免外部依赖内部结构。
-
-**代价**：每次读配置多一次结构化克隆。但配置对象很小（现仅 `maxConcurrent`），且只在 command 调用时读——非热路径。性能影响可忽略。
-
-**替代方案**（未采用）：行为方法（`toggleYolo()` / `setCategoryModel()` 等）替代直接改字段。但配置现已是只读单字段，行为方法无意义，深拷贝读是当前最小实现。
-
-### 5.6 getAgentDir 是否该暴露
-
-**问题**：SubagentService 构造 SessionRunnerContext 需要 `agentDir`，这个值存在 ModelConfigService 里。暴露这个 getter 是否破坏封装？
-
-**推理**：这个值是**构造参数的只读透传**（init 时传入，永不改变），不是内部状态。暴露它不比把它存到 SubagentService 自己的字段里更好或更差——但存在 ModelConfigService 里避免了重复存储。如果 SubagentService 也存一份 agentDir，两个 Service 就有**同一数据的两份拷贝**，改 init 参数时要同步两处——这是更差的设计。
-
-**决策**：暴露只读 getter（`getAgentDir()`）。它是**数据归属**的表达——agentDir 归配置域（agent 的 .md 在 agentDir 下扫描），执行域只是借用。
-
-## 相关文档
-
-- [data-model.md](./data-model.md) — ExecutionRecord 唯一状态源与投影契约
-- [execution-flow.md](./execution-flow.md) — 统一执行流与 sync/bg 分叉
-- [session-runner.md](./session-runner.md) — SessionRunner 深化（run 编排骨架 + H1/H2 资源清理修复）
-- 决策溯源见源仓库归档：`xyz-pi-extensions-workspace/main/.xyz-harness/2026-06-15-subagent-architecture-consolidation/spec.md` — 设计动机与缺陷诊断（只读溯源）
+旧版三层架构图与分层铁律表见 git 历史（本文件 2026-09-11 之前的版本）。

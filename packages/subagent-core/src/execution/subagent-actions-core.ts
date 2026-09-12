@@ -14,6 +14,7 @@
 // 平台中立性：全部错误文案 / 提示文案面向 LLM（行动语言），无宿主专属词汇，
 // 文案内聚本模块（文案即行为，⛔4 逐字锚定）。
 
+import { findForeignLiveInstance } from "./alive-store.ts";
 import { computeElapsedSeconds, projectOutcome } from "./execution-record.ts";
 import { isResumable } from "./lifecycle-predicates.ts";
 import { SLUG_MAX_LENGTH } from "../orchestration/models/types.ts";
@@ -35,6 +36,10 @@ import type {
 } from "./types.ts";
 import { ResurrectDeniedError } from "./types.ts";
 import { COLLECT_SCAN_LIMIT } from "./collect-coordinator.ts";
+// [H1 U2 / D5 双写点①] SP-5 升级 gate 的错误构造（文案/错误码/恢复指引单一权威，
+// 与 Continuation D4 revive 格写点②共用）+ 默认引擎 id（engine 留痕缺省判据）。
+import { engineConversationUpgradeUnsupportedError } from "./engine/common/capability-gate.ts";
+import { DEFAULT_ENGINE_ID } from "./engine/registry.ts";
 
 // ============================================================
 // 常量
@@ -133,6 +138,12 @@ export type StartHandlerResult = {
 
 export interface ListHandlerInput {
   includeFinished?: boolean;
+  /**
+   * [H2 W1，设计 subagent-workflow-record-unification §3.3 D1①] 同时列出 workflow
+   * 脚本 agent() 派发的 record（origin="workflow"）。缺省 false——list 默认只展示
+   * 手动 tool 派发的 subagent；排查 workflow 子代理时显式传 true。
+   */
+  includeWorkflow?: boolean;
   limit?: number;
 }
 
@@ -230,7 +241,7 @@ export function endedMessageGuard(service: SubagentService, id: string, original
       return new Error(
         `subagent ${id} was deliberately closed by user (closedReason: ${snap.closedReason}) — ` +
         `it cannot be messaged or resumed; nothing can reattach to it. ` +
-        `Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output.`,
+        `Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).`,
       );
     }
     return new Error(
@@ -280,8 +291,7 @@ function assertNever(value: never): string {
  * 内部 ExecutionStatus → 对外 state 映射（设计决策 10 细则 3）。
  * 两态收敛后的真实映射只有两条：
  *   running → active / closed → ended（closed 统一终态，含 cancelled）
- * ExternalState 仍声明 waiting/error 四态联合（对外契约不变），但当前状态机不产生
- * 这两个值——它们是历史多态映射（idle→waiting / failed+crashed→error）的遗留声明。
+ * ExternalState 即两态联合（历史 waiting/error 死值成员已随 L2 清扫删除）。
  * 未来内部加态必须扩展此处，漏加会在 default 分支编译报错（而非静默返回 undefined
  * 让 state 字段以无主值进入 listResponse JSON）。
  */
@@ -297,7 +307,7 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
   }
 }
 
-/** SubagentRecord → SubagentListItem（state 四态主字段 + status 调试字段，duration 实时计算）。
+/** SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
  *  parent 从 record.parentRecordId 派生（配合直接父守卫），resumable 从 isResumable 派生
  *  （「可续聊」对外表达）；outcome 一等终态语义（projectOutcome 唯一出口），closedReason
  *  退出对外 JSON（保留为 record 内部诊断字段），对外成败判读收口到 outcome。
@@ -440,15 +450,17 @@ function countPendingSyncRecords(service: SubagentService): number {
 
 /**
  * list 数据源（诚实声明）：
- * collectRecords(limit, statusFilter) 合并内存(running) + 磁盘(重建)。磁盘源天然
- * 跨 session 可见——/new /resume /fork 后前 session 的终态 record 仍在 sessions
- * 目录里（直到 GC）。内存源仅当前 session 的 running record。
+ * collectRecords(limit, statusFilter, includeWorkflow) 合并内存(running) + 磁盘(重建)。
+ * 磁盘源天然跨 session 可见——/new /resume /fork 后前 session 的终态 record 仍在
+ * sessions 目录里（直到 GC）。内存源仅当前 session 的 running record。
+ * [H2 W1] origin==="workflow" 的 record 默认过滤（D1①），includeWorkflow:true 放行。
  */
 export function listHandler(
   service: SubagentService,
   input: ListHandlerInput | undefined,
 ): ListHandlerResult {
   const includeFinished = input?.includeFinished === true;
+  const includeWorkflow = input?.includeWorkflow === true;
   // limit 夹紧：下限 1，上限 MAX_LIST_LIMIT
   const rawLimit = input?.limit ?? DEFAULT_LIST_LIMIT;
   const limit = Math.max(1, Math.min(rawLimit, MAX_LIST_LIMIT));
@@ -456,7 +468,7 @@ export function listHandler(
   // collectRecords 是 service 核心能力：statusFilter 决定 running-only 还是全部。
   // 防截断（先多取再过滤）已下沉到 store 层——这里直接传 limit + filter。
   const filter = includeFinished ? "all" : "running";
-  const all = service.queries.collectRecords(limit, filter);
+  const all = service.queries.collectRecords(limit, filter, includeWorkflow);
   // collectRecords 磁盘源是 light（无 totalTokens/model 等）：SubagentListItem 对
   // LLM 消费方暴露 totalTokens/model，逐项 getFullRecord 补全（per-file 缓存，仅首次
   // 全量解析；显式 tool 调用非渲染热路径，成本可接受）。
@@ -494,7 +506,7 @@ export async function cancelHandler(
           `cancel only works for subagents spawned by the current process.`,
       );
     }
-    throw new Error(`No subagent record with id "${id}". It may have finished — use action:'list' with includeFinished:true to verify.`);
+    throw new Error(`No subagent record with id "${id}". It may have finished — use action:'list' with includeFinished:true to verify (add includeWorkflow:true to also see workflow-dispatched subagents).`);
   }
   // step 2: controller 检查（controller 为 undefined 表示 record 已终态或未启动）
   if (rec.mode !== "background") {
@@ -529,12 +541,11 @@ export async function cancelHandler(
 /**
  * message action handler：向对话模式 subagent 续聊/插入消息。
  *
- * 状态 × interrupt 自动映射（agent 只表达意图）：
- *   running → deliverChatMessage 热路径（进程活：prompt + streamingBehavior，interrupt=true
- *             抢占 / false 排队）
- *   进程死  → deliverChatMessage 冷路径（resumeRound 重开 session + prompt，interrupt 自动
- *             退化，agent 无感）
- *   终态    → throw ended（正常路径不命中——终态 record 已 archive，getRecordForAction 先 throw not found）
+ * [H1 U6] 状态分流面收敛：running → Continuation 派发新轮（新 run + resume 锚点）；
+ * 在途轮存在 → D2 打断（abort + 入队）；终态 → throw ended（正常路径不命中——终态
+ * record 已 archive，getRecordForAction 先 throw not found）。interrupt 输入字段保留
+ *（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但不参与
+ * 分派（D2 统一打断语义）。
  *
  * 归属守卫：getRecordForAction 内部校验 rootSessionId。
  *
@@ -551,7 +562,6 @@ export async function messageHandler(
     "messageParam.text is required for action:'message' (must not be whitespace-only). " +
     'Correct: {"action":"message","messageParam":{"subagentId":"sa-...","text":"your follow-up"}}',
   );
-  const interrupt = input?.interrupt === true;
 
   // 归属守卫：getRecordForAction 内部校验 rootSessionId。
   // 拒绝时经 endedMessageGuard 分流：找不到 → 原错误；user-close/cancelled
@@ -565,24 +575,30 @@ export async function messageHandler(
   }
 
   // one-shot upgrade：非 chatMode 的 active record（running/idle）收到 message 时
-  // 自动升级为 chatMode，后续走 deliverChatMessage 统一投递路径（热路径或冷路径 resume）。
+  // 自动升级为 chatMode，后续走 Continuation 统一续聊路径（新 run + resume 锚点）。
   // closed/cancelled 终态 record 不可 upgrade（getRecordForAction 已抛 not found）。
   // chatMode 是 ExecutionRecord 的 readonly 字段，用 Mutable<T> 显式断言绕过 readonly 约束（upgrade 语义）。
   // Object.assign 隐式绕过 readonly 不可追踪，改为单字段显式赋值。
   // 进程内 upgrade 入口——one-shot 首条 message 触发 upgrade 置位 chatMode=true。
-  // 与 subagent-service.ts getRecordForAction 磁盘重建（跨重启恢复入口）分工：
+  // 与 conversation-continuation 的 D4 revive 格（跨重启冷升级写点②）分工协同：
   // 本入口服务进程内 one-shot，跨重启路径恒被 getRecordForAction 磁盘重建绕过
-  //（该处无条件 chatMode=true）。改动这两处必须协同。
+  //（该处经 Continuation revive 格 gate 化）。改动这两处必须协同。
+  // [H1 U2 / D5 双写点①] 升级前置 gate：conversation 位检查——unsupported 引擎
+  //（zcode）的 one-shot 收到 message 不升级（升级后续聊行为悬空），硬拒 + fork/重派
+  // 指引（engineConversationUpgradeUnsupportedError 文案单源）。
   if (!record.chatMode && record.status === "running") {
+    if (!service.canUpgradeToConversation(record)) {
+      throw engineConversationUpgradeUnsupportedError(record.engine ?? DEFAULT_ENGINE_ID);
+    }
     type Mutable<T> = { -readonly [K in keyof T]: T[K] };
     (record as Mutable<ExecutionRecord>).chatMode = true;
   }
 
-  // chatMode 统一投递：按进程死活分流（热路径 prompt+streamingBehavior / 冷路径 resume），
-  // 不按 record.status（进程长驻，idle 态进程仍活，续聊走热路径 prompt 而非重开 session）。
-  // upgrade 后 record.chatMode 已为 true，统一进此分支。
+  // chatMode 统一投递：Continuation 编排（§3.4——D4 状态迁移表 / D2 打断语义）。
+  // [H1 U6] 旧「进程死活分流热/冷路径」消亡（每轮 = 新 run + resume 锚点），
+  // interrupt 参数随 D2 打断统一语义退役（在途轮存在即打断入队，不区分抢占/排队）。
   if (record.chatMode) {
-    await service.chatActions.deliverChatMessage(record, text, interrupt);
+    await service.chatActions.deliverChatMessage(record, text);
   } else {
     // 终态（closed/cancelled）：防御性兜底（终态 record 已 archive，正常走 not found）
     throw new Error(
@@ -689,17 +705,21 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
   if (!source) {
     throw new Error(
       `No subagent record with id "${id}". It may never have existed or been garbage-collected — ` +
-      `use action:'list' with includeFinished:true to verify the id.`,
+      `use action:'list' with includeFinished:true to verify the id (add includeWorkflow:true to also see workflow-dispatched subagents).`,
     );
   }
 
-  // 守卫 3：异进程活跃（externalInstance = 另一进程的活 pid marker）。
+  // 守卫 3：异进程活跃（.alive 侧车指向另一进程的活 pid）。
   // 双写防护：fork 虽 copy-on-write（历史 jsonl 只读），但源仍在异进程运行时接续容易
-  // 读到半截历史，等它结束再接更安全。判据只认 externalInstance（真实活 pid 探针
-  // 命中），不拦 status==='running' 的快照——后者含跨重启回退重建的 running 记录
-  //（无活 pid，历史已完整落盘），它们正是 endedMessageGuard 指引 fork-from 的目标；
-  // 拦了会让 agent 在「建议 fork-from」与「fork-from 拒绝 running」两条错误间死循环。
-  if (source.externalInstance !== undefined) {
+  // 读到半截历史，等它结束再接更安全。判据 = findForeignLiveInstance 直接探针（同
+  // cold-lookup 双守卫判据；[U4b / D3b (a′)] 原读 rec.externalInstance 重建缓存换现查
+  // 探针——语义等价（externalInstance 非空 ⟺ 探针非空）且比重建时点缓存更新鲜；
+  // externalInstance 字段链已随 U4a 删除），不拦 status==='running' 的快照——后者含跨重启
+  // 回退重建的 running 记录（无活 pid，历史已完整落盘），它们正是 endedMessageGuard
+  // 指引 fork-from 的目标；拦了会让 agent 在「建议 fork-from」与「fork-from 拒绝
+  // running」两条错误间死循环。sessionFile 缺失（entry-born 孤儿）时无从探活，
+  // 天然无 foreign 声明，落守卫 6 处置。
+  if (source.sessionFile !== undefined && findForeignLiveInstance(source.sessionFile) !== undefined) {
     throw new Error(
       `subagent ${id} is still running in another process (alive pid marker present). ` +
       `Recovery: wait until it finishes, or operate it in its own session; then retry fork-from.`,
@@ -713,7 +733,7 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     throw new Error(
       `subagent ${id} was deliberately closed by user (closedReason: ${source.closedReason}) — ` +
       `deliberately-closed records cannot be resumed or branched from; nothing can reattach to them. ` +
-      `Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output.`,
+      `Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).`,
     );
   }
 

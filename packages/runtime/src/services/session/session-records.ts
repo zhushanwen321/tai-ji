@@ -549,6 +549,8 @@ export class SessionRecords {
 /**
  * W18：SubagentRecord 逐字段相等判定（record entry 派生缓存的发布 diff 基线）。
  * 结构固定（shared SubagentRecord），逐字段比对而非 JSON.stringify（顺序无关、无序列化抖动）。
+ * origin 在比对面（R3-1②）：活 record 的 origin 实际不变，但本函数管 publish 去重——
+ * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
  */
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
@@ -566,6 +568,7 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.endedAt === b.endedAt
     && a.error === b.error
     && a.closedReason === b.closedReason
+    && a.origin === b.origin
 }
 
 /**

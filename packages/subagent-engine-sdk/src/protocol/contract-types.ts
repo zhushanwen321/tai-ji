@@ -8,11 +8,14 @@
 //   - AgentEvent / AgentUsage / AgentUsageTotal / ToolCallResult / ToolCall /
 //     InternalToolCall / Turn ← core execution/types.ts（2026-09-09 实测 :164-:313）
 //   - ReplayedTurn / SessionView / EngineHandleData / EngineCapabilities / ProbeReport /
-//     InteractAction / InteractResult / AgentOutcome ← core execution/engine/types.ts
+//     AgentOutcome ← core execution/engine/types.ts
 //   - AgentFailureKind / AgentOutcomeUsage（core 名 AgentUsage，orchestration 版）/
 //     ToolCallEntry / AgentCallOpts 子集 ← core orchestration/models/types.ts
 //   - WorktreeHandle ← core execution/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
+//
+// [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
+// docs/design/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
 //
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出
@@ -96,8 +99,12 @@ export interface Turn {
 }
 
 /**
- * 引擎事件（8 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
+ * 引擎事件（9 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
  * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/types.ts 注释）。
+ *
+ * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
+ * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
+ * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
  */
 export type AgentEvent =
   | { type: "tool_start"; toolName: string; args?: unknown }
@@ -107,6 +114,7 @@ export type AgentEvent =
   | { type: "turn_end"; summary?: string }
   | { type: "message_end"; usage?: AgentUsage; error?: string }
   | { type: "compaction" }
+  | { type: "activity" }
   | { type: "error"; message: string };
 
 // ============================================================
@@ -114,7 +122,7 @@ export type AgentEvent =
 // ============================================================
 
 /**
- * EngineHandle 的持久化形态（JSON v1）。协议 run 终态应答 / interact / read 的
+ * EngineHandle 的持久化形态（JSON v1）。协议 run 终态应答 / read 的
  * handle 载荷（引擎不持有宿主运行时引用，data 即全部）。
  */
 export interface EngineHandleData {
@@ -135,11 +143,10 @@ export interface EngineHandleData {
 
 /**
  * [v1.x] 冷续 resume 锚点——EngineHandleData 定位键的投影子集（诊断字段
- * v/engineVersion/adapterVersion 不属锚点语义，不随锚点走）。两处消费：
- *   - run.params.chat.resume（宿主 → 引擎：冷续重开已 idle 的 session，pi 消费
- *     sessionRef.sessionFile —— 对照 core SpawnResumeOpts.sessionFile 的锚点面）；
- *   - host/roundLifecycle 载荷 anchor（引擎 → 宿主：轮次终态时回填当前锚点，
- *     宿主据此刷新冷续依据——pi 定位键形态同 EngineHandleData.sessionRef 注释）。
+ * v/engineVersion/adapterVersion 不属锚点语义，不随锚点走）。消费点：
+ *   - run.params.resume（宿主 → 引擎：冷续重开已 idle 的 session，pi 消费
+ *     sessionRef.sessionFile —— 对照 core SpawnResumeOpts.sessionFile 的锚点面）。
+ * [H1 U6 已切换] 键切换单批完成（读写端同批），锚点仅经 resume 键携带。
  * 类型层与 EngineHandleData 定位形态的对照由测试断言（Pick 可赋值闭包）锁定。
  */
 export interface ResumeAnchor {
@@ -188,7 +195,11 @@ export interface EngineCapabilities {
   schemaEnforcement: "native" | "emulated";
   /** 注意区分「引擎 RPC 层有此能力」与「subagent 链路已接通」。 */
   steer: "native" | "emulated" | "unsupported";
-  /** interact 控制面（message/close/cancel + idle）。 */
+  /**
+   * [H1 D5 语义收窄] resume 能力位（chat 续聊 = 新 run + resume 锚点的承载前提；
+   * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
+   * 「resume 续聊能力」，gate 判据与消费方不变）。
+   */
   conversation: "native" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
@@ -217,20 +228,6 @@ export interface ProbeReport {
   /** engine_probe_failed 的恢复指引（ok=false 时必填）。 */
   error?: { code: string; recovery: string };
 }
-
-/**
- * interact 的 action（交互控制面）。interrupt: true = steer（抢占）/ false|缺省 =
- * followUp（排队）；不支持抢占的引擎忽略。
- */
-export type InteractAction =
-  | { kind: "message"; payload: string; interrupt?: boolean }
-  | { kind: "close"; payload?: { force: boolean } }
-  | { kind: "cancel" };
-
-/** interact 的结果（失败码 = engine_session_not_resumable / engine_capability_unsupported 等）。 */
-export type InteractResult =
-  | { ok: true; delivered: true }
-  | { ok: false; code: string; message: string };
 
 // ============================================================
 // 终态 / 任务声明

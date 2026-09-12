@@ -135,13 +135,12 @@ describe("U7a: catch 分支兜底回发 agent-result（非 Abort 异常）", () 
       expect(posted.result.error).toBe("runner exploded");
       expect(posted.result.content).toBe("");
 
-      // state 一致性三件套（review should_fix）：
+      // state 一致性三件套（review should_fix；[H2 W3] trace.live 字段已删除，
+      // 「live 清除」由类型层面收敛——节点无运行期附属对象）：
       // trace node 标 failed（不遗留 running 幽灵节点）
       const traceNode = run.state.trace.find(2);
       expect(traceNode?.status).toBe("failed");
       expect(traceNode?.result?.error).toBe("runner exploded");
-      // node.live 清除（防内存泄漏）
-      expect(traceNode?.live).toBeUndefined();
       // 持久化（catch 是最需留证的场景）
       expect(deps.store.save).toHaveBeenCalled();
     } finally {

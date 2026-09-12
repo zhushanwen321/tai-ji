@@ -1,6 +1,9 @@
 // src/__tests__/subagent-service.test.ts
 //
-// SubagentService 生命周期 + 公共 API 边界测试。
+// SubagentService 生命周期 + 公共 API 边界测试（[H3/R5 测试归位] 本文件为壳级测试：
+// 装配 / dispose 编排 / 转发面 / 跨域 emit 记账。run 域 execute 入口用例已迁
+// run-orchestration.test.ts；ModelConfigService ctxModel 缓存已迁
+// model-config-service.test.ts）。
 //
 // 范围:initSession / dispose / query / cancel / listRunning / collectRecords /
 // onChange / assertReady -- 这些不依赖动态 import Pi SDK(getSdk)。
@@ -19,13 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../execution-record.ts";
 import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
+import type { ModelInfo } from "../model-resolver.ts";
 import type { RecordStore } from "../record-store.ts";
 import type { UiRequest, UiRequestHandler } from "../dialog-queue.ts";
 import type { PiLike } from "../subagent-service.ts";
-import { getSubagentService, setSubagentService,SubagentService } from "../subagent-service.ts";
+import { SubagentService } from "../subagent-service.ts";
+// [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
+import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
 import type { ExecutionRecord } from "../types.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 
@@ -331,9 +335,11 @@ describe("SubagentService", () => {
   // private 字段，用 Reflect.get 取（与 R0-D 块访问 store 同模式）。
 
   describe("dispose uiRequestHandler stub (dispose-cleanup)", () => {
-    /** 从 service 取出 private uiRequestHandler（trailing ui_request 实际调用入口）。 */
+    /** 从 service 取出 private uiRequestHandler（trailing ui_request 实际调用入口）。
+     *  [R1 深绑改写] uiRequestHandler 随域 #2 聚合迁入 SessionBaselines，深绑路径改为
+     *  service → baselines 聚合实例（断言对象与强度不变，路径对齐终态结构）。 */
     function getHandler(service: SubagentService): UiRequestHandler | undefined {
-      return Reflect.get(service, "uiRequestHandler") as UiRequestHandler | undefined;
+      return (Reflect.get(service, "baselines") as { uiRequestHandler: UiRequestHandler | undefined }).uiRequestHandler;
     }
 
     /** 最小 UiRequest（method 无关紧要——stub 不论 method 一律返回 cancelled）。 */
@@ -387,136 +393,11 @@ describe("SubagentService", () => {
   });
 
   // ============================================================
-  // execute() worktree 路径（worktree 与 fork 解耦后）
+  // execute() worktree 路径（worktree 与 fork 解耦）
+  // → [H3/R5 测试归位] 整块迁至 run-orchestration.test.ts（run 域聚合同名域测试
+  //   文件；用例名与断言零改动）。此处不留转发桩——vitest 按文件发现，无注册面。
   // ============================================================
-  //
-  // worktree（文件隔离）与 fork（上下文继承）已解耦：worktree:true 可独立于 fork 工作
-  // （worktreeManager.create 只看 opts.worktree，不读 fork）。此组验证三种 fork/worktree
-  // 组合下 worktree 路径的行为（均不应抛 'requires fork'——该 guard 已移除）：
-  //   1. worktree:true + fork:false → 解耦后正常（创建 worktree 路径，不抛 requires fork）
-  //   2. worktree:true + fork:true  → 创建 worktree 路径（测试环境 git 失败，抛非 requires fork 错）
-  //   3. worktree:false + fork:false → 默认路径（不创建 worktree）
-  //
-  // 本文件不 mock spawn（保持与文件头声明一致——execute 集成测试在 execute-nesting /
-  // run-spawn-integration），因此 case 验证「不抛 requires fork」而非「执行完成」：
-  // 执行越过 worktree 创建后在后续步骤（worktreeManager.create 调 git / runSpawn 调
-  // spawn）抛与 fork/worktree 无关的错。用 try/catch 断言抛出的不是 requires fork。
 
-  describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {
-    /** 构造已就绪的 service（initSession + initModel 注入 ctxModel，使 resolveIdentity 不因 model 拗错）。 */
-    function makeReadyService(): SubagentService {
-      const service = new SubagentService({ cwd: agentDir, modelService });
-      service.initSession({ pi: makePi(), sessionId: "s1" });
-      // 注入 modelRegistry + ctxModel：让 resolveIdentity 越过 resolveModel，
-      // 使 guard 之后的失败点稳定在 worktreeManager.create（git）或 runSpawn（spawn），
-      // 而非 modelService.resolveModel——避免与 guard 无关的 model 错误掩盖被测点。
-      modelService.initModel({
-        modelRegistry: {
-          getAvailable: () => [],
-          find: () => undefined,
-          hasConfiguredAuth: () => false,
-        },
-        sessionId: "s1",
-        ctxModel: { id: "ctx-model", name: "Ctx", provider: "p", reasoning: false },
-      });
-      return service;
-    }
-
-    it("worktree:true + fork:false → 解耦后不抛 'requires fork'（worktree 独立于 fork）", async () => {
-      const service = makeReadyService();
-      // 解耦后 worktree:true+fork:false 不再 throw requires fork（worktreeManager.create 只看 worktree）
-      try {
-        await service.execute({
-          task: "worktree without fork (decoupled)",
-          slug: "test",
-          worktree: true,
-          fork: false,
-          ctxModel: { id: "ctx-model", name: "Ctx", provider: "p", reasoning: false },
-        });
-      } catch (err) {
-        // 解耦后绝不抛 requires fork（执行继续到 worktreeManager.create/spawn 才可能抛其他错）
-        expect((err as Error).message).not.toMatch(/requires fork/);
-      }
-    });
-
-    it("worktree:true + fork:true → 创建 worktree 路径（不抛 'requires fork'）", async () => {
-      const service = makeReadyService();
-      // 执行继续：先创建 record，然后 worktreeManager.create 调 git（测试环境无 repo → 抛与 fork 无关的错）
-      try {
-        await service.execute({
-          task: "worktree with fork",
-          slug: "test",
-          worktree: true,
-          fork: true,
-          ctxModel: { id: "ctx-model", name: "Ctx", provider: "p", reasoning: false },
-        });
-        // 若未抛（理论上 worktreeManager.create 在某些环境成功）也 OK——重点是没命中 guard
-      } catch (err) {
-        // guard 放行：抛出的错误绝不能是 "requires fork"
-        expect((err as Error).message).not.toMatch(/requires fork/);
-      }
-    });
-
-    it("worktree:false + fork:false → 默认路径（不创建 worktree，不抛 'requires fork'）", async () => {
-      const service = makeReadyService();
-      // 默认路径：runSpawn 调 child_process.spawn（测试环境无真实 pi → 抛与 fork 无关的错）
-      try {
-        await service.execute({
-          task: "default path",
-          slug: "test",
-          worktree: false,
-          fork: false,
-          ctxModel: { id: "ctx-model", name: "Ctx", provider: "p", reasoning: false },
-        });
-      } catch (err) {
-        // guard 放行：抛出的错误绝不能是 "requires fork"
-        expect((err as Error).message).not.toMatch(/requires fork/);
-      }
-    });
-
-    // ============================================================
-    // create-await 竞态守卫（Phase 2）：create 的 await 窗口内 dispose/cancel
-    // 可把 record CAS 成 closed——守卫须主动 cleanup + early-failed 返回，不 kickOff。
-    // 实现约束固化：「赋值 record.worktreeHandle → 终态检查 → 轮次 kick-off」
-    // 必须同一同步段（中间禁止 await），本用例即该不变量的回归锚点。
-    // ============================================================
-    it("守卫：create await 窗口内 dispose 抢先 → cleanup 被调 + early-failed 返回（不 kickOff）", async () => {
-      const service = makeReadyService();
-      const wtm = Reflect.get(service, "worktreeManager") as WorktreeManager;
-      const handle = Object.freeze({
-        path: "/tmp/wt-guard",
-        branch: "pi-sub-guard",
-        baseCommit: "abc123",
-        mainCwd: "/repo",
-      }) as Parameters<WorktreeManager["cleanup"]>[0];
-      let resolveCreate!: (h: unknown) => void;
-      vi.spyOn(wtm, "create").mockImplementation(
-        () => new Promise<unknown>((r) => { resolveCreate = r; }) as ReturnType<WorktreeManager["create"]>,
-      );
-      const cleanupSpy = vi.spyOn(wtm, "cleanup").mockResolvedValue(undefined);
-
-      const execP = service.execute({
-        task: "guard test",
-        slug: "test",
-        worktree: true,
-        fork: false,
-        ctxModel: { id: "ctx-model", name: "Ctx", provider: "p", reasoning: false },
-      });
-      // 微任务推进：record 已建 + execute 挂在 pending create 上
-      await new Promise((r) => { setTimeout(r, 0); });
-      // dispose 抢先（无需 record id）：CAS running → closed，此时 worktreeHandle 仍
-      // undefined（dispose 的 fire-and-forget cleanup 跳过）——守卫是唯一的清理点
-      service.disposeAllRecords("parent-shutdown");
-      resolveCreate(handle);
-
-      const ret = await execP;
-      // 守卫生效：handle 被主动清理（不等 60s reaper）
-      expect(cleanupSpy).toHaveBeenCalledWith(handle);
-      // 返回 early-failed 形态（details.status 已 closed），而非 kickOff 的 running 形态
-      expect(ret.mode).toBe("background");
-      expect(ret.details).toMatchObject({ status: "closed" });
-    });
-  });
   //
   // [背景] PR #82 在 subagent-service.ts 新增 emitPendingRegister/Unregister 调用，
   // 5 个 emit 点：register（execute L309）、unregister(failed)（finalizeFailed 经
@@ -698,88 +579,9 @@ describe("SubagentService", () => {
 
 // ============================================================
 // ModelConfigService ctxModel 缓存(renderCall 标题行 model 显示的核心)
+// → [H3/R5 测试归位] 整块迁至 model-config-service.test.ts（被测主体 =
+//   ModelConfigService 模块，非 SubagentService；用例名与断言零改动）。
 // ============================================================
-//
-// [HISTORICAL] 99f20da1e 后 renderCall 拿不到主 agent model(ToolRenderContext 无 model),
-// resolveModel 第三层拗错→降级不显示 model。修复:session_start 缓存 ctxModel,
-// resolveModel 第三参默认用缓存。此测试验证该透传链路。
-
-describe("ModelConfigService ctxModel 缓存", () => {
-  let agentDir: string;
-
-  beforeEach(() => {
-    agentDir = makeTmpAgentDir();
-  });
-  afterEach(() => {
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  /** 最小 mock registry:空可用列表(ctxModel 路径不需要 lookup)。 */
-  function makeEmptyRegistry(): ModelRegistryLike {
-    return {
-      getAvailable: () => [],
-      find: () => undefined,
-      hasConfiguredAuth: () => false,
-    };
-  }
-
-  it("initModel 传 ctxModel 后,resolveModel 不传第三参返回缓存 model", () => {
-    const svc = makeModelService(agentDir);
-    const mainModel: ModelInfo = {
-      id: "main-model",
-      name: "Main",
-      provider: "anthropic",
-      reasoning: false,
-    };
-    svc.initModel({
-      modelRegistry: makeEmptyRegistry(),
-      sessionId: "sess-1",
-      ctxModel: mainModel,
-    });
-
-    // agent 无 model 声明 + 无 override → 走第三层 ctxModel 缓存
-    const r = svc.resolveModel("general-purpose");
-    expect(r.model).toBe(mainModel);
-    expect(r.model.provider).toBe("anthropic");
-  });
-
-  it("显式 ctxModel 参数优先于缓存(execute 路径覆盖 renderCall 缓存)", () => {
-    const svc = makeModelService(agentDir);
-    const cached: ModelInfo = { id: "cached", name: "C", provider: "p1", reasoning: false };
-    const explicit: ModelInfo = { id: "explicit", name: "E", provider: "p2", reasoning: false };
-    svc.initModel({
-      modelRegistry: makeEmptyRegistry(),
-      sessionId: "sess-1",
-      ctxModel: cached,
-    });
-
-    // execute 传显式 ctxModel → 用显式,不用缓存
-    const r = svc.resolveModel("general-purpose", undefined, explicit);
-    expect(r.model).toBe(explicit);
-  });
-
-  it("setCtxModel 刷新缓存(model_select 后 renderCall 能看到新 model)", () => {
-    const svc = makeModelService(agentDir);
-    const m1: ModelInfo = { id: "m1", name: "1", provider: "p", reasoning: false };
-    const m2: ModelInfo = { id: "m2", name: "2", provider: "p", reasoning: false };
-    svc.initModel({ modelRegistry: makeEmptyRegistry(), sessionId: "s", ctxModel: m1 });
-
-    expect(svc.resolveModel("general-purpose").model).toBe(m1);
-    svc.setCtxModel(m2); // 模拟 model_select 刷新
-    expect(svc.resolveModel("general-purpose").model).toBe(m2);
-  });
-
-  it("缓存为空且无 override/agentConfig.model → 拗错(不静默降级)", () => {
-    const svc = makeModelService(agentDir);
-    svc.initModel({
-      modelRegistry: makeEmptyRegistry(),
-      sessionId: "s",
-      // ctxModel 不传 → 缓存为空
-    });
-    // 空 registry + 空 ctxModel → 第三层不可用 → 拗错
-    expect(() => svc.resolveModel("general-purpose")).toThrow(/No available model/);
-  });
-});
 
 // ============================================================
 // execute() 集成测试 — 已由 execute-integration.test.ts 覆盖

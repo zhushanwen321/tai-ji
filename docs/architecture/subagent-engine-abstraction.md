@@ -1,5 +1,7 @@
 # subagent 执行层引擎中立抽象设计（pi / zcode / 未来多引擎）
 
+> **[HISTORICAL] 取代声明（2026-09-12 补）**：本篇描述的「进程内引擎」形态（PiEngine/ZcodeEngine 以 TS 模块内建在 core 里、registry 经 `id → factory` 进程内取用）**已被引擎协议化取代**——引擎外移为独立 CLI 包（`packages/pi-subagent-cli` / `packages/zcode-subagent-cli`），经 **NDJSON stdio 协议（engine-protocol v1）** 与 core 通信；subagent-core 壳侧**零内建引擎**，registry 改为三级发现（`XYZ_AGENT_ENGINE_ROOTS` + node 解析 + config.json）装载 cli descriptor manifest（registry.ts `kind:"cli"`）。新增引擎 = 装一个独立引擎 CLI 包，**不再改 subagent-core**。随协议化的关键反转与契约漂移：reader 已随引擎包外移，core/runtime 均为协议客户端（本篇 D9「reader 双端复用共享只读模块」被显式反转）；`AgentEvent` 现为 **9 种**（新增 `activity` 纯活性信号）；`AgentTaskSpec` 已并入 `AgentCallOpts`（D6 合流，`run(task: AgentCallOpts)`）；EnginePort 另有 `listModels?` / `validateModel?` / `dispose?` 可选面。**现行权威 = [subagent-engine-protocolization.md](../design/subagent-engine-protocolization.md) + [subagent-post-convergence-architecture.md](../design/subagent-post-convergence-architecture.md)**；本篇按历史设计存档，结构导航读 [docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)。
+
 > 层声明：本文档是「引擎抽象架构层」的设计，下一层产物是**可实现的接口/数据模型/技术方案**（EnginePort 接口 + 引擎适配器 + 公共降级层），不跨层到具体测试用例与逐文件实现。2026-08-24 补充：接口契约层（EnginePort 完整签名/中立类型字段/handle 与 journal 格式/四件套接口，原属下一层）已并入 §3.3.5-§3.3.9——实施评审确认缺它无法指导编码；仍未跨入逐文件实现与具体测试代码。
 >
 > 调研输入：六引擎能力调研（zcode/pi 见 `~/Code/zcode-plugin-workspace/main/docs/research/zcode-vs-pi-extension-capabilities.md` 与本仓现状；claude-code / codex / opencode / kimi-code 见 `docs/research/agent-engine-*.md` 四份，2026-08-24）。
@@ -39,7 +41,7 @@ pi-subagent-workflow 是 xyz-agent 的一个 pi extension，跑在 pi 主会话�
 
 ### 2.1 现有执行链与「碰巧中立」的类型面
 
-执行层（`extensions/universal/subagent-workflow/src/execution/`，约 1.4 万行）分层清晰：
+执行层（原 `extensions/universal/subagent-workflow/src/execution/`，约 1.4 万行——**已抽包至 `packages/subagent-core`**，本节为抽包前快照）分层清晰：
 
 ```
 AgentRunner port（orchestration/models/ports.ts）
@@ -155,7 +157,8 @@ AgentRunner port（orchestration/models/ports.ts）
 [中立类型层] AgentTaskSpec / AgentEvent / AgentOutcome / SessionView / EngineCapabilities
         ↓ 唯一契约点
 [EnginePort]  run(task, ctx) → AgentOutcome
-              interact(handle, action) → 交互控制面（message/close/cancel，可选）
+              ~~interact(handle, action) → 交互控制面（message/close/cancel，可选）~~
+              （[H1 退役 2026-09-11] 已删除：续聊 = 新 run + resume 锚点；SDK 现行方法恰 9 个，无 interact）
               read(handle) → SessionView
               probe() → ProbeReport
               capabilities() → EngineCapabilities
@@ -164,6 +167,8 @@ AgentRunner port（orchestration/models/ports.ts）
    ├─ PiEngine        （现有 spawn 链回填，行为零变化）
    ├─ ZcodeEngine     （新增，spawn 单轮模式）
    └─ （未来：ClaudeEngine / CodexEngine / OpencodeEngine / KimiEngine）
+   （注记 2026-09-12：上图 PiEngine/ZcodeEngine「进程内模块」形态已被取代——
+    registry 现行三级发现装载 cli descriptor manifest（kind:"cli"），见头部取代声明）
         ↓ 每引擎内部
 [Adapter 四件套] launcher（spawn 命令组装）/ parser（stdout→事件流+终态）
                  preparer（env/隔离目录/凭据生成）/ reader（session 历史读取）
@@ -357,9 +362,14 @@ interface EnginePort {
   probe(opts?: { force?: boolean }): Promise<ProbeReport>;  // D7（factory 初始化 + 版本变化检测触发）
 
   run(task: AgentTaskSpec, ctx: RunContext): Promise<EngineRunResult>;           // D1 主语义
-  interact(handle: EngineHandle, action: InteractAction): Promise<InteractResult>; // D1 可选面
   read(handle: EngineHandle): Promise<SessionView>;         // D6 三级降级链
 }
+
+// [H1 退役注记 2026-09-11] 上表原含 `interact(handle, action: InteractAction): Promise<InteractResult>`
+// 可选面（chat 续聊/插话/关断控制面）——已随 chat 域统一进 run 域
+// （docs/design/subagent-chat-run-unification.md）整族删除：续聊 = run 携 resume 锚点
+// （`RunParams.resume {recordId, resume: ResumeAnchor}`，pi `--session` 续写原 session 文件），
+// 轮活性经 run 事件通道与 run 终态应答承载（约束 C-proc-13）。
 
 interface RunContext {
   taskId: string;                        // = record.id（bg-N-xxx / run-N）——journal 文件名与池引用计数 key
@@ -374,14 +384,9 @@ interface EngineRunResult {
   outcome: AgentOutcome;                 // 终态（abort/超时/失败时为宿主合成终态）
 }
 
-type InteractAction =
-  | { kind: 'message'; payload: string }    // 续聊（chatMode idle 子代理，D1）
-  | { kind: 'close'; payload?: { force: boolean } }
-  | { kind: 'cancel' };
-
-type InteractResult =
-  | { ok: true; delivered: true }
-  | { ok: false; code: string; message: string }; // engine_session_not_resumable / engine_capability_unsupported ...
+// [H1 退役 2026-09-11] 原 `InteractAction`（message/close/cancel 三 action）与 `InteractResult`
+// 类型块已随 interact 控制面删除；close/cancel 语义经 run 域 cancel 方法与 record close 编排承载，
+// 续聊经 `RunParams.resume`（约束 C-proc-13）。
 
 interface ProbeReport {
   ok: boolean;
@@ -574,6 +579,9 @@ reader 是唯一允许被 xyz-agent runtime import 的引擎模块（D6 双端�
   config.json | home/ | db.sqlite ...   # 引擎原生状态（preparer 可重建）
   refs.json                              # 池引用登记（host 维护）
   journal-<taskId>.jsonl                 # host 落盘（不随池删）
+  （注记 2026-09-12：zcode 的 db.sqlite 已迁出池目录至
+    <engineDataDir>/engines/zcode/session-db/db.sqlite——原选址落在整池删除边界内，
+    见 [zcode-session-db-isolation.md](../design/zcode-session-db-isolation.md)）
 ```
 
 poolKey = `<sanitized-agent-name>`（agent 未指定时 `default`；非 [a-zA-Z0-9-] 字符替换为 `-`）。model 不进 key：模型差异由 prepare 期 config 重写消化（zsub 先例：源 config mtime 比对 + 按需重建，成本确定性）。pi 无池化（`PI_CODING_AGENT_DIR` 全局一份），poolKey 恒 `shared`，仅为路径形状统一。

@@ -2,6 +2,8 @@
 
 > 测试体系 SSOT。AGENTS.md「测试规范」章节是规则载体，本文件补充分层策略 + 回归基线 + mock 策略 + 运行手册。两者互补不冲突。
 >
+> **回归排序按功能分级**：P0 每版全量、P1 每版核心用例、P2 抽样/变更触发、P3 变更触发——分级表见 [docs/feature-priorities.md](docs/feature-priorities.md)（P0-P3 SSOT）。
+>
 > **各功能具体测试步骤**（MOCK/非MOCK/Playwright 调用链 + 每步期望输入输出）见 [docs/testing/](docs/testing/) 测试手册：
 > - [00-test-strategy-overview.md](docs/testing/00-test-strategy-overview.md) — 双轨制 + Playwright harness + 公共前置（入口篇，必读）
 > - [01-new-task.md](docs/testing/01-new-task.md) — 新建任务（Landing + 选目录 + 首发提交）
@@ -24,8 +26,8 @@
 
 | 层 | 环境 | 目的 | 运行命令 |
 |----|------|------|---------|
-| 单元测试 | renderer（happy-dom）/ runtime | 纯逻辑、纯函数、单模块、状态机 | 见下 |
-| 集成测试 | renderer（mount 组件树，`@vue/test-utils`） | 组件协作、store 联动、WS 事件流 | 见下 |
+| 单元测试 | renderer（happy-dom）/ core（node）/ runtime | 纯逻辑、纯函数、单模块、状态机 | 见下 |
+| 集成测试 | renderer（mount 组件树，`@vue/test-utils`）/ ui（happy-dom，features/chat 等组件 mount 测试） | 组件协作、store 联动、WS 事件流 | 见下 |
 | E2E（mock 轨）| Playwright `_electron` + VITE_MOCK | 全链路用户旅程（renderer 渲染 + 交互逻辑），OS 原生 dialog 标 `[需手工]` | `npx playwright test` |
 | **dev 冒烟**（闸门）| chromium + vite dev server | 模块加载健康（拦 node:path externalize / CSS 变量引用错 / Tailwind 类名错 / Vue template compile 错，mock 轨盲区）| `node scripts/dev-smoke.mjs`（或 `pnpm dev:smoke`）|
 
@@ -46,6 +48,12 @@ cd packages/renderer && npx vitest run src/__tests__/panel/composer-slash-trigge
 
 # runtime（有独立 vitest.config.ts）
 cd packages/runtime && npx vitest run
+
+# core（chat/composer/session 等 domain 纯逻辑单测，独立 vitest，node 环境，120 测试文件 2026-09-12 实测）
+cd packages/core && npx vitest run
+
+# ui（features/chat 等跨端组件 mount 测试，独立 vitest，happy-dom，58 测试文件 2026-09-12 实测）
+cd packages/ui && npx vitest run
 
 # typecheck（vue-tsc 在 apps/electron/node_modules）
 pnpm --filter @xyz-agent/frontend run typecheck
@@ -88,14 +96,16 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 | 页面/区域 | 顶层容器 | 关键交互 testid（至少断言这些存在）|
 |-----------|---------|----------------------------------|
-| Landing 态（无 session）| `Panel`（`sessionId:null`）| `composer-input` / `chip-directory` |
-| 激活 session 后 | `Panel`（激活态）| `composer-input` / `message-list` / `turn-*` |
+| Landing 态（无 session）| `Panel`（`sessionId:null`）| `composer-box` / `chip-directory` |
+| 激活 session 后 | `Panel`（激活态）| `composer-box` / `turn-*` |
 | 侧边栏 | `Sidebar` / `SessionItem` | `session-list` / `session-item` / `session-agent-badge`（agent-spawned AI 标记）/ `session-view-parent-item`（查看父 session 菜单项） |
 | 文件树 | `FileTree` | `file-tree` / `tree-node` |
 | 搜索浮层 | `SearchModal` | `search-modal` / `search-input` |
-| Composer slash 浮层 | `Composer` | `composer-input` / `slash-popover` |
+| Composer slash 浮层 | `Composer` | `composer-box` |
 | Settings · 用量 | `UsagePage` | `usage-ledger` / `usage-metric-toggle` / `usage-range-toggle` / `usage-empty-state` / `usage-error-state` |
 
+> 注：`composer-input` 是 CSS class（`ComposerInput.vue`）非 testid，composer 断言用 `composer-box`；`message-list` testid 不存在（对话流容器锚点用 `turn-*`）。
+>
 > spec 结构条目 = 渲染断言清单（规则#4）。每功能集成/E2E 必含 1 条首屏冒烟，覆盖该页面的关键 testid，防止「测试全绿但功能不可用」。
 >
 > 三视角缺一不可。任一缺失即重蹈「测试全绿但功能不可用」。
@@ -132,7 +142,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | **slash 命令契约** | 输入 `/` → 浮层弹出 → 选中 → chip 插入；session.commands 时序竞争修复 | `2026-06-28-lite-slash-command-fix`（broadcast 早于订阅丢失） | `src/__tests__/useSidebar-get-commands.test.ts`（U1-U3）+ `landing-precreate-session.test.ts`（U4/U5）+ `composer-slash-trigger.test.ts`（U1-U10） |
 | **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | CLAUDE.md 规则#7 | 各 domain/store 单测 |
 | **渲染 gate** | mount 顶层容器断言结构元素 DOM 存在（防「测试全绿功能不可用」） | 2026-06-27 事故 | 每功能首屏冒烟用例 |
-| **错误状态重置** | 错误路径必须重置 isGenerating + streamingMessage（否则 UI 卡死） | CLAUDE.md 规则#3 | useChat 错误路径测试 |
+| **错误状态重置** | 错误路径必须收口生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | CLAUDE.md 规则#3 | useChat 错误路径测试 |
 | **emit 单 payload** | emit 不传多参数 | CLAUDE.md 规则#1 | - |
 | **runtime broadcast 时序** | session 级 broadcast 早于 renderer 订阅会丢消息；切换/创建 session 后需立即消费的状态必须主动拉取（`session.getCommands` RPC） | `2026-06-28-lite-slash-command-fix` | U1-U3 + U4/U5（见上） |
 | **搜索查询乱序守卫** | useSearch.query 内 loadSeq 自增序列号，await 后 `seq !== loadSeq` 丢弃旧响应；快速连续查询时旧响应晚到不得覆盖新结果（数据错乱=事故） | NFR S-8 `[from: 2026-06-30-search-modal §execution T1.12]` | `packages/core/src/domain/new-task-search/__tests__/search.test.ts`（TC-2 loadSeq 乱序守卫，原 T1.12）+ `packages/core/src/domain/new-task-search/__tests__/file-match.test.ts`（TC-9c~9k file 匹配分级，原 T3.10）|
@@ -165,9 +175,9 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 ## 5. mock 策略
 
-- **唯一合法入口：`api/mock/` 层**（镜像 `api/domains/` 接口签名，模拟 runtime WS 返回）。通过 `api/index.ts` 的 `VITE_MOCK` 切换。验证：`docs/standards.md §8.1`
-- **禁止**：组件内联硬编码 mock（`const MOCK=[...]`）、panel/composables/lib 静态 fixture、组件直接 import `api/mock/`
-- **测试 mock**：`vi.mock` api domain；复用 `api/mock/` 的 events/fixtures（如 `run-send-stream.ts` 模拟流式 ServerMessage 序列、`mock-ws.ts` 模拟 WS 生命周期）
+- **唯一合法入口：`packages/core/src/transport/mock/` 层**（模拟 runtime WS 协议返回，经 `api/index.ts` 门面按 `VITE_MOCK` 切换接入——true 时直接 import `@xyz-agent/core/transport/mock`，不走 transport）。验证：`docs/standards.md §8.1`
+- **禁止**：组件内联硬编码 mock（`const MOCK=[...]`）、panel/composables/lib 静态 fixture、组件直接 import `@xyz-agent/core/transport/mock`
+- **测试 mock**：`vi.mock` api domain；复用 core mock 层的 events/fixtures（如 `run-send-stream.ts` 模拟流式 ServerMessage 序列、`mock-ws.ts` 模拟 WS 生命周期）
 - **例外**：UI 固定枚举常量（如 thinking-levels 6 级）、`__tests__/` 测试 mock 不算违规
 - **外部系统对接验证脚本**：独立 `verify-<system>.cjs`（放项目根或临时位置），先验证字段名/格式再编码,完成后移除
 
