@@ -42,7 +42,7 @@ import * as fs from "node:fs";
 
 import { getLogger } from "../core/logger.ts";
 
-import type { RecordOrigin } from "./types.ts";
+import type { AbandonedRoundMark, Epoch, RecordOrigin, TranscriptRef } from "./types.ts";
 
 const logger = getLogger("subagents");
 
@@ -351,6 +351,26 @@ export interface RecordBinding {
   turns?: number;
   /** 终态结束时间快照 ms（精确值，优于 light 路径的 jsonl mtime 近似）。 */
   endedAt?: number;
+  /**
+   * [永久会话模型 §3.2.3 / u-foundation 类型面] 世代计数（reopen 防撞）：常态
+   * undefined（与 0 同义），reopen 时 +1。**随 binding 持久化是硬要求**——防撞
+   * 依赖跨重启单调，丢 epoch 会被二次 reopen 击穿（notifyId `id:epoch:round`
+   * 防撞维度）。undefined（存量 binding）= epoch 0。
+   */
+  epoch?: Epoch;
+  /**
+   * [§3.2.6 / u-foundation 类型面] 对话记录指针（引擎中立判别联合，pi=sessionFile /
+   * zcode=sessionId+dbPath）——binding 是锚的持久化承载面之一（内存 record 同名
+   * 字段 + 主 session entry engineHandle.sessionRef 为另两面）。undefined（存量
+   * binding / spawn 窗口期）= 锚未回填，读侧不参与重建（U6 续聊链接线消费）。
+   */
+  transcriptRef?: TranscriptRef;
+  /**
+   * [§3.2.7 / u-foundation 类型面] 放弃轮标记（通知 gate ②判据，单槽，随 binding
+   * 持久化）：abort 时置在飞轮 {epoch, round}；reopen（epoch+1）后残留自然失效。
+   * null 与 undefined 同义（无标记）。
+   */
+  lastAbandonedRound?: AbandonedRoundMark | null;
 }
 
 /**
@@ -381,6 +401,30 @@ export function writeRecordBinding(sessionFile: string, binding: RecordBinding):
       },
     });
   }
+}
+
+/**
+ * [u-foundation] binding 载荷的 transcriptRef 运行时守卫（未知 JSON 不裸收；
+ * engine 判别 + 引擎专有字段 string 校验，与 record-store isEngineHandleShape
+ * 同款形态）。
+ */
+function isTranscriptRefShape(v: unknown): v is TranscriptRef {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v as Record<string, unknown>;
+  if (r.engine === "pi") return typeof r.sessionFile === "string";
+  if (r.engine === "zcode") return typeof r.sessionId === "string" && typeof r.dbPath === "string";
+  return false;
+}
+
+/**
+ * [u-foundation] binding 载荷的 lastAbandonedRound 运行时守卫（单槽标记：
+ * {epoch: number, round: number}；null 视为合法「无标记」形态——与 undefined
+ * 同义，见 RecordBinding.lastAbandonedRound 注释）。
+ */
+function isAbandonedRoundMarkShape(v: unknown): v is AbandonedRoundMark {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v as Record<string, unknown>;
+  return typeof r.epoch === "number" && typeof r.round === "number";
 }
 
 /**
@@ -441,6 +485,16 @@ export function readRecordBinding(sessionFile: string): RecordBinding | undefine
     totalTokens: typeof parsed.totalTokens === "number" ? parsed.totalTokens : undefined,
     turns: typeof parsed.turns === "number" ? parsed.turns : undefined,
     endedAt: typeof parsed.endedAt === "number" ? parsed.endedAt : undefined,
+    // [u-foundation] 永久会话模型三字段：number / shape 守卫（非法/缺省 → undefined
+    // = 不投影，存量 binding 零迁移；lastAbandonedRound 的 null 是合法「无标记」）。
+    epoch: typeof parsed.epoch === "number" ? parsed.epoch : undefined,
+    transcriptRef: isTranscriptRefShape(parsed.transcriptRef) ? parsed.transcriptRef : undefined,
+    lastAbandonedRound:
+      parsed.lastAbandonedRound === null
+        ? null
+        : isAbandonedRoundMarkShape(parsed.lastAbandonedRound)
+          ? parsed.lastAbandonedRound
+          : undefined,
   };
 }
 

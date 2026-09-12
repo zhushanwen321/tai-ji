@@ -159,6 +159,133 @@ export type ExternalState = "active" | "ended";
 export type ExecutionMode = "background";
 
 // ============================================================
+// 永久会话模型领域词汇（设计 subagent-permanent-session-model.md §3.2.1；
+// u-foundation 类型骨架先行，U2 实装状态机）
+// ============================================================
+
+/**
+ * 占用维度目标两态（§3.2.1 领域模型 / §3.2.2 状态机）：
+ *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
+ * 终态概念删除（closed 消亡）；「旧 running 的隐性子态（resumable/纳管态）」由
+ * 「idle + transcriptRef 在」统一表达。
+ *
+ * 过渡策略（u-foundation 决策，U2 切换点）：本类型暂**不并入** {@link ExecutionStatus}
+ * 联合——exhaustive 消费方（subagent-actions-core mapExternalState 的 assertNever
+ * default 分支、extensions subagent-workflow format.ts statusGlyph 无 default 穷尽
+ * switch）在 u-foundation 领地外，直接扩联合会破坏其编译。U2（领地含 types.ts）落地
+ * 状态机改造时将 ExecutionStatus 收敛为本联合并同批迁移全部消费方。
+ */
+export type ExecutionStatusV2 = "running" | "idle";
+
+/**
+ * 旧终态值独立类型：仅供读侧兼容映射（§3.2.4——旧 `.state` finalized/cancelled
+ * 重建时映射 idle + stopReason），U3/U4 切换完成后随 closed 联合值一并清除。
+ *
+ * @deprecated 终态概念已删除（§3.2.2「无 closed 事件」），禁止新写侧产出本值。
+ */
+export type LegacyClosedStatus = "closed";
+
+/**
+ * 意愿维度（§3.2.1 三维正交之一）：用户是否把会话收起来了（列表可见性）。
+ *   active   = 默认列表可见（缺省语义——存量 record undefined 零迁移）；
+ *   archived = 已收起（close 动作；message 到达自动翻回 active = 隐含寻回）。
+ * 谁改它：用户动作（close 收起 / message 寻回），不参与占用判定与资格判定。
+ */
+export type Intent = "active" | "archived";
+
+/**
+ * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值：
+ *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
+ *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
+ *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
+ *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
+ * 仅展示 + 排障（列表主展示用派生 outcome）；复活资格判据是物理三件套
+ * （§3.2.3），本字段不参与任何资格判定。
+ */
+export type StopReason =
+  | ClosedReason
+  | "interrupted"
+  | "interrupted-by-restart"
+  | "interrupted-by-parent"
+  | "reopened";
+
+/** StopReason 的 4 个新展示值（运行时守卫与枚举完整性测试锚；值域见类型注释）。 */
+export const NEW_STOP_REASONS = [
+  "interrupted",
+  "interrupted-by-restart",
+  "interrupted-by-parent",
+  "reopened",
+] as const satisfies readonly StopReason[];
+
+/**
+ * StopReason 全枚举（运行时守卫用——防御性解析外部输入时校验成员资格）。
+ * = CLOSED_REASONS（6 个可写终态原因）+ disconnected（读侧兜底产出，不写入，
+ * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值），共 11 值。
+ * 完整性由 permanent-session-types.test.ts 断言（值数 + 成员逐一）。
+ */
+export const STOP_REASONS: readonly StopReason[] = [
+  ...CLOSED_REASONS,
+  "disconnected",
+  ...NEW_STOP_REASONS,
+];
+
+/** 窄化守卫：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */
+export function isValidStopReason(value: string | undefined): value is StopReason {
+  return (STOP_REASONS as readonly string[]).includes(value ?? "");
+}
+
+/**
+ * 世代计数（§3.2.3 epoch 防撞）：常态 0（undefined 同义），reopen（带历史重开）+1。
+ * 单调递增依赖跨重启持久化（随 `.record-binding` 落盘，丢 epoch 会被二次 reopen
+ * 击穿）。消费点：通知账本 notifyId 从 `id:round` 扩为 `id:epoch:round`（epoch=0
+ * 保持旧格式，磁盘账本零迁移）；迟到回注 gate 第一步的世代比较基准。
+ */
+export type Epoch = number;
+
+/**
+ * 放弃轮标记（§3.2.7 通知 gate ②判据，单槽）：abort（用户 cancel / 编排性关闭
+ * 打断）时置为在飞轮 {epoch, round}；reopen（epoch+1）后残留标记自然失效（跨
+ * epoch 丢弃是去重语义的正确执行）。迟到回注判定**显式两步**（比较基准 =
+ * record 当前 epoch，非标记槽 epoch）：①回注 epoch ≠ record 当前 epoch → 丢弃；
+ * ②同 epoch 且回注轮 ≤ 标记轮 → 丢弃；否则放行。
+ */
+export interface AbandonedRoundMark {
+  readonly epoch: Epoch;
+  readonly round: number;
+}
+
+/** pi 引擎锚：子 session jsonl 文件（口径与 ExecutionRecord.sessionFile 一致）。 */
+export interface PiTranscriptRef {
+  readonly engine: "pi";
+  readonly sessionFile: string;
+}
+
+/** zcode 引擎锚：隔离会话库条目（sessionId + dbPath 二元组，§3.2.6）。 */
+export interface ZcodeTranscriptRef {
+  readonly engine: "zcode";
+  readonly sessionId: string;
+  readonly dbPath: string;
+}
+
+/**
+ * 对话记录指针（§3.2.6 引擎中立锚，判别联合以 engine 字段判别）：会话历史的物理
+ * 定位。与 SDK 协议层 EngineHandleData.sessionRef 是同一概念的两层投影——传输层
+ * 弱类型 Record<string,string>，领域层强类型判别联合。锚的可解析性表达资源维度
+ * （在 / 被回收），无独立字段；失效时 message 走 reopen 降级（§3.2.3）。
+ */
+export type TranscriptRef = PiTranscriptRef | ZcodeTranscriptRef;
+
+/** 判别联合收窄守卫：pi 锚分支。 */
+export function isPiTranscriptRef(ref: TranscriptRef): ref is PiTranscriptRef {
+  return ref.engine === "pi";
+}
+
+/** 判别联合收窄守卫：zcode 锚分支。 */
+export function isZcodeTranscriptRef(ref: TranscriptRef): ref is ZcodeTranscriptRef {
+  return ref.engine === "zcode";
+}
+
+// ============================================================
 // Agent 事件流（Core → Record 的唯一更新驱动）
 // ============================================================
 
@@ -455,6 +582,37 @@ export interface ExecutionRecord {
    * 消费方：U5 E1 重建扫描只收「collectMode=sync 且无本标记」的成员（防双重通知）。
    */
   batchFinalized?: boolean;
+
+  // ── 永久会话模型新维度（§3.2.1 三维正交；u-foundation 类型面，U2 实装写点）──
+  // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
+  /**
+   * 意愿维度：用户是否把会话收起来了（列表可见性）。undefined = "active"。
+   * 写点：close（收起）置 archived / message 到达自动翻回 active（隐含寻回）——
+   * 经 store 意图原语 markArchived（U2 实装）。
+   */
+  intent?: Intent;
+  /**
+   * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
+   * undefined = 从未收口 / 旧数据。仅展示+排障，不参与资格判定。
+   */
+  stopReason?: StopReason;
+  /**
+   * 世代计数（reopen 防撞）：undefined 与 0 同义（常态）。reopen 时 +1；
+   * 随 `.record-binding` 持久化（跨重启单调是硬要求，见 {@link Epoch}）。
+   */
+  epoch?: Epoch;
+  /**
+   * 放弃轮标记（通知 gate ②判据，单槽，随 binding 持久化）：
+   * abort 时置在飞轮；reopen 后残留标记自然失效。null 与 undefined 同义
+   * （无标记——不存在清空操作，跨 epoch 丢弃由判定第一步承接）。
+   */
+  lastAbandonedRound?: AbandonedRoundMark | null;
+  /**
+   * 对话记录指针（引擎中立判别联合）。undefined = 锚尚未回填（spawn 窗口期）/
+   * 旧 record（迁移期仍读 sessionFile / engineHandle 投影）。
+   */
+  transcriptRef?: TranscriptRef;
+
   /** 完整执行内容，按 turn 组织。createRecord 初始化为 [空 turn]。 */
   turns: Turn[];
   /** turn 计数（= turns.filter(closed).length，冗余存储供投影直接读）。 */

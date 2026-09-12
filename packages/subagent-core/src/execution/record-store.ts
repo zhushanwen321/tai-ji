@@ -28,6 +28,13 @@
 // | markIdleArchived(record) | idle-GC 归档（30 天 TTL 内存回收，非终态化——磁盘仍 running 可接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
+// ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md
+//    §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 意愿动作表；签名已定，实现 U2 填肉）──
+// | markSettled(record, stopReason) | 轮收口（settle：成功/失败/中断统一落 idle + stopReason；替代 markFinalized/markCancelled 的轮收口角色） | U2 定（usage 快照落 binding + manifest 投影；`.alive` 跨轮保留） |
+// | markReopened(record, transcriptRef) | 带历史重开（新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened，§3.2.3） | U2 定（binding 持久化 epoch/锚） |
+// | markArchived(record) | close 收起（intent 翻转 archived + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
+// | markIdleEvicted(record) | 内存回收（markIdleArchived 统一语言更名，语义不变，§3.2.4 release 出口②） | U2 定（= markIdleArchived 写序） |
+//
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终保持 running→markRoundIdle；
 //                    终态→markFinalized/markCancelled（内存冻结由调用方 completeRecord/
@@ -95,7 +102,9 @@ import type {
   ExecutionRecord,
   ExecutionStatus,
   RecordSnapshot,
+  StopReason,
   SubagentRecord,
+  TranscriptRef,
 } from "./types.ts";
 import { CLOSED_REASONS as CLOSED_REASON_LIST } from "./types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
@@ -974,6 +983,91 @@ export class RecordStore {
    */
   acquireWriteLease(sessionFile: string, recordId: string): void {
     writeAliveMarker(sessionFile, { pid: process.pid, id: recordId, startedAt: Date.now() });
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // [永久会话模型 / u-foundation] 新意图原语骨架（设计
+  // subagent-permanent-session-model.md；签名 + 语义注释已定，实现 U2 填肉）。
+  // 全部 throw not-implemented——生产路径禁调；骨架落在 store 内即满足
+  // C-data-20 写面唯一入口约束（实现不外泄到类外）。
+  // ════════════════════════════════════════════════════════════
+
+  /**
+   * 意图原语：轮收口（settle）。§3.2.2 事件表 settle 行——「轮完成 / 失败 / 中断
+   * 收口」统一落 idle（ExecutionStatusV2 目标词汇）+ stopReason 展示值写入；
+   * 替代 markFinalized / markCancelled 的轮收口角色（二者退役归 U3 切换）。
+   *
+   * U2 实装语义：usage 快照落 binding（§3.2.7 统计口径——binding 快照为基准）+
+   * manifest 投影；**`.alive` 跨轮保留**（§3.2.4——settle 不释放写权声明，idle
+   * record 随时可能续写同一 transcript）；副作用编排（进程按 idle timer 回收等）
+   * 留调用方。
+   *
+   * @param stopReason 展示值（成功/失败轮用旧值 gc + error 载体、中断轮用
+   *        interrupted 族——值域见 types.ts StopReason）。
+   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   */
+  markSettled(record: ExecutionRecord, stopReason: StopReason): boolean {
+    throw new Error(
+      `markSettled(${record.id}, stopReason=${stopReason}): not implemented (u-foundation type skeleton). ` +
+        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
+        `do not call from production paths until then.`,
+    );
+  }
+
+  /**
+   * 意图原语：带历史重开（reopen，锚失效降级路径 §3.2.3）。同 id 不换——新
+   * transcriptRef（pi 新 sessionFile / zcode 新 sessionId）+ round 归零 + epoch+1 +
+   * stopReason=reopened；首轮 prompt 的历史摘要注入编排留调用方（U4 reopen 降级
+   * 路径接线）。触发方式：仅用户显式 message（不自动重开）。
+   *
+   * U2 实装语义：epoch / 新锚随 binding 持久化（跨重启单调是硬要求）；残留
+   * lastAbandonedRound 不迁移（跨 epoch 自然失效，§3.2.7）。
+   *
+   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   */
+  markReopened(record: ExecutionRecord, transcriptRef: TranscriptRef): boolean {
+    throw new Error(
+      `markReopened(${record.id}, transcriptRef.engine=${transcriptRef.engine}): not implemented ` +
+        `(u-foundation type skeleton). Recovery: implementation lands in U2 ` +
+        `(permanent-session-model domain vocabulary); do not call from production paths until then.`,
+    );
+  }
+
+  /**
+   * 意图原语：close 收起（意愿动作 §3.2.5 close 行）。intent 翻转 archived +
+   * `.alive` release（§3.2.4 release 出口①——归档即放弃写权）。
+   *
+   * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → intent 翻转 + 归档注销
+   * （intent 翻转必须在通知链之后，否则吞掉收口轮通知）。worktree 回收（patch
+   * 落盘前移到归档点）与 pending 注销补发的编排留调用方（U5 意愿动作接线）；
+   * 本原语只吸收 intent 位 + 写权声明两写面。
+   *
+   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   */
+  markArchived(record: ExecutionRecord): boolean {
+    throw new Error(
+      `markArchived(${record.id}): not implemented (u-foundation type skeleton). ` +
+        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
+        `do not call from production paths until then.`,
+    );
+  }
+
+  /**
+   * 意图原语：内存回收（evicted）。markIdleArchived 的统一语言更名（§3.2.4
+   * release 出口②：「原 markIdleArchived 出口保留（原语随统一语言更名
+   * markIdleEvicted，语义不变）」）——30 天 TTL 内存回收，用户不可见，非终态化。
+   *
+   * U2 实装语义：与 markIdleArchived 同写序（store.archive 先 → manifest 投影 →
+   * `.alive` release 后）；更名切换与旧名退役归 U2/U5 编排。
+   *
+   * @throws Error not implemented（u-foundation 骨架；U2 落地前调用即编程错误）。
+   */
+  markIdleEvicted(record: ExecutionRecord): void {
+    throw new Error(
+      `markIdleEvicted(${record.id}): not implemented (u-foundation type skeleton). ` +
+        `Recovery: implementation lands in U2 (permanent-session-model domain vocabulary); ` +
+        `do not call from production paths until then.`,
+    );
   }
 
   /** 终态 manifest 投影（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
