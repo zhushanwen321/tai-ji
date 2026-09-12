@@ -42,15 +42,10 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
  */
 const DOC_MODULE_MAP = {
   'docs/design/update-network-resilience.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts'],
-  'docs/design/update-network-resilience.impl-plan.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts'],
   'docs/design/update-multi-source.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts', 'apps/electron/main/release-checker.ts', 'apps/electron/main/interfaces.ts'],
-  'docs/design/update-multi-source.impl-plan.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts', 'apps/electron/main/release-checker.ts', 'apps/electron/main/interfaces.ts'],
   'docs/design/chat-stream-perf-architecture.md': ['packages/core/src/domain/chat', 'packages/core/src/domain/session', 'packages/renderer/src/composables/features/sidebar', 'packages/renderer/src/composables/features/trace'],
-  'docs/design/chat-stream-perf-architecture.impl-plan.md': ['packages/core/src/domain/chat', 'packages/core/src/domain/session', 'packages/renderer/src/composables/features/sidebar', 'packages/renderer/src/composables/features/trace'],
   'docs/design/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts'],
-  'docs/design/zcode-session-db-isolation.impl-plan.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts'],
   'docs/design/catalog-provider-field-authority.md': ['packages/runtime/src/services/provider-config-helper.ts', 'packages/runtime/src/services/provider-catalog.ts', 'packages/runtime/src/services/auth/provider-credential-resolver.ts', 'packages/runtime/src/infra/pi/pi-provider-store.ts', 'packages/core/src/domain/settings/use-provider-edit.ts', 'scripts/check-doc-symbol-drift.mjs'],
-  'docs/design/catalog-provider-field-authority.impl-plan.md': ['packages/runtime/src/services/provider-config-helper.ts', 'packages/runtime/src/services/provider-catalog.ts', 'packages/runtime/src/services/auth/provider-credential-resolver.ts', 'packages/runtime/src/infra/pi/pi-provider-store.ts', 'packages/core/src/domain/settings/use-provider-edit.ts', 'scripts/check-doc-symbol-drift.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
   // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫

@@ -2019,7 +2019,7 @@
         ".githooks/check_env_whitelist_sync.py"
       ],
       "authority": [
-        "../docs/design/subagent-engine-protocolization.impl-plan.md#212-w12-环境与文档规格",
+        "../packages/subagent-engine-sdk/src/env.ts",
         "../docs/design/env-propagation-boundary.md"
       ],
       "dimensions": [

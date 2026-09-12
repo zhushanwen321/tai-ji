@@ -2,7 +2,7 @@
 
 > **⚠️ Superseded** —— 本 ADR 的「调用层先行」方案（cw-tool 探测 common-dir + dirname + `--workspace` 透传）已被**引擎层方案 A**取代：
 > - 引擎层 SSOT：`coding-workflow` 仓库 `fix-cw-cwd-worktree/docs/cw-store-workspace-decoupling.md`（commit `aa4949b`，含自身对抗审查）
-> - 本仓差异文档：`docs/architecture/cw-store-workspace-decoupling.md`（cw-tool 协调需求 + 版本门控 + `~/.cw` 实测数据）
+> - 本仓差异文档：已删除（2026-09 docs 清理；git 历史可追溯，原路径 `docs/architecture/cw-store-workspace-decoupling.md`）
 >
 > **继承成立的核心洞察**：store 应 repo 级共享（所有 worktree 一份）、用 `git-common-dir` 做 repo 标识——本 ADR 方向正确。
 >

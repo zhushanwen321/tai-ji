@@ -10,7 +10,7 @@ name: review-arch-boundary
 - **Electron 侧**：main / preload / renderer / shared 四层
 - **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-three-layer-design.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
 
-术语以 `docs/architecture/terminology.md`（R1-R3 已落地：sidecar→runtime、Pane→Panel、SystemChatMessage 清除；R4/R5 被 v3 推翻）、`docs/architecture/context.md` 为准。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
+术语以 `docs/architecture/context.md` 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
 
 ## 输入
 
@@ -60,7 +60,7 @@ task prompt 中必须包含：
     - **Panel 5 zone**：panel-header / message-stream / progress-zone / composer / git-zone
     - **Side Drawer**（原 Side Inspector）：Panel 联动多 tab 抽屉（文件/终端/子Agent/浏览器），非运行时状态面板
     - **Statusline**：Input Toolbar / Session Strip / Global Statusbar
-    - 旧术语（Drawer→SideInspector 中间态、Focus Mode、PanelGrid、Pane*、sidecar）已过时——以 terminology.md 为准（R4/R5 已被 v3 推翻）。发现代码引用过时术语标 INFO。
+    - 旧术语（Drawer→SideInspector 中间态、Focus Mode、PanelGrid、Pane*、sidecar）已过时——以 context.md 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。发现代码引用过时术语标 INFO。
 11. **输出审查报告**到 `output` 路径。
 
 ## 输出格式
