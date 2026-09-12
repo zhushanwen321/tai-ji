@@ -79,9 +79,9 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 		expect(recordToListItem(rec).resumable).toBe(false);
 	});
 
-	it("resumable：closed（isResumable=false）→ false（终态不可续聊）", () => {
+	it("resumable：已收口（idle+closedReason 桥接形态，isResumable=false）→ false", () => {
 		vi.mocked(isResumable).mockReturnValue(false);
-		const rec = makeRecord({ status: "closed" });
+		const rec = makeRecord({ status: "idle", closedReason: "gc" });
 		expect(recordToListItem(rec).resumable).toBe(false);
 	});
 
@@ -89,7 +89,7 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 
 	it("outcome：closed + closedReason='parent-fork' + 合成 error → 'failed'（D6 显式取舍：父进程关闭未完成即失败，勿改 cancelled）", () => {
 		const rec = makeRecord({
-			status: "closed",
+			status: "idle",
 			closedReason: "parent-fork",
 			error: "closed due to parent-fork",
 		});
@@ -98,7 +98,7 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 
 	it("outcome：closed + closedReason='cancelled' → 'cancelled'（取消优先于 error）", () => {
 		const rec = makeRecord({
-			status: "closed",
+			status: "idle",
 			closedReason: "cancelled",
 			error: "aborted",
 		});
@@ -106,17 +106,17 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 	});
 
 	it("outcome：closed + gc 正常完成（存量形态，无 outcome 字段、无 error）→ 兑底派生 'completed'", () => {
-		const rec = makeRecord({ status: "closed", closedReason: "gc" });
+		const rec = makeRecord({ status: "idle", closedReason: "gc" });
 		expect(recordToListItem(rec).outcome).toBe("completed");
 	});
 
 	it("outcome：closed + gc + error（存量失败形态）→ 兑底派生 'failed'", () => {
-		const rec = makeRecord({ status: "closed", closedReason: "gc", error: "spawn EPIPE" });
+		const rec = makeRecord({ status: "idle", closedReason: "gc", error: "spawn EPIPE" });
 		expect(recordToListItem(rec).outcome).toBe("failed");
 	});
 
 	it("outcome：一等字段存在时直读透传（不重推导）", () => {
-		const rec = makeRecord({ status: "closed", outcome: "failed", closedReason: "gc" });
+		const rec = makeRecord({ status: "idle", outcome: "failed", closedReason: "gc" });
 		expect(recordToListItem(rec).outcome).toBe("failed");
 	});
 
@@ -126,15 +126,15 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 	});
 
 	it("closedReason 退出对外 JSON：list item 不再携带（内部诊断字段），outcome 字段在位", () => {
-		const rec = makeRecord({ status: "closed", closedReason: "gc", error: "boom" });
+		const rec = makeRecord({ status: "idle", closedReason: "gc", error: "boom" });
 		const item = recordToListItem(rec);
 		expect("closedReason" in item).toBe(false);
 		const parsed = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
 		expect("closedReason" in parsed).toBe(false);
 		expect(parsed.outcome).toBe("failed");
 		// 旧字段保留（向后兼容）
-		expect(parsed.status).toBe("closed");
-		expect(parsed.state).toBe("ended");
+		expect(parsed.status).toBe("idle");
+		expect(parsed.state).toBe("idle");
 		expect(parsed.mode).toBe("background");
 	});
 });

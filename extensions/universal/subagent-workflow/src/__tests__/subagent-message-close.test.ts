@@ -61,7 +61,7 @@ describe("mapExternalState 两态映射（v4 B-1：running/closed 收敛，决�
     expect(mapExternalState("running")).toBe("active");
   });
   it("closed → ended", () => {
-    expect(mapExternalState("closed")).toBe("ended");
+    expect(mapExternalState("idle")).toBe("idle");
   });
 });
 

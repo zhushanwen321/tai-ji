@@ -146,7 +146,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     const count = service.onParentFork();
 
     expect(count).toBe(1);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("parent-fork");
     expect(record.endedAt).toBeDefined();
     // completeRecord 冻结合成 AgentResult（disposeAllRecords 构造，无在途执行）
@@ -163,7 +163,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     const count = service.onParentNew();
 
     expect(count).toBe(1);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("parent-new");
     expect(store.getMutable("sa-new-1")).toBeUndefined();
   });
@@ -180,7 +180,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
 
     expect(count).toBe(3);
     for (const r of records) {
-      expect(r.status).toBe("closed");
+      expect(r.status).toBe("idle");
       expect(r.closedReason).toBe("parent-new");
     }
     expect(store.listAllActive()).toHaveLength(0);
@@ -284,7 +284,7 @@ describe("SP-4 index.ts 事件接线", () => {
     );
 
     expect(onParentNewSpy).toHaveBeenCalledTimes(1);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("parent-new");
     expect(store.getMutable("sa-wire-new-1")).toBeUndefined();
   });
@@ -319,7 +319,7 @@ describe("SP-4 index.ts 事件接线", () => {
     );
 
     expect(onParentForkSpy).toHaveBeenCalledTimes(1);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("parent-fork");
     expect(store.getMutable("sa-wire-fork-1")).toBeUndefined();
   });

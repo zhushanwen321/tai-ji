@@ -177,7 +177,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
       writeFinalizedState(file, "user-close");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-userclose");
-      expect(rec?.status).toBe("closed");
+      expect(rec?.status).toBe("idle");
       expect(rec?.closedReason).toBe("user-close");
     });
 
@@ -203,7 +203,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
       fs.writeFileSync(`${file}.finalized`, "", "utf-8");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-legacy");
-      expect(rec?.status).toBe("closed");
+      expect(rec?.status).toBe("idle");
       expect(rec?.closedReason).toBe("disconnected");
 
       // [v8.5 D 升级] disconnected ∈ 可重连集 → message 不再拒绝而是透明重生，续写原文件；
@@ -231,7 +231,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
       writeTombstone(file, "sa-a2-tomb");
 
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-tomb");
-      expect(rec?.status).toBe("closed");
+      expect(rec?.status).toBe("idle");
       expect(rec?.closedReason).toBe("cancelled");
     });
   });

@@ -14,10 +14,12 @@
 //      随 chat 域退役删除，armIdleTimer 唯一剩余接线在 createHostBridge
 //      （host-bridge.ts）——而后者全仓无生产调用点。运行时 timer 永不 armed，
 //      disarmIdleTimer 仅剩 record-lifecycle 终态化路径的幂等清扫（对永不 armed
-//      的 timer 为 no-op，保持终态清扫完整性）。模块与函数保留 = 既有判据形态
+//      的 timer 为 no-op，保持收口清扫完整性）。模块与函数保留 = 既有判据形态
 //      （lifecycle-predicates.isIdle 消费 hasIdleTimer）与 env/API 面
 //      （ExecuteOptions.idleTimeoutMs 校验文案引用 DEFAULT_IDLE_TIMEOUT_MS）不删，
 //      语义变化/显式 idle 状态设计属独立议题（impl-plan Gate B 收口 backlog）】
+//      [U2 注记] 两态迁移（running|idle）不改变本模块地位——「终态清扫」词汇随
+//      终态概念删除改为「收口清扫」；arm 链是否随意愿动作重接线归 U5。
 // 其余四项已删除：职责 2 全局 ceiling / 职责 3 shutdown 收割 / 职责 4 孤儿扫描自
 // 落地起无生产接线；职责 5 activate 互斥的历史接线点（冷路径 resume 前）随协议化
 // 重构消失、仅余自持单测。未来需要时按

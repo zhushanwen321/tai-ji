@@ -125,9 +125,11 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(before).toBeDefined()
     const viewBefore = identityView(before!)
 
-    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）
+    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）。
+    // [U2 两态] executionStatus 是内部权威词汇（running|idle 两态，终态概念删除）
+    // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读投影（永久保留）→ 'closed'。
     const rawBefore = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
-    expect(rawBefore.executionStatus).toBe('closed')
+    expect(rawBefore.executionStatus).toBe('idle')
     expect(rawBefore.status).toBe('closed')
 
     // ── S5 场景：人为删除全部 manifest（缓存可丢）→ 全量重建 ──
@@ -146,7 +148,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     // 重建源 = `.state` 权威：closedReason 从终态位派生回 manifest（旧三态 closed）
     const rawAfter = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
     expect(rawAfter.status).toBe('closed')
-    expect(rawAfter.executionStatus).toBe('closed')
+    expect(rawAfter.executionStatus).toBe('idle')
     expect(rawAfter.closedReason).toBe('gc')
   })
 

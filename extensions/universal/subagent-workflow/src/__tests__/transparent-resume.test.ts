@@ -367,7 +367,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     // A 档兼容读：磁盘层 closedReason=disconnected
     const diskRec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-d-legacy");
-    expect(diskRec?.status).toBe("closed");
+    expect(diskRec?.status).toBe("idle");
     expect(diskRec?.closedReason).toBe("disconnected");
 
     // D 档：message 直接重生（Y 分支文案不再触达）
@@ -434,9 +434,9 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs.length).toBe(0);
     });
 
-    it("resurrectClosed 单元语义：仅 closed 可翻边且清除语义位；running 体拒绝", () => {
+    it("resurrectClosed 单元语义：[U2 两态] 仅已收口（idle ∧ closedReason 有值）可翻边且清除语义位；running 体拒绝", () => {
       const closed = {
-        status: "closed" as const,
+        status: "idle" as const,
         closedReason: "disconnected" as const,
         endedAt: 123,
       };
