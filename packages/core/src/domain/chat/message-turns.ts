@@ -13,7 +13,10 @@
  * ② display 前置过滤让隐藏完成通知完全退出分组输入——subagent/workflow 完成通知
  *   （display:false）触发的续跑 assistant 并入上一 turn（机制 A：后台任务结果混进上一个提问）。
  * v2 规则表（分组消费全量数组；display 过滤挪到渲染项输出层——D3）：
- * 1. user → 开新 turn（锚）
+ * 1. user → 开新 turn（锚）。steer 插话不特判 inline 归组：pi session 文件对 steer 投递的
+ *    user entry 无任何可重放区分标记（与普通 prompt 同路径 appendMessage），live 侧若按
+ *    xyz 已知 mode 归入当前 turn，replay 侧永远推不出同样归属——开新 turn 是两侧可一致
+ *    推导的最大公约数（设计 D1）
  * 2. 隐藏完成通知（display===false 且 customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES，shared SSOT
  *    常量——与 apply-entry 覆写同一常量源，无第二份判定）→ turn 边界：关闭当前 turn，开启
  *    user:null + trigger:'bg-notify' 的新 turn，后续 assistant 归入（G3 续跑可见起点）。

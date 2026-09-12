@@ -340,7 +340,7 @@
       ],
       "authority": [
         "../AGENTS.md",
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance",
@@ -361,7 +361,7 @@
         "packages/core/src/**"
       ],
       "authority": [
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -499,7 +499,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/default-model-unified-exit.md"
+        "../packages/runtime/src/transport/settings-message-handler.ts"
       ],
       "dimensions": [
         "business-logic",
@@ -520,7 +520,7 @@
         "packages/core/src/**"
       ],
       "authority": [
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -1601,7 +1601,7 @@
         "extensions/universal/subagent-workflow/src/execution/__tests__/chat-engine-routing.test.ts"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "compatibility",
@@ -1623,7 +1623,7 @@
         "packages/subagent-core/src/execution/engine/port.ts"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "lifecycle",
@@ -1646,7 +1646,7 @@
         "packages/renderer/src/components/panel/SubagentTab.vue"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "ui-consistency",

@@ -13,6 +13,11 @@
  * 映射逻辑整体迁移自 session-history.ts mapEntriesToPiMessages（逻辑不重新发明），差异：
  * ① 不注入 __entryId（改平行 entryIds 数组）；
  * ② 完成通知 custom_message 的 display 覆写引用 shared COMPLETE_NOTIFY_CUSTOM_TYPES SSOT。
+ *
+ * 为什么必须是共享单点（教训）：曾因 RPC/文件两路各自维护 entry 筛选实现，覆盖倒挂——
+ * RPC 路径只放行 message + client-msg-id，compaction/branch_summary/custom_message 三类
+ * 被丢弃（活跃重开丢压缩记录），离线文件路径反而完整；修一处漏一处的循环正是本次收敛
+ * 单点的动因（「判别前置到数据入口，下游不做二次猜测」）。新增 entry 类型只改此处。
  */
 import type { PiSessionEntry, PiSessionCustomEntry } from './pi-protocol.js'
 import { COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@xyz-agent/shared'

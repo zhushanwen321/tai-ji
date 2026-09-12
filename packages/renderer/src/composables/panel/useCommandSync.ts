@@ -73,6 +73,10 @@ export function useCommandSync(
    * 复用 inflight 去重：同 sid 并发触发时复用同一 Promise，避免重复 RPC。
    * 写入 reply.sessionId 分区（非调用方实时 sid），从结构上消除 ADR-0049 M1 竞态。
    * settle 即清（下次同 sid 触发重新拉取，无条件恢复腿）与引用比对防误删由 factory 内建。
+   *
+   * 链路盲区（验收 S3 前提）：拉到的是 pi 内存 skill 注册表的当前值，不是磁盘当前值——
+   * 磁盘 skill 增删须经 chokidar watcher → ReloadOrchestrator → pi ctx.reload() 重扫才进
+   * 注册表（秒级）。reload 未完成时拉到的仍是旧列表，这是降级不是 bug，勿当缺陷修。
    */
   function pull(sid: string): void {
     const { promise } = commandsFetchDedup.run(sid, () =>

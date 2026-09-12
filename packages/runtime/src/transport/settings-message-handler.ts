@@ -69,6 +69,11 @@ function reconcileDefaultModelAfterProviderChange(
 ): void {
   const dm = existingNewDefault ?? ctx.configService.getDefaultModel()
   if (!dm) return
+  // 坑：source: 'provider-change' 不在 shared DefaultModelSource 联合内（协议漂移，设计 D4 待修），
+  // tsc 不报是因为 ServerMessage 泛型默认 T=全 union 时 type/payload 联动约束在 union 实例化下
+  // 丢失（占位成员兜住非法 payload）。修复走合法枚举（provider-updated/provider-deleted 按场景映射），
+  // 或调用点泛型钉死 broadcast<'config.defaults'>(...) 恢复联动校验；不要把 'provider-change'
+  // 加进联合（语义与既有两值重叠，冗余值）。
   ctx.broadcast({
     type: 'config.defaults',
     id: ctx.nextPushId(),

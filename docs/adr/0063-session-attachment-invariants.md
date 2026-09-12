@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-19
-- 关联：[restore-fork-attach-fix.md](../architecture/restore-fork-attach-fix.md)（P0 根因分析与 F4 护栏设计全文）· [ADR-0062](0062-single-data-owner-absolute-write-rule.md)（绝对写规则，本 ADR 的前置约束；其 §2 已增补第三类合法形态）· [data-source-registry.md](../architecture/data-source-registry.md) §4 ⑩（会话文件身份登记条目，I5 落点）
+- 关联：restore-fork-attach-fix.md（P0 根因分析与 F4 护栏设计全文；已删除，git 可追溯，机制沉淀在 session-attach-assert.ts / session-lifecycle.ts 注释）· [ADR-0062](0062-single-data-owner-absolute-write-rule.md)（绝对写规则，本 ADR 的前置约束；其 §2 已增补第三类合法形态）· [data-source-registry.md](../architecture/data-source-registry.md) §4 ⑩（会话文件身份登记条目，I5 落点）
 
 ## 背景
 
