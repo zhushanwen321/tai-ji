@@ -15,6 +15,9 @@
 // 文案内聚本模块（文案即行为，⛔4 逐字锚定）。
 
 import { findForeignLiveInstance } from "./alive-store.ts";
+// [U4 / §3.2.3] 锚可解析性判据（三件套判据一单点，cold-lookup 导出）——fork-from
+// 守卫 5 的「锚不可解析 → 引导 reopen」分流消费。
+import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "./execution-record.ts";
 import { isResumable } from "./lifecycle-predicates.ts";
 import { SLUG_MAX_LENGTH } from "../orchestration/models/types.ts";
@@ -206,26 +209,34 @@ export type ForkFromHandlerResult = {
 };
 
 // ============================================================
-// message 拒绝文案分流（endedMessageGuard）
+// message 拒绝文案分流（endedMessageGuard，[U4] 缩型）
 // ============================================================
 
+/** [U4 / §3.2.3] 异进程占用的统一拒绝文案句式（设计 §3.1 唯一拒绝形态：错误 →
+ *  权威源 → 重试闭环）。 */
+export function foreignLiveInstanceMessage(id: string, pid: number, sessionFile: string | undefined): string {
+  return (
+    `subagent ${id}: another process (pid ${pid}) is writing this session` +
+    `${sessionFile ? ` (${sessionFile})` : ""}; close it or wait for it to exit, then retry.`
+  );
+}
+
 /**
- * message 拒绝时的可行动文案分流。
+ * message 拒绝时的可行动文案分流（[U4 / §3.2.3 万物可续] 缩型）。
  *
- * 背景：getRecordForAction 冷查只认 status==='running'（可续聊重建），任何终态/
- * 异归属记录都落到同一个「not found or not owned」错误，把两类完全不同的场景混为一谈：
- *   - user-close/cancelled：用户主动告别，记录真没了 → 引导 start 新的
- *   - parent-shutdown/gc/orphan 等：父会话重启/进程退出导致的断联，对话 jsonl 完好，
- *     resume/fork 基建现成 → 引导 fork-from 从旧记录接续
- *
- * 分流规则（消费方是 LLM，保持正交简单）：
- *   - 找不到记录 → 原样透传 getRecordForAction 错误（id 打错最常见，原文案最准）
- *   - closed + user-close/cancelled →「已主动关闭，无法续聊」文案
- *   - 其余（closed 其他 reason / running 但异归属）→「断联可接续」文案
+ * [U4] 形态枚举分流消亡：旧七种文案（deliberately closed / reconnectable+fork-from
+ * 指引 / 异树 fork-from 指引）随「万物可续」删除——任何 idle record（无论旧终态
+ * 遗留位 closedReason 为何值）都可同 id 续聊；锚失效不拒绝，走 markReopened 自动
+ * 带历史重开（reopen 降级，§3.2.3——无需用户操作）。剩余可达拒绝面收敛为：
+ *   1. ResurrectDeniedError（worktree 绑定丢失 / 异进程活实例）→ 原样透传（自带
+ *      pid/恢复指引——占用拒绝即唯一真实拒绝形态）；
+ *   2. 记录不存在（id 打错）→ 原样透传 not found；
+ *   3. 归属不匹配（跨 session 树 / 跨层）→ 归属判据文案（§3.2.3 判据三，非形态枚举）。
+ * 兜底分支（理论不可达）附「重发 message 会自动带历史重开」的降级说明，保证
+ * 锚失效场景的文案自解释。
  */
 export function endedMessageGuard(service: SubagentService, id: string, original: unknown): Error {
-  // 透明重生守卫拒绝（worktree/异进程占用）原样透传——错误自带完整行动语言，
-  // 若被下方 fork-from 指引改写会误导 agent 走已被判死的通道（types.ts 契约声明）。
+  // 透明重生守卫拒绝（worktree/异进程占用）原样透传——错误自带完整行动语言。
   if (original instanceof ResurrectDeniedError) return original;
   let snap: SubagentRecord | undefined;
   try {
@@ -236,48 +247,39 @@ export function endedMessageGuard(service: SubagentService, id: string, original
   if (!snap) {
     return original instanceof Error ? original : new Error(String(original));
   }
-  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-  // 迁移不变量，U4 endedMessageGuard 缩型时重写本段）。
-  if (snap.status === "idle" && snap.closedReason !== undefined) {
-    if (snap.closedReason === "cancelled" || snap.closedReason === "user-close") {
-      return new Error(
-        `subagent ${id} was deliberately closed by user (closedReason: ${snap.closedReason}) — ` +
-        `it cannot be messaged or resumed; nothing can reattach to it. ` +
-        `Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).`,
-      );
+  // 异进程活实例复检（findColdLookupCandidate 探针后、endedMessageGuard 前的窗口内
+  // marker 被异进程重写，或内存快照路径未过冷查探针）→ 统一占用拒绝句式。
+  if (snap.sessionFile !== undefined) {
+    const foreign = findForeignLiveInstance(snap.sessionFile);
+    if (foreign) {
+      return new Error(foreignLiveInstanceMessage(id, foreign.pid, snap.sessionFile));
     }
+  }
+  // 归属不匹配（跨 session 树 / 跨层）：判据 = record 全态可查但 getRecordForAction
+  // 抛「not found or not owned」（归属校验拒绝的唯一文案形态）。历史 jsonl 只读安全
+  // ——跨树场景保留 fork-from 分叉指引（fork-from = 历史在分叉新 id，与 reopen 的
+  // 「历史亡同 id 重启」语义分野）。
+  const originalMsg = original instanceof Error ? original.message : String(original);
+  if (originalMsg.includes("not found or not owned")) {
     return new Error(
-      `subagent ${id} is ended but reconnectable (closedReason: ${snap.closedReason ?? "unknown"}` +
-      `${describeClosedContext(snap)}). Its conversation history is intact at ${snap.sessionFile ?? "(session file unavailable)"}. ` +
-      `Recovery: resume from that history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"${id}"}}, ` +
-      `or read key points directly from the session file.`,
+      `subagent ${id} belongs to a different session tree than this one` +
+      `${describeSessionTreeContext(snap)}. You cannot message it from here. ` +
+      `Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"${id}"}}` +
+      `${snap.sessionFile ? ` (source session: ${snap.sessionFile})` : ``}; otherwise start a new subagent.`,
     );
   }
-  // running 但未通过 getRecordForAction：记录属于当前进程外的另一个 session 树
-  //（主会话重启前的遗留态，或其他并发进程的活跃 subagent）。无论哪种，历史
-  // jsonl 只读安全，fork-from 快照接续均有效。
+  // 兜底（理论不可达——冷查准入全放行后，本进程可达 record 不再产生形态拒绝）：
+  // 附 reopen 自动降级说明，保证锚失效场景文案自解释。
   return new Error(
-    `subagent ${id} is alive but belongs to a different session tree than this one` +
-    `${describeClosedContext(snap)}. You cannot message it from here. ` +
-    `Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"${id}"}}` +
-    `${snap.sessionFile ? ` (source session: ${snap.sessionFile})` : ``}; otherwise start a new subagent.`,
+    `${originalMsg} ` +
+    `Note: if this subagent's transcript was collected (retention expired), re-sending the message ` +
+    `(action:'message') automatically reopens it on the same id with a history summary injected — no manual step needed.`,
   );
 }
 
-/** 终态快照的上下文人话短语（仅作补充描述，主分支逻辑在 endedMessageGuard）。 */
-function describeClosedContext(r: SubagentRecord): string {
-  switch (r.closedReason) {
-    case "parent-shutdown":
-      return " — it was disconnected when the previous parent session exited";
-    case "parent-fork":
-      return " — it was detached when the previous parent session forked";
-    case "parent-new":
-      return " — it was detached when the previous parent session switched";
-    case "disconnected":
-      return " — it ended in a previous session (exact cause unknown)";
-    default:
-      return "";
-  }
+/** 跨树快照的上下文人话短语（仅作补充描述，主分支逻辑在 endedMessageGuard）。 */
+function describeSessionTreeContext(r: SubagentRecord): string {
+  return r.rootSessionId !== undefined ? ` (rootSessionId: ${r.rootSessionId})` : "";
 }
 
 // ============================================================
@@ -544,15 +546,17 @@ export async function cancelHandler(
 /**
  * message action handler：向对话模式 subagent 续聊/插入消息。
  *
- * [H1 U6] 状态分流面收敛：running → Continuation 派发新轮（新 run + resume 锚点）；
- * 在途轮存在 → D2 打断（abort + 入队）；终态 → throw ended（正常路径不命中——终态
- * record 已 archive，getRecordForAction 先 throw not found）。interrupt 输入字段保留
- *（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但不参与
- * 分派（D2 统一打断语义）。
+ * [U4 / §3.2.3 万物可续] 状态分流面收敛：任何非 workflow-origin record 的 message
+ * 都放行——idle → Continuation 派发新轮（锚失效自动 markReopened 降级，同 id 带
+ * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。唯一真实拒绝 = 异进程占用
+ *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界。interrupt 输入字段
+ * 保留（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但
+ * 不参与分派（D2 统一打断语义）。
  *
- * 归属守卫：getRecordForAction 内部校验 rootSessionId。
+ * 归属守卫：getRecordForAction 内部校验 rootSessionId + 直接父。
  *
- * @throws Error subagentId/text 缺失 / 不存在或非本 session 所有 / 已结束
+ * @throws Error subagentId/text 缺失 / 不存在或非本 session 所有 / workflow 域边界
+ * @throws ResurrectDeniedError 异进程占用（唯一占用拒绝形态，文案含 pid）
  */
 export async function messageHandler(
   service: SubagentService,
@@ -566,10 +570,10 @@ export async function messageHandler(
     'Correct: {"action":"message","messageParam":{"subagentId":"sa-...","text":"your follow-up"}}',
   );
 
-  // 归属守卫：getRecordForAction 内部校验 rootSessionId。
-  // 拒绝时经 endedMessageGuard 分流：找不到 → 原错误；user-close/cancelled
-  // → 「已主动关闭」；断联/已完成/异归属 → fork-from 可行动指引。仅 message action
-  // 升级文案——close/cancel 维持原语义（它们不需要恢复通道）。
+  // 归属守卫：getRecordForAction 内部校验 rootSessionId + 准入三件套（[U4 / §3.2.3]
+  // 万物可续——任何 idle record 均可续聊，形态枚举 gate 消亡）。
+  // 拒绝时经 endedMessageGuard 分流：找不到 → 原错误；异进程占用 → 含 pid 占用拒绝；
+  // 跨 session 树 → 归属判据 + fork-from 指引。
   let record: ExecutionRecord;
   try {
     record = service.chatActions.getRecordForAction(id, { allowReconnect: true });
@@ -577,9 +581,22 @@ export async function messageHandler(
     throw endedMessageGuard(service, id, err);
   }
 
-  // one-shot upgrade：非 chatMode 的 active record（running/idle）收到 message 时
+  // [U4 / §1.4 D7 域边界] workflow-origin record 不进 message 通道：workflow agent
+  // 结果由脚本返回值承载、无 message 对端（run-orchestration settleOneShotOutcome
+  // D7 例外注释的四面连带——「被误升级为对话容器」正是本守卫承接的面）。origin 是
+  // 记录的真实身份维度（非「以什么方式结束」的形态枚举），此拒绝不属万物可续的
+  // 形态 gate 残留。
+  if (record.origin === "workflow") {
+    throw new Error(
+      `subagent ${id} is a workflow-origin record — it is managed by its workflow script ` +
+      `(results are collected by the workflow run, not by messaging). ` +
+      `Recovery: use action:'list' with includeWorkflow:true to inspect it.`,
+    );
+  }
+
+  // one-shot upgrade：非 chatMode 的 active record（running/idle——[U4] idle 纳入：
+  // markSettled 轮收口 / 跨重启磁盘重建产出 idle 非 chatMode 形态，收 message 时
   // 自动升级为 chatMode，后续走 Continuation 统一续聊路径（新 run + resume 锚点）。
-  // closed/cancelled 终态 record 不可 upgrade（getRecordForAction 已抛 not found）。
   // chatMode 是 ExecutionRecord 的 readonly 字段，用 Mutable<T> 显式断言绕过 readonly 约束（upgrade 语义）。
   // Object.assign 隐式绕过 readonly 不可追踪，改为单字段显式赋值。
   // 进程内 upgrade 入口——one-shot 首条 message 触发 upgrade 置位 chatMode=true。
@@ -589,7 +606,7 @@ export async function messageHandler(
   // [H1 U2 / D5 双写点①] 升级前置 gate：conversation 位检查——unsupported 引擎
   //（zcode）的 one-shot 收到 message 不升级（升级后续聊行为悬空），硬拒 + fork/重派
   // 指引（engineConversationUpgradeUnsupportedError 文案单源）。
-  if (!record.chatMode && record.status === "running") {
+  if (!record.chatMode) {
     if (!service.canUpgradeToConversation(record)) {
       throw engineConversationUpgradeUnsupportedError(record.engine ?? DEFAULT_ENGINE_ID);
     }
@@ -597,18 +614,10 @@ export async function messageHandler(
     (record as Mutable<ExecutionRecord>).chatMode = true;
   }
 
-  // chatMode 统一投递：Continuation 编排（§3.4——D4 状态迁移表 / D2 打断语义）。
+  // chatMode 统一投递：Continuation 编排（§3.4——两态分流 / D2 打断语义）。
   // [H1 U6] 旧「进程死活分流热/冷路径」消亡（每轮 = 新 run + resume 锚点），
   // interrupt 参数随 D2 打断统一语义退役（在途轮存在即打断入队，不区分抢占/排队）。
-  if (record.chatMode) {
-    await service.chatActions.deliverChatMessage(record, text);
-  } else {
-    // 终态（closed/cancelled）：防御性兜底（终态 record 已 archive，正常走 not found）
-    throw new Error(
-      `subagent ${id} has ended (status: ${record.status}), cannot message. ` +
-      `Recovery: use action:'close' to clean up, then action:'start' a new subagent.`,
-    );
-  }
+  await service.chatActions.deliverChatMessage(record, text);
   return { kind: "message", subagentId: id, slug: record.slug, response: { delivered: true } };
 }
 
@@ -652,15 +661,22 @@ export async function closeHandler(
  *
  * 用于 subagent 因会话重启/进程退出而断联后的恢复：新进程以 --fork 指向旧 session
  * 文件（copy-on-write 建分支会话），继承全部对话历史；源文件只读不续写。
- * 旧记录本身不动——closed 单向状态机不变量、tryTransition 语义均不触碰。
+ * 旧记录本身不动——tryTransition 语义均不触碰。
+ *
+ * [U4 / §3.2.3 万物可续] 语义分野写死：fork-from = **历史在**分叉新 id；reopen
+ * （markReopened，经 message 触发）= 历史亡同 id 重启。守卫链按 transcript 锚
+ * 可解析性分流——锚不可解析（transcript 被回收）时 fork-from 语义空洞，引导
+ * message（reopen 语义）而非拒绝。
  *
  * 守卫链（拒绝原因与行动语言对齐，见 assertAndLookupForkFromSource）：
  *   1. 本进程内存 running → 还活着，应走 message（防双写同一子 session 文件）
  *   2. 不存在            → 引导 list 确认
- *   3. 异进程活跃         → 别处正跑，不可从此接续（同 id 双写风险；等其结束或在其所属会话内操作）
- *   4. cancelled/user-close → 用户主动告别，真没了（不提供接续通道）
- *   5. worktree 记录     → checkout 不可复用，fork 子进程 cwd 会回落主仓破坏隔离
- *   6. 无子 session 文件  → 无历史可继承（entry-only 孤儿：spawn 窗口期中断）
+ *   3. 异进程活跃         → 别处正跑，不可从此接续（读到半截历史；等其结束或在其所属会话内操作）
+ *   4. worktree 记录     → checkout 不可复用，fork 子进程 cwd 会回落主仓破坏隔离
+ *   5. 锚不可解析         → 无历史可分叉（从未开跑 / transcript 被回收）——引导
+ *      message（同 id reopen，历史摘要自动注入）或 start fresh
+ *  （[U4] 原守卫 4「cancelled/user-close 拒绝」随万物可续删除——fork-from 对任何
+ *   idle record 放行，主动告别不再是 fork 例外。）
  *
  * @throws Error 各守卫命中 / service.execute 失败（引擎不支持等）
  */
@@ -691,9 +707,9 @@ export async function forkFromHandler(
   };
 }
 
-/** forkFromHandler 的守卫链（fork-from handler doc 的守卫 1–6 原样提取）：按序校验
+/** forkFromHandler 的守卫链（fork-from handler doc 的守卫 1–5 原样提取）：按序校验
  *  源记录可接续，命中即抛带行动语言的 Error；全部通过则返回源 SubagentRecord
- *  （守卫 6 已保证 sessionFile 非空，返回类型随之收窄）。 */
+ *  （守卫 5 已保证锚可解析、sessionFile 非空，返回类型随之收窄）。 */
 function assertAndLookupForkFromSource(service: SubagentService, id: string): SubagentRecord & { sessionFile: string } {
   // 守卫 1：本进程内存 running —— 直接 message 即可，fork-from 会双写其 session 文件。
   if (service.queries.findRecord(id)) {
@@ -715,13 +731,9 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
   // 守卫 3：异进程活跃（.alive 侧车指向另一进程的活 pid）。
   // 双写防护：fork 虽 copy-on-write（历史 jsonl 只读），但源仍在异进程运行时接续容易
   // 读到半截历史，等它结束再接更安全。判据 = findForeignLiveInstance 直接探针（同
-  // cold-lookup 双守卫判据；[U4b / D3b (a′)] 原读 rec.externalInstance 重建缓存换现查
-  // 探针——语义等价（externalInstance 非空 ⟺ 探针非空）且比重建时点缓存更新鲜；
-  // externalInstance 字段链已随 U4a 删除），不拦 status==='running' 的快照——后者含跨重启
-  // 回退重建的 running 记录（无活 pid，历史已完整落盘），它们正是 endedMessageGuard
-  // 指引 fork-from 的目标；拦了会让 agent 在「建议 fork-from」与「fork-from 拒绝
-  // running」两条错误间死循环。sessionFile 缺失（entry-born 孤儿）时无从探活，
-  // 天然无 foreign 声明，落守卫 6 处置。
+  // cold-lookup 准入判据；[U4b / D3b (a′)] 原读 rec.externalInstance 重建缓存换现查
+  // 探针——语义等价且比重建时点缓存更新鲜）。sessionFile 缺失（entry-born 孤儿）时
+  // 无从探活，天然无 foreign 声明，落守卫 5 处置。
   if (source.sessionFile !== undefined && findForeignLiveInstance(source.sessionFile) !== undefined) {
     throw new Error(
       `subagent ${id} is still running in another process (alive pid marker present). ` +
@@ -729,22 +741,8 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 4：主动告别（cancelled tombstone / user-close 正式关闭）——close 语义无旁路：
-  // fork-from 与 message 一致拒绝（guard 一致性规格），文案升级为统一「主动关闭」形态
-  //（含 closedReason 显式列入），与 deliverChatMessage 的同类分支同语系不同落地（此处强调不可 branch）。
-  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-  // 迁移不变量；守卫 4 的删除/缩型归 U4 准入判据切换）。
-  if (source.status === "idle" && source.closedReason !== undefined
-    && (source.closedReason === "cancelled" || source.closedReason === "user-close")) {
-    throw new Error(
-      `subagent ${id} was deliberately closed by user (closedReason: ${source.closedReason}) — ` +
-      `deliberately-closed records cannot be resumed or branched from; nothing can reattach to them. ` +
-      `Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).`,
-    );
-  }
-
-  // 守卫 5：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
-  // 回收；fork 子进程若复用旧路径会回落主 repo（破坏文件隔离）。与 deliverChatMessage 的
+  // 守卫 4：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
+  // 回收；fork 子进程若复用旧路径会回落主 repo（破坏文件隔离）。与续聊链的
   // hadWorktree 守卫同一判据同一理由。
   if (source.worktree === true) {
     throw new Error(
@@ -755,12 +753,16 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 6：无子 session 文件（entry-born 孤儿：spawn 窗口期中断，从未开跑）。
+  // 守卫 5（[U4] 原守卫 6 锚判据化）：锚不可解析（字段缺失 = entry-born 从未开跑；
+  // 文件不在 = transcript 被回收）→ fork-from「继承历史」语义空洞。不硬拒 start
+  // fresh，引导 message 的 reopen 语义（同 id 重开 + 历史摘要自动注入）。
   const sessionFile = source.sessionFile;
-  if (!sessionFile) {
+  if (sessionFile === undefined || !isAnchorResolvable({ sessionFile })) {
     throw new Error(
-      `subagent ${id} has no child session file to inherit from (it never started successfully). ` +
-      `Recovery: start a fresh subagent (action:'start') describing the task again.`,
+      `subagent ${id} has no transcript history left to fork from (it never started, or the transcript ` +
+      `was collected after its retention expired). ` +
+      `Recovery: use action:'message' on this id — it reopens on the same id with a fresh transcript ` +
+      `(prior-task summary auto-injected); or start a fresh subagent (action:'start').`,
     );
   }
 

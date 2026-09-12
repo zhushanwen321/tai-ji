@@ -30,6 +30,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
 
 import { writeFinalizedState } from "../state-marker.ts";
+import { ResurrectDeniedError } from "../types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../model-config-service.ts";
@@ -205,12 +206,14 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(() => service.chatActions.getRecordForAction("sa-grand")).toThrow(/direct parent/);
   });
 
-  it(".state sidecar（closed 终态）不重建 → throw not found or not owned", () => {
+  it("[U4 万物可续] .state sidecar（旧终态遗留位）→ 冷查重建放行（idle 全候选，closedReason 只是展示位）", () => {
     const file = writeSessionJsonl(sessionsDir, { id: "sa-fin", rootSessionId: "root-session" });
-    writeFinalizedState(file); // sidecar 矩阵分支 2 → status=closed → find(status==="running") miss
+    writeFinalizedState(file); // sidecar 矩阵分支 2 → 重建 idle + closedReason 遗留位
 
-    expect(() => service.chatActions.getRecordForAction("sa-fin")).toThrow(/not found or not owned/);
-    expect(store.getMutable("sa-fin")).toBeUndefined(); // 未重建注册
+    const record = service.chatActions.getRecordForAction("sa-fin");
+    expect(record.status).toBe("running"); // 接管翻边
+    expect(record.sessionFile).toBe(file);
+    expect(store.getMutable("sa-fin")).toBe(record); // 重建注册
   });
 
   // ============================================================
@@ -230,15 +233,11 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
       worktree: true,
     });
 
-    const record = service.chatActions.getRecordForAction("sa-wt");
-    // hadWorktree 从磁盘 identity entry 的 worktree 标志恢复
-    expect(record.hadWorktree).toBe(true);
-    // handle 无法恢复（不可序列化）
-    expect(record.worktreeHandle).toBeUndefined();
-
-    // 冷路径续聊（无活进程）→ 续轮守卫拒绝，不 spawn 回落主 repo
-    await expect(service.chatActions.deliverChatMessage(record, "resume after restart")).rejects.toThrow(
-      /worktree isolation.*lost when the parent process restarted/,
+    // [U4] worktree 绑定丢失的拒绝点前移到冷查准入守卫（assertAdmissionAllowed——
+    // 重建候选统一守卫；[U5 接管] 拒绝动作将改为 worktree 自动重建 + patch 恢复）
+    expect(() => service.chatActions.getRecordForAction("sa-wt")).toThrow(ResurrectDeniedError);
+    await expect(async () => service.chatActions.getRecordForAction("sa-wt")).rejects.toThrow(
+      /worktree isolation/,
     );
   });
 

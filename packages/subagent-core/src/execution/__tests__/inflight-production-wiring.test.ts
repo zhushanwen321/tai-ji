@@ -159,6 +159,8 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
   it("续聊投递 disarm（生产路径 = deliverChatMessage → Continuation.dispatchRound）：翻回正在执行，推送 inFlight=1", async () => {
     const record = makeResumableRecord("sa-wiring-disarm");
     record.sessionFile = path.join(agentDir, "child-session.jsonl"); // 续聊锚点（dispatchRound 守卫必需）
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     store.register(record);
     registerSpawnedChildForRecord(record.id, makeFakeChild());
     armIdleTimer(record.id, () => {}); // 预置保活态（上轮已 settle 的形态）——disarm 挂点的真实生效面

@@ -29,6 +29,7 @@ import { readAliveMarker, writeAliveMarker } from "../alive-store.ts";
 import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../cold-lookup.ts";
 import { RecordStore } from "../record-store.ts";
 import type { SubagentRecord } from "../types.ts";
+import type { ClosedReason } from "../types.ts";
 import { ResurrectDeniedError } from "../types.ts";
 
 /** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
@@ -191,18 +192,15 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
 
-  it("idToFile 索引直查返回不可续聊形态（旧终态遗留位 ∉ 可重连集）→ 回退磁盘全扫兜底定位", () => {
+  it("[U4 万物可续] idToFile 索引直查命中旧终态遗留位（closedReason=gc）→ 直接采用（两态全候选，不再回退全扫）", () => {
     const sessionFile = writeSessionFixture();
-    const found = makeFound({ sessionFile });
-    // direct 命中但旧终态遗留位不可重连（closedReason=gc）→ 不直接采用，
-    // 落到 collectRecords 兜底（全扫返回可重连候选）
-    const direct = makeFound({ sessionFile, closedReason: "gc" });
-    const deps = makeDeps({ direct, disk: [found] });
+    const found = makeFound({ sessionFile, closedReason: "gc" });
+    const deps = makeDeps({ direct: found, disk: [] });
 
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
 
     expect(record.status).toBe("running");
-    expect(vi.mocked(deps.collectRecords)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.collectRecords)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
   });
 
@@ -258,8 +256,12 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     const deps = makeDeps({ disk: [makeFound({ sessionFile })] });
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
+    // [U4] 统一占用拒绝句式（设计 §3.1 唯一拒绝形态：错误 → 权威源 → 重试闭环）
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
-      /still finishing in another process/,
+      /is writing this session/,
+    );
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
+      /close it or wait for it to exit, then retry/,
     );
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
@@ -271,7 +273,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
-      /currently running in another process instance/,
+      /is writing this session/,
     );
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
@@ -293,21 +295,28 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   // ── 候选过滤 / 归属与父层校验 ──
 
   it.each([
-    ["自然完成死因 gc", makeFound({ closedReason: "gc" })],
-    ["用户主动 close", makeFound({ closedReason: "user-close" })],
-  ])("不可重连死因（%s）→ 磁盘也无候选，返回 undefined", (_label, found) => {
-    const deps = makeDeps({ disk: [found] });
+    ["自然完成死因 gc", "gc"],
+    ["用户主动 close", "user-close"],
+    ["用户取消", "cancelled"],
+    ["编排性关闭 parent-fork", "parent-fork"],
+    ["编排性关闭 parent-new", "parent-new"],
+  ] as const satisfies readonly (readonly [string, ClosedReason])[])("[U4 万物可续] 旧终态遗留位（%s）→ 同样重生放行（形态枚举 gate 消亡）", (_label, _reason) => {
+    const sessionFile = writeSessionFixture();
+    const deps = makeDeps({ disk: [makeFound({ sessionFile, closedReason: _reason })] });
 
-    expect(coldLookupForAction(deps, "sa-cold-1", true)).toBeUndefined();
-    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    expect(record.status).toBe("running");
+    expect(record.closedReason).toBeUndefined();
+    expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
-  it("allowReconnect=false：closed 候选一律不可见（running-only 查询语义）", () => {
+  it("[U4] allowReconnect 参数退役：两态全候选（idle 不再按可重连集把门），false 同样放行", () => {
     const sessionFile = writeSessionFixture();
     const deps = makeDeps({ disk: [makeFound({ sessionFile })] });
 
-    expect(coldLookupForAction(deps, "sa-cold-1", false)).toBeUndefined();
-    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+    const record = coldLookupForAction(deps, "sa-cold-1", false)!;
+    expect(record.status).toBe("running");
+    expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
   it("rootSessionId 不匹配 → 返回 undefined（不区分失败形态，防跨 session 探测）", () => {

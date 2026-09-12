@@ -154,7 +154,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
 
   it('惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取投影', async () => {
     // 不经终态写面（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
-    // （running 形态）→ 查询触发惰性补建。
+    // → 查询触发惰性补建。
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
     expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')
     store.dispose()
@@ -167,9 +167,11 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(found!.agentName).toBe('worker')
     expect(found!.sessionFile).toBe(childFile)
     expect(found!.parentRecordId).toBe('sa-parent')
-    // 双写过渡字段在场（running 二态）
+    // 双写过渡字段（[U3 重建单规则] 无 sidecar 重建一律 idle：executionStatus 如实
+    // 投影两态词汇；legacy status 经桥接判据派生——无 closedReason 遗留位的 idle
+    // 投影 "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
     const raw = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
-    expect(raw.executionStatus).toBe('running')
+    expect(raw.executionStatus).toBe('idle')
     expect(raw.status).toBe('running')
   })
 })

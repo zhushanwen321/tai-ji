@@ -1327,6 +1327,17 @@ export class RunOrchestration {
         this.deps.getStore().register(rec);
         this.deps.getStore().reportRecordTransition(rec);
       },
+      // [U4 / §3.2.3] reopen 降级原语接线：锚失效 → store.markReopened（同 id 带
+      // 历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘）。
+      // 锚入参 = record.sessionFile 路径复用（pi transcript 按路径定位：旧文件已被
+      // 回收，续轮 resume:undefined 派发后引擎在同目录开新 session，新锚由 run 应答
+      // 回填——writeBindingForRecord 在回填点重写 binding，markReopened 落旧路径旁
+      // 的 binding 为过渡死数据，随 session-file-gc 孤儿清理回收）。zcode 锚
+      //（sessionId 变更）的重开接线归 U6 transcript 锚单元。
+      reopenRecord: (rec) => {
+        if (rec.sessionFile === undefined) return false;
+        return this.deps.getStore().markReopened(rec, { engine: "pi", sessionFile: rec.sessionFile });
+      },
       // [U2b 修复轮/D2] 轮始簿记（store.markRoundStarted）——Continuation 的唯一轮始写点。
       markRoundStarted: (rec) => {
         this.deps.getStore().markRoundStarted(rec.id);

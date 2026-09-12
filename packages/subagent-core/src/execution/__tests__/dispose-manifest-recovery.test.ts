@@ -222,11 +222,11 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBe("parent-shutdown");
 
+    // [U4 缩型] endedMessageGuard 的形态分流消亡——重启后的跨树 record（snapshot
+    // 可查、归属拒绝）统一走「different session tree」判据文案 + fork-from 分叉指引。
     const err = endedMessageGuard(restarted, "sa-m1", new Error("subagent not found or not owned: sa-m1"));
-    expect(err.message).toContain("ended but reconnectable");
-    expect(err.message).toContain("closedReason: parent-shutdown");
-    expect(err.message).toContain("it was disconnected when the previous parent session exited");
-    expect(err.message).not.toContain("deliberately closed by user");
+    expect(err.message).toContain("belongs to a different session tree");
+    expect(err.message).toContain("fork-from");
   });
 
   it("M1 自愈: manifest 被 SIGKILL 竞态吞掉时，boot 从可重连 entry 重物化反查索引", async () => {
@@ -316,11 +316,11 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBe("cancelled");
 
-    // 曾报原始 not-found（Gate B sq-c）——现走「主动关闭」专属文案
+    // [U4 缩型] 「主动关闭」专属文案消亡——跨树统一归属判据文案（万物可续后
+    // cancelled 遗留位不再拒绝同树 message）。
     const err = endedMessageGuard(restarted, "sa-cx", new Error("subagent not found or not owned: sa-cx"));
-    expect(err.message).toContain("deliberately closed by user (closedReason: cancelled)");
-    expect(err.message).toContain("cannot be messaged or resumed");
-    expect(err.message).not.toContain("fork-from");
+    expect(err.message).toContain("belongs to a different session tree");
+    expect(err.message).toContain("fork-from");
   });
 
   it("M2: manifest 源 user-close 快照走「主动关闭」专属文案（读侧投影三分流收口）", async () => {
@@ -345,10 +345,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       "utf-8",
     );
     // manifest 缓存按 stat 戳读取，写入后直接查询即可（listAllSync 每次重 stat）
+    // [U4 缩型] user-close 快照同走跨树归属判据文案（形态分流消亡）。
     const err = endedMessageGuard(restarted, "sa-ucx", new Error("subagent not found or not owned: sa-ucx"));
-    expect(err.message).toContain("deliberately closed by user (closedReason: user-close)");
-    expect(err.message).toContain("cannot be messaged or resumed");
-    expect(err.message).not.toContain("ended but reconnectable");
+    expect(err.message).toContain("belongs to a different session tree");
+    expect(err.message).toContain("fork-from");
   });
 
   // ── [B3/D8] disposeAllRecords 终态化归口 markFinalized——行为变化矩阵五行 ──

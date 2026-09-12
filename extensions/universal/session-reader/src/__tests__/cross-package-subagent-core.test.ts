@@ -265,7 +265,9 @@ describe('跨包集成：subagent-core E1 落标 manifest → session-reader res
     const childFiles = await driveSyncBatchRecovery([m])
 
     // manifest 内容断言（W3 appendBatchFinalizedEntry 投影路径的产物，非手工预写）：
-    // 覆写后 closed 重建快照 → status 如实投影 "closed"；sessionFile 来自 W1 投影扩展。
+    // sessionFile 来自 W1 投影扩展。[U2/U3 两态桥接] E1 落标成员经恢复链覆写后处于
+    // idle（重建单规则）/running 形态、无旧终态遗留位 → legacy status 如实投影
+    // "running"（batchManifestRecord 单点派生，session-reader 视角的活跃成员）。
     const manifest = JSON.parse(
       fs.readFileSync(path.join(getSubagentRecordsDir(agentDir, agentDir), 'sa-cross-1.json'), 'utf-8'),
     ) as Record<string, unknown>
@@ -273,7 +275,7 @@ describe('跨包集成：subagent-core E1 落标 manifest → session-reader res
       id: 'sa-cross-1',
       rootSessionId: ROOT_SESSION,
       agentName: '/agents/worker.md',
-      status: 'closed',
+      status: 'running',
       sessionFile: childFiles.get('sa-cross-1'),
     })
 

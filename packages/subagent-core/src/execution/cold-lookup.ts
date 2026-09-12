@@ -4,16 +4,26 @@
 // [H1 U6] cold-resurrect.ts 随 chat 域退役改名落位本文件：其中「跨重启磁盘重建无条件
 // 置 chatMode=true」的升级语义已迁 Continuation D4 revive 格 + D5 gate
 //（conversation-continuation.ts reviveOrThrow / subagent-actions-core messageHandler
-// 双写点），本文件只保留冷查定位 / 可重连守卫 / 磁盘重建注册链——UF-1 跨重启续聊
+// 双写点），本文件只保留冷查定位 / 准入守卫 / 磁盘重建注册链——UF-1 跨重启续聊
 // 绑定链（getRecordForAction → coldLookupForAction → 绑定重建 → Continuation）的
-// 宿主侧解析承载。变化轴：改跨重启重建 / 透明重生回边 / 可重连守卫语义，只改本文件；
+// 宿主侧解析承载。变化轴：改跨重启重建 / 透明重生回边 / 准入守卫语义，只改本文件；
 // Service 的 getRecordForAction 保留归属校验编排（内存未命中分支委托 coldLookupForAction）。
+//
+// [U4 / §3.2.3 准入判据单点] 复活资格从「形态枚举 gate」（closedReason ∈ 可重连集）
+// 切换为物理三件套：锚可解析性（isAnchorResolvable）+ 异进程探针
+//（findForeignLiveInstance）+ 归属匹配（rootSessionId / 直接父，编排层）。任何 idle
+// record 都是候选（万物可续——closedReason/stopReason 只是展示位）；锚不可解析不在此
+// 拒绝——降级处置 = 同 id 带历史重开（markReopened），编排归 Continuation 派发守卫
+//（磁盘重建源 = session 文件本身，冷查候选锚天然可解析；锚失效的现实触发面 = 内存
+// idle record 的 transcript 被回收，发生在派发时点）。
+
+import * as fs from "node:fs";
 
 import { findForeignLiveInstance } from "./alive-store.ts";
 import { createRecord } from "./execution-record.ts";
 import type { StatusFilter } from "./record-store.ts";
 import type { ExecutionRecord, SubagentRecord } from "./types.ts";
-import { isReconnectableFinalReason, ResurrectDeniedError } from "./types.ts";
+import { ResurrectDeniedError } from "./types.ts";
 
 /** SP-2 冷路径按 id 查 record 的 collectRecords 扫描上限（全扫兜底的容量 cap）。
  *  原定义于 subagent-service.ts，随冷查链搬移；Service.lookupRecordAnyState
@@ -43,80 +53,66 @@ export interface ColdLookupDeps {
   getBaselineRecordId: () => string | undefined;
 }
 
-/** 冷查候选谓词（findColdLookupCandidate 的候选形态判定，判据单点）。
+/** [U4 / §3.2.3 判据一单点] transcript 锚可解析性（pi 形态：sessionFile 在盘可读）。
+ *  锚失效（文件被 transcript GC 回收 / 外部删除）≠ 拒绝续聊——消费方按 §3.2.3 降级
+ *  规则走同 id 带历史重开（markReopened，编排归 Continuation 派发守卫）。zcode 锚
+ *（sessionId+dbPath 库内存在性）判据归 U6 transcript 锚单元接线（record.transcriptRef
+ *  写面 U6 落地前，锚的现行载体恒为 pi 的 sessionFile）。 */
+export function isAnchorResolvable(record: Pick<SubagentRecord, "sessionFile">): boolean {
+  return record.sessionFile !== undefined && fs.existsSync(record.sessionFile);
+}
+
+/** [U4 / §3.2.3] 冷查候选谓词（findColdLookupCandidate 的候选形态判定，判据单点）。
  *
- *  [U3 / §3.2.4 桥接] 磁盘重建单规则产出恒 idle，候选形态从「running 或可重连
- *  closed」切换为三维：
- *   - running：内存接管形态（重建面已不产出，保留判据防形态回退）；
- *   - idle ∧ closedReason undefined：新侧可续聊形态（markSettled 轮收口 / 磁盘
- *     重建单规则无 sidecar 兜底——旧终态遗留位不存在，天然可续）；
- *   - idle ∧ closedReason ∈ 可重连集：旧 closed 数据兼容（allowReconnect 把门，
- *     message 专属）。
- *  其余 idle（旧终态遗留位 ∉ 可重连集）不进候选。守卫段与 Continuation.reviveOrThrow
- *  的合并重写归 U4 准入判据单点。 */
-function isColdLookupCandidate(r: SubagentRecord, allowReconnect: boolean): boolean {
-  if (r.status === "running") return true;
-  if (r.status === "idle") {
-    return r.closedReason === undefined || (allowReconnect && isReconnectableClosed(r));
-  }
-  return false;
+ *  两态状态机下任何 record 都是候选：running（内存接管形态）与 idle（轮收口 /
+ *  磁盘重建单规则产出——旧终态遗留位 closedReason 只是读侧兼容展示位，不参与
+ *  资格判定）。形态枚举 gate（closedReason ∈ 可重连集）随「万物可续」消亡。
+ *  准入守卫（探针 / worktree / 归属）在候选定位之后统一执行。 */
+function isColdLookupCandidate(r: SubagentRecord): boolean {
+  return r.status === "running" || r.status === "idle";
 }
 
 /** 冷查候选定位（coldLookupForAction 步骤 1）：idToFile 索引直查命中，未命中再
  *  全目录 collectRecords 兜底（谓词见 isColdLookupCandidate）。
  *
- *  [T5③ / PS-7b] 候选异进程活实例守卫：冷查候选（跨重启 / 内存重建）此前不经任何
- *  探针直接 resurrect + resume spawn——若其 .alive marker 仍指向活着的异进程实例
- * （父进程重启后旧子进程尚存的窗口），resume 会 spawn 第二个 pi 子进程写同一
- *  session JSONL（本代码最忌惮的双写者形态，v4 A-5/P7 事故模式）。closed 候选的
- *  同款守卫已在 assertReconnectAllowed（v8.5 D）；本守卫闭合其余候选的防御不对称。
- *  marker 的 pid 是**宿主进程** pid（D3d 失实注释修正：写者 = 宿主的写权声明
- *  acquire——resurrect 回边 / 接管 / spawn 锚点确立，非子进程 pi 自写），本进程持有
- *  的 running record 恒在内存（archive 才移出），可达本冷查分支的候选必然来自磁盘
- *  重建——探针命中即拒绝（ResurrectDeniedError，与 closed 候选守卫同异常类型，
+ *  [U4] 异进程活实例探针统一对**所有**候选执行（原「旧 closed 候选走
+ *  assertReconnectAllowed / 其余候选在此探活」的双轨守卫随准入单点收敛合并）：
+ *  冷查候选（跨重启 / 内存重建）此前不经任何探针直接 resurrect + resume spawn——
+ *  若其 .alive marker 仍指向活着的异进程实例（父进程重启后旧子进程尚存的窗口），
+ *  resume 会 spawn 第二个 pi 子进程写同一 session JSONL（本代码最忌惮的双写者形态，
+ *  v4 A-5/P7 事故模式）。marker 的 pid 是**宿主进程** pid（D3d 失实注释修正：写者 =
+ *  宿主的写权声明 acquire——resurrect 回边 / 接管 / spawn 锚点确立，非子进程 pi
+ *  自写），本进程持有的 running record 恒在内存（archive 才移出），可达本冷查分支的
+ *  候选必然来自磁盘重建——探针命中即拒绝（ResurrectDeniedError，唯一拒绝形态，
  *  错误含 pid 与恢复指引）。 */
-function findColdLookupCandidate(
-  deps: ColdLookupDeps,
-  id: string,
-  allowReconnect: boolean,
-): SubagentRecord | undefined {
+function findColdLookupCandidate(deps: ColdLookupDeps, id: string): SubagentRecord | undefined {
   const direct = deps.findLightById(id);
   const found =
-    (direct !== undefined && isColdLookupCandidate(direct, allowReconnect) ? direct : undefined) ??
+    (direct !== undefined && isColdLookupCandidate(direct) ? direct : undefined) ??
     deps
       .collectRecords(COLD_LOOKUP_SCAN_LIMIT, "all", undefined)
-      .find((r) => r.id === id && isColdLookupCandidate(r, allowReconnect));
-  // 旧 closed 形态（idle ∧ closedReason 有值）的守卫在 assertReconnectAllowed
-  // （worktree + 探活双道）；其余候选在此探活。
-  if (found !== undefined && !(found.status === "idle" && found.closedReason !== undefined) && found.sessionFile) {
+      .find((r) => r.id === id && isColdLookupCandidate(r));
+  if (found !== undefined && found.sessionFile) {
     const foreign = findForeignLiveInstance(found.sessionFile);
     if (foreign) {
       throw new ResurrectDeniedError(
-        `subagent ${id} is currently running in another process instance (pid ${foreign.pid}, ` +
-          `startedAt=${new Date(foreign.startedAt).toISOString()}); resuming here would double-write ${found.sessionFile}. ` +
-          `Recovery: retry once that process exits; if it never exits, action:'close' this subagent, then action:'start' a fresh one.`,
+        `another process (pid ${foreign.pid}) is writing this session (${found.sessionFile}, ` +
+          `startedAt=${new Date(foreign.startedAt).toISOString()}); ` +
+          `close it or wait for it to exit, then retry.`,
       );
     }
   }
   return found;
 }
 
-/** [v8.5 D] 冷查候选过滤：closed 且死因落在可重连集。判定源 = closedReason（buildRecord
- *  归一化后的对外字段：A 档真实死因直通、旧空 sidecar 兑底 disconnected——SubagentRecord
- *  不暴露 raw finalizedReason）；cancelled/user-close/gc 等主动关闭与自然完成死因天然不在集合内。
- *  防线在集合本身而非调用点。 */
-function isReconnectableClosed(r: SubagentRecord): boolean {
-  return isReconnectableFinalReason(r.closedReason);
-}
-
-/** 可重连守卫（coldLookupForAction 步骤 2，[v8.5 D]）：先于任何状态突变与注册。
- *  worktree 绑定丢失 / 异进程活实例以 ResurrectDeniedError 抛出（endedMessageGuard
- *  必须原样透传，不得改写为 fork-from 指引误导 agent 走已被判死的通道）；拒绝时
- *  内存不得残留该记录（findRecord 契约）。 */
-function assertReconnectAllowed(found: SubagentRecord, id: string): void {
-  // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-  // 迁移不变量；判据集合替换归 U4 准入切换）。
-  if (!(found.status === "idle" && found.closedReason !== undefined)) return;
+/** [U4 / §3.2.3] 准入守卫（coldLookupForAction 步骤 2，原 assertReconnectAllowed
+ *  单点化）：先于任何状态突变与注册。拒绝形态只剩两种——worktree 绑定丢失（[U5
+ *  接管] 设计 §3.2.5：拒绝动作将改为 worktree 自动重建 + patch 恢复；重建链归 U5
+ *  意愿动作单元，本单元保留拒绝语义防 spawn cwd 静默回落主 repo）与异进程活实例
+ *  （已在候选定位统一探针拒绝，此处防御性复检 running 重建形态——findColdLookupCandidate
+ *  探针后磁盘态不可变窗口内 marker 被异进程重写的极端竞态）。拒绝时内存不得残留
+ *  该记录（findRecord 契约）。 */
+function assertAdmissionAllowed(found: SubagentRecord, id: string): void {
   if (found.worktree === true) {
     throw new ResurrectDeniedError(
       `subagent ${id} cannot be transparently resumed: it was created with worktree isolation, ` +
@@ -128,10 +124,9 @@ function assertReconnectAllowed(found: SubagentRecord, id: string): void {
   const foreign = found.sessionFile ? findForeignLiveInstance(found.sessionFile) : undefined;
   if (foreign) {
     throw new ResurrectDeniedError(
-      `subagent ${id} is not transparently resumable: its previous instance still finishing in another process ` +
-        `(pid ${foreign.pid}, startedAt=${new Date(foreign.startedAt).toISOString()}). ` +
-        `Resuming in place would double-write ${found.sessionFile}. ` +
-        `Recovery: retry once that process exits; if it never exits, action:'start' a fresh subagent and treat the history at ${found.sessionFile} as read-only reference.`,
+      `another process (pid ${foreign.pid}) is writing this session (${found.sessionFile}, ` +
+        `startedAt=${new Date(foreign.startedAt).toISOString()}); ` +
+        `close it or wait for it to exit, then retry.`,
     );
   }
 }
@@ -167,13 +162,14 @@ function resurrectColdRecord(
   // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
   // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（closeChatIdle 走
   // doFinalizeRecord，泄漏的 worktree 由 reaper 兜底回收）。
+  // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
   record.hadWorktree = found.worktree === true;
   // [U2a/B4 → D3c] 透明重生回边整体收编 store.markResurrected：acquire-first 顺序
   // （写 .alive 写权声明 → 删 .state → 删 .finalized legacy）+ resurrectClosed 内存
-  // 翻回 + register，单 try 域原子收敛。准入唯一依据 = A 档 sidecar 真实死因 ∈ 可重连
-  // 集（守卫已在上方跑完）；reportTransition（entry 上报）留本编排层（纯投递副作用，
-  // 失败不破坏状态一致性）。
-  // 两种接管形态统一 acquire（D3c）：closed 候选（wasClosed=true）三件套全量；running
+  // 翻回 + register，单 try 域原子收敛。准入唯一依据 = §3.2.3 物理三件套（守卫已在
+  // 上方跑完）；reportTransition（entry 上报）留本编排层（纯投递副作用，失败不破坏
+  // 状态一致性）。
+  // 两种接管形态统一 acquire（D3c）：idle 候选（wasClosed=true）三件套全量；running
   // 候选接管（跨重启磁盘重建，wasClosed=false）跳过删终态位（无 .state 可删）**仍
   // acquire marker**——「接管即声明」，现状此路径不写 marker 的 B/C 双写窗随归口消灭。
   // 失败语义 = 响亮抛错中止主流程（§3.4）：acquire 失败 = 双写风险敞口，禁止
@@ -190,19 +186,26 @@ function resurrectColdRecord(
 }
 
 /** [D4-③] 冷查编排（原 Service.coldLookupForAction）：getRecordForAction 内存未命中
- *  分支——候选定位 → 可重连守卫 → 归属/直接父校验 → 重建注册。
+ *  分支——候选定位 → 准入守卫 → 归属/直接父校验 → 重建注册。
+ *
+ *  [U4] allowReconnect 参数退役保留：两态下 idle 全候选（万物可续），message 专属的
+ *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见面随之统一为
+ *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口/归档，符合新语义）。
+ *  参数保留是因调用方 record-access.ts 的签名面（领地外）不做破坏性变更。
+ *
  *  @returns 重建的 record；磁盘也无则 undefined
- *  @throws ResurrectDeniedError 可重连候选被 worktree/异进程活实例守卫拦截
+ *  @throws ResurrectDeniedError 候选被 worktree 绑定丢失 / 异进程活实例守卫拦截
  *  @throws Error parentRecordId 跨层不匹配（direct parent 错误，与外层校验同文案） */
 export function coldLookupForAction(
   deps: ColdLookupDeps,
   id: string,
-  allowReconnect: boolean,
+  // 参数退役保留（_ 前缀 = TS/eslint 未用惯例豁免）：两态下 idle 全候选，见 docstring。
+  _allowReconnect: boolean,
 ): ExecutionRecord | undefined {
-  const found = findColdLookupCandidate(deps, id, allowReconnect);
+  const found = findColdLookupCandidate(deps, id);
   if (!found) return undefined;
-  // [v8.5 D] 可重连候选的守卫先于任何状态突变与注册（细节见 assertReconnectAllowed）
-  assertReconnectAllowed(found, id);
+  // [v8.5 D] 准入守卫先于任何状态突变与注册（细节见 assertAdmissionAllowed）
+  assertAdmissionAllowed(found, id);
   // [review MF-9] 归属校验先于任何持久化副作用：coldLookup 是 getRecordForAction 的
   // 内存未命中分支，若先 resurrect/register/report 再由调用方抛归属错误，会在磁盘/
   // 内存留下幽灵 running record + running transition entry（跨进程双 resurrect 窗口）。

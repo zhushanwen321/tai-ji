@@ -81,6 +81,9 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     record = makeIdleRecord();
     // sessionFile 用 agentDir 下路径（finalizeRoundToIdle 写 .idle sidecar 不留 /tmp 垃圾）
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync），否则续聊
+    // 误触 reopen 降级——fixture 补实体空文件。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] 轮终簿记归口 store.markRoundIdle（按 id 查内存）——record 须 register 进
     // store（生产链路 getRecordForAction/run 流程的 record 恒在内存，测试补齐同形态）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
@@ -121,17 +124,15 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("running");
   });
 
-  it("旧终态遗留位 record（idle + closedReason ∉ 可重连集）→ throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
+  it("[U4 万物可续] 旧终态遗留位 record（idle + closedReason=gc）→ 直接接管派发，不硬拒（形态枚举 gate 消亡）", async () => {
     record.status = "idle";
-    // [H1 U2 → U3 桥接] D4 表 closed 硬拒格：旧终态遗留位 ∉ 可重连集（gc）→ 硬拒 +
-    // start 新的指引（Continuation reviveOrThrow 文案）。[U3 / §3.2.4] 桥接后
-    // closedReason=undefined 的 idle 是「轮间空闲」可续聊形态（走接管分支不再硬拒），
-    // 硬拒格由旧终态遗留位（closedReason 有值且不可重连）承载。
+    // [U4 / §3.2.3] 旧终态遗留位（closedReason 有值，无论是否可重连集）只是展示位，
+    // 不参与资格判定——message 到达直接翻回 running 派发新轮（万物可续）。
     record.closedReason = "gc";
-    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
-      /cannot be messaged or resumed/,
-    );
-    expect(fake.runs.length).toBe(0);
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(record.status).toBe("running");
+    expect(record.closedReason).toBeUndefined(); // 翻边清遗留位（notifyGate 门判据）
   });
 
   it("[U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined，轮间空闲）→ 直接接管派发，不硬拒", async () => {
@@ -144,12 +145,14 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("running");
   });
 
-  it("record 无 sessionFile → 同步拒绝（D4 表锚点缺失格：no transcript anchor + re-dispatch 指引），不触发 kickOff", async () => {
+  it("[U4] record 无 sessionFile（从未开跑）→ 全新 session 直派（resume:undefined），不拒绝", async () => {
     record.sessionFile = undefined;
-    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
-      /no transcript anchor/,
-    );
-    expect(fake.runs.length).toBe(0);
+    // [U4 / §3.2.3] 原锚点缺失同步拒绝格消亡：无锚 = 无历史可摘要，按全新 session
+    // 派发承接（新锚由 run 应答回填）。
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(fake.runs[0]!.ctx.resume?.resume).toBeUndefined();
+    expect(fake.runs[0]!.task.prompt).toBe("msg"); // 无锚无历史，不注入 reopen 摘要
   });
 
   it("record 无 controller → 投递 throw 行动语言（MF-4），不触发 kickOff", async () => {
@@ -179,6 +182,8 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     record = makeIdleRecord(); // chatMode:true, running, round=1
     // sessionFile：续聊锚点需要
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();
@@ -248,6 +253,8 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     service.initSession({ pi: makePi(), sessionId: "root-session" });
     record = makeIdleRecord();
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();

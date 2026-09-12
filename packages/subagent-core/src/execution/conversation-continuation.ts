@@ -28,7 +28,7 @@ import { getLogger } from "../core/logger.ts";
 
 import { bestEffort } from "./best-effort.ts";
 import { notifyInFlightChanged } from "./engine/inflight-snapshot.ts";
-import { resurrectClosed, tryEnterRunning } from "./execution-record.ts";
+import { tryEnterRunning } from "./execution-record.ts";
 // 轮终 outcome 入参（权威定义在 finalize-record.ts，本文件 re-export 供 host 契约引用；
 // finalize-record 不反向依赖本模块，无循环）。
 import { type RoundSettlementOutcome } from "./finalize-record.ts";
@@ -45,7 +45,8 @@ import {
   disarmRoundFromProtocol,
   noteRoundSettledFromProtocol,
 } from "./settled-watchdog.ts";
-import { isReconnectableFinalReason } from "./types.ts";
+// [U4 / §3.2.3] 准入判据单点消费：锚可解析性判据（判据一）定义在 cold-lookup.ts。
+import { isAnchorResolvable } from "./cold-lookup.ts";
 import type { ExecutionRecord } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -54,6 +55,37 @@ const logger = getLogger("subagents");
 const FAILURE_RECOVERY_TAIL =
   "Recovery: re-send your message (action:'message') to continue — the conversation " +
   "context is preserved (session file intact), or use action:'close' to discard it.";
+
+/** [U4 / §3.2.3] reopen 降级首轮的历史摘要 prompt（模板单点，单测锁定 §3.2.3 摘要
+ *  来源契约：binding 快照域 task/agent/round/totalTokens/turns + 上一轮 result）。
+ *  用户消息附在摘要之后（指令首见即达的弱模型友好形态，与 wrapForkFromPrompt 同思路
+ *  ——此处摘要在前：续聊指令的语义依赖「你正在接续旧工作」的框架先行）。
+ *  fail-soft：result/用量缺省时该行显式标注 not retained（不虚构数据）。 */
+export function buildReopenSummaryPrompt(input: {
+  readonly id: string;
+  readonly task: string;
+  readonly agent: string;
+  readonly round: number;
+  readonly totalTokens?: number;
+  readonly turns?: number;
+  readonly lastResult?: string;
+}): string {
+  const usage =
+    input.totalTokens !== undefined || input.turns !== undefined
+      ? `- Usage so far: ${input.totalTokens ?? "unknown"} tokens / ${input.turns ?? "unknown"} turns\n`
+      : "";
+  return (
+    `[Session reopened] The previous transcript of subagent "${input.id}" is no longer available ` +
+    "(retention expired or file collected). This is a fresh transcript on the SAME subagent id — " +
+    "the user is continuing the same conversation. Prior context summary:\n" +
+    `- Task: ${input.task}\n` +
+    `- Agent: ${input.agent}\n` +
+    `- Completed rounds: ${input.round}\n` +
+    usage +
+    `- Last delivered result: ${input.lastResult !== undefined && input.lastResult !== "" ? input.lastResult : "(not retained)"}\n` +
+    "Resume the work from this summary; if details are missing, state what is lost and proceed with best judgment.\n\n"
+  );
+}
 
 /**
  * 泛化派发主干的轮次回调面（service.kickOffChatRound 泛化参数，D6）。
@@ -104,6 +136,10 @@ export interface ContinuationHost {
   upgradeGateAllows(record: ExecutionRecord): boolean;
   /** D4 revive 格的宿主面：revive 后的 record register + 迁移上报（entry 落盘）。 */
   reviveClosedRecord(record: ExecutionRecord): void;
+  /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
+   *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
+   *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
+  reopenRecord(record: ExecutionRecord): boolean;
   /** 轮始簿记（store.markRoundStarted：status=running + result/resumable 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写）。 */
   markRoundStarted(record: ExecutionRecord): void;
@@ -128,6 +164,9 @@ export class ConversationContinuation {
   private activeController: AbortController | undefined;
   /** FIFO 待发消息（在途轮打断窗内到达的 message；abort 收敛后 drain 聚合为一轮）。 */
   private readonly queue: string[] = [];
+  /** [U4 / §3.2.3] reopen 降级摘要（reviveOrThrow 翻边前检测锚失效时构造，派发守卫
+   *  消费后即清——单飞守卫下无并发消费）。非空 = 本轮按 reopen 降级派发。 */
+  private pendingReopenSummary: string | undefined;
 
   constructor(
     private readonly record: ExecutionRecord,
@@ -163,16 +202,15 @@ export class ConversationContinuation {
   /**
    * message 入口（chatActions.deliverChatMessage 改写后的编排落点）。
    *
-   * D4 表逐格：
-   *   - record 已终态（user-close/cancelled）→ 硬拒（endedMessageGuard 同语义）；
-   *   - record closed 但属可重连终态（disconnected/parent-shutdown）→ revive +
-   *     非 chatMode 升级格（D4 revive 格：gate 放行 → 置位 chatMode=true 再续聊；
-   *     gate 不过 → 硬拒 + fork/重派指引）；
+   * [U4 / §3.2.2 事件表] 两态分流：
+   *   - idle → reviveOrThrow（万物可续：升级 gate + tryEnterRunning 翻边；锚失效
+   *     在派发守卫走 reopen 降级）；
    *   - running（有在途轮）→ D2 打断：abort 在途轮 signal（record 不终态化）+
    *     入队，abort 收敛后 drain；
    *   - running（轮间 idle）→ 直接派发新轮。
    *
-   * @throws Error 终态硬拒 / 锚点缺失 / worktree 绑定丢失（同步拒绝，文案即指引）。
+   * @throws Error 升级 gate 拒绝 / worktree 绑定丢失 / reopen CAS 竞态（同步拒绝，
+   *   文案即指引）。
    */
   onMessage(text: string): void {
     const record = this.record;
@@ -257,16 +295,30 @@ export class ConversationContinuation {
    * async 函数内的 throw 会变 rejected promise，`void` 调用丢传导，故守卫必须
    * 在同步段完成）；activeRunId 同步占位，dispatchRoundAsync 的 await 窗内
    * 重入被拒（单写者构造性保证的实现面）。
+   *
+   * [U4 / §3.2.3 锚判据] 续轮锚守卫从「无锚即拒」切换为锚可解析性分流：
+   *   - pendingReopenSummary 非空（reviveOrThrow 翻边前已 markReopened 的 idle-message
+   *     降级）：按 reopen 降级轮派发（resume:undefined + 摘要前缀），消费后即清；
+   *   - 锚字段缺失（从未开跑，entry-born）：无历史可摘要——直接按全新 session 派发
+   *     （resume:undefined），无世代推进（round/epoch 均为初始值）；
+   *   - 锚字段在但不可解析（续轮 drain 窗口内 transcript 被删，极窄现实面）：同按
+   *     全新 session 派发 + 摘要注入——**不**推进世代（markReopened CAS 仅收 idle，
+   *     U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
+   *     应答回填 writeBindingForRecord 保证）——世代推进仅 idle-message 触发的完整
+   *     reopen 承担（偏差登记：续轮降级无 epoch/round 重置）；
+   *   - 锚可解析：原样 resume 续写（透明续聊）。
+   *  worktree 绑定丢失守卫保留（防 spawn cwd 静默回落主 repo）；[U5 接管] 拒绝动作
+   *  将改为自动重建 + patch 恢复（§3.2.5），本单元保留拒绝语义。
    */
   private dispatchRoundGuarded(msgs: string[], firstRound: boolean): void {
     const record = this.record;
     if (record.status !== "running") return;
     if (this.activeRunId !== undefined) return; // 双保险（正常路径 onMessage 已分流）
+    let freshSession = false;
+    let summaryPrefix = this.pendingReopenSummary;
+    this.pendingReopenSummary = undefined;
+    if (summaryPrefix !== undefined) freshSession = true; // reopen 降级轮 = fresh session
     if (!firstRound) {
-      if (!record.sessionFile) {
-        // §3.1 失败路径表：锚点缺失同步拒绝，文案即指引。
-        throw new Error(`no transcript anchor on record ${record.id}; re-dispatch (action:'start')`);
-      }
       if (record.hadWorktree === true && !record.worktreeHandle) {
         // 跨重启 worktree 绑定丢失守卫（承接 resumeColdRound 同款）：防 resume 的
         // spawn cwd 静默回落主 repo，子 agent 直接编辑主仓库。
@@ -275,6 +327,27 @@ export class ConversationContinuation {
           `resuming it now would run in the main repository and bypass the isolation. ` +
           `Recovery: use action:'close' to release this subagent, then action:'start' a new one with worktree isolation.`,
         );
+      }
+      if (summaryPrefix === undefined && record.sessionFile === undefined) {
+        // [U4] 锚字段缺失（从未开跑）：全新 session 直派；无历史轮可摘要（binding
+        // 只在首轮 run 后存在），不注入 reopen 摘要。
+        freshSession = true;
+      } else if (summaryPrefix === undefined && !isAnchorResolvable(record)) {
+        // [U4] 续轮窗口内 transcript 被删（字段在、文件不在）：全新 session 直派 +
+        // 摘要注入。完整 reopen 降级（markReopened 世代推进）只在 idle-message 路径
+        //（reviveOrThrow）发生；本分支不推进世代（markReopened CAS 仅收 idle，U2
+        // 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
+        // 应答回填 writeBindingForRecord 保证）——偏差登记见实现单元报告。
+        freshSession = true;
+        summaryPrefix = buildReopenSummaryPrompt({
+          id: record.id,
+          task: record.task,
+          agent: record.agent,
+          round: record.round ?? 0,
+          ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
+          ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
+          ...(record.result !== undefined ? { lastResult: record.result } : {}),
+        });
       }
     }
     if (!record.controller) {
@@ -292,10 +365,15 @@ export class ConversationContinuation {
     // 首轮/续聊/drain 三路派发的唯一同步入口，单挂点覆盖全部「翻回正在执行」）。
     disarmIdleTimer(record.id);
     notifyInFlightChanged();
-    void this.dispatchRoundAsync(msgs, firstRound);
+    void this.dispatchRoundAsync(msgs, firstRound, freshSession, summaryPrefix);
   }
 
-  private async dispatchRoundAsync(msgs: string[], firstRound: boolean): Promise<void> {
+  private async dispatchRoundAsync(
+    msgs: string[],
+    firstRound: boolean,
+    freshSession: boolean,
+    summaryPrefix: string | undefined,
+  ): Promise<void> {
     const record = this.record;
     // ① stale-child 兜底（红线第二级②）：镜像在途子进程活着 → kill 等退出。
     //    引擎已死场景的孤儿由引擎退出链收割兜底（红线第二级①，engine-client）。
@@ -339,8 +417,16 @@ export class ConversationContinuation {
     try {
       this.host.dispatchChatRound(record, {
         // 多条聚合为一轮输入（§3.1：cancel 宽限窗内多条消息按序聚合）。
-        task: msgs.join("\n\n"),
-        resume: firstRound ? undefined : this.resumeAnchor(),
+        // [U4] reopen 降级轮：摘要前缀在前 + 用户消息在后（buildReopenSummaryPrompt
+        // 契约——「接续旧工作」框架先行，指令随后）。
+        task:
+          summaryPrefix !== undefined
+            ? summaryPrefix + msgs.join("\n\n")
+            : msgs.join("\n\n"),
+        // [U4 / §3.2.3] resume 锚点分流：freshSession（首轮 / 锚字段缺失 / reopen
+        // 降级）→ undefined（引擎开新 session，新锚由 run 应答回填）；正常续轮 →
+        // resumeAnchor()（sessionFile 续写原文件）。
+        resume: firstRound || freshSession ? undefined : this.resumeAnchor(),
         signal: controller.signal,
         handlers: {
           onSettled: (outcome) => {
@@ -540,66 +626,74 @@ export class ConversationContinuation {
     this.activeController = undefined;
   }
 
-  // ── D4 revive 格（closed 可重连终态 → revive [+ 非 chatMode 升级] → 续聊）──
+  // ── D4 revive 格（idle → running 翻边 [+ 非 chatMode 升级]）──────────────
 
   /**
-   * 终态分流（onMessage 入口的 record.status !== "running" 分支）。
+   * 状态翻边分流（onMessage 入口的 record.status !== "running" 分支）。
    *
-   *   - user-close/cancelled → 硬拒（D4 表 closed 硬拒格；文案与 endedMessageGuard
-   *     的主动告别分支同语义）；
-   *   - 可重连终态（disconnected/parent-shutdown，RECONNECTABLE_FINAL_REASONS）→
-   *     非 chatMode 升级格（D4 revive 格 v4 显式化：水合保留持久化 chatMode 后，
-   *     `chatMode !== true` 的 record 收到 message → 升级置位 chatMode=true 再续聊；
-   *     语义承接原 cold-resurrect 的无条件置位（U6 已删）——session shutdown 时被
-     *     disposeAllRecords 关成 parent-shutdown 的在途 one-shot 正靠此路径保持可续）
-   *     + D5 gate 前置（conversation 位检查，gate 不过 → 硬拒 + fork/重派指引）；
-   *   - 其余 closed（gc/parent-new/parent-fork）→ 按不可重连硬拒（fork-from 指引）。
+   * [U4 / §3.2.3 万物可续] 两态状态机下任何 idle record 都可续聊——「deliberately
+   * closed」硬拒分支消亡（用户 close 后 message = 隐含寻回：intent 翻回 active 的
+   * 挂点归 U5 意愿动作，见下方留桩），closedReason/stopReason 只是展示位。准入 =
+   * 物理三件套（锚可解析 + 异进程探针 + 归属）：探针/归属已在 getRecordForAction
+   * 冷查链执行（内存 idle record 恒本进程持有）；锚可解析性在派发守卫
+   *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝。
+   * 非 chatMode record 收 message 仍先过升级 gate（D5：unsupported 引擎不升级——
+   * 升级后续聊行为悬空）。
    */
   private reviveOrThrow(): void {
     const record = this.record;
-    // [U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined——markSettled 轮收口 /
-    // 磁盘重建单规则产出）= 可续聊形态：无旧终态遗留位，直接翻回 running 派发
-    //（与旧「跨重启 running 候选接管」等价——不过 chatMode 升级 gate，与既有链路
-    // 行为一致）。守卫段与本分支的合并重写归 U4 准入判据单点。
-    if (record.status === "idle" && record.closedReason === undefined) {
-      if (!tryEnterRunning(record)) {
-        // 判据刚确认 idle——竞态窗口（close/cancel 抢先翻位）的防御分支。
+    // [U4 / §3.2.3 锚失效降级] 检测点在翻边**前**（markReopened CAS 仅收 idle——
+    // U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚字段在但文件不可
+    // 解析（transcript 被回收/外部删除）→ 同 id 带历史重开——round 归零 + epoch+1 +
+    // stopReason=reopened + 新锚 binding（store.markReopened），摘要暂存 pendingReopen
+    // 由派发守卫消费（resume:undefined + prompt 注入）。锚字段缺失（从未开跑）不在此
+    // 分支（无世代可推进，派发守卫按全新 session 直派）。CAS false = 竞态防御
+    //（此刻仍 idle 的前提下理论不可达），响亮上抛。
+    if (record.sessionFile !== undefined && !isAnchorResolvable(record)) {
+      // 摘要快照先于 markReopened（后者 round 归零——摘要须反映重开前的历史轮数）。
+      const summary = buildReopenSummaryPrompt({
+        id: record.id,
+        task: record.task,
+        agent: record.agent,
+        round: record.round ?? 0,
+        ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
+        ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
+        ...(record.result !== undefined ? { lastResult: record.result } : {}),
+      });
+      if (!this.host.reopenRecord(record)) {
         throw new Error(
-          `subagent ${record.id} was closed while the message was being processed — it cannot be messaged. ` +
-          `Recovery: start a new subagent (action:'start').`,
+          `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
+          `while the message was being processed). Recovery: retry the message (action:'message').`,
         );
       }
-      this.host.reviveClosedRecord(record);
-      return;
-    }
-    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-    // 迁移不变量；本守卫与 resurrectClosed 回边的合并重写归 U4 准入判据单点）。
-    if (!(record.status === "idle" && record.closedReason !== undefined)
-      || !isReconnectableFinalReason(record.closedReason)) {
-      const reasonDesc = record.closedReason !== undefined ? ` (closedReason: ${record.closedReason})` : "";
-      throw new Error(
-        `subagent ${record.id} was deliberately closed by user${reasonDesc} — ` +
-        `it cannot be messaged or resumed; nothing can reattach to it. ` +
-        `Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).`,
-      );
+      this.pendingReopenSummary = summary;
     }
     if (record.chatMode !== true) {
-      // D5 gate 前置（双写点②）：gate 不过 → 硬拒 + fork/重派指引，防 unsupported
+      // D5 gate（写点②）：gate 不过 → 硬拒 + fork/重派指引，防 unsupported
       // 引擎升级后续聊行为悬空。
       if (!this.host.upgradeGateAllows(record)) {
         throw engineConversationUpgradeUnsupportedError(record.engine ?? "pi");
       }
       (record as Mutable<ExecutionRecord>).chatMode = true;
     }
-    if (!resurrectClosed(record)) {
-      // closed → running 回边失败 = 竞态终态化（close/cancel 抢先）——按已终态硬拒。
+    if (!tryEnterRunning(record)) {
+      // 判据刚确认 idle——竞态窗口（close/cancel 抢先翻位）的防御分支。
       throw new Error(
         `subagent ${record.id} was closed while the message was being processed — it cannot be messaged. ` +
-        `Recovery: start a new subagent (action:'start').`,
+        `Recovery: retry the message (action:'message'); idle subagents accept messages at any time.`,
       );
     }
+    // 旧终态遗留位清除（对齐 resurrectClosed 桥接语义——closedReason 残留会让
+    // notifyGate 门误拦本轮通知：parent-new/parent-fork/cancelled 在拦截集）。
+    // stopReason 保留：新展示位「上一轮为什么停」（reopen 降级轮 = reopened）在
+    // 轮运行期间保留展示，settle 时由 markSettled 覆写。
+    record.closedReason = undefined;
+    record.endedAt = undefined;
     // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);
+    // [U5 挂点留桩] archived + message = 隐含寻回（§3.2.2 事件表：intent 自动翻回
+    // active）。intent 的「翻回 active」写面原语未接线（markArchived 已有，反向
+    // 原语归 U5 意愿动作单元），本单元放行续聊不拒、寻回翻转留桩 U5 接管。
   }
 }

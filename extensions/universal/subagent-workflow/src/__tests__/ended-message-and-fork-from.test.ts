@@ -240,46 +240,39 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
   // A1：message 拒绝文案两形态
   // ============================================================
 
-  describe("A1 message 拒绝文案分流", () => {
-    it("形态 X：user-close 终态 →「已主动关闭」文案，不再误报 not found", async () => {
+  describe("[U4 缩型] message 拒绝面：形态分流消亡，只剩异进程占用 / 跨树归属 / id 打错", () => {
+    it("user-close 终态 → 放行同 id 续聊（「主动关闭」文案消亡）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-x-close", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "user-close");
 
-      const err = await messageHandler(service, { subagentId: "sa-x-close", text: "hi" }).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(Error);
-      const msg = (err as Error).message;
-      expect(msg).toMatch(/deliberately closed by user \(closedReason: user-close\)/);
-      expect(msg).toMatch(/start a new subagent/);
-      // 不再给出误导性的「历史完好可接续」指引
-      expect(msg).not.toMatch(/fork-from/);
-      expect(msg).not.toMatch(/not found or not owned/);
+      const res = await messageHandler(service, { subagentId: "sa-x-close", text: "hi" });
+      expect(res.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
-    it("形态 X'：cancelled 终态 → 同款「真没了」语义", async () => {
+    it("cancelled 终态 → 放行同 id 续聊", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-x-cancel", rootSessionId: "root-session-cur" });
       writeTombstone(file, "sa-x-cancel");
 
-      await expect(messageHandler(service, { subagentId: "sa-x-cancel", text: "hi" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: cancelled\)/,
-      );
+      const res = await messageHandler(service, { subagentId: "sa-x-cancel", text: "hi" });
+      expect(res.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     });
 
-    it("形态 Y-closed：gc 完成的 done 记录追问 → fork-from 可行动指引 + sessionFile 路径", async () => {
+    it("gc 完成的 done 记录追问 → 同 id 续聊（「reconnectable + fork-from 指引」消亡）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-y-done", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "gc");
 
-      const err = await messageHandler(service, { subagentId: "sa-y-done", text: "follow up?" }).catch((e: unknown) => e);
-      const msg = (err as Error).message;
-      expect(msg).toMatch(/reconnectable/);
-      expect(msg).toContain(file); // 指引必须带出 history 所在文件
-      expect(msg).toMatch(/fork-from/);
-      expect(msg).toMatch(/sourceSubagentId/);
+      const res = await messageHandler(service, { subagentId: "sa-y-done", text: "follow up?" });
+      expect(res.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
-    it("形态 Y-running：断联遗留 running 态异树记录 → 归属差异说明 + fork-from 指引", async () => {
+    it("断联遗留异树记录 → 归属差异说明 + fork-from 指引（归属判据保留）", async () => {
       // 主会话重启后（新 rootSessionId），断联 record 无 sidecar → 分支 4 重建为
-      // running，但 rootSessionId=旧树 → getRecordForAction 拒绝。这是原「ended
-      // cannot be messaged」文案最失真的场景——它并没有结束，只是断联了。
+      // running，但 rootSessionId=旧树 → getRecordForAction 拒绝（归属判据保留）。
       writeSessionJsonl(sessionsDir, { id: "sa-y-stale-running", rootSessionId: "old-root-session" });
 
       const err = await messageHandler(service, { subagentId: "sa-y-stale-running", text: "hi" }).catch((e: unknown) => e);
@@ -342,14 +335,14 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
       expect(fake.runs[0].task.forkSource).toBe(path.join(sessionsDir, "sa-src2.jsonl"));
     });
 
-    it("cancelled 源拒绝（用户主动告别，无接续通道）", async () => {
+    it("[U4 守卫 4 删除] cancelled 源 → 放行分叉（主动告别不再是 fork 例外）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-canxx", rootSessionId: "old-root" });
       writeTombstone(file, "sa-canxx");
 
-      await expect(forkFromHandler(service, { sourceSubagentId: "sa-canxx" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: cancelled\)/,
-      );
-      expect(fake.runs.length).toBe(0); // 守卫拒绝：不进入执行链
+      const r = await forkFromHandler(service, { sourceSubagentId: "sa-canxx" });
+      expect(r.response.newSubagentId).not.toBe("sa-canxx");
+      expect(r.response.sourceSessionFile).toBe(file);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     });
 
     it("worktree 记录拒绝（binding 已丢，防 cwd 回落主仓破坏隔离）", async () => {

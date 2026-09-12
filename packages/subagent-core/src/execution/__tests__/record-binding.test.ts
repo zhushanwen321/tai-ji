@@ -604,12 +604,15 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     expect(chatParams?.recordId).toBe("sa-bind-1");
   });
 
-  it("④ service 面终态不冲突：绑定 + .state(closed) → getRecordForAction 仍拒（终态单向语义保持）", () => {
+  it("④ [U4 万物可续] 绑定 + .state(旧终态遗留位) → getRecordForAction 重建放行（binding 不再被终态位阻断）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
     writeFinalizedState(file, "gc");
 
-    expect(() => service.chatActions.getRecordForAction("sa-bind-1")).toThrow(/not found or not owned/);
-    expect(store.getMutable("sa-bind-1")).toBeUndefined(); // 绑定不越权复活终态 record
+    // [U4 / §3.2.3] 旧终态遗留位只是展示位：binding 身份在 + 锚可解析 → 冷查重建
+    // 注册放行（终态单向语义随终态概念消亡），续聊 resume 续写原文件。
+    const record = service.chatActions.getRecordForAction("sa-bind-1");
+    expect(record.status).toBe("running");
+    expect(store.getMutable("sa-bind-1")).toBe(record);
   });
 });

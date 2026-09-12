@@ -143,14 +143,30 @@ describe("messageHandler 非 chatMode 状态分流（SP-5 one-shot upgrade）", 
     expect(result.response).toEqual({ delivered: true });
   });
 
-  it("终态（done）→ throw ended（含恢复指引）", async () => {
+  it("[U4 万物可续] 旧终态遗留 record（idle + closedReason）→ 升级 chatMode + 放行投递（ended 拒绝格消亡）", async () => {
     const service = makeMockService();
-    const record = makeRecord({ status: "closed" });
+    const record = makeRecord({ status: "idle" });
+    record.closedReason = "gc";
+    (service.getRecordForAction as ReturnType<typeof vi.fn>).mockReturnValue(record);
+
+    const result = await messageHandler(service, { subagentId: "sa-test", text: "hi" });
+
+    // 形态枚举 gate 消亡：非 chatMode → 升级 gate（mock 放行）→ 统一投递
+    expect(record.chatMode).toBe(true);
+    expect(service.deliverChatMessage).toHaveBeenCalledWith(record, "hi");
+    expect(result.response).toEqual({ delivered: true });
+  });
+
+  it("[U4] workflow-origin record → 拒绝（D7 域边界：workflow 编排成员不进 message 通道）", async () => {
+    const service = makeMockService();
+    const record = makeRecord({ status: "idle" });
+    record.origin = "workflow";
     (service.getRecordForAction as ReturnType<typeof vi.fn>).mockReturnValue(record);
 
     await expect(
       messageHandler(service, { subagentId: "sa-test", text: "hi" }),
-    ).rejects.toThrow(/has ended/);
+    ).rejects.toThrow(/workflow-origin record/);
+    expect(service.deliverChatMessage).not.toHaveBeenCalled();
   });
 
   it("归属守卫：getRecordForAction throw 时透传（not found or not owned）", async () => {
