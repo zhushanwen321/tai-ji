@@ -133,7 +133,7 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 ## 演进 / 调研 / 历史
 
-- [重构迁移计划](architecture/history/refactor-2026-06/migration-plan.md) — 2026-06 重构期 5 阶段路线（已归档） · [术语对齐](architecture/terminology.md) R1–R5
+- [重构迁移计划](architecture/history/refactor-2026-06/migration-plan.md) — 2026-06 重构期 5 阶段路线（已归档） · 术语对齐 R1–R5 已落地进代码，术语以 [architecture/context.md](architecture/context.md) 为准（原 terminology.md 已删除，git 可追溯）
 - [架构调研](architecture/research/) — Electron 打包 · Node.js 路径安全 · Pi Extension 通道
 - [历史归档](architecture/history/) — 被 supersede 的旧架构（pre-electron Tauri 方案等）
 

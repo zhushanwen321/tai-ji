@@ -630,7 +630,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ## §7 Plugin 渲染体系（架构层）
 
-> 详见 `docs/architecture/renderer-target-architecture.md`（架构 SSOT）。本节给摘要。
+> 架构细节见 git 历史 renderer-target-architecture.md（架构 SSOT，已删除）。本节给摘要。
 
 ### 7.1 统一架构判定
 
@@ -683,7 +683,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ## §8 落地改动点（前端整体架构重构）
 
-> 结合 [`v6-architecture-refactor.md`](../architecture/v6-architecture-refactor.md)（现状审查+缝补）+ [`renderer-target-architecture.md`](../architecture/renderer-target-architecture.md)（终态架构）。
+> 结合 v6-architecture-refactor.md（现状审查+缝补）+ renderer-target-architecture.md（终态架构）——两份架构文档已删除，git 历史可追溯。
 > 时序：阶段 0 → A → B → C。
 
 ### 8.1 阶段 0：测试基础设施（最先，为重构护航）
@@ -717,7 +717,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 8.4 阶段 C：v6 视觉层（token 反写 → 分视图）
 
-> 阶段 C 属 v6 视觉线，`v6-architecture-refactor.md`（架构线）不含此阶段（架构线止于阶段 B）。C1-C8 由本文档定义。
+> 阶段 C 属 v6 视觉线，v6-architecture-refactor.md（架构线，已删除 git 可追溯）不含此阶段（架构线止于阶段 B）。C1-C8 由本文档定义。
 
 | 波次 | 内容 |
 |---|---|
@@ -789,7 +789,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | 可运行参考 | `.tmp/v6/`（demo 项目） | ✅ token 真值与组件实现 |
 | 设计 SSOT | `v6-design.md` | 已删除（2026-09-13，残值并入本文档 §5/§6 并标注来源，git 可追溯） |
 | 设计总览 | `v6-summary.md` | 已删除（2026-09-13，纯索引/摘要无独立残值，git 可追溯） |
-| 架构 SSOT | `../architecture/renderer-target-architecture.md` / `../architecture/v6-architecture-refactor.md` | ✅ 保留（架构细节本文档 §7-§8 摘要引用） |
+| 架构 SSOT | renderer-target-architecture.md / v6-architecture-refactor.md | 已删除（2026-09-13 docs 清理，git 可追溯；架构细节本文档 §7-§8 摘要承载） |
 | HTML spec（15 份） | `v6-spec-*.html` | 降级为视觉标注参考（部分已滞后于 demo） |
 | HTML demo（3 份） | `v6-demo.html` / `v6-drawer-tabs-demo.html` / `v6-plugin-max-demo.html` | 降级为早期 HTML 探索稿（已被 `.tmp/v6/` Vue demo 取代） |
 | 过程文档 | `v6-review-*.md` / `v6-fix-plan.md` / `v6-review-action-plan.md` | 已删除（裁决已收敛进本文档 §9；UI 演变叙事合并至 `../design-evolution.md`） |

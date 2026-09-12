@@ -54,14 +54,14 @@
 | # | 目标 | 使用者视角 |
 |---|------|-----------|
 | G1 | 长驻进程 + 零冷启动 | zsw 用户跑 map-reduce 多任务，第 2 个起 subagent 启动耗时从 ~1.5s 降为 ~0 |
-| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；xyz-agent 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）依赖 relay 通道建设（`subagent-realtime-channel.md` 已论证 launcher 层模式可复制），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
+| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；xyz-agent 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）依赖 relay 通道建设（subagent-realtime-channel.md 已论证 launcher 层模式可复制——该文档已删除，git 可追溯，机制沉淀在 relay/relay.mjs 与 pi-invocation.ts 注释），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
 | G3 | per-session model | 同一常驻进程上，任务 A 用 GLM-5.3、任务 B 用 mimo-v2.5，互不干扰 |
 | G4 | 宿主零改动 | pi 壳与 zsw 壳不改一行代码、不发 breaking 版本即获得上述收益 |
 | G5 | 漂移防御内化 | zcode 平台升级导致协议漂移时，core probe/golden/conformance 承接，宿主无感或按 capabilities 声明自适应 |
 
 **in scope**：zcode engine 常驻化（连接层 + 会话层 + launcher 双模式）；EnginePort `dispose()` 停机面；abort 链从杀进程改 `session/stop`；capabilities 升级（仅 eventGranularity）；probe / golden 语料 / conformance 套件适配；spawn 降级路径保留（见 D2）。
 
-**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI relay 实时通道建设（`subagent-realtime-channel.md` 已论证模式可复制，launcher 层加环境分支即可复用，不提前建设）；zsw 宿主与 pi 壳的任何改动。
+**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI relay 实时通道建设（subagent-realtime-channel.md 已论证模式可复制——已删除，git 可追溯，launcher 层加环境分支即可复用，不提前建设）；zsw 宿主与 pi 壳的任何改动。
 
 ## §2 现状与问题分析
 
