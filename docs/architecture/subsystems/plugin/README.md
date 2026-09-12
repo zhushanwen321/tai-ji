@@ -2,7 +2,13 @@
 
 插件系统全部设计、实现和规划文档的索引。
 
-**当前落地设计**见 [plugin-rendering/](../../plugin-rendering/README.md)（2026-08 总纲）；本目录保留 2026-05 期的融合设计与外部参考分析，进度类文档（status / roadmap / remaining-work / extension-audit）已归档至 [history/refactor-2026-06/subsystems-plugin/](../../history/refactor-2026-06/subsystems-plugin/)。
+**plugin 渲染体系已落地**（renderer-rebuild-v2 P4/P5 + 2026-08 M17 wave 全部交付）。现行权威入口：
+
+- 协议 SSOT：[extension-gui-protocol.md](../../extension-gui-protocol.md)（§4 五个渲染入口的 GUI 镜像 / §4.3 widget → M17 对话流面板 / §15 挂载实现现状）
+- 架构：[renderer-rebuild-architecture.md](../../renderer-rebuild-architecture.md) §6（ExtensionHost / 挂载点注册表 / contribution schema v2）
+- 视觉规格：`docs/page-design/v6-spec-plugin-rendering.html`（组件级权威）与 `docs/page-design/v6-plugin-max-demo.html`（全景 mockup）
+
+2026-08 的执行设计集（原 `plugin-rendering/` 目录，六文件：挂载点/view 概念分离、drawer 旧 widget 适配废弃、slash 收编、M16 接线、M17 widget 面板）已全部交付并删除，git 可追溯；关键决策记录见 extension-gui-protocol.md §13 决策日志（含 M17 挂载点定稿）。本目录保留 2026-05 期的融合设计与外部参考分析，进度类文档（status / roadmap / remaining-work / extension-audit）已归档至 [history/refactor-2026-06/subsystems-plugin/](../../history/refactor-2026-06/subsystems-plugin/)。
 
 ## 阅读顺序（新成员推荐）
 

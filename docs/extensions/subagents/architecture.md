@@ -139,7 +139,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 主题 | 文档 |
 |---|---|
-| 引擎中立抽象 | [docs/architecture/subagent-engine-abstraction.md](../../architecture/subagent-engine-abstraction.md) |
+| 引擎中立抽象（已归档：被引擎协议化取代） | [docs/architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md](../../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md) |
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
 | 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
 | 体系深化设计（方案层，含体系图与术语） | [docs/design/subagent-post-convergence-architecture.md](../../design/subagent-post-convergence-architecture.md) |

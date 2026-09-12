@@ -2,7 +2,7 @@
 
 > 层声明：本文档是「架构重构方案层」设计——把双轨收敛收官（912440a6f，2026-09-03）后的架构走查发现收敛为三组可实施深化方案。下一层产物是**各组的实现计划与代码任务**，不跨层到逐函数实现细节。
 >
-> 上游资产：[subagent-dual-track-convergence.md](subagent-dual-track-convergence.md)（双轨收敛，已落地）、[subagent-core-package-extraction.md](subagent-core-package-extraction.md)（core 抽包 + D5 barrel 定稿，已落地）、[subagent-engine-abstraction.md](../architecture/subagent-engine-abstraction.md)（引擎中立抽象）。
+> 上游资产：[subagent-dual-track-convergence.md](subagent-dual-track-convergence.md)（双轨收敛，已落地）、[subagent-core-package-extraction.md](subagent-core-package-extraction.md)（core 抽包 + D5 barrel 定稿，已落地）、[subagent-engine-abstraction.md](../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md)（引擎中立抽象，已被引擎协议化取代）。
 
 ## 1. 背景目标
 

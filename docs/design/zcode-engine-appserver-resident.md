@@ -277,7 +277,7 @@ A1/A2/A3/A4/A6/A7 为必过门（真机）；A5 的 ①为回归门、②③为�
 
 **文档同步清单**（W6 内完成，防再次出现决策滞后）：
 
-1. `docs/architecture/subagent-engine-abstraction.md`：D10 与 §1 scope-out 行补「已由 app-server 终态决策超越（2026-08-30），实施见本设计」注记；实施状态段补 W1-W6 落地记录。
+1. `docs/architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md`：D10 与 §1 scope-out 行补「已由 app-server 终态决策超越（2026-08-30），实施见本设计」注记；实施状态段补 W1-W6 落地记录。
 2. `docs/design/subagent-core-package-extraction.md` D6-⑥：补「P3 常驻回归已提前实施，见 zcode-engine-appserver-resident.md」注记（原文保留——2c 退役是当时的正确事实）。
 3. zsw 仓决策记录：状态从「待实施」更新为实施进度（跨仓 PR 同步）。
 4. `.xyz-harness/subagent-engine-abstraction/decisions.md` D-010：追加 revisit 行（终态决策时间与出处），不改写原决策记录。

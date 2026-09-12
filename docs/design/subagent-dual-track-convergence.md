@@ -2,7 +2,7 @@
 
 > 层声明：本文档是「架构重构方案层」的设计——把架构走查（2026-09-02，三分支并行 explorer 走查 + 主 agent 抽查实证）发现的 8 个摩擦点收敛为可实施的分组方案。下一层产物是**各组的实现计划与代码任务**（逐文件迁移清单、测试切换清单），不跨层到逐函数实现与具体测试用例。
 >
-> 上游资产：[subagent-engine-abstraction.md](../architecture/subagent-engine-abstraction.md)（引擎中立抽象，D1-D12，P1-P5 已落地）、[subagent-core-package-extraction.md](subagent-core-package-extraction.md)（core 抽包 + HostServices，已落地）、subagent-engine-gui-visibility.md（record 通道引擎中立；已删除，git 可追溯，现行权威 = [subagent-engine-protocolization.md](subagent-engine-protocolization.md)）。
+> 上游资产：[subagent-engine-abstraction.md](../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md)（引擎中立抽象，D1-D12，P1-P5 已落地；已被引擎协议化取代）、[subagent-core-package-extraction.md](subagent-core-package-extraction.md)（core 抽包 + HostServices，已落地）、subagent-engine-gui-visibility.md（record 通道引擎中立；已删除，git 可追溯，现行权威 = [subagent-engine-protocolization.md](subagent-engine-protocolization.md)）。
 
 ## 1. 背景目标
 
