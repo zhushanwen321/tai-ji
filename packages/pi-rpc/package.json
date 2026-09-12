@@ -1,0 +1,26 @@
+{
+  "name": "@zhushanwen/pi-rpc",
+  "version": "0.1.0",
+  "description": "Shared pi process RPC layer for xyz-agent: spawn argv builders (main-agent / subagent templates), LF-only NDJSON framing with pending registry + tiered timeouts, command frame assembly, SIGCONT-first kill chain, and pi outbound env composition. Extracted verbatim from runtime rpc-client and pi-subagent-cli (design docs/design/subagent-permanent-session-model.md §3.3.2).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  }
+}
