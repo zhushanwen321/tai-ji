@@ -6,12 +6,6 @@ import { readFileSync } from 'fs'
 // __APP_VERSION__ 展示应用版本（与 electron 包一致），读 apps/electron/package.json（单一版本源）。
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../apps/electron/package.json'), 'utf-8')) as { version: string }
 
-// P0 coexistence spike：构建期共存 flag。NEW_ARCH=1 时整个构建切换到新壳骨架入口
-// （vite define 注入 globalThis.__NEW_ARCH__ + input/outDir 切到 dist-new），未设 flag 时
-// 构建行为与现状完全一致（ES1 安全默认）。消费方：main 进程 window-factory.ts 的
-// resolveRendererEntry(process.env.NEW_ARCH)（同源同值，避免 main loadFile 与 renderer 自认架构不一致）。
-const newArch = process.env.NEW_ARCH === '1'
-
 // 裸跑（不经 dev-instance.mjs 装配器）时的 Vite 端口；与 runtime dev 端口 3310 / CDP 9222
 // 同属「裸跑端口组」，改值须同步 dev-instance.mjs 旧用法兼容注释与 troubleshooting 文档。
 const DEFAULT_VITE_PORT = 1420
@@ -29,9 +23,6 @@ export default defineConfig(({ mode }) => {
       // 用 globalThis.__X__ 形式：vite define 会替换 globalThis 属性访问（vitest 不继承 build 的 define，
       // 但 data.ts 用可选链兜底，vitest 下为 undefined → 空串，不影响测试）。
       'globalThis.__E2E_SAMPLE_PROJECT_CWD__': JSON.stringify(env.VITE_E2E === 'true' ? e2eSampleCwd : ''),
-      // P0 coexistence spike：构建期 flag，读 process.env.NEW_ARCH，默认 false，复用现有 define 模式。
-      // 烘焙为字面 boolean；P0 无业务消费者（consumerCount=0），P3 域级灰度时各域模块按此分支。
-      'globalThis.__NEW_ARCH__': JSON.stringify(newArch),
     },
     // 打包后通过 file:// 协议加载，必须用相对路径，否则 /assets/ 解析到文件系统根目录
     base: './',
@@ -59,9 +50,7 @@ export default defineConfig(({ mode }) => {
       target: 'esnext',
       // 产物输出到 apps/electron/renderer/dist（与 main 进程 loadFile 路径一致，
       // electron-builder files 直接包含 renderer/dist/**/*）。dev 模式不读 outDir。
-      // P0 coexistence spike：NEW_ARCH=1 时切换入口/输出目录到新壳骨架（dist-new），
-      // 证明「构建期可按 flag 选入口」接缝机制；未设 flag 时以下两行与现状完全一致（ES1）。
-      outDir: resolve(__dirname, newArch ? '../../apps/electron/renderer/dist-new' : '../../apps/electron/renderer/dist'),
+      outDir: resolve(__dirname, '../../apps/electron/renderer/dist'),
       emptyOutDir: true,
       // [W31 D-8] codeSplitting.groups = rolldown 1.1.4 的 manual chunking（rolldown 文档 §manual-code-splitting）。
       // rollupOptions.output.manualChunks / advancedChunks 均已被 rolldown 标记 deprecated（manualChunks 仅支持
@@ -83,7 +72,7 @@ export default defineConfig(({ mode }) => {
       // 未命中任何组的模块（含 @shikijs/langs/*、mermaid、业务共享模块）回退 automatic chunking。
       rolldownOptions: {
         input: {
-          main: resolve(__dirname, newArch ? 'new-arch/index.html' : 'index.html'),
+          main: resolve(__dirname, 'index.html'),
         },
         output: {
           codeSplitting: {

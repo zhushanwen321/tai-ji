@@ -24,7 +24,6 @@
     "extensions:lint": "node scripts/check-stale-ctx-audit-coverage.mjs && npx eslint extensions/",
     "extensions:test": "pnpm -r --filter '@zhushanwen/pi-*' test",
     "extensions:test:isolated": "pnpm -r --filter '@zhushanwen/pi-*' test:isolated",
-    "verify:coexistence-flag": "node scripts/verify-coexistence-flag.mjs",
     "gen:builtin-providers": "node packages/runtime/scripts/gen-builtin-providers.mjs",
     "prebuild": "node packages/runtime/scripts/gen-builtin-providers.mjs"
   },
