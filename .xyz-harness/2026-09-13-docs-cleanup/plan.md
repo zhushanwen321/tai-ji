@@ -74,11 +74,12 @@ docs/
 │
 ├── testing/                      # 19 份文件名全保留，内容手术（§3.7）
 │
+├── todo/                         # 20 份 = 4 份开放项 + ext-simplify/ 16 份（待决策，用户裁决暂留）
 └── feature-map/
     └── 2026-09-11.md             # 只留最新一份滚动
 ```
 
-终态总量：根级 9 + adr 68 + architecture 22（含 history/22 与 research/4）+ design 22 + extensions 37 + page-design ~11 + testing 19 + feature-map 1 ≈ **189 份**（现 767，约 -75%）。
+终态总量：根级 9 + adr 68 + architecture 22（含 history/22 与 research/4）+ design 22 + extensions 37 + page-design ~10 + testing 19 + todo 20 + feature-map 1 ≈ **208 份**（现 767，约 -73%）。
 
 ## 2. 整合方案（跨文件合并，共 6 项）
 
@@ -88,7 +89,7 @@ docs/
 | I2 | 滚动跟随不变量 | `chat-pin-bottom-fix.md` 的 INVAR-M4-2′ 迁入 `architecture/conversation-stream-block-rendering.md`（该文档已引用它），原文 S | `scripts/check-scroll-follow.mjs` 注释同步 |
 | I3 | 稳定性调研收口 | `long-run-stability-prevention-deep-dive.md` 已实施项（O4-A 等）从正文删、未实施项并入 `long-run-stability-architecture.md`，原文件 D | — |
 | I4 | 例外登记簿出 ADR | ADR-0049 的 ~80 行例外表迁至 `taste-lint` allowlist 或 `use-session-scoped-state.ts` 头注释；ADR 只留裁决判据 | ADR-0049 Checklist 段保留 |
-| I5 | v6 设计收口 | `page-design/v6-design.md`、`v6-summary.md` 残值并入 `v6-master-spec.md` 后 D；`design-system.md` 活跃裁决（Notice Family）并入 master-spec，Card 原语细节 S 至 packages/ui 组件注释 | `design-tokens.md` 与 v6-tokens.css 双真值收敛单 SSOT（另立小任务） |
+| I5 | v6 设计收口 | `page-design/v6-design.md`、`v6-summary.md` 残值并入 `v6-master-spec.md` 后 D；`design-system.md` 活跃裁决（Notice Family）并入 master-spec，Card 原语细节 S 至 packages/ui 组件注释 | design-tokens.md 双真值收敛已裁决为 css 唯一权威（见 §3.8 废弃方案），不再另立任务 |
 | I6 | 换色决策转正 | `page-design/2026-08-02-taiji-v3-color-decision.md` 转 ADR 格式迁入 `docs/adr/` | adr/README 索引补 0064/0065 时一并登记 |
 
 明确**不整合**：subagent-* 架构 7 份演进文档（互相引用 + 被源码注释锚点引用，合并 = 全部锚点重写，成本 > 收益；靠 ADR/代码锚点维持演进链）。
@@ -107,7 +108,7 @@ docs/
 | 域 | 文件（代表） | 下沉目标 |
 |---|---|---|
 | extension 域（20） | base-tool-enhance、bridge-rewrite-pi-0.84、structured-output-redesign、rename-session-three-modes、plugin-intercept-injection、subagent-engine-awareness-injection、subagent-sync-collect(+v2) | `extensions/<pkg>/src/` 模块头注释 + 包 README（契约 SSOT 已在 `packages/extension-protocol`，删重复陈述） |
-| ext-simplify-01~15（15） | **01/02 已实施 → S**；**9 份未审查 → 暂 K 待用户裁决是否继续做**；已实施其余 → S | 各包源码注释 |
+| ext-simplify-01~15（15+index，用户裁决 2026-09-13） | **全部移入 `docs/todo/ext-simplify/`（含 index），待决策是否继续执行**——不删不下沉；docs/todo/ 终态相应 +16 | — |
 | runtime 域（22） | idle-pi-reclamation、rpc-client-early-frame-buffer、runtime-stream-fault-isolation、session-dead-structural-fixes、session-occupancy-send-closure、sidecar-binding-sync、import-session、real-pi-test-hardening、update-*×3、timeout-streaming-ui-idle、timeout-slow-flow-wallclock、timeout-plugin-service-granularity、timeout-audit-hygiene-batch、pr-lifecycle-workflow、genstats-speed-llm-window | `packages/runtime/src/` 对应模块头注释（如 idle-pi-reclamation → `idle-pi-reaper.ts`「为什么跳过 bus.clearSession/PTY/插件 destroy」）；`update-*` 三篇 → update 域模块注释；timeout 类裁决已被 AGENTS.md 规则 19 承载，只蒸馏各文件独有的坑 |
 | renderer/core 域（21） | chat-pin-bottom-fix（INVAR 先行 I2）、bash-running-stream-output、message-stream-editing-pin-identity、steer-followup-user-bubble-display、subagent-drawer-blank、subagent-nonpi-visibility-followups、subagent-sidebar-filter、composer-*×4、model-thinking-level-memory、landing-composer-session-file-symbols、catalog-provider-field-authority、coding-plan-quota-config-ux、llm-retry-settings、usage-page-fixes、release-artifact-size-optimization(+batch3) | `packages/renderer/src/composables/` / `packages/ui/src/features/` 对应文件头注释（如 chat-pin-bottom-fix 根因 → `useVirtuaFollow.ts` 头注释：virtua 0.50.0 坐标语义 + rAF-RO 时序坑） |
 | 混合（1） | subagent-core-unbounded-wait-audit | 裁决框架已被 AGENTS.md 规则 19 引用为权威：把「权威裁决」段落迁入 AGENTS.md 引用的稳定位置（或 ADR 化），普查明细 D。**AGENTS.md 规则 19 引用需同步改** |
@@ -159,9 +160,18 @@ docs/
 
 ### 3.8 根级 + feature-map/ + page-design/
 
-- 根级 9 份全保留；`standards.md` R（§2.1/§7.1/§9.1 改 lint 指针；§6 删指向 architecture.md；§3/§7.2 S；§7.2.6 死条目 D）；`troubleshooting.md` R（§3.7 见 troubleshooting 三分类：pi 坑机制长文删、留症状+grep+指针；#12/#13 留三行命令；修 git-service.ts 载体名漂移）
+**skill 消费核查（2026-09-13，用户裁决「根级文档期望被 skill 用到，原则层多保留」）**：
+- pr-cr-fix **深度消费** `constraints.json`（select-constraints → 8 个 review agent 全接「权威源」列）与 `standards.md`（review-business-logic 消费 §3.3 streaming 时序 / §4.1 session 双状态 / §5 持久化同步三规则）
+- dev-flow 对根级 9 份无直接引用（其 L0 守卫跑项目 hook、阶段 6 走 design-code-sync）——根级文档对 skill 的供给经 AGENTS.md + constraints 间接达成
+- **处置影响**：standards.md 手术范围收窄——被 review agent 引用的三节保留可引用状态（§3.3 保留时序规则、改写为版本无关表述并删 v3 类名/CSS 细节；§4.1/§5 原样保留）；原则层内容（§1 外部系统对接 / §2.2 引用计数 / §2.3 错误路径 / §8 Mock 边界 / §10 重构范式）全部保留不压缩。原计划的 467→200 行放宽为 467→约 280 行（只删 lint 逐字重复、§6 整章、§7.2 死条目与局部细则）
+
+- 根级 9 份全保留；`standards.md` R（按上述收窄范围）；`troubleshooting.md` R（pi 坑机制长文删、留症状+grep+指针；#12/#13 留三行命令；修 git-service.ts 载体名漂移）
 - `feature-map/`：保留 `2026-09-11.md`，其余 5 份 D（删前把 09-11 内旧版链接改 git 历史说明）
 - `page-design/`：v6-design/v6-summary D（I5）；design-system.md 活跃内容并入 master-spec 后 A；usage-dashboard.md D（已上线，细节 S 至组件）；`session-trace/`、`streaming-trace-window/`、`markdown-filepath-redesign/` 子目录 D（一次性工作流产物，按 README 应在 harness）；其余 K
+- **design-tokens.md 废弃方案（用户裁决 2026-09-13：只以 css 为准）**：
+  1. design-tokens.md 头部已自我降位（「以 master-spec §4 + v6-tokens.css 为准，保留作历史决策追溯」），独有价值 = 「来源」列决策叙事（2026-07-09 提亮对标 VS Code Dark+、07-12 Δ13 层级拉距、WCAG 4.5:1 校准）
+  2. 步骤：① 叙事蒸馏为 `v6-tokens.css` 分组/行内注释（css 已有注释文化，只补 why）；② **阻断点**：亮色族值目前仅存于 md 亮色表（css 注释「亮色族值见 design-tokens.md」）——先固化亮色值到 `packages/renderer/src/style.css` [data-theme=light] 实装块（或 v6-tokens.css 扩展块）；③ `git rm` design-tokens.md；④ `.githooks/check_css_token_ssot.py` 改向：style.css :root token ⊆ **v6-tokens.css**（名字集合校验，逻辑不变只换对照文件）；⑤ 全仓 grep 清理指向 design-tokens.md 的引用（AGENTS.md / standards.md / scripts 3 处 / pr-cr-fix）
+  3. 换色决策叙事已由 `2026-08-02-taiji-v3-color-decision.md`（I6 转正 ADR）承载，md 删除无叙事损失
 
 ## 4. 引用链同步清单（已核查，Batch 0 / 同批执行）
 
@@ -187,6 +197,8 @@ docs/
 | **Batch 3** | 下沉：design 63 + architecture 25 + extensions 11 → 蒸馏「为什么/坑」到目标注释后删（按域分 3 小批：extension → runtime → renderer/core） | ~99 份 | 每份下沉前跑目标包 `pnpm --filter <pkg> test`；tsc/eslint 双绿 |
 | **Batch 4** | 整合 I1-I6 + ADR 瘦身 + adr/README 补索引 + docs/README 治理规则更新（补「单模块设计 → 蒸馏后删；为什么进模块注释 + ADR 锚点；过程产物落 .xyz-harness/ 不进 docs」）+ docs/README.md 目录树与实际终态对齐 | 6 整合 + 66 ADR | 全 grep 校验 + `render-constraints.mjs` 绿 |
 
-**流程改造（防反弹）**：review/impl-plan/acceptance 类工作流产物从源头改落 `.xyz-harness/<date>-<slug>/`（docs/README.md 规则已有，dev-flow/tech-design skill 的产物路径需同步检查）；`ext-simplify` 9 份未审查设计保留待用户裁决。
+**流程改造（防反弹）**：review/impl-plan/acceptance 类工作流产物从源头改落 `.xyz-harness/<date>-<slug>/`（docs/README.md 规则已有，dev-flow/tech-design skill 的产物路径需同步检查）；ext-simplify 16 份已按用户裁决移入 `docs/todo/ext-simplify/` 待决策。
 
-**遗留小任务**（不阻塞清理）：design-tokens.md 与 v6-tokens.css 双真值收敛；data-source-registry.md 长期演进为「配置生成」（其自述终态）。
+**遗留小任务**（不阻塞清理）：data-source-registry.md 长期演进为「配置生成」（其自述终态）。
+
+**用户裁决记录（2026-09-13）**：① 根级 9 份原则层多保留（standards 手术范围已收窄，pr-cr-fix 消费章节全保）；② ext-simplify-01~15+index 移入 docs/todo/ 待决策；③ design-tokens 双真值 → css 唯一权威，v6-tokens.css 补 why 注释后废弃 md（含亮色表固化阻断点 + hook 改向）。
