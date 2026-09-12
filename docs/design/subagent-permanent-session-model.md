@@ -313,8 +313,8 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 2. **锚的承载**：内存 record 的 `transcriptRef` 字段（替代裸 sessionFile 的引擎专属性）；磁盘 = `.record-binding` 增 `transcriptRef` 块 + 主 session entry 的 engineHandle.sessionRef（已有，record-entry.ts:99）。
 3. **锚的消费**：续聊链三处硬拒点（conversation-continuation.ts:260-263 锚点守卫 / record-store.ts:910-914 markResurrected 无锚 throw / actions-core.ts:752-759 fork-from 守卫 6）统一改为「按 transcriptRef.engine 分派」：
    - pi → 现状路径（`--session <file>` 续写原文件）；
-   - zcode → 引擎侧新实现：interact(message) 恢复会话。底层机制 = zcode `--resume` 冷启动（capabilities 已声明 `resume:"cold"`，zcode-engine.ts:187）或 app-server session/create 带 resume 语义——**具体协议选型待实施设计验证**（见 §5 待验证清单）：zcode app-server 的 session/create 键集是 strict 的（session-channel.ts:557-587），是否接受 resume/sessionId 参数需真机探针确认。
-4. **zcode conversation 能力位**：`capabilities.conversation` 从 `unsupported` 升为 `cold`（新值：冷恢复会话，无热 steering）——capability-gate 的 message 升级 gate（run-orchestration canUpgradeToConversation :1394-1401）自动放行 zcode record 的 chat 升级。`steer` 维持 unsupported（interrupt=true 的 message 对 zcode 先做「等轮结束再投」降级，映射 followUp 语义，capabilities 声明如实）。
+   - zcode → **P-1 探针已测（2026-09-13，zcode 0.16.5 真机 6 轮）**：`session/resume {sessionId}` 原生存在（strict 键集）且**应答自带完整双向 messages 历史**（user/assistant 全量、tokens、parts、timeline 事件、会话快照）——读通道完全成立；但 **resume 后原会话 send 被 -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE` 卡死**（restoreWarning 挂起；provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除——bundle 内部 setModel 路径有清除逻辑、协议 handler 未接通）；CLI `--resume` flag 对 app-server 子命令不生效（create 返回新 id 无预绑定）；`session/fork` 需 workspace checkpoint 非轻量通道。**选型结论：zcode 续聊 = resume 读通道取结构化历史 + `session/create` 新会话注入首轮**——与 §3.2.3 reopen 机制同构（每次续聊换新 sessionId，record.transcriptRef 更新新锚，旧 sessionId 历史仍可经读通道回溯，round/epoch 不变），零依赖 -32031 修复，token 成本经 resume 应答自带的 tokens 数据做裁剪预算。探针脚本：`.tmp/probe/zcode-resume-probe*.mjs` + `fs-patch.cjs`（复刻 launcher 注入）。
+4. **zcode conversation 能力位**：`capabilities.conversation` 从 `unsupported` 升为 `cold`（新值：冷恢复会话——resume 读 + 新 session 注入，无热 steering）——capability-gate 的 message 升级 gate（run-orchestration canUpgradeToConversation :1394-1401）自动放行 zcode record 的 chat 升级。`steer` 维持 unsupported（interrupt=true 的 message 对 zcode 先做「等轮结束再投」降级，映射 followUp 语义，capabilities 声明如实）。
 5. **entry-born 形态消亡**：zcode record 有了 transcriptRef，`finalizeEntryOnlyOrphan` 直断分支删除（见 3.2.3 删除清单）——Gate B F2（缓存重建缺员）与 F3（纳管态误结案）随 anchor 统一自动消解。
 
 **zcode 会话库资源生命周期（风险登记，四要素）**：万物可续聊后，zcode 隔离库（`<engineDataDir>/engines/zcode/session-db/db.sqlite`，含每会话全量 turns）成为单调累积写入面——每 subagent 每轮追加、reopen 再开新 sessionId 继续追加。要素登记：①**量级** = 会话数 × 轮均体积（sqlite 全量 turns，量级与 pi 侧 jsonl transcript 同源同阶；实施期以真实库采样校准，设计期上界假设 <1MB/会话）；②**清理通道（本设计锁定的约束）** = zcode 库条目 TTL **必须与 pi transcript 同窗 30 天**——通道二选一在实施设计定：引擎侧 sweep（协议加清理方法，宿主周期调）或宿主侧清库（写库并发/锁窗口评估）；通道落地前不得发布「zcode 万物可续聊」；③**恢复路径** = 条目被清 = 锚失效 → 自动走 reopen 降级（§3.2.3），无需人工恢复；④**重审条件** = 库体积 >100MB 或活跃条目 >1000（数字实施期校准）触发 TTL 窗口复审。**执行锚**（防纯文本承诺静默失效）：本约束随 U6 落地时登记进 constraints.json（C-data 系新条目，pre-commit / CI 检查按路径触发），S3 验收补通道存在性断言（zcode 库条目超窗被清 + 清后 message 走 reopen 降级）；**约束登记与 TTL 通道属同一发布单元，不拆分发布**（防「锚先合、通道后合」的裸奔窗口）。
@@ -428,16 +428,16 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | K3 | 锚失效 → 同 id 带历史重开（reopen） | fork-from 新 id / 硬拒 | 方案对比 3 |
 | K4 | cancel=暂停 / close=归档+worktree 回收 / 无显式 delete | cancel/close 终态化（现状） | handoff 共识（用户已接受分界）；worktree 占磁盘大，30 天保留不成立（git-cwt worktree 含 node_modules） |
 | K5 | `.state` 降权为「上一轮收条」，重建矩阵收敛为「一律 idle」 | 保留终态权威语义 | 无终态后死亡证明无对象；崩溃恢复分支数 4→1 |
-| K6 | transcriptRef 引擎中立（pi=sessionFile / zcode=sessionId+dbPath），承载 binding + entry | pi 专用的 sessionFile 字段继续扩张 | zcode sessionId 已在 onHandleReady 回传（zcode-engine.ts:455-465），缺的只是消费链 |
+| K6 | transcriptRef 引擎中立（pi=sessionFile / zcode=sessionId+dbPath），承载 binding + entry；zcode 续聊 = resume 读通道取历史 + 新 session 注入（P-1 已测） | pi 专用的 sessionFile 字段继续扩张；原地 resume 续聊（被 -32031 卡死，P-1 探针） | zcode sessionId 已在 onHandleReady 回传（zcode-engine.ts:455-465），缺的只是消费链；resume 应答自带全量双向历史（P-1），注入形态与 reopen 机制同构 |
 | K7 | 公共包 @zhushanwen/pi-rpc 独立新包 | 进 SDK / 只提类型 | 方案对比 2；两引擎 SDK 依赖纪律 |
 | K8 | busy 判定位置保留两侧差异，公共化判读器与词汇 | 强行统一前置预检或后置裁决 | §2.4 #5：GUI 与 agent 消费方不同，真差异 |
 | K9 | zcode conversation 能力 = cold（冷恢复，无 steer）；interrupt 降级 followUp | 等待 zcode 热会话能力 | session/send busy 时 -32010 硬错是结构保证（zcode-engine.ts:1174-1180），不越权改引擎 |
 | K10 | 编排性关闭（宿主 session fork/new）= 自动收起（intent=archived + interrupted-by-parent，回 idle 不终态化）；迟到回注按归档静默承接（v4 A-6 僵尸回执防御不回退） | 维持终态化（旧 disposeAllRecords 语义） | 主 session 已分叉，旧 record 不属新活跃列表；终态化会剥夺旧 session 树内的寻回（§2.3 矩阵「被视为告别」失败模式） |
 | K11 | 迟到回注通知 gate 从 closedReason 集合改为三元组：intent=archived 静默 / 放弃轮标记命中阻断（per-round 单槽 {epoch, round}，防双发）/ 收口轮豁免 | 「归档后一律静默」单判据；纯轮号比较（吞快速续聊正常通知） | 单判据吞收口轮通知（用户专门等的最后一轮）；cancelled/parent-* 两阻断分支是已修复事故的防御，必须逐一承接（r2 影响面审查 MF）；纯轮号判据的反例 = 轮 N 正常 settle 后立即续聊 N+1，轮 N 异步回注排队晚到不该被吞（r3 影响面审查） |
 
-**运行时行为断言与探针**（实施期门，设计期不可跑）：
-- P-1：「pi `--session` 续写 + zcode resume 冷启动恢复历史」两侧真机探针（zcode session/create 是否接受 resume 键——K6 前置）；
-- P-2：「reopen 摘要注入后 subagent 第一轮能正确引用历史结论」真机场景验收（§4 S4）；
+**运行时行为断言与探针**：
+- P-1 ✅**已测（2026-09-13，zcode 0.16.5 真机 6 轮）**：`session/resume` 读通道成立（应答自带全量双向历史）；resume 后原会话 send 被 -32031 卡死（restoreWarning 不清除，provider 注入/setModel/等待三路均不通）；CLI `--resume` 对 app-server 不生效；**选型 = resume 读 + 新 session 注入**（§3.2.6 要点 3）。-32031 修复路径登记为 U6 上游跟踪项（若未来版本修复，可升级为原地 resume 续聊）；
+- P-2：「reopen 摘要注入后 subagent 第一轮能正确引用历史结论」真机场景验收（§4 S4）——zcode 侧由 resume 结构化历史注入覆盖（比摘要更强）；
 - P-3：「idle record 30 天归档 + 锚 GC 后 message 触发 reopen」fake-clock 单测 + 真机降级路径采样。
 
 ---
@@ -473,8 +473,8 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | U9 文档同步 | 母设计 D5/D8 注记演进、constraints 更新（C-data-20 原语清单 + zcode 库 TTL 通道新条目——§3.2.6 执行锚）、explainer 更新、`check-doc-symbol-drift` 绿 | C-proc-10 设计文档同步纪律 | — |
 
 **待验证检查点**（设计期无法确定，实施期第一批任务）：
-1. zcode app-server session/create 对 resume/sessionId 的接受性（K6/P-1）——若不接受，回退通道 = 引擎进程内维持 zcode 会话常驻（session/close 不再用后即毁）或 CLI `--resume` 冷启动 spawn；
-2. reopen 摘要的 token 成本与格式（binding 快照 → prompt 模板）；
+1. ~~zcode app-server session/create 对 resume/sessionId 的接受性~~ **P-1 已测（§3.5）**：resume 读通道成立、写通道 -32031 卡死、选型定为「历史注入新会话」；残留上游跟踪项 = zcode 未来版本是否打通 restoreWarning 的协议层清除路径（打通则升级为原地 resume 续聊，机制不变只省 token）；
+2. reopen 摘要的 token 成本与格式（binding 快照 → prompt 模板；zcode 侧用 resume 结构化历史注入，裁剪预算取自应答自带 tokens 数据）；
 3. transcriptRef 进 binding 后旧 binding（无该字段）的读侧默认行为；
 4. zcode 会话库 TTL 清理通道选型（引擎侧 sweep vs 宿主侧清库）——已升格为 §3.2.6 风险登记条目，选型在 U6 实施设计内定。
 
