@@ -11,7 +11,7 @@ xyz-agent 有**两条独立的测试轨道**，覆盖不同维度的 bug。缺�
 ### 1.1 MOCK 轨（renderer-only）
 
 ```
-VITE_MOCK=true → renderer 走 api/mock/ 层（镜像 api/domains/ 签名）
+VITE_MOCK=true → renderer 走 core mock 门面（packages/core/src/transport/mock/，镜像 api 签名）
                  不起 runtime 子进程，不连 pi，不发真实 WS
 ```
 
@@ -163,7 +163,7 @@ api/index.ts
   └─ VITE_MOCK=false → 走 domains/*.ts（真实 WS → runtime）
 ```
 
-**修改 fixture 数据**：直接改 `packages/renderer/src/api/mock/*.ts`，重建后 E2E 生效。
+**修改 fixture 数据**：直接改 `packages/core/src/transport/mock/*.ts`，重建后 E2E 生效。
 
 ## 4. 公共前置：激活 session（多数 E2E 用例的入口）
 
@@ -311,7 +311,7 @@ pnpm run build:e2e   # 或删除 dist/ 强制 globalSetup 重建
 
 **Playwright Electron 不支持 headless**（macOS 无 xvfb）。E2E 启动的窗口**必须可见**——Playwright 需要窗口在渲染管线中才能截图/操作 DOM。
 
-当前行为（`window-factory.ts:100-108`）：
+当前行为（`apps/electron/main/window/window-factory.ts`）：
 
 | 模式 | 窗口显示方式 | 效果 |
 |---|---|---|
@@ -326,39 +326,9 @@ pnpm run build:e2e   # 或删除 dist/ 强制 globalSetup 重建
 
 **不修改 `skipTaskbar` / `setBounds`**：这些选项可能导致 Playwright 无法截图或操作窗口，得不偿失。`showInactive` 是当前最优解。
 
-## 7. E2E 用例覆盖盘点
+## 7. E2E 覆盖现状
 
-### 7.1 MOCK 轨（自动化，Playwright）
-
-| spec | 用例数 | 覆盖功能 | 状态 |
-|---|---|---|---|
-| `gui-components.spec.ts` | 4 | GUI 组件渲染（card/progress-bar/stats-line/list-tree 两条路径） | ✅ 全绿 |
-| `state-tearing.spec.ts` | 6 | 流式状态切换/隔离/steer/abort | ✅ 全绿 |
-| `file-tree.spec.ts` | 11 | 文件树懒加载/过滤/git 角标/SideDrawer detail | ⚠️ E2E-3b flaky |
-| `composer.spec.ts` | 7 | composer # 文件候选 inline 触发 | ⚠️ E2E-CF-3 flaky |
-| `search-modal.spec.ts` | 11 | ⌘K 搜索浮层 四类分组/键盘导航/slash 注入 | ✅ 全绿 |
-| `workspace.spec.ts` | 3 | 最近工作区 popover | ✅ 全绿 |
-| **合计 mock 轨** | **43** | | **41 绿 / 2 flaky** |
-
-### 7.2 real 轨（半自动化，需真实 runtime + pi）
-
-| spec | 用例数 | 覆盖功能 | 状态 |
-|---|---|---|---|
-| `workspace-real.spec.ts` | 1 | 跨进程持久化（record → 重启 → list 一致） | ❌ 需真实 runtime（`ECONNREFUSED`） |
-| `ask-user-real.spec.ts` | 3 | ask-user 协议透传（无 allowComment/__comment）+ overlay 渲染 + UI 交互闭环 | ✅ 全绿（需 LLM，flaky skip） |
-| `workflow-thinkinglevel-real.spec.ts` | 3 | workflow agent() thinkingLevel 端到端（state 请求值 + pi 子进程 thinking_level_change + 完整跑通） | ✅ 全绿（需 LLM，flaky skip） |
-
-real 轨自动化 spec 的定位是**验证 mock 轨覆盖不到的盲区**（runtime/pi 真实协议、真实 LLM tool 调用、pi 自身产物文件）。由于依赖真实 LLM provider（慢、flaky），运行方式和 bring-up 经验见 [11-real-e2e-specs.md](./11-real-e2e-specs.md)。
-
-real 轨的定位是**验证 mock 轨覆盖不到的盲区**（runtime/pi 真实协议、WS 生命周期、文件系统真实读写），不适合做全量自动化。
-
-### 7.3 real 轨策略：手工测试文档驱动
-
-real E2E 依赖真实 runtime + pi + provider 配置，环境敏感、CI 不稳定。更适合的方式是**把测试流程写成文档**，让 ai-agent（或人）照着手动执行，而非跑自动化脚本。
-
-现有各功能文档（01-07）都有 `## N. 非 MOCK 模式测试` 章节，列了手工冒烟清单。但缺少统一的 real 轨测试入口文档。
-
-→ 详见 [08-real-track-manual.md](./08-real-track-manual.md)：real 轨手工测试用例（给 ai-agent 照着执行）
+覆盖现状以 `e2e/*.spec.ts` 为准（mock 轨 spec 全量在 `e2e/` 目录；real 轨半自动 spec 的运行方式与 bring-up 经验见 [11-real-e2e-specs.md](./11-real-e2e-specs.md)；real 轨手工测试入口见 [08-real-track-manual.md](./08-real-track-manual.md)）。
 
 ## 8. 下一步
 

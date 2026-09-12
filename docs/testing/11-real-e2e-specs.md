@@ -5,7 +5,7 @@
 
 ## 1. 定位（与 mock 轨的区别）
 
-| 维度 | MOCK 轨（00 §7.1） | real 轨自动化（本文） |
+| 维度 | MOCK 轨（见 [00 总览](./00-test-strategy-overview.md)） | real 轨自动化（本文） |
 |---|---|---|
 | renderer bundle | `VITE_MOCK=true` 构建 | `VITE_MOCK` 不传（real bundle） |
 | runtime / pi | 不起（`XYZ_MOCK=1`） | 真起（main spawn runtime → runtime spawn pi） |
@@ -94,7 +94,7 @@ async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000, minCo
 
 ### 5.5 `state.calls[0].sessionId`（sa- 前缀）不是 pi session id
 
-`sa-<uuid>` 是 subagent-workflow 扩展的 ExecutionRecord id（`subagent-service.ts:651`），**不是** pi 的 session id（uuidv7，JSONL 首行 `session.id`）。用 sessionId 定位子进程 session 文件必然失败。
+`sa-<uuid>` 是 subagent-workflow 扩展的 ExecutionRecord id（`subagent-service.ts`），**不是** pi 的 session id（uuidv7，JSONL 首行 `session.id`）。用 sessionId 定位子进程 session 文件必然失败。
 
 对策：定位走 `state.calls[0].sessionFile`（execution-record serialize 持久化的**绝对路径**）；缺失时 fallback 全量扫描 `dataDir` 下 `sessions/*.jsonl`（排除主 session 文件 + cwd 匹配 sample-project + mtime 最新）。
 
@@ -109,7 +109,7 @@ async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000, minCo
 | **L2** | 子进程 session JSONL 的 `thinking_level_change` entry | **pi 自己写的产物文件（零 xyz-agent 介入）** | **证明"pi 真实收到并落盘"** |
 | L3 | 真实 provider 跑完的产出 | WS done + assistant 消息 | 证明"完整链路可跑通" |
 
-**要点**：L2 是最佳性价比——断言对象是 pi 的产物（`main.ts:726 setThinkingLevel → session-manager.ts:991 appendThinkingLevelChange`），不需要任何 xyz-agent 日志钩子。且 `:high` 后缀**只在 spawn args 存在**（`session-runner.ts:454-459`），pi 解析后拆成独立字段落盘——**断言必须查独立字段 `thinkingLevel:"high"`，禁止 grep `:high` 后缀**。
+**要点**：L2 是最佳性价比——断言对象是 pi 的产物（`setThinkingLevel` → `appendThinkingLevelChange` 落盘链路），不需要任何 xyz-agent 日志钩子。且 `:high` 后缀**只在 spawn args 存在**（session-runner 拼 args 处），pi 解析后拆成独立字段落盘——**断言必须查独立字段 `thinkingLevel:"high"`，禁止 grep `:high` 后缀**。
 
 ## 7. 编写新 real spec 的 checklist
 
@@ -120,4 +120,4 @@ async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000, minCo
 - [ ] 需要捕获前端出站帧时：先确认 routeWebSocket 可行（Electron 下不可行，见 5.2），否则降级为可观测副作用
 - [ ] 断言 pi 产物文件时：查独立字段（5.5/§6），文件定位优先绝对路径字段
 - [ ] 独立 launch（每用例独立 dataDir），`finally` 里 cleanup + 清理临时目录
-- [ ] 跑通后更新本文件 §2 清单 + 00 总览 §7.2 盘点
+- [ ] 跑通后更新本文件 §2 清单

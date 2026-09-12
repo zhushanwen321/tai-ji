@@ -27,38 +27,23 @@ Esc / 再按⌘K / 点遮罩关闭
 - `packages/core/src/domain/new-task-search/command-registry.ts` + `command-store.ts`（`useCommandRegistry` 应用命令 + slash 聚合 / pendingSlash 通道）
 - `packages/ui/src/overlays/SearchModal.vue`（UI 交互 + 键盘导航 + 渲染；SearchDeps 端口注入，壳组装在 `packages/renderer/src/composables/features/search/useSearchModalDeps.ts`）
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-SearchModal.vue (data-testid="search-modal-root")  ← Dialog portal 到 body
-  ├─ DialogContent
-  │    ├─ 输入区
-  │    │    ├─ Search 图标
-  │    │    └─ Input (data-testid="search-input", v-model=query, @keydown)
-  │    └─ 结果区 (ref=resultsRef, max-h overflow)
-  │         ├─ loading 态 (data-testid="search-loading", v-if loading, AC-8.1 防闪烁 200ms)
-  │         ├─ 分组渲染 (v-if total > 0)
-  │         │    └─ section × N (data-testid="search-section-{label}")
-  │         │         └─ item × N (data-testid="search-item-{idx}", role=option, aria-selected)
-  │         │              ├─ 类型图标（command=Terminal / file=FileText / symbol=Code / session=MessageSquare）
-  │         │              ├─ title + <mark> 高亮（segments 命中段）
-  │         │              ├─ sub（相对路径 / cwd·branch）
-  │         │              └─ Clock 图标（仅空查询 recents 项）
-  │         └─ 空态 (data-testid="search-empty")
-  │              ├─ recents 库空（首用，空查询）→「输入关键词开始搜索」
-  │              └─ 查询无结果（非空 query）→「未找到「查询词」」
-```
+`SearchModal.vue`（`packages/ui/src/overlays/`，容器 `data-testid="search-modal-root"`，reka-ui Dialog portal 到 body）分输入区与结果区。输入区为 `search-input`（v-model=query + keydown 导航）；结果区按状态切换：loading 态（`search-loading`，查询 >200ms 才显示，AC-8.1 防闪烁）、分组渲染（`search-section-{label}` 内 `search-item-{idx}`，item 带 role=option + aria-selected，含类型图标、title + `<mark>` 高亮（segments 命中段）、sub 副文本、Clock 图标仅空查询 recents 项）、空态（`search-empty`，分「recents 库空」与「查询无结果」两种文案）。
 
 ## 3. data-testid 清单
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `search-modal-root` | SearchModal.vue | 恒显（open=true 时，Dialog portal 到 body） |
-| `search-input` | SearchModal.vue | open=true 时（Dialog 默认聚焦） |
-| `search-loading` | SearchModal.vue | 查询耗时 >200ms 时（AC-8.1 防闪烁） |
-| `search-section-{label}` | SearchModal.vue | 分组渲染时（label=命令/文件/符号/会话/最近/建议命令） |
-| `search-item-{idx}` | SearchModal.vue | 分组项渲染时（idx=跨组扁平序号） |
-| `search-empty` | SearchModal.vue | total=0 时（recents 库空 或 查询无结果） |
+testid 以组件 template 内 data-testid 属性为准（均在 `packages/ui/src/overlays/SearchModal.vue`，已核实有效）。
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `search-modal-root` | 恒显（open=true 时，Dialog portal 到 body） |
+| `search-modal-overlay` | 恒显（遮罩层） |
+| `search-input` | open=true 时（Dialog 默认聚焦） |
+| `search-loading` | 查询耗时 >200ms 时（AC-8.1 防闪烁） |
+| `search-section-{label}` | 分组渲染时（label=命令/文件/符号/会话/最近/建议命令） |
+| `search-item-{idx}` | 分组项渲染时（idx=跨组扁平序号） |
+| `search-empty` | total=0 时（recents 库空 或 查询无结果） |
 
 > **Portal 注意**：reka-ui Dialog 通过 `DialogPortal` teleport 到 `<body>`，脱离 Sidebar 的 stacking context。E2E/集成测试查询不要限定在 Sidebar 容器内，用 `document.body.querySelector` 或 `new DOMWrapper(document.body)`（参考 [00 §6.4](./00-test-strategy-overview.md)）。
 
@@ -176,32 +161,13 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 7. 再按 ⌘K → toggle 关闭（AC-7.1 变更项）
 8. **模块加载健康**：dev console 无 `node:path.relative` 类错误（test-strategy §1.1 MOCK 盲区）
 
-## 7. Playwright E2E（待补）
+## 7. Playwright E2E
 
-> **当前状态**：⚠️ 未落地。search 功能目前只有 vitest 集成测试（mount SearchModal + mock composable），无 Playwright E2E。
+**当前状态**：已落地 [`e2e/search-modal.spec.ts`](../../e2e/search-modal.spec.ts)（覆盖 ⌘K 唤起 / 空查询 recents / 四类分组 / 键盘导航 / slash 注入等，以 spec 实际内容为准）。
 
 **E2E 价值**（test-strategy 双轨制要求）：验证「⌘K 唤起 → 输入 → 选中 → 跳转」全链路用户旅程，覆盖 composable 间接线完整性（useSearch→useSearchJump→useSidebar/selectFile）。
 
-**E2E 用例建议**（待落地为 `e2e/search-modal.spec.ts`）：
-
-```typescript
-test('E2E-1 ⌘K 唤起 + 空查询显 recents', async ({ page, electronApp }) => {
-  await activateSession(page, '重构 auth 模块')  // 先激活 session（slash 命令需 session）
-  await page.keyboard.press('Meta+k')           // ⌘K 唤起
-  await expect(page.locator('[data-testid="search-modal-root"]')).toBeVisible()
-  await expect(page.locator('[data-testid="search-input"]')).toBeFocused()
-})
-
-test('E2E-2 查询命中文件 + 跳转 DetailPane', async ({ page }) => {
-  await page.keyboard.press('Meta+k')
-  await page.locator('[data-testid="search-input"]').fill('session')
-  await expect(page.locator('[data-testid="search-section-文件"]')).toBeVisible()
-  await page.keyboard.press('Enter')  // 选中首个文件项
-  // 验证 DetailPane 打开（SideDrawer 或 panel 内）
-})
-```
-
-> E2E 落地需考虑：search 是浮层（portal 到 body），查询不限定 Sidebar 容器；跳转验证依赖 DetailPane/SideDrawer 的 testid（见 [05-side-drawer.md](./05-side-drawer.md)）。
+实现要点：search 是浮层（portal 到 body），查询不限定 Sidebar 容器；跳转验证依赖 DetailPane/DrawerPanel 的 testid（见 [05-side-drawer.md](./05-side-drawer.md)）。
 
 ## 8. 已知缺口（非阻断）
 
@@ -209,7 +175,6 @@ test('E2E-2 查询命中文件 + 跳转 DetailPane', async ({ page }) => {
 |------|------|------|--------|
 | `registerApp` 无调用方 | 应用命令区运行时为空，搜索「命令」分组只显 slash 命令 | 测试用 mock 覆盖；功能不崩溃；slash 命令源工作 | P3（需产品决策命令清单）|
 | AC-10.1 未完全通用化 | Sidebar keydown 用本地 keymap 数组（未走 useCommandRegistry）| 硬编码 if/else 字面消除；⌘K toggle 已落地 | P3（需独立 keymap 注册表 + shortcut DSL）|
-| Playwright E2E 未落地 | 全链路用户旅程无 E2E | vitest 集成测试覆盖渲染+交互 | P2 增强非阻断 |
 | dev 冒烟闸门待建 | MOCK 全绿≠可用（模块加载盲区）| 手工 `pnpm run dev` 冒烟（见 §6）| 待 scripts/dev-smoke.mjs |
 | useSearch 单测 onScopeDispose warn | 测试输出不干净（harness 缺陷）| 生产无 warn（SearchModal setup 提供 scope）；测试全绿 | 低（测试 harness 优化）|
 

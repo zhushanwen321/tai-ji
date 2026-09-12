@@ -13,87 +13,51 @@ AI 把 bash 命令转后台执行后，任务落在 per-session registry.json。
 
 数据链路：runtime `BackgroundTaskService` 直读 registry（拉取 RPC + 变更广播），renderer `useBackgroundTasks` per-session 分区。测试框架（vitest 用例）见 `packages/renderer/src/__tests__/components/background-task-list-view.test.ts` 与 `background-task-detail-panel.test.ts`。
 
-## §2 组件树
+## §2 组件结构概述
 
-```
-PluginViewContainer.vue（NATIVE_VIEWS 路由，viewId='background-tasks'）
-└─ BackgroundTaskListView.vue
-   ├─ div [data-testid="background-task-list"]            ← 视图容器
-   ├─ [v-if 全量空态] div [data-testid="bg-task-empty"]
-   ├─ [v-else]
-   │   ├─ div [data-testid="bg-task-filterbar"]           ← 凹陷槽三桶
-   │   │   └─ Button ×3 [data-testid="bg-task-filter-active|ended|all"]
-   │   └─ ScrollArea
-   │       ├─ [运行中空桶] div [data-testid="bg-task-bucket-empty"]
-   │       │    └─ Button [data-testid="bg-task-view-all"]  「查看全部 (N)」
-   │       ├─ [已结束空桶] div [data-testid="bg-task-bucket-empty-ended"]
-   │       └─ [列表] div ×N [data-testid="bg-task-item"]    (@click → drawer)
-   │           ├─ div [data-testid="bg-task-group-divider"]  「全部」桶 active/ended 段边界
-   │           ├─ div [data-testid="bg-task-icon"]           7px 状态 icon（spinner/色点）
-   │           ├─ div [data-testid="bg-task-meta"]           第二行 pid · exit
-   │           │    └─ Button [data-testid="bg-task-kill"|"bg-task-kill-confirm"]
-   │           │        （仅 running 行；确认态切换 testid）
+列表侧：`PluginViewContainer.vue`（NATIVE_VIEWS 路由，viewId='background-tasks'）挂 `BackgroundTaskListView.vue`（容器 `background-task-list`）：全量空态 `bg-task-empty`；有任务时渲染三桶筛选槽 `bg-task-filterbar`（`bg-task-filter-active|ended|all`，`data-active` 标当前桶）与 ScrollArea 列表——运行中空桶 `bg-task-bucket-empty`（含「查看全部」`bg-task-view-all`）、已结束空桶 `bg-task-bucket-empty-ended`、任务行 `bg-task-item`（点击开 drawer；行内含「全部」桶分段边界 `bg-task-group-divider`、状态 icon `bg-task-icon`、pid·exit 第二行 `bg-task-meta`、running 行行内两段式终止按钮 `bg-task-kill`→确认态切换为 `bg-task-kill-confirm`）。另有损坏/断连横幅 `bg-task-corrupt-banner` / `bg-task-disconnect-banner`。
 
-DrawerPanel.vue（tab 栏 [data-testid="drawer-tab-bashTask"]，既有 drawer-tab-{key} 模板新值）
-└─ PanelContainer.vue v-if 分支
-   └─ BackgroundTaskDetailPanel.vue
-      ├─ div [data-testid="bash-task-detail"]              ← 容器
-      ├─ code [data-testid="bash-task-command"]            ← 命令全文
-      ├─ Button [data-testid="bash-task-copy"]             ← 复制命令（copied 态换 icon）
-      ├─ div [data-testid="bash-task-meta"]                ← 元信息行
-      │    ├─ span [data-testid="bash-task-status-dot"]    ← 状态色点（bucket SSOT tone）
-      │    ├─ span [data-testid="bash-task-meta-taskid"]
-      │    ├─ span [data-testid="bash-task-meta-pid"]
-      │    ├─ span [data-testid="bash-task-meta-started"]  「开始 HH:MM:SS」
-      │    ├─ span [data-testid="bash-task-meta-duration"] running=已运行 / 终态=耗时
-      │    ├─ span [data-testid="bash-task-meta-exit"]     exit {code|null→—}
-      │    └─ span [data-testid="bash-task-meta-reason"]   reason 五态文案
-      ├─ 输出区（三态互斥）
-      │    ├─ div [data-testid="bash-task-output-unavailable"]  lost=true（文件已清理）
-      │    ├─ pre [data-testid="bash-task-output"]              有内容（running 2s 跟随）
-      │    └─ div [data-testid="bash-task-output-empty"]        loaded 且空
-      └─ [v-if running] Button [data-testid="bash-task-kill"]   两段式（data-armed=确认态）
-```
+Drawer 侧：`DrawerPanel.vue` tab 栏新增 bashTask 值（`drawer-tab-bashTask`，复用既有 `drawer-tab-{key}` 模板），`PanelContainer.vue` v-if 分支挂 `BackgroundTaskDetailPanel.vue`（容器 `bash-task-detail`）：命令全文 `bash-task-command` + 复制按钮 `bash-task-copy`、元信息行 `bash-task-meta`（状态色点 `bash-task-status-dot` + taskid/pid/started/duration/exit/reason 各 span）、输出区三态互斥（`bash-task-output` 有内容且 running 时 2s 跟随 / `bash-task-output-unavailable` 文件已清理 / `bash-task-output-empty` loaded 且空）、running 时的两段式终止按钮 `bash-task-kill`（`data-armed="true"` 为确认态）。
 
 ## §3 data-testid 清单
 
+testid 以组件 template 内 data-testid 属性为准（下表均已核实有效）。
+
 ### 列表（BackgroundTaskListView.vue）
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `background-task-list` | BackgroundTaskListView.vue:17 | 视图挂载时恒显（容器） |
-| `bg-task-empty` | BackgroundTaskListView.vue:21 | 全量空态（loaded 且 0 条；此时不渲染筛选条） |
-| `bg-task-filterbar` | BackgroundTaskListView.vue:32 | 有任务时恒显（三桶筛选槽） |
-| `bg-task-filter-active` / `bg-task-filter-ended` / `bg-task-filter-all` | BackgroundTaskListView.vue:37（动态 `bg-task-filter-${value}`） | 同 filterbar；`data-active` 标当前桶 |
-| `bg-task-bucket-empty` | BackgroundTaskListView.vue:53 | 「运行中」桶空（含 bg-task-view-all） |
-| `bg-task-view-all` | BackgroundTaskListView.vue:59 | 同上，点击跳「全部」桶 |
-| `bg-task-bucket-empty-ended` | BackgroundTaskListView.vue:67 | 「已结束」桶空（仅文案） |
-| `bg-task-item` | BackgroundTaskListView.vue:79 | 每条任务一个；@click 开 drawer bashTask tab |
-| `bg-task-group-divider` | BackgroundTaskListView.vue:88 | 仅「全部」桶 active/ended 段边界处 |
-| `bg-task-icon` | BackgroundTaskListView.vue:91 | 恒显；running 时内部为旋转环，其余为色点 |
-| `bg-task-meta` | BackgroundTaskListView.vue:106 | 恒显（第二行 pid · exit） |
-| `bg-task-kill` / `bg-task-kill-confirm` | BackgroundTaskListView.vue:117（确认态切换 testid） | 仅 running 行 hover 显现；首击变 confirm（常显红底），再击发 kill RPC |
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `background-task-list` | 视图挂载时恒显（容器） |
+| `bg-task-empty` | 全量空态（loaded 且 0 条；此时不渲染筛选条） |
+| `bg-task-filterbar` | 有任务时恒显（三桶筛选槽） |
+| `bg-task-filter-active` / `bg-task-filter-ended` / `bg-task-filter-all` | 同 filterbar；`data-active` 标当前桶 |
+| `bg-task-bucket-empty` | 「运行中」桶空（含 bg-task-view-all） |
+| `bg-task-view-all` | 同上，点击跳「全部」桶 |
+| `bg-task-bucket-empty-ended` | 「已结束」桶空（仅文案） |
+| `bg-task-item` | 每条任务一个；@click 开 drawer bashTask tab |
+| `bg-task-group-divider` | 仅「全部」桶 active/ended 段边界处 |
+| `bg-task-icon` | 恒显；running 时内部为旋转环，其余为色点 |
+| `bg-task-meta` | 恒显（第二行 pid · exit） |
+| `bg-task-kill` / `bg-task-kill-confirm` | 仅 running 行 hover 显现；首击变 confirm（常显红底），再击发 kill RPC |
+| `bg-task-corrupt-banner` / `bg-task-disconnect-banner` | registry 损坏 / 数据源断连横幅 |
 
 ### Drawer 详情（BackgroundTaskDetailPanel.vue）
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `drawer-tab-bashTask` | DrawerPanel.vue:41（既有 `drawer-tab-{key}` 模板） | drawer 打开时 tab 栏内 |
-| `bash-task-detail` | BackgroundTaskDetailPanel.vue:23 | 选中任务后（未选中走 DrawerPanel 空态文案） |
-| `bash-task-command` | BackgroundTaskDetailPanel.vue:29 | 恒显（命令全文） |
-| `bash-task-copy` | BackgroundTaskDetailPanel.vue:36 | 恒显（title 随 copied 态换文案） |
-| `bash-task-meta` | BackgroundTaskDetailPanel.vue:47 | 恒显（元信息行容器） |
-| `bash-task-status-dot` | BackgroundTaskDetailPanel.vue:52 | 恒显；class 随 bucket SSOT tone |
-| `bash-task-meta-taskid` | BackgroundTaskDetailPanel.vue:54 | 恒显 |
-| `bash-task-meta-pid` | BackgroundTaskDetailPanel.vue:55 | 恒显 |
-| `bash-task-meta-started` | BackgroundTaskDetailPanel.vue:56 | 恒显 |
-| `bash-task-meta-duration` | BackgroundTaskDetailPanel.vue:59 | 恒显（文案随 running/终态切换） |
-| `bash-task-meta-exit` | BackgroundTaskDetailPanel.vue:63 | 仅 exitCode 非 undefined |
-| `bash-task-meta-reason` | BackgroundTaskDetailPanel.vue:65 | 仅终态（orphaned 或 exited+reason） |
-| `bash-task-output` | BackgroundTaskDetailPanel.vue:78 | output 拉到且非空（running 时 2s 跟随） |
-| `bash-task-output-unavailable` | BackgroundTaskDetailPanel.vue:73 | output 文件丢失/清理（lost） |
-| `bash-task-output-empty` | BackgroundTaskDetailPanel.vue:83 | output loaded 但为空 |
-| `bash-task-kill` | BackgroundTaskDetailPanel.vue:99 | 仅 running（killing/终态无按钮）；`data-armed="true"` = 确认态 |
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `drawer-tab-bashTask` | drawer 打开时 tab 栏内（`drawer-tab-{key}` 模板新值） |
+| `bash-task-detail` | 选中任务后（未选中走 DrawerPanel 空态文案） |
+| `bash-task-command` | 恒显（命令全文） |
+| `bash-task-copy` | 恒显（title 随 copied 态换文案） |
+| `bash-task-meta` | 恒显（元信息行容器） |
+| `bash-task-status-dot` | 恒显；class 随 bucket SSOT tone |
+| `bash-task-meta-taskid` / `-pid` / `-started` / `-duration` | 恒显（duration 文案随 running/终态切换） |
+| `bash-task-meta-exit` | 仅 exitCode 非 undefined |
+| `bash-task-meta-reason` | 仅终态（orphaned 或 exited+reason） |
+| `bash-task-output` | output 拉到且非空（running 时 2s 跟随） |
+| `bash-task-output-unavailable` | output 文件丢失/清理（lost） |
+| `bash-task-output-empty` | output loaded 但为空 |
+| `bash-task-kill` | 仅 running（killing/终态无按钮）；`data-armed="true"` = 确认态 |
 
 ### 测试注意
 

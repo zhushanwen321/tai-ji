@@ -19,37 +19,19 @@ Composer 是消息输入核心组件，有两种 variant：
 流式中（isStreaming）→ composer 蓝呼吸 ring + ⏎ 变 steer + 发送位变 stop 按钮
 ```
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-Composer.vue (data-testid="composer-box")  ← 容器，variant=landing|panel
-  ├─ RetryIndicator（retry 态指示，#13）
-  ├─ QueueBubble（queue 态指示，#13）
-  ├─ CommandPopover.vue（v-model:open，portal 到 body）  ← slash/mention/file 浮层
-  │    └─ PopoverContent（v-if open && items.length > 0）
-  │         └─ Button × N（命令项，无 testid，按文本/role 查）
-  ├─ #meta-row slot（仅 landing 态：directory/branch chip，见 01-new-task.md）
-  ├─ ContextChipsBar（已附上下文 chip 行）
-  ├─ ComposerInput.vue（role="textbox"）  ← contenteditable 输入区
-  │    ├─ slash chip（span，插入的 / 命令）
-  │    └─ mention chip（span，插入的 @ / # 引用）
-  └─ composer-bar（工具条）
-       ├─ AddMenuPopover.vue（+ 添加内容，出 4 路浮层）
-       ├─ ContextCapacityPopover.vue（上下文容量，hover 出 popover）
-       ├─ ModelSelectPopover.vue（模型切换，click 出 popover）
-       ├─ ThinkingLevelPopover.vue（思考等级，click 出 6 级 popover）
-       └─ 发送位三态：
-            ├─ isStreaming → stop 按钮（title="停止"）
-            ├─ isCompacting → spinner（title="压缩中…"）
-            ├─ isSending → spinner（title="发送中…"）
-            └─ else → send 按钮（title="发送 · ⏎" / "输入内容后发送"）
-```
+`Composer.vue`（`data-testid="composer-box"`，variant=landing|panel）是容器，内部组合：RetryIndicator / QueueBubble（排队与重试指示）、`CommandPopover`（slash/mention/file 浮层，portal 到 body）、ContextChipsBar（已附上下文 chip 行）、`ComposerInput`（contenteditable 输入区，位于 `packages/ui/src/features/composer/`，内含插入的 slash chip 与 mention chip）、工具条（AddMenuPopover / ContextCapacityPopover / ModelSelectPopover / ThinkingLevelPopover）。landing 态还有 meta-row chip 行（见 [01-new-task.md](./01-new-task.md)）。
+
+发送位三态：流式中（isStreaming）显示 stop 按钮（title="停止"）；压缩中/发送中显示 spinner；否则显示 send 按钮（title="发送 · ⏎" / "输入内容后发送"）。
 
 ## 3. data-testid 清单
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `composer-box` | Composer.vue:25 | 恒显（composer 容器） |
+testid 以组件 template 内 data-testid 属性为准。
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `composer-box` | 恒显（composer 容器） |
 
 **CommandPopover / ComposerInput 目前没有 data-testid**。E2E 查询靠：
 - 命令项：`page.getByRole('button', { name: '/commit' })`（命令名作 button text）
@@ -71,7 +53,7 @@ Composer.vue (data-testid="composer-box")  ← 容器，variant=landing|panel
 ### 4.2 slash 命令获取时机（双源切换）
 
 ```typescript
-// CommandPopover.vue line 129-137
+// CommandPopover.vue（slash 命令双源切换）
 const slashCommands = computed(() => {
   if (props.sessionId) return commandStore.getCommands(props.sessionId)  // session 态：runtime 推送
   return settingsStore.skills.map(s => ({                                 // landing 态：全局 skill
@@ -127,7 +109,7 @@ function onCmdSelect(payload: { type, name, icon?, description? }) {
 
 ## 5. mock 数据
 
-[`api/mock/composer-data.ts`](../../packages/renderer/src/api/mock/composer-data.ts) + [`api/mock/index.ts`](../../packages/renderer/src/api/mock/index.ts)：
+[`transport/mock/composer-data.ts`](../../packages/core/src/transport/mock/composer-data.ts) + [`transport/mock/index.ts`](../../packages/core/src/transport/mock/index.ts)：
 
 | 数据 | 内容 |
 |------|------|
@@ -136,7 +118,7 @@ function onCmdSelect(payload: { type, name, icon?, description? }) {
 | `MOCK_SLASH_COMMANDS`（composer-data.ts） | / 命令静态数据（/commit /review /fix，**3 个**，kind: 提交/审查/修复） |
 | `MOCK_COMMANDS`（mock/index.ts） | session.commands 推送用（/commit /review /fix /compact，**4 个**，含 builtin /compact；与 MOCK_SLASH_COMMANDS **不同源**——多了 /compact 且字段名不同 source vs kind） |
 
-**session 激活后推送**（`pushSessionState`，mock/index.ts line 81）：
+**session 激活后推送**（`pushSessionState`，mock/index.ts）：
 ```typescript
 // switchSession 后 30ms（TIMING.switchCmd）推 session.commands
 pushSession(sessionId, {
@@ -241,7 +223,7 @@ async function activateSessionForComposer(page: import('@playwright/test').Page)
 
 ### 8.3 完整 E2E 示例代码
 
-> 注意：以下代码是**范例模板**，尚未落地为 `e2e/composer.spec.ts`。落地时按此模板实现。
+> 注意：以下代码是**范例模板**（`e2e/composer.spec.ts` 已落地，以该 spec 实际内容为准）。落地时按此模板实现。
 
 ```typescript
 import { test, expect } from './fixtures/launch-app'
@@ -303,7 +285,7 @@ test.describe('Composer E2E', () => {
     await page.getByRole('textbox').press('Enter')
     // 发送成功的可靠信号：mock 流式完成后的收尾 summary（约 3-4 秒）。
     // 注意：不直接用 getByText('测试消息 e2e') 断言 user 气泡 ——
-    // mock 回复回显 user 输入（run-send-stream.ts:49 '已处理："${text}"...'），
+    // mock 回复回显 user 输入（run-send-stream 的 '已处理："${text}"...' 形态），
     // 该文本同时出现在 user 气泡 + assistant 回复，getByText 严格模式会因多匹配报错。
     // 收尾 summary 是 mock 固定 CANNED_REPLY，单匹配稳定。
     await expect(page.getByText(/好的，我来处理这个请求/)).toBeVisible({ timeout: 15_000 })
@@ -351,7 +333,7 @@ test.describe('Composer E2E', () => {
 
 ## 11. 相关文档
 
-- 组件源码：[`components/panel/Composer.vue`](../../packages/renderer/src/components/panel/Composer.vue) / [`CommandPopover.vue`](../../packages/renderer/src/components/panel/CommandPopover.vue)
+- 组件源码：[`components/panel/Composer.vue`](../../packages/renderer/src/components/panel/Composer.vue) / [`CommandPopover.vue`](../../packages/renderer/src/components/panel/CommandPopover.vue) / [`features/composer/ComposerInput.vue`](../../packages/ui/src/features/composer/ComposerInput.vue)
 - 集成测试：[`__tests__/panel/composer-slash-trigger.test.ts`](../../packages/renderer/src/__tests__/panel/composer-slash-trigger.test.ts)
-- 命令 store：[`stores/command.ts`](../../packages/renderer/src/stores/command.ts)
+- 命令 store：[`core/domain/new-task-search/command-store.ts`](../../packages/core/src/domain/new-task-search/command-store.ts)
 - 发送链路：[03-chat-flow.md](./03-chat-flow.md)（Composer.onSend → chat.send 的完整流式链路）

@@ -13,35 +13,24 @@
 - **回合分组**：`messageTurns.toRenderItems` 纯函数动态计算（user + assistants 成一组）；三车道含 `toRenderItemsIncremental` 尾部快车道——streaming 每合帧批只处理尾部变化区（O(n)→O(delta)），`toRenderItems` 并存签名零变化
 - **session 隔离**：所有状态按 sessionId 分区（messages/retry/queue/changeSetStatuses）
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-Panel.vue (sessionId 存在, messageCount > 0)
-  └─ MessageStream.vue（容器，无 testid）  ← 对话流主路径
-       ├─ 空态欢迎语（messageCount===0 时）
-       ├─ auto-scroll 锚点
-       ├─ 「回到底部」浮层（无 testid）
-       └─ Turn.vue × N（回合，无 testid）
-            ├─ turn-meta 折叠条（工作中脉冲点 / 已工作 chevron + 思考×N 工具×N badge）
-            ├─ user 气泡（右对齐，MarkdownRenderer）
-            ├─ trace（折叠区，含 Block 列表）
-            │    └─ Block.vue × N（无 testid）
-            │         ├─ type='thinking'（紫斜体，默认收起可 toggle）
-            │         └─ type='tool'（青色 mono，默认收起，running/failed 强制展开）
-            ├─ 收尾 summary（末条 assistant content，streaming 时光标）
-            ├─ ChangeSetCard.vue（变更集卡，无 testid）
-            │    └─ 5 态 badge + A/M/D/U 文件行
-            └─ ForkConfirmModal.vue（fork 确认弹窗）
-       └─ SystemNotice.vue（system 提示行，独立穿插，无 testid）
-```
+对话流主路径：`Panel.vue`（sessionId 存在且消息非空）渲染 `MessageStream.vue`（容器，无 testid），内部为空态欢迎语、auto-scroll 锚点、「回到底部」浮层，以及按回合划分的 `Turn.vue` 列表。每个 Turn 包含 turn-meta 折叠条（工作中脉冲点 / 已工作 chevron + 思考×N 工具×N badge）、user 气泡、trace 折叠区（内含 `Block.vue` 列表：thinking 块紫斜体默认收起、tool 块青色 mono 默认收起且 running/failed 强制展开）、收尾 summary、`ChangeSetCard.vue`（变更集卡，5 态 badge + A/M/D/U 文件行）、`ForkConfirmModal`。`SystemNotice`（system 提示行）独立穿插在流中。组件位于 `packages/ui/src/features/chat/`，MessageStream 容器在 `packages/renderer/src/components/panel/`。
 
-## 3. data-testid 清单（关键缺口）
+## 3. data-testid 清单
 
-| testid | 文件:行 | 说明 |
+testid 以组件 template 内 data-testid 属性为准。对话流相关已落地的锚点：
+
+| testid | 所在组件 | 说明 |
 |--------|---------|------|
-| `composer-box` | Composer.vue:25 | composer 容器（唯一有 testid 的对话流相关元素） |
-
-> ✅ **testid 已大量落地**（原「关键缺口」前置已失效）：`Turn.vue` → `turn-{index}` / `turn-meta-{index}`；`Block.vue` → `block-text`（文本块）/ `tool-block-header`（工具块 header）；`ChangeSetCard.vue` → `change-set-card` / `change-set-header` / `change-set-file`；`SystemNotice.vue` → `subagent-directive-bubble`（subagent 指令行）；`MessageStream.vue` → `pending-bubble-list` / `load-more-history`。以源码 grep 为准，新增交互面随组件补。
+| `composer-box` | Composer.vue | composer 容器 |
+| `turn-{index}` | Turn.vue | 回合容器 |
+| `turn-meta-{index}` | TurnMeta.vue | 回合折叠条 |
+| `block-text` / `tool-block-header` | Block.vue | 文本块 / 工具块 header |
+| `change-set-card` / `change-set-header` / `change-set-file` | ChangeSetCard.vue | 变更集卡 |
+| `subagent-directive-bubble` | SystemNotice.vue | subagent 指令行 |
+| `pending-bubble-list` | MessageStream.vue | 待渲染气泡列表 |
+| `load-more-history` | TruncatedHistoryBar.vue | 历史截断加载 |
 
 **当前可用的文本锚点**（无需 testid，按 mock 固定文案断言）：
 
@@ -90,7 +79,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
-定义在 [`shared/src/protocol.ts`](../../packages/shared/src/protocol.ts) line 207-347。`applyChunk`（[`chunk-processor.ts`](../../packages/core/src/domain/chat/chunk-processor.ts) + [`effects/registry.ts`](../../packages/core/src/domain/chat/effects/registry.ts)——原 renderer 21 case 已迁移 core）消费的核心类型：
+定义在 [`shared/src/protocol.ts`](../../packages/shared/src/protocol.ts)。`applyChunk`（[`chunk-processor.ts`](../../packages/core/src/domain/chat/chunk-processor.ts) + [`effects/registry.ts`](../../packages/core/src/domain/chat/effects/registry.ts)——原 renderer 21 case 已迁移 core）消费的核心类型：
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
@@ -278,13 +267,13 @@ test.describe('对话流 E2E', () => {
     await page.getByRole('textbox').press('Enter')
     // 发送成功的可靠信号：mock 流式完成后的收尾 summary（约 3-4 秒）。
     // 不直接断言 user 气泡 getByText('测试对话流 e2e') —— mock 回复会回显 user 输入
-    //（run-send-stream.ts:49 '已处理："${text}"...'），该文本双匹配（user 气泡 + assistant
+    //（run-send-stream 的 '已处理："${text}"...' 形态），该文本双匹配（user 气泡 + assistant
     // 回复），getByText 严格模式会报错。收尾 summary 是 mock 固定 CANNED_REPLY，单匹配稳定。
     await expect(page.getByText(/好的，我来处理这个请求/)).toBeVisible({ timeout: 15_000 })
   })
 
   test('E2E-CF-2: 流式 thinking + tool 可见（文本锚点）', async ({ page }) => {
-    // ⚠️ thinking 可见性时序（Block.vue:85）：
+    // ⚠️ thinking 可见性时序（Block.vue 的 thinkingExpanded computed）：
     //   thinkingExpanded = computed(() => props.working || !thinkingCollapsed.value)
     //   - 流式中（working=true）→ 强制展开，全文可见
     //   - 流式完成（complete 后 working=false）→ 收起，全文 v-if 不在 DOM，只剩 header + preview
@@ -295,13 +284,13 @@ test.describe('对话流 E2E', () => {
     await page.getByRole('textbox').click()
     await page.getByRole('textbox').pressSequentially('展示 thinking 和 tool')
     await page.getByRole('textbox').press('Enter')
-    // thinking header 恒显（Block.vue:20「思考」文案，不受 working/collapsed 影响）
+    // thinking header 恒显（「思考」文案，不受 working/collapsed 影响）
     await expect(page.getByText('思考', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
-    // tool 块 header 恒显（Block.vue:42-43 两个 span：「工具」+ toolName）。
-    // mock toolCall toolName='read'（run-send-stream.ts:98）。注意 header 是两个独立 span，
-    // getByText 跨 span 匹配不可靠；用 .trace-tool（Block.vue:33 tool 块容器 class）限定后
+    // tool 块 header 恒显（两个 span：「工具」+ toolName）。
+    // mock toolCall toolName='read'（run-send-stream）。注意 header 是两个独立 span，
+    // getByText 跨 span 匹配不可靠；用 .trace-tool（tool 块容器 class）限定后
     // 断言 toolName span 文本，规避跨 span 合并问题 + 「read」宽泛匹配（限定在 trace-tool 内唯一）。
-    // 完整「read(/mock/file.ts)」在展开态详情区（Block.vue:47-48 v-if=toolExpanded），仅
+    // 完整「read(/mock/file.ts)」在展开态详情区（v-if=toolExpanded），仅
     // working/running/failed 渲染，流式完成后收起有时序竞争，故不断言展开态详情。
     await expect(page.locator('.trace-tool').first()).toContainText('read', { timeout: 15_000 })
   })
@@ -313,10 +302,10 @@ test.describe('对话流 E2E', () => {
     await page.getByRole('textbox').pressSequentially('展示变更集')
     await page.getByRole('textbox').press('Enter')
     // mock fileChanges（accumulating → ready，约 120ms × 2 + 文本流式）
-    // ChangeSetCard 文件行渲染完整 filePath（ChangeSetCard.vue:39 {{ c.filePath }}）
+    // ChangeSetCard 文件行渲染完整 filePath
     // 用 .first() 防 accumulating/ready 两帧瞬时双匹配
     await expect(page.getByText(/src\/mock-feature\.ts/).first()).toBeVisible({ timeout: 15_000 })
-    // 变更集状态 badge：ready → '待审查'（ChangeSetCard.vue:69）；'变更集' 恒显（line 18）
+    // 变更集状态 badge：ready → '待审查'；'变更集' 标题恒显
     await expect(page.getByText('待审查').first()).toBeVisible({ timeout: 5_000 })
   })
 
@@ -334,11 +323,11 @@ test.describe('对话流 E2E', () => {
 
   test('E2E-CF-5: 历史 session 渲染（s1 error 态）', async ({ page }) => {
     // s1 fixture 回合2 含 error tool（bash EBUSY）：output='EBUSY: 文件被外部进程占用，写入失败', status='error'
-    // data.ts:164-165。error tool Block 默认强制展开（isFailed → toolExpanded=true，Block.vue:110-111）
+    //（mock/data.ts）。error tool Block 默认强制展开（isFailed → toolExpanded=true）
     // 用 error tool 的 output 文本作锚点（稳定，不受 class 命名重构影响）
     await page.getByRole('button', { name: /^会话/ }).click()
     await page.getByText('重构 auth 模块').click()
-    // 等 MessageStream 渲染历史，error tool output 可见（Block.vue:51-57 result 区）
+    // 等 MessageStream 渲染历史，error tool output 可见
     await expect(page.getByText(/EBUSY|文件被外部进程占用/).first()).toBeVisible({ timeout: 10_000 })
   })
 
@@ -411,7 +400,7 @@ test.describe('对话流 E2E', () => {
 
 | 教训 | 机制（实测自 virtua 0.50.0 实装） | 测试设计启示 |
 |------|------|------|
-| **virtua 坐标语义** | `findItemIndex` 入参按**绝对滚动坐标**解释、内部再减 startMargin（core/index.js:78）；handle 的 `scrollSize` getter **不含** startMargin（vue/index.js:470-471）；`scrollToIndex` 的 `offset` 选项 = 目标 scrollTop 正偏移（core/index.js:287）。`findItemIndex(scrollSize)` 直接拼用 = 反查偏移差一个 startMargin：load-more 显示（startMargin=44）时高度 <44px 的短末项（SystemNotice/SkillNoticeInline 约 24px）被钉到**倒数第二项**（R3 自我锁死错钉） | 断言滚动目标以「末项索引直取」为准（scrollToIndex 收到 `length-1`，见 use-virtua-follow.test.ts R3 回归用例）；任何 offset→index 反查类用例必须覆盖 startMargin≠0（load-more 显示）场景，startMargin=0 下永远测不出坐标错位 |
+| **virtua 坐标语义** | `findItemIndex` 入参按**绝对滚动坐标**解释、内部再减 startMargin（virtua core/index.js）；handle 的 `scrollSize` getter **不含** startMargin（virtua vue/index.js）；`scrollToIndex` 的 `offset` 选项 = 目标 scrollTop 正偏移（virtua core/index.js）。`findItemIndex(scrollSize)` 直接拼用 = 反查偏移差一个 startMargin：load-more 显示（startMargin=44）时高度 <44px 的短末项（SystemNotice/SkillNoticeInline 约 24px）被钉到**倒数第二项**（R3 自我锁死错钉） | 断言滚动目标以「末项索引直取」为准（scrollToIndex 收到 `length-1`，见 use-virtua-follow.test.ts R3 回归用例）；任何 offset→index 反查类用例必须覆盖 startMargin≠0（load-more 显示）场景，startMargin=0 下永远测不出坐标错位 |
 | **rAF-RO 时序** | 同一帧内执行顺序为 **rAF 回调 → style/layout → ResizeObserver 通知投递**：rAF 内 scrollToIndex 拿到的是上一帧 virtua 高度缓存，本帧新渲染高度要等 RO 投递才进测量缓存（R1「跟随恒落后一帧」；virtua jump 补偿只管视口顶锚、底部末项增长零补偿） | happy-dom 单测用 fake timers + 手动 RO stub（`_virtua-mock-helper.ts` 的 ManualResizeObserverStub）显式控制投递时机；「滚完即断言落点」的用例必须先 flush rAF（`advanceTimersByTimeAsync(16)`）再派发 RO，勿假设同帧生效 |
 | **脱离信号集（INVAR-M4-2′）** | stickToBottom=false 只由用户输入信号驱动：① onWheel deltaY<0（恒即时生效，不受抑制窗约束）；② onScroll 复合判据（offset 递减 ∧ 距底 >40px——滚动条拖拽/键盘 PageUp·Home 不产生 wheel，靠复合判据覆盖）。force 强滚后收敛抑制窗（RO 静默 ≥120ms 关窗 / 1500ms 硬上限）内暂停判据②翻 false；程序性写入回声（offset 递增 / clamp distance≤0）结构性不误判 | 回声/脱离用例三分支覆盖：程序性写入（offset 递增）不脱离 / clamp 回声（distance≤0）走恢复分支翻 true / 用户拖拽（递减 ∧ distance>40）脱离且后续 follow 不滚屏（rAF 重读 guard）；抑制窗用例须含「窗内负补偿不脱离」「wheel 恒即时脱离」与两个关窗条件（120ms 静默 / 1500ms 硬上限，手动派发 RO stub 驱动） |
 | **挂载级 mock Virtualizer 的 scrollRef prop 声明坑（U3 实测机制）** | `<Virtualizer :scroll-ref="scrollEl ?? undefined">` 绑定 undefined→el 的变更驱动**父组件重渲染**（与 attrs 无关）；挂载级测试仅给 mock 声明 scrollRef prop 红不消失——需配合「已收敛渲染窗口」断言或 key 断言（U3 对照实验隔离机制后定稿） | 挂载级测试 mock Virtualizer 必须声明 scrollRef prop 且接受 undefined 初始值；「红且补 prop 不消失」时优先排查绑定时序（undefined→el 重渲染窗口）而非 mock 字段缺失 |

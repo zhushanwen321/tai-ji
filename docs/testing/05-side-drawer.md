@@ -18,53 +18,32 @@ SideDrawer 是 workspace-body 级的右侧抽屉，承载 5 个 tab：
 
 **detail tab** 是文件树点文件的落点（见 [04-file-tree.md](./04-file-tree.md) E2E-3）：点文件 → `fileTreeStore.selectFile` → SideDrawer `open('detail')` → DetailPane 挂载 → useDetailPane 加载内容。
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-PanelContainer.vue
-  └─ SideDrawer.vue（props: open, activeTab, sessionId）  ← 容器
-       ├─ header
-       │    ├─ tab 栏（terminal/browser/git/doc/detail，button × 5，无 testid）
-       │    ├─ 钉住按钮（无 testid）
-       │    └─ 关闭按钮（无 testid）
-       └─ content（按 activeTab 切换）
-            ├─ terminal/browser tab → widget 内容（extension.onWidget）或空态
-            ├─ GitPanel.vue（v-if activeTab==='git'，无 testid）  ← git 全量状态
-            ├─ CommandDocPanel.vue（v-if activeTab==='doc'）  ← 命令文档
-            └─ DetailPane.vue（v-else-if activeTab==='detail'）  ← 文件预览
-                 ├─ detail-pane (data-testid="detail-pane")  ← 容器
-                 ├─ detail-view-toggle (data-testid="detail-view-toggle")  ← diff/preview 切换（有 git 改动时）
-                 ├─ detail-loading (data-testid="detail-loading")
-                 ├─ detail-error (data-testid="detail-error")
-                 ├─ detail-empty (data-testid="detail-empty")
-                 ├─ detail-binary (data-testid="detail-binary")
-                 ├─ detail-content (data-testid="detail-content")  ← 内容区（<pre> 文本插值）
-                 └─ detail-truncated (data-testid="detail-truncated")  ← 截断提示（>1MB）
-```
+`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（terminal/browser/git/doc/detail，`drawer-tab-{key}` testid）、钉住按钮（`drawer-pin`）、关闭按钮（`drawer-close`）。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）。
 
 ## 3. data-testid 清单
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `detail-pane` | DetailPane.vue:11 | detail tab 激活时恒显 |
-| `detail-view-toggle` | DetailPane.vue:17 | **仅有 git 改动时**显示（diff/preview 切换） |
-| `detail-loading` | DetailPane.vue:39 | 加载中 |
-| `detail-error` | DetailPane.vue:49 | 加载失败 |
-| `detail-empty` | DetailPane.vue:60 | 空内容 |
-| `detail-binary` | DetailPane.vue:70 | 二进制文件 |
-| `detail-content` | DetailPane.vue:78 | 内容区（恒显，加载完成后） |
-| `detail-truncated` | DetailPane.vue:83 | 文件 >1MB 截断 |
+testid 以组件 template 内 data-testid 属性为准（下表均已核实有效）。
 
-> ⚠️ **SideDrawer 本身 + GitPanel + CommandDocPanel + tab 栏按钮无 testid**。E2E 查 tab 靠文本，查 git/doc 内容靠内部元素文本。建议补：
-> - SideDrawer tab 按钮 → `data-testid="drawer-tab-{key}"`（已落地，含 bashTask）
-> - SideDrawer 根 → `data-testid="side-drawer-root"`
-> - GitPanel → `data-testid="git-panel"`
->
-> bashTask tab（后台命令详情，第 8 tab）的完整 testid 清单见 [14-background-task-sidebar.md](./14-background-task-sidebar.md)。
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `detail-pane` | DetailPane.vue | detail tab 激活时恒显 |
+| `detail-view-toggle` | DetailPane.vue | **仅有 git 改动时**显示（diff/preview 切换） |
+| `detail-loading` | DetailPane.vue | 加载中 |
+| `detail-error` | DetailPane.vue | 加载失败 |
+| `detail-empty` | DetailPane.vue | 空内容 |
+| `detail-binary` | DetailPane.vue | 二进制文件 |
+| `detail-content` | DetailPane.vue | 内容区（恒显，加载完成后） |
+| `detail-truncated` | DetailPane.vue | 文件 >1MB 截断 |
+| `drawer-tab-{key}` | DrawerPanel.vue | tab 栏按钮（terminal/browser/git/doc/detail 等） |
+| `drawer-panel` / `drawer-pin` / `drawer-close` | DrawerPanel.vue | 抽屉容器 / 钉住 / 关闭 |
+
+> GitPanel 仅有 `git-inject-file` 一个 testid，git 状态内容查询仍靠内部元素文本；CommandDocPanel 无 testid。bashTask tab（后台命令详情）的完整 testid 清单见 [14-background-task-sidebar.md](./14-background-task-sidebar.md)。
 
 ## 4. detail tab 数据流（useDetailPane）
 
-[`composables/features/useDetailPane.ts`](../../packages/renderer/src/composables/features/useDetailPane.ts)：
+[`composables/features/file-tree/useDetailPane.ts`](../../packages/renderer/src/composables/features/file-tree/useDetailPane.ts)：
 
 ```
 fileTreeStore.selectedPath 变化（点文件触发）
@@ -80,7 +59,7 @@ fileTreeStore.selectedPath 变化（点文件触发）
             → state.content = 结果；state.status = 'ready'
 ```
 
-**viewMode 切换**（detail-view-toggle）：`detail-view-toggle` 仅在 `hasGitChange=true` 时渲染（`DetailPane.vue:17` v-if）。点击切换 viewMode 并**重新拉数据**（diff→preview 调 `fileApi.read`，preview→diff 调 `gitApi.getDiff`，设 `status:'loading'`）。守卫仅检查 `viewMode !== mode`，不额外校验「可读/可 diff」——无 git 改动的文件切 diff 会调 getDiff，若返回空则显空内容（不崩）。
+**viewMode 切换**（detail-view-toggle）：`detail-view-toggle` 仅在 `hasGitChange=true` 时渲染。点击切换 viewMode 并**重新拉数据**（diff→preview 调 `fileApi.read`，preview→diff 调 `gitApi.getDiff`，设 `status:'loading'`）。守卫仅检查 `viewMode !== mode`，不额外校验「可读/可 diff」——无 git 改动的文件切 diff 会调 getDiff，若返回空则显空内容（不崩）。
 
 **XSS 安全**（[NFR.md](../../NFR.md) no-v-html 约束）：DetailPane **禁用 v-html**，内容用 `<pre>{{ state.content }}</pre>` 文本插值。mock file.read / git.getDiff 含 `<script>` 路径用于验证 XSS 防护。
 
@@ -215,7 +194,7 @@ test.describe('SideDrawer E2E', () => {
     await expect(page.getByTestId('detail-content')).toBeVisible({ timeout: 5_000 })
     // 切回 diff
     await page.getByTestId('detail-view-toggle').click()
-    // toggleView 切换时先设 status='loading'（useDetailPane.ts:104），detail-content（v-else
+    // toggleView 切换时先设 status='loading'（useDetailPane），detail-content（v-else
     // 非_loading）短暂从 DOM 消失显 detail-loading。需先等 toBeVisible 再断文本，避免 flaky。
     await expect(page.getByTestId('detail-content')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('detail-content')).toContainText('diff --git')
@@ -224,22 +203,22 @@ test.describe('SideDrawer E2E', () => {
   test('E2E-SD-5: 切 git tab → GitPanel 渲染全量状态', async ({ page }) => {
     // 入口选择：SideDrawer 的 git tab 按钮与 PanelHeader 的 git 按钮都含 "Git" 文本，
     // getByRole(button, name:/git/i) 会双匹配。改用 PanelHeader git 按钮（title 更具体
-    // 「Git 状态 · 打开侧栏」，PanelHeader.vue:102），点击触发 openGit → openDrawer('git')
-    //（PanelContainer.vue:39）→ drawer 切到 git tab → GitPanel 挂载。
+    // 「Git 状态 · 打开侧栏」），点击触发 openGit → openDrawer('git')
+    // → drawer 切到 git tab → GitPanel 挂载。
     await gotoFileTree(page)
     await page.getByTestId('file-tree-dir-src').click()
     await page.getByTestId('file-tree-file-src/index.ts').click()
     await expect(page.getByTestId('detail-pane')).toBeVisible({ timeout: 5_000 })
     // 点 PanelHeader git 按钮（唯一匹配，title 含「Git 状态」）
     await page.getByTitle('Git 状态 · 打开侧栏').click()
-    // GitPanel 渲染（GitPanel.vue，数据来自 inject GIT_STATUS_KEY → useGitStatus →
-    // gitApi.status → mock fixtureGitStatus）。无 testid，用稳定文本断言：
-    //   - 分支名 main（GitPanel.vue:35 {{ result.branch }}，mock git.ts:41 branch:'main'）
+    // GitPanel 渲染（数据来自 inject GIT_STATUS_KEY → useGitStatus →
+    // gitApi.status → mock fixtureGitStatus）。内容区无 testid，用稳定文本断言：
+    //   - 分支名 main（mock git branch:'main'）
     await expect(page.getByText('main').first()).toBeVisible({ timeout: 5_000 })
-    //   - stats +42 −7（GitPanel.vue:40-41，mock git.ts:44 stats:{add:42,del:7}）
+    //   - stats +42 −7（mock git stats:{add:42,del:7}）
     await expect(page.getByText('+42').first()).toBeVisible()
     await expect(page.getByText('−7').first()).toBeVisible()
-    //   - 文件列表含 mock fixture 路径（GitPanel.vue:59 v-for files，mock git.ts:47-53）
+    //   - 文件列表含 mock fixture 路径
     await expect(page.getByText('src/new-feature.ts').first()).toBeVisible()
   })
 })
@@ -274,23 +253,23 @@ test.describe('SideDrawer E2E', () => {
 | 二进制文件 | 图片等 → detail-binary 显示 | 非 MOCK（mock 不返回二进制标记） | 低 |
 | diff/preview 切换 | 点 detail-view-toggle 在 diff/preview 间切换（每次切换重新拉数据） | E2E（E2E-SD-4 已覆盖单次切换） | — |
 
-> ⚠️ **viewMode 不持久（已知限制，非 backlog）**：`useDetailPane.state` 是组件级 `ref`（`useDetailPane.ts:61`），`DetailPane` 在 `SideDrawer.vue:72` 是 `v-else-if` 条件挂载——切走（切到 git/doc tab）即 unmount，state 销毁；切回重新 `useDetailPane()` → `initialState()` → viewMode 复位为 `'preview'`（`useDetailPane.ts:54`）。**无 store/localStorage 持久化**。如需「切走再切回记忆 viewMode」是功能增强需求，需改造成 store 或 module 级缓存，当前不作为测试 backlog（测了也是验证缺陷）。
+> ⚠️ **viewMode 不持久（已知限制，非 backlog）**：`useDetailPane.state` 是组件级 `ref`，`DetailPane` 在抽屉容器内是条件挂载——切走（切到 git/doc tab）即 unmount，state 销毁；切回重新 `useDetailPane()` → `initialState()` → viewMode 复位为 `'preview'`。**无 store/localStorage 持久化**。如需「切走再切回记忆 viewMode」是功能增强需求，需改造成 store 或 module 级缓存，当前不作为测试 backlog（测了也是验证缺陷）。
 
 ## 10. 约束与盲区
 
 | 约束 | 说明 |
 |------|------|
-| ⚠️ tab 栏无 testid | SideDrawer tab 按钮（terminal/browser/git/doc/detail）无 testid，E2E 靠文本查（脆弱）。建议补 `drawer-tab-{key}` |
-| ⚠️ GitPanel/CommandDocPanel 无 testid | git/doc tab 内容查询靠内部元素文本。建议补 testid |
+| ⚠️ GitPanel/CommandDocPanel testid 覆盖薄 | GitPanel 仅有 `git-inject-file`；CommandDocPanel 无 testid。git/doc tab 内容查询靠内部元素文本（脆弱） |
 | ✅ DetailPane testid 完整 | detail tab 有完整 testid（detail-pane/content/loading/error/empty/binary/truncated/toggle），E2E 稳定 |
+| ✅ DrawerPanel testid 已落地 | tab 栏 `drawer-tab-{key}` + 容器/钉住/关闭均有 testid |
 | ❌ mock 不模拟大文件/二进制 | detail-truncated（>1MB）/ detail-binary 只能非 MOCK 测（mock file.read 恒小文本） |
 | ❌ 真实 git diff 格式 | mock getDiff 返回固定 patch，真实 git（binary/rename）只能非 MOCK 测 |
 | ❌ widget 订阅 | terminal/browser tab 走 extension.onWidget，mock 推送有限，真实 widget 内容只能非 MOCK 测 |
 
 ## 11. 相关文档
 
-- 组件源码：[`components/panel/SideDrawer.vue`](../../packages/renderer/src/components/panel/SideDrawer.vue) / [`DetailPane.vue`](../../packages/renderer/src/components/panel/DetailPane.vue)
-- composable：[`composables/features/useDetailPane.ts`](../../packages/renderer/src/composables/features/useDetailPane.ts) / [`useSideDrawer.ts`](../../packages/renderer/src/composables/features/useSideDrawer.ts)
+- 组件源码：抽屉容器 [`features/drawer/DrawerPanel.vue`](../../packages/ui/src/features/drawer/DrawerPanel.vue)（原 SideDrawer，已迁 ui 包）/ [`DetailPane.vue`](../../packages/renderer/src/components/panel/DetailPane.vue)
+- composable：[`composables/features/file-tree/useDetailPane.ts`](../../packages/renderer/src/composables/features/file-tree/useDetailPane.ts) / [`composables/features/drawer/useSideDrawer.ts`](../../packages/renderer/src/composables/features/drawer/useSideDrawer.ts)
 - E2E（detail tab）：[`e2e/file-tree.spec.ts`](../../e2e/file-tree.spec.ts) E2E-3a/3b/3c
 - 文件树入口：[04-file-tree.md](./04-file-tree.md)（点文件 → drawer detail）
 - NFR no-v-html：[NFR.md](../../NFR.md)（XSS 安全约束）

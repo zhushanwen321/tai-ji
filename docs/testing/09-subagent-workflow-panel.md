@@ -6,31 +6,9 @@
 
 ## §1 功能概述
 
-### 主流程
+### 主流程概述
 
-```
-用户点击 Agents tab
-  → Sidebar watch 检测 activeTab='subagents'
-  → useSubagentView.loadSubagents(activeSessionId)
-  → sessionApi.getSubagents (WS RPC: session.getSubagents)
-  → runtime: SessionService.getSubagents → extractSubagentsFromSessionFile(sessionFile)
-  → 读主 session JSONL，提取 subagent 工具调用/结果/bg-notify
-  → 返回 SubagentRecord[]
-  → 前端渲染卡片列表
-
-用户点击 subagent 卡片
-  → useSubagentView.selectSubagent(subagentId)
-  → 保存 originalSessionId
-  → sessionApi.getSubagentHistory → runtime 读 subagent JSONL → Message[]
-  → chatStore.hydrate('subagent:<id>', messages)
-  → panel.loadSession(panelId, 'subagent:<id>')
-  → Panel 渲染 MessageStream + PanelHeader 显示返回按钮
-
-用户点击返回
-  → useSubagentView.backToMainSession()
-  → panel.loadSession(panelId, originalSessionId)
-  → Panel 恢复原 session header
-```
+Agents tab 激活时前端经 `session.getSubagents` WS RPC 请求 runtime；runtime 读取主 session JSONL，提取 subagent 工具调用/结果/bg-notify 组装 `SubagentRecord[]` 返回，前端渲染卡片列表。点击 subagent 卡片后，前端保存原 session id，经 `session.getSubagentHistory` 拉取 subagent JSONL 转为 `Message[]`，hydrate 到 `subagent:<id>` 虚拟 session 并切换 Panel 渲染对话流；点击返回则恢复原 session。
 
 Workflow tab 当前仅为空态占位（无后端逻辑）。
 
@@ -40,73 +18,33 @@ Workflow tab 当前仅为空态占位（无后端逻辑）。
 |---|---|---|
 | 展示组件 | `SubagentList.vue` | 渲染 SubagentRecord[] 卡片，点击 emit select |
 | 展示组件 | `SegmentedTab.vue` | 4 tab 等宽均分 + badge 点 |
-| 编排 composable | `useSubagentView.ts` | loadSubagents/selectSubagent/backToMainSession，模块级单例 |
-| Store | `sidebar.ts` | `activeTab` 状态（sessions/files/subagents/workflows） |
-| API domain | `api/domains/session.ts` | getSubagents/getSubagentHistory WS RPC |
-| Mock domain | `api/mock/index.ts:259-269` | 返回空数组（mock 无真实 subagent 数据） |
-| Runtime extractor | `subagent-extractor.ts` | 解析主 session JSONL → SubagentRecord[] |
-| Runtime service | `session-service.ts:320-336` | getSubagents/getSubagentHistory |
-| Transport handler | `session-message-handler.ts:88-95` | session.getSubagents/session.getSubagentHistory 路由 |
+| Store | `stores/subagent.ts` | subagent 视图状态（原 useSubagentView composable 已并入 store 层） |
+| Store | `stores/sidebar.ts` | `activeTab` 状态（sessions/files/subagents/workflows） |
+| Mock domain | `packages/core/src/transport/mock/index.ts` | 返回空数组（mock 无真实 subagent 数据） |
+| Runtime extractor | `services/session/subagent-extractor.ts` | 解析主 session JSONL → SubagentRecord[] |
+| Runtime service | `packages/runtime/src/services/session/` | getSubagents/getSubagentHistory |
 
-## §2 组件树
+## §2 组件结构概述
 
-```
-Sidebar.vue
-├─ SegmentedTab.vue [v-model=sidebar.activeTab]
-│   ├─ Button title="会话" (MessageSquare)    count=sessionCount
-│   ├─ Button title="文件" (File)             count=fileCount
-│   ├─ Button title="Agents" (Bot)            count=subagentCount  badge=subagentCount>0
-│   └─ Button title="Flows" (Workflow)        count=0              badge=workflowCount>0
-│
-├─ [v-if activeTab==='subagents']
-│   └─ SubagentList.vue [data-testid="subagent-list"]
-│       ├─ [v-if subagents.length > 0]
-│       │   └─ div [data-testid="subagent-card"] (@click=emit select)
-│       │       ├─ Loader2 v-if="status==='running'" [data-testid="subagent-card-spinner"]
-│       │       ├─ span.dot v-else (statusDotClass: bg-success/bg-danger/bg-subtle/bg-accent)
-│       │       ├─ span.agent (record.agent)
-│       │       ├─ span.id (subagentId slice 12)
-│       │       ├─ summary (turns / tokens / elapsed)
-│       │       └─ div.task (record.task)
-│       └─ [v-else] div [data-testid="subagent-list-empty"]
-│           ├─ Bot icon
-│           ├─ p "暂无后台任务"
-│           └─ p "发起 subagent 后在此查看进度"
-│
-├─ [v-else-if activeTab==='workflows']
-│   └─ div [data-testid="workflow-list-empty"]
-│       ├─ Workflow icon
-│       ├─ p "暂无工作流"
-│       └─ p "发起 workflow 后在此查看进度"
-│
-└─ [v-else] FileView / file-view-no-session
-```
+`Sidebar.vue` 的 SegmentedTab 含 4 个等宽 tab（会话/文件/Agents/Flows，Agents tab 带 subagentCount badge 点）。Agents tab 激活时渲染 `SubagentList.vue`（容器 `data-testid="subagent-list"`）：有记录时渲染卡片列表（`subagent-card`，含 running 态 spinner `subagent-card-spinner`、状态点、agent 名、id 前缀、turns/tokens/elapsed summary、task 描述）；无记录时渲染 `subagent-list-empty` 空态（Bot 图标 +「暂无后台任务」引导文案），另有加载失败/加载中态（`subagent-list-error` / `subagent-list-loading`）。Flows tab 激活时渲染 `workflow-list-empty` 空态占位。
 
-Panel 层（subagent 视图切换时）：
-
-```
-Panel.vue
-├─ subagentLabel computed: `${record.agent} · ${subagentId.slice(12)}`
-├─ PanelHeader.vue
-│   ├─ [v-if viewingSubagent] Button [data-testid="subagent-back-btn"] (ArrowLeft)
-│   ├─ [v-if viewingSubagent] span (subagentLabel)
-│   └─ [v-else] 正常 header（spinner/breadcrumb/buttons）
-└─ MessageStream [v-if sessionId && messageCount > 0]
-    （virtualId='subagent:<id>' 透明复用，无需特殊处理）
-```
+Panel 层：进入 subagent 视图时 PanelHeader 显示返回入口 + subagent label（`${record.agent} · ${subagentId 前缀}`），MessageStream 以 `subagent:<id>` 虚拟 sessionId 透明复用，无需特殊处理。
 
 ## §3 data-testid 清单
 
-| testid | 文件 | 触发/可见条件 |
-|--------|------|-------------|
-| `subagent-list` | SubagentList.vue:8 | Agents tab 激活时（恒定，容器） |
-| `subagent-card` | SubagentList.vue:16 | `subagents.length > 0`，每条记录一个 |
-| `subagent-card-spinner` | SubagentList.vue:23 | `record.status === 'running'` |
-| `subagent-list-empty` | SubagentList.vue:56 | `subagents.length === 0` |
-| `workflow-list-empty` | Sidebar.vue:101 | workflows tab 激活时（恒定） |
-| `file-view-no-session` | Sidebar.vue:119 | files tab + 无 active session |
-| `subagent-back-btn` | PanelHeader.vue:68 | `viewingSubagent === true` |
-| `panel-session-spinner` | PanelHeader.vue:80 | `!viewingSubagent && showSpinner` |
+testid 以组件 template 内 data-testid 属性为准（下表均已核实有效）。
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `subagent-list` | SubagentList.vue | Agents tab 激活时（恒定，容器） |
+| `subagent-card` | SubagentList.vue | `subagents.length > 0`，每条记录一个 |
+| `subagent-card-spinner` | SubagentList.vue | `record.status === 'running'` |
+| `subagent-list-empty` | SubagentList.vue | `subagents.length === 0` |
+| `subagent-list-loading` / `subagent-list-error` / `subagent-list-retry` | SubagentList.vue | 加载中 / 加载失败 / 重试按钮 |
+| `workflow-list-empty` | Sidebar.vue | workflows tab 激活时（恒定） |
+| `file-view-no-session` | Sidebar.vue | files tab + 无 active session |
+
+> 注：PanelHeader 现无 `subagent-back-btn` / `panel-session-spinner` testid（v6 重构后已移除），返回入口与加载态需用文本/角色锚点。
 
 **状态点 CSS 类**（非 testid，但测试可检查）：
 - `bg-success` — done 状态（绿色圆点）
@@ -114,72 +52,19 @@ Panel.vue
 - `bg-accent` — running 或未知（accent 色）
 - `bg-subtle opacity-50` — cancelled（灰色）
 
-## §4 调用链
+## §4 关键链路概述
 
-### 4.1 加载 subagent 列表
+- **加载列表**：Sidebar watch activeTab + activeId，tab 为 subagents 时经 `session.getSubagents` RPC → runtime 定位 session 文件 → extractor 解析 JSONL（提取 toolCalls / toolResults / bgNotifies / listItems）组装 `SubagentRecord[]` 回包 → 前端更新列表与 badge。
+- **选中 subagent**：卡片 emit select → 记录原 session id → 经 `session.getSubagentHistory` 拉取 subagent JSONL 转 `Message[]` → `chatStore.hydrate('subagent:<id>', messages)` → Panel 切到虚拟 session 渲染。
+- **返回主 session**：恢复原 sessionId，Panel header 与消息流还原。
 
-```
-Sidebar watch([activeTab, session.activeId])
-  → tab==='subagents' && sid → loadSubagents(sid)
-    → sessionApi.getSubagents(sid)
-      → transport.send({type:'session.getSubagents', payload:{sessionId:sid}})
-        → WS → server.ts → SessionMessageHandler
-          → ctx.sessionService.getSubagents(sid)
-            → scanSessions() 找 session.filePath
-            → extractSubagentsFromSessionFile(filePath)
-              → readFileSync → parseJsonl → 遍历 entries
-              → 提取 toolCalls / toolResults / bgNotifies / listItems
-              → 组装 SubagentRecord[]
-          → ctx.reply(ws, msg.id, 'session.subagents', {sessionId, subagents})
-        ← reply → pending resolve → SubagentRecord[]
-    → subagentRecords.value = records
-    → subagentCount computed 更新 → SegmentedTab badge 点亮
-```
+### sessionFile 后备查找（background 模式）
 
-### 4.2 选中 subagent → 切换对话流
+background 模式 subagent 的 sessionFile 可能为 null（bg-notify 不带 sessionFile，listResponse 可能缺失）。extractor 的后备优先级：
 
-```
-SubagentList @click → emit('select', subagentId)
-  → Sidebar.onSelectSubagent → subagentView.selectSubagent(id)
-    → panel.activePanelId + activeLeafPanel
-    → originalSessionId = panel 当前 sessionId（首次进入）
-    → currentSubagentId = id
-    → isHydrated('subagent:<id>')? 跳过 : sessionApi.getSubagentHistory
-      → transport.send({type:'session.getSubagentHistory', payload:{sessionId, subagentId}})
-        → runtime: getSubagentHistory → 找 record.sessionFile → getHistoryFromFilePath
-          → parseJsonl + convertHistory → Message[]
-        ← reply → Message[]
-      → chatStore.hydrate('subagent:<id>', messages)
-    → panel.loadSession(panelId, 'subagent:<id>')
-    → viewingSubagent = true
-      → PanelHeader 渲染 back-btn + subagentLabel
-      → MessageStream 渲染（messageCount > 0）
-```
-
-### 4.3 返回主 session
-
-```
-PanelHeader @click back-btn → emit('back')
-  → Panel.onSubagentBack → subagentView.backToMainSession()
-    → panel.loadSession(panelId, originalSessionId)
-    → viewingSubagent = false, currentSubagentId = null, originalSessionId = null
-      → PanelHeader 恢复正常 header
-      → MessageStream 渲染原 session 消息
-```
-
-### 4.4 sessionFile 后备查找（background 模式）
-
-background 模式 subagent 的 sessionFile 可能为 null（bg-notify 不带 sessionFile，listResponse 可能缺失）。extractor 的后备链路：
-
-```
-record.sessionFile 查找优先级：
-  1. listItem.sessionFile（listResponse.items 中匹配的）
-  2. toolResult.sessionFile（bgResponse 返回的，通常 null）
-  3. findSubagentSessionFile(mainCwd, startedAt)
-     → 扫描 getSubagentSessionDir(mainCwd)/sessions/*.jsonl
-     → parseIsoFromFilename 提取文件名中的时间戳
-     → 匹配 startedAt ±60s 窗口内最近的文件
-```
+1. `listItem.sessionFile`（listResponse.items 中匹配的）
+2. `toolResult.sessionFile`（bgResponse 返回的，通常 null）
+3. `findSubagentSessionFile(mainCwd, startedAt)`：扫描 getSubagentSessionDir 下的 sessions/*.jsonl，从文件名解析时间戳，匹配 startedAt ±60s 窗口内最近的文件
 
 ## §5 MOCK 模式测试（vitest 集成）
 

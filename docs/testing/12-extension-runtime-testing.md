@@ -1,10 +1,10 @@
 # 12 · extension 层运行时测试体系（worker harness → real LLM E2E）
 
-> **定位**：[TEST-STRATEGY.md](../../TEST-STRATEGY.md) 的分层 SSOT 覆盖「单元/集成/E2E mock 轨/dev 冒烟」，[11-real-e2e-specs.md](./11-real-e2e-specs.md) 覆盖「app 级 real-mode Playwright E2E」。本文补两者之间的空白——**extension（尤其 `extensions/subagent-workflow`）层如何做运行时断言**：从源码字符串断言（L0）一路到真实 LLM（L3），给出可操作的 harness 模式与决策树。
+> [STALE 2026-09-13] 本文撰写于 subagent-workflow 重构前：档位 A 的 L1 harness（`worker-script-builder.ts` + `worker-script-builder-runtime.test.ts`）已随重构并入 host/injectors 而删除，同名等价物不存在（现行源码见 `extensions/universal/subagent-workflow/src/{host,injectors}/`）。仅保留仍然有效的章节：§2 断言价值层级方法论、§3 档位 C real E2E 结论、§4 pi-mono 参考模式、§5 决策树；现存测试覆盖 = `extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`（L1.5）+ `e2e/workflow-thinkinglevel-real.spec.ts`（L2/L3）。
 >
-> **读者**：给 `extensions/subagent-workflow/`（或同类 extension）写测试、想把「降级断言」升级为运行时断言、或要做 real LLM 验证的开发者。
+> **定位**：[TEST-STRATEGY.md](../../TEST-STRATEGY.md) 的分层 SSOT 覆盖「单元/集成/E2E mock 轨/dev 冒烟」，[11-real-e2e-specs.md](./11-real-e2e-specs.md) 覆盖「app 级 real-mode Playwright E2E」。本文补两者之间的空白——**extension（尤其 `extensions/universal/subagent-workflow`）层如何做运行时断言**：从源码字符串断言（L0）一路到真实 LLM（L3）。
 >
-> **配套实证**：本文档的「档位 A worker-runtime」原落地于 extensions/subagent-workflow/src/orchestration/__tests__/worker-script-builder-runtime.test.ts（P3/P4 run-level model/thinkingLevel override 验证）。该结构已在 subagent-workflow 重构中并入 host/injectors（extensions/universal/subagent-workflow/src/），现存等价覆盖见 extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts，可直接参照。
+> **读者**：给 subagent-workflow（或同类 extension）写测试、想把「降级断言」升级为运行时断言、或要做 real LLM 验证的开发者。
 
 ---
 
@@ -27,8 +27,8 @@
 
 | 层级 | 断言对象 | 能证明什么 | 抓不住什么 | 本仓库实现 |
 |---|---|---|---|---|
-| **L0** | 生成的源码字符串（`toContain`）| 「拼对字符串」「注入行存在」| 运行时语法错（转义坏）、作用域错、workerData 没传到、序列化失败 | `worker-script-builder.test.ts`（源码断言层）|
-| **L1** | 真实 Worker 线程的**消息产物**（`agent-call.opts`）| 「`workerData.model` 真的流到 `agent()` 的 `opts.model`」「三分支 fallback 真生效」| pi 是否真用这个 model 调 LLM、RunSpec 构造是否对 | `worker-script-builder-runtime.test.ts`（**本文档主角**）|
+| **L0** | 生成的源码字符串（`toContain`）| 「拼对字符串」「注入行存在」| 运行时语法错（转义坏）、作用域错、workerData 没传到、序列化失败 | 原 `worker-script-builder.test.ts`（已随重构移除）|
+| **L1** | 真实 Worker 线程的**消息产物**（`agent-call.opts`）| 「`workerData.model` 真的流到 `agent()` 的 `opts.model`」「三分支 fallback 真生效」| pi 是否真用这个 model 调 LLM、RunSpec 构造是否对 | 原 `worker-script-builder-runtime.test.ts`（本文档原主角，已随重构移除，模式见 §3 档位 A）|
 | **L1.5** | 真实 lifecycle + workerHost + RunSpec 全链路（mock 最终 runner）| 「`actionRun(params.model)` → `RunSpec.model` → `workerData.model` → `$MODEL`」完整生产链路 | pi 子进程 + LLM | `workflows-e2e.test.ts`（mock runner）|
 | **L2** | pi 自己写的**产物文件**（session JSONL 的 `model_change`/`thinking_level_change` entry）| 「pi 收到 `--model p/m:level` 后真实拆字段落盘」「零 xyz-agent 代码介入」| LLM 是否跑完产出 | `e2e/workflow-thinkinglevel-real.spec.ts` TC2 |
 | **L3** | 真实 provider 跑完产出（assistant 消息）| 「完整链路可跑通」「provider 真的接受这个 model」| —（最真实，但慢/flaky/花钱）| `e2e/workflow-thinkinglevel-real.spec.ts` TC3 |
@@ -39,78 +39,20 @@
 
 ## 3. 三档测试模式
 
-### 档位 A · worker-runtime（L1）⭐ 首选
+### 档位 A · worker-runtime（L1）[已随重构移除]
 
-**真实起 `node:worker_threads.Worker` 执行 `buildWorkerScript()` 产物，主线程模拟 workflow runtime 回发 `agent-result`，断言 `agent-call` 消息的 `opts`。**
+原模式：真实起 `node:worker_threads.Worker` 执行生成的 worker 脚本产物，主线程模拟 workflow runtime 回发 `agent-result`，断言 `agent-call` 消息的 `opts`——Worker 边界以内全真（`$MODEL`/`$THINKING_LEVEL` global 注入、`agent()` 三分支 fallback、`postMessage` 序列化），唯一 mock 是主线程回发，完全确定（毫秒级）。harness 为 `runWorker()` 扩展点（给 workerData 加 `model`/`thinkingLevel` 透传）。
 
-- **真实程度**：Worker 边界以内全真（真实的 `$MODEL` global 注入、真实的 `agent()` 三分支 fallback、真实的 `postMessage` 序列化），唯一 mock 是主线程回发 `agent-result`（不让 worker 真的调 pi/LLM）。
-- **确定性**：✅ 完全确定（无 LLM、无 pi 子进程、毫秒级）。
-- **覆盖**：`worker-script-builder.ts` 的全部注入逻辑（`$ARGS`/`$MODEL`/`$THINKING_LEVEL`/`$BUDGET` globals、`agent()` 三分支、`parallel`/`pipeline`/`workflow()`、`_safePost` 作用域）。
-- **不覆盖**：`actionRun` → `RunSpec` 构造、`worker-host.ts` 的 `workerData` 透传、`resolveModel` 优先级、pi 子进程。
-
-#### harness：`runWorker()` 扩展点
-
-`worker-script-builder-runtime.test.ts` 的 `runWorker(userScript, opts)` 是核心 harness。要验证 run-level override，给 `RunOptions` 加 `model?`/`thinkingLevel?`，透传到 `workerData`：
-
-```ts
-interface RunOptions {
-  // ...existing
-  model?: string;            // ← 透传到 workerData.model → $MODEL global
-  thinkingLevel?: string;    // ← 透传到 workerData.thinkingLevel → $THINKING_LEVEL global
-}
-
-// runWorker() 内 workerData 构造：
-workerData: {
-  scriptPath: "test.js", args: opts.args ?? {}, workspace: process.cwd(),
-  budget: {...}, callCache: {...},
-  model: opts.model,            // ← 新增
-  thinkingLevel: opts.thinkingLevel, // ← 新增
-},
-```
-
-`AgentCallMsg.opts` 已有 `[k: string]: unknown` 索引签名，直接断言 `agentCalls[0].opts.model`。
-
-#### 测试骨架（P3/P4 实证，已落地）
-
-```ts
-describe("P3/P4 run-level model/thinkingLevel override 真实注入", () => {
-  it("workerData.model 经 $MODEL global 注入到 agent() opts.model", async () => {
-    const res = await runWorker(`await agent({ prompt: "hi" }); return {};`,
-      { model: "anthropic/claude-sonnet-4-5" });
-    expect(res.agentCalls[0]!.opts.model).toBe("anthropic/claude-sonnet-4-5");
-  });
-  it("per-call model 优先于 $MODEL（显式传时不被 override 覆盖）", async () => { ... });
-  it("三分支一致继承 $MODEL（string / task / object.prompt）", async () => { ... });
-  it("model+thinkingLevel 同时注入（对称）", async () => { ... });
-  it("不传时 opts.model undefined（零配置）", async () => { ... });
-});
-```
-
-> **何时新增 L0（源码断言）**：L1 是主防线，L0 保留作「快速防御」（改 `worker-script-builder.ts` 拼接逻辑时，L0 先红定位拼写，L1 再证运行时）。两者互补不互斥。
-
----
+**该 harness 及其测试文件已随 2026-09 重构删除**（orchestration 层并入 host/injectors），此处保留模式描述供未来重建参照：核心思想是「断言越靠近真实产物越好」——源码字符串断言（L0）只防拼写错误，真实 Worker 消息产物断言（L1）才能抓作用域/序列化/透传 bug（历史教训：`_safePost` 作用域 bug 源码断言全绿但真实 Worker 100% 失败）。若需要重建等价 harness，按现行 `host/` + `injectors/` 结构重新落地。
 
 ### 档位 B · workflow-E2E（L1.5）
 
 **走真实 `actionRun` → `lifecycle.runWorkflow` → `workerHost` → Worker 全链路，唯一 mock 是 `deps.runner`（`AgentRunner` 接口）。**
 
-- **真实程度**：比档位 A 多覆盖「`tool-workflow.ts` 的 `actionRun` 把 `params.model` 塞进 `RunSpec.model`」+「`worker-host.ts` 把 `spec.model` 透传到 `workerData.model`」这两段生产代码。
+- **真实程度**：覆盖「`actionRun` 把 `params.model` 塞进 `RunSpec.model`」+「`worker-host` 把 `spec.model` 透传到 workerData」这两段生产代码。
 - **确定性**：✅ 完全确定（真 lifecycle + 真 JsonlRunStore temp dir，mock runner）。
-- **harness**：`workflows-e2e.test.ts` 的 `makeMockRunner()`——`runner.run` 是 `vi.fn`，`mock.calls[N][0]` 即 AgentCall 的 `opts`（含 `opts.model`）。
-
-```ts
-import { actionRun } from "../../interface/tool-workflow.ts";
-
-it("actionRun model 透传到 RunSpec → workerData → agent-call opts.model", async () => {
-  const { deps, runner } = buildDeps(/* 真实 WorkerHost + JsonlRunStore + mock runner */);
-  await actionRun({ action: "run", name: "parallel", model: "anthropic/claude-sonnet-4-5" },
-    deps as any, undefined);
-  const calls = (runner.run as ReturnType<typeof vi.fn>).mock.calls;
-  for (const [opts] of calls) expect(opts.model).toBe("anthropic/claude-sonnet-4-5");
-});
-```
-
-- **何时用**：档位 A 已覆盖 worker 内注入；档位 B 补「RunSpec 构造 + worker-host 透传」段。当改动涉及 `tool-workflow.ts`/`run-spec.ts`/`worker-host.ts` 的 model/thinkingLevel 字段流转时，档位 B 是回归防线。
+- **现存实现**：[`extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`](../../extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts) 的 `makeMockRunner()`——`runner.run` 是 `vi.fn`，`mock.calls[N][0]` 即 AgentCall 的 `opts`（含 `opts.model`）。
+- **何时用**：改动涉及 model/thinkingLevel 字段在 actionRun → RunSpec → workerData 的流转时，本档位是回归防线。
 
 ---
 
@@ -178,12 +120,12 @@ PROBE_MODEL=zhipu-coding-plan-router/glm-5.2 npx playwright test e2e/workflow-th
 ## 5. 决策树：何时用哪档
 
 ```
-要验证的代码在 worker 内（worker-script-builder.ts 的 globals/agent()/parallel/pipeline）?
-├─ 是 → 档位 A（worker-runtime，L1）。源码断言（L0）作补充。
-│       runWorker() 已就绪，加 RunOptions.model/thinkingLevel 即可。
+要验证的代码在 worker 内（globals 注入 / agent() fallback / parallel/pipeline）?
+├─ 是 → 档位 A（worker-runtime，L1）——原 harness 已移除，需按现行 host/injectors 结构重建。
+│       L0 源码断言可作补充防线。
 │
-要验证 RunSpec 构造 / worker-host 透传 / actionRun 字段流转（tool-workflow.ts / run-spec.ts / worker-host.ts）?
-├─ 是 → 档位 B（workflow-E2E，L1.5）。makeMockRunner() 已就绪。
+要验证 RunSpec 构造 / worker-host 透传 / actionRun 字段流转?
+├─ 是 → 档位 B（workflow-E2E，L1.5）。makeMockRunner() 已就绪（workflows-e2e.test.ts）。
 │
 要验证跨进程协议透传 / pi 对 CLI 参数的真实消费 / pi 产物文件?
 ├─ 是 → 档位 C（real E2E，L2/L3）。参考 workflow-thinkinglevel-real.spec.ts。
@@ -197,32 +139,23 @@ PROBE_MODEL=zhipu-coding-plan-router/glm-5.2 npx playwright test e2e/workflow-th
 
 ---
 
-## 6. 已落地的实证索引
+## 6. 现存实证索引
 
 | 验证目标 | 档位 | 文件 | 价值层级 |
 |---|---|---|---|
-| `$MODEL`/`$THINKING_LEVEL` global 注入 + agent() 三分支 fallback（源码层）| A 源码断言 | `worker-script-builder.test.ts` `P3/P4` block | L0 |
-| 同上（运行时层）| **A runtime** | `worker-script-builder-runtime.test.ts` `P3/P4 runtime` block | **L1** |
-| `_safePost` 作用域 / return / error / abort / workflow() / execute() | A runtime | `worker-script-builder-runtime.test.ts` 回归组 | L1 |
-| agent() returnMeta 模式 | A runtime | `worker-script-builder-runtime.test.ts` W2 组 | L1 |
+| run-level 字段流转（actionRun → RunSpec → workerData → agent-call opts）| B | [`extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`](../../extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts) | L1.5 |
 | runSpawn（spawn pi 子进程的业务逻辑）| mock spawn | `run-spawn-integration.test.ts` 等（FakeChild）| L0.5（mock 边界 = spawn）|
 | workflow agent() thinkingLevel 端到端（per-call）| C real | `e2e/workflow-thinkinglevel-real.spec.ts` | L2/L3 |
 
-> **本次新增**（2026-09-10）：`worker-script-builder-runtime.test.ts` 的 P3/P4 runtime 组（6 个 it），把 run-level model/thinkingLevel override 从 L0 升级到 L1。原 L0 源码断言保留作防御性补充。
+> 原 L1 档位（`worker-script-builder-runtime.test.ts`）已随重构删除，见文头 STALE 注。
 
 ---
 
 ## 附录：关键文件速查
 
-> [2026-09-11 注] 下表为 subagent-workflow 重构前结构（orchestration 层已并入 host/injectors，extensions/universal/subagent-workflow/src/ 为现行 SSOT；workflows-e2e.test.ts 现存于 src/__tests__/）。历史路径不带反引号——以现行结构为准。
-
 | 文件 | 作用 |
 |---|---|
-| extensions/subagent-workflow/src/orchestration/worker-script-builder.ts | 生成 worker 源码（globals/agent()/parallel 注入）|
-| extensions/subagent-workflow/src/orchestration/__tests__/worker-script-builder.test.ts | L0 源码字符串断言 |
-| extensions/subagent-workflow/src/orchestration/__tests__/worker-script-builder-runtime.test.ts | **L1 真实 Worker 运行时断言（runWorker() harness）** |
-| extensions/subagent-workflow/src/orchestration/__tests__/workflows-e2e.test.ts | L1.5 真 lifecycle + mock runner（现存于 extensions/universal/subagent-workflow/src/__tests__/）|
-| extensions/subagent-workflow/src/execution/__tests__/helpers/spawn-mock.ts | FakeChild + spawn mock helper（L0.5）|
+| `extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts` | L1.5 真 lifecycle + mock runner（现行 SSOT）|
 | `e2e/workflow-thinkinglevel-real.spec.ts` | L2/L3 real LLM E2E 模板 |
 | `e2e/fixtures/launch-app-real.ts` | real-mode Electron launch fixture |
 | `~/GitApp/pi-ecosystem/pi-mono/packages/ai/src/providers/faux.ts` | pi faux provider（mock LLM 边界）|

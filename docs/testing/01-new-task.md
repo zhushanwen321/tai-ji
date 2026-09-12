@@ -20,64 +20,41 @@
 
 **关键设计：统一延迟 create**。点「新建任务」**不立即 create session**，只进 Landing 空 chip 态。选目录只记 `pendingCwd`（不建 session）。首发提交（`submitFirstMessage`）才真正 create session。原因：避免用户点新建又退出留下僵尸空 session。
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-Panel.vue (sessionId=null, messageCount=0, !isGenerating)
-  └─ Landing.vue (data-testid="new-task-landing")  ← Landing 态渲染入口
-       ├─ 时段问候语（上午好呀/下午好呀/晚上好呀）
-       ├─ Composer.vue (variant="landing")  ← landing 内嵌 composer 卡片
-       │    ├─ #meta-row slot（chip 行）
-       │    │    ├─ directory chip (data-testid="chip-directory")
-       │    │    │    └─ DirSelectPopover.vue (data-testid="dir-select-popover")
-       │    │    │         ├─ workspace-item × N (data-testid="workspace-item")
-       │    │    │         ├─ action-open-dir (data-testid="action-open-dir")
-       │    │    │         └─ action-remote (data-testid="action-remote")
-       │    │    └─ branch chip (data-testid="chip-branch")  ← 仅 git 目录显示
-       │    │         └─ BranchSelectPopover.vue (data-testid="branch-select-popover")
-       │    │              ├─ branch-item × N (data-testid="branch-item")
-       │    │              ├─ action-create-branch (data-testid="action-create-branch")
-       │    │              ├─ dirty-confirm (data-testid="dirty-confirm")  ← 工作区脏时确认
-       │    │              └─ CreateBranchModal.vue (data-testid="branch-name-error" / "submit-btn")
-       │    ├─ ComposerInput.vue (role="textbox")  ← contenteditable 输入区
-       │    └─ 工具条（AddMenu / ContextCapacity / Model / ThinkingLevel / 发送按钮）
-       └─ retry-history 按钮 (data-testid="retry-history")  ← 仅 historyError=true 时
-```
+Landing 态由 `Panel.vue`（sessionId=null 且非 generating 时）渲染 `Landing.vue`（`data-testid="new-task-landing"`），内嵌一个 landing 变体的 `Composer.vue`。composer 的 meta-row chip 行包含 directory chip（点开 `DirSelectPopover`：工作区项 + 打开其他目录）与 branch chip（仅 git 目录显示，点开 `BranchSelectPopover`：分支项 + 新建分支，含 `CreateBranchModal`）。历史加载失败时 Landing 另有 `retry-history` 按钮。Landing 态 composer 内嵌于 Landing，Panel 自身的 composer 不重复渲染。
 
-**渲染条件**（`Panel.vue`）：
-- `Landing` 渲染：`!isGenerating && isLandingView`，其中 `isLandingView = !sessionId || flow.state.value==='landing'`
-- Landing 态 composer 由 Landing 内嵌，Panel 的 `showPanelComposer` 为 false（不重复渲染）
+组件源码：`packages/renderer/src/components/new-task/Landing.vue`、`packages/ui/src/features/new-task/`（DirSelectPopover / BranchSelectPopover / CreateBranchModal）、`packages/renderer/src/components/panel/Composer.vue`。
 
 ## 3. data-testid 清单
 
-| testid | 文件:行 | 触发/可见条件 |
+testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为已核实有效的锚点）。
+
+| testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
-| `new-task-landing` | Landing.vue:96 | Landing 态恒显 |
-| `chip-directory` | Landing.vue:138 | Landing 态恒显（directory chip 行） |
-| `chip-branch` | Landing.vue:160 | 仅 git 目录（`gitInfo != null`）显示 |
-| `retry-history` | Landing.vue:120 | 仅 `historyError=true`（getHistory 失败）时显示 |
-| `dir-select-popover` | DirSelectPopover.vue:113 | 点 directory chip 后弹出 |
-| `workspace-item` | DirSelectPopover.vue:141 | popover 内每个工作区项 |
-| `action-open-dir` | DirSelectPopover.vue:168 | 「打开其他目录」（触发 OS dialog） |
-| `action-remote` | DirSelectPopover.vue:181 | 「克隆远程仓库」 |
-| `branch-select-popover` | BranchSelectPopover.vue:156 | 点 branch chip 后弹出 |
-| `branch-item` | BranchSelectPopover.vue:199 | popover 内每个分支项 |
-| `action-create-branch` | BranchSelectPopover.vue:232 | 「新建分支」 |
-| `dirty-confirm` | BranchSelectPopover.vue:260 | 工作区脏时切分支的确认弹窗 |
-| `dirty-confirm-cancel` / `dirty-confirm-ok` | BranchSelectPopover.vue:268/276 | 确认弹窗按钮 |
-| `branch-name-error` | CreateBranchModal.vue:115 | 新建分支名校验错误 |
-| `submit-btn` | CreateBranchModal.vue:131 | 新建分支提交按钮 |
-| `composer-box` | Composer.vue:25 | composer 容器（Landing + Panel 态都有） |
+| `new-task-landing` | Landing.vue | Landing 态恒显 |
+| `chip-directory` | Landing.vue | Landing 态恒显（directory chip 行） |
+| `chip-branch` | Landing.vue | 仅 git 目录（`gitInfo != null`）显示 |
+| `retry-history` | Landing.vue | 仅 `historyError=true`（getHistory 失败）时显示 |
+| `dir-select-popover` | DirSelectPopover.vue | 点 directory chip 后弹出 |
+| `workspace-item` | DirSelectPopover.vue | popover 内每个工作区项 |
+| `action-open-dir` | DirSelectPopover.vue | 「打开其他目录」（触发 OS dialog） |
+| `branch-select-popover` | BranchSelectPopover.vue | 点 branch chip 后弹出 |
+| `branch-item` | BranchSelectPopover.vue | popover 内每个分支项 |
+| `action-create-branch` | BranchSelectPopover.vue | 「新建分支」 |
+| `branch-name-error` | CreateBranchModal.vue | 新建分支名校验错误 |
+| `submit-btn` | CreateBranchModal.vue | 新建分支提交按钮 |
+| `composer-box` | Composer.vue | composer 容器（Landing + Panel 态都有） |
 
 ## 4. 状态机（useNewTaskFlow）
 
-`composables/features/useNewTaskFlow.ts`，状态枚举（line 32）：
+`composables/features/new-task/useNewTaskFlow.ts`，状态枚举：
 
 ```
 'idle' | 'landing' | 'dir-popover' | 'branch-popover' | 'dir-dialog' | 'branch-modal' | 'completed' | 'cancelled'
 ```
 
-状态转换图（line 73-80 transitions）：
+状态转换图（transitions）：
 
 ```
 idle ──startFlow──→ landing ──openDirPopover──→ dir-popover ──openDirDialog──→ dir-dialog
@@ -97,7 +74,7 @@ idle ──startFlow──→ landing ──openDirPopover──→ dir-popover 
 completed ──startFlow──→ idle ──→ landing（AC-3.12：终态再触发先销毁重建）
 ```
 
-**关键状态字段**（line 84-92）：
+**关键状态字段**：
 - `state: Ref<NewTaskFlowState>` — 当前状态（初始 `idle`）
 - `currentSession: Ref<SessionSummary | null>` — 当前 flow 绑定的 session（landing 态恒 null，首发提交才绑定）
 - `pendingCwd: Ref<string | null>` — landing 选定但未 create 的 cwd（选目录只记值不建 session）
@@ -195,9 +172,9 @@ import { test, expect } from './fixtures/launch-app'
 test.describe('新建任务 E2E', () => {
   test('E2E-NT-1: 首屏 Landing 态渲染（composer 输入区 + chip 行）', async ({ page }) => {
     // app 启动后默认 Landing 态（无活跃 session）。
-    // 注意：initApp 会用最近活跃 session 的 cwd 预填 chip（useSidebar.ts:217 注释
-    // 「initApp 用最近 session 目录预填」）。E2E 下 e2eTestSession.lastActiveAt=Date.now()
-    //（data.ts:257，是最新），其 cwd 是 sample-project → chip 预填「sample-project」，
+    // 注意：initApp 会用最近活跃 session 的 cwd 预填 chip（useSidebar「initApp 用最近
+    // session 目录预填」）。E2E 下 e2eTestSession.lastActiveAt=Date.now()（data.ts，是
+    // 最新），其 cwd 是 sample-project → chip 预填「sample-project」，
     // **不是**空态「选择目录」。空态只在真正首次启动（无任何历史 session）时出现。
     await expect(page.getByTestId('new-task-landing')).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('composer-box')).toBeVisible()
@@ -220,7 +197,7 @@ test.describe('新建任务 E2E', () => {
     // 注意：app 启动时 chip 已被 initApp 预填（e2eTestSession 的 cwd=sample-project，
     // 见 NT-1）。recentWorkspaces 首项也是 sample-project（lastActiveAt=Date.now 最新）。
     // 若点 .first()（sample-project），与预填 cwd 相同 → selectWorkspace 走 noop 分支
-    //（useNewTaskFlow.ts:265 cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
+    //（useNewTaskFlow：cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
     // 故点 .nth(1)（第 2 个，fixtureSessions 去 cwd 重后 = xyz-agent，s1/s2/s5 的 cwd
     // /Users/zhushanwen/Code/xyz-agent 末段）。
     await page.getByTestId('chip-directory').click()
@@ -247,7 +224,7 @@ test.describe('新建任务 E2E', () => {
     // composer 仍在（Panel 态 variant，证明已进入对话流，非 Landing 内嵌）
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
     // 注意：不直接用 getByText('帮我写个 hello world') 断言 user 气泡 ——
-    // mock 回复会回显 user 输入（run-send-stream.ts:49 reply='已处理："${text}"...'），
+    // mock 回复会回显 user 输入（run-send-stream 的 reply 形如「已处理："${text}"...」），
     // 导致该文本同时出现在 user 气泡 + assistant 回复，getByText 严格模式会因多匹配报错。
     // 改用 panel composer 可见 + Landing 消失作为「进入对话流」的复合信号。
   })

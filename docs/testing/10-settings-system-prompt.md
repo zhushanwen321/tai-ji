@@ -31,50 +31,29 @@
 
 **[HISTORICAL]** 旧根文件版 `xyz-system-prompt-extension.js`（repo root 文件型 builtin）已于 2026-08 builtin→npm 迁移删除；其「当前生效提示词快照」卡（写 `<dataDir>/system-prompt-snapshot.md` 供 UI 回读）一并移除，现行无实时快照入口，参考区只展示默认提示词常量。
 
-## 2. 组件树
+## 2. 组件结构概述
 
-```
-SettingsModal.vue
-  └─ system/SystemPromptPage.vue (data-testid="system-prompt-page")  ← activeMenu === 'system-prompt' 时渲染
-       ├─ corrupted 提示条（v-if="corrupted"，警告色）
-       ├─ 卡 1 替换系统提示词
-       │    ├─ Switch (data-testid="system-prompt-replace-switch")
-       │    ├─ Textarea (data-testid="system-prompt-replace-input")
-       │    ├─ Button 放弃 (data-testid="system-prompt-replace-discard"，dirty 才可用)
-       │    ├─ Button 恢复默认 (data-testid="system-prompt-replace-reset"，dirty 才可用)
-       │    ├─ Button 保存 (data-testid="system-prompt-replace-save"，dirty 才可用)
-       │    └─ 折叠参考区
-       │         ├─ Button 展开/收起 (data-testid="system-prompt-default-toggle")
-       │         ├─ Button 复制 (data-testid="system-prompt-default-copy")
-       │         └─ 内容区 (data-testid="system-prompt-default-content"，DEFAULT_PI_SYSTEM_PROMPT)
-       └─ 卡 2 注入额外提示词
-            ├─ Switch (data-testid="system-prompt-append-switch")
-            ├─ Textarea (data-testid="system-prompt-append-input")
-            ├─ Button 放弃 (data-testid="system-prompt-append-discard"，dirty 才可用)
-            └─ Button 保存 (data-testid="system-prompt-append-save"，dirty 才可用)
-```
-
-**渲染条件**（`SettingsModal.vue`）：
-- `SystemPromptPage` 渲染：`activeMenu === 'system-prompt'`（菜单项 `menus[4]`，`labelKey: 'settings.menu.systemPrompt'`，nav 按钮 testid `settings-nav-system-prompt`）
-- 两张编辑卡 Switch 关闭时 Textarea + 保存按钮 `:disabled`（dirty 快照 diff 另行控制按钮可用性）；参考区默认折叠
+`SettingsModal.vue` 在 activeMenu 为 `system-prompt` 时渲染 `system/SystemPromptPage.vue`（`data-testid="system-prompt-page"`；菜单 nav 按钮 testid `settings-nav-system-prompt`）。页面含 corrupted 警告提示条（条件渲染）与两张编辑卡：卡 1 替换系统提示词（Switch `system-prompt-replace-switch`、Textarea `system-prompt-replace-input`、放弃/恢复默认/保存按钮 `system-prompt-replace-discard` / `-reset` / `-save`，均 dirty 才可用）+ 折叠参考区（展开/收起 `system-prompt-default-toggle`、复制 `system-prompt-default-copy`、内容区 `system-prompt-default-content` 展示 DEFAULT_PI_SYSTEM_PROMPT 常量）；卡 2 注入额外提示词（Switch `system-prompt-append-switch`、Textarea `system-prompt-append-input`、放弃/保存 `system-prompt-append-discard` / `system-prompt-append-save`）。Switch 关闭时 Textarea 与保存按钮 disabled；参考区默认折叠。
 
 ## 3. data-testid 清单
 
-| testid | 文件:行 | 触发/可见条件 |
-|--------|---------|--------------|
-| `system-prompt-page` | system/SystemPromptPage.vue:11 | 切到 system-prompt 菜单后恒显（页面根容器） |
-| `system-prompt-replace-switch` | system/SystemPromptPage.vue:38 | 卡 1 恒显（Switch 控件，model-value 绑 replaceEnabled） |
-| `system-prompt-replace-input` | system/SystemPromptPage.vue:50 | 卡 1 恒显，`!replaceEnabled` 时 disabled |
-| `system-prompt-replace-discard` | system/SystemPromptPage.vue:61 | 卡 1 恒显，`!replaceDirty` 时 disabled，点击还原已保存快照 |
-| `system-prompt-replace-reset` | system/SystemPromptPage.vue:70 | 卡 1 恒显，`!replaceDirty` 时 disabled，点击清空文本+关开关（编辑态） |
-| `system-prompt-replace-save` | system/SystemPromptPage.vue:79 | 卡 1 恒显，`!replaceDirty` 时 disabled，点击调 `saveReplace` |
-| `system-prompt-default-toggle` | system/SystemPromptPage.vue:92 | 卡 1 恒显，点击切换参考区展开态（默认折叠） |
-| `system-prompt-default-copy` | system/SystemPromptPage.vue:106 | 仅参考区展开时可见，点击复制 DEFAULT_PI_SYSTEM_PROMPT 到剪贴板 |
-| `system-prompt-default-content` | system/SystemPromptPage.vue:116 | 仅参考区展开时可见，pre 展示常量全文 |
-| `system-prompt-append-switch` | system/SystemPromptPage.vue:134 | 卡 2 恒显（model-value 绑 appendEnabled） |
-| `system-prompt-append-input` | system/SystemPromptPage.vue:146 | 卡 2 恒显，`!appendEnabled` 时 disabled |
-| `system-prompt-append-discard` | system/SystemPromptPage.vue:157 | 卡 2 恒显，`!appendDirty` 时 disabled |
-| `system-prompt-append-save` | system/SystemPromptPage.vue:166 | 卡 2 恒显，`!appendDirty` 时 disabled，点击调 `saveAppend` |
+testid 以组件 template 内 data-testid 属性为准（均在 `packages/renderer/src/components/settings/system/SystemPromptPage.vue`，已核实有效）。
+
+| testid | 触发/可见条件 |
+|--------|--------------|
+| `system-prompt-page` | 切到 system-prompt 菜单后恒显（页面根容器） |
+| `system-prompt-replace-switch` | 卡 1 恒显（Switch 控件，绑 replaceEnabled） |
+| `system-prompt-replace-input` | 卡 1 恒显，`!replaceEnabled` 时 disabled |
+| `system-prompt-replace-discard` | 卡 1 恒显，`!replaceDirty` 时 disabled，点击还原已保存快照 |
+| `system-prompt-replace-reset` | 卡 1 恒显，`!replaceDirty` 时 disabled，点击清空文本+关开关（编辑态） |
+| `system-prompt-replace-save` | 卡 1 恒显，`!replaceDirty` 时 disabled，点击调 `saveReplace` |
+| `system-prompt-default-toggle` | 卡 1 恒显，点击切换参考区展开态（默认折叠） |
+| `system-prompt-default-copy` | 仅参考区展开时可见，点击复制 DEFAULT_PI_SYSTEM_PROMPT 到剪贴板 |
+| `system-prompt-default-content` | 仅参考区展开时可见，pre 展示常量全文 |
+| `system-prompt-append-switch` | 卡 2 恒显（绑 appendEnabled） |
+| `system-prompt-append-input` | 卡 2 恒显，`!appendEnabled` 时 disabled |
+| `system-prompt-append-discard` | 卡 2 恒显，`!appendDirty` 时 disabled |
+| `system-prompt-append-save` | 卡 2 恒显，`!appendDirty` 时 disabled，点击调 `saveAppend` |
 
 ## 4. MOCK 模式测试
 
@@ -122,31 +101,14 @@ cd packages/renderer && npx vitest run src/__tests__/settings/system-prompt-page
 - 放弃：改文本 → 点 discard → 编辑态还原 + discard/save/reset 按钮 disabled
 - corrupted：`getSystemPrompt.mockResolvedValueOnce({ ..., corrupted: true })` → 断言页内文本含「损坏」
 
-### 4.3 调用链（前端 → runtime → 磁盘）
+### 4.3 调用链概述（前端 → runtime → 磁盘）
 
-```
-SystemPromptPage.saveReplace() / saveAppend()
-  → config.setSystemPrompt(buildConfig())            (api/domains/config.ts:286)
-  → command('config.setSystemPrompt', { config })    (WS 请求)
-  → SettingsMessageHandler.handleSettingsMessage     (settings-message-handler.ts:335)
-  → ConfigService.setSystemPromptConfig(config)      (config-service.ts:365，委托 system-prompt-config-helper)
-       ├─ 长度校验：replace.prompt > SYSTEM_PROMPT_MAX_LENGTH(16000) → { ok:false, error }
-       └─ atomicWrite(<dataDir>/system-prompt.json)
-  → reply 'config.systemPrompt' { config, corrupted:false }
-  → broadcast 'config.systemPrompt'（多 panel 同步）
+- **保存**：`SystemPromptPage.saveReplace()` / `saveAppend()` → config 门面 `setSystemPrompt` → WS `config.setSystemPrompt` → `SettingsMessageHandler` → `ConfigService.setSystemPromptConfig`（委托 system-prompt-config-helper）：长度校验（replace.prompt 超 `SYSTEM_PROMPT_MAX_LENGTH` 16000 拒绝）→ atomicWrite `<dataDir>/system-prompt.json` → reply + broadcast `config.systemPrompt`（多 panel 同步）。
+- **加载**：`config.getSystemPrompt` → `ConfigService.getSystemPromptConfig`：文件不存在 → 默认配置 corrupted:false；JSON.parse 失败 → 默认配置 corrupted:true；字段缺失/类型错 → `mergeSystemPromptConfig` 容错 corrupted:false。
 
-SystemPromptPage.loadConfig()
-  → config.getSystemPrompt()                         (api/domains/config.ts:280)
-  → command('config.getSystemPrompt', {})
-  → ConfigService.getSystemPromptConfig()            (config-service.ts:361)
-       ├─ 文件不存在 → 默认配置，corrupted:false
-       ├─ JSON.parse 失败 → 默认配置，corrupted:true
-       └─ 字段缺失/类型错 → mergeSystemPromptConfig 容错，corrupted:false
-```
+**长度上限 SSOT**：`SYSTEM_PROMPT_MAX_LENGTH = 16000`（`packages/shared/src/constants.ts`），ConfigService 与前端 textarea 计数器同源引用；**仅约束 replace**（append 走 hook 不经 argv，无硬上限，只显示字符数）。
 
-**长度上限 SSOT**：`SYSTEM_PROMPT_MAX_LENGTH = 16000`（`packages/shared/src/constants.ts:97`），ConfigService 与前端 textarea 计数器同源引用；**仅约束 replace**（append 走 hook 不经 argv，无硬上限，只显示字符数）。
-
-**默认提示词常量 SSOT**：`DEFAULT_PI_SYSTEM_PROMPT`（`packages/shared/src/pi-default-prompt.ts:19`，提取自 pi 0.84.1——pi 升级后需 diff 检查）。
+**默认提示词常量 SSOT**：`DEFAULT_PI_SYSTEM_PROMPT`（`packages/shared/src/pi-default-prompt.ts`，提取自 pi 0.84.1——pi 升级后需 diff 检查）。
 
 ## 5. 非 MOCK 测试步骤（真实 runtime）
 
@@ -177,7 +139,7 @@ cd packages/runtime && npx vitest run test/system-prompt-config.test.ts test/set
 
 **扩展源码**：[`extensions/taiji/system-prompt/src/index.ts`](../../extensions/taiji/system-prompt/src/index.ts)（npm 包 `@zhushanwen/pi-system-prompt`，root `index.ts` 再导出。打包：`scripts/bundle-extensions.mjs` esbuild bundle 后 staging 到 `apps/electron/resources/extensions/@zhushanwen/pi-system-prompt/`，数量与清单以 `packages/shared/src/mandatory-extensions.json` SSOT 为准）
 
-**关键 hook 行为**（`extensions/taiji/system-prompt/src/index.ts:202`）：
+**关键 hook 行为**（`extensions/taiji/system-prompt/src/index.ts`）：
 - 每轮 `before_agent_start` 读 `<dataDir>/system-prompt.json`（不缓存）
 - 注入顺序：base → 全局指令（`~/.agents/AGENTS.md` 候选精确匹配真实目录条目，防 APFS 大小写不敏感误报）→ append.prompt
 - append.enabled && append.prompt 非空白 → 追加后返回 `{ systemPrompt: newPrompt }`；与原值相同 → `undefined`（放行）
@@ -194,7 +156,7 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 | 步骤 | 操作 | 期望 |
 |------|------|------|
 | 1 | Settings → 系统提示词 → 开替换卡开关 + 填文本 → 保存 | toast 提示成功；`~/.xyz-agent-dev/system-prompt.json` 写入 |
-| 2 | 新建会话发一条消息 | runtime 日志 spawn pi 时 args 含 `--system-prompt "..."`（rpc-client.ts:190-191） |
+| 2 | 新建会话发一条消息 | runtime 日志 spawn pi 时 args 含 `--system-prompt "..."` |
 | 3 | 切 append 卡开关 + 填追加指令（如「每轮回复以 MARKER 开头」）→ 保存 → 在已有会话发下一轮 | 回复遵守追加指令（hook 每轮读配置，下一轮即生效——现行无快照文件，只能按行为验证） |
 | 4 | `~/.agents/AGENTS.md` 写入标记内容 → 下一轮提问确认模型知晓 | 模型复述全局指令内容；用 preset `noContextFiles`（或 `--no-context-files`）启动的新会话 → 全局不注入 |
 | 5 | 手动把 system-prompt.json 改成非法 JSON 后刷新页 | corrupted 提示条出现，控件回退默认值（不崩） |
@@ -204,10 +166,10 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 
 | 坑 | 说明 |
 |----|------|
-| ⚠️ 替换模式仅对新建会话生效 | replace 走 spawn 期 `--system-prompt` CLI（rpc-client.ts:69-70 options 语义），已存在的会话不会重新 spawn。改完 replace 后必须新建会话才看到效果 |
+| ⚠️ 替换模式仅对新建会话生效 | replace 走 spawn 期 `--system-prompt` CLI 注入，已存在的会话不会重新 spawn。改完 replace 后必须新建会话才看到效果 |
 | ✅ 追加模式下一轮即生效 | append 走 before_agent_start hook，hook 每轮读配置（不缓存）。保存后同一会话下一轮即可生效 |
-| ⚠️ 长度上限 16000 仅约束 replace | `SYSTEM_PROMPT_MAX_LENGTH`（shared/constants.ts:97），ConfigService 拒绝超长（ok:false）；append 走 hook 不经 argv 无硬上限，UI 只显示字符数（R3） |
-| ⚠️ 参考区是静态常量不是实时快照 | `DEFAULT_PI_SYSTEM_PROMPT` 是 pi 0.84.1 提取的常量（pi-default-prompt.ts:53 版本标记）；旧「当前生效提示词快照」机制（system-prompt-snapshot.md）已随 builtin→npm 迁移删除，[HISTORICAL] 勿按旧文档找 snapshot testid / `config.getSystemPromptSnapshot` 命令（均已不存在） |
+| ⚠️ 长度上限 16000 仅约束 replace | `SYSTEM_PROMPT_MAX_LENGTH`（shared/constants.ts），ConfigService 拒绝超长（ok:false）；append 走 hook 不经 argv 无硬上限，UI 只显示字符数（R3） |
+| ⚠️ 参考区是静态常量不是实时快照 | `DEFAULT_PI_SYSTEM_PROMPT` 是 pi 0.84.1 提取的常量（pi-default-prompt.ts 内含版本标记）；旧「当前生效提示词快照」机制（system-prompt-snapshot.md）已随 builtin→npm 迁移删除，[HISTORICAL] 勿按旧文档找 snapshot testid / `config.getSystemPromptSnapshot` 命令（均已不存在） |
 | ⚠️ corrupted 仅 JSON.parse 失败才置 true | 字段缺失/类型错走 `mergeSystemPromptConfig` 字段级容错（corrupted=false）。只有文件整个不是合法 JSON 才回退默认 + corrupted=true 提示用户 |
 | ⚠️ 全局指令注入受 argv 守卫 | pi 带 `--no-context-files` / `-nc` 启动时 hook 跳过全局 AGENTS.md 注入；subagent 路径靠 argv-mirror 镜像该 flag 保证 opt-out 不被绕过（extensions/subagent-workflow/src/execution/argv-mirror.ts） |
 | ⚠️ hook 绝不阻塞 agent | hook 顶层 try/catch 兜底，任何异常返回 `undefined`（放行）+ stderr 诊断。测试注入坏 dataDir 不会让 pi 卡住 |
@@ -217,7 +179,7 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 
 - 组件源码：[`components/settings/system/SystemPromptPage.vue`](../../packages/renderer/src/components/settings/system/SystemPromptPage.vue)
 - 菜单注册：[`components/settings/SettingsModal.vue`](../../packages/renderer/src/components/settings/SettingsModal.vue)（`menus[4] = { id: 'system-prompt', ... }`，nav testid `settings-nav-system-prompt`）
-- 数据层：[`api/domains/config.ts`](../../packages/renderer/src/api/domains/config.ts) §System prompt config
+- 数据层：[`core/transport/api/domains/config.ts`](../../packages/core/src/transport/api/domains/config.ts) §System prompt config
 - runtime 配置：[`services/config-service.ts`](../../packages/runtime/src/services/config-service.ts) + [`services/system-prompt-config-helper.ts`](../../packages/runtime/src/services/system-prompt-config-helper.ts)
 - WS 路由：[`transport/settings-message-handler.ts`](../../packages/runtime/src/transport/settings-message-handler.ts)（`config.getSystemPrompt` / `config.setSystemPrompt` case）
 - 扩展源码：[`extensions/taiji/system-prompt/src/index.ts`](../../extensions/taiji/system-prompt/src/index.ts)（npm 包 `@zhushanwen/pi-system-prompt`）
