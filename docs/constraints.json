@@ -1942,7 +1942,7 @@
         "packages/shared/src/subagent-frame.ts"
       ],
       "authority": [
-        "design/timeout-streaming-ui-idle.md",
+        "../packages/core/src/domain/chat/timers.ts",
         "../AGENTS.md"
       ],
       "dimensions": [
