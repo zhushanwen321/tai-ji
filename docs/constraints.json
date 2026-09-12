@@ -1851,7 +1851,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/runtime/src/infra/pi/session-binding-sidecar-io.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -1876,7 +1876,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/core/src/domain/composer/model-thinking.ts"
       ],
       "dimensions": [
         "business-logic",
@@ -1896,7 +1896,7 @@
         "packages/core/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/core/src/domain/composer/thinking-level-sync.ts"
       ],
       "dimensions": [
         "business-logic"
@@ -1915,7 +1915,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "design/chat-pin-bottom-fix.md#44-防复发护栏用户显式要求如何防止再次发生同样的问题"
+        "../docs/architecture/conversation-stream-block-rendering.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2159,7 +2159,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/catalog-provider-field-authority.md"
+        "../scripts/check-provider-credential-reads.mjs"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2179,7 +2179,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/catalog-provider-field-authority.md"
+        "../scripts/check-provider-credential-reads.mjs"
       ],
       "dimensions": [
         "arch-boundary"

@@ -245,6 +245,13 @@ onUnmounted(() => {
 function startEdit(): void {
   if (!props.turn.user) return
   editingUserId.value = props.turn.user.id
+  // 回填 normalizeContent 归位全文是登记过的近似路径（composer-chip-insertion-semantics D6 +
+  // composer-multi-skill-injection §3.5-⑤）：
+  // ① 归位全文让命令在编辑稿中可见可改——提交侧「剥离与保留段重复的前缀命令」语义以此为前提；
+  // ② 含 skill/slash 段的消息在编辑框显示序列化标记文本而非 chip——视觉退化按原样接受，
+  //    「从 Segment[] 重建 chip」的完整优化项经评估延期未实施（重审条件 = 用户反馈编辑重发体验）。
+  // 坑：勿在此做「标记文本还原成 chip」的局部修复——提交侧 segment-rebuild 已按「剥离与保留段
+  // 重复的序列化文本」收口防标记翻倍，回填侧另造一套还原会形成两套口径。
   draftText.value = normalizeContent(props.turn.user.content)
 }
 

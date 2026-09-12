@@ -351,7 +351,7 @@ landing 页 chip 区（`packages/renderer/src/components/new-task/Landing.vue` �
 - **新增**：`packages/core/src/domain/new-task-search/launch-config.ts`；`packages/core/src/foundation/create-inflight-dedup.ts`、`create-kv-slot.ts`（Batch 3）
 - **改写**：`model-thinking.ts`（landing 分支读 resolve + 删跟随/landing armed/记录 watch 全套 + 记录点收窄为 onThinkingSelect）、`flow.ts`（submit 透传 resolve 输出 + ensureLaunchDataReady await + 删 C-W4-3 补 apply）、`packages/ui/src/features/new-task/PresetSelectChip.vue`（回显改读 resolve）、`create-session-flow.ts`（快照语义 + 删 step 7 applyModel）、`packages/runtime/src/services/session/launch-params.ts` / `session-lifecycle.ts`（D5 契约注释 + D6 继承档 + L2 探针）、`handoff-service.ts`（D6 handoff 链）、`packages/shared/src/protocol.ts`（D8 reply 类型 + U9 FR-15 类型段删除）
 - **收敛/删除**：`useForkActions.ts` / `useHandoffActions.ts`（语义自动变对，调用形状不变）、FR-15 全链（U9 清单）、6+ 处 in-flight 手写实现（迁移 factory）、model-thinking.test.ts 跟随 describe（重写）
-- **文档**：本设计 + ADR（D8 裁决标准）+ constraints.json 三批登记 + **`docs/design/model-thinking-level-memory.md` 回写**（C-proc-10：u3 的「生效即记录」D2 机制被本设计 authored-only 整体废除，U2 落地同 commit 回写该文档的登记与变更历史）
+- **文档**：本设计 + ADR（D8 裁决标准）+ constraints.json 三批登记（u3 的「生效即记录」D2 机制被本设计 authored-only 整体废除；原回写目标 `docs/design/model-thinking-level-memory.md` 已删除，git 可追溯，现行权威 = `packages/core/src/domain/composer/model-thinking-memory.ts` 头注释）
 
 ### 待验证检查点（诚实标注）
 

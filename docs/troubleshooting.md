@@ -207,7 +207,7 @@ record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `suba
 grep "stripped unmarked provider-level keys" ~/.xyz-agent/logs/runtime-*.log   # dev 用 ~/.xyz-agent-dev
 ```
 
-命中即启动清洗剥除了未显式标记的手编 catalog 网关（判定锚 = providers.json extras 的 `gatewayBaseUrl` 标记，无标记即剥）。恢复：Settings → Providers 展开该 provider，在「端点（自定义网关）」重设网关 URL 并保存一次（标记落盘后不再被剥）。设计与判定锚见 [design/catalog-provider-field-authority.md](design/catalog-provider-field-authority.md) §3.3。
+命中即启动清洗剥除了未显式标记的手编 catalog 网关（判定锚 = providers.json extras 的 `gatewayBaseUrl` 标记，无标记即剥）。恢复：Settings → Providers 展开该 provider，在「端点（自定义网关）」重设网关 URL 并保存一次（标记落盘后不再被剥）。判定锚权威 = `packages/core/src/domain/settings/use-provider-edit.ts` 防线注释（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。
 
 ### 15. Coding Plan 额度查询失败 / 数据疑似过期（2026-09-10 配置交互重构）
 
