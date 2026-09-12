@@ -4,7 +4,7 @@
 > 两者并存的前提是本文档的 owner/期限/上界三者齐全）
 > **创建日期**：2026-09-09（会话库隔离 W4 交付，跟踪落点见
 > [zcode-session-db-isolation.md](../design/zcode-session-db-isolation.md) §2.4.1 与
-> [impl-plan §2.4①](../design/zcode-session-db-isolation.impl-plan.md)）
+> impl-plan §2.4①（zcode-session-db-isolation.impl-plan.md，已删除，git 可追溯））
 > **owner**：zhushanwen
 > **期限**：2026-10-01（设计口径 = G1 止血合入后 30 天内）
 > **逾期处置**：逾期未排期即**升为阻塞项**；检查主体 = 下一次触碰该面的设计/PR 评审

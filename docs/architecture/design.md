@@ -363,7 +363,7 @@ API Client（D3）天然是第 2 层的家——它是所有 ingress 的必经�
 ## D7. 命名债（引用既有计划）
 
 ### 决策：直接引用既有计划，不重复
-- [terminology.md](terminology.md) 已有 R1–R5（sidecar→runtime、Pane→Panel、SystemChatMessage→SystemNotification、Drawer→SideInspector、Overview→PanelGrid）。
+- terminology.md（已删除，git 可追溯）已有 R1–R5（sidecar→runtime、Pane→Panel、SystemChatMessage→SystemNotification、Drawer→SideInspector、Overview→PanelGrid）；术语表现由 [context.md](context.md) 承载。
 - 本设计新增的命名对齐：
   - `SidecarServer`（server.ts）→ `RuntimeServer`，并迁入 `transport/server.ts`
   - `server.ts` 注释 "pure Transport layer" 与实际不符 → 迁入 transport/ 后注释与实现一致
@@ -533,7 +533,7 @@ API Client（D3）天然是第 2 层的家——它是所有 ingress 的必经�
 
 ## 3.2 迁移路线（分阶段，低风险优先）
 
-> ⚠️ **阶段 0–2 已落地（2026-06）**：前端 API Client（`renderer/src/api/`）、Runtime 三层目录分层（`transport/services/infra`）、`SidecarServer → RuntimeServer` 迁入 `transport/server.ts` 均已完成。详见 [runtime-three-layer-design.md](runtime-three-layer-design.md)（已落地快照）与 [runtime-migration-progress.md](runtime-migration-progress.md)（R0–R9 执行记录）。以下路线保留作决策记录，阶段标注见各条。阶段 3+ 未完成项以本路线为准。
+> ⚠️ **阶段 0–2 已落地（2026-06）**：前端 API Client（`renderer/src/api/`）、Runtime 三层目录分层（`transport/services/infra`）、`SidecarServer → RuntimeServer` 迁入 `transport/server.ts` 均已完成。详见 [runtime-three-layer-design.md](runtime-three-layer-design.md)（已落地快照）与 runtime-migration-progress.md（R0–R9 执行记录，已删除，git 可追溯）。以下路线保留作决策记录，阶段标注见各条。阶段 3+ 未完成项以本路线为准。
 
 ```
 阶段 0 · 文档与认知（0 代码风险）
@@ -592,7 +592,7 @@ API Client（D3）天然是第 2 层的家——它是所有 ingress 的必经�
 | D4 | Runtime 四层：transport/services/adapters/infra（防腐层独立） | 阶段 2 |
 | D5 | 双维度模型：水平层 × 纵向上下文（Plugin 为完整切片） | 阶段 0 |
 | D6 | 横切：错误不变量下沉 + session 路由管线 + 服务解耦机制 | 6a/6b 阶段1，6c 已订正（见 D6c） |
-| D7 | 命名债（引用 [terminology.md](terminology.md) R1–R5） | 阶段 4 |
+| D7 | 命名债（引用 terminology.md R1–R5，已删除，git 可追溯；术语现见 [context.md](context.md)） | 阶段 4 |
 | D8 | Mock 下沉到 API Client 层 | 阶段 1 |
 | D9 | 复用 protocol.ts union | 阶段 1 |
 

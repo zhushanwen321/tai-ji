@@ -6,9 +6,9 @@
 
 ## 阅读顺序（新成员推荐）
 
-1. [plan.md](plan.md) — 分阶段实施计划
-2. [design-part1.md](design-part1.md) — 架构设计（Worker 隔离、RPC、生命周期）
-3. [design-part2.md](design-part2.md) — API 设计、contributes、安全模型
+1. plan.md（已删除，git 可追溯）— 分阶段实施计划
+2. design-part1.md（已删除，git 可追溯）— 架构设计（Worker 隔离、RPC、生命周期）
+3. design-part2.md（已删除，git 可追溯）— API 设计、contributes、安全模型
 4. [built-in-plugin-guide.md](built-in-plugin-guide.md) — 内置插件开发指南
 
 ## 参考分析

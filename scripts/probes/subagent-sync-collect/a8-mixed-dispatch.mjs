@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a8-mixed-dispatch.mjs
 //
 // [A8] 同轮混合派发（2 sync + 1 async）
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A8 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A8 行（设计文档已删，git 可追溯）：
 //   同轮 2 个 collect:"sync" + 1 个不传 collect（async）。
 // 预期输出：
 //   - sync 部分恒 1 条批通知：批头 `2 finished, 0 failed, 0 cancelled`，

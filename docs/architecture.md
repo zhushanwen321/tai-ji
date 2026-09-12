@@ -77,8 +77,8 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 **详细设计**：
 - [Runtime 三层架构设计](architecture/runtime-three-layer-design.md) — 为什么放弃四层、ports 依赖倒置原理
-- [Runtime 模块架构图](architecture/runtime-module-map.md) — R9 后快照，各层内部模块 + 依赖铁律
-- [Runtime 迁移记录](architecture/runtime-migration-progress.md) — R0–R9 执行（17 commit）
+- Runtime 模块架构图（runtime-module-map.md，已删除，git 可追溯）— R9 后快照，各层内部模块 + 依赖铁律
+- Runtime 迁移记录（runtime-migration-progress.md，已删除，git 可追溯）— R0–R9 执行（17 commit）
 
 ## 共享类型（shared）
 

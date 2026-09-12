@@ -6,7 +6,7 @@
 
 **决策权威源声明**：六项收口决策（D-1~D-6）已在上游设计定稿——`zcode-plugin-workspace/feat-app-server-refactor/docs/design/subagent-core-convergence-design.md`（四轮对抗审查收敛至 0 must-fix，2026-08-30）。**本文档不重新决策**，职责是把已定决策落位到本仓代码现实（§2 全部 file:line 证据取自本仓 HEAD 并逐一核实）、给出本仓的验收场景与单元拆分。读者无需回读上游文档即可施工；决策谱系与被否方案见附录 A。
 
-**状态**：Approved（本仓文档两轮对抗审查收敛：R1 4 MF/4 S/1 DE 全修 → R2 复审 4 MF 全部成立 + 0 MF，余 3 S/1 DE（修订同步残留）当轮修完，终态 0 must-fix / 0 遗留。审查记录见 [subagent-core-convergence.review.md](subagent-core-convergence.review.md)）
+**状态**：Approved（本仓文档两轮对抗审查收敛：R1 4 MF/4 S/1 DE 全修 → R2 复审 4 MF 全部成立 + 0 MF，余 3 S/1 DE（修订同步残留）当轮修完，终态 0 must-fix / 0 遗留。审查记录见 subagent-core-convergence.review.md（已删除，git 可追溯））
 
 ---
 

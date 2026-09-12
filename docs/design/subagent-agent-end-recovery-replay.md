@@ -2,7 +2,7 @@
 
 > **[HISTORICAL] 部分退役注记（2026-09-11，H1 符号清扫批）**：本设计的 M1/M2/LC-4（sessionFile 获取链）与 M3（workflow 域 no-progress 熔断）仍现行；但 F2/F3 清账段描述的 chat 续聊轮活性载体——`host/roundLifecycle` active 相位、`emitActivePhase`、pi `chat-session.ts` 续聊轮事件外发、宿主 `handleChatRoundPhase` case active、`kickOffChatRound` 派发链——已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）整族退役：续聊轮 = 新 run + resume 锚点，工具执行期活性经 run 事件通道 `activity` 变体直达宿主（覆盖窗 = run 域全域，不再有「chat 续聊轮失明」边界）。正文相关段保留作交付史实，不逐处改写；现行排障口径见 [../troubleshooting.md](../troubleshooting.md) §12。
 
-> **一句话结论**：dev-0.9.16 的新架构（pi-subagent-cli + engine protocol）消灭了「agent_end 保守处置 → 永挂 → 通知冻结」的事故主干，但对抗审查（R1-R4）逐步证伪了「每环都有熔断」——**workflow 域（carbon 事故原发路径）的静默楔死在两代架构都无 no-progress 熔断**（旧架构 arm 两处生产调用点均在 chatMode 门内，该域 mid-round 静默楔死的唯一外层是 rpc-client 5400s——正是 carbon 90min 耗尽形态的表现；新架构同样零覆盖），本设计将其补挂（M3）。加上 S2 契约防御修复（M1）与 sessionFile 获取链补强（M2 惰性回补 + M4 兜底扫描——M4 已于交付后移除，见状态修订），移植面共四件；D1（迟到接受）已等价覆盖无需移植，D3/D3a/D4 的问题域在新架构不存在，判定不移植并给出证据。本文档是线 B 设计 [`subagent-agent-end-recovery.md`](subagent-agent-end-recovery.md) 在架构分叉后的重放移植裁决书。
+> **一句话结论**：dev-0.9.16 的新架构（pi-subagent-cli + engine protocol）消灭了「agent_end 保守处置 → 永挂 → 通知冻结」的事故主干，但对抗审查（R1-R4）逐步证伪了「每环都有熔断」——**workflow 域（carbon 事故原发路径）的静默楔死在两代架构都无 no-progress 熔断**（旧架构 arm 两处生产调用点均在 chatMode 门内，该域 mid-round 静默楔死的唯一外层是 rpc-client 5400s——正是 carbon 90min 耗尽形态的表现；新架构同样零覆盖），本设计将其补挂（M3）。加上 S2 契约防御修复（M1）与 sessionFile 获取链补强（M2 惰性回补 + M4 兜底扫描——M4 已于交付后移除，见状态修订），移植面共四件；D1（迟到接受）已等价覆盖无需移植，D3/D3a/D4 的问题域在新架构不存在，判定不移植并给出证据。本文档是线 B 设计 `subagent-agent-end-recovery.md`（外部 workspace 仓设计文档，不在本仓）在架构分叉后的重放移植裁决书。
 >
 > **层声明**：当前层 = 技术方案（重放移植裁决 + 落点设计）；下一层 = 实现计划（§5 拆分单元，供 dev-flow / coding-workflow 消费）。不跨层写代码。
 >

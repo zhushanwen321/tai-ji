@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/probes/subagent-sync-collect/v1-pointer-line-bootstrap.mjs
 //
-// [V1] 指针行取回自举（v2 设计 §4 验收表 V1 行 / v1 A4① 复验）
+// [V1] 指针行取回自举（v2 设计 §4 验收表 V1 行〔设计文档已删，git 可追溯〕/ v1 A4① 复验）
 // 断链 1（manifest 永不产生）修复后：批通知指针行原文 `session_read
 // {"action":"result","session":"<sa- id>"}` 应可直接自举取回——v1 A4① 实跑中
 // sa- id 反查报「无匹配 record」（manifest 惰性不落盘，须人工换绝对路径），v2 W3

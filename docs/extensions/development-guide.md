@@ -1362,7 +1362,7 @@ pi uninstall my-extension
 
 ## 子代理专项模式（已迁出）
 
-> 🟠 子代理专项章节（原 §16-21、§23-24：子进程保护入口 / Agent 定义系统 / 子进程执行模式 / 后台异步执行 / Chain-Pipeline / Intercom / Acceptance Gates / Git Worktree 隔离）已迁至 [extensions/universal/subagent-workflow/docs/subagent-development.md](../../../extensions/universal/subagent-workflow/docs/subagent-development.md)（2026-09-13 迁移，编号重排为 1-8）。TUI 渲染（§22）不属子代理专项，保留于本文档。
+> 🟠 子代理专项章节（原 §16-21、§23-24：子进程保护入口 / Agent 定义系统 / 子进程执行模式 / 后台异步执行 / Chain-Pipeline / Intercom / Acceptance Gates / Git Worktree 隔离）已迁至 [extensions/universal/subagent-workflow/docs/subagent-development.md](../../extensions/universal/subagent-workflow/docs/subagent-development.md)（2026-09-13 迁移，编号重排为 1-8）。TUI 渲染（§22）不属子代理专项，保留于本文档。
 
 ---
 
@@ -1824,9 +1824,9 @@ src/
 
 ### 子代理专项阶段（🟠 仅 spawn 子进程的扩展需要）
 
-- [ ] 子进程隔离：环境变量检测（见 [subagent-development.md](../../../extensions/universal/subagent-workflow/docs/subagent-development.md) §1）
-- [ ] 后台执行：文件系统状态 + watcher（见 [subagent-development.md](../../../extensions/universal/subagent-workflow/docs/subagent-development.md) §4）
-- [ ] Agent 定义：Markdown + YAML frontmatter（见 [subagent-development.md](../../../extensions/universal/subagent-workflow/docs/subagent-development.md) §2）
+- [ ] 子进程隔离：环境变量检测（见 [subagent-development.md](../../extensions/universal/subagent-workflow/docs/subagent-development.md) §1）
+- [ ] 后台执行：文件系统状态 + watcher（见 [subagent-development.md](../../extensions/universal/subagent-workflow/docs/subagent-development.md) §4）
+- [ ] Agent 定义：Markdown + YAML frontmatter（见 [subagent-development.md](../../extensions/universal/subagent-workflow/docs/subagent-development.md) §2）
 - [ ] Skills：SKILL.md 文件
 - [ ] 单元测试：`test/unit/*.test.ts`
 - [ ] 集成测试：`test/integration/*.test.ts`

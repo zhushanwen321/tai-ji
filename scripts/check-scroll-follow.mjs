@@ -2,7 +2,8 @@
 /**
  * check-scroll-follow.mjs — 消息流滚动跟随链路守卫（约束 C-state-11 机器执法）。
  *
- * 设计来源：docs/design/chat-pin-bottom-fix.md §4.3 D1/D6 + §4.4 护栏④⑤
+ * 设计来源：docs/design/chat-pin-bottom-fix.md §4.3 D1/D6 + §4.4 护栏④⑤（已删除，git 可追溯；
+ * INVAR 权威定义现居 docs/architecture/conversation-stream-block-rendering.md §7.3.1）
  * （约束登记：docs/constraints.json C-state-11）。
  *
  * [顺序依赖声明] 本守卫在 M1（U1 useVirtuaFollow 末项索引直取 + D6 vlistBottom 同款修正）
@@ -118,7 +119,7 @@ if (failures.length > 0) {
   console.error(`[scroll-follow] 守卫拦截：${failures.length} 处违规（约束 C-state-11）\n`)
   for (const f of failures) console.error(`  ${f}\n`)
   console.error('[FIX] 滚动到底必须走 useVirtuaFollow 的 follow 原语（末项索引直取 + offset=tailHeight），')
-  console.error('      修复指引：docs/design/chat-pin-bottom-fix.md §4.3（D1/D6）与 §4.4（护栏④⑤）。')
+  console.error('      修复指引：docs/architecture/conversation-stream-block-rendering.md §7.3.1（原 chat-pin-bottom-fix 设计文档已删除，git 可追溯）。')
   console.error('      新合法用途按本脚本头注释「白名单扩登记流程」在设计文档登记后加入 WHITELIST。')
   process.exit(1)
 }

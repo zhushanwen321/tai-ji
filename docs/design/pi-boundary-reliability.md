@@ -5,7 +5,7 @@
 - **层声明**：架构程序层 → 下一层产物为各切片技术方案。切片 1 技术方案已存在（`docs/design/subagent-dispatch-reliability.md`）；切片 2 规模小（runtime 一个服务面 + renderer 三处接线 + 表单一个字段），本文 D2-D4 已设计到可实施深度，不再单独出文档；护栏与治理（D6-D8）本身就是实施清单。
 - **证据基线**：本文全部现状事实取自 2026-08-27 两次排查的实证记录与三轮独立代码核查（pi 实装 `@earendil-works/pi-coding-agent@0.84.1` / `pi-ai@0.84.1` / `pi-agent-core@0.84.1` dist 直读，均已 `npm ls` 核对版本；xyz-agent 侧文件:行号经 subagent 实读核对）。事故 A 基线 session：`~/.xyz-agent/pi/sessions/2026-08-27T10-58-34-533Z_01a042df-21a5-783d-890d-61e075514b9d.jsonl`。
 - **切片关系**：切片 1 = [subagent-dispatch-reliability.md](subagent-dispatch-reliability.md)（D1-D6 / U1-U4 / S1-S5，审查报告见同名 .review.md，4 must-fix + 5 suggestions 已全部落盘修订）。本文不重述其细节，只引用结论。
-- **审查记录**：本文经一轮对抗式审查（[pi-boundary-reliability.review.md](pi-boundary-reliability.review.md)，3 must-fix + 8 suggestions；49 处事实抽查 47 命中 2 偏离），must-fix 已全部落盘修订，suggestions 全部吸收（含判据适用边界、事故 B 数据流图、多包版本门禁、verifiedWith 防线分层、缓存键补维、锚点修正）。
+- **审查记录**：本文经一轮对抗式审查（审查报告 pi-boundary-reliability.review.md 已删除，git 可追溯；3 must-fix + 8 suggestions；49 处事实抽查 47 命中 2 偏离），must-fix 已全部落盘修订，suggestions 全部吸收（含判据适用边界、事故 B 数据流图、多包版本门禁、verifiedWith 防线分层、缓存键补维、锚点修正）。
 - **2026-08-28 增补（D9 轮询精简 + 附录 C）**：经 ZCode（打包版反混淆直读）与 deepseek-harness / opencode 源码对照调研后新增。增补项中的代码落地（plugin-host 30s 空转删除、flushAll 5s×2 删除、handoff 2s 事件化、更新检查 20min→60min、skill watch polling 降级化）已随当日提交完成并测试全绿；thinkingLevel 30s 轮询删除仍随 U6 落地。本增补为删减性质 + 全部带证据锚点，未再单走一轮对抗式审查。
 
 ---

@@ -3,7 +3,7 @@
 > **状态**：待执行。`feat-remote-use` 分支（86 commits，P0-P7 全交付）合并进 main 后，**本文档删除**。
 > **创建日期**：2026-08-02
 > **关联分支**：`feat-remote-use`（worktree 路径 `../feat-remote-use`）
-> **架构 SSOT**：[`docs/architecture/renderer-target-architecture.md`](../architecture/renderer-target-architecture.md) §2（七层架构 + 归属规则）
+> **架构 SSOT**：原指 renderer-target-architecture.md §2（七层架构 + 归属规则；已删除，git 可追溯）；现行权威 = [docs/architecture/renderer-rebuild-architecture.md](../architecture/renderer-rebuild-architecture.md)（§3 包拓扑 / §4 core 分层）
 
 ---
 
@@ -11,7 +11,7 @@
 
 `feat-remote-use` 引入了远程化功能（服务器跑 runtime+pi，桌面/手机客户端连接），把 renderer 从「单进程桌面 SPA」变成「双模式（本地+远程）多客户端运行时」。v6 前端架构为此新增了 **Transport & Coordination Layer（T&C 层）**（七层架构的第 6 层），作为远程化连接/协同逻辑的归位点。
 
-合并时，远程化的代码必须按本文档的归位清单落到 T&C 层，而不是散落回 Foundation/Feature。归属判据见 [renderer-target §2.2 功能归属规则表](../architecture/renderer-target-architecture.md#22-功能归属规则表)。
+合并时，远程化的代码必须按本文档的归位清单落到 T&C 层，而不是散落回 Foundation/Feature。归属判据见 renderer-target-architecture.md §2.2 功能归属规则表（已删除，git 可追溯）。
 
 ---
 

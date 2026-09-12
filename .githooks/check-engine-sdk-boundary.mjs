@@ -3,7 +3,7 @@
 //
 // 引擎 SDK 边界守卫（W1 交付，impl-plan §2.1「守卫基线」：新增 SDK 代码前先建守卫）。
 // 设计权威源：docs/design/subagent-engine-protocolization.md §3.5.1 不变量 +
-// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「守卫基线」。
+// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「守卫基线」（impl-plan 已删除，git 可追溯）。
 //
 // 不变量（设计 §3.10 实施不变量 1）：**SDK 不得 import core**——否则 core → SDK → core
 // 成环。本守卫扫描 @zhushanwen/subagent-engine-sdk 的源码与 dist：

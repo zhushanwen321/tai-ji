@@ -1,6 +1,6 @@
 // scripts/probes/subagent-sync-collect/common.mjs
 //
-// subagent-sync-collect 真实 CLI 探针共享骨架（U8；设计 §4 验收 A1-A8 / AGENTS.md
+// subagent-sync-collect 真实 CLI 探针共享骨架（U8；设计 §4 验收 A1-A8〔设计文档已删，git 可追溯〕/ AGENTS.md
 // 「Pi Extension 开发」MANDATORY 通道）。
 //
 // 每个场景脚本 import 本模块，共享：

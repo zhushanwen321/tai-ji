@@ -587,15 +587,15 @@ else
 fi
 
 # ============================================================================
-# CSS token SSOT 一致性检查（style.css vs design-tokens.md）
+# CSS token SSOT 一致性检查（style.css vs v6-tokens.css）
 # ============================================================================
 
 CSS_SSOT_CHECKER=".githooks/check_css_token_ssot.py"
-CSS_SSOT_FILES="packages/renderer/src/style.css docs/page-design/design-tokens.md"
+CSS_SSOT_FILES="packages/renderer/src/style.css docs/page-design/v6-tokens.css"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; then
-    # 仅当 style.css 或 design-tokens.md 变更时才检查
-    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/page-design/design-tokens\.md$" || true)
+    # 仅当 style.css 或 v6-tokens.css 变更时才检查（原 design-tokens.md 已删除，git 可追溯）
+    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/page-design/v6-tokens\.css$" || true)
     if [ -n "$SSOT_CHANGED" ]; then
         echo -e "${BLUE}[INFO] 运行 CSS token SSOT 一致性检查...${NC}"
 
@@ -607,7 +607,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
 
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
-                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：style.css 含 design-tokens.md 未收录的 token${NC}"
+                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：style.css 含 v6-tokens.css 未收录的 token${NC}"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
                 exit 1
             fi
@@ -1632,11 +1632,11 @@ fi
 # 安装后自检：生成的 pre-commit 必须含流写逃逸护栏段。
 # 防「源缺段/heredoc 生成失败」——本脚本源若缺护栏段或 heredoc 损坏，此处 exit 1 拦下。
 # 边界：防不了「旧版源覆盖」（旧源无此自检，静默装旧版），该残留风险登记在
-# docs/design/runtime-stream-fault-isolation.impl-plan.md §7 变更历史 2026-09-04 条目。
+# docs/design/runtime-stream-fault-isolation.impl-plan.md §7 变更历史 2026-09-04 条目（已删除，git 可追溯）。
 # 匹配护栏段功能行（变量赋值），不匹配任意出现——仅残留注释/引用的坏源同样拦下。
 if ! grep -q 'UNSAFE_STREAM_CHECKER=' "$GIT_HOOKS_DIR/pre-commit"; then
     echo -e "${RED}[ERROR] 安装后自检失败：生成的 pre-commit 缺少流写逃逸护栏段（check-unsafe-stream-writes）${NC}"
-    echo -e "${YELLOW}[FIX] 安装源已过期或 heredoc 损坏：对照 docs/design/runtime-stream-fault-isolation.md §5 核对本 worktree 的 .githooks/install-hooks.sh 是否含护栏段，更新到最新分支后重跑 bash .githooks/install-hooks.sh${NC}"
+    echo -e "${YELLOW}[FIX] 安装源已过期或 heredoc 损坏：对照 scripts/check-unsafe-stream-writes.mjs（护栏机制本体，头部注释含设计依据）核对本 worktree 的 .githooks/install-hooks.sh 是否含护栏段，更新到最新分支后重跑 bash .githooks/install-hooks.sh${NC}"
     exit 1
 fi
 

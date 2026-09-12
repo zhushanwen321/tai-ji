@@ -143,7 +143,7 @@ mobile-renderer 与桌面壳同为 Vue 3（feat-remote-use 实测）。Pinia sto
 
 ADR-0049 原样继承并强化：
 
-- `useSessionScopedState` 在 `core/foundation/`，所有 per-session composable 强制使用（原计划的 ESLint 自定义规则——禁止模块级 `new Map<string, ...>` 存 session 状态——已被 [ADR-0049](../../adr/0049-session-isolation-map-partition.md) spec_review D4 放弃：AST 判定 ref/let 是否 per-session 语义铺天盖地误报，不可行；现行防护 = ADR-0049 Code Review Checklist + taste-lint `no-instance-level-session-state`）。
+- `useSessionScopedState` 在 `core/foundation/`，所有 per-session composable 强制使用（原计划的 ESLint 自定义规则——禁止模块级 `new Map<string, ...>` 存 session 状态——已被 [ADR-0049](../adr/0049-session-isolation-map-partition.md) spec_review D4 放弃：AST 判定 ref/let 是否 per-session 语义铺天盖地误报，不可行；现行防护 = ADR-0049 Code Review Checklist + taste-lint `no-instance-level-session-state`）。
 - **显式例外只有两个**：presence（全局协同态）与 lease（runtime TTL 管控），住 `core/coordination/`，并在文件头标注例外依据。
 - `triggerSessionCleanups(id)` 订阅 `session.deleted` 广播（remote-use 已引入的两步删除），保证他端删 session 时本地分区同步清除。
 

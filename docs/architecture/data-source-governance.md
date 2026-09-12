@@ -332,7 +332,7 @@ P0 止血 + 护栏先行（活跃 rename 接 RPC 修覆盖 bug + 登记表 + rev
 
 ## §5 下一层拆分
 
-> 实施计划（单元 → wave 拆分与执行规格）见子文档 [data-source-governance-plan.md](data-source-governance-plan.md)；本节单元表保留为概览。
+> 实施计划（单元 → wave 拆分与执行规格）原见子文档 data-source-governance-plan.md（已删除，git 可追溯）；本节单元表保留为概览。
 
 **结论：五阶段递进，每阶段独立可验收可回滚；P0 把唯一的已证实 bug 修掉并立起双层护栏，P1-P3 在守护下逐域收敛，P4 固化为长期回归基线。**
 

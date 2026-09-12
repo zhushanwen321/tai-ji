@@ -213,7 +213,7 @@ grep "stripped unmarked provider-level keys" ~/.xyz-agent/logs/runtime-*.log   #
 
 先核对「界面显示的凭证来源」与磁盘字段/文件是否一致，不猜凭证有没有填（`no-credential` = 按 `credentialSource` 选中的链路解析不到凭证，不是「凭证一个都没有」；`exclusive` 缺专属 Key 文件即失败、不回退）。检查三命令（`CD=~/.xyz-agent`，dev 用 `~/.xyz-agent-dev`）：`grep "\[quota\] fetch failed" $CD/logs/runtime-*.log | tail -20`（失败原因）· `grep -n -A6 '"quota"' $CD/pi/agent/config/providers.json`（credentialSource 字段）· `ls -la $CD/secrets/`（secrets 实际文件）。
 
-恢复：失败态浮层的「刷新/配置」双入口；设置页「保存并测试」是唯一落盘 + 查询动作，齐备性不满足时按钮置灰并给字段级提示。机制与 D1-D12 设计见 [design/coding-plan-quota-config-ux.md](design/coding-plan-quota-config-ux.md)。
+恢复：失败态浮层的「刷新/配置」双入口；设置页「保存并测试」是唯一落盘 + 查询动作，齐备性不满足时按钮置灰并给字段级提示。机制权威 = quota 配置相关代码注释与约束登记（原设计文档 design/coding-plan-quota-config-ux.md 已删除，git 可追溯）。
 
 ## pi 数据布局迁移（方案 B，2026-09-10）
 

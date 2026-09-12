@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/probes/subagent-sync-collect/a2-token-comparison.mjs
 //
-// [A2] token 对比探针（数字记录非门：设计 §4 验收表 A2 行「仅记录不设硬阈值」）
+// [A2] token 对比探针（数字记录非门：设计 §4 验收表 A2 行「仅记录不设硬阈值」，设计文档已删，git 可追溯）
 // 同一任务组（3 个快速 one-shot）分别以 async（不传 collect）与 sync 各跑一次，
 // 从主 session assistant usage 统计 input tokens 对比表。
 // 预期输出（结构门 + 数字记录）：

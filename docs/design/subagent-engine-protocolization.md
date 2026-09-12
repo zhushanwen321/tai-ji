@@ -73,12 +73,12 @@
 >   ②**自灭主判据改 stdio EOF**（stdin EOF/EPIPE），超时只对 **in-flight 反向请求**计时（env 改 `XYZ_ENGINE_HOST_REQUEST_TIMEOUT_MS`），A8④ 补「静默长任务不被自灭」负向验收（ADR-0047 反向通道版）；
 >   ③**「孙进程零残留」限定范围**（一代子进程 + 组内后代；pi rpc-mode detached 后代按 §3.9 已接受代价，量级表述据实修正）；④conformance 静态断言加 allowlist（探测/收割命令例外）。
 >
-> - v11（2026-09-08，**分层拆分**）：设计层收敛后，按 dev-flow 分层把**实现级细节**下沉到 [`subagent-engine-protocolization.impl-plan.md`](subagent-engine-protocolization.impl-plan.md)（帧字段级 JSON / env 键表与生成物名 / manifest 字段表 / pidfile 命名与清扫判据 / 自灭阈值 / conformance 断言形式 / W 单元领地与测试命令）；
+> - v11（2026-09-08，**分层拆分**）：设计层收敛后，按 dev-flow 分层把**实现级细节**下沉到 subagent-engine-protocolization.impl-plan.md（已删除，git 可追溯；实施细节现由代码承载）（帧字段级 JSON / env 键表与生成物名 / manifest 字段表 / pidfile 命名与清扫判据 / 自灭阈值 / conformance 断言形式 / W 单元领地与测试命令）；
 >   本文件保留决策、不变量、数据流、错误语义、验收场景与粗粒度拆分。R9 的实现级残留改在 plan §7.2 跟踪。
 > **分层声明（2026-09-08）**：本文件是**设计层**（决策 / 不变量 / 数据流 / 错误语义 / 验收场景 / 下一层拆分）。
 > **实现级细节（帧字段级 JSON、env 键表与生成物名、pidfile 命名与清扫判据、自灭阈值、conformance 断言形式、
-> 单元领地与测试命令）的 SSOT 已下沉至 [`subagent-engine-protocolization.impl-plan.md`](subagent-engine-protocolization.impl-plan.md)**。
-> 后续改动实现级细节改 plan，不改本文件；本文件只在**决策或语义**变化时修订。
+> 单元领地与测试命令）的 SSOT 已由代码承载（原下沉目标 subagent-engine-protocolization.impl-plan.md 已删除，git 可追溯）**。
+> 后续改动实现级细节直接改代码并以本文件对应章节为入口；本文件只在**决策或语义**变化时修订。
 
 > 关联：`zcode-session-db-isolation.md`（前置小改，其改动最终落在 `zcode-subagent-cli` 包内）；
 > `../architecture/subagent-engine-abstraction.md`（EnginePort 抽象层；其中「reader 划为双端复用共享只读模块」
