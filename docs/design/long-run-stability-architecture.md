@@ -258,6 +258,9 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
 - **被否**：「不动数据路径，只靠看门狗（D3）兜底」——若用它，每次打开大 session 都是一次内存尖峰，看门狗从「兜底」变成「高频主路径」，违反超时/兜底原则的同样教训（兜底被高频触发 = 正常路径 broken）。
 - **证据**：本机 198MB tee 文件与全量加载链路代码事实（§2.3 失败模式 D）。
 - **效果**：G3 的内存平台期由「数据路径有界」保证，看门狗回归兜底角色。
+- **迁入注记（源：long-run-stability-prevention-deep-dive.md，2026-09-13 文档整合，该文档已删除 git 可追溯；其已实施项不迁，仅以下两条仍长期有效）**：
+  - **pi RPC 无倒序分页的外部约束（长期有效）**：pi 的 `get_entries(since)` 只有正向增量游标、无 tail/range 参数（[MANDATORY] 不改 pi）——「pi→runtime 的全量传输」中间成本不可消除，能消除的是全量驻留（缓存只留窗口）、全量下发（帧只含窗口）、renderer 全量 parse；中间峰值以「restore 后首屏走文件尾读 + 后台增量 reconcile 收敛」缓解。此约束是上文 ① 分页预算协议在活跃路径的实现形态依据。
+  - **未实施遗留项（renderer 层，登记不展开）**：streaming 超长消息的 markdown 每帧全文行扫描 + 前缀整体拷贝（`markdown.ts` 行扫描路径，MB 级消息 O(n²) CPU）——非崩溃源，归 `taiji-renderer-optimize` skill 领地择机处理；LRU 豁免卡死面已被既有 streaming idle 30min 收口定时器覆盖。
 
 **D7：诊断导出——取证链路的用户出口（选定）**
 

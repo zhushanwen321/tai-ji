@@ -2264,7 +2264,7 @@
         "packages/runtime/src/services/message-bus/__tests__/outbound-frame-guard.test.ts"
       ],
       "authority": [
-        "design/crash-resilience.md#33-关键决策与权衡"
+        "design/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2307,7 +2307,7 @@
         "packages/renderer/src/composables/useCrashRecoveryNotice.ts"
       ],
       "authority": [
-        "design/crash-resilience.md#33-关键决策与权衡"
+        "design/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "lifecycle",
@@ -2441,10 +2441,10 @@
         "extensions/universal/structured-output/**",
         "extensions/universal/subagent-workflow/**",
         "docs/pi-semantics.json",
-        "docs/design/crash-resilience.md"
+        "docs/design/crash-forensics-and-watchdog.md"
       ],
       "authority": [
-        "design/crash-resilience.md#d1extension-异步回调守卫泛化-scheduler-范式到-ext-guards短期对应-r1g1",
+        "design/crash-forensics-and-watchdog.md",
         "pi-semantics.json"
       ],
       "dimensions": [

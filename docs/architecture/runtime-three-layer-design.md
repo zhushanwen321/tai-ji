@@ -217,7 +217,7 @@ infra/      ← pi 适配（实现 ports，连接 + 翻译合并）
 
 **本批显式列入清单**：`services/session/background-task-reaper.ts`（555 行，直用 node:fs + node:child_process spawnSync）。它是后台收殓任务（孤儿后台任务补杀 + registry 终态回写），横切基础设施性质与 ① logger 同类，不在业务请求路径上；判定逻辑已有测试覆盖 175/175 行（runtime incremental coverage）。裁决理由：单独 ports 化这一个文件将与存量 45 文件形成 1:45 双轨，违反一致性；留待 R3 ports 收编统一治理。
 
-**补登（2026-09-12，crash-resilience 批次新增文件随批登记，review MF-8）**：
+**补登（2026-09-12，crash-resilience 批次新增文件随批登记，review MF-8；crash-resilience.md 设计文档已删除，git 可追溯）**：
 - `services/startup-reattach.ts`（node:fs `existsSync`/`unlinkSync`）：启动重附探测的残留 checkpoint 文件清理——启动期一次性路径，与 background-task-reaper 同类不在业务请求路径上；
 - `services/session/runtime-checkpoint.ts`（node:fs 多符号）：runtime checkpoint 读写本体（崩溃取证/恢复链的自有文件 IO，非 pi 文件），文件即该模块的存在理由；
 - `services/session/rolling-restart.ts`（node:v8 `getHeapStatistics`）：滚动重启硬升级判定的 heap 水位读取——os 级只读探针语义与 ③c mem-pressure 同类（无业务语义、无状态、best-effort），v8 而非 os 模块仅为数据源差异；

@@ -2,7 +2,7 @@
 /**
  * check-stale-ctx-audit-coverage.mjs —— stale-ctx 普查清单完备性守卫（O1-2 审计覆盖机器守卫，B 方案）。
  *
- * 背景（docs/design/crash-forensics-and-watchdog.md §3.3 D9 O1-2）：crash-resilience u1-ext-guard
+ * 背景（docs/design/crash-forensics-and-watchdog.md §3.3 D9 O1-2）：crash-resilience（设计文档已删，git 可追溯）u1-ext-guard
  * 交付的 stale-ctx 全仓普查（extensions/shared/ext-guards/docs/stale-ctx-audit.md §3）是一次性人工动作，
  * 此后新增 extension 包不会自动进入普查——「新包绕过 stale 静默语义判定」的漏洞无人把守。
  * 采用 B 方案（清单完备性检查）而非 AST lint（A 方案被否：回调形态发散，过匹配/漏匹配不可靠）：

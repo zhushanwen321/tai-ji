@@ -633,7 +633,7 @@ export default [
   },
   // [HISTORICAL] session-dead u2/u3b 语义改动致超限（512>500），拆分登记为后续重构项，勿再增行。
   // 提额至 520 而非 off：微超即提额，保留软上限告警（与 provider-config-helper 提额先例同型）。
-  // [merge dev-0.9.17 2026-09] crash-resilience / crash-forensics-and-watchdog（respawn
+  // [merge dev-0.9.17 2026-09] crash-resilience（设计文档已删，git 可追溯）/ crash-forensics-and-watchdog（respawn
   // 编排 + 收殓 + inflight 镜像挂点）与对方 chat 域协议化（userStoppedGate / restore-abort
   // 收敛环）并存，统计行 634 > 520 → 提额 650（微超即提额哲学不变；本块位于 config 末尾，
   // 覆盖上方 idle-pi-reclamation 的 off 块——两块语义冲突时以本软上限为准）。

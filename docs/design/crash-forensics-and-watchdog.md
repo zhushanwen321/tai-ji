@@ -9,7 +9,7 @@
 - **Q（问题）**：怎么让「崩溃可归因、自愈可观测、触发条件有人算、内存压力走计划内路径、取证有用户出口」，且与已交付形态（respawn / 熔断 / 回收）正确咬合而不是重造？
 - **A（答案）**：三件套——① append-only 双文件崩溃台账承接全部层的死亡/自愈事件（**条件类信号一并事件化**，台账是评估器唯一输入）+ 纯函数触发条件评估器（导出与日评双出口）；② runtime 持续 checkpoint + 看门狗两级阈值 + 优雅滚动重启（经既有完整 shutdown 序退出，supervisor 增计划内分支，relay 推迟带上限与双维硬升级）；③ 设置页一键诊断包导出（台账 + 日志尾部 + 触发状态摘要）。批次补课 4 小项随附（tee size 轮转 / 入站 parse 守卫 / 截断反转 supersession 裁决 / 审计覆盖守卫）。
 
-**层声明（当前层 → 下一层）**：本文承接 [long-run-stability-architecture.md](long-run-stability-architecture.md) §3.3 D1/D3/D6③/D7 的架构决策与 [crash-resilience.md](crash-resilience.md) / idle-pi-reclamation.md（已删除，git 可追溯）的已交付形态，产出**可实施的技术方案**（接口 / 数据模型 / 机制 / 单元拆分）。下一层产物 = dev-flow 实施单元。本文不设计函数级实现细节。
+**层声明（当前层 → 下一层）**：本文承接 [long-run-stability-architecture.md](long-run-stability-architecture.md) §3.3 D1/D3/D6③/D7 的架构决策与 crash-resilience.md / idle-pi-reclamation.md（两份设计文档均已删除，git 可追溯；crash-resilience.md 的独有档案已迁入本文附录 D，正文其余引用均为其已交付形态或触发条件出处）的已交付形态，产出**可实施的技术方案**（接口 / 数据模型 / 机制 / 单元拆分）。下一层产物 = dev-flow 实施单元。本文不设计函数级实现细节。
 
 ## 1 背景目标
 
@@ -208,7 +208,7 @@ pi 崩溃（exit 1）
 **D6：诊断导出（E7）**
 
 - **采用**：设置页 系统 分区新增「导出诊断包」行 + 死态静态错误页（C-proc-16 熔断后的手动重试页）带同款入口。main 进程打包 zip（用户自选保存位置）：`crashes/main.jsonl` + `crashes/runtime.jsonl`（现档）+ 触发条件状态表（D2 评估器输出）+ 各层日志尾部（runtime-*.log / main 日志 / renderer-error-* 各取末 256KB，非全量）+ 近 24h 水位行摘录 + 版本/平台/pi 版本/marker 状态。zip 内置 `summary.md`（人读首屏：最近 10 条台账事件表格 + 触发状态表 + 各文件清单说明）。
-  **隐私判定（逐项）**：detailDigest（stderr 末 10 行——extension 错误栈**含本机绝对路径**）、日志尾部（cwd slug、session 文件绝对路径、杀链决策行）、renderer-error 栈、sessionId。判定：**与 session 历史 JSONL 明文落盘同级敏感度**（本地文件、用户自选位置自管、不联网），**不脱敏**——路径与会话标识正是归因线索，脱敏摧毁诊断价值（对齐 crash-resilience D4 草稿「草稿明文落盘」的先例判定结构）。补偿：导出确认对话框文案含「包含本机路径与会话标识信息」知情提示。重审触发：用户反馈需要脱敏版时再评估可选项（已回流附录 A #20，requires-user-report）。
+  **隐私判定（逐项）**：detailDigest（stderr 末 10 行——extension 错误栈**含本机绝对路径**）、日志尾部（cwd slug、session 文件绝对路径、杀链决策行）、renderer-error 栈、sessionId。判定：**与 session 历史 JSONL 明文落盘同级敏感度**（本地文件、用户自选位置自管、不联网），**不脱敏**——路径与会话标识正是归因线索，脱敏摧毁诊断价值（对齐 crash-resilience.md（已删，git 可追溯）D4 草稿「草稿明文落盘」的先例判定结构）。补偿：导出确认对话框文案含「包含本机路径与会话标识信息」知情提示。重审触发：用户反馈需要脱敏版时再评估可选项（已回流附录 A #20，requires-user-report）。
 - **被否**：① 「联网自动上报」——架构 D7 已否；② 「导出全量日志」——GB 级且含 session 隐私内容，尾部 + 台账已覆盖归因需求（detailDigest 设计的初衷）；③ 「默认脱敏」——见隐私判定。
 - **效果**：G-A 的出口成立；场景一完整兑现。
 
@@ -225,7 +225,7 @@ pi 崩溃（exit 1）
 **D8：renderer 入站 parse 前置大小守卫（O3-D 补课，防御纵深）**
 
 - **采用**：ws-client 消息处理器在 `JSON.parse` 前检查数据大小（text 帧按 `string.length` code units 计，Blob 帧按 `byteLength`——两种到达形态实施期以实际为主）：**string.length > 40,000,000 code units（≈80MB UTF-16）** 整条丢弃 + console error + 计数上报（经 renderer-log IPC 带 `inbound-frame-dropped` 结构化标记进台账，D1 矩阵已列）。阈值换算论证（按出站守卫的**真实模型**）：守卫度量单位是**整帧 UTF-8 字节**，截断成功的硬条件是「字段替换为 KB 级占位载荷后重测 ≤32MB」（否则 drop）——故合法帧（passthrough 与 replaced 两形态）恒 ≤32MiB UTF-8 字节；UTF-8 字节数 ≥ code units 数，text 帧 `string.length` 恒 ≤ 32M code units。40M 阈值 = 对该上界留 25% 余量 + 覆盖 JSON 转义等实现细节，只拦「显著超界」形态（守卫失效/协议漂移，含守卫零抛错放行的路径——此时哨兵语义仍成立）——响亮失败优于静默 parse 一个巨型字符串（UTF-16 放大 + 对象图再放大，正是 E3 类 OOM 形态）。
-  **循环防护（终止阀，三点钉死）**：丢弃 → seq gap → 重订阅全量拉取，若拉取响应同样超界 → 再丢 → 再 gap 的死循环（与 crash-resilience D3 被否方案④同构的环）。终止阀：**连续 3 次** inbound-frame-dropped 后暂停**该 session** 的自动重订阅——**作用域 = 单 session 订阅隔离**（既有 `resubscribeAll` 是 WS 重连后恢复全部 session 订阅的全局机制，不得暂停它，否则单个坏 session 连坐全部 session 的流恢复）。**恢复触发器 = 用户动作重试**：暂停后用户切走再切回该 session 时重试一次订阅（可判定的用户信号；「对端自行恢复」无观测信号，不承诺）；应用重启是兜底路径。**死态呈现复用既有机制**：不新建第三套死态——session 级静态提示复用 C-proc-16 熔断静态页形态 + D6 导出诊断包入口。台账计数照记——出站守卫失效是该守卫存在的唯一前提，此形态下静默循环不可接受，响亮降级是正解。
+  **循环防护（终止阀，三点钉死）**：丢弃 → seq gap → 重订阅全量拉取，若拉取响应同样超界 → 再丢 → 再 gap 的死循环（与 crash-resilience.md（已删，git 可追溯）D3 被否方案④同构的环）。终止阀：**连续 3 次** inbound-frame-dropped 后暂停**该 session** 的自动重订阅——**作用域 = 单 session 订阅隔离**（既有 `resubscribeAll` 是 WS 重连后恢复全部 session 订阅的全局机制，不得暂停它，否则单个坏 session 连坐全部 session 的流恢复）。**恢复触发器 = 用户动作重试**：暂停后用户切走再切回该 session 时重试一次订阅（可判定的用户信号；「对端自行恢复」无观测信号，不承诺）；应用重启是兜底路径。**死态呈现复用既有机制**：不新建第三套死态——session 级静态提示复用 C-proc-16 熔断静态页形态 + D6 导出诊断包入口。台账计数照记——出站守卫失效是该守卫存在的唯一前提，此形态下静默循环不可接受，响亮降级是正解。
 - **被否**：「8MB 对齐告警档也拦」——入站侧无截断降级形态（截断的 JSON 不再可 parse），只能丢；丢 8-32MB 区间正常帧会误伤合法大帧（出站守卫允许 ≤32MB 通过）。80MB 只拦「守卫已失效」的形态。
 - **效果**：O3-D 承诺的 renderer 本地防线建立；同时它是出站守卫失效的**哨兵**（inbound-frame-dropped 出现 = C-comm-14 被绕过，评估器把它列为高频敏感条件，附录 A #2 关联）。
 
@@ -233,7 +233,7 @@ pi 崩溃（exit 1）
 
 **D9：两个 supersession / 守卫裁决（O3-C + O1-2 补课）**
 
-- **O3-C 截断反转 —— 裁决：被已交付形态 superseded，不实施**。原承诺「六工具白名单反转为默认截断 + 豁免名单」针对的「白名单外工具在 renderer 无界」问题，已被 crash-resilience u7 交付的 **entryStates 64KB 条目截断**（apply-entry-utils.ts，live/reload 共用同一截断层）结构性覆盖——所有工具的 entry 累积态恒有界。再反转 display 层白名单（truncate-tool-output 4KB 投影）只是显示层一致性收益，引入双截断体系的维护成本。**登记 supersession 而非静默放弃**：本条写入 prevention-deep-dive 的对账（实施单元含一行动作：deep-dive §5 表 O3-C 行加注 superseded-by）。
+- **O3-C 截断反转 —— 裁决：被已交付形态 superseded，不实施**。原承诺「六工具白名单反转为默认截断 + 豁免名单」针对的「白名单外工具在 renderer 无界」问题，已被 crash-resilience.md（已删，git 可追溯）u7 交付的 **entryStates 64KB 条目截断**（apply-entry-utils.ts，live/reload 共用同一截断层）结构性覆盖——所有工具的 entry 累积态恒有界。再反转 display 层白名单（truncate-tool-output 4KB 投影）只是显示层一致性收益，引入双截断体系的维护成本。**登记 supersession 而非静默放弃**：对账动作已执行——prevention-deep-dive.md §5 总表 O3-C 行已加注 superseded-by（该文档已删除，git 可追溯；其 O3-C 行注记与本条裁决一致）。
 - **O1-2 审计覆盖机器守卫 —— 采用 B 方案（清单完备性检查）而非 AST lint**：新增检查脚本（挂 extensions 三连或 pre-commit）：解析 `stale-ctx-audit.md` **§3 全仓普查清单**（权威表——不是 §2 接入清单）vs `extensions/{taiji,universal,shared}/` **三组目录**的实际包列表——任何新增 extension 包未在普查表出现即红（forcing 新包接入时填写 stale 静默语义判定）。**合并行解析规则**：普查表存在一行多包斜杠分隔的合并行（如「rename-session / msg-id-mapper / …」），按 `/` 拆分后逐一比对。被否 A 方案（taste-lint AST 规则识别「未守卫的异步 ctx 调用」）：过匹配/漏匹配不可靠（回调形态发散：timer/事件/Promise/闭包传递），误报噪音会教人绕过；清单完备性是可机器判定的强不变量，语义判定交回人（普查表）+ 行为兜底交回守卫（guardStaleCtx 已交付）。
 
 ### 3.4 探针清单（运行时断言，准则 7）
@@ -260,8 +260,8 @@ pi 崩溃（exit 1）
 | A4 滚动重启计划内路径（G-C，武装后） | env 注入低阈值 + 在途 relay 任务 | 横幅出现（含终端会话预告，执行前 30s 有二次预告）→ 任务完成后重启（supervisor 日志确认零退避零计数）→ session 恢复 → 台账 rolling-restart 事件；强制路径注入硬阈值 → rolling-restart-forced；relay 子进程、sandbox plugin 进程与 plugin sessionData 在重启前后无孤儿/无丢失（退出链完整性）；**进程表无残留 PTY**（终端孤儿检查）；**保活 subagent 反向用例**：存在 Path A 保活（settled 无在途）进程时不触发推迟（`!hasIdleTimer` 谓词生效）；**runtime 日志含完整 shutdown 步骤打点序列**（继承完整性的机械验证）；**横幅终态断言**（重启完成后转「已恢复」30s 自动清除；断连重连后横幅经拉取恢复；**重启完成窗口内重连的横幅消失不重现**）；**推迟链路事件断言**：在途任务存在时推迟路径产生 `rolling-restart-deferred` 事件且携带镜像在途计数字段（在场形态为数字、errs 形态为 null + absent-report——两形态分别注入验证）；**30min 到点路径断言**：经 `XYZ_ROLLING_RESTART_DEFER_LIMIT_MS` 注入短上限（如 30s），任务不完成到点后 forced 事件 `reason=defer-limit` 出现（不靠硬阈值）；**镜像重建断言**：滚动重启→reattach→镜像条目重建（runtime 预置 0 + extension 重载初始上报）→再次触发滚动重启判定**无 errs**（errs 不因 reattach 永久残留——对账机制的行为验证）。**执行口径（Gate B 2026-09-11 首轮）**：FAIL——armed 注入下 rolling-restart 事件与 shutdown 步骤打点前 10 步正常，但退出链挂死在 engine-pool-dispose 前（退出码 86 不可达），被 LivenessMonitor 按 liveness_unhealthy 强杀走崩溃退避路径；Gate W 默认 off 生产休眠，缺陷修复后须复验全部子断言（verdict 表见 impl-plan §6） |
 | A5 tee 有界（G-D） | 单 session 持续高流量对话至超 50MB stdout | `pi-*.jsonl` 主档 ≤~50MB + `.1.gz` 旋段存在（gunzip 解压逐行 valid JSON）；尾部最新行完整（现场保全）；正常退出后 tee 尾部行全部落盘（flush 走新流）。**执行口径（Gate B 2026-09-11，SCALED）**：`XYZ_LOG_MAX_BYTES=262144` 注入 256KB 替代 50MB 全量灌入——主档多次轮转保持 ≤~256KB + `.1.gz` 段存在且 gunzip 后全 valid JSON + 任意时刻主档尾部行 valid + 正常退出前后行数一致（同轮次主日志 `runtime-*.log.1` 轮转同证） |
 | A6 入站防御（G-D） | 测试钩子注入超界单帧 ×4 | 帧被丢弃、renderer 不崩、台账 inbound-frame-dropped ×4、第 3 次后**该 session** 静态错误提示出现（终止阀单 session 作用域，其余 session 流不受连坐）；用户切走再切回该 session 触发一次重试订阅（恢复触发器）。**执行口径（Gate B 2026-09-11）**：BLOCKED——生产无注入钩子（守卫本体无测试钩子），运行态不可达；单元级覆盖 core 11 + main 9 + renderer 9 用例；renderer 应用级装配（`installInboundFrameGuard` 挂载）随 u-init 收口后可复验 |
-| A7 守卫与 supersession（G-D） | `extensions/` 三组任一目录新建空包（临时）跑检查；核对 deep-dive O3-C 行 | 检查红（未在普查表）；O3-C 行带 superseded-by 注记 |
-| **A8 错误风暴限流（G-B 负面行为）** | renderer 注入同签名错误 500 次/min（测试钩子） | renderer-error 文件该分钟 ≤100 行 + 超限合并为一条汇总行（D1 防漏 3 的反向验证——风暴不会压垮 IPC 与磁盘）。**执行口径（Gate B 2026-09-11，替代口径）**：注入判据同样无钩子不可达（限流本体复用 crash-resilience 既有 100/min 节流 + 同签名去重，有既有单测）——改用 CDP 采集器全程监听剧烈恢复场景（kill pi / kill main / kill runtime / 退出重启），零 console.error 零 exception（仅 2 条启动期 Vue warning）——真实崩溃恢复无错误风暴 |
+| A7 守卫与 supersession（G-D） | `extensions/` 三组任一目录新建空包（临时）跑检查；核对 O3-C supersession 注记（原登记于 prevention-deep-dive.md §5 表，该文档已删除，git 可追溯；注记内容见本文 D9） | 检查红（未在普查表）；O3-C superseded-by 注记在案（本文 D9） |
+| **A8 错误风暴限流（G-B 负面行为）** | renderer 注入同签名错误 500 次/min（测试钩子） | renderer-error 文件该分钟 ≤100 行 + 超限合并为一条汇总行（D1 防漏 3 的反向验证——风暴不会压垮 IPC 与磁盘）。**执行口径（Gate B 2026-09-11，替代口径）**：注入判据同样无钩子不可达（限流本体复用 crash-resilience.md（已删，git 可追溯）交付的 100/min 节流 + 同签名去重，有既有单测）——改用 CDP 采集器全程监听剧烈恢复场景（kill pi / kill main / kill runtime / 退出重启），零 console.error 零 exception（仅 2 条启动期 Vue warning）——真实崩溃恢复无错误风暴 |
 
 每场景均回溯 §1：A1/A2/A8→G-A/G-B、A3/A3b/A4→G-C、A5/A6/A7→G-D。全部场景在 dev app + 真实 pi 上执行（对齐 TEST-STRATEGY 真实依赖要求）；A4 阈值注入用 env 旋钮（§5 命名）不 mock 判定逻辑本身。
 
@@ -287,23 +287,23 @@ pi 崩溃（exit 1）
 **清理声明**：台账与 checkpoint 自带生命周期（10MB×3 段轮转 / **main 侧 app 退出链删除** + checkpoint-failed 保留最近 3 份新失败覆盖最旧），**不修改 cleanExpiredLogs 与 log-retention 的「跳过目录」现状语义**（它保护非日志产物）；诊断 zip 用户自管。
 **checkpoint 五契约**（名对齐架构 D3 原文「风暴防护与收割时序」全条）：**删除属主双轨**——main 侧在 app 退出链删除（确认 runtime 死亡后；liveness 强杀重启与滚动重启都不删）/ 新 runtime reattach 编排在全部尝试完后删（**runtime 自身任何退出路径一律不删**——「app 级识别信号」不存在，见 D5 退出链论证）；staleness guard（reattach 前校验文件存在）/ 完整性降级（tmp+rename，解析失败记 checkpoint-corrupt 退 lazy）/ 失败现场（checkpoint-failed-\<ts\> 保留最近 3 份）/ **风暴防护与收割时序（分批并发 2 + 高水位延迟【即时系统级查询，冷启动不空转】+ live 孤儿必须等收割后再 spawn）**。
 **待验证检查点**：退出码 86 的跨平台/信号语义冲突核对；zcode appserver、sandbox plugin fork、忽略 SIGHUP 的终端命令**三者意外孤儿**（无 shutdown 机会）的 reap 判据扩展可行性；reattach 并发上限的 spawn 峰值实测（2 起步）；memPressure 即时系统级查询的实现层（os 级 swap/空闲内存的跨平台 API 差异）；收割等待上界（ps 10s + 每孤儿 2s）实测。
-**约束登记义务**（对齐 crash-resilience §5 先例，五项随交付登记 constraints.json）：① 台账双文件 schema 与写入点矩阵；② checkpoint 五契约；③ 滚动重启退出码与 supervisor planned 分支语义；④ 入站 parse 守卫（C-comm-14 的对偶：80MB 阈值 + 哨兵语义 + 连续 3 次终止阀）；⑤ tee 段文件 `pi-` 前缀不变量（架构 D6③）。**文档同步义务**：AGENTS.md 关键规则（runtime 生命周期新机制条目）、`docs/feature-map/` 更新、TEST-STRATEGY / docs-testing 同步、**EnginePort 扩展的权威源同步（`docs/architecture/subagent-engine-abstraction.md` §3.3.5 + port.ts 扩展登记注释——port.ts 头部纪律：字段级变更须先改设计文档）**、subagent-core core→壳事件出口的设计文档同步、renderer i18n 双 key——对齐 crash-resilience §5 实施期义务先例。
+**约束登记义务**（对齐 crash-resilience.md（已删，git 可追溯）§5 先例，五项随交付登记 constraints.json）：① 台账双文件 schema 与写入点矩阵；② checkpoint 五契约；③ 滚动重启退出码与 supervisor planned 分支语义；④ 入站 parse 守卫（C-comm-14 的对偶：80MB 阈值 + 哨兵语义 + 连续 3 次终止阀）；⑤ tee 段文件 `pi-` 前缀不变量（架构 D6③）。**文档同步义务**：AGENTS.md 关键规则（runtime 生命周期新机制条目）、`docs/feature-map/` 更新、TEST-STRATEGY / docs-testing 同步、**EnginePort 扩展的权威源同步（`docs/architecture/subagent-engine-abstraction.md` §3.3.5 + port.ts 扩展登记注释——port.ts 头部纪律：字段级变更须先改设计文档）**、subagent-core core→壳事件出口的设计文档同步、renderer i18n 双 key——对齐 crash-resilience.md（已删，git 可追溯）§5 实施期义务先例。
 
 ## 附录 A：重审触发条件汇总（评估器的条件清单 SSOT，20 条）
 
 | # | 条件 | 来源 | 评估形态（数据源全部在台账） |
 |---|---|---|---|
-| 1 | 出站截断告警周均 >10 次 | crash-resilience.md §3.3 D3 代价 A | frame-truncated（reason=warn-tier）事件窗口计数 |
+| 1 | 出站截断告警周均 >10 次 | crash-resilience.md（已删，git 可追溯）§3.3 D3 代价 A | frame-truncated（reason=warn-tier）事件窗口计数 |
 | 2 | 出站注册表 miss（任何一次） | 同上 D3 代价 B | registry-miss 事件出现即 tripped；inbound-frame-dropped 关联佐证 |
 | 3 | supervisor 重启频率显著上升 | 同上 D7 代价 B | main.jsonl runtime-crash 窗口计数 |
 | 4 | 回收态存量致水位长期不回落 | idle-pi-reclamation.md（已删除，git 可追溯）代价声明 1 | watermark-daily 趋势（coverage <50% 的日降权标注——滚动重启的水位重置会掩盖不回落形态；明细 5min 行在日志供深查） |
-| 5 | base64 证明为主要压力源（水位归因） | crash-resilience.md v9 两步走 | 人工归因型（watermark-daily 数据就绪标注） |
-| 6 | 活跃态 Trace 降级重审 | crash-resilience.md §3.4 | requires-user-report |
+| 5 | base64 证明为主要压力源（水位归因） | crash-resilience.md（已删，git 可追溯）v9 两步走 | 人工归因型（watermark-daily 数据就绪标注） |
+| 6 | 活跃态 Trace 降级重审 | crash-resilience.md（已删，git 可追溯）§3.4 | requires-user-report |
 | 7 | auto-respawn 周均 >5 次 | architecture D2 代价 | auto-respawn 事件窗口计数 |
 | 8 | 滚动重启 >周 1 / 推迟月均 >10 / forced 月均 >3 / defer-limit 占 forced >30%（stale-high 假推迟占比——排除 reason=absent-report 形态后计） | architecture D3 代价 + 本文 D5 缺席语义⑤ | rolling-restart / rolling-restart-deferred / rolling-restart-forced 事件计数与 reason 分类（武装后生效） |
 | 9 | renderer reload 月均 >4 | architecture D4 代价 | main.jsonl reload 事件计数 |
 | 10 | 第三方扩展崩溃月均 >2 | architecture D5 代价 | crash 事件 reason 分类计数 |
-| 11 | 白屏但两侧日志无记录 → crashReporter 立项 | crash-resilience D2 代价 A | requires-user-report |
+| 11 | 白屏但两侧日志无记录 → crashReporter 立项 | crash-resilience.md（已删，git 可追溯）D2 代价 A | requires-user-report |
 | 12 | reload 丢草稿反馈 → 草稿持久化立项 | 同上 D2 代价 B | requires-user-report |
 | 13 | live/reload 大文本可见差异反馈 | 同上 D3 代价 C | requires-user-report |
 | 14 | 「加载更早」翻页高频抱怨 | 同上 D4 | requires-user-report |
@@ -318,7 +318,7 @@ pi 崩溃（exit 1）
 
 | 架构原文 | 已交付现实 | 本文裁决 |
 |---|---|---|
-| D2 respawn 1s/4s/16s 退避 + 3 次熔断 + intentional-kill 集合四契约 | crash-resilience 交付 5s 延迟 + 2 次熔断 + Map 存在性抑制（意图等价，process-manager.ts 源码实证） | 台账与滚动重启按已交付形态咬合；架构 D2 增量（OOM 分类差异化等）留在 E3 增量清单 |
+| D2 respawn 1s/4s/16s 退避 + 3 次熔断 + intentional-kill 集合四契约 | crash-resilience.md（已删，git 可追溯）交付 5s 延迟 + 2 次熔断 + Map 存在性抑制（意图等价，process-manager.ts 源码实证） | 台账与滚动重启按已交付形态咬合；架构 D2 增量（OOM 分类差异化等）留在 E3 增量清单 |
 | D4 renderer 5min/3 次 reload 熔断 | 交付 60s/3 次（C-proc-16） | 按已交付形态记录事件 |
 | E5「依水位数据裁剪甚至缓建」条款 | 水位打点多日无人回头裁决 | 转化为设计内 Gate W（u8），有触发条件有产物 |
 
@@ -333,3 +333,86 @@ pi 崩溃（exit 1）
 - v7（2026-09-11）：六轮全修（主审 1 must-fix / 1 suggestion + 影响面 3 must-fix / 1 suggestion，全部当轮清偿）。要点：**errs 判别域补初始上报**（extension 在 session 就绪时上报 count=0——否则「从未收到上报」含常态无 subagent session，errs 规则把每次滚动重启推满 30min，必现级兜底变常态）；**可用性判定改 per-session 事实**（runtime spawn 时刻的注入列表 getExtensionPaths——全局快照在 mid-session 禁用窗口会误杀在途：disabled-packages.json 是「下次 spawn 生效」语义）；**D3 残留分支改「隔离」**（删除失败重命名进 checkpoint-failed 家族——文件存在就可能被后续真 unclean 误配对，重命名使配对不可能；best-effort 不阻塞启动、重复失败不重复记事件）；**补 rolling-restart-deferred 事件**（推迟开始记一条、携带镜像在途计数——附录 A #8「推迟月均 >10」子句的数据源 + stale-high 观测面）；**30min 到点强制执行记 forced（reason=defer-limit）**与硬阈值区分；**残余风险双向登记**（偏低：漏推迟首案例升级；偏高：defer-limit 占 forced >30% 升级全量快照对账——对称触发）；横幅终态形态分叉（在线见绿确认 / 断连重连见消失）；A3c 判死时窗改最坏 10-15 分钟口径（undici 300s × 3）；marker 启动写时点钉单实例锁后。
 - v8（2026-09-11）：七轮收尾，**双审 0 must-fix 终止**（主审 0 M / 3 S / 1 INFO + 影响面 0 M / 2 S，双报告显式判定「设计就绪」，全部 suggestion + INFO 当轮清偿）。要点：**event 枚举删 unclean-exit 孤儿值**（实际生产形态 = event=crash + reason=unclean-exit，枚举内无生产者；P-A2 探针措辞同步按 reason 找）；**附录 A 16→20 条**（v3-v7 新增触发回流 SSOT：#8 扩第四子句 defer-limit 占 forced >30%【机器可判，排除 absent-report 形态】；#17 降级反弹——判据在采样环内存态不落台账，消费方 = Gate W 人工复审、评估器恒 no-data 但入清单；#18 漏推迟首案例 / #19 终端终止抱怨 / #20 脱敏反馈按 requires-user-report 先例入清单；计数 6 处同步 + 正文四处回流标注闭环）；**errs 形态 deferred 字段语义钉死**（镜像计数取 null 非 0 + reason=absent-report 独立标记；评估器 #8 占比子句分子排除 absent-report——errs 推迟是旧版兼容形态，混入会把上报链路问题误读为 stale-high 镜像漂移；absent-report 月均 >2 再评估上报链路加固）；**初始上报触发时点钉死**（extension 加载完成，不挂懒触发）+ **镜像条目完整事件集 = 初始上报 ∪ 五种 spawn 形态（新 session/respawn/reattach/lazy restore/fork）runtime 预置 0**（互不依赖：runtime 置 0 是本地真值不依赖上报到达，初始上报独立重试服务下次 errs 判别）；**rename 同域失败降级声明**（ENOENT = 并发删除视为已隔离 / EACCES = 权限同源原地残留幂等静默；收敛双通道 = 下次启动重试隔离 + 后续 unclean 覆写接管；复合误配对窗口 errs-safe 有界——最坏多恢复一个可自收敛 session，非数据损坏）；**A4 补三断言**（推迟链路事件在场/errs 两形态字段分别验证 / defer-limit 到点经旋钮注入短上限端到端验证 / 滚动重启→reattach→镜像重建→再次判定无 errs）+ §5 旋钮清单增 `XYZ_ROLLING_RESTART_DEFER_LIMIT_MS` + u4 补 rename 幂等实施注意。
 - v9（2026-09-12）：**阶段 6 design-code-sync（交付现实回写，全部为文档措辞对齐、零设计裁决变更）**。要点：**D7 旋段形态改写**（`.1.gz` gzip 单代 + `XYZ_LOG_MAX_BYTES` 单旋钮——dev-0.9.17 合并裁决回写；初版 `.1` 平面实现与打开时预滚的被取代事实落交付偏差注记两则）；**D1 矩阵对齐交付**（reaped 判据 v2 marker 化【spawn marker 清单 + argv + ppid=1】/ deleted 行号锚定 session-service.ts:1191 / reattach-skipped 拆双落点【runtime 编排三类 skip + main 侧冷启动残留隔离】/ shutdown 行补 `runtime.isRunning` 在场性 guard——偏差 #17 措辞回写）；**D3 补可信度判定 main 侧实施分工**（consumeResidualRunMarker → resolveColdStartTrust → isolateStaleCheckpoint，runtime 编排只消费 trusted-unclean）；**D4 补 LRU 已交付形态**（useMemoryPressure 可注入收紧动作 + core setLruMaxSessions 可变窗——偏差 #28②）；**D5 补引擎池 dispose 打点占位注记**（runtime 注册表恒空、实际杀链经 pi 侧 extension 收割钩子——偏差 #29，Gate B A4 挂死排查锚点）；**§4 补执行口径注记不删原判据**（A4 首轮 FAIL 退出链挂死复验中 / A5 SCALED 256KB / A6 BLOCKED 无注入钩子 / A8 CDP 替代口径；A3c 探针超时收口未落地事实化）；**§5 env 清单**补 `XYZ_LOG_MAX_BYTES`、移除未实施的 liveness 旋钮占位；**约束引用对齐登记面现状**（renderer 熔断 C-proc-12→C-proc-16、stale ctx 守卫 C-pi-15→C-pi-16——v5 合并对侧重写 constraints.json 致编号撞车与三条登记丢失【原 C-comm-14 出站守卫 / 原 C-pi-15 stale ctx / C-state-12】，恢复登记见 constraints.json 同批变更）；**§5 约束登记义务五项兑现**（台账双文件与写入点矩阵 / checkpoint 五契约 / 滚动重启退出码与 planned 分支及推迟有界 / 入站 parse 守卫 / tee `pi-` 前缀与 gzip 单代有界轮转）+ 看门狗武装门控默认 off + reap 判据 v2 marker 化，同批登记 constraints.json（C-data-20 / C-proc-17~20 / C-comm-15 / C-build-08）。
+- v10（2026-09-13）：文档整合 Batch 4-I1——吸收 crash-resilience.md（v11）独有档案为新附录 D，该文档与 crash-resilience.impl-plan.md 删除（git 可追溯），正文引用逐处挂溯源标注。
+
+## 附录 D：崩溃韧性防线档案（迁自 crash-resilience.md，该文档已删除 git 可追溯）
+
+> **迁移声明（2026-09-13 文档整合）**：crash-resilience.md（v11，371 行，「崩溃韧性：Taiji.app 中短期崩溃防治技术方案」）的五道防线已全部交付（13 单元，双 Gate 绿 + design-code-sync 收敛），其正文 D1-D7 决策、探针清单、验收记录、单元拆分属过程内容不迁，本附录只收独有档案（防线框架 / 错误规格表 / 崩溃证据增量 / 数据流档案 / 术语锚定）。该文档与 crash-resilience.impl-plan.md 均已删除，git 可追溯；本附录及正文引用的「impl-plan 偏差 Dx」「u 系单元号」「T 系场景号（T4 = pi 崩溃自动恢复场景）」均指该文档族。触发条件的运行时机器实装（常量与文案）见 `apps/electron/main/diagnostics/trigger-evaluator.ts`（与附录 A 编号一一对应）。
+
+### D.1 五道防线框架（交付形态总览）
+
+原文按崩溃面设五道防线，与本文 §1.1 按进程层组织的已交付防线表视角互补：
+
+| 防线 | 原决策 | 消灭的崩溃面 | 现役锚点 |
+|---|---|---|---|
+| ① extension 异步回调守卫 | D1 | stale ctx 异步回调炸死 pi 进程（9/3 实锤） | `extensions/shared/ext-guards` guardStaleCtx（接入终态 SSOT = stale-ctx-audit.md §2；C-pi-17） |
+| ② renderer 错误边界 + 自动恢复 | D2 | renderer 白屏无痕、崩溃 reload 循环 | `window-factory.ts` render-process-gone 链 + `recovery-policy.ts` 熔断（C-proc-16）+ renderer-log 落盘 |
+| ③ server→client 传输预算（含历史治理面） | D3/D4/D5 | 出站巨帧打穿 renderer；大历史加载/传输/附着无界（字节预算、分页协议、全量读预检） | `outbound-frame-registry.ts` 穷举表（SSOT）+ guardOutboundPushFrame（C-comm-14）；预算化读取与游标分页在 runtime session 链 |
+| ④ 内存观测与取证打点 | D6 | 崩溃取证盲区、内存无水位、日志清理只在启动跑一次 | main/runtime 水位 5min 打点 + `log-retention.ts` 每日复扫 + pi-crash 上下文头 + 杀链决策日志 |
+| ⑤ pi 崩溃自动恢复 | D7 | session 无声死亡、恢复不可见 | `pi-respawn.ts`（5s 延迟 + 连续 2 次熔断 + join 语义）；本文 D1 台账承接其事件 |
+
+### D.2 错误规格表（每个失败给出路）
+
+原文 §3.4 整表迁入，行为均为现役交付形态；runtime 整机死亡与 renderer 进程死亡的恢复链细节见本文 D1 写入点矩阵与附录 B 对账。
+
+| 失败 | 检测点 | 用户所见 | 恢复指引 |
+|---|---|---|---|
+| extension 回调 stale ctx | ext-guards 守卫 catch | 无感知（对话照常） | 无需恢复；debug 日志供排查 |
+| extension 回调非 stale 错误 | 守卫原样上抛 → pi 崩溃链路 | T4 恢复提示条 | 自动 respawn；反复失败 → 提示重试/新建会话 |
+| renderer JS 渲染错误 | errorHandler/onerror | 不白屏；错误现场自动落盘（renderer-error log），App 其余功能可用 | 日志自动落盘；影响持续 → 重启窗口 |
+| renderer 进程死亡 | main render-process-gone | 1s 内自动 reload + 恢复提示条 | 60s 滑窗内前 3 次自动 reload、第 4 次熔断 → 静态错误页：「请重启应用，日志在 ~/.xyz-agent/logs/」 |
+| 出站 reply 超 32MB | 出站帧守卫（reply 通路=message-broker.reply 内联） | 错误提示「内容过大无法传输」 | 提示含「加载更早」分页入口与 session 文件路径 |
+| 出站 push 超 32MB | 出站帧守卫（push 通路=guardOutboundPushFrame@publish 入口，契约保持式截断；实现为 seq 预写 + drop 时 rollbackSeq，可观察等价于 seq 分配前判定——见 impl-plan 偏差 D2） | 该条消息显示占位文案，其余消息照常 | 占位文案含 session 文件路径 |
+| push 注册表 miss / 截断后仍超限（病态兜底） | publish 入口兜底整条丢弃 + rollbackSeq 回滚（**miss 不占 seq**，等价于 seq 分配前丢弃） | 该条消息不出现 | error 日志含消息类型与体积 → 补注册表后同类消息恢复；8MB 告警档前置暴露 miss |
+| 历史文件超 32MB | statSync 预检 | 最近窗口正常显示 + truncated 标记 | 「加载更早」翻页；Trace 视图降级为「文件过大，源文件：<路径>」（④档降级文案在离线/file 通路生效；**活跃态** Trace 走 RPC get_entries 通路，超限被 reply 守卫拦截为错误 envelope——错误提示同样携带路径指引；活跃态协议级降级为已知限制，挂数据驱动重审） |
+| restore 附着超 32MB（最小规范化） | statSync 预检（⑤档） | 尾部 session_end 被流式 strip、首行 cwd 死路径被 fallback 修复 → session 正常附着可用（失忆防由 strip 保证、cwd 防由首行修复保证）；显式失败仅在文件头损坏等极端形态触发 | cwd 死路径的根治：在原 worktree 路径重建目录（推荐）；或手工编辑 session 文件首行 header 的 cwd 字段指向现存目录——**pi 按 header 的 cwd 判定而非文件所在目录，只移动文件不改 header 无效** |
+| pi 进程死亡 | ProcessManager onSessionExit 链 | T4 恢复提示条（含在途回合与后台任务丢失说明） | 自动 respawn（5s 延迟，2 次熔断）→ 手动重试按钮 |
+| pi 恢复后 subagent/后台任务缺失 | 崩溃时已连坐终止（relay kill/reap） | T4 提示条明示「不会自动恢复」 | 用户重新发起子代理/后台任务 |
+| 用户手动强制退出 session | forceQuitSession（不经 onSessionExit） | 现状 UI（dead 标记） | 不自动恢复（设计意图）；下次交互（点击 session 即惰性附着恢复，实测口径） |
+| runtime 整机死亡 | supervisor（既有） | 「重启中…」过渡屏（既有） | 退避重启（既有）；5 次用尽 → 手动重试（既有）；重启后 dead session 等用户交互惰性恢复 |
+
+### D.3 真实崩溃证据档案（2026-09 取证增量）
+
+E1（9/3 pi 进程被 extension 炸死）/ E2（9/5 七 session 同秒连坐）/ E3（9/9 renderer OOM）三案的主干叙事、堆栈与系统状态见 [long-run-stability-architecture.md](long-run-stability-architecture.md) §2.1/§2.2（该文档在册），此处只记彼处未覆盖的增量细节：
+
+- **E1 增量**：崩溃日志形态 `pi-crash-2026-09-03-835c6577-*.log`（打包版 pi exit 1）；同构现场除 smart-context 外还有 plan/compact.ts 的 `onComplete`/`onError` 裸调 `pi.sendUserMessage`（u1 接入守卫时一并收口）。stale ctx 机制与「pi 单独用不崩、套 GUI 就崩」的差异解释见 architecture §2.2。
+- **E2 增量**：同秒 7 pi exit 143 期间，dev worktree（fix-zcode-subagent-failed）的 runtime 实例在用 **prod 数据目录** `~/.xyz-agent` 运行（fallback 到系统 PATH 的 pi）——归因为「dev 实例与打包版共享数据目录 + 重启/收割级联」的混合事件，确切触发者不可定论——这本身是当时取证缺口的证据（无内存水位、无收割决策日志、无主谋记录；水位打点与决策日志后由防线④补齐）。残余面已由 datadir pin 缩小，复发即升级立项的重审触发见本文附录 A #16。
+- **E3 增量**：renderer 启动 0.31 秒后在 libuv `uv__malloc` 帧 SIGTRAP（V8 对分配失败立即 crash）。
+- **背景噪音（9/9 同日佐证，非崩溃）**：`plugin-host worker trusted-1 exited with code 1` 出现 13 次（当时 worker 有重建机制但无崩溃取证落盘——plugin-crash log 后由防线④补齐）；runtime stderr 大量 `relay connection lost, killing child`（主 pi 死亡后 relay kill-on-disconnect 连坐杀 subagent 子进程，relay-registry.ts，属预期内级联）。
+
+### D.4 session 历史数据流档案（磁盘到用户眼前，v1 基线快照）
+
+原文 §2.4 与本文 §2.4 是两个对象：本文 §2.4 画的是「崩溃事件信号流」，此处存档的是「session 历史的内存放大流」——它是现役预算机制（640KB 尾读窗、分页游标、entryStates 64KB 截断、restore 最小规范化）的设计动机。图中无界点①-⑥均已治理（映射见表后注）。
+
+```
+磁盘 ~/.xyz-agent/pi/agent/sessions/<cwd-slug>/<ts>_<sid>.jsonl（实测最大 6MB；
+pi-*.jsonl tee 累计流量达 198MB = 长会话高频大 entry 真实流入的证据；
+单条工具结果体积受 pi 工具上游约束：read/bash 类工具自截输出 50KB/2000 行、图片 ≤16MB）
+│
+├─【活跃 session】pi 进程内存 entry 树
+│    → RPC get_entries（不截断）
+│    → history-rebuild-cache doGetHistory 全量重建 Message[]，truncated:false
+│
+└─【离线 session】session-history.ts 尾读窗口 640KB
+     → 窗口内凑不够 20 个 user turn → fallback readFile 全量 + parseJsonl
+     →「加载更早」（设计时点为 getFullHistory 全量读全量传；u6 后全量通路退役改游标翻页）
+     →【restore 附着】normalizeInactiveSessionFileIfNeeded 每次附着无条件 readFileSync 全量读
+       ★ 自动 respawn 使附着变成崩溃后 5 秒自动触发的内存尖峰（恢复侧恶性循环）
+     → 每次 pi 退出时 extractSessionOutcome 的 findLastEntryField
+       32KB 尾读未命中 → fallback readFileSync 全量同步读
+       ★ 崩溃收尾动作本身变成内存尖峰触发器（退出侧恶性循环）
+│
+→ session.history 单条 JSON reply（设计时点无大小限制）
+→ renderer ws-client JSON.parse（V8 内 UTF-16 双倍膨胀 + 对象图数倍放大，峰值可达文件体积 4-8 倍）
+→ ChatStore.hydrate 全量进 messages Map + entryStates 全量累积（LRU=8 是唯一总量帽）
+→ Virtualizer 虚拟滚动渲染（DOM 侧已窗口化，健康；瓶颈在内存对象图，不在 DOM）
+```
+
+**无界点治理映射（均已交付）**：① 活跃路径全量不截断 → u4 双预算截断；② 离线 fallback 全量 → u4 分块扩窗；③ 出站帧无上限 → u4 出站帧守卫（C-comm-14）；④ 入站 parse 无守卫 → 入站帧守卫（本文 D8）；⑤ entryStates 无截断 → u7 累积态 64KB 截断 + 图片落盘（data-source-registry #35）；⑥ restore 附着无条件全量读 → u4 最小规范化（session-file-streaming.ts）。图中行为与命名以代码符号为锚。
+
+### D.5 术语锚定（读现役崩溃链路代码的前提）
+
+- **stale ctx（失效上下文）**：pi 的 extension API 对象（`pi` / `ctx`）在 session 替换（`ctx.newSession()` / `fork()` / `switchSession()` / `reload()`）后被 pi 标记失效，再调用其方法会**同步抛错**（`assertActive` 检查，错误文案含 `stale after session replacement`——PS-30 语义断言随 C-proc-08 版本门禁自动重验）。GUI 的每次切 session/新建/重载都在制造失效窗口；CLI 用户几乎不触发——这是「pi 单独用不崩、套 GUI 就崩」的核心机制差异。
+- **出站帧**：runtime 经 WebSocket 发往 renderer 的单条消息。session 级 push 帧形态 `{type, payload: {sessionId, entry}}`——大内容藏在 entry 内部字段（工具结果在 `entry.message.content`，工具参数在 `entry.arguments`，图片是 content 数组内的 Image block，entry 无独立 images 字段）。
+- **ring 回放与 seq gap 检测**：MessageBus 为每 session 消息分配单调递增 seq；stream 类写容量 1000 环形缓冲，state 类更新订阅快照；WS 重连后按 seq 回放，客户端发现跳号（gap）即触发重订阅全量拉取。**seq 连续性是断连恢复机制的正确性前提**——任何「分配了 seq 但客户端没收到」的消息都会被判为丢帧（本文 D3/D8 与 C-comm-14 的 seq 语义约束均源于此）。
+- **单条消息体积 vs 累计流量**：单 session pi stdout tee 累计流量实测 198MB，但单条工具结果体积受 pi 工具上游约束（read/bash 类自截 50KB/2000 行、图片 ≤16MB）——累计大 ≠ 单帧大。传输预算防单帧超限，读取预算防文件级与累计级无界，两者对象不同。
