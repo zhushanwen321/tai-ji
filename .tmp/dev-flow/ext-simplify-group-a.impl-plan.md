@@ -145,13 +145,13 @@ graph LR
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| 06-u0 | in-progress（波1） | 0 | - |
+| 06-u0 | committed | 1 | P1 PASS（isActive=false/phase=idle，D6 门开）；P2 steer 时序 PASS + goal 桥断裂新发现（probe-06.md）；plan 包工作区已还原 |
 | 06-u1 | pending | 0 | - |
 | 06-u2 | pending | 0 | - |
 | 06-u3 | pending | 0 | - |
 | 06-u4 | pending | 0 | - |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
-| 08-u23 | pending | 0 | - |
+| 08-u23 | in-progress | 0 | - |
 | 08-u4 | pending | 0 | - |
 | 04-U1 | pending | 0 | - |
 | 04-U2 | pending | 0 | - |
@@ -178,6 +178,7 @@ graph LR
 4. 08-V3 长观察（≥12min）与 GUI dev（08-V2）共享本机资源，验收编排串行化，避免端口/焦点竞争。
 5. 11-V4 随 11-u2 移交 code-simplify 批次，本流水线 deferred（终态同步阶段登记到 ext-simplify-index）。
 6. subagent 领地 = 线级包目录；发现领地外必改（如 runtime 侧意外牵连）停下上报，禁止顺手改。
+7. **goal 桥断裂（06-u0 探针新发现，2026-09-14）**：pi 0.84.4 每扩展独立 API 对象，`pi.__goalInit` 跨扩展挂载运行时不可达（双扩展实验确证，probe-06.md）——goal 档在 plan complete 对话框恒缺失、tryGoalInit 恒不执行。处置：06 线照常实施（D2 改造正确性独立）；V1/V2 的 goal 档场景按桥断裂现状形态验收并标注；桥修复（goal 暴露机制 + plan 探测方式）为独立缺陷待用户裁决，不纳入本批。
 
 **变更历史**：
 
