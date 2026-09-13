@@ -19,7 +19,7 @@
 | Unit | 职责 | 领地（精确文件路径） | 依赖 | 隔离 | 验收条款 |
 |------|------|----------------------|------|------|----------|
 | U1 | toolCall endTime reload 回填（fill 点 + 调用点 + 测试） | `packages/core/src/domain/chat/apply-entry-convert.ts` · `packages/core/src/domain/chat/apply-entry.ts`（仅 endTime 透传所需改动）· `packages/core/src/domain/chat/__tests__/`（apply-entry-convert 相关 + apply-entry-equivalence） | - | plain | ① computeToolCallFill 返回 endTime=toolResult body.timestamp（缺失不填）；② reload 路径 toolCall.endTime 有值；③ `pnpm -C packages/core test` 全绿（含 equivalence） |
-| U2 | UI 时间戳展示（formatClock + TurnMeta 区间 + Block 行尾列 + UserBubble + i18n + 测试） | `packages/ui/src/features/chat/format-utils.ts` · `TurnMeta.vue` · `composables/useTurnElapsed.ts` · `Block.vue` · `composables/useToolMeta.ts` · `UserBubble.vue` · `Turn.vue` · `__tests__/{format-utils,useTurnElapsed,TurnMeta,Block,UserBubble}.test.ts` · `packages/renderer/src/i18n/locales/zh-CN/panel.ts` · `packages/renderer/src/i18n/locales/en-US/panel.ts` | U1 | plain | ① formatClock 本地时区 HH:MM:SS；② TurnMeta 区间（完成定格/live 进行中）；③ Block tool 块 `耗时 · 时刻`、text/thinking 时刻；④ UserBubble 时刻；⑤ useToolMeta 耗时项移除；⑥ `pnpm -C packages/ui test` + `pnpm -C packages/ui typecheck` 绿 |
+| U2 | UI 时间戳展示（formatClock + TurnMeta 区间 + Block 行尾列 + UserBubble + i18n + 测试） | `packages/ui/src/features/chat/format-utils.ts` · `TurnMeta.vue` · `composables/useTurnElapsed.ts` · `Block.vue` · `composables/useToolMeta.ts` · `UserBubble.vue` · `Turn.vue` · `__tests__/{format-utils,useTurnElapsed,TurnMeta,Block,UserBubble,Turn,ChatView}.test.ts` · `packages/renderer/src/i18n/locales/zh-CN/panel.ts` · `packages/renderer/src/i18n/locales/en-US/panel.ts` | U1 | plain | ① formatClock 本地时区 HH:MM:SS；② TurnMeta 区间（完成定格/live 进行中）；③ Block tool 块 `耗时 · 时刻`、text/thinking 时刻；④ UserBubble 时刻；⑤ useToolMeta 耗时项移除；⑥ `pnpm -C packages/ui test` + `pnpm -C packages/ui typecheck` 绿 |
 
 注：u-foundation 共享契约根节点不设——无新增共享类型（`ToolCall.endTime` 已存在）；formatClock 归 U2 领地内。
 
@@ -59,7 +59,7 @@ graph LR
 ## 6 状态表
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| U1 | pending | 0 | - |
+| U1 | committed | 1 | 5669e6a00；core 129 文件/2073 测试绿 + typecheck 干净（主 agent 重跑核验） |
 | U2 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
@@ -67,3 +67,4 @@ graph LR
 - 风险 R2：text/thinking 多块共享同一 message 时刻（近似语义）——已在 demo 与设计 §2.4 声明，用户接受。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
+  - 2026-09-13 U1 committed（5669e6a00）；U2 领地补 `__tests__/Turn.test.ts`、`__tests__/ChatView.test.ts`（Turn.vue props 改动潜在波及面，避免领地外 blocker 浪费轮次）。
