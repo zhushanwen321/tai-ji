@@ -632,6 +632,15 @@ export class RunOrchestration {
           PRIORITY_BACKGROUND,
         );
       }
+    } else if (record.chatMode) {
+      // [U6b / B-firstround] 非 pi chatMode（zcode conversation:'cold'——U6 后 capability
+      // gate 对 conversation:true 放行）首轮同经 Continuation 编排，对齐 pi 分支形态：
+      // 轮末分流归 onRunSettled（settleRoundSuccess/Failed → markRoundIdle，record 保持
+      // 可续聊），续轮 message → deliverChatMessage → dispatchChatRoundForContinuation →
+      // kickOffChatRound 按 record.engine 路由（[U6b / B-routing]）。若走下方
+      // kickOffEngineRun 的 one-shot 编排（finalizeEngineOutcome tryTransition 终态化），
+      // chatMode record 首轮 settle 即终态化，续聊链从第一轮就断。
+      this.continuationFor(record).startFirstRound(recordOpts.task);
     } else {
       // 非 pi 引擎：engine.run 自足执行（handle+outcome），编排侧 journal 接线 + 终态迁移
       this.kickOffEngineRun(record, recordOpts, engine);
@@ -1073,7 +1082,12 @@ export class RunOrchestration {
 
     // [H1 U6] recordId 键反向通道路由注册段已随 interact 面退役删除——流式 delta
     // 恒经 run 作用域路由（runId 键 ctx.stream），中段守护刷新由 ctx.onEvent 承担。
-    const engine = this.resolveChatEnginePort();
+    // [U6b / B-routing] 轮次引擎按 record.engine 分派（非 pi 会话轮——zcode cold 续聊
+    // 经 dispatchChatRoundForContinuation 进入本主干，钉死 pi 会把 zcode chatMode 轮
+    // 派给 pi 引擎进程）：pi（缺省）保持 pi 专属解析（未注册 stub 语义零变化）；非 pi
+    // 经 registry 直解析（未注册同步 throw——Continuation dispatchRoundAsync 的 catch
+    // 承接为失败轮末分流，失败通知可达）。
+    const engine = this.resolveRoundEnginePort(record);
 
     // [W4] 会话形态轮的在途记账：死亡纳管 record 被主 agent resume = 决策收敛
     // （清指引标记与看门狗，回归「该等」）。conversation 形态本就豁免监督域（D8）。
@@ -1143,6 +1157,26 @@ export class RunOrchestration {
           updateFromEvent(record, event);
           refreshFromProtocolEvent(record.id);
         };
+        // [U6b / B-routing] 非 pi 会话轮（zcode cold 续聊）的运行中句柄回填通道：每轮
+        // session/create 新会话，新 sessionRef 经 onHandleReady 回传——**覆写**语义，
+        // 刻意区别于 runEngineTask backfillEngineHandle 的补缺语义（one-shot 单轮 +
+        // LC-4 迟到补发用补缺；cold 续聊每轮换锚，旧 sessionId 必须被替换——否则
+        // transcriptAnchorOf 派生的 resume 锚停在旧 session，引擎侧注入的历史每轮
+        // 缺最新一轮）。落 entry 经 store.reportRecordTransition（appendEvent 既有
+        // engineHandle 投影通道——GUI 经 entry 重建 record 即拿到新锚）。pi 不挂本
+        // 回调：pi 会话锚是 outcome.sessionFile 回填面（下方 writeBindingForRecord），
+        // pi 行为零变化。
+        const backfillRoundHandle = (partial: {
+          sessionRef: Record<string, string>;
+          poolKey: string;
+        }): void => {
+          record.engineHandle = {
+            ...(record.engineHandle ?? {}),
+            sessionRef: { ...partial.sessionRef },
+            poolKey: partial.poolKey,
+          };
+          this.deps.getStore().reportRecordTransition(record);
+        };
         const { outcome } = await engine.run(
           // resume 锚点轮引擎侧覆盖 model 解析（taskSpec 装配单一来源见 taskSpecWithModel）。
           this.taskSpecWithModel(opts, record.model),
@@ -1153,6 +1187,10 @@ export class RunOrchestration {
             ...(stream !== undefined ? { stream } : {}),
             ctxModel: identity.resolved.model,
             onEvent: observedEvent,
+            // [U6b / B-routing] 非 pi 会话轮挂 onHandleReady（见 backfillRoundHandle）。
+            ...(engine.id !== DEFAULT_ENGINE_ID
+              ? { onHandleReady: backfillRoundHandle }
+              : {}),
             // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）。
             // 本方法是 pi 引擎 background 派发的主路径（isPiRoute 恒路由至此，含 workflow
             // 域一次性 run——非 chatMode 不带 resume 键但同经此处），漏注 = pi child exit 13。
@@ -1316,6 +1354,21 @@ export class RunOrchestration {
    *  未注册 = 不可用 stub（engine_not_found，见 pi-host-binding）。 */
   resolveChatEnginePort(): EnginePort {
     return resolveHostPiEnginePort(() => null);
+  }
+
+  /**
+   * [U6b / B-routing] 会话轮引擎解析按 record.engine 分派（kickOffChatRound 主干）：
+   *   - pi（engine 未盖章 / 显式 'pi' / pi 兜底盖章）：pi 专属解析（resolveChatEnginePort
+   *     ——未注册返回不可用 stub，拒绝点延迟到首次 run，pi 既有行为零变化）；
+   *   - 非 pi（zcode 等 chatMode 轮，Continuation dispatchChatRoundForContinuation 唯一
+   *     可达）：registry 直解析（getEngine）——未注册同步 throw EngineNotFoundError，
+   *     kickOffChatRound 的 Continuation 调用点在 dispatchRoundAsync 的 try 内，同步
+   *     throw 被 catch 转失败轮末分流（失败通知可达，record 保持可续聊）。
+   */
+  private resolveRoundEnginePort(record: Pick<ExecutionRecord, "engine">): EnginePort {
+    const engineId = record.engine ?? DEFAULT_ENGINE_ID;
+    if (engineId === DEFAULT_ENGINE_ID) return this.resolveChatEnginePort();
+    return getEngine(engineId);
   }
 
   /**
