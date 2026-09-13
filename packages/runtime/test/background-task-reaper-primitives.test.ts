@@ -1,24 +1,24 @@
 /**
- * 后台任务收殓器原语与 fs 错误分支测试（test/background-task-reaper.test.ts 的补充面，
+ * 后台任务收殓器 registry/fs 错误分支测试（test/background-task-reaper.test.ts 的补充面，
  * 覆盖其依赖注入 mock 所绕过的真实实现路径）。
  *
- * 覆盖：
- * - killProcessTree（POSIX）：非法 pid 早退 / 进程组 kill(-pid) 成功早退 / 组长已死降级
- *   单 pid + killDescendantsRecursive 递归（先杀孙辈再杀子辈的顺序断言）/ kill 幂等
- *   已死仅诊断 / pgrep 不可用放弃枚举
- * - killProcessTree（Windows）：taskkill /F /T /PID 参数断言 / taskkill 失败仅诊断不抛
- * - getProcessStartTimeSec：ps 正常解析 lstart → epoch 秒 / 输出不可解析 / spawnSync
- *   抛异常 / result.error / status!==0 / 空 stdout 均返回 undefined（调用方保守跳过契约）
- * - registry/fs 错误分支（经真实入口 reapSessionBackgroundTasks /
- *   reapAllSessionsBackgroundTasks 触发）：读失败按空表继续 / corrupt 隔离 rename 失败
- *   原文件保留原位 / 终态写 tmp 落盘失败条目停留 running / rename 失败且 tmp 清理
- *   双诊断 / ②补杀分支终态写失败 / 触发面 A 目录级异常 / 触发面 B baseDir 读失败
- *   （非 ENOENT warn）/ 单目录扫描异常跳过 / stale reaper.lock 残留非空（ENOTEMPTY）
+ * 覆盖（编排层断言，经真实入口 reapSessionBackgroundTasks / reapAllSessionsBackgroundTasks
+ * 触发）：registry 读失败按空表继续 / corrupt 隔离 rename 失败原文件保留原位 / 终态写
+ * tmp 落盘失败条目停留 running / rename 失败且 tmp 清理双诊断 / ②补杀分支终态写失败 /
+ * 触发面 A 目录级异常 / 触发面 B baseDir 读失败（非 ENOENT warn）/ 单目录扫描异常跳过 /
+ * stale reaper.lock 残留非空（ENOTEMPTY）。
+ *
+ * pid 探测/处置原语（isPidAlive / killProcessTree / getProcessStartTimeSec /
+ * pidStartMatchesRegistered）自 ext-simplify-13 起下沉 protocol 子出口
+ * `background-task`（本仓单一实现），其直接实现面测试由 protocol 包
+ * background-task-process.test.ts 同构覆盖，此处不再保留副本；registry 文件原语
+ * （readRegistry / atomicWriteRegistry）下沉 protocol background-task-registry-file.ts
+ * 后，本文件的错误注入断言经 vi.mock('node:fs') 对 protocol 模块同样生效（模块级 mock），
+ * 编排层降级语义（计数守恒 / 条目停留原状 / warn 落日志）在此锁定。
  *
  * Mock 边界（对齐 test/scan-pi-sessions-cache.test.ts 惯例——ESM 下 vi.spyOn(node:fs)
- * 不可用，node:fs / node:child_process 用 importOriginal 部分 mock，默认全数委托真实
- * 实现，用例内按路径条件注入失败）：process.kill 用 vi.spyOn（对象方法可 spy），
- * process.platform 用 Object.defineProperty 临时改写。
+ * 不可用，node:fs 用 importOriginal 部分 mock，默认全数委托真实实现，用例内按路径
+ * 条件注入失败）。
  *
  * 运行：cd packages/runtime && npx vitest run test/background-task-reaper-primitives.test.ts
  */
@@ -29,20 +29,11 @@ import { dirname, join } from 'node:path'
 
 import type { BackgroundTaskRegistryEntry } from '@xyz-agent/extension-protocol'
 import {
-  killProcessTree,
-  getProcessStartTimeSec,
   reapSessionBackgroundTasks,
   reapAllSessionsBackgroundTasks,
   type BackgroundTaskReapDeps,
   type BackgroundTaskReapResult,
 } from '../src/services/session/background-task-reaper.js'
-
-// ── node:child_process 部分 mock：spawnSync 全接管（ps / pgrep / taskkill 均不真跑）──
-const childMock = vi.hoisted(() => ({ spawnSync: vi.fn() }))
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:child_process')>()
-  return { ...actual, spawnSync: childMock.spawnSync }
-})
 
 // ── node:fs 部分 mock：错误分支注入接缝（默认委托真实实现）──
 const fsMock = vi.hoisted(() => ({
@@ -75,8 +66,6 @@ vi.mock('node:fs', async (importOriginal) => {
   }
 })
 
-const realPlatform = process.platform
-
 /** 本次测试创建的 tmp 目录（afterEach 统一清理）。 */
 const tmpAgentDirs: string[] = []
 
@@ -105,15 +94,8 @@ beforeEach(() => {
 
 afterEach(() => {
   delegateFsToReal()
-  childMock.spawnSync.mockReset()
-  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
   for (const dir of tmpAgentDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
-
-/** 临时改写 process.platform（win32 分支在非 Windows 测试机上可达）。 */
-function stubProcessPlatform(value: NodeJS.Platform): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function errnoLike(code: string, message: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code })
@@ -173,158 +155,6 @@ function zeroResult(): BackgroundTaskReapResult {
   return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0, staleLocksRemoved: 0 }
 }
 
-// ── killProcessTree（POSIX 进程组路径）─────────────────────────
-
-describe('killProcessTree · POSIX 路径', () => {
-  it.skipIf(process.platform === 'win32')('非法 pid（0 / 负数 / 非整数）直接 return：不发 kill、不 spawn 子进程', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
-    try {
-      killProcessTree(0)
-      killProcessTree(-5)
-      killProcessTree(1.5)
-      expect(killSpy).not.toHaveBeenCalled()
-      expect(childMock.spawnSync).not.toHaveBeenCalled()
-    } finally {
-      killSpy.mockRestore()
-    }
-  })
-
-  it.skipIf(process.platform === 'win32')('进程组 kill(-pid) 成功 → 发令即返回，不做子孙枚举', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
-    try {
-      killProcessTree(4321)
-      expect(killSpy).toHaveBeenCalledWith(-4321, 'SIGKILL')
-      expect(killSpy).toHaveBeenCalledTimes(1)
-      expect(childMock.spawnSync).not.toHaveBeenCalled()
-    } finally {
-      killSpy.mockRestore()
-    }
-  })
-
-  it.skipIf(process.platform === 'win32')('组长已死（组 kill ESRCH）→ 降级单 pid kill + pgrep 递归子孙（先孙辈子辈顺序）', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid: number) => {
-      if (pid < 0) throw errnoLike('ESRCH', 'process group gone')
-      return true
-    })
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
-    // 进程树：4321 → {5100, 5101}；5100 → 5200（孙辈）；其余 pgrep 无子
-    childMock.spawnSync.mockImplementation((_cmd: string, args: string[]) => {
-      const target = args[1]
-      if (target === '4321') return { status: 0, stdout: '5100\n5101\n' }
-      if (target === '5100') return { status: 0, stdout: '5200\n' }
-      return { status: 1, stdout: '' }
-    })
-    try {
-      killProcessTree(4321)
-      // kill 调用序列（含失败尝试）：组 kill(-4321) 抛错降级 → 单 kill(4321) →
-      // 子孙递归先杀孙辈 5200 再杀子辈 5100（防孙辈 reparent 逃逸枚举的顺序保证）
-      expect(killSpy.mock.calls.map((c) => c[0])).toEqual([-4321, 4321, 5200, 5100, 5101])
-      expect(debugSpy).toHaveBeenCalledWith(
-        expect.stringContaining('process group kill missed, falling back to single pid + descendants'),
-        expect.any(String),
-      )
-    } finally {
-      killSpy.mockRestore()
-      debugSpy.mockRestore()
-    }
-  })
-
-  it.skipIf(process.platform === 'win32')('单 pid kill 与子孙 kill 均已死（幂等语义）→ 仅诊断不抛；pgrep 输出非 pid 行跳过', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw errnoLike('ESRCH', 'already dead')
-    })
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
-    childMock.spawnSync.mockImplementation((_cmd: string, args: string[]) => {
-      if (args[1] === '4321') return { status: 0, stdout: '5100\nnot-a-pid\n\n' }
-      return { status: 1, stdout: '' }
-    })
-    try {
-      expect(() => killProcessTree(4321)).not.toThrow()
-      // 非 pid 行（NaN / 空行）被 parseInt guard 跳过，只对 5100 发 kill
-      expect(killSpy.mock.calls.map((c) => c[0])).toEqual([-4321, 4321, 5100])
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('single pid kill missed (already dead?)'), expect.any(String))
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('descendant kill missed (already dead?)'), expect.any(String))
-    } finally {
-      killSpy.mockRestore()
-      debugSpy.mockRestore()
-    }
-  })
-
-  it.skipIf(process.platform === 'win32')('pgrep 抛异常（不可用）→ 放弃子孙枚举仅诊断', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid: number) => {
-      if (pid < 0) throw errnoLike('ESRCH', 'process group gone')
-      return true
-    })
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
-    childMock.spawnSync.mockImplementation(() => {
-      throw new Error('pgrep gone')
-    })
-    try {
-      expect(() => killProcessTree(4321)).not.toThrow()
-      expect(killSpy.mock.calls.map((c) => c[0])).toEqual([-4321, 4321])
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('descendant enumeration failed'), expect.any(String))
-    } finally {
-      killSpy.mockRestore()
-      debugSpy.mockRestore()
-    }
-  })
-})
-
-// ── killProcessTree（Windows taskkill 路径）─────────────────────────
-
-describe('killProcessTree · Windows taskkill 路径', () => {
-  it('win32 平台 → taskkill /F /T /PID 发令（参数逐项断言）', () => {
-    stubProcessPlatform('win32')
-    childMock.spawnSync.mockReturnValue({ status: 0, error: undefined, stdout: null, stderr: null })
-    killProcessTree(777)
-    expect(childMock.spawnSync).toHaveBeenCalledWith('taskkill', ['/F', '/T', '/PID', '777'], { stdio: 'ignore', windowsHide: true })
-  })
-
-  it('taskkill 失败（进程已死/权限）→ 仅诊断不抛（收殓路径不中断）', () => {
-    stubProcessPlatform('win32')
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
-    childMock.spawnSync.mockReturnValue({ status: 128, error: new Error('not found'), stdout: null, stderr: null })
-    try {
-      expect(() => killProcessTree(777)).not.toThrow()
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('taskkill failed'), expect.any(String))
-    } finally {
-      debugSpy.mockRestore()
-    }
-  })
-})
-
-// ── getProcessStartTimeSec（ps 探测原语）─────────────────────────
-
-describe('getProcessStartTimeSec · ps 探测（失败一律 undefined → 调用方保守跳过）', () => {
-  it('ps 正常：lstart 解析为 epoch 秒（floor），参数带 5s 超时', () => {
-    childMock.spawnSync.mockReturnValue({ status: 0, error: undefined, stdout: 'Mon Aug 25 14:23:45 2026\n' })
-    const sec = getProcessStartTimeSec(999)
-    expect(sec).toBe(Math.floor(Date.parse('Mon Aug 25 14:23:45 2026') / 1000))
-    expect(childMock.spawnSync).toHaveBeenCalledWith('ps', ['-o', 'lstart=', '-p', '999'], { encoding: 'utf8', timeout: 5_000 })
-  })
-
-  it('lstart 输出不可解析（Date.parse NaN）→ undefined', () => {
-    childMock.spawnSync.mockReturnValue({ status: 0, error: undefined, stdout: 'garbage output' })
-    expect(getProcessStartTimeSec(999)).toBeUndefined()
-  })
-
-  it('spawnSync 抛异常 → undefined（catch 兜底）', () => {
-    childMock.spawnSync.mockImplementation(() => {
-      throw new Error('ps exploded')
-    })
-    expect(getProcessStartTimeSec(999)).toBeUndefined()
-  })
-
-  it('result.error / status!==0 / 空 stdout 三态 → 均为 undefined', () => {
-    childMock.spawnSync.mockReturnValueOnce({ status: null, error: new Error('spawn failed'), stdout: '' })
-    expect(getProcessStartTimeSec(999)).toBeUndefined()
-    childMock.spawnSync.mockReturnValueOnce({ status: 1, error: undefined, stdout: '' })
-    expect(getProcessStartTimeSec(999)).toBeUndefined()
-    childMock.spawnSync.mockReturnValueOnce({ status: 0, error: undefined, stdout: '' })
-    expect(getProcessStartTimeSec(999)).toBeUndefined()
-  })
-})
-
 // ── registry / fs 错误分支（真实入口 + 条件失败注入）─────────────────────────
 
 describe('registry 读写错误分支（收殓不因 fs 问题崩溃）', () => {
@@ -342,7 +172,11 @@ describe('registry 读写错误分支（收殓不因 fs 问题崩溃）', () => 
       const result = await reapSessionBackgroundTasks(agentDir, 's1', deps)
 
       expect(result).toEqual({ ...zeroResult(), scannedDirs: 1 })
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('registry read failed, treating as empty'), expect.any(String))
+      // protocol readRegistry 经 onLog 注入 console 适配：事件文案 + detail 对象（path/err）
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('registry read failed, treating as empty'),
+        expect.objectContaining({ path: p, err: expect.anything() }),
+      )
     } finally {
       warnSpy.mockRestore()
     }
@@ -368,7 +202,7 @@ describe('registry 读写错误分支（收殓不因 fs 问题崩溃）', () => 
       expect(fsMock.actual.readFileSync(p, 'utf8')).toBe('{not valid json')
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('registry corrupted and quarantine rename failed, continuing with empty table in place'),
-        expect.any(String),
+        expect.objectContaining({ path: p, err: expect.anything() }),
       )
     } finally {
       warnSpy.mockRestore()
@@ -417,7 +251,10 @@ describe('registry 读写错误分支（收殓不因 fs 问题崩溃）', () => 
 
       expect(result.conservativelySkipped).toBe(1)
       // tmp 清理失败不掩盖原错误：两条 warn 都在（tmp cleanup + orphaned-terminal write failed）
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('registry tmp cleanup failed'), expect.any(String))
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('registry tmp cleanup failed'),
+        expect.objectContaining({ tmpPath: expect.stringContaining('.tmp_'), err: expect.anything() }),
+      )
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('registry orphaned-terminal write failed; entry stays as-is'),
         expect.any(String),

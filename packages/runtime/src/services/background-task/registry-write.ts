@@ -14,31 +14,40 @@
  *  - writeExitedTransitionalLocked：分支③属主活的过渡终态（exited/reason natural/
  *    exitCode null——poller 若健康会 ≤2s 用真实 exitCode/tailSummary 覆盖，两写均
  *    终态、RMW 串行，覆盖无害）
+ *
+ * 文件原语（原子写/序列化/终态裁剪）自 ext-simplify-13 起取 protocol 子出口
+ * `background-task`（跨端单一实现，与 reaper/extension 写侧字节同构），本文件保留
+ * 锁内 RMW 编排；tmp 清理诊断经 onLog 注入本文件 console 适配。
  */
 
 import {
-  BACKGROUND_TASK_REGISTRY_VERSION,
   MAX_TERMINAL_REGISTRY_ENTRIES,
   isTerminalBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
 } from '@xyz-agent/extension-protocol'
-import { atomicWriteRegistry, readRegistryEntries } from '../session/background-task-reaper.js'
+import {
+  atomicWriteRegistry,
+  serializeRegistryFile,
+  trimTerminalEntries,
+  type RegistryFileLogFn,
+} from '../../utils/protocol-background-task.js'
+import { readRegistryEntries } from '../session/background-task-reaper.js'
 
-/** registry 序列化缩进（契约：JSON indent 2 + 尾部换行；与 reaper/extension 写侧一致）。 */
-const JSON_INDENT = 2
+const LOG_TAG = '[bg-task-registry-write]'
+
+/** 原子写 tmp 清理失败的 console 适配（protocol onLog → runtime console 通道；原错误照常向上抛，不掩盖）。 */
+const registryLog: RegistryFileLogFn = (level, event, detail) =>
+  (level === 'warn' ? console.warn : console.debug)(`${LOG_TAG} ${event}`, detail)
 
 /**
  * 终态 LRU 裁剪 + 原子写（对齐 reaper writeOrphanedTerminalLocked 的裁剪语义：
- * 按 endedAt ?? startedAt 升序淘汰最老终态，保 MAX_TERMINAL_REGISTRY_ENTRIES）。
+ * 按 endedAt ?? startedAt 升序淘汰最老终态，保 MAX_TERMINAL_REGISTRY_ENTRIES；
+ * 裁剪/序列化/原子写均为 protocol 单一实现，taskId 去重防御保留在本编排层）。
  */
 function writeTrimmedLocked(registryPath: string, entries: BackgroundTaskRegistryEntry[]): void {
   const merged = new Map(entries.map((e) => [e.taskId, e] as const))
-  const terminal = entries
-    .filter((e) => isTerminalBackgroundTaskState(e.state))
-    .sort((a, b) => (a.endedAt ?? a.startedAt) - (b.endedAt ?? b.startedAt))
-  const excess = terminal.length - MAX_TERMINAL_REGISTRY_ENTRIES
-  for (let i = 0; i < excess; i++) merged.delete(terminal[i].taskId)
-  atomicWriteRegistry(registryPath, `${JSON.stringify({ version: BACKGROUND_TASK_REGISTRY_VERSION, entries: [...merged.values()] }, null, JSON_INDENT)}\n`)
+  const kept = trimTerminalEntries([...merged.values()], MAX_TERMINAL_REGISTRY_ENTRIES)
+  atomicWriteRegistry(registryPath, serializeRegistryFile(kept), registryLog)
 }
 
 /**

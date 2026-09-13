@@ -28,12 +28,15 @@ import {
   isTerminalBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
 } from '@xyz-agent/extension-protocol'
-import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import {
-  getSessionRegistryPath,
   isPidAlive,
   killProcessTree,
   pidStartMatchesRegistered,
+  type ProcessFallbackLogger,
+} from '../../utils/protocol-background-task.js'
+import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
+import {
+  getSessionRegistryPath,
   readRegistryEntriesWithStatus,
   writeOrphanedTerminal,
   writeOrphanedTerminalLocked,
@@ -41,9 +44,18 @@ import {
 import { withFileLockSync } from '../../utils/file-lock.js'
 import { writeExitedTransitionalLocked, writeKillingStateLocked } from './registry-write.js'
 import { probeProcessStartTimeMs } from './process-probe.js'
-import { OUTPUT_TAIL_DEFAULT_MAX_BYTES, readOutputTail, type OutputTailResult } from './output-tail.js'
+import {
+  OUTPUT_TAIL_DEFAULT_MAX_BYTES,
+  OUTPUT_TAIL_MAX_LINES,
+  readOutputTail,
+  type OutputTailResult,
+} from './output-tail.js'
 
 const LOG_TAG = '[bg-task-service]'
+
+/** 进程原语回退路径诊断的 console 适配（protocol onFallback → runtime console 通道；对齐 reaper 同款注入形态）。 */
+const processFallbackLog: ProcessFallbackLogger = (step, err) =>
+  console.debug(`${LOG_TAG} ${step}:`, err instanceof Error ? err.message : err)
 
 /** 默认 mtime 轮询周期（D2：2s，与 extension poller tick 同节奏）。 */
 const DEFAULT_POLL_INTERVAL_MS = 2_000
@@ -74,9 +86,9 @@ type IdentityVerdict = 'verified' | 'mismatch' | 'unverifiable'
 
 /** 依赖注入（pid 原语可 mock，零真实进程可测）。 */
 export interface BackgroundTaskServiceDeps {
-  /** pid 判活。默认真实 process.kill(pid, 0)（reaper 导出）。 */
+  /** pid 判活。默认真实 process.kill(pid, 0)（protocol background-task 子出口原语）。 */
   isPidAlive?: (pid: number) => boolean
-  /** 进程树处置。默认真实 kill(-pid)/taskkill（reaper 导出）。 */
+  /** 进程树处置。默认真实 kill(-pid)/taskkill（protocol background-task 子出口原语）。 */
   killProcessTree?: (pid: number) => void
   /**
    * 进程 start time 探测（epoch ms；异步 ≤1s 超时不阻塞事件循环，D6 两档规格）。
@@ -127,7 +139,8 @@ export class BackgroundTaskService {
     this.agentDir = options.piAgentDir ?? getPiAgentDir()
     this.deps = {
       isPidAlive: options.deps?.isPidAlive ?? isPidAlive,
-      killProcessTree: options.deps?.killProcessTree ?? killProcessTree,
+      // 默认实现包一层 onFallback 注入：进程组 kill 失败的回退诊断落 console（与原本地实现日志语义等价）
+      killProcessTree: options.deps?.killProcessTree ?? ((pid: number) => killProcessTree(pid, processFallbackLog)),
       probeProcessStartTimeMs: options.deps?.probeProcessStartTimeMs ?? probeProcessStartTimeMs,
     }
   }
@@ -166,13 +179,14 @@ export class BackgroundTaskService {
   // ── output tail（D7） ────────────────────────────────────────────
 
   /**
-   * 读任务输出尾部（字节窗口从文件末尾，默认 32KB）。条目不存在 / 输出文件不可读
-   * → undefined（u-runtime-rpc 的 output RPC handler 映射 lost 语义）。
+   * 读任务输出尾部（字节窗口从文件末尾，默认 32KB / 2000 行——output-tail.ts 的
+   * runtime 侧口径常量作实参，protocol readOutputTail 无默认值）。条目不存在 /
+   * 输出文件不可读 → undefined（u-runtime-rpc 的 output RPC handler 映射 lost 语义）。
    */
   getOutputTail(sessionId: string, taskId: string, maxBytes: number = OUTPUT_TAIL_DEFAULT_MAX_BYTES): OutputTailResult | undefined {
     const entry = this.listTasks(sessionId).entries.find((e) => e.taskId === taskId)
     if (!entry) return undefined
-    return readOutputTail(entry.outputFile, maxBytes)
+    return readOutputTail(entry.outputFile, { maxBytes, maxLines: OUTPUT_TAIL_MAX_LINES })
   }
 
   // ── 变更检测（D2：三触发面共享同一 last-seen，单广播源） ───────────
