@@ -183,7 +183,7 @@ graph LR
 | 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 |
 | 04-U3 | committed | 1 | 398 绿；「缓存命中」零命中；G5① 两文档五笔回写齐 |
 | 04-U4 | committed | 1 | 402 绿（+4 富字段用例）；薄包装/enrichRefs 代码面零命中；G5⑤ 回写齐 |
-| 04-U5 | pending | 0 | - |
+| 04-U5 | committed | 1 | 406 绿（+4）；两 action 一致性 by construction；formatOutlineText 零命中 |
 | 04-U6 | pending | 0 | - |
 | 04-U7 | pending | 0 | - |
 | 04-U8 | pending | 0 | - |

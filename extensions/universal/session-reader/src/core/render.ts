@@ -55,6 +55,11 @@ export interface TurnBrief {
 
 export interface OutlineResult {
   turns: TurnBrief[]
+  /**
+   * 渲染行（E7/D3 行渲染统一）：formatLine 产出、降级与总预算截断后的最终展示行——
+   * 预算度量与工具层展示共用同一份（度量 = 展示 by construction），展示侧不得重建行格式。
+   */
+  lines: string[]
   /** skippedLines：JSON 解析失败/缺结构字段的行数（parser 检测，工具层覆盖精确值；render 层无 ParseResult 恒 0） */
   stats: { totalTurns: number; totalEntries: number; totalBytes: number; parsedBytes: number; skippedLines: number }
   /** chars / 4 近似（与 design P-outline 口径一致） */
@@ -276,7 +281,7 @@ function findBranchForkPoint(turn: Turn, tree: TreeView): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// 行渲染（预算度量依据）
+// 行渲染（预算度量与展示同一份渲染行，E7/D3 行渲染统一）
 // ---------------------------------------------------------------------------
 
 function formatHHMM(timestamp?: string): string {
@@ -292,10 +297,11 @@ export function formatBytesMarker(bytes: number): string {
 }
 
 /**
- * 渲染单行为字符串（用于预算度量与降级判断）。
+ * 渲染单行为字符串（E7 行渲染统一：预算度量与展示同一份渲染行，OutlineResult.lines 的行工厂）。
  * v2 O1：L1 行含 assistantBrief（补 assistant 结论行让 outline 单独可决策，不再逼反复 expand）。
  * level: 0=全有（toolSummary + assistantBrief）/ 1=砍 assistantBrief / 2=再砍 toolSummary（骨架）。
  * userBrief + omittedBytes 骨架永保。assistantBrief 格式 `→ <结论>`，在 toolSummary 后、omitted 前。
+ * 旁支标记 `[旁支 N entries]`（branchSize = 该 forkPoint 下旁支子树 entry 数）。
  */
 function formatLine(b: TurnBrief, level: LineLevel, branchSize?: number): string {
   const parts: string[] = []
@@ -341,7 +347,8 @@ function applyBranchLabels(briefs: TurnBrief[], turns: Turn[], tree: TreeView): 
 /**
  * 降级序逐行渲染（design §3.5 算法 1 step3）：level 0 全有；超预算降到 level 1
  * 砍 assistantBrief；仍超降到 level 2 砍 toolSummary（骨架）。
- * 直接改写 brief 的 assistantBrief/toolSummary 字段，返回行缓存。
+ * 直接改写 brief 的 assistantBrief/toolSummary 字段，返回行缓存（E7 后随结果
+ * 返回为 OutlineResult.lines，预算度量与展示同一份）。
  */
 function renderDegradingLines(
   briefs: TurnBrief[],
@@ -408,7 +415,7 @@ export function renderOutline(
   }
 
   if (turns.length === 0) {
-    return { turns: [], stats, tokenEstimate: 0 }
+    return { turns: [], lines: [], stats, tokenEstimate: 0 }
   }
 
   // granularity:entry —— 每 entry 一行，不聚合 turn（D-1 兜底）
@@ -428,11 +435,11 @@ export function renderOutline(
   // 3. 降级序渲染：level 0 全有 → level 1 砍 assistantBrief → level 2 骨架
   const lineCache = renderDegradingLines(briefs, tree, perTurnCharBudget)
 
-  // 4. 总预算截断（从尾部丢弃）
+  // 4. 总预算截断（从尾部丢弃，lines 与 briefs 同步截短）
   const { totalChars, truncated } = truncateToTotalBudget(briefs, lineCache, budget)
 
   const tokenEstimate = Math.ceil(totalChars / CHARS_PER_TOKEN)
-  return { turns: briefs, stats, tokenEstimate, truncated }
+  return { turns: briefs, lines: lineCache, stats, tokenEstimate, truncated }
 }
 
 /** granularity:entry 模式：每 entry 一行 TurnBrief，不聚合，仅总预算截断。 */
@@ -486,6 +493,7 @@ function renderEntryGranularity(
   }
   return {
     turns: briefs,
+    lines,
     stats,
     tokenEstimate: Math.ceil(totalChars / CHARS_PER_TOKEN),
     truncated,

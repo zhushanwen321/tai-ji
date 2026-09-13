@@ -90,6 +90,8 @@ describe('renderOutline', () => {
     // thinking 'secret'(6B) + toolResult 'output'(6B)
     expect(b.omittedBytes).toBe(12)
     expect(result.truncated).toBeUndefined()
+    // E7 行渲染统一：lines 随结果返回，与 turns 一一对应（预算度量 = 展示行同一份）
+    expect(result.lines).toEqual(['T000 · do something · bash×2,read×2 · → sure · [12B omitted]'])
   })
 
   it('2a. 降级：单行 toolSummary 过长超 perTurnBudget → 砍 toolSummary，保 userBrief 骨架', () => {
@@ -108,6 +110,25 @@ describe('renderOutline', () => {
       expect(b.toolSummary).toBe('') // 被砍（降级）
       expect(b.userBrief).toBe('u'.repeat(10)) // 骨架保留
     }
+    // E7：降级后的渲染行（骨架形态）与 briefs 字段同步——行内无 → 结论段、无工具聚合段
+    expect(result.lines).toHaveLength(3)
+    expect(result.lines).toEqual(['T000 · uuuuuuuuuu', 'T001 · uuuuuuuuuu', 'T002 · uuuuuuuuuu'])
+    expect(result.truncated).toBeUndefined()
+  })
+
+  it('2b. 降级（砍 assistantBrief 档）：行内 → 结论段消失、toolSummary 保留，与改前语义一致', () => {
+    // budget=20 → perTurnCharBudget=80；level 0 行 = T000 · u*10 · bash×2 · → a*80… ≈112 > 80
+    // → 砍 assistantBrief 后 ≈26 ≤ 80 停（S3：该档形态与改前 handler 侧渲染降级后 briefs 等价）
+    const t = turn(
+      0,
+      [uEntry('U', 'u'.repeat(10)), aEntry('A', 'a'.repeat(100), [{ name: 'bash' }, { name: 'bash' }])],
+      { userEntry: uEntry('U', 'u'.repeat(10)) },
+    )
+    const result = renderOutline([t], emptyTree(), { budget: 20 })
+
+    expect(result.turns[0].assistantBrief).toBe('') // 被砍
+    expect(result.turns[0].toolSummary).toBe('bash×2') // 保留
+    expect(result.lines).toEqual(['T000 · uuuuuuuuuu · bash×2'])
     expect(result.truncated).toBeUndefined()
   })
 
@@ -122,6 +143,8 @@ describe('renderOutline', () => {
 
     expect(result.truncated).toBe(3)
     expect(result.turns).toHaveLength(2)
+    // E7：lines 与 turns 同步截短（truncateToTotalBudget 双数组一致）
+    expect(result.lines).toHaveLength(2)
   })
 
   it('4. toolSummary 聚合：同名计数 ×N，不同名逗号分隔', () => {
@@ -166,6 +189,19 @@ describe('renderOutline', () => {
 
     const withoutBranches = renderOutline(turns, tree, { allBranches: false })
     expect(withoutBranches.turns[0].branch).toBeUndefined()
+  })
+
+  it('7b. E7 旁支标记统一：渲染行 `[旁支 N entries]`（N = 该 forkPoint 下旁支子树 entry 数）', () => {
+    // branches: U → 3 entries 旁支子树（E7/D3：outline 与 export 两条路径共用此形态）
+    const tree: TreeView = { leafPath: ['U'], branches: new Map([['U', 3]]), orphans: [] }
+    const userEntry = uEntry('U', 'hi')
+    const turns = [turn(0, [userEntry], { userEntry })]
+
+    const result = renderOutline(turns, tree, { allBranches: true })
+    expect(result.lines).toEqual(['T000 · hi · [旁支 3 entries]'])
+    // branchSize 缺失（allBranches:false）不标旁支
+    const noBranch = renderOutline(turns, tree, { allBranches: false })
+    expect(noBranch.lines).toEqual(['T000 · hi'])
   })
 
   it.skipIf(!HAS_REAL_SESSION)('8. 真实 019e6c96：outline tokenEstimate <= 1500 + assistantBrief/toolSummary 非空（v2 O1）', async () => {

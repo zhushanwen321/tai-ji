@@ -497,21 +497,15 @@ function formatFindContent(query: string, groups: FindGroup[], truncated: boolea
   return `${head}\n${lines.join('\n')}`
 }
 
-function formatOutlineText(r: OutlineResult): string {
-  const lines = r.turns.map((b) => {
-    const time = b.startTime ? b.startTime.match(/T(\d{2}:\d{2})/)?.[1] ?? '' : ''
-    const parts = [`T${pad(b.index)}${time ? ' ' + time : ''}`]
-    if (b.userBrief) parts.push(b.userBrief)
-    if (b.toolSummary) parts.push(b.toolSummary)
-    // v2 O1：补 assistant 结论行（→ ）让 outline 单独可决策
-    if (b.assistantBrief) parts.push('→ ' + b.assistantBrief)
-    const om = formatBytesMarker(b.omittedBytes)
-    if (om) parts.push(om)
-    if (b.branch) parts.push('[旁支]')
-    return parts.join(' · ')
-  })
+/**
+ * outline 尾段（stats 摘要行 + truncated 提示）。E7/D3 行渲染统一：行主体 = result.lines
+ *（renderOutline 返回的渲染行，预算度量与展示同一份），行格式知识只在 core/render.ts 的
+ * formatLine 一处，tool-handler 不再重建行格式；本函数只拼 stats 尾段（skippedLines 由
+ * doOutline 用 ParseResult 覆盖后再渲染）。doOutline/doExport 同一拼装
+ * （`lines.join('\n')` + 本尾段），两 action 输出一致 by construction。
+ */
+function formatOutlineTail(r: OutlineResult): string {
   const tail = [
-    '',
     `${r.stats.totalTurns} turns · ${r.stats.totalEntries} entries · ~${r.tokenEstimate} tokens${
       r.stats.skippedLines > 0 ? ` · ${r.stats.skippedLines} skipped lines` : ''
     }`,
@@ -519,7 +513,7 @@ function formatOutlineText(r: OutlineResult): string {
   ]
     .filter(Boolean)
     .join('\n')
-  return `${lines.join('\n')}\n${tail}`
+  return tail
 }
 
 function formatExpandText(turn: string, entries: EntryBrief[]): string {
@@ -861,7 +855,11 @@ async function doOutline(
   // [D8d] skippedLines 同模式覆盖：parser 已检测坏行计数（render 签名不含 ParseResult 恒 0），
   // 有检测必有报告——静默跳过行对调用方不可见 = 数据完整性缺口
   result.stats.skippedLines = skippedLines
-  return { content: [{ type: 'text', text: formatOutlineText(result) }], details: result }
+  // E7 行渲染统一：行主体 = result.lines（renderOutline 渲染行），handler 只拼 stats 尾段
+  return {
+    content: [{ type: 'text', text: `${result.lines.join('\n')}\n${formatOutlineTail(result)}` }],
+    details: result,
+  }
 }
 
 /** expand：单 turn 的 entry 列表（design §3.4 expand）。turn 越界抛 F4。 */
@@ -1044,7 +1042,8 @@ async function doExport(
       allBranches: params.allBranches,
       granularity: params.granularity,
     })
-    text = formatOutlineText(result)
+    // E7 行渲染统一：与 doOutline 同一拼装（lines + 尾段），两 action 输出一致
+    text = `${result.lines.join('\n')}\n${formatOutlineTail(result)}`
     label = 'outline'
   }
 

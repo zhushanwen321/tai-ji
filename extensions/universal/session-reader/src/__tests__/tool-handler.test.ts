@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, utimes, readFile } from 'node:fs/promises'
 import { tmpdir, homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import {
@@ -430,6 +430,77 @@ describe('outline skippedLines 报告（fixture，D8d 有检测必有报告）',
     const d = r.details as { stats: { skippedLines: number } }
     expect(d.stats.skippedLines).toBe(0)
     expect(r.content[0].text).not.toContain('skipped lines')
+  })
+})
+
+// ============================================================
+// E7：行渲染统一（ext-simplify-04 U5，design D3）。outline 与 export {format:"outline"}
+// 共用 renderOutline 返回的渲染行（OutlineResult.lines）+ 同一尾段拼装——预算度量 =
+// 展示 by construction；旁支标记统一为 `[旁支 N entries]`（改前 handler 侧第二份行
+// 格式知识输出裸 `[旁支]`，已随 formatOutlineText 删除）。
+// ============================================================
+describe('E7 行渲染统一（outline 与 export outline 同一渲染行）', () => {
+  let dir: string
+  const SID = '019e6c96-bbbb-cccc-dddd-00000000000e'
+
+  /** 写含 fork 旁支的 session：主链 R→m1(user)→m2(assistant)，b1/b2 挂 m1 下成
+   * 旁支子树（buildTreeView：branches[m1]=2；segmentTurns：单 turn [m1, m2]，
+   * 旁支 entry 不进 leaf 视图）。 */
+  async function writeForkSession(): Promise<void> {
+    await mkdir(join(dir, 'sessions', '--demo-cwd--'), { recursive: true })
+    const msg = (id: string, parentId: string, role: 'user' | 'assistant', text: string) =>
+      JSON.stringify({
+        type: 'message',
+        id: `${SID}-${id}`,
+        parentId,
+        message: { role, content: [{ type: 'text', text }] },
+      })
+    const lines = [
+      JSON.stringify({ type: 'session', id: SID, cwd: '/demo' }),
+      msg('m1', SID, 'user', 'fork point turn'),
+      msg('b1', `${SID}-m1`, 'assistant', 'branch one'),
+      msg('b2', `${SID}-m1`, 'assistant', 'branch two'),
+      msg('m2', `${SID}-m1`, 'assistant', 'main line answer'),
+    ]
+    await writeFile(join(dir, 'sessions', '--demo-cwd--', `${SID}.jsonl`), lines.join('\n') + '\n')
+  }
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'tool-handler-e7-'))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('① allBranches:true → 旁支行标记 `[旁支 N entries]`（N=forkPoint 旁支子树 entry 数）+ 尾段同改前语义', async () => {
+    await writeForkSession()
+    const r = await handleSessionRead(
+      { action: 'outline', session: SID, allBranches: true },
+      { agentDir: dir },
+    )
+    const text = r.content[0].text
+    // 旁支标记带 entry 数；裸 `[旁支]` 旧形态零出现（'[旁支]' 与 '[旁支 2 entries]' 互不为子串）
+    expect(text).toContain('T000 · fork point turn · → main line answer · [旁支 2 entries]')
+    expect(text).not.toContain('[旁支]')
+    // stats 尾段与改前语义一致（totalEntries = leaf 2 + 旁支 2）
+    expect(text).toContain('1 turns · 4 entries · ')
+  })
+
+  it('② 两 action 一致性：export {format:"outline"} 物化全文 === outline content 文本（旁支行同形态）', async () => {
+    await writeForkSession()
+    const outline = await handleSessionRead(
+      { action: 'outline', session: SID, allBranches: true },
+      { agentDir: dir },
+    )
+    const exp = await handleSessionRead(
+      { action: 'export', session: SID, format: 'outline', allBranches: true },
+      { agentDir: dir },
+    )
+    const d = exp.details as { path: string }
+    const exported = await readFile(d.path, 'utf8')
+    // 干净 session（无坏行）下两 action 全文逐字节一致——同一 result.lines + 同一尾段拼装
+    expect(exported).toBe(outline.content[0].text)
+    expect(exported).toContain('[旁支 2 entries]')
   })
 })
 
