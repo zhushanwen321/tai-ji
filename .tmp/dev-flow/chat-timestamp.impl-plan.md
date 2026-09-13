@@ -60,11 +60,12 @@ graph LR
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | U1 | committed | 1 | 5669e6a00；core 129 文件/2073 测试绿 + typecheck 干净（主 agent 重跑核验） |
-| U2 | pending | 0 | - |
+| U2 | committed | 2 | 143b3db70；ui 65 文件/784 测试绿 + typecheck 干净（主 agent 亲跑核验；主 dev 缺交 A1-A4 断言，由补发 mini-dev u2-tests-gapfill 完成） |
 
 ## 7 残留风险与变更历史
 - 风险 R1：live `tool_call_end` overlay（Date.now()）与 message_end 回填（body.timestamp）覆盖时序——终态以回填为准，等价性测试守卫；若 equivalence 对 endTime 敏感导致既有用例红，回退方案 = overlay 不设 endTime，仅回填点设置。
 - 风险 R2：text/thinking 多块共享同一 message 时刻（近似语义）——已在 demo 与设计 §2.4 声明，用户接受。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
+  - 2026-09-13 U2 committed（143b3db70）。轮次记录：主 dev（mimo）实现全部落地但 A1-A4 断言缺交且收敛慢（两轮中断干预），cancel 后主 agent 核验实现 + 补发 mini-dev 只补测试；deviations 由 mini-dev 汇报（formatDuration '2s' 口径 / i18n mock 返 key 断言 / 编辑态直测）。
   - 2026-09-13 U1 committed（5669e6a00）；U2 领地补 `__tests__/Turn.test.ts`、`__tests__/ChatView.test.ts`（Turn.vue props 改动潜在波及面，避免领地外 blocker 浪费轮次）。
