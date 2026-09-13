@@ -1,6 +1,6 @@
 # ext-simplify A 组（04/05/06/08/10/11）实施计划
 
-基线: <commit 后回填> | 来源设计: docs/design/ext-simplify-{04-session-reader,05-permission,06-plan,08-scheduler,10-structured-output,11-ask-user}.md | 日期: 2026-09-14
+基线: d15086883 | 来源设计: docs/design/ext-simplify-{04-session-reader,05-permission,06-plan,08-scheduler,10-structured-output,11-ask-user}.md | 日期: 2026-09-14
 
 批次性质：6 份设计两两无文件交集（handoff /tmp/handoff-ext-simplify-execution-order.md A 组表），一份批次计划统一编排，单元编号 = `<设计号>-<设计内单元号>`，内容权威源 = 各设计文档自身（subagent 按编号回设计读细节）。**用户约束：subagent 并发度 ≤2。**
 
@@ -39,9 +39,8 @@ Out-of-scope（各设计 In-scope 之外一律不动）：10 明示 SW 侧任何
 | 06-u2 | complete 交互矩阵（D1+D2+发现 7/8 顺带） | 同上 | 06-u1 | plain | 包测试绿（tool/compact-handler 改写用例）；V3① tree 传参 schema 拒绝 |
 | 06-u3 | 模板单源 + 标题统一（D3+D4）+ CHANGELOG 破坏性条目 | 同上 | 06-u1 | plain | 包测试绿 + 新守卫测试；list-template 恰 5 个 builtin 无 source 后缀 |
 | 06-u4 | phase 删除（D6） | 同上 | 06-u2（且 06-u0-P1 结论 = 死状态实证） | plain | 包测试绿；`rg "phase" src/`（非测试）写入点清零 |
-| 08-M0 | 08 §6.4 探针门 P1 红基线（新用例在现状下失败 = 缺陷实证）+ P2 现状形态（npm pack 后 croner 不可解析确认） | packages/session-delivery/**（仅测试新增）+ npm pack 临时目录 | - | plain | P1 新用例跑红且失败形态 = 「合批只回调首条」；P2 现状 import('croner') 失败留档；产物 .tmp/dev-flow/probe-08.md |
-| 08-u1 | 内核 settled per-message（D1/B1）+ types 契约注释 + 合批用例转绿 + 版本 bump session-delivery 0.3.1→0.4.0 | packages/session-delivery/** | 08-M0 | plain | P1 用例转绿；既有 delivery-receipt/delivery-inflight 套件零改动全绿 |
-| 08-u23 | croner 依赖修复 + 兜底语义注释 + runtime 测试核对（u2+u3 同 commit）+ 版本 bump scheduler 0.5.2→0.6.0；P2 复跑转绿 + P3 预演 | extensions/universal/scheduler/** | 08-u1 | plain | P2 干净目录 import('croner') 成功；`node scripts/check-extension-dependencies.mjs` 绿；runtime.ts 注释与 §5.2 终态一致 |
+| 08-u1 | 探针门 P1 红基线先行（新用例在现状下失败 = 缺陷实证留档）→ 内核 settled per-message（D1/B1）+ types 契约注释 → 用例转绿 + 版本 bump session-delivery 0.3.1→0.4.0 | packages/session-delivery/** | - | plain | P1 红基线留档 .tmp/dev-flow/probe-08.md；用例转绿；既有 delivery-receipt/delivery-inflight 套件零改动全绿 |
+| 08-u23 | 探针门 P2 现状红确认先行 → croner 依赖修复 + 兜底语义注释 + runtime 测试核对（u2+u3 同 commit）+ 版本 bump scheduler 0.5.2→0.6.0；P2 复跑转绿 + P3 预演；**含 packages/subagent-core/src/execution/notify-ledger.ts:317-318 注释同步（设计 §7 文件表项，08-u1 blocker 裁决归此）** | extensions/universal/scheduler/** + packages/subagent-core/src/execution/notify-ledger.ts | 08-u1 | plain | P2 干净目录 import('croner') 成功（先红后绿两态留档）；`node scripts/check-extension-dependencies.mjs` 绿；runtime.ts 注释与 §5.2 终态一致 |
 | 08-u4 | low 群清扫 L1-L9（L7 已随 08-u23） | extensions/universal/scheduler/** | 08-u23 | plain | 三连绿；§6.3 两处二选一裁决落地 |
 | 04-U1 | 测试兼容层退役（E4 + G5③ 清账） | extensions/universal/session-reader/**（含包内 docs/ 两文件——回写目标） | - | plain | 包测试绿；re-export 块删除；G5③ 回写落位 |
 | 04-U2 | find 单次根解析（E1/D1 + G5②） | 同上 | 04-U1 | plain | P1 spy 断言 doFind 全路径 resolveSessionRoots 恰 1 次 |
@@ -75,13 +74,13 @@ graph LR
     C1 --> C3[06-u3]
   end
   subgraph G08[08 scheduler + session-delivery]
-    D0[08-M0 探针门] --> D1[08-u1] --> D2[08-u23] --> D4[08-u4]
+    D1[08-u1 含探针门P1] --> D2[08-u23 含探针门P2/P3] --> D4[08-u4]
   end
   E1[10-u1]
   F1[11-u1]
 ```
 
-六线两两无交集，任意并行；调度受全局并发 ≤2 约束。推荐波次（探针门最前置）：波1 = 06-u0 + 08-M0 → 波2 = 10-u1 + 11-u1 → 之后 04 线与 05 线占满双槽滚动推进，06/08 剩余单元插空。
+六线两两无交集，任意并行；调度受全局并发 ≤2 约束。推荐波次（探针门最前置）：波1 = 06-u0 + 08-u1（后者内含 P1 红基线先行）→ 波2 = 10-u1 + 11-u1 → 之后 04 线与 05 线占满双槽滚动推进，06/08 剩余单元插空。
 
 ## 4 测试与验收计划
 
@@ -131,19 +130,21 @@ graph LR
 
 ## 5 合理偏差登记表
 
-（初始为空；阶段 3 填充）
+| Unit | 偏差 | 性质 | 裁决 |
+|------|------|------|------|
+| 08-u1 | onSendOk/onSendFail/onSendReceipt 移除 composed 死参穿线（设计 §7 字面保留签名） | per-message 化后 composed 在两函数零消费方，保留即新死代码 | 接受，随单元 commit；阶段 3 一致性审查回写设计 §7 措辞 |
+| 08-u1 | 未加 changeset 条目 | 版本 bump 口径已定（批次尾统一），单元仅动 version 字段 | 接受，批次尾统一补 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| 06-u0 | pending | 0 | - |
+| 06-u0 | in-progress（波1） | 0 | - |
 | 06-u1 | pending | 0 | - |
 | 06-u2 | pending | 0 | - |
 | 06-u3 | pending | 0 | - |
 | 06-u4 | pending | 0 | - |
-| 08-M0 | pending | 0 | - |
-| 08-u1 | pending | 0 | - |
+| 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | pending | 0 | - |
 | 08-u4 | pending | 0 | - |
 | 04-U1 | pending | 0 | - |
@@ -175,3 +176,4 @@ graph LR
 **变更历史**：
 
 - 2026-09-14：初版（阶段 0 预检 + 阶段 1 计划）。结构四节 6/6 齐备；审查证据 = R2 双 PASS 0 must-fix（cadfaf4b9）。
+- 2026-09-14 r1：08-M0 撤销独立单元——P1 红基线用例即 08-u1 的 TDD 测试（需保留转绿），独立 committed 单元会强制「红测试入库」或「属地不干净」二选一；并入 08-u1（P1 门）/08-u23（P2 现状红确认）作为前置步骤。门性质不变：探针失败 = 停线回设计重审。
