@@ -5,7 +5,7 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 ## 通道契约
 
 - 工具调用经 `ctx.ui.select(SESSION_MANAGER_MARKER, [JSON], {timeout})` 发出，超时按 action 分档（create/history 60s、其余 30s，SSOT 在 `src/index.ts` 的 `SELECT_TIMEOUT_MS`）；marker 为 `\x00XYZ_SESSION_MANAGER`（NUL 前缀防与普通 select title 冲突，SSOT 在 `@xyz-agent/extension-protocol`）
-- 请求体为嵌套形状 `{ action, params }`（`SessionManagerRequest` 协议类型）；**不要扁平化展开**——runtime event-adapter 按 `data.params` 提取，扁平化会导致 params 丢失
+- 请求体为嵌套形状 `{ action, params }`（形状 SSOT 在 `@xyz-agent/extension-protocol`）；**不要扁平化展开**——runtime event-adapter 按 `data.params` 提取，扁平化会导致 params 丢失
 - 应答方是 xyz-agent runtime 的 `SessionManagerHandler`（select value 通道回写 JSON 字符串；取消/超时返回 null）
 
 ## 工具（6 个 action）

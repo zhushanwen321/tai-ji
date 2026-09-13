@@ -2,7 +2,11 @@
 // 6 个 session 管理工具，通过 ctx.ui.select(SESSION_MANAGER_MARKER) 通道与 runtime handler 通信。
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { SESSION_MANAGER_MARKER, type SessionManagerAction } from "@xyz-agent/extension-protocol";
+import {
+	SESSION_MANAGER_MARKER,
+	type SessionManagerAction,
+	type SessionManagerErrorResult,
+} from "@xyz-agent/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
 
@@ -50,18 +54,7 @@ const SELECT_TIMEOUT_MS: Record<SessionManagerAction, number> = {
 	abort: 30_000,
 };
 
-/** runtime handler respond 的 JSON 形状（错误闭环：{ error, hint?, sessionId? }） */
-interface SessionManagerRawError {
-	error: string;
-	hint?: string;
-	sessionId?: string;
-}
-
-/** 工具 details 的可消费形状（下游消费不再 any） */
-type SessionManagerToolDetails =
-	| { kind: "error"; error: SessionManagerRawError }
-	| { kind: "ok"; result: unknown }
-	| { kind: "cancelled" };
+/** runtime handler respond 的错误 JSON 形状（错误闭环：{ error, hint?, sessionId? }），SSOT 在协议包 */
 
 /**
  * 通过 select 通道向 runtime handler 发送 session 管理请求。
@@ -72,8 +65,8 @@ async function callSessionManager(
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
 ): Promise<string | null> {
-	// 契约 SSOT：SessionManagerRequest = { action, params }（协议包 extension-protocol 的
-	// session-manager 模块 types.ts，嵌套 params）。runtime event-adapter 的 marker
+	// 契约 SSOT：请求体 = 嵌套 { action, params } 形状（协议包 @xyz-agent/extension-protocol
+	// 的 session-manager 模块）。runtime event-adapter 的 marker
 	// 分支按 data.params 提取——若扁平化展开（{action, ...params}）params 会丢失变 {}。
 	const payload = JSON.stringify({ action, params });
 	try {
@@ -103,13 +96,13 @@ async function executeTool(
 	ctx: ExtensionContext,
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
-): Promise<{ isError?: boolean; content: Array<{ type: "text"; text: string }>; details: SessionManagerToolDetails }> {
+): Promise<{ isError?: boolean; content: Array<{ type: "text"; text: string }>; details: undefined }> {
 	const raw = await callSessionManager(ctx, action, params);
 	if (raw === null) {
 		return {
 			isError: true,
 			content: [{ type: "text" as const, text: `Session manager ${action}: cancelled or timed out.` }],
-			details: { kind: "cancelled" },
+			details: undefined,
 		};
 	}
 	// runtime 错误闭环（respond({error}) 走同一 select 通道）——解析后检测 error 字段，
@@ -121,18 +114,18 @@ async function executeTool(
 	} catch {
 		parsed = undefined;
 	}
-	if (parsed !== null && typeof parsed === "object" && typeof (parsed as SessionManagerRawError).error === "string") {
-		const err = parsed as SessionManagerRawError;
+	if (parsed !== null && typeof parsed === "object" && typeof (parsed as SessionManagerErrorResult).error === "string") {
+		const err = parsed as SessionManagerErrorResult;
 		const text = err.hint ? `${err.error}\nhint: ${err.hint}` : err.error;
 		return {
 			isError: true,
 			content: [{ type: "text" as const, text }],
-			details: { kind: "error", error: err },
+			details: undefined,
 		};
 	}
 	return {
 		content: [{ type: "text" as const, text: raw }],
-		details: { kind: "ok", result: parsed },
+		details: undefined,
 	};
 }
 
@@ -179,7 +172,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "create_managed_session",
 		label: "Create Managed Session",
-		description: "Create a new agent-managed session in the specified working directory. Optionally provide an initial prompt, which is sent immediately (new sessions are always idle, so it is delivered directly). Returns a session ID and initial status.",
+		description: "Create a new agent-managed session in the specified working directory. Optionally provide an initial prompt, which is sent immediately (new sessions are always idle, so it is delivered directly). Returns a session ID and initial status. Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: CreateManagedSessionParams,
 		action: "create",
 		toParams: (p) => ({ cwd: p.cwd, label: p.label, prompt: p.prompt }),
@@ -188,7 +181,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "send_to_session",
 		label: "Send to Session",
-		description: "Send a prompt/message to an existing managed session. The message is asynchronously queued: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary, and {queued: true} is returned immediately. On synchronous failure the tool returns an error result (isError) with a hint (check get_session_status, then retry).",
+		description: "Send a prompt/message to an existing managed session. The message is asynchronously queued: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary, and {queued: true} is returned immediately. On synchronous failure the tool returns an error result (isError) with a hint (check get_session_status, then retry). Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: SendToSessionParams,
 		action: "send",
 		toParams: (p) => ({ sessionId: p.sessionId, prompt: p.prompt }),
@@ -197,7 +190,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "read_session_history",
 		label: "Read Session History",
-		description: "Read the conversation history of a managed session. Optionally limit to the last N turns.",
+		description: "Read the conversation history of a managed session. Optionally limit to the last N turns. Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: ReadSessionHistoryParams,
 		action: "history",
 		toParams: (p) => ({ sessionId: p.sessionId, tailTurns: p.tailTurns }),
@@ -206,7 +199,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "list_my_sessions",
 		label: "List My Sessions",
-		description: "List all sessions managed by the current agent. Returns session IDs, labels, and statuses.",
+		description: "List all sessions managed by the current agent. Returns session IDs, labels, and statuses. Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: ListMySessionsParams,
 		action: "list",
 		toParams: () => ({}),
@@ -215,7 +208,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "get_session_status",
 		label: "Get Session Status",
-		description: "Get the current status of a managed session (active, idle, error, etc.) and its model info.",
+		description: "Get the current status of a managed session (active, idle, error, etc.) and its model info. Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: GetSessionStatusParams,
 		action: "status",
 		toParams: (p) => ({ sessionId: p.sessionId }),
@@ -224,7 +217,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "abort_session",
 		label: "Abort Session",
-		description: "Abort a running managed session. The session stops processing; its final status will be 'stopped'.",
+		description: "Abort a running managed session. The session stops processing; its final status will be 'stopped'. Requires the xyz-agent desktop runtime; standalone pi CLI will time out.",
 		parameters: AbortSessionParams,
 		action: "abort",
 		toParams: (p) => ({ sessionId: p.sessionId }),

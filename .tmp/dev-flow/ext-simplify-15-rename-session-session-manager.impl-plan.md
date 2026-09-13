@@ -65,7 +65,7 @@ u1/u2 无依赖可并行（领地互斥）；本流水线串行窗口内按 u1�
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u1 | committed | 1 | protocol 102/102 + handler 32/32 + send-queue 18/18 + e2e-probe A1-A9 PASS + extensions:typecheck 绿 |
-| u2 | pending | 0 | — |
+| u2 | committed | 1 | session-manager 38/38 + extensions:typecheck 绿；grep 双零 + 6 description + details:undefined×4 |
 
 ## 7 残留风险与变更历史
 
@@ -73,3 +73,4 @@ u1/u2 无依赖可并行（领地互斥）；本流水线串行窗口内按 u1�
 - V4 的 GUI 实测依赖 `pnpm dev` 桌面端 + agent 真实调用 session-manager 工具；dev 实例按 AGENTS.md 用 `XYZ_DEV_BACKGROUND=1` + dev-instance 装配器端口派生。
 - 版本 bump（session-manager patch / extension-protocol patch）归 merge 阶段 changesets，不在单元领地。
 - 2026-09-14：计划创建（阶段 0 预检通过：待执行四节齐全；审查证据 = .tmp/tech-design/ext-simplify-15-r2-review.md PASS 0 must-fix + 原始 review.md 2 MF 已修复闭环）。
+- 2026-09-14（u2 补充）：B1 形态裁决 = 显式 `details: undefined` 键（省略形态经 pi 实装类型核实必 TS2739——registerTool 泛型自 execute 返回值推断 TDetails，缺键落 unknown 缺属性）；用例标题随断言删除同步去「details kind=ok」悬空描述。
