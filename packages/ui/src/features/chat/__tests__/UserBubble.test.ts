@@ -160,6 +160,93 @@ describe('W4TC3: UserBubble skill badge', () => {
   })
 })
 
+// ── [D12] 混排消息 inline 化渲染（is-mixed 修饰 class）──
+// badge 是 inline span、text 段经 MarkdownRenderer 渲染为块级（.md-render div + markdown-it <p>），
+// 混排时块级边界使 badge 前后必然换行。isMixedContent 判定「同时含 text 段与非 text 段」时给
+// 气泡容器加 is-mixed，组件 scoped CSS 据此把 .md-render/段容器 div/p 置 inline（badge 与正文
+// 同流）。测试环境无布局引擎，锁定 DOM 机制面：修饰 class 的加与不加 + badge/text 段均可见。
+describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
+  /** 渲染 content prop 的 MarkdownRenderer stub（默认 stub 不输出文本） */
+  const MarkdownContentStub = {
+    name: 'MarkdownRenderer',
+    props: { content: { type: String, default: '' }, sessionId: { type: String, default: '' } },
+    template: '<span>{{ content }}</span>',
+  }
+
+  function mountWithContent(content: Segment[] | string) {
+    return mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: false,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide(),
+        stubs: { MarkdownRenderer: MarkdownContentStub, ImageThumb: true },
+      },
+    })
+  }
+
+  function bubble(wrapper: ReturnType<typeof mount>) {
+    return wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+  }
+
+  it('[text, skill, text] 混排 → 气泡带 is-mixed，badge 与前后 text 段同处气泡可见流', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '先用' },
+      { type: 'skill', name: 'code-review' } as Segment,
+      { type: 'text', text: '再总结' },
+    ])
+    const el = bubble(wrapper)
+    // 修饰 class 生效（inline 化开关，组件 scoped CSS 据此选择器生效）
+    expect(el.classes()).toContain('is-mixed')
+    // 用户可见 DOM：badge 与前后 text 都在气泡内（同内联流的成员面）
+    expect(el.text()).toContain('先用')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
+    expect(el.text()).toContain('再总结')
+  })
+
+  it('file badge 混排（[text, file, text]）同样命中 is-mixed（场景 10-⑤ 非 skill badge 正向）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '改一下' },
+      { type: 'file', path: 'src/a.ts' } as Segment,
+      { type: 'text', text: '这个文件' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).toContain('is-mixed')
+    expect(el.find('[data-testid="msg-file-badge-1"]').exists()).toBe(true)
+    expect(el.text()).toContain('这个文件')
+  })
+
+  it('纯 text 多段消息（无 badge）→ 不加 is-mixed（复杂 markdown 排版不受影响的回归锁）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '第一段' },
+      { type: 'text', text: '第二段' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('第一段')
+    expect(el.text()).toContain('第二段')
+  })
+
+  it('纯 string content（reload 侧单文档渲染）→ 不加 is-mixed', () => {
+    const wrapper = mountWithContent('纯文本消息')
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('纯文本消息')
+  })
+
+  it('仅 badge 无 text（[skill]）→ 不加 is-mixed（无 text 段无需 inline 化）', () => {
+    const wrapper = mountWithContent([{ type: 'skill', name: 'code-review' } as Segment])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
+  })
+})
+
 // ── [MF-1] slash 段渲染：命令文本不消失 + live ≡ reload ──
 // live content 段序是 DOM 序（命令 chip 就地插，D4-a），reload 侧是 textToSegments(归位文本)
 // 的单 text 段（apply-entry-convert）；气泡只有按归位序渲染 slash 段为 `/name` 纯文本，
