@@ -111,7 +111,7 @@ function handleStatus(
     return;
   }
   ctx.ui.notify(
-    `Plan Mode: ${state.phase}\nPlan: ${state.planFilePath}\nTemplate: ${state.templateName || "(not selected)"}`,
+    `Plan: ${state.planFilePath}\nTemplate: ${state.templateName || "(not selected)"}`,
     "info",
   );
 }
@@ -149,7 +149,6 @@ function handleEnterPlanMode(
   const planFilePath = path.join(planDir, "plan.md");
 
   state.isActive = true;
-  state.phase = "brainstorming";
   state.planFilePath = planFilePath;
   state.requirement = requirement;
   state.templateName = "";

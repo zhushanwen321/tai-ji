@@ -25,18 +25,16 @@ export function registerPlanEventHandlers(
     // Read plan file content for recovery after compact
     const planContent = readPlanFileSafe(state.planFilePath);
 
-    // Include phase info for non-complete phases
-    const phaseNote = state.phase !== "complete"
-      ? `\nPhase: ${state.phase}. Plan was in progress — review and continue.`
-      : "\nAwaiting user decision on execution. Do NOT auto-proceed.";
+    // handler 已有 isActive 门——能走到这里的 plan 必然进行中（D6：phase 删除，原 phase="complete" 分支为死状态）
+    const progressNote = "\nPlan was in progress — review and continue.";
 
     return {
       compaction: {
         summary:
-          `Plan mode active (${state.phase}). Plan file: ${state.planFilePath}\n\n` +
+          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
           `## Plan Content\n${planContent}\n\n` +
           `Requirement: ${state.requirement}` +
-          phaseNote,
+          progressNote,
         firstKeptEntryId: prep?.firstKeptEntryId,
         tokensBefore: prep?.tokensBefore,
       },
@@ -53,7 +51,7 @@ export function registerPlanEventHandlers(
     return {
       summary: {
         summary:
-          `Plan mode active (${state.phase}). Plan file: ${state.planFilePath}\n\n` +
+          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
           `## Plan Content\n${planContent}\n\n` +
           `Read the plan file and execute the implementation.`,
       },

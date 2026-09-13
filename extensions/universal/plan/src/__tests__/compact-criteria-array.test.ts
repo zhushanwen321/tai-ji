@@ -42,7 +42,6 @@ function makeCtx() {
 function makeActiveState() {
   return {
     isActive: true,
-    phase: "complete" as const,
     planFilePath: "/tmp/plan.md",
     requirement: "Add login page",
     templateName: "default",

@@ -157,6 +157,9 @@ graph LR
 | 05-S2 | buildApprovalFieldSet/ApprovalFieldSet 保持模块私有不导出 | 设计 E6 未要求导出；S3 才是导出面收敛阶段；测试走行为级断言 | 接受 |
 | 05-S2 | makeUiAdapter 单一 cast 实现一次过三接口（T5 未触发降级） | ExtensionUIContext 参数类型覆盖三目标接口同型 | 接受（优于降级路径） |
 | 05-S2 | E11 顺带清扫 matcher/pipeline 过时注释 | 删除守卫/本地三元后的悬空表述，符号删除的注释同步义务 | 接受 |
+| 06-u4 | 测试联动 5 文件（设计写 3 个） | tool.test 旧断言必红 + makeActiveState 含 phase 字面量，机械必然 | 接受 |
+| 06-u4 | executeComplete 的 persistPlanState 调用一并移除 | 该 persist 唯一目的是落盘死状态，删后写入内容与上一条 entry 逐字段重复（P1 实证无观测窗口） | 接受（死状态删除面顺带清账） |
+| 06-u4 | 三处显示面文案最小实现（status 去 phase 行 / 渲染删两态行 / summary 收常量化） | 设计未给字面量，「显示面同步简化」裁量 | 接受（在授权范围内） |
 
 ## 6 状态表
 
@@ -166,10 +169,10 @@ graph LR
 | 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位；commit 513deb653 |
 | 06-u2 | committed | 1 | 78/78（+14）；tree schema 拒绝 + 五值出口用例齐；typecheck/lint 过 |
 | 06-u3 | committed | 1 | 82/82；5 builtin + 未知 action + D4 对齐守卫齐；fallback 探针 4/4 |
-| 06-u4 | in-progress | 0 | - |
+| 06-u4 | committed | 1 | 82/82；phase 写入清零 + PlanPhase 全仓零命中 + 旧 entry 兼容用例（06 线完成） |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
-| 08-u4 | pending | 0 | - |
+| 08-u4 | in-progress | 0 | - |
 | 04-U1 | pending | 0 | - |
 | 04-U2 | pending | 0 | - |
 | 04-U3 | pending | 0 | - |

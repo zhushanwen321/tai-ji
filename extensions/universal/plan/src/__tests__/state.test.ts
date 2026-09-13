@@ -5,7 +5,6 @@ import {
   DEFAULT_PLAN_STATE,
   getPlanState,
   persistPlanState,
-  type PlanPhase,
   type PlanSessionMap,
   type PlanState,
   reconstructPlanState,
@@ -14,20 +13,14 @@ import {
 describe("PlanState", () => {
   it("DEFAULT_PLAN_STATE has correct defaults", () => {
     expect(DEFAULT_PLAN_STATE.isActive).toBe(false);
-    expect(DEFAULT_PLAN_STATE.phase).toBe("idle");
     expect(DEFAULT_PLAN_STATE.planFilePath).toBe("");
     expect(DEFAULT_PLAN_STATE.requirement).toBe("");
     expect(DEFAULT_PLAN_STATE.templateName).toBe("");
   });
 
-  it("PlanPhase type includes all required phases", () => {
-    const phases: PlanPhase[] = ["idle", "brainstorming", "writing", "complete"];
-    expect(phases).toHaveLength(4);
-  });
-
   it("getPlanState returns cached state if exists", () => {
     const sessions: PlanSessionMap = new Map();
-    const cached: PlanState = { ...DEFAULT_PLAN_STATE, isActive: true, phase: "brainstorming" };
+    const cached: PlanState = { ...DEFAULT_PLAN_STATE, isActive: true };
     sessions.set("session-1", cached);
 
     const mockCtx = {
@@ -54,17 +47,15 @@ describe("PlanState", () => {
 
     const result = getPlanState(sessions, "session-2", mockCtx);
     expect(result.isActive).toBe(true);
-    expect(result.phase).toBe("writing");
     expect(sessions.get("session-2")).toBe(result);
   });
 });
 
 describe("State persistence", () => {
-  it("persistPlanState calls appendEntry with correct data", () => {
+  it("persistPlanState calls appendEntry with correct data (no phase field — D6)", () => {
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
     const state: PlanState = {
       isActive: true,
-      phase: "brainstorming",
       planFilePath: ".xyz-harness/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
@@ -72,9 +63,9 @@ describe("State persistence", () => {
 
     persistPlanState(mockPi, state);
 
+    // 精确匹配：新写的 plan-state entry 无 phase 字段（V5② 守卫）
     expect(mockPi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      phase: "brainstorming",
       planFilePath: ".xyz-harness/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
@@ -111,7 +102,34 @@ describe("State persistence", () => {
 
     const state = reconstructPlanState(mockCtx);
     expect(state.isActive).toBe(true);
-    expect(state.phase).toBe("writing");
     expect(state.planFilePath).toBe(".xyz-harness/test/plan.md");
+  });
+
+  it("reconstructPlanState ignores the legacy phase field in old entries (D6 兼容读 — V5②)", () => {
+    // 旧版（含 phase）写的 entry：重开后 plan mode 重建正常，phase 被白名单式读取自然忽略
+    const mockCtx = {
+      sessionManager: {
+        getEntries: () => [
+          {
+            type: "custom",
+            customType: "plan-state",
+            data: {
+              isActive: true,
+              phase: "brainstorming",
+              planFilePath: ".xyz-harness/legacy/plan.md",
+              requirement: "legacy",
+              templateName: "feature-plan",
+            },
+          },
+        ],
+      },
+    } as unknown as ExtensionContext;
+
+    const state = reconstructPlanState(mockCtx);
+    expect(Object.keys(state).sort()).toEqual(["isActive", "planFilePath", "requirement", "templateName"]);
+    expect(state.isActive).toBe(true);
+    expect(state.planFilePath).toBe(".xyz-harness/legacy/plan.md");
+    expect(state.requirement).toBe("legacy");
+    expect(state.templateName).toBe("feature-plan");
   });
 });

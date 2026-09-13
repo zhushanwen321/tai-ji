@@ -102,7 +102,7 @@ describe("registerPlanTool", () => {
       await expect(exec({ action: "select-template", templateName: "nonexistent" })).rejects.toThrow("Template not found");
     });
 
-    it("sets phase to writing and persists", async () => {
+    it("sets templateName and persists (D6：无 phase 写入)", async () => {
       const { exec, pi, sessions } = setup();
       // Use a builtin template name — find one first
       const listRes = await exec({ action: "list-template" });
@@ -113,9 +113,8 @@ describe("registerPlanTool", () => {
       const res = await exec({ action: "select-template", templateName: name });
       expect(res.details.templateName).toBe(name);
       expect(res.details.action).toBe("select-template");
-      expect(pi.appendEntry).toHaveBeenCalled();
-      const state = sessions.get("test-session");
-      expect(state?.phase).toBe("writing");
+      expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ templateName: name }));
+      const state = sessions.get("test-session") as { templateName?: string; isActive?: boolean };
       expect(state?.templateName).toBe(name);
     });
   });
@@ -247,7 +246,7 @@ describe("registerPlanTool", () => {
     it("resets state and cleans up session", async () => {
       const { exec, pi, sessions } = setup();
       // Pre-populate a session
-      sessions.set("test-session", { isActive: true, phase: "writing", planFilePath: "/tmp/plan.md", requirement: "test", templateName: "t" });
+      sessions.set("test-session", { isActive: true, planFilePath: "/tmp/plan.md", requirement: "test", templateName: "t" });
       const res = await exec({ action: "abort" });
       expect(res.details.action).toBe("abort");
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);

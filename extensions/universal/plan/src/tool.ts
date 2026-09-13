@@ -36,7 +36,6 @@ interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
   content: string;
-  phase: string;
 }
 
 interface CompleteDetails {
@@ -130,9 +129,8 @@ function renderPlanResult(
 
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
-      const body = fg("dim", `  brainstorming → ${details.phase}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
-      return new Text(header + body + hint, 0, 0);
+      return new Text(header + hint, 0, 0);
     }
 
     case "complete": {
@@ -186,11 +184,10 @@ function executeSelectTemplate(
     throw new Error(`Template not found: ${templateName}`);
   }
   state.templateName = templateName;
-  state.phase = "writing";
   persistPlanState(pi, state);
   return {
     content: [{ type: "text" as const, text: `Template selected: ${templateName}` }],
-    details: { action: "select-template", templateName, content, phase: state.phase },
+    details: { action: "select-template", templateName, content },
   };
 }
 
@@ -279,7 +276,7 @@ function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome 
     : `${base}\nGoal execution was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
 }
 
-/** complete action: prompt for execution mode, persist final phase, restore tools, reset state. */
+/** complete action: prompt for execution mode, restore tools, reset state. */
 async function executeComplete(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -295,11 +292,11 @@ async function executeComplete(
   }
   const chosenMode = choice.chosenMode;
 
-  // Persist final phase before cleanup
+  // D6：原「persist final phase (complete)」为死状态落盘（P1 实证不可观测），
+  // phase 删除后该 persist 与上一条 entry 完全重复，随死状态一并移除——
+  // 最终态由下方 resetPlanState 的 isActive=false entry 权威记录。
   const planFilePath = state.planFilePath;
   const isolation = (params.isolation as string) ?? "direct";
-  state.phase = "complete";
-  persistPlanState(pi, state);
 
   // Restore full tool set
   restoreFullToolSet(pi);
