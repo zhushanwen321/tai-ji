@@ -74,6 +74,11 @@ export function defaultEngineCmdlineMatcher(command: string): (cmdline: string) 
   };
 }
 
+/** models 声明空占位判定（null/undefined/[]）：无真值基线，应答空值形态差异不构成漂移证据。 */
+function isEmptyModelsDeclaration(models: ModelCatalogEntry[] | null | undefined): boolean {
+  return models == null || models.length === 0;
+}
+
 /** manifest 诊断比对（应答仅诊断：不一致 → warn 留痕，不参与判据；EngineClient 握手尾调用）。 */
 export function warnOnManifestDiagnostics(
   engineId: string,
@@ -90,7 +95,10 @@ export function warnOnManifestDiagnostics(
       );
     }
   }
-  if (diag && "models" in diag) {
+  // 声明侧空占位（null/undefined/[]）跳过比对：无真值基线，应答 null/[] 的空值形态
+  // 差异不构成漂移证据（曾产 "manifest=[] answered=null" 噪音）。声明非空而应答为空
+  // 仍进入比对 → warn（真漂移不吞）。
+  if (diag && "models" in diag && !isEmptyModelsDeclaration(diag.models)) {
     const answered = JSON.stringify(result.models ?? null);
     const declared = JSON.stringify(diag.models ?? null);
     if (answered !== declared) {
