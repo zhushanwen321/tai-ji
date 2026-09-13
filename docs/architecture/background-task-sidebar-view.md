@@ -271,7 +271,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 | U4 renderer 列表视图 | builtin-contributions 声明 + PluginViewContainer NATIVE_VIEWS + L2TabBar badge 扩展 + BackgroundTaskListView（两行式 SessionItem 同构 item + 筛选槽 + 空态三分 + 行内两段式终止）+ background-task-bucket.ts（分桶 SSOT）+ useBackgroundTaskBucketFilter（reactive 容器分区）+ useBackgroundTasks（useSessionScopedState + 模块级单 listener refCount） | UI 消费面闭环（G1 + D10）；「插件规范」落点在本单元 | S1/S3 前半/S6 筛选边界 |
 | U5 drawer 详情 | SideDrawerTab 加成员 + DetailPanel（元信息/输出跟随/kill 按钮 + 分支④⑤ toast 文案）+ 4 点接线 | G2/G3 交互闭环；依赖 U2 的 output/kill RPC | S1 后半/S2/S5 |
 | U6 base-tool-enhance intent 读回（D6-en） | `poller.ts` finalize 合并 registry state killing → reason=killed + `armBackgroundTimeout` pid 已死跳过 markKillingIntent（R2-S1 加固，2 行）+ 不变量注释登记（extension 写 registry 必先内存更新）+ 既有 extensions:test 三连回归 | S2 的 reason=killed + AI 零唤醒依赖它；独立于 runtime/renderer 可先行合入（对 AI bash_kill 路径是幂等增强——内存 intent 优先，读回仅在缺省时生效） | P7 + extensions:test |
-| U7 i18n + testid + 文档 | zh-CN/en-US 文案、data-testid 清单登记、feature-map 更新 | 交付完整性；TEST-STRATEGY 的 testid SSOT 纪律 | lint + 测试三视角用例 |
+| U7 i18n + testid + 文档 | zh-CN/en-US 文案、data-testid 清单登记、feature-map 更新（现 [feature-map.md](feature-map.md)，原 `docs/feature-map/` 目录已并入） | 交付完整性；TEST-STRATEGY 的 testid SSOT 纪律 | lint + 测试三视角用例 |
 
 **文件改动地图**：
 - `packages/shared/src/protocol.ts`（+消息类型）
@@ -286,7 +286,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - `packages/renderer/src/lib/background-task-bucket.ts`（新，D10 分桶 SSOT）、`packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts` + `useBackgroundTaskBucketFilter.ts`、`packages/renderer/src/components/extension/BackgroundTaskListView.vue`（含内联 BackgroundTaskFilterBar，形态对齐 SubagentFilterBar）、`.../BackgroundTaskDetailPanel.vue`（新）
 - `packages/ui/src/extension-host/L2TabBar.vue` + `l2-tab-item.ts`（badge 支持，D4 ④）
 - `extensions/universal/base-tool-enhance/src/background/poller.ts`（D6-en intent 读回）、`.../background/spawn-background.ts`（armBackgroundTimeout 加固，R3-S1）、`.../background/task-store.ts`（不变量注释登记落点）
-- i18n locales、`docs/feature-map/`
+- i18n locales、`docs/architecture/feature-map.md`（原 `docs/feature-map/`，已并入）
 
 **待验证检查点（设计阶段无法确定，留实施期）**：
 - dev-0.9.15 合入时序：本设计落地的分支若早于 subagent-sidebar-filter 合入 main，BackgroundTaskFilterBar 按 dev-0.9.15 设计参数独立实现（凹陷槽参数一致）；若已合入则评估直接复用组件形态（两处消费才抽象，本设计不提前假设其可复用性）

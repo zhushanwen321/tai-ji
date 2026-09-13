@@ -296,7 +296,7 @@ Two independent release pipelines, decoupled by tag prefix:
 | [docs/standards.md](docs/standards.md) | Coding standards and architecture standards |
 | [docs/page-design/](docs/page-design/) | Design SSOT (`v6-tokens.css` TaiJi pure-gray atomic values + `v6-master-spec.md` paradigm) |
 | [docs/extensions/](docs/extensions/) | Full set of pi extension development guides |
-| [docs/feature-map/](docs/feature-map/) | Feature planning and phase status |
+| [docs/architecture/feature-map.md](docs/architecture/feature-map.md) | Feature planning and phase status |
 | [docs/testing/](docs/testing/) + [TEST-STRATEGY.md](TEST-STRATEGY.md) | Test strategy and per-feature test manuals |
 | [docs/adr/](docs/adr/) | Architecture decision records |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Troubleshooting guide |

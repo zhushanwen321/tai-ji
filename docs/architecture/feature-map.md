@@ -1,8 +1,22 @@
 # xyz-agent 功能开发地图
 
-**日期**: 2026-09-11 | **基准分支**: fix-crash-runtime（基线 af812599a） | **状态**: 长跑稳定性专项三大子项交付——crash-resilience（13 单元，设计文档已删除 git 可追溯）+ idle-pi-reclamation（6 单元）+ crash-forensics-and-watchdog（21 单元），前两者双 Gate 绿 + design-code-sync 收敛；crash-forensics Gate A 绿 + Gate B 有条件通过（A4 滚动重启退出链挂死修复复验中）
+> 滚动快照，只留最新一份（启动新 Phase 前更新；历史版本直接删除，git 可追溯）。2026-09-13 由 `docs/feature-map/`（按日期命名）并入本目录并去掉日期后缀。
 
-> 本版反映「Taiji 30+ 天长跑稳定性专项」三大交付落地后的状态。上一版 2026-09-06.md（后台命令侧边栏视图，已删除，git 可追溯）。专项全链：[long-run-stability-architecture.md](../architecture/long-run-stability-architecture.md)（G1-G4 / E1-E7 三阶段）→ prevention-deep-dive（O1-O4 批次 1-4；已删除，git 可追溯）→ 本版三大子项。
+**快照日期**: 2026-09-13（初版 2026-09-11，基线 fix-crash-runtime @ af812599a） | **状态**: 长跑稳定性专项三大子项全部交付收敛——crash-resilience（13 单元，设计文档已删除 git 可追溯）+ idle-pi-reclamation（6 单元）+ crash-forensics-and-watchdog（21 单元），三者双 Gate 绿（crash-forensics Gate B 终判通过，`a266e42f1`）；当前进行中：subagent 永久会话模型（见「〇、进行中」）。
+
+---
+
+## 〇、进行中：subagent 永久会话模型（两态 + 万物可续聊，P0）
+
+### 功能概述
+
+把 subagent 从「任务」（有终态、形态枚举决定复活资格）重构为「会话」（无终态、只有占用与意愿两个正交维度）——状态机收敛为 `running | idle` 两态，任何 record 任何时候都能同 id 续聊（含被取消/被关闭/宿主重启后/zcode 引擎）；主 agent 与 subagent 在 pi 进程 RPC 上的 7 处同型实现收敛为公共包 `@zhushanwen/pi-rpc`。设计 [subagent-permanent-session-model.md](subagent-permanent-session-model.md)（风险 10/10，P0，2026-09-12 用户裁决）。
+
+### 当前状态（截至本快照）
+
+- 设计已实施全单元落毕（U1-U9 + u-foundation + U6b/U8a/U8b，dev-flow），偏差 40+ 条登记于 impl-plan §5（`.xyz-harness/`，不入库）；约束已回写 C-data-20 / C-data-22 / C-proc-13。
+- 验收（phase 5）已收官：三个真实缺陷 P1（cancel settle-window 重校准 + stale round-arrival 守卫）/ P2（resurrectColdRecord 补 engine/engineHandle 水合）/ P3（worktree 重建闭环）已修复（`d01f0f225` / `5dcb99453` / `8ea19681e`），scripts PASS（`a2a1f0df4`）。
+- 工作分支 `feat-subagent-continuout-chat-refactor`（已合流 dev-0.9.19 基线）。
 
 ---
 
@@ -16,7 +30,7 @@
 
 | 防线 | 载体 |
 |------|------|
-| D1 extension 守卫 | `extensions/shared/ext-guards/src/index.ts`（guardStaleCtx：代际检查主判 + stale 文案兜底分诊）；6 包接入（smart-context / plan / scheduler / structured-output / subagent-workflow）；21 包普查判定表 [stale-ctx-audit.md](../../extensions/shared/ext-guards/docs/stale-ctx-audit.md)；PS-30 文案门禁探针（pi-semantics.json + check-pi-semantics.mjs）；约束 C-pi-17（2026-09-13 改号）|
+| D1 extension 守卫 | `extensions/shared/ext-guards/src/index.ts`（guardStaleCtx：代际检查主判 + stale 文案兜底分诊）；6 包接入（smart-context / plan / scheduler / structured-output / subagent-workflow）；21 包普查判定表 [stale-ctx-audit.md](../../../extensions/shared/ext-guards/docs/stale-ctx-audit.md)；PS-30 文案门禁探针（pi-semantics.json + check-pi-semantics.mjs）；约束 C-pi-17（2026-09-13 改号）|
 | D2 renderer 恢复 | `apps/electron/main/window/recovery-policy.ts`（60s 滑窗 ≤3 次熔断）+ `window-factory.ts`（render-process-gone 自动 reload / 静态错误页）；错误捕获三件套 + renderer-log IPC 落盘（`apps/electron/main/logs/`，限流合并）；恢复提示条 `useCrashRecoveryNotice.ts` + CrashRecoveredBar；约束 C-proc-16 |
 | D3 出站帧守卫 | `packages/runtime/src/services/message-bus/outbound-frame-registry.ts`（8 条大字段穷举）+ `message-bus.ts` push 截断（seq 语义内，drop 时 rollbackSeq）+ `transport/message-broker.ts` reply 超限 envelope；8MB 告警 / 32MB 截断双档；约束 C-comm-14 |
 | D4/D5 历史预算 | 读侧：`services/session-history.ts` + `services/session/history-reverse-read.ts` + `infra/pi/session-file-streaming.ts`（32MB 预检五档 + 逆序分块尾读）；传输侧：20 turns / 640KB 双预算 + 游标分页（`session.history` RPC cursor 参数，core `useChat.ts` 翻页 + `truncated-window.ts` 窗口态 SSOT）；「加载更早」prepend |
@@ -51,7 +65,7 @@
 
 ### 功能概述
 
-补齐专项最后断链「取证与兜底」：统一崩溃台账（双文件 append-only JSONL + 条件信号事件化，评估器唯一输入）+ 触发条件评估器（附录 A 20 条暗债的纯函数消费端）+ 诊断一键导出（E7 用户出口）+ checkpoint 自动恢复（E5a 无条件档，runtime 死后活跃 session 自动 reattach）+ 看门狗与滚动重启（E5b/c 代码完整交付、武装挂 Gate W 数据门默认 off）。批次补课 4 小项随附（tee size 轮转 / 入站 parse 守卫 / 截断反转 supersession / 审计覆盖守卫）。设计 [docs/architecture/crash-forensics-and-watchdog.md](../architecture/crash-forensics-and-watchdog.md)（v9），实施 crash-forensics-and-watchdog.impl-plan.md（21 单元 8 Wave + 偏差 #1-#32；已删除，git 可追溯）。
+补齐专项最后断链「取证与兜底」：统一崩溃台账（双文件 append-only JSONL + 条件信号事件化，评估器唯一输入）+ 触发条件评估器（附录 A 20 条暗债的纯函数消费端）+ 诊断一键导出（E7 用户出口）+ checkpoint 自动恢复（E5a 无条件档，runtime 死后活跃 session 自动 reattach）+ 看门狗与滚动重启（E5b/c 代码完整交付、武装挂 Gate W 数据门默认 off）。批次补课 4 小项随附（tee size 轮转 / 入站 parse 守卫 / 截断反转 supersession / 审计覆盖守卫）。设计 [crash-forensics-and-watchdog.md](crash-forensics-and-watchdog.md)（v9），实施 crash-forensics-and-watchdog.impl-plan.md（21 单元 8 Wave + 偏差 #1-#32；已删除，git 可追溯）。
 
 ### 关键落点
 
@@ -65,7 +79,7 @@
 | E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ EnginePort 快照 ∪ relay-registry】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 13 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
 | 在途上报通道 | `packages/extension-protocol/src/extensions/subagent-inflight/`（marker + 绝对计数 schema + ack）+ subagent-workflow 聚合上报 + runtime `inflight-mirror.ts`（五 spawn 形态预置 0 + 生命周期对账 + absent-report errs 判别） |
 | 批次补课 | tee size 轮转：`infra/logger.ts`（gzip `.1.gz` 单代 + `XYZ_LOG_MAX_BYTES` 单旋钮，C-build-09，2026-09-13 改号）；入站 parse 守卫：core `ws-client.ts` 80MB + 单 session 终止阀（C-comm-15）；O3-C superseded-by 注记 + `scripts/check-stale-ctx-audit-coverage.mjs` 审计覆盖守卫；reap 判据 v2 marker 化（C-proc-20） |
-| Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B 有条件通过——8 PASS / **A4 FAIL**（滚动重启退出链挂死在 engine-pool-dispose 前，Gate W 默认 off 生产休眠，修复复验中）/ A6 BLOCKED（无生产注入钩子，单元级覆盖）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |
+| Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B **终判通过**（8 PASS / 1 BLOCKED / 3 SCALED，`a266e42f1`）——A4 滚动重启退出链挂死已根修（stop 时关存续 WS 连接，`3220a351c`）并真机复验（61 次 planned_rolling_restart 退出码 86、零 liveness 误杀）/ A6 BLOCKED（无生产注入钩子，单元级覆盖；u7a push 链生产悬挂已修 `90cdbefe6`，复验挂 swap 水位回落窗口）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |
 
 ---
 
@@ -73,7 +87,7 @@
 
 - **V6 七天长跑 soak**（约 2026-09-18 到期）：足迹平台期 / 重启一致性 / PTY 存活 + P4 relay 真机腿 + 阈值校准——登记于 idle impl-plan §6，无自动提醒；到期后同为 crash-forensics u8 Gate W 武装复审的输入。
 - **未交付面**：架构阶段二 E1/E7 与阶段三 E5 已由 crash-forensics-and-watchdog 交付（见第三节；E5b/c 武装挂 Gate W 未裁决）；仍 out-of-scope：E3/E4 架构级增量（崩溃分类差异化 respawn、在途 turn 一键重发、草稿持久化、面板级错误边界、getAppMetrics 联动）与 base64 剥离——各带书面重审触发条件，等台账数据驱动立项。
-- **crash-forensics Gate B 遗留**：A4 滚动重启退出链挂死（修复复验中）；A1 导出 zip 环节受 dev 窗口焦点自动化限制（打包逻辑有 15 用例）；A6 renderer 应用级装配（installInboundFrameGuard 挂载）随 u-init 收口；A3 excluded 过滤路径不写 reattach-skipped 台账行（待裁决补行或改措辞）。
+- **crash-forensics Gate B 遗留**（终判通过后的残留，详见 impl-plan §7 v7，git 可追溯）：A6 BLOCKED 三条子断言——u7a push 链生产悬挂（已根修 `90cdbefe6`，复验挂 swap 水位回落到 mem-pressure 阈值以下的窗口）与真实系统 swap 压力（97.7% ≥ 95% 阈值且无 env 旋钮，mock 违反 A4 no-mock 判据，双根因已登记）；A1 导出 zip 环节受 dev 窗口焦点自动化限制（打包逻辑有 15 用例）；A3 excluded 过滤路径不写 reattach-skipped 台账行（待裁决补行或改措辞）。
 - **待用户裁决**：A3 打包版复验（挂 prerelease）；CI real-pi 凭据注入。
 
 ## 五、继承条目
@@ -92,7 +106,7 @@
 | 顶层架构 | `docs/architecture/long-run-stability-architecture.md`（E1-E7 三阶段，阶段二/三已交付、武装挂 Gate W） |
 | 根治调研 | `docs/design/long-run-stability-prevention-deep-dive.md`（O1-O4 批次总表，已删除，git 可追溯；未实施遗留项已并入 long-run-stability-architecture.md D6 迁入注记） |
 | 设计 | `docs/design/crash-resilience.md`（v9，已删除，git 可追溯；独有档案已并入 crash-forensics-and-watchdog.md 附录 D）· `docs/design/idle-pi-reclamation.md`（已删除，git 可追溯）· `docs/architecture/crash-forensics-and-watchdog.md`（v9） |
-| 实施计划 | `crash-resilience.impl-plan.md`（13 单元 + Gate A/B 记录，已删除，git 可追溯）· `idle-pi-reclamation.impl-plan.md`（6 单元 + Gate A/B 记录，已删除，git 可追溯）· `crash-forensics-and-watchdog.impl-plan.md`（21 单元 + Gate A/B 记录 + Gate B verdict 表） |
-| 架构裁决修订 | `docs/architecture/pi-exit-notification-and-respawn.md`（v6：§6.2 lazy → bounded proactive） |
-| 约束登记 | C-pi-16（stale 守卫）· C-state-12（pollTimer 全关）· C-comm-14（出站帧守卫）· C-proc-16（renderer 熔断）· C-data-20 / C-proc-17~20 / C-comm-15 / C-build-08（crash-forensics 批）——[constraints.json](../constraints.json) SSOT |
+| 实施计划 | `crash-resilience.impl-plan.md`（13 单元 + Gate A/B 记录，已删除，git 可追溯）· `idle-pi-reclamation.impl-plan.md`（6 单元 + Gate A/B 记录，已删除，git 可追溯）· `crash-forensics-and-watchdog.impl-plan.md`（21 单元 + Gate A/B 记录 + Gate B verdict 表；已删除，git 可追溯） |
+| 架构裁决修订 | `pi-exit-notification-and-respawn.md`（v6：§6.2 lazy → bounded proactive；已删除，git 可追溯） |
+| 约束登记 | C-pi-17（stale 守卫，2026-09-13 改号）· C-state-12（pollTimer 全关）· C-comm-14（出站帧守卫）· C-proc-16（renderer 熔断）· C-data-21 / C-proc-17~20 / C-comm-15 / C-build-09（crash-forensics 批，2026-09-13 改号）——[constraints.json](../constraints.json) SSOT |
 | 旧版地图 | 2026-09-06.md · 2026-08-28.md · 2026-08-25.md · 2026-06-20.md（均已删除，git 可追溯） |

@@ -20,9 +20,10 @@ docs/
 ├── extensions/            ← pi 扩展跨包约定（开发指南/强约束/日志规范/术语表/adr/）
 ├── page-design/           ← 前端设计 SSOT（v6-tokens.css 值权威 + v6-master-spec.md 范式权威）
 ├── testing/               ← 测试手册（分层策略/手工冒烟清单/mock 盲区表）
-├── todo/                  ← 有效待办 + ext-simplify/ 待决策设计集
-└── feature-map/           ← 功能规划全景（只留最新一份滚动）
+└── todo/                  ← 有效待办 + ext-simplify/ 待决策设计集
 ```
+
+> 功能开发地图已并入 [architecture/feature-map.md](architecture/feature-map.md)（滚动快照，只留最新一份；原 `feature-map/` 目录 2026-09-13 消亡，git 可追溯）。
 
 ## 文档归属判定
 

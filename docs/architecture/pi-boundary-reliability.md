@@ -254,7 +254,7 @@ AGENTS.md 文档索引涉及的资产，逐一定性「改/不改/怎么改」�
 | `docs/extensions/logging-conventions.md` | **改**（轻量） | delivery warn 出口接 extensionLogger 的口径一句（切片 1 U4 对接点） |
 | `docs/architecture/context.md` + `docs/extensions/glossary.md` | **改**（轻量） | 术语各加 4 条：语义吸收层 / 能力注册表 / 生效回执 / 确认式送达（账本·销账·courier 归并后者） |
 | workspace `AGENTS.md` | **改**（最小） | 文档索引表加一行本设计；「外部依赖 pi」段加一句指向 C-proc-08 版本门禁纪律（不新增大段规则，约束细节活在 constraints.json） |
-| `docs/feature-map/` | **按既有纪律** | 启动本 Phase 时新增当日地图条目 |
+| `docs/architecture/feature-map.md` | **按既有纪律** | 启动本 Phase 时更新地图（滚动快照；原 `docs/feature-map/` 目录已并入，git 可追溯） |
 | `docs/design-evolution.md` | **不改** | UI 视觉设计专用，架构演变归 ADR |
 | `docs/release-notes.md` | **不改** | 写作规范文档；发布时按规范撰写即可 |
 | `docs/extensions/development-guide.md` | **不改** | 通用开发流程，无涉本主题 |

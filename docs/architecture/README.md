@@ -4,13 +4,14 @@
 
 ## 目录结构
 
-> 2026-09-13 起 `docs/design/` 并入本目录（机制域规格与拓扑规格同目录，原「architecture/ 或 design/」双口准入改单口）。原 design 文档的消化史：19 份迁移（下表「机制域规格」各组）、9 份删除（决策谱系由承接文档的附录/头部注记承载，git 可追溯：dispatch→pi-boundary 附录 D、unbounded-wait-audit→crash-forensics 附录 E、early-wave 四份→package-extraction 头部、replay→troubleshooting §12、adversarial→check_prompt_outposts.py 头注释、chat-stream-perf/panel-view→代码注释）。
+> 2026-09-13 起 `docs/design/` 并入本目录（机制域规格与拓扑规格同目录，原「architecture/ 或 design/」双口准入改单口）。原 design 文档的消化史：19 份迁移（下表「机制域规格」各组）、9 份删除（决策谱系由承接文档的附录/头部注记承载，git 可追溯：dispatch→pi-boundary 附录 D、unbounded-wait-audit→crash-forensics 附录 E、early-wave 四份→package-extraction 头部、replay→troubleshooting §12、adversarial→check_prompt_outposts.py 头注释、chat-stream-perf/panel-view→代码注释）。同日 `docs/feature-map/`（功能开发地图，按日期滚动）并入本目录 → `feature-map.md`（去掉日期后缀，滚动快照语义不变；历史日期版已删除，git 可追溯）。
 
 ```
 docs/architecture/
 ├── README.md                        # 本文件（规范说明）
 ├── design.md                        # 跨进程架构决策记录（D1–D9：双通道/启动时序/API Client/双维度模型/横切归宿）
 ├── context.md                       # 领域术语表（Session/Panel/Runtime 等）
+├── feature-map.md                   # 功能开发地图（滚动快照，启动新 Phase 前更新；原 docs/feature-map/）
 │
 │  ── 拓扑与治理 SSOT ──
 ├── renderer-package-topology.md     # renderer 终态包拓扑 SSOT（§1 包拓扑 / §2 core 分层；原 renderer-rebuild-architecture.md）
