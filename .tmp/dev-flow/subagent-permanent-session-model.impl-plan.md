@@ -120,7 +120,7 @@ graph TD
 | U4 | committed | 1 | commit 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
 | U5 | committed | 1 | 四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
 | U6 | committed-followup | 1 | 领地内全落地：resume 读→裁剪→前缀注入全链 + conversation:'cold'（gate === unsupported 判据零改接线）+ TTL 引擎侧 sweep（time_updated 判龄/24h 节流/活跃豁免）+ isAnchorResolvable zcode 分派 + e2e「resume 帧先于 create/无向旧会话 send」；zcode-cli 258 / subagent-core 3074 / 守卫双绿。3 blockers 分流：B-routing+B-firstround→U6b（run-orchestration 领地外，本表新增行）；B-restart→store 面归 U7 / manifest 契约面归 U8 |
-| U6b | pending | 0 | 新增行：zcode 续聊宿主侧接线（run-orchestration.ts 单文件领地）——B-routing（kickOffChatRound 引擎路由按 record.engine + RunContext onHandleReady 回填新 sessionRef）+ B-firstround（executeViaEngine 非 pi 分支 conversation:true 走 Continuation 首轮）。依赖 U6 committed ✓ 即绪 |
+| U6b | committed | 1 | commit c19fb765c：B-routing（resolveRoundEnginePort 按 record.engine 分派 + 未注册引擎失败轮不崩宿主）+ B-firstround（非 pi chatMode 走 startFirstRound）+ onHandleReady 非 pi 会话轮覆写回填（pi 零行为变化）；新测试 5 passed + 全量 3079；deviations 4 条（pi 不挂回调/覆写 vs 补缺双语义注释互指/chat 轮不接 journal 分层/未注册引擎不对称拒绝点） |
 | U7 | pending | 0 | - |
 | U8 | pending | 0 | - |
 | U9 | pending | 0 | - |
