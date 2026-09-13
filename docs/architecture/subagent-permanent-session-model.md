@@ -374,6 +374,19 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | **session-reader（外部 npm 包）** | manifest.status 三态（running/closed/cancelled）+ executionStatus 永久双写是与仓外已发布包的兼容契约（manifest-store.ts:26-40，无版本磁盘 schema 不做破坏性变更） | **旧三态继续派生投影下行**（idle→running「活跃会话」、archived→closed「已收起」）+ executionStatus 双写新词（idle）——沿用既有「永久双写」过渡契约，旧版 session-reader 读旧 status 字段照常工作、新词被忽略；rebuildIndexes 重建路径（`.state` 新格式 → derivedManifestRecord）的映射进 U8。**行为变化声明**：idle→running 下行映射使 session-reader 家族视图把可续聊 record 视为活跃成员（符合新语义）；archived→closed 使其按既有 closed 语义归入已完成分区——两向均落在 session-reader 既有词汇的行为域内，无未知值、无缺员 |
 | 错误文案 | 七种拒绝文案 + 自相矛盾的 gc reconnectable | 一种占用拒绝 + 降级自动发生（无需用户理解） |
 
+#### 3.2.9 桥接词汇日落登记（2026-09-13 design-code-sync 审查后补登记）
+
+**背景**：本模型对外把 9 值隐性状态空间压缩为两态，但实现期为兼容存量保留了桥接词汇；审查发现这些桥接位自声明的清理时点（「U3 后删除」「U5 后清理」）全部过期未执行——根因是**只登记了时点、没登记可判定的退出信号**。本节为全部桥接概念补登记退出判据，并立元规则：**桥接层不得新增概念；任何新增桥接位必须随本表登记可证伪的退出判据，无判据的桥接 = 必须立即清算**。
+
+| 桥接概念 | 现状载体 | 退出判据（可证伪） | 到期动作 |
+|---|---|---|---|
+| `closedReason` 字段（ExecutionRecord） | 仅 workflow-origin D7 例外族写点（markFinalized/markCancelled）+ 旧格式 record 读取 + runtime diff 基线（session-records.ts） | ①写点归零：D7 例外族终态化改用 `intent=archived + stopReason` 表达（grep 两原语生产调用零命中）；②存量消化：旧格式 record 经 30 天 TTL / 磁盘重建自然消化（抽查全量重建后无 closedReason 读需求） | 删字段 + runtime diff 基线同步收缩（session-records.ts subagentRecordEquals）+ StopReason 收窄同批 |
+| `RECONNECTABLE_FINAL_REASONS` / `isReconnectableFinalReason` | 唯一存活消费点 = record-access.ts `rematerializeReconnectableEntryManifests`（boot 自愈可见性 gate，注释已标注桥接残留） | 重物化 gate 改物理判据（entry 自描述完整 + 归属本 session 树，与 §3.2.3 复活资格判据同源）落地并全绿 | 删集合与判定函数；注释口径随改 |
+| `StopReason` 超集值空间 | 与 ClosedReason 的历史并集（types.ts），13 值中部分无展示面消费 | 逐值 grep GUI/TUI/文案消费方：零消费值清单确认后一个批次收窄（收窄属 types 面破坏性改动，须与 closedReason 字段删除同批走） | 值空间收窄至实际消费集 |
+| manifest 旧三态 + executionStatus 双写 | manifest-store.ts:26-40「永久双写」——仓外已发布 session-reader 包的兼容契约 + 无版本磁盘 schema | session-reader 发布 next-major（README/CHANGELOG 声明新两态词汇）**且**全量存量用户数据经一次重建后无旧 status 读需求——两条件同时满足才评审下线；只满足前者不得动磁盘 schema | 双写降级为「派生投影函数保留、字段退役」评审（届时按 session-reader 实际安装面数据裁决，不预设结论） |
+
+> 登记维护规则：本表为桥接词汇唯一台账（SSOT）；每轮 design-code-sync 审查须核对本表条目的判据是否已触发，触发未执行 = must-fix。
+
 ### 3.3 RPC 公共包与分层架构
 
 #### 3.3.1 终态分层
