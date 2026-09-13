@@ -1,7 +1,7 @@
 // packages/zcode-subagent-cli/src/db-path.ts（原 subagent-core 路径，2026-09-09 W11 随引擎包迁出）
 //
 // zcode 会话库路径契约（2026-09 会话库隔离）。设计权威源：
-// docs/design/zcode-session-db-isolation.md §3.2 D1（路径与 env 契约）/
+// docs/architecture/zcode-session-db-isolation.md §3.2 D1（路径与 env 契约）/
 // D2（白名单集合与 dataDir 权威源）/ D3（存量兼容）/ §3.3 不变量 2（路径单一来源）。
 //
 // 为什么独立成模块：constants.ts 头注约束「零 import 纯常量」，而路径构造函数需要

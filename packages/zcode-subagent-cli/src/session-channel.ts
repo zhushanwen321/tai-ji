@@ -1,7 +1,7 @@
 // src/execution/engine/engines/zcode/session-channel.ts
 //
 // ZcodeEngine app-server 会话层（R3）。设计权威源：
-// docs/design/zcode-engine-appserver-resident.md §3.3 D4（会话生命周期：每任务自包含
+// docs/architecture/zcode-engine-appserver-resident.md §3.3 D4（会话生命周期：每任务自包含
 // create→run→close，不做热会话复用）/ §2.4 目标数据流 ①-⑦ / §3.4 不变量 1
 // （text_delta 拼接 == read 全文、终态唯一 turn.terminal 权威、收尾帧 usage 完整）
 // 与 2（resolve 严格晚于全部事件回调）/ 附录 A.2（任务生命周期帧序列——协议权威，

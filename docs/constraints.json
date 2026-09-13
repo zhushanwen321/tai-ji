@@ -64,7 +64,7 @@
         "global"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -214,7 +214,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -233,7 +233,7 @@
         "extensions/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -254,7 +254,7 @@
       ],
       "authority": [
         "adr/0062-single-data-owner-absolute-write-rule.md",
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -298,7 +298,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -319,7 +319,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -380,7 +380,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -400,7 +400,6 @@
         "extensions/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md",
         "architecture/data-source-registry.md"
       ],
       "dimensions": [
@@ -540,7 +539,7 @@
       ],
       "authority": [
         "adr/0001-manual-di-over-ioc-container.md",
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -564,7 +563,7 @@
         "packages/runtime/src/transport/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -588,7 +587,7 @@
         "packages/runtime/src/services/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -862,7 +861,7 @@
       ],
       "authority": [
         "adr/0058-dom-core-package.md",
-        "architecture/renderer-rebuild-architecture.md"
+        "architecture/renderer-package-topology.md"
       ],
       "dimensions": [
         "monorepo-impact",
@@ -886,7 +885,7 @@
         "packages/shared/src/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1763,8 +1762,8 @@
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "design/zcode-session-db-isolation.md",
-        "design/zcode-engine-appserver-resident.md",
+        "architecture/zcode-session-db-isolation.md",
+        "architecture/zcode-engine-appserver-resident.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1915,7 +1914,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "../docs/architecture/conversation-stream-block-rendering.md"
+        "../packages/renderer/src/composables/panel/useVirtuaFollow.ts"
       ],
       "dimensions": [
         "arch-boundary",

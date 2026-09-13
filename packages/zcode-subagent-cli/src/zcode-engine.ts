@@ -2,7 +2,7 @@
 //
 // ZcodeEngine：zcode 的 EnginePort 实现（2026-09 起单一 app-server 形态）。
 // 设计权威源：docs/architecture/subagent-engine-abstraction.md D10 / §3.3.4 /
-// §3.3.5；docs/design/zcode-engine-appserver-resident.md §3.3 D1（每引擎实例一条
+// §3.3.5；docs/architecture/zcode-engine-appserver-resident.md §3.3 D1（每引擎实例一条
 // 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机面）。
 //
 // 2026-09 breaking 重构（用户拍板，理由与代价见设计文档修订节）：

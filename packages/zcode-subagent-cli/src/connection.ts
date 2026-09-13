@@ -1,7 +1,7 @@
 // src/execution/engine/engines/zcode/connection.ts
 //
 // ZcodeEngine app-server 常驻连接层（R2）。设计权威源：
-// docs/design/zcode-engine-appserver-resident.md §3.2 方案 A（单常驻进程 + per-session
+// docs/architecture/zcode-engine-appserver-resident.md §3.2 方案 A（单常驻进程 + per-session
 // model）/ §3.3 D1（惰性启动、进程退出即失效下次使用重建、probe 用独立短命连接）/
 // D9（反向请求常量表应答 + 未知一律回空 result）/ 附录 A.1（传输与帧型——协议权威）/
 // A.3（错误码表）。旧实现参照：zsw 仓 84b63a0^ lib/runner-appserver.js 的

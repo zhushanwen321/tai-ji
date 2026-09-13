@@ -152,7 +152,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | SubagentService 六聚合拆分（壳 + 聚合） | [docs/design/subagent-service-decomposition.md](../../design/subagent-service-decomposition.md) |
 | 不通知根因与恢复链（F 系列） | [docs/design/subagent-agent-end-recovery-replay.md](../../design/subagent-agent-end-recovery-replay.md) |
 | 无界等待与回收层上界审计 | [docs/design/subagent-core-unbounded-wait-audit.md](../../design/subagent-core-unbounded-wait-audit.md) |
-| zcode 引擎形态与会话库隔离 | [docs/design/zcode-engine-appserver-resident.md](../../design/zcode-engine-appserver-resident.md) · [docs/design/zcode-session-db-isolation.md](../../design/zcode-session-db-isolation.md) |
+| zcode 引擎形态与会话库隔离 | [docs/architecture/zcode-engine-appserver-resident.md](../../architecture/zcode-engine-appserver-resident.md) · [docs/architecture/zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
 
 ## 7. 历史沿革（本节为归档说明，不描述现状）
 

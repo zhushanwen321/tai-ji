@@ -6,7 +6,7 @@
 //
 // 字段级扩展登记（接上文纪律——先改设计文档再扩接口）：
 //   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机面。权威源：
-//     docs/design/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
+//     docs/architecture/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
 //   - [R4 已实施 2026-08-30] RunContext.onHandleReady——运行中句柄回填通道
 //     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层，
 //     与 onPoolResolved 分立两个时点）。

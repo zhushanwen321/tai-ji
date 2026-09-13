@@ -135,7 +135,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 **成功路径（xyz-agent GUI 用户）**：chat 域发起 zcode 引擎 subagent，任务运行中途打开详情页——record entry 在 journal writer 创建后即已回填 ②级读取钥匙（W4 回填机制，create 应答后并入 sessionId），详情页可见打开时刻的进度快照（journal 已增量落盘的 text_delta）；任务进行中刷新/重开 session，详情页渲染与 live 所见一致（读取链 ①级 sqlite / ②级 journal 无论哪级命中，内容一致）。GUI 内的逐字实时推送属 relay 通道建设（out of scope，见 G2 边界）。
 
-**失败路径 1（协议漂移）**：zcode 升级后 `session/create` 返回 `-32602`（参数校验失败）。引擎按错误分类归档 `protocol-drift`，本任务自动降级 spawn 单轮重跑（结果 record 标注 `degraded: spawn`），后续任务直接走 spawn。降级标志（`driftDegraded`）为引擎内存态且判定先于探针门控——CLI mtime 变化不触发重探，恢复 = 宿主进程重启后经探针门控重建（zsw daemon 常驻场景 = 需重启 daemon），core 修复协议适配后重启即恢复。用户在任务输出中看到降级标注与「升级冒烟失败，已回退 spawn 通道」提示。注意区分：探针失败降级（另一路径，probe 未过、无漂移命中）的探针结论为内存缓存、与 CLI mtime 绑定，mtime 变化后首个任务前重新真探——mtime 重探语义仅属该路径，不构成漂移降级的自动恢复。
+**失败路径 1（协议漂移）**：zcode 升级后协议漂移（如 `session/create` 返回 `-32602`）——**现行行为：不再降级保底，直接报可操作错误**（2026-09 breaking 删除 spawn 降级链；原「自动降级 spawn 重跑 + record 标注」方案 git 可追溯）。
 
 **失败路径 2（常驻进程崩溃）**：进程意外退出 → 连接 onClose → 全部在途任务 fail（错误信息附 stderr 尾部 400 字符）→ 用户重试任务 → 下一次 `engine.run` 自动重建进程。单任务失败语义与 spawn 现状等价（进程死 = 任务失败），不劣化。
 
@@ -162,10 +162,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 - 被否理由：宿主层私连正是旧 1.x 6500 行防御工事的教训——漂移防御责任错放在宿主。xyz-agent 侧 pi 壳也用 core，宿主直连意味着两套防御。决策记录已明确「zsw 宿主 NEVER connects app-server directly」，本设计不重开此题。
 
-**降级策略对比（独立于 A/B 的正交决策）**：
-
-- **保留 spawn 兜底（推荐，D2 详述）**：app-server 探针失败 / 首任务漂移类错误 → 自动降级 spawn 重跑，后续任务直走 spawn。
-- **app-server 单路径硬失败（被否）**：zcode 平台无公开契约（决策记录 §1 明示），3.8→3.10 升级窗口已实际发生 schema 级漂移风险（`--stdio` 之疑、`--surface` 新增均为实证信号）；无兜底 = 每次平台升级后 subagent 功能硬断，直到 core 发版修复。spawn 路径已存在、已验证、golden 已就位，保留成本 ≈ launcher 一个模式分派。
+**降级策略对比——已作废（2026-09 breaking）**：原「保留 spawn 兜底 vs 硬失败单路径」的对比随 spawn 通道删除失去对象，终态即硬失败单路径（协议漂移直接报可操作错误）。原文 git 可追溯。
 
 ### 3.3 关键决策与权衡
 
@@ -174,11 +171,8 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 - 被否：per-model 进程池（方案 B）；per-task 进程（= 现状 spawn，无冷启动收益）。
 - 证据：旧实现 `_ensureConnection` 复用粒度（runner-appserver.js:872-886）+ E10 四会话并发不串线真机实证（Gate B 2026-08-29）。
 
-**D2 降级链 = app-server 优先 + probe 门控 + 首败降级 spawn 重跑**（长期方案）
-- 选择：①引擎启动时（或 zcode 版本变更后首个任务前）跑协议探针（独立连接 create 探针会话 → close → shutdown，**不发模型请求**，10s 预算）；②探针失败 → 本任务起直接走 spawn；③探针通过但首任务运行中命中漂移类错误（`-32601/-32602`）→ 本任务降级 spawn 重跑一次，后续任务直走 spawn，record 标注降级原因；④显式 env（如 `XYZ_ZCODE_MODE=appserver|spawn`）可定向指定，定向时不探不降。
-- 被否：硬失败单路径（§3.2 已论证）；把降级链做成宿主可配置（违反 G4 宿主零改动与 C7 宿主不防御原则）。
-- 证据：这是旧 zsw 防御链的引擎内精简版——旧实现三层（probe 缓存落盘 + 失效重探 + 降级重跑）在宿主层花了 ~6500 行，core 内只需引擎类内部状态（探针结论 + 降级标志），漂移检测主体交给 golden 回归（D8）。
-- 说明：降级为任务级兜底而非能力级降级——capabilities 声明不变（见 D5），record 留痕降级事实。
+**D2 降级链——已作废（2026-09 breaking）**
+- 原方案「app-server 优先 + probe 门控 + 首败降级 spawn 重跑」已随 CLI spawn 通道整体删除（launcher.ts / appserver-probe.ts 等整文件删除）：协议漂移不再降级保底，直接报可操作错误。原文 git 可追溯（含被否的「硬失败单路径」论证——该方案正是现行终态）。
 
 **D3 abort 链 = session/stop 优先，杀进程为最后手段**
 - 选择：任务收到 AbortSignal → ①发 `session/stop {sessionId}`（协议明示 stop 是唯一绕过请求串行队列的方法）②等待 grace 窗口确认终态 ③stop 失败或超时 → killChain 杀共享进程（接受连坐，因为此时协议已不可信）→ 在途其他任务走崩溃路径。
@@ -204,13 +198,10 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 - 证据：盘点 §2.3 硬缺口；zsw 壳现役 shutdown 链（runner-core.js → killAllSpawnedChildren）零改动验证（A7 场景）。
 - **子决策①（签名与等待策略）**：dispose 双面——同步面：`killAllSpawnedChildren` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步面：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步面的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await killAllSpawnedChildren（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步面供未来宿主/测试消费（A7 判据按此口径）。
 - **子决策②（dispose 触发粒度与 pi 壳收益边界）**：pi 壳的 dispose 挂在 session_shutdown（每 session 关闭触发，subagent-service.ts:521-536）——即常驻进程随 session 结束回收。接受该边界：**G1 在 xyz-agent 侧的收益面 = session 生命周期内多任务零冷启动**（每 session 一次进程冷启动，摊薄到 session 内任务数）；zsw daemon 生命周期长，收益完整。被否：跨 session idle 保活常驻进程——违背 dispose = 防泄漏语义，且 pi 壳在 G4 约束下无法感知进程归属，保活即泄漏面。
-- **子决策③（孤儿自愈）**：宿主 SIGKILL 级崩溃时 dispose 不执行，孤儿窗口从 spawn 模式的秒级任务进程扩大为常驻进程。自愈机制：常驻 HOME 内写 pidfile（`appserver.pid`，含 pid + 启动时间戳）；引擎实例初始化（首任务或显式 probe 触发——引擎惰性实例化，**不是**宿主启动时）发现 pidfile 时按三重判据回收：**pid 仍活 AND `ps lstart` 启动时间与 pidfile 记录一致 AND 命令行匹配 `app-server` 形态**——时间戳判据封死 pid 复用误杀（残留 pidfile + 同形进程被复用）；命令行匹配对 wrapper 形态（A5-② 测试）假阴性漏回收可接受（仅泄漏不误杀）。**时序：先过 D7 目录锁判定——lockfile.pid 归宿主进程（pid 归属分离见 D7），锁被活宿主持有时派生新 HOME、不触碰他人 pidfile；仅在锁无主（持锁宿主已死，接管 HOME）后才执行本回收**。宿主崩溃 → 下次引擎初始化（首任务/probe）时完成回收（A7 场景 2 验证）。
+- **子决策③（孤儿自愈）——已作废（2026-09 breaking）**：pidfile / HOME 目录锁机制随 D7 HOME 池化删除（appserver-home.ts 整文件删除），HOME 共享后无池目录派生与孤儿回收问题。原文 git 可追溯。
 
-**D7 HOME/config = 常驻 HOME 即池目录（锚定不变量保持）+ allProviders 引导 + 凭据刷新 + 所有权隔离**
-- 选择：①**poolKey = 常驻 HOME 目录名**（固定名 `home-appserver`），常驻 HOME = `resolvePoolDir(engineDataDir,'zcode','home-appserver')`——严格维持 spawn 模式的锚定不变量 **poolDir == HOME == db 所在目录**：SQLite 落 HOME 内 `.zcode/cli/db/db.sqlite`，sessionRef.dbPath 相对路径锚 HOME，GUI ①级读取（runtime `readZcodeNativeTier` 按 handle.poolKey 推 poolDir + `isStrictlyUnder` 白名单）对新 record 持续可用、零 runtime 改动。journal 同落该池目录（journal 文件名 = record id，任务间无冲突）。config.json 写入**全部**可用 provider（带 apiKey 者全写）；per-session model 经 create 参数传递。spawn 降级路径继续用现 `home-<provider>-<model>` 池（锚定不变量本就成立）。
-- 依据：app-server 进程启动即要求 `$HOME/.zcode/cli/config.json` 有模型配置（缺失则 create 恒 `-32603 "Model config is missing"`，二进制字符串级验证仍在）；单 HOME + allProviders 是旧实现实证方案（「先 bootstrap 再 probe，否则 appserver 永远误降级 spawn」的教训一并承接——**探针连接也用已引导的 HOME**）。凭据写入与 spawn 池同源（preparer 的 sources 解析复用），不新增凭据来源。
-- **凭据刷新**：常驻进程生命周期内凭据可能变化（spawn 池每任务 mtime 免重写检查即生效，常驻 HOME 无对应物则新 provider 恒撞 `-32603`）。补：每任务比对 sources 配置（内容 hash）与常驻 HOME config.json，不一致 → 重写 config + 重建连接（kill 旧进程、新进程读新配置）；在途任务走崩溃路径（失败可重试），换取凭据变更下一任务生效。**hash 范围限定（实现口径 appserver-home.ts `hashProviderRegistry`）：只覆盖 provider 注册表段，`model.main` 不参与**——per-session model 走 create 参数传入，计入 hash 会在每次换模型时误判「凭据变更」杀掉常驻进程（冷启动收益归零）。
-- **所有权隔离（跨进程并发）**：zsw daemon 若在 xyz-agent 会话内被调用，`XYZ_AGENT_DATA_DIR` 经出站白名单传播（C-proc-09）→ 两宿主进程可能共用同一 engineDataDir。策略：常驻 HOME 目录锁（lockfile：O_EXCL 创建 + pid + 心跳 mtime）。**pid 归属钉死（r3）：lockfile.pid = 持锁宿主进程（引擎实例所在进程）的 pid，心跳 mtime 由该进程更新；常驻 app-server 进程的 pid 只归 pidfile（`appserver.pid`）记录——两文件两 pid 严格分离**。宿主死 ⇒ 锁无主 ⇒ 接管方接管 HOME 并经 pidfile 回收孤儿（D6③）；宿主活 ⇒ 锁活。**「活持有」判定钉死为 lockfile.pid 活 ⇒ 一律视为持有（新实例派生后缀目录）**——心跳 mtime 不参与活持有的否决（桌面睡眠/长 GC 致心跳过期时误判死 → 偷锁双写同一 SQLite，不可接受），仅用于 pid 已死时的锁破坏加速（区分崩溃残留 vs 活持有）。**双接管者竞争闭环：接管 = 删旧锁 + O_EXCL 重建新锁；O_EXCL 失败 = 他方已先行接管，失败方重走锁判定循环（读到对方活 pid → 派生）**。派生目录（`home-appserver-2`…）作自己的 HOME，record 的 handle.poolKey 记**实际**目录名 → ①级锚定随 handle 走，不受派生影响。**派生目录清理语义（钉死）**：journal 文件**永不**随池目录清理（对齐 paths.ts 登记不变量 D5「journal 生命周期跟随 record，不随池删除」）；首期**不自动删除**派生目录（碰撞是罕见场景、目录体量小，破坏性操作判据成本 > 收益）；未来若需清理，前提是无存活引用（存活引用 = 仍有未过 30 天 TTL 的 record 引用该 poolKey），届时另行设计，不预设触发条件。两进程各持 HOME 各自 bootstrap，无 SQLite 并发写竞态。
+**D7 HOME/config——已作废（2026-09 breaking，被共享宿主 HOME + 会话库隔离取代）**
+- 原方案「常驻 HOME 即池目录 + allProviders 引擎 + 凭据 hash 刷新 + 目录锁/pidfile 孤儿自愈」随 HOME 池化删除整章作废：spawn env 不再覆写 HOME（共享宿主 HOME），凭据经 fs 拦截 launcher 注入，锁/pidfile/派生目录复杂度整章删除。会话库去向见 [zcode-session-db-isolation.md](zcode-session-db-isolation.md)。原文 git 可追溯。
 
 **D8 probe / golden = 协议冒烟探针 + 帧序列 golden 语料替换**
 - 选择：①probe 改为 app-server 协议冒烟（独立连接：create 探针会话 → close → shutdown，校验应答形状与 sessionId 提取，预算 10s，不触发模型请求、不产生费用）；**探针连接 env 携带实现期新增标记 `ZCODE_APPSERVER_PROBE_CONN=1`（constants.ts `ZCODE_APPSERVER_PROBE_CONN_ENV`）**——探针用独立短命连接但 env 与主连接同源（同一常驻 HOME），该标记供真机 wrapper / fake 侧区分「探针连接」与「主连接」（测试断言探针帧序、故障注入只命中主连接的判据；A5-② 的 wrapper 探针放行即依赖此标记）。②golden 语料从「stdout 单 JSON」换为「NDJSON 帧序列」（create 应答、推送流、终态帧、read 应答四类样本，fixture 双副本 diff 机制保留）；③探针结论记录 CLI mtime，zcode 升级（mtime 变化）后首个任务前重探。
@@ -230,14 +221,14 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 | 触发 | 协议信号 | core 行为 | 用户可见/恢复 |
 |------|---------|----------|--------------|
-| 方法不存在 / 参数变形 | `-32601` / `-32602`（error.data 带 zod 诊断） | 归档 protocol-drift；首任务降级 spawn 重跑，后续任务直走 spawn | record 标注 `degraded: spawn` + 提示「zcode 升级冒烟失败已回退」；恢复 = core 修适配 |
+| 方法不存在 / 参数变形 | `-32601` / `-32602`（error.data 带 zod 诊断） | **现行：直接报可操作错误**（降级链已删，2026-09 breaking） | 错误指向 zcode 升级后需 core 适配；原文降级方案 git 可追溯 |
 | 模型配置缺失 | `-32603 "Model config is missing"` | 报 `engine_credential_missing`（prepare 期同码） | 检查 provider 凭据配置后重试 |
 | 会话不在内存 | `-32004 "Session is not active"` | 首期任务自包含 + 用后即 close，正常不出现；出现则按任务失败上报（含会话 id） | 任务重试（新会话） |
 | send 时已有轮在跑 | `-32010` | 任务失败上报（不重试——旧实证 busy 不排队不打断） | 单会话一任务是结构保证，出现即 bug，错误信息引导报告 |
 | 反向请求超时断连 | 连接 onClose（旧码 `-32022`） | 全部在途任务失败 + 进程标记失效 | 重试任务自动重建进程 |
 | 进程意外退出 | onClose + stderr 尾 400 字符 | 同上 | 同上 |
 | abort | 宿主 signal | stop → grace → killChain（D3） | record 终态 exitCode=null（杀链合成语义沿用） |
-| 探针预算耗尽 | probe 10s | 结论 failed → 降级 spawn | 同漂移降级 |
+| 探针预算耗尽 | probe 10s | **已作废**（probe 随降级链删除） | — |
 
 ### 3.4 实施不变量（从决策推导，conformance 承接）
 
@@ -256,7 +247,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 | A2 | stream 事件流出 + 快照一致性 | ①zsw 真机跑 workflow，观察终端 live 输出实时刷新；②xyz-agent dev 起 zcode 引擎 subagent，任务运行中打开详情页、任务中途重开 session | ①workflow live 输出随任务运行实时出现（非终态一次性）；②详情页打开可见当时进度快照，重开后渲染与 live 一致（①级 sqlite / ②级 journal 无论哪级命中，内容一致） | G2 |
 | A3 | per-session model | 同进程上并发两任务：任务 A `model: glm-5.3`，任务 B `model: mimo-v2.5` | 两任务各自成功、响应面无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
 | A4 | abort 不连坐 | 两任务并发在途，取消其一 | 被取消任务终态 exitCode=null；另一任务正常完成不受影响（session/stop 只作用于目标会话） | G1/G3 |
-| A5 | 漂移降级 + 重探重建 | 三层：①单测 fixture 注入 `-32602`（回归门）；②真机首败降级——**缺省模式（不设 `XYZ_ZCODE_MODE`，走 D2①② probe 门控路径）** + `XYZ_ZCODE_CLI` 指向包装脚本（转发真 CLI；wrapper 按探针 env 标记 `ZCODE_APPSERVER_PROBE_CONN=1` 识别探针连接并放行——标记语义见 D8，定向时不探不降（D2④）故不可用 `XYZ_ZCODE_MODE=appserver` 定向构造本场景——仅对主连接的首个 create 注入一次 `-32602`），跑真实任务；③真机 mtime 重探——`touch` 真 CLI 文件本体（非 wrapper，避免与 ② 混跑歧义）伪造 mtime 变化后跑下一任务（须独立新进程实例——漂移降级标志随进程重启清零，同进程残留降级态会直走 spawn、不进探针门控） | ①降级 spawn 重跑成功、record 标注、后续直走 spawn；②真连接上首败降级全链成立（错误分类 → 池/HOME 切换 → spawn 重跑 → record 标注）；③mtime 变化触发重探（日志可见 probe 重跑）；另真机显式 `XYZ_ZCODE_MODE=spawn`（无 wrapper 直连）通道全绿（兜底始终可用） | G5 |
+| A5 | 漂移降级 + 重探重建——**已作废**（2026-09 breaking：降级链与探针随 spawn 通道删除，协议漂移直接报错） | — | — | — |
 | A6 | 崩溃重建 | 任务运行中 `kill -9` 常驻进程 | 在途任务失败（错误含 stderr 尾）；紧接的下一任务自动重建进程并成功 | G1 |
 | A7 | 无孤儿进程（三种退出形态） | ①zsw daemon 正常退出（现役 shutdown 链零改动——异步面现役消费方为空，实际生效的是同步 SIGTERM 面，见 D6①）；②宿主 SIGKILL 后重启宿主，**跑一个 zcode 任务（或触发 probe）后再 ps**（引擎惰性实例化，回收挂在引擎初始化而非宿主启动，见 D6③）；③pi 壳 session 关闭触发同步 dispose | ①②每次之后 `ps` 无残留 `app-server` 进程——②的判据为**重启并触发引擎初始化后完成 stale 回收**（pidfile 机制）；③SIGTERM 已随 dispose 同步发出、session 内无泄漏（grace→SIGKILL 兜底边界见 D6 子决策①） | G4 |
 | A8 | conformance 全绿 | 跑 engine conformance 套件（真机 gate）+ zcode 单测族迁移后全量 | C1-C8 适配后全绿；golden 帧序列语料 diff 通过；pi 引擎测试零改动零回归 | G4/G5 |
@@ -272,7 +263,7 @@ A1/A2/A3/A4/A6/A7 为必过门（真机）；A5 的 ①为回归门、②③为�
 | W2 连接层 | AppServerConnection：NDJSON 帧分发（4 帧型）、请求 id 关联、反向请求应答（D9 常量）、崩溃 onClose、惰性启动/重建、stderr tee 落盘 | 新文件 `engines/zcode/connection.ts` + 单测（fake server fixture 从 zsw 仓移植改造） | 协议层与业务层解耦，fake-server 60+ 用例模式可低成本移植；A6 的基础 |
 | W3 会话层 | create/subscribe/send/终态判定（turn.terminal 权威 + 宽松匹配防洪堤）/read 四层兜底链/close | 新文件 `engines/zcode/session-channel.ts` + golden 帧序列语料（替换 golden-sample.ts） | 旧实现同等层（`_createTurn`/`_fetchFinalResponse`）已验证，逐字级协议断言迁移；A2/A3 的基础 |
 | W4 引擎接线 | launcher 双模式分派（app-server 常驻 / spawn 单轮）、run 重写（事件时序前移）、abort 链（D3）、capabilities（D5）、per-session model 透传（task.model → create 参数）、poolKey='home-appserver' 锚定 + journal 同池 + 凭据刷新 + 目录锁/派生 + pidfile 孤儿自愈（D6③/D7）、**运行中 engineHandle 回填**（RunContext 新增可选 `onHandleReady` 回调 + 编排层回填 record.engineHandle + reportRecordTransition 落 entry，§3.4 不变量 3——chat 域经 subagent-service 接线；**workflow 域 SAR 无需同类回填**：zsw live 消费 onEvent 事件流自足，taskId 非 record id、无运行中 record 读取方，防实施者误扩展） | port.ts（RunContext 增可选回调 onHandleReady）、launcher.ts、zcode-engine.ts、preparer.ts（spawn 池语义保留）、appserver-home.ts（appserver home 引导/刷新/锁/pidfile 孤儿自愈——D7 语义自 preparer.ts 拆出的独立模块，语义等价）、constants.ts、registration.ts、persona-router 调用点、subagent-service.ts（onHandleReady 接线 + engineHandle 回填，core 内部） | 核心改造单元；A1-A4 的落点；poolKey 锚定不变量（poolDir==HOME==db）保持是 ①级读取零改动的结构前提；运行中回填是 A2-②「中途打开可见快照」的通道支撑（不回填则运行中 GUI 恒落 ③级 outcome-only） |
-| W5 降级链 | probe 冒烟改写（D8）、首败失效降级、`XYZ_ZCODE_MODE` 定向、record 降级标注 | zcode-engine.ts、probe 相关 | 独立于 W4 主链可并行；A5 的落点 |
+| W5 降级链——**已作废**（2026-09 breaking：probe/降级链/`XYZ_ZCODE_MODE` 随 spawn 通道删除） | — | — | — |
 | W6 测试迁移 + 文档同步 | zcode 单测族迁移（~40+ 用例）、conformance C3/C4 口径、golden 双副本、live gate 4 用例改写；文档同步（见下） | `__tests__/` 7 文件 + conformance 8 文件 + 文档 4 处 | 测试与实现同步交付（不留尾巴）；A8 的落点 |
 
 **文档同步清单**（W6 内完成，防再次出现决策滞后）：

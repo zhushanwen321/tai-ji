@@ -15,7 +15,7 @@
 //   2. journal-*.jsonl 不随池删——生命周期跟随 record，release 只删「该 record 自己的」
 //      journal（record GC 时联动，避免「池删导致仍存 record 的历史从②级静默跌③级」）；
 //   3. 删除失败置 .pool-cleanup-failed 标记文件（可观测不静默），启动期扫描该标记告警。
-//   隔离库边界（2026-09 会话库隔离，设计 docs/design/zcode-session-db-isolation.md D4）：
+//   隔离库边界（2026-09 会话库隔离，设计 docs/architecture/zcode-session-db-isolation.md D4）：
 //   zcode 隔离会话库不在池目录内，但 TTL 扫描会枚举 session-db/（engines/<id>/ 下每个
 //   子目录都被当池遍历）——db.sqlite* 不匹配任何删除条件（无 refs.json 早退；孤儿 journal
 //   只匹配 journal-*.jsonl），由 A9 守卫测试（公共 API + 枚举断言）钉死。
