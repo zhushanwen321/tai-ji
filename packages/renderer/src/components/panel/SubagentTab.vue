@@ -58,7 +58,8 @@
           data-testid="subagent-engine-badge"
         >{{ engineBadgeText }}</span>
         <!-- 停因词（永久会话模型 §3.2.8 U8b）：上一轮为什么停，原文 kebab-case 对齐
-             U8a TUI 决策（interrupted / interrupted-by-restart / ...）；仅 idle 有值时展示 -->
+             U8a TUI 决策（interrupted / interrupted-by-restart / ...）；有值即展示
+            （idle 与 A-lite 轮终 running-resumable 均携带合法停因）-->
         <span
           v-if="subagentMeta?.stopReason"
           class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-70"
@@ -176,8 +177,9 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
       meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
       engine: record.engine || undefined,
       engineFallback: record.engineFallback,
-      // 停因词（U8b §3.2.8）：仅 idle 有意义——「为什么停」一句话解释，不参与资格判定
-      stopReason: record.status === 'idle' ? record.stopReason : undefined,
+      // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
+      // 合法停因；「为什么停」一句话解释，不参与资格判定
+      stopReason: record.stopReason,
     }
   }
 

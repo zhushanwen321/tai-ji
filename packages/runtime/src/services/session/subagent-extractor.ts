@@ -285,10 +285,12 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // closedReason 仅 closed 终态投影（与 legacy 路径同构，防 running + closedReason 脏组合）
     closedReason: status === 'closed' ? optString(d.closedReason) : undefined,
     // [U8 / 永久会话模型 §3.2.8] 意愿 + 展示维度下行投影：intent 字面量守卫（缺省/
-    // 非法 → undefined = active 语义，存量 entry 零迁移）；stopReason 仅 idle 投影
-    //（写面只在收口 entry 携带；与 closedReason 同款防 running + stopReason 脏组合）。
+    // 非法 → undefined = active 语义，存量 entry 零迁移）。不对称守卫：closedReason
+    // closed-only（防 running + closedReason 脏组合）；stopReason 有值即投影——A-lite
+    // 轮终 running-resumable record 也携带合法停因（completed/failed）需下行，string
+    // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。
     intent: d.intent === 'active' || d.intent === 'archived' ? d.intent : undefined,
-    stopReason: status === 'idle' ? optString(d.stopReason) : undefined,
+    stopReason: optString(d.stopReason),
     turns: optNumber(d.turns),
     totalTokens: optNumber(d.totalTokens),
     model: optString(d.model),

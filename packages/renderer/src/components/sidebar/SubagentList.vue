@@ -251,12 +251,17 @@ const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupt
 
 /**
  * 状态点颜色映射（design-tokens 语义色，三态主分类 + 中断细分）。
- *  U8b 两态：idle 三分支（stopReason 派生——失败红 / 中断灰 / 已收口绿）；running 沿用
- *  spinner + done 投影绿 + waiting 半透明 accent；legacy 五值（done/failed/crashed/
- *  cancelled/closed）保留只读兼容（旧 session 显示，S8），closed 经 deriveClosedDisplay 派生。
+ *  U8b 两态：idle 三分支（stopReason 派生——失败红 / 中断灰 / 已收口绿）；running 失败轮
+ *  （A-lite stopReason=failed，markRoundIdle 保持 running-resumable）红点优先于 done/waiting
+ *  投影，其余沿用 spinner + done 投影绿 + waiting 半透明 accent；legacy 五值（done/failed/
+ *  crashed/cancelled/closed）保留只读兼容（旧 session 显示，S8），closed 经 deriveClosedDisplay 派生。
  */
 function statusDotClass(record: SubagentRecord): string {
   if (record.status === 'running') {
+    // 失败轮红点（A-lite）：markRoundIdle 失败轮携带 stopReason='failed' 且保持
+    // running-resumable——先于 done/waiting 投影判据（绿点/半透明点都会误导失败轮），
+    // 与 idle 分支 failed 同判据同色；红点只表达「上一轮失败」，不改变续聊资格语义。
+    if (record.stopReason === 'failed') return 'bg-danger'
     // spinner 只给 isStreaming；one-shot 轮终投影 done 用绿点、其余（等续聊/孤儿兜底）
     // 用 accent 静态点（进行中的非活跃态，区别于 done 绿/error 红/cancelled 灰）。
     if (isDone(record)) return 'bg-success'

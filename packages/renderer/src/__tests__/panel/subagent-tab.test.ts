@@ -336,6 +336,25 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
+  it('停因词：running-resumable 轮终（A-lite markRoundIdle 失败轮）→ 有值即渲染（idle-only 放宽）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'running',
+        stopReason: 'failed',
+        resumable: true,
+        result: 'round did not complete: boom',
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const reason = wrapper.find('[data-testid="subagent-stop-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toBe('failed')
+    wrapper.unmount()
+  })
+
   it('停因词：running（在飞轮无停因）与无 stopReason 的 record → 不渲染停因元素', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'running' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])

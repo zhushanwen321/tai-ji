@@ -262,6 +262,8 @@ describe('SubagentList', () => {
 //   1. running 真在跑           → spinner（Loader2 动画，无静态圆点）
 //   2. running one-shot 轮终投影 → bg-success 绿点（result 有值且 chatMode 显式 false）
 //   3. running 等续聊/孤儿兜底    → bg-accent opacity-60 半透明 accent 点
+//   3b. running 失败轮（A-lite stopReason=failed，markRoundIdle 保持 running-resumable）
+//                              → bg-danger 红点（优先于 done 绿/waiting 半透明）
 //   4. idle 失败（stopReason=failed）→ bg-danger 红点
 //   5. idle 中断（stopReason=interrupted*）→ bg-neutral-dim opacity-50 中性点
 //   6. idle 已收口（completed/reopened/无停因）→ bg-success 绿点
@@ -323,10 +325,35 @@ describe('SubagentList statusDotClass 状态点映射', () => {
     expect(dot.classes()).toContain('opacity-60')
   })
 
-  it('态4 idle + stopReason=failed → bg-danger 红点（投影契约锁定：该形态当前写面尚不可产生，可达路径由写面侧并行修复组补齐）', () => {
+  it('态4 idle + stopReason=failed → bg-danger 红点（投影契约锁定：写面已落地（markRoundIdle A-lite）——失败轮实际落 running-resumable 形态，见态4b）', () => {
     const { dot } = mountDot({ status: 'idle', stopReason: 'failed', subagentId: 'dot-idle-failed-1' })
     expect(dot.classes()).toContain('bg-danger')
     expect(dot.classes()).not.toContain('bg-success')
+  })
+
+  it('态4b running-resumable 失败轮（A-lite markRoundIdle 真实形态：stopReason=failed 下行）→ bg-danger 红点（优先于 done 绿/waiting 半透明）', () => {
+    // chat 失败轮（chatMode true：等续聊形态，不再落半透明 accent 点）
+    const chat = mountDot({
+      status: 'running',
+      result: 'round did not complete: boom',
+      chatMode: true,
+      resumable: true,
+      stopReason: 'failed',
+      subagentId: 'dot-rf-chat-1',
+    })
+    expect(chat.dot.classes()).toContain('bg-danger')
+    expect(chat.dot.classes()).not.toContain('bg-accent')
+    expect(chat.dot.classes()).not.toContain('bg-success')
+    // one-shot 失败轮（chatMode false：done 投影形态不再误绿）
+    const oneshot = mountDot({
+      status: 'running',
+      result: 'round did not complete: boom',
+      chatMode: false,
+      stopReason: 'failed',
+      subagentId: 'dot-rf-oneshot-1',
+    })
+    expect(oneshot.dot.classes()).toContain('bg-danger')
+    expect(oneshot.dot.classes()).not.toContain('bg-success')
   })
 
   it('态5 idle + stopReason=interrupted → bg-neutral-dim opacity-50 中性点（取消后状态流转显示）', () => {

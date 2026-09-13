@@ -244,7 +244,7 @@ export type RoundSettlementOutcome =
 /**
  * 对话模式轮次完成收尾：record 进 idle 态（非终态化，等待续聊）。
  *
- * [U2a/B5] 轮终簿记全集（①-⑨）归口 store.markRoundIdle——本方法瘦身为编排薄壳。
+ * [U2a/B5] 轮终簿记全集（①-⑪）归口 store.markRoundIdle——本方法瘦身为编排薄壳。
  * 簿记语义（细节与 result 写入规则见 record-store.markRoundIdle 方法头）：
  *   - 不调 completeRecord（record 不冻结，保留 turns[] 等运行时状态供续聊累积）
  *   - 不调 store.archive（record 留内存，getMutable 可查、list 可见）
@@ -264,7 +264,8 @@ export async function doFinalizeRoundToIdle(
   record: ExecutionRecord,
   outcome: RoundSettlementOutcome,
 ): Promise<void> {
-  // 簿记①-⑨归口（含 A3 硬断言与⑨ reportRecordTransition entry 上报）。
+  // 簿记①-⑪归口（含 A3 硬断言与⑨ reportRecordTransition entry 上报；⑩ stopReason
+  // 展示位 / ⑪ 轮终磁盘面为 A-lite 增补，见 record-store.markRoundIdle 方法头）。
   // 返回 false = record 不在 store 内存（debug 留痕，无副作用）——两构造性调用面
   //（Continuation 轮末分流 / settleOneShotOutcome SP-5）的 record 均在内存，false 即
   // 调用方 bug，留痕足够。
