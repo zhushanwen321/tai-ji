@@ -1,6 +1,6 @@
 // src/execution/notify-ledger.ts
 //
-// U2 B-ledger：后台通知的持久账本与 courier（设计 docs/design/subagent-dispatch-reliability.md
+// U2 B-ledger：后台通知的持久账本与 courier（设计 docs/architecture/pi-boundary-reliability.md 附录 D
 // §3.3 D4/D5）。
 //
 // 通知拆为两个正交关注点：
@@ -562,7 +562,7 @@ export function createNotifyLedger(
 
   // settled 边沿（D5 ①触发点）：先查回执（销账上一轮投递），再投递新 pending。
   // 回执可见性时序（custom message 落盘 message_end → appendCustomMessageEntry 先于
-  // _emitAgentSettled）= 设计 P-B1(b) 探针门待证项（subagent-dispatch-reliability.md
+  // _emitAgentSettled）= 设计 P-B1(b) 探针门待证项（docs/architecture/pi-boundary-reliability.md 附录 D
   // D5）——实测若晚于 S3 阈值，按既定降级路径收敛为「只记账 + 超时看门狗直达」。
   // at-least-once 正确性不承重于该时序：checkReceipts 错过边沿由看门狗 + 重启恢复兜底
   // （P-B0 相邻机制已源码级锚定，agent-session.js:327-331，PS-07）。

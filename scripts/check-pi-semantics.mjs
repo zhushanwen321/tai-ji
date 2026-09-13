@@ -58,7 +58,7 @@ const warn = (msg) => console.warn(`  ⚠ ${msg}`)
 
 // ── 0. registry 可读 ─────────────────────────────────────────────────
 if (!existsSync(REGISTRY_FILE)) {
-  fail(`登记表不存在: ${REGISTRY_FILE}（U7a 交付物缺失）——恢复动作：从 docs/design/pi-boundary-reliability.md 附录 A 恢复 pi-semantics.json 后重跑 node scripts/check-pi-semantics.mjs`)
+  fail(`登记表不存在: ${REGISTRY_FILE}（U7a 交付物缺失）——恢复动作：从 docs/architecture/pi-boundary-reliability.md 附录 A 恢复 pi-semantics.json 后重跑 node scripts/check-pi-semantics.mjs`)
   process.exit(1)
 }
 let entries
@@ -75,7 +75,7 @@ const ID_RE = /^PS-\d{2,3}$/
 const seenIds = new Set()
 
 if (!Array.isArray(entries) || entries.length === 0) {
-  fail(`登记表必须是条目数组（当前 ${Array.isArray(entries) ? `仅 ${entries.length} 条` : typeof entries}）——恢复动作：按附录 A（docs/design/pi-boundary-reliability.md）补齐 PS 条目后重跑`)
+  fail(`登记表必须是条目数组（当前 ${Array.isArray(entries) ? `仅 ${entries.length} 条` : typeof entries}）——恢复动作：按附录 A（docs/architecture/pi-boundary-reliability.md）补齐 PS 条目后重跑`)
   process.exit(1)
 }
 

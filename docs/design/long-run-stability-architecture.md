@@ -87,7 +87,7 @@ Bun v1.3.14 (macOS arm64)
 
 ### 2.3 失败模式与根因（MECE）
 
-**失败模式 A：pi 进程崩溃，session 死亡，恢复靠手动。** 触发源不止 stale ctx——任何 extension 的未捕获异步异常、pi 自身 bug、系统资源耗尽都可能杀 pi。现状恢复是 lazy 的：用户切回 session 或点「重新打开」才触发 `restoreSession`（`session-service.ts:567-586` 的 `ensureActive`）。这是既有设计 `docs/architecture/pi-exit-notification-and-respawn.md` §6.2 的显式裁决（当时理由：「死亡时没有需要新进程接手的在途操作，立即重建无收益；lazy 天然防 crash-loop」）。**该裁决在「死亡可感知」目标下成立，但在本文 G2「无感自愈」目标下不成立**——lazy 意味着每次扩展崩溃都是一次用户可见、需手动恢复的崩溃。
+**失败模式 A：pi 进程崩溃，session 死亡，恢复靠手动。** 触发源不止 stale ctx——任何 extension 的未捕获异步异常、pi 自身 bug、系统资源耗尽都可能杀 pi。现状恢复是 lazy 的：用户切回 session 或点「重新打开」才触发 `restoreSession`（`session-service.ts:567-586` 的 `ensureActive`）。这是既有设计 pi-exit-notification-and-respawn.md §6.2（已删除，git 可追溯）的显式裁决（当时理由：「死亡时没有需要新进程接手的在途操作，立即重建无收益；lazy 天然防 crash-loop」）。**该裁决在「死亡可感知」目标下成立，但在本文 G2「无感自愈」目标下不成立**——lazy 意味着每次扩展崩溃都是一次用户可见、需手动恢复的崩溃。
 
 **失败模式 B：runtime 单进程托管全部 session，一死全灭。** runtime 的 `uncaughtException` 策略是 graceful shutdown + exit(1) 交给 supervisor 重启（`packages/runtime/src/index.ts:771-778`）——策略本身正确，但影响半径是全部 session。supervisor 有指数退避重启（1/2/4/8/16s，上限 5 次，`apps/electron/main/supervisor/restart-policy.ts`）和 liveness 探针，崩溃恢复链相对完整；但重启后所有活跃 session 变成「持久化但未附着」，等用户操作才逐个 `restoreSession`——案例二的「七 session 同秒连杀」就是这个影响半径的实证。**诚实声明**：案例二的具体触发源（什么导致该次实例级事件）本次调研未能定位——dev 实例与打包版共享数据目录期间的重启/收割行为是最大嫌疑，但日志在该时段存在启动 banner 缺失的断档，无法闭环归因。本设计不承诺消灭该类触发源，只改影响半径与恢复速度；触发源取证由 D1 台账承接未来事件。
 
@@ -208,7 +208,7 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
   | renderer 草稿（D4③，localStorage，**落 Chromium userData，prod 不在 dataDir 内**） | renderer reload 后恢复 | 草稿发送成功即删；session 删除时清对应草稿 | 每 session 一条，KB 级 |
   | 诊断导出 zip（D7） | 用户手动保存 | 用户自选位置、用户自管 | 按需 |
 
-**D2：pi 崩溃 bounded proactive respawn——对 pi-exit-notification-and-respawn §6.2 裁决的显式修订（选定）**
+**D2：pi 崩溃 bounded proactive respawn——对 原 pi-exit-notification-and-respawn.md §6.2 裁决（文档已删除，git 可追溯）的显式修订（选定）**
 
 - **采用**：pi 异常退出后 runtime **自动 respawn**（复用 `restoreSession`：spawn + `switchSession` 附加磁盘历史），有界退避（3 次：1s/4s/16s）+ 熔断（连续失败 3 次 → dead 态 + 死态 UI 带崩溃原因与诊断入口）。五条架构约束：
   1. **计数语义**：退避/熔断按**连续失败**计数，respawn 成功且稳定运行 60 秒即清零——低频抖动（每周崩一次的扩展）永不误入死态。参数与 supervisor 退避（restart-policy.ts）**语义同构**而非相同。
@@ -217,7 +217,7 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
   4. **作用域**：仅**用户可见 session** 自动 respawn；hidden 公共 session（`session-lifecycle.ts` 的 `hidden` 标记）崩溃保持 lazy（无用户感知，下次使用经 `ensureActive` 恢复）——proactive respawn 若含 hidden 会无谓抬高进程基数，直接侵蚀 G3 的内存平台期。
   5. **在途 turn**：renderer 侧 pending 发送注册表在重连后发现该 turn 无终态帧时提示用户一键重发（消息级幂等由既有 msg-id 体系兜底）。
 - **被否**：「保持 lazy restore（现状裁决）」——若用它，案例一场景里用户回来看到的是死态占位，必须手动点「重新打开」；30 天维度每次扩展崩溃都是一次手动恢复，G2 不成立。该裁决当时的论据是「死亡时无在途操作需要新进程立即接手，lazy 天然防 crash-loop」——**新证据使其不再成立**：① 扩展崩溃已从假设变为现实高频源（9/3 实锤，且 21 个自有 extension 的异步回调是同构风险面）；② crash-loop 风险用有界退避 + 熔断解决，不需要靠「用户手动」当熔断器；③ lazy 的收益（防 loop）与 proactive 的收益（无感）不再互斥。
-- **证据**：respawn 路径是既有冷启动恢复路径（`session-lifecycle.ts:830` `restoreSession`），非新机制；退避/熔断与 supervisor 既有退避（restart-policy.ts）**语义同构而非相同**（计数语义差异见采用块第 1 条）。**实施时须同步修订 `docs/architecture/pi-exit-notification-and-respawn.md` §6.2 的裁决记录**（设计文档同步纪律 C-proc-10）。
+- **证据**：respawn 路径是既有冷启动恢复路径（`session-lifecycle.ts:830` `restoreSession`），非新机制；退避/熔断与 supervisor 既有退避（restart-policy.ts）**语义同构而非相同**（计数语义差异见采用块第 1 条）。**实施时须同步修订原裁决记录（pi-exit-notification-and-respawn.md §6.2，已删除，git 可追溯；修订记录落本文件）**（设计文档同步纪律 C-proc-10）。
 - **效果**：G2 在 pi 层成立；配合 D5（遏制扩展错误源）使 respawn 触发率随时间下降。
 - **代价声明（已接受）**：每次 pi 崩溃杀死该 session 的在途 turn。量级：每次崩溃 0-1 个在途 turn，仅影响该 session；恢复路径：pending 重发提示（采用块第 5 条），历史经磁盘 JSONL 无损；重审触发：台账显示 `auto-respawn` 周均 >5 次 → 说明扩展错误源治理（D5）失效，回头治理源头而非调参；显式判定：**可接受**——崩溃已发生的前提下，「自动恢复 + 提示重发」严格优于现状的「手动发现 + 手动恢复」。
 
@@ -273,7 +273,7 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
 
 | ID | 验证的行为断言 | 探针方式 | 状态 | 失败时的降级路径 |
 |---|---|---|---|---|
-| P1 | pi 异常退出后 runtime 检测、广播 `session.exited`、三 Map 无残留 | 既有设计 pi-exit-notification-and-respawn 的 V1-V3 实测 | ✅ 已验证（该设计已交付） | — |
+| P1 | pi 异常退出后 runtime 检测、广播 `session.exited`、三 Map 无残留 | 既有设计 pi-exit-notification-and-respawn（已删除，git 可追溯）的 V1-V3 实测 | ✅ 已验证（该设计已交付） | — |
 | P2 | respawn 复用 `restoreSession`（spawn + switchSession 附加磁盘历史）历史完整 | 冷启动恢复是日常在用路径 | ✅ 已验证（既有行为） | — |
 | P3 | pi 收到 SIGTERM 后会 flush session 文件再退出（滚动重启无损的前提） | 实施期实测：对活跃 pi 发 SIGTERM，比对退出前后 session 文件尾部 entry | ⛔ E5 实施门前必跑 | 失败 → 改为先 RPC 触发 flush/ compaction 再杀；仍不行 → 滚动重启接受尾部未 flush 丢失并在预告横幅声明 |
 | P4 | `app.getAppMetrics()` 在 macOS 打包版能提供 per-renderer 内存读数 | 实施期在打包版打点验证字段可用性 | ⛔ E4 实施门 | 失败 → renderer 内存监控降级为仅台账记录 render-process-gone 时的系统压力快照 |
@@ -311,7 +311,7 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
 | E6 | **一（根治）** | **资源治理协议化**：历史分页预算协议 + entryStates 截断/图片落盘 + tee 日志轮转 + 大文件读流式化（含内存水位打点） | D6 | 无硬依赖 | 数据路径有界化是 30 天内存平台期的根本保证；水位打点验证自身有效性 |
 | E1 | 二（取证） | **崩溃台账与水位打点基建**：crash journal 双文件 writer、Schema 落 `packages/shared`、轮转、`cleanExpiredLogs` 白名单扩展 | D1 | 建议阶段一后（水位打点已提前） | 阶段一落地后崩溃应趋零，台账主要服务残余事件归因与阶段三自愈的可观测 |
 | E7 | 二（取证） | **诊断导出**：设置页入口 + 打包逻辑 | D7 | E1 | 取证闭环出口 |
-| E3 | 三（自愈） | **pi 崩溃自动自愈**：bounded respawn（连续失败计数 + 熔断 + 分类差异化）+ 主动终止抑制通道（intentional-kill 集合，覆盖 shutdown / 滚动重启 / delete 族 / restore 清场 / create-fork 失败清理，登记枚举含 tempId 与 forkedId）+ respawn 作用域限定 + 死态 UI + 在途 turn 重发提示；同步修订 pi-exit-notification-and-respawn.md §6.2；**防掩盖：respawn 事件必须用户可见（toast/系统消息）+ 台账计数纳入重审触发** | D2 | E1 | 前两阶段完成后残余崩溃频率应已显著下降，自愈的性价比与风险面在此阶段重新评估 |
+| E3 | 三（自愈） | **pi 崩溃自动自愈**：bounded respawn（连续失败计数 + 熔断 + 分类差异化）+ 主动终止抑制通道（intentional-kill 集合，覆盖 shutdown / 滚动重启 / delete 族 / restore 清场 / create-fork 失败清理，登记枚举含 tempId 与 forkedId）+ respawn 作用域限定 + 死态 UI + 在途 turn 重发提示；同步修订原 pi-exit-notification-and-respawn.md §6.2（已删除，git 可追溯；修订记录落本文件）；**防掩盖：respawn 事件必须用户可见（toast/系统消息）+ 台账计数纳入重审触发** | D2 | E1 | 前两阶段完成后残余崩溃频率应已显著下降，自愈的性价比与风险面在此阶段重新评估 |
 | E4 | 三（自愈） | **renderer 自愈闭环**：全局错误捕获（含节流去重）+ 面板级错误边界 + render-process-gone 自动 reload（per-window 循环保护）+ 草稿持久化（含清理通道）+ 内存压力联动；**防掩盖：reload 必须带可见 toast 与台账计数** | D4 | E1 | 同上 |
 | E5 | 三（自愈） | **runtime 看门狗与滚动重启**：水位采样 → 降级 → 滚动重启（专用退出码 + supervisor 计划内重启分支 + **持续 checkpoint 交接文件**含冷启动/容错/风暴防护契约 + 崩溃/滚动重启统一自动 reattach + relay 活跃推迟（30 分钟上限 + 双维度硬升级阈值）+ 非阻塞横幅）；**防掩盖：滚动重启必须横幅可见 + `rolling-restart-forced` 计数纳入重审触发** | D3 | E1；E3 先行（复用 respawn 设施与抑制通道） | 最复杂、兜底性最强的一个，放最后；届时若阶段一已消除内存压力，可依据水位数据裁剪甚至缓建 |
 
@@ -325,6 +325,6 @@ runtime 连续采样发现 heap 越过告警线（如 heapUsed 达 heap 上限 7
 
 ## 附录：与既有文档的关系
 
-- 本文修订 `docs/architecture/pi-exit-notification-and-respawn.md` §6.2 的「lazy respawn」裁决为「bounded proactive respawn」（理由见 D2），实施 E3 时同步回写该文档。
-- 本文与 `docs/design/pi-boundary-reliability.md`（pi 语义吸收层）正交：该设计防「语义漂移」，本设计防「进程死亡与资源衰变」。
+- 本文修订 原 `docs/architecture/pi-exit-notification-and-respawn.md` §6.2（该文档已删除，git 可追溯） 的「lazy respawn」裁决为「bounded proactive respawn」（理由见 D2），实施 E3 时同步回写该文档。
+- 本文与 `docs/architecture/pi-boundary-reliability.md`（pi 语义吸收层）正交：该设计防「语义漂移」，本设计防「进程死亡与资源衰变」。
 - 短期点修清单（smart-context stale ctx 修复、render-process-gone 最小 reload、WS 帧上限、全量读护栏）由用户另行安排，本文 E2/E4/E6 会将其协议化收编，不冲突。

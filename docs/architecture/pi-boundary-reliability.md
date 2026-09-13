@@ -2,9 +2,9 @@
 
 > **一句话结论**：2026-08-27 同日的两起事故（subagent 派发 429/gc、思考等级自动变关）不是两个独立 bug，而是同一个架构空缺的两次显形——**xyz-agent 与 pi 之间缺少一层「语义吸收层」**：对 pi 私有语义的本地推断散布在扩展/core/renderer 多处且互不知晓，跨边界承诺（派发、改状态、发通知）一律没有受理确认，对 pi 语义的依赖只有人读登记没有机器守卫。本设计从终态倒推四支柱（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫）+ 一套硬校验护栏与治理更新，把「同类问题」从靠人肉排查变成 CI/pre-commit 红灯。落地分两个切片：切片 1（subagent 派发域）已有独立技术方案并通过一轮对抗式审查；切片 2（思考等级/模型能力域）决策在本文 D2-D4。
 
-- **层声明**：架构程序层 → 下一层产物为各切片技术方案。切片 1 技术方案已存在（`docs/design/subagent-dispatch-reliability.md`）；切片 2 规模小（runtime 一个服务面 + renderer 三处接线 + 表单一个字段），本文 D2-D4 已设计到可实施深度，不再单独出文档；护栏与治理（D6-D8）本身就是实施清单。
+- **层声明**：架构程序层 → 下一层产物为各切片技术方案。切片 1 技术方案已实施交付（原独立文档已收编本文附录 D）；切片 2 规模小（runtime 一个服务面 + renderer 三处接线 + 表单一个字段），本文 D2-D4 已设计到可实施深度，不再单独出文档；护栏与治理（D6-D8）本身就是实施清单。
 - **证据基线**：本文全部现状事实取自 2026-08-27 两次排查的实证记录与三轮独立代码核查（pi 实装 `@earendil-works/pi-coding-agent@0.84.1` / `pi-ai@0.84.1` / `pi-agent-core@0.84.1` dist 直读，均已 `npm ls` 核对版本；xyz-agent 侧文件:行号经 subagent 实读核对）。事故 A 基线 session：`~/.xyz-agent/pi/sessions/2026-08-27T10-58-34-533Z_01a042df-21a5-783d-890d-61e075514b9d.jsonl`。
-- **切片关系**：切片 1 = [subagent-dispatch-reliability.md](subagent-dispatch-reliability.md)（D1-D6 / U1-U4 / S1-S5，审查报告见同名 .review.md，4 must-fix + 5 suggestions 已全部落盘修订）。本文不重述其细节，只引用结论。
+- **切片关系**：切片 1 = 附录 D 决策索引（原独立设计文档 subagent-dispatch-reliability.md 已于 2026-09-13 收编删除，全文 git 可追溯）。本文不重述其细节，只引用结论。
 - **审查记录**：本文经一轮对抗式审查（审查报告 pi-boundary-reliability.review.md 已删除，git 可追溯；3 must-fix + 8 suggestions；49 处事实抽查 47 命中 2 偏离），must-fix 已全部落盘修订，suggestions 全部吸收（含判据适用边界、事故 B 数据流图、多包版本门禁、verifiedWith 防线分层、缓存键补维、锚点修正）。
 - **2026-08-28 增补（D9 轮询精简 + 附录 C）**：经 ZCode（打包版反混淆直读）与 deepseek-harness / opencode 源码对照调研后新增。增补项中的代码落地（plugin-host 30s 空转删除、flushAll 5s×2 删除、handoff 2s 事件化、更新检查 20min→60min、skill watch polling 降级化）已随当日提交完成并测试全绿；thinkingLevel 30s 轮询删除仍随 U6 落地。本增补为删减性质 + 全部带证据锚点，未再单走一轮对抗式审查。
 
@@ -419,3 +419,18 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 | ZCode（~/GitApp/ZCode 打包版反混淆直读） | 无 engine ping（30s 请求超时 → dispose+SIGTERM+惰性重建，wakaru-test/host/entry.js:5158、chunk_LG.js:137-149）；renderer↔host MessagePort 零心跳；无 /health 轮询；更新检查启动+1h（main/index.js:17712）；fs.watch+150ms debounce 无轮询兜底；重试线性 1s×n ≤5 + 120s 窗口 2 次崩溃熔断 |
 | deepseek-harness | runtime core 全仓仅 1 个 setInterval（ELU busy-budget 采样 25ms，60s busy/600s wall）；MCP 重连 500ms→30s ×10 + 30s 稳定窗清零 |
 | opencode | SSE 心跳 10s/15s + 客户端 1s→30s 指数退避重连；OAuth 严格 RFC 8628（server interval / first-poll 前 sleep / slow_down +5s） |
+
+## 附录 D：切片 1（subagent 派发域）技术方案决策索引（2026-09-13 收编）
+
+> 原独立设计文档 `subagent-dispatch-reliability.md`（D1-D6 / U1-U4 / S1-S5，四轮对抗审查收敛，已全部实施交付）收编为决策索引；全文与审查轨迹 git 可追溯。现行机制锚点：模型裁决 `packages/subagent-core/src/shared/model-ref.ts`、通知账本 `packages/subagent-core/src/execution/notify-ledger.ts`、投递内核 `packages/session-delivery/src/delivery.ts`。
+
+| # | 决策 | 被否方案（要点） |
+|---|------|----------------|
+| D1 | 模型裁决收拢为 `assertCanonicalModelRef` 单函数——全等放行 + registry 孪生守卫，模糊匹配只做报错建议绝不采纳 | 大小写宽容采纳（采纳即改写，翻译层随 registry 刷新漂移）；现状双层规则（扩展精确 + pi pattern 模糊——429 空转实证）；只做全等不做孪生守卫（恒等式静默破产面） |
+| D2 | spawn 前置守卫——`--model` 只接已裁决的 ModelRef | 给 pi CLI 参数做引号/转义优化（pattern 引擎是 pi 私有语义，赌行为） |
+| D3 | 不改 pi，以上游缺陷为设计常量 | 提 PR / fork（项目 MANDATORY 纪律禁止） |
+| D4 | 通知存在性与可达性分离——持久账本先行，投递尽力，回执销账（at-least-once） | 内存销账（重启即全量重放）；delivery 单打独斗（retry 重试的是函数调用不是事实——十余次完成仅 1 条落盘反证）；纯拉取（无触发器 G2 失效） |
+| D5 | courier 单通道化——投递时机统一收敛 settled 边沿直达，删除 steer 与 nextTurn 通道 | steer 通道（消费窗极窄且回执为零）；nextTurn 队列（初稿选型审查证伪：注入点只在 `session.prompt()` 内，主 agent 长 streaming 时无限期滞留 + 超时重放重复涌入） |
+| D6 | outcome 一等字段在 completeRecord 唯一写入点定形 | 各消费点本地推导（三处同构 switch 已产 bug）；改 closedReason 语义（波及 30 余处消费点与历史兼容） |
+
+三项改造同构于一个原则：**派发契约的两个承诺（start 时承诺可执行的模型、完成后必达通知）都必须有受理确认与单一权威**——即四支柱「能力注册表 / 确认式送达」在派发域的实例化。

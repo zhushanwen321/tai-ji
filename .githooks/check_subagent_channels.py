@@ -2,7 +2,7 @@
 r"""
 subagent-workflow 通道禁则检查（C-ext-19，pi-boundary-reliability §3.3 D5 + D7 G4 行）。
 
-规则（authority：docs/design/pi-boundary-reliability.md D5「确认式送达」与 D7 G4；
+规则（authority：docs/architecture/pi-boundary-reliability.md D5「确认式送达」与 D7 G4；
 constraints.json 登记 C-ext-19 随 U8 落盘）：
   扫描 extensions/universal/subagent-workflow/src/ 的 .ts 源码
   （排除 __tests__/ 与 *.test.ts / *.d.ts——测试模拟串不拦，同 install-hooks.sh
@@ -60,7 +60,7 @@ MODEL_FLAG_RE = re.compile(r"""["']--model["']""")
 EXEMPT_RE = re.compile(r"g4-allow[:：]\s*\S+")
 
 CONSTRAINT_ID = "C-ext-19"
-DESIGN_DOC = "docs/design/pi-boundary-reliability.md"
+DESIGN_DOC = "docs/architecture/pi-boundary-reliability.md"
 
 
 def parse_args(argv: list[str]) -> tuple[bool, str | None]:

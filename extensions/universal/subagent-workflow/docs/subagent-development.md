@@ -320,7 +320,7 @@ function createResultWatcher(pi, state, resultsDir, intervalMs) {
   subagent-log-<id>.md # Markdown 格式日志
 ```
 
-> 后台任务的**结果语义通知**（完成/终态投递）必须走确认式送达——持久账本 + notifyId 幂等 + settled 边沿 courier，禁依赖 steer/followUp/nextTurn 内存队列的 at-most-once 通道（约束 C-ext-19，设计见 [pi-boundary-reliability.md](../../../../docs/design/pi-boundary-reliability.md)）。
+> 后台任务的**结果语义通知**（完成/终态投递）必须走确认式送达——持久账本 + notifyId 幂等 + settled 边沿 courier，禁依赖 steer/followUp/nextTurn 内存队列的 at-most-once 通道（约束 C-ext-19，设计见 [pi-boundary-reliability.md](../../../../docs/architecture/pi-boundary-reliability.md)）。
 
 ---
 
@@ -477,7 +477,7 @@ async function deliverSubagentResultIntercomEvent(
 }
 ```
 
-> 结果语义的跨会话投递同样受 C-ext-19 确认式送达约束（账本 + 幂等键 + courier，见 [pi-boundary-reliability.md](../../../../docs/design/pi-boundary-reliability.md)）。
+> 结果语义的跨会话投递同样受 C-ext-19 确认式送达约束（账本 + 幂等键 + courier，见 [pi-boundary-reliability.md](../../../../docs/architecture/pi-boundary-reliability.md)）。
 
 ---
 

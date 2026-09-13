@@ -1,7 +1,7 @@
 // src/shared/__tests__/model-ref.test.ts
 //
 // [U1 ModelRef 全等裁决] assertCanonicalModelRef / modelRefFromVerified 单测族。
-// 设计权威：docs/design/subagent-dispatch-reliability.md §3.3 D1（规则①~⑤含孪生守卫）、D2（继承路径豁免口径）。
+// 设计权威：docs/architecture/pi-boundary-reliability.md 附录 D §3.3 D1（规则①~⑤含孪生守卫）、D2（继承路径豁免口径）。
 //
 // P-A2（实施期门）：孪生守卫行为验证——含孪生的 registry 快照实测拒单路径 +
 // 无孪生快照实测放行路径。「有孪生仍放行」= 守卫失效，阻断合入。

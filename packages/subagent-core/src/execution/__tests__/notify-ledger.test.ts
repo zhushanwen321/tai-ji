@@ -1,7 +1,7 @@
 // src/execution/__tests__/notify-ledger.test.ts
 //
 // U2 B-ledger 单测族：通知账本与 courier 的四步生命周期
-// （设计 docs/design/subagent-dispatch-reliability.md §3.3 D4/D5）。
+// （设计 docs/architecture/pi-boundary-reliability.md 附录 D §3.3 D4/D5）。
 // u-5c 迁自壳套件 src/__tests__/notify-ledger.test.ts（被测 module 是 core 件，
 // 唯一测试覆盖原落壳——设计 §2.2 C6 / §1 目标 6）。
 //

@@ -1669,7 +1669,7 @@
         "extensions/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d2能力注册表--runtime-单点服务面离线同源--在线对账选定",
+        "architecture/pi-boundary-reliability.md#d2能力注册表--runtime-单点服务面离线同源--在线对账选定",
         "adr/0064-pi-semantic-absorption-layer.md"
       ],
       "dimensions": [
@@ -1696,7 +1696,7 @@
         "packages/renderer/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d3生效回执接通并上升为协议约束选定",
+        "architecture/pi-boundary-reliability.md#d3生效回执接通并上升为协议约束选定",
         "adr/0064-pi-semantic-absorption-layer.md"
       ],
       "dimensions": [
@@ -1741,7 +1741,7 @@
         "packages/session-delivery/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d5确认式送达通用化at-most-once-内存通道禁止用于结果语义选定",
+        "architecture/pi-boundary-reliability.md#d5确认式送达通用化at-most-once-内存通道禁止用于结果语义选定",
         "extensions/extension-conventions.md"
       ],
       "dimensions": [
@@ -1785,7 +1785,7 @@
         "packages/runtime/package.json"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d6漂移守卫体系pi-语义依赖的机器登记--探针--版本门禁选定"
+        "architecture/pi-boundary-reliability.md#d6漂移守卫体系pi-语义依赖的机器登记--探针--版本门禁选定"
       ],
       "dimensions": [
         "business-logic"

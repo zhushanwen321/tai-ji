@@ -63,7 +63,7 @@ Agent Runtime（一个 Node.js 进程）
 
 ### 语义吸收层（pi-boundary-reliability，2026-08-28）
 
-xyz-agent 与 pi 之间对 pi 私有语义的统一适配层（[ADR-0064](../adr/0064-pi-semantic-absorption-layer.md)）：对 pi 语义的推断与跨边界承诺只在边界一次吸收，域内只剩确定性；EventAdapter 只适配传输格式，语义适配归本层，散布在各处的本地推断即「影子推断」。四支柱（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫）的权威词条落 [extensions glossary 的 pi 边界可靠性段](../extensions/glossary.md)，设计全文见 [docs/design/pi-boundary-reliability.md](../design/pi-boundary-reliability.md)。
+xyz-agent 与 pi 之间对 pi 私有语义的统一适配层（[ADR-0064](../adr/0064-pi-semantic-absorption-layer.md)）：对 pi 语义的推断与跨边界承诺只在边界一次吸收，域内只剩确定性；EventAdapter 只适配传输格式，语义适配归本层，散布在各处的本地推断即「影子推断」。四支柱（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫）的权威词条落 [extensions glossary 的 pi 边界可靠性段](../extensions/glossary.md)，设计全文见 [docs/architecture/pi-boundary-reliability.md](../architecture/pi-boundary-reliability.md)。
 
 ### Subagent
 
