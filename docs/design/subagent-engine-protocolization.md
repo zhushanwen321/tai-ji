@@ -81,7 +81,7 @@
 > 后续改动实现级细节直接改代码并以本文件对应章节为入口；本文件只在**决策或语义**变化时修订。
 
 > 关联：`zcode-session-db-isolation.md`（前置小改，其改动最终落在 `zcode-subagent-cli` 包内）；
-> `../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md`（EnginePort 抽象层；其中「reader 划为双端复用共享只读模块」
+> `subagent-engine-abstraction.md`（EnginePort 抽象层；已删除，git 可追溯——其中「reader 划为双端复用共享只读模块」
 > 的裁决由本设计**显式反转**，见 D9）。
 
 ---
@@ -120,7 +120,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 
 **迁移范围（用户裁决 2026-09-08，硬约束）**：**`pi` 与 `zcode` 两个引擎都必须完成外移**，
 **不允许任何内置引擎例外**。驱动细节重写归各自提取设计（§5 末），但「迁移完成」属本设计验收范围，
-> **【2026-09-09 实施期裁决注记 → 已收口（2026-09-09 协议 v1.x）】** zcode 已全量外移（engines/zcode 删除）；pi 的 **chat 续聊域**曾存在一处**临时显式豁免**——v1 协议 8 反向通道未含 HostBridge 载荷面（ChatRoundTicket/长驻轮/resume），chat 域 inproc 分支保留（engines/pi 仅余 chat 专用面）。**该豁免已随协议 v1.x 载荷扩展落地收口**：第 9 反向通道 `host/roundLifecycle`（settled/idle+anchor/failed）+ `RunParams.chat` 会话形态 + `interact` 激活承载续聊/插话/关断，`engines/pi` 整目录删除（含旧 143 误分类器），pi 引擎单一 CLI 形态达成。（历史）权威源 = [chat-domain-v1x-liveness-governance.md](../architecture/history/chat-liveness-v1x-2026-09/chat-domain-v1x-liveness-governance.md)（D1/D3/D5；该文已 superseded，现行权威 = [subagent-chat-run-unification.md](subagent-chat-run-unification.md)）。
+> **【2026-09-09 实施期裁决注记 → 已收口（2026-09-09 协议 v1.x）】** zcode 已全量外移（engines/zcode 删除）；pi 的 **chat 续聊域**曾存在一处**临时显式豁免**——v1 协议 8 反向通道未含 HostBridge 载荷面（ChatRoundTicket/长驻轮/resume），chat 域 inproc 分支保留（engines/pi 仅余 chat 专用面）。**该豁免已随协议 v1.x 载荷扩展落地收口**：第 9 反向通道 `host/roundLifecycle`（settled/idle+anchor/failed）+ `RunParams.chat` 会话形态 + `interact` 激活承载续聊/插话/关断，`engines/pi` 整目录删除（含旧 143 误分类器），pi 引擎单一 CLI 形态达成。（历史）权威源 = chat-domain-v1x-liveness-governance.md（D1/D3/D5；该文已 superseded 且已删除，git 可追溯；现行权威 = [subagent-chat-run-unification.md](subagent-chat-run-unification.md)）。
 完成定义见 §3.8 D6。
 
 **in scope**：引擎协议 v1；引擎 SDK 包；core 壳侧边界；发现与注册（manifest + 配置 + 搜索路径 + 时机）；
@@ -615,7 +615,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 
 #### D9 反转记录（与既有权威文档的冲突，显式登记）
 
-`docs/architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md` 二轮审查 must-fix① 裁决「reader 划为**双端复用的共享只读模块**」，
+`subagent-engine-abstraction.md`（已删除，git 可追溯）二轮审查 must-fix① 裁决「reader 划为**双端复用的共享只读模块**」，
 并把 runtime 侧 tsup `noExternal` 登记为复用载体。本设计**反转该裁决**：reader 随引擎包外移，core 侧改为协议 `read`。
 **反转理由**：① 双端复用的前提是「同一份 TS 模块」，与「引擎不得 import core / core 不得 import 引擎」互斥；
 ② 保留它会让 core 永久静态依赖 zcode 实现（H1 无法清除），DoD#3 不可达。

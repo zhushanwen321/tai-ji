@@ -13,21 +13,18 @@ v3 视觉稿（shell/sidebar/panel/settings/overlays/workspace/overview/new-task
 | `fast-fork/` | 待实现 | 快速分叉（Fork-to-Ask + 后台分支管理） |
 | `fast-merge/` | 待实现 | 多分支差异聚合（依赖 fast-fork 基础层） |
 | `fast-handoff/` | 待实现 | 一键交接到新 session |
-| `subagent-panel/` | 活跃 | agent-call-streaming + workflow-extension-adaptation |
 | `research/` | 实现调研 | pi steer/followup 队列机制调研 |
-| `handoffs/` | 交接层 | 各能力 spec 的接手入口文档 |
 
-## 根级文件
+（原 `subagent-panel/`、`handoffs/` 与根级 `ui-skeleton.md` / `skeleton-chain.html` / `toolcall-visual-distinction-demo.html` / `fast-fork-merge-handoff-plan.md` 已于 2026-09-13 删除，git 可追溯。）
 
-- `ui-skeleton.md` — L0-L4 递归骨架总纲（术语/拓扑参考，视觉部分以 v6 为准）
-- `skeleton-chain.html` — 骨架链路可视化导航图
-- `fast-fork-merge-handoff-plan.md` — fast-fork/merge/handoff 统一实现计划
+## 术语/拓扑定义
+
+v3 UI 结构术语（Sidebar / Workspace / Panel / Overview / L0-L4 拓扑）的现行载体：`docs/architecture/context.md`「v3 UI 结构术语」章节（原 v3 骨架总纲 ui-skeleton.md 已删，git 可追溯）。
 
 ## 视觉稿去哪了
 
 v3 视觉稿（spec.md + draft-*.html）已被 v6 视觉规格取代：
 - 当前视觉 SSOT：`docs/page-design/v6-master-spec.md` + `docs/page-design/v6-spec-*.html`（原 v6-design.md 已删除，git 可追溯）
 - 当前原子 SSOT：`docs/page-design/v6-tokens.css`（原 design-tokens.md 已删除）
-- 术语/拓扑定义：`docs/architecture/context.md`（v3 UI 结构术语章节）
 
 v3 → v6 的完整演变叙事见 `docs/design-evolution.md`。

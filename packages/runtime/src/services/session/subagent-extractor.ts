@@ -284,6 +284,11 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     status,
     // closedReason 仅 closed 终态投影（与 legacy 路径同构，防 running + closedReason 脏组合）
     closedReason: status === 'closed' ? optString(d.closedReason) : undefined,
+    // [U8 / 永久会话模型 §3.2.8] 意愿 + 展示维度下行投影：intent 字面量守卫（缺省/
+    // 非法 → undefined = active 语义，存量 entry 零迁移）；stopReason 仅 idle 投影
+    //（写面只在收口 entry 携带；与 closedReason 同款防 running + stopReason 脏组合）。
+    intent: d.intent === 'active' || d.intent === 'archived' ? d.intent : undefined,
+    stopReason: status === 'idle' ? optString(d.stopReason) : undefined,
     turns: optNumber(d.turns),
     totalTokens: optNumber(d.totalTokens),
     model: optString(d.model),

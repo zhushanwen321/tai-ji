@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/3/35/Yin_i_Yang_Sonda.svg
-source: Wikimedia Commons (API query)

@@ -41,14 +41,19 @@ describe('normalizeSubagentStatus', () => {
     expect(normalizeSubagentStatus('')).toBe('running')
   })
 
+  it('idle → idle（U8 两态新词直投：无任务在飞可续聊）', () => {
+    // [U8 / 永久会话模型 §3.2.2] entry 写面 U2 起产出 idle——此前被当未知值落 closed
+    // 兜底（「空闲」被误读成终态），U8 投影面切直投。不再触发 unknown warn（下方
+    // warn 用例反向钉住）。
+    expect(normalizeSubagentStatus('idle')).toBe('idle')
+  })
+
   it('未知值 → closed（终态方向兜底，不把已结束记录翻回运行中）', () => {
     expect(normalizeSubagentStatus('unknown')).toBe('closed')
     expect(normalizeSubagentStatus('whatever')).toBe('closed')
-    // idle 是 v4 已删除的死值（idle 已折入 running），按未知值走终态兜底
-    expect(normalizeSubagentStatus('idle')).toBe('closed')
   })
 
-  it('未知状态触发 console.warn 兜底告警', () => {
+  it('未知状态触发 console.warn 兜底告警（idle 属已知两态词，不触发）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     normalizeSubagentStatus('future-status')
     expect(warnSpy).toHaveBeenCalledWith(
@@ -57,6 +62,7 @@ describe('normalizeSubagentStatus', () => {
     // 已知状态不触发 warn
     warnSpy.mockClear()
     normalizeSubagentStatus('done')
+    normalizeSubagentStatus('idle')
     expect(warnSpy).not.toHaveBeenCalled()
   })
 })

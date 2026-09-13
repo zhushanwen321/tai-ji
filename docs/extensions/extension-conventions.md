@@ -34,7 +34,7 @@
   - `@zhushanwen/pi-subagent-workflow` 走单执行链——SubprocessAgentRunner 委托 SubagentService.executeAndAwait（`executeAndAwait` → `runSpawn` → `spawn("pi", ["--mode","json"])` 子进程，进程隔离），`session-runner.runSpawn` 是**唯一**的 Pi 子进程 spawn 点（ADR-030 决策 2）
   - `@zhushanwen/pi-base-tool-enhance` 的 bash 后台任务 spawn：`detached: true` 子进程 + per-session registry 目录 + 模块级轮询器单例判活（任务生命周期绑定 pi 进程而非 session——D7/D17 裁决见包内源码注释，原设计文档 base-tool-enhance.md 已删除，git 可追溯）
   - `execFileSync("git", ...)` 等只读子进程调用可使用 child_process
-  - 引擎抽象（[subagent-engine-abstraction.md](../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md)，2026-08-25）曾新增使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内。（终态更新：zcode 引擎已迁独立包 `packages/zcode-subagent-cli`，只走 app-server RPC 常驻子进程、不走 CLI spawn；zcode reader 的 `node:sqlite` 直读已随读链外移迁入引擎进程）
+  - 引擎抽象（subagent-engine-abstraction.md，2026-08-25；已删除，git 可追溯）曾新增使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内。（终态更新：zcode 引擎已迁独立包 `packages/zcode-subagent-cli`，只走 app-server RPC 常驻子进程、不走 CLI spawn；zcode reader 的 `node:sqlite` 直读已随读链外移迁入引擎进程）
 - 旧包 `pi-workflow`/`pi-subagents` 的双 spawn 路径已废弃（见 [pi-ext-030](./adr/pi-ext-030-subagents-workflow-merge.md)）；旧包 `pi-subagents` 曾用的进程内 `createAgentSession()` 路径已回退为 spawn（进程隔离优先，见 pi-ext-030 决策记录）
 
 ## 资源自包含

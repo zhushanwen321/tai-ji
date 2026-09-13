@@ -3,29 +3,16 @@
 > 2026-08-01 决策: 千问 AI 生成的双鱼太极图作为 xyz-agent logo 的**唯一参考图**，双鱼版作为最终方案。
 >
 > v2 阴鱼版（仅保留阴鱼 + 白鱼眼水滴）已尝试但回退——用户最终选择保留完整双鱼结构。
+> 原始参考图 source.png 与生成过程中间产物（src.txt / autotrace / preview.html）已删除（git 可追溯）。
 
 ## 文件清单
 
 | 文件 | 用途 |
 |------|------|
-| `source.png` | 千问 AI 生成原图 (857x1224)，设计唯一参考 |
-| `source.png.src.txt` | 几何分析数据 (PIL 提取) |
 | `logo.svg` | **最终 logo** (矢量, 竖向 0.7:1)，双鱼太极，6 条 potrace path |
-| `logo.svg.src.txt` | logo.svg 设计说明 |
 | `logo.png` | **logo.svg 渲染的位图版本** (857x1224)，用于 Markdown/竖向场景 |
-| `logo.png.src.txt` | PNG 渲染方法 (headless Chrome + http server) |
 | `logo-square.svg` | **正方形版 logo** (矢量, 1:1)，用外层 g 缩放+居中，几何与 v1 一致 |
-| `logo-square.svg.src.txt` | 正方形版设计说明 (含视觉重心微调细节) |
 | `logo-square.png` | **正方形版 PNG** (1200x1200)，用于 App icon / favicon / 头像 |
-| `logo-square.png.src.txt` | 正方形版 PNG 渲染方法 |
-| `logo-autotrace-raw.svg` | potrace 原始输出，**仅作几何参考底稿**，不要直接用 |
-| `logo-autotrace-raw.svg.src.txt` | autotrace 输出说明 |
-| `preview.html` | 浏览器对比验证页面（白底/深色底两种） |
-
-## 设计过程回溯
-
-- v1 双鱼版（`logo.svg`）— 完整保留
-- v2 阴鱼版（`logo-v2.svg`）— 用户试过，但"看起来负空间感太弱/白鱼眼形状不对"等迭代 3 次后回退
 
 ## 使用方法
 
@@ -35,7 +22,7 @@
 ```
 
 ### 改成项目主题色
-- 黑色色块：搜索 `fill="#000000"`，改为项目主色（如 v3 冷蓝 `#3b82f6`）
+- 黑色色块：搜索 `fill="#000000"`，改为项目主色
 - 鱼眼/描边同理
 - viewBox 是 `0 0 857 1224`，缩放时保持 0.7:1 比例
 

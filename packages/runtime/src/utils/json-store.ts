@@ -6,7 +6,7 @@
  * 默认值、atomicWrite、TTL 缓存、write-back（dirty + 定时 flush + size 跟踪）。
  *
  * 设计依据：6 个 store 的文件均为 KB 级、读带缓存、写低频，同步 IO 对 event loop
- * 无感（详见 docs/architecture/history/refactor-2026-06/runtime-similar-code-review.md P0-A）。统一同步，
+ * 无感（评审证据见 git 历史 runtime-similar-code-review.md P0-A，该文档已删除）。统一同步，
  * 不拆 sync/async 双子类。
  *
  * 归属：跨层共享叶子层 utils/（ADR 0035），是 fs-utils（atomicWrite）与 errors

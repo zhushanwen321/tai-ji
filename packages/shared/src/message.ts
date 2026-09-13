@@ -214,7 +214,9 @@ export interface BgNotifyRecord {
   id: string
   /** 扩展状态枚举（v4 B-1 两态）：
    *  running = 对话模式轮次完成（每轮送达，携带本轮结果，等待下一轮续聊，非终态）；
-   *  closed = 统一终态（含 cancelled/gc 等，closedReason 表达 L2 原因）。
+   *  closed = 统一终态载体（含 cancelled/gc 等，closedReason 表达 L2 原因；永久会话
+   *  模型 U5 起 close（收起）的「已收起」提示与 one-shot 轮终亦经本值送达——终态概念
+   *  删除后 closed 只是通知文案族的载荷词，不再代表会话结束）。
    *  done/failed/cancelled 为 legacy 兼容值（v4 之前旧版扩展产物，历史 session 落盘存在）。 */
   status: 'done' | 'failed' | 'cancelled' | 'closed' | 'running'
   agent: string

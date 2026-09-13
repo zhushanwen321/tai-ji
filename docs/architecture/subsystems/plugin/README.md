@@ -8,7 +8,7 @@
 - 架构：[renderer-rebuild-architecture.md](../../renderer-rebuild-architecture.md) §6（ExtensionHost / 挂载点注册表 / contribution schema v2）
 - 视觉规格：`docs/page-design/v6-spec-plugin-rendering.html`（组件级权威）与 `docs/page-design/v6-plugin-max-demo.html`（全景 mockup）
 
-2026-08 的执行设计集（原 `plugin-rendering/` 目录，六文件：挂载点/view 概念分离、drawer 旧 widget 适配废弃、slash 收编、M16 接线、M17 widget 面板）已全部交付并删除，git 可追溯；关键决策记录见 extension-gui-protocol.md §13 决策日志（含 M17 挂载点定稿）。本目录保留 2026-05 期的融合设计与外部参考分析，进度类文档（status / roadmap / remaining-work / extension-audit）已归档至 [history/refactor-2026-06/subsystems-plugin/](../../history/refactor-2026-06/subsystems-plugin/)。
+2026-08 的执行设计集（原 `plugin-rendering/` 目录，六文件：挂载点/view 概念分离、drawer 旧 widget 适配废弃、slash 收编、M16 接线、M17 widget 面板）已全部交付并删除，git 可追溯；关键决策记录见 extension-gui-protocol.md §13 决策日志（含 M17 挂载点定稿）。本目录保留 2026-05 期的融合设计；进度类文档（status / roadmap / remaining-work / extension-audit，原归档于 history/）与外部参考分析（pi-extension-analysis.md / vscode-extension-analysis.md）已于 2026-09-13 删除，git 可追溯。
 
 ## 阅读顺序（新成员推荐）
 
@@ -16,11 +16,6 @@
 2. design-part1.md（已删除，git 可追溯）— 架构设计（Worker 隔离、RPC、生命周期）
 3. design-part2.md（已删除，git 可追溯）— API 设计、contributes、安全模型
 4. [built-in-plugin-guide.md](built-in-plugin-guide.md) — 内置插件开发指南
-
-## 参考分析
-
-- [pi-extension-analysis.md](pi-extension-analysis.md) — pi extension 系统逆向分析
-- [vscode-extension-analysis.md](vscode-extension-analysis.md) — VS Code extension 系统参考
 
 ## 相关 ADR
 

@@ -1579,7 +1579,7 @@
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md#d5-环境隔离与凭据注入走-per-engine-preparer-钩子隔离目录池化保留随-record-生命周期回收",
+        "../packages/subagent-engine-sdk/src/paths.ts",
         "design/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
       ],
       "dimensions": [
@@ -2071,7 +2071,7 @@
       ],
       "authority": [
         "../docs/design/subagent-engine-protocolization.md",
-        "../docs/architecture/history/chat-liveness-v1x-2026-09/chat-domain-v1x-liveness-governance.md"
+        "../docs/design/subagent-chat-run-unification.md"
       ],
       "dimensions": [
         "arch-boundary",

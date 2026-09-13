@@ -185,7 +185,9 @@ export { QUOTA_PRESETS, matchQuotaPreset } from './quota-presets'
 // SUBAGENT_STATUS_ALL：枚举值全集（B3 护栏，renderer bucket 测试的全集覆盖矩阵数据源）。
 // SUBAGENT_OUTCOME_PLACEHOLDER：③级占位文案（D6 三端锚点 SSOT 值，core 同值字面量 /
 // runtime 钉子断言 / renderer 思考行判据的消费入口）。
-export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER } from './subagent'
+// projectSubagentExecutionStatus：占用两态投影（U8 旧数据只读兼容——legacy 六值 →
+// running|idle，renderer U8b 分桶/过滤器对新旧词汇统一判定的映射 SSOT）。
+export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER, projectSubagentExecutionStatus } from './subagent'
 export type {
   WorkflowRunStatus,
   WorkflowDoneReason,

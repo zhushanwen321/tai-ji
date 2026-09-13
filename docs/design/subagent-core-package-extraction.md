@@ -1,6 +1,6 @@
 # subagent 核心包抽离与双宿主统一（subagent-core）
 
-> 层声明：本文档是「核心包抽离与宿主适配」的架构层设计，下一层产物是**可实施的 HostServices 接口契约 + 包切面文件清单 + zcode 仓迁移对照实现计划**，不跨层到逐测试用例与逐函数实现。上游承接：[subagent-engine-abstraction.md](../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md)（引擎中立抽象，P1-P5 已实施；已被引擎协议化取代）——该设计回答「执行引擎如何可插拔」，本文档回答「执行层与编排层如何成为跨宿主共享的独立包」。
+> 层声明：本文档是「核心包抽离与宿主适配」的架构层设计，下一层产物是**可实施的 HostServices 接口契约 + 包切面文件清单 + zcode 仓迁移对照实现计划**，不跨层到逐测试用例与逐函数实现。上游承接：subagent-engine-abstraction.md（引擎中立抽象，P1-P5 已实施；已被引擎协议化取代；已删除，git 可追溯）——该设计回答「执行引擎如何可插拔」，本文档回答「执行层与编排层如何成为跨宿主共享的独立包」。
 >
 > 状态：两轮对抗式审查。
 > - r1（2026-08-29，报告 `.review/design-review-subagent-core-r1.md`）：4 must-fix 已修复——①D1 切面补 `workflows/` 脚本资产处置（2a/2b 替换对象的落点）②依赖闭包审计补 `config-loader.ts` 触点与 logger 全量计数 ③D6 副作用核对补 runner-appserver 活跃通道处置 ④D2 补 pi 壳 dataRoot 三段回退语义；4 suggestion（D8 计数、检查点 5 降级路径、审计表补注、V1 比对判据与打包验证）已随文处理。

@@ -551,6 +551,8 @@ export class SessionRecords {
  * 结构固定（shared SubagentRecord），逐字段比对而非 JSON.stringify（顺序无关、无序列化抖动）。
  * origin 在比对面（R3-1②）：活 record 的 origin 实际不变，但本函数管 publish 去重——
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
+ * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
+ * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
  */
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
@@ -568,7 +570,12 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.endedAt === b.endedAt
     && a.error === b.error
     && a.closedReason === b.closedReason
+    && a.intent === b.intent
+    && a.stopReason === b.stopReason
     && a.origin === b.origin
+    && a.engine === b.engine
+    && a.engineFallback === b.engineFallback
+    && a.engineHandle === b.engineHandle
 }
 
 /**

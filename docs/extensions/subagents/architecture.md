@@ -103,7 +103,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 机制 | 落点 | 说明 |
 |---|---|---|
-| 状态单一真源 | `execution-record.ts` + `record-store.ts` | 内存 record 与 `session.jsonl` 磁盘重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`） |
+| 状态单一真源 | `execution-record.ts` + `record-store.ts` | 内存 record 与 `session.jsonl` 磁盘重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`）。record 为纯数据 interface（贫血+函数式），行为集中在少数 mutate 唯一入口（create/updateFromEvent/complete/project）——函数式 aggregate root，取代旧实现 11 种状态形状 / 6 处 turns 累加器散落（rationale 见 git 历史 subagents/data-model.md，已删） |
 | 终态标记 | `state-marker.ts` | 单一 `<session>.state` sidecar（`{status, reason?, endedAt?}`）标记 finalized / cancelled；旧名 `.finalized` / `.cancelled` 只读兼容；record 绑定 sidecar `<session>.record-binding`（UF-1：id→file + rootSessionId，跨重启续聊数据源）同挂本载体族 |
 | 进程探活 | `alive-store.ts` | `.alive`（pid + 启动时刻）探活面——写者未随 H1 消亡：随 U6 从 cold-resurrect.ts 改名迁入 cold-lookup.ts，resurrect 回边（跨重启续聊活链）仍调 `writeAliveMarker`（`cold-lookup.ts:157`，把 `.alive` 刷新为当前进程以翻回磁盘活态）——非零写者；[subagent-record-persistence-consolidation.md](../../design/subagent-record-persistence-consolidation.md) D3 的「零写者后删除」清理执行前须先处置该写点 |
 | chat→run 统一 | `conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（终态 guard 分流 / 在途轮 abort 入队 / 空则派发）、`dispatchRound` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`onRunSettled` 轮末收口（doFinalizeRoundToIdle + 通知门路由）；[subagent-chat-run-unification.md](../../design/subagent-chat-run-unification.md) §3.4 |
@@ -139,7 +139,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 主题 | 文档 |
 |---|---|
-| 引擎中立抽象（已归档：被引擎协议化取代） | [docs/architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md](../../architecture/history/engine-abstraction-2026-09/subagent-engine-abstraction.md) |
+| 引擎中立抽象（已被引擎协议化取代） | subagent-engine-abstraction.md（已删除，git 可追溯；现行权威 = [docs/design/subagent-engine-protocolization.md](../../design/subagent-engine-protocolization.md)） |
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
 | 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
 | 体系深化设计（方案层，含体系图与术语） | [docs/design/subagent-post-convergence-architecture.md](../../design/subagent-post-convergence-architecture.md) |

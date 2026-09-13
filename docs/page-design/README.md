@@ -11,15 +11,12 @@ page-design/
 ├── README.md                          本文件（索引 + 归属判定）
 ├── v6-tokens.css                      值 SSOT（hook check_css_token_ssot.py 对照面；运行时真值 = style.css :root，逐 token why 注释在两处 css 内）
 ├── v6-master-spec.md                  ★ v6 单一权威源（决策与范式，整合自 28 份过程文档 + demo）
-├── ui-design-principles.md            UI/UX 设计方法论（认知负荷/格式塔/WCAG，色相无关）
 ├── pi-launch-presets.md               pi 启动预设设计（被 packages/ 5 处源文件引用）
 ├── v6-spec-tokens.html                v6 token 集 + 标注规范（token 值已滞后，真值以 v6-tokens.css 为准）
 ├── v6-spec-*.html                     v6 各视图视觉稿（15 个文件，部分已滞后于 master-spec）
 ├── v6-spec-base.css                   对话流共享 CSS
 ├── v6-plugin-max-demo.html            plugin 最大化交互原型
-├── logo/                              品牌 logo 素材与设计稿
-│   ├── assets/qianwen/                当前唯一活跃素材库（千问双鱼）
-│   └── archive/pre-2026-08-qianwen/   已淘汰素材（butterfly/taiji/taiji-fish + concepts）
+├── logo/                              品牌 logo 素材（assets/qianwen/ 定案四件套）
 └── archive/                           历史设计稿归档（见下方详细说明）
 ```
 
@@ -45,10 +42,9 @@ style.css :root        ← 运行时真值（逐 token why 注释；新增 token
 
 archive/ 是历史设计稿归档区。pre-v3 探索稿（Warm & Soft 时期 demo HTML、过程审查日志等）已于 2026-08-02 清理，完整演变叙事见 [design-evolution.md](../design-evolution.md)。
 
-### archive/ 根 — 早期探索稿与过期规格
+### archive/ 根 — 早期探索稿
 
 - `v6-demo.html` / `v6-drawer-tabs-demo.html` — 早期 HTML 探索稿（已被 `.tmp/v6/` Vue demo 取代，master-spec §附录已降级）
-- `zcode-ui-spec.md` — v3 冷蓝期 Chat UI/UX 布局规格（色值已过期，布局规则仅历史参考）
 
 ### archive/v3/ — 能力设计 spec（活跃，非死稿）
 
@@ -61,9 +57,9 @@ v3 视觉稿（shell/sidebar/panel/settings 等）已被 v6 取代并删除。�
 | `flow-3-subagent/` | 产品主路径 Flow-3 多 agent 编排 |
 | `ask-user/` | inline ask-user 交互设计（被 AskUserOverlay.vue 引用） |
 | `fast-fork/` `fast-handoff/` `fast-merge/` | 跨区联动能力（待实现） |
-| `subagent-panel/` | agent-call-streaming + workflow-extension-adaptation |
 | `research/` | pi steer/followup 队列机制调研 |
-| `handoffs/` | 各能力 spec 的接手入口文档 |
+
+（原 `subagent-panel/`、`handoffs/` 与根级 ui-skeleton/skeleton-chain/fast-fork-merge-handoff-plan 已于 2026-09-13 删除，git 可追溯。）
 
 详见 [archive/v3/README.md](./archive/v3/README.md)。
 
@@ -77,7 +73,7 @@ v3 视觉稿（shell/sidebar/panel/settings 等）已被 v6 取代并删除。�
 | v6 视觉稿（某视图的标注规范）？ | `v6-spec-*.html`（参考，以 master-spec 为准） |
 | 跨模块的用户流程（如 code-review 流）？ | `archive/v3/flow-*/spec.md`（活跃能力 spec） |
 | Fork/Handoff/Merge 联动能力？ | `archive/v3/fast-*/spec.md`（活跃能力 spec） |
-| Logo 素材？ | `logo/assets/qianwen/`（活跃）/ `logo/archive/`（已淘汰） |
+| Logo 素材？ | `logo/assets/qianwen/`（已淘汰素材已删，git 可追溯） |
 | UI 设计演变历史？ | `../design-evolution.md`（单篇汇总） |
 
 ## 关键约束

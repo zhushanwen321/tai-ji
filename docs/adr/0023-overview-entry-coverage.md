@@ -15,7 +15,7 @@ Overview 是独立 L1 Region（与 Sidebar / Workspace / Settings 并列，见 `
 | 来源 | 说法 |
 |---|---|
 | `overview/spec.md` | 入口在 workspace 顶栏「Overview」按钮 |
-| `ui-skeleton.md` | 入口是 shell 级 view 切换（`main` 在 chat/overview/settings 间切） |
+| `ui-skeleton.md`（已删除，git 可追溯） | 入口是 shell 级 view 切换（`main` 在 chat/overview/settings 间切） |
 | `workspace/spec.md` | **完全沉默**（未提 overview）—— 真缺口 |
 
 三方不一致会导致实现时无法判断按钮挂哪、覆盖到哪一层。

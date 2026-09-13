@@ -16,14 +16,16 @@
  */
 
 /**
- * subagent 状态。对齐 pi-subagent-workflow v4 ExecutionStatus 两态：
- * - running：执行中，或对话模式轮次完成等待续聊（非终态）
- * - closed：统一终态（done/failed/crashed/cancelled 合并），L2 原因由 closedReason 表达
- *
- * done/failed/cancelled/crashed 为 legacy 兼容值：v4 之前旧版扩展产物 + manifest 旧值
- * （completed/failed/cancelled）读侧归一需要，v4 起扩展不再产出，仅为历史 session 数据保留。
+ * subagent 状态。对齐永久会话模型（subagent-permanent-session-model §3.2.2）占用两态
+ * + 历史迁移遗留值：
+ * - running：本轮有任务在飞
+ * - idle：无任务在飞，随时可接下一条 message（U8 起扩展写面产出——旧「轮终回 running」
+ *   折叠为 idle，「为什么停」由 stopReason 表达，列表可见性由 intent 表达）
+ * - done/failed/cancelled/crashed/closed：legacy 兼容值（v4~U7 期间扩展产物 + manifest
+ *   旧值读侧归一需要），U8 起扩展写面不再产出，仅为历史 session 数据保留。读侧兼容
+ *   映射见 {@link projectSubagentExecutionStatus}。
  */
-export type SubagentStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'crashed' | 'closed'
+export type SubagentStatus = 'running' | 'idle' | 'done' | 'failed' | 'cancelled' | 'crashed' | 'closed'
 
 /**
  * SubagentStatus 值全集（adversarial-review-fixes §3.3 B3）。
@@ -40,6 +42,7 @@ export type SubagentStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'cras
  */
 export const SUBAGENT_STATUS_ALL = [
   'running',
+  'idle',
   'done',
   'failed',
   'cancelled',
@@ -144,6 +147,23 @@ export interface SubagentRecord {
    */
   closedReason?: string
   /**
+   * 意愿维度（永久会话模型 §3.2.1，U8 下行投影）：用户是否把会话收起来了。
+   * 'archived' = 已收起（close 动作；message 到达自动翻回 'active' = 隐含寻回）。
+   * 缺省（undefined，存量 record 与旧扩展投影）= 'active'（默认列表可见）。
+   * 来源：自描述 subagent-record entry（U8 起 close/寻回迁移写点携带）。列表
+   * 可见性过滤器（U8b）按 `intent === 'archived'` 判「已收起」分区。
+   */
+  intent?: 'active' | 'archived'
+  /**
+   * 展示维度（永久会话模型 §3.2.1，U8 下行投影）：上一轮为什么停。值域 =
+   * 旧 closedReason 七值沿用 + 四个新展示值（interrupted / interrupted-by-restart /
+   * interrupted-by-parent / reopened），见 subagent-core types.ts StopReason。
+   * 仅 status='idle' 时有意义；缺省 = 从未收口 / 存量数据。用 string 而非字面量
+   * 联合：shared 是跨进程契约 SSOT，extension 新增展示值时读侧不因类型收窄丢字段。
+   * 「为什么停」只做一句话解释展示（G2），不参与任何资格判定。
+   */
+  stopReason?: string
+  /**
    * 对话模式标志（residual-fixes 设计）：chat 与否——侧栏执行态细分判据
    * （one-shot 轮终 = chatMode 显式 false + result 有值 → 完成态；chat 轮终 → 等续聊）。
    * 来源：自描述 subagent-record entry（register 起写入显式值，one-shot 为显式 false）；
@@ -219,4 +239,18 @@ export function deriveClosedDisplay(input: { closedReason?: string; error?: stri
   if (reason === 'cancelled') return 'cancelled'
   if (reason === 'gc' && input.error) return 'failed'
   return 'done'
+}
+
+/**
+ * 占用两态投影（永久会话模型 §3.2.2 G2，U8 旧数据只读兼容）：任意 SubagentStatus
+ * （含 legacy 六值）→ 占用两态。
+ *   running → running；其余（idle + legacy done/failed/cancelled/crashed/closed）→ idle。
+ *
+ * 消费方：需要对旧 session 数据按新两态词汇判「正在跑 / 空闲」的读侧（renderer U8b
+ * 分桶判据、过滤器）。旧终态值全部归 idle 而非 running——旧数据里的终态 record 没有
+ * 在飞轮，映射成 running 会复活 spinner / 活跃计数（与 normalizeSubagentStatus 的
+ * 「未知值不翻回运行中」兜底方向一致）。
+ */
+export function projectSubagentExecutionStatus(status: SubagentStatus): 'running' | 'idle' {
+  return status === 'running' ? 'running' : 'idle'
 }

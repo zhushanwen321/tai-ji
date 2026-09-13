@@ -920,6 +920,39 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     expect(records[0]!.closedReason).toBe('user-close')
   })
 
+  it('U8 两态投影：idle entry 直投 idle + intent/stopReason 下行（意愿/展示维度）', () => {
+    const records = scanSubagentEntries([
+      subagentRecordEntry({
+        id: 'sa-idle',
+        status: 'idle',
+        stopReason: 'interrupted',
+        intent: 'archived',
+        endedAt: 5000,
+      }),
+    ])
+
+    expect(records).toHaveLength(1)
+    expect(records[0]!.status).toBe('idle')
+    expect(records[0]!.stopReason).toBe('interrupted')
+    expect(records[0]!.intent).toBe('archived')
+    // 旧会话数据（无新字段）下行不漂移：缺省 intent/stopReason 均 undefined
+    const legacy = scanSubagentEntries([
+      subagentRecordEntry({ id: 'sa-old', status: 'closed', closedReason: 'gc' }),
+    ])
+    expect(legacy[0]!.status).toBe('closed')
+    expect(legacy[0]!.intent).toBeUndefined()
+    expect(legacy[0]!.stopReason).toBeUndefined()
+  })
+
+  it('U8 守卫：stopReason 仅 idle 投影（防 running + stopReason 脏组合）；intent 非法值回落 undefined', () => {
+    const records = scanSubagentEntries([
+      subagentRecordEntry({ id: 'sa-dirty', status: 'running', stopReason: 'interrupted', intent: 'weird' }),
+    ])
+    expect(records[0]!.status).toBe('running')
+    expect(records[0]!.stopReason).toBeUndefined()
+    expect(records[0]!.intent).toBeUndefined()
+  })
+
   it('版本守卫：v≠1 的自描述 entry 跳过（全部无效 → 落 legacy 兜底）', () => {
     const legacyEntries = [
       {

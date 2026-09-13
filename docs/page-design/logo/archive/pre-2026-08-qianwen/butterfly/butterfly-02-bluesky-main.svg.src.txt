@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/6/64/Bluesky_logo_%28white%29.svg
-source: Wikimedia Commons (API query)

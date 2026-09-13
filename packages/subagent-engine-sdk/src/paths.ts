@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * 自算池/journal 路径）；core 侧引用切换已完成（core execution/engine/paths.ts 为
  * re-export shim，子入口 ./engine/paths 解析路径不变）。
  *
- * 设计权威源：subagent-engine-abstraction.md D5/D6。
+ * 设计权威源：constraints.json C-ext-15（原 subagent-engine-abstraction.md D5/D6，已删，git 可追溯）。
  *
  * 为什么独立成模块：extension 写侧（journal 落盘 / preparer 池目录）与
  * runtime 校验侧（subagent-extractor 前缀白名单）必须同源推导——

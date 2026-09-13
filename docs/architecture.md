@@ -102,13 +102,13 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 ## 详细设计文档
 
 - [完整架构设计](architecture/design.md) — 逐点决策 D1–D9 + 分层规则 + 依赖矩阵 + 迁移路线
-- [架构评审问题记录](architecture/history/refactor-2026-06/review-issues.md) — 9 个盲点 D1–D9 的来源与验证（2026-06 重构期，已归档）
+- 架构评审问题记录 — 9 个盲点 D1–D9 的来源与验证（2026-06 重构期；已删除，git 可追溯）
 - [领域术语表](architecture/context.md) — Session/Panel/Runtime + v3 UI 结构术语
 
 ## 视觉与交互层
 
 - [设计 Tokens（值 SSOT）](./page-design/v6-tokens.css) — 太极纯灰暗色原子值 · [v6 主规范](./page-design/v6-master-spec.md)
-- [v3 UI 设计稿（归档）](./page-design/archive/v3/README.md) — L0–L4 递归骨架 + 22 个 draft
+- [v3 能力设计 spec（归档）](./page-design/archive/v3/README.md) — v6 无对应物的功能/跨区联动设计 SSOT（quota/flow/ask-user/fast-*）
 - 视觉/交互 ADR 0019–0023（见下）
 
 ## 架构决策（ADR）
@@ -133,9 +133,9 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 ## 演进 / 调研 / 历史
 
-- [重构迁移计划](architecture/history/refactor-2026-06/migration-plan.md) — 2026-06 重构期 5 阶段路线（已归档） · 术语对齐 R1–R5 已落地进代码，术语以 [architecture/context.md](architecture/context.md) 为准（原 terminology.md 已删除，git 可追溯）
-- [架构调研](architecture/research/) — Electron 打包 · Node.js 路径安全 · Pi Extension 通道
-- [历史归档](architecture/history/) — 被 supersede 的旧架构（pre-electron Tauri 方案等）
+- 重构迁移计划 — 2026-06 重构期 5 阶段路线（已删除，git 可追溯） · 术语对齐 R1–R5 已落地进代码，术语以 [architecture/context.md](architecture/context.md) 为准（原 terminology.md 已删除，git 可追溯）
+- [架构调研](architecture/research/) — Pi Extension RPC/TUI 通道参考清单
+- 历史归档目录已删除（2026-09-13，归档即删除策略）——被整体取代的设计文档直接删，git 可追溯
 
 ---
 
