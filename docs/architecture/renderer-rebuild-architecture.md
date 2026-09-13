@@ -539,7 +539,7 @@ v1 把 B1-B9 缝补「整体取消」偏绝对。修正：**B1（useChat 残留�
 
 - `docs/architecture/renderer-target-architecture.md`（七层 + 挂载点 + ExtensionHost 设计，本文档 §4/§6 的概念源头）
 - `docs/architecture/v6-architecture-refactor.md`（现状审查，数字经本文档二次验证）
-- `docs/todo/remote-use-merge-architecture.md`（T&C 归位清单 + routeInbound 合并设计 + sync 纪律）
+- `docs/todo/remote-use-merge-architecture.md`（T&C 归位清单 + routeInbound 合并设计 + sync 纪律；已删除——remote-use 合并前提失效，git 可追溯）
 - `docs/page-design/v6-master-spec.md`（v6 视觉单一权威源）+ `.tmp/v6/` demo
 
 ---
