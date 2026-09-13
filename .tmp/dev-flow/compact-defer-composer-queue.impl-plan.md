@@ -1,5 +1,5 @@
 # 压缩待发消息展示统一与压缩中活动带 实施计划
-基线: <待 commit 后回填> | 来源设计: docs/design/compact-defer-composer-queue.md (v2) | 日期: 2026-09-13
+基线: 67e5f0f95 | 来源设计: docs/design/compact-defer-composer-queue.md (v3) | 日期: 2026-09-13
 
 ## 0 章节映射
 | 内容 | 本文实际位置 |
@@ -46,7 +46,7 @@ graph TD
 
 ## 4 测试与验收计划
 **测试命令（真实读取自各包 package.json）**：
-- 增量：`cd packages/renderer && pnpm test -- <file>`（vitest run）、`cd packages/renderer && pnpm typecheck`（vue-tsc）
+- 增量：`cd packages/renderer && npx vitest run <file>`（⚠️ vitest 4.1.9 下 `pnpm test -- <file>` 的 `--` 过滤不生效会跑全量，禁用——D1 偏差登记）、`cd packages/renderer && pnpm typecheck`（vue-tsc）
 - 包级回归：`cd packages/renderer && pnpm test`；`cd packages/core && pnpm test`；`cd packages/shared && pnpm test`
 - L0 静态：`pnpm run lint`（root，含 taste-lint/vue_rules_checker）· `node scripts/check-doc-symbol-drift.mjs` · pre-commit 全套钩子
 - 全量（阶段 3 尾）：renderer + core + shared 三包全量 + lint；不跑 extensions 三连（本改动不触 extensions/）与 e2e playwright（无 e2e 用例改动）
@@ -68,12 +68,15 @@ graph TD
 **提速结论**：9 项中 7 项可脚本化降级为 L1 组件测试（A1-A4/A6-A8），1 项半降级（A5 单测为主），仅 A9 需 L4 真机；真机 L4 合并为单轮（browser-automation 连 dev app CDP，按 AGENTS.md `XYZ_DEV_BACKGROUND=1 pnpm dev` 规范）覆盖 A1/A4/A5/A8/A9 五场景——A8 真机步骤按设计场景表执行（D1 长任务提示词维持 run、瞬态豁免以稳态判据）。L0 守卫清单：check-doc-symbol-drift、taste-lint/vue_rules_checker（pre-commit）、useConstantHeightAssert（dev 运行时断言）。预计派发轮次：开发 3 波（u1 → u2∥u3 → u4）+ 真机 1 轮。
 
 ## 5 合理偏差登记表
-（空——实施中产生偏差时逐条登记：偏差内容 / 合理理由 / 是否需回写设计文档）
+| # | Unit | 偏差内容 | 理由 / 处置 |
+|---|------|----------|-------------|
+| D1 | u1 | 测试过滤命令：`pnpm test -- <file>` 在 vitest 4.1.9 下 `--` 后不生效、实际跑全量套件；改用 `npx vitest run <file>` 精确过滤 | 工具链行为修正，非设计偏离；本表登记后 §4 增量命令以此为准 |
+| D2 | u1 | 全量套件中 locale-key-usage-guard.test.ts 报 `panel.message.compactingFlushHint` 零字面引用（i18n 反向守卫） | 预期跨 wave 瞬态：key 由 u1 新增、唯一消费方是 u3 的 ActivityStrip.vue（领地外）；u3 落地后自然转绿，阶段 3 全量套件复验 |
 
 ## 6 状态表
 | Unit | 状态(pending/in-progress/committed/blocked) | 轮次 | 证据指针 |
 |------|---------------------------------------------|------|----------|
-| u1 | pending | 0 | - |
+| u1 | committed（67e5f0f95 基线后 u1 commit；queue-bubble-s8 16/16、typecheck 0、领地 5 文件精确） | 1 | commit hash 见 git log；test_evidence = vitest run queue-bubble-s8 16 passed + pnpm typecheck exit 0（主 agent 复跑确认） |
 | u2 | pending | 0 | - |
 | u3 | pending | 0 | - |
 | u4 | pending | 0 | - |
