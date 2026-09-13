@@ -277,12 +277,12 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     await expect(service.chatActions.deliverChatMessage(record, "second msg")).resolves.toBeUndefined();
     expect(fake.runs.length).toBe(1);
     const continuation = (
-      // [R4 深绑改写] continuations 队列已迁 RunOrchestration 聚合——读取路径改经
-      // 聚合实例（断言对象与强度不变）。
+      // [2026-09-13 design-code-sync 接线] continuations 队列已迁 ChatRounds 聚合——
+      // 读取路径改经聚合实例（断言对象与强度不变）。
       service as unknown as {
-        runOrchestration: { continuations: Map<string, { pendingCount: number }> };
+        chatRounds: { continuations: Map<string, { pendingCount: number }> };
       }
-    ).runOrchestration.continuations.get(record.id);
+    ).chatRounds.continuations.get(record.id);
     expect(continuation?.pendingCount).toBe(1);
 
     // 轮终（应答收敛）→ drain → 队列消息派发为下一轮（单写者前置满足）

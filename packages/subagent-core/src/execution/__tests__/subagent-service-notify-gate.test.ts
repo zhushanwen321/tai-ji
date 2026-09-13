@@ -130,11 +130,12 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     store.register(record);
     // [W3] 轮次编排入口 kickOffChatRound（私有，bracket 调用先例）——协议 run 发起后
     // 挂起，编排性关闭先行，再模拟引擎应答（迟到回注被门拦）。
-    // [R4 深绑改写] kickOffChatRound 本体已迁 RunOrchestration 聚合——bracket 路径
-    // 改经聚合实例（断言对象与强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
+    // [2026-09-13 design-code-sync 接线] kickOffChatRound 本体已迁 ChatRounds 聚合
+    // （自 RunOrchestration 拆出的第三文件）——bracket 路径改经聚合实例（断言对象与
+    // 强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
     const orchestration = (
-      service as unknown as { runOrchestration: { kickOffChatRound: (...args: unknown[]) => void } }
-    ).runOrchestration;
+      service as unknown as { chatRounds: { kickOffChatRound: (...args: unknown[]) => void } }
+    ).chatRounds;
     const identity = {
       agent: "general-purpose",
       agentConfig: undefined,
@@ -171,11 +172,12 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     record.endedAt = Date.now();
     record.closedReason = "gc";
     store.register(record);
-    // [R4 深绑改写] kickOffChatRound 本体已迁 RunOrchestration 聚合——bracket 路径
-    // 改经聚合实例（断言对象与强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
+    // [2026-09-13 design-code-sync 接线] kickOffChatRound 本体已迁 ChatRounds 聚合
+    // （自 RunOrchestration 拆出的第三文件）——bracket 路径改经聚合实例（断言对象与
+    // 强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
     const orchestration = (
-      service as unknown as { runOrchestration: { kickOffChatRound: (...args: unknown[]) => void } }
-    ).runOrchestration;
+      service as unknown as { chatRounds: { kickOffChatRound: (...args: unknown[]) => void } }
+    ).chatRounds;
     const identity = {
       agent: "general-purpose",
       agentConfig: undefined,

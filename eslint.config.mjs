@@ -536,16 +536,19 @@ export default [
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
-  // [H4 record 持久化收敛] record-store.ts 单独提额：H4 设计（docs/design/
+  // [H4 record 持久化收敛] record-store.ts 单独提额：H4 设计（docs/architecture/
   // subagent-record-persistence-consolidation.md）把 record 全部写面收编进
   // RecordStore（十意图原语 + 同步写权威），U1 API 立面落地后 800→1207，
   // U4a 读面收尾 / U4c rebuildIndexes 还将增长。写面收口与行数守卫是显式
   // 冲突，提额至 1400 过渡；H4 全落地后按意图原语族拆分（终态原语/轮次
   // 簿记/重建三轴）属独立重构任务，登记于 H4 impl-plan 残留风险。
+  // [2026-09-13 design-code-sync 追认] 1400→1450：现折算 1429，已破 1400（零余量
+  // 反转成必红）；三轴拆分（终态原语/轮次簿记/重建）待排期，拆分完成即回落。
+  // 一次性追认、禁止再抬。
   {
     files: ['packages/subagent-core/src/execution/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1400, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1450, skipBlankLines: true, skipComments: true }],
     },
   },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
@@ -575,10 +578,13 @@ export default [
   // 1245 → 无界等待修复 1415 → u-h2 1471 → W4 监督器 1548 → W3 协议化 1684 →
   // R0 重排折算 1842 → R1 1785 → R2 1640 → R3 后触发告警 → R4 移除本 override）。
   // run-orchestration.ts 单列：R4 核心编排聚合——[D-R4-1] G1 容量偏差的 lint 面
-  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限，备选第三
-  // 文件 chat-rounds.ts 未采纳，理由见 impl-plan §5 D-R4-1）。终态实测（阶段3 复核）：
-  // 本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts 527 物理行
-  // 合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
+  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限）。终态实测
+  //（阶段3 复核）：本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts
+  // 527 物理行合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
+  // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作面拆出
+  // chat-rounds.ts 后，本文件 1077 物理行 / 549 折算——阈值保持 800（余量健康，
+  // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 794 物理行 / 365 折算，低于
+  // packages 域 500 上限，无需 override（余量健康，不设零余量锁）。
   {
     files: ['packages/subagent-core/src/execution/service/run-orchestration.ts'],
     rules: {

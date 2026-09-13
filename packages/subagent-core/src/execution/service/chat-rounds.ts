@@ -3,7 +3,7 @@
 // docs/architecture/subagent-service-decomposition.md §3.1「ConversationContinuation 归
 // RunOrchestration 协作面」；拆分预案 = run-orchestration 头部 [G1 超限预授权拆分] 段
 // 登记的「备选 = 第三文件再拆 Continuation 协作面」，2026-09-13 design-code-sync 兑现：
-// run-orchestration 折算 845 破 800 零余量锁定线，按预案拆出本文件）。
+// run-orchestration 折算 845 破 800 零余量锁定线，按预案拆出本文件并完成壳装配接线）。
 //
 // 单一职责：chat 域轮次编排——ConversationContinuation 实例表（continuations，本聚合
 // 唯一写者）+ 统一投递入口（deliverChatMessage）+ pi 会话形态轮次 detached 派发主干
@@ -19,10 +19,14 @@
 //   - 本聚合 → RunOrchestration：taskSpecWithModel / outcomeToAgentResult /
 //     settleOneShotOutcome / writeBindingForRecord / effectiveMaxConcurrentFor /
 //     resolveChatEnginePort（壳装配闭包指 runOrchestration 实例方法）；
-//   - RunOrchestration → 本聚合：startFirstChatRound / kickOffOneShotChatRound
-//    （executeViaEngine 的 chatMode 首轮与 one-shot 派发两个调用点，经其 deps 回调）。
+//   - RunOrchestration → 本聚合：startFirstChatRound / kickOffChatRound
+//    （executeViaEngine 的 chatMode 首轮与 one-shot 派发调用点，经其 deps 回调；
+//     kickOffChatRound 回调签名收窄为五参形态——resume/continuation 缺省语义归本聚合）。
 // 两方向均为窄函数接口注入，聚合文件间静态 import 仅 ResolvedIdentity type-only
 //（record-access.ts，边界守卫台账登记边）。
+// [接线完成 2026-09-13 design-code-sync] 壳（subagent-service.ts）组装 ChatRounds 实例
+// 并注入上述双向协作闭包（RecordLifecycle 的 C-4/C-5 回调同步改指本聚合显式接口）；
+// run-orchestration 折算行回落至 800 锁定线内，头部自述已按接线后现实校准。
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——#1 留壳共享依赖
