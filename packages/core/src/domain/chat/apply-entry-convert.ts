@@ -105,13 +105,14 @@ function stripSkillDataBlocks(text: string): { body: string; stripped: boolean }
  *   整体丢弃、不参与后续解析（见 stripSkillDataBlocks）；剥过块但正文无标记时返回
  *   剥后正文（不回退原始文本，防块全文泄漏）。
  * ② 标记还原：`<xyz-skill .../>` 单标记（本设计 segmentsToText 序列化产物，正文占位
- *   标记形态）与 `<xyz-skills>` 降级块（存量落盘，解析复用 shared skill-marker SSOT
- *   的 index/length 位置切片）。标记前后的正文全部保留为 text segment——专防升级前
+ *   标记形态）。标记前后的正文全部保留为 text segment——专防升级前
  *   「捕获组从第一个 <skill 开始、block 前正文不在任何捕获组直接丢弃」的缺陷回归。
  *   与 ① 协调：块内标记已随块整体丢弃，标记命中区间与块区间互斥（区间不相交）。
- * ③ 存量形态兼容（零改动）：pi 原生 block（升级前存量消息）保持存量行为等价——
- *   block 前置 + `\n\nargs` 在后产出 `[skill, args-text]`（`\n\n` 吞入区间实现，见
- *   PI_SKILL_BLOCK_RE）；block 前正文升级前直接丢弃，升级后保留（缺陷修复，D7）。
+ * ③ 存量形态兼容（零改动，对应设计 D7-③）：pi 原生 block 与 `<xyz-skills>` 降级块
+ *   （升级前存量落盘，解析复用 shared skill-marker SSOT 的 index/length 位置切片）
+ *   保持存量行为等价——block 前置 + `\n\nargs` 在后产出 `[skill, args-text]`
+ *   （`\n\n` 吞入区间实现，见 PI_SKILL_BLOCK_RE）；block 前正文升级前直接丢弃，
+ *   升级后保留（缺陷修复，D7）。
  *
  * 优先级实现（apply-entry 测试锁定）：① 先剥块改写扫描域；降级块先扫描并整体占用
  * 区间（含块内嵌套标记与紧随指引行——指引行是块的组成部分，不作正文残留）；单标记

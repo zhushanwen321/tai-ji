@@ -114,8 +114,8 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
   // ── 三形态反解析（D7 兜底通道，composer 多 skill 注入 u3；R4 剥块升级）──────────
   // 反解析 SSOT = apply-entry-convert parseSkillBlock（live 帧 / 历史重建 / 文件重放
   // 三链路共用）。形态① <xyz-skill-data> 剥块（R4 D11 末尾块协议，任意位置整块剔除）、
-  // 形态② xyz 私有标记（本设计序列化产物）+ 存量 <xyz-skills> 降级块、形态③ pi 原生
-  // block（存量，零改动兼容）。
+  // 形态② xyz 私有标记（本设计序列化产物）、形态③ 存量兼容（pi 原生 block +
+  // <xyz-skills> 降级块，对应设计 D7-③，零改动）。
   it('message/user：xyz 私有标记混排中文正文——标记前后正文全保留为交错 segments（专防前置正文丢失回归）', () => {
     const state = replayEntries([
       msgEntry('e-user-mk1', {
