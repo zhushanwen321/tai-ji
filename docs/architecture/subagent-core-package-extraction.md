@@ -2,11 +2,9 @@
 
 > 层声明：本文档是「核心包抽离与宿主适配」的架构层设计，下一层产物是**可实施的 HostServices 接口契约 + 包切面文件清单 + zcode 仓迁移对照实现计划**，不跨层到逐测试用例与逐函数实现。上游承接：subagent-engine-abstraction.md（引擎中立抽象，P1-P5 已实施；已被引擎协议化取代；已删除，git 可追溯）——该设计回答「执行引擎如何可插拔」，本文档回答「执行层与编排层如何成为跨宿主共享的独立包」。
 >
-> 状态：两轮对抗式审查。
-> - r1（2026-08-29，报告 `.review/design-review-subagent-core-r1.md`）：4 must-fix 已修复——①D1 切面补 `workflows/` 脚本资产处置（2a/2b 替换对象的落点）②依赖闭包审计补 `config-loader.ts` 触点与 logger 全量计数 ③D6 副作用核对补 runner-appserver 活跃通道处置 ④D2 补 pi 壳 dataRoot 三段回退语义；4 suggestion（D8 计数、检查点 5 降级路径、审计表补注、V1 比对判据与打包验证）已随文处理。
-> - r2（2026-08-29，报告 `.review/design-review-subagent-core-r2.md`，tech-design-review agent 与主 agent 双路独立亲审、全部源码实测）：5 must-fix 已修复——①D2 log 端口补 facade 解析时机契约（切面内 30 处模块顶层 `getLogger` 缓存实测，configureCore 时序陷阱）②D2 discoveryRoots 补语义边界 + D6 接管核对补「资源发现」段 ③D6 接管核对补「自定义脚本契约」段（zsw 进程内 fresh-require + ctx 契约 vs core worker 契约的执行模型差异实测）④D1 修正 require 机制失实（实为 workerData.scriptPath 锚定 + cwd 静默回退，非相对 require）并补 fail-fast 加固 ⑤§3.5 终态图 workflow-state 落点与 D2 矛盾修正（pi 侧权威在会话 entry）；8 suggestion（§3.2 补 A' 独立仓对比、D2 端口演进纪律、D9 dist 持续发布门、D5 版本跟随治理、D6-⑥/P3 per-session model 回收载体、D1 workflows TS 化裁决记录、§4 前置门 file: 机制前提、计数口径修正）已随文处理。
-> - 计划期契约细化（2026-08-29，dev-flow 执行计划编写时实证定案，3 处 D2 细化 + P0 行同步）：①discoveryRoots 根条目从 `string[]` 细化为 `{ dir, source }` 带语义标签——resource-discovery 遮蔽报告与既有测试断言依赖 user-pi/npm/npm-dev 标签，纯 string[] 丢失语义；②HostServices.notify 落地次序澄清——pi 侧完成通知的两机制（session-delivery 投递内核 / pending 活跃计数）经新增通知域窄端口 NotifyDomainPorts 结构化注入，notify 事件推送方法按演进纪律②（禁止推测性预留）推迟到 P2 zsw 壳首个真实触点时落地；③dataRoot 分段归属——env 覆盖段与 warn-once 留 core data-dir.ts、pi 壳 dataRoot() 仅返回 getAgentDir()，且未 configureCore 即消费抛 core_host_not_configured（缺省值改为显式导出 DEFAULT_DATA_ROOT 供宿主选用，消除「缺省静默漂目录」与 §3.4 错误规格的矛盾）。
-> - 实现后一致性审查回写（2026-08-30，轮 1 + 轮 2）：轮 1 固化 D2 createDelivery 结构化签名与 D9-② 落地注记；轮 2 修正 D4 bundle 事实陈述（dist 实测无 protocol 运行时引用，noExternal 为防御性边界）、D9-① 禁项补 pi-file-lock、D1 证据锚点随 P1 迁移刷新、D2 缺省 sink 的 debug 语义注记、检查点 5 断言收紧注记。
+> 状态：**已实施交付**（两轮对抗式审查收敛 + 计划期契约细化 + 实现后一致性审查回写，轨迹 git 可追溯）。
+>
+> **演进谱系（2026-09-13 收编注记——下列四份后续设计文档已删除，决策与被否谱系 git 可追溯）**：本文（抽包）之后 core 体系经四轮连续演进，全部落地——① `subagent-core-convergence.md`（2026-08-30，能力收口 W1-W5：内置 agent 模板/注入渲染/创作管线收口进 core + 发现链三缺口）；② `subagent-core-sink-design.md（已删，git 可追溯）`（2026-08-31，下沉收口：barrel 扩面 + 组装层函数 + codec 单源 + git 内核参数化 + 动作层下沉，终态两宿主零复刻）；③ `subagent-dual-track-convergence.md`（2026-09-02，双轨收敛：10 对双轨/双实现按依赖分 3 组收敛，「每个概念一个实现点」）；④ `subagent-post-convergence-architecture.md`（2026-09-03，三组深化：组合根 seam、core 契约面 semver 化、三个小收敛；chat 轮次机器抽出被源码证据撤销留档）。现行 core 结构权威 = [../extensions/subagents/architecture.md](../extensions/subagents/architecture.md) 与包内 README。
 
 ## 1. 背景目标
 
@@ -238,7 +236,7 @@ interface NotifyDomainPorts {
 - **证据**：本仓两条 npm 发布管线（main 稳定 + dev-npm 预发布）为既有机制。
 - **效果**：目标 5 成立。
 
-> **[2026-09 post-convergence 补注]** 深路径豁免终止（出处：[subagent-post-convergence-architecture.md](subagent-post-convergence-architecture.md) §3.2 B-2 / D5-补注）——壳侧生产代码深路径归零，豁免条款不再适用：曾保留的 `./*` → src 开发态通配已删除，生产消费收口到主入口 barrel（137 符号，逐名可审）与上列受控子入口（4 条语义子入口 + `./workflows/*`）；删通配后壳再写深路径 = tsc 编译错误（不再是风格问题）。D5「无宿主触点证据不放宽」判据由 post-convergence 收口首次执行——补注而非推翻。
+> **[2026-09 post-convergence 补注]** 深路径豁免终止（出处：subagent-post-convergence-architecture.md（已删，git 可追溯） §3.2 B-2 / D5-补注）——壳侧生产代码深路径归零，豁免条款不再适用：曾保留的 `./*` → src 开发态通配已删除，生产消费收口到主入口 barrel（137 符号，逐名可审）与上列受控子入口（4 条语义子入口 + `./workflows/*`）；删通配后壳再写深路径 = tsc 编译错误（不再是风格问题）。D5「无宿主触点证据不放宽」判据由 post-convergence 收口首次执行——补注而非推翻。
 
 **D6：zcode 侧渐进替换次序 = utils → workflow 运行时 → spawn 驱动（选定）**
 

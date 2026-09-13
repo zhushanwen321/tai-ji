@@ -1,6 +1,6 @@
 // src/orchestration/run-snapshot.ts
 //
-// WorkflowRun 快照 codec（下沉收口 D4——设计件 subagent-core-sink-design.md U8）。
+// WorkflowRun 快照 codec（下沉收口 D4——设计件 subagent-core-sink-design.md（已删，git 可追溯） U8）。
 //
 // 为什么需要它：WorkflowRun 的 JSONL 快照投影此前两宿主各写一份（core
 // file-run-store.ts 的 toSnapshot/fromSnapshot 与 pi 壳 jsonl-run-store.ts 的

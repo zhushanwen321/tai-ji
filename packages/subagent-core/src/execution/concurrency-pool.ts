@@ -17,7 +17,7 @@ interface QueueEntry {
 /**
  * 排队策略（D7/U4）：release 时从等待队列放行哪个条目。策略差异是宿主声明的
  * 有意决策（pi=priority / zsw=strict-fifo），保留为参数而非消灭（见 sink 设计
- * subagent-core-sink-design.md §3.3 D7）。
+ * subagent-core-sink-design.md（已删，git 可追溯） §3.3 D7）。
  *
  * - `"priority"`（缺省）：priority 值最小（0=最高）者优先，同优先级按入队序（FIFO）。
  *   与 pi 既有行为等值。

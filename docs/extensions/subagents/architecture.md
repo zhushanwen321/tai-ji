@@ -146,7 +146,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
 | 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
 | 体系深化设计（方案层，含体系图与术语） | [docs/design/subagent-post-convergence-architecture.md](../../design/subagent-post-convergence-architecture.md) |
-| core 抽包与 barrel/semver 契约（D5） | [docs/design/subagent-core-package-extraction.md](../../design/subagent-core-package-extraction.md) |
+| core 抽包与 barrel/semver 契约（D5） | [docs/architecture/subagent-core-package-extraction.md](../../architecture/subagent-core-package-extraction.md) |
 | 双轨收敛（双份实现归一） | [docs/design/subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md) |
 | 引擎协议化（引擎外移独立 CLI 进程） | [docs/design/subagent-engine-protocolization.md](../../design/subagent-engine-protocolization.md) |
 | SubagentService 六聚合拆分（壳 + 聚合） | [docs/architecture/subagent-service-decomposition.md](../../architecture/subagent-service-decomposition.md) |
@@ -160,9 +160,9 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 该结构随后被三步重构取代：
 
-1. **core 抽包**（[subagent-core-package-extraction.md](../../design/subagent-core-package-extraction.md)）：Runtime/Core 两层整体迁入 `packages/subagent-core`，壳只留注册面、宿主适配与渲染。
+1. **core 抽包**（[subagent-core-package-extraction.md](../../architecture/subagent-core-package-extraction.md)）：Runtime/Core 两层整体迁入 `packages/subagent-core`，壳只留注册面、宿主适配与渲染。
 2. **引擎协议化**（W 系列）：进程内引擎退役，pi / zcode 各自成为独立引擎进程，宿主经 engine-protocol v1 通信；`session-runner` 及其内联件随之删除，其职责拆入 core 的引擎子域与引擎包。
-3. **双轨收敛**（[subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md)）：chat 域与 workflow 域的双份实现归一到单份。
+3. **双轨收敛**（subagent-dual-track-convergence.md，已删 git 可追溯；谱系见 subagent-core-package-extraction.md 头部演进注记）：chat 域与 workflow 域的双份实现归一到单份。
 
 已删除的旧文件（本节仅作索引，勿按名查找）：`session-runner.ts`、`session-factory.ts`、`event-bridge.ts`、`executor.ts`、`tombstone-store.ts`、`finalized-marker.ts`、`progress-widget.ts`、`config-wizard.ts`。
 
