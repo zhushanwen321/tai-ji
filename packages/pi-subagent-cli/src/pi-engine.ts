@@ -3,7 +3,7 @@
 // PiEngine 协议化引擎适配器（W7，impl-plan §2.7）——core engines/pi/pi-engine.ts
 // 的引擎进程内形态。
 //
-// 归属对照（设计 §3.8 D2 表；[H1 U3/U5] chat-run 统一 docs/design/subagent-chat-run-unification.md
+// 归属对照（设计 §3.8 D2 表；[H1 U3/U5] chat-run 统一 docs/architecture/subagent-chat-run-unification.md
 // §3.3 D6/D7 后形态）：
 //   - spawn 执行链（runSpawn 本体 / sendPromptCommand / EPIPE 兜底 / stdin 驱动）
 //     → 本包 spawn-runner（迁移物）；

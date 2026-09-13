@@ -2,7 +2,7 @@
 """
 PiXxx 类型泄漏检查（C-comm-02）——落实 runtime 三层设计「PiXxx 类型只在 infra/pi 内部可见」。
 
-规则（规格 SSOT：docs/architecture/runtime-three-layer-design.md 第二部分边界规则）：
+规则（规格 SSOT：docs/architecture/runtime-layering.md 第二部分边界规则）：
   扫描 packages/runtime/src/services/ 与 packages/runtime/src/transport/ 的 .ts 源码
   （排除 *.test.ts 与 __tests__/），剥离注释后命中标识符 Pi[A-Z]* 即违规——
   pi 协议类型只允许出现在 infra/pi/ 内部，pi 原始事件必须经 infra/pi/pi-events.ts
@@ -102,7 +102,7 @@ def main() -> int:
                 break  # 每文件报首个即可
 
     if violations:
-        print("[check_pi_type_leak] 发现 PiXxx 类型泄漏（docs/architecture/runtime-three-layer-design.md 边界规则）：")
+        print("[check_pi_type_leak] 发现 PiXxx 类型泄漏（docs/architecture/runtime-layering.md 边界规则）：")
         for v in violations:
             print(f"  - {v}")
         print("修复方向：pi 原始类型/事件经 infra/pi/pi-events.ts 翻译为内部类型后供 services 消费。")

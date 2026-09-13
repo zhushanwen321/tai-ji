@@ -1,6 +1,6 @@
 // [H3/R3] RecordLifecycle 聚合（域 #4/#11/#17/#18：回收面 + close 三路 + cancel +
 // finalize 簇）——自 SubagentService 上帝类 strangler 抽取的第三个聚合的**终态迁移
-// 写面**（设计 docs/design/subagent-service-decomposition.md §2.1 / §3.3 D5；成员归属
+// 写面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；成员归属
 // 以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，

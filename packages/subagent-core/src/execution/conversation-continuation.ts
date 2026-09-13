@@ -1,7 +1,7 @@
 // src/execution/conversation-continuation.ts
 //
 // [H1 U2] ConversationContinuation——chat 域统一进 run 域的唯一新增组件（设计
-// docs/design/subagent-chat-run-unification.md §3.4，伪码即实现契约）。
+// docs/architecture/subagent-chat-run-unification.md §3.4，伪码即实现契约）。
 //
 // 一个 chatMode record 一个实例：对话容器 = record，续聊轮 = 「新 run + resume 锚点」
 //（pi --session 续写原 session 文件）。本类承载三面：

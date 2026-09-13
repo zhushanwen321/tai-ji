@@ -1,6 +1,6 @@
 // src/execution/engine/inflight-snapshot.ts
 //
-// core→壳在途事件出口（u7a，设计权威源：docs/design/crash-forensics-and-watchdog.md
+// core→壳在途事件出口（u7a，设计权威源：docs/architecture/crash-forensics-and-watchdog.md
 // §3.3 D5「在途判定谓词 + 求值位置」）。
 //
 // 在途状态（spawnedChildren Map / idleTimers Map）真实存在于本包（随 subagent-workflow

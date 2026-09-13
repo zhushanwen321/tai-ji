@@ -9,7 +9,7 @@
 // ExtensionHost 的 mountPoints.register，存储收敛到 core（届时本文件顶部
 // TODO(P4) 接缝被消费）。
 //
-// 设计依据：renderer-rebuild-architecture.md §6.3、slice plan IF1。
+// 设计依据：renderer-package-topology.md §6.3、slice plan IF1。
 
 // MobileMountPointName —— mobile 壳注册的挂载点名（§6.3 B+D 子集 + companion）。
 export type MobileMountPointName = 'message-stream' | 'slash' | 'companion'

@@ -1,6 +1,6 @@
 // [H3/R2] SyncCollectDomain 聚合（域 #5：sync 批缓冲 + E9 dispose 转账 + E1 崩溃恢复）
 // ——自 SubagentService 上帝类 strangler 抽取的第二个聚合（设计
-// docs/design/subagent-service-decomposition.md §2.1 域 #5 / §3.3 D1 v3；成员归属以
+// docs/architecture/subagent-service-decomposition.md §2.1 域 #5 / §3.3 D1 v3；成员归属以
 // r0-inventory.md 清单① #26-#28 + 域 #5 分区为准）。
 //
 // 单一职责：自闭合批语义（设计 §3.1.4/§3.1.5）——collectCoordinator 装配（sync 批

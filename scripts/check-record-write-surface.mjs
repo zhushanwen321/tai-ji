@@ -4,7 +4,7 @@
 // [H4 / S4 / D7] record 持久化写面唯一入口守卫（grep 门——文本级兜底；模块边界
 // 的一级拦截 = eslint no-restricted-imports，见 eslint.config.mjs subagent-core 块）。
 //
-// 设计基线：docs/design/subagent-record-persistence-consolidation.md §3.3 D7
+// 设计基线：docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7
 //（record 持久化收敛，写面从 9 处收口为 RecordStore 唯一写入口）。
 //
 // 检查项（对齐 D7 v2 口径）：
@@ -165,7 +165,7 @@ if (violations.length > 0) {
   console.error(`[record-write-surface] FAIL：${violations.length} 处 store 外 record 写面命中`);
   for (const v of violations) console.error(`  ✗ ${v}`);
   console.error("");
-  console.error("  权威源：docs/design/subagent-record-persistence-consolidation.md §3.3 D7");
+  console.error("  权威源：docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7");
   console.error("  一级拦截（模块边界）：eslint no-restricted-imports（subagent-core 块）");
   process.exit(1);
 }

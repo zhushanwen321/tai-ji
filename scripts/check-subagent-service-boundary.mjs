@@ -2,7 +2,7 @@
 // scripts/check-subagent-service-boundary.mjs
 //
 // [H3/R5] SubagentService 六聚合（execution/service/）× 壳（execution/subagent-service.ts）
-// 三方向依赖边界守卫（设计 docs/design/subagent-service-decomposition.md §3.4 D4/G2，
+// 三方向依赖边界守卫（设计 docs/architecture/subagent-service-decomposition.md §3.4 D4/G2，
 // impl-plan §2 R5 行；约束「S3 依赖单向由守卫机械检查接管」）。
 //
 // 检查项：

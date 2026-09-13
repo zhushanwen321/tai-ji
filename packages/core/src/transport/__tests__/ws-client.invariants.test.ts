@@ -1,7 +1,7 @@
 // ws-client 不变量特征测试 —— 规格权威。
 //
 // 规格来源：原 docs/architecture/renderer-rebuild/ws-client-invariants.md（remote-use 期撰写，
-//   依据 renderer-rebuild-architecture.md §5.1 ws-client 不预拆整体迁入 / §11.0.4 不变量定义
+//   依据 renderer-package-topology.md §5.1 ws-client 不预拆整体迁入 / §11.0.4 不变量定义
 //   修正 / 附录 B.2-4 特征测试覆盖），2026-09-13 复核后沉入本注释块——文档已删除，本块是
 //   特征测试断言点的唯一规格权威；描述已逐类对照现行实现（ws-client.ts + coordination/）修正。
 //

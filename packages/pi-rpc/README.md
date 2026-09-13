@@ -1,6 +1,6 @@
 # @zhushanwen/pi-rpc
 
-pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-subagent-cli）两套 pi RPC 客户端的同型实现收敛（设计 `docs/design/subagent-permanent-session-model.md` §3.3.2，G5）。
+pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-subagent-cli）两套 pi RPC 客户端的同型实现收敛（设计 `docs/architecture/subagent-permanent-session-model.md` §3.3.2，G5）。
 
 消费者：
 

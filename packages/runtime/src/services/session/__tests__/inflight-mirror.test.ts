@@ -1,5 +1,5 @@
 /**
- * inflight-mirror 单元测试（u7b，设计权威源 docs/design/crash-forensics-and-watchdog.md
+ * inflight-mirror 单元测试（u7b，设计权威源 docs/architecture/crash-forensics-and-watchdog.md
  * §3.3 D5「缺席与丢失的语义收敛」①-⑤）。
  *
  * 覆盖（u7b 验收）：

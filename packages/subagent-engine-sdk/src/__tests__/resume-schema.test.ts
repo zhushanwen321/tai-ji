@@ -1,7 +1,7 @@
 // src/__tests__/resume-schema.test.ts
 //
 // [H1 U1→U6] run.params.resume 会话形态契约断言（设计
-// docs/design/subagent-chat-run-unification.md §3.3 D3 + impl-plan §2 U1/U6 行）。
+// docs/architecture/subagent-chat-run-unification.md §3.3 D3 + impl-plan §2 U1/U6 行）。
 // 全部从 protocol barrel import（消费方视角）：
 //   1. resume 键 schema 校验通过（载荷级 runSessionParamsSchema + 帧级 request
 //      schema 对含 resume 键的 run 帧放行）；

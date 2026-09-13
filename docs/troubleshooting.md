@@ -177,7 +177,7 @@ CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 6-7s 重建本地�
 
 ### 12. subagent 完成后不回收 / 回收慢：sessionFile 获取链与 workflow 域守护特征串（2026-09-10 重放移植重写；2026-09-11 H1 续聊链修订）
 
-> 权威 SSOT：[design/subagent-agent-end-recovery-replay.md](design/subagent-agent-end-recovery-replay.md) + [design/subagent-chat-run-unification.md](design/subagent-chat-run-unification.md)，机制与串语义以 SSOT 为准，本节只留排障入口。**防误判**：2026-09-10 前的旧特征串（`backfilled via late get_state response` / `located via sessionDir scan` / `unobtainable after 15s recovery window` / `no-descendant fast path` 等）与 chat 域热路径日志面（roundLifecycle 相位帧 / `interact` / ChatSessionRegistry / `chat-round-first-round-watchdog`）在现树均已不存在——按旧串 grep 恒零命中是预期，不是日志丢失。
+> 权威 SSOT：[design/subagent-agent-end-recovery-replay.md](design/subagent-agent-end-recovery-replay.md) + [architecture/subagent-chat-run-unification.md](architecture/subagent-chat-run-unification.md)，机制与串语义以 SSOT 为准，本节只留排障入口。**防误判**：2026-09-10 前的旧特征串（`backfilled via late get_state response` / `located via sessionDir scan` / `unobtainable after 15s recovery window` / `no-descendant fast path` 等）与 chat 域热路径日志面（roundLifecycle 相位帧 / `interact` / ChatSessionRegistry / `chat-round-first-round-watchdog`）在现树均已不存在——按旧串 grep 恒零命中是预期，不是日志丢失。
 
 排障入口（三条现行 warn 特征串；①③ 来自 `pi-subagent-cli`，② 来自 `subagent-core`；日志统一落 `<dataDir>/agent/logs/subagents-<date>.log`，裸 pi CLI 需 `XYZ_AGENT_EXT_LOG=1` 或 `XYZ_AGENT_DEBUG=1` 才落盘）：
 
@@ -194,7 +194,7 @@ H1 后续聊要点：每轮续聊 = 独立 run（`RunParams.resume` 续写原 se
 
 ### 13. record 直写守卫拦截（eslint no-restricted-imports / check-record-write-surface）
 
-> 权威 SSOT：[design/subagent-record-persistence-consolidation.md](design/subagent-record-persistence-consolidation.md)（§3.3 守卫分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
+> 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 守卫分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
 
 record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/record-store.ts`）。两级守卫：eslint `no-restricted-imports`（store 外禁 import 终态/.alive/sessions-index 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（类方法 / 字面量直写形态 grep 门兜底）。
 

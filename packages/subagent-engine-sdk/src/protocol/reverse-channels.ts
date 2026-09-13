@@ -3,7 +3,7 @@
 // 8 反向通道（引擎 → core，帧④，必须应答）载荷与超时二分。设计权威源：
 // 设计 §3.3 方法集表 host/* 行 + impl-plan §2.1「8 反向通道」与「反向请求超时二分」。
 // [H1] chat 域 v1.x 增量曾新增的第 9 通道（轮次相位帧）已随 chat-run 统一退役
-// （docs/design/subagent-chat-run-unification.md §3.3 D5，U5 删除）——轮次终态
+// （docs/architecture/subagent-chat-run-unification.md §3.3 D5，U5 删除）——轮次终态
 // 改由 run 应答（agent_settled resolve）承载，通道集收敛回 8 个。
 //
 // 应答约定：数据面类回 {ok:true}（REVERSE_REQUEST_TIMEOUT_MS=10s 未答 = 引擎故障 →

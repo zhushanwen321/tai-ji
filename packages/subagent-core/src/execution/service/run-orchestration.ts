@@ -1,7 +1,7 @@
 // [H3/R4] RunOrchestration 聚合（域 #6/#7/#12/#14/#15：model 解析 + run 域执行入口 +
 // await 入口 + 引擎编排（含 Continuation 协作面）+ pool/worktree 资源）——自
 // SubagentService 上帝类 strangler 抽取的核心编排聚合（设计
-// docs/design/subagent-service-decomposition.md §2.1 / §3.3 D2 抽取序末位；成员归属以
+// docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D2 抽取序末位；成员归属以
 // r0-inventory.md 清单① + 域分区为准）。
 //
 // [G1 超限预授权拆分 / 偏差 D-R4-1] 主 agent 派发预授权：R4 域段体量大（派发估算

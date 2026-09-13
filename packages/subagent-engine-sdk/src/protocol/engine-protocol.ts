@@ -21,7 +21,7 @@
 //   union，旧宿主 runtime 对其 no-op（reducer default 分支安全落空 / journal
 //   豁免面不感知），协议版本维持 1、不 bump。
 //
-// [H1 双键过渡（chat-run 统一，docs/design/subagent-chat-run-unification.md §3.3
+// [H1 双键过渡（chat-run 统一，docs/architecture/subagent-chat-run-unification.md §3.3
 // D3 + §5 U1 行）][H1 U6 已切换]：run.params.resume 曾与原 run.params.chat 载荷
 // 同形并存（additive 可选，协议版本维持 1）；U1 只加键——U2-U5 过渡期 core 恒
 // 构造旧 `chat` 键、pi 引擎恒读 `ctx.chat`。U6 已单批同时切换写端（core 构造

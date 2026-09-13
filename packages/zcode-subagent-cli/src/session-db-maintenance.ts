@@ -1,7 +1,7 @@
 // src/session-db-maintenance.ts
 //
 // [U6 / §3.2.6 风险登记②] zcode 隔离会话库的 TTL 清理通道（引擎侧 sweep 选型）。
-// 设计：docs/design/subagent-permanent-session-model.md §3.2.6「zcode 会话库资源
+// 设计：docs/architecture/subagent-permanent-session-model.md §3.2.6「zcode 会话库资源
 // 生命周期」——万物可续聊后隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）
 // 成为单调累积写入面，条目 TTL 必须与 pi transcript 同窗 30 天；通道未落地不得
 // 发布「zcode 万物可续聊」。

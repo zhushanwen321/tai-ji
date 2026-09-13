@@ -4,7 +4,7 @@
 //
 // 消费者：runtime（主 agent rpc-client 薄壳）+ pi-subagent-cli（stdin-writer /
 // spawn-args 归并）。zcode 不经过此层（app-server 是另一协议，仅语义层对齐）。
-// 设计权威源：docs/design/subagent-permanent-session-model.md §3.3。
+// 设计权威源：docs/architecture/subagent-permanent-session-model.md §3.3。
 
 export type {
   PiMessage,

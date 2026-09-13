@@ -1,6 +1,6 @@
 # GUI 数据源登记表（SSOT）
 
-> 父文档：[data-source-governance.md](data-source-governance.md)（§2.2 清单 / §3.3 D1b 空值语义 / D3b 写边界裁定 / D6 队列分工）。计划：data-source-governance-plan.md（已删除，git 可追溯；wave 编号 SSOT）。
+> 父文档：[data-source-governance.md](data-source-governance.md)（关键术语 / 五原则 / D1b 合并规则 / D1–D8 裁决索引；诊断与迁移史已删，git 可追溯）。计划：data-source-governance-plan.md（已删除，git 可追溯；wave 编号 SSOT）。跨进程锁协议三原则见 [integrity-hardening.md](integrity-hardening.md)。
 
 ## 表头声明
 

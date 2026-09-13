@@ -1,6 +1,6 @@
 // [H3/R1] SessionBaselines 聚合（域 #2：session 注入 + ALS/嵌套身份基线）——自
 // SubagentService 上帝类 strangler 抽取的首个聚合（设计
-// docs/design/subagent-service-decomposition.md §2.1 域 #2 / §3.3 D4；字段归属以
+// docs/architecture/subagent-service-decomposition.md §2.1 域 #2 / §3.3 D4；字段归属以
 // r0-inventory.md 清单①为准，含 impl-plan 漏列的 uiObservability/execNesting/forkDepthAls）。
 //
 // 单一职责：session 级基线状态（pi 句柄 / session 身份 / fork 深度 ALS / exec 嵌套

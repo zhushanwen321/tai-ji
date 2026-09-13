@@ -4,7 +4,7 @@
 // 集成面（one-shot 四分支回归 / closeAfterRound 退役 / 引擎死亡单发通知 / stale-child
 // 兜底 / 收割链之外的 chat 编排面）。
 //
-// 设计权威源：docs/design/subagent-chat-run-unification.md §3.4（伪码即实现契约）/
+// 设计权威源：docs/architecture/subagent-chat-run-unification.md §3.4（伪码即实现契约）/
 // §3.3 D4 状态迁移表 / D5 双写点 gate / D7 轮末分流。Continuation 单测 = mock host
 //（编排能力全注入，次序断言用 order 账本）；集成面 = registerFakePiEngine 协议替身
 //（与 delivery-methods.test.ts 同源 setup 形态）。

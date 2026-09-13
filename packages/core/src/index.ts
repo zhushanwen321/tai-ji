@@ -1,5 +1,5 @@
 // @xyz-agent/core — 平台无关内核（headless）。P0 骨架阶段。
-// 详见 docs/architecture/renderer-rebuild-architecture.md §3（包拓扑）/§4（core 内部分层）。
+// 详见 docs/architecture/renderer-package-topology.md §3（包拓扑）/§4（core 内部分层）。
 // Vue reactivity 可用（双端 Vue），零 DOM / 零 electron / 零浏览器 API 直连（经 PlatformPort 注入）。
 export * from './bootstrap'
 export * from './extension-host'

@@ -735,6 +735,18 @@ function expandFallback(msg: Message): OrderedBlock[] {
 /**
  * 把单条 assistant Message 的内部块按 contentBlocks 真实时序解成有序列表。
  * 纯函数：相同输入相同输出，无副作用。
+ *
+ * contentBlocks 是渲染顺序的唯一 SSOT，消费端（Turn.vue 等）禁止在其上叠加
+ * 「末位 assistant」等兄弟消息派生的位置判断——那会随 message_start 翻转导致
+ * block 跳变（2026-08 对话流 block 渲染重构的主症，设计文档已删，git 可追溯）。
+ *
+ * 填充点契约：全部填充点（live feed = effects/registry.ts、streaming =
+ * streaming-state-machine.ts、重放 = apply-entry-convert.ts、历史转换 =
+ * runtime infra/pi/message-converter.ts）必须 append-only + 单 message 最多
+ * 1 个 text 块（`.some(b => b.type === 'text')` 幂等守卫，见 registry:544 /
+ * streaming-state-machine:162 先例）——新增填充点必须带同款守卫，否则 fallback
+ * 分支会对每个 text 块重复 push 完整 content。顺序语义统一按 contentIndex
+ * （产出顺序）insert，禁止退化为「事件到达顺序」与「content array 顺序」双轨。
  */
 export function expandAssistantBlocks(msg: Message): OrderedBlock[] {
   const blocks = msg.contentBlocks

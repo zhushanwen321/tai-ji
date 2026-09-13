@@ -9,7 +9,7 @@ import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@xyz-agent/shared'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo, SendCommandOptions } from '../../services/ports/pi-engine.js'
 import { createPiSessionLog, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
-// pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/design/subagent-permanent-session-model.md
+// pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/architecture/subagent-permanent-session-model.md
 // §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（超时分级 + 迟到响应丢弃）/
 // 早期帧缓冲 / 命令帧组装 / 杀链 / 出站 env 组装全部 import 自公共包——本文件保留
 // 进程生命周期编排与 runtime 专属语义（touch 时钟 / 崩溃取证 / stderr 收集 / 日志落盘），
@@ -43,7 +43,7 @@ export { attachLfOnlyLineReader } from '@zhushanwen/pi-rpc'
  * id/provider/reasoning/thinkingLevelMap，对账所需字段）。
  *
  * 非 Pi 前缀命名：本类型会被 services/model-capability.ts 消费——PiXxx 命名只许
- * 留在 infra/pi 内部（check_pi_type_leak / runtime-three-layer-design 边界规则），
+ * 留在 infra/pi 内部（check_pi_type_leak / runtime-layering 边界规则），
  * 对上导出的翻译类型用内部命名（pi-events 翻译范式）。
  */
 export interface AvailableModelSnapshot {

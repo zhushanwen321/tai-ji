@@ -15,7 +15,7 @@
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
 // [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
-// docs/design/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
+// docs/architecture/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
 //
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出

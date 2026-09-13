@@ -163,7 +163,7 @@ export interface SpawnRunParams {
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
   /**
-   * [H1 U3 chat 轮 run 形态]（设计 docs/design/subagent-chat-run-unification.md
+   * [H1 U3 chat 轮 run 形态]（设计 docs/architecture/subagent-chat-run-unification.md
    * §3.3 D7）：agent_end 不 kill（pi 的 compact/收尾在 agent_end 后执行，提前 kill
    * 截断收尾截断 session 文件），agent_settled（真空闲）resolve run（exit 0 口径）
    * **并收割子进程**——每轮一进程，续聊 = 新 run + resume 锚点（--session 续写），

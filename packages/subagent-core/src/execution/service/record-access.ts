@@ -1,6 +1,6 @@
 // [H3/R3] RecordAccess 聚合（域 #3/#8/#10/#13：孤儿/manifest 恢复 + 查询面 + action
 // 网关 + 身份解析/record 创建）——自 SubagentService 上帝类 strangler 抽取的第三个
-// 聚合的**读建面**（设计 docs/design/subagent-service-decomposition.md §2.1 / §3.3 D5；
+// 聚合的**读建面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；
 // 成员归属以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，

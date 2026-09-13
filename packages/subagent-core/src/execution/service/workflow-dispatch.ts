@@ -1,6 +1,6 @@
 // [H3/R4] WorkflowDispatch 聚合（域 #14 的 H2 workflow 族：executeWorkflowAgent +
 // runWorkflowEngineTask + 类外派发 helper 整段）——自 SubagentService 上帝类 strangler
-// 抽取的第五个聚合文件（设计 docs/design/subagent-service-decomposition.md §2.1 域 #14
+// 抽取的第五个聚合文件（设计 docs/architecture/subagent-service-decomposition.md §2.1 域 #14
 // 增项 / impl-plan §2 R4 行「H2 workflow 族整段随族迁入」）。
 //
 // [G1 超限预授权拆分 / 偏差 D-R4-1] 主 agent 派发预授权：R4 域段体量大（派发估算

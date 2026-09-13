@@ -13,7 +13,7 @@
 // TODO(P1): websocket 对接 core transport（P1 ws-client 迁入 core 后，mobile D2
 // 远程连接落地时，create 返回真实 WebSocket 实例或远程代理）。
 //
-// 设计依据：renderer-rebuild-architecture.md §9、slice plan IF2。
+// 设计依据：renderer-package-topology.md §9、slice plan IF2。
 
 import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@xyz-agent/core'
 

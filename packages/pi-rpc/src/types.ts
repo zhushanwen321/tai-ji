@@ -3,7 +3,7 @@
 // pi RPC 协议的共享类型面（@zhushanwen/pi-rpc）。
 //
 // 本包是主 agent（runtime rpc-client）与 subagent（pi-subagent-cli）两套 pi 进程
-// RPC 客户端的公共协议层（设计 docs/design/subagent-permanent-session-model.md
+// RPC 客户端的公共协议层（设计 docs/architecture/subagent-permanent-session-model.md
 // §3.3.2）。类型自包含（零运行时依赖）：ThinkingLevel 字面量联合与
 // @xyz-agent/shared / subagent-engine-sdk 侧同形（TS 结构化类型下互通），避免
 // 公共包背上宿主依赖（zcode 不经过此层——app-server 是另一协议）。

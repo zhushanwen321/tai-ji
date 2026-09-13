@@ -95,7 +95,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 `initialize` · `probe` · `run` · `cancel` · `read` · `listModels` · `validateModel` · `dispose` · `ping`
 
-反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../design/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。manifest conversation 位语义随永久会话模型增 `cold` 值（zcode 冷恢复：resume 读 + 新 session 注入，无热 steering）；capability gate 判据仍 `=== 'unsupported'` 拒绝（`true`/`cold` 均放行，[subagent-permanent-session-model.md](../../design/subagent-permanent-session-model.md) §3.2.6）。
+反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。manifest conversation 位语义随永久会话模型增 `cold` 值（zcode 冷恢复：resume 读 + 新 session 注入，无热 steering）；capability gate 判据仍 `=== 'unsupported'` 拒绝（`true`/`cold` 均放行，[subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) §3.2.6）。
 
 `run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `poolKey` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。
 
@@ -103,10 +103,10 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 机制 | 落点 | 说明 |
 |---|---|---|
-| 状态单一真源 | `execution-record.ts` + `record-store.ts` | 内存 record 与 `session.jsonl` 磁盘重建两条通路共用同一 reducer；内部状态机两态（`running` / `idle`，[永久会话模型](../../design/subagent-permanent-session-model.md)——closed 终态与 ClosedReason 资格角色删除，cancel/close 转为意愿动作：中断当前轮 / 收起归档，stopReason 仅展示排障），对外投影两态（`active` / `idle`，`mapExternalState`——idle 替代旧 ended）。record 为纯数据 interface（贫血+函数式），行为集中在少数 mutate 唯一入口（createRecord/updateFromEvent/completeRecord/project/tryEnterRunning）——函数式 aggregate root，取代旧实现 11 种状态形状 / 6 处 turns 累加器散落（rationale 见 git 历史 subagents/data-model.md，已删） |
+| 状态单一真源 | `execution-record.ts` + `record-store.ts` | 内存 record 与 `session.jsonl` 磁盘重建两条通路共用同一 reducer；内部状态机两态（`running` / `idle`，[永久会话模型](../../architecture/subagent-permanent-session-model.md)——closed 终态与 ClosedReason 资格角色删除，cancel/close 转为意愿动作：中断当前轮 / 收起归档，stopReason 仅展示排障），对外投影两态（`active` / `idle`，`mapExternalState`——idle 替代旧 ended）。record 为纯数据 interface（贫血+函数式），行为集中在少数 mutate 唯一入口（createRecord/updateFromEvent/completeRecord/project/tryEnterRunning）——函数式 aggregate root，取代旧实现 11 种状态形状 / 6 处 turns 累加器散落（rationale 见 git 历史 subagents/data-model.md，已删） |
 | 轮收口 sidecar | `state-marker.ts` | 单一 `<session>.state`（现行格式 `{status:"idle", stopReason?, endedAt?}`——**上一轮收条**而非死亡证明；旧值 finalized/cancelled 读侧上行映射为 idle+stopReason、写侧不再产）；重建单规则 = 一律得 idle（stopReason 取自 `.state`，缺失视为 interrupted-by-restart）。`.record-binding` 身份/统计/世代 sidecar（id→file、rootSessionId、epoch/lastAbandonedRound/turns——统计单基准）+ zcode 锚键文件族 `<dbPath>.<sessionId>` 同挂本载体族 |
-| 进程探活 | `alive-store.ts` | `.alive`（pid marker）= 跨进程写权声明——写面已全量归 RecordStore（`writeAliveMarker` 唯一包装 = `acquireWriteLease`，acquire 三时机：sessionFile 锚点确立 / resurrect 回边 / running 接管；cold-lookup 直写存量已消亡）；release 两出口 = close 收起（`markArchived`）/ 30 天内存回收（`markIdleEvicted`）；判活 pid 单判据（[subagent-record-persistence-consolidation.md](../../design/subagent-record-persistence-consolidation.md) D3 v7） |
-| chat→run 统一 | `conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（idle → `reviveOrThrow` 万物可续 / 在途轮 D2 打断入队 / 轮间直派）、`dispatchRoundGuarded` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`settleRoundSuccess`/`settleRoundFailed` 轮末收口（settle 簿记 + 通知门三元组路由 + armIdleKeepalive）；[subagent-chat-run-unification.md](../../design/subagent-chat-run-unification.md) §3.4 + [永久会话模型](../../design/subagent-permanent-session-model.md) §3.2.7 |
+| 进程探活 | `alive-store.ts` | `.alive`（pid marker）= 跨进程写权声明——写面已全量归 RecordStore（`writeAliveMarker` 唯一包装 = `acquireWriteLease`，acquire 三时机：sessionFile 锚点确立 / resurrect 回边 / running 接管；cold-lookup 直写存量已消亡）；release 两出口 = close 收起（`markArchived`）/ 30 天内存回收（`markIdleEvicted`）；判活 pid 单判据（[subagent-record-persistence-consolidation.md](../../architecture/subagent-record-persistence-consolidation.md) D3 v7） |
+| chat→run 统一 | `conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（idle → `reviveOrThrow` 万物可续 / 在途轮 D2 打断入队 / 轮间直派）、`dispatchRoundGuarded` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`settleRoundSuccess`/`settleRoundFailed` 轮末收口（settle 簿记 + 通知门三元组路由 + armIdleKeepalive）；[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md) §3.4 + [永久会话模型](../../architecture/subagent-permanent-session-model.md) §3.2.7 |
 | 空闲回收 | `lifecycle-manager.ts` | per-record idle timer——arm 面 u7a 重挂（`armIdleTimer`/`armIdleKeepalive`：轮成功收口翻入保活 + 推 inFlight=0，新轮 disarm 翻回 executing），常量 `XYZ_SUBAGENT_IDLE_TIMEOUT_MS` |
 | 楔死回收 | `settled-watchdog.ts` | settled 永不到达的两段式守护：中段无进展检测（刷新源 = run 事件通道既有事件）+ 收尾段固定上界（交棒 = run 应答驱动）；run 域（含 chatMode 续聊轮）与 workflow 域共用同一原语 |
 | 引擎装载 | `engine/engine-discovery*.ts` → `registry.ts` → `routing.ts` | 三级发现装载 cli descriptor；core 壳侧零内建引擎（`pi` 亦经发现装载） |
@@ -141,7 +141,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 主题 | 文档 |
 |---|---|
-| 永久会话模型（两态状态机 + 万物可续聊 + 意图原语，2026-09-13 落毕） | [docs/design/subagent-permanent-session-model.md](../../design/subagent-permanent-session-model.md) |
+| 永久会话模型（两态状态机 + 万物可续聊 + 意图原语，2026-09-13 落毕） | [docs/architecture/subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) |
 | 引擎中立抽象（已被引擎协议化取代） | subagent-engine-abstraction.md（已删除，git 可追溯；现行权威 = [docs/design/subagent-engine-protocolization.md](../../design/subagent-engine-protocolization.md)） |
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
 | 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
@@ -149,7 +149,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | core 抽包与 barrel/semver 契约（D5） | [docs/design/subagent-core-package-extraction.md](../../design/subagent-core-package-extraction.md) |
 | 双轨收敛（双份实现归一） | [docs/design/subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md) |
 | 引擎协议化（引擎外移独立 CLI 进程） | [docs/design/subagent-engine-protocolization.md](../../design/subagent-engine-protocolization.md) |
-| SubagentService 六聚合拆分（壳 + 聚合） | [docs/design/subagent-service-decomposition.md](../../design/subagent-service-decomposition.md) |
+| SubagentService 六聚合拆分（壳 + 聚合） | [docs/architecture/subagent-service-decomposition.md](../../architecture/subagent-service-decomposition.md) |
 | 不通知根因与恢复链（F 系列） | [docs/design/subagent-agent-end-recovery-replay.md](../../design/subagent-agent-end-recovery-replay.md) |
 | 无界等待与回收层上界审计 | [docs/architecture/crash-forensics-and-watchdog.md 附录 E](../../architecture/crash-forensics-and-watchdog.md) |
 | zcode 引擎形态与会话库隔离 | [docs/architecture/zcode-engine-appserver-resident.md](../../architecture/zcode-engine-appserver-resident.md) · [docs/architecture/zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |

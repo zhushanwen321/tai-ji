@@ -160,7 +160,7 @@ export const REVERSE_CHANNEL_NAMES: readonly ReverseChannel[] = REVERSE_CHANNELS
 
 /**
  * run.params 的会话形态参数载荷 schema（draft-07 深载荷片段）。设计权威源：
- * docs/design/subagent-chat-run-unification.md §3.3 D3 + §5 U1/U6 行。
+ * docs/architecture/subagent-chat-run-unification.md §3.3 D3 + §5 U1/U6 行。
  *
  * [H1 U6 已切换] 键切换单批完成后本 schema 面向唯一键 `resume`（RunResumeParams：
  * recordId + 可选 ResumeAnchor），形状不变。帧级 schema（requestFrameSchema.params）
