@@ -115,7 +115,13 @@
     {
       "name": "@zhushanwen/pi-pending-notifications",
       "directory": "extensions/universal/pending-notifications",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@xyz-agent/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import scanPendingEntries/applyPendingDiff（src/state.ts top-level import，ext-simplify-13 E6 差集规则单点委托），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-permission",

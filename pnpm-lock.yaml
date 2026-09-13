@@ -391,6 +391,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@xyz-agent/extension-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
