@@ -27,16 +27,16 @@ export const scheduleGuidelines = [
 
 /**
  * schedule tool handler（SchedulerService 瘦壳，无独立业务逻辑）。
+ * 直传参普通函数（ext-simplify-08 L6：原工厂柯里化 `createScheduleHandler(service)(params)`
+ * 两段调用收敛为 `handleSchedule(service, params)`）。
  * 业务失败 → throw（pi 只对 execute throw 置 isError:true，返回值里的 isError
  * 被 agent-loop 丢弃——W4 修复，锚点 agent-loop.js:453-483）；service 未初始化等
  * 初始化异常不在此 catch——穿透到 index.ts execute 的 catch 兜底（R3）。
  */
-export function createScheduleHandler(service: SchedulerService) {
-  return async (params: ScheduleParamsT) => {
-    const { prompt, schedule: scheduleInput, kind, name, expires, force } = params
-    const result = await service.create(prompt, scheduleInput, { kind, name, expires, force })
-    return toToolResult(result)
-  }
+export async function handleSchedule(service: SchedulerService, params: ScheduleParamsT) {
+  const { prompt, schedule: scheduleInput, kind, name, expires, force } = params
+  const result = await service.create(prompt, scheduleInput, { kind, name, expires, force })
+  return toToolResult(result)
 }
 
 // ── schedule_control tool ──
@@ -56,33 +56,30 @@ export const controlGuidelines = [
   'action="run" dispatches the task now: force tasks are sent directly; non-force tasks are enqueued via the delivery kernel and delivered once the agent is idle (busy messages wait in the queue and are flushed later).',
 ]
 
-export function createScheduleControlHandler(service: SchedulerService) {
-  return async (params: ScheduleControlParamsT) => {
-    const { action, id, enabled } = params
+export async function handleScheduleControl(service: SchedulerService, params: ScheduleControlParamsT) {
+  const { action, id, enabled } = params
 
-    let result: ServiceResult
-    switch (action) {
-      case 'list':
-        result = service.list()
-        break
-      case 'toggle':
-        result = await service.toggle(id, enabled)
-        break
-      case 'delete':
-        result = service.delete(id)
-        break
-      case 'run':
-        result = await service.run(id)
-        break
-      default:
-        result = {
-          success: false,
-          errorCode: 'INVALID_PARAMS',
-          message: `Unknown action: ${action}`,
-        }
-    }
-    return toToolResult(result)
+  let result: ServiceResult
+  switch (action) {
+    case 'list':
+      result = service.list()
+      break
+    case 'toggle':
+      result = await service.toggle(id, enabled)
+      break
+    case 'delete':
+      result = service.delete(id)
+      break
+    case 'run':
+      result = await service.run(id)
+      break
+    default:
+      result = {
+        success: false,
+        message: `Unknown action: ${action}`,
+      }
   }
+  return toToolResult(result)
 }
 
 /**

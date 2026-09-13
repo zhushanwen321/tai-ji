@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 
 describe('U4_DISPATCH_INFLIGHT: 调用方 in-flight 守卫', () => {
@@ -25,7 +25,7 @@ describe('U4_DISPATCH_INFLIGHT: 调用方 in-flight 守卫', () => {
     })
     const backend = new MockSchedulerBackend()
     backend.sendMessage = vi.fn(() => sendPromise)
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask(
       'inflight-test',
@@ -58,7 +58,7 @@ describe('U4_DISPATCH_INFLIGHT: 调用方 in-flight 守卫', () => {
 
   it('(2) 第一次完成后 → 第二次 dispatchTask 正常执行（send 调 2 次）', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask(
       'serial-inflight',
@@ -84,14 +84,14 @@ describe('U4_DISPATCH_INFLIGHT: 调用方 in-flight 守卫', () => {
   it('(3) 非 force + 有 delivery handle 时，in-flight 守卫同样拦截并发 dispatch', async () => {
     const warnSpy = vi.spyOn(getLogger('scheduler'), 'warn').mockImplementation(() => {})
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = {
+    const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
       flush: vi.fn(),
       depth: vi.fn(() => 0),
       dispose: vi.fn(),
     } as any
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend, mockDelivery)
 
     const task = await runtime.addTask('delivery-inflight', { mode: 'interval', intervalMs: 60_000 })
 
@@ -100,7 +100,7 @@ describe('U4_DISPATCH_INFLIGHT: 调用方 in-flight 守卫', () => {
 
     expect(await first).toBe(true)
     expect(second).toBe(false)
-    expect(backend.deliveryHandle.send).toHaveBeenCalledTimes(1)
+    expect(mockDelivery.send).toHaveBeenCalledTimes(1)
 
     const warnText = warnSpy.mock.calls.map(c => String(c[0])).join('\n')
     expect(warnText).toContain('already in flight')

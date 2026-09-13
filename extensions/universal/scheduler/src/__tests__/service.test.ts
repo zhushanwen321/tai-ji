@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
-
-const mockCtx = { isIdle: () => true, hasPendingMessages: () => false }
 
 describe('SchedulerService', () => {
   let service: SchedulerService
@@ -15,14 +13,13 @@ describe('SchedulerService', () => {
     // 固定时间避免 clock-boundary flake：formatRelativeTime 内部读 Date.now()，
     // 两次读之间的延迟可能导致 "in 1h" 变成 "in 59m"。
     backend.nowValue = Date.now()
-    service = new SchedulerService(new SchedulerRuntime(backend, mockCtx), () => backend.now())
+    service = new SchedulerService(new SchedulerRuntime(backend), () => backend.now())
   })
 
   describe('create', () => {
     it('creates task with duration and returns full summary', async () => {
       const result = await service.create('check build', '5m')
       expect(result.success).toBe(true)
-      expect(result.errorCode).toBeUndefined()
       expect(result.message).toContain('Task "check build"')
       expect(result.message).toContain('every 5m')
       expect(result.message).toContain('Next 5 runs:')
@@ -51,7 +48,7 @@ describe('SchedulerService', () => {
       const fixedNow = Date.now()
       const injectBackend = new MockSchedulerBackend()
       injectBackend.nowValue = fixedNow
-      const nowService = new SchedulerService(new SchedulerRuntime(injectBackend, mockCtx), () => injectBackend.now())
+      const nowService = new SchedulerService(new SchedulerRuntime(injectBackend), () => injectBackend.now())
       const result = await nowService.create('one shot', '1h', { kind: 'once' })
       expect(result.data!.nextRuns[0]).toBe(fixedNow + 3_600_000)
       expect(result.message).toContain('in 1h')
@@ -63,22 +60,20 @@ describe('SchedulerService', () => {
       expect(result.data!.task.schedule).toEqual({ mode: 'cron', cronExpression: '0 0 9 * * 1-5' })
     })
 
-    it('returns INVALID_SCHEDULE for invalid schedule', async () => {
+    it('returns invalid-schedule message for invalid schedule', async () => {
       const result = await service.create('test', 'invalid')
       expect(result).toEqual({
         success: false,
-        errorCode: 'INVALID_SCHEDULE',
         message: 'Invalid schedule: "invalid". Use duration (5m/2h/1d) or cron expression (*/10 * * * *).',
       })
     })
 
-    it('returns TASK_LIMIT_REACHED when 50 tasks exist', async () => {
+    it('returns task-limit message when 50 tasks exist', async () => {
       for (let i = 0; i < 50; i++) {
         await service.create(`task ${i}`, '5m')
       }
       const result = await service.create('one more', '5m')
       expect(result.success).toBe(false)
-      expect(result.errorCode).toBe('TASK_LIMIT_REACHED')
       expect(result.message).toContain('Task limit reached (50)')
     })
   })
@@ -118,29 +113,26 @@ describe('SchedulerService', () => {
       expect(service.runtime.getTask(id)?.enabled).toBe(false)
     })
 
-    it('TC4: returns TASK_NOT_FOUND for unknown id', async () => {
+    it('TC4: returns not-found message for unknown id', async () => {
       const result = await service.toggle('deadbeef', true)
       expect(result).toEqual({
         success: false,
-        errorCode: 'TASK_NOT_FOUND',
         message: 'Task deadbeef not found.',
       })
     })
 
-    it('returns INVALID_PARAMS when id missing', async () => {
+    it('returns invalid-params message when id missing', async () => {
       const result = await service.toggle(undefined, true)
       expect(result).toEqual({
         success: false,
-        errorCode: 'INVALID_PARAMS',
         message: 'id is required for toggle.',
       })
     })
 
-    it('returns INVALID_PARAMS when enabled missing', async () => {
+    it('returns invalid-params message when enabled missing', async () => {
       const result = await service.toggle('abc12345', undefined)
       expect(result).toEqual({
         success: false,
-        errorCode: 'INVALID_PARAMS',
         message: 'enabled is required for toggle.',
       })
     })
@@ -155,58 +147,56 @@ describe('SchedulerService', () => {
       expect(service.runtime.getTask(id)).toBeUndefined()
     })
 
-    it('TC4: returns TASK_NOT_FOUND for unknown id', () => {
+    it('TC4: returns not-found message for unknown id', () => {
       const result = service.delete('deadbeef')
       expect(result).toEqual({
         success: false,
-        errorCode: 'TASK_NOT_FOUND',
         message: 'Task deadbeef not found.',
       })
     })
   })
 
   describe('run', () => {
+    // run 触达 dispatchDirect 的用例统一 force 任务（L4：无 handle 直投分支已删，
+    // idle/busy 判定移交 delivery 内核，直投唯一入口是 force）
     it('runs task now', async () => {
-      const created = await service.create('test', '5m')
+      const created = await service.create('test', '5m', { force: true })
       const id = created.data!.task.id
       const result = await service.run(id)
       expect(result).toEqual({ success: true, message: `Task ${id} executed.` })
       expect(service.runtime.getTask(id)?.runCount).toBe(1)
     })
 
-    it('TC4: returns TASK_NOT_FOUND for unknown id', async () => {
+    it('TC4: returns not-found message for unknown id', async () => {
       const result = await service.run('deadbeef')
       expect(result).toEqual({
         success: false,
-        errorCode: 'TASK_NOT_FOUND',
         message: 'Task deadbeef not found.',
       })
     })
 
-    it('returns DISPATCH_SKIPPED for disabled task (not not-found)', async () => {
+    it('returns dispatch-skipped message for disabled task (not not-found)', async () => {
       const created = await service.create('test', '5m')
       const id = created.data!.task.id
       await service.toggle(id, false)
       const result = await service.run(id)
       expect(result).toEqual({
         success: false,
-        errorCode: 'DISPATCH_SKIPPED',
         message: `Task ${id} not dispatched (disabled, rate-limited, or already queued for delivery).`,
       })
     })
 
-    // U4 变更：gate 已交 delivery 内核，无 delivery handle 时走 dispatchDirect（直投不检查 idle）。
-    // busy 不再导致 DISPATCH_SKIPPED（直投成功）。
-    it('无 delivery handle 时 busy 不影响 dispatch（直投）', async () => {
-      const busyCtx = { isIdle: () => false, hasPendingMessages: () => false }
+    // 原「无 delivery handle 时 busy 不影响 dispatch（直投）」用例按 L4 裁决改由 force 路径
+    // 覆盖：force 任务 run 直投成功（dispatchDirect 不经 delivery，idle/busy 判定在内核侧）
+    it('force 任务 run 直投成功（不受 busy 影响）', async () => {
       const busyBackend = new MockSchedulerBackend()
-      const busyService = new SchedulerService(new SchedulerRuntime(busyBackend, busyCtx), () => busyBackend.now())
+      const busyService = new SchedulerService(new SchedulerRuntime(busyBackend), () => busyBackend.now())
 
-      const created = await busyService.create('test', '5m')
+      const created = await busyService.create('test', '5m', { force: true })
       const id = created.data!.task.id
       const result = await busyService.run(id)
 
-      // 直投成功（无 delivery handle → dispatchDirect，不检查 idle）
+      // 直投成功（force → dispatchDirect，不检查 idle/busy）
       expect(result.success).toBe(true)
       expect(busyBackend.sentMessages).toHaveLength(1)
     })

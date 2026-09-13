@@ -24,7 +24,7 @@ export interface ScheduledTask {
   lastRunAt?: number
   lastStatus?: TaskStatus
   lastError?: string                // 最近一次失败原因（cron 失效 / appendEntry 失败）
-  history: ExecutionRecord[]        // 最近 20 条
+  history: ExecutionRecord[]        // 最近 HISTORY_LIMIT 条
   ownerSessionFile?: string         // append-only owner：记录任务创建时所属的 session JSONL，fork 重放时按此过滤非 owner 任务（gap1）
   pending?: boolean                 // 运行时标记：到期待 dispatch（非持久化语义，勿与 TaskStatus 混淆）
 }
@@ -33,6 +33,13 @@ export interface ExecutionRecord {
   at: number
   status: TaskStatus
 }
+
+/**
+ * history 裁剪上限（ext-simplify-08 L5 单点）：runtime 侧 dispatch 累积
+ * （onDispatchSuccess / handleSettled）与 replay 侧 advance 折叠共用同一上限——
+ * 双处各持字面量会漂移（曾 runtime.ts / replay.ts 各写一份 20），收敛到 types.ts 单点导出。
+ */
+export const HISTORY_LIMIT = 20
 
 // ── CustomEntry event sourcing（append-only 任务存储）──
 
@@ -76,6 +83,11 @@ export type SchedulerEntryOp =
 // ── 持久化 ──
 
 export interface SchedulerStore {
+  /**
+   * 形状忠实保留（ext-simplify-08 L8）：旧 store 文件（npm 0.1.1 store.ts）顶层携带
+   * version:1，importer 只读 tasks、version 零读点——字段是磁盘格式的文档而非消费面，
+   * 删除会让类型与迁移源文件的真实形状静默漂移。
+   */
   version: 1
   tasks: ScheduledTask[]
 }

@@ -1,4 +1,3 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { guardStaleCtx, toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
@@ -7,6 +6,7 @@ import type { DeliveryHandle, DeliveryMessage } from '@xyz-agent/session-deliver
 import type { SchedulerBackend } from './backend.js'
 import { autoName, generateTaskId } from './format.js'
 import { computeNextRunAt, MS_PER_DAY, MS_PER_MINUTE, parseDuration } from './parsing.js'
+import { HISTORY_LIMIT } from './types.js'
 import type {
   AddOptions,
   ScheduledTask,
@@ -34,7 +34,7 @@ const RATE_LIMIT_PER_MINUTE = 6
 const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
-const HISTORY_LIMIT = 20 // 与 replayFoldEntries 的裁剪上限一致（advance 折叠 / dispatch 累积共用）
+// HISTORY_LIMIT 单点在 types.ts（ext-simplify-08 L5）——与 replay.ts 的 advance 折叠共用
 // STALE_CTX_MARKER（文案兜底分诊词）已迁移到 ext-guards 共享守卫（guardStaleCtx 内部
 // 引用，本文件不再直接持有）。语义：G1 模块级代际检测（isCtxStale）为主判；文案子串
 // 覆盖代际盲区——显式 reload / cwd 变化触发 clearExtensionCache 后 jiti 重新 import 产生
@@ -60,12 +60,17 @@ export class SchedulerRuntime {
   // 注释；内核 onSettled 已 per-message 化，合批每条各自回调，本标记不再承担合批补偿）
   // ——标记过期后允许重投，保持 at-least-once。
   private readonly queuedInDeliveryAt = new Map<string, number>()
-  // delivery handle（装配点注入；非 force 任务走内核队列）
+  // delivery handle（构造器直传，ext-simplify-08 L2：原经 backend set/getDeliveryHandle 中转——
+  // backend 自身不消费属穿层传参；非 force 任务走内核队列）
   private delivery: DeliveryHandle | undefined
 
   /**
    * 依赖反转构造：backend 承担 appendEntry/pi.sendMessage/时间源，runtime 只持有内存态。
    * 不触碰任何 FS / session JSONL（测试可用 MockSchedulerBackend 零副作用注入）。
+   *
+   * delivery（L2 直传）：非 force 任务走内核队列的投递 handle，装配点（index.ts
+   * session_start）createDelivery 创建后注入；缺省不注入时仅 force 直投与记账路径可用
+   * （L4：无 handle 直投分支已删，装配契约由 index-generation.test.ts 装配断言锚定）。
    *
    * isCtxStale（G1 代际检测，S9/R3-M1）：返回 true 表示本 runtime 建立时的 session 已被
    * 替换。index.ts 装配点注入（模块级代数比对，R3-M1），使 stale 分诊不依赖 pi 错误文案；
@@ -73,15 +78,12 @@ export class SchedulerRuntime {
    */
   constructor(
     backend: SchedulerBackend,
-    ctx?: Pick<ExtensionContext, 'isIdle' | 'hasPendingMessages'>,
+    delivery?: DeliveryHandle,
     isCtxStale?: () => boolean,
   ) {
     this.backend = backend
-    // ctx 不再存实例变量（gate 已交内核）；isCtxStale 保留用于代际检测
-    void ctx
+    this.delivery = delivery
     this.isCtxStale = isCtxStale
-    // 从 backend 获取 delivery handle（装配点注入）
-    this.delivery = backend.getDeliveryHandle?.()
   }
 
   // ── 任务 CRUD ──
@@ -304,8 +306,9 @@ export class SchedulerRuntime {
   // ── dispatch ──
 
   /**
-   * dispatch 单个任务。返回 true 表示真的发送了 message，false 表示 no-op
-   * （task disabled / 已有同任务在途 / rate-limited / 非 force 且 busy）。
+   * dispatch 单个任务。返回 true 表示真的发送了 message（force 直投）或已入队（非 force
+   * 经 delivery），false 表示 no-op（task disabled / 已有同任务在途 / rate-limited /
+   * 同任务入队已在 TTL 窗口内）。
    *
    * R3-S1 in-flight 守卫：tick 为 fire-and-forget，若 tick1 的 `await backend.sendMessage`
    * 挂起超过 TICK_INTERVAL_MS（如 pi 卡死），tick2 的 step2 会再标 pending、step3 对同一
@@ -340,8 +343,10 @@ export class SchedulerRuntime {
     // 检查速率限制
     if (!this.hasDispatchCapacity(this.backend.now())) return false
 
-    if (task.force || !this.delivery) {
-      // force 任务或无 delivery handle 时直投（绕过内核队列）
+    if (task.force) {
+      // force 任务直投（绕过内核队列）。L4（ext-simplify-08）：`|| !this.delivery` 无 handle
+      // 直投分支已删——生产装配（index.ts session_start）无条件注入 delivery，该分支生产死；
+      // 「force 直投」是 dispatchDirect 的唯一入口，装配契约由 index-generation.test.ts 锚定
       return this.dispatchDirect(task)
     }
 
@@ -355,8 +360,8 @@ export class SchedulerRuntime {
   }
 
   /**
-   * force 任务直投：绕过 delivery 内核队列，直接调 backend.sendMessage。
-   * 无 delivery handle 时也走此路径（向后兼容）。
+   * force 任务直投：绕过 delivery 内核队列，直接调 backend.sendMessage（L4 后唯一入口——
+   * 仅 task.force 触达，idle/busy 判定已全部移交 delivery 内核）。
    */
   private async dispatchDirect(task: ScheduledTask): Promise<boolean> {
     try {
@@ -381,6 +386,8 @@ export class SchedulerRuntime {
    * 返回 true 表示已入队（非实际发送）。
    */
   private dispatchViaDelivery(task: ScheduledTask): boolean {
+    // 非 force 路径必经 delivery：装配点无条件注入（L4 后无 handle 降级路径——装配缺漏
+    // 属装配 bug，由 index-generation.test.ts 装配断言拦截；缺省构造仅用于 force/记账路径单测）
     const delivery = this.delivery!
 
     delivery.send({

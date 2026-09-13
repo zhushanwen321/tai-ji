@@ -10,13 +10,11 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 
 describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   it('(1) isIdle=false 时 dispatchTask → delivery 入队不直投', async () => {
-    // busy ctx：isIdle()=false
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
@@ -25,8 +23,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('park-gate-test', { mode: 'interval', intervalMs: 60_000 })
     const dispatched = await runtime.dispatchTask(task)
@@ -47,7 +44,6 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   })
 
   it('(2) isIdle=false → flush() 外部调用 → 队列消息被投递', async () => {
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     // 内核级 flush 模拟：调用 port.send 投递已入队的消息
     const portSendCalls: Array<{ msg: unknown; intent: string }> = []
     const mockPort = {
@@ -69,8 +65,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     await runtime.addTask('flush-test', { mode: 'interval', intervalMs: 60_000 })
     // 模拟 tickScheduler：dispatchTask 入队 + tick 末尾 flush
@@ -82,7 +77,6 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   })
 
   it('(4) busy ctx 下 flush 由 tick 显式触发，而非内核自动重试', async () => {
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
@@ -91,8 +85,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('tick-flush', { mode: 'interval', intervalMs: 60_000 })
     await runtime.dispatchTask(task)
@@ -107,7 +100,6 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   })
 
   it('(3) force=true 时绕过 delivery 直投（即使 isIdle=false 也 sendMessage）', async () => {
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
@@ -116,8 +108,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask(
       'force-bypass-test',
@@ -139,7 +130,6 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   })
 
   it('(5) 到期任务 + 持续 busy 多 tick 不重复入队；settled 后可再入队（回归：nextRunAt 未推进期曾每 tick 重压副本）', async () => {
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
@@ -148,8 +138,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('dup-test', { mode: 'interval', intervalMs: 60_000 })
     // 任务到期（nextRunAt 已过）
@@ -177,7 +166,6 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
   })
 
   it('(6) rejected 终态同样清除防重标记', async () => {
-    const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
     const mockDelivery = {
       send: vi.fn(),
       sendChecked: vi.fn(),
@@ -186,8 +174,7 @@ describe('U4_PARK_GATE: park 模式 gate 行为', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, busyCtx)
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('reject-test', { mode: 'interval', intervalMs: 60_000 })
     task.nextRunAt = backend.now() - 1

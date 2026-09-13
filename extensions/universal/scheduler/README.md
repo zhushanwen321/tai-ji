@@ -228,7 +228,7 @@ npx vitest run src/__tests__/<file>.test.ts   # 单个文件
 
 测试策略：
 
-- **依赖反转**：`SchedulerRuntime` 只依赖 `SchedulerBackend` 接口（`sendMessage` / `appendEntry` / `now`），不触碰 FS/pi。测试注入 `MockSchedulerBackend`（`src/backend.ts` 同文件 export）实现零副作用测试
+- **依赖反转**：`SchedulerRuntime` 只依赖 `SchedulerBackend` 接口（`sendMessage` / `appendEntry` / `now`），不触碰 FS/pi。测试注入 `MockSchedulerBackend`（`src/__tests__/mock-backend.ts`，ext-simplify-08 L9 自 `src/backend.ts` 迁出的测试专用实现）实现零副作用测试
 - **纯函数**：`parseDuration` / `formatDuration` / `parseSchedule` / `computeNextRunAt` / `computeNextRuns`（`src/parsing.ts`）无副作用，可直接断言
 - **重放折叠**：custom entry 折叠协议（upsert / advance / toggle / delete，含 nextRunAt 重放恢复、fork owner 过滤）
 - **旧 store 导入**：rename `.imported` 原子收敛（单成功者、崩溃恢复）

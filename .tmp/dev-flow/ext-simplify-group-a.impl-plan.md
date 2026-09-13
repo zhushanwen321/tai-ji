@@ -163,6 +163,9 @@ graph LR
 | 04-U1 | re-export 实为 5 条 export 语句（7 符号）而非设计写的 6 条 | 设计计数口径与符号实际数差 1，删除面完全覆盖设计列举 | 接受（无遗漏无扩大） |
 | 04-U1 | 「导出面」叙事实际在 tool-handler.ts:57-58 而非设计写的 result-action.ts:8 | 行号漂移；4 处叙事全清，与设计意图等价 | 接受 |
 | 04-U2 | P1 落地 4 用例（设计点名三分支） | doFind 有两个互异零匹配入口，两者都须验证 roots 透传 | 接受（全覆盖优于点名） |
+| 08-u4 | L4 牵动 14 处测试（设计估 1 处） | 依赖「无 delivery 直投」旧路径锚定的用例全集，按 L4 裁决机械转 force 路径，断言本体零改动 | 接受 |
+| 08-u4 | L8 二选一：SchedulerStore 保留 + 形状忠实注释 | 唯一用途是 importer 的 JSON.parse cast，描述旧 store 磁盘真实格式，删除会静默漂移 | 接受（优于删除） |
+| 08-u4 | L9 二选一：Mock 迁 __tests__/mock-backend.ts，三个生产符号保留 export（直测消费） | 去 export 迫使测试走间接路径或复制路径推导，代价大于收益 | 接受 |
 
 ## 6 状态表
 
@@ -175,10 +178,10 @@ graph LR
 | 06-u4 | committed | 1 | 82/82；phase 写入清零 + PlanPhase 全仓零命中 + 旧 entry 兼容用例（06 线完成） |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
-| 08-u4 | in-progress | 0 | - |
+| 08-u4 | committed | 1 | 240/240 + extensions 三连全绿 + 守卫双过；L1-L9 除 L7 逐项 grep 证据（08 线完成） |
 | 04-U1 | committed | 1 | 398 绿 2 skip；re-export 零命中；G5③ 回写落位；commit 20dcfbe37 |
 | 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 |
-| 04-U3 | pending | 0 | - |
+| 04-U3 | in-progress | 0 | - |
 | 04-U4 | pending | 0 | - |
 | 04-U5 | pending | 0 | - |
 | 04-U6 | pending | 0 | - |

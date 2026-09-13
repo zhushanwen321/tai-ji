@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 
 describe('U4_AFTER_RUN_INTENT: intent 映射', () => {
@@ -26,8 +26,7 @@ describe('U4_AFTER_RUN_INTENT: intent 映射', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('intent-test', { mode: 'interval', intervalMs: 60_000 })
     await runtime.dispatchTask(task)
@@ -52,7 +51,7 @@ describe('U4_AFTER_RUN_INTENT: intent 映射', () => {
 
   it('(2) force 路径直调 sendMessage 参数等价（deliverAs:followUp + triggerTurn:true）', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask(
       'force-intent',
@@ -86,8 +85,7 @@ describe('U4_AFTER_RUN_INTENT: intent 映射', () => {
       dispose: vi.fn(),
     }
     const backend = new MockSchedulerBackend()
-    backend.deliveryHandle = mockDelivery as any
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend, mockDelivery as any)
 
     const task = await runtime.addTask('delivery-only-test', { mode: 'interval', intervalMs: 60_000 })
     const dispatched = await runtime.dispatchTask(task)

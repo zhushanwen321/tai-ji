@@ -8,8 +8,8 @@ import { SchedulerRuntime } from './runtime.js'
 import { SchedulerService } from './service.js'
 import {
   controlGuidelines,
-  createScheduleControlHandler,
-  createScheduleHandler,
+  handleSchedule,
+  handleScheduleControl,
   ScheduleControlParams,
   type ScheduleControlParamsT,
   scheduleGuidelines,
@@ -113,11 +113,12 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
         settledHandlerRef.current?.(msg, outcome)
       },
     })
-    backend.setDeliveryHandle(deliveryHandle)
 
     // G1：注入代际比对（本 runtime 建立时的代数 vs 实时代数），供 tick 前置检查与
     // F2 catch 分诊判定 stale——不依赖 pi 错误文案。
-    const runtime = new SchedulerRuntime(backend, ctx, () => sessionGeneration !== myGeneration)
+    // delivery 直传构造器（L2：原经 backend.setDeliveryHandle 中转；装配无条件注入是
+    // L4 删除无 handle 直投分支的依据，装配断言锚定在 index-generation.test.ts）
+    const runtime = new SchedulerRuntime(backend, deliveryHandle, () => sessionGeneration !== myGeneration)
     // 延迟绑定：runtime 的 handleSettled 绑定到 delivery onSettled 回调
     settledHandlerRef.current = (msg, outcome) => runtime.handleSettled(msg, outcome)
     runtime.loadTasks(backend.loadTasks())
@@ -178,7 +179,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       _ctx: ExtensionContext,
     ) {
       try {
-        return await createScheduleHandler(getService())(params)
+        return await handleSchedule(getService(), params)
       } catch (err) {
         throw new Error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -200,7 +201,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       _ctx: ExtensionContext,
     ) {
       try {
-        return await createScheduleControlHandler(getService())(params)
+        return await handleScheduleControl(getService(), params)
       } catch (err) {
         throw new Error(`Error: ${err instanceof Error ? err.message : String(err)}`)
       }

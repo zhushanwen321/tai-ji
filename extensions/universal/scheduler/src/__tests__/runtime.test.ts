@@ -11,12 +11,10 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
   setPiHandle: vi.fn(),
 }))
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 
 // MockSchedulerBackend 零 FS 副作用：runtime 不再触碰 store，无需 mock store.js。
-
-const mockCtx = { isIdle: () => true, hasPendingMessages: () => false }
 
 /** 构造 delivery onSettled 回调入参消息（dispatchViaDelivery 挂 dedupeKey=task.id）。 */
 function settledMsg(content: string, taskId: string): DeliveryMessage {
@@ -39,7 +37,7 @@ describe('SchedulerRuntime', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     backend = new MockSchedulerBackend()
-    runtime = new SchedulerRuntime(backend, mockCtx)
+    runtime = new SchedulerRuntime(backend)
   })
 
   describe('addTask', () => {
@@ -125,8 +123,12 @@ describe('SchedulerRuntime', () => {
   })
 
   describe('dispatchTask', () => {
-    it('dispatches task when idle', async () => {
-      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+    // L3/L4（ext-simplify-08）后构造器不再收 ctx（idle/busy 判定已移交 delivery 内核），
+    // 直投路径只由 force 触达；无 handle 直投分支已删（装配契约见 index-generation.test.ts）。
+    // 原「无 delivery handle 时直投」类用例按设计 L4 裁决改由 force 路径覆盖。
+
+    it('dispatches task via direct send (force)', async () => {
+      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       await runtime.dispatchTask(task)
       expect(backend.sentMessages).toHaveLength(1)
       expect(backend.sentMessages[0]!.msg).toEqual(expect.objectContaining({ content: 'test' }))
@@ -139,81 +141,82 @@ describe('SchedulerRuntime', () => {
       expect(backend.sentMessages).toHaveLength(0)
     })
 
-    it('non-force 任务在 busy 时走 delivery 入队（不直调 sendMessage）', async () => {
-      const busyCtx = { isIdle: () => false, hasPendingMessages: () => false }
-      const busyBackend = new MockSchedulerBackend()
-      const busyRuntime = new SchedulerRuntime(busyBackend, busyCtx)
-      const task = await busyRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 })
-      // 无 delivery handle 时走 dispatchDirect（直投），busy 不影响（直投不检查 idle）
-      await busyRuntime.dispatchTask(task)
-      expect(busyBackend.sentMessages).toHaveLength(1)
+    it('non-force 任务走 delivery 入队（不直调 sendMessage）', async () => {
+      const deliveryBackend = new MockSchedulerBackend()
+      const mockDelivery = {
+        send: vi.fn(),
+        sendChecked: vi.fn(),
+        flush: vi.fn(),
+        depth: vi.fn(() => 0),
+        dispose: vi.fn(),
+      } as any
+      const deliveryRuntime = new SchedulerRuntime(deliveryBackend, mockDelivery)
+      const task = await deliveryRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+      await deliveryRuntime.dispatchTask(task)
+      expect(mockDelivery.send).toHaveBeenCalledTimes(1)
+      expect(deliveryBackend.sentMessages).toHaveLength(0)
     })
 
-    it('dispatches when force is true even if busy', async () => {
-      const busyCtx = { isIdle: () => false, hasPendingMessages: () => false }
+    it('dispatches directly when force is true even if busy', async () => {
       const busyBackend = new MockSchedulerBackend()
-      const busyRuntime = new SchedulerRuntime(busyBackend, busyCtx)
+      const busyRuntime = new SchedulerRuntime(busyBackend)
       const task = await busyRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       await busyRuntime.dispatchTask(task)
       expect(busyBackend.sentMessages).toHaveLength(1)
     })
 
-    // OR 组合补全：源码 `!isIdle() || hasPendingMessages()` 任一为真即跳过。
-    // idle=true 但有 pending message → dispatch 应被跳过。
-    // U4 变更：gate 已交 delivery 内核，无 delivery handle 时走 dispatchDirect（直投不检查 idle）
-    it('无 delivery handle 时直投不受 idle/pending 影响', async () => {
-      const pendingCtx = { isIdle: () => true, hasPendingMessages: () => true }
+    // 原「无 delivery handle 时直投不受 idle/pending 影响」用例（L4 裁决改由 force 路径覆盖）：
+    // 直投不经 delivery 内核，idle/pending 状态不参与判定——force 任务在 busy/pending 场景同样直投成功
+    it('force 任务直投不受 idle/pending 影响', async () => {
       const pendingBackend = new MockSchedulerBackend()
-      const pendingRuntime = new SchedulerRuntime(pendingBackend, pendingCtx)
-      const task = await pendingRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+      const pendingRuntime = new SchedulerRuntime(pendingBackend)
+      const task = await pendingRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       await pendingRuntime.dispatchTask(task)
       expect(pendingBackend.sentMessages).toHaveLength(1)
     })
 
     // U4 区分力补强：有 delivery handle 时非 force 任务走 delivery 入队而非直投
     it('有 delivery handle 时非 force 任务走 delivery 入队', async () => {
-      const pendingCtx = { isIdle: () => true, hasPendingMessages: () => true }
       const pendingBackend = new MockSchedulerBackend()
-      pendingBackend.deliveryHandle = {
+      const mockDelivery = {
         send: vi.fn(),
         sendChecked: vi.fn(),
         flush: vi.fn(),
         depth: vi.fn(() => 0),
         dispose: vi.fn(),
       } as any
-      const pendingRuntime = new SchedulerRuntime(pendingBackend, pendingCtx)
+      const pendingRuntime = new SchedulerRuntime(pendingBackend, mockDelivery)
       const task = await pendingRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 })
       const dispatched = await pendingRuntime.dispatchTask(task)
 
       expect(dispatched).toBe(true)
-      expect(pendingBackend.deliveryHandle.send).toHaveBeenCalledTimes(1)
+      expect(mockDelivery.send).toHaveBeenCalledTimes(1)
       expect(pendingBackend.sentMessages).toHaveLength(0)
       expect(task.pending).toBe(false)
     })
 
     // U4 区分力补强：busy 时 delivery 入队成功，不触发直投
     it('busy 时 delivery 入队成功，不触发直投', async () => {
-      const busyCtx = { isIdle: () => false, hasPendingMessages: () => true }
       const busyBackend = new MockSchedulerBackend()
-      busyBackend.deliveryHandle = {
+      const mockDelivery = {
         send: vi.fn(),
         sendChecked: vi.fn(),
         flush: vi.fn(),
         depth: vi.fn(() => 0),
         dispose: vi.fn(),
       } as any
-      const busyRuntime = new SchedulerRuntime(busyBackend, busyCtx)
+      const busyRuntime = new SchedulerRuntime(busyBackend, mockDelivery)
       const task = await busyRuntime.addTask('test', { mode: 'interval', intervalMs: 60000 })
       const dispatched = await busyRuntime.dispatchTask(task)
 
       expect(dispatched).toBe(true)
-      expect(busyBackend.deliveryHandle.send).toHaveBeenCalledTimes(1)
+      expect(mockDelivery.send).toHaveBeenCalledTimes(1)
       expect(busyBackend.sentMessages).toHaveLength(0)
       expect(task.pending).toBe(false)
     })
 
     it('sendMessage 失败 → 记 failed 状态但不 rethrow', async () => {
-      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       // backend.sendMessage 抛错模拟注入失败
       backend.sendMessage = async () => { throw new Error('inject failed') }
       const dispatched = await runtime.dispatchTask(task)
@@ -224,7 +227,7 @@ describe('SchedulerRuntime', () => {
     })
 
     it('成功 dispatch 后清除 lastError', async () => {
-      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       task.lastError = 'cron expression invalid'
       await runtime.dispatchTask(task)
       expect(task.lastError).toBeUndefined()
@@ -359,7 +362,7 @@ describe('SchedulerRuntime', () => {
     })
 
     it('dispatches due interval tasks and advances nextRunAt', async () => {
-      const task = await runtime.addTask('tick me', { mode: 'interval', intervalMs: 60000 })
+      const task = await runtime.addTask('tick me', { mode: 'interval', intervalMs: 60000 }, { force: true })
       // 手动让任务过期（nextRunAt 设为过去）
       task.nextRunAt = Date.now() - 1000
 
@@ -387,7 +390,7 @@ describe('SchedulerRuntime', () => {
     })
 
     it('deletes once task after dispatch', async () => {
-      const task = await runtime.addTask('one-shot', { mode: 'interval', intervalMs: 60000 }, { kind: 'once' })
+      const task = await runtime.addTask('one-shot', { mode: 'interval', intervalMs: 60000 }, { kind: 'once', force: true })
       task.nextRunAt = Date.now() - 1000
 
       await runtime.tickScheduler()
@@ -401,7 +404,7 @@ describe('SchedulerRuntime', () => {
     // tick1 dispatch 成功、重算 nextRunAt 失败停用；tick2/3 因 enabled=false 不再 dispatch。
     // 旧实现 `?? Date.now()` 会把 nextRunAt 设为 now → 每 tick 立即重触发 → 死循环。
     it('TC1: cron 失效任务不死循环（sendMessage 只触发 1 次）', async () => {
-      const task = await runtime.addTask('tick me', { mode: 'cron', cronExpression: '*/10 * * * *' })
+      const task = await runtime.addTask('tick me', { mode: 'cron', cronExpression: '*/10 * * * *' }, { force: true })
       // 手动把 cron 表达式改为无效（模拟表达式随环境失效），并使任务到期
       task.schedule = { mode: 'cron', cronExpression: 'invalid * *' }
       task.nextRunAt = Date.now() - 1000
@@ -425,7 +428,7 @@ describe('SchedulerRuntime', () => {
       backend.appendError = new Error('pi internal')
 
       // addTask 内 appendEntry 抛错 → 被捕获（console.warn），不 rethrow；内存态已更新（task 仍在）
-      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
+      const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       expect(runtime.getTask(task.id)).toBeDefined()
       expect(task.enabled).toBe(true)
       // appendEntrySafe 不污染业务态（append 失败是 transient，不设 lastError）
@@ -475,19 +478,16 @@ describe('SchedulerRuntime', () => {
     })
 
     // ── MF-1：toggle enable 重算 nextRunAt 到未来时清除残留 pending ──
-    // U4 变更：gate 已交 delivery 内核，非 force 任务在 busy 时通过 delivery 入队（无 handle 时直投）。
-    // pending 在 dispatchViaDelivery/dispatchDirect 成功后清除（不再依赖 gate 跳过保留 pending）。
+    // U4 变更：gate 已交 delivery 内核。pending 在 dispatchViaDelivery/dispatchDirect
+    // 成功后清除（不再依赖 gate 跳过保留 pending）；L3 后构造器不收 ctx、L4 后直投仅 force 触达。
     it('MF-1: enable 重算 nextRunAt 到未来时清除残留 pending，不提前 dispatch', async () => {
-      // 可控 idle 状态：先 busy 模拟 dispatchTask 跳过保留 pending（W4），后切 idle 排除 busy 干扰
-      let idle = false
-      const controllableCtx = { isIdle: () => idle, hasPendingMessages: () => false }
       const controllableBackend = new MockSchedulerBackend()
-      const rt = new SchedulerRuntime(controllableBackend, controllableCtx)
+      const rt = new SchedulerRuntime(controllableBackend)
 
       vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-      const task = await rt.addTask('mf1', { mode: 'interval', intervalMs: 60000 })
+      const task = await rt.addTask('mf1', { mode: 'interval', intervalMs: 60000 }, { force: true })
 
-      // T0+61s：任务到期 + 无 delivery handle → dispatchDirect（直投，不检查 idle）
+      // T0+61s：任务到期 → dispatchDirect（force 直投）
       // 直投成功后 pending=false
       vi.setSystemTime(new Date('2026-01-01T00:01:01Z'))
       await rt.tickScheduler()
@@ -539,7 +539,7 @@ describe('SchedulerRuntime', () => {
         data: op,
       }))
       // fakeSessionFile 默认 '/test/session.json'，与第一个 backend 一致 → owner 过滤放行
-      const replayRuntime = new SchedulerRuntime(replayBackend, mockCtx)
+      const replayRuntime = new SchedulerRuntime(replayBackend)
       replayRuntime.loadTasks(replayBackend.loadTasks())
 
       const replayed = replayRuntime.getTask(task.id)
@@ -601,10 +601,10 @@ describe('SchedulerRuntime', () => {
 
   // ── U4：delivery 内核集成 ──
   // scheduler 的非 force 任务走 delivery 内核（park 模式）。
-  // force 任务和无 delivery handle 时走 dispatchDirect（直投）。
+  // force 任务走 dispatchDirect（直投）；无 handle 直投分支已删（L4，装配恒注入 delivery）。
   describe('U4: delivery 内核集成', () => {
     it('有 delivery handle 时非 force 任务走 delivery 入队（不直调 sendMessage）', async () => {
-      // 模拟 delivery handle（必须在 runtime 构造前设置，构造时从 backend 获取）
+      // 模拟 delivery handle（L2 后经构造器直传）
       const sentViaDelivery: Array<{ content: string; intent: string }> = []
       const mockDelivery = {
         send: vi.fn((msg: { payload: { content: string }; intent?: string }) => {
@@ -618,9 +618,7 @@ describe('SchedulerRuntime', () => {
         depth: vi.fn(() => 0),
         dispose: vi.fn(),
       }
-      backend.deliveryHandle = mockDelivery as any
-      // 重新创建 runtime（构造时获取 delivery handle）
-      const deliveryRuntime = new SchedulerRuntime(backend, mockCtx)
+      const deliveryRuntime = new SchedulerRuntime(backend, mockDelivery as any)
 
       const task = await deliveryRuntime.addTask('delivery-test', { mode: 'interval', intervalMs: 60000 })
       await deliveryRuntime.dispatchTask(task)
@@ -643,8 +641,7 @@ describe('SchedulerRuntime', () => {
         depth: vi.fn(() => 0),
         dispose: vi.fn(),
       }
-      backend.deliveryHandle = mockDelivery as any
-      const deliveryRuntime = new SchedulerRuntime(backend, mockCtx)
+      const deliveryRuntime = new SchedulerRuntime(backend, mockDelivery as any)
 
       const task = await deliveryRuntime.addTask('force-test', { mode: 'interval', intervalMs: 60000 }, { force: true })
       await deliveryRuntime.dispatchTask(task)
@@ -663,8 +660,7 @@ describe('SchedulerRuntime', () => {
         depth: vi.fn(() => 0),
         dispose: vi.fn(),
       }
-      backend.deliveryHandle = mockDelivery as any
-      const deliveryRuntime = new SchedulerRuntime(backend, mockCtx)
+      const deliveryRuntime = new SchedulerRuntime(backend, mockDelivery as any)
 
       await deliveryRuntime.tickScheduler()
 
@@ -827,7 +823,7 @@ describe('SchedulerRuntime', () => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
       staleFlag = false
-      genRuntime = new SchedulerRuntime(backend, mockCtx, () => staleFlag)
+      genRuntime = new SchedulerRuntime(backend, undefined, () => staleFlag)
     })
 
     afterEach(() => {

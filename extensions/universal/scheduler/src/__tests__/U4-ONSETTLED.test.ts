@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import type { DeliveryMessage } from '@xyz-agent/session-delivery'
 
 import { SchedulerRuntime } from '../runtime.js'
@@ -41,7 +41,7 @@ describe('U4_ONSETTLED: onSettled 失败记账', () => {
 
   it('(1) delivery onSettled rejected → task.lastStatus=failed + history + pending=false', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask('rejected-test', { mode: 'interval', intervalMs: 60_000 })
 
@@ -57,7 +57,7 @@ describe('U4_ONSETTLED: onSettled 失败记账', () => {
 
   it('(2) once 任务 rejected → task 不删（at-least-once 语义）', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask(
       'once-rejected',
@@ -81,7 +81,7 @@ describe('U4_ONSETTLED: onSettled 失败记账', () => {
 
   it('(2b) 通过 handleSettled rejected 触发时，任务不删除且保留失败历史', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask(
       'once-rejected-via-handler',
@@ -98,7 +98,7 @@ describe('U4_ONSETTLED: onSettled 失败记账', () => {
 
   it('(3) recurring 任务 delivered → lastStatus=success + nextRunAt 推进 + append advance', async () => {
     const backend = new MockSchedulerBackend()
-    const runtime = new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false })
+    const runtime = new SchedulerRuntime(backend)
 
     const task = await runtime.addTask('delivered-test', { mode: 'interval', intervalMs: 60_000 })
     const oldNextRunAt = task.nextRunAt

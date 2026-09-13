@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { executeScheduleCommand, registerScheduleCommand } from '../commands.js'
 import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
@@ -27,7 +27,7 @@ describe('/schedule command', () => {
     }
     const backend = new MockSchedulerBackend()
     service = new SchedulerService(
-      new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false }),
+      new SchedulerRuntime(backend),
       () => backend.now(),
     )
     registerScheduleCommand(mockPi as never, () => service)
@@ -104,7 +104,9 @@ describe('/schedule command', () => {
   // ── 子命令路由：run ──
 
   it('run executes task', async () => {
-    const created = await service.create('test', '5m')
+    // force 任务（L4：直投唯一入口——/schedule 命令创建路径不带 force，run 子命令
+    // 的 dispatch 行为用 force 任务锚定直投路径）
+    const created = await service.create('test', '5m', { force: true })
     const result = await executeScheduleCommand(service, `run ${created.data!.task.id}`)
     expect(result).toContain('executed')
     // dispatchTask 更新 task 对象（同一引用），runCount 自增到 1。

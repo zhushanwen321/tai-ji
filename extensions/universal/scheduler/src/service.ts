@@ -8,18 +8,12 @@ const PREVIEW_RUN_COUNT = 5
 
 // ── 结构化结果 ──
 
-export type ServiceErrorCode =
-  | 'TASK_NOT_FOUND'
-  | 'INVALID_SCHEDULE'
-  | 'TASK_LIMIT_REACHED'
-  | 'DISPATCH_SKIPPED'
-  | 'INVALID_PARAMS'
-  | 'INTERNAL'
+// L1（ext-simplify-08）：errorCode 枚举与字段已删——W4 后失败通道收敛为 throw，
+// tool/command 两层均零消费方；失败语义由 message 文案承载。
 
 export interface ServiceResult<T = unknown> {
   success: boolean
   message: string
-  errorCode?: ServiceErrorCode
   data?: T
 }
 
@@ -29,7 +23,7 @@ export interface ServiceResult<T = unknown> {
  * tool 与 command 的唯一业务入口（IF-4 去双轨）：
  * 5 个动作单一实现，返回结构化 ServiceResult。
  * - 成功: { success: true, message, data }
- * - 失败: { success: false, errorCode, message }
+ * - 失败: { success: false, message }
  *
  * message 为用户可读纯文本（tool 用作 content 文本、command 直接输出），
  * data 供 tool details（create: {task, nextRuns}；list: {tasks}）。
@@ -41,8 +35,8 @@ export class SchedulerService {
    * 创建任务。
    * 注意：create 接收原始 schedule 字符串、内部 parseSchedule（而非已解析的
    * ScheduleSpec）——这是对 IF-4 草案 create(parseResult) 的有意细化：
-   * 解析失败需要结构化 INVALID_SCHEDULE 返回，把解析责任留在 service 内，
-   * tool/command 两层都不需要重复 parseSchedule。
+   * 解析失败需要结构化失败返回（success=false + 用户可读 message），把解析责任留在
+   * service 内，tool/command 两层都不需要重复 parseSchedule。
    */
   async create(
     prompt: string,
@@ -55,7 +49,6 @@ export class SchedulerService {
     if (!parsed) {
       return {
         success: false,
-        errorCode: 'INVALID_SCHEDULE',
         message: `Invalid schedule: "${scheduleInput}". Use duration (5m/2h/1d) or cron expression (*/10 * * * *).`,
       }
     }
@@ -64,12 +57,9 @@ export class SchedulerService {
     try {
       task = await this.runtime.addTask(prompt, parsed, options)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      if (message.startsWith('Task limit reached')) {
-        return { success: false, errorCode: 'TASK_LIMIT_REACHED', message }
-      }
-      // 意外错误兜底（正常路径不会到达：parseSchedule 已校验 cron 有效性）
-      return { success: false, errorCode: 'INTERNAL', message }
+      // 失败归一 message 通道（L1）：任务上限 / 意外错误（正常路径不会到达——
+      // parseSchedule 已校验 cron 有效性）同样回传原始 message
+      return { success: false, message: err instanceof Error ? err.message : String(err) }
     }
 
     const count = task.kind === 'once' ? 1 : PREVIEW_RUN_COUNT
@@ -113,48 +103,47 @@ export class SchedulerService {
 
   async toggle(id: string | undefined, enabled: boolean | undefined): Promise<ServiceResult> {
     if (!id) {
-      return { success: false, errorCode: 'INVALID_PARAMS', message: 'id is required for toggle.' }
+      return { success: false, message: 'id is required for toggle.' }
     }
     if (enabled === undefined) {
-      return { success: false, errorCode: 'INVALID_PARAMS', message: 'enabled is required for toggle.' }
+      return { success: false, message: 'enabled is required for toggle.' }
     }
     const success = await this.runtime.toggleTask(id, enabled)
     if (!success) {
-      return { success: false, errorCode: 'TASK_NOT_FOUND', message: `Task ${id} not found.` }
+      return { success: false, message: `Task ${id} not found.` }
     }
     return { success: true, message: `Task ${id} ${enabled ? 'enabled' : 'disabled'}.` }
   }
 
   delete(id: string | undefined): ServiceResult {
     if (!id) {
-      return { success: false, errorCode: 'INVALID_PARAMS', message: 'id is required for delete.' }
+      return { success: false, message: 'id is required for delete.' }
     }
     const success = this.runtime.deleteTask(id)
     if (!success) {
-      return { success: false, errorCode: 'TASK_NOT_FOUND', message: `Task ${id} not found.` }
+      return { success: false, message: `Task ${id} not found.` }
     }
     return { success: true, message: `Task ${id} deleted.` }
   }
 
   /**
    * 立即执行任务。语义细分：
-   * 任务不存在 → TASK_NOT_FOUND；任务存在但 dispatch no-op
-   * （disabled / rate-limited / 同任务入队已在 TTL 窗口内）→ DISPATCH_SKIPPED。
+   * 任务不存在 → not found 文案；任务存在但 dispatch no-op
+   * （disabled / rate-limited / 同任务入队已在 TTL 窗口内）→ not dispatched 文案。
    * busy 不再是 no-op：非 force 任务入队 delivery 内核即成功（park 等后续投递）。
    * 修复了旧实现把 no-op 误报为 not found 的混同。
    */
   async run(id: string | undefined): Promise<ServiceResult> {
     if (!id) {
-      return { success: false, errorCode: 'INVALID_PARAMS', message: 'id is required for run.' }
+      return { success: false, message: 'id is required for run.' }
     }
     if (!this.runtime.getTask(id)) {
-      return { success: false, errorCode: 'TASK_NOT_FOUND', message: `Task ${id} not found.` }
+      return { success: false, message: `Task ${id} not found.` }
     }
     const dispatched = await this.runtime.runTaskNow(id)
     if (!dispatched) {
       return {
         success: false,
-        errorCode: 'DISPATCH_SKIPPED',
         message: `Task ${id} not dispatched (disabled, rate-limited, or already queued for delivery).`,
       }
     }
