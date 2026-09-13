@@ -7,7 +7,7 @@
  * NUL 前缀确保不会与 extension 正常的 select title 冲突。
  * 与 ASK_USER_MARKER / SESSION_MANAGER_MARKER / BRIDGE_MARKER 同理。
  *
- * 设计权威源：docs/design/crash-forensics-and-watchdog.md §3.3 D5
+ * 设计权威源：docs/architecture/crash-forensics-and-watchdog.md §3.3 D5
  * 「在途判定谓词 + 求值位置」——extension 聚合上报通道的协议面（u7a）。
  */
 export const SUBAGENT_INFLIGHT_MARKER = '\x00XYZ_SUBAGENT_INFLIGHT'

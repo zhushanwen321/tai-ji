@@ -1,6 +1,6 @@
 # stale ctx 普查清单与「stale 静默语义」判定表（crash-resilience u1-ext-guard 交付物；设计文档已删，git 可追溯）
 
-> 依据：docs/design/crash-resilience.md（已删除，git 可追溯；独有档案已并入 docs/design/crash-forensics-and-watchdog.md 附录 D）§3.3 D1（extension 异步回调守卫）· §2.2 事件 E1 · §3.5 P-stale-throw / P-stale-wording / P-guard-holds。
+> 依据：docs/design/crash-resilience.md（已删除，git 可追溯；独有档案已并入 docs/architecture/crash-forensics-and-watchdog.md 附录 D）§3.3 D1（extension 异步回调守卫）· §2.2 事件 E1 · §3.5 P-stale-throw / P-stale-wording / P-guard-holds。
 > 守卫：`@zhushanwen/pi-ext-guards` 的 `guardStaleCtx(fn, opts)`——前置代际检查（isCtxStale，主判）+ fn 同步执行 + 错误文案 `stale after session replacement` 分诊（兜底）；stale 类静默降级（调 `opts.onStale`），非 stale 类原样上抛（守卫不吞真实 bug）。
 > 分诊词是 pi 语义断言：登记 docs/pi-semantics.json PS-30（探针 `extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts`），随 C-proc-08 pi 版本门禁自动重验。
 

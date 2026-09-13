@@ -80,7 +80,7 @@ export const NOTIFY_WATCHDOG_MS = 120_000;
  * [T4③/PS-6] 单条通知投递尝试上限（attempts 字段含首次投递）：看门狗把 sent 超期
  * 条目转回 pending 前，attempts 已达本上限 → 不再重投，转放弃终态（abandoned entry
  * + warn 恢复指引）。被否语义：「重投无限但幂等」——幂等只防重复入账，不防重复
- * 投递唤醒 LLM（设计 docs/design/subagent-core-unbounded-wait-audit.md §7.2 T4③）。
+ * 投递唤醒 LLM（设计 docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T4③）。
  */
 export const NOTIFY_REDELIVERY_MAX_ATTEMPTS = 5;
 

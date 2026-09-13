@@ -15,7 +15,7 @@
 //   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
 //     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
 //     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
-//     docs/design/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
+//     docs/architecture/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，

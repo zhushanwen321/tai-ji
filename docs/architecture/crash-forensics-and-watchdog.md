@@ -417,3 +417,12 @@ pi-*.jsonl tee 累计流量达 198MB = 长会话高频大 entry 真实流入的�
 - **出站帧**：runtime 经 WebSocket 发往 renderer 的单条消息。session 级 push 帧形态 `{type, payload: {sessionId, entry}}`——大内容藏在 entry 内部字段（工具结果在 `entry.message.content`，工具参数在 `entry.arguments`，图片是 content 数组内的 Image block，entry 无独立 images 字段）。
 - **ring 回放与 seq gap 检测**：MessageBus 为每 session 消息分配单调递增 seq；stream 类写容量 1000 环形缓冲，state 类更新订阅快照；WS 重连后按 seq 回放，客户端发现跳号（gap）即触发重订阅全量拉取。**seq 连续性是断连恢复机制的正确性前提**——任何「分配了 seq 但客户端没收到」的消息都会被判为丢帧（本文 D3/D8 与 C-comm-14 的 seq 语义约束均源于此）。
 - **单条消息体积 vs 累计流量**：单 session pi stdout tee 累计流量实测 198MB，但单条工具结果体积受 pi 工具上游约束（read/bash 类自截 50KB/2000 行、图片 ≤16MB）——累计大 ≠ 单帧大。传输预算防单帧超限，读取预算防文件级与累计级无界，两者对象不同。
+
+## 附录 E：subagent-core 无界等待家族裁决索引（2026-09-13 收编自 subagent-core-unbounded-wait-audit.md，原文档删除 git 可追溯）
+
+**两层裁决（AGENTS.md「超时默认原则」规则的出处）**：weekly/monthly workflow 并发挂死（RC-1/2/3）不是孤立 bug，而是「默认无界」设计裁决的家族性发作——全仓普查登记 **32 条同家族独立缺陷**（原始 34 条并条归并；13 条可致永久挂起/进程泄漏/宿主崩溃），修复按两层推进：
+
+1. **正常路径逐点根修**——任务执行正常路径不引入墙钟超时（用户显式指定才生效；静默 ≠ 卡死，活跃产出不得判死，ADR-0047）；逐个消灭无界等待点。
+2. **回收层统一有界兜底**——dispose / kill / 上界 / idle timer 四族回收机制允许默认有界（opt-out）；**兜底只许出现在回收层**，兜底被高频触发 = 正常路径 broken 的信号。
+
+约束登记：C-proc-19（看门狗默认不武装）、AGENTS.md 规则 19。原文档 § 编号（§4.1 OR-1、§7.2 T 系列、§7.3 P-T 探针族等）随收编不再对应本文结构，原编号上下文 git 可追溯；探针族现存于 `packages/subagent-core/probe/`（p-t1~p-t5），其报告头的设计依据指针已改指本附录。

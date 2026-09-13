@@ -2,7 +2,7 @@
 /**
  * check-stale-ctx-audit-coverage.mjs —— stale-ctx 普查清单完备性守卫（O1-2 审计覆盖机器守卫，B 方案）。
  *
- * 背景（docs/design/crash-forensics-and-watchdog.md §3.3 D9 O1-2）：crash-resilience（设计文档已删，git 可追溯）u1-ext-guard
+ * 背景（docs/architecture/crash-forensics-and-watchdog.md §3.3 D9 O1-2）：crash-resilience（设计文档已删，git 可追溯）u1-ext-guard
  * 交付的 stale-ctx 全仓普查（extensions/shared/ext-guards/docs/stale-ctx-audit.md §3）是一次性人工动作，
  * 此后新增 extension 包不会自动进入普查——「新包绕过 stale 静默语义判定」的漏洞无人把守。
  * 采用 B 方案（清单完备性检查）而非 AST lint（A 方案被否：回调形态发散，过匹配/漏匹配不可靠）：
@@ -52,7 +52,7 @@ if (rootIdx !== -1) {
 const auditPath = join(ROOT, AUDIT_REL)
 if (!existsSync(auditPath)) {
   console.error(`普查清单文件不存在: ${auditPath}`)
-  console.error('该文件是 stale-ctx 普查的权威 SSOT，缺失说明仓库结构漂移——先核对 docs/design/crash-forensics-and-watchdog.md §3.3 D9。')
+  console.error('该文件是 stale-ctx 普查的权威 SSOT，缺失说明仓库结构漂移——先核对 docs/architecture/crash-forensics-and-watchdog.md §3.3 D9。')
   process.exit(1)
 }
 
@@ -109,7 +109,7 @@ for (const group of GROUPS) {
   const groupDir = join(ROOT, 'extensions', group)
   if (!existsSync(groupDir)) {
     console.error(`extensions 分组目录不存在: ${groupDir}`)
-    console.error(`三组目录 ${GROUPS.join('/')} 是本守卫的扫描面，缺失说明仓库结构漂移——核对 docs/design/crash-forensics-and-watchdog.md §3.3 D9 的扫描范围定义。`)
+    console.error(`三组目录 ${GROUPS.join('/')} 是本守卫的扫描面，缺失说明仓库结构漂移——核对 docs/architecture/crash-forensics-and-watchdog.md §3.3 D9 的扫描范围定义。`)
     process.exit(1)
   }
   for (const entry of readdirSync(groupDir, { withFileTypes: true })) {
@@ -132,7 +132,7 @@ if (missing.length > 0) {
   console.error('修复：编辑 extensions/shared/ext-guards/docs/stale-ctx-audit.md 的 §3「全仓普查清单」表格，')
   console.error('  为上述每个包补一行登记（列：包 / 命中点 / 判定 / 理由；同组多包可并入斜杠分隔的合并行），')
   console.error('  判定为「接入」的包还需在 §4「stale 静默语义」判定表补对应场景行。')
-  console.error('设计依据：docs/design/crash-forensics-and-watchdog.md §3.3 D9 O1-2（B 方案：清单完备性检查）。')
+  console.error('设计依据：docs/architecture/crash-forensics-and-watchdog.md §3.3 D9 O1-2（B 方案：清单完备性检查）。')
   process.exit(1)
 }
 

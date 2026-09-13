@@ -1,6 +1,6 @@
 // src/host/inflight-reporter.ts
 //
-// 壳层在途上报出口（u7a，设计权威源：docs/design/crash-forensics-and-watchdog.md
+// 壳层在途上报出口（u7a，设计权威源：docs/architecture/crash-forensics-and-watchdog.md
 // §3.3 D5「extension 聚合上报」）。本文件属壳侧（shell），对 pi SDK（ExtensionContext
 // 的 ctx.ui.select 通道）的消费收敛在 host/ 层——core 闭包红线只约束 core（出口回调
 // 由 core 的 inflight-snapshot 注入，见组合根 index.ts 的 setInFlightListener 接线）。

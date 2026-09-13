@@ -1,7 +1,7 @@
 /**
  * [OR-3] abort 广播（主线程半边）+ [OR-7] signal abort listener 终态移除 测试。
  *
- * 覆盖（unbounded-wait-audit §4.3 OR-7 / §7.2 T3③⑥ / §7.3 P-T3 主线程半边）：
+ * 覆盖（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §4.3 OR-7 / §7.2 T3③⑥ / §7.3 P-T3 主线程半边））：
  * - abortRun / terminateRunningRuns 在 worker.terminate 之前向 worker 广播
  *   {type:"abort", reason}（worker 侧 pending 优雅解阻，P-T3）；postMessage 抛错
  *   （worker 已退出）不阻断 abort 主流程；runtime 缺失为 no-op

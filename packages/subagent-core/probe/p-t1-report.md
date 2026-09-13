@@ -2,7 +2,7 @@
 
 - **探针脚本**：`packages/subagent-core/probe/p-t1-lazy-getstate.mjs`（可复跑：`node probe/p-t1-lazy-getstate.mjs --count 6`）
 - **运行日期**：2026-09-01
-- **设计依据**：`docs/design/subagent-core-unbounded-wait-audit.md` §7.3 P-T1 行（⛔ T1 实施前门）、§7.2 T1 主题
+- **设计依据**：`docs/architecture/crash-forensics-and-watchdog.md 附录 E` §7.3 P-T1 行（⛔ T1 实施前门）、§7.2 T1 主题
 - **结论**：**通过（PASS）**——6 路全部在 1ms 量级应答，对 1s 预算有三个数量级余量。T1「agent_end 决策链惰性回补」方案的前提成立，**无需启用降级路径**（sessionDir 后缀扫描 + leaf 短路组合仍按 T1 设计保留为 LC-4/PS-9 修复面，但不再承担 get_state 不可达的风险对冲）。
 
 ## 1. 验证的断言

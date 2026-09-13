@@ -1,5 +1,5 @@
 // inflight-snapshot.test.ts —— core→壳在途事件出口（u7a，设计权威源：
-// docs/design/crash-forensics-and-watchdog.md §3.3 D5）。
+// docs/architecture/crash-forensics-and-watchdog.md §3.3 D5）。
 //
 // 三视角：
 //   ①使用者（壳层 reporter 视角）——setInFlightListener 注册后，core 状态迁移点

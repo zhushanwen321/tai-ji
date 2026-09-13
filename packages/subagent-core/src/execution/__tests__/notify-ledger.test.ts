@@ -28,7 +28,7 @@
 //
 // 合并终态（feat 容器 + dev T4③ 增量）：
 //   - 追加 T4③ 重投止损（PS-6）族：回执确认不可达时 attempts 上限 + abandoned
-//     放弃终态（docs/design/subagent-core-unbounded-wait-audit.md §7.2 T4③ /
+//     放弃终态（docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T4③ /
 //     §8.2 S-E）；差集 helper 相应升级三列（ledger − ack − abandoned）。
 //   - logger 基建统一 dev 侧 configureCore sink（core logger facade 经
 //     host-services 动态解析宿主实现，见 agents-assembly.test.ts 同款）——

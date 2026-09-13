@@ -2,7 +2,7 @@
  * [OR-4] 终态收尾 emit/onRunDone M12 同款围栏 + [OR-6] handleWorkerMessage log case /
  * default 留痕 + [OR-8] run done 时 in-flight call 收口 cancelled 测试。
  *
- * 覆盖（unbounded-wait-audit §4.1 OR-4 / §4.3 OR-6、OR-8 / §7.2 T3④⑤、T7④）：
+ * 覆盖（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §4.1 OR-4 / §4.3 OR-6、OR-8 / §7.2 T3④⑤、T7④））：
  * - OR-4：eventBus.emit 或 onRunDone 同步抛错时，五个终态路径（return / worker error
  *   超限 / script error 超限 / exit 无终态消息 / time_limited）promise 均 resolve——
  *   错误被围栏捕获 error 留痕，不再经 worker-host 的 `void handlers.onXxx(...)`

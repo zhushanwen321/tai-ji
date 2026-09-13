@@ -1,5 +1,5 @@
 /**
- * reattach 编排（docs/design/crash-forensics-and-watchdog.md §3.3 D3，实施单元 u5）。
+ * reattach 编排（docs/architecture/crash-forensics-and-watchdog.md §3.3 D3，实施单元 u5）。
  *
  * 职责：runtime 启动（WS listen 后独立并行任务，组合根 index.ts 挂载）消费
  * runtime-checkpoint 快照，按「reaper 回收判定的真补集」恢复崩溃前的活跃 session。

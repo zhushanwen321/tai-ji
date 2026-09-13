@@ -321,7 +321,7 @@ describe("DialogGlobalQueue — #19 单一推进点 + child close 集成语义",
 });
 
 // ── LC-3/T2⑦：dialog 超时上界（有意的行为变更：「等用户无限久」→ 默认 30min 有界）──
-// 设计权威源：docs/design/subagent-core-unbounded-wait-audit.md §7.2 T2 措施⑦。
+// 设计权威源：docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T2 措施⑦。
 // 覆盖：①传 timeout 按传值 settle（错误消息含恢复指引与已等待时长）②未传挂 30min 默认上界
 // ③超时后队列继续（L2 processing 释放，不全局卡死）④handler 与队列级竞态 settle 恰一次。
 

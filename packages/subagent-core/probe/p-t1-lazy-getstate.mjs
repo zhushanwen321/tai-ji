@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // probe/p-t1-lazy-getstate.mjs — 探针 P-T1（⛔ T1 实施前门）
 //
-// 设计来源：docs/design/subagent-core-unbounded-wait-audit.md §7.3 P-T1 行 / §7.2 T1 主题。
+// 设计来源：docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.3 P-T1 行 / §7.2 T1 主题。
 // 验证断言：agent_end 时子进程（已完成 turn、idle）对 get_state **毫秒级**应答——
 // T1「agent_end 决策链惰性回补」方案成立的前提（sessionFile 缺失现场重试 get_state
 // 之所以可行，是因为此刻子进程已完成 turn、rpc 主循环空闲，get_state handler 只读

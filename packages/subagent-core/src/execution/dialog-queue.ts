@@ -27,7 +27,7 @@ import { isDialogMethod } from "./ui-interaction-model.ts";
 
 const logger = getLogger("subagents");
 
-// ── dialog 超时上界（LC-3 / T2⑦，设计 docs/design/subagent-core-unbounded-wait-audit.md）──
+// ── dialog 超时上界（LC-3 / T2⑦，设计 docs/architecture/crash-forensics-and-watchdog.md 附录 E）──
 
 /** 分钟/秒/毫秒换算常数（与 lifecycle-manager.ts 同款命名）。 */
 const SECONDS_PER_MINUTE = 60;

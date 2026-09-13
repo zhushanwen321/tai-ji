@@ -1,7 +1,7 @@
 /**
  * inflight-mirror — subagent 在途上报的 runtime 侧只读镜像（u7b）。
  *
- * 设计权威源：docs/design/crash-forensics-and-watchdog.md §3.3 D5「缺席与丢失的语义收敛」①-⑤。
+ * 设计权威源：docs/architecture/crash-forensics-and-watchdog.md §3.3 D5「缺席与丢失的语义收敛」①-⑤。
  * 生产侧契约（u7a，packages/extension-protocol/src/extensions/subagent-inflight/）：pi 进程内
  * subagent-workflow 壳层经既有 select 通道推送在途帧（title = SUBAGENT_INFLIGHT_MARKER），
  * 每帧携带该 session 的**绝对计数**（非增量——单帧丢失由后续帧覆盖纠正，不累积误差）。

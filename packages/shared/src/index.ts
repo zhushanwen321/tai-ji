@@ -99,7 +99,7 @@ export {
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
 } from './ipc-payloads'
-// 崩溃台账事件 Schema SSOT（docs/design/crash-forensics-and-watchdog.md §3.3 D1，
+// 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
 export type {
