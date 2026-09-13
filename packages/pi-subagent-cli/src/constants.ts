@@ -11,7 +11,7 @@ export const PI_ENGINE_ID = "pi";
 /** pi 适配器版本（handle.adapterVersion 数据源——golden 样本对齐排查锚点）。 */
 export const PI_ADAPTER_VERSION = "1.0.0";
 
-/** pi 无隔离池（PI_CODING_AGENT_DIR 全局一份，设计 §3.3.9），poolKey 恒 'shared'。 */
+/** pi 无隔离池（PI_CODING_AGENT_DIR 全局一份；依据 = 原 subagent-engine-abstraction.md §3.3.9（已删，git 可追溯），现行登记 constraints.json C-ext-15），poolKey 恒 'shared'。 */
 export const PI_POOL_KEY = SHARED_POOL_KEY;
 
 /** pi 域 schema env 名（宿主侧唯一活定义；structured-output 扩展读取它注册 tool——

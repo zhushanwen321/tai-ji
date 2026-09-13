@@ -1084,9 +1084,10 @@ function zcodeResumeAnchorOf(ctx: RunContext): { sessionId: string; dbPath: stri
  *
  * 形态：新会话对 prior session 零记忆——前缀显式框定「这是同一对话的延续」并
  * 给出 prior sessionId（宿主 record 锚已换新，旧 id 仅作溯源提示），历史按
- * user/assistant 双向行铺陈。裁剪：token 预算（tokens 数据优先，缺席按字符近似
- * ×ZCODE_RESUME_CHARS_PER_TOKEN）超限时从最旧条目起丢弃并显式标注省略（保尾
- * ——最近上下文对续聊最重要）。
+ * user/assistant 双向行铺陈。裁剪：恒按字符 4:1 近似（token 预算 ×
+ * ZCODE_RESUME_CHARS_PER_TOKEN）执行，超限时从最旧条目起丢弃并显式标注省略（保尾
+ * ——最近上下文对续聊最重要）；resume 应答 tokens 数据（totalTokens 形参）不参与
+ * 裁剪判定，仅进保留量注记。
  */
 export function buildResumeInjectionSegment(
   history: readonly ResumedHistoryTurn[],
@@ -1099,7 +1100,9 @@ export function buildResumeInjectionSegment(
   const lines = history.map((t) => `${t.role}: ${t.text}`);
   let kept = lines;
   let omitted = 0;
-  // 裁剪循环：总字符超预算时逐条丢最旧（每轮重算，前缀行也占预算）
+  // 裁剪循环：历史行总字符超预算时逐条丢最旧（每轮重算；预算只覆盖历史行——
+  // 前缀框架文本与省略注记不占预算，框架文本为固定数百字符，对 96k chars 量级
+  // 预算的偏差可忽略）
   while (kept.length > 1 && kept.reduce((n, l) => n + l.length + 1, 0) > charBudget) {
     kept = kept.slice(1);
     omitted++;

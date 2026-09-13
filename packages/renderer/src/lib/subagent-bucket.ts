@@ -43,7 +43,9 @@ export function isRunningProjection(record: SubagentRecord): boolean {
  * done 投影判据（D4 SSOT）：one-shot 轮终等 GC——v4~U7 写面故意保持 running
  * （可冷路径 resume）但携带轮终 result，此形态以绿点展示且可长期滞留，「轮终不算
  * 真在跑」是 store 既有窄口径语义（hasRunning / isStreamingSubagent 同源注释）。
- * U8 起写面轮终直接落 idle，本判据仅服务旧 session 数据展示。
+ * U8 起成功/失败轮终落 running-resumable 形态（仍经本判据判定 done），并非直接
+ * 落 idle——本判据服务全部现存 one-shot 轮终（running + result 形态）+ 旧 session
+ * 数据展示，不可退役。
  * SubagentList 展示判据 isDone 必须引用本函数，禁止重复实现。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {

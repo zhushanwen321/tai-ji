@@ -323,7 +323,7 @@ describe('SubagentList statusDotClass 状态点映射', () => {
     expect(dot.classes()).toContain('opacity-60')
   })
 
-  it('态4 idle + stopReason=failed → bg-danger 红点（失败收口）', () => {
+  it('态4 idle + stopReason=failed → bg-danger 红点（投影契约锁定：该形态当前写面尚不可产生，可达路径由写面侧并行修复组补齐）', () => {
     const { dot } = mountDot({ status: 'idle', stopReason: 'failed', subagentId: 'dot-idle-failed-1' })
     expect(dot.classes()).toContain('bg-danger')
     expect(dot.classes()).not.toContain('bg-success')

@@ -13,7 +13,8 @@
 //
 // pi-subagent-cli 侧不消费本函数（其子进程 env 走 SDK buildEngineChildEnv 三层
 // 契约 + schemaEnv/relay 键，无 pi agent 目录隔离需求——PI_CODING_AGENT_DIR 全局
-// 一份，设计 §3.3.9 无隔离池）。
+// 一份，无隔离池；依据 = 原 subagent-engine-abstraction.md §3.3.9（已删，git
+// 可追溯），现行登记 constraints.json C-ext-15）。
 
 /** 底层出站构建器形状（shared buildOutboundChildEnv / SDK 同形，DI 注入）。 */
 export type BuildChildEnvFn = (opts: {

@@ -556,6 +556,10 @@ export class SessionRecords {
  * [U8b / GUI 快修①] result/resumable/chatMode 三字段补入：轮终迁移恰翻这三个字段
  * （result 写入 / resumable 置位 / chatMode 显式化），缺比对会把「轮终等待续聊」的
  * 显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
+ * [engine 域浅比较] engineHandle/engineFallback 是嵌套对象，applyRecordEntries 每轮
+ * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
+ * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
+ * （sessionRef.sessionId 变化）是真值变化，字段级比较天然触发 publish。
  */
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
@@ -580,8 +584,43 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.stopReason === b.stopReason
     && a.origin === b.origin
     && a.engine === b.engine
-    && a.engineFallback === b.engineFallback
-    && a.engineHandle === b.engineHandle
+    && engineFallbackEquals(a.engineFallback, b.engineFallback)
+    && engineHandleEquals(a.engineHandle, b.engineHandle)
+}
+
+/**
+ * [engine 域浅比较] string Record 键值逐一比对（键序无关——sessionRef 是引擎自定义
+ * 键集合，两轮解析的键插入序不保证稳定，禁 JSON.stringify 全量比较）。
+ */
+function stringRecordEquals(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => a[key] === b[key])
+}
+
+/** [engine 域浅比较] engineFallback 字段级（from/reason 均标量）。 */
+function engineFallbackEquals(
+  a: SubagentRecord['engineFallback'],
+  b: SubagentRecord['engineFallback'],
+): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.from === b.from && a.reason === b.reason
+}
+
+/**
+ * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + journalPath /
+ * poolKey 标量比对（zcode 锚 = sessionRef.{sessionId,dbPath}，sessionId 换新即真变化）。
+ */
+function engineHandleEquals(
+  a: SubagentRecord['engineHandle'],
+  b: SubagentRecord['engineHandle'],
+): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return stringRecordEquals(a.sessionRef, b.sessionRef)
+    && a.journalPath === b.journalPath
+    && a.poolKey === b.poolKey
 }
 
 /**

@@ -205,12 +205,13 @@ export function isFailedTerminalStatus(status: string | undefined): boolean {
 /**
  * resume 历史注入的 token 预算（先验值）：新会话无任何记忆，历史全部经 prompt
  * 前缀注入——预算防超长历史（多轮长会话）把首轮 prompt 撑爆模型上下文。超预算
- * 时从最旧条目起丢弃（保尾——最近上下文对续聊最重要）。裁剪预算的数据源 =
- * resume 应答自带 tokens（extractResumeTotalTokens）；tokens 缺席时按字符近似。
+ * 时从最旧条目起丢弃（保尾——最近上下文对续聊最重要）。裁剪恒按字符 4:1 近似
+ * （ZCODE_RESUME_CHARS_PER_TOKEN）换算执行；resume 应答自带 tokens
+ * （extractResumeTotalTokens）不参与裁剪判定，仅进保留量注记。
  */
 export const ZCODE_RESUME_HISTORY_TOKEN_BUDGET = 24_000;
 
-/** tokens 数据缺席时的字符近似换算（1 token ≈ 4 chars，中英混合保守值）。 */
+/** 字符近似换算（1 token ≈ 4 chars，中英混合保守值）——裁剪恒用此比率，非 tokens 缺席时的降级。 */
 export const ZCODE_RESUME_CHARS_PER_TOKEN = 4;
 
 /**

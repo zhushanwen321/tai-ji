@@ -226,6 +226,88 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(publish).toHaveBeenCalledTimes(4)
   })
 
+  it('engine 域同值新引用不重复发布（字段级浅比较——引用比较会把每轮重解析误判为变化）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // engine 三字段齐备的 zcode record 形态（sessionRef 键序 = sessionId 在前）
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e1', {
+          engine: 'zcode',
+          engineFallback: { from: 'zcode-missing', reason: 'engine_probe_failed' },
+          engineHandle: {
+            sessionRef: { sessionId: 'z-1', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            journalPath: '/engines/zcode/shared/journal.jsonl',
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e1',
+      },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 增量窗口返回同值新 entry：extractor 重新解析产生全新对象引用（applyRecordEntries
+    // 每轮重扫），且 sessionRef 刻意换键序（dbPath 在前）——字段级浅比较判相等不发布
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e9', {
+          engine: 'zcode',
+          engineFallback: { from: 'zcode-missing', reason: 'engine_probe_failed' },
+          engineHandle: {
+            journalPath: '/engines/zcode/shared/journal.jsonl',
+            sessionRef: { dbPath: '/engines/zcode/session-db/db.sqlite', sessionId: 'z-1' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e9',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('zcode 续聊换锚：engineHandle.sessionRef.sessionId 变化是真值变化必须 publish', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e1', {
+          engine: 'zcode',
+          engineHandle: {
+            sessionRef: { sessionId: 'z-1', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e1',
+      },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 续聊后每轮换新 session（record 锚已换新）——sessionRef.sessionId 真变化触发 publish
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e2', {
+          engine: 'zcode',
+          engineHandle: {
+            sessionRef: { sessionId: 'z-2', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e2',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(2)
+  })
+
   it('增量路径：cursor 建立后失效走 getEntries(since)', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
