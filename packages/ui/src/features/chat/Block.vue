@@ -334,12 +334,13 @@ const isFailed = computed(() => props.tool?.status === 'error')
 const isRunning = computed(() => props.tool?.status === 'running')
 
 /** running 工具耗时实时跳动：仅 isRunning 期间挂载 interval，onUnmounted 清理，页面 hidden 停 tick */
+const LIVE_DUR_TICK_MS = 100
 const nowTs = ref(Date.now())
 let liveDurTimer: ReturnType<typeof setInterval> | null = null
 function startLiveDurTick(): void {
   if (liveDurTimer) return
   nowTs.value = Date.now()
-  liveDurTimer = setInterval(() => { nowTs.value = Date.now() }, 100)
+  liveDurTimer = setInterval(() => { nowTs.value = Date.now() }, LIVE_DUR_TICK_MS)
 }
 function stopLiveDurTick(): void {
   if (liveDurTimer) { clearInterval(liveDurTimer); liveDurTimer = null }
