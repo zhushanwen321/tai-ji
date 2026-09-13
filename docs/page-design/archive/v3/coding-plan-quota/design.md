@@ -319,7 +319,7 @@ interface QuotaState {
 
 #### 2.2.5 Settings UI 设计
 
-在 `ProviderEditModal.vue` 的左侧「凭据配置」区下方，新增「Coding Plan 额度查询」Section（仅在 provider 命中 QUOTA_PRESETS 时显示）。**[HISTORICAL] 该「仅在命中 QUOTA_PRESETS 时显示」已失效**：实现早已改为始终显示，[coding-plan-quota-config-ux.md](../../../../design/coding-plan-quota-config-ux.md) 的 D8 正式采纳用户决策「所有 provider 都显示，未选类型时只渲染类型下拉 + 一句说明」——旧条件会把「该 provider 能不能配额度」变成用户猜不到的隐规则。
+在 `ProviderEditModal.vue` 的左侧「凭据配置」区下方，新增「Coding Plan 额度查询」Section（仅在 provider 命中 QUOTA_PRESETS 时显示）。**[HISTORICAL] 该「仅在命中 QUOTA_PRESETS 时显示」已失效**：实现早已改为始终显示，coding-plan-quota-config-ux.md（已删，git 可追溯） 的 D8 正式采纳用户决策「所有 provider 都显示，未选类型时只渲染类型下拉 + 一句说明」——旧条件会把「该 provider 能不能配额度」变成用户猜不到的隐规则。
 
 ```
 ┌─ 凭据配置（已有）──────────────────┐
@@ -336,8 +336,8 @@ interface QuotaState {
 ```
 
 交互细节：
-- **开关**：默认关闭。打开后立即调 `quota.refresh` 测试一次，成功显示「✓ 已获取额度」，失败显示错误。**[HISTORICAL] 本句已被 [coding-plan-quota-config-ux.md](../../../../design/coding-plan-quota-config-ux.md) 推翻（D4）**：开关退化为纯配置位——唯一语义是「要不要在对话框容量浮层里展示」，拨动只落盘、无任何网络副作用；「打开即测一次」正是失败模式 A（「已启用但永远查不到」）的直接成因，测试动作改为并入唯一按钮「保存并测试」（D2）。
-- **api-key 类 provider**（智谱/kimi/minimax）：凭证复用上方的 API Key 输入框，不重复输入。**[HISTORICAL] 本句已被 [coding-plan-quota-config-ux.md](../../../../design/coding-plan-quota-config-ux.md) 部分推翻（D3）**：继承仍然成立，但由「留空即复用」的隐式约定改为显式的「凭证来源」选择（Provider 凭据 / 专属 Key），且该选择持久化到 `ProviderInfo.quota.credentialSource`，UI 显示与 runtime 实际使用同源（消除「显示用 A、实际用 B」）。
+- **开关**：默认关闭。打开后立即调 `quota.refresh` 测试一次，成功显示「✓ 已获取额度」，失败显示错误。**[HISTORICAL] 本句已被 coding-plan-quota-config-ux.md（已删，git 可追溯） 推翻（D4）**：开关退化为纯配置位——唯一语义是「要不要在对话框容量浮层里展示」，拨动只落盘、无任何网络副作用；「打开即测一次」正是失败模式 A（「已启用但永远查不到」）的直接成因，测试动作改为并入唯一按钮「保存并测试」（D2）。
+- **api-key 类 provider**（智谱/kimi/minimax）：凭证复用上方的 API Key 输入框，不重复输入。**[HISTORICAL] 本句已被 coding-plan-quota-config-ux.md（已删，git 可追溯） 部分推翻（D3）**：继承仍然成立，但由「留空即复用」的隐式约定改为显式的「凭证来源」选择（Provider 凭据 / 专属 Key），且该选择持久化到 `ProviderInfo.quota.credentialSource`，UI 显示与 runtime 实际使用同源（消除「显示用 A、实际用 B」）。
 - **cookie 类 provider**（mimo/opencode-go）：单独显示 Cookie 输入框（textarea，多行支持）+ 「如何获取 cookie」帮助链接
 - **测试查询按钮**：调 `quota.refresh(providerId)` 立即拉取一次，UI 显示结果（成功/失败 + 错误原因）
 - **查看额度按钮**：在浮层里直接展示当前额度（不离开设置页）
@@ -379,7 +379,7 @@ grid-template-columns: 32px 1fr 32px 52px;
 - `>90%`：`fill-danger`，百分比文字转 `text-danger`
 - `null`（无限/未订阅/不支持）：进度条透明（width 0），百分比显 `∞`（`text-subtle`）
 
-**未配置态**：provider 未启用 coding-plan 查询时，浮层**只保留容量区**，不渲染 divider + section-label + 三窗口行。浮层自然比已配置态矮一截——这是预期行为，不强求等高。footer 文案改为「<Provider名> 无 Coding Plan」+ 「配置」按钮（跳转 Settings → Provider 编辑）。**[HISTORICAL] 本段已被 [coding-plan-quota-config-ux.md](../../../../design/coding-plan-quota-config-ux.md) 补齐（D11）**：原文只描述了未配置态的该入口；失败态（已启用但查询失败）同样需要它——「已启用但凭证缺失」的 provider 必有 matchedProviderId，只会拿到「刷新」，而刷新在凭证缺失时只会再失败一次，形成死路，故失败态 footer 同时给「刷新」与「配置」两个入口。
+**未配置态**：provider 未启用 coding-plan 查询时，浮层**只保留容量区**，不渲染 divider + section-label + 三窗口行。浮层自然比已配置态矮一截——这是预期行为，不强求等高。footer 文案改为「<Provider名> 无 Coding Plan」+ 「配置」按钮（跳转 Settings → Provider 编辑）。**[HISTORICAL] 本段已被 coding-plan-quota-config-ux.md（已删，git 可追溯） 补齐（D11）**：原文只描述了未配置态的该入口；失败态（已启用但查询失败）同样需要它——「已启用但凭证缺失」的 provider 必有 matchedProviderId，只会拿到「刷新」，而刷新在凭证缺失时只会再失败一次，形成死路，故失败态 footer 同时给「刷新」与「配置」两个入口。
 
 **数据源**：`ContextCapacityPopover.vue` hover-enter 时触发查询：
 - 容量区（现有）：`context.update` / `session.state_changed` → `inputTokens / contextLimit / usagePercent`（已有订阅）
