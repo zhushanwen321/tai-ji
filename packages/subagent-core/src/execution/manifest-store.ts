@@ -35,6 +35,28 @@ export interface ManifestRecord {
    */
   executionStatus?: ExecutionStatus;
   /**
+   * [U8 / §3.2.8 session-reader 前向兼容铁律] 意愿维度下行：'archived' = 已收起
+   * （close 动作）。写侧经 derivedManifestRecord 投影（intent 持久化的 manifest
+   * 锚——binding/entry 面之外的第三持久化点，孤儿 record 重启后意图不丢）；
+   * 读侧 manifestToSubagent 回读。旧版 session-reader 的 RecordManifest 接口无
+   * 本字段，未知字段跳过——无破坏（与 executionStatus 同款过渡锚形态）。
+   */
+  intent?: "active" | "archived";
+  /**
+   * [U8 / B-restart manifest 契约面] 实际执行引擎 id（引擎域下行）。zcode record
+   * 无子 session 文件（磁盘扫描缺员），manifest 是其重启可见性的兜底承载——
+   * 缺 engine 域则 manifest 源投影丢引擎身份，U8b 与重启恢复无法路由读链。
+   * 缺省 = pi。旧版 session-reader 未知字段跳过，无破坏。
+   */
+  engine?: string;
+  /**
+   * [U8 / B-restart] 引擎自描述定位符（与 SubagentRecord.engineHandle 同形）：
+   * sessionRef 整体透传不枚举内部键（zcode = { sessionId, dbPath }）、journalPath
+   * 绝对路径、poolKey 隔离池定位。zcode record 重启续聊的锚恢复数据源之一
+   * （entry engineHandle.sessionRef 为主，本字段为 manifest 孤儿兜底）。
+   */
+  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  /**
    * [M2 Gate B] closed 终态的 L2 关闭原因（status="closed" 时有意义）。旧 manifest 无
    * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建
    * 的快照丢 closedReason，endedMessageGuard 把 user-close/cancelled 误分流进

@@ -17,6 +17,7 @@ import type {
   DisplayItem,
   ExecutionMode,
   ExecutionStatus,
+  Intent,
   RecordOrigin,
   StopReason,
   SubagentRecord,
@@ -60,6 +61,13 @@ export interface SubagentRecordEntryData {
    * （stopReason ?? closedReason）归一。
    */
   stopReason?: StopReason;
+  /**
+   * [U8 / §3.2.1] 意愿维度（close 收起 / message 寻回的迁移写点携带）。additive
+   * 字段：undefined（存量 entry）= "active" 语义零迁移。GUI「已收起」分区（U8b）
+   * 与 manifest 下行映射（archived → legacy closed，U5-D10）的持久化载体——
+   * 漏本字段则重启后归档意图静默丢失。
+   */
+  intent?: Intent;
   mode: ExecutionMode;
   startedAt: number;
   /** 根 Pi session ID（session 隔离过滤用）。 */
@@ -145,6 +153,9 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     status: record.status,
     closedReason: record.closedReason,
     stopReason: record.stopReason,
+    // [U8] 意愿维度随快照持久化（undefined 经 JSON.stringify 自然缺省，旧 entry
+    // 序列化字节不变——零迁移）。
+    intent: record.intent,
     mode: record.mode,
     startedAt: record.startedAt,
     rootSessionId: record.rootSessionId,

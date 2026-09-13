@@ -155,11 +155,13 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     // = D8 判据破坏）。
     const manifestFile = manifestPath(agentDir, "sa-m1");
     expect(fs.existsSync(manifestFile)).toBe(true);
-    // [U5] 编排性关闭 = 自动收起（不终态化）：markArchived 派生投影——idle 无
-    // closedReason 如实投影 legacy "running"（session-reader 视角活跃成员；archived
-    // → closed 下行映射归 U8），executionStatus = idle（两态权威词）。
+    // [U5] 编排性关闭 = 自动收起（不终态化）：markArchived 派生投影——[U8 / U5-D10]
+    // archived intent 下行 legacy "closed"（「已收起」在旧消费者语义里 = 结束，
+    // session-reader 按既有 closed 语义归已完成分区）+ executionStatus = idle
+    //（两态权威词）双写。
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as Record<string, unknown>;
-    expect(manifest.status).toBe("running");
+    expect(manifest.status).toBe("closed");
+    expect(manifest.intent).toBe("archived");
     expect(manifest.closedReason).toBeUndefined();
     expect(manifest.rootSessionId).toBe("root-session");
     expect(manifest.agentName).toBe("general-purpose");
@@ -223,10 +225,11 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     const snap = restarted.queries.lookupRecordAnyState("sa-m1");
     expect(snap).toBeDefined();
-    // [U5] 自动收起产物重启冷查：manifest 派生投影 legacy "running"（§3.2.8 下行
-    // 映射——session-reader 家族视图把可续聊 record 视为活跃成员；两态权威词在
-    // executionStatus 字段，投影切换归 U8）+ closedReason 不携带（settle 语义）。
-    expect(snap?.status).toBe("running");
+    // [U8 / §3.2.8 双写回读] 自动收起产物重启冷查：manifest 源投影按 executionStatus
+    //（两态权威词）优先读回 idle；intent 经 manifest 持久化锚回读 archived（归档
+    // 意图跨重启不丢）；closedReason 不携带（settle 语义）。
+    expect(snap?.status).toBe("idle");
+    expect(snap?.intent).toBe("archived");
     expect(snap?.closedReason).toBeUndefined();
 
     // [U4 缩型] endedMessageGuard 的形态分流消亡——重启后的跨树 record（snapshot
@@ -323,9 +326,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     const restarted = makeServiceOn(agentDir);
     extraServices.push(restarted);
     const snap = restarted.queries.lookupRecordAnyState("sa-cx");
-    // [U5] cancel settle 后重启：manifest legacy "running" 下行投影（活跃成员——
-    // 万物可续，可续聊）、closedReason 不携带。
-    expect(snap?.status).toBe("running");
+    // [U8 / §3.2.8 双写回读] cancel settle 后重启：manifest legacy "running" 下行
+    //（活跃成员——万物可续，可续聊；旧 session-reader 视角），宿主内读侧按
+    // executionStatus 权威词读回 idle；closedReason 不携带。
+    expect(snap?.status).toBe("idle");
     expect(snap?.closedReason).toBeUndefined();
 
     // [U4 缩型] 「主动关闭」专属文案消亡——跨树统一归属判据文案（万物可续后

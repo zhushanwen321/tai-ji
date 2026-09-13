@@ -972,6 +972,13 @@ export interface SubagentRecord {
    * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收口 / 旧数据。
    */
   stopReason?: StopReason;
+  /**
+   * 意愿维度（§3.2.1 三维正交之一，U8 additive 投影）：用户是否把会话收起来了。
+   * 与 {@link ExecutionRecord.intent} 同源投影；undefined = "active"（存量零迁移）。
+   * 消费点：manifest 下行映射（derivedManifestRecord——archived → legacy closed，
+   * U5-D10）+ entry/重建面的 intent 载体（GUI 已收起分区 U8b 的数据源）。
+   */
+  intent?: Intent;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
   outcome?: ExecutionOutcome;
   mode: ExecutionMode;

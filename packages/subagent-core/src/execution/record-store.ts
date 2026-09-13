@@ -168,6 +168,19 @@ function mapManifestStatus(s: string): ExecutionStatus | null {
   return null; // 越界=数据损坏（含历史 "error" 值），返回 null 让调用方跳过
 }
 
+/**
+ * [U8 / §3.2.8 双写回读] manifest → ExecutionStatus 的读侧单点：executionStatus
+ * （两态权威词）在场且合法时**优先**——旧三态 status 只是 session-reader 下行投影，
+ * settle 产物（legacy running + executionStatus idle）按权威词读回 idle，闭环
+ * 「写侧下行映射不污染读侧占用判定」。executionStatus 缺失/越界（旧 manifest /
+ * 外部写入垃圾）回落 mapManifestStatus（legacy status 越界仍返回 null 跳过——
+ * 双字段全坏 = 数据损坏，维持既有 skip 语义）。
+ */
+function manifestStatusToExecution(m: ManifestRecord): ExecutionStatus | null {
+  if (m.executionStatus === "idle" || m.executionStatus === "running") return m.executionStatus;
+  return mapManifestStatus(m.status);
+}
+
 /** store 变更监听器（返回取消订阅函数）。 */
 export type ChangeListener = () => void;
 
@@ -377,6 +390,10 @@ function rebuildEntryRecord(id: string, d: Record<string, unknown>): SubagentRec
     task,
     slug: entryStr(d, "slug") ?? "",
     ...readEntryTerminalFields(d),
+    // [U8] 意愿域透传（与 recordToSubagent 同源投影）：字面量守卫，缺省/非法 →
+    // undefined（= active 语义，存量 entry 零迁移）。漏投影则重启后 archived record
+    // 的 manifest 补建（derivedManifestRecord）丢 intent → legacy 下行翻 running。
+    ...(d.intent === "archived" || d.intent === "active" ? { intent: d.intent } : {}),
     mode: "background",
     startedAt,
     rootSessionId: entryStr(d, "rootSessionId"),
@@ -1285,8 +1302,10 @@ export class RecordStore {
    *
    * 幂等：intent 恒置 archived、release 对缺失 marker 静默（重复 close 无害）。
    * record 留内存（archived ≠ 内存回收——列表可见性由 intent 承载，占用位不动）。
-   * session-reader 的 archived 下行映射（archived→closed）归 U8 manifest 双写映射；
-   * 桥接期经 derived 投影保持索引在册。
+   * session-reader 的 archived 下行映射（U5-D10，§3.2.8）：本原语经
+   * derivedManifestRecord 投影 legacy status="closed"（「已收起」在旧消费者语义里
+   * = 结束）+ executionStatus="idle"（两态权威词）双写——旧版 session-reader 按
+   * 既有 closed 语义归入已完成分区，行为域内无未知值。
    *
    * @returns true = 归档写面完成（幂等，恒 true）。
    */
@@ -1319,7 +1338,9 @@ export class RecordStore {
    *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 两态）随终态写面双写——
    *  旧 status 三态是 session-reader 直读的投影字段（永久保留），新字段是内部权威
    *  词汇的写面过渡锚（D5 词汇全景①③并存）。[U2 两态] 内部权威词汇无 closed——
-   *  终态化后的 executionStatus = idle（closedReason 遗留位区分死因）。 */
+   *  终态化后的 executionStatus = idle（closedReason 遗留位区分死因）。
+   *  [U8 / B-restart] engine/engineHandle 域随终态投影下行（zcode 终态 record 的
+   *  manifest 兜底锚，与 derived/batch 投影同域）。 */
   private static terminalManifestRecord(record: ExecutionRecord): ManifestRecord {
     return {
       id: record.id,
@@ -1328,6 +1349,7 @@ export class RecordStore {
       agentName: record.agent,
       status: "closed",
       executionStatus: "idle",
+      intent: record.intent,
       closedReason: record.closedReason,
       createdAt: record.startedAt,
       completedAt: record.endedAt ?? Date.now(),
@@ -1335,6 +1357,8 @@ export class RecordStore {
       task: record.task,
       slug: record.slug,
       model: record.model,
+      engine: record.engine,
+      engineHandle: record.engineHandle,
     };
   }
 
@@ -1342,7 +1366,7 @@ export class RecordStore {
    *  已随 U3 归口删除——status 如实投影[成功成员此刻 running+resumable]，后续
    *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。
    *  [U2 两态桥接] 旧 status 三态经桥接判据派生（idle ∧ closedReason 有值 → 终态投影），
-   *  executionStatus 直投两态词汇。 */
+   *  executionStatus 直投两态词汇。[U8] intent + engine 域随投影下行（同 derived）。 */
   private static batchManifestRecord(rec: SubagentRecord): ManifestRecord {
     return {
       id: rec.id,
@@ -1351,6 +1375,7 @@ export class RecordStore {
       agentName: rec.agent,
       ...RecordStore.legacyManifestStatusFields(rec),
       executionStatus: rec.status,
+      intent: rec.intent,
       closedReason: rec.closedReason,
       createdAt: rec.startedAt,
       completedAt: rec.endedAt,
@@ -1358,18 +1383,32 @@ export class RecordStore {
       task: rec.task,
       slug: rec.slug,
       model: rec.model,
+      engine: rec.engine,
+      engineHandle: rec.engineHandle,
     };
   }
 
   /**
-   * [U2 两态桥接] 旧 status 三态（session-reader 兼容契约）的派生单点：
-   * 旧「closed 终态」读形态（idle ∧ closedReason 有值）→ cancelled/closed 二分；
-   * 其余（running / 轮间 idle）→ running。derivedManifestRecord 与 batchManifestRecord
-   * 共用（防两处手写判据漂移）。
+   * [U2 两态桥接 + U8 / §3.2.8] 旧 status 三态（session-reader 兼容契约）的派生单点。
+   * 判定序（先命中先出）：
+   *   1. intent='archived' → closed（「已收起」在旧消费者语义里 = 结束——归入已完成
+   *      分区，session-reader 家族视图不再把它当活跃成员；U5-D10 下行映射）；
+   *   2. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——workflow D7
+   *      例外族与监督器放弃仍产出）→ cancelled（reason='cancelled'）/ closed 二分；
+   *   3. 其余（running / 轮间 idle（markSettled 无 closedReason））→ running
+   *      （session-reader 视角的活跃成员，§3.2.8 行为变化声明：可续聊 record =
+   *      活跃会话——settle 后 stopReason=interrupted/failed 的 record 也投 running，
+   *      「为什么停」经 executionStatus + 下游 stopReason 通道表达，不翻旧终态：
+   *      settle 的 record 仍可 message 续聊，投 closed 会让旧版把它当已完成分区成员，
+   *      message 寻回后再翻回 running = 状态反复横跳，比恒 running 更漂移）。
+   * derivedManifestRecord 与 batchManifestRecord 共用（防两处手写判据漂移）。
    */
   private static legacyManifestStatusFields(
     rec: SubagentRecord,
   ): Pick<ManifestRecord, "status"> {
+    if (rec.intent === "archived") {
+      return { status: "closed" };
+    }
     const legacySettled = rec.status === "idle" && rec.closedReason !== undefined;
     return {
       status: legacySettled
@@ -1385,7 +1424,11 @@ export class RecordStore {
    * D1「.state 权威 + entry 尽力」）——词汇双写同终态写面。
    * [U2 两态桥接] 旧 status 三态派生收口 legacyManifestStatusFields 单点：
    * markSettled 的轮间 idle（无 closedReason）如实投影 legacy "running"
-   * （session-reader 视角的活跃成员，§3.2.8 下行映射）。
+   * （session-reader 视角的活跃成员，§3.2.8 下行映射）；markArchived 的
+   * archived intent 投影 legacy "closed"（U5-D10——「已收起」在旧消费者语义里
+   * = 结束）。
+   * [U8 / B-restart] intent 持久化的 manifest 锚 + engine/engineHandle 域下行
+   * （zcode record 重启可见性兜底——manifest 源投影据此恢复引擎身份与锚）。
    */
   private static derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     return {
@@ -1395,6 +1438,7 @@ export class RecordStore {
       agentName: rec.agent,
       ...RecordStore.legacyManifestStatusFields(rec),
       executionStatus: rec.status,
+      intent: rec.intent,
       closedReason: rec.closedReason,
       createdAt: rec.startedAt,
       completedAt: rec.endedAt,
@@ -1402,6 +1446,8 @@ export class RecordStore {
       task: rec.task,
       slug: rec.slug,
       model: rec.model,
+      engine: rec.engine,
+      engineHandle: rec.engineHandle,
     };
   }
 
@@ -2505,9 +2551,15 @@ export class RecordStore {
    *  status 越界（mapManifestStatus 返回 null）时返回 null，由 collectRecords 跳过。
    *  [M2 Gate B] closedReason 投影（枚举守卫，同 mapManifestStatus 的越界容错口径）：
    *  旧 manifest 无此字段 / 损坏值 → undefined。缺失曾让 manifest 源快照在
-   *  endedMessageGuard 丢失三分流依据（user-close/cancelled 误入 reconnectable 分支）。 */
+   *  endedMessageGuard 丢失三分流依据（user-close/cancelled 误入 reconnectable 分支）。
+   *  [U8 / §3.2.8 双写回读] executionStatus（两态权威词）在场且合法时优先——旧三态
+   *  status 只是 session-reader 下行投影，settle 产物（legacy running + idle）按
+   *  权威词读回 idle；旧 manifest（无 executionStatus）回落 mapManifestStatus。
+   *  [U8] intent/engine 域回读（manifest 持久化锚的读侧半边）：archived 孤儿重启后
+   *  意图不丢；zcode manifest 孤儿恢复引擎身份（engineHandle 经 isEngineHandleShape
+   *  守卫，未知 JSON 不裸收）。 */
   private static manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
-    const status = mapManifestStatus(m.status);
+    const status = manifestStatusToExecution(m);
     if (status === null) return null;
     return {
       id: m.id,
@@ -2516,6 +2568,7 @@ export class RecordStore {
       slug: m.slug ?? "",
       status,
       closedReason: isValidClosedReason(m.closedReason) ? m.closedReason : undefined,
+      intent: m.intent === "archived" || m.intent === "active" ? m.intent : undefined,
       mode: "background" as const,
       startedAt: m.createdAt,
       rootSessionId: m.rootSessionId || undefined,
@@ -2531,6 +2584,8 @@ export class RecordStore {
       result: undefined,
       error: undefined, // closed 统一终态，不再按 status 区分 error 字段
       sessionFile: m.sessionFile,
+      engine: m.engine,
+      engineHandle: isEngineHandleShape(m.engineHandle) ? m.engineHandle : undefined,
     };
   }
 
@@ -2544,6 +2599,9 @@ export class RecordStore {
       // [U2 additive] 展示维度随投影持久化（register/archive/reportRecordTransition
       // 全部写点均经本投影 → toSubagentRecordEntry）；undefined 自然缺省，旧 entry 零迁移。
       stopReason: r.stopReason,
+      // [U8 / §3.2.8] 意愿维度随投影持久化（manifest archived 下行映射的输入 +
+      // entry/重建面的 intent 载体）；undefined 自然缺省（= active），旧 entry 零迁移。
+      intent: r.intent,
       mode: r.mode,
       slug: r.slug,
       startedAt: r.startedAt,

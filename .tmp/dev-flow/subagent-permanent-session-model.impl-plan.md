@@ -108,6 +108,12 @@ graph TD
 | U6-D3 zcode 锚失效走无世代降级（fresh session + 摘要注入，round 连续）不走 markReopened 完整 reopen——reopenRecord 宿主闭包只构造 pi 锚（U6b 接线后可升级完整版） | U6 | 与 U4-D2/U5-D3 偏差族同构 |
 | U6-D4 TTL 引擎侧 sweep 确认：判龄 session.time_updated??time_created、defer 50ms + 24h 节流 + keepSessionIds=activeSessions、删除序复刻 zsw clean-exec | U6 | 库写并发引擎单点持有 |
 | U6-D5 resume 注入预算 24k tokens 先验值（ZCODE_RESUME_HISTORY_TOKEN_BUDGET，字符 4:1 兜底，超限从最旧丢起保尾 + omitted 标注） | U6 | 设计定数据源未定数值 |
+| U8a-D1 derivedManifestRecord 旧三态派生取「intent 优先」单规则：archived→closed（设计原话）＞桥接终态（idle∧closedReason→closed/cancelled）＞其余（含 settle 后 idle）→running——**不按 stopReason 派生 closed/cancelled**：settle 产物可续聊，按停因翻旧终态会在 message 寻回时状态反复横跳（closed→running），恒 running 更贴「活跃会话」下行且零未知值 | U8a | 「旧版读到不漂移」裁决：只保证值域已知 + 行为域内，语义按 §3.2.8 行为变化声明 |
+| U8a-D2 manifest 读侧（manifestToSubagent）新增 executionStatus 优先回读（manifestStatusToExecution 单点）：settle 产物 legacy running + 权威词 idle → 宿主内读回 idle——写侧下行映射不再污染读侧占用判定；旧 manifest（无 executionStatus）回落 mapManifestStatus 行为不变 | U8a | 双写契约的回读半边（设计未明说，构造性必需） |
+| U8a-D3 intent 持久化三面落位：entry 面新增（record-entry.ts schema + toSubagentRecordEntry + rebuildEntryRecord 投影，领地外 additive 2 文件——types.ts SubagentRecord.intent 1 字段同批）+ manifest 面（intent 下行 + manifestToSubagent 回读）；binding 面未做（state-marker.ts RecordBinding 领地外未动）——pi record 重启后 TUI 侧 store 重建丢 intent（GUI 侧经 entry 链不受影响），binding 扩字段留后续批次 | U8a | U5-D10「intent 持久化归 U7/U8」的 U8 最小闭环；store 面完整持久化超投影单元边界 |
+| U8a-D4 ManifestRecord 扩 intent/engine/engineHandle 三字段（不扩 engineFallback——spawn 窗诊断字段，重启恢复无消费方，manifest 保持最小）；manifestToSubagent 回读 engine 域（isEngineHandleShape 守卫）——zcode manifest 孤儿的引擎身份恢复（B-restart 契约面）。旧 session-reader RecordManifest 未知字段跳过，零破坏（读侧已核） | U8a | B-restart 交接条款落地 |
+| U8a-D5 runtime subagentRecordEquals 基线补 intent/stopReason/engine 三域（engineFallback/engineHandle 随 engine 域整域补入）；result/chatMode/resumable 三字段仍缺比对（U1 前存量缺口，非本次范围，仅登记不修） | U8a | 任务点名「diff 基线含新字段（intent/stopReason/engine 域）」整域补入；存量缺口留给一致性批次 |
+| U8a-D6 3 处 U5 期测试断言翻转（dispose-manifest-recovery.test.ts：dispose 终态 manifest running→closed、两处重启 snap running→idle）——原断言注释自证「投影切换归 U8」 | U8a | U5-D10 交接的直接后果 |
 
 ## 6 状态表
 
@@ -123,7 +129,7 @@ graph TD
 | U6b | committed | 1 | commit c19fb765c：B-routing（resolveRoundEnginePort 按 record.engine 分派 + 未注册引擎失败轮不崩宿主）+ B-firstround（非 pi chatMode 走 startFirstRound）+ onHandleReady 非 pi 会话轮覆写回填（pi 零行为变化）；新测试 5 passed + 全量 3079；deviations 4 条（pi 不挂回调/覆写 vs 补缺双语义注释互指/chat 轮不接 journal 分层/未注册引擎不对称拒绝点） |
 | U7 | committed | 1 | commit 0b28b0e39：binding 单基准（markSettled 锚分派 pi 腿/zcode 锚键腿 + merge-or-create）+ roundBaseTurnIndex 等价实现（binding.turns 水合，不复活死字段）+ 归零覆盖回归修复（hydrateReviveBaseline max-merge，GUI 快修⑤构造性解决）+ B-restart store 面（mergedRecords 1.7 entry 源 zcode 收窄）+ 锚键文件族（<dbPath>.<sessionId> 复用 alive/binding 函数）+ release 对称；vitest 3091 / 守卫双绿；deviations 7 条（D1 死字段不复活 / D2 entry 源收窄 zcode / D3 锚键 sidecar 孤儿与 pi 同族 / D7 占用探针位置不对称已注释声明） |
 | U8 | pending-split | 0 | 拆两段串行：U8a 契约与投影（shared 类型 + manifest 双写 + runtime diff/extractor + TUI/通知 + extensions 词表 + S8 兼容）→ U8b GUI 渲染面（renderer 三处判据 + 默认可见性 + 过滤器 + GUI 快修批次①③④②并入，⑤已被 U7 构造性解决） |
-| U8 | pending | 0 | - |
+| U8a | committed | 1 | **commit 归属注记：8 个 shared/runtime 文件被并行 docs commit 340ae8c1f 捎带（内容=终态零丢失，同 U2 期 56898e3cfa 先例，不 revert）；其余 11 文件由本流水线 commit 收编**。shared SubagentStatus 扩 idle（SUBAGENT_STATUS_ALL 同步）+ intent/stopReason 下行 + projectSubagentExecutionStatus 旧值映射 helper；manifest 双写映射（legacyManifestStatusFields intent 优先 + engine 域下行 + manifestStatusToExecution 回读优先）；runtime normalizeSubagentStatus idle 直投（原 closed 兜底修正）+ extractor intent/stopReason 投影 + diff 基线三域补入；TUI detail 面板 stopReason 展示（mapExternalState/通知词表 U5 已就位查漏零改）；S8 测试 11 例（permanent-session-legacy-compat）。shared tsc 0 + 401 / subagent-core tsc 0 + 3102 / runtime 5949 / extensions 三连绿（subagent-workflow 940）/ write-surface 绿；renderer tsc 19 错为 useCommandPopoverTrigger 存量（与 subagent 零引用，归 U8b 前置修复）。deviations 6 条见 §5 |
 | U9 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
