@@ -331,7 +331,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 | A3 | G2 | 用户在 strict 模式触发 `read /etc/passwd` 审批：①本地 pi TUI 会话看审批卡；②xyz-agent dev（GUI，rpc 中继）看审批对话框 | 两种形态字段行集合一致（Tool/Command/Reason/AI risk/outcome/confidence/**reasoning**）；TUI 卡逐字节与改前一致；GUI 对话框 title 与改前**同形态**（存量形态：CompanionBand.vue:188-192 纯插值渲染、无 `white-space: pre-line`，多行 title 本就折叠为单行流式文本）且 reasoning **文本可见**——不按「按行显示」验收，防止把存量折叠形态误诊为 M6 回归（M6；T1 检查点） |
 | A4 | G2/G4 | 用户手编 `permission-ext-config.json` 加规则 `deny read /Users/<you>/.ssh/*`（**绝对路径——pattern 必须与 read 工具实际收到的 path 字符串同形态**：wildcardToRegExp 是全锚定字面编译、无 `~` 展开，写 `~/.ssh/*` 编译为 `^~\/\.ssh\/.*$` 不会命中绝对路径入参，会把「场景写错」误诊为「M10 改动破坏行为」；loadAndWatchConfig 热重载生效；规则编辑器 custom 模板写死 tool='bash'，read 规则走手编配置这一包支持的官方路径）→ auto 模式下 agent 调 read `/Users/<you>/.ssh/id_rsa` 被拦截（reason 含 "denied by rule"）；加 `allow read /tmp/*` → `/tmp/x` 放行；bash 命令（`ls`）白名单放行不变 | 非 bash 匹配行为与改前一致（M10/E11；正则编译语义等价）；缓存命中由单测断言同一 RegExp 实例 |
 | A5 | G1（负面） | 维护者全仓 `rg "setDefaultListAvailableModels\|RuleEditorRpcDeps\|PermissionModelCommandDeps\|PermissionRuleCommandDeps"`；`/permission status` 输出 | 两者均零命中；status 输出格式逐字节不变 |
-| A6 | G3（负面） | 维护者 `rg` 验证死面零残留：SelectItem re-export、rerender、RuleOp re-export、DEFAULT_SELECT_THEME re-export、rules 类型 re-export 块、classifier barrel 被删符号 | 全部零命中；rules barrel = 2 符号、classifier barrel = 2 符号 |
+| A6 | G3（负面） | 维护者 `rg` 验证死面零残留（**按 re-export 声明形态检索，防全词误报**：`rg "export type \{ SelectItem|export \{ DEFAULT_SELECT_THEME|export type \{ RuleOp|rerender\("`——`SelectItem`/`rerender` 裸词在 Out-of-scope 文件（rule-editor-component 等）有 pi-tui 类型正常使用与焦点同步概念注释，非本设计删除对象） | re-export 声明形态全部零命中；rules barrel = 2 符号、classifier barrel = 2 符号 |
 | A7 | G4（全局回归） | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test`（permission 包全量） | 三连绿；无导出/类型错误残留 |
 
 **负面行为补充**：A5/A6 即「不该存在的不存在」的反向验证——注入点与死面删净，而非被搬进另一种写法。
@@ -362,7 +362,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 |---|---|---|---|
 | T1 | RPC 多行 title（+reasoning 行）在 xyz-agent GUI 对话框渲染无回归：验收基线 = 与改前同形态对比（title 纯插值、多行折叠单行为存量形态，不要求按行显示）+ reasoning 文本可见 | S2 验收 A3 | reasoning 文本已在两外壳行序末尾，折叠形态下仍位于文本流尾部；仍异常（文本丢失/截断）则仅对 RPC 外壳做行折叠（字段集内核不动） |
 | T2 | commands.test.ts vi.mock（model-resolver / rule-editor 两模块）与现有 mock helper 无冲突 | S1 实施中 | 退回 D4 降级形态（listModels 保参数、editRulesViaOverlay 直调） |
-| T3 | patternCache 跨 matcher/pipeline 复用无 key 语义冲突（同 source+pattern 必同编译） | S1 后由 E7 单测断言（同实例返回） | 语义本同构（D3 证据），若断言失败即发现真差异——按实际差异拆 key，不回退方案 |
+| T3 | patternCache 跨 matcher/pipeline 复用无 key 语义冲突（同 source+pattern 必同编译） | S1 后由 E7 单测断言缓存命中（落地口径：spy wildcardToRegExp 对同 pattern 编译次数恰为 1——编译次数=1 构造性蕴含返回缓存内同一实例） | 语义本同构（D3 证据），若断言失败即发现真差异——按实际差异拆 key，不回退方案 |
 | T4 | M6 重构后 renderApprovalView 输出逐字节不变 | S2 实施中（approval.test.ts 既有断言） | 不等则修正 TUI 排版代码至全绿（TUI 无漂移是设计硬约束） |
 | T5 | makeUiAdapter 统一后三个目标接口的 custom 泛型差异被正确吸收（unknown×2 / Component×1，cast 保留且行为等价） | S2 实施中（typecheck + A1/A2/A3） | cast 编译不过则该处闭包保留独立类型标注（helper 只收敛实现体，类型面不强求一行） |
 

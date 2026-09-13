@@ -919,7 +919,7 @@ M-1 独立交付且先行；M0–M3 是一个不可分割的正确性交付（M3
 
 | 文件 | 改动 |
 |---|---|
-| `extensions/universal/session-reader/src/discovery/roots.ts` | 新增 `resolveSessionRoots` / `SessionRoot` / `SessionRootSignals`；`listMainSessions`/`listSubagentSessions` 保留为旧签名薄包装（**工具路径不再直接消费它们**，见 §7B 要点 7） |
+| `extensions/universal/session-reader/src/discovery/roots.ts` | 新增 `resolveSessionRoots` / `SessionRoot` / `SessionRootSignals`；`listMainSessions`/`listSubagentSessions` 保留为旧签名薄包装（**工具路径不再直接消费它们**，见 §7B 要点 7）（后注：ext-simplify-04 U4/A3 已退役删除，直调 `resolveSessionRoots`+filter——见 §7B 要点 7 v9.9 修订） |
 | `extensions/universal/session-reader/src/discovery/env.ts` | **新增** |
 | `extensions/universal/session-reader/src/discovery/find.ts` | `collectCandidates` 改从 `resolveSessionRoots` 取文件列表；两级归一化匹配；`metadataProvider` 注入点 |
 | `extensions/universal/session-reader/src/discovery/subagents.ts` | not-found 文案列实际候选根（U7 其余不建，§6.13） |
@@ -984,7 +984,9 @@ M-1 独立交付且先行；M0–M3 是一个不可分割的正确性交付（M3
 
 **P-6 失败的降级路径**：`[live]` 根被跳过，发现层退化为「`[env]` + `[default]` + `[legacy]`」三根并集——在三个已知宿主的实测布局下这三根已完备（§4.2），故 P-6 失败**不阻塞** M0 交付，只降低「跟随宿主」的长期健壮性。
 
-### 12.2 复现探针（可重跑）
+### 12.2 复现探针（历史快照，v9.9 起不可直接重跑）
+
+> **失效标注（ext-simplify-04 U4/A3）**：下述脚本 import 的 `listMainSessions`/`listSubagentSessions` 薄包装已删除（§7B 要点 7 v9.9 修订）——脚本按原样运行会报模块导出不存在。等效复现：把 import 与两处调用换为 `resolveSessionRoots` + 按 `kind` filter（等价式见包内 `roots.test.ts`「薄包装退役」用例）。保留原文仅作时点记录。
 
 ```bash
 cd <repo>/extensions/universal/session-reader
