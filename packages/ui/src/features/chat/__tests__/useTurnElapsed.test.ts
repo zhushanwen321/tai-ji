@@ -206,3 +206,61 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     wrapper.unmount()
   })
 })
+
+describe('useTurnElapsed 首末时刻输出', () => {
+  it('streaming 态 firstTs/lastTs 有值，isLive=true', async () => {
+    const t1 = T0 + 1000
+    const t2 = T0 + 5000
+    const assistants = [makeAssistant(t1), makeAssistant(t2)]
+    const streaming = ref(true)
+    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> }
+    const Host = defineComponent({
+      setup() {
+        const result = useTurnElapsed(() => assistants, () => streaming.value)
+        Object.assign(exposed, result)
+        return () => null
+      },
+    })
+    const wrapper = mount(Host)
+    expect(exposed.firstTs.value).toBe(t1)
+    expect(exposed.lastTs.value).toBe(t2)
+    expect(exposed.isLive.value).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('完成态 firstTs/lastTs 有值，isLive=false', () => {
+    const t1 = T0 + 1000
+    const t2 = T0 + 5000
+    const assistants = [makeAssistant(t1), makeAssistant(t2)]
+    const streaming = ref(false)
+    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> }
+    const Host = defineComponent({
+      setup() {
+        const result = useTurnElapsed(() => assistants, () => streaming.value)
+        Object.assign(exposed, result)
+        return () => null
+      },
+    })
+    const wrapper = mount(Host)
+    expect(exposed.firstTs.value).toBe(t1)
+    expect(exposed.lastTs.value).toBe(t2)
+    expect(exposed.isLive.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('空 assistants → firstTs/lastTs=0', () => {
+    const streaming = ref(false)
+    const exposed = {} as { firstTs: Ref<number>; lastTs: Ref<number> }
+    const Host = defineComponent({
+      setup() {
+        const result = useTurnElapsed(() => [], () => streaming.value)
+        Object.assign(exposed, result)
+        return () => null
+      },
+    })
+    const wrapper = mount(Host)
+    expect(exposed.firstTs.value).toBe(0)
+    expect(exposed.lastTs.value).toBe(0)
+    wrapper.unmount()
+  })
+})

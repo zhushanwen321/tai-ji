@@ -28,9 +28,7 @@ export function useToolMeta(params: {
   tool: ComputedRef<ToolCall | undefined>
   toolName: ComputedRef<string>
   isFailed: ComputedRef<boolean>
-  formatDuration: (ms: unknown) => string
 }): { metaItems: ComputedRef<MetaItem[]> } {
-  const { formatDuration } = params
 
   /** 字符数格式化：>= CHAR_K_THRESHOLD 显示为 XK chars，否则原值 + chars */
   function formatCharCount(n: number): string {
@@ -53,12 +51,6 @@ export function useToolMeta(params: {
       if (name === 'read' || name === 'cat') {
         items.push({ tone: 'muted', text: formatCharCount(output.length) })
       }
-    }
-    // 耗时（末位）
-    const start = tool?.startTime
-    const end = tool?.endTime
-    if (typeof start === 'number' && typeof end === 'number' && end > start) {
-      items.push({ tone: 'muted', text: formatDuration(end - start) })
     }
     return items
   })

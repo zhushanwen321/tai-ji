@@ -4,7 +4,7 @@
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/format-utils.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { shortenForHeader, tailLines } from '../format-utils'
+import { shortenForHeader, tailLines, formatClock } from '../format-utils'
 
 describe('shortenForHeader', () => {
   // U1: bash 命令——绝对路径 4 段截短，相对路径不动
@@ -126,5 +126,40 @@ describe('tailLines', () => {
         expect(tailLines(text, n)).toEqual(tailLinesRef(text, n))
       }
     }
+  })
+})
+
+describe('formatClock', () => {
+  it('A6: 本地时区 HH:MM:SS（用 Date 本地 getter 断言，禁硬编码时区）', () => {
+    const ms = 1_700_000_000_000
+    const result = formatClock(ms)
+    const d = new Date(ms)
+    const expected = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+    expect(result).toBe(expected)
+  })
+
+  it('A6: 多个不同时间点均正确格式化', () => {
+    const timestamps = [0, 1_000_000, 1_700_000_000_000, Date.now()]
+    for (const ms of timestamps) {
+      const d = new Date(ms)
+      const expected = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+      expect(formatClock(ms)).toBe(expected)
+    }
+  })
+
+  it('A6: 非法入参返回空串', () => {
+    expect(formatClock(NaN)).toBe('')
+    expect(formatClock(-1)).toBe('')
+    expect(formatClock(Infinity)).toBe('')
+    expect(formatClock(-Infinity)).toBe('')
+    expect(formatClock('abc' as unknown as number)).toBe('')
+    expect(formatClock(undefined as unknown as number)).toBe('')
+    expect(formatClock(null as unknown as number)).toBe('')
+  })
+
+  it('A6: epoch 0 格式化——用本地 getter 断言（不同 CI 时区不同）', () => {
+    const d = new Date(0)
+    const expected = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+    expect(formatClock(0)).toBe(expected)
   })
 })
