@@ -213,8 +213,8 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 | `src/command.ts` | 改 | 注入提示 isolation 两值 + completion dialog 描述同步（D1）；handleEnterPlanMode/handleStatus 删 phase（D6） |
 | `src/index.ts` | 改 | 静态 import + 删 logger 与 catch（D5） |
 | `src/widget.ts` | 不变 | 只消费 isActive（现状即如此） |
-| `templates/*.md`（5 个） | 改 | 步骤节统一 `## Implementation Steps`（D4） |
-| `package.json` | 改 | peerDependenciesMeta 增 `"@zhushanwen/pi-goal": { "optional": true }`（发现 5）；version patch bump（dependencies 不动——extension-logger 保留，见 D5） |
+| `templates/*.md`（5 个统一，物理改 4——feature-plan 原标题已对齐） | 改 | 步骤节统一 `## Implementation Steps`（D4） |
+| `package.json` | 改 | peerDependenciesMeta 增 `"@zhushanwen/pi-goal": { "optional": true }`（发现 5）；version bump 随批次尾统一（v2-r2 修订：breaking 按 semver 落 minor——CHANGELOG 0.5.0 节为权威版本号，不按本行早期「patch bump」字面执行；dependencies 不动——extension-logger 保留，见 D5） |
 | `src/__tests__/`（7 个） | 改写 | tool（create-template/tree 用例删、goal 失败降级用例增）、compact-handler（tree 用例删、outcome 用例改）、compact-criteria-array/state/command/templates（phase/create-template/多源断言改）、compact.test.ts（extractPlanSteps 用例不受 D4 影响，不变）、新增模板-正则对齐守卫测试（D4） |
 
 错误规格不变量：`readPlanFileSafe` 不抛错（读失败返回标记字符串，其 `startsWith("(")` 判定随 GoalBridgeOutcome 改为显式信号，消除哨兵字符串比较）；工具 action 校验失败消息含合法值列表（现状保留）。
@@ -277,3 +277,4 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 - v1（2026-09-12）：初稿。覆盖审计候选 8（C8 high）+ M1/M2/M3 + 四问发现 5/6/7/8 与 suggestions；探针 P1/P2 定为实施期门；3 项 low 移交 code-simplify。
 - v2（2026-09-13）：按 over-engineering 审查（`.review.md`）修复——MF1：D5 收缩（包级 extension-logger 依赖保留——compact.ts:7/:12/:236/:246 guardStaleCtx onStale 降级日志是 crash-resilience 引入的真实消费方，v1 误读过期快照；「-1 npm 依赖」声明撤销，记入 D5 被否谱系 a）+ compact.ts 行号按审查实读系统性刷新；S1：F7「无任何 await」改精确表述（唯一 await = :326 动态 import，位于 ctx.compact() 之前）；S2：GoalBridgeOutcome 补第 5 值 internal-error（catch 出口映射闭合）；S3：V2 补 ③init-refused ④plan-unreadable 场景；S4：基线刷新（src 1096 行 / 测试 7 个含 compact.test.ts / 版本 0.4.4 / promptSnippet 22 行 / 模板标题 25 个 / goal 行号）。
 - v2-r1（2026-09-13，tech-design 双审查 R1，双 PASS）：主审 sug：u1 标题精确化「index.ts 局部 logger 使用剥离」+ 内容列注「package.json 仅 version bump；dependencies 不动」（防「logger 剥离 + package.json」被误读为删依赖）；影响面审 sug：u3 补 plan CHANGELOG.md 破坏性条目落点（isolation=tree 与 create-template 两项 AI 接口面 breaking + 迁移指引——D3 恢复路径的执行落点）。
+- v2-r2（2026-09-14，dev-flow 阶段 3 一致性审查 doc_errors 修复）：§6 文件地图两处精度修订——package.json 行版本策略（breaking 落 minor 0.5.0，CHANGELOG 节为权威；bump 随批次尾统一，见实施计划风险 1 口径）+ 模板计数（5 个统一、物理改 4——feature-plan 原已对齐）。
