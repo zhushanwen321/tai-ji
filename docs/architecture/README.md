@@ -20,10 +20,10 @@ docs/architecture/
 ├── architecture-overview.drawio/.png    # 全局架构图源文件与导出
 ├── subsystems/                          # 子系统架构（plugin/）
 ├── research/                            # 架构调研（打包/路径安全/RPC 通道，非 UI）
-├── renderer-rebuild/                    # renderer-rebuild-v2 波次活规格（ws-client invariants，it.todo 未清零）
-├── refactor-2026-08/                    # extension 冻结候选设计（⛔ 解冻后实施依据，非归档）
 └── history/                             # 历史版本归档（被 supersede 的旧架构与重构期过程文档）
 ```
+
+> [HISTORICAL] 已散出的活文档：`renderer-rebuild/ws-client-invariants.md` 规格已沉入 `packages/core/src/transport/__tests__/ws-client.invariants.test.ts` 头部注释（2026-09-13）；`refactor-2026-08/05-extensions.md`（extension 冻结候选设计，⛔ 解冻后实施依据，非归档）已移至 [`../todo/extensions-refactor-candidates-2026-08.md`](../todo/extensions-refactor-candidates-2026-08.md)（含 2026-09-13 逐项复核状态块）。
 
 > ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 设计稿** 在 `docs/page-design/archive/v3/`（L0-L4 递归骨架 spec + draft），设计系统权威文档在 `docs/page-design/` 根（原 design-tokens.md / design-system.md 已删除，残值并入 v6-master-spec.md，git 可追溯）。
 

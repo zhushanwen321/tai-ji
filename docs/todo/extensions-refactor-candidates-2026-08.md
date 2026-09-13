@@ -4,6 +4,26 @@
 
 > **⛔ 冻结状态（2026-08 更新）**：本层全部候选（F1-F7 + conventions 附带项）与 DP-3/DP-4 **暂停实施**——用户指令：extension 开发冻结；quota-providers 正在重构（F3 删除测试的前提由重构消化）。DP-3/DP-4 决策链下游（F1 utils 归位、F5 logger 推广）随冻结暂停。重新评估触发：extension 解冻 + quota 重构完成后。本层文档内容（方案对比/验收）保留作解冻后实施依据。
 
+> **📋 2026-09-13 复核（docs 压缩行动；冻结未解除）**：对照 extensions/ 现状逐项核实过期度。本文档自 `docs/architecture/refactor-2026-08/05-extensions.md` 移入（该编号目录已散，编号前缀失去索引语义）；正文中的 `arch-review-text.md` 引用为悬空引用（该文件已不存在，git 可追溯）。
+>
+> **结构性前提变化**（比单项过期更根本）：① extensions/ 已从顶层平铺重组为 `universal/` + `taiji/` 两组（AGENTS.md「目录分组」）；② 包删除：evolve-daily / model-switch / vision 已不存在（F1/F5/F6 的主要引用对象随之消失）；③ subagent 执行引擎重组——subagent-workflow 的 `src/execution/`（session-runner / session-reconstructor / session-pending / agent-result-mapper）已消失，编排迁入引擎协议化形态（package.json 依赖 `@zhushanwen/subagent-core` 等引擎包）；④ `extensions/shared/` 重整为 llm-shared / extension-logger / file-lock / ext-guards 四包。
+>
+> | 项 | 状态 | 证据（2026-09-13 实测） |
+> |----|------|------|
+> | F1 | **部分消化、部分仍有效** | safeStringify 3→2 份（余 `universal/session-reader/src/search-across.ts:55` + `shared/extension-logger/src/index.ts:450`）；escapeXml 4→1 份（仅 `universal/goal/src/projection/prompts.ts:21`，subagent-workflow injector 两处与 evolve-daily 逆操作均已消失）；时间常量仍 9 处本地 const 但构成全换——旧 model-switch/vision/quota-providers 侧消失，新 `base-tool-enhance` ×4（config.ts:23 / kill-tree.ts:24 / background/spawn-background.ts:32 / background/notify.ts:202）、`structured-output/src/loop-gate.ts:406`、`taiji/plugin-bridge/src/index.ts:53` 长出同型拷贝（`goal/constants.ts:10` / `scheduler/src/parsing.ts:9` / `subagent-workflow/interface/format.ts:433` 存续）——「无守护 → 回潮」模式的活证据，收敛主张仍成立 |
+> | F2 | **已基本消化** | 3 份独立解析 → 1 份（仅 `universal/session-reader/src/discovery/find.ts` createInterface 流式）；session-reconstructor / session-pending 随 execution/ 重组消失；`subagent-workflow/src/jsonl-run-store.ts` 经 pi.appendEntry 官方 API 写入，非独立解析循环 |
+> | F3 | **已消化** | `extensions/shared/` 已无 quota-providers；shared 重整为四包各有明确职责——DP-3「撤销 shared 定位」以更优形态落地（shared 成为真共享层），原问题对象不存在 |
+> | F4 | **已基本消化** | subagent-workflow 侧 ajv 零命中（args-validator 随 execution/ 消失、依赖无 ajv）；仅剩 `universal/structured-output/src/ajv-validator.ts`（strict:false + WeakMap 缓存）单点，无分叉可收敛。builtin 权威 schema 纪律（方案 A 审计前置精神）已由 AGENTS.md「structured-output 方案 A」条目承载 |
+> | F5 | **仍有效、数据过期** | model-switch / evolve-daily 包删除带走主要计数对象（原 35 处中的 20 处）；现余真实裸调用约 permission 4 / scheduler 5 / subagent-workflow 2——量级大降，DP-4 决策成本远低于原估，解冻后按新计数重估即可，无需按 §F5 方案 A 全量执行 |
+> | F6 | **仍有效（路径漂移）** | goal 侧移至 `universal/goal/src/adapters/command-adapter.ts:206`（formatDuration(seconds)）；scheduler 侧 `src/parsing.ts` formatDuration(intervalMs)——同名异义仍在，改名建议照旧 |
+> | F7 | **已消化** | extensions/ 下 assistantMessageEvent 零命中（session-runner 消失）；仅剩 runtime `packages/runtime/src/infra/pi/event-adapter.ts` 一份实现，无两套分流 |
+> | 附带 1 | **仍有效** | `extension-dependencies.json` 仍标 pi-structured-output → `runtime`，`universal/subagent-workflow/package.json` 仍声明 peerDependenciesMeta optional——分类矛盾未修 |
+> | 附带 2 | **仍有效（略降）** | `universal/session-reader/src/tool-handler.ts` 现 1408 行（原 1473），仍超 ≤1000 约束 |
+> | 附带 3 | **仍有效** | `universal/plan/package.json` peerDependencies 4 个中仅 pi-ai 标 optional（pi-coding-agent / typebox / pi-goal 未标） |
+> | 附带 4 | **已过期** | `universal/subagent-workflow/workflows/` 目录已不存在、package.json 无 pi.workflows 字段——待声明对象消失 |
+>
+> 解冻后实施以本表过滤：已消化项（F2/F3/F4/F7、附带 4）仅作历史参照不再立项；仍有效项（F1 的 safeStringify ×2 与时间常量、F5、F6、附带 1/2/3）按现行路径与计数重估后实施。
+
 ## §1 背景与目标
 
 ### 背景（SCQA）

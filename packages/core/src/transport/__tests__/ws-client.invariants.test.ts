@@ -1,16 +1,72 @@
-// ws-client 不变量测试（D2：AC7 双交付之可执行骨架 → P1 已激活 ①⑤）。
+// ws-client 不变量特征测试 —— 规格权威。
 //
-// 激活范围（F4 → S-33 扩）：① 连接状态机 3 条 + ② auth 握手 3 条 + ⑤ 重连退避 2 条为真实断言
-//   （fake 注入 + vi.useFakeTimers）。② 原为 C4 deferred（「auth 能力迁入 core 时激活」），
-//   S-33 复审确认 auth 握手已落地 core ws-client（connect(url, token) 双参），defer 理由失效。
-// 保持 todo 范围（C4 deferred）：
-//   ③ close code 分流、④ seq 回放 reconcile 后半段 —— close code / RTT 能力未迁入 core，激活待后续 wave。
-//   ⑤ visibilitychange 立即重连 —— 归 coordination/connection-lifecycle（架构文档 §5.2），
-//      headless core 无 document，本 wave 不实现。
+// 规格来源：原 docs/architecture/renderer-rebuild/ws-client-invariants.md（remote-use 期撰写，
+//   依据 renderer-rebuild-architecture.md §5.1 ws-client 不预拆整体迁入 / §11.0.4 不变量定义
+//   修正 / 附录 B.2-4 特征测试覆盖），2026-09-13 复核后沉入本注释块——文档已删除，本块是
+//   特征测试断言点的唯一规格权威；描述已逐类对照现行实现（ws-client.ts + coordination/）修正。
 //
-// 不变量定义修正（renderer-rebuild-architecture.md §5.1 / B.2-4）：
-//   旧「本地模式逐字节不变」不可执行（测试无法锁定字节级）→
-//   新「特征测试覆盖的关键行为不变」（5 类行为特征断言）。
+// 不变量定义修正：旧「本地模式逐字节不变」不可执行（测试无法锁定字节级）→
+//   新「特征测试覆盖的关键行为不变」（下列行为特征 = 特征测试必须锁定的不变量）。
+//
+// ── 5 类不变量定义（按现行实现修正后的口径，[漂移] 标注与原稿的差异）──
+// ① 连接状态机：模块级状态机仅允许合法迁移。现行 6 态 disconnected/connecting/connected/
+//   reconnecting/restarting/failed。[漂移] 原稿 4 态 connecting/open/closing/closed 是
+//   remote-use 期术语；closing 中间态不存在——主动 disconnect 先摘回调再 close，直接置
+//   disconnected。断言点：connecting → connected（onopen，token 模式经 auth.result ok 的
+//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调被摘除；非法迁移拒绝
+//   （已连接/连接中重复 connect 幂等 no-op，不重置状态不建新 WS）；onclose → disconnected →
+//   scheduleReconnect（closed 是重连起点，原稿语义保留）。
+// ② auth 握手：token 模式下 open 后首帧必为 {type:'auth', payload:{token}}，等 auth.result
+//   才进消息处理（握手期业务消息丢弃）。[漂移] 原稿的 buildAuthMessage 共享函数与 auth.ok /
+//   auth.reject 双类型不存在——现行 wire 协议是单一 auth.result { ok, reason? }
+//   （shared/protocol.ts，runtime 对握手失败 close 1008），auth 帧在 ws-client onopen 内联
+//   构造；原稿「probe 与 ws-client 共用 buildAuthMessage 防漂移」的前提已消失（无独立 probe
+//   模块）。[漂移] 原稿「auth.ok 后订阅 + flush pending」——resubscribeAll / pending rejectAll
+//   归 use-connection 编排层（connected false→true watch 驱动），ws-client 层等价行为是
+//   markConnected 置位 + pre-auth 队列 flush（见 ⑥）。[漂移] 原稿「auth.reject 降级：标记
+//   连接不可用 + 壳降级 UI」——现行语义 = close 走重连链（新 token 由 use-connection 的
+//   onRuntimePort 路径刷新），非降级 UI。
+// ③ close code 分流：按 WebSocket close code 分流重连策略。能力未迁入 core（保持 it.todo）：
+//   现行 ws-client onclose 不读 code，一律走退避重连。原稿断言点：1006 异常关闭 → 退避重连；
+//   4001 认证失效 → 不重连；4000/4003 等服务端正常关闭 → 不重连；分流判定集中在 ws-client
+//   单点（不散落 routeInbound/domain）。[漂移] 原稿「4001 不重连」与现行 auth 拒绝行为
+//   （close → 重连链，等 token 刷新）语义相反——激活时按现行语义裁决分流表，不照搬原稿。
+// ④ seq 回放（可靠投递语义）：session 通道消息带 seq，gap 检测后 reconcile 保证消息不丢。
+//   seq 机制全部在 transport + coordination（seqGate / subscription-state / route-inbound），
+//   不进 domain（domain store 只面对已排序、已去重的消息流）。断言点：gap 检测 → subscribe
+//   reconcile（fromSeq = lastSeenSeq 排他下界）；[漂移] 原稿「reconcile 响应后服务端发
+//   seqReset → reload 全量历史 + 重载前静默窗口」不存在（runtime/core 均无 seqReset）——现行
+//   是增量回拉，snapshot/stateSnapshot 经 replay dispatcher 走与 live 相同的路由管线（seqGate
+//   去重 + gapDispatchedSeqs 簿记 drop + ROUTE_TABLE effects），基线 max() 收敛不回退；
+//   presence 弱可靠通道不入 seq 桶（靠 auth.ok/presence.list 兜底，约束同时锁定在
+//   coordination/presence.ts 头注释，防未来误「修复」成入桶）；send.rejected 是 runtime 预检
+//   拒绝的独立反馈类型（shared/protocol.ts D-006，带 clientUuid 回带），消费在
+//   domain/chat/useChat（不进对话流）——原稿断言点已被实现消化，不在本文件 todo。
+// ⑤ 重连退避：异常断开后指数退避重连。断言点：base 1s / ×2 / cap 30s 序列；连续失败达
+//   [漂移] 时长上限 60s（MAX_RECONNECT_DURATION_MS）后停止自动重连置 failed 待用户手动重试
+//   （原稿「次数上限如 10 次」不成立——attempts 上限曾存在但恒被时长上限先触发，死代码已删）；
+//   [漂移] 原稿「jitter 随机抖动防惊群」不存在——现行确定性 delay（单用户自托管单连接，
+//   无惊群形态）；[漂移] 原稿「visibilitychange 触发立即重连 + 重置退避计数」已实现在
+//   transport/use-connection.ts（headless 化经 visibility 端口：切回 visible 且未连接时用
+//   最近 url 主动重连，不干等退避最长 30s），由 use-connection-visibility.test.ts 锁定，
+//   退避簿记归零发生在连接成功（markConnected）而非触发瞬间；退避与连接状态解耦——重连成功
+//   后退避簿记归零（reconnectAttempts=0 + reconnectStartedAt=null），不污染新连接。
+//
+// ── 协议演进纪律 ──
+// - ws-client 从 remote-use 整体迁入 core/transport 后不预拆（auth/seq/RTT 经模块级状态紧
+//   耦合，拆分边界按实际耦合测量再定——架构文档 §5.1）。
+// - 新增行为不变量（如未来引入心跳 RTT 测量）时，先扩本注释块规格 + 新增 it.todo，再实现
+//   ——规格先行，本注释块随实现漂移时同步修正。
+//
+// ── 激活范围（F4 → S-33 扩）──
+// 已激活：① 3 条 + ② 3 条 + ④ gap reconcile 1 条 + ⑤ 退避/时长上限 2 条（fake 注入 +
+//   vi.useFakeTimers）。② 原为 C4 deferred（「auth 能力迁入 core 时激活」），S-33 复审确认
+//   auth 握手已落地 core ws-client（connect(url, token) 双参），defer 理由失效。
+// 保持 todo 范围（C4 deferred）：③ close code 分流 3 条、④ reconcile 回放断言 + presence
+//   2 条——close code / presence 能力未迁入 core，激活待后续 wave。⑤ visibility 重连的 todo
+//   已移除（行为已落地 use-connection 并有专门测试，见 ⑤ [漂移] 说明）。
+// 超出原稿范围（规格按实现现状增补）：⑥ pre-auth 发送队列（review findings-confirmation #3）
+//   + 辅助状态（restarting/failed IPC 驱动）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { providePlatform } from '../../platform/port'
 import type { ClientMessage } from '@xyz-agent/shared'
@@ -188,7 +244,14 @@ describe('ws-client 不变量 ② auth 握手', () => {
 })
 
 describe('ws-client 不变量 ③ close code 分流', () => {
-  // [C4 deferred] close code 分流属后续迁移 wave（close code 处理能力迁入 core 时激活）
+  // [C4 deferred] close code 分流属后续迁移 wave（close code 处理能力迁入 core 时激活）。
+  // 现行 onclose 不读 code 一律走退避重连；runtime 侧对 auth 握手失败发 close 1008
+  // （shared/protocol.ts auth.result 注释）。原稿断言点：1006（浏览器层异常关闭）→ 重连走
+  // ⑤ 退避；4001（服务端明确拒绝认证）→ 不重连、标记需重新认证；4xxx（服务端正常关闭如
+  // 4000/4003）→ 不重连、尊重服务端意图等用户手动重连。[漂移] 原稿「4001 不重连」与现行
+  // auth 拒绝行为（close → 重连链，等 use-connection 刷新 token）语义相反——激活时按现行
+  // 语义裁决分流表，不照搬原稿。分流判定必须集中在 ws-client 单点（不散落 routeInbound/
+  // domain），便于整体锁定行为。
   it.todo('1006（异常关闭）触发重连走退避序列')
   it.todo('4001（认证失效）不重连，标记需重新认证（壳降级 UI）')
   it.todo('4xxx（服务端正常关闭，如 4000/4003）不重连')
@@ -239,7 +302,18 @@ describe('ws-client 不变量 ④ seq 回放', () => {
     expect(subscribeSpy).toHaveBeenLastCalledWith('s1', 10)
   })
 
-  it.todo('reconcile 响应 → seqReset → reload 会话历史（重载前静默窗口逻辑保留）')
+  // [漂移修正] 原稿描述「reconcile 响应后服务端发 seqReset → reload 会话历史（重载前静默
+  // 窗口）」在现行实现不存在（runtime/core 均无 seqReset 消息、无全量 reload、无静默窗口）。
+  // 现行语义：reconcile = subscribeSession(sid, lastSeenSeq) 增量回拉缺失段（fromSeq 排他
+  // 下界），reply.snapshot/stateSnapshot 经注入的 replay dispatcher 进入与 live 相同的路由
+  // 管线——seqGate 去重（gap 触发消息 live 已 dispatch 但基线未推进，靠 gapDispatchedSeqs
+  // 簿记 drop；缺失段逐条递进推进基线）+ ROUTE_TABLE effects + crossSession 分发照常触发
+  // （PR #175 review R1 MUST_FIX），基线 max() 收敛不回退（MF-3：reconcile 成功才推进，
+  // 失败保持原位可重试）。激活时断言：回放去重 + 基线收敛 + 回放路径 effects 同触发。
+  it.todo('reconcile 回放经与 live 相同的路由管线（gap 触发消息簿记去重 + 基线 max() 收敛）')
+  // 约束仍有效（presence 弱可靠通道，架构文档 §5.3-4）：presence 是全局协同态，不入 seq 桶，
+  // 靠 auth.ok / presence.list 兜底补全。本约束同时锁定在 coordination/presence.ts 头注释
+  // （防未来误「修复」成入桶）。presence 当前为占位（C4 deferred）——激活待 presence 落地。
   it.todo('presence 弱可靠通道不入 seq 桶（靠 auth.ok/presence.list 兜底）')
 })
 
@@ -311,9 +385,12 @@ describe('ws-client 不变量 ⑤ 重连退避', () => {
     expect(getState().value).toBe('failed')
   })
 
-  it.todo('visibilitychange（页面可见）触发立即重连，并重置退避计数')
-  // [C4 deferred] visibility 重连归 coordination/connection-lifecycle（架构文档 §5.2），
-  // headless core 无 document，本 wave 不实现该行为。
+  // [已落地] 原稿 ⑤ todo「visibilitychange（页面可见）触发立即重连，并重置退避计数」已实现
+  // 于 transport/use-connection.ts（headless 化经 visibility 端口，非本文件职责）：切回
+  // visible 且未连接时用最近 url（lastConnectedUrl）主动重连，不干等 ws-client 退避（最长
+  // 30s）；hidden 不触发、已 connected 不触发。由 use-connection-visibility.test.ts 锁定。
+  // [漂移] 原稿「重置退避计数」发生在触发瞬间不成立——退避簿记归零在连接成功（markConnected
+  // 置 reconnectAttempts=0 + reconnectStartedAt=null）。
 })
 
 describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
