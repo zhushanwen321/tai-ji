@@ -154,6 +154,20 @@ function toChildStdoutLines(): string[] {
       isError: c1.toolResult.isError,
       result: { content: [{ type: 'text', text: c1.toolResult.text }], details: null },
     }),
+    // pi 对同一 toolResult 双发（R2-S1，chaos real-pi 同证）：message_end 携带持久化权威
+    // timestamp（与 JSONL 腿同源 1200）。live 侧 endTime 经 U3 last-wins 收敛为权威值 ≡ reload；
+    // 缺此帧则 live endTime = 客户端时钟（Gate A 实测漂移源）
+    JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'toolResult',
+        toolCallId: c1.toolResult.toolCallId,
+        toolName: c1.toolResult.toolName,
+        isError: c1.toolResult.isError,
+        content: [{ type: 'text', text: c1.toolResult.text }],
+        timestamp: c1.toolResult.timestamp,
+      },
+    }),
     // 总结 assistant + 清除帧触发（assistant 定稿 lines:undefined）
     msgStart(c1.summary.timestamp),
     ...deltas(['入口是 main.ts\n导出', ' main 函数']),
@@ -190,13 +204,14 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
       (f): f is { sessionId: string; msg: ServerMessage & { payload: { entries: unknown[] } } } =>
         f.msg.type === 'session.subagentEntriesAppended',
     )
-    // 非空守卫（防 0 == 0 空转）：7 帧各 1 entry = 6 条 message（user×2 / assistant×3 /
-    // toolResult×1）+ 1 条 toolCall overlay form。overlay form 是 tool_execution_start 的
-    // UI running 态载体（timestamp 运行时生成非确定值），不进 reducer 不变量——下方
-    // liveEntries 按 applySubagentEntries 同规则剔除，此处只断言其存在与归属。
+    // 非空守卫（防 0 == 0 空转）：8 帧各 1 entry = 6 条 message（user×2 / assistant×3 /
+    // toolResult×1，R2-S1 双发含 message_end 权威帧）+ 1 条 toolCall overlay form。overlay
+    // form 是 tool_execution_start 的 UI running 态载体（timestamp 运行时生成非确定值），
+    // 不进 reducer 不变量——下方 liveEntries 按 applySubagentEntries 同规则剔除，此处只
+    // 断言其存在与归属。
     const allEntries = entryFrames.flatMap((f) => f.msg.payload.entries)
-    expect(entryFrames).toHaveLength(7)
-    expect(allEntries).toHaveLength(7)
+    expect(entryFrames).toHaveLength(8)
+    expect(allEntries).toHaveLength(8)
     const overlayForms = allEntries.filter(
       (e): e is PiToolCallEntryForm => (e as { type?: string }).type === 'toolCall',
     )
@@ -229,7 +244,8 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     const liveEntries = allEntries.filter(
       (e): e is PiEntry => (e as { type?: string }).type !== 'toolCall',
     )
-    expect(liveEntries).toHaveLength(6)
+    // U3：R2-S1 双发的 message_end toolResult 帧计入（去重后仍占一个 entry 位）
+    expect(liveEntries).toHaveLength(7)
     const liveState = replayEntries(liveEntries)
 
     // ── reload 腿：getSubagentHistory pi 直读链尾段（JSONL fixtures 驱动）──

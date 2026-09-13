@@ -124,15 +124,28 @@ describe('reload 路径 toolCall.endTime 回填（chat-flow-timestamp U1 验收�
     expect('endTime' in trBody).toBe(false)
   })
 
-  it('R2-S1 双入口幂等：同 toolCallId 二投保留首条版本（endTime 与 output 同语义）', () => {
+  it('R2-S1 双入口幂等（U3 后）：内容首条 wins，endTime last-wins（第二帧覆盖为权威值）', () => {
     const first = applyEntry(
       replayEntries([assistantWithToolCall('e-asst', 'tc-x', 1000)]),
       toolResultEntry('e-tr-1', 'tc-x', 5432),
     )
     expect(first.messages[0]!.toolCalls![0]!.endTime).toBe(5432)
+    expect(first.messages[0]!.toolCalls![0]!.output).toBe('done')
 
-    // 第二条帧（message_end 载体，timestamp 不同）：整体 no-op，保留首条 endTime
+    // 第二条帧（message_end 载体，pi 权威 timestamp）：内容仍保留首条（R2-S1），
+    // endTime 被覆盖为第二帧权威值（U3 last-wins——live 客户端时钟被 pi 时刻修正）
     const second = applyEntry(first, toolResultEntry('e-tr-2', 'tc-x', 7777))
+    const tc2 = second.messages[0]!.toolCalls![0]!
+    expect(tc2.endTime).toBe(7777)
+    expect(tc2.output).toBe('done')
+  })
+
+  it('去重命中但第二帧无 timestamp → endTime 保持首条值（守卫不误清）', () => {
+    const first = applyEntry(
+      replayEntries([assistantWithToolCall('e-asst', 'tc-x', 1000)]),
+      toolResultEntry('e-tr-1', 'tc-x', 5432),
+    )
+    const second = applyEntry(first, toolResultEntry('e-tr-2', 'tc-x', undefined))
     expect(second.messages[0]!.toolCalls![0]!.endTime).toBe(5432)
   })
 
