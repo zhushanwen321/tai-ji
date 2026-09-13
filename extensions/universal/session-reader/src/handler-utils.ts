@@ -1,15 +1,21 @@
 /**
- * tool-handler 共享小工具（max-lines 拆分轮机械提取，零行为变更）。
+ * tool-handler 共享小工具（max-lines 拆分轮机械提取；ext-simplify-04 E5 扩充，零行为变更）。
  *
  * 从 tool-handler.ts「小工具」与「turn/turns 索引解析」段搬出：pad/err/turn 索引解析
- * 被留守的 tool-handler 与拆出的 search-across.ts / extract.ts 共同消费——放独立低层
- * 模块保持单向依赖（handler-utils ← 各域模块 ← tool-handler），不引入循环 import
- *（result-action.ts 的 Deps 注入先例解决不了纯函数跨模块复用，低层模块更直接）。
- * stripHash/formatDate/shortCwd/requireStr 仅 tool-handler 留守部分使用，不在此列。
+ * 被留守的 tool-handler 与拆出的 search-across.ts / extract.ts 共同消费；
+ * err 原属此列，E5 起同包 helper 获取范式单一化——result-action.ts 不再经
+ * ResultActionDeps 注入 err/stripHash/requireStr/SESSION_ID_PREFIX_LEN，与本模块
+ * 其他消费者一样直接 import。formatDate/shortCwd 仅 tool-handler 留守部分使用，不在此列。
+ * requireStr 的 action 参数类型经 type import 取自 tool-handler.ts（编译期擦除，
+ * 无运行时循环——与域模块对本模块「仅 type import」同一先例）。
  */
+import type { SessionReadAction } from './tool-handler.js'
 
 /** turn 索引显示宽度（T013 三位补零）。 */
 const TURN_INDEX_WIDTH = 3
+
+/** sessionId 列表行内的短显前缀长度。 */
+export const SESSION_ID_PREFIX_LEN = 8
 
 export const pad = (n: number): string => String(n).padStart(TURN_INDEX_WIDTH, '0')
 
@@ -18,6 +24,23 @@ export const pad = (n: number): string => String(n).padStart(TURN_INDEX_WIDTH, '
  * isError:true 的 error tool result——返回值上的 isError 字段会被丢弃（错误被标成功）。 */
 export function err(message: string): Error {
   return new Error(message)
+}
+
+/** 剥 # 前缀（TUI `#e6c96` 引用 → 纯片段，design §3.3 D-3/D-4）。 */
+export function stripHash(s: string): string {
+  return s.replace(/^#+/, '')
+}
+
+/** F5 必填参数校验。 */
+export function requireStr(
+  val: string | undefined,
+  name: string,
+  action: SessionReadAction,
+): string {
+  if (val === undefined || val === null || val.trim() === '') {
+    throw err(`action:"${action}" 需要参数 "${name}"。👉 补上 "${name}" 重试。`)
+  }
+  return val.trim()
 }
 
 // ---------------------------------------------------------------------------

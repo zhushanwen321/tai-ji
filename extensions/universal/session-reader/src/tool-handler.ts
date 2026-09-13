@@ -11,7 +11,8 @@
  * 域模块拆分（max-lines 拆分轮机械提取，零行为变更，result-action.ts 先例同型）：
  *   result-action.ts（result）/ doctor.ts（doctor + SessionReadSignals）/
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
- *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/turn 索引解析低层小工具）。
+ *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/stripHash/requireStr/
+ *   SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
  * 本模块保留公共类型、定位解析（resolveSessionId）、各 action 编排与共享渲染；
  * 域模块符号不经此 re-export——从所属域模块直接 import（唯一例外 SessionReadSignals：
  * 本模块 re-export 供 index.ts 生产消费）。
@@ -53,7 +54,7 @@ import {
   type ToolResultSummaryEntry,
 } from './core/render.js'
 import type { Family, SessionRef, WorkflowRef } from './core/family.js'
-import { doResult, type ResultActionDeps } from './result-action.js'
+import { doResult } from './result-action.js'
 
 // result action 主体在 result-action.ts（max-lines 拆分轮机械提取，零行为变更）。
 import {
@@ -63,7 +64,18 @@ import {
 } from './core/execution-tree.js'
 // 同轮拆分的域模块（依赖方向：本模块 → 域模块 → handler-utils，无循环；
 // 域模块对本模块仅 type import——编译期擦除，同 result-action.ts 先例）。
-import { err, pad, parseTurnIndex, parseTurnsRange, rangeLabel } from './handler-utils.js'
+// stripHash/requireStr/SESSION_ID_PREFIX_LEN 经 handler-utils 供本模块与 result-action
+// 直接消费（ext-simplify-04 E5：同包 helper 获取范式单一化）。
+import {
+  SESSION_ID_PREFIX_LEN,
+  err,
+  pad,
+  parseTurnIndex,
+  parseTurnsRange,
+  rangeLabel,
+  requireStr,
+  stripHash,
+} from './handler-utils.js'
 import { formatNoMatch } from './no-match.js'
 import {
   collectSearchHits,
@@ -145,11 +157,6 @@ export interface ToolResult {
 // 小工具
 // ---------------------------------------------------------------------------
 
-/** 剥 # 前缀（TUI `#e6c96` 引用 → 纯片段，design §3.3 D-3/D-4）。 */
-function stripHash(s: string): string {
-  return s.replace(/^#+/, '')
-}
-
 /** formatDate 日期段（月/日）补零宽度。 */
 const DATE_FIELD_WIDTH = 2
 
@@ -168,18 +175,6 @@ const SHORT_CWD_SEGMENTS = 2
 function shortCwd(cwd: string): string {
   const parts = cwd.split('/').filter(Boolean)
   return parts.slice(-SHORT_CWD_SEGMENTS).join('/')
-}
-
-/** F5 必填参数校验。 */
-function requireStr(
-  val: string | undefined,
-  name: string,
-  action: SessionReadAction,
-): string {
-  if (val === undefined || val === null || val.trim() === '') {
-    throw err(`action:"${action}" 需要参数 "${name}"。👉 补上 "${name}" 重试。`)
-  }
-  return val.trim()
 }
 
 // ---------------------------------------------------------------------------
@@ -395,8 +390,6 @@ function formatSaIdAmbiguous(saId: string, records: RecordManifest[]): string {
   )
 }
 
-/** sessionId 列表行内的短显前缀长度。 */
-const SESSION_ID_PREFIX_LEN = 8
 /** 消歧提示的 uuid 片段长度（比短显略长，引导输入更长片段消歧）。 */
 const HINT_ID_PREFIX_LEN = 12
 
@@ -1357,21 +1350,6 @@ function withMetadataCache(provider: SessionMetadataProvider): SessionMetadataPr
   }
 }
 
-/**
- * result action 的注入依赖（构造期绑定本文件私有 helper，运行时零查找开销）。
- * resolveSessionId 仅作类型/缺省绑定——入口分发时被 per-call 包装覆盖（闭包捕获
- * 信号包 liveSessionDir，见 handleSessionRead result case）。
- */
-const RESULT_ACTION_DEPS: ResultActionDeps = {
-  err,
-  stripHash,
-  requireStr,
-  resolveSessionId,
-  disambiguate,
-  safeParse,
-  sessionIdPrefixLen: SESSION_ID_PREFIX_LEN,
-}
-
 // ===========================================================================
 // 入口：按 action 分发
 // ===========================================================================
@@ -1421,13 +1399,16 @@ export async function handleSessionRead(
     case 'workflow':
       return doWorkflow(params, agentDir, signals.liveSessionDir)
     case 'result':
-      // per-call 覆盖 deps.resolveSessionId：把信号包中的 liveSessionDir 闭包进解析调用
-      //（ResultActionDeps 接口签名固定 5 参，包装保持同形、末位补传），result 的片段
-      // 形态与 find/outline 消费同一 roots（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
+      // per-call 构造注入面（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
+      // 直接 import——ext-simplify-04 E5）：resolveSessionId 包装把信号包中的
+      // liveSessionDir 闭包进解析调用（ResultActionDeps 接口签名固定 5 参，包装保持
+      // 同形、末位补传），result 的片段形态与 find/outline 消费同一 roots
+      //（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
       return doResult(params, agentDir, {
-        ...RESULT_ACTION_DEPS,
         resolveSessionId: (rawSession, action, ad, source, prefetchedManifests) =>
           resolveSessionId(rawSession, action, ad, source, prefetchedManifests, signals.liveSessionDir),
+        disambiguate,
+        safeParse,
       })
     case 'doctor':
       return doDoctor(params, signals)
