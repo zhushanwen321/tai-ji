@@ -229,7 +229,7 @@ export class TerminalService implements ITerminalService {
   }
 
   /**
-   * 构造子进程 env（B7 出站接线，docs/design/env-propagation-boundary.md §5-U4）。
+   * 构造子进程 env（B7 出站接线，docs/architecture/env-propagation-boundary.md §5-U4）。
    *
    * D5 决策：用户终端身份是「用户的 shell」，比 pi 更外部——跟随最小剥离（不走入站
    * 白名单基座过滤，shell 需要 PATH/HOME/SHELL 等全量系统变量）：pass-all 前缀 ''

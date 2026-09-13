@@ -8,7 +8,7 @@ utilityProcess.fork），要求所在文件经过出站契约构建器（buildOu
 composeChildEnvBase）组装子进程 env；未经构建器的文件按调用点逐一报错并给出修复指引，
 豁免名单在本脚本 EXEMPT_CALLSITES 内逐条注明理由。
 
-设计依据与背景：docs/design/env-propagation-boundary.md
+设计依据与背景：docs/architecture/env-propagation-boundary.md
 （§3.5 D2/D3 deny 清单最小起步 · §3.6 R1-R5 红线 · §5 U7 · AC8 演练场景）
 约束登记：docs/constraints.json C-proc-09；与入站白名单（C-proc-07）正交共存——
 入站白名单管「外部环境哪些准许进来」，本契约管「自身变量哪些允许跟随 spawn 出去」。
@@ -31,7 +31,7 @@ composeChildEnvBase）组装子进程 env；未经构建器的文件按调用点
    豁免失效时宁可重新报警人工复核，不允许静默放行。
 
 退出码：0=通过；2=存在违规；1=脚本自身异常。
-豁免/范围调整须同步 docs/design/env-propagation-boundary.md §3.6 R5 并过评审。
+豁免/范围调整须同步 docs/architecture/env-propagation-boundary.md §3.6 R5 并过评审。
 """
 
 import os
@@ -400,7 +400,7 @@ def exempted(rel_path, line_text):
 FIX_HINT = """[fix] 子进程 env 须经出站契约构建器组装（deny 清单剥 XYZ_AGENT_PACKAGED / XYZ_RUNTIME_TOKEN）:
       runtime 包内:   import { buildOutboundChildEnv } from '<相对路径>/infra/spawn-env.js'
       跨包直连 SSOT:  import { buildOutboundChildEnv } from '@xyz-agent/shared'
-      设计依据: docs/design/env-propagation-boundary.md (§3.5 D2/D3 · §3.6 R1-R5 · §5 U1/U7)
+      设计依据: docs/architecture/env-propagation-boundary.md (§3.5 D2/D3 · §3.6 R1-R5 · §5 U1/U7)
       豁免申请: .githooks/check_spawn_env_boundary.py EXEMPT_CALLSITES 注明理由后过评审"""
 
 

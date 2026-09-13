@@ -168,7 +168,7 @@ export type { SubagentServiceSessionInit };
  *
  * 第三宿主不经 session_start 流程时改用 createSubagentService(init) 参数注入构造。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md §3.3 D6）：
+ * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 

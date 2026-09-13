@@ -184,7 +184,7 @@ export type ClientMessageType =
   | 'config.removeProviderByKind'
   // scoped model：配置模型白名单 + 有序列表（reply config.scopedModels）。
   | 'config.setScopedModels'
-  // backgroundTask 域（docs/design/background-task-sidebar-view.md §3.3 D3，u-proto）：后台命令
+  // backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）：后台命令
   // 侧边栏的拉取/操作 RPC——list 拉全量并隐式把 session 加入 runtime watched 集合（D8③）；
   // output 按字节窗口 tail 输出尾部；kill 走 D6 分支矩阵。回执/广播登记见 ServerMessageType。
   | 'backgroundTask.list' | 'backgroundTask.output' | 'backgroundTask.kill'
@@ -720,7 +720,7 @@ export interface ClientMessageMap {
   'config.oauthLogout': { providerId: string }
   // ── scoped model ──
   'config.setScopedModels': { models: string[] }
-  // ── backgroundTask 域（docs/design/background-task-sidebar-view.md §3.3 D3，u-proto）──
+  // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
   // list：拉取该 session 后台任务全量（runtime 直读 registry 的投影；目录/文件不存在 → 空数组）。
   // 首次调用同时把 session 加入 runtime watched 集合（D8③）——订阅语义由 list 隐含，协议面无
   // subscribe/unsubscribe 消息（D3 被否项）；watched 退订挂 session 销毁汇聚点（runtime 侧职责）。
@@ -929,7 +929,7 @@ export type ServerMessageType =
   | 'config.oauthLogoutReply'
   // 环境变量检测 reply（I3）。
   | 'config.envVarsChecked'
-  // backgroundTask 域（docs/design/background-task-sidebar-view.md §3.3 D3，u-proto）：3 个 RPC 回执
+  // backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）：3 个 RPC 回执
   // + session 级变更广播。backgroundTask:updated 用冒号 camelCase（Server→Client 推送命名规则，
   // 对齐 plugin:statusBarUpdate / extension:widgetGui），payload 单对象必带 sessionId（架构规则 7），
   // 经 IMessageBus.publish(sessionId, msg) session 级定向推。
@@ -1001,7 +1001,7 @@ export interface SkillCacheInvalidatedPayload {
   cwd?: string
 }
 
-// ── backgroundTask 域 payload 辅助类型（docs/design/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
+// ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
 // shared 不依赖 @xyz-agent/extension-protocol（SubagentEngineConfigView / SessionTraceHeaderPayload
 // 同先例：契约 SSOT 在彼处，shared 侧放结构镜像，结构兼容即协议兼容）。任务条目逐字段镜像
 // extension-protocol background-task.ts 的 BackgroundTaskRegistryEntry（D9 数据契约零新造——
@@ -1961,7 +1961,7 @@ export interface ServerMessageMapBase {
   // applyEntry（toolResult 窗口局部配对回填）+ overlay 收口。
   'message.tool_call_end': { sessionId: string; entry: PiMessageEntry }
 
-  // ── backgroundTask 域（docs/design/background-task-sidebar-view.md §3.3 D3，u-proto）──
+  // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
   // 后台命令侧边栏：3 个 RPC 回执 + 1 个 session 级变更广播；全部必带 sessionId（架构规则 7）。
   // tasks 元素是 shared 协议镜像 BackgroundTaskRegistryEntry（逐字段同构 extension-protocol 同名
   // 契约，D9；等价性由 core transport api domain（packages/core/src/transport/api/domains/
@@ -2295,7 +2295,7 @@ export interface ReplyPayloadMap {
   'session.workflowAction': void  // reply session.workflowActionDone
   // ── scoped model 域──
   'config.setScopedModels': { scopedModels: string[] }  // reply config.scopedModels（去重保序后结果）
-  // ── backgroundTask 域（docs/design/background-task-sidebar-view.md §3.3 D3，u-proto）──
+  // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
   // 三个 RPC 全部 payload 消费型（renderer 读回执字段）；backgroundTask:updated 是 session 级
   // 广播（非 RPC reply），不走本映射——消费侧经 events 通道订阅。
   'backgroundTask.list': ServerMessageMap['backgroundTask.tasks']

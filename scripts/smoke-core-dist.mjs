@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * smoke-core-dist.mjs —— subagent-core dist 发布回归门（D9-②，设计
- * docs/design/subagent-core-package-extraction.md §3.3 D9-② / V7 产品化）。
+ * docs/architecture/subagent-core-package-extraction.md §3.3 D9-② / V7 产品化）。
  *
  * 背景：workspace 消费者永远吃最新 TS 源，npm 消费者吃 tsup dist——src 侧全绿
  * 不代表 dist 未坏（tsup 配置漂移 / 依赖升级 / d.ts 缺陷都可能「src 绿 dist 坏」

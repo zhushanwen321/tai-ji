@@ -4,7 +4,7 @@
 
 **层性质声明**：本文档是**技术方案设计**——下一层产物是可实现的接口/数据模型 + 代码任务（impl-plan）。准则 5/6/7（物理数据流 / 错误恢复 / 运行时探针）全适用。
 
-**修订记录**：R1（首轮对抗审查 2 must-fix + 7 suggestion 全修，含 kill 回路两处结构性修复）；R2（聚焦复审 0 must-fix + 5 suggestion 全修：零感知断言收窄 + intent 读回信号钉死 + Windows 探测规格 + 时限口径对齐 + 验收形态修正）；R3（聚焦复审 0 must-fix + 1 suggestion 全修：改动地图补 extension 加固落点）；R4（用户裁决升级：对齐 dev-0.9.15 subagent-sidebar-filter 二级筛选设计——新增 D10（三桶筛选 + 分桶 SSOT + 分区记忆 + 空桶自适应 + 行内两段式终止 + badge 同源）+ 术语改「后台命令」（i18n 冲突）；追加用户 item 形态裁决：两行式 SessionItem 同构 + 状态徽标移除（icon 即状态）+ exit 码入第二行（D10 ⑤）；R4 复审 0 must-fix + 2 suggestion 全修：icon 色档入 bucket SSOT（backgroundTaskStatusIcon，判定顺序钉死 + exit null 显示形态）+ 验收层「徽标」措辞同步 icon 化 + 文字后备双轨（aria-label + title）。审查报告 `background-task-sidebar-view.review.md` 含 R1-R4 结论存档）。
+> **实施状态**：已交付（R1-R4 四轮对抗审查收敛全修：R1 kill 回路两处结构性修复；R2 零感知断言收窄 + intent 读回钉死 + Windows 探测规格；R3 改动地图补 extension 加固；R4 用户裁决升级二级筛选 D10——三桶筛选/分桶 SSOT/行内两段式终止/icon 即状态。审查轨迹 git 可追溯）。
 
 ## 1. 背景目标
 
@@ -299,4 +299,4 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - 本仓两份 explorer 调研报告（2026-09-04，已固化入库；原文件已删除，git 可追溯）：`background-task-sidebar-view.research-data.md`（数据源全景）、`background-task-sidebar-view.research-view-flow.md`（view/drawer/widget 链路；原始落盘 /tmp/bg-bash-design/ 与 /tmp/view-flow-research.md）
 - 原 `docs/design/base-tool-enhance.md` §3.5（任务生命周期数据流、两层存储分工、跨进程边界；已删除，git 可追溯，决策沉淀在 base-tool-enhance 包内源码注释）
 - `packages/extension-protocol/src/background-task.ts`（registry 契约 SSOT）
-- R1 对抗审查报告：`docs/design/background-task-sidebar-view.review.md`（20+ 锚点核实记录 + 攻击面核验）
+- R1 对抗审查报告：`background-task-sidebar-view.review.md`（已删除，git 可追溯；20+ 锚点核实记录 + 攻击面核验）

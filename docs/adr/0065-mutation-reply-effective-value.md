@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-09-08
-- 关联：[state-truth-sync-architecture.md](../design/state-truth-sync-architecture.md) §3.3 D8（本文的权威源）· [ADR-0064](0064-pi-semantic-absorption-layer.md)（生效回支柱二，登记 C-pi-13——本文是其人肉纪律的机器化）· [constraints.json](../constraints.json) C-pi-15（本 ADR 的约束登记）· 事故 B（2026-08-27，见 ADR-0064 背景）
+- 关联：[state-truth-sync-architecture.md](../architecture/state-truth-sync-architecture.md) §3.3 D8（本文的权威源）· [ADR-0064](0064-pi-semantic-absorption-layer.md)（生效回支柱二，登记 C-pi-13——本文是其人肉纪律的机器化）· [constraints.json](../constraints.json) C-pi-15（本 ADR 的约束登记）· 事故 B（2026-08-27，见 ADR-0064 背景）
 
 ## 背景
 

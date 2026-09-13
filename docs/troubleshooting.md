@@ -144,7 +144,7 @@ printenv | grep XYZ_AGENT_PACKAGED   # 有输出 = 泄漏确认（出站契约�
 env -u XYZ_AGENT_PACKAGED bash scripts/validate-runtime-bundle.sh   # 旁证：剥除后应恢复正常
 ```
 
-若仍命中，说明该调用点未经出站契约构建器，带报错文件行号去 `.githooks/check_spawn_env_boundary.py` 豁免名单核对。治理：约束 C-proc-09（子进程 env 出站契约，`buildOutboundChildEnv` deny 剥除）+ pre-commit 守卫 `.githooks/check_spawn_env_boundary.py`，详见 [design/env-propagation-boundary.md](design/env-propagation-boundary.md)。
+若仍命中，说明该调用点未经出站契约构建器，带报错文件行号去 `.githooks/check_spawn_env_boundary.py` 豁免名单核对。治理：约束 C-proc-09（子进程 env 出站契约，`buildOutboundChildEnv` deny 剥除）+ pre-commit 守卫 `.githooks/check_spawn_env_boundary.py`，详见 [architecture/env-propagation-boundary.md](architecture/env-propagation-boundary.md)。
 
 ### 10. 升级中断手动恢复（升级脚本 staging 状态机残余窗口）
 

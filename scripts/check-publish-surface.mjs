@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * check-publish-surface.mjs —— packages/ 方向 npm 发布面一致性守卫
- * （约束 C-proc-11，设计 docs/design/npm-publish-surface-guard.md）。
+ * （约束 C-proc-11，设计 docs/architecture/npm-publish-surface-guard.md）。
  *
  * 背景：npm 对 files 白名单里磁盘上不存在的条目静默跳过——白名单承诺与构建产出
  * 之间零反馈。subagent-core 0.4.0/0.5.1 tarball 缺 dist.bundle（files 声明了该档，
@@ -345,7 +345,7 @@ function runGuard(rootDir) {
     const bytes = estimateFilesSize(pkg.dir, pkg.files)
     if (bytes > SIZE_WARN_BYTES) {
       warnings.push(
-        `${pkg.name}: files 条目磁盘求和 ${(bytes / 1024 / 1024).toFixed(2)}MB 超 5MB——触发设计 D7 重审（重审双档发布形态，docs/design/npm-publish-surface-guard.md §3.3 D7）`,
+        `${pkg.name}: files 条目磁盘求和 ${(bytes / 1024 / 1024).toFixed(2)}MB 超 5MB——触发设计 D7 重审（重审双档发布形态，docs/architecture/npm-publish-surface-guard.md §3.3 D7）`,
       )
     }
   }

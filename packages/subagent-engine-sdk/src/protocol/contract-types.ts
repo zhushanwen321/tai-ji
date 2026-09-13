@@ -1,7 +1,7 @@
 // src/protocol/contract-types.ts
 //
 // 引擎面契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费面）。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
 // impl-plan §2.1「类型闭包处置」。
 //
 // 搬运口径（逐字对照，结构等价、零 core import）：

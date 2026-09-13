@@ -194,7 +194,7 @@ function isHandshakeEnvOwnershipValid(frame: RelayHandshakeFrame): boolean {
  * env 原样使用（身份贯穿/schemaEnv/worktree 标志全在握手帧），剥离 relay env——
  * 孙进程经 pi-invocation 判定三 env 缺失回落直连，防嵌套 relay 时旧值误导。
  *
- * B8 出站接线（docs/design/env-propagation-boundary.md §5-U4 / D4）：基座维持帧 env
+ * B8 出站接线（docs/architecture/env-propagation-boundary.md §5-U4 / D4）：基座维持帧 env
  * 全量拷贝拓扑（pass-all 前缀 '' 不做白名单过滤——schemaEnv/worktree 标志未在入站
  * 白名单内，过滤即丢语义），五键剥离迁为 extras undefined=显式删除语义；deny 清单由
  * 构建器末步兜底，「叠加 deny 过滤后不多不少」。导出仅供单测直验（handleConnection

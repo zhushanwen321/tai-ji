@@ -1,7 +1,7 @@
 // src/execution/worktree-git-ops.ts
 //
 // worktree git 内核纯函数（sink 设计 U5 / D5 裁决全量）。
-// 设计权威源：docs/design/subagent-core-sink-design.md §3.3 D5 + 错误规格表
+// 设计权威源：docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D5 + 错误规格表
 // collectWorktreePatch 两行 + §5.4 ⛔3。
 //
 // 提取源：execution/worktree-manager.ts（gitRunAsync / GitRunError / SAFE_ID_RE /

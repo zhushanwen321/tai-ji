@@ -4,7 +4,7 @@
 
 ## 开篇（SCQA）
 
-- **S（情境）**：bte 是同名 override 内置 bash 工具的增强层（前台委托 pi 官方工厂 + 增量 background 后台模式 + 工具报错审计，承接已废弃 unified-hooks，设计契约见 `docs/design/base-tool-enhance.md`）；`@xyz-agent/extension-protocol` 是 xyz-agent 体系内 extension 与桌面端之间的跨层契约包（GUI 渲染 helper、session-manager 嵌套契约、background-task registry.json 契约），零运行时依赖，extension 侧 6 包与 runtime/core/renderer 侧 6 包共同 import。bte 的后台任务收殓在 2026-09 下沉 runtime（`docs/design/file-lock-unification-and-reaper-sink.md`）后，同一套 pid 判活/进程树 kill/tail/原子写/LRU 逻辑在 pi 进程侧（bte）与 runtime 侧各存一份，靠注释互指「移植自对方」对齐。
+- **S（情境）**：bte 是同名 override 内置 bash 工具的增强层（前台委托 pi 官方工厂 + 增量 background 后台模式 + 工具报错审计，承接已废弃 unified-hooks，设计契约见 `docs/design/base-tool-enhance.md`）；`@xyz-agent/extension-protocol` 是 xyz-agent 体系内 extension 与桌面端之间的跨层契约包（GUI 渲染 helper、session-manager 嵌套契约、background-task registry.json 契约），零运行时依赖，extension 侧 6 包与 runtime/core/renderer 侧 6 包共同 import。bte 的后台任务收殓在 2026-09 下沉 runtime（`docs/architecture/file-lock-unification-and-reaper-sink.md`）后，同一套 pid 判活/进程树 kill/tail/原子写/LRU 逻辑在 pi 进程侧（bte）与 runtime 侧各存一份，靠注释互指「移植自对方」对齐。
 - **C（冲突）**：2026-09-11 过度设计审计（M12/M13）证实「注释对齐」已经失守——两侧 `readOutputTail` 的参数顺序已经相反、返回字段名已经分叉（`output` vs `text`）；LRU 裁剪实存 4 份；bt- 差集规则在 bte 对账与 pending-notifications 守卫判据间双写，pending 侧刚经历 W4 翻档大改证明该规则是活动决策。另有一个 07 号设计移交的跨包同构：todo/goal 各自维护一份「清屏/推送 × GUI/TUI」四分支 widget 分派，且 `isGuiCapable` 外层判定不可省略的守卫注释在 3 处重复。
 - **Q（问题）**：如何让这些跨包/跨端的重复知识回归单一实现，使「改一处、两侧同时生效」构造性成立，且不破坏 bte 作为 universal 包可独立安装的既有语义（pending 保持 optional）？
 - **A（答案）**：行为原语与差集规则下沉 extension-protocol（runtime tsup 已将其列入 noExternal、bte 已硬依赖它，两侧零新增依赖边）；M13 在「A 提强依赖复用」与「B 下沉 protocol」间裁决选 B；M5 落一个 `setWidgetDual` 组合 helper。全部改动为等价替换，行为零变更，以真实场景双端验收。
@@ -195,7 +195,7 @@ export function pidStartMatchesRegistered(actualStartSec, registeredStartSec, st
 | E8 | todo `src/index.ts` | makeRefreshDisplay 四分支 → setWidgetDual；删重复守卫注释（守卫已内置） | 直接执行 |
 | E9 | goal `src/ports.ts`、`adapters/ports.ts`、`projection/widget.ts`、`session.ts` | UiPort 删 isGui/setGuiWidget、setWidget 签名改 dual（theme 成员归 03 号 E3 不动）；adapter delegate helper；updateWidget 塌缩；session.ts:129 调用形态兼容 | 直接执行（03 号 :184 联动兑现） |
 | E10 | bte `tool-error-audit.ts:7` | 注释修正（D4，不改 customType） | 直接执行 |
-| E11 | `docs/design/file-lock-unification-and-reaper-sink.md`（或 base-tool-enhance.md 设计演变段） | 登记「纯 CLI 独立安装无 runtime 收殓兜底」为已接受边界（审计四问记录发现 8，doc-right）；`bash-kill-tool.ts:118-122` 错误文案的 runtime 指引修正随登记一并评估 | 直接执行（登记类） |
+| E11 | `docs/architecture/file-lock-unification-and-reaper-sink.md`（或 base-tool-enhance.md 设计演变段） | 登记「纯 CLI 独立安装无 runtime 收殓兜底」为已接受边界（审计四问记录发现 8，doc-right）；`bash-kill-tool.ts:118-122` 错误文案的 runtime 指引修正随登记一并评估 | 直接执行（登记类） |
 
 **移交 code-simplify 清单**（low 级、非 contested，实现阶段批量执行；行号为本次实读）：
 1. `task-store.ts:53-55` getTask 零生产调用——建议方向：让 `bash-output-tool.ts:84` / `bash-kill-tool.ts:65` 的 `getAllTasks().find(...)` 改用 getTask（语义等价 O(1)），而非删除（测试断言面大）；
@@ -282,7 +282,7 @@ M1 先行（新模块与旧实现并存无冲突）；M2/M3 可并行（各自�
 | todo/goal 测试：`__tests__/index.test.ts`（todo）、`__tests__/{ports,service,goal-control-adapter,event-adapter}.test.ts`（goal 的 UiPort fake 成员同步删 isGui/setGuiWidget、dual 签名） | 改 | E8/E9 |
 | `extensions/universal/pending-notifications/src/state.ts` | 改（scanPendingEntries 委托） | E6（协调） |
 | 对应测试：bte `__tests__/{kill-tree,registry,task-store,pending-reconcile,maintenance-once,index}.test.ts`、runtime `test/background-task-reaper{,-primitives}.test.ts`、`services/background-task/{output-tail,background-task-service}.test.ts`、protocol `helpers.test.ts` + 新模块单测 | 改/增（import 路径 + 新增断言） | 各单元 |
-| `docs/design/file-lock-unification-and-reaper-sink.md` 或 `base-tool-enhance.md`、`ext-simplify-01-*.md:198` | 登记（CLI 兜底边界 / P-protocol 对账说明） | E11 + 待验证③ |
+| `docs/architecture/file-lock-unification-and-reaper-sink.md` 或 `base-tool-enhance.md`、`ext-simplify-01-*.md:198` | 登记（CLI 兜底边界 / P-protocol 对账说明） | E11 + 待验证③ |
 
 净行数预估：protocol +~280，bte -~200（kill-tree 152 整删 + registry/output-tail/task-store 本地副本），runtime -~150，todo/goal ±0 附近（分派塌缩 vs helper 调用）；整体净删 + 单一实现收益。
 

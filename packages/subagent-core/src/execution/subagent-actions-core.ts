@@ -3,7 +3,7 @@
 // subagent tool 六 handler 的领域内核（校验 / 守卫链 / 归属判定 / 终态映射）。
 //
 // 来源：pi-sw `src/interface/subagent-actions.ts` 的零 pi-API 部分原样下沉
-//（sink 设计 docs/design/subagent-core-sink-design.md §3.3 D6② / U10②；
+//（sink 设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6② / U10②；
 // ⛔4 行为快照等值测试见 __tests__/subagent-actions-core.test.ts——期望值
 // 硬编码自迁移前 pi-sw 实现的实测输出，含错误文案锚）。
 //

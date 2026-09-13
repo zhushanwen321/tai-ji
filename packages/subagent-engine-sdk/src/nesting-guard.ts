@@ -17,7 +17,7 @@
 //
 // [D3-⑤ 嵌套防护合一] 进程内执行嵌套上下文（原 SubagentService.execCtxAls，pi 路径
 // 私有）并入本文件——「嵌套防护」的两层机制（跨进程 env 标记 / 进程内 ALS 深度计数）
-// 单点于公共层。设计权威源：docs/design/subagent-dual-track-convergence.md §3.3 D3-⑤
+// 单点于公共层。设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-⑤
 // + 双轨清单 #10。
 
 import { AsyncLocalStorage } from "node:async_hooks";

@@ -1,7 +1,7 @@
 // src/execution/engine/engine-discovery-scan.ts
 //
 // [W4] 引擎发现器：manifest 解析 + 三级搜索路径 + cli descriptor 装载。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.4 发现与注册；
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.4 发现与注册；
 // 实现级规格 impl-plan §2.4。
 //
 // 自注册模型（G1「新引擎零改 core」）：引擎包在自己的 package.json 里声明

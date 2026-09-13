@@ -109,5 +109,5 @@ route-inbound 对每条消息：匹配所有订阅条件 → 逐个分发
 
 - [ADR-0049](0049-session-isolation-map-partition.md)：per-session 隔离（crossSessionHandlers 若模块级 Map 需补录例外清单，与 subscription-state/events 同类）
 - [ADR-0059](0059-core-pinia-store-integration.md)：core/pinia 集成端口模式（TransportPorts.events 延续此范式）
-- [renderer-target-architecture.md §2.2](../architecture/renderer-target-architecture.md)：T&C 层（crossSession 是 T&C 路由出口）
+- [renderer-package-topology.md §2](../architecture/renderer-package-topology.md)（原 renderer-target-architecture.md，已改名/删除，git 可追溯）：T&C 层（crossSession 是 T&C 路由出口）
 - ST4 candidate（架构审查报告）：widget 双消费收敛，本 ADR 第 5 步落地

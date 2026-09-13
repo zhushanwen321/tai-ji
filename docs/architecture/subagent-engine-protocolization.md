@@ -393,7 +393,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@xyz-agent/shared
 **不**把 SDK 塞进 `FORBIDDEN_DIRS`——那是同名常量唯一性检查，塞进去会自锁）。
 
 **登记回写**：`XYZ_ZCODE_CLI`（`registration.ts:34` 消费）等 B3 出站白名单条目随包迁移，须同批回写
-`docs/design/env-propagation-boundary.md`；守卫 `check_spawn_env_boundary.py` 的 `SCAN_ROOTS` 扩展覆盖 SDK 与引擎包，
+`docs/architecture/env-propagation-boundary.md`；守卫 `check_spawn_env_boundary.py` 的 `SCAN_ROOTS` 扩展覆盖 SDK 与引擎包，
 **同批把 `buildEngineChildEnv` 登记为可接受构建器符号**（否则引擎包内既有 spawn 点 4 处一扩即红）。
 **验收**：A6 增「用户旋钮（`ZCODE_APPSERVER_TURN_*_TIMEOUT_MS`）跨进程仍生效」+「`XYZ_AGENT_API_KEY` 零命中」观测点。
 

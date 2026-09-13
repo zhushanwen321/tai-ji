@@ -543,7 +543,7 @@ export type RecordStorePi = {
  * record 状态查询面（U10① D6）：按状态枚举 listRunning/collectRecords(statusFilter)、
  * 按 id 查询 getMutable/findLightById/getFullRecord——方法签名即导出形态，本类零改动。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md §3.3 D6）：
+ * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 export class RecordStore {

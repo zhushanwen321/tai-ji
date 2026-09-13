@@ -3,7 +3,7 @@
 // [D3-③ journal 接线合一] host 侧 event journal 接线的共享 helper（唯一实现，调用
 // 点全部在 SubagentService：workflow 域 runWorkflowEngineTask（wireEventJournal
 // taskId=record.id）+ chat 域 runEngineTask 与 tool 域 runAndFinalize 两处（同
-// record.id））。设计权威源：docs/design/subagent-dual-track-convergence.md §3.3 D3-③（writer +
+// record.id））。设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-③（writer +
 // retarget + handle 回填两份提为 common 层共享 helper）+ 双轨清单 #6。
 //
 // 收敛前形态（两份同构接线）：

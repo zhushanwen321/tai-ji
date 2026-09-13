@@ -1,7 +1,7 @@
 /**
  * 出站 env 契约 SSOT（runtime 及 main 孵化子进程时「给什么 / 不给什么」）。
  *
- * 与入站白名单的关系（双向边界契约，详见 docs/design/env-propagation-boundary.md §3.2/§3.5-D2）：
+ * 与入站白名单的关系（双向边界契约，详见 docs/architecture/env-propagation-boundary.md §3.2/§3.5-D2）：
  * - 入站白名单 SSOT ENV_WHITELIST_PREFIXES（constants.ts:72，pre-commit
  *   check_env_whitelist_sync.py 守卫其唯一性）回答「外部环境哪些东西准许进来」——管准入；
  * - 本文件的出站契约回答「我（runtime/main）身上的东西哪些允许跟随 spawn 出去」——管出站。
@@ -37,7 +37,7 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 出站子进程 env 构建器（docs/design/env-propagation-boundary.md §5-U2 的唯一实现点）。
+// 出站子进程 env 构建器（docs/architecture/env-propagation-boundary.md §5-U2 的唯一实现点）。
 // U3 主链路接线起，实现从 runtime infra/spawn-env.ts 归位本契约文件：main 进程 B2
 // 边界（safe-env 薄封装）需要同款过滤/extras 组合能力但不吃 deny 兜底（见
 // composeChildEnvBase JSDoc 的边界分层说明），跨包复用的唯一合理归属地是契约 SSOT 同文件。

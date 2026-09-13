@@ -1,6 +1,6 @@
 // src/execution/__tests__/subagent-actions-core.test.ts
 //
-// ⛔4 行为快照等值测试（sink 设计 docs/design/subagent-core-sink-design.md §5.4 ⛔4 /
+// ⛔4 行为快照等值测试（sink 设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §5.4 ⛔4 /
 // impl-plan u-core-actions）：六 handler（start/list/cancel/message/close/fork-from）
 // 的校验、守卫链、归属判定、终态映射，迁移前后行为逐项一致。
 //

@@ -28,7 +28,7 @@ DISABLE_RE = re.compile(r"eslint-disable")
 
 # [subagent-core 抽离 P0] 规则 A 的 scoped allowlist：core log 端口（HostServices.log 的
 # NULL_HOST 缺省 sink）按设计 D2 即为 console——configureCore 之前宿主 appendEntry 通道
-# 不存在，该路径仅测试与库误用场景可达；设计文档 docs/design/subagent-core-package-extraction.md
+# 不存在，该路径仅测试与库误用场景可达；设计文档 docs/architecture/subagent-core-package-extraction.md
 # §3.3 D2「缺省 console」，eslint 侧已有同范围 config 级 override（eslint.config.mjs）。
 # [u1-move/u1-guards] P1 物理抽包后 src/core 迁至 packages/subagent-core/src/core/；
 # 旧 extensions/ 前缀已随迁移删除（一致性审查 r2 裁定：目录迁走后死条目只有负作用

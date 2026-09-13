@@ -1,7 +1,7 @@
 // run-failure-worktree-cleanup.test.ts —— [W3 契约变更⑤] run 期失败清理前置副作用的
 // 链路锚定单测。
 //
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.3 能力位段（manifest
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.3 能力位段（manifest
 // 多声明 → initialize 发现 → engine_capability_mismatch 该 run 失败 + record 标 failed
 // + **清理 run 前已建的前置副作用**）；impl-plan §2.3 契约变更⑤。
 //

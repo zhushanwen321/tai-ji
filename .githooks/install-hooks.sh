@@ -698,7 +698,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] runtime 子进程 env 出站契约检查失败${NC}"
-            echo -e "${YELLOW}[INFO] 新增子进程必须经 buildOutboundChildEnv 组装 env；修复指引见上方脚本输出；设计依据 docs/design/env-propagation-boundary.md${NC}"
+            echo -e "${YELLOW}[INFO] 新增子进程必须经 buildOutboundChildEnv 组装 env；修复指引见上方脚本输出；设计依据 docs/architecture/env-propagation-boundary.md${NC}"
             echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
             exit 1
         fi
@@ -716,7 +716,7 @@ fi
 #   ② check-engine-package-boundary（W9 新守卫）：packages/subagent-engine-* +
 #     pi/zcode-subagent-cli 不得依赖/导入 core 内部路径 + DoD#2（exports 无
 #     ./engines/ 子入口、barrel 无引擎重导出）。
-#   设计依据：docs/design/subagent-engine-protocolization.md §3.7 / impl-plan §2.9。
+#   设计依据：docs/architecture/subagent-engine-protocolization.md §3.7 / impl-plan §2.9。
 #   注：不设独立跳过开关——新增 SKIP_* 逃生口须同步登记 AGENTS.md 的 SKIP_* 清单，
 #   故本段仅受既有 SKIP_ALL_CHECKS 总闸管辖。
 # ============================================================================

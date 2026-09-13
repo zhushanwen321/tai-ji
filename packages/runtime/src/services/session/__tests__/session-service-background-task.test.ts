@@ -1,6 +1,6 @@
 /**
  * SessionService × BackgroundTaskService 接线测试（u-runtime-rpc，
- * docs/design/background-task-sidebar-view.md §3.3 D2/D3/D8 + §3.4 P6）。
+ * docs/architecture/background-task-sidebar-view.md §3.3 D2/D3/D8 + §3.4 P6）。
  *
  * 覆盖：
  * - 组装：SessionService 构造即创建 backgroundTasks 域（公有成员，handler 经 ctx 结构读取）

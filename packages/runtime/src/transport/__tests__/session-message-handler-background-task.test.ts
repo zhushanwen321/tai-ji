@@ -1,6 +1,6 @@
 /**
  * SessionMessageHandler backgroundTask 域 3 RPC case 分发测试（u-runtime-rpc，
- * docs/design/background-task-sidebar-view.md §3.3 D3/D7/D8 + §3.4 P6）。
+ * docs/architecture/background-task-sidebar-view.md §3.3 D3/D7/D8 + §3.4 P6）。
  *
  * 覆盖：
  * - handles 认领 backgroundTask.list / output / kill

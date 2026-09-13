@@ -50,7 +50,7 @@ type ReplyCallback = (msg: unknown) => void
 /**
  * 构建插件宿主 fork 子进程 env（唯一组装点，导出供单测直验）。
  *
- * D6（docs/design/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝拓扑
+ * D6（docs/architecture/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝拓扑
  * 不动（trusted/sandbox 插件兼容性属有意设计）——pass-all 前缀 '' 承载拷贝语义
  * （构建器步骤 1 对任意 key 放行，副本操作绝不 mutate 父对象，R1），仅在输出上叠加
  * 出站 deny 两键剔除（构建器末步兜底）+ 既有 ELECTRON_RUN_AS_NODE=1 注入。
@@ -417,7 +417,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
     // loader 的 fail-closed 语义不变（env 缺失仍 initialize throw）。
     // trusted 不需要（ESM loader 仅 sandbox 进程经 execArgv --import 注入；
     // trusted 走 Worker 线程不经此 fork 路径）。
-    // D6（docs/design/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝对
+    // D6（docs/architecture/env-propagation-boundary.md §5-U4）：{...process.env} 全量拷贝对
     // trusted/sandbox 插件的兼容性属有意设计，拷贝拓扑不动——pass-all 前缀承载拷贝语义，
     // 仅经构建器叠加 deny 两键剔除（副本上删，R1）。
     const env: NodeJS.ProcessEnv = buildPluginHostChildEnv(process.env)

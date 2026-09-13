@@ -476,9 +476,9 @@ agent → session_read { action:"find", query:"01a08zzz" }
 
 - **采用**：`packages/runtime/src/infra/pi/rpc-client.ts` 在 spawn pi 时，除现有 `--session-dir` 外**再注入 `PI_CODING_AGENT_SESSION_DIR = getSessionsDir()`**（经 `buildOutboundChildEnv` 的 `extras` 通道，遵守 C-proc-09 唯一构建点约束）。
 - **为什么值得**：这是**在信息断点上修，而不是在消费端兜**。`--session-dir` 只存在于 pi 自己的 argv，env 才是**可被子进程继承**的自描述契约——任何未来的 pi-native 或第三方消费者（不只本 extension）都能直接读到。
-- **forward 登记义务（C-proc-09 的另一半）**：`docs/design/env-propagation-boundary.md:215` 明确要求「pi 子树内的新 env 须在出站契约清单加 forward 条目并附消费锚点」。本设计必须同步改两处，缺一不可：
+- **forward 登记义务（C-proc-09 的另一半）**：`docs/architecture/env-propagation-boundary.md:215` 明确要求「pi 子树内的新 env 须在出站契约清单加 forward 条目并附消费锚点」。本设计必须同步改两处，缺一不可：
   1. `packages/shared/src/spawn-env-contract.ts` 的 `SPAWN_ENV_FORWARD_REFERENCE` 增一条（对齐既有 `PI_CODING_AGENT_DIR` 条目的写法，`spawn-env-contract.ts:150-158`）：`injectionPath` 写明 extras 通道，`piConsumerAnchors` 写 `dist/main.js:530-533` + 本 extension 的 `[env]` 信号。
-  2. `docs/design/env-propagation-boundary.md` 的 B 组表同步。
+  2. `docs/architecture/env-propagation-boundary.md` 的 B 组表同步。
   **为什么必须显式登记**：既有防线拦不住这个遗漏——`.githooks/check_spawn_env_boundary.py` 是**文件级**白名单（文件内出现构建器调用即整文件放行，`rpc-client.ts` 早已含 `buildOutboundChildEnv(`），`spawn-env-contract.test.ts` 只断言清单「含某几项」、无完整性断言。漏登记不会被任何机器拦截。
 - **继承面枚举（此变量会传给谁、谁会受影响）**：
 
@@ -936,7 +936,7 @@ M-1 独立交付且先行；M0–M3 是一个不可分割的正确性交付（M3
 | `docs/constraints.json` + 重生成 `docs/constraints.md` | 新增布局对齐契约条目（U18） |
 | `AGENTS.md` / `docs/troubleshooting.md` / `logger.ts:431` / `shared/workflow.ts` / `workflow-extractor.ts:236` 注释 | `~/.xyz-agent/pi/` 字面量同步（U15 清扫范围） |
 | `packages/shared/src/spawn-env-contract.ts` | `SPAWN_ENV_FORWARD_REFERENCE` 增条目（U5，**仅 A 全量退路**） |
-| `docs/design/env-propagation-boundary.md` | B 组表同步（U5，**仅 A 全量退路**） |
+| `docs/architecture/env-propagation-boundary.md` | B 组表同步（U5，**仅 A 全量退路**） |
 | `docs/pi-semantics.json` | 登记 6 条 pi 私有语义（U6） |
 | 测试 | `src/__tests__/roots.test.ts`（三宿主信号包 table-driven）、`env.test.ts`（新增，含透传污染反例）、`tool-handler.test.ts`（`doctor` + 新 F1 文案 + 分组 + 归一化 + family 一致性）、`index.test.ts`（`ctx === undefined` 与 `sessionManager` 缺方法两例） |
 

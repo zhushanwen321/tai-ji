@@ -1,5 +1,5 @@
 // capability-gate.test.ts —— [D3-④ 预检 capabilities 化] 拦截矩阵单测。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.3「能力位」段（manifest
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.3「能力位」段（manifest
 // 权威双向处置）+ 历史源 dual-track（已删 git 可追溯）§3.3 D3-④（r3 裁定：
 // EngineCapabilities +maxTurns 位 pi=true/zcode=false，不保留硬编码 shape 检查）+
 // §3.4 错误规格第 1 行 + §4 V4④⑤（正反向验收）。

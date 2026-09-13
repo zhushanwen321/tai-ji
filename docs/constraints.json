@@ -1496,7 +1496,7 @@
         "packages/runtime/src/services/plugin-service/plugin-host-process.ts"
       ],
       "authority": [
-        "design/env-propagation-boundary.md",
+        "architecture/env-propagation-boundary.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1538,7 +1538,7 @@
         "packages/runtime/**"
       ],
       "authority": [
-        "design/subagent-engine-protocolization.md#31-目标架构"
+        "architecture/subagent-engine-protocolization.md#31-目标架构"
       ],
       "dimensions": [
         "arch-boundary"
@@ -1557,7 +1557,7 @@
         "extensions/universal/subagent-workflow/src/execution/engine/**"
       ],
       "authority": [
-        "design/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
+        "architecture/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
       ],
       "dimensions": [
         "business-logic",
@@ -1579,7 +1579,7 @@
       ],
       "authority": [
         "../packages/subagent-engine-sdk/src/paths.ts",
-        "design/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
+        "architecture/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1966,7 +1966,7 @@
         "resources/plugins/statusline/package.json"
       ],
       "authority": [
-        "design/npm-publish-surface-guard.md#33-关键决策与权衡",
+        "architecture/npm-publish-surface-guard.md#33-关键决策与权衡",
         "../scripts/check-publish-surface.mjs"
       ],
       "dimensions": [
@@ -1989,7 +1989,7 @@
         "packages/renderer/src/composables/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d1resolvelaunchconfig-单一解析模块c1-核心选定"
+        "architecture/state-truth-sync-architecture.md#d1resolvelaunchconfig-单一解析模块c1-核心选定"
       ],
       "dimensions": [
         "data-governance",
@@ -2019,7 +2019,7 @@
       ],
       "authority": [
         "../packages/subagent-engine-sdk/src/env.ts",
-        "../docs/design/env-propagation-boundary.md"
+        "../docs/architecture/env-propagation-boundary.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2045,7 +2045,7 @@
         "packages/renderer/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d8改状态回执裁决标准--协议层机器强制c4选定",
+        "architecture/state-truth-sync-architecture.md#d8改状态回执裁决标准--协议层机器强制c4选定",
         "adr/0065-mutation-reply-effective-value.md"
       ],
       "dimensions": [
@@ -2069,7 +2069,7 @@
         "packages/subagent-core/src/execution/dialog-queue.ts"
       ],
       "authority": [
-        "../docs/design/subagent-engine-protocolization.md",
+        "../docs/architecture/subagent-engine-protocolization.md",
         "../docs/architecture/subagent-chat-run-unification.md"
       ],
       "dimensions": [
@@ -2093,7 +2093,7 @@
         "packages/renderer/src/composables/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d9对账机制三分处置c3选定只保留核心对账的执行框架"
+        "architecture/state-truth-sync-architecture.md#d9对账机制三分处置c3选定只保留核心对账的执行框架"
       ],
       "dimensions": [
         "arch-boundary",

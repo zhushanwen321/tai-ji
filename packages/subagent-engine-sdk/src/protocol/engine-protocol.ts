@@ -1,7 +1,7 @@
 // src/protocol/engine-protocol.ts
 //
 // 引擎协议 v1 版本常量与协商（W1 契约根）。设计权威源：
-// docs/design/subagent-engine-protocolization.md §3.3 + impl-plan §2.1。
+// docs/architecture/subagent-engine-protocolization.md §3.3 + impl-plan §2.1。
 //
 // 传输 = stdio NDJSON（每行一个 JSON 对象）。stdout 独占协议帧；stderr 常驻排空
 // （内存环形缓冲尾 400 字符，崩溃现场由 engine_crashed 携带，宿主侧不落盘）。

@@ -1,6 +1,6 @@
 // journal-wiring.test.ts —— [D3-③ journal 接线合一] host helper 单测（两域共用的
 // 唯一实现：writer 创建 + retarget + journaling onEvent + handle 回填 + close）。
-// 设计权威源：docs/design/subagent-dual-track-convergence.md §3.3 D3-③ + 双轨清单 #6。
+// 设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-③ + 双轨清单 #6。
 //
 // 覆盖：①占位池 key 初始路径与 retarget 后路径权威（getter 反映 retarget）；②先落盘
 // 再转发（forwardEvents）；③handle 回填写终态路径；④close 幂等不抛。

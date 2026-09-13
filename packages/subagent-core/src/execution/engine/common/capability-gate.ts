@@ -1,7 +1,7 @@
 // src/execution/engine/common/capability-gate.ts
 //
 // [D3-④ 预检 capabilities 化] 调用前预检的唯一实现（capabilities 驱动，无引擎 id
-// 特判）。设计权威源（现行）：docs/design/subagent-engine-protocolization.md §3.3
+// 特判）。设计权威源（现行）：docs/architecture/subagent-engine-protocolization.md §3.3
 // 「能力位」段（manifest 权威 + 方向判定表）+ 历史源 docs/design/subagent-dual-track-
 // convergence.md §3.3 D3-④ + r3 裁定（EngineCapabilities 新增 maxTurns 能力位）+
 // 错误规格（engine_capability_unsupported / engine_capability_mismatch）。
