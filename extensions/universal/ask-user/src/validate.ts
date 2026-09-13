@@ -1,5 +1,5 @@
 // src/validate.ts
-import { HEADER_MAX_CHARS, type InputQuestion, QUESTION_MAX_CHARS } from "./types";
+import { HEADER_MAX_CHARS, type InputQuestion, OTHER_LABEL, QUESTION_MAX_CHARS } from "./types";
 
 /** 控制字符（含 \n \r \t 等）：question 文本禁止包含，避免 answers key 含不可见字符（spec FR-2） */
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
@@ -18,6 +18,8 @@ const ERROR_PREVIEW_CHARS = 20;
  * - options 元素必须是 {label, description} 对象，不能是 string（弱模型高频误用）
  * - question 文本长度上限与无控制字符（保证 answers key 有界、可预测）
  * - question 文本在数组内唯一
+ * - option label 不得为保留字 Other（trim 后精确匹配）——Other 自由输入行由 extension
+ *   自动追加，LLM 自带会在渲染层产生同名双行（M23）
  * - 同问题内 option label 唯一
  * - 多问题（questions.length > 1）时每个 question 必须有非空 header
  *
@@ -76,6 +78,12 @@ function checkOptionLabels(qt: string, options: InputQuestion["options"]): strin
 		// opt 已收窄为 Option
 		if (opt.label.trim() === "") {
 			return `Option label must not be empty in question "${qt}". Give every option a distinct, descriptive label.`;
+		}
+		// 保留字 Other（trim 口径：带空白变体与合成 Other 行视觉不可分辨，同样要拦）——
+		// 两条渲染路径都会无条件追加合成 Other 自由输入行，LLM 自带的 "Other" 选项会与它
+		// 同名并存：一行是普通选项、一行是自由输入，UI 自相矛盾且答案通道歧义（M23）。
+		if (opt.label.trim() === OTHER_LABEL) {
+			return `Option label "${OTHER_LABEL}" is reserved in question "${qt}" — the Other free-text option is added automatically. Remove it; to offer a catch-all choice, rely on the built-in Other, or rename the option (e.g. "Other database").`;
 		}
 		if (seenLabels.has(opt.label)) {
 			return `Duplicate option label "${opt.label}" in question "${qt}". Options must be mutually exclusive — reword one so each label maps to a distinct choice.`;

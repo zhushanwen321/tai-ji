@@ -137,6 +137,9 @@ graph LR
 | 10-u1 | 守卫用例实际 :705-711 + tests:21 import 联动删除 | 设计声明 ±1-2 行容差；符号删除的机械必然 | 接受（非偏差，容差内） |
 | 10-u1 | 安全域注释锚定 TEARDOWN_FORCE_EXIT_MS 常量 doc 而非 :484 调用点 | 知识随值锚定，与设计 §5 终态示意图一致 | 接受 |
 | 10-u1 | MS_PER_SECOND 保留 | 被 teardown 日志换算消费，不在 E1 删除面 | 接受 |
+| 11-u1 | channel-handler.ts:80 注释限定随 E3 执行（设计 §6.5 原归 L5 移交） | 派发指令显式点名（主 agent 裁决：与 E3 登记同一语义变更，同批落）；L5 其余两处仍留移交批 | 接受（派发方指令，非 subagent 越权） |
+| 11-u1 | ARCHITECTURE.md 新增 registry 小节而非补既有段 + 「本 slot 单注册方」精确化 | 现状无 registry 专段；登记前 grep 核实 gui_widget 经 engine-sdk re-export 等事实 | 接受（登记措辞更精确） |
+| 11-u1 | 测试新增 3 条（含空白变体 " Other "） | 派发指令明示允许顺带补 | 接受 |
 
 ## 6 状态表
 
@@ -163,7 +166,7 @@ graph LR
 | 05-S2 | pending | 0 | - |
 | 05-S3 | pending | 0 | - |
 | 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
-| 11-u1 | pending | 0 | - |
+| 11-u1 | committed | 1 | 307/307 绿（+3 用例）+ typecheck/lint 双过 |
 
 ## 7 残留风险与变更历史
 
