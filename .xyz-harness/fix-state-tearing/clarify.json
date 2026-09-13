@@ -1,8 +1,0 @@
-{
-  "format": "mid-clarify",
-  "objective": "修复对话流 UI 状态与实体状态撕裂（bash 进行中但无停止按钮）：将 isStreaming 从命令式 flag 重构为从 message 实体派生的 computed，事件语义正交化（send.rejected 独立通道 + B 策略忙时转 steer），统一异常收口出口（finalizeSession），消除所有\"只翻 flag 不收口实体\"的旁路",
-  "deliverables": {
-    "requirements": "requirements.md",
-    "systemArchitecture": "system-architecture.md"
-  }
-}

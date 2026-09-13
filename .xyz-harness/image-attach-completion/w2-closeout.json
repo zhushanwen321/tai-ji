@@ -1,8 +1,0 @@
-{
-  "summary": "P2-a 历史消息图片渲染已交付。Turn.vue 加 seg.type==='image' 分支引用新建的 ImageThumb 子组件（img 缩略图 + 加载失败/path空降级 badge）。满足 #7.5 对话流状态可重开恢复。5 单测 + 全量 1972 测试通过。修复了协议格式 bug（两斜杠→三斜杠，对齐 useChat/DetailPane 既有契约）。",
-  "artifacts": [
-    { "kind": "code", "ref": "packages/renderer/src/components/panel/message-stream/ImageThumb.vue", "note": "新建图片缩略图子组件" },
-    { "kind": "code", "ref": "packages/renderer/src/components/panel/message-stream/Turn.vue", "note": "userSegments 遍历加 image 分支" },
-    { "kind": "test", "ref": "packages/renderer/src/components/panel/message-stream/__tests__/ImageThumb.test.ts", "note": "5 个渲染用例" }
-  ]
-}
