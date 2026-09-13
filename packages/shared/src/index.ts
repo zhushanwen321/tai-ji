@@ -233,10 +233,11 @@ export type { SoundPlatform, SoundKind } from './sound-defaults'
 export { DEFAULT_SUCCESS_PLATFORM, DEFAULT_ERROR_PLATFORM, getDefaultSound } from './sound-defaults'
 // composer 多 skill 注入的标记语法与预算估算 SSOT（设计 docs/design/composer-multi-skill-injection.md
 // §3.3 D3/D6/D7；runtime 注入器、序列化/反解析、scripts 探针三方同源消费，纯文本语法层无 node 依赖）
-export type { ParsedSkillMarker, ParsedSkillsBlock } from './skill-marker'
+export type { ParsedSkillMarker, ParsedSkillsBlock, SkillDataBlockRange } from './skill-marker'
 export {
   SKILL_MARKER_TAG,
   SKILLS_BLOCK_TAG,
+  SKILL_DATA_BLOCK_TAG,
   SKILL_FALLBACK_GUIDANCE,
   CONTEXT_WINDOW_RATIO,
   CJK_TOKENS_PER_CHAR,
@@ -250,5 +251,8 @@ export {
   parseSkillMarkers,
   buildSkillsFallbackBlock,
   parseSkillsFallbackBlocks,
+  buildSkillDataBlockExpansions,
+  buildSkillDataBlockFallback,
+  findSkillDataBlockRange,
   estimateTokens,
 } from './skill-marker'
