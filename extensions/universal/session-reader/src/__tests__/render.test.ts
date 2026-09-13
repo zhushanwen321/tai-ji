@@ -346,7 +346,6 @@ describe('renderDetail', () => {
     expect(summary.summary).toMatch(/^read: f\.ts \(\d+KB\)$/)
     expect(summary.totalLines).toBe(4)
     expect(summary.headLines).toContain('line1')
-    expect(summary.fullEntry.message?.role).toBe('toolResult')
 
     // includeToolResult 全文：返回原 Entry
     const full = renderDetail([t], { includeToolResult: true })

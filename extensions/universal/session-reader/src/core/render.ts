@@ -106,6 +106,26 @@ function blockThinking(block: ContentBlock): string {
   return ''
 }
 
+/**
+ * E11 共享核：白名单提取 message.content 中 `type==='text'` 块的 text 字段（块 → string[]）。
+ * string content 直取为单元素数组；非 string 非数组返回空数组。join 语义（''/'\n'/' '）
+ * 与空态语义（空串 vs undefined）留在各调用点组合——S7 警告适用：join 差异是行为敏感点，
+ * 不可在共享核合并。消费方：result-action（'' join）/ extract（'\n' join）/ find（' ' join
+ * + 空返 undefined）。
+ */
+export function textBlockParts(content: unknown): string[] {
+  if (typeof content === 'string') return [content]
+  if (!Array.isArray(content)) return []
+  const parts: string[] = []
+  for (const b of content) {
+    if (b !== null && typeof b === 'object') {
+      const o = b as Record<string, unknown>
+      if (o.type === 'text' && typeof o.text === 'string') parts.push(o.text)
+    }
+  }
+  return parts
+}
+
 /** 拼接 text 块文本（排除 thinking / toolCall / tool_use / tool_result 块）。 */
 function extractText(content: unknown): string {
   if (isStringContent(content)) return content
@@ -576,7 +596,7 @@ function stripThinking(content: unknown): unknown {
 
 /**
  * L3 detail 默认摘要态的 toolResult entry（v2 O3：toolResult 不再整条消失，给中间态）。
- * includeToolResult:true 时 renderDetail 返回原 Entry（全文），否则返回此摘要。
+ * includeToolResult:true 时 renderDetail 直接 push 原 Entry（全文态真实路径），否则返回此摘要。
  */
 export interface ToolResultSummaryEntry {
   type: 'toolResultSummary'
@@ -588,8 +608,6 @@ export interface ToolResultSummaryEntry {
   headLines: string
   /** 结果文本总行数 */
   totalLines: number
-  /** 原 toolResult entry（includeToolResult:true 时 renderDetail 改用此返回全文） */
-  fullEntry: Entry
 }
 
 export function renderDetail(
@@ -628,7 +646,6 @@ export function renderDetail(
             summary: formatToolResultSummary(msg.toolName, tc, text),
             headLines,
             totalLines: lines.length,
-            fullEntry: e,
           })
         }
         continue

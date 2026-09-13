@@ -16,6 +16,7 @@
  * 定位复用既有发现机制（sa-xxx manifest 反查 / uuid 片段 / 路径），不新造目录或文件。
  */
 import type { Entry, ParseResult } from './core/parser.js'
+import { textBlockParts } from './core/render.js'
 import type { MatchedSession } from './discovery/find.js'
 import { listRecordManifests, type RecordManifest } from './discovery/subagents.js'
 import { err, requireStr, SESSION_ID_PREFIX_LEN, stripHash } from './handler-utils.js'
@@ -50,23 +51,20 @@ export interface ResultActionDeps {
  * 与 record 侧 text_delta 直累积同构：同一 message 内多个 text 块无分隔拼接
  *（流式 delta 逐段 append），thinking/toolCall 块不入 record.text，此处同样排除。
  *
- * [S7 code-simplify 登记] 本包内第 4 个同構「text 块提取」变体（其余三处均在
- * tool-handler.ts / discovery/find.ts）：messageReadableText（'' join + 占位符）、
- * extractContentText（'\n' join）、extractTextFromContent（' ' join + 空返 undefined）。
+ * [S7 code-simplify 登记] 本变体经 E11 归一到共享核 textBlockParts（core/render.ts，
+ * 块 → string[]），join 语义留在本调用点。包内完整映射（共享核 1 + 特异 3）：
+ * - 共享核 textBlockParts：白名单 type==='text' 取 text；本函数（'' join）/
+ *   extract.ts extractContentText（'\n' join）/ find.ts extractTextFromContent
+ *   （' ' join + 空返 undefined）三个纯 text 变体均为其组合调用
+ * - 特异保留 3 个（filter 集不同，不可归一）：tool-handler.ts messageReadableText
+ *   （thinking/toolCall 占位）、search-across.ts searchableText（JSON 兜底）、
+ *   render.ts extractText（排除法——白名单与排除法在未知 type 块上不等价）
+ *
  * 本变体的 '' 无分隔拼接是 A4 取回逐字节一致锁定的硬理由（对齐 record.result 的
  * 流式 delta 无分隔累积），不可与带分隔符的变体合并——差异是行为敏感点，勿「顺手统一」。
  */
 function assistantMessageText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  let out = ''
-  for (const block of content) {
-    if (block !== null && typeof block === 'object') {
-      const o = block as Record<string, unknown>
-      if (o.type === 'text' && typeof o.text === 'string') out += o.text
-    }
-  }
-  return out
+  return textBlockParts(content).join('')
 }
 
 /**

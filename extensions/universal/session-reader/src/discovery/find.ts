@@ -3,6 +3,7 @@ import { open, stat, type FileHandle } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { basename, dirname } from 'node:path'
 import type { SessionRef } from '../core/family.js'
+import { textBlockParts } from '../core/render.js'
 import {
   resolveSessionRoots,
   type SessionFileMeta,
@@ -64,8 +65,8 @@ export interface SessionMetadataEntry {
   cwd: string
   /** 用户标题（session_info entry 的 name）；旧 session 缺失 */
   name?: string
-  /** pi 返回 Date，测试替身可传 number */
-  modified: Date | number
+  /** pi 返回 Date（A4 收窄：原 `Date | number` 宽联合只服务测试替身，替身改传 Date） */
+  modified: Date
   /** 首消息全文（title 命中时填充 firstMessagePreview，免二次读文件） */
   firstMessage?: string
 }
@@ -125,22 +126,12 @@ function extractUserText(line: string): string | undefined {
 /**
  * 从 message content 提取可读文本。
  * 兼容 pi 两种形态：string content（直接用）与 array content（拼 type:text 项的 text）。
+ * E11 归一：共享核 textBlockParts 组合调用，' ' join 与零 text 块返 undefined 的语义
+ * 留在本调用点（find 匹配把 undefined 当「无文本」信号，空串会被 includes('') 误吸）。
  */
 function extractTextFromContent(content: unknown): string | undefined {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    const parts: string[] = []
-    for (const item of content) {
-      if (typeof item === 'object' && item !== null) {
-        const it = item as Record<string, unknown>
-        if (it.type === 'text' && typeof it.text === 'string') {
-          parts.push(it.text)
-        }
-      }
-    }
-    return parts.length > 0 ? parts.join(' ') : undefined
-  }
-  return undefined
+  const parts = textBlockParts(content)
+  return parts.length > 0 ? parts.join(' ') : undefined
 }
 
 /**
@@ -364,11 +355,6 @@ async function pathExistsDir(path: string): Promise<boolean> {
   }
 }
 
-/** 条目 modified 的可比数值（pi 返回 Date，测试替身可传 number）。 */
-function modifiedOf(e: SessionMetadataEntry): number {
-  return typeof e.modified === 'number' ? e.modified : e.modified.getTime()
-}
-
 /**
  * 平铺目录判据（§6.6 调用策略 ②）：本根实扫出的全部 .jsonl 都直接位于根本身
  *（即扫描结果无子目录）。listAll(dir) 实装语义是「只扫一层平铺目录」——平铺根意味着
@@ -422,7 +408,7 @@ async function loadTitleIndex(ctx: MetadataContext): Promise<Map<string, Session
     }
     for (const e of entries) {
       const prev = index.get(e.id)
-      if (prev === undefined || modifiedOf(e) > modifiedOf(prev)) index.set(e.id, e)
+      if (prev === undefined || e.modified.getTime() > prev.modified.getTime()) index.set(e.id, e)
     }
   }
   return index
@@ -545,7 +531,7 @@ async function loadRecentTitles(
     }
     for (const e of entries) {
       const prev = titles.get(e.id)
-      if (prev === undefined || modifiedOf(e) > modifiedOf(prev)) titles.set(e.id, e)
+      if (prev === undefined || e.modified.getTime() > prev.modified.getTime()) titles.set(e.id, e)
     }
   }
   return titles

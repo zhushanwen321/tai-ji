@@ -186,7 +186,7 @@ graph LR
 | 04-U5 | committed | 1 | 406 绿（+4）；两 action 一致性 by construction；formatOutlineText 零命中 |
 | 04-U6 | committed | 1 | 406 绿（零测试改动）；RESULT_ACTION_DEPS 零命中；ResultActionDeps 3 成员 |
 | 04-U7 | committed | 1 | 406 绿；find 专用 readTailIdentityForMatch（56 行）删除复用单实现；畸形行差异注释登记（subagent 中途撞速率限制，主 agent 接替验证收尾） |
-| 04-U8 | pending | 0 | - |
+| 04-U8 | committed | 1 | 405 绿；SessionRoot.id/fullEntry 零命中；E11 共享核 3 组合点；G5④ 回写齐 |
 | 04-U9 | pending | 0 | - |
 | 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
 | 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 |

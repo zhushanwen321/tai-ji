@@ -59,6 +59,7 @@ export interface ExecutionTreeNode {
   agentName?: string
   slug?: string
   task?: string
+  /** 仅 details 可见，不进文本渲染（formatExecutionTreeText 渲染 status/slug/agentName/task，与 SubagentRef.model 同口径） */
   model?: string
   /** subagent 终态 completed/failed/running（manifest.status） */
   status?: string

@@ -705,8 +705,8 @@ describe('u11 标题元数据（metadataProvider 注入，§6.6）', () => {
     await mkdir(legacyDir, { recursive: true })
     const provider = vi.fn(async (dir: string) =>
       dir === flatMain
-        ? [{ path: pathA, id: 'dup-id-0001', cwd: '/demo', name: '旧标题', modified: 1000 }]
-        : [{ path: pathA, id: 'dup-id-0001', cwd: '/demo', name: '新标题', modified: 2000 }],
+        ? [{ path: pathA, id: 'dup-id-0001', cwd: '/demo', name: '旧标题', modified: new Date(1000) }]
+        : [{ path: pathA, id: 'dup-id-0001', cwd: '/demo', name: '新标题', modified: new Date(2000) }],
     )
     const { matches } = await findSessions('新标题', agentDir, { metadataProvider: provider })
     expect(provider).toHaveBeenCalledTimes(2) // 两个平铺存在的根各一次
@@ -753,8 +753,8 @@ describe('u11 标题元数据（metadataProvider 注入，§6.6）', () => {
     const provider = vi.fn(async (dir: string) =>
       dir === flatMain
         ? [
-            { path: pNew1, id: 'recent-new-1', cwd: '/demo', name: '最新标题一', modified: (base + 300) * 1000 },
-            { path: pNew2, id: 'recent-new-2', cwd: '/demo', name: '最新标题二', modified: (base + 200) * 1000 },
+            { path: pNew1, id: 'recent-new-1', cwd: '/demo', name: '最新标题一', modified: new Date((base + 300) * 1000) },
+            { path: pNew2, id: 'recent-new-2', cwd: '/demo', name: '最新标题二', modified: new Date((base + 200) * 1000) },
           ]
         : [],
     )

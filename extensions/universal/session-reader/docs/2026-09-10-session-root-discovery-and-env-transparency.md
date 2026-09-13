@@ -810,7 +810,7 @@ src/tool-handler.ts（纯逻辑，零 pi 依赖；Gate A 回流拆分后本文�
                           ↓
 src/discovery/roots.ts
   resolveSessionRoots(signals) → SessionRoot[]
-    SessionRoot = { id, kind: 'live'|'env'|'default'|'legacy'|'subagent',   ← B 收缩后无 'env'（§6.13）
+    SessionRoot = { kind: 'live'|'env'|'default'|'legacy'|'subagent',   ← B 收缩后无 'env'（§6.13）
                     path, source: 'main'|'subagent', exists, fileCount?, scanMs }
     · 规范化 [live]（encodeCwd 形态剥一层）
     · realpath 去重（同一路径多信号命中只扫一次，保留最高优先级 kind 作标签）
@@ -1041,6 +1041,7 @@ npx tsx ./probe-find.mts
 
 ### 12.4 变更历史
 
+- v9.10（2026-09-14，ext-simplify-04 U8/E9 SessionRoot.id 删除）：§7B ASCII 图 `SessionRoot` 字段列表删 `id`——该字段恒等于 `kind`（去重后每 kind 至多一个根），注释声称的「doctor 表行键」实际由 `kind` 承担，`dedupedInto` 赋值改用 `kept.kind`，doctor 去重注记渲染与去重语义零变化；对应 impl-plan D-2「id 恒等于 kind」半边清账。（同批 U8 其余执行项 E6 fullEntry 死字段 / E11 content 提取共享核 / A4 死字段注释杂项均在包内文件，不触本文档其他登记。）执行台账见同目录 impl-plan 变更历史同日条目。
 - v9.9（2026-09-14，ext-simplify-04 U4/A3 薄包装退役 + E2 family 富字段展示）：①§7B 要点 7 改写——`listMainSessions`/`listSubagentSessions` 薄包装「保留」改「已退役」（内部即「resolveSessionRoots + filter」恒等式，包内原唯一消费者 `subagents.ts` 改直调；过滤语义覆盖由 roots.test 等价式断言保留；npm 深 import 移除按 minor breaking 在包 CHANGELOG 登记，对应 impl-plan D-3 清账）；`findSessions`/`buildFamilyFromFs` 既有签名不受影响，「工具运行路径必须走完整信号包」约定不变。②（同批 E2，非本文档登记债务）`subagents.ts` 的 `enrichRefs` 回填机制删除——family 路径 `SessionRef.fileName`/`subagent cwd` 维持 core 占位空串（回填值零文本读者）；`formatFamilyText` subagents 行新增 status/agentName/task（截 60 单行摘要）富字段展示，孤儿仍标 `[已清理]`。执行台账见同目录 impl-plan 变更历史同日条目。
 - v9.8（2026-09-14，ext-simplify-04 U3 doctor 根扫描缓存机删除 + A2 顺带）：①§6.3 成本控制行——「对已扫过的根做根扫描缓存、重复调用不重扫」方案删除（subagent 根默认 `'stat'` 后缓存保护的已是便宜化路径），subagent 根默认不扫保留；②§7B 要点 8 改写——「仅 doctor 重复调用共享根扫描缓存 / find 一律不读缓存」机制整体退役，`resolveSessionRoots` 每次实扫，原 PS-14 防污染规则（该缓存存在才需要存在）随之失效，进程内仅剩 u11 标题元数据 TTL 缓存（§6.6）；③§9.1 M2 行与 §10 U8 行的缓存交付物删除；④§11.9 半句修正——Gate B 秒级返回未依赖缓存命中，无缓存形态复验归 ext-simplify-04 S4。代码面：`DoctorCacheEntry`/`doctorScanCache`/`doctorRootCache` 与 `SessionRootCache`/`SessionRootCacheEntry`/`ScanOptions.cache`/`SessionRoot.cached` 全链删除（renderDoctor「缓存命中」行随之消失）；`statDirMtimeOrNull` 与 TTL 常量迁 tool-handler（metadata 缓存独占，`METADATA_CACHE_TTL_MS` 独立定义 5000 不再别名）；同批顺带 A2——`formatSessionNotFound` 窄化 `subagents:'stat'`（该路径只渲染 main 根行，不再深扫 subagent 根）。执行台账见同目录 impl-plan 变更历史同日条目。
 - v9.7（2026-09-11，design-code-sync 第 1 轮 code-right 修复）：①四处消费点补 B 先行收缩标注（§6.1 `[env]` 信号、§6.8 顶部状态 banner、§7B kind 枚举「B 收缩后无 'env'」、§10.1 subagents.ts 行改「not-found 文案列实际候选根（U7 其余不建，§6.13）」——正文此前仅在 §6.13 收缩表与 §10 U4/U7 行声明收缩，消费点未同步属漂移面）；②四处悬空章节引用勘正（原引用指向 §7 下不存在的编号小节，§7 实体系 = 7A/7B 要点列表：降级相关 3 处改 §7B 要点 2、薄包装 1 处改 §7B 要点 7）；③§11.5 补唯一非等价差异（纯连字符 query 归一化为空串后不再判 uuid 特征 → 走关键词回退，与 `find.ts` `looksLikeUuidFragment` 实装注释对齐）；④§7B 数据流图与 §10.1 tool-handler 行补 Gate A 回流拆分落点注记（doctor → `doctor.ts`、F1/`formatNoMatch` → `no-match.ts`、跨会话与 search 管线 → `search-across.ts`、extract 预设 → `extract.ts`、低层工具 → `handler-utils.ts`，tool-handler 留守编排 + re-export）；⑤§6.4 代价面补「u12 search 跨会话用法三处 description 扩写（D-17③）与 doctor `includeSubagents` 参数为已登记增量」；⑥§6.12 登记规则②扩双 dev 形态（dev 资源根 + dev 源码根 `<repoRoot>/extensions/<group>/<pkg>`，D-11 勘误）+ 原理性极限段补 node 形态 pi `process.title='pi'` 吞 ps argv 观测面的实机备案（runtime 经 `piCommand` 注入 bun binary 不受影响）。

@@ -107,13 +107,6 @@ describe('buildFamilyIndex', () => {
     expect(index.childrenOf.get('aaa')?.[0].sessionId).toBe('bbb')
   })
 
-  it('parentSession 直接是 sessionId 也兼容（简化 fixture）', () => {
-    const headers = [header('aaa'), header('bbb', { parentSession: 'aaa' })]
-    const index = buildFamilyIndex(headers, [], new Map())
-
-    expect(index.childrenOf.get('aaa')?.[0].sessionId).toBe('bbb')
-  })
-
   it('parentSession 反查不到父 → 该 entry 不进 childrenOf（不报错）', () => {
     const headers = [header('bbb', { parentSession: '/missing.jsonl' })]
     const index = buildFamilyIndex(headers, [], new Map())

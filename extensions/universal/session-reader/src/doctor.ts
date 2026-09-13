@@ -44,6 +44,8 @@ export interface PiLayoutLeftover {
  * 形态判据（与 u14b 启动探测 / u14a 脚本 0a 同源）：目录下含 `agent/` 或 `sessions/`
  * 子目录才算残留——防纯 pi 宿主下任意来源的 `~/.pi/pi/` 目录误报。读探测，每次现查
  * 不入缓存（两次 readdir 成本可忽略，缓存只服务扫盘贵的根）。
+ *
+ * 迁移期支持（A4 登记）：本探测服务于 v2 布局迁移窗口，全量迁移确认后可整段删除。
  */
 async function detectPiLayoutLeftovers(
   agentDir: string,

@@ -39,9 +39,8 @@ export type SessionRootKind = 'live' | 'default' | 'legacy' | 'subagent'
 /** main 源 = 主 session 根（live/default/legacy）；subagent 源 = subagent 会话根 */
 export type SessionRootSource = 'main' | 'subagent'
 
-/** 候选根（含扫描结果）。id 恒等于 kind：去重后每 kind 至多一个根，作 doctor 表行键。 */
+/** 候选根（含扫描结果）。去重后每 kind 至多一个根，kind 即 doctor 表行键。 */
 export interface SessionRoot {
-  id: SessionRootKind
   kind: SessionRootKind
   /** 规范化后的绝对路径（`[live]` 已剥 encodeCwd 层） */
   path: string
@@ -55,7 +54,7 @@ export interface SessionRoot {
   /** 扫描所得文件列表（design §7B 要点 8「本就在返回值里」）；未扫描时空数组 */
   files: SessionFileMeta[]
   /**
-   * realpath 与更高优先级根同路径 → 指向保留根的 id，本根未扫描（doctor 渲染
+   * realpath 与更高优先级根同路径 → 指向保留根的 kind，本根未扫描（doctor 渲染
    * 「与 N 同路径，已去重」注记的依据，§7B 要点 4）。
    */
   dedupedInto?: SessionRootKind
@@ -96,8 +95,8 @@ function sessionRootSpecs(signals: SessionRootSignals): SessionRoot[] {
   return specs
 }
 
-function spec(id: SessionRootKind, source: SessionRootSource, path: string): SessionRoot {
-  return { id, kind: id, source, path, exists: false, files: [] }
+function spec(kind: SessionRootKind, source: SessionRootSource, path: string): SessionRoot {
+  return { kind, source, path, exists: false, files: [] }
 }
 
 /** realpath 解析失败（目录不存在等）→ 回退字面路径作去重键（同字面路径仍可去重） */
@@ -160,7 +159,7 @@ export async function resolveSessionRoots(
     const kept = byRealPath.get(key)
     if (kept) {
       // 同 realpath：不扫描，标注归属（exists 与保留根同目录，必然一致）
-      out.push({ ...candidate, exists: kept.exists, dedupedInto: kept.id })
+      out.push({ ...candidate, exists: kept.exists, dedupedInto: kept.kind })
       continue
     }
     if (candidate.source === 'subagent' && subagentMode === 'stat') {

@@ -121,16 +121,16 @@ function isSubagentIdentityData(v: unknown): v is SubagentIdentityData {
  * 文件名格式 `<timestamp>_<sessionId>.jsonl`，故路径字符串含父 sessionId。
  * 遍历已知 sessionId 做子串匹配反查。
  *
- * 兼容 parentSession 直接就是 sessionId 的简化场景（测试 fixture 常用）。
  * 假设 sessionId 互不为子串（pi 用 UUID，满足）；M2 可优化为 fileName→sessionId
  * 索引反查（O(1)），当前遍历 O(N)，家族索引文件数通常几十到几百，可接受。
+ *（原「parentSession 直接是 sessionId」快路径已删除，ext-simplify-04 A4——生产数据
+ * 恒为文件路径，该分支只服务测试 fixture 简化形态。）
  */
 function resolveParentSessionId(
   parentSession: string | undefined,
   byId: Map<string, SessionRef>,
 ): string | null {
   if (!parentSession) return null
-  if (byId.has(parentSession)) return parentSession // 直接是 sessionId（简化场景）
   for (const sid of byId.keys()) {
     if (parentSession.includes(sid)) return sid
   }

@@ -6,6 +6,7 @@
  *（resolveSessionId/safeParse/turns 范围限定依赖 tool-handler 私有定位层）留守
  * tool-handler，经本模块导出的 5 预设函数分发。纯提取，不调 LLM。
  */
+import { textBlockParts } from './core/render.js'
 import { extractToolCalls, formatToolCallSummary, basename } from './core/toolcall.js'
 import type { Turn } from './core/turns.js'
 import { pad } from './handler-utils.js'
@@ -28,25 +29,12 @@ const SHORT_HASH_RE = /\b[0-9a-f]{7,8}\b/g
 const COMMIT_CTX_RE = /feat:|fix:|refactor:|chore:|docs:|\b(commit|commits|merged|pushed|merge)\b/i
 
 /**
- * 从 message.content 提取纯 text（string 直取；数组拼接 text 块）。
- *
- * 与 render.ts 内部 extractText 同语义，但那未导出；extract 仅需纯 text
- *（user-messages / tool-results 的正文），不要 thinking/toolCall 占位，本地实现。
- * content 是 unknown 做类型守卫。
+ * 从 message.content 提取纯 text（E11 归一：共享核 textBlockParts 组合调用，'\n' join
+ * 语义留在本调用点）。extract 仅需纯 text（user-messages / tool-results 的正文），
+ * 不要 thinking/toolCall 占位。
  */
 function extractContentText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    const parts: string[] = []
-    for (const b of content) {
-      if (b !== null && typeof b === 'object') {
-        const o = b as Record<string, unknown>
-        if (o.type === 'text' && typeof o.text === 'string') parts.push(o.text)
-      }
-    }
-    return parts.join('\n')
-  }
-  return ''
+  return textBlockParts(content).join('\n')
 }
 
 /** 截断到 max 字符，超出加省略号（防爆；tool-results 正文用）。 */
