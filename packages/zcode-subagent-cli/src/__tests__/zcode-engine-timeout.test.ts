@@ -26,7 +26,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineRunResult, RunContext } from "../port-types.ts";
 import type { AgentCallOpts } from "../port-types.ts";
-import { ZCODE_SHARED_POOL_KEY } from "../constants.ts";
 import { zcodeSessionDbPath } from "../db-path.ts";
 import { ZCODE_APPSERVER_GOLDEN } from "../golden-sample.ts";
 import { AppServerConnection } from "../connection.ts";
@@ -187,7 +186,7 @@ function makeTask(overrides?: Partial<AgentCallOpts>): AgentCallOpts {
 }
 
 function makeCtx(overrides?: Partial<RunContext>): RunContext {
-  return { taskId: "sa-timeout", poolKey: "", ...overrides };
+  return { taskId: "sa-timeout", ...overrides };
 }
 
 // ============================================================
@@ -290,22 +289,21 @@ describe("超时处置链（P0-1 U2：catch 分流 → stop-outcome 三态裁决
   it("handle 锚定不变量在超时收口下成立：onHandleReady 已回填 sessionId + poolKey（不变量 3 不因超时路径缺失）", async () => {
     vi.stubEnv("XYZ_ZCODE_TURN_IDLE_TIMEOUT_MS", "300");
     const f = makeEngine();
-    const ready: Array<{ sessionId: unknown; poolKey: string }> = [];
+    const ready: Array<{ sessionId: unknown }> = [];
     const r = await f.engine.run(
       makeTask({ cwd: f.workspace }),
       makeCtx({
         onHandleReady: (partial) =>
-          ready.push({ sessionId: partial.sessionRef["sessionId"], poolKey: partial.poolKey }),
+          ready.push({ sessionId: partial.sessionRef["sessionId"] }),
       }),
     );
     expect(ready).toEqual([
-      { sessionId: GOLDEN_SESSION_ID, poolKey: ZCODE_SHARED_POOL_KEY },
+      { sessionId: GOLDEN_SESSION_ID},
       // U4 起首轮超时收口后自动重试一次（同 hang 场景）——重试轮 create 再回填一次，
       // 值相同（同一 fake 的 golden create 应答）：不变量 3 每轮 create 都成立
-      { sessionId: GOLDEN_SESSION_ID, poolKey: ZCODE_SHARED_POOL_KEY },
+      { sessionId: GOLDEN_SESSION_ID},
     ]);
     expect(r.handle.data.sessionRef).toEqual({ sessionId: GOLDEN_SESSION_ID, dbPath: zcodeSessionDbPath(dataDir) });
-    expect(r.handle.data.poolKey).toBe(ZCODE_SHARED_POOL_KEY);
   }, 20_000);
 
   it("alive 守卫：conn 已 finalize（进程死+收割完成微窗口）时 stop 分支不惰性重建，按连接级失败形态终局", async () => {

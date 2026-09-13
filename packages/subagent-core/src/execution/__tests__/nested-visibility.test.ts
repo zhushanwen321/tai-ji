@@ -15,8 +15,8 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 
 // [Gate A teardown 稳定性] no-op 掉索引落盘。根因：collectRecords 扫描尾的
 // flushIndexAfterScan（record-store.ts）fire-and-forget saveIndex（tmp+fsync+rename
@@ -25,8 +25,8 @@ import { RecordStore } from "../record-store.ts";
 // rpc 时在途调用被 reject 为 EnvironmentTeardownError（0 断言失败，纯 teardown 时序）。
 // 本文件用一次性 tmpdir、断言不观察索引文件，落盘与否无观察者——no-op 消除在途 IO
 // 链，任何负载下确定；loadIndex 等其余导出保留原实现（磁盘重建语义不变）。
-vi.mock("../sessions-index.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../sessions-index.ts")>()),
+vi.mock("../persistence/sessions-index.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../persistence/sessions-index.ts")>()),
   saveIndex: async () => {},
 }));
 
@@ -311,11 +311,9 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
     const runningRecords = store.collectRecords(100, "running", ROOT_SESSION);
     const ids = runningRecords.map((r) => r.id);
 
-    // v4 B-1：磁盘 A/B 旧 idle 现重建为 running（idle 折入 running），与内存 C 一起返回
-    expect(ids).toHaveLength(3);
-    expect(ids).toContain("sa-a");
-    expect(ids).toContain("sa-b");
-    expect(ids).toContain("sa-c");
+    // [U3 / §3.2.4] 重建单规则：磁盘 A/B 恒 idle（running 只在轮次在飞时有意义），
+    // filter=running 只剩内存 C
+    expect(ids).toEqual(["sa-c"]);
   });
 
   it("无 rootSessionFilter 时不过滤（向后兼容）", () => {

@@ -3,7 +3,7 @@
 // 真编排：被 renderer App.vue onMounted 真实调用（bootstrap({ platform: resolvePlatform() })），
 // 显式 await 串联五步，无隐式 import 顺序依赖（AC6）。
 //
-// 时序链（renderer-rebuild-architecture.md §11.0.3）：
+// 时序链（renderer-package-topology.md §11.0.3）：
 //   providePlatform(port) → initConnection() → restoreSessions() →
 //   registerMountPoints() → scanContributions()
 //

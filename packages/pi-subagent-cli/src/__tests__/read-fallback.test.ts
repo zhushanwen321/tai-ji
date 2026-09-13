@@ -24,7 +24,6 @@ function makeHandle(journalPath?: string, sessionId = "sess-42"): EngineHandle {
       v: 1,
       engineId: "pi",
       sessionRef: sessionId === "" ? {} : { recordId: "rec-1", sessionId },
-      poolKey: "shared",
       adapterVersion: "1.0.0",
       ...(journalPath !== undefined ? { journalPath } : {}),
     },

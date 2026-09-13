@@ -20,7 +20,7 @@ export const ENV_WHITELIST: readonly string[] = [...ENV_WHITELIST_PREFIXES, 'ELE
 /**
  * 构建最小权限环境变量：只继承白名单前缀匹配的 + 额外指定的变量。
  *
- * U3 薄封装化（docs/design/env-propagation-boundary.md §5-U3）：过滤/extras 循环体由
+ * U3 薄封装化（docs/architecture/env-propagation-boundary.md §5-U3）：过滤/extras 循环体由
  * shared 构建器的基座组装层承担，本函数只锚定 B2 边界的两个入参形态——parentEnv =
  * 本进程 env 快照（只读副本），prefixes = SSOT + ELECTRON_；「undefined = 显式删除」
  * 语义由构建器 extras 步骤原样承接（dev 清理 shell 残留 PACKAGED 标志的行为不变）。

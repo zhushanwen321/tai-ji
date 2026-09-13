@@ -168,7 +168,7 @@ interface Harness {
   statusFile: string;
   lateFile: string;
   events: AgentEvent[];
-  handleReady: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+  handleReady: Array<{ sessionRef: Record<string, string> }>;
   stateChanges: Array<{ pid: number; state: string; killed: boolean; exitCode?: number; signal?: string }>;
   argv1Saved: string | undefined;
 }
@@ -382,8 +382,7 @@ describe("M2 agent_end 惰性回补", () => {
       expect(h.handleReady).toEqual([
         {
           sessionRef: { sessionId: "late-backfill-sess", sessionFile: h.lateFile },
-          poolKey: "shared",
-        },
+            },
       ]);
       // kill（finally）落在存活子进程上：SIGTERM 收割
       expect(h.stateChanges.map((s) => s.state)).toEqual(["running", "exited"]);
@@ -526,7 +525,7 @@ describe("M2 agent_end 惰性回补", () => {
   });
 
   it("K1：回补接线走 identity 既有回填面（addStateListener → applyGetStateFields → handleReady）", async () => {
-    const ready: Array<{ sessionRef: Record<string, string>; poolKey: string }> = [];
+    const ready: Array<{ sessionRef: Record<string, string> }> = [];
     const identity: SessionIdentityTracker = createSessionIdentityTracker("/tmp/k1-sessions", {
       onEvent: () => {},
       onHandleReady: (p) => ready.push(p),
@@ -560,8 +559,7 @@ describe("M2 agent_end 惰性回补", () => {
     expect(ready).toEqual([
       {
         sessionRef: { sessionId: "late-1", sessionFile: "/tmp/k1-sessions/late.jsonl" },
-        poolKey: "shared",
-      },
+        },
     ]);
   });
 

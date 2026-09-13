@@ -48,7 +48,6 @@ function handleWithJournal(path: string | undefined): { data: EngineHandleData }
       v: 1,
       engineId: "zcode",
       sessionRef: { sessionId: "sess-journal-test" },
-      poolKey: "shared",
       adapterVersion: "1.0.0",
       ...(path !== undefined ? { journalPath: path } : {}),
     },

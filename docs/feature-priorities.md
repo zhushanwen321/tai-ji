@@ -2,7 +2,7 @@
 
 > **本文件是 xyz-agent 全部功能模块与用例分级的 SSOT**。三个用途：① tech-design 设计期风险打分的锚定源（见「维护规则」）；② 测试回归与审查资源的排序依据（P0 全量每版、P2 抽样）；③ dev-flow 交付时的同步登记目标。
 >
-> 姊妹指针：[AGENTS.md](../AGENTS.md) 文档索引 · [TEST-STRATEGY.md](../TEST-STRATEGY.md) 回归排序 · 各 extension 包内文档头注（有 ARCHITECTURE.md / docs/ 的包）。
+> 姊妹指针：[AGENTS.md](../AGENTS.md) 文档索引 · [TEST-STRATEGY.md](TEST-STRATEGY.md) 回归排序 · 各 extension 包内文档头注（有 ARCHITECTURE.md / docs/ 的包）。
 
 ## 1. 分级判据
 
@@ -126,7 +126,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt-trace | taiji | P3 | 观测留痕 |
 | unified-hooks（deprecated） | universal | — | 已废弃，残留安装需先卸载 |
 
-**包内标注规则**：包内有 `ARCHITECTURE.md` / `docs/*.md` 的（当前：ask-user、todo、session-reader），文件头加一行 `> 功能分级：P<x>（依据见 docs/feature-priorities.md §6）`；只有 CHANGELOG/README 的包**只登记本表**（CHANGELOG 是发布记录、README 面向用户，均不作登记载体）。
+**包内标注规则**：包内有 `ARCHITECTURE.md` / `docs/*.md` 的（当前：ask-user、todo、session-reader），文件头加一行 `> 功能分级：P<x>（依据见 docs/FEATURE-PRIORITIES.md §6）`；只有 CHANGELOG/README 的包**只登记本表**（CHANGELOG 是发布记录、README 面向用户，均不作登记载体）。
 
 ## 7. 维护规则 [MANDATORY]
 

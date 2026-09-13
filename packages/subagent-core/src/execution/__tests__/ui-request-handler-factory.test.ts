@@ -26,9 +26,9 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-import { DEFAULT_DIALOG_TIMEOUT_MS, DialogGlobalQueue, type UiRequest } from "../dialog-queue.ts";
-import { type ChannelHandler,createUiChannelRegistry } from "../ui-channels.ts";
-import { createUiRequestHandlerForMode } from "../ui-request-handler-factory.ts";
+import { DEFAULT_DIALOG_TIMEOUT_MS, DialogGlobalQueue, type UiRequest } from "../ui/dialog-queue.ts";
+import { type ChannelHandler,createUiChannelRegistry } from "../ui/ui-channels.ts";
+import { createUiRequestHandlerForMode } from "../ui/ui-request-handler-factory.ts";
 
 // mock ExtensionContext 已补 mode 字段（host-mode.ts 读它分流）。最小形状构造。
 function makeCtx(mode: ExtensionMode): ExtensionContext {

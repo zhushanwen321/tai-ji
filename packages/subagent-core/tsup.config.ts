@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsup'
 
-// D4（docs/design/subagent-core-package-extraction.md §3.3）：双形态构建——
+// D4（docs/architecture/subagent-core-package-extraction.md §3.3）：双形态构建——
 // TS 源供 workspace 消费（main/exports 指向 src），dist 双格式供 npm 消费。
 //
 // 两档配置按运行时的 script 名分流（npm_lifecycle_event 由 pnpm/npm 跑 script

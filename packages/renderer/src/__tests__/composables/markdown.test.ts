@@ -136,7 +136,7 @@ describe('markdown fence 规则覆盖（W3）', () => {
 
   it('U9: 含/的文件路径识别为可点击 .md-filepath（需白名单命中）', async () => {
     // [语义变更 2026-07-20] 含/路径识别从「形似即链接」改为「白名单命中才链接」（详见
-    // docs/page-design/markdown-filepath-redesign/design.md）。
+    // 设计文档已删除，git 可追溯）。
     const html = await freshRenderWithEnv('修改了 src/foo.ts 文件\n', { filePaths: new Set(['src/foo.ts']) })
     expect(html).toContain('class="md-filepath"')
     expect(html).toContain('data-path="')

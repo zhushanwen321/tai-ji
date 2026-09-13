@@ -13,7 +13,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { SPAWN_GRACE_MS, type WorktreeEntry,WorktreeRegistry } from "../worktree-registry.ts";
+import { SPAWN_GRACE_MS, type WorktreeEntry,WorktreeRegistry } from "../worktree/worktree-registry.ts";
 
 const REPO_A = "/home/user/repo-a";
 const REPO_B = "/home/user/repo-b";

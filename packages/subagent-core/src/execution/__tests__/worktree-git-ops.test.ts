@@ -24,7 +24,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
-import { DirtyWorktreeError } from "../types.ts";
+import { DirtyWorktreeError } from "../assembly/types.ts";
 import {
   assertSafeId,
   cleanupWorktree,
@@ -34,7 +34,7 @@ import {
   isSafeId,
   isTreeDirty,
   listWorktreePorcelain,
-} from "../worktree-git-ops.ts";
+} from "../worktree/worktree-git-ops.ts";
 
 /** git 辅助：repo/worktree 内执行（原始 stdout，不 trim——保真对照用）。 */
 function git(dir: string, ...args: string[]): string {

@@ -1,7 +1,0 @@
-{
-  "summary": "wave1 完成：在 packages/shared/src/protocol.ts 新增 config.skillCacheInvalidated 消息类型（ServerMessageType union + ServerMessageMapBase payload）。双包 typecheck EXIT 0，renderer vitest 2394 passed。",
-  "artifacts": [
-    { "kind": "code", "ref": "packages/shared/src/protocol.ts", "note": "config.skillCacheInvalidated 类型定义（line ~496 ServerMessageType + line ~572 ServerMessageMapBase）" },
-    { "kind": "test", "ref": ".xyz-harness/fix-skill-reload-contract/wave1-test.json", "note": "testJudgment 记录 + cw test gate 2394 passed" }
-  ]
-}

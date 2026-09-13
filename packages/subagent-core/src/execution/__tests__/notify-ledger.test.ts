@@ -1,7 +1,7 @@
 // src/execution/__tests__/notify-ledger.test.ts
 //
 // U2 B-ledger 单测族：通知账本与 courier 的四步生命周期
-// （设计 docs/design/subagent-dispatch-reliability.md §3.3 D4/D5）。
+// （设计 docs/architecture/pi-boundary-reliability.md 附录 D §3.3 D4/D5）。
 // u-5c 迁自壳套件 src/__tests__/notify-ledger.test.ts（被测 module 是 core 件，
 // 唯一测试覆盖原落壳——设计 §2.2 C6 / §1 目标 6）。
 //
@@ -28,7 +28,7 @@
 //
 // 合并终态（feat 容器 + dev T4③ 增量）：
 //   - 追加 T4③ 重投止损（PS-6）族：回执确认不可达时 attempts 上限 + abandoned
-//     放弃终态（docs/design/subagent-core-unbounded-wait-audit.md §7.2 T4③ /
+//     放弃终态（docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T4③ /
 //     §8.2 S-E）；差集 helper 相应升级三列（ledger − ack − abandoned）。
 //   - logger 基建统一 dev 侧 configureCore sink（core logger facade 经
 //     host-services 动态解析宿主实现，见 agents-assembly.test.ts 同款）——
@@ -56,8 +56,8 @@ import {
   NOTIFY_WATCHDOG_MS,
   _resetNotifyLedgerForTest,
   type NotifyLedgerHost,
-} from "../notify-ledger.ts";
-import { createNotifier, type BgNotifyRecord, type NotifierHost } from "../notifier.ts";
+} from "../notify/notify-ledger.ts";
+import { createNotifier, type BgNotifyRecord, type NotifierHost } from "../notify/notifier.ts";
 
 // ─── 投递内核等价桩（u-5c：替代真实 session-delivery createDelivery） ──────
 //
@@ -1098,7 +1098,7 @@ describe("MF-5: settled 监听单例化（多次 bind 物理监听数不增）",
 
 describe("notify-ledger 常量锚", () => {
   it("NOTIFY_CUSTOM_TYPE 与 notifier 送达 customType / ledger 回执扫描同源", async () => {
-    const notifierModule = await import("../notifier.ts");
+    const notifierModule = await import("../notify/notifier.ts");
     // notifier 模块不再自带本地常量（单一常量源 = notify-ledger）；用运行时行为钉住：
     // ledger 回执扫描匹配的 customType === notifier 送达消息的 customType。
     const mock = makeLedgerHost();

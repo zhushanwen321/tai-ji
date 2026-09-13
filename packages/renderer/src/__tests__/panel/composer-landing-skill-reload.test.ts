@@ -5,7 +5,7 @@
  *
  * WARNING-2：command-popover-landing.test.ts 的 TC5 mount 的是测试内局部 GlobalSkillsHarness（手接
  * useGlobalSkills → CommandPopover），而非 AGENTS.md #6 要求的「文档指定入口」。本功能的文档入口是
- * Composer.vue（TEST-STRATEGY.md docs/testing/02-composer.md §2：Composer.vue 是容器，line 192 调
+ * Composer.vue（TEST-STRATEGY.md docs/testing/01-chat-panel-composer.md §2（Composer）：Composer.vue 是容器，line 192 调
  * useGlobalSkills() 是生产连线点）。GlobalSkillsHarness 是 Composer 这段连线的复制品——若有人删了
  * Composer.vue 的 useGlobalSkills 调用或改了 prop 传递，TC5 仍绿（测的是复制品），生产却断线。
  * 本文件 mount 真实 Composer.vue，验证生产连线：广播 → useGlobalSkills → landingGlobalSkills prop →
@@ -29,7 +29,7 @@
  * - mock useChat（spy 化 send/steer/abort...，landing 首发不应触发 send）
  * - mock useNewTaskFlow（submitFirstMessage spy + currentCwd=null ref 使 useProjectSkills 不 RPC）
  * - mock @/api（getGlobalSkills 可控 mock，onSkillCacheInvalidated 接真实 events.onGlobalType 端到端可达）
- * - mock ComposerInput（渲染 data-testid="composer-input" + emit slash-trigger 开浮层，对齐 02-composer.md
+ * - mock ComposerInput（渲染 data-testid="composer-input" + emit slash-trigger 开浮层，对齐 01-chat-panel-composer.md §2（Composer）
  *   §3 改进建议与 landing-bash-integration.test.ts 既有惯例；真实 ComposerInput 暂无此 testid）
  * - 真实 CommandPopover（不 stub——验证 skill 列表 DOM 刷新是本用例核心；portal 到 body，按 bodyItemButtons 查）
  * - 其余非浮层子组件 stub（AddMenuPopover / ContextChipsBar / 容量/模型/思考 popover 等）
@@ -107,7 +107,7 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
 }))
 
-// ── ComposerInput mock：渲染 data-testid="composer-input"（AGENTS.md 冒烟模板 + 02-composer.md §3
+// ── ComposerInput mock：渲染 data-testid="composer-input"（AGENTS.md 冒烟模板 + 01-chat-panel-composer.md §2（Composer）§3
 //    改进建议；真实 ComposerInput.vue 暂无此 testid，按既有 Composer-mount 测试惯例注入）+ emit
 //    slash-trigger 开 slash 浮层。expose Composer.vue 需要的 instance 方法（clear/setText/insertSlashChip/
 //    getSegments/moveCaretVertical/getText）。──
@@ -253,7 +253,7 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
   it('首屏冒烟：Landing 态 Composer DOM 含 composer 输入区 + composer-box（AGENTS.md MANDATORY 渲染 gate）', async () => {
     wrapper = await mountLandingComposer()
 
-    // composer-box：Composer.vue:32 的 testid（02-composer.md §3 文档入口 testid）
+    // composer-box：Composer.vue:32 的 testid（01-chat-panel-composer.md §2（Composer）§3 文档入口 testid）
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // composer-input：AGENTS.md 首屏冒烟模板断言项（事故复现点：曾全绿但此处 DOM 缺失）
     expect(wrapper.find('[data-testid="composer-input"]').exists()).toBe(true)

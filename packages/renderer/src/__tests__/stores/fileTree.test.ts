@@ -210,7 +210,7 @@ describe('fileTreeStore W15/D-7.1 徽章预聚合', () => {
       'src/utils/deep/d.ts',
       'src-other/e.ts',
       'README.md',
-      'docs/page-design/x.md',
+      'docs/legacy/x.md',
       // [W15 审查] git status porcelain 默认把 untracked 目录折叠为带尾斜杠一条（'newdir/'），
       // 两种算法都应把目录自身计入 newdir（legacy：startsWith('newdir/') 命中自身；
       // 预聚合：首个 '/' 前缀即 'newdir'），父链无额外影响。
@@ -226,7 +226,7 @@ describe('fileTreeStore W15/D-7.1 徽章预聚合', () => {
       'src/utils/deep',
       'src-other',
       'docs',
-      'docs/page-design',
+      'docs/legacy',
       'nonexistent',
       'README.md',
       'newdir',

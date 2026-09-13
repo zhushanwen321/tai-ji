@@ -3,8 +3,10 @@
 // 覆盖（impl-plan §2.10 / 设计 §4 探针挂钩①）：
 //   - 9 正向方法（initialize/probe/run/cancel/read/listModels/
 //     validateModel/dispose/ping）× fake 引擎 CLI 往返；
-//   - 8 反向通道（host/log、host/askUser、host/permission、host/streamDelta、
-//     host/poolResolved、host/handleReady、host/childSpawned、host/childStateChanged）
+//   - 6 反向通道（host/log、host/askUser、host/streamDelta、
+//     host/handleReady、host/childSpawned、host/childStateChanged——[池抽象降级]
+//     原 host/poolResolved 通道已随 poolKey 协议面退役删除；[permission 退役]
+//     host/permission 已删——两引擎 permissionMode=native 零 emit）
 //     的 core 侧到达断言；
 //   - 错误帧：run 失败帧 / 未知方法帧（码原样透传）/ initialize 版本越界
 //     （engine_protocol_mismatch → 客户端直接不可用，不重建）；
@@ -25,9 +27,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EngineClient } from "../../client/engine-client.ts";
-import type { MirrorChangeEvent } from "../../client/mirror.ts";
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
-import type { AgentEvent } from "../../../types.ts";
+import type { AgentEvent } from "../../../assembly/types.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");
@@ -74,25 +75,18 @@ afterEach(() => {
 interface Harness {
   client: EngineClient;
   events: AgentEvent[];
-  mirrorEvents: MirrorChangeEvent[];
-  logs: Array<{ level: string; message: string }>;
   askUserRequests: unknown[];
-  permissionRequests: unknown[];
   streamDeltas: string[];
-  poolResolved: string[];
-  handleReady: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+
+  handleReady: Array<{ sessionRef: Record<string, string> }>;
 }
 
 function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture.run.params.runId): Harness {
   const h: Harness = {
     client: undefined as unknown as EngineClient,
     events: [],
-    mirrorEvents: [],
-    logs: [],
     askUserRequests: [],
-    permissionRequests: [],
     streamDeltas: [],
-    poolResolved: [],
     handleReady: [],
   };
   h.client = new EngineClient({
@@ -103,16 +97,10 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     hostVersion: "w10-protocol-blackbox",
     dataDir,
     envPrefixes: [],
-    log: (p) => h.logs.push({ level: p.level, message: p.message }),
     uiRequestHandler: async (req) => {
       h.askUserRequests.push(req);
       return { value: "option-a" };
     },
-    permissionHandler: async (params) => {
-      h.permissionRequests.push(params);
-      return { approved: true };
-    },
-    onMirrorChanged: (event) => h.mirrorEvents.push(event),
     baseEnv: {
       ...process.env,
       FAKE_PROTOCOL_FIXTURE: FIXTURE,
@@ -125,9 +113,6 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     },
     onStreamDelta: (delta) => {
       h.streamDeltas.push(delta);
-    },
-    onPoolResolved: (poolKey) => {
-      h.poolResolved.push(poolKey);
     },
     onHandleReady: (partial) => {
       h.handleReady.push(partial);
@@ -218,31 +203,28 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
   });
 });
 
-describe("协议黑盒：8 反向通道 core 侧到达", () => {
-  it("run 期间全部 8 通道到达并被正确路由", async () => {
+describe("协议黑盒：6 反向通道 core 侧到达", () => {
+  it("run 期间全部 6 通道到达并被正确路由", async () => {
     const h = makeHarness();
     try {
       await h.client.ensureConnected();
       await h.client.request("run", fixture.run.params);
 
-      // host/log
-      expect(h.logs.some((l) => l.message.includes("run started"))).toBe(true);
+      // host/log：注入观测面已随 ReverseRouterDeps.log 注入点删除（恒走缺省
+      // logger facade），到达面由 engine-client.test 的 host/log 数据面用例覆盖。
       // host/streamDelta
       expect(h.streamDeltas).toEqual(["Hello", " world"]);
-      // host/poolResolved
-      expect(h.poolResolved).toEqual(["shared"]);
       // host/handleReady
-      expect(h.handleReady).toEqual([{ sessionRef: { sessionId: "sess-fixture" }, poolKey: "shared" }]);
-      // host/childSpawned + host/childStateChanged（镜像落项 + 状态更新）
-      const spawned = h.mirrorEvents.filter((e) => e.reason === "childSpawned");
-      expect(spawned).toHaveLength(1);
-      expect(typeof spawned[0]?.pid).toBe("number");
-      const stateChanged = h.mirrorEvents.filter((e) => e.reason === "childStateChanged");
-      expect(stateChanged).toHaveLength(1);
-      expect(stateChanged[0]?.recordId).toBe(fixture.run.params.runId);
-      // host/askUser + host/permission（交互面 ack 两阶段）
+      expect(h.handleReady).toEqual([{ sessionRef: { sessionId: "sess-fixture" } }]);
+      // host/childSpawned + host/childStateChanged（镜像落项 + 状态更新——
+      // onMirrorChanged 注入点已删，经 client.mirror 快照观测）
+      const entries = h.client.mirror.snapshot();
+      expect(entries).toHaveLength(1);
+      expect(typeof entries[0]?.pid).toBe("number");
+      expect(entries[0]?.recordId).toBe(fixture.run.params.runId);
+      expect(entries[0]?.state).toBe("exited");
+      // host/askUser（交互面 ack 两阶段）
       expect(h.askUserRequests).toHaveLength(1);
-      expect(h.permissionRequests).toHaveLength(1);
     } finally {
       await h.client.dispose();
     }
@@ -353,15 +335,15 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
       .map((f) => f.params!.seq!);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
 
-    // 反向通道覆盖（录制期间 8 通道全部上线）
+    // 反向通道覆盖（[池抽象降级] 后 6 通道；录制样本同批去 poolResolved / permission 帧）
     const reverse = new Set(
       recorded.wire.engineToHost
         .filter((f) => typeof (f as { id?: string }).id === "string")
         .map((f) => (f as { method: string }).method),
     );
     for (const ch of [
-      "host/log", "host/askUser", "host/permission", "host/streamDelta",
-      "host/poolResolved", "host/handleReady", "host/childSpawned", "host/childStateChanged",
+      "host/log", "host/askUser", "host/streamDelta",
+      "host/handleReady", "host/childSpawned", "host/childStateChanged",
     ]) {
       expect(reverse.has(ch)).toBe(true);
     }
@@ -380,13 +362,14 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
     try {
       await h.client.ensureConnected();
       await h.client.request("run", fixture.run.params);
-      const spawned = h.mirrorEvents.find((e) => e.reason === "childSpawned");
+      // onMirrorChanged 注入点已删——经 client.mirror 快照取 childSpawned 落项 pid。
+      const spawned = h.client.mirror.snapshot().find((e) => e.recordId === fixture.run.params.runId);
       expect(spawned?.pid).toBeDefined();
       // 预期形态（reverse-router 组探测同款语义）：任务子进程与引擎同组（收割 =
       // 引擎组级 kill(-enginePid)）→ 该 pid 非组长 → kill(-pid,0) ESRCH。
       // kill(-pid,0) 成功 = 自成进程组 = 不在收割组内 = 告警面（R9-1 限定：一代
       // 子进程 + 组内后代；引擎自身 detached 后代不判 fail，设计 §3.9 已接受代价）。
-      expect(() => process.kill(-spawned!.pid!, 0)).toThrow();
+      expect(() => process.kill(-spawned!.pid, 0)).toThrow();
     } finally {
       await h.client.dispose();
     }

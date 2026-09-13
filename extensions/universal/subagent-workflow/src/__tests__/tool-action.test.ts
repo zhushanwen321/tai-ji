@@ -13,7 +13,7 @@ import type {
   RecordSnapshot,
   SubagentRecord,
   SubagentToolDetails,
-} from "@zhushanwen/subagent-core/execution/types.ts";
+} from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
 // ── stub 工厂 ──
 
@@ -231,13 +231,13 @@ describe("listHandler", () => {
 
   it("item 8 字段齐全（含 duration 实时计算）", () => {
     const records: SubagentRecord[] = [
-      { id: "r1", agent: "w", status: "closed", mode: "background", startedAt: 1000, endedAt: 2500, turns: 2, totalTokens: 50, model: "m", thinkingLevel: "high", eventLog: [], sessionFile: "x.jsonl" },
+      { id: "r1", agent: "w", status: "idle", closedReason: "gc", mode: "background", startedAt: 1000, endedAt: 2500, turns: 2, totalTokens: 50, model: "m", thinkingLevel: "high", eventLog: [], sessionFile: "x.jsonl" },
     ];
     const svc = makeService({ collectRecords: vi.fn(() => records) });
     const r = listHandler(svc, { includeFinished: true });
     const item = r.response.items[0];
     expect(item).toMatchObject({
-      subagentId: "r1", agent: "w", status: "closed", mode: "background",
+      subagentId: "r1", agent: "w", status: "idle", mode: "background",
       duration: 1, model: "m", totalTokens: 50, sessionFile: "x.jsonl",
     });
   });
@@ -444,7 +444,7 @@ describe("adapter", () => {
           running: 0,
           items: [
             {
-              subagentId: "bg-u3", agent: "w", slug: "s", state: "ended", status: "closed",
+              subagentId: "bg-u3", agent: "w", slug: "s", state: "idle", status: "idle",
               mode: "background", duration: 1, model: "m", totalTokens: 0,
               outcome: "failed",
             },
@@ -457,9 +457,9 @@ describe("adapter", () => {
     };
     const item = parsed.listResponse.items[0]!;
     expect(item.outcome).toBe("failed");
-    // 旧字段保留（向后兼容）
-    expect(item.status).toBe("closed");
-    expect(item.state).toBe("ended");
+    // 旧字段保留（向后兼容）。[U2 两态] status 是 ExecutionStatus（running|idle）。
+    expect(item.status).toBe("idle");
+    expect(item.state).toBe("idle");
     expect(item.mode).toBe("background");
     // closedReason 退出对外 JSON
     expect("closedReason" in item).toBe(false);

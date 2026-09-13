@@ -1,5 +1,5 @@
 /**
- * 崩溃台账事件 Schema SSOT（docs/design/crash-forensics-and-watchdog.md §3.3 D1）。
+ * 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1）。
  *
  * 双文件 append-only JSONL（`<dataDir>/logs/crashes/main.jsonl` + `runtime.jsonl`）
  * 的事件形态在此唯一定义：main writer（写 main 自身 + renderer 事件）与 runtime

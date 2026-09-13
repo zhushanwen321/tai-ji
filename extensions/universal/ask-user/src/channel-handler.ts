@@ -13,7 +13,7 @@
 //     （key=header/question，单选=string，多选=JSON 数组，Other→__other），让子进程 decode 一致。
 //
 // handler 收到的 req.channelPayload = {questions: AskUserQuestion[], allowCancel}（proto 格式，
-// 由子进程 askUserInteract 编码、packages/subagent-core 的 parseChannel（execution/ui-channels.ts）
+// 由子进程 askUserInteract 编码、packages/subagent-core 的 parseChannel（execution/ui/ui-channels.ts）
 // 解析 options[0] JSON 得到）。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -29,13 +29,13 @@ import { type AnswerValue, type Option, type Question, type Result, type ThemeLi
 
 /**
  * channel handler 签名——与 packages/subagent-core 的 UiChannelRegistry.ChannelHandler 一致
- *（execution/ui-channels.ts 定义，(req: unknown) => Promise<unknown>）。本文件不静态 import
+ *（execution/ui/ui-channels.ts 定义，(req: unknown) => Promise<unknown>）。本文件不静态 import
  * packages/subagent-core（host 侧包，非本包依赖——两侧扩展经 globalThis slot 握手协作，
  * 见 index.ts 工厂注释）；handler 签名用本地等价类型，运行时结构兼容。
  */
 export type ChannelHandler = (req: unknown) => Promise<unknown>;
 
-/** handler 返回给 packages/subagent-core 的 UiResponse 形状（execution/dialog-queue.ts 定义）。
+/** handler 返回给 packages/subagent-core 的 UiResponse 形状（execution/ui/dialog-queue.ts 定义）。
  *  - {value}: select 的回传值（子进程 JSON.parse(value) 得 answers）
  *  - {cancelled}: 用户取消 / 子进程 close / handler 抛错 */
 type ChannelResponse = { value: string } | { cancelled: true };

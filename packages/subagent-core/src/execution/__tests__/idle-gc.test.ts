@@ -15,11 +15,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { findForeignLiveInstance } from "../alive-store.ts";
-import { createRecord } from "../execution-record.ts";
-import { startIdleGc } from "../idle-gc.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord } from "../types.ts";
+import { findForeignLiveInstance } from "../persistence/alive-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { startIdleGc } from "../persistence/idle-gc.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GC_INTERVAL_MS = 60 * 60 * 1000;

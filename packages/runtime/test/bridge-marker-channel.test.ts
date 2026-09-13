@@ -1,7 +1,7 @@
 /**
  * bridge marker 通道（select + BRIDGE_MARKER，协议 v2）— 识别 / 序列化 / 登记测试。
  *
- * 设计 docs/design/bridge-rewrite-pi-0.84.md §3.3-D6（U3 验收 + 探针 P-10）：
+ * 设计 docs/design/bridge-rewrite-pi-0.84.md §3.3-D6（已删除，git 可追溯；U3 验收 + 探针 P-10）：
  * - marker 命中 → bridge-ui kind 产出形状（四 method 各一例）
  * - marker 未命中（普通 select / ASK_USER_MARKER / SESSION_MANAGER_MARKER）→ 不走
  *   bridge 分支（P-10 三态防误伤）

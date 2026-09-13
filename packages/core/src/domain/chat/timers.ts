@@ -59,6 +59,13 @@ export function initTimers(
   function armStreamingTimer(sessionId: string): void {
     clearSessionTimer(streamingTimers, sessionId)
     streamingTimers.set(sessionId, setTimeout(() => {
+      // [timeout-streaming-ui-idle §5.6 D6] 到期只做 UI 收口，刻意不联动 abort pi：
+      // ① idle 误判窗口收敛但非零（stream_delta 桥接外的残余静默窗），一旦 abort 就
+      //    亲手杀掉健康长 turn，把「可自愈瞬态」（complete 迟到即恢复，见
+      //    effects/complete-recovery.ts）变回 zcode 式不可逆误杀；
+      // ② 真挂死的止损收益有限且分形态——工具死锁/进程挂起不烧 token，LLM 黑洞
+      //    计费有界于单响应 max_tokens。有界计费代价 < 误杀健康 turn 的不可逆代价。
+      //    用户确认死了可手动停止（人工判断补上自动 abort 缺的判断力）。
       finalizeSession(sessionId, 'timeout')
       streamingTimers.delete(sessionId)
     }, getStreamingTimeoutMs()))

@@ -1,7 +1,7 @@
 // src/execution/engine/client/__tests__/engine-client-reap.test.ts
 //
 // [H1 U2 / 红线①收割链] 引擎退出链孤儿收割单测（设计
-// docs/design/subagent-chat-run-unification.md §3.3 红线① + §5 U2 验收「收割链各分支」）。
+// docs/architecture/subagent-chat-run-unification.md §3.3 红线① + §5 U2 验收「收割链各分支」）。
 //
 // 覆盖分支：
 //   - 非主动死亡（!intentionalKill && alreadyDead）POSIX → 复用 killProcessTree 负 pid

@@ -1,22 +1,25 @@
 // [H3/R6] SubagentService 壳的支撑文件：聚合面接口类型声明（SubagentQueries /
 // SubagentChatActions / SubagentServiceInit）+ 进程单例访问器族（SERVICE_SLOT_KEY /
-// getServiceSlot / getSubagentService / setSubagentService / createSubagentService）。
+// getServiceSlot / getSubagentService / setSubagentService）。
 // R6 前同居壳文件（impl-plan §2 R6 行），外移达成 G1 壳终态（类体 ≤500 折算 +
 // 单类成员 ≤40）。符号体自壳逐字节搬运，仅 import 通道新设。
+// [2026-09-13 barrel 收窄] createSubagentService 工厂已删（全仓零消费且定义文件
+// 内部零使用的死代码——`new SubagentService(init)` 直构逐字等价；恢复通道 =
+// git 历史原样加回）。
 //
 // 方向纪律（scripts/check-subagent-service-boundary.mjs R6 扩向守卫）：
 //   - 壳→本文件：仅 type-only（接口类型标注——编译后擦除，不成值环）
-//   - 本文件→壳：仅 SubagentService 类值 import（createSubagentService 构造依赖，
-//     设计 v4 明文「bootstrap 必须 new SubagentService」；壳对本文件零 re-export，
+//   - 本文件→壳：仅 SubagentService 类值 import（构造依赖，设计 v4 明文
+//     「bootstrap 必须 new SubagentService」；壳对本文件零 re-export，
 //     防壳↔bootstrap 值环——壳侧 re-export 即成环）
 //   - 聚合→本文件：仅 type-only（聚合不消费装配工厂）
 //   - 本文件→聚合：无（现状零依赖）
 
-import type { UiRequestHandler } from "../dialog-queue.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { StatusFilter } from "../record-store.ts";
+import type { UiRequestHandler } from "../ui/dialog-queue.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { StatusFilter } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord, RecordSnapshot, SubagentRecord } from "../types.ts";
+import type { ExecutionRecord, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 
 /** [D4 查询面聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
  *  `service.queries` 消费面。变化轴：改查询投影 / 过滤 / 订阅语义，只动 queries 组；
@@ -56,7 +59,7 @@ export interface SubagentChatActions {
 /**
  * Service 构造参数（进程级）。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md §3.3 D6）：
+ * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 export interface SubagentServiceInit {
@@ -71,7 +74,7 @@ export interface SubagentServiceInit {
 }
 
 // ── 进程单例访问器 ────────────────────────────────────
-// globalThis[Symbol.for] 防 jiti 路径不同致单例分裂。详见 docs/standards.md §7.5。
+// globalThis[Symbol.for] 防 jiti 路径不同致单例分裂。详见 docs/STANDARDS.md §7.5。
 const SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
 
 type ServiceSlot = { current: SubagentService | null };
@@ -93,19 +96,4 @@ export function getSubagentService(): SubagentService | null {
 /** 设置进程单例（session_start 首次创建时）。 */
 export function setSubagentService(service: SubagentService): void {
   getServiceSlot().current = service;
-}
-
-/**
- * [U10① D6] 第三宿主最小构造入口：仅凭参数注入构造 SubagentService（无全局查找）。
- *
- * 构造依赖（modelService / getMainSessionFile / uiRequestHandler）全部经 init
- * 参数注入；本工厂是 `new SubagentService(init)` 的薄包装，不读也不写
- * getSubagentService/setSubagentService 的全局槽位——session_start 单例流程
- * 行为零改动，宿主自持实例时用本工厂。构造内部行为与直接 new 逐字等价。
- *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md §3.3 D6）：
- * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
- */
-export function createSubagentService(init: SubagentServiceInit): SubagentService {
-  return new SubagentService(init);
 }

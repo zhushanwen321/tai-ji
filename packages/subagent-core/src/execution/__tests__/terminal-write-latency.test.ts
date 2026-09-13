@@ -13,9 +13,9 @@ import { performance } from "node:perf_hooks";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 
 /** 采样次数（D2 口径 N=100）。 */
 const SAMPLE_COUNT = 100;

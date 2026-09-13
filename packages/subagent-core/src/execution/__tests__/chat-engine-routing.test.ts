@@ -73,9 +73,9 @@ import type {
   EngineHandle,
   ProbeReport,
 } from "../engine/types.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import { toSubagentRecordEntry } from "../record-entry.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
 // 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
 import {
@@ -83,7 +83,7 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecuteOptions } from "../types.ts";
+import type { ExecuteOptions } from "../assembly/types.ts";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -322,11 +322,13 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     service.initSession({ pi: makePi(), sessionId: "test-session" });
 
     const handle = await service.execute(baseOpts(agentDir));
-    // 不可用 stub：轮次派发在首次 engine.run 拒绝（engine_not_found）→ chatMode=false
-    // 一次性 run 终态销毁（无孤儿 record——拒绝点唯一化在 run）。
+    // 不可用 stub：轮次派发在首次 engine.run 拒绝（engine_not_found）→ [U5] 失败轮
+    // settle（markRoundIdle 保持 running-resumable——MF-6 回退可恢复，不终态化销毁；
+    // 拒绝点唯一化在 run）。
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
-      expect(rec?.status).toBe("closed");
+      expect(rec?.status).toBe("running");
+      expect(rec?.resumable).toBe(true);
     });
   });
 
@@ -477,7 +479,6 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     expect(task.schema).toEqual({ type: "object" });
     expect(task.skillPath).toBe("/tmp/skill.md");
     expect(task.appendSystemPrompt).toEqual(["extra"]);
-    expect(ctx.poolKey).toBe("shared");
   });
 
   it("[骨架] run resolve 成功 → record 终态 done + result=content", async () => {
@@ -626,12 +627,10 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     expect(service.queries.collectRecords(10, "all")).toHaveLength(0);
   });
 
-  it("[journal] taskId=record.id + onPoolResolved retarget 落 engines/zcode/<poolKey>/，journalPath 同源回填", async () => {
+  it("[journal] taskId=record.id 落 engines/zcode/shared/（[池抽象降级] 固定分组，无 retarget），journalPath 同源回填", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
-    const POOL = "zcode-p-glm";
     zcode.runImpl = (task, ctx) => {
-      ctx.onPoolResolved?.(POOL);
       ctx.onEvent?.({ type: "message_end" } as AgentEvent);
       return Promise.resolve({
         handle: {
@@ -639,7 +638,6 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
             v: 1,
             engineId: "zcode",
             sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" },
-            poolKey: POOL,
             adapterVersion: "test",
           },
         },
@@ -649,8 +647,8 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
     await vi.waitFor(() => expect(service.queries.findRecord(handle.subagentId)).toBeUndefined());
 
-    // journal 文件名 = journal-<record.id>.jsonl，落在 engines/zcode/<poolKey>/ 下
-    const journalPath = resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId);
+    // journal 文件名 = journal-<record.id>.jsonl，落在 engines/zcode/shared/ 下
+    const journalPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
     expect(fs.existsSync(journalPath)).toBe(true);
     const firstLine = JSON.parse(fs.readFileSync(journalPath, "utf8").split("\n")[0]);
     expect(firstLine.taskId).toBe(handle.subagentId);
@@ -659,20 +657,18 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const entry = lastRecordEntry(pi);
     expect(entry?.engineHandle).toEqual({
       sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" },
-      poolKey: POOL,
+      poolKey: "shared",
       journalPath,
     });
   });
 
-  it("[engineHandle] 失败终态 sessionId 缺失 → 仍回填 dbPath/poolKey（①级降②级防御形态）", async () => {
+  it("[engineHandle] 失败终态 sessionId 缺失 → 仍回填 dbPath（①级降②级防御形态）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
-    const POOL = "zcode-p-glm";
     zcode.runImpl = (task, ctx) => {
-      ctx.onPoolResolved?.(POOL);
       return Promise.resolve({
         handle: {
-          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db" }, poolKey: POOL, adapterVersion: "test" },
+          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db" }, adapterVersion: "test" },
         },
         outcome: { ...doneOutcome(""), error: "engine_run_failed: boom", engineId: "zcode" },
       });
@@ -682,8 +678,8 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
 
     const h = lastRecordEntry(pi)?.engineHandle as Record<string, unknown> | undefined;
     expect(h?.sessionRef).toEqual({ dbPath: "sessions.db" });
-    expect(h?.poolKey).toBe(POOL);
-    expect(h?.journalPath).toBe(resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId));
+    expect(h?.poolKey).toBe("shared");
+    expect(h?.journalPath).toBe(resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId));
   });
 
   // ============================================================
@@ -694,14 +690,11 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   it("[onHandleReady] create 应答后回调 → record.engineHandle 立即回填 + reportRecordTransition 落 entry（record 仍 running）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
-    const POOL = "zcode-appserver-home";
     let releaseRun!: (v: { handle: EngineHandle; outcome: AgentOutcome }) => void;
     zcode.runImpl = (task, ctx) => {
-      ctx.onPoolResolved?.(POOL);
       // create 应答后的回调时点（app-server 引擎在 session/create 应答后触发）
       ctx.onHandleReady?.({
         sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
-        poolKey: POOL,
       });
       return new Promise((resolve) => {
         releaseRun = resolve; // 挂起 run——模拟运行中任务
@@ -721,11 +714,11 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
     expect(running?.engineHandle).toEqual({
       sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
-      poolKey: POOL,
-      journalPath: resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId),
+      poolKey: "shared",
+      journalPath: resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId),
     });
-    // 回填 entry 的 journalPath 与 onPoolResolved retarget 后的实际落盘路径一致（同源）
-    expect(fs.existsSync(resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId))).toBe(false);
+    // 运行中尚未落盘（writer 只在事件到达后写文件）——路径即最终落盘路径
+    expect(fs.existsSync(resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId))).toBe(false);
 
     // 终态收口（防 dangling）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
@@ -735,27 +728,22 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   it("[onHandleReady F1] sessionId 先落 + 迟到只补 sessionFile → 按字段补缺落位；已有值不被迟到值覆盖（幂等）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
-    const POOL = "zcode-appserver-home";
     const LATE_SESSION_FILE = "/tmp/late/session-abc.jsonl";
     let releaseRun!: (v: { handle: EngineHandle; outcome: AgentOutcome }) => void;
     zcode.runImpl = (task, ctx) => {
-      ctx.onPoolResolved?.(POOL);
       // ① create 应答：只带 sessionId（本 replay 批次新打通的可达面——close 期 LC-4
       // 后缀反查在 sessionId 已知后才补发 sessionFile）。
       ctx.onHandleReady?.({
         sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
-        poolKey: POOL,
       });
       // ② 迟到 handleReady：只补 sessionFile——旧守卫「有 sessionId 即整条 return」
       // 会把它整条吞掉，sessionFile 永不落位（消费点：冷续 resume 锚点 / interact 定位）。
       ctx.onHandleReady?.({
         sessionRef: { sessionId: "sess-live-1", sessionFile: LATE_SESSION_FILE },
-        poolKey: POOL,
       });
-      // ③ 再迟到一次且带冲突值：已有值必须原样保留（幂等），poolKey 不被重置。
+      // ③ 再迟到一次且带冲突值：已有值必须原样保留（幂等——补缺语义只补空位）。
       ctx.onHandleReady?.({
         sessionRef: { sessionId: "sess-OVERWRITE", sessionFile: "/tmp/late/other.jsonl" },
-        poolKey: "hijacked-pool",
       });
       return new Promise((resolve) => {
         releaseRun = resolve;
@@ -773,8 +761,8 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
         sessionId: "sess-live-1",
         sessionFile: LATE_SESSION_FILE,
       },
-      poolKey: POOL,
-      journalPath: resolveJournalPath(agentDir, "zcode", POOL, handle.subagentId),
+      poolKey: "shared",
+      journalPath: resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId),
     });
     // 补缺经 entry 持久化（运行中 GUI 经 entry 重建 record 即可见），且 ③ 的
     // 「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条）。
@@ -795,12 +783,10 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   it("[onHandleReady] 引擎不回调（spawn 形态）时零回填——终态回填仍兜底（行为不变）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
-    const POOL = "zcode-p-glm";
     zcode.runImpl = (task, ctx) => {
-      ctx.onPoolResolved?.(POOL); // 只 onPoolResolved——spawn 引擎形态（无 onHandleReady）
       return Promise.resolve({
         handle: {
-          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" }, poolKey: POOL, adapterVersion: "test" },
+          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" }, adapterVersion: "test" },
         },
         outcome: doneOutcome("ok"),
       });
@@ -814,7 +800,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       expect((c[1] as Record<string, unknown>).engineHandle).toBeUndefined();
     }
     const final = entries[entries.length - 1][1] as Record<string, unknown>;
-    expect(final.engineHandle).toMatchObject({ poolKey: POOL });
+    expect(final.engineHandle).toMatchObject({ poolKey: "shared" });
   });
 
   it("[D5 回归] pi 纯缺省路径 entry 不含 engine/engineFallback/engineHandle 键", async () => {
@@ -861,6 +847,6 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
 /** 假 EngineHandle（骨架路径不消费 handle 内容——U2 journal/handle 回填才用）。 */
 function fakeHandle(): EngineHandle {
   return {
-    data: { v: 1, engineId: "zcode", sessionRef: {}, poolKey: "shared", adapterVersion: "test" },
+    data: { v: 1, engineId: "zcode", sessionRef: {}, adapterVersion: "test" },
   };
 }

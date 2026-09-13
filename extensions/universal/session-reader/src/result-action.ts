@@ -6,7 +6,7 @@
  * 为文件私有且被其余 9 个 action 共用，不便搬移——经 {@link ResultActionDeps} 注入，
  * tool-handler.ts 构造 RESULT_ACTION_DEPS 常量传入（构造期绑定，运行时零查找开销）。
  *
- * 设计来源：docs/design/subagent-sync-collect.md §3.1.3 ——
+ * 设计来源：docs/design/subagent-sync-collect.md §3.1.3（已删除，git 可追溯）——
  *   session_read {"action":"result","session":"sa-aaa"}              // 单个
  *   session_read {"action":"result","session":"sa-aaa,sa-bbb,sa-ccc"} // 批量（≤10）
  *   → 每条返回该 subagent session 的最终 assistant 正文（与通知 record.result 同源），
@@ -74,7 +74,7 @@ function assistantMessageText(content: unknown): string {
 /**
  * 从 session entries 提取最终结果正文（与完成通知 record.result 同源，A4 逐字节一致的前置）。
  *
- * 同源语义（packages/subagent-core/src/execution/execution-record.ts getFullText，只读参考）：
+ * 同源语义（packages/subagent-core/src/execution/persistence/execution-record.ts getFullText，只读参考）：
  * record.result = AgentResult.text = getFullText(record) = 全部 assistant turn 文本
  * filter(非空，空白串按非空) join("\\n\\n")；pi 每 turn_end 对应一条 assistant message
  *（agent-session.js turn_end 携带 message），故文件侧重建 = 每条 assistant message 的

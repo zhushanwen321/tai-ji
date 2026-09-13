@@ -148,6 +148,9 @@ export function createBashOverrideToolDefinition() {
 		// （label/promptSnippet/promptGuidelines/renderCall/renderResult 等）全部随
 		// delegate 透传，cwd 重建 delegate 时静态闭包引用不变（render 闭包与 cwd 无关）
 		...initial,
+		// D2（禁止改名）：桌面侧六处按工具 key 'bash' 硬编码（truncate-tool-output、
+		// useToolMeta、block-icon、pi-preset BUILTIN_TOOLS 与 deniedTools、permission
+		// extractCommand）——改名后这些消费面全部失配，审批退化为逐次弹窗、渲染错位
 		name: initial.name, // "bash"：同名覆盖内置工具（agent-session _refreshToolRegistry 后注册者胜）
 		description: ENHANCED_BASH_DESCRIPTION,
 		parameters: enhancedBashSchema,

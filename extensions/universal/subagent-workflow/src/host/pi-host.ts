@@ -1,7 +1,7 @@
 // src/host/pi-host.ts
 //
 // pi 壳宿主实现（subagent-core 包抽离 u0-wire）。设计权威源：
-// docs/design/subagent-core-package-extraction.md §3.3 D2（含计划期契约细化 3 条）。
+// docs/architecture/subagent-core-package-extraction.md §3.3 D2（含计划期契约细化 3 条）。
 //
 // 本文件属壳侧（shell），不进 core 切面——对 pi SDK 与 pi 宿主协作件
 // （@earendil-works/pi-coding-agent / @zhushanwen/pi-extension-logger /

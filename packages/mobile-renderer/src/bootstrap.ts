@@ -12,7 +12,7 @@
 // TODO(P1): P1 transport 迁入 core 且 mobile D2 远程落地后，本壳 bootstrap 对接
 // core bootstrap() 的 transport/coordination 序列（initConnection → restoreSessions）。
 //
-// 设计依据：renderer-rebuild-architecture.md §6.3/§9/§11.0.3、slice plan IF3。
+// 设计依据：renderer-package-topology.md §6.3/§9/§11.0.3、slice plan IF3。
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

@@ -115,9 +115,9 @@ function lastWrittenJson(): Record<string, unknown> {
   return JSON.parse(last)
 }
 
-/** 读取 RpcClient 内部 pending Map 的 size（反射，仅测试用）。 */
+/** 读取 RpcClient 内部 pending 数（反射，仅测试用；U1 pi-rpc 收敛后经 registry 部件 pendingSize 只读面）。 */
 function pendingSize(client: unknown): number {
-  return (client as { pending: Map<unknown, unknown> }).pending.size
+  return (client as { pendingRegistry: { pendingSize: number } }).pendingRegistry.pendingSize
 }
 
 // ── Tests ──────────────────────────────────────────────────────────

@@ -33,11 +33,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-lookup.ts";
-import * as stateMarker from "../state-marker.ts";
-import type { PiLike } from "../notify-host.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../types.ts";
+import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
+import * as stateMarker from "../persistence/state-marker.ts";
+import type { PiLike } from "../notify/notify-host.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type SupervisorCandidateRecord } from "./index.ts";
 import {
   createRoundSupervisorForService,
@@ -49,8 +49,8 @@ import {
 // 内部 3 次退避重试），give-up 的 §3.4 false 分支真实磁盘故障无法稳定驱动，仅本文件
 // 的「重试耗尽」用例经模块替身注入 false 返回；默认委托真实实现，相邻用例行为不变
 //（vi.spyOn 对跨模块具名导入绑定不可拦截，必须走 vi.mock）。
-vi.mock("../state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../state-marker.ts")>();
+vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
   return { ...actual, writeFinalizedState: vi.fn(actual.writeFinalizedState) };
 });
 
@@ -237,7 +237,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
     await adoptThenExpire(supervisor, makeRecord());
 
     // CAS 终态化已落（closed + gc），finalizeClosed 收失败语义 result
-    expect(h.store.memory.get("bg-1")?.status).toBe("closed");
+    expect(h.store.memory.get("bg-1")?.status).toBe("idle");
     expect(h.store.memory.get("bg-1")?.closedReason).toBe("gc");
     expect(h.finalizeClosed).toHaveBeenCalledTimes(1);
     const [record, result] = (h.finalizeClosed.mock.calls[0] ?? []) as [ExecutionRecord, Record<string, unknown>];
@@ -277,7 +277,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
         viewChecked = true;
         return rec;
       }
-      return { ...rec, status: "closed", closedReason: "cancelled" } as ExecutionRecord;
+      return { ...rec, status: "idle", closedReason: "cancelled" } as ExecutionRecord;
     };
     const supervisor = createRoundSupervisorForService(h.binding);
 
@@ -330,7 +330,7 @@ describe("supervisorGiveUp 内存态（watchdog-expired / superseded / CAS）", 
     await expect(adoptThenExpire(supervisor, makeRecord())).resolves.toBeUndefined();
 
     expect(h.finalizeClosed).toHaveBeenCalledTimes(1);
-    expect(h.store.memory.get("bg-1")?.status).toBe("closed");
+    expect(h.store.memory.get("bg-1")?.status).toBe("idle");
   });
 });
 
@@ -383,7 +383,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "bg-disk",
-      status: "closed",
+      status: "idle",
       closedReason: "gc",
       endedAt: expect.any(Number),
       error: expect.stringContaining("safe to re-dispatch"),
@@ -410,7 +410,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     const entries = subagentEntries(h.pi);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "closed", closedReason: "gc" });
+    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "idle", closedReason: "gc" });
   });
 
   it("entry 面抛错（pi.appendEntry 炸）→ best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {
@@ -443,8 +443,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     const supervisor = createRoundSupervisorForService(h.binding);
     // 模块替身注入失败返回（U1 后 writeFinalizedState 不抛——重试耗尽返回 false）；
     // finally 恢复委托真实实现。
-    const actual = await vi.importActual<typeof import("../state-marker.ts")>(
-      "../state-marker.ts",
+    const actual = await vi.importActual<typeof import("../persistence/state-marker.ts")>(
+      "../persistence/state-marker.ts",
     );
     const writeSpy = vi.mocked(stateMarker.writeFinalizedState);
     writeSpy.mockImplementation(() => false);
@@ -549,7 +549,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     setup();
     writeRegister("bg-done", "subagent");
     const h = makeBinding({ sessionFile });
-    h.store.memory.set("bg-done", makeRecord({ id: "bg-done", status: "closed", closedReason: "cancelled" }));
+    h.store.memory.set("bg-done", makeRecord({ id: "bg-done", status: "idle", closedReason: "cancelled" }));
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
       { customType: "pending:unregister", data: { id: "bg-done", reason: "cancelled", status: "cancelled" } },
@@ -557,17 +557,17 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.emitted).toEqual([{ channel: "pending:unregister", data: { id: "bg-done", reason: "cancelled" } }]);
   });
 
-  it("终态 subagent record（磁盘 closed，closedReason 缺失）→ 补发注销 reason=completed 兜底", () => {
+  it("终态 subagent record（磁盘 idle+closedReason，桥接判据命中）→ 补发注销（reason 透传 closedReason）", () => {
     setup();
     writeRegister("bg-old", "subagent");
     const h = makeBinding({ sessionFile });
     h.store.disk.set(
       "bg-old",
-      makeDiskRecord(sessionFile, { id: "bg-old", status: "closed", resumable: false }),
+      makeDiskRecord(sessionFile, { id: "bg-old", status: "idle", closedReason: "gc", resumable: false }),
     );
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
-      { customType: "pending:unregister", data: { id: "bg-old", reason: "completed", status: "completed" } },
+      { customType: "pending:unregister", data: { id: "bg-old", reason: "gc", status: "gc" } },
     ]);
   });
 

@@ -24,7 +24,9 @@ import { buildSkillMarker } from './skill-marker'
  * - skill: skill 命令段，含 name 和可选的 SKILL.md 文件路径
  *   （序列化为 `<xyz-skill/>` 私有标记，见 segmentsToText；D3）
  * - file: 文件引用段（未来从 drawer/diff 选取追加到 composer），含路径和可选行范围
- * - mention: @mention 段（未来 @user 等），含 name
+ * - mention: @mention 段（未来 @user 等），含 name。保持死类型不激活（无生产者），
+ *   也不承载 session/subagent 引用——mention 是通用提及语义，独占给单一实体会
+ *   命名与语义错位，三个月后「mention 是什么」成考古题；各实体独立 type 自描述
  * - session: session 引用段（composer # session chip），sessionId 是 TUI session_read
  *   协议消费的定位 id；label 仅用于 UI 展示（badge/气泡），不参与 prompt 序列化
  * - subagent: subagent 定向段（composer @ subagent chip），是消息路由标记而非内容——

@@ -1,6 +1,6 @@
 // [H3/R4] WorkflowDispatch 聚合（域 #14 的 H2 workflow 族：executeWorkflowAgent +
 // runWorkflowEngineTask + 类外派发 helper 整段）——自 SubagentService 上帝类 strangler
-// 抽取的第五个聚合文件（设计 docs/design/subagent-service-decomposition.md §2.1 域 #14
+// 抽取的第五个聚合文件（设计 docs/architecture/subagent-service-decomposition.md §2.1 域 #14
 // 增项 / impl-plan §2 R4 行「H2 workflow 族整段随族迁入」）。
 //
 // [G1 超限预授权拆分 / 偏差 D-R4-1] 主 agent 派发预授权：R4 域段体量大（派发估算
@@ -29,12 +29,14 @@
 
 import { getLogger } from "../../core/logger.ts";
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
+
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
-import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
-import { updateFromEvent } from "../execution-record.ts";
+import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
+import { updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { JOURNAL_INITIAL_POOL_KEY, wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+watchdog+外部 signal 三源合流。
@@ -44,9 +46,9 @@ import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.t
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { AgentConfig } from "../model-resolver.ts";
-import type { NotifyHost } from "../notify-host.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { AgentConfig } from "../assembly/model-resolver.ts";
+import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
@@ -56,10 +58,10 @@ import {
   disarmSettledWatchdog,
   refreshFromProtocolEvent,
   type SettledWatchdogFireInfo,
-} from "../settled-watchdog.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../stream-sink.ts";
-import { MAX_FORK_DEPTH } from "../session-context-resolver.ts";
-import type { UiRequestObservability } from "../ui-request-observability.ts";
+} from "../lifecycle/settled-watchdog.ts";
+import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import {
   DEFAULT_AGENT_NAME,
   ForkDepthExceededError,
@@ -68,7 +70,7 @@ import {
   type ExecuteOptions,
   type ExecutionMode,
   type ExecutionRecord,
-} from "../types.ts";
+} from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND, MS_PER_SECOND, SECONDS_PER_MINUTE } from "./service-constants.ts";
 
@@ -365,11 +367,9 @@ export class WorkflowDispatch {
 
       const runCtx: RunContext = {
         taskId: record.id,
-        poolKey: JOURNAL_INITIAL_POOL_KEY,
         signal: runSignal.signal,
         ctxModel: identity.resolved.model,
         onEvent: observedEvent,
-        onPoolResolved: journal.onPoolResolved,
         ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
         ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
@@ -390,7 +390,9 @@ export class WorkflowDispatch {
       journal.backfillHandle(handle);
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
-        poolKey: handle.data.poolKey,
+        // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
+        // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
+        poolKey: SHARED_POOL_KEY,
         journalPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);

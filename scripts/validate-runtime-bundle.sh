@@ -37,7 +37,7 @@ cd "$PROJECT_ROOT"
 
 # Gate 0：pnpm store 布局守卫——布局被沙箱执行体（zsw 引擎 HOME 覆盖）翻转时，
 # 下方 verify-plugin-e2e 的自含 install 会以 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
-# 硬崩；先拦下给出可操作指引（见 docs/troubleshooting.md「pnpm store 布局双向翻转」）。
+# 硬崩；先拦下给出可操作指引（见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」）。
 bash "$PROJECT_ROOT/.githooks/check_pnpm_store_layout.sh" || exit 1
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

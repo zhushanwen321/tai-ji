@@ -4,7 +4,7 @@
  * W18（perf 03 D4-5）采集收编：snapshotGitStatus / numstat 委托注入的 IGitStateService
  * （异步 execFile + in-flight 单飞 + 非仓库负缓存，W16 基础设施），本 adapter 不再 spawn
  * 任何子进程；diffSnapshots / computeLineCounts 转发 file-change-reconciler 的纯函数。
- * 组合根注入 EventInterpreter，使 service 层不直接 import infra（[runtime-three-layer-design.md] 铁律）。
+ * 组合根注入 EventInterpreter，使 service 层不直接 import infra（[runtime-layering.md] 铁律）。
  */
 import type { FileChange } from '@xyz-agent/shared'
 import type { IFileChangeDiff, FileChangeSnapshot, NumstatMap } from '../../services/ports/file-change-diff.js'

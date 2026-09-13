@@ -159,7 +159,12 @@ async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handle
   // handleHandoffSend 的 isSessionActive 兑底，非此处）。非 staging 走原 canSend 守卫。
   const activeStaging = deps.staging.activeStaging.value
   const canStagingSend = !!activeStaging && (activeStaging.allowsEmptySend || deps.canSend.value) && !deps.isSending.value
-  if (!deps.canSend.value && !canStagingSend) return 'blocked'
+  if (!deps.canSend.value && !canStagingSend) {
+    // [GUI 快修④] blocked 不再静默返回：点击/回车被守卫拦下时给用户可见反馈——
+    // 有输入 = 占用中（双发/流式期），无输入 = 空输入。区分消息避免「点了没反应」。
+    deps.toastError(deps.t(deps.hasInput.value ? 'panel.composer.sendBusy' : 'panel.composer.sendEmptyHint'))
+    return 'blocked'
+  }
   // staging 路由：经 useComposerStaging.send → activeStaging.send。仅在有活跃 staging 时取 staging config
   // 透传（fork/handoff 内部 handleXxxSend 也自取 deps.getStagingConfig，传参与自取等价故实际被忽略）。
   // 守卫 hasActiveStaging：非 staging 态不调 getStagingConfig（避免测试 mock 未提供该方法时炸 + 语义清晰）。
@@ -190,7 +195,11 @@ async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handle
  */
 async function routeSteer(deps: ComposerSendDeps, route: SendRoute): Promise<boolean> {
   if (deps.staging.activeStaging.value || route !== 'steer' || deps.canSend.value) return false
-  if (!deps.hasInput.value || deps.isSending.value) return true
+  if (!deps.hasInput.value || deps.isSending.value) {
+    // [GUI 快修④] steer 行的空输入/双发拦截不再静默吞掉（占用期点击发送无任何反馈）
+    deps.toastError(deps.t(deps.hasInput.value ? 'panel.composer.sendBusy' : 'panel.composer.sendEmptyHint'))
+    return true
+  }
   const sid = deps.sessionIdRef.value
   if (!sid) return true
   // clearInput 会清空 DOM，必须先快照 segments（onSend/submit 同范式）

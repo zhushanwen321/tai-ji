@@ -1,7 +1,7 @@
 /**
  * Pi 启动参数预设数据模型。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md
+ * 设计文档：docs/architecture/pi-launch-presets.md
  *
  * 预设是一组 pi 启动参数的命名集合，用户可创建/编辑/删除。
  * 内置预设 3 个（builtin:true，不可删除），自定义预设任意编辑。

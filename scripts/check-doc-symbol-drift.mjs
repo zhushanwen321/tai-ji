@@ -39,55 +39,17 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 /**
  * 文档 → 权威源码模块映射（新增设计文档在此登记）。
  * 值为目录（递归收 .ts，排除 __tests__/test）或精确文件。
- *
- * [ext-simplify-12 E10 边界登记]
- * - chat-domain-v1x-liveness-governance 两文档映射值除 pending-notifications/src 外
- *   另含 3 个伴随模块：两文档反引号内引用跨系统现行符号（CANCEL_SETTLE_GRACE_MS /
- *   ENGINE_PROTOCOL_VERSION = subagent-engine-sdk protocol；CMD_TIMEOUT_MS /
- *   FAST_TIMEOUT_MS = runtime infra/pi/rpc-client.ts；getPi = subagent-core
- *   execution/notify-host.ts 的 NotifyHostDeps 成员）——只登记单一模块会把这些现行
- *   符号误报为 drift（登记即红），按本表先例（多模块映射）扩充归属面。
- * - 本组登记的守卫能力边界：候选集只抓蛇形大写与 get 前缀驼峰（调用形态），
- *   rebuildFromEntries 类普通驼峰不在候选集——此类悬空靠一次性清扫（E9）+
- *   C-proc-10 流程纪律兜底，不可机检。
- * - 清扫/回护不对称（2/4）：E9 清扫的 4 个 docs 文件中仅 chat-domain 两文档入映射
- *   获机检回护；docs/design/base-tool-enhance.md 不入映射，其 PENDING_* 族悬空不
- *   机检——扩映射实测受阻：登记后实跑守卫即红（:93 getAgentDir、:196/:333
- *   getEntries 为 pi SDK 符号，不在本仓源码导出表），需新增「外部符号白名单」机制
- *   才能绿；该维护税与「E9 清扫后 PENDING_* 引用归零 + C-proc-10 纪律兜底」的残余
- *   风险不匹配，裁决不做（ext-simplify-12 设计 §7 E10）。
- * - 删除性设计文档自身不登记：ext-simplify-12-pending-notifications{,.impl-plan}.md
- *   以引用被删符号为正文职责，登记即恒红。
  */
 const DOC_MODULE_MAP = {
-  'docs/design/update-network-resilience.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts'],
-  'docs/design/update-network-resilience.impl-plan.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts'],
-  'docs/design/update-multi-source.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts', 'apps/electron/main/release-checker.ts', 'apps/electron/main/interfaces.ts'],
-  'docs/design/update-multi-source.impl-plan.md': ['apps/electron/main/update', 'apps/electron/main/gateway/update-handlers.ts', 'apps/electron/main/release-checker.ts', 'apps/electron/main/interfaces.ts'],
-  'docs/design/chat-stream-perf-architecture.md': ['packages/core/src/domain/chat', 'packages/core/src/domain/session', 'packages/renderer/src/composables/features/sidebar', 'packages/renderer/src/composables/features/trace'],
-  'docs/design/chat-stream-perf-architecture.impl-plan.md': ['packages/core/src/domain/chat', 'packages/core/src/domain/session', 'packages/renderer/src/composables/features/sidebar', 'packages/renderer/src/composables/features/trace'],
-  'docs/design/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts'],
-  'docs/design/zcode-session-db-isolation.impl-plan.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts'],
-  'docs/design/catalog-provider-field-authority.md': ['packages/runtime/src/services/provider-config-helper.ts', 'packages/runtime/src/services/provider-catalog.ts', 'packages/runtime/src/services/auth/provider-credential-resolver.ts', 'packages/runtime/src/infra/pi/pi-provider-store.ts', 'packages/core/src/domain/settings/use-provider-edit.ts', 'scripts/check-doc-symbol-drift.mjs'],
-  'docs/design/catalog-provider-field-authority.impl-plan.md': ['packages/runtime/src/services/provider-config-helper.ts', 'packages/runtime/src/services/provider-catalog.ts', 'packages/runtime/src/services/auth/provider-credential-resolver.ts', 'packages/runtime/src/infra/pi/pi-provider-store.ts', 'packages/core/src/domain/settings/use-provider-edit.ts', 'scripts/check-doc-symbol-drift.mjs'],
+  'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
   // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
-  'docs/design/subagent-agent-end-recovery-replay.md': [
-    'packages/pi-subagent-cli/src',
-    'packages/subagent-core/src/execution',
-    'packages/subagent-core/src/orchestration/execute-agent-call.ts',
-    'packages/subagent-engine-sdk/src/protocol/engine-protocol.ts',
-    'scripts/check-doc-symbol-drift.mjs',
-  ],
-  'docs/design/chat-domain-v1x-liveness-governance.md': ['extensions/universal/pending-notifications/src', 'packages/subagent-core/src/execution', 'packages/subagent-engine-sdk/src/protocol', 'packages/runtime/src/infra/pi'],
-  'docs/design/ext-simplify-02-system-prompt-trace.md': ['extensions/taiji/system-prompt-trace/src'],
-  'docs/design/ext-simplify-02-system-prompt-trace.impl-plan.md': ['extensions/taiji/system-prompt-trace/src'],
 }
 
-/** 环境变量名白名单（非导出符号，文档合法引用）：项目（XYZ_/PI_/ENGINE_）与运行平台（NODE_/ELECTRON_/ZCODE_）env 前缀。ENGINE_ = 引擎 conformance live 门 env（如 ENGINE_CONFORMANCE_LIVE，定义在测试文件，不在守卫收集面） */
-const ENV_NAME_ALLOW_RE = /^(XYZ_|PI_|NODE_|ELECTRON_|ZCODE_|ENGINE_)[A-Z0-9_]+$/
+/** 环境变量名白名单（非导出符号，文档合法引用）：项目（XYZ_/PI_）与运行平台（NODE_/ELECTRON_/ZCODE_）env 前缀 */
+const ENV_NAME_ALLOW_RE = /^(XYZ_|PI_|NODE_|ELECTRON_|ZCODE_)[A-Z0-9_]+$/
 /** undici errno 字符串族（文档描述错误分类的字符串字面量，非本项目符号） */
 const ERRNO_STRING_ALLOW_RE = /^(UND_ERR_|E[A-Z]{3,})/
 /** export 声明的 5 种节点类别（对应 ts.isFunctionDeclaration 等类型守卫） */

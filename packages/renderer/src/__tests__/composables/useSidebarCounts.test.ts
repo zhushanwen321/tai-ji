@@ -1,12 +1,11 @@
 /**
- * useSidebarCounts badge 口径单测（设计 subagent-sidebar-filter D8 / T3）。
+ * useSidebarCounts badge 口径单测（设计 subagent-sidebar-filter D8 / T3；U8b 两态化重述）。
  * 另含 sessionCount（非归档口径：全量会话数 − 已归档，sidebar-tab-count-restore §2.3/§3.1）套件。
  *
- * subagentRunningCount 判据 = 「进行中」桶 SSOT（subagentBucket(r) === 'active'，
- * D6 #5 收敛——曾为本地重复实现 `status === 'running' && !isDoneProjection(r)`，
- * 与分桶判据同义但两处维护）：done 投影（one-shot 轮终等 GC，renderer 侧永久态）
- * 不计入、waiting（可复活非终态）计入——badge 语义与列表 active 桶恒同源，
- * 消除 badge 永久虚亮 / 口径漂移分叉。
+ * subagentRunningCount 判据 = 「正在跑」占用谓词 SSOT（isRunningProjection，
+ * subagent-bucket D4）：done 投影（one-shot 轮终等 GC）不计入、waiting（可复活
+ * 非终态）计入、idle 与 legacy 终态不计入（默认可见性翻转后 badge 只数真有活在跑，
+ * badge ↔ FilterBar running 计数恒同源，消除口径漂移分叉）。
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/composables/useSidebarCounts.test.ts
  */
@@ -67,11 +66,12 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
-  it('waiting（resumable 等续聊）仍计入（与「进行中」桶口径一致：可复活非终态）', () => {
+  it('waiting（resumable 等续聊）仍计入；idle（U8 两态收口）不计入（badge = 真有活在跑）', () => {
     const sid = ref<string | null>('sess-wait')
     const store = useSubagentStore()
     store.applyRecords('sess-wait', [
       makeRecord({ subagentId: 'bg-wait-1', status: 'running', resumable: true }),
+      makeRecord({ subagentId: 'bg-idle-1', status: 'idle', stopReason: 'completed', turns: 3 }),
     ])
 
     const counts = useSidebarCounts(sid)
@@ -115,7 +115,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     expect(counts.subagentRunningCount.value).toBe(0)
   })
 
-  it('与「进行中」桶计数恒一致（D6 #5：判据直接引用 subagentBucket SSOT，混合 fixture 下 badge = countSubagents.active）', () => {
+  it('与「正在跑」过滤视图计数恒一致（D6 #5 同源判据：混合 fixture 下 badge = countSubagents.running）', () => {
     const sid = ref<string | null>('sess-mix')
     const store = useSubagentStore()
     const records = [
@@ -124,14 +124,15 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
       makeRecord({ subagentId: 'm3', status: 'running', result: '本轮产出', chatMode: false }),
       makeRecord({ subagentId: 'm4', status: 'done' }),
       makeRecord({ subagentId: 'm5', status: 'failed', error: 'boom' }),
+      makeRecord({ subagentId: 'm6', status: 'idle', stopReason: 'completed' }),
     ]
     store.applyRecords('sess-mix', records)
 
     const counts = useSidebarCounts(sid)
-    // badge（D8 收窄）= 2（m1 streaming + m2 waiting；m3 done 投影排除）
+    // badge（D8 收窄）= 2（m1 streaming + m2 waiting；m3 done 投影 / m4-m6 收口不计入）
     expect(counts.subagentRunningCount.value).toBe(2)
-    // 与分桶 SSOT 的 active 桶计数恒等（同源判据，badge ↔ 桶不再分叉）
-    expect(counts.subagentRunningCount.value).toBe(countSubagents(records).active)
+    // 与分桶 SSOT 的 running 视图计数恒等（同源判据，badge ↔ 过滤视图不再分叉）
+    expect(counts.subagentRunningCount.value).toBe(countSubagents(records).running)
   })
 })
 

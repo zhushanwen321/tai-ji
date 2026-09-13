@@ -10,7 +10,7 @@
  *
  * 层归属：Engine。零 infra 依赖（AC-1）。
  */
-import type { SubagentStream } from "../../execution/stream-sink.ts";
+import type { SubagentStream } from "../../execution/assembly/stream-sink.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";

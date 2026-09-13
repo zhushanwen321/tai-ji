@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a1-staggered-single-wakeup.mjs
 //
 // [A1] 错峰全成功单唤醒（DoD 门）
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A1 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A1 行（设计文档已删，git 可追溯）：
 //   RPC 起 pi，发一条含 3 个 collect:"sync" start 的 prompt（任务里让三台
 //   sleep 10s/30s/60s 再返回），等待。
 // 预期输出：

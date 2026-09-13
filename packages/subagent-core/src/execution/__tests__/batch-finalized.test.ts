@@ -25,11 +25,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { SyncCollectDomain } from "../service/sync-collect-domain.ts";
-import type { SubagentRecord } from "../types.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 const ROOT_SESSION = "root-batch-finalized";
 
@@ -110,7 +110,7 @@ describe("batch-finalized 归口（U3/D1）——barrier：manifest 落盘完成
     for (const id of ["sa-bf-a", "sa-bf-b"]) {
       seedStore.reportSubagentRecord(memberRecord({ id }));
       seedStore.reportSubagentRecord(
-        memberRecord({ id, status: "closed", closedReason: "gc", endedAt: 2000, result: `done-${id}` }),
+        memberRecord({ id, status: "idle", closedReason: "gc", endedAt: 2000, result: `done-${id}` }),
       );
     }
 

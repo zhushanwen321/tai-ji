@@ -80,7 +80,7 @@ export function fsSyncModule(
  * removeAliveMarker（finalizeRecord 收尾删 .alive）mock；其余导出保留真实实现
  * （worktree-manager / record-store 消费，本组用例不涉及但保留以避免间接报错）。
  */
-export function aliveStoreModule(actual: typeof import("../../alive-store.ts")) {
+export function aliveStoreModule(actual: typeof import("../../persistence/alive-store.ts")) {
   return {
     ...actual,
     writeAliveMarker: vi.fn(),

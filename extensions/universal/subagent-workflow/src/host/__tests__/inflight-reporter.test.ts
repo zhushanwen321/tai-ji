@@ -2,12 +2,16 @@
 //
 // 三视角：
 //   ①使用者（runtime event-adapter 视角）——帧形状：title=SUBAGENT_INFLIGHT_MARKER、
-//     options=[JSON 帧]（kind/inFlight/sessionId/emittedAt）、控制面级 timeout 在场；
-//   ②构建者——初始上报（attachSession 触发，kind='initial'，无需任何 subagent 调用）
-//     → ack 成功一次后转 'delta'；失败折叠 + 延迟重试直至成功一次；推送在途期间
-//     多次迁移合并为单帧且携带最新绝对计数；
+//     options=[JSON 帧]（inFlight/sessionId/emittedAt）、控制面级 timeout 在场；
+//   ②构建者——初始上报（attachSession 触发，无需任何 subagent 调用）→ ack 清失败
+//     计数；失败折叠 + 延迟重试；推送在途期间多次迁移合并为单帧且携带最新绝对计数；
 //   ③观察者——onInFlightChanged 同步返回（不 await select，不进生命周期链）；
 //     detachSession 停重试，session 死后通道静默。
+//
+// [HISTORICAL] 行为于 9f914b749 变更：kind='initial'|'delta' 帧字段与 initialAcked
+// 状态机作为死面删除（消费方 event-adapter 从不读 kind，绝对计数语义下帧间等价；
+// 该 commit 漏改本文件致断言失效）。断言已对齐现行协议形状——SubagentInFlightReport
+// 无 kind 字段，kind 断言改为 undefined 锁形（防字段悄悄回流）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -87,7 +91,7 @@ async function advance(ms: number): Promise<void> {
 }
 
 describe("初始上报（D5：触发时点 = extension 加载完成 / session 就绪）", () => {
-  it("attachSession 即发 kind='initial' 帧（count=当下快照，无需任何 subagent 调用）", async () => {
+  it("attachSession 即发初始帧（count=当下快照，无需任何 subagent 调用）", async () => {
     const channel = makeSelectChannel();
     const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
 
@@ -98,7 +102,7 @@ describe("初始上报（D5：触发时点 = extension 加载完成 / session �
     expect(channel.calls[0].title).toBe(SUBAGENT_INFLIGHT_MARKER);
     expect(channel.calls[0].timeout).toBe(SELECT_TIMEOUT_MS);
     const frame = parseFrame(channel.calls[0]);
-    expect(frame.kind).toBe("initial");
+    expect(frame.kind).toBeUndefined(); // kind 已删（9f914b749）：锁现行协议形状，防字段回流
     expect(frame.inFlight).toBe(0);
     expect(frame.sessionId).toBe("sess-u7a");
     expect(typeof frame.emittedAt).toBe("number");
@@ -107,7 +111,7 @@ describe("初始上报（D5：触发时点 = extension 加载完成 / session �
     await advance(0);
   });
 
-  it("初始未送达前发生的迁移不产生第二帧（合并进 initial，送达后转 delta）", async () => {
+  it("初始未送达前发生的迁移不产生第二帧（合并为单帧，ack 后补推最新快照）", async () => {
     const channel = makeSelectChannel();
     const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
     reporter.attachSession(makeCtx(channel));
@@ -123,7 +127,7 @@ describe("初始上报（D5：触发时点 = extension 加载完成 / session �
     await advance(0);
     expect(channel.calls).toHaveLength(2);
     const delta = parseFrame(channel.calls[1]);
-    expect(delta.kind).toBe("delta");
+    expect(delta.kind).toBeUndefined(); // kind 已删（9f914b749）：帧间等价，无 initial/delta 之分
     expect(delta.inFlight).toBe(2); // 补推帧携带最新绝对计数
   });
 });
@@ -155,7 +159,7 @@ describe("绝对计数语义（每帧携带当下值，非增量）", () => {
 });
 
 describe("失败折叠 + 延迟重试直至成功一次（D5 缺席语义②）", () => {
-  it("select resolve undefined（超时/旧版 runtime）→ 折叠重试；重试帧仍 kind='initial'；ack 后停", async () => {
+  it("select resolve undefined（超时/旧版 runtime）→ 折叠重试；重试帧携带完整快照；ack 后停", async () => {
     const channel = makeSelectChannel();
     const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
     reporter.attachSession(makeCtx(channel));
@@ -168,9 +172,11 @@ describe("失败折叠 + 延迟重试直至成功一次（D5 缺席语义②）"
     expect(channel.calls).toHaveLength(1); // 未到退避点不重试
     await advance(1);
     expect(channel.calls).toHaveLength(2);
-    expect(parseFrame(channel.calls[1]).kind).toBe("initial"); // 初始「成功一次」未达成
+    const retryFrame = parseFrame(channel.calls[1]);
+    expect(retryFrame.kind).toBeUndefined(); // kind 已删（9f914b749）：重试帧与普通帧等价
+    expect(retryFrame.inFlight).toBe(0); // 重试帧携带完整绝对计数快照
 
-    // 重试帧得到 ack → 重试停止；随后迁移以 delta 送达
+    // 重试帧得到 ack → 重试停止；随后迁移照常送达
     channel.settle(1, INFLIGHT_REPORT_ACK);
     await advance(RETRY_MS * 10);
     expect(channel.calls).toHaveLength(2);
@@ -178,7 +184,7 @@ describe("失败折叠 + 延迟重试直至成功一次（D5 缺席语义②）"
     reporter.onInFlightChanged();
     await advance(0);
     expect(channel.calls).toHaveLength(3);
-    expect(parseFrame(channel.calls[2]).kind).toBe("delta");
+    expect(parseFrame(channel.calls[2]).inFlight).toBe(0);
     channel.settleAll(INFLIGHT_REPORT_ACK);
   });
 

@@ -1,15 +1,15 @@
-// inflight-snapshot.test.ts —— core→壳在途事件出口 + EnginePort.inFlightSnapshot? 缺省语义
-//（u7a，设计权威源：docs/design/crash-forensics-and-watchdog.md §3.3 D5）。
+// inflight-snapshot.test.ts —— core→壳在途事件出口（u7a，设计权威源：
+// docs/architecture/crash-forensics-and-watchdog.md §3.3 D5）。
 //
 // 三视角：
 //   ①使用者（壳层 reporter 视角）——setInFlightListener 注册后，core 状态迁移点
-//     （子进程注册/移除、idle timer arm）推来最新绝对计数快照；getInFlightSnapshot
-//     随时可拉（初始上报数据源）。
+//     （子进程注册/移除、idle timer arm）触发通知，监听者自行 getInFlightSnapshot
+//     现取快照（发送时刻求值）；getInFlightSnapshot 随时可拉（初始上报数据源）。
 //   ②构建者——计数 = 双谓词过滤（hasLiveProcessHandle && !hasIdleTimer，与
 //     notify-host hasRunningBackground 同源）：活句柄且无 armed idle timer 才算在途，
 //     Path A 保活（timer armed）不算——D5 防推迟恒真的核心裁决。
-//   ③观察者——EnginePort 可选成员向后兼容：pi 引擎不实现（undefined = 无在途），
-//     zcode 引擎实现（快照面在场）；出口监听者抛错不反噬 core。
+//   ③观察者——出口监听者抛错不反噬 core；无参签名（2026-09-13 oe-audit：原
+//     snapshot 参数自交付起无任何监听者消费，删除）。
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
@@ -19,16 +19,15 @@ import {
   armIdleTimer,
   disarmIdleTimer,
   _resetLifecycleState,
-} from "../../lifecycle-manager.ts";
+} from "../../lifecycle/lifecycle-manager.ts";
 import {
   getInFlightSnapshot,
   notifyInFlightChanged,
   setInFlightListener,
   type InFlightSnapshot,
 } from "../inflight-snapshot.ts";
-import type { EnginePort } from "../port.ts";
 // W3 合并改写：inproc 引擎已删——句柄记账走 host/spawned-children 镜像（register +
-// reset 测试面）；「引擎无 inFlightSnapshot 可选成员」断言改桩（EnginePort 缺席形态）。
+// reset 测试面）。
 import {
   killRecordChildWithEscalation,
   registerSpawnedChildForRecord,
@@ -98,9 +97,9 @@ describe("getInFlightSnapshot：双谓词绝对计数（D5 求值位置 = 状态
 });
 
 describe("notifyInFlightChanged：迁移点 → 壳层监听者（同步 fire-and-forget）", () => {
-  it("监听者收到最新快照（迁移时刻求值，非注册时刻）", () => {
+  it("监听者在迁移时刻被调，现取快照即最新值（发送时刻求值，非注册时刻）", () => {
     const seen: InFlightSnapshot[] = [];
-    setInFlightListener((s) => seen.push({ ...s }));
+    setInFlightListener(() => seen.push(getInFlightSnapshot()));
 
     notifyInFlightChanged();
     expect(seen).toEqual([{ inFlight: 0 }]);
@@ -120,20 +119,20 @@ describe("notifyInFlightChanged：迁移点 → 壳层监听者（同步 fire-an
   it("无监听者时 no-op；注册覆盖语义（后注册者收到，先注册者不再收）", () => {
     expect(() => notifyInFlightChanged()).not.toThrow();
 
-    const first: InFlightSnapshot[] = [];
-    const second: InFlightSnapshot[] = [];
-    setInFlightListener((s) => first.push(s));
-    setInFlightListener((s) => second.push(s));
+    let firstCalls = 0;
+    let secondCalls = 0;
+    setInFlightListener(() => { firstCalls += 1; });
+    setInFlightListener(() => { secondCalls += 1; });
     notifyInFlightChanged();
-    expect(first).toEqual([]);
-    expect(second).toEqual([{ inFlight: 0 }]);
+    expect(firstCalls).toBe(0);
+    expect(secondCalls).toBe(1);
   });
 
   it("host-bridge armIdleTimer / disarmIdleTimer 委托点自动触发通知（迁移点接线证据）", () => {
     // W3 镜像形态：register 本身不再通知（子进程终止经引擎反向通道），core 侧唯一挂
     // notifyInFlightChanged 的委托面 = host-bridge 的 arm/disarm（u7a 迁移点新宿主）。
     const seen: InFlightSnapshot[] = [];
-    setInFlightListener((s) => seen.push(s));
+    setInFlightListener(() => seen.push(getInFlightSnapshot()));
     registerSpawnedChildForRecord("sa-inflight-auto", makeFakeChild());
 
     const bridge = createHostBridge({
@@ -145,36 +144,5 @@ describe("notifyInFlightChanged：迁移点 → 壳层监听者（同步 fire-an
 
     bridge.disarmIdleTimer("sa-inflight-auto");
     expect(seen.at(-1)).toEqual({ inFlight: 1 });
-  });
-});
-
-describe("EnginePort.inFlightSnapshot? 可选成员缺省语义（D5：pi 不实现，zcode 实现）", () => {
-  it("未实现该成员的引擎桩 → undefined（= 无引擎侧在途面，pi 形态由 extension 聚合上报覆盖）", () => {
-    // 经 EnginePort 接口面访问（可选成员缺席的正当形态）；裸桩无此声明（W3 后 inproc
-    // pi 引擎已删，缺席形态以桩承载——zcode 真实现的断言移 zcode-subagent-cli 测试），
-    // 消费方必须走 port 类型——本身就是「缺席正当」契约的一部分。
-    const pi: EnginePort = { capabilities: () => ({ id: "pi-stub" }) } as unknown as EnginePort;
-    expect(pi.inFlightSnapshot).toBeUndefined();
-  });
-
-  it("实现该成员的引擎桩 → 同步快照；未初始化恒 0（空闲常驻≠在途——真实现断言在 zcode-subagent-cli 的 zcode-engine-inflight.test）", () => {
-    const engine: EnginePort = {
-      capabilities: () => ({ id: "zcode-stub" }),
-      inFlightSnapshot: () => ({ inFlight: 0 }),
-    } as unknown as EnginePort;
-    expect(typeof engine.inFlightSnapshot).toBe("function");
-    expect(engine.inFlightSnapshot?.()).toEqual({ inFlight: 0 });
-  });
-
-  it("未实现该成员的引擎对象仍满足 EnginePort（向后兼容，可选成员不强制）", () => {
-    // 结构化证据：EnginePort 的既有可选成员扩展先例（listModels/validateModel/dispose）
-    // 同款——缺席成员不破坏实现关系（裸桩承载缺席形态）。W3 后 inproc pi 引擎已删，
-    // id 不再由引擎身份推导断言（桩无 id 字面量），能力面 id 经 capabilities() 取。
-    const pi: EnginePort = { capabilities: () => ({ id: "pi-stub" }) } as unknown as EnginePort;
-    // EngineCapabilities 契约面无 id 成员（contract-types.ts）——运行期桩携带的 id 经
-    // 窄化读取断言（HEAD 既有类型红此处修复：pi.capabilities().id 直取 TS2339）。
-    expect((pi.capabilities() as unknown as { id: string }).id).toBe("pi-stub");
-    expect(typeof pi.capabilities).toBe("function");
-    expect(pi.inFlightSnapshot).toBeUndefined();
   });
 });

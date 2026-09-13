@@ -25,7 +25,7 @@ vi.mock( "@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => l
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { createRecord } from "@zhushanwen/subagent-core/execution/execution-record.ts";
+import { createRecord } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";

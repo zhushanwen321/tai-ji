@@ -24,7 +24,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 const { foreignLiveSpy } = vi.hoisted(() => ({
   foreignLiveSpy: vi.fn<() => { pid: number; id: string; startedAt: number } | undefined>(),
 }));
-vi.mock("../alive-store.ts", () => ({
+vi.mock("../persistence/alive-store.ts", () => ({
   writeAliveMarker: vi.fn(),
   removeAliveMarker: vi.fn(),
   readAliveMarker: vi.fn(() => undefined),
@@ -32,10 +32,10 @@ vi.mock("../alive-store.ts", () => ({
   findForeignLiveInstance: foreignLiveSpy,
 }));
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { ResurrectDeniedError } from "../types.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 import type { PiLike } from "../subagent-service.ts";
 
 function makeTmpAgentDir(): string {
@@ -157,8 +157,9 @@ describe("T5③ cold-lookup running candidate foreign-instance guard", () => {
       service["getRecordForAction"]("sa-foreign");
     } catch (err) {
       expect((err as Error).message).toContain("4242");
-      expect((err as Error).message).toContain("double-write");
-      expect((err as Error).message).toContain("Recovery");
+      // [U4] 统一占用拒绝句式（设计 §3.1 唯一拒绝形态：错误 → 权威源 → 重试闭环）
+      expect((err as Error).message).toContain("is writing this session");
+      expect((err as Error).message).toContain("close it or wait for it to exit, then retry");
     }
     expect(foreignLiveSpy).toHaveBeenCalledWith("/tmp/fake-session.jsonl");
   });

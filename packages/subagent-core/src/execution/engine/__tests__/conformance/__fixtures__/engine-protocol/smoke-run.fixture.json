@@ -92,15 +92,10 @@
         "message": "run started (redacted)"
       },
       {
-        "op": "poolResolved",
-        "poolKey": "shared"
-      },
-      {
         "op": "handleReady",
         "sessionRef": {
           "sessionId": "sess-fixture"
-        },
-        "poolKey": "shared"
+        }
       },
       {
         "op": "childSpawned",
@@ -144,13 +139,6 @@
         }
       },
       {
-        "op": "permission",
-        "request": {
-          "action": "bash",
-          "detail": "redacted"
-        }
-      },
-      {
         "op": "askUser",
         "request": {
           "method": "select",
@@ -180,7 +168,6 @@
         "sessionRef": {
           "sessionId": "sess-fixture"
         },
-        "poolKey": "shared",
         "adapterVersion": "fake-adapter-1"
       },
       "outcome": {

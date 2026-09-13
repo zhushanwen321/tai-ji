@@ -19,7 +19,8 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { computeElapsedSeconds, getAllToolCalls, projectLiveProgress } from "@zhushanwen/subagent-core";
+import { computeElapsedSeconds, getAllToolCalls } from "@zhushanwen/subagent-core";
+import { projectLiveProgress } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import type { ExecutionRecord, SubagentRecord, WorkflowRun } from "@zhushanwen/subagent-core";
 import { collectNodeLiveProgress } from "../WorkflowsView.ts";
 import { projectRecordProgress } from "../detail-content.ts";

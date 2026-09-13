@@ -576,18 +576,24 @@ export default [
   // 1245 → 无界等待修复 1415 → u-h2 1471 → W4 监督器 1548 → W3 协议化 1684 →
   // R0 重排折算 1842 → R1 1785 → R2 1640 → R3 后触发告警 → R4 移除本 override）。
   // run-orchestration.ts 单列：R4 核心编排聚合——[D-R4-1] G1 容量偏差的 lint 面
-  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限，备选第三
-  // 文件 chat-rounds.ts 未采纳，理由见 impl-plan §5 D-R4-1）。终态实测（阶段3 复核）：
-  // 本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts 527 物理行
-  // 合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
+  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限）。终态实测
+  //（阶段3 复核）：本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts
+  // 527 物理行合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
   // [HISTORICAL] metrics-gate cyclo 偿还（kickOffChatRound IIFE 21 / executeViaEngine 16 /
   // settleOneShotOutcome 16 阶段化拆解，均 ≤15）：行为保持提取的 helper 签名/花括号/
   // JSDoc 开销 +71 折算行（869）触发零余量告警，按 engine-client.ts 同款惯例抬至 900——
   // 按域再拆（如 chat-round 启动面独立模块）登记为后续重构债，拆分债本体不变。
+  // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作面拆出
+  // chat-rounds.ts 后，本文件 1077 物理行 / 549 折算——阈值保持 800（余量健康，
+  // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 793 物理行 / 365 折算，低于
+  // packages 域 500 上限，无需 override（余量健康，不设零余量锁）。
+  // [2026-09-14 merge dev-0.9.20] 两侧汇合：feature 侧 chat-rounds.ts 拆分与 dev 侧
+  // cyclo 偿还 helper 共存，合并实测 1060 物理行 / 541 折算（eslint 实读）；
+  // 900 的抬升理由（未拆分文件 869 折算）随拆分落地失效，阈值回 800。
   {
     files: ['packages/subagent-core/src/execution/service/run-orchestration.ts'],
     rules: {
-      'max-lines': ['warn', { max: 900, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
   // session-reader tool-handler：聚合工具处理中枢（多工具入口 + 渲染调度），

@@ -4,7 +4,7 @@
 
 Accepted
 
-> 本 ADR 承接并 supersede ADR-026（未迁移——属源项目工程决策，两包架构，**完全 superseded**）与 [ADR-029](./pi-ext-029-full-workflow-takeover-with-worktree.md)（全流程 workflow 接管，**部分 superseded**——仅 worktree 编排决策 2 被取代，per-call cwd / cw 调用 / plan.json schema 等决策仍有效）。
+> 本 ADR 承接并 supersede ADR-026（未迁移——属源项目工程决策，两包架构，**完全 superseded**）与 [ADR-029](archive-digest.md#pi-ext-029)（全流程 workflow 接管，**部分 superseded**——仅 worktree 编排决策 2 被取代，per-call cwd / cw 调用 / plan.json schema 等决策仍有效）。
 > 见本文 Consequences 段「被取代的 ADR」。
 
 ## Context
@@ -71,4 +71,4 @@ ConcurrencyPool 默认 `maxConcurrent = 6`（**来源：T2 system-architecture �
 | ADR | supersede 范围 | 说明 |
 |-----|---------------|------|
 | ADR-026（未迁移——属源项目工程决策） | **完全 superseded** | 两包架构 → 单包合并；L3A 能力合并进单包（决策 1 承接，不做独立 L3A 包的立场保留） |
-| [ADR-029](./pi-ext-029-full-workflow-takeover-with-worktree.md) | **部分 superseded** | 仅 worktree 编排（决策 2）被取代——worktree 生命周期知识转移到 `coding-execute` skill（T3 UC-11，内容来自该决策原文）；per-call cwd（决策 1）已实现且仍活跃；cw 调用（决策 3）/ plan.json schema（决策 4）/ 砍 pending-env（决策 5）/ SQLite WAL（决策 6）与合并正交，逐决策标注仍有效 |
+| [ADR-029](archive-digest.md#pi-ext-029) | **部分 superseded** | 仅 worktree 编排（决策 2）被取代——worktree 生命周期知识转移到 `coding-execute` skill（T3 UC-11，内容来自该决策原文）；per-call cwd（决策 1）已实现且仍活跃；cw 调用（决策 3）/ plan.json schema（决策 4）/ 砍 pending-env（决策 5）/ SQLite WAL（决策 6）与合并正交，逐决策标注仍有效 |

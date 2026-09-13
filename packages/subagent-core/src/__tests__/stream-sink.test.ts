@@ -14,7 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type StreamSink, SubagentStream } from "../execution/stream-sink.ts";
+import { type StreamSink, SubagentStream } from "../execution/assembly/stream-sink.ts";
 
 /** mock sink：收集所有 setWidget 调用，便于断言。 */
 function createMockSink(): StreamSink & { calls: { key: string; lines: string[] | undefined }[] } {

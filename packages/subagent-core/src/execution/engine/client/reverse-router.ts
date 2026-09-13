@@ -5,13 +5,15 @@
 // 落在本文件）。
 //
 // 超时域划分（impl-plan §2.2 / 设计 §3.3 帧④注释）：
-//   - 快答数据面（host/log / host/streamDelta / host/poolResolved / host/handleReady /
+//   - 快答数据面（host/log / host/streamDelta / host/handleReady /
 //     host/childSpawned / host/childStateChanged）：分发 + 回 {ok:true}，10s 应答守卫
 //     ——10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（REVERSE_REQUEST_TIMEOUT_MS）；
-//   - 人机交互面（host/askUser / host/permission）：ack 两阶段——收即回 {ack:true}，
+//   - 人机交互面（host/askUser）：ack 两阶段——收即回 {ack:true}，
 //     handler 结果异步补帧②，**不计时**（R9-2：已 ack 的等待不参与任何 in-flight
 //     超时，ADR-0047 静默 ≠ 卡死）；未注入 handler → {unsupported:true}；
 //   - 未知 host/* 通道 → {unsupported:true}（引擎自行降级，不重试）。
+//     [permission 通道退役 2026-09-13] 原 host/permission 分支已删（两引擎
+//     permissionMode=native 零 emit、core 零注入）。
 
 import {
   getLogger,
@@ -22,8 +24,6 @@ import {
   type HostChildStateChangedParams,
   type HostHandleReadyParams,
   type HostLogParams,
-  type HostPermissionParams,
-  type HostPoolResolvedParams,
   type HostStreamDeltaParams,
   type UiRequest,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -38,16 +38,12 @@ export interface ReverseRouterDeps {
   engineId: string;
   /** host/askUser 应答端（[D4-④] subagent-service init.uiRequestHandler 注入点）。 */
   uiRequestHandler?: (req: UiRequest) => Promise<unknown>;
-  /** host/permission 应答端（v1 骨架注入点）。 */
-  permissionHandler?: (params: HostPermissionParams) => Promise<unknown>;
-  /** host/log 落宿主日志（缺省 SDK logger facade）。 */
-  log?: (params: HostLogParams) => void;
   /** run 作用域通知路由表（EngineClient 持有，EngineClient 生命周期内同一引用）。 */
   runRoutes: Map<string, RunRoute>;
   /** childSpawned/childStateChanged 的镜像落点。 */
   mirror: SpawnedChildrenMirror;
   /** handleReady 的 partial handle 回填（崩溃合成 handle 数据源）。 */
-  setPartialHandle: (partial: { sessionRef: Record<string, string>; poolKey: string }) => void;
+  setPartialHandle: (partial: { sessionRef: Record<string, string> }) => void;
   /** 帧②应答出口。 */
   sendResponse: (id: string, result: unknown) => boolean;
   /** 引擎故障拉起杀链（killAll）。 */
@@ -60,10 +56,6 @@ export interface ReverseRouterDeps {
 export function routeReverseRequest(deps: ReverseRouterDeps, frame: { id: string; method: string; params: unknown }): void {
   if (frame.method === "host/askUser") {
     handleInteractionRequest(deps, frame, deps.uiRequestHandler, (params) => (params as HostAskUserParams).request as UiRequest);
-    return;
-  }
-  if (frame.method === "host/permission") {
-    handleInteractionRequest(deps, frame, deps.permissionHandler, (params) => params as HostPermissionParams);
     return;
   }
   const timeoutClass = (REVERSE_CHANNEL_TIMEOUT_CLASS as Record<string, string | undefined>)[frame.method];
@@ -161,7 +153,6 @@ type DataPlaneHandler = (deps: ReverseRouterDeps, params: unknown) => Promise<vo
 const DATA_PLANE_HANDLERS: Record<string, DataPlaneHandler> = {
   "host/log": (deps, params) => dispatchLog(deps, params as HostLogParams),
   "host/streamDelta": (deps, params) => dispatchStreamDelta(deps, params as HostStreamDeltaParams),
-  "host/poolResolved": (deps, params) => dispatchPoolResolved(deps, params as HostPoolResolvedParams),
   "host/handleReady": (deps, params) => dispatchHandleReady(deps, params as HostHandleReadyParams),
   "host/childSpawned": (deps, params) => dispatchChildSpawned(deps, params as HostChildSpawnedParams),
   "host/childStateChanged": (deps, params) => dispatchChildStateChanged(deps, params as HostChildStateChangedParams),
@@ -172,27 +163,20 @@ async function dispatchDataPlane(deps: ReverseRouterDeps, method: string, params
 }
 
 function dispatchLog(deps: ReverseRouterDeps, p: HostLogParams): void {
-  if (deps.log !== undefined) deps.log(p);
-  else logger[p.level](`[engine:${p.component}] ${p.message}`, p.data);
+  logger[p.level](`[engine:${p.component}] ${p.message}`, p.data);
 }
 
 async function dispatchStreamDelta(deps: ReverseRouterDeps, p: HostStreamDeltaParams): Promise<void> {
   // [H1 U6] 关联键收敛为 runId 单键（recordId 分路随 chat 续聊轮 interact 面退役——
-  // 每轮 = 新 run，delta 恒经 run 作用域路由）。无注册路由 = 该轮宿主消费面未挂
+  // 续聊轮经 resume run 复用 runId）。无注册路由 = 该轮宿主消费面未挂
   //（诊断形态）——静默丢弃（数据面已 ack，引擎侧不重发；路由缺席非引擎故障）。
-  if (p.runId === undefined) return;
   await deps.runRoutes.get(p.runId)?.onStreamDelta?.(p.delta);
 }
 
-async function dispatchPoolResolved(deps: ReverseRouterDeps, p: HostPoolResolvedParams): Promise<void> {
-  await deps.runRoutes.get(p.runId)?.onPoolResolved?.(p.poolKey);
-}
-
 async function dispatchHandleReady(deps: ReverseRouterDeps, p: HostHandleReadyParams): Promise<void> {
-  deps.setPartialHandle({ sessionRef: p.sessionRef, poolKey: p.poolKey });
+  deps.setPartialHandle({ sessionRef: p.sessionRef });
   await deps.runRoutes.get(p.runId)?.onHandleReady?.({
     sessionRef: p.sessionRef,
-    poolKey: p.poolKey,
   });
 }
 

@@ -7,7 +7,7 @@
 # 重建，非 TTY 上下文直接 abort：ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY（间歇复现，
 # 谁最后 install 谁的 storeDir 生效）。本守卫把该场景从「5 分钟排障」收敛为一条 [FIX] 指引，
 # 同时是引擎侧 HOME 修复的验收探针——引擎仍覆写 HOME 时，workflow 一跑、本地一 commit 本
-# 护栏立刻红。根因/恢复/排障：docs/troubleshooting.md「pnpm store 布局双向翻转」条目。
+# 护栏立刻红。根因/恢复/排障：docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」条目。
 
 set -u
 
@@ -33,7 +33,7 @@ RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]
 
 if [ "$EXPECTED" != "$RECORDED" ]; then
     echo -e "${RED}[FAIL] pnpm store 布局翻转：.modules.yaml 记录 ${RECORDED} ，当前环境解析 ${EXPECTED} ${NC}"
-    echo -e "${YELLOW}[根因] 沙箱执行体（zsw 引擎 worker / CI）覆写 HOME → store 路径分叉，见 docs/troubleshooting.md「pnpm store 布局双向翻转」${NC}"
+    echo -e "${YELLOW}[根因] 沙箱执行体（zsw 引擎 worker / CI）覆写 HOME → store 路径分叉，见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」${NC}"
     echo -e "${YELLOW}[FIX] cd ${PROJECT_ROOT} && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install  （约 6-7s 重建后重试 commit）${NC}"
     exit 1
 fi

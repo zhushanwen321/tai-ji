@@ -7,8 +7,10 @@
 // - 正向方法（9 个）：initialize / probe / run / cancel / read / listModels /
 //   validateModel / dispose / ping——结果取 fixture 对应段（[H1 U5] interact 已随
 //   chat-run 统一退役）；
-// - 反向通道（8 个）：host/log / host/askUser / host/permission / host/streamDelta /
-//   host/poolResolved / host/handleReady / host/childSpawned / host/childStateChanged
+// - 反向通道（6 个）：host/log / host/askUser / host/streamDelta /
+//   host/handleReady / host/childSpawned / host/childStateChanged（[池抽象降级]
+//   host/poolResolved 已退役；[permission 退役] host/permission 已删——两引擎
+//   permissionMode=native 零 emit）
 //   ——run 期间按 fixture.run.script 逐动作播放（[H1 U5] 曾有的轮次相位通道已随
 //   chat-run 统一退役）；
 // - 错误帧：FAKE_PROTOCOL_ERROR=run_failed（run 回错误帧）| unknown_method（对任意
@@ -82,17 +84,10 @@ async function playRunScript(runId, script) {
           message: action.message ?? "",
         });
         break;
-      case "poolResolved":
-        reverseRequest(`rev-pool-${nextRequestId++}`, "host/poolResolved", {
-          runId,
-          poolKey: action.poolKey ?? "shared",
-        });
-        break;
       case "handleReady":
         reverseRequest(`rev-ready-${nextRequestId++}`, "host/handleReady", {
           runId,
           sessionRef: action.sessionRef ?? { sessionId: "sess-fixture" },
-          poolKey: action.poolKey ?? "shared",
         });
         break;
       case "childSpawned": {
@@ -140,12 +135,6 @@ async function playRunScript(runId, script) {
         // [W6] 引擎 stderr 写点（engine_crashed stderr 尾窗的实证面——同步写，
         // 后续动作可用 host/log 做到达锚）。
         process.stderr.write(action.text ?? "");
-        break;
-      case "permission":
-        reverseRequest(`rev-perm-${nextRequestId++}`, "host/permission", {
-          runId,
-          request: action.request ?? {},
-        });
         break;
       case "askUser":
         reverseRequest(`rev-ask-${nextRequestId++}`, "host/askUser", {
@@ -309,7 +298,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         injected.push({ op: "streamDelta", recordId: "rec-chat-1", delta: "chat-delta-not-routed-to-runId" });
       }
       const script = [...injected, ...(process.env.FAKE_RUN_HANG === "1"
-        ? [{ op: "poolResolved", poolKey: "shared" }, { op: "hang" }]
+        ? [{ op: "hang" }]
         : []), ...fixture.run.script];
       playRunScript(runId, script)
         .then(() => send({ id, result: cancelledRuns.has(runId)

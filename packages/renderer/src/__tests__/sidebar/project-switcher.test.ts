@@ -1,6 +1,6 @@
 /**
  * ProjectSwitcher 组件测试（3A 2 列卡片网格 + 拖拽/键盘排序，形态权威
- * docs/page-design/project-switcher-demo.html 变体 3A）。
+ * git 历史 docs/page-design/project-switcher-demo.html 变体 3A，该目录已退役）。
  *
  * 覆盖（三视角：每条含用户可见 DOM 断言）：
  *  - 渲染形态：2 列网格常驻（无折叠展开态），卡片 = 名称 + 会话数徽章，active 卡高亮

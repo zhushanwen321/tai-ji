@@ -1,6 +1,6 @@
 // [H3/R1] SessionBaselines 聚合（域 #2：session 注入 + ALS/嵌套身份基线）——自
 // SubagentService 上帝类 strangler 抽取的首个聚合（设计
-// docs/design/subagent-service-decomposition.md §2.1 域 #2 / §3.3 D4；字段归属以
+// docs/architecture/subagent-service-decomposition.md §2.1 域 #2 / §3.3 D4；字段归属以
 // r0-inventory.md 清单①为准，含 impl-plan 漏列的 uiObservability/execNesting/forkDepthAls）。
 //
 // 单一职责：session 级基线状态（pi 句柄 / session 身份 / fork 深度 ALS / exec 嵌套
@@ -25,13 +25,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { getLogger } from "../../core/logger.ts";
 
-import type { ExtensionMode } from "../host-mode.ts";
-import type { DialogGlobalQueue, UiRequestHandler } from "../dialog-queue.ts";
+import type { ExtensionMode } from "../assembly/host-mode.ts";
+import type { DialogGlobalQueue, UiRequestHandler } from "../ui/dialog-queue.ts";
 import { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { setHostUiRequestEndpoint } from "../engine/host/host-ui-endpoint.ts";
-import type { PiLike } from "../notify-host.ts";
-import type { StreamSink } from "../stream-sink.ts";
-import { UiRequestObservability } from "../ui-request-observability.ts";
+import type { PiLike } from "../notify/notify-host.ts";
+import type { StreamSink } from "../assembly/stream-sink.ts";
+import { UiRequestObservability } from "../ui/ui-request-observability.ts";
 // [R6/D-R3-2] ENV_SELF_RECORD_ID 因跨聚合消费（record-access）归位常量叶子文件，
 // 本聚合 initSession 消费改经 import（聚合→支撑文件方向合法）。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";

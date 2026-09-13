@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""
 检查目录规范（pre-commit）：
-1. 禁止创建 demos/ 或 impeccable/ 目录（demo 统一放 docs/page-design/）
+1. 禁止创建 demos/ 或 impeccable/ 目录（demo 统一放 .tmp/，不入库；原 docs/page-design/ 已于 2026-09-13 退役）
 2. 禁止 symlink 指向外部绝对路径（白名单：../ 相对路径 symlink 允许）
 3. 禁止 cw v1 工作流临时产物出现在根目录（应归档到 .xyz-harness/）
 4. 禁止备份/临时后缀文件进版本管理（*.bak/*.tmp/*.swp/*.orig/*~）
@@ -94,7 +94,7 @@ def check_forbidden_dirs(staged_files):
     if forbidden_dirs_found:
         errors.append(
             f"禁止创建目录: {', '.join(sorted(forbidden_dirs_found))}\n"
-            f"  所有 demo/HTML 统一放 docs/page-design/"
+            f"  所有 demo/HTML 统一放 .tmp/（不入库）"
         )
 
     return errors

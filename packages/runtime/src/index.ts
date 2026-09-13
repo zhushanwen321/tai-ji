@@ -920,7 +920,7 @@ async function main(): Promise<void> {
   })
 
   // ── u3b（idle-pi-reclamation）：空闲 pi 进程回收装配 ──
-  // 设计与七豁免/占座语义见 docs/design/idle-pi-reclamation.md D2/D3/D4/D6。
+  // 设计与七豁免/占座语义见 docs/design/idle-pi-reclamation.md（已删除，git 可追溯）D2/D3/D4/D6。
   // ReclaimSeat 单例：reaper 判定 / reclaimManagedSession 占座 / ensureActive 让路三处
   // 共享同一互斥状态（D6-2）；reaper 经后台序列 ⑩ 才启动，此前 seat 缺省行为不变。
   const reclaimSeat = new ReclaimSeat()

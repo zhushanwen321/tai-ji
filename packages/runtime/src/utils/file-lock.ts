@@ -1,6 +1,6 @@
 /**
  * 跨进程同步/异步文件锁（D1a，integrity-hardening.md §3.1；锁统一 D1-A，
- * docs/design/file-lock-unification-and-reaper-sink.md §3.2）。
+ * docs/architecture/file-lock-unification-and-reaper-sink.md §3.2）。
  *
  * 为什么存在：settings.json / auth.json / providers.json 等文件被 xyz runtime 与
  * pi 子进程双写（跨进程 RMW），Node 单线程只能保证进程内不交错，挡不住跨进程的

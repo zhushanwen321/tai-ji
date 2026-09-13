@@ -1,5 +1,5 @@
 /**
- * ShellRunner env 出站接线单测（U4-B8，docs/design/env-propagation-boundary.md）。
+ * ShellRunner env 出站接线单测（U4-B8，docs/architecture/env-propagation-boundary.md）。
  *
  * 覆盖：execute 传给 spawn 的 env 必须是 buildOutboundChildEnv 输出——
  * 污染父 env（deny 两键）不出站、白名单基座键（PATH/HOME/XYZ_ 前缀）放行（R2：

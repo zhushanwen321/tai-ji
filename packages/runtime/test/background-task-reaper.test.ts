@@ -1,5 +1,5 @@
 /**
- * 后台任务收殓器测试（u-runtime-reaper，设计 docs/design/file-lock-unification-
+ * 后台任务收殓器测试（u-runtime-reaper，设计 docs/architecture/file-lock-unification-
  * and-reaper-sink.md §2.3/§3.2/§3.3 + §4 S4a/S4b 触发面语义）。
  *
  * 覆盖：

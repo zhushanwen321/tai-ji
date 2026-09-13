@@ -1,5 +1,5 @@
 /**
- * TerminalService.buildEnv 出站接线单测（U4-B7，docs/design/env-propagation-boundary.md §5-U4/D5）。
+ * TerminalService.buildEnv 出站接线单测（U4-B7，docs/architecture/env-propagation-boundary.md §5-U4/D5）。
  *
  * 覆盖三个验收断言点：
  * 1. TERM 在输出中保持（含缺省时 fallback xterm-256color）；

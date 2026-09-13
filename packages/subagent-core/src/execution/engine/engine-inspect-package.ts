@@ -3,7 +3,7 @@
 // [W4] 单引擎包检查管线（engine-discovery-scan.ts 拆出——max-lines 纪律 + 职责域
 // 独立）：读 package.json → manifest 字段级解析 → bin 可执行验证 → cli descriptor
 // 装配。纯「候选包目录 → 三态检查产物」，无搜索路径/装载状态（留在 discovery-scan）。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.4 + impl-plan §2.4。
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.4 + impl-plan §2.4。
 
 import * as fs from "node:fs";
 import * as path from "node:path";

@@ -13,8 +13,8 @@ import {
 import {
   _resetLifecycleState,
   hasIdleTimer,
-} from "../../../lifecycle-manager.ts";
-import type { ExecutionRecord, SubagentRecord } from "../../../types.ts";
+} from "../../../lifecycle/lifecycle-manager.ts";
+import type { ExecutionRecord, SubagentRecord } from "../../../assembly/types.ts";
 
 /** 最小 record fake（HostBridge 只透传，不读字段）。 */
 function fakeRecord(id: string): ExecutionRecord {

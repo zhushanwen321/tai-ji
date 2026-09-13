@@ -3,7 +3,7 @@
 > 本文档整合自 xyz-pi-extensions 项目的 CLAUDE.md，收录 pi extension 开发的**强约束和关键约定**。
 > 完整开发指南（规范红线 + 进阶模式范例）见 [development-guide.md](./development-guide.md)。
 > 日志现行口径（三层通道）见 [logging-conventions.md](./logging-conventions.md)——development-guide §10 的旧 console 口径已由其收敛。
-> TUI 渲染细节见 [pi-tui-development-guide.md](./pi-tui-development-guide.md)。
+> TUI 渲染细节见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md)。
 
 本文档只收录「违反必出 bug」或「[MANDATORY]」级别的约束。通用工程规范（TS 禁 any 等）不在此重复，见项目根 [AGENTS.md](../../AGENTS.md)。本文档所载约束登记于 [docs/constraints.json](../constraints.json)（架构约束登记 SSOT）。
 
@@ -32,9 +32,9 @@
 - 同一进程可能有多个 session。模块级 `let` 变量会被所有 session 共享，必须用闭包或 `session_start` 重建
 - 扩展不能依赖 fs 之外的 Node.js 原生模块（网络、child_process 等由 Pi 核心控制）。已知例外：
   - `@zhushanwen/pi-subagent-workflow` 走单执行链——SubprocessAgentRunner 委托 SubagentService.executeAndAwait（`executeAndAwait` → `runSpawn` → `spawn("pi", ["--mode","json"])` 子进程，进程隔离），`session-runner.runSpawn` 是**唯一**的 Pi 子进程 spawn 点（ADR-030 决策 2）
-  - `@zhushanwen/pi-base-tool-enhance` 的 bash 后台任务 spawn：`detached: true` 子进程 + per-session registry 目录 + 模块级轮询器单例判活（任务生命周期绑定 pi 进程而非 session，[base-tool-enhance.md](../design/base-tool-enhance.md) D7/D17）
+  - `@zhushanwen/pi-base-tool-enhance` 的 bash 后台任务 spawn：`detached: true` 子进程 + per-session registry 目录 + 模块级轮询器单例判活（任务生命周期绑定 pi 进程而非 session——D7/D17 裁决见包内源码注释，原设计文档 base-tool-enhance.md 已删除，git 可追溯）
   - `execFileSync("git", ...)` 等只读子进程调用可使用 child_process
-  - 引擎抽象（[subagent-engine-abstraction.md](../architecture/subagent-engine-abstraction.md)，2026-08-25）曾新增使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内。（终态更新：zcode 引擎已迁独立包 `packages/zcode-subagent-cli`，只走 app-server RPC 常驻子进程、不走 CLI spawn；zcode reader 的 `node:sqlite` 直读已随读链外移迁入引擎进程）
+  - 引擎抽象（subagent-engine-abstraction.md，2026-08-25；已删除，git 可追溯）曾新增使用点：zcode launcher 的引擎 CLI `spawn`、引擎/执行器探针的 `execFile`、zcode reader 的 `node:sqlite` 动态 import。注意 ADR-030「唯一 spawn 点」字面只约束 **Pi 子进程**（subagent 执行链）的 spawn，非 pi 引擎的进程调用与原生模块使用不在该决策约束范围内。（终态更新：zcode 引擎已迁独立包 `packages/zcode-subagent-cli`，只走 app-server RPC 常驻子进程、不走 CLI spawn；zcode reader 的 `node:sqlite` 直读已随读链外移迁入引擎进程）
 - 旧包 `pi-workflow`/`pi-subagents` 的双 spawn 路径已废弃（见 [pi-ext-030](./adr/pi-ext-030-subagents-workflow-merge.md)）；旧包 `pi-subagents` 曾用的进程内 `createAgentSession()` 路径已回退为 spawn（进程隔离优先，见 pi-ext-030 决策记录）
 
 ## 资源自包含
@@ -114,9 +114,9 @@ streamSink: ctx.mode === "rpc"
   : undefined,
 ```
 
-`ExtensionMode` 字面量（4 个值：`"tui" | "rpc" | "json" | "print"`）。完整章节 + 进程边界见 [pi-tui-development-guide.md](./pi-tui-development-guide.md) 第四部分第 8 节。
+`ExtensionMode` 字面量（4 个值：`"tui" | "rpc" | "json" | "print"`）。完整章节 + 进程边界见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md) 第四部分第 8 节。
 
-> xyz-agent 跨层排查（[docs/troubleshooting.md](../troubleshooting.md) 历史排查规则）常涉及 pi extension 行为——extension 的 `ctx.mode`、pi 私有协议（triggerTurn/deliverAs 等）是排查「主 agent 是否续跑」等跨层问题的前提知识。
+> xyz-agent 跨层排查（[docs/TROUBLESHOOTING.md](../troubleshooting.md) 历史排查规则）常涉及 pi extension 行为——extension 的 `ctx.mode`、pi 私有协议（triggerTurn/deliverAs 等）是排查「主 agent 是否续跑」等跨层问题的前提知识。
 
 ## SDK 接口契约
 
@@ -284,11 +284,11 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 
 `@zhushanwen/pi-subagent-workflow`（SW）对 `@zhushanwen/pi-structured-output`（SO）的 peer 依赖是**精确版本**（开发态 `workspace:*`，`pnpm publish` 时解析为无范围的精确版本号，如 `5.0.2`）——不是 `^` 范围。
 
-**因此 SO 单独 bump 必须同步重发 SW**：npm 7+ 默认自动安装 peerDependencies 并严格解析——SO 发了新版本而 SW 未重发时，用户环境装新 SO + 旧 SW 会因旧 SW 的 peer 声明仍锁旧精确版本而报 ERESOLVE（装不上/需 --legacy-peer-deps 强装）。两包语义上本就同进退：`PI_WORKFLOW_SCHEMA` env 隐式契约 + 256KiB 上限由跨包契约测试锁字节相等（[structured-output-redesign.md](../design/structured-output-redesign.md) §7 补记 C），一端演进而另一端不跟即静默断桥。
+**因此 SO 单独 bump 必须同步重发 SW**：npm 7+ 默认自动安装 peerDependencies 并严格解析——SO 发了新版本而 SW 未重发时，用户环境装新 SO + 旧 SW 会因旧 SW 的 peer 声明仍锁旧精确版本而报 ERESOLVE（装不上/需 --legacy-peer-deps 强装）。两包语义上本就同进退：`PI_WORKFLOW_SCHEMA` env 隐式契约 + 256KiB 上限由跨包契约测试锁字节相等（原裁决记录 structured-output-redesign.md §7 补记 C——已删除，git 可追溯），一端演进而另一端不跟即静默断桥。
 
 **一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约面变更）。
 
-详见：[pi-ext-019](./adr/pi-ext-019-structured-output-extension.md)
+> 决策追溯：初始裁决记录 pi-ext-019（已压缩，见 [adr/archive-digest.md](./adr/archive-digest.md)；structured-output-redesign §7 补记 C 同为 git 历史可追溯）。
 
 ## 禁止使用已废弃的 Pi SDK namespace [MANDATORY]
 

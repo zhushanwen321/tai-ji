@@ -444,7 +444,7 @@ const headerBlockIcon = computed(() => {
  *  completed 置灰降两档（feat-chat-flow-dim）：neutral-fg → mid → dim（#74747a）。
  *  dim 3.56:1 不过 AA（critique 第 3 轮曾据此禁用），用户实测 mid 档置灰感不足、
  *  明确裁决再降一档——可读性让位于「完成块扫视即灰」的层级对比，此裁决仅限
- *  过程块折叠 header（正文/输出内容不适用）。unfinished 与 completed 同档中性灰。 */
+ *  过程块折叠 header（正文/输出内容不适用）。unfinished 与 completed 同档中性灰（abort/中断非失败，不标 danger 防 abort 满屏红误读）。 */
 const toolStatusClass = computed(() => {
   if (isRunning.value) return 'text-accent'
   if (isFailed.value) return 'text-danger'
@@ -500,6 +500,7 @@ const guiComponent = computed<GuiComponent | undefined>(() => {
  * 1 行即可观察进度，点击才展开详情）。failed 终态默认展开（错误输出立即可见）。
  * mount 快照：toolCollapsed 仅在挂载时求值，Block key 不含 status（running→error 不 remount），
  * 故 streaming 中失败的工具不展开（只 header 染 danger），仅终态挂载（重开/回看）才展开（§3.3.1 选项 A）。
+ * 被否：watch(tool.status) 强制展开——streaming 高度突变破坏跟底/回到底部浮层（P0 级风险）。
  */
 const toolCollapsed = ref(!isFailed.value)
 const toolExpanded = computed(() => !toolCollapsed.value)

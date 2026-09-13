@@ -52,7 +52,6 @@ export class FakeRun {
           v: 1,
           engineId: "pi",
           sessionRef: { recordId: this.ctx.taskId },
-          poolKey: "shared",
           adapterVersion: "fake-engine-port",
         },
       },
@@ -80,8 +79,8 @@ export class FakeRun {
   }
 
   /** 模拟 host/handleReady（运行中句柄回填）。 */
-  emitHandleReady(sessionRef: Record<string, string>, poolKey = "shared"): void {
-    this.ctx.onHandleReady?.({ sessionRef, poolKey });
+  emitHandleReady(sessionRef: Record<string, string>): void {
+    this.ctx.onHandleReady?.({ sessionRef });
   }
 }
 

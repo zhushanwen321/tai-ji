@@ -4,7 +4,7 @@
  * 机器锁定。fixture 全部落 tmpdir（rootDir 注入 runGuard / 磁盘路径注入直测函数），
  * 不依赖真实仓库状态——按 check-core-dist-gate.test.mjs 惯例。
  *
- * 用例对应设计 docs/design/npm-publish-surface-guard.md：D3（三步判定顺序 +
+ * 用例对应设计 docs/architecture/npm-publish-surface-guard.md：D3（三步判定顺序 +
  * ajv/dist/runtime/* 豁免含预期计数 4 与 .default 形态锚点）、D5（动态发现 +
  * 磁盘 stat 判定 + 反向覆盖）、D7（体积 warning 不红）；S1/S1b 场景的 fixture
  * 等价复现（真实仓库临时改包核验由主 agent 执行，不在此做）。

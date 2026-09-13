@@ -187,6 +187,8 @@ function ensureProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
  * 降级标注数据源；降级事实经 warn 留痕供重审触发观测——设计 §3.6「详情页延迟 > 1s
  * 或降级率 > 5%」）。
  */
+// [池抽象降级 2026-09-13] 协议 EngineHandleData 已删 poolKey 字段——本函数参数的
+// poolKey 是持久化 record 形状（EngineHandleView）的成员，不再上 wire。
 function protocolReadTier(engineId: string): (handle: {
   sessionRef: Record<string, string>
   journalPath?: string
@@ -207,7 +209,6 @@ function protocolReadTier(engineId: string): (handle: {
           v: 1,
           engineId,
           sessionRef: handle.sessionRef,
-          poolKey: handle.poolKey,
           ...(handle.journalPath !== undefined ? { journalPath: handle.journalPath } : {}),
           adapterVersion: 'runtime-protocol-read',
         },

@@ -1,6 +1,6 @@
 # xyz-agent 编码规范与架构标准
 
-> 本文档是项目开发的权威规范参考。AGENTS.md 中包含核心规则的摘要。
+> 本文档是项目开发的权威规范参考，只留「原则 + 入口 + 指针」：机器已强制的规则不重复转述，局部细节指向代码与配置。AGENTS.md 中包含核心规则的摘要。
 
 ---
 
@@ -8,22 +8,9 @@
 
 ### 1.1 对接前先写验证脚本
 
-在写任何业务代码之前，先用独立 Node 脚本验证外部系统的接口行为：
+在写任何业务代码之前，先用独立 Node 脚本验证外部系统的接口行为：输入参数的精确字段名和格式、输出响应的结构（哪个字段在哪个层级）、事件流的时序和嵌套、错误时的响应格式（`success: false` 还是 throw）。
 
-- 输入参数的精确字段名和格式
-- 输出响应的结构（哪个字段在哪个层级）
-- 事件流的时序和嵌套结构
-- 错误时的响应格式（`success: false` 还是 throw）
-
-**脚本存放位置**: 项目根或临时目录下的 `verify-<system>.cjs`（如 `verify-pi-rpc.cjs`）。验证使命完成后移除,不长期保留。
-
-**示例**：验证 pi RPC 的 prompt 和事件流
-
-```js
-// verify-pi-rpc.cjs
-// 用法: node verify-pi-rpc.cjs
-// 验证: prompt 命令格式、事件嵌套结构、tool_execution 字段名
-```
+**脚本存放位置**: 项目根或临时目录下的 `verify-<system>.cjs`（如 `verify-pi-rpc.cjs`）。验证使命完成后移除，不长期保留。
 
 ### 1.2 为外部协议建类型定义文件
 
@@ -52,17 +39,9 @@
 
 ### 2.1 emit 只传单个 payload 对象
 
-**禁止**：`emit('confirm-rename', sessionId, newName)` — 多参数在 handler 中极易混淆顺序。
+**禁止**多参数 emit（`emit('confirm-rename', sessionId, newName)`），一律传单个 payload 对象：`emit('confirm-rename', { sessionId, newName })`——多参数在 handler 中极易混淆顺序。
 
-**必须**：`emit('confirm-rename', { sessionId, newName })`
-
-```vue
-<!-- 禁止 -->
-<EmittingComponent @confirm-rename="(id, name) => handler(id, name)" />
-
-<!-- 必须 -->
-<EmittingComponent @confirm-rename="(payload) => handler(payload.sessionId, payload.newName)" />
-```
+机器强制：ESLint 规则 `taste/no-multi-arg-emit`（实现在 `taste-lint/rules/no-multi-arg-emit.mjs`，经 `eslint.config.mjs` 引入 tasteConfig 生效，warn 级）。
 
 ### 2.2 Event Bus listener 必须防重复注册
 
@@ -107,49 +86,23 @@ function onError(sessionId: string, errorText: string) {
 
 ## 3. 聊天 UI 布局范式
 
-### 3.1 消息列表用 flex column + overflow
+### 3.1 消息列表滚动容器
 
-```css
-.chat-msgs {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-```
-
-**禁止**在消息列表内使用 `position: absolute`——这会导致新消息出现在视口顶部而非底部。（对话流主列表例外：已迁移 virtua `Virtualizer`，item 定位由 virtua 接管，见 §3.2；本节约束针对自写滚动容器。）
+消息列表用常规文档流布局（flex column + 纵向滚动），**禁止**在消息列表内对 item 使用 `position: absolute`——新消息会出现在视口顶部而非底部。（对话流主列表例外：已迁移 virtua `Virtualizer`，item 定位由 virtua 接管，见 §3.2；本节约束针对自写滚动容器。）
 
 ### 3.2 自动滚动
 
-对话流渲染载体已是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（chat-pin-bottom-fix / use-virtua-follow）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**。
-
-[HISTORICAL] 迁移 virtua 前的 watch + scrollTop 范式（非对话流的自写滚动列表仍可参考）：
-
-```ts
-watch(
-  () => [messages.length, streamingMessage?.content],
-  () => nextTick(() => {
-    const el = chatMsgsRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  }),
-)
-```
+对话流渲染载体是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（权威定义 INVAR-M4-2′ = `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 文件头注释）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**；非对话流的自写滚动列表才用「数据变化后 `scrollTop = scrollHeight`」的常规范式。
 
 ### 3.3 Streaming message 生命周期
 
-pi 的一次 agent 调用会产生多个 message（thinking 段、tool call 段、文字回复段）。每个 `message_start` 应完成前一个 streaming message，开始新的：
+pi 的一次 agent 调用会产生多个 message（thinking 段、tool call 段、文字回复段），streaming 时序规则与 UI 载体无关：
 
-```
-message_start → 完成 current streaming → 创建新 streaming
-text_delta × N → appendToStreaming
-message.tool_call_start → addToolCall to streaming
-message.tool_call_end → updateToolCall in streaming
-message_start → 完成 current streaming → 创建新 streaming
-text_delta × N → appendToStreaming
-agent_end → 最终 completeStreaming
-```
+- 每个新 `message_start` 到达时，**必须先完成当前 streaming message（complete），再开始新的**——漏掉「完成 current」步骤，前后 message 的内容会错乱合并进同一条消息。
+- 单个 message 内部：`text_delta` 逐段追加内容；tool call start/end 增量更新对应工具调用块。
+- `agent_end` 时对最后一个 streaming message 做最终 complete。
+
+时序实现以 chat 域为准（`packages/core/src/domain/chat/`）。
 
 ---
 
@@ -164,7 +117,7 @@ agent_end → 最终 completeStreaming
 
 ### 4.2 Session 文件格式
 
-xyz-agent 的 session 文件存储在 `~/.xyz-agent/sessions/`（通过 pi 的 `--session-dir` 参数隔离）。
+session 文件存储在 `<dataDir>/agent/sessions/`（路径从 `packages/shared/src/paths.ts` 动态推导，禁止写死；2026-09 pi 布局 v2 迁移后 `pi/` 层已退役）。权威口径以 paths.ts 与 `packages/runtime/src/infra/pi/session-file-utils.ts` 注释为准。
 
 文件格式（`.jsonl`）：
 ```
@@ -180,14 +133,7 @@ xyz-agent 的 session 文件存储在 `~/.xyz-agent/sessions/`（通过 pi 的 `
 
 ### 4.3 消息格式转换
 
-pi 的消息 content 是数组，xyz-agent 的 Message.content 是字符串。转换规则：
-
-| pi content part | xyz-agent 字段 |
-|-----------------|---------------|
-| `{type: "text", text: "..."}` | `content`（拼接为字符串） |
-| `{type: "thinking", thinking: "..."}` | `thinking: [{content: "..."}]` |
-| `{type: "toolCall", name, arguments}` | `toolCalls: [{toolName, input}]` |
-| `role: "toolResult"` | 合并到前一条 assistant 消息的对应 `toolCall.output` |
+pi 的消息 content 是数组；xyz-agent 侧 `Message.content` 为 `string | Segment[]`（ADR-0043：user 消息富内容化为 Segment[]，`normalizeContent()` 归一化；类型 SSOT 在 `packages/shared/src/message.ts` 注释）。转换职责在 `packages/runtime/src/infra/pi/` 适配层（EventAdapter / session-entry-mapper），规则细节以适配层代码注释为准，本节不维护逐字段转换表。
 
 ---
 
@@ -205,159 +151,43 @@ pi 的消息 content 是数组，xyz-agent 的 Message.content 是字符串。�
 
 ## 6. Electron 架构约定
 
-### 6.1 进程间通信
-
-- 主进程管理 runtime 子进程生命周期和窗口
-- Preload 暴露 `window.electronAPI` 给渲染进程
-- 渲染进程通过 WebSocket 与 runtime 通信（不走 IPC）
-- 禁止渲染进程直接使用 `ipcRenderer`
-
-### 6.2 目录结构
-
-```
-packages/
-  shared/src/      共享 TypeScript 类型
-  core/src/        跨端 domain 层（domain: chat/composer/session 等；transport（含 mock/）/coordination/foundation）
-  ui/src/          跨端组件库（features: chat/composer 等 / primitives / overlays）
-  renderer/src/    Vue 前端（Electron 桌面壳：组件、composables、stores、lib）
-  runtime/src/     Node.js Runtime 服务（三层架构 transport/services/infra）
-apps/electron/
-  main/            Electron 主进程
-  preload/         Preload 脚本
-```
+进程架构（进程拓扑、preload 边界、三层职责、目录结构）见 [architecture.md](./architecture.md)「进程架构」各节：渲染进程**禁直接使用 `ipcRenderer`**，经 preload 注入的 `window.electronAPI` 调主进程；前端与 runtime 通信走 WebSocket，不走 IPC。
 
 ---
 
 ## 7. 样式规范
 
-### 7.1 Border-radius 约束（v3）
+### 7.1 Border-radius 约束
 
-> **v3 更新（ADR-0019，2026-06）**：旧 Warm & Soft 时期的「仅 1px/2px」锐利几何规则已**推翻**。v3 冷蓝暗色采用三档圆角，权威 SSOT 为 [design-tokens.md](./page-design/design-tokens.md)。
-
-| 场景 | 使用值 | Tailwind class |
-|------|--------|----------------|
-| 默认（按钮、输入框、卡片等） | 8px | `rounded`（DEFAULT）或 `rounded-md` |
-| 小元素（chip、badge、指示点容器） | 3px | `rounded-sm` |
-| 大容器（面板、modal、float-panel） | 12px | `rounded-lg` |
-| 圆形指示器、头像（不受限） | 50% | `rounded-full` |
-| 无圆角（强制） | 0 | `rounded-none` |
-
-**Tailwind 配置（实际值，`tailwind.config.ts`）：**
-```ts
-borderRadius: {
-  sm: '3px',
-  DEFAULT: '8px',
-  md: '8px',
-  lg: '12px',
-}
-```
-
-值变更时同步 `design-tokens.md`（CSS 变量层）与 `tailwind.config.ts`（Tailwind 映射层）。CSS 变量定义见 `packages/renderer/src/style.css`。
+三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 投影与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器守卫。
 
 ### 7.2 Markdown 文本元素样式规范
 
-**适用于 `.msg__body`（聊天消息体、v-html 渲染的 markdown 容器）。** 参照 `@tailwindcss/typography` 和 `ChatGPT-Next-Web` 的主流范式。完整调研：`docs/research/markdown-list-styling-research.md`。
+**适用于 `.msg__body`（聊天消息体、v-html 渲染的 markdown 容器）。** 参照 `@tailwindcss/typography` 和 `ChatGPT-Next-Web` 的主流范式。
 
 #### 7.2.1 v-html 包装陷阱（必读）
 
-`<MessageBubble>` 的 markdown 容器结构是：
-
-```html
-<div class="msg__body">
-  <span v-html="renderedContent">   <!-- 多了一层 <span> -->
-    <ul>...</ul>
-  </span>
-</div>
-```
-
-**因此 `.msg__body > ul` 不匹配**，必须用后代选择器 `.msg__body ul`。这是其他 Chat UI（lobe-chat、shadcn）也普遍存在的结构。
+v-html 渲染会在 `.msg__body` 内多包一层 `<span>`，**因此 `.msg__body > ul` 不匹配**，必须用后代选择器 `.msg__body ul`。这是其他 Chat UI（lobe-chat、shadcn）也普遍存在的结构。
 
 #### 7.2.2 列表样式范式
 
-```css
-/* 主流选择: outside + padding-left，不用 inside */
-.msg__body ul, .msg__body ol {
-  margin-top: 0;
-  margin-bottom: 12px;
-  padding-left: 1.5em;   /* 12px 聊天气泡下 = 18px，介于 GitHub (2em) 和 typography (1.625em) 之间 */
-}
-.msg__body ol { list-style-type: decimal; }  /* Tailwind preflight 重置了 list-style: none，需显式恢复 */
-.msg__body ul { list-style-type: disc; }
-.msg__body li { margin-top: 0.15em; margin-bottom: 0.15em; }
-.msg__body li + li { margin-top: 0.25em; }
-.msg__body li > p { margin-top: 0; margin-bottom: 0; }  /* 关键: li 内的 p (markdown-it 输出) 不撑开间距 */
-.msg__body li ul, .msg__body li ol { margin-top: 0.25em; margin-bottom: 0.25em; }
-```
-
-> **设计裁决（`.md-render` 用户气泡）**：上面 `1.5em` 是 `.msg__body`（assistant 消息体）的默认缩进。用户气泡（`.md-render`，见 `MarkdownRenderer.vue`）使用更紧凑的 `padding-left: 1.2em`——仅留编号/符号位，让列表在视觉上接近普通正文行。这是对默认 `1.5em` 的有意裁决：用户气泡里手打的编号列表不该被当成大间距结构化块，紧凑缩进避免了「像多一个空行」的视觉割裂。两者共存，按容器语义取值，勿全局统一。
+用 `outside` + `padding-left: 1.5em` 的主流选择（具体规则见 `packages/renderer/src/style.css`）。设计裁决：用户气泡（`.md-render`，`MarkdownRenderer.vue`）使用更紧凑的 `padding-left: 1.2em`——仅留编号/符号位，手打的编号列表不该被当成大间距结构化块。两档缩进共存，按容器语义取值，勿全局统一。
 
 #### 7.2.3 为什么不用 `list-style-position: inside`
 
-| 模式 | 多行换行后表现 | 主流选择 |
-|------|----------------|---------|
-| `outside`（默认） | 换行后文字左对齐 li 容器边缘 | typography / NextChat / GitHub |
-| `inside` | 换行后文字缩进到标记下方（看起来像两层缩进） | **仅** streamdown（Vercel 流式聊天） |
-
-聊天场景消息宽度窄，文字经常换行，**必须用 `outside`**。仅流式渲染 + li 极短时可考虑 `inside`。
+`outside`（默认）换行后文字左对齐 li 容器边缘，是 typography / NextChat / GitHub 的主流选择；`inside` 换行后文字缩进到标记下方（看起来像两层缩进），仅 streamdown 使用。聊天场景消息宽度窄、文字经常换行，**必须用 `outside`**。
 
 #### 7.2.4 调试陷阱
 
-CSS 改了看不出效果时，按顺序检查：
-
-1. **选择器对了吗？** `document.querySelectorAll('.msg__body > ul').length === 0` 说明 `>` 没匹配（v-html 包装陷阱）
-2. **CSS 规则被覆盖？** 遍历 `document.styleSheets` 找所有匹配规则
-3. **Vite HMR 重载了？** `style.css` 改了之后需要等 HMR 推送，computed style 才会更新
-4. **DOM 实际值？** `getComputedStyle(el).listStylePosition` 看真实生效值（不是源码写的值）
+CSS 改了看不出效果时按序检查：选择器是否匹配（v-html 包装陷阱）→ 规则是否被覆盖（遍历 `document.styleSheets`）→ Vite HMR 是否推送 → `getComputedStyle(el)` 看真实生效值。
 
 #### 7.2.5 不要引入 @tailwindcss/typography
 
-- 增加 ~20KB CSS 产出
-- 带来大量不需要的样式（h1-h6、figure、video 等 chat 场景不需要）
-- 与现有 CSS 变量主题系统冲突
+增加 ~20KB CSS 产出、带来大量 chat 场景不需要的样式（h1-h6、figure、video 等）、与现有 CSS 变量主题系统冲突——聊天 markdown 样式**手写**优于引入 prose 类。
 
-聊天 markdown 样式**手写**优于引入 prose 类。
+#### 7.2.6 [HISTORICAL] 容器底色与代码主题必须同暗同亮
 
-#### 7.2.6 [HISTORICAL] Skill 展开内容必须强制使用 dark Shiki 主题
-
-**这条规则来自 2026-06 的视觉 bug：用户反馈 skill-header 展开时代码块"line 1 占了 2 行"。**
-
-**根因**：
-
-`MessageBubble.vue` 渲染 skill 展开内容时调 `renderFull(payload.content, theme, { codeTheme: theme })` —— `codeTheme` 直接用 app 主题。当 app 是 light 主题时，Shiki 用 `github-light` 主题（黑字白底）。
-
-但 skill 内容**渲染到 `--user-bubble-bg`（深色）容器**里（`MessageBubble.vue:148`）：
-
-```html
-<div class="... leading-[1.6] text-xs text-fg ..." 
-     style="background:var(--user-bubble-bg); border:1px solid var(--user-bubble-border); border-left:2px solid var(--accent);">
-```
-
-Shiki 给的 token 颜色 `#24292E`（黑）在 `--user-bubble-bg`（深色）背景上**几乎不可见**。
-
-**视觉后果**：
-- `---` 等带语义颜色的 token 仍然可见（`#005CC5` 蓝色对深色背景有对比度）
-- 普通文本 token (`#24292E` 黑字) 不可见
-- 眼睛只能看到 `---` 等有颜色的行，line 1 `---` 到下一个有颜色的行（line 4 `---`）之间"看起来空了两行" → 视觉上"line 1 占了 2 行"
-
-**为什么"有时候 2 行有时候 1 行"**：
-- **流式阶段**（`renderLightweight`）：markdown-it 默认无 Shiki 高亮 → 文字用 `.msg__body` 的 `text-fg` 变量（深色背景下浅色）→ 文字可见 → 视觉正常
-- **完整阶段**（`renderFull`）：Shiki 用 light theme → 黑字 → 不可见 → 视觉异常
-
-切流式↔完整渲染就切视觉。
-
-**修复**：
-
-`MessageBubble.vue:340` skill 渲染调用必须强制 dark codeTheme（与 444 行 user 消息判断的逻辑一致）：
-
-```ts
-// skill 容器背景始终是深色（--user-bubble-bg），不论 app 主题都用 dark Shiki 主题
-const codeTheme: 'light' | 'dark' | undefined = 'dark'
-skillRenderedContent.value = await renderFull(payload.content, theme, { codeTheme })
-```
-
-**不要把 codeTheme 改成跟随 app theme** —— skill 容器背景是硬编码的深色，主题不一致必然导致文字不可见。
-
-**未来重构时验证**：如果 skill 容器背景支持跟随 app theme 切换，本规则需要相应调整（dark bg → dark theme, light bg → light theme）。
+Shiki 代码高亮主题与承载容器的底色必须同暗同亮，主题错配时 token 文字在背景上不可见（原 v3 时代 skill 展开案例的代码载体已消亡，教训留存于此）。
 
 ---
 
@@ -367,21 +197,7 @@ skillRenderedContent.value = await renderFull(payload.content, theme, { codeThem
 
 前端 mock 有且只有一个合法入口：**`packages/core/src/transport/mock/` 层**（@xyz-agent/core）。该层模拟 runtime WS 协议返回的数据（`session`、`chat`、`config`、`model`、`extension`、`plugin`、`settings`）。`api/index.ts` 通过 `VITE_MOCK` 环境变量切换 real/mock 实现（true 时直接 import `@xyz-agent/core/transport/mock`，不走 transport）。
 
-**允许的 mock 方式：**
-- `transport/mock/data.ts` — 模拟 runtime 的 `session.list` / `chat.getHistory` 返回的会话和消息数据
-- `transport/mock/index.ts` — 模拟 runtime WS 协议的全部 domain（`session`/`chat`/`config`/`model`/`extension`/`plugin`/`settings`）
-- `transport/mock/settings-data.ts` — 模拟 `config.listProviders` 等返回的 providers/skills/agents 数据
-- `transport/mock/composer-data.ts` — 模拟 runtime 推送的 models/mentions/files/slash-commands 数据
-- `transport/mock/search-data.ts` — 模拟全局搜索浮层（⌘K）预制数据
-- `transport/mock/workflow-data.ts` — 模拟 Workflow/subagent fixture（Flows/Agents tab）
-- `transport/mock/git.ts` — 模拟 `git.status` 返回的仓库状态数据
-- `transport/mock/file.ts` — 模拟 file domain（内存最小文件树 fixture）
-- `transport/mock/run-send-stream.ts` — 模拟 `chat.send` 后的流式 ServerMessage 序列
-- `transport/mock/run-send-stream-branches.ts` — mock 流式回复的 tool_call + widget 分支序列（read/todo/goal 按输入分发）
-- `transport/mock/subscription.ts` — mock 订阅工厂（注册后微任务触发初始值）
-- `transport/mock/mock-ws.ts` — 模拟 WebSocket 连接生命周期（connecting → connected）
-
-上述文件均通过 `api/index.ts` 门面统一接入，调用方（composables/features）只依赖 `@/api` 的接口，不感知底层是 real 还是 mock。
+**允许的 mock 方式**：`transport/mock/` 目录下的 fixture 与 domain 文件（会话/消息、providers/skills、composer 数据、搜索浮层、workflow fixture、git 状态、文件树、流式序列、订阅工厂、WS 生命周期等——清单以目录内文件为准，不在此枚举）。所有文件均通过 `api/index.ts` 门面统一接入，调用方只依赖 `@/api` 的接口，不感知底层是 real 还是 mock。
 
 **禁止的 mock 方式：**
 - **禁止在 Vue 组件（`.vue`）中内联硬编码 mock 数据** — 包括但不限于 `const MOCK = [...]`、`const RECENTS = [...]`、`const SUGGESTED = [...]` 等
@@ -405,21 +221,6 @@ skillRenderedContent.value = await renderFull(payload.content, theme, { codeThem
 2. 在 `transport/mock/index.ts` 中实现对应的 domain 方法（签名与 real domain 一致）
 3. 组件通过 `@/api` 的 domain 接口获取数据（不感知 real/mock）
 
-```ts
-// ✅ 正确：transport/mock/index.ts 中新增 domain 方法
-export const search = {
-  async query(q: string): Promise<SearchResult[]> {
-    await sleep(TIMING.ack)
-    return fixtureSearchResults.filter(r => r.title.includes(q))
-  },
-}
-
-// ❌ 错误：组件中直接写死 mock 数据
-const MOCK: SearchItem[] = [
-  { type: 'command', title: '新建任务', sub: '创建一个新会话' },
-]
-```
-
 ### 8.4 例外
 
 以下场景不视为 mock 违规：
@@ -431,13 +232,14 @@ const MOCK: SearchItem[] = [
 
 ## 9. 自动化检查
 
-### 9.1 现有检查工具
+### 9.1 检查工具清单以配置文件为准
 
-| 工具 | 覆盖范围 | 触发时机 |
-|------|---------|---------|
-| taste-lint (ESLint) | 原生 HTML / emoji / v-model / 硬编码颜色 / 魔数间距 / 静默 catch / allSettled | `pnpm run lint` + pre-commit |
-| vue_rules_checker.py | 行数上限 / CSS 选择器 / Tab 缩进 / 原生元素 / emoji / v-model | pre-commit |
-| pre-commit hook | ESLint + vue_rules_checker | git commit |
+本节不维护逐工具枚举（曾漂移）。工具与规则清单的权威源：
+
+- ESLint（taste-lint：原生 HTML / emoji / v-model / 硬编码颜色 / 魔数间距 / 静默 catch / allSettled 等）：`eslint.config.mjs` + `taste-lint/`
+- pre-commit 钩子（vue_rules_checker.py、CSS token SSOT 等）：`.githooks/`
+
+触发时机 = `pnpm run lint` + pre-commit。
 
 ### 9.2 共享类型同步
 
@@ -470,6 +272,6 @@ const MOCK: SearchItem[] = [
 
 ### 10.3 落地要求
 
-1. 范式写入 `docs/standards.md` 的「重构」章节（本文档即固化产物）
+1. 范式写入 `docs/STANDARDS.md` 的「重构」章节（本文档即固化产物）
 2. 后续重构（B6 / ViewHost / Settings 拆分）统一遵循三段式
 3. review 检查新代码：是否有上述信号 → 建议深模块化，而非继续拆 *Impl 或堆叠 import

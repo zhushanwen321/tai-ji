@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs
 //
-// [V2] 含成功成员的崩溃批补发（v2 设计 §4 验收表 V2 行 / GV2①）
+// [V2] 含成功成员的崩溃批补发（v2 设计 §4 验收表 V2 行〔设计文档已删，git 可追溯〕/ GV2①）
 // 3 个 sync（2 快任务先完成 + 1 sleep 240s 在跑）→ 批等待中 **SIGKILL** 宿主
 // （不是 SIGTERM——SIGTERM 走 dispose/E9 转换路径，测不到 E1；kill 时 2 成员
 // 已终态未通知、批未闭合）→ 重启同 session → 断言：

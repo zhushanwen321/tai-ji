@@ -7,10 +7,10 @@
 
 import type { ChildProcess } from "node:child_process";
 
+import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
 
 import { unregisterActiveChild } from "./active-children.ts";
-import { PI_POOL_KEY } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
 import {
@@ -95,7 +95,6 @@ export function createSessionIdentityTracker(
           ...(sessionId !== undefined ? { sessionId } : {}),
           sessionFile: fields.sessionFile,
         },
-        poolKey: PI_POOL_KEY,
       });
     }
   };
@@ -115,7 +114,6 @@ export function createSessionIdentityTracker(
           ...(sessionId !== undefined ? { sessionId } : {}),
           ...(sessionFile !== undefined ? { sessionFile } : {}),
         },
-        poolKey: PI_POOL_KEY,
       });
     },
     addStateListener(id, resolver) {
@@ -308,13 +306,10 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       deps.runEnd.childErrorMessage = toErrorMessage(err);
       onClose(null, null);
     });
-    // stdin 异步 error（EPIPE 半面②）：计数留痕（热路径投递据此判死）
+    // stdin 异步 error（EPIPE 半面②）：计数留痕（热路径投递据此判死）。
+    // 判别经 pi-rpc isBrokenPipeError 单源（同步半面①在 stdin-writer writeStdinLine）。
     child.stdin?.on("error", (err) => {
-      if (
-        err !== null && typeof err === "object" && "code" in err &&
-        ((err as NodeJS.ErrnoException).code === "EPIPE" ||
-          (err as NodeJS.ErrnoException).code === "ERR_STREAM_DESTROYED")
-      ) {
+      if (isBrokenPipeError(err)) {
         recordEpipeFailure(deps.recordId);
       }
     });

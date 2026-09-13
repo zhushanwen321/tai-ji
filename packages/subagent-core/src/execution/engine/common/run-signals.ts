@@ -2,7 +2,7 @@
 //
 // [H2 W2 迁移步⑥] 运行期 signal 合流公共 helper——原定义在 subprocess-agent-runner.ts
 // （模块内直调），随 service 统一编排入口 executeWorkflowAgent 接管 workflow 派发
-// （设计 docs/design/subagent-workflow-record-unification.md §5 W2 八步迁移表）提为
+// （设计 docs/architecture/subagent-workflow-record-unification.md §5 W2 八步迁移表）提为
 // engine/common 公共面：SAR 与 SubagentService 两调用点共用同一实现（行为逐字节
 // 等价搬移，函数体不改）。SAR 侧经 re-export 保持既有 import 路径（测试消费面零
 // 改动），W4 掏空 SAR.run 后本文件成为唯一权威落点。

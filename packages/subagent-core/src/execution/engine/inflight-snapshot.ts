@@ -1,6 +1,6 @@
 // src/execution/engine/inflight-snapshot.ts
 //
-// core→壳在途事件出口（u7a，设计权威源：docs/design/crash-forensics-and-watchdog.md
+// core→壳在途事件出口（u7a，设计权威源：docs/architecture/crash-forensics-and-watchdog.md
 // §3.3 D5「在途判定谓词 + 求值位置」）。
 //
 // 在途状态（spawnedChildren Map / idleTimers Map）真实存在于本包（随 subagent-workflow
@@ -20,8 +20,8 @@
 // 返回值——满足 D5 接线约束①「上报不阻塞生命周期主链、不 await 进 agent_settled
 // handler 链」（该链有时序保护约束 armIdleTimer 先于 notify）。
 
-import { hasIdleTimer } from "../lifecycle-manager.ts";
-import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
+import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
+import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 // 环声明：session-runner（迁移点）import 本模块的 notifyInFlightChanged，本模块经
 // lifecycle-predicates → session-runner.getChildByRecord 读句柄记账 + 直接取
 // spawnedChildren 键集——双向仅函数体内取值（ESM 活绑定，调用期解析），模块求值序
@@ -30,14 +30,16 @@ import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
 //（coreSpawnedChildrenMirror().snapshot() 返回 [{recordId, ...}]，键集等价旧 Map.keys()）。
 import { coreSpawnedChildrenMirror } from "./host/spawned-children.ts";
 
-/** 在途快照（与 EnginePort.inFlightSnapshot? 返回形状一致——runtime 侧统一消费形状）。 */
+/** 在途快照（绝对计数，供壳层 reporter 发送时刻现取）。 */
 export interface InFlightSnapshot {
   /** 当前非 idle 句柄数（绝对计数，非增量）。 */
   inFlight: number;
 }
 
-/** 壳层注册的监听回调（同步、fire-and-forget；core 不 await 不重试）。 */
-export type InFlightListener = (snapshot: InFlightSnapshot) => void;
+/** 壳层注册的监听回调（同步、fire-and-forget；core 不 await 不重试）。无参数——
+ *  帧内容须为发送时刻快照，监听者（host/inflight-reporter）自行 getInFlightSnapshot
+ *  现取（2026-09-13 oe-audit：原 snapshot 参数自交付起无任何监听者消费）。 */
+export type InFlightListener = () => void;
 
 /**
  * 进程级单监听者（非 per-session 状态——在途计数本身是 pi 进程级模块状态
@@ -74,7 +76,7 @@ export function getInFlightSnapshot(): InFlightSnapshot {
 export function notifyInFlightChanged(): void {
   if (listener === null) return;
   try {
-    listener(getInFlightSnapshot());
+    listener();
   // eslint-disable-next-line taste/no-silent-catch -- 上报出口故障刻意静默（D5 约束①）：壳层 bug 不得打断生命周期主链；绝对计数语义下后续事件自愈，丢失单帧无累积误差，记日志徒增 core logger 噪音面
   } catch {
     // 同上：静默是接受的。

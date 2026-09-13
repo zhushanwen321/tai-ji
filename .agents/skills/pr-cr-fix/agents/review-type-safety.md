@@ -34,7 +34,7 @@ task prompt 中必须包含：
    - `packages/shared` → `@xyz-agent/shared`（`tsc --noEmit`）
    - main/preload 不在 workspaces 里（随 electron 构建），无需独立 typecheck
    - 在各 workspace 目录跑 `pnpm run typecheck`（或 `npx tsc --noEmit`）
-6. **PiXxx 类型分层约束（runtime-three-layer-design.md）**：
+6. **PiXxx 类型分层约束（runtime-layering.md）**：
    - runtime 内部 `Pi*` 协议类型（PiMessage/PiModelDefinition/PiHistoryMessage 等）应仅出现在 `infra/` 层（设计目标：`infra/pi/pi-protocol.ts`）
    - `services/` 和 `transport/` **不应出现** `Pi*` 类型——应经 ports 接口（IPiEngine/IConfigStore 等）或内部类型（Message/Provider/Session，来自 shared 或 services/types.ts）
    - 过渡态：services 现存 `Pi*` 泄漏（tree-service/config-service/extension-service）是已知技术债（ports R3 进行中）→ 标 INFO/SUGGESTION；但**新增**代码不应加重泄漏（新增 service 不应 import `Pi*`）

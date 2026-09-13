@@ -5,7 +5,7 @@
 //
 // [v1.x 增量（chat-domain 设计 §3.2 D1-A）]：增量以可选参数形态落在 run.params.chat
 // （会话形态参数 + 冷续 resume 锚点），major 不 bump。[H1] chat-run 统一后续聊 =
-// 新 run + resume 锚点（docs/design/subagent-chat-run-unification.md §3.3 D5/D7），
+// 新 run + resume 锚点（docs/architecture/subagent-chat-run-unification.md §3.3 D5/D7），
 // 既有 interact 方法已随 U5 删除，方法集收敛为 9 个。
 //
 // 应答面补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
@@ -26,7 +26,7 @@ import type {
 
 /**
  * 正向方法名联合（恰好 9 个；PROTOCOL_METHODS 常量数组与之同源互证）。
- * [H1] `interact` 成员已随 chat-run 统一退役（docs/design/subagent-chat-run-unification.md
+ * [H1] `interact` 成员已随 chat-run 统一退役（docs/architecture/subagent-chat-run-unification.md
  * §3.3 D5：续聊轮统一为「新 run + resume 锚点」，U5 删除）。
  */
 export type ProtocolMethod =
@@ -61,8 +61,6 @@ export const PROTOCOL_METHODS = [
  * run 上下文（RunContext 字段映射的协议承载，设计 §3.3 RunContext 映射表）。
  */
 export interface RunContextParams {
-  /** 隔离池归属（journal 归属错 = 缺失后果）。 */
-  poolKey: string;
   /** 任务工作目录（worktree 隔离时 = worktree 路径）。 */
   cwd: string;
   /** 请求模型 ref（未传 = 引擎缺省模型）。 */
@@ -96,7 +94,7 @@ export interface RunContextParams {
 // ============================================================
 
 /**
- * [H1] run 的 resume 会话形态参数（设计 docs/design/subagent-chat-run-unification.md
+ * [H1] run 的 resume 会话形态参数（设计 docs/architecture/subagent-chat-run-unification.md
  * §3.3 D3 + §5 U1/U6 行）：原 RunChatParams（v1.x chat 会话形态参数）的泛化改名终态，
  * 载荷同形（recordId + resume 锚点，ResumeAnchor 不变），仅键名从「chat 会话形态」
  * 泛化为「resume 续聊」。

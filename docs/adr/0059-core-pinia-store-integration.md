@@ -25,7 +25,7 @@ chat 没此问题，因为 createUseChat 经**方法/getter** 访问 store——
 
 ### pinia 是终态保留，非过渡层
 
-[renderer-rebuild-architecture.md:116](../architecture/renderer-rebuild-architecture.md) 明确："Pinia store 和 composable 是 headless 逻辑的最佳载体，强行"框架无关化"是过度工程"。即 core factory（返回 ref）+ pinia（unwrap ref）的结合是**永久架构**。因此本 ADR 处理的 cast 接缝是永久的，非 strangler 过渡态。
+[renderer-package-topology.md:116](../architecture/renderer-package-topology.md) 明确："Pinia store 和 composable 是 headless 逻辑的最佳载体，强行"框架无关化"是过度工程"。即 core factory（返回 ref）+ pinia（unwrap ref）的结合是**永久架构**。因此本 ADR 处理的 cast 接缝是永久的，非 strangler 过渡态。
 
 ### 主论据：范式分歧不可扩展，session 是「没规则所以走偏」的先例
 
@@ -51,7 +51,7 @@ factory 返回的响应式字段（ref/computed）保留（core 内部响应式 
 
 ### 3. pinia 集成接缝：renderer 薄壳 cast（pinia 的固有类型鸿沟，集中可控）
 
-pinia setup store unwrap ref（外部拿到值），与 core factory 返回的 ref 类型不兼容——这是 **pinia 设计的固有代价**（非本 ADR 引入），不可消除（弃 pinia 或弃 core factory 的 ref，均被 renderer-rebuild-architecture.md:116 否决）。运行时方法闭包持原始 ref，cast 后方法访问正常工作。
+pinia setup store unwrap ref（外部拿到值），与 core factory 返回的 ref 类型不兼容——这是 **pinia 设计的固有代价**（非本 ADR 引入），不可消除（弃 pinia 或弃 core factory 的 ref，均被 renderer-package-topology.md:116 否决）。运行时方法闭包持原始 ref，cast 后方法访问正常工作。
 
 接缝集中在 renderer 薄包装的 getXxxStore getter（chat 实测 2 处，都在 useChat.ts 内），createUseXxx 内部拿到 ChatStoreInstance 类型（干净），消费方零感知：
 
@@ -103,7 +103,7 @@ createUseSession 的 7 处 `store.xxx.value` → 方法访问；createSessionSto
 
 ## 关联
 
-- [renderer-rebuild-architecture.md:116](../architecture/renderer-rebuild-architecture.md)：pinia 是 headless 载体的终态定位（本 ADR 的前提）
+- [renderer-package-topology.md:116](../architecture/renderer-package-topology.md)：pinia 是 headless 载体的终态定位（本 ADR 的前提）
 - [ADR-0049](0049-session-isolation-map-partition.md)：per-session 隔离范式（本 ADR 的 store 访问范式与隔离范式正交，不冲突）
 - [ADR-0058](0058-dom-core-package.md)：dom-core 包划分（core headless 边界，本 ADR 在该边界上定义 store 集成范式）
 - chat 域 [README.md](../../packages/core/src/domain/chat/README.md) IF1 契约：factory + 薄壳范式标杆（本 ADR 的正确范式来源）

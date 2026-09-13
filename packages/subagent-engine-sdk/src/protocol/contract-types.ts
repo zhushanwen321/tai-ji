@@ -1,21 +1,21 @@
 // src/protocol/contract-types.ts
 //
 // 引擎面契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费面）。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
 // impl-plan §2.1「类型闭包处置」。
 //
 // 搬运口径（逐字对照，结构等价、零 core import）：
 //   - AgentEvent / AgentUsage / AgentUsageTotal / ToolCallResult / ToolCall /
-//     InternalToolCall / Turn ← core execution/types.ts（2026-09-09 实测 :164-:313）
+//     InternalToolCall / Turn ← core execution/assembly/types.ts（2026-09-09 实测 :164-:313）
 //   - ReplayedTurn / SessionView / EngineHandleData / EngineCapabilities / ProbeReport /
 //     AgentOutcome ← core execution/engine/types.ts
 //   - AgentFailureKind / AgentOutcomeUsage（core 名 AgentUsage，orchestration 版）/
 //     ToolCallEntry / AgentCallOpts 子集 ← core orchestration/models/types.ts
-//   - WorktreeHandle ← core execution/types.ts:349（SDK 结构等价副本——设计 §3.5.1
+//   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
 // [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
-// docs/design/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
+// docs/architecture/subagent-chat-run-unification.md §3.3 D5——续聊统一为新 run + resume）。
 //
 // core 域类型（ExecutionRecord / Turn 的宿主内部态消费）留 core；SDK 侧一切类型为
 // 结构等价形态，漂移由双向可赋值断言（AssertMutuallyAssignable）在 typecheck 期抓出
@@ -44,7 +44,7 @@ export type AssertMutuallyAssignable<A, B> = [A] extends [B]
 // 事件面（AgentEvent 及其字段型）
 // ============================================================
 
-/** token 用量（message_end 单条消息增量）。← core execution/types.ts AgentUsage。 */
+/** token 用量（message_end 单条消息增量）。← core execution/assembly/types.ts AgentUsage。 */
 export interface AgentUsage {
   input: number;
   output: number;
@@ -100,7 +100,7 @@ export interface Turn {
 
 /**
  * 引擎事件（9 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
- * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/types.ts 注释）。
+ * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
@@ -131,9 +131,11 @@ export interface EngineHandleData {
   engineId: string;
   /** 引擎自定义定位键值。pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }。 */
   sessionRef: Record<string, string>;
-  /** 隔离池定位。pi 无池化恒 'shared'。 */
-  poolKey: string;
-  /** journal 绝对路径（read 第②级数据源；宿主读前校验前缀白名单）。缺省 = 无 journal。 */
+  /**
+   * journal 绝对路径（read 第②级数据源；宿主读前校验前缀白名单）。缺省 = 无 journal。
+   * [池抽象降级 2026-09-13] 原 poolKey 字段已删除——两引擎 poolKey 恒 'shared'
+   * （SDK SHARED_POOL_KEY），journal 固定落 engines/<engineId>/shared/，字段零信息量。
+   */
   journalPath?: string;
   /** probe 实测版本（漂移排查锚点）。 */
   engineVersion?: string;
@@ -152,8 +154,6 @@ export interface EngineHandleData {
 export interface ResumeAnchor {
   /** 引擎定位键（pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
-  /** 隔离池定位（锚点补全 handle 重建所需；pi 无池化恒 'shared'）。 */
-  poolKey: string;
   /** journal 绝对路径（read 降级链第②级数据源；无 journal 缺省）。 */
   journalPath?: string;
 }
@@ -199,8 +199,12 @@ export interface EngineCapabilities {
    * [H1 D5 语义收窄] resume 能力位（chat 续聊 = 新 run + resume 锚点的承载前提；
    * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
    * 「resume 续聊能力」，gate 判据与消费方不变）。
+   * [U6 / 永久会话模型 §3.2.6 要点 4] 新值 "cold" = 冷恢复会话：resume 读通道取
+   * 结构化历史 + 新 session 注入（无热 steering）。gate 判据仍是 `=== "unsupported"`
+   * 拒绝——"cold" 在 gate 面与 "native" 等价放行，差异只在续聊形态（新 session
+   * 注入 vs 原地续写）。
    */
-  conversation: "native" | "unsupported";
+  conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
   /** 粗粒度引擎：GUI 显示降级为阶段态。 */
@@ -258,7 +262,7 @@ export interface ToolCallEntry {
   input: string;
 }
 
-/** worktree 句柄（结构等价副本；core 权威定义在 execution/types.ts:349）。 */
+/** worktree 句柄（结构等价副本；core 权威定义在 execution/assembly/types.ts:349）。 */
 export interface WorktreeHandle {
   /** checkout 目录（子 agent 工作目录）。 */
   readonly path: string;

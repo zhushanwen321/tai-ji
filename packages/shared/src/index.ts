@@ -99,7 +99,7 @@ export {
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
 } from './ipc-payloads'
-// 崩溃台账事件 Schema SSOT（docs/design/crash-forensics-and-watchdog.md §3.3 D1，
+// 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
 export type {
@@ -142,7 +142,7 @@ export * from './file-tree'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
-// 导入 pi 会话 RPC 契约（设计 docs/design/import-session.md §3.3 D5，runtime/renderer 两端共同 import）
+// 导入 pi 会话 RPC 契约（设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 D5，runtime/renderer 两端共同 import）
 export type {
   ImportWarning, ImportErrorCode,
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
@@ -185,7 +185,9 @@ export { QUOTA_PRESETS, matchQuotaPreset } from './quota-presets'
 // SUBAGENT_STATUS_ALL：枚举值全集（B3 护栏，renderer bucket 测试的全集覆盖矩阵数据源）。
 // SUBAGENT_OUTCOME_PLACEHOLDER：③级占位文案（D6 三端锚点 SSOT 值，core 同值字面量 /
 // runtime 钉子断言 / renderer 思考行判据的消费入口）。
-export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER } from './subagent'
+// projectSubagentExecutionStatus：占用两态投影（U8 旧数据只读兼容——legacy 六值 →
+// running|idle，renderer U8b 分桶/过滤器对新旧词汇统一判定的映射 SSOT）。
+export { deriveClosedDisplay, SUBAGENT_STATUS_ALL, SUBAGENT_OUTCOME_PLACEHOLDER, projectSubagentExecutionStatus } from './subagent'
 export type {
   WorkflowRunStatus,
   WorkflowDoneReason,

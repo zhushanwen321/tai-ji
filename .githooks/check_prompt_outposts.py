@@ -6,7 +6,7 @@
 .followUp(），对照白名单（文件路径 + 行内稳定子串指纹 + 内容性质 + 注入状态 +
 登记理由）逐一放行；未登记的新调用点 → 退出码 2 红。
 
-设计依据与背景：docs/design/adversarial-review-fixes.md §3.2 A2（D-A2-3）
+设计依据与背景：原设计文档 adversarial-review-fixes.md §3.2 A2（D-A2-3；已删除，git 可追溯）——出站点守卫原则：用户内容出站必须经注入器，本注释自足
 起因：MF-B（@ 定向消息带 skill chip 绕过 SkillInjector 直发 client.prompt）与
 MF-C（landing 首发同缺口）——注入器以「N 入口挂载」模式存在，新增用户内容
 出站通路时没有「必须经注入」的机器约束，靠人记住，各漏一处。本守卫把
@@ -29,7 +29,7 @@ MF-C（landing 首发同缺口）——注入器以「N 入口挂载」模式存
 3. 未命中 → 违规，报文件:行号 + 行内容 + 修复指引。
 
 退出码：0=通过；2=存在未登记调用点；1=脚本自身异常。
-白名单增删（新增出站点 / 语义变化）须同步 docs/design/adversarial-review-fixes.md
+白名单增删（新增出站点 / 语义变化）须同步本头注释的登记理由（原设计文档已删除，git 可追溯）
 A2 节登记并过评审——内部命令（cancel/workflows/__xyz_*__）与代理构造模板文本
 可豁免注入，用户内容必须挂 SkillInjector 后登记 injected。
 
@@ -186,7 +186,7 @@ FIX_HINT = """[fix] 用户内容出站必须经 SkillInjector（packages/runtime
       （共享函数 skill-notice-publisher.ts；时机契约 = client 发送 await 之后）
       内部命令/固定模板可豁免: .githooks/check_prompt_outposts.py OUTPOST_CALLSITES
       登记五元组（文件+指纹+内容性质+注入状态+理由）后过评审
-      设计依据: docs/design/adversarial-review-fixes.md §3.2 A2"""
+      设计依据: adversarial-review-fixes.md §3.2 A2（已删除，git 可追溯）"""
 
 
 def run(scan_root):

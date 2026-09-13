@@ -22,7 +22,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ListHandlerResult } from "../interface/subagent-actions.ts";
 import { adapter } from "../interface/subagent-actions.ts";
-import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/subagent-actions-core.ts";
+import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 
 // ── adapter reminder test fixtures ──
 

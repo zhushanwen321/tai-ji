@@ -2,7 +2,7 @@
 
 - **状态**: Accepted
 - **日期**: 2026-07-16
-- **上下文**: [docs/feature-map/](../feature-map/) Phase GUI Optimize
+- **上下文**: `docs/feature-map/` Phase GUI Optimize（目录已并入 `docs/architecture/feature-map.md`，当期版本已删除，git 可追溯）
 
 ## 背景
 

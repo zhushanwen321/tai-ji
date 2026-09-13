@@ -4,6 +4,8 @@ verdict: pass
 
 # ADR-0046：RPC 类型配对 SSOT（RequestReplyMap + ReplyPayloadMap）
 
+- 状态：Accepted
+
 ## 上下文
 
 H4 开发（perf-h3-h4-memory-jsonl）引入 `session.history`/`session.fullHistory` reply 时，发现协议类型契约断裂有两层：

@@ -1,7 +1,7 @@
 {
   "name": "@zhushanwen/pi-subagent-cli",
   "version": "0.2.0",
-  "description": "pi subagent engine as an independent CLI package (W7 of subagent-engine-protocolization): speaks engine-protocol v1 over NDJSON stdio, depends only on @zhushanwen/subagent-engine-sdk (never subagent-core)",
+  "description": "pi subagent engine as an independent CLI package (W7 of subagent-engine-protocolization): speaks engine-protocol v1 over NDJSON stdio, depends only on @zhushanwen/subagent-engine-sdk + @zhushanwen/pi-rpc (pi process RPC layer, U1 consolidation; never subagent-core)",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -78,6 +78,7 @@
     "gen:model-catalog": "node scripts/gen-model-catalog.mjs"
   },
   "dependencies": {
+    "@zhushanwen/pi-rpc": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*"
   },
   "devDependencies": {

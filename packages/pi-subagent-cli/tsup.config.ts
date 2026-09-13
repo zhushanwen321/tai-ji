@@ -14,8 +14,10 @@ import { defineConfig } from 'tsup'
 // target node22：包 engines >=22.19（bin 直跑 src 时代的下限即来自原生
 // type-stripping），与打包链 bundle-extensions.mjs 引擎 bundle 的 target 一致。
 //
-// 不设 noExternal / dist.bundle 自包含档：运行时依赖只有 SDK（dependencies 唯一
-// 条目，tsup 默认 external），npm 形态经宿主 node_modules 解析到 SDK 发布 dist；
+// noExternal 只有 @zhushanwen/pi-rpc：SDK 经宿主 node_modules 解析到其发布 dist
+// （版本单源），而 pi-rpc 尚无 npm 发布版本——external 化会让 npm 形态 404，故
+// 内联进本包 dist（pi-rpc 是零依赖纯 TS 包，内联无实例分裂风险；pi-rpc 发布后
+// 可切 external 对齐 SDK 做法）。
 // 引擎 CLI 无 vendoring 宿主场景（zsw 用存在性发现非 vendoring），按 C-proc-11
 // 自包含档（dist.bundle）仅 vendoring 需要时启用的约定不建该档。
 export default defineConfig({
@@ -28,4 +30,5 @@ export default defineConfig({
   clean: true,
   sourcemap: false,
   target: 'node22',
+  noExternal: ['@zhushanwen/pi-rpc'],
 })

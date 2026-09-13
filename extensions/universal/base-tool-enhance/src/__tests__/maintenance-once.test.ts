@@ -1,6 +1,6 @@
 // src/__tests__/maintenance-once.test.ts —— 收殓下沉后的 session_start 维护链
-// 语义（实施单元 u-bte-remove，设计 docs/design/file-lock-unification-and-reaper-
-// sink.md §3.2 D2「extension 删 session_start reaper」/ §3.3 D3 粒度段 / §4 S6
+// 语义（实施单元 u-bte-remove，设计 docs/architecture/file-lock-unification-and-
+// reaper-sink.md §3.2 D2「extension 删 session_start reaper」/ §3.3 D3 粒度段 / §4 S6
 // 「批 2 后 reap 类操作不再执行」）：
 //  - reconcilePendingEntries 是 session 级豁免类，每 session_start 派发都执行
 //    （startup/resume/new 多派发 ×N——含 factory 二调 handler 累积的真实形态）

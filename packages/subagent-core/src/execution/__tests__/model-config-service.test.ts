@@ -19,8 +19,8 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService（自 subagent-service.test.ts 迁移段自持副本）──
 

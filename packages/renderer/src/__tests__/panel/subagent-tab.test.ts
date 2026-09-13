@@ -320,6 +320,56 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
+  // ── 停因词展示（永久会话模型 §3.2.8 U8b：详情面板 stopReason 原文 kebab-case，对齐 U8a TUI 决策）──
+
+  it('停因词：idle + stopReason → 标题栏渲染原文 kebab-case（为什么停一句话解释）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({ status: 'idle', stopReason: 'interrupted-by-restart' }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const reason = wrapper.find('[data-testid="subagent-stop-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toBe('interrupted-by-restart')
+    wrapper.unmount()
+  })
+
+  it('停因词：running-resumable 轮终（A-lite markRoundIdle 失败轮）→ 有值即渲染（idle-only 放宽）', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [
+      makeRecord({
+        status: 'running',
+        stopReason: 'failed',
+        resumable: true,
+        result: 'round did not complete: boom',
+      }),
+    ])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const reason = wrapper.find('[data-testid="subagent-stop-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.text()).toBe('failed')
+    wrapper.unmount()
+  })
+
+  it('停因词：running（在飞轮无停因）与无 stopReason 的 record → 不渲染停因元素', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'running' })])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
+
+    // idle 但无停因（从未收口 / 存量数据）→ 同样不渲染
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('空态：未选中 subagent 时渲染空态占位（首屏冒烟）', () => {
     const wrapper = mountTab()
     expect(wrapper.find('[data-testid="drawer-subagent-empty"]').exists()).toBe(true)

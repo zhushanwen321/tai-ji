@@ -31,7 +31,7 @@ import type { AgentCallOpts, EnginePort, EngineRunResult, RunContext } from "../
 const CAPABILITIES: EngineCapabilities = {
   schemaEnforcement: "emulated",
   steer: "unsupported",
-  conversation: "unsupported",
+  conversation: "cold",
   personaInjection: "prompt",
   eventGranularity: "stream",
   sandbox: "none",
@@ -46,7 +46,6 @@ const HANDLE: EngineHandleData = {
   v: 1,
   engineId: "zcode",
   sessionRef: { sessionId: "sess_server_test_1", dbPath: "/tmp/fake-zcode-db.sqlite" },
-  poolKey: "shared",
   adapterVersion: ZCODE_ADAPTER_VERSION,
 };
 
@@ -312,8 +311,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     const engine = makeEngine({
       run: vi.fn(async (task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> => {
         captured = { task, ctx };
-        ctx.onPoolResolved?.("shared");
-        ctx.onHandleReady?.({ sessionRef: HANDLE.sessionRef, poolKey: HANDLE.poolKey });
+        ctx.onHandleReady?.({ sessionRef: HANDLE.sessionRef });
         ctx.onEvent?.({ type: "text_delta", delta: "你好" } satisfies AgentEvent);
         ctx.onEvent?.({ type: "message_end", usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0 } });
         ctx.stream?.onDelta("你好");
@@ -331,8 +329,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
         runId: "run-1",
         task: { prompt: "做点什么", denyTools: ["bash"] },
         ctx: {
-          poolKey: "shared",
-          cwd: "/w",
+              cwd: "/w",
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
@@ -342,14 +339,9 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       },
     });
 
-    // host/poolResolved 先于首个事件（journal 归属契约），载荷 runId 关联
-    const pool = await sink.waitFor((f) => f.method === "host/poolResolved", "poolResolved");
-    server.handleFrame({ id: pool.id, result: { ok: true } });
-    expect(pool.params).toEqual({ runId: "run-1", poolKey: "shared" });
-
     const ready = await sink.waitFor((f) => f.method === "host/handleReady", "handleReady");
     server.handleFrame({ id: ready.id, result: { ok: true } });
-    expect(ready.params).toEqual({ runId: "run-1", sessionRef: HANDLE.sessionRef, poolKey: "shared" });
+    expect(ready.params).toEqual({ runId: "run-1", sessionRef: HANDLE.sessionRef});
 
     const delta = await sink.waitFor((f) => f.method === "host/streamDelta", "streamDelta");
     server.handleFrame({ id: delta.id, result: { ok: true } });
@@ -366,15 +358,14 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     // 本地全量 task 还原（ctx.model 合回；task 其余字段透传）+ RunContext 断言
     expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1" });
     expect(captured?.ctx.taskId).toBe("run-1");
-    expect(captured?.ctx.poolKey).toBe("shared");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
     expect(captured?.ctx.schemaEnv).toBe("SCHEMA_ENV=1");
     expect(captured?.ctx.engineFallback).toEqual({ from: "pi", reason: "manifest" });
     expect(captured?.ctx.stream).toBeDefined();
     expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);
 
-    // 反向请求必须先于事件到达（journal 归属契约的帧序证据）
-    expect(sink.frames.indexOf(pool)).toBeLessThan(sink.frames.indexOf(ev1));
+    // host/handleReady 反向请求必须先于事件到达（§3.4 不变量 3 帧序证据）
+    expect(sink.frames.indexOf(ready)).toBeLessThan(sink.frames.indexOf(ev1));
 
     // 终态应答：进程内 {data} 包装拆掉（协议 RunResult.handle = EngineHandleData 本体）
     const resp = await sink.waitFor(

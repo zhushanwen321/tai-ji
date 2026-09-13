@@ -3,8 +3,11 @@
     展示组件 · subagent 列表（Agents tab）。
     渲染 SubagentRecord[] 卡片：状态点 + agent 名称 + task 摘要 + turns/tokens/elapsed。
     点击卡片 → emit('select', subagentId)，由父组件切换 Panel sessionId。
-    二级筛选（进行中 / 已结束 / 全部）：SubagentFilterBar + subagent-bucket SSOT 派生
-    （设计 subagent-sidebar-filter，D3/D4/D5/D6）。空态展示提示文案。
+    二级筛选（全部活跃 / 只看正在跑 / 已收起）：SubagentFilterBar + subagent-bucket SSOT 派生
+    （subagent-sidebar-filter D3/D4/D5/D6 + 永久会话模型 §3.2.8 可见性翻转 U8b）。
+    默认视图 = running + idle(active) 全显（legacy 终态投影 idle 同显）；intent=archived
+    默认隐藏、「已收起」视图寻回（场景 3：message 隐含翻回 active 由宿主侧承担）。
+    空态展示提示文案。
   -->
   <div class="flex h-full min-h-0 flex-col" data-testid="subagent-list">
     <!-- 加载态（M1：loadSubagents 在途） -->
@@ -36,14 +39,14 @@
       <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.subagentList.empty') }}</p>
       <p class="text-[length:var(--text-3xs)] text-neutral-dim opacity-40">{{ t('sidebar.subagentList.emptyHint') }}</p>
     </div>
-    <!-- 有数据列表态：二级筛选槽 + 按桶过滤的列表 / 桶空态 -->
+    <!-- 有数据列表态：二级筛选槽 + 按视图过滤的列表 / 视图空态 -->
     <template v-else>
       <SubagentFilterBar
         :counts="subagentCounts"
         :model-value="filter"
         @update:model-value="setFilter"
       />
-      <!-- 列表（当前桶非空） -->
+      <!-- 列表（当前视图非空） -->
       <ScrollArea v-if="visibleSubagents.length > 0" class="min-h-0 flex-1">
         <div class="flex flex-col px-1.5">
           <div
@@ -84,9 +87,11 @@
               >
                 {{ record.slug }}
               </span>
-              <!-- cancel 按钮（streaming 态显示，inline 两段式确认；waiting/done 投影无进程可取消，不显示） -->
+              <!-- cancel 按钮（streaming 态显示，inline 两段式确认；waiting/done 投影无进程可取消，不显示）。
+                   [GUI 快修③] 确认窗口期保留按钮：第一击进入确认态后，迟到 isStreaming=false 广播
+                   （轮终/settle）不得把确认按钮藏掉——第二击可达性优先于态过滤。 -->
               <Button
-                v-if="isStreaming(record)"
+                v-if="isStreaming(record) || cancellingId === record.subagentId"
                 variant="ghost"
                 size="icon"
                 :data-testid="cancellingId === record.subagentId ? 'subagent-action-cancel-confirm' : 'subagent-action-cancel'"
@@ -94,7 +99,7 @@
                   ? 'size-5 rounded-sm border border-danger bg-danger text-neutral-fg'
                   : 'size-5 text-neutral-dim hover:text-danger'"
                 :title="cancellingId === record.subagentId ? t('sidebar.subagentList.cancelConfirm') : t('sidebar.subagentList.cancel')"
-                @click.stop="onCancelClick(record.subagentId)"
+                @click.stop="onCancelClick(record)"
               >
                 <Check v-if="cancellingId === record.subagentId" class="size-3" />
                 <X v-else class="size-3" />
@@ -116,7 +121,7 @@
         </div>
       </ScrollArea>
 
-      <!-- 「进行中」空桶：自适应空态 + 一键查看全部（G1，设计 §3.1 空桶行） -->
+      <!-- 「全部」视图空态：自适应空态 + 一键查看已收起（场景 3 寻回入口） -->
       <div
         v-else-if="filter === 'active'"
         class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 py-10 text-center"
@@ -126,19 +131,36 @@
         <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.subagentFilter.emptyActive') }}</p>
         <p class="text-[length:var(--text-3xs)] text-neutral-dim opacity-40">{{ t('sidebar.subagentFilter.emptyActiveHint') }}</p>
         <Button
+          v-if="subagentCounts.archived > 0"
+          variant="ghost"
+          class="h-6 text-[length:var(--text-2xs)] text-accent"
+          data-testid="subagent-filter-jump-archived"
+          @click="setFilter('archived')"
+        >{{ t('sidebar.subagentFilter.viewArchived', { count: subagentCounts.archived }) }}</Button>
+      </div>
+      <!-- 「正在跑」空桶：文案 + 一键回默认视图 -->
+      <div
+        v-else-if="filter === 'running'"
+        class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 py-10 text-center"
+        data-testid="subagent-list-empty-running"
+      >
+        <Bot class="size-7 text-neutral-dim opacity-40" />
+        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.subagentFilter.emptyRunning') }}</p>
+        <p class="text-[length:var(--text-3xs)] text-neutral-dim opacity-40">{{ t('sidebar.subagentFilter.emptyRunningHint') }}</p>
+        <Button
           variant="ghost"
           class="h-6 text-[length:var(--text-2xs)] text-accent"
           data-testid="subagent-filter-jump-all"
-          @click="setFilter('all')"
-        >{{ t('sidebar.subagentFilter.viewAll', { count: subagents.length }) }}</Button>
+          @click="setFilter('active')"
+        >{{ t('sidebar.subagentFilter.viewAll', { count: subagentCounts.active }) }}</Button>
       </div>
-      <!-- 「已结束」空桶：仅文案（设计 D6/§3.1） -->
+      <!-- 「已收起」空桶：仅文案 -->
       <div
         v-else
         class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 py-10 text-center"
-        data-testid="subagent-list-empty-ended"
+        data-testid="subagent-list-empty-archived"
       >
-        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.subagentFilter.emptyEnded') }}</p>
+        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.subagentFilter.emptyArchived') }}</p>
       </div>
     </template>
   </div>
@@ -179,10 +201,10 @@ const props = withDefaults(defineProps<{
 // useSubagentBucketFilter / useSessionScopedState 工厂承担（ADR-0049）
 const { filter, setFilter } = useSubagentBucketFilter(computed(() => props.sessionId))
 
-/** 当前桶下的可见记录（纯内存派生，subagent-bucket SSOT） */
+/** 当前视图下的可见记录（纯内存派生，subagent-bucket SSOT） */
 const visibleSubagents = computed(() => filterSubagents(props.subagents, filter.value))
 
-/** 三桶计数（computed 缓存，D6 #6——模板直调会在无关重渲染时反复重算全量分桶） */
+/** 三视图计数（computed 缓存，D6 #6——模板直调会在无关重渲染时反复重算全量分桶） */
 const subagentCounts = computed(() => countSubagents(props.subagents))
 
 const emit = defineEmits<{
@@ -194,14 +216,18 @@ const emit = defineEmits<{
 /** 当前进入取消确认态的 subagentId（两段式：首次点击进入，再次点击执行） */
 const cancellingId = ref<string | null>(null)
 
-/** cancel 两段式：首次点击进入确认态，二次点击 emit cancel */
-function onCancelClick(subagentId: string): void {
-  if (cancellingId.value === subagentId) {
-    emit('cancel', subagentId)
+/**
+ * cancel 两段式：首次点击进入确认态，二次点击 emit cancel。第二击时任务可能已收口
+ * （迟到 isStreaming=false 窗口）——组件保持纯展示不判业务，统一上抛；「任务已结束」
+ * 反馈在 action 层（useSidebarSubagentActions：非 streaming 不发 RPC，toast 提示）。
+ */
+function onCancelClick(record: SubagentRecord): void {
+  if (cancellingId.value === record.subagentId) {
     cancellingId.value = null
-  } else {
-    cancellingId.value = subagentId
+    emit('cancel', record.subagentId)
+    return
   }
+  cancellingId.value = record.subagentId
 }
 
 /** 执行态判据（四形态合并为三态展示，权威源 residual-fixes 设计 §5.4 等价公式）：
@@ -220,16 +246,34 @@ function isWaiting(record: SubagentRecord): boolean {
   return record.status === 'running' && !isStreaming(record) && !isDone(record)
 }
 
-/** 状态点颜色映射（design-tokens 语义色）。
- *  v4 两态：closed 是统一终态，成功/失败/取消按 closedReason/error 经 deriveClosedDisplay
- *  派生（closed 落 default bg-accent 会丢失终态语义——成功/失败都显示 accent 点）。 */
+/** 中断类停因（G2「为什么停」展示）：取消 / 各类被打断，落中性灰。 */
+const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
+
+/**
+ * 状态点颜色映射（design-tokens 语义色，三态主分类 + 中断细分）。
+ *  U8b 两态：idle 三分支（stopReason 派生——失败红 / 中断灰 / 已收口绿）；running 失败轮
+ *  （A-lite stopReason=failed，markRoundIdle 保持 running-resumable）红点优先于 done/waiting
+ *  投影，其余沿用 spinner + done 投影绿 + waiting 半透明 accent；legacy 五值（done/failed/
+ *  crashed/cancelled/closed）保留只读兼容（旧 session 显示，S8），closed 经 deriveClosedDisplay 派生。
+ */
 function statusDotClass(record: SubagentRecord): string {
   if (record.status === 'running') {
+    // 失败轮红点（A-lite）：markRoundIdle 失败轮携带 stopReason='failed' 且保持
+    // running-resumable——先于 done/waiting 投影判据（绿点/半透明点都会误导失败轮），
+    // 与 idle 分支 failed 同判据同色；红点只表达「上一轮失败」，不改变续聊资格语义。
+    if (record.stopReason === 'failed') return 'bg-danger'
     // spinner 只给 isStreaming；one-shot 轮终投影 done 用绿点、其余（等续聊/孤儿兜底）
     // 用 accent 静态点（进行中的非活跃态，区别于 done 绿/error 红/cancelled 灰）。
     if (isDone(record)) return 'bg-success'
     if (isWaiting(record)) return 'bg-accent opacity-60'
     return 'bg-accent'
+  }
+  if (record.status === 'idle') {
+    if (record.stopReason === 'failed') return 'bg-danger'
+    if (record.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(record.stopReason)) {
+      return 'bg-neutral-dim opacity-50'
+    }
+    return 'bg-success'
   }
   switch (record.status) {
     case 'done':
@@ -252,7 +296,7 @@ function statusDotClass(record: SubagentRecord): string {
           return 'bg-success'
       }
     default:
-      // running 走 spinner 不会到这里；保留 accent 兜底防未知值无色
+      // running/idle 已在前置分支返回；保留 accent 兜底防未知值无色
       return 'bg-accent'
   }
 }

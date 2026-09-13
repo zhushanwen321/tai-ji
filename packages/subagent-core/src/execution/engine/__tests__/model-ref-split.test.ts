@@ -1,6 +1,6 @@
 // model-ref-split.test.ts —— [W3 契约变更④] 无斜杠 canonicalRef 的 core 侧拆分单测。
 //
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.3 validateModel 行
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.3 validateModel 行
 // （「core 必须改 resolveIdentityForEngine 与续聊回读对无斜杠 ref 的处理：provider="",
 // id=ref，整串进 name，否则落成 "<ref>/" 畸形」）。拆分单一权威 = splitEngineModelRef，
 // 写入词形 = joinEngineModelRef（provider 空串不拼斜杠）；两消费方（chat 域留痕 /

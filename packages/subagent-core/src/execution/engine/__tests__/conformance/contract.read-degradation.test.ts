@@ -47,7 +47,6 @@ function makeHandle(engineId: string, sessionRef: Record<string, string>, journa
       v: 1,
       engineId,
       sessionRef,
-      poolKey: "shared",
       ...(journalPath !== undefined ? { journalPath } : {}),
       adapterVersion: "1.0.0-test",
     },

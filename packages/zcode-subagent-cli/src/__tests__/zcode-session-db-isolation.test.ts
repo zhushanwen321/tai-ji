@@ -1,5 +1,5 @@
 // zcode-session-db-isolation.test.ts —— 2026-09 会话库隔离的单元守护面（设计权威源：
-// docs/design/zcode-session-db-isolation.md D1/D2/D3 + §3.3 不变量 1/2/3；impl-plan
+// docs/architecture/zcode-session-db-isolation.md D1/D2/D3 + §3.3 不变量 1/2/3；impl-plan
 // §2.3 W3 规格「单元」行 + 探针④）。池 GC 守卫（A9/不变量 6 的可执行断言）见
 // zcode-session-db-pool-gc.test.ts；生产链白名单分支守护见
 // engine/__tests__/common/session-view-service-zcode-dbpath.test.ts。
@@ -78,7 +78,6 @@ function makeHandle(sessionRef: Record<string, string>): EngineHandle {
       v: 1,
       engineId: "zcode",
       sessionRef,
-      poolKey: "shared",
       adapterVersion: "1.0.0-test",
     },
   };
@@ -247,7 +246,7 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
 
     const { outcome } = await engine.run(
       { prompt: "做点什么", description: "s", model: `${PROVIDER}/m1`, cwd: workspace },
-      { taskId: "sa-iso-env", poolKey: "" },
+      { taskId: "sa-iso-env" },
     );
     expect(outcome.error).toBeUndefined();
 

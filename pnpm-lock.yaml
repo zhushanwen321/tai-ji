@@ -822,8 +822,26 @@ importers:
         specifier: ^2
         version: 2.2.12(typescript@5.9.3)
 
+  packages/pi-rpc:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      '@vitest/coverage-v8':
+        specifier: ^4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
   packages/pi-subagent-cli:
     dependencies:
+      '@zhushanwen/pi-rpc':
+        specifier: workspace:*
+        version: link:../pi-rpc
       '@zhushanwen/subagent-engine-sdk':
         specifier: workspace:*
         version: link:../subagent-engine-sdk
@@ -993,6 +1011,9 @@ importers:
       '@zhushanwen/pi-file-lock':
         specifier: workspace:*
         version: link:../../extensions/shared/file-lock
+      '@zhushanwen/pi-rpc':
+        specifier: workspace:*
+        version: link:../pi-rpc
       '@zhushanwen/subagent-core':
         specifier: workspace:*
         version: link:../subagent-core

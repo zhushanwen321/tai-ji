@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs
 //
-// [V3] kill -9 崩溃恢复（v2 设计 §4 验收表 V3 行 / GV2②；v1 A6 FAIL 复验转 PASS）
+// [V3] kill -9 崩溃恢复（v2 设计 §4 验收表 V3 行〔设计文档已删，git 可追溯〕/ GV2②；v1 A6 FAIL 复验转 PASS）
 // v1 A6 裁决：kill 形态可构造、补发不可达（240s 零到达）——worker 与宿主 SIGKILL
 // 共亡，成员 record 停留 running，E1 恢复钩子被「仍有 running」永久顶死。真根因
 // （v2 §2.2/§2.3）：orphan 覆写抹 collectMode（候选恒空）+ E1 running 口径与协调器

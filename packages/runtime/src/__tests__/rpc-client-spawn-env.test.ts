@@ -1,5 +1,5 @@
 /**
- * RpcClient 出站 env 契约回归锁定（U3，docs/design/env-propagation-boundary.md §5-U3）。
+ * RpcClient 出站 env 契约回归锁定（U3，docs/architecture/env-propagation-boundary.md §5-U3）。
  *
  * B3（runtime→pi）是本案泄道收口点：私有 buildSafeEnv 被 buildOutboundChildEnv 取代后，
  * 子进程 env 必须满足——deny 清单两键（XYZ_AGENT_PACKAGED / XYZ_RUNTIME_TOKEN）无论从

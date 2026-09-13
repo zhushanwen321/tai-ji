@@ -11,15 +11,15 @@
 // 对齐 notify-host.ts createNotifyHost 的 deps 惰性求值先例）。
 
 import { getLogger } from "../../core/logger.ts";
-import { bestEffort } from "../best-effort.ts";
-import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-lookup.ts";
-import { createRecord, tryTransition } from "../execution-record.ts";
-import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
+import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
+import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
-import { resolvePiWorkflowStateDir } from "../workflow-state-root.ts";
-import type { PiLike } from "../notify-host.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { AgentResult, ExecutionRecord } from "../types.ts";
+import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import type { PiLike } from "../notify/notify-host.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
 import {
   RoundSupervisor,
   runReconcileSweep,
@@ -61,7 +61,8 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
   if (memory !== undefined) {
     return {
       id: memory.id,
-      status: memory.status === "closed" ? "closed" : "running",
+      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+      status: memory.status === "idle" && memory.closedReason !== undefined ? "closed" : "running",
       resumable: memory.resumable === true,
       hasResult: memory.result !== undefined,
       chatMode: memory.chatMode === true,
@@ -77,7 +78,7 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
   if (disk === undefined) return undefined;
   return {
     id: disk.id,
-    status: disk.status === "closed" ? "closed" : "running",
+    status: disk.status === "idle" && disk.closedReason !== undefined ? "closed" : "running",
     resumable: disk.resumable === true,
     hasResult: disk.result !== undefined,
     chatMode: disk.chatMode === true,
@@ -92,11 +93,8 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
 
 /** 本 root session 的 running record 候选（内存 ∪ 磁盘重建投影）。
  *  [H2 W2] origin 透传——superseded 对账的 workflow 候选豁免判据（supervisor.evaluate
- *  消费面，W1 已把 origin 投影进 SubagentRecord）。【双防注记 I2】本处的 collectRecords
- *  不传 includeWorkflow（缺省过滤 workflow origin），而 supervisor.evaluate 的 superseded
- *  对账另有 workflow 候选豁免判据——后者实为死判据：workflow 候选在本查询已结构性
- *  豁免（缺省过滤），判据永不命中。刻意保留作防御纵深：若未来本查询改传 includeWorkflow
- *  或 store 侧过滤语义变更，evaluate 侧判据立即接管，行为不回退。 */
+ *  消费面）。防御性保留：当前 collectRecords 缺省 includeWorkflow=false 过滤下
+ *  workflow record 不进候选，本判据不命中；治理面若显式传 includeWorkflow:true 即生效。 */
 function supervisorCandidates(binding: RoundSupervisorBinding): SupervisorCandidateRecord[] {
   const rootFilter = binding.getSessionRootId() ?? undefined;
   return binding
@@ -292,15 +290,16 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
     runReconcileSweep({
       sessionFile: binding.getMainSessionFile(),
       lookupRecordState: (id) => {
+        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
         const memory = binding.getStore().getMutable(id);
         if (memory !== undefined) {
-          return memory.status === "closed"
+          return memory.status === "idle" && memory.closedReason !== undefined
             ? { terminal: true, closedReason: memory.closedReason }
             : "active";
         }
         const disk = binding.getStore().findLightById(id);
         if (disk === undefined) return "missing";
-        return disk.status === "closed"
+        return disk.status === "idle" && disk.closedReason !== undefined
           ? { terminal: true, closedReason: disk.closedReason }
           : "active";
       },

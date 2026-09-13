@@ -33,6 +33,7 @@ interface RegisteredTool {
 function createHarness(
 	selectImpl: (...args: unknown[]) => unknown,
 	registerToolImpl?: (tool: RegisteredTool) => void,
+	mode: "rpc" | "tui" = "rpc",
 ) {
 	const registered: RegisteredTool[] = [];
 	const handlers = new Map<string, Array<(data: unknown, ctx: unknown) => unknown>>();
@@ -44,7 +45,7 @@ function createHarness(
 		},
 	};
 	const ctx = {
-		mode: "rpc" as const,
+		mode,
 		hasUI: true,
 		ui: { select: selectMock },
 		sessionManager: { getSessionId: () => "sess-1" },
@@ -108,6 +109,19 @@ describe("factory 注册", () => {
 });
 
 describe("启动 sync（设计 §3.3-D4）", () => {
+	it("环境门控：非 rpc 模式（裸 pi TUI）跳过 sync 与 observe 转发——BRIDGE select 无拦截方不弹框", async () => {
+		// 2026-09-13 oe-audit + 裸 TUI 闪框事故：BRIDGE_MARKER select 的消费方是
+		// xyz-agent runtime（恒 --mode rpc）；tui 模式下 marker select 弹真框（sync 闪
+		// 60s、observe 转发无 timeout 永久挂起）——callBridge 入口统一折叠 null。
+		const selectMock = methodRouter({ "bridge:sync": [SYNC_PAYLOAD] });
+		const { registered, handlers, ctx, selectMock: captured } = createHarness(selectMock, undefined, "tui");
+		await triggerSessionStart(handlers, ctx);
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(captured).toHaveBeenCalledTimes(0); // callBridge 入口即折叠，select 通道零调用
+		expect(registered).toHaveLength(0); // 无 sync → 无工具注册（taiji 组离开 xyz-agent 无功能）
+	});
+
 	it("session_start 触发 sync：select 用 BRIDGE_MARKER + bridge:sync 载荷，工具注册透传 parameters", async () => {
 		const selectMock = methodRouter({ "bridge:sync": [SYNC_PAYLOAD] });
 		const { registered, handlers, ctx } = createHarness(selectMock);

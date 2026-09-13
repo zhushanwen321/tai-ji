@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/page-design/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
+<p align="center"><img src="docs/assets/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
 
 # 太极 TaiJi
 
@@ -292,14 +292,14 @@ pnpm build:e2e && pnpm test:e2e
 | 文档 | 内容 |
 |------|------|
 | [AGENTS.md](AGENTS.md) | 开发约定、关键规则、调试与发布纪律 |
-| [PRODUCT.md](PRODUCT.md) / [ARCHITECTURE.md](ARCHITECTURE.md) | 产品定位 / 架构总览 |
-| [docs/standards.md](docs/standards.md) | 编码规范与架构标准 |
-| [docs/page-design/](docs/page-design/) | 设计 SSOT（`design-tokens.md` 太极纯灰原子值 + `v6-master-spec.md` 范式） |
+| [docs/PRODUCT.md](docs/PRODUCT.md) / [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 产品定位 / 架构总览 |
+| [docs/STANDARDS.md](docs/STANDARDS.md) | 编码规范与架构标准 |
+| [docs/page-design/](docs/page-design/) | 设计 SSOT（`v6-tokens.css` 太极纯灰原子值 + `v6-master-spec.md` 范式） |
 | [docs/extensions/](docs/extensions/) | pi 扩展开发全套指南 |
-| [docs/feature-map/](docs/feature-map/) | 功能规划与阶段现状 |
-| [docs/testing/](docs/testing/) + [TEST-STRATEGY.md](TEST-STRATEGY.md) | 测试策略与分功能测试手册 |
+| [docs/architecture/feature-map.md](docs/architecture/feature-map.md) | 功能规划与阶段现状 |
+| [docs/testing/](docs/testing/) + [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) | 测试策略与分功能测试手册 |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | 问题排查指南 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 问题排查指南 |
 
 ## License
 

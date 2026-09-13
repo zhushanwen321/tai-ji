@@ -10,7 +10,7 @@
 // 推进，不引入真实 setTimeout（TEST-STRATEGY 禁真实等待），无需 fake timers。
 import { describe, expect, it } from "vitest";
 
-import { createConcurrencyPool, DefaultConcurrencyPool } from "../concurrency-pool.ts";
+import { createConcurrencyPool, DefaultConcurrencyPool } from "../assembly/concurrency-pool.ts";
 
 /** microtask flush：让排队条目的 resolve/.then 链跑完（pool 无 timer 语义）。 */
 async function flushMicrotasks(): Promise<void> {

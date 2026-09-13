@@ -1,7 +1,7 @@
 /**
  * [OR-3] worker 侧 pending per-call timeoutMs + abort 广播 测试（真实 Worker 线程，P-T3）。
  *
- * 覆盖（unbounded-wait-audit §4.1 OR-3 / §7.2 T3③ / §7.3 P-T3）：
+ * 覆盖（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §4.1 OR-3 / §7.2 T3③ / §7.3 P-T3））：
  * - agent() 传 timeoutMs：主线程不回话 → pending 以错误 resolve（不 reject、不放大成
  *   脚本 error）+ 超时 warn 记入 _workerLogs——消息层自己的超时，旧实现零超时永挂
  * - returnMeta 模式超时 resolve {value:"", error}

@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a3-failure-in-batch.mjs
 //
 // [A3] 成员失败入批
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A3 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A3 行（设计文档已删，git 可追溯）：
 //   3 个 collect:"sync"，其一 task 为「直接 throw/失败」。
 // 预期输出：
 //   - 仍单条批通知（subagent-bg-notify 恰 1 条，批形态）

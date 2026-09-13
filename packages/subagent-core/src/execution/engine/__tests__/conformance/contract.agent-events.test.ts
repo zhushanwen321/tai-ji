@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentEvent } from "../../../types.ts";
+import type { AgentEvent } from "../../../assembly/types.ts";
 import {
   assertAgentEventInvariants,
   checkAgentEventInvariants,

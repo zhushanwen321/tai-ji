@@ -1,6 +1,6 @@
 // engine-section-stability.test.ts —— [engine-awareness U4 stability-guard]
 //
-// 字节稳定守护（设计 docs/design/subagent-engine-awareness-injection.md §3.3 D7 /
+// 字节稳定守护（设计 docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）§3.3 D7 /
 // §4 A8 的代码级前置）：engine 段延续注入纪律——确定性渲染、链尾位置，引擎切换只断
 // system prompt 尾部 cache 前缀（与 provider models 段变更同判，不新增 cache 破坏面，
 // cache-probe 前缀指纹归因兼容）。

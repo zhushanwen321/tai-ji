@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { DefaultConcurrencyPool } from "../concurrency-pool.ts";
+import { DefaultConcurrencyPool } from "../assembly/concurrency-pool.ts";
 
 describe("S1: ConcurrencyPool abort reject produces AbortError name", () => {
 	it("queued acquire aborted via signal rejects with error.name=AbortError", async () => {

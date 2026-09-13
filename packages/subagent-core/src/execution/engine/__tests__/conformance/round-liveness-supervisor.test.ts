@@ -41,7 +41,7 @@ import {
   type SupervisorCandidateRecord,
   type SupervisorRecordView,
 } from "../../../round-supervisor/index.ts";
-import type { ExecutionRecord } from "../../../types.ts";
+import type { ExecutionRecord } from "../../../assembly/types.ts";
 
 // ── 场景道具（替身 deps——黑盒观测面：通知/指引/替代/放弃四出口 + 三状态源）────
 
@@ -88,7 +88,7 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
 function viewOf(record: ExecutionRecord, overrides: Partial<SupervisorRecordView> = {}): SupervisorRecordView {
   return {
     id: record.id,
-    status: record.status === "closed" ? "closed" : "running",
+    status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
     resumable: record.resumable === true,
     hasResult: record.result !== undefined,
     chatMode: record.chatMode === true,

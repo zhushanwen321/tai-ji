@@ -1573,7 +1573,8 @@ export class EventAdapter {
       inflightMirror.applyReport(this.sessionId, report)
       const requestId = String((event as PiExtensionUiRequestEvent).id ?? '')
       // fire-and-forget 的送达判定（D5 缺席语义②）：reporter 侧 resolve(undefined) 与超时
-      // 不可区分，必须显式 ack 才能区分「已送达」与「旧版 runtime 无路由」。
+      // 不可区分，必须显式 ack 才能区分「已送达」与「无路由/通道故障」——reporter 据此
+      // 停止重试（有界，2026-09-13 oe-audit 修订）。
       if (requestId !== '') client.sendExtensionUiResponse?.(requestId, INFLIGHT_REPORT_ACK, 'select')
     } catch (err) {
       // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）

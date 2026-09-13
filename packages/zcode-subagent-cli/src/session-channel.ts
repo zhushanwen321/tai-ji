@@ -1,7 +1,7 @@
 // src/execution/engine/engines/zcode/session-channel.ts
 //
 // ZcodeEngine app-server 会话层（R3）。设计权威源：
-// docs/design/zcode-engine-appserver-resident.md §3.3 D4（会话生命周期：每任务自包含
+// docs/architecture/zcode-engine-appserver-resident.md §3.3 D4（会话生命周期：每任务自包含
 // create→run→close，不做热会话复用）/ §2.4 目标数据流 ①-⑦ / §3.4 不变量 1
 // （text_delta 拼接 == read 全文、终态唯一 turn.terminal 权威、收尾帧 usage 完整）
 // 与 2（resolve 严格晚于全部事件回调）/ 附录 A.2（任务生命周期帧序列——协议权威，
@@ -240,6 +240,73 @@ export function extractReadUsage(
     if (finish !== undefined && isRecord(finish.tokens)) return finish.tokens;
   }
   return isRecord(readResult.usage) ? readResult.usage : undefined;
+}
+
+// ============================================================
+// [U6 / §3.2.6 要点 3] session/resume 读通道（P-1 探针 2026-09-13 实证）
+// ============================================================
+
+/** resume 应答中还原出的双向历史条目（user / assistant 全文，时序保持）。 */
+export interface ResumedHistoryTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/**
+ * 从 session/resume 应答提取双向历史（P-1 实证：应答自带完整 messages 历史，
+ * 形态与 session/read 同构——role 在 m.info.role 主形态 / m.role 旧形态，文本在
+ * parts[] text 部件拼接 / content 三形态）。空文本条目跳过；未知 role 跳过
+ * （只还原对话双向，不猜测系统消息语义）。
+ */
+export function extractResumeHistory(resumeResult: unknown): ResumedHistoryTurn[] {
+  if (!isRecord(resumeResult) || !Array.isArray(resumeResult.messages)) return [];
+  const turns: ResumedHistoryTurn[] = [];
+  for (const m of resumeResult.messages) {
+    if (!isRecord(m)) continue;
+    const role = messageRole(m);
+    if (role !== "user" && role !== "assistant") continue;
+    const text = partsToText(m.parts) ?? contentToText(m.content);
+    if (text === undefined || text === "") continue;
+    turns.push({ role, text });
+  }
+  return turns;
+}
+
+/**
+ * 从 session/resume 应答提取历史 token 总量（裁剪预算数据源，§3.2.6 要点 3：
+ * 「token 成本经 resume 应答自带的 tokens 数据做裁剪预算」）。口径 = 全部
+ * assistant 消息 step-finish tokens 的 input+output（含 cache）累加；无任何
+ * tokens 数据返回 undefined（调用方走字符近似兜底）。
+ */
+export function extractResumeTotalTokens(resumeResult: unknown): number | undefined {
+  if (!isRecord(resumeResult) || !Array.isArray(resumeResult.messages)) return undefined;
+  let total = 0;
+  let has = false;
+  for (const m of resumeResult.messages) {
+    if (!isRecord(m) || messageRole(m) !== "assistant" || !Array.isArray(m.parts)) continue;
+    for (const p of m.parts) {
+      if (!isRecord(p) || p.type !== "step-finish" || !isRecord(p.tokens)) continue;
+      const t = p.tokens as Record<string, unknown>;
+      for (const key of ["input", "output"] as const) {
+        const v = typeof t[key] === "number" ? t[key] : Number(t[key]);
+        if (Number.isFinite(v) && v > 0) {
+          total += v;
+          has = true;
+        }
+      }
+      const cache = isRecord(t.cache) ? t.cache : undefined;
+      if (cache !== undefined) {
+        for (const key of ["read", "write"] as const) {
+          const v = typeof cache[key] === "number" ? cache[key] : Number(cache[key]);
+          if (Number.isFinite(v) && v > 0) {
+            total += v;
+            has = true;
+          }
+        }
+      }
+    }
+  }
+  return has ? total : undefined;
 }
 
 // ============================================================
@@ -614,6 +681,18 @@ export class SessionChannel {
         "session/send 返回 accepted:false（投递未被接受——会话可能已失效或拒绝投递）"
       );
     }
+  }
+
+  /**
+   * session/resume 读通道（[U6 / §3.2.6 要点 3，P-1 探针实证]）：应答自带完整
+   * 双向 messages 历史（user/assistant 全量、tokens、parts）——zcode 续聊选型的
+   * 历史来源（读通道成立；原地 resume 续写被 -32031 卡死，写通道不可用）。错误
+   * 原样上抛（调用方决定降级形态——引擎侧 warn 后无历史前缀开新会话）。
+   * 经 conn.request 惰性启动连接（resume 是 run 的**首个**请求——调用时点连接
+   * 可能尚未启动，与 readBestEffort 的「已死跳过」判据不同场景，不做 alive 守卫）。
+   */
+  async resumeSession(sessionId: string): Promise<unknown> {
+    return this.conn.request("session/resume", { sessionId }, { timeoutMs: ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS });
   }
 
   /**

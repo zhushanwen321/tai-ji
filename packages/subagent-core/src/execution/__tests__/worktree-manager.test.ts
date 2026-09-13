@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DirtyWorktreeError } from "../types.ts";
+import { DirtyWorktreeError } from "../assembly/types.ts";
 
 // ── mock modules ──
 
@@ -30,7 +30,7 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
 }));
 
-vi.mock("../alive-store.ts", () => ({
+vi.mock("../persistence/alive-store.ts", () => ({
   isProcessAlive: vi.fn(),
 }));
 
@@ -60,7 +60,7 @@ const { mockLoad, mockAdd, mockUpdatePid, mockRemove, registryEntries } = vi.hoi
   };
 });
 
-vi.mock("../worktree-registry.ts", () => ({
+vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
     updatePid = mockUpdatePid;
@@ -76,9 +76,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { isProcessAlive } from "../alive-store.ts";
-import { encodeCwd } from "../path-encoding.ts";
-import { WorktreeManager } from "../worktree-manager.ts";
+import { isProcessAlive } from "../persistence/alive-store.ts";
+import { encodeCwd } from "../assembly/path-encoding.ts";
+import { WorktreeManager } from "../worktree/worktree-manager.ts";
 
 // 被测链路（gitRunAsync）调用四参形态（file, args, options, callback）；vi.mocked
 // 直接包 execFile 会推导到无 options 重载，显式绑定四参签名
@@ -355,6 +355,28 @@ describe("WorktreeManager", () => {
         expect.anything(),
       );
       // 注册表仍被移除
+      expect(mockRemove).toHaveBeenCalledWith(handle.branch);
+    });
+
+    it("[S5] keepBranch:true（归档回收）跳过 branch -D——分支是续聊重建依据", async () => {
+      setupExecFile();
+      const handle = makeHandle();
+
+      await mgr.cleanup(handle, { keepBranch: true });
+
+      // worktree remove 照常（释放 checkout 隔离）
+      expect(mockExecFile).toHaveBeenCalledWith(
+        "git",
+        ["worktree", "remove", "--force", handle.path],
+        expect.objectContaining({ cwd: MAIN_CWD }),
+        expect.anything(),
+      );
+      // 分支保留（reconstruct 按 `pi-sub-<recordId>` 命名约定重建的依据）
+      const branchDeletes = mockExecFile.mock.calls.filter(
+        (c) => (c[1] as readonly string[])[0] === "branch" && (c[1] as readonly string[])[1] === "-D",
+      );
+      expect(branchDeletes).toHaveLength(0);
+      // 注册表条目照常移除（分支存活但无 checkout——对账器方向二只扫 tmpdir 物理目录，不触碰）
       expect(mockRemove).toHaveBeenCalledWith(handle.branch);
     });
   });

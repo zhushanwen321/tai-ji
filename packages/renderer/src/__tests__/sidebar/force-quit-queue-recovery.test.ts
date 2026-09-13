@@ -1,7 +1,7 @@
 /**
  * [session-dead 结构性修复 D3] useSidebarSessionActions.onForceQuitSession 队列回收编排测试。
  *
- * 设计 D3（docs/design/session-dead-structural-fixes.md §3.3）：forceQuit 两段确认（SessionItem
+ * 设计 D3（docs/design/session-dead-structural-fixes.md——已删除，git 可追溯——§3.3）：forceQuit 两段确认（SessionItem
  * 内，不在本测试面）成功后——
  *  - 行为 1（队列清空）：compactQueue.drain 整队回收（含已提交在途条目），count 归零
  *  - 行为 2（草稿回收）：回收文本经 composer injection 一次性通道写回（target='current' +

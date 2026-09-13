@@ -1,5 +1,7 @@
 # ADR 0013: sessionData API over pi.appendEntry
 
+- 状态：Accepted（底层持久化实现后被 [ADR-0014](archive-digest.md#adr-0014) 演进为本地文件，sessionData API 决策本体仍有效）
+
 ## Context
 
 Plugin 需要 per-session 状态持久化（如 goal 的任务进度、todo 的列表）。数据需要随 session 生灭、可被 LLM context 引用、支持 session fork/restore。

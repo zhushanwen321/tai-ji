@@ -155,9 +155,10 @@ export function collector(received: PiMessage[]): (msg: PiMessage) => void {
   return (msg) => { received.push(msg) }
 }
 
-/** 反射读早期帧缓冲（仅测试观测用，先例：rpc-client.test.ts pendingSize；private 字段须经 unknown 中转——runtime/test 惯例）。 */
+/** 反射读早期帧缓冲（仅测试观测用，先例：rpc-client.test.ts pendingSize；private 字段须经 unknown 中转——runtime/test 惯例）。
+ *  U1 pi-rpc 收敛后缓冲是 createEarlyFrameBuffer 部件（只读快照经 frames getter 暴露）。 */
 export function earlyFrameBufferOf(client: RpcClient): PiMessage[] {
-  return (client as unknown as { earlyFrameBuffer: PiMessage[] }).earlyFrameBuffer
+  return (client as unknown as { earlyFrameBuffer: { frames: readonly PiMessage[] } }).earlyFrameBuffer.frames.slice()
 }
 
 /**

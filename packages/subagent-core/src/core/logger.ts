@@ -1,7 +1,7 @@
 // src/core/logger.ts
 //
 // core log facade（替代 @zhushanwen/pi-extension-logger 的 core 内统一入口）。
-// 设计权威源：docs/design/subagent-core-package-extraction.md §3.3 D2「解析时机契约」。
+// 设计权威源：docs/architecture/subagent-core-package-extraction.md §3.3 D2「解析时机契约」。
 //
 // 为什么是 facade 代理而不是绑死实现：切面内 30 处既有惯例是模块顶层
 // `const logger = getLogger(...)`（模块加载期创建并缓存实例，彼时宿主必然尚未

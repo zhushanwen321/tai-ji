@@ -1,7 +1,7 @@
 // src/execution/engine/registry.ts
 //
 // 引擎注册表（P1；W3 协议化改造）。设计权威源（现行）：
-// docs/design/subagent-engine-protocolization.md §3.4 发现与注册 / §3.8 D1（EngineDescriptor
+// docs/architecture/subagent-engine-protocolization.md §3.4 发现与注册 / §3.8 D1（EngineDescriptor
 // 双模）+ D4（缺省引擎与 fallback 目标）；实现级规格 impl-plan §2.3。历史权威源
 // docs/architecture/subagent-engine-abstraction.md §3.3.1/§3.3.3（engine_not_found 错误
 // 规格第 1 行）仍然有效。

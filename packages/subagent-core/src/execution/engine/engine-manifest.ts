@@ -1,7 +1,7 @@
 // src/execution/engine/engine-manifest.ts
 //
 // [W4] 引擎包 manifest 字段级解析（package.json `xyz-agent.subagentEngine` 段）。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.4 + impl-plan §2.4。
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.4 + impl-plan §2.4。
 //
 // 自 engine-discovery-scan.ts 拆出（max-lines 纪律）：manifest 解析是纯「unknown →
 // 强类型」的字段级校验域，与发现主链（搜索路径/装载）无状态耦合；warn 经 core log
@@ -47,7 +47,9 @@ export const CONSERVATIVE_CAPABILITIES: EngineCapabilities = {
 const CAPABILITY_ENUMS: Record<string, readonly string[]> = {
   schemaEnforcement: ["native", "emulated"],
   steer: ["native", "emulated", "unsupported"],
-  conversation: ["native", "unsupported"],
+  // [U6 / §3.2.6 要点 4] "cold" = 冷恢复会话（resume 读 + 新 session 注入）——
+  // 与 SDK EngineCapabilities.conversation 值域同批扩展，manifest 侧同步收词。
+  conversation: ["native", "cold", "unsupported"],
   personaInjection: ["file", "flag", "prompt"],
   eventGranularity: ["stream", "coarse"],
   sandbox: ["native", "emulated", "none"],

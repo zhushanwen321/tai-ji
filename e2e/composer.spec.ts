@@ -1,5 +1,5 @@
 /**
- * Composer E2E —— `#` 文件候选 inline 触发 + 过滤 + chip 插入（02-composer.md §8/§9）。
+ * Composer E2E —— `#` 文件候选 inline 触发 + 过滤 + chip 插入（01-chat-panel-composer.md §2（Composer）§8/§9）。
  *
  * 数据流（MOCK 轨）：VITE_MOCK=true → composer domain 走 mockApi.composer，
  * getFileCandidates 返回 FILE_CANDIDATES 映射的 FileNode[]（src/auth/、AuthService.ts、token.ts）。
@@ -14,7 +14,7 @@
  * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项（守门已随 file 入口移除）
  * - E2E-CF-6: 敲 #token → query 过滤到仅 token.ts（验证 name+path 过滤）
  *
- * 约束（见 00-test-strategy-overview.md §6）：
+ * 约束（见 00-overview.md §6）：
  * - contenteditable 用 pressSequentially（fill 可能不触发 input / 光标定位）
  * - CommandPopover portal 到 body，全局查命令 button
  * - SegmentedTab 按钮文本带计数，用正则前缀匹配

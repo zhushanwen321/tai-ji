@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { ManifestStore } from "../manifest-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
 
 const VALID_MANIFEST = {
   id: "sa-good",

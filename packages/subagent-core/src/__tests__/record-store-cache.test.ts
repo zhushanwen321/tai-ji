@@ -18,8 +18,8 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { RecordStore } from "../execution/record-store";
-import type { ExecutionRecord } from "../execution/types";
+import { RecordStore } from "../execution/persistence/record-store";
+import type { ExecutionRecord } from "../execution/assembly/types";
 
 describe("RecordStore per-file cache + light scan [perf]", () => {
   let rootDir: string;
@@ -111,10 +111,13 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
   });
 
   it("A2: jsonl 变化触发单文件重建——append + finalize 后状态翻转", () => {
-    const fA = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] }); // 无 sidecar → running
+    const fA = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] }); // 无 sidecar → idle
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
 
-    expect(store.collectRecords(100, "all", "root-1").every((r) => r.status === "running")).toBe(true);
+    // [U3 / §3.2.4] 重建单规则：无 sidecar 恒 idle + interrupted-by-restart
+    const initial = store.collectRecords(100, "all", "root-1");
+    expect(initial.every((r) => r.status === "idle")).toBe(true);
+    expect(initial.every((r) => r.stopReason === "interrupted-by-restart")).toBe(true);
 
     // 文件 A 追加一条 assistant + 写 .finalized（模拟真实 finalize）
     fs.appendFileSync(
@@ -130,12 +133,13 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     const records = store.collectRecords(100, "all", "root-1");
     const a = records.find((r) => r.id === "sa-1");
     const b = records.find((r) => r.id === "sa-2");
-    expect(a?.status).toBe("closed");
+    expect(a?.status).toBe("idle");
     // [v8.5 A2] 空 sidecar 兜底 disconnected（旧格式：死因不可考），不再误导为 gc。
     // reason 读回的正向用例在 ended-message-and-fork-from.test.ts。
     expect(a?.closedReason).toBe("disconnected");
-    expect(a?.endedAt).toBeGreaterThan(0); // light 分支 2 用 jsonl mtime 近似
-    expect(b?.status).toBe("running"); // 未变文件不受影响
+    expect(a?.endedAt).toBeGreaterThan(0); // light 旧 finalized 分支用 jsonl mtime 近似
+    expect(b?.status).toBe("idle"); // 未变文件不受影响（stopReason 保持兜底值）
+    expect(b?.stopReason).toBe("interrupted-by-restart");
   });
 
   it("A3: sidecar 变化触发状态翻转——.finalized 换 .cancelled", () => {
@@ -150,7 +154,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     );
 
     const rec = store.collectRecords(100, "all", "root-1")[0];
-    expect(rec.status).toBe("closed");
+    expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("cancelled");
     expect(rec.error).toBe("cancelled by user");
     expect(rec.endedAt).toBe(3000);
@@ -175,7 +179,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
 
     const light = store.collectRecords(100, "all", "root-1")[0];
     expect(light.id).toBe("sa-1");
-    expect(light.status).toBe("closed");
+    expect(light.status).toBe("idle");
     expect(light.result).toBeUndefined();
     expect(light.eventLog).toEqual([]);
     expect(light.displayItems).toEqual([]);
@@ -194,7 +198,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     expect(full?.totalTokens).toBe(15); // input 10 + output 5
     expect(full?.eventLog.length).toBeGreaterThan(0); // turn_end 派生事件
     expect(full?.displayItems.length).toBeGreaterThan(0);
-    expect(full?.status).toBe("closed"); // 状态矩阵同样套用
+    expect(full?.status).toBe("idle"); // 状态矩阵同样套用
 
     // 已缓存：去掉读权限再取，仍返回全量（不重读文件）
     fs.chmodSync(f, 0o000);
@@ -205,18 +209,19 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     expect(store.getFullRecord("sa-missing")).toBeUndefined();
   });
 
-  it("B3: identity-only 文件（无 assistant）按分支 4 running 呈现", () => {
-    // v4 B-1 可续聊语义：pi 延迟写入下这类文件几乎不存在（首个 assistant 才 flush），
-    // 若存在（崩溃前 flush）应可见为 running 而非静默消失。getFullRecord 回退 light。
+  it("B3: identity-only 文件（无 assistant）按 §3.2.4 单规则 idle 呈现", () => {
+    // pi 延迟写入下这类文件几乎不存在（首个 assistant 才 flush），若存在（崩溃前
+    // flush）应可见为 idle（§3.2.4 单规则）而非静默消失。getFullRecord 回退 light。
     writeSession({ name: "a.jsonl", id: "sa-1" }); // 无 assistantTexts
     const rec = store.collectRecords(100, "all", "root-1")[0];
     expect(rec.id).toBe("sa-1");
-    expect(rec.status).toBe("running");
+    expect(rec.status).toBe("idle");
+    expect(rec.stopReason).toBe("interrupted-by-restart");
     expect(rec.endedAt).toBeUndefined();
 
     const full = store.getFullRecord("sa-1");
     expect(full).toBeDefined();
-    expect(full?.status).toBe("running"); // 哨兵回退 light，不重试全文解析
+    expect(full?.status).toBe("idle"); // 哨兵回退 light，不重试全文解析
   });
 
   it("B5: 续聊场景 identity 在尾部——尾部定位 + 负缓存回归防护", () => {
@@ -314,7 +319,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     const second = store.collectRecords(100, "all", "root-1");
     expect(second).toHaveLength(1);
     expect(second[0]?.id).toBe("sa-1");
-    expect(second[0]?.status).toBe("running"); // light 态不受 append 影响
+    expect(second[0]?.status).toBe("idle"); // light 态不受 append 影响（§3.2.4 单规则恒 idle）
 
     // 详情走 getFullRecord 独立 stat 校验，仍能看到 append 后的完整数据
     const full = store.getFullRecord("sa-1");

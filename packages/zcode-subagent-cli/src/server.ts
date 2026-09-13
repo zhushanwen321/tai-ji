@@ -6,8 +6,8 @@
 //   core EngineClient（spawn+握手+请求关联+反向路由） ←NDJSON stdio→ 本服务器
 //
 // 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
-// `event` 通知（runId + 单调 seq）外发，onPoolResolved/onHandleReady/stream 经
-// host/* 反向请求上抛。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
+// `event` 通知（runId + 单调 seq）外发，onHandleReady/stream 经 host/* 反向请求上抛
+//（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
 // cwd/schemaEnv/engineFallback 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
 // （与 core RemoteEngine.toSdkTaskSubset 的映射互为镜像）。
 //
@@ -206,18 +206,17 @@ export class EngineProtocolServer {
 
     const runCtx: RunContext = {
       taskId: runId,
-      poolKey: ctx.poolKey,
       signal: controller.signal,
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
       ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
-      onPoolResolved: (poolKey) => {
-        void this.reverseRequestInternal("host/poolResolved", { runId, poolKey });
-      },
+      // [U6 / §3.2.6 要点 3] resume 锚点透传（宿主 → 引擎的续聊通道：zcode 锚
+      // sessionRef {sessionId, dbPath}，引擎侧 resume 读 + 新 session 注入消费）。
+      ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
-        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef, poolKey: partial.poolKey });
+        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef });
       },
     };
 

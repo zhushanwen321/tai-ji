@@ -42,18 +42,18 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import { tryTransition } from "../execution-record.ts";
-import { createRecord } from "../execution-record.ts";
-import { createNotifyHost } from "../notify-host.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import { SubagentStream } from "../stream-sink.ts";
+import { tryTransition } from "../persistence/execution-record.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { createNotifyHost } from "../notify/notify-host.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { SubagentRecordEntryData } from "../record-entry.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
+import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import {
   _resetSettledWatchdogsForTest,
   _setMidRoundNoProgressWindowMsForTest,
@@ -63,12 +63,12 @@ import {
   isSettledWatchdogDisabled,
   SETTLED_MID_ROUND_NO_PROGRESS_MS,
   SETTLED_WATCHDOG_ENV,
-} from "../settled-watchdog.ts";
+} from "../lifecycle/settled-watchdog.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EngineCapabilities } from "../engine/types.ts";
 import type { EnginePort } from "../engine/port.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
@@ -269,7 +269,7 @@ describe("executeWorkflowAgent 池顺序", () => {
     controller.abort();
     const result = await pending;
     expect(result.error).toContain("cancelled"); // 合成 failed result 回脚本
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收口
     expect(entries.at(-1)).toMatchObject({ id: record.id, closedReason: "cancelled" });
     expect(fake.runs).toHaveLength(0); // 零引擎副作用
@@ -454,12 +454,12 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     expect(result.sessionFile).toBe(sessionFile);
     expect(result.usage?.turns).toBe(2);
     // D7：成功即终态化 closed/gc + archive 出内存（不再 SP-5 running-resumable）
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
     expect(store.getMutable(record.id)).toBeUndefined();
     // 终态 entry（持久化链）携带 origin/closedReason
     const finalEntry = entries.at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, status: "closed", closedReason: "gc", origin: "workflow" });
+    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", closedReason: "gc", origin: "workflow" });
   });
 
   it("close 路径抢先（user-close 已写 closedReason）→ 静默跳过不覆盖（memory closedReason 不分叉）", async () => {
@@ -471,7 +471,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const run = soleRun(fake);
     const record = runningRecord(store);
 
-    // 模拟 close 路径赢家（closeChatIdle 终态写点的抢先形态：closed + user-close）
+    // 模拟 close 路径赢家（close 收起 markArchived 终态写点的抢先形态：closed + user-close）
     expect(tryTransition(record, "closed", "user-close")).toBe(true);
 
     run.settle({ content: "done" });
@@ -479,7 +479,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
 
     // D7 分支抢锁失败 → 静默跳过：closedReason 不被 "gc" 覆盖，无二次终态 entry
     expect(record.closedReason).toBe("user-close");
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(entries.length).toBe(entriesBefore);
   });
 
@@ -495,7 +495,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     run.settle({ content: "done" });
     const result = await pending;
 
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled"); // 不漂移为 "gc"（D7 条件含 !aborted）
     const finalEntry = entries.at(-1);
     expect(finalEntry).toMatchObject({ id: record.id, closedReason: "cancelled" });
@@ -545,7 +545,7 @@ describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
     run.settle({ content: "done" });
     await pending;
     const finalEntry = entries.at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, status: "closed", totalTokens: 190, turns: 1 });
+    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", totalTokens: 190, turns: 1 });
   });
 
   it("error 事件 → lastError 记录（reducer 喂入不破坏失败语义）", async () => {
@@ -561,7 +561,7 @@ describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
     // 失败收口不受喂入影响（终态 entry 正常落盘）
     const finalEntry = entries.at(-1);
     expect(finalEntry).toBeDefined();
-    expect(finalEntry!.status).toBe("closed");
+    expect(finalEntry!.status).toBe("idle");
     expect(store.getMutable(finalEntry!.id)).toBeUndefined();
   });
 });
@@ -587,7 +587,7 @@ describe("D6 toNotifyRecord origin gate", () => {
       slug: "d6",
       startedAt: Date.now(),
     });
-    const closedWf = { ...base, origin: "workflow" as const, status: "closed" as const };
+    const closedWf = { ...base, origin: "workflow" as const, status: "idle" as const, closedReason: "gc" as const };
     const resumableWf = { ...base, origin: "workflow" as const, resumable: true };
     expect(host.toNotifyRecord(closedWf)).toBeUndefined();
     expect(host.toNotifyRecord(resumableWf)).toBeUndefined();
@@ -635,10 +635,10 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     expect(result.error).toContain("engine_crashed");
     expect(result.content).toBe("");
     // record 由失败路径立即终态化（closed/gc + archive），不保持 resumable 交监督器
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
     expect(store.getMutable(record.id)).toBeUndefined();
-    expect(entries.at(-1)).toMatchObject({ id: record.id, status: "closed", closedReason: "gc" });
+    expect(entries.at(-1)).toMatchObject({ id: record.id, status: "idle", closedReason: "gc" });
     const supervisor = Reflect.get(service, "roundSupervisor") as { supervisedIds(): string[] };
     expect(supervisor.supervisedIds()).toEqual([]);
   });
@@ -674,7 +674,7 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     store.register(wfRecord);
     const adopted = await runEngineTask(wfRecord, { task: "t", slug: "s" }, deadEngine, undefined);
     expect(adopted).toBe(false); // 豁免：不走接管分支
-    expect(wfRecord.status).toBe("closed"); // 落空 → finalizeFailed 立即终态化
+    expect(wfRecord.status).toBe("idle"); // 落空 → finalizeFailed 立即终态化
     expect(wfRecord.closedReason).toBe("gc");
     expect(wfRecord.resumable).toBeUndefined();
     expect(supervisor.supervisedIds()).toEqual([]);
@@ -718,7 +718,7 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
       exitCode: null,
     });
     expect(adopted).toBe(false); // 豁免：exitCode===null 合成死亡形态不走接管
-    expect(wfRecord.status).toBe("closed"); // 落空 → 正常终态化
+    expect(wfRecord.status).toBe("idle"); // 落空 → 正常终态化
     expect(wfRecord.closedReason).toBe("gc");
     expect(supervisor.supervisedIds()).toEqual([]);
   });

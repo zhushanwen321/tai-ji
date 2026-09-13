@@ -3,10 +3,11 @@
 > 记录 UI 设计系统从初始到当前形态的完整演变过程。每个阶段记录：方向、为什么转向、关键决策、标志文档。
 >
 > 当前态权威文档：
-> - 范式 SSOT：[docs/page-design/v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
-> - 原子 SSOT：[docs/page-design/design-tokens.md](page-design/design-tokens.md)
-> - 过程参考：[v6-design.md](page-design/v6-design.md)（五原则原始定稿，被 master-spec 取代为"实现细节参考"）
-> - 视觉规格：`docs/page-design/v6-spec-*.html`（部分已滞后，以 master-spec + demo 为准）
+> - 视觉设计权威：[docs/DESIGN.md](DESIGN.md)（v6 范式 + token 登记对照；2026-09-13 page-design 目录退役后收口并入）
+> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 投影挂值相等守卫）
+> - 视觉规格稿：`v6-spec-*.html` 已删除（2026-09-13 退役，git 可追溯）；demo 活验证在 `.tmp/v6/`
+>
+> 已删除过程文档（2026-09-13 收口，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）
 
 ---
 
@@ -50,13 +51,13 @@ Warm & Soft 被整体推翻。[ADR-0019](adr/0019-visual-direction.md) 裁决视
 - 组织方法：L0-L4 递归骨架（recursive-skeleton），每个设计单元 = spec.md + draft HTML
 - 验收：W01-W20 共 20 波视觉验收全部 PASS
 
-v3 确立了设计 tokens SSOT（`design-tokens.md`）和组件原语层（`design-system.md`），这两个文件至今仍是原子/原语层权威。
+v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收口为 `v6-tokens.css`）和组件原语层（原 `design-system.md`，2026-09-13 已删除，活跃裁决并入 v6-master-spec.md）。
 
 **标志文档**：
 - [ADR-0019](adr/0019-visual-direction.md)（视觉方向裁决）
 - [ADR-0022](adr/0022-default-theme-direction.md)（默认主题裁决）
-- [design-tokens.md](page-design/design-tokens.md)（原子 SSOT，此后持续迭代）
-- [design-system.md](page-design/design-system.md)（原语层）
+- [v6-tokens.css](page-design/v6-tokens.css)（值 SSOT；原 design-tokens.md 已删除，git 可追溯）
+- ~~design-system.md~~（原语层；2026-09-13 已删除，git 可追溯）
 
 ---
 
@@ -80,7 +81,7 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 4. **内容列收窄**——对话流 max-width 720px 居中
 5. **彩色降噪**——状态指示极小化（图标 → 圆点），exit≠0 中性化表达
 
-[v6-design.md](page-design/v6-design.md) 在此基线上确立最终决策（D1-D14），成为范式 SSOT。后续整合为 [v6-master-spec.md](page-design/v6-master-spec.md)（单一权威源）。
+v6-design.md（2026-09-13 已删除，git 可追溯）在此基线上确立最终决策（D1-D14），成为范式 SSOT。后续整合为 [v6-master-spec.md](page-design/v6-master-spec.md)（单一权威源）。
 
 实施过程经历了两轮严格审查：
 - **第一轮**（v6-review-2026-07-31）：5 路并行逐字审查 349 条断言。结论：「五原则的魂保住了，形散了」——发现"被选中"出现三种视觉语言、两份定稿互相否定等问题
@@ -90,9 +91,9 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 审查过程中发现的核心张力：**五原则的「魂」（设计意图）反复与「形」（具体实现）分裂**。每次修复都会在某个文件里修对，又在另一个文件里引入新的不一致。这成为后续维护的持续关注点。
 
 **标志文档**：
-- [v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
-- [v6-design.md](page-design/v6-design.md)（五原则原始定稿，D1-D14 决策）
-- [v6-summary.md](page-design/v6-summary.md)（索引/摘要）
+- [DESIGN.md](DESIGN.md)（v6 范式权威，整合自 28 份过程文档 + demo）
+- ~~v6-design.md~~（五原则原始定稿，D1-D14 决策；2026-09-13 已删除，git 可追溯）
+- ~~v6-summary.md~~（索引/摘要；2026-09-13 已删除，git 可追溯）
 - `v6-spec-*.html`（15 个视觉规格稿）
 
 ---
@@ -101,7 +102,7 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 用户想把产品做成符合**太极/阴阳鱼/圆/相生相克/周而复始**概念的风格。v6 的冷蓝 accent 与太极概念无关。
 
-[2026-08-02-taiji-v3-color-decision.md](page-design/2026-08-02-taiji-v3-color-decision.md) 经三轮对比后确定方向：
+换色决策经三轮对比后确定方向（决策记录现居 [ADR-0066](adr/0066-taiji-pure-grey-color-direction.md)；原 2026-08-02-taiji-v3-color-decision.md 已删除，git 可追溯）：
 
 1. **色相方案**：墨青 / 墨朱 / 纯太极 → 选定**纯太极**（纯灰系）。墨青基底仍冷、太极纯粹感不够；墨朱红久盯会燥且与 danger 语义冲突
 2. **克制梯度**：浅 / 中 / 重 / 极简 → 选定**重克制 V3**（`--accent #cfcfd4`）。V4 极简灰度完全零色相，导致 M/A/D 变更集 badge 无法靠颜色分辨，语义损失过大
@@ -110,11 +111,11 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 太极概念的三层拆解中，V3 只覆盖「色」层。「形」（圆/环，需加大圆角或 S 曲线分割）和「动」（周而复始，需太极旋转 loader）是独立工作线，不在本次换色范围。
 
-换色已落地到 `design-tokens.md`（V3 纯灰真值）和 `.tmp/v6/` Vue demo（taiji 预设）。
+换色已落地到 `v6-tokens.css`（V3 纯灰值 SSOT，hook 守卫）和 `.tmp/v6/` Vue demo（taiji 预设）。
 
 **标志文档**：
-- [2026-08-02-taiji-v3-color-decision.md](page-design/2026-08-02-taiji-v3-color-decision.md)（换色决策，含完整色值对比表和否决方案）
-- [design-tokens.md](page-design/design-tokens.md)（V3 纯灰真值，当前 SSOT）
+- [ADR-0066](adr/0066-taiji-pure-grey-color-direction.md)（换色决策与被否方案；原配色决策文档已删除，git 可追溯）
+- [`style.css`](../packages/renderer/src/style.css)（V3 纯灰值真值）
 
 ---
 
@@ -124,10 +125,10 @@ visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spe
 
 ```
 v6-master-spec.md（v6 单一权威源：决策与范式）
-  ↑ 整合自 v6-design.md + demo，冲突时以此为准
-design-tokens.md（原子真值：色/字/距/影/动效）
+  ↑ 整合自 v6-design.md（已删除）+ demo，冲突时以此为准
+v6-tokens.css（值 SSOT：色/字/距/影/动效登记对照面；原 design-tokens.md 已删除）
   ↑ token 层以此为准
-v6-design.md / v6-spec-*.html（过程文档：实现细节参考）
+v6-spec-*.html（视觉标注参考）
   ↑ 已被 master-spec 取代，部分滞后
 .tmp/v6/ demo（token 真值与组件实现的活验证层）
 ```

@@ -15,9 +15,9 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ManifestRecord } from "../manifest-store.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir } from "../path-encoding.ts";
+import type { ManifestRecord } from "../persistence/manifest-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 
 let tmpAgentDir: string;
 

@@ -1,7 +1,7 @@
 /**
  * PresetMessageHandler — pi 启动预设域的 WS 消息处理。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md（§8.1 API）
+ * 设计文档：docs/architecture/pi-launch-presets.md（§8.1 API）
  *
  * 处理 preset.* 消息类型（6 CRUD + 4 Phase 2 增强）：
  * - preset.list / getDefault / setDefault / create / update / delete（CRUD）

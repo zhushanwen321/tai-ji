@@ -29,11 +29,11 @@ import { FileRunStore } from "../../orchestration/file-run-store.ts";
 import { Budget } from "../../orchestration/models/budget.ts";
 import { Trace } from "../../orchestration/models/trace.ts";
 import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
-import { startIdleGc } from "../idle-gc.ts";
-import { RecordStore } from "../record-store.ts";
+import { startIdleGc } from "../persistence/idle-gc.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { runPendingReconcileSweepForService } from "../round-supervisor/service-binding.ts";
 import type { RoundSupervisorBinding } from "../round-supervisor/service-binding.ts";
-import { resolvePiWorkflowStateDir } from "../workflow-state-root.ts";
+import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GC_INTERVAL_MS = 60 * 60 * 1000;

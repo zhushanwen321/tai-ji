@@ -28,16 +28,16 @@ import { clearEngines } from "../engine/registry.ts";
 
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
-vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../state-marker.ts", () => stateMarkerModule());
-vi.mock("../manifest-store.ts", () => manifestStoreModule());
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../persistence/alive-store.ts")>()));
+vi.mock("../persistence/state-marker.ts", () => stateMarkerModule());
+vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 
 import { spawn } from "node:child_process";
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import { createRecord } from "../execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 const mockSpawn = vi.mocked(spawn);

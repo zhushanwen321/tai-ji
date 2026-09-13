@@ -52,7 +52,7 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 
 // [arch 技术债登记，R3 ports 依赖倒置待收口] 下方五个 infra/pi 值 import（getSessionsDir /
 // cleanupMigrateResidues + persistModelBinding / hydrateBindingMeta / assertPiSessionFile）
-// 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-three-layer-design.md 阶段 R3）。
+// 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-layering.md 阶段 R3）。
 // 同属本登记的衍生直引面：services/session/restore-seeding.ts（本文件拆出，直引
 // session-file-utils 的 cleanupMigrateResidues / normalizeSessionFileInPlace /
 // persistModelBinding——S2 追加登记，随 R3 同批收口，中期经 services/ports 暴露）。

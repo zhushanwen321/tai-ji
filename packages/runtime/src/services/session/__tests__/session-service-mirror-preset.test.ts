@@ -101,7 +101,7 @@ const PRESET_ZERO = { injected: false, hasEverReported: false, inFlight: 0 }
 
 /** 合法在途帧（SubagentInFlightReport 最小构造，emittedAt 固定值便于断言）。 */
 function report(inFlight: number): SubagentInFlightReport {
-  return { kind: 'initial', inFlight, emittedAt: 1_700_000_000_000 }
+  return { inFlight, emittedAt: 1_700_000_000_000 }
 }
 
 describe('SessionService × in-flight mirror（D5 预置 0 / detach / reclaim 生命周期接线）', () => {

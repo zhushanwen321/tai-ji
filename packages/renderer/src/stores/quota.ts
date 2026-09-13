@@ -5,7 +5,7 @@
  * 状态隔离：按 providerId 分区（byProvider Map），不同 provider 的额度互不干扰。
  * 并发保护：pending Set 记录正在查询的 providerId，composable 层防重复触发。
  *
- * 设计文档：docs/page-design/archive/v3/coding-plan-quota/design.md §2.2.4
+ * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.4
  * HANDOFF：.xyz-harness/coding-plan-quota/HANDOFF.md §5 Wave 4
  */
 import { defineStore } from 'pinia'

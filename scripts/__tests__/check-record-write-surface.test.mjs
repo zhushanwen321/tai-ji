@@ -65,8 +65,8 @@ describe('collectTsFiles 遍历边界', () => {
 // ── 正则/判定原语 ──────────────────────────────────────────────────────
 
 describe('规则原语', () => {
-  it('WRITE_FN_RE 命中六名真实导出（含 .alive 写/删两名）', () => {
-    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
+  it('WRITE_FN_RE 命中七名真实导出（含 .alive 写/删两名 + U2 轮收口写面）', () => {
+    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
       expect(WRITE_FN_RE.test(`${name}(f)`)).toBe(true)
     }
     expect(WRITE_FN_RE.test('writeStateMarker(f)')).toBe(false) // v1 假绿教训：模块私有名不命中

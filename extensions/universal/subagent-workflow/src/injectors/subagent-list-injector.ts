@@ -14,7 +14,7 @@
  *   core barrel（渲染骨架与条目模板逐字节同 pi 旧本地实现——CA2 快照验收前提）；
  *   guide 文案是 pi 宿主注入（core 不内嵌平台文案）。
  * - U11（sink 设计）：装配循环（发现→解析→去重→排序 + warn/error 口径）整体改
- *   消费 core discoverAgents（execution/agents-assembly，U2/A6）——经工厂 assemble
+ *   消费 core discoverAgents（execution/assembly/agents-assembly，U2/A6）——经工厂 assemble
  *   覆写槽委托，壳侧收缩为「宿主注入根现取 + 委托」，语义等值口径见
  *   agents-assembly.ts 头注（⛔1 探针对照注入 XML diff 为空验收）。
  *

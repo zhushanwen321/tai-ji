@@ -6,7 +6,7 @@
 
 ## 上下文
 
-ADR-0003 决定 `event-adapter.ts` 的 `translate()` 入参用 `Record<string, unknown>` 宽类型，
+[ADR-0003](archive-digest.md#adr-0003)（已推翻，摘要见 archive-digest）决定 `event-adapter.ts` 的 `translate()` 入参用 `Record<string, unknown>` 宽类型，
 理由是「pi 发送 PiEvent 联合之外的事件」。当时 `pi-protocol.ts` 的 PiEvent 联合只覆盖 13 个
 事件类型，而 event-adapter 运行时确实接收到 `compaction_*`、`auto_retry_*`、`extension_error`
 等「联合外」事件，于是把整个 translate 入参放宽、并在多处防御性双读 fallback（`args ?? input`、

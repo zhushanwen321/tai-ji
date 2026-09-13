@@ -1,7 +1,7 @@
 // packages/zcode-subagent-cli/src/db-path.ts（原 subagent-core 路径，2026-09-09 W11 随引擎包迁出）
 //
 // zcode 会话库路径契约（2026-09 会话库隔离）。设计权威源：
-// docs/design/zcode-session-db-isolation.md §3.2 D1（路径与 env 契约）/
+// docs/architecture/zcode-session-db-isolation.md §3.2 D1（路径与 env 契约）/
 // D2（白名单集合与 dataDir 权威源）/ D3（存量兼容）/ §3.3 不变量 2（路径单一来源）。
 //
 // 为什么独立成模块：constants.ts 头注约束「零 import 纯常量」，而路径构造函数需要
@@ -22,11 +22,12 @@ import { ZCODE_HOST_DB_SUFFIX } from "./constants.ts";
  * 隔离会话库绝对路径（单一构造函数，唯一权威）：
  * `<engineDataDir>/engines/zcode/session-db/db.sqlite`。
  *
- * 选址在池目录之外（不落 `engines/zcode/shared/`——那是 journal 池目录，被
- * `deletePoolNativeState` 覆盖，设计 D1/F11）；journal 路径不变（仍
- * `engines/zcode/shared/journal-<taskId>.jsonl`）。`cleanupExpiredPoolRefs` 会把
- * `engines/<engineId>/` 下每个子目录当池枚举，`session-db/` 中的 `db.sqlite*`
- * 不匹配任何删除条件（池 GC 守卫 = 验收场景 A9）。
+ * 选址在 journal 分组目录之外（不落 `engines/zcode/shared/`——[池抽象降级
+ * 2026-09-13] 后那是 journal 固定分组目录，清理机制 = `cleanupExpiredJournals`
+ * 的 mtime TTL，refs 计数/deletePoolNativeState 已删，设计 D1/F11）；journal
+ * 路径不变（仍 `engines/zcode/shared/journal-<taskId>.jsonl`）。
+ * `cleanupExpiredJournals` 会把 `engines/<engineId>/` 下每个子目录枚举，
+ * `session-db/` 中的 `db.sqlite*` 不匹配任何删除条件（GC 守卫 = 验收场景 A9）。
  *
  * @param engineDataDir 引擎数据目录（`deps.engineDataDir()`；禁硬编码，一律由入参推导）
  */

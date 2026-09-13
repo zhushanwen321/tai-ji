@@ -42,8 +42,8 @@ import { isAbsolute, relative, resolve } from "node:path";
 // 包名 import 在 runtime 编译图可解析（先例：dialog-queue.ts 同式 import SDK barrel）。
 import { aggregateUsage } from "@zhushanwen/subagent-engine-sdk";
 import { getLogger } from "../../../core/logger.js";
-import { createRecord, updateFromEvent } from "../../execution-record.js";
-import type { Turn } from "../../types.js";
+import { createRecord, updateFromEvent } from "../../persistence/execution-record.js";
+import type { Turn } from "../../assembly/types.js";
 import { resolveEnginesRoot } from "../paths.js";
 import type { SessionView } from "../types.js";
 import { replayJournal } from "./event-journal.js";

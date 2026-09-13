@@ -3,7 +3,7 @@
 // @zhushanwen/pi-ext-guards —— pi 运行环境守卫共享库（不是 Pi extension，零依赖纯函数，
 // 无 pi SDK peerDep——供任意 @zhushanwen/pi-* 包与子代理核心消费）。
 //
-// 背景与设计依据：docs/design/file-lock-unification-and-reaper-sink.md §2.2 P3 / §3.2 D3。
+// 背景与设计依据：docs/architecture/file-lock-unification-and-reaper-sink.md §2.2 P3 / §3.2 D3。
 // pi 的 extension 缓存按 cwd 失效：switch_session 时 cwd 不变则 factory 被二次调用且
 // handler 累积注册——session_start handler 的真实派发语义是「每 session × factory
 // 调用次数」，不是「每 session 一次」。handler 体内的跨 session 副作用操作（写非本

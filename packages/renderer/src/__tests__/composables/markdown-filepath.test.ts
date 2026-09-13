@@ -2,7 +2,7 @@
  * markdown 路径识别测试（2026-07-20 core rule 架构重构后）。
  *
  * 架构变更：旧 filepathRule（inline rulechain，text 之前抢跑）→ 新 filepathCoreRule
- * （core rulechain，replacements 之后）。详见 docs/page-design/markdown-filepath-redesign/design.md。
+ * （core rulechain，replacements 之后）。详见其设计文档（docs/page-design/markdown-filepath-redesign/design.md，已删除，git 可追溯）。
  *
  * 语义变更：含/路径识别从「无白名单、形似即链接」改为「白名单命中才链接」（与裸 basename 对称）。
  * 误识别防御从「正则前瞻/后顾 hack」改为「数据白名单」。pi/3.14/glm-5.2/necessity-sufficiency

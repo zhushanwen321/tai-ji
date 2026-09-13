@@ -62,7 +62,7 @@ export class ShellRunner implements IShellRunner {
     // 查找 .bare），而是 spawn 对脚本权限位的隐式依赖。
     const child = this.deps.spawn('bash', [scriptPath, ...(args ?? [])], {
       cwd,
-      // B8 出站边界显式化（docs/design/env-propagation-boundary.md §5-U4）：此前不传 env
+      // B8 出站边界显式化（docs/architecture/env-propagation-boundary.md §5-U4）：此前不传 env
       // ＝隐式全量继承父进程环境；改传构建器输出——默认白名单前缀作基座保住 PATH/HOME
       // （红线 R2：env 整体替换语义，禁从空对象起拼），deny 清单兜底剥生命周期标志与凭证。
       // extras 转发 git/pnpm 代理键与 SSH_AUTH_SOCK：setup-worktree.sh 内嵌 pnpm install

@@ -1,9 +1,0 @@
-{
-  "summary": "wave3 完成：useGlobalSkills/useProjectSkills 订阅 config.skillCacheInvalidated 失效信号，收到后 force 重拉/清缓存重拉。修复 line 113 bug（RPC 失败不置 globalLoaded=true）。模块级订阅守卫保证只挂一次。renderer vitest 2399 passed，vue-tsc EXIT 0。",
-  "artifacts": [
-    { "kind": "code", "ref": "packages/renderer/src/api/domains/config.ts", "note": "onSkillCacheInvalidated 订阅函数" },
-    { "kind": "code", "ref": "packages/renderer/src/composables/features/useProjectSkills.ts", "note": "useGlobalSkills loadGlobal(force)+订阅+失败不永久失败；useProjectSkills 版本号机制+订阅" },
-    { "kind": "test", "ref": "packages/renderer/src/__tests__/composables/use-project-skills.test.ts", "note": "TC1-TC4（失败重试/force 重拉/版本号/多实例订阅去重）" },
-    { "kind": "test", "ref": "packages/renderer/src/__tests__/panel/command-popover-landing.test.ts", "note": "TC5 渲染 gate（mount + DOM 断言广播后刷新）" }
-  ]
-}

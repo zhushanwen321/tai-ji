@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a5-async-zero-regression.mjs
 //
 // [A5] async 路径零回归
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A5 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A5 行（设计文档已删，git 可追溯）：
 //   不传 collect 的单 subagent 流程，与显式 collect:"async" 同 prompt 双跑对照——
 //   单条通知文案与 collect:"async" 时逐字节一致（sa-/uuid 等运行期标识归一后 diff 为空）。
 // 预期输出：

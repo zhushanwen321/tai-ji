@@ -1,5 +1,7 @@
 # ADR-0025: File View 语义重定义为全项目文件树
 
+- 状态：Accepted
+
 > **性质**：产品语义 D-不可逆决策（推翻旧 spec）。本文档定义语义，不含实现细节。
 > **关联**：[ADR-0024 FileChanges 通道](0024-filechanges-channel.md)（ChangeSetCard 历史态与本 ADR 的现在态互补）、[ADR-0026 懒加载策略](0026-file-tree-lazy-loading.md)。
 > **溯源**：`[from: 2026-06-28-sidebar-project-file-tree §1, decisions D-001]`

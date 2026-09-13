@@ -1,6 +1,6 @@
 /**
  * BackgroundTaskService — 后台任务侧边栏视图的数据服务（runtime 直读 registry SSOT，
- * D1/D2/D6/D7/D8 —— docs/design/background-task-sidebar-view.md §3.3）。
+ * D1/D2/D6/D7/D8 —— docs/architecture/background-task-sidebar-view.md §3.3）。
  *
  * 职责（u-runtime-svc）：
  *  - registry 读：`<getPiAgentDir()>/base-tool-enhance/<sid>/registry.json`（损坏 →

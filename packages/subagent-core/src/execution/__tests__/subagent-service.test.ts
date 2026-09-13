@@ -20,16 +20,16 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { UiRequest, UiRequestHandler } from "../dialog-queue.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 
@@ -260,7 +260,7 @@ describe("SubagentService", () => {
         controller,
       });
       // 直接改 status 模拟终态（不走 CAS——测试不关心状态机，只关心 dispose 的 abort 过滤）
-      record.status = "closed";
+      record.status = "idle";
       getStore(service).register(record);
       return record;
     }
@@ -496,14 +496,15 @@ describe("SubagentService", () => {
           name: "general-purpose",
         }),
       );
-      // unregister(failed) 只记 registry 状态（通知由 BgNotifier 发，不在这条事件里）
+      // [U5] 失败轮 settle（markRoundIdle）簿记⑧注销（reason=running——进程已死从
+      // 活跃差集移除；旧 finalizeRecord emitUnregister(closed) 随终态化退役）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ reason: "closed" }),
+        expect.objectContaining({ reason: "running" }),
       );
     });
 
-    it("cancel(background) → unregister(reason=closed) 被 emit，register 未被 emit（v4 B-1 cancelled 折入 closed）", () => {
+    it("cancel(background) → unregister(reason=interrupted) 被 emit（[U5] cancel = 中断轮 settle，不终态化）", () => {
       const { service, pi } = makeReadyServiceWithPi();
       const record = injectRunningBackground(service, "bg-cancel-1");
       expect(record.status).toBe("running");
@@ -514,7 +515,7 @@ describe("SubagentService", () => {
       expect(ok).toBe(true);
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-cancel-1", reason: "closed" }),
+        expect.objectContaining({ id: "bg-cancel-1", reason: "interrupted" }),
       );
       // record 手动注入（未走 execute）→ register 不应被 emit
       expect(pi.events.emit).not.toHaveBeenCalledWith("pending:register", expect.anything());
@@ -529,7 +530,7 @@ describe("SubagentService", () => {
     // 让 pending-notifications 清理 registry entry，避免两侧状态不一致。
     // 此组验证该 emit 路径。
 
-    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=failed)", () => {
+    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=archived)（[U5] 编排性关闭=自动收起）", () => {
       const { service, pi } = makeReadyServiceWithPi();
       injectRunningBackground(service, "bg-dispose-1");
       injectRunningBackground(service, "bg-dispose-2");
@@ -537,18 +538,19 @@ describe("SubagentService", () => {
 
       service.dispose();
 
-      // 每个 running record 都 emit 了 pending:unregister(reason=failed)
+      // 每个 running record 都 emit 了 pending:unregister（[U5] reason=archived——
+      // 归档点补发注销，承接原 emitUnregister 语义挂载归档原语）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-1", reason: "closed" }),
+        expect.objectContaining({ id: "bg-dispose-1", reason: "archived" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-2", reason: "closed" }),
+        expect.objectContaining({ id: "bg-dispose-2", reason: "archived" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-3", reason: "closed" }),
+        expect.objectContaining({ id: "bg-dispose-3", reason: "archived" }),
       );
     });
 
@@ -558,7 +560,7 @@ describe("SubagentService", () => {
       injectRunningBackground(service, "bg-running-1");
       injectRunningBackground(service, "bg-running-2");
       const terminal = injectRunningBackground(service, "bg-done");
-      terminal.status = "closed"; // 模拟终态，dispose 不应为其 emit
+      terminal.status = "idle"; // 模拟终态，dispose 不应为其 emit
 
       service.dispose();
 

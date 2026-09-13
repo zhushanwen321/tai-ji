@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { isDialogMethod } from "../ui-interaction-model.ts";
+import { isDialogMethod } from "../ui/ui-interaction-model.ts";
 
 describe("isDialogMethod — dialog 类 method（占输入焦点）", () => {
   it("select → true（含 ask_user channel 借道 select）", () => {

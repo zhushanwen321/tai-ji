@@ -17,7 +17,7 @@
 //     └────────────────────────────┘  ← overlay 底空白行
 //   （外层框线仅为示意，实际是空白行/空格列）
 //
-// 契约（ctx.ui.custom overlay，对照 pi-tui-development-guide.md §3.2）：
+// 契约（ctx.ui.custom overlay，对照 tui-rendering-pitfalls.md §3.2）：
 //   custom<void>((tui, theme, kb, done) => Component, {overlay:true, overlayOptions})
 //   Component: render(width):string[] + invalidate() + handleInput?(data)
 //

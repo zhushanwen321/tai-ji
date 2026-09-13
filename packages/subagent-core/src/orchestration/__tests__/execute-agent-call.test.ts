@@ -17,7 +17,7 @@ import { executeAgentCall } from "../execute-agent-call.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";
 import type { AgentRunner } from "../models/ports.ts";
-import type { ToolCall } from "../../execution/types.ts";
+import type { ToolCall } from "../../execution/assembly/types.ts";
 import { Trace } from "../models/trace.ts";
 import type { ExecutionTraceNode } from "../models/types.ts";
 import type { AgentCallOpts, AgentResult } from "../models/types.ts";

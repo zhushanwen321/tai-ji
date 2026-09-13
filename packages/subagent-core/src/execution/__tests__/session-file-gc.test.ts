@@ -14,8 +14,8 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as aliveStore from "../alive-store.ts";
-import { maybeCleanupExpiredSessionFiles } from "../session-file-gc.ts";
+import * as aliveStore from "../persistence/alive-store.ts";
+import { maybeCleanupExpiredSessionFiles } from "../persistence/session-file-gc.ts";
 
 // [D8] 引擎池 TTL 兜底走 getEngineDataDir() 解析 dataDir——测试必须钉到 tmpAgentDir，
 // 防止命中真实 XYZ_AGENT_DATA_DIR（或宿主 fallback）误清开发机数据。

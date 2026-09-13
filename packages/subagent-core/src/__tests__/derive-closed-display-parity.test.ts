@@ -1,7 +1,7 @@
 // derive-closed-display-parity — 成败推导单一权威守卫（core 侧）
 //
 // 同构成败推导收敛到 execution-record.ts 的 deriveOutcome/projectOutcome（单一权威）。
-// 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notifier.ts buildLlmContent）
+// 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notify/notifier.ts buildLlmContent）
 // 源码不得写回手写同构 switch。
 // [u1-move 拆分] 壳侧消费方（interface/bg-notify-render.ts renderRecordLines）的守卫段
 // 随壳件留守 pi extension 包：src/__tests__/derive-closed-display-parity-interface.test.ts。
@@ -12,13 +12,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { deriveOutcome, projectOutcome } from "../execution/execution-record.ts";
+import { deriveOutcome, projectOutcome } from "../execution/persistence/execution-record.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** core 侧消费方源码（同构成败推导已收敛删除）。 */
 const CONSUMER_SOURCES = {
-  notifier: join(here, "..", "execution", "notifier.ts"),
+  notifier: join(here, "..", "execution", "notify", "notifier.ts"),
 } as const;
 
 /**
@@ -59,9 +59,9 @@ describe("deriveOutcome — 单一权威终态派生（行为锚定）", () => {
 describe("projectOutcome — 投影唯一出口（行为锚定）", () => {
   it("running → undefined；closed 一等 outcome 直读；存量 record 兜底派生", () => {
     expect(projectOutcome({ status: "running" })).toBeUndefined();
-    expect(projectOutcome({ status: "closed", outcome: "failed" })).toBe("failed");
-    expect(projectOutcome({ status: "closed", closedReason: "gc", error: "boom" })).toBe("failed");
-    expect(projectOutcome({ status: "closed" })).toBe("completed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "failed" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc", error: "boom" })).toBe("failed");
+    expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
   });
 });
 

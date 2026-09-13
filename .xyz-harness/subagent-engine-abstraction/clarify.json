@@ -1,8 +1,0 @@
-{
-  "format": "mid-clarify",
-  "objective": "在 pi-subagent-workflow 执行层之下插入引擎中立抽象（EnginePort + 中立类型 + 公共降级层），使任意 coding-agent CLI 可作为 subagent 执行引擎插拔；首期落地 pi（回填，行为零变化）+ zcode（新增 spawn 单轮模式），抽象按六引擎能力全集设计。设计已过三轮对抗式审查（docs/architecture/subagent-engine-abstraction.md），CW 阶段从该设计文档提炼需求与架构：G1-G5 目标（引擎无感/配置三层切换/能力显式化/抗漂移/接入成本递减）、UC-1~UC-9 用例（A1-A14 验收全承载）、四层分层架构（中立类型/EnginePort/adapter 四件套/公共降级层）、D1-D12 决策忠实提炼、BC-1~BC-8 pi 零回归锚点。",
-  "deliverables": {
-    "requirements": "requirements.md",
-    "systemArchitecture": "system-architecture.md"
-  }
-}

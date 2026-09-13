@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ManifestStore } from "../execution/manifest-store";
+import { ManifestStore } from "../execution/persistence/manifest-store";
 
 // [C10] 磁盘满测试需要可控的 fs.promises.rename（拖 ENOSPC/EACCES）。
 // hoisted flag + vi.mock 透传：默认 renameErrorRef.current=null 走真实 rename，

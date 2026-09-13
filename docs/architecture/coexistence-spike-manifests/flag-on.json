@@ -1,8 +1,0 @@
-{
-  "label": "flag-on",
-  "newArchEnv": "1",
-  "rendererEntryHtml": "apps/electron/renderer/dist-new/new-arch/index.html",
-  "rendererScriptSrc": "../assets/main-DgeJ3QY3.js",
-  "bakedFlagValue": true,
-  "distNewEntryExists": true
-}

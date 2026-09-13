@@ -62,7 +62,7 @@ import { PassThrough } from "node:stream";
 
 import { vi } from "vitest";
 
-import { createRecord } from "../../execution-record.ts";
+import { createRecord } from "../../persistence/execution-record.ts";
 
 // [W3 改写] RunOptions / SessionRunnerContext 类型源（inproc session-runner（已删））
 // 随删件消亡——makeOpts/makeCtx 改用结构化最小类型（消费方为 keep-alive 系历史

@@ -5,9 +5,9 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeCwd } from "../path-encoding.ts";
-import { resolveSessionContext } from "../session-context-resolver.ts";
-import { ForkDepthExceededError } from "../types.ts";
+import { encodeCwd } from "../assembly/path-encoding.ts";
+import { resolveSessionContext } from "../assembly/session-context-resolver.ts";
+import { ForkDepthExceededError } from "../assembly/types.ts";
 
 const AGENT_DIR = "/home/user/.pi/agent";
 const MAIN_CWD = "/home/user/project";

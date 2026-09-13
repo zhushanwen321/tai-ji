@@ -10,7 +10,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDelivery } from "@xyz-agent/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { createNotifier, type BgNotifyRecord, type NotifierHost } from "@zhushanwen/subagent-core/execution/notifier.ts";
+import { createNotifier, type BgNotifyRecord, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
 
 // 投递内核经通知域窄端口注入（notifier 不再直接 import session-delivery）——

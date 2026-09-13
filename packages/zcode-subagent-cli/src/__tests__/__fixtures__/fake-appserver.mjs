@@ -31,6 +31,8 @@
  *   session/subscribe    应答 {subscribed:true}（R3；真实应答形状未知——会话层不校验）
  *   session/send         按 FAKE_SESSION_SCENARIO 推送帧序列后应答（缺省 {accepted:true}）
  *   session/read         按 FAKE_SESSION_SCENARIO 应答（缺省 {messages:[]}）
+ *   session/resume       按 FAKE_SESSION_SCENARIO 应答（缺省 {messages:[]}；resumeError
+ *                        注入 error 帧）——[U6] resume 读通道（应答自带合成历史）
  *   session/close        应答 {closed:true}
  *   其余方法             应答 -32601（method not found）
  *
@@ -40,8 +42,13 @@
  *     createResult?: object            覆盖 create 应答（golden create 应答注入）
  *     createError?: {code,message,data} create 应答 error 帧（-32602/-32601 注入）
  *     sendError?:   {code,message,data} send 应答 error 帧（-32010/-32602 注入）
- *     sendPushes?:  [frame, ...]       send 应答前逐帧推送（推送流 + 终态帧全显式
- *                                      逐字回放，不经 withExtra 改写）
+ *     sendDenySessionIds?: [sessionId, ...]
+ *                                      [U6] 对列出的 sessionId，session/send 应答
+ *                                      -32031（ZCODE_RUNTIME_MODEL_UNAVAILABLE——
+ *                                      P-1 实测「resume 后原会话 send 卡死」形态）：
+ *                                      断言续聊链永不向旧会话 send（不回退路径）
+ *     resumeResult?: object            [U6] 覆盖 session/resume 应答（合成历史注入）
+ *     resumeError?: {code,message,data} [U6] resume 应答 error 帧（-32602/条目失效）
  *     sendResult?:  object             缺省 {accepted:true}
  *     crashAfterSendMs?: number        [P0-1 U4] send 应答后 N ms 自杀 exit(1)（连接
  *                                      崩溃收割注入——onClose → failAllTurns 在途
@@ -238,6 +245,12 @@ async function handleRequest(f) {
       if (SCENARIO && SCENARIO.sendError) {
         return replyErr(id, SCENARIO.sendError.code, SCENARIO.sendError.message, SCENARIO.sendError.data);
       }
+      // [U6] 定向拒投（-32031：P-1 实测「resume 后原会话 send 被
+      // ZCODE_RUNTIME_MODEL_UNAVAILABLE 卡死」形态）——对指定旧会话 send 一律报错，
+      // 断言续聊链只向新会话 send（原地 resume 不回退）。
+      if (SCENARIO && Array.isArray(SCENARIO.sendDenySessionIds) && SCENARIO.sendDenySessionIds.includes(String(params.sessionId || ''))) {
+        return replyErr(id, -32031, `ZCODE_RUNTIME_MODEL_UNAVAILABLE: model used by session ${params.sessionId} is no longer available (restoreWarning pending)`);
+      }
       // 推送帧逐字回放（STAMP_SESSION 时按目标会话归因改写）；重建代走 rebootSendPushes
       // （U4：重试轮的不同行为通道）
       const pushes =
@@ -275,6 +288,14 @@ async function handleRequest(f) {
         return replyErr(id, SCENARIO.readError.code, SCENARIO.readError.message, SCENARIO.readError.data);
       }
       return reply(id, (SCENARIO && SCENARIO.readResult) || { messages: [] });
+    }
+    case 'session/resume': {
+      // [U6] resume 读通道：应答自带合成历史（messages[].info.role + parts[].text，
+      // 形态对齐 P-1 真机实测）；resumeError 注入 error 帧（条目被清/失效形态）。
+      if (SCENARIO && SCENARIO.resumeError) {
+        return replyErr(id, SCENARIO.resumeError.code, SCENARIO.resumeError.message, SCENARIO.resumeError.data);
+      }
+      return reply(id, (SCENARIO && SCENARIO.resumeResult) || { messages: [] });
     }
     case 'session/close':
       return reply(id, { closed: true });

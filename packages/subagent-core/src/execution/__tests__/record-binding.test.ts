@@ -39,24 +39,24 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import { createRecord } from "../execution-record.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
-import { _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import {
   readRecordBinding,
   updateRecordBinding,
   writeFinalizedState,
   writeRecordBinding,
   RECORD_BINDING_SIDECAR_EXT,
-} from "../state-marker.ts";
-import type { RecordBinding } from "../state-marker.ts";
+} from "../persistence/state-marker.ts";
+import type { RecordBinding } from "../persistence/state-marker.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { ModelConfigService } from "../model-config-service.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 
 // 身份 env 清理（同 get-record-for-action-restart.test.ts：测试进程可能继承
 // subagent env，污染 rootCwd 编码目录与 sessionRootId 基线）。
@@ -219,7 +219,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("collectRecords：无 identity 子文件 + 绑定 → 重建 running light（id/rootSessionId/chatMode/round/sessionFile）", () => {
+  it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/chatMode/round/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
     const store = new RecordStore(sessionsDir);
@@ -228,7 +228,9 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     expect(records).toHaveLength(1);
     const rec = records[0]!;
     expect(rec.id).toBe("sa-bind-1");
-    expect(rec.status).toBe("running"); // v4 B-1 跨重启可续聊语义（无 .state → 分支 4）
+    // [U3 / §3.2.4 重建单规则] 无 .state → idle + interrupted-by-restart 兜底
+    expect(rec.status).toBe("idle");
+    expect(rec.stopReason).toBe("interrupted-by-restart");
     expect(rec.rootSessionId).toBe("root-session");
     expect(rec.chatMode).toBe(true);
     expect(rec.round).toBe(1);
@@ -250,7 +252,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     const light = store.findLightById("sa-bind-1");
     expect(light?.id).toBe("sa-bind-1");
     expect(light?.sessionFile).toBe(file);
-    expect(light?.status).toBe("running");
+    expect(light?.status).toBe("idle");
   });
 
   it("rootSessionId 过滤仍生效：异树过滤排除绑定 record（session 隔离不因绑定旁路）", () => {
@@ -270,7 +272,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
-    expect(records[0]!.status).toBe("closed");
+    expect(records[0]!.status).toBe("idle");
     expect(records[0]!.closedReason).toBe("gc");
     // 保留选项锁定：终态后绑定不删——resurrect 回边删 .state 后绑定仍在，再崩溃仍可恢复
     expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true);
@@ -425,7 +427,7 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
-    expect(visible[0]!.status).toBe("closed");
+    expect(visible[0]!.status).toBe("idle");
     expect(visible[0]!.origin).toBe("workflow");
     expect(visible[0]!.parentRunId).toBe("wf-run-2");
   });
@@ -542,19 +544,22 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
 
     // 轮应答（= L2797 回填点）后绑定在盘，身份域与 record 对齐
     await vi.waitFor(() => expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true));
+    // 轮正常收口（绑定写不影响派发主路径）——先等轮终 round+1 完成，再读快照
+    //（[A-lite] 轮终 markRoundIdle 亦 merge binding，读取须在轮终收口后无竞态）。
+    await vi.waitFor(() => expect(record.round).toBe(2));
     const binding = readRecordBinding(sessionFile);
     expect(binding).toMatchObject({
       v: 1,
       recordId: "sa-bind-live",
       rootSessionId: "root-session",
       chatMode: true,
-      // 绑定写点在轮终 round+1 之前——写点时点快照（round 滞后一拍为已登记语义）
-      round: 1,
+      // [A-lite] 轮终 markRoundIdle 亦 merge 快照（U7 水合口径）——binding.round
+      // = 轮终 round+1 后最新值（原「回填点写点时点快照、round 滞后一拍」由轮终
+      // 快照增补覆盖，与 markSettled settleSnapshotPatch 同构）。
+      round: 2,
       agent: "general-purpose",
       model: "prov/model-1",
     });
-    // 轮正常收口（绑定写不影响派发主路径）
-    await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.status).toBe("running");
   });
 
@@ -602,12 +607,15 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     expect(chatParams?.recordId).toBe("sa-bind-1");
   });
 
-  it("④ service 面终态不冲突：绑定 + .state(closed) → getRecordForAction 仍拒（终态单向语义保持）", () => {
+  it("④ [U4 万物可续] 绑定 + .state(旧终态遗留位) → getRecordForAction 重建放行（binding 不再被终态位阻断）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
     writeFinalizedState(file, "gc");
 
-    expect(() => service.chatActions.getRecordForAction("sa-bind-1")).toThrow(/not found or not owned/);
-    expect(store.getMutable("sa-bind-1")).toBeUndefined(); // 绑定不越权复活终态 record
+    // [U4 / §3.2.3] 旧终态遗留位只是展示位：binding 身份在 + 锚可解析 → 冷查重建
+    // 注册放行（终态单向语义随终态概念消亡），续聊 resume 续写原文件。
+    const record = service.chatActions.getRecordForAction("sa-bind-1");
+    expect(record.status).toBe("running");
+    expect(store.getMutable("sa-bind-1")).toBe(record);
   });
 });

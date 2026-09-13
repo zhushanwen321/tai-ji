@@ -1,5 +1,6 @@
 /**
- * 空闲 pi 进程回收 reaper（docs/design/idle-pi-reclamation.md D2/D4/D6/D7，实施计划 u2）。
+ * 空闲 pi 进程回收 reaper（设计 docs/design/idle-pi-reclamation.md——已删除，git 可追溯——
+ * D2/D4/D6/D7，实施计划 u2）。
  *
  * 职责分两半：
  * 1. ReclaimSeat —— 回收占座原语（D6-2「全链占座」的状态载体）。reaper 判定通过后经

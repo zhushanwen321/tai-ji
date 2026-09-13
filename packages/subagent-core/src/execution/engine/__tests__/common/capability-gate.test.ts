@@ -1,6 +1,6 @@
 // capability-gate.test.ts —— [D3-④ 预检 capabilities 化] 拦截矩阵单测。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.3「能力位」段（manifest
-// 权威双向处置）+ 历史源 subagent-dual-track-convergence.md §3.3 D3-④（r3 裁定：
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.3「能力位」段（manifest
+// 权威双向处置）+ 历史源 dual-track（已删 git 可追溯）§3.3 D3-④（r3 裁定：
 // EngineCapabilities +maxTurns 位 pi=true/zcode=false，不保留硬编码 shape 检查）+
 // §3.4 错误规格第 1 行 + §4 V4④⑤（正反向验收）。
 //
@@ -90,17 +90,41 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     expect(() => gate(PI_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl", worktree: { path: "/tmp/wt" } }, "pi")).not.toThrow();
   });
 
-  it("[V4④ 正向] zcode 引擎四参数全拦：fork/conversation/maxTurns/worktree → engine_capability_unsupported", () => {
+  it("[U6 / §3.2.6 要点 4] zcode conversation=cold：conversation 放行（冷恢复会话）+ fork 通道族随 cold 放行；maxTurns/worktree 仍拦", () => {
+    // zcode manifest conversation "unsupported" → "cold"（U6）：conversation:true 经
+    // gate（冷恢复 = resume 读 + 新 session 注入，能力位如实声明——首轮 message
+    // 升级路径 canUpgradeToConversation 同判据放行）。
+    expect(() => gate(ZCODE_CAPS, { conversation: true })).not.toThrow();
+    // fork 通道族（OR 对偶）：conversation cold 可用 → fork/fork-from 不在 gate 拦
+    //（zcode 的 fork-from「继承历史」语义空洞由 actions-core 守卫 5 的锚判据承接
+    //——zcode record 无 pi sessionFile 锚，守卫按锚缺失给 message/reopen 指引）。
+    expect(() => gate(ZCODE_CAPS, { fork: true })).not.toThrow();
+    expect(() => gate(ZCODE_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl" })).not.toThrow();
+    // 能力位未变的拦截面（maxTurns/worktree）不随 conversation 升级回退
     const cases: Array<[TaskShapeForGate, RegExp]> = [
-      [{ fork: true }, /不支持 fork/],
-      [{ forkFromSessionFile: "/tmp/sess.jsonl" }, /fork-from 同为父 session 上下文继承/],
-      [{ conversation: true }, /不支持 resume 续聊/],
       [{ maxTurns: 10 }, /不支持 maxTurns/],
       [{ worktree: true }, /不支持 worktree 隔离/],
       [{ worktree: { path: "/tmp/wt" } }, /不支持 worktree 隔离/],
     ];
     for (const [task, pattern] of cases) {
       const err = gateError(ZCODE_CAPS, task);
+      expect(err.code).toBe("engine_capability_unsupported");
+      expect(err.message).toMatch(pattern);
+      expect(err.message).toContain("capabilities");
+      expect(err.recovery).toMatch(/去掉|不传/);
+      expect(err.recovery).toMatch(/修 manifest|升级引擎包/);
+    }
+  });
+
+  it("[V4④ 正向] conversation/fork 通道族双 unsupported 的引擎仍拦（cold 之外的历史拦截面不回退）", () => {
+    const unsupported: EngineCapabilities = { ...ZCODE_CAPS, steer: "unsupported", conversation: "unsupported" };
+    const cases: Array<[TaskShapeForGate, RegExp]> = [
+      [{ fork: true }, /不支持 fork/],
+      [{ forkFromSessionFile: "/tmp/sess.jsonl" }, /fork-from 同为父 session 上下文继承/],
+      [{ conversation: true }, /不支持 resume 续聊/],
+    ];
+    for (const [task, pattern] of cases) {
+      const err = gateError(unsupported, task);
       expect(err.code).toBe("engine_capability_unsupported");
       expect(err.message).toMatch(pattern);
       expect(err.message).toContain("capabilities");
@@ -154,8 +178,11 @@ describe("assertGateCapabilitiesMatched（manifest vs initialize 应答，gate �
   });
 
   it("fork 通道族（OR 对偶）：manifest 任一可用、应答双 unsupported → mismatch", () => {
+    // [U6] zcode manifest conversation 已升 "cold"——为构造「族应答双 unsupported」
+    // 形态，两侧 conversation 显式对齐 unsupported（否则 conversation 位先于 fork
+    // 族判定制 mismatch，测不到 fork 分支本身）。
     const err = mismatchError(
-      { ...ZCODE_CAPS, steer: "native" },
+      { ...ZCODE_CAPS, steer: "native", conversation: "unsupported" },
       { ...ZCODE_CAPS, steer: "unsupported", conversation: "unsupported" },
     );
     expect(err.code).toBe("engine_capability_mismatch");

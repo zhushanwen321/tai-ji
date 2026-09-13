@@ -10,7 +10,7 @@
  *   provider 跳过专属文件经 providerCredentialResolver：auth.json → models.json；
  *   cookie 从 secrets 文件）
  *
- * 设计文档：docs/page-design/archive/v3/coding-plan-quota/design.md §2.2.3
+ * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.3
  * 交互重构（D3/D12）：docs/design/coding-plan-quota-config-ux.md §7.3
  */
 

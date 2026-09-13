@@ -138,16 +138,24 @@ export function shortId(id: string): string {
  *   running → { icon: undefined, color: "accent" }
  *     icon 留空是因为 running 的 spinner 需 seed 驱动,
  *     调用方用 detailsSeed(details) 算 seed 后调 spinnerGlyph(seed).
- *   done      → { "✓", "success" }
- *   failed    → { "✗", "error" }
- *   cancelled → { "■", "muted" }
+ *   idle     → { "✓", "success" }
+ *
+ * [U2 两态迁移] 永久会话模型（subagent-permanent-session-model §3.2.2）状态机收敛为
+ * running | idle 两态，终态概念删除——旧 closed 分支（v4 B-1 统一终态 ✓ success 色）
+ * 迁移为 idle（已收口/等续聊，语义上「上一轮有产出」保留 ✓ success 色；stopReason
+ * 派生词的渲染细化归 U8 投影面）。签名兼容 BgNotifyRecord 的通知词汇 "closed"
+ * （通知文案载体的本地类型不受 ExecutionStatus 两态约束，桥接映射同 idle）。
  */
-export function statusGlyph(status: ExecutionStatus): { icon: string | undefined; color: string } {
+export function statusGlyph(
+  status: ExecutionStatus | "closed",
+): { icon: string | undefined; color: string } {
   switch (status) {
     case "running":
       return { icon: undefined, color: "accent" };
+    case "idle":
     case "closed":
-      // v4 B-1: closed 统一终态（含 cancelled）。默认 ✓ success 色。
+      // 已收口/等续聊（closed = BgNotifyRecord 通知词汇桥接）。默认 ✓ success 色
+      // （承接旧 closed 分支的视觉基线）。
       return { icon: "✓", color: "success" };
   }
 }

@@ -1,8 +1,0 @@
-{
-  "label": "flag-off",
-  "newArchEnv": "unset",
-  "rendererEntryHtml": "apps/electron/renderer/dist/index.html",
-  "rendererScriptSrc": "./assets/main-CEeDk4UO.js",
-  "bakedFlagValue": false,
-  "distNewEntryExists": true
-}

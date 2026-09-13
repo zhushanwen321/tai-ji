@@ -7,8 +7,8 @@
 //   core EngineClient（spawn+握手+请求关联+反向路由） ←NDJSON stdio→ 本服务器
 //
 // 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
-// `event` 通知（runId + 单调 seq）外发，onPoolResolved/onHandleReady/onChildSpawned/
-// stream 经 host/* 反向请求上抛。
+// `event` 通知（runId + 单调 seq）外发，onHandleReady/onChildSpawned/stream 经
+// host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。
 //
 // pi 专有通道（本单元实装客户端）：
 //   - host/askUser：run 分发前把 server 的反向请求等待体绑定进引擎
@@ -272,7 +272,6 @@ export class EngineProtocolServer {
 
     return {
       taskId: runId,
-      poolKey: ctx.poolKey,
       signal: controller.signal,
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
@@ -285,11 +284,8 @@ export class EngineProtocolServer {
       // 推导值透传引擎消费——undefined 不挂键，引擎走 [LEGACY] fallback）
       ...(ctx.sessionDir !== undefined ? { sessionDir: ctx.sessionDir } : {}),
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
-      onPoolResolved: (poolKey) => {
-        void this.reverseRequestInternal("host/poolResolved", { runId, poolKey });
-      },
       onHandleReady: (partial) => {
-        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef, poolKey: partial.poolKey });
+        void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef });
       },
       onChildSpawned: (child) => {
         if (child.pid === undefined) return;
@@ -362,7 +358,7 @@ export class EngineProtocolServer {
 
   /** 反向请求应答落位。
    *
-   * ack 两阶段（R9-2）：人机交互通道（host/askUser / host/permission）宿主先回
+   * ack 两阶段（R9-2）：人机交互通道（host/askUser）宿主先回
    * `{ack:true}`——只 ack 计时面（移出 in-flight 自灭计时），**不终结等待**；最终
    * 结果帧才 settle。数据面通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {

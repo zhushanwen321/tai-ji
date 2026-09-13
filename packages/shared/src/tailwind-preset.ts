@@ -5,7 +5,7 @@ import type { Config } from 'tailwindcss'
  *
  * 提取 renderer / mobile-renderer 两个 tailwind.config.ts 的逐字段相同块（colors 主体 /
  * fontFamily / borderRadius / boxShadow / .content-col plugin），单一 SSOT 防漂移；
- * 色值映射到 style.css 的 CSS 变量（SSOT: docs/page-design/design-tokens.md）。
+ * 色值映射到 style.css 的 CSS 变量（SSOT: docs/DESIGN.md §4）。
  *
  * 约束（packages/shared 全局约束）：纯 JS 对象，零 IO、无 node 内置依赖——tailwind
  * config 只在构建期被 PostCSS 链加载，不进 runtime 产物。

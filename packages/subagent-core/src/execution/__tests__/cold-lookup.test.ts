@@ -25,11 +25,18 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readAliveMarker, writeAliveMarker } from "../alive-store.ts";
-import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../cold-lookup.ts";
-import { RecordStore } from "../record-store.ts";
-import type { SubagentRecord } from "../types.ts";
-import { ResurrectDeniedError } from "../types.ts";
+import { readAliveMarker, writeAliveMarker } from "../persistence/alive-store.ts";
+import {
+  COLD_LOOKUP_SCAN_LIMIT,
+  coldLookupForAction,
+  isAnchorResolvable,
+  transcriptAnchorOf,
+  type ColdLookupDeps,
+} from "../assembly/cold-lookup.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
+import type { ClosedReason } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 
 /** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
  *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」
@@ -43,7 +50,7 @@ function makeFound(overrides: Partial<SubagentRecord> = {}): SubagentRecord {
     agent: "general-purpose",
     task: "cold recovery task",
     slug: "cold-test",
-    status: "closed",
+    status: "idle",
     closedReason: "parent-shutdown",
     mode: "background",
     startedAt: 1_700_000_000_000,
@@ -191,16 +198,27 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
 
-  it("idToFile 索引直查返回非 running 态 → 回退磁盘全扫兜底定位（closed 候选仍可重连）", () => {
+  it("[U4 万物可续] idToFile 索引直查命中旧终态遗留位（closedReason=gc）→ 直接采用（两态全候选，不再回退全扫）", () => {
+    const sessionFile = writeSessionFixture();
+    const found = makeFound({ sessionFile, closedReason: "gc" });
+    const deps = makeDeps({ direct: found, disk: [] });
+
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+
+    expect(record.status).toBe("running");
+    expect(vi.mocked(deps.collectRecords)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
+  });
+
+  it("[U3 / §3.2.4 桥接] idToFile 索引直查命中可重连 closed 候选 → 直接采用（无需回退全扫）", () => {
     const sessionFile = writeSessionFixture();
     const found = makeFound({ sessionFile });
-    // direct 命中但 status=closed → 不直接采用，落到 collectRecords 兜底
     const deps = makeDeps({ direct: found, disk: [found] });
 
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
 
     expect(record.status).toBe("running");
-    expect(vi.mocked(deps.collectRecords)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.collectRecords)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
   });
 
@@ -244,8 +262,12 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     const deps = makeDeps({ disk: [makeFound({ sessionFile })] });
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
+    // [U4] 统一占用拒绝句式（设计 §3.1 唯一拒绝形态：错误 → 权威源 → 重试闭环）
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
-      /still finishing in another process/,
+      /is writing this session/,
+    );
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
+      /close it or wait for it to exit, then retry/,
     );
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
@@ -257,7 +279,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
-      /currently running in another process instance/,
+      /is writing this session/,
     );
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
@@ -279,21 +301,28 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   // ── 候选过滤 / 归属与父层校验 ──
 
   it.each([
-    ["自然完成死因 gc", makeFound({ closedReason: "gc" })],
-    ["用户主动 close", makeFound({ closedReason: "user-close" })],
-  ])("不可重连死因（%s）→ 磁盘也无候选，返回 undefined", (_label, found) => {
-    const deps = makeDeps({ disk: [found] });
+    ["自然完成死因 gc", "gc"],
+    ["用户主动 close", "user-close"],
+    ["用户取消", "cancelled"],
+    ["编排性关闭 parent-fork", "parent-fork"],
+    ["编排性关闭 parent-new", "parent-new"],
+  ] as const satisfies readonly (readonly [string, ClosedReason])[])("[U4 万物可续] 旧终态遗留位（%s）→ 同样重生放行（形态枚举 gate 消亡）", (_label, _reason) => {
+    const sessionFile = writeSessionFixture();
+    const deps = makeDeps({ disk: [makeFound({ sessionFile, closedReason: _reason })] });
 
-    expect(coldLookupForAction(deps, "sa-cold-1", true)).toBeUndefined();
-    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    expect(record.status).toBe("running");
+    expect(record.closedReason).toBeUndefined();
+    expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
-  it("allowReconnect=false：closed 候选一律不可见（running-only 查询语义）", () => {
+  it("[U4] allowReconnect 参数退役：两态全候选（idle 不再按可重连集把门），false 同样放行", () => {
     const sessionFile = writeSessionFixture();
     const deps = makeDeps({ disk: [makeFound({ sessionFile })] });
 
-    expect(coldLookupForAction(deps, "sa-cold-1", false)).toBeUndefined();
-    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+    const record = coldLookupForAction(deps, "sa-cold-1", false)!;
+    expect(record.status).toBe("running");
+    expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
   it("rootSessionId 不匹配 → 返回 undefined（不区分失败形态，防跨 session 探测）", () => {
@@ -379,5 +408,132 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     // pid 死）→ B 接管刷新 pid=B → C 再触达被拦（S8⑤ 验收锚点的磁盘面前置）。
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================
+// [U6 / §3.2.6] transcript 锚引擎分派：transcriptAnchorOf 派生单点 +
+// isAnchorResolvable 的 zcode 分支（隔离库条目存在性，内嵌只读 sqlite 查询）。
+// fixture：真实 node:sqlite 建 tmp 库（mkdtempSync 自建自删）。
+// ============================================================
+
+describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
+  let zcodeDir: string;
+  let zcodeDb: string;
+
+  beforeEach(() => {
+    zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cold-zcode-"));
+    zcodeDb = path.join(zcodeDir, "db.sqlite");
+  });
+
+  afterEach(() => {
+    fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 最小隔离库（session 表 + 目标条目）。 */
+  async function seedZcodeDb(sessionIds: string[]): Promise<void> {
+    const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
+    type Db = { exec: (s: string) => void; prepare: (s: string) => { run: (...a: unknown[]) => void }; close: () => void };
+    const db = new DatabaseSync(zcodeDb) as unknown as Db;
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, time_created INTEGER)");
+    for (const id of sessionIds) db.prepare("INSERT INTO session (id, time_created) VALUES (?, 1)").run(id);
+    db.close();
+  }
+
+  it("zcode 锚（engineHandle.sessionRef 双键）→ 库条目在 = 可解析；条目被 TTL 清 / db 缺失 = 不可解析", async () => {
+    await seedZcodeDb(["sess_z_1"]);
+    const rec = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: zcodeDb }, poolKey: "shared" },
+    };
+    expect(transcriptAnchorOf(rec)).toEqual({ engine: "zcode", sessionId: "sess_z_1", dbPath: zcodeDb });
+    expect(isAnchorResolvable(rec)).toBe(true);
+
+    const swept = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_swept", dbPath: zcodeDb }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(swept)).toBe(false); // 条目不存在（TTL 清理后的锚失效形态）
+
+    const noDb = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: path.join(zcodeDir, "nope.sqlite") }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(noDb)).toBe(false); // db 文件缺失（fail-closed）
+  });
+
+  it("pi 锚现行判据不变：sessionFile 在盘可读（`{sessionFile}` 字面量入参兼容）", () => {
+    const sessionFile = path.join(zcodeDir, "anchor.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    expect(isAnchorResolvable({ sessionFile })).toBe(true);
+    expect(isAnchorResolvable({ sessionFile: path.join(zcodeDir, "gone.jsonl") })).toBe(false);
+    expect(transcriptAnchorOf({ sessionFile })).toEqual({ engine: "pi", sessionFile });
+  });
+
+  it("显式 transcriptRef 优先；锚缺失（三载体皆无）→ undefined / false", () => {
+    const explicit = {
+      sessionFile: "/should/be/ignored.jsonl",
+      transcriptRef: { engine: "zcode" as const, sessionId: "s1", dbPath: "/no-db.sqlite" },
+    };
+    expect(transcriptAnchorOf(explicit)).toEqual({ engine: "zcode", sessionId: "s1", dbPath: "/no-db.sqlite" });
+    expect(isAnchorResolvable(explicit)).toBe(false);
+    expect(transcriptAnchorOf({})).toBeUndefined();
+    expect(isAnchorResolvable({})).toBe(false);
+  });
+
+  it("[U6] 冷查重建水合：zcode 候选（engineHandle.sessionRef）→ record.transcriptRef 落位（markResurrected 注入桩——zcode 无 sessionFile 锚，真实 store 写权声明面的 zcode 接线属后续单元）", () => {
+    const deps: ColdLookupDeps = {
+      findLightById: vi.fn(() =>
+        makeFound({
+          status: "idle",
+          sessionFile: undefined,
+          engine: "zcode",
+          engineHandle: { sessionRef: { sessionId: "sess_cold_z", dbPath: "/absent.sqlite" }, poolKey: "shared" },
+        }),
+      ),
+      collectRecords: vi.fn(() => []),
+      register: vi.fn(),
+      reportRecordTransition: vi.fn(),
+      markResurrected: vi.fn(),
+      getSessionRootId: vi.fn(() => "root-session"),
+      getBaselineRecordId: vi.fn(() => undefined),
+    };
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    expect(record.transcriptRef).toEqual({ engine: "zcode", sessionId: "sess_cold_z", dbPath: "/absent.sqlite" });
+  });
+
+  it("[A3/S3] 冷查重建水合引擎域：zcode 候选（engine + engineHandle）→ record.engine / record.engineHandle 在场（否则 resolveRoundEnginePort 按 engine ?? 'pi' 错投 pi 引擎）", () => {
+    const engineHandle = { sessionRef: { sessionId: "sess_cold_z", dbPath: "/absent.sqlite" }, poolKey: "shared" };
+    const deps: ColdLookupDeps = {
+      findLightById: vi.fn(() =>
+        makeFound({
+          status: "idle",
+          sessionFile: undefined,
+          engine: "zcode",
+          engineHandle,
+        }),
+      ),
+      collectRecords: vi.fn(() => []),
+      register: vi.fn(),
+      reportRecordTransition: vi.fn(),
+      markResurrected: vi.fn(),
+      getSessionRootId: vi.fn(() => "root-session"),
+      getBaselineRecordId: vi.fn(() => undefined),
+    };
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    // engine 域（identity）：消费方 resolveRoundEnginePort 分派依据，缺省即错投 pi
+    expect(record.engine).toBe("zcode");
+    // engineHandle 域（run 后回填的引擎定位符）：record → SubagentRecord 投影 / 锚派生
+    // 单源（transcriptAnchorOf 消费面），重建后须在场
+    expect(record.engineHandle).toBe(engineHandle);
+    // pi 候选缺省形态不破坏：engine/engineHandle 均 undefined 透传为 undefined
+    const piDeps: ColdLookupDeps = {
+      ...deps,
+      findLightById: vi.fn(() => makeFound({ sessionFile: path.join(zcodeDir, "anchor.jsonl") })),
+    };
+    fs.writeFileSync(path.join(zcodeDir, "anchor.jsonl"), "{}\n", "utf-8");
+    const piRecord = coldLookupForAction(piDeps, "sa-cold-1", true)!;
+    expect(piRecord.engine).toBeUndefined();
+    expect(piRecord.engineHandle).toBeUndefined();
   });
 });

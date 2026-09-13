@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a7-zcode-consistency.mjs
 //
 // [A7] zcode 引擎一致性（手动执行模板）
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A7 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A7 行（设计文档已删，git 可追溯）：
 //   与 A1 同构但引擎路由 zcode（同轮 3 个 collect:"sync" start，sleep 10s/30s/60s）。
 //   本脚本不实际执行（zcode 引擎需本机 CLI 与配置）——只做：
 //     1) 参数检查（extensions / pi 二进制 / 模型 / <agentDir>/subagents/config.json

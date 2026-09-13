@@ -47,7 +47,7 @@ export class GitExecutor implements IGitExecutor {
           encoding: 'utf8',
           timeout: timeoutMs,
           maxBuffer: GIT_MAX_BUFFER_BYTES, // 10MB：超大 status/diff 输出兜底
-          // B8 出站边界显式化（docs/design/env-propagation-boundary.md §5-U4）：execFile
+          // B8 出站边界显式化（docs/architecture/env-propagation-boundary.md §5-U4）：execFile
           // 默认隐式全量继承；改传构建器输出，同 shell-runner——白名单基座保 PATH/HOME
           // （R2），deny 兜底。extras 转发代理键与 SSH_AUTH_SOCK：fetch/push/commit
           // 在 corporate 代理与 ssh-agent 认证环境下的刚需（与 npm-git-installer 同源）。

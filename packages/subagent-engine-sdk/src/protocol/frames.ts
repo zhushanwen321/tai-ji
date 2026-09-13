@@ -82,12 +82,10 @@ export interface ReverseRequestFrame {
 export type ReverseResponseResult =
   /** 数据面类：处理确认。 */
   | { ok: true }
-  /** 人机交互类（askUser/permission）两阶段第一阶段：已受理，结果异步到达（R9-2）。 */
+  /** 人机交互类（askUser）两阶段第一阶段：已受理，结果异步到达（R9-2）。 */
   | { ack: true }
   /** 未实现的交互能力（设计：未实现回 unsupported，引擎自行降级）。 */
   | { unsupported: true };
-
-export type AnyFrame = RequestFrame | ResponseFrame | NotificationFrame | ReverseRequestFrame;
 
 // ============================================================
 // 判别守卫（W2 行解析器消费；结构判定，不抛错）
