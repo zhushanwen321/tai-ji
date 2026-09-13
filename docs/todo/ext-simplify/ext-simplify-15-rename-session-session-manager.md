@@ -151,7 +151,7 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 
 ### 6.3 D3：isSubagentSession 路径耦合（contested 裁决，选定：登记 constraints.json + 双端注释）
 
-- **采用**：登记新约束 **C-ext-21**（scope：`packages/subagent-core/src/execution/assembly/path-encoding.ts` + `extensions/universal/rename-session/**`；authority：本文档 §6.3 锚点；enforcement：review-arch-boundary；登记后跑 `node scripts/render-constraints.mjs` 重新生成 constraints.md），摘要声明「`<agentDir>/subagents/<enc>/sessions` 布局是 subagent-core 与 rename-session 的跨包契约，变更布局必须同批改 isSubagentSession」。双端注释互相指向：llm.ts isSubagentSession 注释补「布局 SSOT：subagent-core path-encoding.ts getSubagentSessionDir，约束 C-ext-21」；path-encoding.ts getSubagentSessionDir 注释补「消费方：rename-session isSubagentSession 路径嗅探（C-ext-21）」。
+- **采用**：登记新约束 **C-ext-21**（scope：`packages/subagent-core/src/execution/assembly/path-encoding.ts` + `extensions/universal/rename-session/**`；authority：本文档 §6.3 锚点；enforcement：review-arch-boundary；登记后跑 `node scripts/validate-constraints.mjs` 结构校验（原 `render-constraints.mjs` 已于 2026-09-13 删除，constraints.md 视图不再生成）），摘要声明「`<agentDir>/subagents/<enc>/sessions` 布局是 subagent-core 与 rename-session 的跨包契约，变更布局必须同批改 isSubagentSession」。双端注释互相指向：llm.ts isSubagentSession 注释补「布局 SSOT：subagent-core path-encoding.ts getSubagentSessionDir，约束 C-ext-21」；path-encoding.ts getSubagentSessionDir 注释补「消费方：rename-session isSubagentSession 路径嗅探（C-ext-21）」。
 - **被否**：
   - **收敛实现之「读 spawn env 标记」**（subagent-core 已有 `PI_SUBAGENT_DEPTH` 等四键贯穿子进程，subagent-service.ts:271-274）——耦合并未消除，只是从「目录布局契约」换成「env 注入契约」，后者同样是 subagent-core 单方主导的**内部递归身份协议**（注释自认「env 描述子进程自己的身份」）；让 rename-session 读它 = 内部协议升格跨包公共契约，契约面反而扩大。
   - **收敛实现之「universal 包 import subagent-core」**——方向倒挂：role=universal 要求独立 pi 用户可单独安装，依赖 xyz-agent 内部包即失格。
@@ -213,7 +213,7 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 | 阶段 | 内容 | 交付终态的什么 | 验收挂点 |
 |---|---|---|---|
 | M1 | D1 rename-session env 层删除（A1-A3） | 配置 3 源终态 | V1/V2/V3 + extensions 三连绿 |
-| M2 | D2 双端死面删除（A4-A6，单 commit）+ D3 登记（C1） | 协议死面清零 + 耦合显式化 | V4/V5 + render-constraints --check 绿 |
+| M2 | D2 双端死面删除（A4-A6，单 commit）+ D3 登记（C1） | 协议死面清零 + 耦合显式化 | V4/V5 + `node scripts/validate-constraints.mjs` 绿 |
 | M3 | session-manager low 批（B1-B3） | 包内死面清零 + 依赖声明 | extensions 三连绿 + V4 复跑一次 |
 
 M1/M2 可并行（不同包不同 commit）；M3 随 M2 之后。包版本：rename-session 配置面变更建议 minor bump，session-manager 无 LLM 可见行为变化 patch bump，extension-protocol 随 M2 patch bump（最终按仓库版本策略由实施定）。
