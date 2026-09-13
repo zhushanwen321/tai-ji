@@ -215,12 +215,23 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(binding?.agent).toBe("general-purpose"); // 身份域不丢
   });
 
-  it("binding 面：存量 binding 缺失时跳过不造新（updateRecordBinding 既有语义）", () => {
+  it("binding 面：存量 binding 缺失时造全载荷（[U7] merge-or-create——统计基准不因回填点写失败而永久丢失）", () => {
     const store = newStore();
     const rec = runningRecord();
+    rec.totalTokens = 900;
+    rec.turnCount = 4;
+    rec.round = 2;
     store.register(rec);
     store.markSettled(rec, "gc");
-    expect(readRecordBinding(rec.sessionFile!)).toBeUndefined();
+    // spawn 回填点 binding 写失败（best-effort）的窗口下，settle 写点承担创建腿——
+    // 身份域取 settle 时点内存 record（齐全非残缺，对齐 markReopened 创建先例）。
+    const binding = readRecordBinding(rec.sessionFile!);
+    expect(binding).toBeDefined();
+    expect(binding?.recordId).toBe("bg-1");
+    expect(binding?.agent).toBe("general-purpose");
+    expect(binding?.totalTokens).toBe(900);
+    expect(binding?.turns).toBe(4);
+    expect(binding?.round).toBe(2);
   });
 
   it("manifest 面：派生投影 legacy running（settle 非终态，session-reader 视角活跃成员）", () => {

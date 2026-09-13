@@ -421,12 +421,28 @@ export interface RecordBinding {
 }
 
 /**
+ * [U7 / U6-D2 交接] zcode 锚的 sidecar 键基底：`<dbPath>.<sessionId>`。
+ *
+ * binding/`.alive` 载体族的键 = 「锚基底 + 扩展名」（pi 形态锚基底 = 子 session 文件
+ * 路径，天然唯一）；zcode 无文件锚（binding sidecar 键 = pi 文件锚的结构性理由，U6-D2），
+ * 等价基底从 transcriptRef 派生——dbPath 是会话库单例路径（zcodeSessionDbPath 单一
+ * 来源）、sessionId 是库内会话键，二元组唯一且稳定。sidecar 落 dbPath 同目录
+ * （session-db/，与库条目同生命周期域；引擎 TTL sweep 只清库内条目，孤儿 sidecar
+ * 残留与 pi 侧孤儿 binding 同族，GC 名单扩展归 GC 领地批次）。
+ */
+export function zcodeAnchorBasePath(ref: { sessionId: string; dbPath: string }): string {
+  return `${ref.dbPath}.${ref.sessionId}`;
+}
+
+/**
  * 写 record 绑定 sidecar（原子写：独占创建 tmp → rename 覆盖目标）。
  *
  * best-effort 记账面：任何 I/O 失败只 warn 不抛——绑定写发生在派发/应答主路径上，
  * 绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。
  *
- * @param sessionFile 子 session.jsonl 绝对路径（绑定目标 = `<sessionFile>.record-binding`）
+ * @param sessionFile 锚基底路径：pi = 子 session.jsonl 绝对路径（绑定目标 =
+ *        `<sessionFile>.record-binding`）；zcode = {@link zcodeAnchorBasePath} 派生基底
+ *        （U7 settle 快照收编——扩展名拼接同构，读写两侧共用本函数）。
  */
 export function writeRecordBinding(sessionFile: string, binding: RecordBinding): void {
   const target = `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`;
@@ -482,6 +498,9 @@ function isAbandonedRoundMarkShape(v: unknown): v is AbandonedRoundMark {
  * 拒绝重建——与 rebuildEntryRecord 的损坏 entry 跳过语义同向，不把损坏残留误判成
  * 可恢复身份）。可选域（rootSessionId/parentRecordId/round/thinkingLevel）类型非法
  * 时归一 undefined，不影响整体判读。
+ *
+ * @param sessionFile 锚基底路径（pi = 子 session.jsonl；zcode = zcodeAnchorBasePath
+ *        派生基底，见 writeRecordBinding 注释——读写同构）。
  */
 export function readRecordBinding(sessionFile: string): RecordBinding | undefined {
   let raw: string;

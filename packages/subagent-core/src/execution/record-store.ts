@@ -6,7 +6,8 @@
 // 职责：
 //   - 持有 running record（归档/回收 record 在 archive 时立即从内存移除）
 //   - onChange 订阅（TUI widget/list 据此重渲）
-//   - collectRecords：内存(running) ∪ 磁盘(sessions/*.jsonl 重建) ∪ manifest(sessions-index.json 补充) 三源合并
+//   - collectRecords：内存(running) ∪ 磁盘(sessions/*.jsonl 重建) ∪ 主 session entry 源
+//     （[U7/B-restart] zcode record 专用缺员补源）∪ manifest(sessions-index.json 补充) 四源合并
 //   - 提供 snapshot() 只读视图给 TUI（永不返回可变引用）
 //
 // ════════════════════════════════════════════════════════════════════
@@ -84,12 +85,20 @@ import type { StateMarker } from "./state-marker.ts";
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
 // [U2] writeRecordBinding 供 markReopened 在新 pi 锚旁落盘完整 binding（epoch 跨重启
 // 单调硬要求的持久化面）。
-import { readRecordBinding, writeRecordBinding, RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
+// [U7 / §3.2.7 统计口径] zcodeAnchorBasePath 供 zcode 锚的 binding/写权声明键派生
+// （U6-D2 交接：binding 键 = 锚基底 + 扩展名，pi 锚基底 = 子 session 文件路径）。
+import { readRecordBinding, writeRecordBinding, zcodeAnchorBasePath, RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
 import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
+// [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
+// transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
+// 单源 / pi sessionFile 载体）——markSettled/markResurrected 的锚分派消费它，与
+// isAnchorResolvable / Continuation resumeAnchor 同源防三处判据漂移。cold-lookup 对
+// record-store 是 type-only import，无运行时循环。
+import { transcriptAnchorOf } from "./cold-lookup.ts";
 import {
   IDENTITY_HEAD_BYTES,
   type IdentityHeaderRecon,
@@ -108,8 +117,9 @@ import type {
   StopReason,
   SubagentRecord,
   TranscriptRef,
+  ZcodeTranscriptRef,
 } from "./types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST, isPiTranscriptRef, isValidStopReason } from "./types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST, isPiTranscriptRef, isZcodeTranscriptRef, isValidStopReason, ResurrectDeniedError } from "./types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
@@ -400,6 +410,16 @@ function isEngineFallbackShape(v: unknown): v is { from: string; reason: string 
   return typeof r.from === "string" && typeof r.reason === "string";
 }
 
+/**
+ * [U7 / §3.2.6] record 的 zcode 锚（cold-lookup transcriptAnchorOf 派生单点的 zcode
+ * 筛选形态——显式 transcriptRef 优先 / engineHandle.sessionRef 单源）。pi record 恒
+ * undefined（sessionFile 载体在，锚分派的 pi 腿优先）。
+ */
+function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefined {
+  const anchor = transcriptAnchorOf(record);
+  return anchor !== undefined && isZcodeTranscriptRef(anchor) ? anchor : undefined;
+}
+
 /** engineHandle entry 值的运行时 guard（未知 JSON 不裸收；形状与 runtime 读侧
  *  subagent-engine-history 的 extractRecordEngineHandle 守卫语义对齐：poolKey
  *  必有非空 string + sessionRef 值全 string 才收，journalPath 可选 string）。 */
@@ -539,6 +559,15 @@ export class RecordStore {
   /** [U4c / G1] manifest 惰性重建的每 id 尝试守卫（mergedRecords 高频路径防磁盘写
    *  放大：每 id 每进程至多一次；dispose/revive 随其余缓存态一并重置）。 */
   private manifestRebuildTried = new Set<string>();
+
+  /** [U7 / B-restart store 面] 主 session 文件路径（entry 源读取锚——经
+   *  recoverOrphanRecords / recoverEntryOnlyOrphans 入参记忆，record-access
+   *  initSession 恢复段供给；undefined = 未初始化（测试/纯内存形态），entry 源空转）。 */
+  private mainSessionFile: string | undefined;
+  /** [U7] entry 源缓存 + stat 戳（主 session append 频繁——戳同零读复用，稳态成本
+   *  1×statSync；变化重读「每 id 末条」全量行，collectLastRecordEntries 快过滤承担）。 */
+  private mainEntryStamp: Stamp | null = null;
+  private mainEntryCache: SubagentRecord[] = [];
 
   /**
    * [D8 v7] manifest 同步写目录（与 manifestStore 同一 records 目录，由构造方提供——
@@ -884,22 +913,60 @@ export class RecordStore {
    * （「接管即声明」——现状此路径不写 marker 的双写窗随归口消灭）。
    * 中间形态推演（G3 单点论证）见设计 D3c (i)(ii)(iii)：三形态无卡死态、无双写窗。
    *
+   * [U7 / §3.2.6 锚分派] zcode 锚不再被「no sessionFile anchor」硬拒：写权声明的
+   * 物理对象 = 会话库条目（dbPath 单库共享，双宿主开同一 dataDir 时互斥语义与 pi
+   * 同构），声明键 = transcriptRef 派生锚基底（zcodeAnchorBasePath）。zcode 无
+   * `.state`/legacy 终态位（settle 不写——无文件锚），wasClosed 删位动作只对 pi 腿。
+   * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针面只覆盖 sessionFile
+   * 形态——findColdLookupCandidate 对无 sessionFile 候选不探）。
+   *
+   * [U7 / §3.2.7] revive 统计基线水合先于 acquire/register：冷复活链的 createRecord
+   * 产物 turnCount/totalTokens/round/epoch 全部归零，不水合则 register/reportRecordTransition
+   * 的 entry 投影以归零值 last-writer-wins 覆盖磁盘原值（GUI 快修批次⑤根因）——
+   * binding 快照（settle 权威终值）恢复基线，新轮增量在其上累加（跨轮连续）。
+   *
    * @param record 调用方重建的可变 record（createRecord 产物）
    * @param wasClosed 磁盘候选是否为 closed 形态（cold-lookup 的 found.status 判定）
-   * @throws Error acquire 或终态位删除失败（含 sessionFile 缺失——无锚点无法声明写权）
+   * @throws Error acquire 或终态位删除失败（含双锚皆缺——无锚点无法声明写权）；
+   *         zcode 锚被异进程持有时 ResurrectDeniedError（含 pid 与恢复指引）。
    */
   markResurrected(record: ExecutionRecord, wasClosed: boolean): void {
     const { id, sessionFile } = record;
-    if (sessionFile === undefined) {
+    const zcodeAnchor = sessionFile === undefined ? zcodeRefOf(record) : undefined;
+    // 写权声明键：pi = 子 session 文件；zcode = transcriptRef 派生锚基底。双锚皆缺
+    // （无任何可声明的物理锚点）→ 响亮抛错（现行语义保留）。
+    const leaseBase =
+      sessionFile !== undefined
+        ? sessionFile
+        : zcodeAnchor !== undefined
+          ? zcodeAnchorBasePath(zcodeAnchor)
+          : undefined;
+    if (leaseBase === undefined) {
       throw new Error(
         `markResurrected(${id}): no sessionFile anchor — cannot acquire write lease; ` +
           `resurrect aborted without touching disk or memory (no half-state).`,
       );
     }
+    // zcode 锚 acquire 前探针（pi 腿的探针在 cold-lookup 候选定位统一执行；zcode
+    // 形态 cold-lookup 不探——此处收编，放在 try 域外保持「占用拒绝 ≠ acquire 失败」
+    // 的错误语义分离）。
+    if (sessionFile === undefined) {
+      const foreign = findForeignLiveInstance(leaseBase);
+      if (foreign) {
+        throw new ResurrectDeniedError(
+          `another process (pid ${foreign.pid}) is writing this session (${leaseBase}, ` +
+            `startedAt=${new Date(foreign.startedAt).toISOString()}); ` +
+            `close it or wait for it to exit, then retry.`,
+        );
+      }
+    }
+    // [U7] 统计基线水合（纯读盘 + 内存赋值，失败无副作用——binding 缺失/损坏时
+    // 静默保持归零基线，与 binding best-effort 记账语义对齐）。
+    this.hydrateReviveBaseline(record, zcodeAnchor);
     try {
       // acquire-first：先声明写权——失败即中止，终态位未删（D3c (i)/(ii) 形态锚）。
-      writeAliveMarker(sessionFile, { pid: process.pid, id, startedAt: Date.now() });
-      if (wasClosed) {
+      writeAliveMarker(leaseBase, { pid: process.pid, id, startedAt: Date.now() });
+      if (wasClosed && sessionFile !== undefined) {
         fs.rmSync(`${sessionFile}${STATE_SIDECAR_EXT}`, { force: true });
         // 旧名两名全量清理（与 writeStateMarker 写侧清理对称）：readStateMarker 在 .state
         // 缺失时回退旧名——残留任一旧终态文件都会让重建读出 cancelled/finalized，破坏
@@ -911,10 +978,10 @@ export class RecordStore {
       logger.error(
         `[subagents] markResurrected(${id}) failed to acquire/flip terminal position; ` +
           `resurrect aborted loudly (disk keeps a closed-readable shape (possibly via legacy filename), memory unregistered)`,
-        { detail: { sessionFile, error: err instanceof Error ? err.message : String(err) } },
+        { detail: { sessionFile: sessionFile ?? leaseBase, error: err instanceof Error ? err.message : String(err) } },
       );
       throw new Error(
-        `markResurrected(${id}): write-lease acquire/terminal-position flip failed for ${sessionFile} ` +
+        `markResurrected(${id}): write-lease acquire/terminal-position flip failed for ${sessionFile ?? leaseBase} ` +
           `(${err instanceof Error ? err.message : String(err)}). Recovery: inspect disk (permissions/full) and retry message; ` +
           `terminal state remains closed (possibly via legacy filename), the record stays resurrectable.`,
         { cause: err },
@@ -922,6 +989,32 @@ export class RecordStore {
     }
     resurrectClosed(record);
     this.register(record);
+  }
+
+  /**
+   * [U7 / §3.2.7] revive 统计基线水合：binding 快照（settle 写点权威终值）→ 内存
+   * record 基线。max 合并防御调用方传入已带统计的形态（水合只增不减——防归零
+   * 覆盖的语义本体）；lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，
+   * 调用方冷查水合值优先）。
+   */
+  private hydrateReviveBaseline(record: ExecutionRecord, zcodeAnchor: ZcodeTranscriptRef | undefined): void {
+    const binding =
+      record.sessionFile !== undefined
+        ? readRecordBinding(record.sessionFile)
+        : zcodeAnchor !== undefined
+          ? readRecordBinding(zcodeAnchorBasePath(zcodeAnchor))
+          : undefined;
+    if (binding === undefined) return;
+    if (binding.turns !== undefined) record.turnCount = Math.max(record.turnCount, binding.turns);
+    if (binding.totalTokens !== undefined) record.totalTokens = Math.max(record.totalTokens, binding.totalTokens);
+    if (binding.round !== undefined) record.round = Math.max(record.round ?? 0, binding.round);
+    if (binding.epoch !== undefined) record.epoch = Math.max(record.epoch ?? 0, binding.epoch);
+    if (record.lastAbandonedRound == null && binding.lastAbandonedRound != null) {
+      record.lastAbandonedRound = binding.lastAbandonedRound;
+    }
+    if (record.transcriptRef === undefined && binding.transcriptRef !== undefined) {
+      record.transcriptRef = binding.transcriptRef;
+    }
   }
 
   /**
@@ -958,7 +1051,7 @@ export class RecordStore {
     // [U4c / G2] 回收点补写：经状态派生投影（running 如实投影——非终态化语义，
     // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
     this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
-    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+    this.releaseWriteLease(record);
   }
 
   /**
@@ -1015,22 +1108,29 @@ export class RecordStore {
     record.stopReason = stopReason;
     record.idleSince = Date.now();
     const settledAt = Date.now();
+    // [U7 / §3.2.7 统计口径单基准] settle 快照锚分派（U6-D2 交接收编）：
+    //   - pi：子 session 文件锚（现行——`.state` 收条 + binding 快照）；
+    //   - zcode：transcriptRef 派生锚键承载 binding 快照（`.state` 无文件锚不写，
+    //     上一轮收条经 entry/manifest 投影承载）——zcode 无 pi 文件锚是常态形态
+    //     非异常，不 warn；
+    //   - 双锚皆缺（spawn 窗口期 / 从未开跑）：warn 留痕（现行）。
+    const zcodeAnchor = record.sessionFile === undefined ? zcodeRefOf(record) : undefined;
     if (record.sessionFile !== undefined) {
       // ① `.state` 收条（失败 warn 留痕不抛——轮收口非终态，内存态已收口，磁盘面
       // 滞后由下次收口/接管补写；错误已在 state-marker 层 error 级响亮暴露）。
       writeSettledState(record.sessionFile, { stopReason, endedAt: settledAt });
-      // ② binding 快照（best-effort——binding 缺失不造残缺身份，updateRecordBinding
-      // 既有语义；round 随快照推进，light 重建面恢复轮次）。[U5 / §3.2.7] epoch 与
-      // 放弃轮标记同批落盘（cancel/编排性关闭的中断轮 settle 是标记的置位点——
-      // gate ②判据跨重启有效是硬要求，丢标记 = 中断轮迟到回注防双发失效）。
-      updateRecordBinding(record.sessionFile, {
-        totalTokens: record.totalTokens,
-        turns: record.turnCount,
-        endedAt: record.endedAt,
-        round: record.round ?? 0,
-        epoch: record.epoch,
-        lastAbandonedRound: record.lastAbandonedRound,
-      });
+      // ② binding 快照。[U5 / §3.2.7] epoch 与放弃轮标记同批落盘（cancel/编排性
+      // 关闭的中断轮 settle 是标记的置位点——gate ②判据跨重启有效是硬要求，丢标记
+      // = 中断轮迟到回注防双发失效）。[U7] 写点统一为 merge-or-create：binding
+      // 缺失（spawn 回填点 best-effort 写失败的窗口）时以 settle 时点的完整身份域
+      // 造全载荷（对齐 markReopened 创建先例）——统计基准不因回填点失败而永久丢失。
+      this.persistSettleSnapshot(record.sessionFile, record);
+    } else if (zcodeAnchor !== undefined) {
+      // [U7 / U6-D2] zcode 锚 settle 快照：锚键基底承载（readRecordBinding/
+      // writeRecordBinding 的键形态对 pi/zcode 同构，见 state-marker 注释）。
+      // transcriptRef 显式落位（锚键是派生形态，显式字段让 markResurrected 水合
+      // 与重启恢复的读侧单源）。
+      this.persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), record, zcodeAnchor);
     } else {
       logger.warn("[subagents] markSettled: no sessionFile anchor, .state/binding faces skipped", {
         detail: { id: record.id },
@@ -1074,10 +1174,13 @@ export class RecordStore {
    *
    * epoch 持久化（跨重启单调是硬要求，丢 epoch 会被二次 reopen 击穿）：pi 锚经
    * writeRecordBinding 在新 sessionFile 旁落盘完整 binding（新锚旁无存量 binding 可
-   * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；zcode
-   * 锚（无文件载体）的 binding 面归 U6（会话库锚承载）接线。残留 lastAbandonedRound
-   * 不迁移（跨 epoch 自然失效，§3.2.7——判定第一步以 record 当前 epoch 为基准丢弃
-   * 旧世代回注）。`.alive` 写权声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
+   * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；
+   * [U7 / U6-D2 收编] zcode 锚同款落盘（锚键基底派生，见 zcodeAnchorBasePath）。
+   * 宿主闭包 reopenRecord 的 engine 分派（run-orchestration 领地，U6b 接线）只构造
+   * pi 锚——zcode 腿接线前本分支经内存 idle record 的显式 transcriptRef 可达，写面
+   * 就位即 U6b 的依赖锚点。残留 lastAbandonedRound 不迁移（跨 epoch 自然失效，
+   * §3.2.7——判定第一步以 record 当前 epoch 为基准丢弃旧世代回注）。`.alive` 写权
+   * 声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
    *
    * @returns true = 重开完成；false = CAS 拒绝（record 非 idle）。
    */
@@ -1093,39 +1196,82 @@ export class RecordStore {
     record.epoch = (record.epoch ?? 0) + 1;
     record.stopReason = "reopened";
     if (isPiTranscriptRef(transcriptRef)) {
-      writeRecordBinding(transcriptRef.sessionFile, {
-        v: 1,
-        recordId: record.id,
-        rootSessionId: record.rootSessionId,
-        parentRecordId: record.parentRecordId,
-        depth: record.depth,
-        agent: record.agent,
-        task: record.task,
-        slug: record.slug,
-        mode: "background",
-        startedAt: record.startedAt,
-        chatMode: record.chatMode === true,
-        round: record.round,
-        model: record.model,
-        thinkingLevel: record.thinkingLevel,
-        worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
-        origin: record.origin,
-        parentRunId: record.parentRunId,
-        totalTokens: record.totalTokens,
-        turns: record.turnCount,
-        endedAt: record.endedAt,
-        epoch: record.epoch,
-        transcriptRef,
-        lastAbandonedRound: record.lastAbandonedRound,
-      });
+      writeRecordBinding(transcriptRef.sessionFile, RecordStore.fullBindingPayload(record, transcriptRef));
     } else {
-      logger.debug("[subagents] markReopened: non-pi anchor, binding persistence deferred to U6", {
-        detail: { id: record.id, engine: transcriptRef.engine },
-      });
+      // [U7 / U6-D2] zcode 锚的 binding 持久化：锚键基底 + 扩展名与 pi 同构
+      // （state-marker.writeRecordBinding 键形态统一），epoch/统计基线随新 sessionId
+      // 键落盘——旧 sessionId 键下 binding 保留（历史锚回溯，与 pi 侧旧文件 binding
+      // 同族）。
+      writeRecordBinding(zcodeAnchorBasePath(transcriptRef), RecordStore.fullBindingPayload(record, transcriptRef));
     }
     this.reportRecordTransition(record);
     this.notifyChange();
     return true;
+  }
+
+  /**
+   * [U7 / §3.2.7] settle 快照的统计域 patch（turns/tokens 终值 + round/epoch/放弃轮
+   * 标记——binding 为统计单基准的写侧载荷）。endedAt 取 record 终值（非终态 settle
+   * 恒 undefined，与 markSettled「不写 endedAt」语义一致——快照槽位保留供
+   * markFinalized/markCancelled 终态路径 merge 复用）。
+   */
+  private static settleSnapshotPatch(
+    record: ExecutionRecord,
+  ): Pick<RecordBinding, "totalTokens" | "turns" | "endedAt" | "round" | "epoch" | "lastAbandonedRound"> {
+    return {
+      totalTokens: record.totalTokens,
+      turns: record.turnCount,
+      endedAt: record.endedAt,
+      round: record.round ?? 0,
+      epoch: record.epoch,
+      lastAbandonedRound: record.lastAbandonedRound,
+    };
+  }
+
+  /**
+   * [U7] record → 完整 binding 载荷（merge-or-create 的 create 腿与 markReopened
+   * 新锚旁落盘共用——身份域取 settle/reopen 时点的内存 record（齐全非残缺），对齐
+   * 「binding 缺失不造残缺身份」原则的合法例外：调用时点 record 身份已定型）。
+   */
+  private static fullBindingPayload(record: ExecutionRecord, transcriptRef: TranscriptRef | undefined): RecordBinding {
+    return {
+      v: 1,
+      recordId: record.id,
+      rootSessionId: record.rootSessionId,
+      parentRecordId: record.parentRecordId,
+      depth: record.depth,
+      agent: record.agent,
+      task: record.task,
+      slug: record.slug,
+      mode: "background",
+      startedAt: record.startedAt,
+      chatMode: record.chatMode === true,
+      model: record.model,
+      thinkingLevel: record.thinkingLevel,
+      worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
+      origin: record.origin,
+      parentRunId: record.parentRunId,
+      ...RecordStore.settleSnapshotPatch(record),
+      ...(transcriptRef !== undefined ? { transcriptRef } : {}),
+    };
+  }
+
+  /**
+   * [U7 / §3.2.7] settle 统计快照落 binding（merge-or-create）：现有 binding merge
+   * patch（updateRecordBinding 既有语义）；缺失时全载荷创建（spawn 回填点 best-effort
+   * 写失败的窗口下统计基准不丢——「binding 为单基准」的写侧可靠性收口）。best-effort
+   * 语义同写侧（state-marker.writeRecordBinding 内部 warn 不抛）。
+   */
+  private persistSettleSnapshot(basePath: string, record: ExecutionRecord, transcriptRef?: TranscriptRef): void {
+    const existing = readRecordBinding(basePath);
+    if (existing === undefined) {
+      writeRecordBinding(basePath, RecordStore.fullBindingPayload(record, transcriptRef));
+      return;
+    }
+    updateRecordBinding(basePath, {
+      ...RecordStore.settleSnapshotPatch(record),
+      ...(transcriptRef !== undefined ? { transcriptRef } : {}),
+    });
   }
 
   /**
@@ -1146,11 +1292,26 @@ export class RecordStore {
    */
   markArchived(record: ExecutionRecord): boolean {
     record.intent = "archived";
-    if (record.sessionFile !== undefined) removeAliveMarker(record.sessionFile);
+    this.releaseWriteLease(record);
     this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));
     this.reportRecordTransition(record);
     this.notifyChange();
     return true;
+  }
+
+  /**
+   * [U7 / §3.2.4 release 出口] 写权声明 release 的锚分派：pi = 子 session 文件
+   * （现行键）；zcode = transcriptRef 派生锚基底（markResurrected acquire 的对称
+   * 反向）。双锚皆缺（spawn 窗口期归档）无声明可释——静默跳过（acquire 同形态
+   * 硬拒，对称成立）。
+   */
+  private releaseWriteLease(record: ExecutionRecord): void {
+    if (record.sessionFile !== undefined) {
+      removeAliveMarker(record.sessionFile);
+      return;
+    }
+    const zcode = zcodeRefOf(record);
+    if (zcode !== undefined) removeAliveMarker(zcodeAnchorBasePath(zcode));
   }
 
   /** 终态 manifest 投影（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
@@ -1500,8 +1661,10 @@ export class RecordStore {
   }
 
   /**
-   * collectRecords / collectRecordsByParentRunId 共用的三源合并（磁盘重建 ∪ manifest
-   * 补充 ∪ 内存覆盖）。返回 byId Map（内存优先——running record 是活态比磁盘重建新）。
+   * collectRecords / collectRecordsByParentRunId 共用的四源合并（磁盘重建 ∪ 主
+   * session entry 源 ∪ manifest 补充 ∪ 内存覆盖；entry 源 [U7 / B-restart] 只补
+   * zcode record，见 1.7 段注）。返回 byId Map（内存优先——running record 是活态
+   * 比磁盘重建新）。
    * [D1 ⑤] 磁盘重建投影本身不做任何 origin 过滤——record 全量重建，过滤只在上层
    * 查询消费面按参数生效。
    */
@@ -1510,6 +1673,21 @@ export class RecordStore {
 
     // 1. 磁盘源（重建终态 record）。 reconstructAll 已按 rootSessionFilter 过滤。
     for (const rec of this.reconstructAll(rootSessionFilter)) {
+      byId.set(rec.id, rec);
+    }
+
+    // 1.7 [U7 / B-restart store 面] 主 session entry 源：补「磁盘扫描缺员」的
+    // **zcode record**（无子 session 文件不在扫描集，重启后唯一 store 侧可见面）。
+    // 锚恢复 = entry 的 engineHandle.sessionRef（zcode 锚单源，冷查链
+    // resurrectColdRecord 经 transcriptAnchorOf 派生消费）；统计/round 随 entry 投影
+    //（best-effort 过程面，settle 权威值在 binding——markResurrected 水合覆盖）。
+    // 刻意收窄到 engine==='zcode'：pi entry-only record（spawn 窗口 entry-born / 旧
+    // 终态 entry）的 store 可见性语义是 U8 投影面决策域（H4 M1「不重物化」守护），
+    // 不随 zcode 锚恢复顺带变更。manifest 投影契约扩展（engineHandle 下行）归 U8。
+    for (const rec of this.entrySourceRecords()) {
+      if (byId.has(rec.id)) continue;
+      if (rec.engine !== "zcode") continue;
+      if (rootSessionFilter !== undefined && rec.rootSessionId !== rootSessionFilter) continue;
       byId.set(rec.id, rec);
     }
 
@@ -1562,6 +1740,28 @@ export class RecordStore {
     return byId;
   }
 
+  /**
+   * [U7 / B-restart] 主 session entry 源的缓存读（stat 戳校验）。mainSessionFile
+   * 未初始化 / 已消失 → 空集（entry 源空转，行为与无该源等价）；戳变化（entry
+   * append）触发一次「每 id 末条」重读。缓存结果为浅共享数组——消费方只读遍历
+   * （mergedRecords 拷贝进 byId 后不 mutate 源元素），无逃逸别名写风险。
+   */
+  private entrySourceRecords(): SubagentRecord[] {
+    if (this.mainSessionFile === undefined) return [];
+    const stamp = statStamp(this.mainSessionFile);
+    if (stamp === null) {
+      this.mainEntryStamp = null;
+      this.mainEntryCache = [];
+      return [];
+    }
+    if (this.mainEntryStamp !== null && sameStamp(this.mainEntryStamp, stamp)) {
+      return this.mainEntryCache;
+    }
+    this.mainEntryStamp = stamp;
+    this.mainEntryCache = this.scanLastRecordEntries(this.mainSessionFile);
+    return this.mainEntryCache;
+  }
+
   // ── 孤儿终态恢复（residual-fixes 设计 §6.1.2）──────────────────
 
   /**
@@ -1591,6 +1791,9 @@ export class RecordStore {
    * 语义一致）。调用方：record-access initSession 恢复段（一次）。
    */
   recoverOrphanRecords(rootSessionFilter?: string, mainSessionFile?: string): void {
+    // [U7 / B-restart] 主 session 路径记忆（entry 源读取锚——initSession 恢复段每
+    // session 供给一次；/resume /fork 后新主文件随下次调用覆盖）。
+    if (mainSessionFile !== undefined) this.mainSessionFile = mainSessionFile;
     const lastById = new Map(this.scanLastRecordEntries(mainSessionFile).map((r) => [r.id, r]));
     for (const rec of this.reconstructAll(rootSessionFilter)) {
       const lastEntry = lastById.get(rec.id);
@@ -1662,6 +1865,9 @@ export class RecordStore {
    */
   recoverEntryOnlyOrphans(mainSessionFile: string | undefined, rootSessionFilter?: string): void {
     if (mainSessionFile === undefined) return;
+    // [U7 / B-restart] 同 recoverOrphanRecords 的记忆点（两个 initSession 恢复入口
+    // 任一先达即锚定 entry 源）。
+    this.mainSessionFile = mainSessionFile;
     let content: string;
     try {
       content = fs.readFileSync(mainSessionFile, "utf-8");
@@ -1769,6 +1975,10 @@ export class RecordStore {
     this.lastIndexWriteAt = 0;
     this.indexHigherVersion = false;
     this.manifestRebuildTried.clear();
+    // [U7 / B-restart] entry 源随 session 结束释放（主 session 文件属 session 状态）。
+    this.mainSessionFile = undefined;
+    this.mainEntryStamp = null;
+    this.mainEntryCache = [];
   }
 
   /**
@@ -1786,6 +1996,11 @@ export class RecordStore {
     // [U4c / G1] /new /resume 重开后 manifest 态可能已变（外部删除/异宿主写入），
     // 惰性重建守卫随缓存态一并复位（对齐 orphanJudged 的「重开重判」语义）。
     this.manifestRebuildTried.clear();
+    // [U7 / B-restart] entry 源缓存戳复位（/resume /fork 后主文件可能已换——
+    // initSession 恢复段的 recover* 调用会重设 mainSessionFile 并触发重读；复位
+    // 保证复位前窗口内的首次读取不命中旧 session 的缓存）。
+    this.mainEntryStamp = null;
+    this.mainEntryCache = [];
   }
 
   // ── 内部 ──────────────────────────────────────────────────
@@ -1929,17 +2144,16 @@ export class RecordStore {
       return null;
     }
     const entry = RecordStore.buildFileCacheEntry(base, file, stamps, payloads);
-    // [UF-1] 绑定承载的对话形态域补投影：IdentityHeaderRecon 无 round 槽位
-    //（既有语义：identity entry 磁盘重建不恢复 round），绑定路径在其上恢复——
-    // 续聊轮数随绑定快照可滞后一拍（state-marker.RecordBinding.round 契约）。
-    if (header === undefined && payloads.binding?.round !== undefined) {
-      entry.light.round = payloads.binding.round;
-    }
-    // [H2 A3] 终态 usage 快照补投影（round 同款先例）：binding 快照只在终态写点
-    // （finalizeRecord Step3a）更新，存在即代表终值——light 列表面据此恢复
-    // totalTokens/turns/endedAt，不再恒 0（list 与通知显示消耗真实值）。
-    if (header === undefined && payloads.binding) {
+    // [U7 / §3.2.7 统计口径单基准] binding 补投影扩展到 identity 基底（原仅 binding
+    // 基底）：binding 快照是 settle 写点的统计权威（.state 收条不冗余承载 round/
+    // usage，§3.2.4），light 重建一律从 binding 恢复 turns/tokens/round/endedAt 终值
+    // ——「冷复活前后计数一致」的读侧半边（写侧 = markSettled 快照 + markResurrected
+    // 水合）。快照可滞后于在飞轮（settle 后 jsonl 续写），此时 record 在内存由
+    // mergedRecords 内存源覆盖（内存增量覆盖磁盘终值），详情走 getFullRecord 从
+    // jsonl 全量重放——三面优先级衔接无跳变。
+    if (payloads.binding !== undefined) {
       const b = payloads.binding;
+      if (b.round !== undefined) entry.light.round = b.round;
       if (b.totalTokens !== undefined) entry.light.totalTokens = b.totalTokens;
       if (b.turns !== undefined) entry.light.turns = b.turns;
       if (b.endedAt !== undefined) entry.light.endedAt = b.endedAt;
