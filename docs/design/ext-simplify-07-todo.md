@@ -200,7 +200,7 @@ session 重开 → reconstructState 回放最后一条 todo toolResult details �
 
 | # | 场景 | 回溯目标 | 真实流程/数据/路径 | 通过标准 |
 |---|---|---|---|---|
-| V1 | 真实 pi CLI：批量更新成功 + 失败 + 错误后状态完好 | 目标 1/2/3；探针 P1 | `pnpm --filter @zhushanwen/pi-todo build` 后 `pi --mode rpc --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <dist 路径>`，stdin JSONL 发 prompt：让模型建 2 个 todo、批量更新标记第 1 个 completed，再故意更新不存在的 #9 | 成功轮返回 `Updated 1 todo(s)` + 全量列表（与现状同构）；#9 轮以工具错误返回且文案为 `Todo #9 not found`；随后 list 显示 2 条 todo 且第 1 条 completed（错误未污染 state）、会话继续可用 |
+| V1 | 真实 pi CLI：批量更新成功 + 失败 + 错误后状态完好 | 目标 1/2/3；探针 P1 | `pi --mode rpc --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension extensions/universal/todo`（包 pi.extensions 指向源码 ./index.ts，源码直载，无需构建），stdin JSONL 发 prompt：让模型建 2 个 todo、批量更新标记第 1 个 completed，再故意更新不存在的 #9 | 成功轮返回 `Updated 1 todo(s)` + 全量列表（与现状同构）；#9 轮以工具错误返回且文案为 `Todo #9 not found`；随后 list 显示 2 条 todo 且第 1 条 completed（错误未污染 state）、会话继续可用 |
 | V2 | 旧会话回放零回归 | 目标 3；探针 P2 | V1 结束后以同 `--session-dir` resume 重开该 session，再发一条消息让模型 list todo | 状态行 N/M 与 list 结果与关闭前一致（reconstructState 回放 details 正常，M4 未触及落盘形状） |
 | V3 | 负面行为：渲染链路不变 | 目标 3 | V1 全程观察 TUI 状态行与 widget（或 RPC 下 host 侧 widget） | 状态行 N/M 格式与 widget 渲染与改动前一致（本设计零触及渲染文件；若观察到变化即回归） |
 
@@ -232,3 +232,4 @@ session 重开 → reconstructState 回放最后一条 todo toolResult details �
 
 - v1（2026-09-12）：初稿。覆盖审计 M4（medium，code-right）+ low 群移交登记（审计主清单 L1/L2 + 四问记录遗留 L3–L6）；M5 登记出范围（归 13 号设计）；审计行号微移已在证据基线标注。
 - v2（2026-09-13）：按 over-engineering-audit 审查报告（ext-simplify-07-todo.review.md）修订——MF1 证据基线刷新至 0.9.0（auto-GC 提交 8b7f85b8b 重排行号，全文行号引用同步；SCQA-S 补 auto-GC / 软上限行为，包体量修正为约 1200 行，版本 v0.9.0）；S1 版本 bump 表述与 D3 去 export 自洽（导出面收缩按 patch 辩护）；S2「两处微调」归纳修正为一类变化（4 条文案去前缀）；S3 grep 口径修正（生产代码排除 __tests__）。决策层（D1–D4）无变化。
+- v2.1（2026-09-14）：dev-flow 阶段 3 一致性审查 doc_errors 修复——V1 流程命令 `pnpm --filter @zhushanwen/pi-todo build` 引用不存在的 script（todo 包无 build，pi.extensions 直指源码），改为源码直载 `--extension extensions/universal/todo`；判定内容不变。

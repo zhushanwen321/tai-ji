@@ -72,3 +72,4 @@ graph TD
 - 版本 bump（patch）不在 u1 领地：按 handoff 总原则「批次版本 bump 由 merge 阶段统一处理」，与已实施 6 份同规；实施完成后 merge 阶段以 changesets 补。
 - D4 移交清单（L1-L6）与本流水线解耦，留 code-simplify 批处理；若 L1 与本设计 u1 的 steer.test.ts 触碰面重叠，以 code-simplify 批次时点为准（本设计不改 steer.test.ts）。
 - 2026-09-14：计划创建（阶段 0 预检通过：四节齐全；审查证据 = .tmp/tech-design/ext-simplify-07-r2-review.md PASS 0 must-fix + 原始 review.md 1 MF 已修复闭环）。
+- 2026-09-14（阶段 3）：一致性审查收敛——reasonable 8（终态表 5 行逐字落地/UpdateResult 去 export 零消费/handleBatchUpdate 三行化/测试 4+5 改写完整等）；unreasonable 1（ARCHITECTURE.md:160 同款悬空 CLAUDE.md 引用未闭环——已打回原 dev 定向修）；doc_errors 1（设计文档 V1 的 `pnpm --filter @zhushanwen/pi-todo build` 命令引用不存在 script——主 agent 已修为源码直载 `--extension extensions/universal/todo`，并记设计变更历史）。Gate A 全绿：extensions:typecheck+lint+test exit 0（26 包 4426 tests / 0 failed；session-reader 2 skipped 为存量条件守卫 describe.skipIf，非本区间引入）；todo 包 137/137。
