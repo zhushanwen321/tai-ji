@@ -1,7 +1,7 @@
 # ADR-0066: 视觉色相定为太极·玄纯灰重克制（V3）
 
 - 状态：Accepted（2026-08-02 决策，2026-09-13 自 page-design 临时决策文档转正）
-- 值权威：[`v6-tokens.css`](../page-design/v6-tokens.css)（本 ADR 不复制色值表；提案值与定稿值曾有微调，如 `--accent` 提案 `#c8c8cd` → 定稿 `#cfcfd4`）
+- 值权威：[`style.css`](../../packages/renderer/src/style.css)（值真值；登记对照见 [DESIGN.md §4](../DESIGN.md)。本 ADR 不复制色值表；提案值与定稿值曾有微调，如 `--accent` 提案 `#c8c8cd` → 定稿 `#cfcfd4`）
 
 ## 背景
 

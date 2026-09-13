@@ -3,9 +3,9 @@
 > 记录 UI 设计系统从初始到当前形态的完整演变过程。每个阶段记录：方向、为什么转向、关键决策、标志文档。
 >
 > 当前态权威文档：
-> - 范式 SSOT：[docs/page-design/v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
-> - 值 SSOT：[docs/page-design/v6-tokens.css](page-design/v6-tokens.css)（hook 守卫；原 design-tokens.md 已删除）
-> - 视觉规格：`docs/page-design/v6-spec-*.html`（部分已滞后，以 master-spec + demo 为准）
+> - 视觉设计权威：[docs/DESIGN.md](DESIGN.md)（v6 范式 + token 登记对照；2026-09-13 page-design 目录退役后收口并入）
+> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 投影挂值相等守卫）
+> - 视觉规格稿：`v6-spec-*.html` 已删除（2026-09-13 退役，git 可追溯）；demo 活验证在 `.tmp/v6/`
 >
 > 已删除过程文档（2026-09-13 收口，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）
 
@@ -91,7 +91,7 @@ v6-design.md（2026-09-13 已删除，git 可追溯）在此基线上确立最�
 审查过程中发现的核心张力：**五原则的「魂」（设计意图）反复与「形」（具体实现）分裂**。每次修复都会在某个文件里修对，又在另一个文件里引入新的不一致。这成为后续维护的持续关注点。
 
 **标志文档**：
-- [v6-master-spec.md](page-design/v6-master-spec.md)（v6 单一权威源，整合自 28 份过程文档 + demo）
+- [DESIGN.md](DESIGN.md)（v6 范式权威，整合自 28 份过程文档 + demo）
 - ~~v6-design.md~~（五原则原始定稿，D1-D14 决策；2026-09-13 已删除，git 可追溯）
 - ~~v6-summary.md~~（索引/摘要；2026-09-13 已删除，git 可追溯）
 - `v6-spec-*.html`（15 个视觉规格稿）
@@ -115,7 +115,7 @@ v6-design.md（2026-09-13 已删除，git 可追溯）在此基线上确立最�
 
 **标志文档**：
 - [ADR-0066](adr/0066-taiji-pure-grey-color-direction.md)（换色决策与被否方案；原配色决策文档已删除，git 可追溯）
-- [v6-tokens.css](page-design/v6-tokens.css)（V3 纯灰值 SSOT）
+- [`style.css`](../packages/renderer/src/style.css)（V3 纯灰值真值）
 
 ---
 

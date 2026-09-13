@@ -71,7 +71,7 @@ export interface SubagentServiceInit {
 }
 
 // ── 进程单例访问器 ────────────────────────────────────
-// globalThis[Symbol.for] 防 jiti 路径不同致单例分裂。详见 docs/standards.md §7.5。
+// globalThis[Symbol.for] 防 jiti 路径不同致单例分裂。详见 docs/STANDARDS.md §7.5。
 const SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
 
 type ServiceSlot = { current: SubagentService | null };

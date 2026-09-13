@@ -248,7 +248,7 @@ AGENTS.md 文档索引涉及的资产，逐一定性「改/不改/怎么改」�
 |---|---|---|
 | `docs/constraints.json`（+`render-constraints.mjs` 重生成 md） | **改** | 新增 C-pi-12/C-pi-13/C-ext-19/C-proc-08（见 D7-G7）；顺带修既有漂移：C-build-01 的 scope 含精确路径 `tsup.config.ts`，而实装文件在 `packages/runtime/tsup.config.ts`（另 packages/extension-protocol、session-delivery 各一），按 select-constraints 全等匹配规则该 scope 永不命中——改为 `packages/**/tsup.config.ts` 不支持（glob 只允许 `<prefix>/**`），故改 scope 为三个精确路径全列 |
 | `docs/adr/0064-pi-semantic-absorption-layer.md` | **新增** | 按 ADR-0063 模板（H1 + 状态/日期/关联 bullet + 背景 + 决策条）记录四支柱决策；authority 供 C-pi-12/13 引用 |
-| `docs/troubleshooting.md` | **改** | 「pi 行为观察项」5 条既有条目加 PS 编号互链；新增观察项：pattern 引擎大小写选择（PS-01）、reasoning 总开关（PS-02）、set_thinking_level 无 data（PS-03）、steer/nextTurn 消费窗（PS-05/06）、settled 复位序（PS-07）、appendEntry custom 不进上下文（PS-09）；「历史排查规则」新增 2 条：① `closedReason:"gc"` 是统一终态占位非故障（判读指引）；② 模型名大小写漂移致 429（昨天能用今天炸的排查路径） |
+| `docs/TROUBLESHOOTING.md` | **改** | 「pi 行为观察项」5 条既有条目加 PS 编号互链；新增观察项：pattern 引擎大小写选择（PS-01）、reasoning 总开关（PS-02）、set_thinking_level 无 data（PS-03）、steer/nextTurn 消费窗（PS-05/06）、settled 复位序（PS-07）、appendEntry custom 不进上下文（PS-09）；「历史排查规则」新增 2 条：① `closedReason:"gc"` 是统一终态占位非故障（判读指引）；② 模型名大小写漂移致 429（昨天能用今天炸的排查路径） |
 | `docs/extensions/extension-conventions.md` | **改** | 新增「模型引用解析 [MANDATORY]」节：扩展域内字符串→模型身份只允许经 `shared/model-ref.ts assertCanonicalModelRef`（切片 1 U1 产物）；禁裸串拼 `--model`；「Event handler 消息注入」节补「可靠性分级」段：结果语义通知必须走 session-delivery 账本通道（引 C-ext-19），交互注入（steer/followUp）仅限非结果语义 |
 | `TEST-STRATEGY.md` | **改** | §4 回归基线表加一行（pi 语义守卫探针族，来源=本事故对）；「等价性测试双轨」节登记 G5 用例归属（完整基线/凭证机）；文末按惯例追加 topic 段 `[from: pi-boundary-reliability]` |
 | `docs/extensions/logging-conventions.md` | **改**（轻量） | delivery warn 出口接 extensionLogger 的口径一句（切片 1 U4 对接点） |
@@ -331,7 +331,7 @@ scripts/diff-probe-thinking.mjs                          [U7 改目标+接线]
 docs/pi-semantics.json                                   [U7 新增]
 docs/constraints.json (+constraints.md 生成)             [U8]
 docs/adr/0064-pi-semantic-absorption-layer.md            [U8 新增]
-docs/troubleshooting.md / docs/extensions/extension-conventions.md
+docs/TROUBLESHOOTING.md / docs/extensions/extension-conventions.md
 TEST-STRATEGY.md / docs/architecture/context.md / docs/extensions/glossary.md
 docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 ```

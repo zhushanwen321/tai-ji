@@ -16,7 +16,7 @@
  *     - 字母前缀（`api/agent-api` 含 `pi/agent` 子串，纯词法巧合）
  *
  * 文件范围（显式，非 rglob 全仓）：packages/ apps/ scripts/ 源码（.ts/.tsx/.mjs/.cjs/
- * .js/.jsx/.sh/.py）+ AGENTS.md + docs/troubleshooting.md + docs/architecture/data-source-registry.md；
+ * .js/.jsx/.sh/.py）+ AGENTS.md + docs/TROUBLESHOOTING.md + docs/architecture/data-source-registry.md；
  * node_modules/dist/test-results 等生成物目录排除。.md 默认不在范围（三明列文件除外）
  * ——fixtures README / probe 历史报告属时点性历史记录，不属源码。registry 补录裁决
  * （2026-09 design-code-sync round1 F2）：U18 范围声明先于 data-source-registry.md 成为
@@ -37,7 +37,7 @@ const ROOT = join(fileURLToPath(new URL('..', import.meta.url)))
 
 /** 扫描范围：目录根（递归）+ 明列单文件。.md 仅两个明列文件入域。 */
 const RANGE_DIRS = ['packages', 'apps', 'scripts']
-const RANGE_FILES = ['AGENTS.md', 'docs/troubleshooting.md', 'docs/architecture/data-source-registry.md']
+const RANGE_FILES = ['AGENTS.md', 'docs/TROUBLESHOOTING.md', 'docs/architecture/data-source-registry.md']
 
 const SOURCE_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js', '.jsx', '.sh', '.py'])
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'test-results', '.git', 'build', 'release', 'out'])
@@ -85,7 +85,7 @@ export const LAYOUT_LITERAL_EXEMPT = [
     reason: 'resources/pi 资源布局路径（bundled pi 二进制 stage 产物目录，app 资源树非数据布局）',
   },
   {
-    file: 'docs/troubleshooting.md',
+    file: 'docs/TROUBLESHOOTING.md',
     reason: '迁移节：pi.backup-v2-<ts> 备份名、回滚命令行、旧布局沿革描述——迁移语义承载文件',
   },
   {

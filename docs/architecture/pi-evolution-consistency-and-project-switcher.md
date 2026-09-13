@@ -60,7 +60,7 @@ xyz-agent = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket R
 | A3 | bundled pi binary（6 件产物：binary/assets/wasm/theme…） | `apps/electron/resources/pi/`（gitignore，dev 为 symlink → workspace 级 `.pi-binary-cache`） | `prepare-pi-resources.sh`，`PI_VERSION` 默认值手工写（`:14`） | binary 与 npm 包错配 → RPC 协议漂移 |
 | A4 | **CI 下载版本 env** | `.github/workflows/build.yml:47` `PI_VERSION: '0.84.1'` | 手工编辑 | CI 打「JS 0.84.4 + binary 0.84.1」混装包 |
 | A5 | **快照指纹测试基线** | `packages/runtime/scripts/__tests__/gen-builtin-providers.test.ts:104-125`（t10：写死 1220 模型 / deepseek 精确 2 模型） | 手工维护 | 测试红（守卫自身成为派生锚点） |
-| A6 | 手工镜像常量与文档锚点 | `packages/shared/src/constants.ts:58` `KNOWN_PI_API_TYPES`（注释自认「升级时人工 diff」）；`docs/troubleshooting.md:296` 等 | 手工维护 | 类型漂移无检测 |
+| A6 | 手工镜像常量与文档锚点 | `packages/shared/src/constants.ts:58` `KNOWN_PI_API_TYPES`（注释自认「升级时人工 diff」）；`docs/TROUBLESHOOTING.md:296` 等 | 手工维护 | 类型漂移无检测 |
 
 **已发生的失败模式（本次 0.84.4 升级实证，非想象）**：
 

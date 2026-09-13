@@ -116,7 +116,7 @@ streamSink: ctx.mode === "rpc"
 
 `ExtensionMode` 字面量（4 个值：`"tui" | "rpc" | "json" | "print"`）。完整章节 + 进程边界见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md) 第四部分第 8 节。
 
-> xyz-agent 跨层排查（[docs/troubleshooting.md](../troubleshooting.md) 历史排查规则）常涉及 pi extension 行为——extension 的 `ctx.mode`、pi 私有协议（triggerTurn/deliverAs 等）是排查「主 agent 是否续跑」等跨层问题的前提知识。
+> xyz-agent 跨层排查（[docs/TROUBLESHOOTING.md](../troubleshooting.md) 历史排查规则）常涉及 pi extension 行为——extension 的 `ctx.mode`、pi 私有协议（triggerTurn/deliverAs 等）是排查「主 agent 是否续跑」等跨层问题的前提知识。
 
 ## SDK 接口契约
 

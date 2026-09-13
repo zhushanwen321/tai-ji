@@ -4,7 +4,7 @@
 
 ## 决策
 
-以冷蓝 `#4f8ef7`、暗色画布、Inter 作为产品**唯一视觉标准 (single source of truth)**（2026-08-25 字体子决策已 supersede，见 docs/page-design/v6-master-spec.md §4.6），默认主题基调为**暗色优先，亮色为备选**。
+以冷蓝 `#4f8ef7`、暗色画布、Inter 作为产品**唯一视觉标准 (single source of truth)**（2026-08-25 字体子决策已 supersede，见 docs/DESIGN.md §4.6），默认主题基调为**暗色优先，亮色为备选**。
 
 > **2026-08-02 更新**：原始 `docs/page-design/zcode-demo/` 探索稿已删除，视觉规格见 `../page-design/v6-spec-*.html`（15 份 HTML 标注稿）与 `../page-design/v6-master-spec.md`。本 ADR 的视觉方向裁决（冷蓝暗色优先）不变。
 

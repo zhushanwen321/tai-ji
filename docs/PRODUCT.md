@@ -19,7 +19,7 @@ product
 
 太极是一个 AI Agent 桌面工作台。与 Claude Code、Pi 等工具类似，但核心差异在于**专注长任务管理和 SubAgent 并行执行的可视化**。
 
-> **现状锦点（2026-08）**：愿景强调 SubAgent 并行可视化（P4 分屏/P5 任务树/P6 RPC 桥接仍在路上），实际已落地的差异化亮点是 **多 Session/Panel 工作台 + Session Tree/Fork 导航 + AgentRunBlock 过程折叠 + Markdown 增强 + Plugin 扩展骨架**。本文件描述的是愿景态，落地进度见 ARCHITECTURE.md + DESIGN-LOG.md。
+> **现状锦点（2026-08）**：愿景强调 SubAgent 并行可视化（P4 分屏/P5 任务树/P6 RPC 桥接仍在路上），实际已落地的差异化亮点是 **多 Session/Panel 工作台 + Session Tree/Fork 导航 + AgentRunBlock 过程折叠 + Markdown 增强 + Plugin 扩展骨架**。本文件描述的是愿景态，落地进度见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 产品要解决的核心问题：
 1. 当 AI Agent 自动拆分出多个 SubAgent 并行工作时，用户如何直观地看到整体进度？
@@ -32,7 +32,7 @@ product
 
 **太极 · 纯灰水墨工作台**
 
-> 2026-08-02 视觉方向裁决：推翻早期冷蓝暗色定位（ADR-0018），收敛到太极纯灰水墨系。色相决策记录见 [ADR-0066](docs/adr/0066-taiji-pure-grey-color-direction.md)，原子值见 [docs/page-design/v6-tokens.css](docs/page-design/v6-tokens.css)。品牌名「太极」取自阴阳鱼 logo——双鱼咬尾、阴阳相生，隐喻 Agent 协作中人与 AI 的动态平衡。
+> 2026-08-02 视觉方向裁决：推翻早期冷蓝暗色定位（ADR-0018），收敛到太极纯灰水墨系。色相决策记录见 [ADR-0066](docs/adr/0066-taiji-pure-grey-color-direction.md)，原子值见 [`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（值真值；登记对照 [DESIGN.md](DESIGN.md) §4）。品牌名「太极」取自阴阳鱼 logo——双鱼咬尾、阴阳相生，隐喻 Agent 协作中人与 AI 的动态平衡。
 
 三个关键词：**克制**、**周而复始**、**阴阳分明**。
 

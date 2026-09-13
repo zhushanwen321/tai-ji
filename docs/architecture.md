@@ -1,10 +1,10 @@
 # xyz-agent 架构
 
-> 本文件是**系统架构总览入口**：进程拓扑、三层职责、数据流、核心约束的实质说明。逐点决策、迁移记录、子系统细节在 [`architecture/`](architecture/) 子文档中，链接见文末。
+> 本文件是**系统架构总览入口 + design 工作流入口索引**：进程拓扑、三层职责、数据流、核心约束的实质说明。逐点决策、迁移记录、子系统细节在 [`architecture/`](architecture/) 子文档中，链接见文末。（2026-09-13：根目录 ARCHITECTURE.md 速查版并入本文件，git 可追溯。）
 
 ## 一句话定位
 
-基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。引擎由 pi 提供，GUI 核心职责是「让用户高效给 agent 上下文、审查 agent 产出、介入 agent 行为」。完整定位见 [PRODUCT.md](../PRODUCT.md) 与领域术语表 [context.md](architecture/context.md)。
+基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。引擎由 pi 提供，GUI 核心职责是「让用户高效给 agent 上下文、审查 agent 产出、介入 agent 行为」。完整定位见 [PRODUCT.md](PRODUCT.md) 与领域术语表 [CONTEXT.md](CONTEXT.md)。
 
 ## 进程架构
 
@@ -36,13 +36,15 @@
 - **② WebSocket 边界**：主进程用 `ELECTRON_RUN_AS_NODE=1` spawn Runtime 为独立 Node 进程，前端通过 WS 与之双向通信。ServerMessage 流式回推（pi 的 assistant 输出、工具调用、文件变更等）。
 - **③ subagent 引擎进程层**：subagent 执行经 engine-protocol v1（NDJSON stdio）派发到独立引擎 CLI 进程——pi 引擎两层嵌套（subagent-core → `pi-subagent-cli` 引擎 CLI → pi 任务子进程）；zcode 引擎常驻 app-server 子进程（spawn env 覆写 `ZCODE_SESSION_DB_PATH`，会话库隔离 `<engineDataDir>/engines/zcode/session-db/`，不进 ZCode GUI 侧边栏）。设计见 [zcode-engine-appserver-resident.md](architecture/zcode-engine-appserver-resident.md) / [zcode-session-db-isolation.md](architecture/zcode-session-db-isolation.md)，结构导航见 [subagents 架构](extensions/subagents/architecture.md)。
 
+**组合根与启动时序契约**：renderer 经 API Client（`renderer/src/api/`）统一门面访问两条通道，对组件屏蔽走哪条。启动时序必须显式守护：Main createWindow（先）→ runtimeManager.start()（后）→ renderer init → IPC getRuntimePort() → connect WS → 业务就绪。Runtime 重启经 `onRuntimePort` 推新端口触发重连。
+
 ## 渲染进程（renderer）
 
-Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + xyz-ui 组件库。设计系统为太极纯灰暗色（token 值 SSOT：[v6-tokens.css](./page-design/v6-tokens.css)，范式：[v6-master-spec.md](./page-design/v6-master-spec.md)）。
+Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + xyz-ui 组件库。设计系统为太极纯灰暗色（**视觉权威 [DESIGN.md](DESIGN.md)**；token 值真值 = [`../packages/renderer/src/style.css`](../packages/renderer/src/style.css)）。
 
 现行形态是**多包拓扑**：平台无关内核 `packages/core`（headless，stores/domain/composables/transport）+ 跨端组件库 `packages/ui` + 桌面壳 `packages/renderer` + 移动壳 `packages/mobile-renderer`。分层铁律（单向依赖 / core 零 DOM / store 不互 import / 声明式路由表）与各层落点见 **[renderer-package-topology.md](architecture/renderer-package-topology.md)**（现行 SSOT）。
 
-**Session 隔离**：所有涉及特定 session 的消息必须带 `sessionId`，前端三层隔离（store 分区 → 路由层分发 → 组件过滤）。详见 [context.md](architecture/context.md) 与 [ADR-0049](adr/0049-session-isolation-map-partition.md)。
+**Session 隔离**：所有涉及特定 session 的消息必须带 `sessionId`，前端三层隔离（store 分区 → 路由层分发 → 组件过滤）。详见 [CONTEXT.md](CONTEXT.md) 与 [ADR-0049](adr/0049-session-isolation-map-partition.md)。
 
 ## 主进程（main）
 
@@ -50,7 +52,7 @@ Electron 主进程，Node 环境。负责原生生命周期与跨进程编排。
 
 | 模块 | 位置 | 职责 |
 |------|------|------|
-| 窗口管理 | `window/window-manager.ts` + `window-factory.ts` | 多 panel 窗口树、traffic light 安全区（[ADR-0017](adr/archive-digest.md#adr-0017)，已 Superseded，现行 SSOT 见 page-design/traffic-light-layout.md） |
+| 窗口管理 | `window/window-manager.ts` + `window-factory.ts` | 多 panel 窗口树、traffic light 安全区（[ADR-0017](adr/archive-digest.md#adr-0017)，已 Superseded，现行 SSOT 见 [DESIGN.md §11](DESIGN.md)） |
 | Runtime 监管 | `supervisor/runtime-supervisor.ts` | spawn/重启 Runtime 子进程、健康检查、端口发现 |
 | 安全环境 | `supervisor/safe-env.ts` | 环境变量白名单过滤（[shared/constants.ts](../packages/shared/src/constants.ts) SSOT） |
 | 快捷键 | `shortcuts/shortcut-registry.ts` | 全局/窗口快捷键 |
@@ -75,6 +77,28 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 - Runtime 模块架构图（runtime-module-map.md，已删除，git 可追溯）— R9 后快照，各层内部模块 + 依赖铁律
 - Runtime 迁移记录（runtime-migration-progress.md，已删除，git 可追溯）— R0–R9 执行（17 commit）
 
+## 数据流模式
+
+```
+pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
+  → renderer ws-client(收字节) → event-bus(按 type 分发)
+  → api/events.ts(第2层: 抽 payload.sessionId 路由, 无 sid 丢弃)
+  → composables/features/(业务编排) → Pinia store 分区(Map<sessionId>)
+  → Vue 响应式组件
+```
+
+**跨 store 编排在 composable 层（实例）**：⌘K 全局搜索（`useSearch`）聚合 4 源——命令内存（core `command-registry`/`command-store`）+ 文件 WS（core `file-search` 缓存，未命中调 composer domain WS + 超时 race）+ session domain（WS）+ recents（localStorage）。实现位于 core `packages/core/src/domain/new-task-search/`（`search.ts`/`search-jump.ts`/`recents.ts`），2026-09-11 由 renderer 迁入。编排归 composable 非 domain（domain 严格只调 transport+pending，编排跨 store 违反铁律），见 [ADR-0028](adr/0028-search-orchestration-in-composable.md)。
+
+## 关键状态机
+
+| 状态机 | 状态流 | 来源 |
+|--------|--------|------|
+| Session 生命周期 | `create → active/idle → compact → restore → delete`，扁平 `.jsonl` 持久化 | [CONTEXT.md](CONTEXT.md) |
+| Generating | `isGenerating`（pi 处理中）+ `streamingMessage`（当前逐字输出），两者可能不同步 | [CONTEXT.md](CONTEXT.md)「Generating State」 |
+| Message streaming | `message_start → text_delta×N → tool_execution_start/end → agent_end` | [STANDARDS.md](STANDARDS.md) §3.3 |
+| NewTaskFlow | 8 态：`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled` | `useNewTaskFlow.ts` |
+| Plugin 生命周期 | `UNLOADED → LOADING → ACTIVATING → ACTIVE → DEACTIVATING → UNLOADED`（+ CRASHED） | [CONTEXT.md](CONTEXT.md)「Plugin」词条 |
+
 ## 共享类型（shared）
 
 `packages/shared/` 是独立 npm package，三上下文共享。
@@ -91,18 +115,20 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 | 4 | 数据目录隔离：`~/.xyz-agent/` 与 `~/.pi/agent/` 完全隔离 | [ADR-0009](adr/0009-xyz-agent-data-dir-isolation-from-pi.md) |
 | 5 | 路径白名单动态化：禁止硬编码 `~/.xyz-agent`，从 `getConfigDir()` 推导 | 安全规则 |
 | 6 | Runtime services 零 infra 直连，经 ports 接口 | runtime 三层铁律 |
+| 7 | Runtime broadcast 时序竞争：session 级 broadcast 若在 session 建立/激活流程内部发出，会早于 renderer 订阅而丢失——renderer 切换/创建 session 后需立即消费的 session 级状态**必须主动拉取**（`session.getCommands` RPC），不可依赖 broadcast 到达 | [AGENTS.md](../AGENTS.md)「架构约定」 |
+| 8 | 错误统一走 `chatStore.markSessionError(sid, err)` 单一入口：重置 isGenerating + streamingMessage，错误作为 assistant 消息插入聊天流（非顶部 banner） | [AGENTS.md](../AGENTS.md) 关键规则 #3 |
 
 完整规则见 [AGENTS.md](../AGENTS.md)「关键规则」「架构约定」章节。
 
 ## 详细设计文档
 
 - [跨进程架构决策记录](architecture/design.md) — D1–D9 决策与理由（双通道/启动时序/API Client/双维度模型/横切归宿；迁移路线已删，git 可追溯）
-- [领域术语表](architecture/context.md) — Session/Panel/Runtime + v3 UI 结构术语
+- [领域术语表](CONTEXT.md) — Session/Panel/Runtime + v3 UI 结构术语
 
 ## 视觉与交互层
 
-- [设计 Tokens（值 SSOT）](./page-design/v6-tokens.css) — 太极纯灰暗色原子值 · [v6 主规范](./page-design/v6-master-spec.md)
-- [v3 能力设计 spec（归档）](./page-design/archive/v3/README.md) — v6 无对应物的功能/跨区联动设计 SSOT（quota/flow/ask-user/fast-*）
+- **[DESIGN.md](DESIGN.md) — 视觉设计权威**（v6 范式 + token 登记对照 + traffic light 布局；值真值 = [`../packages/renderer/src/style.css`](../packages/renderer/src/style.css)）
+- [v3 能力设计 spec](architecture/v3-specs/README.md) — v6 无对应物的功能/跨区联动设计 SSOT（quota/flow/ask-user/fast-*）
 - 视觉/交互 ADR 0019–0023（见下）
 
 ## 架构决策（ADR）
@@ -123,7 +149,7 @@ Node.js WebSocket 服务，三层架构（端口-适配器模式，[ADR 驱动](
 
 - [内置插件开发指南](plugins/built-in-plugin-guide.md) — plugin 系统使用指南（trusted Worker / sandbox fork 双轨）；架构与协议权威见 [renderer-package-topology.md](architecture/renderer-package-topology.md) §4 与 [extension-gui-protocol.md](architecture/extension-gui-protocol.md)
 - [Subagent 子系统](extensions/subagents/architecture.md) — 5 类包拓扑（subagent-workflow extension / subagent-core / subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli）+ engine-protocol v1（NDJSON stdio，引擎外移独立 CLI 包）
-- **文件树子系统**（FileService + fileTreeStore）— 三层架构（[ADR-0027](adr/0027-fileservice-three-layer.md)）+ 懒加载（[ADR-0026](adr/0026-file-tree-lazy-loading.md)）。runtime FileService 编排（cwd 守门/越界校验/ignore 双模式）→ 前端 fileTreeStore（D-021 per-session 4 facet + setNodeState 原子入口）→ FileView/FileTreeRow 渲染 + DetailPane 预览（禁 v-html）。工程约束见 [NFR.md](../NFR.md) `[from: 2026-06-28-sidebar-project-file-tree §子系统]`
+- **文件树子系统**（FileService + fileTreeStore）— 三层架构（[ADR-0027](adr/0027-fileservice-three-layer.md)）+ 懒加载（[ADR-0026](adr/0026-file-tree-lazy-loading.md)）。runtime FileService 编排（cwd 守门/越界校验/ignore 双模式）→ 前端 fileTreeStore（D-021 per-session 4 facet + setNodeState 原子入口）→ FileView/FileTreeRow 渲染 + DetailPane 预览（禁 v-html）。工程约束见 [constraints.json](constraints.json) `[from: 2026-06-28-sidebar-project-file-tree §子系统]`
 
 ## 演进 / 调研 / 历史
 

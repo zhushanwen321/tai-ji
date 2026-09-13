@@ -2,7 +2,7 @@
 
 > 测试体系 SSOT。AGENTS.md「测试规范」章节是规则载体，本文件补充分层策略 + 回归基线 + mock 策略 + 运行手册。两者互补不冲突。
 >
-> **回归排序按功能分级**：P0 每版全量、P1 每版核心用例、P2 抽样/变更触发、P3 变更触发——分级表见 [docs/feature-priorities.md](docs/feature-priorities.md)（P0-P3 SSOT）。
+> **回归排序按功能分级**：P0 每版全量、P1 每版核心用例、P2 抽样/变更触发、P3 变更触发——分级表见 [docs/FEATURE-PRIORITIES.md](docs/FEATURE-PRIORITIES.md)（P0-P3 SSOT）。
 >
 > **各功能具体测试步骤**（MOCK/非MOCK/Playwright 调用链 + 每步期望输入输出）见 [docs/testing/](docs/testing/) 测试手册（2026-09 并册为 4 册）：
 > - [00-overview.md](docs/testing/00-overview.md) — 总览（双轨制 + Playwright harness + 公共前置 + E2E 常见坑，入口篇必读）+ 手册索引 + real 轨手工手册（RT-01~08）+ real 轨自动化 spec（真 Electron + runtime + pi + LLM，零 mock）
@@ -117,7 +117,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 ### B 层：minimax-m3 VLM 语义对齐（半自动，非 CI gate）
 
-- **机制**：`scripts/visual-capture.mjs` 截目标页面 PNG → 主 agent 用 `subagent` 工具派发 `minimax-token-plan-router/minimax-m3` VLM，对照 `docs/page-design/v6-master-spec.md` 文字描述逐区域检查 → 返回结构化 JSON（regions/verdict/meta）
+- **机制**：`scripts/visual-capture.mjs` 截目标页面 PNG → 主 agent 用 `subagent` 工具派发 `minimax-token-plan-router/minimax-m3` VLM，对照 `docs/DESIGN.md` 文字描述逐区域检查 → 返回结构化 JSON（regions/verdict/meta）
 - **派发模板 SSOT**：[docs/testing/visual/vlm-prompt-template.md](docs/testing/visual/vlm-prompt-template.md) ——minimax-m3 VLM 视觉验证标准化派发模板（三段式 task：背景/目标/验收标准 + 内嵌 JSON schema + 自检检查点。VLM 一次返回合规 JSON 无需人工修正）
 - **定位**：半自动形态，重构期 agent/人触发的验收工具链。失败不阻塞，降级人工肉眼对照。**非 CI gate**（成本 + 非确定性）。建的是机制+模板+首例，非可执行断言
 
@@ -170,7 +170,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 
 ## 5. mock 策略
 
-- **唯一合法入口：`packages/core/src/transport/mock/` 层**（模拟 runtime WS 协议返回，经 `api/index.ts` 门面按 `VITE_MOCK` 切换接入——true 时直接 import `@xyz-agent/core/transport/mock`，不走 transport）。验证：`docs/standards.md §8.1`
+- **唯一合法入口：`packages/core/src/transport/mock/` 层**（模拟 runtime WS 协议返回，经 `api/index.ts` 门面按 `VITE_MOCK` 切换接入——true 时直接 import `@xyz-agent/core/transport/mock`，不走 transport）。验证：`docs/STANDARDS.md §8.1`
 - **禁止**：组件内联硬编码 mock（`const MOCK=[...]`）、panel/composables/lib 静态 fixture、组件直接 import `@xyz-agent/core/transport/mock`
 - **测试 mock**：`vi.mock` api domain；复用 core mock 层的 events/fixtures（如 `run-send-stream.ts` 模拟流式 ServerMessage 序列、`mock-ws.ts` 模拟 WS 生命周期）
 - **例外**：UI 固定枚举常量（如 thinking-levels 6 级）、`__tests__/` 测试 mock 不算违规

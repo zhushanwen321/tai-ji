@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
- * docs/standards.md 重构范式章节（FR4 AC7）存在性断言。
+ * docs/STANDARDS.md 重构范式章节（FR4 AC7）存在性断言。
  * 纯文档 wave 的机器可验 gate：验证「## 10. 重构范式」章节已固化
  * （三段式 / 信号识别表 / 落地要求，对齐 .xyz-harness/2026-08-05-arch-fix-v2/07 §优化 4）。
  */
-const standards = readFileSync(resolve(__dirname, '../../../../docs/standards.md'), 'utf-8')
+const standards = readFileSync(resolve(__dirname, '../../../../docs/STANDARDS.md'), 'utf-8')
 
-describe('docs/standards.md 重构范式章节（FR4 AC7）', () => {
+describe('docs/STANDARDS.md 重构范式章节（FR4 AC7）', () => {
   it('章节存在：## 10. 重构范式', () => {
     expect(standards).toContain('## 10. 重构范式')
   })
@@ -33,7 +33,7 @@ describe('docs/standards.md 重构范式章节（FR4 AC7）', () => {
   it('10.3 落地要求 3 条齐全', () => {
     const section = standards.split('### 10.3 落地要求')[1] ?? ''
     // 3 条：写入 standards.md / 后续重构统一遵循 / review 检查信号
-    expect(section).toContain('范式写入 `docs/standards.md`')
+    expect(section).toContain('范式写入 `docs/STANDARDS.md`')
     expect(section).toContain('统一遵循三段式')
     expect(section).toContain('review 检查新代码')
   })

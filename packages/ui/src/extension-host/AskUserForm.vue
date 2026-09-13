@@ -17,7 +17,7 @@
  * - 多选：value = JSON.stringify(label[])
  * - Other：独立 key `${header}__other`
  *
- * 样式对齐 demo v3（docs/page-design/archive/v3/ask-user/inline-ask-user-demo-v3.html）：
+ * 样式对齐 demo v3（docs/architecture/v3-specs/ask-user/inline-ask-user-demo-v3.html）：
  * 无边框一体化、head 行脉冲点 + 单问题标题(或 tab)、选项 indicator+label+desc 同行流式、
  * Other 卡片化（选中后 label 下方展开输入框）。
  */

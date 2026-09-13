@@ -5,7 +5,7 @@
 /* ============================================================
    xyz-agent Design Tokens · v6 太极（2026-08-02 定稿反写）
    ────────────────────────────────────────────────────────────
-   SSOT: docs/page-design/v6-master-spec.md §4
+   SSOT: docs/DESIGN.md §4
         + .tmp/v6/src/styles/tokens.css（token 真值源，逐字对齐）
         + .tmp/v6/src/composables/useTheme.ts（6 太极主题 entry）
         + .tmp/v6/src/styles/base.css（全局 reset / keyframes / btn 原语）

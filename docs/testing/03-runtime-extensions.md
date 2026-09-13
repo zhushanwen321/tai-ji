@@ -199,7 +199,7 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 
 > [STALE 2026-09-13] 本文撰写于 subagent-workflow 重构前：档位 A 的 L1 harness（`worker-script-builder.ts` + `worker-script-builder-runtime.test.ts`）已随重构并入 host/injectors 而删除，同名等价物不存在（现行源码见 `extensions/universal/subagent-workflow/src/{host,injectors}/`）。仅保留仍然有效的章节：§2 断言价值层级方法论、§3 档位 C real E2E 结论、§4 pi-mono 参考模式、§5 决策树；现存测试覆盖 = `extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`（L1.5）+ `e2e/workflow-thinkinglevel-real.spec.ts`（L2/L3）。
 >
-> **定位**：[TEST-STRATEGY.md](../../TEST-STRATEGY.md) 的分层 SSOT 覆盖「单元/集成/E2E mock 轨/dev 冒烟」，[00-overview.md](./00-overview.md) 覆盖「app 级 real-mode Playwright E2E」。本文补两者之间的空白——**extension（尤其 `extensions/universal/subagent-workflow`）层如何做运行时断言**：从源码字符串断言（L0）一路到真实 LLM（L3）。
+> **定位**：[TEST-STRATEGY.md](../TEST-STRATEGY.md) 的分层 SSOT 覆盖「单元/集成/E2E mock 轨/dev 冒烟」，[00-overview.md](./00-overview.md) 覆盖「app 级 real-mode Playwright E2E」。本文补两者之间的空白——**extension（尤其 `extensions/universal/subagent-workflow`）层如何做运行时断言**：从源码字符串断言（L0）一路到真实 LLM（L3）。
 >
 > **读者**：给 subagent-workflow（或同类 extension）写测试、想把「降级断言」升级为运行时断言、或要做 real LLM 验证的开发者。
 

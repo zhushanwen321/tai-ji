@@ -80,8 +80,8 @@ node scripts/dev-smoke.mjs                                               # exit 
 
 - `docs/adr/0039-chat-messages-shallowref.md` — 消息 shallowRef 决策（性能基线）
 - `docs/adr/0049-session-isolation-map-partition.md` — Map 分区范式 SSOT（含 CR checklist）
-- `docs/standards.md` — §2.2 refCount、§3 聊天 UI 布局/自动滚动/streaming 生命周期、§7 样式规范
+- `docs/STANDARDS.md` — §2.2 refCount、§3 聊天 UI 布局/自动滚动/streaming 生命周期、§7 样式规范
 - `packages/core/src/domain/chat/message-turns.ts` `expandAssistantBlocks` 头注释 — block 渲染顺序 SSOT 契约（contentBlocks 顺序 + 填充点 append-only/text 幂等守卫；原 conversation-stream 设计文档已删，git 可追溯）
 - `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 头注释 — 滚动跟随 INVAR-M4-2′ 权威定义
-- `docs/page-design/v6-tokens.css` + `v6-master-spec.md` — 设计 token 值 SSOT（hook 守卫）
+- `packages/renderer/src/style.css` — 设计 token 值真值（运行时唯一源）+ `docs/DESIGN.md` — 登记对照（frontmatter 投影挂值相等守卫）
 - 代码注释引用的"perf 07 文档"不在 docs/ 下（在 cw harness 目录），以代码注释为准

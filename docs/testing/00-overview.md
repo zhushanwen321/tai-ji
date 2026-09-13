@@ -2,7 +2,7 @@
 
 > 本册是测试手册的**总入口**：测试流程总览（双轨制 / Playwright harness / 公共前置 / E2E 常见坑）+ 文档索引 + real 轨全部内容（手工手册 RT-01~08 + 自动化 spec 范式）。
 >
-> 策略依据见根 [TEST-STRATEGY.md](../../TEST-STRATEGY.md)（测试分层 SSOT）。本册是操作落地。
+> 策略依据见根 [TEST-STRATEGY.md](../TEST-STRATEGY.md)（测试分层 SSOT）。本册是操作落地。
 
 ## 手册索引（2026-09 并册后 4 册）
 
@@ -27,10 +27,10 @@
 3. 更新本册上方索引表
 
 **测试跑挂了？**
-- 看 [TEST-STRATEGY.md §2 运行命令](../../TEST-STRATEGY.md) 确认 cwd（renderer 测试必须从 `packages/renderer` 跑）
+- 看 [TEST-STRATEGY.md §2 运行命令](../TEST-STRATEGY.md) 确认 cwd（renderer 测试必须从 `packages/renderer` 跑）
 - 看 [troubleshooting.md](../troubleshooting.md) 排查 runtime/WS/路径问题
 - E2E 看本册 §6 常见坑
-- 单测满载下间歇 flake（等待/删除/跨进程时序）→ [TEST-STRATEGY.md「测试自身引入的 flake 防规范」](../../TEST-STRATEGY.md)
+- 单测满载下间歇 flake（等待/删除/跨进程时序）→ [TEST-STRATEGY.md「测试自身引入的 flake 防规范」](../TEST-STRATEGY.md)
 
 ---
 
@@ -38,7 +38,7 @@
 
 > 本文档是测试手册的**入口篇**。理解本文的双轨制 + 公共前置后，再读各功能文档（01-05）就能直接上手。
 >
-> 策略依据见根 [TEST-STRATEGY.md](../../TEST-STRATEGY.md)（测试分层 SSOT）。本文档是操作落地。
+> 策略依据见根 [TEST-STRATEGY.md](../TEST-STRATEGY.md)（测试分层 SSOT）。本文档是操作落地。
 
 ## 1. 测试双轨制（核心概念）
 
@@ -293,7 +293,7 @@ mock 用 `sleep(TIMING.xxx)` 模拟异步。常见延迟（`mock/index.ts` TIMIN
 | `fileChangesGap` | 120ms | file_changes 帧 |
 | `switchCmd` | 30ms | session 激活后推 commands |
 
-**对策**：永远用 `expect(...).toBeVisible({ timeout: N })` 等待终态，**禁止 `page.waitForTimeout(固定值)`**。一轮 mock 流式约 3-4 秒，timeout 给 10s 余量。涉及真实子进程/文件系统/跨进程等待的更完整规则（等待机制只读化 / 轮询 + deadline / teardown maxRetries）见 [TEST-STRATEGY.md「测试自身引入的 flake 防规范」](../../TEST-STRATEGY.md)。
+**对策**：永远用 `expect(...).toBeVisible({ timeout: N })` 等待终态，**禁止 `page.waitForTimeout(固定值)`**。一轮 mock 流式约 3-4 秒，timeout 给 10s 余量。涉及真实子进程/文件系统/跨进程等待的更完整规则（等待机制只读化 / 轮询 + deadline / teardown maxRetries）见 [TEST-STRATEGY.md「测试自身引入的 flake 防规范」](../TEST-STRATEGY.md)。
 
 ### 6.2 contenteditable 输入
 

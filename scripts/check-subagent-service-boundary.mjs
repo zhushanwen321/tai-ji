@@ -60,6 +60,9 @@ const ALLOWED_EDGES = new Map([
   ["run-orchestration.ts|ResolvedIdentity", "record-access.ts"],
   // ③ D-R4-8：ResolvedIdentity type-only 单向
   ["workflow-dispatch.ts|ResolvedIdentity", "record-access.ts"],
+  // ④ D-R4-8：ResolvedIdentity type-only 单向（chat-rounds 为第三消费方，
+  //   2026-09-13 补登——源码注释声称已登记但台账漏登，聚合边界守卫显形）
+  ["chat-rounds.ts|ResolvedIdentity", "record-access.ts"],
 ]);
 
 /** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 装配工厂的

@@ -159,7 +159,7 @@ pi 的消息 content 是数组；xyz-agent 侧 `Message.content` 为 `string | S
 
 ### 7.1 Border-radius 约束
 
-三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威见 [v6-tokens.css](./page-design/v6-tokens.css) 与 [v6-master-spec.md](./page-design/v6-master-spec.md)；style.css 的 CSS 变量与 v6-tokens.css 的 token 收录同步由 `.githooks/check_css_token_ssot.py` 机器守卫。
+三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 投影与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器守卫。
 
 ### 7.2 Markdown 文本元素样式规范
 
@@ -272,6 +272,6 @@ Shiki 代码高亮主题与承载容器的底色必须同暗同亮，主题错�
 
 ### 10.3 落地要求
 
-1. 范式写入 `docs/standards.md` 的「重构」章节（本文档即固化产物）
+1. 范式写入 `docs/STANDARDS.md` 的「重构」章节（本文档即固化产物）
 2. 后续重构（B6 / ViewHost / Settings 拆分）统一遵循三段式
 3. review 检查新代码：是否有上述信号 → 建议深模块化，而非继续拆 *Impl 或堆叠 import

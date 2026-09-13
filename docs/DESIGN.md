@@ -1,46 +1,72 @@
-# v6 重构完整规格（2026-08）
-
-> **状态**：权威整合主文档（Master Spec）。整合自 28 份 v6 过程文档 + `.tmp/v6/` 可运行 demo（2026-08-02 最新）。token 值真值固化见 [`v6-tokens.css`](./v6-tokens.css)（自 demo 固化，随仓库提交）。
-> **性质**：视觉语言层 + 前端架构重构的完整设计。授权大刀阔斧，不考虑兼容性。
-> **取代关系**：本文档是 v6 的单一权威源。`v6-spec-*.html` 降级为**视觉标注参考**，与本文档冲突时以本文档 + demo 为准。（`v6-design.md` / `v6-summary.md` 已删除（2026-09-13 收口，残值已并入本文档并标注来源，git 可追溯）；`v6-review-*.md` / `v6-fix-plan.md` 等审查/修复文档已删除，裁决收敛进本文档 §9；v3 期 `design-system.md` 已删除（2026-09-13 收口，活跃裁决并入本文档 §3.2/§5.1/§5.13/§6.1）。）
-> **真相源优先级**：本文档（决策与范式） > [`v6-tokens.css`](./v6-tokens.css)（token 值真值，随仓库提交） > `.tmp/v6/` demo（组件实现活验证） > `v6-spec-*.html`（视觉标注稿，部分已滞后） > 过程文档（审查/修复计划，已收敛进本文档）。
->
-> **2026-08-02 修订**：新增 §3.5 实践原则（8 条，demo 迭代沉淀）；§5.6 状态指示圆点范式范围限缩（SessionList 改用 §3.5.2）；§9 新增 D12/D13/D14 裁决（SessionList 信号编排 / TurnRail 滚动条二合一 / Project 一级导航）。
-> **2026-08-02 审查修订**：spec↔demo 全量对照后修正——P0 内部矛盾统一（TurnRail thumb 色阶 / pulse-accent 时长 / badge 图标 / ChangeSetCard vs GitPanel badge 边界）；P1 跟 demo（send-slot 圆角矩形 / comp-box has-input 兑淡 / UiInput surface-2 / UiCheckbox focus 双环 / composer-bar 6 元素）；demo 新增 landing 页 + useTheme composable + ProjectSwitcher 增删 + 6 太极主题 SystemPage 接通，spec 同步记录；P2 笔误修正（7 tab 补 browser / tab 名统一 / keyframes SSOT 约束 / install-ok soft 底统一等）。
-> **2026-08-02 二次审查修订**：修正 4 处与 demo 真值不符的事实性错误——(1) §6.4 nav 项计数 12→11（demo `SettingsOverlay.vue` NAV 数组实为 11 项）；(2) §5.9 pulse-accent 描述由「opacity 明灭」改为「box-shadow 扩散涟漪」（`base.css:87` 实际是 box-shadow 0%→70%→100%，非 opacity）；(3) §6.1 TurnRail failed 节点色阶——demo 实际用 `warn`（TurnRail.vue:179/195/205），非 spec 声称的 `danger`，改为标注「demo 待对齐 §5.6B」；(4) §4.8 COLOR_TOKENS 计数 18→19（数组实含 19 个，漏算 `--neutral-ico`）；另补 §5.9 SSOT 约束的 3 处现存违反位置 + §6.1 thumb 色阶交叉引用 §3.5.6。
-> **2026-08-02 三次审查修订（subagent 四路并行审查）**：修正 15 处——P0：§3.4 例外计数两类→三类、§10.1 HTML spec 18→15 份+补登 3 个 demo html、附录 A mock 8→9 + 补 common/icons 子目录、§5.1 `.btn-secondary` 补 `solid`、§6.1 TurnMeta pill `bg-surface-2`→`bg-elevated`；P1：§5.11 install-ok 改为如实记录 demo 透明底现状+目标态、§7.2 A4 状态修正（pi 已实现非未消费）、§9 序言修正来源归因（D12-D14 非 review/fix-plan 来源）、§6.1 ChangeSetCard 补 superseded 例外、§6.5 SearchModal 三源→二源；P2：§6.1 ThinkingBlock 60 字符→CSS ellipsis、§6.5 MermaidRenderer 标注 demo 未实现、§10.2 真相源链删除已删除文档层级、§8.4 阶段 C 补说明 refactor 不含。
-> **2026-09-09 修订（reduce-gradient-decoration）**：移除 `--shadow-drawer`（§4.7 token 列表 / §5.5 drawer-main 分隔 / §6.3 一体化生长描述）——drawer-area `overflow-hidden` 裁剪后代 box-shadow，该投影自布局收紧后从未实际可见（死样式）；同时 main-panel 移除浮层投影（`--shadow-2`），分隔由 border + 色差 + 圆角承载，`--shadow-1` 描边保留。§4.1「唯一带 border + shadow」自本修订起指 `--shadow-1` 描边环。
-
 ---
+name: xyz-agent
+description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
+colors:
+  bg: "#131316"
+  surface: "#1f1f22"
+  fg: "#dedee2"
+  muted: "#96969c"
+  border: "rgba(255, 255, 255, 0.07)"
+  accent: "#cfcfd4"
+  success: "#78a87e"
+  warn: "#b79c54"
+  danger: "#bf6b6b"
+typography:
+  sans:
+    fontFamily: "system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: "14px"
+  mono:
+    fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace"
+    fontSize: "13px"
+rounded:
+  sm: "6px"
+  md: "8px"
+  card: "10px"
+  lg: "12px"
+spacing:
+  xs: "4px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "24px"
+components:
+  button-default:
+    backgroundColor: "{colors.accent}"
+    textColor: "#1a1a1c"
+    rounded: "{rounded.md}"
+  button-secondary:
+    backgroundColor: "transparent"
+    textColor: "{colors.fg}"
+    border: "1px solid {colors.border}"
+    rounded: "{rounded.md}"
+  button-ghost:
+    backgroundColor: "transparent"
+    textColor: "{colors.fg}"
+    rounded: "{rounded.md}"
+  button-danger:
+    backgroundColor: "transparent"
+    textColor: "{colors.danger}"
+    rounded: "{rounded.md}"
+---
+
+# xyz-agent 视觉设计系统（太极纯灰 · v6）
+
+> **权威链（2026-09-13 文档资产收口裁决）**：
+> - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等守卫（pre-commit 检查）。
+> - **本文件（docs/DESIGN.md）= 视觉范式权威 + token 登记对照 + AI / impeccable 视觉上下文入口**。范式冲突以本文件为准；值冲突以 style.css 为准，并回修本文件。
+> - 原 `docs/page-design/` 目录整体退役（2026-09-13）：v6-master-spec.md 与 traffic-light-layout.md 的有价值内容已并入本文件，其余文件（v6-tokens.css / v6-spec-*.html / v6-spec-base.css / 各 demo html 等）已删除，git 可追溯。
+> - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)；demo 活验证在 `.tmp/v6/`。
 
 ## §1 背景
 
-### 1.1 项目
+xyz-agent：基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台，通过子进程 RPC 调用 pi（AI coding agent CLI），用户画像是每天 6h+ 与 AI Agent 协作的开发者。
 
-xyz-agent：基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。通过子进程 RPC 调用 pi（AI coding agent CLI）。用户画像：每天 6h+ 与 AI Agent 协作的开发者。
+v6 重构的三个缘由：
+1. **视觉层**：v3 冷蓝暗色设计系统工程化程度不弱，但观感「不够现代、不够简洁」，根因是五个「克制」缺失（对标 Codex/Claude/Linear）。v6 不是换色，是把五原则更彻底地应用到全部页面。
+2. **架构层**：renderer 内部复杂度欠债——useChat 违反 per-session 隔离 ADR-0049、stores 互相 import、Sidebar 上帝组件、settings 与 v6 全屏形态根本冲突，阻碍 plugin 扩展体系落地。
+3. **扩展层**：两套扩展机制并存（pi extension 已实现 / plugin-sdk renderer 零消费），需统一为可承重的 plugin 渲染体系。
 
-### 1.2 为什么要 v6 重构
-
-**视觉层**：v3 冷蓝暗色设计系统工程化程度不弱于竞品（token SSOT、10 主题预设、20 波视觉验收），但观感「不够现代、不够简洁」。根因不是色相，而是五个「克制」缺失（竞品 Codex/Claude/Linear/分析结论）。v6 不是换色，是把五原则更彻底地应用到全部页面。
-
-**架构层**：renderer 内部复杂度欠债——useChat 违反 per-session 隔离 ADR-0049、stores 间互相 import、Sidebar 上帝组件、settings 与 v6 全屏形态根本冲突。这些欠债影响可维护性，且阻碍 plugin 扩展体系落地。
-
-**扩展层**：项目有两套扩展机制（pi extension 已实现 / plugin-sdk 借鉴 VSCode 但 renderer 零消费），需要统一为可承重的 plugin 渲染体系。
-
-### 1.3 授权与时序
-
-- 用户原话：**全面大胆重构，大刀阔斧，不用考虑成本/兼容性，整体不合理可全部重写**
-- 时序：**先架构后视觉**。阶段 0（测试）→ A（整体架构）→ B（renderer 局部）→ C（v6 视觉层）
-- 视觉线与架构线可并行（仅 3 个交叉点：设置全屏 / Drawer 二级 tab / token 变更）
-
-### 1.4 文档现状（为什么需要整合）
-
-v6 过程文档已积累 28 份（30000+ 行），存在三类问题：
-1. **SSOT 与 spec 互相否定**（review 发现）：如 settings shell spec 回退到 modal，而 v6-design 决策是全屏。
-2. **demo（2026-08-02）比 HTML spec 更新**：demo 引入太极阴阳 6 主题、字号上移一档、状态色水墨化、整体明度抬亮，spec 仍是旧冷蓝单主题。
-3. **过程文档（review/fix-plan）的裁决已收敛**，但散落各处，无单一查阅入口。
-
-本文档解决这三个问题：裁决已定稿、token 以 demo 为准、过程结论已吸收。
+用户授权：全面大胆重构，大刀阔斧，不用考虑成本/兼容性。时序：先架构后视觉（阶段 0 测试 → A 整体架构 → B renderer 局部 → C v6 视觉层）。
 
 ---
 
@@ -195,8 +221,8 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ## §4 Design Tokens
 
-> **真相源**：[`v6-tokens.css`](./v6-tokens.css)（2026-08-02 太极·玄定稿值，自 .tmp/v6 demo 固化、随仓库提交）。以下值与该文件逐字对齐。
-> 本节取代 `v6-design.md §2` / `v6-summary.md §3`（两文档已删除，残值并入本文档）与 `v6-spec-tokens.html`（滞后于 demo，仅存作标注规范参考）。
+> **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等守卫保护（pre-commit）；运行时值更新时须同 commit 回写本表。
+> 本节取代 v6-design.md §2 / v6-summary.md §3（两文档已删除，残值并入本文档）与 v6-spec-tokens.html（已删除，2026-09-13 退役，git 可追溯）。
 
 ### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
 
@@ -536,7 +562,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ## §6 分区设计（逐视图：v6 方案）
 
-> 详细视觉标注见 `v6-spec-*.html`（实现细节参考），本节给架构关键决策。
+> v6-spec-*.html 已删除（2026-09-13 退役，git 可追溯）。本节给架构关键决策。
 
 ### 6.1 对话流（assistant 居中 720）
 
@@ -604,7 +630,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 左 nav `w-220px bg-sunken` 无 border-r；右内容区底色 `--bg`（卡片才能浮起），内容列 `max-w-content-max-w`(720) **左对齐**（非居中）
 - nav 选中态见 §5.4（列表项型）；nav-brand `uppercase 0.08em`（例外）
 - **11 个 nav 项**（provider/skill/agent/extension/system-prompt/terminal/preset/worktree/update/system/token-debug），每项 icon + label + 可选 count badge（中性圆点 `bg-surface` + `neutral-dim` mono）；hover 右侧显 chevron（链接提示）。注意：`skill` 项的 key 是 `'skill'`，但 demo 渲染的是 `ResourcesPage`（技能资源管理页），无独立 `SkillPage` 组件
-- 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 下加 12px `neutral-mid` 描述
+- 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
 - **ProviderEdit**：展开就地编辑（手风琴，取代 ProviderEditModal 双层 modal）
 - 表单 label 去 uppercase tracking-wider
 - **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开守卫（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
@@ -779,34 +805,26 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ---
 
-## §10 文档体系与取代关系
+## §10 真相源与取代关系
 
-### 10.1 v6 文档分类（28 份 → 整合后）
-
-| 类别 | 文件 | 整合后状态 |
-|---|---|---|
-| **权威主文档** | **本文档（v6-master-spec.md）** | ✅ 单一权威源 |
-| 可运行参考 | `.tmp/v6/`（demo 项目） | ✅ token 真值与组件实现 |
-| 设计 SSOT | `v6-design.md` | 已删除（2026-09-13，残值并入本文档 §5/§6 并标注来源，git 可追溯） |
-| 设计总览 | `v6-summary.md` | 已删除（2026-09-13，纯索引/摘要无独立残值，git 可追溯） |
-| 架构 SSOT | renderer-target-architecture.md / v6-architecture-refactor.md | 已删除（2026-09-13 docs 清理，git 可追溯；架构细节本文档 §7-§8 摘要承载） |
-| HTML spec（15 份） | `v6-spec-*.html` | 降级为视觉标注参考（部分已滞后于 demo） |
-| HTML demo（3 份） | `v6-demo.html` / `v6-drawer-tabs-demo.html` / `v6-plugin-max-demo.html` | 降级为早期 HTML 探索稿（已被 `.tmp/v6/` Vue demo 取代） |
-| 过程文档 | `v6-review-*.md` / `v6-fix-plan.md` / `v6-review-action-plan.md` | 已删除（裁决已收敛进本文档 §9；UI 演变叙事合并至 `../design-evolution.md`） |
-| 共享 CSS | `v6-spec-base.css` | ✅ 保留（对话流四文件共享） |
-| 输入提案 | `visual-modernization-2026-07.md` | 已删除（内容已被 v6-design 取代，无独立保留价值） |
-
-### 10.2 真相源优先级
+原设计文档目录（page-design）已整体退役（2026-09-13 裁决），本文件承接其有价值内容，成为全仓唯一视觉设计权威。真相源优先级：
 
 ```
-本文档（v6-master-spec.md，决策与范式）
-  > .tmp/v6/ demo（token 真值与组件实现，2026-08-02 最新）
-  > v6-spec-*.html（视觉标注稿，部分滞后）
+style.css（packages/renderer/src/style.css :root，值真值，运行时唯一源）
+  > 本文件（docs/DESIGN.md，范式与 token 登记对照）
+  > .tmp/v6/ demo（组件实现活验证）
 ```
 
-> 原第 4 级「过程文档（review/fix-plan）」已删除，裁决收敛进本文档 §9，无独立真相源层级。
+**冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等守卫，pre-commit 检查）。
 
-**冲突处理原则**：本文档与任何降级文档冲突时，以本文档为准；token 值与 HTML spec 冲突时，以 demo 为准（demo 比 spec 新，含太极主题/字号上移/水墨状态色等演进）。
+### 10.1 终态表（原 28 份 v6 文档分类整合后）
+
+| 终态 | 归宿 |
+|---|---|
+| v6-master-spec.md（§1-§9 + 附录 A/B） | 并入本文件 |
+| traffic-light-layout.md | 并入本文件 §11 |
+| v6-tokens.css / v6-spec-*.html / v6-spec-base.css / page-design 各 demo html / 过程文档（review/fix-plan 等） | 已删除（2026-09-13 退役，git 可追溯；裁决收敛进 §9，UI 演变叙事见 design-evolution.md） |
+| `.tmp/v6/` demo | 保留为组件实现活验证 |
 
 ---
 
@@ -845,3 +863,27 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - [ ] 无无意义渐变（logo/avatar/装饰）
 - [ ] 无硬编码色值（应用 token；stage 底色/模拟外部网页豁免）
 - [ ] class 名正确 ≠ CSS 值正确（逐字核对视觉值）
+
+---
+
+## §11 窗口顶部 Traffic Light 布局
+
+> **本拓扑是 v3 刻意调整形态，不遵循 v6 demo 范式**（原 traffic-light-layout.md 全文并入，2026-08-17 从 AGENTS.md 前端编码规范第 11 条外移）。本节是窗口顶部布局数值的唯一载体——新增或修改任何窗口顶部区域 UI 时，先对照本节数值。
+
+v3 重建采用 zcode-demo 拓扑：base 平铺全屏 → sidebar 透明融合 → main 是唯一 float-panel 浮起。traffic light 靠 **aside-region 顶部留白**兼容，而非旧版 padding-left 避让。**2026-08 二次裁决：本拓扑是刻意调整，不遵循 v6 demo**（PanelHeader 调小至 22px 与 trafficlight 行共线对齐、main-panel 与窗口边框间距收紧至 4px、折叠态 chrome 落入 header 等，出自 8c62f64bc/0251b6d40/860ee6007 等 commit）。此前一次裁决曾按「以 v6 demo 为准」回填 v6 拓扑（38px header / trafficLight {16,26} / p-3 / 52px 安全区），后经用户确认刻意调整被误改，已整体恢复。
+
+### 数值清单
+
+- AppShell `p-1`(4px) 四周统一：上下左右各 4px（紧凑但有呼吸，对称）。注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿保持原生位置不动，用户明确不移动 trafficLightPosition）；折叠态 `!gap-0`（aside 归零，padding 保持 p-1 四周 4px，与展开态一致）
+- `.aside-region` 恒定 `padding-top: 44px`(pt-11)（安全区 + 拉开 trafficlight 行与 LOGO 行间距），**三平台统一，全屏也保留**（mac 全屏 hover 时系统下拉覆盖层会落进这块留白）。AppShell py-1 使 aside 顶在窗口 y=4，红黄绿 y=8~20，安全区让出，与 trafficlight 行（nav 按钮 bottom y27）视觉间距约 12px
+- mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:8}` 放到 macOS 原生左上角（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）；win/linux 自绘圆点 `left:0 top:[4px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 顶在窗口 y=4，故 top-4 = 窗口 y8，与 mac 同位）。圆点 12px，顶理论 y=8 / **实测中线 y≈15.75**（macOS 渲染亚像素偏置，比理论 y14 低 ~2pt）/ 右缘 x=60
+- app-nav-controls（收起侧栏/←/→）浮在 AppShell 层（aside 外，避免折叠态 overflow-hidden 裁剪），**非折叠态** `left:72px top:5px`（按钮中线 y=5+11=16，对齐红黄绿**实测**中线 ~15.75；红黄绿右缘 60 + 12 呼吸），全屏 `left:8px`（320ms 平移与 traffic-light opacity 同步）。**PanelHeader `h-[22px]` 与 trafficlight 行共线对齐**：main-panel 顶=AppShell p-1(4)+border(1)=y5，h-22 → header bottom y27 = nav 按钮 bottom，内容中线 y16 ≈ 红黄绿实测中线 y15.75（三者顶/底/中线全对齐）。右侧 drawer/git 按钮 `size-[22px]` 适配 22 高 header
+- **折叠态** chrome 迁入 P1 PanelHeader 内（header `pl-[88px]` 让位红黄绿右缘 60），chrome 按钮在 header 中线（header h-22 中线 y16 = 红黄绿中线，无高度差）；AppShell 折叠态 `!gap-0`（强制覆盖 gap-3，padding 保持 p-1）
+- 全屏两态：非全屏（traffic light opacity 1，按钮 left:72px）/ 全屏（opacity 0，按钮左移 left:8px）。**无第三态**，mac 全屏 hover 红黄绿由系统提供，应用不渲染。全屏态 TrafficLight 圆点 `opacity-0 pointer-events-none` 成对（review MF-1：隐形圆点仍可命中会劫持 header chrome 点击）
+- win/linux 走 mimic_mac：自绘彩色圆点放左侧模拟 mac，三平台左上视觉统一
+- 唤回侧栏：⌘B + header chrome 按钮（**rail-restore 左缘细条已移除**）
+
+### 相关
+
+- v6-spec-shell.html 已删除（2026-09-13 退役，git 可追溯）——v6 demo/spec 的 38px/16,26/52px 拓扑不适用本实现，属刻意偏离
+- 设计决策记录：[ADR 0017（档案摘要）](./adr/archive-digest.md#adr-0017)（旧版 padding-left 方案，**已 Superseded**，原文 git 可追溯）；8c62f64bc/0251b6d40/860ee6007（刻意调整序列，现版形态来源）

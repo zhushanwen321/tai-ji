@@ -353,7 +353,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 | U5 回归守卫测试 | 在 `packages/runtime/src/infra/__tests__/spawn-env.test.ts` 内固化「契约快照」用例：给定模拟污染父 env（PACKAGED/TOKEN=1 + 正常系统变量）→ 断言输出无 deny 键、必备基座齐全 | 把本案永久钉进测试基线，防止未来重构悄悄放行 | 该测试文件入 CI 常跑集合并绿 | AC2 自动化层 |
 | U6 constraints 登记 | `docs/constraints.json` 新增条目：「runtime 子进程 env 出站契约」scope=[rpc-client.ts, shell-runner.ts, git-executor.ts, terminal-service.ts, relay-registry.ts, plugin-host-process.ts]，执行方式指向 U7 守卫脚本；附「与 ENV_WHITELIST_PREFIXES 关系」说明段；随后 `node scripts/render-constraints.mjs` 再生成 constraints.md | 本项目约束治理的唯一登记处（AGENTS.md 文档索引行），先登记再写码制度 | json 校验过、md 已再生、两条目互引成立 | AC5 |
 | U7 pre-commit 静态守卫 | 新建 `.githooks/check_spawn_env_boundary.py`：扫 `packages/runtime/src` 与 `apps/electron/main` 中 spawn/execFile/fork/pty.spawn/Worker( 调用点，要求相邻 ≤10 行出现 `buildOutboundChildEnv` 或命中脚本内置豁免名单（豁免逐条注释理由：reap-orphan-pi ps 只读、relay-env 探针 :68 手工 env、__tests__ 等）；报错信息给修复指引（import 路径 + U1 清单链接）；注册进 `.githooks/install-hooks.sh` heredoc 并重跑安装（R4） | G3 的机器强制力；静态检查成本低误报可控（豁免白名单兜底） | 带 U 临时文件跑 exit≠0 且输出含行号指引；清理后 exit 0；重装 hook 后对新文件生效 | AC8 |
-| U8 文档收尾 | AGENTS.md「关键规则」补一行 outbound 契约指针（一句 + 文档链接）；`docs/troubleshooting.md` 追加受害案例与排查条目（症状：commit 被 Bundled pi binary not found 挡住） | 制度落地后的可发现性：下一个撞到同类问题的人能 30 秒找到本文档 | 两文档 diff 就位；文中无本对话上下文引用（自包含） | — |
+| U8 文档收尾 | AGENTS.md「关键规则」补一行 outbound 契约指针（一句 + 文档链接）；`docs/TROUBLESHOOTING.md` 追加受害案例与排查条目（症状：commit 被 Bundled pi binary not found 挡住） | 制度落地后的可发现性：下一个撞到同类问题的人能 30 秒找到本文档 | 两文档 diff 就位；文中无本对话上下文引用（自包含） | — |
 
 交付顺序建议：U1+U2 一个 commit（新增模块零行为变化）→ U3+U4+U5 一个 commit（行为收敛，即 B 档完成，跑 AC2/AC4）→ U6+U7+U8 一个 commit（C 档守卫，跑 AC8）。AC1/AC3/AC6/AC7 需要打包产物，随 C 档合入后在打包版上完成闭环验证。
 

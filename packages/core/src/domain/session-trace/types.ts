@@ -1,5 +1,5 @@
 /**
- * session-trace 域类型（设计 docs/page-design/session-trace/design.md §2.1 事实表 + §3.4 渲染模型）。
+ * session-trace 域类型（设计文档 session-trace/design.md（已删除，git 可追溯）§2.1 事实表 + §3.4 渲染模型）。
  *
  * entry 类型全集 = pi 官方 10 种 + xyz-agent 自定义（handoff_marker JSONL 行 / session_end sidecar）。
  * 建模为宽松结构（id/parentId 可选）：pi 的 session 解析不做校验（session-manager.ts

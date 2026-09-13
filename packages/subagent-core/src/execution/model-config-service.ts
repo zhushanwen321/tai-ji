@@ -223,7 +223,7 @@ export class ModelConfigService {
 // ============================================================
 
 // 用 globalThis[Symbol.for] 持有进程单例，避免 jiti 因路径字符串不同加载多份模块
-// 导致单例分裂（详见 docs/standards.md §7.5）。
+// 导致单例分裂（详见 docs/STANDARDS.md §7.5）。
 const MODEL_SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.model-service");
 
 type ModelServiceSlot = { current: ModelConfigService | null };

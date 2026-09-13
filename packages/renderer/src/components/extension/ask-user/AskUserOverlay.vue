@@ -21,7 +21,7 @@
  * getAskUserAnswer 读主 key（label / JSON.stringify(label[])），
  * getAskUserOther 读 `${header}__other`。
  *
- * 样式对齐 demo v3（docs/page-design/archive/v3/ask-user/inline-ask-user-demo-v3.html）：
+ * 样式对齐 demo v3（docs/architecture/v3-specs/ask-user/inline-ask-user-demo-v3.html）：
  * - 无边框一体化：去掉 border-b/border-t 分层，单容器 bg-input 靠间距分区
  * - head 行：脉冲点 + 单问题标题(或 tab)
  * - 选项 inline：indicator + label + description 同行流式，无边框 hover/selected 用 bg

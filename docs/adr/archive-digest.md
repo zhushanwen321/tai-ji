@@ -27,12 +27,12 @@
 <a id="adr-0017"></a>
 ### ADR-0017：macOS Traffic Light Safe Zone + Sidebar Expand Button（Superseded）
 - 结论：v2 方案（PanelBar `padding-left:78px` safe-zone + 左缘 floating pill expand button）已全部废弃；traffic light 改由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{8,8}` 精确控位，唤回走 ⌘B + header chrome 按钮。
-- 去向：被 v6 shell spec（`docs/page-design/v6-spec-shell.html`）+ 折叠态 chrome 落位取代；现行数值 SSOT 见 `docs/page-design/traffic-light-layout.md`。
+- 去向：被 v6 shell spec（`docs/page-design/v6-spec-shell.html`）+ 折叠态 chrome 落位取代；现行数值 SSOT 见 `docs/DESIGN.md` §11。
 
 <a id="adr-0020"></a>
 ### ADR-0020：核心 User Flow 范围（Accepted）
 - 结论：demo 聚焦 5 条核心 flow——深度编织 Flow 2（单 Agent 对话→代码变更审查）+ Flow 3（SubAgent 并行→监控→介入），其余 3 条（冷启动/回退/多任务收尾）入口级轻量展示。
-- 去向：已实现，flow spec 归档于 `docs/page-design/archive/v3/flow-2-code-review/spec.md`、`docs/page-design/archive/v3/flow-3-subagent/spec.md`。
+- 去向：已实现，flow spec 归档于 `docs/architecture/v3-specs/flow-2-code-review/spec.md`、`docs/architecture/v3-specs/flow-3-subagent/spec.md`。
 
 <a id="adr-0030"></a>
 ### ADR-0030：文件匹配算法单一管线复用（composer # 与 SearchModal）（Accepted）

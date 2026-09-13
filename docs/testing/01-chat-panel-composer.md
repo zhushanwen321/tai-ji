@@ -275,7 +275,7 @@ test.describe('新建任务 E2E', () => {
 
 ## 10. 相关文档
 
-- 组件 spec：[docs/page-design/archive/v3/flow-2-code-review/](../page-design/archive/v3/flow-2-code-review/)（如有）
+- 组件 spec：[docs/architecture/v3-specs/flow-2-code-review/](../architecture/v3-specs/flow-2-code-review/)（如有）
 - 状态机源码：[`composables/features/new-task/useNewTaskFlow.ts`](../../packages/renderer/src/composables/features/new-task/useNewTaskFlow.ts)
 - 集成测试：[`__tests__/new-task/`](../../packages/renderer/src/__tests__/new-task/)
 - composer 子组件测试：[01-chat-panel-composer.md](./01-chat-panel-composer.md)
@@ -612,7 +612,7 @@ test.describe('Composer E2E', () => {
 | ⚠️ landing 态 slash 源不同 | landing 态（无 session）slash 命令来自 `settingsStore.skills`（全局 skill 扫描），**不含** builtin/extension 命令（/compact 等）。session 态才含全部。测 builtin 命令必须先激活 session |
 | ❌ mock 不模拟 abort 真实中断 | mock `chat.abort` 只标记 cancelled + 推 complete{stopReason:'aborted'}，不真实中断 pi。abort 的 pi 行为只能非 MOCK 测 |
 | ❌ mock 不模拟 send 失败 | mock `chat.send` 恒成功。失败路径（hook 拦截/WS 断连）只能集成测试验证 |
-| ❌ happy-dom 对 contenteditable 支持有限 | 集成测试（happy-dom）测 contenteditable 用 textContent + dispatch input event，不要依赖真实光标操作（Selection/Range）。见 [TEST-STRATEGY.md §5](../../TEST-STRATEGY.md) |
+| ❌ happy-dom 对 contenteditable 支持有限 | 集成测试（happy-dom）测 contenteditable 用 textContent + dispatch input event，不要依赖真实光标操作（Selection/Range）。见 [TEST-STRATEGY.md §5](../TEST-STRATEGY.md) |
 
 ## 11. 相关文档
 

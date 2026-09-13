@@ -10,19 +10,31 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 ## 文档索引
 
+**重要文档资产（2026-09-13 收口）**：根目录只留 `AGENTS.md` + 2 个 README；一级资产全大写命名收在 `docs/` 下。下表前 8 行是资产登记（读取阶段 + 更新触发）——closeout 文档同步纪律见 dev-flow `flow/acceptance.md` 收尾节；本表即资产清单 SSOT。
+
+| 文档 | 主题 | 谁在什么阶段读 | 什么触发时同 commit 更新 |
+|------|------|---------------|------------------------|
+| [docs/PRODUCT.md](docs/PRODUCT.md) | 产品愿景/用户画像 | tech-design 设计期（产品边界核对） | 产品定位/用户画像/核心场景变化 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构总览 | tech-design reviewer（项目约定提取） | 进程拓扑/分层/数据流/核心约束变化 |
+| [docs/CONTEXT.md](docs/CONTEXT.md) | 领域术语表 | tech-design / design-code-sync（术语对齐） | 新术语/语义漂移/词条消亡 |
+| [docs/DESIGN.md](docs/DESIGN.md) | 视觉设计权威 | impeccable / AI 视觉上下文；改 UI 前必读 | 视觉范式/token 结构/窗口布局变化 |
+| [docs/STANDARDS.md](docs/STANDARDS.md) | 编码规范 | dev-flow 编码期 + CR | 编码规范变化 |
+| [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) | 测试策略 | dev-flow 验收计划 + 写测试前 | 回归基线/测试分层/已知坑变化 |
+| [docs/FEATURE-PRIORITIES.md](docs/FEATURE-PRIORITIES.md) | 功能分级 P0-P3 | tech-design 风险打分 + dev-flow 收尾 | 功能增删/挂掉后果变化 [MANDATORY] |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 问题排查 | 排障时 | 新排障规则/日志路径/常见问题 |
+
+### 主题索引
+
 | 主题 | 文档 |
 |------|------|
-| **功能与用例分级（P0-P3 SSOT）** | [docs/feature-priorities.md](docs/feature-priorities.md)——tech-design 风险打分锚定源 / 测试回归排序依据 / dev-flow 收尾同步登记目标；功能挂掉后果变化须同 commit 更新 |
+| **功能与用例分级（P0-P3 SSOT）** | [docs/FEATURE-PRIORITIES.md](docs/FEATURE-PRIORITIES.md)——tech-design 风险打分锚定源 / 测试回归排序依据 / dev-flow 收尾同步登记目标；功能挂掉后果变化须同 commit 更新 |
 | **架构约束登记表（SSOT）** | [docs/constraints.json](docs/constraints.json)（唯一登记处，机器权威，本身即人读）——全部架构级约束的 id/scope/权威源/执行方式登记处；新增约束先登记再写代码，改 json 后跑 `node scripts/validate-constraints.mjs` 结构校验；CR 动态加载：`node scripts/select-constraints.mjs --base main` |
-| 完整编码规范 / UI 设计演变 / 术语表 | [docs/standards.md](docs/standards.md) · [design-evolution.md](docs/design-evolution.md) · [architecture/context.md](docs/architecture/context.md) |
-| 设计系统（tokens / 原语层 / v6 SSOT / 视觉规格） | [docs/page-design/](docs/page-design/)（v6-tokens.css（值 SSOT，hook 守卫）· v6-master-spec.md · v6-spec-*.html；能力设计 spec 在 `archive/v3/`。禁止创建 `demos/`、`impeccable/` 目录） |
-| 窗口顶部 traffic light 布局数值 SSOT | [traffic-light-layout.md](docs/page-design/traffic-light-layout.md)（v3 刻意调整形态，不遵循 v6 demo） |
+| UI 设计演变史 / 视觉能力 spec | [docs/design-evolution.md](docs/design-evolution.md)（Warm&Soft → v3 → v6 → 太极纯灰）· [docs/architecture/v3-specs/](docs/architecture/v3-specs/)（v6 无对应物的能力设计 SSOT）· [docs/architecture/pi-launch-presets.md](docs/architecture/pi-launch-presets.md) |
 | Renderer 终态包拓扑（现行 SSOT） | [architecture/renderer-package-topology.md](docs/architecture/renderer-package-topology.md)（现行 SSOT：§1 包拓扑 / §2 core 分层；原 renderer-rebuild-architecture.md 已改名，历史文档 renderer-target-architecture / v6-architecture-refactor 已删除，git 可追溯） |
 | pi 边界可靠性（语义吸收层四支柱） | [docs/architecture/pi-boundary-reliability.md](docs/architecture/pi-boundary-reliability.md)（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫；决策记录 [ADR-0064](docs/adr/0064-pi-semantic-absorption-layer.md)，约束登记 C-pi-12 / C-pi-13 / C-ext-19 / C-proc-08） |
 | 功能开发地图（启动新 Phase 前更新） | [docs/architecture/feature-map.md](docs/architecture/feature-map.md)（滚动快照，只留最新一份；原 docs/feature-map/ 已并入 architecture，2026-09-13） |
-| 测试策略 SSOT | [TEST-STRATEGY.md](TEST-STRATEGY.md) + [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑） |
+| 测试细则 | [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑） |
 | Release Notes 写作规范 | 全局规范 SSOT `~/.agents/guide/release-notes.md`（三节结构 / 30 字模糊化 / 双语强制；merge 阶段 5 撰写 notes 前必读）+ 项目特化 [docs/release-notes.md](docs/release-notes.md)（展示位 / release.sh 草稿行为） |
-| 问题排查（日志/诊断/常见问题/历史排查规则） | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Pi Extension 开发 | [docs/extensions/development-guide.md](docs/extensions/development-guide.md)（指南）· [extension-conventions.md](docs/extensions/extension-conventions.md)（强约束）· [logging-conventions.md](docs/extensions/logging-conventions.md)（日志现行 SSOT）· [glossary.md](docs/extensions/glossary.md) · [local-dev-guide.md](docs/extensions/local-dev-guide.md) |
 | Subagent 体系架构（包拓扑 / 协议面 / 机制落点） | [docs/extensions/subagents/architecture.md](docs/extensions/subagents/architecture.md)（现状 SSOT 导航页：5 类包拓扑 · engine-protocol v1 · 关键机制落点表 · 主题文档指针） |
 
@@ -82,9 +94,9 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 **架构机制**：
 
 12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `pr-cr-fix/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
-13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.xyz-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；`DESIGN.md` 保留作历史参考（已 DEPRECATED by ADR-0019）
+13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.xyz-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
 14. **项目 skill 必须自包含 [HISTORICAL]**：`.agents/skills/` 引用的脚本复制到 skill 目录内随 git 跟踪（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink
-15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制穷尽 pi extension 层）**：详见 [docs/troubleshooting.md](docs/troubleshooting.md) 的「历史排查规则」
+15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制穷尽 pi extension 层）**：详见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「历史排查规则」
 
 **Plugin / Builtin extensions**：
 
@@ -92,12 +104,12 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 17. **Builtin pi-extensions 打包内置（现行）**： `@zhushanwen/pi-*` 包 esbuild bundle 后 staged 到 `apps/electron/resources/extensions/` 随应用打包（不走 npm 安装；数量以 `packages/shared/src/mandatory-extensions.json` SSOT 为准，不在此写死）。清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁、都不可卸，组内包数以该 JSON 为准；守卫抛 `builtin_cannot_*`）。[HISTORICAL] 演化：builtin 依赖 → 推荐安装 → mandatory npm → 打包内置（2026-08-12）；「删除打包所需依赖致产物缺失」教训始终适用（pi binary、builtin 扩展包如 `@zhushanwen/pi-system-prompt` 同理）
 18. **子进程 env 出站契约（C-proc-09）**：进程创建点的子 env 必须经 `buildOutboundChildEnv` 构建（deny 清单剥 `XYZ_AGENT_PACKAGED` / `XYZ_RUNTIME_TOKEN`），与 `ENV_WHITELIST_PREFIXES` 入站准入正交——入站管准入、出站管外泄；守卫 `.githooks/check_spawn_env_boundary.py`，设计依据 [docs/architecture/env-propagation-boundary.md](docs/architecture/env-propagation-boundary.md)
 19. **超时默认原则（任务级默认无超时，量级按对象粒度校准）**：subagent turn / workflow `agent()` / 引擎 run 等**任务执行正常路径禁止自带墙钟超时**——用户显式指定（`timeoutMs` / `budgetTimeMs` / watchdog env）才生效，调用方未传就是不限时。必须设防挂死兜底时，量级必须按**被保护对象的粒度**校准：任务级（subagent / workflow run）= 小时级或「无进展检测」（idle / ping，ADR-0047：静默 ≠ 卡死，活跃产出不得判死）；控制面单请求（RPC 帧 / 探针 / 握手）= 秒级；禁止跨粒级挪用（单 turn 分钟级预算 ≠ 整任务总预算）。回收层（dispose / kill / 上界 / idle timer 四族）防挂死兜底允许默认有界（opt-out）——权威裁决见 [crash-forensics-and-watchdog.md 附录 E](docs/architecture/crash-forensics-and-watchdog.md)「正常路径逐点根修 + 回收层统一有界兜底」。[HISTORICAL] 反例：zcode appserver `turnTimeoutMs` 固定 300s 墙钟（`ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS`，2026-09 实测 21% 任务误杀——343s/541s 正常完成的任务被 300s 判死，死后 app-server 继续烧 token；且流式 delta 不刷新计时）。
-20. **pnpm store 布局双向翻转（沙箱 HOME × pnpm store）**：zsw 引擎 worker 等沙箱执行体覆写 HOME，其 pre-commit 内 verify-*.sh 自含 `pnpm install` 会把沙箱侧 store 写进 `node_modules/.modules.yaml` 的 storeDir；本地（正常 HOME）后续 install 判布局过期 → `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 硬崩（pre-commit 随机红，`CI=true` 治标会复发）。护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0）翻转即红并给 [FIX]；恢复：`CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install`（约 6-7s）。根因/排障见 [docs/troubleshooting.md](docs/troubleshooting.md)；引擎侧修复落地后护栏应恒绿，红 = HOME 覆盖回退的验收信号
+20. **pnpm store 布局双向翻转（沙箱 HOME × pnpm store）**：zsw 引擎 worker 等沙箱执行体覆写 HOME，其 pre-commit 内 verify-*.sh 自含 `pnpm install` 会把沙箱侧 store 写进 `node_modules/.modules.yaml` 的 storeDir；本地（正常 HOME）后续 install 判布局过期 → `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 硬崩（pre-commit 随机红，`CI=true` 治标会复发）。护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0）翻转即红并给 [FIX]；恢复：`CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install`（约 6-7s）。根因/排障见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)；引擎侧修复落地后护栏应恒绿，红 = HOME 覆盖回退的验收信号
 21. **看门狗/滚动重启默认不武装（Gate W 数据门，C-proc-19）**：`XYZ_RUNTIME_WATCHDOG_ARMED` 缺失时 runtime watchdog 纯观测（采样进环，无 relief / 无滚动重启 / 无通知）——armed 动作必须显式 env 开启，且武装前置 = V6 soak 水位数据 + 评估器 watermark-daily 趋势复审通过（阈值校准 + 重启循环风险排除），禁未经数据复审先武装（兜底先行掩盖问题）；滚动重启走专用退出码 86 + supervisor 零退避零计数，推迟上限 30min（`XYZ_ROLLING_RESTART_DEFER_LIMIT_MS`）。设计依据 [docs/architecture/crash-forensics-and-watchdog.md](docs/architecture/crash-forensics-and-watchdog.md) §3.2 方案 B / D5
 
 ## 测试
 
-**先读 [TEST-STRATEGY.md](TEST-STRATEGY.md)（分层/mock/回归基线 SSOT）+ [docs/testing/](docs/testing/) 对应功能文档**，复用已有 testid/调用链/踩坑经验。红线：vitest（禁 `node:test` / `tsx --test`，配置在子包 vitest.config.ts，从子包目录运行）；timer 测试用 fake timers；派编码 subagent 时 task 写明测试框架。**三视角缺一不可 [HISTORICAL]**（构建者白盒 + 使用者黑盒 + 观察者形态；每条用例至少一个用户可见 DOM 断言；spec 结构条目 = 渲染断言清单）——细则见 TEST-STRATEGY.md §3。
+**先读 [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md)（分层/mock/回归基线 SSOT）+ [docs/testing/](docs/testing/) 对应功能文档**，复用已有 testid/调用链/踩坑经验。红线：vitest（禁 `node:test` / `tsx --test`，配置在子包 vitest.config.ts，从子包目录运行）；timer 测试用 fake timers；派编码 subagent 时 task 写明测试框架。**三视角缺一不可 [HISTORICAL]**（构建者白盒 + 使用者黑盒 + 观察者形态；每条用例至少一个用户可见 DOM 断言；spec 结构条目 = 渲染断言清单）——细则见 docs/TEST-STRATEGY.md §3。
 
 **用例级耗时报告**：vitest 包的 config 统一配 `reporters: ["default", "junit"]` + `outputFile: { junit: "./test-results/vitest-junit.xml" }`（`test-results/` 已 gitignore），每次 run 自动落盘用例级耗时，慢用例排查用 grep/sort，勿临时加 reporter flag：`grep -o '<testcase classname="[^"]*" name="[^"]*" time="[0-9.]*"' test-results/vitest-junit.xml | sed -E 's/.*classname="([^"]*)" name="([^"]*)" time="([0-9.]+)".*/\3s \1 > \2/' | sort -rn | head -15`。已有自定义 reporters 的包（如 runtime 的 cw-acceptance-markers-reporter）**追加** `junit` 项而非覆盖；v4 json reporter 的文件级 `duration` 恒 null（用例级有值），程序化消费用 junit `time` 属性。示范实现：`packages/subagent-core/vitest.config.ts`；新建 vitest 包默认带上，存量包改动其测试时顺手补。
 
@@ -113,7 +125,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 4. `v-model`（禁 `:value` + `@input`）；独立数据源用 `Promise.allSettled`
 5. 禁止硬编码颜色 / 魔数间距（用 CSS 变量与标准 Tailwind scale）
 6. border-radius 遵循 v3 tokens（`--radius-sm:3px` 默认 / `--radius:8px` / `--radius-lg:12px`，ADR-0019）
-7. **窗口顶部 traffic light 布局**：v3 刻意调整形态（非 v6 demo），全部数值（AppShell p-1 / pt-11 / {x:8,y:8} / h-[22px] 共线等）见 [traffic-light-layout.md](docs/page-design/traffic-light-layout.md)——改窗口顶部 UI 前必读
+7. **窗口顶部 traffic light 布局**：v3 刻意调整形态（非 v6 demo），全部数值（AppShell p-1 / pt-11 / {x:8,y:8} / h-[22px] 共线等）见 [DESIGN.md §11](docs/DESIGN.md)——改窗口顶部 UI 前必读
 8. **reka ScrollAreaViewport 默认 `overflow-x: hidden` [HISTORICAL]**：横向滚动需给 `ScrollArea` 传 `horizontal` prop（`!overflow-x-auto` 覆盖内联；`:deep()` 会破坏 reka Root 渲染顺序）
 
 自动化检查：taste-lint（no-native-html / no-emoji / prefer-v-model 等，`pnpm run lint` + pre-commit）· vue_rules_checker.py（行数/选择器/Tab/原生元素，pre-commit）。

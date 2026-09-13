@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * ProjectSwitcher —— ProjectSwitcher 3A：2 列卡片网格（形态权威 docs/page-design/
- * project-switcher-demo.html 变体 3A 单行 pill）+ 1 步点击切换 + 拖拽/键盘排序（D7/D8）。
+ * ProjectSwitcher —— ProjectSwitcher 3A：2 列卡片网格（形态权威见 git 历史 project-switcher-demo.html 变体 3A 单行 pill，
+ * 原 docs/page-design/ 已退役）+ 1 步点击切换 + 拖拽/键盘排序（D7/D8）。
  *
  * 形态（demo 3A）：单行 pill 卡（26px）= 项目名（截断 + title 全名兜底）+ 会话数徽章；
  * 网格尾部「新建」卡（点击展开内联 Input，Enter/blur 提交、Esc 取消）。

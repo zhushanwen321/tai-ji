@@ -1,7 +1,9 @@
-# xyz-agent 领域术语表
+# xyz-agent 领域术语表（统一语言）
 
 > **关系模型 SSOT**：Project – Session 直接关联（跨目录逻辑分组，cwd 仅展示聚合）见
 > [project-session-model.md](project-session-model.md)（D14 语义修正，2026-08-04）。
+>
+> 2026-09-13：根目录 CONTEXT.md（design workflow 精简统一语言）并入本文件——isActive / Task / 新建任务词条来自该版，其余过时词条（旧 Session 路径、Human Confirm、streamingMessage 现行态）按本文件既有词条为准。
 
 ## 核心概念
 
@@ -16,6 +18,15 @@
 Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同一时刻全局只能绑定到一个 Panel（跨窗口唯一）。空 Panel（sessionId=null）等待用户选择或创建 session。
 
 **代码映射**: 已统一为 `Panel` / `PanelLeaf` / `PanelTree`（2026-06 完成 Pane→Panel 重命名，见 terminology R2）
+
+### Task（任务）
+**「任务」是「会话」的产品化措辞，1:1 同义。** 对用户暴露的概念叫"任务"（更贴近工作意图），系统/代码层统一叫"session"。不存在"一个任务跨多 session"的聚合实体。
+
+### isActive（执行态 SSOT）
+用户视角的「session 在忙」信号。定义：`isGenerating ∨ pendingSend`。UI 层（圆点/状态点/Composer/Panel 守卫）统一消费此信号，不直接用 isGenerating。isCompacting 是独立互斥态（compact 期间不可 steer/abort），不并入 isActive，但 deriveStatus 第 4 参数 isCompacting=true 时也返回 running（视觉态属 running）。实现：`packages/core/src/domain/chat/derive-status.ts`。
+
+### 新建任务（New Task Flow）
+用户从「无活跃会话」进入「准备开聊」的业务动作。终点是 session 发出第一条消息。用户流程 5 步：落地空态 → 选目录 popover → 选分支 popover → 系统原生目录选择器 → 创建分支 modal；对应状态机 8 态（`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled`，`useNewTaskFlow.ts`）。**directory / branch** 是 session 的元信息，非任务本体，显示为 composer 顶部 chip，可随时改。
 
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
@@ -166,7 +177,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 ## v3 UI 结构术语（2026-06 重构）
 
-> 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/page-design/archive/v3/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/page-design/v6-master-spec.md`。
+> 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。
 
 ### Sidebar（侧栏）
 L0/L1。持久容器（非单列表），所有 view 共用。顶部 Logo + 主操作区 → segmented tab（会话|文件）互斥切换 → 子视图列表 → 底部设置/用户。透明融合于 base（无 background）。折叠态 + Overview 入口按钮。

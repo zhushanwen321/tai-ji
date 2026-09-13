@@ -5,7 +5,7 @@
 > **定位**：使用指南（how-to），原在 `docs/architecture/subsystems/plugin/`（2026-09-13 迁出并解散该目录——按 architecture 目录判定标准，「怎么写」不属架构文档）。架构与协议的权威入口：
 > - 协议 SSOT：[extension-gui-protocol.md](../architecture/extension-gui-protocol.md)（五个渲染入口的 GUI 镜像 / §13 决策日志 / §15 挂载现状）
 > - 架构：[renderer-package-topology.md](../architecture/renderer-package-topology.md) §4（ExtensionHost / 挂载点注册表 / contribution schema）
-> - 视觉规格：`docs/page-design/v6-spec-plugin-rendering.html`（组件级权威）与 `docs/page-design/v6-plugin-max-demo.html`（全景 mockup）
+> - 视觉规格：`docs/DESIGN.md`（v6 范式权威；原 spec html 已删除，git 可追溯）
 > - 关键 ADR：ADR-0007 ~ ADR-0013（`docs/adr/`）
 
 ---

@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/page-design/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
+<p align="center"><img src="docs/assets/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
 
 # TaiJi
 
@@ -292,14 +292,14 @@ Two independent release pipelines, decoupled by tag prefix:
 | Document | Content |
 |------|------|
 | [AGENTS.md](AGENTS.md) | Development conventions, key rules, debugging and release discipline |
-| [PRODUCT.md](PRODUCT.md) / [ARCHITECTURE.md](ARCHITECTURE.md) | Product positioning / architecture overview |
-| [docs/standards.md](docs/standards.md) | Coding standards and architecture standards |
+| [docs/PRODUCT.md](docs/PRODUCT.md) / [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Product positioning / architecture overview |
+| [docs/STANDARDS.md](docs/STANDARDS.md) | Coding standards and architecture standards |
 | [docs/page-design/](docs/page-design/) | Design SSOT (`v6-tokens.css` TaiJi pure-gray atomic values + `v6-master-spec.md` paradigm) |
 | [docs/extensions/](docs/extensions/) | Full set of pi extension development guides |
 | [docs/architecture/feature-map.md](docs/architecture/feature-map.md) | Feature planning and phase status |
-| [docs/testing/](docs/testing/) + [TEST-STRATEGY.md](TEST-STRATEGY.md) | Test strategy and per-feature test manuals |
+| [docs/testing/](docs/testing/) + [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) | Test strategy and per-feature test manuals |
 | [docs/adr/](docs/adr/) | Architecture decision records |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Troubleshooting guide |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Troubleshooting guide |
 
 ## License
 

@@ -5,7 +5,7 @@
  * - 请求-响应：getCached（读缓存不请求）/ fetch（hover 触发主动查询）
  * - 动作-ack：configure（启用/禁用/写 cookie）
  *
- * 设计文档：docs/page-design/archive/v3/coding-plan-quota/design.md
+ * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md
  * HANDOFF：.xyz-harness/coding-plan-quota/HANDOFF.md
  */
 import type { NormalizedQuotaRow, QuotaConfigurePayload, QuotaFetchFailureReason } from '@xyz-agent/shared'

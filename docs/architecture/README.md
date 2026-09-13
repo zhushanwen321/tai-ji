@@ -10,7 +10,6 @@
 docs/architecture/
 ├── README.md                        # 本文件（规范说明）
 ├── design.md                        # 跨进程架构决策记录（D1–D9：双通道/启动时序/API Client/双维度模型/横切归宿）
-├── context.md                       # 领域术语表（Session/Panel/Runtime 等）
 ├── feature-map.md                   # 功能开发地图（滚动快照，启动新 Phase 前更新；原 docs/feature-map/）
 │
 │  ── 拓扑与治理 SSOT ──
@@ -52,13 +51,13 @@ docs/architecture/
 
 > [HISTORICAL] 已删除的活文档与去向：`conversation-stream-block-rendering.md`（2026-09-13 删——INVAR-M4-2′ 权威 = `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 头注释，contentBlocks 填充点契约 = `packages/core/src/domain/chat/message-turns.ts` `expandAssistantBlocks` 头注释）；`renderer-rebuild/ws-client-invariants.md` 规格沉入 `packages/core/src/transport/__tests__/ws-client.invariants.test.ts` 头部注释（2026-09-13）；`refactor-2026-08/05-extensions.md`（extension 冻结候选设计，⛔ 解冻后实施依据，非归档）已移至 [`../todo/extensions-refactor-candidates-2026-08.md`](../todo/extensions-refactor-candidates-2026-08.md)（含 2026-09-13 逐项复核状态块）。`history/` 归档目录、`research/` 调研、`architecture-overview` 图源均已删除（归档即删除策略，git 可追溯）。
 
-> ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 能力设计 spec** 在 `docs/page-design/archive/v3/`（v6 无对应物的功能/跨区联动设计 SSOT），设计系统权威文档在 `docs/page-design/` 根（原 design-tokens.md / design-system.md 已删除，残值并入 v6-master-spec.md，git 可追溯）。
+> ADR 统一在 [`../adr/`](../adr/)（索引见其 README.md）。**v3 能力设计 spec** 在 [`v3-specs/`](v3-specs/README.md)（v6 无对应物的功能/跨区联动设计 SSOT）；视觉设计权威 = [`../DESIGN.md`](../DESIGN.md)（2026-09-13 page-design 目录退役后收口并入，git 可追溯）。
 
 ## 三条核心规则
 
 ### 1. 单一入口，不重复内容
 
-`docs/architecture.md` 是「当前架构」唯一入口，**只放索引链接**。
+`docs/ARCHITECTURE.md` 是「当前架构」唯一入口，**只放索引链接**。
 - 改架构 → 改本目录内的具体文档（`design.md` 等）
 - 入口的链接跟随更新，但**不在入口重复正文**
 
@@ -84,9 +83,9 @@ docs/architecture/
 
 | 属于本目录 | 不属于（留 docs/ 其他位置） |
 |-----------|---------------------------|
-| 系统分层 / 模块边界 / 依赖方向 | UI 设计稿（`docs/page-design/`） |
-| 跨进程通信 / 数据流 | 设计规范（`docs/page-design/v6-master-spec.md`） |
-| 架构决策（ADR） | 编码规范（`docs/standards.md`） |
+| 系统分层 / 模块边界 / 依赖方向 | 视觉设计（[`../DESIGN.md`](../DESIGN.md)） |
+| 跨进程通信 / 数据流 | 视觉范式（[`../DESIGN.md`](../DESIGN.md)） |
+| 架构决策（ADR） | 编码规范（`docs/STANDARDS.md`） |
 | 子系统设计 | 使用指南 / how-to（plugin 指南 → `docs/plugins/`，pi extension → `docs/extensions/`） |
 | 架构调研（pi extension 通道参考） | UI 调研（TUI→GUI 映射等，留 `docs/extensions/`） |
 | 迁移 / 重构路线（实施完成后删或压缩） | 竞品分析（`docs/extensions/archive/`） |

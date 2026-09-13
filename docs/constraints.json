@@ -735,7 +735,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "architecture/context.md"
+        "CONTEXT.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -1362,7 +1362,7 @@
         "global"
       ],
       "authority": [
-        "../TEST-STRATEGY.md",
+        "TEST-STRATEGY.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1383,7 +1383,7 @@
         "packages/core/**"
       ],
       "authority": [
-        "../TEST-STRATEGY.md"
+        "TEST-STRATEGY.md"
       ],
       "dimensions": [
         "test-coverage"
@@ -1717,7 +1717,7 @@
         "apps/**",
         "scripts/**",
         "AGENTS.md",
-        "docs/troubleshooting.md"
+        "docs/TROUBLESHOOTING.md"
       ],
       "authority": [
         "../extensions/universal/session-reader/docs/2026-09-10-session-root-discovery-and-env-transparency.md#5-终态",

@@ -10,7 +10,7 @@ name: review-arch-boundary
 - **Electron 侧**：main / preload / renderer / shared 四层
 - **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-layering.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
 
-术语以 `docs/architecture/context.md` 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
+术语以 `docs/CONTEXT.md` 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
 
 ## 输入
 
@@ -55,7 +55,7 @@ task prompt 中必须包含：
    - 前端 ↔ 插件系统通信是否经 WS → server → PluginService 路径（禁止前端直连 Worker）
    - WS 命名约定：Client→Server 用点号（`plugin.xxx`），Server→Client 用冒号 camelCase（`plugin:xxx`）
    - sessionData（plugin per-session KV）是否走 Pi Bridge 的 `pi.appendEntry()` 持久化（区别于 PluginStorage 的 global/workspace scope JSON 文件）
-10. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（术语定义 `docs/architecture/context.md`「v3 UI 结构术语」章节；原 v3 设计稿已删，git 可追溯）：
+10. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（术语定义 `docs/CONTEXT.md`「v3 UI 结构术语」章节；原 v3 设计稿已删，git 可追溯）：
     - L0/L1 结构：**Sidebar**（持久容器）/ **Workspace**（chat view 容器）/ **Overview**（L1 独立 Region，多会话鸟瞰）/ **Search Modal**（⌘K Overlay）
     - **Panel 5 zone**：panel-header / message-stream / progress-zone / composer / git-zone
     - **Side Drawer**（原 Side Inspector）：Panel 联动多 tab 抽屉（文件/终端/子Agent/浏览器），非运行时状态面板

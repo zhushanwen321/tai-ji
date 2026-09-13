@@ -2,7 +2,7 @@
 
 > **一句话结论**：把 subagent 从「任务」（有终态、形态枚举决定复活资格）重构为「会话」（无终态、只有占用与意愿两个正交维度）——状态机收敛为 `running | idle` 两态，任何 record 任何时候都能同 id 续聊（含被取消/被关闭/宿主重启后/zcode 引擎），复杂度从「形态枚举 gate」转移到它该在的「资源生命周期」；同时把主 agent 与 subagent 在 pi 进程 RPC 上的 7 处同型实现收敛为公共包 `@zhushanwen/pi-rpc`，subagent 操作逻辑统一收敛到 Continuation + RecordStore 意图原语两条既有主干。
 >
-> **功能分级**：P0（subagent/workflow 派发，2026-09-12 用户裁决升 P0，docs/feature-priorities.md）。
+> **功能分级**：P0（subagent/workflow 派发，2026-09-12 用户裁决升 P0，docs/FEATURE-PRIORITIES.md）。
 > **风险分**：10/10 = P0 基数 9 + 可逆性 +1（`.state` 磁盘语义变更 + 状态机词汇对外契约变更）+ 新颖度 +1（仓内无「会话永久化 + 引擎中立 transcript 锚」先例）。
 > **代码基线声明**：本设计的事实断言全部基于 **dev-0.9.19 分支**（tip 0bd74b5b2，含 H4「record 持久化收敛」交付形态）；当前 main 尚未含 H4（execution/ 层 132 文件差异），行号引用如无特别说明均指 dev-0.9.19。本分支合并 dev-0.9.19 后行号可能偏移，结构性断言（机制存在性与语义）不受影响。
 

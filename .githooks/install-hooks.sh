@@ -587,15 +587,15 @@ else
 fi
 
 # ============================================================================
-# CSS token SSOT 一致性检查（style.css vs v6-tokens.css）
+# CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值真值）
 # ============================================================================
 
 CSS_SSOT_CHECKER=".githooks/check_css_token_ssot.py"
-CSS_SSOT_FILES="packages/renderer/src/style.css docs/page-design/v6-tokens.css"
+CSS_SSOT_FILES="packages/renderer/src/style.css docs/DESIGN.md"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; then
-    # 仅当 style.css 或 v6-tokens.css 变更时才检查（原 design-tokens.md 已删除，git 可追溯）
-    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/page-design/v6-tokens\.css$" || true)
+    # 仅当 style.css 或 DESIGN.md 变更时才检查（v6-tokens.css 已随 page-design 目录退役，git 可追溯）
+    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/DESIGN\.md$" || true)
     if [ -n "$SSOT_CHANGED" ]; then
         echo -e "${BLUE}[INFO] 运行 CSS token SSOT 一致性检查...${NC}"
 
@@ -607,7 +607,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
 
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
-                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：style.css 含 v6-tokens.css 未收录的 token${NC}"
+                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 投影值与 style.css 不一致${NC}"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
                 exit 1
             fi
@@ -1569,7 +1569,7 @@ fi
 # ============================================================================
 # 数据布局字面量守卫（C-pi-14，设计 §10 U18）
 #   staged 命中守卫范围（packages/ apps/ scripts/ 源码 + AGENTS.md +
-#   docs/troubleshooting.md + 守卫脚本自身）时触发：
+#   docs/TROUBLESHOOTING.md + 守卫脚本自身）时触发：
 #   scripts/check-layout-literals.mjs —— 旧布局 pi/ 兄弟层字面量（join 形态
 #   'pi','agent'|'sessions' 与路径形态 pi/agent|pi/sessions，显式排除 .pi 前缀）
 #   回流即拦截。合法持有（bundled 资源布局/迁移语义/历史证据）集中登记在
@@ -1577,7 +1577,7 @@ fi
 #   全量扫描毫秒级，无增量模式。不设独立 SKIP_* 开关（R1 后惯例，总闸兜底）。
 # ============================================================================
 
-LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/troubleshooting.md scripts/check-layout-literals.mjs)
+LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/TROUBLESHOOTING.md scripts/check-layout-literals.mjs)
 if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/troubleshooting\.md$"; then
     print_section "[数据布局字面量守卫]"
     if [ ! -f "scripts/check-layout-literals.mjs" ]; then
