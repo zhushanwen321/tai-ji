@@ -135,6 +135,32 @@ describe("sweepExpiredZcodeSessions（判龄三要素 + 级联删除）", () => 
   it("db 缺失 / 无超窗条目 → no-op（不抛）", () => {
     expect(sweepExpiredZcodeSessions(path.join(tmpDir, "nope.sqlite"))).toEqual({ swept: 0, keptActive: 0 });
   });
+
+  it("超窗条目超过单批 IN 参数上限（1200 > 500）→ 分批删除仍全清（子表级联全覆盖）", async () => {
+    // IN 子句按批拆分（每批 ≤500 占位符，SQLite 变量上限 32766 兜底）；
+    // 共享单事务——批间任一失败整体回滚，此处验证正常路径批间结果合并。
+    const db = await createDb(dbPath);
+    const now = 3_000_000_000_000;
+    const expiredAt = now - ZCODE_SESSION_TTL_MS - 1;
+    const total = 1200;
+    for (let i = 0; i < total; i++) {
+      insertSession(db, `sess_${i}`, expiredAt);
+      insertChildRows(db, `sess_${i}`);
+    }
+    db.close();
+
+    const result = sweepExpiredZcodeSessions(dbPath, { nowMs: now });
+    expect(result.swept).toBe(total);
+
+    const verify = await openDb(dbPath);
+    try {
+      expect((verify.prepare("SELECT COUNT(*) AS n FROM session").get() as { n: number }).n).toBe(0);
+      expect((verify.prepare("SELECT COUNT(*) AS n FROM message").get() as { n: number }).n).toBe(0);
+      expect((verify.prepare("SELECT COUNT(*) AS n FROM input_history").get() as { n: number }).n).toBe(0);
+    } finally {
+      verify.close();
+    }
+  });
 });
 
 describe("maybeSweepExpiredZcodeSessions（进程级节流，fake timers）", () => {

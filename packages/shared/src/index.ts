@@ -7,6 +7,7 @@ export type {
   RenameMode,
   SystemPromptConfig,
   CommandSourceInfo,
+  DefaultModelSource,
   WorktreeErrorCode, WorktreeUnknownErrorCode, WorktreeEnvelopeCode,
   TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,

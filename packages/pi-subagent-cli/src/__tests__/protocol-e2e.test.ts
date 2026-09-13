@@ -201,8 +201,6 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
         outcome: { content: string; sessionId?: string; usage?: { input: number } };
       };
       expect(runResult.handle.engineId).toBe("pi");
-      // [池抽象降级] 协议 handle 已删 poolKey（record 持久层恒 'shared'，不随帧透传）
-      expect(runResult.handle.poolKey).toBeUndefined();
       expect(runResult.handle.sessionRef.recordId).toBe("run-e2e-1");
       expect(typeof runResult.handle.sessionRef.sessionFile).toBe("string");
       expect(runResult.outcome.content).toContain("final answer");

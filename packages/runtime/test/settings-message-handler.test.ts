@@ -141,7 +141,7 @@ describe('SettingsMessageHandler', () => {
       await handler.handleSettingsMessage(msg('config.setProvider', { providerId: 'p1', name: 'x' }), WS)
       const d = broadcasts.find(b => b.type === 'config.defaults')
       expect(d).toBeDefined()
-      expect(d?.payload).toMatchObject({ defaultModel: 'p1/m1', source: 'provider-change' })
+      expect(d?.payload).toMatchObject({ defaultModel: 'p1/m1', source: 'provider-updated' })
     })
 
     it('deleteProvider 有 newDefault → 广播 config.defaults (source=provider-deleted)', async () => {
@@ -150,7 +150,7 @@ describe('SettingsMessageHandler', () => {
       })
       await handler.handleSettingsMessage(msg('config.deleteProvider', { providerId: 'p1' }), WS)
       const d = broadcasts.find(b => b.type === 'config.defaults')
-      expect(d?.payload).toMatchObject({ defaultModel: 'p2/m2', source: 'provider-change' })
+      expect(d?.payload).toMatchObject({ defaultModel: 'p2/m2', source: 'provider-deleted' })
     })
   })
 
@@ -605,13 +605,13 @@ describe('SettingsMessageHandler', () => {
       expect(broadcasts.filter(b => b.type === 'config.defaults')).toHaveLength(0)
     })
 
-    it('广播内容：source 统一为 provider-change，defaultModel 复合串 provider/modelId', async () => {
+    it('广播内容：source 用合法枚举（setProvider → provider-updated），defaultModel 复合串 provider/modelId', async () => {
       const { broadcasts, handler } = makeHandler({
         setProvider: vi.fn().mockReturnValue({ newDefault: { provider: 'anthropic', modelId: 'claude-opus' } }),
       })
       await handler.handleSettingsMessage(msg('config.setProvider', { providerId: 'anthropic', name: 'x' }), WS)
       const d = broadcasts.find(b => b.type === 'config.defaults')
-      expect(d?.payload).toMatchObject({ defaultModel: 'anthropic/claude-opus', source: 'provider-change' })
+      expect(d?.payload).toMatchObject({ defaultModel: 'anthropic/claude-opus', source: 'provider-updated' })
     })
   })
 

@@ -156,38 +156,58 @@ function listPresentTables(db: SweepSqliteDb): Set<string> {
 }
 
 /**
+ * 单条 IN 子句的占位符参数上限：SQLite 变量上限默认 32766（SQLITE_MAX_VARIABLE_NUMBER），
+ * 超大 session 库单批全量 IN 会越限报错。500 留足量级裕度；分批共享同一事务，原子性与
+ * 原单批形态不变。
+ */
+const DELETE_BATCH_SIZE = 500;
+
+/** 把 ids 切成 ≤size 的批（最后一批可短）。 */
+function chunkIds(ids: readonly string[], size: number): string[][] {
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) batches.push(ids.slice(i, i + size));
+  return batches;
+}
+
+/**
  * [行为保持] 单事务删除序（FK 纪律，原函数 try 段提取，删除顺序与 SQL 逐字保持）：
  * session_id 键子表 → session_task_link 双向（child 删 / parent 置 NULL）→
- * workflow 父键置 NULL → input_history 删 → session 最后删。失败 ROLLBACK 后
- * 原样上抛（已断连等 ROLLBACK 失败时保留原错误）。返回实际删除条数。
+ * workflow 父键置 NULL → input_history 删 → session 最后删。expired 超过
+ * DELETE_BATCH_SIZE 时按批拆分 IN 子句（全部批次共享同一事务——任一批失败整体
+ * ROLLBACK，原子性与原单批形态一致）。失败 ROLLBACK 后原样上抛（已断连等
+ * ROLLBACK 失败时保留原错误）。返回实际删除条数。
  */
 function deleteExpiredSessionsInTx(
   db: SweepSqliteDb,
   expired: readonly string[],
   present: ReadonlySet<string>,
 ): number {
-  const ph = expired.map(() => "?").join(", ");
   db.exec("BEGIN");
   try {
-    for (const table of SESSION_CHILD_TABLES) {
-      if (present.has(table)) db.prepare(`DELETE FROM ${table} WHERE session_id IN (${ph})`).run(...expired);
+    let swept = 0;
+    for (const batch of chunkIds(expired, DELETE_BATCH_SIZE)) {
+      const ph = batch.map(() => "?").join(", ");
+      for (const table of SESSION_CHILD_TABLES) {
+        if (present.has(table)) db.prepare(`DELETE FROM ${table} WHERE session_id IN (${ph})`).run(...batch);
+      }
+      if (present.has("session_task_link")) {
+        db.prepare(`DELETE FROM session_task_link WHERE child_session_id IN (${ph})`).run(...batch);
+        db.prepare(`UPDATE session_task_link SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...batch);
+      }
+      if (present.has("workflow_run")) {
+        db.prepare(`UPDATE workflow_run SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...batch);
+      }
+      if (present.has("workflow_activity")) {
+        db.prepare(`UPDATE workflow_activity SET child_session_id = NULL WHERE child_session_id IN (${ph})`).run(...batch);
+      }
+      if (present.has("input_history")) {
+        db.prepare(`DELETE FROM input_history WHERE session_id IN (${ph})`).run(...batch);
+      }
+      const res = db.prepare(`DELETE FROM session WHERE id IN (${ph})`).run(...batch);
+      swept += res.changes ?? batch.length;
     }
-    if (present.has("session_task_link")) {
-      db.prepare(`DELETE FROM session_task_link WHERE child_session_id IN (${ph})`).run(...expired);
-      db.prepare(`UPDATE session_task_link SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
-    }
-    if (present.has("workflow_run")) {
-      db.prepare(`UPDATE workflow_run SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
-    }
-    if (present.has("workflow_activity")) {
-      db.prepare(`UPDATE workflow_activity SET child_session_id = NULL WHERE child_session_id IN (${ph})`).run(...expired);
-    }
-    if (present.has("input_history")) {
-      db.prepare(`DELETE FROM input_history WHERE session_id IN (${ph})`).run(...expired);
-    }
-    const res = db.prepare(`DELETE FROM session WHERE id IN (${ph})`).run(...expired);
     db.exec("COMMIT");
-    return res.changes ?? expired.length;
+    return swept;
   } catch (err) {
     try {
       db.exec("ROLLBACK");

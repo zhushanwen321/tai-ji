@@ -15,7 +15,7 @@
  *   - enforcement：machine 项 hook 须存在于 .githooks/ / scripts/ / 仓库根（含 "§" 的内联段特例跳过）；
  *     review 项 agent 须存在于 .agents/skills/pr-cr-fix/agents/<agent>.md
  *
- * 退出码：0 成功 / 2 校验失败
+ * 退出码：0 成功 / 2 校验失败（含 JSON 解析失败）
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -114,7 +114,15 @@ function validate(data) {
 
 // ---------- main ----------
 
-const data = JSON.parse(readFileSync(JSON_PATH, "utf-8"));
+let data;
+try {
+  data = JSON.parse(readFileSync(JSON_PATH, "utf-8"));
+} catch (err) {
+  console.error(`[validate-constraints] constraints.json 解析失败：${JSON_PATH}`);
+  console.error(`  原因：${err instanceof Error ? err.message : String(err)}`);
+  console.error("  恢复动作：修复 docs/constraints.json 的 JSON 语法后重跑 node scripts/validate-constraints.mjs");
+  process.exit(2);
+}
 validate(data);
 
 if (errors.length > 0) {

@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ProviderSource, SkillCacheScope, ProviderId } from '@xyz-agent/shared'
+import type { ClientMessage, ClientMessageType, DefaultModelSource, ProviderSource, SkillCacheScope, ProviderId } from '@xyz-agent/shared'
 import type { IConfigService, ISessionService, IModelService, IAuthService } from '../interfaces.js'
 import type { SkillRegistry } from '../services/skill-registry.js'
 import { SCOPED_MODEL_REGEX } from '../services/provider-extras-store.js'
@@ -65,19 +65,19 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
  */
 function reconcileDefaultModelAfterProviderChange(
   ctx: SettingsHandlerContext,
+  source: DefaultModelSource,
   existingNewDefault?: { provider: ProviderId; modelId: string },
 ): void {
   const dm = existingNewDefault ?? ctx.configService.getDefaultModel()
   if (!dm) return
-  // 坑：source: 'provider-change' 不在 shared DefaultModelSource 联合内（协议漂移，设计 D4 待修），
-  // tsc 不报是因为 ServerMessage 泛型默认 T=全 union 时 type/payload 联动约束在 union 实例化下
-  // 丢失（占位成员兜住非法 payload）。修复走合法枚举（provider-updated/provider-deleted 按场景映射），
-  // 或调用点泛型钉死 broadcast<'config.defaults'>(...) 恢复联动校验；不要把 'provider-change'
-  // 加进联合（语义与既有两值重叠，冗余值）。
+  // source 用 shared DefaultModelSource 联合的合法成员，按调用场景映射
+  //（provider-updated=增改/启停/导入，provider-deleted=删除），由本参数的类型在调用点
+  // 强制校验。ServerMessage 大联合实例化下 type/payload 联动约束仍缺失（broadcast 非
+  // 泛型，无法在此钉死单一消息类型），但 source 参数已把非法字面量挡在编译期。
   ctx.broadcast({
     type: 'config.defaults',
     id: ctx.nextPushId(),
-    payload: { defaultModel: `${dm.provider}/${dm.modelId}`, source: 'provider-change' },
+    payload: { defaultModel: `${dm.provider}/${dm.modelId}`, source },
   })
 }
 
@@ -205,7 +205,7 @@ export class SettingsMessageHandler {
     const setResult = await this.ctx.configService.setProvider(providerId, data as Parameters<IConfigService['setProvider']>[1])
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId })
     this.ctx.broadcastProviderList()
-    reconcileDefaultModelAfterProviderChange(this.ctx, setResult.newDefault)
+    reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated', setResult.newDefault)
     return true
   }
 
@@ -213,7 +213,7 @@ export class SettingsMessageHandler {
     const delResult = await this.ctx.configService.deleteProvider(msg.payload.providerId)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId: msg.payload.providerId, deleted: true })
     this.ctx.broadcastProviderList()
-    reconcileDefaultModelAfterProviderChange(this.ctx, delResult.newDefault)
+    reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-deleted', delResult.newDefault)
     return true
   }
 
@@ -225,7 +225,7 @@ export class SettingsMessageHandler {
     const toggleResult = this.ctx.configService.toggleProviderEnabled(providerId, enabled)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId })
     this.ctx.broadcastProviderList()
-    reconcileDefaultModelAfterProviderChange(this.ctx, toggleResult.newDefault)
+    reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated', toggleResult.newDefault)
     return true
   }
 
@@ -237,7 +237,7 @@ export class SettingsMessageHandler {
     const removeResult = await this.ctx.configService.removeProviderByKind(providerId, kind)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId, deleted: true })
     this.ctx.broadcastProviderList()
-    reconcileDefaultModelAfterProviderChange(this.ctx, removeResult.newDefault)
+    reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-deleted', removeResult.newDefault)
     return true
   }
 
@@ -436,7 +436,7 @@ export class SettingsMessageHandler {
       this.ctx.broadcastProviderList()
       // 导入后重选 defaultModel：不传 newDefault → reconcile 自动走 getDefaultModel 兜底
       //（内部 findValidDefaultModel + wasFixed:true 时写回 settings.json）。
-      reconcileDefaultModelAfterProviderChange(this.ctx)
+      reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated')
       // D9（pi-evolution-consistency-and-project-switcher §3.3）：导入成功后 fire-and-forget
       // 刷新远程模型目录（overlay 通道）——导入的 catalog provider 此刻才进 listProviders，
       // 不刷则其模型列表停留在快照（「导入后模型列表不新鲜」的原始场景）。完成后广播新列表
