@@ -2,7 +2,9 @@
 
 本文件是被压缩的**非载荷 pi-ext ADR 档案**：原文件已删除，每号保留一行结论 + 去向，逐号可查。全文见 git 历史（`git log --diff-filter=D -- docs/extensions/adr/` 或对应编号文件名）。
 
-在册 ADR（pi-ext-002 / 011 / 014 / 019 / 021 / 022 / 030 / 032）见同目录原文件。
+在册 ADR（pi-ext-002 / 011 / 021 / 022 / 030 / 032）见同目录原文件。
+
+> **目录定位边界**：本目录是 pi extension 域的**历史 ADR 系列**（pi-ext-NNN 编号，源自旧 xyz-pi-extensions 仓迁移），与全局 [docs/adr/](../../adr/)（NNNN 编号）是两套体系。新 ADR 一律进全局 `docs/adr/`（规则见 [architecture/README.md](../../architecture/README.md)「ADR 规范」），本目录只维护存量、不再新增。
 
 > 注意：本目录早期 ADR 描述的 `subagent-workflow` 源码结构（record-store / session-reconstructor / resource-discovery.ts 等模块）已随引擎化重构演进为 host / injectors / interface 分层 + jsonl-run-store 持久化，文中「代码已消亡」均指现行树中无对应实现，git 历史可追溯。
 
@@ -51,10 +53,20 @@
 - 结论：V5 格式升级（frontmatter 扁平化、gate 深度统一、test_execution schema）只对新 topic 生效，历史 `.xyz-harness/` 旧文件不迁移不兼容——兼容旧格式增加复杂度而收益为零。
 - 去向：已实施完毕（源项目历史决策），纯历史无现行锚点。
 
+<a id="pi-ext-014"></a>
+### ADR-014：专用 Review Agent 模式（Accepted，事实层面 superseded by pi-ext-011）
+- 结论：subagent 满足「模板数量 ≥ 3 + 模板可参数化 + 主 agent 无需理解 prompt 细节」时用独立 agent.md 替代 general-purpose + task prompt——SKILL.md 从 622 行降到 ~186 行，分派上下文省 ~500 行；同时限定 pi-ext-011 的适用边界（subagent ≤ 2、prompt 短、不跨 skill 复用时 011 仍成立）。附带跨平台差异记录：agent.md 的 `model`/`tools` frontmatter 字段在 Pi 中不生效（Claude Code 生效），保留不报错。
+- 去向：事实层面被 pi-ext-011 取代——pr-cr-fix 已将 review agents 内化为 skill 自带 agents（`.agents/skills/pr-cr-fix/agents/`），不再依赖独立 agent 定义文件。
+
 <a id="pi-ext-017"></a>
 ### ADR-017：Todo 使用独立轻量循环而非复用 Goal 的 Loop（Accepted）
 - 结论：todo 实现自己约 50 行的轻量 agent loop（无状态机/无 budget，仅停滞时注入 context），不共享 goal 的 7 态状态机——本质区别（AI 自发轻量追踪 vs 用户驱动正式循环）+ 独立 npm 包隔离 + 复杂度不匹配。
 - 去向：已实现——`extensions/universal/todo/`。
+
+<a id="pi-ext-019"></a>
+### ADR-019：StructuredOutput 独立扩展与 Extension 依赖管理（proposed，已实施演进）
+- 结论：StructuredOutput 拆独立 extension（tool call 机制仿 Claude Code：注册 tool + `terminate: true` 结束 + `before_agent_start` 注入指令 + `turn_end` 未调用时重试提醒），不内嵌 workflow；项目根新增 `extension-dependencies.json` 声明 extension 间依赖（runtime / package / optional 三型）。方案对比否决了内嵌 workflow（无法复用）、改进 prompt + 重试（LLM 不保证返 JSON）、文件中转（并发冲突 + 失败点）。
+- 去向：已实施并演进——structured-output 现役包 `extensions/universal/structured-output/`；依赖登记现行规范在 [extension-conventions.md](../extension-conventions.md)「Extension 依赖管理」（SO peer 精确版本联动规则同节）；workflow 侧接管机制已被 structured-output-redesign 重设计（PI_WORKFLOW_SCHEMA 单参数合成工具，见 AGENTS.md）；引用的 pi-statusline / pi-context-engineering / pi-evolve-daily 包已删除。决策追溯全文见 git 历史。
 
 <a id="pi-ext-020"></a>
 ### ADR-020：Coding-Workflow 依赖 Workflow Extension（Accepted）

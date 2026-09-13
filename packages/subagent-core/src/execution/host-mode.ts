@@ -7,7 +7,7 @@
 // handler 工厂分流、stdio 选择等消费点统一调用。
 //
 // 判定依据见 AGENTS.md「运行时环境区分」章节 +
-// docs/extensions/pi-tui-development-guide.md 第四部分第 8 节。
+// docs/extensions/tui-rendering-pitfalls.md 第四部分第 8 节。
 // ExtensionMode 来自 Pi 源码 packages/coding-agent/src/core/extensions/types.ts:299
 // （dist 中 core/extensions/types.d.ts:207）。
 //

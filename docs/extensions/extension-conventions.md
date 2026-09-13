@@ -3,7 +3,7 @@
 > 本文档整合自 xyz-pi-extensions 项目的 CLAUDE.md，收录 pi extension 开发的**强约束和关键约定**。
 > 完整开发指南（规范红线 + 进阶模式范例）见 [development-guide.md](./development-guide.md)。
 > 日志现行口径（三层通道）见 [logging-conventions.md](./logging-conventions.md)——development-guide §10 的旧 console 口径已由其收敛。
-> TUI 渲染细节见 [pi-tui-development-guide.md](./pi-tui-development-guide.md)。
+> TUI 渲染细节见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md)。
 
 本文档只收录「违反必出 bug」或「[MANDATORY]」级别的约束。通用工程规范（TS 禁 any 等）不在此重复，见项目根 [AGENTS.md](../../AGENTS.md)。本文档所载约束登记于 [docs/constraints.json](../constraints.json)（架构约束登记 SSOT）。
 
@@ -114,7 +114,7 @@ streamSink: ctx.mode === "rpc"
   : undefined,
 ```
 
-`ExtensionMode` 字面量（4 个值：`"tui" | "rpc" | "json" | "print"`）。完整章节 + 进程边界见 [pi-tui-development-guide.md](./pi-tui-development-guide.md) 第四部分第 8 节。
+`ExtensionMode` 字面量（4 个值：`"tui" | "rpc" | "json" | "print"`）。完整章节 + 进程边界见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md) 第四部分第 8 节。
 
 > xyz-agent 跨层排查（[docs/troubleshooting.md](../troubleshooting.md) 历史排查规则）常涉及 pi extension 行为——extension 的 `ctx.mode`、pi 私有协议（triggerTurn/deliverAs 等）是排查「主 agent 是否续跑」等跨层问题的前提知识。
 
@@ -288,7 +288,7 @@ event handler（如 `tool_execution_end`）中注入消息**必须用 `pi.sendUs
 
 **一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约面变更）。
 
-详见：[pi-ext-019](./adr/pi-ext-019-structured-output-extension.md)
+> 决策追溯：初始裁决记录 pi-ext-019（已压缩，见 [adr/archive-digest.md](./adr/archive-digest.md)；structured-output-redesign §7 补记 C 同为 git 历史可追溯）。
 
 ## 禁止使用已废弃的 Pi SDK namespace [MANDATORY]
 

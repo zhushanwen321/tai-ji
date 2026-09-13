@@ -4,7 +4,9 @@
 >
 > 本文档是 [Pi Extension 开发指南 §22 TUI 渲染系统](./development-guide.md#22-tui-渲染系统) 的深度展开，专注「场景 → 怎么做」的可操作经验。
 >
-> 最后更新：2026-06-17
+> **校准基线**：机制断言（含 `tool-execution.ts` / `tui.ts` 行号引用）锚定 2026-06-17 时点的 pi 版本。pi 是外部依赖且持续演进（当前实装版本以根 `package.json` 为准，核对方式见 [extension-conventions.md](./extension-conventions.md)「SDK 接口契约」）——机制性经验（self shell 残影 / visibleWidth / streaming delta 三红线）跨版本有效，**行号级断言引用前须对实装 dist 核实**。
+>
+> 最后更新：2026-06-17（校准基线标注：2026-09-13）
 
 ---
 

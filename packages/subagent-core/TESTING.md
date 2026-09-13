@@ -1,18 +1,19 @@
-# subagent-workflow 测试方法论
+# subagent workflow 域测试方法论
 
-> 本文档记录 `@zhushanwen/pi-subagent-workflow` 的测试分层策略与执行方法，指导后续测试编写。
+> 本文记录 subagent workflow 域（`packages/subagent-core` 的编排执行域 + shell 包 `extensions/universal/subagent-workflow`）的测试分层策略与执行方法，指导后续测试编写。
 > 源自 2026-07-30 修复「所有内置 workflow 100% 崩溃」时的经验沉淀——两个根因 bug 都是
 > 「生成代码从未被真实执行」导致的，光靠字符串断言测不出来。
+> 全局测试策略见仓库根 [TEST-STRATEGY.md](../../TEST-STRATEGY.md)。
 
 ## 测试分层
 
-subagent-workflow 有三层测试，覆盖度逐层提升，执行成本也逐层上升：
+workflow 域有三层测试，覆盖度逐层提升，执行成本也逐层上升：
 
 | 层 | 测试文件 | 验证范围 | 真实性 | 成本 |
 |----|---------|---------|--------|------|
-| **L1 字符串断言** | `worker-script-builder.test.ts` | 生成的 worker 源码**包含**特定子串（函数声明、消息协议字面量） | 最低——只读字符串，从不执行 | 极低（2ms） |
-| **L2 Worker 运行时** | `worker-script-builder-runtime.test.ts` | 生成的 worker 源码在**真实 `node:worker_threads` Worker** 里执行正确（return/throw/agent/abort/workflow 链路） | 中——真实 Worker thread，mock 主线程回发消息 | 低（~100ms） |
-| **L3 Workflow E2E** | `workflows-e2e.test.ts` | 5 个内置 workflow 通过**完整编排链路**（registry→lint→runWorkflow→真实 Worker→脚本→agent/parallel 编排→outcome 聚合） | 高——唯一 mock 的是 LLM 本身（AgentRunner） | 中（~2s） |
+| **L1 字符串断言** | `src/orchestration/__tests__/worker-script-builder.test.ts` | 生成的 worker 源码**包含**特定子串（函数声明、消息协议字面量） | 最低——只读字符串，从不执行 | 极低（2ms） |
+| **L2 Worker 运行时** | `src/orchestration/__tests__/worker-script-builder-runtime.test.ts` | 生成的 worker 源码在**真实 `node:worker_threads` Worker** 里执行正确（return/throw/agent/abort/workflow 链路） | 中——真实 Worker thread，mock 主线程回发消息 | 低（~100ms） |
+| **L3 Workflow E2E** | shell 包 `extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts` | 5 个内置 workflow 通过**完整编排链路**（registry→lint→runWorkflow→真实 Worker→脚本→agent/parallel 编排→outcome 聚合） | 高——唯一 mock 的是 LLM 本身（AgentRunner） | 中（~2s） |
 
 ### 为什么需要三层
 
@@ -25,7 +26,7 @@ subagent-workflow 有三层测试，覆盖度逐层提升，执行成本也逐�
 
 ## L1：字符串断言（快速守护）
 
-文件：`packages/subagent-core/src/orchestration/__tests__/worker-script-builder.test.ts`
+文件：`src/orchestration/__tests__/worker-script-builder.test.ts`
 
 **用途**：快速验证生成的 worker 源码结构——注入了哪些全局函数、消息协议字面量、postMessage 防御包装。
 
@@ -40,7 +41,7 @@ expect(script).toMatch(/_safePost[\s\S]*?try \{ _parentPort\.postMessage\(msg\)/
 
 ## L2：Worker 运行时执行（核心回归防线）
 
-文件：`packages/subagent-core/src/orchestration/__tests__/worker-script-builder-runtime.test.ts`
+文件：`src/orchestration/__tests__/worker-script-builder-runtime.test.ts`
 
 **用途**：起真实的 `node:worker_threads.Worker`，执行 `buildWorkerScript(userScript)` 的产物，验证生成的代码在真实 Worker 线程里行为正确。
 
@@ -83,7 +84,7 @@ new Worker(buildWorkerScript(   →   执行注入的 infra + 用户脚本
 
 ## L3：Workflow E2E（完整编排链路）
 
-文件：`extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`
+文件：shell 包 `extensions/universal/subagent-workflow/src/__tests__/workflows-e2e.test.ts`
 
 **用途**：验证 5 个内置 workflow（parallel/chain/map-reduce/scatter-gather/review-fix-loop）通过真实的 `runAndWait()` 编排链路执行成功。
 
@@ -160,11 +161,9 @@ pnpm typecheck
 
 1. **必须调 LLM**：workflow 内部 `agent()` → `executeAgentCall` → spawn pi 子进程 → 调 model provider API。无法绕过（无"不调 LLM"的钩子）。
 2. **需要 API key + 扩展安装 + provider 配置**：CI 环境不可控。
-3. **本仓库无先例**：整个 monorepo 没有任何测试起真实 pi 子进程。现有的 `.xyz-harness/subagent-e2e-test-prompt.md` 是人工手动执行的 E2E，非自动化。
+3. **本仓库无先例**：整个 monorepo 没有任何测试起真实 pi 子进程。人工手动执行的 E2E 范式不放进自动化 CI。
 
 L3（mock LLM runner）是最佳平衡：验证除 LLM 本身外的**全部**编排链路（含真实 worker thread、真实脚本执行、真实 runWorkflow 生命周期），唯一 mock 的是不可控的 LLM 调用。两个历史 bug（作用域 + Promise）都能被 L3 抓到——它们都是编排层 bug，不是 LLM bug。
-
-如需真实 LLM 的端到端验证，走人工 E2E（`.xyz-harness/subagent-e2e-test-prompt.md` 范式），不放进自动化 CI。
 
 ## 标记说明
 

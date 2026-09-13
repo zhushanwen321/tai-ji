@@ -945,49 +945,19 @@ Pi 的 extension loader 使用 [jiti](https://github.com/unjs/jiti) 加载 TypeS
 
 ## 10. 日志与诊断输出 **[规范]**
 
-Pi Interactive 模式下，extension 的 `console.*` 输出直接写入 pi 主进程 stdout/stderr，会干扰 TUI 渲染并泄漏到用户输入区域，且 pi 既不捕获也不落盘 extension 的 console 输出。**必须严格遵守以下规范。**
+> **现行口径 SSOT = [logging-conventions.md](./logging-conventions.md)**（三层通道分类 + `@zhushanwen/pi-extension-logger` 用法 + 迁移指南 + 事故教训）。本节只留红线速查，细节、示例与迁移对照以该文档为准。
 
-> **现行口径 SSOT = [logging-conventions.md](./logging-conventions.md)**（三层通道分类 + `@zhushanwen/pi-extension-logger`）。本节为其摘要——历史版本允许的 `console.warn`/`console.error` 带前缀输出已被收敛为禁止，见该文档迁移指南。
+背景一句话：extension 的 `console.*` 直写 pi 主进程 stdout/stderr——TUI alternate-screen 下 raw stderr 越过渲染层污染 input 区，且 pi 既不捕获也不落盘。
 
-### 10.1 输出通道选择（三层通道）
+**红线速查**（详释见 logging-conventions「关键约束」）：
 
-每条日志按**受众**路由，选择唯一正确的通道：
+1. **禁止一切裸 `console.*`**（`log` / `info` / `warn` / `error`），无论是否本次引入，必须正面修复，统一接 `@zhushanwen/pi-extension-logger`
+2. **日志按受众选唯一通道**：AI 实时感知 = tool result / `return { block: true, reason }`；事后排查 = `logger.warn`/`error` → `pi.appendEntry`；开发者调试 = `logger.debug` 文件日志（`XYZ_AGENT_DEBUG=1` 全量 / `XYZ_AGENT_EXT_LOG=1` INFO 级）；用户操作反馈 = `ctx.ui.notify`
+3. **禁止新增 per-extension 的 `PI_*_DEBUG` / `<EXT>_DEBUG` 变量**——开关统一走上一条的两个变量
+4. **不可恢复错误用 `throw`**——由 Pi 框架的 `ExtensionRunner.onError()` 捕获并渲染到 TUI，不用 console 输出
+5. 跨 session 异步使用 `ctx.ui.notify` 时，用 `safeNotify()` 包装防 stale context 错误（见 [§11.1](#111-stale-context-检测)）
 
-| 场景 | 正确做法 | 错误做法 |
-|------|---------|----------|
-| AI 需实时感知（hook block、tool 执行错误） | tool result / `return { block: true, reason }`（pi 原生链路） | 经 logger 转发 |
-| 事后排查（内部降级、竞态、IO 清理失败） | `logger.warn` / `logger.error` → `pi.appendEntry` custom entry | `console.warn("[ext] ...")`、`ctx.ui.notify` |
-| 开发者调试 | `logger.debug` → 文件日志（`XYZ_AGENT_DEBUG=1` DEBUG 全量 / `XYZ_AGENT_EXT_LOG=1` INFO 级） | 自造 `PI_*_DEBUG` 环境变量 + console |
-| 用户操作反馈（用户主动触发命令的结果） | `ctx.ui.notify(msg, "info"/"warning"/"error")` | 诊断信息用 notify（刷屏） |
-| Worker 线程 | 拦截 console.* → 收集数组 → postMessage 回传 | 直接 console.* 输出 |
-
-### 10.2 console 方法使用规则
-
-**[规范]** 禁止一切裸 `console.*`（`log` / `info` / `warn` / `error`），无论是否是本次引入的，必须正面修复，统一接 `@zhushanwen/pi-extension-logger`：
-
-1. **禁止 `console.log` / `console.info`** — 输出到 stdout，Interactive 模式下泄漏到用户输入区域，干扰 TUI 渲染
-2. **禁止 `console.warn` / `console.error`** — raw stderr 在 TUI alternate-screen 下越过渲染层污染 input 区，且不落盘。历史「带 `[ext-name]` 前缀的 warn/error」方案已废弃（前缀只解决来源区分，不解决污染与不落盘）
-3. **不可恢复错误用 `throw`** — 由 Pi 框架的 `ExtensionRunner.onError()` 捕获并渲染到 TUI，比手动 console 输出更规范
-4. **生产默认静默** — 正常运行时不输出诊断信息；文件日志双开关：`XYZ_AGENT_DEBUG=1`（DEBUG 全量）与 `XYZ_AGENT_EXT_LOG=1`（INFO 级落盘，xyz 托管环境由 runtime spawn 时注入 + 7 天清理）；禁止新增 per-extension 的 `PI_*_DEBUG` / `<EXT>_DEBUG` 变量
-5. **重复警告去重** — 可能反复触发的警告用 `Set` 去重，防止刷屏
-
-### 10.3 ctx.ui.notify() 使用
-
-`ctx.ui.notify(msg, type?)` 是 Pi SDK 提供的唯一正规用户通知 API：
-
-```typescript
-ctx.ui.notify("Goal paused. Use /goal resume to continue.", "info");
-ctx.ui.notify("Token budget 90% used — start wrapping up.", "warning");
-```
-
-**注意事项：**
-- RPC/JSON 模式下为**空操作**（Pi runner 中 `notify: () => {}`）
-- Interactive 模式渲染到 TUI chat 区域
-- 跨 session 异步使用时，用 `safeNotify()` 包装防止 stale context 错误（参见 [§11.1](#111-stale-context-检测)）
-
-### 10.4 Worker 线程日志拦截
-
-Worker 线程（`worker_threads` / `child_process`）中的 `console.*` 输出直接写 stderr，不受 Pi 管理。必须拦截并回传主线程：
+**Worker 线程例外**：Worker 内的 `console.*` 直写 stderr、不受 Pi 管理，必须拦截并回传主线程（此范例 logging-conventions 不含，留本节）：
 
 ```typescript
 // Worker 脚本中拦截 console.*
@@ -1368,7 +1338,7 @@ pi uninstall my-extension
 
 ## 22. TUI 渲染系统
 
-> 完整的 TUI 渲染避坑指南（渲染管线/shell 策略、ANSI/宽度/截断、键盘交互/overlay、流式更新/性能）见 [Pi TUI 扩展开发避坑指南](./pi-tui-development-guide.md)。该指南基于 `@zhushanwen/pi-subagents` 20+ 个 TUI 修复 commit 的实战总结，对照无 bug 的参考实现 `pi-subagents` 及 Pi 渲染引擎源码交叉验证，专注「场景 → 怎么做」的可操作经验。本节列基础要点与组件系统。
+> 完整的 TUI 渲染避坑指南（渲染管线/shell 策略、ANSI/宽度/截断、键盘交互/overlay、流式更新/性能）见 [Pi TUI 扩展开发避坑指南](./tui-rendering-pitfalls.md)。该指南基于 `@zhushanwen/pi-subagents` 20+ 个 TUI 修复 commit 的实战总结，对照无 bug 的参考实现 `pi-subagents` 及 Pi 渲染引擎源码交叉验证，专注「场景 → 怎么做」的可操作经验。本节列基础要点与组件系统。
 
 ### 22.1 颜色使用 **[指南]**
 
@@ -1501,7 +1471,7 @@ const streamSink = ctx.mode === "rpc"
 service.initSession({ pi, streamSink });
 ```
 
-完整章节（含 `ExtensionMode` 字面量定义、进程边界、与 spawn 参数的区别）：见 `./pi-tui-development-guide.md` 第四部分第 8 节。
+完整章节（含 `ExtensionMode` 字面量定义、进程边界、与 spawn 参数的区别）：见 `./tui-rendering-pitfalls.md` 第四部分第 8 节。
 
 ### 22.7 实时进度渲染 🟠
 
