@@ -3,8 +3,8 @@
 // 覆盖（impl-plan §2.2 必写死条目）：
 //   同步成员形态映射（capabilities 直读 / listModels 三态 / validateModel 三态与
 //   成员不实现）/ run 帧映射（task 子集收窄 + ctx 承载）/ RunContext 反向通道映射 /
-//   abort → cancel + 3s 收敛（收敛与超时杀链两路）/ read dataDir 必填 /
-//   运行中失败合成 outcome vs prepare 期失败 reject 的分界。
+//   abort → cancel + 收敛杀链兜底窗（窗口内收敛与超时杀链两路 + 兜底窗量级常量锚）/
+//   read dataDir 必填 / 运行中失败合成 outcome vs prepare 期失败 reject 的分界。
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient } from "../engine-client.ts";
-import { RemoteEngine, type RemoteEngineManifestSnapshot } from "../remote-engine.ts";
+import {
+  CANCEL_SETTLE_KILL_CHAIN_GRACE_MS,
+  RemoteEngine,
+  type RemoteEngineManifestSnapshot,
+} from "../remote-engine.ts";
 import { SubagentStream } from "../../../stream-sink.ts";
 import { getSubagentSessionDir } from "../../../path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
@@ -73,6 +77,7 @@ interface Fixture {
 function makeEngine(
   manifestOverrides: Partial<RemoteEngineManifestSnapshot> = {},
   clientOverrides: Partial<ConstructorParameters<typeof EngineClient>[0]> = {},
+  engineOverrides: Partial<ConstructorParameters<typeof RemoteEngine>[0]> = {},
 ): Fixture {
   const client = new EngineClient({
     engineId: "fake",
@@ -99,6 +104,7 @@ function makeEngine(
       },
       ...manifestOverrides,
     },
+    ...engineOverrides,
   });
   return { engine, client, cleanup: () => client.dispose() };
 }
@@ -323,33 +329,49 @@ describe("RemoteEngine run 帧映射", () => {
   });
 });
 
-describe("abort 分级（cancel 帧 + 3s 收敛窗口）", () => {
-  it("signal abort → cancel；引擎收敛（终态应答在窗口内）→ aborted 终态正常返回", async () => {
+describe("abort 分级（cancel 帧 + 收敛杀链兜底窗）", () => {
+  it("signal abort → cancel；引擎主动收敛（终态应答在兜底窗内）→ 引擎侧 abort 终态正常返回（不触发杀链）", async () => {
     const controller = new AbortController();
     const { engine, cleanup } = makeEngine(undefined, {
-      args: [FAKE_ENGINE, "--cancel-settle", "1", "--run-hang", "1"],
+      // run 受理后 delay 挂起（不与 --run-hang 组合——run-hang 丢弃 run 帧致
+      // activeRun 恒 null，cancel-settle 永不生效，用例会退化为杀链路径）；
+      // cancel 到达 → cancel-settle 同步回 abort 终态（引擎侧收敛，杀链不触发）。
+      args: [
+        FAKE_ENGINE,
+        "--cancel-settle", "1",
+        "--run-actions", JSON.stringify([{ op: "delay", ms: 60_000 }]),
+      ],
     });
     const { ctx } = makeCtx({ signal: controller.signal });
     const runPromise = engine.run({ prompt: "p" }, ctx);
     setTimeout(() => controller.abort(), 100);
     const result = await runPromise;
-    expect(result.outcome.error).toContain("engine_run_failed");
+    expect(result.outcome.error).toContain("engine_run_failed: aborted (fake)");
     expect(result.outcome.exitCode).toBeNull(); // 被信号杀死判据
     expect(result.handle.data.engineId).toBe("fake");
     await cleanup();
   }, 15_000);
 
-  it("cancel 3s 未收敛 → 杀链 → run 合成 abort 终态（不 reject，EnginePort 契约）", async () => {
+  it("[S1 P1] 收敛杀链兜底窗常量 = 30s（pi 停轮收敛实测 15s 的 2× 量级——量级校准回归锚）", () => {
+    // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制面单请求量级，被误用为
+    // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被组杀（S1 主路径 8/8 失败）。
+    // 本断言锚定兜底窗按被保护对象粒度（任务级）校准，防止再被「优化」回秒级。
+    expect(CANCEL_SETTLE_KILL_CHAIN_GRACE_MS).toBe(30_000);
+  });
+
+  it("cancel 未收敛（注入短兜底窗）→ 杀链 → run 合成 abort 终态（不 reject，EnginePort 契约）", async () => {
     const controller = new AbortController();
-    const { engine, client, cleanup } = makeEngine(undefined, {
-      args: [FAKE_ENGINE, "--run-hang", "1"], // 不收敛（FAKE_CANCEL_SETTLE 缺省 0）
-    });
+    const { engine, client, cleanup } = makeEngine(
+      undefined,
+      { args: [FAKE_ENGINE, "--run-hang", "1"] }, // 不收敛（FAKE_CANCEL_SETTLE 缺省 0）
+      { cancelSettleGraceMs: 500 },
+    );
     const { ctx } = makeCtx({ signal: controller.signal });
     const runPromise = engine.run({ prompt: "p" }, ctx);
     await waitForReady(client); // abort 抢在连接完成前会打断握手重建循环——先等 ready
     const enginePid = client.enginePid!;
     controller.abort();
-    const result = await runPromise; // ~3s 收敛窗口超时 → 杀链 → 合成终态
+    const result = await runPromise; // 注入 500ms 兜底窗超时 → 杀链 → 合成终态
     expect(result.outcome.error).toContain("engine_run_failed");
     expect(result.outcome.error).toContain("aborted before terminal answer");
     expect(result.outcome.exitCode).toBeNull();

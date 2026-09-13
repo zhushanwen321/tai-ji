@@ -183,8 +183,14 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
  * ConversationContinuation（每 chatMode record 一个实例；§3.4 全规格）。
  */
 export class ConversationContinuation {
-  /** 在途轮标识（单飞守卫；undefined = 无在途轮。派发异步窗内为占位值）。 */
+  /** 在途轮标识（单飞守卫；undefined = 无在途轮。派发异步窗内为占位值）。
+   *  形态 `${record.id}#r${roundSeq}`——轮身份分量是**派发序号**而非 roundNo：
+   *  round 只随轮终簿记 +1（markRoundIdle 写点③），「被取消轮迟到应答丢弃（无
+   *  簿记）→ 续聊新轮」的 roundNo 会与被取消轮相同（撞号致轮身份校验失效），
+   *  序号单调递增无此面。 */
   private activeRunId: string | undefined;
+  /** 派发序号（轮身份单调分量；每次 dispatchRoundAsync 正式定稿时递增）。 */
+  private roundSeq = 0;
   /** 在途轮打断通道（D2：abort 轮 signal，非 record 级 cancel——cancelBackground 会
    *  终态化销毁 record，不可用于打断）。 */
   private activeController: AbortController | undefined;
@@ -262,13 +268,23 @@ export class ConversationContinuation {
   // ── [U5] 立即打断面（cancel / 编排性关闭的 Continuation 侧触发）────────────
 
   /**
-   * abort 在途轮 + 清空队列（[U5] 消费方变化：原 close 行专用——close 改优雅收口后
-   * 现消费方 = cancelBackground / disposeAllRecords 的立即打断路径）。record 的
-   * settle/归档由调用方编排（store 意图原语），本方法只做轮级打断。
+   * abort 在途轮 + 清空队列 + **废弃轮身份**（[U5] 消费方变化：原 close 行专用——
+   * close 改优雅收口后现消费方 = cancelBackground / disposeAllRecords 的立即打断
+   * 路径）。record 的 settle/归档由调用方编排（store 意图原语），本方法只做轮级打断。
+   *
+   * [S1 P1 修复] 轮身份废弃是 cancel 语义的必要组成：取消轮的 run 应答要等引擎
+   * 停轮收敛（pi SIGTERM → trap-flush → 退出实测可达 15s）才返回——本方法返回时
+   * 旧轮 run 仍在飞，activeRunId 若保留，(a) 用户 message revive 会误走 D2 打断
+   * 分支入队、被死轮拖住整段收敛窗；(b) 旧轮迟到应答回调时轮身份校验仍匹配放行
+   * （见 dispatchRoundAsync handlers），失败簿记串进 revive 后的新对话（round 多跳
+   * +1、双通知、stopReason=failed 覆盖新轮正文）。废弃后旧轮的一切后续回调按迟到
+   * 丢弃，message 直接派发新轮。D2 打断（onMessage 的在飞轮打断）不入此列——那是
+   * 轮仍活跃的续聊打断，activeRunId 保留至该轮自然收敛。
    */
   abortAndClearQueue(): void {
     this.activeController?.abort();
     this.queue.length = 0;
+    this.clearActiveRound();
   }
 
   /**
@@ -290,6 +306,11 @@ export class ConversationContinuation {
    * 「覆盖 closed 回滚为 running」机制回滚）、不通知、不 drain——S7 精确语义。
    * notifyGate 门与此正交并存（门判 closedReason 编排面、守卫判 status 终态面，
    * 两闸判据不同源不互替）。
+   *
+   * 【迟到守卫（S1 P1 修复）】status 守卫对「cancel settle → message revive 翻回
+   * running」形态失守（status 又是 running 了）；轮身份校验在回调入口层（见
+   * dispatchRoundAsync isStaleRoundArrival）先行拦截迟到应答——本方法到达的应答
+   * 已保证属于当前在途轮。
    */
   onRunSettled(outcome: AgentOutcome): void {
     this.clearActiveRound();
@@ -486,8 +507,9 @@ export class ConversationContinuation {
     if (recordSignal.aborted) controller.abort();
     else recordSignal.addEventListener("abort", onRecordAbort, { once: true });
 
-    const roundNo = (record.round ?? 0) + 1;
-    this.activeRunId = `${record.id}#${roundNo}`;
+    this.roundSeq += 1;
+    const roundRunId = `${record.id}#r${this.roundSeq}`;
+    this.activeRunId = roundRunId;
     this.activeController = controller;
     // 轮始簿记归口（[U2b 修复轮/D2] store.markRoundStarted：status=running 重申 +
     // 清上一轮 result 与 resumable——§5.4 isStreaming 公式要求 result undefined 才
@@ -498,6 +520,23 @@ export class ConversationContinuation {
     this.host.markRoundStarted(record);
     const concludeRound = (): void => {
       recordSignal.removeEventListener("abort", onRecordAbort);
+    };
+    // [S1 P1 修复②] 轮身份守卫：run 应答回调（onSettled/onRejected/onAbandoned）
+    // 到达时若 activeRunId 已不是本轮（cancel 废弃轮身份 / revive 后新轮已占位），
+    // 即为迟到应答——整体丢弃（不簿记、不通知、不 drain、不误清新轮在途标记，
+    // concludeRound 的 listener 清理仍先行——旧轮资源不留挂）。典型时序：cancel 的
+    // 旧轮 run 要等 pi 停轮收敛（实测可达 15s）才返回，此间用户 message 已 revive
+    // 并派发新轮，旧轮应答迟到到达时 status 守卫已失守（revive 翻回 running）——
+    // 本守卫是唯一拦断面。判据 = 全等（activeRunId 形态 `${record.id}#r${seq}`，
+    // seq 派发序号单调递增，同 record 内无前缀歧义、无簿记回退撞号）。
+    const isStaleRoundArrival = (entry: string): boolean => {
+      if (this.activeRunId === roundRunId) return false;
+      logger.warn(
+        `[subagent] stale round outcome dropped for ${record.id}: ${entry} carried runId ` +
+          `${roundRunId} but activeRunId is ${this.activeRunId ?? "(none)"} — ` +
+          `cancelled round's late run answer ignored (no round bookkeeping / notify / drain)`,
+      );
+      return true;
     };
     try {
       this.host.dispatchChatRound(record, {
@@ -520,14 +559,17 @@ export class ConversationContinuation {
         handlers: {
           onSettled: (outcome) => {
             concludeRound();
+            if (isStaleRoundArrival("onSettled")) return;
             this.onRunSettled(outcome);
           },
           onRejected: (err) => {
             concludeRound();
+            if (isStaleRoundArrival("onRejected")) return;
             this.onRoundRejected(err);
           },
           onAbandoned: () => {
             concludeRound();
+            if (isStaleRoundArrival("onAbandoned")) return;
             this.onRoundAbandoned();
           },
           onWatchdogFire: (fire) => this.onWatchdogFire(fire),
