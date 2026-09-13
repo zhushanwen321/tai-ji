@@ -2,6 +2,7 @@
   "name": "@xyz-agent/extension-protocol",
   "version": "0.9.0",
   "description": "Cross-layer pi extension contract package: dual-mode (TUI/GUI) rendering helpers, session/background-task/pending-entries protocols, and shared behavior primitives",
+  "type": "module",
   "main": "src/index.ts",
   "module": "src/index.ts",
   "types": "src/index.ts",
@@ -16,17 +17,17 @@
     }
   },
   "publishConfig": {
-    "main": "dist/index.mjs",
-    "module": "dist/index.mjs",
-    "types": "dist/index.d.mts",
+    "main": "dist/index.js",
+    "module": "dist/index.js",
+    "types": "dist/index.d.ts",
     "exports": {
       ".": {
-        "types": "./dist/index.d.mts",
-        "import": "./dist/index.mjs"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
       },
       "./background-task": {
-        "types": "./dist/background-task-entry.d.mts",
-        "import": "./dist/background-task-entry.mjs"
+        "types": "./dist/background-task-entry.d.ts",
+        "import": "./dist/background-task-entry.js"
       }
     }
   },
