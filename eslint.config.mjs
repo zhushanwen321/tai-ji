@@ -227,9 +227,11 @@ export default [
           patterns: [
             {
               group: ['**/state-marker.ts'],
-              importNames: ['writeFinalizedState', 'writeCancelledState'],
+              // .state 三写函数全集（U2 后）：两终态（finalized/cancelled）+ 轮收口
+              // idle（writeSettledState）——三者同走 writeStateMarker 权威同步写。
+              importNames: ['writeFinalizedState', 'writeCancelledState', 'writeSettledState'],
               message:
-                'store 外禁 import 终态 sidecar 写函数（.state 是终态权威）——经 RecordStore.markFinalized/markCancelled 意图原语落盘（H4/G1，D7 守卫分级）',
+                'store 外禁 import .state sidecar 写函数（两终态 + U2 轮收口 idle）——经 RecordStore.markFinalized/markCancelled/markSettled 意图原语落盘（H4/G1，D7 守卫分级）',
             },
             {
               group: ['**/alive-store.ts'],
