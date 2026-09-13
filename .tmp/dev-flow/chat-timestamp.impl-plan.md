@@ -19,14 +19,14 @@
 | Unit | 职责 | 领地（精确文件路径） | 依赖 | 隔离 | 验收条款 |
 |------|------|----------------------|------|------|----------|
 | U1 | toolCall endTime reload 回填（fill 点 + 调用点 + 测试） | `packages/core/src/domain/chat/apply-entry-convert.ts` · `packages/core/src/domain/chat/apply-entry.ts`（仅 endTime 透传所需改动）· `packages/core/src/domain/chat/__tests__/`（apply-entry-convert 相关 + apply-entry-equivalence） | - | plain | ① computeToolCallFill 返回 endTime=toolResult body.timestamp（缺失不填）；② reload 路径 toolCall.endTime 有值；③ `pnpm -C packages/core test` 全绿（含 equivalence） |
-| U2 | UI 时间戳展示（formatClock + TurnMeta 区间 + Block 行尾列 + UserBubble + i18n + 测试） | `packages/ui/src/features/chat/format-utils.ts` · `TurnMeta.vue` · `composables/useTurnElapsed.ts` · `Block.vue` · `composables/useToolMeta.ts` · `UserBubble.vue` · `Turn.vue` · `__tests__/{format-utils,useTurnElapsed,TurnMeta,Block,UserBubble,Turn,ChatView}.test.ts` · `packages/renderer/src/i18n/locales/zh-CN/panel.ts` · `packages/renderer/src/i18n/locales/en-US/panel.ts` | U1 | plain | ① formatClock 本地时区 HH:MM:SS；② TurnMeta 区间（完成定格/live 进行中）；③ Block tool 块 `耗时 · 时刻`、text/thinking 时刻；④ UserBubble 时刻；⑤ useToolMeta 耗时项移除；⑥ `pnpm -C packages/ui test` + `pnpm -C packages/ui typecheck` 绿 |
+| U2 | UI 时间戳展示（formatClock + TurnMeta 区间 + Block 行尾列 + UserBubble + i18n + 测试） | `packages/ui/src/features/chat/format-utils.ts` · `TurnMeta.vue` · `composables/useTurnElapsed.ts` · `Block.vue` · `composables/useToolMeta.ts` · `UserBubble.vue` · `Turn.vue` · `__tests__/{format-utils,useTurnElapsed,TurnMeta,Block,UserBubble,Turn,ChatView}.test.ts` · `packages/renderer/src/i18n/locales/zh-CN/panel.ts` · `packages/renderer/src/i18n/locales/en-US/panel.ts` · `packages/renderer/src/__tests__/panel/block-rendering-regression.test.ts`（Gate A 回归护栏适配） | U1 | plain | ① formatClock 本地时区 HH:MM:SS；② TurnMeta 区间（完成定格/live 进行中）；③ Block tool 块 `耗时 · 时刻`、text/thinking 时刻；④ UserBubble 时刻；⑤ useToolMeta 耗时项移除；⑥ `pnpm -C packages/ui test` + `pnpm -C packages/ui typecheck` 绿 |
 
 注：u-foundation 共享契约根节点不设——无新增共享类型（`ToolCall.endTime` 已存在）；formatClock 归 U2 领地内。
 
 ## 3 DAG 图
 ```mermaid
 graph LR
-  U1[U1 core endTime 回填] --> U2[U2 UI 时间戳展示]
+  U1[U1 core endTime 回填] --> U2[U2 UI 时间戳展示] --> U3[U3 Gate A 回归修复：endTime live≡reload]
 ```
 
 ## 4 测试与验收计划
@@ -61,11 +61,15 @@ graph LR
 |------|------|------|----------|
 | U1 | committed | 1 | 5669e6a00；core 129 文件/2073 测试绿 + typecheck 干净（主 agent 重跑核验） |
 | U2 | committed | 2 | 143b3db70；ui 65 文件/784 测试绿 + typecheck 干净（主 agent 亲跑核验；主 dev 缺交 A1-A4 断言，由补发 mini-dev u2-tests-gapfill 完成） |
+| U3 | in-progress | 0 | Gate A 回归修复：endTime live≡reload（R1 风险落地） |
 
 ## 7 残留风险与变更历史
 - 风险 R1：live `tool_call_end` overlay（Date.now()）与 message_end 回填（body.timestamp）覆盖时序——终态以回填为准，等价性测试守卫；若 equivalence 对 endTime 敏感导致既有用例红，回退方案 = overlay 不设 endTime，仅回填点设置。
 - 风险 R2：text/thinking 多块共享同一 message 时刻（近似语义）——已在 demo 与设计 §2.4 声明，用户接受。
+- 风险 R3（存量，非本流水线引入，基线 b3a179a7c 逐一对照一致）：① pi-subagent-cli 10 败（bin 真机 NDJSON 集成用例）；② subagent-core 6 败（机器装有 zcode 引擎致 discovery 扫描多包 + inflight-wiring emitLifecycle 测试实现漂移）；③ runtime subagent-extractor-engine zcode 白名单 + d8-compat×3。合计 20 个，交付时呈报用户签认转残留。
+- 风险 R4（flaky，孤立跑全绿）：runtime system-prompt-extension / logger-tee-rotation、ext subagent-workflow crash-recovery / inflight-wiring——全量并行负载下偶发，不阻塞。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
   - 2026-09-13 U2 committed（143b3db70）。轮次记录：主 dev（mimo）实现全部落地但 A1-A4 断言缺交且收敛慢（两轮中断干预），cancel 后主 agent 核验实现 + 补发 mini-dev 只补测试；deviations 由 mini-dev 汇报（formatDuration '2s' 口径 / i18n mock 返 key 断言 / 编辑态直测）。
+  - 2026-09-13 Gate A 首轮归因：① U1 真回归 4 个（runtime 等价性 endTime：live 侧 tool_call_end 客户端时钟先占 fill + R2-S1 去重丢权威 message_end）→ 开 U3 修复；② renderer TC-REG-1 适配新 DOM（toContain）→ 29adbdf47；③ 存量 20 + flaky 4（见 R3/R4）。基线对照方法：b3a179a7c detached worktree（/tmp/cft-baseline）逐包跑同套件比对失败集。
   - 2026-09-13 U1 committed（5669e6a00）；U2 领地补 `__tests__/Turn.test.ts`、`__tests__/ChatView.test.ts`（Turn.vue props 改动潜在波及面，避免领地外 blocker 浪费轮次）。
