@@ -46,7 +46,7 @@ const { spawn } = require('node:child_process')
 
 const TAG = '[SCHED-E2E]'
 const REPO_ROOT = path.resolve(__dirname, '..')
-const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'scheduler')
+const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'scheduler')
 const PI_BIN_DEFAULT = path.join(
   REPO_ROOT,
   'apps',
