@@ -202,7 +202,7 @@ export class SessionManagerHandler {
 
   /** create 分支：四步串行时序 */
   private async handleCreate(parentSessionId: string, params: SessionManagerCreateParams): Promise<SessionManagerCreateResult> {
-    const { cwd, label, prompt, model, thinkingLevel } = params
+    const { cwd, label, prompt } = params
 
     // 1. SessionService.create —— spawnSource/parentAgentSessionId 服务端注入：
     // 父 session 由路由上下文（interpreter sessionId）决定，不信任 extension 请求参数（防伪造父 id）
@@ -212,8 +212,6 @@ export class SessionManagerHandler {
       spawnSource: 'agent',
       parentAgentSessionId: parentSessionId,
       persistLabel: true,
-      modelOverride: model,
-      thinkingOverride: thinkingLevel,
     })
 
     // 2. broadcastSessionList（先于 sendMessage，opts 注入回调）
@@ -328,13 +326,12 @@ export class SessionManagerHandler {
   /**
    * list 分支：过滤 spawnSource + parentAgentSessionId（agent-managed-session/design.md §392）。
    *
-   * 缺省注入路由上下文（LLM 可控 params 不得放宽过滤）：spawnSource 缺省 'agent'；
-   * parentAgentSessionId 一律以路由上下文（发起方 session）为准，params 显式指定的
-   * 其他父 id 不生效——否则 agent 可枚举其他 agent 的子 session（label/cwd 泄露）。
+   * 过滤条件固化（LLM 可控 params 不得放宽过滤）：spawnSource 恒 'agent'；
+   * parentAgentSessionId 恒为路由上下文（发起方 session）——协议 params 无过滤字段，
+   * 即使携带也不被读取——否则 agent 可枚举其他 agent 的子 session（label/cwd 泄露）。
    */
-  private async handleList(parentSessionId: string, params: SessionManagerListParams): Promise<SessionManagerListResult> {
-    const { spawnSource } = params
-    const wantSpawn = spawnSource ?? 'agent'
+  private async handleList(parentSessionId: string, _params: SessionManagerListParams): Promise<SessionManagerListResult> {
+    const wantSpawn = 'agent'
     const wantParent = parentSessionId
     const groups = this.opts.sessionService.listPersistedSessions()
 

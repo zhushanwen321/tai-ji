@@ -54,7 +54,6 @@ export {
 // ── session-manager 协议（agent-managed session：select 通道 + marker；实现在 extensions/universal/session-manager）──
 export type {
   SessionManagerAction,
-  SessionManagerRequest,
   SessionManagerParams,
   SessionManagerCreateParams,
   SessionManagerSendParams,

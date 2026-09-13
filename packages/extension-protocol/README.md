@@ -30,7 +30,7 @@ const result = guiResult(guiComponent('stats-line', { items: [{ label: 'turns', 
 const extracted = extractGui(toolResultDetails)
 ```
 
-session-manager 嵌套 `{action, params}` 契约的类型（`SessionManagerRequest` 等）同样从本包导出。
+session-manager 嵌套 `{action, params}` 契约的类型（各 action 的 params/result 类型）同样从本包导出。
 
 ## 开发
 

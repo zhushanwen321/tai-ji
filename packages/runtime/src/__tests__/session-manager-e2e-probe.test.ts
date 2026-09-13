@@ -201,15 +201,13 @@ describe('U4-E1 create e2e probe', () => {
     const pipeline = makeE2ePipeline(sessionService)
 
     await pipeline.dispatch(buildUiRequestLine('req-create', 'create', {
-      cwd: '/test/cwd', label: 'E2E 测试执行', prompt: 'run the suite', model: 'm/x', thinkingLevel: 'max',
+      cwd: '/test/cwd', label: 'E2E 测试执行', prompt: 'run the suite',
     }))
 
-    // create 以 spawnSource='agent' + parentAgentSessionId=父 session 调用，model/thinking 透传
+    // create 以 spawnSource='agent' + parentAgentSessionId=父 session 调用（服务端注入，不信任请求侧）
     expect(sessionService.create).toHaveBeenCalledWith('/test/cwd', 'E2E 测试执行', expect.objectContaining({
       spawnSource: 'agent',
       parentAgentSessionId: 'sid-parent',
-      modelOverride: 'm/x',
-      thinkingOverride: 'max',
     }))
     // 初始 prompt 直投到新 session（sd-u5：delivery.sendDirect → ensureActive + prompt，不走内核队列）
     expect(sessionService.ensureActive).toHaveBeenCalledWith('child-1')
@@ -264,7 +262,7 @@ describe('U4-E2 manage e2e probe', () => {
     },
     {
       action: 'list',
-      params: { spawnSource: 'agent' },
+      params: {},
       expected: {
         sessions: [
           {

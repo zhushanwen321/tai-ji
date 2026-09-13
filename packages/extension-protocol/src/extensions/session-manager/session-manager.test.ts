@@ -4,7 +4,7 @@ import { ASK_USER_MARKER } from '../ask-user/marker'
 import { GUI_WIDGET_MARKER } from '../../core/markers'
 import type {
   SessionManagerAction,
-  SessionManagerRequest,
+  SessionManagerParams,
   SessionManagerCreateParams,
   SessionManagerSendParams,
   SessionManagerHistoryParams,
@@ -57,7 +57,8 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
   })
 
   it('U1-A2 请求为嵌套形状：{action, params}（params 不携带 action 字段）', () => {
-    const requests: SessionManagerRequest[] = [
+    // 内联形状（与 extension 手拼 JSON 同构）——纸面统一请求类型已删，契约由各 params 类型 + 此形状断言锁定
+    const requests: { action: SessionManagerAction; params: SessionManagerParams[SessionManagerAction] }[] = [
       { action: 'create', params: { label: 'l', prompt: 'p' } },
       { action: 'send', params: { sessionId: 's', prompt: 'c' } },
       { action: 'history', params: { sessionId: 's' } },
@@ -73,13 +74,11 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
 })
 
 describe('U1-A2 各 action 请求 params 类型结构（嵌套契约）', () => {
-  it('U1-A2 SessionManagerCreateParams：cwd/label/prompt/model/thinkingLevel 全可选', () => {
+  it('U1-A2 SessionManagerCreateParams：cwd/label/prompt 全可选', () => {
     const req: SessionManagerCreateParams = {
       cwd: '/tmp/x',
       label: 'test',
       prompt: 'do something',
-      model: 'm',
-      thinkingLevel: 'high',
     }
     const empty: SessionManagerCreateParams = {}
     expect(req.prompt).toBe('do something')
@@ -106,14 +105,9 @@ describe('U1-A2 各 action 请求 params 类型结构（嵌套契约）', () => 
     expect(req.sessionId).toBe('abc')
   })
 
-  it('U1-A2 SessionManagerListParams：spawnSource / parentAgentSessionId 过滤可选', () => {
-    const req: SessionManagerListParams = {
-      spawnSource: 'agent',
-      parentAgentSessionId: 'parent',
-    }
+  it('U1-A2 SessionManagerListParams：空参数（过滤由 handler 固化）', () => {
     const empty: SessionManagerListParams = {}
-    expect(req.spawnSource).toBe('agent')
-    expect(empty.parentAgentSessionId).toBeUndefined()
+    expect(empty).toEqual({})
   })
 
   it('U1-A2 SessionManagerAbortParams 必含 sessionId', () => {

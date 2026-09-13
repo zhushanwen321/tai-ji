@@ -9,12 +9,6 @@ import type { SESSION_MANAGER_ACTIONS } from './marker.js'
 /** session-manager 支持的 6 个 action（从 SESSION_MANAGER_ACTIONS 集合派生，值与类型同源） */
 export type SessionManagerAction = (typeof SESSION_MANAGER_ACTIONS)[number]
 
-/** session-manager 请求的统一形状（extension → runtime via select 通道） */
-export interface SessionManagerRequest {
-  action: SessionManagerAction
-  params: SessionManagerParams[SessionManagerAction]
-}
-
 /** 各 action 的请求参数映射 */
 export interface SessionManagerParams {
   create: SessionManagerCreateParams
@@ -33,10 +27,6 @@ export interface SessionManagerCreateParams {
   label?: string
   /** 初始 prompt（可选；提供时 create 后立即注入——设计文档 §5.2 原子性决策） */
   prompt?: string
-  /** 模型覆盖（可选，透传 SessionService.create 的 modelOverride） */
-  model?: string
-  /** thinking 级别覆盖（可选，透传 thinkingOverride） */
-  thinkingLevel?: string
 }
 
 /** send action 参数 */
@@ -57,13 +47,8 @@ export interface SessionManagerStatusParams {
   sessionId: string
 }
 
-/** list action 参数 */
-export interface SessionManagerListParams {
-  /** 按 spawnSource 过滤 */
-  spawnSource?: 'user' | 'agent'
-  /** 按 parentAgentSessionId 过滤（handler 一律以路由上下文父 id 为准，此字段仅作显式收窄提示） */
-  parentAgentSessionId?: string
-}
+/** list action 参数（无字段：过滤由 handler 固化——spawnSource='agent' + 路由上下文父 id；Record<string, never> 结构性拒绝任何请求字段） */
+export type SessionManagerListParams = Record<string, never>
 
 /** abort action 参数 */
 export interface SessionManagerAbortParams {
@@ -72,7 +57,7 @@ export interface SessionManagerAbortParams {
 
 // ── params 运行时守卫（信任边界：params 来自 extension_ui_request，LLM 可控 JSON）──
 // handler 侧 dispatch 前校验；非法 params 不再经 `as unknown as` 断言静默流入
-// sessionService（曾以 undefined 流入 create 的 cwd/label/prompt/model）。
+// sessionService（曾以 undefined 流入 create 的 cwd/label/prompt）。
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
@@ -92,9 +77,7 @@ export function isSessionManagerCreateParams(v: unknown): v is SessionManagerCre
     isRecord(v) &&
     isOptionalString(v.cwd) &&
     isOptionalString(v.label) &&
-    isOptionalString(v.prompt) &&
-    isOptionalString(v.model) &&
-    isOptionalString(v.thinkingLevel)
+    isOptionalString(v.prompt)
   )
 }
 
@@ -121,13 +104,9 @@ export function isSessionManagerAbortParams(v: unknown): v is SessionManagerAbor
   return isSessionIdParams(v)
 }
 
-/** list：两过滤字段可选（spawnSource 限枚举） */
+/** list：无参数（过滤由 handler 固化，params 不携带任何过滤字段） */
 export function isSessionManagerListParams(v: unknown): v is SessionManagerListParams {
-  return (
-    isRecord(v) &&
-    (v.spawnSource === undefined || v.spawnSource === 'user' || v.spawnSource === 'agent') &&
-    isOptionalString(v.parentAgentSessionId)
-  )
+  return isRecord(v)
 }
 
 /** create 结果 */

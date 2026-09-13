@@ -1,6 +1,6 @@
 # ext-simplify-15 实施计划
 
-基线: <待填> | 来源设计: docs/design/ext-simplify-15-rename-session-session-manager.md (v2) | 日期: 2026-09-14
+基线: 175897fff | 来源设计: docs/design/ext-simplify-15-rename-session-session-manager.md (v2) | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -54,13 +54,17 @@ u1/u2 无依赖可并行（领地互斥）；本流水线串行窗口内按 u1�
 
 ## 5 合理偏差登记表
 
-（空——实施中填充）
+1. session-manager-e2e-probe.test.ts 加入改动面：其 :211-212 断言 modelOverride/thinkingOverride 透传，handler 删除后必红；同批最小修改（删死字段断言），未发现隐性发送方（reasonable）。
+2. list 守卫落地为 `type ... = Record<string, never>`（空 interface 触 no-empty-object-type，禁 disable 规则）——比空 interface 更强（结构性拒绝任何请求字段），设计未指定该细节（reasonable）。
+3. session-manager.test.ts u9 防漂移形状用例改内联类型标注，不复活被删类型（reasonable）。
+4. session-manager-handler.test.ts 防伪造用例保留 spawnSource/parentAgentSessionId 字面量 params（守卫不拒绝未知字段，「服务端固化过滤」语义独立于死字段），测试绿（reasonable）。
+5. 领地外残留（审查登记）：extension 包 index.ts:75 注释引用 SessionManagerRequest 字样 → 并入 u2 领地清理；extension README.md:8 同款 → 并入 u2 领地（本次计划扩展，登记）。
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | pending | 0 | — |
+| u1 | committed | 1 | protocol 102/102 + handler 32/32 + send-queue 18/18 + e2e-probe A1-A9 PASS + extensions:typecheck 绿 |
 | u2 | pending | 0 | — |
 
 ## 7 残留风险与变更历史
