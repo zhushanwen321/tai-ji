@@ -16,14 +16,14 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  GenerateWorkflowScriptOptions,
-  GenerateWorkflowScriptResult,
-  WorkflowDirOptions,
-} from "../../index.ts";
 import * as subagentCore from "../../index.ts";
 import { parseResourceMetaDetailed } from "../../shared/meta-parser.ts";
-import { generateWorkflowScript } from "../script-generate.ts";
+import {
+  generateWorkflowScript,
+  type GenerateWorkflowScriptOptions,
+  type GenerateWorkflowScriptResult,
+} from "../script-generate.ts";
+import { DEFAULT_WORKFLOW_SAVED_DIR, type WorkflowDirOptions } from "../workflow-files.ts";
 
 // ============================================================
 // 样本（构造逻辑对齐 pi 侧 tool-workflow-script-generate.test.ts）
@@ -299,7 +299,9 @@ describe("barrel exports probe", () => {
   it("缺省目录常量经 barrel 可达（值 = pi 布局）", () => {
     const barrel = subagentCore as Record<string, unknown>;
     expect(barrel["DEFAULT_WORKFLOW_TMP_DIR"]).toBe(".pi/workflows/.tmp");
-    expect(barrel["DEFAULT_WORKFLOW_SAVED_DIR"]).toBe(".pi/workflows");
+    // DEFAULT_WORKFLOW_SAVED_DIR 已随 2026-09-13 barrel 收窄出公共面（仅测试消费），
+    // 改深路径断言同名常量值不变（守卫强度不降）。
+    expect(DEFAULT_WORKFLOW_SAVED_DIR).toBe(".pi/workflows");
   });
 
   it("类型导出经 barrel 可引用（typecheck 即探针）", () => {

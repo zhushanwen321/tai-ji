@@ -126,7 +126,7 @@ const logger = getLogger("subagents");
 
 // [R6] 聚合面接口类型声明（SubagentQueries / SubagentChatActions / SubagentServiceInit）
 // 已外移支撑文件 service/service-bootstrap.ts——壳经 type-only import 消费（编译后
-// 擦除），bootstrap→壳仅存的 SubagentService 值边（createSubagentService 构造依赖）
+// 擦除），bootstrap→壳仅存的 SubagentService 值边（构造依赖）
 // 不构成值环（壳对 bootstrap 零 re-export）。
 
 // [v4 A-1] EPIPE 连续失败计数器在 stdin-writer.ts（stdin 错误域，避免 session-runner
@@ -172,7 +172,8 @@ export type { SubagentServiceSessionInit };
  *   session_shutdown:
  *     service.dispose()
  *
- * 第三宿主不经 session_start 流程时改用 createSubagentService(init) 参数注入构造。
+ * 第三宿主不经 session_start 流程时改用 `new SubagentService(init)` 参数注入直构
+ * （原 createSubagentService 薄包装工厂已随 2026-09-13 barrel 收窄删除，全仓零消费）。
  *
  * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
@@ -959,7 +960,7 @@ export class SubagentService {
 }
 
 // [R6] 进程单例访问器族（SERVICE_SLOT_KEY / getServiceSlot / getSubagentService /
-// setSubagentService / createSubagentService）已外移 service/service-bootstrap.ts
+// setSubagentService）已外移 service/service-bootstrap.ts
 //（globalThis[Symbol.for] slot 防 jiti 多实例分裂，机制注释随迁）；barrel
 // packages/subagent-core/src/index.ts 直接改指向该文件，壳不做 re-export（防壳↔
 // bootstrap 值环——设计 v4 import 纪律）。

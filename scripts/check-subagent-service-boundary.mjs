@@ -28,7 +28,9 @@
 //      - 聚合→支撑：service-constants.ts 允许（import 常量）；service-bootstrap.ts
 //        仅 type-only 允许（聚合不消费装配工厂）
 //      - 支撑→壳：默认红（防反向依赖，D4 同理），仅 SUPPORT_SHELL_EDGES 登记的
-//        SubagentService 值边放行（createSubagentService 构造依赖，设计 v4）
+//        SubagentService 值边放行（装配构造依赖，设计 v4 时为
+//        createSubagentService 工厂——工厂已随 2026-09-13 barrel 收窄删除，
+//        bootstrap 直构 new SubagentService，值边语义不变）
 //      - 壳→支撑：允许（装配），不检查
 //
 // [HISTORICAL] 2026-09-12 建立时现状三条合法边（D-R3-2 / D-R4-8 登记）；R6 已兑现
