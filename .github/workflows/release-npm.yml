@@ -75,6 +75,12 @@ jobs:
       # workflow 构建步骤 + files 白名单条目 + 守卫覆盖，三者缺一不可）。SDK 的
       # dist 是两个引擎 CLI dist 的 external 依赖解析目标（npm 形态经宿主
       # node_modules），构建顺序必须在 CLI 之前。
+      # pi-rpc（C-proc-11 同批）：pi-subagent-cli dependencies 的 registry 解析目标
+      # （tsup noExternal 内联不豁免 npm install 面的依赖解析），必须先于 CLI 构建无
+      # 硬依赖（内联取 src），但 publish 前必须产出 dist——与 SDK 同层放最前。
+      - name: Build pi-rpc
+        run: pnpm --filter @zhushanwen/pi-rpc build
+
       - name: Build subagent-engine-sdk
         run: pnpm --filter @zhushanwen/subagent-engine-sdk build
 

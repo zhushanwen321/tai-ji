@@ -28,6 +28,7 @@
 | dist 发布包 | `@zhushanwen/subagent-engine-sdk` | `src/`（排除 `__tests__`）+ `dist/` | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
 | dist 发布包 | `@zhushanwen/pi-subagent-cli` | `bin/` + `dist/`（CLI 包：bin 是唯一 npm 消费面，不带 src/） | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
 | dist 发布包 | `@zhushanwen/zcode-subagent-cli` | `bin/` + `dist/`（CLI 包：bin 是唯一 npm 消费面，不带 src/） | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
+| dist 发布包 | `@zhushanwen/pi-rpc` | `src/`（排除 `__tests__`）+ `dist/`（库包双形态：workspace 走 exports import 条件 → src，npm 走 publishConfig → dist） | tsup，正式/dev 两线均有显式 build 步骤（2026-09 pi-subagent-cli 依赖可解析性缺口批次接入） |
 | 非 workspace 特例 | `statusline`（resources/plugins/，v0.3.14） | 无 files 字段 | 非 pnpm workspace 成员——机制上不经 changeset 发布线（见 D6） |
 
 TS 源直发类不存在本缺口（声明的都是 git 里就有的文件）；风险集中在 dist 发布包。
@@ -280,3 +281,4 @@ S7 是外部消费方（zsw）真实回归，作为发布后场景登记——�
 | 2026-09-07 | v6 | 阶段 3 一致性审查（三区并行，0 unreasonable）doc_errors 修正：§3.1 失败路径 1 补指引分流说明（非 dist 前缀纯文件条目按补文件/删条目处置，守卫文案同步分流）；D2 行号引用改锚 step 名称（ci.yml 插入致行号漂移）；§5「u3（紧随 u1）」改「u3（依赖 u1）」（v5 修订残留）。README 三处内容缺陷（示例类型错误/包结构漏列/extractGui 参数语义）与守卫文案分流实现走阶段 4 修复批次 |
 | 2026-09-07 | v7 | 第 4 轮审查修复（主审 0 must-fix + 3 suggestion，全修）：① 发布面计数更新为终态口径——u4 将 pi-unified-hooks 加入 changeset ignore 后未被 ignore 的 workspace 包为 28，终态发布面 = 28 + statusline = 29（§1.1 S / §1.2 计数句 / §3.2 C 三处 30→29，§1.2 TS 源直发行 26→25 并标注已 ignore，D6「未 ignore」补 u4 落地后状态）；② 幽灵条目恢复指引从仅指 release-npm.yml 扩为三处构建段（release-npm.yml / release-npm-dev.yml / ci.yml Build dist packages——按旧指引修复会漏 dev 线与 CI 面再次红灯），守卫 fixFor 文案与 §3.1 失败路径 1 示例同批同步，单测断言锁定三处文件名；③ 守卫测试 AJV_EXEMPT_OK 注释失实修正（单/双引号混合是覆盖 REQUIRE_RE 双分支的测试设计，真实产物实测 4 处全双引号、单引号 0——fixture 本身不动） |
 | 2026-09-11 | v8 | ext-simplify-01 删包移除 ignore 条目，发布面计数不变（`.changeset/config.json` ignore 数组删除 `@zhushanwen/pi-unified-hooks` 末项——unified-hooks 整包删除后不在磁盘，删前被 ignore 排除、删后不在磁盘，31 包计数不变；§1.1 S / §1.2 全景句 / §1.2 分类表三处现行口径句同批补注记） |
+| 2026-09-14 | v9 | 检查项 4 workspace 依赖发布闭包（依赖可解析性，PR review 双维度发现 pi-subagent-cli → pi-rpc 首发缺口 M1/MUST_FIX）：dependencies / peerDependencies 指向 workspace 内包的依赖 X，「registry 可解析」静态信号 = X/CHANGELOG.md 存在（changesets changelog 每次 version bump 写入）∨ X 有 pending changeset，两信号皆无 → 红（publish 替换 workspace:* 为 ^<version> 后 E404、tarball 装不上——npm install 面，晚于检查项 1-3 的 files ↔ 产物域）；private 依赖无条件红；外部依赖零网络不可验不纳入。同批：pi-rpc 由 TS 源直发改双形态 dist 发布（对齐 subagent-engine-sdk，Node 拒载 node_modules 内 .ts），三处构建段（release-npm.yml / release-npm-dev.yml / ci.yml）补 pi-rpc build，守卫动态发现面 6→7 包 |

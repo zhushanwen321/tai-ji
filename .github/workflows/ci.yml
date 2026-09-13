@@ -325,16 +325,18 @@ jobs:
 
       # C-proc-11 发布面一致性守卫（docs/design/npm-publish-surface-guard.md §3.3 D2）：
       # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
-      # 自包含探针）。dist 产物被 .gitignore、干净 checkout 上必红，刻意不挂 pre-commit
-      # （与 extensions 方向的刻意不对称，设计 D2）——pre-commit 之外的 CI 面同源拦截
-      # （D7 通则，同 D9-① 挂载理由）：先构建 6 包 7 档再同源直调守卫，漂移在 PR
-      # 软拦截而非发布现场硬拦截（两级拦截等级声明见设计 D2）。
+      # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
+      # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
+      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 7 包
+      # 8 档再同源直调守卫，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
+      # 见设计 D2）。
       - name: Build dist packages (publish surface guard)
         run: |
           pnpm --filter @xyz-agent/extension-protocol run build
           pnpm --filter @xyz-agent/session-delivery run build
           pnpm --filter @zhushanwen/subagent-core run build
           pnpm --filter @zhushanwen/subagent-core run build:bundle
+          pnpm --filter @zhushanwen/pi-rpc run build
           pnpm --filter @zhushanwen/subagent-engine-sdk run build
           pnpm --filter @zhushanwen/pi-subagent-cli run build
           pnpm --filter @zhushanwen/zcode-subagent-cli run build
