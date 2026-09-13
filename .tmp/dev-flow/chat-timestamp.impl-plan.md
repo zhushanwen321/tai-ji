@@ -61,7 +61,7 @@ graph LR
 |------|------|------|----------|
 | U1 | committed | 1 | 5669e6a00；core 129 文件/2073 测试绿 + typecheck 干净（主 agent 重跑核验） |
 | U2 | committed | 2 | 143b3db70；ui 65 文件/784 测试绿 + typecheck 干净（主 agent 亲跑核验；主 dev 缺交 A1-A4 断言，由补发 mini-dev u2-tests-gapfill 完成） |
-| U3 | in-progress | 0 | Gate A 回归修复：endTime live≡reload（R1 风险落地） |
+| U3 | committed | 2（两轮均被基础设施杀死零产出，主 agent 亲自修复，偏离零编码已记录；独立 reviewer 事后把关） | 97d3a2b6b；core 129 文件/2074 绿 + runtime 等价性 6/6 绿 + typecheck 双包干净 |
 
 ## 7 残留风险与变更历史
 - 风险 R1：live `tool_call_end` overlay（Date.now()）与 message_end 回填（body.timestamp）覆盖时序——终态以回填为准，等价性测试守卫；若 equivalence 对 endTime 敏感导致既有用例红，回退方案 = overlay 不设 endTime，仅回填点设置。
@@ -70,6 +70,7 @@ graph LR
 - 风险 R4（flaky，孤立跑全绿）：runtime system-prompt-extension / logger-tee-rotation、ext subagent-workflow crash-recovery / inflight-wiring——全量并行负载下偶发，不阻塞。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
+  - 2026-09-13 U3 修复由主 agent 亲自执行（连续 3 次派发被基础设施杀死 143/128 零产出，触发升级阈值；fix = endTime last-wins + 非对称时钟测试 + relay fixture 补全生产双发形态）。Gate A 终局：core/ui/renderer 全绿，剩余 3 败包 = R3 存量集（与基线一致），endTime 回归 4 个全消。
   - 2026-09-13 U2 committed（143b3db70）。轮次记录：主 dev（mimo）实现全部落地但 A1-A4 断言缺交且收敛慢（两轮中断干预），cancel 后主 agent 核验实现 + 补发 mini-dev 只补测试；deviations 由 mini-dev 汇报（formatDuration '2s' 口径 / i18n mock 返 key 断言 / 编辑态直测）。
   - 2026-09-13 Gate A 首轮归因：① U1 真回归 4 个（runtime 等价性 endTime：live 侧 tool_call_end 客户端时钟先占 fill + R2-S1 去重丢权威 message_end）→ 开 U3 修复；② renderer TC-REG-1 适配新 DOM（toContain）→ 29adbdf47；③ 存量 20 + flaky 4（见 R3/R4）。基线对照方法：b3a179a7c detached worktree（/tmp/cft-baseline）逐包跑同套件比对失败集。
   - 2026-09-13 U1 committed（5669e6a00）；U2 领地补 `__tests__/Turn.test.ts`、`__tests__/ChatView.test.ts`（Turn.vue props 改动潜在波及面，避免领地外 blocker 浪费轮次）。
