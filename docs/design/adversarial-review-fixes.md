@@ -313,7 +313,7 @@ Windows powershell 探测维持 fail-closed 登记，待 Windows 实机；golden
 
 | 单元 | 内容 | 主要文件 | 验收挂钩 |
 |---|---|---|---|
-| u1 defer segments 化 | A1 全部 | `send.ts` / `useCompactQueue.ts`（含 confirmDelivery 段源，D-A1-6）/ `useChat.ts:533` submitQueuedEntry + 重入队路径 + sidecar 写 / shared `SegmentsMetadataEntry.deferEntryId` / runtime `entry-tree-builder.ts`（编排层裸 id 提取 + backfillSegments 签名扩展）/ PendingBubble 徽标 / i18n | S1 + 单测 |
+| u1 defer segments 化 | A1 全部 | `send.ts` / `useCompactQueue.ts`（含 confirmDelivery 段源，D-A1-6）/ `useChat.ts:533` submitQueuedEntry + 重入队路径 + sidecar 写 / shared `SegmentsMetadataEntry.deferEntryId` / runtime `entry-tree-builder.ts`（编排层裸 id 提取 + backfillSegments 签名扩展）/ QueueBubble 徽标 / i18n | S1 + 单测 |
 | u2 双旁路注入 + 守卫 | A2 全部 | `session-records.ts` / `session-delivery-registry.ts` / notice 编排提取（`message-dispatcher.ts:850`）/ 新守卫脚本（扫 prompt/steer/followUp 三方法）+ install-hooks + ci.yml | S2/S2b + 单测 |
 | u3 defer/steer 行为批 | D1 + D2 + D3 | `useChat.ts`（timer / steer 签名）/ `send.ts` / `submit.ts` onSteer 分支 / `Turn.vue` | S3/S4 + 单测 |
 | u4 守卫批 | B1 + B2 + B3 | pi-semantics 静态锚 + `pi-semantics.json` / `skill-marker.ts` + 校准样本 / shared `SUBAGENT_STATUS_ALL` + bucket 测试 | 单测 + CI 路径 |

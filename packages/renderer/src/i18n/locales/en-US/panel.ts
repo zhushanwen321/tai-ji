@@ -317,7 +317,6 @@ export default {
     pendingHintBash: 'Will be sent after the command finishes',
     pendingHintSettling: 'Will be sent after the current turn ends',
     cancelQueued: 'Cancel queued message',
-    submittedAwaitingDelivery: 'Submitted, awaiting delivery',
     chipBadge: '+{count}',
     chipBadgeHint: 'Contains {count} attachment/reference chip(s), sent along with the message',
     // [compact-defer-composer-queue u1] defer row occupancy chip (After compact / After command / Later)

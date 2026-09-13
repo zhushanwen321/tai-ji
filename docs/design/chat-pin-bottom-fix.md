@@ -3,6 +3,8 @@
 > **一句话结论**：消息流"钉在底部"失效（最新消息恒差 1-2 行不可见）不是单点 bug，而是跟随系统对「最后一次滚动之后发生的高度/内容变化」结构性零补偿——本设计把跟随触发从「信号 watch 枚举」重构为「ResizeObserver 兜底网 + 唯一真实底部原语」，修正 `findItemIndex(scrollSize)` 的 startMargin 坐标错位，把脱离锚定信号从「仅滚轮」扩展为「一切用户上滑」（复合判据，不含写标记位），并以「结构护栏 + 机器护栏 + 回归护栏」三层护栏防止同类问题复发。
 >
 > **文档状态**：v7（第 6 轮复审修订：「恒取上限」无条件表述补 token 节奏条件限定——慢 token 节奏下窗口经静默分支提前关闭、⑤b 兑底，安全性不变；影响面审已 0 must-fix / 0 suggestion 关闭）。**层声明**：技术方案层（涉及运行时行为/数据流/错误处理，层敏感准则 5/6/7 全适用）→ 下一层 = 代码实施单元拆分（§6）。
+>
+> **变更注记（2026-09-13）**：随 compact-defer-composer-queue 迁移更新——`PendingBubble` 待投递气泡已迁移至 composer 上方队列区 defer 行，尾部块现仅 `ActivityStrip` / `ForkNotice` 两块，正文相关指称已同步改述。
 
 ## 开篇（SCQA）
 
@@ -29,7 +31,7 @@ xyz-agent 是 Electron + Vue 3 的 AI Agent 桌面工作台。聊天窗口的消
 
 > **贴底（stuck）** = `stickToBottom === true` 的状态。就是 §3.2 失败模式里「用户没有主动上滑、期望窗口跟着新内容走」的状态。初始为 true；脱离与恢复的信号集由 §4.3 D7 定义（本设计把脱离信号从「仅滚轮上滑」扩展为「一切用户上滑」，见根因 R5）；恢复贴底 = `onScroll` 检测到距底 ≤ 40px（`BOTTOM_THRESHOLD`，useVirtuaFollow.ts:43）。
 
-> **尾部块（trailing blocks）** = 渲染在 `<Virtualizer>` **之后、仍在滚动容器内文档流中**的非虚拟列表内容：`ActivityStrip` 活动条（compacting/bash/thinking/settling 指示行，每行实测约 24px，常量 `COMPACTING_NOTICE_HEIGHT=24`，message-stream-layout.ts:25）、`PendingBubble` 待投递气泡列表、`ForkNotice` 分支反馈行。它们位于 MessageStream.vue 模板中 Virtualizer 之后的文档流区块，是 virtua 坐标系**看不见**的内容——这是 §3.3 根因 R2 的舞台。
+> **尾部块（trailing blocks）** = 渲染在 `<Virtualizer>` **之后、仍在滚动容器内文档流中**的非虚拟列表内容：`ActivityStrip` 活动条（compacting/bash/thinking/settling 指示行，每行实测约 24px，常量 `COMPACTING_NOTICE_HEIGHT=24`，message-stream-layout.ts:25）、`ForkNotice` 分支反馈行。它们位于 MessageStream.vue 模板中 Virtualizer 之后的文档流区块，是 virtua 坐标系**看不见**的内容——这是 §3.3 根因 R2 的舞台。
 
 > **INVAR-M4-2（既有不变量，本设计修订为 INVAR-M4-2′）** = 原版：「脱离锚定只由 `onWheel deltaY<0` 驱动，`onScroll` 永远不把 stickToBottom 翻 false（只单向翻真），任何程序性滚动不得把用户扯回底部」。修订版（D7）：脱离信号扩展为「滚轮上滑（恒即时生效）+ onScroll 复合判据（offset 递减 ∧ 距底 >40px，force 强滚后的测量收敛抑制窗内暂停）」，「程序性滚动不扯回」的核心保护不变。修订理由与回归反例重演见 §4.3 D7。
 
@@ -39,7 +41,7 @@ xyz-agent 是 Electron + Vue 3 的 AI Agent 桌面工作台。聊天窗口的消
 
 | # | 目标（从使用者体验倒推） | 度量 |
 |---|---|---|
-| G1 | 贴底状态下，任何时刻窗口都真正位于内容底部：发送消息、流式输出、流结束定格、压缩完成、活动条显隐、pending 气泡出现、窗口 resize 之后，最新消息（含尾部块）完整可见，无需手动滚 | 真实场景下 `scrollEl.scrollHeight - scrollTop - clientHeight ≤ 2px`（dpr=1；dpr=2 的 retina 环境按 ≤4px 判；§5 验收逐场景实测） |
+| G1 | 贴底状态下，任何时刻窗口都真正位于内容底部：发送消息、流式输出、流结束定格、压缩完成、活动条显隐、窗口 resize 之后，最新消息（含尾部块）完整可见，无需手动滚 | 真实场景下 `scrollEl.scrollHeight - scrollTop - clientHeight ≤ 2px`（dpr=1；dpr=2 的 retina 环境按 ≤4px 判；§5 验收逐场景实测） |
 | G2 | 用户用**任何**输入方式上滑（滚轮 / 滚动条拖拽 / 键盘 PageUp·Home）脱离锚定后，任何自动跟随不得把视口扯回；有新内容时浮出「回到底部」按钮 | INVAR-M4-2′ 保持；§5 场景 V5 反向验证（含滚动条拖拽路径） |
 | G3 | 「滚动后又发生高度/内容变化」这一类回归，未来在 dev 环境即时报警 + 单测/pre-commit 拦截，不再依赖用户报障 | §4.4 三层护栏全部落地并登记 |
 
@@ -63,7 +65,7 @@ pi 进程（token 流 / 工具结果 / compaction entry）
                     ├─→ ④ MarkdownRenderer / useMarkdownStreaming（rAF 节流 + latest-wins
                     │     串行 + fence 静默 finalize）——DOM 高度比 store 内容晚 ≥1 帧，
                     │     fence 完整渲染可延迟到消息 complete 之后
-                    ├─→ ⑤ 尾部块（ActivityStrip 24px/行、PendingBubble、ForkNotice）
+                    ├─→ ⑤ 尾部块（ActivityStrip 24px/行、ForkNotice）
                     │     文档流位于 Virtualizer 之后，不进 virtua scrollSize
                     └─→ ⑥ useMessageStreamScroll 的 4 个 watch → followIfStuck → rAF →
                           v.findItemIndex(v.scrollSize) → scrollToIndex(last, {align:'end'})
@@ -79,7 +81,7 @@ pi 进程（token 流 / 工具结果 / compaction entry）
 - **F1 流式回复定格后差 1-2 行（最高频）**：助手回复流式输出，结束后最后 1-2 行（常是一个代码块的首行或收尾行）被裁在视口外。触发条件：每次流式回复结束。机制：末次文本增长的 DOM 高度经 rAF 节流渲染 + virtua RO 实测后才生效，而最后一次 follow 在此之前已执行完毕（环节 ③④⑥ 接缝，根因 R1）。
 - **F2 发送消息后活动条/末行不可见**：用户发送消息，turn 进入 dispatching，「思考中…」活动条（24px，在 Virtualizer 外）出现；跟随滚动只滚到虚拟列表末端，活动条被压在视口底外 24px——约 1-2 行（环节 ⑤，根因 R2）。
 - **F3 长会话压缩完成后通知整条不可见**：长会话（显示「加载更多」→ virtua `startMargin=44`，LOAD_MORE_RESERVED_HEIGHT，message-stream-layout.ts:48）中自动/手动压缩完成，「上下文已压缩」SystemNotice（`py-1` + `--text-xs`，实测约 24-25px < 44px）成为末项，但跟随滚动钉到了**倒数第二项**——通知整行沉在视口外，且 `stickToBottom` 仍为 true（距底为负值 ≤ 40 阈值），**不浮出「回到底部」按钮**，用户无任何提示（环节 ⑥，根因 R3）。skill 注入提示行（SkillNoticeInline，`py-0.5` 约 21px）作为末项时同样命中。
-- **F4 session 占用时发送的消息"消失"**：session 忙时发送的消息进 defer 队列，以 PendingBubble 形式渲染在 Virtualizer 外；`messages.length` 不变 → 4 个 watch 一个都不触发 → 没有任何滚动发生，用户必须手动下滚才能看到自己刚发的消息（环节 ⑤⑥，根因 R2 的触发缺口面）。
+- **F4 session 占用时发送的消息"消失"**：session 忙时发送的消息进 defer 队列，渲染在 composer 上方队列区 defer 行（不占 Virtualizer 尾部）；`messages.length` 不变 → 4 个 watch 一个都不触发 → 没有任何滚动发生，用户必须手动下滚才能看到自己刚发的消息（环节 ⑤⑥，根因 R2 的触发缺口面）。
 - **F5 滚动条拖拽/键盘上滑后被持续扯回（既有缺陷，本设计若不管会被放大）**：`useVirtuaFollow.ts:162-173` 实装证实脱离锚定**只**由 `onWheel deltaY<0` 驱动——滚动条拖拽、键盘 PageUp/Home 上滑不触发 wheel，`stickToBottom` 保持 true，下一个跟随触发就把用户扯回底部。现状下触发源只有 4 个 watch（低频，多数场景碰巧躲过一次扯回）；若不修，本设计的 RO 兜底网会把扯回频率放大到「每一次内容高度变化」（如阅读历史期间中部图片加载完成）——这是对 G2 的结构性侵犯，必须在本次一并修复（根因 R5）。
 
 ### 3.3 根因分析（五个，前四个全部经 node_modules 实装核实）
@@ -92,7 +94,7 @@ pi 进程（token 流 / 工具结果 / compaction entry）
 跟随触发链是 `watch → followIfStuck → rAF → scrollToIndex`。rAF 回调先于同帧 RO 投递执行（§3.1 时序事实），所以 scrollToIndex 用的是上一帧的高度缓存；本帧新长出的 1-2 行落在滚动目标外。流式期间下一个 token 的 follow 会追平（所以过程中几乎不可见），但**流结束后的最后一段增长——收尾文本帧、fence finalize 的完整代码块渲染（useMarkdownStreaming.ts 的 silence-finalize/complete 兜底）、shiki 高亮、图片加载——之后没有任何触发源**。virtua 的 jump 补偿也不兜底：其实装（core/index.js case 3，:114-140）只对「视口顶边以上/与顶边相交」的 item 做位置补偿（防下拉跳动语义），对视口底部末项长高**结构性零补偿**，virtua 0.50.0 无 bottom-sticky 能力（探针 P-comp ✅ 已核）。
 
 **R2 尾部块在 virtua 坐标系之外，且其显隐大多没有滚动触发。**
-scrollToIndex 的目标公式（core/index.js:287）：`scrollTop = startMargin + itemOffset(last) + itemSize(last) - viewportSize`，其中 `viewportSize` = 滚动容器的 `contentRect.height`（**不含 padding**，vue/index.js:368，探针 P-viewport ✅ 已核）。scrollEl 的 `pt-20px + pb-8px = 28px`（MessageStream.vue:16 + style.css:120）恰好抵消该扣除，因此**无尾部块时** align-end 像素级正确。但尾部块（ActivityStrip/PendingBubble/ForkNotice）在 Virtualizer 之后，不占 scrollSize——滚动目标比真实底部恒短一个尾部高度（F2 的 24px 正由此来）。更糟的是触发缺口：useMessageStreamScroll 的 4 个 watch 只覆盖消息条数/末条文本/isCompacting/isSessionActive，**executingBash、pendingEntries、forkNotices 的显隐没有任何滚动触发**（F4 正由此来）。
+scrollToIndex 的目标公式（core/index.js:287）：`scrollTop = startMargin + itemOffset(last) + itemSize(last) - viewportSize`，其中 `viewportSize` = 滚动容器的 `contentRect.height`（**不含 padding**，vue/index.js:368，探针 P-viewport ✅ 已核）。scrollEl 的 `pt-20px + pb-8px = 28px`（MessageStream.vue:16 + style.css:120）恰好抵消该扣除，因此**无尾部块时** align-end 像素级正确。但尾部块（ActivityStrip/ForkNotice）在 Virtualizer 之后，不占 scrollSize——滚动目标比真实底部恒短一个尾部高度（F2 的 24px 正由此来）。更糟的是触发缺口：useMessageStreamScroll 的 4 个 watch 只覆盖消息条数/末条文本/isCompacting/isSessionActive，**executingBash、forkNotices 的显隐没有任何滚动触发**（F4 正由此来）。
 
 **R3（确定性最强）`findItemIndex(scrollSize)` 与 startMargin 坐标错位，末项较短时钉到倒数第二项。**
 virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，内部减 startMargin（core/index.js:78，`$findItemIndex: e => d(R, e - m)`）；而 handle 的 `scrollSize` getter = `max(totalSize, viewportSize)`，**不含** startMargin（vue/index.js:470-471，探针 P-coord ✅ 已核）。useVirtuaFollow.ts:131/166（设计期现场，D1 索引直取后已删除，事故背景注释现存 :27）把 `scrollSize` 直接当绝对坐标传入，实际反查偏移 = `totalSize - 44`（load-more 显示时 startMargin=44）。**只要末项实测高度 < 44px（一行 SystemNotice/SkillNoticeInline 恒成立），findItemIndex 返回倒数第二项**，scrollToIndex 把倒数第二项的底部钉到视口底，真正的末项整行沉底。且滚完后距底 = `末项高 - 44 < 0 ≤ 40`（BOTTOM_THRESHOLD），`stickToBottom` 保持 true → 不浮回到底部按钮、后续每次 follow 重复同一错误目标——**自我锁死的错钉**（F3）。同模式误用还有第二处实例：`vlistBottom`（MessageStream.vue，同为 `findItemIndex(v.scrollSize)`，消费链见 §4.3 D6）。
@@ -116,7 +118,7 @@ virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，�
 - **T1（反转 F1）**：助手流式回复一段含代码块的长文。流式中窗口持续贴底；最后一个 token 到达、markdown 末帧渲染、代码块 shiki 高亮完成的**那一帧**，RO 兜底网检测到末项高度变化 → 自动再跟随 → 回复的最后一行完整可见，`scrollHeight - scrollTop - clientHeight ≤ 2px`。用户全程无需碰滚动条。
 - **T2（反转 F2）**：用户发送消息。dispatching「思考中…」活动条出现的当帧即被滚入视野（它是真实底部的一部分）；助手开始流式输出后活动条消失，视口保持在新的真实底部。
 - **T3（反转 F3）**：长会话触发自动压缩。「上下文已压缩」SystemNotice 落为末项后完整可见——跟随目标恒为末项本身（索引直取），与它的像素高度无关。
-- **T4（反转 F4）**：session 占用中发送消息，PendingBubble 气泡出现的当帧自动滚入视野；投递确认转正常消息后视口仍在底部。
+- **T4（反转 F4）**：session 占用中发送消息，defer 行在 composer 上方队列区展示（不占对话流尾部）；投递确认转正常消息后视口仍在底部。
 - **T5（保持并扩展既有好行为）**：用户上滑翻阅历史——无论用滚轮、滚动条拖拽还是键盘 PageUp——都即时脱离锚定，新内容到达视口**不**被扯回（INVAR-M4-2′），右下浮出「回到底部」按钮；点击后同步强制回到底部并恢复贴底。
 
 **失败路径与恢复指引（准则 6）**：
@@ -154,7 +156,7 @@ virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，�
 - **采用**：MessageStream 模板把三个尾部块收进一个 `<div ref="tailEl">` 容器（仍在滚动容器文档流内、Virtualizer 之后）；RO 实测 `tailEl.offsetHeight` 存入 `tailHeight` ref 并注入 useVirtuaFollow；follow 原语调 `scrollToIndex(last, { align: 'end', offset: tailHeight })`（virtua scrollToIndex 的 `offset` 参数实装语义 = 在目标 scrollTop 上正偏移，core/index.js:287，探针 P-offset ✅ 已核）。数学不变量写入代码注释：scrollEl `pt-20 + pb-8 = 28px` 与 virtua viewportSize 不含 padding 的 28px 扣除精确抵消，因此 `offset = tailHeight` 时落点即真实底部，改动任一 padding 值必须同步复核该注释。
 - **被否**：把 28px 抵消改为显式换算（如自定义 viewport 计算）——现状数学已正确，重写只会引入新断言；保持 virtua 公式 + offset 是最小侵入。
 - **证据**：core/index.js:287 公式；vue/index.js:368（contentRect 不含 padding）；MessageStream.vue:16 + style.css:120（padding 值）。
-- **效果**：T2/T4 成立——活动条、pending 气泡、fork 行成为滚动目标的一部分。
+- **效果**：T2 成立——活动条、fork 行成为滚动目标的一部分。
 
 **D3：RO 兜底网取代信号枚举 watch；未读标记只挂 store 级信号与 tailEl（修 R1 + R2 触发缺口 + R4）**
 - **采用**：MessageStream 把 `<Virtualizer>` 与 `tailEl` 收进一个**静态无样式** `<div ref="contentWrapEl">`（永不获得 position/transform/尺寸样式——它不构成 containing block，空态欢迎语 `absolute inset-0` 与 load-more 浮层 `absolute top-0` 留在 wrapper 外、锚定关系不变；该约束写入模板注释与 §4.4 结构护栏），并给 `<Virtualizer>` 传 `:scroll-ref="scrollEl"`（virtua 0.50.0 实装支持 scrollRef prop，vue/index.js:348 prop 声明 + :446 挂载选择，探针 P-wrap ⛔ 实施期门）。跟随/未读触发矩阵（「跟随」= 贴底则滚底；「标 unread」= 脱离则点亮「回到底部」浮层；**所有触发最终都进同一个 follow 原语**，rAF 内重读 stickToBottom 的 guard 不变）：
@@ -163,7 +165,7 @@ virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，�
   |---|---|---|
   | `messages.length` watch（保留，store 级） | 跟随 | 标 unread |
   | 末条消息文本长度 watch（保留，store 级——流式 token 到达；**保留现状的 `lastRenderTurn.isStreaming` 守卫**：仅在末 turn 流式中触发，编辑历史消息等非流式内容变化不触发——useMessageStreamScroll.ts:64 既有语义原样迁移） | 跟随 | 标 unread |
-  | `tailEl` RO 增高（活动条/pending 气泡/fork 行出现或长高——底部区域新内容） | 跟随 | 标 unread |
+  | `tailEl` RO 增高（活动条/fork 行出现或长高——底部区域新内容） | 跟随 | 标 unread |
   | `contentWrapEl` RO 其余变化（spacer 增高/降低——含 fence finalize、图片加载、估算收敛、trace 折叠） | 跟随 | 不动，**不标** unread |
   | `scrollEl` RO（视口 resize） | 跟随 | 不动，不标 |
   | 纯宽度变化（高度未变）/ load-more 前插抑制窗（`isPrepend`） | 显式 no-op / 跟随不标 | 不标 |
@@ -255,7 +257,7 @@ virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，�
 | **V1 发送短消息** | G1 | 用户在 dev app 普通会话输入「你好」发送；等待 turn 完成（dispatching → streaming → settled） | 过程中每阶段采样 gap 达标；dispatching 期「思考中…」活动条在视口内完整可见（改造前它被压在视口外 24px） |
 | **V2 长流式回复含代码块** | G1 | 用户要求「写一个有 30 行注释的 typescript 函数并解释」；等回复完整结束、代码块高亮渲染完成后再等 1s（覆盖 fence finalize/异步高亮） | 静止后 gap 达标；回复最后一行完整可见；连续帧采样无振荡（P-timing） |
 | **V3 长会话压缩完成通知（R3 现场）** | G1 | 在长会话（load-more 可见）触发手动压缩（或自动压缩）；等「上下文已压缩」SystemNotice 落为末项 | 通知整行可见，gap 达标（改造前：通知整行消失且无「回到底部」浮层） |
-| **V4 占用期发送（pending 气泡）** | G1 | 在 session 仍 streaming 时连续发送第二条消息；观察 PendingBubble 出现到转正常态全过程 | 气泡出现当帧 gap 达标（气泡可见）；转正常消息后 gap 仍达标 |
+| **V4 占用期发送（defer 行）** | G1 | 在 session 仍 streaming 时连续发送第二条消息；观察 composer 队列区 defer 行出现到转正常态全过程 | defer 行在 composer 队列区可见（不占对话流，无需滚动）；转正常消息后 gap 仍达标 |
 | **V5 用户上滑脱离锚定（负面反向，含 R5 修复面）** | G2 | 在 V2 同类流式进行中：a) 滚轮上滑 3 屏；b) **滚动条拖拽**上滑 3 屏（改造前不脱离、被扯回）——分两轮，保持到回复结束 | 两轮全程视口均不被扯回（scrollTop 无向下跳变）；右下出现「回到底部」浮层；点击后 gap 达标且浮层消失 |
 | **V6 窗口 resize** | G1 | 贴底态下把窗口高度拉大 200px 再缩回 | 两个方向操作后 gap 均达标 |
 | **V7 subagent 虚拟 session** | G1 | 打开一个正在运行的 subagent 标签页，等其流式输出结束 | 与 V2 同标准（验证同一组件的第二消费面） |
@@ -273,7 +275,7 @@ virtua 实装语义：`findItemIndex` 入参按**绝对滚动坐标**解释，�
 | 阶段 | 单元 | 内容 | justification（为什么这么拆） | 独立验收 |
 |---|---|---|---|---|
 | M1 | **U1 useVirtuaFollow 重构** | 新增 `itemCount` / `endOffset` 入参；末项索引直取；follow 原语加 `offset`；「静默跟随（不标 unread）」变体；`onScroll` 复合判据 + `lastOffset` 快照（NaN 重置规则）+ 收敛抑制窗状态（D7）；删除 findItemIndex 派生 | 坐标、触发原语与脱离语义的 SSOT，其余单元都消费它；U1 先行可把 R3 的一行级修复独立交付 | 单测：startMargin=44 + 短末项用例断言 scrollToIndex 收到 `length-1`；复合判据四回声用例 + force 后快照/抑制窗用例 |
-| M1 | **U2 MessageStream 结构与接线** | 模板加 `contentWrapEl`（静态无样式 div，模板注释钉禁止定位样式；空态欢迎语与 load-more 浮层留 wrapper 外）包 Virtualizer + 新 `tailEl`（收编 PendingBubble/ActivityStrip/ForkNotice 三块）；`<Virtualizer>` 传 `:scroll-ref="scrollEl"`；挂 RO（contentWrapEl + scrollEl，回调内按 tailEl 高度快照区分两类变化；isPrepend 抑制窗）；messages.length + 末条文本长度两个 watch 迁入；`vlistBottom` 同款修正（D6）；删 useMessageStreamScroll 调用，force 入口内联；头部注释同步 INVAR-M4-2′ | 结构变更集中在一个文件一次提交，便于 P-wrap 探针的改造前后对比 | P-wrap/P-timing/P-no-loop 三个 ⛔ 探针全过（dev app 实测） |
+| M1 | **U2 MessageStream 结构与接线** | 模板加 `contentWrapEl`（静态无样式 div，模板注释钉禁止定位样式；空态欢迎语与 load-more 浮层留 wrapper 外）包 Virtualizer + 新 `tailEl`（收编 ActivityStrip/ForkNotice 两块）；`<Virtualizer>` 传 `:scroll-ref="scrollEl"`；挂 RO（contentWrapEl + scrollEl，回调内按 tailEl 高度快照区分两类变化；isPrepend 抑制窗）；messages.length + 末条文本长度两个 watch 迁入；`vlistBottom` 同款修正（D6）；删 useMessageStreamScroll 调用，force 入口内联；头部注释同步 INVAR-M4-2′ | 结构变更集中在一个文件一次提交，便于 P-wrap 探针的改造前后对比 | P-wrap/P-timing/P-no-loop 三个 ⛔ 探针全过（dev app 实测） |
 | M1 | **U3 删除 useMessageStreamScroll + 测试迁移与挂载级测试适配** | 删 composable 与其测试；guard 语义用例并入 use-virtua-follow 测试；适配直接挂载 MessageStream 的既有测试（`MessageStream.wire.test.ts` / `MessageStream-kind.test.ts` / `MessageStream-subagent-force-working.test.ts` 等：模板 wrapper + scrollRef + RO 进入其渲染树，happy-dom 无 RO 时需注入 stub，mock Virtualizer handle 字段集随 U1 签名调整） | 减法交付物单列，diff 审查时能一眼确认没有行为被静默丢弃；挂载级适配显式列名，避免「静默改测试」 | `pnpm --filter renderer test` 绿 |
 | M2 | **U4 护栏三件套 + docs 同步清扫** | `usePinBottomGuard`（dev 断言，前置收敛窗口 + dpr 阈值）；`scripts/check-scroll-follow.mjs` + pre-commit 挂接（显式声明在 M1 禁用模式归零之后落地）；constraints.json 登记 C-state-11 + `render-constraints.mjs` 重生成；docs/testing/03-chat-flow.md 教训登记；C-proc-10 清扫（composer-multi-skill-injection.md:265 + 其 impact-review.md:75 的 useMessageStreamScroll 悬空引用改述、conversation-stream-block-rendering.md 的 INVAR-M4-2 表格行改述并建立指向本设计 D7 的指针、packages/ui/src/features/chat/index.ts:12 注释改述；ADR-0045:45 为历史快照不改写）→ 跑 `node scripts/check-doc-symbol-drift.mjs` | 护栏依赖 M1 的最终形态（白名单文件清单与不变量措辞），放在行为稳定后落；docs 清扫按纪律与被删符号同批 | V8 故障注入验证；check-doc-symbol-drift.mjs 退出码 0 |
 | M2 | **U5 真实场景验收执行** | §5.2 V1-V9 全跑，采样记录归档（含 dpr 记录） | 验收是独立交付物（证据），不是实施的副产品 | 9 场景通过标准全达成 |

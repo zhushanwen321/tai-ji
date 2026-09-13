@@ -315,7 +315,6 @@ export default {
     pendingHintBash: '等待命令执行结束后发送',
     pendingHintSettling: '等待当前回合结束后发送',
     cancelQueued: '撤销排队',
-    submittedAwaitingDelivery: '已提交，等待投递',
     chipBadge: '+{count}',
     chipBadgeHint: '含 {count} 个附件/引用，将随消息一并发送',
     // [compact-defer-composer-queue u1] defer 行占用分档 chip（压缩后 / 命令后 / 稍后发送）

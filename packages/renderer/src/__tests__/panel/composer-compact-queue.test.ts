@@ -1,8 +1,8 @@
 /**
  * Composer defer 队列 UI 集成测试（compact-queued-messages W2 → session-occupancy u4b/u6b）。
  *
- * 验证（入队行为 + 发送位 queue 态；队列可见性由对话流 PendingBubble 承接——独立 badge
- * 组件已随 u6b/D7 展示统一移除，撤销/预览 UI 由 PendingBubble.test.ts 覆盖）：
+ * 验证（入队行为 + 发送位 queue 态；队列可见性由 composer 上方 QueueBubble 的 defer 行承接——独立 badge
+ * 组件已随 u6b/D7 展示统一移除，撤销/预览 UI 由 __tests__/panel/queue-bubble-s8.test.ts 的 defer 行分支覆盖）：
  * - TC11: compact 期间 ⏎ 发送 → 入队 + 输入清空 + 发送位 queue 态（时钟角标按钮）
  * - TC12: compact 期间发送按钮点击 → 入队（按钮可点非 spinner，title=「排队发送 · ⏎」）
  * - TC13: compact 期间 `/` 前缀文本 → 拒绝入队 + toast + draft 保留
@@ -12,7 +12,7 @@
  * - TC17: compact 态无输入 → 发送按钮 disabled + title=sendHint + 点击不入队
  * - TC18: compact 期间 Alt+⏎ → 入队而非 followUp
  * （原 TC14 badge 条数/预览/逐条取消为 badge 专属 UI，随组件移除；× 撤销在
- *   message-stream/__tests__/PendingBubble.test.ts 覆盖）
+ *   queue-bubble-s8.test.ts 的 defer 行分支覆盖）
  *
  * 策略（对齐 composer-bash-mode.test.ts 结构范本）：
  * - 真 pinia + 真 chatStore（[u5b] isCompacting 由 occupancy 投影派生——驱动方式 =

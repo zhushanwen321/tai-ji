@@ -30,7 +30,7 @@
  *   负值 ≤ 阈值 → stickToBottom 恒 true → 不浮「回到底部」按钮 → 自我锁死的错钉（设计 §3.2 F3）。
  *   索引直取与 startMargin/scrollSize 坐标语义彻底解耦，末项定位与末项像素高度无关。
  * - scrollToIndex(末项, { align: 'end', offset: endOffset() })（D2）——endOffset = Virtualizer
- *   之后、仍在滚动容器文档流内的尾部块（ActivityStrip / PendingBubble / ForkNotice）实测总高，
+ *   之后、仍在滚动容器文档流内的尾部块（ActivityStrip / ForkNotice）实测总高，
  *   由 U2 经 tailEl ResizeObserver 注入。virtua offset 语义 = 目标 scrollTop 正偏移
  *   （0.50.0 core $scrollToIndex 公式：`offset + startSpacerSize + itemOffset(last) +
  *   itemSize(last) - viewportSize`）。

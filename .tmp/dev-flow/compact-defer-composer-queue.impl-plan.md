@@ -79,7 +79,7 @@ graph TD
 | u1 | committed（67e5f0f95 基线后 u1 commit；queue-bubble-s8 16/16、typecheck 0、领地 5 文件精确） | 1 | commit hash 见 git log；test_evidence = vitest run queue-bubble-s8 16 passed + pnpm typecheck exit 0（主 agent 复跑确认） |
 | u2 | committed（u2 commit；use-compact-queue 25 + chat-transient-reset 5 + fg5 41 + wire/compact-queue 19 全绿、typecheck 0、领地 4 路径含 2 删除） | 1 | 主 agent 复跑 100 用例 99 绿（唯 1 红 = D2 死键守卫，处置入 u4）；hash 见 git log |
 | u3 | committed（与 u2 同窗口 commit；ActivityStrip 26/26、shared 395/395、typecheck 0、领地 4 文件） | 1 | 主 agent 复跑 ActivityStrip + shared 确认；偏差 2 条均为登记级（常量 50 实测口径、mock peek 测试基建） |
-| u4 | pending | 0 | - |
+| u4 | committed（u4 commit；drift exit 0、PendingBubble 零残留、core 2061/2061、locale-key-usage-guard 3/3、领地 10 文件精确） | 1 | 主 agent 复跑 V1–V4 全绿；hash 见 git log |
 
 ## 7 残留风险与变更历史
 - 残留风险：① COMPACTING_NOTICE_HEIGHT 已按实测口径取 50（含 border-y），真机 dev 断言作最终裁决；② A8 真机窗口可观测性由设计 A8 步骤（D1 长任务维持 run）保障，组件测试已锁定核心断言；③ ~~submittedAwaitingDelivery key 暂留~~ → D2 升级：反向守卫红，u4 双侧删键（已登记）。
