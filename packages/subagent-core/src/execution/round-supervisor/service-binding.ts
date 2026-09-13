@@ -93,7 +93,8 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
 
 /** 本 root session 的 running record 候选（内存 ∪ 磁盘重建投影）。
  *  [H2 W2] origin 透传——superseded 对账的 workflow 候选豁免判据（supervisor.evaluate
- *  消费面，W1 已把 origin 投影进 SubagentRecord）。 */
+ *  消费面）。防御性保留：当前 collectRecords 缺省 includeWorkflow=false 过滤下
+ *  workflow record 不进候选，本判据不命中；治理面若显式传 includeWorkflow:true 即生效。 */
 function supervisorCandidates(binding: RoundSupervisorBinding): SupervisorCandidateRecord[] {
   const rootFilter = binding.getSessionRootId() ?? undefined;
   return binding

@@ -99,8 +99,11 @@ const logger = getLogger("subagents");
 //
 // session_shutdown 是 pi 的 async hook，进程被 SIGTERM/SIGINT 强杀或崩溃时来不及
 // 触发；sync 子进程（controller 为 undefined，abortRunningControllers 跳过它们）会
-// 泄漏为孤儿。process.on 兜底显式 killAllSpawnedChildren 收割全部活子进程。
-// guard 防多信号叠加（如 SIGINT 后又 beforeExit）重复 kill。
+// 泄漏为孤儿。process.on 兜底调 killAllSpawnedChildren——[如实口径] core 侧该入口
+// 为镜像置死 no-op（仅清空 core spawnedChildren 镜像记账，不发任何进程信号），真实
+// 回收链 = 子进程 stdin-EOF 自灭（宿主退出 / EngineClient 销毁）+ dispose 链；本调用
+// 保留兜底占位（镜像一致性），不构成真实收割。guard 防多信号叠加（如 SIGINT 后又
+// beforeExit）重复触发。
 let processShutdownHookFired = false;
 
 function reapSpawnedChildrenOnShutdown(): void {

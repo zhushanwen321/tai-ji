@@ -193,7 +193,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
      *  收不到带指针行的终态通知（审查 C-1）。故 round 置 undefined（key 回退为裸 id），
      *  轮数改经 totalRounds 进文案 "completed after N rounds."（C-2）。
      *
-     *  仅 chatMode close 语义调用（closeChatIdle 终态化成功后；[H1 U6] 旧
+     *  仅 chatMode close 语义调用（close 收起 markArchived 终态化成功后；[H1 U6] 旧
      *  closeAfterRoundSettled 消费点已随 chat 域退役）。
      *  one-shot 显式拒绝（G4：one-shot close 路径现状无终态通知，字节不变）；cancel 走
      *  cancelBackground 自己的 notifyComplete，不经本方法。幂等性：两条 close 路径均由
@@ -201,7 +201,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
      *  本方法自身不重复发送；迟到的轮次收尾 .then 通知与轮次通知同 key=`id:round`，
      *  60s 窗内仍被吞，不构成第三条。 */
     /** @param emptyBody true = 终态通知正文置空串（D2 路径②）。W16 P-1 修复后
-     *  closeChatIdle 的 doneResult.text 改用 record.result 保真（close 终态
+     *  close 终态的 doneResult.text 改用 record.result 保真（close 终态
      *  subagent-record entry 的 result 不抹空轮终真实值），「正文空」不再由合成空
      *  text 的副作用承载，改为显式参数——持久化 result 与通知正文两个关注点解耦。 */
     notifyClosed(record: ExecutionRecord, emptyBody = false): void {

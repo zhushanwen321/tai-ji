@@ -1,4 +1,4 @@
-// src/core/session-reconstructor.ts
+// src/execution/session-reconstructor.ts
 //
 // 从 subagent 的 session.jsonl 重建完整的 SubagentRecord 数据。
 //
@@ -8,7 +8,8 @@
 // 等富数据——session.jsonl 是唯一 source of truth（history.jsonl 已废弃）。
 //
 // 身份恢复：session.jsonl 的 header 不含 ExecutionRecord.id / agent / mode，故
-// session-runner 在创建 session 后立即写一条 custom entry（customType:"subagent-identity"）
+// subagent 扩展（subagent-workflow session-lifecycle，pi.appendEntry 唯一写入点）在
+// 创建 session 后立即写一条 custom entry（customType:"subagent-identity"）
 // 携带 {id, agent, mode, task, startedAt}。本模块读这条 entry 恢复身份。
 //
 // 纯函数 + 防御性 I/O：任何文件缺失/损坏/格式漂移/缺 identity entry 均返回 undefined
@@ -79,7 +80,7 @@ interface JsonlUserMessage {
 
 type JsonlMessage = JsonlUserMessage | JsonlAssistantMessage | JsonlToolResultMessage;
 
-/** custom entry 的 data（session-runner 写入的 subagent-identity）。 */
+/** custom entry 的 data（subagent 扩展写入的 subagent-identity）。 */
 export interface SubagentIdentityData {
   id: string;
   agent: string;

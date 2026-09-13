@@ -34,9 +34,7 @@ import {
 } from "../types.ts";
 import type {
   Epoch,
-  ExecutionStatusV2,
   Intent,
-  LegacyClosedStatus,
   TranscriptRef,
 } from "../types.ts";
 
@@ -170,15 +168,9 @@ describe("StopReason 枚举完整性", () => {
 // ── 新词汇类型面（值域编译锚） ────────────────────────────────────────────────
 
 describe("新词汇类型面值域", () => {
-  it("Intent / ExecutionStatusV2 / LegacyClosedStatus / Epoch 值域", () => {
+  it("Intent / Epoch 值域", () => {
     const intents: Intent[] = ["active", "archived"];
     expect(intents).toEqual(["active", "archived"]);
-
-    const statuses: ExecutionStatusV2[] = ["running", "idle"];
-    expect(statuses).toEqual(["running", "idle"]);
-
-    const legacy: LegacyClosedStatus = "closed";
-    expect(legacy).toBe("closed");
 
     const epoch: Epoch = 0;
     expect(epoch).toBe(0);

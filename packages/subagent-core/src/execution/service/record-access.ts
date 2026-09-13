@@ -183,10 +183,12 @@ export class RecordAccess {
    * manifest——恢复 list 可见性 + message 的可重连分流（D4 revive 准入仍由
    * cold-lookup 四守卫把门，重物化只补反查索引，不复活任何执行态）。
    *
-   * 刻意收窄的语义边界：
-   *  - 只认可重连集。user-close/cancelled（主动告别，close 语义不可旁路）与
-   *    gc/parent-fork/parent-new（自洽终态，无续聊歧义）不重物化——条目自洽，
-   *    「不可恢复」即其对外语义，补可见性收益不抵语义面扩大（M1 负向断言锁定）。
+ * 刻意收窄的语义边界：
+ *  - 只认可重连集（RECONNECTABLE_FINAL_REASONS = disconnected/parent-shutdown）。
+ *    重物化是可见性自愈的窄口：只对「查询面已不可见且 entry 自描述为旧 closed 读形态」
+ *    的条目补 manifest 反查索引，不复活任何执行态。按 closedReason 集合 gate 是桥接期
+ *    残留——万物可续模型下续聊资格由冷查物理三件套判定（§3.2.3），本集合判据随桥接
+ *    词汇清算统一收口（M1 负向断言锁定现值）。
    *  - 只补本 rootSessionId 的 entry（每 session boot 治自己的树；跨 session 记录
    *    归属其自身 boot 段，防本进程替异树批量落盘）。
    *  - 已可见（磁盘锚或 manifest 幸存）的 id 跳过——重物化是幂等补缺，不是覆写源。
@@ -514,8 +516,8 @@ export class RecordAccess {
     }
     if (!record || record.rootSessionId !== this.deps.getSessionRootId()) {
       throw new Error(
-        `subagent not found or not owned: ${id}. Recovery: use action:'list' to confirm the id; ` +
-        `ended subagents cannot be messaged — start a new one; only subagents owned by the current session can be operated on.`,
+        `subagent not found or not owned by this session: ${id}. Recovery: use action:'list' to confirm the id; ` +
+        `only subagents owned by the current session can be operated on.`,
       );
     }
     // [v4 A-5 / P7] 直接父校验：rootSessionId 已确认 record 属于本 session 树，但递归场景下

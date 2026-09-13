@@ -44,7 +44,7 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
 
 /**
  * 唯一执行状态（永久会话模型两态，设计 subagent-permanent-session-model.md
- * §3.2.1/§3.2.2；U2 自 u-foundation 的 ExecutionStatusV2 转正，终态概念删除）：
+ * §3.2.1/§3.2.2；U2 两态转正，终态概念删除）：
  *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
  *
  * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障，不参与资格判定）；
@@ -57,14 +57,6 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  * cancel/close/编排性关闭产出。
  */
 export type ExecutionStatus = "running" | "idle";
-
-/**
- * 占用维度两态别名（u-foundation 骨架期名称，U2 转正后与 {@link ExecutionStatus}
- * 同一类型）。保留至 U3 消化存量引用后删除。
- *
- * @deprecated 改用 {@link ExecutionStatus}。
- */
-export type ExecutionStatusV2 = ExecutionStatus;
 
 /**
  * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1 建议新增）：
@@ -185,17 +177,6 @@ export type ExecutionMode = "background";
 // 永久会话模型领域词汇（设计 subagent-permanent-session-model.md §3.2.1；
 // u-foundation 类型骨架先行，U2 实装状态机）
 // ============================================================
-
-// [U2] ExecutionStatusV2 骨架别名已随两态转正并入 {@link ExecutionStatus}
-//（定义见「执行状态机」section；过渡别名随本体保留至 U3 清理）。
-
-/**
- * 旧终态值独立类型：仅供读侧兼容映射（§3.2.4——旧 `.state` finalized/cancelled
- * 重建时映射 idle + stopReason），U3/U4 切换完成后随 closed 联合值一并清除。
- *
- * @deprecated 终态概念已删除（§3.2.2「无 closed 事件」），禁止新写侧产出本值。
- */
-export type LegacyClosedStatus = "closed";
 
 /**
  * 意愿维度（§3.2.1 三维正交之一）：用户是否把会话收起来了（列表可见性）。

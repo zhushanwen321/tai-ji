@@ -42,11 +42,15 @@ export interface FinalizeDeps {
   emitUnregister(id: string, status: string): void;
   /**
    * [F-5 修复] record 终态化的宿主侧收口钩子（recordId；best-effort，抛错由调用方
-   * 在闭包内自行兜底）。单一汇聚点：doFinalizeRecord 是全部 closed 终态的必经路径
-   *（finalizeRecord / closeChatIdle / finalizeFailed / finalizeAborted /
-   * consumeCloseAfterRound）。收口面现 = Continuation 实例清理（[H1 U6] 旧 chat 轮
-   * 路由注销面已随 interact 面退役）。finalizeRoundToIdle 不经本钩子（回 idle 非终态，
-   * 续聊仍需容器）。
+   * 在闭包内自行兜底）。[永久会话模型] 现行调用面（recordLifecycle.finalizeRecord →
+   * doFinalizeRecord 的全部生产入口）：workflow-origin D7 例外族（settleOneShotOutcome
+   * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
+   * 监督器放弃（finalizeClosed）+ finalizeEngineOutcome 兜底（引擎死亡不可接管形态
+   * 的终态化）。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
+   * settle/markRoundIdle 不终态化（万物可续 G1），close = 归档（consumePendingArchive）、
+   * dispose = settle + 自动收起，均不经本钩子。收口面现 = Continuation 实例清理
+   *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销面已随 interact 面退役）。
+   * finalizeRoundToIdle 不经本钩子（回 idle 非终态，续聊仍需容器）。
    */
   onFinalized?: (recordId: string) => void;
   /**

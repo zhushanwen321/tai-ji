@@ -283,7 +283,7 @@ describe("[v8.5] ended-message 分流文案 + fork-from 恢复通道", () => {
 
     it("找不到的 id → 原样透传 not found 文案（id 打错场景不受影响）", async () => {
       await expect(messageHandler(service, { subagentId: "sa-nonexistent", text: "hi" })).rejects.toThrow(
-        /not found or not owned: sa-nonexistent/,
+        /not found or not owned by this session: sa-nonexistent/,
       );
     });
   });

@@ -1,8 +1,9 @@
 // src/execution/engine/common/pool-manager.ts
 //
-// 隔离目录池管理（P2 公共降级层）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md D5（隔离目录池化保留，随 record
-// 生命周期回收，清理只做到池粒度）+ §3.3.9（目录布局 / refs.json 方案）。
+// 隔离目录池管理（P2 公共降级层）。现行权威：docs/extensions/subagents/architecture.md
+//（现状 SSOT 导航页）+ constraints.json C-ext-15——原设计 subagent-engine-abstraction.md
+// D5（隔离目录池化保留，随 record 生命周期回收，清理只做到池粒度）/ §3.3.9（目录布局 /
+// refs.json 方案）已删除，git 可追溯。
 //
 // refs.json 文件形态（D8 接线，dual-track-convergence）：引用计数的唯一权威源是
 // 池目录内 refs.json——进程重启后计数可恢复（文件在即计数在）。.acquire 登记

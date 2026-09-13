@@ -4,7 +4,9 @@
 //
 // [U4a / D3 v7] 角色重定义（D3d 模块头权威表述）：
 //   - 宿主 resurrect/接管归口写：写权声明 acquire（markResurrected/acquireWriteLease）
-//     / release（markFinalized/markCancelled/markIdleArchived 内部删）；
+//     / release（[永久会话模型] 现行主出口两点 = markArchived（close 收起）+
+//     markIdleEvicted（内存回收 30 天）；markFinalized/markCancelled 仅剩
+//     workflow-origin D7 例外族与监督器放弃族——legacy 例外，内部删）；
 //   - 判活 = pid 单判据（findForeignLiveInstance：self-pid 排除 + isProcessAlive，
 //     软超时已退役——谱系 #12，跨轮保留 × startedAt 一次性不刷新的组合下超时会
 //     误判在持声明陈旧）。

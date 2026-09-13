@@ -55,18 +55,19 @@ export interface WorkflowRunGcStore {
  * 每个扫描周期：
  *  - record 面：对 store 内全部 active record 中 resumable 的，锚点（idleSince
  *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的归档
- *    （[U2b] markIdleArchived：archive 先 + `.alive` release 后——归档 = 放弃持有
+ *    （[U2b] markIdleEvicted：archive 先 + `.alive` release 后——归档 = 放弃持有
  *    即放弃写权声明，D3a release 出口②）。单条失败不阻断其余（bestEffort 留痕）。
  *    **只归档不补注销**（见文件头注）。
  *  - workflow 面（注入 workflowRuns 时）：running 且 meta.startedAt 超
  *    IDLE_TTL_MS 的 run 终态化归档（transition + save），单 run 失败不阻断。
  *
- * [D8 池引用计数接线] 归档时同步释放该 record 的引擎池引用（releasePoolRef：
+ * [D8 池引用计数接线] 回收时同步释放该 record 的引擎池引用（releasePoolRef：
  * journal 跟随 record 删除 + refs 移除 + 归零删池内原生状态）。锚点选在 30 天 TTL
  * 而非 dispose/archive 类时机，依据：idle record 30 天后引擎侧不会再有活动（archive
- * 后 message 续聊走 fork-from/新 start，不触原引擎），且与 pi 域 session 文件 30 天
+ * 后 message 对 idle record 同 id 续聊走冷查重建 + 新轮 spawn——万物可续准入，续聊
+ * 不依赖原引擎池内状态，原池引用可安全释放），且与 pi 域 session 文件 30 天
  * TTL（session-file-gc 同期删①级读源）形成两引擎对称衰减；disposeAllRecords/close
- * 类时机 record 数据仍保留（可 resurrect / GUI 历史重建可见），journal（②级数据源）
+ * 类时机 record 数据仍保留（可冷查重建 / GUI 历史重建可见），journal（②级数据源）
  * 不能删——那是 record 主数据死亡（主 session 文件被 pi 侧删除，core 无触发点）才有
  * 的处置，由 cleanupExpiredPoolRefs 的 TTL 兜底覆盖。
  */
@@ -85,11 +86,12 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
           `[subagents] GC: archiving idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
         );
         try {
-          // [U2b / D3a release 出口②] 归口 markIdleArchived：store.archive 先、`.alive`
+          // [U2b / D3a release 出口②] 归口 markIdleEvicted：store.archive 先、`.alive`
           // release 后（写序在 store 内部——归档 = 放弃持有 = 放弃写权声明，残留声明
-          // 会把 idle 归档后的预期通道 fork-from/新 start 拦死至宿主退出，纯成本零防御
-          // 收益；归档 record 后续被接管时统一 acquireWriteLease 重新声明）。
-          store.markIdleArchived(record);
+          // 会把 idle 回收后 message 同 id 续聊的冷查重建 + 新轮 spawn 通道拦死至宿主
+          // 退出，纯成本零防御收益；回收 record 后续被接管时统一 acquireWriteLease
+          // 重新声明）。
+          store.markIdleEvicted(record);
         } catch (err) {
           bestEffort(err, `GC archive record ${record.id}`);
         }

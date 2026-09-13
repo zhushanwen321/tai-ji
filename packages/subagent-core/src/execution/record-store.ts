@@ -22,20 +22,22 @@
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result/resumable 清除） | entry（best-effort） |
 // | markRoundIdle(id, outcome) | 轮末收口（保持 running-resumable，非置 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
-// | markFinalized(record, reason) | 正常终态（含 disposeAllRecords 编排性关闭，D8 矩阵；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | `.state` writeSync 先 → binding（updateRecordBinding）→ entry/archive → manifest writeSync → `.alive` 删（D8 v7 写序） |
-// | markCancelled(record) | 取消终态（tombstone endedAt） | 同 markFinalized 写序（writeCancelledState） |
 // | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
 // | adoptEngineDeath(id, {error}) | 引擎死亡收养（error/result/resumable 三写；监督器接管编排留调用方） | entry（best-effort） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
-// | markIdleArchived(record) | idle-GC 归档（30 天 TTL 内存回收，非终态化——磁盘仍 running 可接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
+//
+// ── legacy 例外原语（workflow D7 例外族 / 监督器放弃专用；新调用面禁用）──
+// | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃 / 引擎死亡不可接管兜底消费；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | `.state` writeSync 先 → binding（updateRecordBinding）→ entry/archive → manifest writeSync → `.alive` 删（D8 v7 写序） |
+// | markCancelled(record) | cancelled 终态化（仅 workflow D7 例外族 abort 路径；tombstone endedAt） | 同 markFinalized 写序（writeCancelledState） |
+// | markIdleArchived(record) | markIdleEvicted 的 deprecated 转发别名（@deprecated，存量测试消费；生产调用点已迁名） | 完整委托 markIdleEvicted |
 //
 // ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md
 //    §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 意愿动作表；签名已定，实现 U2 填肉）──
 // | markSettled(record, stopReason) | 轮收口（settle：成功/失败/中断统一落 idle + stopReason；替代 markFinalized/markCancelled 的轮收口角色） | U2 定（usage 快照落 binding + manifest 投影；`.alive` 跨轮保留） |
 // | markReopened(record, transcriptRef) | 带历史重开（新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened，§3.2.3） | U2 定（binding 持久化 epoch/锚） |
 // | markArchived(record) | close 收起（intent 翻转 archived + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
-// | markIdleEvicted(record) | 内存回收（markIdleArchived 统一语言更名，语义不变，§3.2.4 release 出口②） | U2 定（= markIdleArchived 写序） |
+// | markIdleEvicted(record) | 内存回收（30 天 TTL，用户不可见，非终态化——磁盘不动、可重建接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终保持 running→markRoundIdle；
@@ -1077,7 +1079,7 @@ export class RecordStore {
    * 重连硬拒」，D3a 被否分支）。
    *
    * [U2 更名] 统一语言更名 markIdleEvicted（「内存回收」义），本名保留为 deprecated
-   * 别名（存量调用方 idle-gc.ts 零改动；U5 编排切换后清理）。实现完整委托。
+   * 别名（生产点 idle-gc.ts 已迁名；存量测试写序全等断言仍消费，删除随测试迁名一并处理）。
    *
    * @deprecated 改用 {@link RecordStore.markIdleEvicted}。
    */

@@ -1,8 +1,8 @@
 // src/execution/__tests__/conversation-continuation.test.ts
 //
 // [H1 U2] ConversationContinuation 单测族（§5 U2 验收清单逐项对应用例）+ SubagentService
-// 集成面（one-shot 四分支回归 / closeAfterRound 退役 / 引擎死亡单发通知 / stale-child
-// 兜底 / 收割链之外的 chat 编排面）。
+// 集成面（one-shot 四分支回归 / closeAfterRound 优雅收口消费（U5：在飞轮不打断，挂起 →
+// 轮终通知送达后归档）/ 引擎死亡单发通知 / stale-child 兜底 / 收割链之外的 chat 编排面）。
 //
 // 设计权威源：docs/architecture/subagent-chat-run-unification.md §3.4（伪码即实现契约）/
 // §3.3 D4 状态迁移表 / D5 双写点 gate / D7 轮末分流。Continuation 单测 = mock host
@@ -1052,11 +1052,11 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 归档：在飞轮�
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     // 在途轮打断入队
     await service.chatActions.deliverChatMessage(record, "queued msg");
-    // [R4 深绑改写] continuations 队列已迁 RunOrchestration 聚合——读取路径改经
-    // 聚合实例（断言对象与强度不变）。
+    // [2026-09-13 design-code-sync 接线] continuations 队列已迁 ChatRounds 聚合——
+    // 读取路径改经聚合实例（断言对象与强度不变）。
     const conts = (
-      service as unknown as { runOrchestration: { continuations: Map<string, { pendingCount: number }> } }
-    ).runOrchestration.continuations;
+      service as unknown as { chatRounds: { continuations: Map<string, { pendingCount: number }> } }
+    ).chatRounds.continuations;
     expect(conts.get(record.id)?.pendingCount).toBe(1);
 
     // [U5] close 优雅收口挂起（不打断在飞轮、不清队列——轮终后归档消费）。

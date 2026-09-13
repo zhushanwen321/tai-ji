@@ -471,7 +471,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const run = soleRun(fake);
     const record = runningRecord(store);
 
-    // 模拟 close 路径赢家（closeChatIdle 终态写点的抢先形态：closed + user-close）
+    // 模拟 close 路径赢家（close 收起 markArchived 终态写点的抢先形态：closed + user-close）
     expect(tryTransition(record, "closed", "user-close")).toBe(true);
 
     run.settle({ content: "done" });
