@@ -150,20 +150,16 @@ describe("EngineClient 帧往返与握手", () => {
 });
 
 describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
-  it("event 通知 / streamDelta / poolResolved / handleReady 路由到 run 作用域回调；handleReady 回填 partial handle", async () => {
+  it("event 通知 / streamDelta / handleReady 路由到 run 作用域回调；handleReady 回填 partial handle", async () => {
     const events: unknown[] = [];
     const deltas: string[] = [];
-    const poolKeys: string[] = [];
-    const readyPartials: Array<{ sessionRef: Record<string, string>; poolKey: string }> = [];
+    const readyPartials: Array<{ sessionRef: Record<string, string> }> = [];
     const route: RunRoute = {
       onEvent: (e) => {
         events.push(e);
       },
       onStreamDelta: (d) => {
         deltas.push(d);
-      },
-      onPoolResolved: (p) => {
-        poolKeys.push(p);
       },
       onHandleReady: (partial) => {
         readyPartials.push(partial);
@@ -176,8 +172,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
         JSON.stringify([
           { op: "emit", seq: 1, event: { type: "text_delta", delta: "hello" } },
           { op: "streamDelta", delta: "stream-1" },
-          { op: "poolResolved", poolKey: "pool-x" },
-          { op: "handleReady", sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" },
+          { op: "handleReady", sessionRef: { sessionId: "s-1" } },
         ]),
       ],
     });
@@ -186,14 +181,13 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     const result = (await client.request("run", {
       runId: "run-1",
       task: { prompt: "p" },
-      ctx: { poolKey: "pool-x", cwd: dataDir },
+      ctx: { cwd: dataDir },
     })) as { handle: { sessionRef: Record<string, string> }; outcome: { content: string } };
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(events).toContainEqual({ type: "text_delta", delta: "hello" });
     expect(deltas).toEqual(["stream-1"]);
-    expect(poolKeys).toEqual(["pool-x"]);
-    expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" }]);
-    expect(client.getPartialHandle()).toEqual({ sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" });
+    expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" } }]);
+    expect(client.getPartialHandle()).toEqual({ sessionRef: { sessionId: "s-1" } });
     unregister();
     await cleanup();
   });
@@ -212,7 +206,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       ],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     expect(mirrorEvents).toContain("childSpawned");
     expect(mirrorEvents).toContain("childStateChanged");
     expect(client.mirror.getEntry(4242)).toMatchObject({
@@ -237,7 +231,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       ],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     expect(logs).toContainEqual({ level: "warn", component: "fake-comp", message: "log-line-1" });
     await cleanup();
   });
@@ -264,7 +258,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"value":"answer-A"');
@@ -287,7 +281,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"cancelled":true');
@@ -307,7 +301,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"unsupported":true');
@@ -335,7 +329,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     });
     await client.ensureConnected();
     const runFailed = expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
     ).rejects.toMatchObject({ code: "engine_crashed" });
     // 分步推进：streamDelta 反向请求是真实 IO（引擎收到 run → 回帧），guardTimer
     // 注册于帧到达之后——一次性 advance(10s) 会与该 IO 竞态（推进时守卫尚未注册）。
@@ -362,7 +356,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     await client.ensureConnected();
     const enginePid = client.enginePid!;
     void client
-      .request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } })
+      .request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } })
       .catch(() => {});
     await vi.advanceTimersByTimeAsync(60_000);
     // ack 已回（引擎继续跑），handler 挂起不触发任何杀链
@@ -392,7 +386,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
     expect(client.enginePid).toBeDefined();
     const path = pidfilePath(dataDir, "fake", "test", process.pid);
     await expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
     ).rejects.toSatisfy((err: Error & { code?: string }) => {
       expect(err.code).toBe("engine_crashed");
       expect(err.message).toContain("stderr tail");
@@ -463,7 +457,7 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     void client
       .ensureConnected()
       .then(() =>
-        client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+        client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
       )
       .catch(() => {});
     await waitFor(() => client.mirror.size > 0);

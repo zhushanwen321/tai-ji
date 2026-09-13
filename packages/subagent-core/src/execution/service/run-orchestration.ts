@@ -55,6 +55,7 @@
 //   改 import 消费）；STALE_CHILD_EXIT_WAIT_MS + delay（唯一消费
 //   killStaleChildBeforeDispatch）随消费主体迁 chat-rounds.ts（2026-09-13 接线）。
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { toErrorMessage } from "../../core/error-message.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
@@ -64,7 +65,7 @@ import type { CollectCoordinator } from "../collect-coordinator.ts";
 import type { ConcurrencyPool } from "../concurrency-pool.ts";
 import { project, tryTransition, updateFromEvent } from "../execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { JOURNAL_INITIAL_POOL_KEY, wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
@@ -615,8 +616,7 @@ export class RunOrchestration {
   /**
    * 非 pi 引擎的 detached 执行编排（与 pi 轮次 kick-off 同构的 background 语义）：
    * pool 并发槽（maxConcurrent 对非 pi 引擎同样生效）→ journal 接线（D6 第②级：
-   * taskId=record.id，初始池 key 占位 'shared'，onPoolResolved retarget 到引擎实际
-   * 池 key——路径与 paths.ts 同源推导）→ engine.run（signal 接 record controller，
+   * taskId=record.id，固定分组 key 'shared'）→ engine.run（signal 接 record controller，
    * kill-chain 两级生效）→ engineHandle 回填（终态迁移落 entry 前）→ 终态迁移 →
    * bg notify（chat 域宿主职责，与 pi 完成通知同语义）。
    */
@@ -657,9 +657,9 @@ export class RunOrchestration {
 
   /**
    * kickOffEngineRun 的 acquire 后主体：journal 接线（D6 第②级：taskId=record.id，
-   * 初始池 key 占位 'shared'，onPoolResolved retarget 到引擎实际池 key）→ engine.run
-   * （signal 接 record controller，kill-chain 两级生效）→ engineHandle 回填（终态迁移
-   * 落 entry 前）→ 终态迁移。bg notify 归编排侧（与 pi 轮次收尾通知归编排对称）。
+   * 固定分组 key 'shared'——[池抽象降级 2026-09-13] 无 retarget，路径构造即终值）
+   * → engine.run（signal 接 record controller，kill-chain 两级生效）→ engineHandle
+   * 回填（终态迁移落 entry 前）→ 终态迁移。bg notify 归编排侧（与 pi 轮次收尾通知归编排对称）。
    */
   async runEngineTask(
     record: ExecutionRecord,
@@ -667,31 +667,32 @@ export class RunOrchestration {
     engine: EnginePort,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
-    // [D3-③ journal 接线合一] writer + retarget + 路径权威收敛 common/journal-wiring
+    // [D3-③ journal 接线合一] writer + 路径权威收敛 common/journal-wiring
     //（与 SAR 同一实现）。chat 域无下游 onEvent 消费者——journal 是事件唯一出口，
     // 不传 forwardEvents。
     const journal = wireEventJournal({ engineId: engine.id, taskId: record.id });
     // [R4 §3.4 不变量 3] 运行中句柄回填：create 应答后（远早于 run resolve）回填
     // record.engineHandle 并经 reportRecordTransition 落 entry——运行中的 GUI 经 entry
-    // 重建 record 即拿到 ①②级读取钥匙（sessionRef/dbPath/poolKey/journalPath），
-    // 不再等终态回填（详情页中途打开可见当时进度快照）。journalPath 此时已是
-    // retarget 后的最终路径（onPoolResolved 在 prepare 期先行触发，writer 是路径权威）。
+    // 重建 record 即拿到 ①②级读取钥匙（sessionRef/dbPath/journalPath），
+    // 不再等终态回填（详情页中途打开可见当时进度快照）。journalPath 由 journal writer
+    // 定稿（[池抽象降级] 无 retarget，路径构造即终值）。
     // 仅 chat 域接线——workflow 域 SAR 无运行中 record 读取方，刻意不做同类回填（防误扩展）。
     // [F1 修复] 幂等语义 = 按字段补缺，不是整条丢弃：已有值一律不被迟到值覆盖，缺失
     // 字段照常补上。「sessionId 先落、迟到 handleReady 只补 sessionFile」是本 replay
     // 批次新打通且更有价值的形态（close 期 LC-4 后缀反查会在 sessionId 已知后补发
     // sessionFile）——旧守卫「有 sessionId 即整条 return」会把该
     // 回填永久吞掉，令冷续 resume 锚点（anchor.sessionRef.sessionFile）与引擎 interact
-    // 定位拿不到 sessionFile（[H1 U6] chatHandleFor 已随 interact 面退役）。poolKey / journalPath 不参与补缺：
-    // journalPath 权威归 journal writer（本闭包写入即定稿），poolKey 由 onPoolResolved
-    // retarget 与首次回填定稿，迟到值不得重置。仅在确有字段落位时才落 entry——无新字段
-    // 不写噪（迟到重复回调即零副作用，GUI 无额外投影）。
-    const backfillEngineHandle = (partial: { sessionRef: Record<string, string>; poolKey: string }): void => {
+    // 定位拿不到 sessionFile（[H1 U6] chatHandleFor 已随 interact 面退役）。journalPath 不参与补缺：
+    // journalPath 权威归 journal writer（本闭包写入即定稿），迟到值不得重置。仅在确有
+    // 字段落位时才落 entry——无新字段不写噪（迟到重复回调即零副作用，GUI 无额外投影）。
+    // [池抽象降级] record.engineHandle.poolKey 恒 SHARED_POOL_KEY——持久化形状保留字段
+    //（record-store 读侧守卫要求非空），协议面 poolKey 已删，无引擎侧实际值。
+    const backfillEngineHandle = (partial: { sessionRef: Record<string, string> }): void => {
       const current = record.engineHandle;
       if (current === undefined) {
         record.engineHandle = {
           sessionRef: { ...partial.sessionRef },
-          poolKey: partial.poolKey,
+          poolKey: SHARED_POOL_KEY,
           journalPath: journal.path,
         };
         this.deps.getStore().reportRecordTransition(record);
@@ -711,8 +712,6 @@ export class RunOrchestration {
       record.engineHandle = { ...current, sessionRef: merged };
       this.deps.getStore().reportRecordTransition(record);
     };
-    // 对齐点③：journal 路径权威 = 引擎声明的池 key（writer 初始用占位，retarget 后
-    // 与 handle.poolKey 同源）。
     // [H2 Gate B 修复] live reducer 喂入恢复（runWorkflowEngineTask observedEvent 同款）：
     // 非 pi 引擎派发此前 onEvent 直连 journal.onEvent——事件只落 ②级 journal，live record
     // 零喂入（turns/totalTokens 恒 0，chat 域 record 与 tool one-shot 经非 pi 引擎同病）。
@@ -728,11 +727,9 @@ export class RunOrchestration {
     };
     const runCtx: RunContext = {
       taskId: record.id,
-      poolKey: JOURNAL_INITIAL_POOL_KEY,
       signal,
       ctxModel: opts.ctxModel,
       onEvent: observedEvent,
-      onPoolResolved: journal.onPoolResolved,
       // [R4 §3.4 不变量 3] 运行中句柄回填通道（engine/port.ts RunContext.onHandleReady）
       onHandleReady: backfillEngineHandle,
       // D9①：路由层 fallback 留痕投影进 outcome（zcode 无独立 record 通路）
@@ -749,11 +746,12 @@ export class RunOrchestration {
       const { handle, outcome } = await engine.run(executeOptionsToEngineTaskSpec(opts), runCtx);
       // engineHandle 终态回填（U2：终态迁移落 entry 前；R4 起为兜底面——运行中回填
       // 已由 onHandleReady 提前落 entry，此处覆写终态权威值）。sessionRef 整体透传——
-      // 失败终态 sessionId 缺失时也回填已有部分（dbPath/poolKey），读侧①级降②级
-      // 的防御形态；journalPath 取 retarget 后的实际落盘路径（writer 是路径权威）。
+      // 失败终态 sessionId 缺失时也回填已有部分（dbPath），读侧①级降②级的防御形态；
+      // journalPath 取实际落盘路径（writer 是路径权威）；poolKey 恒 SHARED_POOL_KEY
+      //（持久化形状保留字段，[池抽象降级] 后无引擎侧实际值）。
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
-        poolKey: handle.data.poolKey,
+        poolKey: SHARED_POOL_KEY,
         journalPath: journal.path,
       };
       await journal.close();
@@ -876,11 +874,9 @@ export class RunOrchestration {
     try {
       const runCtx: RunContext = {
         taskId: record.id,
-        poolKey: JOURNAL_INITIAL_POOL_KEY,
         signal,
         ctxModel: identity.resolved.model,
         onEvent: journal.onEvent,
-        onPoolResolved: journal.onPoolResolved,
         ...(stream !== undefined ? { stream } : {}),
         ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）
@@ -893,7 +889,7 @@ export class RunOrchestration {
       const { handle, outcome } = await engine.run(this.taskSpecWithModel(opts, record.model), runCtx);
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
-        poolKey: handle.data.poolKey,
+        poolKey: SHARED_POOL_KEY,
         journalPath: journal.path,
       };
       await journal.close();

@@ -91,7 +91,6 @@ describe("契约类型运行时形状冒烟（字段可选项漂移时在构造�
       v: 1,
       engineId: "zcode",
       sessionRef: { sessionId: "s1", dbPath: "/tmp/db.sqlite" },
-      poolKey: "shared",
       adapterVersion: "1.0.0",
     };
     expect(handle.v).toBe(1);

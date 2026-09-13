@@ -125,13 +125,11 @@ function makeTask(): AgentCallOpts {
 function resumeCtx(): RunContext {
   return {
     taskId: "sa-resume",
-    poolKey: "shared",
     resume: {
       recordId: "sa-resume",
       resume: {
         sessionRef: { sessionId: OLD_SESSION_ID, dbPath: path.join(dataDir, "engines", "zcode", "session-db", "db.sqlite") },
-        poolKey: "shared",
-      },
+        },
     },
   };
 }
@@ -227,7 +225,7 @@ describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行�
 
   it("无锚（首轮/one-shot）→ 不发 session/resume，行为不变", async () => {
     const { engine, stateFile } = makeEngine();
-    const { outcome } = await engine.run(makeTask(), { taskId: "sa-fresh", poolKey: "shared" });
+    const { outcome } = await engine.run(makeTask(), { taskId: "sa-fresh"});
     expect(outcome.error).toBeUndefined();
     expect(sentFrames(stateFile, "session/resume")).toHaveLength(0);
   });

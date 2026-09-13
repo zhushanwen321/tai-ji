@@ -4,7 +4,8 @@
 //   - 9 正向方法（initialize/probe/run/cancel/read/listModels/
 //     validateModel/dispose/ping）× fake 引擎 CLI 往返；
 //   - 8 反向通道（host/log、host/askUser、host/permission、host/streamDelta、
-//     host/poolResolved、host/handleReady、host/childSpawned、host/childStateChanged）
+//     host/handleReady、host/childSpawned、host/childStateChanged——[池抽象降级]
+//     原 host/poolResolved 通道已随 poolKey 协议面退役删除）
 //     的 core 侧到达断言；
 //   - 错误帧：run 失败帧 / 未知方法帧（码原样透传）/ initialize 版本越界
 //     （engine_protocol_mismatch → 客户端直接不可用，不重建）；
@@ -79,8 +80,8 @@ interface Harness {
   askUserRequests: unknown[];
   permissionRequests: unknown[];
   streamDeltas: string[];
-  poolResolved: string[];
-  handleReady: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+
+  handleReady: Array<{ sessionRef: Record<string, string> }>;
 }
 
 function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture.run.params.runId): Harness {
@@ -92,7 +93,6 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     askUserRequests: [],
     permissionRequests: [],
     streamDeltas: [],
-    poolResolved: [],
     handleReady: [],
   };
   h.client = new EngineClient({
@@ -125,9 +125,6 @@ function makeHarness(extraEnv: Record<string, string> = {}, routeRunId = fixture
     },
     onStreamDelta: (delta) => {
       h.streamDeltas.push(delta);
-    },
-    onPoolResolved: (poolKey) => {
-      h.poolResolved.push(poolKey);
     },
     onHandleReady: (partial) => {
       h.handleReady.push(partial);
@@ -229,10 +226,8 @@ describe("协议黑盒：8 反向通道 core 侧到达", () => {
       expect(h.logs.some((l) => l.message.includes("run started"))).toBe(true);
       // host/streamDelta
       expect(h.streamDeltas).toEqual(["Hello", " world"]);
-      // host/poolResolved
-      expect(h.poolResolved).toEqual(["shared"]);
       // host/handleReady
-      expect(h.handleReady).toEqual([{ sessionRef: { sessionId: "sess-fixture" }, poolKey: "shared" }]);
+      expect(h.handleReady).toEqual([{ sessionRef: { sessionId: "sess-fixture" } }]);
       // host/childSpawned + host/childStateChanged（镜像落项 + 状态更新）
       const spawned = h.mirrorEvents.filter((e) => e.reason === "childSpawned");
       expect(spawned).toHaveLength(1);
@@ -353,7 +348,7 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
       .map((f) => f.params!.seq!);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
 
-    // 反向通道覆盖（录制期间 8 通道全部上线）
+    // 反向通道覆盖（[池抽象降级] 后 7 通道；录制样本同批去 poolResolved 帧）
     const reverse = new Set(
       recorded.wire.engineToHost
         .filter((f) => typeof (f as { id?: string }).id === "string")
@@ -361,7 +356,7 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
     );
     for (const ch of [
       "host/log", "host/askUser", "host/permission", "host/streamDelta",
-      "host/poolResolved", "host/handleReady", "host/childSpawned", "host/childStateChanged",
+      "host/handleReady", "host/childSpawned", "host/childStateChanged",
     ]) {
       expect(reverse.has(ch)).toBe(true);
     }

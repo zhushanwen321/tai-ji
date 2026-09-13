@@ -21,7 +21,7 @@
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
 // 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态面正交双闸。
 
-import { SHARED_POOL_KEY, type AgentOutcome, type ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
+import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "../core/error-message.ts";
 import { getLogger } from "../core/logger.ts";
@@ -34,7 +34,6 @@ import { tryEnterRunning } from "./execution-record.ts";
 import { type RoundSettlementOutcome } from "./finalize-record.ts";
 export type { RoundSettlementOutcome };
 import { engineConversationUpgradeUnsupportedError } from "./engine/common/capability-gate.ts";
-import { PI_POOL_KEY } from "./engine/host/pi-host-binding.ts";
 import { type BgNotifyRecord, notifyGateAllowsDelivery } from "./notifier.ts";
 // [u7a 生产补挂] idle timer 原语（lifecycle-manager 叶子模块，与 settled-watchdog
 // 同层直接 import 惯例）：轮终 arm（翻入保活）+ 新轮 disarm（翻回正在执行）是 D5
@@ -585,18 +584,19 @@ export class ConversationContinuation {
 
   /**
    * resume 锚点（引擎分派，[U6 / §3.2.6 要点 3]）：
-   *   - zcode：sessionRef = {sessionId, dbPath}（transcriptAnchorOf 派生单源），
-   *     poolKey = engineHandle.poolKey（引擎回填面，缺省 'shared'）——引擎侧消费 =
-   *     session/resume 读历史 + session/create 新 session 注入（P-1 选型，原地
-   *     resume 续写被 -32031 卡死不可用），新 sessionRef 经 onHandleReady 回传；
-   *   - pi（缺省）：recordId + sessionFile 续写原文件，poolKey 恒 'shared'。
+   *   - zcode：sessionRef = {sessionId, dbPath}（transcriptAnchorOf 派生单源）——
+   *     引擎侧消费 = session/resume 读历史 + session/create 新 session 注入（P-1
+   *     选型，原地 resume 续写被 -32031 卡死不可用），新 sessionRef 经
+   *     onHandleReady 回传；
+   *   - pi（缺省）：recordId + sessionFile 续写原文件。
+   * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议面退役删除——
+   * 两引擎恒 'shared'，锚点补全 handle 无需池定位。
    */
   private resumeAnchor(): ResumeAnchor {
     const anchor = transcriptAnchorOf(this.record);
     if (anchor !== undefined && anchor.engine === "zcode") {
       return {
         sessionRef: { sessionId: anchor.sessionId, dbPath: anchor.dbPath },
-        poolKey: this.record.engineHandle?.poolKey ?? SHARED_POOL_KEY,
       };
     }
     return {
@@ -604,7 +604,6 @@ export class ConversationContinuation {
         recordId: this.record.id,
         ...(this.record.sessionFile !== undefined ? { sessionFile: this.record.sessionFile } : {}),
       },
-      poolKey: PI_POOL_KEY,
     };
   }
 

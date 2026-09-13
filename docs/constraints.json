@@ -1572,7 +1572,7 @@
     },
     {
       "id": "C-ext-15",
-      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<poolKey>/）与 journal 路径必须经 engine/paths.ts 同源推导，extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 投影（存量 record 零迁移）",
+      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<分组 key，池抽象降级后恒 'shared'>/）与 journal 路径必须经 engine/paths.ts 同源推导（SDK SHARED_POOL_KEY 单源承载），extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 投影（存量 record 零迁移）",
       "scope": [
         "extensions/universal/subagent-workflow/src/execution/engine/**",
         "packages/runtime/src/services/session/**"
@@ -1756,7 +1756,7 @@
     },
     {
       "id": "C-ext-20",
-      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 恒 'shared'）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
+      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 协议面已随池抽象降级整体退役，journal 固定分组 'shared'，磁盘布局不变）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
       "scope": [
         "packages/zcode-subagent-cli/**",
         "packages/runtime/src/services/session/**"

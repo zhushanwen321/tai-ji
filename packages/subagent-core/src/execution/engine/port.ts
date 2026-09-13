@@ -8,8 +8,9 @@
 //   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机面。权威源：
 //     docs/architecture/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
 //   - [R4 已实施 2026-08-30] RunContext.onHandleReady——运行中句柄回填通道
-//     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层，
-//     与 onPoolResolved 分立两个时点）。
+//     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层）。
+//     [池抽象降级 2026-09-13] 原 RunContext.poolKey 字段与 onPoolResolved 回调已删
+//     （两引擎无池化实现，journal 固定落 engines/<id>/shared/，历史头部叙述见 git）。
 //   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面。
 //     权威源：docs/design/timeout-audit-hygiene-batch.md §3.2 D2-2。
 //   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
@@ -54,10 +55,8 @@ import type {
  * server 实现（未来 driver host）时接口不动。
  */
 export interface RunContext {
-  /** = record.id（bg-N-xxx / run-N）——journal 文件名与池引用计数 key（P2 消费）。 */
+  /** = record.id（bg-N-xxx / run-N）——journal 文件名。 */
   taskId: string;
-  /** D5 隔离池（宿主分配，设计 §3.3.9；pi 无池化恒 'shared'）。 */
-  poolKey: string;
   /** abort 分级入口（D1：引擎原生中断 → 公共杀链兜底）。 */
   signal?: AbortSignal;
   /** 事件流出口（host 消费后统一落 journal，D6 第②级）。 */
@@ -111,24 +110,16 @@ export interface RunContext {
    */
   sessionDir?: string;
   /**
-   * [P4 对齐点③] 引擎声明实际隔离池 key（journal 落盘路径权威）。宿主创建 journal
-   * writer 时只能用缺省占位 poolKey（pi 恒 'shared'），非池化稳定的引擎（zcode 按
-   * provider+model 池化）在 prepare 期确定 poolKey 后回调本方法重定向 writer——
-   * 保证 journal 落盘路径与 handle.poolKey 同源（单一权威，不再两边推导）。
-   * 契约：必须在首个事件 emit 之前调用（zcode coarse 事件在终态后合成，天然满足；
-   * 未来流式引擎需在事件出口前调用）。
-   */
-  onPoolResolved?: (poolKey: string) => void;
-  /**
    * [R4 §3.4 不变量 3] 运行中句柄回填通道：引擎在「session/create 应答到达后」
    * 立即回调（早于 run resolve——stream 引擎的 run 生命周期远长于会话建立）。
-   * 与 onPoolResolved 分立两个时点：poolKey 在 prepare 期（onPoolResolved，连接
-   * 建立前即可知），sessionRef 在 create 应答后（本回调）。编排层收到后立即回填
-   * record.engineHandle 并落 entry——运行中的 GUI 经 entry 重建 record 即拿到
-   * ①②级读取钥匙，不再等 run resolve 后的终态回填。可选回调：不支持运行中回填
-   * 的引擎（spawn 单轮、终态即回填）不调用，宿主语义不受影响。
+   * 编排层收到后立即回填 record.engineHandle 并落 entry——运行中的 GUI 经 entry
+   * 重建 record 即拿到①②级读取钥匙，不再等 run resolve 后的终态回填。可选回调：
+   * 不支持运行中回填的引擎（spawn 单轮、终态即回填）不调用，宿主语义不受影响。
+   * [池抽象降级 2026-09-13] 原 poolKey 成员与 onPoolResolved 回调（引擎声明隔离池
+   * key、retarget journal 路径）已随 poolKey 协议面退役删除——两引擎 poolKey 恒
+   * 'shared'（journal 固定落 engines/<id>/shared/），回调零信息量。
    */
-  onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef" | "poolKey">) => void;
+  onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /**
    * [U0 D10] 引擎 spawn 的子进程句柄注册钩子（宿主终止链记账）。引擎在 spawn 成功后
    * 同步回调（与 pi runSpawn 的 spawnedChildren.set 同构时机）；宿主据此把 child 注册进

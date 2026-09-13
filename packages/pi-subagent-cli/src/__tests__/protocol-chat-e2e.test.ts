@@ -214,7 +214,7 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
       ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model" },
       resume: {
         recordId: "rec-chat-1",
-        resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }, poolKey: "shared" },
+        resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }},
       },
     });
     const resumeSpawned = await host.waitForReverse("host/childSpawned");

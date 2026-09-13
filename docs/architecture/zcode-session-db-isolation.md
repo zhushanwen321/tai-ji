@@ -338,9 +338,10 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
    zcode.cjs app-server（常驻；连接/会话/事件语义零变化）
       │ ② 会话行落**隔离库**（我们独占；任务间 WAL 并发同前）
       ▼
-   <engineDataDir>/engines/zcode/session-db/db.sqlite     ← 池目录之外（`cleanupExpiredPoolRefs` 会把
-                                                         `engines/<id>/*` 每个子目录当池**枚举**，但不匹配
-                                                         任何删除条件——由 A9 断言，见 D4）
+   <engineDataDir>/engines/zcode/session-db/db.sqlite     ← journal 分组目录之外（`cleanupExpiredJournals`
+                                                         [池抽象降级后更名，原 cleanupExpiredPoolRefs] 会把
+                                                         `engines/<id>/*` 每个子目录**枚举**，但 db.sqlite*
+                                                         不匹配任何删除条件——由 A9 断言，见 D4）
       │ ③ handle.sessionRef.dbPath = 隔离库绝对路径（运行中回填 + 终态 handle 同源）
       ▼
    读取链（两条独立白名单，均需放行隔离路径）
@@ -397,7 +398,7 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 
 | record 时代 | `sessionRef.dbPath` 形态 | 改造后行为 |
 |------------|------------------------|-----------|
-| 池时代（2026-09 前） | 相对路径（`.zcode/cli/db/db.sqlite`） | 走既有 poolKey 锚定分支（不变） |
+| 池时代（2026-09 前） | 相对路径（`.zcode/cli/db/db.sqlite`） | 走池目录锚定分支（[池抽象降级] 锚定 key 用 SDK SHARED_POOL_KEY 常量承载，值恒 'shared'——协议面 poolKey 已删，池时代真实池 key 不再随 handle 传输；锚定目录不存在时自然降②级 journal） |
 | 共享 HOME 时代（2026-09–本次改造） | 宿主库绝对路径 | 白名单集合第二项放行 → ①级可读（**不迁移、不删除**） |
 | 本次改造后 | 隔离库绝对路径 | 集合第一项放行 |
 | **误配（env 未传播）** | 隔离库落在 `HostServices.dataRoot()`（pi agent dir）下 | 读侧集合按 runtime dataDir 构造 → **不含**该路径 → ①级**静默**降②级 journal；修 env 后恢复。由单元断言「两站点 dataDir 相等」在测试期拦截 |
@@ -427,13 +428,14 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 - **重审触发条件**：隔离库 > 2GB，或最早行龄 > 90 天，或用户报告磁盘异常 → 启动 TTL 清理（W6，**预期 ≈45 天内就绪**——先就绪再触发，不再是硬 T+2 周）。
 - **显式判定**：**可接受**（首期不做自动删除）。依据：量级可控 + 我们独占 + 通道明确。
 - **禁止**：运行期删除隔离库文件（在途会话句柄会失效，D6 E3 已按事实改写）。
-- **与池 GC 的边界（措辞与实装对齐，作用域已限定）**：隔离库**不在池目录内**；但 `cleanupExpiredPoolRefs`（`pool-manager.ts:234`，定义行）
-  把 `engines/<engineId>/` 下**每个子目录**都当池遍历（`:243`/`:252` 双层 `readdirSync` → `:258` `cleanupPoolByTtl`；行号 2026-09-13 复核），
-  `session-db/` 因此会被当作「伪池」枚举。对 `db.sqlite*`：**不匹配任何删除条件**（无 `refs.json` → `hadRefs=false` 早退；
-  `removeOrphanJournals` 只匹配 `journal-*.jsonl`）。**但作用域仅限 `db.sqlite*`**：
-  若该目录内出现 `journal-*.jsonl`，会被当孤儿 journal 删；且一旦 `changed=true`，扫描会向该目录**写入 `refs.json`**
-  （实跑证据）。实践不可达（无代码往该目录写 journal），但这是**隐式假设**，不是结构保证
-  → 由 **A9 守卫测试**（经公共 API + 真实隔离库路径 + 枚举断言）钉死，并在 W3 同批交付。
+- **与 journal TTL 清理的边界（措辞与实装对齐，作用域已限定；[池抽象降级 2026-09-13] 后口径）**：隔离库**不在 journal 分组目录内**；`cleanupExpiredJournals`
+  （`pool-manager.ts`，[池抽象降级] 更名自 `cleanupExpiredPoolRefs`，refs 引用计数机制已删）把
+  `engines/<engineId>/` 下**每个子目录**都遍历，`session-db/` 因此会被当作「伪分组」枚举。
+  对 `db.sqlite*`：**不匹配任何删除条件**（清理目标只有 `journal-*.jsonl` 与池时代 `refs.json` 残留）。
+  **但作用域仅限 `db.sqlite*`**：若该目录内出现超龄 `journal-*.jsonl`，会被当孤儿 journal 删。
+  实践不可达（无代码往该目录写 journal），但这是**隐式假设**，不是结构保证
+  → 由 **A9 守卫测试**（core `pool-manager.test.ts` + 引擎包 `zcode-session-db-pool-gc.test.ts`
+  枚举/结构断言）钉死。
 
 #### D5 明确不动的面（防实施者过度扩展）
 
@@ -692,8 +694,8 @@ WHERE u.task_type='interactive'
 3. **白名单封闭**：①级读取只放行 `zcodeDbPathAllowlist(dataDir)` 集合内的精确绝对路径。
 4. **存量零迁移**：改造不修改、不删除任何既有 record 与宿主库行（清理是独立通道 D7，需用户授权）。
 5. **失败不静默**：隔离库不可用时任务显式失败（不回落写宿主库——回落会让污染静默复活）。
-6. **隔离库不在池目录内**：`zcodeSessionDbPath()` 的结果不在 `resolvePoolDir(dataDir,'zcode','shared')` 之下；
-   TTL 扫描（`cleanupExpiredPoolRefs`）会**枚举** `session-db/`，但 `db.sqlite*` 不匹配任何删除条件
+6. **隔离库不在 journal 分组目录内**：`zcodeSessionDbPath()` 的结果不在 `resolvePoolDir(dataDir,'zcode','shared')` 之下；
+   TTL 扫描（`cleanupExpiredJournals`，[池抽象降级] 更名）会**枚举** `session-db/`，但 `db.sqlite*` 不匹配任何删除条件
    （journal 名条目除外——实践不可达）——由 A9 经公共 API + 枚举断言。
 
 ---
@@ -713,7 +715,7 @@ WHERE u.task_type='interactive'
 | A6 | 并发与崩溃 | 并发 3 个任务；运行中 `kill -9` app-server | 3 个会话各归各（隔离库行数 = 3）；在途任务失败、下一任务自动重建 | G2 |
 | A7 | 无宿主残留 | A1–A6 后统计宿主库新增行 | 宿主库新增 subagent 行 = 0（判定方法：以 A1–A6 的 record sessionId 为白名单查宿主库）；`tasks-index` 无新增任务 | G1/G5 |
 | A8 | 失败路径 | ①隔离库父目录 `chmod 000`；②运行期 unlink `db.sqlite*`（主文件 + `-wal`/`-shm`，按 E3 事实核验） | ①任务显式失败且错误含路径与恢复指引，**宿主库零新增**；②在途会话数据落已 unlink inode、重启后自动重建新库、旧 record 降②级 journal 仍可读 | D6 |
-| A9 | 池 GC 守卫（反向不变量，**经公共 API + 枚举断言**） | `dataDir=mkdtempSync()` 下先 `mkdirSync(dirname(zcodeSessionDbPath(dataDir)), {recursive:true})` 并写入 `db.sqlite`+`-wal`+`-shm`（**注意：入参是父目录，不是 dbPath 本身**）；然后 (a) `acquirePool(dataDir,'zcode','shared',taskId)` + `releasePoolRef(...)` 归零；(b) `cleanupExpiredPoolRefs(dataDir, 0, spyFs)`（TTL 归零 + 注入 spy fs） | ①隔离库三件套**字节不变**；②**枚举断言**：spy 的 `readdirSync` 调用序列命中 `engines/zcode/session-db`（证明扫描真进入该目录，不是“没扫到”的假通过）；③池目录原生状态照常清理 = **`refs.json`/原生条目被删**（注意 `deletePoolNativeState` 对空目录 early-return，**池目录本身不会被 rmdir**）；④断言 `zcodeSessionDbPath(dataDir)` 不在 `resolvePoolDir(dataDir,'zcode','shared')` 之下 | 不变量 6 |
+| A9 | 池 GC 守卫（反向不变量，**经公共 API + 枚举断言**）[池抽象降级 2026-09-13 修订：`acquirePool`/`releasePoolRef`/refs 机制已删，现行形态 = core `pool-manager.test.ts` 的 `cleanupExpiredJournals` 超龄 db.sqlite 不删断言 + 引擎包 `zcode-session-db-pool-gc.test.ts` 结构守卫（隔离库与任意分组目录双向前缀分离 / db 文件名族与 journal 名族不相交）] | 原规格（历史）：`dataDir=mkdtempSync()` 下写入隔离库三件套后经 `acquirePool`+`releasePoolRef`+`cleanupExpiredPoolRefs` 断言不删；现行等价断言经 `cleanupExpiredJournals(dataDir, 0)` 触达 | ①隔离库三件套**字节不变**；②目录级分离结构断言；③journal 分组目录内可清理条目清空后目录回收、`db.sqlite*` 目录保留 | 不变量 6 |
 | A10 | 存量零迁移（反向不变量） | 改造前后对比宿主库行数 / 既有 record 文件 | 宿主库行数与 record 内容**逐字节不变**（除新会话）；无任何自动删除 | 不变量 4 |
 | A11 | 存量行清理通道（W5） | 用 D7 规格对自身 record 白名单做 dry-run → **先在 ZCode GUI 打开含我们会话的 worktree**（让索引侧有可观测行）→ 停机窗口执行 | **四数报告 + 删除集 == 参照 SQL 结果**（白名单总数 / 白名单∩宿主库 / 派生删除集 / 删除集总数）；**I2 时间戳交叉验证全部通过**（无一条中止）；**I3/I3b 无命中**；**反向 fixture 两条**（混入用户 `fork` id → 中止；混入普通用户 interactive+generated 且时间戳差数小时 id → 必须中止）；**无确认参数且非 TTY → 拒绝**；`--confirm-count` 错值 → 拒绝；**确认凭证落盘且与删除集总数匹配**；**索引面归零** + 预检命中项两侧同时剔除并报告 + 索引删除失败时残留清单落盘、补删后归空；执行后宿主库 11 表 + `input_history` + 派生行零残留；SET NULL 修改行数与 FK 失败中止记录（若发生）已报告。**实现级步骤与 fixture 由代码承载（原 impl-plan §2.5/§7.2 已删除，git 可追溯；入口 = `scripts/zcode-session-db-cleanup.mjs` 及其测试）** | G5 |
 | A12 | 伴生写入面登记准确性（反向不变量） | A1–A6 后 diff `~/.zcode/` 增量（排除已知 GUI 面 `v2/tasks-index.sqlite`、`v2/telemetry-state.json` 与第二宿主 `zsw/`） | 增量面与 §2.4.1 表列出的面一致（无未登记的新写入面）；若出现未登记面 → 回写登记表并重审判定 | 已接受代价登记 |
@@ -721,7 +723,7 @@ WHERE u.task_type='interactive'
 **探针挂钩**（随代码落地）：
 ① 单元：spawn env 含 `ZCODE_SESSION_DB_PATH` 且等于 `zcodeSessionDbPath(engineDataDir)`，且不含 `ZCODE_SESSION_DB`；
 ② 单元：`onHandleReady` 与终态 handle 的 `dbPath` 相等；两站点白名单集合成员判定一致；
-③ 单元：池 GC 守卫（A9，经 `acquirePool`/`releasePoolRef`/`cleanupExpiredPoolRefs` 公共 API，不用模块私有的 `deletePoolNativeState`）；
+③ 单元：journal TTL 清理守卫（A9，[池抽象降级] 后经 `cleanupExpiredJournals` 公共 API + 引擎包结构断言）；
 ④ 集成（fake-server）：create 帧后断言 fake 侧收到的 env 含隔离路径；
 ⑤ 真机：A1/A2/A3 各跑一次（本设计成文时已用探针 `probe2.mjs` 预验证 F1/F2；E3 的「运行期删除」行为
    需在实施期补一条真机探针，观测「unlink 后写入 + 重启后新库」实际形态）。

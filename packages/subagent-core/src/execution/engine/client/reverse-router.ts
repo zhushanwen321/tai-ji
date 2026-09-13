@@ -5,7 +5,7 @@
 // 落在本文件）。
 //
 // 超时域划分（impl-plan §2.2 / 设计 §3.3 帧④注释）：
-//   - 快答数据面（host/log / host/streamDelta / host/poolResolved / host/handleReady /
+//   - 快答数据面（host/log / host/streamDelta / host/handleReady /
 //     host/childSpawned / host/childStateChanged）：分发 + 回 {ok:true}，10s 应答守卫
 //     ——10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（REVERSE_REQUEST_TIMEOUT_MS）；
 //   - 人机交互面（host/askUser / host/permission）：ack 两阶段——收即回 {ack:true}，
@@ -23,7 +23,6 @@ import {
   type HostHandleReadyParams,
   type HostLogParams,
   type HostPermissionParams,
-  type HostPoolResolvedParams,
   type HostStreamDeltaParams,
   type UiRequest,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -47,7 +46,7 @@ export interface ReverseRouterDeps {
   /** childSpawned/childStateChanged 的镜像落点。 */
   mirror: SpawnedChildrenMirror;
   /** handleReady 的 partial handle 回填（崩溃合成 handle 数据源）。 */
-  setPartialHandle: (partial: { sessionRef: Record<string, string>; poolKey: string }) => void;
+  setPartialHandle: (partial: { sessionRef: Record<string, string> }) => void;
   /** 帧②应答出口。 */
   sendResponse: (id: string, result: unknown) => boolean;
   /** 引擎故障拉起杀链（killAll）。 */
@@ -161,7 +160,6 @@ type DataPlaneHandler = (deps: ReverseRouterDeps, params: unknown) => Promise<vo
 const DATA_PLANE_HANDLERS: Record<string, DataPlaneHandler> = {
   "host/log": (deps, params) => dispatchLog(deps, params as HostLogParams),
   "host/streamDelta": (deps, params) => dispatchStreamDelta(deps, params as HostStreamDeltaParams),
-  "host/poolResolved": (deps, params) => dispatchPoolResolved(deps, params as HostPoolResolvedParams),
   "host/handleReady": (deps, params) => dispatchHandleReady(deps, params as HostHandleReadyParams),
   "host/childSpawned": (deps, params) => dispatchChildSpawned(deps, params as HostChildSpawnedParams),
   "host/childStateChanged": (deps, params) => dispatchChildStateChanged(deps, params as HostChildStateChangedParams),
@@ -184,15 +182,10 @@ async function dispatchStreamDelta(deps: ReverseRouterDeps, p: HostStreamDeltaPa
   await deps.runRoutes.get(p.runId)?.onStreamDelta?.(p.delta);
 }
 
-async function dispatchPoolResolved(deps: ReverseRouterDeps, p: HostPoolResolvedParams): Promise<void> {
-  await deps.runRoutes.get(p.runId)?.onPoolResolved?.(p.poolKey);
-}
-
 async function dispatchHandleReady(deps: ReverseRouterDeps, p: HostHandleReadyParams): Promise<void> {
-  deps.setPartialHandle({ sessionRef: p.sessionRef, poolKey: p.poolKey });
+  deps.setPartialHandle({ sessionRef: p.sessionRef });
   await deps.runRoutes.get(p.runId)?.onHandleReady?.({
     sessionRef: p.sessionRef,
-    poolKey: p.poolKey,
   });
 }
 

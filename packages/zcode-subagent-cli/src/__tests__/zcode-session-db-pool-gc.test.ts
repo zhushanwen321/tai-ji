@@ -15,16 +15,15 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolvePoolDir } from "@zhushanwen/subagent-engine-sdk";
+import { resolvePoolDir, SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
-import { ZCODE_SHARED_POOL_KEY } from "../constants.ts";
 import { zcodeSessionDbPath } from "../db-path.ts";
 
 describe("池 GC 结构守卫（A9 前提：隔离库与池目录目录级分离）", () => {
   it("隔离库不在任何 poolKey 池目录之内（含 'shared' 池），亦不反向包含", () => {
     const dataDir = path.join(path.sep, "data-root");
     const sessionDb = zcodeSessionDbPath(dataDir);
-    for (const poolKey of [ZCODE_SHARED_POOL_KEY, "builtin-provider_model", "arbitrary-pool"]) {
+    for (const poolKey of [SHARED_POOL_KEY, "builtin-provider_model", "arbitrary-pool"]) {
       const poolDir = resolvePoolDir(dataDir, "zcode", poolKey);
       // 双向前缀断言：既不在池目录下，也不把池目录包进 session-db
       expect(sessionDb.startsWith(poolDir + path.sep)).toBe(false);
@@ -37,7 +36,7 @@ describe("池 GC 结构守卫（A9 前提：隔离库与池目录目录级分离
     expect(path.basename(path.dirname(sessionDb))).toBe("session-db");
     // 池目录父级 = engines/zcode（与 session-db 同父、不同子——目录级分离的构造形态）
     expect(path.dirname(path.dirname(sessionDb))).toBe(
-      path.dirname(resolvePoolDir(path.join(path.sep, "data-root"), "zcode", ZCODE_SHARED_POOL_KEY)),
+      path.dirname(resolvePoolDir(path.join(path.sep, "data-root"), "zcode", SHARED_POOL_KEY)),
     );
   });
 

@@ -143,15 +143,6 @@ export function parseZcodeTurnTimeoutEnv(
 }
 
 /**
- * 共享宿主 HOME 语义下的 journal 分组 key（与 pi 引擎 PI_POOL_KEY='shared' 同构）：
- * journal 落 engineDataDir/engines/zcode/shared/journal-<taskId>.jsonl。无 HOME 池、
- * 无派生目录——key 是固定字面量，仅作 pool-manager 通用契约的分组锚点。隔离会话库
- * 不在此目录内（db-path.zcodeSessionDbPath 选址 engines/zcode/session-db/，池目录
- * 之外，设计 D1/F11）。
- */
-export const ZCODE_SHARED_POOL_KEY = "shared";
-
-/**
  * [R4 D3] abort 链第一级：session/stop 的控制面超时（ms）。stop 失败/超时即落
  * killChain（协议此时已不可信）。
  */

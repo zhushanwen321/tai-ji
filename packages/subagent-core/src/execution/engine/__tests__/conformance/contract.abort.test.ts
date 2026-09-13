@@ -67,7 +67,6 @@ describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收�
       const events: AgentEvent[] = [];
       const ctx: RunContext = {
         taskId: "w10-c4-abort",
-        poolKey: "shared",
         signal: controller.signal,
         onEvent: (e) => events.push(e),
       };

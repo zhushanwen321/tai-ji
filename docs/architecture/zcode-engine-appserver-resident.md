@@ -14,9 +14,10 @@
 > 轮换后常驻连接需引擎进程重启才用新凭据（凭据内容 hash 刷新机制删除）；zcode 升级
 > schema migration 竞争无契约担保。新漂移面：zcode 升级若改变配置读取路径/方式，失败信号
 > 为 missing baseURL / Model config is missing 明确报错（不静默坏）。收益：HOME 依赖副作用
-> （pnpm store 随 HOME 翻转等）根治；锁/pidfile/孤儿回收/派生目录整章复杂度删除。poolKey
-> 固定 `'shared'`（与 pi 引擎
-> PI_POOL_KEY 同构，journal 落 `engines/zcode/shared/`）；handle.sessionRef.dbPath 为
+> （pnpm store 随 HOME 翻转等）根治；锁/pidfile/孤儿回收/派生目录整章复杂度删除。journal
+> 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议面已整体退役——原
+> PI_POOL_KEY/ZCODE_SHARED_POOL_KEY 常量与 onPoolResolved 通道删除，journal 落盘路径构造
+> 即终值）；handle.sessionRef.dbPath 为
 > 绝对路径（隔离库 `<engineDataDir>/engines/zcode/session-db/db.sqlite`，`zcodeSessionDbPath()`
 > SSOT；存量 record 的宿主库绝对路径由 `zcodeDbPathAllowlist()` 集合第二项兼容放行——见下方修订块）。
 > 未作废章节（D1 连接/D3 abort/D4 会话自包含/D5 capabilities/D6 停机面）仍然有效。
@@ -35,7 +36,7 @@
 > subagent 会话不再进 ZCode GUI 侧边栏。上方修订块中三处口径随之撤销/改写：「会话与 GUI 共写
 > 同一 SQLite」「已接受代价：GUI 会话列表可见 headless 会话」「handle.dbPath 锚定宿主库
 > `ZCODE_HOST_DB_SUFFIX`」。**HOME 保持共享**（凭据 / 插件 / MCP / pnpm store 语义零变化）、
-> 凭据 fs 拦截注入、poolKey 恒 `'shared'`、常驻连接 / abort 链 / 会话自包含 / capabilities /
+> 凭据 fs 拦截注入、journal 固定分组 `'shared'`（[池抽象降级] poolKey 协议面已删）、常驻连接 / abort 链 / 会话自包含 / capabilities /
 > 停机面全部不变。两条读取链按 `zcodeDbPathAllowlist(dataDir)` 白名单集合成员判定放行
 > （隔离库 + 宿主库存量兼容锚点）。
 

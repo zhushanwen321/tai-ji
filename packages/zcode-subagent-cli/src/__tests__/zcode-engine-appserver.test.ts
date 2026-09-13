@@ -22,7 +22,6 @@ import type { EngineRunResult, RunContext } from "../port-types.ts";
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
 import type { AgentCallOpts } from "../port-types.ts";
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
-import { ZCODE_SHARED_POOL_KEY } from "../constants.ts";
 import { ZCODE_APPSERVER_GOLDEN } from "../golden-sample.ts";
 import { AppServerConnection } from "../connection.ts";
 import { SessionChannel } from "../session-channel.ts";
@@ -194,7 +193,7 @@ function makeTask(overrides?: Partial<AgentCallOpts>): AgentCallOpts {
 }
 
 function makeCtx(overrides?: Partial<RunContext>): RunContext {
-  return { taskId: "sa-appserver", poolKey: "", ...overrides };
+  return { taskId: "sa-appserver", ...overrides };
 }
 
 // ============================================================
@@ -242,9 +241,8 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     expect(outcome.usage).toEqual({ input: 12599, output: 17, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 });
     expect(outcome.exitCode).toBe(0);
 
-    // handle 锚定：poolKey 恒 'shared'，sessionRef.dbPath = 隔离会话库绝对路径
+    // handle 锚定：sessionRef.dbPath = 隔离会话库绝对路径
     // （期望值独立展开，见 expectedSessionDbPath 注释——不调实现函数）
-    expect(handle.data.poolKey).toBe(ZCODE_SHARED_POOL_KEY);
     expect(handle.data.sessionRef).toEqual({ sessionId: GOLDEN_SESSION_ID, dbPath: expectedSessionDbPath() });
     expect(String(handle.data.sessionRef["dbPath"]).startsWith("/")).toBe(true);
   }, 15_000);
@@ -300,29 +298,26 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     ]);
   }, 15_000);
 
-  it("回调时点：onPoolResolved（prepare 期）先于 onHandleReady（create 应答后）先于首事件", async () => {
+  it("回调时点：onHandleReady（create 应答后）先于首事件（[池抽象降级] onPoolResolved 已退役）", async () => {
     const { engine, workspace } = makeEngine();
     const order: string[] = [];
     await engine.run(
       makeTask({ cwd: workspace }),
       makeCtx({
-        onPoolResolved: (k) => order.push(`pool:${k}`),
-        onHandleReady: (partial) => order.push(`handle:${partial.poolKey}:${partial.sessionRef["sessionId"]}`),
+        onHandleReady: (partial) => order.push(`handle:${partial.sessionRef["sessionId"]}`),
         onEvent: (e) => {
           if (e.type === "text_delta" && order[order.length - 1] !== "event") order.push("event");
         },
       }),
     );
-    expect(order[0]).toBe(`pool:${ZCODE_SHARED_POOL_KEY}`);
-    expect(order[1]).toBe(`handle:${ZCODE_SHARED_POOL_KEY}:${GOLDEN_SESSION_ID}`);
-    expect(order[2]).toBe("event");
+    expect(order[0]).toBe(`handle:${GOLDEN_SESSION_ID}`);
+    expect(order[1]).toBe("event");
   }, 15_000);
 
   it("共享宿主 HOME：HOME 正向透传、遥测关、argv=app-server --cwd engineDataDir、无池 config/lockfile/pidfile、onChildSpawned 零调用", async () => {
     const { engine, stateFile, workspace } = makeEngine();
     const onChildSpawned = vi.fn();
     const { handle } = await engine.run(makeTask({ cwd: workspace }), makeCtx({ onChildSpawned }));
-    expect(handle.data.poolKey).toBe(ZCODE_SHARED_POOL_KEY);
     // fake 侧 boot env：base env 携带的宿主 HOME 值原样透传（buildAppServerEnv 不覆写
     // HOME 键——launcher 同进程 import() 也不改 env）、遥测 false、统一嵌套标记
     const env = bootEnv(stateFile);
@@ -600,7 +595,7 @@ describe("abort 链（D3）", () => {
     expect(bootCount(stateFile)).toBe(2);
   }, 40_000);
 
-  it("pre-aborted signal：短路返回中止终态——不建会话不发任何帧（防误杀共享进程）；onPoolResolved 先于 error 事件（不变量 3）", async () => {
+  it("pre-aborted signal：短路返回中止终态——不建会话不发任何帧（防误杀共享进程）；error 事件可达（[池抽象降级] onPoolResolved 已退役）", async () => {
     const { engine, stateFile, workspace } = makeEngine();
     const controller = new AbortController();
     controller.abort();
@@ -609,17 +604,13 @@ describe("abort 链（D3）", () => {
       makeTask({ cwd: workspace }),
       makeCtx({
         signal: controller.signal,
-        onPoolResolved: (k) => order.push(`pool:${k}`),
         onEvent: (e) => order.push(`event:${e.type}`),
       }),
     );
     expect(outcome.exitCode).toBeNull();
     expect(outcome.error).toContain("session/stop");
     expect(handle.data.sessionRef["sessionId"]).toBeUndefined();
-    // 不变量 3：poolKey 声明先于首个事件（error）——journal writer 重定向先于落盘，
-    // 落盘池与 handle.poolKey 同值同源（短路分支不满足即落 shared 占位池漂移）
-    expect(order).toEqual([`pool:${ZCODE_SHARED_POOL_KEY}`, "event:error"]);
-    expect(handle.data.poolKey).toBe(ZCODE_SHARED_POOL_KEY);
+    expect(order).toEqual(["event:error"]);
     expect(readState(stateFile)).toHaveLength(0); // 连惰性启动都没触发
   }, 10_000);
 

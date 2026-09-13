@@ -238,14 +238,14 @@ export class RemoteEngine implements EnginePort {
         // Continuation 侧轮身份校验（activeRunId）丢弃迟到应答（S1 P1 修复②，
         // conversation-continuation.ts dispatchRoundAsync handlers）。
         return {
-          handle: { data: this.synthesizeHandle(ctx.poolKey) },
+          handle: { data: this.synthesizeHandle() },
           outcome: abortedRunOutcome(this.id, runId, err),
         };
       }
       if (isTransientRunFailure(err)) {
         // 运行中失败（引擎崩溃 / 数据面故障杀链）：合成 error outcome + 正常 handle。
         return {
-          handle: { data: this.synthesizeHandle(ctx.poolKey) },
+          handle: { data: this.synthesizeHandle() },
           outcome: transientRunOutcome(this.id, err),
         };
       }
@@ -271,15 +271,14 @@ export class RemoteEngine implements EnginePort {
     await this.opts.client.dispose();
   }
 
-  /** 运行中失败的合成 handle：handleReady 回填优先，缺省回退请求期 ctx。 */
-  private synthesizeHandle(poolKey: string): EngineHandleData {
+  /** 运行中失败的合成 handle：handleReady 回填优先，缺省空 sessionRef。 */
+  private synthesizeHandle(): EngineHandleData {
     const partial = this.opts.client.getPartialHandle();
     const diag = this.opts.client.getInitializeDiagnostics();
     return {
       v: 1,
       engineId: this.id,
       sessionRef: partial?.sessionRef ?? {},
-      poolKey: partial?.poolKey ?? poolKey,
       engineVersion: diag?.engineVersion,
       adapterVersion: diag?.adapterVersion ?? `remote-engine/${this.id}`,
     };
@@ -307,7 +306,6 @@ interface WireRunParams {
   runId: string;
   task: SdkAgentCallOpts;
   ctx: {
-    poolKey: string;
     cwd: string;
     model: string | undefined;
     schemaEnv: string | undefined;
@@ -362,7 +360,6 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
     runId,
     task: toSdkTaskSubset(task),
     ctx: {
-      poolKey: ctx.poolKey,
       cwd: task.cwd ?? process.cwd(),
       model: task.model,
       schemaEnv: ctx.schemaEnv ?? task.schemaEnv,
@@ -381,12 +378,11 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
   };
 }
 
-/** run 作用域事件路由（event / streamDelta / poolResolved / handleReady）。 */
+/** run 作用域事件路由（event / streamDelta / handleReady）。 */
 function buildRunRouteHandlers(ctx: RunContext): RunRoute {
   return {
     onEvent: (event) => ctx.onEvent?.(event as Parameters<NonNullable<RunContext["onEvent"]>>[0]),
     onStreamDelta: (delta) => ctx.stream?.onDelta(delta),
-    onPoolResolved: (poolKey) => ctx.onPoolResolved?.(poolKey),
     onHandleReady: (partial) => ctx.onHandleReady?.(partial),
   };
 }

@@ -107,7 +107,7 @@ interface PumpHarness {
   exitPromise: Promise<number>;
   fireClose: (code: number | null, signal?: NodeJS.Signals | null) => void;
   fireError: (err: Error) => void;
-  readyCalls: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+  readyCalls: Array<{ sessionRef: Record<string, string> }>;
   runEnd: import("../spawn-run-pump.ts").RunEndState;
 }
 

@@ -112,13 +112,12 @@ describe("M3 V5c killAll 组杀邻接", () => {
 
       const runA = engine.run(
         { prompt: "wedged" },
-        { taskId: "run-a", poolKey: "shared", signal: mergedA.signal, onEvent: (e) => eventsA.push(e) },
+        { taskId: "run-a", signal: mergedA.signal, onEvent: (e) => eventsA.push(e) },
       );
       const runB = engine.run(
         { prompt: "healthy" },
         {
           taskId: "run-b",
-          poolKey: "shared",
           signal: new AbortController().signal,
           onEvent: (e) => eventsB.push(e),
         },

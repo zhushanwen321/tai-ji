@@ -30,14 +30,12 @@ const sessionParamsSamples = [
     recordId: "rec-1",
     resume: {
       sessionRef: { recordId: "rec-1", sessionFile: "/data/sessions/a.jsonl" },
-      poolKey: "shared",
     },
   },
   {
     recordId: "rec-9",
     resume: {
       sessionRef: { sessionFile: "/data/sessions/b.jsonl" },
-      poolKey: "shared",
       journalPath: "/data/journals/b.ndjson",
     },
   },
@@ -58,10 +56,10 @@ describe("run.params.resume：schema 校验通过（H1 U6 唯一会话形态键�
     const run: RunParams = {
       runId: "run-1",
       task: { prompt: "do" },
-      ctx: { poolKey: "shared", cwd: "/tmp" },
+      ctx: { cwd: "/tmp" },
       resume: {
         recordId: "rec-1",
-        resume: { sessionRef: { sessionFile: "/s/a.jsonl" }, poolKey: "shared" },
+        resume: { sessionRef: { sessionFile: "/s/a.jsonl" } },
       },
     };
     expect(run.resume?.recordId).toBe("rec-1");
@@ -76,7 +74,7 @@ describe("run.params.resume：schema 校验通过（H1 U6 唯一会话形态键�
         params: {
           runId: "run-1",
           task: { prompt: "do" },
-          ctx: { poolKey: "shared", cwd: "/tmp" },
+          ctx: { cwd: "/tmp" },
           resume: sessionParamsSamples[1],
         },
       }),
@@ -104,11 +102,11 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
     expect(validateSessionParams({ recordId: 42 })).toBe(false);
   });
 
-  it("resume 非 object / 缺 sessionRef / 缺 poolKey", () => {
+  it("resume 非 object / 缺 sessionRef", () => {
     expect(validateSessionParams({ recordId: "r", resume: "not-an-object" })).toBe(false);
-    expect(validateSessionParams({ recordId: "r", resume: { poolKey: "shared" } })).toBe(false);
+    expect(validateSessionParams({ recordId: "r", resume: { journalPath: "/j" } })).toBe(false);
     expect(
-      validateSessionParams({ recordId: "r", resume: { sessionRef: {} } }),
+      validateSessionParams({ recordId: "r", resume: {} }),
     ).toBe(false);
   });
 
@@ -116,7 +114,7 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
     expect(
       validateSessionParams({
         recordId: "r",
-        resume: { sessionRef: { sessionFile: 123 }, poolKey: "shared" },
+        resume: { sessionRef: { sessionFile: 123 } },
       }),
     ).toBe(false);
     expect(
@@ -124,7 +122,6 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
         recordId: "r",
         resume: {
           sessionRef: { sessionFile: "/s/a.jsonl" },
-          poolKey: "shared",
           journalPath: 42,
         },
       }),
@@ -134,7 +131,7 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
   it("未知键拒（additionalProperties:false，含凭据类字段与废弃键混入）", () => {
     expect(validateSessionParams({ recordId: "r", priority: "high" })).toBe(false);
     expect(
-      validateSessionParams({ recordId: "r", resume: { sessionRef: {}, poolKey: "p", extra: 1 } }),
+      validateSessionParams({ recordId: "r", resume: { sessionRef: {}, extra: 1 } }),
     ).toBe(false);
   });
 

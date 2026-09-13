@@ -143,7 +143,7 @@ function noteEvent(params) {
   let runResult;
   let runError;
   try {
-    runResult = await request("run", { runId, task, ctx: { poolKey: "shared", cwd: "<workdir>" } });
+    runResult = await request("run", { runId, task, ctx: { cwd: "<workdir>" } });
   } catch (err) {
     runError = String(err.message);
   }

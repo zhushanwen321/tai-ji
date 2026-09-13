@@ -78,7 +78,6 @@ function makeHandle(sessionRef: Record<string, string>): EngineHandle {
       v: 1,
       engineId: "zcode",
       sessionRef,
-      poolKey: "shared",
       adapterVersion: "1.0.0-test",
     },
   };
@@ -247,7 +246,7 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
 
     const { outcome } = await engine.run(
       { prompt: "做点什么", description: "s", model: `${PROVIDER}/m1`, cwd: workspace },
-      { taskId: "sa-iso-env", poolKey: "" },
+      { taskId: "sa-iso-env" },
     );
     expect(outcome.error).toBeUndefined();
 

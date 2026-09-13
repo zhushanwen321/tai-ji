@@ -131,9 +131,11 @@ export interface EngineHandleData {
   engineId: string;
   /** 引擎自定义定位键值。pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }。 */
   sessionRef: Record<string, string>;
-  /** 隔离池定位。pi 无池化恒 'shared'。 */
-  poolKey: string;
-  /** journal 绝对路径（read 第②级数据源；宿主读前校验前缀白名单）。缺省 = 无 journal。 */
+  /**
+   * journal 绝对路径（read 第②级数据源；宿主读前校验前缀白名单）。缺省 = 无 journal。
+   * [池抽象降级 2026-09-13] 原 poolKey 字段已删除——两引擎 poolKey 恒 'shared'
+   * （SDK SHARED_POOL_KEY），journal 固定落 engines/<engineId>/shared/，字段零信息量。
+   */
   journalPath?: string;
   /** probe 实测版本（漂移排查锚点）。 */
   engineVersion?: string;
@@ -152,8 +154,6 @@ export interface EngineHandleData {
 export interface ResumeAnchor {
   /** 引擎定位键（pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
-  /** 隔离池定位（锚点补全 handle 重建所需；pi 无池化恒 'shared'）。 */
-  poolKey: string;
   /** journal 绝对路径（read 降级链第②级数据源；无 journal 缺省）。 */
   journalPath?: string;
 }

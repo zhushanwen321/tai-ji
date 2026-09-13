@@ -92,7 +92,7 @@ export interface SpawnRunCallbacks {
   /** AgentEvent 出口（→ `event` 通知，runId + 单调 seq 由 server 层组装）。 */
   onEvent: (event: AgentEvent) => void;
   /** sessionFile/sessionId 就绪回填（→ host/handleReady）。 */
-  onHandleReady?: (partial: { sessionRef: Record<string, string>; poolKey: string }) => void;
+  onHandleReady?: (partial: { sessionRef: Record<string, string> }) => void;
   /** 一次性子进程 pid 上报（→ host/childSpawned）。 */
   onChildSpawned?: (pid: number, recordId: string) => void;
   /** 子进程状态变更（→ host/childStateChanged；killed 必含）。 */

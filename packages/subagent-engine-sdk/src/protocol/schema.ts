@@ -178,11 +178,10 @@ export const runSessionParamsSchema = {
     resume: {
       type: "object",
       additionalProperties: false,
-      required: ["sessionRef", "poolKey"],
+      required: ["sessionRef"],
       properties: {
         // ResumeAnchor.sessionRef = Record<string, string>（引擎定位键值对）
         sessionRef: { type: "object", additionalProperties: { type: "string" } },
-        poolKey: { type: "string" },
         journalPath: { type: "string" },
       },
     },

@@ -17,7 +17,7 @@
 > - v2（2026-09-08，R1 修复）：①**同步能力位**改为 manifest 声明 + 握手校验（原「未握手返回保守值」会误拒 pi）；
 >   ②新增 **D7 引擎 SDK 包**（解决「公共降级层引擎无关」与「引擎不得 import core」的互斥）；
 >   ③**runtime 升为第三个宿主**并给出①级读的进程模型与降级语义；④协议补 `read.dataDir`、
->   反向通知 `host/poolResolved|handleReady|childSpawned`、反向请求超时值；⑤删内置引擎清单 +
+>   反向通知 `host/handleReady|childSpawned`、反向请求超时值（[池抽象降级 2026-09-13] `host/poolResolved` 已删，反向通道 8→7）；⑤删内置引擎清单 +
 >   定义「缺省引擎包缺失」的路由规格；⑥v1 **关闭事件合并**（原 16ms/4KB 与 A1 逐字段等价不可兼得）；
 >   ⑦宿主零改动改为**兼容公共面**；⑧补伴生写入面、env 契约归属、打包发现路径传递、relay 透传、
 >   pi 等价验收与宿主表面不变量场景；⑨硬耦合清单补齐 pi 的静态 import 面与测试消费面。
@@ -160,8 +160,8 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 ```
 
 引擎与 core **同进程、同依赖树、同版本**；引擎通过 `EnginePort` 被调用，
-通过 `RunContext` 回调（onEvent / onHandleReady / onPoolResolved / onChildSpawned / stream / schemaEnv / ctxModel）
-与宿主交互。
+通过 `RunContext` 回调（onEvent / onHandleReady / onChildSpawned / stream / schemaEnv / ctxModel）
+与宿主交互（[池抽象降级 2026-09-13] onPoolResolved 与 RunContext.poolKey 已删——两引擎 poolKey 恒 `'shared'`，journal 落盘路径构造即终值）。
 
 ### 2.2 问题清单（每条都指向「分发形态」而非「抽象设计」）
 
@@ -235,7 +235,7 @@ pi 扩展进程 ──spawn──> engine CLI 进程（常驻，per engine id）
      │                       │                  pi    → <pi agent dir>/sessions/*.jsonl
      │                       ├─ launcher wrapper：<engineDataDir>/engines/zcode/appserver-launcher.cjs
      │                       └─ stderr 日志：<engineDataDir>/logs/zcode-appserver-stderr-<pid>.log
-     ├─ journal：<dataRoot>/engines/<engineId>/<poolKey>/journal-<taskId>.jsonl（core 写）
+     ├─ journal：<dataRoot>/engines/<engineId>/shared/journal-<taskId>.jsonl（core 写；分组 key 固定 `'shared'`，[池抽象降级] 无池化）
      ├─ record：宿主 record 存储（core 写）
      └─ engines.json：<agentDir>/subagents/engines.json（core 写，runtime/GUI 读）
 
@@ -268,8 +268,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 { "id": 1, "result": { ... } }   |   { "id": 1, "error": { "code": "...", "message": "...", "recovery": "...", "data": {...} } }
 // ③ 通知（引擎 → core，无 id）
 { "method": "event", "params": { "runId": "...", "seq": 1, "event": { "type": "text_delta", "delta": "..." } } }
-// ④ 反向请求（引擎 → core，**必须应答**）：数据面类（`host/log`/`streamDelta`/`poolResolved`/
-//    `handleReady`/`childSpawned`/`childStateChanged`）10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败；
+// ④ 反向请求（引擎 → core，**必须应答**）：数据面类（`host/log`/`streamDelta`/
+//    `handleReady`/`host/childSpawned`/`host/childStateChanged`）10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败；
 //    人机交互类（`host/askUser`/`host/permission`）**不设统一超时**——core 先回 `{ack:true}`，
 //    结果异步到达；按 ADR-0047「静默 ≠ 卡死」用无进展检测/用户取消，不据此判引擎故障
 { "id": "rev-1", "method": "host/askUser", "params": { ... } }
@@ -281,7 +281,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 |------|------|------|------|
 | `initialize` | core→引擎 | 握手 | `{protocolVersion, hostInfo:{name,version,dataRoot}, engineConfig}` → `{protocolVersion, engineId, engineVersion, adapterVersion, capabilities, models?}`；**应答仅作诊断**（与 manifest 不一致 → warn 留痕，不参与判据，见下「同步成员清单」）；**`engineConfig` = L3 显式配置的 `engines.<id>.config`（`Record<string,string>`，缺省 `{}`）**，作为引擎自身配置入口透传（不放凭据）；版本越界 → `engine_protocol_mismatch`；能力位与 manifest 不符 → 按方向处理（见下「能力位」段） |
 | `probe` | core→引擎 | `probe` | `{force?}` → `ProbeReport` |
-| `run` | core→引擎 | `run` | `{runId, task, ctx:{poolKey, cwd, model?, schemaEnv?, ctxModel?, engineFallback?, streamMode?}}`；期间发 `event`；终态应答 `{handle, outcome}` |
+| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, schemaEnv?, ctxModel?, engineFallback?, streamMode?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
 | `cancel` | core→引擎 | AbortSignal | `{runId, reason}`；引擎须在 3s 内收敛终态；超时 core 走杀链 |
 | `interact` | core→引擎 | `interact` | `{handle, action}` → `InteractResult` |
 | `read` | core→引擎 | `read` | `{handle, dataDir}` → `SessionView`（**`dataDir` 必填**：存量池时代相对 `dbPath` 需要它） |
@@ -292,7 +292,6 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `host/log` | 引擎→core | 日志 | 引擎日志落宿主日志 |
 | `host/askUser` / `host/permission` | 引擎→core | 交互 | 未实现的能力回 `{unsupported:true}` |
 | `host/streamDelta` | 引擎→core | `ctx.stream` | UI 实时通道（双通道之一） |
-| `host/poolResolved` | 引擎→core | `onPoolResolved` | **journal 落盘路径的单一权威**（须在首个事件 emit 前调用） |
 | `host/handleReady` | 引擎→core | `onHandleReady` | 运行中句柄回填（AGENTS.md 关键规则 9 的前提） |
 | `host/childSpawned` | 引擎→core | `onChildSpawned` | 上报引擎内一次性子进程 pid（**用途 = `isResumable` 镜像谓词 + 诊断留痕**；**不再声称「供杀链/收割」**——v6 已删按 pid 补杀，收割只靠进程组，见 §3.6 D2；常驻进程不报，归 `dispose`） |
 | `host/childStateChanged` | 引擎→core | `onChildSpawned` 的**状态面** | `{pid, recordId, state: running\|exited, killed: boolean, exitCode?, signal?}`——core 侧镜像用于 `hasLiveProcessHandle`/`isResumable`（同步读镜像，不跨进程查询）；**载荷必含 `killed`**（实装判据 `child !== undefined && !child.killed`） |
@@ -301,11 +300,10 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 | RunContext 成员 | 协议承载 | 缺失后果 |
 |----------------|---------|---------|
-| `taskId` / `poolKey` | `run.params.ctx` | journal 归属错 |
+| `taskId` | `run.params.ctx` | journal 归属错（[池抽象降级] `poolKey` 已删——journal 固定落 `engines/<id>/shared/`） |
 | `signal` | `cancel` 帧 + 杀链 | 无法取消 |
 | `onEvent` | `event` 通知 | 无事件流 |
 | `stream` | `host/streamDelta` | UI 实时刷新丢失 |
-| `onPoolResolved` | `host/poolResolved` | journal 路径与 handle.poolKey 分叉 |
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
 | `ctxModel` / `schemaEnv` / `engineFallback` | `run.params.ctx` | model 兜底/结构化输出降级 |

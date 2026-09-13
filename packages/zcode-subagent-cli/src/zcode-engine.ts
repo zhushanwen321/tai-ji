@@ -21,7 +21,8 @@
 //     隔离库绝对路径，读侧（本文件 read + session-view-service）按
 //     zcodeDbPathAllowlist 封闭白名单放行（宿主路径仅存量兼容）。原「GUI 会话列表
 //     可见 headless 会话」已接受代价随之撤销。
-//   - journal 分组 key 固定 'shared'（与 pi 引擎 PI_POOL_KEY 同构）：journal 落
+//   - journal 分组 key 固定 'shared'（SDK SHARED_POOL_KEY——[池抽象降级 2026-09-13]
+//     poolKey 协议面已删，值仅承载 journal 落盘路径与存量 record 兼容）：journal 落
 //     engineDataDir/engines/zcode/shared/journal-<taskId>.jsonl。
 //
 // run 错误语义（设计 §3.3.5）：
@@ -53,6 +54,7 @@ import {
   synthesizeTimeoutOutcome,
   engineTimeoutDetail,
   resolvePoolDir,
+  SHARED_POOL_KEY,
   spawnEngineChild,
 } from "@zhushanwen/subagent-engine-sdk";
 import { replayJournalToSessionView } from "./journal-io.ts";
@@ -78,7 +80,6 @@ import {
   ZCODE_RESUME_CHARS_PER_TOKEN,
   ZCODE_RESUME_HISTORY_TOKEN_BUDGET,
   ZCODE_SESSION_SWEEP_DEFER_MS,
-  ZCODE_SHARED_POOL_KEY,
   ZCODE_TURN_MAX_TIMEOUT_ENV,
   isFailedTerminalStatus,
   parseZcodeTurnTimeoutEnv,
@@ -286,8 +287,8 @@ export class ZcodeEngine implements EnginePort {
   /**
    * 常驻路径主编排：模型解析（v2 单源校验）→ 惰性连接 + runTurn（事件时序前移：
    * text_delta 流式、终态后 message_end/turn_end）→ schema 仿真重试 → outcome/handle。
-   * poolKey 固定 'shared'（共享宿主 HOME，无池），onPoolResolved 在 prepare 期、
-   * onHandleReady 在 create 应答后（§3.4 不变量 3）。
+   * onHandleReady 在 create 应答后（§3.4 不变量 3；原 onPoolResolved prepare 期
+   * 声明已随 [池抽象降级 2026-09-13] poolKey 协议面退役删除）。
    */
   private async runViaAppServer(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
     const startedAt = Date.now();
@@ -303,9 +304,6 @@ export class ZcodeEngine implements EnginePort {
     // [RX2-F1] 非常见档位出声一行（不拦截透传）；放主编排而非 attemptAppServerTurn——
     // schema 重试轮会二次进 attempt，warn 只应随任务出声一次
     this.warnThoughtLevelUncommon(task, ctx);
-    // 对齐点③（不变量 3）：poolKey 在 prepare 期声明，早于连接建立与首个事件
-    ctx.onPoolResolved?.(ZCODE_SHARED_POOL_KEY);
-
     const cwd = task.cwd ?? process.cwd();
     const schema = isPlainObject(task.schema) ? task.schema : undefined;
     // [U6 / §3.2.6 要点 3] zcode 续聊（interact-resume）：ctx.resume 携带 zcode 锚
@@ -328,9 +326,6 @@ export class ZcodeEngine implements EnginePort {
 
   /** pre-aborted 短路收口：合成中止 outcome + 'shared' 锚定 handle。 */
   private abortedAppServerRun(task: AgentCallOpts, ctx: RunContext, startedAt: number): EngineRunResult {
-    // 对齐点③（不变量 3）：onPoolResolved 必须先于首个事件 emit——本分支
-    // finalizeOutcome 经 applyAbortedOutcome emit error 事件
-    ctx.onPoolResolved?.(ZCODE_SHARED_POOL_KEY);
     const outcome = this.finalizeOutcome(
       task,
       ctx,
@@ -429,7 +424,6 @@ export class ZcodeEngine implements EnginePort {
           dbPath: zcodeSessionDbPath(this.deps.engineDataDir()),
           ...(outcome.sessionId !== undefined ? { sessionId: outcome.sessionId } : {}),
         },
-        poolKey: ZCODE_SHARED_POOL_KEY,
         ...(this.probeCache?.engineVersion !== undefined && this.probeCache.engineVersion !== ""
           ? { engineVersion: this.probeCache.engineVersion }
           : {}),
@@ -482,7 +476,6 @@ export class ZcodeEngine implements EnginePort {
         // dbPath 与终态 handle 同源 zcodeSessionDbPath(engineDataDir)（设计 D1）
         ctx.onHandleReady?.({
           sessionRef: { dbPath: zcodeSessionDbPath(this.deps.engineDataDir()), sessionId },
-          poolKey: ZCODE_SHARED_POOL_KEY,
         });
       },
       // 显式总上界传参（D2/U4：缺省缺席——channel 侧 resolveTurnTimerMs 走 env→默认）
@@ -915,8 +908,12 @@ export class ZcodeEngine implements EnginePort {
    * sessionId 缺失（解析失败的 run 无法定位 session）跳过①级；②级依赖
    * handle.journalPath（宿主 run 后回填）。dbPath：新 handle 恒为隔离库绝对路径
    * （zcodeSessionDbPath(engineDataDir)，tier1 白名单集合见方法体——宿主路径仅
-   * 「共享 HOME 时代」存量兼容）；旧 records（池时代）的相对路径仍按 poolKey
-   * 锚定解析（read 兼容旧数据，池目录不存在时自然落②级 journal 降级）。
+   * 「共享 HOME 时代」存量兼容）；旧 records（池时代）的相对路径仍按池目录锚定
+   * 解析（read 兼容旧数据，池目录不存在时自然落②级 journal 降级）。[池抽象降级
+   * 2026-09-13] 锚定 key 用常量 SHARED_POOL_KEY 承载——协议面 poolKey 已删，池
+   * 时代真实池 key 不再随 handle 传输；若旧 record 的池目录恰为 shared 布局则①级
+   * 仍可达，其余池 key 的旧 record 直接走②级 journal 降级（30 天 TTL 同尺度衰减，
+   * 行为安全）。
    */
   async read(handle: EngineHandle): Promise<SessionView> {
     if (handle.data.engineId !== ZCODE_ENGINE_ID) {
@@ -942,7 +939,7 @@ export class ZcodeEngine implements EnginePort {
         }
       } else {
         dbPath = path.join(
-          resolvePoolDir(this.deps.engineDataDir(), ZCODE_ENGINE_ID, handle.data.poolKey),
+          resolvePoolDir(this.deps.engineDataDir(), ZCODE_ENGINE_ID, SHARED_POOL_KEY),
           dbPathRaw,
         );
       }

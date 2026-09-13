@@ -20,12 +20,9 @@
  *     身份在 transition("done") 路径（发射点③）与其宿主收口链，GC 不越权补发。
  */
 import { getLogger } from "../core/logger.ts";
-import { getEngineDataDir } from "./engine/common/data-dir.ts";
-import { releasePoolRef } from "./engine/common/pool-manager.ts";
 import { bestEffort } from "./best-effort.ts";
 import { isResumable } from "./lifecycle-predicates.ts";
 import type { RecordStore } from "./record-store.ts";
-import type { ExecutionRecord } from "./types.ts";
 
 const logger = getLogger("subagents");
 
@@ -61,15 +58,10 @@ export interface WorkflowRunGcStore {
  *  - workflow 面（注入 workflowRuns 时）：running 且 meta.startedAt 超
  *    IDLE_TTL_MS 的 run 终态化归档（transition + save），单 run 失败不阻断。
  *
- * [D8 池引用计数接线] 回收时同步释放该 record 的引擎池引用（releasePoolRef：
- * journal 跟随 record 删除 + refs 移除 + 归零删池内原生状态）。锚点选在 30 天 TTL
- * 而非 dispose/archive 类时机，依据：idle record 30 天后引擎侧不会再有活动（archive
- * 后 message 对 idle record 同 id 续聊走冷查重建 + 新轮 spawn——万物可续准入，续聊
- * 不依赖原引擎池内状态，原池引用可安全释放），且与 pi 域 session 文件 30 天
- * TTL（session-file-gc 同期删①级读源）形成两引擎对称衰减；disposeAllRecords/close
- * 类时机 record 数据仍保留（可冷查重建 / GUI 历史重建可见），journal（②级数据源）
- * 不能删——那是 record 主数据死亡（主 session 文件被 pi 侧删除，core 无触发点）才有
- * 的处置，由 cleanupExpiredPoolRefs 的 TTL 兜底覆盖。
+ * [池抽象降级 2026-09-13] 原「回收时同步释放该 record 的引擎池引用」（releasePoolRef）
+ * 接线已删除——refs 引用计数机制整体退役，record 的 journal 回收统一由
+ * pool-manager cleanupExpiredJournals 的 30 天 mtime TTL 兜底（record 主数据死亡对
+ * core 无触发点，mtime 是唯一可观测锚）。
  */
 export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStore): () => void {
   const timer = setInterval(() => {
@@ -95,7 +87,6 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
         } catch (err) {
           bestEffort(err, `GC archive record ${record.id}`);
         }
-        releaseEnginePoolRef(record);
       }
     }
     if (workflowRuns !== undefined) {
@@ -139,20 +130,5 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
     } catch (err) {
       bestEffort(err, `GC terminate workflow run ${run.runId}`);
     }
-  }
-}
-
-/**
- * 释放 record 的引擎池引用（best-effort）。无 engineHandle（存量 record / 非引擎
- * 路径）时 no-op；engine 缺省投影 'pi'（与读侧存量 entry 零迁移口径一致）。
- */
-function releaseEnginePoolRef(record: ExecutionRecord): void {
-  const poolKey = record.engineHandle?.poolKey;
-  if (poolKey === undefined) return;
-  const engineId = record.engine ?? "pi";
-  try {
-    releasePoolRef(getEngineDataDir(), engineId, poolKey, record.id);
-  } catch (err) {
-    bestEffort(err, `GC release pool ref for record ${record.id}`);
   }
 }

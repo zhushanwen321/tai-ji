@@ -37,7 +37,7 @@ import {
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import { PI_ADAPTER_VERSION, PI_ENGINE_ID, PI_POOL_KEY } from "./constants.ts";
+import { PI_ADAPTER_VERSION, PI_ENGINE_ID } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
 import type { AgentCallOpts, EngineHandle, EnginePort, EngineCtxModel, RunContext } from "./port-types.ts";
 import type { PiInvocation } from "./pi-invocation.ts";
@@ -188,8 +188,8 @@ export class PiEngine implements EnginePort {
    * 抛错语义（core PiEngine.run ①）：prepare 期失败 reject，不产生 handle。 */
   async run(task: AgentCallOpts, ctx: RunContext): Promise<{ handle: EngineHandle; outcome: AgentOutcome }> {
     const dataDir = resolveEngineDataRootOrThrow(this.deps.dataDir);
-    // pi 无隔离池（poolKey 恒 'shared'）——恒值声明，宿主 journal writer 无需重定向
-    ctx.onPoolResolved?.(PI_POOL_KEY);
+    // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议面退役删除
+    //（journal 固定落 engines/pi/shared/，宿主侧路径构造即终值）。
 
     const cwd = task.cwd ?? process.cwd();
     const spawn = this.deps.spawnRunner ?? runSpawnOnce;
@@ -324,7 +324,6 @@ function buildEngineRunResult(
           ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
           ...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
         },
-        poolKey: PI_POOL_KEY,
         adapterVersion: PI_ADAPTER_VERSION,
       },
     },

@@ -61,8 +61,6 @@ export const PROTOCOL_METHODS = [
  * run 上下文（RunContext 字段映射的协议承载，设计 §3.3 RunContext 映射表）。
  */
 export interface RunContextParams {
-  /** 隔离池归属（journal 归属错 = 缺失后果）。 */
-  poolKey: string;
   /** 任务工作目录（worktree 隔离时 = worktree 路径）。 */
   cwd: string;
   /** 请求模型 ref（未传 = 引擎缺省模型）。 */

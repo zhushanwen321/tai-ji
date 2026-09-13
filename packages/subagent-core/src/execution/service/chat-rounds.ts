@@ -55,7 +55,7 @@ import {
 } from "../conversation-continuation.ts";
 import { updateFromEvent } from "../execution-record.ts";
 import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../finalize-record.ts";
-import { PI_POOL_KEY } from "../engine/host/pi-host-binding.ts";
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
@@ -383,14 +383,13 @@ export class ChatRounds {
         // engineHandle 投影通道——GUI 经 entry 重建 record 即拿到新锚）。pi 不挂本
         // 回调：pi 会话锚是 outcome.sessionFile 回填面（下方 writeBindingForRecord），
         // pi 行为零变化。
-        const backfillRoundHandle = (partial: {
-          sessionRef: Record<string, string>;
-          poolKey: string;
-        }): void => {
+        const backfillRoundHandle = (partial: { sessionRef: Record<string, string> }): void => {
           record.engineHandle = {
             ...(record.engineHandle ?? {}),
             sessionRef: { ...partial.sessionRef },
-            poolKey: partial.poolKey,
+            // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
+            // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
+            poolKey: SHARED_POOL_KEY,
           };
           this.deps.getStore().reportRecordTransition(record);
         };
@@ -399,7 +398,6 @@ export class ChatRounds {
           this.deps.taskSpecWithModel(opts, record.model),
           {
             taskId: record.id,
-            poolKey: PI_POOL_KEY,
             signal,
             ...(stream !== undefined ? { stream } : {}),
             ctxModel: identity.resolved.model,

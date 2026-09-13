@@ -66,8 +66,8 @@ class ZcodeColdRun {
   }
 
   /** 模拟 zcode 引擎 create 应答后的运行中句柄回传（§3.4 不变量 3——onSessionCreated）。 */
-  emitHandleReady(sessionRef: Record<string, string>, poolKey = "shared"): void {
-    this.ctx.onHandleReady?.({ sessionRef, poolKey });
+  emitHandleReady(sessionRef: Record<string, string>): void {
+    this.ctx.onHandleReady?.({ sessionRef });
   }
 
   /** 模拟引擎协议事件（live reducer 喂入路径）。 */
@@ -83,7 +83,6 @@ class ZcodeColdRun {
           v: 1,
           engineId: "zcode",
           sessionRef: { dbPath: "<db>" },
-          poolKey: "shared",
           adapterVersion: "zcode-cold-fake",
         } satisfies EngineHandle["data"],
       },
@@ -259,12 +258,13 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     });
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
     const record = recordOf(handle.subagentId);
-    // 首轮 create 应答 → onHandleReady 回填锚（sessionRef + poolKey）
+    // 首轮 create 应答 → onHandleReady 回填锚（sessionRef；poolKey 恒 'shared' 为
+    // 持久化形状成员——RecordStore engineHandle 断言用 record.engineHandle 自身核对）
     zcode.runs[0]!.emitHandleReady({ sessionId: "sess_cold_1", dbPath: zcodeDb });
-    expect(record.engineHandle).toEqual({
+    expect(record.engineHandle).toMatchObject({
       sessionRef: { sessionId: "sess_cold_1", dbPath: zcodeDb },
-      poolKey: "shared",
     });
+    expect(record.engineHandle?.poolKey).toBe("shared");
     zcode.runs[0]!.settle("round one done");
     await vi.waitFor(() => expect(record.round).toBe(1));
 
@@ -276,7 +276,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     // session/resume 读历史 + session/create 新会话注入）
     expect(zcode.runs[1]!.ctx.resume).toEqual({
       recordId: record.id,
-      resume: { sessionRef: { sessionId: "sess_cold_1", dbPath: zcodeDb }, poolKey: "shared" },
+      resume: { sessionRef: { sessionId: "sess_cold_1", dbPath: zcodeDb } },
     });
     expect(zcode.runs[1]!.task.prompt).toBe("second round");
     expect(zcode.runs[1]!.task.conversation).toBe(true);
@@ -301,9 +301,8 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     // 第二轮 create 应答 → 新 sessionRef 覆写（补缺语义会把 'sess_cold_1' 残留成锚，
     // 引擎侧下一轮注入的历史就缺最新一轮——本用例锁定覆写）
     zcode.runs[1]!.emitHandleReady({ sessionId: "sess_cold_2", dbPath: zcodeDb });
-    expect(record.engineHandle).toEqual({
+    expect(record.engineHandle).toMatchObject({
       sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb },
-      poolKey: "shared",
     });
     // 回填经 store.reportRecordTransition 落 entry（appendEvent 既有 engineHandle
     // 投影通道——GUI 经 entry 重建 record 即拿到新锚）
@@ -324,7 +323,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     await vi.waitFor(() => expect(zcode.runs.length).toBe(3));
     expect(zcode.runs[2]!.ctx.resume).toEqual({
       recordId: record.id,
-      resume: { sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb }, poolKey: "shared" },
+      resume: { sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb } },
     });
   });
 

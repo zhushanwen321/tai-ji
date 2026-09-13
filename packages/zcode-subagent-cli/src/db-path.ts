@@ -22,11 +22,12 @@ import { ZCODE_HOST_DB_SUFFIX } from "./constants.ts";
  * 隔离会话库绝对路径（单一构造函数，唯一权威）：
  * `<engineDataDir>/engines/zcode/session-db/db.sqlite`。
  *
- * 选址在池目录之外（不落 `engines/zcode/shared/`——那是 journal 池目录，被
- * `deletePoolNativeState` 覆盖，设计 D1/F11）；journal 路径不变（仍
- * `engines/zcode/shared/journal-<taskId>.jsonl`）。`cleanupExpiredPoolRefs` 会把
- * `engines/<engineId>/` 下每个子目录当池枚举，`session-db/` 中的 `db.sqlite*`
- * 不匹配任何删除条件（池 GC 守卫 = 验收场景 A9）。
+ * 选址在 journal 分组目录之外（不落 `engines/zcode/shared/`——[池抽象降级
+ * 2026-09-13] 后那是 journal 固定分组目录，清理机制 = `cleanupExpiredJournals`
+ * 的 mtime TTL，refs 计数/deletePoolNativeState 已删，设计 D1/F11）；journal
+ * 路径不变（仍 `engines/zcode/shared/journal-<taskId>.jsonl`）。
+ * `cleanupExpiredJournals` 会把 `engines/<engineId>/` 下每个子目录枚举，
+ * `session-db/` 中的 `db.sqlite*` 不匹配任何删除条件（GC 守卫 = 验收场景 A9）。
  *
  * @param engineDataDir 引擎数据目录（`deps.engineDataDir()`；禁硬编码，一律由入参推导）
  */

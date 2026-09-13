@@ -1,10 +1,13 @@
 // src/protocol/reverse-channels.ts
 //
-// 8 反向通道（引擎 → core，帧④，必须应答）载荷与超时二分。设计权威源：
+// 7 反向通道（引擎 → core，帧④，必须应答）载荷与超时二分。设计权威源：
 // 设计 §3.3 方法集表 host/* 行 + impl-plan §2.1「8 反向通道」与「反向请求超时二分」。
 // [H1] chat 域 v1.x 增量曾新增的第 9 通道（轮次相位帧）已随 chat-run 统一退役
 // （docs/architecture/subagent-chat-run-unification.md §3.3 D5，U5 删除）——轮次终态
 // 改由 run 应答（agent_settled resolve）承载，通道集收敛回 8 个。
+// [池抽象降级 2026-09-13] 原 host/poolResolved 通道（第 8 条）随 poolKey 协议面退役
+// 一并删除（两引擎 poolKey 恒 'shared'、journal 落盘路径固定，回调零信息量），通道集
+// 收敛为 7 个。
 //
 // 应答约定：数据面类回 {ok:true}（REVERSE_REQUEST_TIMEOUT_MS=10s 未答 = 引擎故障 →
 // 杀进程 + 在途 run 失败）；人机交互类走 ack 两阶段——先回 {ack:true}，结果异步到达
@@ -15,14 +18,13 @@ import type { ReverseRequestTimeoutClass } from "./engine-protocol.ts";
 import type { UiRequest, UiResponse } from "../ui-types.ts";
 
 /**
- * 反向通道名联合（恰好 8 个；REVERSE_CHANNELS 常量数组与之同源互证）。
+ * 反向通道名联合（恰好 7 个；REVERSE_CHANNELS 常量数组与之同源互证）。
  */
 export type ReverseChannel =
   | "host/log"
   | "host/askUser"
   | "host/permission"
   | "host/streamDelta"
-  | "host/poolResolved"
   | "host/handleReady"
   | "host/childSpawned"
   | "host/childStateChanged";
@@ -35,7 +37,6 @@ export const REVERSE_CHANNELS = [
   "host/askUser",
   "host/permission",
   "host/streamDelta",
-  "host/poolResolved",
   "host/handleReady",
   "host/childSpawned",
   "host/childStateChanged",
@@ -48,7 +49,6 @@ export const REVERSE_CHANNELS = [
 export const REVERSE_CHANNEL_TIMEOUT_CLASS: Record<ReverseChannel, ReverseRequestTimeoutClass> = {
   "host/log": "data-plane",
   "host/streamDelta": "data-plane",
-  "host/poolResolved": "data-plane",
   "host/handleReady": "data-plane",
   "host/childSpawned": "data-plane",
   "host/childStateChanged": "data-plane",
@@ -120,22 +120,13 @@ export function isHostStreamDeltaParams(value: unknown): value is HostStreamDelt
 }
 
 /**
- * host/poolResolved：journal 落盘路径单一权威（契约：必须在首个事件 emit 前调用——
- * 否则 journal 归属错）。载荷 = core onPoolResolved(poolKey) 的 runId 关联形态。
- */
-export interface HostPoolResolvedParams {
-  runId: string;
-  poolKey: string;
-}
-
-/**
  * host/handleReady：运行中句柄回填（core onHandleReady 语义：session/create 应答后、
  * 早于 run resolve；AGENTS.md 关键规则 9「重开 session 仍可见」的前提）。
+ * [池抽象降级 2026-09-13] 原 poolKey 字段已随协议面 poolKey 退役删除。
  */
 export interface HostHandleReadyParams {
   runId: string;
   sessionRef: Record<string, string>;
-  poolKey: string;
 }
 
 /**
@@ -169,7 +160,6 @@ export interface ReverseChannelParamsMap {
   "host/askUser": HostAskUserParams;
   "host/permission": HostPermissionParams;
   "host/streamDelta": HostStreamDeltaParams;
-  "host/poolResolved": HostPoolResolvedParams;
   "host/handleReady": HostHandleReadyParams;
   "host/childSpawned": HostChildSpawnedParams;
   "host/childStateChanged": HostChildStateChangedParams;
@@ -181,7 +171,6 @@ export interface ReverseChannelResultMap {
   "host/askUser": HostAskUserResult;
   "host/permission": HostPermissionResult;
   "host/streamDelta": { ok: true };
-  "host/poolResolved": { ok: true };
   "host/handleReady": { ok: true };
   "host/childSpawned": { ok: true };
   "host/childStateChanged": { ok: true };

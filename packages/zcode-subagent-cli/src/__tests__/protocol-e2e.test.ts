@@ -5,7 +5,7 @@
 // 用 __fixtures__/fake-appserver.mjs 冒充 zcode CLI（XYZ_ZCODE_CLI 注入 + HOME 指
 // tmp 写入合成 v2 config——合成 apiKey，绝不碰真实凭据/真实数据目录），断言：
 //   ① initialize 握手应答（protocolVersion/engineId/capabilities）；
-//   ② run 期间 host/* 反向请求（poolResolved/handleReady）可达且可应答；
+//   ② run 期间 host/* 反向请求（handleReady）可达且可应答；
 //   ③ event 通知（text_delta 流 + 终态 message_end/turn_end，seq 单调）；
 //   ④ run 终态应答：outcome.content 与 handle.sessionRef（隔离库 dbPath）正确；
 //   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭守卫主判据的隐式验证）。
@@ -235,13 +235,10 @@ describe("bin e2e：initialize → run → 终态应答 协议往返", () => {
         params: {
           runId: "run-e2e-1",
           task: { prompt: "做点什么" },
-          ctx: { poolKey: "shared", cwd: dataDir, model: "test-provider/m1" },
+          ctx: { cwd: dataDir, model: "test-provider/m1" },
         },
       });
 
-      // host/poolResolved（journal 落盘路径权威——首个事件 emit 前到达）
-      const pool = await engine.waitFor((f) => f.kind === "reverse" && f.method === "host/poolResolved");
-      expect((pool.params as { poolKey?: string })?.poolKey).toBe("shared");
       // host/handleReady（create 应答后回填）
       const handle = await engine.waitFor((f) => f.kind === "reverse" && f.method === "host/handleReady");
       const handleParams = handle.params as { sessionRef?: Record<string, string> };
@@ -267,7 +264,7 @@ describe("bin e2e：initialize → run → 终态应答 协议往返", () => {
       // 协议 RunResult.handle = EngineHandleData 本体（进程内 {data} 包装只在
       // EnginePort 面存在——与 RemoteEngine 的 `handle: { data: result.handle }` 对端互证）
       const runResult = runResp.result as {
-        handle: { sessionRef: Record<string, string>; poolKey: string };
+        handle: { sessionRef: Record<string, string> };
         outcome: { content: string; exitCode: number | null; error?: string; sessionId?: string };
       };
       expect(runResult.outcome.content).toBe(FINAL_TEXT);
@@ -276,7 +273,6 @@ describe("bin e2e：initialize → run → 终态应答 协议往返", () => {
       expect(runResult.handle.sessionRef["sessionId"]).toBe(GOLDEN_SESSION_ID);
       // 隔离库路径单一来源（db-path 契约根）
       expect(runResult.handle.sessionRef["dbPath"]).toBe(zcodeSessionDbPath(dataDir));
-      expect(runResult.handle.poolKey).toBe("shared");
 
       // ⑤ dispose 幂等 + ping
       engine.write({ id: 3, method: "dispose", params: {} });
@@ -356,14 +352,13 @@ describe("bin e2e：interact(resume) 全链（resume 读 → create 新 session 
         params: {
           runId: "run-resume-1",
           task: { prompt: "暗号是什么？" },
-          ctx: { poolKey: "shared", cwd: dataDir, model: "test-provider/m1" },
+          ctx: { cwd: dataDir, model: "test-provider/m1" },
           // [U6] 协议 run.params.resume（RunResumeParams：recordId + ResumeAnchor）
           resume: {
             recordId: "run-resume-1",
             resume: {
               sessionRef: { sessionId: OLD_SID, dbPath: zcodeSessionDbPath(dataDir) },
-              poolKey: "shared",
-            },
+                    },
           },
         },
       });
@@ -469,7 +464,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
         params: {
           runId: "run-late-terminal",
           task: { prompt: "做点什么" },
-          ctx: { poolKey: "shared", cwd: dataDir, model: "test-provider/m1" },
+          ctx: { cwd: dataDir, model: "test-provider/m1" },
         },
       });
       const runResp = await engine.waitFor((f) => f.kind === "response" && f.id === 2);

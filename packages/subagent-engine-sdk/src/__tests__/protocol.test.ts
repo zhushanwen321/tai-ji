@@ -143,22 +143,21 @@ describe("9 正向方法全集", () => {
   });
 });
 
-describe("8 反向通道全集与超时二分（R9-2；[H1] v1.x 曾增的轮次相位通道已退役）", () => {
-  it("恰好 8 个通道", () => {
-    expect(REVERSE_CHANNELS).toHaveLength(8);
+describe("7 反向通道全集与超时二分（R9-2；[池抽象降级] 原 host/poolResolved 已随 poolKey 协议面退役删除）", () => {
+  it("恰好 7 个通道", () => {
+    expect(REVERSE_CHANNELS).toHaveLength(7);
     expect([...REVERSE_CHANNELS]).toEqual([
       "host/log",
       "host/askUser",
       "host/permission",
       "host/streamDelta",
-      "host/poolResolved",
       "host/handleReady",
       "host/childSpawned",
       "host/childStateChanged",
     ]);
   });
 
-  it("二分：数据面 6 通道 10s 超时；人机交互 2 通道不设统一超时", () => {
+  it("二分：数据面 5 通道 10s 超时；人机交互 2 通道不设统一超时", () => {
     const dataPlane = REVERSE_CHANNELS.filter(
       (ch) => REVERSE_CHANNEL_TIMEOUT_CLASS[ch] === "data-plane",
     );
@@ -168,7 +167,6 @@ describe("8 反向通道全集与超时二分（R9-2；[H1] v1.x 曾增的轮次
     expect(dataPlane).toEqual([
       "host/log",
       "host/streamDelta",
-      "host/poolResolved",
       "host/handleReady",
       "host/childSpawned",
       "host/childStateChanged",
@@ -258,7 +256,7 @@ describe("帧判别守卫（四帧型互斥判别，W2 行解析器消费）", (
 });
 
 describe("run.params.ctx 增量字段（F6 sessionRootId：relay 归属键 SESSION_ID 权威源）", () => {
-  const v1Ctx: RunContextParams = { poolKey: "shared", cwd: "/tmp" };
+  const v1Ctx: RunContextParams = { cwd: "/tmp" };
 
   it("带 sessionRootId 的 run ctx 可构造（RunParams 形态承载）", () => {
     const run: RunParams = {
@@ -276,7 +274,7 @@ describe("run.params.ctx 增量字段（F6 sessionRootId：relay 归属键 SESSI
 });
 
 describe("run.params.ctx 增量字段（Option C sessionDir：宿主权威 subagent session 目录）", () => {
-  const v1Ctx: RunContextParams = { poolKey: "shared", cwd: "/tmp" };
+  const v1Ctx: RunContextParams = { cwd: "/tmp" };
 
   it("带 sessionDir 的 run ctx 可构造（引擎据此组装 --session-dir，不自推导）", () => {
     const run: RunParams = {

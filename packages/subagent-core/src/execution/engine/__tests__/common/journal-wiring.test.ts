@@ -1,9 +1,12 @@
 // journal-wiring.test.ts —— [D3-③ journal 接线合一] host helper 单测（两域共用的
-// 唯一实现：writer 创建 + retarget + journaling onEvent + handle 回填 + close）。
+// 唯一实现：writer 创建 + journaling onEvent + handle 回填 + close）。
 // 设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-③ + 双轨清单 #6。
 //
-// 覆盖：①占位池 key 初始路径与 retarget 后路径权威（getter 反映 retarget）；②先落盘
-// 再转发（forwardEvents）；③handle 回填写终态路径；④close 幂等不抛。
+// [池抽象降级 2026-09-13] 原「占位池 key + onPoolResolved retarget」覆盖面已删——
+// journal 落盘路径构造即终值（固定分组 key 'shared'，磁盘布局字节不变）。
+//
+// 覆盖：①固定分组 key 路径定稿（getter 恒构造值）；②先落盘再转发（forwardEvents）；
+// ③handle 回填写终态路径；④close 幂等不抛。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -11,7 +14,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { JOURNAL_INITIAL_POOL_KEY, wireEventJournal } from "../../common/journal-wiring.ts";
+import { wireEventJournal } from "../../common/journal-wiring.ts";
 import { resolveJournalPath } from "../../paths.ts";
 import type { AgentEvent } from "../../types.ts";
 import type { EngineHandle } from "../../types.ts";
@@ -31,16 +34,13 @@ afterEach(() => {
 });
 
 function makeHandle(): EngineHandle {
-  return { data: { v: 1, engineId: "zcode", sessionRef: {}, poolKey: "p-m1", adapterVersion: "t" } };
+  return { data: { v: 1, engineId: "zcode", sessionRef: {}, adapterVersion: "t" } };
 }
 
 describe("wireEventJournal（D3-③ host helper 唯一实现）", () => {
-  it("初始路径用占位池 key；onPoolResolved retarget 后 path getter 反映实际池 key（路径权威 = writer）", () => {
+  it("路径构造即终值：固定分组 key 'shared'（engines/zcode/shared/，[池抽象降级] 无 retarget）", () => {
     const wiring = wireEventJournal({ engineId: "zcode", taskId: "sa-1" });
-    expect(JOURNAL_INITIAL_POOL_KEY).toBe("shared");
     expect(wiring.path).toBe(resolveJournalPath(dataRoot, "zcode", "shared", "sa-1"));
-    wiring.onPoolResolved("home-p-m1");
-    expect(wiring.path).toBe(resolveJournalPath(dataRoot, "zcode", "home-p-m1", "sa-1"));
   });
 
   it("journaling onEvent：先落盘再转发（forwardEvents 收到同一事件）", async () => {
@@ -79,13 +79,12 @@ describe("wireEventJournal（D3-③ host helper 唯一实现）", () => {
     expect(JSON.parse(lines[0]).event.type).toBe("turn_end");
   });
 
-  it("handle 回填：backfillHandle 写 retarget 后的终态路径（read ②级自描述定位符）", async () => {
+  it("handle 回填：backfillHandle 写终态路径（read ②级自描述定位符）", async () => {
     const wiring = wireEventJournal({ engineId: "zcode", taskId: "sa-4" });
-    wiring.onPoolResolved("home-p-m1");
     wiring.onEvent({ type: "turn_end" });
     const handle = makeHandle();
     wiring.backfillHandle(handle);
-    expect(handle.data.journalPath).toBe(resolveJournalPath(dataRoot, "zcode", "home-p-m1", "sa-4"));
+    expect(handle.data.journalPath).toBe(resolveJournalPath(dataRoot, "zcode", "shared", "sa-4"));
     await wiring.close();
     expect(fs.existsSync(handle.data.journalPath!)).toBe(true);
   });

@@ -3,18 +3,18 @@
 // 概率性清理过期 subagent session 文件（TTL 30 天）。
 // session_start 时调用，best-effort（失败不影响启动）。
 //
-// [D8 池引用计数接线] 同概率门内追加引擎池 TTL 兜底（cleanupExpiredPoolRefs）：
-// journal / refs.json 条目按同 30 天 mtime 回收。record 主数据（主 session 文件里
-// 的 subagent-record entry）由 pi 侧管理，其删除对 core 无触发点——done record 的
-// journal 没有精确回收锚，只能靠此兜底；workflow 域（taskId 占位无 record 生命周期
-// 锚）同样依赖它（D8 分域口径「journal 依赖 30 天 TTL 自然回收」的落地）。
+// 引擎 journal TTL 兜底（[池抽象降级 2026-09-13] cleanupExpiredJournals，原
+// cleanupExpiredPoolRefs 更名）：同概率门内按同 30 天 mtime 回收超龄 journal-*.jsonl
+// 与池时代 refs.json 残留。record 主数据（主 session 文件里的 subagent-record entry）
+// 由引擎侧管理，其删除对 core 无触发点——done record 的 journal 没有精确回收锚，
+// 只能靠此兜底；workflow 域（taskId 占位无 record 生命周期锚）同样依赖它。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { isProcessAlive, readAliveMarker } from "./alive-store.ts";
 import { getEngineDataDir } from "./engine/common/data-dir.ts";
-import { cleanupExpiredPoolRefs } from "./engine/common/pool-manager.ts";
+import { cleanupExpiredJournals } from "./engine/common/pool-manager.ts";
 
 /** 30 天 TTL（毫秒）。 */
 const TTL_DAYS = 30;
@@ -57,7 +57,7 @@ export function maybeCleanupExpiredSessionFiles(agentDir: string, cwd: string): 
 /** 引擎池 TTL 兜底（dataDir 解析失败 = 未配置宿主服务，best-effort 吞掉）。 */
 function cleanupEnginePoolsBestEffort(): void {
   try {
-    cleanupExpiredPoolRefs(getEngineDataDir(), TTL_MS);
+    cleanupExpiredJournals(getEngineDataDir(), TTL_MS);
   } catch (_e) {
     void _e;
   }

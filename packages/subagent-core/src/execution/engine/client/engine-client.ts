@@ -109,9 +109,8 @@ export type EngineClientState =
 export interface RunRoute {
   onEvent?: (event: unknown) => void | Promise<void>;
   onStreamDelta?: (delta: string) => void | Promise<void>;
-  onPoolResolved?: (poolKey: string) => void | Promise<void>;
   onHandleReady?: (
-    partial: Pick<EngineHandleData, "sessionRef" | "poolKey">,
+    partial: Pick<EngineHandleData, "sessionRef">,
   ) => void | Promise<void>;
 }
 
@@ -168,7 +167,7 @@ export class EngineClient {
   private pidfileSwept = false;
   private intentionalKill = false;
   /** run 期 host/handleReady 的最近回填（崩溃时在途 run 的合成 handle 数据源）。 */
-  private lastPartialHandle: { sessionRef: Record<string, string>; poolKey: string } | undefined;
+  private lastPartialHandle: { sessionRef: Record<string, string> } | undefined;
   private initializeDiagnostics: InitializeResult | undefined;
   private stdoutBuffer = "";
 
@@ -217,7 +216,7 @@ export class EngineClient {
   }
 
   /** 最近一次 host/handleReady 回填（RemoteEngine 崩溃合成 handle 用）。 */
-  getPartialHandle(): { sessionRef: Record<string, string>; poolKey: string } | undefined {
+  getPartialHandle(): { sessionRef: Record<string, string> } | undefined {
     return this.lastPartialHandle;
   }
 

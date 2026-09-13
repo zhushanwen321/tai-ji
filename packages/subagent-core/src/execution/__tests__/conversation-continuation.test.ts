@@ -250,7 +250,6 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
       await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
       expect(calls.dispatched[0]!.task).toBe("continue please");
       expect(calls.dispatched[0]!.resume?.sessionRef["sessionFile"]).toBe(fixtureFile);
-      expect(calls.dispatched[0]!.resume?.poolKey).toBe("shared");
     },
   );
 
@@ -1522,7 +1521,6 @@ class FeedCaptureEngine implements EnginePort {
                 v: 1,
                 engineId: this.id,
                 sessionRef: { recordId: ctx.taskId },
-                poolKey: "shared",
                 adapterVersion: "feed-capture-engine",
               } satisfies EngineHandle["data"],
             },
@@ -1720,6 +1718,8 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
         poolKey: "shared",
       },
     });
+    // 注：engineHandle.poolKey 是持久化 record 形状成员（读侧守卫要求非空，值恒 'shared'），
+    // 不随 [池抽象降级] 协议面退役删除——resume 锚（ResumeAnchor）才不再携带 poolKey。
   }
 
   async function seedZcodeDb(): Promise<void> {
@@ -1731,7 +1731,7 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
     db.close();
   }
 
-  it("锚可解析（库条目在）→ resume 锚携带 zcode 形态（sessionRef={sessionId,dbPath}，poolKey=shared），无摘要前缀", async () => {
+  it("锚可解析（库条目在）→ resume 锚携带 zcode 形态（sessionRef={sessionId,dbPath}），无摘要前缀", async () => {
     await seedZcodeDb();
     const record = makeZcodeRecord({});
     record.status = "idle";
@@ -1746,7 +1746,6 @@ describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
     // resume 锚 = zcode 形态（引擎侧据此走 session/resume 读 + 新 session 注入）
     expect(calls.dispatched[0]!.resume).toEqual({
       sessionRef: { sessionId: "sess_z_anchor", dbPath: zcodeDb },
-      poolKey: "shared",
     });
     // 锚在 → 不注入 reopen 摘要（历史由引擎侧结构化注入，非宿主摘要）
     expect(calls.dispatched[0]!.task).toBe("继续看导出接口");

@@ -112,7 +112,6 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
       recordId: record.id,
       resume: {
         sessionRef: { recordId: record.id, sessionFile: record.sessionFile },
-        poolKey: "shared",
       },
     });
 

@@ -70,7 +70,7 @@ function fakeCliEnvEcho(opts: {
   // envEcho 白名单摘要（initialize 应答与 read 应答共享同一进程 env）。
   // read 前置 ensureConnected → initialize；此处直接取 view 上的 envEcho 附加字段。
   return engine
-    .read({ data: { v: 1, engineId: 'zcode', sessionRef: { sessionId: 's-d8' }, poolKey: 'shared', adapterVersion: 'd8-test' } })
+    .read({ data: { v: 1, engineId: 'zcode', sessionRef: { sessionId: 's-d8' }, adapterVersion: 'd8-test' } })
     .then((view) => (view as unknown as { envEcho?: Record<string, string | undefined> }).envEcho ?? {})
 }
 
@@ -83,7 +83,7 @@ describe('W8 D8 兼容公共面薄壳', () => {
     const engine = createZcodeEngine({ engineDataDir: () => dataDir, cliPath: FIXTURE_CLI })
     expect(engine.id).toBe('zcode')
     const view = await engine.read({
-      data: { v: 1, engineId: 'zcode', sessionRef: { sessionId: 's-1' }, poolKey: 'shared', adapterVersion: 'd8-test' },
+      data: { v: 1, engineId: 'zcode', sessionRef: { sessionId: 's-1' }, adapterVersion: 'd8-test' },
     })
     expect(view.turns[0]?.text).toBe('fake turn') // 协议 read 生效（非 inproc / 非降级）
     expect(view.source).toBe('native')

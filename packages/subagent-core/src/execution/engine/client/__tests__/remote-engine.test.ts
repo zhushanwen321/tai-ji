@@ -218,7 +218,6 @@ describe("RemoteEngine run 帧映射", () => {
     expect(wire.task).not.toHaveProperty("schemaEnv");
     expect(wire.task).not.toHaveProperty("cwd");
     expect(wire.ctx).toMatchObject({
-      poolKey: "shared",
       cwd: "/tmp/w2-cwd",
       model: "zai/glm-4.6",
       schemaEnv: "ctx-schema-env", // ctx 优先于 task（协议层单列，不双写）
@@ -303,26 +302,22 @@ describe("RemoteEngine run 帧映射", () => {
     }
   });
 
-  it("poolResolved / handleReady → RunContext 回调（journal 路径权威 + 运行中句柄回填）", async () => {
-    const pools: string[] = [];
-    const readies: Array<{ sessionRef: Record<string, string>; poolKey: string }> = [];
+  it("handleReady → RunContext 回调（运行中句柄回填；[池抽象降级] poolResolved 通道已退役）", async () => {
+    const readies: Array<{ sessionRef: Record<string, string> }> = [];
     const { engine, cleanup } = makeEngine(undefined, {
       args: [
         FAKE_ENGINE,
         "--run-actions",
         JSON.stringify([
-          { op: "poolResolved", poolKey: "pool-9" },
-          { op: "handleReady", sessionRef: { sessionId: "s-9" }, poolKey: "pool-9" },
+          { op: "handleReady", sessionRef: { sessionId: "s-9" } },
         ]),
       ],
     });
     const { ctx } = makeCtx({
-      onPoolResolved: (p: string) => pools.push(p),
       onHandleReady: (partial) => readies.push(partial),
     });
     const result = await engine.run({ prompt: "p" }, ctx);
-    expect(pools).toEqual(["pool-9"]);
-    expect(readies).toEqual([{ sessionRef: { sessionId: "s-9" }, poolKey: "pool-9" }]);
+    expect(readies).toEqual([{ sessionRef: { sessionId: "s-9" } }]);
     // run 终态 handle 来自引擎应答（非 handleReady 的 partial——那是运行中回填通道）
     expect(result.handle.data.sessionRef).toEqual({ sessionId: "fake-session-run-1" });
     await cleanup();
@@ -395,7 +390,6 @@ describe("失败分界（运行中合成 vs prepare 期 reject）", () => {
     expect(result.outcome.error).toContain("boom");
     expect(result.outcome.exitCode).toBeNull();
     expect(result.handle.data.v).toBe(1);
-    expect(result.handle.data.poolKey).toBe("shared");
     await cleanup();
   });
 
@@ -467,7 +461,6 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
         v: 1,
         engineId: "fake",
         sessionRef: { sessionId: "s-read" },
-        poolKey: "shared",
         adapterVersion: "fake-adapter",
       },
     });

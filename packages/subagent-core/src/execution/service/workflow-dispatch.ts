@@ -29,12 +29,14 @@
 
 import { getLogger } from "../../core/logger.ts";
 
+import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
+
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
 import { updateFromEvent } from "../execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { JOURNAL_INITIAL_POOL_KEY, wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+watchdog+外部 signal 三源合流。
@@ -338,11 +340,9 @@ export class WorkflowDispatch {
 
       const runCtx: RunContext = {
         taskId: record.id,
-        poolKey: JOURNAL_INITIAL_POOL_KEY,
         signal: runSignal.signal,
         ctxModel: identity.resolved.model,
         onEvent: observedEvent,
-        onPoolResolved: journal.onPoolResolved,
         ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
         ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
@@ -363,7 +363,9 @@ export class WorkflowDispatch {
       journal.backfillHandle(handle);
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
-        poolKey: handle.data.poolKey,
+        // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
+        // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
+        poolKey: SHARED_POOL_KEY,
         journalPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);
