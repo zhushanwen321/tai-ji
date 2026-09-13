@@ -76,11 +76,11 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u0 | committed（探针通过零文件落地） | 1 | esbuild bundle:true inline 解析 exports 子路径实证：staged bte 产物 :202 命中探针常量；三处临时改动完整还原，git status 干净 |
-| u1 | pending | 0 | — |
-| u2 | pending | 0 | — |
-| u3 | pending | 0 | — |
-| u4 | pending | 0 | — |
-| u5 | pending | 0 | — |
+| u1 | committed | 1 | 30f21b95c；protocol 166/166（64 新用例）+ typecheck 绿 + dist 双探针（子出口 OK / index 零原语泄漏） |
+| u2 | committed | 1 | 3e153e188；bte 233/233 + extensions typecheck/lint 绿 + doc-symbol-drift 0 |
+| u3 | committed | 1+1 | 4f10c8b7d + ESM 修复 2da00e91f；runtime 73/73 + validate-runtime-bundle exit 0（含 tsx 链）|
+| u4 | committed | 1 | 795393b96；todo 137 + goal 402 全绿；isGuiCapable/setGuiWidget 零残留 |
+| u5 | committed | 1 | 092916edc；pending 32/32（与基线同数零测试改动）+ 依赖边登记 |
 
 ## 7 残留风险与变更历史
 
@@ -88,3 +88,5 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 - u0 探针若失败：冻结流水线，D1 降级重审（设计 P1 降级路径）。
 - 版本 bump（extension-protocol patch）归 merge 阶段 changesets。
 - 2026-09-14：计划创建（阶段 0 预检通过；审查证据 = .tmp/tech-design/ext-simplify-13-r3-review.md PASS 0 must-fix + 原始 review.md 5 MF 与 r2 复审 1 MF 均已修复闭环）。
+- 2026-09-14（u3 blocker 发现与正解）：protocol 缺 "type": "module"——export * 聚合在 node tsx 源码链 CJS interop 下断 named exports（esbuild/tsup 链免疫，u0/u1 探针盲区）。u3 以 runtime 侧中介临时闭环 + 回派正解（protocol 补声明 + publishConfig 指针 .mjs→.js + 中介简化纯 named re-export，commit 2da00e91f）；三链验证 vitest 73/73 + validate-runtime-bundle exit 0 + esbuild/dist 探针全过。教训登记：子出口类改动验证面必须含 tsx 直跑链。
+- u2 偏差要点：契约常量走 index 出口、原语走子出口（曾误从子出口取常量致 vite 下 undefined、LRU 失效 19 红——已修正并登记）；kill-tree 消费点实为 5 处（poller/process-exit-guard 为任务清单外编译必要联动）。
