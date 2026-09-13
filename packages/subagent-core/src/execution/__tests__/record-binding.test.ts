@@ -544,19 +544,22 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
 
     // 轮应答（= L2797 回填点）后绑定在盘，身份域与 record 对齐
     await vi.waitFor(() => expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true));
+    // 轮正常收口（绑定写不影响派发主路径）——先等轮终 round+1 完成，再读快照
+    //（[A-lite] 轮终 markRoundIdle 亦 merge binding，读取须在轮终收口后无竞态）。
+    await vi.waitFor(() => expect(record.round).toBe(2));
     const binding = readRecordBinding(sessionFile);
     expect(binding).toMatchObject({
       v: 1,
       recordId: "sa-bind-live",
       rootSessionId: "root-session",
       chatMode: true,
-      // 绑定写点在轮终 round+1 之前——写点时点快照（round 滞后一拍为已登记语义）
-      round: 1,
+      // [A-lite] 轮终 markRoundIdle 亦 merge 快照（U7 水合口径）——binding.round
+      // = 轮终 round+1 后最新值（原「回填点写点时点快照、round 滞后一拍」由轮终
+      // 快照增补覆盖，与 markSettled settleSnapshotPatch 同构）。
+      round: 2,
       agent: "general-purpose",
       model: "prov/model-1",
     });
-    // 轮正常收口（绑定写不影响派发主路径）
-    await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.status).toBe("running");
   });
 

@@ -26,6 +26,7 @@ import { readRecordBinding, writeRecordBinding } from "../state-marker.ts";
 import type { RecordBinding } from "../state-marker.ts";
 import {
   NEW_STOP_REASONS,
+  ROUND_TERMINAL_STOP_REASONS,
   STOP_REASONS,
   isPiTranscriptRef,
   isZcodeTranscriptRef,
@@ -119,8 +120,8 @@ describe("TranscriptRef 判别联合收窄守卫", () => {
 // ── ② StopReason 枚举完整性 ──────────────────────────────────────────────────
 
 describe("StopReason 枚举完整性", () => {
-  it("全枚举 = 旧 ClosedReason 7 值（6 写值 + disconnected 读侧兜底）+ 4 新展示值，共 11 无重复", () => {
-    expect([...STOP_REASONS]).toHaveLength(11);
+  it("全枚举 = 旧 ClosedReason 7 值（6 写值 + disconnected 读侧兜底）+ 4 新展示值 + 2 正常轮终展示值，共 13 无重复", () => {
+    expect([...STOP_REASONS]).toHaveLength(13);
     // 无重复（重复成员会撑长度 + 稀释枚举语义）。
     expect(new Set(STOP_REASONS).size).toBe(STOP_REASONS.length);
     for (const reason of [
@@ -132,6 +133,7 @@ describe("StopReason 枚举完整性", () => {
       "gc",
       "disconnected",
       ...NEW_STOP_REASONS,
+      ...ROUND_TERMINAL_STOP_REASONS,
     ] as const) {
       expect(STOP_REASONS).toContain(reason);
     }
@@ -146,14 +148,20 @@ describe("StopReason 枚举完整性", () => {
     ]);
   });
 
-  it("isValidStopReason：合法成员放行；outcome 词（completed/failed）与垃圾值拒绝", () => {
+  it("ROUND_TERMINAL_STOP_REASONS 恰为 2 个正常轮终展示值（A-lite）", () => {
+    expect([...ROUND_TERMINAL_STOP_REASONS]).toEqual(["completed", "failed"]);
+  });
+
+  it("isValidStopReason：合法成员（含正常轮终 completed/failed）放行；垃圾值拒绝", () => {
     for (const reason of STOP_REASONS) {
       expect(isValidStopReason(reason)).toBe(true);
     }
-    // completed/failed 是派生 outcome 词汇（§3.2.1 注记），混入 stopReason 词表
-    // 属词表混淆回归——锁定拒绝。
-    expect(isValidStopReason("completed")).toBe(false);
-    expect(isValidStopReason("failed")).toBe(false);
+    // [A-lite 裁决翻转] completed/failed 原锁拒绝（派生 outcome 词汇不混入
+    // stopReason 词表）——区1-U1+区3-U1 一致性审查后 markRoundIdle 正常轮终
+    // 需要停因展示位（SubagentList failed 判据 + 排障「为什么停」），两词入值域
+    //（status 保持 running-resumable，见 types.ts StopReason 注释）。
+    expect(isValidStopReason("completed")).toBe(true);
+    expect(isValidStopReason("failed")).toBe(true);
     expect(isValidStopReason("bogus")).toBe(false);
     expect(isValidStopReason(undefined)).toBe(false);
   });

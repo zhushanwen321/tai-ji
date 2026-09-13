@@ -114,7 +114,14 @@ export const RECONNECTABLE_FINAL_REASONS = ["disconnected", "parent-shutdown"] a
 
 export type ReconnectableFinalReason = (typeof RECONNECTABLE_FINAL_REASONS)[number];
 
-/** 窄化守卫：closedReason 是否落在可重生集内。 */
+/**
+ * 窄化守卫：closedReason 是否落在可重生集内。
+ *
+ * @deprecated 复活资格判据已不消费本守卫（资格 = §3.2.3 物理三件套，经
+ * markResurrected acquire 锚定）——仅剩 manifest 重物化
+ * （rematerializeReconnectableEntryManifests）的非准入消费点。新代码勿再接入；
+ * U5 后随 legacy closed 词汇族一并清理。
+ */
 export function isReconnectableFinalReason(reason: string | undefined): reason is ReconnectableFinalReason {
   return (RECONNECTABLE_FINAL_REASONS as readonly string[]).includes(reason ?? "");
 }
@@ -199,11 +206,17 @@ export type LegacyClosedStatus = "closed";
 export type Intent = "active" | "archived";
 
 /**
- * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值：
+ * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值
+ * + 2 个正常轮终展示值：
  *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
  *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
  *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
+ *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
+ *                              status 保持 running-resumable 不变——U2 桥接策略不推翻，
+ *                              本值只承担「上一轮为什么停」的展示 + `.state` 收条 reason
+ *                              词；中断族走 markSettled interrupted 族不经 markRoundIdle，
+ *                              与上 4 值无冲突）
  * 仅展示 + 排障（列表主展示用派生 outcome）；复活资格判据是物理三件套
  * （§3.2.3），本字段不参与任何资格判定。
  */
@@ -212,7 +225,9 @@ export type StopReason =
   | "interrupted"
   | "interrupted-by-restart"
   | "interrupted-by-parent"
-  | "reopened";
+  | "reopened"
+  | "completed"
+  | "failed";
 
 /** StopReason 的 4 个新展示值（运行时守卫与枚举完整性测试锚；值域见类型注释）。 */
 export const NEW_STOP_REASONS = [
@@ -222,16 +237,21 @@ export const NEW_STOP_REASONS = [
   "reopened",
 ] as const satisfies readonly StopReason[];
 
+/** [A-lite] 正常轮终展示值（markRoundIdle 成功/失败轮写入；值域见 StopReason 注释）。 */
+export const ROUND_TERMINAL_STOP_REASONS = ["completed", "failed"] as const satisfies readonly StopReason[];
+
 /**
  * StopReason 全枚举（运行时守卫用——防御性解析外部输入时校验成员资格）。
  * = CLOSED_REASONS（6 个可写终态原因）+ disconnected（读侧兜底产出，不写入，
- * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值），共 11 值。
+ * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值）+
+ * ROUND_TERMINAL_STOP_REASONS（2 正常轮终展示值），共 13 值。
  * 完整性由 permanent-session-types.test.ts 断言（值数 + 成员逐一）。
  */
 export const STOP_REASONS: readonly StopReason[] = [
   ...CLOSED_REASONS,
   "disconnected",
   ...NEW_STOP_REASONS,
+  ...ROUND_TERMINAL_STOP_REASONS,
 ];
 
 /** 窄化守卫：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */

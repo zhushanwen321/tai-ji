@@ -21,7 +21,7 @@
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result/resumable 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（保持 running-resumable，非置 idle；簿记全集①-⑨见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a） | entry + 注销发射点② |
+// | markRoundIdle(id, outcome) | 轮末收口（保持 running-resumable，非置 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
 // | markFinalized(record, reason) | 正常终态（含 disposeAllRecords 编排性关闭，D8 矩阵；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | `.state` writeSync 先 → binding（updateRecordBinding）→ entry/archive → manifest writeSync → `.alive` 删（D8 v7 写序） |
 // | markCancelled(record) | 取消终态（tombstone endedAt） | 同 markFinalized 写序（writeCancelledState） |
 // | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
@@ -54,6 +54,8 @@
 //   ⑧ turns       —— 事件累积族→appendEvent（execution-record.updateFromEvent 归约）
 //   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷
 //   ⑩ error       —— 收养/失败→adoptEngineDeath/markRoundIdle
+//   ⑪ stopReason  —— 轮终写（成功 completed / 失败 failed，A-lite 展示位——status
+//                    保持 running）→markRoundIdle；settle 写（中断族）→markSettled
 //
 // [perf] 两级读写设计（修复 /subagents 打开慢）：
 //   1. 列表扫描 = light：只读文件头部 identity（readIdentityHeader，64KB）+ sidecar
@@ -717,8 +719,8 @@ export class RecordStore {
 
   /**
    * 意图原语：轮末收口——**保持 running-resumable**（名称沿用，非置 idle：status 写
-   * idle 会断 SP-5 升级链与 hasRunning 判据）。簿记全集（①-⑨，= doFinalizeRoundToIdle
-   * 现状簿记 + D3a 修订）：
+   * idle 会断 SP-5 升级链与 hasRunning 判据）。簿记全集（①-⑪，= doFinalizeRoundToIdle
+   * 现状簿记 + D3a 修订 + A-lite 轮终磁盘面增补）：
    *   ① status 保持 running；② result 按 outcome 写入（成功=content / 失败=前值??
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable=true
    *      （GUI waiting 判据）；⑥ idleSince 刷新（idle-GC 判据）；⑦ **`.alive` 保留**
@@ -726,7 +728,11 @@ export class RecordStore {
    *      record 仍 resumable 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
-   *      携带新 round 与本轮 result）。
+   *      携带新 round 与本轮 result）；
+   *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 仍
+   *      running，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
+   *      pi 腿 `.state` 收条 + binding 快照 / zcode 腿锚键 binding 快照——正常轮终后
+   *      宿主崩溃 revive 水合 turns/tokens 不归零）。
    * worktree/通知等副作用编排留调用方。
    *
    * @param outcome 轮终结果（kind 判别：success=content / failed=reason）
@@ -766,6 +772,34 @@ export class RecordStore {
     rec.round = (rec.round ?? 0) + 1;
     rec.idleSince = Date.now();
     rec.resumable = true;
+    // ⑩ [A-lite / 区1-U1+区3-U1] 轮终停因展示位：成功轮 completed / 失败轮 failed
+    //（「上一轮为什么停」——SubagentList failed 红点判据词 + 排障有词；投影随 ⑨
+    // entry/recordToSubagent 自动携带）。status 仍 running（U2 桥接 running-resumable
+    // 不动——stopReason 不参与资格判定；中断族走 markSettled interrupted 族不经本
+    // 原语，值域无冲突）。endedAt 内存位不写（终态冻结信号，写了会击穿方法头 A3
+    // 断言——同 record 跨轮轮终第二次即抛错；对齐 markSettled「非终态不写
+    // endedAt」先例），收条时间戳只进磁盘面。
+    const stopReason: StopReason = outcome.kind === "failed" ? "failed" : "completed";
+    rec.stopReason = stopReason;
+    // ⑪ [A-lite / U7 统计口径] 轮终磁盘面（锚分派对齐 markSettled :1138 写法）：
+    // 正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding 快照在场
+    //（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口
+    // idle 形态（重建单规则「一律 idle」不受内存 running-resumable 桥接影响）。
+    // best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面
+    // 滞后由下次收口/接管补写）。
+    const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
+    if (rec.sessionFile !== undefined) {
+      writeSettledState(rec.sessionFile, { stopReason, endedAt: Date.now() });
+      this.persistSettleSnapshot(rec.sessionFile, rec);
+    } else if (zcodeAnchor !== undefined) {
+      // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：
+      // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
+      this.persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
+    } else {
+      logger.warn("[subagents] markRoundIdle: no sessionFile anchor, .state/binding faces skipped", {
+        detail: { id },
+      });
+    }
     // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
     // ⑧ pending 注销发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
     // 测试形态 no-op）。
@@ -1397,7 +1431,8 @@ export class RecordStore {
    *      例外族与监督器放弃仍产出）→ cancelled（reason='cancelled'）/ closed 二分；
    *   3. 其余（running / 轮间 idle（markSettled 无 closedReason））→ running
    *      （session-reader 视角的活跃成员，§3.2.8 行为变化声明：可续聊 record =
-   *      活跃会话——settle 后 stopReason=interrupted/failed 的 record 也投 running，
+   *      活跃会话——settle/轮终后 stopReason=interrupted/completed/failed 的 record
+   *      也投 running，
    *      「为什么停」经 executionStatus + 下游 stopReason 通道表达，不翻旧终态：
    *      settle 的 record 仍可 message 续聊，投 closed 会让旧版把它当已完成分区成员，
    *      message 寻回后再翻回 running = 状态反复横跳，比恒 running 更漂移）。

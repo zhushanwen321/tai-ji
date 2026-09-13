@@ -1003,8 +1003,9 @@ export class RunOrchestration {
     }
     if (result.success) {
       // [SP-5] one-shot 成功完成 → 保持 running-resumable，等待 message 触发 upgrade。
-      // [U2b] 轮终簿记①-⑨归口 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
-      // pending 注销已随 store 簿记⑧统一发射）。
+      // [U2b] 轮终簿记①-⑪归口 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
+      // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
+      // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。
       this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
     } else {
       // [U5] 失败轮 settle（不终态化——旧一次性销毁退役，失败轮同样可续聊）。
