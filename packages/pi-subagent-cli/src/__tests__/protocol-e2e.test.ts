@@ -2,8 +2,8 @@
 //
 // 最小 e2e（W7 验收口径）：真实 spawn bin/pi-subagent-cli.mjs + NDJSON 往返——
 // initialize → run（fake pi 子进程经 PATH 注入）→ host/* 反向通道到 fake 宿主
-// 应答（host/childSpawned / host/poolResolved / host/handleReady / host/log /
-// host/askUser ack 两阶段）→ run 终态应答（handle + outcome 等价断言）。
+// 应答（host/childSpawned / host/handleReady / host/log / host/askUser ack 两阶段
+// ——[池抽象降级] host/poolResolved 已退役）：→ run 终态应答（handle + outcome 等价断言）。
 //
 // fake pi（fixtures/fake-pi.mjs）：rpc 形态子进程——应答 get_state、回放事件流
 // （tool/text_delta/turn_end/message_end）、发出 extension_ui_request（select
