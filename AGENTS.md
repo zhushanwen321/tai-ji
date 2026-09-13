@@ -13,7 +13,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | 主题 | 文档 |
 |------|------|
 | **功能与用例分级（P0-P3 SSOT）** | [docs/feature-priorities.md](docs/feature-priorities.md)——tech-design 风险打分锚定源 / 测试回归排序依据 / dev-flow 收尾同步登记目标；功能挂掉后果变化须同 commit 更新 |
-| **架构约束登记表（SSOT）** | [docs/constraints.json](docs/constraints.json)（机器权威）· [docs/constraints.md](docs/constraints.md)（生成式人读视图）——全部架构级约束的 id/scope/权威源/执行方式登记处；新增约束先登记再写代码，改 json 后跑 `node scripts/render-constraints.mjs` 重新生成 md；CR 动态加载：`node scripts/select-constraints.mjs --base main` |
+| **架构约束登记表（SSOT）** | [docs/constraints.json](docs/constraints.json)（唯一登记处，机器权威，本身即人读）——全部架构级约束的 id/scope/权威源/执行方式登记处；新增约束先登记再写代码，改 json 后跑 `node scripts/validate-constraints.mjs` 结构校验；CR 动态加载：`node scripts/select-constraints.mjs --base main` |
 | 完整编码规范 / UI 设计演变 / 术语表 | [docs/standards.md](docs/standards.md) · [design-evolution.md](docs/design-evolution.md) · [architecture/context.md](docs/architecture/context.md) |
 | 设计系统（tokens / 原语层 / v6 SSOT / 视觉规格） | [docs/page-design/](docs/page-design/)（v6-tokens.css（值 SSOT，hook 守卫）· v6-master-spec.md · v6-spec-*.html；能力设计 spec 在 `archive/v3/`。禁止创建 `demos/`、`impeccable/` 目录） |
 | 窗口顶部 traffic light 布局数值 SSOT | [traffic-light-layout.md](docs/page-design/traffic-light-layout.md)（v3 刻意调整形态，不遵循 v6 demo） |

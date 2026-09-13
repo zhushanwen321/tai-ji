@@ -125,7 +125,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 ## 6. 约束与权威文档
 
-**约束登记**（机器权威 [docs/constraints.json](../../constraints.json)，人读视图 [docs/constraints.md](../../constraints.md)）：
+**约束登记**（机器权威 [docs/constraints.json](../../constraints.json)）：
 
 | id | 内容 |
 |---|---|

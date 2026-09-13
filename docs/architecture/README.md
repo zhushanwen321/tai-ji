@@ -69,7 +69,7 @@ docs/architecture/
 |---------|------|
 | 某架构方案被新方案取代且不再参考 | 直接删除；引用它的活文档同批改为「已删除，git 可追溯」或重指现行权威 |
 | 实施型设计文档在落地完成后 | **压缩保留**或删除：代码注释以其决策编号（§/D/M/W）溯源的（如 data-source-governance / integrity-hardening）压缩为「原则 + 决策索引」；无溯源价值的直接删（如 conversation-stream） |
-| constraints.json 的 authority 指向被删文档 | 同批重指到现行权威设计文档或实现代码，`node scripts/render-constraints.mjs` 必须过 |
+| constraints.json 的 authority 指向被删文档 | 同批重指到现行权威设计文档或实现代码，`node scripts/validate-constraints.mjs` 必须过 |
 | ADR 被新 ADR 取代 | **不删除**——在原 ADR 写 `Status: Superseded by ADR-NNNN`，新 ADR 引用旧 ADR（supersede 机制内建） |
 
 ### 3. ADR 规范

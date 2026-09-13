@@ -914,7 +914,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] $CONSTRAINT_CHECKER 检查失败${NC}"
-            echo -e "${YELLOW}[INFO] 约束登记见 docs/constraints.json / docs/constraints.md（机器 SSOT + 人读视图）${NC}"
+            echo -e "${YELLOW}[INFO] 约束登记见 docs/constraints.json（机器 SSOT）${NC}"
             echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
             exit 1
         fi
@@ -925,20 +925,20 @@ else
 fi
 
 # ============================================================================
-# 约束登记 SSOT 一致性（constraints.json 改动时触发）
-#   改 docs/constraints.json 后必须重跑 node scripts/render-constraints.mjs
-#   生成 docs/constraints.md，防止 json/md 双份漂移。
+# 约束登记 SSOT 结构校验（constraints.json 改动时触发）
+#   node scripts/validate-constraints.mjs 校验 id/scope/authority/enforcement 结构，
+#   防止死链、非法 id、缺失 enforcement 的登记入库。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if echo "$STAGED_FILES" | grep -q "^docs/constraints\.json$"; then
-        echo -e "${BLUE}[INFO] constraints.json 有变更，校验 md 同步...${NC}"
-        node scripts/render-constraints.mjs --check
+        echo -e "${BLUE}[INFO] constraints.json 有变更，运行结构校验...${NC}"
+        node scripts/validate-constraints.mjs
         EXIT_CODE=$?
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
-            echo -e "${RED}[ERROR] docs/constraints.md 与 constraints.json 不同步${NC}"
-            echo -e "${YELLOW}[INFO] 运行 node scripts/render-constraints.mjs 重新生成后提交${NC}"
+            echo -e "${RED}[ERROR] docs/constraints.json 结构校验失败${NC}"
+            echo -e "${YELLOW}[INFO] 按上方明细修正登记后重新提交${NC}"
             exit 1
         fi
     fi

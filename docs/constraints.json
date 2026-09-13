@@ -12,7 +12,7 @@
     },
     "consumers": [
       "scripts/select-constraints.mjs（CR 动态加载：diff → 命中约束清单 → .review/constraints.md）",
-      "scripts/render-constraints.mjs（生成 docs/constraints.md 人读视图 + --check 一致性校验）"
+      "scripts/validate-constraints.mjs（结构校验：id/scope/authority/enforcement，pre-commit 在本文件变更时触发）"
     ]
   },
   "constraints": [
