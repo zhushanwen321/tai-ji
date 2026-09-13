@@ -27,33 +27,59 @@
   - turn=generating 不渲染行：streaming 本体由末位 turn 的 TurnMeta「工作中」行承担
     （D6 活动条列「streaming 本体」，不重复指示）；全部 idle 渲染 nothing。
 
-  视觉沿用 system-notice 形态（左右 hairline + Loader2 spinner + --text-xs，太极纯灰
-  tokens，无 emoji 无硬编码颜色）。文档流 block（Virtualizer 之后），fork notice 等后续
-  文档流内容自然堆叠在其后（ForkNotice 为文档流 block，无 absolute 定位——定位链已随
-  D6 死路径清理删除）。
+  视觉（[compact-defer-composer-queue §2.2]）：compacting 行升级为通栏活动带——accent-soft
+  底 + border-y hairline + py-[14px] 居中，副文案联动待发队列未提交计数（count===0 时副文案
+  与「·」不渲染）；bash/thinking/settling 行维持 system-notice 形态（左右 hairline +
+  Loader2 spinner + --text-xs，太极纯灰 tokens，无 emoji 无硬编码颜色）。文档流 block
+  （Virtualizer 之后），fork notice 等后续文档流内容自然堆叠在其后（ForkNotice 为文档流
+  block，无 absolute 定位——定位链已随 D6 死路径清理删除）。
   dev 断言：COMPACTING_NOTICE_HEIGHT / EXECUTING_BASH_NOTICE_HEIGHT 常量漂移检测随行迁入
   （useConstantHeightAssert，生产裁剪零开销）。
 -->
 <template>
   <div v-if="rows.length > 0" class="flex flex-col" data-testid="activity-strip">
-    <div
-      v-for="row in rows"
-      :key="row.kind"
-      :ref="(el) => bindRowRef(row.kind, el)"
-      class="system-notice content-col flex min-w-0 items-center gap-2 py-1"
-      :data-testid="`activity-strip-row-${row.kind}`"
-    >
-      <span class="h-px flex-1 bg-border" />
-      <Loader2 class="size-3 shrink-0 animate-spin text-neutral-mid" />
-      <span
-        class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-snug text-neutral-mid"
-        :data-testid="`activity-strip-text-${row.kind}`"
+    <template v-for="row in rows" :key="row.kind">
+      <!-- compacting 行：[compact-defer-composer-queue §2.2] 通栏活动带——摘除 content-col /
+           system-notice（hairline 视觉由 border-y 承担，notice-in 动画不再复用），accent-soft 底 +
+           上下 hairline；-mx-5 抵消滚动容器 px-5，任意面板宽（含 >720px）下通栏到面板边缘。 -->
+      <div
+        v-if="row.kind === 'compacting'"
+        :ref="(el) => bindRowRef(row.kind, el)"
+        class="-mx-5 flex items-center justify-center gap-2 border-y border-hairline bg-[var(--accent-soft)] px-5 py-[14px]"
+        :data-testid="`activity-strip-row-${row.kind}`"
       >
-        <span class="shrink-0">{{ row.text }}</span>
-        <span v-if="row.command" class="min-w-0 truncate font-mono">{{ row.command }}</span>
-      </span>
-      <span class="h-px flex-1 bg-border" />
-    </div>
+        <Loader2 class="size-3.5 shrink-0 animate-spin text-accent" />
+        <span
+          class="text-[length:var(--text-sm)] text-neutral-fg"
+          :data-testid="`activity-strip-text-${row.kind}`"
+        >{{ row.text }}</span>
+        <template v-if="flushCount > 0">
+          <span class="text-neutral-faint">·</span>
+          <span
+            class="text-[length:var(--text-xs)] text-neutral-mid"
+            :data-testid="`activity-strip-flush-hint-${row.kind}`"
+          >{{ t('panel.message.compactingFlushHint', { count: flushCount }) }}</span>
+        </template>
+      </div>
+      <!-- bash / thinking / settling 行：维持原 system-notice + content-col 形态（左右 hairline） -->
+      <div
+        v-else
+        :ref="(el) => bindRowRef(row.kind, el)"
+        class="system-notice content-col flex min-w-0 items-center gap-2 py-1"
+        :data-testid="`activity-strip-row-${row.kind}`"
+      >
+        <span class="h-px flex-1 bg-border" />
+        <Loader2 class="size-3 shrink-0 animate-spin text-neutral-mid" />
+        <span
+          class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-snug text-neutral-mid"
+          :data-testid="`activity-strip-text-${row.kind}`"
+        >
+          <span class="shrink-0">{{ row.text }}</span>
+          <span v-if="row.command" class="min-w-0 truncate font-mono">{{ row.command }}</span>
+        </span>
+        <span class="h-px flex-1 bg-border" />
+      </div>
+    </template>
   </div>
 </template>
 
@@ -64,6 +90,7 @@ import { Loader2 } from '@lucide/vue'
 import type { ExecutingBash } from '@xyz-agent/core'
 import { useChatStore } from '@/stores/chat'
 import { useConstantHeightAssert } from '@/composables/panel/useConstantHeightAssert'
+import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
 
 const props = defineProps<{
@@ -123,7 +150,16 @@ const rows = computed<ActivityRow[]>(() => {
   return list
 })
 
-// dev-only 像素常量漂移检测（随行迁入本组件；行结构与原 compacting/bash 行同构 → 高度常量语义不变）
+const queue = useCompactQueue()
+
+/** 待发队列未提交条目计数（副文案口径，[compact-defer-composer-queue §2.2]）：只计
+ *  mode === undefined 的未提交条目，与 composer 队列区 defer 行归一规则（§2.1）同源——
+ *  flush 提交后已提交条目（mode 已写）不计入（承接面分通道：steer 镜像行 / send 无行）。
+ *  count === 0 时副文案与「·」不渲染（活动带仍在，压缩状态本身独立成立）。 */
+const flushCount = computed(() => queue.peek(props.sessionId).filter((m) => m.mode === undefined).length)
+
+// dev-only 像素常量漂移检测（随行迁入本组件；compacting 行升级通栏带后 COMPACTING_NOTICE_HEIGHT
+// 已随 §2.2 同步 24 → 50，bash 行结构不变 EXECUTING_BASH_NOTICE_HEIGHT 不动）
 const [compactingEl, executingBashEl] = useConstantHeightAssert([
   { name: 'COMPACTING_NOTICE_HEIGHT', expected: COMPACTING_NOTICE_HEIGHT },
   { name: 'EXECUTING_BASH_NOTICE_HEIGHT', expected: EXECUTING_BASH_NOTICE_HEIGHT },

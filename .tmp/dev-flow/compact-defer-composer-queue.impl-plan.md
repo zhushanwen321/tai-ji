@@ -21,7 +21,7 @@
 | u1 | composer 侧 defer 队列展示 + 全部新增 i18n key + 测试改造/re-home | packages/renderer/src/components/panel/QueueBubble.vue（含头注「只读」声明修订）· packages/renderer/src/components/panel/Composer.vue · packages/renderer/src/i18n/locales/zh-CN/panel.ts · packages/renderer/src/i18n/locales/en-US/panel.ts · packages/renderer/src/__tests__/panel/queue-bubble-s8.test.ts | 无 | plain | V1 `cd packages/renderer && pnpm test -- queue-bubble-s8` 绿（含新用例：state=undefined 根门渲染 defer 行 / 未提交 × emit removeDefer / 分档 chip+hover 文案 / +N 徽标 / 只读契约收窄后 steer/followUp 无按钮断言保持）；V2 `pnpm typecheck` 绿 |
 | u2 | 对话流侧 PendingBubble 移除 + useCompactQueue 收尾 | packages/renderer/src/components/panel/MessageStream.vue · packages/renderer/src/components/panel/message-stream/PendingBubble.vue(删) · packages/renderer/src/components/panel/message-stream/__tests__/PendingBubble.test.ts(删) · packages/renderer/src/composables/panel/useCompactQueue.ts（拆 useSessionPendingEntries + 头注 :10/:19/:106 修订） | u1 | plain | V1 全仓 `rg "PendingBubble|useSessionPendingEntries" packages/renderer/src --include="*.{ts,vue}"` 仅剩 u3/u4 领地内已登记的注释位；V2 `cd packages/renderer && pnpm test` 绿（composer-compact-queue / chat-transient-reset 等既有回归）；V3 MessageStream 模板无 pending-bubble-list 块 |
 | u3 | 压缩中通栏活动带 + 高度常量 + 原语注释同步 | packages/renderer/src/components/panel/message-stream/ActivityStrip.vue · packages/renderer/src/composables/panel/message-stream-layout.ts（常量值+强绑定 DOM 注释）· packages/renderer/src/components/panel/message-stream/__tests__/ActivityStrip.test.ts（band 用例 + 本文件 PendingBubble 注释清扫）· packages/shared/src/tailwind-preset.ts（content-col 消费方清单注释，纯注释） | u1 | plain | V1 `cd packages/renderer && pnpm test -- ActivityStrip` 绿（band 结构：无 content-col/system-notice、accent-soft 底、border-y、副文案 count 未提交口径、count=0 隐藏副文案、bash/thinking/settling 行不变）；V2 message-stream-layout.ts 的 COMPACTING_NOTICE_HEIGHT 与新 DOM 实测一致（dev 断言零 warn 由真机验收复核）；V3 shared 包 `cd packages/shared && pnpm test` 绿（守卫不受注释影响） |
-| u4 | 悬空引用清扫 + drift 机检（全注释/文档编辑，无逻辑改动） | packages/renderer/src/composables/panel/useMessageStreamFollowTriggers.ts(:17/:147) · packages/renderer/src/composables/panel/useVirtuaFollow.ts(:33) · packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts(头注 3 处 :4/:5/:15，PendingBubble 指称改指 QueueBubble defer 行 / queue-bubble-s8.test.ts) · packages/core/src/domain/chat/store.ts(:382) · docs/design/chat-pin-bottom-fix.md(7 处) · docs/design/session-dead-structural-fixes.md(:23/:328) · docs/testing/03-chat-flow.md(`pending-bubble-list` testid :44/:401) · docs/design/adversarial-review-fixes.md(:316)；豁免 docs/page-design/archive/v3/fast-fork/spec.md | u2 | plain | V1 `node scripts/check-doc-symbol-drift.mjs` exit 0；V2 全仓 rg "PendingBubble" 仅剩显式豁免位（archive spec）与历史变更记录性文字（逐处登记）；V3 `cd packages/core && pnpm test` 绿 |
+| u4 | 悬空引用清扫 + drift 机检（全注释/文档编辑，无逻辑改动） | packages/renderer/src/composables/panel/useMessageStreamFollowTriggers.ts(:17/:147) · packages/renderer/src/composables/panel/useVirtuaFollow.ts(:33) · packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts(头注 3 处 :4/:5/:15，PendingBubble 指称改指 QueueBubble defer 行 / queue-bubble-s8.test.ts) · packages/core/src/domain/chat/store.ts(:382) · docs/design/chat-pin-bottom-fix.md(7 处) · docs/design/session-dead-structural-fixes.md(:23/:328) · docs/testing/03-chat-flow.md(`pending-bubble-list` testid :44/:401) · docs/design/adversarial-review-fixes.md(:316) · packages/renderer/src/i18n/locales/zh-CN/panel.ts + packages/renderer/src/i18n/locales/en-US/panel.ts（仅删 `deferQueue.submittedAwaitingDelivery` 死键，D2，双侧对称）；豁免 docs/page-design/archive/v3/fast-fork/spec.md | u2 | plain | V1 `node scripts/check-doc-symbol-drift.mjs` exit 0；V2 全仓 rg "PendingBubble" 仅剩显式豁免位（archive spec）与历史变更记录性文字（逐处登记）；V3 `cd packages/core && pnpm test` 绿；V4 `npx vitest run locale-key-usage-guard` 绿 |
 
 领地互斥：两两交集为空（panel.ts 仅 u1；ActivityStrip.test.ts 仅 u3；useCompactQueue.ts 仅 u2；u4 与 u2/u3 无交集）。u4 共 8 路径，全部 1–3 行注释/文档编辑——超「≤5 文件」判据部分为机械清扫，无逻辑风险。
 
@@ -71,17 +71,17 @@ graph TD
 | # | Unit | 偏差内容 | 理由 / 处置 |
 |---|------|----------|-------------|
 | D1 | u1 | 测试过滤命令：`pnpm test -- <file>` 在 vitest 4.1.9 下 `--` 后不生效、实际跑全量套件；改用 `npx vitest run <file>` 精确过滤 | 工具链行为修正，非设计偏离；本表登记后 §4 增量命令以此为准 |
-| D2 | u1 | 全量套件中 locale-key-usage-guard.test.ts 报 `panel.message.compactingFlushHint` 零字面引用（i18n 反向守卫） | 预期跨 wave 瞬态：key 由 u1 新增、唯一消费方是 u3 的 ActivityStrip.vue（领地外）；u3 落地后自然转绿，阶段 3 全量套件复验 |
+| D2 | u2 | 全量套件中 locale-key-usage-guard.test.ts 报 1 死键：`panel.deferQueue.submittedAwaitingDelivery`（u2 删 PendingBubble 后最后消费方消失；设计 v3 曾记「key 暂留终态复核」，但反向守卫不允许无动态可达豁免） | 机器守卫权威：处置改为 u4 双侧删键（zh/en 同步，locale-sync-check 要求对称）；u4 领地已扩入 i18n 两文件；阶段 3 全量套件复验 |
 
 ## 6 状态表
 | Unit | 状态(pending/in-progress/committed/blocked) | 轮次 | 证据指针 |
 |------|---------------------------------------------|------|----------|
 | u1 | committed（67e5f0f95 基线后 u1 commit；queue-bubble-s8 16/16、typecheck 0、领地 5 文件精确） | 1 | commit hash 见 git log；test_evidence = vitest run queue-bubble-s8 16 passed + pnpm typecheck exit 0（主 agent 复跑确认） |
-| u2 | pending | 0 | - |
-| u3 | pending | 0 | - |
+| u2 | committed（u2 commit；use-compact-queue 25 + chat-transient-reset 5 + fg5 41 + wire/compact-queue 19 全绿、typecheck 0、领地 4 路径含 2 删除） | 1 | 主 agent 复跑 100 用例 99 绿（唯 1 红 = D2 死键守卫，处置入 u4）；hash 见 git log |
+| u3 | committed（与 u2 同窗口 commit；ActivityStrip 26/26、shared 395/395、typecheck 0、领地 4 文件） | 1 | 主 agent 复跑 ActivityStrip + shared 确认；偏差 2 条均为登记级（常量 50 实测口径、mock peek 测试基建） |
 | u4 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
-- 残留风险：① COMPACTING_NOTICE_HEIGHT 实测值可能与预填 48 有 ±2px 偏差（border-y 计入与否）——useConstantHeightAssert dev 断言兜底，真机校准；② A8 真机窗口可观测性依赖确认帧到达时序（秒级），组件测试已锁定核心断言；③ `submittedAwaitingDelivery` key 暂留零消费方，阶段 6 终态同步复核清理。
+- 残留风险：① COMPACTING_NOTICE_HEIGHT 已按实测口径取 50（含 border-y），真机 dev 断言作最终裁决；② A8 真机窗口可观测性由设计 A8 步骤（D1 长任务维持 run）保障，组件测试已锁定核心断言；③ ~~submittedAwaitingDelivery key 暂留~~ → D2 升级：反向守卫红，u4 双侧删键（已登记）。
 - 变更历史：
   - 2026-09-13 计划创建（设计 v3；round2 聚焦复审后主审 0MF 收敛，影响审 2MF 已在设计 v3 全修）。

@@ -6,6 +6,9 @@
  *   bash（正在执行 + mono 命令）、thinking（turn=dispatching→思考中…）、
  *   settling（turn=settling 且无 compacting/bash→行出现，R3-U1；文案复用 dispatching key，
  *   P-1 探针 V8 校准点）
+ * - P1.5 组件黑盒·通栏活动带 band（compact-defer-composer-queue §2.2 / A4+A7）：compacting 行
+ *   摘除 content-col/system-notice、accent-soft 底 + border-y、副文案 count 只计未提交条目、
+ *   count=0 隐藏副文案、bash/thinking/settling 行形态不变
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
  *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；
  *   settling 与 compacting 并存 → 仅 compacting 行（同档位幂等，不重复堆叠）；
@@ -26,6 +29,7 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
@@ -33,11 +37,21 @@ const apiMock = vi.hoisted(() => ({
   streamSubscribe: vi.fn(() => () => {}),
 }))
 
+/** useCompactQueue mock：band 副文案 count 口径测试需注入 mode!==undefined 条目（真实队列公开
+ *  API 无法写 mode——flush 内部 setEntryMode），故 mock peek 返回可控快照；队列真实行为由
+ *  use-compact-queue.test.ts 覆盖。 */
+const queueMock = vi.hoisted(() => ({
+  peek: vi.fn(() => [] as QueuedMessage[]),
+}))
+
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   chat: { send: apiMock.send, steer: apiMock.steer, streamSubscribe: apiMock.streamSubscribe },
   session: {},
 }))
-// MessageStream 挂载的重依赖 composable（对齐 PendingBubble.test.ts / wire.test.ts 的隔离策略）
+vi.mock('@/composables/panel/useCompactQueue', () => ({
+  useCompactQueue: () => ({ peek: queueMock.peek }),
+}))
+// MessageStream 挂载的重依赖 composable（对齐 MessageStream.wire.test.ts 的隔离策略）
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({ editAndResend: vi.fn(), loadMoreHistory: vi.fn(), hasMoreHistory: () => false }),
   resetChatModuleState: vi.fn(),
@@ -103,6 +117,8 @@ async function mountStrip(opts: {
 beforeEach(() => {
   setActivePinia(createPinia())
   resetForkNoticeFeed()
+  queueMock.peek.mockReset()
+  queueMock.peek.mockReturnValue([])
 })
 
 describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
@@ -110,10 +126,11 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
-    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）+ hairline 分隔（system-notice 形态）
+    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）；通栏带 hairline 由 border-y 承担
+    //（无 .h-px span，band 结构断言见下方「通栏活动带」describe）
     expect(wrapper.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
     expect(row.find('.animate-spin').exists()).toBe(true)
-    expect(row.findAll('.h-px').length).toBe(2)
+    expect(row.findAll('.h-px').length).toBe(0)
     wrapper.unmount()
   })
 
@@ -175,6 +192,88 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
   })
 })
 
+describe('ActivityStrip · 通栏活动带 band（compact-defer-composer-queue §2.2 / A4+A7）', () => {
+  /** 构造待发条目（可注入提交通道 mode，模拟 flush 已提交条目——副文案 count 口径过滤） */
+  function queued(id: string, text: string, mode?: 'send' | 'steer'): QueuedMessage {
+    const entry: QueuedMessage = { id, text, segments: [{ type: 'text', text }] }
+    if (mode) entry.mode = mode
+    return entry
+  }
+
+  it('compacting 行通栏带：无 content-col/system-notice、有 accent-soft 底与 border-y hairline', async () => {
+    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
+    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
+    expect(row.exists()).toBe(true)
+    // §2.2 F5：摘除 content-col（720px 封顶内容列与通栏带冲突）/ system-notice（纯语义死标记）
+    expect(row.classes()).not.toContain('content-col')
+    expect(row.classes()).not.toContain('system-notice')
+    // accent-soft 底 + border-y（上下 hairline 由 border 整体替代，不再复用 .h-px span）
+    expect(row.classes()).toContain('bg-[var(--accent-soft)]')
+    expect(row.classes()).toContain('border-y')
+    expect(row.classes()).toContain('border-hairline')
+    expect(row.findAll('.h-px').length).toBe(0)
+    // spinner 升级 size-3.5 + accent 色（原 size-3 neutral-mid）
+    const spinner = row.find('.animate-spin')
+    expect(spinner.exists()).toBe(true)
+    expect(spinner.classes()).toContain('size-3.5')
+    expect(spinner.classes()).toContain('text-accent')
+    wrapper.unmount()
+  })
+
+  it('count 口径：只计 mode===undefined 未提交条目（已提交 steer/send 条目不计入副文案）', async () => {
+    queueMock.peek.mockReturnValue([
+      queued('u1', '未提交 A'),
+      queued('s1', '已提交 steer', 'steer'),
+      queued('s2', '已提交 send', 'send'),
+      queued('u2', '未提交 B'),
+    ])
+    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
+    const hint = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toBe('完成后自动发送 2 条待发消息')
+    // 主文案与副文案之间由「·」分隔
+    expect(wrapper.find('[data-testid="activity-strip-row-compacting"]').text()).toContain('·')
+    wrapper.unmount()
+  })
+
+  it('count=0：副文案与「·」不渲染，活动带仍在（压缩状态本身独立成立，A4）', async () => {
+    queueMock.peek.mockReturnValue([])
+    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
+    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
+    expect(row.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]').exists()).toBe(false)
+    expect(row.text()).not.toContain('·')
+    wrapper.unmount()
+  })
+
+  it('bash/thinking/settling 行维持原 system-notice + content-col 形态（band 不扩散）', async () => {
+    const wrapper = await mountStrip({
+      occupancy: { turn: 'idle', compacting: false, bash: true },
+      executingBash: { command: 'pnpm test', startedAt: Date.now() },
+    })
+    const bashRow = wrapper.find('[data-testid="activity-strip-row-bash"]')
+    expect(bashRow.exists()).toBe(true)
+    expect(bashRow.classes()).toContain('system-notice')
+    expect(bashRow.classes()).toContain('content-col')
+    expect(bashRow.classes()).not.toContain('bg-[var(--accent-soft)]')
+    // bash 行保留两条 .h-px hairline
+    expect(bashRow.findAll('.h-px').length).toBe(2)
+    wrapper.unmount()
+  })
+
+  it('主文案 key 分档：manual→压缩中（band 内）、threshold→正在自动压缩上下文（A7）', async () => {
+    const manual = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
+    expect(manual.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
+    manual.unmount()
+    const auto = await mountStrip({
+      occupancy: { turn: 'idle', compacting: true, bash: false },
+      reason: 'threshold',
+    })
+    expect(auto.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('正在自动压缩上下文')
+    auto.unmount()
+  })
+})
+
 describe('ActivityStrip · 优先级堆叠与互斥（P2）', () => {
   it('compacting + bash 并存 → 两行堆叠且 compacting 在上（DOM 顺序断言）', async () => {
     const wrapper = await mountStrip({
@@ -229,7 +328,7 @@ describe('ActivityStrip · 全 idle 不渲染（P3）', () => {
 })
 
 describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => {
-  /** mount MessageStream（真实 chat store 驱动 occupancy；照 PendingBubble.test.ts mountStream 模式） */
+  /** mount MessageStream（真实 chat store 驱动 occupancy；照既有 MessageStream 集成测试的 mountStream 模式） */
   async function mountStream(sessionId: string) {
     const wrapper = mount(MessageStream, {
       props: { sessionId },
@@ -243,7 +342,7 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 
   it('dispatching 空窗：TurnMeta 旧占位不再渲染 + ActivityStrip thinking 行接管', async () => {
     // store 取用必须在 mountStream 之后（mount 时 app 安装新 pinia 并 setActivePinia，
-    // 先取会拿到 beforeEach 的旧实例，写入不传导——同 PendingBubble.test.ts P3 模式）
+    // 先取会拿到 beforeEach 的旧实例，写入不传导——同既有集成测试 P3 模式）
     const wrapper = await mountStream(SID)
     const chat = useChatStore()
     // 制造 dispatching 空窗的对话流形态：user 已入流（空 turn，assistants=[]）、message_start 未到
