@@ -16,7 +16,8 @@
  * ① subagent-core——notify-host.ts / orchestration/lifecycle.ts /
  *   worker-message-pump.ts / round-supervisor/reconcile-sweep.ts（崩溃恢复 sweep
  *   补注销）；② base-tool-enhance——bash 投影（notify.ts register/unregister 主链 +
- *   process-exit-guard.ts / pending-reconcile.ts 收殓对账尽力补）；
+ *   process-exit-guard.ts 退出边沿尽力补 emit（pending-reconcile 对账走 appendEntry
+ *   权威路径，不经 emit））；
  * ③ subagent-workflow——仅崩溃恢复时 emit pending:unregister（session-lifecycle.ts
  *   recoverCrashedRuns 回调））：
  * - emit("pending:register", { id, type, name })

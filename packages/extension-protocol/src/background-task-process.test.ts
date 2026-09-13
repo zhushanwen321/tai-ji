@@ -122,6 +122,9 @@ describe('getProcessStartTimeSec', () => {
     const startSec = getProcessStartTimeSec(process.pid)
     expect(typeof startSec).toBe('number')
     expect(startSec).toBeGreaterThan(0)
+    const nowSec = Math.floor(Date.now() / 1000)
+    expect(startSec).toBeGreaterThanOrEqual(nowSec - 600)
+    expect(startSec).toBeLessThanOrEqual(nowSec + 5)
   })
 
   it('已死 pid / 非法 pid 返回 undefined（无法校验 → 调用方保守跳过）', () => {

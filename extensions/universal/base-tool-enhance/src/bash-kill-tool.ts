@@ -89,7 +89,7 @@ export function createBashKillToolDefinition() {
 					"the task is managed by the pi process that started it (bash_kill from that session); " +
 						"if that process is gone, the orphan keeps running until it exits on its own; " +
 						"inside the xyz-agent runtime it is collected when the owner's session ends or on app restart; " +
-						"standalone pi: kill the process group manually (kill -- -<pgid>) if it lingers",
+						"standalone pi: kill the process group manually (kill -- -<pgid>; the registered task pid is the pgid) if it lingers",
 				);
 			}
 			if (isTerminalState(fromStore.state)) {
