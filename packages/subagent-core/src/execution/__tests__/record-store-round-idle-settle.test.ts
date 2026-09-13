@@ -100,12 +100,14 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(binding?.round).toBe(1);
 
     // [U7] 正常轮终后宿主崩溃的最常见形态：新 store 实例（模拟重启）+ createRecord
-    // 产物（统计归零）→ markResurrected revive 水合不归零。
+    // 产物（统计归零）→ markResurrected revive 水合不归零。wasClosed=true 对齐生产
+    // 形态（round-terminal 崩溃后 cold-lookup 重建恒 idle 以 wasClosed=true 进入，
+    // 顺带覆盖 .state 终态位删除分支）。
     const revivedStore = makeStore(sessionsDir, manifestDir);
     const revived = makeRecord("bg-ok", { sessionFile, status: "idle" });
     expect(revived.turnCount).toBe(0);
     expect(revived.totalTokens).toBe(0);
-    revivedStore.markResurrected(revived, false);
+    revivedStore.markResurrected(revived, true);
     expect(revived.turnCount).toBe(3);
     expect(revived.totalTokens).toBe(1200);
     expect(revived.round).toBe(1);

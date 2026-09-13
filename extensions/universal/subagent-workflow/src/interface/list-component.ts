@@ -607,8 +607,9 @@ export class SubagentsListComponent implements Component {
     const t = this.theme;
     // 元数据：第 1 行 id + 状态 + turns + tokens。stopReason（上一轮为什么停）只在
     // 详情面板出现（§3.2.1 展示层词汇收敛：列表主展示用状态词，停因是排障信息）；
-    // idle 且有值时追加 `stopped: <reason>` 段，缺省省略（running 在飞 / 存量无字段）。
-    const stopPart = record.status === "idle" && record.stopReason
+    // 有值即追加 `stopped: <reason>` 段（与 SubagentTab 同判据——A-lite 轮终
+    // running-resumable 也携带合法停因），缺省省略（在飞首轮 / 存量无字段）。
+    const stopPart = record.stopReason
       ? ` · stopped: ${record.stopReason}`
       : "";
     content.push(truncLine(

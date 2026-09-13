@@ -319,8 +319,11 @@ function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord,
  *   ② 新写侧投影（recordToSubagent/markSettled 后 U2 起产 status:"idle"）：直投，
  *     stopReason 优先取 entry 的 stopReason 字段（新写侧 additive），缺失回落
  *     closedReason 迁移映射。
- * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位；
- * stopReason 经 isValidStopReason 守卫（非法/缺省 → 回落链）。
+ * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位（closed-only，
+ * 防 running + closedReason 脏组合）；stopReason 经 isValidStopReason 守卫后有值即
+ * 透传——running entry 的合法停因（A-lite 轮终 running-resumable 携带 completed/
+ * failed）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite 阶段 3
+ * 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
  */
 function readEntryTerminalFields(
   d: Record<string, unknown>,
@@ -333,7 +336,7 @@ function readEntryTerminalFields(
   return {
     status: settledEntry ? "idle" : "running",
     closedReason: settledEntry ? validClosed : undefined,
-    stopReason: settledEntry ? (validStop ?? validClosed) : undefined,
+    stopReason: validStop ?? (settledEntry ? validClosed : undefined),
   };
 }
 
