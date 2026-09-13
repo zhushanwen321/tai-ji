@@ -319,6 +319,10 @@ function fillHostToolCall(host: Message, matched: ToolCall, body: PiMessageBody)
     ...(fill.isError && { status: 'error' as const }),
     ...(fill.details !== undefined && { details: fill.details }),
     ...(fill.images !== undefined && { images: fill.images }),
+    // [chat-flow-timestamp U1] endTime 权威回填（= toolResult body.timestamp，缺失不设字段）：
+    // live（tool_call_end/message_end 帧经 commitToolResultMessage）与 reload（replayEntries）
+    // 两通路共用本函数，同源覆盖 live overlay 的 Date.now() 即时值（设计 §2.1）。
+    ...(fill.endTime !== undefined && { endTime: fill.endTime }),
   }
   // matched 恒取自 host.toolCalls（调用点配对保证）；undefined 分支不可达，防御保引用
   const tcs = host.toolCalls

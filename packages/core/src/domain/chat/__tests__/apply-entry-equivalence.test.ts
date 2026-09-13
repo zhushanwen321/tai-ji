@@ -680,6 +680,24 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
       { type: 'text', text: '\n收尾正文' },
     ])
   })
+
+  it('E8: toolCall endTime 回填（chat-flow-timestamp A5/A7）——live（双入口幂等后）≡ replay，值 = toolResult body.timestamp', () => {
+    // live 侧：toolResult 双帧（tool_call_end + message_end，同内容同 timestamp，E1 fixture
+    // 同款 R2-S1 形态）→ 幂等去重后回填；replay 侧：单条持久化 entry。两通路经同一
+    // computeToolCallFill 回填 endTime = body.timestamp（权威 pi 时刻，非 Date.now() 渗入），
+    // deep-equal 归一后 endTime 同值——历史 reload 耗时持久的 core 侧构造性保证。
+    const liveState = replayEntries(liveEntries)
+    const replayState = replayEntries(replaySideEntries)
+    const liveTc = liveState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-1'))!.toolCalls![0]!
+    const replayTc = replayState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-1'))!.toolCalls![0]!
+    // 显式值断言（用户可见字段级：UI 耗时展示的数据源）
+    expect(liveTc.endTime).toBe(3000)
+    expect(replayTc.endTime).toBe(3000)
+    expect(liveTc.endTime).toBe(replayTc.endTime)
+    // startTime 来自 assistant body.timestamp（既有语义，与 endTime 异源不同值）
+    expect(liveTc.startTime).toBe(2000)
+    expect(replayTc.startTime).toBe(2000)
+  })
 })
 
 // ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 表述修正 + §4 AC-7）──
