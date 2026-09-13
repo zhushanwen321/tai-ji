@@ -24,7 +24,7 @@ Mirror repository: [gitcode.com/qq_18433817/xyz-agent](https://gitcode.com/qq_18
 #### macOS (Apple Silicon)
 
 ```bash
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 ```
 
@@ -33,7 +33,7 @@ You can also download the dmg from [GitCode Releases](https://gitcode.com/qq_184
 #### Linux
 
 ```bash
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -43,13 +43,13 @@ curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJ
 PowerShell (uses Invoke-WebRequest to avoid the parameter conflicts caused by curl being an alias in PowerShell):
 
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 Command Prompt (cmd.exe; requires the system-bundled curl.exe, included by default since Windows 10 1803+):
 
 ```cmd
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### International download (GitHub)
@@ -59,14 +59,14 @@ Repository: [github.com/zhushanwen321/xyz-agent](https://github.com/zhushanwen32
 #### macOS (Apple Silicon)
 
 ```bash
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 ```
 
 #### Linux
 
 ```bash
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -76,13 +76,13 @@ curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/Tai
 PowerShell:
 
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 Command Prompt (cmd.exe):
 
 ```cmd
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 > On macOS, if the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads; needed for browser downloads):

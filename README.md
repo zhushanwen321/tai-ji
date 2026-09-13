@@ -24,7 +24,7 @@ AI Agent 桌面工作台（macOS / Windows / Linux），基于 Electron + Vue 3 
 #### macOS（Apple Silicon）
 
 ```bash
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 ```
 
@@ -33,7 +33,7 @@ curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJ
 #### Linux
 
 ```bash
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -43,13 +43,13 @@ curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJ
 PowerShell（用 Invoke-WebRequest，避免 curl 在 PowerShell 是别名导致的参数冲突）：
 
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 命令提示符（cmd.exe，需系统自带 curl.exe，Win10 1803+ 默认含）：
 
 ```cmd
-curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### 国外下载（GitHub）
@@ -59,14 +59,14 @@ curl -L https://gitcode.com/qq_18433817/xyz-agent/releases/download/v0.9.19/TaiJ
 #### macOS（Apple Silicon）
 
 ```bash
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 ```
 
 #### Linux
 
 ```bash
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -76,13 +76,13 @@ curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/Tai
 PowerShell：
 
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 命令提示符（cmd.exe）：
 
 ```cmd
-curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.19/TaiJi-0.9.19-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+curl -L https://github.com/zhushanwen321/xyz-agent/releases/download/v0.9.20/TaiJi-0.9.20-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 > macOS 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
