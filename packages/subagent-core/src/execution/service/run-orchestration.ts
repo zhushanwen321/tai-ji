@@ -493,39 +493,14 @@ export class RunOrchestration {
     // warn 留痕不阻断（诊断面归 EngineClient，设计 §3.3 能力位段）。
     assertTaskShapeSupported(engine.id, engine.capabilities(), opts);
 
-    // identity 按路由结果分支构造（[u-h2 D2-1] 路由先行）：
-    //   - pi：pi 链三层解析在路由后执行（现状三层解析链行为零变化；含 resolveModel
-    //     失败的跨引擎候选提示，D2-4）；
-    //   - 非 pi：跳过 pi registry，model 按目标引擎校验（同步期 throw，record 创建前
-    //     ——场景 2 错误；ctxModel 不透传，缺省语义归引擎，D2-1③）。
-    const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    // [u-h2 D2-1③] 非 pi 的 model 源 = 调用参数 > agent .md frontmatter（作者声明不
-    // 忽略）——frontmatter 声明须真正透传给引擎（taskSpec.model 消费 opts.model），
-    // 不能只进 record 留痕；无显式 model 时引擎落自身缺省（validateModel(undefined) 裁决）。
-    const engineModel = isPiRoute ? undefined : (opts.model ?? preIdentity.agentConfig?.model);
-    const identity = isPiRoute
-      ? await this.deps.resolveIdentity(opts, preIdentity)
-      : this.deps.resolveIdentityForEngine(engine, engineModel, preIdentity.agent, preIdentity.agentConfig, opts);
-
-    // record 盖章路由结果（D5 字节级守护的执行侧落点）：
-    //   - pi 纯缺省/显式 pi：不盖 engine 键（pi record entry 序列化产物不得新增 engine
-    //     键，undefined 经 JSON 省略）——与旧 pi 主路径 piOpts 剥离语义逐字节一致；
-    //   - pi 兜底：engine='pi' + engineFallback 留痕（engine = 实际执行引擎，from=请求
-    //     引擎留痕）；
-    //   - 非 pi：engine=route.engineId 显式留痕（+engineFallback 如有）+ model 覆写
-    //     （frontmatter 声明透传，u-h2 D2-1③）。
-    const recordOpts: ExecuteOptions = isPiRoute
-      ? route.engineFallback !== undefined
-        ? { ...opts, engine: DEFAULT_ENGINE_ID, engineFallback: route.engineFallback }
-        : opts.engine === undefined
-          ? opts
-          : { ...opts, engine: undefined }
-      : {
-        ...opts,
-        ...(engineModel !== undefined ? { model: engineModel } : {}),
-        engine: route.engineId,
-        ...(route.engineFallback !== undefined ? { engineFallback: route.engineFallback } : {}),
-      };
+    // [metrics-gate cyclo 偿还·第二轮 / 行为保持] 沿既有拆解方向（见 eslint.config
+    // [HISTORICAL] cyclo 偿还段）继续原地拆解：identity 分支构造 → resolveIdentityForRoute、
+    // record 盖章 → stampEngineOnRecordOpts、派发分流 → kickOffBackgroundDispatch——
+    // 判据 / 分支产物 / 次序逐字节等价。worktree 段保持内联：[create-await 竞态守卫]
+    // 的「赋值 → 收口检查 → kick-off 同一同步段」实现约束禁止在检查与 kick-off 间
+    // 插入 await，不宣 extract。
+    const { isPiRoute, engineModel, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
+    const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, isPiRoute);
     const record = this.deps.createRecordForMode(identity, recordOpts, mode);
     this.deps.getNotifyHost().emitPendingRegister(record.id, record.agent);
 
@@ -564,40 +539,111 @@ export class RunOrchestration {
       }
     }
 
-    if (isPiRoute) {
-      if (record.chatMode) {
-        // [H1 U2] chat 首轮经 ConversationContinuation（§3.5 终态数据流：轮末分流
-        // chatMode → Continuation onRunSettled；one-shot → settleOneShotOutcome 照旧）。
-        // 首轮 task = dispatchRound([task])（无 resume——新 session，锚点由 run 应答回填）。
-        // [2026-09-13 design-code-sync] continuationFor/startFirstRound 本体已迁
-        // ChatRounds——派发经 deps 回调（startFirstChatRound）。
-        this.deps.startFirstChatRound(record, recordOpts.task);
-      } else {
-        // one-shot background 派发主干（kickOffChatRound 共享部分，D6 保留泛化）。
-        // [2026-09-13 design-code-sync] 本体已迁 ChatRounds——派发经 deps 回调。
-        this.deps.kickOffChatRound(
-          record,
-          { ...recordOpts, worktree: worktreeHandle },
-          identity,
-          record.controller!.signal,
-          PRIORITY_BACKGROUND,
-        );
-      }
-    } else if (record.chatMode) {
-      // [U6b / B-firstround] 非 pi chatMode（zcode conversation:'cold'——U6 后 capability
-      // gate 对 conversation:true 放行）首轮同经 Continuation 编排，对齐 pi 分支形态：
-      // 轮末分流归 onRunSettled（settleRoundSuccess/Failed → markRoundIdle，record 保持
-      // 可续聊），续轮 message → deliverChatMessage → dispatchChatRoundForContinuation →
-      // kickOffChatRound 按 record.engine 路由（[U6b / B-routing]）。若走下方
-      // kickOffEngineRun 的 one-shot 编排（finalizeEngineOutcome tryTransition 终态化），
-      // chatMode record 首轮 settle 即终态化，续聊链从第一轮就断。
-      // [2026-09-13 design-code-sync] 本体已迁 ChatRounds——派发经 deps 回调。
-      this.deps.startFirstChatRound(record, recordOpts.task);
-    } else {
-      // 非 pi 引擎：engine.run 自足执行（handle+outcome），编排侧 journal 接线 + 终态迁移
-      this.kickOffEngineRun(record, recordOpts, engine);
-    }
+    this.kickOffBackgroundDispatch(record, recordOpts, identity, engine, isPiRoute, worktreeHandle);
     return { mode: "background", subagentId: record.id, sessionFile: record.sessionFile, details: project(record) };
+  }
+
+  /**
+   * [metrics-gate cyclo 偿还·第二轮 / 行为保持] executeViaEngine 的 identity 分支构造
+   * 原样提取（判据与解析调用逐字节等价）：
+   *   - pi：pi 链三层解析在路由后执行（现状三层解析链行为零变化；含 resolveModel
+   *     失败的跨引擎候选提示，D2-4）；
+   *   - 非 pi：跳过 pi registry，model 按目标引擎校验（同步期 throw，record 创建前
+   *     ——场景 2 错误；ctxModel 不透传，缺省语义归引擎，D2-1③）。
+   * [u-h2 D2-1③] 非 pi 的 model 源 = 调用参数 > agent .md frontmatter（作者声明不
+   * 忽略）——frontmatter 声明须真正透传给引擎（taskSpec.model 消费 opts.model），
+   * 不能只进 record 留痕；无显式 model 时引擎落自身缺省（validateModel(undefined) 裁决）。
+   */
+  private async resolveIdentityForRoute(
+    opts: ExecuteOptions,
+    preIdentity: { agent: string; agentConfig: AgentConfig | undefined },
+    route: EngineRouteResult,
+  ): Promise<{ isPiRoute: boolean; engineModel: string | undefined; identity: ResolvedIdentity }> {
+    const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
+    const engineModel = isPiRoute ? undefined : (opts.model ?? preIdentity.agentConfig?.model);
+    const identity = isPiRoute
+      ? await this.deps.resolveIdentity(opts, preIdentity)
+      : this.deps.resolveIdentityForEngine(
+        route.engine,
+        engineModel,
+        preIdentity.agent,
+        preIdentity.agentConfig,
+        opts,
+      );
+    return { isPiRoute, engineModel, identity };
+  }
+
+  /**
+   * [metrics-gate cyclo 偿还·第二轮 / 行为保持] executeViaEngine 的 record 盖章路由
+   * 结果提取（D5 字节级守护的执行侧落点；嵌套三元改早返回，判据与产物逐字节等价）：
+   *   - pi 纯缺省/显式 pi：不盖 engine 键（pi record entry 序列化产物不得新增 engine
+   *     键，undefined 经 JSON 省略）——与旧 pi 主路径 piOpts 剥离语义逐字节一致；
+   *   - pi 兜底：engine='pi' + engineFallback 留痕（engine = 实际执行引擎，from=请求
+   *     引擎留痕）；
+   *   - 非 pi：engine=route.engineId 显式留痕（+engineFallback 如有）+ model 覆写
+   *     （frontmatter 声明透传，u-h2 D2-1③）。
+   */
+  private stampEngineOnRecordOpts(
+    opts: ExecuteOptions,
+    route: EngineRouteResult,
+    engineModel: string | undefined,
+    isPiRoute: boolean,
+  ): ExecuteOptions {
+    if (!isPiRoute) {
+      return {
+        ...opts,
+        ...(engineModel !== undefined ? { model: engineModel } : {}),
+        engine: route.engineId,
+        ...(route.engineFallback !== undefined ? { engineFallback: route.engineFallback } : {}),
+      };
+    }
+    if (route.engineFallback !== undefined) {
+      return { ...opts, engine: DEFAULT_ENGINE_ID, engineFallback: route.engineFallback };
+    }
+    return opts.engine === undefined ? opts : { ...opts, engine: undefined };
+  }
+
+  /**
+   * [metrics-gate cyclo 偿还·第二轮 / 行为保持] executeViaEngine 的尾部分流提取
+   * （同步调用面，零时序变化）——四象限（isPiRoute × chatMode）归并为 chatMode 优先
+   * 两段判（分支映射逐字节等价）：
+   *   - chatMode（pi 与非 pi 同形）：首轮经 ConversationContinuation（[H1 U2] §3.5
+   *     终态数据流：轮末分流 chatMode → Continuation onRunSettled；one-shot →
+   *     settleOneShotOutcome 照旧）；首轮 task = dispatchRound([task])（无 resume
+   *     ——新 session，锚点由 run 应答回填）。[2026-09-13 design-code-sync]
+   *     continuationFor/startFirstRound 本体已迁 ChatRounds——派发经 deps 回调；
+   *     [U6b / B-firstround] 非 pi chatMode（zcode conversation:'cold'）首轮同经
+   *     Continuation 编排对齐 pi 分支形态——若走 kickOffEngineRun 的 one-shot 编排
+   *     （finalizeEngineOutcome tryTransition 终态化），chatMode record 首轮 settle
+   *     即终态化，续聊链从第一轮就断；
+   *   - pi one-shot：one-shot background 派发主干（kickOffChatRound 共享部分，D6
+   *     保留泛化；[2026-09-13 design-code-sync] 本体已迁 ChatRounds——派发经 deps 回调）；
+   *   - 非 pi one-shot：engine.run 自足执行（handle+outcome），编排侧 journal 接线
+   *     + 终态迁移（kickOffEngineRun）。
+   */
+  private kickOffBackgroundDispatch(
+    record: ExecutionRecord,
+    recordOpts: ExecuteOptions,
+    identity: ResolvedIdentity,
+    engine: EnginePort,
+    isPiRoute: boolean,
+    worktreeHandle: WorktreeHandle | undefined,
+  ): void {
+    if (record.chatMode) {
+      this.deps.startFirstChatRound(record, recordOpts.task);
+      return;
+    }
+    if (isPiRoute) {
+      this.deps.kickOffChatRound(
+        record,
+        { ...recordOpts, worktree: worktreeHandle },
+        identity,
+        record.controller!.signal,
+        PRIORITY_BACKGROUND,
+      );
+      return;
+    }
+    this.kickOffEngineRun(record, recordOpts, engine);
   }
 
   /**

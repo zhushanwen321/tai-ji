@@ -8,13 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SubagentEnginesFile } from "@xyz-agent/extension-protocol";
 
-import { getEnginesFilePath, syncEnginesFile } from "../engine-discovery.ts";
+import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 import type { EnginePort } from "../port.ts";
 import { clearEngines, registerEngine } from "../registry.ts";
 
 /** 密闭发现注入（env:{} 斩 L1 env 根，nodeModuleRoots:[] 斩 L2 宿主 node_modules）——
  * 防宿主环境（打包态 XYZ_AGENT_ENGINE_ROOTS / workspace 链接的引擎包）污染注册表。 */
-const HERMETIC_DISCOVERY = { env: {}, nodeModuleRoots: [] } as const;
+const HERMETIC_DISCOVERY: SyncEnginesFileOptions = { env: {}, nodeModuleRoots: [] };
 
 function stubEngine(id: string): EnginePort {
   return {

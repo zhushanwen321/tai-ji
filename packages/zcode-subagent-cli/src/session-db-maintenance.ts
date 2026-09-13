@@ -101,6 +101,103 @@ function sessionLastActivity(row: { time_updated?: unknown; time_created?: unkno
   return null;
 }
 
+/** 过期条目收集结果：expired = 待删 id 清单；keptActive = 活跃豁免计数。 */
+interface ExpiredScan {
+  expired: string[];
+  keptActive: number;
+}
+
+/**
+ * [行为保持] 从 session 表收集超窗条目（原 sweepExpiredZcodeSessions 内联循环
+ * 提取，判定序逐条保持）：形状防御（无 id 行不可删也不可豁免）→ 保守保留
+ * （非数值时间戳 / 窗内条目）→ 活跃豁免（keepSessionIds 命中计数保条目）。
+ */
+function collectExpiredSessions(
+  db: SweepSqliteDb,
+  cutoff: number,
+  keep: ReadonlySet<string>,
+): ExpiredScan {
+  const rows = db
+    .prepare("SELECT id, time_updated, time_created FROM session")
+    .all() as Array<{ id?: unknown; time_updated?: unknown; time_created?: unknown }>;
+  const expired: string[] = [];
+  let keptActive = 0;
+  for (const row of rows) {
+    if (typeof row.id !== "string" || row.id === "") continue; // 形状防御：无 id 行不可删也不可豁免
+    const last = sessionLastActivity(row);
+    if (last === null || last >= cutoff) continue; // 保守保留：非数值时间戳 / 窗内条目
+    if (keep.has(row.id)) {
+      keptActive++;
+      continue;
+    }
+    expired.push(row.id);
+  }
+  return { expired, keptActive };
+}
+
+/**
+ * [行为保持] 同连接显式开启并校验 FK PRAGMA（原内联段提取）。P1 实测：engine
+ * 声明 CASCADE 但默认 foreign_keys=0——未生效即抛错中止删除（防孤儿行）。
+ */
+function ensureForeignKeysOn(db: SweepSqliteDb): void {
+  db.exec("PRAGMA foreign_keys = ON");
+  const fkOn = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys?: unknown } | undefined;
+  if (fkOn?.foreign_keys !== 1) {
+    throw new Error("PRAGMA foreign_keys=ON 未生效——中止删除（防孤儿行），本轮 sweep 放弃");
+  }
+}
+
+/** [行为保持] 现存表名集合（schema 漂移容忍探测，原内联段提取）。 */
+function listPresentTables(db: SweepSqliteDb): Set<string> {
+  return new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name?: unknown }>)
+      .map((r) => (typeof r.name === "string" ? r.name : "")),
+  );
+}
+
+/**
+ * [行为保持] 单事务删除序（FK 纪律，原函数 try 段提取，删除顺序与 SQL 逐字保持）：
+ * session_id 键子表 → session_task_link 双向（child 删 / parent 置 NULL）→
+ * workflow 父键置 NULL → input_history 删 → session 最后删。失败 ROLLBACK 后
+ * 原样上抛（已断连等 ROLLBACK 失败时保留原错误）。返回实际删除条数。
+ */
+function deleteExpiredSessionsInTx(
+  db: SweepSqliteDb,
+  expired: readonly string[],
+  present: ReadonlySet<string>,
+): number {
+  const ph = expired.map(() => "?").join(", ");
+  db.exec("BEGIN");
+  try {
+    for (const table of SESSION_CHILD_TABLES) {
+      if (present.has(table)) db.prepare(`DELETE FROM ${table} WHERE session_id IN (${ph})`).run(...expired);
+    }
+    if (present.has("session_task_link")) {
+      db.prepare(`DELETE FROM session_task_link WHERE child_session_id IN (${ph})`).run(...expired);
+      db.prepare(`UPDATE session_task_link SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
+    }
+    if (present.has("workflow_run")) {
+      db.prepare(`UPDATE workflow_run SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
+    }
+    if (present.has("workflow_activity")) {
+      db.prepare(`UPDATE workflow_activity SET child_session_id = NULL WHERE child_session_id IN (${ph})`).run(...expired);
+    }
+    if (present.has("input_history")) {
+      db.prepare(`DELETE FROM input_history WHERE session_id IN (${ph})`).run(...expired);
+    }
+    const res = db.prepare(`DELETE FROM session WHERE id IN (${ph})`).run(...expired);
+    db.exec("COMMIT");
+    return res.changes ?? expired.length;
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch (rollbackErr) {
+      void rollbackErr; // 已断连等：保留原错误
+    }
+    throw err;
+  }
+}
+
 /**
  * 扫并删除隔离库中超 TTL 窗的 session 条目（同步——维护动作，调用方负责不阻塞
  * 主链路时点，见 maybeSweep 的 defer 接线）。
@@ -125,77 +222,25 @@ export function sweepExpiredZcodeSessions(
   const ttl = opts.ttlMs ?? ZCODE_SESSION_TTL_MS;
   const cutoff = now - ttl;
   const keep = opts.keepSessionIds ?? new Set<string>();
-  let db: InstanceType<typeof Ctor> | undefined;
+  let db: SweepSqliteDb | undefined;
   try {
     db = new Ctor(dbPath);
     db.exec(`PRAGMA busy_timeout = ${SWEEP_BUSY_TIMEOUT_MS}`);
-    const rows = db
-      .prepare("SELECT id, time_updated, time_created FROM session")
-      .all() as Array<{ id?: unknown; time_updated?: unknown; time_created?: unknown }>;
-    const expired: string[] = [];
-    let keptActive = 0;
-    for (const row of rows) {
-      if (typeof row.id !== "string" || row.id === "") continue; // 形状防御：无 id 行不可删也不可豁免
-      const last = sessionLastActivity(row);
-      if (last === null || last >= cutoff) continue; // 保守保留：非数值时间戳 / 窗内条目
-      if (keep.has(row.id)) {
-        keptActive++;
-        continue;
-      }
-      expired.push(row.id);
-    }
+    const { expired, keptActive } = collectExpiredSessions(db, cutoff, keep);
     if (expired.length === 0) {
       db.close();
       return { swept: 0, keptActive };
     }
-    // FK 纪律：同连接显式开启并校验（P1 实测——声明 CASCADE 不等于默认生效）
-    db.exec("PRAGMA foreign_keys = ON");
-    const fkOn = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys?: unknown } | undefined;
-    if (fkOn?.foreign_keys !== 1) {
-      throw new Error("PRAGMA foreign_keys=ON 未生效——中止删除（防孤儿行），本轮 sweep 放弃");
-    }
-    // 表存在性探测（schema 漂移容忍：缺表跳过，多余的表不可删也不知道）
-    const present = new Set(
-      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name?: unknown }>)
-        .map((r) => (typeof r.name === "string" ? r.name : "")),
-    );
-    const ph = expired.map(() => "?").join(", ");
-    db.exec("BEGIN");
+    ensureForeignKeysOn(db);
+    const present = listPresentTables(db);
+    const swept = deleteExpiredSessionsInTx(db, expired, present);
+    logger.debug(`[zcode-ttl] 隔离库超窗条目已清：${swept} 条（TTL ${ttl}ms，豁免活跃 ${keptActive}）`, { dbPath });
     try {
-      for (const table of SESSION_CHILD_TABLES) {
-        if (present.has(table)) db.prepare(`DELETE FROM ${table} WHERE session_id IN (${ph})`).run(...expired);
-      }
-      if (present.has("session_task_link")) {
-        db.prepare(`DELETE FROM session_task_link WHERE child_session_id IN (${ph})`).run(...expired);
-        db.prepare(`UPDATE session_task_link SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
-      }
-      if (present.has("workflow_run")) {
-        db.prepare(`UPDATE workflow_run SET parent_session_id = NULL WHERE parent_session_id IN (${ph})`).run(...expired);
-      }
-      if (present.has("workflow_activity")) {
-        db.prepare(`UPDATE workflow_activity SET child_session_id = NULL WHERE child_session_id IN (${ph})`).run(...expired);
-      }
-      if (present.has("input_history")) {
-        db.prepare(`DELETE FROM input_history WHERE session_id IN (${ph})`).run(...expired);
-      }
-      const res = db.prepare(`DELETE FROM session WHERE id IN (${ph})`).run(...expired);
-      db.exec("COMMIT");
-      const swept = res.changes ?? expired.length;
-      logger.debug(`[zcode-ttl] 隔离库超窗条目已清：${swept} 条（TTL ${ttl}ms，豁免活跃 ${keptActive}）`, { dbPath });
-      try {
-        db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
-      } catch (err) {
-        void err; // checkpoint 失败只影响 WAL 回收节奏，删除已提交
-      }
-      return { swept, keptActive };
+      db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
     } catch (err) {
-      try {
-        db.exec("ROLLBACK");
-      } catch (rollbackErr) {
-        void rollbackErr; // 已断连等：保留原错误
-      }
-      throw err;
+      void err; // checkpoint 失败只影响 WAL 回收节奏，删除已提交
     }
+    return { swept, keptActive };
   } catch (err) {
     logger.warn(
       `[zcode-ttl] sweep 失败（辅助资源面，不影响 run 主链路；下个节流窗重试）: ${

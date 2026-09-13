@@ -397,15 +397,7 @@ export class ConversationContinuation {
         // 通知去重键单调，磁盘一致性由 run 应答回填 writeBindingForRecord 保证）
         //——偏差登记见实现单元报告。
         freshSession = true;
-        summaryPrefix = buildReopenSummaryPrompt({
-          id: record.id,
-          task: record.task,
-          agent: record.agent,
-          round: record.round ?? 0,
-          ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
-          ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
-          ...(record.result !== undefined ? { lastResult: record.result } : {}),
-        });
+        summaryPrefix = this.reopenSummaryFor(record);
       }
     }
     if (!record.controller) {
@@ -449,52 +441,16 @@ export class ConversationContinuation {
       return;
     }
     // ①' [U5 / §3.2.5 worktree 续聊重建] 绑定丢失（跨重启 / 归档后 worktreeHandle
-    //    恒 undefined）→ 自动重建。原同步 throw 拒绝语义退役（拒绝会阻断万物可续；
-    //    放行 = spawn cwd 静默回落主 repo——重建是两害的唯一正确解）。三失败形态：
-    //      rebuilt      → handle 回填 record（后续轮/归档回收复用）；
-    //      conflict     → 干净基线 handle 回填 + 原地续聊 + 用户可见提示（patch
-    //                     备份路径进本轮 prompt 前缀 + appendEntry——不降级 reopen）；
-    //      degrade-reopen → 形态①（patch 丢失/分支不存在）→ 摘要注入全新 session
-    //                     直派（同上方 [U4] 续轮 transcript 丢失分支同构——不推进
-    //                     世代，markReopened CAS 仅收 idle，偏差同族登记）；
-    //      throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具
-    //                     错误面/失败通知可见，不静默回落）。
-    let worktreeNotice: string | undefined;
-    if (!firstRound && record.hadWorktree === true && !record.worktreeHandle) {
-      let rebuild: WorktreeRebuildOutcome;
-      try {
-        rebuild = await this.host.rebuildWorktree(record);
-      } catch (err) {
-        // 形态③：重建 IO 错（GitRunError/DirtyWorktreeError）——转失败轮末分流
-        //（失败通知 + 恢复指引；record 保持 running-resumable）。
-        this.clearActiveRound();
-        this.onRoundRejected(err);
-        return;
-      }
-      if (rebuild.kind === "degrade-reopen") {
-        freshSession = true;
-        summaryPrefix = buildReopenSummaryPrompt({
-          id: record.id,
-          task: record.task,
-          agent: record.agent,
-          round: record.round ?? 0,
-          ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
-          ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
-          ...(record.result !== undefined ? { lastResult: record.result } : {}),
-        });
-      } else {
-        type MutableRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
-        (record as MutableRecord).worktreeHandle = rebuild.handle;
-        if (rebuild.kind === "conflict") {
-          worktreeNotice =
-            `[Worktree rebuilt on a clean baseline] The worktree from before archiving was ` +
-            `rebuilt, but its uncommitted changes could not be re-applied automatically ` +
-            `(the branch moved on while archived). A patch backup is preserved at: ${rebuild.patchFile} ` +
-            `— apply it manually with \`git apply ${rebuild.patchFile}\` if still needed.\n\n`;
-          this.host.notifyWorktreeConflict(record.id, rebuild.patchFile);
-        }
-      }
-    }
+    //    恒 undefined）→ 自动重建（四失败形态处置与「原同步 throw 拒绝语义退役」的
+    //    裁决依据见 rebuildWorktreeBinding 方法头；[metrics-gate cyclo 偿还 / 行为保持]
+    //    判据与三失败形态处置逐字节等价提取）。返回 rejected = 形态③转失败轮末分流
+    //    后本轮作废；返回 dispatch = 携带降级后的 freshSession/summaryPrefix 与形态②
+    //    的用户可见提示前缀。
+    const rebuild = await this.rebuildWorktreeBinding(firstRound, freshSession, summaryPrefix);
+    if (rebuild.kind === "rejected") return;
+    freshSession = rebuild.freshSession;
+    summaryPrefix = rebuild.summaryPrefix;
+    const worktreeNotice = rebuild.worktreeNotice;
 
     // ② 载荷组装：轮级 signal（record controller 级联 + 打断通道）。
     //    model 身份重建 / resume 锚点 / chat 键组装 / sessionRootId 注入 / pool
@@ -544,12 +500,12 @@ export class ConversationContinuation {
         // 契约——「接续旧工作」框架先行，指令随后）。
         // [U5] worktree 重建形态②：干净基线提示前缀（patch 备份路径——子 agent 与
         // 用户双通道可见）。
-        task:
-          worktreeNotice !== undefined
-            ? worktreeNotice + (summaryPrefix ?? "") + msgs.join("\n\n")
-            : summaryPrefix !== undefined
-              ? summaryPrefix + msgs.join("\n\n")
-              : msgs.join("\n\n"),
+        // 多条聚合为一轮输入（§3.1：cancel 宽限窗内多条消息按序聚合）。
+        // [U4] reopen 降级轮：摘要前缀在前 + 用户消息在后（buildReopenSummaryPrompt
+        // 契约——「接续旧工作」框架先行，指令随后）。
+        // [U5] worktree 重建形态②：干净基线提示前缀（patch 备份路径——子 agent 与
+        // 用户双通道可见）。
+        task: this.composeRoundTask(worktreeNotice, summaryPrefix, msgs),
         // [U4 / §3.2.3] resume 锚点分流：freshSession（首轮 / 锚字段缺失 / reopen
         // 降级）→ undefined（引擎开新 session，新锚由 run 应答回填）；正常续轮 →
         // resumeAnchor()（sessionFile 续写原文件）。
@@ -580,6 +536,97 @@ export class ConversationContinuation {
       concludeRound();
       this.onRoundRejected(err);
     }
+  }
+
+  /**
+   * [U4 / §3.2.3] reopen 降级摘要前缀（binding 快照域投影，buildReopenSummaryPrompt
+   *  模板单点）。[metrics-gate cyclo 偿还 / 行为保持] dispatchRoundGuarded /
+   *  dispatchRoundAsync 两处重复的内联构造归一为单点（两处载荷与字段守卫逐字节等价
+   *  ——提取自原内联 buildReopenSummaryPrompt 调用，零判据变化）。
+   */
+  private reopenSummaryFor(record: ExecutionRecord): string {
+    return buildReopenSummaryPrompt({
+      id: record.id,
+      task: record.task,
+      agent: record.agent,
+      round: record.round ?? 0,
+      ...(record.totalTokens !== undefined ? { totalTokens: record.totalTokens } : {}),
+      ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
+      ...(record.result !== undefined ? { lastResult: record.result } : {}),
+    });
+  }
+
+  /**
+   * [U5 / §3.2.5 worktree 续聊重建] dispatchRoundAsync ①' 段原样提取（[metrics-gate
+   *  cyclo 偿还 / 行为保持]：入守卫 / 三失败形态处置 / 字段回填逐字节等价）。绑定
+   *  丢失（跨重启 / 归档后 worktreeHandle 恒 undefined）→ 自动重建。原同步 throw
+   *  拒绝语义退役（拒绝会阻断万物可续；放行 = spawn cwd 静默回落主 repo——重建是
+   *  两害的唯一正确解）。四失败形态：
+   *    rebuilt      → handle 回填 record（后续轮/归档回收复用）；
+   *    conflict     → 干净基线 handle 回填 + 原地续聊 + 用户可见提示（patch 备份路径
+   *                   进本轮 prompt 前缀 + appendEntry——不降级 reopen）；
+   *    degrade-reopen → 形态①（patch 丢失/分支不存在）→ 摘要注入全新 session 直派
+   *                   （同 [U4] 续轮 transcript 丢失分支同构——不推进世代，
+   *                   markReopened CAS 仅收 idle，偏差同族登记）；
+   *    throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具错误面/
+   *                   失败通知可见，不静默回落；返回 { kind: "rejected" }，调用方
+   *                   本轮作废）。
+   */
+  private async rebuildWorktreeBinding(
+    firstRound: boolean,
+    freshSession: boolean,
+    summaryPrefix: string | undefined,
+  ): Promise<
+    | { kind: "rejected" }
+    | { kind: "dispatch"; freshSession: boolean; summaryPrefix: string | undefined; worktreeNotice: string | undefined }
+  > {
+    const record = this.record;
+    if (!firstRound && record.hadWorktree === true && !record.worktreeHandle) {
+      let rebuild: WorktreeRebuildOutcome;
+      try {
+        rebuild = await this.host.rebuildWorktree(record);
+      } catch (err) {
+        // 形态③：重建 IO 错（GitRunError/DirtyWorktreeError）——转失败轮末分流
+        //（失败通知 + 恢复指引；record 保持 running-resumable）。
+        this.clearActiveRound();
+        this.onRoundRejected(err);
+        return { kind: "rejected" };
+      }
+      if (rebuild.kind === "degrade-reopen") {
+        return { kind: "dispatch", freshSession: true, summaryPrefix: this.reopenSummaryFor(record), worktreeNotice: undefined };
+      }
+      type MutableRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+      (record as MutableRecord).worktreeHandle = rebuild.handle;
+      if (rebuild.kind === "conflict") {
+        const worktreeNotice =
+          `[Worktree rebuilt on a clean baseline] The worktree from before archiving was ` +
+          `rebuilt, but its uncommitted changes could not be re-applied automatically ` +
+          `(the branch moved on while archived). A patch backup is preserved at: ${rebuild.patchFile} ` +
+          `— apply it manually with \`git apply ${rebuild.patchFile}\` if still needed.\n\n`;
+        this.host.notifyWorktreeConflict(record.id, rebuild.patchFile);
+        return { kind: "dispatch", freshSession, summaryPrefix, worktreeNotice };
+      }
+      return { kind: "dispatch", freshSession, summaryPrefix, worktreeNotice: undefined };
+    }
+    return { kind: "dispatch", freshSession, summaryPrefix, worktreeNotice: undefined };
+  }
+
+  /**
+   * 轮次 prompt 装配：[U4] reopen 降级摘要前缀在前 + 用户消息在后（「接续旧工作」
+   *  框架先行，指令随后）；[U5] worktree 重建形态②的干净基线提示前缀最前（patch
+   *  备份路径——子 agent 与用户双通道可见）。[metrics-gate cyclo 偿还 / 行为保持]
+   *  原三元链改两级早判，三分支拼接结果逐字节等价：
+   *    worktreeNotice ≠ undefined → worktreeNotice + (summaryPrefix ?? "") + msgs；
+   *    summaryPrefix ≠ undefined → summaryPrefix + msgs；
+   *    双缺省 → msgs。
+   */
+  private composeRoundTask(
+    worktreeNotice: string | undefined,
+    summaryPrefix: string | undefined,
+    msgs: string[],
+  ): string {
+    const prefix = worktreeNotice !== undefined ? worktreeNotice + (summaryPrefix ?? "") : summaryPrefix;
+    return prefix !== undefined ? prefix + msgs.join("\n\n") : msgs.join("\n\n");
   }
 
   /**

@@ -577,8 +577,10 @@ function projectValidatedIdentityFields(
 }
 
 /**
- * 可选域类型守卫归一（非法/缺省 → 各自缺省值，不影响整体判读）。各守卫表达式自
- * readRecordBinding 原样搬移，逐字段等价。
+ * 可选域类型守卫归一（非法/缺省 → 各自缺省值，不影响整体判读）。守卫表达式自
+ * readRecordBinding 原样搬移，逐字段等价。[metrics-gate cyclo 偿还] 逐字段三元守卫
+ * （原单函数 cyclomatic 18）归一为下方同类守卫 helper（表驱动降）——每字段仍是一元
+ * 表达式，判读结果与求值顺序逐字节等价（行为保持：纯提取，无判据变化）。
  */
 function normalizeOptionalBindingFields(
   parsed: Partial<RecordBinding>,
@@ -601,33 +603,70 @@ function normalizeOptionalBindingFields(
   | "lastAbandonedRound"
 > {
   return {
-    rootSessionId: typeof parsed.rootSessionId === "string" ? parsed.rootSessionId : undefined,
-    parentRecordId: typeof parsed.parentRecordId === "string" ? parsed.parentRecordId : undefined,
-    depth: typeof parsed.depth === "number" ? parsed.depth : 0,
-    slug: typeof parsed.slug === "string" ? parsed.slug : "",
-    round: typeof parsed.round === "number" ? parsed.round : undefined,
-    model: typeof parsed.model === "string" ? parsed.model : "",
-    thinkingLevel: typeof parsed.thinkingLevel === "string" ? parsed.thinkingLevel : undefined,
+    rootSessionId: strOrUndefined(parsed.rootSessionId),
+    parentRecordId: strOrUndefined(parsed.parentRecordId),
+    depth: numOr(parsed.depth, 0),
+    slug: strOr(parsed.slug, ""),
+    round: numOrUndefined(parsed.round),
+    model: strOr(parsed.model, ""),
+    thinkingLevel: strOrUndefined(parsed.thinkingLevel),
     // 来源身份两字段（H2 S3）：字面量守卫归一（非法/缺省 → undefined = "tool" 语义），
     // 对齐 record-store.readEntryOriginFields 主 entry 重建侧的同名守卫。
-    origin:
-      parsed.origin === "workflow" || parsed.origin === "tool" ? parsed.origin : undefined,
-    parentRunId: typeof parsed.parentRunId === "string" ? parsed.parentRunId : undefined,
+    origin: originOrUndefined(parsed.origin),
+    parentRunId: strOrUndefined(parsed.parentRunId),
     // 终态 usage 快照三字段（H2 A3）：number 守卫（非法/缺省 → undefined = 不投影）。
-    totalTokens: typeof parsed.totalTokens === "number" ? parsed.totalTokens : undefined,
-    turns: typeof parsed.turns === "number" ? parsed.turns : undefined,
-    endedAt: typeof parsed.endedAt === "number" ? parsed.endedAt : undefined,
+    totalTokens: numOrUndefined(parsed.totalTokens),
+    turns: numOrUndefined(parsed.turns),
+    endedAt: numOrUndefined(parsed.endedAt),
     // [u-foundation] 永久会话模型三字段：number / shape 守卫（非法/缺省 → undefined
     // = 不投影，存量 binding 零迁移；lastAbandonedRound 的 null 是合法「无标记」）。
-    epoch: typeof parsed.epoch === "number" ? parsed.epoch : undefined,
-    transcriptRef: isTranscriptRefShape(parsed.transcriptRef) ? parsed.transcriptRef : undefined,
-    lastAbandonedRound:
-      parsed.lastAbandonedRound === null
-        ? null
-        : isAbandonedRoundMarkShape(parsed.lastAbandonedRound)
-          ? parsed.lastAbandonedRound
-          : undefined,
+    epoch: numOrUndefined(parsed.epoch),
+    transcriptRef: transcriptRefOrUndefined(parsed.transcriptRef),
+    lastAbandonedRound: abandonedRoundOrUndefined(parsed.lastAbandonedRound),
   };
+}
+
+// ── 同类守卫归一 helper 族（[metrics-gate cyclo 偿还] 表驱动降）─────────────────
+// 行为保持依据：每 helper 即原 normalizeOptionalBindingFields 对应字段的一元三元
+// 守卫原样提取（判据 / 缺省值 / 求值结果逐字节等价）；参数静态类型沿用 RecordBinding
+// 字段声明（载荷实为 JSON.parse 产物，运行时任意——typeof/shape 守卫照常拦截）。
+
+/** string 守卫（非法/缺省 → undefined）。 */
+function strOrUndefined(v: string | undefined): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+/** number 守卫（非法/缺省 → undefined）。 */
+function numOrUndefined(v: number | undefined): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
+
+/** number 守卫 + 显式缺省值（depth 0 / slug "" 等非 undefined 缺省域）。 */
+function numOr(v: number | undefined, fallback: number): number {
+  return typeof v === "number" ? v : fallback;
+}
+
+/** string 守卫 + 显式缺省值（model "" 等非 undefined 缺省域）。 */
+function strOr(v: string | undefined, fallback: string): string {
+  return typeof v === "string" ? v : fallback;
+}
+
+/** 来源身份字面量守卫（非法/缺省 → undefined = "tool" 语义，H2 S3）。 */
+function originOrUndefined(v: RecordOrigin | undefined): RecordOrigin | undefined {
+  return v === "workflow" || v === "tool" ? v : undefined;
+}
+
+/** transcriptRef shape 守卫（非法/缺省 → undefined = 不投影，u-foundation）。 */
+function transcriptRefOrUndefined(v: TranscriptRef | undefined): TranscriptRef | undefined {
+  return isTranscriptRefShape(v) ? v : undefined;
+}
+
+/** 放弃轮标记守卫（null 是合法「无标记」；非法/缺省 → undefined，§3.2.7 单槽）。 */
+function abandonedRoundOrUndefined(
+  v: AbandonedRoundMark | null | undefined,
+): AbandonedRoundMark | null | undefined {
+  if (v === null) return null;
+  return isAbandonedRoundMarkShape(v) ? v : undefined;
 }
 
 /**

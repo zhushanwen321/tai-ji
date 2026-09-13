@@ -18,11 +18,11 @@ import { configureCore, resetCoreForTests } from "../../../core/host-services.ts
 import type { DiscoveryRoot } from "../../../core/host-services.ts";
 import { clearEngines, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
 import type { EnginePort } from "../port.ts";
-import { getEnginesFilePath, syncEnginesFile } from "../engine-discovery.ts";
+import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 
 /** 密闭发现注入（env:{} 斩 L1 env 根，nodeModuleRoots:[] 斩 L2 宿主 node_modules）——
  * 防宿主环境（打包态 XYZ_AGENT_ENGINE_ROOTS / workspace 链接的引擎包）污染断言。 */
-const HERMETIC_DISCOVERY = { env: {}, nodeModuleRoots: [] } as const;
+const HERMETIC_DISCOVERY: SyncEnginesFileOptions = { env: {}, nodeModuleRoots: [] };
 import {
   ENGINE_ROOTS_ENV,
   deriveNodeModuleRoots,

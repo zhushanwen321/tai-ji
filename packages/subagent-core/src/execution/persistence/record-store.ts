@@ -959,23 +959,39 @@ export class RecordStore {
       byId.set(rec.id, rec);
     }
 
-    // 1.7 [U7 / B-restart store 面] 主 session entry 源：补「磁盘扫描缺员」的
-    // **zcode record**（无子 session 文件不在扫描集，重启后唯一 store 侧可见面）。
-    // 锚恢复 = entry 的 engineHandle.sessionRef（zcode 锚单源，冷查链
-    // resurrectColdRecord 经 transcriptAnchorOf 派生消费）；统计/round 随 entry 投影
-    //（best-effort 过程面，settle 权威值在 binding——markResurrected 水合覆盖）。
-    // 刻意收窄到 engine==='zcode'：pi entry-only record（spawn 窗口 entry-born / 旧
-    // 终态 entry）的 store 可见性语义是 U8 投影面决策域（H4 M1「不重物化」守护），
-    // 不随 zcode 锚恢复顺带变更。manifest 投影契约扩展（engineHandle 下行）归 U8。
+    // [metrics-gate cyclo 偿还] 四源合并按源拆私有 helper（行为保持：合并次序 / 判据 /
+    // 逐字段投影逐字节等价，各 helper 共享 byId 引用原地写入）。
+    this.mergeEntrySourceRecords(byId, rootSessionFilter);
+    this.mergeManifestRecords(byId, rootSessionFilter);
+    this.mergeMemoryRecords(byId, rootSessionFilter);
+    this.rebuildMissingManifests(byId);
+
+    return byId;
+  }
+
+  /** mergedRecords 源 1.7（主 session entry 源，[U7 / B-restart store 面]）。行为保持：
+   *  自 mergedRecords 原样提取，判据与投影零变化。 */
+  private mergeEntrySourceRecords(byId: Map<string, SubagentRecord>, rootSessionFilter: string | undefined): void {
+    // 主 session entry 源：补「磁盘扫描缺员」的 **zcode record**（无子 session 文件
+    // 不在扫描集，重启后唯一 store 侧可见面）。锚恢复 = entry 的
+    // engineHandle.sessionRef（zcode 锚单源，冷查链 resurrectColdRecord 经
+    // transcriptAnchorOf 派生消费）；统计/round 随 entry 投影（best-effort 过程面，
+    // settle 权威值在 binding——markResurrected 水合覆盖）。刻意收窄到
+    // engine==='zcode'：pi entry-only record（spawn 窗口 entry-born / 旧终态 entry）
+    // 的 store 可见性语义是 U8 投影面决策域（H4 M1「不重物化」守护），不随 zcode
+    // 锚恢复顺带变更。manifest 投影契约扩展（engineHandle 下行）归 U8。
     for (const rec of this.entrySourceRecords()) {
       if (byId.has(rec.id)) continue;
       if (rec.engine !== "zcode") continue;
       if (rootSessionFilter !== undefined && rec.rootSessionId !== rootSessionFilter) continue;
       byId.set(rec.id, rec);
     }
+  }
 
-    // 1.5 FR-8: manifest 源补充 orphan 记录。
-    // 优先级：内存 > 磁盘重建 > manifest。manifest 仅补充 session.jsonl 重建失败的记录。
+  /** mergedRecords 源 1.5（manifest 源补充 orphan 记录，FR-8）。行为保持：自
+   *  mergedRecords 原样提取，优先级（内存 > 磁盘重建 > manifest）与损坏处置零变化。 */
+  private mergeManifestRecords(byId: Map<string, SubagentRecord>, rootSessionFilter: string | undefined): void {
+    // manifest 仅补充 session.jsonl 重建失败的记录。
     if (this.manifestStore) {
       for (const manifest of this.readManifestsSync()) {
         if (byId.has(manifest.id)) continue; // 已被磁盘/内存源覆盖
@@ -1001,26 +1017,29 @@ export class RecordStore {
         byId.set(rec.id, rec);
       }
     }
+  }
 
-    // 2. 内存源覆盖（running record 优先——它是活态，比磁盘重建更新鲜）。同样按 session 过滤。
+  /** mergedRecords 源 2（内存源覆盖，running record 优先——它是活态，比磁盘重建
+   *  更新鲜）。行为保持：自 mergedRecords 原样提取，同样按 session 过滤。 */
+  private mergeMemoryRecords(byId: Map<string, SubagentRecord>, rootSessionFilter: string | undefined): void {
     for (const r of this.records.values()) {
       if (rootSessionFilter !== undefined && r.rootSessionId !== rootSessionFilter) continue;
       byId.set(r.id, recordToSubagent(r));
     }
+  }
 
-    // 3. [U4c / G1 惰性通道] manifest 反查 miss 的惰性重建（D5 双通道的惰性腿）：
-    //    磁盘源已重建的 record 若在 manifest 索引缺员（缓存被删/boot 全量轮漏扫），
-    //    此处补建——manifest 是外部 session-reader 的 identity 富字段主路径与指针
-    //    行反查索引，缺员窗口不应等到下次 boot。在途 record（内存持有，本 host 的
-    //    终态写点会落 manifest——「创建时不写」契约保持）不在补建集；每 id 每进程
-    //    只尝试一次（rebuildManifestIfMissing 内 manifestRebuildTried 守卫，防高频
-    //    collectRecords 放大磁盘写）。
+  /** mergedRecords 源 3（[U4c / G1 惰性通道] manifest 反查 miss 的惰性重建，D5 双通道
+   *  的惰性腿）。行为保持：自 mergedRecords 原样提取。磁盘源已重建的 record 若在
+   *  manifest 索引缺员（缓存被删/boot 全量轮漏扫），此处补建——manifest 是外部
+   *  session-reader 的 identity 富字段主路径与指针行反查索引，缺员窗口不应等到下次
+   *  boot。在途 record（内存持有，本 host 的终态写点会落 manifest——「创建时不写」
+   *  契约保持）不在补建集；每 id 每进程只尝试一次（rebuildManifestIfMissing 内
+   *  manifestRebuildTried 守卫，防高频 collectRecords 放大磁盘写）。 */
+  private rebuildMissingManifests(byId: Map<string, SubagentRecord>): void {
     for (const rec of byId.values()) {
       if (this.records.has(rec.id)) continue;
       this.rebuildManifestIfMissing(rec);
     }
-
-    return byId;
   }
 
   /**

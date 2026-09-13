@@ -560,21 +560,55 @@ export class SessionRecords {
  * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
  * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
  * （sessionRef.sessionId 变化）是真值变化，字段级比较天然触发 publish。
+ * [拆分依据] 24 字段单链 && 圈复杂度 24 超 metrics-gate 门禁（≤15），按 record
+ * 语义域拆四组 helper（身份锚 / 执行配置 / 统计 / 状态展示，见下方四个 equals）。
+ * 各组内仍逐字段 ===，字段全集与比较语义不变；比较均为无副作用纯函数，分组与
+ * 短路求值顺序不影响布尔结果（行为保持）。
  */
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return recordIdentityEquals(a, b)
+    && recordRunConfigEquals(a, b)
+    && recordStatsEquals(a, b)
+    && recordStateEquals(a, b)
+}
+
+/** [身份锚组] subagent 身份与会话锚五字段：subagentId / sessionFile / agent / slug / task。 */
+function recordIdentityEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
     && a.sessionFile === b.sessionFile
     && a.agent === b.agent
     && a.slug === b.slug
     && a.task === b.task
-    && a.status === b.status
-    && a.model === b.model
+}
+
+/**
+ * [执行配置组] 模型/思考等级标量 + engine 域三件套（engine id / fallback 留痕 /
+ * handle 锚——后两者经既有浅比较 helper，见上方「engine 域浅比较」注释）。
+ */
+function recordRunConfigEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.model === b.model
     && a.thinkingLevel === b.thinkingLevel
-    && a.turns === b.turns
+    && a.engine === b.engine
+    && engineFallbackEquals(a.engineFallback, b.engineFallback)
+    && engineHandleEquals(a.engineHandle, b.engineHandle)
+}
+
+/** [统计组] 执行统计五标量：轮数 / token / 耗时 / 起止时间戳。 */
+function recordStatsEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.turns === b.turns
     && a.totalTokens === b.totalTokens
     && a.elapsedSeconds === b.elapsedSeconds
     && a.startedAt === b.startedAt
     && a.endedAt === b.endedAt
+}
+
+/**
+ * [状态展示组] 状态 + 终态/展示信号九字段：status / error / closedReason + 轮终
+ * 三字段（result / resumable / chatMode）+ intent / stopReason / origin——publish
+ * 去重的全部「显示形态」信号集中于此组，翻任一字段即触发 publish。
+ */
+function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.status === b.status
     && a.error === b.error
     && a.closedReason === b.closedReason
     && a.result === b.result
@@ -583,9 +617,6 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.intent === b.intent
     && a.stopReason === b.stopReason
     && a.origin === b.origin
-    && a.engine === b.engine
-    && engineFallbackEquals(a.engineFallback, b.engineFallback)
-    && engineHandleEquals(a.engineHandle, b.engineHandle)
 }
 
 /**

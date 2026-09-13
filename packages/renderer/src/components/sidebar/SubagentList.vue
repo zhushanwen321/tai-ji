@@ -249,56 +249,49 @@ function isWaiting(record: SubagentRecord): boolean {
 /** 中断类停因（G2「为什么停」展示）：取消 / 各类被打断，落中性灰。 */
 const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
 
+/** 状态点映射规则：match 谓词 + 语义色 class（design-tokens） */
+type StatusDotRule = {
+  match: (record: SubagentRecord) => boolean
+  cls: string
+}
+
 /**
- * 状态点颜色映射（design-tokens 语义色，三态主分类 + 中断细分）。
+ * 状态点颜色映射（design-tokens 语义色，三态主分类 + 中断细分）——优先级表驱动：
+ * 自上而下首个 match 生效，顺序即语义（挪动条目前先核对该条注释）。
  *  U8b 两态：idle 三分支（stopReason 派生——失败红 / 中断灰 / 已收口绿）；running 失败轮
  *  （A-lite stopReason=failed，markRoundIdle 保持 running-resumable）红点优先于 done/waiting
  *  投影，其余沿用 spinner + done 投影绿 + waiting 半透明 accent；legacy 五值（done/failed/
  *  crashed/cancelled/closed）保留只读兼容（旧 session 显示，S8），closed 经 deriveClosedDisplay 派生。
  */
+const STATUS_DOT_RULES: StatusDotRule[] = [
+  // 失败红（A-lite）：markRoundIdle 失败轮携带 stopReason='failed' 且保持 running-resumable——
+  // 红点先于 done/waiting 投影判据（绿点/半透明点都会误导失败轮）；与 idle failed 同判据同色；
+  // 红点只表达「上一轮失败」，不改变续聊资格语义。
+  { match: (r) => r.status === 'running' && r.stopReason === 'failed', cls: 'bg-danger' },
+  { match: (r) => r.status === 'idle' && r.stopReason === 'failed', cls: 'bg-danger' },
+  // running：spinner 只给 isStreaming（模板层 v-if 渲染，不落此表）；one-shot 轮终投影 done
+  // 用绿点、其余（等续聊/孤儿兜底）用 accent 静态点（进行中的非活跃态，区别于 done 绿/error 红/cancelled 灰）。
+  { match: (r) => r.status === 'running' && isDone(r), cls: 'bg-success' },
+  { match: (r) => r.status === 'running' && isWaiting(r), cls: 'bg-accent opacity-60' },
+  { match: (r) => r.status === 'running', cls: 'bg-accent' },
+  // idle：中断类停因（见 INTERRUPTED_STOP_REASONS）落中性灰；已收口（completed/reopened/无停因）绿。
+  { match: (r) => r.status === 'idle' && r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason), cls: 'bg-neutral-dim opacity-50' },
+  { match: (r) => r.status === 'idle', cls: 'bg-success' },
+  // legacy 五值只读兼容（旧 session 显示，S8）；crashed（子进程崩溃）与 failed 同为异常终态
+  // 共用 danger 色（running 走 spinner 不会到这里，故不混淆）；closed 三分（v4 B-1 统一终态）：
+  // cancelled→中性 / gc 失败（error 有值）→红 / 自然完成·级联关闭→绿。
+  { match: (r) => r.status === 'done', cls: 'bg-success' },
+  { match: (r) => r.status === 'failed' || r.status === 'crashed', cls: 'bg-danger' },
+  { match: (r) => r.status === 'cancelled', cls: 'bg-neutral-dim opacity-50' },
+  { match: (r) => r.status === 'closed' && deriveClosedDisplay(r) === 'cancelled', cls: 'bg-neutral-dim opacity-50' },
+  { match: (r) => r.status === 'closed' && deriveClosedDisplay(r) === 'failed', cls: 'bg-danger' },
+  { match: (r) => r.status === 'closed', cls: 'bg-success' },
+]
+
+/** 状态点颜色查表（映射语义 SSOT 见上方规则表；未知 status 兜底 accent 防无色） */
 function statusDotClass(record: SubagentRecord): string {
-  if (record.status === 'running') {
-    // 失败轮红点（A-lite）：markRoundIdle 失败轮携带 stopReason='failed' 且保持
-    // running-resumable——先于 done/waiting 投影判据（绿点/半透明点都会误导失败轮），
-    // 与 idle 分支 failed 同判据同色；红点只表达「上一轮失败」，不改变续聊资格语义。
-    if (record.stopReason === 'failed') return 'bg-danger'
-    // spinner 只给 isStreaming；one-shot 轮终投影 done 用绿点、其余（等续聊/孤儿兜底）
-    // 用 accent 静态点（进行中的非活跃态，区别于 done 绿/error 红/cancelled 灰）。
-    if (isDone(record)) return 'bg-success'
-    if (isWaiting(record)) return 'bg-accent opacity-60'
-    return 'bg-accent'
-  }
-  if (record.status === 'idle') {
-    if (record.stopReason === 'failed') return 'bg-danger'
-    if (record.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(record.stopReason)) {
-      return 'bg-neutral-dim opacity-50'
-    }
-    return 'bg-success'
-  }
-  switch (record.status) {
-    case 'done':
-      return 'bg-success'
-    case 'failed':
-    case 'crashed':
-      // crashed（子进程崩溃）与 failed 同为异常终态，共用 danger 色。
-      // running 走 spinner 不会到这里，故 crashed 用 bg-danger 不会与 running 混淆。
-      return 'bg-danger'
-    case 'cancelled':
-      return 'bg-neutral-dim opacity-50'
-    case 'closed':
-      // v4 B-1 统一终态：cancelled→中性；gc 失败（error 有值）→红；自然完成/级联关闭→绿
-      switch (deriveClosedDisplay(record)) {
-        case 'cancelled':
-          return 'bg-neutral-dim opacity-50'
-        case 'failed':
-          return 'bg-danger'
-        default:
-          return 'bg-success'
-      }
-    default:
-      // running/idle 已在前置分支返回；保留 accent 兜底防未知值无色
-      return 'bg-accent'
-  }
+  const hit = STATUS_DOT_RULES.find((entry) => entry.match(record))
+  return hit ? hit.cls : 'bg-accent'
 }
 
 /** 格式化 token 数（超过阈值显示 k） */

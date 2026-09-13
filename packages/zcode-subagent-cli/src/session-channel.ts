@@ -272,6 +272,46 @@ export function extractResumeHistory(resumeResult: unknown): ResumedHistoryTurn[
   return turns;
 }
 
+/** token 累加器（has：任一字段命中即置位——与原内联 `has` 变量同语义）。 */
+interface TokenTotalAcc {
+  total: number;
+  has: boolean;
+}
+
+/**
+ * [行为保持] 逐键累加 token 字段（原内联键循环提取）：值为 number 直取，否则
+ * Number() 强转；有限正数才计入（非数值/0/负数/NaN 一律跳过），任一命中置 has
+ * ——与原「无任何 tokens 数据返回 undefined」的口径一致。
+ */
+function accumulateTokenFields(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+  acc: TokenTotalAcc,
+): void {
+  for (const key of keys) {
+    const raw = source[key];
+    const v = typeof raw === "number" ? raw : Number(raw);
+    if (Number.isFinite(v) && v > 0) {
+      acc.total += v;
+      acc.has = true;
+    }
+  }
+}
+
+/**
+ * [行为保持] 单条 assistant 消息 parts 内全部 step-finish tokens 的累加（原内层
+ * parts 循环提取）：input/output 直取，cache 是 record 时再累加 read/write——
+ * 判定与累加顺序与原实现逐条一致。
+ */
+function accumulateStepFinishTokens(parts: unknown[], acc: TokenTotalAcc): void {
+  for (const p of parts) {
+    if (!isRecord(p) || p.type !== "step-finish" || !isRecord(p.tokens)) continue;
+    const t = p.tokens as Record<string, unknown>;
+    accumulateTokenFields(t, ["input", "output"], acc);
+    if (isRecord(t.cache)) accumulateTokenFields(t.cache, ["read", "write"], acc);
+  }
+}
+
 /**
  * 从 session/resume 应答提取历史 token 总量（裁剪预算数据源，§3.2.6 要点 3：
  * 「token 成本经 resume 应答自带的 tokens 数据做裁剪预算」）。口径 = 全部
@@ -280,33 +320,12 @@ export function extractResumeHistory(resumeResult: unknown): ResumedHistoryTurn[
  */
 export function extractResumeTotalTokens(resumeResult: unknown): number | undefined {
   if (!isRecord(resumeResult) || !Array.isArray(resumeResult.messages)) return undefined;
-  let total = 0;
-  let has = false;
+  const acc: TokenTotalAcc = { total: 0, has: false };
   for (const m of resumeResult.messages) {
     if (!isRecord(m) || messageRole(m) !== "assistant" || !Array.isArray(m.parts)) continue;
-    for (const p of m.parts) {
-      if (!isRecord(p) || p.type !== "step-finish" || !isRecord(p.tokens)) continue;
-      const t = p.tokens as Record<string, unknown>;
-      for (const key of ["input", "output"] as const) {
-        const v = typeof t[key] === "number" ? t[key] : Number(t[key]);
-        if (Number.isFinite(v) && v > 0) {
-          total += v;
-          has = true;
-        }
-      }
-      const cache = isRecord(t.cache) ? t.cache : undefined;
-      if (cache !== undefined) {
-        for (const key of ["read", "write"] as const) {
-          const v = typeof cache[key] === "number" ? cache[key] : Number(cache[key]);
-          if (Number.isFinite(v) && v > 0) {
-            total += v;
-            has = true;
-          }
-        }
-      }
-    }
+    accumulateStepFinishTokens(m.parts, acc);
   }
-  return has ? total : undefined;
+  return acc.has ? acc.total : undefined;
 }
 
 // ============================================================
