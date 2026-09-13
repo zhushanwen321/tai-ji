@@ -47,13 +47,6 @@ const DOC_MODULE_MAP = {
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
   // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
-  'docs/design/subagent-agent-end-recovery-replay.md': [
-    'packages/pi-subagent-cli/src',
-    'packages/subagent-core/src/execution',
-    'packages/subagent-core/src/orchestration/execute-agent-call.ts',
-    'packages/subagent-engine-sdk/src/protocol/engine-protocol.ts',
-    'scripts/check-doc-symbol-drift.mjs',
-  ],
 }
 
 /** 环境变量名白名单（非导出符号，文档合法引用）：项目（XYZ_/PI_）与运行平台（NODE_/ELECTRON_/ZCODE_）env 前缀 */
