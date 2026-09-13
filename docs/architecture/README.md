@@ -17,12 +17,10 @@ docs/architecture/
 ├── data-source-registry.md              # 数据源登记表（SSOT 索引）
 ├── integrity-hardening.md               # 架构完整性加固（进程生命周期自愈/安全不变量机制化）
 ├── extension-gui-protocol.md            # Extension GUI 渲染协议规范（含 §13 决策日志 / §15 挂载现状）
-├── architecture-overview.drawio/.png    # 全局架构图源文件与导出
-├── subsystems/                          # 子系统架构（plugin/）
-└── research/                            # 架构调研参考（pi extension RPC/TUI 通道清单，非 UI）
+└── subsystems/                          # 子系统架构（plugin/）
 ```
 
-> [HISTORICAL] `history/` 历史归档目录已于 2026-09-13 删除（归档即删除策略，git 可追溯）。
+> [HISTORICAL] `history/` 历史归档目录已于 2026-09-13 删除（归档即删除策略，git 可追溯）。`research/` 调研与 `architecture-overview` 图源同日删除（零活引用，git 可追溯）。
 
 > [HISTORICAL] 已散出的活文档：`renderer-rebuild/ws-client-invariants.md` 规格已沉入 `packages/core/src/transport/__tests__/ws-client.invariants.test.ts` 头部注释（2026-09-13）；`refactor-2026-08/05-extensions.md`（extension 冻结候选设计，⛔ 解冻后实施依据，非归档）已移至 [`../todo/extensions-refactor-candidates-2026-08.md`](../todo/extensions-refactor-candidates-2026-08.md)（含 2026-09-13 逐项复核状态块）。
 
