@@ -185,7 +185,7 @@ graph LR
 | 04-U4 | committed | 1 | 402 绿（+4 富字段用例）；薄包装/enrichRefs 代码面零命中；G5⑤ 回写齐 |
 | 04-U5 | committed | 1 | 406 绿（+4）；两 action 一致性 by construction；formatOutlineText 零命中 |
 | 04-U6 | committed | 1 | 406 绿（零测试改动）；RESULT_ACTION_DEPS 零命中；ResultActionDeps 3 成员 |
-| 04-U7 | pending | 0 | - |
+| 04-U7 | committed | 1 | 406 绿；find 专用 readTailIdentityForMatch（56 行）删除复用单实现；畸形行差异注释登记（subagent 中途撞速率限制，主 agent 接替验证收尾） |
 | 04-U8 | pending | 0 | - |
 | 04-U9 | pending | 0 | - |
 | 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |

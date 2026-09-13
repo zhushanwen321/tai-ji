@@ -9,7 +9,12 @@ import {
   type SessionRoot,
   type SessionRootSignals,
 } from './roots.js'
-import { listRecordManifests, extractSessionIdFromFilename, type RecordManifest } from './subagents.js'
+import {
+  listRecordManifests,
+  extractSessionIdFromFilename,
+  readTailIdentity,
+  type RecordManifest,
+} from './subagents.js'
 
 /**
  * M2 discovery 发现层：按 query 定位 session（design §3.3 D-3 + §3.4 find action）。
@@ -230,59 +235,6 @@ interface Matched extends Candidate {
 // U5：subagent task/slug/agentName 匹配（manifest 索引 + P-fallback identity 回退）
 // ============================================================
 
-/** P-fallback 尾行 identity 读取窗口（同 subagents.ts，task 文本可达数 KB）。 */
-const TAIL_READ_BYTES = 65536
-
-/**
- * 读 subagent 文件尾部（最后 64KB）找 subagent-identity entry，返回 task/slug/agent。
- *
- * find 的 P-fallback 路径（场景 A：subagent 无 manifest，本机 11.5%）：manifest 索引未命中时
- * 读尾行 identity 取 task/slug/agent 做 query 子串匹配。与 subagents.ts 的 readTailIdentity
- * 同源（64KB 窗口 + lastIndexOf 定位），但是 find 专用最小版（只取 task/slug/agent，不要
- * rootSessionId——find 候选已有 header.id）。不导出，不碰 subagents.ts（w3 冻结）。
- */
-async function readTailIdentityForMatch(
-  path: string,
-  size: number,
-): Promise<{ task?: string; slug?: string; agent?: string } | undefined> {
-  if (size === 0) return undefined
-  let fh: FileHandle | undefined
-  try {
-    fh = await open(path, 'r')
-    const len = Math.min(TAIL_READ_BYTES, size)
-    const buf = Buffer.alloc(len)
-    await fh.read(buf, 0, len, Math.max(0, size - len))
-    const text = buf.toString('utf8')
-    const idx = text.lastIndexOf('subagent-identity')
-    if (idx < 0) return undefined
-    const lineStartSearch = text.lastIndexOf('\n', idx)
-    if (lineStartSearch < 0 && size > len) return undefined
-    const start = lineStartSearch < 0 ? 0 : lineStartSearch + 1
-    let end = text.indexOf('\n', idx)
-    if (end < 0) end = text.length
-    const line = text.slice(start, end)
-    let raw: unknown
-    try {
-      raw = JSON.parse(line)
-    } catch {
-      return undefined
-    }
-    const data = (raw as Record<string, unknown> | undefined)?.data as
-      | Record<string, unknown>
-      | undefined
-    if (!data) return undefined
-    return {
-      task: typeof data.task === 'string' ? data.task : undefined,
-      slug: typeof data.slug === 'string' ? data.slug : undefined,
-      agent: typeof data.agent === 'string' ? data.agent : undefined,
-    }
-  } catch {
-    return undefined
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-}
-
 /**
  * 建 sessionId→RecordManifest 索引（U5：subagent task/slug/agentName 匹配用）。
  *
@@ -325,8 +277,11 @@ async function matchSubagentMetadata(
       (manifest.agentName?.includes(query) ?? false)
     )
   }
-  // P-fallback：manifest 索引未命中 → 读尾行 identity 回退
-  const ident = await readTailIdentityForMatch(candidate.meta.path, candidate.meta.size)
+  // P-fallback：manifest 索引未命中 → 读尾行 identity 回退。E8（ext-simplify-04）：
+  // 复用 subagents.ts 的 readTailIdentity 单实现，取 task/slug/agent 子集。行为差异 =
+  // 缺 rootSessionId 的畸形 identity 行从「可匹配」变「不匹配」（m0 契约外数据，
+  // design §3.3 E8 登记为可接受）。
+  const ident = await readTailIdentity(candidate.meta.path, candidate.meta.size)
   if (!ident) return false
   return (
     (ident.task?.includes(query) ?? false) ||
