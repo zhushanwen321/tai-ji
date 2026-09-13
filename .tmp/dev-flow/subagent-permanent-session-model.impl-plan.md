@@ -150,7 +150,7 @@ graph TD
 2. ~~u7a 推送链 3 处活路径未补推送~~ 已处理（U5 随新语义统一接线完毕）。
 3. zcode -32031 上游缺陷：U6 选型已绕开（历史注入），若上游修复可升级原地 resume（设计 K6）。
 4. 探针产物 .tmp/probe/*.mjs 不进 git（gitignore），U6 集成测试需自含协议驱动代码。
-5. ~~relay-registry.ts killRelayChild 同型 pi 杀链~~ 已处理（阶段 3 修复 a4f55afc3：收敛为 pi-rpc killPiProcess 薄壳，SIGCONT 全仓唯一命中 pi-rpc 单源，S7 双轨清零）。
+5. ~~relay-registry.ts killRelayChild 同型 pi 杀链~~ 已处理（阶段 3 修复 a4f55afc3：收敛为 pi-rpc killPiProcess 薄壳，S7 双轨清零——kill('SIGCONT') 域内唯一命中 pi-rpc 单源；sweepOrphanChildren 的 process.kill(pid,'SIGCONT') 为 pid 级孤儿收割不同机制，a4f55afc3 提交信息已显式排除出收敛范围）。
 6. ~~reap-orphan-pi.ts:21/204 注释引用旧名 buildPiArgs（现为 pi-rpc buildPiMainAgentArgs）~~ 已处理（U9 清扫，顺带同文件 176/195 的 appendSkillAndExtensionArgs 同类漂移一并修正——该名已随 U1 消亡，现名 pi-rpc appendSkillArgs/appendExtensionArgs）。
 
 **变更历史**：
