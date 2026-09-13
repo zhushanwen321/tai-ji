@@ -134,7 +134,8 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     // a1 text 引用同一节点（keyed v-for 按 flatIndex=0 复用），textContent 无丢失
     expect(wrapper.find('.trace .trace-blk > div').exists()).toBe(true)
     expect(wrapper.find('.trace .trace-blk > div').element).toBe(a1TextEl)
-    expect(a1TextEl.textContent).toBe('我先读文件')
+    // U2 起 text 块行尾含时刻槽（text-time-slot），textContent 含时刻文本——断言「正文无丢失」用 toContain
+    expect(a1TextEl.textContent).toContain('我先读文件')
     // 相对顺序不变：a1 text 在 tool 前
     const blocksT2 = wrapper.findAll('.trace .trace-blk')
     expect(blocksT2.length).toBe(2)

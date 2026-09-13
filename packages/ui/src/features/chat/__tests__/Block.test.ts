@@ -15,7 +15,7 @@ import { Block } from '@xyz-agent/ui'
 import type { MessageStatus } from '@xyz-agent/shared'
 import { MdStub, AnsiStub, makeToolCall, mountToolBlock } from './helpers'
 
-function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string } = {}) {
+function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string; messageTimestamp?: number } = {}) {
   return mount(Block, {
     props: {
       type: 'text',
@@ -526,5 +526,75 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
     // 展开区不渲染（isBashTool 分支不命中非 bash 工具）
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     expect(wrapper.find('.group\\/content').exists()).toBe(false)
+  })
+})
+
+/* ── [chat-flow-timestamp U2] Block 行尾时间槽（设计 §3 A3/A4）──
+ * A3 tool 块行尾 `耗时 · 时刻`：完成态耗时 = formatDuration(end - start)（从实现读：
+ * formatDuration(2000) = (2000/1000).toFixed(0)+'s' = '2s'，非 '2.0s'）；endTime 缺失只显时刻；
+ * running 态耗时 span 染 text-accent（实时跳动）。A4 text/thinking 块行尾只显所属 message 时刻；
+ * messageTimestamp 缺失整槽不渲染（数据缺口降级语义，设计 §2.5）。
+ * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4）', () => {
+  function mountThinkingTimeBlock(over: Record<string, unknown> = {}) {
+    // collapsed 显式传 undefined（同 M3 组：键缺失会吃掉 `?? true` 的 fallback）
+    return mount(Block, {
+      props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-time', collapsed: undefined, ...over },
+      global: { stubs: { MarkdownRenderer: MdStub } },
+    })
+  }
+
+  it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s·HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
+    const slot = wrapper.find('[data-testid="tool-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    // 剥掉全部空白后整串比对：耗时 + · 分隔 + 时刻，顺序结构同时锁定
+    expect(slot.text().replace(/\s+/g, '')).toBe(`2s·${clockOf(1000)}`)
+  })
+
+  it('A3 endTime 缺失 → 槽内只有时刻无耗时（数据缺口降级，设计 §2.5）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: undefined }))
+    const slot = wrapper.find('[data-testid="tool-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+  })
+
+  it('A3 status=running → 耗时 span 染 text-accent（实时跳动态，end>start 静态分支不走）', () => {
+    // endTime 显式剔除：确保 accent 来自 running 分支而非静态耗时
+    const wrapper = mountToolBlock(makeToolCall({ status: 'running', startTime: 1000, endTime: undefined }))
+    const slot = wrapper.find('[data-testid="tool-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    // 槽内第一个 span 是耗时 span（toolDuration 非空才渲染）
+    const durSpan = slot.find('span')
+    expect(durSpan.exists()).toBe(true)
+    expect(durSpan.classes()).toContain('text-accent')
+    expect(durSpan.text()).not.toBe('')
+  })
+
+  it('A4 text 块 messageTimestamp=1000 → text-time-slot 文本 = formatClock(1000)（本地时刻）', () => {
+    const wrapper = mountTextBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="text-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+  })
+
+  it('A4 thinking 块 messageTimestamp=1000 → thinking-time-slot 文本 = formatClock(1000)', () => {
+    const wrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="thinking-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+  })
+
+  it('A4 messageTimestamp 缺失 → text/thinking 两槽均不渲染（异常降级整槽隐藏）', () => {
+    const textWrapper = mountTextBlock({})
+    expect(textWrapper.find('[data-testid="text-time-slot"]').exists()).toBe(false)
+    const thinkWrapper = mountThinkingTimeBlock({})
+    expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').exists()).toBe(false)
   })
 })

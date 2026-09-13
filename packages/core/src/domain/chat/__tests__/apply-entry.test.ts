@@ -435,8 +435,8 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
     )
     expect(first.messages[0].toolCalls![0].output).toBe('first-version')
 
-    // 第二条同 id 帧（message_end 载体，内容版本不同）：整体 no-op——不重放回填
-    //（保留首条版本）、state.messages 引用不变、簿记集合引用不变（copy-on-write 纯度）
+    // 第二条同 id 帧（message_end 载体，内容版本不同）：内容不重放回填
+    //（保留首条版本）；endTime 例外走 U3 last-wins（见下方断言）；簿记集合引用不变
     const messagesBefore = first.messages
     const deliveredBefore = first.deliveredToolResultIds
     const second = applyEntry(
@@ -450,7 +450,11 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
       }),
     )
     expect(second.messages[0].toolCalls![0].output).toBe('first-version')
-    expect(second.messages).toBe(messagesBefore)
+    // [chat-flow-timestamp U3] endTime last-wins：第二帧（权威 pi 时刻）覆盖首条客户端时钟；
+    // 其余字段保持首条。覆盖产新 message 引用（copy-on-write：输入零污染，其余元素保引用）
+    expect(second.messages[0].toolCalls![0].endTime).toBe(3000)
+    expect(second.messages).not.toBe(messagesBefore)
+    expect(second.messages.length).toBe(messagesBefore.length)
     expect(second.deliveredToolResultIds).toBe(deliveredBefore)
     expect(second.orphanToolResults).toHaveLength(0)
 

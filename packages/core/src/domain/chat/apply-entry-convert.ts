@@ -360,6 +360,12 @@ export function computeToolCallFill(body: PiMessageBody): {
   images?: Array<{ data: string; mimeType: string }>
   /** [D6-⑧] output/outputRaw 被 64KB 累积截断裁剪（ToolCall.outputTruncated 回填源）。 */
   outputTruncated: boolean
+  /**
+   * [chat-flow-timestamp U1] 工具结束时刻 = toolResult body.timestamp（pi 落盘毫秒时刻）。
+   * 缺失/非 number 时不设字段——ToolCall.endTime 此前 live 有（registry overlay Date.now()）、
+   * reload 缺（live≠reload 漂移点），本字段让两通路经同一 fill 点同源回填（权威值 = pi 时刻）。
+   */
+  endTime?: number
 } {
   const { output, outputRaw, images } = normalizePiToolResult(body)
   // [D6-⑧] 累积态条目级截断：live（applyEntryFrame）与 reload（replayEntries）共用本点，
@@ -378,5 +384,9 @@ export function computeToolCallFill(body: PiMessageBody): {
     details,
     images,
     outputTruncated: outputT.truncated || (outputRawT?.truncated ?? false),
+    // [chat-flow-timestamp U1] endTime 回填源 = toolResult body.timestamp；缺失/非 number
+    // 不设字段（旧数据/畸形 body 无耗时语义——设计 §2.5 数据缺口语义「只显时刻不显耗时」）。
+    // typeof 运行时守卫：pi JSONL 是外部宽形态数据（usageField 同款防御模式）。
+    ...(typeof body.timestamp === 'number' && { endTime: body.timestamp }),
   }
 }

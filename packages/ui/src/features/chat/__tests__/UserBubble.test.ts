@@ -8,6 +8,8 @@
  *   === segmentsToText(同段)（含 badge 段时不等价的两条并存原因——边界空格不显式渲染 +
  *   展示投影 ≠ 序列化——见本文件下方 [MF-1] 组注释，文件头不复述原因以免口径分叉）
  * - [MF-2] submitEdit 编辑含命令的消息后 prompt 中命令只出现一次
+ * - [chat-flow-timestamp U2] turn.user.timestamp 行尾时刻（设计 §3 A4）：展示态 user-timestamp 槽显本地时刻；
+ *   编辑态不渲染该槽
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
@@ -501,5 +503,44 @@ describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
     await submitDraft(wrapper, '改后的正文')
     expect(prompts).toEqual(['改后的正文'])
     expect(prompts[0]!.split('<xyz-skill').length - 1).toBe(0)
+  })
+})
+
+/* ── [chat-flow-timestamp U2] UserBubble 行尾时刻（设计 §3 A4）──
+ * turn.user.timestamp 有值 → 气泡左侧 user-timestamp 槽显本地时刻；编辑态（textarea 分支）
+ * 与展示态是 v-if / v-else 互斥分支，编辑态下整个展示分支（含时间槽）被替换。
+ * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
+  // 固定 epoch（非 Date.now()）：失败时可复现的确定值
+  const USER_TS = 1700000000000
+
+  function makeTurnWithTs(): MessageTurn {
+    return makeTurn({
+      user: { id: 'u1', role: 'user', content: 'hello world', status: 'complete', timestamp: USER_TS },
+    })
+  }
+
+  it('turn.user.timestamp 有值 → user-timestamp 槽文本 = formatClock(该值)（本地时刻）', () => {
+    const wrapper = mountBubble({ turn: makeTurnWithTs() })
+    const slot = wrapper.find('[data-testid="user-timestamp"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(USER_TS))
+  })
+
+  it('编辑态不渲染 user-timestamp 槽（v-if/v-else 互斥：编辑分支替换含时间槽的展示分支）', async () => {
+    // 编辑态触发与上方编辑态组同款：canEdit=true + 非 sessionEditable + hover actions 第 2 个按钮
+    // （该触发在本测试环境轻量可行，故直测而非仅靠 v-if 语义说明）
+    const wrapper = mountBubble({ turn: makeTurnWithTs(), canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user .opacity-0')
+    await actions.findAll('button')[1]!.trigger('click')
+    // 已进入编辑态（textarea 渲染）
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="user-timestamp"]').exists()).toBe(false)
   })
 })

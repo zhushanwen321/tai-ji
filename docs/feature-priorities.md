@@ -80,6 +80,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 快捷键与 side drawer | 全局快捷键、文件预览/diff/git tab（testing 05） |
 | session 导入 | ImportSessionDialog |
 | 后台任务侧边栏 | background task 展示（testing 14） |
+| 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 
 ## 5. P3 — 特定人群/低影响
 

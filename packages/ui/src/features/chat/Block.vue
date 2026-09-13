@@ -39,6 +39,8 @@
             </span>
           </span>
           <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-sm)] text-neutral-dim" :class="thinkingExpanded ? 'invisible' : ''">{{ previewText }}</span>
+          <!-- thinking 块行尾时刻 -->
+          <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
         <!-- 展开内容区：copy 按钮在左上角，始终可见 -->
         <Transition name="block-expand">
@@ -66,7 +68,8 @@
          [M2 error-visibility] status==='error' 形态判定（SSOT §3.3.2）：
          纯 error（无 msg.error，errorText 即全文）→ 整条 danger（AlertCircle + text-danger）；
          追加形态（msg.error 有值）→ content 崩溃前正常正文保持原色 + msg.error 独立 danger 行。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="pb-2 text-[length:var(--text-base)] leading-7" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="flex items-start gap-2 pb-2 text-[length:var(--text-base)] leading-7" :class="textColorClass">
+      <div class="min-w-0 flex-1">
       <!-- 纯 error：AlertCircle + 整条 danger（正文 text-danger，由 textColorClass 承担） -->
       <div v-if="isPureError" class="flex items-start gap-1.5">
         <AlertCircle data-testid="block-text-error-icon" class="mt-1.5 size-3.5 shrink-0 text-danger" />
@@ -82,6 +85,9 @@
           <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
         </div>
       </template>
+      </div>
+      <!-- text 块行尾时刻 -->
+      <span v-if="messageTimestamp" class="w-28 shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- tool_call 块：默认 1 行收起（streaming/running 也收起），header 含摘要，点击展开详情。
@@ -136,6 +142,12 @@
             </span>
           </span>
           <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="{ invisible: toolExpanded && isBashTool }">· {{ shortenForHeader(argPath) }}</span>
+          <!-- tool 块行尾槽：耗时 · 时刻 -->
+          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums" data-testid="tool-time-slot">
+            <span v-if="toolDuration" :class="isRunning ? 'text-accent' : 'text-neutral-dim'">{{ toolDuration }}</span>
+            <span v-if="toolDuration" class="text-neutral-faint">·</span>
+            <span class="text-neutral-dim">{{ formatClock(tool.startTime) }}</span>
+          </span>
         </div>
         <Transition name="block-expand">
           <!-- 内容区：统一 group 包裹，copy 按钮浮在左上角复制全部内容 -->
@@ -209,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@xyz-agent/extension-protocol'
@@ -222,7 +234,7 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatDuration, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatDuration, formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @xyz-agent/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -259,6 +271,8 @@ const props = defineProps<{
   status?: MessageStatus
   /** 追加形态错误文本（assistant Message.error 字段，status==='error' 时有值）。 */
   error?: string
+  /** 所属 assistant message 时刻（epoch ms，行尾时刻显示） */
+  messageTimestamp?: number
   /** 所属 session（透传给 MarkdownRenderer 供文件路径打开 DetailPane 用） */
   sessionId?: string | null
 }>()
@@ -318,6 +332,35 @@ const textColorClass = computed(() => {
 
 const isFailed = computed(() => props.tool?.status === 'error')
 const isRunning = computed(() => props.tool?.status === 'running')
+
+/** running 工具耗时实时跳动：仅 isRunning 期间挂载 interval，onUnmounted 清理，页面 hidden 停 tick */
+const nowTs = ref(Date.now())
+let liveDurTimer: ReturnType<typeof setInterval> | null = null
+function startLiveDurTick(): void {
+  if (liveDurTimer) return
+  nowTs.value = Date.now()
+  liveDurTimer = setInterval(() => { nowTs.value = Date.now() }, 100)
+}
+function stopLiveDurTick(): void {
+  if (liveDurTimer) { clearInterval(liveDurTimer); liveDurTimer = null }
+}
+watch(isRunning, (running) => {
+  if (running) startLiveDurTick()
+  else stopLiveDurTick()
+}, { immediate: true })
+onUnmounted(() => { stopLiveDurTick() })
+
+/** tool 块行尾耗时（running 实时算，completed 用 startTime/endTime） */
+const toolDuration = computed(() => {
+  const start = props.tool?.startTime
+  if (typeof start !== 'number') return ''
+  if (isRunning.value) {
+    return formatDuration(nowTs.value - start)
+  }
+  const end = props.tool?.endTime
+  if (typeof end !== 'number' || end <= start) return ''
+  return formatDuration(end - start)
+})
 /* end_not_received（流结束未收到 tool_call_end，进程崩溃/WS 断连）原单独分支已并入
  * completed 的 neutral-mid 置灰（同为非 running 非失败的中性态，无需视觉区分）。 */
 const toolName = computed(() => props.tool?.toolName ?? 'tool')
@@ -378,7 +421,6 @@ const { metaItems } = useToolMeta({
   tool: computed(() => props.tool),
   toolName,
   isFailed,
-  formatDuration,
 })
 
 /** bash 展开后去掉行数统计（命令+output 已完整展示，行数无参考价值） */

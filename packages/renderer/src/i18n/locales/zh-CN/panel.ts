@@ -38,6 +38,7 @@ export default {
     copy: '复制',
     working: '工作中',
     worked: '已工作',
+    inProgress: '（进行中）',
     expandReasoning: '展开推理',
     collapseReasoning: '收起推理',
     toolFailed: '（失败）',

@@ -40,8 +40,11 @@ export function useTurnElapsed(
   getIsStreaming: () => boolean,
   getIsSessionActive?: () => boolean,
   onComplete?: () => void,
-): { elapsed: Ref<string>; elapsedSecs: Ref<number> } {
+): { elapsed: Ref<string>; elapsedSecs: Ref<number>; firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> } {
   const elapsedSecs = ref(0)
+  const firstTs = ref(0)
+  const lastTs = ref(0)
+  const isLive = ref(getIsStreaming())
   const elapsed = ref(formatElapsed())
   let elapsedTimer: ReturnType<typeof setInterval> | null = null
 
@@ -55,8 +58,12 @@ export function useTurnElapsed(
     const as = getAssistants()
     if (as.length === 0) {
       elapsedSecs.value = 0
+      firstTs.value = 0
+      lastTs.value = 0
       return '0s'
     }
+    firstTs.value = as[0].timestamp
+    lastTs.value = as[as.length - 1].timestamp
     const first = as[0].timestamp
     const end = getIsStreaming() ? Date.now() : as[as.length - 1].timestamp
     const secs = Math.max(1, Math.round((end - first) / MS_PER_SEC))
@@ -137,6 +144,7 @@ export function useTurnElapsed(
   watch(
     () => getIsStreaming(),
     (nw, old) => {
+      isLive.value = nw
       if (old && !nw) {
         // 文本流完：停表定格
         stopElapsedTimer()
@@ -166,5 +174,5 @@ export function useTurnElapsed(
     stopElapsedTimer()
   })
 
-  return { elapsed, elapsedSecs }
+  return { elapsed, elapsedSecs, firstTs, lastTs, isLive }
 }

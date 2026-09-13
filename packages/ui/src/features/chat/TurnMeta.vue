@@ -32,6 +32,10 @@
         <span class="lbl" :class="isWorkingTurn ? 'text-accent' : 'text-neutral-mid'">{{ statusLabel }}</span>
         <span class="elapsed ml-1 font-mono font-medium tracking-[0.01em]" :class="elapsedColor">{{ elapsed }}</span>
       </span>
+      <!-- Turn 区间：首末时刻 -->
+      <span v-if="firstTs > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
+        · {{ formatClock(firstTs) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(lastTs) }}
+      </span>
       <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
       <ChevronRight
         v-if="turn.hasFoldable && !isWorkingTurn"
@@ -60,6 +64,7 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@xyz-agent/core/domain/chat'
 import { useChatViewDeps } from './chat-view-deps'
+import { formatClock } from './format-utils'
 
 const props = defineProps<{
   turn: MessageTurn
@@ -76,6 +81,12 @@ const props = defineProps<{
   turnKey: string
   /** session id（透传保留） */
   sessionId: string
+  /** turn 首条 assistant 时刻（epoch ms） */
+  firstTs: number
+  /** turn 末条 assistant 时刻（epoch ms） */
+  lastTs: number
+  /** 是否正在流式生成 */
+  isLive: boolean
 }>()
 
 // turn 展开/折叠经 ChatViewDeps inject（renderer 壳绑 useTurnExpansion store）

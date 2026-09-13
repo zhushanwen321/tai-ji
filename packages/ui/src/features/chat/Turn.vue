@@ -44,6 +44,9 @@
         :tool-count="toolCount"
         :elapsed="elapsed"
         :elapsed-secs="elapsedSecs"
+        :first-ts="firstTs"
+        :last-ts="lastTs"
+        :is-live="isLive"
         :turn-index="turn.index"
         :turn-key="turnStableId(turn)"
         :session-id="sessionId"
@@ -84,6 +87,7 @@
             fb.assistantStatus,
             fb.block.kind === 'thinking' ? (fb.block.ref as ThinkingBlock).collapsed : undefined,
             assistantById.get(fb.assistantId)?.error,
+            assistantById.get(fb.assistantId)?.timestamp,
           ]"
           :type="fb.block.kind"
           :content="fb.block.kind === 'text' ? (fb.block.ref as string) : fb.block.kind === 'thinking' ? (fb.block.ref as ThinkingBlock).content : undefined"
@@ -94,6 +98,7 @@
           :streaming="fb.assistantStatus === 'streaming'"
           :status="fb.assistantStatus"
           :error="assistantById.get(fb.assistantId)?.error"
+          :message-timestamp="assistantById.get(fb.assistantId)?.timestamp"
           :session-id="sessionId"
         />
         <!-- streaming 光标：turn 内容区末尾独立元素（跟在所有 block 后，位置稳定不受 block 增删/折叠态影响）。
@@ -285,7 +290,7 @@ function onToggleTakeover(): void {
 /**
  * 工作耗时 live 计时。
  */
-const { elapsed, elapsedSecs } = useTurnElapsed(
+const { elapsed, elapsedSecs, firstTs, lastTs, isLive } = useTurnElapsed(
   () => props.turn.assistants,
   () => isStreaming.value,
   () => sessionActive.value,

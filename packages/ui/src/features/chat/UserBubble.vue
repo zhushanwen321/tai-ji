@@ -24,8 +24,15 @@
     <!-- 展示态气泡 -->
     <div
       v-else
-      class="max-w-[85%] min-w-0 break-words rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
+      class="flex items-start justify-end gap-2"
     >
+      <!-- 用户时刻（气泡左侧） -->
+      <span v-if="turn.user?.timestamp" class="shrink-0 self-start pt-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="user-timestamp">
+        {{ formatClock(turn.user.timestamp) }}
+      </span>
+      <div
+        class="max-w-[85%] min-w-0 break-words rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
+      >
       <template v-for="(seg, i) in orderedSegments" :key="i">
         <!-- slash 段与后继段之间的边界空格：slash 段按纯文本渲染（D4-d，无 badge、
              无 mr-1 间距），空格必须显式渲染才与 segmentsToText 产物逐字一致。规则复用
@@ -95,6 +102,7 @@
         <MarkdownRenderer v-else-if="seg.type === 'text' && seg.text" :content="seg.text" :session-id="sessionId" />
       </template>
       <MarkdownRenderer v-if="!userSegments.length && typeof turn.user?.content === 'string'" :content="turn.user!.content" :session-id="sessionId" />
+      </div>
     </div>
     <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示。 -->
     <div
@@ -139,6 +147,7 @@ import type { Segment } from '@xyz-agent/shared'
 import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder } from '@xyz-agent/shared'
 import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild'
 import { useCopy } from './composables/useCopy'
+import { formatClock } from './format-utils'
 import { SLASH_ICON_COMPONENTS } from './slash-icons'
 import { useChatViewDeps } from './chat-view-deps'
 import ImageThumb from './ImageThumb.vue'

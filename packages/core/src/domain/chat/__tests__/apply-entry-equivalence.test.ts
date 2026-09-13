@@ -680,6 +680,34 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
       { type: 'text', text: '\n收尾正文' },
     ])
   })
+
+  it('E8: toolCall endTime 回填（chat-flow-timestamp A5/A7）——非对称时钟下 live（双帧）≡ replay（单帧），值 = 权威 body.timestamp', () => {
+    // 真实时钟形态（Gate A 实测暴露）：live 侧 tool_call_end 重构帧先到（body.timestamp =
+    // 客户端时钟 Date.now 语义，取 2999），后到 message_end 携带 pi 权威落盘时刻（3000）；
+    // R2-S1 去重首条 wins 内容，但 endTime 走 U3 last-wins 例外 → 终态 = 权威值；
+    // replay 侧：单条持久化 entry（权威 3000）。两通路终态 endTime 相等——历史 reload
+    // 耗时持久的 core 侧构造性保证。
+    const assistant: PiEntry = { type: 'message', id: 'asst-e8', parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'toolCall', id: 'tc-e8', name: 'bash', arguments: { cmd: 'ls' } }], timestamp: 2000 } }
+    const toolCallEndFrame: PiEntry = { type: 'message', id: 'tce-e8', parentId: null, timestamp: ts(2999), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 2999 } }
+    const messageEndFrame: PiEntry = { type: 'message', id: 'me-e8', parentId: null, timestamp: ts(3000), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 3000 } }
+    const replayEntry: PiEntry = { type: 'message', id: piId(20), parentId: null, timestamp: ts(3000), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 3000 } }
+    const liveState = normalizeIds(replayEntries([assistant, toolCallEndFrame, messageEndFrame]))
+    const replayState = normalizeIds(replayEntries([
+      { type: 'message', id: 'asst-e8', parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'toolCall', id: 'tc-e8', name: 'bash', arguments: { cmd: 'ls' } }], timestamp: 2000 } },
+      replayEntry,
+    ]))
+    const liveTc = liveState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-e8'))!.toolCalls![0]!
+    const replayTc = replayState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-e8'))!.toolCalls![0]!
+    // 显式值断言（用户可见字段级：UI 耗时展示的数据源）：endTime = 权威值（非客户端时钟渗入）
+    expect(liveTc.endTime).toBe(3000)
+    expect(replayTc.endTime).toBe(3000)
+    expect(liveTc.endTime).toBe(replayTc.endTime)
+    // startTime 来自 assistant body.timestamp（既有语义，与 endTime 异源不同值）
+    expect(liveTc.startTime).toBe(2000)
+    expect(replayTc.startTime).toBe(2000)
+    // 全量 state 归一 deep-equal（endTime 在内逐字段一致）
+    expect(liveState).toEqual(replayState)
+  })
 })
 
 // ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 表述修正 + §4 AC-7）──
