@@ -151,7 +151,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
       │    ├─ registry.ts    id → factory（globalThis slot 单例）
       │    ├─ routing.ts     三层优先级 + probe + fallback（:116-198）+ pi 同步短路（:262-278）
       │    ├─ engine-discovery.ts  registry → <agentDir>/subagents/engines.json
-      │    ├─ common/        capability-gate / schema-emulation / persona-router /
+      │    ├─ common/        capability-gate / schema-emulation / kill-chain /
       │    │                 kill-chain / nesting-guard / journal-replay / session-view-service
       │    └─ engines/
       │         ├─ pi/       PiEngine + session-runner + reader + …（12 个 .ts）
@@ -471,7 +471,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@xyz-agent/shared
 | 面 | 归属 | 说明 |
 |----|------|------|
 | 路由三层优先级 + 守卫 fallback | **core 保留** | `routing.ts` 纯决策，改为面向 descriptor/代理 |
-| capability-gate / persona-router | **core 保留** | 引擎无关 |
+| capability-gate | **core 保留** | 引擎无关（persona-router 已删除 2026-09-13——零生产接线，随本轮设计代码同步清扫） |
 | journal 落盘 / record-store / session-view 投影 | **core 保留** | 数据所有权在宿主 |
 | 引擎进程生命周期（spawn/握手/重建/dispose/杀链） | **core 保留**（新增 `EngineClient`） | 与 `AppServerConnection` 同型但**引擎无关** |
 | conformance 套件 | **core 保留**（改为**协议黑盒套件**） | 引擎作者可用它自测 |

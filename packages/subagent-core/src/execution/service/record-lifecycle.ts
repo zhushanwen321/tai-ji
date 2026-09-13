@@ -21,7 +21,8 @@
 //   现读同一实例——深绑测试的 FR 替换语义保持。
 // 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发（D3 壳终态保留面：disposeAllRecords/
 //   onParentFork/onParentNew/startGcTimer/cancel/recoverManifestTmpFiles）；聚合内部
-//   互调（cancelBackground/closeChatIdle/finalizeRecord/promoteSessionFileFromEngineHandle/
+//   互调（cancelBackground/close 收起 markArchived——旧 closeChatIdle 已改优雅收口
+//   归档/finalizeRecord/promoteSessionFileFromEngineHandle/
 //   stopGcTimer）保持 private，不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5/C-6）：
 //    - C-5（onRecordFinalizedCleanup 跨域汇聚点，本体在壳 #14 Continuation 协作面）：
@@ -91,7 +92,7 @@ export interface RecordLifecycleDeps {
   readonly getWorktreeManager: () => WorktreeManager;
   /** ModelConfigService（doFinalizeRecord FinalizeDeps 形参——独立模块签名要求具体类型）。 */
   readonly getModelService: () => ModelConfigService;
-  /** NotifyHost（pending 注销 + closeChatIdle 终态通知）。 */
+  /** NotifyHost（pending 注销 + close 收起终态通知——旧 closeChatIdle 已改优雅收口）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** subagent sessionDir（doFinalizeRecord FinalizeDeps.sessionDir——sessionFile 缺失时
    *  磁盘 identity 反查依据；壳构造期同源推导）。 */

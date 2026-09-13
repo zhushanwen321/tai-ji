@@ -661,8 +661,8 @@ export class ConversationContinuation {
       this.drain();
       return;
     }
-    // dedup key = record:round（notifier 65 行口径不变）：round 已随簿记 +1，
-    // 失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
+    // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
+    // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
     const notify: BgNotifyRecord = {
       id: record.id,
       // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态

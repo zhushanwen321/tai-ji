@@ -263,8 +263,9 @@ function resurrectColdRecord(
   // [review round2] 跨重启 worktree 绑定丢失防护：原 record 创建时启用了 worktree 隔离
   //（session entry 的 worktree 标志），但 WorktreeHandle 不可序列化、重建后恒缺失。
   // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
-  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（closeChatIdle 走
-  // doFinalizeRecord，泄漏的 worktree 由 reaper 兜底回收）。
+  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收起
+  // markArchived 不触本守卫；旧 closeChatIdle 语义已改优雅收口归档，泄漏的 worktree
+  // 由 reaper 兜底回收）。
   // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
   record.hadWorktree = found.worktree === true;
   // [U2a/B4 → D3c] 透明重生回边整体收编 store.markResurrected：acquire-first 顺序

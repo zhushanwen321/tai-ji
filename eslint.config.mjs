@@ -583,7 +583,7 @@ export default [
   // 527 物理行合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
   // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作面拆出
   // chat-rounds.ts 后，本文件 1077 物理行 / 549 折算——阈值保持 800（余量健康，
-  // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 794 物理行 / 365 折算，低于
+  // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 793 物理行 / 365 折算，低于
   // packages 域 500 上限，无需 override（余量健康，不设零余量锁）。
   {
     files: ['packages/subagent-core/src/execution/service/run-orchestration.ts'],
