@@ -22,7 +22,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { guiSetWidget, isGuiCapable, type GuiContext } from "@xyz-agent/extension-protocol";
+import { setWidgetDual, type GuiContext } from "@xyz-agent/extension-protocol";
 
 import { registerTodosCommand } from "./commands";
 import { registerTodoEventHandlers } from "./handlers";
@@ -39,28 +39,23 @@ import { registerTodoTool } from "./tool";
  * 类型断言根因：pi 的 ExtensionContext.ui.custom 是泛型方法（返回 Promise<T>），
  * 与 GuiContext.ui.custom 的具体返回类型静态不兼容，传参需断言收窄；
  * mode/hasUI/ui.setWidget 形状一致（ExtensionMode 与 GuiContext.mode union 完全
- * 相同），单层直接断言可过 tsc（guiSetWidget/isGuiCapable 不读 custom），
- * 与 goal adapters/ports.ts setGuiWidget 同款。
+ * 相同），单层直接断言可过 tsc（setWidgetDual 只读 mode 与 ui.setWidget，
+ * 不读 custom）。
  *
- * isGuiCapable 外层判定不可省略：guiSetWidget 内部无 isGui 守卫
- * （extension-protocol helpers.ts 仅查 ctx.ui?.setWidget 存在性），
- * TUI 模式误调会把 marker 编码行推给原生 widget 造成乱码。
+ * 推送/清屏 × GUI/TUI 模式分派由 protocol setWidgetDual 单点内化
+ * （守卫单点化说明见 extension-protocol helpers.ts，本文件不再自持 isGui 判定）。
  */
 export function makeRefreshDisplay(state: TodoSessionState): (ctx: ExtensionContext) => void {
 	return function refreshDisplay(ctx: ExtensionContext): void {
 		const statusText = renderStatusText(state.todos, ctx.ui.theme);
 		ctx.ui.setStatus("todo", statusText || undefined);
-		const isGui = isGuiCapable(ctx as GuiContext);
 		if (state.todos.length === 0) {
-			if (isGui) {
-				guiSetWidget(ctx as GuiContext, "todo", undefined);
-			} else {
-				ctx.ui.setWidget("todo", undefined);
-			}
-		} else if (isGui) {
-			guiSetWidget(ctx as GuiContext, "todo", buildGui(state.todos));
+			setWidgetDual(ctx as GuiContext, "todo", undefined);
 		} else {
-			ctx.ui.setWidget("todo", renderWidgetLines(state.todos, ctx.ui.theme));
+			setWidgetDual(ctx as GuiContext, "todo", {
+				gui: buildGui(state.todos),
+				text: renderWidgetLines(state.todos, ctx.ui.theme),
+			});
 		}
 	};
 }

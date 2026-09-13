@@ -6,8 +6,9 @@
  * adapter 层提供实现（包装 ctx / pi）。
  */
 
+import type { DualWidgetContent } from "@xyz-agent/extension-protocol";
+
 import type { GoalRuntimeState } from "./engine/types";
-import type { GuiRenderResult } from "@xyz-agent/extension-protocol";
 
 // ── GoalHistoryEntry（DTO，非 aggregate，D-09）─────────
 
@@ -49,22 +50,19 @@ export interface ThemeLike {
 // ── UiPort ───────────────────────────────────────────
 
 export interface UiPort {
-	/** 设置 widget（undefined = 清除）。hasUI=false 时 adapter 跳过（FR-6.6） */
-	setWidget(name: string, content: string[] | string | undefined): void;
 	/**
-	 * 设置 GUI 协议 widget（GuiRenderResult：component + meta 宿主元数据，
-	 * RPC 模式经 guiSetWidget marker 编码）。TUI 模式 adapter 内部 no-op
-	 * （走 setWidget 文本行）。undefined = 清除。
+	 * 设置 widget（双模单调用）。content = { gui, text } 双模 payload / undefined 清除；
+	 * 模式分派（RPC→gui 经 marker 通道 / TUI→text 原生文本行）由 protocol setWidgetDual
+	 * 单点内化（守卫单点化说明见 extension-protocol core/helpers.ts，adapter 委托 helper）。
+	 * hasUI 守卫留在调用方（FR-6.6）。
 	 */
-	setGuiWidget(name: string, result: GuiRenderResult | undefined): void;
+	setWidget(name: string, content: DualWidgetContent | undefined): void;
 	/** 设置 status bar */
 	setStatus(name: string, text: string | undefined): void;
 	/** 弹通知 */
 	notify(text: string, level: "info" | "warning" | "error"): void;
 	/** 是否有 UI（headless 为 false） */
 	readonly hasUI: boolean;
-	/** 是否 GUI 渲染模式（RPC → GuiComponent；TUI → 原生文本行） */
-	readonly isGui: boolean;
 	/** 终端主题能力（fg/bold 着色），widget/status 文本行渲染消费（E3 显式声明） */
 	readonly theme: ThemeLike;
 }
