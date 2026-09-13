@@ -1,6 +1,6 @@
 # ext-simplify-13 实施计划
 
-基线: 98582efd7 | 来源设计: docs/design/ext-simplify-13-base-tool-enhance-protocol.md (v2.2) | 日期: 2026-09-14
+基线: 08ce984d7 | 来源设计: docs/design/ext-simplify-13-base-tool-enhance-protocol.md (v2.2) | 日期: 2026-09-14
 
 ## 0 章节映射
 
