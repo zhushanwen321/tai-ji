@@ -1,6 +1,6 @@
 # ext-simplify-07-todo 实施计划
 
-基线: e1a40a3de | 来源设计: docs/design/ext-simplify-07-todo.md (v2) | 日期: 2026-09-14
+基线: e1a40a3de | 来源设计: docs/design/ext-simplify-07-todo.md (v2.1) | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -75,3 +75,4 @@ graph TD
 - 2026-09-14（阶段 3）：一致性审查收敛——reasonable 8（终态表 5 行逐字落地/UpdateResult 去 export 零消费/handleBatchUpdate 三行化/测试 4+5 改写完整等）；unreasonable 1（ARCHITECTURE.md:160 同款悬空 CLAUDE.md 引用未闭环——已打回原 dev 定向修）；doc_errors 1（设计文档 V1 的 `pnpm --filter @zhushanwen/pi-todo build` 命令引用不存在 script——主 agent 已修为源码直载 `--extension extensions/universal/todo`，并记设计变更历史）。Gate A 全绿：extensions:typecheck+lint+test exit 0（26 包 4426 tests / 0 failed；session-reader 2 skipped 为存量条件守卫 describe.skipIf，非本区间引入）；todo 包 137/137。
 - 2026-09-14（阶段 5）：验收 A1-A3 全 PASS（真机 pi CLI v0.85.1，源码直载 + PI_CODING_AGENT_DIR 隔离 tmp 环境；模型 mimo-v2.5-pro）。V1 四轮：add→`Added 2 todos`；批量 update→`Updated 1 todo(s)`；#9→isError 文案恰 `Todo #9 not found`（无前缀）；错误后 list 2 条第 1 条 completed（throw 先于突变实证）；JSONL 全程 0 次 error 字段=落盘形状零触及。V2：同 dir resume 后 details 回放逐条一致、N/M 一致。V3：stderr 空、状态行 ☑ 1/2 正常、GUI marker 正常；`📋 N pending` 与 `☑ N/M` 交替为 D4-L5 已登记存量（非回归）。环境适配 2 条（npm 版 todo 冲突→隔离目录；模型自发单条形态→显式 updates 数组重跑并核 JSONL 命中批量路径），零代码改动，临时产物已清理。
 - 验收方式备注：V1a-d/V2/V3 由验收 subagent 执行（L4），驱动与断言脚本化；V2 的 resume 语义 = `--session <绝对路径>` 重启（rename e2e README 探针 3 背书）。
+- 2026-09-14（阶段 6 终态同步）：审查四条关系全过（终态表 5 行/符号悬空引用零/状态表与现实一致/注释口径无残留），findings 2 条当轮修——MF：todo README.md:40 悬空 CLAUDE.md 引用（阶段 3 领地外残留，终态口径闭环）打回原 dev 定向修；info：本计划头部版本标签 (v2)→(v2.1) 已更正。修复后 07 流水线交付完成。
