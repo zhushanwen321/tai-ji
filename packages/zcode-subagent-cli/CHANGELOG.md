@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 893b702b6: New features for the zcode engine: session TTL sweep with batched deletion (<=500 bind params per batch, single transaction across batches) covering session_task_link cleanup in both directions and NULL-ing parent keys on workflow_run / workflow_activity; resume anchor dbPath is now validated against the engine data-dir allowlist (closed-set match), and relative dbPath candidates are resolved and containment-checked against the pool directory before use.
+
 ## 0.2.1
 
 ### Patch Changes

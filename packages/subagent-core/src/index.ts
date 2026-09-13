@@ -33,7 +33,7 @@
 // 0.4.0 = 首个公开发布的收敛收口面（0.3.0 为 2026-08-30 裁决的跳号占位，永不单独
 // 发布；+ minor changeset 收口面落本号）；与 package.json version 的一致性由
 // src/__tests__/smoke.test.ts 动态守护，改版本须两处同步。
-export const CORE_PACKAGE_VERSION = "0.9.0";
+export const CORE_PACKAGE_VERSION = "0.10.0";
 
 // ── 宿主端口接线面（core/）────────────────────────────────────
 // HostServices：dataRoot / log / discoveryRoots 端口 + configureCore 注入；

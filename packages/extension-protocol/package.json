@@ -1,6 +1,6 @@
 {
   "name": "@xyz-agent/extension-protocol",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Extension GUI rendering protocol: types and helpers for pi extension dual-mode (TUI/GUI) rendering",
   "main": "src/index.ts",
   "module": "src/index.ts",

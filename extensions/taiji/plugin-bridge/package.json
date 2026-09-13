@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-plugin-bridge",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Plugin system bridge — register plugin tools into pi and relay events/intercepts to the runtime via the select+marker channel",
   "type": "module",
   "main": "src/index.ts",

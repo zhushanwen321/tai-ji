@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-todo",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "AI-driven todo list for Pi — stateful task management with session persistence and /todos command.",
   "type": "module",
   "main": "src/index.ts",

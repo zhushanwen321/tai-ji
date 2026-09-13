@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-session-manager",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Pi extension for managing agent-managed sessions — create, send, read history, list, status, abort via ctx.ui.select channel.",
   "type": "module",
   "main": "index.ts",

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-session-reader",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "main": "index.ts",
   "xyz-agent": {

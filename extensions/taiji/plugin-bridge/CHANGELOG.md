@@ -1,5 +1,11 @@
 # @zhushanwen/pi-plugin-bridge
 
+## 0.2.3
+
+### Patch Changes
+
+- 893b702b6: Collapse the inflight delivery-reliability layer into mode-gated marker-select channels for simpler event relay between plugin bridge and the host.
+
 ## 0.2.2
 
 ### Patch Changes

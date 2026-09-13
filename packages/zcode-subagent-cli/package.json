@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/zcode-subagent-cli",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "zcode subagent engine as an independent CLI package (W5 of subagent-engine-protocolization): speaks engine-protocol v1 over NDJSON stdio, depends only on @zhushanwen/subagent-engine-sdk (never subagent-core)",
   "type": "module",
   "license": "MIT",

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-pending-notifications
 
+## 0.7.1
+
+### Patch Changes
+
+- 893b702b6: Map new subagent stop reasons (interrupted / interrupted-by-restart / interrupted-by-parent / reopened) to correct pending statuses instead of falling through to completed.
+
 ## 0.7.0
 
 ### Minor Changes

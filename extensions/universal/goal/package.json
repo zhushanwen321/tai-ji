@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-goal",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "Codex-style /goal command for Pi — persistent goal-driven autonomous loop with evidence-based completion, token budget, agent-reported blocking, and steering templates.",
   "type": "module",
   "main": "src/index.ts",

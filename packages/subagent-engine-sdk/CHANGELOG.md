@@ -1,5 +1,13 @@
 # @zhushanwen/subagent-engine-sdk
 
+## 0.4.0
+
+### Minor Changes
+
+- 893b702b6: BREAKING CHANGE (0.x, carried as minor): `RunContextParams.poolKey` (required string) has been removed — the pool abstraction is retired on the protocol surface and the journal now always lands under the engine's shared directory. Engine implementations implementing `RunContextParams` must drop the field; no replacement is needed.
+
+  Other protocol-surface adjustments in this release: reverse-channel surface consolidated for engine-protocol v1, resume anchor carried via `run.params.resume` (generic rename of the former chat params, payload unchanged).
+
 ## 0.3.0
 
 ### Minor Changes

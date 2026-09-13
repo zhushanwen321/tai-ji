@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/subagent-core",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Cross-host shared subagent execution layer and workflow orchestration core (dual-form npm package: TS source for workspace, dist ESM+CJS for npm)",
   "type": "module",
   "license": "MIT",

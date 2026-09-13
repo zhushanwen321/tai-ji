@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/subagent-engine-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Engine-side SDK for the subagent engine protocol: NDJSON stdio contract types, engine primitives (schema emulation, nesting guard, kill chain, journal replay projection, data-dir/paths resolution) — the shared contract root between subagent-core and engine CLI packages (engines import SDK only, never core)",
   "type": "module",
   "license": "MIT",

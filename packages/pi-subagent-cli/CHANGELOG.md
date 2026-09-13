@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 893b702b6: Aligned with engine-protocol v1: child-exit reporting now carries the killed flag, process kill handling was consolidated onto the shared @zhushanwen/pi-rpc kill chain (new dependency), and stdin frame assembly reuses the shared RPC layer. Behavior-compatible refactor for embedders; protocol surface unchanged beyond the SDK-side poolKey retirement.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-reader
 
+## 0.5.1
+
+### Patch Changes
+
+- 893b702b6: Adapt record reconstruction to the subagent permanent-session model: import paths follow the subagent-core persistence/assembly layout, and record status mapping reflects the new two-state machine values.
+
 ## 0.5.0
 
 ### Minor Changes
