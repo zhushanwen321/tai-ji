@@ -2,7 +2,7 @@
 /**
  * SubagentFilterBar —— Agents tab 二级筛选槽（全部活跃 / 只看正在跑 / 已收起）。
  *
- * 设计来源：docs/design/subagent-sidebar-filter.md §3.4（方案 A 迷你分段槽，T2）；
+ * 设计来源：docs/design/subagent-sidebar-filter.md §3.4（方案 A 迷你分段槽，T2；该文档已删除，git 可追溯）；
  * 永久会话模型 §3.2.8 默认可见性翻转（U8b）：默认视图 = 全部活跃会话
  * （running + idle），「已收起」视图承载归档寻回（场景 3）。
  *

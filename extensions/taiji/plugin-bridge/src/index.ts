@@ -186,10 +186,14 @@ function getSessionId(ctx: ExtensionContext): string | undefined {
 
 // ── 工具执行结果类型（session-manager 同款：details 供下游消费，错误必须 isError）──
 
-// 【坑】isError 是 extension 侧约定字段——pi 0.84.4 的 AgentToolResult 接口无此字段、
-// agent-loop 不读取（正常 return 恒按成功，仅 throw 才算错）；LLM 判错实际依据
-// content 文本。因此 cancelled/error result 的 content 必须带可读文案，isError 只作
-// 下游（details 消费方）的结构化标记。
+// 【坑】isError 是 extension 侧约定字段——pi 0.84.4 的 AgentToolResult 接口无此字段
+// （实装锚点：node_modules/@earendil-works/pi-agent-core@0.84.4 dist/types.d.ts:317，
+// 字段集 = content / details / usage? / addedToolNames? / terminate?）、agent-loop 不读取
+// （正常 return 恒按成功，仅 throw 才算错——实装锚点：同包 dist/agent-loop.js:468
+// executePreparedToolCall 正常分支硬编码 isError:false，:473-477 仅 catch 分支置
+// isError:true）；LLM 判错实际依据 content 文本。因此 cancelled/error result 的 content
+// 必须带可读文案，isError 只作下游（details 消费方）的结构化标记。
+// pi 版本 bump 时随探针族重验（C-proc-08）。
 interface PluginBridgeToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details:

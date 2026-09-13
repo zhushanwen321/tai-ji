@@ -157,7 +157,8 @@ export default {
     turnsUnit: 'turns',
     tokUnit: 'tok',
   },
-  // Agents tab secondary filter (design docs/design/subagent-sidebar-filter.md §3.4 + permanent
+  // Agents tab secondary filter (design docs/design/subagent-sidebar-filter.md §3.4 [deleted, see git
+  // history] + permanent
   // session model §3.2.8 default-visibility flip, U8b: default view = all active sessions
   // (running + idle, legacy terminal statuses shown read-only); the Archived view carries
   // archive retrieval (scenario 3))

@@ -1,6 +1,7 @@
 /**
- * subagent 分桶判据 SSOT 模块（纯函数，设计 subagent-sidebar-filter §3.4 / D3 D4；
- * 永久会话模型 §3.2.8 默认可见性翻转，U8b 重写）。
+ * subagent 分桶判据 SSOT 模块（纯函数，设计 subagent-sidebar-filter §3.4 / D3 D4——原设计文档
+ * docs/design/subagent-sidebar-filter.md 已删除，git 可追溯，现行判据以 subagent-bucket.test.ts
+ * 断言表为准；永久会话模型 §3.2.8 默认可见性翻转，U8b 重写）。
  *
  * 唯一职责：把 SubagentRecord 按意愿维度（intent）分「活跃 / 已收起」二桶 + 派生
  * 「正在跑」占用谓词，供 SubagentList（列表过滤 + 状态点展示判据）、SubagentFilterBar

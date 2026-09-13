@@ -227,98 +227,13 @@ function runSync(options: RunSyncOptions): SingleResult {
 
 ---
 
-## 4. 后台异步执行系统
+## 4. 后台异步执行与结果通知
 
-### 4.1 异步任务追踪
-
-```typescript
-interface AsyncJobTracker {
-  ensurePoller: () => void;
-  handleStarted: (event: AsyncStartedEvent) => void;
-  handleComplete: (event: AsyncCompleteEvent) => void;
-  resetJobs: (ctx: ExtensionContext) => void;
-}
-
-function createAsyncJobTracker(
-  pi: ExtensionAPI,
-  state: ExtensionState,
-  asyncDir: string
-): AsyncJobTracker {
-  return {
-    ensurePoller() {
-      if (state.poller) return;
-      state.poller = setInterval(() => {
-        for (const job of state.asyncJobs.values()) {
-          refreshJobStatus(job, asyncDir);
-        }
-      }, 2000);
-    },
-
-    handleStarted(event) {
-      state.asyncJobs.set(event.runId, {
-        asyncId: event.runId,
-        asyncDir: event.asyncDir,
-        status: "running",
-        updatedAt: Date.now(),
-      });
-    },
-
-    handleComplete(event) {
-      const job = state.asyncJobs.get(event.runId);
-      if (job) {
-        job.status = "completed";
-        job.updatedAt = Date.now();
-      }
-    },
-
-    resetJobs(ctx) {
-      state.asyncJobs.clear();
-    }
-  };
-}
-```
-
-### 4.2 文件系统结果观察器
-
-```typescript
-function createResultWatcher(pi, state, resultsDir, intervalMs) {
-  let watcher: FSWatcher | null = null;
-
-  function startResultWatcher() {
-    if (!existsSync(resultsDir)) return;
-    watcher = fs.watch(resultsDir, { recursive: true }, (eventType, filename) => {
-      if (filename?.endsWith(".json")) {
-        const result = readResultFile(path.join(resultsDir, filename));
-        if (result && !state.completionSeen.has(result.runId)) {
-          state.completionSeen.set(result.runId, true);
-          pi.events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, result);
-        }
-      }
-    });
-  }
-
-  function primeExistingResults() {
-    // 启动时扫描已有结果文件，避免错过热重载期间完成的结果
-  }
-
-  function stopResultWatcher() {
-    watcher?.close();
-    watcher = null;
-  }
-
-  return { startResultWatcher, primeExistingResults, stopResultWatcher };
-}
-```
-
-### 4.3 异步状态文件格式
-
-```
-<tmpdir>/pi-subagents-<scope>/async-subagent-runs/<id>/
-  status.json          # 运行状态（running/completed/failed）
-  events.jsonl         # 包装事件 + 子 Pi JSON 事件
-  output-<n>.log       # 实时人类可读日志
-  subagent-log-<id>.md # Markdown 格式日志
-```
+后台子代理的完成通知经 subagent tool 的 `collect` 参数（`"async"` 逐个通知 / `"sync"` 全批收集）
+与 pending-notifications 扩展投递——参数语义以 subagent tool schema description 为准，实现见
+`packages/subagent-core` 与 `extensions/universal/pending-notifications` 源码。本指南不维护
+内部状态文件布局文档（历史版本的 tmpdir 布局与 watcher 机制章节因无对应实现已删除，git 可
+追溯）——布局与机制以源码为准。
 
 > 后台任务的**结果语义通知**（完成/终态投递）必须走确认式送达——持久账本 + notifyId 幂等 + settled 边沿 courier，禁依赖 steer/followUp/nextTurn 内存队列的 at-most-once 通道（约束 C-ext-19，设计见 [pi-boundary-reliability.md](../../../../docs/architecture/pi-boundary-reliability.md)）。
 

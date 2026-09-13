@@ -156,7 +156,7 @@ export default {
     turnsUnit: 'turns',
     tokUnit: 'tok',
   },
-  // Agents tab 二级筛选（设计 docs/design/subagent-sidebar-filter.md §3.4 + 永久会话模型
+  // Agents tab 二级筛选（设计 docs/design/subagent-sidebar-filter.md §3.4（已删除，git 可追溯）+ 永久会话模型
   // §3.2.8 默认可见性翻转 U8b：默认视图 = 全部活跃会话（running + idle，legacy 终态只读
   // 兼容同显）；「已收起」视图承载归档寻回（场景 3））
   // [C7 用词登记] 本处「正在跑」与 backgroundTaskList.filter.active 的「运行中」刻意不统一：

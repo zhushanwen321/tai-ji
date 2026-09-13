@@ -40,7 +40,7 @@ export { SLUG_MAX_LENGTH };
 // 反映必填性。勿在此基础上继续堆 action 条件逻辑——要加就拆 tool。
 export const SubagentParams = Type.Object({
   action: StringEnum(["start", "list", "cancel", "message", "close", "fork-from"], {
-    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to a running subagent (one-shot subagents are auto-upgraded to conversation mode on first message), 'close' ends a running subagent (conversation-mode or one-shot), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
+    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to any of your subagents (running or idle — an idle one transparently revives and continues on its original session file; one-shot subagents are auto-upgraded to conversation mode on first message), 'close' archives a subagent (immediately when idle; after the current round, or immediately with force:true, when running), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
   }),
   // ── action:"start" fields (flattened to top level). task/slug REQUIRED for start. ──
   // Missing/empty task or slug throws at runtime (startHandler).
@@ -145,24 +145,29 @@ export const SubagentParams = Type.Object({
       description: "REQUIRED for action:'cancel'. The subagentId to cancel. Throws if missing. Only background subagents can be cancelled.",
     }),
   })),
-  // action:"message" → messageParam.subagentId + text REQUIRED. Any RUNNING subagent works —
-  // one-shot subagents are auto-upgraded to conversation mode on first message (SP-5); ended ones throw.
+  // action:"message" → messageParam.subagentId + text REQUIRED. Any reachable subagent works —
+  // running joins the in-flight round (D2 打断入队)；idle transparently revives on the same
+  // session file（[U4 §3.2.3] 万物可续——形态枚举 gate 消亡）；one-shot auto-upgrades to
+  // conversation mode on first message (SP-5)。description 与实现锚点见 messageHandler。
   messageParam: Type.Optional(Type.Object({
     subagentId: Type.String({
-      description: "REQUIRED for action:'message'. The subagentId to message (any running subagent; a one-shot subagent is auto-upgraded to conversation mode on first message, so you may also message one-shot subagents that are still running).",
+      description: "REQUIRED for action:'message'. The subagentId to message. Any subagent reachable in this session tree works, running or idle: an idle subagent transparently revives on the same id and continues writing its original session file (a one-shot is auto-upgraded to conversation mode on first message); a running subagent has your message interrupt-and-join its in-flight round. Rejections: unknown id, session file held by another live process, a record from a different session tree, workflow-origin records (their results belong to the workflow run), and one-shot records on engines that do not support conversation upgrade.",
     }),
     text: Type.String({
       description: "REQUIRED for action:'message'. The message to send. Whitespace-only throws.",
     }),
     interrupt: Type.Optional(Type.Boolean({
-      description: "If true, interrupt the subagent's current work immediately (in-progress output stops, it switches to your new message). If false (default), the message is queued and processed after the current round completes. When the subagent is idle (between rounds), interrupt has no effect — the message always starts a new round.",
+      // [H1 U6 / D2] 参数已退役（messageHandler 零消费）：在途轮存在即打断入队，
+      // 不区分抢占/排队——字段保留防存量调用 schema 报错，description 据实声明 no-op。
+      description: "Deprecated, no effect: a message to a running subagent always interrupts its in-flight round (the round aborts and your message is processed next) regardless of this flag; an idle subagent always starts a new round.",
     })),
   })),
-  // action:"close" → closeParam.subagentId REQUIRED. Ends a running subagent (conversation-mode
-  // or one-shot — closeSubagent behavior split covers both).
+  // action:"close" → closeParam.subagentId REQUIRED. 归档（archived）：列表隐藏、可寻回、
+  // 非终态化（[U5 §3.2.5]）。idle 立即归档收口；running 默认等当前轮收口后归档，
+  // force:true 立即终止随即归档（closeHandler 头注行为分流）。
   closeParam: Type.Optional(Type.Object({
     subagentId: Type.String({
-      description: "REQUIRED for action:'close'. The subagentId to close (any running subagent, conversation-mode or one-shot).",
+      description: "REQUIRED for action:'close'. The subagentId to close (any reachable subagent — running or idle). Close archives the record: hidden from list, recoverable, not a terminal state. Idle subagents close immediately; running ones finish the current round first, or terminate immediately when force:true.",
     }),
     force: Type.Optional(Type.Boolean({
       description: "If true, terminate immediately even if mid-round (in-progress work is lost). If false (default), let the current round finish, then close. When idle, the subagent closes immediately regardless.",
@@ -173,7 +178,7 @@ export const SubagentParams = Type.Object({
   // 源文件只读不续写）；旧记录/状态机不动。pi 引擎限定（非 pi 在 execute 层拒绝）。
   forkFromParam: Type.Optional(Type.Object({
     sourceSubagentId: Type.String({
-      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose conversation history becomes the inherited context of the new subagent. Works for records disconnected by a session restart or already finished; cancelled/worktree-bound/still-running ones are rejected with guidance.",
+      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose conversation history becomes the inherited context of the new subagent. Works for any idle record — disconnected by a session restart, already finished, or previously closed/cancelled. Rejections: still-running sources (message them instead), sources held by another live process, worktree-bound sources, and unknown ids; an unparseable history anchor is guided to action:'message' (same-id reopen) instead.",
     }),
     prompt: Type.Optional(Type.String({
       description: "Continuation instruction for the new subagent (what to do next on top of the inherited history). When omitted, a standard handover frame is injected: reconstruct done/decided/remaining from the inherited history, then continue to completion. Whitespace-only treated as omitted.",

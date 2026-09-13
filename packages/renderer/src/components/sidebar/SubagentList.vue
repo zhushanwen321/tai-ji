@@ -4,7 +4,7 @@
     渲染 SubagentRecord[] 卡片：状态点 + agent 名称 + task 摘要 + turns/tokens/elapsed。
     点击卡片 → emit('select', subagentId)，由父组件切换 Panel sessionId。
     二级筛选（全部活跃 / 只看正在跑 / 已收起）：SubagentFilterBar + subagent-bucket SSOT 派生
-    （subagent-sidebar-filter D3/D4/D5/D6 + 永久会话模型 §3.2.8 可见性翻转 U8b）。
+    （subagent-sidebar-filter D3/D4/D5/D6 + 永久会话模型 §3.2.8 可见性翻转 U8b；原设计文档已删除，git 可追溯）。
     默认视图 = running + idle(active) 全显（legacy 终态投影 idle 同显）；intent=archived
     默认隐藏、「已收起」视图寻回（场景 3：message 隐含翻回 active 由宿主侧承担）。
     空态展示提示文案。
