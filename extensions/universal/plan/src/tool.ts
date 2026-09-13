@@ -6,7 +6,8 @@ import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendi
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-import { detectGoalCapability, handlePlanComplete } from "./compact.js";
+import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
+import type { GoalBridgeOutcome } from "./compact.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
 import { getPlanState, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
@@ -53,6 +54,8 @@ interface CompleteDetails {
   planFilePath: string;
   isolation: string;
   execMode: string;
+  /** D2：direct 档 goalInit 的同步结果；compact 档在 onComplete 回调内执行，不进 result */
+  goalOutcome?: GoalBridgeOutcome;
 }
 
 interface CompleteCancelledDetails {
@@ -250,21 +253,30 @@ function executeAbort(
   };
 }
 
+/**
+ * 执行方式对话框的 label→mode 映射表（发现 8）——SDK `ui.select(title, options: string[])`
+ * 只收字符串数组，无法传结构化选项，故用本地查表而非文案反查。
+ */
+const EXEC_MODE_OPTIONS: Array<{ label: string; mode: string }> = [
+  { label: "Subagent-driven execution", mode: "subagent" },
+  { label: "Goal-driven execution (/goal)", mode: "goal" },
+  { label: "Single-agent (current session)", mode: "single-agent" },
+];
+
+/** 对话框尾部的两个"留在 plan mode"选项（complete-cancelled 路径） */
+const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
+
 /** Build execution options filtered by available capabilities. */
 function buildExecOptions(pi: ExtensionAPI): string[] {
-  const execOptions = ["Subagent-driven execution"];
-  const hasGoal = detectGoalCapability(pi);
-  if (hasGoal) execOptions.push("Goal-driven execution (/goal)");
-  execOptions.push("Single-agent (current session)");
-  execOptions.push("Modify the plan first", "Save for later");
-  return execOptions;
+  const modeLabels = EXEC_MODE_OPTIONS
+    .filter((opt) => opt.mode !== "goal" || detectGoalCapability(pi))
+    .map((opt) => opt.label);
+  return [...modeLabels, ...CANCEL_OPTIONS];
 }
 
-/** Map the user's execution-method choice to the chosenMode string. */
+/** Map the user's execution-method choice (dialog label) to the chosenMode string. */
 function chosenModeFromChoice(choice: string): string {
-  if (choice === "Subagent-driven execution") return "subagent";
-  if (choice === "Goal-driven execution (/goal)") return "goal";
-  return "single-agent";
+  return EXEC_MODE_OPTIONS.find((opt) => opt.label === choice)?.mode ?? "single-agent";
 }
 
 /** Outcome of the complete-action execution-method prompt. */
@@ -298,6 +310,19 @@ async function resolveCompleteChoice(ctx: ExtensionContext, pi: ExtensionAPI): P
   return { kind: "mode", chosenMode: chosenModeFromChoice(choice) };
 }
 
+/**
+ * complete 的 result 正文：direct 档 goalInit 同步完成，追加 goal 结果行（D2）；
+ * compact 档 goalInit 在 onComplete 回调内执行、result 已返回，不携带（通道差异
+ * 为设计 §6.2 D2 登记的终态）。
+ */
+function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome | undefined): string {
+  const base = `Plan approved. File: ${displayPath}`;
+  if (goalOutcome === undefined) return base;
+  return goalOutcome.started
+    ? `${base}\nGoal execution started via /goal.`
+    : `${base}\nGoal execution was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
+}
+
 /** complete action: prompt for execution mode, persist final phase, restore tools, reset state. */
 async function executeComplete(
   pi: ExtensionAPI,
@@ -323,8 +348,8 @@ async function executeComplete(
   // Restore full tool set
   restoreFullToolSet(pi);
 
-  // Execute completion handler (compact/tree setup)
-  handlePlanComplete(pi, ctx, state, isolation, chosenMode);
+  // Execute completion handler (compact setup + steer/goalInit delivery)
+  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode);
 
   // Reset state and clear widget — same as abort
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx);
@@ -332,8 +357,8 @@ async function executeComplete(
 
   const displayPath = relativePath(planFilePath, projectDir);
   return {
-    content: [{ type: "text" as const, text: `Plan approved. File: ${displayPath}` }],
-    details: { action: "complete", planFilePath: displayPath, isolation, execMode: chosenMode },
+    content: [{ type: "text" as const, text: completeResultText(displayPath, goalOutcome) }],
+    details: { action: "complete", planFilePath: displayPath, isolation, execMode: chosenMode, goalOutcome },
   };
 }
 
@@ -355,7 +380,7 @@ export function registerPlanTool(
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
       templateContent: Type.Optional(Type.String({ description: "Template content (for create-template)" })),
       isolation: Type.Optional(
-        StringEnum(["compact", "tree", "direct"], {
+        StringEnum(["compact", "direct"], {
           description: "Isolation mode for plan execution (for complete action)",
         }),
       ),

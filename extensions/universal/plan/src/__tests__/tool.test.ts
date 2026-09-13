@@ -14,11 +14,16 @@ vi.mock("@earendil-works/pi-ai", () => ({
   StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
 }));
 
-// Mock compact.js (dynamically imported by complete action)
-vi.mock("../compact.js", () => ({
-  handlePlanComplete: vi.fn(),
-  detectGoalCapability: vi.fn(() => false),
-}));
+// Mock compact.js (statically imported since 06-u1)
+vi.mock("../compact.js", async () => {
+  // GOAL_FAILURE_RECOVERY 与真实实现同文案——completeResultText 在 failure 断言里消费它
+  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
+  return {
+    handlePlanComplete: vi.fn(),
+    detectGoalCapability: vi.fn(() => false),
+    GOAL_FAILURE_RECOVERY,
+  };
+});
 
 // Mock widget (imported by abort)
 vi.mock("../widget.js", () => ({
@@ -33,7 +38,7 @@ vi.mock("node:fs", async () => {
 
 import * as fs from "node:fs";
 
-import { handlePlanComplete } from "../compact.js";
+import { detectGoalCapability, handlePlanComplete } from "../compact.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
 
@@ -136,6 +141,26 @@ describe("registerPlanTool", () => {
 
   // --- complete ---
   describe("complete", () => {
+    beforeEach(() => {
+      // 默认桥不可达（与真实 pi 0.84.4 现状一致）；goal 档用例显式 mock 桥可达
+      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
+    });
+
+    /** 注册时捕获的工具定义（schema 检查用）。 */
+    function registeredTool(pi: { registerTool: unknown }): Record<string, unknown> {
+      return ((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0]) as Record<string, unknown>;
+    }
+
+    it("rejects isolation='tree' at the schema level: enum is exactly compact|direct (D1 / V3①)", async () => {
+      const { pi } = setup();
+      const parameters = registeredTool(pi).parameters as {
+        properties: { isolation: { enum: string[] } };
+      };
+      expect(parameters.properties.isolation.enum).toEqual(["compact", "direct"]);
+      expect(parameters.properties.isolation.enum).not.toContain("tree");
+    });
+
     it("does not advance when user cancels", async () => {
       const { exec, ctx, pi } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Modify the plan first");
@@ -153,6 +178,74 @@ describe("registerPlanTool", () => {
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
       expect(handlePlanComplete).toHaveBeenCalled();
       expect(res.details.planFilePath).toBeDefined();
+    });
+
+    it("dialog options exclude the goal tier when the bridge is unavailable", async () => {
+      const { exec, ctx } = setup();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Single-agent (current session)");
+      await exec({ action: "complete" });
+      const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
+      expect(options).not.toContain("Goal-driven execution (/goal)");
+      expect(options).toEqual([
+        "Subagent-driven execution",
+        "Single-agent (current session)",
+        "Modify the plan first",
+        "Save for later",
+      ]);
+    });
+
+    it("dialog options include the goal tier when the bridge is reachable (mocked pi.__goalInit world)", async () => {
+      const { exec, ctx } = setup();
+      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      const res = await exec({ action: "complete" });
+      const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
+      expect(options).toEqual([
+        "Subagent-driven execution",
+        "Goal-driven execution (/goal)",
+        "Single-agent (current session)",
+        "Modify the plan first",
+        "Save for later",
+      ]);
+      expect(res.details.execMode).toBe("goal"); // EXEC_MODE_OPTIONS 查表映射（发现 8）
+    });
+
+    it("maps 'Single-agent (current session)' choice to execMode single-agent", async () => {
+      const { exec, ctx } = setup();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Single-agent (current session)");
+      const res = await exec({ action: "complete" });
+      expect(res.details.execMode).toBe("single-agent");
+    });
+
+    it("direct tier carries the goal outcome into result content and details (D2)", async () => {
+      const { exec, ctx } = setup();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: false, reason: "no-steps" });
+      const res = await exec({ action: "complete", isolation: "direct" });
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "goal");
+      expect(res.content[0].text).toContain("Goal execution was not started (no-steps)");
+      expect(res.content[0].text).toContain("Implementation Steps"); // 恢复动作
+      expect(res.details.goalOutcome).toEqual({ started: false, reason: "no-steps" });
+    });
+
+    it("successful goal outcome appends the started line", async () => {
+      const { exec, ctx } = setup();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");
+      (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: true });
+      const res = await exec({ action: "complete", isolation: "direct" });
+      expect(res.content[0].text).toContain("Goal execution started via /goal");
+      expect(res.details.goalOutcome).toEqual({ started: true });
+    });
+
+    it("compact tier outcome is deferred (undefined): result keeps the plain approved line", async () => {
+      const { exec, ctx } = setup();
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Subagent-driven execution");
+      (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+      const res = await exec({ action: "complete", isolation: "compact" });
+      expect(res.content[0].text).toMatch(/^Plan approved\. File: /);
+      expect(res.content[0].text).not.toContain("Goal execution");
+      expect(res.details.goalOutcome).toBeUndefined();
+      expect(res.details.isolation).toBe("compact");
     });
   });
 
