@@ -1,5 +1,5 @@
 /**
- * BackgroundTask 域 —— 后台命令侧边栏的拉取/操作 RPC（docs/design/background-task-sidebar-view.md
+ * BackgroundTask 域 —— 后台命令侧边栏的拉取/操作 RPC（docs/architecture/background-task-sidebar-view.md
  * §3.3 D3，u-proto 单元）。
  *
  * 三个封装：list（拉全量 + 隐式加入 runtime watched 集合）/ output（tail 输出尾部）/ kill（终止）。

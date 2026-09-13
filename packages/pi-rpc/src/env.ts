@@ -4,7 +4,7 @@
 // 恒注入 + 底层白名单构建器（DI）+ pi agent 目录隔离。
 //
 // 来源（行为逐字等价提取，非重写）：runtime rpc-client.ts buildPiOutboundEnv
-// （B3 出站契约收口，docs/design/env-propagation-boundary.md §5-U3）。
+// （B3 出站契约收口，docs/architecture/env-propagation-boundary.md §5-U3）。
 //
 // 底层 buildChildEnv 经依赖注入而非硬依赖：白名单过滤 + deny 兜底的 SSOT 现状
 // 是两份（@xyz-agent/shared spawn-env-contract 供 runtime；subagent-engine-sdk

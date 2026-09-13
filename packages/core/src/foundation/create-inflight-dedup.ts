@@ -1,7 +1,7 @@
 /**
  * createInflightDedup —— in-flight 去重共享原语（「Map + Promise 复用」模式工厂）。
  *
- * 【登记】D9「收编为共享原语」产物（docs/design/state-truth-sync-architecture.md §3.3 D9），
+ * 【登记】D9「收编为共享原语」产物（docs/architecture/state-truth-sync-architecture.md §3.3 D9），
  * 约束 C-data-18 enforcement 载体：新增/修改「同 key 并发异步操作去重」时**禁止手写**
  * Map<key, Promise> + settle 清理的同构实现，一律组装本 factory（review-arch-boundary
  * 审查项）。收编前 7 处同构实现（迁移见 impl-plan U7b/U7c）：core subscription-state、
