@@ -2,6 +2,8 @@
 
 > 本术语表整合自 xyz-pi-extensions 项目的 CONTEXT.md。收录 pi 平台通用术语与 xyz-agent ↔ pi 边界概念。
 > 各 extension 的专属概念已迁至对应包 README（goal / todo / permission / plan / subagent-workflow 等）或随包退役删除（2026-09-13 清理）。
+>
+> **与 [docs/architecture/context.md](../architecture/context.md) 的分工**：xyz-agent 全局领域词（Session / Panel / Provider / Skill / Agent / Compaction 等）的权威定义在 context.md，本表只收录 pi 平台层术语与 pi 边界域词条——「pi 边界可靠性（语义吸收层）四支柱」的权威词条在本表（context.md 仅留一行概要指路）。
 
 ---
 
