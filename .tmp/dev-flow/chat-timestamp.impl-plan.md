@@ -76,6 +76,8 @@ graph LR
 - 后续迭代候选（用户 2026-09-13 提出，非本流水线范围）：TurnProgressBar 观测条与 TurnMeta「思考中」行信息重叠，拟合并为 TurnMeta 行右侧流式期字段（已生成字符数 / 当前工具耗时），10min 警示降级为行内变警示色 + 中止动作收编溢出菜单，删除独立观测条；另其报告的「经常假卡死」归因 = ①观测条 10min 固定阈值长 turn 必触发 ②工具执行/思考静默期无帧变化的感知 ③历史 10min 固定墙钟误判已重设计为 idle 1800s + 自愈（timeout-streaming-ui-idle.md），若仍见误判 error 气泡需上报复现帧型。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
+  - 2026-09-13 阶段3 审查收敛：reviewer 三分类（reasonable 6 / unreasonable 3 low / doc_errors 2）——low 全修（7d5652f46），doc 回写（7abaeca65），合理偏差入 §5。Gate A 终局无本流水线新增失败。
+  - 2026-09-13 阶段5 L3 全绿（S1-S6 逐场景签收，截图入 acceptance/）：S3 running 耗时 5s→6s 实时跳动（clock=startTime 恒定）；S4 reload 后 tool 槽 21s·12:00:51（endTime 权威回填生效）；S5 TurnMeta live「→（进行中）」→ 完成定格。新登记近似语义：reload 时 startTime=assistant 消息时刻（pi 不持久化工具开始时刻），reload 耗时含该消息 thinking/流式前段（sleep 6 实测 reload 显 21s vs live 6s）——数据源固有限制，已同步设计 §2.1。
   - 2026-09-13 U3 修复由主 agent 亲自执行（连续 3 次派发被基础设施杀死 143/128 零产出，触发升级阈值；fix = endTime last-wins + 非对称时钟测试 + relay fixture 补全生产双发形态）。Gate A 终局：core/ui/renderer 全绿，剩余 3 败包 = R3 存量集（与基线一致），endTime 回归 4 个全消。
   - 2026-09-13 U2 committed（143b3db70）。轮次记录：主 dev（mimo）实现全部落地但 A1-A4 断言缺交且收敛慢（两轮中断干预），cancel 后主 agent 核验实现 + 补发 mini-dev 只补测试；deviations 由 mini-dev 汇报（formatDuration '2s' 口径 / i18n mock 返 key 断言 / 编辑态直测）。
   - 2026-09-13 Gate A 首轮归因：① U1 真回归 4 个（runtime 等价性 endTime：live 侧 tool_call_end 客户端时钟先占 fill + R2-S1 去重丢权威 message_end）→ 开 U3 修复；② renderer TC-REG-1 适配新 DOM（toContain）→ 29adbdf47；③ 存量 20 + flaky 4（见 R3/R4）。基线对照方法：b3a179a7c detached worktree（/tmp/cft-baseline）逐包跑同套件比对失败集。
