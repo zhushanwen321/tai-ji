@@ -134,6 +134,9 @@ graph LR
 |------|------|------|------|
 | 08-u1 | onSendOk/onSendFail/onSendReceipt 移除 composed 死参穿线（设计 §7 字面保留签名） | per-message 化后 composed 在两函数零消费方，保留即新死代码 | 接受，随单元 commit；阶段 3 一致性审查回写设计 §7 措辞 |
 | 08-u1 | 未加 changeset 条目 | 版本 bump 口径已定（批次尾统一），单元仅动 version 字段 | 接受，批次尾统一补 |
+| 10-u1 | 守卫用例实际 :705-711 + tests:21 import 联动删除 | 设计声明 ±1-2 行容差；符号删除的机械必然 | 接受（非偏差，容差内） |
+| 10-u1 | 安全域注释锚定 TEARDOWN_FORCE_EXIT_MS 常量 doc 而非 :484 调用点 | 知识随值锚定，与设计 §5 终态示意图一致 | 接受 |
+| 10-u1 | MS_PER_SECOND 保留 | 被 teardown 日志换算消费，不在 E1 删除面 | 接受 |
 
 ## 6 状态表
 
@@ -159,7 +162,7 @@ graph LR
 | 05-S1 | pending | 0 | - |
 | 05-S2 | pending | 0 | - |
 | 05-S3 | pending | 0 | - |
-| 10-u1 | pending | 0 | - |
+| 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
 | 11-u1 | pending | 0 | - |
 
 ## 7 残留风险与变更历史

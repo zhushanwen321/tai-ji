@@ -392,35 +392,8 @@ export class LoopGate {
 /** terminal 日志的 appendEntry customType（session.jsonl 持久化，不进 LLM 上下文）。 */
 export const GATE_ENTRY_TYPE = "structured-output:gate";
 
-/**
- * setTimeout delay 安全域校验。[同源锚定] @zhushanwen/pi-subagent-workflow 的
- * shared/timer-delay.ts assertSafeTimerDelay 本地副本——两包独立 npm 不能直接
- * import（isObjectRootSchema 本地副本同例：跨包相对 import 在发布产物里悬空），
- * 本包仅此一个 timer 入口，取最小面副本。语义同源：非有限值 / 超 2^31-1 的 delay
- * 会被 Node 塌缩为 1ms 立即触发（语义反转：兜底窗口变成立即硬杀），fail-fast 不
- * 静默 clamp（clamp 把配置错误变成静默语义漂移）。
- */
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
-
 /** 每秒毫秒数（teardown 日志 ms→s 换算用，no-magic-numbers）。 */
 const MS_PER_SECOND = 1000;
-
-export function assertSafeTimerDelay(ms: number, source: string): void {
-	if (!Number.isFinite(ms)) {
-		throw new Error(
-			`[structured-output] ${source} = ${ms} is not a finite number (NaN/±Infinity). `
-				+ "Non-finite delays collapse to 1ms in Node setTimeout and fire immediately. "
-				+ "Recovery: fix the constant/computation feeding this timer and retry.",
-		);
-	}
-	if (ms > MAX_TIMER_DELAY_MS) {
-		throw new Error(
-			`[structured-output] ${source} = ${ms} exceeds the Node setTimeout limit `
-				+ `(${MAX_TIMER_DELAY_MS} ms = 2^31-1); larger delays silently collapse to 1ms and fire immediately. `
-				+ `Recovery: clamp the value to <= ${MAX_TIMER_DELAY_MS} and retry.`,
-		);
-	}
-}
 
 /**
  * terminal 后 bounded teardown 的兜底硬退窗口（ms）。
@@ -435,6 +408,10 @@ export function assertSafeTimerDelay(ms: number, source: string): void {
  * 后正常退出秒级完成），兜底只覆盖「pi 挂死不 settle」的异常态——此时宁可硬退
  *（父进程 SW 侧走「子进程结束未产出 structured-output」失败路径，stderr 已留原因）
  * 也不无限烧 token。
+ *
+ * 安全域：15_000 为字面量常量，处于 Node setTimeout 安全域内（非有限/超 2^31-1
+ * 会塌缩为 1ms 立即触发——若未来 delay 来源动态化，需引入安全域校验，参照
+ * packages/subagent-core/src/shared/timer-delay.ts 的 assertSafeTimerDelay）。
  */
 export const TEARDOWN_FORCE_EXIT_MS = 15_000;
 
@@ -444,24 +421,10 @@ export const TEARDOWN_FORCE_EXIT_MS = 15_000;
  */
 const TEARDOWN_EXIT_CODE = 1;
 
-/** 已武装的兜底硬退 timer：globalThis[Symbol.for] slot 持有（C-ext-06，照 notify-ledger
- *  先例）——jiti 路径分裂加载多份模块时裸模块级 let 双实例各持 timer（失效模式良性：
- *  至多双 timer 各自 process.exit，进程级幂等）；slot 化后单介质同源，幂等再清语义不变。 */
-const TEARDOWN_TIMER_SLOT_KEY = Symbol.for("@zhushanwen/pi-structured-output.loopGate.teardownTimer");
-
-type TeardownTimerSlot = { current: ReturnType<typeof setTimeout> | undefined };
-
-function getTeardownTimerSlot(): TeardownTimerSlot {
-	// globalThis 无 symbol 索引签名，但运行时支持 symbol 键——用 Reflect 安全读写
-	//（notify-ledger getNotifyLedgerSlot 同款）。TeardownTimerSlot 是运行时保证的
-	// 固定形状（本文件唯一写入点）。
-	let slot = Reflect.get(globalThis, TEARDOWN_TIMER_SLOT_KEY) as TeardownTimerSlot | undefined;
-	if (!slot) {
-		slot = { current: undefined };
-		Reflect.set(globalThis, TEARDOWN_TIMER_SLOT_KEY, slot);
-	}
-	return slot;
-}
+// one-shot timer 不属 C-ext-06 §7.5 的「跨 session 存活进程级单例」范畴：
+// terminal 一次性武装、随 process.exit 消亡；jiti 双实例下双 timer 各自
+// process.exit 进程级幂等，模块级 let 即可。
+let teardownTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
  * 武装 terminal 后的 bounded teardown 兜底：TEARDOWN_FORCE_EXIT_MS 后进程仍未退出
@@ -475,14 +438,12 @@ function getTeardownTimerSlot(): TeardownTimerSlot {
  * 能做的最大硬杀就是对自身 process.exit。故采用任务预设的兜底形态：abort+shutdown
  * 优雅退出为主，定时 process.exit 兜底。
  *
- * timer 卫生：assertSafeTimerDelay 包裹（防未来常量演化溢出塌缩为 1ms 立即硬杀）+
+ * timer 卫生：delay 为字面量常量、处 setTimeout 安全域（见 TEARDOWN_FORCE_EXIT_MS 注释）+
  * unref（不阻止 pi 在窗口内自然退出；自然退出时本 timer 随进程消亡不再开火）+
  * terminal 路径幂等 clearTimeout（重复武装不叠加多个兜底 timer）。
  */
 export function armForceExitTeardown(): void {
-	const slot = getTeardownTimerSlot();
-	if (slot.current !== undefined) clearTimeout(slot.current);
-	assertSafeTimerDelay(TEARDOWN_FORCE_EXIT_MS, "structured-output gate teardown");
+	if (teardownTimer !== undefined) clearTimeout(teardownTimer);
 	const timer = setTimeout(() => {
 		process.stderr.write(
 			`[structured-output gate] graceful shutdown did not complete within ${TEARDOWN_FORCE_EXIT_MS / MS_PER_SECOND}s; `
@@ -492,7 +453,7 @@ export function armForceExitTeardown(): void {
 	}, TEARDOWN_FORCE_EXIT_MS);
 	// unref：窗口内 pi 自然退出时不被本 timer 拖住（timer 随进程消亡，不再开火）
 	timer.unref();
-	slot.current = timer;
+	teardownTimer = timer;
 }
 
 /**
