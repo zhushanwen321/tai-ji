@@ -32,13 +32,13 @@ import {
   buildOutboundChildEnv,
   createReplayRecord,
   getLogger,
-  killChain,
   resolveEngineDataDir,
   spawnEngineChild,
   type AgentEvent,
   type UiRequest,
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
+import { killPiProcess } from "@zhushanwen/pi-rpc";
 
 import { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 import { registerActiveChild } from "./active-children.ts";
@@ -81,6 +81,11 @@ const logger = getLogger("session-runner");
  * 秒级）——kill 最多延后此时长，对已完成 turn 的子进程无副作用。
  */
 const LAZY_GET_STATE_TIMEOUT_MS = 1_000;
+
+// 毫秒→秒换算（SIGKILL 升级 warn 日志的秒数显示）。文件内私有定义：工程内
+// MS_PER_SECOND 惯例是各使用文件私有常量（subagent-engine-sdk kill-chain 等
+// 先例），无共享导出源可 import，保持同惯例不另立导出点。
+const MS_PER_SECOND = 1_000;
 
 /** run 的宿主回调面（server.ts 注入：协议通知 + host/* 反向请求）。 */
 export interface SpawnRunCallbacks {
@@ -413,11 +418,20 @@ export async function runSpawnOnce(
       ...(params.signal !== undefined ? { signal: params.signal } : {}),
     });
 
+    // [U1 归并] 杀链切 pi-rpc killPiProcess（SIGCONT 前置 + SIGTERM → grace →
+    // SIGKILL 阶梯，与 runtime 主链路同源；grace 维持 PI_KILL_GRACE_MS 现状值，
+    // timer unref 维持迁移前 dispose 语义）。相对 SDK killChain 的行为面差异：
+    // +SIGCONT（唤醒 SIGSTOP 冻结形态，防御增强）、-SIGKILL 后 10s 收尸等待
+    // （killChild 是 fire-and-forget，无 settle 消费方，无行为影响）。
     const killChild = (source: string): void => {
-      void killChain(child, {
+      void killPiProcess(child, {
         graceMs: PI_KILL_GRACE_MS,
         unrefTimers: true,
-        escalationNote: `child ${params.recordId} (source: ${source})`,
+        onEscalate: () => {
+          logger.warn(
+            `[kill-chain] child ${params.recordId} (source: ${source}) still alive ${PI_KILL_GRACE_MS / MS_PER_SECOND}s after SIGTERM, escalating to SIGKILL`,
+          );
+        },
       });
     };
     // agent_end 终结（F1.2）：正常完成后的主动 kill，close 带信号但语义是成功

@@ -98,13 +98,18 @@ graph TD
 | U5-D8 worktree 重建 repo 定位依赖注册表 branch 反查，归档 cleanup 已移除条目 → 反查落空归形态①降级 reopen | U5 | 重建依据消亡的自然处置 |
 | U5-D9 worktree-manager 收纳 reconstruct 后超 max-lines(500)，对账族拆出 worktree-reconcile.ts（RECONCILE 常量 re-export 保持测试 import 路径） | U5 | MANDATORY 行限修复规则 |
 | U5-D10 manifest archived 下行映射（archived→closed）与 intent 持久化归 U7/U8；本次 archived record 派生投影 legacy running | U5 | 领地边界，U8 承接 |
+| U1-D1 杀链切换与前任 README「双源刻意保留」冲突：按设计 §3.3.2 收敛意图切单源 killPiProcess，README 同步修订；行为差异 +SIGCONT 前置（增强）/ -SIGKILL 后收尸等待（消费方为 void，无影响） | U1r2 | 设计意图优先于前任登记 |
+| U1-D2 killPiProcess 超逐字等价新增 unrefTimers 可参（pi-subagent-cli 防 ref'd timer 挂进程）+ 已退前置短路（K2 零信号语义保留） | U1r2 | 收敛消费面必需，双参缺省不改变 runtime 现状 |
+| U1-D3 env 面 pi-subagent-cli 不切 buildPiOutboundEnv：该侧走 SDK buildEngineChildEnv 三层契约，强切是语义错误（强注 EXT_LOG + 覆写 PI_CODING_AGENT_DIR） | U1r2 | 按包契约 env.ts 头注释/README 第 7 条 |
+| U1-D4 import 走 barrel '@zhushanwen/pi-rpc'（包 exports 单一 '.' 入口，两侧消费形态一致） | U1r2 | 前任设定沿用 |
+| U1-D5 tsup noExternal=['@zhushanwen/pi-rpc'] 内联（pi-rpc 未发布，external 会让 npm 形态 404；零依赖纯 TS 无实例分裂；发布后可切 external） | U1r2 | 发布时序约束 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u-foundation | committed | 1 | tsc 零错 + vitest 3000 passed + write-surface 绿 + flake 修复；deviations 7 条（V2 转正推迟 U2 / barrel 推迟 U8 等） |
-| U1 | wip-checkpoint | 1 | 第 1 轮速率限制中断（1302）；半成品已 WIP commit 8ab4461eb 保护（pi-rpc 五模块 + runtime 侧接线）；未完成：pi-subagent-cli 归并 + 双侧验收测试；等 U3 完成后串行重派（附证据包续作） |
+| U1 | committed | 2 | 第 1 轮速率限制中断 WIP 8ab4461eb；第 2 轮续作完成：pi-subagent-cli 归并（stdin-writer 帧构造/spawn-args 委托壳/杀链切 killPiProcess）+ tsup noExternal 内联 pi-rpc + S7 前置 grep 无双轨五组证据（唯一残留 relay-registry killRelayChild 领地外，见残留风险 5）；pi-rpc 75 / pi-subagent-cli 304 / runtime 5946 全绿；deviations 6 条见 §5 |
 | U2 | committed | 1 | 部分在制文件被外部 docs 批次 commit 56898e3cfa 捎带（边界污染已记录）；增量补全 commit 0487bbab2：两态转正 + 四原语填肉 + 桥接不变量 12 文件 + extensions 测试迁移；tsc 0 / vitest 3024 passed / write-surface 绿 / extensions 三连绿；deviations 8 条（桥接判据 SSOT、tryEnterRunning 新增、closedReason 保留等） |
 | U3 | committed | 1 | commit 42e3498b4：.state 读侧新格式 + 旧值映射 + 重建单规则四输入 + 孤儿恢复直断删除 + entry stopReason 投影 + cold-lookup/Continuation 桥接（U4 重写锚点已注）；tsc 0 / vitest 3027 passed / runtime 5945 passed / 守卫绿；deviations 8 条（E1 批投影 running 化归 U8、boot 重认领源消亡归 U5、worktree/GC 消费方核实免改） |
 | U4 | committed | 1 | commit 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
@@ -121,8 +126,11 @@ graph TD
 2. ~~u7a 推送链 3 处活路径未补推送~~ 已处理（U5 随新语义统一接线完毕）。
 3. zcode -32031 上游缺陷：U6 选型已绕开（历史注入），若上游修复可升级原地 resume（设计 K6）。
 4. 探针产物 .tmp/probe/*.mjs 不进 git（gitignore），U6 集成测试需自含协议驱动代码。
+5. relay-registry.ts killRelayChild 同型 pi 杀链（runtime/src/infra/relay/，领地外未动）：与 killPiProcess 非逐字等价（settleTimer 兜底/try-catch/once-on 差异），收敛需先行为对齐裁决——S7 grep 无双轨的唯一残留，阶段 3 一致性审查裁决归属单元。
+6. reap-orphan-pi.ts:21/204 注释引用旧名 buildPiArgs（现为 pi-rpc buildPiMainAgentArgs）——注释级漂移，U9 文档同步顺带清扫。
 
 **变更历史**：
 - 2026-09-13 计划创建（基线 c2c111170：merge dev-0.9.19 + u7a re-arm 之后）。
 - 2026-09-13 u-foundation committed；U1 速率限制中断半程，WIP checkpoint 8ab4461eb；U2 committed 0487bbab2（部分 src 被外部 docs 批次 56898e3cfa 捎带——并行会话活跃于本 worktree，后续单元验收后立即 commit 缩短在制暴露窗）。
 - 2026-09-13 U3 committed 42e3498b4；U4 committed；U5 committed（27 文件：cancel/close/编排性关闭/寻回四动作 + gate 三元组 + worktree 重建；vitest 3066 / extensions 三连绿；10 偏差入 §5）。
+- 2026-09-13 用户要求提速 → 双 agent 并发（U6 + U1 续作）；U1 第 2 轮续作 committed（12 文件：pi-subagent-cli 归并 + S7 双轨清扫；pi-rpc 75 / cli 304 / runtime 5946；relay-registry 残留入风险 5）。

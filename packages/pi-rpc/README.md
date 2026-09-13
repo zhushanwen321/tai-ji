@@ -5,7 +5,7 @@ pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-
 消费者：
 
 - `@xyz-agent/runtime`（主 agent rpc-client 薄壳）
-- `@zhushanwen/pi-subagent-cli`（stdin-writer / spawn-args 归并）
+- `@zhushanwen/pi-subagent-cli`（stdin-writer / spawn-args / 杀链归并；npm dist 经 tsup noExternal 内联本包——本包尚无 npm 发布版）
 - **zcode 不经过此层**（app-server 是另一协议，仅语义层对齐）
 
 ## 五模块
@@ -15,7 +15,7 @@ pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-
 | `spawn-args` | pi argv 构造器：`buildPiMainAgentArgs`（主 agent 模板）/ `buildPiSubagentSpawnArgs`（subagent 模板）+ 共享分段原语（skill/extension/tools/mirror）。参数化差异点：session 定位 none/dir+file、thinking 传递 flag/模型后缀、mirror 规则 | runtime `buildPiArgs` ∪ pi-subagent-cli `buildSpawnArgs` |
 | `frame` | `attachLfOnlyLineReader`（LF-only 行分帧，U+2028/U+2029 不拆帧）+ `createPendingRegistry`（pending 表 + 超时分级 FAST/CMD/SLOW + 迟到响应丢弃）+ `createEarlyFrameBuffer`（早期帧缓冲）+ `tryWriteStdinLine`/`isBrokenPipeError`（裸写原语） | runtime rpc-client :46-74 / sendCommand；pi-subagent-cli stdin-writer |
 | `commands` | prompt（含 streamingBehavior 语义）/ steer / followUp / abort / get_state / switch_session / extension_ui_response 帧组装（params 形态 + 完整帧形态两层） | runtime rpc-client 高层 API；pi-subagent-cli stdin-writer |
-| `kill-chain` | `killPiProcess`：SIGCONT → SIGTERM → grace → SIGKILL 阶梯（grace 可参，缺省 2s） | runtime RpcClient.kill() |
+| `kill-chain` | `killPiProcess`：已退前置短路 + SIGCONT → SIGTERM → grace → SIGKILL 阶梯（grace 可参，缺省 2s；timer 可参 unref） | runtime RpcClient.kill() + pi-subagent-cli killChild / dispose 收割 |
 | `env` | `buildPiOutboundEnv`：extras 过滤 + `XYZ_AGENT_EXT_LOG` 恒注入 + `PI_CODING_AGENT_DIR` 隔离；底层白名单构建器经 DI 注入 | runtime rpc-client buildPiOutboundEnv |
 
 ## 刻意不统一的清单（防「顺手统一」）
@@ -27,7 +27,7 @@ pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-
 3. **裸写错误策略**：runtime `sendRaw` 吞错（UI 响应 fire-and-forget，无恢复路径）vs pi-subagent-cli `writeStdinLine` 对 EPIPE throw（驱动冷恢复路径）。本包只提供 `tryWriteStdinLine` 原语 + `isBrokenPipeError` 判别单源，策略归消费方。
 4. **argv 编排顺序**：主 agent 与 subagent 模板的 flag 顺序不同（`buildPiMainAgentArgs` 的 skill/extension 在 tools 段前、基座 flag 前置；`buildPiSubagentSpawnArgs` 的 skill 在 tools 段后、mirror 段末尾）。pi 的 commander 解析对顺序无语义；保留两模板现状是「行为等价提取」迁移契约（快照测试锚定两侧输出与切换前逐字节一致），不是待清理债。
 5. **stdout 行分帧双源现状**：runtime 侧用本包 `attachLfOnlyLineReader`（StringDecoder + 剥 `\r` + 尾行 flush）；pi-subagent-cli 的 stdout pump 用 `@zhushanwen/subagent-engine-sdk` `pumpNdjsonLines`（与 zcode connection 共享的引擎中立单源，S4 簇 5b 已收敛）。两者正常路径行为一致（pi 输出恒 `\n` 定界），不强行合并——合并会让 zcode 间接依赖本包，违反「zcode 不经过此层」。
-6. **杀链双源现状**：本包 `killPiProcess`（SIGCONT 前置，pi 主链路）与 SDK `killChain`（SIGTERM 起，pi-subagent-cli spawn-runner 与 zcode 共用的引擎中立面）并存。SIGCONT 阶梯是 runtime 主链路对「SIGSTOP 冻结进程」的防御；引擎中立层语义不同，完整收敛超出本包单元。
+6. **pi 杀链与 SDK killChain 分层**：pi 进程杀链单源在本包 `killPiProcess`（SIGCONT 前置 + 已退零信号短路 + 不等 SIGKILL 收尸的 settle 语义）——runtime rpc-client 与 pi-subagent-cli（killChild / dispose 收割）双侧消费。SDK `killChain`（SIGTERM 起 + SIGKILL 后有界收尸 + terminated/killed 判别返回值）继续服务 **zcode 引擎**（引擎中立层），不经本包——两链语义面不同（收尸等待 / 返回值 / 防御前置），是对「pi 进程」与「引擎中立」两个概念域的分别建模，非双轨。
 7. **`buildOutboundChildEnv` 底层双 SSOT**：`@xyz-agent/shared`（runtime 消费）与 SDK（引擎 CLI 独立 npm 发布需自包含）各一份，本包不复刻第三份——经 `buildChildEnv` 参数注入。
 
 ## 单侧消费的命令（防误认为双侧契约）

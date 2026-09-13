@@ -839,6 +839,9 @@ importers:
 
   packages/pi-subagent-cli:
     dependencies:
+      '@zhushanwen/pi-rpc':
+        specifier: workspace:*
+        version: link:../pi-rpc
       '@zhushanwen/subagent-engine-sdk':
         specifier: workspace:*
         version: link:../subagent-engine-sdk

@@ -14,11 +14,13 @@ interface FakeChild extends KillableChild {
   emitExit(): void
 }
 
-function makeFakeChild(): FakeChild {
+function makeFakeChild(overrides?: { exitCode?: number | null; signalCode?: string | null }): FakeChild {
   const signals: string[] = []
   let exitListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined
   const child: FakeChild = {
     signals,
+    ...(overrides?.exitCode !== undefined ? { exitCode: overrides.exitCode } : {}),
+    ...(overrides?.signalCode !== undefined ? { signalCode: overrides.signalCode } : {}),
     kill(signal?: NodeJS.Signals | number) {
       signals.push(String(signal))
       return true
@@ -33,6 +35,26 @@ function makeFakeChild(): FakeChild {
     },
   }
   return child
+}
+
+/**
+ * stub setTimeout 并跟踪各 timer 的 unref 调用（Node 运行时 timer 是 Timeout 对象，
+ * DOM lib 类型面是 number——经 unknown 双重转换后 spyOn）。返回 unref 计数数组；
+ * 调用方 finally 里 vi.unstubAllGlobals() 复原。
+ */
+function trackTimerUnrefs(): string[] {
+  const unrefCalls: string[] = []
+  const originalSetTimeout = globalThis.setTimeout
+  vi.stubGlobal('setTimeout', ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+    const timer = originalSetTimeout(handler, timeout, ...(args as [])) as unknown as NodeJS.Timeout
+    const spy = vi.spyOn(timer, 'unref')
+    spy.mockImplementation(() => {
+      unrefCalls.push('unref')
+      return timer
+    })
+    return timer as unknown as ReturnType<typeof setTimeout>
+  }) as unknown as typeof globalThis.setTimeout)
+  return unrefCalls
 }
 
 describe('killPiProcess', () => {
@@ -74,5 +96,52 @@ describe('killPiProcess', () => {
     child.emitExit()
     await done
     expect(child.signals).toEqual(['SIGCONT', 'SIGTERM'])
+  })
+
+  it('unrefTimers: true → grace timer 被 unref（dispose 路径不挂进程退出）', async () => {
+    const unrefCalls = trackTimerUnrefs()
+    try {
+      const child = makeFakeChild()
+      const done = killPiProcess(child, { graceMs: 20, unrefTimers: true })
+      child.emitExit()
+      await done
+      expect(unrefCalls).toHaveLength(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('unrefTimers 缺省（不传）→ grace timer 保持 ref\'d（runtime 主链路现状）', async () => {
+    const unrefCalls = trackTimerUnrefs()
+    try {
+      const child = makeFakeChild()
+      const done = killPiProcess(child, { graceMs: 20 })
+      child.emitExit()
+      await done
+      expect(unrefCalls).toHaveLength(0)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('已退进程（exitCode 非 null）→ 前置短路零信号（K2：幂等 no-op，不抛、可重复）', async () => {
+    const child = makeFakeChild({ exitCode: 0 })
+    await killPiProcess(child, { graceMs: 20 })
+    await killPiProcess(child, { graceMs: 20 }) // 可重复
+    expect(child.signals).toEqual([])
+  })
+
+  it('被信号杀死（signalCode 非 null）→ 前置短路零信号', async () => {
+    const child = makeFakeChild({ signalCode: 'SIGKILL' })
+    await killPiProcess(child, { graceMs: 20 })
+    expect(child.signals).toEqual([])
+  })
+
+  it('无 exitCode/signalCode 字段的 fake（undefined）→ 视为存活，正常发信号', async () => {
+    const child = makeFakeChild()
+    const done = killPiProcess(child, { graceMs: 50 })
+    expect(child.signals).toEqual(['SIGCONT', 'SIGTERM'])
+    child.emitExit()
+    await done
   })
 })
