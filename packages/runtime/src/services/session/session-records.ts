@@ -273,7 +273,13 @@ export class SessionRecords {
     const workflowUpdates: Array<{ runId: string; status: string; reason?: string }> = []
     for (const record of workflows) {
       const prev = cache.workflows.get(record.runId)
-      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason) {
+      // [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
+      // 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
+      // GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
+      // 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
+      // entry append 节流（缺省 60s）约束，不会刷屏。
+      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
+          prev.agentCalls.length !== record.agentCalls.length) {
         workflowUpdates.push({ runId: record.runId, status: record.status, reason: record.reason })
       }
       cache.workflows.set(record.runId, record)

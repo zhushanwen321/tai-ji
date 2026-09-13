@@ -55,7 +55,13 @@ function subagentRecordEntry(id: string, status: string, entryId: string, extra:
 }
 
 /** 自描述 workflow-record entry（W17 v1：{v:1, snapshot, updatedAt}）。 */
-function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId: string, reason?: string): Record<string, unknown> {
+function workflowRecordEntry(
+  runId: string,
+  status: 'running' | 'done',
+  entryId: string,
+  reason?: string,
+  trace: Array<Record<string, unknown>> = [],
+): Record<string, unknown> {
   return {
     type: 'custom',
     customType: 'workflow-record',
@@ -69,7 +75,7 @@ function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId:
         v: 'wf-run-v2',
         runId,
         spec: { scriptName: 'test-flow' },
-        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace: [] },
+        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace },
         meta: { startedAt: '2026-08-19T00:00:00Z' },
       },
     },
@@ -183,6 +189,37 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(workflowMsgs).toHaveLength(1)
     expect((workflowMsgs[0][1] as { payload: { update: { runId: string; status: string } } }).payload.update)
       .toEqual({ runId: 'run-1', status: 'running', reason: undefined })
+  })
+
+  it('running 态仅 trace 步骤数变化也发布 workflowUpdate（GUI 步骤实时可见，[步骤可见性修复 2026-09-14]）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [workflowRecordEntry('run-1', 'running', 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    // 新增 run：首发一次（status 变化）
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')).toHaveLength(1)
+
+    // 同 runId 仍 running，仅 trace 多一个 agent 步骤（core 启动即 save 的产物）——
+    // status/reason 未变，但步骤数变化也必须发布（否则 GUI 详情整个 run 期间收不到 reload 触发）
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [
+          workflowRecordEntry('run-1', 'running', 'e2', undefined, [
+            { stepIndex: 1, agent: 'reviewer', task: 't', model: 'default', status: 'running', phase: 'R1', startedAt: '2026-08-19T00:00:02Z' },
+          ]),
+        ],
+        leafId: 'e2',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    const stepMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')
+    expect(stepMsgs).toHaveLength(2)
+    expect(stepMsgs[1][0]).toBe('s1')
   })
 
   it('同值重复 entry 不重复发布（diff 基线）', async () => {
