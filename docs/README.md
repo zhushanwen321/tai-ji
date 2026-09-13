@@ -16,7 +16,7 @@ docs/
 ├── release-notes.md       ← 发布 notes 写作规范 + 待发布草稿暂存
 │
 ├── adr/                   ← 架构决策记录（决策级「为什么」唯一家园；统一编号 + README 索引）
-├── architecture/          ← 全局架构与契约（分层/数据治理/跨模块协议/外部系统调研 + history/ 归档区）
+├── architecture/          ← 全局架构与契约（分层/数据治理/跨模块协议；被取代设计即删，git 可追溯）
 ├── design/                ← 跨模块运行时机制设计（准入：跨 ≥2 个 package 的机制/架构）
 ├── extensions/            ← pi 扩展跨包约定（开发指南/强约束/日志规范/术语表/adr/）
 ├── page-design/           ← 前端设计 SSOT（v6-tokens.css 值权威 + v6-master-spec.md 范式权威）
@@ -33,7 +33,7 @@ docs/
 | 不可逆的架构/技术决策（被否方案/事故/外部约束）？ | `adr/`（ADR，带日期 + 状态 + 背景 + 裁决） |
 | 跨 ≥2 个 package 的运行时机制/架构？ | `architecture/` 或 `design/` |
 | 单模块/单包的实现设计？ | **不进 docs/**——「为什么/坑」蒸馏进该模块代码注释（挂 `// ADR-xxxx` 锚点），已实施的过程内容删除（git 可追溯） |
-| review/impl-plan/acceptance 等工作流产物？ | **不进 docs/**——落 `.xyz-harness/<date>-<slug>/`，完成后不清理（harness 目录随 git 追踪） |
+| review/impl-plan/acceptance 等工作流产物？ | **不进 docs/ 也不进 git**——落本地 `.xyz-harness/<date>-<slug>/`（gitignored；2026-09-13 裁决：仓内不留决策档案，追溯靠 commit message 与 docs） |
 | 竞品/技术调研？ | `~/Documents/xyz-agent-archive/`（不进 git） |
 | 前端视觉/组件/页面设计？ | `page-design/`（值权威 = v6-tokens.css，hook 守卫） |
 | pi 扩展跨包约定？ | `extensions/`；单 extension 行为文档进该包内 `docs/` 或 README |
@@ -56,7 +56,7 @@ docs/
 
 ## 禁止放入 docs/
 
-- xyz-harness 工作流产出物（spec / plan / test / retrospect / review / impl-plan）→ `.xyz-harness/<date>-<slug>/`
+- xyz-harness 工作流产出物（spec / plan / test / retrospect / review / impl-plan）→ 本地 `.xyz-harness/<date>-<slug>/`（gitignored，不入库）
 - 单模块设计文档 → 蒸馏进代码注释后删除（见上文归属判定）
 - 一次性审查日志、已完成的修复记录 → 完成后删除（git 可追溯）
 - UI demo / HTML 设计稿 → `page-design/`（禁止散落项目根或 `demos/`、`impeccable/` 目录）

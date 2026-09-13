@@ -82,7 +82,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 **架构机制**：
 
 12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `pr-cr-fix/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
-13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.xyz-harness/` 必须提交不可删除（决策追溯）；`DESIGN.md` 保留作历史参考（已 DEPRECATED by ADR-0019）
+13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.xyz-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；`DESIGN.md` 保留作历史参考（已 DEPRECATED by ADR-0019）
 14. **项目 skill 必须自包含 [HISTORICAL]**：`.agents/skills/` 引用的脚本复制到 skill 目录内随 git 跟踪（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink
 15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制穷尽 pi extension 层）**：详见 [docs/troubleshooting.md](docs/troubleshooting.md) 的「历史排查规则」
 
