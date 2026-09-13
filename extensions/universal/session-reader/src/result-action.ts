@@ -116,8 +116,7 @@ interface ResultItem {
   text: string
 }
 
-/** result 截断尾提示（design §3.1.3：超出截断 + 提示读原文件）。 */
-/** result 条目截断提示行。
+/** result 条目截断提示行（design §3.1.3：超出截断 + 提示读原文件）。
  *
  * [S8 code-simplify 口径注] 本函数的 X = **保留**字符数（limit）；而 subagent-core
  * notifier.ts buildTruncationPointer 同模板的 X = **丢弃**字符数（total - kept）。

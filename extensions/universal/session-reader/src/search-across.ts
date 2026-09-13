@@ -347,7 +347,9 @@ function formatCrossSearchText(d: CrossSearchDetails): string {
   return `${formatCrossSearchHead(d, hitSessions.length)}\n${lines.join('\n')}`
 }
 
-/** searchAcrossSessions 的可选参数（byteBudget 供测试注入小预算）。 */
+/** searchAcrossSessions 的可选参数。byteBudget 为测试注入缝（E10 定性）：非模型可见参数
+ * （session_read schema 无此入参），存在动机 = 测试注入小预算触发预算截断用例，不必构造
+ * 64MB fixture；生产路径（doSearch）不传，走 SEARCH_SCAN_BYTE_BUDGET 默认。 */
 interface CrossSearchOptions {
   scope?: NonNullable<SessionReadParams['scope']>
   limit?: number
@@ -462,8 +464,8 @@ async function attachScannedTitles(
 }
 
 /**
- * 跨会话内容检索主体（u12 导出：byteBudget 参数供测试注入小预算，工具路径经 doSearch
- * 走默认 SEARCH_SCAN_BYTE_BUDGET）。
+ * 跨会话内容检索主体（u12 导出：byteBudget 为测试注入缝，非模型可见——工具路径经
+ * doSearch 走默认 SEARCH_SCAN_BYTE_BUDGET）。
  *
  * 流程：窄化拒绝（候选 > MULTI_SEARCH_MAX_SESSIONS，V8）→ buildSessionFileIndex（一次
  * 根扫描，id 语义与 find 候选同源）→ 按传入顺序逐个「复用单会话扫描管线」（safeParse →

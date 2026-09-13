@@ -1,7 +1,7 @@
 import type { AutocompleteItem } from '@earendil-works/pi-tui'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { SessionManager, type SessionInfo } from '@earendil-works/pi-coding-agent'
-import { toCandidate } from './hash-provider.js'
+import { toCandidate, DEFAULT_LIMIT } from './hash-provider.js'
 
 /**
  * M4 TUI 层：/session-pick 命令（design 附录 P-hash-trigger 降级兜底 + 非 # 场景入口）。
@@ -21,13 +21,12 @@ import { toCandidate } from './hash-provider.js'
  * cwdSessionDir 注入（同 hash-provider，零 pi 依赖核心逻辑，可单测）。
  */
 
-/** /session-pick 列表上限（对齐 # 弹窗 DEFAULT_LIMIT，design G6）。 */
-const PICK_LIMIT = 10
-
 /** label 追加的短 uuid 长度（uuid v7 时间前缀，同目录同毫秒创建概率可忽略，消歧足够）。 */
 const SHORT_UUID_LEN = 8
 
-/** /session-pick 命令配置（Omit<RegisteredCommand, 'name' | 'sourceInfo'>）。 */
+/** /session-pick 命令配置：返回结构类型（description + 参数补全 + handler），
+ * 形态等价于 RegisteredCommand 减 name/sourceInfo（这两项由 pi 注册方提供），
+ * 按仓内现状写为内联类型而非 Omit<>。 */
 export function createSessionCommand(
   getCwdSessionDir: () => string,
 ): {
@@ -39,11 +38,16 @@ export function createSessionCommand(
     description: 'Pick a session and insert a #uuid reference into the editor.',
     async getArgumentCompletions(argumentPrefix) {
       const trimmed = argumentPrefix.trim()
-      const all = await SessionManager.listAll(getCwdSessionDir())
+      // 目录未就绪（无 live session 上下文，getCwdSessionDir 返回空串）→ 空手返回，绝不调
+      // listAll('')——pi 的 listAll 对空字符串 falsy 走默认全盘分支（3488 项 / ~8s，会让补全
+      // 卡死；同款 guard 见 hash-provider provideHashCandidates）
+      const cwdSessionDir = getCwdSessionDir()
+      if (!cwdSessionDir) return null
+      const all = await SessionManager.listAll(cwdSessionDir)
       // uuid 片段过滤（与 # 弹窗一致）；空 prefix → recent（listAll 已按 modified 倒序）
       const filtered =
         trimmed === '' ? all : all.filter((s) => s.id.includes(trimmed))
-      const top = filtered.slice(0, PICK_LIMIT)
+      const top = filtered.slice(0, DEFAULT_LIMIT)
       if (top.length === 0) return null
       // value 用完整 uuid（剥 # 后，命令参数位置不带 #）
       return top.map((s) => {
@@ -53,10 +57,17 @@ export function createSessionCommand(
     },
     async handler(args, ctx) {
       const trimmed = args.trim()
-      const all = await SessionManager.listAll(getCwdSessionDir())
+      // 同 getArgumentCompletions 的空串 guard：无 live session 上下文时按零匹配处理，
+      // 不触发 listAll 全盘分支
+      const cwdSessionDir = getCwdSessionDir()
+      if (!cwdSessionDir) {
+        ctx.ui.notify('未找到匹配的 session。', 'warning')
+        return
+      }
+      const all = await SessionManager.listAll(cwdSessionDir)
       const filtered =
         trimmed === '' ? all : all.filter((s) => s.id.includes(trimmed))
-      const top = filtered.slice(0, PICK_LIMIT)
+      const top = filtered.slice(0, DEFAULT_LIMIT)
       if (top.length === 0) {
         ctx.ui.notify('未找到匹配的 session。', 'warning')
         return
@@ -65,8 +76,9 @@ export function createSessionCommand(
       const labels = top.map((s) => formatSessionLabel(s))
       const chosen = await ctx.ui.select('选择一个 session 插入 # 引用', labels)
       if (chosen === undefined) return
+      // chosen 必属 labels（select 契约返回列表成员或 undefined，后者上一行已拦截），
+      // indexOf 恒命中——不再保留 idx<0 死防御分支
       const idx = labels.indexOf(chosen)
-      if (idx < 0) return
       // 选中后插入 # + 完整 uuid（剥 # 算片段，再补 # 插入编辑器）
       const frag = toCandidate(top[idx]).insertText.slice(1)
       // /session-pick 提交后编辑器已清空，直接 set # uuid 供用户补完指令再发送；

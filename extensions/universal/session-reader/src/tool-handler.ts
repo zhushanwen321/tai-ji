@@ -818,7 +818,8 @@ async function doFamily(
   return { content: [{ type: 'text', text: formatFamilyText(family) }], details: family }
 }
 
-/** outline：turn 级全貌 TOC（design §3.4 outline，~1500 token；render budget 硬编码 2000）。 */
+/** outline：turn 级全貌 TOC（design §3.4 outline，~1500 token；budget 走 render 侧
+ * OUTLINE_DEFAULT_BUDGET_TOKENS 默认，handler 不再传测试专用缝参数）。 */
 async function doOutline(
   params: SessionReadParams,
   agentDir: string,
@@ -837,7 +838,6 @@ async function doOutline(
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const opts: OutlineOptions = {
-    budget: 2000,
     allBranches: params.allBranches,
     granularity: params.granularity,
   }
@@ -1031,7 +1031,6 @@ async function doExport(
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const result = renderOutline(turns, tree, {
-      budget: 2000,
       allBranches: params.allBranches,
       granularity: params.granularity,
     })

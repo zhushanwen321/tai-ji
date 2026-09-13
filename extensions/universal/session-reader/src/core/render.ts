@@ -17,7 +17,8 @@ const ASSISTANT_BRIEF_MAX_CHARS = 80
 const ENTRY_BRIEF_MAX_CHARS = 100
 /** turn 索引显示宽度（T013 三位补零）。 */
 const TURN_INDEX_WIDTH = 3
-/** outline 默认 token 预算（OutlineOptions.budget 缺省值）。 */
+/** outline 默认 token 预算（OutlineOptions.budget 缺省值）。生产路径（doOutline/doExport）
+ * 唯一取值：outline 是设计定档的 ~1500 token 全貌 TOC，无按调用方调节的需求。 */
 const OUTLINE_DEFAULT_BUDGET_TOKENS = 2000
 /** token 估算换算基数（chars/4，与 tokenEstimate 口径一致）。 */
 const CHARS_PER_TOKEN = 4
@@ -69,7 +70,9 @@ export interface OutlineResult {
 }
 
 export interface OutlineOptions {
-  /** 默认 2000（token） */
+  /** 测试注入缝（E10 定性）：非模型可见参数——session_read schema 无 budget 入参，模型
+   * 无法也无需调节；存在动机 = 测试注入小预算触发降级档用例（砍 assistantBrief / 骨架档）。
+   * 生产路径不传，走 OUTLINE_DEFAULT_BUDGET_TOKENS 默认。 */
   budget?: number
   allBranches?: boolean
   /** 默认 turn；entry = 每 entry 一行不聚合（D-1 兜底，坏 session 调试） */

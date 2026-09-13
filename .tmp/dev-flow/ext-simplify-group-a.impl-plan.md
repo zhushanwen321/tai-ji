@@ -166,6 +166,9 @@ graph LR
 | 08-u4 | L4 牵动 14 处测试（设计估 1 处） | 依赖「无 delivery 直投」旧路径锚定的用例全集，按 L4 裁决机械转 force 路径，断言本体零改动 | 接受 |
 | 08-u4 | L8 二选一：SchedulerStore 保留 + 形状忠实注释 | 唯一用途是 importer 的 JSON.parse cast，描述旧 store 磁盘真实格式，删除会静默漂移 | 接受（优于删除） |
 | 08-u4 | L9 二选一：Mock 迁 __tests__/mock-backend.ts，三个生产符号保留 export（直测消费） | 去 export 迫使测试走间接路径或复制路径推导，代价大于收益 | 接受 |
+| 04-U9 | eslint.config.mjs 在仓库根（设计行号指包内，实为根文件专属 override 段） | 设计权威内容 = session-reader tool-handler override；包内无此文件 | 接受（按设计权威落点） |
+| 04-U9 | hash-provider applyCompletion 委托分支保留 + 注释纠错（原判死防御） | pi-tui 实装核实为真实可达路径（@文件//命令 经 provider 转发） | 接受（实装证据优于原注释） |
+| 04-U9 | eslint 阈值收紧做成 override 移除（989 < 域基线 1000） | 仓内先例「移除而非抬阈值」，移除 = 收紧至域基线 | 接受 |
 
 ## 6 状态表
 
@@ -187,7 +190,7 @@ graph LR
 | 04-U6 | committed | 1 | 406 绿（零测试改动）；RESULT_ACTION_DEPS 零命中；ResultActionDeps 3 成员 |
 | 04-U7 | committed | 1 | 406 绿；find 专用 readTailIdentityForMatch（56 行）删除复用单实现；畸形行差异注释登记（subagent 中途撞速率限制，主 agent 接替验证收尾） |
 | 04-U8 | committed | 1 | 405 绿；SessionRoot.id/fullEntry 零命中；E11 共享核 3 组合点；G5④ 回写齐 |
-| 04-U9 | pending | 0 | - |
+| 04-U9 | committed | 1 | 407 绿（+2 A1 用例）；A1/E10/A4/A5 全落地；阶段 2 全 23 单元完成 |
 | 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
 | 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 |
 | 05-S3 | committed | 1 | 579/579；六组符号零命中；barrel 2+2；typecheck/lint 过（05 线完成） |
