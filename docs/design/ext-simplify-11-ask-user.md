@@ -4,7 +4,7 @@
 
 ## 开篇（SCQA）
 
-- **S（情境）**：`@zhushanwen/pi-ask-user`（v7.1.2，universal 组，mandatory-extensions.json feature tier）提供 ask_user 工具——LLM 发起 1-4 个结构化问题（每题 2-4 个互斥选项），extension **无条件自动追加一个 Other 自由输入行**；TUI 模式经 `ctx.ui.custom` + AskUserComponent 内联渲染，RPC 模式（xyz-agent GUI）经 askUserInteract select 通道由 AskUserOverlay 渲染。它的校验层设计前提是「容忍弱模型违反 schema description 软约束」：string options 被故意放行到 validateInput 做友好纠错。
+- **S（情境）**：`@zhushanwen/pi-ask-user`（v7.1.3，universal 组，mandatory-extensions.json feature tier）提供 ask_user 工具——LLM 发起 1-4 个结构化问题（每题 2-4 个互斥选项），extension **无条件自动追加一个 Other 自由输入行**；TUI 模式经 `ctx.ui.custom` + AskUserComponent 内联渲染，RPC 模式（xyz-agent GUI）经 askUserInteract select 通道由 AskUserOverlay 渲染。它的校验层设计前提是「容忍弱模型违反 schema description 软约束」：string options 被故意放行到 validateInput 做友好纠错。
 - **C（冲突）**：2026-09-11 过度设计审计证实两件事。① 同一容忍设计下存在校验完备性缺口：schema description/tool description/promptGuidelines 四处声明「不要传 Other 选项」但全部是软约束，LLM 真传 `label:"Other"` 时 validateInput 放行 → 两套渲染路径各出现两行 Other，UI 自相矛盾且答案语义歧义（M23，正确性）。② 外沿有零星收持税：AnswerValueSchema/ResultSchema 零引用死导出、TUI 启动样板同包双份且已漂移、channel registry 本地接口死成员 + gui_widget 路由位空置——而 registry 骨架（握手 slot + pending/flush）经 M4 事故验证为本质复杂度，不可砍。
 - **Q（问题）**：如何用与既有校验风格一致的最小改动堵住 Other 保留字缺口，同时只清外沿不动骨架，并把四问记录中与现状不符的 contested 发现诚实关闭？
 - **A（答案）**：checkOptionLabels 增加保留字精确匹配拦截（一行校验 + 2 条测试）+ ARCHITECTURE.md 登记 registry 外沿事实；5 项 low 清理显式移交 code-simplify 批次；发现 5（前端编码漂移）经实读证伪后裁决不实施。
@@ -72,7 +72,7 @@ TUI 内联问卷实际渲染（allOptions 追加后）：
 
 - **F1（双 Other 行，自相矛盾 UI）**：两条路径都中招。TUI 如上；RPC 路径 LLM 的 Other 原样进 protoQuestions（toProtoQuestions 不过滤，index.ts:117-129），AskUserOverlay 的 showOther()（:196-198，`allowOther !== false` 即追加）再追加前端 Other 卡（`__other__` 占位）→ 同样两行。选中 LLM 的 Other 后答案走 `answers[key]="Other"` 主 key 通道，选中前端 Other 走 `${key}__other` 通道——两条通道语义对 LLM 不可区分。
 - **F2（答案语义歧义传导到 renderResult）**：LLM 的 Other 被选中后 `selected=["Other"]`，renderResult 的 renderExpandedOptions（index.ts:86-108）按 label 建 Set 匹配给该行打 ● 标记——「Other 出现在 selected 里」与工具契约（Other 是自由输入、不该作为选项值返回）矛盾；answerValueText 拼出的 summary 如 `"Which database?" = "Other"`，LLM 拿到的信息量与用户真实意图脱节。
-- **F3（外沿收持税）**：AnswerValueSchema/ResultSchema（types.ts:96-110）零引用死导出（全仓 rg 仅定义处，types.test.ts 也不测）；TUI 组件启动样板在 index.ts:62-78 与 channel-handler.ts:115-125 各写一遍且已漂移（仅 index 版挂 signal abort 监听，channel-handler 版把 tui 断言内联为字面量而不用同包 TUILike）；channel-registry-register.ts 本地 ChannelRegistry 接口的 resolve/list（:46-47）ask-user 从不调用（只调 register）。
+- **F3（外沿收持税）**：AnswerValueSchema/ResultSchema（types.ts:96-110）零引用死导出（全仓 rg 仅定义处，types.test.ts 也不测）；TUI 组件启动样板在 index.ts:62-78 与 channel-handler.ts:115-125 各写一遍且已漂移（真正的两版差异仅一处：signal abort 监听 index 版 :72-74 挂、channel-handler 版无；另有两版**共有**的坏味道——tui 断言均为 `tui as { requestRender(): void }` 内联字面量，同包 component.ts:27 的 TUILike 两处都没用。v1 误记为「channel-handler 版独有差异」，审查 S1 修正）；channel-registry-register.ts 本地 ChannelRegistry 接口的 resolve/list（:46-47）ask-user 从不调用（只调 register）。
 
 ### 3.3 根因
 
@@ -125,7 +125,7 @@ TUI 内联问卷实际渲染（allOptions 追加后）：
 
 ### 6.1 D1：Other 保留字拦截的落点（选定：方案 A，validateInput 校验层）
 
-- **采用**：`checkOptionLabels`（validate.ts:70-86）在空 label 检查之后、重复 label 检查之前增加 `opt.label === OTHER_LABEL` 拦截，返回带 Correct 示例的英文纠错文案（§5.1 形态）。execute 已在交互前 throw（index.ts:271-276），拦截天然先于一切渲染。
+- **采用**：`checkOptionLabels`（validate.ts:70-86）在空 label 检查之后、重复 label 检查之前增加 `opt.label.trim() === OTHER_LABEL` 拦截（匹配口径见 D2），返回带 Correct 示例的英文纠错文案（§5.1 形态）。execute 已在交互前 throw（index.ts:271-276），拦截天然先于一切渲染。
 - **被否**：
   - **方案 B（渲染层条件跳过：allOptions/showOther 检测到 LLM 自带 Other 时不再追加合成行）**——把契约从「Other 恒为自由输入行」降级为「看情况」，LLM 的 Other 变成无自由文本能力的普通选项，工具核心价值受损；两套渲染路径各加一处分支 = 双份知识；且治标：selected 含 "Other" 的语义歧义（F2）仍在。若用它，§5.1 的例子变成「问卷只渲染 LLM 的那行 Other，用户无法自由输入」。
   - **方案 C（渲染层去重：allOptions 过滤同名项）**——静默吞掉 LLM 显式传入的参数，违背本包「误用必须可看见、可纠正」的校验哲学（string options 的拦截就是反例证明）；LLM 永远不知道自己的参数被改。
@@ -138,13 +138,13 @@ TUI 内联问卷实际渲染（allOptions 追加后）：
 
 - **证据**：validate.ts:70-86（现状只查三类）；question-view.ts:99-101 与 AskUserOverlay.vue:196-198（两条无条件追加链）；index.ts:271-276（校验先于交互的既有次序）。
 - **效果**：目标 1；§5.1 成立；F1/F2 根除。
-- **边界声明（P0-12 副作用核查）**：主进程 channel-handler 的 TUI 透传路径（protoToInternalQuestions → AskUserComponent，channel-handler.ts:52-66/:107-131）**不经 validateInput**——若子进程绕过子进程侧 ask-user extension 直发带 Other 的 channel 请求，主进程渲染仍可能出现双 Other 行。显式判定**不在此路径加第二处拦截**：正常路径要求子进程侧装有 ask-user（其 execute 走同一个 validateInput，拦截在子进程已生效），第三方直发 channel 请求属协议滥用、后果限于显示层矛盾（用户可见、可 Esc 取消重来），无数据损坏。已接受代价四要素——量级：仅协议滥用场景，正常链路不可达；恢复：用户取消重问；重审触发：出现真实案例或 channel 请求新增非 ask-user 发起方；判定：可接受。u1 实施时以一次真实 subagent 场景（子进程 ask_user 透传）确认子进程侧拦截生效（§9.3）。
+- **边界声明（P0-12 副作用核查）**：主进程 channel-handler 的两条透传路径——TUI 透传（protoToInternalQuestions → AskUserComponent，channel-handler.ts:52-66/:107-131）与 RPC 转发（runRpcForward，channel-handler.ts:170-181）——均**不经 validateInput**（v2 补全路径穷举：原版只列 TUI 路径，RPC 转发同构适用）——若子进程绕过子进程侧 ask-user extension 直发带 Other 的 channel 请求，主进程渲染仍可能出现双 Other 行。显式判定**不在此路径加第二处拦截**：正常路径要求子进程侧装有 ask-user（其 execute 走同一个 validateInput，拦截在子进程已生效；**版本前提**：子进程侧需 ≥ 本设计发布版——子进程侧为旧版 ≤7.1.3 时该拦截不存在、双 Other 行可现，量级随版本滚动归零，属升级窗口期已接受形态），第三方直发 channel 请求属协议滥用、后果限于显示层矛盾（用户可见、可 Esc 取消重来），无数据损坏。已接受代价四要素——量级：仅协议滥用场景 + 升级窗口期子进程旧版形态，正常链路（新版双侧）不可达；恢复：用户取消重问；重审触发：出现真实案例或 channel 请求新增非 ask-user 发起方；判定：可接受。u1 实施时以一次真实 subagent 场景（子进程 ask_user 透传）确认子进程侧拦截生效（§9.3）。
 
-### 6.2 D2：匹配口径（选定：精确匹配 OTHER_LABEL = "Other"）
+### 6.2 D2：匹配口径（选定：trim 后精确匹配 OTHER_LABEL = "Other"）
 
-- **采用**：`opt.label === OTHER_LABEL` 精确匹配（OTHER_LABEL 已是 types.ts:5 导出常量，question-view/前端共用）。
-- **被否**：case-insensitive（把 "other"/"OTHER" 一并拦）——大小写变体与自动追加的 "Other" 行是视觉可分辨的独立行，不构成 §3.1 的自相矛盾 UI；扩大拦反面会误杀合法标签（如 "OTHER DATABASES"），违反最小改动。已接受代价：大小写变体仍可与 Other 行并存造成轻微困惑——量级：未观察到真实案例（审计与本设计实读均无）；恢复：用户照常二选一，无功能损失；重审触发：实测出现 case 变体误用案例；判定：可接受。
-- **证据**：OTHER_LABEL 唯一定义（types.ts:5）；validate.test.ts 现有 0 条 Other 相关用例（grep 证实，仅 :85 注释提及）。
+- **采用**：`opt.label.trim() === OTHER_LABEL`（OTHER_LABEL 已是 types.ts:5 导出常量，question-view/前端共用；trim 先例 = 同文件 :77 空 label 检查 `opt.label.trim() === ""`）。**v2 修正（审查 S2）**：v1 的裸精确匹配存在自洽缺口——`" Other "` / `"Other "` 带空白变体与合成 Other 行**视觉不可分辨**（仅差不可见空白），按本决策自己的裁决标准（视觉可分辨才放行）应拦却放行，且该变体未进 v1 已接受代价清单；trim 比较以零成本闭合该缺口。
+- **被否**：case-insensitive（把 "other"/"OTHER" 一并拦）——大小写变体与自动追加的 "Other" 行是视觉可分辨的独立行，不构成 §3.1 的自相矛盾 UI；扩大拦截面会误杀合法标签（如 "OTHER DATABASES"），违反最小改动。已接受代价：大小写变体仍可与 Other 行并存造成轻微困惑——量级：未观察到真实案例（审计与本设计实读均无；空白变体经 trim 后同归零）；恢复：用户照常二选一，无功能损失；重审触发：实测出现 case 变体误用案例；判定：可接受。
+- **证据**：OTHER_LABEL 唯一定义（types.ts:5）；validate.test.ts 现有 0 条 Other 相关用例（grep 证实，仅 :85 注释提及）；渲染 `t.fg(labelColor, \`${num}. ${opt.label}\`)`（question-view.ts:188/:218/:240）空白不显示——视觉不可分辨判定的依据。
 - **效果**：D1 的精确语义定案；「不误杀含 Other 子串的合法标签」进入验收 V3 反向验证。
 
 ### 6.3 D3：四问记录发现 5（contested：前端编码漂移）裁决（选定：事实不成立，不实施）
@@ -174,7 +174,7 @@ TUI 内联问卷实际渲染（allOptions 追加后）：
 | E2 | src/__tests__/validate.test.ts | 新增用例：拒绝 label:"Other"（含 Correct 文案断言）；放行 "Other database" 子串标签 | E1 同提交 |
 | E3 | ARCHITECTURE.md | registry 段补外沿登记（单注册方 / gui_widget 空置 / 发现 6 裁决与重审触发）；顺手修正行数漂移（~1970 → 实测值） | D4 直接执行（u1） |
 | L1 | types.ts:96-110 | 删 AnswerValueSchema/ResultSchema 两个死 schema，`AnswerValue`/`Result` 改直接结构定义（全仓零引用，types.test.ts 不测；QuestionSchema 因 InputSchema 使用而保留） | 移交 code-simplify |
-| L2 | index.ts:57-79 + channel-handler.ts:107-131 | 提取共用 TUI 启动 helper（`ctx.ui.custom` 包装 + AskUserComponent 构造），channel-handler 版复用 TUILike、保留 index 版 signal abort 差异点为可选参数 | 移交 code-simplify |
+| L2 | index.ts:57-79 + channel-handler.ts:107-131 | 提取共用 TUI 启动 helper（`ctx.ui.custom` 包装 + AskUserComponent 构造；helper 内统一复用 component.ts:27 的 TUILike——**两处现状均为内联字面量**，都要改）、signal abort 差异点为 helper 可选参数（index 版挂、channel-handler 版不挂） | 移交 code-simplify |
 | L3 | channel-registry-register.ts:46-47 | 本地 ChannelRegistry 接口删 resolve/list 死成员 | 移交 code-simplify |
 | L4 | types.ts:173-177 + question-view.ts:25-29 | SURROGATE_HIGH_MASK/SURROGATE_HIGH_START（仅同文件 isHighSurrogate 使用）、DisplayOption（仅定义文件可见引用）去 export 改模块私有 | 移交 code-simplify |
 | L5 | channel-handler.ts:80 + answer-codec.ts 头注释 + e2e/ask-user-real.spec.ts 头注释 | 「唯一 encode 实现」限定语境为「本扩展内」；修正 e2e spec 头部陈旧协议描述 | 移交 code-simplify（D3 残余） |
@@ -247,3 +247,5 @@ u1 与 u2 分离：行为变更与纯清理不交叉，review 面与回滚粒度
 ## 附录：变更历史
 
 - v1（2026-09-11）：初稿。覆盖审计 M23（medium 正确性）+ ask-user low 群（死 schema / TUI 样板双份 / registry 外沿）+ 四问记录补充发现（发现 6 裁决不实施、发现 7 归入 L4）；审计修正两处（四问记录索引路径错位、发现 5 前端漂移事实证伪）。
+- v2（2026-09-13）：按 over-engineering 审查（`.review.md`，VERDICT PASS）采纳 2 条 suggestion——S1：F3/L2 的「channel-handler 版独有内联断言」表述修正（两版均为内联字面量、helper 统一复用 TUILike 时两处都要改）；S2：D1/D2 匹配口径改 `opt.label.trim() === OTHER_LABEL`（空白变体视觉不可分辨却放行的自洽缺口闭合，与 :77 空 label 检查 trim 先例一致）。
+- v2-r1（2026-09-13，tech-design 双审查 R1，双 PASS）：影响面审 sug×2——D1 边界声明补 RPC 转发路径 runRpcForward（channel-handler.ts:170-181，与 TUI 透传同构适用）；已接受代价补版本滚动缺口（子进程侧旧版 ≤7.1.3 无拦截、升级窗口期双 Other 行可现，量级随版本滚动归零）。主审复核：trim 口径三处一致、前缀词不误杀。
