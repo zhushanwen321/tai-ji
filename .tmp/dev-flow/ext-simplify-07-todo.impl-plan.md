@@ -1,6 +1,6 @@
 # ext-simplify-07-todo 实施计划
 
-基线: <待填> | 来源设计: docs/design/ext-simplify-07-todo.md (v2) | 日期: 2026-09-14
+基线: e1a40a3de | 来源设计: docs/design/ext-simplify-07-todo.md (v2) | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -57,13 +57,15 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（空——实施中填充）
+1. tool.ts/index.ts 注释中「见 CLAUDE.md「Tool 设计」」改为「见 docs/extensions/extension-conventions.md「Tool 设计」」——原引用是悬空引用（项目根无 CLAUDE.md），重写必然触及该句，指向真实权威源（reasonable）。
+2. updateTodos 补函数头 doc comment（原无）——设计 §6「函数头注释同步」的落地形态（reasonable）。
+3. error 用例断言用完整新文案（强于设计的子串匹配口径）——断言强度提升非迁就（reasonable）。
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | pending | 0 | — |
+| u1 | committed | 1 | commit u1-07；137 tests passed（8 files）；extensions:typecheck 绿；grep resultText!/export UpdateResult 双零 |
 
 ## 7 残留风险与变更历史
 

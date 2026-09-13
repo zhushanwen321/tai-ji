@@ -159,6 +159,6 @@ reconstructState（纯读，H1：不修改 entries）:
 
 handler 失败**直接 `throw new Error()`**，不返回错误成功模式（见 CLAUDE.md「Tool 设计」）。
 
-- `model.ts` 纯函数：`addTodos` 校验失败直接 throw（C1：不静默 filter）；`updateTodos` 返回带可选 `error` 的 Result 对象（合法的函数式模式，不是"错误成功模式"）
-- `tool.ts` 的 handler：`updateTodos` 拿到 error 时 `throw new Error(r.resultText)`，把友好文案交给 Pi 框架
+- **包内单一 throw 协议**：`model.ts` 纯函数 `addTodos`（C1：不静默 filter）与 `updateTodos`（重复 id / id 不存在 / 无 status 无 text / 非法 status 四类批量校验）校验失败均直接 throw，文案无 "Error: " 前缀，与单条 / delete 路径措辞一致；`updateTodos` 成功返回 `{ updatedTodos, resultText }`（两必填）
+- `tool.ts` 的 handler 不做 error→throw 翻译：`handleBatchUpdate` 直接消费 `updateTodos` 的返回值，throw 点在 model 层、pi 工具错误边界不变
 - `TodoDetails` 接口**不含 `error` 字段**（已移除），`renderTodoResult` 无 error 分支

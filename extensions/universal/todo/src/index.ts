@@ -16,8 +16,9 @@
  * - commands.ts: /todos 命令注册
  * - index.ts（本文件）: 工厂入口（创建 state + 注册 tool/command/event + makeRefreshDisplay）
  *
- * 错误处理：handler 失败直接 throw（见 CLAUDE.md「Tool 设计」），不返回错误成功模式。
- * model 层纯函数返回 Result 对象（合法），dispatcher 拿到 error 时 throw。
+ * 错误处理：包内单一 throw 协议——handler 与 model 层纯函数（addTodos / updateTodos）
+ * 校验失败均直接 throw（见 docs/extensions/extension-conventions.md「Tool 设计」），
+ * 不返回错误成功模式。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
