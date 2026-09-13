@@ -172,6 +172,9 @@ export class RecordLifecycle {
       // [M1 sessionFile 锚点提升] 先于 settle 原语——写面随之携带锚点。
       this.promoteSessionFileFromEngineHandle(record);
       if (record.status === "running") {
+        // [区1-U2] 打断作废 close 优雅收口挂起（对齐 one-shot 域 settleOneShotOutcome
+        // aborted 分支先例）：归档后挂起残留会在寻回复活的下一轮轮终触发意外再归档。
+        record.closeAfterRound = undefined;
         // 放弃轮标记（通知 gate ②）：在飞轮 {epoch, round}——迟到回注按两步判定
         // 丢弃；标记随 settle 的 binding 快照持久化（跨重启有效）。
         record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
@@ -452,6 +455,11 @@ export class RecordLifecycle {
     }
     // 置放弃轮标记（通知 gate ②判据）：在飞轮 {epoch, round}。随 markSettled 的
     // binding 快照持久化（跨重启有效——丢标记 = 中断轮迟到回注防双发失效）。
+    // [区1-U2] 打断作废 close 优雅收口挂起（对齐 one-shot 域 settleOneShotOutcome
+    // aborted 分支先例）：cancel 抢先 settle 后轮收敛回调（onRunSettled）被 status
+    // 守卫拦截，挂起的消费点不可达——残留挂起会在用户续聊的下一轮轮终触发意外归档
+    //（cancel 语义 = 暂停这一轮可以继续聊，§3.2.5）。
+    record.closeAfterRound = undefined;
     record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
     const persisted = this.deps.getStore().markSettled(record, "interrupted");
     if (!persisted) {
