@@ -24,11 +24,8 @@ import { migrateLegacyConfig } from "@zhushanwen/pi-llm-shared";
 
 const logger = getLogger("pi-permission");
 
-import { listAvailableModels } from "./classifier/model-resolver.js";
 import { handlePermissionCommand, handlePermissionModelCommand, handlePermissionRuleCommand } from "./commands.js";
 import { loadAndWatchConfig, saveConfig } from "./config.js";
-import { setDefaultListAvailableModels } from "./model-picker.js";
-import { editRulesViaOverlay } from "./rule-editor.js";
 import { makeNextIdCounter } from "./rule-templates.js";
 import { checkPermission, type CheckPermissionDeps } from "./pipeline.js";
 import { createPipelineDeps } from "./production.js";
@@ -87,10 +84,6 @@ const _UI_OPTIONS_PARAM_INDEX = 2;
  * （llm-shared mtime 去重零成本，详见 config.ts「热重载契约」）。
  */
 export default function permissionExtension(pi: ExtensionAPI): void {
-	// W7：注入 listAvailableModels 真实实现（model-picker.ts 默认返回空 Map）。
-	// E2 签名：(ctx) → ctx.modelRegistry.getAll() + hasConfiguredAuth 过滤。
-	setDefaultListAvailableModels((ctx) => listAvailableModels(ctx));
-
 	// ──────────────────────── 配置读取（读时刷新，回归 llm-shared 框架） ────────────────────────
 	// 不持有跨调用缓存：每次需要配置直接 loadAndWatchConfig()，llm-shared 内部 mtime+size 去重，
 	// 文件未变时零额外 IO（只 statSync）。这是 llm-shared config「热重载契约」的正确用法——
@@ -158,14 +151,10 @@ export default function permissionExtension(pi: ExtensionAPI): void {
 					},
 					config,
 					makeNextIdCounter(config.userRules),
-					{
-						save: (newConfig) => {
-							const r = saveConfig(newConfig);
-							if (r.success) requestFooterRender();
-							return r;
-						},
-						editRulesViaOverlay: (ctx, initialRules, sessionIdCounter, rpcDeps) =>
-							editRulesViaOverlay(ctx, initialRules, sessionIdCounter, rpcDeps),
+					(newConfig) => {
+						const r = saveConfig(newConfig);
+						if (r.success) requestFooterRender();
+						return r;
 					},
 				);
 				return;
@@ -193,13 +182,10 @@ export default function permissionExtension(pi: ExtensionAPI): void {
 						},
 					},
 					config,
-					{
-						listModels: (pickerCtx) => listAvailableModels(pickerCtx),
-						save: (newConfig) => {
-							const r = saveConfig(newConfig);
-							if (r.success) requestFooterRender();
-							return r;
-						},
+					(newConfig) => {
+						const r = saveConfig(newConfig);
+						if (r.success) requestFooterRender();
+						return r;
 					},
 				);
 				return;

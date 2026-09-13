@@ -26,14 +26,12 @@ import {
 
 // ──────────────────────── mock fixtures（listAvailableModels） ────────────────────────
 
-/** 构造一条 ResolvedModelEntry（测试 helper）。 */
-function makeEntry(provider: string, id: string, inputCost: number): ResolvedModelEntry {
+/** 构造一条 ResolvedModelEntry（测试 helper；E5 后仅 provider/id/api）。 */
+function makeEntry(provider: string, id: string): ResolvedModelEntry {
 	return {
 		provider,
 		id,
-		name: id,
 		api: "openai-completions",
-		cost: { input: inputCost, output: 0, cacheRead: 0, cacheWrite: 0 },
 	};
 }
 
@@ -116,7 +114,7 @@ function makePickerCtx(overrides: Partial<ModelPickerContext> = {}): ModelPicker
 describe("MPT2: pickModelViaOverlay 分发", () => {
 	it("headless（json）→ 返回 undefined（降级）", async () => {
 		const ctx = makePickerCtx({ mode: "json" });
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const result = await pickModelViaOverlay(ctx, "auto", models);
 		expect(result).toBeUndefined();
 	});
@@ -136,7 +134,7 @@ describe("MPT2: pickModelViaOverlay 分发", () => {
 				custom: vi.fn(),
 			},
 		});
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const result = await pickModelViaOverlay(ctx, "auto", models);
 		expect(result).toBe("auto");
 		expect(ctx.ui.select).toHaveBeenCalledOnce();
@@ -150,7 +148,7 @@ describe("MPT2: pickModelViaOverlay 分发", () => {
 			mode: "rpc",
 			ui: { notify: vi.fn(), select: selectMock, custom: vi.fn() },
 		});
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const result = await pickModelViaOverlay(ctx, "auto", models);
 		expect(result).toBe("co/m1");
 		expect(ctx.ui.select).toHaveBeenCalledTimes(2);
@@ -165,13 +163,13 @@ describe("MPT2: pickModelViaOverlay 分发", () => {
 				custom: vi.fn(),
 			},
 		});
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const result = await pickModelViaOverlay(ctx, "auto", models);
 		expect(result).toBeUndefined();
 	});
 
 	it("TUI 模式：custom factory 被调用，comp done settle 结果", async () => {
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		// 模拟 ctx.ui.custom：构造 comp 并模拟 done({kind:'auto'})
 		const customMock = vi.fn(
 			<T,>(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: T) => void) => unknown) =>
@@ -181,7 +179,7 @@ describe("MPT2: pickModelViaOverlay 分发", () => {
 		);
 		const ctx = makePickerCtx({ mode: "tui", ui: { notify: vi.fn(), select: vi.fn(), custom: customMock } });
 		// 在 factory 内拿到 comp，但这里 mock 直接调 done({kind:'auto'})
-		// 改写 mock：构造真实 comp 并用 cancel/settle
+		// 改写 mock：构造真实 comp 并用 handleInput('\r') 触发 onSelect
 		customMock.mockImplementationOnce(
 			<T,>(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: T) => void) => unknown) =>
 				new Promise<T>((resolve) => {
@@ -201,7 +199,7 @@ describe("MPT2: pickModelViaOverlay 分发", () => {
 describe("MPT3: ProviderModelSelectorComponent 构造 + 初始 stage", () => {
 	it("构造：初始 stage='provider'，render 非空含 'Select Provider'", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		const lines = comp.render(80);
 		const joined = lines.join("\n");
@@ -212,7 +210,7 @@ describe("MPT3: ProviderModelSelectorComponent 构造 + 初始 stage", () => {
 
 	it("currentSpec='auto' → 预选 'Auto'（index 0）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		comp.handleInput("\r"); // Enter 选中预选项（Auto）
 		expect(done).toHaveBeenCalledOnce();
@@ -222,7 +220,7 @@ describe("MPT3: ProviderModelSelectorComponent 构造 + 初始 stage", () => {
 
 	it("currentSpec='provider/modelId' → 预选该 provider（Enter 直接到 model stage）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("co/m1", ["co"], models, done);
 		// 预选 'co'（index 1），Enter 触发 switchToModelStage（不 done）
 		comp.handleInput("\r");
@@ -235,7 +233,7 @@ describe("MPT3: ProviderModelSelectorComponent 构造 + 初始 stage", () => {
 describe("MPT4: ProviderModelSelectorComponent provider onSelect", () => {
 	it("provider stage 选 Auto → done({kind:'auto'})", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		comp.handleInput("\r"); // Enter 选中预选 Auto
 		expect(done).toHaveBeenCalledWith({ kind: "auto" });
@@ -243,7 +241,7 @@ describe("MPT4: ProviderModelSelectorComponent provider onSelect", () => {
 
 	it("provider stage 选具体 provider → switchToModelStage（不 done）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		// 下移到 'co'（index 1），Enter 进入 model stage
 		comp.handleInput("\x1b[B"); // Down arrow
@@ -254,7 +252,7 @@ describe("MPT4: ProviderModelSelectorComponent provider onSelect", () => {
 
 	it("provider stage Esc → done(undefined)（cancel）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		comp.handleInput("\x1b"); // Esc
 		expect(done).toHaveBeenCalledWith(undefined);
@@ -264,7 +262,7 @@ describe("MPT4: ProviderModelSelectorComponent provider onSelect", () => {
 describe("MPT5: ProviderModelSelectorComponent model onSelect", () => {
 	it("model stage 选 model → done({kind:'specific', provider, modelId})", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1), makeEntry("co", "m2", 0.2)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1"), makeEntry("co", "m2")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		// 下移到 'co'，Enter 进 model stage
 		comp.handleInput("\x1b[B"); // Down
@@ -276,7 +274,7 @@ describe("MPT5: ProviderModelSelectorComponent model onSelect", () => {
 
 	it("model stage Esc → 回退到 provider stage（不 done）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		// 进 model stage
 		comp.handleInput("\x1b[B"); // Down
@@ -289,7 +287,7 @@ describe("MPT5: ProviderModelSelectorComponent model onSelect", () => {
 
 	it("_resolved 守卫：done 后再 handleInput no-op", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		comp.handleInput("\r"); // Auto → done
 		expect(done).toHaveBeenCalledOnce();
@@ -304,7 +302,7 @@ describe("MPT5: ProviderModelSelectorComponent model onSelect", () => {
 describe("MPT6: WR1 handleInput 委托 SelectList.onSelect（critical）", () => {
 	it("handleInput('\\r') 直接触发 SelectList.onSelect（不绕过键盘委托通路）", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		// 直接调 handleInput('\r')，验证：
 		// 1. Container.handleInput 不存在，组件 override 委托给 SelectList
@@ -317,7 +315,7 @@ describe("MPT6: WR1 handleInput 委托 SelectList.onSelect（critical）", () =>
 
 	it("handleInput(down + enter) 链式触发 SelectList 导航 + onSelect", () => {
 		const done = vi.fn();
-		const models = makeModelsMap({ "co": [makeEntry("co", "m1", 0.1)] });
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);
 		// Down 移动到 'co'，Enter 选中 → 进 model stage（done 未调）
 		comp.handleInput("\x1b[B"); // Down

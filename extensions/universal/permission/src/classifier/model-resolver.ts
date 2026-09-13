@@ -8,6 +8,7 @@
  * hasConfiguredAuth() 过滤——用户只经 `pi auth login` 配的内置/OAuth provider 同样可见，
  * 不再自读 models.json（loadModelsJson / flattenModels 已删除）。
  * E1：ResolvedModelEntry.apiKey 死字段已删（P3 收口后凭证走 modelRegistry，无消费者）。
+ * E5：name/baseUrl/cost 死字段已删（picker 只读 id/api）。
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -27,27 +28,17 @@ export interface ListAvailableModelsCtx {
 
 // ──────────────────────── 条目类型 ────────────────────────
 
-/** 单个 model 的 cost 结构（与 pi-ai Model.cost 同形；缺失时填零默认） */
-interface ModelCost {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-}
-
 /**
  * 解析后的「扁平 model 条目」：附带其 provider 名。
  *
  * listAvailableModels 的中间表示，用于 picker 分组展示。
- * 注：hasApiKey 语义已不存在（E2 后用 hasConfiguredAuth 过滤，能进列表即已配 auth）。
+ * 注：hasApiKey 语义已不存在（E2 后用 hasConfiguredAuth 过滤，能进列表即已配 auth）；
+ * E5：name/baseUrl/cost 死字段已删（picker 只读 id/api，生产零读者）。
  */
 export interface ResolvedModelEntry {
 	provider: string;
 	id: string;
-	name: string;
 	api: string;
-	baseUrl?: string;
-	cost: ModelCost;
 }
 
 // ──────────────────────── listAvailableModels（W7 model picker 用） ────────────────────────
@@ -75,11 +66,7 @@ export function listAvailableModels(
 		entries.push({
 			provider: m.provider,
 			id: m.id,
-			name: m.name ?? m.id,
 			api: m.api,
-			...(m.baseUrl ? { baseUrl: m.baseUrl } : {}),
-			// 缺失 cost 时填零默认（picker 展示稳定，不依赖真实成本）
-			cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		});
 	}
 

@@ -144,14 +144,17 @@ graph LR
 | 08-u23 | P2 探针方法两处调整（pnpm pack 重写 workspace 协议 + workspace 依赖本地 staging） | npm pack 不重写 workspace:* 使干净安装必然协议错；staging 后 croner 在盘性完全由声明形态决定，断言效力不变 | 接受（方法学等价，留档 probe-08.md） |
 | 08-u23 | service.ts(2)/runtime.ts(3) 生产调用点 vestigial await 去除 | 设计 §6.2 明示「可保留也可顺带去，由实施定」 | 接受 |
 | 08-u23 | SKILL.md 两处 croner 依赖形态描述同步 | 随 files 字段发布，不修即发布过时事实 | 接受 |
+| 05-S1 | ListAvailableModelsFn 类型顺带删除 | 唯一消费者即被删 setter（全仓 grep 核实），不删即新死导出 | 接受（符号删除机械必然） |
+| 05-S1 | A5 rg 剩余命中仅在 docs/ 三文档 | 均为改前现状描述/审查记录（变更历史登记），非代码残留 | 接受（A5 意图 = 代码面零命中） |
+| 05-S1 | commands.test.ts vi.mock 用空 factory + beforeEach 设默认值 | vi hoisting 限制不能引用外部变量 | 接受（T2 落地形态） |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | 06-u0 | committed | 1 | P1 PASS（isActive=false/phase=idle，D6 门开）；P2 steer 时序 PASS + goal 桥断裂新发现（probe-06.md）；plan 包工作区已还原 |
-| 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位 |
-| 06-u2 | pending | 0 | - |
+| 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位；commit 513deb653 |
+| 06-u2 | in-progress | 0 | - |
 | 06-u3 | pending | 0 | - |
 | 06-u4 | pending | 0 | - |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
@@ -166,7 +169,7 @@ graph LR
 | 04-U7 | pending | 0 | - |
 | 04-U8 | pending | 0 | - |
 | 04-U9 | pending | 0 | - |
-| 05-S1 | in-progress | 0 | - |
+| 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
 | 05-S2 | pending | 0 | - |
 | 05-S3 | pending | 0 | - |
 | 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
