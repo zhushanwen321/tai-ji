@@ -134,12 +134,18 @@ function isToolNotFound(raw: unknown): boolean {
 // ── select 通道 ──
 
 /** bridge 请求经 select 通道的统一出口：返回解析后的回包对象；失败路径统一折叠为 null
- * （cancelled / 通道异常 / 非 JSON 回包 / timeout 到期），由各调用方按语义折叠为 isError 或重试。 */
+ * （cancelled / 通道异常 / 非 JSON 回包 / timeout 到期），由各调用方按语义折叠为 isError 或重试。
+ *
+ * 环境门控（2026-09-13 oe-audit）：BRIDGE_MARKER select 的消费方是 xyz-agent runtime
+ * （event-adapter marker 路由），runtime spawn pi 恒为 --mode rpc——非 rpc 模式（裸
+ * pi TUI）无拦截方，select 会弹真框（observe 转发不传 timeout 则永久挂起）。本包为
+ * taiji 组（离开 xyz-agent 无功能），非 rpc 模式折叠 null，与 cancelled 同路径。 */
 async function callBridge(
 	ctx: ExtensionContext,
 	request: BridgeRequest,
 	opts?: { signal?: AbortSignal; timeout?: number },
 ): Promise<unknown> {
+	if (ctx.mode !== "rpc") return null;
 	const payload = JSON.stringify(request);
 	try {
 		// signal 透传给 dialog：abort 后 pi 本地 resolve(undefined) 不 reject（rpc-mode
@@ -319,8 +325,17 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 
 	/** 防抖入口：启动 sync 与 miss 重同步共用——同一时刻仅一个循环 in flight，
 	 * 并发触发者等待同一个 promise（设计 §3.3-D4）。首轮发起时记录终态
-	 * （miss 重同步不覆盖——准入闸语义是「首个 prompt 前至少完成一轮」）。 */
+	 * （miss 重同步不覆盖——准入闸语义是「首个 prompt 前至少完成一轮」）。
+	 *
+	 * 环境门控（2026-09-13 oe-audit）：BRIDGE_MARKER select 的消费方是 xyz-agent
+	 * runtime，runtime spawn pi 恒为 --mode rpc——非 rpc 模式（裸 pi TUI 等）无拦截
+	 * 方，启动 sync 的 marker select 会弹真框闪 60s（30 次重试）才降级。本包为
+	 * taiji 组（离开 xyz-agent 无功能），裸 TUI 下 sync 必然失败，直接跳过。 */
 	function ensureSynced(ctx: ExtensionContext): Promise<void> {
+		if (ctx.mode !== "rpc") {
+			logger.warn("[plugin-bridge] non-rpc mode (bare pi TUI) — skipping bridge sync (no xyz-agent runtime to talk to)");
+			return Promise.resolve();
+		}
 		if (syncInFlight) return syncInFlight;
 		syncInFlight = runSyncLoop(ctx).finally(() => {
 			syncInFlight = null;

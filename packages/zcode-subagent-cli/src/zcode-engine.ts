@@ -783,18 +783,6 @@ export class ZcodeEngine implements EnginePort {
     await this.shutdownRuntimeAndDisposeChannel(rt);
   }
 
-  /**
-   * [u7a D5] 引擎在途只读快照：activeSessions 非空才算在途——poolKey 'shared' 的
-   * app-server **空闲常驻进程恒活，禁止按进程存在判定**（进程在 ≠ 在途，否则推迟
-   * 判定恒真、30min 上限从兜底变常态路径，设计 §3.3 D5 显式排除）。计数权威 =
-   * activeSessions（attempt 入 create 应答后 add / finally settle 后 delete，与
-   * dispose 的 close 帧目标集同一状态源，无双记账）。运行时未初始化（从未 run /
-   * 已 dispose）→ 恒 0。
-   */
-  inFlightSnapshot(): { inFlight: number } {
-    return { inFlight: this.appserverRuntime?.activeSessions.size ?? 0 };
-  }
-
   /** 终态合成（extension-conventions 函数 80 行上限，从 run 提取）：aborted / run-failed / parsed 三分支。 */
   private finalizeOutcome(
     task: AgentCallOpts,

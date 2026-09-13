@@ -6,9 +6,9 @@
  * - errs 判别真值表三形态：「已注入 + 从未收到上报」→ 'absent-report'；「已注入 + 上报过 0」
  *   → null（按镜像值判）；「未注入」（无论有无上报）→ null（D5 ①：未注入 ⇒ 判「无在途」）；
  * - 绝对计数语义：applyReport 整值覆盖（非增量），后帧纠正前帧；
- * - 五 spawn 形态预置 0（presetZero，调用方 u4/u5）：条目建立为 inFlight=0；
- * - 生命周期对账重置（resetFor：pi 崩溃/respawn/reattach）清计数与「曾上报」（新 reporting
- *   epoch），保留 injected；
+ * - 五 spawn 形态预置 0（presetZero，调用方 u4/u5 收敛为 registerSession 单挂点）：条目
+ *   建立为 inFlight=0（respawn 对账同挂点——resetFor 已删，2026-09-13 oe-audit：生产零
+ *   调用且与 presetZero 实现逐字同款）；
  * - 条目与 session 生命周期同删（dropSession）；
  * - 快照隔离（query 返回副本，外部改写不影响内部态）。
  *
@@ -24,8 +24,8 @@ import type { SubagentInFlightReport } from '@xyz-agent/extension-protocol'
 
 const SID = 'sess-mirror-1'
 
-function report(inFlight: number, kind: SubagentInFlightReport['kind'] = 'delta'): SubagentInFlightReport {
-  return { kind, inFlight, sessionId: SID, emittedAt: 1_700_000_000_000 }
+function report(inFlight: number): SubagentInFlightReport {
+  return { inFlight, sessionId: SID, emittedAt: 1_700_000_000_000 }
 }
 
 /** 模块级单例在文件内跨用例共享——每例前清该 sid 的条目（其它 sid 不受影响）。 */
@@ -52,7 +52,7 @@ describe('inflight-mirror: errs 判别真值表（D5 ④）', () => {
     expect(m.errsShape(SID)).toBeNull()
   })
 
-  it('已注入 + 从未收到上报 → errs=absent-report（D5 ④ 旧版组合形态）', () => {
+  it('已注入 + 从未收到上报 → errs=absent-report（reporter 放弃 / 通道结构性故障形态）', () => {
     const m = freshMirror()
     m.setInjected(SID, true)
     expect(m.errsShape(SID)).toBe('absent-report')
@@ -62,7 +62,7 @@ describe('inflight-mirror: errs 判别真值表（D5 ④）', () => {
   it('已注入 + 上报过 0 → errs=null，镜像值 0（0 = 在场且无在途的已证事实，非未知）', () => {
     const m = freshMirror()
     m.setInjected(SID, true)
-    m.applyReport(SID, report(0, 'initial'))
+    m.applyReport(SID, report(0))
     expect(m.errsShape(SID)).toBeNull()
     expect(m.query(SID)?.inFlight).toBe(0)
     expect(m.query(SID)?.hasEverReported).toBe(true)
@@ -85,16 +85,15 @@ describe('inflight-mirror: errs 判别真值表（D5 ④）', () => {
   })
 })
 
-describe('inflight-mirror: 绝对计数 + 预置/对账/删除', () => {
-  it('applyReport 整值覆盖（非增量）：后帧纠正前帧，lastReportAt = emittedAt', () => {
+describe('inflight-mirror: 绝对计数 + 预置/删除', () => {
+  it('applyReport 整值覆盖（非增量）：后帧纠正前帧', () => {
     const m = freshMirror()
     m.applyReport(SID, report(5))
     m.applyReport(SID, { ...report(2), emittedAt: 1_700_000_000_123 })
     expect(m.query(SID)?.inFlight).toBe(2)
-    expect(m.query(SID)?.lastReportAt).toBe(1_700_000_000_123)
   })
 
-  it('presetZero（五 spawn 形态预置 0）建条目为 inFlight=0，不触碰 injected', () => {
+  it('presetZero（五 spawn 形态收敛单挂点）建条目为 inFlight=0，不触碰 injected', () => {
     const m = freshMirror()
     m.setInjected(SID, true)
     m.applyReport(SID, report(4))
@@ -104,17 +103,9 @@ describe('inflight-mirror: 绝对计数 + 预置/对账/删除', () => {
     expect(m.errsShape(SID)).toBe('absent-report')
   })
 
-  it('resetFor（pi 崩溃/respawn/reattach 对账）清 stale-high 计数 + 「曾上报」，保留 injected', () => {
+  it('presetZero 对无条目 session 幂等建条目（不抛）', () => {
     const m = freshMirror()
-    m.setInjected(SID, true)
-    m.applyReport(SID, report(7))
-    m.resetFor(SID)
-    expect(m.query(SID)).toEqual({ injected: true, hasEverReported: false, inFlight: 0 })
-  })
-
-  it('resetFor 对无条目 session 幂等建条目（不抛）', () => {
-    const m = freshMirror()
-    m.resetFor(SID)
+    m.presetZero(SID)
     expect(m.query(SID)).toEqual({ injected: false, hasEverReported: false, inFlight: 0 })
   })
 
@@ -158,13 +149,13 @@ describe('inflight-mirror: 实例与单例', () => {
     expect(isolated.errsShape(SID)).toBe('absent-report')
   })
 
-  it('模块级单例导出可用（对齐 runtime 单例风格）', () => {
+  it('模块级单例导出可用（对齐 runtime 单例风格；resetFor 已删——2026-09-13 oe-audit 生产零调用）', () => {
     expect(typeof inflightMirror.setInjected).toBe('function')
     expect(typeof inflightMirror.presetZero).toBe('function')
-    expect(typeof inflightMirror.resetFor).toBe('function')
     expect(typeof inflightMirror.dropSession).toBe('function')
     expect(typeof inflightMirror.applyReport).toBe('function')
     expect(typeof inflightMirror.query).toBe('function')
     expect(typeof inflightMirror.errsShape).toBe('function')
+    expect((inflightMirror as unknown as Record<string, unknown>).resetFor).toBeUndefined()
   })
 })

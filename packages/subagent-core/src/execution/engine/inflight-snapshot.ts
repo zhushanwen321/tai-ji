@@ -30,14 +30,16 @@ import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
 //（coreSpawnedChildrenMirror().snapshot() 返回 [{recordId, ...}]，键集等价旧 Map.keys()）。
 import { coreSpawnedChildrenMirror } from "./host/spawned-children.ts";
 
-/** 在途快照（与 EnginePort.inFlightSnapshot? 返回形状一致——runtime 侧统一消费形状）。 */
+/** 在途快照（绝对计数，供壳层 reporter 发送时刻现取）。 */
 export interface InFlightSnapshot {
   /** 当前非 idle 句柄数（绝对计数，非增量）。 */
   inFlight: number;
 }
 
-/** 壳层注册的监听回调（同步、fire-and-forget；core 不 await 不重试）。 */
-export type InFlightListener = (snapshot: InFlightSnapshot) => void;
+/** 壳层注册的监听回调（同步、fire-and-forget；core 不 await 不重试）。无参数——
+ *  帧内容须为发送时刻快照，监听者（host/inflight-reporter）自行 getInFlightSnapshot
+ *  现取（2026-09-13 oe-audit：原 snapshot 参数自交付起无任何监听者消费）。 */
+export type InFlightListener = () => void;
 
 /**
  * 进程级单监听者（非 per-session 状态——在途计数本身是 pi 进程级模块状态
@@ -74,7 +76,7 @@ export function getInFlightSnapshot(): InFlightSnapshot {
 export function notifyInFlightChanged(): void {
   if (listener === null) return;
   try {
-    listener(getInFlightSnapshot());
+    listener();
   // eslint-disable-next-line taste/no-silent-catch -- 上报出口故障刻意静默（D5 约束①）：壳层 bug 不得打断生命周期主链；绝对计数语义下后续事件自愈，丢失单帧无累积误差，记日志徒增 core logger 噪音面
   } catch {
     // 同上：静默是接受的。

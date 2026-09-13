@@ -11,8 +11,8 @@
 //   ①使用者（extension reporter 视角）——注册 setInFlightListener 后，生产迁移点
 //     （轮终 arm（Continuation.settleRoundSuccess）/ 续聊派发 disarm
 //     （Continuation.dispatchRound）/ dispose 批量回收（disposeAllRecords）/
-//     引擎反向通道 childSpawned/childStateChanged）每一处都推来含该 record 贡献的
-//     绝对计数快照。
+//     引擎反向通道 childSpawned/childStateChanged）每一处都被触发通知，监听者现取
+//     getInFlightSnapshot 即含该 record 贡献的绝对计数（无参签名，发送时刻求值）。
 //   ②构建者——推送携带的是双谓词过滤后的真实计数：活句柄 + 无 armed idle timer
 //     才计在途；镜像置死后计数即刻回落（EngineClient 镜像桥接投影）。
 //   ③观察者——EngineClient 镜像 → core 镜像的单向投影可从镜像面观察（core 镜像
@@ -127,7 +127,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
   beforeEach(() => {
     ({ agentDir, service, store, fake } = setup());
     seen = [];
-    setInFlightListener((s) => seen.push({ ...s }));
+    setInFlightListener(() => seen.push(getInFlightSnapshot()));
   });
 
   afterEach(() => {
@@ -206,7 +206,7 @@ describe("u7a 数据面桥接：EngineClient 反向通道镜像 → core 镜像 
       envPrefixes: [],
     });
     seen = [];
-    setInFlightListener((s) => seen.push({ ...s }));
+    setInFlightListener(() => seen.push(getInFlightSnapshot()));
   });
 
   afterEach(() => {

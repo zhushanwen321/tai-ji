@@ -2347,7 +2347,7 @@
     },
     {
       "id": "C-proc-18",
-      "summary": "滚动重启计划内路径语义（crash-forensics D5）：临界触发经推迟判定（pi 侧 extension 聚合上报绝对计数镜像 ∪ zcode EnginePort.inFlightSnapshot? 可选注入槽【缺省 = 无在途面】∪ relay-registry 在途）→ 推迟有界：上限 30min（XYZ_ROLLING_RESTART_DEFER_LIMIT_MS 可注入短上限验证），到点强制记 rolling-restart-forced reason=defer-limit（与硬阈值形态区分，absent-report 形态不计入 stale-high 观测占比）→ 双维硬升级（heap ≥92% 或系统 memPressure 越限，reason=hard-threshold）；执行 = 经既有完整 shutdown 序退出（SHUTDOWN_STEP_SEQUENCE 13 步打点 SSOT：首步 cancel-rolling-restart、engine-pool-dispose 挂 server.stop 后 closeLogger 前、close-crash-journal 在 closeLogger 前——禁新增任何退出 shortcut）；专用退出码 86（RUNTIME_PLANNED_EXIT_CODE SSOT 在 shared）→ supervisor 走 recordPlanned 分支：立即重启、零退避、零崩溃计数（planned 边不进 counting 状态机）；推迟/预告/红牌状态暴露只读查询 RPC，renderer 重连/刷新后主动拉取恢复横幅（broadcast 早于订阅即丢的时序竞争教训——T-30s 广播只作加速显示）",
+      "summary": "滚动重启计划内路径语义（crash-forensics D5）：临界触发经推迟判定（pi 侧 extension 聚合上报绝对计数镜像 ∪ relay-registry 在途；zcode EnginePort.inFlightSnapshot? 注入槽已删 2026-09-13 oe-audit——runtime 进程内无引擎实例零接线，引擎子任务由 pi 侧上报覆盖）→ 推迟有界：上限 30min（XYZ_ROLLING_RESTART_DEFER_LIMIT_MS 可注入短上限验证），到点强制记 rolling-restart-forced reason=defer-limit（与硬阈值形态区分，absent-report 形态不计入 stale-high 观测占比）→ 双维硬升级（heap ≥92% 或系统 memPressure 越限，reason=hard-threshold）；执行 = 经既有完整 shutdown 序退出（SHUTDOWN_STEP_SEQUENCE 13 步打点 SSOT：首步 cancel-rolling-restart、engine-pool-dispose 挂 server.stop 后 closeLogger 前、close-crash-journal 在 closeLogger 前——禁新增任何退出 shortcut）；专用退出码 86（RUNTIME_PLANNED_EXIT_CODE SSOT 在 shared）→ supervisor 走 recordPlanned 分支：立即重启、零退避、零崩溃计数（planned 边不进 counting 状态机）；推迟/预告/红牌状态暴露只读查询 RPC，renderer 重连/刷新后主动拉取恢复横幅（broadcast 早于订阅即丢的时序竞争教训——T-30s 广播只作加速显示）",
       "scope": [
         "packages/runtime/src/services/session/rolling-restart.ts",
         "packages/runtime/src/index.ts",

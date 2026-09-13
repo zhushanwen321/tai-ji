@@ -11,15 +11,3 @@
  * 「在途判定谓词 + 求值位置」——extension 聚合上报通道的协议面（u7a）。
  */
 export const SUBAGENT_INFLIGHT_MARKER = '\x00XYZ_SUBAGENT_INFLIGHT'
-
-/**
- * 上报类型的 2 个值运行时集合（与 InFlightReportKind 类型同源——types.ts 从此派生）。
- * event-adapter（u7b）用它把 JSON 解析出的 kind 字符串收窄为联合类型，
- * 非法值按 malformed 上报丢弃（不镜像不报错——单帧丢弃由绝对计数语义自愈）。
- *
- * - initial：extension 加载完成（session 就绪）时点的一次性初始上报，语义 =
- *   「本 session 已注入 subagent-workflow 且当前在途计数为帧内值」——服务 u7b 的
- *   errs 判别（区分「缺席/旧版」与「在场且无在途」，D5 缺席语义②）。
- * - delta：生命周期事件触发的常规上报，绝对计数（非增量）。
- */
-export const INFLIGHT_REPORT_KINDS = ['initial', 'delta'] as const

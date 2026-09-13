@@ -12,9 +12,10 @@
 //     与 onPoolResolved 分立两个时点）。
 //   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面。
 //     权威源：docs/design/timeout-audit-hygiene-batch.md §3.2 D2-2。
-//   - [u7a 已实施 2026-09-10] EnginePort.inFlightSnapshot?()——引擎在途只读快照面
-//     （滚动重启推迟谓词输入）。权威源：
-//     docs/design/crash-forensics-and-watchdog.md §3.3 D5。
+//   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
+//     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
+//     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
+//     docs/design/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
@@ -237,19 +238,4 @@ export interface EnginePort {
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;
-
-  /**
-   * [u7a D5] 可选面：引擎在途任务只读快照（滚动重启推迟谓词的引擎侧输入——
-   * 权威源：docs/design/crash-forensics-and-watchdog.md §3.3 D5「推迟判定源 =
-   * relay ∪ 引擎池在途 ∪ pi 侧 extension 聚合上报」）。同步纯读、无副作用。
-   *
-   * 返回 null = 引擎不提供快照；成员缺席（undefined，pi 引擎不实现）= 无引擎侧
-   * 在途面——pi 形态的在途由 subagent-workflow extension 聚合上报覆盖（EnginePort
-   * 之外的第 4 通道，两通道互不替代）。可选成员保持向后兼容（port.ts 既有扩展
-   * 先例：listModels / validateModel / dispose 全为可选成员）。
-   *
-   * zcode 实现语义（显式裁决）：在途 = activeSessions 非空——poolKey 'shared' 的
-   * app-server 空闲常驻进程恒活，**禁止按进程存在判定**（会恒真、推迟常态化）。
-   */
-  inFlightSnapshot?(): { inFlight: number } | null;
 }

@@ -5,21 +5,18 @@
  * 职责（单一变化轴「滚动重启决策与推迟编排」）：
  * - 触发：看门狗 critical 档（u6 广播 watchdog:memoryPressure level='critical'）进入
  *   决策——warn 档是 relief 降级（u6），不进本模块。
- * - 推迟判定谓词（D5 ①，三源并集）：
+ * - 推迟判定谓词（D5 ①，两源并集；2026-09-13 oe-audit 删第三源「引擎侧快照」——
+ *   引擎池活在 pi 进程、runtime 进程内无引擎实例，注入槽自交付起零接线，引擎宿主
+ *   迁入 runtime 侧时再按 git 历史恢复）：
  *   ① pi 侧镜像（inflight-mirror，u7b）：遍历活跃 session，绝对计数 >0 即在途；
- *      「已注入但从未收到上报」（errs/absent-report，旧版 extension 组合）→ 推迟且
- *      计数未知（deferred 事件 inflight=null——u7b 配方：0 = 在场且无在途的已证事实，
- *      null = 计数未知）。Path A 保活天然被镜像谓词排除：上报口径即
+ *      「已注入但从未收到上报」（errs/absent-report，reporter 放弃 / 通道结构性故障）
+ *      → 推迟且计数未知（deferred 事件 inflight=null——u7b 配方：0 = 在场且无在途的
+ *      已证事实，null = 计数未知）。Path A 保活天然被镜像谓词排除：上报口径即
  *      `hasLiveProcessHandle && !hasIdleTimer`（extension 侧 getInFlightSnapshot 双谓词），
  *      settled 后等待续聊的进程不计数 → 不推迟。
  *   ② relay-registry 在途子进程（kill-on-disconnect 同一注册表，size 即在途数）——经
  *      relayInFlight 注入槽消费，生产接线在组合根 index.ts（services 层不直连有状态
  *      IO infra）；未注入 = 该维不贡献（0）。
- *   ③ 引擎侧快照（EnginePort.inFlightSnapshot? 形态，u7a）：可选注入槽——pi 引擎不实现
- *      （undefined = 无引擎侧在途面，pi 形态已由 ① 覆盖），缺席即无在途（errs-safe 方向
- *      声明：当前 runtime 进程内无引擎实例（引擎池活在 pi 进程），生产装配暂不注入，
- *      缺席语义与 port.ts「成员缺席 = 无在途面」一致；引擎宿主迁移 runtime 侧时在组合根
- *      接线）。
  * - 推迟有界可升级（D5 ②）：命中 → deferred 相位，每拍重判；上限
  *   XYZ_ROLLING_RESTART_DEFER_LIMIT_MS（默认 30min）到点强制执行 reason=defer-limit；
  *   双维硬升级 = heap ≥ XYZ_RUNTIME_WATCHDOG_FORCE_PCT（默认 92%）或 memPressure 越限
@@ -186,16 +183,10 @@ export interface RollingRestartOptions {
   listSessionIds?: () => string[]
   /**
    * relay 在途子进程数（D5 判定源 ②：kill-on-disconnect 同一注册表的 size）。生产由
-   * 组合根接线（index.ts 持有 registry 句柄）；**未注入 = 0 = 谓词该维不贡献**——与
-   * queryEngineInFlight 缺席语义同型（services 层禁止 value import 有状态 IO infra，
-   * check_services_infra_import 守卫）。
+   * 组合根接线（index.ts 持有 registry 句柄）；**未注入 = 0 = 谓词该维不贡献**（services
+   * 层禁止 value import 有状态 IO infra，check_services_infra_import 守卫）。
    */
   relayInFlight?: () => number
-  /**
-   * 引擎侧在途快照（EnginePort.inFlightSnapshot? 形态）：返回 null = 引擎不提供快照；
-   * 缺省不注入 = 成员缺席 = 无引擎侧在途面（port.ts 缺省语义，见文件头 ③）。
-   */
-  queryEngineInFlight?: () => { inFlight: number } | null
   /** heap 用量百分比（0-100；缺省即时查 process.memoryUsage / v8 heap_size_limit）。 */
   heapPercent?: () => number
   /** 系统内存高压判定（D5 双维硬升级第二维；缺省 mem-pressure 即时查询 + isMemPressureHigh）。 */
@@ -252,7 +243,6 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
   const mirror = options.mirror ?? inflightMirror
   const listSessionIds = options.listSessionIds ?? (() => [])
   const relayInFlight = options.relayInFlight ?? (() => 0)
-  const queryEngineInFlight = options.queryEngineInFlight
   const heapPercent = options.heapPercent ?? defaultHeapPercent
   const memPressureHigh = options.memPressureHigh ?? defaultMemPressureHigh
   const onExecute = options.onExecute
@@ -295,8 +285,6 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
       if (entry && entry.inFlight > 0) total += entry.inFlight
     }
     total += relayInFlight()
-    const engine = queryEngineInFlight?.()
-    if (engine && engine.inFlight > 0) total += engine.inFlight
     // errs 收敛（u7b 配方）：任一 session 计数未知 → 整体计数未知（null），errs-safe
     // 方向 = 推迟有 30min 上限封顶，不因未知计数而漏推迟。
     return {
