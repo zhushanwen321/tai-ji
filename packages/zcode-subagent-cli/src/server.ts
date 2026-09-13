@@ -213,6 +213,9 @@ export class EngineProtocolServer {
       ...(stream !== undefined ? { stream } : {}),
       ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
+      // [U6 / §3.2.6 要点 3] resume 锚点透传（宿主 → 引擎的续聊通道：zcode 锚
+      // sessionRef {sessionId, dbPath}，引擎侧 resume 读 + 新 session 注入消费）。
+      ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onPoolResolved: (poolKey) => {
         void this.reverseRequestInternal("host/poolResolved", { runId, poolKey });
       },

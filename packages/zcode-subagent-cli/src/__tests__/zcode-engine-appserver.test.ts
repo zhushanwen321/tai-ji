@@ -780,7 +780,7 @@ describe("capabilities（D5：仅 eventGranularity 变）", () => {
     expect(engine.capabilities()).toEqual({
       schemaEnforcement: "emulated",
       steer: "unsupported",
-      conversation: "unsupported",
+      conversation: "cold",
       personaInjection: "prompt",
       eventGranularity: "stream",
       sandbox: "none",

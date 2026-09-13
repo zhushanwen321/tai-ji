@@ -199,8 +199,12 @@ export interface EngineCapabilities {
    * [H1 D5 语义收窄] resume 能力位（chat 续聊 = 新 run + resume 锚点的承载前提；
    * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
    * 「resume 续聊能力」，gate 判据与消费方不变）。
+   * [U6 / 永久会话模型 §3.2.6 要点 4] 新值 "cold" = 冷恢复会话：resume 读通道取
+   * 结构化历史 + 新 session 注入（无热 steering）。gate 判据仍是 `=== "unsupported"`
+   * 拒绝——"cold" 在 gate 面与 "native" 等价放行，差异只在续聊形态（新 session
+   * 注入 vs 原地续写）。
    */
-  conversation: "native" | "unsupported";
+  conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
   personaInjection: "file" | "flag" | "prompt";
   /** 粗粒度引擎：GUI 显示降级为阶段态。 */

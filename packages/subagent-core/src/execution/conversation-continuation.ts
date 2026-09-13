@@ -21,7 +21,7 @@
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
 // 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态面正交双闸。
 
-import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
+import { SHARED_POOL_KEY, type AgentOutcome, type ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "../core/error-message.ts";
 import { getLogger } from "../core/logger.ts";
@@ -46,7 +46,9 @@ import {
   noteRoundSettledFromProtocol,
 } from "./settled-watchdog.ts";
 // [U4 / §3.2.3] 准入判据单点消费：锚可解析性判据（判据一）定义在 cold-lookup.ts。
-import { isAnchorResolvable } from "./cold-lookup.ts";
+// [U6 / §3.2.6] transcriptAnchorOf = 锚派生单点（zcode 经 engineHandle.sessionRef），
+// resumeAnchor 构造与锚缺失/失效分流共用。
+import { isAnchorResolvable, transcriptAnchorOf } from "./cold-lookup.ts";
 // [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
 import type { WorktreeRebuildOutcome } from "./worktree-manager.ts";
 import type { ExecutionRecord } from "./types.ts";
@@ -358,16 +360,22 @@ export class ConversationContinuation {
     this.pendingReopenSummary = undefined;
     if (summaryPrefix !== undefined) freshSession = true; // reopen 降级轮 = fresh session
     if (!firstRound) {
-      if (summaryPrefix === undefined && record.sessionFile === undefined) {
+      // [U6] 锚判据引擎中立化：transcriptAnchorOf 单点（pi = sessionFile / zcode =
+      // engineHandle.sessionRef {sessionId,dbPath}）——zcode record 的 sessionFile
+      // 恒 undefined，旧「sessionFile 缺失 = 从未开跑」判据会把有锚 zcode record
+      // 误派 fresh session（丢 resume 通道）。
+      const anchor = transcriptAnchorOf(record);
+      if (summaryPrefix === undefined && anchor === undefined) {
         // [U4] 锚字段缺失（从未开跑）：全新 session 直派；无历史轮可摘要（binding
         // 只在首轮 run 后存在），不注入 reopen 摘要。
         freshSession = true;
       } else if (summaryPrefix === undefined && !isAnchorResolvable(record)) {
-        // [U4] 续轮窗口内 transcript 被删（字段在、文件不在）：全新 session 直派 +
-        // 摘要注入。完整 reopen 降级（markReopened 世代推进）只在 idle-message 路径
-        //（reviveOrThrow）发生；本分支不推进世代（markReopened CAS 仅收 idle，U2
-        // 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
-        // 应答回填 writeBindingForRecord 保证）——偏差登记见实现单元报告。
+        // [U4] 续轮窗口内 transcript 被删（pi：文件不在 / zcode：库条目被 TTL 清）
+        //：全新 session 直派 + 摘要注入。完整 reopen 降级（markReopened 世代推进）
+        // 只在 idle-message 路径（reviveOrThrow）发生；本分支不推进世代
+        //（markReopened CAS 仅收 idle，U2 原语契约领地外不可放宽；round 连续保持
+        // 通知去重键单调，磁盘一致性由 run 应答回填 writeBindingForRecord 保证）
+        //——偏差登记见实现单元报告。
         freshSession = true;
         summaryPrefix = buildReopenSummaryPrompt({
           id: record.id,
@@ -533,8 +541,22 @@ export class ConversationContinuation {
     }
   }
 
-  /** resume 锚点 = record identity（sessionFile 续写原文件；pi 无池化 poolKey 恒 'shared'）。 */
+  /**
+   * resume 锚点（引擎分派，[U6 / §3.2.6 要点 3]）：
+   *   - zcode：sessionRef = {sessionId, dbPath}（transcriptAnchorOf 派生单源），
+   *     poolKey = engineHandle.poolKey（引擎回填面，缺省 'shared'）——引擎侧消费 =
+   *     session/resume 读历史 + session/create 新 session 注入（P-1 选型，原地
+   *     resume 续写被 -32031 卡死不可用），新 sessionRef 经 onHandleReady 回传；
+   *   - pi（缺省）：recordId + sessionFile 续写原文件，poolKey 恒 'shared'。
+   */
   private resumeAnchor(): ResumeAnchor {
+    const anchor = transcriptAnchorOf(this.record);
+    if (anchor !== undefined && anchor.engine === "zcode") {
+      return {
+        sessionRef: { sessionId: anchor.sessionId, dbPath: anchor.dbPath },
+        poolKey: this.record.engineHandle?.poolKey ?? SHARED_POOL_KEY,
+      };
+    }
     return {
       sessionRef: {
         recordId: this.record.id,
@@ -735,14 +757,15 @@ export class ConversationContinuation {
    */
   private reviveOrThrow(): void {
     const record = this.record;
-    // [U4 / §3.2.3 锚失效降级] 检测点在翻边**前**（markReopened CAS 仅收 idle——
-    // U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚字段在但文件不可
-    // 解析（transcript 被回收/外部删除）→ 同 id 带历史重开——round 归零 + epoch+1 +
-    // stopReason=reopened + 新锚 binding（store.markReopened），摘要暂存 pendingReopen
-    // 由派发守卫消费（resume:undefined + prompt 注入）。锚字段缺失（从未开跑）不在此
-    // 分支（无世代可推进，派发守卫按全新 session 直派）。CAS false = 竞态防御
-    //（此刻仍 idle 的前提下理论不可达），响亮上抛。
-    if (record.sessionFile !== undefined && !isAnchorResolvable(record)) {
+    // [U4 / §3.2.3 锚失效降级 → U6 引擎中立] 检测点在翻边**前**（markReopened CAS
+    // 仅收 idle——U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚在但
+    // 不可解析（pi：transcript 文件被回收 / zcode：库条目被 TTL 清，§3.2.6 ③）→
+    // 同 id 带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding
+    //（store.markReopened），摘要暂存 pendingReopen 由派发守卫消费（resume:undefined
+    // + prompt 注入）。锚缺失（从未开跑）不在此分支（无世代可推进，派发守卫按全新
+    // session 直派）。
+    const anchor = transcriptAnchorOf(record);
+    if (anchor !== undefined && !isAnchorResolvable(record)) {
       // 摘要快照先于 markReopened（后者 round 归零——摘要须反映重开前的历史轮数）。
       const summary = buildReopenSummaryPrompt({
         id: record.id,
@@ -753,13 +776,22 @@ export class ConversationContinuation {
         ...(record.turnCount !== undefined ? { turns: record.turnCount } : {}),
         ...(record.result !== undefined ? { lastResult: record.result } : {}),
       });
-      if (!this.host.reopenRecord(record)) {
+      if (this.host.reopenRecord(record)) {
+        this.pendingReopenSummary = summary;
+      } else if (anchor.engine === "zcode") {
+        // [U6 偏差登记] zcode 锚失效降级：现行 reopenRecord 宿主闭包（run-orchestration
+        // 领地）只承载 pi 锚（sessionFile 缺失恒 false）——zcode 走无世代推进降级
+        //（fresh session + 摘要注入，round 连续——与 drain 窗口降级/U4-D2 偏差同族：
+        // round 不重置则 notifyId 无撞键面，epoch 推进非必要）。世代推进版 reopen
+        //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
+        this.pendingReopenSummary = summary;
+      } else {
+        // pi：CAS false = 竞态防御（此刻仍 idle 的前提下理论不可达），响亮上抛。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
           `while the message was being processed). Recovery: retry the message (action:'message').`,
         );
       }
-      this.pendingReopenSummary = summary;
     }
     if (record.chatMode !== true) {
       // D5 gate（写点②）：gate 不过 → 硬拒 + fork/重派指引，防 unsupported

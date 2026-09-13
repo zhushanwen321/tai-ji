@@ -12,7 +12,7 @@
 // 驱动面自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别守卫对齐）。
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,7 +88,7 @@ class EngineProc {
   private closed = false;
   private stderrText = "";
 
-  constructor(scenarioPath: string = scenarioFile) {
+  constructor(scenarioPath: string = scenarioFile, extraEnv: Record<string, string> = {}) {
     this.child = spawn(process.execPath, [BIN], {
       env: {
         ...process.env,
@@ -99,6 +99,7 @@ class EngineProc {
         // 剥可能干扰的宿主继承面（CI/本地环境差异面收敛）
         ZCODE_SESSION_DB_PATH: "",
         ZCODE_SESSION_DB: "",
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -296,6 +297,134 @@ describe("bin e2e：initialize → run → 终态应答 协议往返", () => {
     }
   });
 });
+
+// ============================================================
+// [U6 / §3.2.6 要点 3] interact(resume) 协议级 e2e：run.params.resume 携带 zcode 锚
+// → 引擎 session/resume 读历史 → 前缀注入 → session/create 新会话执行 → 新
+// sessionRef 回填（handleReady + 终态 handle）。-32031 定向拒投断言续聊链永不向
+// 旧会话 send（P-1 选型不回退）。
+// ============================================================
+
+describe("bin e2e：interact(resume) 全链（resume 读 → create 新 session → sessionRef 回填）", () => {
+  const OLD_SID = "sess_prior_e2e_1";
+
+  function writeResumeScenario(): string {
+    const file = path.join(root, "scenario-resume.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        // distinctSessionIds 形态：create 回独立 sess_<frameId>（≠ 旧锚）
+        sendPushes: [
+          ...ZCODE_APPSERVER_GOLDEN.pushStream,
+          ZCODE_APPSERVER_GOLDEN.terminal[0],
+          ZCODE_APPSERVER_GOLDEN.terminal[1],
+        ].map((l) => JSON.parse(l) as Record<string, unknown>),
+        sendDenySessionIds: [OLD_SID],
+        resumeResult: {
+          messages: [
+            { info: { role: "user" }, parts: [{ type: "text", text: "记住暗号：蓝莓派-42" }] },
+            {
+              info: { role: "assistant" },
+              parts: [
+                { type: "text", text: "收到。" },
+                { type: "step-finish", tokens: { input: 800, output: 120 } },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    return file;
+  }
+
+  it("resume 锚驱动：resume 帧先于 create、首轮含历史前缀、终态 sessionRef = 新会话、无向旧会话 send", { timeout: 60_000 }, async () => {
+    const stateFile = path.join(root, "resume-fake-state.jsonl");
+    // STAMP：golden 推送流按目标会话归因（新会话 id ≠ golden 内嵌固定 id）
+    const engine = new EngineProc(writeResumeScenario(), { FAKE_STATE_FILE: stateFile, FAKE_STAMP_SESSION: "1" });
+    try {
+      engine.write({
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: 1, hostInfo: { name: "vitest-e2e", version: "0.0.0", dataRoot: dataDir }, engineConfig: {} },
+      });
+      const init = await engine.waitFor((f) => f.kind === "response" && f.id === 1);
+      expect(init.error).toBeUndefined();
+
+      engine.write({
+        id: 2,
+        method: "run",
+        params: {
+          runId: "run-resume-1",
+          task: { prompt: "暗号是什么？" },
+          ctx: { poolKey: "shared", cwd: dataDir, model: "test-provider/m1" },
+          // [U6] 协议 run.params.resume（RunResumeParams：recordId + ResumeAnchor）
+          resume: {
+            recordId: "run-resume-1",
+            resume: {
+              sessionRef: { sessionId: OLD_SID, dbPath: zcodeSessionDbPath(dataDir) },
+              poolKey: "shared",
+            },
+          },
+        },
+      });
+
+      // handleReady 的新 sessionRef（create 应答后回传——锚换新的协议面证据）
+      const handle = await engine.waitFor((f) => f.kind === "reverse" && f.method === "host/handleReady");
+      const handleSid = (handle.params as { sessionRef?: Record<string, string> })?.sessionRef?.["sessionId"];
+      expect(typeof handleSid).toBe("string");
+      expect(handleSid).not.toBe(OLD_SID);
+
+      const runResp = await engine.waitFor((f) => f.kind === "response" && f.id === 2);
+      expect(runResp.error).toBeUndefined();
+      const runResult = runResp.result as {
+        handle: { sessionRef: Record<string, string> };
+        outcome: { content: string; error?: string; sessionId?: string };
+      };
+      expect(runResult.outcome.error).toBeUndefined();
+      expect(runResult.outcome.content).toBe(FINAL_TEXT);
+      // 终态 handle 与 outcome 的 sessionId 均为新会话（锚更新链的引擎侧产出）
+      expect(runResult.outcome.sessionId).toBe(handleSid);
+      expect(runResult.handle.sessionRef["sessionId"]).toBe(handleSid);
+
+      // fake 流水：resume 帧先于 create；唯一 send 目标 = 新会话且内容含历史前缀
+      const recv = readFakeState(stateFile);
+      const methods = recv.map((f) => (f as { method?: string }).method);
+      expect(methods.indexOf("session/resume")).toBeGreaterThanOrEqual(0);
+      expect(methods.indexOf("session/resume")).toBeLessThan(methods.indexOf("session/create"));
+      expect(recv.filter((f) => (f as { method?: string }).method === "session/resume")).toHaveLength(1);
+      expect((recv.find((f) => (f as { method?: string }).method === "session/resume") as { params?: unknown }).params).toEqual({
+        sessionId: OLD_SID,
+      });
+      const sends = recv.filter((f) => (f as { method?: string }).method === "session/send");
+      expect(sends).toHaveLength(1);
+      const sendParams = (sends[0] as { params?: { sessionId?: string; content?: string } }).params;
+      expect(sendParams?.sessionId).toBe(handleSid);
+      expect(sendParams?.content).toContain("[Continued conversation]");
+      expect(sendParams?.content).toContain(`prior session id: ${OLD_SID}`);
+      expect(sendParams?.content).toContain("记住暗号：蓝莓派-42");
+      expect(sendParams?.content?.endsWith("暗号是什么？")).toBe(true);
+
+      engine.endStdin();
+      expect(await engine.exited()).toBe(true);
+    } finally {
+      engine.kill();
+    }
+  });
+});
+
+/** fake-appserver 流水（FAKE_STATE_FILE）的 recv 帧提取。 */
+function readFakeState(file: string): Array<Record<string, unknown>> {
+  try {
+    return readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .filter((l) => l.includes('"ev":"recv"'))
+      .map((l) => (JSON.parse(l) as { frame?: Record<string, unknown> }).frame)
+      .filter((f): f is Record<string, unknown> => f !== undefined);
+  } catch {
+    return [];
+  }
+}
 
 // ============================================================
 // 权威终态迟到分级日志：stderr 兜底链路取证（bin 真进程全链——session-channel

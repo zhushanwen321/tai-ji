@@ -19,11 +19,15 @@
 
 import * as fs from "node:fs";
 
+import { getLogger } from "../core/logger.ts";
+
 import { findForeignLiveInstance } from "./alive-store.ts";
 import { createRecord } from "./execution-record.ts";
 import type { StatusFilter } from "./record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "./types.ts";
-import { ResurrectDeniedError } from "./types.ts";
+import type { ExecutionRecord, SubagentRecord, TranscriptRef } from "./types.ts";
+import { isZcodeTranscriptRef, ResurrectDeniedError } from "./types.ts";
+
+const logger = getLogger("subagents");
 
 /** SP-2 冷路径按 id 查 record 的 collectRecords 扫描上限（全扫兜底的容量 cap）。
  *  原定义于 subagent-service.ts，随冷查链搬移；Service.lookupRecordAnyState
@@ -53,13 +57,98 @@ export interface ColdLookupDeps {
   getBaselineRecordId: () => string | undefined;
 }
 
-/** [U4 / §3.2.3 判据一单点] transcript 锚可解析性（pi 形态：sessionFile 在盘可读）。
- *  锚失效（文件被 transcript GC 回收 / 外部删除）≠ 拒绝续聊——消费方按 §3.2.3 降级
- *  规则走同 id 带历史重开（markReopened，编排归 Continuation 派发守卫）。zcode 锚
- *（sessionId+dbPath 库内存在性）判据归 U6 transcript 锚单元接线（record.transcriptRef
- *  写面 U6 落地前，锚的现行载体恒为 pi 的 sessionFile）。 */
-export function isAnchorResolvable(record: Pick<SubagentRecord, "sessionFile">): boolean {
-  return record.sessionFile !== undefined && fs.existsSync(record.sessionFile);
+/**
+ * [U6 / §3.2.6] 锚派生的消费面形状（transcriptAnchorOf / isAnchorResolvable 入参）：
+ * ExecutionRecord 与 SubagentRecord（entry 重建）均结构满足。sessionFile = pi 锚的
+ * 迁移期载体（写面未收编前 pi 锚的现行形态）；engineHandle.sessionRef = zcode 锚的
+ * 单源（引擎 onHandleReady 回传 {sessionId, dbPath}，经主 session entry 持久化——
+ * record.transcriptRef 显式字段优先）。
+ */
+export interface AnchorProbeShape {
+  sessionFile?: string;
+  transcriptRef?: TranscriptRef;
+  engine?: string;
+  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+}
+
+/**
+ * [U6 / §3.2.6 要点 1/2] record → transcript 锚的派生单点（引擎中立判别联合）：
+ *   - 显式 transcriptRef（markReopened 写面 / 后续单元收编的 settle 写点）优先；
+ *   - zcode：engineHandle.sessionRef {sessionId, dbPath} 双键齐 → zcode 锚（内存
+ *     record 的引擎回填面即锚的单源，避免双写漂移——binding 快照收编归 U7）；
+ *   - pi：sessionFile 在 → pi 锚（现行载体）。
+ * 三处皆缺 = 无锚（从未开跑的 entry-born / spawn 窗口期）→ undefined。
+ */
+export function transcriptAnchorOf(record: AnchorProbeShape): TranscriptRef | undefined {
+  if (record.transcriptRef !== undefined) return record.transcriptRef;
+  const sessionRef = record.engineHandle?.sessionRef;
+  if (
+    record.engine === "zcode" &&
+    typeof sessionRef?.["sessionId"] === "string" &&
+    sessionRef["sessionId"] !== "" &&
+    typeof sessionRef?.["dbPath"] === "string" &&
+    sessionRef["dbPath"] !== ""
+  ) {
+    return { engine: "zcode", sessionId: sessionRef["sessionId"], dbPath: sessionRef["dbPath"] };
+  }
+  if (record.sessionFile !== undefined && record.sessionFile !== "") {
+    return { engine: "pi", sessionFile: record.sessionFile };
+  }
+  return undefined;
+}
+
+/**
+ * [U6 / §3.2.6 判据一] zcode 锚存在性：隔离库 session 条目在（内嵌只读查询——
+ * node:sqlite 零依赖，与 zcode-subagent-cli reader 同选型；subagent-core 不开引擎
+ * CLI 包的生产 import（仓内零生产 import 约定），任务书钦点的「内嵌只读查询」形态）。
+ * 同步经 process.getBuiltinModule（Node ≥22.3，仓根 engines node>=22.19 满足）。
+ * fail-closed：运行时不支持 / db 缺失 / 查询异常 = false——锚失效走 reopen 降级是
+ * 设计内恢复路径（§3.2.6 ③），误判可解析才会造成双写/挂死。
+ */
+function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
+  try {
+    if (!fs.existsSync(dbPath)) return false;
+    const getBuiltin = (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
+    if (typeof getBuiltin !== "function") {
+      logger.warn("[subagents] zcode 锚存在性检查不可用（process.getBuiltinModule 缺席，需 Node ≥22.3）——按锚失效降级");
+      return false;
+    }
+    const mod = getBuiltin("node:sqlite") as { DatabaseSync?: unknown } | undefined;
+    if (typeof mod?.DatabaseSync !== "function") return false;
+    type DbLike = {
+      prepare: (sql: string) => { get: (...a: unknown[]) => unknown };
+      close: () => void;
+    };
+    const db = new (mod.DatabaseSync as new (path: string, opts: { readOnly: boolean }) => DbLike)(dbPath, {
+      readOnly: true,
+    });
+    try {
+      return db.prepare("SELECT id FROM session WHERE id = ? LIMIT 1").get(sessionId) !== undefined;
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    logger.debug(
+      `[subagents] zcode 锚存在性查询失败（按锚失效降级 reopen）: ${err instanceof Error ? err.message : String(err)}`,
+      { dbPath, sessionId },
+    );
+    return false;
+  }
+}
+
+/**
+ * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性：
+ *   - pi：sessionFile 在盘可读（现行判据不变——`{sessionFile}` 字面量入参兼容）；
+ *   - zcode：sessionId+dbPath 库中条目存在（TTL 清理/外部删除 = 锚失效）。
+ *  锚失效 ≠ 拒绝续聊——消费方按 §3.2.3 降级规则走同 id 带历史重开（markReopened，
+ *  编排归 Continuation 派发守卫；zcode 现行降级形态见 conversation-continuation
+ *  reviveOrThrow 的 zcode 分支注记）。
+ */
+export function isAnchorResolvable(record: AnchorProbeShape): boolean {
+  const anchor = transcriptAnchorOf(record);
+  if (anchor === undefined) return false;
+  if (isZcodeTranscriptRef(anchor)) return zcodeSessionEntryExists(anchor.dbPath, anchor.sessionId);
+  return fs.existsSync(anchor.sessionFile);
 }
 
 /** [U4 / §3.2.3] 冷查候选谓词（findColdLookupCandidate 的候选形态判定，判据单点）。
@@ -157,6 +246,13 @@ function resurrectColdRecord(
   });
   record.sessionFile = found.sessionFile;
   record.round = found.round;
+  // [U6 / §3.2.6] transcript 锚水合：SubagentRecord（entry engineHandle.sessionRef）
+  // → ExecutionRecord.transcriptRef（zcode 锚经 transcriptAnchorOf 派生单点——与
+  // isAnchorResolvable / Continuation resumeAnchor 同源，防三处判据漂移）。pi 锚
+  // 同批水合（显式字段与 sessionFile 载体并存，消费方经 transcriptAnchorOf 单点
+  // 读——先到先得无冲突）。
+  const anchor = transcriptAnchorOf(found);
+  if (anchor !== undefined) record.transcriptRef = anchor;
   // [review round2] 跨重启 worktree 绑定丢失防护：原 record 创建时启用了 worktree 隔离
   //（session entry 的 worktree 标志），但 WorktreeHandle 不可序列化、重建后恒缺失。
   // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏

@@ -75,6 +75,9 @@ import {
   ZCODE_ENGINE_ID,
   ZCODE_ERROR_TAIL_CHARS,
   ZCODE_KILL_GRACE_MS,
+  ZCODE_RESUME_CHARS_PER_TOKEN,
+  ZCODE_RESUME_HISTORY_TOKEN_BUDGET,
+  ZCODE_SESSION_SWEEP_DEFER_MS,
   ZCODE_SHARED_POOL_KEY,
   ZCODE_TURN_MAX_TIMEOUT_ENV,
   isFailedTerminalStatus,
@@ -101,9 +104,13 @@ import { AppServerConnection, buildAppServerEnv, isAppServerRpcError } from "./c
 import {
   SessionChannel,
   TurnTimeoutError,
+  extractResumeHistory,
+  extractResumeTotalTokens,
+  type ResumedHistoryTurn,
   type SessionCreateParams,
   type SessionTurnResult,
 } from "./session-channel.ts";
+import { maybeSweepExpiredZcodeSessions } from "./session-db-maintenance.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { stderrLogPathFor } from "./logs/stderr-rotation.ts";
 
@@ -172,8 +179,11 @@ export class ZcodeEngine implements EnginePort {
       schemaEnforcement: "emulated",
       // send-while-running 恒 -32010 硬错误（旧实测）——app-server 常驻化不改变此判据
       steer: "unsupported",
-      // 无同进程 idle 复用（D4：每任务自包含 create→run→close）
-      conversation: "unsupported",
+      // [U6 / §3.2.6 要点 4] "cold" = 冷恢复会话：session/resume 读通道取结构化
+      // 历史 + session/create 新会话注入首轮（无热 steering——interrupt 维持
+      // kill-only 如实声明）。P-1 探针：原地 resume 续写被 -32031 卡死，热会话
+      // 通道不可用，声明不越级。
+      conversation: "cold",
       // 无 --append-system-prompt flag（实测拒收）——persona 只能拼进 prompt
       personaInjection: "prompt",
       // app-server 推送流实时流出（session/event payload.delta → text_delta）
@@ -298,7 +308,15 @@ export class ZcodeEngine implements EnginePort {
 
     const cwd = task.cwd ?? process.cwd();
     const schema = isPlainObject(task.schema) ? task.schema : undefined;
-    const basePrompt = this.buildPrompt(task, schema);
+    // [U6 / §3.2.6 要点 3] zcode 续聊（interact-resume）：ctx.resume 携带 zcode 锚
+    //（sessionRef {sessionId, dbPath}）→ session/resume 读通道取结构化历史 → token
+    // 预算裁剪 → prompt 前缀注入。执行仍走**新 session**（attemptAppServerTurn 每次
+    // create 新会话——原地 resume 续写被 -32031 卡死，P-1 探针；与 §3.2.3 reopen
+    // 机制同构，round/epoch 不变），新 sessionRef 经 onHandleReady 回传宿主回填
+    // transcriptRef。无锚（首轮 / fresh session 轮）prefix 为 undefined，行为不变。
+    const resumePrefix = await this.buildResumeHistoryPrefix(ctx);
+    const basePrompt =
+      resumePrefix === undefined ? this.buildPrompt(task, schema) : resumePrefix + this.buildPrompt(task, schema);
 
     // ② 首轮执行 + schema 仿真重试（重试语义与不变量注释见 runAppServerAttemptsWithRetry）
     const usageAcc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, has: false };
@@ -692,6 +710,16 @@ export class ZcodeEngine implements EnginePort {
       activeSessions: new Set<string>(),
     };
     this.appserverRuntime = rt;
+    // [U6 / §3.2.6 风险登记②] TTL 清理通道接线（引擎侧 sweep 选型，见
+    // session-db-maintenance.ts 头注）：lazy——运行时建立时 defer 触发（50ms 让位
+    // 首 run 的 create 请求先出站），进程级 24h 节流。活跃豁免集 = 当前在途会话
+    // 快照（sweep 同步执行窗内新建的会话在 30 天 TTL 口径下天然安全——不可能是
+    // 超窗条目）。fail-soft：sweep 任何失败不进 run 主链路。
+    const sweepDbPath = sessionDbPath;
+    const sweepTimer = setTimeout(() => {
+      maybeSweepExpiredZcodeSessions(sweepDbPath, { keepSessionIds: this.appserverRuntime?.activeSessions });
+    }, ZCODE_SESSION_SWEEP_DEFER_MS);
+    if (typeof sweepTimer.unref === "function") sweepTimer.unref();
     return rt;
   }
 
@@ -990,6 +1018,36 @@ export class ZcodeEngine implements EnginePort {
   }
 
   /**
+   * [U6 / §3.2.6 要点 3] resume 锚 → 历史前缀（interact-resume 的读半段）。
+   *
+   * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（条目被 TTL 清 /
+   * 会话失效 / 控制面错误）= 宿主侧锚判据通过后、引擎派发前的窄竞态窗——降级为
+   * **无历史前缀的新会话**（warn 留痕；宿主 reopen 摘要承担主降级面），不炸轮：
+   * 续聊消息本身仍可送达（模型缺历史上下文，比整轮失败可用性高，与 reopen 降级
+   * 的「带摘要重开」语义同族）。
+   */
+  private async buildResumeHistoryPrefix(ctx: RunContext): Promise<string | undefined> {
+    const anchor = zcodeResumeAnchorOf(ctx);
+    if (anchor === undefined) return undefined;
+    const rt = this.ensureAppServerRuntime();
+    let history: ResumedHistoryTurn[];
+    let tokens: number | undefined;
+    try {
+      const result = await rt.channel.resumeSession(anchor.sessionId);
+      history = extractResumeHistory(result);
+      tokens = extractResumeTotalTokens(result);
+    } catch (err) {
+      logger.warn(
+        `[zcode-engine] session/resume 读历史失败（锚 ${anchor.sessionId}）——降级为无历史前缀的新会话: ${errMessage(err)}`,
+        { taskId: ctx.taskId },
+      );
+      return undefined;
+    }
+    if (history.length === 0) return undefined; // 空历史（锚存在但从未成轮）不注入空段
+    return buildResumeInjectionSegment(history, anchor.sessionId, tokens);
+  }
+
+  /**
    * persona 拼接后的完整 prompt（personaInjection: 'prompt'——zcode 无 flag 通道）：
    * appendSystemPrompt 段在前（人设/约束语境——D6 合流后 persona≡skillPath+
    * appendSystemPrompt 平铺，由上游解析进 appendSystemPrompt），task 正文居中，
@@ -1004,6 +1062,61 @@ export class ZcodeEngine implements EnginePort {
 }
 
 // ── 模块级辅助（run 的重试编排件） ──
+
+/**
+ * [U6 / §3.2.6 要点 3] run ctx 的 resume 锚 zcode 形态判别（sessionRef 双键
+ * {sessionId, dbPath}——宿主 transcriptAnchorOf 派生的 zcode 锚经协议 ResumeAnchor
+ * 弱类型 Record 透传，此处形状收窄）。pi 锚（sessionFile）对 zcode 引擎无意义，
+ * 返回 undefined 走无前缀路径。
+ */
+function zcodeResumeAnchorOf(ctx: RunContext): { sessionId: string; dbPath: string } | undefined {
+  const ref = ctx.resume?.resume?.sessionRef;
+  if (ref === undefined) return undefined;
+  const sessionId = ref["sessionId"];
+  const dbPath = ref["dbPath"];
+  if (typeof sessionId !== "string" || sessionId === "") return undefined;
+  if (typeof dbPath !== "string" || dbPath === "") return undefined;
+  return { sessionId, dbPath };
+}
+
+/**
+ * [U6 / §3.2.6 要点 3] resume 历史 → 注入前缀（纯函数，单测锁定裁剪契约）。
+ *
+ * 形态：新会话对 prior session 零记忆——前缀显式框定「这是同一对话的延续」并
+ * 给出 prior sessionId（宿主 record 锚已换新，旧 id 仅作溯源提示），历史按
+ * user/assistant 双向行铺陈。裁剪：token 预算（tokens 数据优先，缺席按字符近似
+ * ×ZCODE_RESUME_CHARS_PER_TOKEN）超限时从最旧条目起丢弃并显式标注省略（保尾
+ * ——最近上下文对续聊最重要）。
+ */
+export function buildResumeInjectionSegment(
+  history: readonly ResumedHistoryTurn[],
+  priorSessionId: string,
+  totalTokens?: number,
+  tokenBudget: number = ZCODE_RESUME_HISTORY_TOKEN_BUDGET,
+): string {
+  const budgetTokens = tokenBudget;
+  const charBudget = budgetTokens * ZCODE_RESUME_CHARS_PER_TOKEN;
+  const lines = history.map((t) => `${t.role}: ${t.text}`);
+  let kept = lines;
+  let omitted = 0;
+  // 裁剪循环：总字符超预算时逐条丢最旧（每轮重算，前缀行也占预算）
+  while (kept.length > 1 && kept.reduce((n, l) => n + l.length + 1, 0) > charBudget) {
+    kept = kept.slice(1);
+    omitted++;
+  }
+  const omissionNote = omitted > 0 ? `[... ${omitted} older turn(s) omitted to fit the ${tokenBudget}-token history budget ...]\n` : "";
+  const usageNote =
+    totalTokens !== undefined
+      ? `\n(prior session retained ~${totalTokens} tokens of history)`
+      : "";
+  return (
+    `[Continued conversation] You are continuing an existing subagent conversation on a NEW session ` +
+    `(prior session id: ${priorSessionId}). The new session has no memory of its own — the full prior ` +
+    `conversation history recovered from the session store follows. Continue seamlessly from it; the user ` +
+    `message after this block is the next turn of the SAME conversation.\n\n` +
+    `<conversation_history>\n${omissionNote}${kept.join("\n")}\n</conversation_history>${usageNote}\n\n`
+  );
+}
 
 /** app-server 路径的合成 output 形态（stdoutText 恒空——失败素材在 message 内）。 */
 interface AttemptOutput {

@@ -47,7 +47,9 @@ export const CONSERVATIVE_CAPABILITIES: EngineCapabilities = {
 const CAPABILITY_ENUMS: Record<string, readonly string[]> = {
   schemaEnforcement: ["native", "emulated"],
   steer: ["native", "emulated", "unsupported"],
-  conversation: ["native", "unsupported"],
+  // [U6 / §3.2.6 要点 4] "cold" = 冷恢复会话（resume 读 + 新 session 注入）——
+  // 与 SDK EngineCapabilities.conversation 值域同批扩展，manifest 侧同步收词。
+  conversation: ["native", "cold", "unsupported"],
   personaInjection: ["file", "flag", "prompt"],
   eventGranularity: ["stream", "coarse"],
   sandbox: ["native", "emulated", "none"],

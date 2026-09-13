@@ -1532,3 +1532,109 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(finalEntry).toMatchObject({ id: record!.id, status: "idle", totalTokens: 42 });
   });
 });
+
+// ============================================================
+// [U6 / §3.2.6] zcode record 的 Continuation 续聊派发：resumeAnchor 引擎分派
+//（zcode 锚 {sessionId, dbPath} → 引擎侧 resume 读 + 新 session 注入）+ 锚缺失/
+// 失效分支的引擎中立化。fixture：真实 node:sqlite 建 tmp 库（锚可解析形态）。
+// ============================================================
+
+describe("ConversationContinuation — [U6] zcode 锚分派与降级", () => {
+  let zcodeDir: string;
+  let zcodeDb: string;
+
+  beforeEach(() => {
+    zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cont-zcode-"));
+    zcodeDb = path.join(zcodeDir, "db.sqlite");
+  });
+
+  afterEach(() => {
+    fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** zcode record（sessionFile 恒 undefined；锚 = engineHandle.sessionRef）。 */
+  function makeZcodeRecord(over: {
+    sessionId?: string;
+    dbPath?: string;
+    round?: number;
+  }): ExecutionRecord {
+    return makeRecord({
+      id: "sa-zcode",
+      engine: "zcode",
+      sessionFile: undefined,
+      round: over.round ?? 2,
+      engineHandle: {
+        sessionRef: {
+          sessionId: over.sessionId ?? "sess_z_anchor",
+          dbPath: over.dbPath ?? zcodeDb,
+        },
+        poolKey: "shared",
+      },
+    });
+  }
+
+  async function seedZcodeDb(): Promise<void> {
+    const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
+    type Db = { exec: (s: string) => void; prepare: (s: string) => { run: (...a: unknown[]) => void }; close: () => void };
+    const db = new DatabaseSync(zcodeDb) as unknown as Db;
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, time_created INTEGER)");
+    db.prepare("INSERT INTO session (id, time_created) VALUES ('sess_z_anchor', 1)").run();
+    db.close();
+  }
+
+  it("锚可解析（库条目在）→ resume 锚携带 zcode 形态（sessionRef={sessionId,dbPath}，poolKey=shared），无摘要前缀", async () => {
+    await seedZcodeDb();
+    const record = makeZcodeRecord({});
+    record.status = "idle";
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("继续看导出接口");
+
+    expect(record.status).toBe("running");
+    expect(calls.reopened).toEqual([]);
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    // resume 锚 = zcode 形态（引擎侧据此走 session/resume 读 + 新 session 注入）
+    expect(calls.dispatched[0]!.resume).toEqual({
+      sessionRef: { sessionId: "sess_z_anchor", dbPath: zcodeDb },
+      poolKey: "shared",
+    });
+    // 锚在 → 不注入 reopen 摘要（历史由引擎侧结构化注入，非宿主摘要）
+    expect(calls.dispatched[0]!.task).toBe("继续看导出接口");
+  });
+
+  it("锚失效（库条目被 TTL 清）→ 降级：reopenRecord 闭包恒 false（zcode 无 pi 锚）不抛错，无世代推进 + 摘要前缀 + resume:undefined", async () => {
+    // dbPath 指向不存在文件 = 锚失效（isAnchorResolvable fail-closed）
+    const record = makeZcodeRecord({ dbPath: path.join(zcodeDir, "swept.sqlite"), round: 4 });
+    record.status = "idle";
+    // reopenAllowed=false 复刻真实 run-orchestration 闭包对 zcode record 的行为
+    //（sessionFile undefined → markReopened pi 锚不可构造 → 恒 false）
+    const { host, calls } = makeHost(record, { reopenAllowed: false });
+    const cont = new ConversationContinuation(record, host);
+
+    expect(() => cont.onMessage("继续")).not.toThrow();
+    expect(record.status).toBe("running");
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    // 无世代推进（无 markReopened 侧作用）：round 保持连续
+    expect(record.round).toBe(4);
+    expect(record.epoch).toBeUndefined();
+    expect(calls.dispatched[0]!.resume).toBeUndefined();
+    expect(calls.dispatched[0]!.task).toContain("[Session reopened]");
+    expect(calls.dispatched[0]!.task).toContain("继续");
+  });
+
+  it("锚缺失（zcode record 无 engineHandle——从未开跑）→ 全新 session 直派（resume:undefined、无摘要）", async () => {
+    const record = makeZcodeRecord({});
+    record.engineHandle = undefined;
+    record.status = "idle";
+    const { host, calls } = makeHost(record);
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("first contact");
+
+    expect(record.status).toBe("running");
+    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
+    expect(calls.dispatched[0]!.resume).toBeUndefined();
+    expect(calls.dispatched[0]!.task).toBe("first contact");
+  });
+});

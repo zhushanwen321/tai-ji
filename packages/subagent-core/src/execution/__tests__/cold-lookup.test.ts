@@ -26,7 +26,13 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readAliveMarker, writeAliveMarker } from "../alive-store.ts";
-import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../cold-lookup.ts";
+import {
+  COLD_LOOKUP_SCAN_LIMIT,
+  coldLookupForAction,
+  isAnchorResolvable,
+  transcriptAnchorOf,
+  type ColdLookupDeps,
+} from "../cold-lookup.ts";
 import { RecordStore } from "../record-store.ts";
 import type { SubagentRecord } from "../types.ts";
 import type { ClosedReason } from "../types.ts";
@@ -402,5 +408,97 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     // pid 死）→ B 接管刷新 pid=B → C 再触达被拦（S8⑤ 验收锚点的磁盘面前置）。
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================
+// [U6 / §3.2.6] transcript 锚引擎分派：transcriptAnchorOf 派生单点 +
+// isAnchorResolvable 的 zcode 分支（隔离库条目存在性，内嵌只读 sqlite 查询）。
+// fixture：真实 node:sqlite 建 tmp 库（mkdtempSync 自建自删）。
+// ============================================================
+
+describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
+  let zcodeDir: string;
+  let zcodeDb: string;
+
+  beforeEach(() => {
+    zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "cold-zcode-"));
+    zcodeDb = path.join(zcodeDir, "db.sqlite");
+  });
+
+  afterEach(() => {
+    fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 最小隔离库（session 表 + 目标条目）。 */
+  async function seedZcodeDb(sessionIds: string[]): Promise<void> {
+    const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
+    type Db = { exec: (s: string) => void; prepare: (s: string) => { run: (...a: unknown[]) => void }; close: () => void };
+    const db = new DatabaseSync(zcodeDb) as unknown as Db;
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, time_created INTEGER)");
+    for (const id of sessionIds) db.prepare("INSERT INTO session (id, time_created) VALUES (?, 1)").run(id);
+    db.close();
+  }
+
+  it("zcode 锚（engineHandle.sessionRef 双键）→ 库条目在 = 可解析；条目被 TTL 清 / db 缺失 = 不可解析", async () => {
+    await seedZcodeDb(["sess_z_1"]);
+    const rec = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: zcodeDb }, poolKey: "shared" },
+    };
+    expect(transcriptAnchorOf(rec)).toEqual({ engine: "zcode", sessionId: "sess_z_1", dbPath: zcodeDb });
+    expect(isAnchorResolvable(rec)).toBe(true);
+
+    const swept = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_swept", dbPath: zcodeDb }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(swept)).toBe(false); // 条目不存在（TTL 清理后的锚失效形态）
+
+    const noDb = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: path.join(zcodeDir, "nope.sqlite") }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(noDb)).toBe(false); // db 文件缺失（fail-closed）
+  });
+
+  it("pi 锚现行判据不变：sessionFile 在盘可读（`{sessionFile}` 字面量入参兼容）", () => {
+    const sessionFile = path.join(zcodeDir, "anchor.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    expect(isAnchorResolvable({ sessionFile })).toBe(true);
+    expect(isAnchorResolvable({ sessionFile: path.join(zcodeDir, "gone.jsonl") })).toBe(false);
+    expect(transcriptAnchorOf({ sessionFile })).toEqual({ engine: "pi", sessionFile });
+  });
+
+  it("显式 transcriptRef 优先；锚缺失（三载体皆无）→ undefined / false", () => {
+    const explicit = {
+      sessionFile: "/should/be/ignored.jsonl",
+      transcriptRef: { engine: "zcode" as const, sessionId: "s1", dbPath: "/no-db.sqlite" },
+    };
+    expect(transcriptAnchorOf(explicit)).toEqual({ engine: "zcode", sessionId: "s1", dbPath: "/no-db.sqlite" });
+    expect(isAnchorResolvable(explicit)).toBe(false);
+    expect(transcriptAnchorOf({})).toBeUndefined();
+    expect(isAnchorResolvable({})).toBe(false);
+  });
+
+  it("[U6] 冷查重建水合：zcode 候选（engineHandle.sessionRef）→ record.transcriptRef 落位（markResurrected 注入桩——zcode 无 sessionFile 锚，真实 store 写权声明面的 zcode 接线属后续单元）", () => {
+    const deps: ColdLookupDeps = {
+      findLightById: vi.fn(() =>
+        makeFound({
+          status: "idle",
+          sessionFile: undefined,
+          engine: "zcode",
+          engineHandle: { sessionRef: { sessionId: "sess_cold_z", dbPath: "/absent.sqlite" }, poolKey: "shared" },
+        }),
+      ),
+      collectRecords: vi.fn(() => []),
+      register: vi.fn(),
+      reportRecordTransition: vi.fn(),
+      markResurrected: vi.fn(),
+      getSessionRootId: vi.fn(() => "root-session"),
+      getBaselineRecordId: vi.fn(() => undefined),
+    };
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    expect(record.transcriptRef).toEqual({ engine: "zcode", sessionId: "sess_cold_z", dbPath: "/absent.sqlite" });
   });
 });

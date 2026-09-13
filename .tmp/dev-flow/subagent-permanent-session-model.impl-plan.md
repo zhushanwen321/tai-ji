@@ -103,6 +103,11 @@ graph TD
 | U1-D3 env 面 pi-subagent-cli 不切 buildPiOutboundEnv：该侧走 SDK buildEngineChildEnv 三层契约，强切是语义错误（强注 EXT_LOG + 覆写 PI_CODING_AGENT_DIR） | U1r2 | 按包契约 env.ts 头注释/README 第 7 条 |
 | U1-D4 import 走 barrel '@zhushanwen/pi-rpc'（包 exports 单一 '.' 入口，两侧消费形态一致） | U1r2 | 前任设定沿用 |
 | U1-D5 tsup noExternal=['@zhushanwen/pi-rpc'] 内联（pi-rpc 未发布，external 会让 npm 形态 404；零依赖纯 TS 无实例分裂；发布后可切 external） | U1r2 | 发布时序约束 |
+| U6-D1 领地外 2 文件 1 行值域扩展：SDK contract-types + engine-manifest CAPABILITY_ENUMS 增 conversation:'cold'（机械前提，gate 判据仍 ==='unsupported' 零行为分支） | U6 | 判定合理：不扩则 capability 目标不可交付 |
+| U6-D2 transcriptRef 不双写 binding（binding sidecar 键=pi 文件锚，zcode 无文件锚结构不成立）；内存消费走 transcriptAnchorOf 派生单点（record.transcriptRef 优先，zcode 惯常态=engineHandle.sessionRef 单源）；settle 写点收编留 U7 | U6 | 避免同锚双写漂移 |
+| U6-D3 zcode 锚失效走无世代降级（fresh session + 摘要注入，round 连续）不走 markReopened 完整 reopen——reopenRecord 宿主闭包只构造 pi 锚（U6b 接线后可升级完整版） | U6 | 与 U4-D2/U5-D3 偏差族同构 |
+| U6-D4 TTL 引擎侧 sweep 确认：判龄 session.time_updated??time_created、defer 50ms + 24h 节流 + keepSessionIds=activeSessions、删除序复刻 zsw clean-exec | U6 | 库写并发引擎单点持有 |
+| U6-D5 resume 注入预算 24k tokens 先验值（ZCODE_RESUME_HISTORY_TOKEN_BUDGET，字符 4:1 兜底，超限从最旧丢起保尾 + omitted 标注） | U6 | 设计定数据源未定数值 |
 
 ## 6 状态表
 
@@ -114,7 +119,8 @@ graph TD
 | U3 | committed | 1 | commit 42e3498b4：.state 读侧新格式 + 旧值映射 + 重建单规则四输入 + 孤儿恢复直断删除 + entry stopReason 投影 + cold-lookup/Continuation 桥接（U4 重写锚点已注）；tsc 0 / vitest 3027 passed / runtime 5945 passed / 守卫绿；deviations 8 条（E1 批投影 running 化归 U8、boot 重认领源消亡归 U5、worktree/GC 消费方核实免改） |
 | U4 | committed | 1 | commit 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
 | U5 | committed | 1 | 四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
-| U6 | pending | 0 | - |
+| U6 | committed-followup | 1 | 领地内全落地：resume 读→裁剪→前缀注入全链 + conversation:'cold'（gate === unsupported 判据零改接线）+ TTL 引擎侧 sweep（time_updated 判龄/24h 节流/活跃豁免）+ isAnchorResolvable zcode 分派 + e2e「resume 帧先于 create/无向旧会话 send」；zcode-cli 258 / subagent-core 3074 / 守卫双绿。3 blockers 分流：B-routing+B-firstround→U6b（run-orchestration 领地外，本表新增行）；B-restart→store 面归 U7 / manifest 契约面归 U8 |
+| U6b | pending | 0 | 新增行：zcode 续聊宿主侧接线（run-orchestration.ts 单文件领地）——B-routing（kickOffChatRound 引擎路由按 record.engine + RunContext onHandleReady 回填新 sessionRef）+ B-firstround（executeViaEngine 非 pi 分支 conversation:true 走 Continuation 首轮）。依赖 U6 committed ✓ 即绪 |
 | U7 | pending | 0 | - |
 | U8 | pending | 0 | - |
 | U9 | pending | 0 | - |

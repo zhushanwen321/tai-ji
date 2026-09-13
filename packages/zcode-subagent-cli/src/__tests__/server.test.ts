@@ -31,7 +31,7 @@ import type { AgentCallOpts, EnginePort, EngineRunResult, RunContext } from "../
 const CAPABILITIES: EngineCapabilities = {
   schemaEnforcement: "emulated",
   steer: "unsupported",
-  conversation: "unsupported",
+  conversation: "cold",
   personaInjection: "prompt",
   eventGranularity: "stream",
   sandbox: "none",

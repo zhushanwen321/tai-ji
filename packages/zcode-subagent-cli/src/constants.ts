@@ -197,3 +197,26 @@ export const ZCODE_APPSERVER_HARVEST_GRACE_MS = 1_000;
 export function isFailedTerminalStatus(status: string | undefined): boolean {
   return status === "failed" || status === "error";
 }
+
+// ============================================================
+// [U6 / §3.2.6 要点 3] zcode 续聊（resume 读 + 新 session 注入）的历史裁剪预算
+// ============================================================
+
+/**
+ * resume 历史注入的 token 预算（先验值）：新会话无任何记忆，历史全部经 prompt
+ * 前缀注入——预算防超长历史（多轮长会话）把首轮 prompt 撑爆模型上下文。超预算
+ * 时从最旧条目起丢弃（保尾——最近上下文对续聊最重要）。裁剪预算的数据源 =
+ * resume 应答自带 tokens（extractResumeTotalTokens）；tokens 缺席时按字符近似。
+ */
+export const ZCODE_RESUME_HISTORY_TOKEN_BUDGET = 24_000;
+
+/** tokens 数据缺席时的字符近似换算（1 token ≈ 4 chars，中英混合保守值）。 */
+export const ZCODE_RESUME_CHARS_PER_TOKEN = 4;
+
+/**
+ * [U6 TTL 通道] sweep defer 时点（ms）：运行时建立后让位首 run 的 create 请求先
+ * 出站（sweep 同步执行，大库删除 + checkpoint 可能达秒级——不推后则抢占首 run
+ * 的控制面时序）。unref（不阻塞进程退出）。
+ */
+export const ZCODE_SESSION_SWEEP_DEFER_MS = 50;
+
