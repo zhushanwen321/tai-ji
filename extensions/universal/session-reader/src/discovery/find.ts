@@ -362,9 +362,9 @@ function buildCandidate(
  *
  * u11 起直接消费 resolveSessionRoots 的根列表（单次实扫，files 与根归属信息同批产出——
  * 标题窄化策略需要「扫描结果无子目录的候选根」这一根级事实，薄包装的扁平列表给不出）。
- * 对只含 agentDir 的信号包，根集合 = [default]+[legacy]+[subagent]，与旧薄包装
- * listMainSessions/listSubagentSessions 的并集逐文件一致（含 workflow-state 跳过与
- * realpath 去重语义）；传 liveSessionDir 时按 §6.1 追加 [live] 根（realpath 去重保优先级）。
+ * 对只含 agentDir 的信号包，根集合 = [default]+[legacy]+[subagent]，与已删除薄包装
+ * listMainSessions/listSubagentSessions（ext-simplify-04 U4/A3）原并集逐文件一致（含
+ * workflow-state 跳过与 realpath 去重语义）；传 liveSessionDir 时按 §6.1 追加 [live] 根（realpath 去重保优先级）。
  */
 async function collectCandidates(
   roots: SessionRoot[],

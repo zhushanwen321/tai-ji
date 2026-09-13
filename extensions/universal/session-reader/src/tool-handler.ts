@@ -599,6 +599,35 @@ function formatDetailText(
   return `${head}\n${body}`
 }
 
+/**
+ * family subagents 行的 task 摘要截断宽度（D2②：LLM 判断「哪个 subagent 分支相关」所需
+ * 的信息量，信息密度对齐 find 的 firstMessagePreview；探针 P4 输出量级锚点）。
+ */
+const FAMILY_TASK_RENDER_LIMIT = 60
+
+/**
+ * task → 单行摘要：压平空白（task 原文可含换行，换行会破坏 family 输出的行结构）后截断。
+ */
+function familyTaskSummary(task: string): string {
+  const flat = task.replace(/\s+/g, ' ').trim()
+  return flat.length <= FAMILY_TASK_RENDER_LIMIT ? flat : flat.slice(0, FAMILY_TASK_RENDER_LIMIT) + '…'
+}
+
+/**
+ * subagents 行富字段展示（ext-simplify-04 D2②）：status 终态短标签 + agent 名 + task 摘要。
+ * 富字段来自 manifest/identity 组装（SubagentRef，不经 enrichRefs——已删除）；孤儿
+ *（cleanedUp）只标 [已清理]，不再展开摘要（已清理即终局，文件 GC 后无深读入口）。
+ */
+function formatSubagentLine(s: Family['subagents'][number]): string {
+  const base = `  ${s.sessionId.slice(0, SESSION_ID_PREFIX_LEN)} root=${s.rootSessionId.slice(0, SESSION_ID_PREFIX_LEN)} slug=${s.slug}`
+  if (s.cleanedUp) return `${base} [已清理]`
+  const parts: string[] = []
+  if (s.status) parts.push(`[${s.status}]`)
+  if (s.agentName) parts.push(s.agentName)
+  if (s.task) parts.push(`· ${familyTaskSummary(s.task)}`)
+  return parts.length > 0 ? `${base} ${parts.join(' ')}` : base
+}
+
 function formatFamilyText(f: Family): string {
   const lines: string[] = []
   lines.push(`root: ${f.root.sessionId} (${formatDate(f.root.mtime)})`)
@@ -607,16 +636,7 @@ function formatFamilyText(f: Family): string {
   if (f.forks.length)
     lines.push(`forks: ${f.forks.map((p) => p.sessionId.slice(0, SESSION_ID_PREFIX_LEN)).join(', ')}`)
   if (f.subagents.length)
-    lines.push(
-      `subagents:\n${f.subagents
-        .map(
-          (s) =>
-            `  ${s.sessionId.slice(0, SESSION_ID_PREFIX_LEN)} root=${s.rootSessionId.slice(0, SESSION_ID_PREFIX_LEN)} slug=${s.slug}${
-              s.cleanedUp ? ' [已清理]' : ''
-            }`,
-        )
-        .join('\n')}`,
-    )
+    lines.push(`subagents:\n${f.subagents.map(formatSubagentLine).join('\n')}`)
   if (f.workflows.length)
     lines.push(
       `workflows:\n${f.workflows

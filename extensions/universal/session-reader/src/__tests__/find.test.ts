@@ -133,7 +133,7 @@ async function makeSubagentSession(
 describe('findSessions', () => {
   let agentDir: string
   let slugDir: string
-  /** subagent fixture 目录（模拟 subagents/<cwd编码>/sessions/ 结构，roots.listSubagentSessions 扫描路径） */
+  /** subagent fixture 目录（模拟 subagents/<cwd编码>/sessions/ 结构，resolveSessionRoots [subagent] 根扫描路径） */
   let saDir: string
 
   let recordsDir: string

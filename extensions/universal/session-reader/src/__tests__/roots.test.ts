@@ -3,8 +3,6 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, readdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import {
-  listMainSessions,
-  listSubagentSessions,
   resolveSessionRoots,
   normalizeLiveSessionDir,
   type SessionRoot,
@@ -12,6 +10,24 @@ import {
 } from '../discovery/roots.js'
 import { buildFamilyFromFs } from '../discovery/subagents.js'
 import { REAL_AGENT_DIR, HAS_E6, HAS_REAL_AGENT_DIR, HAS_REAL_SUBAGENTS_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
+
+// ============================================================
+// A3（ext-simplify-04 U4）：listMainSessions/listSubagentSessions 薄包装已删除，
+// subagents.ts 直调 resolveSessionRoots+filter。以下 describe 用同一等价式作入口，
+// 保过滤语义覆盖（.finalized 排除 / workflow-state 跳过 / 递归 / 根选择 / 空目录容错）。
+// ============================================================
+
+/** 原 listMainSessions 等价式：agentDir 信号包下未去重 main 根的文件并集 */
+async function mainSessionFiles(agentDir: string) {
+  return (await resolveSessionRoots({ agentDir }))
+    .filter((r) => r.source === 'main' && r.dedupedInto === undefined)
+    .flatMap((r) => r.files)
+}
+
+/** 原 listSubagentSessions 等价式：agentDir 信号包下 [subagent] 根文件集 */
+async function subagentSessionFiles(agentDir: string) {
+  return (await resolveSessionRoots({ agentDir })).find((r) => r.kind === 'subagent')?.files ?? []
+}
 
 /** 写 .jsonl fixture（父目录不存在则自建），内容默认合法 session header */
 async function writeJsonl(path: string, content = '{"type":"session","id":"x"}\n') {
@@ -22,7 +38,7 @@ async function writeJsonl(path: string, content = '{"type":"session","id":"x"}\n
 /** 真实形态的 cwd 编码目录名（encodeCwd：`--` 开头 `--` 结尾，实证见 real-data.ts） */
 const SLUG = '--Users-foo--'
 
-describe('listMainSessions', () => {
+describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆盖）', () => {
   let dir: string
 
   beforeEach(async () => {
@@ -38,7 +54,7 @@ describe('listMainSessions', () => {
     await writeFile(join(dir, 'sessions', slug, 'a.jsonl'), '{"type":"session","id":"a"}\n')
     await writeFile(join(dir, 'sessions', slug, 'b.jsonl.finalized'), '{"type":"session","id":"b"}\n')
 
-    const result = await listMainSessions(dir)
+    const result = await mainSessionFiles(dir)
     expect(result).toHaveLength(1)
     expect(result[0].path.endsWith('a.jsonl')).toBe(true)
     expect(result[0].path.endsWith('.finalized')).toBe(false)
@@ -54,7 +70,7 @@ describe('listMainSessions', () => {
     // 同 slug 直接层也放一个，验证同一 slug 下平铺与嵌套并存
     await writeFile(join(dir, 'sessions', 'slug', 'top.jsonl'), '{}\n')
 
-    const result = await listMainSessions(dir)
+    const result = await mainSessionFiles(dir)
     const names = result.map((m) => m.path.split('/').pop()!)
     expect(names).toContain('d.jsonl')
     expect(names).toContain('top.jsonl')
@@ -70,22 +86,22 @@ describe('listMainSessions', () => {
       '{"v":"wf-run-v1"}\n',
     )
 
-    const result = await listMainSessions(dir)
+    const result = await mainSessionFiles(dir)
     expect(result).toHaveLength(1)
     expect(result[0].path.endsWith('real.jsonl')).toBe(true)
     expect(result.every((m) => !m.path.includes('workflow-state'))).toBe(true)
   })
 
   it('空 agentDir（无 sessions 目录）返回 []，不抛错', async () => {
-    await expect(listMainSessions(dir)).resolves.toEqual([])
+    await expect(mainSessionFiles(dir)).resolves.toEqual([])
   })
 
   it('不存在的 agentDir 返回 []，不抛错', async () => {
-    await expect(listMainSessions(join(dir, 'no-such-dir'))).resolves.toEqual([])
+    await expect(mainSessionFiles(join(dir, 'no-such-dir'))).resolves.toEqual([])
   })
 
   it.skipIf(!HAS_E6)('真实数据：扫描 ~/.pi/agent，含 019e6c96，不含 .finalized 与 wf-', async () => {
-    const result = await listMainSessions(REAL_AGENT_DIR)
+    const result = await mainSessionFiles(REAL_AGENT_DIR)
     expect(result.length).toBeGreaterThan(0)
     // 含目标 session
     expect(result.some((m) => m.path.includes('019e6c96'))).toBe(true)
@@ -100,7 +116,7 @@ describe('listMainSessions', () => {
   }, REAL_DATA_TIMEOUT_MS)
 })
 
-describe('listSubagentSessions', () => {
+describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后保覆盖）', () => {
   let dir: string
 
   beforeEach(async () => {
@@ -119,7 +135,7 @@ describe('listSubagentSessions', () => {
       '{"type":"session"}\n',
     )
 
-    const result = await listSubagentSessions(dir)
+    const result = await subagentSessionFiles(dir)
     expect(result).toHaveLength(1)
     expect(result[0].path.endsWith('c.jsonl')).toBe(true)
     expect(result[0].path.endsWith('.finalized')).toBe(false)
@@ -132,17 +148,17 @@ describe('listSubagentSessions', () => {
     await writeFile(join(dir, 'subagents', slug, 'records', 'manifest.json'), '{}\n')
     await writeFile(join(dir, 'subagents', slug, 'sessions', 'sub.jsonl'), '{"type":"session"}\n')
 
-    const result = await listSubagentSessions(dir)
+    const result = await subagentSessionFiles(dir)
     expect(result).toHaveLength(1)
     expect(result[0].path.endsWith('sub.jsonl')).toBe(true)
   })
 
   it('无 subagents 目录返回 []，不抛错', async () => {
-    await expect(listSubagentSessions(dir)).resolves.toEqual([])
+    await expect(subagentSessionFiles(dir)).resolves.toEqual([])
   })
 
   it.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：扫描 ~/.pi/agent/subagents 返回非空', async () => {
-    const result = await listSubagentSessions(REAL_AGENT_DIR)
+    const result = await subagentSessionFiles(REAL_AGENT_DIR)
     expect(result.length).toBeGreaterThan(0)
     expect(result.every((m) => !m.path.endsWith('.finalized'))).toBe(true)
   }, REAL_DATA_TIMEOUT_MS)

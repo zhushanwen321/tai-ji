@@ -6,11 +6,14 @@ import type { Entry } from './parser.js'
  * M1 范围：纯逻辑层。buildFamilyIndex 接收已读入的 entry 数组（不做文件 IO），
  * 文件扫描/首行读取归 M2 discovery 层（roots.ts/find.ts/subagents.ts）。
  *
- * M1 占位约定（M2 discovery 层补全真实值，逻辑不变）：
- * - SessionRef.fileName：session header 推不出文件路径 → 占位空串
+ * 占位约定（原「M2 回填补全」双阶段约定已随 enrichRefs 删除退役，ext-simplify-04 U4/E2
+ * ——回填的 fileName/cwd 零文本读者；SessionRef 类型与 find 路径共享，find 侧两字段有
+ * 真实消费者，字段本身保留）：
+ * - SessionRef.fileName / subagent cwd：family 路径恒为占位空串（session header 推不出
+ *   路径 / identity entry 无 cwd），不再回填
  * - SessionRef.mtime/sizeBytes：从 fileStats 取（M1 key=sessionId），取不到为 0
  * - SubagentRef.sessionId：identity entry 不含 subagent session 的 id → 占位用 entry.id
- * - SubagentRef.cwd：identity entry（custom 类型）无 cwd → 占位空串
+ *   （M2 buildFamilyFromFs 以 header.id 替换为真实 id）
  * - fileStats 的 key：sessionId（M2 实现沿用此 key，cleanedUp 按 sessionId 命中），逻辑通用
  *
  * 隔代关联规则（design §3.3 D-7 Q1）见 resolveFamily 注释。
@@ -35,11 +38,11 @@ export interface SubagentRef extends SessionRef {
   task?: string
   /** agent 类型名（manifest.agentName，P-fallback 时 identity.data.agent；同语义异名） */
   agentName?: string
-  /** 模型 id（仅 manifest 有；P-fallback 时 undefined） */
+  /** 模型 id（仅 manifest 有；P-fallback 时 undefined）。仅 details 可见，不进文本渲染（D2②：展示面只取 status/agentName/task） */
   model?: string
   /** 终态 completed/failed/running（仅 manifest 有；P-fallback 时 undefined） */
   status?: string
-  /** subagent session.jsonl 绝对路径（manifest.sessionFile 或 alive 文件 meta.path） */
+  /** subagent session.jsonl 绝对路径（manifest.sessionFile 或 alive 文件 meta.path）。仅 details 可见，不进文本渲染 */
   sessionFile?: string
 }
 
@@ -144,7 +147,7 @@ function buildById(
     const stat = fileStats.get(h.id)
     const ref: SessionRef = {
       sessionId: h.id,
-      fileName: '', // M1 占位：M2 discovery 补真实文件路径
+      fileName: '', // 占位空串：family 路径不回填（enrichRefs 已删除，ext-simplify-04 U4）
       mtime: stat?.mtime ?? 0,
       sizeBytes: stat?.size ?? 0,
       cwd: h.cwd ?? '',
@@ -198,7 +201,7 @@ function buildSubagentsByRoot(
       fileName: '', // M1 占位
       mtime: stat?.mtime ?? 0,
       sizeBytes: stat?.size ?? 0,
-      cwd: '', // identity entry 无 cwd；M2 从 subagent 文件 header 补
+      cwd: '', // identity entry 无 cwd；family 路径不回填（enrichRefs 已删除，ext-simplify-04 U4）
       // fileStats key=sessionId（buildFamilyFromFs 以 header.id 写入），cleanedUp 按 sessionId 命中
       cleanedUp: !fileStats.has(ident.id),
       // U4 富字段：从 identity data 读（manifest 主/P-fallback 由 buildFamilyFromFs 组装时决定）

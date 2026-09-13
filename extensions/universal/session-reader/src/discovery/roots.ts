@@ -13,9 +13,9 @@ import { performance } from 'node:perf_hooks'
  * U1（design 2026-09-10 §6.1/§7B）：新增 `resolveSessionRoots(signals)` —— 信号包 →
  * 带来源标签的候选根列表，逐根扫描、按 realpath 去重（同路径只扫一次，保留最高优先级
  * kind 标签）。B 收缩（design §6.13）：布局对齐后无 `[env]` 信号，`[default]` 为主根。
- * 旧签名 `listMainSessions`/`listSubagentSessions` 保留为薄包装（内部构造只含 agentDir
- * 的信号包 → main 源退化为 `[default]`+`[legacy]` 两根），存量调用（find.ts /
- * subagents.ts）不破。
+ * 旧签名 `listMainSessions`/`listSubagentSessions` 薄包装已删除（ext-simplify-04 U4/A3：
+ * 内部即「resolveSessionRoots + filter」恒等式，包内原唯一消费者 subagents.ts 改直调；
+ * npm 深 import 移除按 minor breaking 在 CHANGELOG 登记）。
  */
 
 // ============================================================
@@ -249,31 +249,5 @@ async function scanJsonlRecursive(
 
   await walk(rootDir)
   return results
-}
-
-/**
- * 旧签名薄包装（U1，design §7B 要点 7）：内部构造只含 agentDir 的信号包，main 源退化为
- * 「`[default]`+`[legacy]`」两根并集。工具运行路径后续单元改走 resolveSessionRoots 新签名，
- * 本包装仅为存量调用（find.ts / subagents.ts）与外部深 import 保持不破。
- *
- * 递归扫描子目录（cwd 编码目录如 --Users-foo--），glob *.jsonl，排除 *.jsonl.finalized
- *（design §3.3 D-7 Q2）；跳过 workflow-state 子目录（workflow 运行状态文件，非 session）。
- */
-export async function listMainSessions(agentDir: string): Promise<SessionFileMeta[]> {
-  const roots = await resolveSessionRoots({ agentDir })
-  return roots
-    .filter((r) => r.source === 'main' && r.dedupedInto === undefined)
-    .flatMap((r) => r.files)
-}
-
-/**
- * 旧签名薄包装：agentDir 信号包下 `[subagent]` 根 = `<agentDir>/subagents`（常量推导），
- * 行为与旧实现等价。结构：subagents/<cwd编码>/sessions/*.jsonl。records/ 子目录
- *（.json manifest）无 .jsonl，天然不被误收。
- */
-export async function listSubagentSessions(agentDir: string): Promise<SessionFileMeta[]> {
-  const roots = await resolveSessionRoots({ agentDir })
-  const sub = roots.find((r) => r.kind === 'subagent')
-  return sub?.files ?? []
 }
 

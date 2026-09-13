@@ -1575,6 +1575,142 @@ describe('doFamily recursive（m3b U8 接入）', () => {
 })
 
 // ===========================================================================
+// ext-simplify-04 U4/E2（D2②）：formatFamilyText subagents 行富字段展示
+// status 终态短标签 + agent 名 + task 截 60 摘要；孤儿只标 [已清理]；P4 输出量级守卫。
+// ===========================================================================
+
+describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）', () => {
+  const MAIN = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f1'
+  const SUB = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f2'
+  let dir: string
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'tool-handler-family-rich-'))
+    await makeFixtureSession(dir, MAIN, 'main session')
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  /** alive subagent：session 文件（header + 可选 identity 尾行）+ 可选 manifest 富字段 */
+  async function writeSubagent(
+    realId: string,
+    opts: {
+      manifest?: { agentName?: string; task?: string; slug?: string; model?: string; status?: string }
+      identityTask?: string
+      identityAgent?: string
+    } = {},
+  ): Promise<void> {
+    const sessionDir = join(dir, 'subagents', '--demo-cwd--', 'sessions')
+    await mkdir(sessionDir, { recursive: true })
+    const subPath = join(sessionDir, `${realId}.jsonl`)
+    const lines = [JSON.stringify({ type: 'session', id: realId, cwd: '/demo' })]
+    if (opts.identityTask !== undefined || opts.identityAgent !== undefined) {
+      lines.push(
+        JSON.stringify({
+          type: 'custom',
+          customType: 'subagent-identity',
+          data: {
+            id: `sa-${realId.slice(0, 8)}`,
+            rootSessionId: MAIN,
+            slug: 'identity-slug',
+            agent: opts.identityAgent ?? 'explorer',
+            task: opts.identityTask ?? 't',
+          },
+        }),
+      )
+    }
+    await writeFile(subPath, lines.join('\n') + '\n')
+    if (opts.manifest) {
+      const recordsDir = join(dir, 'subagents', '--demo-cwd--', 'records')
+      await mkdir(recordsDir, { recursive: true })
+      await writeFile(
+        join(recordsDir, `sa-${realId}.json`),
+        JSON.stringify({
+          id: `sa-${realId}`,
+          rootSessionId: MAIN,
+          sessionFile: subPath,
+          ...opts.manifest,
+        }),
+      )
+    }
+  }
+
+  /** 孤儿 manifest：sessionFile 指向不存在路径（模拟 .jsonl 被 GC） */
+  async function writeOrphanManifest(
+    saId: string,
+    fields: { agentName?: string; task?: string; slug?: string; status?: string } = {},
+  ): Promise<void> {
+    const recordsDir = join(dir, 'subagents', '--demo-cwd--', 'records')
+    await mkdir(recordsDir, { recursive: true })
+    await writeFile(
+      join(recordsDir, `${saId}.json`),
+      JSON.stringify({ id: saId, rootSessionId: MAIN, sessionFile: '/nonexistent/gc.jsonl', ...fields }),
+    )
+  }
+
+  it('manifest 主路径：subagents 行含 [status] agent 名 · task 摘要；root 段不变', async () => {
+    await writeSubagent(SUB, {
+      manifest: { agentName: 'coder', task: '修复登录表单校验并补测试', slug: 'fix-login', status: 'completed' },
+    })
+    const r = await handleSessionRead({ action: 'family', session: MAIN }, { agentDir: dir })
+    const text = r.content[0].text
+    // 富字段行形态（设计 §3.1）：slug 后接 [status] agent · task 摘要
+    expect(text).toContain('slug=fix-login [completed] coder · 修复登录表单校验并补测试')
+    // root/parents/forks/workflows 段不变（root 行含完整 id + 日期括号）
+    expect(text).toContain(`root: ${MAIN} (`)
+  })
+
+  it('P4 输出量级：task 截 60 字符（超出加省略号），换行压平不破坏行结构', async () => {
+    const SUB2 = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f3'
+    await writeSubagent(SUB, {
+      manifest: { agentName: 'coder', task: 'A'.repeat(100), slug: 'long-task', status: 'running' },
+    })
+    await writeSubagent(SUB2, {
+      manifest: { agentName: 'worker', task: 'line1\nline2\ttabbed', slug: 'nl-task', status: 'failed' },
+    })
+    const r = await handleSessionRead({ action: 'family', session: MAIN }, { agentDir: dir })
+    const text = r.content[0].text
+    // 截断：恰 60 字符 + 省略号，原文 61+ 连续段不出现
+    expect(text).toContain(`${'A'.repeat(60)}…`)
+    expect(text).not.toContain('A'.repeat(61))
+    // 换行/制表压平为单空格
+    expect(text).toContain('slug=nl-task [failed] worker · line1 line2 tabbed')
+    // 行结构：subagents 段 = 头行 + 每 subagent 恰一行（换行未折叠出额外行）
+    const lines = text.split('\n')
+    const headIdx = lines.indexOf('subagents:')
+    const subLines = lines.slice(headIdx + 1)
+    expect(subLines).toHaveLength(2)
+    expect(subLines.every((l) => l.startsWith('  ') && l.trim().length > 0)).toBe(true)
+  })
+
+  it('孤儿（cleanedUp）：仍标 [已清理]，不展开 status/agent/task 摘要', async () => {
+    await writeOrphanManifest('sa-ghost-id', {
+      agentName: 'worker',
+      task: 'ghost task',
+      slug: 'ghost-slug',
+      status: 'completed',
+    })
+    const r = await handleSessionRead({ action: 'family', session: MAIN }, { agentDir: dir })
+    const text = r.content[0].text
+    expect(text).toContain('slug=ghost-slug [已清理]')
+    // 已清理即终局：manifest 富字段不进文本（无深读入口，摘要无消费价值）
+    expect(text).not.toContain('ghost task')
+    expect(text).not.toContain('[completed]')
+  })
+
+  it('P-fallback（无 manifest）：identity 回退 task/agent 仍展示，status 无则无标签', async () => {
+    await writeSubagent(SUB, { identityTask: 'fix bug', identityAgent: 'worker' })
+    const r = await handleSessionRead({ action: 'family', session: MAIN }, { agentDir: dir })
+    const text = r.content[0].text
+    // P-fallback：task/agent 从 identity 回退（slug 取 identity.slug），status 不可回退 → 无 [x] 标签
+    expect(text).toContain('slug=identity-slug worker · fix bug')
+    expect(text).not.toContain('[completed]')
+    expect(text).not.toContain('[running]')
+  })
+})
+
+// ===========================================================================
 // doctor action（u8：design 2026-09-10 §6.3/§6.4/§7B 要点 2/4/5/8 + §6.11 U14b 段）
 // 全部 mkdtemp fixture 自建自删，不触碰真实数据目录。
 // ===========================================================================

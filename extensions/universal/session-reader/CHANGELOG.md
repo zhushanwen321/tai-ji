@@ -1,5 +1,20 @@
 # @zhushanwen/pi-session-reader
 
+## 0.6.0
+
+### Minor Changes
+
+- **session-reader: thin wrapper exports removed; `family` subagents lines now carry status / agent / task summary**
+
+  **Breaking changes (npm deep imports):**
+
+  - `listMainSessions` and `listSubagentSessions` are removed from `src/discovery/roots.ts`. Both were one-line wrappers over `resolveSessionRoots` + filter with no remaining consumers in the package (the last one, `subagents.ts`, calls `resolveSessionRoots` directly). Migration: call `resolveSessionRoots({ agentDir })` yourself and either take `roots.filter((r) => r.source === 'main' && r.dedupedInto === undefined).flatMap((r) => r.files)` (former `listMainSessions`) or `roots.find((r) => r.kind === 'subagent')?.files ?? []` (former `listSubagentSessions`). The package entry surface is unchanged.
+
+  **Behavior changes (LLM-facing output, intentional):**
+
+  - `session_read {action:"family"}` subagents lines now render the manifest/identity rich fields that were already assembled but never shown: a terminal status tag (`[completed]` / `[failed]` / `[running]`), the agent name, and a single-line task summary truncated at 60 characters (whitespace flattened so a multi-line task cannot break the line structure). Cleaned-up orphans still render `[已清理]` and do not expand the summary (the session file is gone, so there is no deep-read entry to advertise).
+  - The internal `enrichRefs` backfill is deleted: on the `family` path, `root`/`parents`/`forks`/`subagents` refs keep the empty-string placeholders for `fileName` and `cwd` (the backfilled values had zero readers; the text output never showed them). `details` consumers wanting the subagent file path should read `subagents[].sessionFile`, which stays populated from the manifest / alive file scan.
+
 ## 0.5.0
 
 ### Minor Changes
