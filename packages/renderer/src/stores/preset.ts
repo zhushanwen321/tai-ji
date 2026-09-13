@@ -1,7 +1,7 @@
 /**
  * Preset store —— pi 启动预设的「纯状态容器」。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md
+ * 设计文档：docs/architecture/pi-launch-presets.md
  *
  * 职责（与其他 store 同构，纯状态容器铁律）：
  * - 持有 presets（预设列表）+ defaultPresetId（全局默认预设 id）+ loadError（加载错误态）三份 state。

@@ -1,6 +1,6 @@
 // src/lock-core.ts
 //
-// 零依赖跨进程 mkdir 锁原语（D1-A 自实现，docs/design/file-lock-unification-and-reaper-sink.md §3.2）。
+// 零依赖跨进程 mkdir 锁原语（D1-A 自实现，docs/architecture/file-lock-unification-and-reaper-sink.md §3.2）。
 //
 // 为什么自实现：包名入口原先包 proper-lockfile，但 runtime 经 tsup bundle 复用它时，
 // 第三方对模块对象的内部操作（probe 精度缓存的 fs symbol）在 jiti 类加载器下失效——

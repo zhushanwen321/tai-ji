@@ -377,7 +377,7 @@ export function fetchCurrentSystemPrompt(
   return command('session.fetchCurrentSystemPrompt', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-// ── 导入 pi 会话（import-session u4，来源设计 docs/design/import-session.md §3.3 D5）──
+// ── 导入 pi 会话（import-session u4，来源设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）──
 /**
  * 拉取外部 pi 会话候选列表（打开对话框 / 搜索 / 切目录时调用，renderer 侧 debounce 250ms）。
  *

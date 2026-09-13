@@ -1,7 +1,7 @@
 // probe/p-t2-keepalive-dist.mjs
 //
 // 探针 P-T2：keep-alive 真实时长分布——T2-①「keep-alive 裸缺省默认上限 30min」
-// 不误杀真实 wave 场景的标定依据（docs/design/subagent-core-unbounded-wait-audit.md
+// 不误杀真实 wave 场景的标定依据（docs/architecture/crash-forensics-and-watchdog.md 附录 E
 // §7.2 T2-① / §7.3 P-T2 行）。
 //
 // 决策树（按设计降级路径顺序执行）：

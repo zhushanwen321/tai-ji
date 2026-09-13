@@ -1,6 +1,6 @@
 // [H3/R3] RecordAccess 聚合（域 #3/#8/#10/#13：孤儿/manifest 恢复 + 查询面 + action
 // 网关 + 身份解析/record 创建）——自 SubagentService 上帝类 strangler 抽取的第三个
-// 聚合的**读建面**（设计 docs/design/subagent-service-decomposition.md §2.1 / §3.3 D5；
+// 聚合的**读建面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；
 // 成员归属以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，
@@ -31,9 +31,9 @@
 import { getLogger } from "../../core/logger.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
 
-import { bestEffort } from "../best-effort.ts";
-import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../cold-lookup.ts";
-import { createRecord, project, snapshot } from "../execution-record.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
+import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../assembly/cold-lookup.ts";
+import { createRecord, project, snapshot } from "../persistence/execution-record.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
@@ -43,10 +43,10 @@ import {
 } from "../engine/model-validation.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { getEngine, listEngines } from "../engine/registry.ts";
-import type { ManifestStore } from "../manifest-store.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { AgentConfig, ResolvedModel } from "../model-resolver.ts";
-import type { RecordStore, StatusFilter } from "../record-store.ts";
+import type { ManifestStore } from "../persistence/manifest-store.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { AgentConfig, ResolvedModel } from "../assembly/model-resolver.ts";
+import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 // [R6/D-R3-2] 跨进程身份 env 名 ENV_SELF_RECORD_ID 归位常量叶子文件
 // service-constants.ts（原 SSOT 在 session-baselines.ts，R3 时的聚合间单向 import
 // 合法边随之消除）——聚合→支撑文件方向（import 常量），守卫允许。
@@ -60,7 +60,7 @@ import {
   type ExecutionRecord,
   type RecordSnapshot,
   type SubagentRecord,
-} from "../types.ts";
+} from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 
@@ -183,10 +183,12 @@ export class RecordAccess {
    * manifest——恢复 list 可见性 + message 的可重连分流（D4 revive 准入仍由
    * cold-lookup 四守卫把门，重物化只补反查索引，不复活任何执行态）。
    *
-   * 刻意收窄的语义边界：
-   *  - 只认可重连集。user-close/cancelled（主动告别，close 语义不可旁路）与
-   *    gc/parent-fork/parent-new（自洽终态，无续聊歧义）不重物化——条目自洽，
-   *    「不可恢复」即其对外语义，补可见性收益不抵语义面扩大（M1 负向断言锁定）。
+ * 刻意收窄的语义边界：
+ *  - 只认可重连集（RECONNECTABLE_FINAL_REASONS = disconnected/parent-shutdown）。
+ *    重物化是可见性自愈的窄口：只对「查询面已不可见且 entry 自描述为旧 closed 读形态」
+ *    的条目补 manifest 反查索引，不复活任何执行态。按 closedReason 集合 gate 是桥接期
+ *    残留——万物可续模型下续聊资格由冷查物理三件套判定（§3.2.3），本集合判据随桥接
+ *    词汇清算统一收口（M1 负向断言锁定现值）。
    *  - 只补本 rootSessionId 的 entry（每 session boot 治自己的树；跨 session 记录
    *    归属其自身 boot 段，防本进程替异树批量落盘）。
    *  - 已可见（磁盘锚或 manifest 幸存）的 id 跳过——重物化是幂等补缺，不是覆写源。
@@ -202,7 +204,9 @@ export class RecordAccess {
     for (const rec of this.deps.getStore().scanLastRecordEntries(this.deps.getMainSessionFile())) {
       if (visibleIds.has(rec.id)) continue; // 查询面已可见：磁盘锚或 manifest 幸存
       if (rec.rootSessionId !== this.deps.getSessionRootId()) continue; // 只治本 session 树
-      if (rec.status !== "closed" || !isReconnectableFinalReason(rec.closedReason)) continue;
+      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+      if (!(rec.status === "idle" && rec.closedReason !== undefined)
+        || !isReconnectableFinalReason(rec.closedReason)) continue;
       // manifest 投影补写走 store 公开原语（[H4 收口 / G1] store 外零 manifest 直写；
       // status 恒 closed——entry 的 closed 即终态自描述，无 running 形态可达此处）。
       this.deps.getStore().rematerializeManifest({
@@ -517,8 +521,8 @@ export class RecordAccess {
     }
     if (!record || record.rootSessionId !== this.deps.getSessionRootId()) {
       throw new Error(
-        `subagent not found or not owned: ${id}. Recovery: use action:'list' to confirm the id; ` +
-        `ended subagents cannot be messaged — start a new one; only subagents owned by the current session can be operated on.`,
+        `subagent not found or not owned by this session: ${id}. Recovery: use action:'list' to confirm the id; ` +
+        `only subagents owned by the current session can be operated on.`,
       );
     }
     // [v4 A-5 / P7] 直接父校验：rootSessionId 已确认 record 属于本 session 树，但递归场景下

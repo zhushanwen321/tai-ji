@@ -1,6 +1,6 @@
 /**
  * useBackgroundTaskBucketFilter —— 后台命令列表的三桶筛选状态 per-session 分区
- *（docs/design/background-task-sidebar-view.md §3.3 D10②，u-renderer-store）。
+ *（docs/architecture/background-task-sidebar-view.md §3.3 D10②，u-renderer-store）。
  *
  * 分区语义（对齐 useSubagentBucketFilter 范式，subagent MF-A 同款死锁级坑的防回归锚）：
  * - **标量必须对象包装且必须 reactive 容器**（`reactive({ value })`）——useSessionScopedState

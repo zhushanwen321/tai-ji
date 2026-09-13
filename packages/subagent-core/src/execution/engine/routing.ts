@@ -1,7 +1,7 @@
 // src/execution/engine/routing.ts
 //
 // 配置路由与探针 fallback 编排（P4；W3 协议化改造）。设计权威源（现行）：
-// docs/design/subagent-engine-protocolization.md §3.8 D4（缺省引擎与 fallback 目标）/
+// docs/architecture/subagent-engine-protocolization.md §3.8 D4（缺省引擎与 fallback 目标）/
 // §3.5.3（路由与执行时序契约——跨进程后作废「run 内首个 await 前已触达 executeAndAwait」，
 // 改为「首个 await 前完成路由决策；执行经进程边界，时序契约由本设计放宽」）；
 // 历史权威源 docs/architecture/subagent-engine-abstraction.md D9（配置路由三层 + 故障

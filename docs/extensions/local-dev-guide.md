@@ -341,5 +341,5 @@ npm publish
 ## 6. 相关文档
 
 - [GUI 协议接入指南](./gui-protocol-guide.md) — TUI extension 改造为 TUI/GUI 双模
-- [问题排查指南](../troubleshooting.md) — dev 模式差异、extension 安装失败排查
+- [问题排查指南](../TROUBLESHOOTING.md) — dev 模式差异、extension 安装失败排查
 - [pi extensions 官方文档](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md) — 完整 API 参考

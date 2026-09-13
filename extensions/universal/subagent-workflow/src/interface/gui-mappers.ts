@@ -48,12 +48,16 @@ function isFailedStatus(s: string): boolean {
  * 把 workflow/subagent 状态字符串映射到 list-tree 的三态 status。
  *
  * 输入可能是纯 RunStatus（running/done）、RunStatus+reason 组合
- * （如 "done (failed)"），或 subagent status（running/done/failed/cancelled/crashed）。
+ * （如 "done (failed)"），或 subagent status（running/idle/legacy done/failed/
+ * cancelled/crashed）。
  *
  * 映射规则：
  *   - running → running
  *   - failed / aborted / error / crashed / cancelled / budget_limited / time_limited → failed
- *   - 其他（done / completed / success / pending）→ done
+ *   - 其他（done / completed / success / pending / idle）→ done
+ *
+ * [U8 两态] subagent 的 idle（无任务在飞可续聊）在协议三态里落 done（空闲 = 无
+ * 进行中工作，check 图标）；「为什么停」不进树形状态（协议无该维度）。
  */
 export function mapRunStatus(status: string): TreeStatus {
   const s = status.toLowerCase();

@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeCwd, getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
+import { encodeCwd, getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 
 describe("encodeCwd", () => {
   it("encodes a normal unix absolute path", () => {

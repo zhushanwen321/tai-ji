@@ -1,7 +1,7 @@
 <!--
   BackgroundTaskDetailPanel —— drawer bashTask tab：后台命令详情（G2/G3 交互闭环）。
 
-  设计：docs/design/background-task-sidebar-view.md §3.1 终态（drawer 形态与失败路径）
+  设计：docs/architecture/background-task-sidebar-view.md §3.1 终态（drawer 形态与失败路径）
   + §3.3 D5（drawer 接线第 8 tab）/ D7（输出 = 按需 tail RPC + running 2s 跟随）/ D6（kill 回执
   分支④⑤ toast）。u-drawer 单元。
 

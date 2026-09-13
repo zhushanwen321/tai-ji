@@ -16,9 +16,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDelivery } from "@xyz-agent/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/execution-record.ts";
-import { createNotifier } from "@zhushanwen/subagent-core/execution/notifier.ts";
-import type { BgNotifyRecord, BgNotifier, NotifierHost } from "@zhushanwen/subagent-core/execution/notifier.ts";
+import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
+import { createNotifier } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
+import type { BgNotifyRecord, BgNotifier, NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import { mapExternalState } from "../interface/subagent-actions.ts";
 import { statusGlyph } from "../interface/format.ts";
 import type { ClosedReason, ExecutionRecord, ExecutionStatus } from "@zhushanwen/subagent-core";
@@ -63,7 +63,7 @@ describe("ClosedReason enum", () => {
 
 describe("ExecutionStatus type", () => {
   it("合法值只有 running/closed（v4 B-1 两态收敛）", () => {
-    const validStatuses: ExecutionStatus[] = ["running", "closed"];
+    const validStatuses: ExecutionStatus[] = ["running", "idle"];
     expect(validStatuses).toHaveLength(2);
   });
 
@@ -102,7 +102,7 @@ describe("tryTransition with closed + closedReason", () => {
 
     const ok = tryTransition(record, "closed", "gc");
     expect(ok).toBe(true);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
   });
 
@@ -110,7 +110,7 @@ describe("tryTransition with closed + closedReason", () => {
     const record = makeRunningRecord();
     const ok = tryTransition(record, "closed", "user-close");
     expect(ok).toBe(true);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("user-close");
   });
 
@@ -118,7 +118,7 @@ describe("tryTransition with closed + closedReason", () => {
     const record = makeRunningRecord();
     const ok = tryTransition(record, "closed");
     expect(ok).toBe(true);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
   });
 
@@ -126,7 +126,7 @@ describe("tryTransition with closed + closedReason", () => {
     const record = makeRunningRecord();
     const ok = tryTransition(record, "closed", "cancelled");
     expect(ok).toBe(true);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled");
   });
 
@@ -135,7 +135,7 @@ describe("tryTransition with closed + closedReason", () => {
     tryTransition(record, "closed", "gc");
     const ok = tryTransition(record, "closed", "user-close");
     expect(ok).toBe(false);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc"); // 未被覆盖
   });
 
@@ -144,7 +144,7 @@ describe("tryTransition with closed + closedReason", () => {
     tryTransition(record, "closed", "cancelled");
     const ok = tryTransition(record, "closed", "gc");
     expect(ok).toBe(false);
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled"); // 未被覆盖
   });
 });
@@ -170,7 +170,7 @@ describe("completeRecord with closed + closedReason", () => {
     const result = { text: "done", turns: 1, durationMs: 100, success: true, sessionId: "s", toolCalls: [] };
     completeRecord(record, result, "closed", "gc");
 
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
     expect(record.endedAt).toBeDefined();
     expect(record.result).toBe("done");
@@ -181,7 +181,7 @@ describe("completeRecord with closed + closedReason", () => {
     const result = { text: "", turns: 0, durationMs: 0, success: true, sessionId: "s", toolCalls: [] };
     completeRecord(record, result, "closed", "user-close");
 
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("user-close");
   });
 
@@ -198,7 +198,7 @@ describe("completeRecord with closed + closedReason", () => {
     const result = { text: "", turns: 0, durationMs: 0, success: false, error: "cancelled", sessionId: "s", toolCalls: [] };
     completeRecord(record, result, "closed", "cancelled");
 
-    expect(record.status).toBe("closed");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled");
   });
 });
@@ -307,8 +307,8 @@ describe("mapExternalState", () => {
     expect(mapExternalState("running")).toBe("active");
   });
 
-  it("closed → ended", () => {
-    expect(mapExternalState("closed")).toBe("ended");
+  it("idle → idle（[U2 两态] 永久会话无 ended 形态）", () => {
+    expect(mapExternalState("idle")).toBe("idle");
   });
 });
 
@@ -317,8 +317,8 @@ describe("mapExternalState", () => {
 // ============================================================
 
 describe("statusGlyph", () => {
-  it("closed → ✓ success", () => {
-    const glyph = statusGlyph("closed");
+  it("idle → ✓ success（[U2 两态] 承接旧 closed 分支视觉基线）", () => {
+    const glyph = statusGlyph("idle");
     expect(glyph.icon).toBe("✓");
     expect(glyph.color).toBe("success");
   });

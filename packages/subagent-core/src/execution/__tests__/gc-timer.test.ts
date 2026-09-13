@@ -26,21 +26,20 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-// [D8] idle-gc 归档时释放引擎池引用（releasePoolRef 经 getEngineDataDir 解析
-// dataDir）——测试钉到模块级 holder（vi.mock factory 闭包只能引用模块级变量），
-// beforeEach 刷新为当前 tmp agentDir，防触碰真实数据目录。
+// [池抽象降级 2026-09-13] idle-gc 的 releasePoolRef 接线已删除（refs 机制退役，
+// journal 回收统一归 cleanupExpiredJournals 的 30 天 TTL）——dataDir holder mock
+// 保留供 session-file-gc 类链路复用锚点；本文件不再触碰引擎目录。
 let gcDataDirHolder = "";
 vi.mock("../engine/common/data-dir.ts", () => ({
   getEngineDataDir: () => gcDataDirHolder,
 }));
 
-import { acquirePool } from "../engine/common/pool-manager.ts";
 import { coreSpawnedChildrenMirror, _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 与 startGcTimer 内部常量一致（1h 扫描 / 30 天 TTL）。 */
 const GC_INTERVAL_MS = 60 * 60 * 1000;
@@ -179,13 +178,13 @@ describe("[M8] idle record GC 定时器（startGcTimer）", () => {
     expect(store.getMutable("sa-after-dispose")).toBeDefined();
   });
 
-  it("[D8] 归档超 TTL record 时释放引擎池引用：journal 跟随删除、refs 移除、归零删池原生状态", () => {
-    // 建池（engine 缺省投影 'pi' + poolKey 'shared'——与 runEngineTask 回填形态一致）
-    const poolDir = acquirePool(agentDir, "pi", "shared", "sa-pool-1");
-    fs.mkdirSync(path.join(poolDir, "native-state"), { recursive: true });
-    fs.writeFileSync(path.join(poolDir, "native-state", "db.sqlite"), "x");
+  it("[池抽象降级] 归档超 TTL record 不触碰引擎目录：journal 保留（回收统一归 TTL，非 GC 时点）", () => {
+    // journal 固定落 engines/<engineId>/shared/（[池抽象降级] 无 refs 计数，GC 不再
+    // 做 release——journal 回收唯一机制 = cleanupExpiredJournals 的 30 天 mtime TTL）
+    const poolDir = path.join(agentDir, "engines", "pi", "shared");
+    fs.mkdirSync(poolDir, { recursive: true });
     fs.writeFileSync(path.join(poolDir, "journal-sa-pool-1.jsonl"), "{}\n");
-    fs.writeFileSync(path.join(poolDir, "journal-sa-pool-2.jsonl"), "{}\n"); // 他人 journal（refs 无条目）
+    fs.writeFileSync(path.join(poolDir, "journal-sa-pool-2.jsonl"), "{}\n");
 
     const fireAt = Date.now() + GC_INTERVAL_MS;
     const record = makeIdleRecord("sa-pool-1", fireAt - IDLE_TTL_MS - 1);
@@ -196,29 +195,8 @@ describe("[M8] idle record GC 定时器（startGcTimer）", () => {
     vi.advanceTimersByTime(GC_INTERVAL_MS);
 
     expect(store.getMutable("sa-pool-1")).toBeUndefined(); // 已归档
-    // release 语义：自己的 journal 删、他人 journal 保留、归零删原生状态、目录保留（剩 journal）
-    expect(fs.existsSync(path.join(poolDir, "journal-sa-pool-1.jsonl"))).toBe(false);
+    // journal 全部保留（GC 只归档 record，不删引擎目录文件——无论有无 engineHandle）
+    expect(fs.existsSync(path.join(poolDir, "journal-sa-pool-1.jsonl"))).toBe(true);
     expect(fs.existsSync(path.join(poolDir, "journal-sa-pool-2.jsonl"))).toBe(true);
-    expect(fs.existsSync(path.join(poolDir, "native-state"))).toBe(false);
-    expect(fs.existsSync(poolDir)).toBe(true);
-    // refs 归零后随池清理（无残留幻影引用）
-    const refsPath = path.join(poolDir, "refs.json");
-    if (fs.existsSync(refsPath)) {
-      expect(Object.keys((JSON.parse(fs.readFileSync(refsPath, "utf8")) as { refs: object }).refs)).toEqual([]);
-    }
-  });
-
-  it("[D8] 无 engineHandle 的 record 归档不触碰引擎池（存量 record 零影响）", () => {
-    const poolDir = acquirePool(agentDir, "pi", "shared", "sa-plain");
-    fs.writeFileSync(path.join(poolDir, "journal-sa-plain.jsonl"), "{}\n");
-
-    const fireAt = Date.now() + GC_INTERVAL_MS;
-    store.register(makeIdleRecord("sa-plain", fireAt - IDLE_TTL_MS - 1)); // 无 engineHandle
-
-    service.startGcTimer();
-    vi.advanceTimersByTime(GC_INTERVAL_MS);
-
-    expect(store.getMutable("sa-plain")).toBeUndefined(); // 正常归档
-    expect(fs.existsSync(path.join(poolDir, "journal-sa-plain.jsonl"))).toBe(true); // 池/journal 不动
   });
 });

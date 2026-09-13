@@ -26,7 +26,7 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-import { UiRequestObservability } from "../ui-request-observability.ts";
+import { UiRequestObservability } from "../ui/ui-request-observability.ts";
 
 // ── 公共 fixture ──────────────────────────────────────────────
 

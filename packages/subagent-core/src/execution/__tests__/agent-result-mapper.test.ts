@@ -7,8 +7,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
-import type { AgentResult as SubagentsAgentResult, AgentUsageTotal, ToolCall } from "../types.ts";
+import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
+import type { AgentResult as SubagentsAgentResult, AgentUsageTotal, ToolCall } from "../assembly/types.ts";
 
 describe("mapToWorkflowAgentResult (D-A10)", () => {
   const minimalResult: SubagentsAgentResult = {

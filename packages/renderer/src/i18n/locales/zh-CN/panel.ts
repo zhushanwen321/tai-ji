@@ -16,6 +16,8 @@ export default {
     queueSend: '排队发送',
     commandQueuedRejected: '会话占用中，命令请等待完成后使用',
     sending: '发送中…',
+    sendBusy: '会话正在处理中，请稍候再发送',
+    sendEmptyHint: '请输入内容后再发送',
     sendHint: '输入内容后发送',
     steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮…',
     inputHint: '描述你想让 AI 做什么，或 # 文件、/ 命令…',
@@ -38,6 +40,7 @@ export default {
     copy: '复制',
     working: '工作中',
     worked: '已工作',
+    inProgress: '（进行中）',
     expandReasoning: '展开推理',
     collapseReasoning: '收起推理',
     toolFailed: '（失败）',
@@ -62,6 +65,8 @@ export default {
     viewCommandDoc: '查看命令文档',
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
+    // [compact-defer-composer-queue u1] 压缩中活动带副文案（u3 消费；u1 负责新增 key）
+    compactingFlushHint: '完成后自动发送 {count} 条待发消息',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
@@ -195,6 +200,7 @@ export default {
     subagentCoarseHint: '{engine} 引擎：运行中（该引擎不支持实时流，结束后可查看完整对话）',
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
+    subagentStopReason: '上一轮为什么停（停因词，仅展示）',
     engineFallbackBadge: '请求 {from} → 已回退 {to}',
     engineFallbackHint: '引擎 {from} 探针失败，已自动回退 {to}；修复 {from} 后新建会话即可恢复',
     backToWorkflow: '返回工作流',
@@ -313,9 +319,12 @@ export default {
     pendingHintBash: '等待命令执行结束后发送',
     pendingHintSettling: '等待当前回合结束后发送',
     cancelQueued: '撤销排队',
-    submittedAwaitingDelivery: '已提交，等待投递',
     chipBadge: '+{count}',
     chipBadgeHint: '含 {count} 个附件/引用，将随消息一并发送',
+    // [compact-defer-composer-queue u1] defer 行占用分档 chip（压缩后 / 命令后 / 稍后发送）
+    deferChipCompacting: '压缩后',
+    deferChipBash: '命令后',
+    deferChipFallback: '稍后发送',
   },
   contextChips: {
     removeFromContext: '从上下文移除',

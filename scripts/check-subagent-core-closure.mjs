@@ -5,7 +5,7 @@
  * 背景：packages/subagent-core（@zhushanwen/subagent-core）是跨宿主共享的引擎中立
  * 执行层，设计红线 = 依赖闭包不含 pi SDK 与宿主专属依赖（否则 zcode 宿主被拖入
  * pi 依赖树，双宿主统一实现的目标失效）。人工 review 守不住漂移（设计 §2.3 实证），
- * 本脚本机器化该判据（docs/design/subagent-core-package-extraction.md §3.3 D9-①）。
+ * 本脚本机器化该判据（docs/architecture/subagent-core-package-extraction.md §3.3 D9-①）。
  *
  * 检查项：
  * 0. 版本双源一致性（残留风险 11 闭合）：src/index.ts 的 CORE_PACKAGE_VERSION 与

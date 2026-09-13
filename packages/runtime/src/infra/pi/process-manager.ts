@@ -144,7 +144,7 @@ export class ProcessManager implements IProcessManager {
     // process.execPath 是 pi binary，矩阵① 必须用注入执行器）。键序在 DATA_DIR 之后、
     // options.env 之前（调用方显式配置仍可覆盖）。
     const engineRootsEnv = getEngineRootsSpawnEnv(this.projectRoot)
-    // B3 出站注入组（docs/design/env-propagation-boundary.md §5-U3）：本对象经
+    // B3 出站注入组（docs/architecture/env-propagation-boundary.md §5-U3）：本对象经
     // RpcClientOptions.env 传入，由 rpc-client start() 的 buildOutboundChildEnv 作为
     // extras 在过滤基座之上整体覆盖；下方 spread 键序即覆盖优先级
     // （DATA_DIR < PATH 补齐 < relay 三件套 < 调用方 options.env），与组装迁入构建器前

@@ -111,9 +111,11 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
     ])
   })
 
-  // ── 两形态反解析（D7 兜底通道，composer 多 skill 注入 u3）──────────────────────
+  // ── 三形态反解析（D7 兜底通道，composer 多 skill 注入 u3；R4 剥块升级）──────────
   // 反解析 SSOT = apply-entry-convert parseSkillBlock（live 帧 / 历史重建 / 文件重放
-  // 三链路共用）。形态① xyz 私有标记（本设计序列化产物）、形态② pi 原生 block（存量）。
+  // 三链路共用）。形态① <xyz-skill-data> 剥块（R4 D11 末尾块协议，任意位置整块剔除）、
+  // 形态② xyz 私有标记（本设计序列化产物）、形态③ 存量兼容（pi 原生 block +
+  // <xyz-skills> 降级块，对应设计 D7-③，零改动）。
   it('message/user：xyz 私有标记混排中文正文——标记前后正文全保留为交错 segments（专防前置正文丢失回归）', () => {
     const state = replayEntries([
       msgEntry('e-user-mk1', {
@@ -239,6 +241,137 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
       }),
     ])
     expect(nested.messages[0].content).toEqual([{ type: 'skill', name: 'a', location: '/a/SKILL.md' }])
+  })
+
+  // ── R4 三形态①剥块（<xyz-skill-data> 包裹块，D11 末尾块协议）─────────────────
+  it('message/user：[R4 ①] 正常形态——正文标记 + 末尾块：标记还原 + 块全文零残留（D11 场景 1）', () => {
+    // 块形态 = buildSkillDataBlockExpansions 产物锚定（手写格式双保险）：块内 <skill>
+    // 全文是注入器产物，剥块整体丢弃——不还原 badge、不残留文本
+    const state = replayEntries([
+      msgEntry('e-user-data1', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '帮我 review 这段代码 <xyz-skill name="code-review-graph" location="/abs/SKILL.md"/>\n\n<xyz-skill-data>\n<skill name="code-review-graph" location="/abs/SKILL.md">\nReferences are relative to /abs.\n\n（SKILL.md 全文…）\n</skill>\n</xyz-skill-data>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    expect(state.messages[0].content).toEqual([
+      { type: 'text', text: '帮我 review 这段代码 ' },
+      { type: 'skill', name: 'code-review-graph', location: '/abs/SKILL.md' },
+      // 块与正文间的分隔空白属块外正文，逐字保留（「块外正文全部保留」）
+      { type: 'text', text: '\n\n' },
+    ])
+  })
+
+  it('message/user：[R4 ①] 块任意位置——中段/开头剥块，块外正文全部保留（防御 hook 改写挪位）', () => {
+    // 中段：块夹在两段正文之间，前后正文零丢失
+    const middle = replayEntries([
+      msgEntry('e-user-data2', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '开头正文\n<xyz-skill-data>\n<skill name="x" location="/x/SKILL.md">\n（全文）\n</skill>\n</xyz-skill-data>\n结尾正文',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    expect(middle.messages[0].content).toEqual([{ type: 'text', text: '开头正文\n\n结尾正文' }])
+    // 开头：块前置 + 正文标记在后，剥块后标记照常还原
+    const head = replayEntries([
+      msgEntry('e-user-data3', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '<xyz-skill-data>\n<skill name="x" location="/x/SKILL.md">\n（全文）\n</skill>\n</xyz-skill-data>\n\n看这个 <xyz-skill name="a" location="/a/SKILL.md"/>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    expect(head.messages[0].content).toEqual([
+      { type: 'text', text: '\n\n看这个 ' },
+      { type: 'skill', name: 'a', location: '/a/SKILL.md' },
+    ])
+  })
+
+  it('message/user：[R4 ①] 块内含 <xyz-skill> 字样——随块整体丢弃不误还原（清单标记/块内 <skill> 均零还原）', () => {
+    const state = replayEntries([
+      msgEntry('e-user-data4', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '正文 <xyz-skill name="body-marker" location="/b/SKILL.md"/>\n\n<xyz-skill-data>\n<xyz-skill name="in-block" location="/i/SKILL.md"/>\n<skill name="also-in-block" location="/s/SKILL.md">\n（全文）\n</skill>\nUse the read tool to load the skill files above before continuing the task\n</xyz-skill-data>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    // 仅正文标记还原；块内标记清单（in-block）与块内 <skill> 全文（also-in-block）
+    // 随块丢弃——零还原零残留
+    expect(state.messages[0].content).toEqual([
+      { type: 'text', text: '正文 ' },
+      { type: 'skill', name: 'body-marker', location: '/b/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+  })
+
+  it('message/user：[R4 ①→②] 降级形态——剥 <xyz-skill-data> 块后正文标记仍还原为 badge（D11 场景 2）', () => {
+    // R4 降级形态 = buildSkillDataBlockFallback 产物锚定：块内标记清单 + 块内指引行
+    //（与存量 <xyz-skills> 块外指引行形态不同）；正文占位标记原样保留，剥块后标记
+    // 还原链路（形态②）不受影响
+    const state = replayEntries([
+      msgEntry('e-user-data5', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '帮我 review <xyz-skill name="a" location="/a/SKILL.md"/>\n\n<xyz-skill-data>\n<xyz-skill name="a" location="/a/SKILL.md"/>\nUse the read tool to load the skill files above before continuing the task\n</xyz-skill-data>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    expect(state.messages[0].content).toEqual([
+      { type: 'text', text: '帮我 review ' },
+      { type: 'skill', name: 'a', location: '/a/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+  })
+
+  it('message/user：[R4 ①] 纯块消息（无正文标记）——剥后无命中不回退原始文本，块全文零泄漏', () => {
+    const state = replayEntries([
+      msgEntry('e-user-data6', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '<xyz-skill-data>\n<skill name="only" location="/o/SKILL.md">\n（整块全文）\n</skill>\n</xyz-skill-data>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    // 关键防线：剥过块后不得返回 null（否则调用方回退 textToSegments 原文 = 全文泄漏
+    // 进显示层）；剥后正文为空串 → 空 Segment[]（空串不产 text segment 同款约定）
+    expect(state.messages[0].content).toEqual([])
+  })
+
+  it('message/user：[R4] defer 确认标记 + 末尾块组合（live 真实落盘形态）——两段剥除叠加正文零残留', () => {
+    // D11 落盘末尾性依赖：useChat 先追加 <!--xyz:msg:u-…--> 注释、注入块拼接在注释后
+    // ——剥 defer 标记（convertMessageBody 单点）与剥块（parseSkillBlock ①）叠加后
+    // 标记与块均不可见
+    const state = replayEntries([
+      msgEntry('e-user-data7', {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: '正文标记 <xyz-skill name="a" location="/a/SKILL.md"/>\n<!--xyz:msg:3f2504e0-4f89-41d3-9a0c-0305e82c3301-->\n\n<xyz-skill-data>\n<skill name="a" location="/a/SKILL.md">\n（全文）\n</skill>\n</xyz-skill-data>',
+        }],
+        timestamp: 1000,
+      }),
+    ])
+    expect(state.messages[0].content).toEqual([
+      { type: 'text', text: '正文标记 ' },
+      { type: 'skill', name: 'a', location: '/a/SKILL.md' },
+      // 注释剥除前后各一行换行 + 块前空行分隔 = 三个换行，属块外正文保留
+      { type: 'text', text: '\n\n\n' },
+    ])
   })
 
   it('message/user：手打残缺/错序标记不还原（D8 透传语义——反解析不宽松）', () => {
@@ -435,8 +568,8 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
     )
     expect(first.messages[0].toolCalls![0].output).toBe('first-version')
 
-    // 第二条同 id 帧（message_end 载体，内容版本不同）：整体 no-op——不重放回填
-    //（保留首条版本）、state.messages 引用不变、簿记集合引用不变（copy-on-write 纯度）
+    // 第二条同 id 帧（message_end 载体，内容版本不同）：内容不重放回填
+    //（保留首条版本）；endTime 例外走 U3 last-wins（见下方断言）；簿记集合引用不变
     const messagesBefore = first.messages
     const deliveredBefore = first.deliveredToolResultIds
     const second = applyEntry(
@@ -450,7 +583,11 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
       }),
     )
     expect(second.messages[0].toolCalls![0].output).toBe('first-version')
-    expect(second.messages).toBe(messagesBefore)
+    // [chat-flow-timestamp U3] endTime last-wins：第二帧（权威 pi 时刻）覆盖首条客户端时钟；
+    // 其余字段保持首条。覆盖产新 message 引用（copy-on-write：输入零污染，其余元素保引用）
+    expect(second.messages[0].toolCalls![0].endTime).toBe(3000)
+    expect(second.messages).not.toBe(messagesBefore)
+    expect(second.messages.length).toBe(messagesBefore.length)
     expect(second.deliveredToolResultIds).toBe(deliveredBefore)
     expect(second.orphanToolResults).toHaveLength(0)
 

@@ -13,10 +13,20 @@
 - **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示
 - **subagent 进程**自动静默（`PI_SUBAGENT_ROOT_SESSION_ID` 标记）
 
+## 行为门控
+
+| 状态 | 工具 execute | 阈值提醒 | 压缩生成接管 |
+|---|---|---|---|
+| enabled，模型未排除 | 放行（低于最低档阈值时拒绝并返回用量建议） | 生效 | 生效（按双模式判定） |
+| enabled，模型命中排除列表 | 拒绝（返回原因） | 跳过 | 跳过（回落 pi 原生生成） |
+| enabled=false | 拒绝（"可在设置页开启"） | 跳过 | 跳过（回落 pi 原生） |
+| compactModel 未配置/无效 | 放行（same-model 不依赖该配置） | 生效 | same-model 生效；cross-model 回退当前模型，压缩不失败 |
+| 模型切换跨界（model_select） | 常驻不变 | 注入一条可用性变化通知（仅跨界时） | 按新模型即时重判 |
+
+行为正确性由 execute / handler 现场校验兜底，每次事件回调重新读配置（热加载，改完下一 turn 生效，无需重启）。
+
+> 设计层 why 与业界调研记录见原设计文档（已随 2026-09 docs 清理退役，git 历史可查 `docs/extensions/smart-context/design.md`）。
+
 ## 配置
 
 `<agentDir>/config/smart-context-ext-config.json`（读时热加载）。schema 与示例见 `skills/smart-context-ext-config/SKILL.md`。xyz-agent 桌面端在设置页（系统 → 智能上下文压缩）可视化配置。
-
-## 设计文档
-
-`docs/extensions/smart-context/design.md`（xyz-agent 仓库）——决策依据、探针记录、验收场景。

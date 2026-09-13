@@ -21,7 +21,7 @@ import type { ToolCallResult } from "@zhushanwen/subagent-engine-sdk";
 import { toErrorMessage } from "./error-message.ts";
 
 /**
- * pi stdout 的 SdkEvent 形态（core execution/types.ts SdkEvent 的结构子集——
+ * pi stdout 的 SdkEvent 形态（core execution/assembly/types.ts SdkEvent 的结构子集——
  * spawn-runner 的翻译 switch 只消费这些字段；SDK 契约类型未收该类型，包内自持）。
  */
 export interface SdkEvent {

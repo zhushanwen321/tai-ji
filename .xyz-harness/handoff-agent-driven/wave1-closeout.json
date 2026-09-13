@@ -1,9 +1,0 @@
-{
-  "summary": "wave1 完成 handoff-service agent-driven 重写。runHandoff 从同步拼字符串改为：源 session 跑 handoff turn（buildHandoffPrompt 注入内置 prompt）→ 监听 agent_end 提取 finalText → create 新 session → newClient.prompt(doc) 注入 → 广播 handoffComplete（payload 移除 doc/reply）。新增 abortHandoff（中断 pi turn + 清理 inflight，幂等 + ES4 兜底）。inflight Set→Map<InflightHandoff> 承载 teardown 句柄。删除 assembleHandoffDoc/mapRoleLabel（不降级，C5）。16 vitest 测试全绿（含 TC9 表驱动 6 输入 + TC10 sanitize），tsc exit 0。",
-  "artifacts": [
-    {"kind": "code", "ref": "packages/runtime/src/services/handoff-prompt.ts", "note": "新建：HANDOFF_PROMPT_TEMPLATE 内置常量 + buildHandoffPrompt + sanitizeReply + REPLY_MAX_LENGTH"},
-    {"kind": "code", "ref": "packages/runtime/src/services/handoff-service.ts", "note": "重写：runHandoff agent-driven + abortHandoff + extractFinalTextFromAgentEnd + inflight Map"},
-    {"kind": "test", "ref": "packages/runtime/src/services/__tests__/handoff-service.test.ts", "note": "重写：16 测试覆盖主路径/reply/空doc/超时/并发/abort×3/extract表/buildPrompt"},
-    {"kind": "commit", "ref": "a2cd91015", "note": "refactor(handoff): wave1 runtime agent-driven core"}
-  ]
-}

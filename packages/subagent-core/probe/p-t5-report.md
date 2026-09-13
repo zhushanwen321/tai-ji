@@ -2,7 +2,7 @@
 
 - 日期：2026-09-01
 - 单元：u-svc（subagent-core-unbounded-wait-audit，T5②实施前⛔门）
-- 设计依据：docs/design/subagent-core-unbounded-wait-audit.md §7.3 P-T5 / §7.2 T5②
+- 设计依据：docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.3 P-T5 / §7.2 T5②
 - 结论：**PASS——写盘开销可忽略，T5②按主路径实现心跳（每次 keep-alive 期 agent_end 覆盖写 .alive），不降级软超时。**
 
 ## 方法（历史回溯）

@@ -3,7 +3,7 @@
  * crash-forensics-and-watchdog.md §3.3 D5「extension 聚合上报」+「缺席与丢失的语义收敛」④）。
  *
  * 覆盖（u7b 验收）：
- * - 合法帧（initial/delta）→ 在途镜像绝对计数覆盖 + resolve INFLIGHT_REPORT_ACK（第三参
+ * - 合法帧 → 在途镜像绝对计数覆盖 + resolve INFLIGHT_REPORT_ACK（第三参
  *   'select'，rpc-client 对 select 走 value 序列化，pi 侧 reporter 靠它判「已送达」）；
  * - **无任何前端广播副作用**：marker 帧不进翻译（interpret 零调用），且直调 translate()
  *   也返回空（守卫分支）——[HISTORICAL] 广播会让前端渲染无人应答的弹窗导致 pending 泄漏；
@@ -28,9 +28,9 @@ function makeFrame(title: string | undefined, options: unknown[], id = 'req-infl
   return { type: 'extension_ui_request', method: 'select', id, title, options } as PiEvent
 }
 
-/** 合法上报载荷（sessionId 在场 = 可归属）。 */
-function reportPayload(inFlight: number, kind: 'initial' | 'delta' = 'delta', sessionId: string = SID): string {
-  return JSON.stringify({ kind, inFlight, sessionId, emittedAt: 1_700_000_000_000 })
+/** 合法上报载荷（sessionId 在场 = 可归属；kind 字段已删——2026-09-13 oe-audit）。 */
+function reportPayload(inFlight: number, sessionId: string = SID): string {
+  return JSON.stringify({ inFlight, sessionId, emittedAt: 1_700_000_000_000 })
 }
 
 /**
@@ -57,13 +57,13 @@ beforeEach(() => {
 })
 
 describe('event-adapter: subagent 在途帧旁路（D5）', () => {
-  it('合法 initial 帧（count=0）→ 镜像条目 + ack，零前端广播（interpret 零调用）', () => {
+  it('合法初始帧（count=0）→ 镜像条目 + ack，零前端广播（interpret 零调用）', () => {
     const { interpret, listener, ack } = attachAdapter()
-    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(0, 'initial')], 'req-ack-1'))
+    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(0)], 'req-ack-1'))
 
     // 镜像：hasEverReported=true + inFlight=0（「在场且无在途」已证事实 → errs 不再触发）
     const entry = inflightMirror.query(SID)
-    expect(entry).toEqual({ injected: false, hasEverReported: true, inFlight: 0, lastReportAt: 1_700_000_000_000 })
+    expect(entry).toEqual({ injected: false, hasEverReported: true, inFlight: 0 })
     expect(inflightMirror.errsShape(SID)).toBeNull()
 
     // ack：resolve INFLIGHT_REPORT_ACK（第三参 select → rpc-client 序列化为 value 字符串）
@@ -74,7 +74,7 @@ describe('event-adapter: subagent 在途帧旁路（D5）', () => {
     expect(interpret).not.toHaveBeenCalled()
   })
 
-  it('合法 delta 帧 → 绝对计数覆盖镜像（非增量）', () => {
+  it('合法后续帧 → 绝对计数覆盖镜像（非增量）', () => {
     const { interpret, listener, ack } = attachAdapter()
     listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(3)]))
     listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(1)], 'req-ack-2'))
@@ -84,7 +84,7 @@ describe('event-adapter: subagent 在途帧旁路（D5）', () => {
   })
 
   it('translate() 直调 marker 帧 → 空输出（守卫分支：绝不广播前端）', () => {
-    const events = translate(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(0, 'initial')]), SID)
+    const events = translate(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(0)]), SID)
     expect(events).toEqual([])
     // 不产任何 message / extension-ui 事件（无广播、无弹窗、无 pending）
     expect(events.some(e => e.kind === 'message' || e.kind === 'extension-ui')).toBe(false)
@@ -101,10 +101,9 @@ describe('event-adapter: 坏帧静默丢弃（不抛不镜像不 ack）', () => 
     ['payload 非 JSON', ['{not json']],
     ['options 为空', []],
     ['payload 非对象', ['42']],
-    ['kind 不在值域', [JSON.stringify({ kind: 'evil', inFlight: 0, sessionId: SID, emittedAt: 1 })]],
-    ['inFlight 为负', [JSON.stringify({ kind: 'delta', inFlight: -1, sessionId: SID, emittedAt: 1 })]],
-    ['inFlight 非整数', [JSON.stringify({ kind: 'delta', inFlight: 1.5, sessionId: SID, emittedAt: 1 })]],
-    ['缺 emittedAt', [JSON.stringify({ kind: 'delta', inFlight: 0, sessionId: SID })]],
+    ['inFlight 为负', [JSON.stringify({ inFlight: -1, sessionId: SID, emittedAt: 1 })]],
+    ['inFlight 非整数', [JSON.stringify({ inFlight: 1.5, sessionId: SID, emittedAt: 1 })]],
+    ['缺 emittedAt', [JSON.stringify({ inFlight: 0, sessionId: SID })]],
   ])('%s → 静默丢弃', (_label, options) => {
     const { interpret, listener, ack } = attachAdapter()
     expect(() => listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, options))).not.toThrow()
@@ -116,9 +115,9 @@ describe('event-adapter: 坏帧静默丢弃（不抛不镜像不 ack）', () => 
   it('sessionId 缺席/空串 → 丢弃整帧（u7a 契约：无法归属不镜像；不 ack 待重试）', () => {
     const { interpret, listener, ack } = attachAdapter()
     // 缺席：JSON 无 sessionId 键（注意不能用默认参 undefined——默认参会回落 SID）
-    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [JSON.stringify({ kind: 'delta', inFlight: 2, emittedAt: 1 })], 'req-absent'))
+    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [JSON.stringify({ inFlight: 2, emittedAt: 1 })], 'req-absent'))
     // 空串
-    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [JSON.stringify({ kind: 'delta', inFlight: 2, sessionId: '', emittedAt: 1 })], 'req-empty'))
+    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [JSON.stringify({ inFlight: 2, sessionId: '', emittedAt: 1 })], 'req-empty'))
     expect(inflightMirror.query(SID)).toBeUndefined()
     expect(ack).not.toHaveBeenCalled()
     expect(interpret).not.toHaveBeenCalled()
@@ -127,7 +126,7 @@ describe('event-adapter: 坏帧静默丢弃（不抛不镜像不 ack）', () => 
   it('坏帧后通道保持存活：后续合法帧照常写镜像 + ack', () => {
     const { interpret, listener, ack } = attachAdapter()
     listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, ['{not json'], 'req-bad'))
-    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(2, 'initial')], 'req-good'))
+    listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(2)], 'req-good'))
     expect(inflightMirror.query(SID)?.inFlight).toBe(2)
     expect(ack).toHaveBeenCalledTimes(1)
     expect(ack).toHaveBeenCalledWith('req-good', INFLIGHT_REPORT_ACK, 'select')
@@ -157,7 +156,7 @@ describe('event-adapter: 旁路不误伤既有 UI 通道', () => {
 describe('event-adapter: ack 通道缺省/异常不干扰事件流', () => {
   it('client 无 sendExtensionUiResponse（port 可选成员缺省）→ 不抛，镜像仍更新', () => {
     const { interpret, listener } = attachAdapter({ withAck: false })
-    expect(() => listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(4, 'initial')]))).not.toThrow()
+    expect(() => listener(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(4)]))).not.toThrow()
     expect(inflightMirror.query(SID)?.inFlight).toBe(4)
     expect(interpret).not.toHaveBeenCalled()
   })

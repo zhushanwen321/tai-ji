@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CONFIG } from "@zhushanwen/subagent-core/execution/config.ts";
+import { DEFAULT_CONFIG } from "@zhushanwen/subagent-core/execution/assembly/config.ts";
 
 /** package.json `xyz-agent.startupConfig` 声明条目的最小形状（守护断言用）。 */
 interface StartupConfigEntry {

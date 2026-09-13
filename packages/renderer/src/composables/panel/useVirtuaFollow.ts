@@ -5,6 +5,18 @@
  * virtua 路径（cw wave w4 删除手写方案）；本版按 chat-pin-bottom-fix 设计 v7 重构坐标原语与
  * 脱离语义（docs/design/chat-pin-bottom-fix.md §4.3 D1/D2/D7，实施计划 U1）。
  *
+ * v7 为何把触发从「信号 watch 枚举」换成结果导向的 RO 兜底网（根因 R1，触发编排实装见
+ * useMessageStreamFollowTriggers）：信号枚举 + 单次滚动对「滚动目标算完之后发生的高度变化」
+ * 结构性零补偿——同帧次序是 rAF 回调 → style/layout → RO 投递，scrollToIndex 拿到的恒是
+ * 上一帧的实测高度缓存，流式结束后的最后一段增长（fence finalize / shiki 高亮 / 图片加载）
+ * 之后没有任何触发源，最新消息恒差 1-2 行被裁在视口外。virtua 0.50.0 自身不兜底：其 jump
+ * 补偿只对视口顶锚 item（防下拉跳动语义），对底部末项长高零补偿、无 bottom-sticky。补 N 个
+ * watch 无解（永远有第 N+1 个盲区），故任何底部高度/视口变化统一进 follow 原语。新 item
+ * 估算高度（ESTIMATED_TURN_HEIGHT=200，实际偏高/偏低不对称）的缺口是同一盲区的特例，RO 网
+ * 实测收敛天然覆盖。RO 网把跟随触发频率放大到「每次内容高度变化」——这正是脱离判据必须
+ * 同批从 wheel-only 扩为复合判据（下方 INVAR-M4-2′）的动机：否则滚动条/键盘上滑用户会被
+ * 每次高度变化扯回一次。
+ *
  * 核心不变量（INVAR-M4-2′，取代旧 INVAR-M4-2 的「wheel-only + onScroll 只单向翻真」）：
  * **stickToBottom = false（脱离锚定）只由用户输入信号驱动——① onWheel deltaY<0（滚轮上滑，
  * 恒即时生效，不受任何抑制窗约束）；② onScroll 复合判据（offset 递减 ∧ 距底 > BOTTOM_THRESHOLD，
@@ -30,7 +42,7 @@
  *   负值 ≤ 阈值 → stickToBottom 恒 true → 不浮「回到底部」按钮 → 自我锁死的错钉（设计 §3.2 F3）。
  *   索引直取与 startMargin/scrollSize 坐标语义彻底解耦，末项定位与末项像素高度无关。
  * - scrollToIndex(末项, { align: 'end', offset: endOffset() })（D2）——endOffset = Virtualizer
- *   之后、仍在滚动容器文档流内的尾部块（ActivityStrip / PendingBubble / ForkNotice）实测总高，
+ *   之后、仍在滚动容器文档流内的尾部块（ActivityStrip / ForkNotice）实测总高，
  *   由 U2 经 tailEl ResizeObserver 注入。virtua offset 语义 = 目标 scrollTop 正偏移
  *   （0.50.0 core $scrollToIndex 公式：`offset + startSpacerSize + itemOffset(last) +
  *   itemSize(last) - viewportSize`）。

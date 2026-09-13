@@ -4,7 +4,7 @@
 
 ## 决策
 
-以冷蓝 `#4f8ef7`、暗色画布、Inter 作为产品**唯一视觉标准 (single source of truth)**（2026-08-25 字体子决策已 supersede，见 docs/page-design/v6-master-spec.md §4.6），默认主题基调为**暗色优先，亮色为备选**。
+以冷蓝 `#4f8ef7`、暗色画布、Inter 作为产品**唯一视觉标准 (single source of truth)**（2026-08-25 字体子决策已 supersede，见 docs/DESIGN.md §4.6），默认主题基调为**暗色优先，亮色为备选**。
 
 > **2026-08-02 更新**：原始 `docs/page-design/zcode-demo/` 探索稿已删除，视觉规格见 `../page-design/v6-spec-*.html`（15 份 HTML 标注稿）与 `../page-design/v6-master-spec.md`。本 ADR 的视觉方向裁决（冷蓝暗色优先）不变。
 
@@ -44,25 +44,4 @@
 - **B (`../page-design/design-system.md`)**：原 Warm & Soft 方案，ADR-0019 推翻后降级为组件原语层参考（不再承载视觉方向）。
 - **`PRODUCT.md`**：品牌章节（Warm & Soft 人格、赤陶、anti-references 中"不是冷色开发者工具"）需重写为冷蓝暗色开发者工具人格——**单独任务，不在此 ADR 范围**。
 
-## D 的漂移修复清单（精确到行）
-
-目标：`src-electron/renderer/src/style.css` + `tailwind.config.ts` 全部对齐到 `../page-design/design-tokens.md`。
-
-`style.css` :root（L11-30）：
-- L11-15 `--bg/--surface/--fg/--muted/--border`：暖奶油 → 冷蓝暗色底（见 `../page-design/design-tokens.md` 暗色块）
-- L16-17 `--accent(195°)/--accent-light`：青蓝 → `#4f8ef7` 蓝系
-- L25 `--font-display`：serif (Tiempos/Newsreader) → Inter（display 与 body 同族，tech-utility 取向）（2026-08-25 字体子决策已 supersede，见 docs/page-design/v6-master-spec.md §4.6）
-- L28 `--radius: 1px` → `3px/8px/12px` 三档
-- **新增**：整块 `.dark { ... }` token（当前缺失，`darkMode:'class'` 是空头支票）
-
-`tailwind.config.ts`：
-- L8 `colors`：对齐冷蓝暗色板
-- L37 `fontFamily`：display/body → Inter，mono → JetBrains Mono（2026-08-25 字体子决策已 supersede，见 docs/page-design/v6-master-spec.md §4.6）
-- L42 `borderRadius`：→ 3/8/12px
-
-## 后续步骤
-
-1. 落地 `../page-design/design-tokens.md` 到 `style.css :root` + `tailwind.config.ts`（按上清单）
-2. 重写 `PRODUCT.md` 品牌章节（Warm → 冷蓝开发者工具人格）
-3. 补交互层规范（组件状态机、空/错/载态、动效时序、响应式断点）——当前最大空白
-4. 提炼 Vue SFC 组件库，补全 8 个状态（原 zcode-demo 已删除，参考 `../page-design/v6-spec-*.html`）
+> 落地步骤已删除：实现由代码承载（源码内 // ADR-0019 锚点可回链），git 历史可追溯（2026-09-13 ADR 瘦身）

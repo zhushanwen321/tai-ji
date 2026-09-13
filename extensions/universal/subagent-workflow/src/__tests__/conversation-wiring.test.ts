@@ -33,10 +33,10 @@ import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagen
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
 import { startHandler } from "../interface/subagent-actions.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
-import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/model-resolver.ts";
+import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/assembly/model-resolver.ts";
 import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
-import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/types.ts";
+import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
 const STUB_MODEL: ModelInfo = { id: "test-model", name: "Test", provider: "test", reasoning: false };
 

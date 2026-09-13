@@ -182,7 +182,7 @@ function reportViolations(violations, pkgDirs) {
   console.error(
     `  Recovery: engine packages depend only on @zhushanwen/subagent-engine-sdk; ` +
       `shared logic belongs in the SDK (core -> SDK is the legal direction, never the reverse). ` +
-      `See docs/design/subagent-engine-protocolization.md §3.7 / impl-plan §2.9.`,
+      `See docs/architecture/subagent-engine-protocolization.md §3.7 / impl-plan §2.9.`,
   );
 }
 

@@ -144,7 +144,7 @@ function makeTask(overrides?: Partial<AgentCallOpts>): AgentCallOpts {
 }
 
 function makeCtx(overrides?: Partial<RunContext>): RunContext {
-  return { taskId: "sa-dispose", poolKey: "", ...overrides };
+  return { taskId: "sa-dispose", ...overrides };
 }
 
 // ============================================================

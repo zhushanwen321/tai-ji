@@ -1255,7 +1255,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         console.error(`[session-service] onSessionDestroyed listener error (sessionId=${sessionId}):`, e)
       }
     }
-    // 收殓下沉触发面 A（D2，设计 docs/design/file-lock-unification-and-reaper-sink.md
+    // 收殓下沉触发面 A（D2，设计 docs/architecture/file-lock-unification-and-reaper-sink.md
     // §3.3 挂点论证）：本汇聚点是「该 session 的 pi 确认死亡」的精确时点（主动删 /
     // onSessionExit 进程退出 / forceQuit 编排 / restore 清场全部经此），覆盖面大于
     // pm.onSessionExit（后者只覆盖进程退出）。fire-and-forget：void + catch warn，

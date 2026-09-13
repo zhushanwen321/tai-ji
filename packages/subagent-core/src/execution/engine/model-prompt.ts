@@ -2,7 +2,7 @@
 //
 // [U7] 引擎模型段 system prompt 注入（模型可发现性）。
 // [engine-awareness U2] 引擎恒在状态段 <current_subagent_engine>（设计权威源：
-// docs/design/subagent-engine-awareness-injection.md §3.1 终态逐字基准 / §3.3 D6、D7）。
+// docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）§3.1 终态逐字基准 / §3.3 D6、D7）。
 //
 // 背景：pi 核心在 system prompt 生成 <available_provider_models> 段并教育 agent
 // 「subagent/workflow 的 model 参数用这些 id」——该教育对 engine: zcode 等自带

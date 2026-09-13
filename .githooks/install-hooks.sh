@@ -262,7 +262,7 @@ fi
 # 2c. pi extensions manifest & convention 检查
 #    迁自 xyz-pi-extensions 仓库的 pre-commit，针对已迁移的 extensions/ 包：
 #      (1) 禁止废弃 namespace @mariozechner/pi-*（Pi SDK 已重命名为 @earendil-works/pi-*）
-#      (2) 禁止 extensions 代码用 console.log/info（会泄漏到 TUI，见 standards.md §10）
+#      (2) 禁止 extensions 代码用 console.log/info（会泄漏到 TUI，见 STANDARDS.md §10）
 #      (3) pi manifest + package.json 深度检查（保 pi.extensions/type/keyword/
 #          peerDependencies/包名/files 字段完整）
 #    仅在 staged extensions/ 文件变更时触发，与 2b 共用 SKIP_EXTENSION_LINT 跳过开关。
@@ -587,15 +587,15 @@ else
 fi
 
 # ============================================================================
-# CSS token SSOT 一致性检查（style.css vs design-tokens.md）
+# CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值真值）
 # ============================================================================
 
 CSS_SSOT_CHECKER=".githooks/check_css_token_ssot.py"
-CSS_SSOT_FILES="packages/renderer/src/style.css docs/page-design/design-tokens.md"
+CSS_SSOT_FILES="packages/renderer/src/style.css docs/DESIGN.md"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; then
-    # 仅当 style.css 或 design-tokens.md 变更时才检查
-    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/page-design/design-tokens\.md$" || true)
+    # 仅当 style.css 或 DESIGN.md 变更时才检查（v6-tokens.css 已随 page-design 目录退役，git 可追溯）
+    SSOT_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^docs/DESIGN\.md$" || true)
     if [ -n "$SSOT_CHANGED" ]; then
         echo -e "${BLUE}[INFO] 运行 CSS token SSOT 一致性检查...${NC}"
 
@@ -607,7 +607,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
 
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
-                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：style.css 含 design-tokens.md 未收录的 token${NC}"
+                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 投影值与 style.css 不一致${NC}"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
                 exit 1
             fi
@@ -698,7 +698,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] runtime 子进程 env 出站契约检查失败${NC}"
-            echo -e "${YELLOW}[INFO] 新增子进程必须经 buildOutboundChildEnv 组装 env；修复指引见上方脚本输出；设计依据 docs/design/env-propagation-boundary.md${NC}"
+            echo -e "${YELLOW}[INFO] 新增子进程必须经 buildOutboundChildEnv 组装 env；修复指引见上方脚本输出；设计依据 docs/architecture/env-propagation-boundary.md${NC}"
             echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
             exit 1
         fi
@@ -716,7 +716,7 @@ fi
 #   ② check-engine-package-boundary（W9 新守卫）：packages/subagent-engine-* +
 #     pi/zcode-subagent-cli 不得依赖/导入 core 内部路径 + DoD#2（exports 无
 #     ./engines/ 子入口、barrel 无引擎重导出）。
-#   设计依据：docs/design/subagent-engine-protocolization.md §3.7 / impl-plan §2.9。
+#   设计依据：docs/architecture/subagent-engine-protocolization.md §3.7 / impl-plan §2.9。
 #   注：不设独立跳过开关——新增 SKIP_* 逃生口须同步登记 AGENTS.md 的 SKIP_* 清单，
 #   故本段仅受既有 SKIP_ALL_CHECKS 总闸管辖。
 # ============================================================================
@@ -914,7 +914,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] $CONSTRAINT_CHECKER 检查失败${NC}"
-            echo -e "${YELLOW}[INFO] 约束登记见 docs/constraints.json / docs/constraints.md（机器 SSOT + 人读视图）${NC}"
+            echo -e "${YELLOW}[INFO] 约束登记见 docs/constraints.json（机器 SSOT）${NC}"
             echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
             exit 1
         fi
@@ -925,20 +925,20 @@ else
 fi
 
 # ============================================================================
-# 约束登记 SSOT 一致性（constraints.json 改动时触发）
-#   改 docs/constraints.json 后必须重跑 node scripts/render-constraints.mjs
-#   生成 docs/constraints.md，防止 json/md 双份漂移。
+# 约束登记 SSOT 结构校验（constraints.json 改动时触发）
+#   node scripts/validate-constraints.mjs 校验 id/scope/authority/enforcement 结构，
+#   防止死链、非法 id、缺失 enforcement 的登记入库。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if echo "$STAGED_FILES" | grep -q "^docs/constraints\.json$"; then
-        echo -e "${BLUE}[INFO] constraints.json 有变更，校验 md 同步...${NC}"
-        node scripts/render-constraints.mjs --check
+        echo -e "${BLUE}[INFO] constraints.json 有变更，运行结构校验...${NC}"
+        node scripts/validate-constraints.mjs
         EXIT_CODE=$?
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
-            echo -e "${RED}[ERROR] docs/constraints.md 与 constraints.json 不同步${NC}"
-            echo -e "${YELLOW}[INFO] 运行 node scripts/render-constraints.mjs 重新生成后提交${NC}"
+            echo -e "${RED}[ERROR] docs/constraints.json 结构校验失败${NC}"
+            echo -e "${YELLOW}[INFO] 按上方明细修正登记后重新提交${NC}"
             exit 1
         fi
     fi
@@ -1044,7 +1044,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
-# 用户内容出站点守卫（adversarial-review-fixes A2 D-A2-3）
+# 用户内容出站点守卫（A2 D-A2-3；原设计文档 adversarial-review-fixes.md 已删除，原则见 check_prompt_outposts.py 头注释）
 #   packages/runtime/src 有变更时触发：.githooks/check_prompt_outposts.py
 #   扫描 .prompt( / .steer( / .followUp( 三方法全部调用点（任意接收者——防
 #   client 变量名改写逃逸），对照白名单（文件 + 行内子串指纹 + 内容性质 +
@@ -1569,7 +1569,7 @@ fi
 # ============================================================================
 # 数据布局字面量守卫（C-pi-14，设计 §10 U18）
 #   staged 命中守卫范围（packages/ apps/ scripts/ 源码 + AGENTS.md +
-#   docs/troubleshooting.md + 守卫脚本自身）时触发：
+#   docs/TROUBLESHOOTING.md + 守卫脚本自身）时触发：
 #   scripts/check-layout-literals.mjs —— 旧布局 pi/ 兄弟层字面量（join 形态
 #   'pi','agent'|'sessions' 与路径形态 pi/agent|pi/sessions，显式排除 .pi 前缀）
 #   回流即拦截。合法持有（bundled 资源布局/迁移语义/历史证据）集中登记在
@@ -1577,8 +1577,8 @@ fi
 #   全量扫描毫秒级，无增量模式。不设独立 SKIP_* 开关（R1 后惯例，总闸兜底）。
 # ============================================================================
 
-LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/troubleshooting.md scripts/check-layout-literals.mjs)
-if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/troubleshooting\.md$"; then
+LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/TROUBLESHOOTING.md scripts/check-layout-literals.mjs)
+if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/TROUBLESHOOTING\.md$"; then
     print_section "[数据布局字面量守卫]"
     if [ ! -f "scripts/check-layout-literals.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-layout-literals.mjs（C-pi-14 守卫交付物缺失）${NC}"
@@ -1632,11 +1632,11 @@ fi
 # 安装后自检：生成的 pre-commit 必须含流写逃逸护栏段。
 # 防「源缺段/heredoc 生成失败」——本脚本源若缺护栏段或 heredoc 损坏，此处 exit 1 拦下。
 # 边界：防不了「旧版源覆盖」（旧源无此自检，静默装旧版），该残留风险登记在
-# docs/design/runtime-stream-fault-isolation.impl-plan.md §7 变更历史 2026-09-04 条目。
+# docs/design/runtime-stream-fault-isolation.impl-plan.md §7 变更历史 2026-09-04 条目（已删除，git 可追溯）。
 # 匹配护栏段功能行（变量赋值），不匹配任意出现——仅残留注释/引用的坏源同样拦下。
 if ! grep -q 'UNSAFE_STREAM_CHECKER=' "$GIT_HOOKS_DIR/pre-commit"; then
     echo -e "${RED}[ERROR] 安装后自检失败：生成的 pre-commit 缺少流写逃逸护栏段（check-unsafe-stream-writes）${NC}"
-    echo -e "${YELLOW}[FIX] 安装源已过期或 heredoc 损坏：对照 docs/design/runtime-stream-fault-isolation.md §5 核对本 worktree 的 .githooks/install-hooks.sh 是否含护栏段，更新到最新分支后重跑 bash .githooks/install-hooks.sh${NC}"
+    echo -e "${YELLOW}[FIX] 安装源已过期或 heredoc 损坏：对照 scripts/check-unsafe-stream-writes.mjs（护栏机制本体，头部注释含设计依据）核对本 worktree 的 .githooks/install-hooks.sh 是否含护栏段，更新到最新分支后重跑 bash .githooks/install-hooks.sh${NC}"
     exit 1
 fi
 

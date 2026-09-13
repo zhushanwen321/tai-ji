@@ -5,7 +5,11 @@
  * - D3：skill segment 序列化产私有标记 `<xyz-skill name="..." location="..."/>`——
  *   与 pi 原生 `<skill>` 展开格式正交，runtime 只认私有标记展开，手打 /skill: 行为零变化
  * - D6：注入量预检的 CJK 感知 token 估算 + 0.8 contextWindow 阈值（常量单一处便于调参）
- * - D7：超预算整条降级为 `<xyz-skills>` 包裹块 + 指引行（模型自主 read 的最小指令形态）
+ * - D7：超预算整条降级为标记模式（标记清单 + 指引行，模型自主 read 的最小指令形态；
+ *   R4 起降级块并入 D11 包裹块，旧 `<xyz-skills>` tag 退役但构建/解析保留以兼容存量落盘消息）
+ * - D11（R4）：正文保留 `<xyz-skill/>` 占位标记 + 消息末尾集中追加 `<xyz-skill-data>`
+ *   包裹块——正常形态（块内 pi 对齐展开全文）与降级形态（块内标记清单 + 指引行）共用
+ *   包裹；本模块供块构建（runtime 注入器）与剥块定位切片（core 反解析三形态①）消费
  *
  * 消费方：runtime 注入器（解析/展开/降级）、shared 序列化与 core 反解析（依赖解析位置
  * 切片保留前后正文）、scripts 探针（CJK 正则同源引用）。纯文本语法层，不依赖 node API，
@@ -15,8 +19,16 @@
 /** `<xyz-skill/>` 单标记标签裸名（构建/解析/降级块三处共用，避免字符串漂移）。 */
 export const SKILL_MARKER_TAG = 'xyz-skill'
 
-/** `<xyz-skills>` 降级包裹块标签裸名。 */
+/** `<xyz-skills>` 降级包裹块标签裸名（R4 起退役，仅存量落盘消息的构建/解析兼容面）。 */
 export const SKILLS_BLOCK_TAG = 'xyz-skills'
+
+/**
+ * `<xyz-skill-data>` 末尾集中追加包裹块标签裸名（R4 D11）：正常形态（块内 pi 对齐
+ * 展开的 `<skill>` 全文）与降级形态（块内 `<xyz-skill/>` 清单 + 指引行，原 `<xyz-skills>`
+ * 统一并入）共用包裹。tag 名即新旧消息自识别锚点（存量 `<xyz-skills>` 与 R4 新块靠
+ * tag 即可区分，D11 被否变体④的裁决依据），对模型传达「数据附挂区」语义。
+ */
+export const SKILL_DATA_BLOCK_TAG = 'xyz-skill-data'
 
 /**
  * 降级块指引行文案（D7 正文定稿，SSOT；adversarial-review-fixes §3.4 C5 改英文——
@@ -139,9 +151,13 @@ export function parseSkillMarkers(text: string): ParsedSkillMarker[] {
 }
 
 /**
- * 构建降级块（D7）：`<xyz-skills>` 包裹全部自闭合标记 + 紧跟一行的指引文案。
+ * 构建降级块（D7）：`<xyz-skills>` 包裹全部自闭合标记 + 紧跟块后一行的指引文案。
  * 归拢成块的取舍见设计（块 + 单指引行的指令遵循率高于散点）；末尾不加换行，
  * 由调用方决定与后文的拼接方式。
+ * 注意：此存量形态的指引行在块外（紧随闭标签一行，SKILLS_BLOCK_RE 的可选吞尾组
+ * 与之配套）；R4 D11 降级形态的指引行在包裹块内，两者不可混用。R4 起新消息降级
+ * 一律走 buildSkillDataBlockFallback（旧 tag 退役）；本函数保留为存量形态的构建
+ * 锚点（回归测试/探针引用），不再有生产调用方。
  */
 export function buildSkillsFallbackBlock(
   skills: ReadonlyArray<{ name: string; location?: string }>,
@@ -182,6 +198,67 @@ export function parseSkillsFallbackBlocks(text: string): ParsedSkillsBlock[] {
     results.push({ skills: parseSkillMarkers(m[0]), index: m.index, length: m[0].length })
   }
   return results
+}
+
+// ── R4 D11：末尾集中追加包裹块（`<xyz-skill-data>`）────────────────────────
+
+/**
+ * 构建正常形态包裹块（R4 D11）：`<xyz-skill-data>` 包裹全部已展开的 `<skill>` block，
+ * 形态与设计 §3.1 场景 1 逐字一致（首行开标签、每个 block 独立一行、末行闭标签，
+ * 行间 '\n' 连接）。输入是「已按 get_commands 权威映射展开完成」的 block 全文——
+ * 展开本身（D5 pi 逐字对齐）与同 name 去重都在 runtime 调用方完成，本函数只负责
+ * 包裹与分隔约定。不追加指引行（D11 选定：正文标记与块内 `<skill>` 的 name 双向
+ * 对齐已完备，指引行仅降级形态保留）；末尾不加换行，与后文的拼接（正文 + 空行 +
+ * 块）由调用方完成。
+ */
+export function buildSkillDataBlockExpansions(expansions: ReadonlyArray<string>): string {
+  return [`<${SKILL_DATA_BLOCK_TAG}>`, ...expansions, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n')
+}
+
+/**
+ * 构建降级形态包裹块（R4 D11，原 D7 降级块统一并入）：`<xyz-skill-data>` 包裹
+ * `<xyz-skill/>` 标记清单 + 置于清单后的指引行，形态与设计 §3.1 场景 2 逐字一致。
+ * 标记产出复用存量 buildSkillsFallbackBlock 同款能力（buildSkillMarker 逐项 +
+ * SKILL_FALLBACK_GUIDANCE 单指引行），但指引行位于包裹块内（D11 场景 2，与存量
+ * D7 块外指引行形态不同）——降级与正常两形态同构后，反解析「先剥块、再认标记」
+ * 规则统一（D7 三形态①）。
+ */
+export function buildSkillDataBlockFallback(
+  skills: ReadonlyArray<{ name: string; location?: string }>,
+): string {
+  const lines = skills.map((s) => buildSkillMarker(s.name, s.location))
+  return [
+    `<${SKILL_DATA_BLOCK_TAG}>`,
+    ...lines,
+    SKILL_FALLBACK_GUIDANCE,
+    `</${SKILL_DATA_BLOCK_TAG}>`,
+  ].join('\n')
+}
+
+/** findSkillDataBlockRange 的命中区间：slice 约定 `[start, end)`，text.slice(start, end) 即块全文。 */
+export interface SkillDataBlockRange {
+  start: number
+  end: number
+}
+
+/**
+ * `<xyz-skill-data>` 块定位正则：非贪婪匹配首个完整块（开闭标签间任意内容含换行）。
+ * 与 SKILLS_BLOCK_RE 同构但无吞尾组——降级形态的指引行位于块内（D11 §3.1 场景 2），
+ * 无块外指引行需要吞入。无 g 标志：本函数只取首个命中，exec 不产生 lastIndex 残留。
+ */
+const SKILL_DATA_BLOCK_RE = new RegExp(
+  `<${SKILL_DATA_BLOCK_TAG}>[\\s\\S]*?</${SKILL_DATA_BLOCK_TAG}>`,
+)
+
+/**
+ * 定位文本中首个完整 `<xyz-skill-data>...</xyz-skill-data>` 块（供 core 反解析剥块，
+ * D7 三形态①「任意位置剥块优先」）。非贪婪语义：止于首个闭合标签——嵌套块不在生产
+ * 形态中，与 parseSkillsFallbackBlocks 的「首个闭合即块结束」一致；无完整块（缺开
+ * 标签或缺闭合标签）返回 null。切片用法：块前 = text.slice(0, start)、块后 = text.slice(end)。
+ */
+export function findSkillDataBlockRange(text: string): SkillDataBlockRange | null {
+  const m = SKILL_DATA_BLOCK_RE.exec(text)
+  return m ? { start: m.index, end: m.index + m[0].length } : null
 }
 
 /**

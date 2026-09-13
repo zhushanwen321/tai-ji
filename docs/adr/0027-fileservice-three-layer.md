@@ -1,5 +1,7 @@
 # ADR-0027: FileService 三层架构 + ignore 纯函数范式
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（分层 + 范式）。本文档定义架构约束。
 > **关联**：[ADR-0025 File View 语义](0025-file-view-full-project-tree.md)、[ADR-0026 懒加载](0026-file-tree-lazy-loading.md)、[ADR-0009 数据目录隔离](0009-xyz-agent-data-dir-isolation-from-pi.md)。
 > **溯源**：`[from: 2026-06-28-sidebar-project-file-tree §6,§10, decisions D-008/D-013]`
@@ -28,7 +30,7 @@ D-008 原含 `IIgnoreReader` port，追踪发现**多余**——`git-status-pars
 - `shared/ignore-parser.ts` 导出 `compileIgnoreRules` / `matchPath` 纯函数（无 IO，放 shared 层）
 - FileService 经 `IFileExecutor.readFile` 读 .gitignore 内容（IO 走 port），再调纯函数匹配（计算走 shared）
 
-> **⚠️ 教训记录**：`isUnderOrEqual` 曾误迁到 shared（W1a），但 shared 是浏览器/runtime 共享层，`node:path` 在浏览器崩。已移回 runtime/path-utils.ts。**shared 层禁止 node 内置模块**（见 NFR.md）。
+> **⚠️ 教训记录**：`isUnderOrEqual` 曾误迁到 shared（W1a），但 shared 是浏览器/runtime 共享层，`node:path` 在浏览器崩。已移回 runtime/path-utils.ts。**shared 层禁止 node 内置模块**（约束登记 C-state-05，见 docs/constraints.json）。
 
 ### ignore 双模式（D-020）
 

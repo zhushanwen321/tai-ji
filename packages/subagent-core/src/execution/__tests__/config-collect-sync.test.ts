@@ -12,7 +12,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const loggerMock = vi.hoisted(() => ({ warn: vi.fn(), debug: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { DEFAULT_COLLECT_SYNC, DEFAULT_CONFIG, sanitizeCollectSync } from "../config.ts";
+import { DEFAULT_COLLECT_SYNC, DEFAULT_CONFIG, sanitizeCollectSync } from "../assembly/config.ts";
 
 beforeEach(() => {
   loggerMock.warn.mockClear();

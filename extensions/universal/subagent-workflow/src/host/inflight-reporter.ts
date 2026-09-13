@@ -1,6 +1,6 @@
 // src/host/inflight-reporter.ts
 //
-// 壳层在途上报出口（u7a，设计权威源：docs/design/crash-forensics-and-watchdog.md
+// 壳层在途上报出口（u7a，设计权威源：docs/architecture/crash-forensics-and-watchdog.md
 // §3.3 D5「extension 聚合上报」）。本文件属壳侧（shell），对 pi SDK（ExtensionContext
 // 的 ctx.ui.select 通道）的消费收敛在 host/ 层——core 闭包红线只约束 core（出口回调
 // 由 core 的 inflight-snapshot 注入，见组合根 index.ts 的 setInFlightListener 接线）。
@@ -15,21 +15,26 @@
 //   ② 事件产生点在 core、上报出口在壳层——本文件即出口（core 零 pi SDK）；
 //   ③ marker 路由不广播前端是 u7b（runtime 侧）的约束，本文件不涉及。
 //
-// 语义（D5）：每帧携带**绝对计数**（getInFlightSnapshot，谓词与 core 内
-// hasRunningBackground 同源），非增量；初始上报（initial）触发时点 = extension 加载
-// 完成——factory 阶段拿不到 ctx/ui（pi 0.84.4 实装：dist/core/extensions/loader.js:463
-// await factory(load.api) 只收静态注册面 API（registerTool/events.on…，
-// createExtensionAPI :209 函数体无 ui 字段）；per-session ctx 由
-// dist/core/extensions/runner.js createContext() :503（get ui :508）在事件派发时点
-// 构造，emit :624 每次现场建 ctx）——session_start 是 pi 启动序列里最早带 ctx 的钩子
-// （dist/core/agent-session.js:1919 _extensionRunner.emit(_sessionStartEvent)，默认
-// 事件 :152）= 「session 就绪」，即设计所指加载完成时点；不挂任何懒触发（无 subagent
-// 的 session 也必上报）。
+// 环境门控（2026-09-13 oe-audit + 裸 TUI 闪框事故）：上报的消费方是 xyz-agent
+// runtime 的 event-adapter marker 路由，而 runtime spawn pi 恒为 --mode rpc——
+// ctx.mode !== 'rpc' 即无拦截方（裸 pi TUI 下 marker select 会弹真框超时，2026-09-12
+// 实测无限闪框），此时不启动上报（ask-user channel-handler 的 mode 二值判定同款
+// 先例）。非 rpc 会话的 inFlight 判定归 runtime 侧镜像（spawn 预置 0），无信息损失。
 //
-// 失败语义（D5 缺席语义②）：select 失败（超时/通道异常/非确认回包）折叠后**延迟重试
-// 直至成功一次**。送达判据 = runtime resolve 的确认回包（INFLIGHT_REPORT_ACK）——
-// fire-and-forget 下 resolve(undefined) 与超时不可区分，必须靠显式 ack 区分「已送达」
-// 与「旧版 runtime 无路由」，否则 errs 判别（「从未收到上报」只覆盖缺席/旧版）失效。
+// 语义（D5）：每帧携带**绝对计数**（getInFlightSnapshot，谓词与 core 内
+// hasRunningBackground 同源），非增量；初始上报触发时点 = extension 加载完成
+// （session_start 是 pi 启动序列里最早带 ctx 的钩子 = 「session 就绪」，即设计所指
+// 加载完成时点；不挂任何懒触发（无 subagent 的 session 也必上报）。
+//
+// 失败语义（D5 缺席语义②，2026-09-13 oe-audit 修订）：select 失败（超时/通道异常/
+// 非确认回包）折叠后延迟重试，**累计 MAX_REPORT_ATTEMPTS 次放弃**（原「重试直至
+// 成功一次」的无界语义为「旧版 runtime」版本错配场景设计——该场景已被同 bundle
+// 发布 + pi 随 runtime 退出销毁两条事实证伪；有界化的防挂死兜底对齐 plugin-bridge
+// MAX_SYNC_ATTEMPTS 形态。session_start 首帧早于 runtime adapter attach 的竞态
+// （R2 实证）在 30×2s=60s 窗口内必然自愈）。送达判据 = runtime resolve 的确认回包
+// （INFLIGHT_REPORT_ACK）——fire-and-forget 下 resolve(undefined) 与超时不可区分，
+// 靠显式 ack 区分「已送达」与「无路由」；放弃后镜像按 absent-report 走 errs 推迟
+// （30min 有界），不丢 errs-safe 兜底。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SUBAGENT_INFLIGHT_MARKER, isInFlightReportAck } from "@xyz-agent/extension-protocol";
@@ -44,11 +49,16 @@ const SELECT_TIMEOUT_MS = 2_000;
 /** 失败重试退避（对齐 plugin-bridge SYNC_RETRY_MS 控制面节奏）。 */
 const RETRY_DELAY_MS = 2_000;
 
+/** 累计失败放弃上限（对齐 plugin-bridge MAX_SYNC_ATTEMPTS：60s 窗口覆盖 attach 竞态，
+ *  有界防 rpc-but-非-xyz orchestrator 场景的永久空转）。 */
+const MAX_REPORT_ATTEMPTS = 30;
+
 /** 在途上报器（组合根 index.ts 持有；per-factory 实例，session_start/shutdown 驱动）。 */
 export interface InFlightReporter {
   /**
    * session_start 注入当前 ctx 并发起初始上报（fire-and-forget——本方法同步返回，
-   * 不阻塞 session_start 装配链；初始帧 kind='initial'，count 为当下绝对计数）。
+   * 不阻塞 session_start 装配链；初始帧 count 为当下绝对计数）。非 rpc 模式
+   * （ctx.mode !== 'rpc'）下为 no-op：无 runtime 拦截方，上报通道不该启动。
    */
   attachSession(ctx: ExtensionContext): void;
   /** session_shutdown 摘除 ctx 并停止重试（session 已死，上报通道随之终结）。 */
@@ -62,6 +72,8 @@ export interface InFlightReporterOpts {
   selectTimeoutMs?: number;
   /** 测试注入：重试退避（ms）。缺省 RETRY_DELAY_MS。 */
   retryDelayMs?: number;
+  /** 测试注入：累计失败放弃上限。缺省 MAX_REPORT_ATTEMPTS。 */
+  maxAttempts?: number;
 }
 
 /**
@@ -80,19 +92,22 @@ function getSessionId(ctx: ExtensionContext): string | undefined {
 export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFlightReporter {
   const selectTimeoutMs = opts.selectTimeoutMs ?? SELECT_TIMEOUT_MS;
   const retryDelayMs = opts.retryDelayMs ?? RETRY_DELAY_MS;
+  const maxAttempts = opts.maxAttempts ?? MAX_REPORT_ATTEMPTS;
   const logger = getLogger("subagents");
 
   // 闭包状态（per-factory 实例；禁模块级 let——同进程多 factory 实例会串台）。
   let ctx: ExtensionContext | null = null;
-  /** 初始上报是否已送达（送达后所有帧 kind='delta'）。 */
-  let initialAcked = false;
   /** 一次推送尝试在途（串行化——绝对计数语义下中间值可安全合并丢弃）。 */
   let attemptInFlight = false;
   /** 有待推帧（onInFlightChanged 在推送在途期间置位，成功后立即补推最新值）。 */
   let dirty = false;
   /** 重试定时器句柄（单飞；成功/dispose 即清）。 */
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  /** 首次失败已 warn 留痕（重试循环不刷屏——旧版 runtime 场景会长期重试）。 */
+  /** 累计失败次数（成功清零；达 maxAttempts 放弃——本 session 不再重试）。 */
+  let failureCount = 0;
+  /** 已放弃（累计到顶；session 内终态，成功路径永不触及）。 */
+  let givenUp = false;
+  /** 首次失败已 warn 留痕（重试循环不刷屏）。 */
   let firstFailureLogged = false;
 
   function clearRetryTimer(): void {
@@ -102,9 +117,9 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
     }
   }
 
-  /** 推送在途或无 ctx 时仅置脏；否则发起一次尝试（void，不阻塞调用方）。 */
+  /** 推送在途、已放弃或无 ctx 时仅置脏；否则发起一次尝试（void，不阻塞调用方）。 */
   function kick(): void {
-    if (attemptInFlight || ctx === null) {
+    if (attemptInFlight || givenUp || ctx === null) {
       dirty = true;
       return;
     }
@@ -120,11 +135,9 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
       return;
     }
     // 帧内容在发送时刻现取：绝对计数 = 此刻快照（「当前非 idle 句柄数」）、
-    // 产生时点 = 此刻、kind 按初始上报是否已送达裁决（初始未送达前，脏帧也以
-    // initial 语义送达——对 errs 判别等价：runtime 收到任何帧即「在场」）。
+    // 产生时点 = 此刻（runtime 收到任何帧即「在场」，errs 判别按帧到达置位）。
     const snapshot = getInFlightSnapshot();
     const payload = JSON.stringify({
-      kind: initialAcked ? "delta" : "initial",
       inFlight: snapshot.inFlight,
       sessionId: getSessionId(active),
       emittedAt: Date.now(),
@@ -139,15 +152,25 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
     }
     attemptInFlight = false;
     if (typeof value === "string" && isInFlightReportAck(value)) {
-      // 送达确认：清重试；初始上报「成功一次」达成后，后续帧一律 delta。
-      initialAcked = true;
+      // 送达确认：清重试与失败计数，补推积压脏帧。
+      failureCount = 0;
       clearRetryTimer();
       if (dirty && ctx !== null) kick();
       return;
     }
-    // 失败折叠（resolve undefined = 超时/取消/旧版无路由）→ 延迟重试直至成功一次
-    //（D5 缺席语义②：使「从未收到」只覆盖缺席/旧版形态，不覆盖一次性丢包）。
+    // 失败折叠（resolve undefined = 超时/取消/无路由）→ 延迟重试，累计到顶放弃
+    //（放弃后镜像按 absent-report 走 errs 推迟，30min 有界，errs-safe 兜底不丢）。
     logFailure("no ack (timeout, cancelled, or runtime without marker routing)", value);
+    failureCount += 1;
+    if (failureCount >= maxAttempts) {
+      givenUp = true;
+      clearRetryTimer();
+      logger.warn(
+        `[subagent-inflight] in-flight report gave up after ${failureCount} attempts; ` +
+          `mirror will treat this session as absent-report (errs-deferred, bounded)`,
+      );
+      return;
+    }
     if (ctx !== null && retryTimer === null) {
       retryTimer = setTimeout(() => {
         retryTimer = null;
@@ -161,7 +184,7 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
   function logFailure(reason: string, detail: unknown): void {
     if (!firstFailureLogged) {
       firstFailureLogged = true;
-      logger.warn(`[subagent-inflight] in-flight report failed (${reason}); retrying every ${retryDelayMs}ms until acked`, {
+      logger.warn(`[subagent-inflight] in-flight report failed (${reason}); retrying every ${retryDelayMs}ms (bounded at ${maxAttempts} attempts)`, {
         detail: detail instanceof Error ? detail.message : String(detail),
       });
       return;
@@ -171,6 +194,15 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
 
   return {
     attachSession(target: ExtensionContext): void {
+      // 环境门控：非 rpc 模式（裸 pi TUI / json / print）无 runtime 拦截方，marker
+      // select 会弹真框（2026-09-12 裸 TUI 无限闪框事故根因）——不设 ctx，本 session
+      // 全程 no-op。ask-user 的 ctx.mode === "rpc" 二值判定同款先例。
+      if (target.mode !== "rpc") return;
+      // attach = 新 reporting epoch（新 session / respawn 后重载）：放弃态与失败计数
+      // 随旧 session 终结，重置重试资格（同一 session 内放弃不恢复——absent-report 兜底）。
+      givenUp = false;
+      failureCount = 0;
+      firstFailureLogged = false;
       ctx = target;
       clearRetryTimer();
       // 初始上报（count=当下绝对计数；session 就绪时点恒为 0——子进程只会在后续

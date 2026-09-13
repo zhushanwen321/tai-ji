@@ -27,9 +27,9 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { encodeCwd } from "../path-encoding.ts";
-import { WorktreeRegistry } from "../worktree-registry.ts";
-import { RECONCILE_SKIP_ESCALATION_CYCLES, WorktreeManager } from "../worktree-manager.ts";
+import { encodeCwd } from "../assembly/path-encoding.ts";
+import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
+import { RECONCILE_SKIP_ESCALATION_CYCLES, WorktreeManager } from "../worktree/worktree-manager.ts";
 
 /** 原始 TMPDIR（beforeEach 重定向、afterEach 还原）。 */
 const ORIG_TMPDIR = os.tmpdir();

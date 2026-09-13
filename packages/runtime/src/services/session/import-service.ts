@@ -1,5 +1,5 @@
 /**
- * ImportService — 外部 pi 会话导入（import-session 设计 docs/design/import-session.md §3.3 U2）。
+ * ImportService — 外部 pi 会话导入（import-session 设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 U2）。
  *
  * 两个领域动作（D5 契约，类型来自 @xyz-agent/shared 的 import-session 模块）：
  * - listCandidates：外部根候选列表（scanExternalSessions 默认 TTL 读 + alreadyImported/cwdExists

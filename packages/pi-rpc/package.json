@@ -1,0 +1,57 @@
+{
+  "name": "@zhushanwen/pi-rpc",
+  "version": "0.1.0",
+  "description": "Shared pi process RPC layer for xyz-agent: spawn argv builders (main-agent / subagent templates), LF-only NDJSON framing with pending registry + tiered timeouts, command frame assembly, SIGCONT-first kill chain, and pi outbound env composition. Extracted verbatim from runtime rpc-client and pi-subagent-cli (design docs/architecture/subagent-permanent-session-model.md §3.3.2).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        },
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "$comment": "双形态发布（形态对齐 subagent-engine-sdk / pi-subagent-cli，D4 同款）：workspace 消费走 exports import 条件 -> src；npm 消费走 publishConfig.exports（publish 时整体替换同名字段后进 tarball）-> dist。npm 发布面必须 dist——本包是 pi-subagent-cli 的 dependencies 成员（tarball 安装面），Node 拒载 node_modules 内 .ts，TS 源发布只产出误导（pi-subagent-cli $comment 同款论证；tsup noExternal 内联是 CLI 侧行为，dependencies 声明仍要求 registry 侧可解析可加载）。src 内部 import 带 .ts 后缀 + allowImportingTsExtensions（tsc emit 不可行），构建 = tsup 单 entry（exports 仅 '.'，无子路径面）。files 仅 dist（对齐 pi-subagent-cli，2026-09 review 收窄：src/ 曾双载进 tarball ~80KB 死重且不可达）；main/module/types 顶层字段恒指 dist：npm pack 会强制包含 main 指向的文件（无视 files 白名单），指 src 会把 TS 源塞进不含 src/ 的 tarball；workspace 消费恒走 exports 的 import 条件 → src，顶层字段只是 exports 缺席时的 fallback，无 workspace DX 影响（pi-subagent-cli 同构）。首次发布 changeset：pi-rpc-initial-release（registry 0.1.0 从未发布，首发 bump minor 至 0.2.0，本仓新包首发惯例 minor）。",
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  }
+}

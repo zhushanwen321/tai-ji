@@ -20,11 +20,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { RecordStore } from '@zhushanwen/subagent-core'
 // barrel 外符号按包名 .ts 深路径消费（vitest alias 重写，同 cross-package 先例）
-import { createRecord } from '@zhushanwen/subagent-core/execution/execution-record.ts'
+import { createRecord } from '@zhushanwen/subagent-core/execution/persistence/execution-record.ts'
 import {
   getSubagentRecordsDir,
   getSubagentSessionDir,
-} from '@zhushanwen/subagent-core/execution/path-encoding.ts'
+} from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 import { listRecordManifests, type RecordManifest } from '../discovery/subagents.js'
 
@@ -125,9 +125,11 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(before).toBeDefined()
     const viewBefore = identityView(before!)
 
-    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）
+    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）。
+    // [U2 两态] executionStatus 是内部权威词汇（running|idle 两态，终态概念删除）
+    // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读投影（永久保留）→ 'closed'。
     const rawBefore = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
-    expect(rawBefore.executionStatus).toBe('closed')
+    expect(rawBefore.executionStatus).toBe('idle')
     expect(rawBefore.status).toBe('closed')
 
     // ── S5 场景：人为删除全部 manifest（缓存可丢）→ 全量重建 ──
@@ -146,13 +148,13 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     // 重建源 = `.state` 权威：closedReason 从终态位派生回 manifest（旧三态 closed）
     const rawAfter = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
     expect(rawAfter.status).toBe('closed')
-    expect(rawAfter.executionStatus).toBe('closed')
+    expect(rawAfter.executionStatus).toBe('idle')
     expect(rawAfter.closedReason).toBe('gc')
   })
 
   it('惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取投影', async () => {
     // 不经终态写面（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
-    // （running 形态）→ 查询触发惰性补建。
+    // → 查询触发惰性补建。
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
     expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')
     store.dispose()
@@ -165,9 +167,11 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(found!.agentName).toBe('worker')
     expect(found!.sessionFile).toBe(childFile)
     expect(found!.parentRecordId).toBe('sa-parent')
-    // 双写过渡字段在场（running 二态）
+    // 双写过渡字段（[U3 重建单规则] 无 sidecar 重建一律 idle：executionStatus 如实
+    // 投影两态词汇；legacy status 经桥接判据派生——无 closedReason 遗留位的 idle
+    // 投影 "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
     const raw = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
-    expect(raw.executionStatus).toBe('running')
+    expect(raw.executionStatus).toBe('idle')
     expect(raw.status).toBe('running')
   })
 })

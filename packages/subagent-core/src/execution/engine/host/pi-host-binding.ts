@@ -6,11 +6,8 @@
 // 域同样经协议客户端（RemoteEngine，registry 'pi' 由三级发现装载 cli descriptor）
 // 发往 pi-subagent-cli 引擎进程（G1：pi 引擎单一 CLI 形态，core 壳侧零内建引擎）。
 //
-// 两个出口：
-//   - PI_POOL_KEY 常量：pi 无隔离池（PI_CODING_AGENT_DIR 全局一份）→ poolKey 恒
-//     'shared'。原 inproc pi-engine（已删） 定义随删件收敛到本公共面（字面量不变，
-//     引擎包内侧等价物在 pi-subagent-cli constants.ts——跨包字面量一致性由协议
-//     handle.poolKey 往返锚定）；
+// 出口（[池抽象降级 2026-09-13] 原 PI_POOL_KEY 常量已随 poolKey 协议面退役删除，
+// 消费方改用 SDK SHARED_POOL_KEY）：
 //   - resolveHostPiEnginePort：宿主侧（SAR / chat 域路由）pi EnginePort 解析——
 //     registry 'pi' 返回发现器装载的 cli 形态 port（RemoteEngine）；未注册（引擎包
 //     未装/发现失败）→ 不可用 stub：路由层对 pi 恒同步短路（本地 pi 恒可用口径），
@@ -23,12 +20,8 @@
 // （pi-subagent-cli spawn-runner 的 spawn watchdog）保持同源常量，漂移由 conformance
 // chat golden（spawn-args 断言）在引擎包侧守护。
 
-import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import type { EnginePort } from "../port.ts";
 import { EngineNotFoundError, getEngine, hasEngine, listEngines } from "../registry.ts";
-
-/** pi 无隔离池（PI_CODING_AGENT_DIR 全局一份，协议化设计 §3.3.9），poolKey 恒 'shared'。 */
-export const PI_POOL_KEY = SHARED_POOL_KEY;
 
 /** watchdog 换算下限（分钟）：与引擎包 spawn-runner 的 floor 同源（30min）。 */
 const WATCHDOG_FLOOR_MINUTES = 30;

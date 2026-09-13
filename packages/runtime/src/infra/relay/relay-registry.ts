@@ -5,8 +5,9 @@
  * 全从握手帧，env 剥离 XYZ_SUBAGENT_RELAY_* 防孙进程嵌套误导）→ 双向字节泵（down 帧 →
  * child stdin；child stdout → up 帧 + 磁盘镜像 pi-relay-<date>-<recordId>.jsonl + tee 分支
  * 同一次读取顺序分发；stderr → up-stderr 帧；exit → exit 帧 → 关连接）→ 断连即杀
- * （SIGTERM → grace → SIGKILL，独立实现——依赖方向纪律：runtime 不 import extension 的
- * kill-chain）→ pid 文件 + 重启残留扫描兜底。
+ * （pi-rpc kill-chain 单源消费，见 killRelayChild 头注——依赖方向纪律：runtime 不
+ * import extension 的 kill-chain，pi-rpc 是 workspace 公共包非 extension）→ pid 文件 +
+ * 重启残留扫描兜底。
  *
  * 与 ProcessManager 的关系（设计 §4.4）：relay 子进程的发起方是 extension（经代理转交），
  * runtime 只是受托执行人——不进 RpcClient 体系（无 RPC 会话语义、无 attach 需求），
@@ -26,6 +27,7 @@ import {
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_RECORD_ID,
 } from '@zhushanwen/subagent-core/relay-env'
+import { killPiProcess } from '@zhushanwen/pi-rpc'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import { createPiRelayLog, type PiSessionLog } from '../logger.js'
@@ -35,8 +37,6 @@ import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
 
 /** 断连即杀的优雅退出窗口（SIGTERM 后等这么久再 SIGKILL，设计 §4.2）。 */
 export const RELAY_KILL_GRACE_MS = 3_000
-/** SIGKILL 后等待 exit 事件的兜底上限（防御性——SIGKILL 后 exit 必到）。 */
-const KILL_SETTLE_MS = 2_000
 /** 握手超时：连接建立后等第一帧的上限（防半开连接占资源）。 */
 const HANDSHAKE_TIMEOUT_MS = 10_000
 /** spawn 失败时代理看到的退出码（127 = command not found 惯例，走子进程非零退出语义）。 */
@@ -135,40 +135,34 @@ function isPidAlive(pid: number): boolean {
 }
 
 /**
- * 杀链（独立实现，语义对齐 extension common/kill-chain 与 RpcClient.kill）：
- * SIGCONT（唤醒可能被 SIGSTOP 冻结的进程，否则 SIGTERM 被吞）→ SIGTERM → grace →
- * SIGKILL。幂等：已退出的 child 直接 resolve。
+ * 杀链（S7 收敛：pi-rpc kill-chain 单源消费，与 rpc-client.kill / pi-subagent-cli
+ * killChild 同源）：SIGCONT（唤醒可能被 SIGSTOP 冻结的进程，否则 SIGTERM 被吞）→
+ * SIGTERM → grace → SIGKILL。幂等：已退出的 child 直接 resolve（killPiProcess 前置
+ * exitCode/signalCode 短路，与迁移前本函数守卫等价——去重不重复实现）。
+ *
+ * 消费参数与外层兜底裁决（独立实现 → 单源消费的行为保真点）：
+ * - graceMs 缺省维持 RELAY_KILL_GRACE_MS（3s，设计 §4.2 断连即杀窗口，不随
+ *   killPiProcess 缺省 2s 漂移）；
+ * - unrefTimers: true 维持迁移前双 timer unref 形态——kill-on-disconnect / 尾扫 /
+ *   destroyAll 都是关停路径，ref'd timer 会拖住 runtime 进程退出；
+ * - .catch 兜底维持「杀链必 resolve、永不 reject」契约：close 路径
+ *   `void killRelayChild().then(...)` 无 catch。注：killPiProcess 内三处 kill
+ *   现已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性必 resolve，本
+ *   .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步抛出路径）。
+ *
+ * 迁移删除的防御与理由：迁移前 settleTimer（graceMs+2s 强制 resolve）守护的是
+ * 「SIGKILL 后等真实 exit」形态的挂起面；killPiProcess 的 killTimer 在 grace 超时
+ * 点无条件 SIGKILL + resolve（信号发出即承诺兑现），promise 结构性不可能超过 graceMs
+ * 悬挂，外层 Promise.race 兜底恒为死代码，故去兜底而非保留。escalation 路径的
+ * resolve 时机从「真实 exit」提前为「SIGKILL 发出」——消费方全部容忍：cleanupEntry
+ * 幂等且由 attachRelayChildWiring 的 exit handler 独立复跑，尾扫 kill 是
+ * fire-and-forget（session-lifecycle `void target.kill().catch(...)`）。
  */
 export function killRelayChild(child: ChildProcess, graceMs = RELAY_KILL_GRACE_MS): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    let settled = false
-    const done = (): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(graceTimer)
-      clearTimeout(settleTimer)
-      resolve()
-    }
-    child.once('exit', done)
-    try {
-      child.kill('SIGCONT')
-      child.kill('SIGTERM')
-    } catch {
-      // kill 抛错说明进程已死，exit 事件已/将至
-      void 0
-    }
-    const graceTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        void 0
-      }
-    }, graceMs)
-    // SIGKILL 后 exit 必到；兜底定时器防极端挂起阻塞关停序列
-    const settleTimer = setTimeout(done, graceMs + KILL_SETTLE_MS)
-    graceTimer.unref()
-    settleTimer.unref()
+  return killPiProcess(child, { graceMs, unrefTimers: true }).catch(() => {
+    // kill 抛错说明进程已死（exit 事件已/将至）；杀链契约是必 resolve（见头注），
+    // 吞错防 close 路径 unhandled rejection
+    void 0
   })
 }
 
@@ -200,7 +194,7 @@ function isHandshakeEnvOwnershipValid(frame: RelayHandshakeFrame): boolean {
  * env 原样使用（身份贯穿/schemaEnv/worktree 标志全在握手帧），剥离 relay env——
  * 孙进程经 pi-invocation 判定三 env 缺失回落直连，防嵌套 relay 时旧值误导。
  *
- * B8 出站接线（docs/design/env-propagation-boundary.md §5-U4 / D4）：基座维持帧 env
+ * B8 出站接线（docs/architecture/env-propagation-boundary.md §5-U4 / D4）：基座维持帧 env
  * 全量拷贝拓扑（pass-all 前缀 '' 不做白名单过滤——schemaEnv/worktree 标志未在入站
  * 白名单内，过滤即丢语义），五键剥离迁为 extras undefined=显式删除语义；deny 清单由
  * 构建器末步兜底，「叠加 deny 过滤后不多不少」。导出仅供单测直验（handleConnection

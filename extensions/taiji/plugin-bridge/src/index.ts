@@ -16,6 +16,13 @@
 //    runtime 侧 D1 取值链（插件声明 timeoutMs / 30min 默认，超时后 runtime 主动回包），
 //    dialog 恒有终态，只透传 signal 吃 abort 红利（用户中断 → pi 本地 resolve(undefined)）。
 //    例外：启动 sync 带 2s 通道级 timeout（控制面就绪等待的自愈闸，详见 syncOnce 注释）。
+//
+// 通道选型（设计 §3.2 对比一，被否方案备查）：select dialog 帧是 pi 公开承诺的
+// ExtensionUIContext 契约，与 session-manager / ask-user 两个生产 marker 通道同构；
+// input dialog 载荷（第三种 marker 载位，违反一致性）、notify 自造请求-响应（在应用层
+// 重造 RPC，漂移回到旧 bridge 私有通道的老路）、fork pi 加自定义 method（红线）、
+// MCP（pi 0.84.4 无 client）均被否。旧 bridge 死于依赖从未公开承诺的私有通道
+// （extension_ui_request 方法 + activate 命名导出 + 装配链三断）。
 
 import type {
 	BeforeAgentStartEventResult,
@@ -127,12 +134,18 @@ function isToolNotFound(raw: unknown): boolean {
 // ── select 通道 ──
 
 /** bridge 请求经 select 通道的统一出口：返回解析后的回包对象；失败路径统一折叠为 null
- * （cancelled / 通道异常 / 非 JSON 回包 / timeout 到期），由各调用方按语义折叠为 isError 或重试。 */
+ * （cancelled / 通道异常 / 非 JSON 回包 / timeout 到期），由各调用方按语义折叠为 isError 或重试。
+ *
+ * 环境门控（2026-09-13 oe-audit）：BRIDGE_MARKER select 的消费方是 xyz-agent runtime
+ * （event-adapter marker 路由），runtime spawn pi 恒为 --mode rpc——非 rpc 模式（裸
+ * pi TUI）无拦截方，select 会弹真框（observe 转发不传 timeout 则永久挂起）。本包为
+ * taiji 组（离开 xyz-agent 无功能），非 rpc 模式折叠 null，与 cancelled 同路径。 */
 async function callBridge(
 	ctx: ExtensionContext,
 	request: BridgeRequest,
 	opts?: { signal?: AbortSignal; timeout?: number },
 ): Promise<unknown> {
+	if (ctx.mode !== "rpc") return null;
 	const payload = JSON.stringify(request);
 	try {
 		// signal 透传给 dialog：abort 后 pi 本地 resolve(undefined) 不 reject（rpc-mode
@@ -173,6 +186,14 @@ function getSessionId(ctx: ExtensionContext): string | undefined {
 
 // ── 工具执行结果类型（session-manager 同款：details 供下游消费，错误必须 isError）──
 
+// 【坑】isError 是 extension 侧约定字段——pi 0.84.4 的 AgentToolResult 接口无此字段
+// （实装锚点：node_modules/@earendil-works/pi-agent-core@0.84.4 dist/types.d.ts:317，
+// 字段集 = content / details / usage? / addedToolNames? / terminate?）、agent-loop 不读取
+// （正常 return 恒按成功，仅 throw 才算错——实装锚点：同包 dist/agent-loop.js:468
+// executePreparedToolCall 正常分支硬编码 isError:false，:473-477 仅 catch 分支置
+// isError:true）；LLM 判错实际依据 content 文本。因此 cancelled/error result 的 content
+// 必须带可读文案，isError 只作下游（details 消费方）的结构化标记。
+// pi 版本 bump 时随探针族重验（C-proc-08）。
 interface PluginBridgeToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details:
@@ -308,8 +329,17 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 
 	/** 防抖入口：启动 sync 与 miss 重同步共用——同一时刻仅一个循环 in flight，
 	 * 并发触发者等待同一个 promise（设计 §3.3-D4）。首轮发起时记录终态
-	 * （miss 重同步不覆盖——准入闸语义是「首个 prompt 前至少完成一轮」）。 */
+	 * （miss 重同步不覆盖——准入闸语义是「首个 prompt 前至少完成一轮」）。
+	 *
+	 * 环境门控（2026-09-13 oe-audit）：BRIDGE_MARKER select 的消费方是 xyz-agent
+	 * runtime，runtime spawn pi 恒为 --mode rpc——非 rpc 模式（裸 pi TUI 等）无拦截
+	 * 方，启动 sync 的 marker select 会弹真框闪 60s（30 次重试）才降级。本包为
+	 * taiji 组（离开 xyz-agent 无功能），裸 TUI 下 sync 必然失败，直接跳过。 */
 	function ensureSynced(ctx: ExtensionContext): Promise<void> {
+		if (ctx.mode !== "rpc") {
+			logger.warn("[plugin-bridge] non-rpc mode (bare pi TUI) — skipping bridge sync (no xyz-agent runtime to talk to)");
+			return Promise.resolve();
+		}
 		if (syncInFlight) return syncInFlight;
 		syncInFlight = runSyncLoop(ctx).finally(() => {
 			syncInFlight = null;

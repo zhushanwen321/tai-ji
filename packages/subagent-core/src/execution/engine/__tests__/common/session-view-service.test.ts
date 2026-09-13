@@ -24,7 +24,7 @@ import {
 } from "../../common/session-view-service.ts";
 import { parseEngineHandle } from "../../common/session-view-types.ts";
 import type { SubagentRecordSnapshot } from "../../common/session-view-types.ts";
-import type { AgentEvent } from "../../../types.ts";
+import type { AgentEvent } from "../../../assembly/types.ts";
 import type { SessionView } from "../../types.ts";
 
 let dataDir: string;

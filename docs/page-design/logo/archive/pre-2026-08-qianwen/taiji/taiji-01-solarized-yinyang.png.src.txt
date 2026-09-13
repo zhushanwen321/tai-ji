@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/c/ca/Solarized_Yin_Yang_logo.png
-source: Wikimedia Commons (API query)

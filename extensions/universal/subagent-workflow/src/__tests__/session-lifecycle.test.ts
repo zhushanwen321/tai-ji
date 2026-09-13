@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => "/home/user/.pi/agent",
 }));
-vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () => ({
   WorktreeManager: class {
     scan = vi.fn(async () => {});
     cleanup = vi.fn();
@@ -29,13 +29,13 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
     registerPid = vi.fn();
   },
 }));
-vi.mock("@zhushanwen/subagent-core/execution/session-file-gc.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
   maybeCleanupExpiredSessionFiles: vi.fn(),
 }));
 
 // seam 组（第 1 组 describe）直接 import session-lifecycle——它消费的默认实现走
 // 下列 mock；seam 用例全部经 deps 注入 fake，mock 仅作默认实现的安全网。
-vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/assembly/model-config-service.ts", () => ({
   ModelConfigService: class {
     initModel = vi.fn();
     reloadGlobalConfig = vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } }));
@@ -46,8 +46,9 @@ vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
 // [H3/R6 连带] R6 把单例访问器族外移 service/service-bootstrap.ts（barrel 改从 bootstrap
 // re-export），SubagentService 类仍从壳直接导出——mock 必须按 barrel 实际取符号的两条
 // 路径分开挂：壳 mock 留 SubagentService 假类（拦 new 分支构造），bootstrap mock 经
-// importOriginal 只替换单例访问器（拦槽读写；真实 createSubagentService 保留——其内部
-// new 的是模块图中已被 mock 的假壳类，行为等价 R6 前）。
+// importOriginal 只替换单例访问器（拦槽读写；真实装配逻辑保留——其内部
+// new 的是模块图中已被 mock 的假壳类，行为等价 R6 前；原 createSubagentService
+// 工厂已随 2026-09-13 barrel 收窄删除）。
 vi.mock("@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
   SubagentService: class {
     initSession = vi.fn();

@@ -8,8 +8,8 @@
 // 为什么放 common：zcode/pi 的 read() ②级降级是同一段逻辑（replayJournal 拿事件流 →
 // live reducer 累积 turns → 投影 SessionView）——放引擎各自实现会漂移出两份形状。
 
-import { createRecord, updateFromEvent } from "../../execution-record.ts";
-import type { AgentEvent } from "../../types.ts";
+import { createRecord, updateFromEvent } from "../../persistence/execution-record.ts";
+import type { AgentEvent } from "../../assembly/types.ts";
 // aggregateUsage / toReplayedTurn 单源 SDK（自 session-view-projection.ts 逐字等价
 // 迁入后收口——双活副本删除，live ≡ replay 的投影语义不再靠双份手工同步）。
 import { aggregateUsage, toReplayedTurn } from "@zhushanwen/subagent-engine-sdk";

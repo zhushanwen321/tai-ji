@@ -39,16 +39,16 @@ import {
   coreSpawnedChildrenMirror,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "@zhushanwen/subagent-core/testing/execution/engine/host/spawned-children.ts";
-import { _resetLifecycleState } from "@zhushanwen/subagent-core/execution/lifecycle-manager.ts";
-import { createRecord } from "@zhushanwen/subagent-core/execution/execution-record.ts";
+import { _resetLifecycleState } from "@zhushanwen/subagent-core/execution/lifecycle/lifecycle-manager.ts";
+import { createRecord } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
-import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/model-resolver.ts";
+import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/assembly/model-resolver.ts";
 import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import type { PiLike } from "@zhushanwen/subagent-core/execution/subagent-service.ts";
 import { createDelivery } from "@xyz-agent/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import type { ExecutionRecord } from "@zhushanwen/subagent-core/execution/types.ts";
+import type { ExecutionRecord } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
 // 投递内核经通知域窄端口注入（u0-notify）——[M3] 的「同 id:round dedup 吞第二次」
 // 依赖真实内核 dedupe 语义，注入真实 createDelivery（降级直发无 dedupe 会发 2 条）。

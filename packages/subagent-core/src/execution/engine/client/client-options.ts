@@ -9,16 +9,12 @@ import {
   getLogger,
   type EngineCapabilities,
   type EngineRelayEnv,
-  type HostLogParams,
-  type HostPermissionParams,
   type InitializeResult,
   type ModelCatalogEntry,
   type UiRequestHandler,
 } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
-
-import type { MirrorChangeEvent } from "./mirror.ts";
 
 /** EngineClient 构造参数。 */
 export interface EngineClientOptions {
@@ -48,12 +44,6 @@ export interface EngineClientOptions {
    * W6 拆 HostBridge 时接线）。缺省 → 引擎收 {unsupported:true} 自行降级。
    */
   uiRequestHandler?: UiRequestHandler;
-  /** host/permission 应答端（v1 骨架注入点）。缺省 → {unsupported:true}。 */
-  permissionHandler?: (params: HostPermissionParams) => Promise<{ approved: boolean }>;
-  /** host/log 落宿主日志（缺省 SDK logger facade）。 */
-  log?: (params: HostLogParams) => void;
-  /** 镜像状态广播接线（W6 notify 合并窗口 / 生命周期谓词）。 */
-  onMirrorChanged?: (event: MirrorChangeEvent) => void;
   /** 引擎 cmdline 身份谓词覆盖（pidfile 三条件清扫防误杀校验；缺省按 command 词形）。 */
   engineCmdlineMatcher?: (cmdline: string) => boolean;
   /** manifest 诊断源（initialize 应答与 manifest 不一致 → warn 留痕，不参与判据）。 */
@@ -74,6 +64,11 @@ export function defaultEngineCmdlineMatcher(command: string): (cmdline: string) 
   };
 }
 
+/** models 声明空占位判定（null/undefined/[]）：无真值基线，应答空值形态差异不构成漂移证据。 */
+function isEmptyModelsDeclaration(models: ModelCatalogEntry[] | null | undefined): boolean {
+  return models == null || models.length === 0;
+}
+
 /** manifest 诊断比对（应答仅诊断：不一致 → warn 留痕，不参与判据；EngineClient 握手尾调用）。 */
 export function warnOnManifestDiagnostics(
   engineId: string,
@@ -90,7 +85,10 @@ export function warnOnManifestDiagnostics(
       );
     }
   }
-  if (diag && "models" in diag) {
+  // 声明侧空占位（null/undefined/[]）跳过比对：无真值基线，应答 null/[] 的空值形态
+  // 差异不构成漂移证据（曾产 "manifest=[] answered=null" 噪音）。声明非空而应答为空
+  // 仍进入比对 → warn（真漂移不吞）。
+  if (diag && "models" in diag && !isEmptyModelsDeclaration(diag.models)) {
     const answered = JSON.stringify(result.models ?? null);
     const declared = JSON.stringify(diag.models ?? null);
     if (answered !== declared) {

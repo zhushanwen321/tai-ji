@@ -1,7 +1,7 @@
 // src/core/host-services.ts
 //
 // HostServices 宿主端口（P0 依赖闭包 port 化）。设计权威源：
-// docs/design/subagent-core-package-extraction.md §3.3 D2 + §3.4 错误规格。
+// docs/architecture/subagent-core-package-extraction.md §3.3 D2 + §3.4 错误规格。
 //
 // core 与宿主（pi 壳 / zsw 壳）的唯一环境服务契约：数据根 / 结构化日志 / 资源发现根。
 // 注入时机：宿主壳初始化最早期 configureCore(host)，core 内模块统一经

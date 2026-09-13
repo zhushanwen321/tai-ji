@@ -163,11 +163,11 @@ action:"list" before action:"start" — a reusable subagent may exist; compactio
 ## Actions
 
 - action:"start" — run a subagent. Pass task and slug as top-level fields (REQUIRED). Optional: agent, model, thinkingLevel, engine, collect, skillPath, appendSystemPrompt, schema, maxTurns, graceTurns, fork, worktree, cwd, conversation, idleTimeoutMs. Background only: returns a subagentId immediately, notifies on completion.
-- action:"message" — send a follow-up to a running subagent (conversation-mode or one-shot); full context retained. REQUIRED messageParam: { subagentId, text }. Optional: interrupt (default false). The reply auto-notifies.
-- action:"close" — end a running subagent and release its resources. REQUIRED closeParam: { subagentId }. Optional: force (default false = let the current round finish; true terminates mid-round).
+- action:"message" — send a follow-up to any of your subagents — running or idle (idle revives in place; one-shots become conversation-mode); full context retained. REQUIRED messageParam: { subagentId, text }. The reply auto-notifies.
+- action:"close" — archive a subagent (hidden from list, recoverable): idle closes immediately; running finishes the current round first unless force:true (then terminates mid-round). REQUIRED closeParam: { subagentId }.
 - action:"list" — list subagents. listParam: { includeFinished?, includeWorkflow?, limit? } (all optional; includeWorkflow defaults false — workflow-dispatched subagents are hidden unless true). Read an item's sessionFile for full detail.
 - action:"cancel" — stop a background subagent (for conversation-mode use close). REQUIRED cancelParam: { subagentId }.
-- action:"fork-from" — restart-disconnect recovery: spawn a NEW subagent inheriting the old one's history via --fork. REQUIRED forkFromParam: { sourceSubagentId }. Optional: prompt (continuation; default handover frame). Returns { newSubagentId, sourceSessionFile }. Rejects cancelled / worktree-bound / still-running sources.
+- action:"fork-from" — restart-disconnect recovery: spawn a NEW subagent inheriting the old one's history via --fork. REQUIRED forkFromParam: { sourceSubagentId }. Optional: prompt (continuation; default handover frame). Returns { newSubagentId, sourceSessionFile }. Rejects still-running / foreign-live / worktree-bound sources; unparseable history anchors are guided to action:"message" (same-id reopen).
 
 ## Examples
 

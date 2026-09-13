@@ -6,7 +6,7 @@
 ## 使用流程
 
 1. 用 `scripts/visual-capture.mjs` 截目标页面 PNG（`node scripts/visual-capture.mjs --target demo --page <name>`）
-2. 从 `docs/page-design/v6-master-spec.md` 摘录与截图相关的章节文字描述（要具体，见下方「SPEC_DESCRIPTION 示例」）
+2. 从 `docs/DESIGN.md` 摘录与截图相关的章节文字描述（要具体，见下方「SPEC_DESCRIPTION 示例」）
 3. 主 agent 用 `subagent` 工具派发 `minimax-token-plan-router/minimax-m3`，task 用下方「派发 task 模板」填充两个占位
 4. 接收 subagent 返回，校验 JSON schema，补全 `meta`（timestamp / model / screenshot 绝对路径等）
 5. 归档到 `.xyz-harness/visual/<date>-<page>/result.json`，复制副本到 `docs/testing/visual/baselines/<page>-<target>.json`（git tracked）
@@ -60,7 +60,7 @@ v6-master-spec 章节描述（逐条对照）：
 `/Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-ui/.xyz-harness/visual/2026-08-03-shell/demo-shell.png`
 
 ### `{{SPEC_DESCRIPTION}}`
-从 `docs/page-design/v6-master-spec.md` 摘录的具体章节文字描述。**必须具体到可对照，不能只写「检查对不对」**。
+从 `docs/DESIGN.md` 摘录的具体章节文字描述。**必须具体到可对照，不能只写「检查对不对」**。
 
 **好的示例**（D8 选中态二分规则）：
 ```

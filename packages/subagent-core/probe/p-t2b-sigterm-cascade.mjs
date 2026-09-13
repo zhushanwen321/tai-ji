@@ -3,7 +3,7 @@
 // 探针 P-T2b：pi 子进程收 SIGTERM 后是否自行级联 kill 其活跃后代。
 // 支撑设计 T2-②「后代级联 kill」的形态裁决：证实级联 → u-t2a 后代补杀退化为
 // no-op 一致性校验；证否 → 后代补杀即主路径
-//（docs/design/subagent-core-unbounded-wait-audit.md §7.2 T2-② / §7.3 P-T2b 行）。
+//（docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T2-② / §7.3 P-T2b 行）。
 //
 // 源码假设（实装版 0.84.2，dist/modes/rpc/rpc-mode.js:276-286 SIGTERM handler
 // 只调 killTrackedDetachedChildren；dist/core/tools/bash.js:71 在 bash 前台执行

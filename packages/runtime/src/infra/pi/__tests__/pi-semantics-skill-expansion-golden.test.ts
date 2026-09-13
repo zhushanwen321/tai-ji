@@ -5,9 +5,13 @@
  * 登记条目（docs/pi-semantics.json PS-24）：pi 0.84.4 的 /skill:name 展开为
  * `<skill name="<skillName>" location="<SKILL.md abs path>">\nReferences are relative to
  * <skillDir>.\n\n<body>\n</skill>`（body = stripFrontmatter 剥 frontmatter 后 trim；args
- * 有则 block + "\n\n" + args）——runtime 注入器（SkillInjector）对同输入的展开输出必须与
- * pi 逐字一致。pi 升级若改格式（tag 结构 / References 行 / trim 语义 / stripFrontmatter
- * 行为），本探针变红拦截。
+ * 有则 block + "\n\n" + args）——runtime 注入器（SkillInjector）块内单个 `<skill>` block
+ * 的展开输出必须与 pi 逐字一致。pi 升级若改格式（tag 结构 / References 行 / trim 语义 /
+ * stripFrontmatter 行为），本探针变红拦截。
+ *
+ * R4 D11 核对：注入形态改为「正文保留 `<xyz-skill/>` 标记 + 末尾 `<xyz-skill-data>`
+ * 包裹块」后，golden 锚定对象不变（单个 `<skill>` block 内容）；整条消息形态断言随
+ * D11 更新为「标记保留 + 空行 + 末尾包裹块」（本文件终断言）。
  *
  * 流程（真实 pi RPC 进程 + 真实模型 turn）：
  * 1. mkdtemp 自建 session-dir，并在其 .pi/skills/ 下自建最小测试 skill（项目级扫描源，
@@ -20,8 +24,9 @@
  *    get_commands 响应（权威映射同源，不改写任何字段），getSessionStats 给巨大窗口绕过
  *    D6 降级；对照输入 = 生产标记形态 `<xyz-skill name="..."/>`（设计 D3/场景 2，name 为
  *    skill 名、无 `skill:` 前缀）；
- * 4. golden diff：两者必须逐字相等。映射失效（skill_missing）与格式漂移分别给出定向
- *    失败信息。
+ * 4. 终断言（R4 D11）：整条消息形态 = 标记保留 + 空行 + 末尾包裹块；块内单 `<skill>`
+ *    block 内容与 pi golden 逐字相等。映射失效（skill_missing）与格式/形态漂移分别给出
+ *    定向失败信息。
  *
  * 常量同源（任务约束「CJK 正则与展开格式的常量引用尽量同源」的实现方式）：探针形态 =
  * vitest（探针族现有模式，登记 schema 强制 guard.test 指向 .test.ts），直接 import 生产
@@ -40,7 +45,7 @@ import { join } from 'node:path'
 import { spawnPiFixture, REAL_PI_READY, REAL_PI_SKIP_REASON, type PiFixture } from '../../../__tests__/equivalence/pi-fixture.js'
 import { SkillInjector } from '../../../services/session/skill-injector.js'
 import type { IPiEngine } from '../../../services/ports/pi-engine.js'
-import { buildSkillMarker } from '@xyz-agent/shared'
+import { buildSkillMarker, SKILL_DATA_BLOCK_TAG } from '@xyz-agent/shared'
 
 const SKILL_NAME = 'u6-golden-probe'
 /** 测试 skill 正文（含 CJK 与 ascii 混排 + 行尾空白行——顺带覆盖 stripFrontmatter 镜像的 trim 语义）。 */
@@ -165,11 +170,14 @@ describe.skipIf(!REAL_PI_READY)(
             `修复面：skill-injector 映射/插值用剥离前缀后的 skill 名（PI 锚点 PS-24）`,
         ).toBeUndefined()
 
-        // ── 5. golden diff 终断言（逐字一致；不等时 vitest 输出首处差异 diff）──
+        // ── 5. 终断言：整条消息形态（R4 D11「标记保留 + 末尾包裹块」）+ golden diff
+        //    （单 block 内容锚不变：块内唯一 `<skill>` 展开必须与 pi 落盘逐字一致；
+        //    不等时 vitest 输出首处差异 diff）──
         expect(
           result.text,
-          '展开格式漂移：xyz 注入器输出 ≠ pi 落盘展开文本（D5 逐字对齐被破坏——复核 stripFrontmatter 镜像、block 模板、baseDir 取值）',
-        ).toBe(piGolden)
+          '形态/格式漂移：期望「正文标记保留 + 空行 + 末尾 <xyz-skill-data> 包裹块，块内单 <skill> 与 pi 落盘逐字一致」'
+            + '（D11 末尾块组装或 D5 逐字对齐被破坏——复核 skill-injector 末尾块组装、stripFrontmatter 镜像、block 模板、baseDir 取值）',
+        ).toBe(`${marker}\n\n${[`<${SKILL_DATA_BLOCK_TAG}>`, piGolden, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n')}`)
       },
     )
   },

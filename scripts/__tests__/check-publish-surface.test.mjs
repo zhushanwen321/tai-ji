@@ -4,7 +4,7 @@
  * 机器锁定。fixture 全部落 tmpdir（rootDir 注入 runGuard / 磁盘路径注入直测函数），
  * 不依赖真实仓库状态——按 check-core-dist-gate.test.mjs 惯例。
  *
- * 用例对应设计 docs/design/npm-publish-surface-guard.md：D3（三步判定顺序 +
+ * 用例对应设计 docs/architecture/npm-publish-surface-guard.md：D3（三步判定顺序 +
  * ajv/dist/runtime/* 豁免含预期计数 4 与 .default 形态锚点）、D5（动态发现 +
  * 磁盘 stat 判定 + 反向覆盖）、D7（体积 warning 不红）；S1/S1b 场景的 fixture
  * 等价复现（真实仓库临时改包核验由主 agent 执行，不在此做）。
@@ -18,6 +18,7 @@ import {
   checkGhostEntries,
   checkSelfContained,
   checkReverseCoverage,
+  checkDependencyClosure,
   runGuard,
 } from '../check-publish-surface.mjs'
 
@@ -353,6 +354,89 @@ describe('checkReverseCoverage（检查项 3：漏声明方向）', () => {
   })
 })
 
+describe('checkDependencyClosure（检查项 4：workspace 依赖发布闭包）', () => {
+  /** 依赖方 fixture：guarded 形态（files 含 dist/）+ dist 产物（避免幽灵红干扰本项断言） */
+  const consumerRepo = (depFields) =>
+    makeRepo({
+      'packages/consumer/package.json': JSON.stringify({
+        name: '@fixture/consumer',
+        files: ['dist/'],
+        ...depFields,
+      }),
+      'packages/consumer/dist/index.js': 'export {}',
+      'packages/lib/package.json': pkgJsonOf({ name: '@fixture/lib' }),
+    })
+  const WS = (root) => new Map([['@fixture/lib', { dir: join(root, 'packages', 'lib'), private: false }]])
+  const PROBE = (root) => checkDependencyClosure(join(root, 'packages', 'consumer'), WS(root), new Set())
+
+  it('依赖包有 CHANGELOG.md → 绿（已发布链静态信号）', () => {
+    const root = consumerRepo({ dependencies: { '@fixture/lib': 'workspace:*' } })
+    try {
+      writeFileSync(join(root, 'packages', 'lib', 'CHANGELOG.md'), '# lib\n')
+      expect(PROBE(root)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('依赖包无 CHANGELOG 但有 pending changeset → 绿（本次发布闭包）', () => {
+    const root = consumerRepo({ dependencies: { '@fixture/lib': 'workspace:*' } })
+    try {
+      expect(PROBE(root).length).toBe(1)
+      const pending = new Set(['@fixture/lib'])
+      expect(checkDependencyClosure(join(root, 'packages', 'consumer'), WS(root), pending)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('两信号皆无 → 红（E404 定性 + 补 changeset 指引 + pi-rpc 缺口同型标注）', () => {
+    const root = consumerRepo({ dependencies: { '@fixture/lib': 'workspace:*' } })
+    try {
+      const problems = PROBE(root)
+      expect(problems.length).toBe(1)
+      expect(problems[0]).toContain('"@fixture/lib" 既无 CHANGELOG.md')
+      expect(problems[0]).toContain('E404')
+      expect(problems[0]).toContain('为 @fixture/lib 新增 changeset')
+      expect(problems[0]).toContain('pi-subagent-cli')
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('依赖 private 包 → 红（永不发布，指引内联 + 移除声明）', () => {
+    const root = consumerRepo({ dependencies: { '@fixture/lib': 'workspace:*' } })
+    try {
+      writeFileSync(join(root, 'packages', 'lib', 'CHANGELOG.md'), '# lib\n')
+      const wsPrivate = new Map([
+        ['@fixture/lib', { dir: join(root, 'packages', 'lib'), private: true }],
+      ])
+      // 双绿信号俱全（CHANGELOG + pending）仍红——private 优先短路
+      const problems = checkDependencyClosure(
+        join(root, 'packages', 'consumer'),
+        wsPrivate,
+        new Set(['@fixture/lib']),
+      )
+      expect(problems.length).toBe(1)
+      expect(problems[0]).toContain('private 包')
+      expect(problems[0]).toContain('tsup noExternal')
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('外部依赖（不在 workspace 索引）不纳入；peerDependencies 与 dependencies 同面检查', () => {
+    const root = consumerRepo({
+      dependencies: { ajv: '^8.20.0' },
+      peerDependencies: { '@fixture/lib': 'workspace:*' },
+    })
+    try {
+      // 唯一红 = peerDependencies 面的 @fixture/lib；外部依赖 ajv 零网络不可验，跳过
+      const problems = PROBE(root)
+      expect(problems.length).toBe(1)
+      expect(problems[0]).toContain('"@fixture/lib" 既无 CHANGELOG.md')
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
 describe('runGuard（rootDir 注入全链路）', () => {
   it('S1 场景等价复现：files 含 dist.worker/ 但磁盘无 → 幽灵红（含恢复指引）', () => {
     const root = makeRepo({
@@ -459,6 +543,33 @@ describe('runGuard（rootDir 注入全链路）', () => {
       expect(warnings.length).toBe(1)
       expect(warnings[0]).toContain('超 5MB')
       expect(warnings[0]).toContain('D7')
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('检查项 4 全链路：依赖包未发布且无 pending changeset → 红；补 changeset 文件后绿', () => {
+    const root = makeRepo({
+      'packages/consumer/package.json': JSON.stringify({
+        name: '@fixture/consumer',
+        files: ['dist/'],
+        dependencies: { '@fixture/lib': 'workspace:*' },
+      }),
+      'packages/consumer/dist/index.js': 'export {}',
+      'packages/lib/package.json': pkgJsonOf({ name: '@fixture/lib' }),
+    })
+    try {
+      const red = runGuard(root)
+      expect(red.failures.length).toBe(1)
+      expect(red.failures[0]).toContain('✗ @fixture/consumer:')
+      expect(red.failures[0]).toContain('"@fixture/lib" 既无 CHANGELOG.md')
+
+      mkdirSync(join(root, '.changeset'))
+      writeFileSync(
+        join(root, '.changeset/lib-first-release.md'),
+        "---\n'@fixture/lib': minor\n---\n\nFirst release.\n",
+      )
+      const green = runGuard(root)
+      expect(green.failures).toEqual([])
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

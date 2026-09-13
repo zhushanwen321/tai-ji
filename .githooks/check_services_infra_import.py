@@ -2,7 +2,7 @@
 """
 services 层 infra 直接 import 检查（C-comm-03）——落实 runtime 三层设计「services 层 IO 一律经 port」。
 
-规则（规格 SSOT：docs/architecture/runtime-three-layer-design.md 第二部分「跨切面例外」）：
+规则（规格 SSOT：docs/architecture/runtime-layering.md 第二部分「跨切面例外」）：
   扫描 packages/runtime/src/services/ 的 .ts 源码（排除 *.test.ts 与 __tests__/），
   value import（排除 import type）中 from 路径含 /infra/ 且目标模块不在白名单 → 违规。
   import type 豁免（与 check_no_service_cycle.py 同理：接口依赖不造成运行时耦合）。
@@ -27,7 +27,7 @@ SERVICES_ROOT = PROJECT_ROOT / "packages/runtime/src/services"
 
 # 受控例外：文档登记四类 + 现状基线（见 docstring）
 ALLOWED_MODULES = {
-    # 文档登记（runtime-three-layer-design「跨切面例外」）
+    # 文档登记（runtime-layering「跨切面例外」）
     "logger",
     "pi-paths",
     "git-status-parser",

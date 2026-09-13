@@ -1,5 +1,5 @@
 /**
- * runtime checkpoint 持续交接（docs/design/crash-forensics-and-watchdog.md §3.3 D3，
+ * runtime checkpoint 持续交接（docs/architecture/crash-forensics-and-watchdog.md §3.3 D3，
  * 实施单元 u4）。
  *
  * 职责：把本 runtime 进程当前**活跃 session 清单 + 每 session 恢复元数据**持续落到

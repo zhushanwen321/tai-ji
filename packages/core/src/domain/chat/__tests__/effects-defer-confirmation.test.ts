@@ -1,6 +1,6 @@
 /**
  * message_end(user) 三分支处理序 ①——defer 分区 FIFO 文本匹配单测（session-occupancy
- * u4a / docs/design/session-occupancy-send-closure.md D5.3）。
+ * u4a / docs/design/session-occupancy-send-closure.md（已删除，git 可追溯）D5.3）。
  *
  * 覆盖（impl-plan u4a-p2-core 验收条款 ①-⑤）：
  * - ① defer 命中转态出队（confirmDelivery）+ send 条目计数回收 + 帧消费终止（不走②③）

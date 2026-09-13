@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EngineClient } from "../engine/client/engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "../engine/client/remote-engine.ts";
-import { mergeRunSignals } from "../subprocess-agent-runner.ts";
+import { mergeRunSignals } from "../assembly/subprocess-agent-runner.ts";
 
 const FAKE_ENGINE = fileURLToPath(
   new URL("../engine/client/__tests__/__fixtures__/fake-engine.mjs", import.meta.url),
@@ -46,7 +46,7 @@ const FAKE_MATCHED_CAPS = {
   maxTurns: false,
 } as const;
 
-/** run 动作脚本：长 delay 保持两路 run 在途（cancel 不做收敛，考验 3s 收敛窗后的杀链）。 */
+/** run 动作脚本：长 delay 保持两路 run 在途（cancel 不做收敛，考验收敛杀链兜底窗超时后的杀链）。 */
 const HANG_RUN_ACTIONS = JSON.stringify([{ op: "delay", ms: 30_000 }]);
 
 async function waitForTrue(predicate: () => boolean, timeoutMs = 8_000, stepMs = 25): Promise<void> {
@@ -91,7 +91,17 @@ describe("M3 V5c killAll 组杀邻接", () => {
     const manifest: RemoteEngineManifestSnapshot = {
       capabilities: { ...FAKE_MATCHED_CAPS },
     };
-    const engine = new RemoteEngine({ engineId: "fake", client, dataDir, hostKind: "test", manifest });
+    // [S1 P1 校准适配] 兜底窗缺省 30s（pi 停轮收敛实测 15s 的 2× 量级）——本用例
+    // 锁「cancel 无响应 → 杀链 → 邻接 run 有终态」的进程链路而非窗口量级（量级由
+    // remote-engine.test.ts 常量断言锚定），注入 500ms 短窗让杀链在测试时限内触发。
+    const engine = new RemoteEngine({
+      engineId: "fake",
+      client,
+      dataDir,
+      hostKind: "test",
+      manifest,
+      cancelSettleGraceMs: 500,
+    });
 
     try {
       const eventsA: unknown[] = [];
@@ -102,13 +112,12 @@ describe("M3 V5c killAll 组杀邻接", () => {
 
       const runA = engine.run(
         { prompt: "wedged" },
-        { taskId: "run-a", poolKey: "shared", signal: mergedA.signal, onEvent: (e) => eventsA.push(e) },
+        { taskId: "run-a", signal: mergedA.signal, onEvent: (e) => eventsA.push(e) },
       );
       const runB = engine.run(
         { prompt: "healthy" },
         {
           taskId: "run-b",
-          poolKey: "shared",
           signal: new AbortController().signal,
           onEvent: (e) => eventsB.push(e),
         },

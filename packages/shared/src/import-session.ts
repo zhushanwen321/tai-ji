@@ -1,7 +1,7 @@
 /**
  * 导入 pi 会话 RPC 契约（runtime ↔ renderer 共享，接口先行）。
  *
- * 来源设计：docs/design/import-session.md §3.3 D5「RPC 契约（接口先行）」
+ * 来源设计：docs/design/import-session.md（已删除，git 可追溯）§3.3 D5「RPC 契约（接口先行）」
  * 及同章「错误规格表」（错误码权威清单）。
  *
  * ## 契约形态

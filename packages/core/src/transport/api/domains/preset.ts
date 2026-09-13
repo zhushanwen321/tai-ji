@@ -1,7 +1,7 @@
 /**
  * Preset 域 —— pi 启动预设列表 / 默认预设读取 / 设置默认预设。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md
+ * 设计文档：docs/architecture/pi-launch-presets.md
  *
  * 依赖方向：transport + pending（经 request helper 的 command 统一发送 ClientMessage 并关联 Promise）。
  * preset 域无 server-push 广播（protocol.ts 不含 preset.* ServerMessageType），全部是按需 RPC：

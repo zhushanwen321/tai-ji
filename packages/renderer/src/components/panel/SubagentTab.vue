@@ -57,6 +57,15 @@
           :title="engineBadgeTitle"
           data-testid="subagent-engine-badge"
         >{{ engineBadgeText }}</span>
+        <!-- 停因词（永久会话模型 §3.2.8 U8b）：上一轮为什么停，原文 kebab-case 对齐
+             U8a TUI 决策（interrupted / interrupted-by-restart / ...）；有值即展示
+            （idle 与 A-lite 轮终 running-resumable 均携带合法停因）-->
+        <span
+          v-if="subagentMeta?.stopReason"
+          class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-70"
+          :title="t('panel.sideDrawer.subagentStopReason')"
+          data-testid="subagent-stop-reason"
+        >{{ subagentMeta.stopReason }}</span>
         <span v-if="subagentMeta?.meta" class="ml-auto shrink-0 truncate font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ subagentMeta.meta }}
         </span>
@@ -150,7 +159,7 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
 }
 
 /** 标题栏元信息（响应式：records 变化时重算） */
-const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; engineFallback?: { from: string; reason: string } } | null>(() => {
+const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; engineFallback?: { from: string; reason: string }; stopReason?: string } | null>(() => {
   const vid = selectedSubagentId.value
   if (!vid) return null
 
@@ -168,6 +177,9 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
       meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
       engine: record.engine || undefined,
       engineFallback: record.engineFallback,
+      // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
+      // 合法停因；「为什么停」一句话解释，不参与资格判定
+      stopReason: record.stopReason,
     }
   }
 
@@ -258,12 +270,14 @@ watch(
 
 /**
  * 非 pi 终态回填桥（设计 D2，docs/design/subagent-nonpi-visibility-followups.md）：
- * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越终态
+ * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收口
  * （running → 非 running）时重拉一次，对话流自动收敛到完整内容。四守卫：
  * cur/prev 任一 null（agentcall / 未选中）跳过；vid 或 subId 变化 = 切换 subagent
  * 跳过（新 vid 由上方 selectedSubagentId watch 负责）；仅 running → 非 running 跨越
- * 触发（打开时已终态由首拉覆盖）；pi 引擎跳过（D5 零变化——v4 波动
- * done→running→done 由跨越守卫天然拦截，非 pi 守卫再兜一层）。
+ * 触发（打开时已收口由首拉覆盖）；pi 引擎跳过（D5 零变化）。
+ * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收口跨越，本判据
+ * 无需改动即正确触发（idle → running 续轮走 pi 实时流 / 非 pi coarse 轮终再跨越，
+ * 与旧 closed → running 复活行为一致）；legacy 五值同落非 running 半边，兼容不破。
  */
 watch(
   () => {

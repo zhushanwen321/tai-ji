@@ -138,6 +138,22 @@ describe('useComposerSend.onSend', () => {
     expect(spies.compact).not.toHaveBeenCalled()
   })
 
+  it('①b [GUI 快修④] blocked 不再静默：有输入被拦 → toast「占用中」反馈（区分空输入）', async () => {
+    // canSend=false 因 isBusy（hasInput=true）：双发/流式期点击发送的用户可见反馈
+    const { deps, spies } = setup({ canSend: false, hasActiveStaging: false, hasInput: true })
+    await useComposerSend(deps).onSend()
+    expect(spies.toastError).toHaveBeenCalledTimes(1)
+    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendBusy')
+    expect(spies.send).not.toHaveBeenCalled()
+  })
+
+  it('①c [GUI 快修④] 空输入被拦 → toast「请输入内容」反馈（不再无响应）', async () => {
+    const { deps, spies } = setup({ canSend: false, hasActiveStaging: false, hasInput: false, draft: '' })
+    await useComposerSend(deps).onSend()
+    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendEmptyHint')
+    expect(spies.send).not.toHaveBeenCalled()
+  })
+
   it('② staging.hasActiveStaging + send 返回 true → 消费 staging，不走普通 send', async () => {
     const { deps, spies } = setup({ hasActiveStaging: true, stagingSendReturn: true })
     await useComposerSend(deps).onSend()
@@ -203,19 +219,21 @@ describe('useComposerSend.onSend', () => {
     expect(spies.restoreSegments).not.toHaveBeenCalled()
   })
 
-  it('②f steer 路由（本地 busy）+ 空输入 → 拦截（不调 steer 不清输入）', async () => {
+  it('②f steer 路由（本地 busy）+ 空输入 → 拦截（不调 steer 不清输入）+ [GUI 快修④] 空输入 toast 反馈', async () => {
     const { deps, spies } = setup({ canSend: false, sendRoute: 'steer', hasInput: false })
     await useComposerSend(deps).onSend()
     expect(spies.steer).not.toHaveBeenCalled()
     expect(spies.clearInput).not.toHaveBeenCalled()
+    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendEmptyHint')
   })
 
-  it('②g steer 路由（本地 busy）+ isSending=true（双发锁）→ 拦截', async () => {
+  it('②g steer 路由（本地 busy）+ isSending=true（双发锁）→ 拦截 + [GUI 快修④] 占用 toast 反馈', async () => {
     const { deps, spies } = setup({ canSend: false, sendRoute: 'steer' })
     ;(deps.isSending as unknown as { value: boolean }).value = true
     await useComposerSend(deps).onSend()
     expect(spies.steer).not.toHaveBeenCalled()
     expect(spies.clearInput).not.toHaveBeenCalled()
+    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendBusy')
   })
 
   it('②i 投影失配窗口（route=steer + 本地 idle）→ 落 direct 流程（send 兜底，不丢输入）', async () => {

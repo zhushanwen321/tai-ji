@@ -1,5 +1,5 @@
 /**
- * BackgroundTaskService 单测（u-runtime-svc，设计 docs/design/background-task-sidebar-view.md
+ * BackgroundTaskService 单测（u-runtime-svc，设计 docs/architecture/background-task-sidebar-view.md
  * §3.3 D1/D2/D6/D8 + §3.4 P1/P5 探针的实施期门）。
  *
  * 覆盖：

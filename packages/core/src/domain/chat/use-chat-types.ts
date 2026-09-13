@@ -18,7 +18,7 @@ import type { ChatStoreInstance } from './store'
  * QueuedMessage）——结构类型 seam，有意不合并：core 不反向依赖 renderer 实现，仅以本
  * 最小结构面约束实现方；任一侧扩展字段时需同步核对另一侧结构面。
  *
- * session-occupancy-send-closure D2 P1：send.rejected{reason:'compacting'} 兜底入队复用
+ * session-occupancy-send-closure（已删除，git 可追溯）D2 P1：send.rejected{reason:'compacting'} 兜底入队复用
  * compactQueue（enqueue）+ flush 重放来源消歧（peek 命中条目 id 即跳过重入队）。
  * [u4a / D5.3 ①] 扩展投递确认回调（confirmDelivery）与条目提交通道标记（mode）——
  * message_end(user) 三分支处理序 ①（defer 分区 FIFO 文本匹配）的 core 消费面。

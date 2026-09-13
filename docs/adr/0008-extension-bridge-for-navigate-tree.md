@@ -1,5 +1,7 @@
 # 0008-extension-bridge-for-navigate-tree
 
+- 状态：Superseded
+
 > **Superseded（2026-08-31）**：本 ADR 设计的 `/xyz-navigate` 桥接命令已随 runtime 侧桥接对端（navigate-result 消费端，monorepo 时代删除）一并移除，agent-ext 不再注册该命令。正文保留作历史参考。
 
 ## Context

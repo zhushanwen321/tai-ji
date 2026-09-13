@@ -17,7 +17,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
-  CANCEL_SETTLE_GRACE_MS,
   EngineSdkError,
   type AgentCallOpts as SdkAgentCallOpts,
   type AgentOutcome as SdkAgentOutcome,
@@ -28,7 +27,7 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
-import { getSubagentSessionDir } from "../../path-encoding.ts";
+import { getSubagentSessionDir } from "../../assembly/path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
   EngineCapabilities,
@@ -62,6 +61,11 @@ export interface RemoteEngineOptions {
   hostVersion?: string;
   /** L3 显式配置 engines.<id>.config（initialize.engineConfig 透传；EngineClient 消费）。 */
   engineConfig?: Record<string, string>;
+  /**
+   * cancel 收敛杀链兜底窗（缺省 CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）。测试注入
+   * 小窗用（量级断言由常量锚定用例持有）；生产链路不传。
+   */
+  cancelSettleGraceMs?: number;
 }
 
 /** manifest 目录条目命中：id / canonicalRef / 任一 alias 与 ref 全等。 */
@@ -74,6 +78,20 @@ function matchCatalogEntry(
       entry.id === ref || entry.canonicalRef === ref || entry.aliases?.includes(ref) === true,
   );
 }
+
+/**
+ * cancel 后 run 应答收敛的杀链兜底窗（超时触发 EngineClient.killAll 组杀常驻引擎）。
+ *
+ * 量级校准依据（全局超时原则：兜底窗按被保护对象粒度校准——本窗保护的是
+ * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制面单请求）：pi 引擎 cancel
+ * 停轮链 = SIGTERM → trap-flush（在途工具/turn 收尾写盘）→ 进程退出 → run 应答
+ * 返回，实测可达 15s（S1 验收 timeline 取证）；兜底窗取实测值的 2× 量级 = 30s。
+ * 历史 3s（SDK CANCEL_SETTLE_GRACE_MS）按「控制面单请求秒级」量级误校准到本
+ * 任务级窗口上——常驻引擎在 pi 正常收敛途中被组杀，续聊轮 run 陪葬（S1 主路径
+ * 8/8 失败，P1）。SDK 常量仍由 engine-client.cancelRun 作为单请求超时使用（秒级
+ * 量级对 cancel 帧往返正确），两窗语义自此分离。
+ */
+export const CANCEL_SETTLE_KILL_CHAIN_GRACE_MS = 30_000;
 
 /**
  * cli 形态 EnginePort。构造同步、不 throw（缺包/坏包不在构造期报——descriptor
@@ -163,7 +181,8 @@ export class RemoteEngine implements EnginePort {
    * 协议 run 映射。task 收窄为引擎面子集（model/schemaEnv/cwd/engineFallback 改挂
    * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决）；事件经 run 作用域
    * 路由分发（event 通知 / streamDelta / poolResolved / handleReady）；abort → cancel
-   * 帧 + 3s 收敛窗口（超时杀链）。运行中失败不 reject——合成 error outcome + 正常
+   * 帧 + 收敛杀链兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS，超时杀链）。运行中失败
+   * 不 reject——合成 error outcome + 正常
    * handle 返回（EnginePort 契约：record 必须收尾）；run 帧发出前的失败（连接/握手）
    * reject。childSpawned/childStateChanged 镜像归 EngineClient（协议形态无
    * ChildProcess 实例，ctx.onChildSpawned 不调用——W6 起生命周期谓词读镜像）。
@@ -189,8 +208,13 @@ export class RemoteEngine implements EnginePort {
 
     const unregister = this.opts.client.registerRunRoute(runId, buildRunRouteHandlers(ctx));
 
-    // abort 分级：cancel 帧 → 等 CANCEL_SETTLE_GRACE_MS 收敛 → 杀链兜底。
-    const abort = wireAbortSignal(this.opts.client, runId, ctx);
+    // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ 杀链兜底。
+    const abort = wireAbortSignal(
+      this.opts.client,
+      runId,
+      ctx,
+      this.opts.cancelSettleGraceMs ?? CANCEL_SETTLE_KILL_CHAIN_GRACE_MS,
+    );
 
     try {
       // wire 载荷收窄（帧 result unknown → 协议 RunResult 形态）；SDK → core 结构
@@ -205,24 +229,23 @@ export class RemoteEngine implements EnginePort {
         // cancel 后未收敛（杀链已杀）或引擎在 abort 期间报错：合成 abort 终态，不 reject
         // （exitCode null = 被信号杀死，杀链判据）。
         //
-        // [时序窗登记] 本合成 outcome 携 error + exitCode null——若它先于 cancel 域的
-        // CAS 终态化到达消费方，record 会先以 error 载体落 failed 形态而非 cancelled。
-        // 防护依据 = cancel 链 CAS 先行：cancelBackground 在 controller.abort() 后的
-        // **同一同步执行栈**内完成 tryTransition(cancelled) 抢锁终态化
-        // （subagent-service.ts cancelBackground），而本合成 outcome 的返回必须经异步
-        // 链（cancelRun RPC 往返 / 杀链 grace 后 run 请求 reject），时序上 CAS 恒先行，
-        // 窗极窄（仅存于 CAS 抢锁失败 = detached 已 finalize 的交错形态，该形态下
-        // 对方已终态化，本 outcome 无接管面）。不改本逻辑——改动会碰 run 域 cancel
-        // 语义（超修复范围），窗口登记于此供后续接管判据收敛时统一评估。
+        // [时序窗登记（S1 验收实测修订）] 本合成 outcome 携 error + exitCode null，且
+        // 其到达消费方的时间由 pi 停轮收敛链决定：SIGTERM → trap-flush → 退出实测
+        // 可达 15s（杀链 30s 兜底窗内为**常态路径**，非窄窗）。原「CAS 恒先行、窗极窄」
+        // 断言在 cancel → 用户 message revive 场景不成立：cancelBackground 的 settle
+        // 不再终态化 record（idle + interrupted，可随时 revive），15s 窗口内 message
+        // 即把 status 翻回 running——本 outcome 到达时 status 守卫失守，须由
+        // Continuation 侧轮身份校验（activeRunId）丢弃迟到应答（S1 P1 修复②，
+        // conversation-continuation.ts dispatchRoundAsync handlers）。
         return {
-          handle: { data: this.synthesizeHandle(ctx.poolKey) },
+          handle: { data: this.synthesizeHandle() },
           outcome: abortedRunOutcome(this.id, runId, err),
         };
       }
       if (isTransientRunFailure(err)) {
         // 运行中失败（引擎崩溃 / 数据面故障杀链）：合成 error outcome + 正常 handle。
         return {
-          handle: { data: this.synthesizeHandle(ctx.poolKey) },
+          handle: { data: this.synthesizeHandle() },
           outcome: transientRunOutcome(this.id, err),
         };
       }
@@ -248,15 +271,14 @@ export class RemoteEngine implements EnginePort {
     await this.opts.client.dispose();
   }
 
-  /** 运行中失败的合成 handle：handleReady 回填优先，缺省回退请求期 ctx。 */
-  private synthesizeHandle(poolKey: string): EngineHandleData {
+  /** 运行中失败的合成 handle：handleReady 回填优先，缺省空 sessionRef。 */
+  private synthesizeHandle(): EngineHandleData {
     const partial = this.opts.client.getPartialHandle();
     const diag = this.opts.client.getInitializeDiagnostics();
     return {
       v: 1,
       engineId: this.id,
       sessionRef: partial?.sessionRef ?? {},
-      poolKey: partial?.poolKey ?? poolKey,
       engineVersion: diag?.engineVersion,
       adapterVersion: diag?.adapterVersion ?? `remote-engine/${this.id}`,
     };
@@ -284,7 +306,6 @@ interface WireRunParams {
   runId: string;
   task: SdkAgentCallOpts;
   ctx: {
-    poolKey: string;
     cwd: string;
     model: string | undefined;
     schemaEnv: string | undefined;
@@ -339,7 +360,6 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
     runId,
     task: toSdkTaskSubset(task),
     ctx: {
-      poolKey: ctx.poolKey,
       cwd: task.cwd ?? process.cwd(),
       model: task.model,
       schemaEnv: ctx.schemaEnv ?? task.schemaEnv,
@@ -358,12 +378,11 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
   };
 }
 
-/** run 作用域事件路由（event / streamDelta / poolResolved / handleReady）。 */
+/** run 作用域事件路由（event / streamDelta / handleReady）。 */
 function buildRunRouteHandlers(ctx: RunContext): RunRoute {
   return {
     onEvent: (event) => ctx.onEvent?.(event as Parameters<NonNullable<RunContext["onEvent"]>>[0]),
     onStreamDelta: (delta) => ctx.stream?.onDelta(delta),
-    onPoolResolved: (poolKey) => ctx.onPoolResolved?.(poolKey),
     onHandleReady: (partial) => ctx.onHandleReady?.(partial),
   };
 }
@@ -375,11 +394,16 @@ interface AbortWiring {
 }
 
 /**
- * abort 分级接线：cancel 帧 → 等 CANCEL_SETTLE_GRACE_MS 收敛 → 杀链兜底。signal 已
- * aborted 则立即进入收敛窗口；dispose 在 run 终态（finally）标记 settled 并清理
- * timer / listener。
+ * abort 分级接线：cancel 帧 → 等收敛（graceMs，缺省 CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）
+ * → 杀链兜底。signal 已 aborted 则立即进入收敛窗口；dispose 在 run 终态（finally）
+ * 标记 settled 并清理 timer / listener。
  */
-function wireAbortSignal(client: EngineClient, runId: string, ctx: RunContext): AbortWiring {
+function wireAbortSignal(
+  client: EngineClient,
+  runId: string,
+  ctx: RunContext,
+  graceMs: number,
+): AbortWiring {
   let cancelSent = false;
   let settled = false;
   let settleTimer: NodeJS.Timeout | undefined;
@@ -393,7 +417,7 @@ function wireAbortSignal(client: EngineClient, runId: string, ctx: RunContext): 
       if (!settled) {
         void client.killAll(`cancel did not settle within grace for run ${runId}`);
       }
-    }, CANCEL_SETTLE_GRACE_MS);
+    }, graceMs);
   };
   if (ctx.signal !== undefined) {
     if (ctx.signal.aborted) onAbort();

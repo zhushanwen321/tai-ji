@@ -7,6 +7,22 @@
  * 接受 unknown（meta 字段 / progress 快照字段类型宽松），非数字返回空串。
  */
 
+/**
+ * 格式化时刻（epoch ms → 本地时区 HH:MM:SS）。
+ * 禁止切 ISO 字符串（pi 落盘 UTC，裸切差 8 小时）。入参非法返回空串。
+ */
+/** 时钟字段固定两位宽（HH:MM:SS 各段 padStart 目标宽度） */
+const CLOCK_FIELD_WIDTH = 2
+
+export function formatClock(ms: number): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return ''
+  const d = new Date(ms)
+  const h = String(d.getHours()).padStart(CLOCK_FIELD_WIDTH, '0')
+  const m = String(d.getMinutes()).padStart(CLOCK_FIELD_WIDTH, '0')
+  const s = String(d.getSeconds()).padStart(CLOCK_FIELD_WIDTH, '0')
+  return `${h}:${m}:${s}`
+}
+
 /** 时长格式化阈值 */
 export const MS_PER_SECOND = 1000
 export const MS_PER_MINUTE = 60000

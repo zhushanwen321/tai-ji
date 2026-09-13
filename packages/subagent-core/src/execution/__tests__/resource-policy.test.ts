@@ -12,7 +12,7 @@ import {
   _resetLifecycleState,
   armIdleTimer,
   hasIdleTimer,
-} from "../lifecycle-manager.ts";
+} from "../lifecycle/lifecycle-manager.ts";
 
 describe("resource-policy — SP-6 idleTimeoutMs 配置化", () => {
   const ENV_KEY = "XYZ_SUBAGENT_IDLE_TIMEOUT_MS";

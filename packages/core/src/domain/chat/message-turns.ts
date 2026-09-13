@@ -13,7 +13,10 @@
  * ② display 前置过滤让隐藏完成通知完全退出分组输入——subagent/workflow 完成通知
  *   （display:false）触发的续跑 assistant 并入上一 turn（机制 A：后台任务结果混进上一个提问）。
  * v2 规则表（分组消费全量数组；display 过滤挪到渲染项输出层——D3）：
- * 1. user → 开新 turn（锚）
+ * 1. user → 开新 turn（锚）。steer 插话不特判 inline 归组：pi session 文件对 steer 投递的
+ *    user entry 无任何可重放区分标记（与普通 prompt 同路径 appendMessage），live 侧若按
+ *    xyz 已知 mode 归入当前 turn，replay 侧永远推不出同样归属——开新 turn 是两侧可一致
+ *    推导的最大公约数（设计 D1）
  * 2. 隐藏完成通知（display===false 且 customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES，shared SSOT
  *    常量——与 apply-entry 覆写同一常量源，无第二份判定）→ turn 边界：关闭当前 turn，开启
  *    user:null + trigger:'bg-notify' 的新 turn，后续 assistant 归入（G3 续跑可见起点）。
@@ -732,6 +735,18 @@ function expandFallback(msg: Message): OrderedBlock[] {
 /**
  * 把单条 assistant Message 的内部块按 contentBlocks 真实时序解成有序列表。
  * 纯函数：相同输入相同输出，无副作用。
+ *
+ * contentBlocks 是渲染顺序的唯一 SSOT，消费端（Turn.vue 等）禁止在其上叠加
+ * 「末位 assistant」等兄弟消息派生的位置判断——那会随 message_start 翻转导致
+ * block 跳变（2026-08 对话流 block 渲染重构的主症，设计文档已删，git 可追溯）。
+ *
+ * 填充点契约：全部填充点（live feed = effects/registry.ts、streaming =
+ * streaming-state-machine.ts、重放 = apply-entry-convert.ts、历史转换 =
+ * runtime infra/pi/message-converter.ts）必须 append-only + 单 message 最多
+ * 1 个 text 块（`.some(b => b.type === 'text')` 幂等守卫，见 registry:544 /
+ * streaming-state-machine:162 先例）——新增填充点必须带同款守卫，否则 fallback
+ * 分支会对每个 text 块重复 push 完整 content。顺序语义统一按 contentIndex
+ * （产出顺序）insert，禁止退化为「事件到达顺序」与「content array 顺序」双轨。
  */
 export function expandAssistantBlocks(msg: Message): OrderedBlock[] {
   const blocks = msg.contentBlocks

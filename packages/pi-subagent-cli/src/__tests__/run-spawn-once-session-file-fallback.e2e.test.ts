@@ -62,7 +62,7 @@ let argv1Saved: string | undefined;
 let logs: Array<{ level: LogLevel; component: string; message: string }>;
 
 interface Harness {
-  handleReady: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+  handleReady: Array<{ sessionRef: Record<string, string> }>;
 }
 
 function makeHarness(): Harness {

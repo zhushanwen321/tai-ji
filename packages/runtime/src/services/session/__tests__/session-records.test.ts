@@ -55,7 +55,13 @@ function subagentRecordEntry(id: string, status: string, entryId: string, extra:
 }
 
 /** 自描述 workflow-record entry（W17 v1：{v:1, snapshot, updatedAt}）。 */
-function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId: string, reason?: string): Record<string, unknown> {
+function workflowRecordEntry(
+  runId: string,
+  status: 'running' | 'done',
+  entryId: string,
+  reason?: string,
+  trace: Array<Record<string, unknown>> = [],
+): Record<string, unknown> {
   return {
     type: 'custom',
     customType: 'workflow-record',
@@ -69,7 +75,7 @@ function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId:
         v: 'wf-run-v2',
         runId,
         spec: { scriptName: 'test-flow' },
-        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace: [] },
+        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace },
         meta: { startedAt: '2026-08-19T00:00:00Z' },
       },
     },
@@ -185,6 +191,37 @@ describe('refreshRecordEntries：拉取与发布', () => {
       .toEqual({ runId: 'run-1', status: 'running', reason: undefined })
   })
 
+  it('running 态仅 trace 步骤数变化也发布 workflowUpdate（GUI 步骤实时可见，[步骤可见性修复 2026-09-14]）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [workflowRecordEntry('run-1', 'running', 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    // 新增 run：首发一次（status 变化）
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')).toHaveLength(1)
+
+    // 同 runId 仍 running，仅 trace 多一个 agent 步骤（core 启动即 save 的产物）——
+    // status/reason 未变，但步骤数变化也必须发布（否则 GUI 详情整个 run 期间收不到 reload 触发）
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [
+          workflowRecordEntry('run-1', 'running', 'e2', undefined, [
+            { stepIndex: 1, agent: 'reviewer', task: 't', model: 'default', status: 'running', phase: 'R1', startedAt: '2026-08-19T00:00:02Z' },
+          ]),
+        ],
+        leafId: 'e2',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    const stepMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')
+    expect(stepMsgs).toHaveLength(2)
+    expect(stepMsgs[1][0]).toBe('s1')
+  })
+
   it('同值重复 entry 不重复发布（diff 基线）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
@@ -200,6 +237,112 @@ describe('refreshRecordEntries：拉取与发布', () => {
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
     expect(publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('轮终三字段（result/resumable/chatMode）任一翻转都触发 publish（GUI 快修① diff 基线）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e1')], leafId: 'e1' } })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 三字段逐个翻转：去重层若缺比对会把「轮终等待续聊」的显示信号静默吞掉（不 publish）
+    for (const extra of [
+      { result: 'round output' },
+      { resumable: true },
+      { chatMode: false },
+    ] as Array<Record<string, unknown>>) {
+      client.getEntries.mockResolvedValue({
+        data: { entries: [subagentRecordEntry('sa-1', 'running', `e-${Object.keys(extra)[0]}`, extra)], leafId: 'e-x' },
+      })
+      records.invalidateRecordEntries('s1', 'subagent-record')
+      await flushDebounce()
+    }
+    expect(publish).toHaveBeenCalledTimes(4)
+  })
+
+  it('engine 域同值新引用不重复发布（字段级浅比较——引用比较会把每轮重解析误判为变化）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // engine 三字段齐备的 zcode record 形态（sessionRef 键序 = sessionId 在前）
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e1', {
+          engine: 'zcode',
+          engineFallback: { from: 'zcode-missing', reason: 'engine_probe_failed' },
+          engineHandle: {
+            sessionRef: { sessionId: 'z-1', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            journalPath: '/engines/zcode/shared/journal.jsonl',
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e1',
+      },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 增量窗口返回同值新 entry：extractor 重新解析产生全新对象引用（applyRecordEntries
+    // 每轮重扫），且 sessionRef 刻意换键序（dbPath 在前）——字段级浅比较判相等不发布
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e9', {
+          engine: 'zcode',
+          engineFallback: { from: 'zcode-missing', reason: 'engine_probe_failed' },
+          engineHandle: {
+            journalPath: '/engines/zcode/shared/journal.jsonl',
+            sessionRef: { dbPath: '/engines/zcode/session-db/db.sqlite', sessionId: 'z-1' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e9',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('zcode 续聊换锚：engineHandle.sessionRef.sessionId 变化是真值变化必须 publish', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e1', {
+          engine: 'zcode',
+          engineHandle: {
+            sessionRef: { sessionId: 'z-1', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e1',
+      },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 续聊后每轮换新 session（record 锚已换新）——sessionRef.sessionId 真变化触发 publish
+    client.getEntries.mockResolvedValue({
+      data: {
+        entries: [subagentRecordEntry('sa-1', 'running', 'e2', {
+          engine: 'zcode',
+          engineHandle: {
+            sessionRef: { sessionId: 'z-2', dbPath: '/engines/zcode/session-db/db.sqlite' },
+            poolKey: 'shared',
+          },
+        })],
+        leafId: 'e2',
+      },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(2)
   })
 
   it('增量路径：cursor 建立后失效走 getEntries(since)', async () => {

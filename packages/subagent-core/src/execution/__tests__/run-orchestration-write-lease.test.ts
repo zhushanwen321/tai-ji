@@ -31,15 +31,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentOutcome } from "../engine/types.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
-import { _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
+import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import type { AgentResult, ExecutionRecord } from "../types.ts";
+import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
 
 interface ServiceInternals {
   store: RecordStore;

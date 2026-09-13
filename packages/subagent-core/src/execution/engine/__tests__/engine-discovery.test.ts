@@ -8,9 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SubagentEnginesFile } from "@xyz-agent/extension-protocol";
 
-import { getEnginesFilePath, syncEnginesFile } from "../engine-discovery.ts";
+import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 import type { EnginePort } from "../port.ts";
 import { clearEngines, registerEngine } from "../registry.ts";
+
+/** 密闭发现注入（env:{} 斩 L1 env 根，nodeModuleRoots:[] 斩 L2 宿主 node_modules）——
+ * 防宿主环境（打包态 XYZ_AGENT_ENGINE_ROOTS / workspace 链接的引擎包）污染注册表。 */
+const HERMETIC_DISCOVERY: SyncEnginesFileOptions = { env: {}, nodeModuleRoots: [] };
 
 function stubEngine(id: string): EnginePort {
   return {
@@ -54,7 +58,7 @@ describe("syncEnginesFile", () => {
   it("注册表引擎列表落盘（v=1 + 注册序）", () => {
     registerEngine("pi", () => stubEngine("pi"));
     registerEngine("zcode", () => stubEngine("zcode"));
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.v).toBe(1);
     expect(file.engines).toEqual(["pi", "zcode"]);
@@ -63,18 +67,18 @@ describe("syncEnginesFile", () => {
 
   it("幂等：引擎清单未变时第二次零写（mtime 不动）", () => {
     registerEngine("pi", () => stubEngine("pi"));
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const p = getEnginesFilePath(agentDir);
     const statAfterFirst = fs.statSync(p);
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     expect(fs.statSync(p).mtimeMs).toBe(statAfterFirst.mtimeMs);
   });
 
   it("新增引擎注册后内容变化触发重写", () => {
     registerEngine("pi", () => stubEngine("pi"));
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     registerEngine("acp", () => stubEngine("acp"));
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.engines).toEqual(["pi", "acp"]);
   });
@@ -84,13 +88,13 @@ describe("syncEnginesFile", () => {
     const p = getEnginesFilePath(agentDir);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, "{ torn", "utf8");
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     expect(() => JSON.parse(fs.readFileSync(p, "utf8"))).not.toThrow();
   });
 
   it("agentDir 不存在时建目录写入；IO 异常吞掉不抛（fail-safe）", () => {
     registerEngine("pi", () => stubEngine("pi"));
-    expect(() => syncEnginesFile(agentDir)).not.toThrow();
+    expect(() => syncEnginesFile(agentDir, HERMETIC_DISCOVERY)).not.toThrow();
     expect(fs.existsSync(getEnginesFilePath(agentDir))).toBe(true);
   });
 });

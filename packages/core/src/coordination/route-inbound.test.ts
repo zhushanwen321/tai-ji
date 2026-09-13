@@ -286,6 +286,18 @@ describe('configureRouteInbound — global 通道 + L9 + effects（⑤/⑦）', 
     expect(effects.onMessageComplete).toHaveBeenCalledWith('s1', { sessionId: 's1', stopReason: 'stop' })
   })
 
+  it('⑦ message.complete 条目：willRetry 字段原样透传（[retry-sound] 中间失败静音判据）', () => {
+    const ports = makePorts()
+    const effects = makeEffects()
+    const dispatcher = configureRouteInbound(ports, effects)
+    dispatcher(sessionMsg('message.complete', { stopReason: 'error', willRetry: true }))
+    expect(effects.onMessageComplete).toHaveBeenCalledWith('s1', {
+      sessionId: 's1',
+      stopReason: 'error',
+      willRetry: true,
+    })
+  })
+
   it('⑦ session.subagents 条目：dispatchSession 后 onSubagents 回调（非数组跳过）', () => {
     const ports = makePorts()
     const effects = makeEffects()

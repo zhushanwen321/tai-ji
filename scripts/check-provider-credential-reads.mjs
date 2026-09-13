@@ -164,7 +164,7 @@ if (isMainModule) {
     }
     console.error('')
     console.error('恢复动作：按上方 ✗ 明细改走 resolver / 写入载体后重试；白名单膨胀到守卫 A >1 文件')
-    console.error('或守卫 B >8 文件 = 收口失效信号，应回到设计 docs/design/catalog-provider-field-authority.md §3.3 D3/D6 重审。')
+    console.error('或守卫 B >8 文件 = 收口失效信号，应回到 use-provider-edit.ts 防线注释重审（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。')
     process.exit(1)
   }
 

@@ -66,18 +66,24 @@ import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 const logger = getLogger("subagents");
 
 /**
- * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死/退出 → markKilled，
- * running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。投影后必推送
- * ——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无任何 arm/disarm 推送，
- * 不在此推则首轮在途窗口对 D5 不可见；notify 同步 fire-and-forget，异常不外溢。
- * killedAll 空表单发（无 pid）与迟到事件（条目已清）为 no-op。
+ * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
+ * markKilled，running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。
+ * 判据必须是 `state === "exited" || entry.killed` 而非只看 killed：pi 子进程自行
+ * 退出/崩溃时引擎侧上报 `state:"exited", killed:false`（child.killed 只在我方 kill
+ * 过才为 true），且引擎侧镜像对已退出子进程只改 state 不删项——只看 killed 会把
+ * 已死子进程重新 register 为活句柄（countInFlight 虚高 → 幻影在途拖住滚动重启
+ * 判据；hasLiveProcessHandle 恒真 → isResumable 失真）。exited 即死，killed 只是
+ * 其子集。投影后必推送——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无
+ * 任何 arm/disarm 推送，不在此推则首轮在途窗口对 D5 不可见；notify 同步
+ * fire-and-forget，异常不外溢。killedAll 空表单发（无 pid）与迟到事件（条目已清）
+ * 为 no-op。
  */
 function bridgeMirrorEventToCoreMirror(event: MirrorChangeEvent, mirror: SpawnedChildrenMirror): void {
   if (event.recordId === undefined || event.pid === undefined) return;
   const entry = mirror.getEntry(event.pid);
   if (entry === undefined) return;
   const core = coreSpawnedChildrenMirror();
-  if (entry.killed) {
+  if (entry.state === "exited" || entry.killed) {
     core.markKilled(event.recordId);
   } else {
     core.register(event.recordId, { pid: entry.pid, killed: false });
@@ -109,9 +115,8 @@ export type EngineClientState =
 export interface RunRoute {
   onEvent?: (event: unknown) => void | Promise<void>;
   onStreamDelta?: (delta: string) => void | Promise<void>;
-  onPoolResolved?: (poolKey: string) => void | Promise<void>;
   onHandleReady?: (
-    partial: Pick<EngineHandleData, "sessionRef" | "poolKey">,
+    partial: Pick<EngineHandleData, "sessionRef">,
   ) => void | Promise<void>;
 }
 
@@ -168,7 +173,7 @@ export class EngineClient {
   private pidfileSwept = false;
   private intentionalKill = false;
   /** run 期 host/handleReady 的最近回填（崩溃时在途 run 的合成 handle 数据源）。 */
-  private lastPartialHandle: { sessionRef: Record<string, string>; poolKey: string } | undefined;
+  private lastPartialHandle: { sessionRef: Record<string, string> } | undefined;
   private initializeDiagnostics: InitializeResult | undefined;
   private stdoutBuffer = "";
 
@@ -178,8 +183,6 @@ export class EngineClient {
     this.reverseRouterDeps = {
       engineId: opts.engineId,
       uiRequestHandler: opts.uiRequestHandler,
-      permissionHandler: opts.permissionHandler,
-      log: opts.log,
       runRoutes: this.runRoutes,
       mirror: this.mirror,
       setPartialHandle: (partial) => {
@@ -190,7 +193,6 @@ export class EngineClient {
       isDisposed: () => this.disposed,
     };
     this.mirror.onChange((event) => {
-      opts.onMirrorChanged?.(event);
       // [u7a 生产补挂] 反向通道镜像事件同步投影进 core 侧镜像 + 推送在途计数
       //（数据面桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
       bridgeMirrorEventToCoreMirror(event, this.mirror);
@@ -217,7 +219,7 @@ export class EngineClient {
   }
 
   /** 最近一次 host/handleReady 回填（RemoteEngine 崩溃合成 handle 用）。 */
-  getPartialHandle(): { sessionRef: Record<string, string>; poolKey: string } | undefined {
+  getPartialHandle(): { sessionRef: Record<string, string> } | undefined {
     return this.lastPartialHandle;
   }
 

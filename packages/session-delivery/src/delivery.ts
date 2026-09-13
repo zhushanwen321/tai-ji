@@ -23,7 +23,7 @@ import type {
 } from './types.js'
 
 /**
- * U4 warn 出口注入（设计 docs/design/subagent-dispatch-reliability.md §5 U4）：
+ * U4 warn 出口注入（设计 docs/architecture/pi-boundary-reliability.md 附录 D §5 U4）：
  * 装配方接 extensionLogger 使投递失败警告落 `<dataDir>/logs/`（console.warn 走
  * stderr tee 不到日志盘——排查无痕）。通用包不硬依赖 xyz logger，故以可选注入
  * 挂载；正式化并入 types.ts 的 DeliveryConfig 属领地外变更，暂以交叉类型承载。

@@ -5,7 +5,7 @@
 //  + ElectronPlatformAdapter/MockPlatform）。platform-port-spike execute 后本文件被其正式实现替换，
 // bootstrap.ts 的 import 路径与单测 spy 不变（只换实现）。
 //
-// 设计依据：renderer-rebuild-architecture.md §9（PlatformPort）、§11.0.3（bootstrap 时序）。
+// 设计依据：renderer-package-topology.md §9（PlatformPort）、§11.0.3（bootstrap 时序）。
 
 // KVStorage —— 异步键值存储抽象（platform-port-spike IF-kv-storage）。
 // LocalStorageAdapter 桥接 localStorage；InMemoryStorage 用 Map。get 不存在 key 返回 null（非抛错）。

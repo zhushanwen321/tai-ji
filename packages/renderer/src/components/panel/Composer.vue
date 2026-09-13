@@ -51,8 +51,16 @@
         @drop.prevent="onDrop"
       >
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
-             仅 border-b 分隔，Zap/Clock icon + truncate 文本）——6 区第 1 位 -->
-        <QueueBubble :state="queueState" />
+             仅 border-b 分隔，Zap/Clock/Hourglass icon + truncate 文本）——6 区第 1 位。
+             [compact-defer-composer-queue u1] defer 行三 props（deferEntries/deferChip/deferHint）
+             由本组件从 useCompactQueue + sessionPhase 算好传入；@remove-defer 撤销未提交条目 -->
+        <QueueBubble
+          :state="queueState"
+          :defer-entries="deferEntries"
+          :defer-chip="deferChip"
+          :defer-hint="deferHint"
+          @remove-defer="onRemoveDefer"
+        />
         <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
              经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
         <div
@@ -135,7 +143,7 @@
           :disabled="!canSubmit"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'fork-send-btn' : 'handoff-send-btn'"
           :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkSend') : t('panel.composer.handoffSend')"
-          @click="onSend"
+          @click="onSendClick"
         >
           <ArrowUp class="size-[15px]" />
         </Button>
@@ -156,7 +164,7 @@
           class="queue-send-btn relative ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
-          @click="onSend"
+          @click="onSendClick"
         >
           <ArrowUp class="size-[15px]" />
           <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
@@ -176,7 +184,7 @@
           class="ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
-          @click="onSend"
+          @click="onSendClick"
         >
           <ArrowUp class="size-[15px]" />
         </Button>
@@ -188,7 +196,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, createVNode, onBeforeUnmount, onMounted, provide, ref, render, watch, type Ref } from 'vue'
+import { computed, createVNode, nextTick, onBeforeUnmount, onMounted, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -207,9 +215,11 @@ import { useChatStore } from '@/stores/chat'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
+import { useDeferQueueRows } from '@/composables/panel/useDeferQueueRows'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
+import { useCompositionFlag } from '@/composables/panel/composition-flag'
 import type { DraftStore } from '@xyz-agent/dom-core/composer/input'
 import { handleImagePaste } from '@/composables/panel/useImageAttachment'
 import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
@@ -235,6 +245,7 @@ const isActive = computed(() => {
 /** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
 const queueState = computed(() => (props.sessionId ? chatStore.getQueueState(props.sessionId) : undefined))
+
 const draft = ref('')
 const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 // W4：shell 的 input 契约是结构类型 ShellInputInstance（composer-shell.ts）——
@@ -245,6 +256,9 @@ const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 
 const sessionIdRef = computed(() => props.sessionId)
+
+// [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
+const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
 const {
   cmdOpen,
   cmdType,
@@ -261,7 +275,7 @@ const {
   onSkillTrigger,
   onAddSelect,
   onCmdSelect,
-} = useCommandPopoverTrigger(inputRef, sessionIdRef)
+} = useCommandPopoverTrigger(shellInputRef, sessionIdRef)
 
 /** 命令浮层过滤 query 五路映射（四符号体系 + skill：$ file / # session / @ subagent / 行首 / slash / 空格后 / skill） */
 const popoverQuery = computed(() => {
@@ -391,6 +405,9 @@ function onInputChange(text: string): void {
   resetBrowsing()
 }
 
+/** IME 组合态（window capture 监听，[GUI 快修④] 发送按钮 click 路径守卫消费） */
+const { composing } = useCompositionFlag()
+
 /** 键盘分发（composer-keydown.ts，U02 拆出）：staging 优先 ⏎ 提交（fork/handoff，含 streaming 中）；
  *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/defer；
  *  Alt+⏎ 保留 followUp 语义：steer 路由行走 followUp 下一轮，其余经分发器）；⇧⏎ 换行，↑/↓ 翻历史。
@@ -417,6 +434,21 @@ async function onStopClick(): Promise<void> {
   if (props.sessionId && await staging.abortIfInProgress(props.sessionId)) return
   // 否则普通 LLM turn abort
   await onAbort()
+}
+
+/**
+ * 发送按钮点击入口 [GUI 快修④ 三吞点收口]（staging / queue / send 三颗发送位按钮共用）：
+ * 1. IME 组字守卫补 click 路径——composer-keydown 的 e.isComposing 守卫只覆盖回车，
+ *    点击路径此前缺失（组字中点击会提交半截拼音/竞态文本）；组字中静默不发送（与
+ *    keydown 守卫同语义，组字提交后再点/回车即发）。
+ * 2. canSubmit 与 draft 同步一帧竞态——点击瞬间分发器可能读到滞后一帧的 canSend/draft
+ *    被守卫拦下（点了没反应）：canSubmit 为 false 时下一帧重读再走分发器（真·空输入/
+ *    占用由 onSend 内 toast 反馈，不再静默）。
+ */
+async function onSendClick(): Promise<void> {
+  if (composing.value) return
+  if (!canSubmit.value) await nextTick()
+  onSend()
 }
 
 // ── ui ComposerInput deps 注入（ADR-0058：pasteImage/renderIcon/t 三壳层能力）──

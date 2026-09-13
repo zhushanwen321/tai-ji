@@ -8,6 +8,10 @@
  * W1 main-fusion 后：TurnMeta 直接调 useTurnExpansion（共享 store），不再走 expanded prop / update:expanded emit。
  * 测试需 setActivePinia + 传 turnIndex/sessionId，chevron 展开态通过 store 预置 isExpanded(sid, idx) 驱动。
  *
+ * [chat-flow-timestamp U2] TurnMeta 区间（设计 §3 A1/A2）：
+ * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）
+ * - A2 live 态：结束侧不定格 lastTs，以 `→` + panel.message.inProgress 文案结尾
+ *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/TurnMeta.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -44,6 +48,12 @@ function mountMeta(props: {
   elapsed?: string
   /** 已耗时秒数（组件必填 prop，驱动长时生成分级配色） */
   elapsedSecs?: number
+  /** turn 首条 assistant 时刻 */
+  firstTs?: number
+  /** turn 末条 assistant 时刻 */
+  lastTs?: number
+  /** 是否正在流式生成 */
+  isLive?: boolean
 }) {
   const turn = props.turn ?? makeTurn()
   return mount(TurnMeta, {
@@ -55,6 +65,9 @@ function mountMeta(props: {
       toolCount: props.toolCount ?? 1,
       elapsed: props.elapsed ?? '5s',
       elapsedSecs: props.elapsedSecs ?? 0,
+      firstTs: props.firstTs ?? NOW,
+      lastTs: props.lastTs ?? NOW + 5000,
+      isLive: props.isLive ?? false,
       turnIndex: turn.index,
       turnKey: turnStableId(turn),
       sessionId: SID,
@@ -172,7 +185,7 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     const turn = makeTurn()
     const toggleExpand = vi.fn()
     const wrapper = mount(TurnMeta, {
-      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', elapsedSecs: 5, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
+      props: { turn, isWorkingTurn: false, isStreaming: false, thinkCount: 1, toolCount: 1, elapsed: '5s', elapsedSecs: 5, firstTs: NOW, lastTs: NOW + 5000, isLive: false, turnIndex: turn.index, turnKey: turnStableId(turn), sessionId: SID },
       global: { provide: mockChatProvide({ toggleExpand }) },
     })
     await wrapper.find('.turn-meta').trigger('click')
@@ -195,5 +208,39 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     // expanded → 有 rotate-90（store 预置展开态驱动）
     const wrapper2 = mountMeta({ isWorkingTurn: false, expanded: true })
     expect(wrapper2.find('.chev').classes()).toContain('rotate-90')
+  })
+})
+
+/* ── [chat-flow-timestamp U2] TurnMeta 区间（设计 §3 A1/A2）──
+ * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径 HH:MM:SS；
+ * 禁硬编码 '14:00:00' 类时区串——formatClock 禁切 ISO，跨时区跑 CI 才稳定）。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+describe('chat-flow-timestamp U2: TurnMeta 区间（A1/A2）', () => {
+  // 固定 epoch（非 Date.now()）：失败时可复现的确定值
+  const FIRST_TS = 1700000000000
+  const LAST_TS = 1700000005000
+
+  it('A1 完成态（isLive=false）：.tm-range 文本 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）', () => {
+    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: false })
+    const range = wrapper.find('.tm-range')
+    expect(range.exists()).toBe(true)
+    // 归一化空白后整串比对（模板换行在 condense 模式下空白处理不进断言语义）
+    expect(range.text().replace(/\s+/g, ' ').trim()).toBe(`· ${clockOf(FIRST_TS)} → ${clockOf(LAST_TS)}`)
+  })
+
+  it('A2 live 态（isLive=true）：.tm-range 以 → + panel.message.inProgress 文案结尾（结束侧不定格 lastTs）', () => {
+    const wrapper = mountMeta({ firstTs: FIRST_TS, lastTs: LAST_TS, isLive: true })
+    const range = wrapper.find('.tm-range')
+    expect(range.exists()).toBe(true)
+    const normalized = range.text().replace(/\s+/g, ' ').trim()
+    // 测试环境 vue-i18n mock 的 t() 返回 key（vitest.setup.ts），断言口径同 W4TC1 'panel.message.worked'
+    expect(normalized).toBe(`· ${clockOf(FIRST_TS)} → panel.message.inProgress`)
+    // live 态结束侧不定格：lastTs 本地时刻不应出现
+    expect(normalized).not.toContain(clockOf(LAST_TS))
   })
 })

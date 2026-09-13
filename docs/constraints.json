@@ -12,7 +12,7 @@
     },
     "consumers": [
       "scripts/select-constraints.mjs（CR 动态加载：diff → 命中约束清单 → .review/constraints.md）",
-      "scripts/render-constraints.mjs（生成 docs/constraints.md 人读视图 + --check 一致性校验）"
+      "scripts/validate-constraints.mjs（结构校验：id/scope/authority/enforcement，pre-commit 在本文件变更时触发）"
     ]
   },
   "constraints": [
@@ -64,7 +64,7 @@
         "global"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -214,7 +214,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -233,7 +233,7 @@
         "extensions/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -254,7 +254,7 @@
       ],
       "authority": [
         "adr/0062-single-data-owner-absolute-write-rule.md",
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -298,7 +298,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance",
@@ -319,7 +319,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -340,7 +340,7 @@
       ],
       "authority": [
         "../AGENTS.md",
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance",
@@ -361,7 +361,7 @@
         "packages/core/src/**"
       ],
       "authority": [
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -380,7 +380,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md"
+        "architecture/data-source-registry.md"
       ],
       "dimensions": [
         "data-governance"
@@ -400,7 +400,6 @@
         "extensions/**"
       ],
       "authority": [
-        "architecture/data-source-governance.md",
         "architecture/data-source-registry.md"
       ],
       "dimensions": [
@@ -499,7 +498,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "architecture/default-model-unified-exit.md"
+        "../packages/runtime/src/transport/settings-message-handler.ts"
       ],
       "dimensions": [
         "business-logic",
@@ -514,13 +513,13 @@
     },
     {
       "id": "C-data-14",
-      "summary": "hydrate 记录尾窗锚（piEntryId），load-more 按锚切分只前插；id 去重降级为兜底断言",
+      "summary": "load-more 游标翻页：游标 = 分区最旧消息文件侧身份（piEntryId ?? id）经 RPC cursor 参数返回锚前最近窗口只前插；cursor 未命中返回空页（翻页到头）；id 去重降级为兜底断言",
       "scope": [
         "packages/renderer/src/**",
         "packages/core/src/**"
       ],
       "authority": [
-        "architecture/conversation-turn-attribution.md"
+        "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -540,7 +539,7 @@
       ],
       "authority": [
         "adr/0001-manual-di-over-ioc-container.md",
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -564,7 +563,7 @@
         "packages/runtime/src/transport/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -588,7 +587,7 @@
         "packages/runtime/src/services/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -736,7 +735,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "architecture/context.md"
+        "CONTEXT.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -862,7 +861,7 @@
       ],
       "authority": [
         "adr/0058-dom-core-package.md",
-        "architecture/renderer-rebuild-architecture.md"
+        "architecture/renderer-package-topology.md"
       ],
       "dimensions": [
         "monorepo-impact",
@@ -886,7 +885,7 @@
         "packages/shared/src/**"
       ],
       "authority": [
-        "architecture/runtime-three-layer-design.md"
+        "architecture/runtime-layering.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -946,7 +945,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "todo/context-consistency-design.md",
+        "../taste-lint/base.mjs",
         "adr/0049-session-isolation-map-partition.md"
       ],
       "dimensions": [
@@ -971,7 +970,7 @@
         "packages/core/src/domain/session/panel-view.ts"
       ],
       "authority": [
-        "design/panel-view-derivation-and-flow-lifecycle.md"
+        "../packages/core/src/domain/session/panel-view.ts"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1363,7 +1362,7 @@
         "global"
       ],
       "authority": [
-        "../TEST-STRATEGY.md",
+        "TEST-STRATEGY.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1384,7 +1383,7 @@
         "packages/core/**"
       ],
       "authority": [
-        "../TEST-STRATEGY.md"
+        "TEST-STRATEGY.md"
       ],
       "dimensions": [
         "test-coverage"
@@ -1497,7 +1496,7 @@
         "packages/runtime/src/services/plugin-service/plugin-host-process.ts"
       ],
       "authority": [
-        "design/env-propagation-boundary.md",
+        "architecture/env-propagation-boundary.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1512,9 +1511,9 @@
     },
     {
       "id": "C-proc-10",
-      "summary": "文档-代码符号零漂移：设计文档（docs/design/）反引号内引用的代码符号（蛇形常量 / getXxx() 函数调用形态）必须存在于映射源码模块的符号表中（导出名或模块级声明；env 名 XYZ_*/PI_* 与 errno 字符串族豁免）；符号删除/改名必须同批同步文档。映射登记 SSOT = scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP，新增设计文档时在该表登记映射",
+      "summary": "文档-代码符号零漂移：设计文档（docs/architecture/）反引号内引用的代码符号（蛇形常量 / getXxx() 函数调用形态）必须存在于映射源码模块的符号表中（导出名或模块级声明；env 名 XYZ_*/PI_* 与 errno 字符串族豁免）；符号删除/改名必须同批同步文档。映射登记 SSOT = scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP，新增设计文档时在该表登记映射",
       "scope": [
-        "docs/design/**",
+        "docs/architecture/**",
         "apps/electron/main/update/**",
         "scripts/check-doc-symbol-drift.mjs"
       ],
@@ -1539,7 +1538,7 @@
         "packages/runtime/**"
       ],
       "authority": [
-        "architecture/subagent-engine-abstraction.md#331-分层总图"
+        "architecture/subagent-engine-protocolization.md#31-目标架构"
       ],
       "dimensions": [
         "arch-boundary"
@@ -1558,7 +1557,7 @@
         "extensions/universal/subagent-workflow/src/execution/engine/**"
       ],
       "authority": [
-        "architecture/subagent-engine-abstraction.md#d4-降级能力归属公共层native-路径与仿真路径硬分流"
+        "architecture/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
       ],
       "dimensions": [
         "business-logic",
@@ -1573,14 +1572,14 @@
     },
     {
       "id": "C-ext-15",
-      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<poolKey>/）与 journal 路径必须经 engine/paths.ts 同源推导，extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 投影（存量 record 零迁移）",
+      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<分组 key，池抽象降级后恒 'shared'>/）与 journal 路径必须经 engine/paths.ts 同源推导（SDK SHARED_POOL_KEY 单源承载），extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 投影（存量 record 零迁移）",
       "scope": [
         "extensions/universal/subagent-workflow/src/execution/engine/**",
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "architecture/subagent-engine-abstraction.md#d5-环境隔离与凭据注入走-per-engine-preparer-钩子隔离目录池化保留随-record-生命周期回收",
-        "architecture/subagent-engine-abstraction.md#d6-session-读取独立-sessionview-接口--三级降级链第级归属宿主-event-journal引擎无关"
+        "../packages/subagent-engine-sdk/src/paths.ts",
+        "architecture/subagent-engine-protocolization.md#351-d7-引擎-sdk-包新增解决三处互斥"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1601,7 +1600,7 @@
         "extensions/universal/subagent-workflow/src/execution/__tests__/chat-engine-routing.test.ts"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "compatibility",
@@ -1623,7 +1622,7 @@
         "packages/subagent-core/src/execution/engine/port.ts"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "lifecycle",
@@ -1646,7 +1645,7 @@
         "packages/renderer/src/components/panel/SubagentTab.vue"
       ],
       "authority": [
-        "architecture/subagent-engine-gui-visibility.md#d1-终态架构--职责分层--协议闭合"
+        "../packages/subagent-core/src/execution/engine/routing.ts"
       ],
       "dimensions": [
         "ui-consistency",
@@ -1670,7 +1669,7 @@
         "extensions/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d2能力注册表--runtime-单点服务面离线同源--在线对账选定",
+        "architecture/pi-boundary-reliability.md#d2能力注册表--runtime-单点服务面离线同源--在线对账选定",
         "adr/0064-pi-semantic-absorption-layer.md"
       ],
       "dimensions": [
@@ -1697,7 +1696,7 @@
         "packages/renderer/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d3生效回执接通并上升为协议约束选定",
+        "architecture/pi-boundary-reliability.md#d3生效回执接通并上升为协议约束选定",
         "adr/0064-pi-semantic-absorption-layer.md"
       ],
       "dimensions": [
@@ -1718,7 +1717,7 @@
         "apps/**",
         "scripts/**",
         "AGENTS.md",
-        "docs/troubleshooting.md"
+        "docs/TROUBLESHOOTING.md"
       ],
       "authority": [
         "../extensions/universal/session-reader/docs/2026-09-10-session-root-discovery-and-env-transparency.md#5-终态",
@@ -1742,7 +1741,7 @@
         "packages/session-delivery/**"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d5确认式送达通用化at-most-once-内存通道禁止用于结果语义选定",
+        "architecture/pi-boundary-reliability.md#d5确认式送达通用化at-most-once-内存通道禁止用于结果语义选定",
         "extensions/extension-conventions.md"
       ],
       "dimensions": [
@@ -1757,14 +1756,14 @@
     },
     {
       "id": "C-ext-20",
-      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 恒 'shared'）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
+      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 协议面已随池抽象降级整体退役，journal 固定分组 'shared'，磁盘布局不变）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
       "scope": [
         "packages/zcode-subagent-cli/**",
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "design/zcode-session-db-isolation.md",
-        "design/zcode-engine-appserver-resident.md",
+        "architecture/zcode-session-db-isolation.md",
+        "architecture/zcode-engine-appserver-resident.md",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1786,7 +1785,7 @@
         "packages/runtime/package.json"
       ],
       "authority": [
-        "design/pi-boundary-reliability.md#d6漂移守卫体系pi-语义依赖的机器登记--探针--版本门禁选定"
+        "architecture/pi-boundary-reliability.md#d6漂移守卫体系pi-语义依赖的机器登记--探针--版本门禁选定"
       ],
       "dimensions": [
         "business-logic"
@@ -1831,7 +1830,7 @@
         "extensions/**"
       ],
       "authority": [
-        "design/pi-evolution-consistency-and-project-switcher.md#32-方案对比",
+        "architecture/pi-evolution-consistency-and-project-switcher.md#32-方案对比",
         "../scripts/check-pi-sync.mjs"
       ],
       "dimensions": [
@@ -1851,7 +1850,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/runtime/src/infra/pi/session-binding-sidecar-io.ts"
       ],
       "dimensions": [
         "data-governance"
@@ -1876,7 +1875,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/core/src/domain/composer/model-thinking.ts"
       ],
       "dimensions": [
         "business-logic",
@@ -1896,7 +1895,7 @@
         "packages/core/src/**"
       ],
       "authority": [
-        "design/composer-model-session-isolation.md#33-关键决策与权衡"
+        "../packages/core/src/domain/composer/thinking-level-sync.ts"
       ],
       "dimensions": [
         "business-logic"
@@ -1915,7 +1914,7 @@
         "packages/renderer/src/**"
       ],
       "authority": [
-        "design/chat-pin-bottom-fix.md#44-防复发护栏用户显式要求如何防止再次发生同样的问题"
+        "../packages/renderer/src/composables/panel/useVirtuaFollow.ts"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1942,7 +1941,7 @@
         "packages/shared/src/subagent-frame.ts"
       ],
       "authority": [
-        "design/timeout-streaming-ui-idle.md",
+        "../packages/core/src/domain/chat/timers.ts",
         "../AGENTS.md"
       ],
       "dimensions": [
@@ -1967,7 +1966,7 @@
         "resources/plugins/statusline/package.json"
       ],
       "authority": [
-        "design/npm-publish-surface-guard.md#33-关键决策与权衡",
+        "architecture/npm-publish-surface-guard.md#33-关键决策与权衡",
         "../scripts/check-publish-surface.mjs"
       ],
       "dimensions": [
@@ -1990,7 +1989,7 @@
         "packages/renderer/src/composables/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d1resolvelaunchconfig-单一解析模块c1-核心选定"
+        "architecture/state-truth-sync-architecture.md#d1resolvelaunchconfig-单一解析模块c1-核心选定"
       ],
       "dimensions": [
         "data-governance",
@@ -2019,8 +2018,8 @@
         ".githooks/check_env_whitelist_sync.py"
       ],
       "authority": [
-        "../docs/design/subagent-engine-protocolization.impl-plan.md#212-w12-环境与文档规格",
-        "../docs/design/env-propagation-boundary.md"
+        "../packages/subagent-engine-sdk/src/env.ts",
+        "../docs/architecture/env-propagation-boundary.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2046,7 +2045,7 @@
         "packages/renderer/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d8改状态回执裁决标准--协议层机器强制c4选定",
+        "architecture/state-truth-sync-architecture.md#d8改状态回执裁决标准--协议层机器强制c4选定",
         "adr/0065-mutation-reply-effective-value.md"
       ],
       "dimensions": [
@@ -2067,11 +2066,11 @@
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
         "packages/subagent-core/src/execution/engine/client/mirror.ts",
-        "packages/subagent-core/src/execution/dialog-queue.ts"
+        "packages/subagent-core/src/execution/ui/dialog-queue.ts"
       ],
       "authority": [
-        "../docs/design/subagent-engine-protocolization.md",
-        "../docs/design/chat-domain-v1x-liveness-governance.md"
+        "../docs/architecture/subagent-engine-protocolization.md",
+        "../docs/architecture/subagent-chat-run-unification.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2094,7 +2093,7 @@
         "packages/renderer/src/composables/**"
       ],
       "authority": [
-        "design/state-truth-sync-architecture.md#d9对账机制三分处置c3选定只保留核心对账的执行框架"
+        "architecture/state-truth-sync-architecture.md#d9对账机制三分处置c3选定只保留核心对账的执行框架"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2109,7 +2108,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发对 unsupported 引擎同步拒照常、mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发对 unsupported 引擎同步拒照常、mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 归档点 markArchived 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2120,7 +2119,7 @@
         "packages/runtime/src/infra/pi/rpc-client.ts"
       ],
       "authority": [
-        "../docs/design/subagent-chat-run-unification.md#33-关键决策"
+        "../docs/architecture/subagent-chat-run-unification.md#33-关键决策"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2140,7 +2139,6 @@
         "packages/runtime/src/services/session/**"
       ],
       "authority": [
-        "design/session-occupancy-send-closure.md",
         "../packages/runtime/src/services/session/event-interpreter.ts"
       ],
       "dimensions": [
@@ -2160,7 +2158,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/catalog-provider-field-authority.md"
+        "../scripts/check-provider-credential-reads.mjs"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2180,7 +2178,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "design/catalog-provider-field-authority.md"
+        "../scripts/check-provider-credential-reads.mjs"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2217,13 +2215,14 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 终态权威 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry）的写面全部归 RecordStore 意图原语（markFinalized/markCancelled/markBatchFinalized/markRoundStarted/markRoundIdle/adoptEngineDeath/markResurrected/markIdleArchived/register/appendEvent），store 外零直写。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。终态原语持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
+      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收口：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 腿 / zcode 锚键腿）/ markReopened（锚失效同 id 带历史重开）/ markArchived（收起归档）/ markIdleEvicted（30 天内存回收，原 markIdleArchived）/ markReactivated / markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
       ],
       "authority": [
-        "design/subagent-record-persistence-consolidation.md#33-关键决策"
+        "architecture/subagent-record-persistence-consolidation.md#33-关键决策",
+        "architecture/subagent-permanent-session-model.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2239,11 +2238,11 @@
       "id": "C-ext-21",
       "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的 <agentDir>/subagents/<enc(cwd)>/sessions 布局互为跨包隐式契约——改任一端路径形态另一端必同步（改 path-encoding 布局须同步 llm.ts 嗅探；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该守卫",
       "scope": [
-        "packages/subagent-core/src/execution/path-encoding.ts",
+        "packages/subagent-core/src/execution/assembly/path-encoding.ts",
         "extensions/universal/rename-session/**"
       ],
       "authority": [
-        "design/rename-session-three-modes.md#d7issubagentsession-跨包耦合登记-c-ext-21吸收-ext-simplify-15-d3选定登记--双端注释"
+        "../extensions/universal/rename-session/src/llm.ts"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2265,7 +2264,7 @@
         "packages/runtime/src/services/message-bus/__tests__/outbound-frame-guard.test.ts"
       ],
       "authority": [
-        "design/crash-resilience.md#33-关键决策与权衡"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "arch-boundary",
@@ -2285,7 +2284,7 @@
         "packages/runtime/src/services/session/replicated-states.config.ts"
       ],
       "authority": [
-        "design/idle-pi-reclamation.md#33-关键决策与权衡"
+        "../packages/runtime/src/services/session/idle-pi-reaper.ts"
       ],
       "dimensions": [
         "business-logic"
@@ -2308,7 +2307,7 @@
         "packages/renderer/src/composables/useCrashRecoveryNotice.ts"
       ],
       "authority": [
-        "design/crash-resilience.md#33-关键决策与权衡"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "lifecycle",
@@ -2332,7 +2331,7 @@
         "apps/electron/main/main.ts"
       ],
       "authority": [
-        "design/crash-forensics-and-watchdog.md"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "lifecycle",
@@ -2347,7 +2346,7 @@
     },
     {
       "id": "C-proc-18",
-      "summary": "滚动重启计划内路径语义（crash-forensics D5）：临界触发经推迟判定（pi 侧 extension 聚合上报绝对计数镜像 ∪ zcode EnginePort.inFlightSnapshot? 可选注入槽【缺省 = 无在途面】∪ relay-registry 在途）→ 推迟有界：上限 30min（XYZ_ROLLING_RESTART_DEFER_LIMIT_MS 可注入短上限验证），到点强制记 rolling-restart-forced reason=defer-limit（与硬阈值形态区分，absent-report 形态不计入 stale-high 观测占比）→ 双维硬升级（heap ≥92% 或系统 memPressure 越限，reason=hard-threshold）；执行 = 经既有完整 shutdown 序退出（SHUTDOWN_STEP_SEQUENCE 13 步打点 SSOT：首步 cancel-rolling-restart、engine-pool-dispose 挂 server.stop 后 closeLogger 前、close-crash-journal 在 closeLogger 前——禁新增任何退出 shortcut）；专用退出码 86（RUNTIME_PLANNED_EXIT_CODE SSOT 在 shared）→ supervisor 走 recordPlanned 分支：立即重启、零退避、零崩溃计数（planned 边不进 counting 状态机）；推迟/预告/红牌状态暴露只读查询 RPC，renderer 重连/刷新后主动拉取恢复横幅（broadcast 早于订阅即丢的时序竞争教训——T-30s 广播只作加速显示）",
+      "summary": "滚动重启计划内路径语义（crash-forensics D5）：临界触发经推迟判定（pi 侧 extension 聚合上报绝对计数镜像 ∪ relay-registry 在途；zcode EnginePort.inFlightSnapshot? 注入槽已删 2026-09-13 oe-audit——runtime 进程内无引擎实例零接线，引擎子任务由 pi 侧上报覆盖）→ 推迟有界：上限 30min（XYZ_ROLLING_RESTART_DEFER_LIMIT_MS 可注入短上限验证），到点强制记 rolling-restart-forced reason=defer-limit（与硬阈值形态区分，absent-report 形态不计入 stale-high 观测占比）→ 双维硬升级（heap ≥92% 或系统 memPressure 越限，reason=hard-threshold）；执行 = 经既有完整 shutdown 序退出（SHUTDOWN_STEP_SEQUENCE 13 步打点 SSOT：首步 cancel-rolling-restart、engine-pool-dispose 挂 server.stop 后 closeLogger 前、close-crash-journal 在 closeLogger 前——禁新增任何退出 shortcut）；专用退出码 86（RUNTIME_PLANNED_EXIT_CODE SSOT 在 shared）→ supervisor 走 recordPlanned 分支：立即重启、零退避、零崩溃计数（planned 边不进 counting 状态机）；推迟/预告/红牌状态暴露只读查询 RPC，renderer 重连/刷新后主动拉取恢复横幅（broadcast 早于订阅即丢的时序竞争教训——T-30s 广播只作加速显示）",
       "scope": [
         "packages/runtime/src/services/session/rolling-restart.ts",
         "packages/runtime/src/index.ts",
@@ -2356,7 +2355,7 @@
         "apps/electron/main/supervisor/restart-policy.ts"
       ],
       "authority": [
-        "design/crash-forensics-and-watchdog.md"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "lifecycle",
@@ -2378,7 +2377,7 @@
         "packages/renderer/src/composables/useMemoryPressure.ts"
       ],
       "authority": [
-        "design/crash-forensics-and-watchdog.md"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "business-logic"
@@ -2399,7 +2398,7 @@
         "packages/runtime/src/index.ts"
       ],
       "authority": [
-        "design/crash-forensics-and-watchdog.md"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "process-safety"
@@ -2419,7 +2418,7 @@
         "apps/electron/main/logs/renderer-log-handler.ts"
       ],
       "authority": [
-        "design/crash-forensics-and-watchdog.md"
+        "architecture/crash-forensics-and-watchdog.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2428,6 +2427,369 @@
         {
           "type": "review",
           "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-pi-17",
+      "summary": "extension 异步回调 stale ctx 守卫：跨 session 生命周期存活的异步回调（compact 的 onComplete/onError、timer tick、延迟回调）禁止裸调捕获的 pi/ctx——必须经 ext-guards guardStaleCtx 包裹（前置代际检查 isCtxStale 主判 + pi stale 错误文案 'stale after session replacement' 兜底分诊；stale 静默降级走 onStale 观测，非 stale 原样上抛不吞真实 bug）；接入包须在 ext-guards/docs/stale-ctx-audit.md 登记「stale 静默语义」判定（stale 静默意味着什么 + 用户出路）。文案是 pi 语义断言（PS-30），随 pi 版本门禁自动重验，文案变更时守卫退化为全部上抛（有痕，门禁报红）；【2026-09-12 恢复登记】原 C-pi-15 被 dev-0.9.17 合并对侧重写顶出（该号现被 mutation reply 约束占用），改登 C-pi-16；【2026-09-13 合并改号】原编号 C-pi-16 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
+      "scope": [
+        "extensions/shared/ext-guards/**",
+        "extensions/universal/smart-context/**",
+        "extensions/universal/plan/**",
+        "extensions/universal/scheduler/**",
+        "extensions/universal/structured-output/**",
+        "extensions/universal/subagent-workflow/**",
+        "docs/pi-semantics.json",
+        "docs/architecture/crash-forensics-and-watchdog.md"
+      ],
+      "authority": [
+        "architecture/crash-forensics-and-watchdog.md",
+        "pi-semantics.json"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "error-handling"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-pi-semantics.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-data-21",
+      "summary": "崩溃台账双文件单写者 + 写入点矩阵（crash-forensics D1）：main.jsonl（main 进程写：main 自身 + renderer 事件）与 runtime.jsonl（runtime 写：runtime + pi + plugin-worker 事件）各写各的——崩溃瞬间两进程死亡顺序不可控，双文件消除跨进程写竞争，禁单一统一台账由一方代写；schema SSOT = packages/shared/src/crash-journal-schema.ts（event 闭合枚举 + CRASH_JOURNAL_KNOWN_REASONS 分层覆盖锁，新 reason 值须登记元组或声明开放形态）；写入点矩阵钉死抑制语义挂点——deleted 挂 removeSessionEntry 汇聚点、pi 计划内终止挂杀链发起处（destroySession 先删 Map 使 exit handler 反查无条目静默，挂 exit handler 事件永不产生）、runtime 自身 shutdown 行由 main 侧写（before-quit 上下文带 runtime.isRunning 在场性 guard / planned 按退出码 86 / 判别式「非 before-quit 且 ≠86 且 stopping=false」才写 crash / liveness 强杀在 forceRestartForLiveness 杀链发起处双写 unresponsive），runtime shutdown 序内禁写 shutdown 行防计划内归因污染；main 自身崩溃走 run/main-running.marker 残留下次启动补记（reason=unclean-exit，先记后删）；条件类信号（frame-truncated / registry-miss / watermark-daily）一并事件化——台账是触发条件评估器的唯一输入，禁让评估器解析日志文本行；【2026-09-13 合并改号】原编号 C-data-20 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
+      "scope": [
+        "packages/runtime/src/infra/crash-journal.ts",
+        "packages/shared/src/crash-journal-schema.ts",
+        "apps/electron/main/logs/crash-journal.ts",
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/services/reap-orphan-pi.ts",
+        "packages/runtime/src/infra/pi/event-adapter.ts",
+        "apps/electron/main/supervisor/**",
+        "apps/electron/main/window/**",
+        "apps/electron/main/logs/renderer-log-handler.ts"
+      ],
+      "authority": [
+        "architecture/crash-forensics-and-watchdog.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-data-22",
+      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写入面（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 必须与 pi transcript 同窗 30 天（ZCODE_SESSION_TTL_MS），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
+      "scope": [
+        "packages/zcode-subagent-cli/src/session-db-maintenance.ts",
+        "packages/zcode-subagent-cli/src/zcode-engine.ts",
+        "packages/zcode-subagent-cli/src/constants.ts"
+      ],
+      "authority": [
+        "architecture/subagent-permanent-session-model.md#326-zcode-transcript-锚ref-锚"
+      ],
+      "dimensions": [
+        "data-governance",
+        "error-handling"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-build-09",
+      "summary": "pi tee 单文件有界（crash-forensics D7）：createPiStreamWriter size 轮转与主日志共用 MAX_FILE_BYTES（XYZ_LOG_MAX_BYTES env 单旋钮，默认 50MB）——达阈值 end 旧流等待 flush → zlib gzip 归档 <file>.1.gz（单代，tmp→rename 原子覆盖，gzip 兜底超时防挂死）→ 新流截断续写原路径，轮转窗口行入队回放防丢、openPiStreams 注册表引用随轮转更新（退出 flush 走新流）；段文件必须保持 pi- 前缀（架构 D6③ 不变量：否则旋段逃出 cleanExpiredLogs 7 天清理白名单，变成新的无清理写入面）；[推翻登记] logger.ts 旧注释裁决「不轮转：单 session 事件量可控」被 198MB 实测证伪 [HISTORICAL]；字节计数起点 = writer 创建时 0（跨重启打开时预滚未实现，reattach 重开同 date 大文件最坏约 2× 阈值才轮转——登记接受，跨重启 size 封顶属后续独立工作）；【2026-09-13 合并改号】原编号 C-build-08 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保号），本条改号原样保留",
+      "scope": [
+        "packages/runtime/src/infra/logger.ts"
+      ],
+      "authority": [
+        "architecture/crash-forensics-and-watchdog.md"
+      ],
+      "dimensions": [
+        "electron-build"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-electron-build"
+        }
+      ]
+    },
+    {
+      "id": "C-state-13",
+      "summary": "用户内容渲染净化契约：聊天 markdown 容器经 v-html 渲染必须保留 DOMPurify 净化；DetailPane 等用户可控文件内容/diff 禁 v-html（用文本插值/pre），高亮复用 shiki 单例禁引第二套高亮库",
+      "scope": [
+        "packages/ui/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "STANDARDS.md",
+        "../packages/renderer/src/components/panel/DetailPane.vue"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "type-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-state-14",
+      "summary": "renderer 启动编排中异步数据加载必须在消费该数据的状态设置之前 await 完成（如 await load 先于 presetCwd），禁依赖数据已就绪的隐式假设",
+      "scope": [
+        "packages/renderer/**",
+        "packages/core/**"
+      ],
+      "authority": [
+        "../packages/renderer/src/composables/features/sidebar/useSidebar.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-state-15",
+      "summary": "前端渲染性能纪律：流式阶段走 renderLightweight（完整阶段才挂 Shiki）；Mermaid/shiki 语言包按需加载；streaming 计时器仅 streaming 态存在且全局至多 1 个，complete 后清除",
+      "scope": [
+        "packages/ui/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "STANDARDS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-state-16",
+      "summary": "WS 查询消费三守卫：编排层直调 domain 方法不经会吞错的中间层；WS pending 查询必须包超时 race（防断连后 pending 永不 settle 导致 UI 挂死）；快速连续查询维护自增 loadSeq，await 后丢弃过期响应",
+      "scope": [
+        "packages/core/**"
+      ],
+      "authority": [
+        "../packages/core/src/domain/new-task-search/search.ts",
+        "../packages/core/src/domain/new-task-search/search-jump.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-16",
+      "summary": "文件服务安全与超时契约：接收 path 的文件树/git 入口必须 isUnderOrEqual(cwd, resolvedPath) 越界守门；git CLI 必须经 IGitExecutor port 数组形式执行禁字符串拼接；findFiles 限定 cwd 并忽略 .git/node_modules；listDir/stat/readFile 共用 10s 超时",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/file-service.ts",
+        "../packages/runtime/src/infra/git-executor.ts",
+        "../packages/runtime/src/services/git-service.ts"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-17",
+      "summary": "plugin 执行隔离与并发契约：trusted 插件共享 Worker（默认 ≤10/Worker）、sandbox 插件独占 fork 子进程；hook 按 priority 串行且单 handler 5s 超时放行；Worker crash 走 5s 冷却 + 3 次重建上限防 crash loop；每 pluginId 独立锁互不阻塞",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "plugins/built-in-plugin-guide.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-18",
+      "summary": "WS 重连与命令超时善后：重连退避有上限禁死循环；重连成功后对所有 isGenerating session 调 markSessionError 收尾（不续传 streaming）；命令超时 reject + 删 pending + 迟到响应静默丢弃",
+      "scope": [
+        "packages/core/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/core/src/transport/ws-client.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-19",
+      "summary": "Tool Approval 交互契约：危险操作三选一（Allow/Deny/Always Allow）；UI 弹窗 60s 超时自动关闭且用户可取消",
+      "scope": [
+        "packages/ui/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "CONTEXT.md"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-data-23",
+      "summary": "用户数据持久化健壮性：读取遇 ENOENT/非法 JSON 必须 try/catch 降级空数据不得阻塞启动；外部输入参数 service 层主守卫 + store 层防御性兜底双层拦截",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/workspace/recent-workspaces-store.ts",
+        "../packages/runtime/src/services/workspace/workspace-service.ts"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-data-24",
+      "summary": "cwd 失效降级契约：create/restore 收到可能已删除的 cwd 必须 existsSync 校验，失效降级 homedir；前端比对请求 cwd 与 reply session.cwd 不一致时 toast 通知；禁用失效 cwd 继续 create",
+      "scope": [
+        "packages/runtime/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/session/session-lifecycle.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-pi-18",
+      "summary": "thinking 档位传递契约：前端只发 thinkingLevelMap 映射后的 pi value（resolveThinkingValue），禁直接发 UI 档位 key（pi 枚举是 off/minimal/low/medium/high/xhigh，不认识 max，直发会被 clamp 错档）；展示档位与传递 value 是两回事",
+      "scope": [
+        "packages/renderer/**",
+        "packages/core/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/renderer/src/components/panel/ThinkingLevelPopover.vue"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-22",
+      "summary": "plugin 通知与 manifest 兼容契约：notify 走 info/warning/error 三级经 plugin:notification 广播；hook 的 blocked/transformedContent 变更在 session 历史可见（可审计）；manifest semver 不兼容跳过扫描",
+      "scope": [
+        "packages/runtime/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "plugins/built-in-plugin-guide.md"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-state-17",
+      "summary": "legacy 消息渲染兼容：不含 contentBlocks 的历史消息走 groupByLegacyFields 分组，渲染行为不变；新增消息字段不得破坏 legacy 路径",
+      "scope": [
+        "packages/core/**",
+        "packages/ui/**"
+      ],
+      "authority": [
+        "../packages/core/src/domain/chat/message-turns.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
         }
       ]
     }

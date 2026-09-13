@@ -1,21 +1,17 @@
 // src/execution/__tests__/record-store-orphan-revive.test.ts
 //
-// [PS-10/T6④] revive() 复位 orphanJudged——落实 recoverOrphanRecords 注释承诺
-// 「IO 恢复后重开可重判」。
+// [PS-10/T6④] revive() 复位 orphanJudged + [U4a / D3b (a″)] 孤儿恢复活实例跳过。
 //
-// 缺陷（设计 §4.3 PS-10）：resumable 形态（IO-error 保守分支）无 .state sidecar
-// 锚，重判资格完全由 orphanJudged 实例级缓存承载；dispose 有 clear 但 /new 复活路径
-// revive() 此前不复位 → 同进程内曾经的 IO 失败记录永久停留 resumable。
+// [U3 / §3.2.4 迁移] 孤儿恢复已简化为 entry 面纠偏（一律保留 idle，锚在等 revive）：
+//   - 原判定矩阵（IO 保守 / 末行截断 / SP-5 分流 / closed+gc 直断 / .state 防重锚）
+//     随直断分支整体删除——子文件正文与 IO 状态不再参与判定；
+//   - 防重语义变化：纠偏 entry 落盘后末条变 idle，判据自然不再命中（构造性幂等）；
+//     orphanJudged 缓存降级为 appendEntry 失败场景的次级防线（本文件验证其语义）；
+//   - 活实例跳过判据不变（findForeignLiveInstance 现查探针，pid 单判据 + self-pid
+//     排除）——异宿主在持时不代写纠偏 entry。
 //
-// 覆盖（验收④：IO 恢复记录 revive 后再次扫描会重新判定，不再停留 resumable）：
-//   阶段 1  IO 失败（openSync EACCES 注入）→ 判定落 resumable entry（保守分支真实触发）
-//   阶段 2  IO 恢复 + revive() → 再次 recoverOrphanRecords 重新判定收敛 closed+gc
-//           （未修复时 orphanJudged 残留 → 605 行 continue 零 entry，本用例红）
-//
-// fs mock：只劫持 openSync 的读模式（"r"）按目标路径计数放行——扫描侧
-// readIdentityHeader（session-reconstructor）与判定侧 readLastJsonlLine（record-store
-// 私有）走同一原语，放行计数 = 让扫描成功、判定失败的最小注入面；写模式（sidecar）
-// 与其余 fs 全部透传 actual。
+// fs mock：只劫持 openSync 的读模式（"r"）按目标路径计数放行（保留文件 IO 注入面供
+// 防重场景构造失败形态）；写模式与其余 fs 全部透传 actual。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -35,8 +31,8 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { RecordStore } from "../record-store.ts";
-import { writeAliveMarker } from "../alive-store.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { writeAliveMarker } from "../persistence/alive-store.ts";
 
 let tmpDir = "";
 
@@ -75,101 +71,33 @@ function writeOrphanSession(filePath: string, id: string): void {
   fs.writeFileSync(filePath, `${header}\n${identityEntry}\n${assistantMsg}\n`, "utf-8");
 }
 
-function makeStore(): { store: RecordStore; appended: Array<{ customType: string; data: Record<string, unknown> }> } {
+/** 主 session 末条 entry 残留 running——entry 纠偏判据的命中前提。 */
+function writeMainRunningEntry(id: string): string {
+  const mainFile = path.join(tmpDir, "main-session.jsonl");
+  const entry = JSON.stringify({
+    type: "custom", id: `e-${id}`, parentId: null, customType: "subagent-record",
+    data: { id, agent: "worker", task: "orphan revive", startedAt: 1000, status: "running" },
+  });
+  fs.writeFileSync(mainFile, entry + "\n", "utf-8");
+  return mainFile;
+}
+
+function makeStore(appendEntryImpl?: (customType: string, data: unknown) => void): {
+  store: RecordStore;
+  appended: Array<{ customType: string; data: Record<string, unknown> }>;
+} {
   const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
   const store = new RecordStore(tmpDir, undefined, {
-    appendEntry: (customType: string, data: unknown) => {
+    appendEntry: appendEntryImpl ?? ((customType: string, data: unknown) => {
       appended.push({ customType, data: data as Record<string, unknown> });
-    },
+    }),
   } as never);
   return { store, appended };
 }
 
-describe("[PS-10] revive() 复位 orphanJudged（IO 恢复后重开可重判）", () => {
-  it("IO 失败落 resumable → revive 后 IO 恢复，再次扫描重新判定收敛 closed+gc", () => {
-    const sessionFile = path.join(tmpDir, "orphan-revive.jsonl");
-    writeOrphanSession(sessionFile, "sa-revive-1");
-    const realOpenSync = fsActualHolder.fs!.openSync;
-
-    // 目标路径读模式 open 的放行计数：阶段 1 只放行 1 次（扫描侧 readIdentityHeader），
-    // 判定侧 readLastJsonlLine 的 open 注入 EACCES（IO 暂时失败的保守形态）。
-    let allowReads = Infinity;
-    openSyncMock.mockImplementation((p: unknown, flags: unknown) => {
-      if (p === sessionFile && typeof flags === "string" && flags.includes("r")) {
-        if (allowReads <= 0) {
-          const err = new Error(`EACCES: permission denied, open '${sessionFile}'`) as NodeJS.ErrnoException;
-          err.code = "EACCES";
-          throw err;
-        }
-        allowReads--;
-      }
-      return realOpenSync(p as Parameters<typeof realOpenSync>[0], flags as Parameters<typeof realOpenSync>[1]);
-    });
-
-    // ── 阶段 1：IO 失败 → 保守落 resumable（注释承诺的形态）──
-    allowReads = 1;
-    const { store, appended } = makeStore();
-    store.recoverOrphanRecords("sess-orphan");
-
-    expect(appended).toHaveLength(1);
-    expect(appended[0]?.customType).toBe("subagent-record");
-    expect(appended[0]?.data.status).toBe("running");
-    expect(appended[0]?.data.resumable).toBe(true);
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 保守分支无 sidecar 锚
-
-    // ── 阶段 2：IO 恢复 + /new 复活（revive 复位 orphanJudged）→ 重判收敛终态 ──
-    allowReads = Infinity;
-    store.revive();
-    store.recoverOrphanRecords("sess-orphan");
-
-    expect(appended).toHaveLength(2); // 未修复时 orphanJudged 残留 → 零新 entry，此处红
-    const rejudged = appended[1];
-    expect(rejudged?.data.status).toBe("closed");
-    expect(rejudged?.data.closedReason).toBe("gc");
-    expect(rejudged?.data.resumable).toBeUndefined(); // 不再停留 resumable
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
-  });
-
-  it("未 revive 时重判资格保持（防重缓存语义不回归）：重复 recover 零新 entry", () => {
-    const sessionFile = path.join(tmpDir, "orphan-norevive.jsonl");
-    writeOrphanSession(sessionFile, "sa-revive-2");
-    const realOpenSync = fsActualHolder.fs!.openSync;
-    let allowReads = Infinity;
-    openSyncMock.mockImplementation((p: unknown, flags: unknown) => {
-      if (p === sessionFile && typeof flags === "string" && flags.includes("r")) {
-        if (allowReads <= 0) {
-          const err = new Error(`EACCES: permission denied, open '${sessionFile}'`) as NodeJS.ErrnoException;
-          err.code = "EACCES";
-          throw err;
-        }
-        allowReads--;
-      }
-      return realOpenSync(p as Parameters<typeof realOpenSync>[0], flags as Parameters<typeof realOpenSync>[1]);
-    });
-
-    allowReads = 1;
-    const { store, appended } = makeStore();
-    store.recoverOrphanRecords("sess-orphan");
-    expect(appended).toHaveLength(1);
-
-    // 同进程内不经历 revive（未重开）：IO 已恢复也不重判——同 session 防重语义保持
-    allowReads = Infinity;
-    store.recoverOrphanRecords("sess-orphan");
-    expect(appended).toHaveLength(1);
-  });
-});
-
-// ── [U4a / D3b (a″)] 孤儿恢复活实例跳过：findForeignLiveInstance 现查探针 ──
-//
-// 原判据 = 重建时缓存的 rec.externalInstance（分支 3 填充）；externalInstance 字段链
-// 删除后换直接探针（pid 单判据 + self-pid 排除）。验收（F2）：
-//   - 探针活（异宿主 pid 在持声明）→ 跳过终态化——boot 不得误杀异宿主持有中 record
-//     （同 root 双宿主形态下，宿主 A 的 boot 把宿主 B 持有中的 record 直断 gc 会
-//     击穿跨进程写权防御，设计 D3b (a″)）；
-//   - pid 死（无在持声明）→ 正常终态化（closed+gc + .state 防重锚）。
-describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid 单判据）", () => {
-  /** openSync 透传真实实现（本 describe 的判定路径需要真实 IO；mockReset 后默认
-   *  实现返回 undefined，readLastJsonlLine 会拿到非法 fd）。 */
+describe("[PS-10] revive() 复位 orphanJudged（appendEntry 失败后重开可重判）", () => {
+  /** openSync 透传真实实现（扫描侧需要真实 IO；mockReset 后默认实现返回 undefined，
+   *  readIdentityHeader 会拿到非法 fd → 负缓存静默跳过，判定不发生）。 */
   function passthroughOpenSync(): void {
     const realOpenSync = fsActualHolder.fs!.openSync;
     openSyncMock.mockImplementation(
@@ -178,50 +106,137 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     );
   }
 
-  it("探针活（异宿主 pid 在持声明）→ 跳过终态化：零 entry + 无 .state 防重锚", () => {
+  /** [U3 场景迁移] 原场景（读 IO 失败 → 保守落 resumable）随判定矩阵删除——扫描侧
+   *  读失败由负缓存静默吸收（record 不可见 = 不判定）。orphanJudged 的次级防线语义
+   *  改用 appendEntry 注入失败构造：纠偏 entry 未落盘 → 判据（末条 running）不自愈，
+   *  重判资格完全由缓存承载。 */
+  it("appendEntry 失败（纠偏 entry 未落盘）→ orphanJudged 拦截重复判定；revive 后重判收敛 idle entry", () => {
+    const sessionFile = path.join(tmpDir, "orphan-revive.jsonl");
+    writeOrphanSession(sessionFile, "sa-revive-1");
+    const mainFile = writeMainRunningEntry("sa-revive-1");
+    passthroughOpenSync();
+
+    let failAppend = true;
+    const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
+    const { store } = makeStore((customType: string, data: unknown) => {
+      if (failAppend) throw new Error("append entry failed (disk full)");
+      appended.push({ customType, data: data as Record<string, unknown> });
+    });
+
+    // ── 阶段 1：纠偏落盘爆炸 → 异常传播（生产由 record-access try/catch 吸收），
+    // orphanJudged 已标记；磁盘无 sidecar（纠偏不写 .state）──
+    expect(() => store.recoverOrphanRecords("sess-orphan", mainFile)).toThrow(/append entry failed/);
+    expect(appended).toHaveLength(0);
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+
+    // ── 阶段 2（未 revive）：判据仍命中（entry 未落盘）但 orphanJudged 拦截 →
+    // 零异常零重复（次级防线语义）──
+    store.recoverOrphanRecords("sess-orphan", mainFile);
+    expect(appended).toHaveLength(0);
+
+    // ── 阶段 3：append 恢复 + /new 复活（revive 复位 orphanJudged）→ 重判纠偏落盘 ──
+    failAppend = false;
+    store.revive();
+    store.recoverOrphanRecords("sess-orphan", mainFile);
+
+    expect(appended).toHaveLength(1); // 未 revive 时 orphanJudged 残留 → 零新 entry，此处红
+    const corrected = appended[0];
+    expect(corrected?.customType).toBe("subagent-record");
+    expect(corrected?.data.status).toBe("idle");
+    expect(corrected?.data.closedReason).toBeUndefined();
+    expect(corrected?.data.stopReason).toBe("interrupted-by-restart");
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+  });
+
+  it("未 revive 时重判资格保持（防重缓存语义不回归）：appendEntry 恢复后重复 recover 仍零新 entry", () => {
+    const sessionFile = path.join(tmpDir, "orphan-norevive.jsonl");
+    writeOrphanSession(sessionFile, "sa-revive-2");
+    const mainFile = writeMainRunningEntry("sa-revive-2");
+    passthroughOpenSync();
+
+    let failAppend = true;
+    const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
+    const { store } = makeStore((customType: string, data: unknown) => {
+      if (failAppend) throw new Error("append entry failed (disk full)");
+      appended.push({ customType, data: data as Record<string, unknown> });
+    });
+
+    expect(() => store.recoverOrphanRecords("sess-orphan", mainFile)).toThrow(/append entry failed/);
+    expect(appended).toHaveLength(0);
+
+    // 同进程内不经历 revive（未重开）：append 已恢复也不重判——orphanJudged 防重语义保持
+    failAppend = false;
+    store.recoverOrphanRecords("sess-orphan", mainFile);
+    expect(appended).toHaveLength(0);
+  });
+});
+
+// ── [U4a / D3b (a″)] 孤儿恢复活实例跳过：findForeignLiveInstance 现查探针 ──
+//
+// 判据 = .alive marker 的 pid 活性（pid 单判据 + self-pid 排除）。验收（F2）：
+//   - 探针活（异宿主 pid 在持声明）→ 跳过纠偏——boot 不得代写异宿主持有中 record 的
+//     entry（同 root 双宿主形态下，宿主 A 的 boot 误判宿主 B 持有中的 record 会击穿
+//     跨进程写权防御）；
+//   - pid 死（无在持声明）/ self-pid 残留 → 正常纠偏（idle entry 落盘，无 .state sidecar
+//     ——[U3] 直断防重锚写点已删）。
+describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid 单判据）", () => {
+  /** openSync 透传真实实现（本 describe 的扫描路径需要真实 IO；mockReset 后默认
+   *  实现返回 undefined，扫描侧会拿到非法 fd）。 */
+  function passthroughOpenSync(): void {
+    const realOpenSync = fsActualHolder.fs!.openSync;
+    openSyncMock.mockImplementation(
+      (p: Parameters<typeof realOpenSync>[0], flags: Parameters<typeof realOpenSync>[1]) =>
+        realOpenSync(p, flags),
+    );
+  }
+
+  it("探针活（异宿主 pid 在持声明）→ 跳过纠偏：零 entry", () => {
     const sessionFile = path.join(tmpDir, "orphan-foreign-live.jsonl");
     writeOrphanSession(sessionFile, "sa-probe-1");
+    const mainFile = writeMainRunningEntry("sa-probe-1");
     // pid 1（launchd）必然存活且非本测试进程——异宿主「在持声明」的确定性形态
     writeAliveMarker(sessionFile, { pid: 1, id: "sa-probe-1", startedAt: Date.now() });
     passthroughOpenSync();
 
     const { store, appended } = makeStore();
-    store.recoverOrphanRecords("sess-orphan");
+    store.recoverOrphanRecords("sess-orphan", mainFile);
 
-    expect(appended).toHaveLength(0); // 跳过：不落任何终态/resumable entry
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 未终态化 = 无防重锚
+    expect(appended).toHaveLength(0); // 跳过：不落任何纠偏 entry
   });
 
-  it("pid 死（marker 残留但持有者已退）→ 正常终态化：closed+gc entry + .state 防重锚", () => {
+  it("pid 死（marker 残留但持有者已退）→ 正常纠偏：idle entry（无 closedReason、无 .state 防重锚）", () => {
     const sessionFile = path.join(tmpDir, "orphan-dead-pid.jsonl");
     writeOrphanSession(sessionFile, "sa-probe-2");
+    const mainFile = writeMainRunningEntry("sa-probe-2");
     // 大 pid 用户空间必然不存在（ESRCH 判死）——原持有宿主已退出的残留 marker 形态
     writeAliveMarker(sessionFile, { pid: 9999999, id: "sa-probe-2", startedAt: Date.now() });
     passthroughOpenSync();
 
     const { store, appended } = makeStore();
-    store.recoverOrphanRecords("sess-orphan");
+    store.recoverOrphanRecords("sess-orphan", mainFile);
 
     expect(appended).toHaveLength(1);
     expect(appended[0]?.customType).toBe("subagent-record");
-    expect(appended[0]?.data.status).toBe("closed");
-    expect(appended[0]?.data.closedReason).toBe("gc");
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态防重锚落盘
+    expect(appended[0]?.data.status).toBe("idle");
+    expect(appended[0]?.data.closedReason).toBeUndefined();
+    expect(appended[0]?.data.stopReason).toBe("interrupted-by-restart");
+    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
   });
 
-  it("self-pid marker（pid 复用到本进程的残留声明）→ 放行清理：原持有者已死，record 确为孤儿", () => {
+  it("self-pid marker（pid 复用到本进程的残留声明）→ 放行纠偏：原持有者已死，record 确为孤儿", () => {
     const sessionFile = path.join(tmpDir, "orphan-self-pid.jsonl");
     writeOrphanSession(sessionFile, "sa-probe-3");
+    const mainFile = writeMainRunningEntry("sa-probe-3");
     // self-pid 排除：findForeignLiveInstance 视同无 foreign——复用窗口内残留 marker
-    // 不构成「异宿主在持」，record 是真孤儿应照常终态化
+    // 不构成「异宿主在持」，record 是真孤儿应照常纠偏
     writeAliveMarker(sessionFile, { pid: process.pid, id: "sa-probe-3", startedAt: Date.now() });
     passthroughOpenSync();
 
     const { store, appended } = makeStore();
-    store.recoverOrphanRecords("sess-orphan");
+    store.recoverOrphanRecords("sess-orphan", mainFile);
 
     expect(appended).toHaveLength(1);
-    expect(appended[0]?.data.status).toBe("closed");
-    expect(appended[0]?.data.closedReason).toBe("gc");
+    expect(appended[0]?.data.status).toBe("idle");
+    expect(appended[0]?.data.closedReason).toBeUndefined();
   });
 });

@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type RoundSupervisorDeps, type SupervisorCandidateRecord, type SupervisorRecordView } from "../round-supervisor/index.ts";
 
 function makeDeps(overrides: Partial<RoundSupervisorDeps> = {}): RoundSupervisorDeps & {

@@ -32,7 +32,7 @@ import * as path from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { RecordStore } from "@zhushanwen/subagent-core";
-import { INDEX_FILENAME } from "@zhushanwen/subagent-core";
+import { INDEX_FILENAME } from "@zhushanwen/subagent-core/execution/persistence/sessions-index.ts";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 

@@ -2,8 +2,8 @@
 //
 // 最小 e2e（W7 验收口径）：真实 spawn bin/pi-subagent-cli.mjs + NDJSON 往返——
 // initialize → run（fake pi 子进程经 PATH 注入）→ host/* 反向通道到 fake 宿主
-// 应答（host/childSpawned / host/poolResolved / host/handleReady / host/log /
-// host/askUser ack 两阶段）→ run 终态应答（handle + outcome 等价断言）。
+// 应答（host/childSpawned / host/handleReady / host/log / host/askUser ack 两阶段
+// ——[池抽象降级] host/poolResolved 已退役）：→ run 终态应答（handle + outcome 等价断言）。
 //
 // fake pi（fixtures/fake-pi.mjs）：rpc 形态子进程——应答 get_state、回放事件流
 // （tool/text_delta/turn_end/message_end）、发出 extension_ui_request（select
@@ -163,14 +163,10 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       const runP = host.request("run", {
         runId: "run-e2e-1",
         task: { prompt: "say hi then ask", description: "e2e", agent: "worker" },
-        ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model" },
+        ctx: { cwd: dataDir, model: "fake-provider/fake-model" },
       });
 
-      // 3. 反向通道断言（按协议契约逐个应答）
-      const poolResolved = await host.waitForReverse("host/poolResolved");
-      expect((poolResolved.params as { poolKey: string }).poolKey).toBe("shared");
-      host.replyReverse(String(poolResolved.id), { ok: true });
-
+      // 3. 反向通道断言（按协议契约逐个应答；poolResolved 已随池抽象降级退役）
       const childSpawned = await host.waitForReverse("host/childSpawned");
       const childPid = (childSpawned.params as { pid: number }).pid;
       expect(Number.isInteger(childPid)).toBe(true);
@@ -201,11 +197,10 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       // 协议 run 终态应答的 handle = EngineHandleData 本体（进程内 {data} 包装已拆，
       // 与 RemoteEngine `handle: { data: result.handle }` 互证）
       const runResult = runFrame.result as {
-        handle: { engineId: string; poolKey: string; sessionRef: Record<string, string> };
+        handle: { engineId: string; sessionRef: Record<string, string> };
         outcome: { content: string; sessionId?: string; usage?: { input: number } };
       };
       expect(runResult.handle.engineId).toBe("pi");
-      expect(runResult.handle.poolKey).toBe("shared");
       expect(runResult.handle.sessionRef.recordId).toBe("run-e2e-1");
       expect(typeof runResult.handle.sessionRef.sessionFile).toBe("string");
       expect(runResult.outcome.content).toContain("final answer");

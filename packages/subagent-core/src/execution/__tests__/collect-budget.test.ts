@@ -22,8 +22,8 @@
 // 纯内存零 IO；不依赖产线 mock（只 import 两个纯函数 + BgNotifyRecord 类型）。
 
 import { describe, expect, it } from "vitest";
-import type { BgNotifyRecord } from "../notifier.ts";
-import { buildBatchLlmContent, computeBatchBudget } from "../notifier.ts";
+import type { BgNotifyRecord } from "../notify/notifier.ts";
+import { buildBatchLlmContent, computeBatchBudget } from "../notify/notifier.ts";
 
 // ─── fixture ──
 

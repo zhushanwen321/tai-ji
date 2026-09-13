@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/4/40/Triple_Yin_Yang.svg
-source: Wikimedia Commons (API query)

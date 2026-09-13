@@ -98,7 +98,7 @@ export default [
   },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
   // 生命周期挂钩）：runtime index.ts 是进程组装 barrel，main 基线 501 行即超，本次 +41。
-  // 拆分归独立重构单元（见 docs/design/idle-pi-reclamation.impl-plan.md），
+  // 拆分归独立重构单元（设计文档已删除，git 历史可追溯），
   // 禁止在 lint 收敛批次内拆文件重构。短期 max-lines override 避免阻塞。
   // [merge dev-0.9.17 2026-09] session-service.ts 已从本 off 块移除——config 末尾的
   // 软上限块（warn 650）语义更严且后位覆盖，双块并存 = 冲突；以末尾块为唯一权威。
@@ -121,7 +121,7 @@ export default [
       'packages/runtime/src/services/session/session-lifecycle.ts',
       'packages/runtime/src/transport/session-message-handler.ts',
       'packages/runtime/src/transport/settings-message-handler.ts',
-      'packages/subagent-core/src/execution/session-reconstructor.ts',
+      'packages/subagent-core/src/execution/persistence/session-reconstructor.ts',
       // [HISTORICAL] message-dispatcher 是消息派发职责的唯一聚合点（从 session-service
       // 巨石拆出：sendMessage/abort/steer/followUp/compact + sendBash 家族），2026-09-09
       // chat-domain-v1x-liveness-governance W7 abort 超时三级阶梯（handleAbortRpcTimeout/
@@ -208,7 +208,7 @@ export default [
   // eslint no-restricted-imports 是模块边界一级拦截（新增写者在 import 面即报错），
   // grep 门（scripts/check-record-write-surface.mjs）降为文本级兜底（拦类方法调用
   // 与字面量写形态）。写面唯一入口 = RecordStore（packages/subagent-core/src/
-  // execution/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
+  // execution/persistence/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
   // 边界登记：manifest 写面是 ManifestStore 实例方法（writeManifest）——import 层
   // 拦不住（装配点构造合法），该面由 grep 门 R1 兜底；writeRecordBinding /
   // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写面收敛范围，不拦。
@@ -216,7 +216,7 @@ export default [
   {
     files: ['packages/subagent-core/src/**/*.ts'],
     ignores: [
-      'packages/subagent-core/src/execution/record-store.ts',
+      'packages/subagent-core/src/execution/persistence/record-store.ts',
       'packages/subagent-core/src/**/__tests__/**',
       'packages/subagent-core/src/**/*.test.ts',
     ],
@@ -227,9 +227,11 @@ export default [
           patterns: [
             {
               group: ['**/state-marker.ts'],
-              importNames: ['writeFinalizedState', 'writeCancelledState'],
+              // .state 三写函数全集（U2 后）：两终态（finalized/cancelled）+ 轮收口
+              // idle（writeSettledState）——三者同走 writeStateMarker 权威同步写。
+              importNames: ['writeFinalizedState', 'writeCancelledState', 'writeSettledState'],
               message:
-                'store 外禁 import 终态 sidecar 写函数（.state 是终态权威）——经 RecordStore.markFinalized/markCancelled 意图原语落盘（H4/G1，D7 守卫分级）',
+                'store 外禁 import .state sidecar 写函数（两终态 + U2 轮收口 idle）——经 RecordStore.markFinalized/markCancelled/markSettled 意图原语落盘（H4/G1，D7 守卫分级）',
             },
             {
               group: ['**/alive-store.ts'],
@@ -526,7 +528,7 @@ export default [
   // 先例同型）。长期拆分方向：interact 交接 / stdin 写入等可按轴再拆，待独立重构。
   {
     files: [
-      'packages/subagent-core/src/execution/execution-record.ts',
+      'packages/subagent-core/src/execution/persistence/execution-record.ts',
       'packages/subagent-core/src/orchestration/worker-message-pump.ts',
       'packages/subagent-core/src/shared/resource-discovery.ts',
     ],
@@ -534,16 +536,25 @@ export default [
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
-  // [H4 record 持久化收敛] record-store.ts 单独提额：H4 设计（docs/design/
-  // subagent-record-persistence-consolidation.md）把 record 全部写面收编进
-  // RecordStore（十意图原语 + 同步写权威），U1 API 立面落地后 800→1207，
-  // U4a 读面收尾 / U4c rebuildIndexes 还将增长。写面收口与行数守卫是显式
-  // 冲突，提额至 1400 过渡；H4 全落地后按意图原语族拆分（终态原语/轮次
-  // 簿记/重建三轴）属独立重构任务，登记于 H4 impl-plan 残留风险。
+  // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地，登记于
+  // subagent-record-persistence-consolidation.md 残留风险）：store 保留容器 +
+  // 意图原语立面 + 有状态扫描（原 1450 提额过渡废止，现折算 677 → max 800 余量）；
+  // 终态原语轴（record-store-terminal.ts，折算 275）与轮次簿记轴
+  // （record-store-rounds.ts，折算 101）在 500 基线内不设 override；重建与投影轴
+  // （record-store-rebuild.ts，折算 539）超 500 基线——纯投影/重建规则聚合（buildRecord
+  // 单规则 + entry 重建族 + manifest 读写投影 + 缓存戳类型），按 u-2a 同款过渡设
+  // max 700。D7 写面约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
+  // ctx 注入），check-record-write-surface 白名单零改动。
   {
-    files: ['packages/subagent-core/src/execution/record-store.ts'],
+    files: ['packages/subagent-core/src/execution/persistence/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1400, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
     },
   },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
@@ -576,18 +587,24 @@ export default [
   // 1245 → 无界等待修复 1415 → u-h2 1471 → W4 监督器 1548 → W3 协议化 1684 →
   // R0 重排折算 1842 → R1 1785 → R2 1640 → R3 后触发告警 → R4 移除本 override）。
   // run-orchestration.ts 单列：R4 核心编排聚合——[D-R4-1] G1 容量偏差的 lint 面
-  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限，备选第三
-  // 文件 chat-rounds.ts 未采纳，理由见 impl-plan §5 D-R4-1）。终态实测（阶段3 复核）：
-  // 本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts 527 物理行
-  // 合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
+  //（R4 域段实测 1662 物理行 > 两文件 2×700 上限，主 agent 裁决追认超限）。终态实测
+  //（阶段3 复核）：本文件 1506 物理行 / 798 折算（R6 常量归一后），workflow-dispatch.ts
+  // 527 物理行合规；阈值 800 实余 2 行（零余量锁定语义不变——增长即告警），禁止再抬。
   // [HISTORICAL] metrics-gate cyclo 偿还（kickOffChatRound IIFE 21 / executeViaEngine 16 /
   // settleOneShotOutcome 16 阶段化拆解，均 ≤15）：行为保持提取的 helper 签名/花括号/
   // JSDoc 开销 +71 折算行（869）触发零余量告警，按 engine-client.ts 同款惯例抬至 900——
   // 按域再拆（如 chat-round 启动面独立模块）登记为后续重构债，拆分债本体不变。
+  // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作面拆出
+  // chat-rounds.ts 后，本文件 1077 物理行 / 549 折算——阈值保持 800（余量健康，
+  // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 793 物理行 / 365 折算，低于
+  // packages 域 500 上限，无需 override（余量健康，不设零余量锁）。
+  // [2026-09-14 merge dev-0.9.20] 两侧汇合：feature 侧 chat-rounds.ts 拆分与 dev 侧
+  // cyclo 偿还 helper 共存，合并实测 1060 物理行 / 541 折算（eslint 实读）；
+  // 900 的抬升理由（未拆分文件 869 折算）随拆分落地失效，阈值回 800。
   {
     files: ['packages/subagent-core/src/execution/service/run-orchestration.ts'],
     rules: {
-      'max-lines': ['warn', { max: 900, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
   // session-reader tool-handler：聚合工具处理中枢（多工具入口 + 渲染调度），
@@ -640,7 +657,7 @@ export default [
   },
   // [HISTORICAL] session-dead u2/u3b 语义改动致超限（512>500），拆分登记为后续重构项，勿再增行。
   // 提额至 520 而非 off：微超即提额，保留软上限告警（与 provider-config-helper 提额先例同型）。
-  // [merge dev-0.9.17 2026-09] crash-resilience / crash-forensics-and-watchdog（respawn
+  // [merge dev-0.9.17 2026-09] crash-resilience（设计文档已删，git 可追溯）/ crash-forensics-and-watchdog（respawn
   // 编排 + 收殓 + inflight 镜像挂点）与对方 chat 域协议化（userStoppedGate / restore-abort
   // 收敛环）并存，统计行 634 > 520 → 提额 650（微超即提额哲学不变；本块位于 config 末尾，
   // 覆盖上方 idle-pi-reclamation 的 off 块——两块语义冲突时以本软上限为准）。

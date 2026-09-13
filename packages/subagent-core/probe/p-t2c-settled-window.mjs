@@ -2,7 +2,7 @@
 //
 // 探针 P-T2c：chatMode post-run（agent_end → agent_settled）真实时长分布。
 // 支撑设计 T2-③「settled 等待固定硬上限（默认 10min）」的标定
-//（docs/design/subagent-core-unbounded-wait-audit.md §7.2 T2-③ / §7.3 P-T2c 行）。
+//（docs/architecture/crash-forensics-and-watchdog.md 附录 E §7.2 T2-③ / §7.3 P-T2c 行）。
 //
 // 方法：真实 pi 会话（--mode rpc，xiaomi-token-plan-cn/mimo-v2.5-pro）串行多轮
 // prompt（3 短 + 2 长上下文），每轮记录 agent_end 与 agent_settled 两事件行的

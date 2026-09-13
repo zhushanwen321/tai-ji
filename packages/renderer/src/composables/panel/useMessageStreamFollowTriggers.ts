@@ -14,7 +14,7 @@
  * |-------------------------------------------|------------|------------|
  * | messages.length watch（store 级）          | 跟随       | 标 unread* |
  * | 末条文本长度 watch（isStreaming 守卫）      | 跟随       | 标 unread  |
- * | tailEl RO 增高（活动条/pending/fork 出现） | 跟随       | 标 unread  |
+ * | tailEl RO 增高（活动条/fork 出现） | 跟随       | 标 unread  |
  * | contentWrapEl RO 其余变化（spacer）         | 跟随       | 不动，不标 |
  * | scrollEl RO（视口 resize）                 | 跟随       | 不动，不标 |
  * | 纯宽度变化（高度未变）                      | 显式 no-op | 不标       |
@@ -144,7 +144,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
         return
       }
       if (tailH > prevTail) {
-        // tail 增高：活动条/pending 气泡/fork 行出现或长高 = 底部区域新内容 → 标 unread
+        // tail 增高：活动条/fork 行出现或长高 = 底部区域新内容 → 标 unread
         followFromRo(true)
       } else {
         // spacer 变化（fence finalize / 图片加载 / 估算收敛 / trace 折叠）→ 静默跟随不标

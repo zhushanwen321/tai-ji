@@ -161,8 +161,8 @@ describe('RpcClient W3 S6 (timedOutIds)', () => {
     vi.advanceTimersByTime(200)
     await expect(commandPromise).rejects.toThrow(/timed out/)
 
-    // 此时 pending 已清空，id 不再匹配 pending
-    expect((client as unknown as { pending: Map<string, unknown> }).pending.has(cmdId)).toBe(false)
+    // 此时 pending 已清空，id 不再匹配 pending（U1 pi-rpc 收敛后经 registry 部件 hasPending 只读面）
+    expect((client as unknown as { pendingRegistry: { hasPending(id: string): boolean } }).pendingRegistry.hasPending(cmdId)).toBe(false)
 
     // 模拟 pi 发回带同一 id 的迟到响应
     emitPiLine({ type: 'response', id: cmdId, success: true, data: { late: true } })
@@ -183,13 +183,13 @@ describe('RpcClient W3 S6 (timedOutIds)', () => {
     vi.advanceTimersByTime(200)
     await expect(commandPromise).rejects.toThrow(/timed out/)
 
-    // 超时后 id 在 timedOutIds 中
-    const timedOutIds = (client as unknown as { timedOutIds: Set<string> }).timedOutIds
-    expect(timedOutIds.has(cmdId)).toBe(true)
+    // 超时后 id 在 timedOutIds 中（U1 pi-rpc 收敛后经 registry 部件 isTimedOut 只读面）
+    const registry = (client as unknown as { pendingRegistry: { isTimedOut(id: string | undefined): boolean } }).pendingRegistry
+    expect(registry.isTimedOut(cmdId)).toBe(true)
 
     // 5s TTL 后自动清理
     vi.advanceTimersByTime(5_000)
-    expect(timedOutIds.has(cmdId)).toBe(false)
+    expect(registry.isTimedOut(cmdId)).toBe(false)
   })
 })
 

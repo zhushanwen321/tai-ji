@@ -21,6 +21,7 @@
 set -euo pipefail
 
 TITLE=""
+BODY=""
 BODY_FILE=""
 TITLE_FILE=""
 BASE="main"
@@ -36,6 +37,7 @@ usage() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --title)         TITLE="$2"; shift 2 ;;
+        --body)          BODY="$2"; shift 2 ;;
         --title-file)    TITLE_FILE="$2"; shift 2 ;;
         --body-file)     BODY_FILE="$2"; shift 2 ;;
         --base)          BASE="$2"; shift 2 ;;
@@ -62,6 +64,11 @@ fi
 if [[ -z "$TITLE" ]]; then
     # 默认：取最新 commit subject 加 conventional commit 前缀规范
     TITLE="$(git log -1 --format='%s')"
+fi
+# --body 直传字符串：落临时文件，与 --body-file 同构（usage 承诺的两形态对齐）
+if [[ -n "$BODY" && -z "$BODY_FILE" ]]; then
+    BODY_FILE="$(mktemp -t pr-body.XXXXXX)"
+    printf '%s' "$BODY" > "$BODY_FILE"
 fi
 [[ -n "$BODY_FILE" ]] || BODY_FILE="$(mktemp -t pr-body.XXXXXX)"
 [[ -r "$BODY_FILE" ]] || { echo "Body file not readable: $BODY_FILE" >&2; exit 5; }

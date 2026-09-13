@@ -77,7 +77,7 @@ describe("U3: not-found 错误含退路指引", () => {
     "..",
   );
   const subagentActionsCoreSrc = readFileSync(
-    join(coreRoot, "src/execution/subagent-actions-core.ts"),
+    join(coreRoot, "src/execution/assembly/subagent-actions-core.ts"),
     "utf-8",
   );
 

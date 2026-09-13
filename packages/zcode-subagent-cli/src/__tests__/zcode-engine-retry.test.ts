@@ -183,7 +183,7 @@ function makeTask(overrides?: Partial<AgentCallOpts>): AgentCallOpts {
 }
 
 function makeCtx(overrides?: Partial<RunContext>): RunContext {
-  return { taskId: "sa-retry", poolKey: "", ...overrides };
+  return { taskId: "sa-retry", ...overrides };
 }
 
 // ============================================================

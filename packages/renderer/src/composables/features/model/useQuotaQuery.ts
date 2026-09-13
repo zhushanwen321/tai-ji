@@ -11,7 +11,7 @@
  *    - RPC rejected（连接层错误）
  *    - fulfilled 但带 reason（A2-4 失败态契约：runtime 查询失败返回 data=null + reason，不抛错）
  *
- * 设计文档：docs/page-design/archive/v3/coding-plan-quota/design.md §2.2.4
+ * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.4
  * HANDOFF：.xyz-harness/coding-plan-quota/HANDOFF.md §5 Wave 4
  */
 import { computed } from 'vue'

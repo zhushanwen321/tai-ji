@@ -273,7 +273,13 @@ export class SessionRecords {
     const workflowUpdates: Array<{ runId: string; status: string; reason?: string }> = []
     for (const record of workflows) {
       const prev = cache.workflows.get(record.runId)
-      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason) {
+      // [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
+      // 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
+      // GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
+      // 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
+      // entry append 节流（缺省 60s）约束，不会刷屏。
+      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
+          prev.agentCalls.length !== record.agentCalls.length) {
         workflowUpdates.push({ runId: record.runId, status: record.status, reason: record.reason })
       }
       cache.workflows.set(record.runId, record)
@@ -551,31 +557,107 @@ export class SessionRecords {
  * 结构固定（shared SubagentRecord），逐字段比对而非 JSON.stringify（顺序无关、无序列化抖动）。
  * origin 在比对面（R3-1②）：活 record 的 origin 实际不变，但本函数管 publish 去重——
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
+ * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
+ * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
+ * [U8b / GUI 快修①] result/resumable/chatMode 三字段补入：轮终迁移恰翻这三个字段
+ * （result 写入 / resumable 置位 / chatMode 显式化），缺比对会把「轮终等待续聊」的
+ * 显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
+ * [engine 域浅比较] engineHandle/engineFallback 是嵌套对象，applyRecordEntries 每轮
+ * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
+ * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
+ * （sessionRef.sessionId 变化）是真值变化，字段级比较天然触发 publish。
+ * [拆分依据] 24 字段单链 && 圈复杂度 24 超 metrics-gate 门禁（≤15），按 record
+ * 语义域拆四组 helper（身份锚 / 执行配置 / 统计 / 状态展示，见下方四个 equals）。
+ * 各组内仍逐字段 ===，字段全集与比较语义不变；比较均为无副作用纯函数，分组与
+ * 短路求值顺序不影响布尔结果（行为保持）。
  */
-/** publish 去重比对面：逐字段对表（原 && 链的字段集，新增需参与去重的字段在此登记）。
- * 刻意不含 result / chatMode / resumable / engine 等未列字段（比对集变更属行为变更，
- * 不在本判定职责内静默扩大）。 */
-const SUBAGENT_RECORD_EQUALS_FIELDS = [
-  'subagentId',
-  'sessionFile',
-  'agent',
-  'slug',
-  'task',
-  'status',
-  'model',
-  'thinkingLevel',
-  'turns',
-  'totalTokens',
-  'elapsedSeconds',
-  'startedAt',
-  'endedAt',
-  'error',
-  'closedReason',
-  'origin',
-] as const satisfies readonly (keyof SubagentRecord)[]
-
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
-  return SUBAGENT_RECORD_EQUALS_FIELDS.every((key) => a[key] === b[key])
+  return recordIdentityEquals(a, b)
+    && recordRunConfigEquals(a, b)
+    && recordStatsEquals(a, b)
+    && recordStateEquals(a, b)
+}
+
+/** [身份锚组] subagent 身份与会话锚五字段：subagentId / sessionFile / agent / slug / task。 */
+function recordIdentityEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.subagentId === b.subagentId
+    && a.sessionFile === b.sessionFile
+    && a.agent === b.agent
+    && a.slug === b.slug
+    && a.task === b.task
+}
+
+/**
+ * [执行配置组] 模型/思考等级标量 + engine 域三件套（engine id / fallback 留痕 /
+ * handle 锚——后两者经既有浅比较 helper，见上方「engine 域浅比较」注释）。
+ */
+function recordRunConfigEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.model === b.model
+    && a.thinkingLevel === b.thinkingLevel
+    && a.engine === b.engine
+    && engineFallbackEquals(a.engineFallback, b.engineFallback)
+    && engineHandleEquals(a.engineHandle, b.engineHandle)
+}
+
+/** [统计组] 执行统计五标量：轮数 / token / 耗时 / 起止时间戳。 */
+function recordStatsEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.turns === b.turns
+    && a.totalTokens === b.totalTokens
+    && a.elapsedSeconds === b.elapsedSeconds
+    && a.startedAt === b.startedAt
+    && a.endedAt === b.endedAt
+}
+
+/**
+ * [状态展示组] 状态 + 终态/展示信号九字段：status / error / closedReason + 轮终
+ * 三字段（result / resumable / chatMode）+ intent / stopReason / origin——publish
+ * 去重的全部「显示形态」信号集中于此组，翻任一字段即触发 publish。
+ */
+function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
+  return a.status === b.status
+    && a.error === b.error
+    && a.closedReason === b.closedReason
+    && a.result === b.result
+    && a.resumable === b.resumable
+    && a.chatMode === b.chatMode
+    && a.intent === b.intent
+    && a.stopReason === b.stopReason
+    && a.origin === b.origin
+}
+
+/**
+ * [engine 域浅比较] string Record 键值逐一比对（键序无关——sessionRef 是引擎自定义
+ * 键集合，两轮解析的键插入序不保证稳定，禁 JSON.stringify 全量比较）。
+ */
+function stringRecordEquals(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => a[key] === b[key])
+}
+
+/** [engine 域浅比较] engineFallback 字段级（from/reason 均标量）。 */
+function engineFallbackEquals(
+  a: SubagentRecord['engineFallback'],
+  b: SubagentRecord['engineFallback'],
+): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.from === b.from && a.reason === b.reason
+}
+
+/**
+ * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + journalPath /
+ * poolKey 标量比对（zcode 锚 = sessionRef.{sessionId,dbPath}，sessionId 换新即真变化）。
+ */
+function engineHandleEquals(
+  a: SubagentRecord['engineHandle'],
+  b: SubagentRecord['engineHandle'],
+): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return stringRecordEquals(a.sessionRef, b.sessionRef)
+    && a.journalPath === b.journalPath
+    && a.poolKey === b.poolKey
 }
 
 /**

@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a4-truncation-and-fetch.mjs
 //
 // [A4 v2] 批条目截断 + session_read 取回一致（config 确定性触发版）
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A4 行。v1 弱模型不服从
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A4 行（设计文档已删，git 可追溯）。v1 弱模型不服从
 // 「输出 11000 字符」强指令（长文本生成不可靠且慢）→ v2 改 config 覆盖做确定性
 // 触发：隔离 agentDir（拷最小鉴权/模型配置集）+ PI_CODING_AGENT_DIR 注入 +
 // <agentDir>/subagents/config.json 写 collectSync 预算（config.ts：

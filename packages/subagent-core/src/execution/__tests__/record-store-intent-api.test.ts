@@ -41,8 +41,8 @@ vi.mock("../../core/logger.ts", () => ({
 }));
 
 // state-marker partial mock：写函数包装真实实现并记录调用序。
-vi.mock("../state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../state-marker.ts")>();
+vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
   return {
     ...actual,
     writeFinalizedState: vi.fn((sessionFile: string, reason?: string) => {
@@ -58,8 +58,8 @@ vi.mock("../state-marker.ts", async (importOriginal) => {
 
 // alive-store partial mock：acquire/release 包装真实实现并记录调用序；release
 // 时点探测 manifest 是否已落盘（A2「.state 先 → manifest 后 → .alive 删」断言）。
-vi.mock("../alive-store.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../alive-store.ts")>();
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/alive-store.ts")>();
   const nodeFs = await import("node:fs");
   return {
     ...actual,
@@ -93,11 +93,11 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-import { writeAliveMarker, readAliveMarker } from "../alive-store.ts";
-import * as stateMarker from "../state-marker.ts";
-import { createRecord, tryTransition } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
+import * as stateMarker from "../persistence/state-marker.ts";
+import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -238,7 +238,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.getMutable("bg-1")).toBeUndefined();
       expect(appendEntryMock).toHaveBeenCalledWith(
         "subagent-record",
-        expect.objectContaining({ id: "bg-1", status: "closed" }),
+        expect.objectContaining({ id: "bg-1", status: "idle" }),
       );
     });
 

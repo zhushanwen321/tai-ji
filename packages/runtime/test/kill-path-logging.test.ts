@@ -1,7 +1,7 @@
 /**
  * D5①（session-dead-structural-fixes）kill 路径全量 warn 日志测试。
  *
- * 设计：docs/design/session-dead-structural-fixes.md §3.3 D5① / §4 V6——所有 kill/destroy
+ * 设计：docs/design/session-dead-structural-fixes.md（已删除，git 可追溯）§3.3 D5① / §4 V6——所有 kill/destroy
  * 路径打 warn 级日志，含调用源（kill_source 结构化字段）与触发信号链（「谁发起、为什么」），
  * 使 exit 143 类进程死亡可从日志回溯到发起方（2026-09-10 事故第三条腿无 kill 日志的教训）。
  *

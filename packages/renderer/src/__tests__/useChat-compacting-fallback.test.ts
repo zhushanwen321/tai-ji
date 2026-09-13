@@ -1,6 +1,6 @@
 /**
  * useChat × useCompactQueue 集成单测 —— send.rejected compacting 兜底入队
- * （session-occupancy-send-closure u3-p1-renderer）。
+ * （session-occupancy-send-closure——已删除，git 可追溯——u3-p1-renderer）。
  *
  * 与 core 侧 useChat.test.ts（mock compactQueue）互补：本文件走 renderer 薄包装
  * （createUseChat + 真实 useCompactQueue 单例 + 真实 chat store），锁定接线层：

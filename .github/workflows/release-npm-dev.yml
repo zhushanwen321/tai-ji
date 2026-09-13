@@ -74,6 +74,12 @@ jobs:
       # W5/W7 引擎三包构建入口（MF-4 修复，约束 C-proc-11 三者闭合）。SDK 先于
       # 两个引擎 CLI 构建（CLI dist 的 external 依赖在 npm 形态解析到 SDK dist）。
       # 与 Publish 同条件挂载——skip 分支不发布即不构建，维持「skip 整体绿」语义。
+      # pi-rpc（C-proc-11 同批）：pi-subagent-cli dependencies 的 registry 解析目标，
+      # publish 前必须产出 dist（与正式线同位置同语义）。
+      - name: Build pi-rpc
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/pi-rpc build
+
       - name: Build subagent-engine-sdk
         if: steps.check_pre.outputs.should_publish == 'true'
         run: pnpm --filter @zhushanwen/subagent-engine-sdk build

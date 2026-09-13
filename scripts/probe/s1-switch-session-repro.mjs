@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// S1 受控复现脚本（u-lock-probe，设计 docs/design/file-lock-unification-and-reaper-sink.md §4 S1）。
+// S1 受控复现脚本（u-lock-probe，设计 docs/architecture/file-lock-unification-and-reaper-sink.md §4 S1）。
 //
 // 完整模拟「冷启动首点 session」崩溃链路（设计 §2.1）：
 //   spawn pi binary（--mode rpc --no-extensions --approve + staged extensions 显式注入）

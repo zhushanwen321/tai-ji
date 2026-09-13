@@ -18,7 +18,6 @@ import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "@zhushanwen/subagent-engine-sdk";
-import { ZCODE_SHARED_POOL_KEY } from "../constants.ts";
 import { ZcodeEngine } from "../zcode-engine.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
 
@@ -70,7 +69,7 @@ describe.skipIf(!LIVE)("ZcodeEngine 端到端真机（app-server 常驻，共享
           additionalProperties: false,
         },
       },
-      { taskId: "sa-live-appserver", poolKey: "", onEvent: (e) => events.push(e) },
+      { taskId: "sa-live-appserver", onEvent: (e) => events.push(e) },
     );
 
     // C2：outcome 正确
@@ -106,7 +105,7 @@ describe.skipIf(!LIVE)("ZcodeEngine 端到端真机（app-server 常驻，共享
         model: E2E_MODEL,
         cwd: AS_WORK_CWD,
       },
-      { taskId: "sa-live-appserver-abort", poolKey: "", signal: controller.signal },
+      { taskId: "sa-live-appserver-abort", signal: controller.signal },
     );
     // 等 send 已发（会话在途），再中途 abort——覆盖 stop 链而非 pre-abort 短路
     await new Promise((r) => setTimeout(r, 4_000));
@@ -124,7 +123,7 @@ describe.skipIf(!LIVE)("ZcodeEngine 端到端真机（app-server 常驻，共享
     // 崩溃/中止后下一任务自动重建或复用（不变量 4 同路径）——abort 不污染常驻进程
     const second = await engine.run(
       { prompt: "Reply with the single word: ok", description: "e2e-appserver-after-abort", model: E2E_MODEL, cwd: AS_WORK_CWD },
-      { taskId: "sa-live-appserver-after-abort", poolKey: "" },
+      { taskId: "sa-live-appserver-after-abort" },
     );
     expect(second.outcome.error).toBeUndefined();
     expect(second.outcome.content.trim().length).toBeGreaterThan(0);

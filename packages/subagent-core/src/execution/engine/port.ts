@@ -6,15 +6,17 @@
 //
 // 字段级扩展登记（接上文纪律——先改设计文档再扩接口）：
 //   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机面。权威源：
-//     docs/design/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
+//     docs/architecture/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
 //   - [R4 已实施 2026-08-30] RunContext.onHandleReady——运行中句柄回填通道
-//     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层，
-//     与 onPoolResolved 分立两个时点）。
+//     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层）。
+//     [池抽象降级 2026-09-13] 原 RunContext.poolKey 字段与 onPoolResolved 回调已删
+//     （两引擎无池化实现，journal 固定落 engines/<id>/shared/，历史头部叙述见 git）。
 //   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面。
 //     权威源：docs/design/timeout-audit-hygiene-batch.md §3.2 D2-2。
-//   - [u7a 已实施 2026-09-10] EnginePort.inFlightSnapshot?()——引擎在途只读快照面
-//     （滚动重启推迟谓词输入）。权威源：
-//     docs/design/crash-forensics-and-watchdog.md §3.3 D5。
+//   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
+//     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
+//     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
+//     docs/architecture/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
@@ -28,9 +30,9 @@ import type { ChildProcess } from "node:child_process";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
-import type { ModelInfo } from "../model-resolver.ts";
-import type { SubagentStream } from "../stream-sink.ts";
-import type { AgentEvent } from "../types.ts";
+import type { ModelInfo } from "../assembly/model-resolver.ts";
+import type { SubagentStream } from "../assembly/stream-sink.ts";
+import type { AgentEvent } from "../assembly/types.ts";
 import type {
   AgentOutcome,
   EngineCapabilities,
@@ -53,10 +55,8 @@ import type {
  * server 实现（未来 driver host）时接口不动。
  */
 export interface RunContext {
-  /** = record.id（bg-N-xxx / run-N）——journal 文件名与池引用计数 key（P2 消费）。 */
+  /** = record.id（bg-N-xxx / run-N）——journal 文件名。 */
   taskId: string;
-  /** D5 隔离池（宿主分配，设计 §3.3.9；pi 无池化恒 'shared'）。 */
-  poolKey: string;
   /** abort 分级入口（D1：引擎原生中断 → 公共杀链兜底）。 */
   signal?: AbortSignal;
   /** 事件流出口（host 消费后统一落 journal，D6 第②级）。 */
@@ -110,24 +110,16 @@ export interface RunContext {
    */
   sessionDir?: string;
   /**
-   * [P4 对齐点③] 引擎声明实际隔离池 key（journal 落盘路径权威）。宿主创建 journal
-   * writer 时只能用缺省占位 poolKey（pi 恒 'shared'），非池化稳定的引擎（zcode 按
-   * provider+model 池化）在 prepare 期确定 poolKey 后回调本方法重定向 writer——
-   * 保证 journal 落盘路径与 handle.poolKey 同源（单一权威，不再两边推导）。
-   * 契约：必须在首个事件 emit 之前调用（zcode coarse 事件在终态后合成，天然满足；
-   * 未来流式引擎需在事件出口前调用）。
-   */
-  onPoolResolved?: (poolKey: string) => void;
-  /**
    * [R4 §3.4 不变量 3] 运行中句柄回填通道：引擎在「session/create 应答到达后」
    * 立即回调（早于 run resolve——stream 引擎的 run 生命周期远长于会话建立）。
-   * 与 onPoolResolved 分立两个时点：poolKey 在 prepare 期（onPoolResolved，连接
-   * 建立前即可知），sessionRef 在 create 应答后（本回调）。编排层收到后立即回填
-   * record.engineHandle 并落 entry——运行中的 GUI 经 entry 重建 record 即拿到
-   * ①②级读取钥匙，不再等 run resolve 后的终态回填。可选回调：不支持运行中回填
-   * 的引擎（spawn 单轮、终态即回填）不调用，宿主语义不受影响。
+   * 编排层收到后立即回填 record.engineHandle 并落 entry——运行中的 GUI 经 entry
+   * 重建 record 即拿到①②级读取钥匙，不再等 run resolve 后的终态回填。可选回调：
+   * 不支持运行中回填的引擎（spawn 单轮、终态即回填）不调用，宿主语义不受影响。
+   * [池抽象降级 2026-09-13] 原 poolKey 成员与 onPoolResolved 回调（引擎声明隔离池
+   * key、retarget journal 路径）已随 poolKey 协议面退役删除——两引擎 poolKey 恒
+   * 'shared'（journal 固定落 engines/<id>/shared/），回调零信息量。
    */
-  onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef" | "poolKey">) => void;
+  onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /**
    * [U0 D10] 引擎 spawn 的子进程句柄注册钩子（宿主终止链记账）。引擎在 spawn 成功后
    * 同步回调（与 pi runSpawn 的 spawnedChildren.set 同构时机）；宿主据此把 child 注册进
@@ -237,19 +229,4 @@ export interface EnginePort {
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;
-
-  /**
-   * [u7a D5] 可选面：引擎在途任务只读快照（滚动重启推迟谓词的引擎侧输入——
-   * 权威源：docs/design/crash-forensics-and-watchdog.md §3.3 D5「推迟判定源 =
-   * relay ∪ 引擎池在途 ∪ pi 侧 extension 聚合上报」）。同步纯读、无副作用。
-   *
-   * 返回 null = 引擎不提供快照；成员缺席（undefined，pi 引擎不实现）= 无引擎侧
-   * 在途面——pi 形态的在途由 subagent-workflow extension 聚合上报覆盖（EnginePort
-   * 之外的第 4 通道，两通道互不替代）。可选成员保持向后兼容（port.ts 既有扩展
-   * 先例：listModels / validateModel / dispose 全为可选成员）。
-   *
-   * zcode 实现语义（显式裁决）：在途 = activeSessions 非空——poolKey 'shared' 的
-   * app-server 空闲常驻进程恒活，**禁止按进程存在判定**（会恒真、推迟常态化）。
-   */
-  inFlightSnapshot?(): { inFlight: number } | null;
 }

@@ -8,6 +8,8 @@
  *   === segmentsToText(同段)（含 badge 段时不等价的两条并存原因——边界空格不显式渲染 +
  *   展示投影 ≠ 序列化——见本文件下方 [MF-1] 组注释，文件头不复述原因以免口径分叉）
  * - [MF-2] submitEdit 编辑含命令的消息后 prompt 中命令只出现一次
+ * - [chat-flow-timestamp U2] turn.user.timestamp 行尾时刻（设计 §3 A4）：展示态 user-timestamp 槽显本地时刻；
+ *   编辑态不渲染该槽
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
@@ -157,6 +159,93 @@ describe('W4TC3: UserBubble skill badge', () => {
     expect(badge.exists()).toBe(true)
     expect(badge.text()).toContain('@build-api')
     expect(badge.classes()).toContain('text-accent')
+  })
+})
+
+// ── [D12] 混排消息 inline 化渲染（is-mixed 修饰 class）──
+// badge 是 inline span、text 段经 MarkdownRenderer 渲染为块级（.md-render div + markdown-it <p>），
+// 混排时块级边界使 badge 前后必然换行。isMixedContent 判定「同时含 text 段与非 text 段」时给
+// 气泡容器加 is-mixed，组件 scoped CSS 据此把 .md-render/段容器 div/p 置 inline（badge 与正文
+// 同流）。测试环境无布局引擎，锁定 DOM 机制面：修饰 class 的加与不加 + badge/text 段均可见。
+describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
+  /** 渲染 content prop 的 MarkdownRenderer stub（默认 stub 不输出文本） */
+  const MarkdownContentStub = {
+    name: 'MarkdownRenderer',
+    props: { content: { type: String, default: '' }, sessionId: { type: String, default: '' } },
+    template: '<span>{{ content }}</span>',
+  }
+
+  function mountWithContent(content: Segment[] | string) {
+    return mount(UserBubble, {
+      props: {
+        turn: makeTurn({
+          user: { id: 'u1', role: 'user', content, status: 'complete', timestamp: NOW } as Message,
+        }),
+        sessionId: 's1',
+        canEdit: false,
+        isSessionEditable: false,
+      },
+      global: {
+        provide: mockChatProvide(),
+        stubs: { MarkdownRenderer: MarkdownContentStub, ImageThumb: true },
+      },
+    })
+  }
+
+  function bubble(wrapper: ReturnType<typeof mount>) {
+    return wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+  }
+
+  it('[text, skill, text] 混排 → 气泡带 is-mixed，badge 与前后 text 段同处气泡可见流', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '先用' },
+      { type: 'skill', name: 'code-review' } as Segment,
+      { type: 'text', text: '再总结' },
+    ])
+    const el = bubble(wrapper)
+    // 修饰 class 生效（inline 化开关，组件 scoped CSS 据此选择器生效）
+    expect(el.classes()).toContain('is-mixed')
+    // 用户可见 DOM：badge 与前后 text 都在气泡内（同内联流的成员面）
+    expect(el.text()).toContain('先用')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
+    expect(el.text()).toContain('再总结')
+  })
+
+  it('file badge 混排（[text, file, text]）同样命中 is-mixed（场景 10-⑤ 非 skill badge 正向）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '改一下' },
+      { type: 'file', path: 'src/a.ts' } as Segment,
+      { type: 'text', text: '这个文件' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).toContain('is-mixed')
+    expect(el.find('[data-testid="msg-file-badge-1"]').exists()).toBe(true)
+    expect(el.text()).toContain('这个文件')
+  })
+
+  it('纯 text 多段消息（无 badge）→ 不加 is-mixed（复杂 markdown 排版不受影响的回归锁）', () => {
+    const wrapper = mountWithContent([
+      { type: 'text', text: '第一段' },
+      { type: 'text', text: '第二段' },
+    ])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('第一段')
+    expect(el.text()).toContain('第二段')
+  })
+
+  it('纯 string content（reload 侧单文档渲染）→ 不加 is-mixed', () => {
+    const wrapper = mountWithContent('纯文本消息')
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.text()).toContain('纯文本消息')
+  })
+
+  it('仅 badge 无 text（[skill]）→ 不加 is-mixed（无 text 段无需 inline 化）', () => {
+    const wrapper = mountWithContent([{ type: 'skill', name: 'code-review' } as Segment])
+    const el = bubble(wrapper)
+    expect(el.classes()).not.toContain('is-mixed')
+    expect(el.find('.text-reasoning').text()).toBe('code-review')
   })
 })
 
@@ -501,5 +590,44 @@ describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
     await submitDraft(wrapper, '改后的正文')
     expect(prompts).toEqual(['改后的正文'])
     expect(prompts[0]!.split('<xyz-skill').length - 1).toBe(0)
+  })
+})
+
+/* ── [chat-flow-timestamp U2] UserBubble 行尾时刻（设计 §3 A4）──
+ * turn.user.timestamp 有值 → 气泡左侧 user-timestamp 槽显本地时刻；编辑态（textarea 分支）
+ * 与展示态是 v-if / v-else 互斥分支，编辑态下整个展示分支（含时间槽）被替换。
+ * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
+  // 固定 epoch（非 Date.now()）：失败时可复现的确定值
+  const USER_TS = 1700000000000
+
+  function makeTurnWithTs(): MessageTurn {
+    return makeTurn({
+      user: { id: 'u1', role: 'user', content: 'hello world', status: 'complete', timestamp: USER_TS },
+    })
+  }
+
+  it('turn.user.timestamp 有值 → user-timestamp 槽文本 = formatClock(该值)（本地时刻）', () => {
+    const wrapper = mountBubble({ turn: makeTurnWithTs() })
+    const slot = wrapper.find('[data-testid="user-timestamp"]')
+    expect(slot.exists()).toBe(true)
+    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(USER_TS))
+  })
+
+  it('编辑态不渲染 user-timestamp 槽（v-if/v-else 互斥：编辑分支替换含时间槽的展示分支）', async () => {
+    // 编辑态触发与上方编辑态组同款：canEdit=true + 非 sessionEditable + hover actions 第 2 个按钮
+    // （该触发在本测试环境轻量可行，故直测而非仅靠 v-if 语义说明）
+    const wrapper = mountBubble({ turn: makeTurnWithTs(), canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user .opacity-0')
+    await actions.findAll('button')[1]!.trigger('click')
+    // 已进入编辑态（textarea 渲染）
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="user-timestamp"]').exists()).toBe(false)
   })
 })

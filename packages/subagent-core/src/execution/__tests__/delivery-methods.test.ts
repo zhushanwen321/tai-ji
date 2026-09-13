@@ -26,12 +26,12 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import * as lifecycle from "../lifecycle-manager.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
+import * as lifecycle from "../lifecycle/lifecycle-manager.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "delivery-test-"));
@@ -81,6 +81,9 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     record = makeIdleRecord();
     // sessionFile 用 agentDir 下路径（finalizeRoundToIdle 写 .idle sidecar 不留 /tmp 垃圾）
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync），否则续聊
+    // 误触 reopen 降级——fixture 补实体空文件。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] 轮终簿记归口 store.markRoundIdle（按 id 查内存）——record 须 register 进
     // store（生产链路 getRecordForAction/run 流程的 record 恒在内存，测试补齐同形态）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
@@ -109,7 +112,6 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
       recordId: record.id,
       resume: {
         sessionRef: { recordId: record.id, sessionFile: record.sessionFile },
-        poolKey: "shared",
       },
     });
 
@@ -121,22 +123,35 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("running");
   });
 
-  it("终态 closed record → throw 行动语言（D4 表 closed 硬拒格），不派发 run", async () => {
-    record.status = "closed";
-    // [H1 U2] D4 表 closed 硬拒格：closedReason 非 可重连集（undefined/gc）→ 硬拒 +
-    // start 新的指引（Continuation reviveOrThrow 文案）
-    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
-      /cannot be messaged or resumed/,
-    );
-    expect(fake.runs.length).toBe(0);
+  it("[U4 万物可续] 旧终态遗留位 record（idle + closedReason=gc）→ 直接接管派发，不硬拒（形态枚举 gate 消亡）", async () => {
+    record.status = "idle";
+    // [U4 / §3.2.3] 旧终态遗留位（closedReason 有值，无论是否可重连集）只是展示位，
+    // 不参与资格判定——message 到达直接翻回 running 派发新轮（万物可续）。
+    record.closedReason = "gc";
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(record.status).toBe("running");
+    expect(record.closedReason).toBeUndefined(); // 翻边清遗留位（notifyGate 门判据）
   });
 
-  it("record 无 sessionFile → 同步拒绝（D4 表锚点缺失格：no transcript anchor + re-dispatch 指引），不触发 kickOff", async () => {
+  it("[U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined，轮间空闲）→ 直接接管派发，不硬拒", async () => {
+    record.status = "idle";
+    // markSettled 轮收口 / 磁盘重建单规则产出的 idle 无旧终态遗留位——message 到达
+    // 直接翻回 running 派发新轮（万物可续）
+    expect(record.closedReason).toBeUndefined();
+    await service.chatActions.deliverChatMessage(record, "msg after settle");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(record.status).toBe("running");
+  });
+
+  it("[U4] record 无 sessionFile（从未开跑）→ 全新 session 直派（resume:undefined），不拒绝", async () => {
     record.sessionFile = undefined;
-    await expect(service.chatActions.deliverChatMessage(record, "msg")).rejects.toThrow(
-      /no transcript anchor/,
-    );
-    expect(fake.runs.length).toBe(0);
+    // [U4 / §3.2.3] 原锚点缺失同步拒绝格消亡：无锚 = 无历史可摘要，按全新 session
+    // 派发承接（新锚由 run 应答回填）。
+    await service.chatActions.deliverChatMessage(record, "msg");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    expect(fake.runs[0]!.ctx.resume?.resume).toBeUndefined();
+    expect(fake.runs[0]!.task.prompt).toBe("msg"); // 无锚无历史，不注入 reopen 摘要
   });
 
   it("record 无 controller → 投递 throw 行动语言（MF-4），不触发 kickOff", async () => {
@@ -166,6 +181,8 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     record = makeIdleRecord(); // chatMode:true, running, round=1
     // sessionFile：续聊锚点需要
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();
@@ -200,7 +217,7 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     await service.chatActions.deliverChatMessage(record, "msg");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../settled-watchdog.ts");
+    const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../lifecycle/settled-watchdog.ts");
     expect(hasSettledWatchdog(record.id)).toBe(true);
     expect(getSettledWatchdogPhase(record.id)).toBe("mid-round");
 
@@ -235,6 +252,8 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     service.initSession({ pi: makePi(), sessionId: "root-session" });
     record = makeIdleRecord();
     record.sessionFile = path.join(agentDir, "fake-session.jsonl");
+    // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
+    fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     // [U2a/B5] markRoundIdle 按 id 查 store 内存——record 须 register（见上 describe 注）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
     lifecycle._resetLifecycleState();
@@ -257,12 +276,12 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     await expect(service.chatActions.deliverChatMessage(record, "second msg")).resolves.toBeUndefined();
     expect(fake.runs.length).toBe(1);
     const continuation = (
-      // [R4 深绑改写] continuations 队列已迁 RunOrchestration 聚合——读取路径改经
-      // 聚合实例（断言对象与强度不变）。
+      // [2026-09-13 design-code-sync 接线] continuations 队列已迁 ChatRounds 聚合——
+      // 读取路径改经聚合实例（断言对象与强度不变）。
       service as unknown as {
-        runOrchestration: { continuations: Map<string, { pendingCount: number }> };
+        chatRounds: { continuations: Map<string, { pendingCount: number }> };
       }
-    ).runOrchestration.continuations.get(record.id);
+    ).chatRounds.continuations.get(record.id);
     expect(continuation?.pendingCount).toBe(1);
 
     // 轮终（应答收敛）→ drain → 队列消息派发为下一轮（单写者前置满足）

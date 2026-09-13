@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
 import type { JournalFsDeps } from "../../common/event-journal.ts";
-import type { AgentEvent } from "../../../types.ts";
+import type { AgentEvent } from "../../../assembly/types.ts";
 
 let tmpRoot: string | undefined;
 

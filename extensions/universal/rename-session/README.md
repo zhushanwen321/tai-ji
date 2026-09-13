@@ -53,7 +53,7 @@ pi install npm:@zhushanwen/pi-rename-session
 2. **config 的 `enabled` 字段**（默认 false）：flag 不存在时生效，是原生 pi CLI 用户的开关。
 3. **默认值**（false）：以上两层均未设置时。
 
-> [HISTORICAL] 原最高优先级的 `PI_RENAME_*` 环境变量覆盖层已删（全仓 0 生产 setter，4 键中 3 键从未被用过）——预置该前缀的环境变量不再有任何效果。rename-session 相关精简项裁决见本仓 `docs/design/rename-session-three-modes.md` 附录 A。
+> [HISTORICAL] 原最高优先级的 `PI_RENAME_*` 环境变量覆盖层已删（全仓 0 生产 setter，4 键中 3 键从未被用过）——预置该前缀的环境变量不再有任何效果。rename-session 相关精简项裁决见原设计文档 rename-session-three-modes.md 附录 A（已删除，git 可追溯）。
 
 ## 命令
 

@@ -28,15 +28,17 @@ import {
 
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
-vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../state-marker.ts", () => stateMarkerModule());
-vi.mock("../manifest-store.ts", () => manifestStoreModule());
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../persistence/alive-store.ts")>()));
+vi.mock("../persistence/state-marker.ts", () => stateMarkerModule());
+vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { clearEngines } from "../engine/registry.ts";
+import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 
 // ── 辅助：service 构造（与 execute-nesting.test.ts setup 等价）──
 
@@ -94,7 +96,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
   });
 
   // ============================================================
-  // worktreeManager.create 抛错 → record 收尾为 failed + 原错外抛
+  // worktreeManager.create 抛错 → [U5] 失败轮 settle（不终态化）+ 原错外抛
   // ============================================================
   it("worktreeManager.create 失败时 finalizeFailed 收尾 record 并抛原错", async () => {
     const { service, worktreeManager } = setup();
@@ -104,9 +106,8 @@ describe("executeAndAwait worktree 失败收尾", () => {
       throw createErr;
     });
 
-    // spy store.archive：finalizeFailed 真实收尾链（CAS→completeRecord→archive）的最末一步。
-    // 捕获传入 archive 的 record，断言其 status 已被推向 "failed"（证明 finalizeFailed 完整执行，
-    // 而非仅 tryTransition 中途返回）。archive 真实执行（不 mockImplementation）以保留移出 running map 的语义。
+    // spy store.archive：[U5] 失败轮 settle（markRoundIdle）不终态化——archive
+    // 必须零调用（旧终态化退役）；失败收口 = record 保持 running-resumable 等续聊。
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
 
@@ -120,14 +121,14 @@ describe("executeAndAwait worktree 失败收尾", () => {
       }),
     ).rejects.toBe(createErr);
 
-    // finalizeFailed 完整执行：record 经 CAS→completeRecord 推到 failed 终态后 archive。
-    expect(archiveSpy).toHaveBeenCalledTimes(1);
-    // store 现已强类型为 RecordStore → archive 入参为 ExecutionRecord，无需 `as` 断言。
-    const archivedRecord = archiveSpy.mock.calls[0]![0];
-    expect(archivedRecord.status).toBe("closed");
-    // archive 后 record 已移出 running map → listRunning 空、getMutable 取不到。
-    expect(store.listRunning()).toHaveLength(0);
-    expect(store.getMutable(archivedRecord.id)).toBeUndefined();
+    // [U5] 失败 settle 完整执行：archive 零调用 + lastError 落 record（markRoundIdle
+    // 簿记⑨——失败原因可达）+ record 留内存（万物可续，可续聊）。
+    expect(archiveSpy).toHaveBeenCalledTimes(0);
+    const records = store.listAllActive();
+    expect(records).toHaveLength(1);
+    expect(records[0]!.lastError).toBe("worktree create boom");
+    expect(records[0]!.resumable).toBe(true);
+    expect(store.getMutable(records[0]!.id)).toBeDefined();
   });
 
   // ============================================================
@@ -167,5 +168,43 @@ describe("executeAndAwait worktree 失败收尾", () => {
 
     await expect(execP).rejects.toThrow("cancelled during worktree creation");
     expect(cleanupSpy).toHaveBeenCalledWith(handle);
+  });
+});
+
+// ============================================================
+// [S5] execute(worktree:true) 创建路径置 record.hadWorktree
+// （三层缺口之一：仅 cold-lookup 跨重启水合置位时，进程内归档寻回的重建守卫
+//  `hadWorktree === true && !worktreeHandle` 第一条永不满足——归档清句后无从重建）
+// ============================================================
+describe("execute(worktree:true) 创建即置 hadWorktree", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearEngines();
+  });
+
+  it("execute 主链（chatMode）：worktree 创建成功 → record.hadWorktree=true + handle 绑定", async () => {
+    const { service, worktreeManager } = setup();
+    registerFakePiEngine();
+    const handle = Object.freeze({
+      path: "/tmp/wt-had-worktree",
+      branch: "pi-sub-had-worktree",
+      baseCommit: "abc123",
+      mainCwd: "/repo",
+    }) as Awaited<ReturnType<WorktreeManager["create"]>>;
+    vi.spyOn(worktreeManager, "create").mockResolvedValue(handle);
+
+    const execHandle = await service.execute({
+      task: "hadWorktree flag on create",
+      slug: "had-worktree",
+      conversation: true,
+      worktree: true,
+      ctxModel,
+    });
+
+    const store = getStore(service);
+    const rec = store.getMutable(execHandle.subagentId);
+    // [S5] 创建即置（归档 markArchived 清句后，重建守卫判据由本标志承载）
+    expect(rec?.hadWorktree).toBe(true);
+    expect(rec?.worktreeHandle).toBe(handle);
   });
 });

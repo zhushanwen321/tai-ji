@@ -1,6 +1,6 @@
 /**
- * 后台任务收殓器（runtime 侧，双触发面 D2——docs/design/file-lock-unification-and-
- * reaper-sink.md §2.3 目标态数据流 / §3.2 D2 决策表 / §3.3 挂点论证）。
+ * 后台任务收殓器（runtime 侧，双触发面 D2——docs/architecture/file-lock-unification-
+ * and-reaper-sink.md §2.3 目标态数据流 / §3.2 D2 决策表 / §3.3 挂点论证）。
  *
  * 职责（G2 职责归位）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，
  * extension 不再做全局扫描/全局锁。判定逻辑移植自 extensions/universal/

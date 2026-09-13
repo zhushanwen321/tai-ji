@@ -132,17 +132,17 @@ describe('R4 文件范围', () => {
       expect(
         /^(packages|apps|scripts)\//.test(rel) ||
           rel === 'AGENTS.md' ||
-          rel === 'docs/troubleshooting.md' ||
+          rel === 'docs/TROUBLESHOOTING.md' ||
           rel === 'docs/architecture/data-source-registry.md',
         `越界文件: ${rel}`,
       ).toBe(true)
       expect(rel).not.toMatch(/node_modules|^packages\/[^/]+\/dist\//)
     }
   })
-  it('明列 .md 入域（AGENTS.md / docs/troubleshooting.md / docs/architecture/data-source-registry.md）', () => {
+  it('明列 .md 入域（AGENTS.md / docs/TROUBLESHOOTING.md / docs/architecture/data-source-registry.md）', () => {
     const files = collectFiles()
     expect(files.some((f) => f === join(ROOT, 'AGENTS.md'))).toBe(true)
-    expect(files.some((f) => f === join(ROOT, 'docs/troubleshooting.md'))).toBe(true)
+    expect(files.some((f) => f === join(ROOT, 'docs/TROUBLESHOOTING.md'))).toBe(true)
     expect(files.some((f) => f === join(ROOT, 'docs/architecture/data-source-registry.md'))).toBe(true)
   })
   it('普通 .md 不入域（fixtures README / probe 历史报告属时点性记录，出守卫域）', () => {
@@ -150,7 +150,7 @@ describe('R4 文件范围', () => {
     const mds = files.filter((f) => f.endsWith('.md'))
     expect(
       mds.every(
-        (f) => f.endsWith('AGENTS.md') || f.endsWith('troubleshooting.md') || f.endsWith('data-source-registry.md'),
+        (f) => f.endsWith('AGENTS.md') || f.endsWith('TROUBLESHOOTING.md') || f.endsWith('data-source-registry.md'),
       ),
     ).toBe(true)
   })

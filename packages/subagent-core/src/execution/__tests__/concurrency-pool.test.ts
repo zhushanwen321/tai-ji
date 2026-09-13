@@ -1,7 +1,7 @@
 // src/__tests__/concurrency-pool.test.ts
 import { describe, expect, it } from "vitest";
 
-import { DefaultConcurrencyPool } from "../concurrency-pool.ts";
+import { DefaultConcurrencyPool } from "../assembly/concurrency-pool.ts";
 
 describe("DefaultConcurrencyPool", () => {
   it("allows up to maxConcurrent concurrent tasks", async () => {

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
  * check-publish-surface.mjs —— packages/ 方向 npm 发布面一致性守卫
- * （约束 C-proc-11，设计 docs/design/npm-publish-surface-guard.md）。
+ * （约束 C-proc-11，设计 docs/architecture/npm-publish-surface-guard.md）。
  *
  * 背景：npm 对 files 白名单里磁盘上不存在的条目静默跳过——白名单承诺与构建产出
  * 之间零反馈。subagent-core 0.4.0/0.5.1 tarball 缺 dist.bundle（files 声明了该档，
  * 但发布流程不构建它）即此缺口的事故形态。
  *
  * 动态发现：扫 packages/ 下 private !== true 且 files 含 dist 前缀目录条目的包
- * （当前 6 包：@xyz-agent/extension-protocol / @xyz-agent/session-delivery /
+ * （当前 7 包：@xyz-agent/extension-protocol / @xyz-agent/session-delivery /
  * @zhushanwen/subagent-core / @zhushanwen/subagent-engine-sdk /
- * @zhushanwen/pi-subagent-cli / @zhushanwen/zcode-subagent-cli；
- * 未来新增 dist 发布包自动纳入守卫面）。
+ * @zhushanwen/pi-subagent-cli / @zhushanwen/zcode-subagent-cli /
+ * @zhushanwen/pi-rpc；未来新增 dist 发布包自动纳入守卫面）。
  *
  * 检查项（设计 D5，双向闭合「files ↔ 产物」两个漂移方向）：
  * 1. 幽灵条目（幽灵声明方向）：files 每个条目磁盘存在且非空——判定信号以磁盘
@@ -26,6 +26,13 @@
  *    ③ 裸包名形态红（指向 tsup noExternal）；子路径形态须命中豁免清单（fail-closed）
  * 3. 产物目录反向覆盖（漏声明方向）：包目录下磁盘存在的顶层 dist* 目录必须被
  *    files 至少一个条目覆盖（目录条目或同名精确条目，允许无尾斜杠形态）。
+ * 4. workspace 依赖发布闭包（依赖可解析性，2026-09 pi-subagent-cli → pi-rpc
+ *    首发缺口）：dependencies / peerDependencies 指向 workspace 内包的依赖 X，
+ *    「registry 可解析」静态信号 = X/CHANGELOG.md 存在（changesets changelog 每次
+ *    version bump 写入——version 与 publish 同链紧邻）∨ X 有 pending changeset
+ *    （本次发布会发布）。两信号皆无 → 红：publish 替换 workspace:* 为 ^<version>
+ *    后 registry E404，依赖方 tarball 装不上（npm install 阶段，晚于检查项 1-3）。
+ *    零网络 fail-closed；外部依赖（ajv 等）registry 存在性零网络不可验，不纳入。
  *
  * 体积估算 warning（不红，设计 D7 机器回显）：files 条目磁盘求和超 5MB 输出
  * warning，提示触发 D7 重审——重审触发不靠发布者人眼看 npm pack 输出。
@@ -50,6 +57,7 @@ export {
   checkGhostEntries,
   checkSelfContained,
   checkReverseCoverage,
+  checkDependencyClosure,
   estimateFilesSize,
   runGuard,
 }
@@ -292,6 +300,93 @@ function checkReverseCoverage(pkgDir, files) {
   return problems
 }
 
+// ---------- 检查项 4：workspace 依赖发布闭包（依赖可解析性） ----------
+
+/**
+ * pending changeset 集合：扫 .changeset/*.md frontmatter 的包名（`'<pkg>': patch`
+ * 行）。目录缺失（tmpdir fixture / 未初始化）返回空集——空集只影响检查项 4 的
+ * 「将随本次发布」信号，不是错误。
+ */
+function scanPendingChangesetPackages(changesetDir) {
+  const pkgs = new Set()
+  if (!existsSync(changesetDir)) return pkgs
+  for (const e of readdirSync(changesetDir, { withFileTypes: true })) {
+    if (!e.isFile() || !e.name.endsWith('.md') || e.name === 'README.md') continue
+    const src = readFileSync(join(changesetDir, e.name), 'utf-8')
+    const fm = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+    if (!fm) continue
+    for (const line of fm[1].split(/\r?\n/)) {
+      const m = line.match(/^["']?(@[\w.-]+\/[\w.-]+|[\w.-]+)["']?\s*:/)
+      if (m) pkgs.add(m[1])
+    }
+  }
+  return pkgs
+}
+
+/** workspace 包索引：packages/* 的 name → { dir, private }（检查项 4 的成员判定域） */
+function indexWorkspacePackages(packagesDir) {
+  const byName = new Map()
+  if (!existsSync(packagesDir)) return byName
+  for (const e of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue
+    const pkgFile = join(packagesDir, e.name, 'package.json')
+    if (!existsSync(pkgFile)) continue
+    const pkg = JSON.parse(readFileSync(pkgFile, 'utf-8'))
+    if (typeof pkg.name === 'string') {
+      byName.set(pkg.name, { dir: dirname(pkgFile), private: pkg.private === true })
+    }
+  }
+  return byName
+}
+
+/**
+ * 检查项 4：dependencies / peerDependencies 中指向 workspace 内包的依赖 X，必须
+ * 满足「registry 可解析」二选一：X/CHANGELOG.md 存在（changesets changelog 每次
+ * version bump 写入，version 与 publish 同链紧邻 → 链上产物 ≈ 已发布）∨ X 有
+ * pending changeset（本次发布会发布）。两信号皆无 → 红。
+ *
+ * 信号误报面（注释备案）：假绿仅限「version 已跑、publish 未跑」中间态——该态
+ * 发布线整体红（changeset publish 报 nothing to publish 之外的网络错），非静默
+ * 缺口；假红方向安全（X 已发布但 CHANGELOG 缺失 → 红 → 按指引核查发布链漂移）。
+ * devDependencies 不进 tarball 依赖树不查；外部依赖（ajv 等）registry 存在性
+ * 零网络不可验，不在成员索引即跳过（与本脚本零第三方依赖取向一致）。
+ *
+ * @param {string} pkgDir 依赖方包目录（读 dependencies 面与核对 CHANGELOG 相对定位）
+ * @param {Map<string, {dir: string, private: boolean}>} workspaceByName
+ * @param {Set<string>} pendingPkgs scanPendingChangesetPackages 结果
+ */
+function checkDependencyClosure(pkgDir, workspaceByName, pendingPkgs) {
+  const problems = []
+  const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf-8'))
+  const deps = { ...(pkg.dependencies ?? {}), ...(pkg.peerDependencies ?? {}) }
+  for (const name of Object.keys(deps)) {
+    const ws = workspaceByName.get(name)
+    if (!ws) continue
+    if (ws.private) {
+      problems.push(
+        [
+          `dependencies 中的 workspace 包 "${name}" 是 private 包（永不发布）——npm 消费方安装本包时依赖解析必失败`,
+          `  修复：private 包不得进入 npm 发布包的 dependencies / peerDependencies；`,
+          `  需要其能力则内联进构建产物（tsup noExternal）后从依赖声明移除`,
+        ].join('\n'),
+      )
+      continue
+    }
+    const hasChangelog = existsSync(join(ws.dir, 'CHANGELOG.md'))
+    if (hasChangelog || pendingPkgs.has(name)) continue
+    problems.push(
+      [
+        `dependencies 中的 workspace 包 "${name}" 既无 CHANGELOG.md（未经历过发布链）也无 pending changeset（本次不会发布）`,
+        `  ——publish 把 workspace:* 替换为 ^<version> 后 registry 无此包，npm install 解析 E404、tarball 装不上`,
+        `  （首发缺口同型：pi-subagent-cli 曾声明从未发布的 @zhushanwen/pi-rpc，2026-09 PR review 发现）`,
+        `  修复：为 ${name} 新增 changeset（格式对照 .changeset/ 现有条目；新包首发惯例 type=minor）后重跑本守卫；`,
+        `  若 ${name} 实际已发布，则核查其 CHANGELOG.md 为何缺失（发布链漂移信号）`,
+      ].join('\n'),
+    )
+  }
+  return problems
+}
+
 // ---------- 体积估算（设计 D7 机器回显，不红） ----------
 
 /** files 条目磁盘求和（目录递归 / glob 匹配 / 精确文件；幽灵条目自然跳过） */
@@ -327,11 +422,14 @@ function runGuard(rootDir) {
   const notices = []
   const warnings = []
   const guarded = discoverGuardedPackages(join(rootDir, 'packages'))
+  const workspaceByName = indexWorkspacePackages(join(rootDir, 'packages'))
+  const pendingPkgs = scanPendingChangesetPackages(join(rootDir, '.changeset'))
   for (const pkg of guarded) {
     const label = `✗ ${pkg.name}: `
     const pkgRel = relative(rootDir, pkg.dir)
     for (const p of checkGhostEntries(pkg.dir, pkg.files, pkg.name)) failures.push(label + p)
     for (const p of checkReverseCoverage(pkg.dir, pkg.files)) failures.push(label + p)
+    for (const p of checkDependencyClosure(pkg.dir, workspaceByName, pendingPkgs)) failures.push(label + p)
     const bundleDir = join(pkg.dir, 'dist.bundle')
     if (existsSync(bundleDir) && statSync(bundleDir).isDirectory()) {
       const { problems, notices: probeNotices } = checkSelfContained(
@@ -345,7 +443,7 @@ function runGuard(rootDir) {
     const bytes = estimateFilesSize(pkg.dir, pkg.files)
     if (bytes > SIZE_WARN_BYTES) {
       warnings.push(
-        `${pkg.name}: files 条目磁盘求和 ${(bytes / 1024 / 1024).toFixed(2)}MB 超 5MB——触发设计 D7 重审（重审双档发布形态，docs/design/npm-publish-surface-guard.md §3.3 D7）`,
+        `${pkg.name}: files 条目磁盘求和 ${(bytes / 1024 / 1024).toFixed(2)}MB 超 5MB——触发设计 D7 重审（重审双档发布形态，docs/architecture/npm-publish-surface-guard.md §3.3 D7）`,
       )
     }
   }
@@ -364,7 +462,7 @@ function main() {
     )
     process.exit(1)
   }
-  console.log(`✓ 发布面一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 全绿）`)
+  console.log(`✓ 发布面一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 / workspace 依赖发布闭包 全绿）`)
   process.exit(0)
 }
 

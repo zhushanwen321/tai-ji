@@ -2,8 +2,8 @@
 // check-engine-sdk-boundary.mjs
 //
 // 引擎 SDK 边界守卫（W1 交付，impl-plan §2.1「守卫基线」：新增 SDK 代码前先建守卫）。
-// 设计权威源：docs/design/subagent-engine-protocolization.md §3.5.1 不变量 +
-// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「守卫基线」。
+// 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 不变量 +
+// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「守卫基线」（impl-plan 已删除，git 可追溯）。
 //
 // 不变量（设计 §3.10 实施不变量 1）：**SDK 不得 import core**——否则 core → SDK → core
 // 成环。本守卫扫描 @zhushanwen/subagent-engine-sdk 的源码与 dist：
@@ -20,7 +20,7 @@
 //   - 只检查模块说明符（import/require/export from/dynamic import），不扫注释文本——
 //     源文件头部的「源 = packages/subagent-core/src/...」参照注释是合法的迁移留痕。
 //
-// 运行：node scripts/check-engine-sdk-boundary.mjs（.githooks 下脚本由仓根相对路径
+// 运行：node .githooks/check-engine-sdk-boundary.mjs（.githooks 下脚本由仓根相对路径
 // 定位包目录；违规时 exit 1 并逐条列出文件:行号:违规说明符 + 恢复指引）。
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
@@ -135,7 +135,7 @@ function main() {
   if (violations.length > 0) {
     console.error(
       `[check-engine-sdk-boundary] ${violations.length} violation(s): SDK must not import core ` +
-        `(invariant 1, docs/design/subagent-engine-protocolization.md §3.10)`,
+        `(invariant 1, docs/architecture/subagent-engine-protocolization.md §3.10)`,
     );
     for (const v of violations) {
       console.error(`  ${relative(REPO_ROOT, v.file)}:${v.lineNo}: ${v.specifier}`);

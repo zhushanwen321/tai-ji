@@ -42,8 +42,9 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
 }
 
 const RUNTIME_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'runtime', 'src') + '/').href
-// [merge dev-0.9.17 2026-09] shared/src 前缀：logger.ts 的 readLogKeepDays（crash-resilience
-// D6-⑦）运行时 import '@xyz-agent/shared' → workspace exports 解析到 src/index.ts，其内部
+// [merge dev-0.9.17 2026-09] shared/src 前缀：logger.ts 的 readLogKeepDays
+// （crash-resilience D6-⑦，该设计文档已删 git 可追溯）运行时 import '@xyz-agent/shared'
+// → workspace exports 解析到 src/index.ts，其内部
 // 是 bundler resolution 风格的无扩展名相对 import（'./protocol'）——Node ESM 严格解析吃不下，
 // 与 runtime src 的 .js 后缀问题同型，hook 同款兜底（.ts 回退，bare specifier 不碰）。
 const SHARED_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'shared', 'src') + '/').href

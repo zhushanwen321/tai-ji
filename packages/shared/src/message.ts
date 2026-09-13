@@ -214,7 +214,9 @@ export interface BgNotifyRecord {
   id: string
   /** 扩展状态枚举（v4 B-1 两态）：
    *  running = 对话模式轮次完成（每轮送达，携带本轮结果，等待下一轮续聊，非终态）；
-   *  closed = 统一终态（含 cancelled/gc 等，closedReason 表达 L2 原因）。
+   *  closed = 统一终态载体（含 cancelled/gc 等，closedReason 表达 L2 原因；永久会话
+   *  模型 U5 起 close（收起）的「已收起」提示与 one-shot 轮终亦经本值送达——终态概念
+   *  删除后 closed 只是通知文案族的载荷词，不再代表会话结束）。
    *  done/failed/cancelled 为 legacy 兼容值（v4 之前旧版扩展产物，历史 session 落盘存在）。 */
   status: 'done' | 'failed' | 'cancelled' | 'closed' | 'running'
   agent: string
@@ -341,7 +343,7 @@ function parseSingleRecord(d: Record<string, unknown>): BgNotifyRecord | null {
 }
 
 // ── Flow-2 代码变更审查数据契约（FileChanges 通道）──────────────────
-// 依据：docs/page-design/archive/v3/flow-2-code-review/spec.md（§S3 变更集聚合 + §状态机·变更集卡）
+// 依据：docs/architecture/v3-specs/flow-2-code-review/spec.md（§S3 变更集聚合 + §状态机·变更集卡）
 //      （v3 重建审计档案 wave-W11/W14 已随 .v3-audit/ 清理，需求追溯见 git 历史）
 // 本契约只定义类型，runtime 解析方案见 ADR-0024，chat store 数据流由 flow-2 完整实施落地。
 

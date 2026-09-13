@@ -144,22 +144,13 @@
         }
       },
       {
-        "id": "rev-pool-101",
-        "method": "host/poolResolved",
-        "params": {
-          "runId": "run-fake-record",
-          "poolKey": "shared"
-        }
-      },
-      {
         "id": "rev-ready-102",
         "method": "host/handleReady",
         "params": {
           "runId": "run-fake-record",
           "sessionRef": {
             "sessionId": "sess-fixture"
-          },
-          "poolKey": "shared"
+          }
         }
       },
       {
@@ -225,17 +216,6 @@
         }
       },
       {
-        "id": "rev-perm-106",
-        "method": "host/permission",
-        "params": {
-          "runId": "run-fake-record",
-          "request": {
-            "action": "bash",
-            "detail": "redacted"
-          }
-        }
-      },
-      {
         "id": "rev-ask-107",
         "method": "host/askUser",
         "params": {
@@ -276,7 +256,6 @@
             "sessionRef": {
               "sessionId": "sess-fixture"
             },
-            "poolKey": "shared",
             "adapterVersion": "fake-adapter-1"
           },
           "outcome": {
@@ -303,7 +282,6 @@
         "sessionRef": {
           "sessionId": "sess-fixture"
         },
-        "poolKey": "shared",
         "adapterVersion": "fake-adapter-1"
       },
       "outcome": {

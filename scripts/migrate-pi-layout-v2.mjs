@@ -710,7 +710,7 @@ function formatAbortedLines(aborted) {
 function formatBackupStatsLines(report) {
   if (!report.backupStats) return []
   return [
-    `备份体积：${report.backupStats.files} 个文件 / ${report.backupStats.bytes} 字节（清理指引见 docs/troubleshooting.md 迁移节；备份不自动删）`,
+    `备份体积：${report.backupStats.files} 个文件 / ${report.backupStats.bytes} 字节（清理指引见 docs/TROUBLESHOOTING.md 迁移节；备份不自动删）`,
   ]
 }
 

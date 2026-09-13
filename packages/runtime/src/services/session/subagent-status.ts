@@ -16,6 +16,10 @@ import type { SubagentStatus } from '@xyz-agent/shared'
 export function normalizeSubagentStatus(status: string | undefined): SubagentStatus {
   if (!status) return 'running'
   switch (status) {
+    case 'idle':
+      // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在飞可续聊（entry
+      // 写面 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
+      return 'idle'
     case 'done':
     case 'completed':
     case 'success':

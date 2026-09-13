@@ -6,7 +6,7 @@
  * var()（见 tokens.test.ts TC2 探测结论），归 scripts/token-consume-check.mjs
  * 的 chromium 轨，不在本模块。
  *
- * SSOT 变量名：docs/page-design/design-tokens.md（ADR-0018 归一命名）。
+ * SSOT 变量名：docs/DESIGN.md §4（ADR-0018 归一命名）。
  * v3 style.css 与 v6 tokens.css 变量名几乎一致，仅值不同（D5），故本模块对
  * v3→v6 迁移都成立。
  */

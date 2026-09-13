@@ -86,25 +86,11 @@
         </template>
       </Virtualizer>
 
-      <!-- [chat-pin-bottom-fix D2] 尾部块容器：Virtualizer 之后的三个文档流块收编于此
+      <!-- [chat-pin-bottom-fix D2] 尾部块容器：Virtualizer 之后的两个文档流块收编于此
            （仍在滚动容器文档流内）。高度经 RO 实测注入 useVirtuaFollow endOffset
            （offset=tailHeight 即真实底部）。新增尾部文档流块必须放进本容器（§4.4 结构护栏），
            且本容器保持无定位/无尺寸样式（tailHeight = 视觉尾部总高的前提）。 -->
       <div ref="tailEl">
-        <!-- defer 队列 pending 气泡（session-occupancy u4b / D4 入队即显）：Virtualizer 之后的
-             文档流 block，视觉位于对话流末尾（所有已落盘消息之后）。条目按入队序排列；投递确认
-             （message_end(user) → core ① → confirmDelivery）后逐条出队转正常态（appendUser 入流，
-             条目从本区消失）。与 compacting 提示的堆叠：气泡属对话流内容，先于系统态行。 -->
-        <div v-if="pendingEntries.length > 0" class="py-1" data-testid="pending-bubble-list">
-          <PendingBubble
-            v-for="entry in pendingEntries"
-            :key="entry.id"
-            :entry="entry"
-            :session-id="sessionId"
-            @remove="onRemovePending"
-          />
-        </div>
-
         <!-- ActivityStrip 活动条（session-occupancy u6a / D7 展示统一）：对话流尾部单一的
              「进行中」指示位，收编原 compacting 浮层 / executing bash 行 / TurnMeta dispatching
              思考占位三处分散指示（优先级 compacting > bash > thinking，数据源 sessionPhase
@@ -199,11 +185,8 @@ import { useSubagentThinking } from '@/composables/panel/useSubagentThinking'
 import { Turn, SystemNotice, BashOutputBlock, TurnRail, ChatViewDepsKey, TruncatedHistoryBar } from '@xyz-agent/ui'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import ForkNotice from './ForkNotice.vue'
-import PendingBubble from './message-stream/PendingBubble.vue'
 // 活动条（u6a / D7 展示统一）：compacting/bash/thinking 行的单一渲染位（原三处分散指示收编）。
 import ActivityStrip from './message-stream/ActivityStrip.vue'
-// defer 队列（u4b / D4）：pending 气泡数据源组装封装（useSessionPendingEntries）。
-import { useSessionPendingEntries } from '@/composables/panel/useCompactQueue'
 import SkillNoticeInline from './SkillNoticeInline.vue'
 import { useSkillNoticeStreamItems } from '@/composables/panel/useSkillNoticeStream'
 import { useForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
@@ -258,10 +241,6 @@ const currentMessages = computed(() => chat.getMessages(props.sessionId))
 
 /** session id（template 内多处引用：Turn :session-id / rail 等）。 */
 const sessionId = computed(() => props.sessionId)
-
-/** defer 队列 pending 条目 + × 撤销（u4b / D4 入队即显）：组装封装见 useCompactQueue.ts
- *  （useSessionPendingEntries，自本文件拆出——≤300 行规范；撤销仅对未提交条目开放）。 */
-const { pendingEntries, onRemovePending } = useSessionPendingEntries(sessionId)
 
 /** 执行中 bash 瞬时态（W1 fix-chat-flow-order D2）：bashStart 置 / bashResult·错误路径清，
  *  不进 messages（执行中反馈 ephemeral 通道；run 结束后 bashExecution entry 入流承担持久语义）。 */

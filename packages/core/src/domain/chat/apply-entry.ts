@@ -319,6 +319,10 @@ function fillHostToolCall(host: Message, matched: ToolCall, body: PiMessageBody)
     ...(fill.isError && { status: 'error' as const }),
     ...(fill.details !== undefined && { details: fill.details }),
     ...(fill.images !== undefined && { images: fill.images }),
+    // [chat-flow-timestamp U1] endTime 权威回填（= toolResult body.timestamp，缺失不设字段）：
+    // live（tool_call_end/message_end 帧经 commitToolResultMessage）与 reload（replayEntries）
+    // 两通路共用本函数，同源覆盖 live overlay 的 Date.now() 即时值（设计 §2.1）。
+    ...(fill.endTime !== undefined && { endTime: fill.endTime }),
   }
   // matched 恒取自 host.toolCalls（调用点配对保证）；undefined 分支不可达，防御保引用
   const tcs = host.toolCalls
@@ -485,7 +489,23 @@ function commitToolResultMessage(c: ChatStateCollector, body: PiMessageBody): vo
   // 恒先到，其 entry 含 hook 改写后内容、与 overlay 收口同值），故双喂入 [t_end, m_end] ≡
   // 单喂入 [t_end] 对任意帧序/丢失组合构造成立——异常时序下不再产生重复孤儿永久残留
   // （live/reload 漂移源消灭）。无 toolCallId 的畸形 toolResult 无键可去重，维持原语义。
+  // [chat-flow-timestamp U3] endTime 例外（last-wins）：首条帧（tool_call_end 重构）的
+  // body.timestamp 是客户端时钟，后到的 message_end 才携带 pi 权威落盘时刻——endTime 若
+  // 跟随首条则 live ≠ reload（Gate A 实测：runtime 等价性 4 用例 endTime deep-equal 红）。
+  // 故去重命中分支放行 endTime 单字段覆盖（copy-on-write 保持），其余字段维持首条版本
+  // （两帧内容同值，见上）。
   if (typeof body.toolCallId === 'string' && c.hasDeliveredToolResult(body.toolCallId)) {
+    const anchor = c.peekLastAssistantWithToolCalls()
+    const matched = anchor?.message.toolCalls?.find((t) => t.id === body.toolCallId)
+    if (anchor !== undefined && matched !== undefined && typeof body.timestamp === 'number') {
+      const tcs = anchor.message.toolCalls
+      if (tcs !== undefined) {
+        c.replaceMessageAt(anchor.index, {
+          ...anchor.message,
+          toolCalls: tcs.map((t) => (t === matched ? { ...matched, endTime: body.timestamp } : t)),
+        })
+      }
+    }
     return
   }
   // 窗口局部配对：只查最近一条带 toolCalls 的消息（迁移前 lastAssistantWithToolCalls 语义）

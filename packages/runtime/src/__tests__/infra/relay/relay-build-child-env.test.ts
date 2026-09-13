@@ -1,5 +1,5 @@
 /**
- * RelayRegistry.buildChildEnv 出站接线单测（U4-B8，docs/design/env-propagation-boundary.md §5-U4/D4）。
+ * RelayRegistry.buildChildEnv 出站接线单测（U4-B8，docs/architecture/env-propagation-boundary.md §5-U4/D4）。
  *
  * 覆盖验收断言点：
  * - 五键剥离范式保留（RELAY_ENV_* 经 extras undefined=删除语义迁入构建器）；

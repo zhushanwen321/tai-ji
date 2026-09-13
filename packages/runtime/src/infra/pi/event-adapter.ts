@@ -323,7 +323,8 @@ function emptyMessagesDegradedTurnEnd(sid: string): PiTranslatedEvent[] {
   console.warn(`[EventAdapter] agent_end with empty messages (degraded to turn-end{error}) sid=${sid}`)
   return [{
     kind: 'turn-end',
-    message: { type: 'message.complete', payload: { sessionId: sid, stopReason: 'error' } },
+    // willRetry=false：降级路径拿不到 pi 的 willRetry，按「不重试」终态处理（前端照常发声/收口）。
+    message: { type: 'message.complete', payload: { sessionId: sid, stopReason: 'error', willRetry: false } },
     stopReason: 'error',
   }]
 }
@@ -389,11 +390,18 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
   const { rawReason, usage, responseModel, diagnostics, errorMessage } = extractAgentEndFields(lastMsg, extras)
   const finalContent = extractFinalContent(extras)
   const stopReason = STOP_REASON_MAP[rawReason] ?? rawReason
+  // [retry-sound] willRetry 透传（pi agent-session.ts 恒发，pi-protocol.ts PiAgentEndEvent.willRetry）：
+  // pi 每个 LLM attempt 失败都结束当次 agent loop 并发 agent_end，重试经 agent.continue() 续跑——
+  // willRetry=true 表示「本次 error 是中间失败，pi 将自动重试」，turn 并未结束。前端完成提示音
+  // （useCompletionNotify）据此静音中间失败：只有 willRetry=false 的终态（重试成功 / 重试用尽 /
+  // 不可重试错误）才发声。其余消费方（chat 流收口/错误气泡）不读此字段，行为不变。
+  const willRetry = event.willRetry === true
   const message: ServerMessage = {
     type: 'message.complete',
     payload: {
       sessionId: sid,
       stopReason,
+      willRetry,
       usage: toUsageTokens(usage),
       responseModel,
       diagnostics,
@@ -1565,7 +1573,8 @@ export class EventAdapter {
       inflightMirror.applyReport(this.sessionId, report)
       const requestId = String((event as PiExtensionUiRequestEvent).id ?? '')
       // fire-and-forget 的送达判定（D5 缺席语义②）：reporter 侧 resolve(undefined) 与超时
-      // 不可区分，必须显式 ack 才能区分「已送达」与「旧版 runtime 无路由」。
+      // 不可区分，必须显式 ack 才能区分「已送达」与「无路由/通道故障」——reporter 据此
+      // 停止重试（有界，2026-09-13 oe-audit 修订）。
       if (requestId !== '') client.sendExtensionUiResponse?.(requestId, INFLIGHT_REPORT_ACK, 'select')
     } catch (err) {
       // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）

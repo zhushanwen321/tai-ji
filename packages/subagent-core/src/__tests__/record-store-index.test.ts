@@ -36,9 +36,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RecordStore } from "../execution/record-store";
-import { INDEX_FILENAME, INDEX_VERSION, loadIndex, saveIndex } from "../execution/sessions-index";
-import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "../execution/sessions-index";
+import { RecordStore } from "../execution/persistence/record-store";
+import { INDEX_FILENAME, INDEX_VERSION, loadIndex, saveIndex } from "../execution/persistence/sessions-index";
+import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "../execution/persistence/sessions-index";
 
 /** chmod 000 零探测用例的环境守卫：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
  *  root 无视 000——两种环境下「零内容读取」断言静默退化为恒真（实现退化回读也不失败），
@@ -551,7 +551,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     // 必须被感知——命中分支读 tombstone override 状态（否则退回兜底 running）
     const storeB = new RecordStore(sessionsDir);
     const sa1 = storeB.collectRecords(100, "all", "root-1").find((r) => r.id === "sa-1");
-    expect(sa1?.status).toBe("closed");
+    expect(sa1?.status).toBe("idle");
     expect(sa1?.closedReason).toBe("cancelled");
     expect(sa1?.error).toBe("cancelled by user");
     expect(sa1?.endedAt).toBe(3000); // tombstone 的精确结束时间，非 mtime 近似

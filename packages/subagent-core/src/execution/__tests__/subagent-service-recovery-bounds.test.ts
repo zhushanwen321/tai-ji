@@ -37,17 +37,15 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import { armSettledWatchdog, hasSettledWatchdog, SETTLED_MID_ROUND_NO_PROGRESS_MS, _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
-import { armIdleTimer, hasIdleTimer, _resetLifecycleState } from "../lifecycle-manager.ts";
+import { armSettledWatchdog, hasSettledWatchdog, SETTLED_MID_ROUND_NO_PROGRESS_MS, _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
+import { armIdleTimer, hasIdleTimer, _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-// AgentResult = execution 层那份（execution/types.ts:259，主字段 text/turns/sessionId），
-// 与 acquirePoolOrFinalize 签名一致；engine/types.ts 只有消歧注释无此导出。
-import type { AgentResult, ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-recovery-bounds-"));
@@ -141,7 +139,7 @@ describe("T2④ service-side kill convergence", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("cancelBackground (via cancel) routes through killRecordChildWithEscalation + 引擎侧 cancel", async () => {
+  it("cancelBackground (via cancel) routes through killRecordChildWithEscalation + [U5] settle interrupted + 放弃轮标记", async () => {
     const record = makeRecord({ id: "sa-cancel" });
     store.register(record);
     const ok = service.cancel(record.id);
@@ -149,17 +147,27 @@ describe("T2④ service-side kill convergence", () => {
     expect(killChildSpy).toHaveBeenCalledWith(record.id, "cancelBackground");
     // [H1 U6] 在途 run 的实际终止经 controller.abort → 轮级 signal（cancel 帧 + 杀链）；
     // 旧 interact cancel 受理断言随 interact 面退役。
+    // [U5] cancel 新语义：settle idle + interrupted + 放弃轮标记——不终态化
+    //（无 closedReason；worktree 不动）。
+    expect(record.status).toBe("idle");
+    expect(record.stopReason).toBe("interrupted");
+    expect(record.closedReason).toBeUndefined();
+    expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
+    expect(record.intent).toBeUndefined(); // cancel ≠ 收起
   });
 
-  it("closeChatIdle (via closeSubagent force:false on idle) routes through killRecordChildWithEscalation and disarms timers", async () => {
-    const record = makeRecord({ id: "sa-close-idle" });
+  it("archiveIdleRecord (via closeSubagent force:false on idle) routes through killRecordChildWithEscalation and disarms timers", async () => {
+    const record = makeRecord({ id: "sa-close-idle", status: "idle" });
     store.register(record);
     armIdleTimer(record.id, () => {}); // Path A：idle timer armed（进程保活）
     armSettledWatchdog(record.id, () => {});
     await service["closeSubagent"](record, false);
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "closeChatIdle");
+    // [U5] close = 归档收口（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
+    expect(killChildSpy).toHaveBeenCalledWith(record.id, "archiveIdleRecord");
     expect(hasIdleTimer(record.id)).toBe(false);
     expect(hasSettledWatchdog(record.id)).toBe(false);
+    expect(record.intent).toBe("archived");
+    expect(record.status).toBe("idle");
     // [H1 U6] 旧引擎侧 close force 受理断言随 interact 面退役（无在跑轮无需进程回收，
     // Path A 保活进程由镜像记账 + reaper 兜底回收）。
   });
@@ -184,10 +192,15 @@ describe("T2④ service-side kill convergence", () => {
     // 回收面 iii：idle timer + settled watchdog 双 disarm
     expect(hasIdleTimer(idle.id)).toBe(false);
     expect(hasSettledWatchdog(idle.id)).toBe(false);
-    // record 终态化
-    expect(running.status).toBe("closed");
-    expect(idle.status).toBe("closed");
-    expect(running.closedReason).toBe("parent-new");
+    // [U5] 自动收起：settle idle + interrupted-by-parent + intent=archived（不终态化
+    // ——closedReason 恒 undefined，stopReason 承载展示位）；在飞轮置放弃轮标记。
+    expect(running.status).toBe("idle");
+    expect(idle.status).toBe("idle");
+    expect(running.closedReason).toBeUndefined();
+    expect(running.stopReason).toBe("interrupted-by-parent");
+    expect(running.intent).toBe("archived");
+    expect(idle.intent).toBe("archived");
+    expect(running.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
   });
 });
 
@@ -266,80 +279,8 @@ describe("T2③ hot-path settled watchdog", () => {
     // [H1 U6] 引擎侧终止意图（watchdog fire 的 cancel 受理断言）随 interact 面退役——
     // fire 的真实 kill = killRoundChildForWatchdog（镜像置死）+ abort 轮 signal → cancel 帧。
   });
-});
 
-// ── [S11] 残余守卫分支：cancel tombstone 幂等 / 池排队 abort / record-access 越界 ──
-
-describe("S11 守卫分支组", () => {
-  let agentDir: string;
-  let service: SubagentService;
-  let store: RecordStore;
-  let pi: MockPi;
-  let fake: FakePiEnginePort;
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    killChildSpy.mockClear();
-    ({ agentDir, service, store, pi, fake } = setup());
-  });
-
-  afterEach(() => {
-    service.dispose();
-    clearEngines();
-    _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
-    _resetCoreSpawnedChildrenMirrorForTest();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("cancel tombstone 幂等：已终态 record 再 cancel → CAS 未抢到返回 false（stop 手段仍执行，零收尾副作用）", async () => {
-    const record = makeRecord({ id: "sa-tombstone" });
-    record.status = "closed";
-    record.closedReason = "cancelled";
-    store.register(record);
-    const emitSpy = vi.fn();
-    store.onChange(emitSpy);
-
-    const ok = service.cancel(record.id);
-
-    expect(ok).toBe(false); // CAS 未抢到：覆写终态 + tombstone 双标 + notify 双发不可执行
-    expect(record.status).toBe("closed"); // 终态不被覆写
-    expect(record.closedReason).toBe("cancelled");
-    // stop 手段无条件先执行（cancel 语义 = 进程必死，幂等无害）
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "cancelBackground");
-    // 收尾副作用归 CAS 赢家：无 markCancelled 落盘 entry（state-write 面）
-    const stateWrites = (pi.appendEntry as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("state-write-failed"),
-    );
-    expect(stateWrites).toHaveLength(0);
-  });
-
-  it("排队被 abort 池分支：池满排队 + signal 已 aborted → finalizeAborted（cancelled 终态）", async () => {
-    const record = makeRecord({ id: "sa-pool-abort" });
-    store.register(record);
-    const ro = privateFn(service, "runOrchestration") as unknown as {
-      acquirePoolOrFinalize: (r: ExecutionRecord, s: AbortSignal | undefined, p: number) => Promise<AgentResult | undefined>;
-    };
-    // 先占满池（占满 effective = max(1, maxConcurrent - depth) 个槽位），迫使目标 record 排队
-    const pool = privateFn(service, "pool") as unknown as {
-      maxConcurrent: number;
-      acquire: (p: number, max?: number, s?: AbortSignal) => Promise<void>;
-      release: () => void;
-    };
-    const slots = Math.max(1, pool.maxConcurrent - record.depth);
-    for (let i = 0; i < slots; i++) await pool.acquire(0);
-    const controller = new AbortController();
-    controller.abort(); // 排队窗内 abort（pre-aborted signal → acquire reject AbortError）
-
-    const result = await ro.acquirePoolOrFinalize(record, controller.signal, 0);
-    for (let i = 0; i < slots; i++) pool.release();
-
-    // S1：排队中被 abort 走 cancelled（与已运行被 abort 一致），返回终态 result 供 early-return
-    expect(result).toBeDefined();
-    expect(record.status).toBe("closed");
-    expect(record.closedReason).toBe("cancelled");
-  });
-
+  // [S11] record-access 越界守卫（review batch 回填）：disposed 后读面返回 undefined 不抛。
   it("record-access 越界守卫：disposed 后 lookupRecordAnyState → undefined（不抛）", async () => {
     service.dispose();
     const record = service.queries.lookupRecordAnyState("any-id");

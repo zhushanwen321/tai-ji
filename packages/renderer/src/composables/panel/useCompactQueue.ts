@@ -7,8 +7,8 @@
  * i18n 及 core/renderer 双方测试广泛引用（>10 处）——本单元只改用户可见
  * 语义（入队即 pending 气泡、撤销边界、flush 投递确认驱动），顶层符号与文件名保持不动；
  * 「defer 队列」术语的展示位由 pending 气泡 + i18n（panel.deferQueue.*）承接。
- * [u6b] 独立 badge 组件已移除（D7 展示统一）：队列可见性由 PendingBubble（对话流内）
- * 独立承接。
+ * [u6b] 独立 badge 组件已移除（D7 展示统一）：队列可见性由 composer 上方 QueueBubble 的
+ * defer 行承接展示与撤销（对话流内展示位已随 2.1 迁移拆除）。
  *
  * **双契约 seam 说明**：本文件的 CompactQueue / QueuedMessage 与 core 侧最小结构类型
  * CompactQueueLike（契约对端：packages/core/src/domain/chat/use-chat-types.ts）构成
@@ -16,9 +16,11 @@
  * （core 不反向依赖 renderer 实现，仅以最小结构面约束实现方；任一侧扩展字段时需
  * 同步核对另一侧结构面）。
  *
- * 入队即显：条目由对话流尾部的 PendingBubble 组件渲染（半透明 + Clock + hover 标注），
- * 条目 id 作气泡 id（data-testid 锚点）。撤销（remove）仅对未提交条目（mode === undefined）
- * 开放——已提交条目已进 pi 队列无法撤回（UI 禁用 ×，tooltip「已提交，等待投递」）。
+ * 入队即显：未提交条目（mode === undefined）由 composer 上方 QueueBubble 的 defer 行渲染
+ * （Hourglass icon + 占用分档 chip + × 撤销）；已提交条目本地行隐藏，承接面分通道：steer
+ * 条目由 queue_update 镜像行承接、send 条目确认帧前暂不可见（echo 到达即 confirmDelivery
+ * 转正常气泡入流）。撤销（remove）仅对未提交条目（mode === undefined）开放——已提交条目
+ * 已进 pi 队列无法撤回。
  *
  * flush 语义（D5，u4b 重写——E2 整队保留重发语义退役）：
  * - **逐条提交**：队首经 core submitQueuedEntry 'send' 等价编排（挂 inflight 占位 +
@@ -39,8 +41,8 @@
  * 时分区随 session 销毁）。所有公开方法显式接收 sid 并经 updateFor 操作分区——不依赖
  * 全局活跃 sid，兼容 split 多 panel。
  */
-import { computed, reactive, ref, unref } from 'vue'
-import type { ComputedRef, Ref } from 'vue'
+import { reactive, ref } from 'vue'
+import type { Ref } from 'vue'
 import type { Segment, ServerMessage } from '@xyz-agent/shared'
 import { segmentsToPrompt } from '@xyz-agent/shared'
 import { setCompactQueueProviderForEffects, submitQueuedEntry } from '@xyz-agent/core'
@@ -103,7 +105,7 @@ export interface CompactQueue {
    *  可撤；已提交条目（mode 已写）remove **no-op**——记账不变量下沉到 API 层（一致性审查
    *  R3-U2）：已提交条目已进 pi 队列无法撤回，强行移除会使 send 条目的 inflight 占位悬空、
    *  其确认帧经 core ① confirmDelivery 变未知 id（匹配作废，气泡永 pending）。UI 侧
-   *  PendingBubble × 按 mode 禁用是唯一撤销入口 */
+   *  QueueBubble defer 行 ×（仅未提交条目渲染）是唯一撤销入口 */
   remove(sid: string, id: string): void
   /** 分区消息数（updateFor 内读 messages.length；调用方包进 computed 时依赖在 reactive 上建立） */
   count(sid: string): number
@@ -400,20 +402,3 @@ function createCompactQueue(): CompactQueue {
 // 已由 App.vue setup 创建（app 级 effect scope，见上方单例注释），此处直接返回缓存实例。
 // 未注册时 core ① 整体跳过（帧落现有处理链），注册失败方向安全。
 setCompactQueueProviderForEffects(() => useCompactQueue())
-
-/**
- * MessageStream 侧 per-session 组装封装（自 MessageStream.vue 拆出，≤300 行规范）：
- * pending 气泡数据源快照 + × 撤销 handler（未提交条目；已提交条目 UI 禁用不会触发——
- * remove 对未知/已出队 id 本就 no-op）。
- */
-export function useSessionPendingEntries(sessionId: ComputedRef<string> | Ref<string>): {
-  pendingEntries: ComputedRef<QueuedMessage[]>
-  onRemovePending: (id: string) => void
-} {
-  const queue = useCompactQueue()
-  const pendingEntries = computed<QueuedMessage[]>(() => queue.peek(unref(sessionId)))
-  const onRemovePending = (id: string): void => {
-    queue.remove(unref(sessionId), id)
-  }
-  return { pendingEntries, onRemovePending }
-}

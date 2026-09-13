@@ -6,7 +6,7 @@ import {
   type ModelInfo,
   type ModelRegistryLike,
   resolveModel,
-} from "../model-resolver.ts";
+} from "../assembly/model-resolver.ts";
 
 // ============================================================
 // helpers
@@ -413,7 +413,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { ModelConfigService } from "../model-config-service.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 
 describe("ModelConfigService: ctx.model plumb-through (EA-4)", () => {
   let tmpDir: string;

@@ -6,6 +6,10 @@
  * ④ 为 xyz 自有口径（rename-session custom entry，G3 rename 落账通道，
  * usage-page-fixes §3.3 ④；落盘形态锚 docs/pi-semantics.json PS-29，非 pi 语义）。
  *
+ * 为什么走「读文件」而非实时事件流聚合：runtime 事件链路只透传
+ * input/output/totalTokens，cacheRead/cacheWrite/cost 仅存在于 JSONL 落盘数据，
+ * 完整用量维度只能从落盘文件获得（原用量设计提案验证结论，提案文档已删除）。
+ *
  * 缓存策略：per-file 分片 (mtimeMs, size) 双键（D9）——append-only 场景下
  * mtime 不变但 size 变仍能 miss。
  */

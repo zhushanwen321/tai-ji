@@ -14,15 +14,15 @@
 
 import { describe, expect, it, vi, type Mock } from "vitest";
 
-import { startHandler } from "../subagent-actions-core.ts";
+import { startHandler } from "../assembly/subagent-actions-core.ts";
 // SubagentService 的权威源是 subagent-service.ts（types.ts 只有 record/tool 契约）
 import type { SubagentService } from "../subagent-service.ts";
-import type { StatusFilter } from "../record-store.ts";
+import type { StatusFilter } from "../persistence/record-store.ts";
 import type {
   ExecutionHandle,
   SubagentRecord,
   SubagentToolDetails,
-} from "../types.ts";
+} from "../assembly/types.ts";
 
 function makeDetails(): SubagentToolDetails {
   return {

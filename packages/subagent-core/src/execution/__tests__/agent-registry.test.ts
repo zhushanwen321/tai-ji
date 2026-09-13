@@ -25,7 +25,7 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: () => "/nonexistent-home-for-tests" };
 });
 
-import { AgentRegistry, parseAgentFrontmatter, parseAgentWithMeta } from "../agent-registry.ts";
+import { AgentRegistry, parseAgentFrontmatter, parseAgentWithMeta } from "../assembly/agent-registry.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { lintAgentMeta } from "../../orchestration/script-lint.ts";

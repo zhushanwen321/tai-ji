@@ -2,7 +2,7 @@
 // scripts/probes/subagent-sync-collect/a6-crash-recovery.mjs
 //
 // [A6] 主 pi 崩溃后的批恢复（D5 降级门）
-// 设计 docs/design/subagent-sync-collect.md §4 验收表 A6 行：
+// 设计 docs/design/subagent-sync-collect.md §4 验收表 A6 行（设计文档已删，git 可追溯）：
 //   2 个 collect:"sync"（sleep 60s 任务）→ 批等待中 kill -9 主 pi → 同 session-dir
 //   重启 → 断言补发单条批；二次重启零重发。
 // 预期输出：

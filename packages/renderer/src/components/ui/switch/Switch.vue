@@ -13,6 +13,10 @@ import { cn } from '@/lib/utils'
  * [HISTORICAL] 切勿改回 rem 类（h-5/w-9/size-4）：项目 html font-size=13.3px（非 16），
  * rem 类会缩放变小但 translate-x-[18px] 是绝对 px 不缩放，二者失配导致 checked thumb
  * 右沿超出 track。几何与位移统一绝对 px 即免疫 rem 缩放。
+ * [HISTORICAL] 消费方同理：禁止用 h-* / w-* / size-* 覆盖轨道尺寸（track 缩了、thumb 16px
+ * 与 translate 18px 不跟着缩，圆点溢出轨道；曾发生于 trace toolbar
+ * `class="h-3.5 w-6 scale-90"`）。要小尺寸只能等比 scale-*（等比缩放连几何一起缩）。
+ * 机器护栏：taste/no-switch-size-override（taste-lint）。
  */
 const props = withDefaults(
   defineProps<SwitchRootProps & { class?: HTMLAttributes['class'] }>(),

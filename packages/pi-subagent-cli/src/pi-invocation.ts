@@ -89,6 +89,9 @@ export function getPiInvocation(userArgs: string[], opts?: PiInvocationOptions):
 
   // 分支 0（前置）：relay 激活——spawn 目标切换为 <RELAY_NODE> <RELAY_SCRIPT>
   // <原 pi spawnArgs>。isRelayActive 已保证三 env 非空，取局部变量仅为 TS 收窄。
+  // 形态裁决：relay 是 spawn 通道的**进程拓扑**变体（spawn 经由谁），不是**引擎身份**
+  // （spawn 谁/事件语义/session 格式全不变）——故做成 invocation 层环境分支而非注册第二个
+  // engine id：那会制造「实际是 pi 但叫别的名字」的引擎，record/journal/读取链全要为别名付代价。
   if (opts?.relay !== false && isRelayActive(process.env)) {
     const relayNode = process.env[RELAY_ENV_NODE];
     const relayScript = process.env[RELAY_ENV_SCRIPT];

@@ -680,6 +680,70 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
       { type: 'text', text: '\n收尾正文' },
     ])
   })
+
+  it('E8: toolCall endTime 回填（chat-flow-timestamp A5/A7）——非对称时钟下 live（双帧）≡ replay（单帧），值 = 权威 body.timestamp', () => {
+    // 真实时钟形态（Gate A 实测暴露）：live 侧 tool_call_end 重构帧先到（body.timestamp =
+    // 客户端时钟 Date.now 语义，取 2999），后到 message_end 携带 pi 权威落盘时刻（3000）；
+    // R2-S1 去重首条 wins 内容，但 endTime 走 U3 last-wins 例外 → 终态 = 权威值；
+    // replay 侧：单条持久化 entry（权威 3000）。两通路终态 endTime 相等——历史 reload
+    // 耗时持久的 core 侧构造性保证。
+    const assistant: PiEntry = { type: 'message', id: 'asst-e8', parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'toolCall', id: 'tc-e8', name: 'bash', arguments: { cmd: 'ls' } }], timestamp: 2000 } }
+    const toolCallEndFrame: PiEntry = { type: 'message', id: 'tce-e8', parentId: null, timestamp: ts(2999), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 2999 } }
+    const messageEndFrame: PiEntry = { type: 'message', id: 'me-e8', parentId: null, timestamp: ts(3000), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 3000 } }
+    const replayEntry: PiEntry = { type: 'message', id: piId(20), parentId: null, timestamp: ts(3000), message: { role: 'toolResult', toolCallId: 'tc-e8', toolName: 'bash', content: [{ type: 'text', text: 'done' }], timestamp: 3000 } }
+    const liveState = normalizeIds(replayEntries([assistant, toolCallEndFrame, messageEndFrame]))
+    const replayState = normalizeIds(replayEntries([
+      { type: 'message', id: 'asst-e8', parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'toolCall', id: 'tc-e8', name: 'bash', arguments: { cmd: 'ls' } }], timestamp: 2000 } },
+      replayEntry,
+    ]))
+    const liveTc = liveState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-e8'))!.toolCalls![0]!
+    const replayTc = replayState.messages.find((m) => m.toolCalls?.some((t) => t.id === 'tc-e8'))!.toolCalls![0]!
+    // 显式值断言（用户可见字段级：UI 耗时展示的数据源）：endTime = 权威值（非客户端时钟渗入）
+    expect(liveTc.endTime).toBe(3000)
+    expect(replayTc.endTime).toBe(3000)
+    expect(liveTc.endTime).toBe(replayTc.endTime)
+    // startTime 来自 assistant body.timestamp（既有语义，与 endTime 异源不同值）
+    expect(liveTc.startTime).toBe(2000)
+    expect(replayTc.startTime).toBe(2000)
+    // 全量 state 归一 deep-equal（endTime 在内逐字段一致）
+    expect(liveState).toEqual(replayState)
+  })
+
+  it('E9: 标记 + 末尾块消息两链路等价（R4 D11/D7）——正文标记 + <xyz-skill-data> 块 live 帧 ≡ reload 文件重放', () => {
+    // R4 形态（D11 场景 1 正常形态 + 场景 2 降级形态各一）：正文占位标记原样保留 +
+    // 末尾 <xyz-skill-data> 包裹块（正常 = <skill> 全文展开；降级 = 标记清单 + 指引行）。
+    // 反解析三链路 SSOT（parseSkillBlock 三形态：①剥块 ②标记还原 ③存量兼容）——live
+    // message_end(user) 帧与 reload 文件重放同经该函数，终态必须一致（架构关键规则 9）。
+    const normalFormText = '帮我 review 这段代码 <xyz-skill name="code-review-graph" location="/abs/SKILL.md"/>\n\n<xyz-skill-data>\n<skill name="code-review-graph" location="/abs/SKILL.md">\nReferences are relative to /abs.\n\n（SKILL.md 全文…）\n</skill>\n</xyz-skill-data>'
+    const degradedFormText = '帮我 review <xyz-skill name="a" location="/a/SKILL.md"/>\n\n<xyz-skill-data>\n<xyz-skill name="a" location="/a/SKILL.md"/>\nUse the read tool to load the skill files above before continuing the task\n</xyz-skill-data>'
+
+    // live 侧：message_end(user) 帧构造形态（客户端 u- 前缀 id，同 E7）
+    const liveState = normalizeIds(replayEntries([
+      { type: 'message', id: 'u-00000013-0000-4000-8000-000000000013', parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: normalFormText }], timestamp: 1000 } },
+      { type: 'message', id: 'u-00000014-0000-4000-8000-000000000014', parentId: null, timestamp: ts(2000), message: { role: 'user', content: [{ type: 'text', text: degradedFormText }], timestamp: 2000 } },
+    ]))
+    // replay 侧：同内容 pi uuidv7 entry（文件重放形态）
+    const replayState = normalizeIds(replayEntries([
+      { type: 'message', id: piId(13), parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: normalFormText }], timestamp: 1000 } },
+      { type: 'message', id: piId(14), parentId: null, timestamp: ts(2000), message: { role: 'user', content: [{ type: 'text', text: degradedFormText }], timestamp: 2000 } },
+    ]))
+    // 全量 state 归一 deep-equal（含 skill 消息走同一断言口径）
+    expect(liveState).toEqual(replayState)
+
+    // 用户可见行为显式断言：剥块（块内全文/清单零残留）+ 正文标记还原 badge +
+    // 块前正文全保留（场景 4③ 断言语义——正文不得因反解析丢失）
+    const [first, second] = liveState.messages
+    expect(first!.content).toEqual([
+      { type: 'text', text: '帮我 review 这段代码 ' },
+      { type: 'skill', name: 'code-review-graph', location: '/abs/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+    expect(second!.content).toEqual([
+      { type: 'text', text: '帮我 review ' },
+      { type: 'skill', name: 'a', location: '/a/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+  })
 })
 
 // ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 表述修正 + §4 AC-7）──

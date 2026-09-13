@@ -1,7 +1,9 @@
 # ADR-0028: 搜索编排归 composable 层（非 domain）
 
+- 状态：Accepted
+
 > **性质**：架构 D-不可逆决策（分层归位）。本文档定义架构约束。
-> **关联**：[ADR-0009 数据目录隔离](0009-xyz-agent-data-dir-isolation-from-pi.md)、NFR.md §兼容性「跨 store 编排在 composable 层」。
+> **关联**：[ADR-0009 数据目录隔离](0009-xyz-agent-data-dir-isolation-from-pi.md)、约束登记 C-state-04（docs/constraints.json）「跨 store 编排在 composable 层」。
 > **溯源**：`[from: 2026-06-30-search-modal §code-arch, decisions D-026]`
 
 ## 上下文

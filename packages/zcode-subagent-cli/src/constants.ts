@@ -143,15 +143,6 @@ export function parseZcodeTurnTimeoutEnv(
 }
 
 /**
- * 共享宿主 HOME 语义下的 journal 分组 key（与 pi 引擎 PI_POOL_KEY='shared' 同构）：
- * journal 落 engineDataDir/engines/zcode/shared/journal-<taskId>.jsonl。无 HOME 池、
- * 无派生目录——key 是固定字面量，仅作 pool-manager 通用契约的分组锚点。隔离会话库
- * 不在此目录内（db-path.zcodeSessionDbPath 选址 engines/zcode/session-db/，池目录
- * 之外，设计 D1/F11）。
- */
-export const ZCODE_SHARED_POOL_KEY = "shared";
-
-/**
  * [R4 D3] abort 链第一级：session/stop 的控制面超时（ms）。stop 失败/超时即落
  * killChain（协议此时已不可信）。
  */
@@ -197,3 +188,27 @@ export const ZCODE_APPSERVER_HARVEST_GRACE_MS = 1_000;
 export function isFailedTerminalStatus(status: string | undefined): boolean {
   return status === "failed" || status === "error";
 }
+
+// ============================================================
+// [U6 / §3.2.6 要点 3] zcode 续聊（resume 读 + 新 session 注入）的历史裁剪预算
+// ============================================================
+
+/**
+ * resume 历史注入的 token 预算（先验值）：新会话无任何记忆，历史全部经 prompt
+ * 前缀注入——预算防超长历史（多轮长会话）把首轮 prompt 撑爆模型上下文。超预算
+ * 时从最旧条目起丢弃（保尾——最近上下文对续聊最重要）。裁剪恒按字符 4:1 近似
+ * （ZCODE_RESUME_CHARS_PER_TOKEN）换算执行；resume 应答自带 tokens
+ * （extractResumeTotalTokens）不参与裁剪判定，仅进保留量注记。
+ */
+export const ZCODE_RESUME_HISTORY_TOKEN_BUDGET = 24_000;
+
+/** 字符近似换算（1 token ≈ 4 chars，中英混合保守值）——裁剪恒用此比率，非 tokens 缺席时的降级。 */
+export const ZCODE_RESUME_CHARS_PER_TOKEN = 4;
+
+/**
+ * [U6 TTL 通道] sweep defer 时点（ms）：运行时建立后让位首 run 的 create 请求先
+ * 出站（sweep 同步执行，大库删除 + checkpoint 可能达秒级——不推后则抢占首 run
+ * 的控制面时序）。unref（不阻塞进程退出）。
+ */
+export const ZCODE_SESSION_SWEEP_DEFER_MS = 50;
+

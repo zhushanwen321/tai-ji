@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/3/38/Bluesky_butterfly-logo-gradient.svg
-source: Wikimedia Commons (API query)

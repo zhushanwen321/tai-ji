@@ -12,7 +12,6 @@
 // 帧校验的目的是行解析器快速拒格式坏帧，不做深校验（深校验成本高于收益，坏载荷
 // 由消费方结构化报错）。
 
-import type { ReverseChannel } from "./reverse-channels.ts";
 import { REVERSE_CHANNELS } from "./reverse-channels.ts";
 import { PROTOCOL_METHODS } from "./methods.ts";
 
@@ -151,16 +150,13 @@ export const FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS = [
   "secret",
 ] as const;
 
-/** 反向通道名词表导出（schema enum 与 W2 路由同源）。 */
-export const REVERSE_CHANNEL_NAMES: readonly ReverseChannel[] = REVERSE_CHANNELS;
-
 // ============================================================
 // [H1] run 会话形态参数载荷 schema（resume 单键校验权威）
 // ============================================================
 
 /**
  * run.params 的会话形态参数载荷 schema（draft-07 深载荷片段）。设计权威源：
- * docs/design/subagent-chat-run-unification.md §3.3 D3 + §5 U1/U6 行。
+ * docs/architecture/subagent-chat-run-unification.md §3.3 D3 + §5 U1/U6 行。
  *
  * [H1 U6 已切换] 键切换单批完成后本 schema 面向唯一键 `resume`（RunResumeParams：
  * recordId + 可选 ResumeAnchor），形状不变。帧级 schema（requestFrameSchema.params）
@@ -178,11 +174,10 @@ export const runSessionParamsSchema = {
     resume: {
       type: "object",
       additionalProperties: false,
-      required: ["sessionRef", "poolKey"],
+      required: ["sessionRef"],
       properties: {
         // ResumeAnchor.sessionRef = Record<string, string>（引擎定位键值对）
         sessionRef: { type: "object", additionalProperties: { type: "string" } },
-        poolKey: { type: "string" },
         journalPath: { type: "string" },
       },
     },

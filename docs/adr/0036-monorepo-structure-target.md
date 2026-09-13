@@ -98,37 +98,7 @@ xyz-agent/
 
 **Electron 兼容性**：Electron 对 node_modules 结构敏感（其 `install.js` + `path.txt` 假设扁平结构）。pnpm 默认软链结构可能让 `electron/dist` 找不到。兜底方案：`.npmrc` 配置 `node-linker=hoisted`（损失 pnpm 严格性换取兼容）。此为已知风险点，迁移时重点验证。
 
-## 迁移计划（实施中，worktree `refactor-package-structure-pnpm`）
-
-### 改动范围
-
-| 步骤 | 内容 | 风险 |
-|---|---|---|
-| 1. 移动 packages | `git mv src-electron/shared packages/shared` 等 3 个 | 低（git mv 保留历史） |
-| 2. 移动 apps/electron | `src-electron/` 剩余内容 → `apps/electron/` | 中（build 配置路径变） |
-| 3. 创建 pnpm-workspace.yaml | `packages: ['packages/*', 'apps/*']` | 低 |
-| 4. 改根 package.json | 删 workspaces 字段（pnpm 用 yaml）、scripts 改 pnpm filter | 低 |
-| 5. 改 apps/electron/package.json | 加 `"@xyz-agent/*": "workspace:*"`、scripts 改 pnpm filter | 低 |
-| 6. 删 apps/electron/package-lock.json | 不再需要独立 lock | 低 |
-| 7. 改 build 配置 | tsup outDir、tsconfig paths、vite root、electron-builder from 路径 | 中（需逐个验证） |
-| 8. 改 CI workflow | setup pnpm + `pnpm install --frozen-lockfile`，删除 src-electron 二次安装 | 低 |
-| 9. 改 setup-worktree.sh | `.bare/custom-hooks/`，npm → pnpm，清理死代码（vendor submodule 引用） | 中 |
-| 10. .npmrc | Electron 兼容配置（node-linker=hoisted 兜底） | 中（需实测） |
-| 11. 改 AGENTS.md / README | 文档同步 | 低 |
-
-### import 路径基本不变
-
-`@xyz-agent/shared` 等包名不变（workspace 正确工作后 symlink 正常）。renderer 内部的 `@/` alias 不变（vite.config 的 `resolve.alias` 仍指向 `src/`）。迁移主要是**移动物理目录 + 改 build 配置路径 + 换包管理器**，不改代码逻辑。
-
-### 验证标准
-
-- [ ] `pnpm install` 一次装完（根目录，无 `cd apps/electron && pnpm install`）
-- [ ] `pnpm dev` 从根目录正常启动 Electron
-- [ ] `pnpm build` 完整打包通过（preflight + build + postbuild）
-- [ ] CI 全绿（lint/typecheck/test/build mac+linux）
-- [ ] `pnpm --filter @xyz-agent/frontend run typecheck` 等 filter 命令正常
-- [ ] git-cwt 新建 worktree 验证 setup-worktree.sh 正常
-- [ ] Electron 启动后 pi 能正常加载 extensions（验证 node_modules 结构兼容）
+> 落地步骤已删除：实现由代码承载（源码内 // ADR-0036 锚点可回链），git 历史可追溯（2026-09-13 ADR 瘦身）
 
 ## 状态
 

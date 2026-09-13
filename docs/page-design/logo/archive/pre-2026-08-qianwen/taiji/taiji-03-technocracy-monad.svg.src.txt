@@ -1,2 +1,0 @@
-url: https://upload.wikimedia.org/wikipedia/commons/d/d0/TechnocracyMonad.svg
-source: Wikimedia Commons (API query)

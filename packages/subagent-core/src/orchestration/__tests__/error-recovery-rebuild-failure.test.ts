@@ -1,7 +1,7 @@
 /**
  * [OR-2] rebuildRuntime 抛错回灌重试矩阵 + [P-SD] 重建失败注入钩子 测试。
  *
- * 覆盖（unbounded-wait-audit §4.1 OR-2 / §7.3 P-SD / §8.2 S-D 子场景②）：
+ * 覆盖（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §4.1 OR-2 / §7.3 P-SD / §8.2 S-D 子场景②））：
  * - worker 崩溃 → rebuild 抛错（workerHost.start 失败）→ workerErrorCount 递增回灌矩阵
  *   → 后续 rebuild 成功 → run 恢复 running（不卡死）
  * - rebuild 连续失败耗尽 MAX_WORKER_RETRIES → 收敛 done,failed（不卡 running）、

@@ -1,6 +1,6 @@
-# stale ctx 普查清单与「stale 静默语义」判定表（crash-resilience u1-ext-guard 交付物）
+# stale ctx 普查清单与「stale 静默语义」判定表（crash-resilience u1-ext-guard 交付物；设计文档已删，git 可追溯）
 
-> 依据：docs/design/crash-resilience.md §3.3 D1（extension 异步回调守卫）· §2.2 事件 E1 · §3.5 P-stale-throw / P-stale-wording / P-guard-holds。
+> 依据：docs/design/crash-resilience.md（已删除，git 可追溯；独有档案已并入 docs/architecture/crash-forensics-and-watchdog.md 附录 D）§3.3 D1（extension 异步回调守卫）· §2.2 事件 E1 · §3.5 P-stale-throw / P-stale-wording / P-guard-holds。
 > 守卫：`@zhushanwen/pi-ext-guards` 的 `guardStaleCtx(fn, opts)`——前置代际检查（isCtxStale，主判）+ fn 同步执行 + 错误文案 `stale after session replacement` 分诊（兜底）；stale 类静默降级（调 `opts.onStale`），非 stale 类原样上抛（守卫不吞真实 bug）。
 > 分诊词是 pi 语义断言：登记 docs/pi-semantics.json PS-30（探针 `extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts`），随 C-proc-08 pi 版本门禁自动重验。
 
@@ -111,7 +111,7 @@ VERDICT=PASS
 
 守卫不改变正常路径：onComplete 回调在同一守卫包裹下正常完成「结果消息投递」。
 
-**与设计 A9① 的对齐**（crash-resilience §4 验收表）：场景 1 + 场景 2 合并覆盖 A9① 断言的实质两面——场景 1 以 pi CLI RPC 直跑（不经 xyz-agent）验证错误路径（stale 静默降级、pi 进程存活、无 assertActive 堆栈浮出），场景 2 验证正常路径零行为变化（onComplete 结果消息正常投递）——即「pi 行为无任何变化（ext-guards 守卫只在错误路径生效）」的正反两面均有实测。
+**与设计 A9① 的对齐**（crash-resilience §4 验收表，该设计文档已删除 git 可追溯）：场景 1 + 场景 2 合并覆盖 A9① 断言的实质两面——场景 1 以 pi CLI RPC 直跑（不经 xyz-agent）验证错误路径（stale 静默降级、pi 进程存活、无 assertActive 堆栈浮出），场景 2 验证正常路径零行为变化（onComplete 结果消息正常投递）——即「pi 行为无任何变化（ext-guards 守卫只在错误路径生效）」的正反两面均有实测。
 
 **已知边界（如实记录）**：① 本机全局 pi 为 0.84.0（workspace 实装 0.84.4），文案已核对一致；0.84.4 侧由 PS-30 静态探针（CI 内守卫，ext-guards 包测试全绿）覆盖。② 一轮 stale 补充场景中模型未配合调用 compact_context（LLM 行为波动，非守卫问题），未计入判定——判定以上述两场景为准。③ pi 原生 compact 有 `Nothing to compact (session too small)`（keepRecentTokens 默认 20000）门槛，实测用大 prompt 构造跨过；`settings.json` 的 `compaction.keepRecentTokens` 覆盖在 0.84.0 CLI 下未生效（键被忽略，原因未深查），如实登记。
 

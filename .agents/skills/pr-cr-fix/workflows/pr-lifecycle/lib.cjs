@@ -1,6 +1,6 @@
 'use strict';
 /*
- * pr-lifecycle 状态核心（纯逻辑库）——设计：docs/design/pr-lifecycle-workflow.md §3.4/§3.5/§3.7
+ * pr-lifecycle 状态核心（纯逻辑库）——设计：docs/design/pr-lifecycle-workflow.md §3.4/§3.5/§3.7（已删除，git 可追溯）
  *
  * 本模块禁止直接产生外部效应：fs / pid 探测 / 时间 / 随机源全部经 io 注入，
  * 禁止引用 workerData 与任何 worker 注入全局（入口 pr-lifecycle.js 组装 io，

@@ -1,7 +1,7 @@
 /**
  * PresetService — Pi 启动参数预设的存储 + CRUD 服务。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md（§1.4 存储 / §3.4 builtin 可编辑边界 / §8.1 API）。
+ * 设计文档：docs/architecture/pi-launch-presets.md（§1.4 存储 / §3.4 builtin 可编辑边界 / §8.1 API）。
  *
  * 与 ConfigService 对称（独立 service，非 SessionService 内部字段）：
  *   - 构造函数注入 IConfigStore（推导 pi-presets.json 路径）+ IExtensionService（resolve 用，本 wave 不调用）

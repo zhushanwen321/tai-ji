@@ -1,7 +1,7 @@
 /**
  * Coding Plan 额度查询 — 共享类型定义。
  *
- * 设计文档：docs/page-design/archive/v3/coding-plan-quota/design.md
+ * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md
  * HANDOFF：.xyz-harness/coding-plan-quota/HANDOFF.md
  */
 

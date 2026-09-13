@@ -87,7 +87,9 @@
         data-testid="trace-context-toggle"
         @click="emit('toggle-context')"
       >
-        <Switch :model-value="contextOnly" class="h-3.5 w-6 scale-90" />
+        <!-- 禁用 h-*/w-* 覆盖轨道尺寸（rem 类与 thumb 绝对 px 几何失配 → 圆点溢出轨道），
+             缩小视觉尺寸只能等比 scale（taste/no-switch-size-override 护栏）。 -->
+        <Switch :model-value="contextOnly" class="scale-90" />
         {{ t('panel.trace.contextOnly') }}
       </div>
     </div>

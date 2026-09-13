@@ -1,14 +1,14 @@
 /**
  * 工具块补充细节条 meta 计算（从 Block.vue 拆出，控 script 行数）。
  *
- * 职责：计算展开后细节条的 meta 项（错误摘要 + 行数/字符数 + 耗时）。
- *  - 耗时：startTime→endTime
+ * 职责：计算展开后细节条的 meta 项（错误摘要 + 行数/字符数）。
  *  - 行数/字符数：pi 协议不返回文件元信息（exit code / fileSize 均无），前端从 output 自算。
  *    read 工具 output 是文件内容，行数/字符数有统计意义；bash output 是命令输出，行数有参考价值；
  *    edit/write 等 output 是简短确认（如 "done"），行数无意义不展示。
- *  - 失败态错误摘要已移至内容区（displayContent 兜底 tool.error），meta 仅保留中性 muted 项。
+ *  - 失败态错误摘要已移至内容区（displayContent 兕底 tool.error），meta 仅保留中性 muted 项。
+ *  - 耗时已上提为 Block header 行尾常驻槽（chat-flow-timestamp U2），meta 不再重复。
  *
- * formatDuration 由 Block.vue 传入（该函数同时服务 template，避免循环依赖）。
+ * formatDuration 已移除（chat-flow-timestamp U2：耗时由 Block header 槽直用 format-utils）。
  */
 import { computed, type ComputedRef } from 'vue'
 import type { ToolCall } from '@xyz-agent/shared'
@@ -28,9 +28,7 @@ export function useToolMeta(params: {
   tool: ComputedRef<ToolCall | undefined>
   toolName: ComputedRef<string>
   isFailed: ComputedRef<boolean>
-  formatDuration: (ms: unknown) => string
 }): { metaItems: ComputedRef<MetaItem[]> } {
-  const { formatDuration } = params
 
   /** 字符数格式化：>= CHAR_K_THRESHOLD 显示为 XK chars，否则原值 + chars */
   function formatCharCount(n: number): string {
@@ -53,12 +51,6 @@ export function useToolMeta(params: {
       if (name === 'read' || name === 'cat') {
         items.push({ tone: 'muted', text: formatCharCount(output.length) })
       }
-    }
-    // 耗时（末位）
-    const start = tool?.startTime
-    const end = tool?.endTime
-    if (typeof start === 'number' && typeof end === 'number' && end > start) {
-      items.push({ tone: 'muted', text: formatDuration(end - start) })
     }
     return items
   })

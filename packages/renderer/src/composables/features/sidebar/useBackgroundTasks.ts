@@ -1,6 +1,6 @@
 /**
  * useBackgroundTasks —— 后台命令列表的 per-session 状态根
- *（docs/design/background-task-sidebar-view.md §3.3 D8①，u-renderer-store）。
+ *（docs/architecture/background-task-sidebar-view.md §3.3 D8①，u-renderer-store）。
  *
  * 职责：registry 全量投影的 per-session Map 分区（useSessionScopedState，ADR-0049）+
  * 变更通道编排。两个数据来源：

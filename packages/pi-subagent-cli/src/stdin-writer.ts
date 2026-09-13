@@ -10,10 +10,23 @@
 //
 // 本文件是 core engines/pi/stdin-writer.ts 的迁移副本（日志走 SDK facade；
 // UiResponse 类型改 SDK ui-types SSOT——结构等价）。core 侧原件过渡期保留（W11 删）。
+//
+// [U1 归并] 帧组装切 @zhushanwen/pi-rpc commands 模块（buildUiResponseFrame /
+// buildPromptCommandFrame / buildGetStateCommandFrame——行为逐字等价提取的单源）；
+// 裸写与 EPIPE 判别切 pi-rpc frame 模块原语（tryWriteStdinLine / isBrokenPipeError）。
+// 刻意保留在本文件的：裸写错误策略——对 EPIPE throw 驱动冷恢复路径（pi-rpc README
+// 「刻意不统一清单」第 3 条：runtime sendRaw 吞错 vs 本侧 throw，策略归消费方）。
 
 import type { ChildProcess } from "node:child_process";
 import * as crypto from "node:crypto";
 
+import {
+  buildGetStateCommandFrame,
+  buildPromptCommandFrame,
+  buildUiResponseFrame,
+  isBrokenPipeError,
+  tryWriteStdinLine,
+} from "@zhushanwen/pi-rpc";
 import { getLogger, type UiResponse } from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "./error-message.ts";
@@ -60,17 +73,13 @@ export function resetAllEpipeFailures(): void {
  */
 export function respond(child: ChildProcess, id: string, out: UiResponse, signal?: AbortSignal): void {
   if (signal?.aborted) return;
-  let line: string | undefined;
-  try {
-    if ("value" in out) line = JSON.stringify({ type: "extension_ui_response", id, value: out.value });
-    else if ("confirmed" in out) line = JSON.stringify({ type: "extension_ui_response", id, confirmed: out.confirmed });
-    else if ("cancelled" in out) line = JSON.stringify({ type: "extension_ui_response", id, cancelled: true });
-  } catch (err) {
-    logger.warn(`[subagents] JSON.stringify failed for ui response ${id}, degrading to cancelled`, {
-      detail: toErrorMessage(err),
-    });
-    line = JSON.stringify({ type: "extension_ui_response", id, cancelled: true });
-  }
+  const line = buildUiResponseFrame(id, out, {
+    onSerializeError: (err) => {
+      logger.warn(`[subagents] JSON.stringify failed for ui response ${id}, degrading to cancelled`, {
+        detail: toErrorMessage(err),
+      });
+    },
+  });
   // ack: fire-and-forget，不写 stdin（SR-5）
   if (line === undefined) return;
   writeStdinLine(child, line, `ui response for request ${id}`);
@@ -92,15 +101,11 @@ export function sendPromptCommand(
   options?: { streamingBehavior?: "followUp" | "steer" },
 ): void {
   if (!child.stdin || child.stdin.destroyed) return;
-  const payload: Record<string, unknown> = {
-    id: crypto.randomUUID(),
-    type: "prompt",
+  const line = buildPromptCommandFrame(crypto.randomUUID(), {
     message: task,
-  };
-  if (options?.streamingBehavior) {
-    payload.streamingBehavior = options.streamingBehavior;
-  }
-  writeStdinLine(child, JSON.stringify(payload), "prompt command");
+    ...(options?.streamingBehavior !== undefined ? { streamingBehavior: options.streamingBehavior } : {}),
+  });
+  writeStdinLine(child, line, "prompt command");
 }
 
 /**
@@ -110,16 +115,14 @@ export function sendPromptCommand(
  */
 export function sendGetStateCommand(child: ChildProcess): string {
   const id = crypto.randomUUID();
-  const command = JSON.stringify({
-    id,
-    type: "get_state",
-  });
-  writeStdinLine(child, command, "get_state command");
+  writeStdinLine(child, buildGetStateCommandFrame(id), "get_state command");
   return id;
 }
 
 /**
  * 向子进程 stdin 写一行（自动补换行），带背压检查 + EPIPE 检测。
+ * 写入与判别原语在 pi-rpc frame 模块（tryWriteStdinLine / isBrokenPipeError），
+ * 本函数只承载错误策略（EPIPE throw 驱动冷恢复——见文件头注 [U1 归并]）。
  *
  * [R3] write 抛 EPIPE / ERR_STREAM_DESTROYED 时 throw 含 EPIPE 关键词的 Error，
  *      让上层能捕获并转冷路径处理。
@@ -127,26 +130,24 @@ export function sendGetStateCommand(child: ChildProcess): string {
  * @throws Error 含 "EPIPE" 关键词——stdin 管道已断（子进程已退出 / stdin 被销毁）
  */
 function writeStdinLine(child: ChildProcess, line: string, warnTag: string): void {
-  if (!child.stdin || child.stdin.destroyed) return;
-  try {
-    const ok = child.stdin.write(line + "\n");
-    if (!ok) logger.warn(`[subagents] stdin backpressure on ${warnTag}`);
-  } catch (err) {
-    if (
-      err !== null &&
-      typeof err === "object" &&
-      "code" in err &&
-      ((err as NodeJS.ErrnoException).code === "EPIPE" ||
-        (err as NodeJS.ErrnoException).code === "ERR_STREAM_DESTROYED")
-    ) {
-      throw new Error(
-        `[subagents] EPIPE on stdin write (${warnTag}): pipe broken, child process likely exited. ` +
-          `Recovery: treat as dead process and resume via cold path.`,
-      );
+  const outcome = tryWriteStdinLine(child.stdin, line);
+  if (!outcome.ok) {
+    // no-stdin / destroyed：静默跳过（guard 生效，不触发 write）
+    if (outcome.reason === "error") {
+      if (isBrokenPipeError(outcome.error)) {
+        throw new Error(
+          `[subagents] EPIPE on stdin write (${warnTag}): pipe broken, child process likely exited. ` +
+            `Recovery: treat as dead process and resume via cold path.`,
+        );
+      }
+      // 非 EPIPE 错误（不应发生，但兜底降级为 warn 不崩溃）
+      logger.warn(`[subagents] unexpected stdin write error on ${warnTag}`, {
+        detail: toErrorMessage(outcome.error),
+      });
     }
-    // 非 EPIPE 错误（不应发生，但兜底降级为 warn 不崩溃）
-    logger.warn(`[subagents] unexpected stdin write error on ${warnTag}`, {
-      detail: toErrorMessage(err),
-    });
+    return;
+  }
+  if (outcome.backpressure) {
+    logger.warn(`[subagents] stdin backpressure on ${warnTag}`);
   }
 }

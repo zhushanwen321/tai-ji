@@ -15,8 +15,8 @@ import {
   SUBAGENT_RECORD_CUSTOM_TYPE,
   toSubagentRecordEntry,
   type SubagentRecordEntryData,
-} from "../record-entry.ts";
-import type { SubagentRecord } from "../types.ts";
+} from "../persistence/record-entry.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 /** 最小合法 SubagentRecord（缺省无 collect 两字段 = 旧记录形态）。 */
 function makeRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
@@ -64,13 +64,13 @@ describe("record-entry serialization: collect fields (U1 foundation)", () => {
       makeRecord({
         collectMode: "sync",
         batchFinalized: true,
-        status: "closed",
+        status: "idle",
         endedAt: 2000,
       }),
     );
     expect(entry.collectMode).toBe("sync");
     expect(entry.batchFinalized).toBe(true);
-    expect(entry.status).toBe("closed");
+    expect(entry.status).toBe("idle");
   });
 
   it("round-trips both fields through JSON serialization (persisted form)", () => {

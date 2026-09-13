@@ -32,16 +32,16 @@ vi.mock("../../core/logger.ts", () => ({
 const { saveIndexMock } = vi.hoisted(() => ({
   saveIndexMock: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../sessions-index.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../sessions-index.ts")>();
+vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/sessions-index.ts")>();
   return { ...actual, saveIndex: saveIndexMock };
 });
 
-import { createRecord } from "../execution-record.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../record-entry.ts";
-import type { SubagentRecordEntryData } from "../record-entry.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord } from "../types.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../persistence/record-entry.ts";
+import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（base 默认 running one-shot，over 覆盖任意字段）。 */
 function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -255,7 +255,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样终态化（closed+gc），终态 entry 保留 origin", () => {
+  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（idle），纠偏 entry 保留 origin", () => {
     const store = new RecordStore(tmpDir);
     const captured: SubagentRecordEntryData[] = [];
     store.setPi(makeCapturePi(captured));
@@ -272,12 +272,14 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     store2.setPi(makeCapturePi(recovered));
     store2.recoverEntryOnlyOrphans(mainFile, "sess-origin");
 
-    // 治理面不过滤：workflow origin 孤儿照样被收敛终态（无文件判据 closed+gc+error）
+    // 治理面不过滤：workflow origin 孤儿照样被纠偏（[U3 / §3.2.4] 一律保留 idle，
+    // 直断 closed+gc 退役）
     const finalized = recovered.find((e) => e.id === "wf-orphan");
     expect(finalized).toBeDefined();
-    expect(finalized?.status).toBe("closed");
-    expect(finalized?.closedReason).toBe("gc");
-    // 终态 entry 保留来源身份（origin/parentRunId 不因恢复链丢失）
+    expect(finalized?.status).toBe("idle");
+    expect(finalized?.closedReason).toBeUndefined();
+    expect(finalized?.stopReason).toBe("interrupted-by-restart");
+    // 纠偏 entry 保留来源身份（origin/parentRunId 不因恢复链丢失）
     expect(finalized?.origin).toBe("workflow");
     expect(finalized?.parentRunId).toBe("run-G");
   });

@@ -1,5 +1,5 @@
 // zcode-session-db-isolation.test.ts —— 2026-09 会话库隔离的单元守护面（设计权威源：
-// docs/design/zcode-session-db-isolation.md D1/D2/D3 + §3.3 不变量 1/2/3；impl-plan
+// docs/architecture/zcode-session-db-isolation.md D1/D2/D3 + §3.3 不变量 1/2/3；impl-plan
 // §2.3 W3 规格「单元」行 + 探针④）。池 GC 守卫（A9/不变量 6 的可执行断言）见
 // zcode-session-db-pool-gc.test.ts；生产链白名单分支守护见
 // engine/__tests__/common/session-view-service-zcode-dbpath.test.ts。
@@ -78,7 +78,6 @@ function makeHandle(sessionRef: Record<string, string>): EngineHandle {
       v: 1,
       engineId: "zcode",
       sessionRef,
-      poolKey: "shared",
       adapterVersion: "1.0.0-test",
     },
   };
@@ -135,6 +134,27 @@ describe("API 链集合成员判定（EnginePort.read，D2 第二站点）", () 
     // 不含漂移路径 → 拒绝①级（生产链同形态行为断言在 svs-zcode-dbpath.test.ts）
     const drifted = zcodeSessionDbPath(path.join(dataDir, "elsewhere"));
     const view = await engine.read(makeHandle({ sessionId: "sess-1", dbPath: drifted }));
+    expect(mockedRead).not.toHaveBeenCalled();
+    expect(view.source).toBe("outcome-only");
+  });
+
+  it("dbPath = 池内相对路径（池时代旧 record）→ 池目录解析后放行①级", async () => {
+    mockedRead.mockResolvedValue(nativeView("from pool db"));
+    const view = await engine.read(makeHandle({ sessionId: "sess-1", dbPath: "db.sqlite" }));
+    expect(mockedRead).toHaveBeenCalledTimes(1);
+    expect(mockedRead).toHaveBeenCalledWith(
+      path.resolve(dataDir, "engines", "zcode", "shared", "db.sqlite"),
+      "sess-1",
+    );
+    expect(view.source).toBe("native");
+  });
+
+  it("dbPath = 相对路径含 `..` 逃逸池目录 → 拒绝①级（reader 零触达），落 outcome-only（防任意文件读）", async () => {
+    // join 归一化后逃逸 `<dataDir>/engines/zcode/shared` 的形态必须与集合外绝对
+    // 路径同款拒绝——相对分支是绝对分支白名单的守卫缺口（2026-09 review 顺手修）
+    const view = await engine.read(
+      makeHandle({ sessionId: "sess-1", dbPath: path.join("..", "..", "evil.sqlite") }),
+    );
     expect(mockedRead).not.toHaveBeenCalled();
     expect(view.source).toBe("outcome-only");
   });
@@ -247,7 +267,7 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
 
     const { outcome } = await engine.run(
       { prompt: "做点什么", description: "s", model: `${PROVIDER}/m1`, cwd: workspace },
-      { taskId: "sa-iso-env", poolKey: "" },
+      { taskId: "sa-iso-env" },
     );
     expect(outcome.error).toBeUndefined();
 

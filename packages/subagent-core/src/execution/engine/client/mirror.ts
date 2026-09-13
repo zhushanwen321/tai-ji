@@ -19,7 +19,7 @@
 
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
 
-import { notifyChildProcessExited } from "../../dialog-queue.ts";
+import { notifyChildProcessExited } from "../../ui/dialog-queue.ts";
 
 const logger = getLogger("subagents");
 

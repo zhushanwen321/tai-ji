@@ -74,7 +74,7 @@ export const RESTORE_FAILED = 'RESTORE_FAILED'
  *
  * [arch] 定义在 utils（services/infra 共享中立层）：services 层（message-dispatcher）
  * 需要 instanceof 运行时值判别，若定义在 infra/pi/rpc-client 会构成 services→infra 的
- * 运行时值 import（runtime 三层规则禁止，见 runtime-three-layer-design.md）。rpc-client.ts
+ * 运行时值 import（runtime 三层规则禁止，见 runtime-layering.md）。rpc-client.ts
  * （infra）从这里 import 并 re-export，保持既有 import 路径兼容。
  */
 export class RpcTimeoutError extends Error {

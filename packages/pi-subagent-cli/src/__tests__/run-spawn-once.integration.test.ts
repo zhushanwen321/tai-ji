@@ -116,7 +116,7 @@ interface Harness {
   scriptPath: string;
   events: AgentEvent[];
   deltas: string[];
-  handleReady: Array<{ sessionRef: Record<string, string>; poolKey: string }>;
+  handleReady: Array<{ sessionRef: Record<string, string> }>;
   childSpawned: Array<{ pid: number; recordId: string }>;
   stateChanges: Array<{ pid: number; state: string; killed: boolean; exitCode?: number; signal?: string }>;
   argv1Saved: string | undefined;
@@ -231,8 +231,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(h.handleReady).toHaveLength(1);
       expect(h.handleReady[0]).toEqual({
         sessionRef: { sessionId: "fake-sess-1", sessionFile: result.sessionFile },
-        poolKey: "shared",
-      });
+        });
 
       // 镜像上报：childSpawned 先行 + running/exited 状态（killed=true = agent_end 收割）
       expect(h.childSpawned).toHaveLength(1);
@@ -292,7 +291,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       // handleReady 恰一次且携带 sessionFile：spawn 期应答无 sessionFile（不发通知），
       // 故这一条只能由 close 期的 LC-4 落位产生 ——「只在 close 后发一次」
       expect(h.handleReady).toEqual([
-        { sessionRef: { sessionId: "fake-sess-1", sessionFile: lc4File }, poolKey: "shared" },
+        { sessionRef: { sessionId: "fake-sess-1", sessionFile: lc4File }},
       ]);
     } finally {
       restoreHarness(h);

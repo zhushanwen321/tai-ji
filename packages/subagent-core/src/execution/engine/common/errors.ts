@@ -1,7 +1,8 @@
 // src/execution/engine/common/errors.ts
 //
-// 引擎层错误 SSOT（P2 公共降级层）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md §3.3.3 错误规格全表（11 条）。
+// 引擎层错误 SSOT（P2 公共降级层）。现行权威：docs/architecture/subagent-engine-
+// protocolization.md（原 subagent-engine-abstraction.md §3.3.3 错误规格全表 11 条，
+// 已删除，git 可追溯）。
 //
 // 为什么集中一处：错误文案契约（code + 恢复指引）被三层消费——公共降级层
 // （prompt_too_large / nested_spawn_rejected / engine_timeout）、后续 wave 的路由与
@@ -123,8 +124,12 @@ function truncate(text: string, max: number): string {
 }
 
 /**
- * prompt_too_large（persona-router 的 argv 预算拦截消费）：仅 argv 投递的引擎在
+ * prompt_too_large（argv 预算拦截的具名构造器）：仅 argv 投递的引擎在
  * prepare 期报——禁止 spawn 后撞 E2BIG 才失败（§3.3.3 第 10 行）。
+ *
+ * [现状] 唯一历史生产消费方 persona-router（argv 预算断言）已删除；本工厂与错误码
+ * 枚举、DEFAULT_RECOVERY_HINTS 模板一并保留（错误码全集 = 协议/文档面契约，
+ * Record 全集覆盖由编译强制），当前仅 errors.test.ts 消费，无生产调用方。
  */
 export function promptTooLargeError(actualBytes: number, limitBytes: number): EngineError {
   return new EngineError(

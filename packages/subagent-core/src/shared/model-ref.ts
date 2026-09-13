@@ -1,6 +1,6 @@
 // src/shared/model-ref.ts
 //
-// [U1 ModelRef 全等裁决] 模型身份的唯一裁决入口（设计 docs/design/subagent-dispatch-reliability.md D1/D2）。
+// [U1 ModelRef 全等裁决] 模型身份的唯一裁决入口（设计 docs/architecture/pi-boundary-reliability.md 附录 D D1/D2）。
 //
 // 零宽容原则：除「缺省继承主 agent 模型」外，只有与 registry 条目**全等精确匹配（含大小写）**
 // 的模型串可放行；模糊匹配（case variant / 包含关系 / provider 相似度）只用于生成报错里的

@@ -15,9 +15,18 @@
  * 从 package.json 删除，深路径归一由消费侧单元（u-2b/u-2c）收口，barrel 是公共
  * 消费终点。
  *
- * 设计权威源：docs/design/subagent-core-package-extraction.md §3.3 D5；
+ * [2026-09-13 barrel 全面收窄] 用户裁决不等跨仓验证直接收窄：零仓内消费导出删除
+ * （A 组全死连定义删 / B 组仅定义文件内部使用只摘 barrel 行 / C 组仅测试消费摘
+ * barrel 行 + 测试改深路径），298 → 229 符号；外部消费者（zsw 仓）编译报错符号
+ * 按 git 历史原样加回 barrel（恢复通道）。弱活保留项：maxTurnsToWatchdogMs /
+ * loadWorkflowScriptByPath / normalizeWorkflowRef / cleanupStaleTmpFiles /
+ * listStaleTmpFiles / parseAtomicTmpPath（scripts/probe-third-host-integration.mjs
+ * 探针消费）、CORE_PACKAGE_VERSION / DEFAULT_DATA_ROOT / routeEngine（版本一致性
+ * 守卫 + dist 冒烟链消费）。
+ *
+ * 设计权威源：docs/architecture/subagent-core-package-extraction.md §3.3 D5；
  * docs/design/subagent-post-convergence-architecture.md §3.2 B-2 / §3.6 D3/D8/D9；
- * docs/design/subagent-core-sink-design.md（sink 下沉收口扩面，2026-08-31）；
+ * docs/design/subagent-core-sink-design.md（已删，git 可追溯）（sink 下沉收口扩面，2026-08-31）；
  * 宿主接入示例见包 README（§3.4 core_host_not_configured 恢复指引的落点）。
  */
 
@@ -53,7 +62,9 @@ export {
 } from "./core/notify-ports.ts";
 
 // ── 引擎契约面（execution/engine）────────────────────────────
-// EnginePort：subagent 执行引擎的唯一契约点（run / interact / read / probe 四能力面）。
+// EnginePort：subagent 执行引擎的唯一契约点（capabilities / probe / run / read 四必选
+// 面 + listModels / validateModel / dispose 可选扩展；[H1] interact 能力面已随
+// chat-run 统一退役，续聊 = run + resume 锚点——协议线对齐 SDK 9 正向方法集）。
 // types.ts：引擎中立类型（宿主与引擎适配器共同消费，宿主不感知具体引擎）。
 export type {
   EnginePort,
@@ -72,19 +83,15 @@ export type {
 } from "./execution/engine/types.ts";
 // RunContext 的成员类型（ctxModel / stream）——类型闭包随 EnginePort 必然公开，
 // 显式导出免宿主深路径兜圈；type-only（SubagentStream 是 execution 内部实现，禁 new）。
-export type { ModelInfo } from "./execution/model-resolver.ts";
-export type { SubagentStream } from "./execution/stream-sink.ts";
+export type { ModelInfo } from "./execution/assembly/model-resolver.ts";
+export type { SubagentStream } from "./execution/assembly/stream-sink.ts";
 
 // routeEngine：三层路由（调用参数 > frontmatter > 全局默认）+ probe fallback 编排
 // 的单一权威点（engine-abstraction D9/D7）。宿主按 error.code（engine_* 错误族）
 // 判别失败形态，无需导入错误类。
 export {
   routeEngine,
-  type EngineRouteOptions,
   type EngineRouteResult,
-  type EngineRouting,
-  type EngineRoutingInput,
-  type EngineRoutingSource,
 } from "./execution/engine/routing.ts";
 // [W8 补扫接线面] setEngineDiscoveryRescanOptions：宿主登记 hasEngineWithRescan 的
 // 补扫发现参数（与 session_start 发现扫描同源）；壳消费 = runtime
@@ -118,7 +125,6 @@ export { killAllSpawnedChildren } from "./execution/engine/host/spawned-children
 export {
   createZcodeEngine,
   registerZcodeEngine,
-  type D8CompatZcodeEngineDeps,
 } from "./execution/engine/d8-compat.ts";
 
 // 在途事件出口（u7a，D5）：壳层（subagent-workflow host/inflight-reporter）注册
@@ -127,13 +133,12 @@ export {
 export {
   setInFlightListener,
   getInFlightSnapshot,
-  type InFlightSnapshot,
-  type InFlightListener,
 } from "./execution/engine/inflight-snapshot.ts";
 // W3 后内核宿主 = engine/host（host-bridge arm/disarm 委托点为在途迁移点），模块本体不经 engines/pi。
 // maxTurnsToWatchdogMs 为 maxTurns→watchdog 毫秒换算（U3/U4 / D7，floor 语义
-// 文档化——两宿主预算一致性 S2 的函数级锚点；[W3] 定义收敛在 pi-host-binding，
-// 原 inproc session-runner（已删） 定义随删件消亡）；killRecordChildWithEscalation 为
+// 文档化——现役消费 = scripts/probe-third-host-integration.mjs 探针；引擎侧无消费
+//（预算各自实现）；[W3] 定义收敛在 pi-host-binding，原 inproc session-runner（已删）
+// 定义随删件消亡）；killRecordChildWithEscalation 为
 // 单 record 子进程终止的镜像记账入口（[W3] 实际终止在引擎进程内经协议承载）。
 export {
   killRecordChildWithEscalation,
@@ -174,7 +179,7 @@ export {
   CLOSED_REASONS,
   DEFAULT_AGENT_NAME,
   ResurrectDeniedError,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 export type {
   AgentEventLogEntry,
   BgResponse,
@@ -193,108 +198,106 @@ export type {
   SubagentListItem,
   SubagentRecord,
   SubagentToolResult,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 
-// execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool calls /
-// live progress），interface 渲染层唯一消费入口。
+// execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
+// calls），interface 渲染层唯一消费入口。projectLiveProgress 已随 2026-09-13
+// barrel 收窄出公共面（仅测试深路径消费，live 进度新投影面 = SubagentRecord
+// 投影族）。
 export {
   computeElapsedSeconds,
-  countAllToolCalls,
   deriveOutcome,
   getAllToolCalls,
-  projectLiveProgress,
   projectOutcome,
-} from "./execution/execution-record.ts";
+} from "./execution/persistence/execution-record.ts";
 
 // SubagentService 聚合面 + 进程单例访问器（post-convergence D8）：访问器经
 // globalThis[Symbol.for] slot 防 jiti 多实例分裂，/resume /fork 复用既有实例
-// （SR-3/SR-4 语义）。createSubagentService / SubagentServiceInit 为构造依赖参数
-// 注入形态（modelService 等，无全局查找，@experimental U10 / D6）。
+// （SR-3/SR-4 语义）。SubagentServiceInit 为构造依赖参数注入形态（modelService
+// 等，无全局查找，@experimental U10 / D6）。
 // [H3/R6] 单例访问器 + Init 接口外移支撑文件 service/service-bootstrap.ts，本
 // barrel 直接改指向该文件（导出符号面不变；壳对 bootstrap 零 re-export——防壳↔
 // bootstrap 值环，设计 v4 import 纪律）。对外消费方零感知。
+// [2026-09-13 barrel 收窄] createSubagentService（全仓零消费，定义文件内部亦零
+// 使用）已连定义删除——第三宿主参数注入构造改走 `new SubagentService(init)`
+// （SubagentServiceInit 形状，见 subagent-service.ts 装配）；恢复通道 = git 历史。
 export { SubagentService } from "./execution/subagent-service.ts";
 export {
   getSubagentService,
   setSubagentService,
-  createSubagentService,
   type SubagentServiceInit,
 } from "./execution/service/service-bootstrap.ts";
-// notifyGateAllowsDelivery：closedReason → 投递许可判定（通知门）——
-// 投递内核与壳侧 notify 链的共同语义锚点（execution 生产域消费，A2a）。
+// notifyGateAllowsDelivery：[U5/K11] 轮次完成回注的投递门——三元组判据（intent=archived
+// 静默 / 回注 epoch 世代比对 + 放弃轮标记命中阻断 / 收口轮构造性豁免），判据源已从旧
+// 「closedReason 形态枚举」切换为「意愿 + 放弃标记」两维——
+// 投递内核与壳侧 notify 链的共同语义锚点（execution 生产域消费，A2a/U5）。
 export { notifyGateAllowsDelivery } from "./execution/subagent-service.ts";
 
-// ModelConfigService 聚合面 + 单例访问器四件中的 model 侧两件（D8）；
-// ModelConfigServiceInit 为 SubagentServiceInit.modelService 的构造依赖
-// （MF-4：jsdoc 示例 `new ModelConfigService({cwd, agentDir})` 可构造）。
+// ModelConfigService 聚合面 + 单例访问器四件中的 model 侧两件（D8）。
+// ModelConfigServiceInit 已随 2026-09-13 barrel 收窄出公共面（定义文件内部
+// 类型闭包，形状经 `new ModelConfigService({cwd, agentDir})` 签名约束，
+// MF-4 jsdoc 同）。
 export {
   ModelConfigService,
   getModelConfigService,
   setModelConfigService,
-  type ModelConfigServiceInit,
-} from "./execution/model-config-service.ts";
+} from "./execution/assembly/model-config-service.ts";
 
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
   bindNotifyLedgerHost,
   getBoundNotifyLedger,
   type NotifyLedgerHost,
-} from "./execution/notify-ledger.ts";
+} from "./execution/notify/notify-ledger.ts";
 
 // identity 重建常量与类型：session_start identity custom entry 的写入侧契约。
 export {
   IDENTITY_CUSTOM_TYPE,
   type SubagentIdentityData,
-} from "./execution/session-reconstructor.ts";
+} from "./execution/persistence/session-reconstructor.ts";
 
 // 执行域外围件（组合根 / interface 层直接消费的独立单点件）。
-export { bestEffort } from "./execution/best-effort.ts";
+export { bestEffort } from "./execution/assembly/best-effort.ts";
 // channel-registry 类型闭包（UiChannelRegistry / ChannelHandler）随值符号进 barrel
-// （u-2b 主 agent 裁决 2026-09-03）：壳 index.ts 跨扩展 re-export surface 的非测试
-// 生产消费，满足 D3 判定标准；type-only，零运行时面变化。
+// （u-2b 主 agent 裁决 2026-09-03）：core 内部消费 + 类型导出（原「壳 index.ts 跨
+// 扩展 re-export surface」消费面已收）；type-only，零运行时面变化。
 export {
   getOrCreateChannelRegistry,
   type UiChannelRegistry,
   type ChannelHandler,
-} from "./execution/channel-registry-access.ts";
-export { DialogGlobalQueue } from "./execution/dialog-queue.ts";
+} from "./execution/assembly/channel-registry-access.ts";
+export { DialogGlobalQueue } from "./execution/ui/dialog-queue.ts";
 export {
   readGlobalConfig,
   type GlobalConfigReadResult,
-} from "./execution/config.ts";
-export { isResumable } from "./execution/lifecycle-predicates.ts";
-export { maybeCleanupExpiredSessionFiles } from "./execution/session-file-gc.ts";
-export { createUiRequestHandlerForMode } from "./execution/ui-request-handler-factory.ts";
-export { WorktreeManager } from "./execution/worktree-manager.ts";
-export { SubprocessAgentRunner } from "./execution/subprocess-agent-runner.ts";
+} from "./execution/assembly/config.ts";
+export { isResumable } from "./execution/lifecycle/lifecycle-predicates.ts";
+export { maybeCleanupExpiredSessionFiles } from "./execution/persistence/session-file-gc.ts";
+export { createUiRequestHandlerForMode } from "./execution/ui/ui-request-handler-factory.ts";
+export { WorktreeManager } from "./execution/worktree/worktree-manager.ts";
+export { SubprocessAgentRunner } from "./execution/assembly/subprocess-agent-runner.ts";
 
-// record 存储面：RecordStore 类 + 索引文件名常量（bench 扫描基准消费）；
-// ChangeListener / RecordStorePi / StatusFilter 为状态查询面的类型闭包
+// record 存储面：RecordStore 类（ChangeListener / RecordStorePi / INDEX_FILENAME
+// 已随 2026-09-13 barrel 收窄出公共面——前两者为定义文件内部类型闭包、后者仅
+// bench/测试深路径消费）；StatusFilter 为状态查询面的类型闭包
 //（@experimental U10 / D6：lookupRecordAnyState 全态查询等签名直接引用）。
 export {
   RecordStore,
-  type ChangeListener,
-  type RecordStorePi,
   type StatusFilter,
-} from "./execution/record-store.ts";
-export { INDEX_FILENAME } from "./execution/sessions-index.ts";
+} from "./execution/persistence/record-store.ts";
 
 // record 落盘 entry 契约：custom entry 写入侧（@experimental U10 / D6）。
 export {
   SUBAGENT_RECORD_CUSTOM_TYPE,
   toSubagentRecordEntry,
-  type SubagentRecordEntryData,
-} from "./execution/record-entry.ts";
+} from "./execution/persistence/record-entry.ts";
 
 // agent-registry 执行消费面：loadByPath 直接加载（@experimental U10 / D6）+
 // parseAgentProfile 宽容解析（无 frontmatter 不拒、name 缺省 stem、返回 body 与
 // 执行字段全量）——执行消费面单点；与严格注入投影（parseResourceMeta）双轨分离
 // 的执行侧统一入口（U2 / D3）。
-export { AgentRegistry } from "./execution/agent-registry.ts";
-export {
-  parseAgentProfile,
-  type AgentProfile,
-} from "./execution/agent-registry.ts";
+export { AgentRegistry } from "./execution/assembly/agent-registry.ts";
+export { parseAgentProfile } from "./execution/assembly/agent-registry.ts";
 
 // 错误类型族（error-recovery.ts 计划路径实测不存在，实测散布于下列源文件）：
 // resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts），
@@ -302,26 +305,20 @@ export {
 export {
   DirtyWorktreeError,
   ForkDepthExceededError,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 
 // 动作层领域内核（@experimental U10 / D6）：六 handler 的校验/守卫链/归属判定/
 // 终态映射，产出领域对象，宿主 adapter 负责包装渲染。
 export {
-  BG_MESSAGE,
   cancelHandler,
   closeHandler,
-  DEFAULT_LIST_LIMIT,
   endedMessageGuard,
-  FORK_FROM_DEFAULT_PROMPT,
   forkFromHandler,
   listHandler,
   mapExternalState,
-  MAX_LIST_LIMIT,
   messageHandler,
-  NOTIFY_CONTRACT,
   recordToListItem,
   startHandler,
-  wrapForkFromPrompt,
   type CancelHandlerInput,
   type CancelHandlerResult,
   type CloseHandlerInput,
@@ -334,19 +331,17 @@ export {
   type MessageHandlerResult,
   type StartHandlerInput,
   type StartHandlerResult,
-} from "./execution/subagent-actions-core.ts";
+} from "./execution/assembly/subagent-actions-core.ts";
 
 // 进程活性探针（watchdog/孤儿判定共用，agent-ref 契约原语组 U1）。
-export { isProcessAlive } from "./execution/alive-store.ts";
+export { isProcessAlive } from "./execution/persistence/alive-store.ts";
 
 // 并发池工厂（U3/U4 / D7）：queuePolicy 缺省 priority 保 pi 行为，zsw 消费
 // strict-fifo——策略差异显式化而非双实现。
-export {
-  createConcurrencyPool,
-  type ConcurrencyPool,
-  type CreateConcurrencyPoolOptions,
-  type QueuePolicy,
-} from "./execution/concurrency-pool.ts";
+// [2026-09-13 barrel 收窄] createConcurrencyPool / CreateConcurrencyPoolOptions /
+// QueuePolicy 已出公共面（定义文件内部零使用，仅测试深路径消费）——池实例经
+// zsw 侧装配注入，core 公共面只留 ConcurrencyPool 契约类型。
+export type { ConcurrencyPool } from "./execution/assembly/concurrency-pool.ts";
 
 // 模型引用切分原语（U1 契约面批件）：provider/model 引用切分与缺省值（两宿主
 // maxTurns/model 换算同源）。[W11/H2] 实现体随 engines/zcode 删除迁至
@@ -363,31 +358,22 @@ export {
 // collectWorktreePatch（统一 add+diff 基线机制，返回结构即 patchIncomplete
 // 留痕载体）、三步容错清理、listWorktreePorcelain（原始输出供宿主 realpath
 // 对账）。锚点缺失/损坏与 add 失败两条降级路径 warn + 留痕（⛔3）。
+// [2026-09-13 barrel 收窄] 上述纯函数族与 Options/结果类型族已出公共面（仓内
+// 仅测试深路径消费；WorktreeManager 仍在 internal 消费）——barrel 保留错误类
+// 与校验正则两个公共锚点。
 //
 // GitRunError 同名双类裁决（u-core-exec-export 交接）：worktree-manager.ts 与
 // worktree-git-ops.ts 各有一个 GitRunError（文案同但类独立）——barrel 只导出
 // 本组 worktree-git-ops 版（git 语义新单源）；worktree-manager 版不进 barrel，
 // 将来 manager 收缩到 git-ops 内核时随之消除。
 export {
-  assertSafeId,
-  cleanupWorktree,
-  collectWorktreePatch,
   GitRunError,
-  gitRun,
-  isSafeId,
-  isTreeDirty,
-  listWorktreePorcelain,
   SAFE_ID_RE,
-  type CleanupWorktreeOptions,
-  type CollectWorktreePatchOptions,
-  type ListWorktreePorcelainOptions,
-  type PatchBaselineAnchor,
-  type WorktreePatchResult,
-} from "./execution/worktree-git-ops.ts";
+} from "./execution/worktree/worktree-git-ops.ts";
 
 // 组装层（U2 装配）：discoverAgents 发现→宽容解析→去重→码点序（workflow 侧
 // discoverWorkflows 对称面，第三宿主「列 agents」入口）。
-export { discoverAgents } from "./execution/agents-assembly.ts";
+export { discoverAgents } from "./execution/assembly/agents-assembly.ts";
 
 // ── workflow 编排入口（orchestration）────────────────────────
 // runWorkflow / abortRun：run 生命周期 free functions（D-12）——orchestration 的
@@ -405,11 +391,9 @@ export {
 } from "./orchestration/lifecycle.ts";
 
 // recoverCrashedRuns：崩溃恢复四步装配（宿主事件经 hooks 外置，U7 生命周期 / D8）。
-export {
-  recoverCrashedRuns,
-  type RecoverCrashedRunsHooks,
-  type RecoverCrashedRunsResult,
-} from "./orchestration/lifecycle.ts";
+// [2026-09-13 barrel 收窄] RecoverCrashedRunsHooks / RecoverCrashedRunsResult
+// 已出公共面（定义文件内部类型闭包），hooks 形状经函数签名隐式约束。
+export { recoverCrashedRuns } from "./orchestration/lifecycle.ts";
 
 // launcher 层：runAndWait / executeNestedWorkflow（workflow 域嵌套编排入口）
 // + deps / 结果类型。
@@ -421,16 +405,13 @@ export {
 } from "./orchestration/launcher.ts";
 
 // worker-message-pump 内核件（execution 生产域消费，A2a）：finalizeRun run 终态
-// 收口 + FinalizeRunOptions 契约、closeOutInFlightCalls 在飞 call 批量清算、
-// makeSerializeFailedResult 序列化失败结果构造、postBudgetUpdate 预算播报、
-// resetRebuildFailureInjectionForTest 重建失败注入复位（测试面）。
+// 收口、closeOutInFlightCalls 在飞 call 批量清算。
+// [2026-09-13 barrel 收窄] makeSerializeFailedResult / postBudgetUpdate /
+// resetRebuildFailureInjectionForTest / FinalizeRunOptions 已出公共面（前三者仅
+// 测试深路径消费，后者为定义文件内部类型闭包）。
 export {
   finalizeRun,
   closeOutInFlightCalls,
-  makeSerializeFailedResult,
-  postBudgetUpdate,
-  resetRebuildFailureInjectionForTest,
-  type FinalizeRunOptions,
 } from "./orchestration/worker-message-pump.ts";
 
 // workflow 领域模型族：run / call / trace / budget / 状态与规格（壳 store 与
@@ -475,7 +456,7 @@ export {
 } from "./orchestration/workflow-script-registry-impl.ts";
 // lintScript：workflow 脚本静态检查（执行前 fail-fast，宿主 list/validate 面消费）。
 export { lintScript } from "./orchestration/script-lint.ts";
-export type { LintFinding, LintResult } from "./orchestration/script-lint.ts";
+export type { LintResult } from "./orchestration/script-lint.ts";
 export { saveWorkflow, deleteWorkflow } from "./orchestration/workflow-files.ts";
 export { clearSkillPathCache } from "./orchestration/skill-discovery.ts";
 export { WorkerHostImpl } from "./orchestration/worker-host.ts";
@@ -484,22 +465,17 @@ export { WorkerHostImpl } from "./orchestration/worker-host.ts";
 // generateWorkflowScript：generate 校验管线（五道闸 + @pi-meta round-trip + tmp
 // 写盘）从 pi-sw 插件层下沉（D-6）——纯函数返回结构化结果（不 throw，pi 的
 // isError 契约转换由宿主负责），报错文案逐字对齐 pi 现版（CA2 前提）。
-// saveWorkflow/deleteWorkflow（上方已导出）+ 目录经 WorkflowDirOptions 注入
-// （缺省 pi 布局 DEFAULT_WORKFLOW_TMP_DIR / DEFAULT_WORKFLOW_SAVED_DIR，向后兼容
-// ——pi 现深路径调用形态行为不变，改接在 C5）。
+// saveWorkflow/deleteWorkflow（上方已导出）+ 目录参数注入（缺省 pi 布局
+// DEFAULT_WORKFLOW_TMP_DIR，向后兼容——pi 现深路径调用形态行为不变，改接在 C5）。
+// [2026-09-13 barrel 收窄] WorkflowDirOptions / GenerateWorkflowScriptOptions /
+// GenerateWorkflowScriptResult / DEFAULT_WORKFLOW_SAVED_DIR 因仓内仅测试消费已出
+// 公共面（恢复通道 = git 历史按符号原样加回）。
 export { generateWorkflowScript } from "./orchestration/script-generate.ts";
-export type {
-  GenerateWorkflowScriptOptions,
-  GenerateWorkflowScriptResult,
-} from "./orchestration/script-generate.ts";
-export type { WorkflowDirOptions } from "./orchestration/workflow-files.ts";
-// 缺省目录常量随面导出：宿主显式注入 pi 缺省布局时引用常量，避免字面硬编码回流。
-export {
-  DEFAULT_WORKFLOW_SAVED_DIR,
-  DEFAULT_WORKFLOW_TMP_DIR,
-} from "./orchestration/workflow-files.ts";
+// 缺省目录常量随面导出：宿主显式注入 pi 布局时引用常量，避免字面硬编码回流。
+export { DEFAULT_WORKFLOW_TMP_DIR } from "./orchestration/workflow-files.ts";
 
-// workflow 发现/加载（ADR-031 统一资源发现）：宿主 list 面与 registry 构造消费；
+// workflow 发现/加载（ADR-031 统一资源发现）：discoverWorkflows 为 registry 构造
+// 消费（workflow-script-registry-impl）；宿主 list 面走 loadWorkflows；
 // invalidateCache 供宿主在写脚本后主动失效 mtime 缓存。
 export {
   discoverWorkflows,
@@ -527,7 +503,6 @@ export {
   DEFAULT_STATE_MAX_RUNS,
   FileRunStore,
   pruneStateFilesBeyondCap,
-  type PruneStateDeps,
 } from "./orchestration/file-run-store.ts";
 
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
@@ -545,20 +520,16 @@ export {
 export {
   isScriptRunning,
   runSummary,
-  type WorkflowRunSummary,
 } from "./orchestration/workflow-run-summary.ts";
 
 // ── schema 助手（U9 / D9）─────────────────────────────────────
-// workflow 资产 @pi-meta parameters 的 schema→已知键集、平铺参数检测与
-// 归一化（pi tool-workflow 消费面下沉；宿主白名单退役入口）。
+// workflow 资产 @pi-meta parameters 的 schema→已知键集与平铺参数检测
+// （pi tool-workflow 消费面下沉；宿主白名单退役入口）。
+// [2026-09-13 barrel 收窄] normalizeArgsByMeta 与本组类型族已出公共面（仅测试
+// 深路径消费），归一化留在模块内部。
 export {
   argKeysFromMeta,
   findFlattenedArgKeys,
-  normalizeArgsByMeta,
-  type ArgKeySet,
-  type ArgMetaOptions,
-  type ArgMetaWarning,
-  type NormalizedArgs,
 } from "./orchestration/args-meta.ts";
 
 // ── 共享原语（shared/）───────────────────────────────────────
@@ -577,9 +548,9 @@ export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
 // 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键，
 // 含 project-host 项目级槽）；深路径消费在 npm/vendored 发布形态不可达（exports 无
 // 深路径通配），故出 barrel。发现链辅助（C5b）：findWorkspaceRoot（project 源根
-// 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——发现链消费方
-// （pi-sw injector 等宿主接线）逐条解析 DiscoveredResource 的 frontmatter/meta
-// 需要它们，深路径同样不可达。
+// 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——getCachedFileContent
+// 生产消费在 core 内部 3 处（agents-assembly / config-loader / workflow-script-registry-impl）；
+// 壳侧测试 mock 引用不计，深路径同样不可达。
 export {
   discoverResources,
   findWorkspaceRoot,
@@ -596,25 +567,22 @@ export { escapeXml, renderXmlSection } from "./shared/xml-injection.ts";
 
 // ── agent-ref 面（契约原语，U1）────────────────────────────────
 // agent 引用规范化（normalizeRef 含 `..` 段拒绝——G4 声明的唯一行为收紧，
-// ⛔2 样本集验证）+ 引用扩展名常量 + 报错文案工厂。
+// ⛔2 样本集验证）+ 引用扩展名常量。
+// [2026-09-13 barrel 收窄] invalidAgentRefMessage / InvalidAgentRefMessageOptions
+// 已出公共面（报错文案工厂仅测试深路径消费，报错文案由 normalizeRef 自带）。
 export {
   AGENT_REF_EXT,
-  invalidAgentRefMessage,
   normalizeRef,
-  type InvalidAgentRefMessageOptions,
   WORKFLOW_REF_EXT,
 } from "./shared/agent-ref.ts";
 
 // ── workflow 契约面（U1）──────────────────────────────────────
 // workflow 引用规范化（名/路径二分 + 保留字裁决，knownNames 宿主注入——内置
 // workflow 名不 core 硬编码）。
-export {
-  normalizeWorkflowRef,
-  WORKFLOW_REF_RESERVED_NAMES,
-  type NormalizeWorkflowRefOptions,
-  type NormalizedWorkflowRef,
-  type WorkflowRefInvalidReason,
-} from "./shared/agent-ref.ts";
+// [2026-09-13 barrel 收窄] WORKFLOW_REF_RESERVED_NAMES / NormalizeWorkflowRefOptions /
+// NormalizedWorkflowRef / WorkflowRefInvalidReason 已出公共面（定义文件内部
+// 类型闭包 + 常量，保留字裁决行为随 normalizeWorkflowRef 本体）。
+export { normalizeWorkflowRef } from "./shared/agent-ref.ts";
 
 // ── 注入渲染面（shared/injection-render，W3）───────────────────
 // 三段 XML（<available_subagents>/<available_workflows>/<available_provider_models>）
@@ -632,29 +600,27 @@ export {
 } from "./shared/injection-render.ts";
 export type {
   AgentEntry,
-  ListFormatOptions,
   ModelEntry,
-  ModelListFormatOptions,
-  ModelReasoningInfo,
   WorkflowEntry,
 } from "./shared/injection-render.ts";
+// [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions /
+// ModelReasoningInfo 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
 
 // ── 原语（U6a）────────────────────────────────────────────────
 // atomic-write：tmp+rename 原子写单一实现（统一 tmp 命名 `.tmp.<pid>.<seq>-<rand>`、
 // 失败清理、崩溃残留扫描/清理入口）——core 内部全部写点已收敛于此（U6b）；
 // sync/async 两档耐久语义见模块头。bounded-serialize：预算内 JSON 序列化
 // （自 pi-sw helpers 平移，输出逐字节一致）。
+// [2026-09-13 barrel 收窄] atomicTmpPathFor 与本组类型族（AtomicTmpRef /
+// AtomicWriteFileOptions / AtomicWriteOptions / CleanupStaleTmpOptions /
+// CleanupStaleTmpResult）已出公共面（类型为定义文件内部闭包，tmp 命名仅测试
+// 深路径消费）；cleanupStaleTmpFiles / listStaleTmpFiles / parseAtomicTmpPath
+// 为弱活保留项（scripts/probe-third-host-integration.mjs 探针消费）。
 export {
-  atomicTmpPathFor,
   cleanupStaleTmpFiles,
   listStaleTmpFiles,
   parseAtomicTmpPath,
   writeAtomicFile,
   writeAtomicFileSync,
-  type AtomicTmpRef,
-  type AtomicWriteFileOptions,
-  type AtomicWriteOptions,
-  type CleanupStaleTmpOptions,
-  type CleanupStaleTmpResult,
 } from "./shared/atomic-write.ts";
 export { boundedPrettySerialize } from "./shared/bounded-serialize.ts";

@@ -112,7 +112,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   }
   if (typeof frame.id === "string") {
     // 反向请求：数据面/交互面统一先 ack（录制宿主不做交互，回 unsupported 由引擎自行降级）
-    send({ id: frame.id, result: frame.method === "host/askUser" || frame.method === "host/permission"
+    send({ id: frame.id, result: frame.method === "host/askUser"
       ? { unsupported: true } : { ok: true } });
   }
 });
@@ -143,7 +143,7 @@ function noteEvent(params) {
   let runResult;
   let runError;
   try {
-    runResult = await request("run", { runId, task, ctx: { poolKey: "shared", cwd: "<workdir>" } });
+    runResult = await request("run", { runId, task, ctx: { cwd: "<workdir>" } });
   } catch (err) {
     runError = String(err.message);
   }

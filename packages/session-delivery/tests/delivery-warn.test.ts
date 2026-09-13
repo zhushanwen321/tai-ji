@@ -1,5 +1,5 @@
 /**
- * warn 出口参数化（U4 观测补齐，设计 docs/design/subagent-dispatch-reliability.md
+ * warn 出口参数化（U4 观测补齐，设计 docs/architecture/pi-boundary-reliability.md 附录 D
  * §5 U4）。
  *
  * createDelivery 接受可选 warn 注入（DeliveryConfigWithWarn）：

@@ -1,6 +1,6 @@
 /**
  * background-task-bucket —— 后台命令列表的分桶 / 筛选 / 计数 / 状态 icon SSOT
- *（docs/design/background-task-sidebar-view.md §3.3 D10①，u-renderer-store）。
+ *（docs/architecture/background-task-sidebar-view.md §3.3 D10①，u-renderer-store）。
  *
  * 纯函数模块，零 Vue / 零 DOM 依赖。四方同源消费点（禁两处各写判定，D10① 纪律）：
  * - 列表过滤（BackgroundTaskListView，u-renderer-list）

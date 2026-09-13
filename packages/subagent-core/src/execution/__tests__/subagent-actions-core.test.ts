@@ -1,6 +1,6 @@
 // src/execution/__tests__/subagent-actions-core.test.ts
 //
-// ⛔4 行为快照等值测试（sink 设计 docs/design/subagent-core-sink-design.md §5.4 ⛔4 /
+// ⛔4 行为快照等值测试（sink 设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §5.4 ⛔4 /
 // impl-plan u-core-actions）：六 handler（start/list/cancel/message/close/fork-from）
 // 的校验、守卫链、归属判定、终态映射，迁移前后行为逐项一致。
 //
@@ -39,15 +39,15 @@ import {
   recordToListItem,
   startHandler,
   wrapForkFromPrompt,
-} from "../subagent-actions-core.ts";
-import { ResurrectDeniedError } from "../types.ts";
-import { writeAliveMarker } from "../alive-store.ts";
+} from "../assembly/subagent-actions-core.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
+import { writeAliveMarker } from "../persistence/alive-store.ts";
 import type {
   ExecutionHandle,
   ExecutionRecord,
   SubagentRecord,
   SubagentToolDetails,
-} from "../types.ts";
+} from "../assembly/types.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
 // ── 时钟固定（duration 快照确定性，见文件头）──
@@ -206,7 +206,7 @@ const CTX_MODEL = { id: "m1", name: "Model One", provider: "prov", reasoning: tr
 describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-sw 实测）", () => {
   it("ExecutionStatus → ExternalState 两态映射", () => {
     expect(mapExternalState("running")).toBe("active");
-    expect(mapExternalState("closed")).toBe("ended");
+    expect(mapExternalState("idle")).toBe("idle");
   });
 
   it("running record → item（displayAgentName 短名 + duration 实时 + resumable）", () => {
@@ -246,7 +246,7 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       recordToListItem(
         makeRec({
           id: "bg-c1",
-          status: "closed",
+          status: "idle",
           closedReason: "gc",
           outcome: "completed",
           startedAt: 1000,
@@ -258,8 +258,8 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       subagentId: "bg-c1",
       agent: "reader",
       slug: "src-slug",
-      state: "ended",
-      status: "closed",
+      state: "idle",
+      status: "idle",
       mode: "background",
       duration: 8,
       model: "prov/m1",
@@ -272,7 +272,7 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
   });
 
   it("closed 存量（无 outcome 字段）→ deriveOutcome 兜底派生四形态", () => {
-    const base = { id: "bg-c2", status: "closed" as const, startedAt: 1000, endedAt: 3000 };
+    const base = { id: "bg-c2", status: "idle" as const, startedAt: 1000, endedAt: 3000 };
     // gc + 无 error → completed
     expect(recordToListItem(makeRec({ ...base, closedReason: "gc" })).outcome).toBe("completed");
     // cancelled → cancelled
@@ -406,7 +406,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
   it("includeFinished:true → collectRecords(20,'all') + getFullRecord 补全投影", () => {
     const collectRecords = vi.fn(() => [
       makeRec({ id: "bg-1", slug: "one" }),
-      makeRec({ id: "bg-2", slug: "two", status: "closed", endedAt: 5000 }),
+      makeRec({ id: "bg-2", slug: "two", status: "idle", closedReason: "gc", endedAt: 5000 }),
     ]);
     const getFullRecord = vi.fn((id: string) =>
       id === "bg-1" ? makeRec({ id: "bg-1", slug: "one", model: "prov/full", totalTokens: 77 }) : undefined,
@@ -434,8 +434,8 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
             subagentId: "bg-2",
             agent: "reader",
             slug: "two",
-            state: "ended",
-            status: "closed",
+            state: "idle",
+            status: "idle",
             mode: "background",
             duration: 4,
             model: "prov/m1",
@@ -513,7 +513,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     expect(
       await errOf(() =>
         cancelHandler(
-          makeService({ collectRecords: vi.fn(() => [makeRec({ id: "bg-9", status: "closed", endedAt: 5000 })]) }),
+          makeService({ collectRecords: vi.fn(() => [makeRec({ id: "bg-9", status: "idle", endedAt: 5000 })]) }),
           { subagentId: "bg-9" },
         ),
       ),
@@ -586,7 +586,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
               calls += 1;
               return calls === 1
                 ? makeRec({ id: "bg-1", chatMode: undefined })
-                : makeRec({ id: "bg-1", status: "closed", endedAt: 5000 });
+                : makeRec({ id: "bg-1", status: "idle", endedAt: 5000 });
             }),
             cancel: vi.fn(() => false),
           }),
@@ -595,7 +595,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
       ),
     ).toEqual({
       errorName: "Error",
-      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: closed)",
+      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: idle)",
     });
   });
 
@@ -703,7 +703,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
           getRecordForAction: vi.fn(() => {
             throw original;
           }),
-          lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "closed", closedReason: "disconnected" })),
+          lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "idle", closedReason: "disconnected" })),
         }),
         { subagentId: "bg-1", text: "hi" },
       );
@@ -714,59 +714,51 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     expect(caught instanceof ResurrectDeniedError).toBe(true);
   });
 
-  it("endedMessageGuard 分流：closed+user-close / cancelled → 主动关闭文案", async () => {
-    const mkSvc = (closedReason: "user-close" | "cancelled") =>
-      makeService({
-        getRecordForAction: vi.fn(() => {
-          throw new Error("not found or not owned");
+  it("[U4 缩型] endedMessageGuard：同树 idle record 归属通过（getRecordForAction 成功）→ 无形态拒绝，正常投递", async () => {
+    // [U4 / §3.2.3 万物可续] 「主动关闭」文案消亡：user-close/cancelled 遗留位不再
+    // 拒绝 message——getRecordForAction 准入放行后直达 deliverChatMessage。
+    for (const closedReason of ["user-close", "cancelled", "gc", "parent-new"] as const) {
+      const deliver = vi.fn(async () => {});
+      const r = await messageHandler(
+        makeService({
+          getRecordForAction: vi.fn(() => {
+            const rec = makeExecRecord({ id: "bg-1", chatMode: true });
+            rec.closedReason = closedReason;
+            return rec;
+          }),
+          canUpgradeToConversation: vi.fn(() => true),
+          deliverChatMessage: deliver,
         }),
-        lookupRecordAnyState: vi.fn(() =>
-          makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile: "sess-1.jsonl" }),
-        ),
-      });
-    expect(await errOf(() => messageHandler(mkSvc("user-close"), { subagentId: "bg-1", text: "hi" }))).toEqual({
-      errorName: "Error",
-      message:
-        "subagent bg-1 was deliberately closed by user (closedReason: user-close) — " +
-        "it cannot be messaged or resumed; nothing can reattach to it. " +
-        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
-    });
-    expect(await errOf(() => messageHandler(mkSvc("cancelled"), { subagentId: "bg-1", text: "hi" }))).toEqual({
-      errorName: "Error",
-      message:
-        "subagent bg-1 was deliberately closed by user (closedReason: cancelled) — " +
-        "it cannot be messaged or resumed; nothing can reattach to it. " +
-        "Recovery: start a new subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
-    });
+        { subagentId: "bg-1", text: "hi" },
+      );
+      expect(r.response.delivered).toBe(true);
+      expect(deliver).toHaveBeenCalled();
+    }
   });
 
-  it("endedMessageGuard 分流：closed 断联类 → reconnectable 文案（describeClosedContext 逐字）", async () => {
-    const mkSvc = (closedReason: ExecutionRecord["closedReason"], sessionFile?: string) =>
+  it("[U4 缩型] endedMessageGuard：异树快照（getRecordForAction not-owned 拒绝）→ 跨树归属文案（closedReason 不再进文案）", async () => {
+    const mkSvc = (sessionFile?: string) =>
       makeService({
         getRecordForAction: vi.fn(() => {
-          throw new Error("not found or not owned");
+          throw new Error("subagent not found or not owned: bg-1. Recovery: ...");
         }),
-        lookupRecordAnyState: vi.fn(() => makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile })),
+        lookupRecordAnyState: vi.fn(() =>
+          makeRec({ id: "bg-1", status: "idle", closedReason: "disconnected", rootSessionId: "root-B", sessionFile }),
+        ),
       });
-    const expectedTail =
-      'Recovery: resume from that history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}, ' +
-      "or read key points directly from the session file.";
-    // parent-shutdown 专属短语
-    expect((await errOf(() => messageHandler(mkSvc("parent-shutdown", "sess-1.jsonl"), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is ended but reconnectable (closedReason: parent-shutdown" +
-        " — it was disconnected when the previous parent session exited" +
-        "). Its conversation history is intact at sess-1.jsonl. " + expectedTail,
+    const expectedHead = "subagent bg-1 belongs to a different session tree than this one (rootSessionId: root-B). " +
+      "You cannot message it from here. ";
+    // 有 sessionFile → 追加 source session
+    expect((await errOf(() => messageHandler(mkSvc("sess-1.jsonl"), { subagentId: "bg-1", text: "hi" }))).message).toBe(
+      expectedHead +
+        'Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}' +
+        " (source session: sess-1.jsonl); otherwise start a new subagent.",
     );
-    // disconnected 专属短语
-    expect((await errOf(() => messageHandler(mkSvc("disconnected", "sess-1.jsonl"), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is ended but reconnectable (closedReason: disconnected" +
-        " — it ended in a previous session (exact cause unknown)" +
-        "). Its conversation history is intact at sess-1.jsonl. " + expectedTail,
-    );
-    // 无 closedReason → "unknown" + 空短语；无 sessionFile → "(session file unavailable)"
-    expect((await errOf(() => messageHandler(mkSvc(undefined, undefined), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is ended but reconnectable (closedReason: unknown). " +
-        "Its conversation history is intact at (session file unavailable). " + expectedTail,
+    // 无 sessionFile → 无追加
+    expect((await errOf(() => messageHandler(mkSvc(undefined), { subagentId: "bg-1", text: "hi" }))).message).toBe(
+      expectedHead +
+        'Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}' +
+        "; otherwise start a new subagent.",
     );
   });
 
@@ -780,15 +772,15 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
           makeRec({ id: "bg-1", status: "running", rootSessionId: "root-B", sessionFile }),
         ),
       });
-    // 有 sessionFile → 追加 source session
+    // 有 sessionFile → 追加 source session（[U4] 文案统一为跨树归属判据 + rootSessionId 回显）
     expect((await errOf(() => messageHandler(mkSvc("sess-1.jsonl"), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is alive but belongs to a different session tree than this one. You cannot message it from here. " +
+      "subagent bg-1 belongs to a different session tree than this one (rootSessionId: root-B). You cannot message it from here. " +
         'Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}' +
         " (source session: sess-1.jsonl); otherwise start a new subagent.",
     );
     // 无 sessionFile → 无追加
     expect((await errOf(() => messageHandler(mkSvc(undefined), { subagentId: "bg-1", text: "hi" }))).message).toBe(
-      "subagent bg-1 is alive but belongs to a different session tree than this one. You cannot message it from here. " +
+      "subagent bg-1 belongs to a different session tree than this one (rootSessionId: root-B). You cannot message it from here. " +
         'Recovery: branch from its history with {"action":"fork-from","forkFromParam":{"sourceSubagentId":"bg-1"}}' +
         "; otherwise start a new subagent.",
     );
@@ -838,8 +830,12 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
   // [U4b/E2] 双宿主探针 fixture 目录：守卫 3 现查探针读真实 .alive 侧车（不再读
   // rec.externalInstance 缓存字段），用临时目录落盘驱动，自建自删。
   let forkDir: string;
+  /** [U4] 锚可解析性 fixture（fork-from 正常路径要求源文件真实在盘）。 */
+  let forkAnchor: string;
   beforeEach(() => {
     forkDir = fs.mkdtempSync(path.join(os.tmpdir(), "actions-core-fork-"));
+    forkAnchor = path.join(forkDir, "sess-1.jsonl");
+    fs.writeFileSync(forkAnchor, "{}\n", "utf-8");
   });
   afterEach(() => {
     fs.rmSync(forkDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
@@ -910,34 +906,40 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
   });
 
   it("守卫 3 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
+    // [U4] 锚可解析性要求源 sessionFile 真实在盘（isAnchorResolvable = existsSync）。
+    const sessionFile = path.join(forkDir, "sess-live.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     const r = await forkFromHandler(
-      makeForkService(makeRec({ id: "bg-1", status: "running", slug: "rebuilt", sessionFile: "sess-1.jsonl" })),
+      makeForkService(makeRec({ id: "bg-1", status: "running", slug: "rebuilt", sessionFile })),
       { sourceSubagentId: "bg-1" },
     );
     expect(r).toEqual({
       kind: "fork-from",
       subagentId: "bg-new-1",
-      sourceSessionFile: "sess-1.jsonl",
-      response: { newSubagentId: "bg-new-1", sourceSessionFile: "sess-1.jsonl" },
+      sourceSessionFile: sessionFile,
+      response: { newSubagentId: "bg-new-1", sourceSessionFile: sessionFile },
     });
   });
 
-  it("守卫 4：cancelled / user-close → deliberately-closed 文案（guard 与 message 一致性）", async () => {
+  it("[U4 守卫 4 删除] cancelled / user-close 源 → fork-from 放行（万物可续后对任何 idle record 分叉）", async () => {
+    // [U4 / §3.2.3] 主动告别不再是 fork 例外：守卫 4 随形态枚举 gate 消亡——
+    // message 与 fork-from 的「guard 一致性拒绝」双双转为放行。
+    const sessionFile = path.join(forkDir, "sess-closed.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     for (const closedReason of ["cancelled", "user-close"] as const) {
-      expect(
-        await errOf(() =>
-          forkFromHandler(
-            makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason, sessionFile: "sess-1.jsonl" })),
-            { sourceSubagentId: "bg-1" },
-          ),
-        ),
-      ).toEqual({
-        errorName: "Error",
-        message:
-          `subagent bg-1 was deliberately closed by user (closedReason: ${closedReason}) — ` +
-          "deliberately-closed records cannot be resumed or branched from; nothing can reattach to them. " +
-          "Recovery: start a fresh subagent (action:'start'); use action:'list' with includeFinished:true to review its final output (add includeWorkflow:true to also see workflow-dispatched subagents).",
-      });
+      const execute = vi.fn(async (): Promise<ExecutionHandle> => ({
+        mode: "background",
+        subagentId: `bg-new-${closedReason}`,
+        sessionFile: "sess-new.jsonl",
+        details: makeDetails(),
+      }));
+      const r = await forkFromHandler(
+        makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason, sessionFile }), execute),
+        { sourceSubagentId: "bg-1" },
+      );
+      expect(r.response.newSubagentId).toBe(`bg-new-${closedReason}`);
+      expect(r.response.sourceSessionFile).toBe(sessionFile);
+      expect(execute).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -945,7 +947,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(
       await errOf(() =>
         forkFromHandler(
-          makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason: "gc", worktree: true, sessionFile: "sess-1.jsonl" })),
+          makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason: "gc", worktree: true, sessionFile: "sess-1.jsonl" })),
           { sourceSubagentId: "bg-1" },
         ),
       ),
@@ -959,20 +961,30 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 6：无子 session 文件 → no-child-session 文案", async () => {
+  it("[U4 守卫 6 锚判据化] 锚不可解析（字段缺失 / 文件被回收）→ 引导 message reopen 语义而非 start fresh", async () => {
+    const expectedMessage =
+      "subagent bg-1 has no transcript history left to fork from (it never started, or the transcript " +
+      "was collected after its retention expired). " +
+      "Recovery: use action:'message' on this id — it reopens on the same id with a fresh transcript " +
+      "(prior-task summary auto-injected); or start a fresh subagent (action:'start').";
+    // 字段缺失（entry-born：从未开跑）
     expect(
       await errOf(() =>
         forkFromHandler(
-          makeForkService(makeRec({ id: "bg-1", status: "closed", closedReason: "gc", sessionFile: undefined })),
+          makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason: "gc", sessionFile: undefined })),
           { sourceSubagentId: "bg-1" },
         ),
       ),
-    ).toEqual({
-      errorName: "Error",
-      message:
-        "subagent bg-1 has no child session file to inherit from (it never started successfully). " +
-        "Recovery: start a fresh subagent (action:'start') describing the task again.",
-    });
+    ).toEqual({ errorName: "Error", message: expectedMessage });
+    // 字段在但文件不在（transcript 被回收）
+    expect(
+      await errOf(() =>
+        forkFromHandler(
+          makeForkService(makeRec({ id: "bg-1", status: "idle", closedReason: "gc", sessionFile: path.join(forkDir, "gone.jsonl") })),
+          { sourceSubagentId: "bg-1" },
+        ),
+      ),
+    ).toEqual({ errorName: "Error", message: expectedMessage });
   });
 
   it("正常：显式 prompt → wrapForkFromPrompt 包装 + slug 派生 'src-slug-resumed' + execute 参数", async () => {
@@ -984,7 +996,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     }));
     const r = await forkFromHandler(
       makeForkService(
-        makeRec({ id: "bg-1", slug: "src-slug", agent: "/home/u/agents/reader.md", sessionFile: "sess-1.jsonl" }),
+        makeRec({ id: "bg-1", slug: "src-slug", agent: "/home/u/agents/reader.md", sessionFile: forkAnchor }),
         execute,
       ),
       { sourceSubagentId: "bg-1", prompt: "  continue the work  " },
@@ -992,15 +1004,15 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(r).toEqual({
       kind: "fork-from",
       subagentId: "bg-new-1",
-      sourceSessionFile: "sess-1.jsonl",
-      response: { newSubagentId: "bg-new-1", sourceSessionFile: "sess-1.jsonl" },
+      sourceSessionFile: forkAnchor,
+      response: { newSubagentId: "bg-new-1", sourceSessionFile: forkAnchor },
     });
     expect(execute).toHaveBeenCalledWith({
       task:
         "continue the work\n\n(You are continuing a previous subagent's inherited conversation via --fork. " +
         "Reconstruct state from that history first — what was done, decided, and remains — then execute the instruction above.)",
       slug: "src-slug-resumed",
-      forkFromSessionFile: "sess-1.jsonl",
+      forkFromSessionFile: forkAnchor,
     });
   });
 
@@ -1012,13 +1024,13 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
       details: makeDetails(),
     }));
     await forkFromHandler(
-      makeForkService(makeRec({ id: "bg-1", slug: "src-slug", sessionFile: "sess-1.jsonl" }), execute),
+      makeForkService(makeRec({ id: "bg-1", slug: "src-slug", sessionFile: forkAnchor }), execute),
       { sourceSubagentId: "bg-1", prompt: undefined },
     );
     expect(execute).toHaveBeenCalledWith({
       task: FORK_FROM_DEFAULT_PROMPT,
       slug: "src-slug-resumed",
-      forkFromSessionFile: "sess-1.jsonl",
+      forkFromSessionFile: forkAnchor,
     });
     expect(FORK_FROM_DEFAULT_PROMPT).toBe(
       "You are taking over work from a previous subagent whose full conversation history you inherited (--fork). " +
@@ -1039,7 +1051,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
       details: makeDetails(),
     }));
     await forkFromHandler(
-      makeForkService(makeRec({ id: "bg-1", slug: "s".repeat(34), sessionFile: "sess-1.jsonl" }), execute34),
+      makeForkService(makeRec({ id: "bg-1", slug: "s".repeat(34), sessionFile: forkAnchor }), execute34),
       { sourceSubagentId: "bg-1", prompt: "p" },
     );
     expect(execute34.mock.calls[0]![0].slug).toBe(`${"s".repeat(27)}-resumed`);
@@ -1052,7 +1064,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     }));
     await forkFromHandler(
       makeForkService(
-        makeRec({ id: "bg-1", slug: "", agent: "/home/u/agents/helper.md", sessionFile: "sess-1.jsonl" }),
+        makeRec({ id: "bg-1", slug: "", agent: "/home/u/agents/helper.md", sessionFile: forkAnchor }),
         executeAgent,
       ),
       { sourceSubagentId: "bg-1", prompt: "p" },
@@ -1066,7 +1078,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
       details: makeDetails(),
     }));
     await forkFromHandler(
-      makeForkService(makeRec({ id: "bg-1", slug: "", agent: "", sessionFile: "sess-1.jsonl" }), executeResumed),
+      makeForkService(makeRec({ id: "bg-1", slug: "", agent: "", sessionFile: forkAnchor }), executeResumed),
       { sourceSubagentId: "bg-1", prompt: "p" },
     );
     expect(executeResumed.mock.calls[0]![0].slug).toBe("resumed-resumed");

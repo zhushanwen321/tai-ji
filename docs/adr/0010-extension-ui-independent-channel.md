@@ -1,5 +1,7 @@
 # ADR-0010: Extension UI 使用独立事件通道
 
+- 状态：Accepted
+
 ## 上下文
 
 pi extension 通过 `ctx.ui.confirm/select` 发起的 UI 交互请求，当前在 EventAdapter 中被翻译为 `message.tool_call_pending`（与 Tool Approval 共用通道）。但两者语义完全不同：Extension UI 是交互请求，Tool Approval 是权限控制。

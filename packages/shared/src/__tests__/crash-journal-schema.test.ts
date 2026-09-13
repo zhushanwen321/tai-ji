@@ -23,7 +23,7 @@ import {
   CRASH_JOURNAL_ENUM_COVERAGE_LOCK,
 } from '../crash-journal-schema.js'
 
-// 设计 docs/design/crash-forensics-and-watchdog.md §3.3 D1 schema JSON 块逐字转录
+// 设计 docs/architecture/crash-forensics-and-watchdog.md §3.3 D1 schema JSON 块逐字转录
 const DESIGN_LAYER_LINE = ['pi', 'runtime', 'renderer', 'main', 'plugin-worker']
 const DESIGN_EVENT_LINE = [
   'crash',

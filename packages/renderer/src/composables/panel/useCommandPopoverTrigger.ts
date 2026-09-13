@@ -23,8 +23,9 @@ import { pickFile } from '@/lib/ipc'
 // 裸 skill 名归一化单点（剥 `skill:` / `/` 前缀）——与 CommandPopover skill-only 候选 /
 // slash 候选 selected 比对 / onCmdSelect skill 项分流同源，避免第三份前缀剥离实现漂移。
 import { bareSkillCommandName } from '@/components/panel/command-popover-skill-candidates'
-// W4：ComposerInput 迁 ui 包，类型 import 改 ui 包路径（旧 renderer 路径已删）
-import type { ComposerInput } from '@xyz-agent/ui/features/composer'
+// [tsc 前置修复] 输入区实例类型从 InstanceType<typeof ComposerInput>（ui 包 .vue，plain
+// tsc 经 shim 解析不出 expose 面）改为 renderer 结构契约 ShellInputInstance（composer-shell）
+import type { ShellInputInstance } from './composer-shell'
 import type CommandPopover from '@/components/panel/CommandPopover.vue'
 
 /** + 菜单「附件」项的图片类型过滤扩展名（「图片」入口 pickFile filters 用） */
@@ -57,7 +58,7 @@ export interface CommandSelectPayload {
 }
 
 export function useCommandPopoverTrigger(
-  inputRef: Ref<InstanceType<typeof ComposerInput> | null>,
+  inputRef: Readonly<Ref<ShellInputInstance | null>>,
   sessionId: Ref<string | null>,
 ): {
   cmdOpen: Ref<boolean>

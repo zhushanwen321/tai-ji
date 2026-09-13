@@ -883,8 +883,8 @@ describe('R4 补口：事件上抛分支（开关 / 输入草稿 / 重选类型 
     trigger.click()
     await flushPromises()
 
-    const target = Array.from(document.body.querySelectorAll<HTMLDivElement>('[role="option"]'))
-      .find((el) => (el.textContent ?? '').includes('Beta Plan'))
+    const target = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((el): el is HTMLElement => (el.textContent ?? '').includes('Beta Plan'))
     expect(target).toBeTruthy()
     target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
     target!.click()

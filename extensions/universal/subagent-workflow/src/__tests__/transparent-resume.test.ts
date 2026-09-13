@@ -37,10 +37,11 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => lo
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/alive-store.ts";
-import { resurrectClosed } from "@zhushanwen/subagent-core/execution/execution-record.ts";
-import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/state-marker.ts";
-import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/path-encoding.ts";
+import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/persistence/alive-store.ts";
+import { resurrectClosed } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
+import { ResurrectDeniedError } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
+import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persistence/state-marker.ts";
+import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { forkFromHandler, messageHandler, closeHandler } from "../interface/subagent-actions.ts";
@@ -163,9 +164,12 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    // [U4] fork-from 放行后真正走到 service.execute 全链——resolveIdentity 需要
+    // modelRegistry stub（modelRefFromVerified 调 source.getAvailable()）。
     modelService.initModel({
       sessionId: "root-session-cur",
       ctxModel: { id: "m", name: "M", provider: "p", reasoning: false },
+      modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => false },
     });
     service = new SubagentService({ cwd: agentDir, modelService });
     pi = makePi();
@@ -273,33 +277,35 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   });
 
   // ============================================================
-  // 2. rejected 四态：一律拒绝 + 不进入执行链 + 不注册内存
+  // 2. [U4 万物可续] 拒绝面缩型：cancelled/user-close/gc 放行续聊；
+  //    唯一拒绝 = worktree 绑定丢失（[U5] 改自动重建）+ 异进程活实例
   // ============================================================
 
-  describe("rejected 四态（红线内不走透明重生）", () => {
-    it("cancelled（tombstone）→ 保持「主动关闭」拒绝文案", async () => {
+  describe("拒绝面缩型（[U4 / §3.2.3]）", () => {
+    it("cancelled（tombstone）→ 放行同 id 续聊（形态枚举 gate 消亡）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-cancel", rootSessionId: "root-session-cur" });
       writeTombstone(file, "sa-d-cancel");
 
-      await expect(messageHandler(service, { subagentId: "sa-d-cancel", text: "hi" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: cancelled\)/,
-      );
-      expect(service.queries.findRecord("sa-d-cancel")).toBeUndefined();
-      expect(fake.runs.length).toBe(0);
+      const result = await messageHandler(service, { subagentId: "sa-d-cancel", text: "hi" });
+      expect(result.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
+      const snap = service.queries.findRecord("sa-d-cancel");
+      expect(snap?.status).toBe("running");
+      expect(snap?.closedReason).toBeUndefined();
     });
 
-    it("user-close → 保持「主动关闭」拒绝文案（close 正式语义完整保留）", async () => {
+    it("user-close → 放行同 id 续聊（message = 隐含寻回续聊）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-uclose", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "user-close");
 
-      await expect(messageHandler(service, { subagentId: "sa-d-uclose", text: "hi" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: user-close\)[\s\S]*nothing can reattach/,
-      );
-      expect(service.queries.findRecord("sa-d-uclose")).toBeUndefined();
-      expect(fake.runs.length).toBe(0);
+      const result = await messageHandler(service, { subagentId: "sa-d-uclose", text: "hi" });
+      expect(result.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
-    it("worktree 记录 → 拒绝（binding 已丢，重生会让 spawn cwd 回落主仓）", async () => {
+    it("worktree 记录 → 拒绝（[U5 接管] 将改为自动重建；现保留准入守卫拒绝）", async () => {
       const file = writeSessionJsonl(sessionsDir, {
         id: "sa-d-wt",
         rootSessionId: "root-session-cur",
@@ -315,7 +321,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs.length).toBe(0);
     });
 
-    it("异进程活实例（.alive + 存活 pid）→ 拒绝（防双写 jsonl）", async () => {
+    it("异进程活实例（.alive + 存活 pid）→ 唯一占用拒绝形态（统一句式含 pid，防双写 jsonl）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-alive", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "disconnected");
       // [U1/A4] 探针判据 = pid 单判据 + self-pid 排除（软超时已退役）——「异进程」模拟
@@ -323,9 +329,13 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       writeAliveMarker(file, FOREIGN_LIVE_PID, Date.now());
       expect(findForeignLiveInstance(file)).toBeDefined(); // 探针前置自检
 
-      await expect(messageHandler(service, { subagentId: "sa-d-alive", text: "hi" })).rejects.toThrow(
-        /transparently resumable[\s\S]*previous instance still finishing/,
-      );
+      const err = await messageHandler(service, { subagentId: "sa-d-alive", text: "hi" }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ResurrectDeniedError);
+      const msg = (err as Error).message;
+      // [U4] 设计 §3.1 统一占用句式：错误 → 权威源 → 重试闭环
+      expect(msg).toContain(`pid ${FOREIGN_LIVE_PID}`);
+      expect(msg).toContain("is writing this session");
+      expect(msg).toContain("close it or wait for it to exit, then retry");
       expect(service.queries.findRecord("sa-d-alive")).toBeUndefined();
       expect(fake.runs.length).toBe(0);
     });
@@ -344,15 +354,14 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     });
 
-    it("gc 完成记录（自然 done）→ 维持 fork-from 指引、不透明重生", async () => {
+    it("gc 完成记录（自然 done）→ 放行同 id 续聊（旧「fork-from 指引」消亡）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-gc", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "gc");
 
-      await expect(messageHandler(service, { subagentId: "sa-d-gc", text: "follow up" })).rejects.toThrow(
-        /reconnectable[\s\S]*fork-from/,
-      );
-      expect(service.queries.findRecord("sa-d-gc")).toBeUndefined();
-      expect(fake.runs.length).toBe(0);
+      const result = await messageHandler(service, { subagentId: "sa-d-gc", text: "follow up" });
+      expect(result.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      expect(fake.runs[0]!.ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
   });
 
@@ -367,7 +376,7 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
 
     // A 档兼容读：磁盘层 closedReason=disconnected
     const diskRec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-d-legacy");
-    expect(diskRec?.status).toBe("closed");
+    expect(diskRec?.status).toBe("idle");
     expect(diskRec?.closedReason).toBe("disconnected");
 
     // D 档：message 直接重生（Y 分支文案不再触达）
@@ -378,43 +387,42 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   });
 
   // ============================================================
-  // 4. guard 一致性：fork-from 与 message 在 user-close 上行为一致地拒绝
+  // 4. [U4 守卫 4 删除] fork-from 与 message 对主动告别源一致放行
   // ============================================================
 
-  describe("guard 一致性（fork-from × message 在 user-close 上）", () => {
-    it("fork-from 对 user-close 源拒绝（与 message 的 X 拒绝对齐，close 语义无旁路）", async () => {
+  describe("[U4] guard 一致性（fork-from × message 在 user-close 上——一致放行）", () => {
+    it("fork-from 对 user-close 源放行（主动告别不再是 fork 例外——历史在即分叉）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-fkclose", rootSessionId: "old-root" });
       writeFinalizedState(file, "user-close");
 
-      await expect(forkFromHandler(service, { sourceSubagentId: "sa-d-fkclose" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: user-close\)[\s\S]*cannot be resumed or branched from/,
-      );
-      expect(fake.runs.length).toBe(0); // 不产生 fork 执行链
+      const r = await forkFromHandler(service, { sourceSubagentId: "sa-d-fkclose" });
+      expect(r.response.newSubagentId).not.toBe("sa-d-fkclose");
+      expect(r.response.sourceSessionFile).toBe(file);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     });
 
-    it("fork-from 对 cancelled 源拒绝（原文案升级覆盖两类）", async () => {
+    it("fork-from 对 cancelled 源放行（tombstone 同样可分叉）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-fkcancel", rootSessionId: "old-root" });
       writeTombstone(file, "sa-d-fkcancel");
 
-      await expect(forkFromHandler(service, { sourceSubagentId: "sa-d-fkcancel" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: cancelled\)/,
-      );
-      expect(fake.runs.length).toBe(0);
+      const r = await forkFromHandler(service, { sourceSubagentId: "sa-d-fkcancel" });
+      expect(r.response.newSubagentId).not.toBe("sa-d-fkcancel");
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     });
 
-    it("message 对同一 user-close 记录拒绝——两边各有独立断言（文案分叉但语义一致：都拒）", async () => {
+    it("message 续聊接管后 fork-from 被守卫 1 拦（内存 running 双写防护保留）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-both", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "user-close");
 
-      // message 侧：X 分支专属文案
-      await expect(messageHandler(service, { subagentId: "sa-d-both", text: "hi" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: user-close\)/,
-      );
-      // fork-from 侧：守卫 4 升级文案（含 user-close 显式列入）
+      // message 侧：同 id 续聊（历史在，resume 续写）→ record 翻 running 进内存
+      const m = await messageHandler(service, { subagentId: "sa-d-both", text: "hi" });
+      expect(m.response.delivered).toBe(true);
+      await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+      // fork-from 侧：源已在本进程内存 running → 守卫 1 拦（防双写，非形态枚举）
       await expect(forkFromHandler(service, { sourceSubagentId: "sa-d-both" })).rejects.toThrow(
-        /deliberately closed by user \(closedReason: user-close\)[\s\S]*cannot be resumed or branched from/,
+        /still active in this process/,
       );
-      expect(fake.runs.length).toBe(0);
+      expect(fake.runs.length).toBe(1);
     });
   });
 
@@ -423,20 +431,20 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
   // ============================================================
 
   describe("回归边界", () => {
-    it("close action 对断联类 ended 记录维持严格拒绝（默认无放宽）", async () => {
+    it("[U4] close action 对旧终态遗留 record → 放行（idle 全候选：对已收口 record 操作 = 幂等收口/归档）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-closestrict", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "disconnected");
 
-      await expect(closeHandler(service, { subagentId: "sa-d-closestrict" })).rejects.toThrow(
-        /not found or not owned/,
-      );
-      expect(service.queries.findRecord("sa-d-closestrict")).toBeUndefined();
+      // [U4 万物可续] getRecordForAction 冷查不再按 allowReconnect 把门——close 的
+      // 归属校验放行（冷查重建注册），closeSubagent 幂等收口。不触发续聊执行链。
+      const r = await closeHandler(service, { subagentId: "sa-d-closestrict" });
+      expect(r.response.closed).toBe(true);
       expect(fake.runs.length).toBe(0);
     });
 
-    it("resurrectClosed 单元语义：仅 closed 可翻边且清除语义位；running 体拒绝", () => {
+    it("resurrectClosed 单元语义：[U2 两态] 仅已收口（idle ∧ closedReason 有值）可翻边且清除语义位；running 体拒绝", () => {
       const closed = {
-        status: "closed" as const,
+        status: "idle" as const,
         closedReason: "disconnected" as const,
         endedAt: 123,
       };

@@ -7,7 +7,7 @@
 
 export { EngineProtocolServer, createDefaultPiEngine } from "./server.ts";
 export { PiEngine, type PiEngineDeps } from "./pi-engine.ts";
-export { PI_ADAPTER_VERSION, PI_ENGINE_ID, PI_POOL_KEY } from "./constants.ts";
+export { PI_ADAPTER_VERSION, PI_ENGINE_ID } from "./constants.ts";
 
 // ── 迁移的引擎侧原语（core engines/pi 同名件的包内权威） ──
 export {

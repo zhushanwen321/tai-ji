@@ -13,6 +13,8 @@
  *     pi extension（pi-subagent-workflow）在 subagent 完成时用 triggerTurn:steer 续跑主 agent，
  *     最终 message.complete 到达时 background 已全 done、守卫放行——此刻才是 session 真正完成。
  *   stopReason: stop（成功）和 error（失败）都响，aborted 不响
+ *   willRetry=true 不响（[retry-sound] pi auto-retry 中间失败，turn 未结束；也不标未读）——
+ *     只有重试链终态（成功/重试用尽/不可重试错误）才响
  *   1s 防抖（多 session 同时完成只响一次）
  *   读取 settingsStore.system.completionSound 开关
  */
@@ -32,14 +34,25 @@ const DEBOUNCE_MS = 1000
  * @param sessionId 完成的 session id
  * @param stopReason 停止原因：'stop'|'error'|'aborted'
  * @param focusedSessionId 当前焦点 session id
+ * @param willRetry [retry-sound] pi auto-retry 中间失败标记（runtime 透传）：true = 本次 error
+ *   是重试链中的中间失败，turn 未结束——静音且不标未读，等 pi 续跑后的终态 complete 再响。
+ *   缺省/undefined（旧 runtime / 非重试终态）保持原行为。
  */
 export function handleCompletion(
   sessionId: string,
   stopReason: string,
   focusedSessionId: string | null,
+  willRetry?: boolean,
 ): void {
   // 1. 过滤 stopReason：aborted 不触发
   if (stopReason === 'aborted') return
+
+  // 1.5 [retry-sound] pi auto-retry 中间失败不触发：error 后 pi 将自动重试（willRetry=true），
+  //   此时响 error 音会在「失败→重试→成功」的 turn 里产生 error+success 双响，
+  //   「3 次重试全失败」则连响 4 声 error（退避 2s/4s/8s，1s 防抖拦不住）。
+  //   未读标记一并跳过：session 尚未真正结束，pi 续跑后的终态 complete 会重新走到这里。
+  //   排序在 background work 守卫之前：重试窗口内不涉及 background work 判定，越早拦越好。
+  if (willRetry === true) return
 
   // 2. background subagent/workflow 守卫：主 turn 结束但 background 任务仍在跑时不触发完成提示。
   // pi extension（pi-subagent-workflow）会在 subagent 完成时用 triggerTurn:steer 续跑主 agent，
@@ -80,8 +93,8 @@ export function handleCompletion(
  */
 export function useCompletionNotify(focusedSessionId: () => string | null) {
   return {
-    handleCompletion: (sessionId: string, stopReason: string) =>
-      handleCompletion(sessionId, stopReason, focusedSessionId()),
+    handleCompletion: (sessionId: string, stopReason: string, willRetry?: boolean) =>
+      handleCompletion(sessionId, stopReason, focusedSessionId(), willRetry),
   }
 }
 

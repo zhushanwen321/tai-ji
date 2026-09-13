@@ -2,7 +2,7 @@
  * FileChange baseline diff 能力 port（ADR-0024 D5：git 作为唯一真值源）。
  *
  * service 层（EventInterpreter）需在 turn 内做 file_changes diff，但
- * [runtime-three-layer-design.md] 铁律：services 不直接 import infra。故抽出此 port，
+ * [runtime-layering.md] 铁律：services 不直接 import infra。故抽出此 port，
  * 由组合根注入 infra 实现（infra/pi/file-change-diff-adapter.ts，内部委托
  * services/git/git-state-service.ts 经 IGitStateService port——W18 采集收编）。
  *

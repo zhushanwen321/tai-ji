@@ -748,6 +748,16 @@ function dispatchAgentCall(
   const call = new AgentCall(msg.callId, resolved.opts, node);
   run.state.calls.set(msg.callId, call);
 
+  // [GUI 步骤实时可见 2026-09-14] 启动即持久化：trace.append 的 running 节点若等
+  // 完成路径（.then/.catch）才随 save 落盘，running 中步骤在权威快照里恒缺席——
+  // GUI workflow 详情（WorkflowRunRecord.agentCalls ← state.trace）只见 run 壳。
+  // 启动 save 走 entry append 节流（[B-1] running 态最小间隔，缺省 60s），高频
+  // dispatch 无 O(n²) 风险；失败路径（resolveAgentOpts error → 742）已有 save，
+  // 不受本行影响。火后模式与下方 .catch 同款（save 失败不阻断状态机，[SW-DATA-3]）。
+  deps.store.save(run).catch((e: unknown) => {
+    logger.error(`[workflow] store.save failed (dispatch trace stamp): ${toErrorMessage(e)}`);
+  });
+
   // C-3：agent call 执行入口。
   // （原经 gate.withSlot 包装，并发门闩 gate 已删——no-op 抽象，实际并发由
   // SubagentService ConcurrencyPool 管理；仅保留其 pre-abort 检查语义，见下方

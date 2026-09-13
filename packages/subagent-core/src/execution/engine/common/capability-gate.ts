@@ -1,7 +1,7 @@
 // src/execution/engine/common/capability-gate.ts
 //
 // [D3-④ 预检 capabilities 化] 调用前预检的唯一实现（capabilities 驱动，无引擎 id
-// 特判）。设计权威源（现行）：docs/design/subagent-engine-protocolization.md §3.3
+// 特判）。设计权威源（现行）：docs/architecture/subagent-engine-protocolization.md §3.3
 // 「能力位」段（manifest 权威 + 方向判定表）+ 历史源 docs/design/subagent-dual-track-
 // convergence.md §3.3 D3-④ + r3 裁定（EngineCapabilities 新增 maxTurns 能力位）+
 // 错误规格（engine_capability_unsupported / engine_capability_mismatch）。
@@ -72,8 +72,10 @@ const MANIFEST_RECOVERY_TAIL = "修 manifest capabilities / 升级引擎包（�
  * fork 判据说明（借位裁定）：fork 依赖父 session 上下文继承（父会话文件作为分叉源），
  * 引擎具备该语义的能力面信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
  * 'unsupported'，**OR 语义任一可用即放行**）。pi conversation='native'（chatMode idle
- * 复用）→ 放行；zcode 双 'unsupported'（argv-only spawn 单轮，无父 session 分叉通道）
- * → 拒绝。仅凭 steer 判会误拦 pi（pi 的 steer 声明 'unsupported'——RPC 有但 spawn
+ * 复用）→ 放行；zcode conversation='cold'（续聊 = 冷查重建 + 新 run + resume 锚点，
+ * 协议线 run.params.chat 承载）→ 同样放行。拒绝例证（假设值）：steer 与 conversation
+ * 双 'unsupported' 的引擎无父 session 上下文继承通道 → fork/fork-from 一并拒绝。
+ * 仅凭 steer 判会误拦 pi（pi 的 steer 声明 'unsupported'——RPC 有但 spawn
  * 链路未接通，与 fork 的初始上下文继承是两条轴），故取通道族任一可用即支持的分寸。
  */
 export function assertTaskShapeSupported(

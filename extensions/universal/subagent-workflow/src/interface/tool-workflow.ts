@@ -431,7 +431,7 @@ export async function actionRun(
   const args = params.args ?? {};
   const tokens = params.tokens;
   const time = params.time;
-  // OR-1 入口 fail-fast（unbounded-wait-audit §7.2 T3①）：schema 的 time 是
+  // OR-1 入口 fail-fast（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §7.2 T3①））：schema 的 time 是
   // Type.Number 直通（无上界）——超 setTimeout 安全域的值会穿透到 lifecycle 内层
   // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链。错误带合法上限
   // 与实际传入值，LLM 可据消息自纠（clamp 或省略走 unlimited 语义）。

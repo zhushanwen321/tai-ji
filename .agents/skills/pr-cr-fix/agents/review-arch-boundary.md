@@ -8,9 +8,9 @@ name: review-arch-boundary
 审查 `git diff main...HEAD` 中变更对 xyz-agent 分层架构边界的影响。架构分两部分：
 
 - **Electron 侧**：main / preload / renderer / shared 四层
-- **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-three-layer-design.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
+- **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-layering.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
 
-术语以 `docs/architecture/terminology.md`（R1-R3 已落地：sidecar→runtime、Pane→Panel、SystemChatMessage 清除；R4/R5 被 v3 推翻）、`docs/architecture/context.md` 为准。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
+术语以 `docs/CONTEXT.md` 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
 
 ## 输入
 
@@ -27,7 +27,7 @@ task prompt 中必须包含：
    - renderer 进程是否直接使用 `ipcRenderer`（必须经 preload 的 `electronAPI`）
    - main 进程是否混入业务逻辑（应只管窗口/runtime 进程生命周期；M2 Window Manager = `window/window-manager.ts`，M3 Process Supervisor = `supervisor/runtime-supervisor.ts` Facade + port-discoverer/health-checker/process-control/port-file/safe-env 子模块）
    - shared/src 类型是否被某一端私自重定义（应为前后端唯一类型源，协议源 `shared/src/protocol.ts`）
-3. **runtime 三层边界（runtime-three-layer-design.md）**：
+3. **runtime 三层边界（runtime-layering.md）**：
    - **transport/**：纯路由（server.ts + router.ts + handlers/），不碰 node: 内置、不做业务决策
    - **services/**：业务编排，**禁止 import infra**、**禁止出现 `Pi*` 类型**（应经 ports 接口访问外部能力）
    - **infra/**：pi 适配（连接 + 翻译合并），**`Pi*` 类型仅在此层内部可见**，不知道 WS 协议和 session 业务语义
@@ -55,12 +55,12 @@ task prompt 中必须包含：
    - 前端 ↔ 插件系统通信是否经 WS → server → PluginService 路径（禁止前端直连 Worker）
    - WS 命名约定：Client→Server 用点号（`plugin.xxx`），Server→Client 用冒号 camelCase（`plugin:xxx`）
    - sessionData（plugin per-session KV）是否走 Pi Bridge 的 `pi.appendEntry()` 持久化（区别于 PluginStorage 的 global/workspace scope JSON 文件）
-10. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（设计源 `docs/page-design/archive/v3/`）：
+10. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（术语定义 `docs/CONTEXT.md`「v3 UI 结构术语」章节；原 v3 设计稿已删，git 可追溯）：
     - L0/L1 结构：**Sidebar**（持久容器）/ **Workspace**（chat view 容器）/ **Overview**（L1 独立 Region，多会话鸟瞰）/ **Search Modal**（⌘K Overlay）
     - **Panel 5 zone**：panel-header / message-stream / progress-zone / composer / git-zone
     - **Side Drawer**（原 Side Inspector）：Panel 联动多 tab 抽屉（文件/终端/子Agent/浏览器），非运行时状态面板
     - **Statusline**：Input Toolbar / Session Strip / Global Statusbar
-    - 旧术语（Drawer→SideInspector 中间态、Focus Mode、PanelGrid、Pane*、sidecar）已过时——以 terminology.md 为准（R4/R5 已被 v3 推翻）。发现代码引用过时术语标 INFO。
+    - 旧术语（Drawer→SideInspector 中间态、Focus Mode、PanelGrid、Pane*、sidecar）已过时——以 context.md 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。发现代码引用过时术语标 INFO。
 11. **输出审查报告**到 `output` 路径。
 
 ## 输出格式

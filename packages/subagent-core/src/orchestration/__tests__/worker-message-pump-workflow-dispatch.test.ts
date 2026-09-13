@@ -42,9 +42,9 @@ import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { handleWorkerMessage } from "../worker-message-pump.ts";
-import { ModelConfigService } from "../../execution/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../../execution/model-resolver.ts";
-import type { RecordStore } from "../../execution/record-store.ts";
+import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../../execution/assembly/model-resolver.ts";
+import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
 import type { PiLike } from "../../execution/subagent-service.ts";
 import { clearEngines } from "../../execution/engine/registry.ts";
@@ -270,5 +270,9 @@ describe("workflowAgentDispatch 未注入回退", () => {
     expect(runnerRun).toHaveBeenCalledTimes(1);
     const posted = findAgentResultPost(postMessage, 7);
     expect(posted?.result?.content).toBe("legacy");
+
+    // [GUI 步骤实时可见 2026-09-14] 启动即持久化：dispatch 同步段内（trace.append 后）
+    // 必须触发一次 store.save——否则 running 节点要等完成路径才落盘，GUI 详情期间见不到步骤
+    expect(deps.store.save).toHaveBeenCalled();
   });
 });

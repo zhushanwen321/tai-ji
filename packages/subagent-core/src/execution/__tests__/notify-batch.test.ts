@@ -29,16 +29,16 @@ import {
   NOTIFY_LEDGER_CUSTOM_TYPE,
   _resetNotifyLedgerForTest,
   type NotifyLedgerHost,
-} from "../notify-ledger.ts";
+} from "../notify/notify-ledger.ts";
 import {
   buildBatchLlmContent,
   buildBatchNotifyId,
   createNotifier,
   type BgNotifyRecord,
   type NotifierHost,
-} from "../notifier.ts";
-import { CollectCoordinator } from "../collect-coordinator.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+} from "../notify/notifier.ts";
+import { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 // ─── env 剥离（impl-plan 偏差#5：RELAY/PI_SUBAGENT 泄漏即红的存量敏感面隔离）──
 
@@ -126,7 +126,8 @@ function makeExecutionRecord(id: string, collectMode: "sync" | undefined): Execu
     rootSessionId: "root-A",
     parentRecordId: undefined,
     depth: 0,
-    status: "closed",
+    status: "idle",
+    closedReason: "gc",
     turns: [],
     turnCount: 1,
     totalTokens: 10,
@@ -140,19 +141,20 @@ function makeExecutionRecord(id: string, collectMode: "sync" | undefined): Execu
   } as ExecutionRecord;
 }
 
-function makeStoreRec(id: string, collectMode: "sync" | undefined, status: "closed" | "running"): SubagentRecord {
+function makeStoreRec(id: string, collectMode: "sync" | undefined, status: "idle" | "running"): SubagentRecord {
   return {
     id,
     agent: "/agents/worker.md",
     task: "t",
     slug: "worker",
     status,
+    closedReason: status === "idle" ? "gc" : undefined,
     mode: "background",
     startedAt: 1000,
     rootSessionId: "root-A",
     parentRecordId: undefined,
     depth: 0,
-    endedAt: status === "closed" ? 2000 : undefined,
+    endedAt: status === "idle" ? 2000 : undefined,
     turns: 1,
     totalTokens: 10,
     model: "prov/m1",
@@ -406,8 +408,8 @@ async function settleFlush(): Promise<void> {
   it("分两轮派 2+1 sync：闭合时单批 3 成员一次投递（D2）", async () => {
     // 第一轮：2 sync 终态，第三台仍在跑（非终态 → 不闭合）
     const storeRecords = [
-      makeStoreRec("sa-1", "sync", "closed"),
-      makeStoreRec("sa-2", "sync", "closed"),
+      makeStoreRec("sa-1", "sync", "idle"),
+      makeStoreRec("sa-2", "sync", "idle"),
       makeStoreRec("sa-3", "sync", "running"),
     ];
     const { mock, coordinator } = makeHarness(storeRecords);
@@ -418,7 +420,7 @@ async function settleFlush(): Promise<void> {
     expect(mock.sentMessages).toHaveLength(0);
 
     // 第二轮：sa-3 终态（store 快照同步终态）→ 闭合 → 单批 3 成员
-    storeRecords[2] = makeStoreRec("sa-3", "sync", "closed");
+    storeRecords[2] = makeStoreRec("sa-3", "sync", "idle");
     expect(coordinator.route(makeExecutionRecord("sa-3", "sync"))).toBe("sync-flushed");
     await settleFlush();
     expect(coordinator.pendingCount).toBe(0);
@@ -433,13 +435,13 @@ async function settleFlush(): Promise<void> {
   });
 
   it("flush 后新 sync 成员开新批（缓冲清空语义），两批 hash 互异", async () => {
-    const storeRecords = [makeStoreRec("sa-1", "sync", "closed")];
+    const storeRecords = [makeStoreRec("sa-1", "sync", "idle")];
     const { mock, coordinator } = makeHarness(storeRecords);
 
     expect(coordinator.route(makeExecutionRecord("sa-1", "sync"))).toBe("sync-flushed");
     await settleFlush();
     // 第一批已投（仍挂 pending——idle），第二批成员入缓冲
-    storeRecords.push(makeStoreRec("sa-2", "sync", "closed"));
+    storeRecords.push(makeStoreRec("sa-2", "sync", "idle"));
     expect(coordinator.route(makeExecutionRecord("sa-2", "sync"))).toBe("sync-flushed");
     await settleFlush();
 
@@ -452,8 +454,8 @@ async function settleFlush(): Promise<void> {
 
   it("混派正交（A8）：async record 直通不走批，sync 成员批闭合不受 async 干扰", async () => {
     const storeRecords = [
-      makeStoreRec("sa-sync", "sync", "closed"),
-      makeStoreRec("sa-async", undefined, "closed"),
+      makeStoreRec("sa-sync", "sync", "idle"),
+      makeStoreRec("sa-async", undefined, "idle"),
     ];
     const asyncDirect: BgNotifyRecord[] = [];
     const mock = makeLedgerHost();

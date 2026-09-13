@@ -356,6 +356,22 @@ describe("SubagentsListComponent", () => {
       expect(detailJoined).toContain("Result:");
       expect(detailJoined).toContain("session-abc.jsonl"); // sessionFile
     });
+
+    // ── [U8 / §3.2.1 展示层词汇收敛] stopReason 只在详情/排障面板出现 ──
+    it("detail 元数据行：idle ∧ stopReason → 追加 stopped: <reason>；running / 无字段省略", () => {
+      const idleRec = makeRecord({ id: "sa-idle", status: "idle", stopReason: "interrupted" });
+      const { comp } = makeComponent({ records: [idleRec], rows: 24, detailMode: true });
+      const joined = comp.render(80).join("\n");
+      expect(joined).toContain("stopped: interrupted");
+
+      // running（在飞，无停因）与无 stopReason 的 idle（存量数据）不出现停因段
+      const runningRec = makeRecord({ id: "sa-run", status: "running" });
+      const runComp = makeComponent({ records: [runningRec], rows: 24, detailMode: true });
+      expect(runComp.comp.render(80).join("\n")).not.toContain("stopped:");
+      const legacyRec = makeRecord({ id: "sa-legacy", status: "idle" });
+      const legacyComp = makeComponent({ records: [legacyRec], rows: 24, detailMode: true });
+      expect(legacyComp.comp.render(80).join("\n")).not.toContain("stopped:");
+    });
   });
 
   // ── 帧缓存 collectRecordsFrame（TC3/IF3/DM5）──────────

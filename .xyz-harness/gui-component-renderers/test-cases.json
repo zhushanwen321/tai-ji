@@ -1,9 +1,0 @@
-[
-  {"caseId":"U1","actual":{"text":"fill width=87.5%, class 含 bg-success, label 含 build, count 含 7 / 8"}},
-  {"caseId":"U2","actual":{"text":"3 个 item 存在，值含 +142/3/1，分别着色 text-success/text-warning/text-danger"}},
-  {"caseId":"U3","actual":{"text":"3 tabs 存在，active 含 accent-soft 背景，done 含 success dot，pending 含 subtle dot"}},
-  {"caseId":"U4","actual":{"text":"card 存在含 CI Pipeline，内嵌 stats-line 存在，class 含 border-strong"}},
-  {"caseId":"U5","actual":{"text":"2 children 存在，flex-grow 分别为 2 和 1"}},
-  {"caseId":"U6","actual":{"text":"parent/child1/child2 文本可见，done=success色 running=accent色"}},
-  {"caseId":"U7","actual":{"text":"6 种 type 各路由到真实组件，ansi-text 不出现 (custom 未注册仍降级不变)"}}
-]

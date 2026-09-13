@@ -2,7 +2,7 @@ import { Static, Type } from 'typebox'
 
 import type { SchedulerService, ServiceResult } from './service.js'
 
-// TODO: add renderResult/renderCall to registerTool calls (standards.md §4.3)
+// TODO: add renderResult/renderCall to registerTool calls (STANDARDS.md §4.3)
 
 // ── schedule tool ──
 

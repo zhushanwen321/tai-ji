@@ -1,7 +1,7 @@
 /**
  * usePiPresets —— pi 启动预设域编排 composable（features 层）。
  *
- * 设计文档：docs/page-design/pi-launch-presets.md
+ * 设计文档：docs/architecture/pi-launch-presets.md
  *
  * 职责（编排，与 useSettings 同构——features 层是跨 api + stores 的唯一合法层）：
  * - loadPresets：并行拉 preset.list + preset.getDefault RPC，写 store（presets + defaultPresetId）。

@@ -38,7 +38,7 @@ import {
   type SpawnRunResult,
 } from "../spawn-runner.ts";
 import { resetAllEpipeFailures } from "../stdin-writer.ts";
-import { PI_ADAPTER_VERSION, PI_ENGINE_ID, PI_POOL_KEY } from "../constants.ts";
+import { PI_ADAPTER_VERSION, PI_ENGINE_ID } from "../constants.ts";
 
 /** fake 子进程：stdin 写捕获 + EPIPE 注入 + kill 观测（原 chat-session.test 形态，该文件已随 U5 删除）。 */
 class FakeChild extends EventEmitter {
@@ -146,12 +146,12 @@ function makeEngine(deps: PiEngineDeps = {}): Harness {
 }
 
 const baseTask: AgentCallOpts = { prompt: "do things" };
-const baseCtx: RunContext = { taskId: "run-e1", poolKey: PI_POOL_KEY };
+const baseCtx: RunContext = { taskId: "run-e1"};
 
 /** 驱动 fake executor 的标准回调序列并 resolve（askUser 可选触发）。 */
 async function settleRun(cap: Captured, result: SpawnRunResult, opts: { askUser?: boolean } = {}): Promise<void> {
   cap.callbacks.onEvent?.({ type: "turn_end" });
-  cap.callbacks.onHandleReady?.({ sessionRef: { sessionId: "sess-e1" }, poolKey: PI_POOL_KEY });
+  cap.callbacks.onHandleReady?.({ sessionRef: { sessionId: "sess-e1" }});
   cap.callbacks.onChildSpawned?.(4321, cap.params.recordId);
   cap.callbacks.onDelta?.("stream-chunk");
   if (opts.askUser) await cap.callbacks.askUser?.({ method: "select", id: "ui-1", title: "pick", options: ["a", "b"] });
@@ -303,20 +303,17 @@ describe("PiEngine.run（一次性任务形态）", () => {
       },
       {
         taskId: "run-full",
-        poolKey: PI_POOL_KEY,
         signal,
         ctxModel: { id: "m1", provider: "prov" },
         stream: { onDelta: (d) => deltas.push(d) },
         onEvent: (e) => events.push(e),
         onHandleReady: (p) => handleReady.push(p),
         onChildSpawned: (c) => childSpawned.push(c),
-        onPoolResolved: (p) => pools.push(p),
         sessionRootId: "root-sess-f6",
       },
     );
 
     const cap = captured[0]!;
-    expect(pools).toEqual([PI_POOL_KEY]);
     expect(cap.params).toMatchObject({
       recordId: "run-full",
       task: "full fields",
@@ -355,13 +352,12 @@ describe("PiEngine.run（一次性任务形态）", () => {
       v: 1,
       engineId: PI_ENGINE_ID,
       sessionRef: { recordId: "run-full", sessionId: "sess-e1", sessionFile: "/tmp/sess-e1.jsonl" },
-      poolKey: PI_POOL_KEY,
       adapterVersion: PI_ADAPTER_VERSION,
     });
 
     // 回调接线
     expect(events.map((e) => (e as { type: string }).type)).toEqual(["turn_end"]);
-    expect(handleReady).toEqual([{ sessionRef: { sessionId: "sess-e1" }, poolKey: PI_POOL_KEY }]);
+    expect(handleReady).toEqual([{ sessionRef: { sessionId: "sess-e1" }}]);
     expect(childSpawned).toEqual([{ pid: 4321, killed: false }]);
     expect(deltas).toEqual(["stream-chunk"]);
 
@@ -393,7 +389,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
 
   it("agentName 回落链 description → agent → workflow-agent；失败结果分诊透传", async () => {
     const { engine, captured } = makeEngine();
-    const runP = engine.run({ prompt: "x" }, { taskId: "run-fb", poolKey: PI_POOL_KEY });
+    const runP = engine.run({ prompt: "x" }, { taskId: "run-fb"});
     expect(captured[0]!.params.agentName).toBe("workflow-agent");
     // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义，one-shot 形态）
     expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
@@ -411,7 +407,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
     expect(outcome.usage).toBeUndefined();
 
     // agent 字段兜底（description 缺失）
-    const runP2 = engine.run({ prompt: "y", agent: "/agents/a.md" }, { taskId: "run-fb2", poolKey: PI_POOL_KEY });
+    const runP2 = engine.run({ prompt: "y", agent: "/agents/a.md" }, { taskId: "run-fb2"});
     expect(captured[1]!.params.agentName).toBe("/agents/a.md");
     await settleRun(captured[1]!, spawnRunResult());
     await runP2;
@@ -422,7 +418,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
     const hostAuthoritative = "/host/agent-dir/subagents/--Users-x-proj--/sessions";
     const runP = engine.run(
       { prompt: "sessionDir priority" },
-      { taskId: "run-sd-priority", poolKey: PI_POOL_KEY, sessionDir: hostAuthoritative },
+      { taskId: "run-sd-priority", sessionDir: hostAuthoritative },
     );
     // ctx.sessionDir 有值 → 原样直通（[LEGACY] fallback 不参与——即使其推导值不同）
     expect(captured[0]!.params.sessionDir).toBe(hostAuthoritative);
@@ -453,11 +449,10 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
       { prompt: "chat turn" },
       {
         taskId: "run-chat-1",
-        poolKey: PI_POOL_KEY,
         sessionRootId: "root-sess-f6",
         resume: {
           recordId: "rec-chat-9",
-          resume: { sessionRef: { recordId: "rec-chat-9", sessionFile: "/tmp/sess-c9.jsonl" }, poolKey: PI_POOL_KEY },
+          resume: { sessionRef: { recordId: "rec-chat-9", sessionFile: "/tmp/sess-c9.jsonl" }},
         },
       },
     );
@@ -478,7 +473,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
     // 会话形态轮回调：onEvent / onHandleReady / onChildSpawned / onChildStateChanged
     // 全走 ctx 直通（与 one-shot 共用 buildRunCallbacks）
     cap.callbacks.onEvent?.({ type: "turn_end" });
-    cap.callbacks.onHandleReady?.({ sessionRef: { sessionFile: "/tmp/sess-c9.jsonl" }, poolKey: PI_POOL_KEY });
+    cap.callbacks.onHandleReady?.({ sessionRef: { sessionFile: "/tmp/sess-c9.jsonl" }});
     cap.callbacks.onChildSpawned?.(555, "rec-chat-9");
 
     // per-run askUser 绑定：bindAskUser 未注入时无 askUser 回调
@@ -497,7 +492,6 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
     const { engine, captured } = makeEngine();
     const runP = engine.run({ prompt: "first" }, {
       taskId: "run-chat-2",
-      poolKey: PI_POOL_KEY,
       resume: { recordId: "rec-new" },
     });
     expect(captured[0]!.params.resumeSessionFile).toBeUndefined();
@@ -518,7 +512,6 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
     });
     const runP = engine.run({ prompt: "chat" }, {
       taskId: "run-chat-ask",
-      poolKey: PI_POOL_KEY,
       resume: { recordId: "rec-ask" },
     });
     const answer = await captured[0]!.callbacks.askUser?.({ method: "select", id: "ui-4", title: "q", options: ["a"] });
@@ -555,8 +548,7 @@ describe("PiEngine.read / dispose", () => {
           v: 1,
           engineId: PI_ENGINE_ID,
           sessionRef: { recordId: "rec-r1", sessionId: "sess-r1", sessionFile: "/tmp/sess-r1.jsonl" },
-          poolKey: PI_POOL_KEY,
-          journalPath,
+            journalPath,
           adapterVersion: PI_ADAPTER_VERSION,
         },
       });
@@ -565,7 +557,7 @@ describe("PiEngine.read / dispose", () => {
       expect(journaled.turns[0]?.text).toBe("replayed");
 
       const outcomeOnly = await engine.read({
-        data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-r2" }, poolKey: PI_POOL_KEY, adapterVersion: PI_ADAPTER_VERSION },
+        data: { v: 1, engineId: PI_ENGINE_ID, sessionRef: { recordId: "rec-r2" }, adapterVersion: PI_ADAPTER_VERSION },
       });
       expect(outcomeOnly).toEqual({ engineId: PI_ENGINE_ID, turns: [], source: "outcome-only" });
     } finally {

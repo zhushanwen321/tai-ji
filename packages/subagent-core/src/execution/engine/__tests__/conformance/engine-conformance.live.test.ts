@@ -98,7 +98,7 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
     try {
       const events: AgentEvent[] = [];
       const task = { prompt: "Reply with the single word: ok", description: "live-c2", model, cwd: os.tmpdir() };
-      const ctx: RunContext = { taskId: "sa-live-pi-c2", poolKey: "shared", onEvent: (e) => events.push(e) };
+      const ctx: RunContext = { taskId: "sa-live-pi-c2", onEvent: (e) => events.push(e) };
       const { outcome } = await engine.run(task, ctx);
       expect(outcome.error).toBeUndefined();
       expect(outcome.content.trim().length).toBeGreaterThan(0);
@@ -128,7 +128,7 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
     const events: AgentEvent[] = [];
     const { outcome } = await engine.run(
       { prompt: "Reply with the single word: ok", description: "live-appserver-c2", model, cwd: "/tmp" },
-      { taskId: "sa-live-zcode-appserver", poolKey: "", onEvent: (e) => events.push(e) },
+      { taskId: "sa-live-zcode-appserver", onEvent: (e) => events.push(e) },
     );
     expect(outcome.error).toBeUndefined();
     expect(outcome.content.trim().length).toBeGreaterThan(0);
@@ -271,7 +271,6 @@ describe.skipIf(!LIVE)("conformance relay 变体（协议客户端 × relay 代�
       const task = { prompt: "Reply with the single word: ok", description: "live-relay-c2", model, cwd: os.tmpdir() };
       const ctx: RunContext = {
         taskId: "sa-live-pi-relay",
-        poolKey: "shared",
         onEvent: (event) => events.push(event),
       };
       const { outcome } = await engine.run(task, ctx);

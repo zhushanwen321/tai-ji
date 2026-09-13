@@ -252,6 +252,12 @@ export class GenStatsService {
    *
    * current = 文件末条单样本换算（跨 session、可跨重启恢复）；day/d7/d30 = 本地日 key
    * 滚动窗口加权聚合（含当日）。聚合无有效样本 → null（store null 纪律，禁止 0 充数）。
+   *
+   * 口径切换过渡态（genstats-speed-llm-window D4，排查勿误判）：落盘 append-only，旧口径
+   * 样本（durationMs = turn 全程墙钟，含工具执行时间）不迁移，≤30 天 GC 出清前与新口径
+   * （LLM 请求窗口）共存——此窗口内 day/d7/d30 聚合值系统性偏低、与 current 倒挂是已知
+   * 过渡现象非 bug。刻意不做迁移脚本：数据量小、无跨期对比消费方，迁移的写风险大于读
+   * 偏差收益；重审触发 = 出现依赖聚合值做跨期对比的消费方或用户长期反馈倒挂误读。
    */
   snapshot(modelKey: string | null, fresh?: FreshDayRecords): GenStatsModelSnapshot {
     if (modelKey === null) {

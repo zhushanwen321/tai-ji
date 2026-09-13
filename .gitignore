@@ -5,9 +5,6 @@
 # .superpowers/ skill 临时产物（plan/brainstorm 等），全目录忽略。
 # 旧规则只匹配 2026-04-* 和 brainstorm/，漏 2026-06+（事故：2026-06-22-sidebar-polish/plan.md 漏网被 commit）。
 .superpowers/
-.xyz-harness/gate/
-# visual 验证产物（截图 PNG + result.json），不进 git；追溯副本在 docs/testing/visual/baselines/
-.xyz-harness/visual/
 *.local
 *.log
 dist/
@@ -21,7 +18,6 @@ src/dist/
 src/node_modules/
 superpowers/20*/
 target/
-.xyz-harness/workflow-state.json
 .claude/worktrees/
 
 # pi resources — pi binary downloaded by prepare-pi-resources.sh from badlogic/pi-mono
@@ -141,3 +137,9 @@ package-lock.json.*
 # === dev 模式自制 Electron app bundle（dev-electron.mjs 生成，太极图标）===
 # dev 启动时按需重建，不进版本库
 /apps/electron/.dev-electron/
+
+# === 运行时数据目录误入 apps/electron（cwd 相对推导的 ConfigService 落盘，2026-05 误提交已清）===
+/apps/electron/.xyz-agent/
+
+# === 本地决策/工作流档案（2026-09-13 裁决：不入库，靠 commit 与 docs 承载决策追溯）===
+/.xyz-harness/

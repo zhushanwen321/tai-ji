@@ -5,7 +5,7 @@ import type { Config } from 'tailwindcss'
  *
  * 提取 renderer / mobile-renderer 两个 tailwind.config.ts 的逐字段相同块（colors 主体 /
  * fontFamily / borderRadius / boxShadow / .content-col plugin），单一 SSOT 防漂移；
- * 色值映射到 style.css 的 CSS 变量（SSOT: docs/page-design/design-tokens.md）。
+ * 色值映射到 style.css 的 CSS 变量（SSOT: docs/DESIGN.md §4）。
  *
  * 约束（packages/shared 全局约束）：纯 JS 对象，零 IO、无 node 内置依赖——tailwind
  * config 只在构建期被 PostCSS 链加载，不进 runtime 产物。
@@ -105,8 +105,8 @@ export default {
   },
   plugins: [
     // 对话流内容列布局原语 .content-col（收敛 mx-auto + w-full + max-w-[var(--content-max-w)]
-    // 三件套，8 组件消费：Turn/Composer/AskUserOverlay/SystemNotice/BashOutputBlock/
-    // ForkNotice/WidgetArea/compacting 行）。宽度数值 SSOT 仍是 style.css 的 --content-max-w
+    // 三件套，7 组件消费：Turn/Composer/AskUserOverlay/SystemNotice/BashOutputBlock/
+    // ForkNotice/WidgetArea）。宽度数值 SSOT 仍是 style.css 的 --content-max-w
     // token，本 plugin 只生成「居中 + 封顶」布局类；display/gap 等由使用处 Tailwind 工具类
     // 叠加。不满足 check_css_tokens 白名单「Tailwind 无法表达」判据，故不落 style.css，
     // 经 Tailwind plugin 生成为正统 utility（两包 config 共享，同步维护压力消除）。

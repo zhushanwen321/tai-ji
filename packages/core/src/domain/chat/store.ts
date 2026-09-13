@@ -160,9 +160,12 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * 一次性语义不受影响）。
  */
 /**
- * user 消息文本投影（mergeBaselineWithLive 文本多重集判据用）：基线（pi 文本经
- * textToSegments 重派生）与 live overlay（原始 segments）两侧同函数转换，纯文本
- * 逐字节同源（P2 探针），富文本 badge 维度两态一致（segmentsToText 往返）。
+ * user 消息文本投影（mergeBaselineWithLive 文本多重集判据用）。比较是**投影级**而非
+ * 「pi 文本 ≡ 提交文本」字节恒等（composer-multi-skill-injection §3.5-① R4 修正，
+ * 过时前提实施期同批更正）：两侧经本函数同规则转换——sidecar 命中消息的基线 content
+ * 已被 runtime backfillSegments 换回原始 Segment[]，与 live overlay（原始 segments）
+ * 同源命中（不双计）；真实失配域仅 sidecar 丢失的兜底反解析路径（剥块残留分隔空白
+ * 等字节差，含 skill chip 消息）。
  */
 function userMessageText(m: Message): string {
   const c = m.content
@@ -188,10 +191,14 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   // 仍在途」的消息领先于 live 帧流，此时 overlay（乐观/腿 1 投递插入，身份判据结构性
   // 永假：piEntryId 剥除 + id 空间不相交）会被当 live-only 保护保留，与基线权威副本
   // 双计（实测 R3-PROMPT 前端 2 条 / pi 1 条；触发形态 = 基线尾部为 assistant（k=0）
-  // 时数量尾窗对齐 a=0 失去去重能力）。文本判据：pi 存储文本与提交 segmentsToText
-  // 输出同源恒等（P2 探针：pi 不 trim，纯文本逐字节保留；富文本 badge 经
-  // segmentsToText→pi→textToSegments 往返同文），skill 展开消息（pi 文本 ≠ 提交文本）
-  // 自然失配 → 落回身份+数量对齐现状。多重集按分区正序（= 投递序 = pi 落盘序）消费，
+  // 时数量尾窗对齐 a=0 失去去重能力）。文本判据是**投影级比较**（composer-multi-skill-
+  // injection §3.5-① R4 修正，早期注释「pi 文本 ≡ 提交文本」为过时前提）：比较域 =
+  // userMessageText 两侧投影（基线 Array content 经 segmentsToText 序列化），非 pi
+  // 落盘字节。sidecar 命中消息的基线 content 经 runtime backfillSegments 换回原始
+  // Segment[]，与 live 侧（原始 segments）同源 → 文本命中不双计；真实失配域 = sidecar
+  // 丢失的兜底反解析路径——反解析产物与提交文本存在剥块残留分隔空白等字节差（含
+  // skill chip 消息），判据在该域失配落回身份+数量对齐现状（同类失配先例 = 行首
+  // skill 展开消息）。多重集按分区正序（= 投递序 = pi 落盘序）消费，
   // 每条基线副本至多抵消一条 overlay；被消费的基线副本同步从步骤②的尾窗 k 中排除
   // （消费按序 = 基线 user 序前缀，尾部遇 consumed 即止），防同文本双投递场景
   // （AC-2b：[T,T] overlay、基线只含 1×T）被数量对齐二次错剔未落盘副本。
@@ -379,7 +386,7 @@ export function createChatStore() {
    * flush/取消的编排（调 chatApi.send/steer）留在 renderer shell（useCompactQueue.ts），
    * core 只经 deps.getCompactQueue() 注入调用——core 域文件不 import renderer api。
    * 组件消费点唯一：QueueBubble 经 Composer → chatStore.getQueueState 读 queueStates；
-   * compact 暂存经 useCompactQueue() 单例读（[u6b] 原 badge 展示组件已移除，PendingBubble 承接）。
+   * compact 暂存经 useCompactQueue() 单例读（[u6b] 原 badge 展示组件已移除，composer 上方 QueueBubble defer 行承接）。
    * pendingBuffer 属 drain
    * 恢复机制留在 store（SSOT 检查点 2 裁决：不强行并入统一视图）。
    */

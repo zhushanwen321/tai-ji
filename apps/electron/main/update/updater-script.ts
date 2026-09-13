@@ -17,7 +17,7 @@
  *   .old）→ S5 xattr / rm .old / 写 done → open 重启。
  * - 残余窗口（诚实边界，无法自愈）：S3→S4 两条同目录 rename 之间中断 = .app 缺失 +
  *   .old/.new 双份完整，自愈代码运行在 app 内无执行机会。手动恢复出口见
- *   docs/troubleshooting.md「升级中断手动恢复」。
+ *   docs/TROUBLESHOOTING.md「升级中断手动恢复」。
  * - .old 处置规则：仅当 .app 在位（完整可用）时才清残留 .old（此时 .old 无恢复价值）；
  *   .app 缺失 + .old 在 = 残余窗口态，禁止动 .old（手动恢复唯一出口），fail abort。
  * - xattr -cr 清 quarantine（未签名发布场景：CI 产物本就未签名，无需 ad-hoc 重签名；
@@ -316,7 +316,7 @@ echo "[\$(date)] [stage] S3 backup begin"
 if [ -d "\$APP" ]; then
   # 仅当 .app 在位（完整可用）时才清残留 .old（旧 .old 已无恢复价值）。
   # .app 缺失 + .old 在 = S3→S4 残余窗口态，禁止动 .old（手动恢复唯一出口，
-  # 见 docs/troubleshooting.md「升级中断手动恢复」）。
+  # 见 docs/TROUBLESHOOTING.md「升级中断手动恢复」）。
   rm -rf "\$APP_OLD"
   if ! mv "\$APP" "\$APP_OLD"; then
     fail "backup failed"
@@ -351,7 +351,7 @@ open "\$APP"
 // ── linux updater 脚本模板（detached，避免双实例）──────────────────
 // 关键：AppImage 单文件 mv 替换本身原子（无 staging 必要，设计 §3.3.3），但
 // 备份+换装两条 rename 之间仍是毫秒级残余窗口（与 mac S3→S4 同型，.old/.new
-// 双份完整时手动恢复同 docs/troubleshooting.md）。与 mac 同步：PID 等待 +
+// 双份完整时手动恢复同 docs/TROUBLESHOOTING.md）。与 mac 同步：PID 等待 +
 // 60s 超时 abort + 只读检测 + 原子 result 写 + mv 失败不吞错。
 const LINUX_UPDATER_TEMPLATE = `#!/bin/bash
 # linux AppImage 升级脚本（设计 §3.3.3）：只读检测 → PID 等待退出 → sha256

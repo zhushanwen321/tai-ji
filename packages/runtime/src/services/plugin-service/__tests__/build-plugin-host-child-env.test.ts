@@ -1,5 +1,5 @@
 /**
- * buildPluginHostChildEnv 出站接线单测（U4-B6，docs/design/env-propagation-boundary.md §5-U4/D6）。
+ * buildPluginHostChildEnv 出站接线单测（U4-B6，docs/architecture/env-propagation-boundary.md §5-U4/D6）。
  *
  * 覆盖验收断言点：{...process.env} 全量拷贝拓扑不动——除 deny 两键与既有
  * ELECTRON_RUN_AS_NODE=1 注入外，输出键集合与输入完全一致（含非白名单任意键）；

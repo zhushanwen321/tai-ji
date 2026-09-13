@@ -154,7 +154,6 @@ describe("eventsToSessionView 投影与 sessionIdFromHandle", () => {
       v: 1,
       engineId: "zcode",
       sessionRef: { sessionId: "s-1" },
-      poolKey: "shared",
       adapterVersion: "1",
     };
     expect(sessionIdFromHandle(handle)).toBe("s-1");

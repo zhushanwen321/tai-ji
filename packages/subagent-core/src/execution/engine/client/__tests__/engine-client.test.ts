@@ -15,6 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient, type RunRoute } from "../engine-client.ts";
 import { isProcessAlive, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
+import {
+  _resetCoreSpawnedChildrenMirrorForTest,
+  hasLiveProcessHandleCore,
+} from "../../host/spawned-children.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -150,20 +154,16 @@ describe("EngineClient 帧往返与握手", () => {
 });
 
 describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
-  it("event 通知 / streamDelta / poolResolved / handleReady 路由到 run 作用域回调；handleReady 回填 partial handle", async () => {
+  it("event 通知 / streamDelta / handleReady 路由到 run 作用域回调；handleReady 回填 partial handle", async () => {
     const events: unknown[] = [];
     const deltas: string[] = [];
-    const poolKeys: string[] = [];
-    const readyPartials: Array<{ sessionRef: Record<string, string>; poolKey: string }> = [];
+    const readyPartials: Array<{ sessionRef: Record<string, string> }> = [];
     const route: RunRoute = {
       onEvent: (e) => {
         events.push(e);
       },
       onStreamDelta: (d) => {
         deltas.push(d);
-      },
-      onPoolResolved: (p) => {
-        poolKeys.push(p);
       },
       onHandleReady: (partial) => {
         readyPartials.push(partial);
@@ -176,8 +176,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
         JSON.stringify([
           { op: "emit", seq: 1, event: { type: "text_delta", delta: "hello" } },
           { op: "streamDelta", delta: "stream-1" },
-          { op: "poolResolved", poolKey: "pool-x" },
-          { op: "handleReady", sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" },
+          { op: "handleReady", sessionRef: { sessionId: "s-1" } },
         ]),
       ],
     });
@@ -186,22 +185,19 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     const result = (await client.request("run", {
       runId: "run-1",
       task: { prompt: "p" },
-      ctx: { poolKey: "pool-x", cwd: dataDir },
+      ctx: { cwd: dataDir },
     })) as { handle: { sessionRef: Record<string, string> }; outcome: { content: string } };
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(events).toContainEqual({ type: "text_delta", delta: "hello" });
     expect(deltas).toEqual(["stream-1"]);
-    expect(poolKeys).toEqual(["pool-x"]);
-    expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" }]);
-    expect(client.getPartialHandle()).toEqual({ sessionRef: { sessionId: "s-1" }, poolKey: "pool-x" });
+    expect(readyPartials).toEqual([{ sessionRef: { sessionId: "s-1" } }]);
+    expect(client.getPartialHandle()).toEqual({ sessionRef: { sessionId: "s-1" } });
     unregister();
     await cleanup();
   });
 
-  it("host/childSpawned + host/childStateChanged → 镜像落项/更新 + onMirrorChanged 广播", async () => {
-    const mirrorEvents: string[] = [];
+  it("host/childSpawned + host/childStateChanged → 镜像落项/更新（onMirrorChanged 注入点已删，经 mirror 快照观测）", async () => {
     const { client, cleanup } = makeClient({
-      onMirrorChanged: (e) => mirrorEvents.push(e.reason),
       args: [
         FAKE_ENGINE,
         "--run-actions",
@@ -212,9 +208,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       ],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
-    expect(mirrorEvents).toContain("childSpawned");
-    expect(mirrorEvents).toContain("childStateChanged");
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     expect(client.mirror.getEntry(4242)).toMatchObject({
       pid: 4242,
       state: "exited",
@@ -226,10 +220,8 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     expect(client.mirror.size).toBe(0);
   });
 
-  it("host/log 数据面 → 注入的 log 出口（缺省 logger facade 不抛）", async () => {
-    const logs: Array<{ level: string; component: string; message: string }> = [];
+  it("host/log 数据面 → 缺省 logger facade 不抛（log 注入点已删，恒走缺省）", async () => {
     const { client, cleanup } = makeClient({
-      log: (p) => logs.push({ level: p.level, component: p.component, message: p.message }),
       args: [
         FAKE_ENGINE,
         "--run-actions",
@@ -237,9 +229,49 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
       ],
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
-    expect(logs).toContainEqual({ level: "warn", component: "fake-comp", message: "log-line-1" });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    // run 应答成功即 host/log 分发未抛（分发抛错也回 ok，但缺省 logger 自身不得炸）。
+    expect(client.currentState).toBe("ready");
     await cleanup();
+  });
+});
+
+describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
+  // bridge 写的是 core 进程级单例镜像（globalThis[Symbol.for] 槽），测试间必须隔离。
+  beforeEach(() => {
+    _resetCoreSpawnedChildrenMirrorForTest();
+  });
+
+  it("childSpawned → core 镜像登记活句柄；自然退出（state:exited, killed:false）→ 置死不登记活句柄", () => {
+    const { client } = makeClient();
+    client.mirror.recordSpawned(4242, "rec-bridge");
+    expect(hasLiveProcessHandleCore("rec-bridge")).toBe(true);
+
+    // pi 子进程自行退出/崩溃的载荷形态：killed=false（child.killed 只在我方 kill 过
+    // 才为 true）、state=exited——投影必须置死 core 镜像项，否则 countInFlight 虚高
+    // （幻影在途拖住滚动重启判据）+ isResumable 恒 false（resumable 说谎）。
+    client.mirror.recordStateChanged({
+      pid: 4242,
+      recordId: "rec-bridge",
+      state: "exited",
+      killed: false,
+      exitCode: 1,
+    });
+    expect(hasLiveProcessHandleCore("rec-bridge")).toBe(false);
+  });
+
+  it("被杀退出（state:exited, killed:true）→ 置死（既有行为不回归）", () => {
+    const { client } = makeClient();
+    client.mirror.recordSpawned(4243, "rec-killed");
+    expect(hasLiveProcessHandleCore("rec-killed")).toBe(true);
+    client.mirror.recordStateChanged({
+      pid: 4243,
+      recordId: "rec-killed",
+      state: "exited",
+      killed: true,
+      signal: "SIGTERM",
+    });
+    expect(hasLiveProcessHandleCore("rec-killed")).toBe(false);
   });
 });
 
@@ -264,7 +296,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"value":"answer-A"');
@@ -287,7 +319,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"cancelled":true');
@@ -307,7 +339,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       onEvent: (e) => { events.push(e as { type: string; message?: string }); },
     });
     await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } });
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
     unregister();
     const echo = events.find((e) => e.message?.startsWith("askUser-result:"));
     expect(echo?.message).toContain('"unsupported":true');
@@ -335,7 +367,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     });
     await client.ensureConnected();
     const runFailed = expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
     ).rejects.toMatchObject({ code: "engine_crashed" });
     // 分步推进：streamDelta 反向请求是真实 IO（引擎收到 run → 回帧），guardTimer
     // 注册于帧到达之后——一次性 advance(10s) 会与该 IO 竞态（推进时守卫尚未注册）。
@@ -362,7 +394,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     await client.ensureConnected();
     const enginePid = client.enginePid!;
     void client
-      .request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } })
+      .request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } })
       .catch(() => {});
     await vi.advanceTimersByTimeAsync(60_000);
     // ack 已回（引擎继续跑），handler 挂起不触发任何杀链
@@ -392,7 +424,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
     expect(client.enginePid).toBeDefined();
     const path = pidfilePath(dataDir, "fake", "test", process.pid);
     await expect(
-      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+      client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
     ).rejects.toSatisfy((err: Error & { code?: string }) => {
       expect(err.code).toBe("engine_crashed");
       expect(err.message).toContain("stderr tail");
@@ -463,7 +495,7 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     void client
       .ensureConnected()
       .then(() =>
-        client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { poolKey: "shared", cwd: dataDir } }),
+        client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
       )
       .catch(() => {});
     await waitFor(() => client.mirror.size > 0);

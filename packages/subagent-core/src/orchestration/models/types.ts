@@ -20,7 +20,7 @@ import type {
   ToolCallEntry,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { WorktreeHandle } from "../../execution/types.ts";
+import type { WorktreeHandle } from "../../execution/assembly/types.ts";
 
 // ── 状态机 ────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ export const SLUG_MAX_LENGTH = 35;
  * [D6 合流裁决] 本类型 = 原 AgentCallOpts（workflow 调用方声明，18 字段）与原
  * AgentTaskSpec（engine 中立任务声明，已删除）的合流形态，从模型脚本 agent() API
  * 到 EnginePort.run 直达 pi 边界一次映射——SAR 链路上的 ExecuteOptions/AgentTaskSpec
- * 中间态消除（设计 docs/design/subagent-dual-track-convergence.md §3.3 D6 / 终态四）。
+ * 中间态消除（设计 docs/design/dual-track（已删 git 可追溯）§3.3 D6 / 终态四）。
  *
  * 终态命名按变化轴裁定为 AgentCallOpts，理由：
  *   - 字段演进的首要驱动轴是「调用方要表达的任务语义」（agent() API 是唯一生产写入方，

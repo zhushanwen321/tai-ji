@@ -2,9 +2,9 @@
 //
 // [H1 U3] chat 轮 run 派发形态 e2e（真机 NDJSON 往返）：spawn bin/pi-subagent-cli.mjs
 // + fake-pi-chat.mjs（PATH 注入，每轮一进程——agent_settled 后引擎杀链收割）。
-// 覆盖 chat-run 统一的线上形态（设计 docs/design/subagent-chat-run-unification.md
+// 覆盖 chat-run 统一的线上形态（设计 docs/architecture/subagent-chat-run-unification.md
 // §3.3 D6/D7 + §5 U3 验收「resume run 续写同文件、历史召回」）：
-//   ① 首轮 run chat（无 resume）→ 反向帧链（poolResolved/childSpawned[recordId]/
+//   ① 首轮 run chat（无 resume）→ 反向帧链（childSpawned[recordId]/
 //      handleReady/streamDelta[runId]）→ run 应答（handle 锚 recordId）→ 收割
 //      （childStateChanged exited 上报）；不经 ChatSessionRegistry——无轮次相位帧；
 //   ② 续聊 = 新 run chat + resume（首轮 sessionFile）→ fake 从同文件读到首轮写入
@@ -164,12 +164,9 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
     const runP = host.request("run", {
       runId: "run-chat-1",
       task: { prompt: "hello", conversation: true, description: "chat-e2e" },
-      ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model", streamMode: "stream" },
+      ctx: { cwd: dataDir, model: "fake-provider/fake-model", streamMode: "stream" },
       resume: { recordId: "rec-chat-1" },
     });
-    const poolResolved = await host.waitForReverse("host/poolResolved");
-    expect((poolResolved.params as { poolKey: string }).poolKey).toBe("shared");
-    host.replyReverse(String(poolResolved.id), { ok: true });
 
     const childSpawned = await host.waitForReverse("host/childSpawned");
     expect((childSpawned.params as { recordId: string }).recordId).toBe("rec-chat-1");
@@ -201,7 +198,6 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
       "host/childSpawned",
       "host/childStateChanged",
       "host/handleReady",
-      "host/poolResolved",
       "host/streamDelta",
     ]);
 
@@ -211,10 +207,10 @@ describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往�
     const resumeP = host.request("run", {
       runId: "run-resume-1",
       task: { prompt: "continue", conversation: true },
-      ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model" },
+      ctx: { cwd: dataDir, model: "fake-provider/fake-model" },
       resume: {
         recordId: "rec-chat-1",
-        resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }, poolKey: "shared" },
+        resume: { sessionRef: { recordId: "rec-chat-1", sessionFile }},
       },
     });
     const resumeSpawned = await host.waitForReverse("host/childSpawned");

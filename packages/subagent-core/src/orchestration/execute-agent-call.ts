@@ -31,7 +31,7 @@
  * 参考：domain-models.md §5 + §失败处理矩阵。
  */
 
-import type { SubagentStream } from "../execution/stream-sink.ts";
+import type { SubagentStream } from "../execution/assembly/stream-sink.ts";
 import type { AgentEvent } from "../shared/agent-event.ts";
 import type { AgentCall } from "./models/agent-call.ts";
 import type { Budget } from "./models/budget.ts";

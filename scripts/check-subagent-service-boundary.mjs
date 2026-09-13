@@ -2,7 +2,7 @@
 // scripts/check-subagent-service-boundary.mjs
 //
 // [H3/R5] SubagentService 六聚合（execution/service/）× 壳（execution/subagent-service.ts）
-// 三方向依赖边界守卫（设计 docs/design/subagent-service-decomposition.md §3.4 D4/G2，
+// 三方向依赖边界守卫（设计 docs/architecture/subagent-service-decomposition.md §3.4 D4/G2，
 // impl-plan §2 R5 行；约束「S3 依赖单向由守卫机械检查接管」）。
 //
 // 检查项：
@@ -28,7 +28,9 @@
 //      - 聚合→支撑：service-constants.ts 允许（import 常量）；service-bootstrap.ts
 //        仅 type-only 允许（聚合不消费装配工厂）
 //      - 支撑→壳：默认红（防反向依赖，D4 同理），仅 SUPPORT_SHELL_EDGES 登记的
-//        SubagentService 值边放行（createSubagentService 构造依赖，设计 v4）
+//        SubagentService 值边放行（装配构造依赖，设计 v4 时为
+//        createSubagentService 工厂——工厂已随 2026-09-13 barrel 收窄删除，
+//        bootstrap 直构 new SubagentService，值边语义不变）
 //      - 壳→支撑：允许（装配），不检查
 //
 // [HISTORICAL] 2026-09-12 建立时现状三条合法边（D-R3-2 / D-R4-8 登记）；R6 已兑现
@@ -60,6 +62,9 @@ const ALLOWED_EDGES = new Map([
   ["run-orchestration.ts|ResolvedIdentity", "record-access.ts"],
   // ③ D-R4-8：ResolvedIdentity type-only 单向
   ["workflow-dispatch.ts|ResolvedIdentity", "record-access.ts"],
+  // ④ D-R4-8：ResolvedIdentity type-only 单向（chat-rounds 为第三消费方，
+  //   2026-09-13 补登——源码注释声称已登记但台账漏登，聚合边界守卫显形）
+  ["chat-rounds.ts|ResolvedIdentity", "record-access.ts"],
 ]);
 
 /** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 装配工厂的

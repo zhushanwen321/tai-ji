@@ -44,7 +44,7 @@ import type { SubagentInFlightReport } from '@xyz-agent/extension-protocol'
 const SID = 'sess-rolling-1'
 
 function report(inFlight: number, sessionId = SID): SubagentInFlightReport {
-  return { kind: 'delta', inFlight, sessionId, emittedAt: 1_700_000_000_000 }
+  return { inFlight, sessionId, emittedAt: 1_700_000_000_000 }
 }
 
 /** 构造 watchdog critical 档广播 payload（rolling-restart 只消费 level 字段）。 */
@@ -77,7 +77,6 @@ function startHarness(opts: {
   deferRetryMs?: number
   countdownMs?: number
   forcePercent?: number
-  queryEngineInFlight?: () => { inFlight: number } | null
   sessionIds?: string[]
 } = {}): Harness {
   const mirror = createInFlightMirror()
@@ -91,7 +90,6 @@ function startHarness(opts: {
     mirror,
     listSessionIds: () => opts.sessionIds ?? [SID],
     relayInFlight: () => relayCount,
-    queryEngineInFlight: opts.queryEngineInFlight,
     heapPercent: () => heapPct,
     memPressureHigh: opts.memPressureHigh ?? (async () => false),
     onExecute,
@@ -251,10 +249,8 @@ describe('A1③ 推迟上限到点强制执行 reason=defer-limit（D5 ②）', 
 })
 
 describe('A2 Path A 保活不推迟（settled 无在途）', () => {
-  it('镜像全 idle（settled 后计数 0）+ relay 空 + 引擎快照 0 → 无 deferred 直接 countdown → 执行', async () => {
-    const h = startHarness({
-      queryEngineInFlight: () => ({ inFlight: 0 }),
-    })
+  it('镜像全 idle（settled 后计数 0）+ relay 空 → 无 deferred 直接 countdown → 执行', async () => {
+    const h = startHarness()
     // Path A 保活形态：曾上报（hasEverReported=true）且当前计数 0——活句柄但 idle timer
     // armed 的进程在镜像口径中不计（getInFlightSnapshot 双谓词），故恒 0。
     h.mirror.setInjected(SID, true)
@@ -385,20 +381,6 @@ describe('relay / 引擎侧在途源', () => {
     const deferred = eventsOf(h.journalAppend, 'rolling-restart-deferred')
     expect(deferred).toHaveLength(1)
     expect(deferred[0].inflight).toBe(2)
-  })
-
-  it('引擎侧快照 >0（EnginePort.inFlightSnapshot 注入形态）→ 推迟', async () => {
-    const h = startHarness({ queryEngineInFlight: () => ({ inFlight: 1 }) })
-    h.handle.onMemoryPressure(criticalPayload())
-    await flushDecisions()
-    expect(eventsOf(h.journalAppend, 'rolling-restart-deferred')).toHaveLength(1)
-  })
-
-  it('引擎快照返回 null（引擎不提供）→ 不计入', async () => {
-    const h = startHarness({ queryEngineInFlight: () => null })
-    h.handle.onMemoryPressure(criticalPayload())
-    await flushDecisions()
-    expect(eventsOf(h.journalAppend, 'rolling-restart-deferred')).toHaveLength(0)
   })
 })
 

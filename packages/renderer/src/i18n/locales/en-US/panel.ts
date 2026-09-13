@@ -16,6 +16,8 @@ export default {
     queueSend: 'Queue to send',
     commandQueuedRejected: 'Session busy, commands are disabled until it is free',
     sending: 'Sending…',
+    sendBusy: 'Session is busy, please wait before sending',
+    sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
     steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎…',
     inputHint: 'Describe what you want AI to do, or # file, / command…',
@@ -38,6 +40,7 @@ export default {
     copy: 'Copy',
     working: 'Working…',
     worked: 'Worked',
+    inProgress: '(in progress)',
     expandReasoning: 'Expand reasoning',
     collapseReasoning: 'Collapse reasoning',
     toolFailed: '(failed)',
@@ -62,6 +65,8 @@ export default {
     viewCommandDoc: 'View command docs',
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
+    // [compact-defer-composer-queue u1] compacting band sub-copy (consumed by u3; key added by u1)
+    compactingFlushHint: 'Will send {count} queued message(s) when done',
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
@@ -195,6 +200,7 @@ export default {
     subagentCoarseHint: '{engine} engine: running (this engine does not support live streaming; the full conversation will be available after completion)',
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
+    subagentStopReason: 'Why the last round stopped (display only)',
     engineFallbackBadge: 'Requested {from} → fell back to {to}',
     engineFallbackHint: 'Engine {from} probe failed and fell back to {to}; fix {from} and start a new session to retry',
     backToWorkflow: 'Back to workflow',
@@ -315,9 +321,12 @@ export default {
     pendingHintBash: 'Will be sent after the command finishes',
     pendingHintSettling: 'Will be sent after the current turn ends',
     cancelQueued: 'Cancel queued message',
-    submittedAwaitingDelivery: 'Submitted, awaiting delivery',
     chipBadge: '+{count}',
     chipBadgeHint: 'Contains {count} attachment/reference chip(s), sent along with the message',
+    // [compact-defer-composer-queue u1] defer row occupancy chip (After compact / After command / Later)
+    deferChipCompacting: 'After compact',
+    deferChipBash: 'After command',
+    deferChipFallback: 'Later',
   },
   contextChips: {
     removeFromContext: 'Remove from context',

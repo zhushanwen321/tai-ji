@@ -1,5 +1,7 @@
 # ADR-0006: Strict bundled pi only, no system fallback
 
+- 状态：Accepted
+
 ## Context
 
 When xyz-agent is packaged (DMG/NSIS/AppImage), it bundles a pi binary inside the app. The user may also have pi installed system-wide via npm. We need to decide whether to use only the bundled pi or fall back to the system pi if the bundled one fails.

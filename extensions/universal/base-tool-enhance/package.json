@@ -1,7 +1,7 @@
 {
   "name": "@zhushanwen/pi-base-tool-enhance",
   "version": "0.5.2",
-  "description": "Base tool enhancement - override builtin bash tool: foreground delegates to pi official factory, incremental background mode (design: docs/design/base-tool-enhance.md)",
+  "description": "Base tool enhancement - override builtin bash tool: foreground delegates to pi official factory, incremental background mode (design decisions documented in source comments)",
   "type": "module",
   "main": "src/index.ts",
   "xyz-agent": {
