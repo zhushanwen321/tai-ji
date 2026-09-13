@@ -198,20 +198,65 @@ function requestHeadless(req: ApprovalRequest, approvalCtx: ApprovalContext): Us
 	return { approved: false, reason: `headless mode (${approvalCtx.mode}): cannot prompt, auto-deny` };
 }
 
-// ──────────────────────── 辅助：标题格式化 ────────────────────────
+// ──────────────────────── 辅助：字段集内核 + 标题格式化 ────────────────────────
 
-/** 格式化审批标题（RPC select / TUI 顶部）。 */
+/**
+ * E6（M6/D5）：审批卡字段集（内核，唯一字段来源）。
+ *
+ * 「审批卡显示哪些内容」由 buildApprovalFieldSet 单点决定；两外壳只做排版——
+ * formatTitle（RPC）压紧凑行数组（AI 单行摘要 + reasoning 行），renderApprovalView
+ * （TUI）展开缩进块。排版是两外壳的形态差异，不属双写。
+ */
+interface ApprovalFieldSet {
+	title: string;
+	tool: string;
+	command: string | undefined;
+	reason: string;
+	ai?: {
+		risk: string;
+		outcome: string;
+		confidence: number;
+		reasoning: string;
+	};
+}
+
+/** 构造审批卡字段集（title/tool/command/reason + 可选 AI 四元组含 reasoning）。 */
+function buildApprovalFieldSet(req: ApprovalRequest): ApprovalFieldSet {
+	return {
+		title: "[pi-permission] Approval required",
+		tool: req.toolName,
+		// 空字符串与 undefined 同义（两外壳的 Command 行都只在非空时渲染）
+		command: req.command !== undefined && req.command.length > 0 ? req.command : undefined,
+		reason: req.reason,
+		...(req.preClassification
+			? {
+					ai: {
+						risk: req.preClassification.risk_level,
+						outcome: req.preClassification.outcome,
+						confidence: req.preClassification.confidence,
+						reasoning: req.preClassification.reasoning,
+					},
+				}
+			: {}),
+	};
+}
+
+/**
+ * 格式化审批标题（RPC select）。消费字段集，压成紧凑行数组（6 行）。
+ * M6 漂移修复：补 reasoning 行——此前 RPC 用户看不到 AI 理由（TUI 一直有）。
+ */
 function formatTitle(req: ApprovalRequest): string {
+	const fields = buildApprovalFieldSet(req);
 	const lines: string[] = [];
-	lines.push(`[pi-permission] Approval required`);
-	lines.push(`Tool: ${req.toolName}`);
-	if (req.command !== undefined && req.command.length > 0) {
-		lines.push(`Command: ${req.command}`);
+	lines.push(fields.title);
+	lines.push(`Tool: ${fields.tool}`);
+	if (fields.command !== undefined) {
+		lines.push(`Command: ${fields.command}`);
 	}
-	lines.push(`Reason: ${req.reason}`);
-	if (req.preClassification) {
-		const pc = req.preClassification;
-		lines.push(`AI: risk=${pc.risk_level} outcome=${pc.outcome} (conf=${pc.confidence})`);
+	lines.push(`Reason: ${fields.reason}`);
+	if (fields.ai) {
+		lines.push(`AI: risk=${fields.ai.risk} outcome=${fields.ai.outcome} (conf=${fields.ai.confidence})`);
+		lines.push(`  reasoning: ${fields.ai.reasoning}`);
 	}
 	return lines.join("\n");
 }
@@ -316,25 +361,25 @@ export class ApprovalComponent implements Component {
 /** box 边框左右各占用 1 列（│ × 2） */
 const BORDER_OVERHEAD = 2;
 
-/** 渲染审批视图（纯函数，便于单测）。 */
+/** 渲染审批视图（纯函数，便于单测）。消费字段集（E6 内核），排版为 TUI 展开块。 */
 export function renderApprovalView(req: ApprovalRequest, width: number): string[] {
+	const fields = buildApprovalFieldSet(req);
 	const innerWidth = Math.max(0, width - BORDER_OVERHEAD); // 减去左右边框
 	const inner: string[] = [];
-	inner.push("[pi-permission] Approval required");
+	inner.push(fields.title);
 	inner.push("");
-	inner.push(`Tool: ${req.toolName}`);
-	if (req.command !== undefined && req.command.length > 0) {
-		inner.push(`Command: ${req.command}`);
+	inner.push(`Tool: ${fields.tool}`);
+	if (fields.command !== undefined) {
+		inner.push(`Command: ${fields.command}`);
 	}
-	inner.push(`Reason: ${req.reason}`);
-	if (req.preClassification) {
-		const pc = req.preClassification;
+	inner.push(`Reason: ${fields.reason}`);
+	if (fields.ai) {
 		inner.push("");
 		inner.push(`AI classification:`);
-		inner.push(`  risk: ${pc.risk_level}`);
-		inner.push(`  outcome: ${pc.outcome}`);
-		inner.push(`  confidence: ${pc.confidence}`);
-		inner.push(`  reasoning: ${pc.reasoning}`);
+		inner.push(`  risk: ${fields.ai.risk}`);
+		inner.push(`  outcome: ${fields.ai.outcome}`);
+		inner.push(`  confidence: ${fields.ai.confidence}`);
+		inner.push(`  reasoning: ${fields.ai.reasoning}`);
 	}
 	inner.push("");
 	inner.push("[Enter] Approve  [Esc] Deny");

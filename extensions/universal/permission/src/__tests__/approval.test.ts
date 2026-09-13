@@ -154,6 +154,53 @@ describe("requestUserApproval: rpc 模式", () => {
 		expect(decision.approved).toBe(true);
 		expect(selectMock).toHaveBeenCalledOnce();
 	});
+
+	it("E6/M6：有 preClassification → title 6 行，含 AI 摘要行 + reasoning 行（漂移修复）", async () => {
+		const pc: ClassifierResult = {
+			risk_level: "high",
+			outcome: "deny",
+			reasoning: "dangerous pipe to shell",
+			confidence: 0.95,
+		};
+		const reqWithPc: ApprovalRequest = { ...req, preClassification: pc };
+		let capturedTitle = "";
+		const selectMock = vi.fn((title: string) => {
+			capturedTitle = title;
+			return Promise.resolve("Deny");
+		});
+		const approvalCtx = makeApprovalCtx({
+			mode: "rpc",
+			ui: { notify: vi.fn(), select: selectMock, custom: vi.fn() },
+		});
+		await requestUserApproval(reqWithPc, ctx, undefined, approvalCtx);
+		const lines = capturedTitle.split("\n");
+		// RPC title 5→6 行：补 `  reasoning: <AI 理由>` 行（与 TUI 字段集同源，M6 漂移修复）
+		expect(lines).toHaveLength(6);
+		expect(lines[0]).toBe("[pi-permission] Approval required");
+		expect(lines[1]).toBe("Tool: bash");
+		expect(lines[2]).toBe("Command: rm -rf /tmp");
+		expect(lines[3]).toBe("Reason: no allow rule");
+		expect(lines[4]).toBe("AI: risk=high outcome=deny (conf=0.95)");
+		expect(lines[5]).toBe("  reasoning: dangerous pipe to shell");
+	});
+
+	it("E6/M6：无 preClassification → title 仍 4 行（无 AI 摘要/reasoning 行）", async () => {
+		let capturedTitle = "";
+		const selectMock = vi.fn((title: string) => {
+			capturedTitle = title;
+			return Promise.resolve("Approve (once)");
+		});
+		const approvalCtx = makeApprovalCtx({
+			mode: "rpc",
+			ui: { notify: vi.fn(), select: selectMock, custom: vi.fn() },
+		});
+		await requestUserApproval(req, ctx, undefined, approvalCtx);
+		const lines = capturedTitle.split("\n");
+		// 无 AI 预分类：title/Tool/Command/Reason 共 4 行（设计「5→6」指有 preClassification 时）
+		expect(lines).toHaveLength(4);
+		expect(lines.join("\n")).not.toContain("reasoning");
+		expect(lines.join("\n")).not.toContain("AI:");
+	});
 });
 
 // ──────────────────────── tui 分支 + G3 ────────────────────────

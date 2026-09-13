@@ -454,6 +454,30 @@ describe("G1: matchNonBashTool（非 bash 工具规则匹配，M5 pattern 对 pa
 	it("空 toolName → ask", () => {
 		expect(matchNonBashTool("", "/x", [])).toEqual({ action: "ask", matchedRule: undefined });
 	});
+
+	it("E7/T3：pattern 编译走 resolvePattern patternCache（matcher 与 pipeline 复用同一缓存）", async () => {
+		// E7（M10）后 matchNonBashTool 的 pattern 双语义分发改调 matcher.resolvePattern，
+		// 第二次调用应命中 patternCache（不再重新编译）。可观测信号：wildcardToRegExp
+		// 收到该 pattern 的编译次数恰为 1（改前的本地三元无缓存，会是 2）。
+		// tool 字段编译不走缓存（每次调用编译一次），与 pattern 计数解耦。
+		const wildcardModule = await import("../rules/wildcard.js");
+		const spy = vi.spyOn(wildcardModule, "wildcardToRegExp");
+		try {
+			const rule: Rule = {
+				id: "pc-1",
+				tool: "read",
+				pattern: "/tmp/e7-unique-cache/*",
+				action: "deny",
+				source: "user",
+			};
+			expect(matchNonBashTool("read", "/tmp/e7-unique-cache/a", [rule]).action).toBe("deny");
+			expect(matchNonBashTool("read", "/tmp/e7-unique-cache/b", [rule]).action).toBe("deny");
+			const patternCompiles = spy.mock.calls.filter((call) => call[0] === rule.pattern);
+			expect(patternCompiles).toHaveLength(1);
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });
 
 // ──────────────────────── runLayer2 ────────────────────────

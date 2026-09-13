@@ -18,7 +18,8 @@
  *  再查 isKnownSafeCommand(argv) 兜底返回 allow。白名单不再短路：用户 deny 规则
  *  可覆盖白名单。白名单不进 Rule[] 数组（Codex flag 子检查无法用单条 wildcard 表达）。
  *
- * 匹配语义：last-match-wins（rules 数组顺序遍历，最后匹配的 rule 胜出）。
+ * 匹配语义：last-match-wins（rules 数组顺序遍历，最后匹配的 rule 胜出），
+ * 循环单源在 lastMatchWins（E11，pipeline.matchNonBashTool 也消费）。
  * 拼接顺序由调用方（W5）负责：[...builtin-danger, ...userRules]。
  */
 
@@ -58,6 +59,28 @@ export function resolvePattern(rule: Rule): RegExp {
 	return re;
 }
 
+// ──────────────────────── lastMatchWins（循环单源，E11） ────────────────────────
+
+/**
+ * last-match-wins 循环单源（E11：原三份循环——matchRulesForArgv / matchRules /
+ * pipeline.matchNonBashTool——收敛）。
+ *
+ * 按 rules 数组顺序遍历，predicate 命中时记录 winner，最后匹配者胜出；
+ * 无匹配返回 `{ action: 'ask', matchedRule: undefined }`（G1 兜底）。
+ */
+export function lastMatchWins(
+	rules: readonly Rule[],
+	predicate: (rule: Rule) => boolean,
+): RuleMatchResult {
+	let winner: RuleMatchResult = { action: "ask", matchedRule: undefined };
+	for (const rule of rules) {
+		if (predicate(rule)) {
+			winner = { action: rule.action, matchedRule: rule };
+		}
+	}
+	return winner;
+}
+
 // ──────────────────────── matchRulesForArgv（happy path，W2 clean=true 有 argv[]）────────────────────────
 
 /** 命中 isKnownSafeCommand 时构造的虚拟 builtin-safe rule（保持 matchedRule 字段一致性）。 */
@@ -95,13 +118,7 @@ export function matchRulesForArgv(argv: string[], rules: readonly Rule[]): RuleM
 
 	const commandStr = argv.join(" ");
 
-	let winner: RuleMatchResult = { action: "ask", matchedRule: undefined };
-	for (const rule of rules) {
-		const re = resolvePattern(rule);
-		if (re.test(commandStr)) {
-			winner = { action: rule.action, matchedRule: rule };
-		}
-	}
+	const winner = lastMatchWins(rules, (rule) => resolvePattern(rule).test(commandStr));
 
 	// deny / allow 直接由 winner 决定（用户规则可覆盖白名单）
 	if (winner.action === "deny" || winner.action === "allow") {
@@ -128,33 +145,23 @@ export function matchRulesForArgv(argv: string[], rules: readonly Rule[]): RuleM
  *     管道拆分后单个 argv 不含 `|`，deny 规则的正则无法命中）。
  *
  * 行为：
- *  - toolName !== 'bash' → ask（W3 只管 bash，其他工具交下游）
  *  - command === undefined / 空字符串 → ask
  *  - 遍历 rules（last-match-wins），对每条用 resolvePattern(rule).test(command)
  *  - 无匹配 → ask（G1）
+ *
+ * E11：toolName 参数与 `toolName !== 'bash'` 守卫已删——生产调用点（pipeline.runLayer2）
+ * 恒在 bash 分支内调用，非 bash 由 matchNonBashTool 承接，守卫是不可达的投机分支。
  *
  * 不调 isKnownSafeCommand（不查白名单）：command 字符串无法可靠提取 argv
  * （含引号/转义/管道），argv 级白名单判断由 matchRulesForArgv 在 happy path 负责。
  * 因此本函数仅用于 deny 补充检查或退化路径，不用作 allow 放行依据。
  */
 export function matchRules(
-	toolName: string,
 	command: string | undefined,
 	rules: readonly Rule[],
 ): RuleMatchResult {
-	if (toolName !== "bash") {
-		return { action: "ask", matchedRule: undefined };
-	}
 	if (command === undefined || command === "") {
 		return { action: "ask", matchedRule: undefined };
 	}
-
-	let winner: RuleMatchResult = { action: "ask", matchedRule: undefined };
-	for (const rule of rules) {
-		const re = resolvePattern(rule);
-		if (re.test(command)) {
-			winner = { action: rule.action, matchedRule: rule };
-		}
-	}
-	return winner;
+	return lastMatchWins(rules, (rule) => resolvePattern(rule).test(command));
 }

@@ -154,6 +154,9 @@ graph LR
 | 06-u3 | promptSnippet 22→14 行（删 create-template 行 + Common mistakes 精简 + workflow 6 并 5） | 设计 D3 只说「压缩」未给终态文案 | 接受（裁量在授权范围内，教学核心保留） |
 | 06-u3 | TC8 用例删除（global 模板扫描隔离测试） | 其测试对象（global 源扫描）属 D3 删除面本身 | 接受（随删除面消亡） |
 | 06-u3 | fallback 探针用包内临时 vitest 文件（跑完即删）替代 /tmp node 直调 | tsx 直调被 pi 包 exports 解析挡住；vitest 同解析链效力不变 | 接受（方法学等价） |
+| 05-S2 | buildApprovalFieldSet/ApprovalFieldSet 保持模块私有不导出 | 设计 E6 未要求导出；S3 才是导出面收敛阶段；测试走行为级断言 | 接受 |
+| 05-S2 | makeUiAdapter 单一 cast 实现一次过三接口（T5 未触发降级） | ExtensionUIContext 参数类型覆盖三目标接口同型 | 接受（优于降级路径） |
+| 05-S2 | E11 顺带清扫 matcher/pipeline 过时注释 | 删除守卫/本地三元后的悬空表述，符号删除的注释同步义务 | 接受 |
 
 ## 6 状态表
 
@@ -177,7 +180,7 @@ graph LR
 | 04-U8 | pending | 0 | - |
 | 04-U9 | pending | 0 | - |
 | 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
-| 05-S2 | in-progress | 0 | - |
+| 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 |
 | 05-S3 | pending | 0 | - |
 | 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
 | 11-u1 | committed | 1 | 307/307 绿（+3 用例）+ typecheck/lint 双过 |
