@@ -14,6 +14,7 @@ import noUnsafeObjectEntries from './rules/no-unsafe-object-entries.mjs';
 import noHardcodedColors from './rules/no-hardcoded-colors.mjs';
 import noMagicSpacing from './rules/no-magic-spacing.mjs';
 import noNativeHtmlElements from './rules/no-native-html-elements.mjs';
+import noSwitchSizeOverride from './rules/no-switch-size-override.mjs';
 import noEmojiInTemplate from './rules/no-emoji-in-template.mjs';
 import preferVModel from './rules/prefer-v-model.mjs';
 import noMultiArgEmit from './rules/no-multi-arg-emit.mjs';
@@ -35,6 +36,10 @@ export const tastePlugin = {
     'no-hardcoded-colors': noHardcodedColors,
     'no-magic-spacing': noMagicSpacing,
     'no-native-html-elements': noNativeHtmlElements,
+    // Switch 几何护栏：禁止消费方 h-*/w-*/size-* 覆盖轨道尺寸（thumb 绝对 px 几何失配
+    // → 圆点溢出；trace toolbar 事故回归防线）。error 级 = 渲染缺陷阻断（同治理护栏逻辑），
+    // 规则 docstring 登记动态 ：class 盲区与 Checkbox 扩展位。
+    'no-switch-size-override': noSwitchSizeOverride,
     'no-emoji-in-template': noEmojiInTemplate,
     'prefer-v-model': preferVModel,
     'no-multi-arg-emit': noMultiArgEmit,
@@ -97,6 +102,7 @@ export const tasteRules = {
   'taste/no-silent-catch': 'warn',
   'taste/no-unsafe-object-entries': 'warn',
   'taste/no-native-html-elements': 'warn',
+  'taste/no-switch-size-override': 'error',
   'taste/no-emoji-in-template': 'warn',
   'taste/prefer-v-model': 'warn',
   'taste/no-multi-arg-emit': 'warn',
