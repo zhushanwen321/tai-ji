@@ -3,6 +3,7 @@ export default {
   // defer 重投熔断（session-dead 第三环）：可操作提示——说明卡死嫌疑 + 给逃生入口
   deferFlushStalled: 'pi 仍在处理，消息可能已卡住：自动重试已停止。可在侧栏右键强制退出该会话后重新发送',
   sendFailed: '消息发送失败：{msg}',
+  sendAutoRequeued: '消息暂被拒收，已自动重新排队重试',
   supplementSendFailed: '补充消息发送失败：{msg}',
   nextTurnSendFailed: '下轮消息发送失败：{msg}',
   stopFailed: '停止失败：{msg}',

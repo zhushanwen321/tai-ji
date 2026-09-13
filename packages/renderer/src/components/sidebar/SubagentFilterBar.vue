@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /**
- * SubagentFilterBar —— Agents tab 二级状态筛选槽（进行中 / 已结束 / 全部）。
+ * SubagentFilterBar —— Agents tab 二级筛选槽（全部活跃 / 只看正在跑 / 已收起）。
  *
- * 设计来源：docs/design/subagent-sidebar-filter.md §3.4（方案 A 迷你分段槽，T2）。
+ * 设计来源：docs/design/subagent-sidebar-filter.md §3.4（方案 A 迷你分段槽，T2）；
+ * 永久会话模型 §3.2.8 默认可见性翻转（U8b）：默认视图 = 全部活跃会话
+ * （running + idle），「已收起」视图承载归档寻回（场景 3）。
  *
- * 纯展示组件：三桶计数与选中值全部来自 props，点击只上抛 update:modelValue——
+ * 纯展示组件：三视图计数与选中值全部来自 props，点击只上抛 update:modelValue——
  * 分桶 / 过滤业务逻辑归调用方（SubagentList，经 subagent-bucket SSOT 模块派生），
  * 本组件不持有任何状态、不做任何 SubagentRecord 判定。
  *
@@ -19,9 +21,9 @@ import { cn } from '@/lib/utils'
 import type { SubagentFilterValue } from '@/lib/subagent-bucket'
 
 defineProps<{
-  /** 三桶计数（调用方经 subagent-bucket 的 countSubagents 派生传入） */
-  counts: { active: number; ended: number; all: number }
-  /** 当前选中桶（v-model） */
+  /** 三视图计数（调用方经 subagent-bucket 的 countSubagents 派生传入） */
+  counts: { active: number; running: number; archived: number }
+  /** 当前选中视图（v-model） */
   modelValue: SubagentFilterValue
 }>()
 
@@ -31,11 +33,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-/** 三桶元数据：id 驱动 testid / i18n key / 计数取值，顺序 = 渲染顺序 */
+/** 三视图元数据：id 驱动 testid / i18n key / 计数取值，顺序 = 渲染顺序 */
 const FILTER_ITEMS: ReadonlyArray<{ id: SubagentFilterValue }> = [
   { id: 'active' },
-  { id: 'ended' },
-  { id: 'all' },
+  { id: 'running' },
+  { id: 'archived' },
 ]
 </script>
 

@@ -153,22 +153,29 @@ export default {
     emptyHint: "Ask the main agent to call the {'@'}subagent tool to start a background task; running tasks appear here",
     cancel: 'Cancel',
     cancelConfirm: 'Confirm cancel?',
+    alreadyEnded: 'Task already ended',
     turnsUnit: 'turns',
     tokUnit: 'tok',
   },
-  // Agents tab secondary status filter (design docs/design/subagent-sidebar-filter.md §3.4; D2 label "Ended")
-  // [C7 word-choice note] "Active" here vs backgroundTaskList.filter.active "Running" is a deliberate
-  // distinction: this one is task-scoped (includes settling/waiting subagent tasks); that one is
+  // Agents tab secondary filter (design docs/design/subagent-sidebar-filter.md §3.4 + permanent
+  // session model §3.2.8 default-visibility flip, U8b: default view = all active sessions
+  // (running + idle, legacy terminal statuses shown read-only); the Archived view carries
+  // archive retrieval (scenario 3))
+  // [C7 word-choice note] "Running" here vs backgroundTaskList.filter.active "Running" is a deliberate
+  // distinction: this one is task-scoped (subagent sessions with a round in flight); that one is
   // process-scoped (background commands whose process state is running). A true conceptual
   // difference — do not unify the wording (adversarial-review-fixes §3.4 C7 ruling).
   subagentFilter: {
-    active: 'Active',
-    ended: 'Ended',
-    all: 'All',
-    emptyActive: 'No active background tasks',
-    emptyActiveHint: 'Nothing is running in this session',
+    active: 'All',
+    running: 'Running',
+    archived: 'Archived',
+    emptyActive: 'No sessions',
+    emptyActiveHint: 'Archived sessions can be found in the Archived view',
+    viewArchived: 'View archived ({count})',
     viewAll: 'View all ({count})',
-    emptyEnded: 'No ended background tasks',
+    emptyRunning: 'No running sessions',
+    emptyRunningHint: 'Idle sessions are ready to continue anytime',
+    emptyArchived: 'No archived sessions',
   },
   workflowDetail: {
     backToList: 'Back to workflow list',
@@ -197,8 +204,8 @@ export default {
   },
   // "Background commands" L2 view (background-task-sidebar-view D10). Term ruling (design §1):
   // distinct from subagent "background tasks"
-  // [C7 word-choice note] "Running" here vs subagentFilter.active "Active" is a deliberate
-  // distinction: process-scoped (process state running) vs task-scoped (settling/waiting included).
+  // [C7 word-choice note] "Running" here vs subagentFilter.running "Running" is a deliberate
+  // distinction: process-scoped (process state running) vs task-scoped (subagent sessions in flight).
   backgroundTaskList: {
     filter: {
       active: 'Running',

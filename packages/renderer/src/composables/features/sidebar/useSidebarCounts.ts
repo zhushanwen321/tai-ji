@@ -16,7 +16,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
-import { subagentBucket } from '@/lib/subagent-bucket'
+import { isRunningProjection } from '@/lib/subagent-bucket'
 
 export function useSidebarCounts(focusedSessionId: Ref<string | null>) {
   const sessionStore = useSessionStore()
@@ -60,15 +60,16 @@ export function useSidebarCounts(focusedSessionId: Ref<string | null>) {
       .value.filter((r) => r.origin !== 'workflow'),
   )
   const subagentCount = computed(() => subagentList.value.length)
-  // D8 口径收窄：badge 判据 =「进行中」桶 SSOT（subagentBucket === 'active'，D6 #5）——
-  // 与 SubagentList/FilterBar 的 active 计数恒同源（含 done 投影排除 + waiting 计入语义），
-  // 消除 badge 与列表计数口径漂移
+  // D8 口径收窄（U8b 两态化重述）：badge 判据 =「正在跑」占用谓词 SSOT
+  // （isRunningProjection，subagent-bucket D4）——与 SubagentList/FilterBar 的 running
+  // 计数恒同源（done 投影排除 + waiting 计入 + idle/legacy 终态不计入），消除 badge 与
+  // 列表计数口径漂移。默认列表可见性翻转后 idle 会话不再点亮 badge（badge = 真有活在跑）。
   // H2 W1（record-unification D1②）：workflow 脚本派发的 record（origin==='workflow'）
   // 不计入 subagent badge——workflow 进度由 workflow tab/run 视图承载，混入会虚亮
   // subagent 徽标。origin 缺省（undefined = tool 语义，存量 record）恒计入。
   const subagentRunningCount = computed(
     () =>
-      subagentList.value.filter((r) => r.origin !== 'workflow' && subagentBucket(r) === 'active')
+      subagentList.value.filter((r) => r.origin !== 'workflow' && isRunningProjection(r))
         .length,
   )
   const workflowCount = computed(() => workflowStore.recordsOf(focusedSessionId.value ?? '').value.length)

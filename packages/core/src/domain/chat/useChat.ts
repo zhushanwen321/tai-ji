@@ -353,6 +353,8 @@ function handleSendRejected(
     pendingDirectSends.delete(sid)
     // P3 全 reason 静默入队（D2 接管表）：toast 退役（三种拒绝统一 defer 语义——
     // occupancy 回 idle 自动投递 + pending 气泡可见），原文（未加标记）入队。
+    // [GUI 快修④] 完全静默会让用户以为「消息发出去了/丢了」——补一次性提示告知已自动
+    // 重试（自愈入队行为保留，不改 D2 接管语义；flush 失败另有 queueFlushFailed toast）。
     // [defer segments 化 / D-A1-1] 重入队带段：pending.text 是已序列化 promptText
     // （直发被拒的提交文本），包 [{type:'text',text}] 单段并同步写 submitText
     // （原文本即提交文本，①b 兜底匹配源与 flush 提交时写入的语义对齐）。
@@ -360,6 +362,7 @@ function handleSendRejected(
       // [session-dead 第三环] 新条目入队 = 新一轮用户意图：计数清零（否则上一轮达阈值后，
       // 后续正常发送的失败被历史计数直接吞掉 timer 重投）
       deferFlushFailureCounts.delete(sid)
+      deps.toast.warning(deps.t('composable.sendAutoRequeued'))
       deps.getCompactQueue().enqueue(sid, pending.text, [{ type: 'text', text: pending.text }], pending.text)
       // [簇 A1] 入队晚于 idle 帧（runtime handlePromptFailure 先广播 occupancy idle 再广播
       // send.rejected，WS FIFO）——idle 帧处理时队列尚空未 flush；其后 agent_settled 的同值

@@ -3,6 +3,7 @@ export default {
   // Defer-retry circuit breaker (session-dead part 3): actionable notice — stall suspicion + escape hatch
   deferFlushStalled: 'pi is still processing, the message may be stuck: auto-retry stopped. Right-click the session in the sidebar to force quit it, then send again',
   sendFailed: 'Failed to send message: {msg}',
+  sendAutoRequeued: 'Message was temporarily rejected; it has been automatically re-queued for retry',
   supplementSendFailed: 'Failed to send supplement: {msg}',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
   stopFailed: 'Failed to stop: {msg}',

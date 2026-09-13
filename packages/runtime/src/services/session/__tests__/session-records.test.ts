@@ -202,6 +202,30 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
+  it('轮终三字段（result/resumable/chatMode）任一翻转都触发 publish（GUI 快修① diff 基线）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e1')], leafId: 'e1' } })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(1)
+
+    // 三字段逐个翻转：去重层若缺比对会把「轮终等待续聊」的显示信号静默吞掉（不 publish）
+    for (const extra of [
+      { result: 'round output' },
+      { resumable: true },
+      { chatMode: false },
+    ] as Array<Record<string, unknown>>) {
+      client.getEntries.mockResolvedValue({
+        data: { entries: [subagentRecordEntry('sa-1', 'running', `e-${Object.keys(extra)[0]}`, extra)], leafId: 'e-x' },
+      })
+      records.invalidateRecordEntries('s1', 'subagent-record')
+      await flushDebounce()
+    }
+    expect(publish).toHaveBeenCalledTimes(4)
+  })
+
   it('增量路径：cursor 建立后失效走 getEntries(since)', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)

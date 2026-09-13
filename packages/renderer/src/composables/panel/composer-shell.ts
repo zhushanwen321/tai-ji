@@ -76,6 +76,12 @@ import { composerInjectionStore } from './composer-injection-store'
  * （getSegments/removeImageChip 等分散在模块内），此处合并为壳层组装用的完整面——
  * ui ComposerInput.vue 的 defineExpose 同时满足所有模块契约（结构类型），
  * Composer.vue 传入的模板 ref 实例可赋值给本接口。
+ *
+ * [tsc 前置修复] useCommandPopoverTrigger 原以 `InstanceType<typeof ComposerInput>` 消费
+ * 该面——vue-tsc 可解析 .vue defineExpose，但 renderer 的 plain tsc 经 env.d.ts 的
+ * `*.vue` shim 落到 `DefineComponent<object, object, unknown>`（无 expose 成员，19 处
+ * TS2349 never）。改为结构契约后 plain tsc 也能全量解析（签名为 dom-core composable
+ * 真源的同构镜像，U8b 前置清零）。扩 expose 面时本接口须同步（漏键 = 消费方 tsc 红）。
  */
 export interface ShellInputInstance {
   clear: () => void
@@ -85,9 +91,22 @@ export interface ShellInputInstance {
   setText: (text: string, caretPosition?: 'end' | 'start') => void
   insertTextAtCursor: (text: string) => void
   insertSlashChip: (command: string, icon?: string) => void
+  insertSkillChip: (name: string, location?: string, icon?: string) => void
+  insertMentionChip: (type: '@' | '#', name: string) => void
   insertFileChip: (path: string, lineRange?: [number, number]) => void
+  insertSessionChip: (sessionId: string, label: string) => void
+  insertSubagentChip: (subagentId: string, slug: string) => void
   insertImageBadge: (path: string, fileName: string, displayName: string, needsMigrate?: boolean) => void
   removeImageChip: (chipId: string) => void
+  clearSlashQueryText: () => void
+  clearHashQueryText: () => void
+  /** # query 段清除（session 语义，expose 别名 = clearHashQueryText） */
+  clearSessionQueryText: () => void
+  clearDollarFileQueryText: () => void
+  clearSubagentQueryText: () => void
+  clearSkillQueryText: () => void
+  saveSelection: () => void
+  restoreSelection: () => void
   moveCaretVertical: (dir: 'up' | 'down') => 'moved' | 'at-edge'
 }
 

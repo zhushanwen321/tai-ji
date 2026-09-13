@@ -21,7 +21,7 @@ import { toErrorMessage } from '@xyz-agent/core'
 
 export function useSidebarSubagentActions(focusedSessionId: Ref<string | null>) {
   const { t } = useI18n()
-  const { error: toastError } = useToast()
+  const { error: toastError, info: toastInfo } = useToast()
   const panelStore = usePanelStore()
   const subagentStore = useSubagentStore()
   const workflowStore = useWorkflowStore()
@@ -34,10 +34,16 @@ export function useSidebarSubagentActions(focusedSessionId: Ref<string | null>) 
     openSubagent({ virtualId: subagentVirtualId(mainSid, subagentId), enteredFrom: 'chat' })
   }
 
-  /** 取消 running subagent（调 RPC + 乐观更新，失败 toast） */
+  /** 取消 running subagent（调 RPC + 乐观更新，失败 toast）。
+   *  [GUI 快修③] 确认第二击时任务可能已收口（迟到 isStreaming=false 窗口）——此时不发
+   *  cancel RPC（会被 runtime 拒绝误报「取消失败」），toast「任务已结束」给出确定反馈。 */
   async function onCancelSubagent(subagentId: string): Promise<void> {
     const sid = focusedSessionId.value
     if (!sid) return
+    if (!subagentStore.isStreamingSubagent(sid, subagentId)) {
+      toastInfo(t('sidebar.subagentList.alreadyEnded'))
+      return
+    }
     try {
       await subagentStore.cancelSubagent(sid, subagentId)
     } catch (e) {

@@ -152,21 +152,27 @@ export default {
     emptyHint: "在对话中让主 agent 调用 {'@'}subagent 工具发起后台任务，运行中的任务会显示在这里",
     cancel: '取消',
     cancelConfirm: '确认取消？',
+    alreadyEnded: '任务已结束',
     turnsUnit: 'turns',
     tokUnit: 'tok',
   },
-  // Agents tab 二级状态筛选（设计 docs/design/subagent-sidebar-filter.md §3.4；D2 文案「已结束」）
-  // [C7 用词登记] 本处「进行中」与 backgroundTaskList.filter.active 的「运行中」刻意不统一：
-  // 前者任务域——含 settling/waiting 流转中的子代理任务；后者进程域——仅进程 running 状态的
+  // Agents tab 二级筛选（设计 docs/design/subagent-sidebar-filter.md §3.4 + 永久会话模型
+  // §3.2.8 默认可见性翻转 U8b：默认视图 = 全部活跃会话（running + idle，legacy 终态只读
+  // 兼容同显）；「已收起」视图承载归档寻回（场景 3））
+  // [C7 用词登记] 本处「正在跑」与 backgroundTaskList.filter.active 的「运行中」刻意不统一：
+  // 前者任务域——占用中（在飞轮）的子代理会话；后者进程域——仅进程 running 状态的
   // 后台命令。概念域不同属真差异，勿合并措辞（adversarial-review-fixes §3.4 C7 裁决）。
   subagentFilter: {
-    active: '进行中',
-    ended: '已结束',
-    all: '全部',
-    emptyActive: '没有进行中的后台任务',
-    emptyActiveHint: '当前会话没有正在运行的任务',
+    active: '全部',
+    running: '正在跑',
+    archived: '已收起',
+    emptyActive: '暂无会话',
+    emptyActiveHint: '已收起的会话可在「已收起」视图中寻回',
+    viewArchived: '查看已收起（{count}）',
     viewAll: '查看全部（{count}）',
-    emptyEnded: '没有已结束的任务',
+    emptyRunning: '没有正在跑的会话',
+    emptyRunningHint: '空闲会话随时可以继续对话',
+    emptyArchived: '没有已收起的会话',
   },
   workflowDetail: {
     backToList: '返回工作流列表',
@@ -195,8 +201,8 @@ export default {
   },
   // 「后台命令」L2 视图（background-task-sidebar-view D10）。术语裁决（设计 §1）：
   // 与 subagent 的「后台任务」区分，本视图一律用「后台命令」
-  // [C7 用词登记] 本处「运行中」与 subagentFilter.active 的「进行中」刻意不统一：
-  // 前者进程域——仅进程 running 状态；后者任务域——含 settling/waiting 流转。真差异保留。
+  // [C7 用词登记] 本处「运行中」与 subagentFilter.running 的「正在跑」刻意不统一：
+  // 前者进程域——仅进程 running 状态；后者任务域——占用中的子代理会话。真差异保留。
   backgroundTaskList: {
     filter: {
       active: '运行中',

@@ -988,6 +988,15 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
     await vi.advanceTimersByTimeAsync(0)
   }
 
+  /**
+   * 熔断提示计数过滤：[GUI 快修④] send.rejected 自愈入队起 toast warning
+   * （sendAutoRequeued，每次直发被拒恰一条）——与熔断提示 deferFlushStalled 分道断言，
+   * 防两条 warning 语义互相污染计数。
+   */
+  function stalledWarnings(f: Fixture): Array<[string]> {
+    return f.toast.warning.mock.calls.filter((c) => c[0] === 'composable.deferFlushStalled') as Array<[string]>
+  }
+
   it('A1-CIRCUIT: 连续 5 次 busy 拒绝 → 熔断 timer 重投（无 pending timer）+ 恰一次可操作提示', async () => {
     vi.useFakeTimers()
     const f = makeFixture()
@@ -1010,10 +1019,33 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
     // ② 用户可见提示恰一次：文案非空 + 走可操作指引 i18n key。
     //    真实文案（zh-CN「pi 仍在处理，消息可能已卡住…可在侧栏右键强制退出该会话后重新发送」/
     //    en-US 对应）在 renderer 侧 use-chat-compacted-flush.test.ts TC11c 用真实 i18n 断言（本fixture 的 t 直出 key）。
-    expect(f.toast.warning).toHaveBeenCalledTimes(1)
-    const copy = f.toast.warning.mock.calls[0]![0] as string
+    const stalled = stalledWarnings(f)
+    expect(stalled).toHaveLength(1)
+    const copy = stalled[0]![0]
     expect(copy).toBe('composable.deferFlushStalled')
     expect(copy.length).toBeGreaterThan(0)
+    f.dispose()
+  })
+
+  it('[GUI 快修④] send.rejected 自愈入队：一次性 toast warning 提示已自动重试（每次被拒直发恰一条）', async () => {
+    vi.useFakeTimers()
+    const f = makeFixture()
+    f.compactQueue.hasPending.mockReturnValue(true)
+    f.compactQueue.flush.mockResolvedValue(false)
+
+    const p = f.useChat.send('a1q', textToSegments('hi'))
+    f.emit('a1q', msg('a1q', 'send.rejected', { reason: 'busy', message: 'Agent 正在处理' }))
+    await p
+
+    // 自愈入队行为保留（既有产品行为）+ 恰一条 sendAutoRequeued 提示
+    expect(f.compactQueue.enqueue).toHaveBeenCalled()
+    expect(f.toast.warning).toHaveBeenCalledWith('composable.sendAutoRequeued')
+    const requeued = f.toast.warning.mock.calls.filter((c) => c[0] === 'composable.sendAutoRequeued')
+    expect(requeued).toHaveLength(1)
+
+    // 后续 timer 重投的拒绝不重复提示（flush 失败留队走熔断通道，无 sendAutoRequeued）
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(f.toast.warning.mock.calls.filter((c) => c[0] === 'composable.sendAutoRequeued')).toHaveLength(1)
     f.dispose()
   })
 
@@ -1026,13 +1058,13 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
       if (expected > 1) await vi.advanceTimersByTimeAsync(1000)
       expect(f.compactQueue.flush).toHaveBeenCalledTimes(expected)
       expect(vi.getTimerCount()).toBe(1) // 阈值-1 不得提前熔断
-      expect(f.toast.warning).not.toHaveBeenCalled() // 未达阈值不提示
+      expect(stalledWarnings(f)).toHaveLength(0) // 未达阈值不提示
     }
     // 第 5 次：熔断 + 提示一次
     await vi.advanceTimersByTimeAsync(1000)
     expect(f.compactQueue.flush).toHaveBeenCalledTimes(5)
     expect(vi.getTimerCount()).toBe(0)
-    expect(f.toast.warning).toHaveBeenCalledTimes(1)
+    expect(stalledWarnings(f)).toHaveLength(1)
     f.dispose()
   })
 
@@ -1058,7 +1090,7 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
       expect(f.compactQueue.flush).toHaveBeenCalledTimes(expected)
     }
     expect(vi.getTimerCount()).toBe(0) // 成功不 re-arm
-    expect(f.toast.warning).not.toHaveBeenCalled()
+    expect(stalledWarnings(f)).toHaveLength(0)
 
     // 新的失败序列从头累计：第 5 次失败 → 计 1 → arm（若成功后未清零，此处早已静音不再 arm）
     f.emit('a1cr', msg('a1cr', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
@@ -1072,7 +1104,7 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
       expect(f.compactQueue.flush).toHaveBeenCalledTimes(expected)
     }
     expect(vi.getTimerCount()).toBe(0)
-    expect(f.toast.warning).toHaveBeenCalledTimes(1)
+    expect(stalledWarnings(f)).toHaveLength(1)
     f.dispose()
   })
 
@@ -1090,7 +1122,7 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
     f.emit('a1cf', msg('a1cf', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
     await vi.advanceTimersByTimeAsync(0)
     expect(f.compactQueue.flush).toHaveBeenCalledTimes(6)
-    expect(f.toast.warning).toHaveBeenCalledTimes(1) // 不重复提示
+    expect(stalledWarnings(f)).toHaveLength(1) // 不重复提示
 
     // 投递成功已清零 → 再次失败重新从 1 累计（timer 通路自动恢复，无需人工干预）
     f.compactQueue.flush.mockResolvedValue(false)
@@ -1107,7 +1139,7 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
     await primeAccidentLoop('a1rs', f)
     for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(1000)
     expect(f.compactQueue.flush).toHaveBeenCalledTimes(5)
-    expect(f.toast.warning).toHaveBeenCalledTimes(1)
+    expect(stalledWarnings(f)).toHaveLength(1)
     expect(vi.getTimerCount()).toBe(0) // 已熔断
 
     // 用户重新发送：直发被拒 → 重入队（计数清零）→ 入队后投影已全 idle 立即 flush（第 6 次，失败 → 计 1）
@@ -1121,7 +1153,7 @@ describe('簇 A1：busy 拒绝入队后的 flush 触发与拒绝循环重投', (
     // 重投恢复可用：1s 后第 7 次（历史计数不永久误伤后续正常发送）
     await vi.advanceTimersByTimeAsync(1000)
     expect(f.compactQueue.flush).toHaveBeenCalledTimes(7)
-    expect(f.toast.warning).toHaveBeenCalledTimes(1) // 新序列未达阈值，不重复提示
+    expect(stalledWarnings(f)).toHaveLength(1) // 新序列未达阈值，不重复提示
     f.dispose()
   })
 })

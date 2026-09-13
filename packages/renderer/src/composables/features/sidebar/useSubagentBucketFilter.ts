@@ -1,11 +1,12 @@
 /**
- * useSubagentBucketFilter —— Agents tab 二级筛选（进行中 / 已结束 / 全部）的
- * per-session 状态分区 composable（设计 subagent-sidebar-filter D5，ADR-0049 合规）。
+ * useSubagentBucketFilter —— Agents tab 二级筛选（全部活跃 / 只看正在跑 / 已收起，
+ * U8b 可见性翻转后语义）的 per-session 状态分区 composable（设计 subagent-sidebar-filter
+ * D5 + 永久会话模型 §3.2.8，ADR-0049 合规）。
  *
  * 分区语义（D1/D5）：经 useSessionScopedState 工厂按 sessionId 分区——
- * - 新 session 首次进入 = 默认「进行中」（DEFAULT_SUBAGENT_FILTER）
+ * - 新 session 首次进入 = 默认视图「全部活跃」（DEFAULT_SUBAGENT_FILTER）
  * - 同一次宿主挂载期内切回旧 session 恢复该 session 上次选择
- * - 切 tab（宿主卸载）后分区全量丢弃，重置默认「进行中」
+ * - 切 tab（宿主卸载）后分区全量丢弃，重置默认视图
  *
  * [响应式契约] init 必须返回 reactive 容器（`reactive({ value: ... })`）——工厂文件头
  * 「响应式契约」明文（W2 useExtensionUI 同款踩坑先例）：update 内 mutate 分区对象，
@@ -26,7 +27,7 @@ import { DEFAULT_SUBAGENT_FILTER } from '@/lib/subagent-bucket'
 import type { SubagentFilterValue } from '@/lib/subagent-bucket'
 
 export function useSubagentBucketFilter(sessionId: Ref<string | null>): {
-  /** 当前 session 的筛选桶（新 session 初值 = 'active'） */
+  /** 当前 session 的筛选视图（新 session 初值 = 'active' 默认视图） */
   filter: ComputedRef<SubagentFilterValue>
   /** 切换当前 session 的筛选桶（null sid 时工厂内部 no-op，Overview 态不可改） */
   setFilter: (value: SubagentFilterValue) => void

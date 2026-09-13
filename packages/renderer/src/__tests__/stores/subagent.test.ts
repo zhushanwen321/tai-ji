@@ -403,7 +403,7 @@ describe('subagent store — fetchAndInject（drawer SubagentTab 数据加载入
 })
 
 describe('subagent store — cancelSubagent', () => {
-  it('调 subagentAction RPC + 乐观更新分区 status→cancelled', async () => {
+  it('调 subagentAction RPC + 乐观更新分区 status→idle + stopReason=interrupted（U8b 两态化，与宿主 settle 终态同形态）', async () => {
     vi.mocked(sessionApi.subagentAction).mockResolvedValue(undefined)
     const store = useSubagentStore()
     // 预置一条 running subagent
@@ -414,18 +414,23 @@ describe('subagent store — cancelSubagent', () => {
 
     // 调了 RPC
     expect(sessionApi.subagentAction).toHaveBeenCalledWith('session-1', 'cancel', { subagentId: 'bg-cancel-target' })
-    // 乐观更新：status 变 cancelled（不等 WS 推送）
-    expect(store.getRecordsBySession('session-1').find(r => r.subagentId === 'bg-cancel-target')?.status).toBe('cancelled')
+    // 乐观更新：翻 idle + 停因 interrupted（不等 WS 推送；不再写 legacy cancelled 终态）
+    const updated = store.getRecordsBySession('session-1').find(r => r.subagentId === 'bg-cancel-target')
+    expect(updated?.status).toBe('idle')
+    expect(updated?.stopReason).toBe('interrupted')
+    expect(updated?.endedAt).toBeTypeOf('number')
   })
 
-  it('RPC 失败 → 不改 status（乐观更新回滚）', async () => {
+  it('RPC 失败 → 回滚乐观更新（status/stopReason 均保持原值）', async () => {
     vi.mocked(sessionApi.subagentAction).mockRejectedValue(new Error('session not active'))
     const store = useSubagentStore()
     store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-fail', status: 'running' })])
 
     await expect(store.cancelSubagent('session-1', 'bg-fail')).rejects.toThrow('session not active')
-    // status 保持 running（回滚）
-    expect(store.getRecordsBySession('session-1').find(r => r.subagentId === 'bg-fail')?.status).toBe('running')
+    // status 保持 running，无停因写入（回滚）
+    const rolled = store.getRecordsBySession('session-1').find(r => r.subagentId === 'bg-fail')
+    expect(rolled?.status).toBe('running')
+    expect(rolled?.stopReason).toBeUndefined()
   })
 })
 

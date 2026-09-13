@@ -313,7 +313,9 @@ export const useSubagentStore = defineStore('subagent', () => {
 
   /**
    * 取消 running subagent（调 RPC + 乐观更新该 sid 分区）。
-   * 成功后立即将分区中对应项 status 改为 cancelled（不等 WS 推送，避免 UI 延迟）。
+   * 成功后立即将分区中对应项翻 idle + stopReason=interrupted（永久会话模型 §3.2.5
+   * cancel = abort 当前轮 → settle 为 idle，U8b 乐观更新与宿主终态同形态；不等 WS 推送
+   * 避免 UI 延迟——spinner 即刻消失、状态点落中性灰「已中断」）。
    * RPC 失败时不改 status（乐观更新回滚），error 向上抛由调用方 toast。
    */
   async function cancelSubagent(sessionId: string, subagentId: string): Promise<void> {
@@ -322,7 +324,9 @@ export const useSubagentStore = defineStore('subagent', () => {
     applyRecords(
       sessionId,
       prevRecords.map((s) =>
-        s.subagentId === subagentId ? { ...s, status: 'cancelled' as const } : s,
+        s.subagentId === subagentId
+          ? { ...s, status: 'idle' as const, stopReason: 'interrupted', endedAt: Date.now() }
+          : s,
       ),
     )
     try {

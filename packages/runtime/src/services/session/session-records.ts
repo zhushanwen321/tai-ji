@@ -553,6 +553,9 @@ export class SessionRecords {
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
  * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
  * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
+ * [U8b / GUI 快修①] result/resumable/chatMode 三字段补入：轮终迁移恰翻这三个字段
+ * （result 写入 / resumable 置位 / chatMode 显式化），缺比对会把「轮终等待续聊」的
+ * 显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
  */
 function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
@@ -570,6 +573,9 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && a.endedAt === b.endedAt
     && a.error === b.error
     && a.closedReason === b.closedReason
+    && a.result === b.result
+    && a.resumable === b.resumable
+    && a.chatMode === b.chatMode
     && a.intent === b.intent
     && a.stopReason === b.stopReason
     && a.origin === b.origin
