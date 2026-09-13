@@ -501,4 +501,39 @@ describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
     expect(record.transcriptRef).toEqual({ engine: "zcode", sessionId: "sess_cold_z", dbPath: "/absent.sqlite" });
   });
+
+  it("[A3/S3] 冷查重建水合引擎域：zcode 候选（engine + engineHandle）→ record.engine / record.engineHandle 在场（否则 resolveRoundEnginePort 按 engine ?? 'pi' 错投 pi 引擎）", () => {
+    const engineHandle = { sessionRef: { sessionId: "sess_cold_z", dbPath: "/absent.sqlite" }, poolKey: "shared" };
+    const deps: ColdLookupDeps = {
+      findLightById: vi.fn(() =>
+        makeFound({
+          status: "idle",
+          sessionFile: undefined,
+          engine: "zcode",
+          engineHandle,
+        }),
+      ),
+      collectRecords: vi.fn(() => []),
+      register: vi.fn(),
+      reportRecordTransition: vi.fn(),
+      markResurrected: vi.fn(),
+      getSessionRootId: vi.fn(() => "root-session"),
+      getBaselineRecordId: vi.fn(() => undefined),
+    };
+    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
+    // engine 域（identity）：消费方 resolveRoundEnginePort 分派依据，缺省即错投 pi
+    expect(record.engine).toBe("zcode");
+    // engineHandle 域（run 后回填的引擎定位符）：record → SubagentRecord 投影 / 锚派生
+    // 单源（transcriptAnchorOf 消费面），重建后须在场
+    expect(record.engineHandle).toBe(engineHandle);
+    // pi 候选缺省形态不破坏：engine/engineHandle 均 undefined 透传为 undefined
+    const piDeps: ColdLookupDeps = {
+      ...deps,
+      findLightById: vi.fn(() => makeFound({ sessionFile: path.join(zcodeDir, "anchor.jsonl") })),
+    };
+    fs.writeFileSync(path.join(zcodeDir, "anchor.jsonl"), "{}\n", "utf-8");
+    const piRecord = coldLookupForAction(piDeps, "sa-cold-1", true)!;
+    expect(piRecord.engine).toBeUndefined();
+    expect(piRecord.engineHandle).toBeUndefined();
+  });
 });

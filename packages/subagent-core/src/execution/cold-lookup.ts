@@ -242,9 +242,16 @@ function resurrectColdRecord(
     // chatMode=true」的升级语义迁 Continuation D4 revive 格 + D5 gate 双写点
     //（one-shot 跨重启重建 chatMode=false 后收到 message → gate 放行 → 升级置位再续聊）。
     chatMode: found.chatMode === true,
+    // [A3/S3 修复] 引擎域透传：跨重启重建不透传 engine 时 record.engine=undefined，
+    // resolveRoundEnginePort 按 record.engine ?? DEFAULT_ENGINE_ID 把 zcode record
+    // 错投 pi 引擎（engine_not_found）。engine 属 identity 域经 createRecord 重建；
+    // engineHandle 是可变回填域（run resolve 后回填的形态，不在 createRecord 签名），
+    // 与 sessionFile 同列水合。
+    engine: found.engine,
     controller: new AbortController(),
   });
   record.sessionFile = found.sessionFile;
+  record.engineHandle = found.engineHandle;
   record.round = found.round;
   // [U6 / §3.2.6] transcript 锚水合：SubagentRecord（entry engineHandle.sessionRef）
   // → ExecutionRecord.transcriptRef（zcode 锚经 transcriptAnchorOf 派生单点——与
