@@ -64,7 +64,7 @@ u1/u2 无依赖可并行（领地互斥）；本流水线串行窗口内按 u1�
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | committed | 1 | protocol 102/102 + handler 32/32 + send-queue 18/18 + e2e-probe A1-A9 PASS + extensions:typecheck 绿 |
+| u1 | committed | 1 | protocol 102/102 + handler 32/32 + send-queue 17/17（transport）+18/18（含 equivalence e2e 合计）+ handler 探针 A1-A6/A9 PASS（cw-acceptance-markers-reporter）+ extensions:typecheck 绿 |
 | u2 | committed | 1 | session-manager 38/38 + extensions:typecheck 绿；grep 双零 + 6 description + details:undefined×4 |
 
 ## 7 残留风险与变更历史
@@ -74,3 +74,5 @@ u1/u2 无依赖可并行（领地互斥）；本流水线串行窗口内按 u1�
 - 版本 bump（session-manager patch / extension-protocol patch）归 merge 阶段 changesets，不在单元领地。
 - 2026-09-14：计划创建（阶段 0 预检通过：待执行四节齐全；审查证据 = .tmp/tech-design/ext-simplify-15-r2-review.md PASS 0 must-fix + 原始 review.md 2 MF 已修复闭环）。
 - 2026-09-14（u2 补充）：B1 形态裁决 = 显式 `details: undefined` 键（省略形态经 pi 实装类型核实必 TS2739——registerTool 泛型自 execute 返回值推断 TDetails，缺键落 unknown 缺属性）；用例标题随断言删除同步去「details kind=ok」悬空描述。
+- 2026-09-14（阶段 3）：一致性审查收敛——unreasonable 0；reasonable 10（死面 5 行逐 hunk 核实全删/响应侧字段保留/wantParent+安全注释保留/单 commit 双端闭包等，均与登记偏差一致）；doc_errors 2（证据口径：send-queue 18 为两文件合计单文件实为 17；「A1-A9」实为 handler 探针 A1-A6/A9 共 7 项，A7/A8 从未定义——状态表已按可复现口径修正，6d73d3399 commit message 同款措辞为既成事实不改写，以本表为准）。Gate A 全绿：extensions:typecheck+lint+test（26 组 4028/4028）+ protocol 102 + runtime session-manager 系列 64/64；绕过扫描零命中（无 SKIP/test.skip/eslint-disable）。
+- 阶段 5 补强（审查 verifiability 提示）：V4 场景 ②「list 只含本 agent 子 session」需构造非本 agent 的对照 session（GUI 手动创建）方有证伪力——验收程序已含此步。
