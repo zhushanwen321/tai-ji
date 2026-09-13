@@ -63,11 +63,15 @@ interface ServiceInternals {
   sessionRootId: string | null;
 }
 
-/** 非 chatMode background record（one-shot 模式）。 */
+/** 非 chatMode background record（one-shot 模式）。sessionFile 必须落在测试自建
+ *  mkdtemp 目录且真实在盘——续聊链路 isAnchorResolvable 用 existsSync 判锚可用，
+ *  失效即降级 [Session reopened] 重开（不带 resume 锚），共用固定 /tmp 路径会因
+ *  宿主残留文件存在与否得出环境相关的两种行为（CI 干净 runner 实测复现）。 */
 function makeOneShotRecord(
   sessionRootId: string,
   status: "running" = "running",
   id = "sa-oneshot",
+  sessionFile: string,
 ): ExecutionRecord {
   const record = createRecord(id, {
     agent: "general-purpose",
@@ -84,7 +88,7 @@ function makeOneShotRecord(
   record.controller = new AbortController();
   // v4 B-1：one-shot 完成后 record 为 running（idle 折入 running）+ isResumable（无活进程）。
   // sessionFile 总设（[H1 U6] resume 锚点形态键——续聊轮统一经新 run + ctx.resume 续写）。
-  record.sessionFile = "/tmp/fake-session.jsonl";
+  record.sessionFile = sessionFile;
   record.round = 1;
   return record;
 }
@@ -98,11 +102,14 @@ describe("SP-5 one-shot upgrade（message → chatMode + resume 锚点续聊）"
   let service: SubagentService;
   let store: RecordStore;
   let sessionRootId: string;
+  let fakeSessionFile: string;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = makeTmpAgentDir();
+    fakeSessionFile = path.join(agentDir, "fake-session.jsonl");
+    fs.writeFileSync(fakeSessionFile, "");
     const modelService = new ModelConfigService({ agentDir });
     service = new SubagentService({ cwd: agentDir, modelService });
     service.initSession({ pi: makePi(), sessionId: "root-session" });
@@ -124,7 +131,7 @@ describe("SP-5 one-shot upgrade（message → chatMode + resume 锚点续聊）"
   // 场景：one-shot running record → message → chatMode 被置 true → Continuation
   // 派发新轮（[H1 U6] 每轮 = 新 run + resume 锚点，无 interact 热路径）
   it("TC-1: one-shot running record 收到 message → chatMode 升级为 true + Continuation 派发新轮", async () => {
-    const record = makeOneShotRecord(sessionRootId, "running");
+    const record = makeOneShotRecord(sessionRootId, "running", "sa-oneshot", fakeSessionFile);
     store.register(record);
 
     expect(record.chatMode).toBeFalsy();
@@ -147,7 +154,7 @@ describe("SP-5 one-shot upgrade（message → chatMode + resume 锚点续聊）"
   // 场景：one-shot running-resumable record → message → chatMode=true →
   // Continuation 派发新轮（[H1 U6] 新 run + resume 锚点）
   it("TC-2: one-shot running-resumable record 收到 message → chatMode 升级 + 新 run resume", async () => {
-    const record = makeOneShotRecord(sessionRootId);
+    const record = makeOneShotRecord(sessionRootId, "running", "sa-oneshot", fakeSessionFile);
     store.register(record);
 
     expect(record.chatMode).toBeFalsy();
@@ -168,7 +175,7 @@ describe("SP-5 one-shot upgrade（message → chatMode + resume 锚点续聊）"
   // TC-3: upgrade 后 record 可续聊（非终态）
   // 场景：验证升级后的 record 不会被 finalize 为终态，仍可接受后续 message
   it("TC-3: upgrade 后 record 可续聊（非终态，仍在内存）", async () => {
-    const record = makeOneShotRecord(sessionRootId);
+    const record = makeOneShotRecord(sessionRootId, "running", "sa-oneshot", fakeSessionFile);
     store.register(record);
 
     await messageHandler(service, { subagentId: record.id, text: "first resume" });

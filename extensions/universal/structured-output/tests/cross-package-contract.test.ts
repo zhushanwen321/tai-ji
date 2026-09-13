@@ -185,7 +185,10 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 		// 嵌套对象 required 存活：messageParam.subagentId/text 非 Optional → 嵌套 required
 		const messageParam = schema.properties.messageParam as SchemaView | undefined;
 		expect(messageParam?.required, "nested messageParam.required preserved").toEqual(["subagentId", "text"]);
-	});
+		// 30s：本用例承担 SW schema 叶子的首载 transform（动态 import TS 源 + 真实
+		// typebox/pi-ai 依赖链），CI 冷缓存下超 vitest 默认 5s 实测两连红（本地暖
+		// 缓存 510ms）；后续用例复用模块缓存不受影响。
+	}, 30_000);
 
 	it("真实 typebox 编译成功 + Check 行为正确（合法通过 / 非法 action 与缺 required 被拒）", async (ctx) => {
 		if (!mod) mod = await importSwSubagentSchema();
