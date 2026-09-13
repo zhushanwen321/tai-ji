@@ -81,11 +81,15 @@ export function createBashKillToolDefinition() {
 				}
 				// registry-only 活跃条目 = 他进程任务（本进程活跃任务必在单例表）——跨进程
 				// 不可 kill：处置权归发起进程；属主若已死，孤儿由 xyz-agent runtime 在
-				// session 销毁时或启动期兜底扫描时收殓（属主判定，u-bte-remove 下沉）
+				// session 销毁时或启动期兜底扫描时收殓（属主判定，u-bte-remove 下沉；
+				// 纯 CLI 独立安装无 runtime 收殓兜底，孤儿自然退出或手动杀——E11 已
+				// 接受边界，hint 按形态分流，不写死 runtime 承诺）
 				return killedFalse(
 					"cross-process running task owned by another pi process",
 					"the task is managed by the pi process that started it (bash_kill from that session); " +
-						"if that process is gone, the owning xyz-agent runtime will collect the orphan when its session ends or on app restart",
+						"if that process is gone, the orphan keeps running until it exits on its own; " +
+						"inside the xyz-agent runtime it is collected when the owner's session ends or on app restart; " +
+						"standalone pi: kill the process group manually (kill -- -<pgid>) if it lingers",
 				);
 			}
 			if (isTerminalState(fromStore.state)) {

@@ -74,15 +74,15 @@ export function installProcessExitGuard(): void {
  */
 export function reapBackgroundTasksNow(): void {
 	stopPoller();
-		for (const task of getActiveTasks()) {
-			try {
-				// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
-				killProcessTree(task.pid, (step, err) =>
-					logger.debug(step, {
-						detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
-					}),
-				);
-			} catch (err) {
+	for (const task of getActiveTasks()) {
+		try {
+			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
+			killProcessTree(task.pid, (step, err) =>
+				logger.debug(step, {
+					detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+				}),
+			);
+		} catch (err) {
 			// 单条 kill 失败不阻断其余条目收殓；进程将退出，残余由 runtime 收殓兜底
 			logger.warn("kill-tree failed during process-exit reap", {
 				detail: { taskId: task.taskId, pid: task.pid, err: err instanceof Error ? err.message : String(err) },
