@@ -121,7 +121,8 @@ graph TD
 | U5 | committed | 1 | 四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
 | U6 | committed-followup | 1 | 领地内全落地：resume 读→裁剪→前缀注入全链 + conversation:'cold'（gate === unsupported 判据零改接线）+ TTL 引擎侧 sweep（time_updated 判龄/24h 节流/活跃豁免）+ isAnchorResolvable zcode 分派 + e2e「resume 帧先于 create/无向旧会话 send」；zcode-cli 258 / subagent-core 3074 / 守卫双绿。3 blockers 分流：B-routing+B-firstround→U6b（run-orchestration 领地外，本表新增行）；B-restart→store 面归 U7 / manifest 契约面归 U8 |
 | U6b | committed | 1 | commit c19fb765c：B-routing（resolveRoundEnginePort 按 record.engine 分派 + 未注册引擎失败轮不崩宿主）+ B-firstround（非 pi chatMode 走 startFirstRound）+ onHandleReady 非 pi 会话轮覆写回填（pi 零行为变化）；新测试 5 passed + 全量 3079；deviations 4 条（pi 不挂回调/覆写 vs 补缺双语义注释互指/chat 轮不接 journal 分层/未注册引擎不对称拒绝点） |
-| U7 | pending | 0 | - |
+| U7 | committed | 1 | commit 0b28b0e39：binding 单基准（markSettled 锚分派 pi 腿/zcode 锚键腿 + merge-or-create）+ roundBaseTurnIndex 等价实现（binding.turns 水合，不复活死字段）+ 归零覆盖回归修复（hydrateReviveBaseline max-merge，GUI 快修⑤构造性解决）+ B-restart store 面（mergedRecords 1.7 entry 源 zcode 收窄）+ 锚键文件族（<dbPath>.<sessionId> 复用 alive/binding 函数）+ release 对称；vitest 3091 / 守卫双绿；deviations 7 条（D1 死字段不复活 / D2 entry 源收窄 zcode / D3 锚键 sidecar 孤儿与 pi 同族 / D7 占用探针位置不对称已注释声明） |
+| U8 | pending-split | 0 | 拆两段串行：U8a 契约与投影（shared 类型 + manifest 双写 + runtime diff/extractor + TUI/通知 + extensions 词表 + S8 兼容）→ U8b GUI 渲染面（renderer 三处判据 + 默认可见性 + 过滤器 + GUI 快修批次①③④②并入，⑤已被 U7 构造性解决） |
 | U8 | pending | 0 | - |
 | U9 | pending | 0 | - |
 
