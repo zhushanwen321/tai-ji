@@ -78,6 +78,49 @@ export function guiSetWidget(
 }
 
 /**
+ * [守卫单点化——本约束的说明全仓只写这一处，调用方不得再各自复写]
+ * 「isGuiCapable 外层判定不可省略，否则 TUI 误调 marker 乱码」：guiSetWidget 无
+ * isGui 守卫（仅查 ctx.ui?.setWidget 存在性），TUI 模式误调会把 marker 编码行推
+ * 给原生 widget 造成乱码。带双模内容的 widget 推送一律走 setWidgetDual，由本
+ * helper 内化模式分派——消费方（todo/goal 及后续带 widget 的 extension）不再
+ * 自持 isGui 判定与守卫注释。
+ */
+
+/** 双模 widget 内容：按值立即构造两侧（构造均为廉价纯函数，成本可忽略）。 */
+export interface DualWidgetContent {
+  /** RPC 模式经 marker 通道推送的 GUI 渲染结果（guiResult 产物）。 */
+  gui: GuiRenderResult
+  /** TUI/json/print 模式推送给 pi 原生渲染的文本行。 */
+  text: string[]
+}
+
+/**
+ * 双模 widget 推送（清屏/推送 × GUI/TUI 四分支的协议侧收敛，模式分派单点）：
+ *  - content 为 undefined → 清屏 ctx.ui.setWidget(key, undefined)，模式无关
+ *    （guiSetWidget 的清屏分支本就两臂同落 setWidget，判别是死分支）
+ *  - 有内容 → isGuiCapable(ctx) ? guiSetWidget(gui) : setWidget(text)——TUI 分支
+ *    推原生文本行，结构性不触达 marker（见上方守卫单点化说明）
+ * hasUI 守卫留在调用方（goal FR-6.6 语义，本 helper 不感知）。
+ */
+export function setWidgetDual(
+  ctx: GuiContext,
+  key: string,
+  content: DualWidgetContent | undefined
+): void {
+  if (!ctx.ui?.setWidget) return
+
+  if (content === undefined) {
+    ctx.ui.setWidget(key, undefined)
+    return
+  }
+  if (isGuiCapable(ctx)) {
+    guiSetWidget(ctx, key, content.gui)
+  } else {
+    ctx.ui.setWidget(key, content.text)
+  }
+}
+
+/**
  * 从 details 中提取 GuiRenderResult。前端统一用此函数读取 __gui__，
  * 集中校验版本号，避免散落的 as 断言。
  */

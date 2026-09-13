@@ -1,16 +1,18 @@
 # @xyz-agent/extension-protocol
 
-Extension GUI 渲染协议：类型 + helper 函数，零运行时依赖。pi extension 双模式（TUI/GUI）渲染的契约层。
+pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零运行时依赖。覆盖双模式（TUI/GUI）渲染、session-manager / background-task / pending-entries 协议与跨端共享的行为原语（进程处置 / registry 文件 IO / output tail）。
 
 ## 包结构
 
-- `core/` —— 通用协议层（所有 extension 共用：`GuiComponent` + 布局原语 + 传输编码）
+- `core/` —— 通用协议层（所有 extension 共用：`GuiComponent` + 布局原语 + 传输编码 + 双模 widget helper）
 - `extensions/` —— 有运行时定制逻辑的 extension（marker + helper）
   - `ask-user/` —— 富交互（select 通道 + marker）
   - `session-manager/` —— agent-managed session 嵌套 `{action, params}` 契约（select 通道 + marker）
   - `plugin-bridge/` —— plugin system bridge（插件工具/事件/拦截经 select 通道 + marker 桥接）
   - `subagent-engine/` —— 引擎可发现性（`engines.json` 状态文件 + 引擎配置视图）
+- `pending-entries` —— pending 事件流差集核心（register 去重 + unregister 抵消，纯算法）
 - `background-task` —— base-tool-enhance 后台任务 `registry.json` 文件契约
+- 子出口 `@xyz-agent/extension-protocol/background-task` —— 后台任务行为原语（进程处置 / registry 文件 IO / output tail，含 node 内建依赖，不进 index 桶出口）
 
 ## 设计原则
 
