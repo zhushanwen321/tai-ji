@@ -130,7 +130,7 @@ graph TD
 | U7 | committed | 1 | commit 0b28b0e39：binding 单基准（markSettled 锚分派 pi 腿/zcode 锚键腿 + merge-or-create）+ roundBaseTurnIndex 等价实现（binding.turns 水合，不复活死字段）+ 归零覆盖回归修复（hydrateReviveBaseline max-merge，GUI 快修⑤构造性解决）+ B-restart store 面（mergedRecords 1.7 entry 源 zcode 收窄）+ 锚键文件族（<dbPath>.<sessionId> 复用 alive/binding 函数）+ release 对称；vitest 3091 / 守卫双绿；deviations 7 条（D1 死字段不复活 / D2 entry 源收窄 zcode / D3 锚键 sidecar 孤儿与 pi 同族 / D7 占用探针位置不对称已注释声明） |
 | U8 | pending-split | 0 | 拆两段串行：U8a 契约与投影（shared 类型 + manifest 双写 + runtime diff/extractor + TUI/通知 + extensions 词表 + S8 兼容）→ U8b GUI 渲染面（renderer 三处判据 + 默认可见性 + 过滤器 + GUI 快修批次①③④②并入，⑤已被 U7 构造性解决） |
 | U8a | committed | 1 | **commit 归属注记：8 个 shared/runtime 文件被并行 docs commit 340ae8c1f 捎带（内容=终态零丢失，同 U2 期 56898e3cfa 先例，不 revert）；其余 11 文件由本流水线 commit 收编**。shared SubagentStatus 扩 idle（SUBAGENT_STATUS_ALL 同步）+ intent/stopReason 下行 + projectSubagentExecutionStatus 旧值映射 helper；manifest 双写映射（legacyManifestStatusFields intent 优先 + engine 域下行 + manifestStatusToExecution 回读优先）；runtime normalizeSubagentStatus idle 直投（原 closed 兜底修正）+ extractor intent/stopReason 投影 + diff 基线三域补入；TUI detail 面板 stopReason 展示（mapExternalState/通知词表 U5 已就位查漏零改）；S8 测试 11 例（permanent-session-legacy-compat）。shared tsc 0 + 401 / subagent-core tsc 0 + 3102 / runtime 5949 / extensions 三连绿（subagent-workflow 940）/ write-surface 绿；renderer tsc 19 错为 useCommandPopoverTrigger 存量（与 subagent 零引用，归 U8b 前置修复）。deviations 6 条见 §5 |
-| U9 | pending | 0 | - |
+| U9 | delivered | 1 | commit 由主流水线收口，本行先落证据：母设计 D5/D8 演进注记（头部横幅 + D5「双写派生 intent 优先 + binding 重建单基准」+ D8「settle 收条 / 编排性关闭=自动收起 / 重建单规则」）；constraints 三处——C-data-20 原语清单刷新（现役 markSettled/markReopened/markArchived/markIdleEvicted/markReactivated/markResurrected/tryEnterRunning + 轮次族，markFinalized/markCancelled 退役标注 workflow-origin D7 例外族）+ 新增 C-data-22（zcode 会话库 TTL 引擎侧 sweep：time_updated 判龄/24h 节流/活跃豁免/删除序 FK 纪律/fail-soft）+ C-proc-13 u7a 挂点注记（settleRoundSuccess/dispatchRoundGuarded/disposeAllRecords 尾推已接线）；render-constraints 幂等（117 条）+ select-constraints 114/117 绿；设计文档头部新增 §0 实施状态节（12 单元 commit 清单 + §5 偏差指针 + -32031 上游跟踪项）；explainer architecture.md 刷新（校准日期/execution 模块清单补 worktree-reconcile/conversation:cold/状态两态/收条 sidecar/acquireWriteLease/settle 双出口/armIdleTimer u7a 重挂/约束表 +C-data-20+C-data-22/主题文档 +永久会话模型）；reap-orphan-pi.ts 注释清扫 4 处（buildPiArgs→pi-rpc buildPiMainAgentArgs×2 + appendSkillAndExtensionArgs→appendSkillArgs/appendExtensionArgs×2，残留 6 闭账）；AGENTS.md grep 核实零旧词命中（markFinalized/markCancelled/closedReason/ClosedReason/resurrect 全零）无需改动；check-doc-symbol-drift 绿 |
 
 ## 7 残留风险与变更历史
 
@@ -140,10 +140,11 @@ graph TD
 3. zcode -32031 上游缺陷：U6 选型已绕开（历史注入），若上游修复可升级原地 resume（设计 K6）。
 4. 探针产物 .tmp/probe/*.mjs 不进 git（gitignore），U6 集成测试需自含协议驱动代码。
 5. relay-registry.ts killRelayChild 同型 pi 杀链（runtime/src/infra/relay/，领地外未动）：与 killPiProcess 非逐字等价（settleTimer 兜底/try-catch/once-on 差异），收敛需先行为对齐裁决——S7 grep 无双轨的唯一残留，阶段 3 一致性审查裁决归属单元。
-6. reap-orphan-pi.ts:21/204 注释引用旧名 buildPiArgs（现为 pi-rpc buildPiMainAgentArgs）——注释级漂移，U9 文档同步顺带清扫。
+6. ~~reap-orphan-pi.ts:21/204 注释引用旧名 buildPiArgs（现为 pi-rpc buildPiMainAgentArgs）~~ 已处理（U9 清扫，顺带同文件 176/195 的 appendSkillAndExtensionArgs 同类漂移一并修正——该名已随 U1 消亡，现名 pi-rpc appendSkillArgs/appendExtensionArgs）。
 
 **变更历史**：
 - 2026-09-13 计划创建（基线 c2c111170：merge dev-0.9.19 + u7a re-arm 之后）。
 - 2026-09-13 u-foundation committed；U1 速率限制中断半程，WIP checkpoint 8ab4461eb；U2 committed 0487bbab2（部分 src 被外部 docs 批次 56898e3cfa 捎带——并行会话活跃于本 worktree，后续单元验收后立即 commit 缩短在制暴露窗）。
 - 2026-09-13 U3 committed 42e3498b4；U4 committed；U5 committed（27 文件：cancel/close/编排性关闭/寻回四动作 + gate 三元组 + worktree 重建；vitest 3066 / extensions 三连绿；10 偏差入 §5）。
 - 2026-09-13 用户要求提速 → 双 agent 并发（U6 + U1 续作）；U1 第 2 轮续作 committed（12 文件：pi-subagent-cli 归并 + S7 双轨清扫；pi-rpc 75 / cli 304 / runtime 5946；relay-registry 残留入风险 5）。
+- 2026-09-13 U6b committed（c19fb765c）→ U7 committed（0b28b0e39）→ U2 遗留收口（5e30ec77e）→ U8a committed（0b1cd73f5，8 文件被 docs 批次 340ae8c1f 捎带）→ U8b committed（c47871d05）；U9 文档同步交付（母设计 D5/D8 注记 / constraints C-data-20 刷新 + C-data-22 新增 + C-proc-13 u7a 注记 / 设计文档 §0 实施状态节 / explainer 刷新 / reap-orphan-pi 注释清扫），流水线全单元落毕，残留 6 闭账。

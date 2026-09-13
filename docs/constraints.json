@@ -2109,7 +2109,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发对 unsupported 引擎同步拒照常、mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发对 unsupported 引擎同步拒照常、mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 归档点 markArchived 补发 + 轮次 settle 簿记（design/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2216,13 +2216,14 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 终态权威 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry）的写面全部归 RecordStore 意图原语（markFinalized/markCancelled/markBatchFinalized/markRoundStarted/markRoundIdle/adoptEngineDeath/markResurrected/markIdleArchived/register/appendEvent），store 外零直写。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。终态原语持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
+      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收口：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 腿 / zcode 锚键腿）/ markReopened（锚失效同 id 带历史重开）/ markArchived（收起归档）/ markIdleEvicted（30 天内存回收，原 markIdleArchived）/ markReactivated / markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
       ],
       "authority": [
-        "design/subagent-record-persistence-consolidation.md#33-关键决策"
+        "design/subagent-record-persistence-consolidation.md#33-关键决策",
+        "design/subagent-permanent-session-model.md"
       ],
       "dimensions": [
         "arch-boundary"
@@ -2481,6 +2482,28 @@
       ],
       "dimensions": [
         "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-data-22",
+      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写入面（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 必须与 pi transcript 同窗 30 天（ZCODE_SESSION_TTL_MS），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
+      "scope": [
+        "packages/zcode-subagent-cli/src/session-db-maintenance.ts",
+        "packages/zcode-subagent-cli/src/zcode-engine.ts",
+        "packages/zcode-subagent-cli/src/constants.ts"
+      ],
+      "authority": [
+        "design/subagent-permanent-session-model.md#326-zcode-transcript-锚ref-锚"
+      ],
+      "dimensions": [
+        "data-governance",
+        "error-handling"
       ],
       "enforcement": [
         {

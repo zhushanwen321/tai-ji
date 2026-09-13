@@ -8,6 +8,29 @@
 
 ---
 
+## 0. 实施状态（2026-09-13，dev-flow 全单元落毕）
+
+本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（40+ 条，含每条的裁决依据），本文不重复。约束面已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
+
+| 单元 | commit | 备注 |
+|---|---|---|
+| u-foundation 类型骨架 | `01d5c8060` | tsc 零错 + vitest 3000 passed |
+| U1 pi-rpc 公共包 | `fe0499107` | 第 1 轮速率限制 WIP `8ab4461eb`，第 2 轮续作完成；S7 前置 grep 无双轨（唯一残留 relay-registry killRelayChild，见 impl-plan §7 残留 5） |
+| U2 两态状态机 | `0487bbab2` | 部分在制文件被并行 docs 批次 `56898e3cfa` 捎带（不 revert）；遗留收口 `5e30ec77e`（statusGlyph 两态迁移） |
+| U3 .state 收条化 + 重建单规则 | `42e3498b4` | 旧 finalized/cancelled 读侧上行映射 |
+| U4 准入判据锚化 | `5fda1ef14` | 万物可续矩阵 22 例 |
+| U5 意愿动作 + 通知 gate 三元组 | `0563ca632` | cancel/close/编排性关闭/寻回四动作 + worktree 重建三形态 |
+| U6 zcode transcript 锚 + TTL sweep | `12f5e972c` | resume 读 + 新 session 注入 + conversation:cold + TTL 引擎侧 sweep |
+| U6b 宿主侧 zcode 续聊接线 | `c19fb765c` | B-routing/B-firstround 两 blocker 分流收口 |
+| U7 统计口径 binding 单基准 | `0b28b0e39` | zcode 锚键 sidecar 文件族 + 重启水合 |
+| U8a 投影契约与 manifest 双写 | `0b1cd73f5` | 8 个 shared/runtime 文件被并行 docs 批次 `340ae8c1f` 捎带（同 U2 期先例，不 revert） |
+| U8b GUI 投影 | `c47871d05` | idle 归进行中桶 + 默认可见性翻转 + 已收起过滤器 + GUI 快修批次 #1#3#4 |
+| U9 文档同步 | 本 commit | 母设计 D5/D8 注记 / constraints 三条 / explainer / AGENTS.md 术语 |
+
+**上游跟踪项（U6 遗留）**：zcode -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE`——resume 后原会话 send 被 restoreWarning 挂起卡死（provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除），本设计选型绕开（resume 读通道取历史 + `session/create` 新会话注入，§3.2.6 要点 3 / §3.5 P-1）；若 zcode 未来版本打通 restoreWarning 的协议层清除路径，可升级为原地 resume 续聊（机制不变，省 token）。探针存证：`.tmp/probe/zcode-resume-probe*.mjs`（gitignore，不进 git）。
+
+---
+
 ## 1. 背景目标
 
 ### 1.1 SCQA

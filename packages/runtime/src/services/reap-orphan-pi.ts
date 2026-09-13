@@ -18,8 +18,9 @@
  *   默认派生），v1 判据失去判别位。
  * - v2（现行）= 四条合取，缺一不可（实现见 matchesOwnPiArgv / findOrphanPiRows）：
  *   ① `--mode rpc`（防误杀用户手跑的交互式 pi）；
- *   ② argv 含 `--no-extensions`——主判别位：xyz spawn 恒带（rpc-client buildPiArgs
- *      首行），用户裸 pi 与 AGENTS.md 实测命令模板均不带，机器可判的硬分界；
+ *   ② argv 含 `--no-extensions`——主判别位：xyz spawn 恒带（pi-rpc
+ *      buildPiMainAgentArgs 首行，U1 收敛后 rpc-client 经公共包构造），用户裸 pi 与
+ *      AGENTS.md 实测命令模板均不带，机器可判的硬分界；
  *   ③ argv 中任一 `--extension`/`--skill` 值与 spawn 清单中某项精确相等。清单 =
  *      `<dataDir>/run/pi-spawn-markers.json`（写侧 spawn-markers.ts，每次 spawn 全量
  *      覆盖写，仅登记 xyz staged 专属路径；用户配置来源 ~/.pi/、项目 .pi/、~/.agents/
@@ -172,8 +173,8 @@ function consumeArgvChar(st: ArgvTokenizerState, ch: string): void {
 
 /**
  * 收集 flag 的全部值（`--flag value` 与 `--flag=value` 两形态，全 argv 扫描、顺序无关）。
- * spawn 的 argv 可重复传同一 flag（`--extension p1 --extension p2 …`，rpc-client
- * appendSkillAndExtensionArgs 逐路径 push），判据③「任一值 ∈ 清单」必须遍历全部出现。
+ * spawn 的 argv 可重复传同一 flag（`--extension p1 --extension p2 …`，pi-rpc
+ * appendSkillArgs / appendExtensionArgs 逐路径 push），判据③「任一值 ∈ 清单」必须遍历全部出现。
  */
 function collectFlagValues(tokens: string[], flag: string): string[] {
   const values: string[] = []
@@ -192,7 +193,7 @@ function flagValue(tokens: string[], flag: string): string | null {
   return collectFlagValues(tokens, flag)[0] ?? null
 }
 
-/** 参与清单匹配的两个值承载 flag（rpc-client appendSkillAndExtensionArgs 的注入段）。 */
+/** 参与清单匹配的两个值承载 flag（pi-rpc appendSkillArgs / appendExtensionArgs 的注入段）。 */
 const MARKER_FLAGS = ['--extension', '--skill'] as const
 
 /**
@@ -201,8 +202,9 @@ const MARKER_FLAGS = ['--extension', '--skill'] as const
  *
  * ① `--mode rpc`：必要条件——用户在终端手工跑的交互式 pi 不带它，没有这条会误杀
  *   用户自己的调试进程；
- * ② argv 含独立 token `--no-extensions`（主判别位）：xyz spawn 恒带（buildPiArgs 首行），
- *   用户裸 pi / AGENTS.md 实测命令模板不带。boolean flag 只判 token 存在性（精确整
+ * ② argv 含独立 token `--no-extensions`（主判别位）：xyz spawn 恒带（pi-rpc
+ *   buildPiMainAgentArgs 首行），用户裸 pi / AGENTS.md 实测命令模板不带。boolean
+ *   flag 只判 token 存在性（精确整
  *   token，`--no-extensions-x` 之类前缀延伸不算）；
  * ③ 任一 `--extension`/`--skill` 值与 markerPaths 中某项【精确相等】（=== 整串，禁
  *   子串/前缀：/a/b 不得匹配 /a/bc）。空清单恒 false（防御：调用方在清单缺失时已
