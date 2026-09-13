@@ -78,7 +78,7 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 | u0 | committed（探针通过零文件落地） | 1 | esbuild bundle:true inline 解析 exports 子路径实证：staged bte 产物 :202 命中探针常量；三处临时改动完整还原，git status 干净 |
 | u1 | committed | 1 | 30f21b95c；protocol 166/166（64 新用例）+ typecheck 绿 + dist 双探针（子出口 OK / index 零原语泄漏） |
 | u2 | committed | 1 | 3e153e188；bte 233/233 + extensions typecheck/lint 绿 + doc-symbol-drift 0 |
-| u3 | committed | 1+1 | 4f10c8b7d + ESM 修复 2da00e91f；runtime 73/73 + validate-runtime-bundle exit 0（含 tsx 链）|
+| u3 | committed | 1+1 | 4f10c8b7d + ESM 修复 2da00e91f；runtime background-task 定向面 73/73（含间接消费面合计 130，口径=直接 4 文件 vs 直连+间连）+ validate-runtime-bundle exit 0（含 tsx 链）|
 | u4 | committed | 1 | 795393b96；todo 137 + goal 402 全绿；isGuiCapable/setGuiWidget 零残留 |
 | u5 | committed | 1 | 092916edc；pending 32/32（与基线同数零测试改动）+ 依赖边登记 |
 
@@ -90,3 +90,5 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 - 2026-09-14：计划创建（阶段 0 预检通过；审查证据 = .tmp/tech-design/ext-simplify-13-r3-review.md PASS 0 must-fix + 原始 review.md 5 MF 与 r2 复审 1 MF 均已修复闭环）。
 - 2026-09-14（u3 blocker 发现与正解）：protocol 缺 "type": "module"——export * 聚合在 node tsx 源码链 CJS interop 下断 named exports（esbuild/tsup 链免疫，u0/u1 探针盲区）。u3 以 runtime 侧中介临时闭环 + 回派正解（protocol 补声明 + publishConfig 指针 .mjs→.js + 中介简化纯 named re-export，commit 2da00e91f）；三链验证 vitest 73/73 + validate-runtime-bundle exit 0 + esbuild/dist 探针全过。教训登记：子出口类改动验证面必须含 tsx 直跑链。
 - u2 偏差要点：契约常量走 index 出口、原语走子出口（曾误从子出口取常量致 vite 下 undefined、LRU 失效 19 红——已修正并登记）；kill-tree 消费点实为 5 处（poller/process-exit-guard 为任务清单外编译必要联动）。
+- 2026-09-14（阶段 3 聚合）：三分区审查（A=protocol+runtime / B=bte / C=todo+goal+pending）+ Gate A 全绿（extensions 三连 exit 0 / protocol 166 / runtime 全量 5940/5940 / bundle exit 0，落盘 .tmp/dev-flow/ext-simplify-13.gate-a.log）。reasonable 27 条（同构性/等价性/出口纪律全面确认）；unreasonable 5 条按领地分 3 批并行修——批次1 protocol 测试矩阵回port（A-U1 P2：Windows taskkill/pgrep 顺序/ps 错误注入/孙子组 kill 四段防护净损失 + B#2 同族）、批次2 bte（B#3 process-exit-guard 缩进 + B#1 E11 错误文案评估补做留痕）、批次3 pending（C#1 §5.4④ emit 措辞清扫 + C doc_errors 两处具象落点）；doc_errors 4 条主 agent 修——设计 V3 措辞（renamed→quarantined）、本表 u3 口径（本条）、C 两处随批次3。
+- 2026-09-14（阶段 4 修复落地）：三批次已提交（c59e67d8f / e5f6c85b7 / de52cac0a）。E11 评估结论：cross-process hint 失真成立已修正（事实陈述 + 条件式 runtime 收殓 + CLI 可操作指引；pid-reuse/start-time 段无误导不改）；TEST-STRATEGY.md:303 承接方声明随批次1 回port 后恢复为真（孙子组 kill/Windows/顺序矩阵已由 protocol 侧承接）。定向复审：三批领地互斥、无交叉结论可共谋，合并单 reviewer 分三节独立审（对「按组并行收口」的合并偏离，理由=三批合计 diff 小且零交集，登记备查）。
