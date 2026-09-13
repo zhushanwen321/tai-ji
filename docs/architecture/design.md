@@ -2,7 +2,7 @@
 
 > **性质**：2026-06 架构重构期的逐点决策记录。长期保留的是**跨进程边界的决策与理由**；已消费完毕的实施内容（现状距离评估、分阶段迁移路线、各进程内部细化设计）于 2026-09-13 删除，git 可追溯。
 >
-> **现行架构入口**：[`docs/ARCHITECTURE.md`](../architecture.md)（进程拓扑与分层实质说明）。各域 SSOT：renderer 包拓扑 [renderer-package-topology.md](renderer-package-topology.md) · runtime 分层 [runtime-layering.md](runtime-layering.md) · 数据治理 [data-source-governance.md](data-source-governance.md) / [data-source-registry.md](data-source-registry.md) · 术语表 [context.md](context.md)。
+> **现行架构入口**：[`docs/ARCHITECTURE.md`](../ARCHITECTURE.md)（进程拓扑与分层实质说明）。各域 SSOT：renderer 包拓扑 [renderer-package-topology.md](renderer-package-topology.md) · runtime 分层 [runtime-layering.md](runtime-layering.md) · 数据治理 [data-source-governance.md](data-source-governance.md) / [data-source-registry.md](data-source-registry.md) · 术语表 [context.md](context.md)。
 >
 > **状态标注**：✅ 生效（现行机制，落点可能已随重构迁移）· ⛔ 已被取代（保留作历史决策与理由）。
 

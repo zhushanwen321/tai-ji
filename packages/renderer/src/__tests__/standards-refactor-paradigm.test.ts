@@ -32,7 +32,7 @@ describe('docs/STANDARDS.md 重构范式章节（FR4 AC7）', () => {
 
   it('10.3 落地要求 3 条齐全', () => {
     const section = standards.split('### 10.3 落地要求')[1] ?? ''
-    // 3 条：写入 standards.md / 后续重构统一遵循 / review 检查信号
+    // 3 条：写入 STANDARDS.md / 后续重构统一遵循 / review 检查信号
     expect(section).toContain('范式写入 `docs/STANDARDS.md`')
     expect(section).toContain('统一遵循三段式')
     expect(section).toContain('review 检查新代码')

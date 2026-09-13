@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-28
-- 关联：[pi-boundary-reliability.md](../architecture/pi-boundary-reliability.md)（程序层设计全文 + 证据基线，本文的权威源）· [ADR-0063](0063-session-attachment-invariants.md)（session 附着不变量，pi 行为断言带锚点纪律的先例）· 切片 1 决策索引见权威源附录 D（派发域先行实例，原文档 2026-09-13 收编删除，git 可追溯）· [troubleshooting.md](../troubleshooting.md)「pi 行为观察项」（人读层，与机器登记 docs/pi-semantics.json 经 PS 编号互链）
+- 关联：[pi-boundary-reliability.md](../architecture/pi-boundary-reliability.md)（程序层设计全文 + 证据基线，本文的权威源）· [ADR-0063](0063-session-attachment-invariants.md)（session 附着不变量，pi 行为断言带锚点纪律的先例）· 切片 1 决策索引见权威源附录 D（派发域先行实例，原文档 2026-09-13 收编删除，git 可追溯）· [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)「pi 行为观察项」（人读层，与机器登记 docs/pi-semantics.json 经 PS 编号互链）
 
 ## 背景
 

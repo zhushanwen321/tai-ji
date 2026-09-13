@@ -104,7 +104,7 @@ landing 页 chip 区（`packages/renderer/src/components/new-task/Landing.vue` �
 
 ### 2.4 复发时间线（「总是出这类问题」的证据）
 
-基于全量挖掘（6281 条 commit 中 fix 类 2427 条占 39%、64 篇 ADR、92 条约束登记、troubleshooting.md 全文）：
+基于全量挖掘（6281 条 commit 中 fix 类 2427 条占 39%、64 篇 ADR、92 条约束登记、TROUBLESHOOTING.md 全文）：
 
 | 时间 | 事故 | 修法 |
 |---|---|---|

@@ -15,7 +15,7 @@
 ### SCQA
 
 - **S（情境）**：xyz-agent 深度依赖 pi 黑盒——[MANDATORY] 不改 pi 源码、不 fork、不提 PR；pi 持续升级（0.80.3→0.84.1 已踩过 clone 漂移连产 4 条 bug 的坑），pi 的远端模型目录缓存（models-store.json）周期刷新。项目已有成熟的约束治理设施（constraints.json 76 条登记 + pre-commit 21 项检查 + CI invariants 门禁 + pi 行为观察项登记）。
-- **C（冲突）**：2026-08-27 一天内两起同类事故：主 agent 派发后台 subagent，小写模型串被 pi pattern 引擎静默换成无权限模型 429 空转，完成通知十余次仅送达 1 次，终态一律显示 `gc` 无法判读；用户手动添加的 GLM 模型思考等级设「最高」后过一会自动变「关」。两起事故的排查都靠人海战术直读 dist 源码完成，而 thinking 档位钳制早在 2026-08-20 就已登记进 troubleshooting.md 观察项——**登记了照样出事**。
+- **C（冲突）**：2026-08-27 一天内两起同类事故：主 agent 派发后台 subagent，小写模型串被 pi pattern 引擎静默换成无权限模型 429 空转，完成通知十余次仅送达 1 次，终态一律显示 `gc` 无法判读；用户手动添加的 GLM 模型思考等级设「最高」后过一会自动变「关」。两起事故的排查都靠人海战术直读 dist 源码完成，而 thinking 档位钳制早在 2026-08-20 就已登记进 TROUBLESHOOTING.md 观察项——**登记了照样出事**。
 - **Q（问题）**：为什么同类问题会反复发生？什么样的终态架构能让「对 pi 语义的假设失效」在用户可见故障之前、在 CI/pre-commit 阶段就爆炸？
 - **A（答案）**：四支柱边界架构 + 防御体系：能力注册表（pi 能力事实单点进入域内）、生效回执（改状态 RPC 一律回真值）、确认式送达（异步结果一律账本化）、漂移守卫（pi 语义依赖机器登记 + 探针测试 + 版本变更门禁），配一套落到 pre-commit/CI/vitest 具体挂载点的硬校验护栏和治理文档更新。
 
@@ -38,7 +38,7 @@
 
 ### Scope
 
-- **In-scope**：`packages/runtime`（能力注册表、回执链路、rpc-client 补齐）；`packages/shared`（协议类型）；`packages/core` / `packages/ui` / `packages/renderer`（档位可用集消费方切换、表单）；`docs/` 治理资产（constraints.json、troubleshooting.md、extension-conventions.md、TEST-STRATEGY.md、ADR）；`.githooks/` + `scripts/` + `.github/workflows/ci.yml`（护栏挂载）；切片 1 两个包按切片 1 文档。
+- **In-scope**：`packages/runtime`（能力注册表、回执链路、rpc-client 补齐）；`packages/shared`（协议类型）；`packages/core` / `packages/ui` / `packages/renderer`（档位可用集消费方切换、表单）；`docs/` 治理资产（constraints.json、TROUBLESHOOTING.md、extension-conventions.md、TEST-STRATEGY.md、ADR）；`.githooks/` + `scripts/` + `.github/workflows/ci.yml`（护栏挂载）；切片 1 两个包按切片 1 文档。
 - **Out-of-scope**：pi 上游（MANDATORY 不改）；renderer 模型清单数据源重构（当前用户配置聚合保持，注册表只做能力标注与对账，不重做清单来源）；~~20+ 处既有轮询定时器的全面整改~~（2026-08-28 增补：已由 D9 处置完毕——12 处逐项处置见附录 C，其中 5 项当日落地、1 项随 U6 删除，不再列 Out-of-scope）；GUI 模型管理面之外的 pi 能力面（bash/compact 等）的注册表化。
 
 ---
@@ -105,7 +105,7 @@
 
 ### 2.4 根因：缺「pi 语义吸收层」，登记≠防御
 
-既有治理资产覆盖的是「知道」而不是「防御」：C-pi-02 规定「pi 语义断言权威源 = node_modules 实装版」但 enforcement 只有 review；troubleshooting.md「pi 行为观察项」以标准格式登记了 5 条 pi 私有语义风险（含 thinking 钳制），但没有任何机器检查在「假设失效」时报警。EventAdapter 被声明为「pi 协议唯一适配点」（C-comm-04），但它只适配传输格式；**语义适配（这个模型支持什么、这条消息是否真的会到达、这个状态是否真的生效）散布在扩展、core、renderer、runtime 多处，无登记、无守卫、pi 升级时无人知道哪些假设已过期**。两起事故的排查成本（人海直读 dist）正是这层空缺的价格。
+既有治理资产覆盖的是「知道」而不是「防御」：C-pi-02 规定「pi 语义断言权威源 = node_modules 实装版」但 enforcement 只有 review；TROUBLESHOOTING.md「pi 行为观察项」以标准格式登记了 5 条 pi 私有语义风险（含 thinking 钳制），但没有任何机器检查在「假设失效」时报警。EventAdapter 被声明为「pi 协议唯一适配点」（C-comm-04），但它只适配传输格式；**语义适配（这个模型支持什么、这条消息是否真的会到达、这个状态是否真的生效）散布在扩展、core、renderer、runtime 多处，无登记、无守卫、pi 升级时无人知道哪些假设已过期**。两起事故的排查成本（人海直读 dist）正是这层空缺的价格。
 
 ---
 
@@ -217,7 +217,7 @@ models-store 远端目录刷新引入大小写孪生条目
 **D6：漂移守卫体系——pi 语义依赖的机器登记 + 探针 + 版本门禁（选定）**
 
 - **采用**：三层——
-  1. **登记层**：新增 `docs/pi-semantics.json`（机器可读）。条目 schema：`{ id: "PS-xx", claim, piAnchor: [{pkg, distPath, symbol, note}], guard: {type:"probe", test:<路径>} | {type:"observe", note:<处置>}, verifiedWith: "0.84.1" }`。初始内容 = 附录 A（两起事故 + 既有观察项 5 条全部收录，probe/observe 分型）。人读层保留在 troubleshooting.md「pi 行为观察项」，二者经 id 互链（观察项正文引 PS 编号），不双写机制描述（json 是唯一机器源，md 是人读处置建议）。
+  1. **登记层**：新增 `docs/pi-semantics.json`（机器可读）。条目 schema：`{ id: "PS-xx", claim, piAnchor: [{pkg, distPath, symbol, note}], guard: {type:"probe", test:<路径>} | {type:"observe", note:<处置>}, verifiedWith: "0.84.1" }`。初始内容 = 附录 A（两起事故 + 既有观察项 5 条全部收录，probe/observe 分型）。人读层保留在 TROUBLESHOOTING.md「pi 行为观察项」，二者经 id 互链（观察项正文引 PS 编号），不双写机制描述（json 是唯一机器源，md 是人读处置建议）。
   2. **守卫层**：新增 `scripts/check-pi-semantics.mjs`（零依赖 node，✗ file:line 明细 + exit 0/1，同 check-extension-dependencies.mjs 范式）：① registry schema 合法；② 每条 guard.probe 指向的测试文件存在；③ **版本门禁（多包一致性，按审查修正）**——先校验四者全等：pi-coding-agent 实装版本 === pi-ai 实装版本 === pi-agent-core 实装版本 === `packages/runtime/package.json` 的 pi-ai pin（读 node_modules 各包 package.json + runtime package.json）；任一不等 → 失败，报错列出不一致项与恢复动作（「同步 bump 各 pin 后重装并重跑探针」）。四者一致但与条目 verifiedWith 不等 → 失败，报错列出待重验条目与重验命令（跑探针族，全绿后批量更新 verifiedWith）。verifiedWith 保持单值（pi-mono 三包同步发版），附录 A schema 不变。**防分裂的关键性**：pnpm 允许多版本共存且 frozen-lockfile 不报错——pi bump PR 漏改 runtime pin 时，离线计算与探针 import 旧版 pi-ai、pi 子进程已是新版，判据 1 会在守卫眼皮底下复活；单包门禁对此全程绿灯，故多包校验是必选项而非增强项。
   - **防线分层声明（防橡皮图章）**：verifiedWith 是提醒机制，探针族（CI 自动跑，与 verifiedWith 取值无关地红）才是机器防线——「顺手全改 verifiedWith 不跑探针」在探针覆盖到的语义上仍然红；剩余盲区 = probe 误分型（语义实际由非 dist 代码决定却被标成 probe，双防线同废），由 P-D1 分型评审与 review 纪律兜底。可选软门禁（本期内建）：check-pi-semantics 读 staged diff，`verifiedWith` 变更行数超阈值且无探针文件变更时输出 WARN（不阻断）。
   3. **探针层**：新增 `packages/runtime/src/infra/pi/__tests__/pi-semantics-*.test.ts` 探针族，仿 `pi-paths-config-dir-contract.test.ts` 范式（静态直读 pi dist 做行为契约断言，dist 不可达时 skip 不 fail，不进 REAL_PI_TESTS 池，CI 凭证无关可跑）。每个 probe 型条目对应一个断言文件。另把既有 `scripts/diff-probe-thinking.mjs` 接线自动化（见 D7-G3）。
@@ -264,7 +264,7 @@ AGENTS.md 文档索引涉及的资产，逐一定性「改/不改/怎么改」�
 - **采用**：以「信息变化是否有 push 通道？无 push 是结构性的还是偷懒？」为判定准则，对全部驻留周期定时器做处置（逐项清单与证据见附录 C）：①**自有状态对账类**（变化 100% 经我方请求/事件路径）禁止周期轮询，正确机制是回执 + 事件失效——thinkingLevel 30s 兜底轮询在 U6 回执接通后**删除**（非降频）；②**活性探测类**保留，但后续优先「升级式触发」（事件静默超时再探）替代无条件周期；③**协议规定 pull**（OAuth 设备码）保留，参数须合规（服务端 interval + slow_down +5s——已核实 device-code-flow.ts 合规，未改）；④**外部信息类**（更新检查）降频到与下游缓存同档（20min→60min，已落地）；⑤**有事件通道却用轮询**（handoff 2s 轮询 exited）事件化（已落地）；⑥**无消费者空转**（plugin-host 30s 刷 lastActiveAt）与**防假设性 bug 的写穿兜底**（sessionData/recent-workspaces 5s flushAll）删除（均已落地）。
 - **被否**：全部保留现状（「事件为主、轮询兜底」哲学）——对照调研证明它被滥用为「不信任主链路的代偿」：ZCode 无引擎探活/无 WS 心跳/无 /health 轮询，deepseek-harness runtime 核心仅 1 个 setInterval，两者靠「被动信号 + 有界预算 + 便宜重建」达到同等可靠性；❌ 一刀切全删——pingPi 覆盖的 pi 半死态（ADR-0047 实证）与 WS 心跳（WS 通道必需）是真实需求，pi 无 stream_idle_timeout 类自报能力。
 - **证据**：附录 C 对照表（含 ZCode/DSH/opencode 逐项 file:line 锚点）；pi 侧源码实证 `setThinkingLevel` 状态真变必发事件（agent-session.js:1280-1299，isChanging=false 仅在值未变时不发，不构成对账缺口）；fs.watch 缺陷复测（2026-08-28，Node v24.11.1 / macOS 25，已 watch 目录下 10 轮「新建子目录+写文件」21/21 事件到达，nodejs/node#52601 不再复现）；rpc-client onExit 已多播（rpc-client.ts:144 注释自述单槽历史）。
-- **效果**：驻留周期定时器从 12 处收敛到 4 处保留 + 2 处待改造（附录 C 全清单），每处都有「为什么 push 不可替代」的登记答案；新增定时器按 troubleshooting.md「周期轮询/兜底定时器的合法性判定」过闸。
+- **效果**：驻留周期定时器从 12 处收敛到 4 处保留 + 2 处待改造（附录 C 全清单），每处都有「为什么 push 不可替代」的登记答案；新增定时器按 TROUBLESHOOTING.md「周期轮询/兜底定时器的合法性判定」过闸。
 
 ### §4 验收
 
@@ -372,13 +372,13 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 - **C-pi-02（pi 语义断言权威源）**：本设计不改动其表述，给它补上机器执行面（D6 登记 + 探针 + 版本门禁）——从「review 时人工核对」升级为「版本不符即红」。
 - **C-data-03 / C-data-04**：能力注册表的 view-ready 下发与「事件只做失效不直写」完全同构，是既有数据治理原则在模型能力域的实例，不发明新模式。
 - **C-comm-04（EventAdapter 唯一适配点）**：本设计把它从「传输格式适配」扩到「语义适配」——能力注册表是语义面的唯一入口，两者并列登记（C-pi-12 authority 会互相引用）。
-- **troubleshooting.md 观察项**：人读层保留并加 PS 互链；机器层（pi-semantics.json）是唯一守卫源，两边机制描述不双写。
+- **TROUBLESHOOTING.md 观察项**：人读层保留并加 PS 互链；机器层（pi-semantics.json）是唯一守卫源，两边机制描述不双写。
 - **切片 1 文档**：D1-D6 技术决策不变；其中 D1（全等裁决）与 D4/D5（账本/ courier）分别是本设计支柱一/三的 subagent 域先行实例。
 - **已登记待办（不进本设计交付，防丢）**：scheduler 触发注入的账本化迁移（D5 存量口径：现状 `extensions/universal/scheduler/src/index.ts:97-99` 底层 deliverAs steer/followUp、无账本无幂等键；复用切片 1 U2 账本设施，迁移合入时 G4 扫描面同步扩到 scheduler 目录）；**subagent-workflow 内 workflow 完成通知的账本化迁移**（interface/helpers.ts notifyDone 存量 steer、结果语义，2026-08-28 审查补登记；复用 U2 账本设施，迁移合入时移除 g4-allow 豁免）；renderer subagent pane 消费 outcome 字段的 UI 升级（切片 1 已保证向后兼容输出；附带：packages/shared/src/subagent.ts 的「三处同构」注释已随 U3 失效，GUI 升级切片须同步更新）；pingPi 60s 升级式触发改造（事件静默超时再探，替代无条件周期，D9 ②）；Electron 30s /health 周期探测按需化（WS watchdog 触发探测 → 重启决策，D9 ②，对齐 ZCode/DSH「请求超时 + 便宜重建」范式）；重试路径普查补三件套（尝试预算上限 / 稳定窗清零 / 尊重 retry-after，D9 对照 DSH MCP 监督）。**已随 2026-08-28 落地**：plugin-host 30s 空转删除、handoff 2s 事件化、5s flushAll×2 删除、更新检查 20min→60min、skill watch polling 降级化（明细见附录 C）。**核查后无需改**：WS 断线重连已是有界指数退避（packages/core/src/transport/ws-client.ts:43-50，1s 起步 ×2 退避、30s 封顶、60s 总预算后进 failed 态），与 opencode 同档，从待办移除。
 
 ## 附录 C：轮询/定时器处置全清单（2026-08-28，D9 执行台账）
 
-12 处常规定时机制的逐项处置。判定准则（四类框架）的人读版在 [troubleshooting.md](../troubleshooting.md)「周期轮询/兜底定时器的合法性判定」；本表是处置事实与证据锚点的登记处。
+12 处常规定时机制的逐项处置。判定准则（四类框架）的人读版在 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)「周期轮询/兜底定时器的合法性判定」；本表是处置事实与证据锚点的登记处。
 
 ### C.1 结构性保留（活性探测 / 一次性握手，共 6 项）
 

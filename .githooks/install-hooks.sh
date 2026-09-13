@@ -262,7 +262,7 @@ fi
 # 2c. pi extensions manifest & convention 检查
 #    迁自 xyz-pi-extensions 仓库的 pre-commit，针对已迁移的 extensions/ 包：
 #      (1) 禁止废弃 namespace @mariozechner/pi-*（Pi SDK 已重命名为 @earendil-works/pi-*）
-#      (2) 禁止 extensions 代码用 console.log/info（会泄漏到 TUI，见 standards.md §10）
+#      (2) 禁止 extensions 代码用 console.log/info（会泄漏到 TUI，见 STANDARDS.md §10）
 #      (3) pi manifest + package.json 深度检查（保 pi.extensions/type/keyword/
 #          peerDependencies/包名/files 字段完整）
 #    仅在 staged extensions/ 文件变更时触发，与 2b 共用 SKIP_EXTENSION_LINT 跳过开关。
@@ -1578,7 +1578,7 @@ fi
 # ============================================================================
 
 LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/TROUBLESHOOTING.md scripts/check-layout-literals.mjs)
-if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/troubleshooting\.md$"; then
+if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/TROUBLESHOOTING\.md$"; then
     print_section "[数据布局字面量守卫]"
     if [ ! -f "scripts/check-layout-literals.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-layout-literals.mjs（C-pi-14 守卫交付物缺失）${NC}"

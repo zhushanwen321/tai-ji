@@ -151,7 +151,7 @@ pi 的消息 content 是数组；xyz-agent 侧 `Message.content` 为 `string | S
 
 ## 6. Electron 架构约定
 
-进程架构（进程拓扑、preload 边界、三层职责、目录结构）见 [architecture.md](./architecture.md)「进程架构」各节：渲染进程**禁直接使用 `ipcRenderer`**，经 preload 注入的 `window.electronAPI` 调主进程；前端与 runtime 通信走 WebSocket，不走 IPC。
+进程架构（进程拓扑、preload 边界、三层职责、目录结构）见 [ARCHITECTURE.md](./ARCHITECTURE.md)「进程架构」各节：渲染进程**禁直接使用 `ipcRenderer`**，经 preload 注入的 `window.electronAPI` 调主进程；前端与 runtime 通信走 WebSocket，不走 IPC。
 
 ---
 

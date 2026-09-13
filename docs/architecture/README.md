@@ -1,6 +1,6 @@
 # 架构文档目录规范
 
-本目录存放 xyz-agent 所有架构相关文档。入口是上一级的 [`../architecture.md`](../architecture.md)，本 README 只说明**组织规则**。
+本目录存放 xyz-agent 所有架构相关文档。入口是上一级的 [`../ARCHITECTURE.md`](../ARCHITECTURE.md)，本 README 只说明**组织规则**。
 
 ## 目录结构
 

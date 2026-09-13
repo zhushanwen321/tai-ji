@@ -150,7 +150,7 @@ describe('R4 文件范围', () => {
     const mds = files.filter((f) => f.endsWith('.md'))
     expect(
       mds.every(
-        (f) => f.endsWith('AGENTS.md') || f.endsWith('troubleshooting.md') || f.endsWith('data-source-registry.md'),
+        (f) => f.endsWith('AGENTS.md') || f.endsWith('TROUBLESHOOTING.md') || f.endsWith('data-source-registry.md'),
       ),
     ).toBe(true)
   })
