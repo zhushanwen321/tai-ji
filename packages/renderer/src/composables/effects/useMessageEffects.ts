@@ -185,13 +185,17 @@ function handleSessionError(sessionId: string, payload: { code?: string; message
 /**
  * 处理 message.complete 事件（session 生成完成）。
  * 算 focusedSid（当前面板聚焦的 session）→ 交给 handleCompletion 链
- * （aborted 过滤 → background work 守卫 → 后台判定 → 未读标记 → 提示音）。
+ * （aborted 过滤 → [retry-sound] willRetry 中间失败静音 → background work 守卫 → 后台判定 →
+ * 未读标记 → 提示音）。
  */
-function handleMessageComplete(sessionId: string, payload: { sessionId?: string; stopReason?: string }): void {
+function handleMessageComplete(
+  sessionId: string,
+  payload: { sessionId?: string; stopReason?: string; willRetry?: boolean },
+): void {
   const panelStore = usePanelStore()
   const focusedSid =
     panelStore.panels.find((p) => p.id === panelStore.activePanelId)?.sessionId ?? null
-  handleCompletion(sessionId, payload.stopReason ?? 'stop', focusedSid)
+  handleCompletion(sessionId, payload.stopReason ?? 'stop', focusedSid, payload.willRetry)
 }
 
 /** 处理 session.subagents 事件（subagent 终态推送兜底，非活跃 session 也生效）。 */

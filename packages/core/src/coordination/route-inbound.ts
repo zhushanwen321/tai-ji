@@ -113,7 +113,12 @@ export interface InboundEffects {
     sessionId: string,
     payload: { sessionId: string; attempts: number; willRetry: boolean; reason: string },
   ): void
-  onMessageComplete?(sessionId: string, payload: { sessionId?: string; stopReason?: string }): void
+  /**
+   * [retry-sound] willRetry=true 表示「本次 error 是 pi auto-retry 的中间失败，turn 未结束」
+   * （pi agent_end 恒发该字段，runtime event-adapter 透传）。renderer 完成提示音据此静音中间失败：
+   * 只有 willRetry=false/缺省 的终态才发声/标未读。语义先例：session.restoreFailed.willRetry。
+   */
+  onMessageComplete?(sessionId: string, payload: { sessionId?: string; stopReason?: string; willRetry?: boolean }): void
   onSubagents?(sessionId: string, subagents: SubagentRecord[]): void
   /**
    * [E-4] subagent entry 帧兜底消费（session.subagentEntriesAppended，relay tee 产出）。
@@ -319,8 +324,9 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   },
   'message.complete': {
     // message.complete 兜底：后台完成时提示音 + 未读标记（renderer 注册回调内实现）。
+    // payload 整体透传（含 [retry-sound] willRetry——中间失败静音判据，见 InboundEffects 注释）。
     sessionEffect(sid, payload, effects) {
-      effects.onMessageComplete?.(sid, payload as { sessionId?: string; stopReason?: string })
+      effects.onMessageComplete?.(sid, payload as { sessionId?: string; stopReason?: string; willRetry?: boolean })
     },
   },
   'session.subagents': {
