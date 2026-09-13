@@ -26,21 +26,21 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
   return { ...actual, killRecordChildWithEscalation: killChildSpy };
 });
 
-import { ConversationContinuation } from "../conversation-continuation.ts";
+import { ConversationContinuation } from "../assembly/conversation-continuation.ts";
 import type {
   ContinuationDispatchInput,
   ContinuationHost,
-} from "../conversation-continuation.ts";
-import type { RoundSettlementOutcome } from "../finalize-record.ts";
-import { createNotifier, type BgNotifyRecord } from "../notifier.ts";
-import { bindNotifyLedgerHost } from "../notify-ledger.ts";
+} from "../assembly/conversation-continuation.ts";
+import type { RoundSettlementOutcome } from "../persistence/finalize-record.ts";
+import { createNotifier, type BgNotifyRecord } from "../notify/notifier.ts";
+import { bindNotifyLedgerHost } from "../notify/notify-ledger.ts";
 import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import {
@@ -49,14 +49,14 @@ import {
   hasSettledWatchdog,
   _resetSettledWatchdogsForTest,
   _setMidRoundNoProgressWindowMsForTest,
-} from "../settled-watchdog.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
+} from "../lifecycle/settled-watchdog.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
 } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../types.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryData } from "../record-entry.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryData } from "../persistence/record-entry.ts";
 
 // [U4] 锚可解析性 fixture（模块级——makeRecord 缺省锚消费）：每个用例独立 tmp 文件。
 beforeEach(() => {

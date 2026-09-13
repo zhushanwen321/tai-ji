@@ -15,21 +15,21 @@
 // [F-3] cancel 收敛等待面已删（无生产装配点）；D3 core 侧收敛语义由引擎面
 // chat-session.cancel 等价承接，偏差登记见 chat-domain impl-plan §5。
 
-import { armIdleTimer, disarmIdleTimer } from "../../lifecycle-manager.ts";
+import { armIdleTimer, disarmIdleTimer } from "../../lifecycle/lifecycle-manager.ts";
 // u7a D5 在途记账迁移点（crash-forensics §3.3 D5）：idle timer arm/disarm 是「保活 ↔
 // 正在执行」翻转的全部迁移点（agent_settled arm / 新 turn disarm / 热路径 re-arm 均经
 // 本委托），迁移后推最新绝对计数给壳层监听者（同步 fire-and-forget，不进投递 await 面；
 // 环规避同 inflight-snapshot.ts 头注释——挂桥层而非 lifecycle-manager）。
 import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 import type { AgentResult as WorkflowAgentResult } from "../../../orchestration/models/types.ts";
-import type { StatusFilter } from "../../record-store.ts";
-import type { SubagentStream } from "../../stream-sink.ts";
+import type { StatusFilter } from "../../persistence/record-store.ts";
+import type { SubagentStream } from "../../assembly/stream-sink.ts";
 import type {
   AgentEvent,
   ExecuteOptions,
   ExecutionRecord,
   SubagentRecord,
-} from "../../types.ts";
+} from "../../assembly/types.ts";
 
 /**
  * HostBridge 的服务实现面（SubagentService 的结构子集，鸭子类型——与原 pi-engine 的

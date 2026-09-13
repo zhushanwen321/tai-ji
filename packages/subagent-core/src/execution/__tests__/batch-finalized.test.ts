@@ -25,11 +25,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { SyncCollectDomain } from "../service/sync-collect-domain.ts";
-import type { SubagentRecord } from "../types.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 const ROOT_SESSION = "root-batch-finalized";
 

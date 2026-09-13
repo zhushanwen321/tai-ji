@@ -36,9 +36,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RecordStore } from "../execution/record-store";
-import { INDEX_FILENAME, INDEX_VERSION, loadIndex, saveIndex } from "../execution/sessions-index";
-import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "../execution/sessions-index";
+import { RecordStore } from "../execution/persistence/record-store";
+import { INDEX_FILENAME, INDEX_VERSION, loadIndex, saveIndex } from "../execution/persistence/sessions-index";
+import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "../execution/persistence/sessions-index";
 
 /** chmod 000 零探测用例的环境守卫：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
  *  root 无视 000——两种环境下「零内容读取」断言静默退化为恒真（实现退化回读也不失败），

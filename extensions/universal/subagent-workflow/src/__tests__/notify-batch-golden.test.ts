@@ -23,7 +23,7 @@ import {
   createNotifier,
   type BgNotifyRecord,
   type NotifierHost,
-} from "@zhushanwen/subagent-core/execution/notifier.ts";
+} from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
 
 beforeEach(() => {

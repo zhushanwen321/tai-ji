@@ -28,7 +28,7 @@ import {
   createUiChannelRegistry,
   type ExtensionUiRequestLike,
   parseChannel,
-} from "../ui-channels.ts";
+} from "../ui/ui-channels.ts";
 
 // ── 测试 fixture 构造助手 ────────────────────────────────────
 // ExtensionUiRequestLike 是 parseChannel 入参的最小形状（method + 对应字段）。

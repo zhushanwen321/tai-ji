@@ -36,11 +36,11 @@
 
 import { getLogger } from "../../core/logger.ts";
 
-import { CollectCoordinator } from "../collect-coordinator.ts";
-import { DEFAULT_COLLECT_SYNC } from "../config.ts";
-import type { BatchBudgetParams, BgNotifyRecord } from "../notifier.ts";
-import { bufferedMemberFallbackRecord, syncRebuildToNotifyMember } from "../sync-rebuild.ts";
-import type { CollectSyncConfig, ExecutionRecord, SubagentRecord } from "../types.ts";
+import { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import { DEFAULT_COLLECT_SYNC } from "../assembly/config.ts";
+import type { BatchBudgetParams, BgNotifyRecord } from "../notify/notifier.ts";
+import { bufferedMemberFallbackRecord, syncRebuildToNotifyMember } from "../persistence/sync-rebuild.ts";
+import type { CollectSyncConfig, ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 

@@ -20,11 +20,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { RecordStore } from '@zhushanwen/subagent-core'
 // barrel 外符号按包名 .ts 深路径消费（vitest alias 重写，同 cross-package 先例）
-import { createRecord } from '@zhushanwen/subagent-core/execution/execution-record.ts'
+import { createRecord } from '@zhushanwen/subagent-core/execution/persistence/execution-record.ts'
 import {
   getSubagentRecordsDir,
   getSubagentSessionDir,
-} from '@zhushanwen/subagent-core/execution/path-encoding.ts'
+} from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 import { listRecordManifests, type RecordManifest } from '../discovery/subagents.js'
 

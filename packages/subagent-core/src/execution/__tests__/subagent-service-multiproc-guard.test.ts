@@ -24,7 +24,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 const { foreignLiveSpy } = vi.hoisted(() => ({
   foreignLiveSpy: vi.fn<() => { pid: number; id: string; startedAt: number } | undefined>(),
 }));
-vi.mock("../alive-store.ts", () => ({
+vi.mock("../persistence/alive-store.ts", () => ({
   writeAliveMarker: vi.fn(),
   removeAliveMarker: vi.fn(),
   readAliveMarker: vi.fn(() => undefined),
@@ -32,10 +32,10 @@ vi.mock("../alive-store.ts", () => ({
   findForeignLiveInstance: foreignLiveSpy,
 }));
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { ResurrectDeniedError } from "../types.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 import type { PiLike } from "../subagent-service.ts";
 
 function makeTmpAgentDir(): string {

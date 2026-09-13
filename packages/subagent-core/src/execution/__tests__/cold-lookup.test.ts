@@ -25,18 +25,18 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readAliveMarker, writeAliveMarker } from "../alive-store.ts";
+import { readAliveMarker, writeAliveMarker } from "../persistence/alive-store.ts";
 import {
   COLD_LOOKUP_SCAN_LIMIT,
   coldLookupForAction,
   isAnchorResolvable,
   transcriptAnchorOf,
   type ColdLookupDeps,
-} from "../cold-lookup.ts";
-import { RecordStore } from "../record-store.ts";
-import type { SubagentRecord } from "../types.ts";
-import type { ClosedReason } from "../types.ts";
-import { ResurrectDeniedError } from "../types.ts";
+} from "../assembly/cold-lookup.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
+import type { ClosedReason } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 
 /** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
  *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」

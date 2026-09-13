@@ -60,10 +60,10 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
-import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
-import type { CollectCoordinator } from "../collect-coordinator.ts";
-import type { ConcurrencyPool } from "../concurrency-pool.ts";
-import { project, tryTransition, updateFromEvent } from "../execution-record.ts";
+import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
+import type { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
+import { project, tryTransition, updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -76,21 +76,21 @@ import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts
 import type { AgentOutcome } from "../engine/types.ts";
 // [V2 决策 3] lifecycle-manager：[T4②] DEFAULT_IDLE_TIMEOUT_MS 是 assertIdleTimeoutMsSafe
 // 错误文案的缺省时长基准（[R4] 唯一消费主体随域迁入本聚合）。
-import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle-manager.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { AgentConfig, ModelInfo, ResolvedModel } from "../model-resolver.ts";
-import type { NotifyHost, PiLike } from "../notify-host.ts";
-import type { RecordStore } from "../record-store.ts";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle/lifecycle-manager.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
+import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
 import type { RoundSupervisor } from "../round-supervisor/index.ts";
-import { MAX_FORK_DEPTH } from "../session-context-resolver.ts";
-import type { StreamSink, SubagentStream } from "../stream-sink.ts";
-import { writeRecordBinding } from "../state-marker.ts";
+import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+import type { StreamSink, SubagentStream } from "../assembly/stream-sink.ts";
+import { writeRecordBinding } from "../persistence/state-marker.ts";
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import type { UiRequestObservability } from "../ui-request-observability.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
+import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
+import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,
   AgentResult,
@@ -100,8 +100,8 @@ import type {
   ExecutionHandle,
   ExecutionMode,
   ExecutionRecord,
-} from "../types.ts";
-import { DEFAULT_AGENT_NAME, ForkDepthExceededError } from "../types.ts";
+} from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME, ForkDepthExceededError } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 // [2026-09-13 design-code-sync] MS_PER_SECOND / SECONDS_PER_MINUTE 消费主体
 //（onOneShotSettledWatchdogTimeout）已迁 chat-rounds.ts，本聚合余 PRIORITY_BACKGROUND。

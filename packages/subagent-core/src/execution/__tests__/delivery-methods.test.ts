@@ -26,12 +26,12 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import * as lifecycle from "../lifecycle-manager.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
+import * as lifecycle from "../lifecycle/lifecycle-manager.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "delivery-test-"));
@@ -217,7 +217,7 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     await service.chatActions.deliverChatMessage(record, "msg");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../settled-watchdog.ts");
+    const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../lifecycle/settled-watchdog.ts");
     expect(hasSettledWatchdog(record.id)).toBe(true);
     expect(getSettledWatchdogPhase(record.id)).toBe("mid-round");
 

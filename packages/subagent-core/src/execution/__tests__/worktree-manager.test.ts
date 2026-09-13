@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DirtyWorktreeError } from "../types.ts";
+import { DirtyWorktreeError } from "../assembly/types.ts";
 
 // ── mock modules ──
 
@@ -30,7 +30,7 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
 }));
 
-vi.mock("../alive-store.ts", () => ({
+vi.mock("../persistence/alive-store.ts", () => ({
   isProcessAlive: vi.fn(),
 }));
 
@@ -60,7 +60,7 @@ const { mockLoad, mockAdd, mockUpdatePid, mockRemove, registryEntries } = vi.hoi
   };
 });
 
-vi.mock("../worktree-registry.ts", () => ({
+vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
     updatePid = mockUpdatePid;
@@ -76,9 +76,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { isProcessAlive } from "../alive-store.ts";
-import { encodeCwd } from "../path-encoding.ts";
-import { WorktreeManager } from "../worktree-manager.ts";
+import { isProcessAlive } from "../persistence/alive-store.ts";
+import { encodeCwd } from "../assembly/path-encoding.ts";
+import { WorktreeManager } from "../worktree/worktree-manager.ts";
 
 // 被测链路（gitRunAsync）调用四参形态（file, args, options, callback）；vi.mocked
 // 直接包 execFile 会推导到无 options 重载，显式绑定四参签名

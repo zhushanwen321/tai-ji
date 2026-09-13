@@ -32,9 +32,9 @@ vi.mock( "@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => l
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { _resetLifecycleState } from "@zhushanwen/subagent-core/execution/lifecycle-manager.ts";
+import { _resetLifecycleState } from "@zhushanwen/subagent-core/execution/lifecycle/lifecycle-manager.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
-import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/model-resolver.ts";
+import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/assembly/model-resolver.ts";
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import type { PiLike } from "@zhushanwen/subagent-core/execution/subagent-service.ts";

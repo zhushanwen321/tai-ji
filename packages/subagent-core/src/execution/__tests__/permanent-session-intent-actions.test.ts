@@ -41,7 +41,7 @@ vi.mock("node:fs", () => ({
   mkdirSync: vi.fn(),
 }));
 
-vi.mock("../alive-store.ts", () => ({
+vi.mock("../persistence/alive-store.ts", () => ({
   isProcessAlive: vi.fn(),
 }));
 
@@ -70,7 +70,7 @@ const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
   };
 });
 
-vi.mock("../worktree-registry.ts", () => ({
+vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
     updatePid = vi.fn();
@@ -84,8 +84,8 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { encodeCwd } from "../path-encoding.ts";
-import { WorktreeManager } from "../worktree-manager.ts";
+import { encodeCwd } from "../assembly/path-encoding.ts";
+import { WorktreeManager } from "../worktree/worktree-manager.ts";
 
 const mockExecFile = vi.mocked(
   execFile as unknown as (
@@ -257,9 +257,9 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
 
 import * as path from "node:path";
 import { RecordLifecycle, type RecordLifecycleDeps } from "../service/record-lifecycle.ts";
-import { createRecord } from "../execution-record.ts";
-import type { ExecutionRecord } from "../types.ts";
-import type { WorktreeManager as WorktreeManagerType } from "../worktree-manager.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
+import type { WorktreeManager as WorktreeManagerType } from "../worktree/worktree-manager.ts";
 
 function makeIntentRecord(id: string, overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   const r = createRecord(id, {
@@ -391,7 +391,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       },
       notifyWorktreeConflict: vi.fn(),
     };
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
     record.closeAfterRound = true; // close 优雅收口挂起
 
@@ -425,7 +425,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       reactivateRecord: vi.fn(),
       notifyWorktreeConflict: vi.fn(),
     };
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
 
     cont.onRunSettled({ content: "normal round", engineId: "pi" } as never);
@@ -444,7 +444,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 
 describe("[U5 / §3.2.2 事件表] archived + message → intent 翻回 active（store.markReactivated）", () => {
   it("markReactivated：archived → active（写面 + notifyChange）；非 archived 幂等 no-op", async () => {
-    const { RecordStore } = await import("../record-store.ts");
+    const { RecordStore } = await import("../persistence/record-store.ts");
     const store = new RecordStore("/tmp/u5-reactivate", undefined, {});
     const record = makeIntentRecord("sa-reactivate");
     store.register(record);
@@ -462,7 +462,7 @@ describe("[U5 / §3.2.2 事件表] archived + message → intent 翻回 active�
   });
 
   it("[S5] markArchived 清 worktreeHandle + 置 hadWorktree（重建守卫第三条判据承接）", async () => {
-    const { RecordStore } = await import("../record-store.ts");
+    const { RecordStore } = await import("../persistence/record-store.ts");
     const store = new RecordStore("/tmp/u5-markarch-hw", undefined, {});
     const handle = Object.freeze({ path: "/tmp/wt-ma", branch: "pi-sub-sa-ma-hw", baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-markarch-hw", { worktreeHandle: handle });
@@ -533,7 +533,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const handle = Object.freeze({ path: "/tmp/wt-rb", branch: `pi-sub-sa-wt-rb`, baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-wt-rb", { hadWorktree: true, worktreeHandle: undefined });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "rebuilt", handle }));
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
 
     cont.onMessage("continue after restart");
@@ -547,7 +547,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const handle = Object.freeze({ path: "/tmp/wt-cf", branch: `pi-sub-sa-wt-cf`, baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-wt-cf", { hadWorktree: true, patchFile: "/backup/sa-wt-cf.patch" });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "conflict", handle, patchFile: "/backup/sa-wt-cf.patch" }));
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
 
     cont.onMessage("continue after conflict");
@@ -566,7 +566,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
   it("degrade-reopen（形态①）：fresh session + 摘要注入（不推进世代——U4 偏差同族）", async () => {
     const record = makeIntentRecord("sa-wt-dr", { hadWorktree: true });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "degrade-reopen", reason: "branch gone" }));
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
     const epochBefore = record.epoch ?? 0;
     const roundBefore = record.round ?? 0;
@@ -588,7 +588,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const { host, calls } = makeTestRig(record, async () => {
       throw new Error("git worktree failed: disk full");
     });
-    const { ConversationContinuation } = await import("../conversation-continuation.ts");
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host as never);
 
     cont.onMessage("continue after io error");
@@ -609,8 +609,8 @@ describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 �
   it("轮次通知 key 按 epoch 分段（`id:round` / `id:epoch:round`）", async () => {
     // ledger 写账断言（生产装配形态——notifyId 在 notify 投影边界物化进账本 entry）
     const ledgerEntries: Array<{ customType: string; data: Record<string, unknown> }> = [];
-    const { createNotifier } = await import("../notifier.ts");
-    const { bindNotifyLedgerHost, _resetNotifyLedgerForTest } = await import("../notify-ledger.ts");
+    const { createNotifier } = await import("../notify/notifier.ts");
+    const { bindNotifyLedgerHost, _resetNotifyLedgerForTest } = await import("../notify/notify-ledger.ts");
     _resetNotifyLedgerForTest();
     bindNotifyLedgerHost({
       appendLedgerEntry: (customType, data) => {

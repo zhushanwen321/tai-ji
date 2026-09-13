@@ -74,7 +74,7 @@ function assistantMessageText(content: unknown): string {
 /**
  * 从 session entries 提取最终结果正文（与完成通知 record.result 同源，A4 逐字节一致的前置）。
  *
- * 同源语义（packages/subagent-core/src/execution/execution-record.ts getFullText，只读参考）：
+ * 同源语义（packages/subagent-core/src/execution/persistence/execution-record.ts getFullText，只读参考）：
  * record.result = AgentResult.text = getFullText(record) = 全部 assistant turn 文本
  * filter(非空，空白串按非空) join("\\n\\n")；pi 每 turn_end 对应一条 assistant message
  *（agent-session.js turn_end 携带 message），故文件侧重建 = 每条 assistant message 的

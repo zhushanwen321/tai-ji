@@ -46,28 +46,28 @@
 import { getLogger } from "../../core/logger.ts";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
-import type { CollectCoordinator } from "../collect-coordinator.ts";
-import type { ConcurrencyPool } from "../concurrency-pool.ts";
+import type { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import {
   ConversationContinuation,
   type ContinuationDispatchInput,
   type ContinuationRoundHandlers,
-} from "../conversation-continuation.ts";
-import { updateFromEvent } from "../execution-record.ts";
-import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../finalize-record.ts";
+} from "../assembly/conversation-continuation.ts";
+import { updateFromEvent } from "../persistence/execution-record.ts";
+import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import type { AgentOutcome } from "../engine/types.ts";
-import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { NotifyHost, PiLike } from "../notify-host.ts";
+import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 // [H1 U2] notify 门（notifier.ts）——轮末回注双闸消费（kickOffChatRound 尾部 +
 // onOneShotSettledWatchdogTimeout 失败通知过门）。
-import { notifyGateAllowsDelivery } from "../notifier.ts";
-import type { RecordStore } from "../record-store.ts";
+import { notifyGateAllowsDelivery } from "../notify/notifier.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态，边界守卫台账登记边）。
 import type { ResolvedIdentity } from "./record-access.ts";
@@ -77,16 +77,16 @@ import {
   disarmRoundFromProtocol,
   refreshFromProtocolEvent,
   type SettledWatchdogFireInfo,
-} from "../settled-watchdog.ts";
-import { createBackgroundStream, type StreamSink } from "../stream-sink.ts";
-import type { UiRequestObservability } from "../ui-request-observability.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
+} from "../lifecycle/settled-watchdog.ts";
+import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
+import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
+import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,
   AgentResult,
   ExecuteOptions,
   ExecutionRecord,
-} from "../types.ts";
+} from "../assembly/types.ts";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND, MS_PER_SECOND, SECONDS_PER_MINUTE } from "./service-constants.ts";

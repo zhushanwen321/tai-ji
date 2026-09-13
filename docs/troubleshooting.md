@@ -196,7 +196,7 @@ H1 后续聊要点：每轮续聊 = 独立 run（`RunParams.resume` 续写原 se
 
 > 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 守卫分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
 
-record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/record-store.ts`）。两级守卫：eslint `no-restricted-imports`（store 外禁 import 终态/.alive/sessions-index 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（类方法 / 字面量直写形态 grep 门兜底）。
+record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）。两级守卫：eslint `no-restricted-imports`（store 外禁 import 终态/.alive/sessions-index 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（类方法 / 字面量直写形态 grep 门兜底）。
 
 - 处置：改调 RecordStore 意图原语（`markFinalized` / `markCancelled` / `acquireWriteLease` / `markIdleArchived` / `rematerializeManifest` / `markBatchFinalized` / `reportRecordTransition`）；读函数不受限。复跑：`node scripts/check-record-write-surface.mjs`（应输出 store 外零命中）。
 - 误拦判定：新写面确属 store 外自有域时，在守卫脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即台账），禁止行内豁免绕过。

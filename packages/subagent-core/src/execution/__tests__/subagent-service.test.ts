@@ -20,16 +20,16 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { UiRequest, UiRequestHandler } from "../dialog-queue.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 

@@ -22,7 +22,7 @@ import {
   armIdleTimer,
   disarmIdleTimer,
   hasIdleTimer,
-} from "../lifecycle-manager.ts";
+} from "../lifecycle/lifecycle-manager.ts";
 
 describe("lifecycle-manager — V2 §5.2 模块 1", () => {
   beforeEach(() => {

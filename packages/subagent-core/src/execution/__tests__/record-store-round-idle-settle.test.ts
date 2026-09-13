@@ -23,10 +23,10 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import { readRecordBinding, zcodeAnchorBasePath } from "../state-marker.ts";
-import type { ExecutionRecord } from "../types.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { readRecordBinding, zcodeAnchorBasePath } from "../persistence/state-marker.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {

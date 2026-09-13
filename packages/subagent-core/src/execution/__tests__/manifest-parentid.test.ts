@@ -14,7 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ManifestStore, type ManifestRecord } from "../manifest-store.ts";
+import { ManifestStore, type ManifestRecord } from "../persistence/manifest-store.ts";
 
 /** 构造最小合法 ManifestRecord（5 必填），optional 字段按 overrides 传入。 */
 function makeBaseManifest(overrides: Partial<ManifestRecord> = {}): ManifestRecord {

@@ -12,12 +12,12 @@ import {
   SubagentService,
   type SubagentRecord,
 } from '@zhushanwen/subagent-core'
-import { ManifestStore } from '@zhushanwen/subagent-core/execution/manifest-store.ts'
-import type { ModelRegistryLike } from '@zhushanwen/subagent-core/execution/model-resolver.ts'
+import { ManifestStore } from '@zhushanwen/subagent-core/execution/persistence/manifest-store.ts'
+import type { ModelRegistryLike } from '@zhushanwen/subagent-core/execution/assembly/model-resolver.ts'
 import {
   getSubagentRecordsDir,
   getSubagentSessionDir,
-} from '@zhushanwen/subagent-core/execution/path-encoding.ts'
+} from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 /**
  * W4 跨包集成测试（subagent-sync-collect v2 impl-plan W4 验收条款①，设计 §5 W4：

@@ -22,14 +22,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { ModelInfo } from "../model-resolver.ts";
-import { SubagentStream } from "../stream-sink.ts";
+import type { ModelInfo } from "../assembly/model-resolver.ts";
+import { SubagentStream } from "../assembly/stream-sink.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import {
   SAR_UNATTACHED_PARENT_RUN_ID,
   SubprocessAgentRunner,
   type SubprocessAgentRunnerDeps,
-} from "../subprocess-agent-runner.ts";
+} from "../assembly/subprocess-agent-runner.ts";
 import { mergeRunSignals } from "../engine/common/run-signals.ts";
 
 function makeOpts(): AgentCallOpts {

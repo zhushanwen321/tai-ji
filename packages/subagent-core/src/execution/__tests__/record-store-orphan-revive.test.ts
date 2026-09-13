@@ -31,8 +31,8 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { RecordStore } from "../record-store.ts";
-import { writeAliveMarker } from "../alive-store.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { writeAliveMarker } from "../persistence/alive-store.ts";
 
 let tmpDir = "";
 

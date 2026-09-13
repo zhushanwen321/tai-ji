@@ -24,7 +24,7 @@
 //      customType 限定到「写」形态（读面失效回调/类型声明不拦）。
 //
 // 白名单逐域（D7 ③）：
-//   - store 内部：packages/subagent-core/src/execution/record-store.ts（唯一写入口本体）
+//   - store 内部：packages/subagent-core/src/execution/persistence/record-store.ts（唯一写入口本体）
 //   - 写面载体定义文件：state-marker.ts / alive-store.ts / sessions-index.ts /
 //     manifest-store.ts（函数/类方法定义处，非调用方）
 //   - 常量定义：record-entry.ts（SUBAGENT_RECORD_CUSTOM_TYPE）
@@ -58,19 +58,19 @@ const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSettledStat
 const RECORD_ENTRY_WRITE_RE = /\bappendEntry\b[^\n]*["'`]subagent-record["'`]|["'`]subagent-record["'`][^\n]*\bappendEntry\b/;
 
 /** store 内部（R1+R2 白名单）——唯一写入口本体，含全部合法调用与注释提及。 */
-const STORE_FILE = "packages/subagent-core/src/execution/record-store.ts";
+const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-store.ts";
 
 /** 写面载体定义文件（R1 白名单：定义处非调用方）。 */
 const WRITER_DEFINITION_FILES = new Set([
-  "packages/subagent-core/src/execution/state-marker.ts",
-  "packages/subagent-core/src/execution/alive-store.ts",
-  "packages/subagent-core/src/execution/sessions-index.ts",
-  "packages/subagent-core/src/execution/manifest-store.ts",
+  "packages/subagent-core/src/execution/persistence/state-marker.ts",
+  "packages/subagent-core/src/execution/persistence/alive-store.ts",
+  "packages/subagent-core/src/execution/persistence/sessions-index.ts",
+  "packages/subagent-core/src/execution/persistence/manifest-store.ts",
 ]);
 
 /** R2 白名单：subagent-record 常量定义（非写点）。 */
 const ENTRY_DEFINITION_FILES = new Set([
-  "packages/subagent-core/src/execution/record-entry.ts",
+  "packages/subagent-core/src/execution/persistence/record-entry.ts",
 ]);
 
 /** extension 自有域白名单（R1+R2；相对仓根路径）。当前零命中，新增须注明依据。 */

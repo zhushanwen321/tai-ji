@@ -13,7 +13,7 @@ import type {
   RecordSnapshot,
   SubagentRecord,
   SubagentToolDetails,
-} from "@zhushanwen/subagent-core/execution/types.ts";
+} from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
 // ── stub 工厂 ──
 

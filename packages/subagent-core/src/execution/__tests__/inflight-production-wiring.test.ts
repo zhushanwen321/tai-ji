@@ -39,12 +39,12 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService, type PiLike } from "../subagent-service.ts";
-import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle-manager.ts";
+import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import {
   registerSpawnedChildForRecord,
   _resetCoreSpawnedChildrenMirrorForTest,

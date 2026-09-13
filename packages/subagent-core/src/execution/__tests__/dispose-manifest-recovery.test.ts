@@ -30,16 +30,16 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
-import { RecordStore } from "../record-store.ts";
-import { getSubagentRecordsDir } from "../path-encoding.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { SubagentService, type PiLike } from "../subagent-service.ts";
-import { endedMessageGuard } from "../subagent-actions-core.ts";
+import { endedMessageGuard } from "../assembly/subagent-actions-core.ts";
 import { isBootReadoptable } from "../round-supervisor/domain.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
-import { isReconnectableFinalReason } from "../types.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import { isReconnectableFinalReason } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dispose-manifest-"));

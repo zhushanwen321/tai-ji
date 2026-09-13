@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // mock lifecycle-predicates：控制 isResumable 返回值。
 // recordToListItem 内部 import 的 isResumable 经 vitest 自动接线拿到此 mock 版本。
-vi.mock( "@zhushanwen/subagent-core/execution/lifecycle-predicates.ts", () => ({
+vi.mock( "@zhushanwen/subagent-core/execution/lifecycle/lifecycle-predicates.ts", () => ({
 	isResumable: vi.fn(),
 }));
 

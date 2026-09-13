@@ -31,9 +31,9 @@
 import { getLogger } from "../../core/logger.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
 
-import { bestEffort } from "../best-effort.ts";
-import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../cold-lookup.ts";
-import { createRecord, project, snapshot } from "../execution-record.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
+import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../assembly/cold-lookup.ts";
+import { createRecord, project, snapshot } from "../persistence/execution-record.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
@@ -43,10 +43,10 @@ import {
 } from "../engine/model-validation.ts";
 import type { EnginePort } from "../engine/port.ts";
 import { getEngine, listEngines } from "../engine/registry.ts";
-import type { ManifestStore } from "../manifest-store.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { AgentConfig, ResolvedModel } from "../model-resolver.ts";
-import type { RecordStore, StatusFilter } from "../record-store.ts";
+import type { ManifestStore } from "../persistence/manifest-store.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { AgentConfig, ResolvedModel } from "../assembly/model-resolver.ts";
+import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 // [R6/D-R3-2] 跨进程身份 env 名 ENV_SELF_RECORD_ID 归位常量叶子文件
 // service-constants.ts（原 SSOT 在 session-baselines.ts，R3 时的聚合间单向 import
 // 合法边随之消除）——聚合→支撑文件方向（import 常量），守卫允许。
@@ -60,7 +60,7 @@ import {
   type ExecutionRecord,
   type RecordSnapshot,
   type SubagentRecord,
-} from "../types.ts";
+} from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 

@@ -232,7 +232,7 @@ models-store 远端目录刷新引入大小写孪生条目
 | G1 | `check-pi-semantics.mjs`（D6 守卫层） | machine | pre-commit 总闸（install-hooks.sh heredoc，i18n 段后插入，**不设独立 SKIP_\*** 遵循 R1 后惯例）+ CI `invariants` job 等价一步 | 新增 scripts/ 脚本 + docs/pi-semantics.json；constraints.json 登记 C-proc-08 |
 | G2 | pi 语义探针测试族 `pi-semantics-*.test.ts` | machine | `packages/runtime` vitest 主池（不进 REAL_PI_TESTS）；CI `test-runtime` 自动覆盖（凭证无关） | 仿 pi-paths-config-dir-contract.test.ts；初始覆盖附录 A 全部 probe 条目 |
 | G3 | `diff-probe-thinking.mjs` 接线 | machine | pre-commit：staged 含 `thinking-levels.ts` / `use-provider-edit.ts` / `builtin-providers.json` / `model-capability.ts` 时触发；CI invariants 同步 | U6 删除 resolveAvailableLevels 后，探针比对对象改为「registry 计算路径 vs pi-ai 同源函数」（防 registry 自身漂移），脚本改目标不退役 |
-| G4 | subagent-workflow 通道禁则 | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时）：禁 `deliverAs:\s*["'](steer\|nextTurn)["']` 出现在 courier 模块白名单（U2 落地后 = `execution/notify-ledger.ts` 单文件）之外；禁 `"--model"` 字面量出现在 `shared/model-ref.ts` / `session-runner.ts` 白名单之外；测试文件中的模拟串按白名单注释豁免（实施细节） | 实现为新的 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；切片 1 U1/U2 合入后启用，避免过渡期红；扫描面扩到 scheduler 目录的时机绑定 D5 存量口径（scheduler 账本化迁移单元合入时同步扩面，见附录 B 待办） |
+| G4 | subagent-workflow 通道禁则 | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时）：禁 `deliverAs:\s*["'](steer\|nextTurn)["']` 出现在 courier 模块白名单（U2 落地后 = `execution/notify/notify-ledger.ts` 单文件）之外；禁 `"--model"` 字面量出现在 `shared/model-ref.ts` / `session-runner.ts` 白名单之外；测试文件中的模拟串按白名单注释豁免（实施细节） | 实现为新的 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；切片 1 U1/U2 合入后启用，避免过渡期红；扫描面扩到 scheduler 目录的时机绑定 D5 存量口径（scheduler 账本化迁移单元合入时同步扩面，见附录 B 待办） |
 | G5 | real-pi 对账用例 `thinking-level-effective-e2e.test.ts` | machine | REAL_PI_TESTS 池（须登记进 `packages/runtime/vitest.config.ts:22-34`，守卫测试强制）；开发机跑（凭证门控 REAL_PI_READY） | 真实 pi：reasoning:false 模型 set high → 断言回执=get_state=off；正常模型 → 回执=请求值。这是「config ≡ pi effective」的端到端保险丝 |
 | G6 | 改状态 RPC reply=void 拦截 | review | constraints.json 登记 C-pi-13，dimensions: type-safety（review-type-safety agent 消费）；protocol.ts 改状态区段加注释指约束 | 机器化（静态判定「改状态」语义）不可靠，诚实停在 review 级 |
 | G7 | constraints.json 四条新登记 | governance | C-pi-12（能力注册表单点，authority=本文 §3.3 D2 + 未来 ADR-0064）、C-pi-13（生效回执，authority=本文 D3）、C-ext-19（确认式送达，authority=本文 D5 + extension-conventions 新增节）、C-proc-08（漂移守卫，authority=本文 D6） | enforcement 的 machine hook 必须真实存在才可通过 render-constraints 校验——**登记与对应护栏同 commit 或护栏先行** |
@@ -422,7 +422,7 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 
 ## 附录 D：切片 1（subagent 派发域）技术方案决策索引（2026-09-13 收编）
 
-> 原独立设计文档 `subagent-dispatch-reliability.md`（D1-D6 / U1-U4 / S1-S5，四轮对抗审查收敛，已全部实施交付）收编为决策索引；全文与审查轨迹 git 可追溯。现行机制锚点：模型裁决 `packages/subagent-core/src/shared/model-ref.ts`、通知账本 `packages/subagent-core/src/execution/notify-ledger.ts`、投递内核 `packages/session-delivery/src/delivery.ts`。
+> 原独立设计文档 `subagent-dispatch-reliability.md`（D1-D6 / U1-U4 / S1-S5，四轮对抗审查收敛，已全部实施交付）收编为决策索引；全文与审查轨迹 git 可追溯。现行机制锚点：模型裁决 `packages/subagent-core/src/shared/model-ref.ts`、通知账本 `packages/subagent-core/src/execution/notify/notify-ledger.ts`、投递内核 `packages/session-delivery/src/delivery.ts`。
 
 | # | 决策 | 被否方案（要点） |
 |---|------|----------------|

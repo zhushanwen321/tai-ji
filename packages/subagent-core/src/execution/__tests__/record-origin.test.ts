@@ -32,16 +32,16 @@ vi.mock("../../core/logger.ts", () => ({
 const { saveIndexMock } = vi.hoisted(() => ({
   saveIndexMock: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../sessions-index.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../sessions-index.ts")>();
+vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/sessions-index.ts")>();
   return { ...actual, saveIndex: saveIndexMock };
 });
 
-import { createRecord } from "../execution-record.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../record-entry.ts";
-import type { SubagentRecordEntryData } from "../record-entry.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord } from "../types.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../persistence/record-entry.ts";
+import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（base 默认 running one-shot，over 覆盖任意字段）。 */
 function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {

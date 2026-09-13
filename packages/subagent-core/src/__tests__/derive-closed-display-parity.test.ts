@@ -1,7 +1,7 @@
 // derive-closed-display-parity — 成败推导单一权威守卫（core 侧）
 //
 // 同构成败推导收敛到 execution-record.ts 的 deriveOutcome/projectOutcome（单一权威）。
-// 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notifier.ts buildLlmContent）
+// 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notify/notifier.ts buildLlmContent）
 // 源码不得写回手写同构 switch。
 // [u1-move 拆分] 壳侧消费方（interface/bg-notify-render.ts renderRecordLines）的守卫段
 // 随壳件留守 pi extension 包：src/__tests__/derive-closed-display-parity-interface.test.ts。
@@ -12,13 +12,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { deriveOutcome, projectOutcome } from "../execution/execution-record.ts";
+import { deriveOutcome, projectOutcome } from "../execution/persistence/execution-record.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** core 侧消费方源码（同构成败推导已收敛删除）。 */
 const CONSUMER_SOURCES = {
-  notifier: join(here, "..", "execution", "notifier.ts"),
+  notifier: join(here, "..", "execution", "notify", "notifier.ts"),
 } as const;
 
 /**

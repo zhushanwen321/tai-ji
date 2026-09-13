@@ -167,7 +167,7 @@ describe("subagent tool runtime handler — 错误文案含纠正正例", () => 
       "..",
     );
     const actionsSrc = readFileSync(
-      join(coreRoot, "src/execution/subagent-actions-core.ts"),
+      join(coreRoot, "src/execution/assembly/subagent-actions-core.ts"),
       "utf-8",
     );
     // 四处 throw（input 缺失 / task 空白 / slug 空白 / slug 超长）都应含 Correct 正例。

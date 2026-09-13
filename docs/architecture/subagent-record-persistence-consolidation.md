@@ -2,7 +2,7 @@
 
 > **层声明**：技术方案层设计——当前层 = 存储模型与写入口契约，下一层 = 可实施的迁移 PR 单元（§5）。
 > **前置依赖**：H1（chat 域统一）→ H2（workflow record 归位）→ H3（service 拆分）依次落地后最后收口——前三者重塑 record 的形状与消费面，本设计在其稳定后统一持久化。
-> **基线**：含 L4 已实施形态（`execution/state-marker.ts`：`.finalized`/`.cancelled` 合并 `.state`，读侧兼容旧名，`.alive` 不并入——L4 设计时在途，以落地版为准）。
+> **基线**：含 L4 已实施形态（`execution/persistence/state-marker.ts`：`.finalized`/`.cancelled` 合并 `.state`，读侧兼容旧名，`.alive` 不并入——L4 设计时在途，以落地版为准）。
 > **行号快照声明（阶段 6 同步补）**：正文 file:line 为 v8 设计基线（72906ff7b）时点快照；H4 实施后行号已漂移，定位以标识符 grep 为准，行号仅作历史参照。
 > **演进注记（2026-09-13）**：本文 G1/G2 骨架（store 唯一写入口 + 权威分层 + 持久化面全同步）现行有效；「终态」域语义已被 [subagent-permanent-session-model.md](subagent-permanent-session-model.md)（永久会话模型，同日实施完毕）**部分取代**——closed 终态与 ClosedReason 资格角色删除、状态机两态化（`running | idle`）、原语清单演进（markFinalized/markCancelled 退役、markSettled 等新原语转正）、`.state` 降权为「上一轮收条」、重建收敛单规则、`.alive` release 出口迁移至 close 收起 / 内存回收两点。逐条落点见 §3.3 D5/D8 演进注记；偏差全表见实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` §5。
 >
@@ -23,7 +23,7 @@
 
 ### 1.2 系统是什么（受众认知铺垫）
 
-RecordStore（`execution/record-store.ts`，1466 行）已是 record 的统一容器：内存持有 running、终态从 session.jsonl 重建、两级读写（light 头 + 全量懒加载）。本设计不是新建模块，而是把它从「容器 + 部分写面」升级为「唯一写入口 + 权威分层」。H3 拆分后其 RecordLifecycle 聚合是消费侧，本设计落在 store 自身接口。
+RecordStore（`execution/persistence/record-store.ts`，1466 行）已是 record 的统一容器：内存持有 running、终态从 session.jsonl 重建、两级读写（light 头 + 全量懒加载）。本设计不是新建模块，而是把它从「容器 + 部分写面」升级为「唯一写入口 + 权威分层」。H3 拆分后其 RecordLifecycle 聚合是消费侧，本设计落在 store 自身接口。
 
 ### 1.3 设计目标
 
@@ -196,7 +196,7 @@ boot 期 4：store.revive / 孤儿恢复（recoverOrphanRecords）/ 对账 sweep
 | P4 | 缓存降级 + rebuildIndexes（触发/降级/量级三要素落地）+ manifest 词汇双写过渡（旧字段永久保留投影地位、新字段权威）+ 恢复路径归并（6→3 含 tmp 恢复退役 + extension boot 钩子触点）+ **`.alive` 读面收尾（D3b v7 矩阵）**：(a) 分支 3/refreshAlive 的 externalInstance 投影移除 + **(a′) fork-from 守卫 3 与 (a″) 孤儿恢复跳过换 findForeignLiveInstance 直接探针（防御保留换数据源）** + externalInstance 字段链删除（types.ts:856 + record-entry.ts:35）+ D3d 注释清理（cold-lookup.ts:51/:156 + alive-store.ts:5 模块头重写）+ boot 清孤儿（**pid 单判据：pid 死才可清**）+ **ALIVE_SOFT_TIMEOUT_MS 常量删除（随分支 3/refreshAlive 消费点 :1518/:1393 移除时一并删——影响面轮 3 SUGGESTION：P1 只重写探针判据不删常量，避免 P2/P3 双轨期编译断）**；(c)(d) 维持现状（collectAlivePids/session-file-gc 不动，选项 i 废止） | 降级与重建最后做（依赖前面权威就位） | S5（含 v7 文件级丢失形态）+ 恢复用例 + session-reader 视角 + **S8 双实例三通道（换下原反向场景）**。**revert = 本 PR + P3（词汇双写先行使缓存格式前向兼容）；缓存本身可丢可重建 = 天然回滚通道** |
 | P5 | 测试面切换（文件名断言 → 接口语义）+ grep 守卫（D7 v2 口径）+ **eslint `no-restricted-imports` 模块边界守卫（v8 补，外部审查：走偏永远经新增写者进入，grep 是文本级事后拦——store 外禁止 import state-marker/alive-store 写函数 + sessions-index saveIndex（manifest 面 = ManifestStore 实例方法，import 层结构性不可拦，归 grep 门 R1 兜底——实施偏差 1，阶段 6 同步订正），违规提前到编译/CI 期；与 barrel 停止导出配套）** + 文档/约束回写（C-proc-13 ②发射点/恢复路径描述、troubleshooting、state-marker 注释） | 守门与文档收尾 | S4 + S7 + doc-symbol-drift 绿。**revert = 守卫与文档，无落盘面** |
 
-**文件改动地图**：`execution/record-store.ts`（API 立面）/ `execution/state-marker.ts`（内部化：barrel 停止导出写函数）/ `execution/finalize-record.ts`（编排瘦身为意图调用）/ `execution/subagent-service.ts`（批写迁移）/ ~~`execution/notify-ledger.ts`（存在性判定改读权威）~~（**阶段 3 审查订正：零改动**——D4①②拆解后「改读权威」经 buildRecord `.state` 优先[L4 既有] + E1 维持 entry 尾[D4② 显式维持]达成，该文件无落点）/ `execution/manifest-store.ts` + `sessions-index.ts`（缓存标注 + rebuild） / 对应 `__tests__/`。
+**文件改动地图**：`execution/persistence/record-store.ts`（API 立面）/ `execution/persistence/state-marker.ts`（内部化：barrel 停止导出写函数）/ `execution/persistence/finalize-record.ts`（编排瘦身为意图调用）/ `execution/subagent-service.ts`（批写迁移）/ ~~`execution/notify/notify-ledger.ts`（存在性判定改读权威）~~（**阶段 3 审查订正：零改动**——D4①②拆解后「改读权威」经 buildRecord `.state` 优先[L4 既有] + E1 维持 entry 尾[D4② 显式维持]达成，该文件无落点）/ `execution/persistence/manifest-store.ts` + `sessions-index.ts`（缓存标注 + rebuild） / 对应 `__tests__/`。
 
 **待验证检查点**：① writeSync 实际时延（D2，P5 实测）；② manifest 被 GUI/runtime 直读的快速路径依赖面（哪些消费方绕 store 读 manifest——迁缓存前逐一核实）；③ pi 主 session 文件 entry 的 flush 窗口实测分布（论证「过程记录可丢」的实际丢失率）。（v6 删⑧——worktree 路径映射机制随 D3 选项 i 废止失去对象）
 

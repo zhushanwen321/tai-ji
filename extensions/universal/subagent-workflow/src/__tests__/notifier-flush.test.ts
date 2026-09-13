@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDelivery } from "@xyz-agent/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { createNotifier, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notifier.ts";
+import { createNotifier, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 
 // 投递内核经通知域窄端口注入（notifier 不再直接 import session-delivery）——
 // 本文件全部用例依赖真实内核语义（isIdle gate 退避 / 60s 合批 / dedup LRU /

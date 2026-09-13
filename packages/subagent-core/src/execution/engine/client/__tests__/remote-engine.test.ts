@@ -18,8 +18,8 @@ import {
   RemoteEngine,
   type RemoteEngineManifestSnapshot,
 } from "../remote-engine.ts";
-import { SubagentStream } from "../../../stream-sink.ts";
-import { getSubagentSessionDir } from "../../../path-encoding.ts";
+import { SubagentStream } from "../../../assembly/stream-sink.ts";
+import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 

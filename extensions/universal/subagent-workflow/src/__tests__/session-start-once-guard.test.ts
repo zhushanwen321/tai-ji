@@ -90,7 +90,7 @@ vi.mock("@zhushanwen/subagent-core/execution/engine/engine-discovery.ts", () => 
 }));
 
 // ⑩ worktree reaper
-vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () => ({
   WorktreeManager: class {
     constructor(_agentDir: string) {
       /* mock */
@@ -104,12 +104,12 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
 }));
 
 // ⑧ session 文件 GC
-vi.mock("@zhushanwen/subagent-core/execution/session-file-gc.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
   maybeCleanupExpiredSessionFiles: mockMaybeCleanup,
 }));
 
 // ④ 通知账本 bind（index.ts 另消费 getBoundNotifyLedger —— session_compact handler）
-vi.mock("@zhushanwen/subagent-core/execution/notify-ledger.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts", () => ({
   bindNotifyLedgerHost: mockBindNotifyLedgerHost,
   getBoundNotifyLedger: () => null,
 }));
@@ -144,7 +144,7 @@ vi.mock(
   },
 );
 
-vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/assembly/model-config-service.ts", () => ({
   ModelConfigService: class {
     initModel = mockInitModel;
     // session_start 的 lastEngine 基线读取经本方法（构造性同源）
@@ -189,7 +189,7 @@ vi.mock("../interface/commands.ts", () => ({
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/session-reconstructor.ts";
+import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/persistence/session-reconstructor.ts";
 
 let subagentsExtension: (pi: ExtensionAPI) => void;
 

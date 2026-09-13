@@ -26,14 +26,14 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 //（registerFakePiEngine 替身，kickOffChatRound 的 notify 门经 engine.run 应答驱动）。
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { bindNotifyLedgerHost, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "../notify-ledger.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { RecordStore } from "../record-store.ts";
+import { bindNotifyLedgerHost, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "../notify/notify-ledger.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { notifyGateAllowsDelivery, SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-notify-gate-"));

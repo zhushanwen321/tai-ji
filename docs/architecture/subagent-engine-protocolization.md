@@ -32,7 +32,7 @@
 >   H5 冷启动回退源迁移、SDK 进 runtime `noExternal`、引擎 CLI 三平台启动解析规格；⑨A13 新增 + A5/A6/A7/A10/A11/A12 判据可执行化 + H→W 承接列。
 > - v4（2026-09-08，R3 修复）：①**能力位分两类**（被 gate 四类以 manifest 为权威，少声明即同步拒 + 恢复指引改写；非 gate 位才适用「强于→放行」）+ 注释回写；
 >   ②**镜像失效语义**（载荷含 `killed` + 引擎退出/重建/dispose/killAll 时整体置死 + 未收 `childSpawned` 前无句柄）；
->   ③**D7 类型闭包表**（`execution/types.ts` / `orchestration/models/types.ts` / `model-resolver` / `paths.ts` / extension-protocol 逐项处置 + 守卫基线）；
+>   ③**D7 类型闭包表**（`execution/assembly/types.ts` / `orchestration/models/types.ts` / `model-resolver` / `paths.ts` / extension-protocol 逐项处置 + 守卫基线）；
 >   ④**同步源闭合**（`initialize` 应答携带 `models` 作缓存唯一生产者 + `validateModel` 与 `listModels` 同源 + `modelCatalog` 生成/保鲜 + `canonicalRef` 语义 + 降级文案按实装）；
 >   ⑤**env 基座/deny 来源与优先级**（SDK 内联 + 同步守卫、`envPrefixes` 校验、显式剥除/deny 高于 manifest 放行）；
 >   ⑥**启动解析改「宿主 × 平台」二维**（打包 pi 宿主的 execPath 是 Bun binary → 注入执行器 + node 探针）；
@@ -504,8 +504,8 @@ core 依赖 SDK；引擎包只依赖 SDK（**不依赖 core**）。
 
 | 依赖项 | 现状 | 处置 |
 |--------|------|------|
-| `execution/types.ts`（1095 行，import `@xyz-agent/extension-protocol` + `orchestration/models/types.ts` + `model-resolver.ts`） | 环的中心 | **不整块下沉**：只抽「引擎面最小契约」（`AgentEvent`/`EngineHandleData`/`SessionView`/`AgentCallOpts` 等**结构子集**）入 SDK；core 域类型（`ExecutionRecord`/`Turn`/`AgentFailureKind`/`WorktreeHandle`）**留 core**，SDK 用结构等价类型（不 import） |
-| `orchestration/models/types.ts`（390 行，反向 import `execution/types.ts` 成环） | `AgentCallOpts` 住所 | `AgentCallOpts` 的**引擎面子集**移入 SDK（协议 `run.params` 用它）；其余（含 `ExecutionRecord` 引用）留 core；core 侧反向 re-export 保消费面 |
+| `execution/assembly/types.ts`（1095 行，import `@xyz-agent/extension-protocol` + `orchestration/models/types.ts` + `model-resolver.ts`） | 环的中心 | **不整块下沉**：只抽「引擎面最小契约」（`AgentEvent`/`EngineHandleData`/`SessionView`/`AgentCallOpts` 等**结构子集**）入 SDK；core 域类型（`ExecutionRecord`/`Turn`/`AgentFailureKind`/`WorktreeHandle`）**留 core**，SDK 用结构等价类型（不 import） |
+| `orchestration/models/types.ts`（390 行，反向 import `execution/assembly/types.ts` 成环） | `AgentCallOpts` 住所 | `AgentCallOpts` 的**引擎面子集**移入 SDK（协议 `run.params` 用它）；其余（含 `ExecutionRecord` 引用）留 core；core 侧反向 re-export 保消费面 |
 | `model-resolver.ts` | `types.ts` 依赖 | 留 core（SDK 只收「已解析的 modelRef 字符串」） |
 | `paths.ts`（`resolvePoolDir`，`zcode-engine.ts:64`） | F5 点名但 D7 表未列 | 纯模块（仅 `node:path`）→ **移入 SDK**（引擎侧需自算池/journal 路径） |
 | `@xyz-agent/extension-protocol`（`GuiRenderResult`） | 类型闭包边缘 | 留 core；SDK 侧不引用（引擎不产 GUI 渲染结果） |

@@ -34,7 +34,7 @@ import {
   clearPendingCursors,
   prunePendingCursor,
   readActivePendingFromSessionFile,
-} from "../session-pending.ts";
+} from "../assembly/session-pending.ts";
 
 /** pi pending entries 的最小可识别形状（与 pi state.ts EntryLike 同构，运行时守卫）。 */
 interface PendingEntryLike {

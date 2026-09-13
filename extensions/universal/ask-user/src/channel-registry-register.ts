@@ -4,7 +4,7 @@
 //
 // 设计动机（PR #85 #M4 修复）：原实现 ask-user 先 session_start 时会自建简化 Map-based
 // registry 占据 canonical 槽位，劫持后续 getOrCreateChannelRegistry 拿到的实例
-// （packages/subagent-core 的 createUiChannelRegistry（execution/ui-channels.ts）才是
+// （packages/subagent-core 的 createUiChannelRegistry（execution/ui/ui-channels.ts）才是
 // canonical——它带排队、dialog 队列等完整能力）。修复后的握手协议改为「带 version 的 slot」：
 //   - 承载 subagent-core 的 subagent-workflow 扩展 session_start 时往 slot 写
 //     {version, registry, pending:[]}（registry 由 subagent-core 创建）
@@ -23,7 +23,7 @@ const logger = getLogger("ask-user");
 /**
  * 进程级 channel registry 握手的 globalThis key（Symbol.for 跨模块共享）。
  *
- * ⚠️ 必须与 packages/subagent-core/src/execution/channel-registry-access.ts 的字面量
+ * ⚠️ 必须与 packages/subagent-core/src/execution/assembly/channel-registry-access.ts 的字面量
  * 完全一致——两边用同一字符串确保拿到同一 slot 实例。改名必须两侧同步。
  */
 export const CHANNEL_HANDSHAKE_KEY = Symbol.for(
@@ -38,7 +38,7 @@ const ASK_USER_CHANNEL = "ask_user";
 
 /**
  * channel registry 的本地等价接口（与 packages/subagent-core 的 UiChannelRegistry 形状一致，
- * execution/ui-channels.ts 定义）。本模块不静态 import packages/subagent-core（host 侧包，
+ * execution/ui/ui-channels.ts 定义）。本模块不静态 import packages/subagent-core（host 侧包，
  * 非本包依赖——两侧经 globalThis slot 握手协作）；运行时结构兼容即可。
  */
 interface ChannelRegistry {

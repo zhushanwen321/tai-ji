@@ -211,7 +211,7 @@ export default function (pi: ExtensionAPI): void {
 	// 注册 ask_user channel handler：把 subagent 子进程的 ask_user 请求透传到主进程 UI。
 	//
 	// 跨扩展握手协议（PR #85 #M4）：通过 globalThis Symbol.for 约定 slot 形状
-	//（CHANNEL_HANDSHAKE_KEY，与 packages/subagent-core/src/execution/channel-registry-access.ts
+	//（CHANNEL_HANDSHAKE_KEY，与 packages/subagent-core/src/execution/assembly/channel-registry-access.ts
 	// 用同一字符串 key），不依赖 dynamic import npm 包名（两个扩展都通过
 	// ~/.pi/agent/extensions/ symlink 加载，互相之间无法用 npm 包名 import）。
 	//
@@ -220,7 +220,7 @@ export default function (pi: ExtensionAPI): void {
 	//   2. slot.registry 就绪（承载 packages/subagent-core 的 subagent-workflow 扩展先到）→ 直接调 registry.register
 	//   3. slot.registry 未就绪 → handler 入 pending，等 subagent-core flush
 	// ask-user 永不创建 registry 实例——canonical registry 仅 packages/subagent-core 创建
-	//（execution/ui-channels.ts 的 createUiChannelRegistry）。
+	//（execution/ui/ui-channels.ts 的 createUiChannelRegistry）。
 	pi.on("session_start", (_event, ctx) => {
 		registerAskUserChannelHandler(createAskUserChannelHandler(ctx));
 	});

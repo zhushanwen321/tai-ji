@@ -50,7 +50,7 @@ vi.mock("@zhushanwen/subagent-core/execution/engine/engines/pi/session-runner.ts
   getChildByRecord: vi.fn(() => undefined),
 }));
 
-import { createRecord } from "@zhushanwen/subagent-core/execution/execution-record.ts";
+import { createRecord } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService, setSubagentService } from "@zhushanwen/subagent-core";

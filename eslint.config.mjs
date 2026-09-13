@@ -121,7 +121,7 @@ export default [
       'packages/runtime/src/services/session/session-lifecycle.ts',
       'packages/runtime/src/transport/session-message-handler.ts',
       'packages/runtime/src/transport/settings-message-handler.ts',
-      'packages/subagent-core/src/execution/session-reconstructor.ts',
+      'packages/subagent-core/src/execution/persistence/session-reconstructor.ts',
       // [HISTORICAL] message-dispatcher 是消息派发职责的唯一聚合点（从 session-service
       // 巨石拆出：sendMessage/abort/steer/followUp/compact + sendBash 家族），2026-09-09
       // chat-domain-v1x-liveness-governance W7 abort 超时三级阶梯（handleAbortRpcTimeout/
@@ -208,7 +208,7 @@ export default [
   // eslint no-restricted-imports 是模块边界一级拦截（新增写者在 import 面即报错），
   // grep 门（scripts/check-record-write-surface.mjs）降为文本级兜底（拦类方法调用
   // 与字面量写形态）。写面唯一入口 = RecordStore（packages/subagent-core/src/
-  // execution/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
+  // execution/persistence/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
   // 边界登记：manifest 写面是 ManifestStore 实例方法（writeManifest）——import 层
   // 拦不住（装配点构造合法），该面由 grep 门 R1 兜底；writeRecordBinding /
   // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写面收敛范围，不拦。
@@ -216,7 +216,7 @@ export default [
   {
     files: ['packages/subagent-core/src/**/*.ts'],
     ignores: [
-      'packages/subagent-core/src/execution/record-store.ts',
+      'packages/subagent-core/src/execution/persistence/record-store.ts',
       'packages/subagent-core/src/**/__tests__/**',
       'packages/subagent-core/src/**/*.test.ts',
     ],
@@ -528,7 +528,7 @@ export default [
   // 先例同型）。长期拆分方向：interact 交接 / stdin 写入等可按轴再拆，待独立重构。
   {
     files: [
-      'packages/subagent-core/src/execution/execution-record.ts',
+      'packages/subagent-core/src/execution/persistence/execution-record.ts',
       'packages/subagent-core/src/orchestration/worker-message-pump.ts',
       'packages/subagent-core/src/shared/resource-discovery.ts',
     ],
@@ -546,13 +546,13 @@ export default [
   // max 700。D7 写面约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
   // ctx 注入），check-record-write-surface 白名单零改动。
   {
-    files: ['packages/subagent-core/src/execution/record-store.ts'],
+    files: ['packages/subagent-core/src/execution/persistence/record-store.ts'],
     rules: {
       'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
   {
-    files: ['packages/subagent-core/src/execution/record-store-rebuild.ts'],
+    files: ['packages/subagent-core/src/execution/persistence/record-store-rebuild.ts'],
     rules: {
       'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
     },

@@ -33,7 +33,7 @@ import {
   type ScanConfig,
 } from "../../shared/resource-discovery.ts";
 import type { DiscoveryRoot } from "../../core/host-services.ts";
-import { discoverAgents } from "../agents-assembly.ts";
+import { discoverAgents } from "../assembly/agents-assembly.ts";
 
 // ── oracle：pi 壳 discoverAllAgents 装配循环的逐句同构（消费同一批 core 原语）──
 

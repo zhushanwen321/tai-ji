@@ -19,7 +19,7 @@ import {
   armIdleTimer,
   disarmIdleTimer,
   _resetLifecycleState,
-} from "../../lifecycle-manager.ts";
+} from "../../lifecycle/lifecycle-manager.ts";
 import {
   getInFlightSnapshot,
   notifyInFlightChanged,

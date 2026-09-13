@@ -33,15 +33,15 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import type { RecordStore } from "../record-store.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
+import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makePi(): PiLike {
   return {

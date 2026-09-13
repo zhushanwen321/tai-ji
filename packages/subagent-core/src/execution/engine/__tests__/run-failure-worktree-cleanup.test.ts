@@ -18,8 +18,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { doFinalizeRecord, type FinalizeDeps } from "../../finalize-record.ts";
-import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../../types.ts";
+import { doFinalizeRecord, type FinalizeDeps } from "../../persistence/finalize-record.ts";
+import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../../assembly/types.ts";
 
 /** 最小 record（worktree 绑定可注入；status running 供终态迁移）。 */
 function makeRecord(worktreeHandle?: WorktreeHandle): ExecutionRecord {

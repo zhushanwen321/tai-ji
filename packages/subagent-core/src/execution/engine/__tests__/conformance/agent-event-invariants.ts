@@ -7,7 +7,7 @@
 // 为什么独立成模块（非内联在测试文件）：pi/zcode 两套 golden 回放 + 负例元测试共用
 // 同一断言逻辑；断言规则漂移会同步影响所有引擎的 conformance，单点维护。
 
-import type { AgentEvent, AgentUsage } from "../../../types.ts";
+import type { AgentEvent, AgentUsage } from "../../../assembly/types.ts";
 
 /** 单条不变量违例。invariant 是规则编号（"1"/"2a"...），detail 是定位信息。 */
 export interface InvariantFinding {

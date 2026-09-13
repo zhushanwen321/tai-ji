@@ -56,8 +56,8 @@ import {
   NOTIFY_WATCHDOG_MS,
   _resetNotifyLedgerForTest,
   type NotifyLedgerHost,
-} from "../notify-ledger.ts";
-import { createNotifier, type BgNotifyRecord, type NotifierHost } from "../notifier.ts";
+} from "../notify/notify-ledger.ts";
+import { createNotifier, type BgNotifyRecord, type NotifierHost } from "../notify/notifier.ts";
 
 // ─── 投递内核等价桩（u-5c：替代真实 session-delivery createDelivery） ──────
 //
@@ -1098,7 +1098,7 @@ describe("MF-5: settled 监听单例化（多次 bind 物理监听数不增）",
 
 describe("notify-ledger 常量锚", () => {
   it("NOTIFY_CUSTOM_TYPE 与 notifier 送达 customType / ledger 回执扫描同源", async () => {
-    const notifierModule = await import("../notifier.ts");
+    const notifierModule = await import("../notify/notifier.ts");
     // notifier 模块不再自带本地常量（单一常量源 = notify-ledger）；用运行时行为钉住：
     // ledger 回执扫描匹配的 customType === notifier 送达消息的 customType。
     const mock = makeLedgerHost();

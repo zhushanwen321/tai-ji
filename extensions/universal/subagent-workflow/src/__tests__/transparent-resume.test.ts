@@ -37,11 +37,11 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => lo
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/alive-store.ts";
-import { resurrectClosed } from "@zhushanwen/subagent-core/execution/execution-record.ts";
-import { ResurrectDeniedError } from "@zhushanwen/subagent-core/execution/types.ts";
-import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/state-marker.ts";
-import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/path-encoding.ts";
+import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/persistence/alive-store.ts";
+import { resurrectClosed } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
+import { ResurrectDeniedError } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
+import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persistence/state-marker.ts";
+import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { forkFromHandler, messageHandler, closeHandler } from "../interface/subagent-actions.ts";

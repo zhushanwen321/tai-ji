@@ -20,7 +20,7 @@
 // zcode 引擎被 gate 拒绝不会到达。
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
-import type { ExecuteOptions } from "../types.ts";
+import type { ExecuteOptions } from "../assembly/types.ts";
 
 /** 纯函数：ExecuteOptions（chat 域执行选项）→ 合流任务声明 AgentCallOpts。无副作用、幂等。 */
 export function executeOptionsToEngineTaskSpec(opts: ExecuteOptions): AgentCallOpts {

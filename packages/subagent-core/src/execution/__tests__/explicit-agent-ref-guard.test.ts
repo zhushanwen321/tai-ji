@@ -27,8 +27,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 

@@ -21,9 +21,9 @@ import {
   snapshot,
   tryTransition,
   updateFromEvent,
-} from "../execution-record.ts";
-import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../types.ts";
-import { toSubagentRecordEntry } from "../record-entry.ts";
+} from "../persistence/execution-record.ts";
+import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../assembly/types.ts";
+import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
 
 // ── 常量（与源码 module-private 值对齐，测试用字面量）──
 const TURN_SUMMARY_MAX = 80;

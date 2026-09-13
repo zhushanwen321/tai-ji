@@ -32,8 +32,8 @@ vi.mock("../../core/logger.ts", () => ({
 // [B1] state-marker 写面 mock（默认透传真实实现）：终态写失败（重试耗尽返回 false）
 // 用例经 vi.mocked(writeFinalizedState).mockReturnValueOnce(false) 注入——绕开真实
 // 重试 3 次 ×100ms 指数退避的墙钟等待。
-vi.mock("../state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../state-marker.ts")>();
+vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
   return {
     ...actual,
     writeFinalizedState: vi.fn(actual.writeFinalizedState),
@@ -41,13 +41,13 @@ vi.mock("../state-marker.ts", async (importOriginal) => {
   };
 });
 
-import { writeFinalizedState } from "../state-marker.ts";
+import { writeFinalizedState } from "../persistence/state-marker.ts";
 
-import { doFinalizeRecord, doFinalizeRoundToIdle } from "../finalize-record.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { RecordStore } from "../record-store.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
-import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../types.ts";
+import { doFinalizeRecord, doFinalizeRoundToIdle } from "../persistence/finalize-record.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../assembly/types.ts";
 
 function makeMinimalRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return {

@@ -20,7 +20,7 @@
 // record 级状态持续判定直至终态或放弃）。本文件的谓词全部只读 record 级状态，
 // 不读引擎镜像——结构性保证「重建不解管」（模拟引擎重建后监督器仍按 record 级判）。
 
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 监督器域分类（判定域先收窄，再谈三态）。 */
 export type SupervisorDomain =

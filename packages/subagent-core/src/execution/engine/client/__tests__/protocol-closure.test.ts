@@ -5,7 +5,7 @@
 // 运行时无逻辑；`const _assert: true = <expr>` 形态让断言结果进入类型检查。
 //
 // UiRequest / UiResponse / UiRequestHandler / UiMethod 的 core 侧出口 =
-// execution/dialog-queue.ts 的 SDK 再导出（W7 已切换，SSOT = SDK ui-types）——
+// execution/ui/dialog-queue.ts 的 SDK 再导出（W7 已切换，SSOT = SDK ui-types）——
 // 本断言的 Core* 别名现在与 Sdk* 同源，保留断言形态防未来回退为本地定义后漂移。
 // [H1 U5/U6] InteractAction / InteractResult 断言对已随 chat 域 interact 面退役删除。
 
@@ -31,7 +31,7 @@ import type { AgentCallOpts as CoreAgentCallOpts } from "../../../../orchestrati
 import type {
   AgentEvent as CoreAgentEvent,
   WorktreeHandle as CoreWorktreeHandle,
-} from "../../../types.ts";
+} from "../../../assembly/types.ts";
 import type {
   AgentOutcome as CoreAgentOutcome,
   EngineCapabilities as CoreEngineCapabilities,
@@ -44,7 +44,7 @@ import type {
   UiRequest as CoreUiRequest,
   UiRequestHandler as CoreUiRequestHandler,
   UiResponse as CoreUiResponse,
-} from "../../../dialog-queue.ts";
+} from "../../../ui/dialog-queue.ts";
 
 // ── 引擎面契约类型（SDK SSOT ↔ core execution/engine/types.ts）──
 type _CoreSdkAgentEvent = AssertMutuallyAssignable<CoreAgentEvent, SdkAgentEvent>;

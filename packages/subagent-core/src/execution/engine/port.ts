@@ -30,9 +30,9 @@ import type { ChildProcess } from "node:child_process";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
-import type { ModelInfo } from "../model-resolver.ts";
-import type { SubagentStream } from "../stream-sink.ts";
-import type { AgentEvent } from "../types.ts";
+import type { ModelInfo } from "../assembly/model-resolver.ts";
+import type { SubagentStream } from "../assembly/stream-sink.ts";
+import type { AgentEvent } from "../assembly/types.ts";
 import type {
   AgentOutcome,
   EngineCapabilities,

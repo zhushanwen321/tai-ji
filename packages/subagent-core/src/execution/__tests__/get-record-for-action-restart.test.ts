@@ -29,13 +29,13 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // [W3 改写 → H1 U6] deliverChatMessage 走协议 seam（registerFakePiEngine 替身）——
 // 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
 
-import { writeFinalizedState } from "../state-marker.ts";
-import { ResurrectDeniedError } from "../types.ts";
+import { writeFinalizedState } from "../persistence/state-marker.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 // 身份 env 名（与 subagent-service.ts 常量一致；beforeEach/afterEach 清理防泄漏——

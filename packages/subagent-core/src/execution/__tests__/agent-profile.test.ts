@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
-import { parseAgentProfile } from "../agent-registry.ts";
+import { parseAgentProfile } from "../assembly/agent-registry.ts";
 
 describe("parseAgentProfile（D3 宽容解析）", () => {
   it("单行 key:value 全字段（IF1 通过）", () => {

@@ -14,11 +14,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import { INDEX_FILENAME } from "../sessions-index.ts";
-import { writeCancelledState, writeFinalizedState } from "../state-marker.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { INDEX_FILENAME } from "../persistence/sessions-index.ts";
+import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 /** 最小合法子 session 文件（session header + identity custom entry + assistant msg）。 */
 function writeSessionJsonl(

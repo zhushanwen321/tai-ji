@@ -23,10 +23,10 @@ import {
   resurrectClosed,
   tryEnterRunning,
   tryTransition,
-} from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import { readRecordBinding, readStateMarker, writeRecordBinding } from "../state-marker.ts";
-import type { ExecutionRecord, TranscriptRef } from "../types.ts";
+} from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { readRecordBinding, readStateMarker, writeRecordBinding } from "../persistence/state-marker.ts";
+import type { ExecutionRecord, TranscriptRef } from "../assembly/types.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 

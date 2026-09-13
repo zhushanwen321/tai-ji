@@ -2066,7 +2066,7 @@
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
         "packages/subagent-core/src/execution/engine/client/mirror.ts",
-        "packages/subagent-core/src/execution/dialog-queue.ts"
+        "packages/subagent-core/src/execution/ui/dialog-queue.ts"
       ],
       "authority": [
         "../docs/architecture/subagent-engine-protocolization.md",
@@ -2238,7 +2238,7 @@
       "id": "C-ext-21",
       "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的 <agentDir>/subagents/<enc(cwd)>/sessions 布局互为跨包隐式契约——改任一端路径形态另一端必同步（改 path-encoding 布局须同步 llm.ts 嗅探；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该守卫",
       "scope": [
-        "packages/subagent-core/src/execution/path-encoding.ts",
+        "packages/subagent-core/src/execution/assembly/path-encoding.ts",
         "extensions/universal/rename-session/**"
       ],
       "authority": [

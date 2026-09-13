@@ -36,15 +36,15 @@ import type {
 } from "../engine/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
-import { _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
+import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 // ============================================================
 // zcode cold 引擎替身（conversation:'cold'——B-firstround 的 capability 判据；

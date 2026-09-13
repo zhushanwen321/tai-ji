@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EngineClient } from "../engine/client/engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "../engine/client/remote-engine.ts";
-import { mergeRunSignals } from "../subprocess-agent-runner.ts";
+import { mergeRunSignals } from "../assembly/subprocess-agent-runner.ts";
 
 const FAKE_ENGINE = fileURLToPath(
   new URL("../engine/client/__tests__/__fixtures__/fake-engine.mjs", import.meta.url),

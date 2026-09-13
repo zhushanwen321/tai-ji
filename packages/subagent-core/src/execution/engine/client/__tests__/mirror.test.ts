@@ -11,7 +11,7 @@ import {
   registerActiveDialogQueue,
   type UiRequest,
   type UiResponse,
-} from "../../../dialog-queue.ts";
+} from "../../../ui/dialog-queue.ts";
 import { SpawnedChildrenMirror } from "../mirror.ts";
 
 describe("SpawnedChildrenMirror", () => {

@@ -87,7 +87,7 @@ process.setMaxListeners(50);
 //（runSessionAssembly / W3TC7 / U2 用例）各自动态 import 取当用例的新鲜
 // setupSessionLifecycle——静态引用跨 resetModules 存活，守卫 Map 不随用例重置。
 let subagentsExtension: typeof import("../index.ts").default;
-import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/notify-ledger.ts";
+import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
@@ -559,7 +559,7 @@ describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
   afterEach(async () => {
     // 动态 import 命中用例已加载的同一 notify-ledger 实例（下一次 beforeEach 才
     // resetModules），重置的正是被测绑定槽——静态引用属首载模块图，重置对其无效。
-    const { _resetNotifyLedgerForTest } = await import("@zhushanwen/subagent-core/execution/notify-ledger.ts");
+    const { _resetNotifyLedgerForTest } = await import("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts");
     _resetNotifyLedgerForTest();
   });
 

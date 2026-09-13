@@ -49,28 +49,28 @@ import { toErrorMessage } from "../../core/error-message.ts";
 
 import { getLogger } from "../../core/logger.ts";
 
-import { bestEffort } from "../best-effort.ts";
-import { tryTransition } from "../execution-record.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
+import { tryTransition } from "../persistence/execution-record.ts";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 // [u7a 生产补挂] 批量 dispose 收敛点推最新在途计数（D5 出口——engine 域叶子模块，
 // 本模块不得被 inflight-snapshot 反向依赖，import 方向单向安全）。
 import { notifyInFlightChanged } from "../engine/inflight-snapshot.ts";
-import { startIdleGc } from "../idle-gc.ts";
+import { startIdleGc } from "../persistence/idle-gc.ts";
 // [V2 决策 3] lifecycle-manager idle timer：chatMode record 的 disarm 面（终态化/取消
 // 路径防误杀）。
-import { disarmIdleTimer } from "../lifecycle-manager.ts";
-import { isIdle, isResumable } from "../lifecycle-predicates.ts";
-import { doFinalizeRecord } from "../finalize-record.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
+import { disarmIdleTimer } from "../lifecycle/lifecycle-manager.ts";
+import { isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { doFinalizeRecord } from "../persistence/finalize-record.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { NotifyHost, PiLike } from "../notify-host.ts";
-import type { RecordStore } from "../record-store.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 // [W4] 轮次活性监督器三态撤下 + settled watchdog disarm（终态路径防 timer 误触发）。
-import { disarmRoundFromProtocol, disarmSettledWatchdog } from "../settled-watchdog.ts";
-import { resolvePiWorkflowStateDir } from "../workflow-state-root.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
-import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../types.ts";
+import { disarmRoundFromProtocol, disarmSettledWatchdog } from "../lifecycle/settled-watchdog.ts";
+import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import type { WorktreeManager } from "../worktree/worktree-manager.ts";
+import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 

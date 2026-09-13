@@ -33,19 +33,19 @@ import {
 
 vi.mock("node:child_process", () => childProcessModule());
 vi.mock("node:fs", async (importOriginal) => fsSyncModule(await importOriginal<typeof import("node:fs")>()));
-vi.mock("../alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../alive-store.ts")>()));
-vi.mock("../state-marker.ts", () => stateMarkerModule());
-vi.mock("../manifest-store.ts", () => manifestStoreModule());
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => aliveStoreModule(await importOriginal<typeof import("../persistence/alive-store.ts")>()));
+vi.mock("../persistence/state-marker.ts", () => stateMarkerModule());
+vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 
 import { spawn } from "node:child_process";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import type { RecordStore } from "../record-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 const mockSpawn = vi.mocked(spawn);

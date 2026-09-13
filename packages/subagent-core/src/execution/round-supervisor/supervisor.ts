@@ -36,7 +36,7 @@
 
 import { getLogger } from "../../core/logger.ts";
 import { assertSafeTimerDelay } from "../../shared/timer-delay.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import {
   classifySupervisorDomain,
   isAwakeWarrantedShape,

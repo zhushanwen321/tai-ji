@@ -26,14 +26,14 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { findForeignLiveInstance } from "../alive-store.ts";
-import { writeFinalizedState, readRecordBinding } from "../state-marker.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
+import { findForeignLiveInstance } from "../persistence/alive-store.ts";
+import { writeFinalizedState, readRecordBinding } from "../persistence/state-marker.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import { buildReopenSummaryPrompt } from "../conversation-continuation.ts";
-import { ResurrectDeniedError } from "../types.ts";
-import { forkFromHandler, messageHandler } from "../subagent-actions-core.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { buildReopenSummaryPrompt } from "../assembly/conversation-continuation.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
+import { forkFromHandler, messageHandler } from "../assembly/subagent-actions-core.ts";
 
 const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_ROOT_SESSION_ID",

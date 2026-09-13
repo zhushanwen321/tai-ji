@@ -8,7 +8,7 @@ constraints.json 登记 C-ext-19 随 U8 落盘）：
   （排除 __tests__/ 与 *.test.ts / *.d.ts——测试模拟串不拦，同 install-hooks.sh
   EXTENSION_FILES 的 __tests__|\.test\. 排除先例）：
   - 规则 1（deliverAs）：deliverAs:"steer"/"nextTurn" 不得出现在 courier 白名单外——
-    结果语义的跨边界通知必须走持久账本 + notifyId 幂等通道（execution/notify-ledger.ts），
+    结果语义的跨边界通知必须走持久账本 + notifyId 幂等通道（packages/subagent-core/src/execution/notify/notify-ledger.ts），
     禁止依赖 pi 内存队列的 at-most-once 投递（事故 A F2：十余次完成通知仅 1 次送达）；
     交互式注入（extension-conventions.md「Event handler 消息注入」节）不属禁令对象，
     豁免须行级注释注明定性。
@@ -131,7 +131,7 @@ def main() -> int:
             print(f"  - {v}")
         print()
         print("修复指引：")
-        print("  - 结果语义通知（subagent/scheduler/webhook 完成）→ 走 execution/notify-ledger.ts")
+        print("  - 结果语义通知（subagent/scheduler/webhook 完成）→ 走 packages/subagent-core/src/execution/notify/notify-ledger.ts")
         print("    持久账本 + notifyId 幂等通道，禁止依赖 pi 内存队列的 at-most-once 投递")
         print("  - 模型身份引用 → shared/model-ref.ts（assertCanonicalModelRef）；argv 拼装只许白名单模块")
         print("  - 白名单定义处：.githooks/check_subagent_channels.py 顶部 WHITELIST_*（扩白名单须给职责定性注释）")

@@ -33,8 +33,8 @@ import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
-import { mapToWorkflowAgentResult } from "../agent-result-mapper.ts";
-import { updateFromEvent } from "../execution-record.ts";
+import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
+import { updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -46,9 +46,9 @@ import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.t
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { AgentConfig } from "../model-resolver.ts";
-import type { NotifyHost } from "../notify-host.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { AgentConfig } from "../assembly/model-resolver.ts";
+import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
@@ -58,10 +58,10 @@ import {
   disarmSettledWatchdog,
   refreshFromProtocolEvent,
   type SettledWatchdogFireInfo,
-} from "../settled-watchdog.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../stream-sink.ts";
-import { MAX_FORK_DEPTH } from "../session-context-resolver.ts";
-import type { UiRequestObservability } from "../ui-request-observability.ts";
+} from "../lifecycle/settled-watchdog.ts";
+import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import {
   DEFAULT_AGENT_NAME,
   ForkDepthExceededError,
@@ -70,7 +70,7 @@ import {
   type ExecuteOptions,
   type ExecutionMode,
   type ExecutionRecord,
-} from "../types.ts";
+} from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND, MS_PER_SECOND, SECONDS_PER_MINUTE } from "./service-constants.ts";
 

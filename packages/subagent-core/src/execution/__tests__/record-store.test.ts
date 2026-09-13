@@ -30,21 +30,21 @@ vi.mock("../../core/logger.ts", () => ({
 const { saveIndexMock } = vi.hoisted(() => ({
   saveIndexMock: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../sessions-index.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../sessions-index.ts")>();
+vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/sessions-index.ts")>();
   return { ...actual, saveIndex: saveIndexMock };
 });
 
-import { writeAliveMarker } from "../alive-store.ts";
-import { completeRecord, createRecord, projectOutcome, tryTransition } from "../execution-record.ts";
-import { writeCancelledState, writeFinalizedState, writeSettledState } from "../state-marker.ts";
-import type { ManifestRecord } from "../manifest-store.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
-import type { StatusFilter } from "../record-store.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ExecutionRecord } from "../types.ts";
+import { writeAliveMarker } from "../persistence/alive-store.ts";
+import { completeRecord, createRecord, projectOutcome, tryTransition } from "../persistence/execution-record.ts";
+import { writeCancelledState, writeFinalizedState, writeSettledState } from "../persistence/state-marker.ts";
+import type { ManifestRecord } from "../persistence/manifest-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import type { StatusFilter } from "../persistence/record-store.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
 /** 构造 ExecutionRecord（base 默认 running，over 覆盖任意字段）。 */

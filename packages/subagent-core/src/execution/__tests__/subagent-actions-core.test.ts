@@ -39,15 +39,15 @@ import {
   recordToListItem,
   startHandler,
   wrapForkFromPrompt,
-} from "../subagent-actions-core.ts";
-import { ResurrectDeniedError } from "../types.ts";
-import { writeAliveMarker } from "../alive-store.ts";
+} from "../assembly/subagent-actions-core.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
+import { writeAliveMarker } from "../persistence/alive-store.ts";
 import type {
   ExecutionHandle,
   ExecutionRecord,
   SubagentRecord,
   SubagentToolDetails,
-} from "../types.ts";
+} from "../assembly/types.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
 // ── 时钟固定（duration 快照确定性，见文件头）──

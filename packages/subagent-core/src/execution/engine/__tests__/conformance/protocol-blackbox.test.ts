@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EngineClient } from "../../client/engine-client.ts";
 import type { MirrorChangeEvent } from "../../client/mirror.ts";
 import { JournalWriter, replayJournal } from "../../common/event-journal.ts";
-import type { AgentEvent } from "../../../types.ts";
+import type { AgentEvent } from "../../../assembly/types.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "engine-protocol");

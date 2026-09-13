@@ -19,7 +19,7 @@ import {
   readIdentityHeader,
   readIdentityTail,
   reconstructFromFile,
-} from "../session-reconstructor.ts";
+} from "../persistence/session-reconstructor.ts";
 
 /** 写一行到文件（JSON.stringify + 换行）。 */
 function writeLine(file: number, obj: unknown): void {

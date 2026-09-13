@@ -45,7 +45,7 @@ import {
   registerActiveDialogQueue,
   type UiRequest,
   type UiResponse,
-} from "../dialog-queue.ts";
+} from "../ui/dialog-queue.ts";
 
 // ── 类型助手 ────────────────────────────────────────────────
 // UiRequest 最小形状（method + id）。dialog 类：select/confirm/input/editor。

@@ -35,11 +35,11 @@ vi.mock("../engine/common/data-dir.ts", () => ({
 }));
 
 import { coreSpawnedChildrenMirror, _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import { createRecord } from "../execution-record.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import { RecordStore } from "../record-store.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 与 startGcTimer 内部常量一致（1h 扫描 / 30 天 TTL）。 */
 const GC_INTERVAL_MS = 60 * 60 * 1000;

@@ -18,8 +18,8 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ManifestStore } from "../execution/manifest-store";
-import { RecordStore } from "../execution/record-store";
+import { ManifestStore } from "../execution/persistence/manifest-store";
+import { RecordStore } from "../execution/persistence/record-store";
 
 // [Gate A teardown 稳定性] no-op 掉索引落盘。根因：recoverOrphanRecords 走的
 // reconstructAll（record-store.ts）扫描尾 fire-and-forget saveIndex（tmp+fsync+rename
@@ -28,8 +28,8 @@ import { RecordStore } from "../execution/record-store";
 // rpc 时在途调用被 reject 为 EnvironmentTeardownError（0 断言失败，纯 teardown 时序）。
 // 本文件用一次性 tmpdir、断言只观察 appendEntry 捕获的判定结果，落盘与否无观察者——
 // no-op 消除在途 IO 链，任何负载下确定；loadIndex 等其余导出保留原实现。
-vi.mock("../execution/sessions-index.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../execution/sessions-index.ts")>()),
+vi.mock("../execution/persistence/sessions-index.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../execution/persistence/sessions-index.ts")>()),
   saveIndex: async () => {},
 }));
 

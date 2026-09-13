@@ -24,7 +24,7 @@ import {
   armIdleTimer,
   disarmIdleTimer,
   hasIdleTimer,
-} from "../lifecycle-manager.ts";
+} from "../lifecycle/lifecycle-manager.ts";
 
 /** 手动排程 fake 捕获的到期回调（fire = 模拟 timer 到点，时机由用例显式控制）。 */
 let scheduled: Array<{ fire: () => void; timer: object }>;

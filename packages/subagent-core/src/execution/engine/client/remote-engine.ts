@@ -27,7 +27,7 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
-import { getSubagentSessionDir } from "../../path-encoding.ts";
+import { getSubagentSessionDir } from "../../assembly/path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
   EngineCapabilities,

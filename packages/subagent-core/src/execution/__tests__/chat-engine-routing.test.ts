@@ -73,9 +73,9 @@ import type {
   EngineHandle,
   ProbeReport,
 } from "../engine/types.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import { toSubagentRecordEntry } from "../record-entry.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
 // 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
 import {
@@ -83,7 +83,7 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecuteOptions } from "../types.ts";
+import type { ExecuteOptions } from "../assembly/types.ts";
 
 const mockSpawn = vi.mocked(spawn);
 

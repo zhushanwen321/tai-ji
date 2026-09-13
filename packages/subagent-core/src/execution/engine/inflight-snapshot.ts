@@ -20,8 +20,8 @@
 // 返回值——满足 D5 接线约束①「上报不阻塞生命周期主链、不 await 进 agent_settled
 // handler 链」（该链有时序保护约束 armIdleTimer 先于 notify）。
 
-import { hasIdleTimer } from "../lifecycle-manager.ts";
-import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
+import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
+import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 // 环声明：session-runner（迁移点）import 本模块的 notifyInFlightChanged，本模块经
 // lifecycle-predicates → session-runner.getChildByRecord 读句柄记账 + 直接取
 // spawnedChildren 键集——双向仅函数体内取值（ESM 活绑定，调用期解析），模块求值序

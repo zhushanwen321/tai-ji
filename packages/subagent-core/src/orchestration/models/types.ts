@@ -20,7 +20,7 @@ import type {
   ToolCallEntry,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { WorktreeHandle } from "../../execution/types.ts";
+import type { WorktreeHandle } from "../../execution/assembly/types.ts";
 
 // ── 状态机 ────────────────────────────────────────────────────
 

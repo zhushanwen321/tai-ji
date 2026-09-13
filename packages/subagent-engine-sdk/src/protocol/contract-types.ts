@@ -6,12 +6,12 @@
 //
 // 搬运口径（逐字对照，结构等价、零 core import）：
 //   - AgentEvent / AgentUsage / AgentUsageTotal / ToolCallResult / ToolCall /
-//     InternalToolCall / Turn ← core execution/types.ts（2026-09-09 实测 :164-:313）
+//     InternalToolCall / Turn ← core execution/assembly/types.ts（2026-09-09 实测 :164-:313）
 //   - ReplayedTurn / SessionView / EngineHandleData / EngineCapabilities / ProbeReport /
 //     AgentOutcome ← core execution/engine/types.ts
 //   - AgentFailureKind / AgentOutcomeUsage（core 名 AgentUsage，orchestration 版）/
 //     ToolCallEntry / AgentCallOpts 子集 ← core orchestration/models/types.ts
-//   - WorktreeHandle ← core execution/types.ts:349（SDK 结构等价副本——设计 §3.5.1
+//   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
 // [H1] InteractAction / InteractResult 已随 chat-run 统一退役（U5 删除；
@@ -44,7 +44,7 @@ export type AssertMutuallyAssignable<A, B> = [A] extends [B]
 // 事件面（AgentEvent 及其字段型）
 // ============================================================
 
-/** token 用量（message_end 单条消息增量）。← core execution/types.ts AgentUsage。 */
+/** token 用量（message_end 单条消息增量）。← core execution/assembly/types.ts AgentUsage。 */
 export interface AgentUsage {
   input: number;
   output: number;
@@ -100,7 +100,7 @@ export interface Turn {
 
 /**
  * 引擎事件（9 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
- * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/types.ts 注释）。
+ * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
@@ -262,7 +262,7 @@ export interface ToolCallEntry {
   input: string;
 }
 
-/** worktree 句柄（结构等价副本；core 权威定义在 execution/types.ts:349）。 */
+/** worktree 句柄（结构等价副本；core 权威定义在 execution/assembly/types.ts:349）。 */
 export interface WorktreeHandle {
   /** checkout 目录（子 agent 工作目录）。 */
   readonly path: string;

@@ -82,13 +82,13 @@ vi.mock("../../shared/atomic-write.ts", async (importOriginal) => {
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { clearEngines } from "../engine/registry.ts";
 
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
-import { ManifestStore } from "../manifest-store.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelRegistryLike } from "../model-resolver.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
-import type { SubagentRecord } from "../types.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 

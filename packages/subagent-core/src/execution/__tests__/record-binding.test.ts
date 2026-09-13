@@ -39,24 +39,24 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import { createRecord } from "../execution-record.ts";
-import { _resetLifecycleState } from "../lifecycle-manager.ts";
-import { getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
-import { _resetSettledWatchdogsForTest } from "../settled-watchdog.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import {
   readRecordBinding,
   updateRecordBinding,
   writeFinalizedState,
   writeRecordBinding,
   RECORD_BINDING_SIDECAR_EXT,
-} from "../state-marker.ts";
-import type { RecordBinding } from "../state-marker.ts";
+} from "../persistence/state-marker.ts";
+import type { RecordBinding } from "../persistence/state-marker.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
-import { ModelConfigService } from "../model-config-service.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 
 // 身份 env 清理（同 get-record-for-action-restart.test.ts：测试进程可能继承
 // subagent env，污染 rootCwd 编码目录与 sessionRootId 基线）。

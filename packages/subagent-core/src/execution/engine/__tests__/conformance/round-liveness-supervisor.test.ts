@@ -41,7 +41,7 @@ import {
   type SupervisorCandidateRecord,
   type SupervisorRecordView,
 } from "../../../round-supervisor/index.ts";
-import type { ExecutionRecord } from "../../../types.ts";
+import type { ExecutionRecord } from "../../../assembly/types.ts";
 
 // ── 场景道具（替身 deps——黑盒观测面：通知/指引/替代/放弃四出口 + 三状态源）────
 

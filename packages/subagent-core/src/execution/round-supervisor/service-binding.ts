@@ -11,15 +11,15 @@
 // 对齐 notify-host.ts createNotifyHost 的 deps 惰性求值先例）。
 
 import { getLogger } from "../../core/logger.ts";
-import { bestEffort } from "../best-effort.ts";
-import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-lookup.ts";
-import { createRecord, tryTransition } from "../execution-record.ts";
-import { hasLiveProcessHandle } from "../lifecycle-predicates.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
+import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
+import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
-import { resolvePiWorkflowStateDir } from "../workflow-state-root.ts";
-import type { PiLike } from "../notify-host.ts";
-import type { RecordStore } from "../record-store.ts";
-import type { AgentResult, ExecutionRecord } from "../types.ts";
+import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import type { PiLike } from "../notify/notify-host.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
 import {
   RoundSupervisor,
   runReconcileSweep,

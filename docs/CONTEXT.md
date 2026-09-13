@@ -84,7 +84,7 @@ xyz-agent subagent 体系的子任务执行单元：由引擎进程派生子进�
 
 ### Execution Record
 
-subagent 运行状态的单一真源（`packages/subagent-core/src/execution/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`），终态经 `<session>.state` sidecar 标记。
+subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`），终态经 `<session>.state` sidecar 标记。
 
 ### ToolCall
 
@@ -131,7 +131,7 @@ session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、sk
 
 > **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互面）。
 
-agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态见 `packages/ui/src/extension-host/AskUserForm.vue`：选项/多选/Other/自由文本/多行编辑）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
+agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态见 `packages/ui/src/extension-host/AskUserForm.vue`：选项/多选/Other/自由文本/多行编辑）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
 
 **Tool Approval vs Ask User**: Tool Approval 是权限控制（binary + always allow），Ask User 是任务级沟通（开放式输入）。
 

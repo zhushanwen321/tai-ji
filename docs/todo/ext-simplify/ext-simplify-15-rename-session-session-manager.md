@@ -11,7 +11,7 @@
 
 **层声明**：本文档是「技术方案设计」层（下一层产物 = 可实施的代码任务 + 测试改造清单），准则 5/6/7 全适用。
 
-**证据基线**：pi SDK 断言核对自本 worktree 实装 `node_modules/@earendil-works/pi-coding-agent@0.84.4`（npm ls 确认）；两包源码、`packages/extension-protocol/src/extensions/session-manager/`、`packages/runtime/src/transport/session-manager-handler.ts`、`packages/runtime/src/infra/pi/event-adapter.ts`、`packages/subagent-core/src/execution/path-encoding.ts` 均为 2026-09-11 实读，文内行号全部为实读值（与审计快照的行号差异见附录 A）。
+**证据基线**：pi SDK 断言核对自本 worktree 实装 `node_modules/@earendil-works/pi-coding-agent@0.84.4`（npm ls 确认）；两包源码、`packages/extension-protocol/src/extensions/session-manager/`、`packages/runtime/src/transport/session-manager-handler.ts`、`packages/runtime/src/infra/pi/event-adapter.ts`、`packages/subagent-core/src/execution/assembly/path-encoding.ts` 均为 2026-09-11 实读，文内行号全部为实读值（与审计快照的行号差异见附录 A）。
 
 ---
 
@@ -151,7 +151,7 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 
 ### 6.3 D3：isSubagentSession 路径耦合（contested 裁决，选定：登记 constraints.json + 双端注释）
 
-- **采用**：登记新约束 **C-ext-21**（scope：`packages/subagent-core/src/execution/path-encoding.ts` + `extensions/universal/rename-session/**`；authority：本文档 §6.3 锚点；enforcement：review-arch-boundary；登记后跑 `node scripts/render-constraints.mjs` 重新生成 constraints.md），摘要声明「`<agentDir>/subagents/<enc>/sessions` 布局是 subagent-core 与 rename-session 的跨包契约，变更布局必须同批改 isSubagentSession」。双端注释互相指向：llm.ts isSubagentSession 注释补「布局 SSOT：subagent-core path-encoding.ts getSubagentSessionDir，约束 C-ext-21」；path-encoding.ts getSubagentSessionDir 注释补「消费方：rename-session isSubagentSession 路径嗅探（C-ext-21）」。
+- **采用**：登记新约束 **C-ext-21**（scope：`packages/subagent-core/src/execution/assembly/path-encoding.ts` + `extensions/universal/rename-session/**`；authority：本文档 §6.3 锚点；enforcement：review-arch-boundary；登记后跑 `node scripts/render-constraints.mjs` 重新生成 constraints.md），摘要声明「`<agentDir>/subagents/<enc>/sessions` 布局是 subagent-core 与 rename-session 的跨包契约，变更布局必须同批改 isSubagentSession」。双端注释互相指向：llm.ts isSubagentSession 注释补「布局 SSOT：subagent-core path-encoding.ts getSubagentSessionDir，约束 C-ext-21」；path-encoding.ts getSubagentSessionDir 注释补「消费方：rename-session isSubagentSession 路径嗅探（C-ext-21）」。
 - **被否**：
   - **收敛实现之「读 spawn env 标记」**（subagent-core 已有 `PI_SUBAGENT_DEPTH` 等四键贯穿子进程，subagent-service.ts:271-274）——耦合并未消除，只是从「目录布局契约」换成「env 注入契约」，后者同样是 subagent-core 单方主导的**内部递归身份协议**（注释自认「env 描述子进程自己的身份」）；让 rename-session 读它 = 内部协议升格跨包公共契约，契约面反而扩大。
   - **收敛实现之「universal 包 import subagent-core」**——方向倒挂：role=universal 要求独立 pi 用户可单独安装，依赖 xyz-agent 内部包即失格。

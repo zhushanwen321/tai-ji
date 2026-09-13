@@ -19,12 +19,12 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ManifestStore } from "../manifest-store.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "../path-encoding.ts";
-import { RecordStore } from "../record-store.ts";
-import { writeRecordBinding } from "../state-marker.ts";
-import type { ExecutionRecord } from "../types.ts";
-import { createRecord } from "../execution-record.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { writeRecordBinding } from "../persistence/state-marker.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
+import { createRecord } from "../persistence/execution-record.ts";
 
 /** 最小合法子 session 文件（session header + identity custom entry，S8 旧数据形态）。 */
 function writeLegacySessionJsonl(

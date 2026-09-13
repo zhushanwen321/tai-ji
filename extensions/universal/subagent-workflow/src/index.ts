@@ -673,7 +673,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
 // session_shutdown），Symbol key 单定义点随迁，避免双份定义漂移。
 
 // 跨扩展 channel handler 注册入口已收口到 core 深路径
-// `@zhushanwen/subagent-core/execution/channel-registry-access.ts`
+// `@zhushanwen/subagent-core/execution/assembly/channel-registry-access.ts`
 // （getOrCreateChannelRegistry / UiChannelRegistry / ChannelHandler）。
 // 历史上的包根 re-export 已删：ask-user 等跨扩展消费者经 globalThis 握手
 // （DIALOG_QUEUE_KEY 同款进程级单例），不再经包根 import 消费本模块。

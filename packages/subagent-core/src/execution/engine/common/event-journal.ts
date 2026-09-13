@@ -18,7 +18,7 @@ import { dirname } from "node:path";
 
 import { getLogger } from "../../../core/logger.ts";
 
-import type { AgentEvent } from "../../types.ts";
+import type { AgentEvent } from "../../assembly/types.ts";
 
 const logger = getLogger("subagents");
 

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ExecutionRecord } from "../../execution/types.ts";
+import type { ExecutionRecord } from "../../execution/assembly/types.ts";
 import type { ExecutionTraceNode } from "../models/types.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";

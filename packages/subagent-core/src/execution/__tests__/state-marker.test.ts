@@ -50,7 +50,7 @@ import {
   writeCancelledState,
   writeFinalizedState,
   writeSettledState,
-} from "../state-marker.ts";
+} from "../persistence/state-marker.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 
 describe("state-marker", () => {

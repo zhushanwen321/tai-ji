@@ -33,11 +33,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { COLD_LOOKUP_SCAN_LIMIT } from "../cold-lookup.ts";
-import * as stateMarker from "../state-marker.ts";
-import type { PiLike } from "../notify-host.ts";
-import { RecordStore } from "../record-store.ts";
-import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../types.ts";
+import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
+import * as stateMarker from "../persistence/state-marker.ts";
+import type { PiLike } from "../notify/notify-host.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type SupervisorCandidateRecord } from "./index.ts";
 import {
   createRoundSupervisorForService,
@@ -49,8 +49,8 @@ import {
 // 内部 3 次退避重试），give-up 的 §3.4 false 分支真实磁盘故障无法稳定驱动，仅本文件
 // 的「重试耗尽」用例经模块替身注入 false 返回；默认委托真实实现，相邻用例行为不变
 //（vi.spyOn 对跨模块具名导入绑定不可拦截，必须走 vi.mock）。
-vi.mock("../state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../state-marker.ts")>();
+vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
   return { ...actual, writeFinalizedState: vi.fn(actual.writeFinalizedState) };
 });
 
@@ -443,8 +443,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     const supervisor = createRoundSupervisorForService(h.binding);
     // 模块替身注入失败返回（U1 后 writeFinalizedState 不抛——重试耗尽返回 false）；
     // finally 恢复委托真实实现。
-    const actual = await vi.importActual<typeof import("../state-marker.ts")>(
-      "../state-marker.ts",
+    const actual = await vi.importActual<typeof import("../persistence/state-marker.ts")>(
+      "../persistence/state-marker.ts",
     );
     const writeSpy = vi.mocked(stateMarker.writeFinalizedState);
     writeSpy.mockImplementation(() => false);

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { executeOptionsToEngineTaskSpec } from "../host-task-spec.ts";
-import type { ExecuteOptions } from "../../types.ts";
+import type { ExecuteOptions } from "../../assembly/types.ts";
 
 function baseOpts(): ExecuteOptions {
   return { task: "do work", slug: "map-test" };

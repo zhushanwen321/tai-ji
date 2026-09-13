@@ -33,7 +33,7 @@ import {
   CHANNEL_HANDSHAKE_KEY,
   getOrCreateChannelRegistry,
   type ChannelRegistryHandshake,
-} from "../channel-registry-access.ts";
+} from "../assembly/channel-registry-access.ts";
 
 // ── 用例隔离：每个用例前清空 globalThis 槽位 ─────────────────
 // handshake 是 globalThis 单例，跨用例污染会破坏测试确定性。

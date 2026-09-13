@@ -3,8 +3,8 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach,beforeEach, describe, expect, it } from "vitest";
 
-import { ManifestStore } from "../execution/manifest-store";
-import { RecordStore } from "../execution/record-store";
+import { ManifestStore } from "../execution/persistence/manifest-store";
+import { RecordStore } from "../execution/persistence/record-store";
 
 describe("FR-8: Orphan Recovery from Manifest", () => {
   let rootDir: string;

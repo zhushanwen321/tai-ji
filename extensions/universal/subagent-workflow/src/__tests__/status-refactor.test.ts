@@ -16,9 +16,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDelivery } from "@xyz-agent/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/execution-record.ts";
-import { createNotifier } from "@zhushanwen/subagent-core/execution/notifier.ts";
-import type { BgNotifyRecord, BgNotifier, NotifierHost } from "@zhushanwen/subagent-core/execution/notifier.ts";
+import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
+import { createNotifier } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
+import type { BgNotifyRecord, BgNotifier, NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import { mapExternalState } from "../interface/subagent-actions.ts";
 import { statusGlyph } from "../interface/format.ts";
 import type { ClosedReason, ExecutionRecord, ExecutionStatus } from "@zhushanwen/subagent-core";

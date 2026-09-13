@@ -35,8 +35,8 @@ import {
   readAliveMarker,
   removeAliveMarker,
   writeAliveMarker,
-} from "../alive-store.ts";
-import type { AliveMarker } from "../types.ts";
+} from "../persistence/alive-store.ts";
+import type { AliveMarker } from "../assembly/types.ts";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "alive-store-test-"));

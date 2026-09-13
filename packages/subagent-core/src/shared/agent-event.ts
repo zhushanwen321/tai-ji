@@ -10,4 +10,4 @@
 // wave-3 删 orchestration/live/types.ts 后，AgentEvent 的唯一定义在 execution/types.ts。
 // 本 re-export 保持「shared/ 是类型共享层」的架构约定。
 
-export type { AgentEvent } from "../execution/types.ts";
+export type { AgentEvent } from "../execution/assembly/types.ts";

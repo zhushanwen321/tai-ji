@@ -7,14 +7,14 @@
 import { getLogger } from "../core/logger.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
-import { bestEffort } from "./best-effort.ts";
+import { bestEffort } from "./assembly/best-effort.ts";
 // [R2] 域 #5 聚合转发 getter 返回类型标注（值装配已迁聚合，仅 type 引用）。
-import type { CollectCoordinator } from "./collect-coordinator.ts";
+import type { CollectCoordinator } from "./assembly/collect-coordinator.ts";
 // [V2 决策 3] lifecycle-manager idle timer：chatMode record 的 disarm 面（终态化/取消
 // 路径防误杀）——[R3] 消费已随终态写面迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
 // 迁 service/run-orchestration.ts——本文件 lifecycle-manager 零 import。
-import { type ConcurrencyPool, DefaultConcurrencyPool } from "./concurrency-pool.ts";
+import { type ConcurrencyPool, DefaultConcurrencyPool } from "./assembly/concurrency-pool.ts";
 // [R4] execution-record 消费（project/tryTransition/updateFromEvent）已随 run 域迁
 // service/run-orchestration.ts（+ workflow-dispatch.ts 的 updateFromEvent）——壳内零消费。
 // [R4] doFinalizeRoundToIdle（finalizeRoundToIdle wrapper）已随 run 域迁
@@ -38,10 +38,10 @@ import type { HostBridgeServiceFace } from "./engine/host/host-bridge.ts";
 import { killAllSpawnedChildren } from "./engine/host/spawned-children.ts";
 // [R4] 引擎路由/registry/model-validation/engine-sdk 消费已随 run 域与 workflow 族迁
 // 两个聚合文件——壳内零消费。
-import { ManifestStore } from "./manifest-store.ts";
-import type { ModelConfigService } from "./model-config-service.ts";
-import type { AgentConfig, ModelInfo, ResolvedModel } from "./model-resolver.ts";
-import { type NotifyHost, type PiLike, createNotifyHost } from "./notify-host.ts";
+import { ManifestStore } from "./persistence/manifest-store.ts";
+import type { ModelConfigService } from "./assembly/model-config-service.ts";
+import type { AgentConfig, ModelInfo, ResolvedModel } from "./assembly/model-resolver.ts";
+import { type NotifyHost, type PiLike, createNotifyHost } from "./notify/notify-host.ts";
 // [T4④ / PS-5] flush 被门拦时的未投递 pending 落盘账本（persistUndeliveredNotificationsForReplay 消费）
 // [R2] BatchBudgetParams / BgNotifyRecord 类型引用已随域 #5 聚合迁至 service/sync-collect-domain.ts（壳内零消费）。
 // [H1 U2] notify 门迁 notifier.ts（Continuation 双闸共用），此处 re-export 保持既有
@@ -49,11 +49,11 @@ import { type NotifyHost, type PiLike, createNotifyHost } from "./notify-host.ts
 // [R4] notifyGateAllowsDelivery 的值消费（kickOffChatRound / onOneShotSettledWatchdog
 // Timeout 双闸）已随 chat 域迁 service/chat-rounds.ts（2026-09-13 接线）——壳内零值
 // 消费，仅保留 re-export（机制不变）。
-export { notifyGateAllowsDelivery } from "./notifier.ts";
-import { getBoundNotifyLedger, NOTIFY_LEDGER_CUSTOM_TYPE } from "./notify-ledger.ts";
-import { getSubagentRecordsDir, getSubagentSessionDir } from "./path-encoding.ts";
-import type { StatusFilter } from "./record-store.ts";
-import { RecordStore } from "./record-store.ts";
+export { notifyGateAllowsDelivery } from "./notify/notifier.ts";
+import { getBoundNotifyLedger, NOTIFY_LEDGER_CUSTOM_TYPE } from "./notify/notify-ledger.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "./assembly/path-encoding.ts";
+import type { StatusFilter } from "./persistence/record-store.ts";
+import { RecordStore } from "./persistence/record-store.ts";
 // [W4] 轮次活性监督器（D2「等待有主」权威层；机制与注释见 round-supervisor/，
 // 装配绑定面在 service-binding.ts——变化轴独立）。[B-6/R4] 字段留壳（boot/dispose
 // 时序消费在壳 + C-6 装配闭包经壳转发 late-bound）。
@@ -62,7 +62,7 @@ import {
   createRoundSupervisorForService,
   runPendingReconcileSweepForService,
 } from "./round-supervisor/service-binding.ts";
-import type { StreamSink, SubagentStream } from "./stream-sink.ts";
+import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
 // [R4] settled-watchdog 全族消费（arm/disarm/refresh）已随 run 域与 workflow 族迁两个
 // 聚合文件，chat 域消费（kickOffChatRound arm / watchdog fire 处置）已迁
 // service/chat-rounds.ts（2026-09-13 接线）；hasLiveProcessHandle
@@ -78,13 +78,13 @@ import type {
   ExecutionRecord,
   RecordSnapshot,
   SubagentRecord,
-} from "./types.ts";
+} from "./assembly/types.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
-import { registerGlobalObservability } from "./ui-request-observability.ts";
+import { registerGlobalObservability } from "./ui/ui-request-observability.ts";
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
-import type { UiRequestObservability } from "./ui-request-observability.ts";
-import { WorktreeManager } from "./worktree-manager.ts";
+import type { UiRequestObservability } from "./ui/ui-request-observability.ts";
+import { WorktreeManager } from "./worktree/worktree-manager.ts";
 // [H3/R6] 聚合面接口类型声明（queries/chatActions 消费面 + 构造参数）外移支撑文件
 // 后经 type-only import 消费（编译后擦除，与 bootstrap→壳的 SubagentService 值边
 // 不构成值环）。
@@ -139,10 +139,10 @@ const logger = getLogger("subagents");
 /** UI streaming sink 的最小接口（ctx.ui.setWidget 的 duck-typed 子集）。
  *  session_start 时从 ctx.ui 注入，background 执行期间用于把合并后的 text_delta
  *  通过 setWidget 通道转发到 RPC stdout（不经 sendMessage 的持久化路径）。 */
-export type { StreamSink } from "./stream-sink.ts";
+export type { StreamSink } from "./assembly/stream-sink.ts";
 
 // pi 依赖端口类型 re-export：测试侧 mock PiLike 历来从本模块取（与 StreamSink 同构的门面模式）
-export type { PiLike } from "./notify-host.ts";
+export type { PiLike } from "./notify/notify-host.ts";
 
 /** session_start 注入参数（session 级）。
  *  [R1] 接口本体已迁 service/session-baselines.ts（唯一消费者 SessionBaselines.initSession）；

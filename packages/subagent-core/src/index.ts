@@ -74,8 +74,8 @@ export type {
 } from "./execution/engine/types.ts";
 // RunContext 的成员类型（ctxModel / stream）——类型闭包随 EnginePort 必然公开，
 // 显式导出免宿主深路径兜圈；type-only（SubagentStream 是 execution 内部实现，禁 new）。
-export type { ModelInfo } from "./execution/model-resolver.ts";
-export type { SubagentStream } from "./execution/stream-sink.ts";
+export type { ModelInfo } from "./execution/assembly/model-resolver.ts";
+export type { SubagentStream } from "./execution/assembly/stream-sink.ts";
 
 // routeEngine：三层路由（调用参数 > frontmatter > 全局默认）+ probe fallback 编排
 // 的单一权威点（engine-abstraction D9/D7）。宿主按 error.code（engine_* 错误族）
@@ -176,7 +176,7 @@ export {
   CLOSED_REASONS,
   DEFAULT_AGENT_NAME,
   ResurrectDeniedError,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 export type {
   AgentEventLogEntry,
   BgResponse,
@@ -195,7 +195,7 @@ export type {
   SubagentListItem,
   SubagentRecord,
   SubagentToolResult,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool calls /
 // live progress），interface 渲染层唯一消费入口。
@@ -206,7 +206,7 @@ export {
   getAllToolCalls,
   projectLiveProgress,
   projectOutcome,
-} from "./execution/execution-record.ts";
+} from "./execution/persistence/execution-record.ts";
 
 // SubagentService 聚合面 + 进程单例访问器（post-convergence D8）：访问器经
 // globalThis[Symbol.for] slot 防 jiti 多实例分裂，/resume /fork 复用既有实例
@@ -236,23 +236,23 @@ export {
   getModelConfigService,
   setModelConfigService,
   type ModelConfigServiceInit,
-} from "./execution/model-config-service.ts";
+} from "./execution/assembly/model-config-service.ts";
 
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
   bindNotifyLedgerHost,
   getBoundNotifyLedger,
   type NotifyLedgerHost,
-} from "./execution/notify-ledger.ts";
+} from "./execution/notify/notify-ledger.ts";
 
 // identity 重建常量与类型：session_start identity custom entry 的写入侧契约。
 export {
   IDENTITY_CUSTOM_TYPE,
   type SubagentIdentityData,
-} from "./execution/session-reconstructor.ts";
+} from "./execution/persistence/session-reconstructor.ts";
 
 // 执行域外围件（组合根 / interface 层直接消费的独立单点件）。
-export { bestEffort } from "./execution/best-effort.ts";
+export { bestEffort } from "./execution/assembly/best-effort.ts";
 // channel-registry 类型闭包（UiChannelRegistry / ChannelHandler）随值符号进 barrel
 // （u-2b 主 agent 裁决 2026-09-03）：壳 index.ts 跨扩展 re-export surface 的非测试
 // 生产消费，满足 D3 判定标准；type-only，零运行时面变化。
@@ -260,17 +260,17 @@ export {
   getOrCreateChannelRegistry,
   type UiChannelRegistry,
   type ChannelHandler,
-} from "./execution/channel-registry-access.ts";
-export { DialogGlobalQueue } from "./execution/dialog-queue.ts";
+} from "./execution/assembly/channel-registry-access.ts";
+export { DialogGlobalQueue } from "./execution/ui/dialog-queue.ts";
 export {
   readGlobalConfig,
   type GlobalConfigReadResult,
-} from "./execution/config.ts";
-export { isResumable } from "./execution/lifecycle-predicates.ts";
-export { maybeCleanupExpiredSessionFiles } from "./execution/session-file-gc.ts";
-export { createUiRequestHandlerForMode } from "./execution/ui-request-handler-factory.ts";
-export { WorktreeManager } from "./execution/worktree-manager.ts";
-export { SubprocessAgentRunner } from "./execution/subprocess-agent-runner.ts";
+} from "./execution/assembly/config.ts";
+export { isResumable } from "./execution/lifecycle/lifecycle-predicates.ts";
+export { maybeCleanupExpiredSessionFiles } from "./execution/persistence/session-file-gc.ts";
+export { createUiRequestHandlerForMode } from "./execution/ui/ui-request-handler-factory.ts";
+export { WorktreeManager } from "./execution/worktree/worktree-manager.ts";
+export { SubprocessAgentRunner } from "./execution/assembly/subprocess-agent-runner.ts";
 
 // record 存储面：RecordStore 类 + 索引文件名常量（bench 扫描基准消费）；
 // ChangeListener / RecordStorePi / StatusFilter 为状态查询面的类型闭包
@@ -280,25 +280,25 @@ export {
   type ChangeListener,
   type RecordStorePi,
   type StatusFilter,
-} from "./execution/record-store.ts";
-export { INDEX_FILENAME } from "./execution/sessions-index.ts";
+} from "./execution/persistence/record-store.ts";
+export { INDEX_FILENAME } from "./execution/persistence/sessions-index.ts";
 
 // record 落盘 entry 契约：custom entry 写入侧（@experimental U10 / D6）。
 export {
   SUBAGENT_RECORD_CUSTOM_TYPE,
   toSubagentRecordEntry,
   type SubagentRecordEntryData,
-} from "./execution/record-entry.ts";
+} from "./execution/persistence/record-entry.ts";
 
 // agent-registry 执行消费面：loadByPath 直接加载（@experimental U10 / D6）+
 // parseAgentProfile 宽容解析（无 frontmatter 不拒、name 缺省 stem、返回 body 与
 // 执行字段全量）——执行消费面单点；与严格注入投影（parseResourceMeta）双轨分离
 // 的执行侧统一入口（U2 / D3）。
-export { AgentRegistry } from "./execution/agent-registry.ts";
+export { AgentRegistry } from "./execution/assembly/agent-registry.ts";
 export {
   parseAgentProfile,
   type AgentProfile,
-} from "./execution/agent-registry.ts";
+} from "./execution/assembly/agent-registry.ts";
 
 // 错误类型族（error-recovery.ts 计划路径实测不存在，实测散布于下列源文件）：
 // resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts），
@@ -306,7 +306,7 @@ export {
 export {
   DirtyWorktreeError,
   ForkDepthExceededError,
-} from "./execution/types.ts";
+} from "./execution/assembly/types.ts";
 
 // 动作层领域内核（@experimental U10 / D6）：六 handler 的校验/守卫链/归属判定/
 // 终态映射，产出领域对象，宿主 adapter 负责包装渲染。
@@ -338,10 +338,10 @@ export {
   type MessageHandlerResult,
   type StartHandlerInput,
   type StartHandlerResult,
-} from "./execution/subagent-actions-core.ts";
+} from "./execution/assembly/subagent-actions-core.ts";
 
 // 进程活性探针（watchdog/孤儿判定共用，agent-ref 契约原语组 U1）。
-export { isProcessAlive } from "./execution/alive-store.ts";
+export { isProcessAlive } from "./execution/persistence/alive-store.ts";
 
 // 并发池工厂（U3/U4 / D7）：queuePolicy 缺省 priority 保 pi 行为，zsw 消费
 // strict-fifo——策略差异显式化而非双实现。
@@ -350,7 +350,7 @@ export {
   type ConcurrencyPool,
   type CreateConcurrencyPoolOptions,
   type QueuePolicy,
-} from "./execution/concurrency-pool.ts";
+} from "./execution/assembly/concurrency-pool.ts";
 
 // 模型引用切分原语（U1 契约面批件）：provider/model 引用切分与缺省值（两宿主
 // maxTurns/model 换算同源）。[W11/H2] 实现体随 engines/zcode 删除迁至
@@ -387,11 +387,11 @@ export {
   type ListWorktreePorcelainOptions,
   type PatchBaselineAnchor,
   type WorktreePatchResult,
-} from "./execution/worktree-git-ops.ts";
+} from "./execution/worktree/worktree-git-ops.ts";
 
 // 组装层（U2 装配）：discoverAgents 发现→宽容解析→去重→码点序（workflow 侧
 // discoverWorkflows 对称面，第三宿主「列 agents」入口）。
-export { discoverAgents } from "./execution/agents-assembly.ts";
+export { discoverAgents } from "./execution/assembly/agents-assembly.ts";
 
 // ── workflow 编排入口（orchestration）────────────────────────
 // runWorkflow / abortRun：run 生命周期 free functions（D-12）——orchestration 的

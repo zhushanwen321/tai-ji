@@ -33,9 +33,9 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 
-import { getSubagentSessionDir, getSubagentRecordsDir } from "../path-encoding.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelRegistryLike } from "../model-resolver.ts";
+import { getSubagentSessionDir, getSubagentRecordsDir } from "../assembly/path-encoding.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 const IDENTITY_ENV_KEYS = [

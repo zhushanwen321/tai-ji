@@ -18,7 +18,7 @@ import {
   hasInteractiveUI,
   resolveHostMode,
   willRespondToAskUser,
-} from "../host-mode.ts";
+} from "../assembly/host-mode.ts";
 
 describe("resolveHostMode — ExtensionMode 聚合为 HostMode", () => {
   it('"tui" → "tui"（纯 Pi TUI，ctx.ui.custom 可用）', () => {

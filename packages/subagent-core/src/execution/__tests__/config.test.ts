@@ -23,9 +23,9 @@ import {
   loadGlobalConfig,
   readGlobalConfig,
   type GlobalConfigReadResult,
-} from "../config.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
+} from "../assembly/config.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 
 let tmpDir: string;
 

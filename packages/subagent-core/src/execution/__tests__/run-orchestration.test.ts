@@ -27,10 +27,10 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ModelConfigService } from "../model-config-service.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { WorktreeManager } from "../worktree-manager.ts";
+import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService（自 subagent-service.test.ts 迁移段自持副本）──
 

@@ -27,12 +27,12 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { transcriptAnchorOf } from "../cold-lookup.ts";
-import { createRecord, updateFromEvent } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import { readRecordBinding, zcodeAnchorBasePath, writeRecordBinding } from "../state-marker.ts";
-import type { ExecutionRecord, TranscriptRef } from "../types.ts";
-import { ResurrectDeniedError } from "../types.ts";
+import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
+import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { readRecordBinding, zcodeAnchorBasePath, writeRecordBinding } from "../persistence/state-marker.ts";
+import type { ExecutionRecord, TranscriptRef } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../assembly/types.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 

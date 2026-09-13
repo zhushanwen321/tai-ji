@@ -30,9 +30,9 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => lo
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/state-marker.ts";
-import type { ModelRegistryLike } from "@zhushanwen/subagent-core/execution/model-resolver.ts";
-import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/path-encoding.ts";
+import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persistence/state-marker.ts";
+import type { ModelRegistryLike } from "@zhushanwen/subagent-core/execution/assembly/model-resolver.ts";
+import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { forkFromHandler, messageHandler } from "../interface/subagent-actions.ts";

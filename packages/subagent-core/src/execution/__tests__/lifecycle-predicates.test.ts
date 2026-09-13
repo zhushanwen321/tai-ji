@@ -11,14 +11,14 @@ import {
   armIdleTimer,
   disarmIdleTimer,
   _resetLifecycleState,
-} from "../lifecycle-manager.ts";
+} from "../lifecycle/lifecycle-manager.ts";
 import {
   coreSpawnedChildrenMirror,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 
-import { hasLiveProcessHandle, isIdle, isResumable } from "../lifecycle-predicates.ts";
+import { hasLiveProcessHandle, isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 
 /** 构造最小 ExecutionRecord（status 默认 running）。 */
 function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {

@@ -53,7 +53,7 @@ describe("M7: handleWorkerMessage validates msg before dereferencing", () => {
 // ── M8: reconstructor Array.isArray guard ────────────────────
 
 describe("M8: session-reconstructor guards msg.content with Array.isArray", () => {
-  const src = readSrc(join("src", "execution", "session-reconstructor.ts"));
+  const src = readSrc(join("src", "execution", "persistence", "session-reconstructor.ts"));
 
   it("for...of msg.content is guarded by Array.isArray", () => {
     // 验证 for (const block of msg.content) 前有 Array.isArray 守卫

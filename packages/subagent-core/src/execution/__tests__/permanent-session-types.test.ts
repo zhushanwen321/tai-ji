@@ -20,10 +20,10 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createRecord } from "../execution-record.ts";
-import { RecordStore } from "../record-store.ts";
-import { readRecordBinding, writeRecordBinding } from "../state-marker.ts";
-import type { RecordBinding } from "../state-marker.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { RecordStore } from "../persistence/record-store.ts";
+import { readRecordBinding, writeRecordBinding } from "../persistence/state-marker.ts";
+import type { RecordBinding } from "../persistence/state-marker.ts";
 import {
   NEW_STOP_REASONS,
   ROUND_TERMINAL_STOP_REASONS,
@@ -31,12 +31,12 @@ import {
   isPiTranscriptRef,
   isZcodeTranscriptRef,
   isValidStopReason,
-} from "../types.ts";
+} from "../assembly/types.ts";
 import type {
   Epoch,
   Intent,
   TranscriptRef,
-} from "../types.ts";
+} from "../assembly/types.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 

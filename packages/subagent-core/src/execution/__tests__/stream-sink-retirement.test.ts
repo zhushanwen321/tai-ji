@@ -67,8 +67,8 @@ vi.mock("node:fs", async () => {
 
 // 接线层观测点：工厂调用记录（参数透传断言用）。返回 stub 形状满足消费面
 // （session-runner onDelta / subagent-service dispose）。判定层走 vi.importActual。
-vi.mock("../stream-sink.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../stream-sink.ts")>();
+vi.mock("../assembly/stream-sink.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../assembly/stream-sink.ts")>();
   return {
     ...actual,
     createBackgroundStream: vi.fn((recordId: string) => ({
@@ -79,8 +79,8 @@ vi.mock("../stream-sink.ts", async (importOriginal) => {
   };
 });
 
-vi.mock("../alive-store.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../alive-store.ts")>();
+vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../persistence/alive-store.ts")>();
   return {
     ...actual,
     writeAliveMarker: vi.fn(),
@@ -88,7 +88,7 @@ vi.mock("../alive-store.ts", async (importOriginal) => {
   };
 });
 
-vi.mock("../state-marker.ts", () => ({
+vi.mock("../persistence/state-marker.ts", () => ({
   writeFinalizedState: vi.fn(),
   writeCancelledState: vi.fn(),
   readStateMarker: vi.fn(() => undefined),
@@ -96,7 +96,7 @@ vi.mock("../state-marker.ts", () => ({
   STATE_SIDECAR_EXT: ".state",
 }));
 
-vi.mock("../manifest-store.ts", () => {
+vi.mock("../persistence/manifest-store.ts", () => {
   class FakeManifestStore {
     writeManifest = vi.fn(async () => {});
     readManifest = vi.fn(async () => null);
@@ -108,12 +108,12 @@ vi.mock("../manifest-store.ts", () => {
 
 import { spawn } from "node:child_process";
 
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { RELAY_ENV_NODE, RELAY_ENV_SCRIPT, RELAY_ENV_SOCKET } from "@zhushanwen/subagent-engine-sdk";
 import { SubagentService } from "../subagent-service.ts";
-import { createBackgroundStream } from "../stream-sink.ts";
-import type { ExtensionMode } from "../host-mode.ts";
+import { createBackgroundStream } from "../assembly/stream-sink.ts";
+import type { ExtensionMode } from "../assembly/host-mode.ts";
 
 const mockSpawn = vi.mocked(spawn);
 const mockCreateStream = vi.mocked(createBackgroundStream);
@@ -194,12 +194,12 @@ describe("退役步骤 2 判定层：createBackgroundStream", () => {
   const sink = { setWidget: vi.fn() };
 
   it("gui（mode=rpc）+ relay 激活 → 不创建（tee 供数，widget 私货停发）", async () => {
-    const actual = await vi.importActual<typeof import("../stream-sink.ts")>("../stream-sink.ts");
+    const actual = await vi.importActual<typeof import("../assembly/stream-sink.ts")>("../assembly/stream-sink.ts");
     expect(actual.createBackgroundStream("rec-1", sink, "rpc", RELAY_ON)).toBeUndefined();
   });
 
   it("tui（mode=tui）+ relay 激活 → 原样创建（TUI widget 行是终端用户的实时预览）", async () => {
-    const actual = await vi.importActual<typeof import("../stream-sink.ts")>("../stream-sink.ts");
+    const actual = await vi.importActual<typeof import("../assembly/stream-sink.ts")>("../assembly/stream-sink.ts");
     const stream = actual.createBackgroundStream("rec-1", sink, "tui", RELAY_ON);
     expect(stream).toBeInstanceOf(actual.SubagentStream);
     stream?.dispose();
@@ -207,21 +207,21 @@ describe("退役步骤 2 判定层：createBackgroundStream", () => {
   });
 
   it("gui + relay 未激活 → 原样创建（现状路径，独立 pi / 无 runtime 环境零回归）", async () => {
-    const actual = await vi.importActual<typeof import("../stream-sink.ts")>("../stream-sink.ts");
+    const actual = await vi.importActual<typeof import("../assembly/stream-sink.ts")>("../assembly/stream-sink.ts");
     const stream = actual.createBackgroundStream("rec-1", sink, "rpc", {});
     expect(stream).toBeInstanceOf(actual.SubagentStream);
     stream?.dispose();
   });
 
   it("headless（mode 未穿透）+ relay 激活 → 原样创建（抑制条件精确等于 gui，不扩大面）", async () => {
-    const actual = await vi.importActual<typeof import("../stream-sink.ts")>("../stream-sink.ts");
+    const actual = await vi.importActual<typeof import("../assembly/stream-sink.ts")>("../assembly/stream-sink.ts");
     const stream = actual.createBackgroundStream("rec-1", sink, undefined, RELAY_ON);
     expect(stream).toBeInstanceOf(actual.SubagentStream);
     stream?.dispose();
   });
 
   it("sink=null 恒不创建（session_start 未注入降级，与退役判定正交）", async () => {
-    const actual = await vi.importActual<typeof import("../stream-sink.ts")>("../stream-sink.ts");
+    const actual = await vi.importActual<typeof import("../assembly/stream-sink.ts")>("../assembly/stream-sink.ts");
     expect(actual.createBackgroundStream("rec-1", null, "tui", {})).toBeUndefined();
     expect(actual.createBackgroundStream("rec-1", null, "rpc", RELAY_ON)).toBeUndefined();
   });

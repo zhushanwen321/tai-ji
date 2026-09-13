@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => "/home/user/.pi/agent",
 }));
-vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () => ({
   WorktreeManager: class {
     scan = vi.fn(async () => {});
     cleanup = vi.fn();
@@ -29,13 +29,13 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree-manager.ts", () => ({
     registerPid = vi.fn();
   },
 }));
-vi.mock("@zhushanwen/subagent-core/execution/session-file-gc.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
   maybeCleanupExpiredSessionFiles: vi.fn(),
 }));
 
 // seam 组（第 1 组 describe）直接 import session-lifecycle——它消费的默认实现走
 // 下列 mock；seam 用例全部经 deps 注入 fake，mock 仅作默认实现的安全网。
-vi.mock("@zhushanwen/subagent-core/execution/model-config-service.ts", () => ({
+vi.mock("@zhushanwen/subagent-core/execution/assembly/model-config-service.ts", () => ({
   ModelConfigService: class {
     initModel = vi.fn();
     reloadGlobalConfig = vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } }));

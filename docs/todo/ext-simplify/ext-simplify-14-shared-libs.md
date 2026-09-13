@@ -41,7 +41,7 @@ extension-logger 解决「pi 宿主无 logger 接口」：扩展只能裸 consol
 3. **导出面收敛**：三包中「外部零引用」的导出收窄，被 parity 测试与包内测试引用的锚点显式保留并登记理由。
 4. **已核实面零回归**：sync 锁在真实跨进程竞争下行为不变（两进程并发 RMW 零丢失）；runtime 侧 async 锁（6 调用方）与 `/core` 子入口不受影响；extension-logger 机制行为不变。
 
-**In-scope**：`extensions/shared/file-lock/`（src + tests + package.json 描述）、`extensions/universal/cache-probe/`（src/index.ts、fingerprint.ts、README、tests）、`extensions/shared/extension-logger/`（src/index.ts、package.json 描述）+ 相邻注释修正 `packages/runtime/src/utils/file-lock.ts`（仅注释）与 `packages/runtime/test/file-lock-parity.test.ts`（仅 :5 头注释，第四处同款，见 E5）+ 删符号的连带悬空引用清扫（C-proc-10，全部仅注释/登记表/测试，零行为）：`packages/subagent-core/src/execution/worktree-registry.ts`、`docs/architecture/data-source-registry.md`（worktrees.json 行）、`packages/subagent-core/src/core/logger.ts`（:16 注释）、`extensions/shared/llm-shared/src/__tests__/config.test.ts`（:24 注释）、`extensions/universal/base-tool-enhance/src/__tests__/maintenance-once.test.ts`（测试 mock/断言改写，见 E14）。
+**In-scope**：`extensions/shared/file-lock/`（src + tests + package.json 描述）、`extensions/universal/cache-probe/`（src/index.ts、fingerprint.ts、README、tests）、`extensions/shared/extension-logger/`（src/index.ts、package.json 描述）+ 相邻注释修正 `packages/runtime/src/utils/file-lock.ts`（仅注释）与 `packages/runtime/test/file-lock-parity.test.ts`（仅 :5 头注释，第四处同款，见 E5）+ 删符号的连带悬空引用清扫（C-proc-10，全部仅注释/登记表/测试，零行为）：`packages/subagent-core/src/execution/worktree/worktree-registry.ts`、`docs/architecture/data-source-registry.md`（worktrees.json 行）、`packages/subagent-core/src/core/logger.ts`（:16 注释）、`extensions/shared/llm-shared/src/__tests__/config.test.ts`（:24 注释）、`extensions/universal/base-tool-enhance/src/__tests__/maintenance-once.test.ts`（测试 mock/断言改写，见 E14）。
 **Out-of-scope**：runtime 侧 file-lock.ts 的任何行为面（withFileLockAsync 6 调用方、sync 编排本体）；subagent-core 与 runtime 的任何行为面（连带清扫仅注释与登记表；worktree-registry 的 proper-lockfile 直用实装不动）；lock-core.ts 的协议与单次原语定位；extension-logger 限流/清理机制本体；cache-probe 的采集 schema（v2 字段集不变）；fileLog size cap 的实装（裁决为豁免登记，见 D4）。
 
 ---
@@ -245,7 +245,7 @@ V1/V2 是本设计的验收主场景（锁是正确性敏感面）；V5 同时�
 | `extensions/shared/file-lock/src/__tests__/file-lock-external-removal.test.ts` | async 调用改 sync（行数持平）（E6） |
 | `packages/runtime/src/utils/file-lock.ts` | 仅 :56-60 注释修正（2 行，零行为）（E5） |
 | `packages/runtime/test/file-lock-parity.test.ts` | 仅 :5 头注释主句归因修正（互斥条件归 lockfile 路径 + mkdir 协议，参数一致 = 行为一致锚定；零行为）（E5 第四处同款） |
-| `packages/subagent-core/src/execution/worktree-registry.ts` | 仅注释：:40-45 常量注释（含 :42-44「参数漂移破坏互斥」失准句按 E5 口径修正）与 :186-199 withLock JSDoc 改指现存对齐目标、不留被删符号裸提及（V5-① subagent-core 域可判；proper-lockfile 直用实装零改动）（E12①） |
+| `packages/subagent-core/src/execution/worktree/worktree-registry.ts` | 仅注释：:40-45 常量注释（含 :42-44「参数漂移破坏互斥」失准句按 E5 口径修正）与 :186-199 withLock JSDoc 改指现存对齐目标、不留被删符号裸提及（V5-① subagent-core 域可判；proper-lockfile 直用实装零改动）（E12①） |
 | `docs/architecture/data-source-registry.md` | :110 worktrees.json 行锁协议列更新为 proper-lockfile 直用现状、行号引用改方法名 + :114 system-prompt-trace-baseline 行升格句存量失准修正（先例改单端）（E12②） |
 | `extensions/universal/base-tool-enhance/src/__tests__/maintenance-once.test.ts` | mock 工厂去 withFileLock 键 + :122 恒真断言删除 + :8/:34-35 注释改写（withFileLockSync 哨兵保留）（E14） |
 | `packages/subagent-core/src/core/logger.ts` | 仅 :16 注释：LogLevel 事实修正（四值含 info、对齐目标去符号级引用）（E15） |

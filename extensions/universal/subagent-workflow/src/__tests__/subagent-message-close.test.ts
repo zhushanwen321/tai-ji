@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createRecord } from "@zhushanwen/subagent-core/execution/execution-record.ts";
+import { createRecord } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
 import { adapter, closeHandler, mapExternalState, messageHandler } from "../interface/subagent-actions.ts";

@@ -15,10 +15,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { COLLECT_SCAN_LIMIT, CollectCoordinator } from "../collect-coordinator.ts";
-import type { CollectCoordinatorDeps } from "../collect-coordinator.ts";
-import type { BgNotifyRecord } from "../notifier.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+import { COLLECT_SCAN_LIMIT, CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import type { CollectCoordinatorDeps } from "../assembly/collect-coordinator.ts";
+import type { BgNotifyRecord } from "../notify/notifier.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 // ── stub 工厂 ──
 

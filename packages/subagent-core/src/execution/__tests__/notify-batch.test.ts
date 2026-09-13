@@ -29,16 +29,16 @@ import {
   NOTIFY_LEDGER_CUSTOM_TYPE,
   _resetNotifyLedgerForTest,
   type NotifyLedgerHost,
-} from "../notify-ledger.ts";
+} from "../notify/notify-ledger.ts";
 import {
   buildBatchLlmContent,
   buildBatchNotifyId,
   createNotifier,
   type BgNotifyRecord,
   type NotifierHost,
-} from "../notifier.ts";
-import { CollectCoordinator } from "../collect-coordinator.ts";
-import type { ExecutionRecord, SubagentRecord } from "../types.ts";
+} from "../notify/notifier.ts";
+import { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
 // ─── env 剥离（impl-plan 偏差#5：RELAY/PI_SUBAGENT 泄漏即红的存量敏感面隔离）──
 

@@ -12,11 +12,11 @@
 //   - 聚合→本文件：仅 type-only（聚合不消费装配工厂）
 //   - 本文件→聚合：无（现状零依赖）
 
-import type { UiRequestHandler } from "../dialog-queue.ts";
-import type { ModelConfigService } from "../model-config-service.ts";
-import type { StatusFilter } from "../record-store.ts";
+import type { UiRequestHandler } from "../ui/dialog-queue.ts";
+import type { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { StatusFilter } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord, RecordSnapshot, SubagentRecord } from "../types.ts";
+import type { ExecutionRecord, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 
 /** [D4 查询面聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
  *  `service.queries` 消费面。变化轴：改查询投影 / 过滤 / 订阅语义，只动 queries 组；

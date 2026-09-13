@@ -42,18 +42,18 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import { tryTransition } from "../execution-record.ts";
-import { createRecord } from "../execution-record.ts";
-import { createNotifyHost } from "../notify-host.ts";
-import { ModelConfigService } from "../model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
-import type { RecordStore } from "../record-store.ts";
-import { SubagentStream } from "../stream-sink.ts";
+import { tryTransition } from "../persistence/execution-record.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import { createNotifyHost } from "../notify/notify-host.ts";
+import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
+import type { RecordStore } from "../persistence/record-store.ts";
+import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { PiLike } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { SubagentRecordEntryData } from "../record-entry.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../record-entry.ts";
+import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import {
   _resetSettledWatchdogsForTest,
   _setMidRoundNoProgressWindowMsForTest,
@@ -63,12 +63,12 @@ import {
   isSettledWatchdogDisabled,
   SETTLED_MID_ROUND_NO_PROGRESS_MS,
   SETTLED_WATCHDOG_ENV,
-} from "../settled-watchdog.ts";
+} from "../lifecycle/settled-watchdog.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EngineCapabilities } from "../engine/types.ts";
 import type { EnginePort } from "../engine/port.ts";
-import type { ExecutionRecord } from "../types.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
