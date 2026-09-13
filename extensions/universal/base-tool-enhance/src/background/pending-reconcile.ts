@@ -8,14 +8,18 @@
  *  ③ fork 后任务完成通知写进新 session，旧 session 文件的 register 成僵尸。
  *
  * 收尾写法（权威路径）：直接 pi.appendEntry("pending:unregister", {id, reason,
- * status})——**不走 bus emit 作为权威**：appendEntry 不依赖 listener 存活，两个
- * extension 的加载/派发顺序（CLI --extension 顺序用户可控）无保障，顺序反转时
- * emit 无人接收、对账失效。差集消费方 goal 从持久化 entries 算差集
- * （agent-end.ts getEntries()），appendEntry 同步入账（pi dist 实证）对守卫直接
- * 生效，无不一致窗口。appendEntry 之外尽力补一次 emit（幂等兜底，纯日志性质：
- * pending-notifications 的 unregister listener 落盘前置判断 isPendingActive 对
- * getEntries() 现算——其内存 registry/rebuild 已随 ext-simplify-12 删除，emit
- * 到达时该 id 已注销即跳过，失败无害）。
+ * status})——**appendEntry 即唯一权威路径**：appendEntry 同步入账（pi dist 实证）
+ * 且不依赖 listener 存活，差集消费方 goal 从持久化 entries 算差集
+ * （agent-end.ts getEntries()），对守卫直接生效，无不一致窗口。（尽力补 emit 的
+ * 第二写路径已随 ext-simplify-13 删除：pending unregister listener 的落盘前置
+ * isPendingActive 对 entries 现算——其内存 registry/rebuild 已随 ext-simplify-12
+ * 删除——而对账 appendEntry 同步入账先于 emit 执行，emit 到达时该 id 必已注销
+ * = 恒 no-op 死路径。）
+ *
+ * 差集判据单点（ext-simplify-13）：collectActivePendingIds（protocol
+ * pending-entries 模块，与 pending-notifications 守卫判据同源）+ bt- 前缀过滤；
+ * 本地差集副本已删除。task_id 前缀亦消费 protocol 契约常量
+ * BACKGROUND_TASK_ID_PREFIX（§2.3，区别于 subagent-workflow 的 bg-/run-）。
  *
  * 终态判据：registry state ∈ {exited, orphaned}，或（state=running/killing 且
  * kill(pid,0) 判死：收殓/写盘失败遗留的 running 条目按事实终态处理）。
@@ -27,24 +31,24 @@
  * 语义覆盖孤儿终态由 runtime 异步写入的时序窗口。
  */
 
+import {
+	BACKGROUND_TASK_ID_PREFIX,
+	collectActivePendingIds,
+} from "@xyz-agent/extension-protocol";
+import { isPidAlive } from "@xyz-agent/extension-protocol/background-task";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { isPidAlive } from "../kill-tree.ts";
 import { toPendingReason } from "./notify.ts";
 import { getRegistryPath, readRegistry } from "./registry.ts";
 import { isActiveState, isTerminalState, type RegistryEntry } from "./types.ts";
 
 const logger = getLogger("base-tool-enhance");
 
-/** 本包 task_id 前缀（§2.3，区别于 subagent-workflow 的 bg-/run-）。 */
-export const BTE_TASK_ID_PREFIX = "bt-";
-
 /**
  * 对账依赖的最小 pi 面（结构兼容 ExtensionAPI 的子集；测试注入不造完整 pi）。
  */
 export interface ReconcilePi {
 	appendEntry(customType: string, data?: unknown): void;
-	events: { emit(channel: string, data: unknown): void };
 }
 
 /** 对账结果（日志 + 测试断言面）。 */
@@ -55,48 +59,9 @@ export interface ReconcileResult {
 	skipped: string[];
 }
 
-/** entries 的最小可识别形状（duck-typed，与 pending-notifications state.ts EntryLike 同式）。 */
-interface EntryLike {
-	customType?: string;
-	data?: { id?: unknown } | null;
-}
-
-function readEntryId(raw: unknown): string | undefined {
-	if (!raw || typeof raw !== "object") return undefined;
-	const entry = raw as EntryLike;
-	const id = entry.data?.id;
-	return typeof id === "string" ? id : undefined;
-}
-
-/**
- * 差集：bt- 前缀 pending:register 且无对应 pending:unregister 的 id 集合。
- * 只认 bt- 前缀——workflow/subagent 的 register 不归本包对账（差集算法与
- * pending-notifications countActiveFromEntries 同构：unregister 全局抵消 + register
- * 去重，id 全局唯一前提）。
- */
-export function collectUnsettledTaskIds(entries: unknown[]): Set<string> {
-	const unregistered = new Set<string>();
-	for (const raw of entries) {
-		if (!raw || typeof raw !== "object") continue;
-		if ((raw as EntryLike).customType !== "pending:unregister") continue;
-		const id = readEntryId(raw);
-		if (id !== undefined && id.startsWith(BTE_TASK_ID_PREFIX)) unregistered.add(id);
-	}
-	const active = new Set<string>();
-	for (const raw of entries) {
-		if (!raw || typeof raw !== "object") continue;
-		if ((raw as EntryLike).customType !== "pending:register") continue;
-		const id = readEntryId(raw);
-		if (id === undefined || !id.startsWith(BTE_TASK_ID_PREFIX)) continue;
-		if (unregistered.has(id) || active.has(id)) continue;
-		active.add(id);
-	}
-	return active;
-}
-
 /**
  * 对账主体（同步：readRegistry / kill(pid,0) / appendEntry 均同步，session_start
- * 链内毫秒级完成）。每个僵尸任务 appendEntry 一次 + 尽力 emit 一次。
+ * 链内毫秒级完成）。每个僵尸任务 appendEntry 一次（唯一权威写路径）。
  */
 export function reconcilePendingEntries(
 	pi: ReconcilePi,
@@ -105,7 +70,7 @@ export function reconcilePendingEntries(
 	entries: unknown[],
 ): ReconcileResult {
 	const result: ReconcileResult = { reconciled: 0, skipped: [] };
-	const unsettled = collectUnsettledTaskIds(entries);
+	const unsettled = collectActivePendingIds(entries, { idPrefix: BACKGROUND_TASK_ID_PREFIX });
 	if (unsettled.size === 0) return result;
 
 	const registry = readRegistry(getRegistryPath(dataDir, sessionId));
@@ -131,16 +96,6 @@ export function reconcilePendingEntries(
 				detail: { id, err: err instanceof Error ? err.message : String(err) },
 			});
 			continue;
-		}
-		// 尽力补 emit（幂等兜底，纯日志性质：listener 落盘前置 isPendingActive 对
-		// entries 现算，该 id 已注销即跳过——appendEntry 同步入账已无不一致窗口；
-		// 失败无害）
-		try {
-			pi.events.emit("pending:unregister", { id, reason: pendingReason });
-		} catch (err) {
-			logger.debug("reconcile best-effort emit failed (harmless)", {
-				detail: { id, err: err instanceof Error ? err.message : String(err) },
-			});
 		}
 		result.reconciled++;
 	}

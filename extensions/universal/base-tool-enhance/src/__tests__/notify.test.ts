@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { killProcessTree } from "../kill-tree.ts";
+import { killProcessTree } from "@xyz-agent/extension-protocol/background-task";
 import {
 	BACKGROUND_BASH_CUSTOM_TYPE,
 	buildNotificationContent,

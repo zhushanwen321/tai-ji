@@ -121,11 +121,9 @@ describe("session_start chain: reconcile (M3, reap sunk into runtime by u-bte-re
 					status: "cancelled",
 				}),
 			);
-			// 对账之外尽力补一次 emit（幂等兜底，纯日志性质；失败无害）
-			expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
-				id: "bt-1700000000-idx001",
-				reason: "cancelled",
-			});
+			// 尽力补 emit 已随 ext-simplify-13 删除（恒 no-op 死路径）——对账后不得有任何
+			// bus emit，appendEntry 即唯一权威路径
+			expect(pi.events.emit).not.toHaveBeenCalled();
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 			dataDirRef.dir = "/tmp/bte-fake-agent-dir";

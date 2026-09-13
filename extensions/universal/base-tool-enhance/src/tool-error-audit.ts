@@ -4,8 +4,9 @@
  * 迁移约定（与原实现逐字段一致，M1 验收点）：
  *  - 事件名 = "tool_execution_end"（pi 0.84.1 实装无 "tool_error" 事件，工具报错以
  *    ToolExecutionEndEvent.isError=true 表达——以 dist types.d.ts 为准）
- *  - customType = "unified-hooks:tool-error"（保持原值，等价迁移不断链；unified-hooks
- *    整包废弃后该 entry 由本包继续产出，M6 摘除旧包时消费方无感）
+ *  - customType = "unified-hooks:tool-error"（保持原值：无代码消费方；保持旧名是
+ *    历史 entry 可查询性承诺（01 号设计 P-protocol / README 承接表），废弃包名残留
+ *    为已接受代价——ext-simplify-13 D4）
  *  - entry 形态 = { timestamp, toolName, toolCallId, errorText }，errorText 取不到时 null
  *
  * 原实现的设计决策一并继承：不调 ctx.ui.notify——tool error 已在对话流里

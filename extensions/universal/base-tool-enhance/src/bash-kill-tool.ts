@@ -18,9 +18,11 @@
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@xyz-agent/extension-protocol/background-task";
 import { Type } from "typebox";
 
-import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "./kill-tree.ts";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
 import { ensurePollerRunning } from "./background/poller.ts";
 import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
 import { getAllTasks, markKillingIntent } from "./background/task-store.ts";
@@ -37,6 +39,8 @@ const BASH_KILL_DESCRIPTION = [
 
 /** JSON 输出缩进（registry.ts 同款）。 */
 const JSON_INDENT = 2;
+
+const logger = getLogger("base-tool-enhance");
 
 function textResult(text: string): AgentToolResult<unknown> {
 	return { content: [{ type: "text", text }], details: undefined };
@@ -125,7 +129,13 @@ export function createBashKillToolDefinition() {
 			if (marked !== undefined) {
 				writeRegistryEntry(marked.registryPath, taskToRegistryEntry(marked));
 			}
-			killProcessTree(fromStore.pid);
+			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2：进程原语
+			// 零日志依赖，协议侧 step 标识符 + 本包落盘通道）
+			killProcessTree(fromStore.pid, (step, err) =>
+				logger.debug(step, {
+					detail: { pid: fromStore.pid, err: err instanceof Error ? err.message : String(err) },
+				}),
+			);
 			// 轮询器确保在跑：边沿收尾（写终态）依赖它
 			ensurePollerRunning();
 			return textResult(

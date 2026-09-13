@@ -14,9 +14,10 @@
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { readOutputTail } from "@xyz-agent/extension-protocol/background-task";
 import { Type } from "typebox";
 
-import { readOutputTail } from "./background/output-tail.ts";
+import { TAIL_MAX_BYTES, TAIL_MAX_LINES } from "./background/output-tail.ts";
 import { getRegistryPath, readRegistry } from "./background/registry.ts";
 import { truncateCommand } from "./background/spawn-background.ts";
 import { getAllTasks } from "./background/task-store.ts";
@@ -88,7 +89,10 @@ function findTask(
 
 /** 详情视图：tail 输出（丢失时 "<lost>"，§3.6）+ 终态字段按存在性展开。 */
 function taskDetailText(task: BackgroundTask | RegistryEntry): string {
-	const tail = readOutputTail(task.outputFile);
+	// protocol 原语返回 {text, truncated}；50KB/2000 行口径（本包产品决策）在此传参。
+	// 返回 JSON 的 `output` 字段名是 LLM 可见契约（工具 schema/描述零变化），仅在
+	// 此处从原语的 text 投影，ext-simplify-13 D2 有意内部变化
+	const tail = readOutputTail(task.outputFile, { maxBytes: TAIL_MAX_BYTES, maxLines: TAIL_MAX_LINES });
 	const detail = {
 		task_id: task.taskId,
 		state: task.state,
@@ -96,7 +100,7 @@ function taskDetailText(task: BackgroundTask | RegistryEntry): string {
 		...(task.reason !== undefined ? { reason: task.reason } : {}),
 		startedAt: task.startedAt,
 		...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-		output: tail?.output ?? "<lost>",
+		output: tail?.text ?? "<lost>",
 		truncated: tail?.truncated ?? false,
 		outputFile: task.outputFile,
 	};

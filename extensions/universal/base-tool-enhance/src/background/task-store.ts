@@ -28,6 +28,8 @@
  * 未来新增写路径（如 maintenance 类）必须保持该顺序，违反即 intent 可丢失。
  */
 
+import { trimTerminalEntries } from "@xyz-agent/extension-protocol/background-task";
+
 import {
 	isActiveState,
 	isTerminalState,
@@ -120,14 +122,17 @@ export function finalizeTask(taskId: string, outcome: FinalizeOutcome): Backgrou
 	return task;
 }
 
-/** 终态条目超上限时按 endedAt 升序淘汰最老（LRU；endedAt 缺失退 startedAt）。 */
+/**
+ * 终态条目超上限时按 endedAt 升序淘汰最老（LRU；endedAt 缺失退 startedAt）。
+ * 裁剪纯函数单点在 protocol trimTerminalEntries（ext-simplify-13：与 registry 写侧、
+ * runtime registry-write 共用同一实现，本地上限经 MAX_TERMINAL_TASKS 传参）。
+ */
 function evictTerminalOverflow(): void {
-	const terminal = getAllTasks()
-		.filter((t) => isTerminalState(t.state))
-		.sort((a, b) => (a.endedAt ?? a.startedAt) - (b.endedAt ?? b.startedAt));
-	const excess = terminal.length - MAX_TERMINAL_TASKS;
-	for (let i = 0; i < excess; i++) {
-		taskTable.delete(terminal[i].taskId);
+	const kept = trimTerminalEntries(getAllTasks(), MAX_TERMINAL_TASKS);
+	if (kept.length === taskTable.size) return;
+	const keptIds = new Set(kept.map((t) => t.taskId));
+	for (const id of [...taskTable.keys()]) {
+		if (!keptIds.has(id)) taskTable.delete(id);
 	}
 }
 
