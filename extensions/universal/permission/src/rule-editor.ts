@@ -12,9 +12,6 @@ import type { Rule } from "./types.js";
 
 // ──────────────────────── 类型 ────────────────────────
 
-/** RuleOp re-export（rule-templates.ts 定义）。 */
-export type { RuleOp } from "./rule-templates.js";
-
 /** 编辑结果：RuleOp[]（有变更）或 undefined（cancel / headless 降级）。 */
 export type RuleEditorResult = RuleOp[] | undefined;
 

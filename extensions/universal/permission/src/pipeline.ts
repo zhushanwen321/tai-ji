@@ -14,6 +14,11 @@
  *
  * fail-closed 原则：任何异常路径 → ask（交人工，不静默放行）。
  * checkPermission 永不 throw（caller index.ts 的 tool_call handler 依赖此契约）。
+ *
+ * 白盒导出声明（E9）：buildApprovalRequest / matchNonBashTool / runLayer2 /
+ * applyAutoApproveOverrides / runLayer3WithRacing 是内部测试 seam，非包公共 API
+ * （包 main 只导出工厂函数，外部消费者不存在）——pipeline.test.ts / e2e-modes.test.ts
+ * 白盒直测锚定安全语义（runLayer2 聚合表 / matchNonBashTool 非 bash 语义），故保留。
  */
 
 import { getLogger } from "@zhushanwen/pi-extension-logger";
@@ -547,8 +552,7 @@ async function runAstLayer(
  * @param config classifier 配置（auto 模式用）
  * @param userRules 用户规则（与 getDefaultRules 拼接）
  * @param deps 注入依赖
- * @param ctxBase 工具调用上下文基线（cwd/agentName）
- * @param signal 外层 abort signal
+ * @param ctxBase 工具调用上下文基线（cwd/agentName，含 signal）
  */
 export async function checkPermission(
 	toolName: string,
@@ -582,7 +586,7 @@ export async function checkPermission(
 	const rules = [...deps.getDefaultRules(), ...userRules];
 	// C1：传入完整 command（bash 跨 argv 管道 deny 补充检查）；
 	// M5：传入 path（非 bash 工具规则对 path 匹配）。
-	const layer2 = runLayer2ForArgvList(toolName, ast.argvList, rules, deps, command, ctx.path);
+	const layer2 = runLayer2(toolName, ast.argvList, rules, deps.matchRulesForArgv, command, ctx.path);
 
 	const decided = ruleDecision(layer2);
 	if (decided !== null) {
@@ -597,21 +601,6 @@ export async function checkPermission(
 
 	// auto：ask → 层 3 Racing（AI + 用户）
 	return await runLayer3WithRacing(deps, ctx, config, ctxBase.signal);
-}
-
-/**
- * 层 2 规则匹配（用注入的 deps.matchRulesForArgv）。
- * 薄封装 runLayer2，把注入的 matcher 传入纯逻辑版。
- */
-function runLayer2ForArgvList(
-	toolName: string,
-	argvList: string[][],
-	rules: readonly Rule[],
-	deps: CheckPermissionDeps,
-	command: string | undefined,
-	path: string | undefined,
-): RuleMatchResult {
-	return runLayer2(toolName, argvList, rules, deps.matchRulesForArgv, command, path);
 }
 
 /** approve/strict 模式的人工审批封装（无 AI）。 */

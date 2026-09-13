@@ -20,7 +20,7 @@
  * TUI 分支因 pi-tui Input 组件集成成本较高，暂保留简化 deny（TODO 后续迭代）。
  */
 
-import { type Component, matchesKey, type SelectItem, truncateToWidth } from "@earendil-works/pi-tui";
+import { type Component, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
 import type { ApprovalRequest } from "./pipeline.js";
 import type { ToolInvocationContext, UserDecision } from "./types.js";
@@ -305,11 +305,6 @@ export class ApprovalComponent implements Component {
 		this.cachedLines = undefined;
 	}
 
-	private rerender(): void {
-		this.invalidate();
-		this.tui.requestRender();
-	}
-
 	render(width: number): string[] {
 		if (this.cachedWidth === width && this.cachedLines) {
 			return this.cachedLines;
@@ -394,6 +389,3 @@ export function renderApprovalView(req: ApprovalRequest, width: number): string[
 	lines.push(`└${"─".repeat(innerWidth)}┘`);
 	return lines;
 }
-
-// re-export SelectItem 仅为测试便利（mock ctx.ui.select 时构造选项）
-export type { SelectItem };

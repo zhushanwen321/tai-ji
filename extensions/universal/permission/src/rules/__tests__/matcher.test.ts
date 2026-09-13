@@ -11,13 +11,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { Rule } from "../../types.js";
-import {
-	BUILTIN_DANGER_RULES,
-	getDefaultRules,
-	matchRules,
-	matchRulesForArgv,
-	resolvePattern,
-} from "../index.js";
+import { BUILTIN_DANGER_RULES, getDefaultRules } from "../builtins.js";
+import { matchRules, matchRulesForArgv, resolvePattern } from "../matcher.js";
 
 // 构造 user 规则的辅助
 function userRule(id: string, pattern: string, action: Rule["action"] = "allow"): Rule {

@@ -17,12 +17,12 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ResolvedModelEntry } from "../classifier/model-resolver.js";
 import { listAvailableModels } from "../classifier/model-resolver.js";
 import {
-	DEFAULT_SELECT_THEME,
 	type ModelPickerContext,
 	pickModelViaOverlay,
 	ProviderModelSelectorComponent,
 	type SelectionResult,
 } from "../model-picker.js";
+import { DEFAULT_SELECT_THEME } from "../select-theme.js";
 
 // ──────────────────────── mock fixtures（listAvailableModels） ────────────────────────
 

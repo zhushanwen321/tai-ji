@@ -166,7 +166,7 @@ graph LR
 | 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位；commit 513deb653 |
 | 06-u2 | committed | 1 | 78/78（+14）；tree schema 拒绝 + 五值出口用例齐；typecheck/lint 过 |
 | 06-u3 | committed | 1 | 82/82；5 builtin + 未知 action + D4 对齐守卫齐；fallback 探针 4/4 |
-| 06-u4 | pending | 0 | - |
+| 06-u4 | in-progress | 0 | - |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
 | 08-u4 | pending | 0 | - |
@@ -181,7 +181,7 @@ graph LR
 | 04-U9 | pending | 0 | - |
 | 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
 | 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 |
-| 05-S3 | pending | 0 | - |
+| 05-S3 | committed | 1 | 579/579；六组符号零命中；barrel 2+2；typecheck/lint 过（05 线完成） |
 | 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
 | 11-u1 | committed | 1 | 307/307 绿（+3 用例）+ typecheck/lint 双过 |
 

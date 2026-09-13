@@ -247,7 +247,7 @@ describe("ApprovalComponent（G4 invalidate）", () => {
 		const first = comp.render(80);
 		expect(first.length).toBeGreaterThan(0);
 
-		// invalidate 清缓存（不直接 requestRender；rerender 才 requestRender）
+		// invalidate 清缓存（不直接 requestRender）
 		requestRender.mockClear();
 		comp.invalidate();
 		// 再次 render → 重新计算（非缓存）

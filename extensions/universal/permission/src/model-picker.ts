@@ -25,9 +25,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ResolvedModelEntry } from "./classifier/model-resolver.js";
 import { DEFAULT_SELECT_THEME } from "./select-theme.js";
 
-// 保持既有 public 名（model-picker.test.ts MPT7 直接消费此路径）。
-export { DEFAULT_SELECT_THEME };
-
 // ──────────────────────── 类型 ────────────────────────
 
 /** 选择结果（discriminated union）；undefined = cancel / 降级。 */
