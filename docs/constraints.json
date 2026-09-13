@@ -2529,6 +2529,269 @@
           "agent": "review-electron-build"
         }
       ]
+    },
+    {
+      "id": "C-state-13",
+      "summary": "用户内容渲染净化契约：聊天 markdown 容器经 v-html 渲染必须保留 DOMPurify 净化；DetailPane 等用户可控文件内容/diff 禁 v-html（用文本插值/pre），高亮复用 shiki 单例禁引第二套高亮库",
+      "scope": [
+        "packages/ui/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "STANDARDS.md",
+        "../packages/renderer/src/components/panel/DetailPane.vue"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "type-safety"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-state-14",
+      "summary": "renderer 启动编排中异步数据加载必须在消费该数据的状态设置之前 await 完成（如 await load 先于 presetCwd），禁依赖数据已就绪的隐式假设",
+      "scope": [
+        "packages/renderer/**",
+        "packages/core/**"
+      ],
+      "authority": [
+        "../packages/renderer/src/composables/features/sidebar/useSidebar.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-state-15",
+      "summary": "前端渲染性能纪律：流式阶段走 renderLightweight（完整阶段才挂 Shiki）；Mermaid/shiki 语言包按需加载；streaming 计时器仅 streaming 态存在且全局至多 1 个，complete 后清除",
+      "scope": [
+        "packages/ui/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "STANDARDS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-state-16",
+      "summary": "WS 查询消费三守卫：编排层直调 domain 方法不经会吞错的中间层；WS pending 查询必须包超时 race（防断连后 pending 永不 settle 导致 UI 挂死）；快速连续查询维护自增 loadSeq，await 后丢弃过期响应",
+      "scope": [
+        "packages/core/**"
+      ],
+      "authority": [
+        "../packages/core/src/domain/new-task-search/search.ts",
+        "../packages/core/src/domain/new-task-search/search-jump.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-16",
+      "summary": "文件服务安全与超时契约：接收 path 的文件树/git 入口必须 isUnderOrEqual(cwd, resolvedPath) 越界守门；git CLI 必须经 IGitExecutor port 数组形式执行禁字符串拼接；findFiles 限定 cwd 并忽略 .git/node_modules；listDir/stat/readFile 共用 10s 超时",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/file-service.ts",
+        "../packages/runtime/src/infra/git-executor.ts",
+        "../packages/runtime/src/services/git-service.ts"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-17",
+      "summary": "plugin 执行隔离与并发契约：trusted 插件共享 Worker（默认 ≤10/Worker）、sandbox 插件独占 fork 子进程；hook 按 priority 串行且单 handler 5s 超时放行；Worker crash 走 5s 冷却 + 3 次重建上限防 crash loop；每 pluginId 独立锁互不阻塞",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "plugins/built-in-plugin-guide.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-18",
+      "summary": "WS 重连与命令超时善后：重连退避有上限禁死循环；重连成功后对所有 isGenerating session 调 markSessionError 收尾（不续传 streaming）；命令超时 reject + 删 pending + 迟到响应静默丢弃",
+      "scope": [
+        "packages/core/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/core/src/transport/ws-client.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-19",
+      "summary": "Tool Approval 交互契约：危险操作三选一（Allow/Deny/Always Allow）；UI 弹窗 60s 超时自动关闭且用户可取消",
+      "scope": [
+        "packages/ui/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "CONTEXT.md"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-data-23",
+      "summary": "用户数据持久化健壮性：读取遇 ENOENT/非法 JSON 必须 try/catch 降级空数据不得阻塞启动；外部输入参数 service 层主守卫 + store 层防御性兜底双层拦截",
+      "scope": [
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/workspace/recent-workspaces-store.ts",
+        "../packages/runtime/src/services/workspace/workspace-service.ts"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+    {
+      "id": "C-data-24",
+      "summary": "cwd 失效降级契约：create/restore 收到可能已删除的 cwd 必须 existsSync 校验，失效降级 homedir；前端比对请求 cwd 与 reply session.cwd 不一致时 toast 通知；禁用失效 cwd 继续 create",
+      "scope": [
+        "packages/runtime/**",
+        "packages/renderer/**"
+      ],
+      "authority": [
+        "../packages/runtime/src/services/session/session-lifecycle.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-pi-18",
+      "summary": "thinking 档位传递契约：前端只发 thinkingLevelMap 映射后的 pi value（resolveThinkingValue），禁直接发 UI 档位 key（pi 枚举是 off/minimal/low/medium/high/xhigh，不认识 max，直发会被 clamp 错档）；展示档位与传递 value 是两回事",
+      "scope": [
+        "packages/renderer/**",
+        "packages/core/**",
+        "packages/runtime/**"
+      ],
+      "authority": [
+        "../packages/renderer/src/components/panel/ThinkingLevelPopover.vue"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-22",
+      "summary": "plugin 通知与 manifest 兼容契约：notify 走 info/warning/error 三级经 plugin:notification 广播；hook 的 blocked/transformedContent 变更在 session 历史可见（可审计）；manifest semver 不兼容跳过扫描",
+      "scope": [
+        "packages/runtime/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "plugins/built-in-plugin-guide.md"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
+      "id": "C-state-17",
+      "summary": "legacy 消息渲染兼容：不含 contentBlocks 的历史消息走 groupByLegacyFields 分组，渲染行为不变；新增消息字段不得破坏 legacy 路径",
+      "scope": [
+        "packages/core/**",
+        "packages/ui/**"
+      ],
+      "authority": [
+        "../packages/core/src/domain/chat/message-turns.ts"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
     }
   ]
 }

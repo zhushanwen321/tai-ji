@@ -369,7 +369,7 @@ fileTreeStore.selectedPath 变化（点文件触发）
 
 **viewMode 切换**（detail-view-toggle）：`detail-view-toggle` 仅在 `hasGitChange=true` 时渲染。点击切换 viewMode 并**重新拉数据**（diff→preview 调 `fileApi.read`，preview→diff 调 `gitApi.getDiff`，设 `status:'loading'`）。守卫仅检查 `viewMode !== mode`，不额外校验「可读/可 diff」——无 git 改动的文件切 diff 会调 getDiff，若返回空则显空内容（不崩）。
 
-**XSS 安全**（[NFR.md](../../NFR.md) no-v-html 约束）：DetailPane **禁用 v-html**，内容用 `<pre>{{ state.content }}</pre>` 文本插值。mock file.read / git.getDiff 含 `<script>` 路径用于验证 XSS 防护。
+**XSS 安全**（约束登记 C-state-13，见 [docs/constraints.json](../constraints.json)）：DetailPane **禁用 v-html**，内容用 `<pre>{{ state.content }}</pre>` 文本插值。mock file.read / git.getDiff 含 `<script>` 路径用于验证 XSS 防护。
 
 ## 5. mock 数据
 
@@ -580,7 +580,7 @@ test.describe('SideDrawer E2E', () => {
 - composable：[`composables/features/file-tree/useDetailPane.ts`](../../packages/renderer/src/composables/features/file-tree/useDetailPane.ts) / [`composables/features/drawer/useSideDrawer.ts`](../../packages/renderer/src/composables/features/drawer/useSideDrawer.ts)
 - E2E（detail tab）：[`e2e/file-tree.spec.ts`](../../e2e/file-tree.spec.ts) E2E-3a/3b/3c
 - 文件树入口：[02-panels-sidebar.md](./02-panels-sidebar.md)（点文件 → drawer detail）
-- NFR no-v-html：[NFR.md](../../NFR.md)（XSS 安全约束）
+- XSS 安全约束：C-state-13（[docs/constraints.json](../constraints.json)）
 
 ---
 

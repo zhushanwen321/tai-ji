@@ -41,7 +41,7 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
  * 值为目录（递归收 .ts，排除 __tests__/test）或精确文件。
  */
 const DOC_MODULE_MAP = {
-  'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts'],
+  'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
   // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫
