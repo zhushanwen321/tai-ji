@@ -217,4 +217,6 @@ graph LR
 
 - 2026-09-14：初版（阶段 0 预检 + 阶段 1 计划）。结构四节 6/6 齐备；审查证据 = R2 双 PASS 0 must-fix（cadfaf4b9）。
 - 2026-09-14 阶段 3 文档修复（主 agent 亲为 doc_errors + P3 unreasonable）：①04 区映射失效修正（执行项明细实际在 §3.3/§3.4 + §1.3）；②设计 04 E3 验证列补第三类合法语境（变更历史时点条目）；③设计 05 A6 通过标准精确化为 re-export 声明形态检索 + T3 措辞同步落地断言口径；④包内 2026-09-10 文档两处悬空引用清扫（§9.1 表行退役后注 + §12.2 失效标注）。04/05 区审查 unreasonable 计 1 条（即④）已清零。
+- 2026-09-14 阶段 3+4 收敛：5 区审查全部收讫——unreasonable 6 条全 P3（04 区 1 文档边角主 agent 修；06 区缩进微修 subagent 修 commit afb75d36c、版本双轨随批次尾；08 区 2 条设计登记回写主 agent 修 commit 85334247a；10/11 区 1 条补登记）+ doc_errors 8 条全修（c4d57fa1a/80b1358cb/318e03ff3）。unreasonable 与 doc_errors 双清零。
+- 2026-09-14 **Gate A（全量测试验收）PASS**：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test && node scripts/check-doc-symbol-drift.mjs && node scripts/check-extension-dependencies.mjs` 一次串联 exit 0（落盘 .tmp/dev-flow/ext-simplify-group-a.gate-a.log）——26 包 4457 用例全过零失败，doc-drift 14 映射零悬空，extension-dependencies 21 entries 一致。无 SKIP_* 变量、无 test.skip 新增。覆盖矩阵：6 包领地全部有对应包级 vitest 承载（04=407/05=579/06=82/08=240+内核 73/10=193/11=307），无无人认领改动区。
 - 2026-09-14 r1：08-M0 撤销独立单元——P1 红基线用例即 08-u1 的 TDD 测试（需保留转绿），独立 committed 单元会强制「红测试入库」或「属地不干净」二选一；并入 08-u1（P1 门）/08-u23（P2 现状红确认）作为前置步骤。门性质不变：探针失败 = 停线回设计重审。
