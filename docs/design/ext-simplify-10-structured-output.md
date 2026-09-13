@@ -202,7 +202,7 @@ export function armForceExitTeardown(): void {
 |---|---|---|---|---|
 | V1 | workflow 模式真实任务（强退链宿主进程正向冒烟） | 目标 1 | 本地 pi CLI 直注 env：`PI_WORKFLOW_SCHEMA='{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}' pi --mode rpc --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension extensions/universal/structured-output`，stdin JSONL 发一条会产出结构化结果的 prompt | 工具调用成功返回 "Structured output recorded successfully."，details 含 answer 字段；进程正常退出（非 15s 硬退路径）；stderr 无 gate 告警 |
 | V2 | 日常模式真实调用（env 缺席分岔 + E5 等价面） | 目标 1 | 同上命令去掉 env 前缀，prompt 诱导模型按工具 description 的 `{schema, data}` 形态自报调用 | 合法 `{schema,data}` 校验通过；互换形态（schema/data 调包）被 "Likely swapped" 拒绝 |
-| V3 | 静态守卫 + 行为回归 | 目标 1/2/4 | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 三连；`node scripts/check-doc-symbol-drift.mjs` | 三连全绿（P2 达成）；doc-drift 通过（E2 回写生效）；loop-gate 既有用例除 :704-709 删除外零改动（P1 达成） |
+| V3 | 静态守卫 + 行为回归 | 目标 1/2/4 | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 三连；`node scripts/check-doc-symbol-drift.mjs` | 三连全绿（P1 达成；P2 留 u2 移交批——E4-E6 未实施时该探针无从执行，见 §6.5 v2-r1 修正）；doc-drift 通过（E2 回写生效）；loop-gate 既有用例除 :704-709 删除外零改动（P1 达成） |
 
 V1/V2 均为真实依赖（真实 pi CLI、真实模型、真实 session-dir），无 mock；单测仅作回归辅助不计入验收。
 
