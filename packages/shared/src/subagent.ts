@@ -158,7 +158,8 @@ export interface SubagentRecord {
    * 展示维度（永久会话模型 §3.2.1，U8 下行投影）：上一轮为什么停。值域 =
    * 旧 closedReason 七值沿用 + 四个新展示值（interrupted / interrupted-by-restart /
    * interrupted-by-parent / reopened），见 subagent-core types.ts StopReason。
-   * 仅 status='idle' 时有意义；缺省 = 从未收口 / 存量数据。用 string 而非字面量
+   * 有值即投影（A-lite：轮终 record 保持 running-resumable 亦带 completed/failed 展示位，
+   * 阶段 3 裁决）；缺省 = 从未收口 / 存量数据。用 string 而非字面量
    * 联合：shared 是跨进程契约 SSOT，extension 新增展示值时读侧不因类型收窄丢字段。
    * 「为什么停」只做一句话解释展示（G2），不参与任何资格判定。
    */
