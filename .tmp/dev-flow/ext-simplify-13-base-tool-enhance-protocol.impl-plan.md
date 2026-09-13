@@ -75,7 +75,7 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u0 | pending | 0 | — |
+| u0 | committed（探针通过零文件落地） | 1 | esbuild bundle:true inline 解析 exports 子路径实证：staged bte 产物 :202 命中探针常量；三处临时改动完整还原，git status 干净 |
 | u1 | pending | 0 | — |
 | u2 | pending | 0 | — |
 | u3 | pending | 0 | — |
