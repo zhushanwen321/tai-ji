@@ -163,14 +163,10 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       const runP = host.request("run", {
         runId: "run-e2e-1",
         task: { prompt: "say hi then ask", description: "e2e", agent: "worker" },
-        ctx: { poolKey: "shared", cwd: dataDir, model: "fake-provider/fake-model" },
+        ctx: { cwd: dataDir, model: "fake-provider/fake-model" },
       });
 
-      // 3. 反向通道断言（按协议契约逐个应答）
-      const poolResolved = await host.waitForReverse("host/poolResolved");
-      expect((poolResolved.params as { poolKey: string }).poolKey).toBe("shared");
-      host.replyReverse(String(poolResolved.id), { ok: true });
-
+      // 3. 反向通道断言（按协议契约逐个应答；poolResolved 已随池抽象降级退役）
       const childSpawned = await host.waitForReverse("host/childSpawned");
       const childPid = (childSpawned.params as { pid: number }).pid;
       expect(Number.isInteger(childPid)).toBe(true);
@@ -201,11 +197,12 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       // 协议 run 终态应答的 handle = EngineHandleData 本体（进程内 {data} 包装已拆，
       // 与 RemoteEngine `handle: { data: result.handle }` 互证）
       const runResult = runFrame.result as {
-        handle: { engineId: string; poolKey: string; sessionRef: Record<string, string> };
+        handle: { engineId: string; sessionRef: Record<string, string> };
         outcome: { content: string; sessionId?: string; usage?: { input: number } };
       };
       expect(runResult.handle.engineId).toBe("pi");
-      expect(runResult.handle.poolKey).toBe("shared");
+      // [池抽象降级] 协议 handle 已删 poolKey（record 持久层恒 'shared'，不随帧透传）
+      expect(runResult.handle.poolKey).toBeUndefined();
       expect(runResult.handle.sessionRef.recordId).toBe("run-e2e-1");
       expect(typeof runResult.handle.sessionRef.sessionFile).toBe("string");
       expect(runResult.outcome.content).toContain("final answer");

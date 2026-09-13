@@ -50,13 +50,23 @@ export function getEnginesFilePath(agentDir: string): string {
  * fail-safe：发现与 IO 异常都吞掉（可发现性降级不阻塞 session 启动——GUI 兜底显示
  * 既有清单）。
  */
-export function syncEnginesFile(agentDir: string): void {
+/** 发现注入面（测试密闭化）：透传 discoverAndRegisterEngines 的隔离选项——
+ * env 覆盖 L1 宿主发现根读取，nodeModuleRoots 覆盖 L2 宿主 node_modules 解析域。
+ * 缺省 = 生产语义（process.env + 宿主解析域）。测试必传密闭值（env:{} + 
+ * nodeModuleRoots:[]），防宿主环境（如打包态 XYZ_AGENT_ENGINE_ROOTS）污染注册表
+ * 导致断言依赖机器环境（TaiJi 会话 env 曾注入引擎根，致 discovery 测试机器相关红）。 */
+export interface SyncEnginesFileOptions {
+  env?: NodeJS.ProcessEnv;
+  nodeModuleRoots?: string[];
+}
+
+export function syncEnginesFile(agentDir: string, opts?: SyncEnginesFileOptions): void {
   try {
     // inproc 过渡注册快照：注册表全集剔除历史发现装载的 id（清理通道语义，见头注释）
     const loadedIds = new Set(loadedDiscoveryIds());
     const inprocSnapshot = listEngines().filter((id) => !loadedIds.has(id));
     // [W4] 三级发现装载（fail-safe 内——扫描失败不阻塞投影与 session 启动）。
-    const scan = discoverAndRegisterEngines({ hostKind: "pi", agentDir });
+    const scan = discoverAndRegisterEngines({ hostKind: "pi", agentDir, ...opts });
     const filePath = getEnginesFilePath(agentDir);
     const engines = [...new Set([...inprocSnapshot, ...scan.discovered.map((e) => e.id)])];
     const payload: SubagentEnginesFile = { v: 1, engines, updatedAt: Date.now() };

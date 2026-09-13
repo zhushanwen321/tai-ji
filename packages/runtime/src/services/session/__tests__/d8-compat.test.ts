@@ -43,6 +43,15 @@ afterEach(() => {
   setEnv('FAKE_READ_MODE', 'ok')
 })
 
+// [密闭化] 宿主注入的引擎执行器/发现根（打包态 TaiJi 会话 env：XYZ_AGENT_ENGINE_NODE
+// 指向 Electron 主二进制）会把 hostKindOf 嗅探到 pi-extension 分支——用主二进制当
+// node 执行器 spawn fake CLI，进程立即 exit 0 → engine_crashed。测试恒用 standalone
+// 语义（PATH node），剥这两个 env（afterAll 经 savedEnv 恢复）。
+beforeAll(() => {
+  setEnv('XYZ_AGENT_ENGINE_NODE', undefined)
+  setEnv('XYZ_AGENT_ENGINE_ROOTS', undefined)
+})
+
 // cliPath 直接以文件形态被 EngineClient spawn——需要可执行位（运行时自愈，
 // 不改 repo 内文件 mode；协议测试文件的拷贝路径已单独 chmod）。
 beforeAll(() => {

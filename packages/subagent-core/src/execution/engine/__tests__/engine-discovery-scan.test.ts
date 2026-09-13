@@ -19,6 +19,10 @@ import type { DiscoveryRoot } from "../../../core/host-services.ts";
 import { clearEngines, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
 import type { EnginePort } from "../port.ts";
 import { getEnginesFilePath, syncEnginesFile } from "../engine-discovery.ts";
+
+/** 密闭发现注入（env:{} 斩 L1 env 根，nodeModuleRoots:[] 斩 L2 宿主 node_modules）——
+ * 防宿主环境（打包态 XYZ_AGENT_ENGINE_ROOTS / workspace 链接的引擎包）污染断言。 */
+const HERMETIC_DISCOVERY = { env: {}, nodeModuleRoots: [] } as const;
 import {
   ENGINE_ROOTS_ENV,
   deriveNodeModuleRoots,
@@ -509,12 +513,12 @@ describe("装载与注册表", () => {
   it("engines.json 投影合流：发现 cli ∪ inproc 注册；幂等零写；契约 {v:1, engines} 不变", () => {
     makeEnginePkg(tmpRoot, "projected", { capabilities: FULL_CAPABILITIES });
     registerEngine("pi", () => stubEngine("pi"));
-    // syncEnginesFile 读 process.env（生产语义）——L1 根经真实 env 注入，afterEach 恢复
-    const prevRoots = process.env[ENGINE_ROOTS_ENV];
-    process.env[ENGINE_ROOTS_ENV] = tmpRoot;
-    try {
+    // L1 env 根通道经注入 opts 覆盖（语义同生产 env 读取，密闭化防宿主环境污染——
+    // L2 斩断：打包态宿主 node_modules 链接的引擎包会污染清单断言）
+    const l1EnvOpts = { env: { [ENGINE_ROOTS_ENV]: tmpRoot }, nodeModuleRoots: [] as string[] };
+    {
       const agentDir = path.join(tmpRoot, "agent");
-      syncEnginesFile(agentDir);
+      syncEnginesFile(agentDir, l1EnvOpts);
       const filePath = getEnginesFilePath(agentDir);
       const file = JSON.parse(fs.readFileSync(filePath, "utf8")) as SubagentEnginesFile;
       expect(file.v).toBe(1);
@@ -523,31 +527,28 @@ describe("装载与注册表", () => {
 
       // 幂等零写（内容不变 mtime 不动）
       const statAfterFirst = fs.statSync(filePath);
-      syncEnginesFile(agentDir);
+      syncEnginesFile(agentDir, l1EnvOpts);
       expect(fs.statSync(filePath).mtimeMs).toBe(statAfterFirst.mtimeMs);
 
       // 发现面变化（新增引擎包）触发重写
       makeEnginePkg(tmpRoot, "second-projected", { capabilities: FULL_CAPABILITIES });
-      syncEnginesFile(agentDir);
+      syncEnginesFile(agentDir, l1EnvOpts);
       const updated = JSON.parse(fs.readFileSync(filePath, "utf8")) as SubagentEnginesFile;
       expect(updated.engines.sort()).toEqual(["pi", "projected", "second-projected"]);
-    } finally {
-      if (prevRoots === undefined) delete process.env[ENGINE_ROOTS_ENV];
-      else process.env[ENGINE_ROOTS_ENV] = prevRoots;
     }
   });
 
   it("syncEnginesFile fail-safe：发现异常不阻塞投影（发现根全部不存在时仍写 inproc 清单）", () => {
     registerEngine("pi", () => stubEngine("pi"));
     const agentDir = path.join(tmpRoot, "agent");
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.engines).toEqual(["pi"]);
   });
 
   it("零发现零注册时投影空清单（W11 删 inproc 后的终态语义预演）", () => {
     const agentDir = path.join(tmpRoot, "agent");
-    syncEnginesFile(agentDir);
+    syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.engines).toEqual([]);
     expect(listEngines()).toEqual([]);
