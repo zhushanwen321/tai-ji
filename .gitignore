@@ -141,3 +141,6 @@ package-lock.json.*
 # === dev 模式自制 Electron app bundle（dev-electron.mjs 生成，太极图标）===
 # dev 启动时按需重建，不进版本库
 /apps/electron/.dev-electron/
+
+# === 运行时数据目录误入 apps/electron（cwd 相对推导的 ConfigService 落盘，2026-05 误提交已清）===
+/apps/electron/.xyz-agent/
