@@ -183,7 +183,8 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		debugLog("debug", "listener: pending:unregister parsed", parsed);
 
 		// 未知/已注销 id 忽略（U8）：对 entries 现算（有 register 且无任何 unregister
-		// 才落盘）——bte 对账已直接落盘的注销在此同样生效，收尾尽力补 emit 天然幂等。
+		// 才落盘）——bte 对账已直接落盘的注销在此同样生效，任一发送方重复 unregister
+		// 被本前置判断拦截，天然不重复落盘。
 		const status = mapReasonToStatus(parsed.reason);
 		if (!isPendingActive(currentEntries(), parsed.id)) {
 			debugLog("debug", "listener: pending:unregister ignored (unknown id)", { id: parsed.id });

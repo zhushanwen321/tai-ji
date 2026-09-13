@@ -105,9 +105,9 @@ export function hasPendingId(entries: unknown[], id: string): boolean {
 
 /**
  * 写侧前置判断②：id 是否活跃（有 register 且无任何 unregister）。
- * unregister listener 落盘前判断用（U8 未知/已注销 id 忽略）；bte 对账直接
- * appendEntry 的注销与事件落盘的注销在同一份 entries 上生效（构造性一致，
- * 收尾尽力补 emit 天然幂等）。
+ * unregister listener 落盘前判断用（U8 未知/已注销 id 忽略）；构造性一致：
+ * bte 对账直接 appendEntry 的注销与事件落盘的注销落在同一份 entries 上，
+ * 任一发送方重复 unregister 均被本前置判断拦截，天然不重复落盘。
  */
 export function isPendingActive(entries: unknown[], id: string): boolean {
 	const { registerEntries, unregisteredIds } = scanPendingEntries(entries);
