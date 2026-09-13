@@ -98,6 +98,7 @@ graph TD
 
 ## 7 残留风险与变更历史
 
+- 阶段 5 验收（2026-09-13）：核心组 A1–A5 全真机 PASS（真实 pi 进程 + mimo-v2.5-pro + dev app + Playwright CDP 全真实键盘事件）——A1 主链路（正文标记原位 + 末尾块去重双 skill 全文 + badge 显示 + 模型确认识别）、A2 降级形态（3MB SKILL.md 夹具触发 budget_exceeded：块内标记清单 + 指引行、零展开，模型按指引自主 read 51KB toolResult 验证降级设计意图）、A3 resume 剥块还原（切 session 重读后块剥离 + 标记还原 badge + 混排仍单行）、A4 混排不换行（is-mixed 容器内文本/badge 全元素同 top 单行）、A5 chip 空开（getComputedStyle 实测 4px/6px/first-child 0）。证据汇总 `.tmp/dev-flow/composer-multi-skill-injection-r4.acceptance/acceptance-summary.md`（截图 9 张 + 断言 JSON 4 份 + 脚本 6 个）。非核心组 A6–A9 按后续波次执行，不阻塞核心组关闭；A8 探针双锚已随 Gate A 执行（static 8 绿 + REAL_PI golden 绿）。
 - 一致性审查清零（2026-09-13）：三区 reviewer（ui / core / shared+runtime）聚合 = 28 reasonable / 2 unreasonable（均 LOW：D12 扩面措辞、core 注释编号）/ 5 doc_errors（均 LOW）——unreasonable 全部修复收口、doc_errors 全部主 agent 修订、reasonable 全部入登记表。清零标记 commit = 设计文档 add637ce9 + 注释对齐 e5bfe596b。Gate A 证据见下条。
 - Gate A（2026-09-13）：五包 vitest（shared 409 / core 2074 / ui 772 / dom-core 232 / runtime 5949 中 1 失败）+ root lint + extensions:typecheck。runtime 唯一失败 = test/subagent-extractor-engine.test.ts「rejects journal path outside engines root」——已实证 HEAD（stash 掉本流水线改动后）同样红，属 zcode db-isolation 工作流面既有债务，非本次引入；登记为残留风险待用户签认。
 
