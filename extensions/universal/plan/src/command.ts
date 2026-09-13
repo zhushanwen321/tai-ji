@@ -181,7 +181,7 @@ function handleEnterPlanMode(
     `4. Write all chapters in one turn, then ask user to review.\n\n` +
     `## Phase D: Completion\n` +
     `1. Ask user to review the complete plan.\n` +
-      `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
+    `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
     `3. After plan complete: the user picks an execution path (subagent-driven / goal-driven / single-agent) via the completion dialog.`,
   );
 }
