@@ -222,7 +222,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **效果**：G5 的「零侵入」与长期防漂移；格式一致保证块内 block 与 pi 原生展开可互换理解。R4 代价变更：原「整条消息 = 单个 skill block」在 pi TUI 可折叠渲染的形态不再产生（所有消息 = 正文 + 末尾块混排，pi TUI 显示 XML 原文——§3.5-④ 登记更新）。
 
 **D6：预算预检——CJK 感知字符估算 + 80% contextWindow 阈值 + 整条降级（选定）**
-- **采用**：runtime 展开前预估「展开后整条 message 的字符数」（正文 + 各 skill 全文 + 标记/分隔开销），token 估算用 **CJK 感知公式：`CJK 字符数 × 1.0 + 非 CJK 字符数 ÷ 4`**（一个正则数 CJK 字符即可，不引入 tokenizer 依赖）。依据：现代 tokenizer 中文实际密度约 0.6~1 token/char（CJK 按 1.0 取区间上界，**保守方向 = 高估 token = 更早降级**）；英文约 4 chars/token（÷4 为准确值）。阈值：**预估 token > 0.8 × contextWindow**（contextWindow 发送时经 RPC `get_session_stats` 的 `contextUsage.contextWindow` 实时取）→ **整条消息降级**（D7 标记模式）。阈值与系数定义为常量（单一处，便于调参）。
+- **采用**：runtime 展开前预估「展开后整条 message 的字符数」（正文 + 各 skill 全文 + 标记/分隔开销），token 估算用 **CJK 感知公式：`CJK 字符数 × 1.0 + 非 CJK 字符数 ÷ 4`**（一个正则数 CJK 字符即可，不引入 tokenizer 依赖）。**B2 修订（adversarial-review-fixes §3.3 B2）**：代码密集文本（非 CJK 占比 > 0.7）的非 CJK 分母收紧为 ÷3（`NON_CJK_CHARS_PER_TOKEN=4` / `CODE_DENSE_NON_CJK_CHARS_PER_TOKEN=3`，实装于 skill-marker.ts estimateTokens），防止代码密集 SKILL.md 低估 1~2 倍放行全文注入。依据：现代 tokenizer 中文实际密度约 0.6~1 token/char（CJK 按 1.0 取区间上界，**保守方向 = 高估 token = 更早降级**）；英文约 4 chars/token（÷4 为准确值）。阈值：**预估 token > 0.8 × contextWindow**（contextWindow 发送时经 RPC `get_session_stats` 的 `contextUsage.contextWindow` 实时取）→ **整条消息降级**（D7 标记模式）。阈值与系数定义为常量（单一处，便于调参）。
 - **等效阈值推演**：英文内容 ÷4 准确 → 实际触发点 ≈ 80% 窗口；中文内容估算取上界 → 实际触发点在 48%~80% 窗口之间（密度越接近 1 token/char 越贴近 80%）。即中文场景可能**提早**降级、不会推迟——方向安全。**推演边界**：代码密集的非 CJK 内容（base64、长标识符等，实际 0.3~0.5 token/char）按 ÷4 低估 1~2 倍且无 CJK 上界富余缓冲——此类 SKILL.md（如含大段代码块的）是估算最弱面，由检查点 6 的代码密集型样本校准覆盖。CJK 字符类定义：CJK 统一表意文字及常用全角标点范围（实施时用一个明确的 Unicode 区间正则，与探针同源定义）。
 - **漏判-兜底关系（诚实声明）**：估算非精确计量，仍存在漏判可能（如中英混排密度异常、contextWindow 元数据虚标）。漏判时 pi overflow 报错链仍然存在（用户可见错误 + 一次 compact-and-retry），预检目标是**拦住大概率超窗的注入**而非精确计量；真实死亡尺寸（单条 ≥ 20000 token 切点保护线）由 CJK 上界估算覆盖（20000 真实 token 的中文内容按 1.0 密度估算 = 20000，不会被漏判到放行程度）。
 - **为什么只看单条消息自身大小、不叠加会话历史占用**：历史占用超阈由 pi 的 threshold compaction 在提交前/每轮前处理（`agent-session.js:893-896`、`:274-287`）——历史是**挤得动**的；而单条 ≥ keepRecentTokens(20000) 的消息受切点算法保护**永远挤不掉**（§2.3 失败模式 C 第 3 步）。所以历史归 pi 已有机制，单条消息自身大小才是本设计必须拦的量。
@@ -236,7 +236,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **采用**：降级时 prompt 里的形态（见 §3.1 场景 2，R4 起与正常形态共用同一 `<xyz-skill-data>` 包裹，旧 `<xyz-skills>` tag 退役但反解析保留识别以兼容存量落盘消息）：所有 chip 标记归拢在包裹块内（每项 `<xyz-skill name location/>` 自闭合）+ 一行指引文本「Use the read tool to load the skill files above before continuing the task」（定稿时为中文「请使用 read 工具加载上述 skill 文件后再继续任务」，C5——adversarial-review-fixes §3.4——改英文对齐 pi available_skills 措辞）。归拢成块（而非散在原位）理由：降级形态只需模型理解一次，块状 + 单指引行的指令遵循率高于散点。
 - **resume 反渲染多通道**：
   - **主通道（已有，零新增）**：`segments.json` sidecar + `<!--xyz:msg:<uuid>-->` 标记机制按 clientUuid 恢复 Segment[]（`history-rebuild-cache.ts:233`），chip badge 显示不受 JSONL 文本形态影响。展开态/降级态都走这条。
-  - **兜底通道（新增，实现位置 = core 转换 SSOT）**：sidecar 丢失/旧版本会话时，**`packages/core/src/domain/chat/apply-entry-convert.ts` 的反解析升级为三形态，按优先序处理**（R4）：① **剥块（最高优先，新增）**——任意位置匹配 `<xyz-skill-data>...</xyz-skill-data>` 整块剔除，块内内容整体丢弃、不参与后续标记解析（块是注入器产物非用户内容）；任意位置而非仅末尾：防御 hook 改写/复述把块挪位，规则更鲁棒；② **标记还原**——全局匹配 `<xyz-skill name="..." location="..."/>`（正文占位标记与降级清单项同形态）还原为 skill segment；③ **存量形态兼容（保留）**——`<skill name="..." location="...">…</skill>` block（pi 原生 + 升级前旧展开形态）与 `<xyz-skills>` 降级块（升级前落盘）的原有反解析规则不变，产出交错 `text + skill + text + …` segments。该函数是三条链路共用的转换 SSOT（① live `message_end(user)` 帧喂 reducer，② runtime 历史重建 `convertPiHistory`，③ 文件重放），在此一处升级即全覆盖。现状「block 前后正文保留」已实现（历史轮已修复前置正文丢失缺陷），存量行为不变。
+  - **兜底通道（新增，实现位置 = core 转换 SSOT）**：sidecar 丢失/旧版本会话时，**`packages/core/src/domain/chat/apply-entry-convert.ts` 的反解析升级为三形态，按优先序处理**（R4）：① **剥块（最高优先，新增）**——任意位置匹配 `<xyz-skill-data>...</xyz-skill-data>` 整块剔除，块内内容整体丢弃、不参与后续标记解析（块是注入器产物非用户内容）；任意位置而非仅末尾：防御 hook 改写/复述把块挪位，规则更鲁棒；② **标记还原**——全局匹配 `<xyz-skill name="..." location="..."/>`（与降级清单项同语法形态；R4 起块内清单项随 ① 剥除、不经 ② 还原）还原为 skill segment；③ **存量形态兼容（保留）**——`<skill name="..." location="...">…</skill>` block（pi 原生 + 升级前旧展开形态）与 `<xyz-skills>` 降级块（升级前落盘）的原有反解析规则不变，产出交错 `text + skill + text + …` segments。该函数是三条链路共用的转换 SSOT（① live `message_end(user)` 帧喂 reducer，② runtime 历史重建 `convertPiHistory`，③ 文件重放），在此一处升级即全覆盖。现状「block 前后正文保留」已实现（历史轮已修复前置正文丢失缺陷），存量行为不变。
   - **兜底已知边界**：SKILL.md 正文含 `</skill>` 字面量时非贪婪正则截断误还原——与 pi 原生 `parseSkillBlock` 同款局限（对齐 pi 可接受），且仅 sidecar 未命中时启用；正文手打 `<xyz-skill` 字样且 sidecar 同时丢失时误还原为 chip——四要素登记于 §3.5-③。另：反解析为**全局匹配**，用户正文手打 `<skill` 字样（pi tag 前缀）的误匹配面从「仅消息第一个」扩大到「任意位置」——与 `<xyz-skill` 同属手打机器标记前缀的极低概率场景，同 §3.5-③ 判定可接受；R4 新增同族项：手打完整 `<xyz-skill-data>` 块形态字样且 sidecar 丢失时被误剥（§3.5-⑥ 合并登记）；**存量兼容**：pi 原生格式消息（block 前置 + args 在后）反解析产出 `[skill, args-text]` segments，与既有行为等价（回归断言见场景 4⑤）。
 - **效果**：G4 成立（§3.1 场景 1/2 的「仍显示为 chip badge」，验收场景 4 含正文保留断言）；R4 附加收益：复制/编辑重发的 normalizeContent 投影恒为「正文占位形态」（不含全文/块）。
 
@@ -266,22 +266,22 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
   - **降级形态（超预算/fail-safe，原 D7 降级块统一并入）**：块内为 `<xyz-skill/>` 标记清单 + 指引行（原 `<xyz-skills>` 块内容整体搬入，旧 tag 退役）。
   - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；get_commands 整体失败（mapping_unavailable）同理：正文留标记、不追加块。
 - **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据面干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
-- **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 get_commands 权威映射**（D4，与 pi 逐字对齐的要求一致；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；正文标记自带的 location 仅用于归并判定输入与反解析自描述。
+- **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 get_commands 权威映射**（D4，与 pi 逐字对齐的要求一致；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
 - **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--xyz:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
 - **LLM 关联指引：正常形态不加文本内指引行（选定）**。理由：对齐信号完备——正文标记带 `name`、块内每个 `<skill>` 也带同名 `name`，citation/脚注模式主流 coding 模型可建立映射；块 tag 名语义化。**观察点**：若实测弱模型漏读末尾块（回答未体现 skill 内容），补救路径 = system-prompt extension 经 hook 注入提示词（一处生效全 session，不污染消息文本）；不回退到文本内指引行。降级形态保留指引行（该形态下 read 是唯一获取通道，指引是必要指令非冗余）。
 - **被否**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<xyz-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议面：`xyz-skills`（清单语义）承载全文块语义 stretch，`xyz-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议面语义精度与新旧自识别，判定值得。
 - **效果**：正文可读；resume/复制/编辑重发数据面干净；降级/正常统一包裹。验收场景 1②/2①/4 形态断言随本决策更新。
 
 **D12：用户气泡混排内联渲染（R4 新增，选定——修复 badge 前后换行）**
-- **现状缺陷**：`UserBubble.vue` 渲染循环中 badge（skill/file/session/subagent）是 inline span，但 text 段经 `MarkdownRenderer` 渲染为**块级**（根元素 `<div class="md-render">` + markdown-it 包裹的块级 `<p>`）——badge 前后任意一侧存在 text 段时该侧必然换行（块级边界），`[text, skill, text]` 段序下 badge 单独占一行。live 与 reload 两侧同构（共用 UserBubble），发送后立即可见。
-- **采用**：气泡同时含 text 段与非 text 段（badge）时，给气泡内容容器启用 inline 化修饰 class，scoped CSS 将 `.md-render`、其内部段容器与 `p` 置为 `display:inline`，段落间换行以 `p + p::before { content: "\a"; white-space: pre }` 类手法补偿；纯 text 消息（无 badge）不加 class，复杂 markdown（标题/列表/表格/代码块）排版完全不受影响。
+- **现状缺陷**：`UserBubble.vue` 渲染循环中 badge（skill/file/session/subagent）与非 text 段（slash 文本还原、image 缩略图）均为 inline 形态，但 text 段经 `MarkdownRenderer` 渲染为**块级**（根元素 `<div class="md-render">` + markdown-it 包裹的块级 `<p>`）——badge 前后任意一侧存在 text 段时该侧必然换行（块级边界），`[text, skill, text]` 段序下 badge 单独占一行。live 与 reload 两侧同构（共用 UserBubble），发送后立即可见。
+- **采用**：气泡同时含 text 段与非 text 段（badge/slash/image——实现按非 text 段统一判定，一致性审查登记的扩面）时，给气泡内容容器启用 inline 化修饰 class，scoped CSS 将 `.md-render`、其内部段容器与 `p` 置为 `display:inline`，段落间换行以 `p + p::before { content: "\a"; white-space: pre }` 类手法补偿；纯 text 消息（无 badge）不加 class，复杂 markdown（标题/列表/表格/代码块）排版完全不受影响。
 - **已接受代价（四要素）**：混排消息的 text 段含复杂块级 markdown 时排版退化为 inline 流。**量级**：混排场景的 text 段以短句为主（badge 是句中引用形态）；**恢复路径**：不适用（显示形态，非内容损伤）；**重审条件**：用户反馈混排消息代码块/列表显示异常；**判定**：可接受。
 - **被否**：text 段弃用 MarkdownRenderer 改轻量 inline 渲染器——等于产品决策「用户气泡非 markdown」，影响面大（现有用例断言 + live ≡ reload 等价性重验），收益不明确。
 - **效果**：混排消息 badge 与正文同行（验收场景 10）。
 
 **D13：composer skill chip 前后自动空开（R4 新增，选定）**
 - **现状缺陷**：`insertChipAtSelection` 落 chip 后仅插 ZWSP（不可见光标锚点）+ `.slash-chip` 仅有 `margin-right: 4px` 单侧间距；chip 前侧无任何间距处理——触发路径（空格 + `/`）靠清 query 后的前置空格，非触发路径（+ 菜单/搜索注入/landing）chip 紧贴前文。
-- **采用**：CSS 单点——`.composer-input :deep(.slash-chip[data-chip-type='skill'])` 增加 `margin-left: 4px`、`margin-right` 提至 6px；`.composer-input > .slash-chip[data-chip-type='skill']:first-child { margin-left: 0 }` 抑制行首缩进。纯视觉零数据污染：ZWSP spacer 契约（`isSpacerNode`/Backspace 删 chip 通路）不动，序列化层 `needsBoundarySpace` 的空格补齐逻辑不变。
+- **采用**：CSS 单点——`.composer-input :deep(.slash-chip[data-chip-type='skill'])` 增加 `margin-left: 4px`、`margin-right` 提至 6px；行首缩进抑制用 `.composer-input :deep(.slash-chip[data-chip-type='skill']:first-child) { margin-left: 0 }`（scoped CSS 下 :deep() 后代形式，与实现一致；「行首」= DOM 首子节点语义）。纯视觉零数据污染：ZWSP spacer 契约（`isSpacerNode`/Backspace 删 chip 通路）不动，序列化层 `needsBoundarySpace` 的空格补齐逻辑不变。
 - **被否**：插入时补真实空格文本节点——DOM 文本污染 + Backspace 联动复杂化 + 与序列化层空格规则双重维护，纯视觉诉求不值得数据层改动。
 - **范围**：仅 skill chip（用户报告面）；file/session/subagent chip 的同类间距问题不在本批（后续统一时另行评估）。
 - **效果**：composer 中 skill 占位前后各空开约一个空格宽（验收场景 11）。
@@ -369,7 +369,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 **场景 10：混排消息气泡 badge 不换行（回溯 D12；R4 新增）**
 - 步骤：composer 输入 `看看这个`，插一个 skill chip，续输 `怎么用`，发送；重开 session 再看同一条消息。用 browser-automation 对气泡截图 + DOM 断言（badge 与前后文本同一行内）。
-- 通过标准：① live 气泡中 badge 与前后文本同行（badge 前后无换行）；② 重开 session 后同形态（live ≡ reload）；③ 纯文本多段落消息（无 badge）排版不变（回归）；④ 混排消息中 text 段含行内 code/链接时渲染正常；⑤ 非 skill badge 混排回归：file/session badge 混排消息渲染形态随 D12 同步变化（正向），抽一例 file badge 混排断言同行渲染。
+- 通过标准：① live 气泡中 badge 与前后文本同行（badge 前后无换行）；② 重开 session 后同形态（live ≡ reload）；③ 纯文本多段落消息（无 badge）排版不变（回归）；④ 混排消息中 text 段含行内 code/链接时渲染正常；⑤ 非 skill 段混排回归：file/session badge 及 slash/image 段混排消息渲染形态随 D12 同步变化（正向），抽一例 file badge 混排断言同行渲染。
 
 **场景 11：composer skill chip 前后空开（回溯 D13；R4 新增）**
 - 步骤：composer 输入文字后经 + 菜单/搜索跳转注入 skill chip（非触发路径，前贴文字），观察 chip 与前后文字间距；行首插 chip 观察首行缩进。
