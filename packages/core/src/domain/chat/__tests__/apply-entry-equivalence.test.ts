@@ -680,6 +680,42 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
       { type: 'text', text: '\n收尾正文' },
     ])
   })
+
+  it('E8: 标记 + 末尾块消息两链路等价（R4 D11/D7）——正文标记 + <xyz-skill-data> 块 live 帧 ≡ reload 文件重放', () => {
+    // R4 形态（D11 场景 1 正常形态 + 场景 2 降级形态各一）：正文占位标记原样保留 +
+    // 末尾 <xyz-skill-data> 包裹块（正常 = <skill> 全文展开；降级 = 标记清单 + 指引行）。
+    // 反解析三链路 SSOT（parseSkillBlock 三形态：①剥块 ②标记还原 ③存量兼容）——live
+    // message_end(user) 帧与 reload 文件重放同经该函数，终态必须一致（架构关键规则 9）。
+    const normalFormText = '帮我 review 这段代码 <xyz-skill name="code-review-graph" location="/abs/SKILL.md"/>\n\n<xyz-skill-data>\n<skill name="code-review-graph" location="/abs/SKILL.md">\nReferences are relative to /abs.\n\n（SKILL.md 全文…）\n</skill>\n</xyz-skill-data>'
+    const degradedFormText = '帮我 review <xyz-skill name="a" location="/a/SKILL.md"/>\n\n<xyz-skill-data>\n<xyz-skill name="a" location="/a/SKILL.md"/>\nUse the read tool to load the skill files above before continuing the task\n</xyz-skill-data>'
+
+    // live 侧：message_end(user) 帧构造形态（客户端 u- 前缀 id，同 E7）
+    const liveState = normalizeIds(replayEntries([
+      { type: 'message', id: 'u-00000013-0000-4000-8000-000000000013', parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: normalFormText }], timestamp: 1000 } },
+      { type: 'message', id: 'u-00000014-0000-4000-8000-000000000014', parentId: null, timestamp: ts(2000), message: { role: 'user', content: [{ type: 'text', text: degradedFormText }], timestamp: 2000 } },
+    ]))
+    // replay 侧：同内容 pi uuidv7 entry（文件重放形态）
+    const replayState = normalizeIds(replayEntries([
+      { type: 'message', id: piId(13), parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: normalFormText }], timestamp: 1000 } },
+      { type: 'message', id: piId(14), parentId: null, timestamp: ts(2000), message: { role: 'user', content: [{ type: 'text', text: degradedFormText }], timestamp: 2000 } },
+    ]))
+    // 全量 state 归一 deep-equal（含 skill 消息走同一断言口径）
+    expect(liveState).toEqual(replayState)
+
+    // 用户可见行为显式断言：剥块（块内全文/清单零残留）+ 正文标记还原 badge +
+    // 块前正文全保留（场景 4③ 断言语义——正文不得因反解析丢失）
+    const [first, second] = liveState.messages
+    expect(first!.content).toEqual([
+      { type: 'text', text: '帮我 review 这段代码 ' },
+      { type: 'skill', name: 'code-review-graph', location: '/abs/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+    expect(second!.content).toEqual([
+      { type: 'text', text: '帮我 review ' },
+      { type: 'skill', name: 'a', location: '/a/SKILL.md' },
+      { type: 'text', text: '\n\n' },
+    ])
+  })
 })
 
 // ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 表述修正 + §4 AC-7）──
