@@ -87,7 +87,7 @@
       </template>
       </div>
       <!-- text 块行尾时刻 -->
-      <span v-if="messageTimestamp" class="shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" style="width: 112px" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+      <span v-if="messageTimestamp" class="w-28 shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- tool_call 块：默认 1 行收起（streaming/running 也收起），header 含摘要，点击展开详情。

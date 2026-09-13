@@ -38,7 +38,7 @@ export default {
     copy: 'Copy',
     working: 'Working…',
     worked: 'Worked',
-    inProgress: 'in progress',
+    inProgress: '(in progress)',
     expandReasoning: 'Expand reasoning',
     collapseReasoning: 'Collapse reasoning',
     toolFailed: '(failed)',
