@@ -37,7 +37,7 @@
 | U6 | zcode transcript 锚：binding/entry 承载 transcriptRef + interact(resume) 实现（resume 读 + 新 session 注入——P-1 探针结论）+ conversation:"cold" + entry-born 分支删除（并入 U3 协同）+ 会话库 TTL 通道 + capabilities 更新 | packages/zcode-subagent-cli/src/zcode-engine.ts、session-channel.ts、capabilities 相关、packages/subagent-core/src/execution/engine/capability-gate.ts、state-marker.ts（binding 块） | U2, U3 | plain | 探针脚本复跑（.tmp/probe/ 基础改造为集成测试）+ zcode 包测试绿 + TTL 通道存在性断言 |
 | U7 | 统计口径统一：binding 基准（settle 落快照 + revive 恢复 + roundBaseTurnIndex + epoch/lastAbandonedRound 持久化）+ 内存增量覆盖 | packages/subagent-core/src/execution/execution-record.ts、record-store.ts（binding 写点）、state-marker.ts | U2, U3 | plain | 单测：revive 前轮统计保留 + 跨重启 binding 恢复 |
 | U8 | 投影面与契约：shared SubagentStatus 契约（running\|idle+intent+stopReason）+ GUI（SubagentList/bucket 三处判据/默认列表可见性/过滤器）+ runtime diff 基线 + manifest 双写映射（session-reader 前向兼容）+ TUI mapExternalState/bg-notify + 通知简化（gate 三元组 + mapReasonToStatus 词表） | packages/shared/src/subagent.ts、message.ts、packages/renderer/src/components/sidebar/SubagentList.vue、lib/subagent-bucket.ts、stores/subagent.ts、packages/runtime/src/services/session/session-records.ts、subagent-extractor.ts、extensions/universal/subagent-workflow/src/interface/**、extensions/universal/pending-notifications/src/index.ts、notifier 系（subagent-core） | U2-U7 | plain | renderer 测试绿 + runtime 测试绿 + extensions 三连绿 + 旧数据只读兼容（S8） |
-| U9 | 文档同步：母设计 D5/D8 注记演进、constraints（C-data-20 原语清单 + zcode TTL 新条目 + u7a 挂点注记）、explainer 更新、AGENTS.md 术语 | docs/design/subagent-record-persistence-consolidation.md、docs/constraints.json（+重渲染）、docs/architecture/subagents/architecture.md、AGENTS.md 相关行 | U2-U8 | plain | check-doc-symbol-drift 绿 + select-constraints 绿 + render-constraints 幂等 |
+| U9 | 文档同步：母设计 D5/D8 注记演进、constraints（C-data-20 原语清单 + zcode TTL 新条目 + u7a 挂点注记）、explainer 更新、AGENTS.md 术语 | docs/architecture/subagent-record-persistence-consolidation.md、docs/constraints.json（+重渲染）、docs/extensions/subagents/architecture.md、AGENTS.md 相关行 | U2-U8 | plain | check-doc-symbol-drift 绿 + select-constraints 绿 + render-constraints 幂等 |
 
 ## 3 DAG 图
 
@@ -86,6 +86,8 @@ graph TD
 
 ## 5 合理偏差登记表（初始为空）
 
+> **补登批（2026-09-13，design-code-sync 第 1 轮）**：下表 U8a-D6 行之后的 26 行为回填——§6 状态表散文点名的六单元（u-foundation/U2/U3/U4/U6b/U7）偏差此前未逐条落行，现按散文与对应 commit message 提取补登；编号沿用散文点名的 Dn，未点名的按补登顺序编 uF-*/D*。提取不到细节的行标注「依据见 §6 状态表散文」。
+
 | 偏差 | 来源 | 处置 |
 |------|------|------|
 | U5-D1 workflow D7 例外族扩大保留（失败/取消轮 settle 会触发 hasRunning 绑架/idle-gc 恒挂/误升级/goal defer 四面连带），finalizeFailed/finalizeAborted/settleOneShotOutcome 按 origin==='workflow' 分流终态化 | U5 | 依 §1.4 out-of-scope「维持现状」；已发生证据 = D7 四面连带 |
@@ -122,8 +124,34 @@ graph TD
 | U8a-D2 manifest 读侧（manifestToSubagent）新增 executionStatus 优先回读（manifestStatusToExecution 单点）：settle 产物 legacy running + 权威词 idle → 宿主内读回 idle——写侧下行映射不再污染读侧占用判定；旧 manifest（无 executionStatus）回落 mapManifestStatus 行为不变 | U8a | 双写契约的回读半边（设计未明说，构造性必需） |
 | U8a-D3 intent 持久化三面落位：entry 面新增（record-entry.ts schema + toSubagentRecordEntry + rebuildEntryRecord 投影，领地外 additive 2 文件——types.ts SubagentRecord.intent 1 字段同批）+ manifest 面（intent 下行 + manifestToSubagent 回读）；binding 面未做（state-marker.ts RecordBinding 领地外未动）——pi record 重启后 TUI 侧 store 重建丢 intent（GUI 侧经 entry 链不受影响），binding 扩字段留后续批次 | U8a | U5-D10「intent 持久化归 U7/U8」的 U8 最小闭环；store 面完整持久化超投影单元边界 |
 | U8a-D4 ManifestRecord 扩 intent/engine/engineHandle 三字段（不扩 engineFallback——spawn 窗诊断字段，重启恢复无消费方，manifest 保持最小）；manifestToSubagent 回读 engine 域（isEngineHandleShape 守卫）——zcode manifest 孤儿的引擎身份恢复（B-restart 契约面）。旧 session-reader RecordManifest 未知字段跳过，零破坏（读侧已核） | U8a | B-restart 交接条款落地 |
-| U8a-D5 runtime subagentRecordEquals 基线补 intent/stopReason/engine 三域（engineFallback/engineHandle 随 engine 域整域补入）；result/chatMode/resumable 三字段仍缺比对（U1 前存量缺口，非本次范围，仅登记不修） | U8a | 任务点名「diff 基线含新字段（intent/stopReason/engine 域）」整域补入；存量缺口留给一致性批次 |
+| U8a-D5 runtime subagentRecordEquals 基线补 intent/stopReason/engine 三域（engineFallback/engineHandle 随 engine 域整域补入）；result/chatMode/resumable 三字段仍缺比对（U1 前存量缺口，非本次范围，仅登记不修）——**[销账 2026-09-13] 三字段缺口 U8b 已补（c47871d05，GUI 快修①：session-records.ts subagentRecordEquals 已比对 result/resumable/chatMode）** | U8a | 任务点名「diff 基线含新字段（intent/stopReason/engine 域）」整域补入；存量缺口留给一致性批次 |
 | U8a-D6 3 处 U5 期测试断言翻转（dispose-manifest-recovery.test.ts：dispose 终态 manifest running→closed、两处重启 snap running→idle）——原断言注释自证「投影切换归 U8」 | U8a | U5-D10 交接的直接后果 |
+| uF-D1 ExecutionStatusV2（running\|idle）与 LegacyClosedStatus 分离引入，消费方迁移推迟 U2——领地外两处穷尽 switch 强改即破编译 | u-foundation | commit 01d5c8060（consumer migration deferred to U2） |
+| uF-D2 RecordBinding 增 transcriptRef/epoch/lastAbandonedRound 可选字段 + 读侧形状守卫 legacy 零迁移（计划 u-foundation 行未点名 binding 面） | u-foundation | commit 01d5c8060（RecordBinding optional fields ... legacy zero-migration） |
+| uF-D3 barrel 导出推迟 U8 | u-foundation | 依据见 §6 状态表散文（u-foundation 行 deviations 点名，commit message 未载细节） |
+| U2-D1 桥接判据 SSOT：「legacy closed 终态 ⟺ idle ∧ closedReason 已置」等价式跨 12 文件机械应用（零编排漂移） | U2 | commit 0487bbab2（bridging invariant applied across 12 src files, mechanical equivalence） |
+| U2-D2 新增 tryEnterRunning 原语（idle→running CAS，计划原语清单未列） | U2 | commit 0487bbab2（tryEnterRunning added for idle→running CAS）；§6 散文点名 |
+| U2-D3 closedReason 字段保留（桥接判据与旧值投影依赖，不随 closed 态删除） | U2 | commit 0487bbab2；§6 散文「closedReason 保留」 |
+| U2-D4 markFinalized/markCancelled 读侧 legacy 映射推迟 U3；extensions 存量测试同批迁移两态词汇（subagent-workflow 7 + session-reader 1） | U2 | commit 0487bbab2（legacy mapping untouched, deferred to U3 / extensions tests migrated to two-state vocabulary） |
+| U3-D1 重建矩阵四分支收敛单规则：重建恒 idle，stopReason 取 .state 收条或 interrupted-by-restart 兜底 | U3 | commit 42e3498b4（Rebuild matrix: four branches -> one rule） |
+| U3-D2 孤儿恢复直断分支删除（in-flight/SP-5/entry-born 恒 idle 等寻回）+ writeFinalizedState(file,'gc') 写点移除 | U3 | commit 42e3498b4（orphan recovery direct-terminal branches deleted） |
+| U3-D3 cold-lookup 候选谓词扩展 + Continuation reviveOrThrow 前置分支（tryEnterRunning 接管）标注为 U4 重写锚点 | U3 | commit 42e3498b4（Bridging (marked as U4 rewrite anchors)） |
+| U3-D4 E1 批投影 running 化归 U8；boot 重认领源消亡归 U5；worktree/GC 消费方核实免改 | U3 | 依据见 §6 状态表散文（U3 行 deviations 点名，commit message 未逐条展开） |
+| U4-D1 reopen 时序修正：markReopened（round→0/epoch+1/摘要注入 fail-soft）先于 idle→running 翻边（CAS 仅收 idle）执行 | U4 | commit 5fda1ef14（BEFORE idle-&gt;running flip (CAS idle-only)）；§6 散文「D1 时序修正」 |
+| U4-D2 续轮降级不推进世代：锚失效续轮降级走 fresh session + 摘要注入、round 连续，不走完整 reopen（无 epoch/round 重置） | U4 | §6 散文「D2 续轮降级不推进世代」；U5-D3/U6-D3 两行「与 U4-D2 同族」交叉引用的登记锚 |
+| U4-D3 过渡期 binding 死数据随 GC 回收（不主动清洗） | U4 | §6 散文「D3 过渡 binding 死数据随 GC 回收」（细节 commit message 未载） |
+| U4-D4 workflow-origin message 拒绝保留（身份维度 out-of-scope 防御，非形态枚举 gate 残留） | U4 | commit 5fda1ef14（workflow-origin message refusal kept, identity dimension, D7 out-of-scope defense） |
+| U4-D8 intent 留桩归 U5（本轮未持久化 intent，写点随 U5 意愿动作落地） | U4 | §6 散文「D8 intent 留桩归 U5」 |
+| U4-D6 顺修两个存量 session-reader 红断言（U3 语义对齐、blocker 已注记；领地外测试触碰） | U4 | commit 5fda1ef14（Two pre-existing session-reader red assertions fixed in passing, blocker-noted） |
+| U6b-D1 pi 不挂 onHandleReady 回调：仅非 pi chat 轮挂载，pi 锚回填仍走 outcome.sessionFile 链（pi 零行为变化） | U6b | commit c19fb765c（RunContext.onHandleReady mounted for non-pi chat rounds only） |
+| U6b-D2 覆写 vs 补缺双语义并存：onHandleReady 轮覆写回填（reportRecordTransition）与 one-shot backfillEngineHandle 补缺语义各自注释互指 | U6b | commit c19fb765c（overwrite-semantics ... complementing one-shot backfillEngineHandle gap-fill semantics, each documented cross-referencing） |
+| U6b-D3 chat 轮不接 journal 分层（与 pi 路径同口径） | U6b | 依据见 §6 状态表散文（U6b 行 deviations 点名，commit message 未展开） |
+| U6b-D4 未注册引擎不对称拒绝点：resolveRoundEnginePort 失败轮 markRoundIdle failed + engine_not_found，不崩宿主 | U6b | commit c19fb765c（unregistered engine fails the round (markRoundIdle failed + engine_not_found) without killing host） |
+| U7-D1 死字段不复活：roundBaseTurnIndex 经 binding.turns 水合等价实现（字段已随 U6/D7 退役，不重新引入死字段） | U7 | commit 0b28b0e39（roundBaseTurnIndex realized as binding.turns hydration, no dead field reintroduced） |
+| U7-D2 mergedRecords entry 源收窄 zcode（entry 统计缓存 + dispose/revive reset；pi 侧不消费该缓存） | U7 | commit 0b28b0e39（B-restart store side: mergedRecords 1.7 entry source, zcode-only narrow） |
+| U7-D3 zcode 锚键 sidecar 文件族 &lt;dbPath&gt;.&lt;sessionId&gt; 复用 writeAliveMarker/readRecordBinding 本体（零 alive-store/state-marker 改动；锚键 sidecar 孤儿与 pi 同族） | U7 | commit 0b28b0e39（zcode anchor-key file family ... verbatim） |
+| U7-D7 zcode 占用探针位置不对称：迁至 markResurrected acquire 点（cold-lookup 不可触），两侧语义等价已注释声明 | U7 | commit 0b28b0e39（zcode occupancy probe relocated ... semantic parity documented both sides）；§6 散文「D7 占用探针位置不对称已注释声明」 |
+| U7-D5 hydrateReviveBaseline max-merge 防归零覆盖（GUI 快修⑤构造性解决，测试钉住） | U7 | commit 0b28b0e39（max-merge prevents zeroed-entry last-writer-wins overwrite） |
 
 ## 6 状态表
 
@@ -133,9 +161,9 @@ graph TD
 | U1 | committed | 2 | 第 1 轮速率限制中断 WIP 8ab4461eb；第 2 轮续作完成：pi-subagent-cli 归并（stdin-writer 帧构造/spawn-args 委托壳/杀链切 killPiProcess）+ tsup noExternal 内联 pi-rpc + S7 前置 grep 无双轨五组证据（唯一残留 relay-registry 已于阶段 3 收敛 a4f55afc3，见残留风险 5 闭账）；pi-rpc 75 / pi-subagent-cli 304 / runtime 5946 全绿；deviations 6 条见 §5 |
 | U2 | committed | 1 | 部分在制文件被外部 docs 批次 commit 56898e3cfa 捎带（边界污染已记录）；增量补全 commit 0487bbab2：两态转正 + 四原语填肉 + 桥接不变量 12 文件 + extensions 测试迁移；tsc 0 / vitest 3024 passed / write-surface 绿 / extensions 三连绿；deviations 8 条（桥接判据 SSOT、tryEnterRunning 新增、closedReason 保留等） |
 | U3 | committed | 1 | commit 42e3498b4：.state 读侧新格式 + 旧值映射 + 重建单规则四输入 + 孤儿恢复直断删除 + entry stopReason 投影 + cold-lookup/Continuation 桥接（U4 重写锚点已注）；tsc 0 / vitest 3027 passed / runtime 5945 passed / 守卫绿；deviations 8 条（E1 批投影 running 化归 U8、boot 重认领源消亡归 U5、worktree/GC 消费方核实免改） |
-| U4 | committed | 1 | commit 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
-| U5 | committed | 1 | 四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
-| U6 | committed-followup | 1 | 领地内全落地：resume 读→裁剪→前缀注入全链 + conversation:'cold'（gate === unsupported 判据零改接线）+ TTL 引擎侧 sweep（time_updated 判龄/24h 节流/活跃豁免）+ isAnchorResolvable zcode 分派 + e2e「resume 帧先于 create/无向旧会话 send」；zcode-cli 258 / subagent-core 3074 / 守卫双绿。3 blockers 分流：B-routing+B-firstround→U6b（run-orchestration 领地外，本表新增行）；B-restart→store 面归 U7 / manifest 契约面归 U8 |
+| U4 | committed | 1 | commit 5fda1ef14 后于本表留证：锚判据单点 + endedMessageGuard 缩型 + reopen 降级接线（D1 时序修正：markReopened 在翻边前）+ workflow-origin 拒绝保留 + 万物可续矩阵 22 例；tsc 0 / vitest 3049 passed / extensions 三连绿 / write-surface 绿；deviations 10 条（D2 续轮降级不推进世代、D3 过渡 binding 死数据随 GC 回收、D8 intent 留桩归 U5） |
+| U5 | committed | 1 | commit 0563ca632：四行动作表全落地（cancel=abort+settle+置标记 / close=归档编排 / 编排性关闭=自动收起 / message 隐含寻回）+ gate 三元组 + notifyId epoch 化 + worktree 重建三形态 + D5b 对账拆出 worktree-reconcile.ts；tsc 0 / vitest 3066 passed / runtime 5945 passed / extensions 三连绿（subagent-workflow 939）/ 守卫双绿；deviations 10 条见 §5 |
+| U6 | committed-followup | 1 | commit 12f5e972c：领地内全落地：resume 读→裁剪→前缀注入全链 + conversation:'cold'（gate === unsupported 判据零改接线）+ TTL 引擎侧 sweep（time_updated 判龄/24h 节流/活跃豁免）+ isAnchorResolvable zcode 分派 + e2e「resume 帧先于 create/无向旧会话 send」；zcode-cli 258 / subagent-core 3074 / 守卫双绿。3 blockers 分流：B-routing+B-firstround→U6b（run-orchestration 领地外，本表新增行）；B-restart→store 面归 U7 / manifest 契约面归 U8 |
 | U6b | committed | 1 | commit c19fb765c：B-routing（resolveRoundEnginePort 按 record.engine 分派 + 未注册引擎失败轮不崩宿主）+ B-firstround（非 pi chatMode 走 startFirstRound）+ onHandleReady 非 pi 会话轮覆写回填（pi 零行为变化）；新测试 5 passed + 全量 3079；deviations 4 条（pi 不挂回调/覆写 vs 补缺双语义注释互指/chat 轮不接 journal 分层/未注册引擎不对称拒绝点） |
 | U7 | committed | 1 | commit 0b28b0e39：binding 单基准（markSettled 锚分派 pi 腿/zcode 锚键腿 + merge-or-create）+ roundBaseTurnIndex 等价实现（binding.turns 水合，不复活死字段）+ 归零覆盖回归修复（hydrateReviveBaseline max-merge，GUI 快修⑤构造性解决）+ B-restart store 面（mergedRecords 1.7 entry 源 zcode 收窄）+ 锚键文件族（<dbPath>.<sessionId> 复用 alive/binding 函数）+ release 对称；vitest 3091 / 守卫双绿；deviations 7 条（D1 死字段不复活 / D2 entry 源收窄 zcode / D3 锚键 sidecar 孤儿与 pi 同族 / D7 占用探针位置不对称已注释声明） |
 | U8 | pending-split | 0 | 拆两段串行：U8a 契约与投影（shared 类型 + manifest 双写 + runtime diff/extractor + TUI/通知 + extensions 词表 + S8 兼容）→ U8b GUI 渲染面（renderer 三处判据 + 默认可见性 + 过滤器 + GUI 快修批次①③④②并入，⑤已被 U7 构造性解决） |

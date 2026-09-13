@@ -2,6 +2,8 @@
 
 设计基线: 72906ff7b（docs/design/subagent-record-persistence-consolidation.md v8）| 计划基线: 本文件首次 commit | 日期: 2026-09-12
 
+> **路径注记（2026-09-13，design-code-sync）**：docs/design/ 目录已消解，设计文档现位于 `docs/architecture/subagent-record-persistence-consolidation.md`（本文所引 docs/design/ 旧路径以本注记为准）；constraints.md 与 render-constraints.mjs 已退役，`docs/constraints.json` 为架构约束唯一登记处。
+
 ## 0 章节映射
 
 | 内容 | 设计文档实际位置 |
@@ -12,7 +14,7 @@
 | 下一层拆分 | §5 下一层拆分（P1-P5 + 文件改动地图） |
 | 待验证检查点 | §5 末尾：① writeSync 实际时延（P5 实测）② manifest 被 GUI/runtime 直读依赖面（P4 前核实）③ pi flush 窗口分布 |
 
-审查证据：主审收尾轮 `.review/subagent-record-persistence-consolidation.v10-review.md` 0 must-fix（DoR 达标）；影响面收尾轮 `.review/...v10-review-impact.md` 1 MF + 1 S 均已在 v8（72906ff7b）修复核实。
+审查证据：主审收尾轮 **0 must-fix**（DoR 达标）；影响面收尾轮 1 MF + 1 S 均已在 v8（72906ff7b）修复核实。（原 `.review/` 证据指针目录已不存在——审查工作产物未入库，仅记述结论本身。）
 
 ## 1 目标快照（逐字摘录）
 
@@ -229,7 +231,7 @@ graph TD
 - 待验证检查点②（manifest 被 GUI/runtime 直读依赖面）——**已关闭（U4c 轮 1）**：renderer/core 零命中，runtime 仅 package.json manifest（异构域无关）；唯一绕 store 直读 records/*.json 的消费方 = extensions/universal/session-reader（5 个读面：listRecordManifests 扫描 / manifestIdentityData 消费旧三态+identity / manifestBySessionFile 索引 / resolveByRecordId 反查 / result-action 批量预取，必填仅 id/rootSessionId/sessionFile）；G2 双写投影（旧三态 + closedReason + identity 全字段 + additive executionStatus）覆盖全部消费面
 - ~~P-B4 探针结论（U1 A7）~~——**已关闭（U1 轮 1）**：实装 pi@0.84.4 dist SessionManager 直驱 appendCompaction，custom entry（subagent-record / notify-ledger 类 / pending:register-unregister）文件面全保留不改写——E1 判定源（entry 尾）与「entry 可丢」承载假设在 compaction 面不劣化，设计 D4② 登记评估项无需立项；残余丢失面仍仅 debounce-flush × SIGKILL 交集（D4② 既述）
 - ~~extensions transparent-resume.test.ts:315 回归——挂 U4b 修复（见偏差登记表尾）~~——**已收账（U4b committed 2589cd38c，FOREIGN_LIVE_PID 探针修复）**
-- record-store.ts 行数 1207（U1 后）——eslint 提额 1400 过渡（已随 U1 commit），H4 全落地后按意图原语族拆分（终态原语/轮次簿记/重建三轴），属独立重构任务
+- record-store.ts 行数 1207（U1 后）——eslint 提额 1400 过渡（已随 U1 commit）→ **2026-09-13 更新：现 2698 物理 / 1429 eslint 折算，已破 1400 提额线**；拆分任务（终态原语/轮次簿记/重建三轴）待排期，2026-09-13 design-code-sync 追认提额 1450 过渡
 - ~~待验证检查点①（writeSync 时延）~~——**已关闭（U5）**：markFinalized N=100 实测 p50=0.155ms / P99=0.404ms / max=1.295ms，远低于 10ms 重审阈值（terminal-write-latency.test.ts 常驻回归）
 - ~~待验证检查点③（pi flush 窗口分布）~~——**已关闭（Gate B S3，降级为接受项）**：S3 真机四腿实测（已送达零重投 / 未送达重放恰 1 次 / E1 sync 批按 ledger 差集重放 / ack 后零重放）中 E1 构造实测「session 文件 flush 把 ledger/notify 合批，文件级窗口不存在」——唯一可命中窗在宿主 stdout 日志级；flush 窗口分布未取得独立分布数据，按 D4② 两形态已声明残余窗接受（微任务级 + debounce 级，后果 = 单批通知缺发非状态错误），不立项
 - 认知外改动 docs/design/timeout-zcode-turn-and-settled-watchdog.md（工作区 1 行外部变更）——全程不碰不裹挟
