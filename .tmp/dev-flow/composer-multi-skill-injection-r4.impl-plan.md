@@ -81,18 +81,25 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（空——随执行填写）
+| # | Unit | 偏差 | 处置 | 证据 |
+|---|------|------|------|------|
+| R1 | u-ui-render | D12 触发面宽于设计文字：实现按「一切非 text 段」统一判定（含 slash 文本还原/image 缩略图），设计采用句原只枚举 badge | 实现属同类缺陷修复无负面效应——设计文档 D12 采用句/现状缺陷/场景 10-⑤ 已补 slash/image 扩面措辞（审查 unreasonable[LOW] 收口） | UserBubble.vue:207-215；cr-ui-r2 报告 |
+| R2 | u-ui-render | D13 设计句第二选择器写法（`>` 子代组合器无 :deep()）按字面在 scoped CSS 下不可实施，实现用 :deep() 后代形式（行为等价） | doc_error 修正：设计 D13 采用句已改为与实现一致的 :deep() 后代形式 | ComposerInput.vue:282-284；cr-ui-r2 报告 |
+| R3 | u-core-parse | 代码注释三形态编号与设计 D7 编号不一致：<xyz-skills> 注释归 ②、设计归 ③（行为零差异，仅口径） | ✅ 已修：统一按设计口径（<xyz-skills> 归 ③），commit e5bfe596b | apply-entry-convert.ts 头注释；cr-core-r2 报告 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u-foundation | pending | 0 | - |
-| u-core-parse | pending | 0 | - |
-| u-injector | pending | 0 | - |
-| u-ui-render | pending | 0 | - |
+| u-foundation | committed | 1 | c1c212d92（409 tests 绿 / typecheck 绿；发现并修正降级形态指引行块内 vs 存量块外语义差异） |
+| u-core-parse | committed（审查通过：R3 注释编号已修 e5bfe596b） | 1 | 7be82c59d（core 2074 绿 / 存量断言零改动 / E8 两链路等价新增；防御细化：剥块后无标记命中不回退原文防泄漏） |
+| u-injector | committed（审查通过：0 unreasonable，2 doc_error 已修 add637ce9） | 1 | b58ba09e0（injector 24 + static 8 + golden REAL_PI 真实执行绿；runtime 全量 5949 中 1 失败 = 既有 subagent-extractor-engine，已实证 HEAD 同红） |
+| u-ui-render | committed（一致性审查通过：7 reasonable / 1 LOW 已收口 / 1 doc_error 已修） | 1 | cc80fedb6（ui 772 绿含 5 条 D12 新用例 / dom-core 232 零回归 / scoped 编译与 :first-child 语义实测） |
 
 ## 7 残留风险与变更历史
+
+- 一致性审查清零（2026-09-13）：三区 reviewer（ui / core / shared+runtime）聚合 = 28 reasonable / 2 unreasonable（均 LOW：D12 扩面措辞、core 注释编号）/ 5 doc_errors（均 LOW）——unreasonable 全部修复收口、doc_errors 全部主 agent 修订、reasonable 全部入登记表。清零标记 commit = 设计文档 add637ce9 + 注释对齐 e5bfe596b。Gate A 证据见下条。
+- Gate A（2026-09-13）：五包 vitest（shared 409 / core 2074 / ui 772 / dom-core 232 / runtime 5949 中 1 失败）+ root lint + extensions:typecheck。runtime 唯一失败 = test/subagent-extractor-engine.test.ts「rejects journal path outside engines root」——已实证 HEAD（stash 掉本流水线改动后）同样红，属 zcode db-isolation 工作流面既有债务，非本次引入；登记为残留风险待用户签认。
 
 - R4 设计协议变更涉及 pi 落盘文本形态（正文标记 + 末尾块）；存量会话（原位展开形态落盘）靠 core 反解析存量兼容规则（u-core-parse ③ 断言锁定）。
 - REAL_PI 探针依赖凭证环境；无凭证时以 static 锚 + skip 记录代替（场景 8 通过标准已声明）。
