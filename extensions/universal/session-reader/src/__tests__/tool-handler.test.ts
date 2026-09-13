@@ -9,7 +9,7 @@ import {
   type SessionReadParams,
   type SessionReadSignals,
 } from '../tool-handler.js'
-import { DOCTOR_CACHE_TTL_MS, type DoctorDetails } from '../doctor.js'
+import { type DoctorDetails } from '../doctor.js'
 import { levenshtein } from '../no-match.js'
 import {
   MULTI_SEARCH_MAX_SESSIONS,
@@ -1582,7 +1582,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
 // doctor details 契约直用 doctor.ts 导出的 DoctorDetails（不再自建局部镜像——生产侧
 // 形状漂移由编译期捕捉，S-R2 同步）
 
-describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob + 缓存）', () => {
+describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob）', () => {
   let tmp: string
 
   const SLUG = '--Users-foo--'
@@ -1754,59 +1754,31 @@ describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob + �
     expect(fullSub?.exists).toBe(true)
   })
 
-  it('进程内缓存：同根二次调用命中缓存不重扫；根目录 mtime 变化即失效重扫（§7B 要点 8）', async () => {
+  it('无缓存形态（ext-simplify-04 U3）：重复调用输出一致（每次实扫），新落盘文件立即可见', async () => {
+    // 原三个用例（缓存命中不重扫 / TTL 到期失效 / find 不读 doctor 缓存 PS-14）随
+    // doctor 缓存机删除而合并为本用例——无缓存层后「find/doctor 读到旧计数」的形态
+    // 在结构上不存在，守卫点收敛为：输出无「缓存命中」行 + 每次调用实扫（新增文件
+    // 下一次调用即见，反而更实时）
     const agentDir = join(tmp, 'agent')
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'a.jsonl'))
     const signals: SessionReadSignals = { agentDir }
 
     const first = (await handleSessionRead({ action: 'doctor' }, signals)).details as DoctorDetails
     const firstDef = first.roots.find((x) => x.kind === 'default')!
-    expect(firstDef.cached).toBeUndefined() // 首扫
     expect(firstDef.fileCount).toBe(1)
 
-    const second = (await handleSessionRead({ action: 'doctor' }, signals)).details as DoctorDetails
-    const secondDef = second.roots.find((x) => x.kind === 'default')!
-    expect(secondDef.cached).toBe(true) // 命中缓存，未重扫
-    expect(secondDef.fileCount).toBe(1)
+    const second = await handleSessionRead({ action: 'doctor' }, signals)
+    const secondDef = (second.details as DoctorDetails).roots.find((x) => x.kind === 'default')!
+    expect(secondDef.fileCount).toBe(1) // 两次输出一致（同目录无变化）
+    expect(second.content[0].text).not.toContain('缓存命中')
 
-    // 根目录 mtime 变化（根层新增文件）→ 失效重扫，计数更新
-    await writeJsonl(join(agentDir, 'sessions', 'b.jsonl'), 'bbbbbbbb')
+    // 新 session 落盘 → 下一次 doctor / find 均立即可见（无缓存层，每次实扫）
+    await writeJsonl(join(agentDir, 'sessions', SLUG, 'b.jsonl'), 'bbbbbbbb')
     const third = (await handleSessionRead({ action: 'doctor' }, signals)).details as DoctorDetails
-    const thirdDef = third.roots.find((x) => x.kind === 'default')!
-    expect(thirdDef.cached).toBeUndefined()
-    expect(thirdDef.fileCount).toBe(2)
-  })
-
-  it('缓存 TTL 到期失效重扫（秒级 TTL，fake timers 推进时钟）', async () => {
-    vi.useFakeTimers()
-    try {
-      const agentDir = join(tmp, 'agent-ttl')
-      await writeJsonl(join(agentDir, 'sessions', SLUG, 'a.jsonl'))
-      const signals: SessionReadSignals = { agentDir }
-      const first = (await handleSessionRead({ action: 'doctor' }, signals))
-        .details as DoctorDetails
-      expect(first.roots.find((x) => x.kind === 'default')!.cached).toBeUndefined()
-      await vi.advanceTimersByTimeAsync(DOCTOR_CACHE_TTL_MS + 1)
-      const second = (await handleSessionRead({ action: 'doctor' }, signals))
-        .details as DoctorDetails
-      // TTL 过期 → 即使 mtime 未变也重扫
-      expect(second.roots.find((x) => x.kind === 'default')!.cached).toBeUndefined()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('find 不读 doctor 缓存（§7B 要点 8 PS-14）：doctor 缓存 0 文件后新建 session，find 立即可见', async () => {
-    const agentDir = join(tmp, 'agent')
-    // doctor 首跑时 main 根为空 → 缓存 fileCount=0（PS-14 形态：首条 assistant 前 jsonl 不落盘）
-    await mkdir(join(agentDir, 'sessions'), { recursive: true })
-    await handleSessionRead({ action: 'doctor' }, { agentDir })
-    // 之后新 session 落盘
-    await writeJsonl(join(agentDir, 'sessions', SLUG, 'found-later.jsonl'), 'id-find-later-xyz')
-    // find 实扫立即可见——若 find 读 doctor 缓存（0 候选）此断言必红
-    const r = await handleSessionRead({ action: 'find', query: 'id-find-later-xyz' }, { agentDir })
+    expect(third.roots.find((x) => x.kind === 'default')!.fileCount).toBe(2)
+    const r = await handleSessionRead({ action: 'find', query: 'bbbbbbbb' }, { agentDir })
     const d = r.details as { matches: Array<{ sessionId: string }> }
-    expect(d.matches.some((m) => m.sessionId.includes('id-find-later-xyz'))).toBe(true)
+    expect(d.matches.some((m) => m.sessionId.includes('bbbbbbbb'))).toBe(true)
   })
 
   it('env/bundleUrl 信号缺失降级：仍出环境判定行（standalone-pi · 未知）+ 完整根表，不抛错', async () => {
@@ -1986,9 +1958,10 @@ describe('u9 F1 重写 + uuid 归一化（fixture，§5.2 / §6.7 / §11.5）', 
     expect((hexJunk.details as { matches: unknown[] }).matches).toHaveLength(0)
   })
 
-  it('⑥ 自检行计数 = 本次实扫结果（不读 doctor 缓存）+ 去重根注记', async () => {
+  it('⑥ 自检行计数 = 本次实扫结果 + 去重根注记', async () => {
     const agentDir = join(tmp, 'agent')
-    // PS-14 形态：doctor 首跑时 main 根空 → 缓存 fileCount=0
+    // 根扫描无缓存（doctor 缓存机已删，ext-simplify-04 U3）——doctor 首跑后落盘的
+    // 文件，find 自检行照实扫计数（原 PS-14「doctor 缓存 0 文件」形态结构性不存在）
     await mkdir(join(agentDir, 'sessions'), { recursive: true })
     await handleSessionRead({ action: 'doctor' }, { agentDir })
     // 之后 session 落盘（main 2 + subagent 1）
@@ -2001,7 +1974,6 @@ describe('u9 F1 重写 + uuid 归一化（fixture，§5.2 / §6.7 / §11.5）', 
       { agentDir },
     )
     const text = r.content[0].text
-    // 若 F1 读 doctor 缓存（0 文件），以下计数断言必红
     expect(text).toContain(`${join(agentDir, 'sessions')}：2 文件`)
     expect(text).toContain(`${join(agentDir, 'subagents')}：1 文件`)
     expect(text).toContain('候选集非空（共 3 文件）')
@@ -2455,7 +2427,8 @@ describe('E1 find 单次根解析（探针 P1：resolveSessionRoots 恰 1 次）
 
 // ============================================================
 // u11：metadataProvider 注入 + TTL 缓存（design 2026-09-10 §6.6）
-// handler 级集成：注入包装（withMetadataCache 独立实例，不与 doctorScanCache 串扰）
+// handler 级集成：注入包装（metadata 缓存独立实例——根扫描无缓存，doctor 缓存机
+// 已删除，ext-simplify-04 U3，不存在串扰面）
 // + 标题渲染（§5.1 候选行标题优先）+ provider 抛错降级不外抛。
 // 策略①惰性/②窄化/合并语义在 find.test.ts u11 段覆盖。
 // ============================================================

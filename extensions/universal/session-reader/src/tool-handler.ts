@@ -22,7 +22,7 @@
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync, openSync, readSync, closeSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -81,7 +81,7 @@ import {
   extractUserMessages,
   type ExtractWhat,
 } from './extract.js'
-import { doDoctor, DOCTOR_CACHE_TTL_MS, statDirMtimeOrNull, type SessionReadSignals } from './doctor.js'
+import { doDoctor, type SessionReadSignals } from './doctor.js'
 
 // SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
@@ -351,9 +351,10 @@ async function resolveByFragment(
   }
   const { matches } = await findSessions(session, agentDir, opts)
   if (matches.length === 0) {
-    // F1 自检行需要发现层实况：无 options 的 resolveSessionRoots 恒实扫（不读 doctor
-    // 缓存，§7B 要点 8），与 find 刚完成的扫描同一数据源（roots.ts 薄包装语义）；
-    // 信号包同源（liveSessionDir 透传）——findSessions 内部对空串/undefined 已有降级 guard。
+    // F1 自检行需要发现层实况：无 options 的 resolveSessionRoots 恒实扫（根扫描无
+    // 缓存——doctor 缓存机已删除，ext-simplify-04 U3），与 find 刚完成的扫描同一数据
+    // 源（roots.ts 薄包装语义）；信号包同源（liveSessionDir 透传）——findSessions
+    // 内部对空串/undefined 已有降级 guard。
     const roots = await resolveSessionRoots({ agentDir, liveSessionDir })
     throw err(formatNoMatch(session, roots))
   }
@@ -633,8 +634,9 @@ function formatFamilyText(f: Family): string {
 const FIND_DEFAULT_LIMIT = 20
 
 /**
- * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫，不读 doctor
- * 缓存——§7B 要点 8 PS-14），完整信号包保证 [live] 根（最高优先级）计数可见。
+ * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫——根扫描无缓存，
+ * doctor 缓存机已删除，ext-simplify-04 U3），完整信号包保证 [live] 根（最高优先级）
+ * 计数可见。
  *
  * E1（ext-simplify-04 §3 D1）：roots 由 doFind 预解析传入——与匹配用同一次实扫
  * （调用方保证无 options），不再独立第三次全量扫盘。
@@ -667,9 +669,10 @@ function findNoMatch(query: string, roots: SessionRoot[]): ToolResult {
  * 标题 listAll 每 TTL 窗口至多一次/目录。
  *
  * E1 预解析根复用（ext-simplify-04 §3 D1，清 impl-plan D-15④ 债）：开头一次
- * resolveSessionRoots(signals)（无 options 恒实扫，不读 doctor 缓存——§7B 要点 8
- * PS-14），显式 source / 分组两段 findSessions 与零匹配 findNoMatch（F1 自检行）
- * 共用——一次 doFind 内 signals 恒同值、数据完全同源，目录扫描从 2-3 次收敛为恒 1 次。
+ * resolveSessionRoots(signals)（无 options 恒实扫——根扫描无缓存，doctor 缓存机
+ * 已删除，ext-simplify-04 U3），显式 source / 分组两段 findSessions 与零匹配
+ * findNoMatch（F1 自检行）共用——一次 doFind 内 signals 恒同值、数据完全同源，
+ * 目录扫描从 2-3 次收敛为恒 1 次。
  */
 async function doFind(
   params: SessionReadParams,
@@ -1274,9 +1277,9 @@ async function doWorkflow(
 // ---------------------------------------------------------------------------
 
 /**
- * 标题缓存条目（SessionMetadataEntry[] keyed by 目录字面路径）。与 doctor 的
- * doctorScanCache **独立实例**——两者语义不同：doctor 缓存根扫描统计（文件数/耗时），
- * 本缓存标题元数据（session_info name / firstMessage，低频变更）。
+ * 标题缓存条目（SessionMetadataEntry[] keyed by 目录字面路径）。进程内唯一实例，
+ * 仅缓存标题元数据（session_info name / firstMessage，低频变更）——根扫描统计
+ * 不再有缓存（doctor 缓存机已删除，ext-simplify-04 U3），与根扫描无共享状态。
  */
 interface MetadataCacheEntry {
   entries: SessionMetadataEntry[]
@@ -1291,11 +1294,23 @@ const metadataCache = new Map<string, MetadataCacheEntry>()
 // 分裂成两份仅多一次 miss 重扫，无正确性影响，不升级 globalThis 单例。
 
 /**
- * 标题缓存 TTL（秒级，§6.6 策略 ③）。量级与 doctor 根扫描缓存同档（DOCTOR_CACHE_TTL_MS），
- * 待 §11.3a 实测校准；mtime 是主失效通道，TTL 兜「目录内文件追加不改目录 mtime」的陈旧面
- *（标题恰好随首条消息落盘，同窗口内新增标题最多延迟一个 TTL 可见，可接受）。
+ * 标题缓存 TTL（秒级，§6.6 策略 ③）。独立定义 5000（原「与 doctor 根扫描缓存同档
+ * （DOCTOR_CACHE_TTL_MS）」的别名已随 doctor 缓存机删除而撤销，ext-simplify-04 U3）；
+ * 量级待 §11.3a 实测校准；mtime 是主失效通道，TTL 兜「目录内文件追加不改目录 mtime」
+ * 的陈旧面（标题恰好随首条消息落盘，同窗口内新增标题最多延迟一个 TTL 可见，可接受）。
  */
-export const METADATA_CACHE_TTL_MS = DOCTOR_CACHE_TTL_MS
+export const METADATA_CACHE_TTL_MS = 5000
+
+/** stat 目录 mtime；不存在返回 null（与缓存条目的 null 比对 = 存在性未翻转）。 */
+async function statDirMtimeOrNull(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs
+  } catch (err) {
+    // 目录不存在是常态输入（候选根降级形态），非异常——void 同 roots.ts 容错
+    void err
+    return null
+  }
+}
 
 /**
  * 把注入的 metadataProvider 包上 TTL 缓存（get 失效判定 + set 快照）。
@@ -1349,8 +1364,8 @@ const RESULT_ACTION_DEPS: ResultActionDeps = {
  * F1(resolve)/F4/F5/F6 抛 Error（含 👉）；F2 多匹配与 find 零匹配返回结果不抛。
  *
  * @param signals 发现层信号包（design §7B：index.ts 采集 { agentDir, liveSessionDir? }，
- *   采集端全可选链可降级）。u9 起 find/F1 路径消费根列表（F1 自检行恒走无 options 实扫，
- *   不读 doctor 缓存，§7B 要点 8）。
+ *   采集端全可选链可降级）。u9 起 find/F1 路径消费根列表（F1 自检行计数恒取本次
+ *   实扫，无任何根扫描缓存，§7B 要点 8）。
  * @param signal 可选 AbortSignal（MF-5）：仅 search 消费（长扫描可中断）；其余 action 有界，不接。
  * @param metadataProvider 可选标题元数据注入（u11，design 2026-09-10 §6.6）：index.ts 构造
  *   `(dir) => SessionManager.listAll(dir)`，此处包 TTL 缓存后透传 find。缺省 = undefined =
@@ -1364,7 +1379,7 @@ export async function handleSessionRead(
   metadataProvider?: SessionMetadataProvider,
 ): Promise<ToolResult> {
   const agentDir = signals.agentDir
-  // u11：TTL 缓存包装在注入边界（策略 ③，独立于 doctorScanCache 的实例）；仅 find 消费。
+  // u11：TTL 缓存包装在注入边界（策略 ③，metadata 缓存独立实例）；仅 find/search 消费。
   const cachedProvider =
     metadataProvider === undefined ? undefined : withMetadataCache(metadataProvider)
   switch (params.action) {

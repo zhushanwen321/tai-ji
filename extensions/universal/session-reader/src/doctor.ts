@@ -2,21 +2,15 @@
  * doctor action（u8：design 2026-09-10 §6.2/§6.3/§6.4/§7B 要点 2/4/5/8 + §6.11 U14b 段）。
  *
  * 从 tool-handler.ts 机械提取（max-lines 拆分轮，零行为变更）：环境判定 + 根表渲染 +
- * doctor 扫描缓存 + 旧布局残留 glob 探测。SessionReadSignals（u3 信号包超集）在域内
- * 定义，tool-handler re-export 供 index.ts 生产消费。statDirMtimeOrNull /
- * DOCTOR_CACHE_TTL_MS 供留守的 u11 metadata 缓存复用（一并导出）。
+ * 旧布局残留 glob 探测。SessionReadSignals（u3 信号包超集）在域内定义，tool-handler
+ * re-export 供 index.ts 生产消费。原 u8 的扫描缓存机已删除（ext-simplify-04 U3）：
+ * 每次调用实扫，无缓存命中语义；TTL/mtime 判定随 metadata 缓存留在 tool-handler 侧。
  */
 import { existsSync } from 'node:fs'
-import { readdir, stat } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { detectEnvironment, type DetectedEnvironment } from './discovery/env.js'
-import {
-  resolveSessionRoots,
-  type SessionRoot,
-  type SessionRootCache,
-  type SessionRootCacheEntry,
-  type SessionRootSignals,
-} from './discovery/roots.js'
+import { resolveSessionRoots, type SessionRoot, type SessionRootSignals } from './discovery/roots.js'
 import type { SessionReadParams, ToolResult } from './tool-handler.js'
 
 /**
@@ -32,68 +26,8 @@ export interface SessionReadSignals extends SessionRootSignals {
   bundleUrl?: string
 }
 
-/**
- * doctor 扫描缓存（进程内，keyed by 根字面路径；Map 生命周期 = pi 进程生命周期，
- * 即「进程生命周期兜底上限」）。失效 = 秒级 TTL 到期 **或** 根目录 mtime 变化（任一）。
- *
- * 以 SessionRootCache 句柄注入 resolveSessionRoots（§6.3「同一数据源两处渲染」——根
- * 骨架/去重/扫描全在 roots.ts，doctor 只注入缓存与 subagent 扫描模式）；TTL/mtime
- * 失效判定全在本侧实现，roots.ts 不内置。**仅 doctor 消费——find 一律不读缓存**
- *（§7B 要点 8）：find 恒不传 options；若 find 读缓存，最坏形态是 PS-14（首条
- * assistant 前 main 根 0 文件被缓存，之后每次都把「根解析正常」误报成「主根为空」）
- * ——正是本设计要消灭的错误归因。
- */
-interface DoctorCacheEntry extends SessionRootCacheEntry {
-  /** 写入时刻（Date.now()），TTL 判定用 */
-  cachedAt: number
-  /** 根目录 mtime(ms)；目录不存在为 null（存在性翻转即失效） */
-  dirMtimeMs: number | null
-}
-
-const doctorScanCache = new Map<string, DoctorCacheEntry>()
-// §7.5 豁免（development-guide.md「纯性能缓存豁免」）：TTL 纯性能缓存，jiti 双路径加载
-// 分裂成两份仅多一次 miss 重扫，无正确性影响，不升级 globalThis 单例。
-
 /** doctor 根表来源标签列宽（最长 `[subagent]` 10 字符 + 1 对齐间距，§5.1 表格形态）。 */
 const DOCTOR_ROOT_LABEL_PAD = 11
-
-/** 缓存 TTL（秒级，§6.3）。mtime 是主失效通道；TTL 兜「子目录内增删不改变根 mtime」的陈旧面。 */
-export const DOCTOR_CACHE_TTL_MS = 5000
-
-/** stat 根目录 mtime；不存在返回 null（与缓存条目的 null 比对 = 存在性未翻转）。 */
-export async function statDirMtimeOrNull(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).mtimeMs
-  } catch (err) {
-    // 目录不存在是 doctor 的常态输入（三根降级形态），非异常——void 同 roots.ts 容错
-    void err
-    return null
-  }
-}
-
-/** doctor 侧缓存句柄：get 做失效判定（未命中即删除条目），set 快照 mtime 与写入时刻。 */
-const doctorRootCache: SessionRootCache = {
-  async get(key) {
-    const hit = doctorScanCache.get(key)
-    if (hit === undefined) return undefined
-    if (Date.now() - hit.cachedAt >= DOCTOR_CACHE_TTL_MS) {
-      doctorScanCache.delete(key)
-      return undefined
-    }
-    if ((await statDirMtimeOrNull(key)) !== hit.dirMtimeMs) {
-      doctorScanCache.delete(key)
-      return undefined
-    }
-    return { exists: hit.exists, fileCount: hit.fileCount, scanMs: hit.scanMs }
-  },
-  async set(key, value) {
-    doctorScanCache.set(key, {
-      ...value,
-      cachedAt: Date.now(),
-      dirMtimeMs: await statDirMtimeOrNull(key),
-    })
-  },
-}
 
 /** 旧布局残留条目（§6.11 U14b doctor 侧独立 glob 探测）。 */
 /** 旧布局残留探测单条命中（doctor 与 u14b 启动探测同源判据，§6.11）。 */
@@ -155,9 +89,8 @@ export async function doDoctor(
   })
   const roots = await resolveSessionRoots(signals, {
     // subagent 根默认只 stat（§6.3 成本控制：只列路径与可扫性）；includeSubagents:true
-    // 才扫（走同一缓存句柄）。find/F1 路径恒不传 options——不读缓存（§7B 要点 8）。
+    // 才扫。无缓存——每次实扫（原缓存机已删，ext-simplify-04 U3，§7B 要点 8 新态）。
     subagents: params.includeSubagents === true ? 'scan' : 'stat',
-    cache: doctorRootCache,
   })
   const leftovers = await detectPiLayoutLeftovers(signals.agentDir)
   return renderDoctor(roots, environment, leftovers)
@@ -206,19 +139,18 @@ function renderDoctor(
     }
     const facts = [r.exists ? '存在' : '不存在']
     if (r.fileCount === undefined) {
-      // 仅 subagents:'stat' 的 subagent 根（doctor 默认形态）——其余根恒有计数
-      //（实扫或缓存命中）；被去重根已在上方提前返回
+      // 仅 subagents:'stat' 的 subagent 根（doctor 默认形态）——其余根恒有计数（实扫）；
+      // 被去重根已在上方提前返回
       facts.push('未扫描（subagent 根默认不扫，includeSubagents:true 开启）')
     } else {
       facts.push(`${r.fileCount} 文件`, `扫 ${Math.round(r.scanMs ?? 0)}ms`)
     }
-    if (r.cached === true) facts.push('缓存命中')
     facts.push(r.source === 'main' ? 'main' : 'subagent')
     lines.push(`     ${facts.join(' · ')}`)
   })
 
   // 事实型诊断（§7B 要点 5）：列表内首个 main 根即最高优先级 main 根（去重只移除后位根，
-  // 首位根恒有计数——实扫或缓存命中）。0 文件也是事实——首条 assistant 前 jsonl 不落盘
+  // 首位根恒有计数——实扫）。0 文件也是事实——首条 assistant 前 jsonl 不落盘
   //（PS-14），不做归因。
   lines.push('')
   const firstMain = roots.find((r) => r.source === 'main')

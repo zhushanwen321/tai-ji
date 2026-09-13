@@ -136,8 +136,9 @@ function guidanceLines(): string[] {
  *
  * ① 事实型自检行：main 根 N 文件 / subagent 根 M 文件 /「候选集非空|为空」/「查询已做
  *    uuid 归一化匹配（小写+去连字符）后仍无命中」。计数取 roots——调用方在 F1 路径
- *    恒以无 options 的 resolveSessionRoots 实扫（find/doctor 缓存句柄不注入，§7B 要点 8：
- *    缓存计数会把 PS-14「首条 assistant 前 0 文件」误报成「主根为空」），即本次实扫结果。
+ *    恒以无 options 的 resolveSessionRoots 实扫（根扫描无缓存——doctor 缓存机已删除，
+ *    ext-simplify-04 U3，§7B 要点 8 新态；原 PS-14「缓存计数误报主根为空」的防污染
+ *    规则随之失效），即本次实扫结果。
  *    只陈述事实，**不得**出现「真的没有这个 session」类归因断言（§3.3 教训：大写/去连
  *    字符输入在归一化前会被错误归因为「不存在」）。
  * ② 编辑距离最近候选 top-3（标注 source 与差异位），候选 = roots 实扫文件名提取的

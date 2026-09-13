@@ -181,7 +181,7 @@ graph LR
 | 08-u4 | committed | 1 | 240/240 + extensions 三连全绿 + 守卫双过；L1-L9 除 L7 逐项 grep 证据（08 线完成） |
 | 04-U1 | committed | 1 | 398 绿 2 skip；re-export 零命中；G5③ 回写落位；commit 20dcfbe37 |
 | 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 |
-| 04-U3 | in-progress | 0 | - |
+| 04-U3 | committed | 1 | 398 绿；「缓存命中」零命中；G5① 两文档五笔回写齐 |
 | 04-U4 | pending | 0 | - |
 | 04-U5 | pending | 0 | - |
 | 04-U6 | pending | 0 | - |

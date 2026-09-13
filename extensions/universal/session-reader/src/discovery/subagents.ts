@@ -74,7 +74,9 @@ export async function buildFamilyFromFs(sessionId: string, agentDir: string): Pr
  * collectMainSessions 实扫集合一致（listMainSessions = agentDir 信号包下未去重的 main 根）。
  */
 async function formatSessionNotFound(sessionId: string, agentDir: string): Promise<string> {
-  const mainRoots = (await resolveSessionRoots({ agentDir })).filter(
+  // subagents:'stat'——本路径只渲染 main 根行，subagent 根不做深扫（ext-simplify-04 A2：
+  // 原默认 'scan' 白扫整个 subagent 根后 filter 丢弃）
+  const mainRoots = (await resolveSessionRoots({ agentDir }, { subagents: 'stat' })).filter(
     (r) => r.source === 'main' && r.dedupedInto === undefined,
   )
   const lines = mainRoots.map((r) => {

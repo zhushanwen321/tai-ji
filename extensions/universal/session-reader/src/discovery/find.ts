@@ -662,8 +662,8 @@ async function fillFirstMessagePreviews(
  * E1 预解析根复用（ext-simplify-04 §3 D1）：opts.roots = 调用方预解析的根列表——同一
  * 次 doFind 内多段查询（分组 main/subagent 两路）复用同一次根解析，目录扫描不随查询
  * 段数翻倍。缺省 = 本函数自解析（既有测试与单段调用方零改动）。调用方须保证传入的
- * roots 来自无 options 的 resolveSessionRoots 实扫（find 路径不读 doctor 缓存，
- * §7B 要点 8 PS-14——预解析是复用同一次实扫，不是引入缓存）。
+ * roots 来自无 options 的 resolveSessionRoots 实扫（预解析是复用同一次实扫——根扫描
+ * 无缓存，doctor 缓存机已删除，ext-simplify-04 U3）。
  */
 export async function findSessions(
   query: string,
@@ -682,7 +682,7 @@ export async function findSessions(
   const cwdFilter = opts?.cwd
   const sourceFilter = opts?.source
 
-  // 0. 根解析（单次实扫，无 options——find 不读 doctor 缓存，§7B 要点 8 PS-14）；
+  // 0. 根解析（单次实扫，无 options——根扫描无缓存）；
   // E1：调用方已预解析（opts.roots）时复用，不再自扫
   const signals: SessionRootSignals =
     opts?.liveSessionDir !== undefined && opts.liveSessionDir.length > 0

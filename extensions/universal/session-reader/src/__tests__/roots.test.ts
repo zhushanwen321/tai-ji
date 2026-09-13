@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, readdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -364,11 +364,11 @@ describe('buildFamilyFromFs not-found 文案（U1 并入：列实际扫描候选
 
 // ============================================================
 // u8 追加：resolveSessionRoots options（doctor 统一数据源，design §6.3「同一数据源
-// 两处渲染，不重复实现探测」——subagent 扫描模式与进程内缓存经 options 由调用方
-// 驱动，本模块不内置 TTL/mtime 失效逻辑）
+// 两处渲染，不重复实现探测」——subagent 扫描模式经 options 由调用方驱动；原 u8 的
+// 注入式缓存面已删除，ext-simplify-04 U3，每次调用实扫）
 // ============================================================
 
-describe('resolveSessionRoots options（u8：subagents 模式 + 注入式缓存）', () => {
+describe('resolveSessionRoots options（u8：subagents 模式）', () => {
   /** 最小 fixture：default 根 1 文件 + subagent 根 1 文件（legacy 不存在） */
   async function buildMinimalFixture(): Promise<{ tmp: string; agentDir: string }> {
     const tmp = await mkdtemp(join(tmpdir(), 'roots-opts-'))
@@ -413,71 +413,21 @@ describe('resolveSessionRoots options（u8：subagents 模式 + 注入式缓存�
     }
   })
 
-  it('cache：未命中实扫后 set 回写；命中以缓存值构造根（cached 标记、files 空、不再回写）', async () => {
+  it('重复调用每次实扫（无缓存）：两次结果独立完整，files 恒非空实扫值', async () => {
+    // 原三个 cache 用例（set 回写 / 命中优先 / stat × cache）随缓存注入面删除
+    // （ext-simplify-04 U3）；本用例钉死删除后契约——不存在任何缓存层
     const { tmp, agentDir } = await buildMinimalFixture()
     try {
-      const store = new Map<string, { exists: boolean; fileCount: number; scanMs: number }>()
-      const setSpy = vi.fn((key: string, value: { exists: boolean; fileCount: number; scanMs: number }) => {
-        store.set(key, value)
-      })
-      const getSpy = vi.fn(async (key: string) => store.get(key))
-      const cache = { get: getSpy, set: setSpy }
-
-      // 首扫：get 未命中 → 实扫 → 逐非去重根 set（default + legacy + subagent = 3）
-      const first = await resolveSessionRoots({ agentDir }, { cache })
-      const firstDef = first.find((r) => r.kind === 'default')!
-      expect(firstDef.cached).toBeUndefined()
-      expect(firstDef.fileCount).toBe(1)
-      expect(getSpy).toHaveBeenCalled()
-      expect(setSpy).toHaveBeenCalledTimes(3)
-
-      // 二扫：命中 → 缓存值即数据源，无新回写
-      const second = await resolveSessionRoots({ agentDir }, { cache })
-      const secondDef = second.find((r) => r.kind === 'default')!
-      expect(secondDef.cached).toBe(true)
-      expect(secondDef.fileCount).toBe(1)
-      expect(secondDef.files).toEqual([])
-      expect(setSpy).toHaveBeenCalledTimes(3)
-    } finally {
-      await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('cache 命中值优先于磁盘（roots 不旁路缓存实扫——TTL/mtime 失效语义全在缓存实现侧）', async () => {
-    const { tmp, agentDir } = await buildMinimalFixture()
-    try {
-      const setSpy = vi.fn()
-      const cache = {
-        get: async () => ({ exists: true, fileCount: 99, scanMs: 7 }),
-        set: setSpy,
+      const first = await resolveSessionRoots({ agentDir })
+      const second = await resolveSessionRoots({ agentDir })
+      for (const roots of [first, second]) {
+        const def = roots.find((r) => r.kind === 'default')!
+        expect(def.fileCount).toBe(1)
+        expect(def.files).toHaveLength(1)
+        const sub = roots.find((r) => r.kind === 'subagent')!
+        expect(sub.fileCount).toBe(1)
+        expect(sub.files).toHaveLength(1)
       }
-      const roots = await resolveSessionRoots({ agentDir }, { cache })
-      const def = roots.find((r) => r.kind === 'default')!
-      expect(def.fileCount).toBe(99)
-      expect(def.scanMs).toBe(7)
-      expect(def.cached).toBe(true)
-      expect(def.files).toEqual([])
-      expect(setSpy).not.toHaveBeenCalled() // 命中不回写
-    } finally {
-      await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it("stat × cache 组合：'stat' 的 subagent 根不产缓存条目（缓存只服务扫盘贵的根）", async () => {
-    const { tmp, agentDir } = await buildMinimalFixture()
-    try {
-      const setKeys: string[] = []
-      await resolveSessionRoots({ agentDir }, {
-        subagents: 'stat',
-        cache: {
-          get: async () => undefined,
-          set: (key) => {
-            setKeys.push(key)
-          },
-        },
-      })
-      expect(setKeys).not.toContain(join(agentDir, 'subagents'))
-      expect(setKeys).toContain(join(agentDir, 'sessions'))
     } finally {
       await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
