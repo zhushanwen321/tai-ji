@@ -1,5 +1,6 @@
 /**
- * skill-marker 单测：私有标记语法（D3）、降级块形态（D7）、CJK 感知估算（D6）。
+ * skill-marker 单测：私有标记语法（D3）、降级块形态（D7）、末尾集中包裹块（R4 D11：
+ * 正常/降级两形态构建逐字断言 + 剥块定位切片）、CJK 感知估算（D6）。
  *
  * 重点验收面：标记序列化/解析往返无损（含 location 缺省、引号/反斜杠转义边界）、
  * 降级块构建/解析往返、CJK 估算边界（纯中文/纯英文/混合/空串/全角标点/代码密集）、
@@ -9,6 +10,7 @@ import { describe, it, expect } from 'vitest'
 import {
   SKILL_MARKER_TAG,
   SKILLS_BLOCK_TAG,
+  SKILL_DATA_BLOCK_TAG,
   SKILL_FALLBACK_GUIDANCE,
   CONTEXT_WINDOW_RATIO,
   CJK_CHAR_RE,
@@ -21,6 +23,9 @@ import {
   parseSkillMarkers,
   buildSkillsFallbackBlock,
   parseSkillsFallbackBlocks,
+  buildSkillDataBlockExpansions,
+  buildSkillDataBlockFallback,
+  findSkillDataBlockRange,
   estimateTokens,
 } from '../skill-marker'
 
@@ -424,5 +429,150 @@ describe('常量与 CJK 字符类定义', () => {
     expect(CJK_CHAR_RE.test('a')).toBe(false)
     expect(CJK_CHAR_RE.test('1')).toBe(false)
     expect(CJK_CHAR_RE.test('😀')).toBe(false)
+  })
+})
+
+// ── R4 D11：末尾集中追加包裹块（`<xyz-skill-data>`）────────────────────────
+
+describe('buildSkillDataBlockExpansions（R4 D11 正常形态包裹块）', () => {
+  it('常量标签名为 xyz-skill-data（与 SKILL_MARKER_TAG/SKILLS_BLOCK_TAG 命名同族）', () => {
+    expect(SKILL_DATA_BLOCK_TAG).toBe('xyz-skill-data')
+  })
+
+  it('单 skill：与设计 §3.1 场景 1 形态逐字一致（首行开标签、block 独立一行、末行闭标签）', () => {
+    const expansion = [
+      '<skill name="code-review-graph" location="/Users/x/.agents/skills/code-review-graph/SKILL.md">',
+      'References are relative to /Users/x/.agents/skills/code-review-graph.',
+      '',
+      '（SKILL.md 全文…）',
+      '</skill>',
+    ].join('\n')
+    expect(buildSkillDataBlockExpansions([expansion])).toBe(
+      [`<${SKILL_DATA_BLOCK_TAG}>`, expansion, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n'),
+    )
+  })
+
+  it('多 skill：每个展开 block 独立一行、顺序保持输入序（去重由 runtime 负责，本函数不做）', () => {
+    const e1 = '<skill name="a" location="/a/SKILL.md">\nA 正文\n</skill>'
+    const e2 = '<skill name="b" location="/b/SKILL.md">\nB 正文\n</skill>'
+    const block = buildSkillDataBlockExpansions([e1, e2])
+    expect(block).toBe([`<${SKILL_DATA_BLOCK_TAG}>`, e1, e2, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n'))
+  })
+
+  it('空列表：仅包裹壳（join 语义；mapping_unavailable 时是否调用由 runtime 裁决）', () => {
+    expect(buildSkillDataBlockExpansions([])).toBe('<xyz-skill-data>\n</xyz-skill-data>')
+  })
+
+  it('正常形态不追加指引行（D11 选定：name 双向对齐已完备，指引行仅降级形态保留）', () => {
+    const block = buildSkillDataBlockExpansions(['<skill name="a">\nbody\n</skill>'])
+    expect(block).not.toContain(SKILL_FALLBACK_GUIDANCE)
+  })
+})
+
+describe('buildSkillDataBlockFallback（R4 D11 降级形态包裹块）', () => {
+  it('单 skill：与设计 §3.1 场景 2 形态逐字一致（标记清单 + 指引行在包裹块内）', () => {
+    expect(buildSkillDataBlockFallback([{ name: 'cw-cli', location: '/c/SKILL.md' }])).toBe(
+      [
+        '<xyz-skill-data>',
+        '<xyz-skill name="cw-cli" location="/c/SKILL.md"/>',
+        SKILL_FALLBACK_GUIDANCE,
+        '</xyz-skill-data>',
+      ].join('\n'),
+    )
+  })
+
+  it('多 skill：每标记独立一行、location 缺省不输出属性、指引行置于清单后', () => {
+    expect(
+      buildSkillDataBlockFallback([
+        { name: 'a', location: '/a.md' },
+        { name: 'b' },
+      ]),
+    ).toBe(
+      [
+        '<xyz-skill-data>',
+        '<xyz-skill name="a" location="/a.md"/>',
+        '<xyz-skill name="b"/>',
+        SKILL_FALLBACK_GUIDANCE,
+        '</xyz-skill-data>',
+      ].join('\n'),
+    )
+  })
+
+  it('与存量 buildSkillsFallbackBlock 的关系：标记清单同源，指引行位置不同（块内 vs 存量块外）', () => {
+    const skills: ReadonlyArray<{ name: string; location?: string }> = [
+      { name: 'a', location: '/a.md' },
+      { name: 'b' },
+    ]
+    const legacy = buildSkillsFallbackBlock(skills)
+    const r4 = buildSkillDataBlockFallback(skills)
+    // 标记清单（无指引行的中间行）逐字一致：内容产出复用存量能力
+    const markerLines = (s: string) => s.split('\n').filter((l) => l.startsWith('<xyz-skill '))
+    expect(markerLines(r4)).toEqual(markerLines(legacy))
+    // 指引行位置差异：存量 D7 在闭标签后一行（块外），R4 D11 在闭标签前一行（块内）
+    expect(legacy.endsWith(`${SKILL_FALLBACK_GUIDANCE}`)).toBe(true)
+    expect(r4.endsWith(`${SKILL_FALLBACK_GUIDANCE}\n</${SKILL_DATA_BLOCK_TAG}>`)).toBe(true)
+  })
+})
+
+describe('findSkillDataBlockRange（R4 D11 剥块定位切片）', () => {
+  it('命中：区间为 slice 约定（[start, end)），切片即块全文，块前后正文无损', () => {
+    const block = buildSkillDataBlockFallback([{ name: 'a', location: '/a.md' }])
+    const text = `帮我 review 这段代码 <xyz-skill name="a" location="/a.md"/>\n\n${block}`
+    const range = findSkillDataBlockRange(text)
+    if (!range) throw new Error('expected a block range')
+    const start = text.indexOf(`<${SKILL_DATA_BLOCK_TAG}>`)
+    // index 与独立定位交叉验证（防 index 计算漂移）
+    expect(range).toEqual({ start, end: start + block.length })
+    expect(text.slice(range.start, range.end)).toBe(block)
+    expect(text.slice(0, range.start)).toBe(
+      '帮我 review 这段代码 <xyz-skill name="a" location="/a.md"/>\n\n',
+    )
+    expect(text.slice(range.end)).toBe('')
+  })
+
+  it('未命中：纯文本 / 只有开标签未闭合 / 只有闭合标签 → null', () => {
+    expect(findSkillDataBlockRange('纯文本消息')).toBeNull()
+    expect(findSkillDataBlockRange('<xyz-skill-data>\n<xyz-skill name="a"/>')).toBeNull()
+    expect(findSkillDataBlockRange('正文 </xyz-skill-data> 尾')).toBeNull()
+  })
+
+  it('嵌套截断：非贪婪止于首个闭合标签（嵌套非生产形态，与 parseSkillsFallbackBlocks 同语义）', () => {
+    const close = '</xyz-skill-data>'
+    const text = `<${SKILL_DATA_BLOCK_TAG}>A<${SKILL_DATA_BLOCK_TAG}>B${close}C${close}`
+    const range = findSkillDataBlockRange(text)
+    if (!range) throw new Error('expected a block range')
+    expect(range.start).toBe(0)
+    expect(range.end).toBe(text.indexOf(close) + close.length)
+    expect(text.slice(range.end)).toBe(`C${close}`)
+  })
+
+  it('多块取首个：正文混排多块时返回第一处命中（防御 hook 改写把块挪位）', () => {
+    const b1 = buildSkillDataBlockFallback([{ name: 'a' }])
+    const b2 = buildSkillDataBlockExpansions(['<skill name="b">\nB 全文\n</skill>'])
+    const text = `甲 ${b1} 乙 ${b2} 丙`
+    const range = findSkillDataBlockRange(text)
+    if (!range) throw new Error('expected a block range')
+    expect(text.slice(range.start, range.end)).toBe(b1)
+    expect(range.start).toBe(text.indexOf(`<${SKILL_DATA_BLOCK_TAG}>`))
+  })
+
+  it('块位于文本中段（D7 三形态①任意位置剥块）+ 两形态均定位', () => {
+    const cases = [
+      buildSkillDataBlockExpansions(['<skill name="x">\nX 全文\n</skill>']),
+      buildSkillDataBlockFallback([{ name: 'y', location: '/y.md' }]),
+    ]
+    for (const block of cases) {
+      const text = `头部 ${block} 尾部`
+      const range = findSkillDataBlockRange(text)
+      if (!range) throw new Error('expected a block range')
+      expect(text.slice(0, range.start)).toBe('头部 ')
+      expect(text.slice(range.start, range.end)).toBe(block)
+      expect(text.slice(range.end)).toBe(' 尾部')
+    }
+  })
+
+  it('旧解析器不误认新块（tag 退役但新旧自识别——存量 parseSkillsFallbackBlocks 对新块零命中）', () => {
+    const block = buildSkillDataBlockFallback([{ name: 'a', location: '/a.md' }])
+    expect(parseSkillsFallbackBlocks(`前\n${block}\n后`)).toHaveLength(0)
   })
 })

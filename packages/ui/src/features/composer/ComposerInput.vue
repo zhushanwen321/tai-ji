@@ -270,6 +270,18 @@ onMounted(() => {
   font: 600 11px / 1.4 var(--font-sans);
   user-select: none;
 }
+/* skill chip 前后自动空开（D13）：margin-left 4px + margin-right 提至 6px，仅 skill chip
+   （用户报告面）；slash/file/session/subagent chip 维持各自单侧间距不动。行首抑制：
+   chip 为其父容器首子节点（前无兄弟节点，landing / 清空后插入形态）时不缩进——
+   触发路径（空格 + /）清 query 后前置空格仍在，靠文本空格分隔，不依赖本规则。
+   纯视觉零数据污染：ZWSP spacer 契约与序列化层 needsBoundarySpace 空格补齐均不动。 */
+.composer-input :deep(.slash-chip[data-chip-type='skill']) {
+  margin-left: 4px;
+  margin-right: 6px;
+}
+.composer-input :deep(.slash-chip[data-chip-type='skill']:first-child) {
+  margin-left: 0;
+}
 .composer-input :deep(.slash-chip .chip-icon) {
   display: inline-flex;
   align-items: center;

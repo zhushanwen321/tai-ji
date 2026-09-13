@@ -1,8 +1,11 @@
 /**
- * SkillInjector 单测（composer-multi-skill-injection P1）。
+ * SkillInjector 单测（composer-multi-skill-injection P1，R4 D11 末尾块形态）。
  *
- * 覆盖任务清单 ①-⑨：pi 逐字 golden 展开 / 无标记零改动 / 超阈值降级形态 /
- * contextWindow fail-safe / 阈值边界 / 三类失效透传+提示 / location 缺省补路径。
+ * 覆盖：无标记零改动 / 正常形态逐字（正文标记保留 + 末尾 `<xyz-skill-data>` 包裹块，
+ * 块内 block 与 pi 模板逐字一致）/ 降级形态逐字（块内标记清单 + 块内指引行，无全文）/
+ * 同 name 去重（出现序首个归并，location 恒取映射结果）/ contextWindow fail-safe /
+ * 阈值边界 / 三类失效透传+提示（标记留正文、不进块）/ mapping_unavailable 无块 /
+ * location 缺省补路径。
  * SKILL.md fixture 用 mkdtempSync 自建自删（测试禁区红线：不触碰真实数据目录）；
  * get_commands / get_session_stats 以 fake client 注入（真实链路由验收阶段 Gate B 覆盖）。
  */
@@ -13,8 +16,8 @@ import { join } from 'node:path'
 import {
   buildSkillMarker,
   CODE_DENSE_NON_CJK_CHARS_PER_TOKEN,
+  SKILL_DATA_BLOCK_TAG,
   SKILL_FALLBACK_GUIDANCE,
-  SKILLS_BLOCK_TAG,
 } from '@xyz-agent/shared'
 import { SkillInjector } from '../skill-injector.js'
 import { encodeDirectiveText } from '../session-records.js'
@@ -99,30 +102,34 @@ function makeClient(overrides: ClientOverrides = {}): { client: IPiEngine; getCo
 const expectedBlock = (name: string, path: string, baseDir: string, body: string): string =>
   `<skill name="${name}" location="${path}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`
 
+/** 期望正常形态包裹块（D11）：`<xyz-skill-data>` 首行开标签、每个 block 独立一行、末行闭标签。 */
+const expectedDataBlock = (...expansions: string[]): string =>
+  [`<${SKILL_DATA_BLOCK_TAG}>`, ...expansions, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n')
+
+/** 期望降级形态包裹块（D11）：块内标记清单 + 块内指引行（指引行在闭标签前一行）。 */
+const expectedFallbackBlock = (...skills: Array<{ name: string; location?: string }>): string =>
+  [`<${SKILL_DATA_BLOCK_TAG}>`, ...skills.map((s) => buildSkillMarker(s.name, s.location)), SKILL_FALLBACK_GUIDANCE, `</${SKILL_DATA_BLOCK_TAG}>`].join('\n')
+
 describe('SkillInjector.inject', () => {
   let injector: SkillInjector
   beforeEach(() => {
     injector = new SkillInjector()
   })
 
-  it('① 单标记：原位展开与 pi 模板逐字一致（block 与前后正文空行分隔）', async () => {
+  it('① 单标记：正文标记逐字保留 + 末尾块内 block 与 pi 模板逐字一致（正文与块空行分隔）', async () => {
     const marker = buildSkillMarker('skill-a', skillAPath)
     const text = `帮我 ${marker} 处理问题`
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, text)
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
-    expect(result.text).toBe(`帮我\n\n${block}\n\n处理问题`)
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
     expect(result.notices).toEqual([])
   })
 
-  it('① 多标记：两个 block 各自原位替换、空行分隔（golden 逐字）', async () => {
-    const text = [
-      '开头',
-      buildSkillMarker('skill-a', skillAPath),
-      '中间',
-      buildSkillMarker('skill-b', skillBPath),
-      '结尾',
-    ].join(' ')
+  it('① 多标记：正文两个标记原样保留，块内两个 block 按标记出现序', async () => {
+    const mA = buildSkillMarker('skill-a', skillAPath)
+    const mB = buildSkillMarker('skill-b', skillBPath)
+    const text = `开头 ${mA} 中间 ${mB} 结尾`
     const { client } = makeClient({
       commands: [skillCmd('skill-a', skillAPath), skillCmd('skill-b', skillBPath)],
       stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } },
@@ -130,19 +137,19 @@ describe('SkillInjector.inject', () => {
     const result = await injector.inject(client, text)
     const blockA = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
     const blockB = expectedBlock('skill-b', skillBPath, skillBDir, SKILL_B_BODY)
-    expect(result.text).toBe(`开头\n\n${blockA}\n\n中间\n\n${blockB}\n\n结尾`)
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(blockA, blockB)}`)
   })
 
-  it('① 标记位于两端：对齐 pi 原生「block 开头 + args」与「正文 + block 结尾」形态', async () => {
+  it('① 标记位于两端：正文零改动（无原位替换），块统一追加末尾', async () => {
     const marker = buildSkillMarker('skill-a', skillAPath)
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
-    // block 开头（pi 原生 /skill:name args 的形态）
+    // 标记开头
     const head = await injector.inject(client, `${marker} 后续正文`)
-    expect(head.text).toBe(`${block}\n\n后续正文`)
-    // block 结尾
+    expect(head.text).toBe(`${marker} 后续正文\n\n${expectedDataBlock(block)}`)
+    // 标记结尾
     const tail = await injector.inject(client, `前置正文 ${marker}`)
-    expect(tail.text).toBe(`前置正文\n\n${block}`)
+    expect(tail.text).toBe(`前置正文 ${marker}\n\n${expectedDataBlock(block)}`)
   })
 
   it('② 无标记文本零改动且不发起任何 RPC', async () => {
@@ -155,7 +162,7 @@ describe('SkillInjector.inject', () => {
     expect(getSessionStats).not.toHaveBeenCalled()
   })
 
-  it('③ 超阈值：整条降级为降级块（正文保留、无 skill 全文、块含 name/location 与指引行）', async () => {
+  it('③ 超阈值：正文标记保留 + 降级形态逐字（<xyz-skill-data> 块内清单 + 块内指引行，无全文）', async () => {
     // 大 CJK body：估算 ≈ 1000+ token > 0.8 × 100 = 80
     const bigBody = '很'.repeat(1000)
     writeFileSync(skillAPath, `---\nname: skill-a\ndescription: big\n---\n${bigBody}`)
@@ -166,14 +173,8 @@ describe('SkillInjector.inject', () => {
       stats: { contextUsage: { tokens: 10, contextWindow: 100, percent: 10 } },
     })
     const result = await injector.inject(client, text)
-    // 正文保留 + 块形态（buildSkillsFallbackBlock 产物 + 空行拼接）
-    const fallbackBlock = [
-      `<${SKILLS_BLOCK_TAG}>`,
-      buildSkillMarker('skill-a', skillAPath),
-      `</${SKILLS_BLOCK_TAG}>`,
-      SKILL_FALLBACK_GUIDANCE,
-    ].join('\n')
-    expect(result.text).toBe(`正文在前\n\n${fallbackBlock}`)
+    // 正文逐字保留 + 空行 + 降级包裹块（标记清单与指引行都在块内，D11）
+    expect(result.text).toBe(`${text}\n\n${expectedFallbackBlock({ name: 'skill-a', location: skillAPath })}`)
     expect(result.text).not.toContain(bigBody)
     expect(result.text).toContain(SKILL_FALLBACK_GUIDANCE)
     expect(result.text).toContain(skillAPath)
@@ -181,18 +182,19 @@ describe('SkillInjector.inject', () => {
     expect(getCommands).toHaveBeenCalledTimes(1)
   })
 
-  it('③ 多 skill 超阈值：降级块归拢全部 name/location（按出现顺序）', async () => {
+  it('③ 多 skill 超阈值：降级清单归拢全部 name/location（按出现顺序、块内清单形态）', async () => {
     const bigBody = '很'.repeat(600)
     writeFileSync(skillAPath, bigBody)
     writeFileSync(skillBPath, bigBody)
-    const text = `${buildSkillMarker('skill-a', skillAPath)} ${buildSkillMarker('skill-b', skillBPath)}`
+    const mA = buildSkillMarker('skill-a', skillAPath)
+    const mB = buildSkillMarker('skill-b', skillBPath)
+    const text = `${mA} ${mB}`
     const { client } = makeClient({
       commands: [skillCmd('skill-a', skillAPath), skillCmd('skill-b', skillBPath)],
       stats: { contextUsage: { tokens: 10, contextWindow: 100, percent: 10 } },
     })
     const result = await injector.inject(client, text)
-    expect(result.text).toContain(`name="skill-a" location="${skillAPath}"`)
-    expect(result.text).toContain(`name="skill-b" location="${skillBPath}"`)
+    expect(result.text).toBe(`${text}\n\n${expectedFallbackBlock({ name: 'skill-a', location: skillAPath }, { name: 'skill-b', location: skillBPath })}`)
     expect(result.notices).toEqual([{ reason: 'budget_exceeded', skills: ['skill-a', 'skill-b'] }])
   })
 
@@ -203,7 +205,7 @@ describe('SkillInjector.inject', () => {
       statsError: new Error('rpc timeout'),
     })
     const result = await injector.inject(client, `正文 ${marker}`)
-    expect(result.text).toContain(`<${SKILLS_BLOCK_TAG}>`)
+    expect(result.text).toBe(`正文 ${marker}\n\n${expectedFallbackBlock({ name: 'skill-a', location: skillAPath })}`)
     expect(result.text).not.toContain(SKILL_A_BODY)
     expect(result.notices).toEqual([{ reason: 'context_window_unavailable', skills: ['skill-a'] }])
   })
@@ -212,7 +214,8 @@ describe('SkillInjector.inject', () => {
     const marker = buildSkillMarker('skill-a', skillAPath)
     const noUsage = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: {} })
     const resultNoUsage = await injector.inject(noUsage.client, `正文 ${marker}`)
-    expect(resultNoUsage.text).toContain(`<${SKILLS_BLOCK_TAG}>`)
+    expect(resultNoUsage.text).toContain(`<${SKILL_DATA_BLOCK_TAG}>`)
+    expect(resultNoUsage.text).not.toContain(SKILL_A_BODY)
     expect(resultNoUsage.notices[0]?.reason).toBe('context_window_unavailable')
 
     const zeroWindow = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 0, contextWindow: 0, percent: null } } })
@@ -221,37 +224,44 @@ describe('SkillInjector.inject', () => {
   })
 
   it('⑤ 阈值边界：恰好等于阈值 / 略低不降级，略超降级（纯英文字符构造精确估算值）', async () => {
-    // 纯英文（非 CJK 占比 100% > 70%）按 B2 收紧公式 chars/3：构造内容使估算恰为
-    // 0.8 × window。window=400 → 阈值 320 token；hypothetical = "x" + "\n\n" + block，
-    // blockLen = 前缀 + N + len("\n</skill>")，令 (3 + blockLen) / 3 = 320 → N = 957 - 前缀。
+    // 纯 ASCII（非 CJK 占比 100% > 70%）按 B2 收紧公式 chars/3：估算 = 整条消息字符数 / 3。
+    // 估算对象（D6/R4 同口径）= 正文 + '\n\n' + 正常形态末尾包裹块的整条消息。
+    // window=400 → 阈值 320 token；构造 body 长度使整条消息恰 960 字符 = 320 token。
     const window = 400
-    const prefix = `<skill name="skill-a" location="${skillAPath}">\nReferences are relative to ${skillADir}.\n\n`
-    const suffixLen = '\n</skill>'.length
-    const nExact = 320 * CODE_DENSE_NON_CJK_CHARS_PER_TOKEN - 3 - (prefix.length + suffixLen)
+    const marker = buildSkillMarker('skill-a', skillAPath)
+    const text = `x ${marker}`
+    const blockPrefix = `<skill name="skill-a" location="${skillAPath}">\nReferences are relative to ${skillADir}.\n\n`
+    const fixedLen =
+      text.length +
+      '\n\n'.length + // 正文与块间空行
+      `<${SKILL_DATA_BLOCK_TAG}>\n`.length + // 块开标签行
+      blockPrefix.length +
+      '\n</skill>'.length + // block 闭合
+      `\n</${SKILL_DATA_BLOCK_TAG}>`.length // 块闭标签行
+    const nExact = 320 * CODE_DENSE_NON_CJK_CHARS_PER_TOKEN - fixedLen
     const bodyOf = (n: number) => 'a'.repeat(n)
     const writeBody = (n: number) => writeFileSync(skillAPath, `---\nname: skill-a\ndescription: t\n---\n${bodyOf(n)}`)
-    const marker = buildSkillMarker('skill-a', skillAPath)
 
-    // 略低（估算 ≈317.3 < 320）：不降级，全文展开
-    writeBody(nExact - 8)
+    // 略低（估算 317 < 320）：不降级，正常形态全文注入
+    writeBody(nExact - 9)
     const low = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: window, percent: 1 } } })
-    const lowResult = await injector.inject(low.client, `x ${marker}`)
-    expect(lowResult.text).not.toContain(`<${SKILLS_BLOCK_TAG}>`)
-    expect(lowResult.text).toContain('a'.repeat(nExact - 8))
+    const lowResult = await injector.inject(low.client, text)
+    expect(lowResult.text).toBe(`${text}\n\n${expectedDataBlock(expectedBlock('skill-a', skillAPath, skillADir, bodyOf(nExact - 9)))}`)
+    expect(lowResult.text).not.toContain(SKILL_FALLBACK_GUIDANCE)
     expect(lowResult.notices).toEqual([])
 
     // 恰好等于阈值（320 > 320 为 false）：不降级
     writeBody(nExact)
     const exact = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: window, percent: 1 } } })
-    const exactResult = await injector.inject(exact.client, `x ${marker}`)
-    expect(exactResult.text).not.toContain(`<${SKILLS_BLOCK_TAG}>`)
+    const exactResult = await injector.inject(exact.client, text)
+    expect(exactResult.text).toBe(`${text}\n\n${expectedDataBlock(expectedBlock('skill-a', skillAPath, skillADir, bodyOf(nExact)))}`)
     expect(exactResult.notices).toEqual([])
 
-    // 略超（估算 ≈321.7 > 320）：降级
-    writeBody(nExact + 8)
+    // 略超（估算 323 > 320）：降级
+    writeBody(nExact + 9)
     const over = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: window, percent: 1 } } })
-    const overResult = await injector.inject(over.client, `x ${marker}`)
-    expect(overResult.text).toContain(`<${SKILLS_BLOCK_TAG}>`)
+    const overResult = await injector.inject(over.client, text)
+    expect(overResult.text).toBe(`${text}\n\n${expectedFallbackBlock({ name: 'skill-a', location: skillAPath })}`)
     expect(overResult.notices[0]?.reason).toBe('budget_exceeded')
   })
 
@@ -260,9 +270,27 @@ describe('SkillInjector.inject', () => {
     const { client, getCommands, getSessionStats } = makeClient({ commands: [skillCmd('skill-a', skillAPath)] })
     const result = await injector.inject(client, `正文 ${marker} 结束`)
     expect(result.text).toBe(`正文 ${marker} 结束`)
+    expect(result.text).not.toContain(`<${SKILL_DATA_BLOCK_TAG}>`)
     expect(result.notices).toEqual([{ reason: 'skill_missing', skills: ['ghost'] }])
     expect(getCommands).toHaveBeenCalledTimes(1)
     expect(getSessionStats).not.toHaveBeenCalled()
+  })
+
+  it('失效分路：无映射标记留正文 + notice，其余正常进块（部分失效不阻断整条注入）', async () => {
+    const valid = buildSkillMarker('skill-a', skillAPath)
+    const ghost = buildSkillMarker('ghost')
+    const text = `前 ${valid} 中 ${ghost} 后`
+    const { client, getSessionStats } = makeClient({
+      commands: [skillCmd('skill-a', skillAPath)],
+      stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } },
+    })
+    const result = await injector.inject(client, text)
+    // 失效标记逐字保留在正文，不进块；有效标记照常展开进块
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY))}`)
+    expect(result.text).toContain(ghost)
+    expect(result.text.split('<skill name=').length - 1).toBe(1)
+    expect(result.notices).toEqual([{ reason: 'skill_missing', skills: ['ghost'] }])
+    expect(getSessionStats).toHaveBeenCalledTimes(1)
   })
 
   it('⑦ SKILL.md 读取失败：标记原样透传 + skill_read_failed 提示', async () => {
@@ -294,50 +322,51 @@ describe('SkillInjector.inject', () => {
     expect(getCommands).not.toHaveBeenCalled()
   })
 
-  it('⑨ location 缺省标记：get_commands 映射补路径，正常展开', async () => {
+  it('⑨ location 缺省标记：get_commands 映射补路径，正常展开进块', async () => {
     const marker = buildSkillMarker('skill-a')
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, marker)
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
-    expect(result.text).toBe(block)
+    expect(result.text).toBe(`${marker}\n\n${expectedDataBlock(block)}`)
     expect(result.notices).toEqual([])
   })
 
-  it('PS-24：get_commands name 带 skill: 前缀（实装形态）——映射可命中且展开 block name 无前缀', async () => {
+  it('PS-24：get_commands name 带 skill: 前缀（实装形态）——映射可命中且块内 block name 无前缀', async () => {
     // 实装 get_commands 的 skill 项 name 恒带 `skill:` 前缀（agent-session.js :1996）；
     // 私有标记 name 是裸名——映射按裸名命中、block name 插值剥前缀，两端都对齐 pi。
     const marker = buildSkillMarker('skill-a', skillAPath)
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, `帮我 ${marker}`)
-    // 显式断言：不误报 skill_missing + block name 无前缀（pi 原生展开形态）
+    // 显式断言：不误报 skill_missing + 块内 block name 无前缀（pi 原生展开形态）
     expect(result.notices).toEqual([])
     expect(result.text).toContain(`<skill name="skill-a" location="${skillAPath}">`)
     expect(result.text).not.toContain('name="skill:')
   })
 
-  it('get_commands 整体失败：全部标记透传 + mapping_unavailable（不走降级——location 无从构建）', async () => {
+  it('get_commands 整体失败：全部标记透传 + mapping_unavailable（正文留标记、不追加块）', async () => {
     const m1 = buildSkillMarker('skill-a', skillAPath)
     const m2 = buildSkillMarker('ghost')
     const { client, getSessionStats } = makeClient({ commandsError: new Error('rpc closed') })
     const result = await injector.inject(client, `${m1} 正文 ${m2}`)
     expect(result.text).toBe(`${m1} 正文 ${m2}`)
+    expect(result.text).not.toContain(`<${SKILL_DATA_BLOCK_TAG}>`)
     expect(result.notices).toEqual([{ reason: 'mapping_unavailable', skills: ['skill-a', 'ghost'] }])
     expect(getSessionStats).not.toHaveBeenCalled()
   })
 
-  it('失效与降级共存：降级块只含可展开者，失效标记保留正文 + 双 notice', async () => {
+  it('失效与降级共存：降级清单只含可展开者，失效标记保留正文 + 双 notice', async () => {
     writeFileSync(skillAPath, '很'.repeat(1000))
     const valid = buildSkillMarker('skill-a', skillAPath)
     const invalid = buildSkillMarker('ghost')
+    const text = `前 ${valid} 中 ${invalid} 后`
     const { client } = makeClient({
       commands: [skillCmd('skill-a', skillAPath)],
       stats: { contextUsage: { tokens: 10, contextWindow: 100, percent: 10 } },
     })
-    const result = await injector.inject(client, `前 ${valid} 中 ${invalid} 后`)
-    // 失效标记原样保留在正文
+    const result = await injector.inject(client, text)
+    expect(result.text).toBe(`${text}\n\n${expectedFallbackBlock({ name: 'skill-a', location: skillAPath })}`)
     expect(result.text).toContain(invalid)
     expect(result.text).not.toContain('很'.repeat(1000))
-    expect(result.text).toContain(`name="skill-a" location="${skillAPath}"`)
     expect(result.notices).toEqual([
       { reason: 'budget_exceeded', skills: ['skill-a'] },
       { reason: 'skill_missing', skills: ['ghost'] },
@@ -361,13 +390,48 @@ describe('SkillInjector.inject', () => {
     expect(result.text).not.toContain(`References are relative to ${scanRoot}`)
   })
 
-  it('无 frontmatter 闭合 ---：镜像 pi 行为原文保留（不剥），展开正文为全文 trim', async () => {
+  it('无 frontmatter 闭合 ---：镜像 pi 行为原文保留（不剥），块内展开正文为全文 trim', async () => {
     writeFileSync(skillAPath, '---\nname: skill-a\n没有闭合行')
     const raw = '---\nname: skill-a\n没有闭合行'
     const marker = buildSkillMarker('skill-a', skillAPath)
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, marker)
-    expect(result.text).toBe(expectedBlock('skill-a', skillAPath, skillADir, raw))
+    expect(result.text).toBe(`${marker}\n\n${expectedDataBlock(expectedBlock('skill-a', skillAPath, skillADir, raw))}`)
+  })
+})
+
+describe('SkillInjector.inject 同 name 去重（R4 D11）', () => {
+  let injector: SkillInjector
+  beforeEach(() => {
+    injector = new SkillInjector()
+  })
+
+  it('正文两个同名标记：块内一个 <skill>（按出现序首个归并），重复不发 notice', async () => {
+    const marker = buildSkillMarker('skill-a', skillAPath)
+    const text = `${marker} 正文 ${marker}`
+    const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
+    const result = await injector.inject(client, text)
+    const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
+    // 整条形态 = 标记正文逐字保留 + 空行 + 恰含一个 block 的包裹块
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
+    // 显式去重断言：pi 形态 <skill name= 恰一次（<xyz-skill 前缀不误计）
+    expect(result.text.split('<skill name=').length - 1).toBe(1)
+    expect(result.text.split(SKILL_A_BODY).length - 1).toBe(1)
+    expect(result.notices).toEqual([])
+  })
+
+  it('不同自带 location 的同名标记：块内 location 恒取映射结果（首个），不信任标记自带值', async () => {
+    // 过时路径场景：标记自带 location 与映射不一致（skill 移动后），块内 location 必须
+    // 是 get_commands 权威映射的当前路径（D4/D11 数据源澄清）
+    const stalePath = '/stale/old-place/SKILL.md'
+    const text = `${buildSkillMarker('skill-a', stalePath)} 正文 ${buildSkillMarker('skill-a', skillAPath)}`
+    const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
+    const result = await injector.inject(client, text)
+    const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
+    // pi 形态 <skill> 块恰一个，且 location 为映射路径（正文标记自带的过时值仅存于正文）
+    expect(result.text.split('<skill name=').length - 1).toBe(1)
+    expect(result.text).toContain(`<skill name="skill-a" location="${skillAPath}">`)
   })
 })
 
@@ -375,9 +439,9 @@ describe('SkillInjector.inject', () => {
 //
 // 定向链路：subagentAction 的 text/task 经 injector.inject 展开后，还要过
 // encodeDirectiveText（换行 → 字面 \n 保持 /subagents 命令单行，extension 侧
-// decodeNewlineEscapes 解回）。此处锁定两件事：①注入产物（block 含真实换行）
-// 经 encode 后不含真实换行——命令单行契约不因注入而破；②定向文本的标记
-// 展开形态与主链（dispatcher sendPrompt）逐字一致——同一 injector 无第二实现。
+// decodeNewlineEscapes 解回）。此处锁定两件事：①注入产物（正文 + 末尾块含真实换行）
+// 经 encode 后不含真实换行——命令单行契约不因注入而破；②定向文本的注入形态与主链
+// （dispatcher sendPrompt）逐字一致——同一 injector 无第二实现。
 
 describe('SkillInjector.inject × encodeDirectiveText（A2 定向链路）', () => {
   let injector: SkillInjector
@@ -385,18 +449,18 @@ describe('SkillInjector.inject × encodeDirectiveText（A2 定向链路）', () 
     injector = new SkillInjector()
   })
 
-  it('含 skill 标记的定向文本：展开 block 后经 encode 保持命令单行（block 换行编码为字面 \\n）', async () => {
+  it('含 skill 标记的定向文本：末尾块形态与主链逐字一致，encode 后保持命令单行', async () => {
     const marker = buildSkillMarker('skill-a', skillAPath)
     const text = `帮我 ${marker} 处理这个任务`
     const { client } = makeClient({ commands: [skillCmd('skill-a', skillAPath)], stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, text)
-    // 展开形态与主链逐字一致（同一 buildExpandedText，无第二实现面）
+    // 注入形态与主链逐字一致（同一 injector，无第二实现面）
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
-    expect(result.text).toBe(`帮我\n\n${block}\n\n处理这个任务`)
-    // encode 后单行：注入产物含真实换行（block 模板），命令单行性由 encode 兜底
+    expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
+    // encode 后单行：注入产物含真实换行（正文换行 + 块行结构），命令单行性由 encode 兜底
     const encoded = encodeDirectiveText(result.text)
     expect(encoded.includes('\n')).toBe(false)
-    // block 关键内容存活（name/location 原样——encode 只转义反斜杠与换行）
+    // 块关键内容存活（name/location 原样——encode 只转义反斜杠与换行）
     expect(encoded).toContain('<skill name="skill-a"')
     expect(encoded).toContain(`location="${skillAPath}"`)
   })

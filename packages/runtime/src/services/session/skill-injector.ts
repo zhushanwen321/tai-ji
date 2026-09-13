@@ -1,18 +1,25 @@
 /**
- * SkillInjector —— composer 多 skill 注入的 runtime 预处理（composer-multi-skill-injection P1）。
+ * SkillInjector —— composer 多 skill 注入的 runtime 预处理（composer-multi-skill-injection
+ * P1，R4 D11 末尾块形态）。
  *
  * 职责（设计 §3.3）：
- * - D3/D5：解析文本中全部 `<xyz-skill/>` 私有标记（u1 parseSkillMarkers），展开为与 pi
- *   `_expandSkillCommand` 逐字一致的 `<skill>` block，原位替换（保留 chip 与正文相对位置，
- *   block 与相邻正文以空行分隔）；无标记文本零改动
- * - D4：name → SKILL.md 路径以 pi RPC get_commands 的 source:"skill" 项为权威映射，
- *   不自建扫描（避免与 pi loadSkills 双实现漂移）
- * - D6：发送前预检——估算「若全文注入的整条 message」token（CJK 感知，u1 estimateTokens），
- *   超过 0.8 × contextWindow（get_session_stats 实时取）→ 整条降级为 `<xyz-skills>` 标记块
- *   （D7 形态，模型自主 read）；contextWindow 获取失败 fail-safe 降级（不 fail-open）
+ * - D3/D11：解析文本中全部 `<xyz-skill/>` 私有标记（u1 parseSkillMarkers），正文标记
+ *   **原样保留**（R4 起不再原位替换展开）；无标记文本零改动
+ * - D4/D5/D11：name → SKILL.md 路径以 pi RPC get_commands 的 source:"skill" 项为权威映射
+ *   （块内 `<skill>` 与降级清单的 location 恒取映射结果 r.path，不信标记自带 location——
+ *   过时路径不得作为权威 read 路径），读 SKILL.md → stripFrontmatter → 构建与 pi
+ *   `_expandSkillCommand` 逐字一致的 `<skill>` block；同 name 去重（按标记出现序首个
+ *   归并，重复不发 notice）后经 buildSkillDataBlockExpansions 组装 `<xyz-skill-data>`
+ *   包裹块，以空行接在正文后（正文 + '\n\n' + 块）
+ * - D6/D11：发送前预检——估算「正文 + 末尾块全文的整条 message」token（CJK 感知，u1
+ *   estimateTokens），超过 0.8 × contextWindow（get_session_stats 实时取）→ 整条降级为
+ *   buildSkillDataBlockFallback（同一 `<xyz-skill-data>` 包裹，块内标记清单 + 指引行，
+ *   模型自主 read；旧 `<xyz-skills>` tag 退役）；contextWindow 获取失败 fail-safe 降级
+ *   （不 fail-open）
  * - D8：失效降级必须可见——name 无映射 / SKILL.md 读取失败 / 标记被 hook 改写残缺：
- *   该标记原样保留在 prompt 文本（对齐 pi 未知 skill 透传行为）+ 产出提示 notice，
- *   禁止静默。notice 由调用方（message-dispatcher）经 messageBus 发布
+ *   该标记正文原样保留、不进块（对齐 pi 未知 skill 透传行为）+ 产出提示 notice，禁止静默；
+ *   get_commands 整体失败（mapping_unavailable）→ 正文留标记、不追加块。notice 由调用方
+ *   （message-dispatcher）经 messageBus 发布
  *
  * 挂载契约（D9）：dispatcher 三入口各恰好单次调用（结构化幂等，不做文本 grep 判重），
  * 在 BeforeSend hook 之后、client.prompt/steer/followUp 之前。
@@ -20,7 +27,8 @@
 import { readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
-  buildSkillsFallbackBlock,
+  buildSkillDataBlockExpansions,
+  buildSkillDataBlockFallback,
   CONTEXT_WINDOW_RATIO,
   estimateTokens,
   parseSkillMarkers,
@@ -121,7 +129,8 @@ function stripPiSkillCommandPrefix(commandName: string): string {
 
 /**
  * 标记开头顶点统计：`<xyz-skill` 后紧跟空白 / `/` / `>` 视为标记开头（含完整标记与残缺标记；
- * `<xyz-skills>` 降级块的包裹标签后跟字母 s，不命中——手打降级块不在本模块处理范围）。
+ * `<xyz-skills>` 存量降级块的开标签后跟字母 s、`<xyz-skill-data>` 包裹块的开标签后跟 `-`，
+ * 均不命中——手打包裹块不在本模块处理范围，包裹块内标记被逐个解析属设计 §3.5-⑥ 已登记边界）。
  */
 const MARKER_OPEN_RE = new RegExp(`<${SKILL_MARKER_TAG}[\\s/>]`, 'g')
 
@@ -150,98 +159,14 @@ function scanMalformed(text: string, markers: ParsedSkillMarker[]): { hasMalform
   return { hasMalformed, names }
 }
 
-// ── 展开文本构建 ─--
+// ── 标记求值与末尾块组装（R4 D11）──
 
-/** 求值后的单标记：block=null 表示失效（原样透传该标记 token）。 */
+/** 求值后的单标记：block=null 表示失效（正文原样保留该标记、不进块）。 */
 interface MarkerResolution {
   marker: ParsedSkillMarker
   block: string | null
-  /** 展开成功时的 SKILL.md 路径（降级块 location 数据源）。 */
+  /** 展开成功时的 SKILL.md 路径（块内 location / 降级清单 location 的唯一数据源，D4）。 */
   path?: string
-}
-
-/**
- * 原位替换构建（D5：保留 chip 与正文相对位置，block 与相邻正文以空行分隔）。
- *
- * 切片规则：标记区间替换为 block（失效标记原样保留）；block 与相邻内容的空行分隔按
- * 「block 前 rstrip 已累积文本 + 补 `\n\n`，block 后的文本 part lstrip」实现——正文语义
- * 字符不动，只归一标记落点的边界空白。pi 原生单 skill 消息形态（block 开头 + args 在后、
- * block 与 args 间 `\n\n`）是本算法在「标记位于文本两端」时的自然特例。
- */
-function buildExpandedText(text: string, resolutions: MarkerResolution[]): string {
-  let result = ''
-  let lastWasBlock = false
-  let cursor = 0
-  // text part 落在 block 之后时：lstrip 边界空白并前置 `\n\n`（空行分隔由本侧补齐；
-  // part 为纯空白时视为不存在，lastWasBlock 保持，由下一 part 继续判定）。
-  const appendAfterBlock = (raw: string): void => {
-    const stripped = raw.replace(/^\s+/, '')
-    if (stripped !== '') {
-      result += '\n\n' + stripped
-      lastWasBlock = false
-    }
-  }
-  for (const { marker, block } of resolutions) {
-    const before = text.slice(cursor, marker.index)
-    if (before !== '') {
-      if (lastWasBlock) appendAfterBlock(before)
-      else {
-        result += before
-        lastWasBlock = false
-      }
-    }
-    const end = marker.index + marker.length
-    if (block === null) {
-      result += text.slice(marker.index, end)
-      lastWasBlock = false
-    } else {
-      result = result.replace(/\s+$/, '')
-      result += (result === '' ? '' : '\n\n') + block
-      lastWasBlock = true
-    }
-    cursor = end
-  }
-  const tail = text.slice(cursor)
-  if (tail !== '') {
-    if (lastWasBlock) appendAfterBlock(tail)
-    else result += tail
-  }
-  return result
-}
-
-/**
- * 降级文本构建（D7）：移除全部可展开标记区间（失效/残缺标记与正文保留），正文 trim 后
- * 与 `<xyz-skills>` 降级块以空行拼接；正文为空时仅块。归拢成块 + 单指引行的形态见设计 D7。
- */
-function buildFallbackText(text: string, resolutions: MarkerResolution[], skills: ReadonlyArray<{ name: string; location?: string }>): string {
-  let stripped = ''
-  let cursor = 0
-  for (const { marker, block } of resolutions) {
-    if (block === null) continue
-    stripped += text.slice(cursor, marker.index)
-    cursor = marker.index + marker.length
-  }
-  stripped += text.slice(cursor)
-  const body = stripped.trim()
-  const block = buildSkillsFallbackBlock(skills)
-  return body !== '' ? `${body}\n\n${block}` : block
-}
-
-/** skill 名去重（保持首次出现顺序），notice 的 skills 列表归一。 */
-function dedupeNames(markers: ReadonlyArray<ParsedSkillMarker>): string[] {
-  return [...new Set(markers.map((m) => m.name))]
-}
-
-/**
- * get_commands → name（剥 `skill:` 前缀的裸 skill 名）→ 命令项 的权威映射（D4）。
- * 只收 source === 'skill' 项（slash 命令等其他 source 不参与私有标记展开）。
- */
-function buildSkillsByName(commands: SkillCommandInfo[]): Map<string, SkillCommandInfo> {
-  const skillsByName = new Map<string, SkillCommandInfo>()
-  for (const cmd of commands) {
-    if (cmd.source === 'skill') skillsByName.set(stripPiSkillCommandPrefix(cmd.name), cmd)
-  }
-  return skillsByName
 }
 
 /**
@@ -289,6 +214,46 @@ function resolveSingleMarker(
 }
 
 /**
+ * get_commands → name（剥 `skill:` 前缀的裸 skill 名）→ 命令项 的权威映射（D4）。
+ * 只收 source === 'skill' 项（slash 命令等其他 source 不参与私有标记展开）。
+ */
+function buildSkillsByName(commands: SkillCommandInfo[]): Map<string, SkillCommandInfo> {
+  const skillsByName = new Map<string, SkillCommandInfo>()
+  for (const cmd of commands) {
+    if (cmd.source === 'skill') skillsByName.set(stripPiSkillCommandPrefix(cmd.name), cmd)
+  }
+  return skillsByName
+}
+
+/** skill 名去重（保持首次出现顺序），mapping_unavailable notice 的 skills 列表归一。 */
+function dedupeNames(markers: ReadonlyArray<ParsedSkillMarker>): string[] {
+  return [...new Set(markers.map((m) => m.name))]
+}
+
+/**
+ * 同 name 去重收集（D11）：按标记出现序首个归并——首个成功展开的标记决定该 name 的
+ * block 与 location（location 恒为映射结果，D4），后续同名成功标记丢弃（重复全文纯浪费
+ * 上下文；UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径），重复不发 notice。
+ * 返回 validSkills（降级清单数据源）与 expansions（正常形态块内容），两者顺序一致。
+ */
+function collectDedupedExpansions(resolutions: readonly MarkerResolution[]): {
+  validSkills: { name: string; location: string }[]
+  expansions: string[]
+} {
+  const seen = new Set<string>()
+  const validSkills: { name: string; location: string }[] = []
+  const expansions: string[] = []
+  for (const r of resolutions) {
+    if (r.block === null || r.path === undefined) continue
+    if (seen.has(r.marker.name)) continue
+    seen.add(r.marker.name)
+    validSkills.push({ name: r.marker.name, location: r.path })
+    expansions.push(r.block)
+  }
+  return { validSkills, expansions }
+}
+
+/**
  * get_session_stats 实时取 contextWindow（D6 预检数据源）。fail-safe 降级（D6）：RPC 失败
  * 或窗口字段非正有限数 → null，调用方走标记模式降级，不放行全文注入——get_session_stats
  * 失败预示 RPC 异常，放行大消息若真超窗即落持续失败态。设计裁定不重抛（方向安全）。
@@ -305,17 +270,19 @@ async function readContextWindow(client: IPiEngine): Promise<number | null> {
   }
 }
 
-/** 降级注入结果构建（D7 标记块形态）：两个降级触发源（窗口不可得 / 预算超限）共用，仅 reason 不同。 */
+/**
+ * 降级注入结果构建（D11 降级形态）：两个降级触发源（窗口不可得 / 预算超限）共用，仅
+ * reason 不同。正文（含全部标记）逐字保留，降级包裹块（块内标记清单 + 块内指引行）以
+ * 空行接在正文后——与正常形态同构（同一 `<xyz-skill-data>` 包裹，D11）。
+ */
 function buildFallbackInjection(
   text: string,
-  resolutions: MarkerResolution[],
-  validSkills: ReadonlyArray<{ name: string; location?: string }>,
+  validSkills: ReadonlyArray<{ name: string; location: string }>,
   reason: 'context_window_unavailable' | 'budget_exceeded',
   invalidAndMalformed: SkillNotice[],
 ): SkillInjectionResult {
-  const fallback = buildFallbackText(text, resolutions, validSkills)
   return {
-    text: fallback,
+    text: `${text}\n\n${buildSkillDataBlockFallback(validSkills)}`,
     notices: [{ reason, skills: validSkills.map((s) => s.name) }, ...invalidAndMalformed],
   }
 }
@@ -335,6 +302,10 @@ export class SkillInjector {
    * 对发送前文本做 skill 注入预处理（无标记文本零改动、零 RPC 开销——预检只在确有
    * 可展开标记时才发起 get_commands / get_session_stats 往返）。
    *
+   * R4 D11 注入形态：正文中的 `<xyz-skill/>` 标记原样保留；全部展开内容集中追加在
+   * 消息末尾的 `<xyz-skill-data>` 包裹块（正文 + '\n\n' + 块）——正常形态块内为去重后
+   * 的 pi 对齐 `<skill>` 全文列表，降级形态块内为标记清单 + 指引行。
+   *
    * 错误面：内部 RPC / fs 失败全部转为降级或透传 + notice（D8 禁止静默），本方法不向
    * 调用方抛业务错误；调用方（dispatcher）把 notices 在 client 发送成功后经 bus 发布。
    */
@@ -349,8 +320,9 @@ export class SkillInjector {
       return { text, notices: [] }
     }
 
-    // ── get_commands 权威映射（D4）。整体失败 → 全部透传（映射服务不可用；降级块需要
-    //    映射提供的 location，无从构建，故不走 D6 降级路径），发提示禁止静默。
+    // ── get_commands 权威映射（D4）。整体失败 → 全部透传（映射服务不可用；块内 location
+    //    与降级清单 location 均需映射提供，无从构建，故不走 D6 降级路径、不追加块），
+    //    发提示禁止静默。
     let commands: SkillCommandInfo[]
     try {
       commands = await client.getCommands()
@@ -375,26 +347,26 @@ export class SkillInjector {
       ...(malformed.hasMalformed ? [{ reason: 'marker_malformed' as const, skills: malformed.names }] : []),
     ]
 
-    const validSkills = resolutions
-      .filter((r): r is MarkerResolution & { block: string; path: string } => r.block !== null)
-      .map((r) => ({ name: r.marker.name, location: r.path }))
+    // ── 同 name 去重（D11）：按出现序首个归并 ──
+    const { validSkills, expansions } = collectDedupedExpansions(resolutions)
     if (validSkills.length === 0) {
       // 无可展开标记（全部失效/残缺）：跳过预检，原文透传 + 失效提示
       return { text, notices: invalidAndMalformed }
     }
 
-    // ── 预检（D6）：估算「若全文注入的整条 message」token（展开产物天然含正文 + skill
-    //    全文 + 标记/分隔开销），与 0.8 × contextWindow 比较。
-    const hypothetical = buildExpandedText(text, resolutions)
+    // ── 预检（D6）：估算「正文 + 末尾块全文的整条 message」（R4 正常形态全文，与现状
+    //    同口径：估算对象恒为若全文注入的最终消息），与 0.8 × contextWindow 比较。
+    const hypothetical = `${text}\n\n${buildSkillDataBlockExpansions(expansions)}`
     const contextWindow = await readContextWindow(client)
     if (contextWindow === null) {
       // fail-safe（D6）：窗口信息不可得即降级为标记模式，不放行全文注入——
       // get_session_stats 失败预示 RPC 异常，放行大消息若真超窗即落持续失败态。
-      return buildFallbackInjection(text, resolutions, validSkills, 'context_window_unavailable', invalidAndMalformed)
+      return buildFallbackInjection(text, validSkills, 'context_window_unavailable', invalidAndMalformed)
     }
     if (estimateTokens(hypothetical) > CONTEXT_WINDOW_RATIO * contextWindow) {
-      return buildFallbackInjection(text, resolutions, validSkills, 'budget_exceeded', invalidAndMalformed)
+      return buildFallbackInjection(text, validSkills, 'budget_exceeded', invalidAndMalformed)
     }
+    // 正常形态（D11）：正文标记原样保留 + 空行 + 末尾包裹块
     return { text: hypothetical, notices: invalidAndMalformed }
   }
 }

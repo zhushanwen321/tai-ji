@@ -32,6 +32,7 @@
       </span>
       <div
         class="max-w-[85%] min-w-0 break-words rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
+        :class="{ 'is-mixed': isMixedContent }"
       >
       <template v-for="(seg, i) in orderedSegments" :key="i">
         <!-- slash 段与后继段之间的边界空格：slash 段按纯文本渲染（D4-d，无 badge、
@@ -206,6 +207,23 @@ const userSegments = computed<Segment[]>(() => {
 })
 
 /**
+ * [D12] 混排判定：段序同时含 text 段与非 text 段（badge/slash 等一切非 text 段）时为
+ * 混排消息——badge 是 inline span、text 段经 MarkdownRenderer 渲染为块级（.md-render div
+ * + markdown-it <p>），块级边界使 badge 前后必然换行；此时气泡容器加 is-mixed 修饰 class
+ * 启用 inline 化渲染（见文件底部 scoped CSS）。纯 text 消息（无非 text 段）与纯 badge
+ * 消息（无 text 段）均不算混排，不加 class——复杂块级 markdown 排版完全不受影响。
+ */
+const isMixedContent = computed(() => {
+  let hasText = false
+  let hasNonText = false
+  for (const seg of orderedSegments.value) {
+    if (seg.type === 'text') hasText = true
+    else hasNonText = true
+  }
+  return hasText && hasNonText
+})
+
+/**
  * 展示序 = 归位序（slash 段提首），复用 shared 的 normalizeSegmentOrder 单一实现。
  * live content 段序是 DOM 序（命令 chip 就地插，D4-a），reload 侧是 textToSegments(归位文本)
  * 的单 text 段；只有按归位序渲染，live 与 reload 的可见文本才逐字一致（关键规则 9）。
@@ -277,3 +295,22 @@ async function submitEdit(): Promise<void> {
   await editAndResend(props.sessionId, user.id, segments)
 }
 </script>
+
+<style scoped>
+/* [D12] 混排内联渲染：仅 is-mixed 气泡（同时含 text 段与非 text 段，见 isMixedContent）生效。
+   text 段的 MarkdownRenderer 根 .md-render、其内部段容器 div、markdown-it <p> 均为块级，
+   与 inline badge 之间形成块级边界 → badge 前后必然换行；置为 inline 后 badge 与正文同流。
+   纯 text 消息不加 is-mixed，标题/列表/表格/代码块等复杂块级排版不受影响；混排消息的
+   复杂块级 markdown 排版退化为 inline 流是 D12 已接受代价（设计 §3.3 D12）。 */
+.is-mixed :deep(.md-render),
+.is-mixed :deep(.md-render > div),
+.is-mixed :deep(.md-render p) {
+  display: inline;
+}
+/* inline 流中相邻段落间不再有块级换行，以首段外后续段落的 ::before '\a'
+   （换行符 + white-space:pre 使其实际断行）补偿段落边界。 */
+.is-mixed :deep(.md-render p + p)::before {
+  content: '\a';
+  white-space: pre;
+}
+</style>

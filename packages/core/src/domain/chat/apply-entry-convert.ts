@@ -22,6 +22,7 @@ import type {
   ToolCall,
 } from '@xyz-agent/shared'
 import {
+  findSkillDataBlockRange,
   parseSkillMarkers,
   parseSkillsFallbackBlocks,
   textToSegments,
@@ -48,7 +49,7 @@ import { isLooseRecord, isPlainRecord, normalizePiToolResult, truncateEntryToolO
  */
 export const DEFER_FLUSH_MARKER_RE = /<!--xyz:msg:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
 
-// ── user 消息 skill 标记反解析（D7 兜底通道，三链路共用 SSOT）──────────────────────
+// ── user 消息 skill 标记反解析（D7 兜底通道，三链路共用 SSOT；R4 升级三形态）────────
 
 /**
  * pi 原生 skill block 正则（存量格式，pi `_expandSkillCommand` 展开产物）：
@@ -68,23 +69,56 @@ function toSkillSegment(name: string, location: string | undefined): Segment {
 }
 
 /**
+ * [R4 D7 三形态①] 剥除文本中全部 `<xyz-skill-data>...</xyz-skill-data>` 包裹块
+ * （任意位置，findSkillDataBlockRange 循环切片——非贪婪语义止于首个闭合标签，逐块
+ * 消费剩余后缀直至无完整块）。块是注入器产物非用户内容：块内内容整体丢弃、不参与
+ * 后续标记解析（正常形态块内 `<skill>` 全文 / 降级形态块内标记清单 + 指引行均不
+ * 还原）；块外正文全部保留（块与正文间的分隔空白属块外正文，逐字保留不 trim）。
+ *
+ * 任意位置而非仅末尾：防御 hook 改写/复述把块挪位，规则更鲁棒（D7 ①）。
+ * 返回剥后正文与是否剥过块：剥过块的文本即使无标记命中也不得走「无命中返回 null →
+ * 调用方回退原始文本」路径（否则整块全文泄漏进显示层），调用方（parseSkillBlock）
+ * 据 stripped 区分「无命中返回 null」与「剥后纯正文」。
+ */
+function stripSkillDataBlocks(text: string): { body: string; stripped: boolean } {
+  let body = ''
+  let rest = text
+  let stripped = false
+  for (;;) {
+    const range = findSkillDataBlockRange(rest)
+    if (!range) return { body: body + rest, stripped }
+    body += rest.slice(0, range.start)
+    rest = rest.slice(range.end)
+    stripped = true
+  }
+}
+
+/**
  * 反解析 user 消息文本中的 skill 标记为 Segment[]（D7 兜底通道：sidecar 丢失/旧版本
  * 会话时的 chip 还原路径；live message_end 帧 / runtime 历史重建 / 文件重放三链路共用
- * 本函数，一处升级全覆盖）。无命中返回 null（调用方回退 textToSegments 纯文本）。
+ * 本函数，一处升级全覆盖）。无命中且无块可剥返回 null（调用方回退 textToSegments
+ * 纯文本）。
  *
- * 两形态全局匹配，命中区间按位置排序后与区间外正文交错产出 text + skill + text + …：
- * ① xyz 私有标记（本设计 segmentsToText 序列化产物）：`<xyz-skill .../>` 单标记与
- *   `<xyz-skills>` 降级块（解析复用 shared skill-marker SSOT 的 index/length 位置切片）。
- *   标记前后的正文全部保留为 text segment——专防升级前「捕获组从第一个 <skill 开始、
- *   block 前正文不在任何捕获组直接丢弃」的缺陷回归。
- * ② pi 原生 block（升级前存量消息）：保持存量行为等价——block 前置 + `\n\nargs` 在后
- *   产出 `[skill, args-text]`（`\n\n` 吞入区间实现，见 PI_SKILL_BLOCK_RE）；block 前
- *   正文升级前直接丢弃，升级后保留（缺陷修复，D7）。
+ * 三形态按优先序处理（R4 D7），命中区间按位置排序后与区间外正文交错产出
+ * text + skill + text + …：
+ * ① 剥块（最高优先，R4 新增）：`<xyz-skill-data>` 包裹块任意位置整块剔除，块内内容
+ *   整体丢弃、不参与后续解析（见 stripSkillDataBlocks）；剥过块但正文无标记时返回
+ *   剥后正文（不回退原始文本，防块全文泄漏）。
+ * ② 标记还原：`<xyz-skill .../>` 单标记（本设计 segmentsToText 序列化产物，正文占位
+ *   标记形态）。标记前后的正文全部保留为 text segment——专防升级前
+ *   「捕获组从第一个 <skill 开始、block 前正文不在任何捕获组直接丢弃」的缺陷回归。
+ *   与 ① 协调：块内标记已随块整体丢弃，标记命中区间与块区间互斥（区间不相交）。
+ * ③ 存量形态兼容（零改动，对应设计 D7-③）：pi 原生 block 与 `<xyz-skills>` 降级块
+ *   （升级前存量落盘，解析复用 shared skill-marker SSOT 的 index/length 位置切片）
+ *   保持存量行为等价——block 前置 + `\n\nargs` 在后产出 `[skill, args-text]`
+ *   （`\n\n` 吞入区间实现，见 PI_SKILL_BLOCK_RE）；block 前正文升级前直接丢弃，
+ *   升级后保留（缺陷修复，D7）。
  *
- * 优先级（apply-entry 测试锁定）：降级块先扫描并整体占用区间（含块内嵌套标记与紧随
- * 指引行——指引行是块的组成部分，不作正文残留）；单标记与 pi block 后扫描，起点落入
- * 已占用区间的命中跳过。pi block 与两类 xyz 标记的正则前缀互不重叠（`<skill` vs
- * `<xyz-skill`），互不误命中。
+ * 优先级实现（apply-entry 测试锁定）：① 先剥块改写扫描域；降级块先扫描并整体占用
+ * 区间（含块内嵌套标记与紧随指引行——指引行是块的组成部分，不作正文残留）；单标记
+ * 与 pi block 后扫描，起点落入已占用区间的命中跳过。pi block 与两类 xyz 标记的正则
+ * 前缀互不重叠（`<skill` vs `<xyz-skill`），互不误命中；未闭合的 `<xyz-skill-data>`
+ * 残段（无完整块）不匹配任何标记正则，按 D8 透传语义保留为正文。
  */
 function parseSkillBlock(text: string): Segment[] | null {
   interface Hit {
@@ -95,37 +129,46 @@ function parseSkillBlock(text: string): Segment[] | null {
   const hits: Hit[] = []
   const occupied = (start: number) => hits.some((h) => start >= h.start && start < h.end)
 
-  // ① 降级块优先（整体区间消费块内全部标记，防单标记解析二次命中重复产出）
-  for (const block of parseSkillsFallbackBlocks(text)) {
+  // ① 剥块优先（R4）：块内内容整体出局，后续解析只看剥后正文
+  const { body: effective, stripped: dataBlockStripped } = stripSkillDataBlocks(text)
+
+  // ② 降级块优先（整体区间消费块内全部标记，防单标记解析二次命中重复产出）
+  for (const block of parseSkillsFallbackBlocks(effective)) {
     hits.push({
       start: block.index,
       end: block.index + block.length,
       segs: block.skills.map((s) => toSkillSegment(s.name, s.location)),
     })
   }
-  // ② xyz 单标记（块内嵌标记已被 ① 消费，区间内跳过）
-  for (const m of parseSkillMarkers(text)) {
+  // ②' xyz 单标记（降级块内嵌标记已被上方消费，区间内跳过；`<xyz-skill-data>` 块内
+  // 标记已在 ① 随块丢弃，与块区间互斥）
+  for (const m of parseSkillMarkers(effective)) {
     if (occupied(m.index)) continue
     hits.push({ start: m.index, end: m.index + m.length, segs: [toSkillSegment(m.name, m.location)] })
   }
-  // ③ pi 原生 block（存量形态）
-  for (const m of text.matchAll(PI_SKILL_BLOCK_RE)) {
+  // ③ pi 原生 block（存量形态，规则与行为零改动）
+  for (const m of effective.matchAll(PI_SKILL_BLOCK_RE)) {
     if (occupied(m.index)) continue
     hits.push({ start: m.index, end: m.index + m[0].length, segs: [toSkillSegment(m[1], m[2])] })
   }
-  if (hits.length === 0) return null
+  if (hits.length === 0) {
+    if (!dataBlockStripped) return null
+    // 剥过块但无标记命中：返回剥后正文（空串产空数组），不回退原始文本——
+    // 块内容已按注入器产物丢弃，回退会让整块全文泄漏进显示层
+    return effective ? [{ type: 'text', text: effective }] : []
+  }
 
   // 区间排序 + 正文切片：标记间与首尾正文原样保留（空串不产 text segment）
   hits.sort((a, b) => a.start - b.start)
   const segments: Segment[] = []
   let cursor = 0
   for (const h of hits) {
-    const before = text.slice(cursor, h.start)
+    const before = effective.slice(cursor, h.start)
     if (before) segments.push({ type: 'text', text: before })
     segments.push(...h.segs)
     cursor = h.end
   }
-  const tail = text.slice(cursor)
+  const tail = effective.slice(cursor)
   if (tail) segments.push({ type: 'text', text: tail })
   return segments
 }
