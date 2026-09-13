@@ -26,6 +26,8 @@ export interface KillableChild {
   exitCode?: number | null
   /** 被信号杀死判别（与 exitCode 互备，见 exitCode 注释）。 */
   signalCode?: string | null
+  /** 进程 pid（safeKill 抛错留痕；真实 ChildProcess 恒有，自造 fake 可省略）。 */
+  readonly pid?: number
   /** 发信号。返回 false = 进程已不存在（kill no-op）。 */
   kill(signal?: NodeJS.Signals | number): boolean
   /** 注册 exit 监听（与迁移前 RpcClient.kill 的 proc.on('exit') 同形；重复触发由 settled 幂等守卫）。 */
@@ -52,7 +54,36 @@ function isAlreadyExited(child: KillableChild): boolean {
  * exitCode/signalCode 短路双层——后者是 U1 归并引入（pi-subagent-cli 的
  * killChild/killAllActiveChildren 调用点无调用方守卫，agent_end 回补 finally
  * 的 kill 常落在已回收进程上，前置短路保「零信号」语义）。
+ *
+ * kill 抛错守卫：三处 kill 均经 safeKill 吞错（对齐 SDK killChain 的 safeKill
+ * 单源语义）——进程恰在退出态检查与 kill 之间自退时 ChildProcess.kill 可能抛
+ * （zsub 实测经验），且本包消费方 killChild/killAllActiveChildren 是 void
+ * fire-and-forget 无 .catch：同步抛经 executor 变 rejection 即 unhandled
+ * rejection；SIGKILL 在 setTimeout 回调内抛出更是直接 uncaughtException（.catch
+ * 结构性无法覆盖）→ runtime graceful shutdown + 全 session 中断。kill 失败是
+ * 尽力而为语义（对已死进程信号本就是 no-op），warn 留痕后吞掉。
  */
+/**
+ * 发信号守卫包裹（单点收口，对齐 SDK killChain safeKill 同名语义）：kill 抛错吞掉
+ * + warn 留痕。日志走本包既有 console 约定（无 logger 依赖，spawn-args/onEscalate
+ * 同款 '[rpc]' 前缀）；收口在本函数而非逐调用点 .catch 的理由见 killPiProcess
+ * docstring——SIGKILL 位在 setTimeout 回调内，调用方 .catch 结构性无法覆盖。
+ */
+function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
+  try {
+    child.kill(signal)
+  } catch (err) {
+    // 降级策略（best-effort）：kill 抛错 = 进程恰在退出态检查与发信号之间自退，
+    // 对已死进程信号本就是 no-op——刻意吞掉不阻断杀链（本函数存在的唯一目的），
+    // warn 留痕（pid/信号/错误）供排障，不向调用方传播。
+    console.warn(
+      `[rpc] ${signal} on exited/invalid process (pid: ${child.pid ?? 'unknown'}) failed (kill is best-effort): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+  }
+}
+
 export function killPiProcess(
   child: KillableChild,
   opts?: {
@@ -80,7 +111,7 @@ export function killPiProcess(
 
     const killTimer = setTimeout(() => {
       opts?.onEscalate?.()
-      child.kill('SIGKILL')
+      safeKill(child, 'SIGKILL')
       done()
     }, graceMs)
     if (opts?.unrefTimers === true) killTimer.unref()
@@ -96,7 +127,7 @@ export function killPiProcess(
     // D3a：SIGTERM 前先 SIGCONT——唤醒可能被 SIGSTOP 冻结的进程（事件循环卡死的
     // 一种形态），否则 SIGTERM 会被冻结状态吞掉、只能等 grace 后 SIGKILL，丢失
     // 优雅退出路径（扩展落盘等 exit handler）的执行机会。
-    child.kill('SIGCONT')
-    child.kill('SIGTERM')
+    safeKill(child, 'SIGCONT')
+    safeKill(child, 'SIGTERM')
   })
 }

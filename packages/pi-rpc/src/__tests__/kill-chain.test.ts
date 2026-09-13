@@ -18,6 +18,7 @@ function makeFakeChild(overrides?: { exitCode?: number | null; signalCode?: stri
   const signals: string[] = []
   let exitListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined
   const child: FakeChild = {
+    pid: 4321,
     signals,
     ...(overrides?.exitCode !== undefined ? { exitCode: overrides.exitCode } : {}),
     ...(overrides?.signalCode !== undefined ? { signalCode: overrides.signalCode } : {}),
@@ -143,5 +144,52 @@ describe('killPiProcess', () => {
     expect(child.signals).toEqual(['SIGCONT', 'SIGTERM'])
     child.emitExit()
     await done
+  })
+
+  it('kill 抛错（进程恰在检查与 kill 之间自退）→ 吞掉不 reject，后续信号照发', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const child = makeFakeChild()
+      child.kill = (signal?: NodeJS.Signals | number) => {
+        child.signals.push(String(signal))
+        if (signal === 'SIGCONT') throw new Error('kill EPERM')
+        return true
+      }
+      const done = killPiProcess(child, { graceMs: 50 })
+      expect(child.signals).toEqual(['SIGCONT', 'SIGTERM'])
+      child.emitExit()
+      await expect(done).resolves.toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('[rpc] SIGCONT on exited/invalid process (pid: 4321)'),
+      )
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('kill EPERM'))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('SIGKILL 阶段抛错 → 仍 resolve（setTimeout 回调内抛出即 uncaughtException，必须吞在链内）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const child = makeFakeChild()
+      let escalated = false
+      const onEscalate = vi.fn(() => {
+        escalated = true
+      })
+      child.kill = (signal?: NodeJS.Signals | number) => {
+        child.signals.push(String(signal))
+        if (escalated && signal === 'SIGKILL') throw new Error('kill ESRCH')
+        return true
+      }
+      const done = killPiProcess(child, { graceMs: 10, onEscalate })
+      await expect(done).resolves.toBeUndefined()
+      expect(child.signals).toEqual(['SIGCONT', 'SIGTERM', 'SIGKILL'])
+      expect(onEscalate).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('[rpc] SIGKILL on exited/invalid process (pid: 4321)'),
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

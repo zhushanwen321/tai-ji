@@ -384,6 +384,53 @@ describe("pendingNotificationsExtension factory", () => {
 			);
 			expect(stateChangeCalls).toHaveLength(0);
 		});
+
+		it("U7b: reason → status 词表映射（表驱动——防新枚举值漏映射静默落兜底，cancelled 同族事故先例）", () => {
+			fireSessionStart(setup);
+			const cases: Array<[string, string]> = [
+				["completed", "completed"],
+				["failed", "failed"],
+				["cancelled", "cancelled"],
+				["expired", "expired"],
+				["time_limited", "time_limited"],
+				["budget_limited", "failed"],
+				["aborted", "aborted"],
+				// U5 新词表：subagent-core stopReason 展示值经注销 reason 通道到达
+				["interrupted", "aborted"],
+				["interrupted-by-restart", "aborted"],
+				["interrupted-by-parent", "aborted"],
+				["reopened", "completed"],
+			];
+			for (const [i] of cases.entries()) {
+				setup.handlers.pendingRegister!({ id: `w-map-${i}`, type: "workflow", name: `op-${i}` });
+			}
+			setup.appendEntryMock.mockClear();
+			for (const [i, [reason]] of cases.entries()) {
+				setup.handlers.pendingUnregister!({ id: `w-map-${i}`, reason });
+			}
+
+			const unregisterCalls = setup.appendEntryMock.mock.calls.filter((c) => c[0] === "pending:unregister");
+			expect(unregisterCalls).toHaveLength(cases.length);
+			for (const [i, [reason, expected]] of cases.entries()) {
+				expect(unregisterCalls).toContainEqual([
+					"pending:unregister",
+					expect.objectContaining({ id: `w-map-${i}`, reason, status: expected }),
+				]);
+			}
+		});
+
+		it("U7c: 未知 reason 落 default 兜底 completed（兜底语义的显式登记——未来若改兜底口径，此用例同步更新）", () => {
+			fireSessionStart(setup);
+			setup.handlers.pendingRegister!({ id: "w-unknown", type: "workflow", name: "op" });
+			setup.appendEntryMock.mockClear();
+
+			setup.handlers.pendingUnregister!({ id: "w-unknown", reason: "some-future-reason" });
+
+			expect(setup.appendEntryMock).toHaveBeenCalledWith(
+				"pending:unregister",
+				expect.objectContaining({ id: "w-unknown", reason: "some-future-reason", status: "completed" }),
+			);
+		});
 	});
 
 	describe("tool count/list (U9-U10)", () => {

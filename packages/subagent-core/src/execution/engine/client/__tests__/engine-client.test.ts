@@ -15,6 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient, type RunRoute } from "../engine-client.ts";
 import { isProcessAlive, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
+import {
+  _resetCoreSpawnedChildrenMirrorForTest,
+  hasLiveProcessHandleCore,
+} from "../../host/spawned-children.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -229,6 +233,45 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     // run 应答成功即 host/log 分发未抛（分发抛错也回 ok，但缺省 logger 自身不得炸）。
     expect(client.currentState).toBe("ready");
     await cleanup();
+  });
+});
+
+describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
+  // bridge 写的是 core 进程级单例镜像（globalThis[Symbol.for] 槽），测试间必须隔离。
+  beforeEach(() => {
+    _resetCoreSpawnedChildrenMirrorForTest();
+  });
+
+  it("childSpawned → core 镜像登记活句柄；自然退出（state:exited, killed:false）→ 置死不登记活句柄", () => {
+    const { client } = makeClient();
+    client.mirror.recordSpawned(4242, "rec-bridge");
+    expect(hasLiveProcessHandleCore("rec-bridge")).toBe(true);
+
+    // pi 子进程自行退出/崩溃的载荷形态：killed=false（child.killed 只在我方 kill 过
+    // 才为 true）、state=exited——投影必须置死 core 镜像项，否则 countInFlight 虚高
+    // （幻影在途拖住滚动重启判据）+ isResumable 恒 false（resumable 说谎）。
+    client.mirror.recordStateChanged({
+      pid: 4242,
+      recordId: "rec-bridge",
+      state: "exited",
+      killed: false,
+      exitCode: 1,
+    });
+    expect(hasLiveProcessHandleCore("rec-bridge")).toBe(false);
+  });
+
+  it("被杀退出（state:exited, killed:true）→ 置死（既有行为不回归）", () => {
+    const { client } = makeClient();
+    client.mirror.recordSpawned(4243, "rec-killed");
+    expect(hasLiveProcessHandleCore("rec-killed")).toBe(true);
+    client.mirror.recordStateChanged({
+      pid: 4243,
+      recordId: "rec-killed",
+      state: "exited",
+      killed: true,
+      signal: "SIGTERM",
+    });
+    expect(hasLiveProcessHandleCore("rec-killed")).toBe(false);
   });
 });
 

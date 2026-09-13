@@ -137,6 +137,27 @@ describe("API 链集合成员判定（EnginePort.read，D2 第二站点）", () 
     expect(mockedRead).not.toHaveBeenCalled();
     expect(view.source).toBe("outcome-only");
   });
+
+  it("dbPath = 池内相对路径（池时代旧 record）→ 池目录解析后放行①级", async () => {
+    mockedRead.mockResolvedValue(nativeView("from pool db"));
+    const view = await engine.read(makeHandle({ sessionId: "sess-1", dbPath: "db.sqlite" }));
+    expect(mockedRead).toHaveBeenCalledTimes(1);
+    expect(mockedRead).toHaveBeenCalledWith(
+      path.resolve(dataDir, "engines", "zcode", "shared", "db.sqlite"),
+      "sess-1",
+    );
+    expect(view.source).toBe("native");
+  });
+
+  it("dbPath = 相对路径含 `..` 逃逸池目录 → 拒绝①级（reader 零触达），落 outcome-only（防任意文件读）", async () => {
+    // join 归一化后逃逸 `<dataDir>/engines/zcode/shared` 的形态必须与集合外绝对
+    // 路径同款拒绝——相对分支是绝对分支白名单的守卫缺口（2026-09 review 顺手修）
+    const view = await engine.read(
+      makeHandle({ sessionId: "sess-1", dbPath: path.join("..", "..", "evil.sqlite") }),
+    );
+    expect(mockedRead).not.toHaveBeenCalled();
+    expect(view.source).toBe("outcome-only");
+  });
 });
 
 // ============================================================

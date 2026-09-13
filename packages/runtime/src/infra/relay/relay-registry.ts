@@ -146,9 +146,9 @@ function isPidAlive(pid: number): boolean {
  * - unrefTimers: true 维持迁移前双 timer unref 形态——kill-on-disconnect / 尾扫 /
  *   destroyAll 都是关停路径，ref'd timer 会拖住 runtime 进程退出；
  * - .catch 兜底维持「杀链必 resolve、永不 reject」契约：close 路径
- *   `void killRelayChild().then(...)` 无 catch，kill 同步抛错（进程已死竞态——
- *   killPiProcess 内 kill 无 try-catch）经 executor 变 rejection，不兜底即
- *   unhandled rejection → 整机崩溃（与 2026-09-04 连接级故障升级教训同族）。
+ *   `void killRelayChild().then(...)` 无 catch。注：killPiProcess 内三处 kill
+ *   现已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性必 resolve，本
+ *   .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步抛出路径）。
  *
  * 迁移删除的防御与理由：迁移前 settleTimer（graceMs+2s 强制 resolve）守护的是
  * 「SIGKILL 后等真实 exit」形态的挂起面；killPiProcess 的 killTimer 在 grace 超时

@@ -938,10 +938,21 @@ export class ZcodeEngine implements EnginePort {
           });
         }
       } else {
-        dbPath = path.join(
+        // 相对路径（池时代旧 record）分支：dbPathRaw 同样来自 append-only JSONL
+        // （不可信面），含 `..` 段可经 join 归一化逃逸池目录、绕过绝对路径分支的
+        // 封闭白名单——join 后 resolve 归一化并做池目录前缀包含性校验，越界按非
+        // 白名单同款 warn + 拒绝 ①级、降 journal（防任意文件读的守卫缺口补齐）。
+        const poolDir = path.resolve(
           resolvePoolDir(this.deps.engineDataDir(), ZCODE_ENGINE_ID, SHARED_POOL_KEY),
-          dbPathRaw,
         );
+        const resolved = path.resolve(poolDir, dbPathRaw);
+        if (resolved.startsWith(poolDir + path.sep)) {
+          dbPath = resolved;
+        } else {
+          logger.warn("[zcode-engine] record dbPath 相对路径逃逸池目录，拒绝 ①级读取降 journal", {
+            dbPath: dbPathRaw,
+          });
+        }
       }
       if (dbPath !== undefined) {
         try {
@@ -1012,7 +1023,7 @@ export class ZcodeEngine implements EnginePort {
    * 的「带摘要重开」语义同族）。
    */
   private async buildResumeHistoryPrefix(ctx: RunContext): Promise<string | undefined> {
-    const anchor = zcodeResumeAnchorOf(ctx);
+    const anchor = zcodeResumeAnchorOf(ctx, this.deps.engineDataDir());
     if (anchor === undefined) return undefined;
     const rt = this.ensureAppServerRuntime();
     let history: ResumedHistoryTurn[];
@@ -1053,14 +1064,24 @@ export class ZcodeEngine implements EnginePort {
  * {sessionId, dbPath}——宿主 transcriptAnchorOf 派生的 zcode 锚经协议 ResumeAnchor
  * 弱类型 Record 透传，此处形状收窄）。pi 锚（sessionFile）对 zcode 引擎无意义，
  * 返回 undefined 走无前缀路径。
+ *
+ * dbPath 守卫与 read() ①级同字段同构：锚 sessionRef 与 handle/record 同源
+ * append-only JSONL（不可信面），仅放行 zcodeDbPathAllowlist 封闭集合内精确匹配
+ * （隔离库现役 + 宿主库「共享 HOME 时代」存量兼容锚点）。非集合内路径（含池时代
+ * 相对路径——resume 锚场景读通道本就该走白名单库）→ 非法 zcode 锚，undefined 走
+ * 无前缀路径（与读通道失败的降级语义同族，不炸轮）。
  */
-function zcodeResumeAnchorOf(ctx: RunContext): { sessionId: string; dbPath: string } | undefined {
+function zcodeResumeAnchorOf(
+  ctx: RunContext,
+  engineDataDir: string,
+): { sessionId: string; dbPath: string } | undefined {
   const ref = ctx.resume?.resume?.sessionRef;
   if (ref === undefined) return undefined;
   const sessionId = ref["sessionId"];
   const dbPath = ref["dbPath"];
   if (typeof sessionId !== "string" || sessionId === "") return undefined;
   if (typeof dbPath !== "string" || dbPath === "") return undefined;
+  if (!zcodeDbPathAllowlist(engineDataDir).includes(dbPath)) return undefined;
   return { sessionId, dbPath };
 }
 

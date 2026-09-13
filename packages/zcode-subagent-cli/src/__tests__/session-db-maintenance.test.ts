@@ -35,14 +35,22 @@ async function openDb(file: string): Promise<Db> {
   return new DatabaseSync(file) as unknown as Db;
 }
 
-/** 建出 sweep 消费面的最小 schema（session + 两张 session_id 子表 + input_history）。 */
+/**
+ * 建出 sweep 消费面的最小 schema（session + 两张 session_id 子表 + input_history
+ * + 三族 FK 孤儿防线表）。三族表不声明 FK 约束——复现生产实测形态（engine 声明
+ * CASCADE/SET NULL 但 foreign_keys=0 不生效，孤儿行只有 sweep 显式 SQL 能清），
+ * 断言针对显式清理 SQL 的效果而非连接级级联。
+ */
 async function createDb(file: string): Promise<Db> {
   const db = await openDb(file);
   db.exec(
     "CREATE TABLE session (id TEXT PRIMARY KEY, time_created INTEGER, time_updated INTEGER);" +
       "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, sequence INTEGER, data TEXT);" +
       "CREATE TABLE todo (id TEXT PRIMARY KEY, session_id TEXT, content TEXT);" +
-      "CREATE TABLE input_history (session_id TEXT PRIMARY KEY, payload TEXT);",
+      "CREATE TABLE input_history (session_id TEXT PRIMARY KEY, payload TEXT);" +
+      "CREATE TABLE session_task_link (id TEXT PRIMARY KEY, parent_session_id TEXT, child_session_id TEXT);" +
+      "CREATE TABLE workflow_run (id TEXT PRIMARY KEY, parent_session_id TEXT, status TEXT);" +
+      "CREATE TABLE workflow_activity (id TEXT PRIMARY KEY, child_session_id TEXT, kind TEXT);",
   );
   return db;
 }
@@ -157,6 +165,81 @@ describe("sweepExpiredZcodeSessions（判龄三要素 + 级联删除）", () => 
       expect((verify.prepare("SELECT COUNT(*) AS n FROM session").get() as { n: number }).n).toBe(0);
       expect((verify.prepare("SELECT COUNT(*) AS n FROM message").get() as { n: number }).n).toBe(0);
       expect((verify.prepare("SELECT COUNT(*) AS n FROM input_history").get() as { n: number }).n).toBe(0);
+    } finally {
+      verify.close();
+    }
+  });
+});
+
+describe("sweepExpiredZcodeSessions（三族 FK 孤儿防线：session_task_link 双向 / workflow 父键置 NULL）", () => {
+  it("超窗会话：link child 方向整行删、parent 方向置 NULL 行留；workflow_run/workflow_activity 引用键置 NULL 行留；存活会话关联行不动", async () => {
+    const db = await createDb(dbPath);
+    const now = 4_000_000_000_000;
+    const expiredAt = now - ZCODE_SESSION_TTL_MS - 1; // 严格超窗
+    const freshAt = now - ZCODE_SESSION_TTL_MS + 60_000; // 窗内
+    insertSession(db, "sess_expired", expiredAt);
+    insertSession(db, "sess_expired_active", expiredAt);
+    insertSession(db, "sess_fresh", freshAt, freshAt);
+
+    // session_task_link 双向：child 指向被删会话 → 整行删；parent 指向被删会话 → 置 NULL 行留；两端存活 → 不动
+    db.prepare("INSERT INTO session_task_link (id, parent_session_id, child_session_id) VALUES (?, ?, ?)").run("link_child_hit", "sess_fresh", "sess_expired");
+    db.prepare("INSERT INTO session_task_link (id, parent_session_id, child_session_id) VALUES (?, ?, ?)").run("link_parent_hit", "sess_expired", "sess_fresh");
+    db.prepare("INSERT INTO session_task_link (id, parent_session_id, child_session_id) VALUES (?, ?, ?)").run("link_untouched", "sess_fresh", "sess_expired_active");
+
+    // workflow_run / workflow_activity：引用指向被删会话 → 键置 NULL 行留；指向存活会话 → 不动
+    db.prepare("INSERT INTO workflow_run (id, parent_session_id, status) VALUES (?, ?, ?)").run("run_hit", "sess_expired", "done");
+    db.prepare("INSERT INTO workflow_run (id, parent_session_id, status) VALUES (?, ?, ?)").run("run_keep", "sess_fresh", "done");
+    db.prepare("INSERT INTO workflow_activity (id, child_session_id, kind) VALUES (?, ?, ?)").run("act_hit", "sess_expired", "step");
+    db.prepare("INSERT INTO workflow_activity (id, child_session_id, kind) VALUES (?, ?, ?)").run("act_keep", "sess_fresh", "step");
+    db.close();
+
+    const result = sweepExpiredZcodeSessions(dbPath, {
+      nowMs: now,
+      keepSessionIds: new Set(["sess_expired_active"]),
+    });
+    expect(result.swept).toBe(1);
+
+    const verify = await openDb(dbPath);
+    try {
+      const sessionRows = (verify.prepare("SELECT id FROM session").all() as Array<{ id: string }>).map((r) => r.id).sort();
+      expect(sessionRows).toEqual(["sess_expired_active", "sess_fresh"]);
+
+      // child 方向：child_session_id 指向被删会话 → 整行删除（不留孤儿）
+      expect(await countRows(verify, "session_task_link", "id = ?", "link_child_hit")).toBe(0);
+      // parent 方向：行保留，parent_session_id 置 NULL，child 引用原样
+      const parentHit = verify.prepare("SELECT parent_session_id, child_session_id FROM session_task_link WHERE id = ?").get("link_parent_hit") as {
+        parent_session_id: string | null;
+        child_session_id: string;
+      };
+      expect(parentHit.parent_session_id).toBeNull();
+      expect(parentHit.child_session_id).toBe("sess_fresh");
+      // 两端均存活（含活跃豁免）→ 完全不动
+      const untouched = verify.prepare("SELECT parent_session_id, child_session_id FROM session_task_link WHERE id = ?").get("link_untouched") as {
+        parent_session_id: string;
+        child_session_id: string;
+      };
+      expect(untouched.parent_session_id).toBe("sess_fresh");
+      expect(untouched.child_session_id).toBe("sess_expired_active");
+
+      // workflow_run：命中行保留 + parent_session_id 置 NULL；存活引用不动
+      const runHit = verify.prepare("SELECT parent_session_id, status FROM workflow_run WHERE id = ?").get("run_hit") as {
+        parent_session_id: string | null;
+        status: string;
+      };
+      expect(runHit.parent_session_id).toBeNull();
+      expect(runHit.status).toBe("done");
+      const runKeep = verify.prepare("SELECT parent_session_id FROM workflow_run WHERE id = ?").get("run_keep") as { parent_session_id: string };
+      expect(runKeep.parent_session_id).toBe("sess_fresh");
+
+      // workflow_activity：命中行保留 + child_session_id 置 NULL；存活引用不动
+      const actHit = verify.prepare("SELECT child_session_id, kind FROM workflow_activity WHERE id = ?").get("act_hit") as {
+        child_session_id: string | null;
+        kind: string;
+      };
+      expect(actHit.child_session_id).toBeNull();
+      expect(actHit.kind).toBe("step");
+      const actKeep = verify.prepare("SELECT child_session_id FROM workflow_activity WHERE id = ?").get("act_keep") as { child_session_id: string };
+      expect(actKeep.child_session_id).toBe("sess_fresh");
     } finally {
       verify.close();
     }

@@ -134,6 +134,19 @@ function resumeCtx(): RunContext {
   };
 }
 
+/** 指定 dbPath 的锚（白名单守卫用例：非集合内路径 → 非法 zcode 锚）。 */
+function resumeCtxWithDbPath(dbPath: string): RunContext {
+  return {
+    taskId: "sa-resume",
+    resume: {
+      recordId: "sa-resume",
+      resume: {
+        sessionRef: { sessionId: OLD_SESSION_ID, dbPath },
+      },
+    },
+  };
+}
+
 interface StateEvent {
   seq: number;
   ev: string;
@@ -228,6 +241,16 @@ describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行�
     const { outcome } = await engine.run(makeTask(), { taskId: "sa-fresh"});
     expect(outcome.error).toBeUndefined();
     expect(sentFrames(stateFile, "session/resume")).toHaveLength(0);
+  });
+
+  it("锚 dbPath 非白名单集合（read() ①级同构守卫）→ 非法 zcode 锚：不发 session/resume、无前缀降级、run 仍成功", async () => {
+    const { engine, stateFile } = makeEngine();
+    const { outcome } = await engine.run(makeTask(), resumeCtxWithDbPath("/tmp/attacker-chosen/db.sqlite"));
+    expect(outcome.error).toBeUndefined();
+    expect(sentFrames(stateFile, "session/resume")).toHaveLength(0);
+    const sendFrames = sentFrames(stateFile, "session/send");
+    expect(sendFrames).toHaveLength(1);
+    expect(String(sendFrames[0]?.params["content"] ?? "")).toBe("我刚才告诉你的暗号是什么？");
   });
 });
 
