@@ -206,7 +206,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
     │    │     worktree + patch     ← 收起（close）即回收（patch 落盘）；续聊时按需重建                    │
     │    │     transcript 文件/库   ← 30 天 TTL（现状保留）；回收后降级为「带历史重开」                    │
     │    │     .alive 写权声明      ← 随会话持有（跨轮保留；release 于收起/内存回收，见 §3.2.4）           │
-│    └─ 统计: turns / totalTokens / round  ← 单一口径（见 3.3.7）                                    │
+│    └─ 统计: turns / totalTokens / round  ← 单一口径（见 §3.2.7）                                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -254,6 +254,11 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 事件表（全部经 store 意图原语，C-data-20 不变）：
   idle   --message/start-->        running   （锚有效：原地续聊；锚失效：reopen 降级路径）
   running--settle(成功/失败)-->    idle      （stopReason=completed/failed；进程按 idle timer 回收）
+      [实施形态 A-lite，阶段 3 裁决]：内存面轮终保持 running-resumable + stopReason 展示位
+      （completed/failed），状态机翻边不发生——投影桥接（isDoneProjection）与续聊判定等价，
+      统计承诺经轮终写面兑现（binding 快照 + .state 收条随每轮终落盘，markRoundIdle 簿记⑩⑪）。
+      事件表行保留为领域语义（「轮终=会话回到可续聊」），中断族（abort/engine death/host
+      shutdown）仍真实翻 idle。登记 impl-plan §5 S3-R1。
   running--abort(用户 cancel)-->   idle      （stopReason=interrupted；不写任何「终态」）
   running--engine death-->         idle      （纳管语义保留：交 round-supervisor 或等 revive）
   running--host shutdown-->        idle      （stopReason=interrupted-by-restart；进程亡，锚在）
@@ -402,7 +407,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | `env` | buildPiOutboundEnv / buildOutboundChildEnv 组装（已有共享惯例，归位本包） | process-manager / spawn-runner |
 
 **刻意不统一的**（写进包 README 防后人「顺手统一」）：
-- **busy 判定位置**：主 agent 前置预检（GUI 要用户可见反馈 + renderer defer 队列）vs subagent 后置交 pi 裁决（agent 驱动不阻塞）——这是**真差异**（消费方不同），公共包只提供 `classifyPromptRejection`（pi 错误原文 → busy/compacting 分类）这一个共享判读器；
+- **busy 判定位置**：主 agent 前置预检（GUI 要用户可见反馈 + renderer defer 队列）vs subagent 后置交 pi 裁决（agent 驱动不阻塞）——这是**真差异**（消费方不同）。判读器 `classifyPromptRejection`（pi 错误原文 → busy/compacting 分类）为单消费方实现，落位 runtime message-dispatcher（不进公共包——单消费方不公共化，K8 精神由公共包的 StreamingBehavior 占用词汇承载）；
 - **投递策略**：排队/重试归 session-delivery，按消费方注入（GUI 不排队直拒、subagent 排队续投）。
 
 #### 3.3.3 subagent 操作逻辑的统一收敛点

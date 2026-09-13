@@ -108,6 +108,11 @@ graph TD
 | U6-D3 zcode 锚失效走无世代降级（fresh session + 摘要注入，round 连续）不走 markReopened 完整 reopen——reopenRecord 宿主闭包只构造 pi 锚（U6b 接线后可升级完整版） | U6 | 与 U4-D2/U5-D3 偏差族同构 |
 | U6-D4 TTL 引擎侧 sweep 确认：判龄 session.time_updated??time_created、defer 50ms + 24h 节流 + keepSessionIds=activeSessions、删除序复刻 zsw clean-exec | U6 | 库写并发引擎单点持有 |
 | U6-D5 resume 注入预算 24k tokens 先验值（ZCODE_RESUME_HISTORY_TOKEN_BUDGET，字符 4:1 兜底，超限从最旧丢起保尾 + omitted 标注） | U6 | 设计定数据源未定数值 |
+| U1-D6 classifyPromptRejection 单消费方留 runtime message-dispatcher 不入公共包（设计 §3.3.1 原文「公共包只提供这一个共享判读器」与实现不符；K8 精神由公共包 StreamingBehavior 占用词汇承载）——设计措辞已随阶段 3 审查修正 | U1r2 | 单消费方不公共化 |
+| S3-R1（阶段 3 区1/区3 同根 A-lite 裁决）：设计 §3.2.2 事件表「settle(成功/失败)→idle」实现为「轮终保持 running-resumable + stopReason 展示位（completed/failed）+ binding 快照/.state 收条随轮终落盘」——状态机翻边不推翻（U2 桥接与投影判据保留），统计/停因语义经展示位与写面补齐；设计事件表措辞随审查注记 | 阶段3组1 | 投影桥接等价 + 统计承诺兑现 |
+| S3-R2（阶段 3 区1-U2）：cancel/编排性关闭打断在飞轮时清 closeAfterRound 挂起（对齐 one-shot :999 先例）——cancel 表达与「收口下一轮」相反的意愿，挂起作废 | 阶段3组2 | §3.2.5 cancel 语义完整性 |
+| S3-R3（阶段 3 区1-U3 P3）：isReconnectableFinalReason 加 @deprecated 注记——仅剩 rematerializeManifest 非准入消费点（投影面过滤残留，非资格判据），后续批次裁决「idle 全补」放宽 | 阶段3组1 | 建档追踪不立即做 |
+| S3-R4（阶段 3 区3-U2 P3）：subagentRecordEquals engine 域改字段级值比较（原 === 引用比较对象域失效，方向保守只多发不吞发） | 阶段3组3a | 值比较天然保 zcode 换锚触发 |
 | U8a-D1 derivedManifestRecord 旧三态派生取「intent 优先」单规则：archived→closed（设计原话）＞桥接终态（idle∧closedReason→closed/cancelled）＞其余（含 settle 后 idle）→running——**不按 stopReason 派生 closed/cancelled**：settle 产物可续聊，按停因翻旧终态会在 message 寻回时状态反复横跳（closed→running），恒 running 更贴「活跃会话」下行且零未知值 | U8a | 「旧版读到不漂移」裁决：只保证值域已知 + 行为域内，语义按 §3.2.8 行为变化声明 |
 | U8a-D2 manifest 读侧（manifestToSubagent）新增 executionStatus 优先回读（manifestStatusToExecution 单点）：settle 产物 legacy running + 权威词 idle → 宿主内读回 idle——写侧下行映射不再污染读侧占用判定；旧 manifest（无 executionStatus）回落 mapManifestStatus 行为不变 | U8a | 双写契约的回读半边（设计未明说，构造性必需） |
 | U8a-D3 intent 持久化三面落位：entry 面新增（record-entry.ts schema + toSubagentRecordEntry + rebuildEntryRecord 投影，领地外 additive 2 文件——types.ts SubagentRecord.intent 1 字段同批）+ manifest 面（intent 下行 + manifestToSubagent 回读）；binding 面未做（state-marker.ts RecordBinding 领地外未动）——pi record 重启后 TUI 侧 store 重建丢 intent（GUI 侧经 entry 链不受影响），binding 扩字段留后续批次 | U8a | U5-D10「intent 持久化归 U7/U8」的 U8 最小闭环；store 面完整持久化超投影单元边界 |
