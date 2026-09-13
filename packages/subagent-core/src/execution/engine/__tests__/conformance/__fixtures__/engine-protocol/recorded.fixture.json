@@ -216,17 +216,6 @@
         }
       },
       {
-        "id": "rev-perm-106",
-        "method": "host/permission",
-        "params": {
-          "runId": "run-fake-record",
-          "request": {
-            "action": "bash",
-            "detail": "redacted"
-          }
-        }
-      },
-      {
         "id": "rev-ask-107",
         "method": "host/askUser",
         "params": {

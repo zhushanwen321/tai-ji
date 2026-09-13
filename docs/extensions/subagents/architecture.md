@@ -103,7 +103,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。manifest conversation 位语义随永久会话模型增 `cold` 值（zcode 冷恢复：resume 读 + 新 session 注入，无热 steering）；capability gate 判据仍 `=== 'unsupported'` 拒绝（`true`/`cold` 均放行，[subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) §3.2.6）。
 
-`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`，反向通道收敛为 7 条。
+`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`；[permission 通道退役 2026-09-13] `host/permission` 骨架已删（两引擎 `permissionMode=native` 零 emit、core 零注入），反向通道现为 6 条。
 
 ## 4. 关键机制（落点索引）
 

@@ -134,8 +134,9 @@ export {
 } from "./execution/engine/inflight-snapshot.ts";
 // W3 后内核宿主 = engine/host（host-bridge arm/disarm 委托点为在途迁移点），模块本体不经 engines/pi。
 // maxTurnsToWatchdogMs 为 maxTurns→watchdog 毫秒换算（U3/U4 / D7，floor 语义
-// 文档化——两宿主预算一致性 S2 的函数级锚点；[W3] 定义收敛在 pi-host-binding，
-// 原 inproc session-runner（已删） 定义随删件消亡）；killRecordChildWithEscalation 为
+// 文档化——现役消费 = scripts/probe-third-host-integration.mjs 探针；引擎侧无消费
+//（预算各自实现）；[W3] 定义收敛在 pi-host-binding，原 inproc session-runner（已删）
+// 定义随删件消亡）；killRecordChildWithEscalation 为
 // 单 record 子进程终止的镜像记账入口（[W3] 实际终止在引擎进程内经协议承载）。
 export {
   killRecordChildWithEscalation,
@@ -201,7 +202,6 @@ export type {
 // live progress），interface 渲染层唯一消费入口。
 export {
   computeElapsedSeconds,
-  countAllToolCalls,
   deriveOutcome,
   getAllToolCalls,
   projectLiveProgress,
@@ -254,8 +254,8 @@ export {
 // 执行域外围件（组合根 / interface 层直接消费的独立单点件）。
 export { bestEffort } from "./execution/assembly/best-effort.ts";
 // channel-registry 类型闭包（UiChannelRegistry / ChannelHandler）随值符号进 barrel
-// （u-2b 主 agent 裁决 2026-09-03）：壳 index.ts 跨扩展 re-export surface 的非测试
-// 生产消费，满足 D3 判定标准；type-only，零运行时面变化。
+// （u-2b 主 agent 裁决 2026-09-03）：core 内部消费 + 类型导出（原「壳 index.ts 跨
+// 扩展 re-export surface」消费面已收）；type-only，零运行时面变化。
 export {
   getOrCreateChannelRegistry,
   type UiChannelRegistry,
@@ -503,7 +503,8 @@ export {
   DEFAULT_WORKFLOW_TMP_DIR,
 } from "./orchestration/workflow-files.ts";
 
-// workflow 发现/加载（ADR-031 统一资源发现）：宿主 list 面与 registry 构造消费；
+// workflow 发现/加载（ADR-031 统一资源发现）：discoverWorkflows 为 registry 构造
+// 消费（workflow-script-registry-impl）；宿主 list 面走 loadWorkflows；
 // invalidateCache 供宿主在写脚本后主动失效 mtime 缓存。
 export {
   discoverWorkflows,
@@ -581,9 +582,9 @@ export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
 // 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键，
 // 含 project-host 项目级槽）；深路径消费在 npm/vendored 发布形态不可达（exports 无
 // 深路径通配），故出 barrel。发现链辅助（C5b）：findWorkspaceRoot（project 源根
-// 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——发现链消费方
-// （pi-sw injector 等宿主接线）逐条解析 DiscoveredResource 的 frontmatter/meta
-// 需要它们，深路径同样不可达。
+// 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——getCachedFileContent
+// 生产消费在 core 内部 3 处（agents-assembly / config-loader / workflow-script-registry-impl）；
+// 壳侧测试 mock 引用不计，深路径同样不可达。
 export {
   discoverResources,
   findWorkspaceRoot,

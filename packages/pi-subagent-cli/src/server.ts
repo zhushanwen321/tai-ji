@@ -353,7 +353,7 @@ export class EngineProtocolServer {
 
   /** 反向请求应答落位。
    *
-   * ack 两阶段（R9-2）：人机交互通道（host/askUser / host/permission）宿主先回
+   * ack 两阶段（R9-2）：人机交互通道（host/askUser）宿主先回
    * `{ack:true}`——只 ack 计时面（移出 in-flight 自灭计时），**不终结等待**；最终
    * 结果帧才 settle。数据面通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {

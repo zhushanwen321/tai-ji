@@ -143,13 +143,12 @@ describe("9 正向方法全集", () => {
   });
 });
 
-describe("7 反向通道全集与超时二分（R9-2；[池抽象降级] 原 host/poolResolved 已随 poolKey 协议面退役删除）", () => {
-  it("恰好 7 个通道", () => {
-    expect(REVERSE_CHANNELS).toHaveLength(7);
+describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 host/poolResolved 已随 poolKey 协议面退役删除；[permission 退役] host/permission 已删——两引擎 permissionMode=native 零 emit）", () => {
+  it("恰好 6 个通道", () => {
+    expect(REVERSE_CHANNELS).toHaveLength(6);
     expect([...REVERSE_CHANNELS]).toEqual([
       "host/log",
       "host/askUser",
-      "host/permission",
       "host/streamDelta",
       "host/handleReady",
       "host/childSpawned",
@@ -157,7 +156,7 @@ describe("7 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
     ]);
   });
 
-  it("二分：数据面 5 通道 10s 超时；人机交互 2 通道不设统一超时", () => {
+  it("二分：数据面 5 通道 10s 超时；人机交互 1 通道不设统一超时", () => {
     const dataPlane = REVERSE_CHANNELS.filter(
       (ch) => REVERSE_CHANNEL_TIMEOUT_CLASS[ch] === "data-plane",
     );
@@ -171,7 +170,7 @@ describe("7 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
       "host/childSpawned",
       "host/childStateChanged",
     ]);
-    expect(interaction).toEqual(["host/askUser", "host/permission"]);
+    expect(interaction).toEqual(["host/askUser"]);
   });
 
   it("childStateChanged 载荷 killed 必含（类型层 required；运行时构造验证形状）", () => {

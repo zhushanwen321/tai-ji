@@ -85,7 +85,7 @@ export const ENGINE_EVENT_COALESCE_DEFAULT = "0";
  * 反向请求超时二分（帧④注释，R9-2）：
  * - 数据面类（host/log / host/streamDelta / host/handleReady /
  *   host/childSpawned / host/childStateChanged）：10s 未答 = 引擎故障；
- * - 人机交互类（host/askUser / host/permission）：不设统一超时——core 先回 {ack:true}，
+ * - 人机交互类（host/askUser）：不设统一超时——core 先回 {ack:true}，
  *   结果异步到达；按 ADR-0047「静默 ≠ 卡死」用无进展检测/用户取消，不据此判引擎故障。
  */
 export type ReverseRequestTimeoutClass = "data-plane" | "interaction";

@@ -270,7 +270,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 { "method": "event", "params": { "runId": "...", "seq": 1, "event": { "type": "text_delta", "delta": "..." } } }
 // ④ 反向请求（引擎 → core，**必须应答**）：数据面类（`host/log`/`streamDelta`/
 //    `handleReady`/`host/childSpawned`/`host/childStateChanged`）10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败；
-//    人机交互类（`host/askUser`/`host/permission`）**不设统一超时**——core 先回 `{ack:true}`，
+//    人机交互类（`host/askUser`）**不设统一超时**——core 先回 `{ack:true}`，
 //    结果异步到达；按 ADR-0047「静默 ≠ 卡死」用无进展检测/用户取消，不据此判引擎故障
 { "id": "rev-1", "method": "host/askUser", "params": { ... } }
 ```
@@ -290,7 +290,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `dispose` | core→引擎 | `dispose?` | `{}` → `{ok:true}`；幂等 |
 | `ping` | core→引擎 | 健康检查 | 诊断/重建判据（ADR-0047：静默 ≠ 卡死，不据此杀任务） |
 | `host/log` | 引擎→core | 日志 | 引擎日志落宿主日志 |
-| `host/askUser` / `host/permission` | 引擎→core | 交互 | 未实现的能力回 `{unsupported:true}` |
+| `host/askUser` | 引擎→core | 交互 | 未实现的能力回 `{unsupported:true}`（原并列的 `host/permission` 已删——两引擎 `permissionMode=native` 零 emit、core 零注入，未接线骨架随 2026-09-13 死代码清扫退役） |
 | `host/streamDelta` | 引擎→core | `ctx.stream` | UI 实时通道（双通道之一） |
 | `host/handleReady` | 引擎→core | `onHandleReady` | 运行中句柄回填（AGENTS.md 关键规则 9 的前提） |
 | `host/childSpawned` | 引擎→core | `onChildSpawned` | 上报引擎内一次性子进程 pid（**用途 = `isResumable` 镜像谓词 + 诊断留痕**；**不再声称「供杀链/收割」**——v6 已删按 pid 补杀，收割只靠进程组，见 §3.6 D2；常驻进程不报，归 `dispose`） |

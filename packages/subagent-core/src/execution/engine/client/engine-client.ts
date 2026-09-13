@@ -177,8 +177,6 @@ export class EngineClient {
     this.reverseRouterDeps = {
       engineId: opts.engineId,
       uiRequestHandler: opts.uiRequestHandler,
-      permissionHandler: opts.permissionHandler,
-      log: opts.log,
       runRoutes: this.runRoutes,
       mirror: this.mirror,
       setPartialHandle: (partial) => {
@@ -189,7 +187,6 @@ export class EngineClient {
       isDisposed: () => this.disposed,
     };
     this.mirror.onChange((event) => {
-      opts.onMirrorChanged?.(event);
       // [u7a 生产补挂] 反向通道镜像事件同步投影进 core 侧镜像 + 推送在途计数
       //（数据面桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
       bridgeMirrorEventToCoreMirror(event, this.mirror);

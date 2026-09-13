@@ -192,10 +192,8 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     await cleanup();
   });
 
-  it("host/childSpawned + host/childStateChanged → 镜像落项/更新 + onMirrorChanged 广播", async () => {
-    const mirrorEvents: string[] = [];
+  it("host/childSpawned + host/childStateChanged → 镜像落项/更新（onMirrorChanged 注入点已删，经 mirror 快照观测）", async () => {
     const { client, cleanup } = makeClient({
-      onMirrorChanged: (e) => mirrorEvents.push(e.reason),
       args: [
         FAKE_ENGINE,
         "--run-actions",
@@ -207,8 +205,6 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     });
     await client.ensureConnected();
     await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
-    expect(mirrorEvents).toContain("childSpawned");
-    expect(mirrorEvents).toContain("childStateChanged");
     expect(client.mirror.getEntry(4242)).toMatchObject({
       pid: 4242,
       state: "exited",
@@ -220,10 +216,8 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     expect(client.mirror.size).toBe(0);
   });
 
-  it("host/log 数据面 → 注入的 log 出口（缺省 logger facade 不抛）", async () => {
-    const logs: Array<{ level: string; component: string; message: string }> = [];
+  it("host/log 数据面 → 缺省 logger facade 不抛（log 注入点已删，恒走缺省）", async () => {
     const { client, cleanup } = makeClient({
-      log: (p) => logs.push({ level: p.level, component: p.component, message: p.message }),
       args: [
         FAKE_ENGINE,
         "--run-actions",
@@ -232,7 +226,8 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     });
     await client.ensureConnected();
     await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
-    expect(logs).toContainEqual({ level: "warn", component: "fake-comp", message: "log-line-1" });
+    // run 应答成功即 host/log 分发未抛（分发抛错也回 ok，但缺省 logger 自身不得炸）。
+    expect(client.currentState).toBe("ready");
     await cleanup();
   });
 });

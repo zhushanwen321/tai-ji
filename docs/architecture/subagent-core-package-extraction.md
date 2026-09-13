@@ -238,6 +238,8 @@ interface NotifyDomainPorts {
 
 > **[2026-09 post-convergence 补注]** 深路径豁免终止（出处：subagent-post-convergence-architecture.md（已删，git 可追溯） §3.2 B-2 / D5-补注）——壳侧生产代码深路径归零，豁免条款不再适用：曾保留的 `./*` → src 开发态通配已删除，生产消费收口到主入口 barrel（符号逐名可审，数量随批次演进、以 `src/index.ts` 实测为准——2026-09-13 实测 298：去注释后逐名去重）与上列受控子入口（现行 3 条语义子入口 + `./workflows/*`；成文时 4 条，`./engines/zcode/*` 两条已随引擎协议化 H3 删除、`./engine/engine-discovery-scan` 由 W4 新增，谱系见 D5 注记）；删通配后壳再写深路径 = tsc 编译错误（不再是风格问题）。D5「无宿主触点证据不放宽」判据由 post-convergence 收口首次执行——补注而非推翻。
 
+> **[barrel 收窄 backlog（2026-09-13 死代码审查登记）]** 同日死代码/未接线全面复查（四包 tsc 全绿 + barrel ~298 符号逐名 grep 消费方）结论：仓内零消费 barrel 导出 36 个（其中 `countAllToolCalls` 连定义处内部也零使用，已当日删除；其余 35 个在定义文件内部活跃——atomic-write 类型族 / worktree-git-ops 类型族 / workflow-ref 规范族 / `RecoverCrashedRunsHooks` 等，属外部契约候选：删除前须跨仓验证 zsw 与 session-reader 包消费面）、仅测试消费 25 个（`assertSafeId`/`isTreeDirty`/`cleanupWorktree`/`postBudgetUpdate`/`normalizeArgsByMeta` 等弱活）。处置纪律：barrel 收窄属 semver 允许方向（收窄不放宽），但每符号独立裁决——跨仓消费验证通过即删、测试专用符号评估下沉到测试工具入口；清单可再生（grep barrel 导出名逐个全仓检索消费方，排除 vi.mock 与 dist/）。弱活项登记不删：`promptTooLargeError`（错误码全集契约）、`disposeEngines`（宿主 shutdown 链预留，runtime 进程注册表恒空）、`maxTurnsToWatchdogMs`（探针消费）、`ColdLookupDeps.register`（注释自认保留）。
+
 **D6：zcode 侧渐进替换次序 = utils → workflow 运行时 → spawn 驱动（选定）**
 
 - **采用**：三步风险递增：**2a** 删 vendor utils 改 npm 依赖（zcode 侧 require core 的 `workflows/review-fix-loop-utils.cjs` 子路径；纯函数、零 I/O、对照面现成、立即消灭 5 分叉点）；**2b** workflow-manager/workflow-script 替换为 core orchestration，zcode 侧内置 workflow 脚本副本删除、直接使用 core 的 `workflows/` 资产（worker 契约随 core）；**2c** runner-spawn/driver/model-router/slots/pool 替换为 core `engines/zcode` + 执行链，daemon 改为「core 宿主壳」（经 HostServices 接 task-notification）。

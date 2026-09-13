@@ -633,17 +633,6 @@ export function getAllToolCalls(record: ExecutionRecord): ToolCall[] {
   return record.turns.flatMap((t) => t.toolCalls.map(stripInternal));
 }
 
-/**
- * 聚合所有 turn 的 toolCalls 总数（免克隆计数）。
- *
- * getAllToolCalls 会 flatMap + strip 克隆出完整数组——只需计数的调用方（渲染签名
- * 每 200ms tick 调用一次）用它是纯浪费；本函数 reduce 累加各 turn 的 length，零分配。
- * 与 getAllToolCalls(...).length 恒等（同一 turns 源）。
- */
-export function countAllToolCalls(record: ExecutionRecord): number {
-  return record.turns.reduce((sum, t) => sum + t.toolCalls.length, 0);
-}
-
 /** 把 InternalToolCall 映射回纯净的 ToolCall（丢弃 _status / startedTs）。 */
 function stripInternal(tc: InternalToolCall): ToolCall {
   return {

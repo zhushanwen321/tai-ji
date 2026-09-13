@@ -79,17 +79,16 @@ import type { AgentOutcome } from "../engine/types.ts";
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle/lifecycle-manager.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
-import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
+import type { NotifyHost } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
 import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
-import type { StreamSink, SubagentStream } from "../assembly/stream-sink.ts";
+import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,
@@ -114,13 +113,13 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
- *   getPool/getWorktreeManager/getCwd/getPi/getRoundSupervisor/getCollectCoordinator）：
+ *   getPool/getWorktreeManager/getCwd/getRoundSupervisor/getCollectCoordinator）：
  *   getter 现读同一实例（B-6 roundSupervisor 留壳、C-6 装配闭包经壳 late-bound）。
- * - 会话基线 getter（getExecNesting/getSessionRootId/getStreamSink/getUiObservability）：
+ * - 会话基线 getter（getExecNesting/getSessionRootId）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
- *   buildEarlyFailedHandle/finalizeRecord/finalizeFailed/finalizeAborted/
- *   idleTimeoutRecycle/archiveRecord）：身份解析/record 创建/意愿动作收口的跨聚合协作
+ *   buildEarlyFailedHandle/finalizeRecord/finalizeFailed/finalizeAborted）：
+ *   身份解析/record 创建/意愿动作收口的跨聚合协作
  *  （壳装配指 RecordAccess/RecordLifecycle 实例方法，聚合间零私有互调——G2）。
  * - ChatRounds 协作回调（startFirstChatRound/kickOffChatRound，2026-09-13 design-code-sync
  *   接线）：executeViaEngine 的 chat 域轮次派发（本体在 ChatRounds，壳装配闭包指其
@@ -143,14 +142,8 @@ export interface RunOrchestrationDeps {
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
   readonly getPool: () => ConcurrencyPool;
-  /** pi 句柄（FinalizeDeps manifest 写失败 appendEntry；initSession 晚绑定）。 */
-  readonly getPi: () => PiLike | null;
   /** 根 session id（relay 归属键 SESSION_ID 权威源；runCtx 注入）。 */
   readonly getSessionRootId: () => string | null;
-  /** UI streaming sink（createBackgroundStream 的 widget 通道）。 */
-  readonly getStreamSink: () => StreamSink | null;
-  /** UI observability（stream 通道形态判据 getMode）。 */
-  readonly getUiObservability: () => UiRequestObservability;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
   /** [B-6 留壳] 轮次活性监督器（在途记账/死亡分诊 adoptOnProcessDeath）。 */
@@ -191,12 +184,6 @@ export interface RunOrchestrationDeps {
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] 排队中被 abort 的收尾（[U5] cancel 语义 settle）。 */
   readonly finalizeAborted: (record: ExecutionRecord) => Promise<AgentResult>;
-  /** [R3 RecordLifecycle 显式接口 / U5] idle 超时进程回收（Continuation closeNow
-   *  回调面——归档是用户意愿位，超时回收不动 intent/占用位）。 */
-  readonly idleTimeoutRecycle: (record: ExecutionRecord) => Promise<void>;
-  /** [R3 RecordLifecycle 显式接口 / U5] 归档资源编排（closeAfterRound 挂起消费点——
-   *  source 供留痕，调用方保证在收口轮通知送达之后）。 */
-  readonly archiveRecord: (record: ExecutionRecord, source: string) => Promise<void>;
   /** [ChatRounds 协作回调 / 2026-09-13 design-code-sync 接线] chatMode 首轮派发
    *  （continuationFor ensure + startFirstRound——本体在 ChatRounds；executeViaEngine
    *  的 pi 与非 pi chatMode 两分支消费）。 */

@@ -139,13 +139,6 @@
         }
       },
       {
-        "op": "permission",
-        "request": {
-          "action": "bash",
-          "detail": "redacted"
-        }
-      },
-      {
         "op": "askUser",
         "request": {
           "method": "select",

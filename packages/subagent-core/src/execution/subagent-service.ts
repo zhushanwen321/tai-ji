@@ -352,10 +352,7 @@ export class SubagentService {
       getWorktreeManager: () => this.worktreeManager,
       getNotifyHost: () => this.notifyHost,
       getPool: () => this.pool,
-      getPi: () => this.pi,
       getSessionRootId: () => this.sessionRootId,
-      getStreamSink: () => this.streamSink,
-      getUiObservability: () => this.uiObservability,
       getExecNesting: () => this.execNesting,
       getRoundSupervisor: () => this.roundSupervisor,
       getCollectCoordinator: () => this.collectCoordinator,
@@ -369,11 +366,6 @@ export class SubagentService {
         this.recordLifecycle.finalizeRecord(record, result, status, closedReason),
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
-      // [U5] closeNow 语义切分：idle 超时 = 进程回收（不归档——归档是用户意愿位）；
-      // close action 的归档收口走 archiveRecord（Continuation settle 分支 / 主干尾部
-      // 顺序约束消费点）。
-      idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
-      archiveRecord: (record, source) => this.recordLifecycle.archiveRecord(record, source),
       // [2026-09-13 design-code-sync 接线] chat 域轮次派发回调（本体在 ChatRounds——
       // executeViaEngine 的 chatMode 首轮与 one-shot 派发调用点经此编排，G2「经壳编排」）。
       startFirstChatRound: (record, task) => this.chatRounds.startFirstChatRound(record, task),

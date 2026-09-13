@@ -12,7 +12,6 @@
 // 帧校验的目的是行解析器快速拒格式坏帧，不做深校验（深校验成本高于收益，坏载荷
 // 由消费方结构化报错）。
 
-import type { ReverseChannel } from "./reverse-channels.ts";
 import { REVERSE_CHANNELS } from "./reverse-channels.ts";
 import { PROTOCOL_METHODS } from "./methods.ts";
 
@@ -150,9 +149,6 @@ export const FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS = [
   "password",
   "secret",
 ] as const;
-
-/** 反向通道名词表导出（schema enum 与 W2 路由同源）。 */
-export const REVERSE_CHANNEL_NAMES: readonly ReverseChannel[] = REVERSE_CHANNELS;
 
 // ============================================================
 // [H1] run 会话形态参数载荷 schema（resume 单键校验权威）

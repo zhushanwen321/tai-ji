@@ -9,16 +9,12 @@ import {
   getLogger,
   type EngineCapabilities,
   type EngineRelayEnv,
-  type HostLogParams,
-  type HostPermissionParams,
   type InitializeResult,
   type ModelCatalogEntry,
   type UiRequestHandler,
 } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
-
-import type { MirrorChangeEvent } from "./mirror.ts";
 
 /** EngineClient 构造参数。 */
 export interface EngineClientOptions {
@@ -48,12 +44,6 @@ export interface EngineClientOptions {
    * W6 拆 HostBridge 时接线）。缺省 → 引擎收 {unsupported:true} 自行降级。
    */
   uiRequestHandler?: UiRequestHandler;
-  /** host/permission 应答端（v1 骨架注入点）。缺省 → {unsupported:true}。 */
-  permissionHandler?: (params: HostPermissionParams) => Promise<{ approved: boolean }>;
-  /** host/log 落宿主日志（缺省 SDK logger facade）。 */
-  log?: (params: HostLogParams) => void;
-  /** 镜像状态广播接线（W6 notify 合并窗口 / 生命周期谓词）。 */
-  onMirrorChanged?: (event: MirrorChangeEvent) => void;
   /** 引擎 cmdline 身份谓词覆盖（pidfile 三条件清扫防误杀校验；缺省按 command 词形）。 */
   engineCmdlineMatcher?: (cmdline: string) => boolean;
   /** manifest 诊断源（initialize 应答与 manifest 不一致 → warn 留痕，不参与判据）。 */
