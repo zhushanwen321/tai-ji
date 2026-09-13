@@ -1,6 +1,6 @@
 # ext-simplify-15：rename-session + session-manager 过度设计收敛（删 PI_RENAME_* env 覆盖层 + 协议死面双端删除）
 
-> **一句话结论（v2）**：本设计 rename-session 侧（D1 删 `PI_RENAME_*` env 覆盖层、D3 C-ext-21 登记、D4/C3 裁决）**已被兄弟设计 rename-session-three-modes 吸收实施或关闭**，本文档不再重复执行；**仍待执行 = D2（session-manager 协议 4 死字段 + `SessionManagerRequest` 类型单 commit 双端同批删除）+ B1-B3（包内 3 处 low 死面清理）**。v1 全文以「待执行」口吻起草，v2 已全面改道登记（见状态框）。
+> **一句话结论（v2）**：本设计 rename-session 侧（D1 删 `PI_RENAME_*` env 覆盖层、D3 C-ext-21 登记、D4/C3 裁决）**已被兄弟设计 rename-session-three-modes 吸收实施或关闭**，本文档不再重复执行；D2 与 B1-B3 已实施落地（u1=6d73d3399 / u2=56a8ea995）——**本文档全部条目已实施或改道关闭**。v1 全文以「待执行」口吻起草，v2 全面改道登记（见状态框），v2.2 终态回写（见变更历史）。
 
 > **状态框（v2，2026-09-13）**：
 >
@@ -10,13 +10,13 @@
 > | D3（C-ext-21 登记，C1） | **已实施** | rename-session-three-modes.md D7；constraints.json C-ext-21 已存在（authority 指向其 §3.3 D7） |
 > | D4（preview 双维护）/ C3（export 面） | **已关闭** | rename-session-three-modes.md 附录 A「零改动裁决随本设计关闭」 |
 > | V1/V2/V3 验收场景 | **已被取代** | three-modes V1（主流程）/ V8（env 残留负面）/ V7（空 ref 改道显式无效 ref，见 MF2 改道登记） |
-> | **D2（M25 双端死面删除，A4-A6）** | **待执行（本设计交付主体）** | 本文档 §6.2 |
-> | **B1-B3（session-manager low 批）** | **待执行** | 本文档 §6.5 |
+> | D2（M25 双端死面删除，A4-A6） | **已实施**（u1=6d73d3399） | 本文档 §6.2 |
+> | B1-B3（session-manager low 批） | **已实施**（u2=56a8ea995） | 本文档 §6.5 |
 
 ## 开篇（SCQA）
 
 - **S（情境）**：`@zhushanwen/pi-rename-session`（v0.9.0，三模式版本）在 session 首个成功 turn / 首请求 / agent 工具调用后用 LLM 生成会话标题；`@zhushanwen/pi-session-manager`（v0.1.7）提供 6 个 agent 自管子 session 工具，经 `ctx.ui.select(SESSION_MANAGER_MARKER)` 通道对接 xyz-agent runtime 的 `SessionManagerHandler`，嵌套 `{action, params}` 契约 SSOT 在 `@xyz-agent/extension-protocol`（v0.9.0）。两包均为 builtin feature tier 扩展（可禁不可卸）。
-- **C（冲突）**：2026-09-11 过度设计审计证实——rename-session 的配置解析存在 4 层优先级（env > flag 文件 > config 文件 > 默认），其中 env 覆盖层全仓 0 个生产 setter（**该项已被兄弟设计吸收实施，见状态框**）；session-manager 协议有 4 个请求字段 + 1 个请求类型无任何发送方/消费方（唯一客户端的工具 schema 从未暴露它们，runtime 侧却有守卫与消费点在维护）——**该项即本设计当前待执行的交付主体**；isSubagentSession 用路径段嗅探判定子 session，与 subagent-core 的目录布局决策双端硬编码（**已登记 C-ext-21**）。
+- **C（冲突）**：2026-09-11 过度设计审计证实——rename-session 的配置解析存在 4 层优先级（env > flag 文件 > config 文件 > 默认），其中 env 覆盖层全仓 0 个生产 setter（**该项已被兄弟设计吸收实施，见状态框**）；session-manager 协议有 4 个请求字段 + 1 个请求类型无任何发送方/消费方（唯一客户端的工具 schema 从未暴露它们，runtime 侧却有守卫与消费点在维护）——**该项已由本设计实施删除（u1=6d73d3399）**；isSubagentSession 用路径段嗅探判定子 session，与 subagent-core 的目录布局决策双端硬编码（**已登记 C-ext-21**）。
 - **Q（问题）**：如何删掉 session-manager 的协议死面与包内 low 死面，同时保证 6 工具真实调用链零回归？（rename-session 侧的同类问题已由 rename-session-three-modes 解决，本文档只保留其审计结论与改道登记。）
 - **A（答案）**：死面从协议类型、运行时守卫、handler 消费点三处双端同批删除（单 commit 编译闭包）；B1-B3 low 批同批清理；rename-session 侧各项按状态框指向 three-modes，不在本文档重复执行。
 
@@ -37,10 +37,10 @@ session-manager 注册 6 个工具（create/send/history/status/list/abort）。
 ## 2. 设计目标
 
 1. ~~**配置面收敛**~~：**已由 rename-session-three-modes D6 达成**（配置源 4 层 → 3 层，env 解析/合成/文档代码全删，原验收场景改道），本文档不再执行，保留 v1 审计结论作历史记录。
-2. **协议死面清零（待执行）**：session-manager 协议中无发送方的 4 个请求字段与无消费方的 `SessionManagerRequest` 类型双端删除；6 工具的 LLM 可见行为与 runtime 编排零变化。
+2. **协议死面清零（已达成，u1=6d73d3399）**：session-manager 协议中无发送方的 4 个请求字段与无消费方的 `SessionManagerRequest` 类型双端删除；6 工具的 LLM 可见行为与 runtime 编排零变化。
 3. ~~**跨包耦合显式化**~~：**已由 rename-session-three-modes D7 达成**（C-ext-21 已登记 + 双端互指注释已在），本文档不再执行。
 4. ~~**已裁决保留项关闭**~~：**已随 rename-session-three-modes 附录 A 关闭**（D4 preview 双维护接受现状 / C3 export 面登记不执行）。
-5. **low 批清零（待执行）**：session-manager 包内 3 处 low 死面（SessionManagerToolDetails 三态联合、SessionManagerRawError 本地重复声明、description 缺依赖声明）同批清理。
+5. **low 批清零（已达成，u2=56a8ea995）**：session-manager 包内 3 处 low 死面（SessionManagerToolDetails 三态联合、SessionManagerRawError 本地重复声明、description 缺依赖声明）同批清理。
 
 **In-scope（v2 收敛后）**：`extensions/universal/session-manager/`（src + tests + README）、`packages/extension-protocol/src/extensions/session-manager/`、`packages/runtime/src/transport/session-manager-handler.ts`。
 **Out-of-scope**：rename-session 包的全部代码与文档（已被 three-modes 吸收实施，见状态框）；`auto-rename-enabled` flag 契约（[COMPAT]，Remove after v1.0.0 另行处理）；`ModelSelector type:"ref"` 单变体判别联合（已是落盘 config 格式，稳定性对冲投机性，审计判定不可砍）；session-manager 的 universal 分组归属迁移（发现 8 的分组层面，涉 mandatory 清单与 AGENTS.md 列举联动，仅做最小修复见 §6.5 B3）；`SessionService.create` 的 `modelOverride/thinkingOverride` 参数本体（GUI 侧有真实消费，只删 session-manager 协议的死字段）。
@@ -65,6 +65,8 @@ session-manager 注册 6 个工具（create/send/history/status/list/abort）。
 
 ### 3.2 session-manager 契约的真实样子与 M25 死契约位置图
 
+> **状态（v2.2 终态回写）**：以下为 2026-09-13 实施前基线（行号为当时实读值）。5 个死面已随本设计 u1（6d73d3399）双端同批删除——终态 = create 仅 `{cwd, label?, prompt?}`、list params 为 `Record<string, never>` 结构性拒绝、无 `SessionManagerRequest` 类型。
+
 工具侧（`extensions/universal/session-manager/src/index.ts`）每个 action 的工具 schema 只暴露真实参数——create 是 `{cwd, label?, prompt?}`（:15-19），list 是空对象 `Type.Object({})` 且 `toParams: () => ({})`（:31,:212）。请求经 :78 `JSON.stringify({ action, params })` 手拼，**不经过协议类型检查**。
 
 协议侧（`packages/extension-protocol/src/extensions/session-manager/types.ts`）却声明了更宽的请求面。**死契约**（0 发送方 + 消费点仅为维护自身而存在）的位置：
@@ -82,9 +84,9 @@ session-manager 注册 6 个工具（create/send/history/status/list/abort）。
 ### 3.3 真实失败模式
 
 - ~~**F1（幽灵配置层）**~~：**已消灭**（three-modes D6 删 env 层；负面回归 TC-D6-1..3 锁定「预置变量无幽灵效果」）。v1 记录：用户 shell 里残留 `export PI_RENAME_ENABLED=false` 时，桌面 UI 的开关显示 ON 而 rename 实际关闭（env 静默压制 flag 与 config）——SKILL.md:75 需要专门一段解释这个交互，本身就是复杂度自证。该层无任何生产 setter，4 键中 3 键从未被任何人用过。
-- **F2（纸面 SSOT 误导，待执行）**：协议类型 `SessionManagerRequest` 与 4 个死字段让维护者以为「创建时指定模型」「列表过滤」是已暴露的能力——实际唯一客户端从未发送，runtime 侧守卫与消费点在为不可达路径缴税（每字段 = 类型 + 守卫 + handler 路径三处维护）。
+- ~~**F2（纸面 SSOT 误导）**~~：**已消灭（u1=6d73d3399）**。v1 记录：协议类型 `SessionManagerRequest` 与 4 个死字段让维护者以为「创建时指定模型」「列表过滤」是已暴露的能力——实际唯一客户端从未发送，runtime 侧守卫与消费点在为不可达路径缴税（每字段 = 类型 + 守卫 + handler 路径三处维护）。
 - ~~**F3（无守卫的跨包耦合）**~~：**已登记**（C-ext-21 + 双端互指注释，three-modes D7）。v1 记录：isSubagentSession 判定 `sessionDir.includes(path.sep + "subagents" + path.sep)`，而该目录布局的 SSOT 在 subagent-core 的 `getSubagentSessionDir`（`subagents/<enc>/sessions`）；该布局曾变更过一次（[MF#1] 回退注释），再变则 rename-session 静默误判。
-- **F4（分组元数据失真，待执行）**：session-manager 标注 role=universal（独立 pi 用户可单独安装），但应答方唯一存在于 xyz-agent runtime——独立 pi CLI 里 6 工具全部等待超时（create/history 60s、其余 30s）后返回 cancelled，README.md「运行要求」一节自认。工具 description 未告知此依赖，agent 每次误调用白烧 30-60s。
+- **F4（分组元数据失真）——description 缺声明已修复（B3/u2=56a8ea995）；分组迁移仍登记待办（out-of-scope）**。v1 记录：session-manager 标注 role=universal（独立 pi 用户可单独安装），但应答方唯一存在于 xyz-agent runtime——独立 pi CLI 里 6 工具全部等待超时（create/history 60s、其余 30s）后返回 cancelled，README.md「运行要求」一节自认。工具 description 未告知此依赖，agent 每次误调用白烧 30-60s。
 
 ### 3.4 根因
 
@@ -107,7 +109,7 @@ turn_end / message_end / rename_session 工具 → loadRenameConfig()（pure.ts:
   （invalid-provider/nonexistent-model，parseRef 成功 → modelRegistry.find 失败 → null → 同一守卫），见 three-modes V7 与其附录 A 冲突裁决
 ```
 
-session-manager 契约流（终态仅删不可达分支，链路形状不变）：
+session-manager 契约流（**现状口径**：不可达分支已删（u1），链路形状不变——阶段 5 实测；块内行号为实施前快照，按附录 A 先例以符号名定位）：
 
 ```
 LLM 调工具（schema 可见面 = 真相面，终态前后一致）
@@ -122,7 +124,7 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 
 ### 5.1 成功路径（桌面用户，rename + 子 session 编排）
 
-> rename 部分已由 rename-session-three-modes 交付并实测（其 V1/V4 场景）；此处保留 v1 描绘的终态以说明 D2 改动与用户可见面正交——本设计待执行部分（D2/B1-B3）对以下两条路径**零可见变化**。
+> rename 部分已由 rename-session-three-modes 交付并实测（其 V1/V4 场景）；此处保留 v1 描绘的终态以说明 D2 改动与用户可见面正交——本设计实施部分（D2/B1-B3，u1/u2）对以下两条路径**零可见变化——阶段 5 V4/V5 桌面实测 PASS**。
 
 ```
 [用户] 桌面 SystemPage 打开自动重命名 → runtime 写 flag 文件 → 新 session 发首条消息
@@ -135,12 +137,12 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 ### 5.2 失败路径（带恢复指引）
 
 - **model 配置了不存在的 provider/model**（config 手写错，非空 ref）：`resolveModel` 返回 null → logger.warn「model not available, skipping」→ 主对话完全不受影响。恢复：改 config 文件修正 ref（config 是唯一模型配置入口）；排查看 `~/.pi/agent/logs/`（XYZ_AGENT_DEBUG=1）。（空 ref 不属失败路径——D5 终态语义为跟随会话主模型，开箱即用。）
-- **独立 pi CLI 用户误调 session-manager 工具**：select 等待至超时返回 `Session manager <action>: cancelled or timed out`（isError:true）。终态下 description 已声明依赖（§6.5 B3），恢复：改在 xyz-agent 桌面环境使用，或卸载本扩展。
+- **独立 pi CLI 用户误调 session-manager 工具**：select 等待至超时返回 `Session manager <action>: cancelled or timed out`（isError:true）。现状 description 已声明依赖（§6.5 B3 已实施），恢复：改在 xyz-agent 桌面环境使用，或卸载本扩展。
 - **目标 session 不归属发起方**（abort/status/send）：与现状一致返回 `not managed by this agent` / `not_found`——剩余守卫全部保留，删除的 4 字段原本就不可达，错误闭环面零变化。
 
 ## 6. 关键决策与权衡
 
-**本章结论（v2）：D1/D3/D4/C3 已被 rename-session-three-modes 吸收实施或关闭（各节保留 v1 论证作审计记录 + 改道登记）；待执行 = D2（M25 双端死面删除）+ B1-B3（low 批）+ 一张执行项总表（§6.5）。**
+**本章结论（v2.2 终态）：本文档全部条目闭环——D1/D3/D4/C3 已由 rename-session-three-modes 吸收实施或关闭；D2 与 B1-B3 已由本设计实施（u1=6d73d3399 / u2=56a8ea995）。各节保留 v1/v2 论证作审计记录。**
 
 ### 6.1 D1：env 覆盖层删除形态（**已由 three-modes D6 吸收实施**；v1 选型记录保留）
 
@@ -151,7 +153,7 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 - **证据（v1 记录）**：`rg "PI_RENAME_" --glob '!node_modules' -l` 全仓仅 pure.ts / pure.test.ts / SKILL.md / README.md / usage-page-fixes.impl-plan.md 5 文件；`rg "PI_RENAME_" packages apps` 0 命中；startup-config-declaration.test.ts 断言不受影响；commands.ts 的 /auto-rename 双写只走 config/flag。
 - **效果**：~~目标 1~~（已由 three-modes 达成）；F1 已消灭（TC-D6-1..3 负面回归锁定）。
 
-### 6.2 D2：session-manager 死契约处理（**待执行，本设计交付主体**；选定：删除方向 + 单 commit 双端同批）
+### 6.2 D2：session-manager 死契约处理（**已实施，u1=6d73d3399**；选定：删除方向 + 单 commit 双端同批——与实施完全一致，单 commit 跨 4 包 8 文件）
 
 - **采用**：删除 §3.2 表 5 个死面——协议侧删字段声明与对应守卫行（types.ts:37,39,63,65 + :96-97 + :128-129）、删 `SessionManagerRequest` 及其 re-export（index.ts:57）与 README.md:33 引用；runtime 侧 `handleCreate` 删 model/thinkingLevel 解构与透传（handler :205 解构、:215-216 透传）、`handleList` 删 spawnSource 读取（wantSpawn 固化 `'agent'`，:337，连带 :346 过滤行）；同批更新协议包测试（validation.test.ts 的导出断言、session-manager.test.ts 类型标注与 create 用例中的 `model: 'm'`/`thinkingLevel: 'high'` 字段）与两端 README/注释。**批次 = 单 commit 跨包同删**：extension-protocol 被 runtime 与 extension 双向依赖，字段/类型删除必须与消费点删除同 commit，否则 typecheck 红；也无独立可验收的中间态。
 - **被否**：
@@ -181,19 +183,19 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
   - **接受现状的关键依据（审计未明说，本设计补全）**：双维护的漂移方向**两端都会被断言抓出**——run-a1 的内容匹配主判别器是「日志文本 == rebuildPreview(原始文本)」，任一侧单改阈值/格式，另一侧旧实现产生的重构文本必不匹配 → E2E 假红（可发现），不存在静默假绿。残留风险仅「e2e 不进 CI 故漂移在下次人工验收才暴露」，与 e2e 资产自身的定位一致。
 - **效果**：~~目标 4 关闭~~（已随 three-modes 关闭）；零代码改动。
 
-### 6.5 执行项总表（v2：状态列标注；待执行 = A4-A6 + B1-B3）
+### 6.5 执行项总表（v2.2 终态：全部闭环）
 
-| # | 包 | 位置（v1 为 2026-09-11 实读；★ 待执行项行号为 2026-09-13 复核值） | 改动内容 | 状态 |
+| # | 包 | 位置（v1 为 2026-09-11 实读；★ 项行号为 2026-09-13 实施前快照，按符号名定位） | 改动内容 | 状态 |
 |---|---|---|---|---|
 | A1 | rename-session | src/pure.ts:53-57,74-114,243-251 | 删 env 覆盖层（常量 + getEnvOverrides + 合成段，flag 检查简化） | **已实施**（three-modes D6/u1） |
 | A2 | rename-session | src/__tests__/pure.test.ts:261-404 | 删「环境变量覆盖」describe 整块 | **已实施**（现为 TC-D6-1..3 负面回归 :336-377） |
 | A3 | rename-session | README.md:47-49、skills/.../SKILL.md:68-88,119-120 | 删 env 优先级行与示例，4 源改 3 源 | **已实施**（README:47-56 / SKILL.md:105 [HISTORICAL]） |
-| ★A4 | extension-protocol | src/extensions/session-manager/types.ts:37,39,63-65,90-99(:96-97),124-131(:128-129),13-16；src/index.ts:57；README.md:33 | 删 4 死字段 + 对应守卫行 + SessionManagerRequest 及引用 | **待执行（D2）** |
-| ★A5 | runtime | src/transport/session-manager-handler.ts:205,:215-216,:337(连带 :346) | 删 handleCreate model/thinkingLevel 透传、handleList spawnSource 读取（固化 'agent'） | **待执行（D2，与 A4 同 commit）** |
-| ★A6 | extension-protocol | validation.test.ts、session-manager.test.ts | 删 SessionManagerRequest 导出断言与类型标注（:33-36/:60-70），create 用例删 `model:'m'`/`thinkingLevel:'high'`（:76-87），改用各 params 类型 | **待执行（D2，同 commit）** |
-| ★B1 | session-manager | src/index.ts:60-64,:112,:130,:135 + __tests__/tool-error-handling.test.ts:66,:79 details 断言 | 删 SessionManagerToolDetails 三态联合与三处构造（写后无人读：pi TUI renderResult 不消费自定义工具 details，renderer 无消费，isError+content 已满足判错）；测试删 details 断言。**实施注记（S1）**：pi `AgentToolResult.details` 为必填字段（pi-agent-core dist/types.d.ts:317-321），完全删键会 TS2739——实施形态为 `details: undefined`（或核对 registerTool 泛型 TDetails 推断允许省略），executeTool 返回类型（:106）同步收窄 | **待执行（low）** |
-| ★B2 | session-manager | src/index.ts:53-58 | 删本地 SessionManagerRawError 声明，改 import 协议包 SessionManagerErrorResult（index.ts:5 已 import 该包，形状知识归单点） | **待执行（low）** |
-| ★B3 | session-manager | src/index.ts:157-173（registerSessionTool），description 六处 :182/:191/:200/:209/:218/:227 | description 统一追加「Requires the xyz-agent desktop runtime; standalone pi CLI will time out」（发现 8 最小修复；分组迁移 out-of-scope，登记待办） | **待执行（low）** |
+| ★A4 | extension-protocol | src/extensions/session-manager/types.ts:37,39,63-65,90-99(:96-97),124-131(:128-129),13-16；src/index.ts:57；README.md:33 | 删 4 死字段 + 对应守卫行 + SessionManagerRequest 及引用 | **已实施**（u1=6d73d3399） |
+| ★A5 | runtime | src/transport/session-manager-handler.ts:205,:215-216,:337(连带 :346) | 删 handleCreate model/thinkingLevel 透传、handleList spawnSource 读取（固化 'agent'） | **已实施**（u1=6d73d3399，与 A4 同 commit） |
+| ★A6 | extension-protocol | validation.test.ts、session-manager.test.ts | 删 SessionManagerRequest 导出断言与类型标注（:33-36/:60-70），create 用例删 `model:'m'`/`thinkingLevel:'high'`（:76-87），改用各 params 类型 | **已实施**（u1=6d73d3399，同 commit） |
+| ★B1 | session-manager | src/index.ts:60-64,:112,:130,:135 + __tests__/tool-error-handling.test.ts:66,:79 details 断言 | 删 SessionManagerToolDetails 三态联合与三处构造（写后无人读：pi TUI renderResult 不消费自定义工具 details，renderer 无消费，isError+content 已满足判错）；测试删 details 断言。**实施注记（S1）**：pi `AgentToolResult.details` 为必填字段（pi-agent-core dist/types.d.ts:317-321），完全删键会 TS2739——实施形态为 `details: undefined`（或核对 registerTool 泛型 TDetails 推断允许省略），executeTool 返回类型（:106）同步收窄 | **已实施**（u2=56a8ea995） |
+| ★B2 | session-manager | src/index.ts:53-58 | 删本地 SessionManagerRawError 声明，改 import 协议包 SessionManagerErrorResult（index.ts:5 已 import 该包，形状知识归单点） | **已实施**（u2=56a8ea995） |
+| ★B3 | session-manager | src/index.ts:157-173（registerSessionTool），description 六处 :182/:191/:200/:209/:218/:227 | description 统一追加「Requires the xyz-agent desktop runtime; standalone pi CLI will time out」（发现 8 最小修复；分组迁移 out-of-scope，登记待办） | **已实施**（u2=56a8ea995） |
 | C1 | 两包 + subagent-core | llm.ts:35-38 注释、path-encoding.ts:33-38 注释、docs/constraints.json + constraints.md | C-ext-21 登记 + 双端互指注释 | **已实施**（three-modes D7；authority 归属其文档） |
 | C2 | rename-session | —（无代码） | D4 裁决记录 | **已关闭**（three-modes 附录 A） |
 | C3 | rename-session | —（无代码） | llm.ts 管线函数/prompt 常量 export 仅测试消费（发现 4）：不执行——包入口只 re-export default，不构成公共 API 面；如需收紧由 code-simplify 批量加 `@internal`，不单包先行 | **已关闭**（three-modes 附录 A） |
@@ -203,11 +205,13 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 | ID | 验证的行为 | 探针 | 状态 | 失败时的降级路径 |
 |---|---|---|---|---|
 | P1 | ~~默认空 ref 与无效 ref 汇合同一 `!model` 守卫~~ **前提已被 three-modes D5 取代**（空 ref 现跟随会话主模型，不走静默跳过路径） | 等价性验证已改道为 three-modes V7（显式无效 ref），其探针 P1/P2 已实测闭环（见其 v3.4 变更历史：u1 实测通过零降级 dcc189dc4） | **已关闭（随 D1 吸收一并了结）** | 不适用 |
-| P2 | M25 删除后 runtime 契约链不回归：marker 路由 → 查表守卫 → handler 编排 → select 回写 | `packages/runtime` 既有 session-manager-e2e-probe.test.ts 全绿 + GUI 实测（§7 V4） | ⛔ 实施期门（D2 待执行） | 失败 → 核对被删行与剩余守卫差异；确认删除误伤则回滚该字段并在此登记「有隐性发送方」，D2 重审 |
+| P2 | M25 删除后 runtime 契约链不回归：marker 路由 → 查表守卫 → handler 编排 → select 回写 | `packages/runtime` 既有 session-manager-e2e-probe.test.ts 全绿 + GUI 实测（§7 V4） | **已通过**（runtime session-manager 测试族 64/64 + 阶段 5 GUI 实测 V4/V5 PASS；降级路径未触发——无隐性发送方） | 失败（历史口径）→ 核对被删行与剩余守卫差异；确认删除误伤则回滚该字段并在此登记「有隐性发送方」，D2 重审 |
 
 ## 7. 验收（真实场景，非单测非 mock）
 
-**本章结论（v2）：待执行范围收敛后，验收面 = D2 + B1-B3 的 2 个真实场景（V4/V5）。rename-session 侧 V1/V2/V3 已被 rename-session-three-modes 取代（V1→其 V1、V2→其 V8、V3→改道其 V7），不再列入本表。**
+**本章结论（v2.2 终态）：验收面 = D2 + B1-B3 的 V4/V5。rename-session 侧 V1/V2/V3 已被 rename-session-three-modes 取代（V1→其 V1、V2→其 V8、V3→改道其 V7）。**
+
+> **验收结论（2026-09-14）：V4/V5 桌面真机全 PASS**——`XYZ_DEV_BACKGROUND=1` dev 实例 + CDP 自动化驱动，含对照 session 构造补强（list 过滤证伪力）与 abort 终态 sidecar 取证；记录见 impl-plan 阶段 5 条目（commit a8c04b28a）。
 
 | # | 场景 | 回溯目标 | 真实流程/数据/路径 | 通过标准 |
 |---|---|---|---|---|
@@ -223,8 +227,8 @@ LLM 调工具（schema 可见面 = 真相面，终态前后一致）
 | 阶段 | 内容 | 交付终态的什么 | 验收挂点 |
 |---|---|---|---|
 | ~~M1 | D1 rename-session env 层删除（A1-A3）~~ | ~~配置 3 源终态~~ | **已由 three-modes 实施（其 u1/u2）** |
-| M2 | D2 双端死面删除（A4-A6，单 commit） | 协议死面清零 | V4/V5 + extensions 三连绿 |
-| M3 | session-manager low 批（B1-B3） | 包内死面清零 + 依赖声明 | extensions 三连绿 + V4 复跑一次 |
+| M2（实施单元 impl-plan u1） | D2 双端死面删除（A4-A6，单 commit） | 协议死面清零 | **已实施 6d73d3399；V4/V5 PASS** |
+| M3（实施单元 impl-plan u2） | session-manager low 批（B1-B3） | 包内死面清零 + 依赖声明 | **已实施 56a8ea995；extensions 三连绿** |
 
 M2 首发（v1 的 M1/M2 并行关系随 M1 吸收而消解）；M3 随 M2 之后。包版本：rename-session 配置面变更的 minor bump **已随 three-modes 实际发布兑现（当前 0.9.0）**；session-manager 无 LLM 可见行为变化 patch bump（description 追加句为提示性文案，不构成行为变更），extension-protocol 随 M2 patch bump（最终按仓库版本策略由实施定）。
 
@@ -233,15 +237,15 @@ M2 首发（v1 的 M1/M2 并行关系随 M1 吸收而消解）；M3 随 M2 之�
 | 单元 | 说明 | justification |
 |---|---|---|
 | ~~u1 = M1~~ | ~~rename-session 单包自包含~~ | **已由 three-modes 实施（其 u1/u2）** |
-| u2 = M2 的 A4-A6 | 双端契约删除 | 契约两端必须同 commit（编译闭包），跨包但单一主题 |
-| u3 = M3 | session-manager low 批（B1-B3） | 同包三个同性质 low 合一 commit，避免碎片提交；与 u2 的验收面（V4/V5）同构，可同窗口推进但独立 commit |
+| u2 = M2 的 A4-A6（已实施 = impl-plan u1） | 双端契约删除 | 契约两端必须同 commit（编译闭包），跨包但单一主题 |
+| u3 = M3（已实施 = impl-plan u2） | session-manager low 批（B1-B3） | 同包三个同性质 low 合一 commit，避免碎片提交；与 u2 的验收面（V4/V5）同构，可同窗口推进但独立 commit |
 
 ### 8.3 待验证检查点
 
 - ~~探针 P1 实测结果（空 ref 等价性）~~ **已关闭**：前提被 three-modes D5 取代，等价性验证改道其 V7 且已实测闭环（见 §6.6）。
-- V4 在 dev 数据目录隔离（`~/.xyz-agent-dev`）下复跑一次，排除 builtin 打包 staging 差异（AGENTS.md「extension 改动优先在本地 pi CLI 实测」的交叉验证；session-manager 的应答方在 runtime，必须 GUI 实测）。
+- ~~V4 在 dev 数据目录隔离（`~/.xyz-agent-dev`）下复跑一次~~ **已执行**（阶段 5：XYZ_DEV_BACKGROUND=1 dev 实例 + CDP 自动化 + 对照 session 构造，见 impl-plan 阶段 5 记录）。
 - ~~usage-page-fixes.impl-plan.md:123 的 V8 程序描述在删除后失效~~ 该文件已整体删除（commit fadd8b8b4，retire 139 pipeline artifacts），历史版本可经 `git show fadd8b8b4^:docs/design/usage-page-fixes.impl-plan.md` 考查；若未来重跑同类验收，按 three-modes V7 程序（显式无效 ref）执行。
-- B3 的 description 追加措辞会进 LLM prompt 面（6 工具各 +1 句），实施时核对总 token 增量可忽略（估 <100 token/会话）。
+- B3 的 description 追加措辞会进 LLM prompt 面（6 工具各 +1 句）：**已核对**——每句 13 词固定文案，增量确定性极小（<100 token/会话），符合本条估计。
 
 ---
 
@@ -256,3 +260,4 @@ M2 首发（v1 的 M1/M2 并行关系随 M1 吸收而消解）；M3 随 M2 之�
 
 - v1（2026-09-11）：初稿。覆盖审计 M20/M25 + 单元 low 发现 2/3/4/6/7/8；4 个决策（D1-D4）+ 执行项总表 + 探针 P1/P2 + 5 验收场景。
 - v2（2026-09-13）：按 over-engineering-audit 审查报告（ext-simplify-15-rename-session-session-manager.review.md）修订——MF1 状态标注：rename-session 侧 D1/D3/D4/C3 已被 rename-session-three-modes 吸收实施/关闭（头部状态框 + §2 目标重排 + §6.5 执行项表状态列 + §7 删 V1-V3 + §8.1 删 M1 + §8.3 死链改 git 历史指针），待执行范围收敛为 D2（A4-A6）+ B1-B3；MF2 空 ref 等价性前提按 three-modes D5 终态改道登记（§4 数据流 + §6.1 + §6.6 P1 关闭）；S1 B1 补 pi AgentToolResult.details 必填实施注记（details: undefined 形态）；S2 版本基准更新（rename-session 0.9.0 / session-manager 0.1.7 / extension-protocol 0.9.0）；S3 待执行项行号刷新（附录 A 第 4 条）。D2 与 B1-B3 的方案本体无变化。
+- v2.2（2026-09-14）：dev-flow 阶段 6 终态回写（design-code-sync 审查 9 must-fix doc_errors + 2 suggestion 全修）——头部结论/状态框/§1/§2/§3.2/§3.3/§4/§5/§6/§6.5/§6.6/§7/§8 全部由「待执行」改「已实施」终态口径（u1=6d73d3399 / u2=56a8ea995）；P2 探针关闭（runtime 64/64 + GUI 实测 PASS）；§7 补验收结论；§8.3 补 token 核对结论。代码侧孤儿 JSDoc（index.ts:57）由 u2 dev 同批删除。设计交付完成。

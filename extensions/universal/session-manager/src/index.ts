@@ -54,8 +54,6 @@ const SELECT_TIMEOUT_MS: Record<SessionManagerAction, number> = {
 	abort: 30_000,
 };
 
-/** runtime handler respond 的错误 JSON 形状（错误闭环：{ error, hint?, sessionId? }），SSOT 在协议包 */
-
 /**
  * 通过 select 通道向 runtime handler 发送 session 管理请求。
  * 返回 handler respond 的 JSON 字符串，用户取消/超时返回 null。
