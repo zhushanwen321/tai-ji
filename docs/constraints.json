@@ -970,7 +970,7 @@
         "packages/core/src/domain/session/panel-view.ts"
       ],
       "authority": [
-        "design/panel-view-derivation-and-flow-lifecycle.md"
+        "../packages/core/src/domain/session/panel-view.ts"
       ],
       "dimensions": [
         "arch-boundary",
@@ -1830,7 +1830,7 @@
         "extensions/**"
       ],
       "authority": [
-        "design/pi-evolution-consistency-and-project-switcher.md#32-方案对比",
+        "architecture/pi-evolution-consistency-and-project-switcher.md#32-方案对比",
         "../scripts/check-pi-sync.mjs"
       ],
       "dimensions": [

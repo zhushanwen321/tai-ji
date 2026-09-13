@@ -1044,7 +1044,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
-# 用户内容出站点守卫（adversarial-review-fixes A2 D-A2-3）
+# 用户内容出站点守卫（A2 D-A2-3；原设计文档 adversarial-review-fixes.md 已删除，原则见 check_prompt_outposts.py 头注释）
 #   packages/runtime/src 有变更时触发：.githooks/check_prompt_outposts.py
 #   扫描 .prompt( / .steer( / .followUp( 三方法全部调用点（任意接收者——防
 #   client 变量名改写逃逸），对照白名单（文件 + 行内子串指纹 + 内容性质 +
