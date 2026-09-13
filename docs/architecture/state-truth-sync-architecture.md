@@ -325,7 +325,7 @@ landing 页 chip 区（`packages/renderer/src/components/new-task/Landing.vue` �
 
 | 单元 | 内容 | justification | 验收 |
 |---|---|---|---|
-| U0 | constraints.json 登记新约束（landing 配置单一解析点 / mutation 回执契约 / 对账三分处置框架）+ render-constraints 重生成 | 项目纪律「先登记再写代码」 | — |
+| U0 | constraints.json 登记新约束（landing 配置单一解析点 / mutation 回执契约 / 对账三分处置框架）+ `node scripts/validate-constraints.mjs` 结构校验（原 render-constraints 重生成指令的脚本已于 2026-09-13 删除，constraints.md 视图不再生成） | 项目纪律「先登记再写代码」 | — |
 | U1 | core：`launch-config.ts` resolveLaunchConfig 纯函数 + D2 优先级 + D4 校验 + provenance 标签 + isFactoryFullPreset（含 P2/P2b/P3/P5 探针实跑，✅ 均已实跑通过——状态见 §3.4） | 单一解析模块是全部消费方的前置 | V1/V2 部分 |
 | U2 | core/renderer 改线三消费方 + 双重 apply 删除 + landing auto 值机制/记录 watch 删除：model-thinking landing 分支（chip 读 resolve；删 follow watch + localAuthored + landing 分支 armed 设立；「生效即记录」watch 及纪元/第三形态守卫删除，记录点收窄为 onThinkingSelect）/ submitFirstMessage（ensureLaunchDataReady await + 透传 resolve 输出）/ PresetSelectChip 回显（废 B6 echo）；删 `createSessionFlow` step 7 applyModel 与壳层 C-W4-3 setThinkingLevel（D5），连带更新 create-session-flow.test.ts、model-thinking.test.ts（跟随 describe 与记录 watch describe 重写）、壳层 composer 测试 | 同源消费即等价；两个 auto 值源并存必发散（auto 误标 explicit 会反转 D2 序），记录 watch 与跟随机制必须与 resolve 改线同批删 | V1/V2/V3/V4/V5/V11 |
 | U3 | runtime：create 契约快照化（D5）+ L2 对账探针 warn 日志 | 与 U2 同批防协议半态 | V7-③ |

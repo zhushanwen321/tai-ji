@@ -330,7 +330,7 @@ xyz-agent = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket R
 
 ### 约束登记（落地时）
 
-按仓库规矩，U1/U2 若确立新架构级约束（「pi 派生锚点必须过 check-pi-sync」「有效模型判定必须走合并视图单点」），先登记 `docs/constraints.json` 再写代码，改后跑 `node scripts/render-constraints.mjs`。登记形态：**新增独立条目**（如 C-build-02「构建期 pi 派生锚点一致性」），不扩展 C-proc-08——后者 scope 已限定为 pi-semantics 语义登记体系，两者是并列守卫非包含关系（见 §2.1 分工声明）。
+按仓库规矩，U1/U2 若确立新架构级约束（「pi 派生锚点必须过 check-pi-sync」「有效模型判定必须走合并视图单点」），先登记 `docs/constraints.json` 再写代码，改后跑 `node scripts/validate-constraints.mjs` 结构校验（原指令 `node scripts/render-constraints.mjs` 已于 2026-09-13 删除，constraints.md 视图不再生成）。登记形态：**新增独立条目**（如 C-build-02「构建期 pi 派生锚点一致性」），不扩展 C-proc-08——后者 scope 已限定为 pi-semantics 语义登记体系，两者是并列守卫非包含关系（见 §2.1 分工声明）。
 
 ### 待验证检查点（设计阶段无法确定，留给实施期）
 

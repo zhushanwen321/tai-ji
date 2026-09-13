@@ -151,10 +151,14 @@ describe("sweepExpiredZcodeSessions（判龄三要素 + 级联删除）", () => 
     const now = 3_000_000_000_000;
     const expiredAt = now - ZCODE_SESSION_TTL_MS - 1;
     const total = 1200;
+    // 4800 条 INSERT 包进单事务：逐条 autocommit 每条一次 fsync，实测 1.1s-5.6s 波动
+    // 贴 vitest 5s 默认超时线（flaky）；事务化后一次性落盘，与被测 sweep 行为无关。
+    db.exec("BEGIN");
     for (let i = 0; i < total; i++) {
       insertSession(db, `sess_${i}`, expiredAt);
       insertChildRows(db, `sess_${i}`);
     }
+    db.exec("COMMIT");
     db.close();
 
     const result = sweepExpiredZcodeSessions(dbPath, { nowMs: now });

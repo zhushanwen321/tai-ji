@@ -242,8 +242,10 @@ jobs:
       # migrate-pi-layout-v2（守卫正则/白名单回归 + 布局迁移语义，同上 fixture 惯例不依赖 staged 产物）。
       # 逐文件列举刻意维持（禁改目录级 vitest run scripts/__tests__/——builtin-ext-bundle.test.mjs
       # 依赖上方 prepare 步骤的 staged 产物，目录级会把所有未登记测试一并拉进本 step）。
+      # constraints-registry 复审同批追加 validate-constraints（约束登记校验函数本体单测，
+      # 只读仓库既有文件不依赖 staged 产物，同上 fixture 惯例）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/migrate-pi-layout-v2.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/migrate-pi-layout-v2.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
