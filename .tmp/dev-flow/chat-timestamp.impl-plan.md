@@ -68,6 +68,7 @@ graph LR
 - 风险 R2：text/thinking 多块共享同一 message 时刻（近似语义）——已在 demo 与设计 §2.4 声明，用户接受。
 - 风险 R3（存量，非本流水线引入，基线 b3a179a7c 逐一对照一致）：① pi-subagent-cli 10 败（bin 真机 NDJSON 集成用例）；② subagent-core 6 败（机器装有 zcode 引擎致 discovery 扫描多包 + inflight-wiring emitLifecycle 测试实现漂移）；③ runtime subagent-extractor-engine zcode 白名单 + d8-compat×3。合计 20 个，交付时呈报用户签认转残留。
 - 风险 R4（flaky，孤立跑全绿）：runtime system-prompt-extension / logger-tee-rotation、ext subagent-workflow crash-recovery / inflight-wiring——全量并行负载下偶发，不阻塞。
+- 后续迭代候选（用户 2026-09-13 提出，非本流水线范围）：TurnProgressBar 观测条与 TurnMeta「思考中」行信息重叠，拟合并为 TurnMeta 行右侧流式期字段（已生成字符数 / 当前工具耗时），10min 警示降级为行内变警示色 + 中止动作收编溢出菜单，删除独立观测条；另其报告的「经常假卡死」归因 = ①观测条 10min 固定阈值长 turn 必触发 ②工具执行/思考静默期无帧变化的感知 ③历史 10min 固定墙钟误判已重设计为 idle 1800s + 自愈（timeout-streaming-ui-idle.md），若仍见误判 error 气泡需上报复现帧型。
 - 变更历史：
   - 2026-09-13 计划建立。设计审查豁免记录见设计文档头部（用户明示「不需要复杂设计」，以 demo 迭代 + 用户拍板替代三审）。
   - 2026-09-13 U3 修复由主 agent 亲自执行（连续 3 次派发被基础设施杀死 143/128 零产出，触发升级阈值；fix = endTime last-wins + 非对称时钟测试 + relay fixture 补全生产双发形态）。Gate A 终局：core/ui/renderer 全绿，剩余 3 败包 = R3 存量集（与基线一致），endTime 回归 4 个全消。
