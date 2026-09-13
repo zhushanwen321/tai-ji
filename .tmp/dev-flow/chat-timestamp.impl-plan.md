@@ -1,5 +1,5 @@
 # chat-flow-timestamp 实施计划
-基线: <待填> | 来源设计: .tmp/dev-flow/chat-timestamp.design.md | 日期: 2026-09-13
+基线: b3a179a7c | 来源设计: .tmp/dev-flow/chat-timestamp.design.md | 日期: 2026-09-13
 
 ## 0 章节映射
 | 内容 | 设计文档实际位置 |
