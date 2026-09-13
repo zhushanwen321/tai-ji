@@ -30,14 +30,6 @@ vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
 }));
 
-// Mock node:fs — ESM namespace isn't configurable, so we use vi.mock
-vi.mock("node:fs", async () => {
-  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-  return { ...actual, mkdirSync: vi.fn(), writeFileSync: vi.fn() };
-});
-
-import * as fs from "node:fs";
-
 import { detectGoalCapability, handlePlanComplete } from "../compact.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
@@ -83,6 +75,19 @@ describe("registerPlanTool", () => {
       expect(res.details.action).toBe("list-template");
       expect(Array.isArray(res.details.templates)).toBe(true);
     });
+
+    it("returns exactly the 5 builtin templates with no source field (D3 / V4)", async () => {
+      const { exec } = setup();
+      const res = await exec({ action: "list-template" });
+      const templates = res.details.templates as Array<{ name: string; source?: string; path: string }>;
+      expect(templates.map((t) => t.name).sort()).toEqual(
+        ["feature-plan", "bugfix-plan", "refactor-plan", "research-plan", "implementation-plan"].sort(),
+      );
+      for (const t of templates) {
+        expect(t.source).toBeUndefined();
+        expect(t).toEqual({ name: t.name, path: t.path });
+      }
+    });
   });
 
   // --- select-template ---
@@ -115,27 +120,15 @@ describe("registerPlanTool", () => {
     });
   });
 
-  // --- create-template ---
-  describe("create-template", () => {
-    beforeEach(() => { (fs.mkdirSync as ReturnType<typeof vi.fn>).mockClear(); (fs.writeFileSync as ReturnType<typeof vi.fn>).mockClear(); });
-
-    it("throws when parameters are missing", async () => {
+  // --- removed action (D3) ---
+  describe("create-template removal", () => {
+    it("rejects plan(action='create-template') as an unknown action (D3 / V4)", async () => {
       const { exec } = setup();
-      await expect(exec({ action: "create-template" })).rejects.toThrow("templateName and templateContent are required");
-    });
-
-    it("throws when name sanitizes to empty", async () => {
-      const { exec } = setup();
-      await expect(exec({ action: "create-template", templateName: "!!!", templateContent: "x" }))
-        .rejects.toThrow("Invalid template name");
-    });
-
-    it("writes file with sanitized name", async () => {
-      const { exec } = setup();
-      const res = await exec({ action: "create-template", templateName: "My Plan v2!", templateContent: "# hello" });
-      expect(res.details.templateName).toBe("MyPlanv2");
-      expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.pi/plan-templates", { recursive: true });
-      expect(fs.writeFileSync).toHaveBeenCalledWith("/tmp/test-project/.pi/plan-templates/MyPlanv2.md", "# hello");
+      await expect(
+        exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
+      ).rejects.toThrow(
+        "Unknown plan action: create-template. Valid actions: list-template, select-template, complete, abort",
+      );
     });
   });
 
@@ -270,5 +263,8 @@ describe("validateAction", () => {
   });
   it("rejects invalid", () => {
     expect(validateAction("bogus")).toBe(false);
+  });
+  it("action list no longer contains create-template (D3)", () => {
+    expect(PLAN_ACTIONS).not.toContain("create-template");
   });
 });

@@ -151,6 +151,9 @@ graph LR
 | 06-u2 | handlePlanComplete 返回 GoalBridgeOutcome \| undefined + 两处 JSDoc | 设计未明示签名；undefined = 非 goal 档或 compact 档延迟执行 | 接受（通道差异已登记） |
 | 06-u2 | compact-criteria-array.test.ts 同批 5 处调用补参 | 经 handlePlanComplete 直接消费新签名，缺参则 goalInit 恒不执行 4 用例红 | 接受（同一触发链机械联动） |
 | 06-u2 | switch default 未知 isolation 直投（非静默丢弃）+ 钉死用例 | 设计只写删 case tree，防御形态为新形态且比 C8a 现状严格 | 接受（防复现） |
+| 06-u3 | promptSnippet 22→14 行（删 create-template 行 + Common mistakes 精简 + workflow 6 并 5） | 设计 D3 只说「压缩」未给终态文案 | 接受（裁量在授权范围内，教学核心保留） |
+| 06-u3 | TC8 用例删除（global 模板扫描隔离测试） | 其测试对象（global 源扫描）属 D3 删除面本身 | 接受（随删除面消亡） |
+| 06-u3 | fallback 探针用包内临时 vitest 文件（跑完即删）替代 /tmp node 直调 | tsx 直调被 pi 包 exports 解析挡住；vitest 同解析链效力不变 | 接受（方法学等价） |
 
 ## 6 状态表
 
@@ -159,7 +162,7 @@ graph LR
 | 06-u0 | committed | 1 | P1 PASS（isActive=false/phase=idle，D6 门开）；P2 steer 时序 PASS + goal 桥断裂新发现（probe-06.md）；plan 包工作区已还原 |
 | 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位；commit 513deb653 |
 | 06-u2 | committed | 1 | 78/78（+14）；tree schema 拒绝 + 五值出口用例齐；typecheck/lint 过 |
-| 06-u3 | pending | 0 | - |
+| 06-u3 | committed | 1 | 82/82；5 builtin + 未知 action + D4 对齐守卫齐；fallback 探针 4/4 |
 | 06-u4 | pending | 0 | - |
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
