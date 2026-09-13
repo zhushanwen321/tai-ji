@@ -4,16 +4,11 @@
 >
 > **回归排序按功能分级**：P0 每版全量、P1 每版核心用例、P2 抽样/变更触发、P3 变更触发——分级表见 [docs/feature-priorities.md](docs/feature-priorities.md)（P0-P3 SSOT）。
 >
-> **各功能具体测试步骤**（MOCK/非MOCK/Playwright 调用链 + 每步期望输入输出）见 [docs/testing/](docs/testing/) 测试手册：
-> - [00-test-strategy-overview.md](docs/testing/00-test-strategy-overview.md) — 双轨制 + Playwright harness + 公共前置（入口篇，必读）
-> - [01-new-task.md](docs/testing/01-new-task.md) — 新建任务（Landing + 选目录 + 首发提交）
-> - [02-composer.md](docs/testing/02-composer.md) — Composer（输入框 + slash 命令浮层 + 三态）
-> - [03-chat-flow.md](docs/testing/03-chat-flow.md) — 对话流（流式消息 + 工具调用 + 变更集）
-> - [04-file-tree.md](docs/testing/04-file-tree.md) — 文件树（懒加载 + 过滤 + git 角标，11 E2E 用例已落地）
-> - [05-side-drawer.md](docs/testing/05-side-drawer.md) — SideDrawer（文件预览 / diff / git tab）
-> - [06-search-modal.md](docs/testing/06-search-modal.md) — 搜索浮层（⌘K 四类搜索 + recents + 跳转，7 E2E 用例已落地）
-> - [11-real-e2e-specs.md](docs/testing/11-real-e2e-specs.md) — real 轨 E2E 自动化 spec（真 Electron + runtime + pi + LLM，零 mock）
-> - [12-extension-runtime-testing.md](docs/testing/12-extension-runtime-testing.md) — extension 层运行时测试体系（worker harness L1 → real LLM L3，价值层级 + 决策树）
+> **各功能具体测试步骤**（MOCK/非MOCK/Playwright 调用链 + 每步期望输入输出）见 [docs/testing/](docs/testing/) 测试手册（2026-09 并册为 4 册）：
+> - [00-overview.md](docs/testing/00-overview.md) — 总览（双轨制 + Playwright harness + 公共前置 + E2E 常见坑，入口篇必读）+ 手册索引 + real 轨手工手册（RT-01~08）+ real 轨自动化 spec（真 Electron + runtime + pi + LLM，零 mock）
+> - [01-chat-panel-composer.md](docs/testing/01-chat-panel-composer.md) — 对话主链：新建任务（Landing + 选目录 + 首发提交）/ Composer（输入框 + slash 命令浮层 + 三态）/ 对话流（流式消息 + 工具调用 + 变更集）
+> - [02-panels-sidebar.md](docs/testing/02-panels-sidebar.md) — 面板与侧栏：文件树（懒加载 + 过滤 + git 角标，11 E2E 用例已落地）/ SideDrawer（文件预览 / diff / git tab）/ 搜索浮层（⌘K 四类搜索 + recents + 跳转，7 E2E 用例已落地）/ GUI 组件渲染 / Subagent-Workflow 面板 / 后台命令侧边栏
+> - [03-runtime-extensions.md](docs/testing/03-runtime-extensions.md) — runtime 服务与 extension：系统提示词配置 / extension 层运行时测试体系（worker harness L1 → real LLM L3，价值层级 + 决策树）/ 插件系统非 mock E2E / 自动升级验证
 
 ## 1. 测试框架 [HISTORICAL]
 
@@ -153,7 +148,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | **v6 token 落地断言（A 层）** | design-tokens 原子值在组件层正确消费（class→`var()`），双轨验证：vitest 契约（注入等价 CSS 断言消费）+ chromium 真实（加载 JIT CSS 验 computed style）。破坏=token 未落地致颜色/间距/圆角错乱 | `v6-ui-refactor-test-infra S2-W1`（happy-dom `var()` 能力探测推翻预设）`[from: S2-W1]` | `packages/renderer/src/__tests__/v6-visual/tokens.test.ts` + `scripts/token-consume-check.mjs` |
 | **v6 像素 diff baseline（C 层）** | `e2e/visual-baselines/` baseline 快照对照（**git tracked**），visual-chromium project + `maxDiffPixelRatio:0.01` + `caret:'hide'`。破坏=可见像素级回归（布局错位/元素消失） | `v6-ui-refactor-test-infra S2-W3`（snapshotDir 是 project 直接属性非 use）`[from: S2-W3]` | `e2e/visual/*.spec.ts` + `e2e/visual-baselines/` |
 | **v6 选中态二分 D8（B 层 VLM）** | sidebar 选中项 bg-surface + 蓝字（D8 二分规则：列表项型），minimax-m3 VLM 对照 v6-master-spec 语义验证。破坏=选中态视觉不符 spec（选中项无背景/颜色错） | `v6-ui-refactor-test-infra S2-W2`（VLM 三段式 task 派发+schema 内嵌）`[from: S2-W2]` | `docs/testing/visual/vlm-prompt-template.md` + `.xyz-harness/visual/` |
-| **插件系统非 mock 端到端** | 隔离 runtime（tsx 源码形态）+ 真实插件文件 + 真实 WS：sandbox 激活 / toggle 往返 / built-in statusline 发现 / onBeforeSendMessage hook 真实执行。破坏=插件真实加载路径回归（mock 层不可见的 F1-F4 类 bug） | `2026-08 插件系统 F1-F4`（测试金字塔底部全 mock、真实加载路径零覆盖） | `scripts/verify-plugin-e2e.sh`（挂 `validate-runtime-bundle.sh` 第 7 步，pre-commit 于 runtime src 变更触发）+ `packages/runtime/test/plugin-registry.test.ts` TC-1-09/10/11（built-in 扫描两形态）；手册 [docs/testing/13-plugin-e2e.md](docs/testing/13-plugin-e2e.md) |
+| **插件系统非 mock 端到端** | 隔离 runtime（tsx 源码形态）+ 真实插件文件 + 真实 WS：sandbox 激活 / toggle 往返 / built-in statusline 发现 / onBeforeSendMessage hook 真实执行。破坏=插件真实加载路径回归（mock 层不可见的 F1-F4 类 bug） | `2026-08 插件系统 F1-F4`（测试金字塔底部全 mock、真实加载路径零覆盖） | `scripts/verify-plugin-e2e.sh`（挂 `validate-runtime-bundle.sh` 第 7 步，pre-commit 于 runtime src 变更触发）+ `packages/runtime/test/plugin-registry.test.ts` TC-1-09/10/11（built-in 扫描两形态）；手册 [docs/testing/03-runtime-extensions.md](docs/testing/03-runtime-extensions.md) §3（插件系统非 mock E2E） |
 | **流式 block 双轴尾部追踪 + 折叠头截短** | thinking 折叠预览/tool 折叠头在 streaming/running 中渲染尾部行窗口且 scrollLeft 钉右（`scrollLeft >= scrollWidth - clientWidth - 1`）、完成态回落静态摘要；折叠头路径 `…/末两段` 截短但展开态/copy 全量；preview 行高恒定（virtua 高度断言依赖）。破坏=流式预览死在开头/折叠头丢命令可见性/虚拟列表行高抖动 | `cw-2026-08-25-chat-visual-font-optimize`（实测发现：pi bash 部分输出无流式增量广播，tool 接入点按预案降级静态 argPath，thinking 链路钉尾 3/3）`[from: chat-visual-font-optimize (cw-2026-08-25) §D4]` | `packages/ui/src/features/chat/composables/__tests__/useTailScroll.test.ts`（9 用例：钉右/translateY/降级/未挂载）+ `packages/ui/src/features/chat/__tests__/Block.test.ts`（双态 DOM 断言）+ `format-utils.test.ts`（shortenForHeader/tailLines 规则） |
 | **等价性测试双轨** | live ≡ reload / broadcast ≡ get_state / 混沌注入收敛等不变量断言。CI 只跑凭证无关子集（mock RPC / fixture 重放），真实 LLM turn 用例由凭证探测 skip；完整基线跑在开发机（详见下方「等价性测试双轨」小节） | `2026-08-19 data-source-governance P1-P4` goal-audit 问题 1（CI 无 pi 凭证，push 后 test-runtime 预期红） | `packages/runtime/src/__tests__/equivalence/` 13 文件（skip 机制 SSOT = `pi-fixture.ts` `REAL_PI_READY`） |
 | **pi 语义守卫探针族** | 静态直读 pi dist 断言私有语义契约（pattern 引擎匹配规则 / reasoning 两级门控 / RPC 响应面 / steer drain 窗 / settled 复位序 / entry→context 映射），pi 升级语义漂移即红；配套 `check-pi-semantics.mjs` 版本门禁（四包一致 + verifiedWith 比对）与 `diff-probe-thinking.mjs` 档位对账。破坏=pi bump 后语义假设批量过期无人知（登记≠防御：8-20 登记观察项 8-27 照样出事的实证） | `2026-08-27 事故对`（subagent 派发 429/gc + 思考等级自动变关）`[from: pi-boundary-reliability U7]` | `packages/runtime/src/infra/pi/__tests__/pi-semantics-*.test.ts`（6 文件，凭证无关 CI 可跑）+ `scripts/check-pi-semantics.mjs`（pre-commit + CI）+ `scripts/diff-probe-thinking.mjs` |
@@ -294,7 +289,7 @@ pi 边界可靠性设计的测试面落地（2026-08-27 事故对 → 四支柱�
 **规范 1（F2 观察者效应）：等待机制禁止触碰被等待方的共享资源**。测试/代码中等待另一个进程或异步操作就绪时，等待机制自身不得获取/写入被等待方持有的共享资源（锁、文件等）。典型反例：用「试探性获取同一把锁」去等子进程持锁——探测本身制造竞争，满载下持锁窗口被 CPU 抢占拉长 20-250 倍，等待目标反而被探测拖死。就绪信号必须走只读/独立通道：stdout 行握手、进程内事件、挂牌文件（只读自己创建的文件）、消息式 RPC。
 `[HISTORICAL]` 案例锚：D1a 跨进程锁观察者效应（`packages/runtime/test/pi-settings-store.test.ts` 探测自制造竞争）→ commit `44464689a` 改 stdout 握手 + pi-faithful 重试。
 
-**规范 2（F4 固定 sleep 硬等）：等待真实外部事件必须轮询 + deadline**。等待真实外部事件（子进程退出/reap、文件落盘、WS 消息、watcher 建立基线）禁止「固定 sleep N 后单次断言」——必须轮询 + deadline（25-50ms 间隔，deadline 按最慢合理路径给足 5-10s），达到期望状态即通过。负向断言（断言某事不发生）放在对应正向条件确认之后再断言。**与 §1「timer 测试用 fake timers、禁止真实等待」的分界**：纯内存 mock 的微任务排空走 fake timers，不受本规范约束；本规范只管真实外部事件（fake 不了，只能轮询等）。E2E mock 轨同族规则（禁 `page.waitForTimeout` 固定值）见 [docs/testing/00-test-strategy-overview.md §6.1](docs/testing/00-test-strategy-overview.md)。
+**规范 2（F4 固定 sleep 硬等）：等待真实外部事件必须轮询 + deadline**。等待真实外部事件（子进程退出/reap、文件落盘、WS 消息、watcher 建立基线）禁止「固定 sleep N 后单次断言」——必须轮询 + deadline（25-50ms 间隔，deadline 按最慢合理路径给足 5-10s），达到期望状态即通过。负向断言（断言某事不发生）放在对应正向条件确认之后再断言。**与 §1「timer 测试用 fake timers、禁止真实等待」的分界**：纯内存 mock 的微任务排空走 fake timers，不受本规范约束；本规范只管真实外部事件（fake 不了，只能轮询等）。E2E mock 轨同族规则（禁 `page.waitForTimeout` 固定值）见 [docs/testing/00-overview.md §6.1](docs/testing/00-overview.md)。
 `[HISTORICAL]` 生产侧同族案例：manifest fire-and-forget 写盘时序屏障 → commit `6dc9d20e9`（写盘完成设为 pre-ledger barrier，时序依赖显式化）。
 
 **规范 3：teardown 删除 recursive 目录必须带 maxRetries**。`rmSync(dir, { recursive: true })` 与在途异步写竞争 → 间歇 ENOTEMPTY；删除必须带 `maxRetries`（如 `maxRetries: 5, retryDelay: 20`），等待机制与探测一并只读化（规范 1）。pre-commit 护栏 `check_test_flake_hygiene.py` 落地中。

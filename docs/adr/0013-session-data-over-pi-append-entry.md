@@ -1,6 +1,6 @@
 # ADR 0013: sessionData API over pi.appendEntry
 
-- 状态：Accepted（底层持久化实现后被 ADR-0014 演进为本地文件，sessionData API 决策本体仍有效）
+- 状态：Accepted（底层持久化实现后被 [ADR-0014](archive-digest.md#adr-0014) 演进为本地文件，sessionData API 决策本体仍有效）
 
 ## Context
 

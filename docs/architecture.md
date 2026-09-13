@@ -55,7 +55,7 @@ Electron 主进程，Node 环境。负责原生生命周期与跨进程编排。
 
 | 模块 | 位置 | 职责 |
 |------|------|------|
-| 窗口管理 | `window/window-manager.ts` + `window-factory.ts` | 多 panel 窗口树、traffic light 安全区（[ADR-0017](adr/0017-macos-traffic-light-safe-zone.md)） |
+| 窗口管理 | `window/window-manager.ts` + `window-factory.ts` | 多 panel 窗口树、traffic light 安全区（[ADR-0017](adr/archive-digest.md#adr-0017)，已 Superseded，现行 SSOT 见 page-design/traffic-light-layout.md） |
 | Runtime 监管 | `supervisor/runtime-supervisor.ts` | spawn/重启 Runtime 子进程、健康检查、端口发现 |
 | 安全环境 | `supervisor/safe-env.ts` | 环境变量白名单过滤（[shared/constants.ts](../packages/shared/src/constants.ts) SSOT） |
 | 快捷键 | `shortcuts/shortcut-registry.ts` | 全局/窗口快捷键 |

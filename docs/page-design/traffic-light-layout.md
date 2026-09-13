@@ -18,4 +18,4 @@ v3 重建采用 zcode-demo 拓扑：base 平铺全屏 → sidebar 透明融合 �
 ## 相关
 
 - 读 [v6 shell spec](v6-spec-shell.html) 了解设计稿差异（v6 demo/spec 的 38px/16,26/52px 拓扑不适用本实现，属刻意偏离）
-- 设计决策记录：[ADR 0017](../adr/0017-macos-traffic-light-safe-zone.md)（旧版 padding-left 方案，**已 Superseded**）；8c62f64bc/0251b6d40/860ee6007（刻意调整序列，现版形态来源）
+- 设计决策记录：[ADR 0017（档案摘要）](../adr/archive-digest.md#adr-0017)（旧版 padding-left 方案，**已 Superseded**，原文 git 可追溯）；8c62f64bc/0251b6d40/860ee6007（刻意调整序列，现版形态来源）

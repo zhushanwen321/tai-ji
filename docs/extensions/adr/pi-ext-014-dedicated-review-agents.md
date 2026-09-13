@@ -1,8 +1,10 @@
 # 专用 Review Agent 模式：多维代码审查场景使用独立 agent
 
+> **⚠️ SUPERSEDED（事实层面）**：本 ADR 的专用 review agents 已被 [pi-ext-011](pi-ext-011-single-skill-source-no-dedicated-agents.md) 的单一 skill source 模式取代——pr-cr-fix 已将 review agents 内化为 skill 自带 agents（`.agents/skills/pr-cr-fix/agents/`），不再依赖独立 agent 定义文件。本文件保留作决策追溯。
+
 ## 状态
 
-已接受
+已接受（事实层面 superseded，见上方标注）
 
 ## 上下文
 

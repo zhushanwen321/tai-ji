@@ -2,8 +2,8 @@
 
 - 状态：Accepted
 
-> **性质**：契约/设计先行，本文档不含代码实现。为 flow-2（代码变更审查，[ADR-0020](0020-core-user-flows.md)）启动铺数据地基。
-> **关联**：[ADR-0020 核心用户流](0020-core-user-flows.md)、`docs/page-design/archive/v3/flow-2-code-review/spec.md`（flow-2 SSOT）、（v3 重建审计档案 wave-W11/W14 已随 `.v3-audit/` 清理，需求追溯见 git 历史）。
+> **性质**：契约/设计先行，本文档不含代码实现。为 flow-2（代码变更审查，[ADR-0020](archive-digest.md#adr-0020)）启动铺数据地基。
+> **关联**：[ADR-0020 核心用户流](archive-digest.md#adr-0020)（archive-digest）、`docs/page-design/archive/v3/flow-2-code-review/spec.md`（flow-2 SSOT）、（v3 重建审计档案 wave-W11/W14 已随 `.v3-audit/` 清理，需求追溯见 git 历史）。
 > **类型契约**：见 `src-electron/shared/src/message.ts` 的 `FileChange` / `ChangeSetStatus` / `ReviewDecision`（F2-1 已落地）。
 
 ## 上下文

@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 
-> **编号说明**：原误用 0014 编号，与 [ADR-0014 SessionData 本地文件持久化](0014-session-data-local-file-persistence.md) 碰撞。2026-06-20 顺移至 0023（与 0013 SessionData over pi appendEntry 主题不同的独立决策，session-data 系列保留 0013/0014 连续编号）。
+> **编号说明**：原误用 0014 编号，与 [ADR-0014 SessionData 本地文件持久化](archive-digest.md#adr-0014)（archive-digest）碰撞。2026-06-20 顺移至 0023（与 0013 SessionData over pi appendEntry 主题不同的独立决策，session-data 系列保留 0013/0014 连续编号）。
 
 ## 上下文
 
