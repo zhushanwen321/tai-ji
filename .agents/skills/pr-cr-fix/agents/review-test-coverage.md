@@ -52,7 +52,7 @@ task prompt 中必须包含：
 7. **xyz-agent 领域特定测试点**：
    - **TaskNode / TaskTree**：树形引擎的节点状态转换（running/completed/pending/error/aborted）、嵌套（max_depth=20）、fork/clone/navigate
    - **Extension vs Plugin**：两者是独立概念——pi Extension（子进程内，ExtensionAPI）和 Plugin（Worker Thread，agentAPI）的测试不应混淆；Pi Bridge 的转发逻辑需独立测试
-   - **ports 接口**（runtime-three-layer-design）：services 定义、infra 实现的 ports 接口（IPiEngine/IConfigStore/IModelSource 等）应有 mock 实现的 vitest（验证 service 行为不依赖 infra）
+   - **ports 接口**（runtime-layering）：services 定义、infra 实现的 ports 接口（IPiEngine/IConfigStore/IModelSource 等）应有 mock 实现的 vitest（验证 service 行为不依赖 infra）
    - **session 双状态**：活跃（pi 进程实时）vs 非活跃（JSONL 文件解析）路径都要覆盖
    - **PiXxx 类型翻译**：infra 层的 pi 事件→内部事件翻译（PiTranslatedEvent）、pi 历史→Message[] 翻译需独立测试
 8. **输出审查报告**到 `output` 路径。

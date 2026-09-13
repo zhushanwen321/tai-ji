@@ -45,7 +45,7 @@ task prompt 中必须包含：
    - 错误路径是否重置 `isGenerating` + `streamingMessage`（否则 UI 卡在「思考中」）
    - emit 是否只传单个 payload 对象（禁止 `emit('event', a, b)`）
    - 独立数据源是否用 `Promise.allSettled`（禁止 `Promise.all`）
-   - **分级匹配的错误处理策略**（契约见 [docs/feature-priorities.md](../../../docs/feature-priorities.md) §1「分级与错误处理契约」）：先按 diff 触及的模块查功能分级，再逐接入点核对——
+   - **分级匹配的错误处理策略**（契约见 [docs/feature-priorities.md](../../../../docs/feature-priorities.md) §1「分级与错误处理契约」）：先按 diff 触及的模块查功能分级，再逐接入点核对——
      - P0/P1 功能的改动：故障是否响亮（fail-fast + 结构化日志 + 可定位恢复动作）？静默吞错 / 启发式兜底掩盖 = MUST_FIX（类别 `grading-error-policy`）
      - 主流程衔接 P2/P3 功能的接入点：是否有降级边界（catch + 日志 + 关闭/占位兜底）？P2/P3 异常向上传播可打断 P0/P1 主流程 = MUST_FIX（同类别）
      - 跨级调用点按被调功能契约判：调用方不因辅助功能故障而崩，但降级路径必须有日志（无日志的静默降级 = 吞错，同级别 MUST_FIX）

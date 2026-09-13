@@ -1020,7 +1020,7 @@ test.describe('对话流 E2E', () => {
 
 ## 13. 滚动跟随链路教训（chat-pin-bottom-fix 登记，2026-09）
 
-> 来源：原设计文档 chat-pin-bottom-fix（R1-R5 根因 + 三层护栏，约束 C-state-11；已删除，git 可追溯，INVAR 权威定义见 docs/architecture/conversation-stream-block-rendering.md §7.3.1）。后续为消息流滚动 / 虚拟列表设计测试时先读本节——这些机制断言不成立时，用例会以「绿但测错了东西」的方式骗人。
+> 来源：原设计文档 chat-pin-bottom-fix（R1-R5 根因 + 三层护栏，约束 C-state-11；已删除，git 可追溯，INVAR 权威定义 = `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 文件头注释 INVAR-M4-2′）。后续为消息流滚动 / 虚拟列表设计测试时先读本节——这些机制断言不成立时，用例会以「绿但测错了东西」的方式骗人。
 
 | 教训 | 机制（实测自 virtua 0.50.0 实装） | 测试设计启示 |
 |------|------|------|

@@ -1053,7 +1053,7 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 
 > 覆盖：plugin 区「后台命令」L2 视图（BackgroundTaskListView：三桶筛选 + 两行式 item + 行内两段式终止）与 drawer bashTask tab（BackgroundTaskDetailPanel：元信息 / 输出跟随 / 终止）。
 >
-> 设计：[background-task-sidebar-view.md](../design/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10）。先读 [00 总览](00-overview.md)。
+> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10）。先读 [00 总览](00-overview.md)。
 
 ## §1 功能概述
 
@@ -1118,7 +1118,7 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 
 ## §4 相关文档
 
-- 设计文档：[background-task-sidebar-view.md](../design/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7）
+- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7）
 - SideDrawer 宿主：[02-panels-sidebar.md](02-panels-sidebar.md)（bashTask tab 为第 8 tab）
 - 侧栏面板范式：[02-panels-sidebar.md](02-panels-sidebar.md)（Agents tab 同构先例）
 - 组件测试：`packages/renderer/src/__tests__/components/background-task-list-view.test.ts`（12 用例）/ `background-task-detail-panel.test.ts`（13 用例）

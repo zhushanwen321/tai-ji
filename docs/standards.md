@@ -92,7 +92,7 @@ function onError(sessionId: string, errorText: string) {
 
 ### 3.2 自动滚动
 
-对话流渲染载体是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（权威定义见 docs/architecture/conversation-stream-block-rendering.md §7.3.1）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**；非对话流的自写滚动列表才用「数据变化后 `scrollTop = scrollHeight`」的常规范式。
+对话流渲染载体是 virtua `Virtualizer` 虚拟滚动：**单一 scrollTop owner**——滚动测量/窗口化/视口锚定补偿全交 virtua，跟随态由 stickToBottom 脱离信号集 + 收敛抑制窗管理（权威定义 INVAR-M4-2′ = `packages/renderer/src/composables/panel/useVirtuaFollow.ts` 文件头注释）。**直接操作 `el.scrollTop` 会破坏 virtua 所有权，禁止**；非对话流的自写滚动列表才用「数据变化后 `scrollTop = scrollHeight`」的常规范式。
 
 ### 3.3 Streaming message 生命周期
 

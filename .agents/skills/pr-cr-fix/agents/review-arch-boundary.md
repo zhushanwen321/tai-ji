@@ -8,7 +8,7 @@ name: review-arch-boundary
 审查 `git diff main...HEAD` 中变更对 xyz-agent 分层架构边界的影响。架构分两部分：
 
 - **Electron 侧**：main / preload / renderer / shared 四层
-- **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-three-layer-design.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
+- **runtime（Agent Runtime）内部**：自 2026-06 重构为 **transport / services / infra** 三层（端口-适配器架构，旧 `adapters/` 已合并入 `infra/`；设计源 `docs/architecture/runtime-layering.md`）。依赖方向：`transport → services ← infra`（services 定义 ports 接口，infra 实现，无环）。
 
 术语以 `docs/architecture/context.md` 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。边界违规是 bug 高发区（参考 AGENTS.md「关键规则」「架构约定」）。
 
@@ -27,7 +27,7 @@ task prompt 中必须包含：
    - renderer 进程是否直接使用 `ipcRenderer`（必须经 preload 的 `electronAPI`）
    - main 进程是否混入业务逻辑（应只管窗口/runtime 进程生命周期；M2 Window Manager = `window/window-manager.ts`，M3 Process Supervisor = `supervisor/runtime-supervisor.ts` Facade + port-discoverer/health-checker/process-control/port-file/safe-env 子模块）
    - shared/src 类型是否被某一端私自重定义（应为前后端唯一类型源，协议源 `shared/src/protocol.ts`）
-3. **runtime 三层边界（runtime-three-layer-design.md）**：
+3. **runtime 三层边界（runtime-layering.md）**：
    - **transport/**：纯路由（server.ts + router.ts + handlers/），不碰 node: 内置、不做业务决策
    - **services/**：业务编排，**禁止 import infra**、**禁止出现 `Pi*` 类型**（应经 ports 接口访问外部能力）
    - **infra/**：pi 适配（连接 + 翻译合并），**`Pi*` 类型仅在此层内部可见**，不知道 WS 协议和 session 业务语义

@@ -77,11 +77,11 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 ## 子文档导航
 
 - [`docs/architecture.md`](docs/architecture.md) — 系统架构总览入口（进程拓扑图/数据流/核心约束实质说明）
-- [`docs/architecture/runtime-three-layer-design.md`](docs/architecture/runtime-three-layer-design.md) — Runtime 三层重构（取代旧四层）
-- [`docs/architecture/runtime-module-map.md`](docs/architecture/runtime-module-map.md) — Runtime 模块清单 + ports 接口
+- [`docs/architecture/runtime-layering.md`](docs/architecture/runtime-layering.md) — Runtime 三层重构（取代旧四层）
+- Runtime 模块清单（runtime-module-map.md，已删除，git 可追溯；现行结构见 runtime-layering.md §1 与 context.md「Agent Runtime」）
 - [`docs/architecture/context.md`](docs/architecture/context.md) — 领域术语表完整版
-- [`docs/architecture/design.md`](docs/architecture/design.md) — ⚠️ 旧四层设计，部分已 superseded
+- [`docs/architecture/design.md`](docs/architecture/design.md) — 跨进程架构决策记录 D1–D9（D4 四层已被 runtime-layering 取代；迁移路线已删，git 可追溯）
 - **文件树子系统架构决策**：[ADR-0025](docs/adr/0025-file-view-full-project-tree.md)（File View 全项目树语义）/ [ADR-0026](docs/adr/0026-file-tree-lazy-loading.md)（懒加载）/ [ADR-0027](docs/adr/0027-fileservice-three-layer.md)（FileService 三层）。`[from: 2026-06-28-sidebar-project-file-tree §子系统]`
-- **搜索子系统架构决策**：[ADR-0028](docs/adr/0028-search-orchestration-in-composable.md)（编排归 composable）/ [ADR-0029](docs/adr/0029-domain-types-ssot-in-lib.md)（领域类型 SSOT 归 lib）/ [ADR-0030](docs/adr/0030-reuse-file-match-algorithm.md)（文件匹配算法复用）。`[from: 2026-06-30-search-modal §decisions D-026/D-028/D-029]`
+- **搜索子系统架构决策**：[ADR-0028](docs/adr/0028-search-orchestration-in-composable.md)（编排归 composable）/ [ADR-0029](docs/adr/0029-domain-types-ssot-in-lib.md)（领域类型 SSOT 归 lib）/ [ADR-0030](docs/adr/archive-digest.md#adr-0030)（已压缩档案）（文件匹配算法复用）。`[from: 2026-06-30-search-modal §decisions D-026/D-028/D-029]`
 - [`docs/standards.md`](docs/standards.md) — 编码标准（streaming 生命周期/mock 策略/路径规范等）
 - [`CONTEXT.md`](CONTEXT.md) — design workflow 精简统一语言（指向 context.md 完整版）

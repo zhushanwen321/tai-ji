@@ -19,4 +19,4 @@ Release note 面向**应用使用者**，两个消费场景共用同一份 body�
 
 > 本节存放**待随下次发版并入正式 release note 的条目草稿**（设计文档验收条款要求的指引先落于此，merge skill 阶段 5 定稿时按全局规范并入，并入后清空本节）。npm 包侧（CHANGELOG / deprecate 文案）随发版流程另行处理，不在本节。
 
-（空——2026-09-02 v0.9.12 发布时已将 base-tool-enhance 卸载指引草稿并入正式 note，来源 design/file-lock-unification-and-reaper-sink.md §3.3 D2）
+（空——2026-09-02 v0.9.12 发布时已将 base-tool-enhance 卸载指引草稿并入正式 note，来源 architecture/file-lock-unification-and-reaper-sink.md §3.3 D2）
