@@ -216,9 +216,10 @@ describe("budget_limited 终态路径（dispatchAgentCall → finalizeRun）", (
 
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("budget_limited");
-    // save 2 次 = call 完成快照（dispatchAgentCall .then 的常规持久化）+ budget
-    // 终态快照（finalizeRun 内）——两次语义不同，收敛前后一致
-    expect(deps.store.save).toHaveBeenCalledTimes(2);
+    // save 3 次 = dispatch 启动快照（8d52c0035 dispatch-time save，running 步骤
+    // 实时可见）+ call 完成快照（dispatchAgentCall .then 的常规持久化）+ budget
+    // 终态快照（finalizeRun 内）——三次语义不同，收敛前后一致
+    expect(deps.store.save).toHaveBeenCalledTimes(3);
     expect(deps.eventBus!.emit).toHaveBeenCalledTimes(1);
     expect(deps.eventBus!.emit).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-budget-1",
