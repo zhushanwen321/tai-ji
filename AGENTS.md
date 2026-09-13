@@ -17,7 +17,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | 完整编码规范 / UI 设计演变 / 术语表 | [docs/standards.md](docs/standards.md) · [design-evolution.md](docs/design-evolution.md) · [architecture/context.md](docs/architecture/context.md) |
 | 设计系统（tokens / 原语层 / v6 SSOT / 视觉规格） | [docs/page-design/](docs/page-design/)（v6-tokens.css（值 SSOT，hook 守卫）· v6-master-spec.md · v6-spec-*.html；能力设计 spec 在 `archive/v3/`。禁止创建 `demos/`、`impeccable/` 目录） |
 | 窗口顶部 traffic light 布局数值 SSOT | [traffic-light-layout.md](docs/page-design/traffic-light-layout.md)（v3 刻意调整形态，不遵循 v6 demo） |
-| Renderer 终态包拓扑（现行 SSOT） | [architecture/renderer-rebuild-architecture.md](docs/architecture/renderer-rebuild-architecture.md)（现行 SSOT：§3 包拓扑 / §4 core 分层；历史文档 renderer-target-architecture / v6-architecture-refactor 已删除，git 可追溯） |
+| Renderer 终态包拓扑（现行 SSOT） | [architecture/renderer-package-topology.md](docs/architecture/renderer-package-topology.md)（现行 SSOT：§1 包拓扑 / §2 core 分层；原 renderer-rebuild-architecture.md 已改名，历史文档 renderer-target-architecture / v6-architecture-refactor 已删除，git 可追溯） |
 | pi 边界可靠性（语义吸收层四支柱） | [docs/design/pi-boundary-reliability.md](docs/design/pi-boundary-reliability.md)（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫；决策记录 [ADR-0064](docs/adr/0064-pi-semantic-absorption-layer.md)，约束登记 C-pi-12 / C-pi-13 / C-ext-19 / C-proc-08） |
 | 功能开发地图（启动新 Phase 前更新） | [docs/feature-map/](docs/feature-map/)（最新 2026-09-11.md） |
 | 测试策略 SSOT | [TEST-STRATEGY.md](TEST-STRATEGY.md) + [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑） |
@@ -35,7 +35,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 新增/删包时更新此列举与所在分组。校验：`pnpm extensions:typecheck` / `extensions:lint` / `extensions:test`。
 
-- **[MANDATORY] extension 改动优先在本地 pi CLI 实测**（不是 xyz-agent 桌面）：`pi --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <path>` + stdin JSONL 发 prompt；`XYZ_AGENT_DEBUG=1` 看 `~/.pi/agent/logs/` 扩展日志。xyz-agent 的 builtin 打包/数据隔离/runtime 中转层会掩盖版本差异
+- **[MANDATORY] extension 改动优先在本地 pi CLI 实测**（不是 xyz-agent 桌面）：`pi -ne --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <绝对路径>` + stdin JSONL 发 prompt；`XYZ_AGENT_DEBUG=1` 看 `~/.pi/agent/logs/` 扩展日志。xyz-agent 的 builtin 打包/数据隔离/runtime 中转层会掩盖版本差异。**`-ne` 必带 [HISTORICAL]**（2026-09-13 实测事故：settings 清单 `npm:` 版与 `--extension` 本地版同进程双载——jiti 模块独立但 `Symbol.for` 单例槽跨实例共享，版本错配交叉读写炸 `Cannot read properties of undefined (reading 'set')`，且报错路径指向 npm 版误导排查方向；`-ne` 跳过 settings 清单 + 绝对路径避免 cwd 依赖）
 - **structured-output 方案 A [HISTORICAL]**：workflow 模式 `PI_WORKFLOW_SCHEMA` 注入的权威 schema 是唯一校验权威，LLM 自报 schema 不参与校验（曾因校验自报 schema 致修复静默丢失）。终态补强（structured-output-redesign D1/D3/D4）：workflow 模式已重设计为单参数合成工具——parameters 即权威 schema（根级 `additionalProperties:false` 结构性拒绝 schema 字段，模型结构上不可自报）+ 同签名 3 次闸门硬终止
 - 本地开发调试（live edit ↔ npm 版切换）：`.agents/skills/dev-link/`
 - **Review 工作流**：`pr-cr-fix` skill 是 PR 完整生命周期入口（开 PR → 8 维 review → 修 must-fix → pre-merge → push；review agent 内化在 `pr-cr-fix/agents/`，不全局暴露）
