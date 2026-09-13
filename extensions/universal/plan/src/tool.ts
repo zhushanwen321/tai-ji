@@ -6,6 +6,7 @@ import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendi
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+import { detectGoalCapability, handlePlanComplete } from "./compact.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
 import { getPlanState, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
@@ -250,9 +251,9 @@ function executeAbort(
 }
 
 /** Build execution options filtered by available capabilities. */
-async function buildExecOptions(pi: ExtensionAPI): Promise<string[]> {
+function buildExecOptions(pi: ExtensionAPI): string[] {
   const execOptions = ["Subagent-driven execution"];
-  const hasGoal = (await import("./compact.js")).detectGoalCapability(pi);
+  const hasGoal = detectGoalCapability(pi);
   if (hasGoal) execOptions.push("Goal-driven execution (/goal)");
   execOptions.push("Single-agent (current session)");
   execOptions.push("Modify the plan first", "Save for later");
@@ -277,7 +278,7 @@ type CompleteChoiceOutcome =
  * complete-cancelled result; otherwise the mapped chosenMode.
  */
 async function resolveCompleteChoice(ctx: ExtensionContext, pi: ExtensionAPI): Promise<CompleteChoiceOutcome> {
-  const execOptions = await buildExecOptions(pi);
+  const execOptions = buildExecOptions(pi);
 
   if (typeof ctx.ui.select !== "function") {
     return { kind: "mode", chosenMode: "single-agent" };
@@ -323,7 +324,6 @@ async function executeComplete(
   restoreFullToolSet(pi);
 
   // Execute completion handler (compact/tree setup)
-  const { handlePlanComplete } = await import("./compact.js");
   handlePlanComplete(pi, ctx, state, isolation, chosenMode);
 
   // Reset state and clear widget — same as abort
