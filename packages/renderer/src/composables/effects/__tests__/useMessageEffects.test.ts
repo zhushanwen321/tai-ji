@@ -106,7 +106,8 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
 
     effects.onMessageComplete!('s-bg', { stopReason: 'stop' })
 
-    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'stop', 's-focus')
+    // [retry-sound] 第 4 参 willRetry 透传（payload 缺省 → undefined）
+    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'stop', 's-focus', undefined)
   })
 
   it('onMessageComplete → stopReason 缺省按 "stop"（兼容无 stopReason 的 complete）', () => {
@@ -114,15 +115,16 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
 
     effects.onMessageComplete!('s-bg', {})
 
-    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'stop', 's-focus')
+    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'stop', 's-focus', undefined)
   })
 
   it('onMessageComplete → 面板无匹配 session 时 focusedSid 为 null（未知面板结构兜底）', () => {
     storeMocks.panels = [{ id: 'other-panel', sessionId: 's-x' }]
 
-    effects.onMessageComplete!('s-bg', { stopReason: 'error' })
+    effects.onMessageComplete!('s-bg', { stopReason: 'error', willRetry: true })
 
-    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'error', null)
+    // [retry-sound] willRetry 透传第 4 参（中间失败静音判据）
+    expect(storeMocks.handleCompletion).toHaveBeenCalledWith('s-bg', 'error', null, true)
   })
 
   it('onSubagents → applyRecords(sid, list)', () => {

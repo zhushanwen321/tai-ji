@@ -137,4 +137,48 @@ describe('useCompletionNotify', () => {
     expect(sound.playError).toHaveBeenCalledOnce()
     expect(markers.markUnread).toHaveBeenCalledWith('s1')
   })
+
+  // ── [retry-sound] pi auto-retry 中间失败静音（runtime 透传 willRetry）──
+
+  it('RC1: willRetry=true 后台 error → 不响 + 不标未读（中间失败，turn 未结束）', () => {
+    handleCompletion('s1', 'error', 'other-sid', true)
+    expect(sound.playError).not.toHaveBeenCalled()
+    expect(sound.playSuccess).not.toHaveBeenCalled()
+    expect(markers.markUnread).not.toHaveBeenCalled()
+  })
+
+  it('RC2: willRetry=true 优先于后续守卫（background work 在跑时同样静音）', () => {
+    vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => true })
+    handleCompletion('s1', 'error', 'other-sid', true)
+    expect(sound.playError).not.toHaveBeenCalled()
+    expect(markers.markUnread).not.toHaveBeenCalled()
+  })
+
+  it('RC3: willRetry=false 重试用尽终态 error → 正常响 error + 标未读', () => {
+    handleCompletion('s1', 'error', 'other-sid', false)
+    expect(sound.playError).toHaveBeenCalledOnce()
+    expect(markers.markUnread).toHaveBeenCalledWith('s1')
+  })
+
+  it('RC4: willRetry 缺省（旧 runtime）→ 行为与现状一致（error 照响）', () => {
+    handleCompletion('s1', 'error', 'other-sid', undefined)
+    expect(sound.playError).toHaveBeenCalledOnce()
+    expect(markers.markUnread).toHaveBeenCalledWith('s1')
+  })
+
+  it('RC5: 重试链场景——“中间失败（静音）→ 终态成功（响一声）”全程只响一次 success', () => {
+    // attempt 1 失败（pi 将重试）
+    handleCompletion('s1', 'error', 'other-sid', true)
+    // 续跑成功终态
+    handleCompletion('s1', 'stop', 'other-sid', false)
+    expect(sound.playError).not.toHaveBeenCalled()
+    expect(sound.playSuccess).toHaveBeenCalledOnce()
+    expect(markers.markUnread).toHaveBeenCalledTimes(1)
+  })
+
+  it('RC6: willRetry=true + aborted 组合 → aborted 先短路，同样不响', () => {
+    handleCompletion('s1', 'aborted', 'other-sid', true)
+    expect(sound.playError).not.toHaveBeenCalled()
+    expect(markers.markUnread).not.toHaveBeenCalled()
+  })
 })
