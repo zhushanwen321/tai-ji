@@ -46,7 +46,7 @@ graph LR
 | A4 | text/thinking/user 行尾时刻 | L1 ui vitest | 2 | 6 | 非核心 | U2 | 并入 ui 套件 |
 | A5 | 历史 reload 耗时持久 | L1 core vitest + L3 真机 reload | 4 | 9 | 核心 | U1,U2 | core 单测断言回填值；L3 验视觉 |
 | A6 | 时区正确 | L1 format-utils.test（本地 getter 断言） | 1 | 7 | 核心 | U2 | 并入 ui 套件 |
-| A7 | live≡reload 等价 | L1 core equivalence 套件 | 2 | 9 | 核心 | U1 | 并入 core 套件 |
+| A7 | live≡reload 等价 | L1 core equivalence 套件（E8 非对称时钟）+ runtime relay-live-reload 腿 | 2 | 9 | 核心 | U1 | 并入 core 套件；runtime 腿见审查 R-6 |
 | A8 | 全量回归 | L2 `pnpm test` + L0 `pnpm lint` + typecheck | 4 | 8 | 核心 | A1-A7 | 单命令跑 |
 
 **提速结论**：可合并 6 项（A1/A2/A4/A6 同一 ui 套件跑，A5/A7 同一 core 套件跑）；可脚本化 7 项（全部 L0/L1 机器断言）；L0 静态守卫清单 = pre-commit 链（eslint taste-lint / vue_rules_checker.py / check_env_boundary 族）；L3 仅 1 场景（真机 live 跳动 + reload 持久，browser-automation 连 dev 实例）。预计 2 轮 dev subagent + 1 轮全量 + 1 轮 L3，无 L4。
@@ -54,7 +54,12 @@ graph LR
 ## 5 合理偏差登记表
 | 日期 | Unit | 偏差 | 理由 | 登记 |
 |------|------|------|------|------|
-| （空） | | | | |
+| 2026-09-13 | U3 | R2-S1 去重命中分支放行 endTime 单字段 last-wins（设计 §2.1 原文未提） | 不开放则权威覆盖语义不可达（Gate A 实测 4 红）；设计 §2.1 已同步回写 | 审查 R-1 |
+| 2026-09-13 | U2 | computeToolCallFill/formatClock 增非法入参守卫（超设计字面） | pi JSONL 外部宽形态防御，同 usageField 模式 | 审查 R-2/R-3 |
+| 2026-09-13 | U2 | Block running 耗时 100ms interval 实时跳动（设计只给验收标准未给机制） | 生命周期有界（watch immediate + onUnmounted） | 审查 R-4 |
+| 2026-09-13 | U2 | useTurnElapsed 完成边界 watch 内补算 lastTs（防空 tick 陈旧值） | A2 定格正确性机制保证 | 审查 R-5 |
+| 2026-09-13 | U3 | runtime relay-live-reload fixture 补全生产双发形态（帧数 7→8/entries 6→7） | 把 A7 守卫扩展到 runtime relay 腿，正面加强红线 | 审查 R-6 |
+| 2026-09-13 | U2 | 测试口径三项：formatDuration(2000)='2s' 非 '2.0s'；i18n mock 返 key 断言；UserBubble 编辑态直测 | mini-dev 汇报，均强于/等效最低要求 | impl-plan §7 U2 条目 |
 
 ## 6 状态表
 | Unit | 状态 | 轮次 | 证据指针 |

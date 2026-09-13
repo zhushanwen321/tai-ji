@@ -14,6 +14,7 @@
 ## 2 终态/机制
 
 1. **core endTime 回填**：`packages/core/src/domain/chat/apply-entry-convert.ts` 的 `computeToolCallFill` 增加返回 `endTime`（来源 = toolResult `body.timestamp`，缺失不填）→ 调用方（apply-entry.ts 回填 / live `commitToolResultMessage` 同函数）合入 toolCall。live 的 `tool_call_end` overlay `Date.now()` endTime（registry.ts）保持作即时反馈，`message_end` 回填以权威值覆盖——两通路终点同源，等价性测试守卫。
+   **U3 补全（Gate A 实测）**：R2-S1 幂等去重命中分支放行 endTime 单字段覆盖（last-wins）——首条帧（tool_call_end 重构）body.timestamp 是客户端时钟，后到 message_end 才携带 pi 权威值；其余字段维持首条 wins、copy-on-write 保持。守卫双层：core E8（非对称时钟 fixture）+ runtime relay-live-reload（生产双发帧形态）。
 2. **formatClock**：`packages/ui/src/features/chat/format-utils.ts` 新增 `formatClock(ms: number): string` → 本地时区 `HH:MM:SS`（`new Date(ms)` + 本地 getter 补零）。**禁止切 ISO 字符串**（pi 落盘 UTC，裸切差 8 小时——2026-09-13 用户实测确认）。
 3. **TurnMeta 区间**：`useTurnElapsed` 增加首末时刻输出（firstTs/lastTs 已算好）；`TurnMeta.vue` 在 elapsed 后渲染 `<span class="tm-range">· HH:MM:SS → HH:MM:SS</span>`（完成态定格）/ `· HH:MM:SS →（进行中）`（live，结束侧留空）。样式：mono text-2xs neutral-dim（demo 同款）。文案 key 走 i18n（zh-CN/en-US `panel.ts`，复用或新增「进行中」）。
 4. **Block 行尾列**：
