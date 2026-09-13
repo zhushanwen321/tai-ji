@@ -357,6 +357,28 @@ describe("WorktreeManager", () => {
       // 注册表仍被移除
       expect(mockRemove).toHaveBeenCalledWith(handle.branch);
     });
+
+    it("[S5] keepBranch:true（归档回收）跳过 branch -D——分支是续聊重建依据", async () => {
+      setupExecFile();
+      const handle = makeHandle();
+
+      await mgr.cleanup(handle, { keepBranch: true });
+
+      // worktree remove 照常（释放 checkout 隔离）
+      expect(mockExecFile).toHaveBeenCalledWith(
+        "git",
+        ["worktree", "remove", "--force", handle.path],
+        expect.objectContaining({ cwd: MAIN_CWD }),
+        expect.anything(),
+      );
+      // 分支保留（reconstruct 按 `pi-sub-<recordId>` 命名约定重建的依据）
+      const branchDeletes = mockExecFile.mock.calls.filter(
+        (c) => (c[1] as readonly string[])[0] === "branch" && (c[1] as readonly string[])[1] === "-D",
+      );
+      expect(branchDeletes).toHaveLength(0);
+      // 注册表条目照常移除（分支存活但无 checkout——对账器方向二只扫 tmpdir 物理目录，不触碰）
+      expect(mockRemove).toHaveBeenCalledWith(handle.branch);
+    });
   });
 
   describe("collectPatch", () => {

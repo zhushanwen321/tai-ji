@@ -381,6 +381,10 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
+        // [S5 修复] 创建即置 hadWorktree：归档清句（markArchived）后 entry/binding 的
+        // worktree 投影与 Continuation 重建守卫（hadWorktree && !worktreeHandle）靠本
+        // 标志承载——缺置 = 归档后守卫第一条不满足、重建永不触发。
+        record.hadWorktree = true;
         // [U5 判据] cancel/dispose 抢先 = record 已离 running（markSettled settle 为
         // idle——新语义不写 closedReason，status 单判据即收口判读；两态状态机下
         // running 才有在飞任务）。赋值后同同步段检查：已收口则主动 cleanup（幂等，
@@ -599,6 +603,9 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
+        // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：归档清句
+        //（markArchived）后 worktree 投影与 Continuation 重建守卫靠本标志承载。
+        record.hadWorktree = true;
         // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可把 record
         // settle 成已收口态（[U5 判据] status 离 running 即已收口——cancel/dispose
         // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收起回收被跳过）。
@@ -1417,8 +1424,11 @@ export class RunOrchestration {
       // 共用 consumePendingArchive 单点，防标志清写漂移）。
       archiveAfterClosingRound: (rec) => this.consumePendingArchive(rec, "closeAfterRound (chat)"),
       // [U5 / §3.2.5] worktree 绑定丢失自动重建（三失败形态在 outcome 判别联合内）。
+      // [S5 修复] repoPath 传进程 cwd——与 create() 的 mainCwd 同源（record/session/
+      // binding 全按 encodeCwd(cwd) 物理分区，扫得到 record 的进程 cwd 必与创建时
+      // 一致）；reconstruct 不再依赖注册表反查（归档 cleanup 已删条目）。
       rebuildWorktree: (rec) =>
-        this.deps.getWorktreeManager().reconstruct(rec.id, rec.patchFile),
+        this.deps.getWorktreeManager().reconstruct(this.deps.getCwd(), rec.id, rec.patchFile),
       // [U5 / §3.2.2] message 隐含寻回（intent 翻回 active + manifest 投影）。
       reactivateRecord: (rec) => {
         this.deps.getStore().markReactivated(rec);

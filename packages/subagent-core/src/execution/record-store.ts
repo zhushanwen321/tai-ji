@@ -1335,7 +1335,8 @@ export class RecordStore {
    * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → intent 翻转 + 归档注销
    * （intent 翻转必须在通知链之后，否则吞掉收口轮通知）。worktree 回收（patch
    * 落盘前移到归档点）与 pending 注销补发的编排留调用方（U5 意愿动作接线）；
-   * 本原语只吸收 intent 位 + 写权声明两写面。
+   * 本原语只吸收 intent 位 + 写权声明两写面 + worktreeHandle 清句（S5 修复——
+   * 归档即绑定消亡，重建守卫据 hadWorktree 触发）。
    *
    * 幂等：intent 恒置 archived、release 对缺失 marker 静默（重复 close 无害）。
    * record 留内存（archived ≠ 内存回收——列表可见性由 intent 承载，占用位不动）。
@@ -1347,6 +1348,16 @@ export class RecordStore {
    * @returns true = 归档写面完成（幂等，恒 true）。
    */
   markArchived(record: ExecutionRecord): boolean {
+    // [S5 修复] worktree 绑定随归档消亡：调用方（archiveRecord / disposeAllRecords）
+    // 已在归档前完成 patch 前移 + worktree 回收，handle 指向已删目录——残留会让
+    // Continuation 重建守卫（!record.worktreeHandle 判「绑定丢失」）永不触发，续聊
+    // spawn cwd 回落已删目录。清句前先置 hadWorktree（此后 entry/binding 的 worktree
+    // 投影与重建守卫判据均由本标志承载——与 execute 创建点置位呼应）。幂等：无
+    // handle 时 no-op（重复归档零影响）。
+    if (record.worktreeHandle !== undefined) {
+      record.hadWorktree = true;
+      record.worktreeHandle = undefined;
+    }
     record.intent = "archived";
     this.releaseWriteLease(record);
     this.writeManifestPersisted(record.id, RecordStore.derivedManifestRecord(RecordStore.recordToSubagent(record)));

@@ -187,14 +187,17 @@ export class RecordLifecycle {
           );
         }
       }
-      // 自动收起：intent 翻转 archived + `.alive` release + manifest（markArchived，
-      // §3.2.4 release 出口①）。
-      this.deps.getStore().markArchived(record);
       // worktree 收起同款回收：patch 前移归档点（未提交改动快照先于 worktree 销毁）
       // + cleanup。fire-and-forget（本函数同步签名；停机窗 await 会阻塞退出）。
+      // [S5 修复] 发起先于 markArchived——markArchived 现清 record.worktreeHandle
+      //（归档即绑定消亡），async 闭包在首个 await 前的同步段已捕获 handle 局部量，
+      // 但发起在前使两写面的时序不依赖该执行细节。
       if (record.worktreeHandle) {
         void this.archiveWorktreeResources(record, `disposeAllRecords (${reason})`);
       }
+      // 自动收起：intent 翻转 archived + `.alive` release + manifest（markArchived，
+      // §3.2.4 release 出口①；含 worktreeHandle 清句——S5 修复）。
+      this.deps.getStore().markArchived(record);
       // 归档点补发注销（发射点①挂载归档原语；reason 词值 = archived——
       // pending-notifications mapReasonToStatus default 落 completed）。
       this.deps.getNotifyHost().emitPendingUnregister(record.id, "archived");
@@ -364,7 +367,10 @@ export class RecordLifecycle {
       bestEffort(err, `collectPatch (archive ${source})`);
     }
     try {
-      await manager.cleanup(handle);
+      // [S5 修复] keepBranch：归档回收释放 checkout（并发写隔离语义达成）但保留
+      // 分支——分支是续聊重建依据（reconstruct 按 `pi-sub-<recordId>` 命名约定 +
+      // rev-parse --verify 重建；删了分支 = 重建依据消亡，续聊恒降级 reopen）。
+      await manager.cleanup(handle, { keepBranch: true });
     } catch (err) {
       bestEffort(err, `worktree cleanup (archive ${source})`);
     }

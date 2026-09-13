@@ -256,18 +256,25 @@ export class WorktreeManager {
    *   ③ 重建自身 IO 错（git 命令失败、磁盘满等）→ GitRunError/DirtyWorktreeError
    *      响亮上抛（不静默回落，调用方按工具错误面重试）。
    *
-   * repo 定位：worktree 注册表按 branch 反查（create/cleanup 登记的 repo 权威）。
-   * 归档 cleanup 已移除注册表条目 → 反查落空 = 重建依据消亡，归形态①。
+   * repo 定位 [S5 修复：不依赖注册表]：repoPath 由调用方传入（run-orchestration
+   * 传进程 cwd——与 create() 的 mainCwd 同源：record/session/binding 全按
+   * encodeCwd(cwd) 物理分区存储，能扫到该 record 的进程其 cwd 必与创建时一致）。
+   * 旧实现按注册表 branch 反查——归档 cleanup 已删注册表条目 → 反查恒落空 →
+   * 恒 degrade-reopen（U5-D8 偏差根因，随本修复失效）。branchName / checkout
+   * 路径按 create() 同款命名约定派生（`pi-sub-<recordId>` + tmpdir/pi-subagents/
+   * <enc(repoPath)>/<branch>）；分支存在性经 `rev-parse --verify` 实测（形态①：
+   * 分支已被外部删除）。
    *
    * 与 create() 的差异：checkout 已有分支（无 -b 新建）、主树脏不校验（重建不动
    * 主树工作区）、成功后补注册表条目（pid=0 占位——无子进程绑定，reaper 按宽限
    * 期后回收无主条目，续聊轮 spawn 后经 registerPid 补全）。
    *
+   * @param repoPath 主仓库根目录（create 时的 mainCwd 同源值）
    * @param recordId record id（分支名推导键，必须匹配 `^[\w-]+$`）
    * @param patchFile 归档时落盘的 patch 备份路径（record.patchFile；undefined = 无
    *        备份——干净基线重建）
    */
-  async reconstruct(recordId: string, patchFile?: string): Promise<WorktreeRebuildOutcome> {
+  async reconstruct(repoPath: string, recordId: string, patchFile?: string): Promise<WorktreeRebuildOutcome> {
     if (!SAFE_ID_RE.test(recordId)) {
       // 形态③：非法 id 是编程错误，响亮（对齐 create 同判）。
       throw new DirtyWorktreeError(
@@ -275,20 +282,16 @@ export class WorktreeManager {
       );
     }
     const branch = `${BRANCH_PREFIX}${recordId}`;
-    const entry = this.registry.load().find((e) => e.branch === branch);
-    if (entry === undefined) {
-      // 形态①：注册表无条目（归档 cleanup 后的自然形态——cleanup 三步含注册表
-      // 移除；reaper 回收同理）。repo 无从定位 = 重建依据消亡。
-      return { kind: "degrade-reopen", reason: `worktree registry has no entry for ${branch}` };
-    }
-    const repo = entry.repo;
-    // 分支存在性（形态①：分支已被外部删除）。
+    const repo = repoPath;
+    // 分支存在性（形态①：分支已被外部删除——命名约定派生的分支在 repo 实测验证）。
     try {
       await this.gitRunAsync(["rev-parse", "--verify", branch], { cwd: repo });
     } catch {
       return { kind: "degrade-reopen", reason: `branch ${branch} no longer exists in ${repo}` };
     }
-    const worktreePath = entry.checkout;
+    // checkout 路径按 create() 同款约定派生（不读注册表——归档 cleanup 后注册表
+    // 条目已删，重建依据 = 命名约定 + 入参 repoPath）。
+    const worktreePath = path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), branch);
     // 前置清理残留 checkout 目录（同 create——上次 remove 未删净 / 外部残留）。
     if (fs.existsSync(worktreePath)) {
       try {
@@ -354,13 +357,22 @@ export class WorktreeManager {
   }
 
   /**
-   * 清理 worktree：git worktree remove --force + git branch -D + 注册表移除。
-   * 三步各自独立 try/catch——任一步失败不阻断其余（如 remove 失败仍尝试 branch -D + 注册表移除），
+   * 清理 worktree：git worktree remove --force +（可选）git branch -D + 注册表移除。
+   * 各步独立 try/catch——任一步失败不阻断其余（如 remove 失败仍尝试 branch -D + 注册表移除），
    * 避免单步失败导致后续资源泄漏。
    *
+   * [S5 修复] opts.keepBranch：归档回收传 true——回收 checkout（释放并发写隔离语义）
+   * 但保留分支（reconstruct 的重建依据：branchName 按 `pi-sub-<recordId>` 命名约定
+   * 派生 + rev-parse --verify 验证存在性；删了分支 = 重建依据消亡 → 续聊恒降级
+   * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态守卫等无续聊重建
+   * 需求的调用方，行为零变化）。保留的分支无注册表条目，对账器方向二只扫 tmpdir
+   * 物理 checkout 目录、不触碰无 checkout 的存活分支（worktree-reconcile.ts
+   * discoverPhysicalWorktrees），不会误回收。
+   *
    * @param handle 要清理的 worktree handle（含 mainCwd，不靠路径反推）
+   * @param opts.keepBranch true = 保留分支（归档回收——重建依据）
    */
-  async cleanup(handle: WorktreeHandle): Promise<void> {
+  async cleanup(handle: WorktreeHandle, opts: { keepBranch?: boolean } = {}): Promise<void> {
     try {
       await this.gitRunAsync(["worktree", "remove", "--force", handle.path], {
         cwd: handle.mainCwd,
@@ -369,12 +381,14 @@ export class WorktreeManager {
       bestEffort(err, "worktree remove (cleanup)");
     }
 
-    try {
-      await this.gitRunAsync(["branch", "-D", handle.branch], {
-        cwd: handle.mainCwd,
-      });
-    } catch (err) {
-      bestEffort(err, "branch delete (cleanup)");
+    if (opts.keepBranch !== true) {
+      try {
+        await this.gitRunAsync(["branch", "-D", handle.branch], {
+          cwd: handle.mainCwd,
+        });
+      } catch (err) {
+        bestEffort(err, "branch delete (cleanup)");
+      }
     }
 
     await this.registry.remove(handle.branch);

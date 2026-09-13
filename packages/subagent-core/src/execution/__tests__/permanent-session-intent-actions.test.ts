@@ -82,7 +82,9 @@ vi.mock("../worktree-registry.ts", () => ({
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 
+import { encodeCwd } from "../path-encoding.ts";
 import { WorktreeManager } from "../worktree-manager.ts";
 
 const mockExecFile = vi.mocked(
@@ -113,16 +115,13 @@ function setupExecFile(impl?: (args: readonly string[]) => ExecFileResult): void
 const REPO = "/home/user/project";
 const RECORD_ID = "bg-u5-rebuild";
 const BRANCH = `pi-sub-${RECORD_ID}`;
-const CHECKOUT = "/tmp/wt-u5/checkout";
+/** [S5] checkout 不再读注册表——按 create() 同款命名约定派生。 */
+const DERIVED_CHECKOUT = path.join(os.tmpdir(), "pi-subagents", encodeCwd(REPO), BRANCH);
 const BASE_COMMIT = "abc123def456";
 const PATCH_FILE = "/tmp/wt-u5/backup.patch";
 
 function gitError(msg: string): Error & { code?: unknown } {
   return Object.assign(new Error(msg), { code: 1 });
-}
-
-function injectRegistryEntry(): void {
-  mockAdd({ repo: REPO, branch: BRANCH, checkout: CHECKOUT, pid: 0, createdAt: Date.now() });
 }
 
 describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.reconstruct）", () => {
@@ -135,7 +134,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
   });
 
   it("正常路径：分支存在 + patch 可应用 → rebuilt（handle 回填 + 注册表补条目）", async () => {
-    injectRegistryEntry();
+    // [S5] 注册表零条目（归档 cleanup 已删）——重建依据 = repoPath 入参 + 命名约定派生
     setupExecFile((args) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${BASE_COMMIT}\n` };
       if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
@@ -146,33 +145,51 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
     mockExistsSync.mockImplementation((p: unknown) => {
       const s = String(p);
       if (s === PATCH_FILE) return true;
-      if (s === CHECKOUT) return false;
       return false;
     });
 
-    const outcome = await manager.reconstruct(RECORD_ID, PATCH_FILE);
+    const outcome = await manager.reconstruct(REPO, RECORD_ID, PATCH_FILE);
 
     expect(outcome).toEqual({
       kind: "rebuilt",
-      handle: { path: CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
+      handle: { path: DERIVED_CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
     });
     // 注册表补条目（pid=0 占位——续聊轮 spawn 后 registerPid 补全）
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ repo: REPO, branch: BRANCH, checkout: CHECKOUT, pid: 0 }),
+      expect.objectContaining({ repo: REPO, branch: BRANCH, checkout: DERIVED_CHECKOUT, pid: 0 }),
     );
     // patch 实际应用（--check 干跑 + apply 两步）
     const applied = mockExecFile.mock.calls.filter((c) => (c[1] as readonly string[])[0] === "apply");
     expect(applied).toHaveLength(2);
   });
 
+  it("[S5] 注册表无条目（归档 cleanup 已删）不阻断重建——repoPath + 命名约定派生 checkout", async () => {
+    // registryEntries 保持空：旧实现按注册表 branch 反查恒落空 → degrade-reopen
+    //（U5-D8 偏差形态）；修复后依据不入注册表，空表照常重建。
+    setupExecFile((args) => {
+      if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
+      if (args[0] === "apply") return { stdout: "" };
+      return { stdout: "" };
+    });
+    mockExistsSync.mockImplementation((p: unknown) => String(p) === PATCH_FILE);
+
+    const outcome = await manager.reconstruct(REPO, RECORD_ID, PATCH_FILE);
+
+    expect(outcome).toEqual({
+      kind: "rebuilt",
+      handle: { path: DERIVED_CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
+    });
+    // git 命令锚定入参 repoPath（cwd），不查注册表（mockLoad 零调用）
+    expect(mockLoad).not.toHaveBeenCalled();
+  });
+
   it("形态①（分支不存在）→ degrade-reopen（调用方降级带历史重开）", async () => {
-    injectRegistryEntry();
     setupExecFile((args) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") return { err: gitError("unknown revision") };
       return { stdout: "" };
     });
 
-    const outcome = await manager.reconstruct(RECORD_ID, PATCH_FILE);
+    const outcome = await manager.reconstruct(REPO, RECORD_ID, PATCH_FILE);
     expect(outcome).toMatchObject({ kind: "degrade-reopen" });
     if (outcome.kind === "degrade-reopen") {
       expect(outcome.reason).toContain(BRANCH);
@@ -180,7 +197,6 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
   });
 
   it("形态①（patch 备份丢失）→ degrade-reopen（重建依据消亡）", async () => {
-    injectRegistryEntry();
     setupExecFile((args) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${BASE_COMMIT}\n` };
       if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
@@ -188,21 +204,14 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
     });
     mockExistsSync.mockImplementation(() => false); // patch 备份不在盘
 
-    const outcome = await manager.reconstruct(RECORD_ID, PATCH_FILE);
+    const outcome = await manager.reconstruct(REPO, RECORD_ID, PATCH_FILE);
     expect(outcome).toMatchObject({ kind: "degrade-reopen" });
     if (outcome.kind === "degrade-reopen") {
       expect(outcome.reason).toContain("patch backup file is gone");
     }
   });
 
-  it("形态①（注册表无条目——归档 cleanup 已移除）→ degrade-reopen", async () => {
-    // registryEntries 空：repo 无从定位 = 重建依据消亡
-    const outcome = await manager.reconstruct(RECORD_ID, PATCH_FILE);
-    expect(outcome).toMatchObject({ kind: "degrade-reopen" });
-  });
-
   it("形态②（apply 冲突——归档期间分支有新提交）→ conflict（干净基线重建 + patchFile 备份留存，不降级 reopen）", async () => {
-    injectRegistryEntry();
     setupExecFile((args) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${BASE_COMMIT}\n` };
       if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
@@ -215,11 +224,11 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
       return false;
     });
 
-    const outcome = await manager.reconstruct(RECORD_ID, PATCH_FILE);
+    const outcome = await manager.reconstruct(REPO, RECORD_ID, PATCH_FILE);
     // 干净基线 handle 已建（不降级——transcript 仍有效，续聊资格不受工作区影响）
     expect(outcome).toEqual({
       kind: "conflict",
-      handle: { path: CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
+      handle: { path: DERIVED_CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
       patchFile: PATCH_FILE,
     });
     // 实际 apply 未执行（--check 拒绝后止步）
@@ -230,7 +239,6 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
   });
 
   it("形态③（重建 IO 错——worktree add 重试后仍失败）→ 响亮 throw（不静默回落）", async () => {
-    injectRegistryEntry();
     setupExecFile((args) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${BASE_COMMIT}\n` };
       if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
@@ -239,7 +247,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
     });
     mockExistsSync.mockImplementation(() => false);
 
-    await expect(manager.reconstruct(RECORD_ID, undefined)).rejects.toThrow(/git worktree failed/);
+    await expect(manager.reconstruct(REPO, RECORD_ID)).rejects.toThrow(/git worktree failed/);
   });
 });
 
@@ -450,6 +458,32 @@ describe("[U5 / §3.2.2 事件表] archived + message → intent 翻回 active�
     // 幂等：已 active 时 no-op
     expect(store.markReactivated(record)).toBe(true);
     expect(record.intent).toBe("active");
+    store.dispose();
+  });
+
+  it("[S5] markArchived 清 worktreeHandle + 置 hadWorktree（重建守卫第三条判据承接）", async () => {
+    const { RecordStore } = await import("../record-store.ts");
+    const store = new RecordStore("/tmp/u5-markarch-hw", undefined, {});
+    const handle = Object.freeze({ path: "/tmp/wt-ma", branch: "pi-sub-sa-ma-hw", baseCommit: "abc", mainCwd: "/repo" });
+    const record = makeIntentRecord("sa-markarch-hw", { worktreeHandle: handle });
+    store.register(record);
+
+    expect(store.markArchived(record)).toBe(true);
+
+    // 清句：handle 指向已删目录（调用方已回收 worktree），残留会让 Continuation
+    // 重建守卫（!record.worktreeHandle）永不触发——S5 三层缺口之二。
+    expect(record.worktreeHandle).toBeUndefined();
+    // hadWorktree 兜底：entry/binding 的 worktree 投影与重建守卫第一条判据由本标志承载
+    expect(record.hadWorktree).toBe(true);
+    expect(record.intent).toBe("archived");
+    // 幂等：重复归档（handle 已清）零影响
+    expect(store.markArchived(record)).toBe(true);
+    expect(record.hadWorktree).toBe(true);
+    // 无 worktree record：零影响（hadWorktree 不被误置）
+    const bare = makeIntentRecord("sa-markarch-bare");
+    store.register(bare);
+    store.markArchived(bare);
+    expect(bare.hadWorktree).toBeUndefined();
     store.dispose();
   });
 });

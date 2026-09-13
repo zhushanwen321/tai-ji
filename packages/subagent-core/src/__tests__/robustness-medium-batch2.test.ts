@@ -33,7 +33,9 @@ describe("M6: worktree cleanup not gated by patchOk", () => {
     // 找到 worktree cleanup 调用前的条件判断
     // [U5] cleanup 通道随归档编排改造为 archiveWorktreeResources（patch 前移 +
     // cleanup 串行链——handle 提取后判空 return，manager.cleanup 无条件跟随）。
-    const cleanupMatch = src.match(/const handle = record\.worktreeHandle;[\s\S]*?manager\.cleanup\(handle\)/);
+    // [S5] cleanup 调用带 { keepBranch: true }（归档保留分支 = 续聊重建依据）——
+    // 正则兼容带参形态，守卫语义不变（cleanup 不被 patchOk 门控）。
+    const cleanupMatch = src.match(/const handle = record\.worktreeHandle;[\s\S]*?manager\.cleanup\(handle[^)]*\)/);
     expect(cleanupMatch).toBeTruthy();
     const condition = cleanupMatch![0];
     // 条件中不应包含 patchOk（解耦后 worktree cleanup 只依赖 worktreeHandle 存在）

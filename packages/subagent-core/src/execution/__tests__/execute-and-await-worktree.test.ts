@@ -37,6 +37,8 @@ import type { ModelInfo, ModelRegistryLike } from "../model-resolver.ts";
 import type { RecordStore } from "../record-store.ts";
 import type { WorktreeManager } from "../worktree-manager.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { clearEngines } from "../engine/registry.ts";
+import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 
 // ── 辅助：service 构造（与 execute-nesting.test.ts setup 等价）──
 
@@ -166,5 +168,43 @@ describe("executeAndAwait worktree 失败收尾", () => {
 
     await expect(execP).rejects.toThrow("cancelled during worktree creation");
     expect(cleanupSpy).toHaveBeenCalledWith(handle);
+  });
+});
+
+// ============================================================
+// [S5] execute(worktree:true) 创建路径置 record.hadWorktree
+// （三层缺口之一：仅 cold-lookup 跨重启水合置位时，进程内归档寻回的重建守卫
+//  `hadWorktree === true && !worktreeHandle` 第一条永不满足——归档清句后无从重建）
+// ============================================================
+describe("execute(worktree:true) 创建即置 hadWorktree", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearEngines();
+  });
+
+  it("execute 主链（chatMode）：worktree 创建成功 → record.hadWorktree=true + handle 绑定", async () => {
+    const { service, worktreeManager } = setup();
+    registerFakePiEngine();
+    const handle = Object.freeze({
+      path: "/tmp/wt-had-worktree",
+      branch: "pi-sub-had-worktree",
+      baseCommit: "abc123",
+      mainCwd: "/repo",
+    }) as Awaited<ReturnType<WorktreeManager["create"]>>;
+    vi.spyOn(worktreeManager, "create").mockResolvedValue(handle);
+
+    const execHandle = await service.execute({
+      task: "hadWorktree flag on create",
+      slug: "had-worktree",
+      conversation: true,
+      worktree: true,
+      ctxModel,
+    });
+
+    const store = getStore(service);
+    const rec = store.getMutable(execHandle.subagentId);
+    // [S5] 创建即置（归档 markArchived 清句后，重建守卫判据由本标志承载）
+    expect(rec?.hadWorktree).toBe(true);
+    expect(rec?.worktreeHandle).toBe(handle);
   });
 });
