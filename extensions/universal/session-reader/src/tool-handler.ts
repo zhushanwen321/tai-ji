@@ -13,7 +13,8 @@
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
  *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/turn 索引解析低层小工具）。
  * 本模块保留公共类型、定位解析（resolveSessionId）、各 action 编排与共享渲染；
- * 拆出域的公开导出经此 re-export（index.ts / 单测白盒 import 路径不变）。
+ * 域模块符号不经此 re-export——从所属域模块直接 import（唯一例外 SessionReadSignals：
+ * 本模块 re-export 供 index.ts 生产消费）。
  *
  * 错误规格 F1-F6：handler 抛 Error（message 含 👉 恢复指引），index.ts 的 execute 闭包
  * 原样传播给 pi——pi-agent-core 只对 execute throw 置 isError:true（返回值里的 isError
@@ -52,10 +53,9 @@ import {
   type ToolResultSummaryEntry,
 } from './core/render.js'
 import type { Family, SessionRef, WorkflowRef } from './core/family.js'
-import { doResult, extractFinalAssistantText, type ResultActionDeps } from './result-action.js'
+import { doResult, type ResultActionDeps } from './result-action.js'
 
-// result action 主体在 result-action.ts（max-lines 拆分轮机械提取，零行为变更）；
-// 导出面保持不变：extractFinalAssistantText 仍从本模块导出（包内测试白盒导入路径不变）。
+// result action 主体在 result-action.ts（max-lines 拆分轮机械提取，零行为变更）。
 import {
   buildExecutionTree,
   formatExecutionTreeText,
@@ -83,12 +83,8 @@ import {
 } from './extract.js'
 import { doDoctor, DOCTOR_CACHE_TTL_MS, statDirMtimeOrNull, type SessionReadSignals } from './doctor.js'
 
-// 拆出域的公开导出面保持从本模块可见（index.ts / 单测白盒 import 路径不变）。
+// SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
-export { DOCTOR_CACHE_TTL_MS }
-export { levenshtein } from './no-match.js'
-export { MULTI_SEARCH_MAX_SESSIONS, SEARCH_SCAN_BYTE_BUDGET, searchAcrossSessions } from './search-across.js'
-export { renderExtractItems } from './extract.js'
 
 // ---------------------------------------------------------------------------
 // 公共类型（与 index.ts 的 TypeBox schema 对齐）
@@ -1296,7 +1292,7 @@ export const METADATA_CACHE_TTL_MS = DOCTOR_CACHE_TTL_MS
  * 且瞬态失败不污染缓存（下个查询即重试）。find 的多次 findSessions 调用（u10 分组探测
  * main/subagent 两路）与连续 keyword 查询都经此处去重，listAll 每 TTL 窗口至多一次/目录。
  */
-export function withMetadataCache(provider: SessionMetadataProvider): SessionMetadataProvider {
+function withMetadataCache(provider: SessionMetadataProvider): SessionMetadataProvider {
   return async (dir) => {
     const hit = metadataCache.get(dir)
     if (hit !== undefined) {
@@ -1330,8 +1326,6 @@ const RESULT_ACTION_DEPS: ResultActionDeps = {
   sessionIdPrefixLen: SESSION_ID_PREFIX_LEN,
 }
 
-export { extractFinalAssistantText }
-
 // ===========================================================================
 // 入口：按 action 分发
 // ===========================================================================
@@ -1343,9 +1337,7 @@ export { extractFinalAssistantText }
  * F1(resolve)/F4/F5/F6 抛 Error（含 👉）；F2 多匹配与 find 零匹配返回结果不抛。
  *
  * @param signals 发现层信号包（design §7B：index.ts 采集 { agentDir, liveSessionDir? }，
- *   采集端全可选链可降级）。兼容接受裸 agentDir string（存量单测与外部深 import 的旧签名
- *   形态，入口归一化为只含 agentDir 的信号包，行为与旧签名逐字节一致；工具运行路径恒传
- *   完整信号包）。u9 起 find/F1 路径消费根列表（F1 自检行恒走无 options 实扫，
+ *   采集端全可选链可降级）。u9 起 find/F1 路径消费根列表（F1 自检行恒走无 options 实扫，
  *   不读 doctor 缓存，§7B 要点 8）。
  * @param signal 可选 AbortSignal（MF-5）：仅 search 消费（长扫描可中断）；其余 action 有界，不接。
  * @param metadataProvider 可选标题元数据注入（u11，design 2026-09-10 §6.6）：index.ts 构造
@@ -1355,36 +1347,33 @@ export { extractFinalAssistantText }
  */
 export async function handleSessionRead(
   params: SessionReadParams,
-  signals: SessionReadSignals | string,
+  signals: SessionReadSignals,
   signal?: AbortSignal,
   metadataProvider?: SessionMetadataProvider,
 ): Promise<ToolResult> {
-  // 裸 string（存量单测/外部深 import 旧签名，D-8）归一化为信号包；doctor 需要完整
-  // 信号包（liveSessionDir/env/bundleUrl），缺省字段按各自降级语义处理。
-  const norm: SessionReadSignals = typeof signals === 'string' ? { agentDir: signals } : signals
-  const agentDir = norm.agentDir
+  const agentDir = signals.agentDir
   // u11：TTL 缓存包装在注入边界（策略 ③，独立于 doctorScanCache 的实例）；仅 find 消费。
   const cachedProvider =
     metadataProvider === undefined ? undefined : withMetadataCache(metadataProvider)
   switch (params.action) {
     case 'find':
-      return doFind(params, norm, cachedProvider)
+      return doFind(params, signals, cachedProvider)
     case 'family':
-      return doFamily(params, agentDir, norm.liveSessionDir)
+      return doFamily(params, agentDir, signals.liveSessionDir)
     case 'outline':
-      return doOutline(params, agentDir, norm.liveSessionDir)
+      return doOutline(params, agentDir, signals.liveSessionDir)
     case 'expand':
-      return doExpand(params, agentDir, norm.liveSessionDir)
+      return doExpand(params, agentDir, signals.liveSessionDir)
     case 'detail':
-      return doDetail(params, agentDir, norm.liveSessionDir)
+      return doDetail(params, agentDir, signals.liveSessionDir)
     case 'search':
-      return doSearch(params, norm, signal, cachedProvider)
+      return doSearch(params, signals, signal, cachedProvider)
     case 'export':
-      return doExport(params, agentDir, norm.liveSessionDir)
+      return doExport(params, agentDir, signals.liveSessionDir)
     case 'extract':
-      return doExtract(params, agentDir, norm.liveSessionDir)
+      return doExtract(params, agentDir, signals.liveSessionDir)
     case 'workflow':
-      return doWorkflow(params, agentDir, norm.liveSessionDir)
+      return doWorkflow(params, agentDir, signals.liveSessionDir)
     case 'result':
       // per-call 覆盖 deps.resolveSessionId：把信号包中的 liveSessionDir 闭包进解析调用
       //（ResultActionDeps 接口签名固定 5 参，包装保持同形、末位补传），result 的片段
@@ -1392,10 +1381,10 @@ export async function handleSessionRead(
       return doResult(params, agentDir, {
         ...RESULT_ACTION_DEPS,
         resolveSessionId: (rawSession, action, ad, source, prefetchedManifests) =>
-          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, norm.liveSessionDir),
+          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, signals.liveSessionDir),
       })
     case 'doctor':
-      return doDoctor(params, norm)
+      return doDoctor(params, signals)
     default: {
       // exhaustive guard：switch 覆盖全部 11 action，此处 params.action 收窄为 never；
       // 仅防御运行时非法 action（schema 正常校验下不可达）

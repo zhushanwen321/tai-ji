@@ -2,9 +2,9 @@
  * doctor action（u8：design 2026-09-10 §6.2/§6.3/§6.4/§7B 要点 2/4/5/8 + §6.11 U14b 段）。
  *
  * 从 tool-handler.ts 机械提取（max-lines 拆分轮，零行为变更）：环境判定 + 根表渲染 +
- * doctor 扫描缓存 + 旧布局残留 glob 探测。SessionReadSignals（u3 信号包超集）随域迁移，
- * tool-handler re-export 保持导出面不变（index.ts / 单测白盒 import 路径不变）。
- * statDirMtimeOrNull / DOCTOR_CACHE_TTL_MS 供留守的 u11 metadata 缓存复用（一并导出）。
+ * doctor 扫描缓存 + 旧布局残留 glob 探测。SessionReadSignals（u3 信号包超集）在域内
+ * 定义，tool-handler re-export 供 index.ts 生产消费。statDirMtimeOrNull /
+ * DOCTOR_CACHE_TTL_MS 供留守的 u11 metadata 缓存复用（一并导出）。
  */
 import { existsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'

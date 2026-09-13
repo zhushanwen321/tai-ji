@@ -173,7 +173,7 @@ graph LR
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
 | 08-u4 | in-progress | 0 | - |
-| 04-U1 | pending | 0 | - |
+| 04-U1 | in-progress | 0 | - |
 | 04-U2 | pending | 0 | - |
 | 04-U3 | pending | 0 | - |
 | 04-U4 | pending | 0 | - |

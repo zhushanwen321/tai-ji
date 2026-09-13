@@ -5,7 +5,6 @@
  * pattern 编译/文本提取/命中收集/渲染与跨会话检索共享同一扫描管线（safeParse →
  * buildTreeView → segmentTurns → collectSearchHits），拆为独立低层模块保持单向依赖
  *（tool-handler 的 doSearch 消费本模块导出，本模块只反向 type import 公共类型）。
- * searchAcrossSessions 导出面不变：tool-handler re-export（单测白盒 import 路径不变）。
  */
 import { dirname } from 'node:path'
 import {

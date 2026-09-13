@@ -4,8 +4,7 @@
  * 从 tool-handler.ts 机械提取（max-lines 拆分轮，零行为变更）。
  * design §3.3 D3 的 5 个预设 + F8/F9 规格；F7（what 校验）与 doExtract 编排
  *（resolveSessionId/safeParse/turns 范围限定依赖 tool-handler 私有定位层）留守
- * tool-handler，经本模块导出的 5 预设函数分发。renderExtractItems 导出面不变：
- * tool-handler re-export（单测 F9 白盒 import 路径不变）。纯提取，不调 LLM。
+ * tool-handler，经本模块导出的 5 预设函数分发。纯提取，不调 LLM。
  */
 import { extractToolCalls, formatToolCallSummary, basename } from './core/toolcall.js'
 import type { Turn } from './core/turns.js'

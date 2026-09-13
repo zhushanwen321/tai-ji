@@ -5,19 +5,20 @@ import { tmpdir, homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import {
   handleSessionRead,
-  levenshtein,
-  renderExtractItems,
-  DOCTOR_CACHE_TTL_MS,
   METADATA_CACHE_TTL_MS,
-  MULTI_SEARCH_MAX_SESSIONS,
-  SEARCH_SCAN_BYTE_BUDGET,
-  searchAcrossSessions,
   type SessionReadParams,
   type SessionReadSignals,
 } from '../tool-handler.js'
+import { DOCTOR_CACHE_TTL_MS, type DoctorDetails } from '../doctor.js'
+import { levenshtein } from '../no-match.js'
+import {
+  MULTI_SEARCH_MAX_SESSIONS,
+  SEARCH_SCAN_BYTE_BUDGET,
+  searchAcrossSessions,
+} from '../search-across.js'
+import { renderExtractItems } from '../extract.js'
 import { listRecordManifests } from '../discovery/subagents.js'
 import type { SessionMetadataProvider } from '../discovery/find.js'
-import type { DoctorDetails } from '../doctor.js'
 import {
   REAL_AGENT_DIR as REAL,
   E6,
@@ -46,14 +47,14 @@ import {
 // vitest 默认 5s（pnpm extensions:test 全量跑时多包集成测试并发 IO），显式放宽到 60s。
 describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   it('1. find by uuid fragment returns matching session', async () => {
-    const r = await handleSessionRead({ action: 'find', query: 'e6c96' }, REAL)
+    const r = await handleSessionRead({ action: 'find', query: 'e6c96' }, { agentDir: REAL })
     const d = r.details as { matches: Array<{ sessionId: string }> }
     expect(d.matches.some((m) => m.sessionId.startsWith('019e6c96'))).toBe(true)
     expect(r.content[0]).toEqual({ type: 'text', text: expect.any(String) })
   })
 
   it('2. outline yields 32 turns within token budget (v2 O1: <=1500)', async () => {
-    const r = await handleSessionRead({ action: 'outline', session: E6 }, REAL)
+    const r = await handleSessionRead({ action: 'outline', session: E6 }, { agentDir: REAL })
     const d = r.details as { turns: unknown[]; tokenEstimate: number }
     expect(d.turns.length).toBe(32)
     // v2 O1：加 assistantBrief + 修 toolSummary bug 后阈值 600→1500（design §3.3 D4）
@@ -61,7 +62,7 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   })
 
   it('3. detail single turn returns toolResult summary by default (v2 O3)', async () => {
-    const r = await handleSessionRead({ action: 'detail', session: E6, turns: 'T001' }, REAL)
+    const r = await handleSessionRead({ action: 'detail', session: E6, turns: 'T001' }, { agentDir: REAL })
     const d = r.details as { entries: Array<{ type: string; message?: { role?: string } }> }
     expect(d.entries.length).toBeGreaterThan(0)
     // v2 O3：默认 toolResult 变摘要态（type=toolResultSummary），条目不消失
@@ -76,7 +77,7 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
     // 而非失败——与 TC14-TC18 的「数据不存在则 return」守卫模式一致，避免偶发红。
     // 注意必须用 hasAnyRealSession（双目录），hasRealSession 只扫 sessions/ 扫不到 019fe635。
     if (!hasAnyRealSession('019fe632') || !hasAnyRealSession('019fe635')) return
-    const r = await handleSessionRead({ action: 'family', session: FAM }, REAL)
+    const r = await handleSessionRead({ action: 'family', session: FAM }, { agentDir: REAL })
     const d = r.details as {
       forks: Array<{ sessionId: string }>
       subagents: Array<{ sessionId: string }>
@@ -87,7 +88,7 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   })
 
   it('5. search pattern returns hits', async () => {
-    const r = await handleSessionRead({ action: 'search', session: E6, pattern: 'plugin' }, REAL)
+    const r = await handleSessionRead({ action: 'search', session: E6, pattern: 'plugin' }, { agentDir: REAL })
     const d = r.details as { hits: Array<{ turnIndex: number; matchSnippet: string }> }
     expect(d.hits.length).toBeGreaterThan(0)
     expect(typeof d.hits[0].matchSnippet).toBe('string')
@@ -96,7 +97,7 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   it('6. export outline materializes a .md file', async () => {
     const r = await handleSessionRead(
       { action: 'export', session: E6, format: 'outline' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as { path: string; sizeBytes: number }
     expect(d.path).toMatch(/\.md$/)
@@ -111,7 +112,7 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   it('7. F1 find zero match returns empty matches + fact-based self-check (no throw)', async () => {
     const r = await handleSessionRead(
       { action: 'find', query: 'zzz-nonexistent-session-9q8x2', source: 'main' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as { matches: unknown[]; truncated: boolean }
     expect(d.matches).toEqual([])
@@ -125,17 +126,17 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
 
   it('8. F4 detail turn out of range throws with 越界', async () => {
     await expect(
-      handleSessionRead({ action: 'detail', session: E6, turns: 'T999' }, REAL),
+      handleSessionRead({ action: 'detail', session: E6, turns: 'T999' }, { agentDir: REAL }),
     ).rejects.toThrow(/越界/)
   })
 
   it('9. F5 outline missing session throws naming session', async () => {
-    await expect(handleSessionRead({ action: 'outline' }, REAL)).rejects.toThrow(/session/)
+    await expect(handleSessionRead({ action: 'outline' }, { agentDir: REAL })).rejects.toThrow(/session/)
   })
 
   it('10. resolveSessionId fragment equivalent to full id', async () => {
-    const rFull = await handleSessionRead({ action: 'outline', session: E6 }, REAL)
-    const rFrag = await handleSessionRead({ action: 'outline', session: 'e6c96' }, REAL)
+    const rFull = await handleSessionRead({ action: 'outline', session: E6 }, { agentDir: REAL })
+    const rFrag = await handleSessionRead({ action: 'outline', session: 'e6c96' }, { agentDir: REAL })
     const dFull = rFull.details as { turns: unknown[] }
     const dFrag = rFrag.details as { turns: unknown[] }
     expect(dFrag.turns.length).toBe(dFull.turns.length)
@@ -146,7 +147,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('user-messages returns 26 user entries with turn + full text', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'user-messages' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       what: string
@@ -169,7 +170,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('commands (no filter) returns 519 tool calls with name + summary', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'commands' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       count: number
@@ -192,7 +193,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('commands tool=bash returns 309 all bash', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'commands', tool: 'bash' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       count: number
@@ -206,7 +207,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('commands tool=nonexist triggers F8 with tool distribution (no throw)', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'commands', tool: 'nonexist' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       toolDistribution: Array<{ name: string; count: number }>
@@ -220,7 +221,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('files returns deduped paths with op (read/edit/write/head)', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'files' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       count: number
@@ -241,7 +242,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('commits returns hash list with 7-8 hex + source turn', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'commits' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       count: number
@@ -260,7 +261,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('tool-results (no filter) returns 515 results with toolName + text', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'tool-results' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       count: number
@@ -277,7 +278,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('tool-results tool=bash returns 309 all bash', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'tool-results', tool: 'bash' },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as { count: number; items: Array<{ toolName: string }> }
     expect(d.count).toBe(309)
@@ -287,7 +288,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
   it('tool-results tool=nonexist triggers F8 (no throw)', async () => {
     const r = await handleSessionRead(
       { action: 'extract', session: E6, what: 'tool-results', tool: 'nonexist' },
-      REAL,
+      { agentDir: REAL },
     )
     expect(r.content[0].text).toContain('无匹配')
     expect(r.content[0].text).toContain('bash×309')
@@ -297,8 +298,8 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
     // what 缺失是合法 SessionReadParams（optional），handler 层 F7 防御校验。
     // isExtractWhat 对 undefined 返 false → 同一 throw 路径，覆盖非法值场景。
     const params: SessionReadParams = { action: 'extract', session: E6 }
-    await expect(handleSessionRead(params, REAL)).rejects.toThrow(/无效/)
-    await expect(handleSessionRead(params, REAL)).rejects.toThrow(
+    await expect(handleSessionRead(params, { agentDir: REAL })).rejects.toThrow(/无效/)
+    await expect(handleSessionRead(params, { agentDir: REAL })).rejects.toThrow(
       /user-messages\/commands\/files\/commits\/tool-results/,
     )
   })
@@ -309,7 +310,7 @@ describe.skipIf(!HAS_E6)('extract (v2 O4)', () => {
     try {
       await handleSessionRead(
         { action: 'extract', session: E6, what: 'user-messages', turns: 'T999' },
-        REAL,
+        { agentDir: REAL },
       )
     } catch (e) {
       msg = (e as Error).message
@@ -358,7 +359,7 @@ describe('F2 多匹配消歧（fixture，MF-9）', () => {
     await makeFixtureSession(dir, ID2, '第二段内容')
 
     // outline 走 resolveSessionId → 2 匹配 → F2 消歧（不抛错）
-    const r = await handleSessionRead({ action: 'outline', session: '019e6c96-aaaa' }, dir)
+    const r = await handleSessionRead({ action: 'outline', session: '019e6c96-aaaa' }, { agentDir: dir })
     const d = r.details as { ambiguous: boolean; candidates: Array<{ sessionId: string }> }
     expect(d.ambiguous).toBe(true)
     expect(d.candidates).toHaveLength(2)
@@ -382,7 +383,7 @@ describe('F2 多匹配消歧（fixture，MF-9）', () => {
       if (action === 'expand') params.turn = 'T001'
       if (action === 'search') params.pattern = 'x'
       if (action === 'extract') params.what = 'user-messages'
-      const r = await handleSessionRead(params, dir)
+      const r = await handleSessionRead(params, { agentDir: dir })
       const d = r.details as { ambiguous: boolean }
       expect(d.ambiguous, `action=${action}`).toBe(true)
       expect(r.content[0].text).toContain('👉')
@@ -417,7 +418,7 @@ describe('outline skippedLines 报告（fixture，D8d 有检测必有报告）',
     ]
     await writeFile(join(dir, 'sessions', slug, SID + '.jsonl'), lines.join('\n') + '\n')
 
-    const r = await handleSessionRead({ action: 'outline', session: SID }, dir)
+    const r = await handleSessionRead({ action: 'outline', session: SID }, { agentDir: dir })
     const d = r.details as { stats: { skippedLines: number } }
     expect(d.stats.skippedLines).toBe(1)
     expect(r.content[0].text).toContain('1 skipped lines')
@@ -425,7 +426,7 @@ describe('outline skippedLines 报告（fixture，D8d 有检测必有报告）',
 
   it('无坏行时不输出 skipped 片段（正常 session 零噪音）', async () => {
     await makeFixtureSession(dir, SID, 'clean session')
-    const r = await handleSessionRead({ action: 'outline', session: SID }, dir)
+    const r = await handleSessionRead({ action: 'outline', session: SID }, { agentDir: dir })
     const d = r.details as { stats: { skippedLines: number } }
     expect(d.stats.skippedLines).toBe(0)
     expect(r.content[0].text).not.toContain('skipped lines')
@@ -445,21 +446,21 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
   })
 
   it('嵌套量词 pattern (a+)+ → 降级字面子串（不挂死，零命中）', async () => {
-    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '(a+)+' }, dir)
+    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '(a+)+' }, { agentDir: dir })
     const d = r.details as { hits: unknown[] }
     // 字面量 '(a+)+' 不在内容里 → 0 命中（若按正则执行会命中 'aaa' 且可能指数回溯）
     expect(d.hits).toHaveLength(0)
   })
 
   it('普通正则仍按正则匹配', async () => {
-    const r = await handleSessionRead({ action: 'search', session: SID, pattern: 'a+' }, dir)
+    const r = await handleSessionRead({ action: 'search', session: SID, pattern: 'a+' }, { agentDir: dir })
     const d = r.details as { hits: unknown[] }
     expect(d.hits.length).toBeGreaterThan(0)
   })
 
   it('范围量词 {m,n} 形态 → 降级字面子串（(a{1,3})*、(a{0,2})*、(a{1,3}){2,}，MF-1 回归）', async () => {
     for (const pattern of ['(a{1,3})*', '(a{0,2})*', '(a{1,3}){2,}']) {
-      const r = await handleSessionRead({ action: 'search', session: SID, pattern }, dir)
+      const r = await handleSessionRead({ action: 'search', session: SID, pattern }, { agentDir: dir })
       const d = r.details as { hits: unknown[] }
       // 字面量不含这些 pattern → 0 命中；若按正则执行会指数回溯挂死
       expect(d.hits, `pattern=${pattern}`).toHaveLength(0)
@@ -468,7 +469,7 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
 
   it('alternation/嵌套量词分支 (a|aa)+、(a*)* → 降级字面子串（MF-5 分支回归）', async () => {
     for (const pattern of ['(a|aa)+', '(a*)*']) {
-      const r = await handleSessionRead({ action: 'search', session: SID, pattern }, dir)
+      const r = await handleSessionRead({ action: 'search', session: SID, pattern }, { agentDir: dir })
       const d = r.details as { hits: unknown[] }
       expect(d.hits, `pattern=${pattern}`).toHaveLength(0)
     }
@@ -477,7 +478,7 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
   it('(a{1,3}) 单独使用不被降级（组后无尾随量词，仍按正则执行）', async () => {
     const r = await handleSessionRead(
       { action: 'search', session: SID, pattern: '(a{1,3})' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { hits: unknown[] }
     // 按正则执行命中 'aaa' → >0 命中（若被降级为字面量则 0 命中）
@@ -485,12 +486,12 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
   })
 
   it('降级标注：header 含「已降级为字面子串匹配」（S-3）', async () => {
-    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '(a+)+' }, dir)
+    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '(a+)+' }, { agentDir: dir })
     expect(r.content[0].text).toContain('已降级为字面子串匹配')
   })
 
   it('非法正则 pattern → 字面子串兜底不抛错（零命中，S-6）', async () => {
-    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '[unclosed' }, dir)
+    const r = await handleSessionRead({ action: 'search', session: SID, pattern: '[unclosed' }, { agentDir: dir })
     const d = r.details as { hits: unknown[] }
     expect(d.hits).toHaveLength(0)
   })
@@ -498,7 +499,7 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
   it('scope 过滤：scope=assistant 零命中（fixture 仅 user 角色，S-6）', async () => {
     const r = await handleSessionRead(
       { action: 'search', session: SID, pattern: 'aaa', scope: 'assistant' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { hits: unknown[] }
     expect(d.hits).toHaveLength(0)
@@ -525,7 +526,7 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
     )
     const r = await handleSessionRead(
       { action: 'search', session: sid2, pattern: 'aa', limit: 2 },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { hits: unknown[]; truncated: boolean }
     expect(d.truncated).toBe(true)
@@ -536,7 +537,7 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
     const ac = new AbortController()
     ac.abort()
     await expect(
-      handleSessionRead({ action: 'search', session: SID, pattern: 'x' }, dir, ac.signal),
+      handleSessionRead({ action: 'search', session: SID, pattern: 'x' }, { agentDir: dir }, ac.signal),
     ).rejects.toThrow(/中断/)
   })
 })
@@ -611,7 +612,7 @@ describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-conte
         },
       }),
     ])
-    const r = await handleSessionRead({ action: 'extract', session: SID, what: 'commits' }, dir)
+    const r = await handleSessionRead({ action: 'extract', session: SID, what: 'commits' }, { agentDir: dir })
     const d = r.details as { count: number; items: Array<{ hash: string; source: string }> }
     const hashes = d.items.map((it) => it.hash)
     expect(hashes).toContain('abc1234f')
@@ -669,7 +670,7 @@ describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-conte
         },
       }),
     ])
-    const r = await handleSessionRead({ action: 'extract', session: SID, what: 'commits' }, dir)
+    const r = await handleSessionRead({ action: 'extract', session: SID, what: 'commits' }, { agentDir: dir })
     const d = r.details as { count: number; items: Array<{ hash: string; source: string }> }
     const dupes = d.items.filter((it) => it.hash === 'def5678a')
     expect(dupes).toHaveLength(1)
@@ -811,7 +812,7 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
     // export 的 details.path = session-view-<sessionId>.md，含 header 真实 id，不含文件名
     const r = await handleSessionRead(
       { action: 'export', session: filePath, format: 'outline' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { path: string }
     expect(d.path).toContain(fileId)
@@ -826,10 +827,10 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
       `not-exist-${Date.now()}.jsonl`,
     )
     await expect(
-      handleSessionRead({ action: 'outline', session: filePath }, dir),
+      handleSessionRead({ action: 'outline', session: filePath }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*文件不存在/)
     await expect(
-      handleSessionRead({ action: 'outline', session: filePath }, dir),
+      handleSessionRead({ action: 'outline', session: filePath }, { agentDir: dir }),
     ).rejects.toThrow('👉')
   })
 
@@ -838,7 +839,7 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
     await mkdir(join(dir, 'sessions', '--demo-cwd--'), { recursive: true })
     await writeFile(filePath, 'not jsonl')
     await expect(
-      handleSessionRead({ action: 'outline', session: filePath }, dir),
+      handleSessionRead({ action: 'outline', session: filePath }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*非 \.jsonl/)
   })
 
@@ -847,7 +848,7 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
     await mkdir(join(dir, 'sessions', '--demo-cwd--'), { recursive: true })
     await writeFile(filePath, JSON.stringify({ type: 'custom', customType: 'x' }) + '\n')
     await expect(
-      handleSessionRead({ action: 'outline', session: filePath }, dir),
+      handleSessionRead({ action: 'outline', session: filePath }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*首行非合法 session header/)
   })
 
@@ -856,7 +857,7 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
     await mkdir(join(dir, 'sessions', '--demo-cwd--'), { recursive: true })
     await writeFile(filePath, '')
     await expect(
-      handleSessionRead({ action: 'outline', session: filePath }, dir),
+      handleSessionRead({ action: 'outline', session: filePath }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*首行非合法 session header/)
   })
 
@@ -874,7 +875,7 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
       const tildePath = '~/' + sessionFile.slice(home.length + 1)
       const r = await handleSessionRead(
         { action: 'export', session: tildePath, format: 'outline' },
-        dir,
+        { agentDir: dir },
       )
       expect((r.details as { path: string }).path).toContain(fileId)
     } finally {
@@ -898,7 +899,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     await makeFixtureSubagent(dir, 'sa-aaa', { realSessionId: realId, firstUserText: 'do task' })
     const r = await handleSessionRead(
       { action: 'export', session: 'sa-aaa', format: 'outline' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { path: string }
     expect(d.path).toContain(realId)
@@ -913,11 +914,11 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
       sessionFileExists: false,
     })
     await expect(
-      handleSessionRead({ action: 'outline', session: 'sa-gc' }, dir),
+      handleSessionRead({ action: 'outline', session: 'sa-gc' }, { agentDir: dir }),
     ).rejects.toThrow('session 文件不存在')
     // 错误含 manifest 全部元数据 + 👉
     try {
-      await handleSessionRead({ action: 'outline', session: 'sa-gc' }, dir)
+      await handleSessionRead({ action: 'outline', session: 'sa-gc' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('sa-gc')
@@ -931,10 +932,10 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
 
   it('TC9: sa-id 0 命中（可能 running）→ ES2（含 family 指引 + 完整 id 提示 + 👉）', async () => {
     await expect(
-      handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, dir),
+      handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir }),
     ).rejects.toThrow('无匹配 record')
     try {
-      await handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, dir)
+      await handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('可能尚未落盘')
@@ -949,7 +950,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     })
     // 片段 sa-c8c8 不等于完整 sa-c8c8dfa8 → 精确相等不命中 → ES2
     await expect(
-      handleSessionRead({ action: 'outline', session: 'sa-c8c8' }, dir),
+      handleSessionRead({ action: 'outline', session: 'sa-c8c8' }, { agentDir: dir }),
     ).rejects.toThrow('无匹配 record')
   })
 
@@ -978,7 +979,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
       )
     }
     await expect(
-      handleSessionRead({ action: 'outline', session: 'sa-dup' }, dir),
+      handleSessionRead({ action: 'outline', session: 'sa-dup' }, { agentDir: dir }),
     ).rejects.toThrow(/匹配 2 个 record.*数据异常/)
   })
 
@@ -1001,7 +1002,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     )
     // 抛 F6 风格（读取失败 + 首行非合法 session header），不降级返回 sa-bad 当 sessionId
     await expect(
-      handleSessionRead({ action: 'outline', session: 'sa-bad' }, dir),
+      handleSessionRead({ action: 'outline', session: 'sa-bad' }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*首行非合法 session header/)
   })
 })
@@ -1026,7 +1027,7 @@ describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）',
     // 无 source → 两者
     const rBoth = await handleSessionRead(
       { action: 'find', query: sharedFragment },
-      dir,
+      { agentDir: dir },
     )
     const dBoth = rBoth.details as {
       matches: Array<{ source: string; sessionId: string }>
@@ -1037,7 +1038,7 @@ describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）',
     // source:subagent → 只 sub
     const rSub = await handleSessionRead(
       { action: 'find', query: sharedFragment, source: 'subagent' },
-      dir,
+      { agentDir: dir },
     )
     const dSub = rSub.details as {
       matches: Array<{ source: string; sessionId: string }>
@@ -1049,7 +1050,7 @@ describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）',
     // source:main → 只 main
     const rMain = await handleSessionRead(
       { action: 'find', query: sharedFragment, source: 'main' },
-      dir,
+      { agentDir: dir },
     )
     const dMain = rMain.details as {
       matches: Array<{ source: string; sessionId: string }>
@@ -1069,14 +1070,14 @@ describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）',
     // 无 source → main+sub 共享片段 → 2 匹配 → F2 消歧
     const rMulti = await handleSessionRead(
       { action: 'outline', session: sharedFragment },
-      dir,
+      { agentDir: dir },
     )
     expect((rMulti.details as { ambiguous: boolean }).ambiguous).toBe(true)
 
     // source:main → 收窄到 main → 唯一匹配 → outline 成功，且是 main（export path 含 mainId）
     const rExp = await handleSessionRead(
       { action: 'export', session: sharedFragment, source: 'main', format: 'outline' },
-      dir,
+      { agentDir: dir },
     )
     expect((rExp.details as { path: string }).path).toContain(mainId)
   })
@@ -1087,7 +1088,7 @@ describe.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：subagent sa-id（w2 TC1
     const manifests = await listRecordManifests(REAL)
     const alive = manifests.filter((m) => existsSync(m.sessionFile))
     if (alive.length === 0) return // 本机无存活 manifest 则跳过（skipIf 只守卫目录存在）
-    const r = await handleSessionRead({ action: 'outline', session: alive[0].id }, REAL)
+    const r = await handleSessionRead({ action: 'outline', session: alive[0].id }, { agentDir: REAL })
     const d = r.details as { turns: unknown[] }
     expect(d.turns.length).toBeGreaterThan(0)
   })
@@ -1098,7 +1099,7 @@ describe.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：subagent sa-id（w2 TC1
       (m) => m.sessionFile.includes('--private-var-folders-') && existsSync(m.sessionFile),
     )
     if (wt.length === 0) return // 本机无 worktree 编码目录数据则跳过
-    const r = await handleSessionRead({ action: 'outline', session: wt[0].id }, REAL)
+    const r = await handleSessionRead({ action: 'outline', session: wt[0].id }, { agentDir: REAL })
     expect(((r.details as { turns: unknown[] }).turns).length).toBeGreaterThan(0)
   })
 
@@ -1109,7 +1110,7 @@ describe.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：subagent sa-id（w2 TC1
     // 绝对路径形态直接读（M0 入口不依赖 findSessions）
     const r = await handleSessionRead(
       { action: 'outline', session: alive[0].sessionFile },
-      REAL,
+      { agentDir: REAL },
     )
     expect(((r.details as { turns: unknown[] }).turns).length).toBeGreaterThan(0)
   })
@@ -1119,14 +1120,14 @@ describe.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：subagent sa-id（w2 TC1
     const gc = manifests.filter((m) => !existsSync(m.sessionFile))
     if (gc.length === 0) return // 本机无 GC 数据则跳过
     await expect(
-      handleSessionRead({ action: 'outline', session: gc[0].id }, REAL),
+      handleSessionRead({ action: 'outline', session: gc[0].id }, { agentDir: REAL }),
     ).rejects.toThrow('session 文件不存在')
   })
 
   it('TC18: 不存在 sa-id → ES2（场景 4，可能 running 指引）', async () => {
     const fakeId = `sa-nonexist-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`
     await expect(
-      handleSessionRead({ action: 'outline', session: fakeId }, REAL),
+      handleSessionRead({ action: 'outline', session: fakeId }, { agentDir: REAL }),
     ).rejects.toThrow('无匹配 record')
   })
 }, 60000)
@@ -1258,7 +1259,7 @@ describe('doWorkflow（w6，fixture）', () => {
     ])
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-single-1', path: wfPath })
 
-    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, dir)
+    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as {
       runs: Array<{
         runId: string
@@ -1296,7 +1297,7 @@ describe('doWorkflow（w6，fixture）', () => {
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-multi-1', path: wf1 })
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-multi-2', path: wf2 })
 
-    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, dir)
+    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as { runs: Array<{ runId: string }>; runIds: string[] }
     expect(d.runs).toHaveLength(2)
     expect(d.runIds).toHaveLength(2)
@@ -1321,7 +1322,7 @@ describe('doWorkflow（w6，fixture）', () => {
 
     const r = await handleSessionRead(
       { action: 'workflow', session: WF_ROOT, runId: 'wf-filter-1' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as {
       runs: Array<{ runId: string }>
@@ -1350,7 +1351,7 @@ describe('doWorkflow（w6，fixture）', () => {
 
     const r = await handleSessionRead(
       { action: 'workflow', session: WF_ROOT, runId: 'wf-nonexist' },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as { runs: unknown[]; runIds: string[]; requestedRunId?: string }
     expect(d.runs).toEqual([])
@@ -1369,7 +1370,7 @@ describe('doWorkflow（w6，fixture）', () => {
     await wfMainSession(dir, slug, WF_ROOT)
     // 无 wf-link（session 存在但未发起 workflow）
 
-    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, dir)
+    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as { runs: unknown[]; runIds: unknown[]; sessionId?: string }
     expect(d.runs).toEqual([])
     expect(d.runIds).toEqual([])
@@ -1391,7 +1392,7 @@ describe('doWorkflow（w6，fixture）', () => {
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-skip-1', path: ghostPath })
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-skip-2', path: wf2 })
 
-    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, dir)
+    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as {
       runs: Array<{ runId: string }>
       runIds: string[]
@@ -1421,7 +1422,7 @@ describe('doWorkflow（w6，fixture）', () => {
     await wfLink(dir, slug, WF_ROOT, { runId: 'wf-jump-1', path: wfPath })
 
     // 第一次：workflow 概览，拿 call sessionId
-    const rWf = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, dir)
+    const rWf = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const dWf = rWf.details as {
       runs: Array<{ steps: Array<{ sessionId: string; sessionFile: string }> }>
     }
@@ -1432,7 +1433,7 @@ describe('doWorkflow（w6，fixture）', () => {
     // 第二次：用 call sessionId 调 outline（m0 resolveSessionId 三形态复用）
     const rOutline = await handleSessionRead(
       { action: 'outline', session: callSessionId },
-      dir,
+      { agentDir: dir },
     )
     const dOutline = rOutline.details as { turns: unknown[] }
     expect(dOutline.turns.length).toBeGreaterThan(0)
@@ -1469,7 +1470,7 @@ describe('doWorkflow（w6，fixture）', () => {
       { flag: 'a' },
     )
 
-    const r = await handleSessionRead({ action: 'workflow', session: SUB_WF_ROOT }, dir)
+    const r = await handleSessionRead({ action: 'workflow', session: SUB_WF_ROOT }, { agentDir: dir })
     const d = r.details as { runs: Array<{ runId: string }>; runIds: string[] }
     expect(d.runs).toHaveLength(1)
     expect(d.runs[0].runId).toBe('wf-sub-1')
@@ -1490,7 +1491,7 @@ describe.skipIf(!HAS_REAL_WF_SESSION)('doWorkflow - 真实数据守卫', () => {
   it('TC-w6-real-data-guard：真实 workflow session doWorkflow 返回 run 概览', async () => {
     const r = await handleSessionRead(
       { action: 'workflow', session: REAL_WF_SESSION },
-      REAL,
+      { agentDir: REAL },
     )
     const d = r.details as {
       runs: Array<{ runId: string; status: string; steps: unknown[] }>
@@ -1529,7 +1530,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
   })
 
   it('TC-m3b-dofamily-recursive-false：不传 recursive → flat family（m0-m2 零回归）', async () => {
-    const r = await handleSessionRead({ action: 'family', session: MAIN }, dir)
+    const r = await handleSessionRead({ action: 'family', session: MAIN }, { agentDir: dir })
     // details 是 Family 对象（root/subagents/workflows），非 { tree }
     const d = r.details as {
       root: { sessionId: string }
@@ -1547,7 +1548,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
   it('TC-m3b-dofamily-recursive-true：recursive=true → ExecutionTree（details.tree）', async () => {
     const r = await handleSessionRead(
       { action: 'family', session: MAIN, recursive: true },
-      dir,
+      { agentDir: dir },
     )
     const d = r.details as {
       tree: {
@@ -1803,7 +1804,7 @@ describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob + �
     // 之后新 session 落盘
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'found-later.jsonl'), 'id-find-later-xyz')
     // find 实扫立即可见——若 find 读 doctor 缓存（0 候选）此断言必红
-    const r = await handleSessionRead({ action: 'find', query: 'id-find-later-xyz' }, agentDir)
+    const r = await handleSessionRead({ action: 'find', query: 'id-find-later-xyz' }, { agentDir })
     const d = r.details as { matches: Array<{ sessionId: string }> }
     expect(d.matches.some((m) => m.sessionId.includes('id-find-later-xyz'))).toBe(true)
   })
@@ -1871,7 +1872,7 @@ describe('u9 F1 重写 + uuid 归一化（fixture，§5.2 / §6.7 / §11.5）', 
 
   /** find action 便捷调用（agentDir = tmp/agent）。 */
   function find(query: string, extra?: Partial<SessionReadParams>): Promise<ToolResultLike> {
-    return handleSessionRead({ action: 'find', query, ...extra }, join(tmp, 'agent'))
+    return handleSessionRead({ action: 'find', query, ...extra }, { agentDir: join(tmp, 'agent') })
   }
 
   interface ToolResultLike {
@@ -2072,7 +2073,7 @@ describe('片段解析接通 [live] 根（fixture，同一 roots 契约）', () 
     // 负向对照：不传 liveSessionDir（三根降级）→ 同一片段 F1 零匹配
     //（[default]/[legacy]/[subagent] 均无此文件——证明命中确实来自 [live] 根）
     await expect(
-      handleSessionRead({ action: 'outline', session: FRAGMENT }, agentDir),
+      handleSessionRead({ action: 'outline', session: FRAGMENT }, { agentDir }),
     ).rejects.toThrow(/无匹配 session/)
   })
 
@@ -2176,7 +2177,7 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
     query: string,
     extra?: Partial<SessionReadParams>,
   ): ReturnType<typeof handleSessionRead> {
-    return handleSessionRead({ action: 'find', query, ...extra }, join(tmp, 'agent'))
+    return handleSessionRead({ action: 'find', query, ...extra }, { agentDir: join(tmp, 'agent') })
   }
 
   interface FindDetails {
@@ -2304,7 +2305,7 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
 
     const res = await handleSessionRead(
       { action: 'result', session: 'sa-u10-r1,sa-u10-r2' },
-      join(tmp, 'agent'),
+      { agentDir: join(tmp, 'agent') },
     )
     const text = res.content[0].text
     expect(text).toContain(`(session ${R1.slice(0, 8)}…)`)
@@ -2331,7 +2332,7 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
 
     // 解析路径（resolveByFragment → findSessions limit:10 无 source）保持 mtime 排序 +
     // limit 截断原语义：5 命中全进 F2 消歧候选，无 main 置顶/配额分组介入（§6.7 末条）
-    const r = await handleSessionRead({ action: 'outline', session: PREFIX }, join(tmp, 'agent'))
+    const r = await handleSessionRead({ action: 'outline', session: PREFIX }, { agentDir: join(tmp, 'agent') })
     const d = r.details as { ambiguous: boolean; candidates: Array<{ sessionId: string }> }
     expect(d.ambiguous).toBe(true)
     expect(d.candidates).toHaveLength(5)
@@ -2567,7 +2568,7 @@ describe('u12 跨会话内容检索（fixture，V8）', () => {
     const ids = Array.from({ length: MULTI_SEARCH_MAX_SESSIONS + 1 }, (_, i) => mainId(i + 10))
     const r = await handleSessionRead(
       { action: 'search', session: ids.join(','), pattern: 'adj_factor' },
-      join(tmp, 'agent'),
+      { agentDir: join(tmp, 'agent') },
     )
     const text = r.content[0].text
     expect(text).toContain('跨会话检索已拒绝')
@@ -2697,7 +2698,7 @@ describe('u12 跨会话内容检索（fixture，V8）', () => {
     await writeSession(A, [{ role: 'user', text: '普通内容' }])
     const r = await handleSessionRead(
       { action: 'search', session: `${A},${GHOST}`, pattern: 'zzznothing' },
-      join(tmp, 'agent'),
+      { agentDir: join(tmp, 'agent') },
     )
     const text = r.content[0].text
     expect(text).toContain('0/1 session(s) hit for /zzznothing/')
@@ -2721,7 +2722,7 @@ describe('u12 跨会话内容检索（fixture，V8）', () => {
     // 单 id：原 details.hits 结构与 header 形态不变
     const r = await handleSessionRead(
       { action: 'search', session: A, pattern: 'plugin' },
-      join(tmp, 'agent'),
+      { agentDir: join(tmp, 'agent') },
     )
     expect(r.content[0].text).toContain('1 hit(s) for /plugin/')
     const d = r.details as { hits: unknown[]; truncated: boolean; scanned?: unknown }
@@ -2731,7 +2732,7 @@ describe('u12 跨会话内容检索（fixture，V8）', () => {
     // pattern 含逗号不触发跨会话（分流只看 session）
     const r2 = await handleSessionRead(
       { action: 'search', session: A, pattern: 'aaa,bbb' },
-      join(tmp, 'agent'),
+      { agentDir: join(tmp, 'agent') },
     )
     expect((r2.details as { hits: unknown[] }).hits).toHaveLength(0)
     expect((r2.details as { scanned?: unknown }).scanned).toBeUndefined()
