@@ -51,8 +51,16 @@
         @drop.prevent="onDrop"
       >
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
-             仅 border-b 分隔，Zap/Clock icon + truncate 文本）——6 区第 1 位 -->
-        <QueueBubble :state="queueState" />
+             仅 border-b 分隔，Zap/Clock/Hourglass icon + truncate 文本）——6 区第 1 位。
+             [compact-defer-composer-queue u1] defer 行三 props（deferEntries/deferChip/deferHint）
+             由本组件从 useCompactQueue + sessionPhase 算好传入；@remove-defer 撤销未提交条目 -->
+        <QueueBubble
+          :state="queueState"
+          :defer-entries="deferEntries"
+          :defer-chip="deferChip"
+          :defer-hint="deferHint"
+          @remove-defer="onRemoveDefer"
+        />
         <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
              经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
         <div
@@ -204,6 +212,8 @@ import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
 import QueueBubble from './QueueBubble.vue'
 import { useChatStore } from '@/stores/chat'
+import { useCompactQueue } from '@/composables/panel/useCompactQueue'
+import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
@@ -235,6 +245,39 @@ const isActive = computed(() => {
 /** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
 const queueState = computed(() => (props.sessionId ? chatStore.getQueueState(props.sessionId) : undefined))
+
+// [compact-defer-composer-queue u1] defer 行数据源：useCompactQueue 单例 peek 过滤未提交条目
+//（mode === undefined——双数据源归一规则：已提交条目不渲染 defer 行，承接面分通道）。
+const queue = useCompactQueue()
+const deferEntries = computed<QueuedMessage[]>(() => {
+  if (!props.sessionId) return []
+  return queue.peek(props.sessionId).filter((m) => m.mode === undefined)
+})
+
+// defer 行 chip 分档（compacting > bash > 其他，与 PendingBubble.pendingHint 同优先级）
+const deferChip = computed(() => {
+  if (!props.sessionId) return t('panel.deferQueue.deferChipFallback')
+  const phase = chatStore.sessionPhase(props.sessionId)
+  if (phase.compacting) return t('panel.deferQueue.deferChipCompacting')
+  if (phase.bash) return t('panel.deferQueue.deferChipBash')
+  return t('panel.deferQueue.deferChipFallback')
+})
+
+// defer 行 hover title 分档（自 PendingBubble.pendingHint 逻辑迁移；PendingBubble.vue 归 u2
+// 删除，本处只迁逻辑不删文件）
+const deferHint = computed(() => {
+  if (!props.sessionId) return t('panel.deferQueue.pendingHint')
+  const phase = chatStore.sessionPhase(props.sessionId)
+  if (phase.compacting) return t('panel.deferQueue.pendingHintCompacting')
+  if (phase.bash) return t('panel.deferQueue.pendingHintBash')
+  if (phase.turn !== 'idle') return t('panel.deferQueue.pendingHintSettling')
+  return t('panel.deferQueue.pendingHint')
+})
+
+function onRemoveDefer(id: string): void {
+  // remove 对未知/已提交 id 本就 no-op（边界在 API 层）；deferEntries 已过滤为未提交条目
+  if (props.sessionId) queue.remove(props.sessionId, id)
+}
 const draft = ref('')
 const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 // W4：shell 的 input 契约是结构类型 ShellInputInstance（composer-shell.ts）——

@@ -63,6 +63,8 @@ export default {
     viewCommandDoc: '查看命令文档',
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
+    // [compact-defer-composer-queue u1] 压缩中活动带副文案（u3 消费；u1 负责新增 key）
+    compactingFlushHint: '完成后自动发送 {count} 条待发消息',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
@@ -314,9 +316,12 @@ export default {
     pendingHintBash: '等待命令执行结束后发送',
     pendingHintSettling: '等待当前回合结束后发送',
     cancelQueued: '撤销排队',
-    submittedAwaitingDelivery: '已提交，等待投递',
     chipBadge: '+{count}',
     chipBadgeHint: '含 {count} 个附件/引用，将随消息一并发送',
+    // [compact-defer-composer-queue u1] defer 行占用分档 chip（压缩后 / 命令后 / 稍后发送）
+    deferChipCompacting: '压缩后',
+    deferChipBash: '命令后',
+    deferChipFallback: '稍后发送',
   },
   contextChips: {
     removeFromContext: '从上下文移除',

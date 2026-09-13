@@ -14,15 +14,19 @@
  */
 
 /**
- * compaction notice 占位高度。
- * 强绑定 DOM：ActivityStrip compacting 行（`system-notice content-col flex items-center gap-2 py-1`，
- * 含 `size-3` spinner + `text-[length:var(--text-xs)] leading-snug` 文本 + 两条 `h-px` 分隔线）。
- *   实际高度 = py-1(4px×2) + 内容 max(spinner 12px, text≈16px) ≈ 24px。
- *   [u6a] 行迁入 ActivityStrip（文档流 block，Virtualizer 之后），DOM 结构逐 class 等价 →
- *   高度语义不变；此常量供 ActivityStrip 行渲染消费 + dev 断言（useConstantHeightAssert）监测。
+ * compaction notice 占位高度（[compact-defer-composer-queue §2.2] 升级为通栏活动带）。
+ * 强绑定 DOM：ActivityStrip compacting 行（`-mx-5 flex items-center justify-center gap-2
+ * border-y border-hairline bg-[var(--accent-soft)] px-5 py-[14px]`，含 `size-3.5` spinner +
+ * `text-[length:var(--text-sm)]` 主文案 + 可选「·」+ `text-[length:var(--text-xs)]` 副文案）。
+ *   实际高度（getBoundingClientRect 含 border）= py-[14px](14px×2) + 内容行
+ *   max(spinner, text-sm×1.5≈19.5px)≈20px + border-y(1px×2) ≈ 50px。
+ *   [u6a] 行迁入 ActivityStrip（文档流 block，Virtualizer 之后）；§2.2 将 hairline 由两条
+ *   `h-px` span 改为 border-y、system-notice/content-col 摘除（通栏带），高度语义同步变更。
+ *   此常量供 ActivityStrip 行渲染消费 + dev 断言（useConstantHeightAssert）监测——
+ *   border-y 计入与否以真机 dev 断言实测校准为准（理论值 50，±2px 内属亚像素/字号抖动）。
  *   改 padding/字号/icon 必须重测并同步此常量（dev 断言会提醒）。
  */
-export const COMPACTING_NOTICE_HEIGHT = 24
+export const COMPACTING_NOTICE_HEIGHT = 50
 
 /**
  * executing bash 瞬时行占位高度（W4 完整形态）。

@@ -41,7 +41,7 @@ Panel.vue (sessionId 存在, messageCount > 0)
 |--------|---------|------|
 | `composer-box` | Composer.vue:25 | composer 容器（唯一有 testid 的对话流相关元素） |
 
-> ✅ **testid 已大量落地**（原「关键缺口」前置已失效）：`Turn.vue` → `turn-{index}` / `turn-meta-{index}`；`Block.vue` → `block-text`（文本块）/ `tool-block-header`（工具块 header）；`ChangeSetCard.vue` → `change-set-card` / `change-set-header` / `change-set-file`；`SystemNotice.vue` → `subagent-directive-bubble`（subagent 指令行）；`MessageStream.vue` → `pending-bubble-list` / `load-more-history`。以源码 grep 为准，新增交互面随组件补。
+> ✅ **testid 已大量落地**（原「关键缺口」前置已失效）：`Turn.vue` → `turn-{index}` / `turn-meta-{index}`；`Block.vue` → `block-text`（文本块）/ `tool-block-header`（工具块 header）；`ChangeSetCard.vue` → `change-set-card` / `change-set-header` / `change-set-file`；`SystemNotice.vue` → `subagent-directive-bubble`（subagent 指令行）；`MessageStream.vue` → `load-more-history`；`QueueBubble.vue` → `queue-bubble`（composer 队列区 defer 行）。以源码 grep 为准，新增交互面随组件补。
 
 **当前可用的文本锚点**（无需 testid，按 mock 固定文案断言）：
 
@@ -398,7 +398,7 @@ test.describe('对话流 E2E', () => {
 
 | 约束 | 说明 |
 |------|------|
-| ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/pending-bubble-list/load-more-history 等已可用（见 §3 清单）；新增交互面随组件补，未覆盖处才退回文本/class 锚点 |
+| ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/queue-bubble/load-more-history 等已可用（见 §3 清单）；新增交互面随组件补，未覆盖处才退回文本/class 锚点 |
 | ⚠️ mock 流式耗时 | 一轮约 3-4 秒。E2E timeout 给 15s，用 `toBeVisible({timeout})` 等终态，禁止固定 sleep |
 | ❌ mock 不模拟失败 | 错误路径（message.error/stream_error）无法 mock E2E 触发，只能单测验证（chat-streaming-reset.test.ts） |
 | ❌ mock 不模拟 WS 断连 | WS 生命周期（断连/重连）只能非 MOCK 测 |

@@ -63,6 +63,8 @@ export default {
     viewCommandDoc: 'View command docs',
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
+    // [compact-defer-composer-queue u1] compacting band sub-copy (consumed by u3; key added by u1)
+    compactingFlushHint: 'Will send {count} queued message(s) when done',
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
@@ -316,9 +318,12 @@ export default {
     pendingHintBash: 'Will be sent after the command finishes',
     pendingHintSettling: 'Will be sent after the current turn ends',
     cancelQueued: 'Cancel queued message',
-    submittedAwaitingDelivery: 'Submitted, awaiting delivery',
     chipBadge: '+{count}',
     chipBadgeHint: 'Contains {count} attachment/reference chip(s), sent along with the message',
+    // [compact-defer-composer-queue u1] defer row occupancy chip (After compact / After command / Later)
+    deferChipCompacting: 'After compact',
+    deferChipBash: 'After command',
+    deferChipFallback: 'Later',
   },
   contextChips: {
     removeFromContext: 'Remove from context',
