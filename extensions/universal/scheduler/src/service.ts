@@ -49,7 +49,9 @@ export class SchedulerService {
     scheduleInput: string,
     options: AddOptions = {},
   ): Promise<ServiceResult<{ task: ScheduledTask; nextRuns: number[] }>> {
-    const parsed = await parseSchedule(scheduleInput)
+    // parseSchedule 同步化（D2）后返回值即 ScheduleSpec（L7：不再包装 { spec }）；
+    // undefined 唯一语义 = 表达式无效——croner 是 dependencies 恒在盘，不存在解析器缺失
+    const parsed = parseSchedule(scheduleInput)
     if (!parsed) {
       return {
         success: false,
@@ -60,7 +62,7 @@ export class SchedulerService {
 
     let task: ScheduledTask
     try {
-      task = await this.runtime.addTask(prompt, parsed.spec, options)
+      task = await this.runtime.addTask(prompt, parsed, options)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.startsWith('Task limit reached')) {
@@ -73,7 +75,7 @@ export class SchedulerService {
     const count = task.kind === 'once' ? 1 : PREVIEW_RUN_COUNT
     // 消息内相对时间与 nextRuns 必须同基准：分开读时钟会在整点边界漂移（in 1h → in 59m）
     const now = this.now()
-    const nextRuns = await computeNextRuns(task.schedule, now, count)
+    const nextRuns = computeNextRuns(task.schedule, now, count)
     // once 单行内联回显（只执行 1 次，编号列表会误导）；recurring 保持 5 行编号列表
     const runPreview =
       task.kind === 'once'

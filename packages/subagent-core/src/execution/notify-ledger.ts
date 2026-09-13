@@ -316,7 +316,8 @@ export function createNotifyLedger(
       } catch {
         // 受理失败：留 pending（账已落盘，下一边沿重试 + 重启恢复兜底）。
         // U4 ②settleRejected 桶：投递尝试被拒按事件次计数（对齐内核 onSettled
-        // per-批次口径），增量落日志供回归定位。
+        // per-message 终态口径——批次内每条各回调一次，ext-simplify-08 D1/B1），
+        // 增量落日志供回归定位。
         buckets.settleRejected += 1;
         emitBucketLog("settleRejected", buckets.settleRejected, { pending: pending.length });
         return;

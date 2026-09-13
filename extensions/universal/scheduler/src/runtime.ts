@@ -18,7 +18,16 @@ import type {
 const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
-// 入队防重标记 TTL 分钟数（合批非首条任务无终态回调，过期后放行重投；10 min >> 合批窗口）
+// 入队防重标记 TTL 分钟数。TTL 语义 = 回收层有界兜底（ext-simplify-08 D1：内核
+// onSettled 已 per-message 化，合批每条各自终态回调，TTL 不再承担合批补偿主职能），
+// 仅覆盖两类触发源：(a) 终态回调丢失异常（内核 bug / port.send 结果丢失，预期罕见）
+// ——标记过期后放行重投，保持 at-least-once；(b) busy 持续超窗的慢投递（长任务场景
+// 常规可达，< 10min busy 窗口不触发）——per-message 无法防（回调只能等投递终态到达），
+// 副本数 = ⌈busy 超窗时长 / 10min⌉（TTL 窗口自最近一次入队起算），settled 后全部
+// 合批注入：runCount 逐条多计同数，nextRunAt 两次赋值同值不跳周期（computeNextRunAt
+// 绝对时间锚定：interval = start + intervalMs、cron 为 startAt 起下次命中；同批回调
+// 背靠背到达，from 相差毫秒算出同一周期）。10 min 本质是「重复注入风险 vs 投递延迟
+// 上限」的权衡参数，非纯异常兜底。
 const QUEUE_DEDUPE_TTL_MINUTES = 10
 const QUEUE_DEDUPE_TTL_MS = QUEUE_DEDUPE_TTL_MINUTES * MS_PER_MINUTE
 const RATE_LIMIT_PER_MINUTE = 6
@@ -47,8 +56,9 @@ export class SchedulerRuntime {
   // 终态回调（handleSettled）前，nextRunAt 未推进——tick step2 会按 `now >= nextRunAt`
   // 重新置 pending，若无此标记，agent busy 的每个 tick 都会再压一份同 prompt 副本进队列
   // （合批后重复注入）。入队置位、delivered/rejected 清除；任务删除（delete/过期）同步清除。
-  // TTL 兜底：合批投递时 onSettled 只带首条 dedupeKey，非首条任务收不到终态回调——
-  // 标记过期后允许重投，保持 at-least-once（与旧「nextRunAt 未推进下 tick 重投」等价）。
+  // TTL 兜底：终态回调丢失的回收层有界兜底（两类触发源见 QUEUE_DEDUPE_TTL_MINUTES
+  // 注释；内核 onSettled 已 per-message 化，合批每条各自回调，本标记不再承担合批补偿）
+  // ——标记过期后允许重投，保持 at-least-once。
   private readonly queuedInDeliveryAt = new Map<string, number>()
   // delivery handle（装配点注入；非 force 任务走内核队列）
   private delivery: DeliveryHandle | undefined
@@ -94,8 +104,8 @@ export class SchedulerRuntime {
       expiresAt = now + expiryMs
     }
 
-    // 统一 nextRunAt 计算：interval → now + intervalMs；cron → 下次命中
-    const nextRunAt = await computeNextRunAt(schedule, now)
+    // 统一 nextRunAt 计算：interval → now + intervalMs；cron → 下次命中（D2 后同步）
+    const nextRunAt = computeNextRunAt(schedule, now)
     if (nextRunAt === undefined) {
       // 创建时校验失败报错给用户（仅 cron 可能 undefined，interval 恒有值）
       const expr = schedule.mode === 'cron' ? schedule.cronExpression : '<unknown>'
@@ -146,7 +156,7 @@ export class SchedulerRuntime {
     let recalcedNext: number | undefined
     // enable 时若 nextRunAt 已过期，重算，避免 enable 瞬间立即触发
     if (enabled && task.nextRunAt < this.backend.now()) {
-      const next = await computeNextRunAt(task.schedule, this.backend.now())
+      const next = computeNextRunAt(task.schedule, this.backend.now())
       if (next === undefined) {
         // ERR-2 fallback：cron 表达式失效 → 停用任务并记录失败原因。
         // 禁止 `?? now()` 类 fallback（会使 nextRunAt=now，下个 tick 立即重算 → 死循环）
@@ -414,7 +424,7 @@ export class SchedulerRuntime {
       this.tasks.delete(task.id)
       this.appendEntrySafe({ op: 'delete', taskId: task.id })
     } else {
-      const next = await computeNextRunAt(task.schedule, now)
+      const next = computeNextRunAt(task.schedule, now)
       if (next === undefined) {
         task.enabled = false
         task.lastStatus = 'failed'
@@ -436,16 +446,14 @@ export class SchedulerRuntime {
   }
 
   /**
-   * onSettled 回调入口（index.ts 装配点绑定）：delivery 内核投递终态时调用。
+   * onSettled 回调入口（index.ts 装配点绑定）：delivery 内核投递终态时调用
+   * （内核 per-message 终态：批次内每条各回调一次，msg 为该条原始消息而非 composed
+   * 合批消息——ext-simplify-08 D1/B1，与 session-delivery delivery.ts 口径一致）。
    * delivered → 成功记账（onDispatchSuccess）；rejected → 失败记账。
    * once 任务失败不删持久化（at-least-once 语义）。
    * #11：按 msg.dedupeKey（dispatch 时挂的 task.id，见 dispatchViaDelivery）精确反查
    * tasks Map——旧 content 反查在「同 prompt 多任务」下错配（find 取首个命中），
-   * 任务已删除时静默丢弃不误记。反查未命中（once 成功已删 / 批量合投非首条 /
-   * 非 scheduler 消息）直接返回。
-   * 已知限制：内核 busy 期间多条消息合投为一批时（doSend splice 全队列），onSettled
-   * 只收到保留首条 dedupeKey 的 composed 消息——非首条任务不记账，靠下个 tick 的
-   * nextRunAt 未推进重投（at-least-once 兜底），与旧 content 反查行为等价不劣化。
+   * 任务已删除时静默丢弃不误记。反查未命中（once 成功已删 / 非 scheduler 消息）直接返回。
    */
   handleSettled(msg: DeliveryMessage, outcome: 'delivered' | 'rejected'): void {
     const taskId = msg.dedupeKey

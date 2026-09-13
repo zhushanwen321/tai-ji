@@ -80,12 +80,6 @@ export interface SchedulerStore {
   tasks: ScheduledTask[]
 }
 
-// ── 解析结果 ──
-
-export interface ParseScheduleResult {
-  spec: ScheduleSpec
-}
-
 // ── 添加选项 ──
 
 export interface AddOptions {

@@ -84,7 +84,7 @@ describe('property: parseDuration/parseSchedule round-trip', () => {
           // 无空格字符串 → 恒走 duration 分支 → interval mode + 同一 intervalMs
           const parsed = await parseSchedule(text)
           expect(parsed).toBeDefined()
-          expect(parsed!.spec).toEqual({ mode: 'interval', intervalMs: expectedMs })
+          expect(parsed!).toEqual({ mode: 'interval', intervalMs: expectedMs })
         },
       ),
     )

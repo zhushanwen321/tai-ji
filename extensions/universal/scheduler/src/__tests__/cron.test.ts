@@ -5,8 +5,8 @@
 // 此文件集中测 cron 相关导出：normalizeCronExpression / computeNextCronRunAt /
 // computeNextCronRuns / parseSchedule(cron) / computeNextRuns(cron)。
 //
-// croner 包是动态 import 的，测试时已安装（package.json peerDep croner ^9.0.0），
-// getCroner() 能正常返回模块，故 cron 路径在此可真实执行。
+// croner 是 dependencies + 静态 import（ext-simplify-08 D2），解析链同步化，
+// cron 路径在此真实执行（无需 mock）。
 
 import { describe, expect, it } from 'vitest'
 
@@ -60,16 +60,14 @@ describe('computeNextCronRuns', () => {
 describe('parseSchedule (cron 分支)', () => {
   it('5 字段 cron 表达式补秒字段', async () => {
     const result = await parseSchedule('*/10 * * * *')
-    expect(result).toEqual({
-      spec: { mode: 'cron', cronExpression: '0 */10 * * * *' },
-    })
+    expect(result).toEqual({ mode: 'cron', cronExpression: '0 */10 * * * *' })
   })
 
   it('工作日 9 点 cron 表达式返回 cron mode', async () => {
     const result = await parseSchedule('0 9 * * 1-5')
     expect(result).toBeDefined()
-    expect(result!.spec.mode).toBe('cron')
-    expect(result!.spec).toEqual({ mode: 'cron', cronExpression: '0 0 9 * * 1-5' })
+    expect(result!.mode).toBe('cron')
+    expect(result!).toEqual({ mode: 'cron', cronExpression: '0 0 9 * * 1-5' })
   })
 
   it('含空格但非法的表达式返回 undefined', async () => {

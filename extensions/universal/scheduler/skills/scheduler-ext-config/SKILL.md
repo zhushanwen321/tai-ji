@@ -59,7 +59,7 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 - **5 字段**（分 时 日 月 周）：自动在最前面补秒字段 `0`，变成 6 字段。例 `*/10 * * * *` → `0 */10 * * * *`（每 10 分钟）。
 - **6 字段**（秒 分 时 日 月 周）：原样使用。
 - 其他字段数（<5 或 >6）视为无效。
-- 底层用 `croner` 库（peerDependency，运行时动态 `import('croner')`；未安装时 cron 任务全部解析失败，interval 不受影响）。
+- 底层用 `croner` 库（dependencies + 静态 import，解析器随包安装恒在盘；cron 解析失败即表达式无效，interval 不受影响）。
 - 创建时即校验表达式有效性（算不出下次执行时间 → `INVALID_SCHEDULE`）；运行中表达式失效（极少见，如月份边界）→ 任务被停用并记 `lastError='cron expression invalid'`。
 
 示例：`*/30 * * * *`（每 30 分）、`0 9 * * 1-5`（工作日早 9 点）、`0 0 * * *`（每天 0 点）。
@@ -185,7 +185,7 @@ schedule({ prompt: "...", schedule: "1h", kind: "recurring", force: true, expire
 
 ## 备注
 
-- **croner 依赖**：cron 模式依赖 `croner`（peerDependency）。未安装时所有 cron 任务解析失败（返回 `INVALID_SCHEDULE`），interval 任务不受影响。集成方（如 xyz-agent mandatory 安装）需确保 `croner` 可用。
+- **croner 依赖**：cron 模式依赖 `croner`（dependencies，随包自动安装 + 静态 import，2026-09 0.6.0 起；此前为 optional peer，独立安装形态下 cron 任务会静默失败）。cron 解析失败（`INVALID_SCHEDULE`）= 表达式无效，不存在「解析器未安装」形态。
 - **数据目录隔离**：任务存储在 `getAgentDir()` 指向的 session JSONL。xyz-agent 通过 `XYZ_AGENT_DATA_DIR` / `PI_CODING_AGENT_DIR` 隔离实例时，任务随 session 落在隔离目录，与 `~/.pi/agent` 互不干扰。
 - **无配置 schema 可编辑**：scheduler 的所有状态都由运行时命令产生，没有可手动编辑的配置文件。要「批量预置任务」只能在 session 内逐条创建（或迁移旧 store）。
 - **TUI 管理器未实现**：无参 `/schedule` 当前只返回提示，任务管理请用 `list`/`on`/`off`/`rm`/`run` 子命令或 `schedule_control` 工具。

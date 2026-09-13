@@ -1,4 +1,9 @@
-import type { ParseScheduleResult, ScheduleSpec } from './types.js'
+// croner 是 dependencies + 静态 import（ext-simplify-08 D2/M18）：npm 语义保证全安装
+// 形态在盘（独立安装 / builtin inline 同构），不存在「解析器缺失」分支——undefined
+// 的唯一语义 = 表达式无效。
+import { Cron } from 'croner'
+
+import type { ScheduleSpec } from './types.js'
 
 // ── Duration 解析 ──
 
@@ -65,19 +70,6 @@ const CRON_FIELD_COUNT_WITH_SECONDS = 6
 /** computeNextCronRuns / computeNextRuns 默认返回的未来执行时间数。 */
 const DEFAULT_NEXT_RUNS_COUNT = 5
 
-let cronerModule: typeof import('croner') | null | undefined
-
-async function getCroner(): Promise<typeof import('croner') | null> {
-  if (cronerModule !== undefined) return cronerModule
-  try {
-    cronerModule = await import('croner')
-    return cronerModule
-  } catch {
-    cronerModule = null
-    return null
-  }
-}
-
 /**
  * 规范化 cron 表达式：5 字段自动补秒字段。
  * 返回 undefined 表示无效。
@@ -103,20 +95,17 @@ export function normalizeCronExpression(input: string): string | undefined {
 
 /**
  * 计算 cron 表达式的下次执行时间。
- * 返回 undefined 表示表达式无效或 croner 不可用。
+ * 返回 undefined 的唯一语义 = 表达式无效（croner 静态 import 恒在盘，见文件头注释）。
  */
-export async function computeNextCronRunAt(
+export function computeNextCronRunAt(
   expression: string,
   from?: number,
-): Promise<number | undefined> {
-  const croner = await getCroner()
-  if (!croner) return undefined
-
+): number | undefined {
   try {
     const normalized = normalizeCronExpression(expression)
     if (!normalized) return undefined
 
-    const job = new croner.Cron(normalized, { startAt: from ? new Date(from) : undefined })
+    const job = new Cron(normalized, { startAt: from ? new Date(from) : undefined })
     const next = job.nextRun()
     return next ? next.getTime() : undefined
   } catch {
@@ -126,21 +115,18 @@ export async function computeNextCronRunAt(
 
 /**
  * 计算 cron 表达式的多个未来执行时间。
- * count 默认 5。
+ * count 默认 5；表达式无效 → 空数组。
  */
-export async function computeNextCronRuns(
+export function computeNextCronRuns(
   expression: string,
   from?: number,
   count = DEFAULT_NEXT_RUNS_COUNT,
-): Promise<number[]> {
-  const croner = await getCroner()
-  if (!croner) return []
-
+): number[] {
   try {
     const normalized = normalizeCronExpression(expression)
     if (!normalized) return []
 
-    const job = new croner.Cron(normalized, { startAt: from ? new Date(from) : undefined })
+    const job = new Cron(normalized, { startAt: from ? new Date(from) : undefined })
     const runs: number[] = []
     let current = from ? new Date(from) : new Date()
 
@@ -160,14 +146,12 @@ export async function computeNextCronRuns(
 // ── 统一解析 ──
 
 /**
- * 统一解析 schedule 输入。
+ * 统一解析 schedule 输入为 ScheduleSpec（L7：不包装单字段结果对象）。
  * 不含空格 → duration 解析 → interval mode
  * 含空格 → cron 解析 → cron mode
- * 都失败 → undefined
+ * 都失败 → undefined（语义 = 表达式无效，service 层归一为 INVALID_SCHEDULE 单一错误通道）
  */
-export async function parseSchedule(
-  input: string,
-): Promise<ParseScheduleResult | undefined> {
+export function parseSchedule(input: string): ScheduleSpec | undefined {
   const trimmed = input.trim()
   if (!trimmed) return undefined
 
@@ -175,9 +159,7 @@ export async function parseSchedule(
   if (!trimmed.includes(' ')) {
     const ms = parseDuration(trimmed)
     if (ms !== undefined) {
-      return {
-        spec: { mode: 'interval', intervalMs: ms },
-      }
+      return { mode: 'interval', intervalMs: ms }
     }
     return undefined
   }
@@ -186,11 +168,9 @@ export async function parseSchedule(
   const normalized = normalizeCronExpression(trimmed)
   if (normalized) {
     // 验证 cron 表达式有效
-    const nextRun = await computeNextCronRunAt(trimmed)
+    const nextRun = computeNextCronRunAt(trimmed)
     if (nextRun !== undefined) {
-      return {
-        spec: { mode: 'cron', cronExpression: normalized },
-      }
+      return { mode: 'cron', cronExpression: normalized }
     }
   }
 
@@ -200,14 +180,14 @@ export async function parseSchedule(
 /**
  * 统一计算 schedule 的下次执行时间（IF-5：runtime 内唯一 nextRunAt 计算入口）。
  * interval → from + intervalMs（from 缺省 Date.now()）；
- * cron → 下次命中时间戳（> from）；cron 无效或 croner 不可用 → undefined。
+ * cron → 下次命中时间戳（> from）；cron 无效 → undefined。
  * undefined 语义按调用方决策：addTask → 创建即抛错；
  * toggleTask/dispatchTask 重算 → ERR-2 fallback（停用 + failed）。
  */
-export async function computeNextRunAt(
+export function computeNextRunAt(
   spec: ScheduleSpec,
   from?: number,
-): Promise<number | undefined> {
+): number | undefined {
   if (spec.mode === 'interval') {
     const start = from ?? Date.now()
     return start + spec.intervalMs
@@ -222,11 +202,11 @@ export async function computeNextRunAt(
  * 统一计算多个未来执行时间。
  * interval 模式直接乘法，cron 模式调用 croner。
  */
-export async function computeNextRuns(
+export function computeNextRuns(
   spec: ScheduleSpec,
   from?: number,
   count = DEFAULT_NEXT_RUNS_COUNT,
-): Promise<number[]> {
+): number[] {
   if (spec.mode === 'interval') {
     const start = from ?? Date.now()
     return Array.from({ length: count }, (_, i) => start + spec.intervalMs * (i + 1))
