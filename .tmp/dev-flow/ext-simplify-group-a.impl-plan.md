@@ -160,6 +160,9 @@ graph LR
 | 06-u4 | 测试联动 5 文件（设计写 3 个） | tool.test 旧断言必红 + makeActiveState 含 phase 字面量，机械必然 | 接受 |
 | 06-u4 | executeComplete 的 persistPlanState 调用一并移除 | 该 persist 唯一目的是落盘死状态，删后写入内容与上一条 entry 逐字段重复（P1 实证无观测窗口） | 接受（死状态删除面顺带清账） |
 | 06-u4 | 三处显示面文案最小实现（status 去 phase 行 / 渲染删两态行 / summary 收常量化） | 设计未给字面量，「显示面同步简化」裁量 | 接受（在授权范围内） |
+| 04-U1 | re-export 实为 5 条 export 语句（7 符号）而非设计写的 6 条 | 设计计数口径与符号实际数差 1，删除面完全覆盖设计列举 | 接受（无遗漏无扩大） |
+| 04-U1 | 「导出面」叙事实际在 tool-handler.ts:57-58 而非设计写的 result-action.ts:8 | 行号漂移；4 处叙事全清，与设计意图等价 | 接受 |
+| 04-U2 | P1 落地 4 用例（设计点名三分支） | doFind 有两个互异零匹配入口，两者都须验证 roots 透传 | 接受（全覆盖优于点名） |
 
 ## 6 状态表
 
@@ -173,8 +176,8 @@ graph LR
 | 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
 | 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
 | 08-u4 | in-progress | 0 | - |
-| 04-U1 | in-progress | 0 | - |
-| 04-U2 | pending | 0 | - |
+| 04-U1 | committed | 1 | 398 绿 2 skip；re-export 零命中；G5③ 回写落位；commit 20dcfbe37 |
+| 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 |
 | 04-U3 | pending | 0 | - |
 | 04-U4 | pending | 0 | - |
 | 04-U5 | pending | 0 | - |

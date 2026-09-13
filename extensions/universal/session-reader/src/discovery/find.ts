@@ -658,6 +658,12 @@ async function fillFirstMessagePreviews(
  *   去重）并作标题窄化目标；缺省 = 现状三根降级行为。
  * - opts.metadataProvider：标题元数据注入（仅 keyword 路径 + recent 截断后补充消费）；
  *   缺省 = undefined = 现状行为（标题检索不可用，首条 user 匹配不受影响）。
+ *
+ * E1 预解析根复用（ext-simplify-04 §3 D1）：opts.roots = 调用方预解析的根列表——同一
+ * 次 doFind 内多段查询（分组 main/subagent 两路）复用同一次根解析，目录扫描不随查询
+ * 段数翻倍。缺省 = 本函数自解析（既有测试与单段调用方零改动）。调用方须保证传入的
+ * roots 来自无 options 的 resolveSessionRoots 实扫（find 路径不读 doctor 缓存，
+ * §7B 要点 8 PS-14——预解析是复用同一次实扫，不是引入缓存）。
  */
 export async function findSessions(
   query: string,
@@ -668,18 +674,21 @@ export async function findSessions(
     source?: SessionSource
     liveSessionDir?: string
     metadataProvider?: SessionMetadataProvider
+    /** 预解析根列表（E1/D1）：提供则跳过内部 resolveSessionRoots，直接消费 */
+    roots?: SessionRoot[]
   },
 ): Promise<{ matches: MatchedSession[]; truncated: boolean }> {
   const limit = opts?.limit ?? DEFAULT_LIMIT
   const cwdFilter = opts?.cwd
   const sourceFilter = opts?.source
 
-  // 0. 根解析（单次实扫，无 options——find 不读 doctor 缓存，§7B 要点 8 PS-14）
+  // 0. 根解析（单次实扫，无 options——find 不读 doctor 缓存，§7B 要点 8 PS-14）；
+  // E1：调用方已预解析（opts.roots）时复用，不再自扫
   const signals: SessionRootSignals =
     opts?.liveSessionDir !== undefined && opts.liveSessionDir.length > 0
       ? { agentDir, liveSessionDir: opts.liveSessionDir }
       : { agentDir }
-  const roots = await resolveSessionRoots(signals)
+  const roots = opts?.roots ?? (await resolveSessionRoots(signals))
   // 0+1. 逐根首行扫描建候选
   const candidates = await collectCandidates(roots, sourceFilter, cwdFilter)
   // 2. 三路匹配（recent / uuid 片段 / 名称关键词+U5 元数据+u11 标题）

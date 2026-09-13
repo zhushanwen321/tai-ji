@@ -31,7 +31,7 @@ import {
   type SessionMetadataEntry,
   type SessionMetadataProvider,
 } from './discovery/find.js'
-import { resolveSessionRoots } from './discovery/roots.js'
+import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
 import {
   buildFamilyFromFs,
   listRecordManifests,
@@ -635,13 +635,15 @@ const FIND_DEFAULT_LIMIT = 20
 /**
  * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫，不读 doctor
  * 缓存——§7B 要点 8 PS-14），完整信号包保证 [live] 根（最高优先级）计数可见。
+ *
+ * E1（ext-simplify-04 §3 D1）：roots 由 doFind 预解析传入——与匹配用同一次实扫
+ * （调用方保证无 options），不再独立第三次全量扫盘。
  */
-function findNoMatch(query: string, signals: SessionReadSignals): Promise<ToolResult> {
-  // F1 自检行需要发现层实况：resolveSessionRoots 与 find 刚完成的扫描同一数据源。
-  return resolveSessionRoots(signals).then((roots) => ({
+function findNoMatch(query: string, roots: SessionRoot[]): ToolResult {
+  return {
     content: [{ type: 'text', text: formatNoMatch(query, roots) }],
     details: { matches: [], truncated: false },
-  }))
+  }
 }
 
 /**
@@ -663,6 +665,11 @@ function findNoMatch(query: string, signals: SessionReadSignals): Promise<ToolRe
  * 检索的惰性/窄化/TTL 缓存策略都在发现层与注入包装侧，本函数只负责透传（缺省
  * undefined = 现状行为）。多次 findSessions 调用（分组探测）经注入侧 TTL 缓存去重，
  * 标题 listAll 每 TTL 窗口至多一次/目录。
+ *
+ * E1 预解析根复用（ext-simplify-04 §3 D1，清 impl-plan D-15④ 债）：开头一次
+ * resolveSessionRoots(signals)（无 options 恒实扫，不读 doctor 缓存——§7B 要点 8
+ * PS-14），显式 source / 分组两段 findSessions 与零匹配 findNoMatch（F1 自检行）
+ * 共用——一次 doFind 内 signals 恒同值、数据完全同源，目录扫描从 2-3 次收敛为恒 1 次。
  */
 async function doFind(
   params: SessionReadParams,
@@ -672,6 +679,8 @@ async function doFind(
   const query = requireStr(params.query, 'query', 'find')
   const limit = params.limit ?? FIND_DEFAULT_LIMIT
   const cwd = params.cwd
+  // E1：单次根解析（完整信号包——空 liveSessionDir 由 sessionRootSpecs 内部 guard 降级）
+  const roots = await resolveSessionRoots(signals)
 
   // 显式 source：单组，匹配层原语义（mtime 排序 + limit 截断），无分组展示
   if (params.source !== undefined) {
@@ -681,8 +690,9 @@ async function doFind(
       source: params.source,
       liveSessionDir: signals.liveSessionDir,
       metadataProvider,
+      roots,
     })
-    if (matches.length === 0) return findNoMatch(query, signals)
+    if (matches.length === 0) return findNoMatch(query, roots)
     return {
       content: [
         {
@@ -705,6 +715,7 @@ async function doFind(
     source: 'main',
     liveSessionDir: signals.liveSessionDir,
     metadataProvider,
+    roots,
   })
   const mainHasMore = mainRes.matches.length > limit
   const mainShown = mainHasMore ? mainRes.matches.slice(0, limit) : mainRes.matches
@@ -719,12 +730,13 @@ async function doFind(
     source: 'subagent',
     liveSessionDir: signals.liveSessionDir,
     metadataProvider,
+    roots,
   })
   const subOverflow = remaining > 0 ? subRes.matches.length > remaining : subRes.matches.length > 0
   const subShown = subRes.matches.slice(0, Math.max(remaining, 0))
 
   const matches = [...mainShown, ...subShown]
-  if (matches.length === 0) return findNoMatch(query, signals)
+  if (matches.length === 0) return findNoMatch(query, roots)
   const truncated = mainHasMore || subOverflow
   return {
     content: [

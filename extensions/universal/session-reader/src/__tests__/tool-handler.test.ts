@@ -2357,6 +2357,103 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
 })
 
 // ============================================================
+// E1：find 单次根解析（ext-simplify-04 U2，探针 P1）。spy 打在 roots 模块命名空间
+// 上跨模块拦截（find.ts / findNoMatch 渲染链的消费点全走同一入口），断言 doFind
+// 全路径（分组 / 显式 source / 零匹配）resolveSessionRoots 恰调用 1 次——改前分组
+// 2 次、零匹配 3 次（impl-plan D-15④ 登记的分组双倍实扫债），预解析根复用后恒 1 次。
+// ============================================================
+describe('E1 find 单次根解析（探针 P1：resolveSessionRoots 恰 1 次）', () => {
+  let tmp: string
+  const SLUG = '--e1-cwd--'
+  const PREFIX = '019e7e10'
+  const mainId = (n: number) => `${PREFIX}-aaaa-bbbb-cccc-d${String(n).padStart(11, '0')}`
+  const subId = (n: number) => `${PREFIX}-aaaa-bbbb-cccc-e${String(n).padStart(11, '0')}`
+
+  /** 写 session 文件（subagent:true 写入 subagent 根），形态同 u10 段 writeSession。 */
+  async function writeSession(id: string, opts?: { subagent?: boolean }): Promise<void> {
+    const dir = opts?.subagent
+      ? join(tmp, 'agent', 'subagents', SLUG, 'sessions')
+      : join(tmp, 'agent', 'sessions', SLUG)
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+      join(dir, `${id}.jsonl`),
+      JSON.stringify({ type: 'session', id, cwd: '/e1' }) + '\n',
+    )
+  }
+
+  function find(
+    query: string,
+    extra?: Partial<SessionReadParams>,
+  ): ReturnType<typeof handleSessionRead> {
+    return handleSessionRead({ action: 'find', query, ...extra }, { agentDir: join(tmp, 'agent') })
+  }
+
+  /** spy 计数器 + 断言 helper：包装一段 find 调用，返回 { 结果, 调用次数 }。 */
+  async function findCounting(
+    query: string,
+    extra?: Partial<SessionReadParams>,
+  ): Promise<{ result: Awaited<ReturnType<typeof handleSessionRead>>; resolveCalls: number }> {
+    const rootsModule = await import('../discovery/roots.js')
+    const spy = vi.spyOn(rootsModule, 'resolveSessionRoots')
+    try {
+      const result = await find(query, extra)
+      return { result, resolveCalls: spy.mock.calls.length }
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'tool-handler-e1-'))
+  })
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('① 分组路径（main + subagent 两段查询，有命中）：恰 1 次', async () => {
+    await writeSession(mainId(1))
+    await writeSession(subId(1), { subagent: true })
+    const { result, resolveCalls } = await findCounting(PREFIX)
+    const d = result.details as { matches: Array<{ source: string }>; truncated: boolean }
+    // 前置：两段确实各自命中（分组语义不变），再断言扫描收敛
+    expect(d.matches).toHaveLength(2)
+    expect(new Set(d.matches.map((m) => m.source))).toEqual(new Set(['main', 'subagent']))
+    expect(d.truncated).toBe(false)
+    expect(resolveCalls).toBe(1)
+  })
+
+  it('② 显式 source 路径（单组查询，有命中）：恰 1 次', async () => {
+    await writeSession(mainId(1))
+    await writeSession(subId(1), { subagent: true })
+    const { result, resolveCalls } = await findCounting(PREFIX, { source: 'subagent' })
+    const d = result.details as { matches: Array<{ source: string }> }
+    expect(d.matches).toHaveLength(1)
+    expect(d.matches[0].source).toBe('subagent')
+    expect(resolveCalls).toBe(1)
+  })
+
+  it('③ 分组零匹配 → F1 自检行：恰 1 次（改前 3 次）且根表仍进渲染', async () => {
+    await writeSession(mainId(1))
+    const { result, resolveCalls } = await findCounting('zzz-e1-no-hit-9q8x')
+    const d = result.details as { matches: unknown[]; truncated: boolean }
+    expect(d.matches).toEqual([])
+    expect(d.truncated).toBe(false)
+    // F1 自检行消费预解析根表（非空根计数可见 = roots 确实传入而非空列表）
+    expect(result.content[0].text).toContain('自检（发现层，只陈述事实）')
+    expect(result.content[0].text).toContain('候选集非空')
+    expect(resolveCalls).toBe(1)
+  })
+
+  it('④ 显式 source 零匹配 → F1 自检行：恰 1 次（改前 2 次）', async () => {
+    await writeSession(subId(1), { subagent: true })
+    const { result, resolveCalls } = await findCounting('zzz-e1-no-hit-9q8x', { source: 'main' })
+    expect(result.content[0].text).toContain('无匹配 session')
+    expect(result.content[0].text).toContain('自检（发现层，只陈述事实）')
+    expect(resolveCalls).toBe(1)
+  })
+})
+
+// ============================================================
 // u11：metadataProvider 注入 + TTL 缓存（design 2026-09-10 §6.6）
 // handler 级集成：注入包装（withMetadataCache 独立实例，不与 doctorScanCache 串扰）
 // + 标题渲染（§5.1 候选行标题优先）+ provider 抛错降级不外抛。
