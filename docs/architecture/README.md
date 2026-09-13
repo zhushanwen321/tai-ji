@@ -4,18 +4,47 @@
 
 ## 目录结构
 
+> 2026-09-13 起 `docs/design/` 并入本目录（机制域规格与拓扑规格同目录，原「architecture/ 或 design/」双口准入改单口）。原 design 文档的消化史：19 份迁移（下表「机制域规格」各组）、9 份删除（决策谱系由承接文档的附录/头部注记承载，git 可追溯：dispatch→pi-boundary 附录 D、unbounded-wait-audit→crash-forensics 附录 E、early-wave 四份→package-extraction 头部、replay→troubleshooting §12、adversarial→check_prompt_outposts.py 头注释、chat-stream-perf/panel-view→代码注释）。
+
 ```
 docs/architecture/
 ├── README.md                        # 本文件（规范说明）
 ├── design.md                        # 跨进程架构决策记录（D1–D9：双通道/启动时序/API Client/双维度模型/横切归宿）
 ├── context.md                       # 领域术语表（Session/Panel/Runtime 等）
+│
+│  ── 拓扑与治理 SSOT ──
 ├── renderer-package-topology.md     # renderer 终态包拓扑 SSOT（§1 包拓扑 / §2 core 分层；原 renderer-rebuild-architecture.md）
 ├── runtime-layering.md              # runtime 三层分层 SSOT（边界规则 / ports 依赖倒置 / services→infra 受控例外登记；原 runtime-three-layer-design.md）
 ├── project-session-model.md         # Project–Session 关系模型 SSOT
 ├── data-source-governance.md        # 数据治理：关键术语 + 五原则 + D1–D8 裁决索引（诊断/迁移史已删，git 可追溯）
 ├── data-source-registry.md          # 数据源登记表（SSOT 索引 + 跨进程锁协议表）
 ├── integrity-hardening.md           # 完整性加固：三原则 + §/D/M 决策索引（诊断/验收记录已删，git 可追溯）
-└── extension-gui-protocol.md        # Extension GUI 渲染协议规范（含 §13 决策日志 / §15 挂载现状）
+├── extension-gui-protocol.md        # Extension GUI 渲染协议规范（含 §13 决策日志 / §15 挂载现状）
+│
+│  ── 机制域规格（原 design/，按域分组）──
+│  zcode 引擎域
+├── zcode-engine-appserver-resident.md   # zcode 引擎 app-server 常驻化（头部含 2026-09 breaking 修订：共享 HOME / 无降级链）
+├── zcode-session-db-isolation.md        # zcode 会话库隔离（ZCODE_SESSION_DB_PATH，GUI 侧边栏零污染）
+│  pi 边界域 / 稳定性域
+├── pi-boundary-reliability.md           # pi 语义吸收层四支柱（附录 D = 派发域切片决策索引收编）
+├── long-run-stability-architecture.md   # 长跑稳定性架构决策索引（D1-D7，E1-E7 已全部交付）
+├── crash-forensics-and-watchdog.md      # 崩溃取证/看门狗/滚动重启技术方案（附录 E = 无界等待两层裁决收编）
+├── env-propagation-boundary.md          # 子进程 env 出站契约（C-proc-09，deny-by-default）
+│  subagent core 域
+├── subagent-core-package-extraction.md  # core 抽包 + 双宿主统一（头部演进谱系收编 early-wave 四份）
+├── subagent-engine-protocolization.md   # 引擎协议化（协议面权威 = engine-sdk protocol 源码，本文载决策）
+├── subagent-chat-run-unification.md     # H1：chat 域统一进 run 域（resume 锚点续聊）
+├── subagent-workflow-record-unification.md  # H2：workflow agent() record 归位
+├── subagent-service-decomposition.md    # H3：SubagentService 上帝类拆分
+├── subagent-record-persistence-consolidation.md  # H4：record 持久化单一写入口（终态语义被永久会话模型部分取代，头部演进注记）
+├── subagent-permanent-session-model.md  # 永久会话模型（两态 + 万物可续聊，P0）
+│  状态与前端域
+├── state-truth-sync-architecture.md     # 状态真值同步（单一解析层 resolveLaunchConfig + 等价性守卫）
+├── background-task-sidebar-view.md      # 后台命令侧边栏视图契约（registry.json SSOT + RPC + 广播）
+├── pi-evolution-consistency-and-project-switcher.md  # pi 版本锚点守卫 + 模型目录单真相 + 项目切换器
+│  发布与锁域
+├── npm-publish-surface-guard.md         # npm 发布面一致性守卫（check-publish-surface.mjs 设计依据）
+└── file-lock-unification-and-reaper-sink.md  # 文件锁统一 SSOT + 后台任务收殓下沉 runtime
 ```
 
 > plugin 使用指南（内置插件开发 how-to）在 [`../plugins/built-in-plugin-guide.md`](../plugins/built-in-plugin-guide.md)（2026-09-13 迁出，`subsystems/` 目录解散——「怎么写」不属架构文档）。

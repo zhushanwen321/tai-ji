@@ -280,7 +280,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 
 ### 3.7 引擎子进程 env 契约（`buildEngineChildEnv`，W12 迁移期中间态）
 
-子代理引擎协议化（`docs/design/subagent-engine-protocolization.impl-plan.md` §2.12，约束登记 C-proc-12）引入引擎 CLI 子进程形态后，出站契约新增引擎面分支——与 §3.5 D2/D3 的 runtime/main 面共用治理原则（deny-by-default + 消费证据），但**SSOT 落在 `@zhushanwen/subagent-engine-sdk`**（F9：SDK 消费面 zsw 宿主/引擎 CLI 不可依赖 `@xyz-agent/shared`，SDK 是跨宿主 SSOT）：
+子代理引擎协议化（`subagent-engine-protocolization.impl-plan.md`（已删除，git 可追溯）§2.12，约束登记 C-proc-12）引入引擎 CLI 子进程形态后，出站契约新增引擎面分支——与 §3.5 D2/D3 的 runtime/main 面共用治理原则（deny-by-default + 消费证据），但**SSOT 落在 `@zhushanwen/subagent-engine-sdk`**（F9：SDK 消费面 zsw 宿主/引擎 CLI 不可依赖 `@xyz-agent/shared`，SDK 是跨宿主 SSOT）：
 
 - **`buildEngineChildEnv(baseEnv, opts)` 三层**（高者覆盖低者，次序写死 = 先过滤后 L0 显式注入）：
   - **L0 基础设施键**（core 过滤之后显式注入，不受放行/剥除约束）：`XYZ_AGENT_DATA_DIR` / `XYZ_AGENT_ENGINE_NODE` / `ELECTRON_RUN_AS_NODE`（执行器为 Electron 二进制时）/ `XYZ_AGENT_SUBAGENT=1`（nesting guard）/ relay 三键 `XYZ_SUBAGENT_RELAY_{SOCKET,NODE,SCRIPT}`（必经 L0——L1 拒绝 `XYZ_SUBAGENT_` 前缀、L2 是 manifest 面，两层都到不了）/ 引擎侧身份 env（`PI_SUBAGENT_ROOT_SESSION_ID` 等）；

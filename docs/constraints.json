@@ -1511,9 +1511,9 @@
     },
     {
       "id": "C-proc-10",
-      "summary": "文档-代码符号零漂移：设计文档（docs/design/）反引号内引用的代码符号（蛇形常量 / getXxx() 函数调用形态）必须存在于映射源码模块的符号表中（导出名或模块级声明；env 名 XYZ_*/PI_* 与 errno 字符串族豁免）；符号删除/改名必须同批同步文档。映射登记 SSOT = scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP，新增设计文档时在该表登记映射",
+      "summary": "文档-代码符号零漂移：设计文档（docs/architecture/）反引号内引用的代码符号（蛇形常量 / getXxx() 函数调用形态）必须存在于映射源码模块的符号表中（导出名或模块级声明；env 名 XYZ_*/PI_* 与 errno 字符串族豁免）；符号删除/改名必须同批同步文档。映射登记 SSOT = scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP，新增设计文档时在该表登记映射",
       "scope": [
-        "docs/design/**",
+        "docs/architecture/**",
         "apps/electron/main/update/**",
         "scripts/check-doc-symbol-drift.mjs"
       ],

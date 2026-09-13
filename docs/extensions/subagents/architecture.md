@@ -145,12 +145,12 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | 引擎中立抽象（已被引擎协议化取代） | subagent-engine-abstraction.md（已删除，git 可追溯；现行权威 = [docs/architecture/subagent-engine-protocolization.md](../../architecture/subagent-engine-protocolization.md)） |
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
 | 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
-| 体系深化设计（方案层，含体系图与术语） | [docs/design/subagent-post-convergence-architecture.md](../../design/subagent-post-convergence-architecture.md) |
+| 体系深化设计（方案层，含体系图与术语） | subagent-post-convergence-architecture.md（已删，git 可追溯；谱系见 subagent-core-package-extraction.md 头部） |
 | core 抽包与 barrel/semver 契约（D5） | [docs/architecture/subagent-core-package-extraction.md](../../architecture/subagent-core-package-extraction.md) |
-| 双轨收敛（双份实现归一） | [docs/design/subagent-dual-track-convergence.md](../../design/subagent-dual-track-convergence.md) |
+| 双轨收敛（双份实现归一） | subagent-dual-track-convergence.md（已删，git 可追溯） |
 | 引擎协议化（引擎外移独立 CLI 进程） | [docs/architecture/subagent-engine-protocolization.md](../../architecture/subagent-engine-protocolization.md) |
 | SubagentService 六聚合拆分（壳 + 聚合） | [docs/architecture/subagent-service-decomposition.md](../../architecture/subagent-service-decomposition.md) |
-| 不通知根因与恢复链（F 系列） | [docs/design/subagent-agent-end-recovery-replay.md](../../design/subagent-agent-end-recovery-replay.md) |
+| 不通知根因与恢复链（F 系列） | subagent-agent-end-recovery-replay.md（已删，git 可追溯；现行口径 = troubleshooting §12） |
 | 无界等待与回收层上界审计 | [docs/architecture/crash-forensics-and-watchdog.md 附录 E](../../architecture/crash-forensics-and-watchdog.md) |
 | zcode 引擎形态与会话库隔离 | [docs/architecture/zcode-engine-appserver-resident.md](../../architecture/zcode-engine-appserver-resident.md) · [docs/architecture/zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
 

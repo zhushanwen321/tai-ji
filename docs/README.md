@@ -17,7 +17,6 @@ docs/
 │
 ├── adr/                   ← 架构决策记录（决策级「为什么」唯一家园；统一编号 + README 索引）
 ├── architecture/          ← 全局架构与契约（分层/数据治理/跨模块协议；被取代设计即删，git 可追溯）
-├── design/                ← 跨模块运行时机制设计（准入：跨 ≥2 个 package 的机制/架构）
 ├── extensions/            ← pi 扩展跨包约定（开发指南/强约束/日志规范/术语表/adr/）
 ├── page-design/           ← 前端设计 SSOT（v6-tokens.css 值权威 + v6-master-spec.md 范式权威）
 ├── testing/               ← 测试手册（分层策略/手工冒烟清单/mock 盲区表）
@@ -31,7 +30,7 @@ docs/
 |------|------|
 | 全项目通用的架构/规范/排错？ | 根级 `*.md` |
 | 不可逆的架构/技术决策（被否方案/事故/外部约束）？ | `adr/`（ADR，带日期 + 状态 + 背景 + 裁决） |
-| 跨 ≥2 个 package 的运行时机制/架构？ | `architecture/` 或 `design/` |
+| 跨 ≥2 个 package 的运行时机制/架构？ | `architecture/`（2026-09-13 design/ 并入：机制域规格与拓扑规格同目录，README 分组索引导航） |
 | 单模块/单包的实现设计？ | **不进 docs/**——「为什么/坑」蒸馏进该模块代码注释（挂 `// ADR-xxxx` 锚点），已实施的过程内容删除（git 可追溯） |
 | review/impl-plan/acceptance 等工作流产物？ | **不进 docs/ 也不进 git**——落本地 `.xyz-harness/<date>-<slug>/`（gitignored；2026-09-13 裁决：仓内不留决策档案，追溯靠 commit message 与 docs） |
 | 竞品/技术调研？ | `~/Documents/xyz-agent-archive/`（不进 git） |

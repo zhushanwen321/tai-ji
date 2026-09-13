@@ -1065,7 +1065,7 @@ function process(items: string[]): string[] {
 > 插件作者面对的超时 API 面与到期行为。量级裁定原则：**超时按被保护对象的粒度校准**——
 > 等插件业务代码跑完的任务级等待 = 30min 兜底 + 作者声明覆盖；等人工的弹窗/审批 = 30min
 > + 取消非替答；生命周期握手（activate）= 控制面秒级。设计权威源：
-> `docs/design/timeout-plugin-service-granularity.md`。
+> `docs/design/timeout-plugin-service-granularity.md`（已删除，git 可追溯）。
 
 **onActivate 轻量契约 [规范]**：`onActivate` 的协议语义是生命周期握手（声明注册工具/hooks/
 命令清单），控制面超时 30s。`onActivate` 内**禁止**重初始化（拉配置、建连接、预热缓存等
