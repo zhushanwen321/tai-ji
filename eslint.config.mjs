@@ -536,19 +536,25 @@ export default [
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
-  // [H4 record 持久化收敛] record-store.ts 单独提额：H4 设计（docs/architecture/
-  // subagent-record-persistence-consolidation.md）把 record 全部写面收编进
-  // RecordStore（十意图原语 + 同步写权威），U1 API 立面落地后 800→1207，
-  // U4a 读面收尾 / U4c rebuildIndexes 还将增长。写面收口与行数守卫是显式
-  // 冲突，提额至 1400 过渡；H4 全落地后按意图原语族拆分（终态原语/轮次
-  // 簿记/重建三轴）属独立重构任务，登记于 H4 impl-plan 残留风险。
-  // [2026-09-13 design-code-sync 追认] 1400→1450：现折算 1429，已破 1400（零余量
-  // 反转成必红）；三轴拆分（终态原语/轮次簿记/重建）待排期，拆分完成即回落。
-  // 一次性追认、禁止再抬。
+  // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地，登记于
+  // subagent-record-persistence-consolidation.md 残留风险）：store 保留容器 +
+  // 意图原语立面 + 有状态扫描（原 1450 提额过渡废止，现折算 677 → max 800 余量）；
+  // 终态原语轴（record-store-terminal.ts，折算 275）与轮次簿记轴
+  // （record-store-rounds.ts，折算 101）在 500 基线内不设 override；重建与投影轴
+  // （record-store-rebuild.ts，折算 539）超 500 基线——纯投影/重建规则聚合（buildRecord
+  // 单规则 + entry 重建族 + manifest 读写投影 + 缓存戳类型），按 u-2a 同款过渡设
+  // max 700。D7 写面约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
+  // ctx 注入），check-record-write-surface 白名单零改动。
   {
     files: ['packages/subagent-core/src/execution/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1450, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    files: ['packages/subagent-core/src/execution/record-store-rebuild.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
     },
   },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
