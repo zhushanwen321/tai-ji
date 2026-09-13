@@ -10,7 +10,7 @@
 
 > 层声明：当前层 = 技术方案设计（协议 + 壳边界 + 发现注册 + 迁移策略）；
 > 下一层 = 可实施代码单元（W1–W12，见 §5）+ **每引擎一份提取设计**（pi / zcode）。
-> 状态：**设计就绪（R4~R7 全修 + v6 减法 + R8 4 must-fix/4 suggestion 全修，待复审）**。
+> 状态：**已交付**（设计就绪：R4~R7 全修 + v6 减法 + R8 4 must-fix/4 suggestion 全修；2026-09-09 随 W1–W12 落地，见 v11/v12 修订注记与文首 HISTORICAL 退役注记）。
 > 事实基准：2026-09-08 代码盘点（§2.3 逐条给锚点，行号已 read 源核准）。
 > 修订记录：
 > - v1（2026-09-08）：首版。
@@ -376,15 +376,15 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `engine_probe_failed` | `probe` 失败 | 既有 fallback 三守卫不变 |
 | 其余 `engine_*` | 引擎在 `error` 帧原样给出 | core 透传，文案契约不变 |
 
-**安全与 env（设计级契约；实现级键表/生成物/守卫断言见 `subagent-engine-protocolization.impl-plan.md` §2.12）**：
+**安全与 env（设计级契约；实现级键表/生成物/守卫断言由代码承载——原 impl-plan §2.12 已删除，git 可追溯，入口 = 本节对应实现文件）**：
 凭据**不进协议**（引擎包自己解析自己的凭据）；引擎进程 env 由 SDK 的 `buildEngineChildEnv(baseEnv, opts)` 统一构建（D7）。
 **三层语义（高者覆盖低者）**：
 1. **基础设施层（core 在过滤之后注入）**——引擎数据根、执行器路径、nesting guard、**relay 三键（必须到达引擎，否则嵌套 subagent 静默回落直连）**；
 2. **deny / 显式剥除层（恒高于 manifest 放行）**——出站 deny 清单 + 产品凭证键 + 父身份键（relay 的 `SESSION_ID`/`RECORD_ID`）；
 3. **manifest 放行层**——引擎专属命名空间前缀；**保留前缀拒绝表**（产品命名空间不得被第三方声明）；非法条目丢弃该前缀并 warn（包继续可用）。
-**不变量**：基础设施层键集合与 deny 集合恒不相交（守卫断言）；用户无法为引擎注入其 manifest 未声明、引擎未实现消费的 env（已接受能力放弃，重审触发见 impl-plan）。
+**不变量**：基础设施层键集合与 deny 集合恒不相交（守卫断言）；用户无法为引擎注入其 manifest 未声明、引擎未实现消费的 env（已接受能力放弃，重审触发登记原在 impl-plan，已删除，git 可追溯）。
 
-**relay 转发语义（与 H12 一致）**：relay 的**连接三键必须透传**（嵌套 subagent 的唯一供数面，缺一即静默回落直连）；**父身份键必须剥除**，由引擎按运行上下文重写（防父身份误归属）。实现级键名与重写位置见 impl-plan §2.12。
+**relay 转发语义（与 H12 一致）**：relay 的**连接三键必须透传**（嵌套 subagent 的唯一供数面，缺一即静默回落直连）；**父身份键必须剥除**，由引擎按运行上下文重写（防父身份误归属）。实现级键名与重写位置由代码承载（原 impl-plan §2.12 已删除，git 可追溯；入口 = 本节对应实现文件）。
 
 **基座常量来源（单源 + 构建期派生）**：SDK 的前缀/deny 常量由 `packages/shared/src/constants.ts` SSOT **构建期生成**
 （生成物名 `ENGINE_ENV_PREFIXES` / `ENGINE_ENV_DENY_LIST`，与 `modelCatalog` 同款构建期生成口径）；**守卫断言**：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅（防未来 deny 清单误伤 L0 键）。
@@ -399,7 +399,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@xyz-agent/shared
 
 ### 3.4 发现与注册
 
-**引擎包 manifest**（写进引擎包自己的 `package.json`）：
+**引擎包 manifest**（写进引擎包自己的 `package.json`；下例为**示意**，现行权威取值以各引擎包 `package.json` 的 `xyz-agent.subagentEngine` 为准——如 `packages/zcode-subagent-cli` 现值 `sandbox:none / permissionMode:native / conversation:cold`）：
 
 ```jsonc
 {
@@ -418,17 +418,17 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@xyz-agent/shared
         "models": [ { "id": "glm-4.6", "aliases": ["glm"], "canonicalRef": "zai/glm-4.6" } ]
       },
       "capabilities": {                    // 同步能力位权威（注册期读；握手校验，见 §3.3）
-        "schemaEnforcement": "emulated", "steer": "unsupported", "conversation": "unsupported",
-        "personaInjection": "prompt", "eventGranularity": "stream", "sandbox": "emulated",
+        "schemaEnforcement": "emulated", "steer": "unsupported", "conversation": "cold",
+        "personaInjection": "prompt", "eventGranularity": "stream", "sandbox": "none",
         "sessionRead": "full", "resume": "cold", "interrupt": "kill-only",
-        "permissionMode": "fixed", "maxTurns": false
+        "permissionMode": "native", "maxTurns": false
       }
     }
   }
 }
 ```
 
-**manifest 必需字段与缺省策略（设计级语义；字段级 schema 与逐字段缺省表见 impl-plan §2.4）**：
+**manifest 必需字段与缺省策略（设计级语义；字段级 schema 与逐字段缺省表由代码承载——原 impl-plan §2.4 已删除，git 可追溯，入口 = 本节对应实现文件）**：
 - **自注册的最小集**：`id` / `protocol` / `bin` / `capabilities`（至少声明三项被 gate 判据涉及的能力位）；缺必需键 → 保守值 + warn；
 - **`capabilities` 是同步能力位权威**（注册期读，gate 同步消费）；
 - **`envPrefixes`**：引擎专属 env 命名空间，保留前缀不得声明，非法条目丢弃该前缀并 warn；
@@ -635,7 +635,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | 段 | 规则 |
 |----|------|
 | `bin` 名 → 绝对入口 | manifest `bin` 映射（包目录相对路径）+ 包目录绝对化；**不依赖 PATH**（staging 目录不在 PATH） |
-| 运行时选择（**宿主 × 平台二维**） | **设计决策**：打包态 pi 宿主的 `process.execPath` 是 Bun standalone binary（再拉就是又起一个 pi）→ **必须用注入的执行器**，单一名字（不复用 relay 的 node 键）、经基础设施层注入（不依赖继承，否则被剥除）；执行器为 Electron 二进制时同时注入 `ELECTRON_RUN_AS_NODE`；首次使用前跑 node 探针，失败 → `engine_not_found` + 指引。三宿主 × 三平台的完整解析矩阵、探针实现与 env 注入点见 impl-plan §2.9 |
+| 运行时选择（**宿主 × 平台二维**） | **设计决策**：打包态 pi 宿主的 `process.execPath` 是 Bun standalone binary（再拉就是又起一个 pi）→ **必须用注入的执行器**，单一名字（不复用 relay 的 node 键）、经基础设施层注入（不依赖继承，否则被剥除）；执行器为 Electron 二进制时同时注入 `ELECTRON_RUN_AS_NODE`；首次使用前跑 node 探针，失败 → `engine_not_found` + 指引。三宿主 × 三平台的完整解析矩阵、探针实现与 env 注入点由代码承载（原 impl-plan §2.9 已删除，git 可追溯；入口 = 本节对应实现文件） |
 | Windows | 入口为 `.mjs` 时不需 shim；若引擎声明 `.cmd` → 禁止 `shell:true`（注入面），改用显式 `cmd.exe /c` + 参数数组 |
 | 安全 | 不 cwd 探测；引擎根只读 manifest，不执行用户 repo 内同名目录 |
 
@@ -644,8 +644,8 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 `check-extension-files.mjs` 的 `EXT_DIR` 只扫 `extensions/`（`:28`/`:33`），**不能**用来校验 `packages/`——
 真实覆盖链已核实：`check-version-changes.sh:80-88` 扫 `packages/*`、`check-publish-surface.mjs:114+` 动态发现
 packages 下 dist 发布包、changeset `ignore` 不含 `@zhushanwen/*`；**新增规则**「引擎包不得依赖 core 内部路径」
-落到**新脚本 `check-engine-package-boundary.mjs`**（扫描 `packages/subagent-engine-*` 的依赖 + import），
-挂载点 = pre-commit（按路径触发）+ CI invariants。**引擎包落位**：`packages/subagent-engine-*`（它们是 CLI/npm 库，
+落到**新脚本 `check-engine-package-boundary.mjs`**（扫描 `packages/subagent-engine-*`（SDK 族，现 `subagent-engine-sdk`）+ `packages/pi-subagent-cli` + `packages/zcode-subagent-cli` 的依赖 + import），
+挂载点 = pre-commit（按路径触发）+ CI invariants。**引擎包落位**：引擎 CLI 包 = `packages/pi-subagent-cli` / `packages/zcode-subagent-cli`，引擎 SDK = `packages/subagent-engine-sdk`（它们是 CLI/npm 库，
 不是 pi 扩展，不进 `extensions/` 的扩展守卫体系）；发布走 changeset + `apply-version.sh` 枚举。
 
 ### 3.8 迁移策略
@@ -665,7 +665,7 @@ pi 的前置工序（**W6，强制**）：把 `PiEngineService` 全 9 成员 + �
 | 成员/状态 | 归属 | 理由 |
 |----------|------|------|
 | `executeAndAwait`（`PiEngine.run` 主路径，`pi-engine.ts:141-146/296`） | **HostBridge（core）** | 它是「宿主执行链」而非 pi 驱动细节；pi 包经 `host/*` 反向请求回调宿主执行子进程 |
-| `spawnedChildren` Map + 子进程收割 | **持有方 = 引擎进程**；core 只持**状态镜像** | 镜像语义（设计级）：① 未收上报前 = 无句柄；② 引擎 exit / 重建 / dispose / killAll 时**整体置死**（否则通知合并窗口挂住、idle GC 不触发、`resumable` 说谎）；③ 收割 = **进程组级**（POSIX 负 pid / Windows 按 pid 树），只覆盖**一代子进程 + 组内后代**（引擎自身 detached 后代属已接受代价）；④ **宿主崩溃**（反向场景）由**引擎侧自灭 + 宿主启动清扫**兜底。实现级判据（pidfile 命名、三条件清扫、自灭阈值与主判据、conformance 断言形式）见 impl-plan §2.2/§2.10/§2.12 |
+| `spawnedChildren` Map + 子进程收割 | **持有方 = 引擎进程**；core 只持**状态镜像** | 镜像语义（设计级）：① 未收上报前 = 无句柄；② 引擎 exit / 重建 / dispose / killAll 时**整体置死**（否则通知合并窗口挂住、idle GC 不触发、`resumable` 说谎）；③ 收割 = **进程组级**（POSIX 负 pid / Windows 按 pid 树），只覆盖**一代子进程 + 组内后代**（引擎自身 detached 后代属已接受代价）；④ **宿主崩溃**（反向场景）由**引擎侧自灭 + 宿主启动清扫**兜底。实现级判据（pidfile 命名、三条件清扫、自灭阈值与主判据、conformance 断言形式）由代码承载（原 impl-plan §2.2/§2.10/§2.12 已删除，git 可追溯；入口 = 本节对应实现文件） |
 | `sendPromptCommand` / EPIPE 兜底 / 冷续轮 resume（`stdin-writer.ts`） | **pi 包** | pi RPC 语义 |
 | chat 轮次票据（ChatRoundTicket） | **HostBridge（core）** | 宿主编排 |
 | `getRecordForAction` / `collectRecords` / `closeSubagent` / `cancel` / record 状态回写 | **HostBridge（core）** | 数据所有权在宿主 |
@@ -714,14 +714,14 @@ DoD#5 要求迁移完成后删除 `inproc` 分支。**DoD 之后的恢复路径*
 | 6 | zsw vendor 只带 core + 引擎包目录（H7，owner = zsw） | zsw 仓核对 |
 | 7 | 两个引擎的真机等价验收（§4 A1 zcode / A2-A3 pi）均通过，历史 record 可读 | 真机门 |
 | 8 | 测试面全绿：core test + `pnpm extensions:test` + conformance（协议黑盒） | CI |
-| 9 | 文档与约束回写：`check-doc-symbol-drift.mjs` 全绿 + 新增「引擎协议边界」约束登记（`docs/constraints.json` + `render-constraints.mjs`） | pre-commit |
+| 9 | 文档与约束回写：`check-doc-symbol-drift.mjs` 全绿 + 新增「引擎协议边界」约束登记（`docs/constraints.json` + `scripts/validate-constraints.mjs`） | pre-commit |
 
 ### 3.9 写入面与已接受代价（登记）
 
 | 写入面 | 归属 | 累积性 | 清理通道 | 判定 |
 |--------|------|--------|---------|------|
 | `<engineDataDir>/engines/zcode/appserver-launcher.cjs` | 引擎包 | 幂等覆盖 | 随引擎数据目录 | 可接受 |
-| `<engineDataDir>/logs/zcode-appserver-stderr-<pid>.log` | 引擎包 | append 累积 | **文件名带实例维度**（同路径双实例并发写入会 rename 竞争）；清理通道 = 引擎包自实现，判据 = 同前缀 + **pid 已死（OS 存在性探测，不是进程内表）** + mtime 过期（三者同时成立才删）；参数读宿主 `XYZ_LOG_*`（缺省 50MB / 7 天）；宿主 logger 看不见它 → **W11 落地 + A13**；实现级判据见 impl-plan §2.11 | 可接受（通道自建） |
+| `<engineDataDir>/logs/zcode-appserver-stderr-<pid>.log` | 引擎包 | append 累积 | **文件名带实例维度**（同路径双实例并发写入会 rename 竞争）；清理通道 = 引擎包自实现，判据 = 同前缀 + **pid 已死（OS 存在性探测，不是进程内表）** + mtime 过期（三者同时成立才删）；参数读宿主 `XYZ_LOG_*`（缺省 50MB / 7 天）；宿主 logger 看不见它 → **W11 落地 + A13**；实现级判据由代码承载（原 impl-plan §2.11 已删除，git 可追溯；入口 = 引擎包 stderr 轮转实现） | 可接受（通道自建） |
 | **`<engineDataDir>/engines/zcode/session-db/db.sqlite`** | 引擎包 | 单调（引擎无删除 RPC） | 删除即重建（停机窗口）；TTL 策略见前置文档 `zcode-session-db-isolation.md` §3.2 D4 | 可接受（前置文档已登记） |
 | 引擎常驻进程（**每宿主每 id 一个**，典型 2 个） | 引擎包 | 常驻 | `dispose` / 杀链 / **runtime 退出钩子**（§3.6） | 可接受 |
 | `~/.zcode/cli/{artifacts,exec,log,…}` | 引擎包 | 单调 | 见前置文档 §2.4.1 | 另案（已登记） |
@@ -830,18 +830,18 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 
 | 单元 | 职责（设计级） | 依赖 | 验收挂钩 | 领地与实现细节 |
 |------|----------------|------|---------|------------------|
-| W1 协议定义 + SDK 骨架 | engine-protocol v1 帧型/方法/错误码/版本常量/JSON Schema + 边界守卫 | —（DAG 根，与 u-foundation 等价的共享契约根） | A4/A6；§2.1 规格 | impl-plan §2.1 |
-| W2 协议客户端 | `EngineClient` + `RemoteEngine implements EnginePort` + 同步成员形态映射 | W1 | A1/A6/A8/A13；§2.2 规格 | impl-plan §2.2 |
-| W3 注册表与路由 | `EngineDescriptor` 双模 + manifest 快照 + D4 缺省引擎 + 时序契约改写 + 契约变更④⑤ | W1 | A2/A3/A4/A6/A12；§2.3 规格 | impl-plan §2.3 |
-| W4 发现器 | manifest 解析 + 三级搜索路径 + engines.json 投影 + 冷启动回退源单源化 | W1 | A4/A11/A12；§2.4 规格 | impl-plan §2.4 |
-| W5 zcode 外移 | 新建 `@zhushanwen/zcode-subagent-cli` 包，搬 `engines/zcode/` + 前置文档改动 | W1–W4 | A1/A5/A9；§2.5 规格 | impl-plan §2.5 |
-| W6 pi 宿主面下沉 | `PiEngineService` 9 成员拆 HostBridge + `spawnedChildren` 状态镜像（前置，强制） | W1–W3 | A2/A3/A8 前置；§2.6 规格 | impl-plan §2.6 |
-| W7 pi 外移 | 新建 `@zhushanwen/pi-subagent-cli`（依赖 W6 产物） | W6 | A2/A3/A9；§2.7 规格 | impl-plan §2.7 |
-| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共面 + relay 透传 | W2/W4 | A7/A11；§2.8 规格 | impl-plan §2.8 |
-| W9 打包与分发 | 引擎包 staging + 启动解析二维矩阵 + 数据根注入矩阵 + 新守卫 | W1/W5/W7 | A5/A11；§2.9 规格 | impl-plan §2.9 |
-| W10 conformance 改造 | 协议黑盒套件 + 基线三层 + 录制/复跑 + H9 测试面迁移 | W1/W2/W5/W7 | A1/A2/A4/A9；§2.10 规格 | impl-plan §2.10 |
-| W11 壳侧去引擎化（DoD 收口） | 清 H1–H4/H8/H11 + 删内建与 inproc + stderr 轮转引擎侧自实现 | W5/W7/W8/W9/W10/W12 | A5/A9/A11/A13；§2.11 规格 | impl-plan §2.11 |
-| W12 环境与文档 | `buildEngineChildEnv` 三层 env + 守卫扩展 + env 文档/约束回写 | W1 | A6/A9；§2.12 规格 | impl-plan §2.12 |
+| W1 协议定义 + SDK 骨架 | engine-protocol v1 帧型/方法/错误码/版本常量/JSON Schema + 边界守卫 | —（DAG 根，与 u-foundation 等价的共享契约根） | A4/A6；实现级规格由代码承载（原 impl-plan §2.1，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W2 协议客户端 | `EngineClient` + `RemoteEngine implements EnginePort` + 同步成员形态映射 | W1 | A1/A6/A8/A13；实现级规格由代码承载（原 impl-plan §2.2，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W3 注册表与路由 | `EngineDescriptor` 双模 + manifest 快照 + D4 缺省引擎 + 时序契约改写 + 契约变更④⑤ | W1 | A2/A3/A4/A6/A12；实现级规格由代码承载（原 impl-plan §2.3，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W4 发现器 | manifest 解析 + 三级搜索路径 + engines.json 投影 + 冷启动回退源单源化 | W1 | A4/A11/A12；实现级规格由代码承载（原 impl-plan §2.4，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W5 zcode 外移 | 新建 `@zhushanwen/zcode-subagent-cli` 包，搬 `engines/zcode/` + 前置文档改动 | W1–W4 | A1/A5/A9；实现级规格由代码承载（原 impl-plan §2.5，已删除） | 实现级细节由代码承载（入口 = `packages/zcode-subagent-cli`） |
+| W6 pi 宿主面下沉 | `PiEngineService` 9 成员拆 HostBridge + `spawnedChildren` 状态镜像（前置，强制） | W1–W3 | A2/A3/A8 前置；实现级规格由代码承载（原 impl-plan §2.6，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W7 pi 外移 | 新建 `@zhushanwen/pi-subagent-cli`（依赖 W6 产物） | W6 | A2/A3/A9；实现级规格由代码承载（原 impl-plan §2.7，已删除） | 实现级细节由代码承载（入口 = `packages/pi-subagent-cli`） |
+| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共面 + relay 透传 | W2/W4 | A7/A11；实现级规格由代码承载（原 impl-plan §2.8，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W9 打包与分发 | 引擎包 staging + 启动解析二维矩阵 + 数据根注入矩阵 + 新守卫 | W1/W5/W7 | A5/A11；实现级规格由代码承载（原 impl-plan §2.9，已删除） | 实现级细节由代码承载（入口 = `scripts/bundle-extensions.mjs` 与边界守卫脚本） |
+| W10 conformance 改造 | 协议黑盒套件 + 基线三层 + 录制/复跑 + H9 测试面迁移 | W1/W2/W5/W7 | A1/A2/A4/A9；实现级规格由代码承载（原 impl-plan §2.10，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W11 壳侧去引擎化（DoD 收口） | 清 H1–H4/H8/H11 + 删内建与 inproc + stderr 轮转引擎侧自实现 | W5/W7/W8/W9/W10/W12 | A5/A9/A11/A13；实现级规格由代码承载（原 impl-plan §2.11，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W12 环境与文档 | `buildEngineChildEnv` 三层 env + 守卫扩展 + env 文档/约束回写 | W1 | A6/A9；实现级规格由代码承载（原 impl-plan §2.12，已删除） | 实现级细节由代码承载（入口 = `packages/subagent-engine-sdk` env 构建与守卫脚本） |
 
 **下一层文档**：`zcode-subagent-cli` 提取设计与 `pi-subagent-cli` 提取设计各自单独成文
 （驱动细节、凭据/池策略、事件适配、迁移验收），本设计只钉死它们与 core 的协议面。

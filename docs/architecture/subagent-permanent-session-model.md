@@ -10,7 +10,7 @@
 
 ## 0. 实施状态（2026-09-13，dev-flow 全单元落毕）
 
-本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（40+ 条，含每条的裁决依据），本文不重复。约束面已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
+本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（62 条，含每条的裁决依据；其中 26 行系 2026-09-13 design-code-sync 补登——§6 散文点名的六单元偏差回填），本文不重复。约束面已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
 
 | 单元 | commit | 备注 |
 |---|---|---|
@@ -384,7 +384,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 │  subagent: Continuation + run-orchestration（chat 轮编排）                        │
 ├────────────────────────── 投递语义层（公共内核，已存在，扩展复用）────────────────┤
 │  @xyz-agent/session-delivery：busy gate / 排队 dedupe 合批 / 退避重试 / watchdog   │
-│  新增「会话占用词汇」共享：IdleProbe + Intent(streamingBehavior) 映射             │
+│  新增「会话占用词汇」共享：isIdle 探针 + StreamingBehavior（pi-rpc）              │
 ├────────────────────────── 引擎中立契约层（已存在，不变）─────────────────────────┤
 │  subagent-engine-sdk：EnginePort / EngineHandleData(sessionRef) / 反向通道         │
 │  pi-subagent-cli / zcode-subagent-cli：引擎实现（zcode 增 interact/resume）        │

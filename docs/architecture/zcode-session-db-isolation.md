@@ -6,7 +6,7 @@
 > **不**重启 2026-09 已删除的池 / 锁 / pidfile 复杂度。
 
 > 层声明：当前层 = 技术方案设计；下一层 = 可实施代码单元（W1–W6，见 §5）。
-> 状态：**设计就绪（R4~R7 全修 + v6 减法 + R8 4 must-fix/5 suggestion 全修，待复审）**。
+> 状态：**已交付**（设计就绪：R4~R7 全修 + v6 减法 + R8 4 must-fix/5 suggestion 全修；2026-09-09 随 W1–W5b 落地，W6 TTL 为 D4 触发后的后续项，见 v12 注记）。
 > - v11（2026-09-08，**分层拆分**）：设计层收敛后，按 dev-flow 分层把**实现级细节**下沉到 zcode-session-db-isolation.impl-plan.md（已删除，git 可追溯；实施细节现由代码承载）（D7 清理工具的 I1–I3b 判据/CLI 参数/SQL/容差常量/备份与窗口写者清单、W 单元领地与测试命令）；
 >   本文件保留决策、不变量、数据流、错误语义、验收场景与粗粒度拆分。R9 的 7 项实现级残留改在 plan §7.2 跟踪。
 > **分层声明（2026-09-08）**：本文件是**设计层**（决策 / 不变量 / 数据流 / 错误语义 / 验收场景 / 下一层拆分）。
@@ -14,7 +14,7 @@
 > 已由代码承载（原下沉目标 zcode-session-db-isolation.impl-plan.md 已删除，git 可追溯）**。
 > 后续改动实现级细节直接改代码并以本文件对应章节为入口。
 
-> 事实基准：2026-09-08 真机探针（脚本已归档入仓，见 §2.3 证据列）+ 存量双库统计。
+> 事实基准：2026-09-08 真机探针 + 存量双库统计（探针脚本已随 2026-09-13 docs purge 删除，见 §2.3 证据列）。
 > 修订记录：
 > - v1（2026-09-08）：首轮分析 + 三组探针后成文。
 > - v2（2026-09-08，R1 修复）：①改点纠错（生产读取链是**第二份白名单**，非 `EnginePort.read`）；
@@ -65,7 +65,7 @@
 >   ②**Δ 分布落成可执行 SQL**（counts.sql 第 0 步导出 + ④/⑤ 查询，容差推导可复跑）+ 容差「全局唯一常量」护栏；
 >   ③**「宿主已删、索引残留」降为未验证假设**（F7 只实测加法方向）+ 残留 id 清单落盘 + `--replay-residue` 补删模式 + A11 真机观测；
 >   ④**备份粒度与停机窗口写者清单**（整库还原；zsw re-vendor 进程必须在窗口内停用）；⑤确认凭证补「授权来源」；⑥counts.sql grep 法仅限只读证据，不得复用为白名单构造；⑦v8 修订记录恢复史实值。
-> - v12（2026-09-09，**W11 迁移注记**）：zcode 引擎已随引擎协议化外移至 `packages/zcode-subagent-cli`（subagent-core 内建 `engines/zcode/` 删除）——§1「系统是什么」实现锚点、§2.3 F12 读取链、§3.2 D2 站点表按迁移后实态回写：生产链①级读 = runtime `registerNativeSessionReader` 协议读（`subagent-engine-history.ts:219`）经协议 `read` 落引擎包 `zcode-engine.ts` `read()`（:908，白名单集合判定 :923 内聚引擎包）；`readZcodeNativeTier` 符号已不存在；handle 回填现锚 `:416/:466`。决策内容不变，成文时点锚点保留为史实。
+> - v12（2026-09-09，**W11 迁移注记**）：zcode 引擎已随引擎协议化外移至 `packages/zcode-subagent-cli`（subagent-core 内建 `engines/zcode/` 删除）——§1「系统是什么」实现锚点、§2.3 F12 读取链、§3.2 D2 站点表按迁移后实态回写：生产链①级读 = runtime `registerNativeSessionReader` 协议读（`subagent-engine-history.ts:229`）经协议 `read` 落引擎包 `zcode-engine.ts` `read()`（:921，白名单集合判定 :936 内聚引擎包）；`readZcodeNativeTier` 符号已不存在；handle 回填现锚 `:429/:484`（行号已按 2026-09-13 复核刷新）。决策内容不变，成文时点锚点保留为史实。
 >
 > 关联：本设计是 [subagent-engine-protocolization.md](subagent-engine-protocolization.md) 的**前置小改**——
 > 若引擎协议化先落地，本设计改动直接落进 `zcode-subagent-cli` 包内（core 侧零改动）；否则外移时随包搬走。
@@ -166,26 +166,28 @@ ZCode GUI 左侧边栏会话列表 ← 用户看到「凭空多出来的会话�
 
 结论：**只要写入面还落在宿主库，就必然污染**；识别面与展示面我们无法参与（改不了 GUI）。
 
-### 2.3 事实基准（2026-09-08 真机探针 + 存量统计；**数值为成文时快照，复测命令见探针目录**）
+### 2.3 事实基准（2026-09-08 真机探针 + 存量统计；**数值为成文时快照，参照查询见 §3.2 D7 权威 SQL 正文**）
 
-> 探针脚本已归档入仓（可复现）：`docs/design/probes/zcode-session-db/probe-session-db.mjs`（隔离库可行性）、
-> `probe2.mjs`（隔离库 + 真实一轮 prompt 端到端）。两者都用本仓生产的 `appserver-launcher.cjs` wrapper +
-> 真实凭据，只创建临时目录，不触碰宿主库（结束后 `rm -rf` 临时目录）。
+> 探针脚本已随 2026-09-13 docs purge 删除（commit 722c6886a，git 可追溯）——原
+> `docs/design/probes/zcode-session-db/probe-session-db.mjs`（隔离库可行性）、`probe2.mjs`
+> （隔离库 + 真实一轮 prompt 端到端），两者都用本仓生产的 `appserver-launcher.cjs` wrapper +
+> 真实凭据，只创建临时目录，不触碰宿主库。**结论以当时实测为准（本表【实测】标记），不再宣称可复现**；
+> 仍可复跑的证据 = §3.2 D7 的参照 SQL 正文（原 `counts.sql` 已删除并入正文）。
 
 | # | 事实 | 证据 | 置信 |
 |---|------|------|------|
-| F1 | **`ZCODE_SESSION_DB_PATH` 生效**：app-server 在指定路径建库（19 张表全量迁移），create→subscribe→send→`turn.terminal`→read→close 全链通过；会话行 / message / model_usage 全部落隔离库，**宿主库该 sessionId 0 行** | 探针 `probe2.mjs`（已归档） | 【实测·可复现】 |
-| F2 | `titleGenerationEnabled:false` 被接受，且**不再产生 `session_title` 用量行**（隔离库只有 `main_turn` 1 行） | 探针 `probe2.mjs` | 【实测·可复现】 |
-| F3 | **`taskType` 参数被 strict schema 拒收**（`-32602 Unrecognized key: "taskType"`）→ RPC 无法把会话标成 `subagent_child` | 探针 `probe-session-db.mjs` | 【实测·可复现】 |
-| F4 | create 应答 `session.sessionKind = "interactive"`，与库里 `task_type` 一致 | 探针 `probe2.mjs` | 【实测·可复现】 |
+| F1 | **`ZCODE_SESSION_DB_PATH` 生效**：app-server 在指定路径建库（19 张表全量迁移），create→subscribe→send→`turn.terminal`→read→close 全链通过；会话行 / message / model_usage 全部落隔离库，**宿主库该 sessionId 0 行** | 探针 `probe2.mjs`（已删，结论以当时实测为准） | 【实测】 |
+| F2 | `titleGenerationEnabled:false` 被接受，且**不再产生 `session_title` 用量行**（隔离库只有 `main_turn` 1 行） | 探针 `probe2.mjs`（已删，结论以当时实测为准） | 【实测】 |
+| F3 | **`taskType` 参数被 strict schema 拒收**（`-32602 Unrecognized key: "taskType"`）→ RPC 无法把会话标成 `subagent_child` | 探针 `probe-session-db.mjs`（已删，结论以当时实测为准） | 【实测】 |
+| F4 | create 应答 `session.sessionKind = "interactive"`，与库里 `task_type` 一致 | 探针 `probe2.mjs`（已删，结论以当时实测为准） | 【实测】 |
 | F5 | GUI 侧边栏查询**只按 `deleted` / `pinned` / `archived` 过滤**，无 `task_type` / `parentSessionId` 条件 | ZCode app 包内 `out/host/index.js` 的 `queryTaskList`（`WHERE deleted = 0` + `workspace_key IN (…)` + provider + pinned/archived + 搜索；由 R1 影响面审独立复核） | 【实测】 |
-| F6 | 是否进索引的**判别键是 `task_type`，不是 `parent_id`**：`subagent_child` 787/788 条未进索引；`interactive`+有父 13/13 条、`fork`+有父 6/6 条**全部进索引**（无父 `interactive` 766/865 进索引） | 存量双库交叉统计（SQL 见探针目录 `counts.sql`；**本节数字为成文时快照，counts.sql 头部为复跑快照，随数据漂移属预期**） | 【实测·可复现】 |
+| F6 | 是否进索引的**判别键是 `task_type`，不是 `parent_id`**：`subagent_child` 787/788 条未进索引；`interactive`+有父 13/13 条、`fork`+有父 6/6 条**全部进索引**（无父 `interactive` 766/865 进索引） | 存量双库交叉统计（SQL 见 §3.2 D7 参照 SQL 正文，原 `counts.sql` 已删除并入正文；**本节数字为成文时快照，随数据漂移属预期**） | 【实测·可复跑（参照 SQL 在 §3.2 D7）】 |
 | F7 | 污染是**延迟可见**的：外来进程会话靠 GUI 重订阅/按需重建进索引（zsw 同库正例：创建后 1–2 分钟进索引） | GUI 日志 + 索引 `updated_at` 对齐 | 【实测】 |
 | F8 | 当前 xyz-agent 已产生 50 条 zcode 会话（今日 10:34–13:17），全在宿主库；这 50 条**当前 0 条**在索引里——因为所在三个 worktree 不在 GUI workspace 列表 | 双库交叉 + `recentProjects` 对比 | 【实测】 |
 | F9 | 每条会话额外触发 1 次标题生成模型调用（50 条会话 → 50 条 `session_title` 用量行，37.8k input / 898 output tokens） | `model_usage` 统计 | 【实测】 |
 | F10 | 引擎**无删除会话 RPC**（24 个 `session/*` 方法里没有 delete/archive），`session/close` 只回收内存，SQLite 行保留 | engine 协议方法表盘点 + zsw 残留清理设计 | 【实测】 |
-| F11 | **池目录删除器会删池内一切非 journal 条目**（含 `db.sqlite*`）：`deletePoolNativeState`（`pool-manager.ts:374`，定义行）由 `releasePoolRef`（`:195`）与 `cleanupExpiredPoolRefs`（`:230` 定义 → `:280` 删除调用点）触发；当前休眠（`acquirePool` 生产零调用方），但**不是设计保证** | `packages/subagent-core/src/execution/engine/common/pool-manager.ts:10-18/195/230/374` | 【实测】 |
-| F12 | 生产 GUI 详情页的①级读**不经过** core 壳侧 `EnginePort.read()`：链路为 `session-records.ts:313 → readEngineSubagentHistory → readSubagentHistoryMessages → session-view-service.ts:473 → readZcodeNativeTier(:161 白名单)`；`EnginePort.read()`（`zcode-engine.ts:889`）在本仓**无生产调用方**（成文时点实测）。**v12 实态（W11 协议化后）**：runtime ①级读改经 `registerNativeSessionReader` 协议 read（`subagent-engine-history.ts:219`）——①级放行判定内聚引擎包 `zcode-engine.ts` `read()`（:908，白名单集合判定 :923），两条链路同判同源；`readZcodeNativeTier` 符号已不存在 | 全仓 `rg '\.read\('` + 上述链路逐跳 read；v12 实态 = `registerNativeSessionReader` / `zcode-engine.ts:908` 逐跳 read（2026-09-09） | 【实测】 |
+| F11 | **池目录删除器会删池内一切非 journal 条目**（含 `db.sqlite*`）：`deletePoolNativeState`（`pool-manager.ts:378`，定义行）由 `releasePoolRef`（`:181`）与 `cleanupExpiredPoolRefs`（`:234` 定义 → `:284` 删除调用点）触发；当前休眠（`acquirePool` 生产零调用方），但**不是设计保证** | `packages/subagent-core/src/execution/engine/common/pool-manager.ts:13-18/181/234/378`（行号 2026-09-13 复核） | 【实测】 |
+| F12 | 生产 GUI 详情页的①级读**不经过** core 壳侧 `EnginePort.read()`：链路为 `session-records.ts:313 → readEngineSubagentHistory → readSubagentHistoryMessages → session-view-service.ts:473 → readZcodeNativeTier(:161 白名单)`；`EnginePort.read()`（`zcode-engine.ts:889`）在本仓**无生产调用方**（成文时点实测）。**v12 实态（W11 协议化后）**：runtime ①级读改经 `registerNativeSessionReader` 协议 read（`subagent-engine-history.ts:229`）——①级放行判定内聚引擎包 `zcode-engine.ts` `read()`（:921，白名单集合判定 :936），两条链路同判同源；`readZcodeNativeTier` 符号已不存在（行号 2026-09-13 复核） | 全仓 `rg '\.read\('` + 上述链路逐跳 read；v12 实态 = `registerNativeSessionReader` / `zcode-engine.ts:921` 逐跳 read（2026-09-09，行号 09-13 复核） | 【实测】 |
 
 ### 2.4 影响面量化（改造前）
 
@@ -263,8 +265,10 @@ ZCode GUI 左侧边栏会话列表 ← 用户看到「凭空多出来的会话�
   → zsw 发版 → 新会话落隔离库。**观测主体**：re-vendor 之前「zsw 侧隔离库 > 1GB」的观测对象
   **不存在**（条件永不触发），故重审触发条件必须带该前置。
 - **清理归属（交付物写实 + 本仓可验证）**：zsw `doctor clean` 硬编码宿主库 → 对新库恒 0 命中。交付物拆两半：
-  ① **本仓可验证部分**（W5b）= 导出 `zcodeSessionDbPath` + 落**仓内规格文件**
-  `docs/design/handoff/zsw-session-db-cleanup-spec.md`（含 SSOT 内容 + 期望 zsw 侧的验收点）；
+  ① **本仓可验证部分**（W5b）= 导出 `zcodeSessionDbPath` + 清理规格由**仓内清理脚本**
+  `scripts/zcode-session-db-cleanup.mjs` 承载（头注即实现纪律：I1–I3b 判据 / I2_TOLERANCE_MS
+  唯一常量 / 删除面与跨库顺序 / 残留清单与 `--replay-residue`；原规格文件
+  `docs/design/handoff/zsw-session-db-cleanup-spec.md` 已随 2026-09-13 docs purge 删除，git 可追溯）；
   ② **跨仓部分**降为「投递动作」：在本仓记录 owner + 投递日期，登记动作 owner = zsw。
   → 避免「跨仓承诺不可验证」。
 
@@ -342,7 +346,7 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
    读取链（两条独立白名单，均需放行隔离路径）
       ├─ 生产链（成文时点）：runtime 进程 → readEngineSubagentHistory → session-view-service.readZcodeNativeTier
       │    【v12 实态·W11 后】runtime 进程 → registerNativeSessionReader 协议 read
-      │    （subagent-engine-history.ts:219）→ 引擎包 zcode-engine.ts read()（白名单判定 :923）
+      │    （subagent-engine-history.ts:229）→ 引擎包 zcode-engine.ts read()（白名单判定 :936）
       └─ API 链：EnginePort.read()（zcode-engine.ts，成文时点仅测试触达；
            v12 实态 = 协议 read 与生产链共用同一 read() 判定）
       ✗ ZCode GUI：宿主库无行 → 同步面拿不到 → 侧边栏不再出现
@@ -371,9 +375,9 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 
 | 链路 | 位置 | 现状 | 改造后 |
 |------|------|------|--------|
-| **生产链**（GUI 详情页①级读） | `engine/common/session-view-service.ts:161`（`readZcodeNativeTier`）——**已迁（v12 实态）**：runtime `registerNativeSessionReader` 协议读（`subagent-engine-history.ts:219`），①级放行判定内聚引擎包 `zcode-engine.ts:923` | 绝对路径只认 `resolve(homedir(), ...ZCODE_HOST_DB_SUFFIX)` | 白名单集合加入 `zcodeSessionDbPath(dataDir)` |
-| **API 链**（`EnginePort.read()`） | `zcode-engine.ts:889`（成文时点；**v12 实态** = `packages/zcode-subagent-cli/src/zcode-engine.ts:908`，协议 read 与生产链同判） | `dbPathRaw === hostZcodeDbPath()` | 同上（集合成员判定） |
-| handle 回填 | `zcode-engine.ts:407/453`（成文时点；**v12 实态** = 引擎包 `zcode-engine.ts:416/:466`） | `dbPath: hostZcodeDbPath()` | `dbPath: zcodeSessionDbPath(engineDataDir)` |
+| **生产链**（GUI 详情页①级读） | `engine/common/session-view-service.ts:161`（`readZcodeNativeTier`）——**已迁（v12 实态）**：runtime `registerNativeSessionReader` 协议读（`subagent-engine-history.ts:229`），①级放行判定内聚引擎包 `zcode-engine.ts:936` | 绝对路径只认 `resolve(homedir(), ...ZCODE_HOST_DB_SUFFIX)` | 白名单集合加入 `zcodeSessionDbPath(dataDir)` |
+| **API 链**（`EnginePort.read()`） | `zcode-engine.ts:889`（成文时点；**v12 实态** = `packages/zcode-subagent-cli/src/zcode-engine.ts:921`，协议 read 与生产链同判） | `dbPathRaw === hostZcodeDbPath()` | 同上（集合成员判定） |
+| handle 回填 | `zcode-engine.ts:407/453`（成文时点；**v12 实态** = 引擎包 `zcode-engine.ts:429/:484`） | `dbPath: hostZcodeDbPath()` | `dbPath: zcodeSessionDbPath(engineDataDir)` |
 
 - **白名单形态**：由单一构造函数产出**合法路径集合** `zcodeDbPathAllowlist(dataDir) = {zcodeSessionDbPath(dataDir), hostZcodeDbPath()}`
   （后者仅为存量兼容，见 D3），两站点都只做「集合成员判定」——避免 `||` 列表膨胀（未来第三个路径只需改集合构造）。
@@ -423,8 +427,8 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 - **重审触发条件**：隔离库 > 2GB，或最早行龄 > 90 天，或用户报告磁盘异常 → 启动 TTL 清理（W6，**预期 ≈45 天内就绪**——先就绪再触发，不再是硬 T+2 周）。
 - **显式判定**：**可接受**（首期不做自动删除）。依据：量级可控 + 我们独占 + 通道明确。
 - **禁止**：运行期删除隔离库文件（在途会话句柄会失效，D6 E3 已按事实改写）。
-- **与池 GC 的边界（措辞与实装对齐，作用域已限定）**：隔离库**不在池目录内**；但 `cleanupExpiredPoolRefs`（`pool-manager.ts:230`，定义行）
-  把 `engines/<engineId>/` 下**每个子目录**都当池遍历（`:239`/`:248` 双层 `readdirSync` → `:254` `cleanupPoolByTtl`），
+- **与池 GC 的边界（措辞与实装对齐，作用域已限定）**：隔离库**不在池目录内**；但 `cleanupExpiredPoolRefs`（`pool-manager.ts:234`，定义行）
+  把 `engines/<engineId>/` 下**每个子目录**都当池遍历（`:243`/`:252` 双层 `readdirSync` → `:258` `cleanupPoolByTtl`；行号 2026-09-13 复核），
   `session-db/` 因此会被当作「伪池」枚举。对 `db.sqlite*`：**不匹配任何删除条件**（无 `refs.json` → `hadRefs=false` 早退；
   `removeOrphanJournals` 只匹配 `journal-*.jsonl`）。**但作用域仅限 `db.sqlite*`**：
   若该目录内出现 `journal-*.jsonl`，会被当孤儿 journal 删；且一旦 `changed=true`，扫描会向该目录**写入 `refs.json`**
@@ -453,7 +457,7 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 | E5 隔离库路径与宿主库同路径（误配） | 单元测试守卫 | 断言两者恒不等 | 无（配置错误在测试期拦截） |
 | E6 多进程首开迁移竞争 | 两个宿主/进程同时首开隔离库 | 引擎自带迁移锁（`ZCODE_FILE_LOCK_TIMEOUT`）；失败按 E2 恢复 | 重试；仍失败按 E2 |
 
-#### D7 存量宿主行清理通道（独立通道；实现规格见 impl-plan §2.5）
+#### D7 存量宿主行清理通道（独立通道；实现规格由 `scripts/zcode-session-db-cleanup.mjs` 承载——原 impl-plan §2.5 已删除，git 可追溯）
 
 **决策**：存量污染行（我们改造前写进宿主库的会话行）需要一条**独立清理通道**，排期独立、不阻塞 G1 止血；
 **必须经用户授权**（停机窗口 + 整库备份）。
@@ -477,7 +481,7 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 恢复 = 整库回滚，重审触发 = 误删报告或碰撞计数 > 10。
 
 **实现级规格**（I1 双计数 / I2 时间戳容差与唯一常量 / I3 与 I3b 作用域 / 执行形态与 `--confirm-count` /
-索引预检与跨库顺序 / 残留清单与 `--replay-residue` / 备份粒度与窗口写者清单）见 **impl-plan §2.5**。
+索引预检与跨库顺序 / 残留清单与 `--replay-residue` / 备份粒度与窗口写者清单）由代码承载（原 impl-plan §2.5 已删除，git 可追溯；入口 = `scripts/zcode-session-db-cleanup.mjs`）。
 
 **删除面（按实装 schema，2026-09-08 只读打开 `~/.zcode/cli/db/db.sqlite` 核实）**：
 
@@ -516,9 +520,10 @@ pi 扩展进程（xyz-agent）/ zsw CLI 进程
 --   引擎库：~/.zcode/cli/db/db.sqlite
 --   索引库：~/.zcode/v2/tasks-index.sqlite
 --
--- 用法（macOS 自带 sqlite3）：
---   sqlite3 "file:$HOME/.zcode/cli/db/db.sqlite?mode=ro"      < counts.sql
---   sqlite3 "file:$HOME/.zcode/v2/tasks-index.sqlite?mode=ro" < counts.sql
+-- 用法（macOS 自带 sqlite3；本节即原 counts.sql 的权威文本，已并入正文——
+--   将本节 SQL 保存为临时文件后按下列方式执行）：
+--   sqlite3 "file:$HOME/.zcode/cli/db/db.sqlite?mode=ro"      < /tmp/counts.sql
+--   sqlite3 "file:$HOME/.zcode/v2/tasks-index.sqlite?mode=ro" < /tmp/counts.sql
 -- 说明：同一份脚本在两个库上执行时，不适用的语句会因缺表报错——按下面的分节标记
 --       分别在对应库上执行对应段落即可（或直接跑整份，忽略「no such table」行）。
 -- 复现时点：2026-09-08；数字随时间变化属预期（本文件的价值是「查询可复跑」）。
@@ -658,7 +663,7 @@ WHERE parent_id IN (SELECT s.id FROM session s JOIN wl.wl w ON w.sessionId = s.i
 
 -- ④ D7 I2 容差取值依据（可执行）：Δ = |record.startedAt - session.time_created|
 --    我们行的 Δ 分布（r7 复测 max ≈ 4022ms → 容差取 10s，约 2.5× 余量）
---    权威常量 = impl-plan §2.5 I2 / scripts/zcode-session-db-cleanup.mjs 的 I2_TOLERANCE_MS，
+--    权威常量 = scripts/zcode-session-db-cleanup.mjs 的 I2_TOLERANCE_MS（单源），
 --    改容差须同步此处字面量（10000）与 ⑤。
 SELECT COUNT(*) AS rows_,
        MIN(ABS(w.startedAt - s.time_created)) AS delta_min_ms,
@@ -710,7 +715,7 @@ WHERE u.task_type='interactive'
 | A8 | 失败路径 | ①隔离库父目录 `chmod 000`；②运行期 unlink `db.sqlite*`（主文件 + `-wal`/`-shm`，按 E3 事实核验） | ①任务显式失败且错误含路径与恢复指引，**宿主库零新增**；②在途会话数据落已 unlink inode、重启后自动重建新库、旧 record 降②级 journal 仍可读 | D6 |
 | A9 | 池 GC 守卫（反向不变量，**经公共 API + 枚举断言**） | `dataDir=mkdtempSync()` 下先 `mkdirSync(dirname(zcodeSessionDbPath(dataDir)), {recursive:true})` 并写入 `db.sqlite`+`-wal`+`-shm`（**注意：入参是父目录，不是 dbPath 本身**）；然后 (a) `acquirePool(dataDir,'zcode','shared',taskId)` + `releasePoolRef(...)` 归零；(b) `cleanupExpiredPoolRefs(dataDir, 0, spyFs)`（TTL 归零 + 注入 spy fs） | ①隔离库三件套**字节不变**；②**枚举断言**：spy 的 `readdirSync` 调用序列命中 `engines/zcode/session-db`（证明扫描真进入该目录，不是“没扫到”的假通过）；③池目录原生状态照常清理 = **`refs.json`/原生条目被删**（注意 `deletePoolNativeState` 对空目录 early-return，**池目录本身不会被 rmdir**）；④断言 `zcodeSessionDbPath(dataDir)` 不在 `resolvePoolDir(dataDir,'zcode','shared')` 之下 | 不变量 6 |
 | A10 | 存量零迁移（反向不变量） | 改造前后对比宿主库行数 / 既有 record 文件 | 宿主库行数与 record 内容**逐字节不变**（除新会话）；无任何自动删除 | 不变量 4 |
-| A11 | 存量行清理通道（W5） | 用 D7 规格对自身 record 白名单做 dry-run → **先在 ZCode GUI 打开含我们会话的 worktree**（让索引侧有可观测行）→ 停机窗口执行 | **四数报告 + 删除集 == 参照 SQL 结果**（白名单总数 / 白名单∩宿主库 / 派生删除集 / 删除集总数）；**I2 时间戳交叉验证全部通过**（无一条中止）；**I3/I3b 无命中**；**反向 fixture 两条**（混入用户 `fork` id → 中止；混入普通用户 interactive+generated 且时间戳差数小时 id → 必须中止）；**无确认参数且非 TTY → 拒绝**；`--confirm-count` 错值 → 拒绝；**确认凭证落盘且与删除集总数匹配**；**索引面归零** + 预检命中项两侧同时剔除并报告 + 索引删除失败时残留清单落盘、补删后归空；执行后宿主库 11 表 + `input_history` + 派生行零残留；SET NULL 修改行数与 FK 失败中止记录（若发生）已报告。**实现级步骤与 fixture 见 impl-plan §2.5/§7.2** | G5 |
+| A11 | 存量行清理通道（W5） | 用 D7 规格对自身 record 白名单做 dry-run → **先在 ZCode GUI 打开含我们会话的 worktree**（让索引侧有可观测行）→ 停机窗口执行 | **四数报告 + 删除集 == 参照 SQL 结果**（白名单总数 / 白名单∩宿主库 / 派生删除集 / 删除集总数）；**I2 时间戳交叉验证全部通过**（无一条中止）；**I3/I3b 无命中**；**反向 fixture 两条**（混入用户 `fork` id → 中止；混入普通用户 interactive+generated 且时间戳差数小时 id → 必须中止）；**无确认参数且非 TTY → 拒绝**；`--confirm-count` 错值 → 拒绝；**确认凭证落盘且与删除集总数匹配**；**索引面归零** + 预检命中项两侧同时剔除并报告 + 索引删除失败时残留清单落盘、补删后归空；执行后宿主库 11 表 + `input_history` + 派生行零残留；SET NULL 修改行数与 FK 失败中止记录（若发生）已报告。**实现级步骤与 fixture 由代码承载（原 impl-plan §2.5/§7.2 已删除，git 可追溯；入口 = `scripts/zcode-session-db-cleanup.mjs` 及其测试）** | G5 |
 | A12 | 伴生写入面登记准确性（反向不变量） | A1–A6 后 diff `~/.zcode/` 增量（排除已知 GUI 面 `v2/tasks-index.sqlite`、`v2/telemetry-state.json` 与第二宿主 `zsw/`） | 增量面与 §2.4.1 表列出的面一致（无未登记的新写入面）；若出现未登记面 → 回写登记表并重审判定 | 已接受代价登记 |
 
 **探针挂钩**（随代码落地）：
@@ -728,13 +733,13 @@ WHERE u.task_type='interactive'
 
 | 单元 | 职责（设计级） | 依赖 | 验收挂钩 | 领地与实现细节 |
 |------|----------------|------|---------|------------------|
-| W1 路径与 env | `zcodeSessionDbPath()` / `zcodeDbPathAllowlist()` 两个构造函数 + env 注入（含清空别名键）+ 父目录确保 | —（DAG 根） | A1；探针①；§2.1 规格 | impl-plan §2.1 |
-| W2 读取链与 handle | 两站点改集合成员判定 + handle 回填隔离路径 + `hostZcodeDbPath()` 降级为兼容锚点 + 注释回写 | W1 | A3/A4；探针②；§2.2 规格 | impl-plan §2.2 |
-| W3 测试 | 单元 + 集成（fake-server）+ 真机 live 用例；含池 GC 守卫（经公共 API） | W1/W2 | A1–A4/A6/A9；§2.3 规格 | impl-plan §2.3 |
-| W4 文档与约束同步 | 约束表 / AGENTS / 池边界注释 / 漂移检查 / 权威源文档 / 第六面 / 伴生面债务落点 | W1/W2 | §2.4 规格（文档同步纪律 C-proc-10） | impl-plan §2.4 |
-| W5a 清理工具实现 | 按 D7 规格实现（I1/I2/I3/I3b + 执行形态 + 索引预检 + 跨库顺序 + 残留清单） | W1 | A11；§2.5 规格 | impl-plan §2.5 |
-| W5b zsw 侧交接物 | 导出 `zcodeSessionDbPath` + 仓内规格文件 | W1 | §2.4.3；§2.6 规格 | impl-plan §2.6 |
-| W6 隔离库 TTL（后续项） | 按 D4 重审触发条件启动（体积/行龄阈值 → 清理策略） | D4 触发后 | D4 触发后另立；§2.7 规格 | impl-plan §2.7 |
+| W1 路径与 env | `zcodeSessionDbPath()` / `zcodeDbPathAllowlist()` 两个构造函数 + env 注入（含清空别名键）+ 父目录确保 | —（DAG 根） | A1；探针①；实现级规格由代码承载（原 impl-plan §2.1，已删除） | 实现级细节由代码承载（入口 = `db-path.ts`） |
+| W2 读取链与 handle | 两站点改集合成员判定 + handle 回填隔离路径 + `hostZcodeDbPath()` 降级为兼容锚点 + 注释回写 | W1 | A3/A4；探针②；实现级规格由代码承载（原 impl-plan §2.2，已删除） | 实现级细节由代码承载（入口 = `zcode-engine.ts` / `db-path.ts`） |
+| W3 测试 | 单元 + 集成（fake-server）+ 真机 live 用例；含池 GC 守卫（经公共 API） | W1/W2 | A1–A4/A6/A9；实现级规格由代码承载（原 impl-plan §2.3，已删除） | 实现级细节由代码承载（入口 = 引擎包测试目录） |
+| W4 文档与约束同步 | 约束表 / AGENTS / 池边界注释 / 漂移检查 / 权威源文档 / 第六面 / 伴生面债务落点 | W1/W2 | 实现级规格由代码承载（原 impl-plan §2.4，已删除；文档同步纪律 C-proc-10） | 实现级细节由代码承载（入口 = 本文档 + `docs/constraints.json`） |
+| W5a 清理工具实现 | 按 D7 规格实现（I1/I2/I3/I3b + 执行形态 + 索引预检 + 跨库顺序 + 残留清单） | W1 | A11；实现级规格由代码承载（原 impl-plan §2.5，已删除） | 实现级细节由代码承载（入口 = `scripts/zcode-session-db-cleanup.mjs`） |
+| W5b zsw 侧交接物 | 导出 `zcodeSessionDbPath` + 清理规格由 `scripts/zcode-session-db-cleanup.mjs` 承载（原仓内规格文件已随 docs purge 删除，git 可追溯） | W1 | §2.4.3；实现级规格由代码承载（原 impl-plan §2.6，已删除） | 实现级细节由代码承载（入口 = `scripts/zcode-session-db-cleanup.mjs`） |
+| W6 隔离库 TTL（后续项） | 按 D4 重审触发条件启动（体积/行龄阈值 → 清理策略） | D4 触发后 | D4 触发后另立（原 impl-plan §2.7 已删除） | 实现级细节由代码承载（入口 = 触发后另立单元） |
 
 **版本与排序**：W1+W2 必须同批（env 与 handle 分叉会立刻产生读取降级）；W3 随 W1/W2 同批交付；
 W4 在合入前完成；W5/W6 独立排期（不阻塞 G1）。

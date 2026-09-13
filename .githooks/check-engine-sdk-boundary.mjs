@@ -20,7 +20,7 @@
 //   - 只检查模块说明符（import/require/export from/dynamic import），不扫注释文本——
 //     源文件头部的「源 = packages/subagent-core/src/...」参照注释是合法的迁移留痕。
 //
-// 运行：node scripts/check-engine-sdk-boundary.mjs（.githooks 下脚本由仓根相对路径
+// 运行：node .githooks/check-engine-sdk-boundary.mjs（.githooks 下脚本由仓根相对路径
 // 定位包目录；违规时 exit 1 并逐条列出文件:行号:违规说明符 + 恢复指引）。
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";

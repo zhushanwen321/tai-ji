@@ -24,8 +24,8 @@ SubagentService 跑在宿主 pi 主进程内（extension 加载），是 subagen
 
 - **G1 尺寸与聚焦（v2 口径修正）**：壳**类体**行数 ≤ 500（`wc -l` 减去 imports / 模块常量 / 接口声明——**外移后残余非类体行 ~150**，文件口径不可达，见 S2 算术）；每聚合 ≤ 700 行（附算术：RunOrchestration = #6(~12)+#7(~68)+#12(~110)+#14(~440)+#15(~49) ≈ 680 + 注入接口样板，600 不可达——v1 数值与 §2.1 自身算术矛盾，附录 B#1）；每聚合单一职责域族；改一个域不再通读其余。
   - **[终态回写 2026-09-12，阶段 6]** 两处算术被实测证伪、经主 agent 裁决追认（impl-plan §5 D-R4-1 / D-R6-1）：
-    - **壳类体 ≤500：达成**——壳 subagent-service.ts 终态 **893 物理 / 409 eslint 折算**（R6 外移后实测）。
-    - **每聚合 ≤700：六聚合中五达标**（session-baselines 401 / sync-collect-domain 518 / record-lifecycle 531 / record-access 540 / workflow-dispatch 527，物理行）；**run-orchestration 1506 物理 / 798 eslint 折算超限追认**——本条的 ≈680 估算基于 H2 workflow 族并入前的旧域表口径，实测证伪；为凑 700 硬拆需重走 C-5 回调链协作面，违背「聚焦」本意，lint 面以单列 override `max:800` 零余量锁定当前形态（增长即暴露，演化史注释在 eslint.config.mjs）。
+    - **壳类体 ≤500：达成**——壳 subagent-service.ts 终态 **893 物理 / 409 eslint 折算**（R6 外移后实测；2026-09-13 design-code-sync 复测物理 919——后续实施批次继续小幅演化，行数为快照非承诺）。
+    - **每聚合 ≤700：六聚合中五达标**（session-baselines 401 / workflow-dispatch 527 保持；sync-collect-domain 518→445 / record-lifecycle 531→563 / record-access 540→544，2026-09-13 复测物理行）；**run-orchestration 超限追认**（追认时点 1506 物理 / 798 eslint 折算；2026-09-13 复测 1649 物理，且该文件正随后续拆分批次继续演化，行数不在此钉死——见 H3 后续拆分与 2026-09-13 lint 锁处置）——本条的 ≈680 估算基于 H2 workflow 族并入前的旧域表口径，实测证伪；为凑 700 硬拆需重走 C-5 回调链协作面，违背「聚焦」本意，lint 面以单列 override `max:800` 零余量锁定当前形态（增长即暴露，演化史注释在 eslint.config.mjs）。
     - **单类成员 ≤40（S2 判据）：不可达追认**——壳成员 **63**（TS AST `ClassDeclaration.members` 全集口径：20 字段 + 31 方法 + 11 getter + 1 ctor；初登记 52 系 grep 口径盲区——漏 ctor 与无修饰符 public 方法）。超限主体 = strangler 转发面（聚合面 getter + 单行转发方法），删转发会把聚合公共面升级为跨包 API、破坏 D3 消费方零改动承诺；G1 防壳积累业务逻辑的实质已达成（壳方法几乎全为单行转发/装配编排）。
     - **两把折算尺对照**（报告数字必须标注口径名）：**eslint 折算口径** = skipBlankLines + skipComments 的全文件折算（壳 409 / run-orchestration 798）；**类体口径** = `wc -l` 减 imports / 模块常量 / 接口声明（本条主口径；R6 三类外移后壳内残余非类体行远低于 v2 预估 ~150）。
 - **G2 依赖单向显式**：壳组合聚合；聚合间禁止互调私有方法（需要协作的经壳编排或显式接口）；**service 实例字段**所有权单一（单写者）——共享 `ExecutionRecord` 对象内部字段的写点收口归 H4（见 D1 两级归属）。
@@ -156,7 +156,7 @@ SubagentService（装配壳，类体 ≤ 500 行）
 | R5 | 测试归位 + 守卫（三方向循环依赖 / 私有互调 grep 门） | G2/G3 的机械守门 | S3/S4 |
 | R6 | 外移 Init 接口 / 模块常量 / 单例访问器至 `execution/service/` 独立文件（**import 纪律（v4）：Init 接口 type-only；单例访问器经 barrel 直接改指向 service-bootstrap、不做壳 re-export（防壳↔bootstrap 值环——bootstrap 必须 new SubagentService，壳侧 re-export 即成环，且 bootstrap 非聚合、三方向环守卫覆盖不到此边）；类体消费的常量留壳或独立叶子模块**；R5 守卫扩壳侧支撑文件方向） | 壳类体 ≤500 门槛的达成单元（文件口径算术见 G1） | S2 + barrel 导出面不变断言 |
 
-**文件改动地图**：`execution/subagent-service.ts`（缩为壳；`notifyGateAllowsDelivery` 模块级导出 :257 壳保留 re-export——逻辑属 notify 面，不随聚合搬迁）；新增 `execution/service/{session-baselines,sync-collect-domain,record-lifecycle,run-orchestration,service-bootstrap}.ts`（service-bootstrap = R6 外移的 Init 接口/模块常量/单例访问器，命名建议新增，实施可调）；`execution/__tests__/` 对应迁移与深绑改写（D6）；barrel 消费方零改动。
+**文件改动地图**：`execution/subagent-service.ts`（缩为壳；`notifyGateAllowsDelivery` 模块级导出 :257 壳保留 re-export——逻辑属 notify 面，不随聚合搬迁）；新增 `execution/service/{session-baselines,sync-collect-domain,record-lifecycle,run-orchestration,service-bootstrap,service-constants}.ts`（service-bootstrap = R6 外移的 Init 接口/单例访问器；service-constants = R6 常量归一产物——零依赖叶子文件，常量域与 bootstrap 域变化轴正交，防「聚合→bootstrap→壳→聚合」三节点模块环，见该文件头注）；`execution/__tests__/` 对应迁移与深绑改写（D6）；barrel 消费方零改动。
 
 **待验证检查点**：① #5 域与 collect-coordinator 的注入闭包拆分点（flushBatch 依赖 service 闭包——抽取时改为显式依赖注入）；② **R0 三清单**（实例字段归属表 + record 字段写点通道边界表 + 深绑测试全集）作为 R1-R4 实施依据；③ dispose 时序在壳层的最终形态（RecordLifecycle 承接域 #4 后，壳 dispose 编排对它的调用顺序与现状等价性——E9 先于批量 archive 的时序约束保持）。
 

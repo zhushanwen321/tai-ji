@@ -20,6 +20,13 @@
 > 绝对路径（隔离库 `<engineDataDir>/engines/zcode/session-db/db.sqlite`，`zcodeSessionDbPath()`
 > SSOT；存量 record 的宿主库绝对路径由 `zcodeDbPathAllowlist()` 集合第二项兼容放行——见下方修订块）。
 > 未作废章节（D1 连接/D3 abort/D4 会话自包含/D5 capabilities/D6 停机面）仍然有效。
+> **D8/D9/D10 归属补注（2026-09-13 实装核对）**：D8 的**协议冒烟探针段作废**——probe 降级链
+> 随 CLI spawn 删除：appserver-probe.ts 整文件删除，现行 `probe()` = 二进制存在 + 版本解析探测
+> （`packages/zcode-subagent-cli/src/zcode-engine.ts:208`，:119 注释自证），常量
+> `ZCODE_APPSERVER_PROBE_CONN_ENV` 已不存在；D8 的 **golden 帧序列语料段仍现行**
+> （`packages/zcode-subagent-cli/src/__golden__/zcode-golden-appserver.json` 承载）；D9 反向请求
+> 常量表应答仍现行（`connection.ts` `DEFAULT_REVERSE_HANDLERS`）；D10 基线 argv 不带
+> `--stdio/--surface` 仍现行（`connection.ts` 头注自证），三态矩阵跨仓真机补验仍未做（维持原文「留待补验」）。
 
 > **2026-09 会话库隔离修订（承接 [zcode-session-db-isolation.md](zcode-session-db-isolation.md)，2026-09-09）**：
 > spawn env **覆写** `ZCODE_SESSION_DB_PATH`（并清空别名键 `ZCODE_SESSION_DB`），subagent 会话落
@@ -34,7 +41,7 @@
 
 > 层声明：当前层 = 技术方案设计；下一层 = 可实施代码单元（W1-W6，见 §5）。
 > 决策依据：zsw 仓 `docs/design/zcode-engine-appserver-decision-record.md`（commit e70ca71，用户 2026-08-30 确认终态）。本设计是该决策记录的落地实施设计，方向/位置/接口不变性均以决策记录为准，不重新讨论。
-> 状态：**设计就绪**。审查轨迹：r1（2026-08-30）3 must-fix + 4 suggestion + 1 doc_error → r2 复审 2 must-fix + 4 suggestion + 1 doc_error + 4 info → r3 终审 2 must-fix + 2 suggestion + 1 doc_error + 1 info，三轮全部逐条修复；r3 预登记「MF1/MF2 修完即设计就绪」，终批 6 条已同批修完（收敛轨迹 8→11→6，问题从机制级收敛到一句话级钉死）。
+> 状态：**已交付**（设计就绪；2026-08-31 落地，后续形态演进见头部 2026-09 breaking / 会话库隔离两个修订块）。审查轨迹：r1（2026-08-30）3 must-fix + 4 suggestion + 1 doc_error → r2 复审 2 must-fix + 4 suggestion + 1 doc_error + 4 info → r3 终审 2 must-fix + 2 suggestion + 1 doc_error + 1 info，三轮全部逐条修复；r3 预登记「MF1/MF2 修完即设计就绪」，终批 6 条已同批修完（收敛轨迹 8→11→6，问题从机制级收敛到一句话级钉死）。
 
 ## §1 背景目标
 
