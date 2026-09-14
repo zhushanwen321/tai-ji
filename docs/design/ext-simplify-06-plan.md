@@ -1,10 +1,10 @@
 # ext-simplify-06：plan 包过度设计简化（complete 交互矩阵整合 + 模板单源 + 防幻影剥离）
 
-> **一句话结论**：`@zhushanwen/pi-plan`（0.4.3）的 6 组审计发现全部收敛——complete 动作砍掉结构性不可实装且静默丢弃用户选择的 tree isolation 档（3×3 交互矩阵降为 2×3）、goal 桥失败从静默 return false 改为「降级 steer + 显式告知」、三源模板机制收缩为 builtin 单源（砍 create-template action）、5 个内置模板步骤节标题统一并以守卫测试钉死解析正则、3 处防幻影动态 import 改静态（extension-logger 依赖随之剥离）、PlanPhase 删除（isActive 单一编码）、pi-goal peer 依赖 optional 化。除 C8 是行为修复外全部为纯减法；实施前置 1 个行为断言探针（⛔ 见 §6.6）。
+> **一句话结论**：`@zhushanwen/pi-plan`（0.4.4）的 6 组审计发现全部收敛——complete 动作砍掉结构性不可实装且静默丢弃用户选择的 tree isolation 档（3×3 交互矩阵降为 2×3）、goal 桥失败从静默 return false 改为「降级 steer + 显式告知」、三源模板机制收缩为 builtin 单源（砍 create-template action）、5 个内置模板步骤节标题统一并以守卫测试钉死解析正则、3 处防幻影动态 import 改静态（index.ts 的 logger .catch 随之消失；包级 extension-logger 依赖因 compact.ts guardStaleCtx 降级日志而保留——v1 的「依赖剥离」子项基于 crash-resilience 合入前的过期快照，审查 MF1 收缩）、PlanPhase 删除（isActive 单一编码）、pi-goal peer 依赖 optional 化。除 C8 是行为修复外全部为纯减法；实施前置 1 个行为断言探针（⛔ 见 §6.6）。
 
 ## 开篇（SCQA）
 
-- **S（情境）**：`@zhushanwen/pi-plan` 是 pi coding agent 的轻量 plan mode extension（非 mandatory，npm 独立发布，src 7 文件 1076 行）：`/plan <requirement>` 进入 plan mode（限工具集、注入只读约束 prompt），AI 探索并写 `.xyz-harness/<slug>/plan.md`，`plan` 工具的 `complete` action 收尾——弹对话框让用户选执行方式（subagent / goal / single-agent），再按 AI 传入的 `isolation` 参数决定上下文策略（compact / tree / direct）。
+- **S（情境）**：`@zhushanwen/pi-plan` 是 pi coding agent 的轻量 plan mode extension（非 mandatory，npm 独立发布，src 7 文件 1096 行）：`/plan <requirement>` 进入 plan mode（限工具集、注入只读约束 prompt），AI 探索并写 `.xyz-harness/<slug>/plan.md`，`plan` 工具的 `complete` action 收尾——弹对话框让用户选执行方式（subagent / goal / single-agent），再按 AI 传入的 `isolation` 参数决定上下文策略（compact / tree / direct）。
 - **C（冲突）**：2026-09-11 过度设计审计（候选 8 + M1/M2/M3）发现该包 6 组问题，其中一组是正确性缺陷：isolation=tree 档把用户在对话框选的执行方式静默丢弃（只发一句「Use /tree to manually navigate back」）；goal 桥 `tryGoalInit` 5 个失败出口全部静默 return false，而 steer 消息已承诺「Execute via /goal」——AI 与用户被引向不存在的状态。另有：三源模板机制赌一个不存在的模板生态、`extractPlanSteps` 正则与自家 4/5 内置模板脱节、3 处防幻影动态 import 防的是一个不存在的运行时依赖、peer 依赖声明与事实倒挂、PlanPhase 与 isActive 双重编码同一事实。
 - **Q（问题）**：如何在不损失 plan mode 主链路（工具集门禁、状态跨 compact/重启存活、plan 上下文穿越压缩与树导航）的前提下，让 complete 的每次交互言出必行、把无证据的投机面砍到只剩有真实需求方的部分？
 - **A（答案）**：4 个决策（tree 档处置、goal 桥失败显式化、模板单源、phase 删除）+ 2 个执行项（静态 import、peer optional 化），全部行为修复或行为等价；仅模板单源带一项已量化的兼容代价（存量自定义模板目录变孤儿）。
@@ -76,12 +76,12 @@ AI: plan(action="complete", isolation="compact")
 ### 3.2 真实失败模式
 
 - **F1（C8a，选择被静默丢弃）**：isolation=tree 时，用户在 ① 对话框的任何选择都不产生效果——对话框问的是「谁来执行」，tree 档却什么都不执行，只提示用户手动 `/tree`。AI 侧收到的 result content 是 `Plan approved. File: ...`（tool.ts:335），同样不知道选择被丢弃。
-- **F2（C8b，承诺不兑现）**：`tryGoalInit`（compact.ts:128-151）有 5 个静默失败出口——`:132` goal 未加载、`:135` plan 文件不可读（`readPlanFileSafe` 失败返回 `"(plan file could not be read)"`，用 `startsWith("(")` 判定）、`:139` 提取到 0 步骤、`:141-147` `goalInit()` 返回 false（已有 active goal / ctx 缺失）、`:148-150` catch。3 处调用点（:222、:227、:241）全部不消费返回值。失败后 steer 文案仍写着「Execute via /goal」——AI 去 `set up tracked task decomposition` 时 goal 根本不存在。
+- **F2（C8b，承诺不兑现）**：`tryGoalInit`（compact.ts:132-155）有 5 个静默失败出口——`:132` goal 未加载、`:135` plan 文件不可读（`readPlanFileSafe` 失败返回 `"(plan file could not be read)"`，用 `startsWith("(")` 判定）、`:139` 提取到 0 步骤、`:141-147` `goalInit()` 返回 false（已有 active goal / ctx 缺失）、`:148-150` catch。3 处调用点（:222、:227、:241）全部不消费返回值。失败后 steer 文案仍写着「Execute via /goal」——AI 去 `set up tracked task decomposition` 时 goal 根本不存在。
 - **F3（M1，投机模板生态）**：三源模板机制（`templates.ts:34-50`：project `.pi/plan-templates` → global `getAgentDir()/plan-templates` → builtin，`seen` 去重）+ `create-template` action（tool.ts:213-235，AI 可写模板文件）≈ 200 行，服务的本质需求只是「给 LLM 一段初始 markdown」。5 个 builtin 模板同一提交自产，project/global 两级与元创建机制零真实消费者（inner-platform effect）。
 - **F4（M2，正则与模板脱节）**：`extractPlanSteps` 的步骤节正则 `^##\s*(实现步骤|实施步骤|Implementation|Steps)`（compact.ts:160）在 5 个内置模板中只命中 feature-plan 的 `## Implementation Steps`；implementation-plan（任务分解/实现顺序）、refactor-plan（分步骤计划）、bugfix-plan（修复策略）、research-plan（后续步骤）全部脱靶退化为 fallback（全局扫任意编号列表，cap 10 条，:177-187）。模板结构与解析器是两套无机制绑定的知识（leaky abstraction）。
-- **F5（M3，防幻影防御）**：3 处动态 import（index.ts:20-25、tool.ts:255、tool.ts:326）注释称「avoids cross-group static import」，但 compact.ts 唯一外部引用是 `import type { GoalInitFn }`（类型擦除）——赌的运行时依赖不存在。代价：promise 链 + `.catch` + 一条 `logger.warn`（这是 `@zhushanwen/pi-extension-logger` 依赖的**唯一**使用点，index.ts:2/:9/:23），并把 `buildExecOptions` 被迫 async 化。
+- **F5（M3，防幻影防御）**：3 处动态 import（index.ts:20-24、tool.ts:255、tool.ts:326）注释称「avoids cross-group static import」，但当时 compact.ts 的外部引用仅 `import type { GoalInitFn }`（类型擦除）——赌的运行时依赖不存在。代价：promise 链 + `.catch` + 一条 `logger.warn`（index.ts:2/:9/:23）。**v2 修正（审查 MF1）**：crash-resilience u1（8ca11d330，09-10）已给 compact.ts 加 `guardStaleCtx` 守卫与 logger（:5 pi-ext-guards、:7/:12 pi-extension-logger、:236/:246 onStale `logger.warn` ×2）——v1 起草读的是合入前快照，「index.ts 是 logger 唯一使用点」已失实；index.ts 的 logger 使用随 `.catch` 消失维持成立，**包级 extension-logger 依赖保留**（消费方 = compact.ts 降级日志，属 crash-resilience D1 登记的降级语义，不得顺手删）。
 - **F6（发现 5，声明倒挂）**：`package.json:24` 把 `@zhushanwen/pi-goal` 声明为硬 peer（无 peerDependenciesMeta.optional；对比 :26-30 pi-ai 标了 optional）——npm≥7 安装 pi-plan 会自动强装 pi-goal；而 `extension-dependencies.json` 登记的是 `type: "optional"`，运行时也是鸭子探测降级。声明面（强）与事实面（弱）倒挂。
-- **F7（发现 6，双重编码 + 死状态）**：`PlanPhase` 四态（state.ts:3）与 `isActive` 布尔在所有写入点冗余共存，无 invariant 保证（`executeSelectTemplate` tool.ts:205 不检查 isActive 即写 `phase="writing"`）。实读追加一条审计未点透的证据：**`phase="complete"` 是死状态**——`executeComplete` 写入它（tool.ts:319）与 `resetPlanState` 归零（tool.ts:330）之间无任何 await（persist/restore/handlePlanComplete 入口均同步；`ctx.compact()` 是 fire-and-forget void，SDK types :246/:1270），JS 单线程保证事件处理器读到该状态的唯一窗口不存在；等 compact 事件真正触发时缓存已被删、重建出的状态 isActive=false。因此 compact.ts:25 的 `state.phase !== "complete"` else 分支（「Awaiting user decision」文案）不可达，brainstorming/writing 两态则零行为差异（唯一行为分支键于一个永不可观测的值）。
+- **F7（发现 6，双重编码 + 死状态）**：`PlanPhase` 四态（state.ts:3）与 `isActive` 布尔在所有写入点冗余共存，无 invariant 保证（`executeSelectTemplate` tool.ts:205 不检查 isActive 即写 `phase="writing"`）。实读追加一条审计未点透的证据：**`phase="complete"` 是死状态**——`executeComplete` 写入它（tool.ts:319）与 `resetPlanState` 归零（tool.ts:330）之间的唯一 await 是 :326 动态 import（模块缓存后近似同步），且其位于 `ctx.compact()` 启动（:327；fire-and-forget void，SDK types :246/:1270）之前——compact 事件在该微任务间隙不可触发，事件窗口不存在（u1 删除该动态 import 后才严格无 await；P1 探针保留为门，对含 await 的现状实测反而是更强的验证）；等 compact 事件真正触发时缓存已被删、重建出的状态 isActive=false。因此 compact.ts:25 的 `state.phase !== "complete"` else 分支（「Awaiting user decision」文案）不可达，brainstorming/writing 两态则零行为差异（唯一行为分支键于一个永不可观测的值）。
 
 ### 3.3 根因
 
@@ -120,7 +120,7 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 
 ### 4.2 失败路径（带恢复指引）
 
-- **goalInit 失败（任一原因）**：不再发 goal steer，改发降级 steer（AI 可见）：`"Goal execution was not started (<reason>). Execute step by step in the current session. Read the plan file and start implementing."` + `ctx.ui.notify` 警告用户。direct 档的 result content 追加一行说明（compact 档 result 已返回，走 steer + notify 通道——两档差异如实登记）。reason 取值与本设计新增的失败出口一一对应：`goal-unavailable`（goal 未加载，正常交互下不可达，防御保留）/ `plan-unreadable`（👉 AI 检查 plan.md 是否存在后重试 complete）/ `no-steps`（👉 AI 按 `## Implementation Steps` 节补编号步骤后重试）/ `init-refused`（已有 active goal → 👉 先 `/goal clear` 或沿用现有 goal；ctx 缺失 → 属 pi 内部异常）。每个 reason 指向一个具体恢复动作，不做纯日志字符串。
+- **goalInit 失败（任一原因）**：不再发 goal steer，改发降级 steer（AI 可见）：`"Goal execution was not started (<reason>). Execute step by step in the current session. Read the plan file and start implementing."` + `ctx.ui.notify` 警告用户。direct 档的 result content 追加一行说明（compact 档 result 已返回，走 steer + notify 通道——两档差异如实登记）。reason 取值与失败出口一一对应（5 值）：`goal-unavailable`（goal 未加载，正常交互下不可达，防御保留）/ `plan-unreadable`（👉 AI 检查 plan.md 是否存在后重试 complete）/ `no-steps`（👉 AI 按 `## Implementation Steps` 节补编号步骤后重试）/ `init-refused`（已有 active goal → 👉 先 `/goal clear` 或沿用现有 goal）/ `internal-error`（tryGoalInit catch 出口 👉 报告为内部异常 + 降级 steer 继续；审查 S2 补第 5 值，消除映射缺口）。每个 reason 指向一个具体恢复动作，不做纯日志字符串。
 - **AI 传 `isolation="tree"`**：参数 schema（`StringEnum(["compact","direct"])`，tool.ts:357-361）直接拒绝并回显合法值，AI 可自纠——不再有「接受参数但行为与参数无关」的档位。
 - **模板找不到**（`Template not found: xxx`）：list-template 重看可用名单（builtin 5 个），恢复动作在错误消息中已可推导，行为不变。
 
@@ -134,7 +134,7 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 - **被否**：
   - **实装 tree 档**——`navigateTree` 仅存在于 `ExtensionCommandContext`（SDK types :274），complete 的触发点是工具 execute（ctx 为 `ExtensionContext`，无该能力），「实装」意味着把 complete 从工具改成 command（改变交互发起方，产品形态变更）或让 AI 提示用户手动操作（= 现状被否形态）。且该档存在依据答不出具体决策：CHANGELOG 无 isolation=tree 的来历记录，审计四问①与本次实读均未找到「批准后不自动执行、专门要跳树分支」的需求方。「批准后不自动执行」的既有替身：complete-cancelled（Modify the plan first / Save for later，留在 plan mode）与 abort（退出且不 steer，plan.md 留盘）。若用它，§3.1 例子中 ① 的选择继续被丢弃，F1 永续。
   - **维持现状**——F1/F2 是正确性缺陷，静默丢弃在用户感知线之下但破坏信任（审计核心无损锚）。
-- **证据**：compact.ts:233-236（tree case 仅 notify）；SDK types :209/:254/:274（navigateTree 的 ctx 归属）；command.ts:185（提示文案三值并列）；plan CHANGELOG 全文无 tree/isolation 条目。
+- **证据**：compact.ts:253-256（tree case 仅 notify）；SDK types :209/:254/:274（navigateTree 的 ctx 归属）；command.ts:185（提示文案三值并列）；plan CHANGELOG 全文无 tree/isolation 条目。
 - **效果**：G1 成立；「砍一个边缘档位」换「交互矩阵闭环 + 消灭一类静默失败」（审计小取舍/大简化论证）。
 
 | 方案 | 长期架构合理性 | 短期实现成本 | 风险 | 裁决 |
@@ -145,14 +145,14 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 
 ### 5.2 D2：goal 桥失败显式化（选定：reason 单点化 + 双通道报告）
 
-- **采用**：`tryGoalInit` 的 5 个 false 出口改为返回 `GoalBridgeOutcome = { started: true } | { started: false; reason: "goal-unavailable" | "plan-unreadable" | "no-steps" | "init-refused" }`（本设计新增类型，出口与 §3.2 F2 列举一一对应）；`handlePlanComplete` 改为「先 goalInit、后按结果选 steer」——成功发 goal steer，失败发降级 steer（文案含 reason 与恢复动作）+ notify 警告；direct 档 outcome 同步可得，executeComplete 把结果写进 result content 与 details；compact 档 goalInit 在 onComplete 回调内执行（保持现状时序——goal 状态 entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，本次不动该时序），失败经 steer + notify 报告，result content 已返回故不含它，文档如实登记这一通道差异。随手术顺带：`:73`/`:131` 两份 `pi as ExtensionAPI & { __goalInit? }` 断言收敛为单一 `getGoalInit(pi)`（发现 7），删 `detectGoalCapability`（:71-79）里包裹纯属性访问的 try/catch（无抛错路径）。
+- **采用**：`tryGoalInit` 的 5 个 false 出口改为返回 `GoalBridgeOutcome = { started: true } | { started: false; reason: "goal-unavailable" | "plan-unreadable" | "no-steps" | "init-refused" | "internal-error" }`（本设计新增类型；前 4 值对应 4 个显式守卫出口、`internal-error` 对应 catch 出口——与 §3.2 F2 五出口一一对应，审查 S2）；`handlePlanComplete` 改为「先 goalInit、后按结果选 steer」——成功发 goal steer，失败发降级 steer（文案含 reason 与恢复动作）+ notify 警告；direct 档 outcome 同步可得，executeComplete 把结果写进 result content 与 details；compact 档 goalInit 在 onComplete 回调内执行（保持现状时序——goal 状态 entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，本次不动该时序），失败经 steer + notify 报告，result content 已返回故不含它，文档如实登记这一通道差异。随手术顺带：`:77`/`:134` 两份 `pi as ExtensionAPI & { __goalInit? }` 断言收敛为单一 `getGoalInit(pi)`（发现 7），删 `detectGoalCapability`（:74-82）里包裹纯属性访问的 try/catch（无抛错路径）。
 - **被否**：仅把 boolean 打进 console/logger——AI 与用户都看不到，不解决「被引向不存在的状态」；goalInit 提前到 compact 之前以求 result 统一携带——引入「goal entry 被压缩边界吞掉」的新行为风险，需另立探针验证 goal 持久化与 compact 的交错，收益只是通道形式统一，得不偿失。
 - **证据**：compact.ts:222/:227/:241（三处不消费返回值）；goal/src/index.ts:168（false 语义权威定义）；ext-simplify-03-goal.md §1（`__goalInit` 保留为跨扩展 API，本设计不改其签名，消费方式不变）；`deliverAs: "steer"` 的消息进对话流、AI 可见（compact.ts:221 现状用法）。
 - **效果**：G2 成立——「Execute via /goal」这句话只在 goal 真实存在时说出。
 
 ### 5.3 D3：模板机制收敛 builtin 单源（选定：砍 project/global 两级 + create-template action）
 
-- **采用**：`listTemplates`/`loadTemplate` 只读 builtin 目录（templates.ts 收敛为单源扫描，`getAgentDir` import、`TemplateInfo.source` 字段、`seen` 去重随之删除）；`PLAN_ACTIONS` 删 `create-template`（tool.ts:19），连带删 `executeCreateTemplate`（:213-235）、`CreateTemplateDetails`（:44-48）、renderResult case（:147-151）、`templateContent` 参数与 promptSnippet 对应行；promptSnippet 的 30 行「plan 工具 vs bash 分工」教学段随 create-template 删除一并压缩（审计认定它是模板抽象泄露的下游症状）。
+- **采用**：`listTemplates`/`loadTemplate` 只读 builtin 目录（templates.ts 收敛为单源扫描，`getAgentDir` import、`TemplateInfo.source` 字段、`seen` 去重随之删除）；`PLAN_ACTIONS` 删 `create-template`（tool.ts:19），连带删 `executeCreateTemplate`（:213-235）、`CreateTemplateDetails`（:44-48）、renderResult case（:147-151）、`templateContent` 参数与 promptSnippet 对应行；promptSnippet 的教学段（现 22 行，tool.ts:363-384）「plan 工具 vs bash 分工」随 create-template 删除一并压缩（审计认定它是模板抽象泄露的下游症状）。
 - **被否**：
   - **保留三源**——模板 = 轻量 DSL、create-template = 元创建机制，是 inner-platform effect；5 个 builtin 模板同一提交自产（git log 仅 1 commit），project/global 优先级与去重服务的是不存在的生态。
   - **中间态（保 project 砍 global）**——仍是两源赌注，只是赌注减半，认知税（source 字段、优先级、去重）一分没少。
@@ -171,15 +171,15 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 - **被否**：
   - **扩正则穷举全部模板标题**（把 任务分解|实现顺序|分步骤计划|修复策略|后续步骤 加进正则）——双知识源依旧，未来每加一个模板都要记得改正则，F4 的 leaky 原样保留只是覆盖变宽。
   - **砍 header 检测只留 fallback**——全局扫编号列表会把 Requirements/风险缓解等节的编号项误收进步骤，goal successCriteria 质量降级（successCriteria 是 goal 完成判定的证据审计依据，误收有真实下游代价）。
-- **证据**：`grep -H "^## " templates/*.md` 实读：24 个 section 标题中仅 feature-plan 的 `## Implementation Steps` 命中现有正则；extractPlanSteps 唯一生产调用在 tryGoalInit（compact.ts:138），产物只进 `buildPlanSuccessCriteria`（:117-125）。
+- **证据**：`grep -H "^## " templates/*.md` 实读：25 个 section 标题中仅 feature-plan 的 `## Implementation Steps` 命中现有正则；extractPlanSteps 唯一生产调用在 tryGoalInit（compact.ts:142），产物只进 `buildPlanSuccessCriteria`（:121-129）。
 - **效果**：G3 第二半成立——「模板引导结构」与「机器提取结构」单一知识。
 
 ### 5.5 D5：防幻影动态 import 改静态 + extension-logger 依赖剥离（选定：全删）
 
-- **采用**：index.ts:20-25 改 `registerPlanEventHandlers` 静态 import 直调；tool.ts:255/:326 改静态 import（`buildExecOptions` 变同步）；index.ts 删 logger（其唯一使用点是动态 import 失败 warn，:23）与 `@zhushanwen/pi-extension-logger` 依赖（package.json:44-46）。
-- **被否**：保留动态 import——compact.ts 运行时零跨组依赖（唯一外部引用 `import type { GoalInitFn }` 类型擦除），防的幻影不存在；同包内静态 import 无循环（compact.ts 只依赖 state.js 与 node 内置）。
+- **采用（v2 收缩）**：index.ts:20-24 改 `registerPlanEventHandlers` 静态 import 直调；tool.ts:255/:326 改静态 import（`buildExecOptions` 变同步）；index.ts 删 logger 与 `.catch`（其使用点只剩动态 import 失败 warn）。**包级 `@zhushanwen/pi-extension-logger` 依赖保留**——compact.ts:7/:12/:236/:246（guardStaleCtx onStale 降级日志）是 crash-resilience u1 引入的真实消费，v1 的「-1 依赖」子项基于过期快照撤销（审查 MF1）。
+- **被否**：保留动态 import——防的幻影不存在（compact.ts 现有运行时依赖 pi-ext-guards 与 pi-extension-logger 均 crash-resilience u1 引入、非跨组幻影）；同包内静态 import 无循环（compact.ts 不 import tool/index，新增两依赖不构成 tool.ts→compact.ts 环）。
 - **证据**：compact.ts:1-8 import 面实读；`rg -n "logger" src/*.ts` 仅 index.ts 三行；index.ts:19 注释自述的「cross-group static import」前提无对应物。
-- **效果**：G4 部分成立；-1 个 npm 依赖、-1 层 promise 链、`buildExecOptions` 去 async（为 D1/D2 的同步化铺路）。
+- **效果**：G4 部分成立；-1 层 promise 链、`buildExecOptions` 去 async（为 D1/D2 的同步化铺路）；npm 依赖数不变（v2 修正）。
 
 ### 5.6 D6：删除 PlanPhase，isActive 单一编码（选定：砍字段）
 
@@ -201,7 +201,7 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 
 ## 6. 实现机制与文件改动地图
 
-**本章结论：改动收敛在 7 个源文件 + 5 个模板 + 6 个测试文件 + package.json，净删约 250 行（src 1076 行的 ~23%）。**
+**本章结论：改动收敛在 7 个源文件 + 5 个模板 + 7 个测试文件 + package.json，净删约 250 行（src 1096 行的 ~23%）。**
 
 | 文件 | 动作 | 要点（决策归属） |
 |---|---|---|
@@ -213,8 +213,8 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 | `src/index.ts` | 改 | 静态 import + 删 logger 与 catch（D5） |
 | `src/widget.ts` | 不变 | 只消费 isActive（现状即如此） |
 | `templates/*.md`（5 个） | 改 | 步骤节统一 `## Implementation Steps`（D4） |
-| `package.json` | 改 | peerDependenciesMeta 增 `"@zhushanwen/pi-goal": { "optional": true }`（发现 5）；dependencies 删 extension-logger（D5）；version patch bump |
-| `src/__tests__/`（6 个） | 改写 | tool（create-template/tree 用例删、goal 失败降级用例增）、compact-handler（tree 用例删、outcome 用例改）、compact-criteria-array/state/command/templates（phase/create-template/多源断言改）、新增模板-正则对齐守卫测试（D4） |
+| `package.json` | 改 | peerDependenciesMeta 增 `"@zhushanwen/pi-goal": { "optional": true }`（发现 5）；dependencies **保留** extension-logger（compact.ts guardStaleCtx 降级日志消费——crash-resilience u1 引入；v1 删除项基于过期快照撤销，审查 MF1）；version patch bump |
+| `src/__tests__/`（7 个） | 改写 | tool（create-template/tree 用例删、goal 失败降级用例增）、compact-handler（tree 用例删、outcome 用例改）、compact-criteria-array/state/command/templates（phase/create-template/多源断言改）、compact.test.ts（不变——extractPlanSteps 用例与 D4 无冲突，v1 漏计）、新增模板-正则对齐守卫测试（D4） |
 
 错误规格不变量：`readPlanFileSafe` 不抛错（读失败返回标记字符串，其 `startsWith("(")` 判定随 GoalBridgeOutcome 改为显式信号，消除哨兵字符串比较）；工具 action 校验失败消息含合法值列表（现状保留）。
 
@@ -227,7 +227,7 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 | # | 场景 | 回溯目标 | 真实流程（谁/上下文/做什么/看到什么） | 通过标准 |
 |---|---|---|---|---|
 | V1 | complete→goal 全链路（compact 档） | G1+G2 | TUI：`/plan` 走完生命周期，plan.md 含 `## Implementation Steps` 编号步骤 → `plan(complete, isolation="compact")` → 对话框选 Goal-driven → 等压缩完成 | steer 消息为 goal 文案且 goal widget 出现、`/goal status` 可见、successCriteria 含步骤 preview；无 warning notify（正向承诺兑现） |
-| V2 | goal 失败降级（负面行为反向验证） | G2 | ①不装 goal 包：对话框无 goal 选项；②装 goal 但 plan.md 全文无编号列表：选 goal 档 | ①无法选到 goal；②收到含 `no-steps` 与恢复动作的降级 steer + warning notify，且**没有**「Execute via /goal」承诺、没有 goal widget（不该发生的不发生） |
+| V2 | goal 失败降级（负面行为反向验证） | G2 | ①不装 goal 包：对话框无 goal 选项；②装 goal 但 plan.md 全文无编号列表：选 goal 档；③先 `/goal x` 建 active goal，再 complete 选 goal 档（审查 S3：构造成本极低） | ①无法选到 goal；②收到含 `no-steps` 与恢复动作的降级 steer + warning notify，且**没有**「Execute via /goal」承诺、没有 goal widget（不该发生的不发生）；③收到含 `init-refused` 与「/goal clear 或沿用」指引的降级 steer |
 | V3 | tree 档消灭 + 手动导航保留 | G1 | ①AI 传 `isolation="tree"`：工具报参数错误并回显合法值；②plan mode 活跃期间用户执行 `/tree` 跳转 | ①schema 拒绝；②跳转后的分支上下文仍含 plan 注入（session_before_tree handler 未回归）；`/tree` 手动路径与改动前一致 |
 | V4 | 模板单源 + 提取对齐 | G3 | `plan(list-template)` 看名单 → select-template → 写 plan.md → complete 选 goal | 名单恰为 5 个 builtin（无 source 后缀）；`plan(create-template)` 报未知 action；V1 的 successCriteria 步骤提取自 `## Implementation Steps` 节（用 bugfix-plan 再跑一遍验证改名模板命中）；旧标题的存量 plan.md 由 fallback 兜底仍能提取 |
 | V5 | 声明面对齐 + 宿主表面不变 | G4 | ①`npm install @zhushanwen/pi-plan --dry-run`（模拟外部用户）；②跑完 V1-V4 后重开 session、检查会话 JSONL 与项目目录 | ①安装计划不含 @zhushanwen/pi-goal（optional peer 生效）；②新写的 plan-state entry 无 phase 字段、旧 entry 的 session 重开后 plan mode 重建正常；`.xyz-harness/` 外无新文件、无 logger 相关报错；goal 侧表面由 ext-simplify-03 验收承载 |
@@ -274,3 +274,4 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 
 **变更历史**：
 - v1（2026-09-12）：初稿。覆盖审计候选 8（C8 high）+ M1/M2/M3 + 四问发现 5/6/7/8 与 suggestions；探针 P1/P2 定为实施期门；3 项 low 移交 code-simplify。
+- v2（2026-09-14）：按审查报告（ext-simplify-06-plan.review.md，1 MF + 4 S）修订——MF1 D5 收缩：动态 import 静态化与 index.ts logger 删除维持，包级 extension-logger 依赖保留（compact.ts guardStaleCtx 降级日志为 crash-resilience u1 引入的真实消费，「-1 npm 依赖」效果撤销），F5/§5.5/§6 表格同步；S1 F7「无任何 await」改精确表述（唯一 await 在 compact() 启动前，u1 后才严格无 await）；S2 GoalBridgeOutcome 补第 5 值 internal-error（catch 出口映射闭合）；S3 V2 补 init-refused 场景（③先建 active goal）；S4 基线全量刷新（1096 行/7 测试文件/0.4.4/promptSnippet 22 行/25 标题/compact.ts 行号现状）+ 基线修正声明。决策层（D1-D4、D6 及 D5 主体）无变化。
