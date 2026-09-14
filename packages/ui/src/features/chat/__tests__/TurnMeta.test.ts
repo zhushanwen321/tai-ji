@@ -12,7 +12,11 @@
  * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）
  * - A2 live 态：结束侧不定格 lastTs，以 `→` + panel.message.inProgress 文案结尾
  *
- * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/TurnMeta.test.ts
+ * [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1）：
+ * - 三态渲染：工作中显示 / 完成态定格常驻（B1）/ chars=0 不渲染
+ * - 数字 toLocaleString() 千分位（用户可见 DOM 断言，锚定 turn-meta-chars testid）
+ *
+ * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/TurnMeta.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'

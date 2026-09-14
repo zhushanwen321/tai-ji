@@ -1,5 +1,5 @@
 /**
- * genStats i18n 双侧对齐定向测试 —— composer-gen-stats u4 验收④。
+ * genStats i18n 双侧对齐定向测试（composer-gen-stats）。
  *
  * 背景：locale-sync-check.test.ts（U7）用正则解析源码做全仓 key 对齐，但按审查意见补一条
  * 直连 import 的定向断言（运行时真值，非文本解析），专锁 panel context 段 genStats* key：
@@ -31,7 +31,7 @@ function flattenKeys(obj: Record<string, unknown>, prefix = ''): Set<string> {
   return out
 }
 
-describe('genStats i18n zh/en 双侧对齐（u4 验收④）', () => {
+describe('genStats i18n zh/en 双侧对齐', () => {
   it('panel context 段 zh/en 拍平 key 集合完全一致（含 genStats* 全部 key）', () => {
     const zhKeys = flattenKeys(asRecord(asRecord(zhPanel).context))
     const enKeys = flattenKeys(asRecord(asRecord(enPanel).context))

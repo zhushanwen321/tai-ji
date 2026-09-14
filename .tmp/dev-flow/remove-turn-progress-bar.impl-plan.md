@@ -82,6 +82,7 @@ graph TD
 | R4 | u2 在 bar 测试追加「双语键集合恰为保留五键」精确断言 | 合理——测试加固非行为偏离：隐含四死键已删的组件侧锁定，与 A8② rg 互为印证 |
 | R5 | Turn.test.ts 列入 u3 领地但零改动（免适配） | 合理——该测试 mount 全部 stubs TurnMeta:true，透传新 prop 对既有断言透明（重跑 30/30 绿）；「清单登记→判定免做」按偏差惯例补登（阶段 3 审查 R-core+ui 区指出） |
 | R6 | TurnMeta 字符数千分位 toLocaleString() 与旧观测条基线逐字同口径 | 合理——设计 §2.4 未规定数字格式化，「承接观测条信息」的忠实迁移应连展示格式一并承接（阶段 3 审查确认非偏差，登记备查） |
+| R7 | Turn.smoke.test.ts 列入 u3 领地但零改动（免适配） | 合理——该测试 shallowMount 全 stub 子组件（TurnMeta 以 stub 渲染），透传新可选 prop 对既有断言透明（dev 实测 5/5 绿）；与 R5 同批同性质判定，补登完备（design-code-sync R1 终态审查指出） |
 
 ## 6 状态表
 
@@ -94,7 +95,7 @@ graph TD
 ## 7 残留风险与变更历史
 
 **残留风险**：
-- Composer.vue:21-24 历史注释仍引用已删除的 awaitingUser 分型文案（领地外悬空注释，u2 上报；纯注释零功能影响，阶段 3 一致性审查批次清扫）
+- 【已闭环 · design-code-sync R1】Composer.vue:21-24 历史注释曾仍引用已删除的 awaitingUser 分型文案（领地外悬空注释，u2 上报；纯注释零功能影响）。原登记「阶段 3 一致性审查批次清扫」承诺落空：阶段 3 审查面为 diff 区间改动文件，Composer.vue 在 u2 领地外不进 diff，属结构性盲区——教训：领地外文件的注释清算不能委托给 diff 区间审查，须由终态全量审查补位。注释已就地改写为 warn 化终态事实（R1 同 commit），下方变更历史「阶段 3 清零」已加范围限定
 - sidebar 段 i18n 死键守卫盲区（候选 14 键待 triage，独立 chore）
 - durationSec 删除与 `TURN_PROGRESS_WARN_THRESHOLD_MS=600s` 生命周期耦合：阈值若 <60s 则 formatDuration 缺秒分支（P-3 纪律禁收窄但无机器守卫）
 - B1 常驻观感重审条件：真机观感噪则机械降级 B2（§1.1）
@@ -104,5 +105,6 @@ graph TD
 - 2026-09-14 round-1 三审（3 must-fix + 9 suggestion）全修 → 设计 v2（§1.1 方案对比新增 / A8 守卫覆盖如实拆分 / snapshot 7→2 / 死键 3→4 / U6 反转登记 / u2·u3 清单补全 / 速记码对照表）
 **变更历史**：
 - 2026-09-14 round-2 聚焦复审收敛：主审 0MF+1S / 影响面审 0MF+0S / 简洁审 0MF+1S（三审均 0 must-fix，设计就绪）。唯一残留 suggestion（两审同指）= durationSec 删除 × P-3 阈值重定值的跨包前提，已回修（设计 §2.4 + u2 条目）。known-issue：三审完成通知在宿主侧丢失（会话 state 文件 19:40 已记 completed，注册表滞留 running），报告经直接读文件回收，已向用户同步排查结论
-- 2026-09-14 阶段 3 一致性审查清零 + Gate A 全量绿：双区审查（core+ui subagent / renderer 主 agent 亲执——两任 subagent 均遭环境 SIGTERM，偏离已登记见 `.tmp/tech-design/consistency-review-renderer.md`）；unreasonable = 1 low（Turn.test.ts 免适配登记缺口 → R5 已补）已闭环；doc_errors = 0；合理偏差 R1–R6 全落 §5。Gate A：core 2085 / ui 797 / renderer 4328 tests 全绿 + 三包类型门 EXIT=0 + 根 lint 绿（证据 `.tmp/dev-flow/remove-turn-progress-bar.gate-a.log`）；覆盖矩阵无无人认领区
+- 2026-09-14 阶段 3 一致性审查清零（清零范围 = diff 区间改动文件；领地外 Composer.vue 注释漏出审查面，由 design-code-sync R1 终态审查补位，见残留风险首条） + Gate A 全量绿：双区审查（core+ui subagent / renderer 主 agent 亲执——两任 subagent 均遭环境 SIGTERM，偏离已登记见 `.tmp/tech-design/consistency-review-renderer.md`）；unreasonable = 1 low（Turn.test.ts 免适配登记缺口 → R5 已补）已闭环；doc_errors = 0；合理偏差 R1–R6 全落 §5。Gate A：core 2085 / ui 797 / renderer 4328 tests 全绿 + 三包类型门 EXIT=0 + 根 lint 绿（证据 `.tmp/dev-flow/remove-turn-progress-bar.gate-a.log`）；覆盖矩阵无无人认领区
 - 2026-09-14 阶段 5 真机验收 A10 全绿（证据 `.tmp/dev-flow/remove-turn-progress-bar.acceptance/` 双截图）：①A1 常态零占用——流式 t+3s/t+8s/收口后/切回后四次采样 turn-progress-bar 均 false；②A2 字符秒级增长——工作中 TurnMeta `已生成 174 字符 → 322 字符`（turn-meta-chars testid）；③A3 完成定格 + 切回重派生同值——切走切回后 322 = 322；④B1 观感判定 OK——字符数与时刻区间同档灰阶 mono 融入 meta 行不显噪，维持 B1 常驻不降级 B2。**范围缩减登记**：ask_user 真机场景豁免（L1 真实 store DOM 测试 + U6 反向断言 + 阶段 3 审查双层已覆盖；真机构造 ask_user turn 成本不成比例）；warn 态真机不可造（10min），A4 由时钟注入单测覆盖（验收计划表既定判定）。功能分级登记零触发（FEATURE-PRIORITIES 无本观测面独立登记行）；文档资产零同步（ARCHITECTURE/DESIGN/TEST-STRATEGY 等均无登记变化）
+- 2026-09-14 design-code-sync R1 终态一致性审查全修（4 findings = 1 must-fix + 2 suggestion + 1 info，报告 `.tmp/tech-design/dcs-final-review.md`）：F1 Composer.vue:21-24 悬空注释改写 warn 化终态 + 残留风险首条改如实登记（含上方「阶段 3 清零」范围限定）；F2 补 R7（Turn.smoke.test.ts 免适配漏登）；F3 ui 两测试头注补 u3 覆盖说明；F4 测试头注「u4 验收②/④」transient 编号引用改自包含措辞（涟漪：gen-stats-i18n / session-rename-fanout 同模式一并清）。全部为注释/文档级改动，零代码行为变更，eslint 0 error

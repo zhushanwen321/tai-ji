@@ -7,9 +7,9 @@
  * handleSessionOccupancy 同一落点）。锁定验收语义：
  * - snapshot 收窄不变量：公共接口仅 turnElapsedMs/warn 两字段（snapshot 公共接口 ≡ 运行时
  *   消费面，设计 §2.3）
- * - 结构事件边界驱动计时（u4 验收②）：turn-start 起算，elapsed 仅按墙钟走（delta/事件帧
+ * - 结构事件边界驱动计时：turn-start 起算，elapsed 仅按墙钟走（delta/事件帧
  *   不重置计时基线）
- * - ask_user pending 豁免（D6 豁免态 + u4 验收②）：经 warn 行为断言——超阈值也不 warn，
+ * - ask_user pending 豁免（D6 豁免态）：经 warn 行为断言——超阈值也不 warn，
  *   豁免解除后恢复（awaitingUser 不再暴露于 snapshot）
  * - 「继续等待」snooze：本 turn 内抑制警示，turn 结束后新 turn 复位
  * - turn 结束（occupancy → idle）展示消失 + 记忆复位（设计：展示自动消失，reload
@@ -51,7 +51,7 @@ async function advanceAndTick(ms: number): Promise<void> {
   await nextTick()
 }
 
-describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
+describe('turn-progress 结构事件边界驱动', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -191,7 +191,7 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
   })
 })
 
-describe('turn-progress 阈值警示与豁免（D6，u4 验收②③）', () => {
+describe('turn-progress 阈值警示与豁免（D6）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })

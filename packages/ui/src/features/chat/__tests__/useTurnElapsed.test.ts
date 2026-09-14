@@ -10,6 +10,9 @@
  * - 卸载：移除 visibilitychange listener + 清 interval（无泄漏）
  * - listener 生命周期与 streaming 对齐（W05 review）：完成态实例零 listener，
  *   开始计时挂载、完成定格摘除、二次周期幂等不叠加
+ * - [u3 remove-turn-progress-bar] generatedChars（设计 §2.1）：Σ 口径（跨 assistant 段
+ *   normalizeContent 累计）/ 秒级节拍（挂载算一次、每 tick 重算、停表定格，tick 间增长
+ *   不计——不随 delta 重算）/ 零字符（空 assistants / 空内容均 0）
  *
  * 时间模型：vi.useFakeTimers() 同时接管 Date.now；advanceTimersByTime 同步推进系统时间，
  * elapsed 是 now - firstTs 的绝对差值，停 tick 不丢时间，恢复可见一次重算即补全。

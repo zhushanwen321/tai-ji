@@ -19,9 +19,11 @@
     <!-- retry/queue 指示位（spec C10，#13，composer 上方独立行）：
          auto_retry_end / message_start 到达时 store 自动清 → state=undefined → 组件 v-if 消失 -->
     <RetryIndicator :state="retryState" />
-    <!-- [session-dead V5②] turn 进展观测条已提升到 Panel.vue composer-band（overlay/composer
-         互斥对之外）：ask_user 等待期 Composer 整体卸载，留在本组件内观测条会一起消失，
-         awaitingUser 分型文案无处渲染（Gate B 实测断点）。挂载点/abort 接线见 Panel.vue。 -->
+    <!-- [remove-turn-progress-bar §2.2 warn 化] turn 进展观测条挂载点已上移 Panel.vue
+         composer-band（overlay/composer 互斥对之外）：ask_user 等待期 Composer 整体卸载，
+         留在本组件内会随等待期一起消失。warn 化后为组件内部自判渲染（snapshot &&
+         snapshot.warn，常态/ask_user 豁免期零 DOM；旧 awaitingUser 分型文案已随本设计
+         删除）。挂载点/abort 接线见 Panel.vue。 -->
     <!-- 命令浮层（§2d @/#//）：anchor = composer-box（slot），reka-ui Popover portal body。
          composer-box 内 focus 算 inside 不触发 dismiss，键盘路由见 onKeydown。
          cwd：landing 态 $ 候选的 cwd 通道（landing-composer-session-file-symbols D2；

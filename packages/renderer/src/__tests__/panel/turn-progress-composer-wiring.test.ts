@@ -1,5 +1,5 @@
 /**
- * TurnProgressBar → abort 链路接线测试（u4 验收④：「中止操作走既有 abort 链路」）。
+ * TurnProgressBar → abort 链路接线测试（中止操作走既有 abort 链路）。
  *
  * 断言链路（真实组件树 + 真实 pinia store，仅 RPC 面 mock）：
  * TurnProgressBar「中止此 turn」点击 → emit abort → Panel.onProgressAbort
@@ -174,7 +174,7 @@ beforeEach(() => {
   useCompactQueue()._clearAllForTest()
 })
 
-describe('中止接线（u4 验收④）：TurnProgressBar → 既有 abort 链路', () => {
+describe('中止接线：TurnProgressBar → 既有 abort 链路', () => {
   it('点击「中止此 turn」→ chatApi.abort(sessionId) 被调（与 stop 按钮同链，无新通道）', async () => {
     const wrapper = mount(Panel, {
       props: {
