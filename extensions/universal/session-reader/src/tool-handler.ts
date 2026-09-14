@@ -11,9 +11,11 @@
  * 域模块拆分（max-lines 拆分轮机械提取，零行为变更，result-action.ts 先例同型）：
  *   result-action.ts（result）/ doctor.ts（doctor + SessionReadSignals）/
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
- *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/turn 索引解析低层小工具）。
+ *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/stripHash/requireStr/
+ *   SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
  * 本模块保留公共类型、定位解析（resolveSessionId）、各 action 编排与共享渲染；
- * 拆出域的公开导出经此 re-export（index.ts / 单测白盒 import 路径不变）。
+ * 域模块符号不经此 re-export——从所属域模块直接 import（唯一例外 SessionReadSignals：
+ * 本模块 re-export 供 index.ts 生产消费）。
  *
  * 错误规格 F1-F6：handler 抛 Error（message 含 👉 恢复指引），index.ts 的 execute 闭包
  * 原样传播给 pi——pi-agent-core 只对 execute throw 置 isError:true（返回值里的 isError
@@ -21,7 +23,7 @@
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync, openSync, readSync, closeSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -30,7 +32,7 @@ import {
   type SessionMetadataEntry,
   type SessionMetadataProvider,
 } from './discovery/find.js'
-import { resolveSessionRoots } from './discovery/roots.js'
+import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
 import {
   buildFamilyFromFs,
   listRecordManifests,
@@ -52,10 +54,9 @@ import {
   type ToolResultSummaryEntry,
 } from './core/render.js'
 import type { Family, SessionRef, WorkflowRef } from './core/family.js'
-import { doResult, extractFinalAssistantText, type ResultActionDeps } from './result-action.js'
+import { doResult } from './result-action.js'
 
-// result action 主体在 result-action.ts（max-lines 拆分轮机械提取，零行为变更）；
-// 导出面保持不变：extractFinalAssistantText 仍从本模块导出（包内测试白盒导入路径不变）。
+// result action 主体在 result-action.ts（max-lines 拆分轮机械提取，零行为变更）。
 import {
   buildExecutionTree,
   formatExecutionTreeText,
@@ -63,7 +64,18 @@ import {
 } from './core/execution-tree.js'
 // 同轮拆分的域模块（依赖方向：本模块 → 域模块 → handler-utils，无循环；
 // 域模块对本模块仅 type import——编译期擦除，同 result-action.ts 先例）。
-import { err, pad, parseTurnIndex, parseTurnsRange, rangeLabel } from './handler-utils.js'
+// stripHash/requireStr/SESSION_ID_PREFIX_LEN 经 handler-utils 供本模块与 result-action
+// 直接消费（ext-simplify-04 E5：同包 helper 获取范式单一化）。
+import {
+  SESSION_ID_PREFIX_LEN,
+  err,
+  pad,
+  parseTurnIndex,
+  parseTurnsRange,
+  rangeLabel,
+  requireStr,
+  stripHash,
+} from './handler-utils.js'
 import { formatNoMatch } from './no-match.js'
 import {
   collectSearchHits,
@@ -81,14 +93,10 @@ import {
   extractUserMessages,
   type ExtractWhat,
 } from './extract.js'
-import { doDoctor, DOCTOR_CACHE_TTL_MS, statDirMtimeOrNull, type SessionReadSignals } from './doctor.js'
+import { doDoctor, type SessionReadSignals } from './doctor.js'
 
-// 拆出域的公开导出面保持从本模块可见（index.ts / 单测白盒 import 路径不变）。
+// SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
-export { DOCTOR_CACHE_TTL_MS }
-export { levenshtein } from './no-match.js'
-export { MULTI_SEARCH_MAX_SESSIONS, SEARCH_SCAN_BYTE_BUDGET, searchAcrossSessions } from './search-across.js'
-export { renderExtractItems } from './extract.js'
 
 // ---------------------------------------------------------------------------
 // 公共类型（与 index.ts 的 TypeBox schema 对齐）
@@ -149,11 +157,6 @@ export interface ToolResult {
 // 小工具
 // ---------------------------------------------------------------------------
 
-/** 剥 # 前缀（TUI `#e6c96` 引用 → 纯片段，design §3.3 D-3/D-4）。 */
-function stripHash(s: string): string {
-  return s.replace(/^#+/, '')
-}
-
 /** formatDate 日期段（月/日）补零宽度。 */
 const DATE_FIELD_WIDTH = 2
 
@@ -172,18 +175,6 @@ const SHORT_CWD_SEGMENTS = 2
 function shortCwd(cwd: string): string {
   const parts = cwd.split('/').filter(Boolean)
   return parts.slice(-SHORT_CWD_SEGMENTS).join('/')
-}
-
-/** F5 必填参数校验。 */
-function requireStr(
-  val: string | undefined,
-  name: string,
-  action: SessionReadAction,
-): string {
-  if (val === undefined || val === null || val.trim() === '') {
-    throw err(`action:"${action}" 需要参数 "${name}"。👉 补上 "${name}" 重试。`)
-  }
-  return val.trim()
 }
 
 // ---------------------------------------------------------------------------
@@ -355,9 +346,10 @@ async function resolveByFragment(
   }
   const { matches } = await findSessions(session, agentDir, opts)
   if (matches.length === 0) {
-    // F1 自检行需要发现层实况：无 options 的 resolveSessionRoots 恒实扫（不读 doctor
-    // 缓存，§7B 要点 8），与 find 刚完成的扫描同一数据源（roots.ts 薄包装语义）；
-    // 信号包同源（liveSessionDir 透传）——findSessions 内部对空串/undefined 已有降级 guard。
+    // F1 自检行需要发现层实况：无 options 的 resolveSessionRoots 恒实扫（根扫描无
+    // 缓存——doctor 缓存机已删除，ext-simplify-04 U3），与 find 刚完成的扫描同一数据
+    // 源（roots.ts 薄包装语义）；信号包同源（liveSessionDir 透传）——findSessions
+    // 内部对空串/undefined 已有降级 guard。
     const roots = await resolveSessionRoots({ agentDir, liveSessionDir })
     throw err(formatNoMatch(session, roots))
   }
@@ -398,8 +390,6 @@ function formatSaIdAmbiguous(saId: string, records: RecordManifest[]): string {
   )
 }
 
-/** sessionId 列表行内的短显前缀长度。 */
-const SESSION_ID_PREFIX_LEN = 8
 /** 消歧提示的 uuid 片段长度（比短显略长，引导输入更长片段消歧）。 */
 const HINT_ID_PREFIX_LEN = 12
 
@@ -500,21 +490,15 @@ function formatFindContent(query: string, groups: FindGroup[], truncated: boolea
   return `${head}\n${lines.join('\n')}`
 }
 
-function formatOutlineText(r: OutlineResult): string {
-  const lines = r.turns.map((b) => {
-    const time = b.startTime ? b.startTime.match(/T(\d{2}:\d{2})/)?.[1] ?? '' : ''
-    const parts = [`T${pad(b.index)}${time ? ' ' + time : ''}`]
-    if (b.userBrief) parts.push(b.userBrief)
-    if (b.toolSummary) parts.push(b.toolSummary)
-    // v2 O1：补 assistant 结论行（→ ）让 outline 单独可决策
-    if (b.assistantBrief) parts.push('→ ' + b.assistantBrief)
-    const om = formatBytesMarker(b.omittedBytes)
-    if (om) parts.push(om)
-    if (b.branch) parts.push('[旁支]')
-    return parts.join(' · ')
-  })
+/**
+ * outline 尾段（stats 摘要行 + truncated 提示）。E7/D3 行渲染统一：行主体 = result.lines
+ *（renderOutline 返回的渲染行，预算度量与展示同一份），行格式知识只在 core/render.ts 的
+ * formatLine 一处，tool-handler 不再重建行格式；本函数只拼 stats 尾段（skippedLines 由
+ * doOutline 用 ParseResult 覆盖后再渲染）。doOutline/doExport 同一拼装
+ * （`lines.join('\n')` + 本尾段），两 action 输出一致 by construction。
+ */
+function formatOutlineTail(r: OutlineResult): string {
   const tail = [
-    '',
     `${r.stats.totalTurns} turns · ${r.stats.totalEntries} entries · ~${r.tokenEstimate} tokens${
       r.stats.skippedLines > 0 ? ` · ${r.stats.skippedLines} skipped lines` : ''
     }`,
@@ -522,7 +506,7 @@ function formatOutlineText(r: OutlineResult): string {
   ]
     .filter(Boolean)
     .join('\n')
-  return `${lines.join('\n')}\n${tail}`
+  return tail
 }
 
 function formatExpandText(turn: string, entries: EntryBrief[]): string {
@@ -602,6 +586,35 @@ function formatDetailText(
   return `${head}\n${body}`
 }
 
+/**
+ * family subagents 行的 task 摘要截断宽度（D2②：LLM 判断「哪个 subagent 分支相关」所需
+ * 的信息量，信息密度对齐 find 的 firstMessagePreview；探针 P4 输出量级锚点）。
+ */
+const FAMILY_TASK_RENDER_LIMIT = 60
+
+/**
+ * task → 单行摘要：压平空白（task 原文可含换行，换行会破坏 family 输出的行结构）后截断。
+ */
+function familyTaskSummary(task: string): string {
+  const flat = task.replace(/\s+/g, ' ').trim()
+  return flat.length <= FAMILY_TASK_RENDER_LIMIT ? flat : flat.slice(0, FAMILY_TASK_RENDER_LIMIT) + '…'
+}
+
+/**
+ * subagents 行富字段展示（ext-simplify-04 D2②）：status 终态短标签 + agent 名 + task 摘要。
+ * 富字段来自 manifest/identity 组装（SubagentRef，不经 enrichRefs——已删除）；孤儿
+ *（cleanedUp）只标 [已清理]，不再展开摘要（已清理即终局，文件 GC 后无深读入口）。
+ */
+function formatSubagentLine(s: Family['subagents'][number]): string {
+  const base = `  ${s.sessionId.slice(0, SESSION_ID_PREFIX_LEN)} root=${s.rootSessionId.slice(0, SESSION_ID_PREFIX_LEN)} slug=${s.slug}`
+  if (s.cleanedUp) return `${base} [已清理]`
+  const parts: string[] = []
+  if (s.status) parts.push(`[${s.status}]`)
+  if (s.agentName) parts.push(s.agentName)
+  if (s.task) parts.push(`· ${familyTaskSummary(s.task)}`)
+  return parts.length > 0 ? `${base} ${parts.join(' ')}` : base
+}
+
 function formatFamilyText(f: Family): string {
   const lines: string[] = []
   lines.push(`root: ${f.root.sessionId} (${formatDate(f.root.mtime)})`)
@@ -610,16 +623,7 @@ function formatFamilyText(f: Family): string {
   if (f.forks.length)
     lines.push(`forks: ${f.forks.map((p) => p.sessionId.slice(0, SESSION_ID_PREFIX_LEN)).join(', ')}`)
   if (f.subagents.length)
-    lines.push(
-      `subagents:\n${f.subagents
-        .map(
-          (s) =>
-            `  ${s.sessionId.slice(0, SESSION_ID_PREFIX_LEN)} root=${s.rootSessionId.slice(0, SESSION_ID_PREFIX_LEN)} slug=${s.slug}${
-              s.cleanedUp ? ' [已清理]' : ''
-            }`,
-        )
-        .join('\n')}`,
-    )
+    lines.push(`subagents:\n${f.subagents.map(formatSubagentLine).join('\n')}`)
   if (f.workflows.length)
     lines.push(
       `workflows:\n${f.workflows
@@ -637,15 +641,18 @@ function formatFamilyText(f: Family): string {
 const FIND_DEFAULT_LIMIT = 20
 
 /**
- * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫，不读 doctor
- * 缓存——§7B 要点 8 PS-14），完整信号包保证 [live] 根（最高优先级）计数可见。
+ * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫——根扫描无缓存，
+ * doctor 缓存机已删除，ext-simplify-04 U3），完整信号包保证 [live] 根（最高优先级）
+ * 计数可见。
+ *
+ * E1（ext-simplify-04 §3 D1）：roots 由 doFind 预解析传入——与匹配用同一次实扫
+ * （调用方保证无 options），不再独立第三次全量扫盘。
  */
-function findNoMatch(query: string, signals: SessionReadSignals): Promise<ToolResult> {
-  // F1 自检行需要发现层实况：resolveSessionRoots 与 find 刚完成的扫描同一数据源。
-  return resolveSessionRoots(signals).then((roots) => ({
+function findNoMatch(query: string, roots: SessionRoot[]): ToolResult {
+  return {
     content: [{ type: 'text', text: formatNoMatch(query, roots) }],
     details: { matches: [], truncated: false },
-  }))
+  }
 }
 
 /**
@@ -667,6 +674,12 @@ function findNoMatch(query: string, signals: SessionReadSignals): Promise<ToolRe
  * 检索的惰性/窄化/TTL 缓存策略都在发现层与注入包装侧，本函数只负责透传（缺省
  * undefined = 现状行为）。多次 findSessions 调用（分组探测）经注入侧 TTL 缓存去重，
  * 标题 listAll 每 TTL 窗口至多一次/目录。
+ *
+ * E1 预解析根复用（ext-simplify-04 §3 D1，清 impl-plan D-15④ 债）：开头一次
+ * resolveSessionRoots(signals)（无 options 恒实扫——根扫描无缓存，doctor 缓存机
+ * 已删除，ext-simplify-04 U3），显式 source / 分组两段 findSessions 与零匹配
+ * findNoMatch（F1 自检行）共用——一次 doFind 内 signals 恒同值、数据完全同源，
+ * 目录扫描从 2-3 次收敛为恒 1 次。
  */
 async function doFind(
   params: SessionReadParams,
@@ -676,6 +689,8 @@ async function doFind(
   const query = requireStr(params.query, 'query', 'find')
   const limit = params.limit ?? FIND_DEFAULT_LIMIT
   const cwd = params.cwd
+  // E1：单次根解析（完整信号包——空 liveSessionDir 由 sessionRootSpecs 内部 guard 降级）
+  const roots = await resolveSessionRoots(signals)
 
   // 显式 source：单组，匹配层原语义（mtime 排序 + limit 截断），无分组展示
   if (params.source !== undefined) {
@@ -685,8 +700,9 @@ async function doFind(
       source: params.source,
       liveSessionDir: signals.liveSessionDir,
       metadataProvider,
+      roots,
     })
-    if (matches.length === 0) return findNoMatch(query, signals)
+    if (matches.length === 0) return findNoMatch(query, roots)
     return {
       content: [
         {
@@ -709,6 +725,7 @@ async function doFind(
     source: 'main',
     liveSessionDir: signals.liveSessionDir,
     metadataProvider,
+    roots,
   })
   const mainHasMore = mainRes.matches.length > limit
   const mainShown = mainHasMore ? mainRes.matches.slice(0, limit) : mainRes.matches
@@ -723,12 +740,13 @@ async function doFind(
     source: 'subagent',
     liveSessionDir: signals.liveSessionDir,
     metadataProvider,
+    roots,
   })
   const subOverflow = remaining > 0 ? subRes.matches.length > remaining : subRes.matches.length > 0
   const subShown = subRes.matches.slice(0, Math.max(remaining, 0))
 
   const matches = [...mainShown, ...subShown]
-  if (matches.length === 0) return findNoMatch(query, signals)
+  if (matches.length === 0) return findNoMatch(query, roots)
   const truncated = mainHasMore || subOverflow
   return {
     content: [
@@ -800,7 +818,8 @@ async function doFamily(
   return { content: [{ type: 'text', text: formatFamilyText(family) }], details: family }
 }
 
-/** outline：turn 级全貌 TOC（design §3.4 outline，~1500 token；render budget 硬编码 2000）。 */
+/** outline：turn 级全貌 TOC（design §3.4 outline，~1500 token；budget 走 render 侧
+ * OUTLINE_DEFAULT_BUDGET_TOKENS 默认，handler 不再传测试专用缝参数）。 */
 async function doOutline(
   params: SessionReadParams,
   agentDir: string,
@@ -819,7 +838,6 @@ async function doOutline(
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const opts: OutlineOptions = {
-    budget: 2000,
     allBranches: params.allBranches,
     granularity: params.granularity,
   }
@@ -830,7 +848,11 @@ async function doOutline(
   // [D8d] skippedLines 同模式覆盖：parser 已检测坏行计数（render 签名不含 ParseResult 恒 0），
   // 有检测必有报告——静默跳过行对调用方不可见 = 数据完整性缺口
   result.stats.skippedLines = skippedLines
-  return { content: [{ type: 'text', text: formatOutlineText(result) }], details: result }
+  // E7 行渲染统一：行主体 = result.lines（renderOutline 渲染行），handler 只拼 stats 尾段
+  return {
+    content: [{ type: 'text', text: `${result.lines.join('\n')}\n${formatOutlineTail(result)}` }],
+    details: result,
+  }
 }
 
 /** expand：单 turn 的 entry 列表（design §3.4 expand）。turn 越界抛 F4。 */
@@ -1009,11 +1031,11 @@ async function doExport(
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const result = renderOutline(turns, tree, {
-      budget: 2000,
       allBranches: params.allBranches,
       granularity: params.granularity,
     })
-    text = formatOutlineText(result)
+    // E7 行渲染统一：与 doOutline 同一拼装（lines + 尾段），两 action 输出一致
+    text = `${result.lines.join('\n')}\n${formatOutlineTail(result)}`
     label = 'outline'
   }
 
@@ -1266,9 +1288,9 @@ async function doWorkflow(
 // ---------------------------------------------------------------------------
 
 /**
- * 标题缓存条目（SessionMetadataEntry[] keyed by 目录字面路径）。与 doctor 的
- * doctorScanCache **独立实例**——两者语义不同：doctor 缓存根扫描统计（文件数/耗时），
- * 本缓存标题元数据（session_info name / firstMessage，低频变更）。
+ * 标题缓存条目（SessionMetadataEntry[] keyed by 目录字面路径）。进程内唯一实例，
+ * 仅缓存标题元数据（session_info name / firstMessage，低频变更）——根扫描统计
+ * 不再有缓存（doctor 缓存机已删除，ext-simplify-04 U3），与根扫描无共享状态。
  */
 interface MetadataCacheEntry {
   entries: SessionMetadataEntry[]
@@ -1283,11 +1305,23 @@ const metadataCache = new Map<string, MetadataCacheEntry>()
 // 分裂成两份仅多一次 miss 重扫，无正确性影响，不升级 globalThis 单例。
 
 /**
- * 标题缓存 TTL（秒级，§6.6 策略 ③）。量级与 doctor 根扫描缓存同档（DOCTOR_CACHE_TTL_MS），
- * 待 §11.3a 实测校准；mtime 是主失效通道，TTL 兜「目录内文件追加不改目录 mtime」的陈旧面
- *（标题恰好随首条消息落盘，同窗口内新增标题最多延迟一个 TTL 可见，可接受）。
+ * 标题缓存 TTL（秒级，§6.6 策略 ③）。独立定义 5000（原「与 doctor 根扫描缓存同档
+ * （DOCTOR_CACHE_TTL_MS）」的别名已随 doctor 缓存机删除而撤销，ext-simplify-04 U3）；
+ * 量级待 §11.3a 实测校准；mtime 是主失效通道，TTL 兜「目录内文件追加不改目录 mtime」
+ * 的陈旧面（标题恰好随首条消息落盘，同窗口内新增标题最多延迟一个 TTL 可见，可接受）。
  */
-export const METADATA_CACHE_TTL_MS = DOCTOR_CACHE_TTL_MS
+export const METADATA_CACHE_TTL_MS = 5000
+
+/** stat 目录 mtime；不存在返回 null（与缓存条目的 null 比对 = 存在性未翻转）。 */
+async function statDirMtimeOrNull(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs
+  } catch (err) {
+    // 目录不存在是常态输入（候选根降级形态），非异常——void 同 roots.ts 容错
+    void err
+    return null
+  }
+}
 
 /**
  * 把注入的 metadataProvider 包上 TTL 缓存（get 失效判定 + set 快照）。
@@ -1296,7 +1330,7 @@ export const METADATA_CACHE_TTL_MS = DOCTOR_CACHE_TTL_MS
  * 且瞬态失败不污染缓存（下个查询即重试）。find 的多次 findSessions 调用（u10 分组探测
  * main/subagent 两路）与连续 keyword 查询都经此处去重，listAll 每 TTL 窗口至多一次/目录。
  */
-export function withMetadataCache(provider: SessionMetadataProvider): SessionMetadataProvider {
+function withMetadataCache(provider: SessionMetadataProvider): SessionMetadataProvider {
   return async (dir) => {
     const hit = metadataCache.get(dir)
     if (hit !== undefined) {
@@ -1315,23 +1349,6 @@ export function withMetadataCache(provider: SessionMetadataProvider): SessionMet
   }
 }
 
-/**
- * result action 的注入依赖（构造期绑定本文件私有 helper，运行时零查找开销）。
- * resolveSessionId 仅作类型/缺省绑定——入口分发时被 per-call 包装覆盖（闭包捕获
- * 信号包 liveSessionDir，见 handleSessionRead result case）。
- */
-const RESULT_ACTION_DEPS: ResultActionDeps = {
-  err,
-  stripHash,
-  requireStr,
-  resolveSessionId,
-  disambiguate,
-  safeParse,
-  sessionIdPrefixLen: SESSION_ID_PREFIX_LEN,
-}
-
-export { extractFinalAssistantText }
-
 // ===========================================================================
 // 入口：按 action 分发
 // ===========================================================================
@@ -1343,10 +1360,8 @@ export { extractFinalAssistantText }
  * F1(resolve)/F4/F5/F6 抛 Error（含 👉）；F2 多匹配与 find 零匹配返回结果不抛。
  *
  * @param signals 发现层信号包（design §7B：index.ts 采集 { agentDir, liveSessionDir? }，
- *   采集端全可选链可降级）。兼容接受裸 agentDir string（存量单测与外部深 import 的旧签名
- *   形态，入口归一化为只含 agentDir 的信号包，行为与旧签名逐字节一致；工具运行路径恒传
- *   完整信号包）。u9 起 find/F1 路径消费根列表（F1 自检行恒走无 options 实扫，
- *   不读 doctor 缓存，§7B 要点 8）。
+ *   采集端全可选链可降级）。u9 起 find/F1 路径消费根列表（F1 自检行计数恒取本次
+ *   实扫，无任何根扫描缓存，§7B 要点 8）。
  * @param signal 可选 AbortSignal（MF-5）：仅 search 消费（长扫描可中断）；其余 action 有界，不接。
  * @param metadataProvider 可选标题元数据注入（u11，design 2026-09-10 §6.6）：index.ts 构造
  *   `(dir) => SessionManager.listAll(dir)`，此处包 TTL 缓存后透传 find。缺省 = undefined =
@@ -1355,47 +1370,47 @@ export { extractFinalAssistantText }
  */
 export async function handleSessionRead(
   params: SessionReadParams,
-  signals: SessionReadSignals | string,
+  signals: SessionReadSignals,
   signal?: AbortSignal,
   metadataProvider?: SessionMetadataProvider,
 ): Promise<ToolResult> {
-  // 裸 string（存量单测/外部深 import 旧签名，D-8）归一化为信号包；doctor 需要完整
-  // 信号包（liveSessionDir/env/bundleUrl），缺省字段按各自降级语义处理。
-  const norm: SessionReadSignals = typeof signals === 'string' ? { agentDir: signals } : signals
-  const agentDir = norm.agentDir
-  // u11：TTL 缓存包装在注入边界（策略 ③，独立于 doctorScanCache 的实例）；仅 find 消费。
+  const agentDir = signals.agentDir
+  // u11：TTL 缓存包装在注入边界（策略 ③，metadata 缓存独立实例）；仅 find/search 消费。
   const cachedProvider =
     metadataProvider === undefined ? undefined : withMetadataCache(metadataProvider)
   switch (params.action) {
     case 'find':
-      return doFind(params, norm, cachedProvider)
+      return doFind(params, signals, cachedProvider)
     case 'family':
-      return doFamily(params, agentDir, norm.liveSessionDir)
+      return doFamily(params, agentDir, signals.liveSessionDir)
     case 'outline':
-      return doOutline(params, agentDir, norm.liveSessionDir)
+      return doOutline(params, agentDir, signals.liveSessionDir)
     case 'expand':
-      return doExpand(params, agentDir, norm.liveSessionDir)
+      return doExpand(params, agentDir, signals.liveSessionDir)
     case 'detail':
-      return doDetail(params, agentDir, norm.liveSessionDir)
+      return doDetail(params, agentDir, signals.liveSessionDir)
     case 'search':
-      return doSearch(params, norm, signal, cachedProvider)
+      return doSearch(params, signals, signal, cachedProvider)
     case 'export':
-      return doExport(params, agentDir, norm.liveSessionDir)
+      return doExport(params, agentDir, signals.liveSessionDir)
     case 'extract':
-      return doExtract(params, agentDir, norm.liveSessionDir)
+      return doExtract(params, agentDir, signals.liveSessionDir)
     case 'workflow':
-      return doWorkflow(params, agentDir, norm.liveSessionDir)
+      return doWorkflow(params, agentDir, signals.liveSessionDir)
     case 'result':
-      // per-call 覆盖 deps.resolveSessionId：把信号包中的 liveSessionDir 闭包进解析调用
-      //（ResultActionDeps 接口签名固定 5 参，包装保持同形、末位补传），result 的片段
-      // 形态与 find/outline 消费同一 roots（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
+      // per-call 构造注入面（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
+      // 直接 import——ext-simplify-04 E5）：resolveSessionId 包装把信号包中的
+      // liveSessionDir 闭包进解析调用（ResultActionDeps 接口签名固定 5 参，包装保持
+      // 同形、末位补传），result 的片段形态与 find/outline 消费同一 roots
+      //（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
       return doResult(params, agentDir, {
-        ...RESULT_ACTION_DEPS,
         resolveSessionId: (rawSession, action, ad, source, prefetchedManifests) =>
-          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, norm.liveSessionDir),
+          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, signals.liveSessionDir),
+        disambiguate,
+        safeParse,
       })
     case 'doctor':
-      return doDoctor(params, norm)
+      return doDoctor(params, signals)
     default: {
       // exhaustive guard：switch 覆盖全部 11 action，此处 params.action 收窄为 never；
       // 仅防御运行时非法 action（schema 正常校验下不可达）

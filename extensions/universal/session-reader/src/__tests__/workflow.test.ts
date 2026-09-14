@@ -30,7 +30,6 @@ const NEW_SNAPSHOT_FIXTURE = {
         opts: {
           prompt: 'Reply with exactly: PROBE-OK',
           model: 'deepseek-router/ds-pro',
-          thinkingLevel: 'high',
           description: 'step-0',
         },
         status: 'done',
@@ -64,7 +63,7 @@ const V2_SNAPSHOT_FIXTURE = {
     calls: [
       {
         id: 0,
-        opts: { prompt: 'task 0', model: 'default', thinkingLevel: 'high', description: 'v2-step-0' },
+        opts: { prompt: 'task 0', model: 'default', description: 'v2-step-0' },
         status: 'done',
         attempts: 1,
         sessionId: '019v2a',
@@ -126,12 +125,10 @@ describe('parseRunSnapshot', () => {
     expect(step.status).toBe('done')
     expect(step.description).toBe('step-0')
     expect(step.model).toBe('deepseek-router/ds-pro')
-    expect(step.thinkingLevel).toBe('high')
     expect(step.attempts).toBe(1)
     expect(step.durationMs).toBe(1234)
     expect(step.sessionId).toBe('019xxx')
     expect(step.sessionFile).toBe('/abs/session.jsonl')
-    expect(step.contentPreview).toBe('PROBE-OK')
   })
 
   it('TC-w5-parse-new-v2：v2 快照（pi-subagent-workflow 8.x 写入）解析非 null，calls sessionFile 读出', () => {
@@ -148,7 +145,6 @@ describe('parseRunSnapshot', () => {
     expect(overview!.steps[0].description).toBe('v2-step-0')
     expect(overview!.steps[1].sessionFile).toBe('/abs/v2-call1.jsonl')
     expect(overview!.steps[1].sessionId).toBe('019v2b')
-    expect(overview!.steps[1].contentPreview).toBe('OK')
   })
 
   it('TC-w5-parse-new-status-unknown：NEW call.status 非 done/running/pending（如 failed）→ step.status=pending', () => {
@@ -174,7 +170,6 @@ describe('parseRunSnapshot', () => {
     expect(step.index).toBe(3)
     expect(step.status).toBe('pending')
     expect(step.description).toBe('step-3')
-    expect(step.contentPreview).toBe('partial')
     expect(step.durationMs).toBe(9)
   })
 
@@ -193,7 +188,6 @@ describe('parseRunSnapshot', () => {
     expect(step.index).toBe(0) // callCache 顺序索引
     expect(step.status).toBe('pending') // content='' 空串不算完成标志 → pending
     expect(step.sessionFile).toBeUndefined() // OLD 未持久化
-    expect(step.contentPreview).toBe('') // value.content='' 仍提取
   })
 
   it('TC-w5-parse-corrupt-nonobject：非对象输入（null/undefined/string/number/array）返回 null', () => {

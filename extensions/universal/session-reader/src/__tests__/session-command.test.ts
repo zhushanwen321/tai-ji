@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createSessionCommand } from '../tui/session-command.js'
+import { SessionManager } from '@earendil-works/pi-coding-agent'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 
 /**
@@ -117,6 +118,16 @@ describe('createSessionCommand - getArgumentCompletions', () => {
     const cmd = createSessionCommand(() => cwdSessionDir)
     expect(await cmd.getArgumentCompletions('deadbeef')).toBeNull()
   })
+
+  it('空 getCwdSessionDir → 秒回 null，不调 listAll（A1：无 live session 上下文不触发全盘分支）', async () => {
+    // mock 拦断言用：guard 失效误调 listAll('') 时 pi 会走真实全盘扫描（实测 3488 项 / ~8s），
+    // mock 掉保证失败态也是秒级红灯
+    const listAllSpy = vi.spyOn(SessionManager, 'listAll').mockResolvedValue([])
+    const cmd = createSessionCommand(() => '')
+    expect(await cmd.getArgumentCompletions('')).toBeNull()
+    expect(listAllSpy).not.toHaveBeenCalled()
+    listAllSpy.mockRestore()
+  })
 })
 
 describe('createSessionCommand - handler select 流程', () => {
@@ -173,6 +184,18 @@ describe('createSessionCommand - handler select 流程', () => {
     expect(notify).toHaveBeenCalledWith('未找到匹配的 session。', 'warning')
     expect(select).not.toHaveBeenCalled()
     expect(setEditorText).not.toHaveBeenCalled()
+  })
+
+  it('空 getCwdSessionDir → 按零匹配 notify，不调 listAll（A1：handler 侧同款空串 guard）', async () => {
+    const listAllSpy = vi.spyOn(SessionManager, 'listAll').mockResolvedValue([])
+    const cmd = createSessionCommand(() => '')
+    const { ctx, select, notify, setEditorText } = makeFakeCtx()
+    await cmd.handler('', ctx)
+    expect(notify).toHaveBeenCalledWith('未找到匹配的 session。', 'warning')
+    expect(select).not.toHaveBeenCalled()
+    expect(setEditorText).not.toHaveBeenCalled()
+    expect(listAllSpy).not.toHaveBeenCalled()
+    listAllSpy.mockRestore()
   })
 
   it('MF-2 回归：同 cwd 同预览同 age 桶 → label 带短 uuid 后缀消歧，选第 2 条插第 2 条 uuid', async () => {

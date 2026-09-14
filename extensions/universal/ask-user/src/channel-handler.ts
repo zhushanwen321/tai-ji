@@ -77,7 +77,8 @@ function protoToInternalQuestions(protoQuestions: AskUserQuestion[]): Question[]
  *   - 多选：value = JSON.stringify(选中项 label 数组)
  *   - Other 自由文本：单独 key `${header}__other`
  *
- * 序列化走 encodeAnswer（answer-codec.ts 是唯一 encode 实现，与协议包解码 helper 对齐）。
+ * 序列化走 encodeAnswer（answer-codec.ts 是本扩展内的唯一 encode 实现，与协议包解码
+ * helper 对齐；renderer 前端组件无法 import extension 包，独立实现对齐同一解码契约）。
  */
 function encodeTuiResultToProto(
 	protoQuestions: AskUserQuestion[],

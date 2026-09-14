@@ -12,7 +12,6 @@ export const ScheduleParams = Type.Object({
   kind: Type.Optional(Type.Union([Type.Literal('once'), Type.Literal('recurring')], { description: 'Task kind. Default: recurring.' })),
   name: Type.Optional(Type.String({ description: 'Human-readable task name. Auto-generated from prompt if omitted.' })),
   expires: Type.Optional(Type.String({ description: 'Expiry duration (30m/2h/7d). Default: 7d. Pass "never" to disable. Only applies to recurring tasks (once tasks fire and are removed, expires is ignored).' })),
-  force: Type.Optional(Type.Boolean({ description: 'Dispatch even when agent is busy. Default: false.' })),
 })
 
 export type ScheduleParamsT = Static<typeof ScheduleParams>
@@ -27,16 +26,16 @@ export const scheduleGuidelines = [
 
 /**
  * schedule tool handler（SchedulerService 瘦壳，无独立业务逻辑）。
+ * 直传参普通函数（ext-simplify-08 L6：原工厂柯里化 `createScheduleHandler(service)(params)`
+ * 两段调用收敛为 `handleSchedule(service, params)`）。
  * 业务失败 → throw（pi 只对 execute throw 置 isError:true，返回值里的 isError
  * 被 agent-loop 丢弃——W4 修复，锚点 agent-loop.js:453-483）；service 未初始化等
  * 初始化异常不在此 catch——穿透到 index.ts execute 的 catch 兜底（R3）。
  */
-export function createScheduleHandler(service: SchedulerService) {
-  return async (params: ScheduleParamsT) => {
-    const { prompt, schedule: scheduleInput, kind, name, expires, force } = params
-    const result = await service.create(prompt, scheduleInput, { kind, name, expires, force })
-    return toToolResult(result)
-  }
+export async function handleSchedule(service: SchedulerService, params: ScheduleParamsT) {
+  const { prompt, schedule: scheduleInput, kind, name, expires } = params
+  const result = await service.create(prompt, scheduleInput, { kind, name, expires })
+  return toToolResult(result)
 }
 
 // ── schedule_control tool ──
@@ -53,36 +52,33 @@ export const controlGuidelines = [
   'Use action="list" to see all scheduled tasks.',
   'After listing, use the returned id for toggle/delete/run.',
   'Prefer toggle(enabled=false) over delete for temporary pauses.',
-  'action="run" dispatches the task now: force tasks are sent directly; non-force tasks are enqueued via the delivery kernel and delivered once the agent is idle (busy messages wait in the queue and are flushed later).',
+  'action="run" dispatches the task now: the message is sent immediately via steer (interrupting the current turn if the agent is busy).',
 ]
 
-export function createScheduleControlHandler(service: SchedulerService) {
-  return async (params: ScheduleControlParamsT) => {
-    const { action, id, enabled } = params
+export async function handleScheduleControl(service: SchedulerService, params: ScheduleControlParamsT) {
+  const { action, id, enabled } = params
 
-    let result: ServiceResult
-    switch (action) {
-      case 'list':
-        result = service.list()
-        break
-      case 'toggle':
-        result = await service.toggle(id, enabled)
-        break
-      case 'delete':
-        result = service.delete(id)
-        break
-      case 'run':
-        result = await service.run(id)
-        break
-      default:
-        result = {
-          success: false,
-          errorCode: 'INVALID_PARAMS',
-          message: `Unknown action: ${action}`,
-        }
-    }
-    return toToolResult(result)
+  let result: ServiceResult
+  switch (action) {
+    case 'list':
+      result = service.list()
+      break
+    case 'toggle':
+      result = await service.toggle(id, enabled)
+      break
+    case 'delete':
+      result = service.delete(id)
+      break
+    case 'run':
+      result = await service.run(id)
+      break
+    default:
+      result = {
+        success: false,
+        message: `Unknown action: ${action}`,
+      }
   }
+  return toToolResult(result)
 }
 
 /**

@@ -98,7 +98,14 @@ export interface DeliveryConfig {
   watchdogMs?: number
   /** 去重配置（条数 LRU）。 */
   dedupe?: { maxKeys: number }
-  /** 投递终态信号（D4）。 */
+  /**
+   * 投递终态信号（D4）。per-message 契约（ext-simplify-08 D1/B1）：批次内每条消息
+   * 各获一次终态回调，msg 为该条原始消息（非合批 composed 消息）；单消息批次行为
+   * 不变。回调循环边界：回调内 dispose() 后本批剩余条目不再回调（与 dispose「丢弃
+   * 队列不触发 onSettled」契约一致）；回调内再 send() 的新消息走标准 flush 管线
+   * （空闲时可能在回调栈内立即投递）、不参与本批回调循环（契约完备性登记：当前
+   * 消费方两种形态均零可达）。
+   */
   onSettled?: (msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
 

@@ -18,7 +18,6 @@ import {
 	normalizeErrorSignature,
 	setupLoopGate,
 	TEARDOWN_FORCE_EXIT_MS,
-	assertSafeTimerDelay,
 	armForceExitTeardown,
 } from "../src/loop-gate.js";
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
@@ -700,14 +699,6 @@ describe("terminal bounded teardown（R3 F-2）", () => {
 		armForceExitTeardown();
 		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS);
 		expect(exitSpy).toHaveBeenCalledTimes(1);
-	});
-
-	it("assertSafeTimerDelay：非有限值 / 超 2^31-1 fail-fast（不静默 clamp）；安全域放行", () => {
-		expect(() => assertSafeTimerDelay(Number.NaN, "t")).toThrow(/not a finite number/);
-		expect(() => assertSafeTimerDelay(Number.POSITIVE_INFINITY, "t")).toThrow(/not a finite number/);
-		expect(() => assertSafeTimerDelay(2_147_483_648, "t")).toThrow(/2\^31-1/);
-		expect(() => assertSafeTimerDelay(TEARDOWN_FORCE_EXIT_MS, "t")).not.toThrow();
-		expect(() => assertSafeTimerDelay(2_147_483_647, "t")).not.toThrow();
 	});
 });
 

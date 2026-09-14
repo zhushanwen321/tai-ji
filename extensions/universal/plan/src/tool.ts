@@ -1,11 +1,10 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
+import type { GoalBridgeOutcome } from "./compact.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
 import { getPlanState, persistPlanState, resetPlanState } from "./state.js";
 import { listTemplates, loadTemplate } from "./templates.js";
@@ -16,7 +15,6 @@ import { updatePlanWidget } from "./widget.js";
 export const PLAN_ACTIONS = [
   "list-template",
   "select-template",
-  "create-template",
   "complete",
   "abort",
 ] as const;
@@ -31,20 +29,13 @@ export function validateAction(action: string): action is PlanAction {
 
 interface ListTemplateDetails {
   action: "list-template";
-  templates: Array<{ name: string; source: string; path: string }>;
+  templates: Array<{ name: string; path: string }>;
 }
 
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
   content: string;
-  phase: string;
-}
-
-interface CreateTemplateDetails {
-  action: "create-template";
-  templateName: string;
-  templateDir: string;
 }
 
 interface CompleteDetails {
@@ -52,6 +43,8 @@ interface CompleteDetails {
   planFilePath: string;
   isolation: string;
   execMode: string;
+  /** D2：direct 档 goalInit 的同步结果；compact 档在 onComplete 回调内执行，不进 result */
+  goalOutcome?: GoalBridgeOutcome;
 }
 
 interface CompleteCancelledDetails {
@@ -66,7 +59,6 @@ interface AbortDetails {
 type PlanDetails =
   | ListTemplateDetails
   | SelectTemplateDetails
-  | CreateTemplateDetails
   | CompleteDetails
   | CompleteCancelledDetails
   | AbortDetails;
@@ -80,10 +72,8 @@ function restoreFullToolSet(pi: ExtensionAPI): void {
 }
 
 /** Compact template list for TUI display. Two-column, max 5 lines. */
-function formatTemplateList(
-  templates: Array<{ name: string; source: string }>,
-): string {
-  const names = templates.map((t) => `${t.name} (${t.source})`);
+function formatTemplateList(templates: Array<{ name: string }>): string {
+  const names = templates.map((t) => t.name);
   if (names.length === 0) return "No templates available.";
 
   const MAX_DISPLAY = 8;
@@ -139,15 +129,8 @@ function renderPlanResult(
 
     case "select-template": {
       const header = fg("success", `✓ ${details.templateName}`) + NL;
-      const body = fg("dim", `  brainstorming → ${details.phase}`) + NL;
       const hint = fg("dim", "→ 按模板章节顺序写 plan.md");
-      return new Text(header + body + hint, 0, 0);
-    }
-
-    case "create-template": {
-      const header = fg("success", `✓ 已创建: ${details.templateName}`) + NL;
-      const body = fg("dim", `  ${details.templateDir}`);
-      return new Text(header + body, 0, 0);
+      return new Text(header + hint, 0, 0);
     }
 
     case "complete": {
@@ -179,8 +162,8 @@ interface ActionResult {
   details: PlanDetails;
 }
 
-function executeListTemplate(projectDir: string): ActionResult {
-  const templates = listTemplates(projectDir);
+function executeListTemplate(): ActionResult {
+  const templates = listTemplates();
   return {
     content: [{ type: "text" as const, text: `${templates.length} templates available` }],
     details: { action: "list-template", templates },
@@ -191,46 +174,20 @@ function executeSelectTemplate(
   pi: ExtensionAPI,
   params: Record<string, unknown>,
   state: PlanState,
-  projectDir: string,
 ): ActionResult {
   const templateName = params.templateName as string;
   if (!templateName) {
     throw new Error("templateName is required for select-template");
   }
-  const content = loadTemplate(templateName, projectDir);
+  const content = loadTemplate(templateName);
   if (!content) {
     throw new Error(`Template not found: ${templateName}`);
   }
   state.templateName = templateName;
-  state.phase = "writing";
   persistPlanState(pi, state);
   return {
     content: [{ type: "text" as const, text: `Template selected: ${templateName}` }],
-    details: { action: "select-template", templateName, content, phase: state.phase },
-  };
-}
-
-function executeCreateTemplate(params: Record<string, unknown>, projectDir: string): ActionResult {
-  const templateName = params.templateName as string;
-  const templateContent = params.templateContent as string;
-  if (!templateName || !templateContent) {
-    throw new Error("templateName and templateContent are required for create-template");
-  }
-  const sanitizedName = templateName.replace(/[^a-zA-Z0-9_-]/g, "");
-  if (!sanitizedName) {
-    throw new Error("Invalid template name: must contain alphanumeric characters");
-  }
-  const templateDir = path.join(projectDir, ".pi", "plan-templates");
-  fs.mkdirSync(templateDir, { recursive: true });
-  const filePath = path.join(templateDir, `${sanitizedName}.md`);
-  fs.writeFileSync(filePath, templateContent);
-  return {
-    content: [{ type: "text" as const, text: `Template created: ${sanitizedName}` }],
-    details: {
-      action: "create-template",
-      templateName: sanitizedName,
-      templateDir: relativePath(filePath, projectDir),
-    },
+    details: { action: "select-template", templateName, content },
   };
 }
 
@@ -249,21 +206,30 @@ function executeAbort(
   };
 }
 
+/**
+ * 执行方式对话框的 label→mode 映射表（发现 8）——SDK `ui.select(title, options: string[])`
+ * 只收字符串数组，无法传结构化选项，故用本地查表而非文案反查。
+ */
+const EXEC_MODE_OPTIONS: Array<{ label: string; mode: string }> = [
+  { label: "Subagent-driven execution", mode: "subagent" },
+  { label: "Goal-driven execution (/goal)", mode: "goal" },
+  { label: "Single-agent (current session)", mode: "single-agent" },
+];
+
+/** 对话框尾部的两个"留在 plan mode"选项（complete-cancelled 路径） */
+const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
+
 /** Build execution options filtered by available capabilities. */
-async function buildExecOptions(pi: ExtensionAPI): Promise<string[]> {
-  const execOptions = ["Subagent-driven execution"];
-  const hasGoal = (await import("./compact.js")).detectGoalCapability(pi);
-  if (hasGoal) execOptions.push("Goal-driven execution (/goal)");
-  execOptions.push("Single-agent (current session)");
-  execOptions.push("Modify the plan first", "Save for later");
-  return execOptions;
+function buildExecOptions(): string[] {
+  const modeLabels = EXEC_MODE_OPTIONS
+    .filter((opt) => opt.mode !== "goal" || detectGoalCapability())
+    .map((opt) => opt.label);
+  return [...modeLabels, ...CANCEL_OPTIONS];
 }
 
-/** Map the user's execution-method choice to the chosenMode string. */
+/** Map the user's execution-method choice (dialog label) to the chosenMode string. */
 function chosenModeFromChoice(choice: string): string {
-  if (choice === "Subagent-driven execution") return "subagent";
-  if (choice === "Goal-driven execution (/goal)") return "goal";
-  return "single-agent";
+  return EXEC_MODE_OPTIONS.find((opt) => opt.label === choice)?.mode ?? "single-agent";
 }
 
 /** Outcome of the complete-action execution-method prompt. */
@@ -276,8 +242,8 @@ type CompleteChoiceOutcome =
  * Cancel / "Modify the plan first" / "Save for later" → cancelled with a
  * complete-cancelled result; otherwise the mapped chosenMode.
  */
-async function resolveCompleteChoice(ctx: ExtensionContext, pi: ExtensionAPI): Promise<CompleteChoiceOutcome> {
-  const execOptions = await buildExecOptions(pi);
+async function resolveCompleteChoice(ctx: ExtensionContext): Promise<CompleteChoiceOutcome> {
+  const execOptions = buildExecOptions();
 
   if (typeof ctx.ui.select !== "function") {
     return { kind: "mode", chosenMode: "single-agent" };
@@ -297,7 +263,20 @@ async function resolveCompleteChoice(ctx: ExtensionContext, pi: ExtensionAPI): P
   return { kind: "mode", chosenMode: chosenModeFromChoice(choice) };
 }
 
-/** complete action: prompt for execution mode, persist final phase, restore tools, reset state. */
+/**
+ * complete 的 result 正文：direct 档 goalInit 同步完成，追加 goal 结果行（D2）；
+ * compact 档 goalInit 在 onComplete 回调内执行、result 已返回，不携带（通道差异
+ * 为设计 §6.2 D2 登记的终态）。
+ */
+function completeResultText(displayPath: string, goalOutcome: GoalBridgeOutcome | undefined): string {
+  const base = `Plan approved. File: ${displayPath}`;
+  if (goalOutcome === undefined) return base;
+  return goalOutcome.started
+    ? `${base}\nGoal execution started via /goal.`
+    : `${base}\nGoal execution was not started (${goalOutcome.reason}). ${GOAL_FAILURE_RECOVERY[goalOutcome.reason]}`;
+}
+
+/** complete action: prompt for execution mode, restore tools, reset state. */
 async function executeComplete(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -307,24 +286,23 @@ async function executeComplete(
   sessionId: string,
   projectDir: string,
 ): Promise<ActionResult> {
-  const choice = await resolveCompleteChoice(ctx, pi);
+  const choice = await resolveCompleteChoice(ctx);
   if (choice.kind === "cancelled") {
     return choice.result;
   }
   const chosenMode = choice.chosenMode;
 
-  // Persist final phase before cleanup
+  // D6：原「persist final phase (complete)」为死状态落盘（P1 实证不可观测），
+  // phase 删除后该 persist 与上一条 entry 完全重复，随死状态一并移除——
+  // 最终态由下方 resetPlanState 的 isActive=false entry 权威记录。
   const planFilePath = state.planFilePath;
   const isolation = (params.isolation as string) ?? "direct";
-  state.phase = "complete";
-  persistPlanState(pi, state);
 
   // Restore full tool set
   restoreFullToolSet(pi);
 
-  // Execute completion handler (compact/tree setup)
-  const { handlePlanComplete } = await import("./compact.js");
-  handlePlanComplete(pi, ctx, state, isolation, chosenMode);
+  // Execute completion handler (compact setup + steer/goalInit delivery)
+  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode);
 
   // Reset state and clear widget — same as abort
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx);
@@ -332,8 +310,8 @@ async function executeComplete(
 
   const displayPath = relativePath(planFilePath, projectDir);
   return {
-    content: [{ type: "text" as const, text: `Plan approved. File: ${displayPath}` }],
-    details: { action: "complete", planFilePath: displayPath, isolation, execMode: chosenMode },
+    content: [{ type: "text" as const, text: completeResultText(displayPath, goalOutcome) }],
+    details: { action: "complete", planFilePath: displayPath, isolation, execMode: chosenMode, goalOutcome },
   };
 }
 
@@ -349,13 +327,12 @@ export function registerPlanTool(
     description:
       "Manages plan mode lifecycle (template selection, state transitions, completion). " +
       "NOT for writing plan content — write plan.md via the bash tool (e.g. cat heredoc). " +
-      "Actions: list-template, select-template, create-template, complete, abort.",
+      "Actions: list-template, select-template, complete, abort.",
     parameters: Type.Object({
       action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
-      templateContent: Type.Optional(Type.String({ description: "Template content (for create-template)" })),
       isolation: Type.Optional(
-        StringEnum(["compact", "tree", "direct"], {
+        StringEnum(["compact", "direct"], {
           description: "Isolation mode for plan execution (for complete action)",
         }),
       ),
@@ -363,7 +340,7 @@ export function registerPlanTool(
     promptSnippet:
       "## When to use this tool vs the bash tool\n" +
       "Use 'plan' tool ONLY for plan mode state management:\n" +
-      "- list-template / select-template / create-template — template operations\n" +
+      "- list-template / select-template — template operations\n" +
       "- complete — user approved plan, exit plan mode\n" +
       "- abort — cancel plan mode\n" +
       "\n" +
@@ -372,15 +349,11 @@ export function registerPlanTool(
       "## End-to-end workflow example\n" +
       "1. /plan 'add dark mode' — user enters plan mode\n" +
       "2. AI explores codebase (read, grep, bash) — brainstorming\n" +
-      "3. plan(action='list-template') — show available templates\n" +
-      "4. User picks template → plan(action='select-template', templateName='feature-plan')\n" +
-      "5. bash: cat > \"$PLAN_FILE\" <<'EOF' ... EOF — write plan content\n" +
-      "6. User reviews → plan(action='complete', isolation='compact') — exit plan mode\n" +
+      "3. plan(action='list-template') → user picks → plan(action='select-template', templateName='...')\n" +
+      "4. bash: cat > \"$PLAN_FILE\" <<'EOF' ... EOF — write plan content\n" +
+      "5. User reviews → plan(action='complete', isolation='compact') — exit plan mode\n" +
       "\n" +
-      "## Common mistakes\n" +
       "❌ plan(action='complete') to 'write the plan' — WRONG, write plan.md via the bash tool\n" +
-      "❌ Calling plan tool when user says 'write plan to file' — use the bash tool\n" +
-      "✅ plan(action='list-template') to discover templates\n" +
       "✅ plan(action='complete') AFTER plan.md is written AND user approves",
     renderResult(
       result: { content: Array<{ type: string; text?: string }>; details?: PlanDetails },
@@ -407,13 +380,10 @@ export function registerPlanTool(
 
       switch (action) {
         case "list-template":
-          return executeListTemplate(projectDir);
+          return executeListTemplate();
 
         case "select-template":
-          return executeSelectTemplate(pi, params, state, projectDir);
-
-        case "create-template":
-          return executeCreateTemplate(params, projectDir);
+          return executeSelectTemplate(pi, params, state);
 
         case "complete":
           return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir);

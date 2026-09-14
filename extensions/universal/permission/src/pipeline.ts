@@ -4,8 +4,8 @@
  * 架构（自上而下）：
  *  - checkPermission：纯函数，按 mode 分发。deps 全注入（测试可 mock，不触碰 fs/network）。
  *  - runLayer2：bash 走 matchRulesForArgv（遍历 AST 拆出的 argv[]）；非 bash 走
- *    matchNonBashTool（G1：W3 matcher 对 toolName!=='bash' 直接 ask，但 W5 需要让
- *    Read/Write/Edit 也评估用户规则，故本模块自带 helper，复用 wildcardToRegExp）。
+ *    matchNonBashTool（G1：让 Read/Write/Edit 也评估用户规则；pattern 双语义与
+ *    last-match-wins 循环均经 matcher 单源，wildcardToRegExp 只编译 tool 字段）。
  *  - runLayer3WithRacing：AI Classifier + 用户审批竞速（移植 classifier-racing.ts）。
  *    G3：用户审批的 ctx.ui.custom 工厂在调之前先检查 signal.aborted，避免 AI 先于
  *    UI 触发 abort 时 comp 尚未创建导致 cancel 落空。
@@ -14,10 +14,15 @@
  *
  * fail-closed 原则：任何异常路径 → ask（交人工，不静默放行）。
  * checkPermission 永不 throw（caller index.ts 的 tool_call handler 依赖此契约）。
+ *
+ * 白盒导出声明（E9）：buildApprovalRequest / matchNonBashTool / runLayer2 /
+ * applyAutoApproveOverrides / runLayer3WithRacing 是内部测试 seam，非包公共 API
+ * （包 main 只导出工厂函数，外部消费者不存在）——pipeline.test.ts / e2e-modes.test.ts
+ * 白盒直测锚定安全语义（runLayer2 聚合表 / matchNonBashTool 非 bash 语义），故保留。
  */
 
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import { matchRules } from "./rules/matcher.js";
+import { lastMatchWins, matchRules, resolvePattern } from "./rules/matcher.js";
 import { wildcardToRegExp } from "./rules/wildcard.js";
 import type {
 	ApprovalRequest,
@@ -68,20 +73,20 @@ export function buildApprovalRequest(
 /**
  * G1 修正：非 bash 工具规则匹配 helper。
  *
- * W3 matcher.ts 的 matchRules 对 toolName!=='bash' 直接返回 ask（W3 只管 bash），
- * 但 W5 需要让 Read/Write/Edit 也评估用户规则（用户可能写 `read ~/.ssh/*` 的 deny 规则）。
- * 故本模块自带 helper，不依赖 matchRules 的非 bash 路径。
+ * W5 需要让 Read/Write/Edit 也评估用户规则（用户可能写 `read ~/.ssh/*` 的 deny 规则），
+ * matcher 的 bash 入口不覆盖该场景，故本模块自带 helper。
  *
  * M5 修正：pattern 对 path 匹配（而非 toolName）。用户规则如 `read ~/.ssh/*` 的
  * pattern `~/.ssh/*` 应对文件路径生效，对 toolName='read' 匹配是失效的。
  *  - tool 字段仍对 toolName 匹配（wildcard，支持 'read'/'write'/'*'）。
  *  - pattern 字段对 path 匹配；path 为 undefined 时退化为对 toolName 匹配
  *    （兼容 rule.tool='read' pattern='*' 这种不关心路径的规则）。
- *  - pattern 字段用 wildcardToRegExp 编译（用户规则是 OpenCode wildcard）。
- *  - builtin-danger 规则的 pattern 是 RegExp 源串（含 \b），这里用 new RegExp(pattern,'i')。
+ *  - pattern 双语义分发（builtin-danger RegExp 源串 vs 其余 wildcard）走
+ *    matcher.resolvePattern 单源（E7/M10，含 patternCache 复用）。
  *  - 无匹配 → ask（与 G1 一致，deny 到下游）。
  *
- * ~20 行，复用 wildcardToRegExp（不重新实现 wildcard 语义）。
+ * 复用 wildcardToRegExp（tool 字段编译）/ resolvePattern / lastMatchWins，
+ * 不重新实现任何匹配语义。
  */
 export function matchNonBashTool(
 	toolName: string,
@@ -92,20 +97,13 @@ export function matchNonBashTool(
 		return { action: "ask", matchedRule: undefined };
 	}
 	const matchTarget = path ?? toolName;
-	let winner: RuleMatchResult = { action: "ask", matchedRule: undefined };
-	for (const rule of rules) {
-		// tool 字段匹配（wildcard，支持 '*' / 精确 'read'）
-		const toolRe = wildcardToRegExp(rule.tool);
-		if (!toolRe.test(toolName)) continue;
-		// pattern 字段：builtin-danger 是 RegExp 源串，其余是 wildcard。
-		const patternRe =
-			rule.source === "builtin-danger" ? new RegExp(rule.pattern, "i") : wildcardToRegExp(rule.pattern);
-		// M5：pattern 对 path 匹配（path 缺省时对 toolName，'*' 总是命中）。
-		if (patternRe.test(matchTarget)) {
-			winner = { action: rule.action, matchedRule: rule };
-		}
-	}
-	return winner;
+	// M5：pattern 对 path 匹配（path 缺省时对 toolName，'*' 总是命中）；
+	// E11：last-match-wins 循环走 matcher 单源（tool 不匹配时短路，不编译 pattern）。
+	return lastMatchWins(
+		rules,
+		(rule) =>
+			wildcardToRegExp(rule.tool).test(toolName) && resolvePattern(rule).test(matchTarget),
+	);
 }
 
 /**
@@ -141,7 +139,7 @@ export function runLayer2(
 	if (argvList.length === 0) {
 		// bash 但 AST 没拆出命令（parseError 或空）→ 仍做 C1 完整字符串 deny 检查
 		// （命令本身可能含管道，AST 拆不出但 deny 规则能命中）
-		const fullCmdDeny = matchRules("bash", command, rules);
+		const fullCmdDeny = matchRules(command, rules);
 		if (fullCmdDeny.action === "deny") return fullCmdDeny;
 		return { action: "ask", matchedRule: undefined };
 	}
@@ -160,7 +158,7 @@ export function runLayer2(
 	// C1：对完整 command 字符串做 deny 补充检查（覆盖跨 argv 管道如 curl|sh）。
 	// 仅 deny 能覆盖 argv 级结果；完整字符串检查不查白名单（matchRules 语义），
 	// 故不会把 argv 级 deny/ask 提升为 allow。
-	const fullCmdDeny = matchRules("bash", command, rules);
+	const fullCmdDeny = matchRules(command, rules);
 	if (fullCmdDeny.action === "deny") return fullCmdDeny;
 	if (sawAsk) return { action: "ask", matchedRule: undefined };
 	return lastAllow ?? { action: "ask", matchedRule: undefined };
@@ -554,8 +552,7 @@ async function runAstLayer(
  * @param config classifier 配置（auto 模式用）
  * @param userRules 用户规则（与 getDefaultRules 拼接）
  * @param deps 注入依赖
- * @param ctxBase 工具调用上下文基线（cwd/agentName）
- * @param signal 外层 abort signal
+ * @param ctxBase 工具调用上下文基线（cwd/agentName，含 signal）
  */
 export async function checkPermission(
 	toolName: string,
@@ -589,7 +586,7 @@ export async function checkPermission(
 	const rules = [...deps.getDefaultRules(), ...userRules];
 	// C1：传入完整 command（bash 跨 argv 管道 deny 补充检查）；
 	// M5：传入 path（非 bash 工具规则对 path 匹配）。
-	const layer2 = runLayer2ForArgvList(toolName, ast.argvList, rules, deps, command, ctx.path);
+	const layer2 = runLayer2(toolName, ast.argvList, rules, deps.matchRulesForArgv, command, ctx.path);
 
 	const decided = ruleDecision(layer2);
 	if (decided !== null) {
@@ -604,21 +601,6 @@ export async function checkPermission(
 
 	// auto：ask → 层 3 Racing（AI + 用户）
 	return await runLayer3WithRacing(deps, ctx, config, ctxBase.signal);
-}
-
-/**
- * 层 2 规则匹配（用注入的 deps.matchRulesForArgv）。
- * 薄封装 runLayer2，把注入的 matcher 传入纯逻辑版。
- */
-function runLayer2ForArgvList(
-	toolName: string,
-	argvList: string[][],
-	rules: readonly Rule[],
-	deps: CheckPermissionDeps,
-	command: string | undefined,
-	path: string | undefined,
-): RuleMatchResult {
-	return runLayer2(toolName, argvList, rules, deps.matchRulesForArgv, command, path);
 }
 
 /** approve/strict 模式的人工审批封装（无 AI）。 */

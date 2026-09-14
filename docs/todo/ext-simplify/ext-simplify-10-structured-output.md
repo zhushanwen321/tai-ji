@@ -4,14 +4,14 @@
 
 ## 开篇（SCQA）
 
-- **S（情境）**：`@zhushanwen/pi-structured-output`（v5.1.4，universal 组，mandatory infrastructure）是 workflow schema enforcement 包——SW 子进程按 `PI_WORKFLOW_SCHEMA` env 注入权威 schema 到工具参数层（方案 A [HISTORICAL]：注入的权威 schema 是唯一校验权威），配套软 steer hook（turn_end 未调用则 steer，≤2 次）与硬失败闸门 loop-gate（连续 3 次同签名失败 → terminal：双通道日志 → `ctx.abort()` → `ctx.shutdown()` → 15s 兜底硬退）。
+- **S（情境）**：`@zhushanwen/pi-structured-output`（v5.1.5，universal 组，mandatory infrastructure）是 workflow schema enforcement 包——SW 子进程按 `PI_WORKFLOW_SCHEMA` env 注入权威 schema 到工具参数层（方案 A [HISTORICAL]：注入的权威 schema 是唯一校验权威），配套软 steer hook（turn_end 未调用则 steer，≤2 次）与硬失败闸门 loop-gate（连续 3 次同签名失败 → terminal：双通道日志 → `ctx.abort()` → `ctx.shutdown()` → 15s 兜底硬退）。
 - **C（冲突）**：2026-09-11 过度设计审计（so 单元）确认本包机制本体全部过四问（签名归一化族、强退本体、双变体、跨包副本均为本质复杂度），但残留一处 medium 级仪式化守卫——为唯一一个编译期字面量实参上了 30 行双分支 throw 守卫，且其同源锚定注释指向已不存在的路径；外加一组 low 级残留（零调用方方法、不可达分支、零消费方出口、为良性失效模式上的 slot 机械），其中 slot 化与 C-ext-06 惯例的适用关系存在争议须裁决。
 - **Q（问题）**：如何在不触碰强退机制本体（真实事故驱动 + 方案 A [HISTORICAL] 的产品锚）的前提下清掉这些仪式化残留，并对 slot 化作出可辩护、可防复发的惯例裁决？
 - **A（答案）**：M24 守卫整体删除（守卫的存在前提「delay 来自动态输入」在本副本不成立）+ slot 回退模块级 `let`（裁决依据本地锚定注释防复发）+ redesign 文档同批回写 + low 群移交清单登记。行为零变更，验收以真实 pi CLI 跑 workflow 模式一轮带 schema 任务 + 既有行为用例零改动通过构成。
 
 **层声明**：本文档是「技术方案设计」层，下一层产物 = 可实施的代码任务清单。全部条目为死代码清理 / 机械回退 / 注释修正，无数据流变更；层敏感准则 5（物理数据流）不适用，准则 6/7 按「行为零变更」对象以最小探针面适用。
 
-**证据基线**：pi SDK 断言核对自本 worktree 实装 `node_modules/@earendil-works/pi-coding-agent@0.84.4`（npm ls 确认版本）；文中全部 file:line 为 2026-09-12 实读当前源码值，与 2026-09-11 审计快照的差异以「审计修正」标注（见 §7 末）；四问记录 sa-ca793788（批 4 structured-output 单元）的五条发现已逐条实读复核。本包既有测试基线绿（8 文件 191 用例通过，2026-09-12 实跑）。
+**证据基线**：pi SDK 断言核对自本 worktree 实装 `node_modules/@earendil-works/pi-coding-agent@0.84.4`（npm ls 确认版本）；文中 file:line 为 2026-09-12 实读值，2026-09-13 审查复核发现系统性 ±1-2 行偏移（语义定位无歧义），实施时以符号检索为准、不照抄行号；与 2026-09-11 审计快照的差异以「审计修正」标注（见 §7 末）；四问记录 sa-ca793788（批 4 structured-output 单元）的五条发现已逐条实读复核。本包既有测试基线绿（8 文件 194 用例全绿，2026-09-13 审查实跑；v1 记 191 为设计基线数，+3 = bbfae6f19 加入的 stale ctx 三用例，恰好为 E1/E3 提供额外回归保护）。
 
 ---
 
@@ -59,7 +59,7 @@ export function assertSafeTimerDelay(ms: number, source: string): void {
 事实链：
 
 - **唯一生产调用点** `armForceExitTeardown`（:484）的实参恒为字面量 `TEARDOWN_FORCE_EXIT_MS = 15_000`（:438，`export const` 原始类型不可变）。两个 throw 分支（非有限值 / 超 2^31-1）对 15000 **永不可达**——被守卫的危害（Node setTimeout 把非法 delay 塌缩为 1ms 立即触发，兜底窗口变成立即硬杀）在该调用点 by construction 不可能发生。
-- **原版的存在前提在本副本不成立**：SSOT 原版 `packages/subagent-core/src/shared/timer-delay.ts:37` 有 ≥8 个真实动态调用点（dialog-queue / settled-watchdog / supervisor / subagent-service / lifecycle-manager / lifecycle / launcher，实跑 grep 证实），守卫「动态输入可能算错」的决策在那里成立；本副本恰好 1 个调用点且喂编译期字面量。
+- **原版的存在前提在本副本不成立**：SSOT 原版 `packages/subagent-core/src/shared/timer-delay.ts:37` 有 7 个真实动态调用点（settled-watchdog ×3 / lifecycle-manager / supervisor / lifecycle / launcher；dialog-queue 与 run-orchestration 的命中为注释引用非调用），守卫「动态输入可能算错」的决策在那里成立；本副本恰好 1 个调用点且喂编译期字面量。
 - **锚点注释漂移**（:395-397）：`[同源锚定] @zhushanwen/pi-subagent-workflow 的 shared/timer-delay.ts`——`@zhushanwen/pi-subagent-workflow` 包存在（即 `extensions/universal/subagent-workflow`），但其内**没有** shared/timer-delay.ts；全仓 `find -name "timer-delay.ts"` 唯一命中 `packages/subagent-core/src/shared/timer-delay.ts`。注释指路的锚点实体已不存在。
 - 测试面：`tests/loop-gate.test.ts:704-709` 专设 5 条断言锁这个不可达守卫的行为。
 
@@ -79,7 +79,7 @@ teardown timer 三条前提全不占：terminal 路径一次性武装（`newlyTe
 
 - **RetryState.reset**（workflow-hook.ts:79-86）：注释自认「当前无调用方；保留作状态机完整契约」。全仓唯一调用 = `tests/retry-state.test.ts:105-119` 专设用例。扩展实例生命周期 = 单子进程单次装配（index.ts:59-74），跨 session 复用场景不存在。连带悬空：`:56` markTerminal 注释「不可逆，**仅 reset() 可清**」在 reset 删除后成为悬空语义锚。
 - **日常变体 env 重读**（tool-definition.ts:226-241，读取在 :236）：日常变体的 execute 内重读 `process.env[ENV_SCHEMA]`——但模式分岔在 index.ts:60-72 装配期已用**同一个 env** 裁决（env 有值根本不会注册日常变体）；进程 env spawn 时固定、全仓零写入点（审计 grep + 实读 index.ts 仅 :60 一处只读）。这是一个不可达的平行决策点，读者须推理一个不可能发生的「运行中模式切换」。
-- **出口面测试专用导出簇**：零消费方导出三处——`GATE_ENTRY_TYPE`（loop-gate.ts:392，全仓零消费，仅同文件 :514 使用）、`HOOK_ENTRY_TYPE`（workflow-hook.ts:90，同上）、`validateAgainstSelfReported`（execute.ts:87，仅同文件 :181 使用）；index.ts re-export 块（:46-55）中 `RetryState`（:52）/ `LoopGate`（:54）/ `setupLoopGate`（:53）经 **index 路径**零消费——本包测试全部走深路径（`tests/loop-gate.test.ts:15-23` ← `../src/loop-gate.js`；`tests/retry-state.test.ts:12` ← `../src/workflow-hook.js`），SW 侧 vitest alias 虽指向 `../structured-output/src/index.ts`，但 grep 证实 SW 无任何源文件 import 该包（alias 为防御性基础设施）。保留面：`normalizeErrorSignature` / `LoopGate` / `TEARDOWN_FORCE_EXIT_MS` / `MAX_CONSECUTIVE_FAILURES` 等深路径导出有真实消费方（本包测试的行为契约锁定，如 :99 锁阈值 3、:674-700 锁 teardown 行为），不动。
+- **出口面测试专用导出簇**：零消费方导出三处——`GATE_ENTRY_TYPE`（loop-gate.ts:392，全仓零消费，仅同文件 :514 使用）、`HOOK_ENTRY_TYPE`（workflow-hook.ts:90，同上）、`validateAgainstSelfReported`（execute.ts:87，仅同文件 :181 使用）；index.ts re-export 块（:46-55）中 `RetryState`（:52）/ `LoopGate`（:54）/ `setupLoopGate`（:53）经 **index 路径**零消费——三项符号的真实消费全部走深路径（`tests/loop-gate.test.ts:15-23` ← `../src/loop-gate.js`；`tests/retry-state.test.ts:12` ← `../src/workflow-hook.js`）。**「本包测试全部走深路径」不成立（v1 表述失实，审查 S1 修正）**：`tests/structured-output.test.ts:29` 与 `tests/cross-package-contract.test.ts:24` 均经 `../src/index.js` 导入，但其 import 的符号（executeStructuredOutput / 双变体工厂 / SO_SCHEMA_SIZE_WARN_BYTES / ENV_SCHEMA）全部在保留面，不在 E6 删除面，删除安全性不受影响。SW 侧 vitest alias 虽指向 `../structured-output/src/index.ts`，但 grep 证实 SW 无任何源文件 import 该包（alias 为防御性基础设施）。保留面：`normalizeErrorSignature` / `LoopGate` / `TEARDOWN_FORCE_EXIT_MS` / `MAX_CONSECUTIVE_FAILURES` 等深路径导出有真实消费方（本包测试的行为契约锁定，如 :99 锁阈值 3、:674-700 锁 teardown 行为），不动。
 - **悬空 unified-hooks 引用**（text-primitives.ts:43-44）：「见 extensions/universal/unified-hooks 的 extractErrorText 及其文档」——unified-hooks 已废弃（AGENTS.md 登记被 base-tool-enhance 整包取代）。批 A 设计 ext-simplify-01 已登记同一点（其执行表 row 4，编号 E5）。
 
 ### 4. 根因
@@ -123,7 +123,7 @@ export function armForceExitTeardown(): void {
 - **被否**：
   - **保留守卫只修锚点注释（doc-right）**——守卫的两个 throw 分支对唯一实参 15000 永不可达，30 行 + 5 断言守护一个 by construction 不可能的危害；若用它，§3.1 的事实链继续要求每个读者推理「这个守卫什么时候触发」，答案是永远不会。
   - **收敛为一行 clamp/断言**——仍是仪式：`Number.isFinite(15_000)` 同样编译期可知为真；一行版省行数不省认知（读者仍要问「防什么」）。
-- **证据**：:484 唯一调用点 + :438 字面量实参（实读）；subagent-core 原版 ≥8 动态调用点 vs 本副本 1 字面量（grep 实跑）；「未来动态化再加守卫」符合减法优先——speculative guard 防的是 review 漏检，而 `export const` 字面量改动必然过 diff review。
+- **证据**：:484 唯一调用点 + :438 字面量实参（实读）；subagent-core 原版 7 个动态调用点 vs 本副本 1 字面量（grep 实跑；dialog-queue / run-orchestration 命中为注释引用）；「未来动态化再加守卫」符合减法优先——speculative guard 防的是 review 漏检，而 `export const` 字面量改动必然过 diff review。
 - **效果**：目标 2；§5 终态成立；强退链行为零变更（探针 P1）。
 
 | 方案 | 长期架构合理性 | 短期实现成本 | 风险 | 裁决 |
@@ -164,7 +164,7 @@ export function armForceExitTeardown(): void {
 | ID | 验证的行为 | 探针 | 状态 | 失败时的降级路径 |
 |---|---|---|---|---|
 | P1 | E1/E3 后强退链行为零变更：常量锁 / 15s 到点 stderr+exit(1) / 幂等重武装三用例**零改动通过** | `tests/loop-gate.test.ts:674-700` 既有用例不改一个字跑绿（幂等用例直接覆盖 let 形态的重复武装 clear） | ⛔ 合入前 | 失败 = 回退 E1 或 E3（按红用例归因），恢复守卫为单行 `Number.isFinite` 检查并回本设计重审 D1 |
-| P2 | E4-E6 移交项行为等价：双变体注册 / RetryState 转移表 / 出口面收敛后测试 import 全部可达 | 本包既有 191 用例在 E4-E6 改动后仅删除 :704-709 与 reset 专设用例、其余零改动通过 | ⛔ 合入前 | 失败 = 对应移交项回退，登记阻塞原因后重审 D3/D4 |
+| P2 | E4-E6 移交项行为等价：双变体注册 / RetryState 转移表 / 出口面收敛后测试 import 全部可达 | 本包既有用例全量（当前实跑 194）在 E4-E6 改动后仅删除 :704-709 与 reset 专设用例、其余零改动通过 | ⛔ u2（code-simplify 移交批）合入前——E4-E6 未实施时该探针无从执行，不阻塞 u1 | 失败 = 对应移交项回退，登记阻塞原因后重审 D3/D4 |
 | P3 | workflow 模式真实可达性：shell 直注 `PI_WORKFLOW_SCHEMA` 后本包进入 workflow 模式（index.ts:60 读同进程 env；extension 与 pi 同进程加载，loop-gate.ts:472-474 既有核实） | 见 §8 V1 命令 | ⛔ 验收期 | 失败（env 未达 extension）→ 改走 SW 真实链路（极简 workflow 单步 agent() 注入 schema）重跑 V1 |
 
 ## 7. 执行项清单与文件改动地图
@@ -181,7 +181,7 @@ export function armForceExitTeardown(): void {
 | E6 | loop-gate.ts:392；workflow-hook.ts:90；execute.ts:87；index.ts:40、:46-55 | 三处零消费导出降模块私有；index re-export 删 RetryState/LoopGate/setupLoopGate 三项、import 收窄（:32 删 LoopGate、:40 删 RetryState） | 移交 code-simplify |
 | E7 | text-primitives.ts:43-44 | 删「见 extensions/universal/unified-hooks 的 extractErrorText 及其文档」从句（保留 agent-loop.js createErrorToolResult 事实锚点）。与批 A ext-simplify-01 row 4 同点，后做方幂等跳过 | 移交 code-simplify（批 A 协同） |
 
-**文件改动地图（u1 直接执行部分）**：`src/loop-gate.ts`（E1+E3，净删约 50 行）/ `tests/loop-gate.test.ts`（删 ：704-709，其余零改动）/ `docs/design/structured-output-redesign.md`（:275 一处）。`package.json` patch bump（5.1.4 → 5.1.5，无对外行为变化）。移交部分（E4-E7）涉及 `workflow-hook.ts` / `tool-definition.ts` / `execute.ts` / `index.ts` / `text-primitives.ts` / `tests/retry-state.test.ts`。
+**文件改动地图（u1 直接执行部分）**：`src/loop-gate.ts`（E1+E3，净删约 50 行）/ `tests/loop-gate.test.ts`（删 ：704-709，其余零改动）/ `docs/design/structured-output-redesign.md`（:275 一处）。`package.json` patch bump（当前 5.1.5 → 5.1.6，无对外行为变化；v1 记的 5.1.4→5.1.5 已被 ext-simplify 批次收尾 bump c79cd621c 占用）。移交部分（E4-E7）涉及 `workflow-hook.ts` / `tool-definition.ts` / `execute.ts` / `index.ts` / `text-primitives.ts` / `tests/retry-state.test.ts`。
 
 **审计修正记录**（实读 vs 2026-09-11 审计快照）：
 1. **事实修正**：审计 finding 5 称「execute.ts:112 `validateAgainstSelfReported` 的注释理由『抽出以便单元测试直接调用』已失实」——不成立。该注释实际位于 `executeStructuredOutput`（execute.ts:143），且该函数确被 `tests/structured-output.test.ts:344+` 经 index 直接调用，注释属实。存活事实收窄为「`validateAgainstSelfReported` 导出零包外消费（含测试），降模块私有即可」。
@@ -202,7 +202,7 @@ export function armForceExitTeardown(): void {
 |---|---|---|---|---|
 | V1 | workflow 模式真实任务（强退链宿主进程正向冒烟） | 目标 1 | 本地 pi CLI 直注 env：`PI_WORKFLOW_SCHEMA='{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}' pi --mode rpc --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension extensions/universal/structured-output`，stdin JSONL 发一条会产出结构化结果的 prompt | 工具调用成功返回 "Structured output recorded successfully."，details 含 answer 字段；进程正常退出（非 15s 硬退路径）；stderr 无 gate 告警 |
 | V2 | 日常模式真实调用（env 缺席分岔 + E5 等价面） | 目标 1 | 同上命令去掉 env 前缀，prompt 诱导模型按工具 description 的 `{schema, data}` 形态自报调用 | 合法 `{schema,data}` 校验通过；互换形态（schema/data 调包）被 "Likely swapped" 拒绝 |
-| V3 | 静态守卫 + 行为回归 | 目标 1/2/4 | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 三连；`node scripts/check-doc-symbol-drift.mjs` | 三连全绿（P2 达成）；doc-drift 通过（E2 回写生效）；loop-gate 既有用例除 :704-709 删除外零改动（P1 达成） |
+| V3 | 静态守卫 + 行为回归 | 目标 1/2/4 | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 三连；`node scripts/check-doc-symbol-drift.mjs` | 三连全绿（P1 达成；P2 留 u2 移交批——E4-E6 未实施时该探针无从执行，见 §6.5 v2-r1 修正）；doc-drift 通过（E2 回写生效）；loop-gate 既有用例除 :704-709 删除外零改动（P1 达成） |
 
 V1/V2 均为真实依赖（真实 pi CLI、真实模型、真实 session-dir），无 mock；单测仅作回归辅助不计入验收。
 
@@ -231,3 +231,5 @@ V1/V2 均为真实依赖（真实 pi CLI、真实模型、真实 session-dir）�
 ## 附录：变更历史
 
 - v1（2026-09-12）：初稿。覆盖审计 M24（守卫 + 锚点漂移）、contested slot 裁决（回退 let）与 low 群移交登记（reset / env 重读 / 出口面 / 悬空引用，含批 A E5 协同）；含 2 条审计修正（finding 5 注释归属、行号机械偏移）。
+- v2（2026-09-13）：按 over-engineering 审查（`.review.md`，VERDICT PASS）采纳 5 条 suggestion——S1：§3.3「本包测试全部走深路径」表述修正（structured-output.test.ts / cross-package-contract.test.ts 经 index 导入但符号均在保留面）；S2：版本 bump 指引改 5.1.5→5.1.6（5.1.5 已被批次 bump 占用）；S3：测试基线 191→194（bbfae6f19 +3）；S4：subagent-core 调用点 ≥8 改 7（区分注释引用）；S5：证据基线加行号 ±1-2 偏移声明（实施以符号检索为准）。
+- v2-r1（2026-09-13，tech-design 双审查 R1，双 PASS）：影响面审 sug——P2 探针时点归属改「u2（code-simplify 移交批）合入前」，E4-E6 未实施时无从执行、不阻塞 u1。主审复核：S1-S5 全部修复成立，194 用例基线实跑吻合。

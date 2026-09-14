@@ -1,10 +1,23 @@
 # @zhushanwen/pi-plan
 
+## 0.5.0
+
+### Minor Changes
+
+- **plan: complete interaction matrix tightened; template surface collapsed to the builtin single source**
+
+  **Breaking changes (AI-facing tool contract):**
+
+  - `plan(action="complete", isolation="tree")` is no longer accepted. The `isolation` parameter schema now allows only `compact | direct`; a `tree` value is rejected at the schema level with the valid values echoed back. The tree tier could not be implemented from the tool execute context (programmatic tree navigation is only available on command contexts) and it silently discarded the user's execution-method choice. Migration: call `complete` with `isolation="compact"` (compact context first, then execute) or `isolation="direct"` (execute immediately). Manual `/tree` navigation while plan mode is active is unchanged.
+  - `plan(action="create-template")` is now rejected as an unknown action (`Valid actions: list-template, select-template, complete, abort`). Template discovery no longer scans the project directory (`.pi/plan-templates`) or the global agent directory (`<agentDir>/plan-templates`); the template list is exactly the 5 builtin templates. Existing custom template directories are orphaned — they are not read, and nothing is deleted. Migration: paste the template content directly into the conversation when writing plan.md; there is no in-tool replacement for template authoring.
+  - All 5 builtin templates now use the single step-section title `## Implementation Steps`, aligned with the `extractPlanSteps` parser (guarded by a test that runs the parser over every builtin template). Plan files written with the older template titles (任务分解/实现顺序/修复策略/分步骤计划/后续步骤) still have their steps extracted via the numbered-list fallback — no migration needed.
+
 ## 0.4.5
 
 ### Patch Changes
 
 - 893b702b6: chore: refresh dependency range (triggered by @zhushanwen/pi-goal@0.14.0 → @zhushanwen/pi-goal@0.14.1)
+
 
 ## 0.4.4
 

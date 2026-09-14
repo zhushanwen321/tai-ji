@@ -166,6 +166,33 @@ describe("validateInput", () => {
 		expect(result).toContain("Correct:");
 		expect(result).toContain('"header"');
 	});
+
+	// V-20/M23: label 恰为保留字 "Other" → 拦截。Other 自由输入行由 extension 自动追加，
+	// LLM 自带会渲染出同名双行；文案含 reserved 与改名指引（rename + e.g. 示例）。
+	it("rejects option label 'Other' as reserved with rename guidance", () => {
+		const result = validateInput([
+			q({ options: [{ label: "Postgres" }, { label: "Other" }] }),
+		]);
+		expect(result).not.toBeNull();
+		expect(result).toContain("reserved");
+		expect(result).toContain("rename");
+	});
+
+	// V-21/D2: 空白变体 " Other " 与合成 Other 行视觉不可分辨（仅差不可见空白），同样拦截
+	it("rejects whitespace variants of the reserved label (' Other ')", () => {
+		const result = validateInput([
+			q({ options: [{ label: "Postgres" }, { label: " Other " }] }),
+		]);
+		expect(result).toContain("reserved");
+	});
+
+	// V-22/D2: 含 Other 子串的合法标签不被拦截（精确匹配不误杀）——catch-all 语义可经命名传达
+	it("allows labels containing 'Other' as a substring (e.g. 'Other database')", () => {
+		const result = validateInput([
+			q({ options: [{ label: "Postgres" }, { label: "Other database" }] }),
+		]);
+		expect(result).toBeNull();
+	});
 });
 
 // ── options 字符串「下沉」机制集成证明 ──────────────────

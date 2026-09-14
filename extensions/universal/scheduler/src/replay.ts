@@ -1,5 +1,6 @@
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
+import { HISTORY_LIMIT } from './types.js'
 import type { ScheduledTask, SchedulerEntryOp, TaskSnapshot } from './types.js'
 
 const logger = getLogger('scheduler')
@@ -14,8 +15,6 @@ export interface SchedulerEntryLike {
   customType?: string
   data?: unknown
 }
-
-const HISTORY_LIMIT = 20
 
 /**
  * 从 CustomEntry 序列折叠恢复 per-task 末态（event sourcing）。
@@ -206,7 +205,6 @@ function snapshotToTask(snapshot: TaskSnapshot): ScheduledTask {
     kind: snapshot.kind,
     schedule: snapshot.schedule,
     enabled: snapshot.enabled,
-    force: snapshot.force,
     createdAt: snapshot.createdAt,
     nextRunAt: snapshot.nextRunAt,
     expiresAt: snapshot.expiresAt,

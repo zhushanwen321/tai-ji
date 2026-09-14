@@ -3,13 +3,19 @@ import { open, stat, type FileHandle } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { basename, dirname } from 'node:path'
 import type { SessionRef } from '../core/family.js'
+import { textBlockParts } from '../core/render.js'
 import {
   resolveSessionRoots,
   type SessionFileMeta,
   type SessionRoot,
   type SessionRootSignals,
 } from './roots.js'
-import { listRecordManifests, extractSessionIdFromFilename, type RecordManifest } from './subagents.js'
+import {
+  listRecordManifests,
+  extractSessionIdFromFilename,
+  readTailIdentity,
+  type RecordManifest,
+} from './subagents.js'
 
 /**
  * M2 discovery 发现层：按 query 定位 session（design §3.3 D-3 + §3.4 find action）。
@@ -59,8 +65,8 @@ export interface SessionMetadataEntry {
   cwd: string
   /** 用户标题（session_info entry 的 name）；旧 session 缺失 */
   name?: string
-  /** pi 返回 Date，测试替身可传 number */
-  modified: Date | number
+  /** pi 返回 Date（A4 收窄：原 `Date | number` 宽联合只服务测试替身，替身改传 Date） */
+  modified: Date
   /** 首消息全文（title 命中时填充 firstMessagePreview，免二次读文件） */
   firstMessage?: string
 }
@@ -120,22 +126,12 @@ function extractUserText(line: string): string | undefined {
 /**
  * 从 message content 提取可读文本。
  * 兼容 pi 两种形态：string content（直接用）与 array content（拼 type:text 项的 text）。
+ * E11 归一：共享核 textBlockParts 组合调用，' ' join 与零 text 块返 undefined 的语义
+ * 留在本调用点（find 匹配把 undefined 当「无文本」信号，空串会被 includes('') 误吸）。
  */
 function extractTextFromContent(content: unknown): string | undefined {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    const parts: string[] = []
-    for (const item of content) {
-      if (typeof item === 'object' && item !== null) {
-        const it = item as Record<string, unknown>
-        if (it.type === 'text' && typeof it.text === 'string') {
-          parts.push(it.text)
-        }
-      }
-    }
-    return parts.length > 0 ? parts.join(' ') : undefined
-  }
-  return undefined
+  const parts = textBlockParts(content)
+  return parts.length > 0 ? parts.join(' ') : undefined
 }
 
 /**
@@ -230,59 +226,6 @@ interface Matched extends Candidate {
 // U5：subagent task/slug/agentName 匹配（manifest 索引 + P-fallback identity 回退）
 // ============================================================
 
-/** P-fallback 尾行 identity 读取窗口（同 subagents.ts，task 文本可达数 KB）。 */
-const TAIL_READ_BYTES = 65536
-
-/**
- * 读 subagent 文件尾部（最后 64KB）找 subagent-identity entry，返回 task/slug/agent。
- *
- * find 的 P-fallback 路径（场景 A：subagent 无 manifest，本机 11.5%）：manifest 索引未命中时
- * 读尾行 identity 取 task/slug/agent 做 query 子串匹配。与 subagents.ts 的 readTailIdentity
- * 同源（64KB 窗口 + lastIndexOf 定位），但是 find 专用最小版（只取 task/slug/agent，不要
- * rootSessionId——find 候选已有 header.id）。不导出，不碰 subagents.ts（w3 冻结）。
- */
-async function readTailIdentityForMatch(
-  path: string,
-  size: number,
-): Promise<{ task?: string; slug?: string; agent?: string } | undefined> {
-  if (size === 0) return undefined
-  let fh: FileHandle | undefined
-  try {
-    fh = await open(path, 'r')
-    const len = Math.min(TAIL_READ_BYTES, size)
-    const buf = Buffer.alloc(len)
-    await fh.read(buf, 0, len, Math.max(0, size - len))
-    const text = buf.toString('utf8')
-    const idx = text.lastIndexOf('subagent-identity')
-    if (idx < 0) return undefined
-    const lineStartSearch = text.lastIndexOf('\n', idx)
-    if (lineStartSearch < 0 && size > len) return undefined
-    const start = lineStartSearch < 0 ? 0 : lineStartSearch + 1
-    let end = text.indexOf('\n', idx)
-    if (end < 0) end = text.length
-    const line = text.slice(start, end)
-    let raw: unknown
-    try {
-      raw = JSON.parse(line)
-    } catch {
-      return undefined
-    }
-    const data = (raw as Record<string, unknown> | undefined)?.data as
-      | Record<string, unknown>
-      | undefined
-    if (!data) return undefined
-    return {
-      task: typeof data.task === 'string' ? data.task : undefined,
-      slug: typeof data.slug === 'string' ? data.slug : undefined,
-      agent: typeof data.agent === 'string' ? data.agent : undefined,
-    }
-  } catch {
-    return undefined
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-}
-
 /**
  * 建 sessionId→RecordManifest 索引（U5：subagent task/slug/agentName 匹配用）。
  *
@@ -325,8 +268,11 @@ async function matchSubagentMetadata(
       (manifest.agentName?.includes(query) ?? false)
     )
   }
-  // P-fallback：manifest 索引未命中 → 读尾行 identity 回退
-  const ident = await readTailIdentityForMatch(candidate.meta.path, candidate.meta.size)
+  // P-fallback：manifest 索引未命中 → 读尾行 identity 回退。E8（ext-simplify-04）：
+  // 复用 subagents.ts 的 readTailIdentity 单实现，取 task/slug/agent 子集。行为差异 =
+  // 缺 rootSessionId 的畸形 identity 行从「可匹配」变「不匹配」（m0 契约外数据，
+  // design §3.3 E8 登记为可接受）。
+  const ident = await readTailIdentity(candidate.meta.path, candidate.meta.size)
   if (!ident) return false
   return (
     (ident.task?.includes(query) ?? false) ||
@@ -362,9 +308,9 @@ function buildCandidate(
  *
  * u11 起直接消费 resolveSessionRoots 的根列表（单次实扫，files 与根归属信息同批产出——
  * 标题窄化策略需要「扫描结果无子目录的候选根」这一根级事实，薄包装的扁平列表给不出）。
- * 对只含 agentDir 的信号包，根集合 = [default]+[legacy]+[subagent]，与旧薄包装
- * listMainSessions/listSubagentSessions 的并集逐文件一致（含 workflow-state 跳过与
- * realpath 去重语义）；传 liveSessionDir 时按 §6.1 追加 [live] 根（realpath 去重保优先级）。
+ * 对只含 agentDir 的信号包，根集合 = [default]+[legacy]+[subagent]，与已删除薄包装
+ * listMainSessions/listSubagentSessions（ext-simplify-04 U4/A3）原并集逐文件一致（含
+ * workflow-state 跳过与 realpath 去重语义）；传 liveSessionDir 时按 §6.1 追加 [live] 根（realpath 去重保优先级）。
  */
 async function collectCandidates(
   roots: SessionRoot[],
@@ -407,11 +353,6 @@ async function pathExistsDir(path: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** 条目 modified 的可比数值（pi 返回 Date，测试替身可传 number）。 */
-function modifiedOf(e: SessionMetadataEntry): number {
-  return typeof e.modified === 'number' ? e.modified : e.modified.getTime()
 }
 
 /**
@@ -467,7 +408,7 @@ async function loadTitleIndex(ctx: MetadataContext): Promise<Map<string, Session
     }
     for (const e of entries) {
       const prev = index.get(e.id)
-      if (prev === undefined || modifiedOf(e) > modifiedOf(prev)) index.set(e.id, e)
+      if (prev === undefined || e.modified.getTime() > prev.modified.getTime()) index.set(e.id, e)
     }
   }
   return index
@@ -590,7 +531,7 @@ async function loadRecentTitles(
     }
     for (const e of entries) {
       const prev = titles.get(e.id)
-      if (prev === undefined || modifiedOf(e) > modifiedOf(prev)) titles.set(e.id, e)
+      if (prev === undefined || e.modified.getTime() > prev.modified.getTime()) titles.set(e.id, e)
     }
   }
   return titles
@@ -658,6 +599,12 @@ async function fillFirstMessagePreviews(
  *   去重）并作标题窄化目标；缺省 = 现状三根降级行为。
  * - opts.metadataProvider：标题元数据注入（仅 keyword 路径 + recent 截断后补充消费）；
  *   缺省 = undefined = 现状行为（标题检索不可用，首条 user 匹配不受影响）。
+ *
+ * E1 预解析根复用（ext-simplify-04 §3 D1）：opts.roots = 调用方预解析的根列表——同一
+ * 次 doFind 内多段查询（分组 main/subagent 两路）复用同一次根解析，目录扫描不随查询
+ * 段数翻倍。缺省 = 本函数自解析（既有测试与单段调用方零改动）。调用方须保证传入的
+ * roots 来自无 options 的 resolveSessionRoots 实扫（预解析是复用同一次实扫——根扫描
+ * 无缓存，doctor 缓存机已删除，ext-simplify-04 U3）。
  */
 export async function findSessions(
   query: string,
@@ -668,18 +615,21 @@ export async function findSessions(
     source?: SessionSource
     liveSessionDir?: string
     metadataProvider?: SessionMetadataProvider
+    /** 预解析根列表（E1/D1）：提供则跳过内部 resolveSessionRoots，直接消费 */
+    roots?: SessionRoot[]
   },
 ): Promise<{ matches: MatchedSession[]; truncated: boolean }> {
   const limit = opts?.limit ?? DEFAULT_LIMIT
   const cwdFilter = opts?.cwd
   const sourceFilter = opts?.source
 
-  // 0. 根解析（单次实扫，无 options——find 不读 doctor 缓存，§7B 要点 8 PS-14）
+  // 0. 根解析（单次实扫，无 options——根扫描无缓存）；
+  // E1：调用方已预解析（opts.roots）时复用，不再自扫
   const signals: SessionRootSignals =
     opts?.liveSessionDir !== undefined && opts.liveSessionDir.length > 0
       ? { agentDir, liveSessionDir: opts.liveSessionDir }
       : { agentDir }
-  const roots = await resolveSessionRoots(signals)
+  const roots = opts?.roots ?? (await resolveSessionRoots(signals))
   // 0+1. 逐根首行扫描建候选
   const candidates = await collectCandidates(roots, sourceFilter, cwdFilter)
   // 2. 三路匹配（recent / uuid 片段 / 名称关键词+U5 元数据+u11 标题）

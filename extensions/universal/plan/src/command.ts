@@ -111,7 +111,7 @@ function handleStatus(
     return;
   }
   ctx.ui.notify(
-    `Plan Mode: ${state.phase}\nPlan: ${state.planFilePath}\nTemplate: ${state.templateName || "(not selected)"}`,
+    `Plan: ${state.planFilePath}\nTemplate: ${state.templateName || "(not selected)"}`,
     "info",
   );
 }
@@ -149,7 +149,6 @@ function handleEnterPlanMode(
   const planFilePath = path.join(planDir, "plan.md");
 
   state.isActive = true;
-  state.phase = "brainstorming";
   state.planFilePath = planFilePath;
   state.requirement = requirement;
   state.templateName = "";
@@ -182,7 +181,7 @@ function handleEnterPlanMode(
     `4. Write all chapters in one turn, then ask user to review.\n\n` +
     `## Phase D: Completion\n` +
     `1. Ask user to review the complete plan.\n` +
-    `2. Call plan tool (complete) with isolation method (compact/tree/direct).\n` +
+    `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
     `3. After plan complete: the user picks an execution path (subagent-driven / goal-driven / single-agent) via the completion dialog.`,
   );
 }

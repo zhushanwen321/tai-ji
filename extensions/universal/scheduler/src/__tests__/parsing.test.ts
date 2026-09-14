@@ -100,9 +100,7 @@ describe('normalizeCronExpression', () => {
 describe('parseSchedule', () => {
   it('parses duration to interval mode', async () => {
     const result = await parseSchedule('5m')
-    expect(result).toEqual({
-      spec: { mode: 'interval', intervalMs: 300_000 },
-    })
+    expect(result).toEqual({ mode: 'interval', intervalMs: 300_000 })
   })
 
   it('returns undefined for invalid duration', async () => {
@@ -119,7 +117,7 @@ describe('parseSchedule', () => {
   it('parses valid cron expression to cron mode', async () => {
     const result = await parseSchedule('0 9 * * 1-5')
     expect(result).toBeDefined()
-    expect(result!.spec.mode).toBe('cron')
+    expect(result!.mode).toBe('cron')
   })
 
   it('returns undefined for invalid cron with spaces', async () => {

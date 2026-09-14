@@ -228,9 +228,10 @@ describe('buildFamilyFromFs - fixture', () => {
     expect(sub!.rootSessionId).toBe(FORK)
     expect(sub!.slug).toBe('test-sub')
     expect(sub!.cleanedUp).toBe(false)
-    // enrich：fileName/cwd 已补真实值（非 M1 占位空串）
-    expect(sub!.fileName.length).toBeGreaterThan(0)
-    expect(sub!.cwd).toBe('/proj/--fork-cwd--')
+    // enrichRefs 已删除（ext-simplify-04 U4/E2）：family 路径 fileName/cwd 维持 core 占位空串
+    //（SessionRef 与 find 路径共享，find 侧有真实消费者；workflow calls 反查走 pathToRef 不受影响）
+    expect(sub!.fileName).toBe('')
+    expect(sub!.cwd).toBe('')
   })
 
   it('从 fork 子代 resolve 也能关联到挂在其下的 subagent', async () => {

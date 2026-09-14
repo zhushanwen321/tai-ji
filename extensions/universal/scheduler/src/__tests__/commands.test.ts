@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { executeScheduleCommand, registerScheduleCommand } from '../commands.js'
 import { SchedulerRuntime } from '../runtime.js'
 import { SchedulerService } from '../service.js'
@@ -27,7 +27,7 @@ describe('/schedule command', () => {
     }
     const backend = new MockSchedulerBackend()
     service = new SchedulerService(
-      new SchedulerRuntime(backend, { isIdle: () => true, hasPendingMessages: () => false }),
+      new SchedulerRuntime(backend),
       () => backend.now(),
     )
     registerScheduleCommand(mockPi as never, () => service)
@@ -104,6 +104,7 @@ describe('/schedule command', () => {
   // ── 子命令路由：run ──
 
   it('run executes task', async () => {
+    // run 子命令的 dispatch 行为锚定 steer 直投路径
     const created = await service.create('test', '5m')
     const result = await executeScheduleCommand(service, `run ${created.data!.task.id}`)
     expect(result).toContain('executed')

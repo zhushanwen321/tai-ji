@@ -16,6 +16,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type ExtensionUIContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { oncePerProcess } from "@zhushanwen/pi-ext-guards";
@@ -24,11 +25,8 @@ import { migrateLegacyConfig } from "@zhushanwen/pi-llm-shared";
 
 const logger = getLogger("pi-permission");
 
-import { listAvailableModels } from "./classifier/model-resolver.js";
 import { handlePermissionCommand, handlePermissionModelCommand, handlePermissionRuleCommand } from "./commands.js";
 import { loadAndWatchConfig, saveConfig } from "./config.js";
-import { setDefaultListAvailableModels } from "./model-picker.js";
-import { editRulesViaOverlay } from "./rule-editor.js";
 import { makeNextIdCounter } from "./rule-templates.js";
 import { checkPermission, type CheckPermissionDeps } from "./pipeline.js";
 import { createPipelineDeps } from "./production.js";
@@ -80,6 +78,39 @@ interface ToolCallResult {
  */
 const _UI_OPTIONS_PARAM_INDEX = 2;
 
+// ──────────────────────── ctx.ui 适配（E8/M11 单源） ────────────────────────
+
+/**
+ * E8（M11）：pi ctx.ui → 本包局部 UI 上下文的统一适配（原三份闭包收敛为单源）。
+ *
+ * 三处消费：/permission rule（RuleEditorContext.ui）、/permission model
+ * （ModelPickerContext.ui）、tool_call 审批（ApprovalContext.ui）。三个目标接口的
+ * custom 泛型形态不同（前两者 factory 返回 unknown、后者返回 Component），统一靠
+ * `as Parameters<typeof ui.custom<T>>[0]` cast 吸收（T5）。
+ *
+ * select/input 的 opts 类型经 `Parameters<typeof ...>[typeof _UI_OPTIONS_PARAM_INDEX]`
+ * 索引提取（字面量索引会触发 no-magic-numbers，typeof 常量索引语义等价）。
+ * input 可选守卫展开：SDK 提供，mock/headless 可能缺失——rule-editor custom 模板
+ * 文本输入与 Reject-with-Reason（approval.ts collectRejectReason）都依赖此透传。
+ */
+function makeUiAdapter(ui: ExtensionUIContext) {
+	return {
+		notify: (msg: string, type?: "info" | "warning" | "error") => ui.notify(msg, type),
+		select: (title: string, options: string[], opts?: Parameters<typeof ui.select>[typeof _UI_OPTIONS_PARAM_INDEX]) =>
+			ui.select(title, options, opts),
+		custom: <T,>(
+			factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown,
+			options?: { overlay?: boolean },
+		): Promise<T> => ui.custom<T>(factory as Parameters<typeof ui.custom<T>>[0], options),
+		...(typeof ui.input === "function"
+			? {
+					input: (title: string, placeholder?: string, opts?: Parameters<typeof ui.input>[typeof _UI_OPTIONS_PARAM_INDEX]) =>
+						ui.input(title, placeholder, opts),
+				}
+			: {}),
+	};
+}
+
 // ──────────────────────── 扩展工厂 ────────────────────────
 
 /**
@@ -87,10 +118,6 @@ const _UI_OPTIONS_PARAM_INDEX = 2;
  * （llm-shared mtime 去重零成本，详见 config.ts「热重载契约」）。
  */
 export default function permissionExtension(pi: ExtensionAPI): void {
-	// W7：注入 listAvailableModels 真实实现（model-picker.ts 默认返回空 Map）。
-	// E2 签名：(ctx) → ctx.modelRegistry.getAll() + hasConfiguredAuth 过滤。
-	setDefaultListAvailableModels((ctx) => listAvailableModels(ctx));
-
 	// ──────────────────────── 配置读取（读时刷新，回归 llm-shared 框架） ────────────────────────
 	// 不持有跨调用缓存：每次需要配置直接 loadAndWatchConfig()，llm-shared 内部 mtime+size 去重，
 	// 文件未变时零额外 IO（只 statSync）。这是 llm-shared config「热重载契约」的正确用法——
@@ -140,32 +167,14 @@ export default function permissionExtension(pi: ExtensionAPI): void {
 				await handlePermissionRuleCommand(
 					{
 						mode: ctx.mode,
-						ui: {
-							notify: (msg: string, type?: "info" | "warning" | "error") => ctx.ui.notify(msg, type),
-							select: (title: string, options: string[], opts?: Parameters<typeof ctx.ui.select>[typeof _UI_OPTIONS_PARAM_INDEX]) =>
-								ctx.ui.select(title, options, opts),
-							custom: <T,>(
-								factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown,
-								options?: { overlay?: boolean },
-							) =>
-								ctx.ui.custom<T>(factory as Parameters<typeof ctx.ui.custom<T>>[0], options),
-							// 连接 ctx.ui.input（rule-editor custom 模板文本输入用）。
-							// approval.ts 已声明可选 input（SDK 提供，mock 可能缺失）。
-							...(typeof ctx.ui.input === "function"
-								? { input: (title: string, placeholder?: string, opts?: Parameters<typeof ctx.ui.input>[typeof _UI_OPTIONS_PARAM_INDEX]) => ctx.ui.input(title, placeholder, opts) }
-								: {}),
-						},
+						ui: makeUiAdapter(ctx.ui),
 					},
 					config,
 					makeNextIdCounter(config.userRules),
-					{
-						save: (newConfig) => {
-							const r = saveConfig(newConfig);
-							if (r.success) requestFooterRender();
-							return r;
-						},
-						editRulesViaOverlay: (ctx, initialRules, sessionIdCounter, rpcDeps) =>
-							editRulesViaOverlay(ctx, initialRules, sessionIdCounter, rpcDeps),
+					(newConfig) => {
+						const r = saveConfig(newConfig);
+						if (r.success) requestFooterRender();
+						return r;
 					},
 				);
 				return;
@@ -177,29 +186,14 @@ export default function permissionExtension(pi: ExtensionAPI): void {
 						mode: ctx.mode,
 						// E2：model picker 数据源（listAvailableModels 走 modelRegistry）
 						modelRegistry: ctx.modelRegistry,
-						ui: {
-							notify: (msg: string, type?: "info" | "warning" | "error") => ctx.ui.notify(msg, type),
-							select: (title: string, options: string[], opts?: Parameters<typeof ctx.ui.select>[typeof _UI_OPTIONS_PARAM_INDEX]) =>
-								ctx.ui.select(title, options, opts),
-							custom: <T,>(
-								factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown,
-								options?: { overlay?: boolean },
-							) =>
-								ctx.ui.custom<T>(factory as Parameters<typeof ctx.ui.custom<T>>[0], options),
-							// 连接 ctx.ui.input（与 rule handler 一致；model picker 当前不用，但保持 ctx 对称）。
-							...(typeof ctx.ui.input === "function"
-								? { input: (title: string, placeholder?: string, opts?: Parameters<typeof ctx.ui.input>[typeof _UI_OPTIONS_PARAM_INDEX]) => ctx.ui.input(title, placeholder, opts) }
-								: {}),
-						},
+						// input 透传保持 ctx 对称（model picker 当前不用，rule handler 用）
+						ui: makeUiAdapter(ctx.ui),
 					},
 					config,
-					{
-						listModels: (pickerCtx) => listAvailableModels(pickerCtx),
-						save: (newConfig) => {
-							const r = saveConfig(newConfig);
-							if (r.success) requestFooterRender();
-							return r;
-						},
+					(newConfig) => {
+						const r = saveConfig(newConfig);
+						if (r.success) requestFooterRender();
+						return r;
 					},
 				);
 				return;
@@ -320,20 +314,7 @@ async function processToolCall(
 	// 装配 deps（每次 tool_call 重新装配，捕获当前 ctx.mode/ui；classifier 走 ctx.modelRegistry）
 	const approvalCtx = {
 		mode: ctx.mode,
-		ui: {
-			notify: (msg: string, type?: "info" | "warning" | "error") => ctx.ui.notify(msg, type),
-			select: (title: string, options: string[], opts?: Parameters<typeof ctx.ui.select>[typeof _UI_OPTIONS_PARAM_INDEX]) => ctx.ui.select(title, options, opts),
-			custom: <T,>(
-				factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown,
-				options?: { overlay?: boolean },
-			) =>
-				ctx.ui.custom<T>(factory as Parameters<typeof ctx.ui.custom<T>>[0], options),
-			// W6 T9 G3：Reject-with-Reason。ctx.ui.input 存在则透传（采集真实拒绝理由）。
-			// approval.ts 的 collectRejectReason 会用 typeof 判断是否可用，不可用则 fallback。
-			...(typeof ctx.ui.input === "function"
-				? { input: (title: string, placeholder?: string, opts?: Parameters<typeof ctx.ui.input>[typeof _UI_OPTIONS_PARAM_INDEX]) => ctx.ui.input(title, placeholder, opts) }
-				: {}),
-		},
+		ui: makeUiAdapter(ctx.ui),
 	};
 	const deps: CheckPermissionDeps = createPipelineDeps(approvalCtx, ctx);
 

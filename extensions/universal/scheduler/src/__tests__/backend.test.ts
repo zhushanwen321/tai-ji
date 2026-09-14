@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { MockSchedulerBackend } from '../backend.js'
+import { MockSchedulerBackend } from './mock-backend.js'
 import { SchedulerRuntime } from '../runtime.js'
 import type { SchedulerEntryOp, TaskSnapshot } from '../types.js'
-
-const mockCtx = { isIdle: () => true, hasPendingMessages: () => false }
 
 /** 构造 base task 快照（upsert op 用）。 */
 function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
@@ -15,8 +13,7 @@ function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
     kind: 'recurring',
     schedule: { mode: 'interval', intervalMs: 60000 },
     enabled: true,
-    force: false,
-    createdAt: 0,
+      createdAt: 0,
     nextRunAt: 100,
     runCount: 0,
     history: [],
@@ -103,7 +100,7 @@ describe('MockSchedulerBackend', () => {
   it('TC2: SchedulerRuntime with MockSchedulerBackend constructs and dispatches via mock', async () => {
     const backend = new MockSchedulerBackend()
     // 构造不抛错（无需 cwd/pi/store mock）
-    const runtime = new SchedulerRuntime(backend, mockCtx)
+    const runtime = new SchedulerRuntime(backend)
     const task = await runtime.addTask('probe', { mode: 'interval', intervalMs: 60000 })
     expect(task).toBeDefined()
     // addTask 后 append upsert op（append-only，零 FS）

@@ -7,6 +7,8 @@
  * - settled 边沿 → busy 复核通过 → flush；有订阅装配下 busy 只依赖边沿 + watch-dog（不退避强发）
  * - watch-dog 低频复核（D8 兜底层①：settled 事件丢失的恢复路径）
  * - port.send 失败 → 消息留在途、按 backoff 有限重试，达上限 settle rejected（D4 错误重试）
+ * - 终态上报 per-message（ext-simplify-08 D1/B1）：onSettled 对批次内每条消息各回调
+ *   一次，msg 为该条原始消息（非 composed 合批消息）；单消息批次行为不变
  * - sendChecked() 统一经投递循环：resolve 挂钩 port.send 受理结果（busy 时经
  *   streaming 受理入 pi 队列即回，以此确认可达）；首次受理失败即 reject（入口即拦）
  * - in-flight 防重：单 handle 至多一个 port.send 在途
@@ -268,14 +270,14 @@ export function createDelivery(
       const result = port.send(composed, intent)
       if (isThenable(result)) {
         result.then(
-          (receipt) => onSendReceipt(composed, receipt),
-          (err: unknown) => onSendFail(composed, err),
+          (receipt) => onSendReceipt(receipt),
+          (err: unknown) => onSendFail(err),
         )
       } else {
-        onSendReceipt(composed, result)
+        onSendReceipt(result)
       }
     } catch (err) {
-      onSendFail(composed, err)
+      onSendFail(err)
     }
   }
 
@@ -283,26 +285,32 @@ export function createDelivery(
    * 受理判定（U2 回执口径）：显式 `{accepted:false}` → 发送失败路径（错误重试 /
    * reject 链路）；void / `{accepted:true}` / 其他形态 = 受理成功（旧 port 兼容）。
    */
-  function onSendReceipt(composed: DeliveryMessage, receipt: SendReceipt | void): void {
+  function onSendReceipt(receipt: SendReceipt | void): void {
     if (receipt !== undefined && receipt.accepted === false) {
-      onSendFail(composed, new Error(receipt.reason ?? 'port.send rejected (accepted:false)'))
+      onSendFail(new Error(receipt.reason ?? 'port.send rejected (accepted:false)'))
       return
     }
-    onSendOk(composed)
+    onSendOk()
   }
 
-  function onSendOk(composed: DeliveryMessage): void {
+  function onSendOk(): void {
     if (disposed) return
     const delivered = inflightBatch
     inFlight = false
     inflightBatch = []
     sendAttempts = 0
     settleChecked(delivered, undefined, checkedPending)
-    cfg.onSettled?.(composed, 'delivered')
+    // per-message 终态（ext-simplify-08 D1/B1）：批次内每条各回调一次，msg 为该条
+    // 原始消息（composed 只带首条 identity，非首条收不到回调 = 合批记账断头）；
+    // 回调内 dispose → 剩余条目不再回调（与 dispose 丢弃队列不触发 onSettled 契约一致）
+    for (const m of delivered) {
+      if (disposed) break
+      cfg.onSettled?.(m, 'delivered')
+    }
     pump()
   }
 
-  function onSendFail(composed: DeliveryMessage, err: unknown): void {
+  function onSendFail(err: unknown): void {
     if (disposed) return
     sendAttempts++
     // 入口即拦：checked 消息首次受理失败即 reject，并从在途剔除（失败同步交给调用方，
@@ -321,12 +329,17 @@ export function createDelivery(
       return
     }
     if (sendAttempts > cfg.backoff.max) {
-      // 达上限 → 终态 rejected（D4 错误重试：不无限静默积压）
+      // 达上限 → 终态 rejected（D4 错误重试：不无限静默积压）；置空前捕获批次，
+      // 逐条 per-message 回调（口径同 onSendOk）
+      const rejectedBatch = inflightBatch
       inFlight = false
       inflightBatch = []
       sendAttempts = 0
       warn('port.send failed after max retries', err)
-      cfg.onSettled?.(composed, 'rejected')
+      for (const m of rejectedBatch) {
+        if (disposed) break
+        cfg.onSettled?.(m, 'rejected')
+      }
       pump()
       return
     }

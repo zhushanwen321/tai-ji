@@ -69,9 +69,9 @@
 - 去向：已实施并演进——structured-output 现役包 `extensions/universal/structured-output/`；依赖登记现行规范在 [extension-conventions.md](../extension-conventions.md)「Extension 依赖管理」（SO peer 精确版本联动规则同节）；workflow 侧接管机制已被 structured-output-redesign 重设计（PI_WORKFLOW_SCHEMA 单参数合成工具，见 AGENTS.md）；引用的 pi-statusline / pi-context-engineering / pi-evolve-daily 包已删除。决策追溯全文见 git 历史。
 
 <a id="pi-ext-020"></a>
-### ADR-020：Coding-Workflow 依赖 Workflow Extension（Accepted）
+### ADR-020：Coding-Workflow 依赖 Workflow Extension（Accepted，通道已死）
 - 结论：经 `pi.__workflowRun` 约定通道（`session_start` 时暴露 `orchestrator.runAndWait()`）复用 workflow 的 parallel/callCache/budget 编排能力，`extension-dependencies.json` 声明 optional 缺失降级。
-- 去向：已实现且通道仍活跃——`extensions/universal/subagent-workflow/src/index.ts`（`pi.__workflowRun`）；两包合并背景见 pi-ext-030。
+- 去向：提供方注册代码在 `extensions/universal/subagent-workflow/src/index.ts`（`pi.__workflowRun`）；两包合并背景见 pi-ext-030。**通道运行时恒不可达（2026-09-14 死刑注记）**：pi 0.84.4 为每个扩展创建独立 ExtensionAPI 对象（loader `createExtensionAPI` per-extension），消费方读不到提供方挂的字段；且消费方 coding-workflow 1.x 已退役、`runSingleAgent` 全仓零引用，无用户可见影响。禁止未来消费者信任「挂 pi API 对象字段」交叉调用模式；跨扩展编程式调用用 `globalThis[Symbol.for]` slot 形态（C-ext-06 惯例，参照 goal 桥修复设计 [goal-bridge-cross-extension.md](../../architecture/goal-bridge-cross-extension.md)）。
 
 <a id="pi-ext-023"></a>
 ### ADR-023：GoalRuntimeState Mixed-Frequency Tech Debt（Accepted，tech debt record）

@@ -18,5 +18,5 @@ status: draft
 ## 推荐
 <!-- 推荐方案和理由 -->
 
-## 后续步骤
+## Implementation Steps
 <!-- 调研结论后的下一步 -->

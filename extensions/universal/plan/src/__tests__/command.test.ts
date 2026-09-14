@@ -128,10 +128,12 @@ describe("registerPlanCommand", () => {
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
     expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("[PLAN MODE]"));
     expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("Implement User Auth"));
-    expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({
+    expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: true,
-      phase: "brainstorming",
-    }));
+      planFilePath: "/tmp/test-project/.xyz-harness/implement-user-auth/plan.md",
+      requirement: "Implement User Auth",
+      templateName: "",
+    });
   });
 
   it("handles special characters in requirement for slug", async () => {
@@ -158,8 +160,13 @@ describe("registerPlanCommand", () => {
     vi.clearAllMocks();
 
     await handler("", ctx);
+    // D6：phase 删除后 status 显示 plan 文件与模板，无档位行
     expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("brainstorming"),
+      expect.stringContaining("my-feature/plan.md"),
+      "info",
+    );
+    expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Template: (not selected)"),
       "info",
     );
   });

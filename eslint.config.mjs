@@ -607,15 +607,11 @@ export default [
       'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
-  // session-reader tool-handler：聚合工具处理中枢（多工具入口 + 渲染调度），
-  // extensions 域上限 1000 下长期超限（基线存量）。短期 override 1200，
-  // 拆分方向：按工具域拆 handler 子模块。
-  {
-    files: ['extensions/universal/session-reader/src/tool-handler.ts'],
-    rules: {
-      'max-lines': ['warn', { max: 1200, skipBlankLines: true, skipComments: true }],
-    },
-  },
+  // [HISTORICAL] session-reader tool-handler 单列 override（max 1200）已移除——按工具域
+  // 拆分（result-action/doctor/search-across/extract/no-match 早已拆出，原注释「拆分方向：
+  // 按工具域拆」滞后于现状）+ ext-simplify-04 U1-U9 净删（re-export 转发层 / doctor 缓存链 /
+  // 死字段 / 双份行格式知识）后折算行 989 < extensions 域 1000 上限，warning 消解
+  // （先例：subagent-service.ts R4 移除而非抬阈值）。若后续再超 1000，按域基线告警处置。
   // download-asset：下载状态机 + 断点续传 + 双引擎降级链（curl/undici 编排 D4/D5/D10）
   // 的单主题模块（apps 域上限 500 下 736 行）。引擎编排段拆分待独立重构，短期 override。
   // [2026-09-06 U03 复杂度重构] 断点续传/校验链/错误分类阶段化提取后 806 代码行——

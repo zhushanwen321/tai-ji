@@ -1,0 +1,867 @@
+
+> xyz-agent@0.9.19 extensions:typecheck /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering
+> cd extensions && npx tsc --noEmit
+
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm.
+npm warn Unknown env config "node-linker". This will stop working in the next major version of npm.
+npm warn Unknown env config "store-dir". This will stop working in the next major version of npm.
+npm warn Unknown project config "node-linker". This will stop working in the next major version of npm.
+npm warn Unknown project config "strict-peer-dependencies". This will stop working in the next major version of npm.
+npm warn Unknown global config "store-dir". This will stop working in the next major version of npm.
+
+> xyz-agent@0.9.19 extensions:lint /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering
+> node scripts/check-stale-ctx-audit-coverage.mjs && npx eslint extensions/
+
+stale-ctx 审计覆盖检查通过：extensions/{taiji,universal,shared}/ 共 25 个实际包全部已在普查表 §3 登记（普查表解析到 27 个登记名）。
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm.
+npm warn Unknown env config "node-linker". This will stop working in the next major version of npm.
+npm warn Unknown env config "store-dir". This will stop working in the next major version of npm.
+npm warn Unknown project config "node-linker". This will stop working in the next major version of npm.
+npm warn Unknown project config "strict-peer-dependencies". This will stop working in the next major version of npm.
+npm warn Unknown global config "store-dir". This will stop working in the next major version of npm.
+
+> xyz-agent@0.9.19 extensions:test /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering
+> pnpm -r --filter '@zhushanwen/pi-*' test
+
+Scope: 26 of 42 workspace projects
+extensions/shared/ext-guards test$ vitest run
+extensions/shared/extension-logger test$ vitest run
+extensions/universal/cache-probe test$ vitest run
+extensions/taiji/agent-ext test$ vitest run
+extensions/shared/ext-guards test: Both esbuild and oxc options were set. oxc options will be used and esbuild options will be ignored. The following esbuild options were set: `{ target: 'es2022' }`
+extensions/shared/extension-logger test: Both esbuild and oxc options were set. oxc options will be used and esbuild options will be ignored. The following esbuild options were set: `{ target: 'es2022' }`
+extensions/taiji/agent-ext test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/agent-ext
+extensions/universal/cache-probe test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/cache-probe
+extensions/shared/extension-logger test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/extension-logger
+extensions/shared/ext-guards test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/ext-guards
+extensions/taiji/agent-ext test:  ✓ src/__tests__/agent-ext.test.ts (3 tests) 12ms
+extensions/taiji/agent-ext test:  Test Files  1 passed (1)
+extensions/taiji/agent-ext test:       Tests  3 passed (3)
+extensions/taiji/agent-ext test:    Start at  07:02:43
+extensions/taiji/agent-ext test:    Duration  206ms (transform 26ms, setup 0ms, import 29ms, tests 12ms, environment 0ms)
+extensions/taiji/agent-ext test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/agent-ext/test-results/vitest-junit.xml
+extensions/shared/ext-guards test:  ✓ src/__tests__/pi-semantics-stale-ctx-wording.test.ts (4 tests) 2ms
+extensions/shared/ext-guards test:  ✓ src/__tests__/guard-stale-ctx.test.ts (12 tests) 4ms
+extensions/shared/ext-guards test:  ✓ src/__tests__/ext-guards.test.ts (6 tests) 6ms
+extensions/universal/cache-probe test:  ✓ src/__tests__/fingerprint.test.ts (14 tests) 3ms
+extensions/shared/ext-guards test:  Test Files  3 passed (3)
+extensions/shared/ext-guards test:       Tests  22 passed (22)
+extensions/shared/ext-guards test:    Start at  07:02:44
+extensions/shared/ext-guards test:    Duration  220ms (transform 94ms, setup 0ms, import 135ms, tests 12ms, environment 0ms)
+extensions/universal/cache-probe test: [cache-probe] before_agent_start failed: injected
+extensions/universal/cache-probe test: [cache-probe] before_provider_request failed: disk full
+extensions/universal/cache-probe test: [cache-probe] appendEntry failed: disk full
+extensions/universal/cache-probe test:  ✓ src/__tests__/state-machine.test.ts (8 tests) 6ms
+extensions/universal/cache-probe test:  Test Files  2 passed (2)
+extensions/universal/cache-probe test:       Tests  22 passed (22)
+extensions/universal/cache-probe test:    Start at  07:02:43
+extensions/universal/cache-probe test:    Duration  232ms (transform 80ms, setup 0ms, import 105ms, tests 9ms, environment 0ms)
+extensions/shared/ext-guards test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/ext-guards/test-results/vitest-junit.xml
+extensions/universal/cache-probe test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/cache-probe/test-results/vitest-junit.xml
+extensions/taiji/agent-ext test: Done
+extensions/universal/cw-tool test$ vitest run
+extensions/shared/ext-guards test: Done
+extensions/universal/session-reader test$ vitest run
+extensions/universal/cache-probe test: Done
+packages/pi-subagent-cli test$ vitest run
+extensions/universal/cw-tool test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/cw-tool
+packages/pi-subagent-cli test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/pi-subagent-cli
+extensions/universal/session-reader test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/session-reader
+extensions/universal/cw-tool test:  ✓ src/__tests__/cw-tool.test.ts (36 tests) 54ms
+extensions/universal/cw-tool test:  Test Files  1 passed (1)
+extensions/universal/cw-tool test:       Tests  36 passed (36)
+extensions/universal/cw-tool test:    Start at  07:02:44
+extensions/universal/cw-tool test:    Duration  545ms (transform 156ms, setup 0ms, import 305ms, tests 54ms, environment 0ms)
+extensions/universal/cw-tool test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/cw-tool/test-results/vitest-junit.xml
+extensions/universal/cw-tool test: Done
+extensions/shared/extension-logger test:  ✓ src/__tests__/extension-logger.test.ts (32 tests) 66ms
+extensions/shared/extension-logger test:  Test Files  1 passed (1)
+extensions/shared/extension-logger test:       Tests  32 passed (32)
+extensions/shared/extension-logger test:    Start at  07:02:44
+extensions/shared/extension-logger test:    Duration  1.13s (transform 45ms, setup 0ms, import 891ms, tests 66ms, environment 0ms)
+extensions/shared/extension-logger test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/extension-logger/test-results/vitest-junit.xml
+extensions/shared/extension-logger test: Done
+packages/pi-subagent-cli test:  ✓ src/__tests__/spawn-run-pump-session-file-fallback.test.ts (8 tests) 16ms
+extensions/universal/session-reader test:  ✓ src/__tests__/result.test.ts (15 tests) 55ms
+extensions/universal/session-reader test:  ✓ src/__tests__/execution-tree.test.ts (14 tests) 251ms
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > rpc 模式成功流：握手身份 + 事件翻译 + exit 0 口径 + stderr tee 落盘 + invalid/ui 管道不中断
+packages/pi-subagent-cli test: [subagents] [subagents] no ui request handler bound (host/askUser unsupported?); subsequent requests from this child will be auto-cancelled { pid: 15465, method: 'input' }
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > header 模式（json mode）：header 行身份落位 + 握手同值去重
+packages/pi-subagent-cli test: [subagents] [subagents] no ui request handler bound (host/askUser unsupported?); subsequent requests from this child will be auto-cancelled { pid: 15575, method: 'input' }
+packages/pi-subagent-cli test:  ✓ src/__tests__/server.test.ts (27 tests) 142ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/stdin-writer.test.ts (28 tests) 20ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/protocol-chat-e2e.test.ts (1 test) 527ms
+packages/pi-subagent-cli test:      ✓ 首轮 → resume 续聊（同文件续写 + 历史召回）→ 收割 + 反向帧面收缩  525ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/protocol-e2e.test.ts (2 tests) 620ms
+packages/pi-subagent-cli test:      ✓ initialize → run → host/* 反向通道 → askUser 两阶段 → 终态应答  556ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/turn-limiter-semantics.test.ts (9 tests) 6ms
+packages/pi-subagent-cli test: stderr | src/__tests__/ui-request-queue.test.ts > UI 请求队列 — method-specific 字段复制（extractMethodFields 链路） > typed 非法 title（number）在上游 startsWith 处炸链路 → handler 不被调、单请求失败被吞不阻塞队列
+packages/pi-subagent-cli test: [subagents] [subagents] ui request r1 (select) failed unexpectedly: str.startsWith is not a function
+packages/pi-subagent-cli test:  ✓ src/__tests__/ui-request-queue.test.ts (7 tests) 14ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/pi-engine.test.ts (15 tests) 587ms
+packages/pi-subagent-cli test:      ✓ default 探测器：fake pi 可执行脚本 → execFile 成功解析首行  565ms
+packages/pi-subagent-cli test: stderr | src/__tests__/get-state-handshake.test.ts > performGetStateHandshake（FR-4 重试握手） > sendGetStateCommand 抛错（stdin EPIPE）：按「本轮未应答」处理——3 轮耗尽必 settle，不 reject 也不逃逸
+packages/pi-subagent-cli test: [subagents] [subagents] get_state handshake attempt 1/3 failed (treated as no answer this round): [subagents] EPIPE on stdin write (get_state command): pipe broken, child process likely exited. Recovery: treat as dead process and resume via cold path.
+packages/pi-subagent-cli test: stderr | src/__tests__/get-state-handshake.test.ts > performGetStateHandshake（FR-4 重试握手） > sendGetStateCommand 抛错（stdin EPIPE）：按「本轮未应答」处理——3 轮耗尽必 settle，不 reject 也不逃逸
+packages/pi-subagent-cli test: [subagents] [subagents] get_state handshake attempt 2/3 failed (treated as no answer this round): [subagents] EPIPE on stdin write (get_state command): pipe broken, child process likely exited. Recovery: treat as dead process and resume via cold path.
+packages/pi-subagent-cli test:  ✓ src/__tests__/temp-prompt.test.ts (5 tests) 136ms
+packages/pi-subagent-cli test: stderr | src/__tests__/get-state-handshake.test.ts > performGetStateHandshake（FR-4 重试握手） > sendGetStateCommand 抛错（stdin EPIPE）：按「本轮未应答」处理——3 轮耗尽必 settle，不 reject 也不逃逸
+packages/pi-subagent-cli test: [subagents] [subagents] get_state handshake attempt 3/3 failed (treated as no answer this round): [subagents] EPIPE on stdin write (get_state command): pipe broken, child process likely exited. Recovery: treat as dead process and resume via cold path.
+packages/pi-subagent-cli test: stderr | src/__tests__/get-state-handshake.test.ts > performGetStateHandshake（FR-4 重试握手） > 首轮抛错后恢复：第 2 轮照发且应答带 sessionFile → 握手成功 resolve（抛错不吞后续轮次）
+packages/pi-subagent-cli test: [subagents] [subagents] get_state handshake attempt 1/3 failed (treated as no answer this round): [subagents] EPIPE on stdin write (get_state command): pipe broken, child process likely exited. Recovery: treat as dead process and resume via cold path.
+packages/pi-subagent-cli test:  ✓ src/__tests__/get-state-handshake.test.ts (11 tests) 20ms
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > spawn 失败（relay node 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）
+packages/pi-subagent-cli test: [subagents] [subagents] stdin backpressure on get_state command
+packages/pi-subagent-cli test: [subagents] [subagents] stdin backpressure on prompt command
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > spawn 失败（relay node 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）
+packages/pi-subagent-cli test: [session-runner] [session-runner] child rec-int-1 error event {
+packages/pi-subagent-cli test:   detail: 'spawn /var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/pi-cli-test-spawn-i4bJpy/nonexistent-node-bin ENOENT'
+packages/pi-subagent-cli test: }
+packages/pi-subagent-cli test: [session-runner] [sessionfile] unobtainable for rec-int-1 (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > spawn 失败（relay node 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）
+packages/pi-subagent-cli test: [session-runner] [sessionfile] unobtainable for rec-int-1 (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。
+packages/pi-subagent-cli test:  ✓ src/__tests__/stderr-rotation.test.ts (7 tests) 23ms
+packages/pi-subagent-cli test: stderr | src/__tests__/run-spawn-once.integration.test.ts > runSpawnOnce 集成（fake pi 子进程） > chatMode（[H1 U3] run 派发形态）：agent_end 不 kill；agent_settled resolve（exit 0）并收割子进程
+packages/pi-subagent-cli test: [subagents] [subagents] no ui request handler bound (host/askUser unsupported?); subsequent requests from this child will be auto-cancelled { pid: 16072, method: 'input' }
+packages/pi-subagent-cli test:  ✓ src/__tests__/ui-channels.test.ts (19 tests) 7ms
+extensions/universal/session-reader test:  ✓ src/__tests__/hash-provider.test.ts (45 tests) 315ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/run-spawn-once.integration.test.ts (9 tests) 859ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/output-collector.test.ts (46 tests) 20ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/turn-limiter.test.ts (5 tests) 6ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/read-fallback.test.ts (5 tests) 14ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/run-spawn-once-session-file-fallback.e2e.test.ts (1 test) 1074ms
+packages/pi-subagent-cli test:      ✓ 四路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态  1073ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/spawn-event-translator.test.ts (6 tests) 8ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/pi-invocation.test.ts (9 tests) 8ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/spawn-event-adapter-rpc.test.ts (15 tests) 5ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/spawn-event-adapter.test.ts (16 tests) 6ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/golden-replay.test.ts (3 tests) 2ms
+packages/pi-subagent-cli test:  ✓ src/__tests__/spawn-args.test.ts (43 tests) 1591ms
+packages/pi-subagent-cli test:      ✓ forkDepth undefined → 不含 depth 行  344ms
+extensions/universal/session-reader test: stderr | src/__tests__/cross-package-subagent-core.test.ts > 跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4） > 1. 单 sa- id：E1 落标 manifest 真实产出 → result 反查命中，正文与 record.result 逐字节一致
+extensions/universal/session-reader test: [subagents] NotifyDomainPorts.createDelivery not configured - falling back to direct-send delivery (no idle gate / merge window / dedupe). Host must call configureNotifyDomain({ createDelivery }) during extension initialization (pi shell: createPiNotifyDomainPorts in src/host/pi-host.ts).
+extensions/universal/session-reader test: stderr | src/__tests__/cross-package-subagent-core.test.ts > 跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4） > 1. 单 sa- id：E1 落标 manifest 真实产出 → result 反查命中，正文与 record.result 逐字节一致
+extensions/universal/session-reader test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:00eaf47abd3759f69eced15aa8d098c1a0612c21' }
+extensions/universal/session-reader test: [subagents] [subagents] E1 sync batch recovery: re-notified 1 member(s) (ledger accepted=true) { ids: [ 'sa-cross-1' ] }
+extensions/universal/session-reader test: stderr | src/__tests__/rebuild-manifest-dual-write.test.ts > 跨包集成：subagent-core rebuildIndexes 重建 manifest → session-reader 投影不降级 > 惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取投影
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-yh9FQ6/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-yh9FQ6--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-yh9FQ6/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-yh9FQ6--/sessions-index.json.tmp.16182.2-oxirb5' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-yh9FQ6/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-yh9FQ6--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+extensions/universal/session-reader test:  ✓ src/__tests__/rebuild-manifest-dual-write.test.ts (2 tests) 106ms
+extensions/universal/session-reader test: stderr | src/__tests__/cross-package-subagent-core.test.ts > 跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4） > 2. 双成员批（逗号串批量）：全部 sa- id 反查命中，头行/分隔/顺序与正文一致
+extensions/universal/session-reader test: [subagents] NotifyDomainPorts.createDelivery not configured - falling back to direct-send delivery (no idle gate / merge window / dedupe). Host must call configureNotifyDomain({ createDelivery }) during extension initialization (pi shell: createPiNotifyDomainPorts in src/host/pi-host.ts).
+extensions/universal/session-reader test: stderr | src/__tests__/cross-package-subagent-core.test.ts > 跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4） > 2. 双成员批（逗号串批量）：全部 sa- id 反查命中，头行/分隔/顺序与正文一致
+extensions/universal/session-reader test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:80f6be41c64854b230133a6ee171cb6ca7931fa3' }
+extensions/universal/session-reader test: [subagents] [subagents] E1 sync batch recovery: re-notified 2 member(s) (ledger accepted=true) { ids: [ 'sa-cross-a', 'sa-cross-b' ] }
+extensions/universal/session-reader test: stderr | Object.log (/Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/subagent-core/src/core/host-services.ts:108:20)
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-okBhz1/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-okBhz1--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-okBhz1/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-okBhz1--/sessions-index.json.tmp.16182.4-3api1i' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/sr-rebuild-dualwrite-okBhz1/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-sr-rebuild-dualwrite-okBhz1--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+extensions/universal/session-reader test: stderr | src/__tests__/cross-package-subagent-core.test.ts > 跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4） > 2. 双成员批（逗号串批量）：全部 sa- id 反查命中，头行/分隔/顺序与正文一致
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--/sessions-index.json.tmp.15257.1-xssq51' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+extensions/universal/session-reader test:  ✓ src/__tests__/cross-package-subagent-core.test.ts (2 tests) 130ms
+extensions/universal/session-reader test: stderr | Object.log (/Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/subagent-core/src/core/host-services.ts:108:20)
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--/sessions-index.json.tmp.15257.5-wodf3g' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+extensions/universal/session-reader test: stderr | Object.log (/Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/subagent-core/src/core/host-services.ts:108:20)
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--/sessions-index.json.tmp.15257.2-25o6xw' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-Qanu1b/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-Qanu1b--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+extensions/universal/session-reader test: stderr | Object.log (/Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/subagent-core/src/core/host-services.ts:108:20)
+extensions/universal/session-reader test: [subagents] [subagents] sessions-index write failed {
+extensions/universal/session-reader test:   detail: {
+extensions/universal/session-reader test:     dir: '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--',
+extensions/universal/session-reader test:     error: "ENOENT: no such file or directory, rename '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--/sessions-index.json.tmp.15257.6-fspkvt' -> '/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/cross-pkg-subagent-core-s39DQu/subagents/--var-folders-3p-d4mx1j_j5s7bn3_03x48kpkw0000gn-T-cross-pkg-subagent-core-s39DQu--/sessions-index.json'"
+extensions/universal/session-reader test:   }
+extensions/universal/session-reader test: }
+packages/pi-subagent-cli test: stderr | src/__tests__/agent-end-backfill.test.ts > M2 agent_end 惰性回补 > [U-A3] 回补也不应答（超时路径）：agent_end 起 1s 假时钟内 run 必收敛，真正测量 ≤1s 上界
+packages/pi-subagent-cli test: [session-runner] [sessionfile] unobtainable for rec-no-answer (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。
+packages/pi-subagent-cli test: stderr | src/__tests__/agent-end-backfill.test.ts > M2 agent_end 惰性回补 > 回补段 reject → killChild 在 finally 必达；endedCleanly 同步段先置且不受回补失败影响
+packages/pi-subagent-cli test: [session-runner] [session-runner] agent_end get_state backfill failed for rec-throw (treated as miss; kill proceeds): onHandleReady → server 组帧链抛错
+packages/pi-subagent-cli test: stderr | src/__tests__/agent-end-backfill.test.ts > M2 agent_end 惰性回补 > 回补段同步 throw → killChild 仍在 finally 必达（同步路径不经 await）
+packages/pi-subagent-cli test: [session-runner] [session-runner] agent_end get_state backfill failed for rec-sync-throw (treated as miss; kill proceeds): 同步抛错（回补组帧）
+packages/pi-subagent-cli test: stderr | src/__tests__/agent-end-backfill.test.ts > M2 agent_end 惰性回补 > race①：子进程在回补窗口内自行退出 → run 正常终态（exit 0）、回补 miss、kill 对已回收进程 no-op
+packages/pi-subagent-cli test: [session-runner] [sessionfile] unobtainable for rec-self-exit (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。
+packages/pi-subagent-cli test:  ✓ src/__tests__/agent-end-backfill.test.ts (7 tests) 1979ms
+packages/pi-subagent-cli test:      ✓ V3：spawn 期 get_state 三轮不应答 + agent_end 恢复应答 → outcome.sessionFile 非空且恢复 ≤1s  955ms
+packages/pi-subagent-cli test:      ✓ [U-A3] 回补也不应答（超时路径）：agent_end 起 1s 假时钟内 run 必收敛，真正测量 ≤1s 上界  757ms
+packages/pi-subagent-cli test:  Test Files  24 passed (24)
+packages/pi-subagent-cli test:       Tests  304 passed (304)
+packages/pi-subagent-cli test:    Start at  07:02:44
+packages/pi-subagent-cli test:    Duration  2.93s (transform 3.25s, setup 392ms, import 6.27s, tests 7.69s, environment 3ms)
+extensions/universal/session-reader test:  ✓ src/__tests__/index.test.ts (17 tests) 29ms
+packages/pi-subagent-cli test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/packages/pi-subagent-cli/test-results/vitest-junit.xml
+packages/pi-subagent-cli test: Done
+extensions/universal/session-reader test:  ✓ src/__tests__/session-command.test.ts (9 tests) 51ms
+extensions/universal/session-reader test:  ✓ src/__tests__/render.test.ts (16 tests) 65ms
+extensions/universal/session-reader test:  ✓ src/__tests__/parser.test.ts (10 tests) 41ms
+extensions/universal/session-reader test:  ✓ src/__tests__/turns.test.ts (9 tests) 53ms
+extensions/universal/session-reader test:  ✓ src/__tests__/family.test.ts (20 tests) 11ms
+extensions/universal/session-reader test:  ✓ src/__tests__/toolcall.test.ts (15 tests) 5ms
+extensions/universal/session-reader test:  ✓ src/__tests__/env.test.ts (16 tests) 7ms
+extensions/universal/session-reader test:  ✓ src/__tests__/tree.test.ts (10 tests) 6ms
+extensions/universal/session-reader test:  ✓ src/__tests__/workflow.test.ts (18 tests | 2 skipped) 9ms
+extensions/universal/session-reader test:  ✓ src/__tests__/roots.test.ts (20 tests) 5329ms
+extensions/universal/session-reader test:      ✓ 真实数据：扫描 ~/.pi/agent，含 019e6c96，不含 .finalized 与 wf-  2698ms
+extensions/universal/session-reader test:      ✓ 真实数据：扫描 ~/.pi/agent/subagents 返回非空  2531ms
+extensions/universal/session-reader test:  ✓ src/__tests__/subagents.test.ts (21 tests) 20175ms
+extensions/universal/session-reader test:      ✓ 019fe620 family：fork 019fe632（跨 cwd）+ 隔代 subagent 019fe635（真实 id）  4668ms
+extensions/universal/session-reader test:      ✓ 019fdcda：workflows 非空，至少一个 workflow calls>=4  12739ms
+extensions/universal/session-reader test:      ✓ TC-u4-real-data-guard: 019fe620 subagents 富字段透传（manifest 主 task 非空率 > 80%）  2567ms
+extensions/universal/session-reader test:  ✓ src/__tests__/find.test.ts (34 tests) 21863ms
+extensions/universal/session-reader test:        ✓ TC-u5-real-data-guard：find codex source:subagent 命中（本机有 codex 相关 subagent task）  6551ms
+extensions/universal/session-reader test:      ✓ 真实数据：e6c96 匹配 019e6c96 开头的 session  4887ms
+extensions/universal/session-reader test:      ✓ 真实数据：recent 返回最近 N 个，mtime 倒序，truncated=true  5791ms
+extensions/universal/session-reader test:      ✓ 真实数据：source:'subagent' 能找到 completed subagent（§7 场景 1 find 部分）  4460ms
+extensions/universal/session-reader test:  ✓ src/__tests__/tool-handler.test.ts (116 tests) 109909ms
+extensions/universal/session-reader test:      ✓ 1. find by uuid fragment returns matching session  3755ms
+extensions/universal/session-reader test:      ✓ 2. outline yields 32 turns within token budget (v2 O1: <=1500)  3672ms
+extensions/universal/session-reader test:      ✓ 3. detail single turn returns toolResult summary by default (v2 O3)  6117ms
+extensions/universal/session-reader test:      ✓ 4. family lists fork children and隔代 subagents  5097ms
+extensions/universal/session-reader test:      ✓ 5. search pattern returns hits  3351ms
+extensions/universal/session-reader test:      ✓ 6. export outline materializes a .md file  1851ms
+extensions/universal/session-reader test:      ✓ 7. F1 find zero match returns empty matches + fact-based self-check (no throw)  4977ms
+extensions/universal/session-reader test:      ✓ 8. F4 detail turn out of range throws with 越界  4960ms
+extensions/universal/session-reader test:      ✓ 10. resolveSessionId fragment equivalent to full id  8115ms
+extensions/universal/session-reader test:      ✓ user-messages returns 26 user entries with turn + full text  1726ms
+extensions/universal/session-reader test:      ✓ commands (no filter) returns 519 tool calls with name + summary  1700ms
+extensions/universal/session-reader test:      ✓ commands tool=bash returns 309 all bash  1653ms
+extensions/universal/session-reader test:      ✓ commands tool=nonexist triggers F8 with tool distribution (no throw)  7609ms
+extensions/universal/session-reader test:      ✓ files returns deduped paths with op (read/edit/write/head)  6694ms
+extensions/universal/session-reader test:      ✓ commits returns hash list with 7-8 hex + source turn  5161ms
+extensions/universal/session-reader test:      ✓ tool-results (no filter) returns 515 results with toolName + text  7667ms
+extensions/universal/session-reader test:      ✓ tool-results tool=bash returns 309 all bash  5378ms
+extensions/universal/session-reader test:      ✓ tool-results tool=nonexist triggers F8 (no throw)  4305ms
+extensions/universal/session-reader test:      ✓ F7 missing what throws with 无效 + valid values  11340ms
+extensions/universal/session-reader test:      ✓ S2: extract turns 越界文案说明 extract turn 体系（不指向 outline）  2127ms
+extensions/universal/session-reader test:      ✓ TC14: completed subagent sa-id outline 成功（场景 1，sessionId=header 真实 id）  3393ms
+extensions/universal/session-reader test:      ✓ TC15: worktree 编码目录 subagent 读取（场景 1b，递归扫描覆盖）  2544ms
+extensions/universal/session-reader test:      ✓ TC16: 嵌套后代直接 outline（场景 1c，绝对路径形态读任意节点）  1329ms
+extensions/universal/session-reader test:      ✓ TC17: GC/failed manifest → ES1（场景 4，sessionFile 不存在）  2234ms
+extensions/universal/session-reader test:      ✓ TC18: 不存在 sa-id → ES2（场景 4，可能 running 指引）  1138ms
+extensions/universal/session-reader test:      ✓ TC-w6-real-data-guard：真实 workflow session doWorkflow 返回 run 概览  1803ms
+extensions/universal/session-reader test:  Test Files  19 passed (19)
+extensions/universal/session-reader test:       Tests  407 passed | 2 skipped (409)
+extensions/universal/session-reader test:    Start at  07:02:44
+extensions/universal/session-reader test:    Duration  113.97s (transform 4.09s, setup 0ms, import 28.77s, tests 158.41s, environment 1ms)
+extensions/universal/session-reader test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/session-reader/test-results/vitest-junit.xml
+extensions/universal/session-reader test: Done
+extensions/taiji/system-prompt test$ vitest run
+extensions/shared/file-lock test$ vitest run
+extensions/taiji/msg-id-mapper test$ vitest run
+extensions/taiji/plugin-bridge test$ vitest run
+extensions/shared/file-lock test: Both esbuild and oxc options were set. oxc options will be used and esbuild options will be ignored. The following esbuild options were set: `{ target: 'es2022' }`
+extensions/taiji/system-prompt test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/system-prompt
+extensions/taiji/msg-id-mapper test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/msg-id-mapper
+extensions/shared/file-lock test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/file-lock
+extensions/taiji/plugin-bridge test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/plugin-bridge
+extensions/shared/file-lock test:  ✓ src/__tests__/file-lock-external-removal.test.ts (2 tests) 5ms
+extensions/taiji/msg-id-mapper test:  ✓ src/__tests__/msg-id-mapper.test.ts (17 tests) 8ms
+extensions/taiji/msg-id-mapper test:  Test Files  1 passed (1)
+extensions/taiji/msg-id-mapper test:       Tests  17 passed (17)
+extensions/taiji/msg-id-mapper test:    Start at  07:04:38
+extensions/taiji/msg-id-mapper test:    Duration  154ms (transform 41ms, setup 0ms, import 53ms, tests 8ms, environment 0ms)
+extensions/taiji/msg-id-mapper test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/msg-id-mapper/test-results/vitest-junit.xml
+extensions/taiji/system-prompt test:  ✓ src/__tests__/system-prompt.test.ts (23 tests) 8ms
+extensions/taiji/system-prompt test:  Test Files  1 passed (1)
+extensions/taiji/system-prompt test:       Tests  23 passed (23)
+extensions/taiji/system-prompt test:    Start at  07:04:38
+extensions/taiji/system-prompt test:    Duration  165ms (transform 43ms, setup 0ms, import 59ms, tests 8ms, environment 0ms)
+extensions/taiji/system-prompt test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/system-prompt/test-results/vitest-junit.xml
+extensions/taiji/msg-id-mapper test: Done
+extensions/taiji/system-prompt-trace test$ vitest run
+extensions/taiji/system-prompt test: Done
+extensions/universal/ask-user test$ vitest run
+extensions/shared/file-lock test:  ✓ src/__tests__/lock-core.test.ts (11 tests) 78ms
+extensions/taiji/system-prompt-trace test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/system-prompt-trace
+extensions/universal/ask-user test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/ask-user
+extensions/shared/file-lock test:  ✓ src/__tests__/file-lock.test.ts (4 tests) 263ms
+extensions/shared/file-lock test:  Test Files  3 passed (3)
+extensions/shared/file-lock test:       Tests  17 passed (17)
+extensions/shared/file-lock test:    Start at  07:04:38
+extensions/shared/file-lock test:    Duration  422ms (transform 81ms, setup 0ms, import 141ms, tests 346ms, environment 0ms)
+extensions/shared/file-lock test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/file-lock/test-results/vitest-junit.xml
+extensions/shared/file-lock test: Done
+.../universal/pending-notifications test$ vitest run
+extensions/taiji/system-prompt-trace test:  ✓ src/__tests__/diff.test.ts (11 tests) 9ms
+extensions/taiji/system-prompt-trace test:  ✓ src/__tests__/index-wiring.test.ts (9 tests) 25ms
+extensions/universal/ask-user test:  ✓ src/__tests__/types.test.ts (7 tests) 2ms
+extensions/universal/ask-user test:  ✓ src/__tests__/w3-regression.test.ts (4 tests) 7ms
+extensions/universal/ask-user test:  ✓ src/__tests__/w2-draft-hint.test.ts (5 tests) 40ms
+extensions/universal/ask-user test:  ✓ src/__tests__/editor-ops.test.ts (19 tests) 6ms
+.../universal/pending-notifications test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/pending-notifications
+extensions/universal/ask-user test:  ✓ src/__tests__/component.test.ts (62 tests) 147ms
+extensions/universal/ask-user test:  ✓ src/__tests__/question-view.test.ts (36 tests) 141ms
+extensions/universal/ask-user test:  ✓ src/__tests__/answer-codec.test.ts (6 tests) 15ms
+extensions/universal/ask-user test:  ✓ src/__tests__/component-keymap.test.ts (51 tests) 132ms
+extensions/universal/ask-user test:  ✓ src/__tests__/channel-registry-register.test.ts (7 tests) 9ms
+extensions/universal/ask-user test:  ✓ src/__tests__/prompt-quality.test.ts (9 tests) 2ms
+extensions/universal/ask-user test:  ✓ src/__tests__/submit-view.test.ts (16 tests) 4ms
+extensions/universal/ask-user test:  ✓ src/__tests__/validate.test.ts (24 tests) 4ms
+extensions/universal/ask-user test:  ✓ src/__tests__/channel-handler.test.ts (15 tests) 3ms
+extensions/taiji/plugin-bridge test:  ✓ src/__tests__/sync-and-registration.test.ts (16 tests) 286ms
+extensions/taiji/system-prompt-trace test:  ✓ src/__tests__/trace.a11.test.ts (8 tests) 8ms
+extensions/taiji/system-prompt-trace test:  ✓ src/__tests__/baseline.a12.test.ts (11 tests) 37ms
+extensions/taiji/system-prompt-trace test:  Test Files  4 passed (4)
+extensions/taiji/system-prompt-trace test:       Tests  39 passed (39)
+extensions/taiji/system-prompt-trace test:    Start at  07:04:39
+extensions/taiji/system-prompt-trace test:    Duration  1.30s (transform 392ms, setup 0ms, import 2.33s, tests 80ms, environment 0ms)
+extensions/taiji/system-prompt-trace test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/taiji/system-prompt-trace/test-results/vitest-junit.xml
+extensions/taiji/system-prompt-trace test: Done
+extensions/universal/scheduler test$ vitest run
+extensions/taiji/plugin-bridge test:  ✓ src/__tests__/forwarding.test.ts (18 tests) 532ms
+extensions/taiji/plugin-bridge test:  Test Files  2 passed (2)
+extensions/taiji/plugin-bridge test:       Tests  34 passed (34)
+extensions/taiji/plugin-bridge test:    Start at  07:04:38
+extensions/taiji/plugin-bridge test:    Duration  1.80s (transform 141ms, setup 0ms, import 2.26s, tests 817ms, environment 0ms)
+extensions/taiji/plugin-bridge test: Done
+extensions/universal/session-manager test$ vitest run
+extensions/universal/ask-user test:  ✓ src/__tests__/index.test.ts (31 tests) 25ms
+extensions/universal/ask-user test:  ✓ src/__tests__/e2e.test.ts (6 tests) 5ms
+.../universal/pending-notifications test:  ✓ src/__tests__/pending-notifications.test.ts (32 tests) 10ms
+.../universal/pending-notifications test:  Test Files  1 passed (1)
+.../universal/pending-notifications test:       Tests  32 passed (32)
+.../universal/pending-notifications test:    Start at  07:04:39
+.../universal/pending-notifications test:    Duration  853ms (transform 86ms, setup 0ms, import 722ms, tests 10ms, environment 0ms)
+.../universal/pending-notifications test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/pending-notifications/test-results/vitest-junit.xml
+extensions/universal/ask-user test:  ✓ src/__tests__/sdk-contract.test.ts (9 tests) 3ms
+extensions/universal/ask-user test:  Test Files  16 passed (16)
+extensions/universal/ask-user test:       Tests  307 passed (307)
+extensions/universal/ask-user test:    Start at  07:04:39
+extensions/universal/ask-user test:    Duration  1.50s (transform 1.47s, setup 0ms, import 6.05s, tests 546ms, environment 1ms)
+extensions/universal/scheduler test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/scheduler
+.../universal/pending-notifications test: Done
+extensions/universal/structured-output test$ vitest run
+extensions/universal/ask-user test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/ask-user/test-results/vitest-junit.xml
+extensions/universal/ask-user test: Done
+extensions/universal/todo test$ vitest run
+extensions/universal/session-manager test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/session-manager
+extensions/universal/scheduler test:  ✓ src/__tests__/parsing.test.ts (27 tests) 6ms
+extensions/universal/scheduler test:  ✓ src/__tests__/property.test.ts (6 tests) 23ms
+extensions/universal/scheduler test:  ✓ src/__tests__/format.test.ts (21 tests) 17ms
+extensions/universal/scheduler test:  ✓ src/__tests__/replay.test.ts (14 tests) 3ms
+extensions/universal/scheduler test:  ✓ src/__tests__/runtime.test.ts (50 tests) 34ms
+extensions/universal/structured-output test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/structured-output
+extensions/universal/todo test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/todo
+extensions/universal/scheduler test:  ✓ src/__tests__/cron.test.ts (11 tests) 6ms
+extensions/universal/scheduler test:  ✓ src/__tests__/widget.test.ts (6 tests) 5ms
+extensions/universal/todo test:  ✓ src/__tests__/tool-prompt.test.ts (14 tests) 5ms
+extensions/universal/scheduler test:  ✓ src/__tests__/index-generation.test.ts (3 tests) 8ms
+extensions/universal/structured-output test:  ✓ tests/prompt-quality.test.ts (19 tests) 7ms
+extensions/universal/structured-output test:  ✓ tests/text-primitives.test.ts (7 tests) 5ms
+extensions/universal/structured-output test:  ✓ tests/schema-guards.test.ts (14 tests) 5ms
+extensions/universal/structured-output test: [structured-output gate] graceful shutdown did not complete within 15s; force-exiting (session flush was best-effort at shutdown request).
+extensions/universal/structured-output test: [structured-output gate] Terminated: the same validation error occurred 3 times consecutively; shutting down this single-purpose workflow subprocess.
+extensions/universal/structured-output test: Last error: Schema validation failed: /count must be number
+extensions/universal/structured-output test: 👉 (workflow 作者) 检查 workflow 脚本的 outputSchema 是否过苛（深嵌套/超长 required），或更换更强模型后重跑该步骤。
+extensions/universal/structured-output test:  ✓ tests/retry-state.test.ts (10 tests) 5ms
+extensions/universal/structured-output test: [structured-output gate] Terminated: the same validation error occurred 3 times consecutively; shutting down this single-purpose workflow subprocess.
+extensions/universal/structured-output test: Last error: Schema validation failed: /count must be number
+extensions/universal/structured-output test: 👉 (workflow 作者) 检查 workflow 脚本的 outputSchema 是否过苛（深嵌套/超长 required），或更换更强模型后重跑该步骤。
+extensions/universal/structured-output test: [structured-output gate] Terminated: the same validation error occurred 3 times consecutively; shutting down this single-purpose workflow subprocess.
+extensions/universal/structured-output test: Last error: Schema validation failed: /count must be number
+extensions/universal/structured-output test: 👉 (workflow 作者) 检查 workflow 脚本的 outputSchema 是否过苛（深嵌套/超长 required），或更换更强模型后重跑该步骤。
+extensions/universal/structured-output test:  ✓ tests/loop-gate.test.ts (52 tests) 48ms
+extensions/universal/structured-output test: [structured-output gate] Terminated: the same validation error occurred 3 times consecutively; shutting down this single-purpose workflow subprocess.
+extensions/universal/structured-output test: Last error: Schema validation failed: /count must be number
+extensions/universal/structured-output test: 👉 (workflow 作者) 检查 workflow 脚本的 outputSchema 是否过苛（深嵌套/超长 required），或更换更强模型后重跑该步骤。
+extensions/universal/structured-output test: [structured-output hook] steer send failed (retry budget NOT consumed, will retry at next turn end): compaction in progress
+extensions/universal/structured-output test: [structured-output hook] steer send failed (retry budget NOT consumed, will retry at next turn end): extension deactivated
+extensions/universal/structured-output test:  ✓ tests/characterization-hook.test.ts (9 tests) 74ms
+extensions/universal/todo test:  ✓ src/__tests__/gui.test.ts (4 tests) 5ms
+extensions/universal/todo test:  ✓ src/__tests__/render.test.ts (10 tests) 163ms
+extensions/universal/structured-output test: [structured-output gate] Terminated: the same validation error occurred 3 times consecutively; shutting down this single-purpose workflow subprocess.
+extensions/universal/structured-output test: Last error: Schema validation failed: /count must be number
+extensions/universal/structured-output test: 👉 (workflow 作者) 检查 workflow 脚本的 outputSchema 是否过苛（深嵌套/超长 required），或更换更强模型后重跑该步骤。
+extensions/universal/todo test:  ✓ src/__tests__/tool-detectors.test.ts (10 tests) 5ms
+extensions/universal/todo test:  ✓ src/__tests__/schema.test.ts (16 tests) 5ms
+extensions/universal/structured-output test:  ✓ tests/structured-output.test.ts (73 tests) 484ms
+extensions/universal/todo test:  ✓ src/__tests__/todo.test.ts (46 tests) 64ms
+extensions/universal/scheduler test:  ✓ src/__tests__/tool.test.ts (9 tests) 5ms
+extensions/universal/scheduler test:  ✓ src/__tests__/service.test.ts (19 tests) 15ms
+extensions/universal/scheduler test:  ✓ src/__tests__/sdk-contract.test.ts (10 tests) 73ms
+extensions/universal/scheduler test:  ✓ src/__tests__/commands.test.ts (29 tests) 11ms
+extensions/universal/scheduler test:  ✓ src/__tests__/U4-PARK_GATE.test.ts (6 tests) 10ms
+extensions/universal/session-manager test:  ✓ src/__tests__/tool-registration.test.ts (11 tests) 3ms
+extensions/universal/session-manager test:  ✓ src/__tests__/tool-execute.test.ts (11 tests) 24ms
+extensions/universal/session-manager test:  ✓ src/__tests__/tool-schema.test.ts (9 tests) 8ms
+extensions/universal/session-manager test:  ✓ src/__tests__/tool-error-handling.test.ts (7 tests) 45ms
+extensions/universal/session-manager test:  Test Files  4 passed (4)
+extensions/universal/session-manager test:       Tests  38 passed (38)
+extensions/universal/session-manager test:    Start at  07:04:40
+extensions/universal/session-manager test:    Duration  2.21s (transform 1.11s, setup 0ms, import 7.98s, tests 80ms, environment 0ms)
+extensions/universal/session-manager test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/session-manager/test-results/vitest-junit.xml
+extensions/universal/scheduler test:  ✓ src/__tests__/importer.test.ts (12 tests) 7ms
+extensions/universal/session-manager test: Done
+extensions/universal/scheduler test:  ✓ src/__tests__/backend.test.ts (6 tests) 3ms
+extensions/universal/todo test:  ✓ src/__tests__/steer.test.ts (23 tests) 6ms
+extensions/universal/todo test:  ✓ src/__tests__/tool-rpc.test.ts (14 tests) 10ms
+extensions/universal/todo test:  Test Files  8 passed (8)
+extensions/universal/todo test:       Tests  137 passed (137)
+extensions/universal/todo test:    Start at  07:04:41
+extensions/universal/todo test:    Duration  2.15s (transform 1.72s, setup 0ms, import 6.89s, tests 264ms, environment 1ms)
+extensions/universal/scheduler test:  ✓ src/__tests__/U4-AFTER_RUN_INTENT.test.ts (3 tests) 7ms
+extensions/universal/scheduler test:  ✓ src/__tests__/index-session-start.test.ts (1 test) 5ms
+extensions/universal/todo test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/todo/test-results/vitest-junit.xml
+extensions/universal/todo test: Done
+extensions/universal/scheduler test:  ✓ src/__tests__/U4-ONSETTLED.test.ts (4 tests) 4ms
+extensions/universal/scheduler test:  ✓ src/__tests__/U4-DISPATCH_INFLIGHT.test.ts (3 tests) 3ms
+extensions/universal/scheduler test:  Test Files  19 passed (19)
+extensions/universal/scheduler test:       Tests  240 passed (240)
+extensions/universal/scheduler test:    Start at  07:04:40
+extensions/universal/scheduler test:    Duration  2.83s (transform 1.49s, setup 0ms, import 19.18s, tests 248ms, environment 1ms)
+extensions/universal/scheduler test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/scheduler/test-results/vitest-junit.xml
+extensions/universal/scheduler test: Done
+extensions/universal/structured-output test:  ✓ tests/cross-package-contract.test.ts (9 tests) 1324ms
+extensions/universal/structured-output test:      ✓ SW 叶子定位 + 真实 typebox 构造形态存活（required/description/enum/pattern/maxLength）  1052ms
+extensions/universal/structured-output test:  Test Files  8 passed (8)
+extensions/universal/structured-output test:       Tests  193 passed (193)
+extensions/universal/structured-output test:    Start at  07:04:41
+extensions/universal/structured-output test:    Duration  2.52s (transform 3.09s, setup 0ms, import 3.20s, tests 1.95s, environment 1ms)
+extensions/universal/structured-output test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/structured-output/test-results/vitest-junit.xml
+extensions/universal/structured-output test: Done
+extensions/universal/goal test$ vitest run
+extensions/universal/subagent-workflow test$ vitest run
+extensions/shared/llm-shared test$ vitest run
+extensions/shared/llm-shared test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/llm-shared
+extensions/universal/subagent-workflow test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/subagent-workflow
+extensions/universal/goal test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/goal
+extensions/shared/llm-shared test:  ✓ src/__tests__/resolve.test.ts (6 tests) 2ms
+extensions/shared/llm-shared test:  ✓ src/__tests__/call.test.ts (24 tests) 9ms
+extensions/universal/goal test:  ✓ src/projection/__tests__/prompts.test.ts (25 tests) 11ms
+extensions/universal/goal test:  ✓ src/__tests__/gui.test.ts (21 tests) 7ms
+extensions/universal/goal test:  ✓ src/__tests__/schema.test.ts (11 tests) 5ms
+extensions/universal/goal test:  ✓ src/__tests__/goal-control-rpc.test.ts (8 tests) 4ms
+extensions/universal/goal test:  ✓ src/__tests__/command-adapter.test.ts (53 tests) 43ms
+extensions/universal/goal test:  ✓ src/__tests__/event-adapter.test.ts (24 tests) 15ms
+extensions/universal/goal test:  ✓ src/projection/__tests__/widget.test.ts (30 tests) 8ms
+extensions/universal/goal test:  ✓ src/__tests__/circuit-breaker.test.ts (13 tests) 26ms
+extensions/universal/goal test:  ✓ src/__tests__/index.test.ts (5 tests) 12ms
+extensions/universal/goal test:  ✓ src/__tests__/session.test.ts (10 tests) 6ms
+extensions/universal/goal test:  ✓ src/__tests__/service.test.ts (20 tests) 9ms
+extensions/universal/goal test:  ✓ src/projection/__tests__/format.test.ts (38 tests) 5ms
+extensions/universal/goal test:  ✓ src/__tests__/goal-control-adapter.test.ts (19 tests) 14ms
+extensions/universal/goal test:  ✓ src/__tests__/criteria-array-migration.test.ts (15 tests) 11ms
+extensions/universal/goal test:  ✓ src/__tests__/ports.test.ts (4 tests) 3ms
+extensions/universal/goal test:  ✓ src/__tests__/criteria-array-adapter.test.ts (9 tests) 5ms
+extensions/universal/goal test:  ✓ src/__tests__/goal-control-prompt.test.ts (10 tests) 5ms
+extensions/universal/goal test:  ✓ src/__tests__/stale-checker.test.ts (4 tests) 4ms
+extensions/universal/goal test:  ✓ src/__tests__/liveness.test.ts (17 tests) 7ms
+extensions/universal/goal test:  ✓ src/__tests__/criteria-array-prompt-guidance.test.ts (12 tests) 3ms
+extensions/shared/llm-shared test:  ✓ src/__tests__/migrate.test.ts (4 tests) 17ms
+extensions/universal/goal test:  ✓ src/__tests__/criteria-array-schema.test.ts (9 tests) 6ms
+extensions/shared/llm-shared test:  ✓ src/__tests__/config.test.ts (18 tests) 22ms
+extensions/shared/llm-shared test:  Test Files  4 passed (4)
+extensions/shared/llm-shared test:       Tests  52 passed (52)
+extensions/shared/llm-shared test:    Start at  07:04:43
+extensions/shared/llm-shared test:    Duration  1.60s (transform 162ms, setup 0ms, import 2.71s, tests 50ms, environment 0ms)
+extensions/shared/llm-shared test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/shared/llm-shared/test-results/vitest-junit.xml
+extensions/shared/llm-shared test: Done
+extensions/universal/goal test:  ✓ src/__tests__/deserialize-state.test.ts (15 tests) 96ms
+extensions/universal/goal test:  ✓ src/engine/__tests__/budget.test.ts (21 tests) 8ms
+extensions/universal/goal test:  ✓ src/engine/__tests__/goal.test.ts (12 tests) 9ms
+extensions/universal/goal test:  Test Files  24 passed (24)
+extensions/universal/goal test:       Tests  405 passed (405)
+extensions/universal/goal test:    Start at  07:04:43
+extensions/universal/goal test:    Duration  1.84s (transform 2.17s, setup 0ms, import 8.44s, tests 322ms, environment 2ms)
+extensions/universal/goal test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/goal/test-results/vitest-junit.xml
+extensions/universal/goal test: Done
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/wave0-package-structure.test.ts (6 tests) 3694ms
+extensions/universal/subagent-workflow test:      ✓ AC-1.1: registers 3 tools (subagent + workflow + workflow-script)  2309ms
+extensions/universal/subagent-workflow test:      ✓ AC-1.1: registers subagent-bg-notify message renderer  315ms
+extensions/universal/subagent-workflow test:      ✓ AC-1.1: sets pi.__workflowRun  321ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/process-shutdown-hook.test.ts (6 tests) 3462ms
+extensions/universal/subagent-workflow test:      ✓ factory 注册 process.on SIGTERM / SIGINT / beforeExit 三个 hook  2057ms
+extensions/universal/subagent-workflow test:      ✓ SIGTERM handler 触发时调 killAllSpawnedChildren("SIGTERM") + process.exitCode = 0  303ms
+extensions/universal/subagent-workflow test:      ✓ SIGINT handler 触发时收割 + re-raise（先 removeListener 自身再 kill 自身，恢复默认终止）  323ms
+extensions/universal/subagent-workflow test:      ✓ beforeExit handler 触发时调 killAllSpawnedChildren 但不 process.kill（自然退出）  320ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/relay-agent.test.ts (11 tests) 3116ms
+extensions/universal/subagent-workflow test:      ✓ backpressure: 1MB random bytes survive full down→up roundtrip  2475ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/inflight-wiring.test.ts (2 tests) 2603ms
+extensions/universal/subagent-workflow test:      ✓ session_start 即发初始上报，不等 setupSessionLifecycle await 链（fire-and-forget）  1448ms
+extensions/universal/subagent-workflow test:      ✓ ack 送达后通道静默；session_shutdown 摘除后无残余调用  1154ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/workflows-e2e.test.ts (9 tests) 2631ms
+extensions/universal/subagent-workflow test:      ✓ parallel workflow：多视角并行分析 → 聚合，reason=completed, outcome.status != error  533ms
+extensions/universal/subagent-workflow test:      ✓ chain workflow：analyze → transform → synthesize 顺序三步，reason=completed, outcome.status != error  515ms
+extensions/universal/subagent-workflow test:      ✓ map-reduce workflow：parallel map → reduce 两段，reason=completed, outcome.status != error  510ms
+extensions/universal/subagent-workflow test:      ✓ scatter-gather workflow：scatter 拆分 → parallel 处理 → gather 合并 三段，reason=completed, outcome.status != error  510ms
+extensions/universal/subagent-workflow test:      ✓ TC12: coerce 结果到达 worker（chokepoint 原地 coerce → $ARGS 收到 boolean false）  522ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/rfl-cli-deep.test.ts (15 tests) 701ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/index-session-start-identity.test.ts (4 tests) 1244ms
+extensions/universal/subagent-workflow test:      ✓ 子进程（PI_SUBAGENT_SELF_RECORD_ID 存在）：appendEntry 写完整 identity custom entry  332ms
+extensions/universal/subagent-workflow test:      ✓ 主进程（无 PI_SUBAGENT_SELF_RECORD_ID）：不写 identity custom entry  314ms
+extensions/universal/subagent-workflow test:      ✓ W3TC9: 主进程分支 session_start 裁剪接线——21 done 经 loadAll 裁到 20（identity 与淘汰共存）  349ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-retention.test.ts (5 tests) 895ms
+extensions/universal/subagent-workflow test:      ✓ 显式非法值（0 / 负数 / 非数值）→ 不清理（opt-out 通道）  816ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/crash-recovery.test.ts (4 tests) 3838ms
+extensions/universal/subagent-workflow test:      ✓ loadAll 成功 + running run：transition done,failed + emit pending:unregister failed  642ms
+extensions/universal/subagent-workflow test:      ✓ loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition  1095ms
+extensions/universal/subagent-workflow test:      ✓ loadAll 失败 → storeHealthy=false：pi.__workflowRun 返回 store unavailable 失败  1118ms
+extensions/universal/subagent-workflow test:      ✓ loadAll 失败后 subagent 域不受影响：registerSubagentTool 仍被调用  982ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/engines-declaration.test.ts (2 tests) 216ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/session-start-reaper.test.ts (3 tests) 1058ms
+extensions/universal/subagent-workflow test:      ✓ session_start 触发 WTM.scan 调用  319ms
+extensions/universal/subagent-workflow test:      ✓ scan 抛错不阻断 session_start  339ms
+extensions/universal/subagent-workflow test:      ✓ mainSessionFile 被缓存并传给 SubagentService  399ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/rfl-cli.test.ts (8 tests) 399ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/session-lifecycle.test.ts (11 tests) 4379ms
+extensions/universal/subagent-workflow test:      ✓ deps.worktreeManager 注入 fake：session_start 恰好 scan 一次（ADR-035 reaper 一行行为一个注入点）  738ms
+extensions/universal/subagent-workflow test:      ✓ 默认 createServices（访问器槽为 null）→ new 分支：双 Service 构造 + 双 set 各恰一次 + init 无条件执行（D8）  333ms
+extensions/universal/subagent-workflow test:      ✓ deps.createRunStore 注入 fake：loadAll 成功 → storeHealthy=true，runs 重水合  317ms
+extensions/universal/subagent-workflow test:      ✓ 主进程（无 PI_SUBAGENT_SELF_RECORD_ID）不写 identity custom entry  472ms
+extensions/universal/subagent-workflow test:      ✓ store 不健康：__workflowRun 消费点返回错误对象（fail-fast，不 throw）  625ms
+extensions/universal/subagent-workflow test:      ✓ store 不健康：两消费点从单一守卫出口拿到逐字相同的消息  628ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/session-start-once-guard.test.ts (2 tests) 374ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/stream-sink-guard.test.ts (5 tests) 471ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/parent-child-matrix.test.ts (11 tests) 2182ms
+extensions/universal/subagent-workflow test:      ✓ factory 注册 session_before_fork 与 session_before_switch handler  457ms
+extensions/universal/subagent-workflow test:      ✓ [M2] 不注册 session_before_tree——/tree 同 session 分支导航不得级联杀 subagent  314ms
+extensions/universal/subagent-workflow test:      ✓ [M2] session_before_switch(reason:'new') 触发 /new 级联：record 转 closed + parent-new  352ms
+extensions/universal/subagent-workflow test:      ✓ [M2] session_before_switch(reason:'resume') 不级联：/resume 回到已有 session，record 保持 running  372ms
+extensions/universal/subagent-workflow test:      ✓ service 单例未初始化（getSubagentService()=null）时 handler 安全 no-op  397ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/chatmode-round-notify-real-chain.test.ts (1 test) 114ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/ended-message-and-fork-from.test.ts (18 tests) 240ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/transparent-resume.test.ts (15 tests) 279ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/chatmode-first-round-closure-service.test.ts (4 tests) 341ms
+extensions/universal/subagent-workflow test:  ✓ src/injectors/__tests__/workflow-list-injector.test.ts (23 tests) 82ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-session-file.test.ts (34 tests) 245ms
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约（U2/D5） > flush 时 sendMessage 的 options 恰为 { triggerTurn: true }（无 deliverAs，D5 单通道）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-test-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约（U2/D5） > flush 时 triggerTurn 必须为 true（让父 agent 立即唤醒）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-test-2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — isIdle gate 竞态修复 > 主 agent busy 时 flush 退避，idle 后才 sendMessage（规避 agent_end→finishRun 竞态窗口）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-race-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — isIdle gate 竞态修复 > 主 agent 持续 busy 达退避上限后强制发送（防通知饿死）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-starve-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — isIdle gate 竞态修复 > 未注入 isIdle 时不 gate，保持原立即发送行为（向后兼容）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-legacy-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — isIdle gate 竞态修复 > dispose 后退避 timer 不再触发发送
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-dispose-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedup） > 对话模式：同 id 不同 round 的两次 notify 不互相吞（round 参与 dedup key）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-chat:1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-chat:2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedup） > 同 id 同 round 60s 内第二次被 dedup 吞（防重复通知）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-dup:1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-dup:1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedup） > 非 chatMode（round undefined → key=id:0）行为同旧（向后兼容，60s 内同 id 吞）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-once' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-once' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > running（轮次通知）+ sessionFile → 末尾追加 \n\n 空行分隔的指针行
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-1:1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > closed 成功文案 + sessionFile → 指针行追加在最终串末尾
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > closed + patchFile + sessionFile → 指针行追加在 patch 提示串末尾（最终串）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-3' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > sessionFile 缺失 → 省略整行（running 通知正文与无指针形态逐字节一致）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-4:2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > cancelled → 不追加指针行（即使 sessionFile 有值）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-5' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > gc-failed（closed + closedReason=gc + error 有值）→ 不追加指针行
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-6' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [review 修复] gc-failed + patchFile 并存 → failed 文案优先（失败轮也会写 patchFile，patch 提示不可达）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-8' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [U3][D6 显式取舍] parent-shutdown 合成关闭 + patchFile 并存 → failed 文案优先（patch 提示不可达）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-u3-ps' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [U3] details payload 物化 outcome：closed 入参缺省时按 deriveOutcome 兑底填充
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-u3-mat' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [U3] 显式 outcome 优先于 closedReason 兑底（一等字段直读）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-u3-explicit' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [U3] running（轮次通知）不物化 outcome（终态语义不适用活跃态）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-u3-round:1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > one-shot（sessionFile 未透传 → undefined）→ closed 通知与改造前逐字节一致（基线常量锚定）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-7' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [C-2] closed + totalRounds（chatMode close 终态通知）→ 文案附轮次统计 after N rounds
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-rounds-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传） > [C-2] 对照：totalRounds 缺失（one-shot 完成通知）→ 无轮次统计，文案逐字节保持 completed. Result:
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-rounds-2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — subscribeSettled 装配（must-fix #4 / D8 settled 边沿驱动） > busy 入队 → settled 事件触发 → flush 送达（不依赖退避轮询）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-settled-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — subscribeSettled 装配（must-fix #4 / D8 settled 边沿驱动） > dispose 后 settled 边沿不再触发发送（内核 disposed 拦截）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-settled-2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — revive 重建内核 handle（must-fix #5） > dispose → notify 静默丢弃 → revive → notify 恢复送达
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-revive-1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-revive-3' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > BgNotifier — revive 重建内核 handle（must-fix #5） > revive 后同 id 重复通知不被旧生命周期的 dedup LRU 吞（新 handle 状态复位）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-revive-dup' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'bg-revive-dup' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > U3_UNIT: createNotifier unit verification > notify calls host.sendMessage with customType=subagent-bg-notify
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'u3-test-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-flush.test.ts > U3_UNIT: createNotifier unit verification > notify with mergeHoldActive=true defers flush until explicit call
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'u3-merge-1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'u3-merge-2' }
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/notifier-flush.test.ts (30 tests) 18ms
+extensions/universal/subagent-workflow test:  ✓ src/injectors/__tests__/subagent-list-injector.test.ts (21 tests) 91ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-throttle.test.ts (5 tests) 39ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/trace.test.ts (12 tests) 9ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-loadall-sources.test.ts (4 tests) 31ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/format.test.ts (62 tests) 19ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/list-component.test.ts (25 tests) 17ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-snapshot-codec.test.ts (5 tests) 16ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/jsonl-run-store-corrupt-entry.test.ts (3 tests) 35ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/tool-workflow-run-builtin-name.test.ts (7 tests) 61ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/helpers-bounded-serialize.test.ts (9 tests) 14ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/one-shot-upgrade.test.ts (3 tests) 45ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/command-handlers.test.ts (22 tests) 17ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/conversation-wiring.test.ts (4 tests) 10ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/tool-action.test.ts (33 tests) 13ms
+extensions/universal/subagent-workflow test:  ✓ src/host/__tests__/inflight-reporter.test.ts (8 tests) 11ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/index-session-start.test.ts (11 tests) 5768ms
+extensions/universal/subagent-workflow test:      ✓ 装配链（tui mode）：initSession 收到 uiRequestHandler=函数 + session 锚点（槽注入 existing 形态）  651ms
+extensions/universal/subagent-workflow test:      ✓ headless mode（json）：createUiRequestHandlerForMode 返回 undefined → initSession 收到 null（显式清空）  327ms
+extensions/universal/subagent-workflow test:      ✓ rpc mode：initSession 收到 uiRequestHandler=函数  317ms
+extensions/universal/subagent-workflow test:      ✓ W2TC16: session_shutdown 触发后 store 实例 dispose 被调用（terminate 完成之后、sessionState 清理之前）  1293ms
+extensions/universal/subagent-workflow test:      ✓ W3TC7: session_start loadAll 灌入后裁剪到 K（21 done + 1 running kill-9 恢复）  309ms
+extensions/universal/subagent-workflow test:      ✓ W3TC8: onRunDone 回调接线——notify → track → evict，本轮 run 不被自身触发的裁剪淘汰  1227ms
+extensions/universal/subagent-workflow test:      ✓ mock session 含 ledger/ack entry → 未销账号重放（单通道 triggerTurn），已销账零重发  492ms
+extensions/universal/subagent-workflow test:      ✓ 全部已销账（差集为空）→ 零重放零发送  400ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/truncline-snapshot.test.ts (6 tests) 11ms
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single closed success — one-shot completed notification
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-7' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single closed + sessionFile — pointer line appended
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single running round (chatMode) — round notification
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-4:2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single running round + sessionFile — pointer appended to round notification
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-1:1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single cancelled — cancelled message, no pointer
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-5' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single gc-failed — error message, no pointer
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-6' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single gc-failed + patchFile — failed takes priority, no patch hint
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-8' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > single closed + patchFile + sessionFile — patch hint + pointer
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-ptr-3' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > closed + totalRounds — chatMode close with round stats
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-rounds-1' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > U3_UNIT notifier golden snapshots (pre-migration freeze) > closed no totalRounds — one-shot, no round stats
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-rounds-2' }
+extensions/universal/subagent-workflow test:  ✓ src/interface/views/__tests__/WorkflowsView-signature.test.ts (21 tests) 5ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/bg-notify-render.test.ts (17 tests) 20ms
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notifier-golden-snapshot.test.ts > notifier golden — batch merge (60s window, two records) > two closed records joined with separator
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'batch-1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'batch-2' }
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/tool-workflow-script-generate.test.ts (13 tests) 21ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/notifier-golden-snapshot.test.ts (11 tests) 15ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/prompt-quality-batch1.test.ts (20 tests) 6ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/subagent-tool-prompt.test.ts (15 tests) 4ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/prompt-quality-batch3.test.ts (29 tests) 7ms
+extensions/universal/subagent-workflow test:  ✓ src/injectors/__tests__/engine-awareness.test.ts (16 tests) 6ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/gui.test.ts (33 tests) 4ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/tool-workflow-throw-paths.test.ts (7 tests) 5ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/workflow-tool-prompt.test.ts (11 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/host/__tests__/pi-host.test.ts (14 tests) 6ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/subagent-message-close.test.ts (17 tests) 7ms
+extensions/universal/subagent-workflow test:  ✓ src/injectors/__tests__/model-list-injector.test.ts (9 tests) 3ms
+extensions/universal/subagent-workflow test:  ✓ src/injectors/__tests__/engine-section-stability.test.ts (12 tests) 7ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/helpers-gui.test.ts (13 tests) 11ms
+extensions/universal/subagent-workflow test: stderr | src/__tests__/status-refactor.test.ts > BgNotifier dedupKey > 同 id 不同 round 不被去重（round 参与 dedup key）
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-123:1' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-123:2' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/status-refactor.test.ts > BgNotifier dedupKey > 不同 id 不被去重
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-111' }
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-222' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/status-refactor.test.ts > BgNotifier dedupKey > closed status 被正确入队
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sa-333' }
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/status-refactor.test.ts (23 tests) 5ms
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notify-batch-golden.test.ts > sync batch notification golden (U3 — batch format lock, design §3.1.1) > 3 finished — full golden: header + three entries joined by separators
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:4632ada9b7a20b87543c40a52cc42149b50b447f' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notify-batch-golden.test.ts > sync batch notification golden (U3 — batch format lock, design §3.1.1) > 2 finished + 1 failed — header counts and failed entry carries error first line
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:607e508374e2484819cc704ab08acaee2c2aec00' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notify-batch-golden.test.ts > sync batch notification golden (U3 — batch format lock, design §3.1.1) > cancelled member — header counts cancelled, entry is the short cancelled line
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:72cc8daee6f12eee3312faf12bcf69f61d4cd927' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notify-batch-golden.test.ts > sync batch notification golden (U3 — batch format lock, design §3.1.1) > single-member batch — same batch format (residual single sync member)
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:794e8a9d5dc217a669236537de6a75fb4ed8d169' }
+extensions/universal/subagent-workflow test: stderr | src/__tests__/notify-batch-golden.test.ts > sync batch details — bg-notify-render batch branch end-to-end (⛔1 渲染核对) > batch details render through the batch branch: every member visible
+extensions/universal/subagent-workflow test: [subagents] notify ledger not bound, falling back to delivery kernel path (at-most-once) { notifyId: 'sync-batch:4632ada9b7a20b87543c40a52cc42149b50b447f' }
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/notify-batch-golden.test.ts (5 tests) 9ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/sdk-contract.test.ts (9 tests) 6ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/notify-stale-guard.test.ts (6 tests) 7ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/command-actions.test.ts (36 tests) 6ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/subagent-schema-collect.test.ts (5 tests) 3ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/subagent-tool-path-guard.test.ts (7 tests) 10ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/derive-closed-display-parity-interface.test.ts (2 tests) 4ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/list-view-processkey.test.ts (20 tests) 4ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/contract.relay.test.ts (7 tests) 4ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/views/__tests__/record-progress.test.ts (9 tests) 7ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/tool-render.test.ts (7 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/workflow-state-file-exposure.test.ts (3 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/list-fields.test.ts (12 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/workflow-script-gui.test.ts (9 tests) 5ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/robustness-medium-batch2-interface.test.ts (1 test) 1ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/__tests__/detectors.test.ts (9 tests) 5ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/gui-mode-dispatch.test.ts (5 tests) 3ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/pi-host-notify-ports.test.ts (2 tests) 1ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/startup-config-declaration.test.ts (1 test) 1ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/subagent-actions.test.ts (4 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/interface/views/__tests__/detail-content-session-file.test.ts (3 tests) 2ms
+extensions/universal/subagent-workflow test:  ✓ src/__tests__/review-fix-loop-e2e.test.ts (26 tests) 35000ms
+extensions/universal/subagent-workflow test:      ✓ sanity: chain 经本文件基础设施可跑（helper 自检）  538ms
+extensions/universal/subagent-workflow test:      ✓ E2E-1：defer 跨轮传递 + R2 prompt 对账段 + clean 终止（§7.2 1/3）  526ms
+extensions/universal/subagent-workflow test:      ✓ E2E-1b：suggestions-only 轮进 fix（全等级修复语义）→ R2 全清才 clean 终止  516ms
+extensions/universal/subagent-workflow test:      ✓ E2E-2：skipCleanAgents 语义（clean agent 下轮跳过）+ fixAgent 参数接受（§7.2 2/3）  517ms
+extensions/universal/subagent-workflow test:      ✓ E2E-3：ES3 硬校验拦截（deferred critical → fix-failure）+ [UNRESOLVED] 渲染 gate（§7.2 3/3）  514ms
+extensions/universal/subagent-workflow test:      ✓ E2E-4：全 fixed + 新发现（M2：reconcile 门控 reconCount + 新发现 merge 独立执行）  513ms
+extensions/universal/subagent-workflow test:      ✓ E2E-5：recheckAfterFix=true → 全批重派 + clean agent 走 scoped 分支（M4 回归）  517ms
+extensions/universal/subagent-workflow test:      ✓ E2E-6：doc-reviewer-only 批（reconciliation 恒空）→ 重新报告转 regressed → needs-redesign（F1 回归）  516ms
+extensions/universal/subagent-workflow test:      ✓ E2E-7：fixed 条目复发 → 不收敛 → 继续修复 → needs-redesign（MF-2 回归）  525ms
+extensions/universal/subagent-workflow test:      ✓ E2E-8：L2 换号改键后对账翻译用上一轮 idMap（MF-1 回归：prev 表格号 ≠ 本轮表格号）  531ms
+extensions/universal/subagent-workflow test:      ✓ fail-fast：未知参数名（batchl 拼错）→ workflow 失败且 error 含未知参数提示（S-19）  7535ms
+extensions/universal/subagent-workflow test:      ✓ TC1: batchN 不存在路径 → 启动期 fail-fast，未调 agent  7527ms
+extensions/universal/subagent-workflow test:      ✓ TC2: fixAgent 不存在路径 → 启动期 fail-fast  7526ms
+extensions/universal/subagent-workflow test:      ✓ A6: state.json 落 ~/.review-fix-loop/<slug>/<runId>/ 且 calls[] 十字段全集 + phaseTimings 采集（默认剧本）  511ms
+extensions/universal/subagent-workflow test:      ✓ A6: recheckAfterFix=true 剧本 → calls[] 出现 promptMode="scoped"（scoped 分支采集）  511ms
+extensions/universal/subagent-workflow test:      ✓ B6: issues 带 origin/guidance/evidence + dormant 落盘/复活 + 消费侧过滤 + aggregatorSchema 扩展  512ms
+extensions/universal/subagent-workflow test:      ✓ C5: scores 落盘 + regression 确定性回填 + clean 轮对账回填 + aggregatorModel 降档  513ms
+extensions/universal/subagent-workflow test:      ✓ B6: exec-review 修复回归——对账通道不绕过 dormant 分区 + 已追踪条目降级重报不翻 regressed/不落 dormant  509ms
+extensions/universal/subagent-workflow test:      ✓ D1/D4: 同一 run 内 R1 与 R2 review 调用 schema 逐字节相同 + 无 per-round spread + R1 空数组下游无异常  512ms
+extensions/universal/subagent-workflow test:      ✓ A4: 全降级轮（reviewer 报 must-fix、aggregator 全部降级）→ 不派 fixer，批推进 + 跨批 skip（W5）  512ms
+extensions/universal/subagent-workflow test:      ✓ F2: aggregator numeric-fallback（无 must_fix_ids）不授予跨批 clean-skip——批 2 仍派该 agent  514ms
+extensions/universal/subagent-workflow test:      ✓ A4/W4: R2 全降级 + 台账残留 → 守门不假 clean，追账轮 openStreak 单计至 stuck 诚实终止  514ms
+extensions/universal/subagent-workflow test:      ✓ F3: review-failure 轮的 batchRounds 条目 mustFix/suggestion 为 null（未知非 0）  523ms
+extensions/universal/subagent-workflow test:      ✓ A2+A3: dormant 批作用域重置（跨批同 id 不污染对账）+ fix prompt 含 guidance 通道  524ms
+extensions/universal/subagent-workflow test:      ✓ A1: engine rebuild 后同 _runId 残留 state 被重置——calls/fixResults 无双记 + previousAttempts=1  1535ms
+extensions/universal/subagent-workflow test:  Test Files  79 passed (79)
+extensions/universal/subagent-workflow test:       Tests  938 passed (938)
+extensions/universal/subagent-workflow test:    Start at  07:04:43
+extensions/universal/subagent-workflow test:    Duration  36.98s (transform 11.32s, setup 508ms, import 25.17s, tests 74.01s, environment 4ms)
+extensions/universal/subagent-workflow test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/subagent-workflow/test-results/vitest-junit.xml
+extensions/universal/subagent-workflow test: Done
+extensions/universal/base-tool-enhance test$ vitest run
+extensions/universal/rename-session test$ vitest run
+extensions/universal/plan test$ vitest run
+extensions/universal/permission test$ vitest run
+extensions/universal/permission test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/permission
+extensions/universal/base-tool-enhance test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/base-tool-enhance
+extensions/universal/plan test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/plan
+extensions/universal/rename-session test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/rename-session
+extensions/universal/rename-session test:  ✓ e2e/harness.test.mjs (45 tests) 9ms
+extensions/universal/plan test:  ✓ src/__tests__/command.test.ts (9 tests) 12ms
+extensions/universal/plan test:  ✓ src/__tests__/state.test.ts (7 tests) 6ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/force-patterns.test.ts (95 tests) 16ms
+extensions/universal/permission test:  ✓ src/rules/__tests__/builtins.test.ts (124 tests) 22ms
+extensions/universal/permission test:  ✓ src/__tests__/rule-editor.test.ts (10 tests) 59ms
+extensions/universal/permission test:  ✓ src/classifier/__tests__/classifier.test.ts (17 tests) 1006ms
+extensions/universal/permission test:      ✓ C8: callLLM 永挂 + 短 timeout → fallback ask（不卡死）  1001ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/bash-tool.test.ts (27 tests) 140ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/maintenance-once.test.ts (4 tests) 1071ms
+extensions/universal/base-tool-enhance test:      ✓ runs reconcilePendingEntries on EVERY session_start dispatch (session-scoped exempt, D3)  1065ms
+extensions/universal/permission test:  ✓ src/__tests__/rule-editor-component.test.ts (28 tests) 163ms
+extensions/universal/permission test:  ✓ src/__tests__/approval.test.ts (34 tests) 13ms
+extensions/universal/permission test:  ✓ src/__tests__/pipeline.test.ts (74 tests) 45ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/config.test.ts (15 tests) 31ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/tool-error-audit.test.ts (5 tests) 18ms
+extensions/universal/permission test:  ✓ src/__tests__/rule-templates.test.ts (24 tests) 93ms
+extensions/universal/permission test:  ✓ src/__tests__/footer-provider.test.ts (19 tests) 116ms
+extensions/universal/permission test:  ✓ src/classifier/__tests__/model-resolver.test.ts (8 tests) 6ms
+extensions/universal/permission test:  ✓ src/__tests__/commands.test.ts (32 tests) 63ms
+extensions/universal/permission test:  ✓ src/rules/__tests__/matcher.test.ts (35 tests) 7ms
+extensions/universal/plan test:  ✓ src/__tests__/templates.test.ts (9 tests) 5ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/index.test.ts (4 tests) 33ms
+extensions/universal/permission test:  ✓ src/__tests__/model-picker.test.ts (21 tests) 7ms
+extensions/universal/rename-session test:  ✓ src/__tests__/startup-config-declaration.test.ts (1 test) 1ms
+extensions/universal/plan test:  ✓ src/__tests__/compact-handler.test.ts (15 tests) 24ms
+extensions/universal/rename-session test:  ✓ src/__tests__/commands.test.ts (9 tests) 13ms
+extensions/universal/plan test:  ✓ src/__tests__/compact-criteria-array.test.ts (13 tests) 41ms
+extensions/universal/plan test:  ✓ src/__tests__/tool.test.ts (20 tests) 6ms
+extensions/universal/rename-session test:  ✓ src/__tests__/pure.test.ts (59 tests) 25ms
+extensions/universal/permission test:  ✓ src/classifier/__tests__/json-parser.test.ts (18 tests) 3ms
+extensions/universal/rename-session test:  ✓ src/__tests__/llm.test.ts (51 tests) 10ms
+extensions/universal/plan test:  ✓ src/__tests__/compact.test.ts (9 tests) 8ms
+extensions/universal/plan test:  Test Files  7 passed (7)
+extensions/universal/plan test:       Tests  82 passed (82)
+extensions/universal/plan test:    Start at  07:05:20
+extensions/universal/plan test:    Duration  2.96s (transform 752ms, setup 0ms, import 12.20s, tests 102ms, environment 0ms)
+extensions/universal/plan test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/plan/test-results/vitest-junit.xml
+extensions/universal/plan test: Done
+extensions/universal/smart-context test$ vitest run
+extensions/universal/permission test:  ✓ src/__tests__/config.test.ts (18 tests) 25ms
+extensions/universal/permission test:  ✓ src/ast/__tests__/loader.test.ts (8 tests) 214ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/task-store.test.ts (10 tests) 177ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/pending-reconcile.test.ts (12 tests) 184ms
+extensions/universal/permission test:  ✓ src/__tests__/session-start-once-guard.test.ts (2 tests) 190ms
+extensions/universal/permission test:  ✓ src/__tests__/index-integration.test.ts (20 tests) 191ms
+extensions/universal/permission test:  ✓ src/__tests__/startup-config-declaration.test.ts (1 test) 4ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/kill-tree.test.ts (11 tests) 442ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/registry.test.ts (7 tests) 152ms
+extensions/universal/permission test:  ✓ src/__tests__/production.test.ts (15 tests) 67ms
+extensions/universal/permission test:  ✓ src/rules/__tests__/index.test.ts (1 test) 3ms
+extensions/universal/permission test:  ✓ src/__tests__/types.test.ts (6 tests) 5ms
+extensions/universal/permission test:  ✓ src/rules/__tests__/wildcard.test.ts (8 tests) 4ms
+extensions/universal/permission test:  ✓ src/ast/__tests__/analyzer.test.ts (27 tests) 403ms
+extensions/universal/permission test:      ✓ WT21: 恰好 65536 字节（边界值，应可解析）  307ms
+extensions/universal/permission test:  ✓ src/__tests__/statusline-palette.test.ts (7 tests) 3ms
+extensions/universal/permission test:  ✓ src/classifier/__tests__/prompt.test.ts (6 tests) 4ms
+extensions/universal/smart-context test:  RUN  v4.1.9 /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/smart-context
+extensions/universal/permission test:  ✓ src/__tests__/e2e-modes.test.ts (11 tests) 42ms
+extensions/universal/rename-session test:  ✓ src/__tests__/index.test.ts (38 tests) 579ms
+extensions/universal/rename-session test:  Test Files  6 passed (6)
+extensions/universal/rename-session test:       Tests  203 passed (203)
+extensions/universal/rename-session test:    Start at  07:05:20
+extensions/universal/rename-session test:    Duration  3.66s (transform 735ms, setup 0ms, import 12.51s, tests 637ms, environment 0ms)
+extensions/universal/permission test:  ✓ src/__tests__/extension.test.ts (5 tests) 38ms
+extensions/universal/permission test:  Test Files  27 passed (27)
+extensions/universal/permission test:       Tests  579 passed (579)
+extensions/universal/permission test:    Start at  07:05:20
+extensions/universal/permission test:    Duration  3.67s (transform 2.47s, setup 0ms, import 20.10s, tests 2.80s, environment 2ms)
+extensions/universal/rename-session test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/rename-session/test-results/vitest-junit.xml
+extensions/universal/rename-session test: Done
+extensions/universal/permission test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/permission/test-results/vitest-junit.xml
+extensions/universal/permission test: Done
+extensions/universal/smart-context test:  ✓ src/__tests__/sdk-contract.test.ts (5 tests) 7ms
+extensions/universal/smart-context test:  ✓ src/__tests__/pure.test.ts (18 tests) 6ms
+extensions/universal/smart-context test:  ✓ src/__tests__/compact-handler.test.ts (7 tests) 9ms
+extensions/universal/smart-context test:  ✓ src/__tests__/startup-config-declaration.test.ts (1 test) 4ms
+extensions/universal/smart-context test:  ✓ src/__tests__/tool.test.ts (10 tests) 8ms
+extensions/universal/smart-context test:  ✓ src/__tests__/reminder.test.ts (10 tests) 3ms
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/notify.test.ts (15 tests) 1300ms
+extensions/universal/base-tool-enhance test:      ✓ natural exit 0: unregister emit reason 'completed' + sendMessage steer with exact params  340ms
+extensions/universal/base-tool-enhance test:      ✓ natural nonzero exit: reason 'failed', content marks failure  343ms
+extensions/universal/base-tool-enhance test:      ✓ poller keeps running when notification path throws inside the exit edge  333ms
+extensions/universal/smart-context test:  ✓ src/__tests__/index-generation.test.ts (2 tests) 2ms
+extensions/universal/smart-context test:  Test Files  7 passed (7)
+extensions/universal/smart-context test:       Tests  53 passed (53)
+extensions/universal/smart-context test:    Start at  07:05:24
+extensions/universal/smart-context test:    Duration  940ms (transform 507ms, setup 0ms, import 5.34s, tests 38ms, environment 0ms)
+extensions/universal/smart-context test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/smart-context/test-results/vitest-junit.xml
+extensions/universal/smart-context test: Done
+extensions/universal/base-tool-enhance test:  ✓ src/__tests__/background-lifecycle.test.ts (37 tests) 10955ms
+extensions/universal/base-tool-enhance test:      ✓ short task: running → exited with exitCode 0, output file readable, registry terminal  345ms
+extensions/universal/base-tool-enhance test:      ✓ poller interval auto-finalizes without manual tick (lazy start/stop)  2032ms
+extensions/universal/base-tool-enhance test:      ✓ natural completion before the deadline cancels the timer (no late kill)  1506ms
+extensions/universal/base-tool-enhance test:      ✓ memory intent missing + registry killing → reason killed; AI not woken (no sendMessage)  522ms
+extensions/universal/base-tool-enhance test:      ✓ memory intent present wins — registry NOT read back (killed kept while registry stays running)  518ms
+extensions/universal/base-tool-enhance test:      ✓ registry read failure (corrupt file) degrades to no-intent natural; finalization not blocked  518ms
+extensions/universal/base-tool-enhance test:      ✓ UI kill × timeout overlap: no timeout mark; poll edge reads back registry killing → killed  1220ms
+extensions/universal/base-tool-enhance test:      ✓ AI bash_kill × timeout overlap: killed intent survives (no 'timed out' misreport)  1224ms
+extensions/universal/base-tool-enhance test:      ✓ natural death before the deadline: no timeout mark; poll edge finalizes natural (accepted shift)  1219ms
+extensions/universal/base-tool-enhance test:      ✓ aborted execute-signal leaves the task running  312ms
+extensions/universal/base-tool-enhance test:  Test Files  12 passed (12)
+extensions/universal/base-tool-enhance test:       Tests  242 passed (242)
+extensions/universal/base-tool-enhance test:    Start at  07:05:20
+extensions/universal/base-tool-enhance test:    Duration  11.96s (transform 2.39s, setup 0ms, import 16.26s, tests 14.52s, environment 3ms)
+extensions/universal/base-tool-enhance test: JUNIT report written to /Users/zhushanwen/Code/xyz-agent-workspace/feat-optimize-extension-over-engineering/extensions/universal/base-tool-enhance/test-results/vitest-junit.xml
+extensions/universal/base-tool-enhance test: Done
+[doc-symbol-drift] OK：14 个映射文档 × 源码导出表，零悬空符号；19 个活跃测试文档 × 路径存在性，零悬空引用
+✓ extension-dependencies.json 一致（21 entries ↔ 磁盘 21 包，分组/role/路径残留 3633 文件扫描通过）

@@ -1,27 +1,40 @@
 /**
- * index.ts 测试 — 工厂入口 + 跨扩展 API（pi.__goalInit）
+ * index.ts 测试 — 工厂入口 + 跨扩展 API（goalInit slot）
  *
- * 覆盖 T1.8 (NFR-AC-8)：__goalInit 签名 (objective, budget, ctx, slug?, successCriteria?)，
+ * 覆盖 T1.8 (NFR-AC-8)：goalInit 签名 (objective, budget, ctx, slug?, successCriteria?)，
  * 结构上无法接收 tasks（task CRUD 已删除，D-16/FR-4 双轨消除）。active 守卫由 service.test.ts 覆盖。
  *
- * 用最小 fake pi + fake ctx 实例化 goalExtension 工厂，再调 pi.__goalInit。
+ * 用最小 fake pi + fake ctx 实例化 goalExtension 工厂，再从 globalThis slot 读取 goalInit——
+ * mock 形态与真实通道同构（goal-bridge-cross-extension.md §3.4：桥的元教训是 mock 世界
+ * 构造「共享 pi 对象」掩盖了真实世界的 per-extension 隔离，两侧测试一律走 slot）。
  */
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { handleSessionStart } from "../adapters/event-handlers/session-start";
-import goalExtension from "../index";
+import goalExtension, { GOAL_INIT_SLOT_KEY, type GoalInitFn } from "../index";
 import { contextInjectionPrompt } from "../projection/prompts";
 import { createGoalSession } from "../session";
+
+/** 每用例后清 slot，防跨用例 globalThis 泄漏（设计 §3.4：teardown 两侧通用） */
+afterEach(() => {
+	Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, undefined);
+});
+
+/** 从 globalThis slot 读取 goalInit（与 plan 侧 compact.ts 的消费形态一致） */
+function readGoalInit(): GoalInitFn | undefined {
+	const fn = Reflect.get(globalThis, GOAL_INIT_SLOT_KEY);
+	return typeof fn === "function" ? (fn as GoalInitFn) : undefined;
+}
 
 // ── Minimal fake pi / ctx ─────────────────────────────
 
 interface FactoryFixture {
-	pi: ExtensionAPI & { __goalInit?: (...args: never[]) => unknown };
+	pi: ExtensionAPI;
 	ctx: ExtensionContext;
 	states: unknown[];
 	history: unknown[];
@@ -50,7 +63,7 @@ function makeFactoryFixture(): FactoryFixture {
 		sendUserMessage(content: unknown): void {
 			sendUser.push(content);
 		},
-	} as unknown as ExtensionAPI & { __goalInit?: (...args: never[]) => unknown };
+	} as unknown as ExtensionAPI;
 
 	const ctx = {
 		hasUI: true,
@@ -68,18 +81,15 @@ function makeFactoryFixture(): FactoryFixture {
 	return { pi, ctx, states, history, sendUser, commands };
 }
 
-// ── pi.__goalInit（NFR-AC-8 / T1.8）──────────────────
+// ── goalInit slot（NFR-AC-8 / T1.8）──────────────────
 
-describe("pi.__goalInit（NFR-AC-8 / T1.8）", () => {
-	it("工厂实例化后 __goalInit 存在；正常调用 → 创建 goal（返回 true + 持久化 state）", () => {
+describe("goalInit slot（NFR-AC-8 / T1.8）", () => {
+	it("工厂实例化后 slot 内 goalInit 存在；正常调用 → 创建 goal（返回 true + 持久化 state）", () => {
 		const { pi, ctx, states } = makeFactoryFixture();
 		goalExtension(pi);
-		expect(typeof pi.__goalInit).toBe("function");
-		const ok = (pi.__goalInit as (o: string, b: unknown, c: ExtensionContext) => boolean)(
-			"build feature X",
-			undefined,
-			ctx,
-		);
+		const goalInit = readGoalInit();
+		expect(typeof goalInit).toBe("function");
+		const ok = goalInit!("build feature X", undefined, ctx);
 		expect(ok).toBe(true);
 		expect(states).toHaveLength(1); // appendState 调用
 		const persisted = states[0] as { objective?: string };
@@ -90,14 +100,7 @@ describe("pi.__goalInit（NFR-AC-8 / T1.8）", () => {
 		const { pi, ctx, states } = makeFactoryFixture();
 		goalExtension(pi);
 		// GoalInitFn 签名防漂移：successCriteria 为 string[]（数组入参，非旧 string）
-		const init = pi.__goalInit as (
-			o: string,
-			b: unknown,
-			c: ExtensionContext,
-			slug: string,
-			sc: string[],
-		) => boolean;
-		const ok = init("objective", undefined, ctx, "slug", ["cond A", "cond B"]);
+		const ok = readGoalInit()!("objective", undefined, ctx, "slug", ["cond A", "cond B"]);
 		expect(ok).toBe(true);
 		// appendState 持久化的 state 深透传 successCriteria 数组
 		const persisted = states[0] as { slug?: string; successCriteria?: string[] };
@@ -109,7 +112,7 @@ describe("pi.__goalInit（NFR-AC-8 / T1.8）", () => {
 		// FR-4.2/D-16: ctx 必填
 		const { pi } = makeFactoryFixture();
 		goalExtension(pi);
-		const init = pi.__goalInit as (o: string, b: unknown, c: unknown) => boolean;
+		const init = readGoalInit()!;
 		expect(() => init("obj", undefined, undefined)).not.toThrow();
 		expect(init("obj", undefined, undefined)).toBe(false);
 	});

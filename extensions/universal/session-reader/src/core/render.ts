@@ -17,7 +17,8 @@ const ASSISTANT_BRIEF_MAX_CHARS = 80
 const ENTRY_BRIEF_MAX_CHARS = 100
 /** turn 索引显示宽度（T013 三位补零）。 */
 const TURN_INDEX_WIDTH = 3
-/** outline 默认 token 预算（OutlineOptions.budget 缺省值）。 */
+/** outline 默认 token 预算（OutlineOptions.budget 缺省值）。生产路径（doOutline/doExport）
+ * 唯一取值：outline 是设计定档的 ~1500 token 全貌 TOC，无按调用方调节的需求。 */
 const OUTLINE_DEFAULT_BUDGET_TOKENS = 2000
 /** token 估算换算基数（chars/4，与 tokenEstimate 口径一致）。 */
 const CHARS_PER_TOKEN = 4
@@ -55,6 +56,11 @@ export interface TurnBrief {
 
 export interface OutlineResult {
   turns: TurnBrief[]
+  /**
+   * 渲染行（E7/D3 行渲染统一）：formatLine 产出、降级与总预算截断后的最终展示行——
+   * 预算度量与工具层展示共用同一份（度量 = 展示 by construction），展示侧不得重建行格式。
+   */
+  lines: string[]
   /** skippedLines：JSON 解析失败/缺结构字段的行数（parser 检测，工具层覆盖精确值；render 层无 ParseResult 恒 0） */
   stats: { totalTurns: number; totalEntries: number; totalBytes: number; parsedBytes: number; skippedLines: number }
   /** chars / 4 近似（与 design P-outline 口径一致） */
@@ -64,7 +70,9 @@ export interface OutlineResult {
 }
 
 export interface OutlineOptions {
-  /** 默认 2000（token） */
+  /** 测试注入缝（E10 定性）：非模型可见参数——session_read schema 无 budget 入参，模型
+   * 无法也无需调节；存在动机 = 测试注入小预算触发降级档用例（砍 assistantBrief / 骨架档）。
+   * 生产路径不传，走 OUTLINE_DEFAULT_BUDGET_TOKENS 默认。 */
   budget?: number
   allBranches?: boolean
   /** 默认 turn；entry = 每 entry 一行不聚合（D-1 兜底，坏 session 调试） */
@@ -99,6 +107,26 @@ function blockThinking(block: ContentBlock): string {
   // 兜底：个别实现把 thinking 文本放在 text 字段
   if (block.type === 'thinking' && typeof block.text === 'string') return block.text
   return ''
+}
+
+/**
+ * E11 共享核：白名单提取 message.content 中 `type==='text'` 块的 text 字段（块 → string[]）。
+ * string content 直取为单元素数组；非 string 非数组返回空数组。join 语义（''/'\n'/' '）
+ * 与空态语义（空串 vs undefined）留在各调用点组合——S7 警告适用：join 差异是行为敏感点，
+ * 不可在共享核合并。消费方：result-action（'' join）/ extract（'\n' join）/ find（' ' join
+ * + 空返 undefined）。
+ */
+export function textBlockParts(content: unknown): string[] {
+  if (typeof content === 'string') return [content]
+  if (!Array.isArray(content)) return []
+  const parts: string[] = []
+  for (const b of content) {
+    if (b !== null && typeof b === 'object') {
+      const o = b as Record<string, unknown>
+      if (o.type === 'text' && typeof o.text === 'string') parts.push(o.text)
+    }
+  }
+  return parts
 }
 
 /** 拼接 text 块文本（排除 thinking / toolCall / tool_use / tool_result 块）。 */
@@ -276,7 +304,7 @@ function findBranchForkPoint(turn: Turn, tree: TreeView): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// 行渲染（预算度量依据）
+// 行渲染（预算度量与展示同一份渲染行，E7/D3 行渲染统一）
 // ---------------------------------------------------------------------------
 
 function formatHHMM(timestamp?: string): string {
@@ -292,10 +320,11 @@ export function formatBytesMarker(bytes: number): string {
 }
 
 /**
- * 渲染单行为字符串（用于预算度量与降级判断）。
+ * 渲染单行为字符串（E7 行渲染统一：预算度量与展示同一份渲染行，OutlineResult.lines 的行工厂）。
  * v2 O1：L1 行含 assistantBrief（补 assistant 结论行让 outline 单独可决策，不再逼反复 expand）。
  * level: 0=全有（toolSummary + assistantBrief）/ 1=砍 assistantBrief / 2=再砍 toolSummary（骨架）。
  * userBrief + omittedBytes 骨架永保。assistantBrief 格式 `→ <结论>`，在 toolSummary 后、omitted 前。
+ * 旁支标记 `[旁支 N entries]`（branchSize = 该 forkPoint 下旁支子树 entry 数）。
  */
 function formatLine(b: TurnBrief, level: LineLevel, branchSize?: number): string {
   const parts: string[] = []
@@ -341,7 +370,8 @@ function applyBranchLabels(briefs: TurnBrief[], turns: Turn[], tree: TreeView): 
 /**
  * 降级序逐行渲染（design §3.5 算法 1 step3）：level 0 全有；超预算降到 level 1
  * 砍 assistantBrief；仍超降到 level 2 砍 toolSummary（骨架）。
- * 直接改写 brief 的 assistantBrief/toolSummary 字段，返回行缓存。
+ * 直接改写 brief 的 assistantBrief/toolSummary 字段，返回行缓存（E7 后随结果
+ * 返回为 OutlineResult.lines，预算度量与展示同一份）。
  */
 function renderDegradingLines(
   briefs: TurnBrief[],
@@ -408,7 +438,7 @@ export function renderOutline(
   }
 
   if (turns.length === 0) {
-    return { turns: [], stats, tokenEstimate: 0 }
+    return { turns: [], lines: [], stats, tokenEstimate: 0 }
   }
 
   // granularity:entry —— 每 entry 一行，不聚合 turn（D-1 兜底）
@@ -428,11 +458,11 @@ export function renderOutline(
   // 3. 降级序渲染：level 0 全有 → level 1 砍 assistantBrief → level 2 骨架
   const lineCache = renderDegradingLines(briefs, tree, perTurnCharBudget)
 
-  // 4. 总预算截断（从尾部丢弃）
+  // 4. 总预算截断（从尾部丢弃，lines 与 briefs 同步截短）
   const { totalChars, truncated } = truncateToTotalBudget(briefs, lineCache, budget)
 
   const tokenEstimate = Math.ceil(totalChars / CHARS_PER_TOKEN)
-  return { turns: briefs, stats, tokenEstimate, truncated }
+  return { turns: briefs, lines: lineCache, stats, tokenEstimate, truncated }
 }
 
 /** granularity:entry 模式：每 entry 一行 TurnBrief，不聚合，仅总预算截断。 */
@@ -486,6 +516,7 @@ function renderEntryGranularity(
   }
   return {
     turns: briefs,
+    lines,
     stats,
     tokenEstimate: Math.ceil(totalChars / CHARS_PER_TOKEN),
     truncated,
@@ -568,7 +599,7 @@ function stripThinking(content: unknown): unknown {
 
 /**
  * L3 detail 默认摘要态的 toolResult entry（v2 O3：toolResult 不再整条消失，给中间态）。
- * includeToolResult:true 时 renderDetail 返回原 Entry（全文），否则返回此摘要。
+ * includeToolResult:true 时 renderDetail 直接 push 原 Entry（全文态真实路径），否则返回此摘要。
  */
 export interface ToolResultSummaryEntry {
   type: 'toolResultSummary'
@@ -580,8 +611,6 @@ export interface ToolResultSummaryEntry {
   headLines: string
   /** 结果文本总行数 */
   totalLines: number
-  /** 原 toolResult entry（includeToolResult:true 时 renderDetail 改用此返回全文） */
-  fullEntry: Entry
 }
 
 export function renderDetail(
@@ -620,7 +649,6 @@ export function renderDetail(
             summary: formatToolResultSummary(msg.toolName, tc, text),
             headLines,
             totalLines: lines.length,
-            fullEntry: e,
           })
         }
         continue

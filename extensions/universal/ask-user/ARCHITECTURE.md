@@ -4,7 +4,7 @@
 
 Internals reference for maintainers. For the usage contract (what the tool does, when an agent should call it), see [README.md](./README.md). This document covers how the code is structured, the state machine, the defensive execute flow, and where each design invariant is enforced — so a change does not silently break an invariant.
 
-Source: 10 files in `src/`, ~1970 lines total.
+Source: 10 files in `src/`, ~2085 lines total.
 
 ## File dependency graph
 
@@ -63,7 +63,17 @@ Serialization happens **once, at the protocol boundary**: `encodeAnswer(value, {
 - 多选：`answers[key] = JSON.stringify(selected)`
 - Other：`answers[`${key}__other`] = other`（仅在 other 非空时写入）
 
-Encoding is **one-way** — the old `parseAnswerParts` text reverse-parsing was deleted with the double model; there is no decode counterpart inside the extension. `channel-handler.ts` reads `AnswerValue` directly and calls `encodeAnswer` when forwarding to subagents.
+Encoding is **one-way** — the old `parseAnswerParts` text reverse-parsing was deleted with the double model; there is no decode counterpart inside the extension. `channel-handler.ts` reads `AnswerValue` directly and calls `encodeAnswer` when forwarding to subagents. (`encodeAnswer` is the only encode implementation **inside this extension**; the renderer frontend components cannot import extension packages and implement the encoding independently, aligned to the same decode contract.)
+
+## Channel registry handshake (subagent passthrough)
+
+`channel-handler.ts` + `channel-registry-register.ts` implement the subagent passthrough: the host-process ask-user extension registers an `"ask_user"` channel handler through a versioned `globalThis[Symbol.for]` slot handshake (`CHANNEL_HANDSHAKE_KEY`). The skeleton (versioned slot + pending/flush; this side never creates the registry instance) is deliberate and must not be simplified away — the M4 incident (a simplified self-made registry hijacking the canonical slot) is the anchor, see the header comment of `channel-registry-register.ts`. A second consumer of the same handshake *pattern* exists: `extensions/universal/permission/src/footer-provider.ts` (own slot key `FOOTER_HANDSHAKE_KEY`, same versioned-slot shape).
+
+Registry outreach facts (ext-simplify-11, D4):
+
+- **Single registrant on this slot.** The `CHANNEL_HANDSHAKE_KEY` slot currently has exactly one registrant: ask-user (`"ask_user"`). The permission footer-provider handshake above uses its own separate slot — same pattern, different slot, not a registrant here.
+- **`"gui_widget"` route reserved but vacant.** The engine-sdk ui-channels parsing (`parseChannel`, re-exported via `packages/subagent-core/src/execution/ui-channels.ts`) reserves a `"gui_widget"` channel name, but no package registers a handler for it; the core-side `ui-request-handler-factory` special-cases the unregistered `"gui_widget"` request to `{ack:true}` without forwarding. A future registrant needs no ask-user change — registration is keyed by channel name and orthogonal per extension.
+- **Known gap, accepted (version-mismatch slot overwrite).** On `slot.version !== 1`, `readSlot` discards the slot and `registerAskUserChannelHandler` rebuilds it via `ensureSlot` — if a hypothetical v2 registry ever held the slot, this would drop its reference. Ruled not-worth-fixing (ext-simplify-11 finding 6): both sides pin `HANDSHAKE_VERSION = 1`, so the mismatch path is unreachable today; fixing it would be defensive code for an imagined v2. Re-review trigger: any PR that bumps either side's handshake version.
 
 ## `execute` defensive flow (6 steps)
 

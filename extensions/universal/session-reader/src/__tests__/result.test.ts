@@ -2,11 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  handleSessionRead,
-  extractFinalAssistantText,
-  type SessionReadParams,
-} from '../tool-handler.js'
+import { handleSessionRead, type SessionReadParams } from '../tool-handler.js'
+import { extractFinalAssistantText } from '../result-action.js'
 
 /**
  * U6 result action 测试（design subagent-sync-collect §3.1.3 + impl-plan U6）。
@@ -152,7 +149,7 @@ describe('result action（U6）', () => {
         assistantEntry(`${realId}-a2`, [{ type: 'text', text: 'second part' }]),
       ],
     })
-    const r = await handleSessionRead({ action: 'result', session: 'sa-one' }, dir)
+    const r = await handleSessionRead({ action: 'result', session: 'sa-one' }, { agentDir: dir })
     // 与 record.result 同源：全部 assistant 正文非空过滤 '\n\n' join，无任何包装
     expect(r.content[0]?.text).toBe('FINAL RESULT\n\nsecond part')
     const d = r.details as {
@@ -184,7 +181,7 @@ describe('result action（U6）', () => {
     }
     const r = await handleSessionRead(
       { action: 'result', session: 'sa-b1,sa-b2,sa-b3' },
-      dir,
+      { agentDir: dir },
     )
     const text = r.content[0]?.text ?? ''
     expect(text).toContain('[1/3] sa-b1')
@@ -207,10 +204,10 @@ describe('result action（U6）', () => {
   it('3. 批量 >10：11 id 拒绝，报错含上限 10 与分批指引（解析先于 fs，无需 fixture）', async () => {
     const list = Array.from({ length: 11 }, (_, i) => `sa-x${i}`).join(',')
     await expect(
-      handleSessionRead({ action: 'result', session: list }, dir),
+      handleSessionRead({ action: 'result', session: list }, { agentDir: dir }),
     ).rejects.toThrow(/最多 10 个/)
     try {
-      await handleSessionRead({ action: 'result', session: list }, dir)
+      await handleSessionRead({ action: 'result', session: list }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('11')
@@ -226,7 +223,7 @@ describe('result action（U6）', () => {
       realId,
       entries: [assistantEntry(`${realId}-a1`, [{ type: 'text', text: longText }])],
     })
-    const r = await handleSessionRead({ action: 'result', session: 'sa-long' }, dir)
+    const r = await handleSessionRead({ action: 'result', session: 'sa-long' }, { agentDir: dir })
     const text = r.content[0]?.text ?? ''
     // 截断到 8000：第 8001 个 x 不在正文，但提示行给出计数
     expect(text.startsWith('x'.repeat(8000))).toBe(true)
@@ -249,7 +246,7 @@ describe('result action（U6）', () => {
     })
     const cut = await handleSessionRead(
       { action: 'result', session: 'sa-lim', limit: 5 },
-      dir,
+      { agentDir: dir },
     )
     expect(cut.content[0]?.text).toBe(
       'abcde\n\n[truncated 5 of 10 chars — full text: read ' +
@@ -258,31 +255,31 @@ describe('result action（U6）', () => {
     )
     const exact = await handleSessionRead(
       { action: 'result', session: 'sa-lim', limit: 10 },
-      dir,
+      { agentDir: dir },
     )
     expect(exact.content[0]?.text).toBe('abcdefghij')
     const d = exact.details as { truncated: boolean }
     expect(d.truncated).toBe(false)
     for (const bad of [0, -1, Number.NaN]) {
       await expect(
-        handleSessionRead({ action: 'result', session: 'sa-lim', limit: bad }, dir),
+        handleSessionRead({ action: 'result', session: 'sa-lim', limit: bad }, { agentDir: dir }),
       ).rejects.toThrow(/limit.*无效/)
     }
   })
 
   it('6. 不存在 id：sa-id 无 manifest → 无匹配 record；uuid 片段零匹配 → 无匹配 session', async () => {
     await expect(
-      handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, dir),
+      handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, { agentDir: dir }),
     ).rejects.toThrow(/无匹配 record/)
     try {
-      await handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, dir)
+      await handleSessionRead({ action: 'result', session: 'sa-nonexist-9999' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('👉')
       expect(msg).toContain('family')
     }
     await expect(
-      handleSessionRead({ action: 'result', session: 'zzz-nonexistent-9q8x2' }, dir),
+      handleSessionRead({ action: 'result', session: 'zzz-nonexistent-9q8x2' }, { agentDir: dir }),
     ).rejects.toThrow(/无匹配 session/)
   })
 
@@ -293,10 +290,10 @@ describe('result action（U6）', () => {
       sessionFileExists: false,
     })
     await expect(
-      handleSessionRead({ action: 'result', session: 'sa-flush' }, dir),
+      handleSessionRead({ action: 'result', session: 'sa-flush' }, { agentDir: dir }),
     ).rejects.toThrow(/session 文件不存在/)
     try {
-      await handleSessionRead({ action: 'result', session: 'sa-flush' }, dir)
+      await handleSessionRead({ action: 'result', session: 'sa-flush' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('未写入')
@@ -310,10 +307,10 @@ describe('result action（U6）', () => {
       realId: '019e6c96-0000-0000-0000-000000000a01',
     })
     await expect(
-      handleSessionRead({ action: 'result', session: 'sa-empty' }, dir),
+      handleSessionRead({ action: 'result', session: 'sa-empty' }, { agentDir: dir }),
     ).rejects.toThrow(/尚无 assistant 输出/)
     try {
-      await handleSessionRead({ action: 'result', session: 'sa-empty' }, dir)
+      await handleSessionRead({ action: 'result', session: 'sa-empty' }, { agentDir: dir })
     } catch (e) {
       const msg = (e as Error).message
       expect(msg).toContain('sa-empty')
@@ -323,10 +320,10 @@ describe('result action（U6）', () => {
 
   it('9. 参数防御：缺 session / 空条目（尾逗号）均报错', async () => {
     await expect(
-      handleSessionRead({ action: 'result' } as SessionReadParams, dir),
+      handleSessionRead({ action: 'result' } as SessionReadParams, { agentDir: dir }),
     ).rejects.toThrow(/需要参数 "session"/)
     await expect(
-      handleSessionRead({ action: 'result', session: 'sa-a,' }, dir),
+      handleSessionRead({ action: 'result', session: 'sa-a,' }, { agentDir: dir }),
     ).rejects.toThrow(/空条目/)
   })
 
@@ -334,7 +331,7 @@ describe('result action（U6）', () => {
     await expect(
       handleSessionRead(
         { action: 'bogus' } as unknown as SessionReadParams,
-        dir,
+        { agentDir: dir },
       ),
     ).rejects.toThrow(/find\/family\/outline\/expand\/detail\/search\/export\/extract\/workflow\/result\/doctor/)
   })

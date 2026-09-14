@@ -13,9 +13,11 @@
 //   isCtxStale 翻转为 true 且其泄漏 timer 在下个 tick 前置检查自停。闭包级实现（R3-M1
 //   修复前）在此拓扑下恒 false——正是被 R3 实测证伪的生产失效路径。
 //
-// 本文件用 InstrumentedRuntime（继承真实 SchedulerRuntime，仅记录构造第三参 isCtxStale）
-// 捕获注入回调。InstrumentedRuntime 全部行为继承父类，不影响装配链本身（F1 停旧 timer
-// 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
+// 本文件用 InstrumentedRuntime（继承真实 SchedulerRuntime，记录构造参 isCtxStale）
+// 捕获注入回调与装配事实。InstrumentedRuntime 全部行为继承父类，不影响装配链本身
+// （F1 停旧 timer 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
+// steer 直投模型（scheduler-steer-direct-dispatch）：装配点不再创建 delivery handle，
+// runtime 构造仅收 backend + isCtxStale 两参。
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,17 +42,16 @@ const { isCtxStaleCaptures, runtimeInstances } = vi.hoisted(() => ({
 }))
 
 // InstrumentedRuntime 继承真实实现（loadTasks/onAfterTick/startScheduler 均真实执行），
-// 仅捕获构造第三参并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）。
+// 仅捕获构造参（isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）。
 vi.mock('../runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtime.js')>()
   const RealSchedulerRuntime = actual.SchedulerRuntime
   class InstrumentedRuntime extends RealSchedulerRuntime {
     constructor(
       backend: ConstructorParameters<typeof RealSchedulerRuntime>[0],
-      ctx: ConstructorParameters<typeof RealSchedulerRuntime>[1],
       isCtxStale?: () => boolean,
     ) {
-      super(backend, ctx, isCtxStale)
+      super(backend, isCtxStale)
       isCtxStaleCaptures.push(isCtxStale)
       runtimeInstances.push(this)
     }

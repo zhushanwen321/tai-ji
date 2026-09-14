@@ -2,7 +2,7 @@
  * W8: Rule editor overlay — three-mode dispatch (TUI / RPC / headless).
  *
  * editRulesViaOverlay：主入口，按 ctx.mode 分发。
- * editViaRpc：RPC 循环（list → action → fill → ...），deps 注入。
+ * editViaRpc：RPC 循环（list → action → fill → ...）。
  * G16：RPC listOptions 用 applyOps(initialRules, ops) 重建。
  */
 
@@ -11,9 +11,6 @@ import { ALL_TEMPLATES, applyOps, PRESET_COMMANDS, type RuleOp } from "./rule-te
 import type { Rule } from "./types.js";
 
 // ──────────────────────── 类型 ────────────────────────
-
-/** RuleOp re-export（rule-templates.ts 定义）。 */
-export type { RuleOp } from "./rule-templates.js";
 
 /** 编辑结果：RuleOp[]（有变更）或 undefined（cancel / headless 降级）。 */
 export type RuleEditorResult = RuleOp[] | undefined;
@@ -33,12 +30,6 @@ export interface RuleEditorContext {
 	};
 }
 
-/** editViaRpc 依赖注入（便于测试 mock）。 */
-export interface RuleEditorRpcDeps {
-	select: (title: string, options: string[]) => Promise<string | undefined>;
-	input: (title: string, placeholder?: string) => Promise<string | undefined>;
-}
-
 // ──────────────────────── editRulesViaOverlay（主入口） ────────────────────────
 
 /**
@@ -47,20 +38,18 @@ export interface RuleEditorRpcDeps {
  * @param ctx UI 上下文（mode + ui.*）
  * @param initialRules 当前 userRules
  * @param sessionIdCounter user-N id 生成器闭包
- * @param rpcDeps 可选 RPC 依赖注入（测试 mock 用）
  * @returns RuleOp[]（有变更）或 undefined（cancel / headless）
  */
 export async function editRulesViaOverlay(
 	ctx: RuleEditorContext,
 	initialRules: readonly Rule[],
 	sessionIdCounter: () => string,
-	rpcDeps?: RuleEditorRpcDeps,
 ): Promise<RuleEditorResult> {
 	switch (ctx.mode) {
 		case "tui":
 			return await editViaTui(ctx, initialRules, sessionIdCounter);
 		case "rpc":
-			return await editViaRpc(ctx, initialRules, sessionIdCounter, rpcDeps);
+			return await editViaRpc(ctx, initialRules, sessionIdCounter);
 		case "json":
 		case "print":
 		default:
@@ -102,11 +91,10 @@ interface RpcIo {
  * ctx.ui.input 可用 → 用真实文本输入（custom 模板需要自由文本）；
  * 不可用 → fallback 把 input 降级为单选项 select（占位符文本，仅保底）。
  */
-function resolveRpcInput(ctx: RuleEditorContext, rpcDeps?: RuleEditorRpcDeps): RpcIo["input"] {
-	return rpcDeps?.input
-		?? (typeof ctx.ui.input === "function"
-			? (title: string, ph?: string) => ctx.ui.input!(title, ph)
-			: (title: string, ph?: string) => ctx.ui.select(title, [ph ?? ""]).then((v) => v === undefined ? undefined : v));
+function resolveRpcInput(ctx: RuleEditorContext): RpcIo["input"] {
+	return typeof ctx.ui.input === "function"
+		? (title: string, ph?: string) => ctx.ui.input!(title, ph)
+		: (title: string, ph?: string) => ctx.ui.select(title, [ph ?? ""]).then((v) => v === undefined ? undefined : v);
 }
 
 /** 单轮 RPC list 画面：当前规则集（applyOps 反映前序操作）+ 标签 + 选项。 */
@@ -185,17 +173,15 @@ async function runRpcLoop(
  * RPC 循环编辑：list → action select → fill input → ... 直到 Done / cancel。
  *
  * G16：每次 op 后 listOptions 更新（反映前序操作）。
- * deps 注入 select/input 便于测试 mock。
  */
 export async function editViaRpc(
 	ctx: RuleEditorContext,
 	initialRules: readonly Rule[],
 	sessionIdCounter: () => string,
-	rpcDeps?: RuleEditorRpcDeps,
 ): Promise<RuleEditorResult> {
 	const io: RpcIo = {
-		select: rpcDeps?.select ?? ctx.ui.select,
-		input: resolveRpcInput(ctx, rpcDeps),
+		select: ctx.ui.select,
+		input: resolveRpcInput(ctx),
 	};
 	return await runRpcLoop(io, initialRules, sessionIdCounter);
 }

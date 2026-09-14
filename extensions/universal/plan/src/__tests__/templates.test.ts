@@ -1,21 +1,26 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { extractPlanSteps } from "../compact.js";
 import { getBuiltinTemplateDir, listTemplates, loadTemplate } from "../templates.js";
 
-describe("Template system", () => {
-  it("listTemplates returns builtin templates", () => {
+const BUILTIN_TEMPLATE_NAMES = [
+  "feature-plan",
+  "bugfix-plan",
+  "refactor-plan",
+  "research-plan",
+  "implementation-plan",
+];
+
+describe("Template system (builtin single source, D3)", () => {
+  it("listTemplates returns exactly the 5 builtin templates with no source field", () => {
     const templates = listTemplates();
-    expect(templates.length).toBeGreaterThanOrEqual(5);
-    const names = templates.map((t) => t.name);
-    expect(names).toContain("feature-plan");
-    expect(names).toContain("bugfix-plan");
-    expect(names).toContain("refactor-plan");
-    expect(names).toContain("research-plan");
-    expect(names).toContain("implementation-plan");
+    expect(templates.map((t) => t.name).sort()).toEqual([...BUILTIN_TEMPLATE_NAMES].sort());
+    // 单源化后 TemplateInfo 只有 name/path —— source 等多源残留字段即红
+    for (const t of templates) {
+      expect(t).toEqual({ name: t.name, path: t.path });
+    }
   });
 
   it("loadTemplate returns content for existing builtin template", () => {
@@ -33,28 +38,23 @@ describe("Template system", () => {
     const dir = getBuiltinTemplateDir();
     expect(fs.existsSync(dir)).toBe(true);
   });
+});
 
-  it("TC8: PI_CODING_AGENT_DIR 隔离目录下扫到全局模板（getAgentDir 派生，不依赖 ~/.pi/agent）", () => {
-    const origEnv = process.env.PI_CODING_AGENT_DIR;
-    const isolated = fs.mkdtempSync(path.join(os.tmpdir(), "plan-tpl-"));
-    try {
-      process.env.PI_CODING_AGENT_DIR = isolated;
-      fs.mkdirSync(path.join(isolated, "plan-templates"), { recursive: true });
-      fs.writeFileSync(path.join(isolated, "plan-templates", "isolated-template.md"), "# t");
+describe("template ↔ extractPlanSteps alignment guard (D4)", () => {
+  // 守卫对象：模板生成端的步骤节标题与解析端正则同仓同测，漂移即红——
+  // ① 模板标题改名 → 恰一节断言失败；
+  // ② 解析正则与标题脱节 → 提取退化到 fallback 收进其他节的噪音项 → toEqual 失败。
+  it.each(BUILTIN_TEMPLATE_NAMES)("template '%s' has exactly one '## Implementation Steps' section that extractPlanSteps consumes", (name) => {
+    const content = loadTemplate(name);
+    expect(content).not.toBeNull();
 
-      const templates = listTemplates();
-      const names = templates.map((t) => t.name);
-      expect(names).toContain("isolated-template");
-      // 隔离目录模板 source 为 global（getAgentDir 直接返回 PI_CODING_AGENT_DIR 值，无 .pi/agent 嵌套）
-      const tpl = templates.find((t) => t.name === "isolated-template");
-      expect(tpl?.source).toBe("global");
-      expect(tpl?.path.startsWith(isolated)).toBe(true);
-      // 仍能扫到 builtin 模板（最低优先级）
-      expect(names).toContain("feature-plan");
-    } finally {
-      if (origEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = origEnv;
-      fs.rmSync(isolated, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
+    expect(content!.match(/^## Implementation Steps$/gm)).toHaveLength(1);
+
+    const plan = content!
+      // 在第一个非步骤节标题后放噪音编号项（模拟 Requirements 等节含编号列表）
+      .replace(/^(## (?!Implementation Steps).+)$/m, "$1\n1. noise-from-other-section")
+      // 在步骤节标题后填编号步骤（模拟 AI 按模板写 plan.md）
+      .replace(/^## Implementation Steps$/m, "## Implementation Steps\n1. Real step A\n2. Real step B");
+    expect(extractPlanSteps(plan)).toEqual(["Real step A", "Real step B"]);
   });
 });

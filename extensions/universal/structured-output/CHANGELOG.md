@@ -1,5 +1,13 @@
 # @zhushanwen/pi-structured-output
 
+## 5.1.6
+
+### Patch Changes
+
+- ext-simplify-10: removed the literal-delay fail-fast guard and the
+  Symbol.for teardown slot (reverted to module-level let). Zero behavior
+  change.
+
 ## 5.1.5
 
 ### Patch Changes

@@ -22,7 +22,7 @@ export const REAL_AGENT_DIR = '/Users/zhushanwen/.pi/agent'
  * 这类用例遍历本机 ~/.pi/agent 全量会话语料（实测 4600+ 文件），空载单用例已需 6-10s；
  * 38 包并行全量测试时 CPU/IO 争抢可降速 3-4 倍，30s 标定必假红。90s ≈ 空载 9 倍余量，
  * 仍能兜住真正的挂死。仅用于遍历全量语料的用例（findSessions / buildFamilyFromFs /
- * listMainSessions 等）；读已知单文件的用例不需要放宽。
+ * resolveSessionRoots 等）；读已知单文件的用例不需要放宽。
  */
 export const REAL_DATA_TIMEOUT_MS = 90_000
 

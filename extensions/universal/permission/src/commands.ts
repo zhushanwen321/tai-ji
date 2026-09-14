@@ -13,9 +13,9 @@
  *   /permission status       显示当前配置详情
  */
 
-import type { ResolvedModelEntry } from "./classifier/model-resolver.js";
+import { listAvailableModels } from "./classifier/model-resolver.js";
 import { type ModelPickerContext,pickModelViaOverlay } from "./model-picker.js";
-import { type RuleEditorContext,type RuleEditorResult } from "./rule-editor.js";
+import { editRulesViaOverlay, type RuleEditorContext } from "./rule-editor.js";
 import { applyOps } from "./rule-templates.js";
 import {
 	isValidPermissionMode,
@@ -118,34 +118,26 @@ function modeHighlight(mode: PermissionMode): string {
 
 // ──────────────────────── /permission model（W7） ────────────────────────
 
-/** handlePermissionModelCommand 的依赖（DI 便于测试 mock）。 */
-export interface PermissionModelCommandDeps {
-	/** 列出可用模型（按 provider 分组）。E2 后走 ctx.modelRegistry（签名带 ctx）。 */
-	listModels: (ctx: ModelPickerContext) => Map<string, ResolvedModelEntry[]>;
-	/** 保存新配置，返回 {success, error?}。 */
-	save: (config: PermissionConfig) => { success: boolean; error?: string };
-}
-
 /**
  * /permission model 命令：overlay 选择 classifier model（provider/model 或 auto）。
  *
  * 流程：
- *  1. listModels：拿可用模型 Map。空 → 降级 notify + return。
+ *  1. listAvailableModels（ctx.modelRegistry 数据源）：拿可用模型 Map。空 → 降级 notify + return。
  *  2. pickModelViaOverlay：TUI/RPC/headless 三模式分发。
  *  3. 写回：save(newConfig)。失败 → notify error。
  *
- * 用依赖注入（deps 参数）便于测试 mock listModels/save。
- * ctx 用 ModelPickerContext 子集（mode + ui.notify/custom/select）。
+ * save 为普通函数参数（唯一真实变化轴：保存 + footer 重绘副作用）。
+ * ctx 用 ModelPickerContext 子集（mode + modelRegistry + ui.notify/custom/select）。
  */
 export async function handlePermissionModelCommand(
 	ctx: ModelPickerContext,
 	config: PermissionConfig,
-	deps: PermissionModelCommandDeps,
+	save: (config: PermissionConfig) => { success: boolean; error?: string },
 ): Promise<void> {
 	const current = config.classifier.model;
 
-	// 1. listModels（E2：ctx 传 modelRegistry 数据源）
-	const models = deps.listModels(ctx);
+	// 1. listAvailableModels（ctx.modelRegistry 数据源）
+	const models = listAvailableModels(ctx);
 	if (models.size === 0) {
 		ctx.ui.notify(
 			"[pi-permission] No available models. Run `pi auth login` or configure provider API keys, then retry.",
@@ -168,7 +160,7 @@ export async function handlePermissionModelCommand(
 		classifier: { ...config.classifier, model: selected },
 		userRules: config.userRules.map((r) => ({ ...r })),
 	};
-	const result = deps.save(newConfig);
+	const result = save(newConfig);
 	if (!result.success) {
 		ctx.ui.notify(
 			`[pi-permission] Failed to save: ${result.error ?? "unknown error"}`,
@@ -181,35 +173,24 @@ export async function handlePermissionModelCommand(
 
 // ──────────────────────── /permission rule（W8） ────────────────────────
 
-/** handlePermissionRuleCommand 的依赖（DI 便于测试 mock）。 */
-export interface PermissionRuleCommandDeps {
-	/** 保存新配置，返回 {success, error?}。 */
-	save: (config: PermissionConfig) => { success: boolean; error?: string };
-	/** 规则编辑 overlay（注入便于测试 mock）。 */
-	editRulesViaOverlay: (
-		ctx: RuleEditorContext,
-		initialRules: readonly import("./types.js").Rule[],
-		sessionIdCounter: () => string,
-		rpcDeps?: import("./rule-editor.js").RuleEditorRpcDeps,
-	) => Promise<RuleEditorResult>;
-}
-
 /**
  * /permission rule 命令：overlay CRUD 编辑 userRules。
  *
  * 流程：
- *  1. editRulesViaOverlay：TUI/RPC/headless 三模式分发。
+ *  1. editRulesViaOverlay（模块直调）：TUI/RPC/headless 三模式分发。
  *  2. ops 非空 → applyOps + saveConfig + notify。
  *  3. 空 → notify no changes。
+ *
+ * save 为普通函数参数（唯一真实变化轴：保存 + footer 重绘副作用，与同步路径 onSave 同款）。
  */
 export async function handlePermissionRuleCommand(
 	ctx: RuleEditorContext,
 	config: PermissionConfig,
 	sessionIdCounter: () => string,
-	deps: PermissionRuleCommandDeps,
+	save: (config: PermissionConfig) => { success: boolean; error?: string },
 ): Promise<void> {
 	// 1. editRulesViaOverlay
-	const ops = await deps.editRulesViaOverlay(ctx, config.userRules, sessionIdCounter);
+	const ops = await editRulesViaOverlay(ctx, config.userRules, sessionIdCounter);
 
 	if (ops === undefined || ops.length === 0) {
 		ctx.ui.notify("[pi-permission] No changes applied.", "info");
@@ -224,7 +205,7 @@ export async function handlePermissionRuleCommand(
 		classifier: { ...config.classifier },
 		userRules: newUserRules,
 	};
-	const result = deps.save(newConfig);
+	const result = save(newConfig);
 	if (!result.success) {
 		ctx.ui.notify(
 			`[pi-permission] Failed to save rules: ${result.error ?? "unknown error"}`,

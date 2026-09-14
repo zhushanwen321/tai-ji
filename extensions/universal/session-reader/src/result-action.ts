@@ -1,10 +1,12 @@
 /**
  * result action（subagent-sync-collect U6：design subagent-sync-collect.md §3.1.3）。
  *
- * 从 tool-handler.ts 机械提取（max-lines 拆分轮）：纯移动零行为变更。tool-handler 的
- * 定位/解析 helper（err/stripHash/requireStr/resolveSessionId/disambiguate/safeParse）
- * 为文件私有且被其余 9 个 action 共用，不便搬移——经 {@link ResultActionDeps} 注入，
- * tool-handler.ts 构造 RESULT_ACTION_DEPS 常量传入（构造期绑定，运行时零查找开销）。
+ * 从 tool-handler.ts 机械提取（max-lines 拆分轮）：纯移动零行为变更。纯函数 helper
+ *（err/stripHash/requireStr/SESSION_ID_PREFIX_LEN）直接 import 自 handler-utils
+ *（ext-simplify-04 E5 收敛：同包 helper 获取范式单一化）；resolveSessionId/disambiguate/
+ * safeParse 仍为 tool-handler 文件私有且被其余 9 个 action 共用，不便搬移——经
+ * {@link ResultActionDeps} 注入，入口分发处 per-call 构造（resolveSessionId 被信号包
+ * liveSessionDir 的包装覆盖）。
  *
  * 设计来源：docs/design/subagent-sync-collect.md §3.1.3（已删除，git 可追溯）——
  *   session_read {"action":"result","session":"sa-aaa"}              // 单个
@@ -14,8 +16,10 @@
  * 定位复用既有发现机制（sa-xxx manifest 反查 / uuid 片段 / 路径），不新造目录或文件。
  */
 import type { Entry, ParseResult } from './core/parser.js'
+import { textBlockParts } from './core/render.js'
 import type { MatchedSession } from './discovery/find.js'
 import { listRecordManifests, type RecordManifest } from './discovery/subagents.js'
+import { err, requireStr, SESSION_ID_PREFIX_LEN, stripHash } from './handler-utils.js'
 import type { ResolveResult, SessionReadAction, SessionReadParams, ToolResult } from './tool-handler.js'
 
 /** result 批量上限（design subagent-sync-collect §3.1.3：一次最多 10 个）。 */
@@ -27,11 +31,8 @@ const RESULT_DEFAULT_LIMIT = 8000
 /** result 批量条目分隔符（与 notifier 批通知 "\n\n---\n\n" join 同款）。 */
 const RESULT_BATCH_SEPARATOR = '\n\n---\n\n'
 
-/** result action 对 tool-handler 私有 helper 的注入面（构造期常量绑定）。 */
+/** result action 对 tool-handler 文件私有 helper 的注入面（入口分发处 per-call 构造）。 */
 export interface ResultActionDeps {
-  err(message: string): Error
-  stripHash(s: string): string
-  requireStr(val: string | undefined, name: string, action: SessionReadAction): string
   resolveSessionId(
     rawSession: string | undefined,
     action: SessionReadAction,
@@ -42,8 +43,6 @@ export interface ResultActionDeps {
   ): Promise<ResolveResult>
   disambiguate(query: string, candidates: MatchedSession[]): ToolResult
   safeParse(fileName: string): Promise<ParseResult>
-  /** 批量头行短 id 截断宽度（tool-handler SESSION_ID_PREFIX_LEN 同源）。 */
-  sessionIdPrefixLen: number
 }
 
 /**
@@ -52,23 +51,20 @@ export interface ResultActionDeps {
  * 与 record 侧 text_delta 直累积同构：同一 message 内多个 text 块无分隔拼接
  *（流式 delta 逐段 append），thinking/toolCall 块不入 record.text，此处同样排除。
  *
- * [S7 code-simplify 登记] 本包内第 4 个同構「text 块提取」变体（其余三处均在
- * tool-handler.ts / discovery/find.ts）：messageReadableText（'' join + 占位符）、
- * extractContentText（'\n' join）、extractTextFromContent（' ' join + 空返 undefined）。
+ * [S7 code-simplify 登记] 本变体经 E11 归一到共享核 textBlockParts（core/render.ts，
+ * 块 → string[]），join 语义留在本调用点。包内完整映射（共享核 1 + 特异 3）：
+ * - 共享核 textBlockParts：白名单 type==='text' 取 text；本函数（'' join）/
+ *   extract.ts extractContentText（'\n' join）/ find.ts extractTextFromContent
+ *   （' ' join + 空返 undefined）三个纯 text 变体均为其组合调用
+ * - 特异保留 3 个（filter 集不同，不可归一）：tool-handler.ts messageReadableText
+ *   （thinking/toolCall 占位）、search-across.ts searchableText（JSON 兜底）、
+ *   render.ts extractText（排除法——白名单与排除法在未知 type 块上不等价）
+ *
  * 本变体的 '' 无分隔拼接是 A4 取回逐字节一致锁定的硬理由（对齐 record.result 的
  * 流式 delta 无分隔累积），不可与带分隔符的变体合并——差异是行为敏感点，勿「顺手统一」。
  */
 function assistantMessageText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  let out = ''
-  for (const block of content) {
-    if (block !== null && typeof block === 'object') {
-      const o = block as Record<string, unknown>
-      if (o.type === 'text' && typeof o.text === 'string') out += o.text
-    }
-  }
-  return out
+  return textBlockParts(content).join('')
 }
 
 /**
@@ -120,8 +116,7 @@ interface ResultItem {
   text: string
 }
 
-/** result 截断尾提示（design §3.1.3：超出截断 + 提示读原文件）。 */
-/** result 条目截断提示行。
+/** result 条目截断提示行（design §3.1.3：超出截断 + 提示读原文件）。
  *
  * [S8 code-simplify 口径注] 本函数的 X = **保留**字符数（limit）；而 subagent-core
  * notifier.ts buildTruncationPointer 同模板的 X = **丢弃**字符数（total - kept）。
@@ -158,16 +153,16 @@ function resolveResultLimit(raw: number | undefined): number {
  * result 的 session 列表解析：单 id 或逗号批量（≤10）。
  * 空条目（如 "sa-a," 或连续逗号）与超限均明确报错（含上限数字与 👉）。
  */
-function parseResultSessionList(raw: string | undefined, deps: ResultActionDeps): string[] {
-  const trimmed = deps.requireStr(raw, 'session', 'result')
-  const ids = trimmed.split(',').map((s) => deps.stripHash(s.trim()))
+function parseResultSessionList(raw: string | undefined): string[] {
+  const trimmed = requireStr(raw, 'session', 'result')
+  const ids = trimmed.split(',').map((s) => stripHash(s.trim()))
   if (ids.some((id) => id === '')) {
-    throw deps.err(
+    throw err(
       `session 列表含空条目："${trimmed}"。👉 检查逗号分隔格式（如 "sa-aaa,sa-bbb"）重试。`,
     )
   }
   if (ids.length > RESULT_MAX_BATCH) {
-    throw deps.err(
+    throw err(
       `批量取回 ${ids.length} 个 session 超上限：一次最多 ${RESULT_MAX_BATCH} 个。` +
         `\n👉 分批取回（每批 ≤${RESULT_MAX_BATCH} 个 id）。`,
     )
@@ -194,7 +189,7 @@ export async function doResult(
   agentDir: string,
   deps: ResultActionDeps,
 ): Promise<ToolResult> {
-  const ids = parseResultSessionList(params.session, deps)
+  const ids = parseResultSessionList(params.session)
   const limit = resolveResultLimit(params.limit)
   // S3（code-simplify）：sa- 形态走 manifest 反查，逐 id 调用会重复全量扫 subagents/ 树
   //（N+1）——批量入口预取一次注入。uuid 片段/路径形态不经 manifest，不预取。
@@ -208,7 +203,7 @@ export async function doResult(
     const { entries } = await deps.safeParse(resolved.fileName)
     const text = extractFinalAssistantText(entries)
     if (text.length === 0) {
-      throw deps.err(
+      throw err(
         `session "${id}" 尚无 assistant 输出（运行中或文件尚未 flush 完整）。` +
           `\n👉 稍后重试，或用 session_read { action:"outline", session:"${id}" } 看当前进度。`,
       )
@@ -235,7 +230,7 @@ export async function doResult(
   }
   const blocks = items.map(
     (it, i) =>
-      `[${i + 1}/${items.length}] ${it.session} (session ${it.sessionId.slice(0, deps.sessionIdPrefixLen)}…)\n${it.text}`,
+      `[${i + 1}/${items.length}] ${it.session} (session ${it.sessionId.slice(0, SESSION_ID_PREFIX_LEN)}…)\n${it.text}`,
   )
   return {
     content: [{ type: 'text', text: blocks.join(RESULT_BATCH_SEPARATOR) }],

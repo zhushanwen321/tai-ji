@@ -6,7 +6,7 @@
  *
  * D-16: service 不持有 ctx，通过 ports 参数接收能力。
  *
- * FR-3.1: createGoal 唯一创建入口（/goal set 与 __goalInit 都走它）
+ * FR-3.1: createGoal 唯一创建入口（/goal set 与 goalInit slot 都走它）
  * FR-3.3: finalizeAndPersist 唯一终态序列入口（tick → finalizeGoal → persist）
  *         finalizeGoal 只做 transitionStatus + writeHistory（纯）
  * FR-6.5: persist 前调 tick 累计时间
@@ -121,7 +121,7 @@ export function persistAndUpdate(
 /**
  * 唯一创建入口。两个调用源都走它：
  * - goal_control create（toolcall，AI 提供 slug + objective + successCriteria）
- * - __goalInit（index.ts）
+ * - goalInit slot（index.ts，跨扩展编程式入口）
  *
  * 注：/goal <objective> 命令路径已改为提示词触发器——不直接调本函数，
  * 而是 sendUserMessage 让 AI 调 goal_control create（slug + successCriteria 由 AI 生成）。

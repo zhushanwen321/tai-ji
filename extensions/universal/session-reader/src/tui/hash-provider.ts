@@ -23,8 +23,9 @@ import { SessionManager, type SessionInfo } from '@earendil-works/pi-coding-agen
  * design D-4：插入纯文本 # uuid，不展开——工具侧（tool-handler）剥 # 前缀后按子串匹配。
  */
 
-/** # 补全默认返回上限（TUI 弹窗可读上限，design G6）。 */
-const DEFAULT_LIMIT = 10
+/** # 补全默认返回上限（TUI 弹窗可读上限，design G6）。/session-pick 命令复用同一上限
+ * （两入口同一可读上限，2026-09 双常量合一，session-command 不再自持 PICK_LIMIT）。 */
+export const DEFAULT_LIMIT = 10
 /**
  * description（预览/name）最大字符数。SessionInfo.firstMessage 是首消息全文（可能含
  * `<skill>` 注入全文，上千字符），预截断避免传超大字符串给 pi-tui。100 覆盖到 ~140 列
@@ -206,7 +207,10 @@ export function createHashAutocompleteProvider(
       return { items, prefix: `#${fragment}` }
     },
     applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-      // 非本 provider 的 item（不应发生，pi 按 suggestion source 路由 applyCompletion）→ 委托 current
+      // 非 # item = 经本 provider 的 getSuggestions 转发的 current（内置 @ 文件 / / 命令 /
+      // 路径）建议——pi-tui 实装（editor 持单一 autocompleteProvider，applyCompletion 直调
+      // 最外层包装者，无按 suggestion source 的路由）决定了这些 item 的 apply 也回到本
+      // provider，必须显式委托 current（组合责任在 factory，同 getSuggestions 的委托）
       if (!item.value.startsWith('#')) {
         return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix)
       }

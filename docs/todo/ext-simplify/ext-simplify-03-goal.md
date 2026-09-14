@@ -15,7 +15,7 @@
 
 **goal 包是「目标驱动的自主循环」extension，本次设计只动它的类型层、接口面与持久化 schema，不动循环机制本身。**
 
-使用者视角的现有能力（全部保留）：`/goal <objective>` 建 goal（AI 经 goal_control toolcall 重述目标并生成 slug/successCriteria）、`/goal pause`/`resume`/`clear`/`update`/`status`/`history`、token 预算 70%/90% 预警与耗尽终态、轮次活性熔断（continuation 封顶 + 退避）、pending 操作 defer、GUI/TUI 双渲染通道。跨扩展 API：`pi.__goalInit`（plan 包消费）。
+使用者视角的现有能力（全部保留）：`/goal <objective>` 建 goal（AI 经 goal_control toolcall 重述目标并生成 slug/successCriteria）、`/goal pause`/`resume`/`clear`/`update`/`status`/`history`、token 预算 70%/90% 预警与耗尽终态、轮次活性熔断（continuation 封顶 + 退避）、pending 操作 defer、GUI/TUI 双渲染通道。跨扩展 API：goalInit slot（原 `pi.__goalInit` 挂载——2026-09-14 桥修复迁移 `globalThis[Symbol.for]` slot，pi 0.84.4 per-extension API 隔离使旧形态恒不可达；plan 包消费，见 `goal-bridge-cross-extension.md`）。
 
 包拓扑（行数为 2026-09-12 实测）：包根 7 文件 998 行（index/service/persistence/session/commands/ports/constants）、adapters/ 12 文件 1652 行、engine/ 4 文件 478 行、projection/ 3 文件 604 行。分层约束 D-22：engine/ 与 service/session/persistence 零 Pi import（机器可查，`rg "@earendil" src/engine/` 零命中）。
 
@@ -223,7 +223,7 @@ M14 涉及的持久化数据流（字段在链上的位置）：
 | 7 | theme 渲染链路（断言删除冒烟） | G4（§2 目标 4） | 本地 pi TUI 模式加载 goal，触发 widget 渲染（goal 激活后状态栏） | 状态栏颜色正常（accent/警告色），无 theme undefined 运行时错；headless（`--mode json`）不渲染不报错（hasUI 既有行为） |
 | 8 | 等价重构回归 | G5 | `pnpm --filter @zhushanwen/pi-goal test` 全绿（含同步修改的 budget/prompts/deserialize/stale-checker 测试）+ `pnpm extensions:lint` | 测试与 lint 零红（E5/E6 断言更新后语义等价） |
 
-**宿主表面不变（邻居系统场景）**：goal 的 entry 类型（goal-state/goal-history customType）与字段语义不变（只减不增不改），session-reader / xyz-agent runtime 对这些 entry 的既有读取不受影响；前端 widget 投影链（guiSetWidget marker → runtime 解码 → M17 对话流面板渲染，builtin-contributions.ts:32-33 登记）亦零影响——buildGoalGui（gui.ts:79 起）只读 slug/goalId/status/currentTurnIndex/tokensUsed/budget/successCriteria，不读被删两字段，且 E3 的 theme 取法变化不进 GuiRenderResult（GUI 通道颜色经 severity 枚举表达，fg/bold 只存在于 TUI 文本行路径）；`pi.__goalInit` 签名不变（plan 包消费方零感知——GoalInitBudget 虽与 BudgetConfig 同构，不在本次范围，保持原样）。
+**宿主表面不变（邻居系统场景）**：goal 的 entry 类型（goal-state/goal-history customType）与字段语义不变（只减不增不改），session-reader / xyz-agent runtime 对这些 entry 的既有读取不受影响；前端 widget 投影链（guiSetWidget marker → runtime 解码 → M17 对话流面板渲染，builtin-contributions.ts:32-33 登记）亦零影响——buildGoalGui（gui.ts:79 起）只读 slug/goalId/status/currentTurnIndex/tokensUsed/budget/successCriteria，不读被删两字段，且 E3 的 theme 取法变化不进 GuiRenderResult（GUI 通道颜色经 severity 枚举表达，fg/bold 只存在于 TUI 文本行路径）；`pi.__goalInit` 签名不变（plan 包消费方零感知——GoalInitBudget 虽与 BudgetConfig 同构，不在本次范围，保持原样；**2026-09-14 桥修复注记**：GoalInitFn 签名仍不变，暴露通道已迁 slot，见 `goal-bridge-cross-extension.md`）。
 
 ## 9. 实施
 

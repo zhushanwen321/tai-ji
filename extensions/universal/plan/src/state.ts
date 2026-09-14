@@ -1,10 +1,7 @@
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
-export type PlanPhase = "idle" | "brainstorming" | "writing" | "complete";
-
 export interface PlanState {
   isActive: boolean;
-  phase: PlanPhase;
   planFilePath: string;
   requirement: string;
   templateName: string;
@@ -12,7 +9,6 @@ export interface PlanState {
 
 export const DEFAULT_PLAN_STATE: PlanState = {
   isActive: false,
-  phase: "idle",
   planFilePath: "",
   requirement: "",
   templateName: "",
@@ -41,7 +37,6 @@ export function getPlanState(
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   pi.appendEntry("plan-state", {
     isActive: state.isActive,
-    phase: state.phase,
     planFilePath: state.planFilePath,
     requirement: state.requirement,
     templateName: state.templateName,
@@ -57,7 +52,6 @@ export function resetPlanState(
 ): PlanState {
   const state = getPlanState(sessions, sessionId, ctx);
   state.isActive = false;
-  state.phase = "idle";
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
@@ -85,8 +79,8 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
     const entry = entries[i];
     if (!isPlanStateEntry(entry)) continue;
     const data = entry.data;
+    // 逐字段 ?? 白名单式读取：旧版 entry 残留的 phase 字段被自然忽略（D6 兼容读）
     state.isActive = data?.isActive ?? false;
-    state.phase = data?.phase ?? "idle";
     state.planFilePath = data?.planFilePath ?? "";
     state.requirement = data?.requirement ?? "";
     state.templateName = data?.templateName ?? "";

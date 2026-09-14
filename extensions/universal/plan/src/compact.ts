@@ -25,18 +25,16 @@ export function registerPlanEventHandlers(
     // Read plan file content for recovery after compact
     const planContent = readPlanFileSafe(state.planFilePath);
 
-    // Include phase info for non-complete phases
-    const phaseNote = state.phase !== "complete"
-      ? `\nPhase: ${state.phase}. Plan was in progress — review and continue.`
-      : "\nAwaiting user decision on execution. Do NOT auto-proceed.";
+    // handler 已有 isActive 门——能走到这里的 plan 必然进行中（D6：phase 删除，原 phase="complete" 分支为死状态）
+    const progressNote = "\nPlan was in progress — review and continue.";
 
     return {
       compaction: {
         summary:
-          `Plan mode active (${state.phase}). Plan file: ${state.planFilePath}\n\n` +
+          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
           `## Plan Content\n${planContent}\n\n` +
           `Requirement: ${state.requirement}` +
-          phaseNote,
+          progressNote,
         firstKeptEntryId: prep?.firstKeptEntryId,
         tokensBefore: prep?.tokensBefore,
       },
@@ -53,7 +51,7 @@ export function registerPlanEventHandlers(
     return {
       summary: {
         summary:
-          `Plan mode active (${state.phase}). Plan file: ${state.planFilePath}\n\n` +
+          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
           `## Plan Content\n${planContent}\n\n` +
           `Read the plan file and execute the implementation.`,
       },
@@ -61,24 +59,45 @@ export function registerPlanEventHandlers(
   });
 }
 
-/** Read plan file, return content or error message */
-function readPlanFileSafe(planFilePath: string): string {
+/** Read plan file: ok=false 是显式信号（GoalBridgeOutcome 的 plan-unreadable 出口消费），消除哨兵字符串比较 */
+type PlanFileContent = { ok: true; content: string } | { ok: false };
+
+function readPlanFile(planFilePath: string): PlanFileContent {
   try {
-    return fs.readFileSync(planFilePath, "utf-8");
+    return { ok: true, content: fs.readFileSync(planFilePath, "utf-8") };
   } catch {
-    return "(plan file could not be read)";
+    return { ok: false };
   }
 }
 
+/** Read plan file, return content or human-readable marker (for prompt embedding) */
+function readPlanFileSafe(planFilePath: string): string {
+  const result = readPlanFile(planFilePath);
+  return result.ok ? result.content : "(plan file could not be read)";
+}
+
+/**
+ * goalInit slot key——goal 扩展的跨扩展编程式入口（goal-bridge-cross-extension.md）。
+ * ⚠️ 必须与 `extensions/universal/goal/src/index.ts` 的 GOAL_INIT_SLOT_KEY 字符串完全一致：
+ * 两侧不共享运行时模块（pi-goal 是 optional peer），靠同一字符串拿到同一 globalThis slot。
+ * 改名必须两侧同步。
+ */
+const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
+
+/**
+ * goal 桥的单一断言点：goal 扩展挂在 globalThis slot 上的编程式接口（发现 7——
+ * 此前 detectGoalCapability / tryGoalInit 两处 inline 断言收敛于此；
+ * 桥通道从 pi API 对象挂载迁到 slot：pi 0.84.4 per-extension API 隔离使
+ * pi.__goalInit 形态跨扩展恒不可见，slot 是 C-ext-06 惯例的进程级共享形态）。
+ */
+function getGoalInit(): GoalInitFn | undefined {
+  const fn = Reflect.get(globalThis, GOAL_INIT_SLOT_KEY);
+  return typeof fn === "function" ? (fn as GoalInitFn) : undefined;
+}
+
 /** Detect whether goal extension is available via its programming interface */
-export function detectGoalCapability(pi: ExtensionAPI): boolean {
-  try {
-    // 交叉类型单步断言（ExtensionAPI 可赋给 ExtensionAPI & { __goalInit? }）
-    const api = pi as ExtensionAPI & { __goalInit?: GoalInitFn };
-    return typeof api.__goalInit === "function";
-  } catch {
-    return false;
-  }
+export function detectGoalCapability(): boolean {
+  return getGoalInit() !== undefined;
 }
 
 /**
@@ -128,29 +147,56 @@ export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]):
   return items;
 }
 
-/** Try to initialize goal via programming interface */
-function tryGoalInit(pi: ExtensionAPI, planFilePath: string, ctx: ExtensionContext): boolean {
-  try {
-    const api = pi as ExtensionAPI & { __goalInit?: GoalInitFn };
-    const goalInit = api.__goalInit;
-    if (typeof goalInit !== "function") return false;
+// ── goal 桥 outcome（D2：失败显式化）───────────────────────────────
 
-    const planContent = readPlanFileSafe(planFilePath);
-    if (planContent.startsWith("(")) return false; // read failed
+/** goalInit 失败原因——五值与 tryGoalInit 的 5 个失败出口一一对应（设计 §6.2 D2）。 */
+export type GoalBridgeFailureReason =
+  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——桥修复后是真实可达的防御分支：goal 档仅在 detectGoalCapability 通过时出现，但 slot 残留 fn 失效等窗口仍可能触发）
+  | "plan-unreadable" // plan 文件读取失败
+  | "no-steps" // plan 内容提取到 0 条步骤
+  | "init-refused" // goalInit 返回 false（已有 active goal / ctx 缺失）
+  | "internal-error"; // goalInit 抛出意外异常（catch 出口，含 slot 残留 fn 调用失效）
+
+/** tryGoalInit 的结构化结果：失败分支携带 reason（+ internal-error 的异常文本）。 */
+export type GoalBridgeOutcome =
+  | { started: true }
+  | { started: false; reason: GoalBridgeFailureReason; detail?: string };
+
+/** 每个 reason 指向一个具体恢复动作（不做纯日志字符串，设计 §4.2）。 */
+export const GOAL_FAILURE_RECOVERY: Record<GoalBridgeFailureReason, string> = {
+  "goal-unavailable": "The goal extension is not loaded — choose another execution method.",
+  "plan-unreadable": "Check that the plan file exists and is readable, then call plan(action='complete') again.",
+  "no-steps": "Add numbered steps under a '## Implementation Steps' section in the plan file, then call plan(action='complete') again.",
+  "init-refused": "An active goal already exists — run /goal clear first, or continue with the existing goal.",
+  "internal-error": "goalInit threw an unexpected exception (details in the warning notification and logs) — falling back to step-by-step execution.",
+};
+
+/** Try to initialize goal via programming interface; never throws (catch 出口 → internal-error). */
+function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOutcome {
+  try {
+    const goalInit = getGoalInit();
+    if (!goalInit) return { started: false, reason: "goal-unavailable" };
+
+    const planFile = readPlanFile(planFilePath);
+    if (!planFile.ok) return { started: false, reason: "plan-unreadable" };
 
     const objective = `Execute plan: ${planFilePath}`;
-    const tasks = extractPlanSteps(planContent);
-    if (tasks.length === 0) return false;
+    const tasks = extractPlanSteps(planFile.content);
+    if (tasks.length === 0) return { started: false, reason: "no-steps" };
 
-    return goalInit(
+    const started = goalInit(
       objective,
       undefined,
       ctx,
       buildPlanSlug(planFilePath),
       buildPlanSuccessCriteria(planFilePath, tasks),
     );
-  } catch {
-    return false;
+    return started
+      ? { started: true }
+      : { started: false, reason: "init-refused" };
+  } catch (error) {
+    logger.warn("plan: goalInit threw unexpectedly", { error: toErrorMessage(error) });
+    return { started: false, reason: "internal-error", detail: toErrorMessage(error) };
   }
 }
 
@@ -194,28 +240,64 @@ export function extractPlanSteps(planContent: string): string[] {
 }
 
 
-export function handlePlanComplete(
+/**
+ * 投递 complete 后的执行通知（D2：goal 档先 goalInit、后按结果选 steer）。
+ * 成功发 goal steer——「Execute via /goal」只在 goal 真实创建成功时说出；失败发
+ * 含 reason 与恢复动作的降级 steer + warning notify。非 goal 档无 goalInit，按
+ * execMode 组 steer。返回 goalInit 的 outcome（非 goal 档为 undefined）。
+ */
+function deliverExecutionNotice(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  state: PlanState,
-  isolation: string,
+  planFilePath: string,
   execMode: string,
-): void {
-  const planFilePath = state.planFilePath;
+): GoalBridgeOutcome | undefined {
+  const outcome = execMode === "goal" ? tryGoalInit(planFilePath, ctx) : undefined;
 
-  // Build mode-specific steer
   const modeMessages: Record<string, string> = {
     subagent: "Execute via subagent-driven development: delegate each task to an independent subagent for parallel execution.",
     goal: "Execute via /goal: set up tracked task decomposition with budget control using the goal extension.",
     "single-agent": "Execute step by step in the current session.",
   };
-  const modeHint = modeMessages[execMode] ?? modeMessages["single-agent"];
+
+  let modeHint: string;
+  if (outcome === undefined) {
+    modeHint = modeMessages[execMode] ?? modeMessages["single-agent"];
+  } else if (outcome.started) {
+    modeHint = modeMessages.goal;
+  } else {
+    modeHint = `Goal execution was not started (${outcome.reason}). ${GOAL_FAILURE_RECOVERY[outcome.reason]} Execute step by step in the current session.`;
+    const detail = outcome.detail ? ` (${outcome.detail})` : "";
+    ctx.ui.notify(`Goal execution was not started (${outcome.reason})${detail}. ${GOAL_FAILURE_RECOVERY[outcome.reason]}`, "warning");
+  }
 
   const executeMessage =
     `Plan approved by user. Plan file: ${planFilePath}\n\n` +
     `Execution mode: ${execMode}\n` +
     `${modeHint}\n\n` +
     `Read the plan file and start implementing.`;
+
+  pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
+  return outcome;
+}
+
+/**
+ * complete 的 isolation 分发（D1 后仅 compact | direct，两档都投递执行通知）。
+ *
+ * 返回值：execMode=goal 且 isolation=direct 时同步返回 goalInit 的 outcome
+ * （executeComplete 写进 result content 与 details）；其余情形返回 undefined——
+ * 非 goal 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
+ * entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，时序
+ * 不动——设计 §6.2 D2），该档 result 已返回，失败报告走 steer + notify 通道。
+ */
+export function handlePlanComplete(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: PlanState,
+  isolation: string,
+  execMode: string,
+): GoalBridgeOutcome | undefined {
+  const planFilePath = state.planFilePath;
 
   switch (isolation) {
     case "compact": {
@@ -229,8 +311,7 @@ export function handlePlanComplete(
         // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
         onComplete: () => {
           guardStaleCtx(() => {
-            pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
-            tryGoalInit(pi, planFilePath, ctx);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
           }, {
             label: "plan:compact-onComplete",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -239,27 +320,19 @@ export function handlePlanComplete(
         onError: (_error: Error) => {
           guardStaleCtx(() => {
             ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
-            tryGoalInit(pi, planFilePath, ctx);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
           }, {
             label: "plan:compact-onError",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
           });
         },
       });
-      break;
-    }
-
-    case "tree": {
-      ctx.ui.notify("Use /tree to manually navigate back. Plan file: " + planFilePath, "info");
-      break;
+      return undefined;
     }
 
     case "direct":
     default: {
-      pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
-      tryGoalInit(pi, planFilePath, ctx);
-      break;
+      return deliverExecutionNotice(pi, ctx, planFilePath, execMode);
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-scheduler",
-  "version": "0.5.2",
+  "version": "0.7.0",
   "type": "module",
   "main": "index.ts",
   "xyz-agent": {
@@ -34,7 +34,6 @@
   ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4",
-    "croner": "^9.0.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -43,14 +42,11 @@
     },
     "typebox": {
       "optional": true
-    },
-    "croner": {
-      "optional": true
     }
   },
   "dependencies": {
-    "@xyz-agent/session-delivery": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
-    "@zhushanwen/pi-extension-logger": "workspace:*"
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "croner": "^9.0.0"
   }
 }

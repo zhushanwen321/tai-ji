@@ -7,18 +7,36 @@
  *  - invalid mode → 错误提示
  *  - status → 详细配置
  *  - 当前状态（已是目标模式）→ "Already in X mode"
+ *  - model/rule 异步 handler（D4 后直调模块函数，测试在模块边界 vi.mock 控制）
  *
  * handlePermissionCommand 是纯函数（输入 args + config + onSave，输出 string），
  * 不依赖 Pi 运行时，便于单测。
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ResolvedModelEntry } from "../classifier/model-resolver.js";
-import { handlePermissionCommand, handlePermissionModelCommand, handlePermissionRuleCommand, type PermissionModelCommandDeps, type PermissionRuleCommandDeps } from "../commands.js";
+// D4：model/rule handler 直调模块函数，测试边界移到模块真实依赖位置
+// （model-resolver / rule-editor）。vi.mock factory 被提升到文件顶部，不能引用
+// 外部变量，因此默认返回值统一在 beforeEach 设置（每用例可覆盖）。
+vi.mock("../classifier/model-resolver.js", () => ({
+	listAvailableModels: vi.fn(),
+}));
+vi.mock("../rule-editor.js", () => ({
+	editRulesViaOverlay: vi.fn(),
+}));
+
+import { listAvailableModels } from "../classifier/model-resolver.js";
+import { handlePermissionCommand, handlePermissionModelCommand, handlePermissionRuleCommand } from "../commands.js";
 import type { ModelPickerContext } from "../model-picker.js";
-import type { RuleEditorContext } from "../rule-editor.js";
+import { editRulesViaOverlay, type RuleEditorContext } from "../rule-editor.js";
 import type { RuleOp } from "../rule-templates.js";
 import { DEFAULT_CONFIG, type PermissionConfig, type Rule } from "../types.js";
+
+beforeEach(() => {
+	vi.mocked(listAvailableModels).mockReset();
+	vi.mocked(listAvailableModels).mockReturnValue(new Map());
+	vi.mocked(editRulesViaOverlay).mockReset();
+	vi.mocked(editRulesViaOverlay).mockResolvedValue(undefined);
+});
 
 // ──────────────────────── mock helpers ────────────────────────
 
@@ -210,14 +228,17 @@ describe("/permission 边界", () => {
 // ──────────────────────── /permission model（W7 T6） ────────────────────────
 
 /** 构造一条 ResolvedModelEntry（测试 helper）。 */
-function makeModelEntry(provider: string, id: string, inputCost: number): ResolvedModelEntry {
+function makeModelEntry(provider: string, id: string): ResolvedModelEntry {
 	return {
 		provider,
 		id,
-		name: id,
 		api: "openai-completions",
-		cost: { input: inputCost, output: 0, cacheRead: 0, cacheWrite: 0 },
 	};
+}
+
+/** 默认可用模型：co → [m1]（非空，供正常选择流程用例）。 */
+function defaultModels(): Map<string, ResolvedModelEntry[]> {
+	return new Map([["co", [makeModelEntry("co", "m1")]]]);
 }
 
 /** 构造 mock ctx（mode + modelRegistry + ui.notify/custom/select）。 */
@@ -241,20 +262,12 @@ function makeModelPickerCtx(overrides: Partial<ModelPickerContext> = {}): ModelP
 	};
 }
 
-/** 构造 mock deps（listModels + save）。 */
-function makeModelDeps(overrides: Partial<PermissionModelCommandDeps> = {}): PermissionModelCommandDeps {
-	return {
-		listModels: overrides.listModels ?? (() => new Map([["co", [makeModelEntry("co", "m1", 0.1)]]])),
-		save: overrides.save ?? vi.fn(() => ({ success: true })),
-	};
-}
-
 describe("/permission model（W7）", () => {
 	it("无可用 model（空 Map）→ notify 降级提示，不调 save", async () => {
 		const ctx = makeModelPickerCtx();
 		const save = vi.fn(() => ({ success: true }));
-		const deps = makeModelDeps({ listModels: () => new Map(), save });
-		await handlePermissionModelCommand(ctx, makeConfig(), deps);
+		vi.mocked(listAvailableModels).mockReturnValue(new Map());
+		await handlePermissionModelCommand(ctx, makeConfig(), save);
 		expect(ctx.ui.notify).toHaveBeenCalledOnce();
 		const [msg, level] = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]!;
 		expect(msg).toContain("No available models");
@@ -271,9 +284,9 @@ describe("/permission model（W7）", () => {
 			},
 		});
 		const save = vi.fn(() => ({ success: true }));
-		const deps = makeModelDeps({ save });
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
 		const config = makeConfig({ classifier: { enabled: true, model: "co/old", timeout: 90, autoApproveLowRisk: true, autoDenyHighRisk: true } });
-		await handlePermissionModelCommand(ctx, config, deps);
+		await handlePermissionModelCommand(ctx, config, save);
 		expect(save).toHaveBeenCalledOnce();
 		const savedConfig = save.mock.calls[0]![0] as PermissionConfig;
 		expect(savedConfig.classifier.model).toBe("auto");
@@ -288,8 +301,8 @@ describe("/permission model（W7）", () => {
 			ui: { notify: vi.fn(), select: selectMock, custom: vi.fn() },
 		});
 		const save = vi.fn(() => ({ success: true }));
-		const deps = makeModelDeps({ save });
-		await handlePermissionModelCommand(ctx, makeConfig(), deps);
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
+		await handlePermissionModelCommand(ctx, makeConfig(), save);
 		expect(save).toHaveBeenCalledOnce();
 		const savedConfig = save.mock.calls[0]![0] as PermissionConfig;
 		expect(savedConfig.classifier.model).toBe("co/m1");
@@ -305,8 +318,8 @@ describe("/permission model（W7）", () => {
 			},
 		});
 		const save = vi.fn(() => ({ success: true }));
-		const deps = makeModelDeps({ save });
-		await handlePermissionModelCommand(ctx, makeConfig(), deps);
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
+		await handlePermissionModelCommand(ctx, makeConfig(), save);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("cancelled"), "info");
 		expect(save).not.toHaveBeenCalled();
 	});
@@ -320,15 +333,16 @@ describe("/permission model（W7）", () => {
 			},
 		});
 		const save = vi.fn(() => ({ success: false, error: "disk full" }));
-		const deps = makeModelDeps({ save });
-		await handlePermissionModelCommand(ctx, makeConfig(), deps);
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
+		await handlePermissionModelCommand(ctx, makeConfig(), save);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("disk full"), "error");
 	});
 
 	it("handler 返回 Promise（async 签名）", () => {
 		const ctx = makeModelPickerCtx();
-		const deps = makeModelDeps();
-		const result = handlePermissionModelCommand(ctx, makeConfig(), deps);
+		const save = vi.fn(() => ({ success: true }));
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
+		const result = handlePermissionModelCommand(ctx, makeConfig(), save);
 		// Promise.is 兼容检查
 		expect(result).toBeInstanceOf(Promise);
 		// 避免 unhandled rejection
@@ -344,14 +358,14 @@ describe("/permission model（W7）", () => {
 			},
 		});
 		const save = vi.fn(() => ({ success: true }));
-		const deps = makeModelDeps({ save });
+		vi.mocked(listAvailableModels).mockReturnValue(defaultModels());
 		const config = makeConfig({
 			mode: "strict",
 			enabled: false,
 			classifier: { enabled: false, model: "co/old", timeout: 30, autoApproveLowRisk: false, autoDenyHighRisk: false },
 			userRules: [{ id: "u1", tool: "bash", pattern: "rm *", action: "deny", source: "user" }],
 		});
-		await handlePermissionModelCommand(ctx, config, deps);
+		await handlePermissionModelCommand(ctx, config, save);
 		const saved = save.mock.calls[0]![0] as PermissionConfig;
 		expect(saved.mode).toBe("strict"); // 保留
 		expect(saved.enabled).toBe(false); // 保留
@@ -376,14 +390,6 @@ function makeRuleEditorCtx(overrides: Partial<RuleEditorContext> = {}): RuleEdit
 	};
 }
 
-/** 构造 PermissionRuleCommandDeps mock。 */
-function makeRuleDeps(overrides: Partial<PermissionRuleCommandDeps> = {}): PermissionRuleCommandDeps {
-	return {
-		save: overrides.save ?? vi.fn(() => ({ success: true })),
-		editRulesViaOverlay: overrides.editRulesViaOverlay ?? vi.fn(() => Promise.resolve(undefined)),
-	};
-}
-
 function makeRule(overrides: Partial<Rule> = {}): Rule {
 	return {
 		id: "user-1",
@@ -405,11 +411,8 @@ describe("/permission rule（W8）", () => {
 		const notify = vi.fn();
 		const save = vi.fn(() => ({ success: true }));
 		const ctx = makeRuleEditorCtx({ ui: { notify, select: vi.fn(), custom: vi.fn() } });
-		const deps = makeRuleDeps({
-			save,
-			editRulesViaOverlay: vi.fn(() => Promise.resolve(undefined)),
-		});
-		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), deps);
+		vi.mocked(editRulesViaOverlay).mockResolvedValue(undefined);
+		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), save);
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("No changes"), "info");
 		expect(save).not.toHaveBeenCalled();
 	});
@@ -418,11 +421,8 @@ describe("/permission rule（W8）", () => {
 		const notify = vi.fn();
 		const save = vi.fn(() => ({ success: true }));
 		const ctx = makeRuleEditorCtx({ ui: { notify, select: vi.fn(), custom: vi.fn() } });
-		const deps = makeRuleDeps({
-			save,
-			editRulesViaOverlay: vi.fn(() => Promise.resolve([])),
-		});
-		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), deps);
+		vi.mocked(editRulesViaOverlay).mockResolvedValue([]);
+		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), save);
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("No changes"), "info");
 		expect(save).not.toHaveBeenCalled();
 	});
@@ -432,12 +432,9 @@ describe("/permission rule（W8）", () => {
 		const save = vi.fn(() => ({ success: true }));
 		const ops: RuleOp[] = [{ kind: "add", rule: makeRule({ id: "user-1", pattern: "git *" }) }];
 		const ctx = makeRuleEditorCtx({ ui: { notify, select: vi.fn(), custom: vi.fn() } });
-		const deps = makeRuleDeps({
-			save,
-			editRulesViaOverlay: vi.fn(() => Promise.resolve(ops)),
-		});
+		vi.mocked(editRulesViaOverlay).mockResolvedValue(ops);
 		const config = makeConfig({ userRules: [] });
-		await handlePermissionRuleCommand(ctx, config, makeCounter(), deps);
+		await handlePermissionRuleCommand(ctx, config, makeCounter(), save);
 		expect(save).toHaveBeenCalledOnce();
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("1 change(s)"), "info");
 		// save 收到的 config.userRules 含新规则
@@ -451,11 +448,8 @@ describe("/permission rule（W8）", () => {
 		const save = vi.fn(() => ({ success: false, error: "disk full" }));
 		const ops: RuleOp[] = [{ kind: "add", rule: makeRule({ id: "user-1" }) }];
 		const ctx = makeRuleEditorCtx({ ui: { notify, select: vi.fn(), custom: vi.fn() } });
-		const deps = makeRuleDeps({
-			save,
-			editRulesViaOverlay: vi.fn(() => Promise.resolve(ops)),
-		});
-		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), deps);
+		vi.mocked(editRulesViaOverlay).mockResolvedValue(ops);
+		await handlePermissionRuleCommand(ctx, makeConfig(), makeCounter(), save);
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("disk full"), "error");
 	});
 
@@ -463,16 +457,13 @@ describe("/permission rule（W8）", () => {
 		const save = vi.fn(() => ({ success: true }));
 		const ops: RuleOp[] = [{ kind: "add", rule: makeRule({ id: "user-1" }) }];
 		const ctx = makeRuleEditorCtx({ ui: { notify: vi.fn(), select: vi.fn(), custom: vi.fn() } });
-		const deps = makeRuleDeps({
-			save,
-			editRulesViaOverlay: vi.fn(() => Promise.resolve(ops)),
-		});
+		vi.mocked(editRulesViaOverlay).mockResolvedValue(ops);
 		const config = makeConfig({
 			mode: "strict",
 			enabled: false,
 			classifier: { enabled: false, model: "custom", timeout: 10, autoApproveLowRisk: false, autoDenyHighRisk: false },
 		});
-		await handlePermissionRuleCommand(ctx, config, makeCounter(), deps);
+		await handlePermissionRuleCommand(ctx, config, makeCounter(), save);
 		const saved = save.mock.calls[0]![0] as PermissionConfig;
 		expect(saved.mode).toBe("strict");
 		expect(saved.enabled).toBe(false);
@@ -480,14 +471,14 @@ describe("/permission rule（W8）", () => {
 	});
 
 	it("editRulesViaOverlay 收到正确的 initialRules 和 sessionIdCounter", async () => {
-		const editMock = vi.fn(() => Promise.resolve(undefined));
+		const save = vi.fn(() => ({ success: true }));
 		const ctx = makeRuleEditorCtx({ ui: { notify: vi.fn(), select: vi.fn(), custom: vi.fn() } });
 		const existingRules = [makeRule({ id: "user-5" })];
 		const counter = makeCounter();
-		const deps = makeRuleDeps({ editRulesViaOverlay: editMock });
-		await handlePermissionRuleCommand(ctx, makeConfig({ userRules: existingRules }), counter, deps);
-		expect(editMock).toHaveBeenCalledOnce();
-		const [_callCtx, callRules, callCounter] = editMock.mock.calls[0]!;
+		vi.mocked(editRulesViaOverlay).mockResolvedValue(undefined);
+		await handlePermissionRuleCommand(ctx, makeConfig({ userRules: existingRules }), counter, save);
+		expect(editRulesViaOverlay).toHaveBeenCalledOnce();
+		const [_callCtx, callRules, callCounter] = vi.mocked(editRulesViaOverlay).mock.calls[0]!;
 		expect(callRules).toEqual(existingRules);
 		expect(typeof callCounter).toBe("function");
 	});
