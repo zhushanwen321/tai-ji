@@ -211,7 +211,9 @@ graph LR
 6. subagent 领地 = 线级包目录；发现领地外必改（如 runtime 侧意外牵连）停下上报，禁止顺手改。
 7. **goal 桥断裂（06-u0 探针新发现，2026-09-14）**：pi 0.84.4 每扩展独立 API 对象，`pi.__goalInit` 跨扩展挂载运行时不可达（双扩展实验确证，probe-06.md）——goal 档在 plan complete 对话框恒缺失、tryGoalInit 恒不执行。处置：06 线照常实施（D2 改造正确性独立）；V1/V2 的 goal 档场景按桥断裂现状形态验收并标注；桥修复（goal 暴露机制 + plan 探测方式）为独立缺陷待用户裁决，不纳入本批。
 8. **subagent-core 预存 typecheck 失败（认知外，08-u23 上报并经主 agent 核实）**：`src/execution/__tests__/inflight-production-wiring.test.ts` 三处 TS 错误（:144 TS2339 / :155 TS2554 / :157 TS2339），HEAD 上即红，引入 commit 90cdbefe6（2026-09-12 u7a 管线，本会话之前）。不在本流水线任何门内（全量清单 = extensions 三连 + doc-drift + extension-dependencies；notify-ledger 相关 vitest 36+23 绿）。处置：登记 + 最终汇报，不在本批修（修复须改认知外文件，归责 u7a 对应管线）。
-9. **scripts/verify-scheduler-e2e.cjs EXTENSION_PATH 指旧路径（08-u4 上报，领地外）**：无 CI/husky 机器依赖（仅自身 usage 文档引用）；该脚本是 scheduler 端到端实测基础设施，阶段 5 验收 08-V1/V3 时改一行路径复用（主 agent 直改，验证基础设施非 subagent 领地）。
+9. **scripts/verify-scheduler-e2e.cjs EXTENSION_PATH 指旧路径（08-u4 上报，领地外）**：无 CI/husky 机器依赖（仅自身 usage 文档引用）；该脚本是 scheduler 端到端实测基础设施，阶段 5 验收 08-V1/V3 时改一行路径复用（主 agent 直改，验证基础设施非 subagent 领地）。→ 已修（2ac4a9b20）。
+10. **08 区验收遗留观测（2026-09-14，建议交付后立案）**：idle 长静默期出现约 10min 精确延迟的投递（V3 两次 + V4① 两 run 共 4 次复现）——延迟恰一次、advance 记账正确、无重复注入（是「延迟」不是「重复」，不违反 V3 通过标准）；机制未归因（内核 backoff ≤5s / watchdog 30s 均解释不了 10min；与 QUEUE_DEDUPE_TTL=10min 数值巧合但无重投副本形态）；本批改动（settled 粒度 + croner 依赖）不触碰该链路，V3 前两轮同链路正常。处置：登记待用户裁决是否立案排查。
+11. **验收期方法学修正与澄清（08/05 区）**：①P2 staging 法需先 `pnpm build` session-delivery（tarball 走 publishConfig dist 形态）；②`schedule_control list` 视图不渲染 runCount（format.ts 既有行为）——runCount 记账以 advance entry 持久化投影承载；③05-A3①：strict 模式不跑 AI 分类，RPC title 生产形态为 3 行（reasoning 行仅 preClassification 非空时出现，该参数生产零调用方、仅单测构造——改前同形态，M6 的 6 行形态由单测锚定）。均为既有事实澄清，非回归。
 
 **变更历史**：
 
