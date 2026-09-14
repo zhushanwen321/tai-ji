@@ -6,8 +6,9 @@
 > **范围收窄后扩大（2026-09-12）**：首轮收窄仅 01/02/12 推进对抗式审查闭环并进入 dev-flow 实施；03/09/14 随后亦经双审查至 0 must-fix 并实施完成。当前已实施 6 份（01/02/03/09/12/14）。
 > **剩余 9 份已审查（2026-09-13）**：按用户指示以 over-engineering-audit skill 方法论（四问 + 反模式清单 + 证据纪律）对 04-08/10/11/13/15 逐份派 subagent 审查，报告落盘本目录 `ext-simplify-XX-*.review.md`。结果：10/11 两份 PASS（0 must-fix），其余 7 份 NEEDS-FIX 共 12 must-fix（04/05/06/07/08 各 1、13 有 5、15 有 2）——全部为事实基线过时 / 公式自相矛盾 / 跨设计前提失效类文档级问题，**方案方向本身 9/9 全部核实成立（无伪问题、无新增过度设计）**。16 号仍未起草。
 > **A 组 6 份已实施（2026-09-14）**：设计就绪后同日走 dev-flow 全流水线——22 单元全部 committed、阶段 3 五区一致性审查（unreasonable/doc_errors 双清零）、Gate A 全量 26 包 4457 用例绿、阶段 5 真机验收全 PASS（GUI 共享轮含 05-A3②/08-V2/V4/11-V2/双层链）。批次尾 changeset 已落；goal 桥运行时断裂（pi 0.84.4 跨扩展 API 不可达）为实施期新发现独立缺陷，修复设计三审 0 must-fix（`goal-bridge-cross-extension.md`）并**已实施（2026-09-14，slot 直挂方案 u1-u4）**；plan 包存废待 tdflow 两阶段工作流重构（`docs/todo/tdflow-two-phase-workflow.md`）落地时另行裁决（重构落地前 plan 维持现状）。原设计就绪记录：04/05/06/08/10/11 按用户指示走完整 tech-design 流程——v2 修复 over-engineering 审查全部意见（4 MF + 21 sug）后补**双审查**（tech-design-review 主审 + tech-design-impact-review 影响面审；简洁性维度已由 over-engineering 审查的「方案自身过度设计检查」覆盖，不重跑），R1 共 3 must-fix（04：G5① impl-plan 回写落点 ×1；08：慢投递行为表征失实 + 排查通道不可操作 ×2）+ 9 sug 全部当轮修复，R2 聚焦复审 6/6 双 PASS 至 **0 must-fix**。双审查报告按流程约定落 `.tmp/tech-design/`（gitignore，不入库）。B 组（07/13/15）与 16 号不在本轮范围。
+> **17 号统一设计起草并双审查闭环（2026-09-14）**：来源为两路 scan 合并（B 组 5 包逐包 subagent 深审 + scheduler jscpd+语义 scan；候选全部经主 agent grep/实读核实后采信）——跨包重复逻辑收敛进共享层三归宿（ext-guards / llm-shared / extension-protocol）+ 包内收敛，14 个 D 项分四桶。审查轨迹：r1（主审 2 MF + 6 S / 影响面 1 MF + 2 S 全修）→ r2 双审独立发现同一 MF（rename-session llm.ts isRecord 在 D7 删除块外的消费点，「消费自然消失」断言证伪）→ r3 影响面补全消费点清单至 4 处并核正自身 r2 漏报 → 主审 R2 PASS + 影响面 v5 确认 PASS，**0 must-fix**。用户裁决已记录于文档头：bte subagent 判据重锚定预授权（探针证实即修）、isRecord 随批顺带、先统一设计后实施。**分支分叉状态同步**：B 组（07/13/15）与 16 号已在 `feat-optimize-extension-overengineering-group-b` 分支实施完成（实施 commit 与验收记录见该分支 index；本文件 07/13/15/16 行状态列保留 A 侧审查时点快照，不再回填）；17 号实施横跨两分支（共享包统一 group-b 侧，scheduler / pi-subagent-cli 本地项在 A 侧），且 group-b worktree 目录已于 20260914 删除（分支 ref 在），实施前须重建。
 
-## 设计文档清单（16 份）
+## 设计文档清单（17 份）
 
 | # | 设计文档 | 覆盖包 | 覆盖发现（审计编号） | 四问记录（~/.pi/agent/tmp/） | 状态 |
 |---|---|---|---|---|---|
@@ -27,6 +28,7 @@
 | 14 | ext-simplify-14-shared-libs.md | file-lock、cache-probe、extension-logger | C9 file-lock 扩展侧 async 面（65 行零调用）；M22 cache-probe seq 声明未实装；low：file-lock LockCoreOptions/双 Options re-export、extension-logger 类型导出+测试出口、cache-probe 测试导出×3 | session-view-01a0907b-727f-*.md | 已实施（双审查至 0 must-fix；u1-u3 20260912） |
 | 15 | ext-simplify-15-rename-session-session-manager.md | rename-session、session-manager | M20 PI_RENAME_* env 覆盖层；M25 session-manager 契约 4 字段+1 类型死；low：isSubagentSession 路径嗅探（contested→登记 constraints+双端注释）、preview 双维护 | session-view-01a09070-780e-*.md | 已审查 20260913：NEEDS-FIX 2 MF——MF1 状态失同步（D1/D3/D4/C3 已被 rename-session-three-modes.md D6/D7 吸收实施或关闭，**待执行范围收敛为 D2+B1-B3**）；MF2 §6.1 等价性前提被 three-modes D5 推翻（空 ref 现走 ctx.model）+ 3 sug（review.md） |
 | 16 | ext-simplify-16-plugin-bridge.md | plugin-bridge | M21 Inject*Content 透传机制（contested→设计裁决：收窄 text-fallback vs 保留 forward-ready）；low：BridgeSyncPayload.commands 恒空死字段（双端同 PR）、isToolNotFound error 分支、跨包形状一致性测试（补测试） | session-view-01a0907b-7245-*.md | 待设计 |
+| 17 | ext-simplify-17-shared-extraction.md | 跨包共享抽取（ext-guards、llm-shared、extension-protocol + scheduler、rename-session、todo、base-tool-enhance、plugin-bridge、session-manager、subagent-workflow、smart-context、permission、plan） | 非 20260911 审计来源：20260914 两路 scan 合并（B 组 5 包逐包深审 + scheduler 扫描）——4 条实测漂移实证 + 5 条确凿同构候选，14 个 D 项分四桶（toErrorMessage 采用批、isEnoentError/isRecord/isSubagentProcess 新导出、ThinkingLevel 白名单、normalizeModelSelector、joinTextBlocks、select+marker RPC 原语、firstContentText、pending 映射、Bridge 守卫族、scheduler/rename-session/todo 包内收敛） | 无（scan 报告 + 主 agent 逐条核实替代四问记录） | 设计就绪（v6 20260914：双审查至双 PASS 0 must-fix，轨迹见文档头；用户裁决——bte 判据重锚定预授权（探针门控）、isRecord 采纳、批次与分支归属已定；实施待用户指示，group-b 侧前置 = 重建 worktree） |
 
 ## 无任务包（审计「已核实非过度」，不出设计文档）
 
@@ -38,8 +40,8 @@
 
 | 阶段 | 状态 |
 |------|------|
-| 映射索引（本文件） | ✅ 20260911（20260912 范围收窄更新；20260913 审查状态更新；20260914 A 组设计就绪更新） |
-| 起草（16 份，tech-design 五段骨架） | 01-15 已落盘并提交（16 未起草）；20260912 收窄为仅 01/02/12 推进，后扩大：03/09/14 亦审查实施完成 |
-| 审查 | 01/02/03/09/12/14：双审查（tech-design-review + tech-design-impact-review）完成。04-08/10/11/13/15：20260913 完成 over-engineering-audit 视角审查（9 份报告 `ext-simplify-XX-*.review.md`，2 PASS / 7 NEEDS-FIX 共 12 must-fix，方案方向 9/9 成立）；其中 **A 组 6 份（04/05/06/08/10/11）20260913-14 追加 tech-design 双审查至 0 must-fix**（报告 `.tmp/tech-design/`，gitignore）；16 未起草 |
-| 修复循环（每轮全修 must-fix+suggestion 至 0） | 01（3 轮）/ 02（4 轮）/ 12（2 轮）/ 09（2 轮）/ 03（聚焦复审 R1 双 0）/ 14（主审 R1 + 影响面 R2）均收敛至 0 must-fix；**A 组 6 份（04/05/06/08/10/11）：over-eng 意见 4 MF + 21 sug 全修（v2）→ 双审查 R1 3 MF + 9 sug 全修（v2-r1）→ R2 聚焦复审 6/6 双 PASS（04 补 1 sug / 08 补 2 INFO 措辞，v2-r2）**；B 组（07/13/15）余 8 must-fix 待修复 |
-| 设计就绪宣告 + commit | 01/02/03/09/12/14 + **A 组 04/05/06/08/10/11（20260914 dev-flow 全流水线交付，impl-plan .tmp/dev-flow/ext-simplify-group-a.impl-plan.md）**共 12 份已实施；07/13/15 待修复后进双审查；16 待起草 |
+| 映射索引（本文件） | ✅ 20260911（20260912 范围收窄更新；20260913 审查状态更新；20260914 A 组设计就绪更新；20260914 17 号起草 + 分支分叉状态同步更新） |
+| 起草（17 份，tech-design 五段骨架） | 01-16 已落盘（16 在 group-b 分支起草）；17 于 20260914 起草落盘本分支（来源非 20260911 审计，系两路 scan 合并的新增项）；20260912 收窄为仅 01/02/12 推进，后扩大：03/09/14 亦审查实施完成 |
+| 审查 | 01/02/03/09/12/14：双审查（tech-design-review + tech-design-impact-review）完成。04-08/10/11/13/15：20260913 完成 over-engineering-audit 视角审查（9 份报告 `ext-simplify-XX-*.review.md`，2 PASS / 7 NEEDS-FIX 共 12 must-fix，方案方向 9/9 成立）；其中 **A 组 6 份（04/05/06/08/10/11）20260913-14 追加 tech-design 双审查至 0 must-fix**（报告 `.tmp/tech-design/`，gitignore）；**17：20260914 双审查至双 PASS**（r1 3 MF + 8 S 全修 → r2 双审同点 MF → r3 影响面补全 → 双 PASS，轨迹见 17 号文档头） |
+| 修复循环（每轮全修 must-fix+suggestion 至 0） | 01（3 轮）/ 02（4 轮）/ 12（2 轮）/ 09（2 轮）/ 03（聚焦复审 R1 双 0）/ 14（主审 R1 + 影响面 R2）均收敛至 0 must-fix；**A 组 6 份（04/05/06/08/10/11）：over-eng 意见 4 MF + 21 sug 全修（v2）→ 双审查 R1 3 MF + 9 sug 全修（v2-r1）→ R2 聚焦复审 6/6 双 PASS（04 补 1 sug / 08 补 2 INFO 措辞，v2-r2）**；**17：r1 全修（v2/v3）→ r2 主审 PASS（v4）+ 影响面 1 MF → r3 补全（v5）→ 影响面最终确认 PASS（v6）**；B 组（07/13/15）余 8 must-fix 待修复（该分支后续已自行收敛并实施，见 group-b index） |
+| 设计就绪宣告 + commit | 01/02/03/09/12/14 + **A 组 04/05/06/08/10/11（20260914 dev-flow 全流水线交付，impl-plan .tmp/dev-flow/ext-simplify-group-a.impl-plan.md）** + **17（20260914 设计就绪，实施待用户指示）**；07/13/15/16 已在 group-b 分支实施完成（20260914，见该分支 index） |
