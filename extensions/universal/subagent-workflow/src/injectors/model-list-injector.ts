@@ -42,6 +42,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 // C5①/C5⑦：渲染统一走 core barrel（formatModelList + ModelEntry 类型为 barrel 导出面）
 import { formatModelList, type ModelEntry } from "@zhushanwen/subagent-core";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 const logger = getLogger("injector");
 
@@ -87,7 +88,7 @@ export function setupModelListInjector(pi: ExtensionAPI): void {
 				return { systemPrompt: event.systemPrompt + injection };
 			} catch (err) {
 				logger.error("[model-list-injector] before_agent_start failed", {
-					reason: err instanceof Error ? err.message : String(err),
+					reason: toErrorMessage(err),
 				});
 			}
 		},

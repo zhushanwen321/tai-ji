@@ -40,6 +40,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SUBAGENT_INFLIGHT_MARKER, callMarkerRpc, isInFlightReportAck } from "@xyz-agent/extension-protocol";
 import { getInFlightSnapshot } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）。取值对齐
  *  plugin-bridge 启动 sync 的 2s 自愈闸：session_start 首帧可能早于 runtime adapter
@@ -202,7 +203,7 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
     if (!firstFailureLogged) {
       firstFailureLogged = true;
       logger.warn(`[subagent-inflight] in-flight report failed (${reason}); retrying every ${retryDelayMs}ms (bounded at ${maxAttempts} attempts)`, {
-        detail: detail instanceof Error ? detail.message : String(detail),
+        detail: toErrorMessage(detail),
       });
       return;
     }
