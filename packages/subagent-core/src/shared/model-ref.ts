@@ -43,7 +43,8 @@ export interface ModelRefSource {
  * （extensions/shared/llm-shared/src/resolve.ts）与被迫独立的 pi-rpc 词表
  * （packages/pi-rpc/src/types.ts THINKING_LEVELS，禁 subagent-core 依赖所致）。
  * 词表变更须三处同步（词表守卫 scripts/check-thinking-levels.mjs 比对
- * pi-ai ↔ llm-shared + pi-rpc 两副本，本数组不在比对面，靠本注释提示）。
+ * pi-ai ↔ llm-shared + pi-rpc + 本数组三副本，本数组为 T3 比对面
+ * 〔ext-simplify-18 D6〕——成员集合一致性校验，不判低→高顺序）。
  * ext-simplify-17 D5 双登记裁决：两侧注释互指关联，不建跨包 import
  * （universal 角色包禁 import subagent-core，反向则 shared 库依赖 packages/ 破坏分层）。
  */

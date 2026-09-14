@@ -2554,7 +2554,7 @@
     },
     {
       "id": "C-build-10",
-      "summary": "thinking 档位词表跟随守卫（ext-simplify-17 D5）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS 两副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向 resolve.ts 同步）；subagent-core THINKING_ORDER（顺序数组）不在比对面，靠 model-ref.ts 注释互指提示三处同步",
+      "summary": "thinking 档位词表跟随守卫（ext-simplify-17 D5 + ext-simplify-18 D6 扩面）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / subagent-core model-ref.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS + subagent-core THINKING_ORDER 三副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向副本同步）；subagent-core THINKING_ORDER 为 T3 比对面（ext-simplify-18 D6：成员集合一致性，不判低→高顺序——顺序语义由 subagent-core 自身测试锚定）",
       "scope": [
         "extensions/shared/llm-shared/src/resolve.ts",
         "packages/pi-rpc/src/types.ts",
@@ -2562,7 +2562,8 @@
         "packages/subagent-core/src/shared/model-ref.ts"
       ],
       "authority": [
-        "architecture/ext-simplify-17-shared-extraction.md"
+        "architecture/ext-simplify-17-shared-extraction.md",
+        "architecture/ext-simplify-18-shared-adoption.md"
       ],
       "dimensions": [
         "extension-api",

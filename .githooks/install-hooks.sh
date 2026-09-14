@@ -1305,16 +1305,18 @@ ${STAGED_DELETED}"
         echo -e "${GREEN}[OK] 无 pi 派生锚点文件变更，跳过 pi-sync 守卫${NC}"
     fi
 
-    # thinking 档位词表守卫（ext-simplify-17 §3.2 D5 机器守卫补强，按路径触发）：
-    # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组）双向比对。
+    # thinking 档位词表守卫（ext-simplify-17 §3.2 D5 机器守卫补强 + ext-simplify-18 §3.4
+    # D6 扩面，按路径触发）：
+    # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组 /
+    # subagent-core THINKING_ORDER 有序数组）双向比对。
     # 钉值单测只锚副本自身字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 实证），
-    # 仅此守卫红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 两副本文件 / 守卫脚本自身；
+    # 仅此守卫红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 三副本文件 / 守卫脚本自身；
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
     # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
-    # 本守卫守 extensions/pi-rpc 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 本守卫守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
     # 总闸 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$"; then
         echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对守卫...${NC}"
         if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器守卫交付物缺失）${NC}"
