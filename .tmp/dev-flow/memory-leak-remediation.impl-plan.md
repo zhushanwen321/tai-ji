@@ -120,7 +120,7 @@ flowchart LR
 | u3 | committed | 0 | 0f1d445a2 |
 | u4 | committed | 0 | b54df2bf5 |
 | u5 | committed | 0 | eadb058fa |
-| u6 | committed | 0 | b80341774 核验 88/88 | 波1派发 |
+| u6 | committed | 0 | b80341774 核验 88/88 | 波2派发 |
 | u7 | committed | 0 | 4299b697c 核验 20+38/38 | 波2派发（u2 已 committed 解锁）|
 | u8 | committed | 0 | b2ebde1b1 核验 4+14/14 | 波2派发 |
 | u9 | committed | 0 | 8d3b5dd29 全量 6020/6020 绿（存量 extractor 失败已修） | 波2派发（含存量 extractor 失败修复）|
@@ -130,7 +130,7 @@ flowchart LR
 - 残留风险：①16MB ring 预算与 32MB HRC 帽为设计值——**A9 已按设计值通过（07be47679），维持 16MB/32MB，校准遗留 = 无**（F6 回填）②A9 量化锚点受 GC 波动影响，已用静置 60s + 中位数缓解（实测补充：删除释放延迟一拍，扩展稳态采样覆盖，见 §5 阶段5-A9 行）③摘碑挂点 plugin-service.ts:441 是单槽回调——实施须链式追加不得二次 setOnSessionCreated 覆盖（简洁审 R4 INFO，实施已按链式追加落地，plugin-service.ts:442-446）。
 - 变更历史：
   - 2026-09-14 计划创建（来源设计 R4 终版 d6b3d0b9f，三审 0 MF）
-  - 2026-09-14 wave-1 完成（u1-u6 committed，669bbbf82）；wave-2 完成（u7-u10 committed，1d589898c）
+  - 2026-09-14 wave-1 完成（u1-u5 committed，669bbbf82）；wave-2 完成（u6-u10 committed，u6=b80341774 随 1d589898c 收口）
   - 2026-09-14 阶段 3 三区一致性审查：1 HIGH（B5 触发面越界）修复 ca058f602 + 3 LOW（i18n 527a0f1a3 / skill-warn e1b5c3c88）+ 8 doc_errors 主 agent 亲修 f014b994a
   - 2026-09-14 Gate A 全量绿 + 阶段 5 验收 A3 8/8、A4 9/9（6cbc1c6c6）
   - 2026-09-15 阶段 5 A9 PASS（soak + 删除基准 -258MB）+ 交付汇总（07be47679）
