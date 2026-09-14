@@ -99,6 +99,7 @@ flowchart LR
 | 阶段3-修复 | 1 high（B5 触发面收窄 ca058f602）+ 3 low（i18n 527a0f1a3 / 接口契约随组A / skill-warn e1b5c3c88）全清零；8 doc_errors 亲修（f014b994a） | 定向复审 b5-fix-recheck 派发 | 见各 commit |
 | 阶段5-A3 | 删除全链路 8/8 PASS（WS RPC 真删除→列表移除+文件清理；forceQuit 存活对照；废纸篓断言 TCC 拦截→单测+日志代理覆盖）| 脚本 .tmp/dev-flow/memory-leak-remediation.acceptance/a3-delete-chain.mjs | dev 实例真机 | 
 | 阶段5-A4 | 断连重连 9/9 PASS（kill runtime ×5→supervisor 复起+RPC 可达+页面健康+console 零 error；第 5 轮系统内存压力致 reattach 推迟>6s，补验通过）| 脚本 a4-reconnect.mjs | dev 实例真机 |
+| 阶段5-A9 | **PASS**。①soak：30min 混合工作流 58 轮 + 静置采样——renderer JS heap 全程稳定 58-59MB（前端修复面零 JS 泄漏）、main 进程 134-144MB 稳定、rt RSS 峰值 558MB→静置 116MB（高水位可回收）；稳态抬升 +22MB ≈ ring 16MB/session + HRC 32MB 帽内设计内缓存。②量化锚点（设计 §4 A9 原文口径）：删 5 个大 session（合计 ~87MB 历史）→ 净回落 rt RSS 398016→133536KB（**-258MB > 0**）+ heap 58→57MB；5/5 session.deleted。③孤儿检查：无 ppid=1 的 pi/Chromium 进程。④日志探针 A1/A2/A5 零命中（无 pingTimer 残留 / ring 超预算 warn / bridge 累积 warn） | a9-soak.mjs + a9-delete-baseline.mjs + a9-delete-baseline.jsonl；日志探针空对象根因 = 脚本 glob 实例目录，实际日志在 ~/.xyz-agent-dev/logs/runtime-*.log（主会话手工补跑断言）。释放延迟现象：60s 窗口内释放分两拍（post-3 才落 133MB），扩展稳态采样确认——对齐设计 R2 S1 防惰性 GC 假阴，登记为已知现象非缺陷 | dev 实例真机 |
 | Gate A | runtime 524f/6024t 绿（2 unhandled=用户在制 rpc-client）·core 129f/2104t 绿·renderer 402f/4354t 绿·ext typecheck+lint 绿·根 lint 修 2 行级豁免后绿 | extensions:test 中 pi-subagent-cli 12 失败=既有（基线前 f932d8545 poolKey 退役遗留，本分支区间该三包零 diff，日志 .tmp/dev-flow/gate-a-*.log） | 用户域残留登记 |
 | 事件 | 越权/外来 commit ×3：0f6d7c93f（fix ci vitest flags）·1b0f9dac6（perf ci shard）·8c0e49ef6（perf runtime rpc-client 测试提速，用户本人 commit）| 内容均正当；保留；最终汇报 | 用户在制 test-infra-source-simplify 工作继续中（docs/todo/） |
 | 阶段3 | 三区一致性审查：1 high（B5 触发面越界）+ 3 low unreasonable + 8 doc_errors | 修复组 A/B/C 并行派发；doc_errors 主 agent 亲修 | 审查报告见本表上方 |
@@ -127,3 +128,27 @@ flowchart LR
 ## 7 残留风险与变更历史
 - 残留风险：①16MB ring 预算与 32MB HRC 帽为设计值，A2/A9 实测后校准（登记于设计待验证检查点 3）②A9 量化锚点受 GC 波动影响，已用静置 60s + 中位数缓解③摘碑挂点 plugin-service.ts:441 是单槽回调——实施须链式追加不得二次 setOnSessionCreated 覆盖（简洁审 R4 INFO）。
 - 变更历史：2026-09-14 计划创建（来源设计 R4 终版，三审 0 MF）。
+
+## 8 阶段 5 交付汇总（2026-09-15 收尾）
+
+**目标达成对照表**：
+
+| 目标 | 证据 | 判定 |
+|---|---|---|
+| G1 消灭两个高危项（pingTimer 泄漏 / ring 字节无界） | u1（7f55323f5 dispose 补 stopPingLoop）/ u3（0f1d445a2 字节记账）+ A1 日志探针 30min 工作流零 pingTimer 残留 + A2 单测（预算内驱逐/超调下界/记账口径） | 达成 |
+| G2 活性无界结构获确定回收路径 | u8（b2ebde1b1 openPiStreams 摘除 + inFlightSubscribes sweep）+ A9 soak rt RSS 高水位 558MB→静置 116MB 可回收 | 达成 |
+| G3 峰值类低成本收敛 | u9（8d3b5dd29 extractor 预检降级 + shell-runner maxBuffer）+ 单测绿 | 达成 |
+| G4 新增 per-session 状态机械检查防复发 | u10（ca9924a18 dispose 补面 + quota cancel + LRU）+ ADR-0049 checklist 条目 | 达成 |
+
+**量化锚点（A9 原文口径）**：删 5 个大 session（~87MB 历史）→ rt RSS 398016→133536KB，**净回落 258MB > 0**；renderer heap 58→57MB；无孤儿 pi/Chromium；A1/A2/A5 日志探针零命中。
+
+**合理偏差登记**：①A9 soak 脚本的「工作流→静置」对比与设计原文「删除前后对比」口径不同——已按设计原文补跑删除基准脚本，两者都过；②删除释放有延迟（60s 窗口内两拍完成），扩展稳态确认，非缺陷；③日志探针 glob 路径错误（实例目录→实际 ~/.xyz-agent-dev/logs/），断言由主会话手工补跑通过。
+
+**功能分级登记同步 [MANDATORY]**：纯内部修复（内存治理），无新功能/无既有功能挂掉后果变化——不触发 docs/FEATURE-PRIORITIES.md 更新，特此注明。
+**文档资产更新检查 [MANDATORY]**：ARCHITECTURE/PRODUCT/CONTEXT/DESIGN/STANDARDS/TROUBLESHOOTING 无进程拓扑/产品边界/术语/视觉/规范/排障规则变化——零同步，特此注明。（TEST-STRATEGY.md 的 §7 改动来自外来 commit 0f6d7c93f，非本流水线产物，见 §5 事件行。）
+
+**覆盖概览**：验收 A1-A10 全部闭环——A1/A2/A5/A6 探针与 L3 场景并入 A9 批次；A6 L3 场景由定向补验执行（切 8 session 前后 DOM 存活断言：root children 2 / 349 testids / 零 error overlay / drawer-area 挂载，soak 的 58 轮 session.switch 循环为前置压力）；A3 8/8、A4 9/9、A9 PASS；A2/A7/A8/A10 单测+Gate A 覆盖。Gate A 三包全量绿 + extensions 双检绿 + 根 lint 绿。
+
+**剧本分流**：一次性脚本（a3/a4/a9 系列）留存 .tmp/dev-flow/memory-leak-remediation.acceptance/ 随 impl-plan 登记，不晋升为可复用 spec；可复用产物 = ADR-0049 checklist 新条目（dispose 补面范式）+ B7/B8 字节帽常量 SSOT 范式（RING_BUDGET_BYTES 入 shared/constants.ts）。
+
+**验收后探针降级**（设计 :237 门条款）：见「阶段5-探针降级」行（subagent 执行中，完成后随最终 commit 入库）。
