@@ -17,11 +17,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
 	clearConfigCache,
 	getConfigPath as getLlmConfigPath,
+	isThinkingLevel,
 	loadConfig,
 	saveConfig as saveLlmConfig,
 } from "@zhushanwen/pi-llm-shared";
@@ -54,20 +54,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const THINKING_LEVELS: ReadonlySet<string> = new Set([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
-function isModelThinkingLevel(value: unknown): value is ModelThinkingLevel {
-	return typeof value === "string" && THINKING_LEVELS.has(value);
-}
-
 function normalizeClassifierConfig(raw: unknown): ClassifierConfig {
 	const record = isPlainObject(raw) ? raw : {};
 	const timeout = Number(record.timeout);
@@ -77,7 +63,7 @@ function normalizeClassifierConfig(raw: unknown): ClassifierConfig {
 		logger.warn("Ignoring invalid classifier.model (expected string 'auto' or 'provider/model-id'), using default auto");
 	}
 	// thinkingLevel 校验：合法值为 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'
-	const thinkingLevel = isModelThinkingLevel(record.thinkingLevel)
+	const thinkingLevel = isThinkingLevel(record.thinkingLevel)
 		? record.thinkingLevel
 		: DEFAULT_CLASSIFIER_CONFIG.thinkingLevel;
 	return {
