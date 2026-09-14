@@ -316,9 +316,11 @@ export class SkillRegistry {
    * 不发广播——由调用方显式 broadcastSkillCacheInvalidated('project')。
    */
   invalidateAllProjects(): void {
-    // close 所有 project watcher
-    for (const watcher of this.projectWatchers.values()) {
-      watcher.close().catch(() => {})
+    // close 所有 project watcher（close 失败须留痕——静默吞会掩盖 fd 回收异常，无日志的降级 unreasonable）
+    for (const [cwd, watcher] of this.projectWatchers.entries()) {
+      watcher.close().catch((e: unknown) => {
+        console.warn(`[skill-registry] project:${cwd} invalidateAllProjects close failed:`, e)
+      })
     }
     this.projectWatchers.clear()
     this.projectWatcherLru.length = 0 // [G4] watcher 全清，LRU 序随同清空
@@ -367,7 +369,10 @@ export class SkillRegistry {
       const evicted = this.projectWatcherLru.shift()!
       const watcher = this.projectWatchers.get(evicted)
       if (watcher) {
-        watcher.close().catch(() => {})
+        // close 失败降级本身不致命（watcher 可能已自行销毁），但静默吞会掩盖 fd 回收异常——降级须留痕
+        watcher.close().catch((e: unknown) => {
+          console.warn(`[skill-registry] project:${evicted} LRU evict close failed:`, e)
+        })
         this.projectWatchers.delete(evicted)
       }
     }
@@ -446,10 +451,14 @@ export class SkillRegistry {
       clearTimeout(timer)
     }
     this.debounceTimers.clear()
-    this.globalWatcher?.close().catch(() => {})
+    this.globalWatcher?.close().catch((e: unknown) => {
+      console.warn('[skill-registry] global watcher dispose close failed:', e)
+    })
     this.globalWatcher = null
-    for (const watcher of this.projectWatchers.values()) {
-      watcher.close().catch(() => {})
+    for (const [cwd, watcher] of this.projectWatchers.entries()) {
+      watcher.close().catch((e: unknown) => {
+        console.warn(`[skill-registry] project:${cwd} dispose close failed:`, e)
+      })
     }
     this.projectWatchers.clear()
     this.projectWatcherLru.length = 0 // [G4] watcher 全清，LRU 序随同清空
