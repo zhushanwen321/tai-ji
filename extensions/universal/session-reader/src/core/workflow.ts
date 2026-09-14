@@ -11,12 +11,9 @@
 // 升版连带编译期影响本扩展；且上游类型只描述 NEW，OLD 仍需自处理（TC-wf-snapshot-version-union）。
 // session-reader 作为纯读取者，按字段存在性 + v 标记分支做「结构化快照」式解析，与上游解耦。
 
-// ---- 类型守卫 helpers ----
+import { isRecord } from '@zhushanwen/pi-ext-guards'
 
-/** unknown → Record<string, unknown> 守卫（非对象或 null → false）。 */
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
-}
+// ---- 类型守卫 helpers ----
 
 /** unknown → string 收窄（非 string → undefined）。快照可选字符串字段的统一入口。 */
 function strOr(v: unknown): string | undefined {

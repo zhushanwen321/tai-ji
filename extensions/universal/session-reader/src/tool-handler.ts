@@ -26,6 +26,7 @@ import { existsSync, openSync, readSync, closeSync } from 'node:fs'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
+import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import {
   findSessions,
   type MatchedSession,
@@ -418,7 +419,7 @@ async function safeParse(fileName: string): Promise<ParseResult> {
     return await parseSessionFile(fileName)
   } catch (e) {
     throw err(
-      `读取失败：${fileName}（${e instanceof Error ? e.message : String(e)}）。👉 检查文件或换 session。`,
+      `读取失败：${fileName}（${toErrorMessage(e)}）。👉 检查文件或换 session。`,
     )
   }
 }
@@ -797,7 +798,7 @@ async function doFamily(
       tree = await buildExecutionTree(resolved.sessionId, agentDir, resolved.fileName)
     } catch (e) {
       throw err(
-        `构建执行树失败：${resolved.sessionId}（${e instanceof Error ? e.message : String(e)}）。👉 检查 session 或用 find 重新定位，或改用 recursive:false 看 flat family 兜底。`,
+        `构建执行树失败：${resolved.sessionId}（${toErrorMessage(e)}）。👉 检查 session 或用 find 重新定位，或改用 recursive:false 看 flat family 兜底。`,
       )
     }
     return {
@@ -812,7 +813,7 @@ async function doFamily(
     family = await buildFamilyFromFs(resolved.sessionId, agentDir)
   } catch (e) {
     throw err(
-      `读取家族失败：${resolved.sessionId}（${e instanceof Error ? e.message : String(e)}）。👉 检查 session 或用 find 重新定位。`,
+      `读取家族失败：${resolved.sessionId}（${toErrorMessage(e)}）。👉 检查 session 或用 find 重新定位。`,
     )
   }
   return { content: [{ type: 'text', text: formatFamilyText(family) }], details: family }
@@ -1004,7 +1005,7 @@ async function doExport(
       family = await buildFamilyFromFs(resolved.sessionId, agentDir)
     } catch (e) {
       throw err(
-        `读取家族失败：${resolved.sessionId}（${e instanceof Error ? e.message : String(e)}）。👉 检查 session 或用 find 重新定位。`,
+        `读取家族失败：${resolved.sessionId}（${toErrorMessage(e)}）。👉 检查 session 或用 find 重新定位。`,
       )
     }
     text = formatFamilyText(family)
@@ -1209,7 +1210,7 @@ async function doWorkflow(
     workflows = await resolveWorkflows(resolved.sessionId, sessionIdToPath, pathToRef)
   } catch (e) {
     throw err(
-      `读取 workflow run 失败：${resolved.sessionId}（${e instanceof Error ? e.message : String(e)}）。👉 检查 session 或用 find 重新定位。`,
+      `读取 workflow run 失败：${resolved.sessionId}（${toErrorMessage(e)}）。👉 检查 session 或用 find 重新定位。`,
     )
   }
   const allRunIds = workflows.map((w) => w.runId)
