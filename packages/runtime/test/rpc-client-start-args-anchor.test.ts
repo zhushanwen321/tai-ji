@@ -32,7 +32,16 @@ const fakeProc = {
     write: vi.fn(),
     once: vi.fn(),
   },
-  kill: vi.fn(),
+  kill: vi.fn((_signal?: NodeJS.Signals | number) => {
+    // kill 即死（mock 语义）：从 on.mock.calls 找 exit listener 微任务驱动，短路 grace 真实等待
+    // （beforeEach 已 mockClear，calls 仅含本用例注册；重复驱动由链内 settled 幂等守卫兑底）
+    queueMicrotask(() => {
+      for (const [event, handler] of fakeProc.on.mock.calls) {
+        if (event === 'exit') (handler as (code: number | null) => void)(0)
+      }
+    })
+    return true
+  }),
   pid: 12345,
 }
 
@@ -85,9 +94,11 @@ vi.mock('../src/infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
 }))
 
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零
+
 async function startWith(options: RpcClientOptions): Promise<import('../src/infra/pi/rpc-client.js').RpcClient> {
   const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
-  const client = new RpcClient(options)
+  const client = new RpcClient({ ...clientOpts, ...options })
   await client.start()
   return client
 }

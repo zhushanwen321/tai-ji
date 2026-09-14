@@ -13,19 +13,35 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { RpcClient } from '../infra/pi/rpc-client.js'
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（骨架与 rpc-client-spawn-args.test.ts 同构，差异仅捕获 spawn 第三参数）──
 
 let capturedEnv: Record<string, string> | null = null
 
+let procExitHandlers: Array<(code: number | null) => void> = []
+
 const fakeProc = {
-  on: vi.fn(),
+  // exit listener 捕获：kill 即死语义（微任务驱动）短路 killPiProcess grace 真实等待
+  // （[HISTORICAL] 空 on/kill 让每次收尾真睡 DEFAULT_PI_KILL_GRACE_MS=2s，2026-09-14 审计）
+  on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+    if (event === 'exit') procExitHandlers.push(handler as (code: number | null) => void)
+    return fakeProc
+  }),
   off: vi.fn(),
   removeListener: vi.fn(),
   stdout: { on: vi.fn(), resume: vi.fn(), destroy: vi.fn() },
   stderr: { on: vi.fn() },
   stdin: { write: vi.fn(), once: vi.fn() },
-  kill: vi.fn(),
+  kill: vi.fn((_signal?: NodeJS.Signals | number) => {
+    queueMicrotask(() => {
+      if (procExitHandlers.length === 0) return
+      const handlers = procExitHandlers
+      procExitHandlers = []
+      handlers.forEach((h) => h(0))
+    })
+    return true
+  }),
   pid: 12345,
 }
 
@@ -77,12 +93,13 @@ describe('RpcClient 出站 env 契约（U3：deny 剥除 + 基座保全）', () 
 
   async function startWith(options: { env?: Record<string, string> } = {}): Promise<void> {
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ cwd: '/project', ...options })
+    client = new RpcClient({ ...clientOpts, cwd: '/project', ...options })
     await client.start()
   }
 
   beforeEach(() => {
     capturedEnv = null
+    procExitHandlers = []
   })
 
   afterEach(async () => {

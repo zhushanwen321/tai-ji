@@ -58,6 +58,12 @@ export interface RpcClientOptions {
   cwd?: string
   model?: string
   /**
+   * 启动确认窗口宽度 ms（缺省 STARTUP_DELAY_MS=500）。窗口语义（窗口内 exit/error
+   * 即 reject）不变，只调宽度——测试注入 0 免真实时钟等待（2026-09-14 审计：
+   * 500ms × N 次 start() 是 rpc-client 族慢因之一）。生产调用方勿传。
+   */
+  startupDelayMs?: number
+  /**
    * 附着恢复模式（restoreSession 专用）：true 时 start() 不拼 --model——options.model
    * 与全局默认兜底都被抑制。pi 的 CLI model 恒优先于 session entry 恢复（main.js
    * buildSessionOptions 的 `if (parsed.model)` 分支），拼了就会把用户在会话内切换过的
@@ -466,7 +472,7 @@ export class RpcClient implements IPiEngine {
         cleanup()
         if (!this._exited) resolve()
         else reject(new Error(`pi process exited during startup${this.formatStderrSuffix()}`))
-      }, STARTUP_DELAY_MS)
+      }, this.options.startupDelayMs ?? STARTUP_DELAY_MS)
     })
   }
 

@@ -18,6 +18,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { RpcClient } from '../infra/pi/rpc-client.js'
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（与 rpc-client-bash.test.ts 同构）──────────────────────
 
@@ -128,7 +129,7 @@ describe('RpcClient onExit 多播（单槽覆盖语义已废除）', () => {
     stdoutStream.reset()
     stderrStream.reset()
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ cwd: '/project' })
+    client = new RpcClient({ ...clientOpts, cwd: '/project' })
     await client.start()
   })
 

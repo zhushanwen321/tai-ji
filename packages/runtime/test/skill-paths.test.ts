@@ -3,6 +3,7 @@ import path from 'node:path'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../src/infra/pi/session-store.js'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // IGitInfoReader 桩：本测试聚焦 skill 路径解析，不验证 git 摘要字段。
 const noopGitInfoReader: IGitInfoReader = { readGitInfo: () => undefined, pruneStaleCache: () => {} }
@@ -188,7 +189,7 @@ describe('skillPaths passing chain', () => {
   it('RpcClient passes --skill args for each skillPath', async () => {
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
 
-    const client = new RpcClient({
+    const client = new RpcClient({ ...clientOpts,
       cwd: '/project',
       skillPaths: ['/skills/skill-a', '/skills/skill-b'],
     })
@@ -203,7 +204,7 @@ describe('skillPaths passing chain', () => {
   it('RpcClient omits --skill when skillPaths is empty', async () => {
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
 
-    const client = new RpcClient({ cwd: '/project', skillPaths: [] })
+    const client = new RpcClient({ ...clientOpts, cwd: '/project', skillPaths: [] })
 
     try { await client.start() } catch { /* expected */ }
 
@@ -215,7 +216,7 @@ describe('skillPaths passing chain', () => {
   it('RpcClient omits --skill when skillPaths is undefined', async () => {
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
 
-    const client = new RpcClient({ cwd: '/project' })
+    const client = new RpcClient({ ...clientOpts, cwd: '/project' })
 
     try { await client.start() } catch { /* expected */ }
 

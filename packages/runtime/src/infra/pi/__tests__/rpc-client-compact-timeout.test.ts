@@ -84,7 +84,8 @@ vi.mock('../../logger.js', () => ({
 }))
 
 async function startClient(): Promise<RpcClient> {
-  const client = new RpcClient()
+  const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（fake timers 下同样省一步 timer）
+const client = new RpcClient({ ...clientOpts })
   const startP = client.start()
   // STARTUP_DELAY_MS（500ms）：fake timers 下推进启动确认窗口让 start() settle
   await vi.advanceTimersByTimeAsync(500)

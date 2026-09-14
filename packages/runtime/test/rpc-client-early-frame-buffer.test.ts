@@ -49,6 +49,8 @@ import {
   resetRpcClientMock,
 } from './helpers/rpc-client-mock'
 
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
+
 // ── Helpers ────────────────────────────────────────────────────────
 
 /** getState 注册 pending 后以 response 帧回填并 resolve（R1-2 / R1-7b 共用装配；断言留在用例）。 */
@@ -73,7 +75,7 @@ describe('RpcClient 早期帧缓冲（early-frame-buffer D1-D6）', () => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    client = new RpcClient({ cwd: '/project' })
+    client = new RpcClient({ ...clientOpts, cwd: '/project' })
     await client.start()
     // start 的 500ms startup 检查已结束，其注册的 exit handlers 已被 cleanup 移除
     clearExitHandlers()

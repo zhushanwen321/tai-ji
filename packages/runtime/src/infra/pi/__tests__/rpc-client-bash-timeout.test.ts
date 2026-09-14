@@ -100,10 +100,11 @@ const ENV_KEY = 'XYZ_RUNTIME_BASH_RPC_TIMEOUT_MS'
 
 async function startClient(): Promise<RpcClient> {
   stdoutStream.reset()
-  const client = new RpcClient()
+  const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变）
+  const client = new RpcClient({ ...clientOpts })
   const startP = client.start()
-  // STARTUP_DELAY_MS（500ms）：fake timers 下推进启动确认窗口让 start() settle
-  await vi.advanceTimersByTimeAsync(500)
+  // 窗口归零后仍推进一步 fake timers 让 setTimeout(0) 回调兑现
+  await vi.advanceTimersByTimeAsync(0)
   await startP
   return client
 }

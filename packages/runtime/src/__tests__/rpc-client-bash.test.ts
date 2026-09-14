@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { RpcClient } from '../infra/pi/rpc-client.js'
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（与 test/rpc-client.test.ts 同构）──────────────────────
 
@@ -47,7 +48,19 @@ const fakeProc = {
     }),
     once: vi.fn(),
   },
-  kill: vi.fn(),
+  kill: vi.fn((_signal?: NodeJS.Signals | number) => {
+    // kill 即死（mock 语义）：微任务内 emit exit 短路 killPiProcess 的 grace 真实等待。
+    // [HISTORICAL] 2026-09-14 审计：空 vi.fn() 永不发 exit → 每次 afterEach kill 真睡
+    // DEFAULT_PI_KILL_GRACE_MS(2s)，27 用例 ≈ 68s 纯等待（runtime 测试 top10 慢因头号构成）。
+    // 重复驱动由 kill-chain settled 幂等守卫兜底；收敛目标 = test/helpers/rpc-client-mock.ts。
+    queueMicrotask(() => {
+      if (procExitHandlers.length === 0) return
+      const handlers = procExitHandlers
+      procExitHandlers = []
+      handlers.forEach((h) => h(0))
+    })
+    return true
+  }),
   pid: 12345,
 }
 
@@ -116,7 +129,7 @@ describe('RpcClient bash/abortBash 透传', () => {
     fakeProc.stdin.write.mockClear()
 
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ cwd: '/project' })
+    client = new RpcClient({ ...clientOpts, cwd: '/project' })
     await client.start()
   })
 

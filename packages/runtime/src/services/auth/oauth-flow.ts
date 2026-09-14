@@ -254,7 +254,15 @@ function credentialFromTokenFields(
  * 标准 RFC 8628 device flow（xai / kimi-coding）。
  * waitBeforeFirstPoll：浏览器授权页打开需要时间，先等一轮再轮询。
  */
-async function runStandardDeviceFlow(providerId: string, config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal): Promise<OAuthCredential> {
+/** 轮询节奏注入（测试用：小值免真实睡眠；生产不传走 RFC 8628 缺省） */
+export interface OAuthPollTuning {
+  /** 轮询间隔下限 ms（device-code-flow 缺省 1_000，RFC 8628 §3.2） */
+  minIntervalMs?: number
+  /** slow_down 且服务器无 interval 时的增量 ms（缺省 5_000，RFC 8628 §3.5） */
+  slowDownIncrementMs?: number
+}
+
+async function runStandardDeviceFlow(providerId: string, config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal, tuning?: OAuthPollTuning): Promise<OAuthCredential> {
   const device = await startDeviceAuthorization(providerId, config, signal)
   hooks.onDeviceCode?.({
     userCode: device.userCode,
@@ -268,6 +276,8 @@ async function runStandardDeviceFlow(providerId: string, config: BuiltinOAuthCon
     expiresInSeconds: device.expiresInSeconds ?? DEFAULT_DEVICE_TIMEOUT_SECONDS,
     waitBeforeFirstPoll: true,
     signal,
+    minIntervalMs: tuning?.minIntervalMs,
+    slowDownIncrementMs: tuning?.slowDownIncrementMs,
     poll: standardDevicePoll(config.endpoints.token!, config.clientId, device.deviceCode, signal),
   })
   if (!result.ok) {
@@ -288,7 +298,7 @@ const COPILOT_HEADERS: Record<string, string> = {
   'Copilot-Integration-Id': 'vscode-chat',
 }
 
-async function runCopilotDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal): Promise<OAuthCredential> {
+async function runCopilotDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal, tuning?: OAuthPollTuning): Promise<OAuthCredential> {
   // 起始请求带 UA（GitHub 对裸请求返回 422）
   const device = await (async () => {
     const fields: Record<string, string> = { client_id: config.clientId, scope: 'read:user' }
@@ -329,6 +339,8 @@ async function runCopilotDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuthFlow
     expiresInSeconds: device.expiresInSeconds ?? DEFAULT_DEVICE_TIMEOUT_SECONDS,
     waitBeforeFirstPoll: true,
     signal,
+    minIntervalMs: tuning?.minIntervalMs,
+    slowDownIncrementMs: tuning?.slowDownIncrementMs,
     poll: async () => {
       // device flow 单次请求超时（MF-3）：fetch 挂起/网络错误时转结构化 failed
       let response: Response
@@ -403,7 +415,7 @@ const OPENAI_CODEX_TIMEOUT_SECONDS = 15 * 60
 /** 单次 OAuth HTTP 请求超时（pi-ai TOKEN_EXCHANGE_TIMEOUT_MS 同款）：device flow 各出网点 + callback exchange，远端挂起时兜底防无限等待 */
 const TOKEN_EXCHANGE_TIMEOUT_MS = 30_000
 
-async function runOpenAICodexDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal): Promise<OAuthCredential> {
+async function runOpenAICodexDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuthFlowHooks, signal: AbortSignal, tuning?: OAuthPollTuning): Promise<OAuthCredential> {
   // 1. 起始：device_auth_id + user_code
   const start = await postJson(config.endpoints.deviceCode!, { client_id: config.clientId }, signal, TOKEN_EXCHANGE_TIMEOUT_MS)
   if (!start.ok) {
@@ -436,6 +448,8 @@ async function runOpenAICodexDeviceFlow(config: BuiltinOAuthConfig, hooks: OAuth
     intervalSeconds,
     expiresInSeconds: OPENAI_CODEX_TIMEOUT_SECONDS,
     signal,
+    minIntervalMs: tuning?.minIntervalMs,
+    slowDownIncrementMs: tuning?.slowDownIncrementMs,
     poll: async () => {
       // device flow 单次请求超时（MF-3）：fetch 挂起/网络错误时转结构化 failed
       let pollRes: { ok: boolean; status: number; body: Record<string, unknown> }
@@ -580,16 +594,17 @@ export async function runOAuthLogin(
   config: BuiltinOAuthConfig,
   hooks: OAuthFlowHooks,
   signal: AbortSignal,
+  tuning?: OAuthPollTuning,
 ): Promise<OAuthCredential> {
   // flow='both'（openai-codex）：优先 device（headless 友好，无固定端口占用风险）
   if (providerId === 'openai-codex') {
-    return runOpenAICodexDeviceFlow(config, hooks, signal)
+    return runOpenAICodexDeviceFlow(config, hooks, signal, tuning)
   }
   if (providerId === 'github-copilot') {
-    return runCopilotDeviceFlow(config, hooks, signal)
+    return runCopilotDeviceFlow(config, hooks, signal, tuning)
   }
   if (config.flow === 'device') {
-    return runStandardDeviceFlow(providerId, config, hooks, signal)
+    return runStandardDeviceFlow(providerId, config, hooks, signal, tuning)
   }
   return runCallbackFlow(providerId, config, hooks, signal)
 }

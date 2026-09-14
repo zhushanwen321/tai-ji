@@ -34,6 +34,8 @@ let procExitHandlers: Array<(code: number | null) => void> = []
 const stdinWrites: string[] = []
 
 const fakeProc = {
+  /** 运行态 = null（isAlreadyExited 判别）；exit emit 后置 0，reset 复位。 */
+  exitCode: null as number | null,
   on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
     if (event === 'exit') procExitHandlers.push(handler as (code: number | null) => void)
     return fakeProc
@@ -56,7 +58,22 @@ const fakeProc = {
     }),
     once: vi.fn(),
   },
-  kill: vi.fn(),
+  kill: vi.fn((_signal?: NodeJS.Signals | number) => {
+    // kill 即死（mock 语义）：微任务内 emit exit 让 killPiProcess 的 grace 立即短路。
+    // [HISTORICAL] 2026-09-14 审计：此前 kill 是空 vi.fn() 永不发 exit → 每次收尾
+    // 真等 DEFAULT_PI_KILL_GRACE_MS(2s) SIGKILL 兕底，27 个用例 × 2.5s ≈ 68s 纯等待，
+    // 是 runtime 测试 top10 慢因的头号构成。微任务而非同步 emit：kill-chain 先注册
+    // exit listener 再发信号（同步亦可），微任务对「kill 后断言信号序列」的用例更宽容；
+    // 重复驱动（killAndDriveExit 手动 emitExit）由链内 settled 幂等守卫兑底。
+    queueMicrotask(() => {
+      if (procExitHandlers.length === 0) return
+      const handlers = procExitHandlers
+      procExitHandlers = []
+      fakeProc.exitCode = 0
+      handlers.forEach((h) => h(0))
+    })
+    return true
+  }),
   pid: 12345,
 }
 
@@ -124,6 +141,8 @@ export function resetRpcClientMock(): void {
   procExitHandlers = []
   fakeProc.on.mockClear()
   fakeProc.stdin.write.mockClear()
+  fakeProc.kill.mockClear()
+  fakeProc.exitCode = null
 }
 
 /** 清空已注册 exit handlers（RpcClient.start 后其 startup 检查的 handlers 已被自身 cleanup 移除，防御性清空）。 */
