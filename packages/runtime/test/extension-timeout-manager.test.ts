@@ -9,6 +9,8 @@
  * - [2026-07-16] 交互式 method（select/confirm/input/editor/ask-user）不再触发 onTimeout
  * - 重复 register 不再产生定时器
  * - isBridgeRequest / removeBridgeRequest
+ * - B6（memory-leak-remediation §3.2-B6）removeBridgeRequest 双集合清理（bridgeRequestIds
+ *   + per-session Set 同步归零，trackSessionRequest 对偶）/ sessionRequestCount 探针
  *
  * [HISTORICAL] registerTimeout 的 bridge: 前缀登记分支已随旧通道清理删除（设计
  * bridge-rewrite-pi-0.84 §3.3-D6）——bridge 登记单落在 addBridgeRequest（BridgeHandler
@@ -110,6 +112,29 @@ describe('ExtensionTimeoutManager', () => {
     expect(mgr.isBridgeRequest('r1')).toBe(true)
     mgr.removeBridgeRequest('r1')
     expect(mgr.isBridgeRequest('r1')).toBe(false)
+  })
+
+  // B6（memory-leak-remediation §3.2-B6）应答即删：removeBridgeRequest 同步清 per-session
+  // Set（trackSessionRequest 对偶——只删全局 Set 会留空 Set 条目驻留到 session 销毁）。
+  it('B6：removeBridgeRequest 双集合清理——bridgeRequestIds 与 per-session Set 同步归零', () => {
+    const mgr = new ExtensionTimeoutManager()
+    mgr.addBridgeRequest('s1', 'r1')
+    mgr.addBridgeRequest('s1', 'r2')
+    mgr.addBridgeRequest('s2', 'r3')
+    expect(mgr.sessionRequestCount('s1')).toBe(2)
+
+    mgr.removeBridgeRequest('r1')
+    expect(mgr.isBridgeRequest('r1')).toBe(false)
+    expect(mgr.sessionRequestCount('s1')).toBe(1)
+
+    mgr.removeBridgeRequest('r2')
+    expect(mgr.sessionRequestCount('s1')).toBe(0) // Set 归零（A5 验收断言）
+    expect(mgr.sessionRequestCount('s2')).toBe(1) // 跨 session 隔离不误伤
+    expect(mgr.isBridgeRequest('r3')).toBe(true)
+
+    // 幂等：重复摘除 no-op
+    expect(() => mgr.removeBridgeRequest('r2')).not.toThrow()
+    expect(mgr.sessionRequestCount('s1')).toBe(0)
   })
 
   it('isBridgeRequest 对未登记 id 返回 false', () => {

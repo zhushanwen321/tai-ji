@@ -645,8 +645,16 @@ export class EventInterpreter {
 
   /**
    * 会话销毁清理（组合根经 EventAdapter.detach 转调）：清在途 settling 延迟 timer + 置
-   * disposed 短路标志。幂等。仅 V7 开关生效时存在真实 timer；未设开关的实例调用本方法
-   * 只置标志（零开销）。
+   * disposed 短路标志 + 停 ping 探测循环。幂等。仅 V7 开关生效时存在真实 settling timer；
+   * 未设开关时该 timer 恒 null（零开销）。
+   *
+   * B1（memory-leak-remediation §3.2-B1，2026-09-14）：补 this.stopPingLoop()——pi turn 中
+   * 崩溃 → onSessionExit → adapter.detach → 本 dispose 后事件源已退订，turn-end 永不再达，
+   * ping 循环失去唯一停止点；5s 后 respawn 为同 sessionId 生成新 client，pingPi 的
+   * pm.getClient(sessionId) 延迟解析打到新 client 必然成功 → pingFailCount 恒清零，
+   * 3 次失败自停条件永不成立 → interval 永续（且 ping 双向 touch lastActivityAt 钉死
+   * idle-pi-reaper 回收）。stopPingLoop 幂等且已 in-flight 的 pingTick 被
+   * `pingTimer === null` 守卫拦截（SR1），修复面最小。
    */
   dispose(): void {
     this.disposed = true
@@ -654,6 +662,7 @@ export class EventInterpreter {
       clearTimeout(this.settlingDelayTimer)
       this.settlingDelayTimer = null
     }
+    this.stopPingLoop()
   }
 
   constructor(

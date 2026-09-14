@@ -30,6 +30,9 @@ import type {
 } from '@xyz-agent/shared'
 import { toErrorMessage } from '../../utils/errors.js'
 import { encodeCwd, getSessionsDir } from '../../infra/pi/pi-paths.js'
+// B5（memory-leak-remediation §3.2-B5 摘碑双路径②）：import 同 id 复活后摘除 sessionData
+// tombstone——doImport 纯文件级不投 didCreate，主线程无创建收敛点可依赖，落地即显式摘碑。
+import { clearSessionDataTombstone } from '../plugin-service/session-data-store.js'
 import { scanExternalSessions, parseHeaderFromFirstLine, type ExternalSessionMeta } from '../../infra/pi/session-file-external-scan.js'
 import {
   invalidateScanDirCache,
@@ -291,6 +294,11 @@ export class ImportService {
     //    且会把单条目缓存键换成源文件所在子目录、下次根查询 miss（见设计 D3 实现层注记）。
     invalidateScanDirCache()
     await scanExternalSessions(dirname(sourcePath), { force: true })
+
+    // 8. B5 摘碑（双路径②，R4）：import 同 id 复活 session——覆盖「import 后未打开窗口」
+    //    的迟到写丢弃风险（路径①的 notifySessionCreated 只在用户点开时触发，此窗口内
+    //    插件对新 session 的合法 set 会被 tombstone 误杀）。导入失败路径不至此，碑保留。
+    clearSessionDataTombstone(header.id)
 
     const reply: ImportReply = { sessionId: header.id, targetPath }
     if (!sidecarVerified) reply.warning = 'sidecar_failed'

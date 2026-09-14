@@ -21,6 +21,14 @@
  * store 层另有 path.resolve 深度防御兜底。key 的长度上限取 SAFE_KEY 的
  * 128 字符（现有实现对 key 无显式上限，此处统一到标识符白名单，防超长
  * 键名进入 JSON 键位与 WriteBackCache size 跟踪）。
+ *
+ * [B5 迟到写守卫（memory-leak-remediation §3.2-B5）] 本 API 四个 RPC 方法均无
+ * session 存活校验（插件 worker 迟到的 set/delete RPC 到达时 session 可能已删）——
+ * 守卫落在 SessionDataStore.set/delete（单一收口点，覆盖 RPC 链 + 全部直连写路径）：
+ * tombstone 命中的迟到 set/delete 丢弃 + warn。get/keys 只读不守。摘碑双路径：
+ * plugin-service 的 setOnSessionCreated 回调链式追加 reviveSession（create/restore/fork
+ * 三收敛点）+ import-service doImport 尾部直调 clearSessionDataTombstone。详见
+ * session-data-store.ts 模块级 tombstone 注释（含「迟到 set 是唯一文件复活入口」源码依据）。
  */
 
 import type { PluginRpcServer } from '../plugin-rpc-server.js'

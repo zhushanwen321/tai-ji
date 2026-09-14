@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtemp, rm, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -190,22 +190,31 @@ describe('SessionDataStore Flush + Lifecycle', () => {
   })
 
   // ── clearSession removes cache + disk ────────────────────────
-  it('clearSession removes cache and disk file', () => {
+  it('clearSession removes cache and disk file', async () => {
+    const trashCalls: string[] = []
+    store = new SessionDataStore(tmpDir, undefined, undefined, async (p) => {
+      trashCalls.push(p)
+      rmSync(p, { force: true })
+    })
     store.set('s1', 'k1', 'v1')
     store.flushSession('s1')
     expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(true)
-    store.clearSession('s1')
+    // B5：clearSession 已 async（磁盘删除走 ITrash port 软删除，mock 同步移除文件）
+    await store.clearSession('s1')
     expect(store.get('s1', 'k1')).toBeUndefined()
     expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(false)
+    expect(trashCalls).toEqual([join(tmpDir, 'session-data', 's1.json')])
   })
 
   // ── debounce flush 落盘 ────────────────────────────────────
   it('per-write debounce flush persists within 500ms', async () => {
     vi.useFakeTimers()
-    store.set('s1', 'k1', 'v1')
+    // sid 唯一化：上一用例 clearSession 的 tombstone 是模块级共享态，复用 's1' 会被
+    // B5 迟到写守卫丢弃（恰是该机制的正向证明，但与本用例目标无关）
+    store.set('s1-debounce', 'k1', 'v1')
     // debounce flush at 500ms
     await vi.advanceTimersByTimeAsync(600)
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(true)
+    expect(existsSync(join(tmpDir, 'session-data', 's1-debounce.json'))).toBe(true)
     vi.useRealTimers()
   })
 

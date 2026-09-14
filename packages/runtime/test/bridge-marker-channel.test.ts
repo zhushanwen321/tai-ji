@@ -257,28 +257,45 @@ describe('bridge-handler: sendExtensionUiResponse 序列化形状', () => {
 // ── bridgeRequestIds 登记 ──
 
 describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录）', () => {
-  it('handleBridgeRequest 到达即登记（含 malformed），clearForSession 清理', async () => {
+  it('handleBridgeRequest 到达即登记（含 malformed），B6 应答即删，clearForSession 兑底仍有效', async () => {
     const mgr = new ExtensionTimeoutManager()
+    const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     const handler = new BridgeHandler(null, mgr)
     const { client } = makeMockClient()
 
+    // sync：await 完成点已摘除（B6 应答即删），「到达即登记」事实经 spy 锁定
     await handler.handleBridgeRequest('sess-1', 'req-reg-1', 'bridge:sync', {}, client)
-    expect(mgr.isBridgeRequest('req-reg-1')).toBe(true)
+    expect(addSpy).toHaveBeenCalledWith('sess-1', 'req-reg-1')
+    expect(mgr.isBridgeRequest('req-reg-1')).toBe(false)
 
-    // malformed 哨兵请求同样登记（前端不得抢答 runtime 内部应答的请求）
+    // malformed 哨兵请求同样登记过（前端不得抢答 runtime 内部应答的请求）+ 应答后摘除
     await handler.handleBridgeRequest('sess-1', 'req-reg-2', 'bridge:malformed', { raw: 'x' }, client)
-    expect(mgr.isBridgeRequest('req-reg-2')).toBe(true)
+    expect(addSpy).toHaveBeenCalledWith('sess-1', 'req-reg-2')
+    expect(mgr.isBridgeRequest('req-reg-2')).toBe(false)
 
     // bridge:event 例外不登记：fire-and-forget 恒 null 回包无抢答窗口，且事件频率
     // = pi agent 事件频率，登记只会在 session 销毁时清理（长会话单调累积）
+    const addCountBeforeEvent = addSpy.mock.calls.length
     await handler.handleBridgeRequest('sess-1', 'req-reg-ev', 'bridge:event', { eventName: 'agent_start', data: {} }, client)
+    expect(addSpy.mock.calls.length).toBe(addCountBeforeEvent)
     expect(mgr.isBridgeRequest('req-reg-ev')).toBe(false)
 
-    // session 级跟踪生效：clearForSession 一并清理 bridgeRequestIds
+    // 在途可见性（登记的语义窗口）：tool_execute await 窗口内可查——前端误发抢答
+    // 防御依赖的就是这个窗口；应答后摘除
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const ps = makePluginService({ handleBridgeToolExecute: vi.fn(() => gate.then(() => ({ content: 'ok' }))) })
+    const handler2 = new BridgeHandler(ps, mgr)
+    const pending = handler2.handleBridgeRequest('sess-1', 'req-inflight', 'bridge:tool_execute', { toolName: 't' }, makeMockClient().client)
+    expect(mgr.isBridgeRequest('req-inflight')).toBe(true)
+    release()
+    await pending
+    expect(mgr.isBridgeRequest('req-inflight')).toBe(false)
+
+    // session 级跟踪：clearForSession（session 销毁兑底路径）仍清理 bridgeRequestIds
+    mgr.addBridgeRequest('sess-1', 'req-manual')
     mgr.clearForSession('sess-1')
-    expect(mgr.isBridgeRequest('req-reg-1')).toBe(false)
-    expect(mgr.isBridgeRequest('req-reg-2')).toBe(false)
-    expect(mgr.isBridgeRequest('req-reg-ev')).toBe(false)
+    expect(mgr.isBridgeRequest('req-manual')).toBe(false)
   })
 
   it('端到端链路：marker 帧翻译 → bridge-ui kind → handler → timeout-manager 有记录', async () => {
@@ -292,11 +309,14 @@ describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录�
     expect(bridgeUi).toBeDefined()
 
     const mgr = new ExtensionTimeoutManager()
+    const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     const handler = new BridgeHandler(makePluginService(), mgr)
     const { client } = makeMockClient()
     await handler.handleBridgeRequest(bridgeUi!.sessionId, bridgeUi!.requestId, bridgeUi!.method, bridgeUi!.data, client)
 
-    expect(mgr.isBridgeRequest('req-e2e')).toBe(true)
+    // 到达即登记（链路完整性）+ B6 应答即删（完成后不残留）
+    expect(addSpy).toHaveBeenCalledWith(bridgeUi!.sessionId, 'req-e2e')
+    expect(mgr.isBridgeRequest('req-e2e')).toBe(false)
   })
 
   it('未注入 timeoutManager 时回包照常（登记可选，不阻塞主链路）', async () => {

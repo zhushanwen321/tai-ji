@@ -363,11 +363,18 @@ describe('RuntimeServer: bridge timeout exclusion', () => {
   })
 
   it('tracks bridge requestIds in bridgeRequestIds set', async () => {
+    // B6 应答即删（memory-leak-remediation §3.2-B6）：登记事实经 spy 锁定，完成后不残留
+    const mgr = (server as unknown as {
+      extensionTimeoutMgr: {
+        isBridgeRequest(id: string): boolean
+        addBridgeRequest(sessionId: string, requestId: string): void
+      }
+    }).extensionTimeoutMgr
+    const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     await server.handleBridgeRequest('sess-1', 'req-bridge-track', 'bridge:sync', {})
 
-    // Bridge requestIds should be tracked
-    const mgr = (server as unknown as { extensionTimeoutMgr: { isBridgeRequest(id: string): boolean } }).extensionTimeoutMgr
-    expect(mgr.isBridgeRequest('req-bridge-track')).toBe(true)
+    expect(addSpy).toHaveBeenCalledWith('sess-1', 'req-bridge-track')
+    expect(mgr.isBridgeRequest('req-bridge-track')).toBe(false)
   })
 
   // [2026-07-16] extension UI 超时已取消（confirm/select/input 等统一不超时）。

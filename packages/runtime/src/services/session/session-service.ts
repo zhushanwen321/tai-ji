@@ -57,6 +57,9 @@ import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 // registry 读 + mtime 轮询 + kill 矩阵实现在 services/background-task/（u-runtime-svc），
 // 本 Facade 只做组装接线（组装点注释见构造器 backgroundTasks 赋值处）。
 import { BackgroundTaskService } from '../background-task/background-task-service.js'
+// B5（memory-leak-remediation §3.2-B5）：removeSessionEntry 尾段直调的 plugin sessionData
+// 清理分发（跨服务模块级分发，模式同 getCrashJournal——见该函数注释的成环规避论证）。
+import { clearRemovedSessionData } from '../plugin-service/session-data-store.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore, SessionOutcome } from '../ports/session.js'
@@ -915,6 +918,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   clearHistoryRebuildCache(): number { return this.historyReader.clearHistoryCache() }
 
+  /**
+   * 驱逐单 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C）。
+   * 回收≠销毁：不走 removeSessionEntry 汇聚点；驱逐后重激活走单次全量重建（P7 张力
+   * 四要素显式登记的代价）。组合根 reclaim 装配消费——ReclaimSessionDeps.
+   * evictHistoryRebuildCache 绑本方法（实现与语义见 history-rebuild-cache.ts
+   * SessionHistoryReader.onSessionReclaimed）。
+   */
+  evictHistoryRebuildCache(sessionId: string): void { this.historyReader.onSessionReclaimed(sessionId) }
+
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 
   /** subagent 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
@@ -1271,11 +1283,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // wave:perf-w20（D6-1）：session 删除 / pi 进程退出时清历史重建缓存 + lastLeafId
     // ——真删除后缓存必须清，清理行为本身正确。但「pi 进程退出后缓存基线（lastLeafId）
     // 必不再与新进程的 entry 集合对应、保留只会走 "Entry not found" fallback」的因果断言
-    // 已被实测推翻：空闲回收（reclaimManagedSession）刻意不走本汇聚点、保留缓存，P7 真机
-    // 实测回收→恢复后 leafId 命中空增量短路零重建（PASS incremental，2026-09-11，证据：
-    // packages/runtime/src/__tests__/services/idle-pi-reclaim-integration.test.ts 阶段 4）。
-    // S6 起清理随域迁入 historyReader（onSessionDisposed 直调形态，
-    // traceSync/projection/records 同款）。
+    // 已被实测推翻；[B8 更新] 空闲回收（reclaimManagedSession）仍不经本汇聚点（回收≠
+    // 销毁），但其历史缓存条目改由回收编排驱逐（ReclaimSessionDeps.
+    // evictHistoryRebuildCache → evictHistoryRebuildCache，§3.3-B8 候选 C），P7 实测的
+    // 「回收→恢复零重建」路径被显式放弃（证据：packages/runtime/src/__tests__/services/
+    // idle-pi-reclaim-integration.test.ts 阶段 4）。S6 起清理随域迁入 historyReader
+    //（onSessionDisposed 直调形态，traceSync/projection 同款）。
     this.historyReader.onSessionDisposed(sessionId)
     // session-trace（A33）：同汇聚点清 trace 增量腿基线与串行链（与 historyCache 同因——
     // 基线跨进程存活无意义；链已 settled，删 Map 条目只释放槽位）。S4：清理随域迁入
@@ -1294,6 +1307,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 不在 pi flush / turn 结束时清理——ring 容量 1000 会自然 FIFO 淘汰旧 turn delta，
     // turn 边界清理是阶段 2 的精细化策略（届时评估）。
     this.messageBus?.clearSession(sessionId)
+    // B5（memory-leak-remediation §3.2-B5）：plugin sessionData 分区 + 磁盘文件清理——
+    // 本汇聚点是「该 session 已不存在」的精确时点，与 bus.clearSession 同区域（设计钉死
+    // 位置：onSessionDestroyedHandlers 投递之后——didDestroy 是 fire-and-forget，插件 worker
+    // 迟到的 set/delete 由 SessionDataStore tombstone 丢弃）。经模块级 clearRemovedSessionData
+    // 分发（plugin-service 与本服务互为依赖，构造注入成环；模式同 getCrashJournal）。
+    // best-effort：清理失败（trash 拋结构化错误等）只 warn，不阻断销毁收敛链。
+    try {
+      clearRemovedSessionData(sessionId)
+    } catch (e: unknown) {
+      // best-effort 降级：sessionData 清理是销毁收敛链的附属面，失败（分发器同步抛错等）
+      // 不阻断主流程；异步腿的 rejection 已在 clearRemovedSessionData 内部逐实例 catch+warn。
+      console.warn(`[session-service] plugin sessionData clear failed (sessionId=${sessionId}):`, e)
+    }
   }
 
   getSessionByClient(client: IPiEngine): IManagedSessionView | undefined {

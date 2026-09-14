@@ -70,9 +70,31 @@ export class ExtensionTimeoutManager {
     return this.bridgeRequestIds.has(requestId)
   }
 
-  /** Remove a bridge request ID from tracking */
+  /**
+   * Remove a bridge request ID from tracking（B6 应答即删，memory-leak-remediation §3.2-B6）。
+   *
+   * 除 bridgeRequestIds 外同步清 per-session Set（trackSessionRequest 的对偶——只删全局
+   * Set 不删 session Set 会留下空 Set 条目驻留到 session 销毁）。全 session 扫描定位
+   * （同本类 clearTimeout 既有模式；requestId 全局唯一，命中即 break，活跃 session 数
+   * 量级下成本可忽略），无需调用方传 sessionId——保持既有单参签名兼容
+   * extension-message-handler 的防御分支调用。幂等。
+   */
   removeBridgeRequest(requestId: string): void {
     this.bridgeRequestIds.delete(requestId)
+    for (const [sid, reqs] of this.extensionSessionRequests) {
+      if (reqs.delete(requestId)) {
+        if (reqs.size === 0) this.extensionSessionRequests.delete(sid)
+        break
+      }
+    }
+  }
+
+  /**
+   * B6 探针：指定 session 的在途请求跟踪条数（A5 验收「应答后 Set 归零」/单测断言用；
+   * 只读，无副作用）。
+   */
+  sessionRequestCount(sessionId: string): number {
+    return this.extensionSessionRequests.get(sessionId)?.size ?? 0
   }
 
   /**

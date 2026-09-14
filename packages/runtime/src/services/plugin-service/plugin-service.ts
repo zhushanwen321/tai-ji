@@ -161,7 +161,7 @@ export class PluginService implements IPluginService {
       this.rpcServer,
       esmExecArgv ? { execArgv: esmExecArgv } : undefined,
     )
-    this.sessionDataStore = new SessionDataStore(configDir)
+    this.sessionDataStore = new SessionDataStore(configDir, undefined, undefined, this.deps.trashFile)
     this.permissionChecker = new PermissionChecker(registry, new PermissionStorage(pluginsDir))
 
     // 活跃 session 解析器：持有同一 deps 引用（setSessionService 后续 mutate 可见）
@@ -439,7 +439,14 @@ export class PluginService implements IPluginService {
       // S3-W2：session 生命周期事件接线——session-service 的创建/销毁回调（其内部
       // 收敛点 notifySessionCreated / removeSessionEntry）转发到注册表，按 handlerId
       // 记录的 workerId 定向投递 plugin.sessions.didCreate/didDestroy 到对应 Worker。
+      //
+      // B5 摘碑双路径①（memory-leak-remediation §3.2-B5，R4）：链式追加在既有回调体内
+      // （setOnSessionCreated 是单槽回调——二次调用会覆盖，丢 didCreate 投递，禁止）；
+      // notifySessionCreated 三收敛点（session-lifecycle create/restore/fork，主线程同步
+      // 动作，不依赖经 worker 的异步链）都会流经本回调，覆盖废纸篓还原→打开等同 id
+      // 复活路径——复活后迟到/新写恢复，clearSession 的 tombstone 摘除。
       this.deps.sessionService.setOnSessionCreated(summary => {
+        this.sessionDataStore.reviveSession(summary.id)
         this.sessionEventDispatch.didCreate(sessionInfoFromSummary(summary))
       })
       this.deps.sessionService.setOnSessionDestroyed(summary => {
@@ -823,9 +830,14 @@ export class PluginService implements IPluginService {
     this.sessionDataStore.flushSession(sessionId)
   }
 
-  /** 清理指定 session 的数据缓存、dirty 跟踪和 size 记录 */
-  clearSessionData(sessionId: string): void {
-    this.sessionDataStore.clearSession(sessionId)
+  /**
+   * 清理指定 session 的数据缓存、dirty 跟踪和 size 记录（B5 接入删除链后为 async：
+   * 磁盘删除走 trash 软删除，与 session 本体持久性对齐）。trash 失败向上传播
+   * （调用方 void…catch(warn) best-effort 消费）；主要消费路径 = SessionService
+   * .removeSessionEntry 尾段经 clearRemovedSessionData 分发（见 session-data-store.ts）。
+   */
+  async clearSessionData(sessionId: string): Promise<void> {
+    await this.sessionDataStore.clearSession(sessionId)
   }
 
   /** 处理前端返回的 UI 响应（供 server.ts 调用）。委托 UiRequestQueue。 */
