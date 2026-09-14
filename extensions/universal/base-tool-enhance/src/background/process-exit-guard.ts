@@ -28,6 +28,7 @@
  */
 
 import { killProcessTree } from "@xyz-agent/extension-protocol/background-task";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { emitPendingUnregister } from "./notify.ts";
@@ -79,13 +80,13 @@ export function reapBackgroundTasksNow(): void {
 			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
 			killProcessTree(task.pid, (step, err) =>
 				logger.debug(step, {
-					detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+					detail: { pid: task.pid, err: toErrorMessage(err) },
 				}),
 			);
 		} catch (err) {
 			// 单条 kill 失败不阻断其余条目收殓；进程将退出，残余由 runtime 收殓兜底
 			logger.warn("kill-tree failed during process-exit reap", {
-				detail: { taskId: task.taskId, pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+				detail: { taskId: task.taskId, pid: task.pid, err: toErrorMessage(err) },
 			});
 		}
 		const finalized = finalizeTask(task.taskId, {

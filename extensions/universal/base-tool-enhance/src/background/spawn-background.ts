@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } from "@xyz-agent/extension-protocol/background-task";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { emitPendingRegister } from "./notify.ts";
@@ -170,7 +171,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 		child.on("error", () => {});
 		child.unref();
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = toErrorMessage(err);
 		return { ok: false, error: `Failed to start background command: ${message}` };
 	} finally {
 		// 子进程已继承 fd 副本（含 spawn 同步失败路径：fd 未被子进程持有），父进程侧
@@ -181,7 +182,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 			} catch (err) {
 				// 已关闭/不可关闭均不掩盖主流程，仅留诊断
 				logger.debug("background spawn output fd close failed", {
-					detail: { outputFile, err: err instanceof Error ? err.message : String(err) },
+					detail: { outputFile, err: toErrorMessage(err) },
 				});
 			}
 		}
@@ -261,7 +262,7 @@ function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 		// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
 		killProcessTree(task.pid, (step, err) =>
 			logger.debug(step, {
-				detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+				detail: { pid: task.pid, err: toErrorMessage(err) },
 			}),
 		);
 		const marked = markKillingIntent(task.taskId, "timeout");

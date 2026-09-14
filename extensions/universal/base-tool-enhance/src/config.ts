@@ -11,6 +11,7 @@
  */
 
 import { getConfigPath as getLlmSharedConfigPath, loadConfig } from "@zhushanwen/pi-llm-shared";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { DEFAULT_MAX_CONCURRENT_BACKGROUND } from "./background/spawn-background.ts";
@@ -109,7 +110,7 @@ function normalizeForceBackgroundPatterns(raw: unknown): string[] {
 		} catch (err) {
 			logger.warn(
 				`Config key 'forceBackgroundPatterns[${index}]' is not a valid regex (${item}), dropped: ` +
-					`${err instanceof Error ? err.message : String(err)} (${getLlmSharedConfigPath(CONFIG_PKG)}).`,
+					`${toErrorMessage(err)} (${getLlmSharedConfigPath(CONFIG_PKG)}).`,
 			);
 			return;
 		}

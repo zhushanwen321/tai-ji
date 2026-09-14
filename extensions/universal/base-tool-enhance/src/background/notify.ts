@@ -27,6 +27,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import type { BackgroundTask, BackgroundTaskEndReason } from "./types.ts";
@@ -107,7 +108,7 @@ export function emitPendingRegister(task: BackgroundTask): void {
 		pi.events.emit("pending:register", { id: task.taskId, type: "bash", name });
 	} catch (err) {
 		logger.warn("pending:register emit failed (stale bus?); task unaffected", {
-			detail: { taskId: task.taskId, err: err instanceof Error ? err.message : String(err) },
+			detail: { taskId: task.taskId, err: toErrorMessage(err) },
 		});
 	}
 }
@@ -130,7 +131,7 @@ export function emitPendingUnregister(
 		pi.events.emit("pending:unregister", { id: taskId, reason: toPendingReason(reason, exitCode) });
 	} catch (err) {
 		logger.warn("pending:unregister emit failed (stale bus?); reconcile covers on next session_start", {
-			detail: { taskId, err: err instanceof Error ? err.message : String(err) },
+			detail: { taskId, err: toErrorMessage(err) },
 		});
 	}
 }
@@ -160,7 +161,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 		logger.warn("background task notify sendMessage failed; poll continues", {
 			detail: {
 				taskId: task.taskId,
-				err: err instanceof Error ? err.message : String(err),
+				err: toErrorMessage(err),
 			},
 		});
 	}

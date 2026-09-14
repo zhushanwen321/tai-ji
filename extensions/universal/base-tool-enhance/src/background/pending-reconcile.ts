@@ -36,6 +36,7 @@ import {
 	collectActivePendingIds,
 } from "@xyz-agent/extension-protocol";
 import { isPidAlive } from "@xyz-agent/extension-protocol/background-task";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { toPendingReason } from "./notify.ts";
@@ -93,7 +94,7 @@ export function reconcilePendingEntries(
 			pi.appendEntry("pending:unregister", { id, reason: pendingReason, status: pendingReason });
 		} catch (err) {
 			logger.warn("reconcile appendEntry failed; retry on next session_start", {
-				detail: { id, err: err instanceof Error ? err.message : String(err) },
+				detail: { id, err: toErrorMessage(err) },
 			});
 			continue;
 		}

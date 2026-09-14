@@ -34,6 +34,7 @@ import {
 	trimTerminalEntries,
 	type RegistryFileLogFn,
 } from "@xyz-agent/extension-protocol/background-task";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { withFileLockSync } from "@zhushanwen/pi-file-lock";
 
@@ -106,7 +107,7 @@ export function writeRegistryEntry(
 	} catch (err) {
 		// 锁壳层写失败 warn 是本模块职责（protocol 原语不发该日志——写失败时的
 		// 「条目停留 running」降级决策在锁壳）
-		const message = err instanceof Error ? err.message : String(err);
+		const message = toErrorMessage(err);
 		logger.warn("registry write failed; entry stays as-is (runtime reaper will collect the orphan)", {
 			detail: { path: registryPath, taskId: entry.taskId, err: message },
 		});

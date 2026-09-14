@@ -21,6 +21,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@xyz-agent/extension-protocol/background-task";
 import { Type } from "typebox";
 
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { ensurePollerRunning } from "./background/poller.ts";
@@ -137,7 +138,7 @@ export function createBashKillToolDefinition() {
 			// 零日志依赖，协议侧 step 标识符 + 本包落盘通道）
 			killProcessTree(fromStore.pid, (step, err) =>
 				logger.debug(step, {
-					detail: { pid: fromStore.pid, err: err instanceof Error ? err.message : String(err) },
+					detail: { pid: fromStore.pid, err: toErrorMessage(err) },
 				}),
 			);
 			// 轮询器确保在跑：边沿收尾（写终态）依赖它

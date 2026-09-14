@@ -259,14 +259,19 @@
       "directory": "extensions/universal/base-tool-enhance",
       "dependsOn": [
         {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage（src/bash-kill-tool.ts、src/index.ts、src/config.ts 及 background/ 下 spawn-background/registry/pending-reconcile/notify/process-exit-guard——共 8 文件 top-level import，替换 inline 错误信息样板 13 处，ext-simplify-17 D1），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
-          "reason": "代码层静态 import getLogger（src/index.ts、src/config.ts、src/reaper.ts、src/kill-tree.ts 及 background/ 下 6 文件——notify/output-tail/pending-reconcile/process-exit-guard/registry/spawn-background——共 10 处 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getLogger（src/bash-kill-tool.ts、src/index.ts、src/config.ts 及 background/ 下 5 文件——notify/pending-reconcile/process-exit-guard/registry/spawn-background——共 8 处 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-file-lock",
           "type": "package",
-          "reason": "代码层静态 import withFileLockSync（src/background/registry.ts，registry.json 锁内 RMW 写盘互斥）与 withFileLock（src/reaper.ts，reaper.lock 跨进程扫描串行化），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import withFileLockSync（src/background/registry.ts，registry.json 锁内 RMW 写盘互斥），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-llm-shared",

@@ -20,6 +20,7 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { createBashOutputToolDefinition } from "./bash-output-tool.ts";
@@ -90,7 +91,7 @@ function runSessionStartMaintenance(
 	} catch (err) {
 		// 对账失败无害：僵尸 register 停留差集，下一 session_start 幂等重查
 		logger.warn("session_start pending reconcile failed; zombies retried next session start", {
-			detail: { err: err instanceof Error ? err.message : String(err) },
+			detail: { err: toErrorMessage(err) },
 		});
 	}
 }

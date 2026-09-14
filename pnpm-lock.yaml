@@ -300,6 +300,9 @@ importers:
       '@xyz-agent/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
