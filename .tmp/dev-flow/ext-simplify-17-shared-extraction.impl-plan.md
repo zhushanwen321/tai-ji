@@ -1,6 +1,6 @@
 # ext-simplify-17-shared-extraction 实施计划
 
-基线: TBD（本计划 commit hash，基线 commit 后回填） | 来源设计: docs/architecture/ext-simplify-17-shared-extraction.md（v6，双审查双 PASS 0 must-fix） | 日期: 2026-09-14
+基线: 74dc89736（本计划 commit hash） | 来源设计: docs/architecture/ext-simplify-17-shared-extraction.md（v6，双审查双 PASS 0 must-fix） | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -88,7 +88,7 @@ graph TD
   u3 --> u16
 ```
 
-独立起点：u0 / u1 / u6 / u8 / u11。波次示例（并发 ≤5）：波1 = u0,u1,u6,u8,u11 → 波2 = u2,u3,u4,u10,u13 → 波3 = u5,u7,u9,u12,u14 → 波4 = u15,u16。
+独立起点：u0 / u1 / u6 / u8 / u11。**并发上限 3（用户 20260914 指令，覆盖全局 ≤5 默认）**。波次示例：波1 = u0,u1,u11 → 补位（任一完成即发下一个就绪单元）：u6,u8 → u2,u3,u4 → u10,u13,u5 → u7,u9,u12 → u14,u15,u16。调度原则：优先关键路径（u1→u2→u5/u7/u9 链）。
 
 ## 4 测试与验收计划
 
@@ -125,18 +125,18 @@ graph TD
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u0 | pending | 0 | - |
-| u1 | pending | 0 | - |
+| u0 | in-progress | 1 | 波1 派发 20260914 |
+| u1 | in-progress | 1 | 波1 派发 20260914 |
 | u2 | pending | 0 | - |
 | u3 | pending | 0 | - |
 | u4 | pending | 0 | - |
 | u5 | pending | 0 | - |
-| u6 | pending | 0 | - |
+| u6 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
 | u7 | pending | 0 | - |
-| u8 | pending | 0 | - |
+| u8 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
 | u9 | pending | 0 | - |
 | u10 | pending | 0 | - |
-| u11 | pending | 0 | - |
+| u11 | in-progress | 1 | 波1 派发 20260914 |
 | u12 | pending | 0 | - |
 | u13 | pending | 0 | - |
 | u14 | pending | 0 | - |

@@ -83,6 +83,26 @@ export function toErrorMessage(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * 判断 value 是否为非 null、非数组的 object（`Record` 语义本义：可按字符串键安全取值）。
+ *
+ * canonical 来自 ext-simplify-17 D3（排数组严版，设计文档
+ * docs/architecture/ext-simplify-17-shared-extraction.md §3.1）。
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 判断 err 是否为 Node fs 的 ENOENT 错误（`Error` 实例且 `code === "ENOENT"`）。
+ *
+ * canonical 来自 ext-simplify-17 D2（scheduler 严版，`"code" in err` 收窄避免
+ * `as Record` 强转——taste/no-unsafe-cast）。
+ */
+export function isEnoentError(err: unknown): boolean {
+	return err instanceof Error && "code" in err && err.code === "ENOENT";
+}
+
 // ── stale ctx 守卫（guardStaleCtx，崩溃韧性 D1）────────────────────────
 //
 // 背景（docs/design/crash-resilience.md §3.3 D1 / §2.2 事件 E1）：pi 的 extension API
