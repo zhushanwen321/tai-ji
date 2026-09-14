@@ -1,6 +1,6 @@
 # remove-turn-progress-bar 实施计划
 
-基线: <待 round-2 收敛后 commit 填入> | 来源设计: `.tmp/dev-flow/remove-turn-progress-bar.design.md` | 日期: 2026-09-14
+基线: 4573f4111 | 来源设计: `.tmp/dev-flow/remove-turn-progress-bar.design.md` | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -80,7 +80,7 @@ graph TD
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | pending | 0 | — |
+| u1 | committed | 1 | dev sa-d2862f59：core 增量 15/15 绿 + 全量 2085 绿 + tsc 绿 + 退役符号全仓零命中（主 agent 独立重跑 15/15 复核）；TurnProgressBar.vue 三行残留属 u2 领地既定中间态 |
 | u2 | pending | 0 | — |
 | u3 | pending | 0 | — |
 
