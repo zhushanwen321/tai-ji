@@ -80,12 +80,14 @@ graph TD
 | R2 | TurnMeta prop 落为可选 `generatedChars?: number`（withDefaults 默认 0），非 task 字面的非可选 | 合理——dev 实测 @vue/compiler-sfc：非可选 + withDefaults 编译产出 `required: true`，TurnMeta.test.ts 存量内联 mount 用例触发 Vue warn；改可选后 `required: false + default 0`，对外契约（默认 0）不变，v-if chars>0 语义不变 |
 | R3 | u2 在 wiring 测试新增 A6 dead 排除脚本化用例（session store mock list 改 vi.hoisted 稳定数组引用驱动 dead 事实） | 合理——A6 此前仅由 Panel.vue 模板 v-if + core derivePanelView 承载、无脚本化断言；验收计划表 A6 行标注「可脚本化」且归属 u2，属验收条款落地方式选择，非语义偏离（abort 接线用例行为不变） |
 | R4 | u2 在 bar 测试追加「双语键集合恰为保留五键」精确断言 | 合理——测试加固非行为偏离：隐含四死键已删的组件侧锁定，与 A8② rg 互为印证 |
+| R5 | Turn.test.ts 列入 u3 领地但零改动（免适配） | 合理——该测试 mount 全部 stubs TurnMeta:true，透传新 prop 对既有断言透明（重跑 30/30 绿）；「清单登记→判定免做」按偏差惯例补登（阶段 3 审查 R-core+ui 区指出） |
+| R6 | TurnMeta 字符数千分位 toLocaleString() 与旧观测条基线逐字同口径 | 合理——设计 §2.4 未规定数字格式化，「承接观测条信息」的忠实迁移应连展示格式一并承接（阶段 3 审查确认非偏差，登记备查） |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | committed | 1 | dev sa-d2862f59：core 增量 15/15 绿 + 全量 2085 绿 + tsc 绿 + 退役符号全仓零命中（主 agent 独立重跑 15/15 复核）；TurnProgressBar.vue 三行残留属 u2 领地既定中间态 |
+| u1 | committed | 1 | dev sa-d2862f59：core 增量 15/15 绿 + 全量 2085 绿 + tsc 绿 + 退役符号全仓零命中（主 agent 独立重跑 15/15 复核）；TurnProgressBar.vue 三行残留属 u2 领地既定中间态；A7 收窄不变量已测试化（Object.keys 恰两字段用例，审查确认优于设计字面） |
 | u2 | committed | 2（首轮 dev 进程 SIGTERM 死亡零产出，接替程序补派重跑） | dev sa-e11c906e：增量 16/16 + i18n 守卫 197 + vue-tsc 绿 + panel 目录回归 662 绿 + A8② rg 四键零命中（主 agent 独立重跑 16/16 + vue-tsc exit=0 复核）；偏差 R3/R4 见 §5；Composer.vue 悬空注释见残留风险 |
 | u3 | committed | 1 | dev sa-b3ad65bf：ui 三文件 67/67 绿（含 generatedChars 新用例）+ renderer 冒烟 5/5 + i18n 守卫 197 绿 + vue-tsc 绿（主 agent 独立重跑 junit 67 testcase 0 failure 复核）；偏差 R1/R2 见 §5 |
 
@@ -100,4 +102,6 @@ graph TD
 
 **变更历史**：
 - 2026-09-14 round-1 三审（3 must-fix + 9 suggestion）全修 → 设计 v2（§1.1 方案对比新增 / A8 守卫覆盖如实拆分 / snapshot 7→2 / 死键 3→4 / U6 反转登记 / u2·u3 清单补全 / 速记码对照表）
+**变更历史**：
 - 2026-09-14 round-2 聚焦复审收敛：主审 0MF+1S / 影响面审 0MF+0S / 简洁审 0MF+1S（三审均 0 must-fix，设计就绪）。唯一残留 suggestion（两审同指）= durationSec 删除 × P-3 阈值重定值的跨包前提，已回修（设计 §2.4 + u2 条目）。known-issue：三审完成通知在宿主侧丢失（会话 state 文件 19:40 已记 completed，注册表滞留 running），报告经直接读文件回收，已向用户同步排查结论
+- 2026-09-14 阶段 3 一致性审查清零 + Gate A 全量绿：双区审查（core+ui subagent / renderer 主 agent 亲执——两任 subagent 均遭环境 SIGTERM，偏离已登记见 `.tmp/tech-design/consistency-review-renderer.md`）；unreasonable = 1 low（Turn.test.ts 免适配登记缺口 → R5 已补）已闭环；doc_errors = 0；合理偏差 R1–R6 全落 §5。Gate A：core 2085 / ui 797 / renderer 4328 tests 全绿 + 三包类型门 EXIT=0 + 根 lint 绿（证据 `.tmp/dev-flow/remove-turn-progress-bar.gate-a.log`）；覆盖矩阵无无人认领区
