@@ -25,7 +25,7 @@ export const fixtureWorkflows: WorkflowRunRecord[] = [
   },
 ]
 
-/** Mock subagent fixture（E2E 验证 Agents tab 渲染） */
+/** Mock subagent fixture（E2E 验证 Agents tab 渲染）[U6] legacy done 收窄出类型，用归一后两态词 */
 export const fixtureSubagents: SubagentRecord[] = [
   {
     subagentId: 'sub-mock-001',
@@ -33,7 +33,8 @@ export const fixtureSubagents: SubagentRecord[] = [
     agent: 'reviewer',
     slug: 'review-task',
     task: 'Review the code changes',
-    status: 'done',
+    status: 'idle',
+    stopReason: 'completed',
     turns: 3,
     totalTokens: 5000,
     elapsedSeconds: 12,

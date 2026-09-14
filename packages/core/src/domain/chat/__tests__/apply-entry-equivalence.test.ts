@@ -47,6 +47,15 @@ import {
   applyHistoryBudgetWindow,
   sliceMessagesBeforeCursor,
 } from '../../../../../runtime/src/services/session/history-rebuild-cache.js'
+// [two-state-convergence U7/P2] subagent-record 等价回放资产（跨包 import 先例 = 上方
+// message-converter / history-rebuild-cache，同深度相对路径；fixture 与 SSOT 谓词均为
+// 无 vue 依赖纯模块——core 与 renderer 双消费同一资产，无副本分叉）。
+import { scanSubagentEntries } from '../../../../../runtime/src/services/session/subagent-extractor.js'
+import { isRunningProjection } from '../../../../../renderer/src/lib/subagent-bucket'
+import {
+  SESSION_01A09F83_GHOST_FIXTURE,
+  type GhostFixtureSpec,
+} from '../../../../../renderer/src/__tests__/lib/subagent-ghost-fixture'
 
 // ── fixture（取自既有测试的真实形态：message-converter*.test.ts 家族）──────────
 
@@ -1181,3 +1190,121 @@ describe('预算窗口内 live ≡ reload（u6 re-scope）', () => {
     expect(headPage.truncated).toBe(false)
   })
 })
+
+// ── [two-state-convergence U7 / P2 ⛔实施期门] subagent-record entry 等价回放 ──────────
+//
+// 设计 D7 P2：「subagent-record entry 的『轮终翻边 entry 序列』冷启动重放 ≡ live 派生
+// （现构造性成立，测试防回归）」。投影面 = runtime scanSubagentEntries（冷启动全量与
+// live 失效重拉是同一份代码——§2.4 构造性保证），本组测试钉住：
+//   1. 翻边 entry 序列投影的确定性（同序列两次全量扫描 deep-equal）；
+//   2. 冷启动全量 ≡ 逐条前缀增量折叠（后到覆盖语义下，live 任意时点的增量重拉态
+//      与全量重放的同 id 投影一致）；
+//   3. U6 归一边（legacy 值 → 两态 + 展示位合成；第五归一 running+resumable → idle）
+//      在重放/live 两通路结果一致；
+//   4. 01a09f83 形态 fixture（U1/U2 批入库，renderer 与 core 双副本头注互指）回放
+//      badge 计数 = 0（P1 门在 renderer subagent-bucket.test 的等价镜像——跨包消费
+//      同一 SSOT 谓词，钉住 fixture 资产不因包边界漂移）。
+
+/** W16 v1 自描述 subagent-record entry 构造（extension record-entry.ts schema 的测试镜像） */
+function subagentRecordEntry(data: Record<string, unknown>): Record<string, unknown> {
+  return { type: 'custom', customType: 'subagent-record', data: { v: 1, agent: 'worker', slug: 'fx', task: 'replay', startedAt: 1000, ...data } }
+}
+
+/** 同 id 后到覆盖折叠（scanSubagentEntries 的 live 增量合并语义镜像） */
+function foldBySubagentId(records: SubagentRecord[]): Map<string, SubagentRecord> {
+  return new Map(records.map((r) => [r.subagentId, r]))
+}
+
+describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列等价回放（P2）', () => {
+  /** 翻边序列：register → 轮终翻边 → revive 续轮（清点族清 result/stopReason）→ 再翻边
+   *  + 一条 legacy closed entry + 一条存量桥接 entry（第五归一输入） */
+  const FLIP_SEQUENCE: Record<string, unknown>[] = [
+    subagentRecordEntry({ id: 'sa-flip', status: 'running' }),
+    // 轮终翻边（U4 后写面：idle + result + stopReason）
+    subagentRecordEntry({ id: 'sa-flip', status: 'idle', result: 'round 1 output', stopReason: 'completed', endedAt: 2000 }),
+    // revive/第 2 轮轮始（[U6/D4] 清点族：result/stopReason 清，status 翻 running）
+    subagentRecordEntry({ id: 'sa-flip', status: 'running' }),
+    // 第 2 轮轮终
+    subagentRecordEntry({ id: 'sa-flip', status: 'idle', result: 'round 2 output', stopReason: 'completed', endedAt: 4000 }),
+    // legacy closed 终态（[U6] 归一边输入：→ idle + closedReason 保留 + stopReason 派生）
+    subagentRecordEntry({ id: 'sa-legacy-closed', status: 'closed', closedReason: 'gc', error: 'boom', endedAt: 5000 }),
+    // 存量桥接形态（U4 部署边界 entry：running + resumable——[U6/D5 第五归一] → idle）
+    subagentRecordEntry({ id: 'sa-bridged', status: 'running', resumable: true, result: 'stale', stopReason: 'completed' }),
+  ]
+
+  it('翻边序列投影确定性：同序列两次全量扫描 deep-equal（D5 纯函数范式镜像）', () => {
+    const first = scanSubagentEntries(FLIP_SEQUENCE)
+    const second = scanSubagentEntries(FLIP_SEQUENCE)
+    expect(first).toEqual(second)
+  })
+
+  it('⛔门：冷启动全量 ≡ 逐条前缀增量折叠（live ≡ replay 构造性的回归钉）', () => {
+    const coldStart = foldBySubagentId(scanSubagentEntries(FLIP_SEQUENCE))
+    // live：从空表开始，逐条「增量重拉」（对前缀全量扫描——同一份投影代码），折叠进缓存
+    const live = new Map<string, SubagentRecord>()
+    for (let k = 1; k <= FLIP_SEQUENCE.length; k++) {
+      for (const rec of scanSubagentEntries(FLIP_SEQUENCE.slice(0, k))) {
+        live.set(rec.subagentId, rec)
+      }
+      // 已见 id 的投影与冷启动终态在该前缀内的应有形态一致：
+      // 该 id 最后一条 entry 落在本前缀内 → 与全量终态一致；否则保持上一增量态（不回退）
+      for (const [id, rec] of live) {
+        const lastIdx = findLastIndex(FLIP_SEQUENCE, (e) => (e.data as Record<string, unknown>).id === id)
+        if (lastIdx < k) {
+          expect(rec, `prefix=${k} id=${id}`).toEqual(coldStart.get(id))
+        }
+      }
+    }
+    // 全量收敛：live 终态 ≡ 冷启动终态
+    expect([...live.entries()]).toEqual([...coldStart.entries()])
+  })
+
+  it('[U6] 归一边在重放/live 两通路结果一致：legacy closed → idle+closedReason 保留+派生 stopReason；桥接形态 → 第五归一 idle', () => {
+    const records = foldBySubagentId(scanSubagentEntries(FLIP_SEQUENCE))
+    // legacy closed 归一（与 runtime subagent-status.test 的映射表一致）
+    const closed = records.get('sa-legacy-closed')!
+    expect(closed.status).toBe('idle')
+    expect(closed.closedReason).toBe('gc')
+    expect(closed.stopReason).toBe('failed') // deriveClosedDisplay(gc+error) → failed 派生
+    // 第五归一（running + resumable=true → idle；entry 自带 stopReason 保留）
+    const bridged = records.get('sa-bridged')!
+    expect(bridged.status).toBe('idle')
+    expect(bridged.stopReason).toBe('completed')
+    // 翻边终态（正常路径：idle + result + stopReason 直投）
+    const flip = records.get('sa-flip')!
+    expect(flip.status).toBe('idle')
+    expect(flip.result).toBe('round 2 output')
+    expect(flip.stopReason).toBe('completed')
+  })
+
+  it('⛔门：01a09f83 fixture 回放 badge 计数 = 0（39 形态经投影 + renderer SSOT 谓词；跨包同源消费）', () => {
+    /** fixture 脱敏规格 → entry data（字段形态六元组，与 renderer P1 门同构映射） */
+    function specToEntryData(spec: GhostFixtureSpec): Record<string, unknown> {
+      return {
+        id: spec.aliasId,
+        status: spec.status,
+        ...(spec.hasResult ? { result: '(redacted)' } : {}),
+        ...(spec.chatMode !== undefined ? { chatMode: spec.chatMode } : {}),
+        ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
+      }
+    }
+    const entries = SESSION_01A09F83_GHOST_FIXTURE.map(specToEntryData).map(subagentRecordEntry)
+    // 冷启动全量
+    const cold = scanSubagentEntries(entries)
+    // live 增量折叠终态
+    const live = new Map<string, SubagentRecord>()
+    for (let k = 1; k <= entries.length; k++) {
+      for (const rec of scanSubagentEntries(entries.slice(0, k))) live.set(rec.subagentId, rec)
+    }
+    expect(cold).toHaveLength(39)
+    expect([...live.values()]).toEqual(cold)
+    // ⛔P1 门镜像：严格口径（isRunningProjection SSOT）回放 badge = 0（幽灵 8→0）
+    expect(cold.filter((r) => isRunningProjection(r))).toHaveLength(0)
+  })
+})
+
+/** Array.prototype.findLastIndex 的内联实现（测试内避免对 Node 版本的库依赖） */
+function findLastIndex<T>(arr: T[], pred: (item: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i]!)) return i
+  return -1
+}

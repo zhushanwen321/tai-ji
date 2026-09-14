@@ -163,7 +163,7 @@ describe('MessageStream 虚拟 session forceWorking 接线（R1-遗留-1）', ()
 
   it('轮终 record（running + result，running-resumable）→ 末位 turn.isStreaming=false（不卡 streaming）', async () => {
     const sub = useSubagentStore()
-    sub.applyRecords(MAIN_SID, [makeSubagentRecord({ status: 'running', result: '本轮产出正文' })])
+    sub.applyRecords(MAIN_SID, [makeSubagentRecord({ status: 'idle', result: '本轮产出正文', stopReason: 'completed' })])
     expect(await mountAndReadStreaming()).toBe('false')
   })
 

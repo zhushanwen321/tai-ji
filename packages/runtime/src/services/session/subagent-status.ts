@@ -1,49 +1,125 @@
 import type { SubagentStatus } from '@xyz-agent/shared'
+import { deriveClosedDisplay } from '@xyz-agent/shared'
 
 /**
- * 将 pi-subagent-workflow 各出口的状态字符串归一化为 SubagentStatus。
+ * 将 pi-subagent-workflow 各出口的状态字符串归一化为 SubagentStatus（[U6/D5] 契约
+ * 收窄后 = `running | idle` 两态直出）+ legacy 值的展示位合成明细。
  *
  * pi 侧状态来源分散且命名不一致（v4 bg-notify 发 running/closed、listResponse 给
  * running/closed、PR #85 的 manifest 写 completed/failed、子进程崩溃重建路径推断
- * crashed），本函数统一收敛到 SubagentStatus（v4 两态 + legacy 兼容值）。
+ * crashed、U4 前自描述 entry 的 A-lite 轮终 running+resumable 桥接形态），本函数统一
+ * 收敛到两态；legacy 值（done/failed/cancelled/crashed/closed）在边界映射为
+ * idle + stopReason/closedReason/chatMode 展示位合成（D5「legacy 四值映射」），
+ * renderer 永不见 legacy 值。
  *
- * runtime 的 event-interpreter（实时路径）与 subagent-extractor（磁盘路径）共用此函数，
- * 避免两处手写三元/switch 漂移（历史 bug：event-interpreter 的三元缺 completed/crashed 归一）。
+ * runtime 的 subagent-extractor（磁盘路径：自描述 entry 投影 + legacy toolResult 配对
+ * 路径）共用此函数，避免多处手写映射漂移（历史 bug：event-interpreter 的三元缺
+ * completed/crashed 归一）。
  *
- * [2026-08-05] 自 @xyz-agent/shared 下沉（架构审计 7.1：单消费者驱动归位）——
- * 消费者仅 runtime 2 文件，shared 只保留真正跨端复用的类型/常量。
+ * [2026-08-05] 自 @xyz-agent/shared 下沉（架构审计 7.1：单消费者驱动归位）。
+ * [2026-09 U6] 返回值从裸 SubagentStatus 扩为归一明细（D5 INFO 落点：legacy 四值映射
+ * 与第五归一需要 status 之外的上下文与产出，单参裸值签名承载不了）。
  */
-export function normalizeSubagentStatus(status: string | undefined): SubagentStatus {
-  if (!status) return 'running'
-  switch (status) {
-    case 'idle':
-      // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在飞可续聊（entry
-      // 写面 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
-      return 'idle'
-    case 'done':
-    case 'completed':
-    case 'success':
-      return 'done'
-    case 'failed':
-    case 'error':
-      return 'failed'
-    case 'cancelled':
-    case 'canceled':
-      return 'cancelled'
-    case 'crashed':
-      return 'crashed'
+
+/** 归一明细（status 之外的字段全部是「entry 自带字段缺失时的合成兜底」，消费方必须让自带字段优先） */
+export interface NormalizedSubagentStatus {
+  /** 归一后的占用两态 */
+  status: SubagentStatus
+  /**
+   * legacy 值归一合成的展示停因（SubagentRecord.stopReason 下行）：done 族 →
+   * 'completed' / failed|crashed → 'failed' / cancelled → 'cancelled' / closed →
+   * deriveClosedDisplay 派生映射（closed→'completed' / failed→'failed' /
+   * cancelled→'cancelled'，D5「deriveClosedDisplay 改 stopReason 派生」）。
+   * 桥接第五归一不合成——存量 entry 自带 A-lite 展示位（completed/failed）。
+   */
+  derivedStopReason?: string
+  /** legacy closed 归一保留的 L2 诊断位（SubagentRecord.closedReason 下行，§3.2.9 台账第 1 条另行退役） */
+  derivedClosedReason?: string
+  /**
+   * legacy done 族（含 closed 的 done 派生分支）归一合成的 one-shot 形态位
+   * （SubagentRecord.chatMode 下行）：done/closed-done 是 W16 前终态「完成」，
+   * 当时无 chat 概念（chatMode 字段不存在）——语义上 ≙ one-shot 完成（chatMode=false）。
+   * 合成它不是造数据，而是把「§3.4 迁移矩阵第 9 行 legacy done → 绿」的判据承载位
+   * 补齐：五行状态点表的绿 = idle 兜底行，要求 chatMode 不保守归 chat。合成仅发生在
+   * entry 自带 chatMode 缺失时（消费方 `optBoolean(d.chatMode) ?? derivedChatMode`）。
+   */
+  derivedChatMode?: false
+}
+
+/** 归一上下文（调用方按数据源可用性传入；legacy toolResult 路径无 resumable） */
+export interface NormalizeSubagentStatusOpts {
+  /**
+   * 存量桥接形态上下文（自描述 entry 的 resumable 字段原值；[U5] 后新写 entry 无此
+   * 字段，仅 U4 部署边界旧 entry 在场）。true 且原始 status=running → 第五归一
+   * （D5 R3：不设 result≠∅ 条件——覆盖 §3.4 第 2-5 行含重建孤儿 result=∅）。
+   */
+  resumable?: boolean
+  /** legacy closed 的 L2 原因（deriveClosedDisplay 派生 + closedReason 保留双消费） */
+  closedReason?: string
+  /** legacy closed 的失败证据（deriveClosedDisplay 的 gc+error → failed 分支） */
+  error?: string
+}
+
+/** closed 展示语义 → stopReason 值域映射（'done'→'completed'，failed/cancelled 同名词直投） */
+function closedDisplayToStopReason(display: 'done' | 'failed' | 'cancelled'): string {
+  return display === 'done' ? 'completed' : display
+}
+
+export function normalizeSubagentStatus(
+  rawStatus: string | undefined,
+  opts: NormalizeSubagentStatusOpts = {},
+): NormalizedSubagentStatus {
+  if (!rawStatus) return { status: 'running' }
+  switch (rawStatus) {
     case 'running':
     case 'pending':
     case 'active':
-      return 'running'
-    case 'closed':
-      return 'closed'
+      // [U6/D5 第五归一] 存量桥接形态（U4 部署边界旧 entry：running + resumable=true）
+      // → idle：覆盖 §3.4 迁移矩阵第 2-5 行全部桥接形态（chat 轮终 / one-shot 轮终 /
+      // legacy chatMode=∅ / 重建孤儿 result=∅），不设 result≠∅ 条件。缺此行则单字段
+      // isOccupied 会对存量桥接形态重新计入幽灵（A1/A4 回归）。展示位不在此合成——
+      // 存量 entry 自带 A-lite stopReason（completed/failed），自带字段优先。
+      if (opts.resumable === true) return { status: 'idle' }
+      return { status: 'running' }
+    case 'idle':
+      // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在飞可续聊（entry
+      // 写面 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
+      return { status: 'idle' }
+    case 'done':
+    case 'completed':
+    case 'success':
+      // [U6/D5] legacy 完成值 → idle + stopReason:'completed' + one-shot 形态合成
+      //（§3.4 第 9 行「绿」的判据承载，见 derivedChatMode 注释）。
+      return { status: 'idle', derivedStopReason: 'completed', derivedChatMode: false }
+    case 'failed':
+    case 'error':
+    case 'crashed':
+      // [U6/D5] legacy 失败值（crashed = 子进程崩溃重建推断，同 failed 异常语义）→
+      // idle + stopReason:'failed'。红点判据不依赖 chatMode，无形态合成必要。
+      return { status: 'idle', derivedStopReason: 'failed' }
+    case 'cancelled':
+    case 'canceled':
+      // [U6/D5] legacy 取消值 → idle + stopReason:'cancelled'（interrupted 族灰点判据词）。
+      return { status: 'idle', derivedStopReason: 'cancelled' }
+    case 'closed': {
+      // [U6/D5] legacy closed 终态 → idle + closedReason 保留（诊断位）+ 展示语义经
+      // deriveClosedDisplay 派生映射为 stopReason（cancelled→灰 / failed→红 / done→绿，
+      // 与收窄前三分行等价——A4 门）。done 派生分支同样合成 one-shot 形态位。
+      const display = deriveClosedDisplay({ closedReason: opts.closedReason, error: opts.error })
+      return {
+        status: 'idle',
+        derivedStopReason: closedDisplayToStopReason(display),
+        derivedClosedReason: opts.closedReason,
+        ...(display === 'done' ? { derivedChatMode: false as const } : {}),
+      }
+    }
     default:
       // 未知状态：pi 扩展可能新增了未映射的状态，warn 一次便于排查。
-      // 兜底方向取终态（closed）而非 running：未知值更可能是扩展新增的终态细分，
+      // 兜底方向取非占用（idle）而非 running：未知值更可能是扩展新增的终态细分，
       // 返回 running 会把已结束的 subagent 翻回「运行中」假象（UI 永久 spinner、
       // 活跃任务误判）；「无状态信息」（undefined/空串）才保持初始 running 认知。
-      console.warn(`[normalizeSubagentStatus] unknown status: ${JSON.stringify(status)}, falling back to 'closed'`)
-      return 'closed'
+      // [U6] 兜底值随契约收窄从 closed 改为 idle（closed 已不存在于两态词表）。
+      console.warn(`[normalizeSubagentStatus] unknown status: ${JSON.stringify(rawStatus)}, falling back to 'idle'`)
+      return { status: 'idle' }
   }
 }

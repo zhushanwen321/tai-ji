@@ -2,7 +2,7 @@
 //
 // [H4 三轴拆分 / 轮次簿记轴] RecordStore 轮次过程原语的实现体：
 //   - appendEvent（事件追加，turns/eventLog/totalTokens 归约）；
-//   - markRoundStarted（轮始重置——字段①②⑤）；
+//   - markRoundStarted（轮始重置——字段①②⑤ + [U6/D4] stopReason 清点）；
 //   - markRoundIdle（轮末收口簿记全集①-⑪——[two-state-convergence U4/D3] 轮终翻边
 //     写 idle + A-lite 轮终磁盘面 `.state` 收条 + binding 快照 + pending 注销发射点②）；
 //   - adoptEngineDeath（引擎死亡收养——error/result/stopReason 三写，[U5/D4] W4 新态）。
@@ -65,9 +65,15 @@ export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): 
 }
 
 /**
- * 意图原语：轮始重置（字段①②⑤）。status=running + result 清除——
- * §5.4 isStreaming 公式要求 result undefined 才显示 streaming，不清则续轮流仍显示
- * waiting。归口写点：热路径轮始与冷启动 resume 续轮（subagent-service，U3 迁移）。
+ * 意图原语：轮始重置（字段①②⑤ + [U6/D4 轮始清点族扩字段] stopReason）。
+ * status=running + result 清除 + stopReason 清除——§5.4 isStreaming 公式要求 result
+ * undefined 才显示 streaming，不清则续轮流仍显示 waiting；[U6] isOccupied 终态判据
+ * （`running && stopReason === undefined`）要求在飞期 stopReason 必为空——轮终写入
+ * 的上轮停因（markRoundIdleImpl 簿记⑩）不清则第 2+ 轮在飞 record 被确定性误排除
+ * （A2 第二轮 spinner+badge+1 必挂）。代价裁决（two-state-convergence §3.1）：在飞期
+ * 上轮停因不可见（与「stopReason=上轮停因」语义的显式冲突裁决）。revive 格同步清
+ * （conversation-continuation reviveOrThrow）与本清点同族。归口写点：热路径轮始与
+ * 冷启动 resume 续轮（subagent-service，U3 迁移）。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
  */
@@ -79,6 +85,9 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   }
   rec.status = "running";
   rec.result = undefined;
+  // [U6/D4 轮始清点族扩字段] 上轮停因随轮始清点——isOccupied 的 stopReason 子句
+  // 依赖本清点（W4 新态 failed 在飞期不存在：adoptEngineDeath 纳管态无新轮可派）。
+  rec.stopReason = undefined;
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;

@@ -199,8 +199,11 @@ export type Intent = "active" | "archived";
  *                              本值承担「上一轮为什么停」的展示 + `.state` 收条 reason
  *                              词；中断族走 markSettled interrupted 族不经 markRoundIdle，
  *                              与上 4 值无冲突）
- * 仅展示 + 排障（列表主展示用派生 outcome）；复活资格判据是物理三件套
- * （§3.2.3），本字段不参与任何资格判定。
+ * 展示 + 排障（列表主展示用派生 outcome）+ [U6] 占用资格判定（isOccupied =
+ * `running && stopReason === undefined`——W4 死亡纳管态据此排除，见下方字段注释）；
+ * 复活资格判据仍是物理三件套（§3.2.3）。在飞期本字段被轮始清点族清空
+ *（markRoundStarted / revive 格，[U6/D4]）——「stopReason 不参与任何资格判定」的
+ * 旧裁决随 two-state-convergence U6 退役。
  */
 export type StopReason =
   | ClosedReason

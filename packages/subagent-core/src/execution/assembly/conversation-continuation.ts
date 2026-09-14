@@ -143,8 +143,9 @@ export interface ContinuationHost {
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
    *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
   reopenRecord(record: ExecutionRecord): boolean;
-  /** 轮始簿记（store.markRoundStarted：status=running + result 清除 +
-   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写）。 */
+  /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
+   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
+   *  [U6/D4] stopReason 清点随轮始清点族扩字段）。 */
   markRoundStarted(record: ExecutionRecord): void;
   /** [U5] idle keepalive 超时的进程回收（idleTimeoutRecycle——归档是用户意愿位，
    *  超时回收不动 intent/占用位，record 保持 idle 可续聊）。 */
@@ -911,10 +912,15 @@ export class ConversationContinuation {
     }
     // 旧终态遗留位清除（对齐 resurrectClosed 桥接语义——closedReason 残留会让
     // notifyGate 门误拦本轮通知：parent-new/parent-fork/cancelled 在拦截集）。
-    // stopReason 保留：新展示位「上一轮为什么停」（reopen 降级轮 = reopened）在
-    // 轮运行期间保留展示，settle 时由 markSettled 覆写。
+    // [U6/D4 轮始清点族扩字段] stopReason 同步清（与 markRoundStartedImpl 同族——
+    // isOccupied 终态判据 `running && stopReason === undefined` 要求在飞期停因为空，
+    // 旧展示位「上一轮为什么停」在轮运行期间保留的行为随清点族退役）。
+    // reopen 归宿：markReopened 写的 stopReason='reopened' 展示位随之退役——重开
+    // 信息由 reopen 摘要注入 prompt 体感承载（buildReopenSummaryPrompt），不再依赖
+    // 展示位字段。settle 时由 markSettled/markRoundIdle 覆写新停因。
     record.closedReason = undefined;
     record.endedAt = undefined;
+    record.stopReason = undefined;
     // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);

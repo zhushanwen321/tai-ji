@@ -91,7 +91,7 @@ function zcodeRecord(engineHandle: unknown): SubagentRecord {
     agent: 'reviewer',
     slug: 'rev',
     task: 'routed task',
-    status: 'closed',
+    status: 'idle', // [U6] closed legacy 值已收窄出类型——终态 fixture 用归一后的两态词
     startedAt: 1756000000000,
     endedAt: 1756000005000,
     result: 'routed outcome',

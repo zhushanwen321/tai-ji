@@ -1,8 +1,10 @@
-// shared SubagentRecord 契约面测试（U8 / 永久会话模型 §3.2.8）：
-//   - SUBAGENT_STATUS_ALL 全集含两态新词 idle（B3 编译锁的运行时镜像——编译锁拦
-//     「联合扩值漏改元组」，本测试拦「元组值域与联合语义漂移」的回归方向）；
-//   - projectSubagentExecutionStatus 旧六值 → 新两态映射（S8 旧数据只读兼容）；
-//   - deriveClosedDisplay 既有三分色不回归（idle 扩值后 legacy 展示派生面不动）。
+// shared SubagentRecord 契约面测试（U8 / 永久会话模型 §3.2.8；[U6] 两态收窄重写）：
+//   - SUBAGENT_STATUS_ALL 全集 = 两态（B3 编译锁的运行时镜像——编译锁拦「联合扩值
+//     漏改元组」，本测试拦「元组值域与联合语义漂移」的回归方向）；
+//   - projectSubagentExecutionStatus 两态直投恒等（legacy 六值的兼容投影已上移至
+//     runtime normalizeSubagentStatus 解析边界归一，U6/D5——renderer 永不见 legacy 值）；
+//   - deriveClosedDisplay 既有三分色不回归（U6 起消费方迁至 runtime 归一层，作为
+//     closed → stopReason 派生映射的推导器）。
 
 import { describe, expect, it } from 'vitest'
 
@@ -14,16 +16,8 @@ import {
 } from '../subagent'
 
 describe('SUBAGENT_STATUS_ALL 全集（B3 运行时镜像）', () => {
-  it('含两态新词 idle + legacy 六值（顺序：新词在前，legacy 随后）', () => {
-    expect(SUBAGENT_STATUS_ALL).toEqual([
-      'running',
-      'idle',
-      'done',
-      'failed',
-      'cancelled',
-      'crashed',
-      'closed',
-    ])
+  it('两态收窄终态：全集恰为 running + idle（legacy 值已从类型面删除，U6）', () => {
+    expect(SUBAGENT_STATUS_ALL).toEqual(['running', 'idle'])
   })
 
   it('全集无重复', () => {
@@ -31,16 +25,13 @@ describe('SUBAGENT_STATUS_ALL 全集（B3 运行时镜像）', () => {
   })
 })
 
-describe('projectSubagentExecutionStatus（旧六值 → 新两态，S8 旧数据只读兼容）', () => {
+describe('projectSubagentExecutionStatus（[U6] 两态直投恒等）', () => {
   it('running → running（唯一「正在跑」形态）', () => {
     expect(projectSubagentExecutionStatus('running')).toBe('running')
   })
 
-  it('idle 与 legacy 终态五值全部 → idle（不复活 spinner / 活跃计数）', () => {
-    const settled: readonly SubagentStatus[] = ['idle', 'done', 'failed', 'cancelled', 'crashed', 'closed']
-    for (const status of settled) {
-      expect(projectSubagentExecutionStatus(status), status).toBe('idle')
-    }
+  it('idle → idle（不复活 spinner / 活跃计数）', () => {
+    expect(projectSubagentExecutionStatus('idle')).toBe('idle')
   })
 
   it('全集覆盖矩阵：SUBAGENT_STATUS_ALL 每值映射后必为两态之一', () => {
@@ -48,6 +39,11 @@ describe('projectSubagentExecutionStatus（旧六值 → 新两态，S8 旧数�
       const mapped = projectSubagentExecutionStatus(status)
       expect(mapped === 'running' || mapped === 'idle', status).toBe(true)
     }
+  })
+
+  it('类型面：SubagentStatus 两态词表外无成员（编译期收窄的运行时镜像断言）', () => {
+    const all: readonly SubagentStatus[] = ['running', 'idle']
+    expect(all).toEqual([...SUBAGENT_STATUS_ALL])
   })
 })
 

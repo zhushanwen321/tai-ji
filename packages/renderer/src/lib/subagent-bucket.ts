@@ -10,13 +10,12 @@
  * isStreamingSubagent（stores/subagent）与 isStreaming（SubagentList）均已改为 import
  * 本模块的 isRunningProjection wrapper，全仓「真在跑」判据单一出处（G2）。
  *
- * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（legacy 终态经
- * projectSubagentExecutionStatus 投影 idle 同样可见——「旧 session 显示」只读兼容）；
+ * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（[U6] 契约收窄后类型已
+ * 两态，legacy 终态由 runtime 归一层映射 idle 同样可见——「旧 session 显示」只读兼容）；
  * intent=archived 默认隐藏，「已收起」过滤视图可寻回（场景 3：寻回靠 message 隐含
  * 翻回 active，GUI 只负责展示与入口）。
  */
 import type { SubagentRecord } from '@xyz-agent/shared'
-import { projectSubagentExecutionStatus } from '@xyz-agent/shared'
 
 /** 筛选值（FilterBar 三视图：全部活跃 / 只看正在跑 / 已收起） */
 export type SubagentFilterValue = 'active' | 'running' | 'archived'
@@ -34,21 +33,20 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 }
 
 /**
- * 占用谓词（G2「正在跑」，严格口径 SSOT——two-state-convergence D1/D2；[U5/D4]
- * resumable 子句随字段退役删除，判据退化为 `running && result === undefined`
- * 双子句）。result 在场 = 轮终信号（U4 翻边后轮终权威词 = idle，status 子句已排除
- * 正常轮终；result 子句兜住 U4 部署边界旧 entry 的 running+result 残留形态——
- * 旧组合判据 `!isDoneProjection` 对 chatMode=true 的轮终误判占用，即 sidebar
- * badge 幽灵 running 根因，session 01a09f83 实测 8 幽灵）。
+ * 占用谓词（G2「正在跑」严格口径 SSOT——two-state-convergence D1/D2；[U6] 判据
+ * 终态化：`status === 'running' && stopReason === undefined`（D5 R3 终态判据，§3.1
+ * isOccupied 本体）。U1 桥接判据的 result/resumable 子句已删——U4 翻边后轮终权威词
+ * = idle（status 子句直接排除），result 子句的旧 entry 兜底职责由 runtime 归一层
+ * 第五归一（`running && resumable===true → idle`，D5）承接；stopReason 子句排除
+ * W4 死亡纳管态（running + stopReason='failed'，[U5/D4] adoptEngineDeath 写点），
+ * 依赖轮始清点族扩字段（markRoundStarted / revive 格翻 running 时清 stopReason）——
+ * 在飞期上轮停因不可见 = 显式裁决的代价（§3.1 注释）。
  * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
  * 与 isStreaming（SubagentList）均为本函数的 import wrapper（U2 判据单一化），
  * badge 计数（useSidebarCounts）与「正在跑」过滤视图同源消费，不漂移。
  */
 export function isRunningProjection(record: SubagentRecord): boolean {
-  return (
-    projectSubagentExecutionStatus(record.status) === 'running' &&
-    record.result === undefined
-  )
+  return record.status === 'running' && record.stopReason === undefined
 }
 
 /**
@@ -80,10 +78,11 @@ export function isWaiting(record: SubagentRecord): boolean {
 }
 
 /**
- * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3，U8b 重述）：shared 扩
- * SubagentStatus 枚举时，新值经 projectSubagentExecutionStatus 落「非 running」半边
- * ——对 isRunningProjection 恒 false（安全方向）；但展示层（SubagentList 状态点）与
- * 全集覆盖矩阵须同步评估新值的三态归属，subagent-bucket.test.ts 断言表缺键即测试红。
+ * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3，U8b 重述；[U6] 后全集 = 两态）：
+ * shared 扩 SubagentStatus 枚举时，新「进行中类」值对本占用谓词的归属必须显式评估
+ * ——isRunningProjection 直读 status，新值默认落 false（安全方向）；但展示层
+ * （SubagentList 状态点）与全集覆盖矩阵须同步评估新值的三态归属，
+ * subagent-bucket.test.ts 断言表缺键即测试红。
  */
 export function filterSubagents(records: SubagentRecord[], filter: SubagentFilterValue): SubagentRecord[] {
   if (filter === 'archived') return records.filter((r) => subagentBucket(r) === 'archived')

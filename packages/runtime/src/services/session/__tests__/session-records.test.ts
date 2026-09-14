@@ -360,7 +360,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(client.getEntries).toHaveBeenCalledWith('e1')
     const subagentsMsgs = publish.mock.calls.filter(([, msg]) => (msg as { type: string }).type === 'session.subagents')
     expect(subagentsMsgs).toHaveLength(2) // 第一轮全量 + 增量变化各一帧
-    expect((subagentsMsgs.at(-1)![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0].status).toBe('done')
+    expect((subagentsMsgs.at(-1)![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0].status).toBe('idle') // [U6/D5] legacy done 归一 idle
   })
 
   it('游标失效自愈：Entry not found → 丢 cursor 第二轮全量重建', async () => {
@@ -382,7 +382,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(client.getEntries).toHaveBeenCalledWith()
     // 自愈重建后的状态经发布可见（取最后一帧——第一轮全量已发过 running 帧）
     const subagentsMsgs = publish.mock.calls.filter(([, msg]) => (msg as { type: string }).type === 'session.subagents')
-    expect((subagentsMsgs.at(-1)![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0].status).toBe('done')
+    expect((subagentsMsgs.at(-1)![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0].status).toBe('idle') // [U6/D5] legacy done 归一 idle
   })
 
   it('其他 RPC 错误：不发布、cursor 保留（下次重试仍走增量）', async () => {

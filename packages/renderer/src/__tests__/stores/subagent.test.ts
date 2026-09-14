@@ -572,24 +572,27 @@ describe('subagent store — subscribeStream / stopStream（streaming 订阅生�
 // ── hasRunning / isStreamingSubagent 窄口径判据（running-resumable 排除，residual-fixes）──
 
 describe('subagent store — hasRunning / isStreamingSubagent 窄口径（轮终 running 不算真在跑）', () => {
-  it('running + result 有值（轮终回写）→ hasRunning false，isRunning 仍 true（双口径分工）', () => {
+  it('[U6] 轮终形态（idle + result + completed）→ hasRunning false，isRunning false（两口径合流）', () => {
     const store = useSubagentStore()
     store.applyRecords('session-1', [
-      makeRecord({ subagentId: 'bg-1', status: 'running', result: '本轮产出' }),
+      // [U6] renderer 实收轮终形态（U4 翻边 + runtime 归一后）
+      makeRecord({ subagentId: 'bg-1', status: 'idle', result: '本轮产出', stopReason: 'completed' }),
     ])
     // hasRunning 窄口径：不算后台真在跑（derivedStatus 不卡 working）
     expect(store.hasRunning('session-1')).toBe(false)
-    // isRunning 宽口径：running 即 true（SubagentTab 据此订阅增量流，resumable 续轮有流活动）
-    expect(store.isRunning('session-1', 'bg-1')).toBe(true)
+    // isRunning 宽口径（running 字面）：U4 翻边后轮终 = idle——两口径天然合流（设计 §2.3）
+    expect(store.isRunning('session-1', 'bg-1')).toBe(false)
   })
 
-  it('W4 新型（[U5] 登记翻转：running + stopReason=failed 无 result）→ hasRunning true / isStreamingSubagent true（U1 判据不消费 stopReason，U6 对冲）', () => {
+  it('[U6] W4 新型（running + stopReason=failed 无 result）→ hasRunning false / isStreamingSubagent false（stopReason 子句对冲生效；isRunning 宽口径仍 true——订阅语义保留）', () => {
     const store = useSubagentStore()
     store.applyRecords('session-1', [
       makeRecord({ subagentId: 'bg-2', status: 'running', stopReason: 'failed' }),
     ])
-    expect(store.hasRunning('session-1')).toBe(true)
-    expect(store.isStreamingSubagent('session-1', 'bg-2')).toBe(true)
+    expect(store.hasRunning('session-1')).toBe(false)
+    expect(store.isStreamingSubagent('session-1', 'bg-2')).toBe(false)
+    // 宽口径（running 字面）不计 stopReason——SubagentTab 订阅语义保留（死亡纳管态仍可被接管链活动）
+    expect(store.isRunning('session-1', 'bg-2')).toBe(true)
   })
 
   it('running 无 result → hasRunning true / isStreamingSubagent true（真在跑）', () => {

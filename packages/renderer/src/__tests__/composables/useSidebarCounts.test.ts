@@ -52,13 +52,14 @@ beforeEach(() => {
 })
 
 describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
-  it('done 投影（running + result + chatMode false）不计入，真 running 计入', () => {
+  it('[U6] done 投影（idle + result + chatMode false + completed）不计入，真 running 计入', () => {
     const sid = ref<string | null>('sess-badge')
     const store = useSubagentStore()
     store.applyRecords('sess-badge', [
       makeRecord({ subagentId: 'bg-live-1', status: 'running' }),
-      makeRecord({ subagentId: 'bg-done-proj-1', status: 'running', result: '本轮产出', chatMode: false }),
-      makeRecord({ subagentId: 'bg-terminal-1', status: 'done' }),
+      // [U6] 轮终形态 = U4 翻边后 renderer 实收形态（idle + stopReason 展示位）
+      makeRecord({ subagentId: 'bg-done-proj-1', status: 'idle', result: '本轮产出', chatMode: false, stopReason: 'completed' }),
+      makeRecord({ subagentId: 'bg-terminal-1', status: 'idle', stopReason: 'completed' }),
     ])
 
     const counts = useSidebarCounts(sid)
@@ -66,7 +67,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
-  it('W4 新型计入（[U5] 登记翻转：running + stopReason=failed 无 result 仍占 badge，U6 stopReason 子句对冲）；idle（U8 两态收口）不计入（badge = 真有活在跑）', () => {
+  it('[U6] W4 新型不计入（stopReason 子句对冲生效）；idle 不计入（badge = 真有活在跑）', () => {
     const sid = ref<string | null>('sess-wait')
     const store = useSubagentStore()
     store.applyRecords('sess-wait', [
@@ -76,9 +77,9 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     ])
 
     const counts = useSidebarCounts(sid)
-    // [U5] 判据退化为 running && result===∅：W4 新型（死亡纳管态）计入 badge（设计
-    // D4/U5 行登记翻转——对冲在 U6 isOccupied 的 stopReason 子句，U4-U6 同 PR 无暴露）
-    expect(counts.subagentRunningCount.value).toBe(2)
+    // [U6/D5 终态判据] isOccupied = running && stopReason===undefined：W4 新型（死亡
+    // 纳管态 stopReason=failed）被 stopReason 子句排除——badge 只计真在跑（G1 闭环）
+    expect(counts.subagentRunningCount.value).toBe(1)
   })
 
   // H2 W1（record-unification D1②）：workflow 脚本派发的 record（origin='workflow'）

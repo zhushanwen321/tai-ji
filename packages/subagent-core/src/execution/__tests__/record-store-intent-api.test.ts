@@ -342,7 +342,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // ============================================================
   // A2 markRoundStarted / markRoundIdle 簿记
   // ============================================================
-  describe("markRoundStarted（轮始重置：字段①②⑤）", () => {
+  describe("markRoundStarted（轮始重置：字段①②⑤ + [U6/D4] stopReason 清点）", () => {
     it("status=running + result 清除 + entry 上报", () => {
       const record = makeRecord("chat-1", { chatMode: true });
       record.result = "prev round";
@@ -356,6 +356,19 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
         "subagent-record",
         expect.objectContaining({ id: "chat-1" }),
       );
+    });
+
+    it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在飞 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接守卫）", () => {
+      const record = makeRecord("chat-1b", { chatMode: true });
+      record.result = "prev round";
+      record.stopReason = "completed"; // 上轮轮终写入的展示位（markRoundIdleImpl 簿记⑩）
+      store.register(record);
+      appendEntryMock.mockClear();
+
+      expect(store.markRoundStarted("chat-1b")).toBe(true);
+      expect(record.status).toBe("running");
+      expect(record.result).toBeUndefined();
+      expect(record.stopReason).toBeUndefined();
     });
 
     it("id 不在内存 → false 无副作用", () => {

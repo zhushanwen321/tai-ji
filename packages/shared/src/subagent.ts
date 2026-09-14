@@ -16,23 +16,25 @@
  */
 
 /**
- * subagent 状态。对齐永久会话模型（subagent-permanent-session-model §3.2.2）占用两态
- * + 历史迁移遗留值：
+ * subagent 状态（[two-state-convergence U6/D5/G4] 契约收窄终态：占用两态，终态概念
+ * 不存在——对齐永久会话模型 subagent-permanent-session-model §3.2.2）：
  * - running：本轮有任务在飞
- * - idle：无任务在飞，随时可接下一条 message（U8 起扩展写面产出——旧「轮终回 running」
- *   折叠为 idle，「为什么停」由 stopReason 表达，列表可见性由 intent 表达）
- * - done/failed/cancelled/crashed/closed：legacy 兼容值（v4~U7 期间扩展产物 + manifest
- *   旧值读侧归一需要），U8 起扩展写面不再产出，仅为历史 session 数据保留。读侧兼容
- *   映射见 {@link projectSubagentExecutionStatus}。
+ * - idle：无任务在飞，随时可接下一条 message（轮终权威词——「为什么停」由 stopReason
+ *   表达，列表可见性由 intent 表达）
+ *
+ * [U6] legacy 兼容值（done/failed/cancelled/crashed/closed）已从类型面删除：扩展写面
+ * U2 起不再产出，历史 session 数据的旧值在解析边界（runtime normalizeSubagentStatus
+ * 归一 + record 投影）映射为两态 + stopReason/closedReason 展示位，renderer 永不见
+ * legacy 值（D5「边界归一」）。编译期破坏性收窄（tsc 全量拦截消费方）。
  */
-export type SubagentStatus = 'running' | 'idle' | 'done' | 'failed' | 'cancelled' | 'crashed' | 'closed'
+export type SubagentStatus = 'running' | 'idle'
 
 /**
- * SubagentStatus 值全集（adversarial-review-fixes §3.3 B3）。
+ * SubagentStatus 值全集（adversarial-review-fixes §3.3 B3；[U6] 两态收窄后 = 两值）。
  *
- * 用途：消费方测试的全集覆盖矩阵数据源——此前 renderer subagent-bucket 测试本地硬拷贝
- * 六值，shared 扩枚举时新「进行中类」值会静默落 renderer 分桶判据 `status !== 'running'`
- * 的「已结束」桶且测试不翻红。消费 shared 常量后，扩枚举同步本元组即测试矩阵自动扩。
+ * 用途：消费方测试的全集覆盖矩阵数据源——shared 扩枚举时新「进行中类」值会静默落
+ * renderer 分桶判据 `status !== 'running'` 的「已结束」桶且测试不翻红。消费 shared
+ * 常量后，扩枚举同步本元组即测试矩阵自动扩。
  *
  * 扩枚举守卫（两处同步，缺一即编译/测试红）：
  * - 上方 SubagentStatus 联合与本元组须同步改——正向（元组含非联合值）由下方 satisfies
@@ -43,11 +45,6 @@ export type SubagentStatus = 'running' | 'idle' | 'done' | 'failed' | 'cancelled
 export const SUBAGENT_STATUS_ALL = [
   'running',
   'idle',
-  'done',
-  'failed',
-  'cancelled',
-  'crashed',
-  'closed',
 ] as const satisfies readonly SubagentStatus[]
 
 /**
@@ -102,7 +99,7 @@ export interface SubagentRecord {
   slug: string
   /** 分配给 subagent 的完整任务提示词（可多行） */
   task: string
-  /** 当前状态 */
+  /** 当前状态（两态：running=本轮有任务在飞 / idle=可接续聊；legacy 终态值 U6 起解析边界归一） */
   status: SubagentStatus
   /** 执行所用 model（展示用） */
   model?: string
@@ -121,29 +118,28 @@ export interface SubagentRecord {
   /** failed 状态的错误文本 */
   error?: string
   /**
-   * 轮终结果文本（running-resumable 轮终信号，review findings-confirmation #8）。
+   * 轮终结果文本（最近一轮产出，数据非状态——two-state-convergence §3.1 字段分工）。
    *
-   * v4 起 subagent 完成一轮注入结果后轮终**故意回写 status='running'**（可冷路径
-   * resume；closed 只在显式关闭，extensions finalize-record.ts v4 B-1）——「后台真在跑」
-   * 与「轮终 resumable」无法凭 status 区分。result 有值即「至少完成过一轮」的轮终信号。
-   * 轮终迁移写点对空文本轮写占位（R2-1 修复后才恒写非空）：本轮正文 / 错误兜底文本 /
-   * chatMode 空增量轮 "(no output this round)" / one-shot 空文本成功轮 "(empty)"（与
-   * notifier 兜底同款措辞）；首轮未完成前恒 undefined。renderer 的 working 判定
-   * （subagent store hasRunning）据此排除轮终 running，消除「完成注入后末位 turn
-   * 永久工作中」。
+   * 历史（v4~U3）：subagent 完成一轮注入结果后轮终故意回写 status='running'
+   * （A-lite 桥接，可冷路径 resume）——「后台真在跑」与「轮终」无法凭 status 区分，
+   * renderer working 判定曾据此排除轮终 running。[U4 翻边] 轮终权威词 = idle
+   * （markRoundIdle 写 idle），status 单字段即可判占用，本字段回归纯数据职责；
+   * result 残留的 running 形态只存在于 U4 部署边界旧 entry（runtime 第五归一
+   * `running && resumable===true → idle` 承接，two-state-convergence D5）。
    *
    * 来源：自描述 subagent-record entry（W16 v1，reportRecordTransition 轮终迁移携带
-   * result 字段）；legacy 路径（W16 前旧 session entry）无此字段 → running 无 result 仍按
-   * 真在跑判定（旧扩展无 running-resumable 设计，语义正确）。
+   * result 字段）；轮终迁移写点对空文本轮写占位（本轮正文 / 错误兜底文本 /
+   * "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
    */
   result?: string
   /**
-   * L2 关闭原因（仅 status='closed' 时有意义）。对齐 extension 侧 ClosedReason 六值
+   * L2 关闭原因（[U6] closed 终态遗留诊断位：runtime 归一把 legacy closed 映射为
+   * idle 后本字段保留原值——§3.2.9 台账第 1 条另行退役，本设计只消费不删除）。
+   * 对齐 extension 侧 ClosedReason 六值
    * （extensions/universal/subagent-workflow/src/execution/types.ts）：
    * 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'user-close' | 'cancelled' | 'gc'。
-   * event-interpreter（bg-notify 实时路径）与 subagent-extractor（JSONL 磁盘路径）投影，
-   * UI 侧经 deriveClosedDisplay 派生成功/失败/取消展示语义。用 string 而非字面量联合：
-   * shared 是跨进程契约 SSOT，extension 新增 reason 值时读侧不因类型收窄丢字段。
+   * 展示语义由 runtime 归一层经 {@link deriveClosedDisplay} 派生为 stopReason
+   * （cancelled→'cancelled' / failed→'failed' / done→'completed'）。
    */
   closedReason?: string
   /**
@@ -158,10 +154,12 @@ export interface SubagentRecord {
    * 展示维度（永久会话模型 §3.2.1，U8 下行投影）：上一轮为什么停。值域 =
    * 旧 closedReason 七值沿用 + 四个新展示值（interrupted / interrupted-by-restart /
    * interrupted-by-parent / reopened），见 subagent-core types.ts StopReason。
-   * 有值即投影（A-lite：轮终 record 保持 running-resumable 亦带 completed/failed 展示位，
-   * 阶段 3 裁决）；缺省 = 从未收口 / 存量数据。用 string 而非字面量
-   * 联合：shared 是跨进程契约 SSOT，extension 新增展示值时读侧不因类型收窄丢字段。
-   * 「为什么停」只做一句话解释展示（G2），不参与任何资格判定。
+   * [U6 起参与占用资格判定（isOccupied = `running && stopReason === undefined`——
+   * W4 死亡纳管态 stopReason=failed 据此排除）]：轮始清点族（markRoundStarted /
+   * revive 格）在翻 running 时清除本字段——在飞期上轮停因不可见是显式裁决的代价
+   * （two-state-convergence §3.1 注释 + D4 轮始清点族扩字段）；「为什么停」的一句话
+   * 解释展示（G2）仅在非在飞期可见。用 string 而非字面量联合：shared 是跨进程契约
+   * SSOT，extension 新增展示值时读侧不因类型收窄丢字段。
    */
   stopReason?: string
   /**
@@ -202,14 +200,11 @@ export interface SubagentRecord {
 }
 
 /**
- * closed 统一终态的展示语义（UI 渲染派生，v4 B-1 两态收敛的配套）。
- *
- * extension v4 起 bg-notify / list 只产出 status='closed'（含失败/取消），L2 原因由
- * closedReason 表达。渲染层（renderer BgNotifyCard / SubagentList）不再各自手写
- * 派生规则，统一消费本函数：
- * - closedReason='cancelled' → cancelled（取消，中性样式；error 不参与——取消分支优先）
- * - closedReason='gc'（缺失兜底 'gc'）且 error 有值 → failed（gc 失败终态携带 error）
- * - 其余 → done（自然完成 / parent-fork / parent-new / parent-shutdown / user-close 等级联关闭）
+ * closed 统一终态的展示语义（[U6/D5] 消费方迁移：renderer SubagentList 的 closed
+ * 三分行已随 STATUS_DOT_RULES 全表坍缩删除，本函数改由 runtime 归一层消费——legacy
+ * closed 归一为 idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
+ * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
+ * 派生」），closedReason 字段同时保留作诊断位）。
  *
  * 派生规则与 extension 侧两处实现同构（三处一致，改任一处须同步其余两处）：
  * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/bg-notify-render.ts
@@ -236,14 +231,14 @@ export function deriveClosedDisplay(input: { closedReason?: string; error?: stri
 }
 
 /**
- * 占用两态投影（永久会话模型 §3.2.2 G2，U8 旧数据只读兼容）：任意 SubagentStatus
- * （含 legacy 六值）→ 占用两态。
- *   running → running；其余（idle + legacy done/failed/cancelled/crashed/closed）→ idle。
+ * 占用两态投影（永久会话模型 §3.2.2 G2；[U6] 契约收窄后类型已两态，本函数退化为
+ * 直投恒等——保留导出作「legacy 数据兼容语义」的历史记录位，消费方可直接读 status）。
+ *   running → running；idle → idle。
  *
- * 消费方：需要对旧 session 数据按新两态词汇判「正在跑 / 空闲」的读侧（renderer U8b
- * 分桶判据、过滤器）。旧终态值全部归 idle 而非 running——旧数据里的终态 record 没有
- * 在飞轮，映射成 running 会复活 spinner / 活跃计数（与 normalizeSubagentStatus 的
- * 「未知值不翻回运行中」兜底方向一致）。
+ * legacy 值（done/failed/cancelled/crashed/closed）的兼容投影已上移至解析边界：
+ * runtime normalizeSubagentStatus 归一（two-state-convergence D5）——renderer 永不见
+ * legacy 值。旧终态值全部归 idle 而非 running：旧数据里的终态 record 没有在飞轮，
+ * 映射成 running 会复活 spinner / 活跃计数（归一兜底方向与之一致）。
  */
 export function projectSubagentExecutionStatus(status: SubagentStatus): 'running' | 'idle' {
   return status === 'running' ? 'running' : 'idle'

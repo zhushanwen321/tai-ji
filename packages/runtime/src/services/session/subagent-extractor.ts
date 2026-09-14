@@ -43,7 +43,8 @@ import { isEnoent } from '../../utils/errors.js'
 import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@xyz-agent/shared'
 import { parseEngineHandle } from '@zhushanwen/subagent-core'
 import { normalizeSubagentStatus } from './subagent-status.js'
-import type { SubagentRecord, SubagentStatus, BgNotifyRecord } from '@xyz-agent/shared'
+import type { NormalizedSubagentStatus } from './subagent-status.js'
+import type { SubagentRecord, BgNotifyRecord } from '@xyz-agent/shared'
 
 /** subagent toolCall 的 arguments 结构（start action） */
 interface SubagentStartArgs {
@@ -269,10 +270,19 @@ function projectEngineSpreadFields(
  * 已守卫版本的 entry data → SubagentRecord 投影（必填 id/status 守卫 + 可选字段逐个 typeof
  * 守卫缺省，与 legacy 路径同构）。runtime 只取 shared SubagentRecord 投影需要的字段
  * （eventLog/displayItems 等扩展内部字段不进 runtime 契约）；缺必填字段视为坏 entry 返回 null。
+ *
+ * [U6/D5] 状态归一在此扩参承载：①legacy 值映射的展示位合成（derivedStopReason/
+ * derivedClosedReason/derivedChatMode——entry 自带字段恒优先，合成仅兜缺失）；
+ * ②第五归一上下文 resumable（存量桥接 entry 专有，[U5] 后新 entry 无此字段）。
  */
 function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): SubagentRecord | null {
   if (typeof d.id !== 'string' || typeof d.status !== 'string') return null
-  const status = normalizeSubagentStatus(d.status)
+  const norm = normalizeSubagentStatus(d.status, {
+    resumable: d.resumable === true,
+    closedReason: optString(d.closedReason),
+    error: optString(d.error),
+  })
+  const status = norm.status
   const startedAt = optNumber(d.startedAt)
   const endedAt = optNumber(d.endedAt)
   return {
@@ -282,15 +292,17 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     slug: optString(d.slug) ?? '',
     task: optString(d.task) ?? '',
     status,
-    // closedReason 仅 closed 终态投影（与 legacy 路径同构，防 running + closedReason 脏组合）
-    closedReason: status === 'closed' ? optString(d.closedReason) : undefined,
+    // [U6] closed 遗留诊断位：归一明细仅 closed 分支返回（防 running + closedReason
+    // 脏组合的守卫内化到归一层——closed 已不存在于两态词表，原始字面守卫随之退役）。
+    closedReason: norm.derivedClosedReason,
     // [U8 / 永久会话模型 §3.2.8] 意愿 + 展示维度下行投影：intent 字面量守卫（缺省/
     // 非法 → undefined = active 语义，存量 entry 零迁移）。不对称守卫：closedReason
-    // closed-only（防 running + closedReason 脏组合）；stopReason 有值即投影——A-lite
-    // 轮终 running-resumable record 也携带合法停因（completed/failed）需下行，string
-    // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。
+    // closed-only（防 running + closedReason 脏组合）；stopReason 有值即投影——string
+    // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。[U6] entry
+    // 自带 stopReason 恒优先（A-lite 轮终展示位 / W4 failed 等真实数据），归一合成
+    // （legacy 值映射）仅兜缺失。
     intent: d.intent === 'active' || d.intent === 'archived' ? d.intent : undefined,
-    stopReason: optString(d.stopReason),
+    stopReason: optString(d.stopReason) ?? norm.derivedStopReason,
     turns: optNumber(d.turns),
     totalTokens: optNumber(d.totalTokens),
     model: optString(d.model),
@@ -299,14 +311,14 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     endedAt,
     elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
     error: optString(d.error),
-    // 轮终结果文本（running-resumable 轮终信号）：entry v1 的轮终迁移写点
-    // （reportRecordTransition ← finalize-round 的 doFinalizeRoundToIdle /
-    // onRoundSettled）恒写非空——renderer hasRunning 据此排除轮终 running（review #8）。
+    // 轮终结果文本：entry v1 的轮终迁移写点恒写非空。[U4 翻边] 轮终权威词 = idle，
+    // result 回归纯数据职责（「running-resumable 轮终信号」判据已随 U6 谓词终态化
+    // 退役为 status+stopReason 直读）。
     result: optString(d.result),
     // 执行态细分判据（residual-fixes）：chatMode 显式值（register 起写入；缺省 = v1 前
-    // 存量 entry，消费端按保守方向处理）。[U5/D4] resumable 下行字段已随退役删除
-    // （idle 即 resumable——renderer 判据消费 status/result 组合）。
-    chatMode: optBoolean(d.chatMode),
+    // 存量 entry，消费端按保守方向处理）。[U5/D4] resumable 下行字段已随退役删除。
+    // [U6] 归一合成（legacy done 族 one-shot 形态位）仅兜缺失。
+    chatMode: optBoolean(d.chatMode) ?? norm.derivedChatMode,
     // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
     // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
     // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
@@ -636,7 +648,10 @@ function buildLegacySubagentRecord(
   notify: BgNotifyRecord | undefined,
   mainCwd: string | null,
 ): SubagentRecord {
-  const status = resolveLegacySubagentStatus(notify, listItem)
+  // [U6/D5] 归一明细一体化：status 两态直出 + legacy 值的展示位合成（stopReason/
+  // closedReason/chatMode）由归一层产出——原 resolveLegacyClosedReason 的「仅 closed
+  // 投影」守卫内化到归一明细（closed 分支才返回 derivedClosedReason）。
+  const norm = resolveLegacySubagentStatus(notify, listItem)
   return {
     subagentId,
     // sessionFile 回退查找：listResponse/bg-notify 都不带 sessionFile 时，
@@ -646,45 +661,40 @@ function buildLegacySubagentRecord(
     agent: notify?.agent ?? listItem?.agent ?? tc.agent,
     slug: tc.slug,
     task: tc.task,
-    status,
+    status: norm.status,
     model: notify?.model ?? listItem?.model,
     totalTokens: listItem?.totalTokens,
     elapsedSeconds: listItem?.duration,
     startedAt: notify?.startedAt,
     endedAt: notify?.endedAt,
     error: notify?.error,
-    closedReason: resolveLegacyClosedReason(status, notify, listItem),
+    closedReason: norm.derivedClosedReason,
+    // [U6/D5] legacy 值展示位合成（done→completed / failed|crashed→failed /
+    // cancelled→cancelled / closed→deriveClosedDisplay 派生）——legacy 路径 entry
+    // 无自带 stopReason/chatMode 字段（W16 前产物），合成值即唯一来源。
+    stopReason: norm.derivedStopReason,
+    chatMode: norm.derivedChatMode,
   }
 }
 
 /**
- * [legacy] status 归一：v4 起 notify.status 是两态枚举（running/closed，详见头部契约注释），
- * legacy 值 done/failed/cancelled 仅为历史 session 数据保留；走 normalizeSubagentStatus 统一
- * 兼容上游变体（completed/error/crashed 等）。notify 缺失时回落 listItem.status（[review 修复]
- * 删除原 `?? normalizeSubagentStatus(tr.bgResponse.status)` 右支——normalizeSubagentStatus 恒
- * 返回非空（falsy 输入回 'running'），?? 右支永不可达）。
+ * [legacy] status 归一（[U6/D5] 归一明细版）：v4 起 notify.status 是两态枚举
+ * （running/closed，详见头部契约注释），legacy 值 done/failed/cancelled 仅为历史
+ * session 数据保留；走 normalizeSubagentStatus 统一兼容上游变体（completed/error/
+ * crashed 等）并产出展示位合成。notify 缺失时回落 listItem.status（[review 修复]
+ * 删除原 `?? normalizeSubagentStatus(tr.bgResponse.status)` 右支——归一恒返回非空
+ * 明细，?? 右支永不可达）。
  */
 function resolveLegacySubagentStatus(
   notify: BgNotifyRecord | undefined,
   listItem: LegacySubagentListItem | undefined,
-): SubagentStatus {
-  return notify
-    ? normalizeSubagentStatus(notify.status)
-    : normalizeSubagentStatus(listItem?.status)
-}
-
-/**
- * [legacy] L2 关闭原因（v4 B-1）：bg-notify 与 list item 都可能携带，notify 优先（终态时点更晚）。
- * 仅 status === 'closed' 时投影，与实时路径（event-interpreter handleSubagentBgNotify）同构——
- * 最后一条 notify 为 running（轮次完成通知）时不从 listItem 兜底 closedReason，消除
- * running + closedReason 脏组合。
- */
-function resolveLegacyClosedReason(
-  status: SubagentStatus,
-  notify: BgNotifyRecord | undefined,
-  listItem: LegacySubagentListItem | undefined,
-): string | undefined {
-  return status === 'closed' ? (notify?.closedReason ?? listItem?.closedReason) : undefined
+): NormalizedSubagentStatus {
+  return normalizeSubagentStatus(notify ? notify.status : listItem?.status, {
+    // legacy closed 派生上下文：notify 优先（终态时点更晚，与原 resolveLegacyClosedReason
+    // 的优先级一致）。
+    closedReason: notify?.closedReason ?? listItem?.closedReason,
+    error: notify?.error,
+  })
 }
 
 /** [legacy] sessionFile 三级回退：listItem → toolResult → startedAt 时间戳匹配目录扫描 */

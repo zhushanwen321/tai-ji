@@ -304,10 +304,12 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
 
     // markReopened 降级原语触达（host.reopenRecord → store.markReopened）
     expect(calls.reopened).toEqual([record.id]);
-    // 世代推进：round 归零 + epoch+1 + stopReason=reopened（mock 内模拟真实原语副作用）
+    // 世代推进：round 归零 + epoch+1（mock 内模拟真实原语副作用）
     expect(record.round).toBe(0);
     expect(record.epoch).toBe(1);
-    expect(record.stopReason).toBe("reopened");
+    // [U6/D4 轮始清点族扩字段] reopened 展示位随清点族退役——markReopened 写入的
+    // stopReason='reopened' 被 revive 格同步清（重开信息由摘要 prompt 体感承载）。
+    expect(record.stopReason).toBeUndefined();
     // 翻边 + 续聊派发：resume:undefined（引擎开新 session，新锚由 run 应答回填）
     expect(record.status).toBe("running");
     expect(calls.revived).toEqual([record.id]);
@@ -1129,7 +1131,9 @@ describe("集成：[S1 P1] cancel 后续聊——被取消轮迟到 run 应答�
 
     // 迟到零副作用：无失败簿记（round 不多跳到 2）、无失败通知、record 不被标 failed
     expect(record.round).toBe(1);
-    expect(record.stopReason).toBe("interrupted"); // 未被 failed 覆盖
+    // [U6/D4 轮始清点族扩字段] 在飞期上轮停因不可见（revive 格同步清 stopReason——
+    // isOccupied 终态判据依赖；显式裁决代价，two-state-convergence §3.1）。
+    expect(record.stopReason).toBeUndefined(); // 未被 failed 覆盖
     expect(record.status).toBe("running");
     expect(pi.sendMessage).not.toHaveBeenCalled();
 

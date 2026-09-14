@@ -157,7 +157,9 @@ describe('extractSubagentsFromSessionFile', () => {
     expect(records).toHaveLength(1)
     const r = records[0]
     expect(r.subagentId).toBe(bgSubagentId)
-    expect(r.status).toBe('done')
+    // [U6/D5] legacy done 归一为 idle + stopReason:'completed' 合成
+    expect(r.status).toBe('idle')
+    expect(r.stopReason).toBe('completed')
     expect(r.sessionFile).toBe(subagentSessionFile)
     expect(r.agent).toBe('worker')
     expect(r.slug).toBe('modify-gate')
@@ -362,7 +364,9 @@ describe('extractSubagentsFromSessionFile', () => {
 
     const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
-    expect(records[0].status).toBe('failed')
+    // [U6/D5] legacy failed 归一为 idle + stopReason:'failed' 合成
+    expect(records[0].status).toBe('idle')
+    expect(records[0].stopReason).toBe('failed')
     expect(records[0].error).toBe('Model timeout')
     expect(records[0].slug).toBe('review-code')
   })
@@ -434,8 +438,11 @@ describe('extractSubagentsFromSessionFile', () => {
 
     const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
-    expect(records[0].status).toBe('closed')
+    // [U6/D5] legacy closed 归一为 idle + closedReason 保留（诊断位）+ deriveClosedDisplay
+    // 派生 stopReason（gc + error → failed）
+    expect(records[0].status).toBe('idle')
     expect(records[0].closedReason).toBe('gc')
+    expect(records[0].stopReason).toBe('failed')
     expect(records[0].error).toBe('provider 429')
   })
 
@@ -738,11 +745,11 @@ describe('extractSubagentsFromSessionFile', () => {
     expect(records).toHaveLength(2)
     const a = records.find((r) => r.subagentId === idA)
     const b = records.find((r) => r.subagentId === idB)
-    // batch 形态下两个 subagent 都被更新为 done（不再整批丢弃）
-    expect(a?.status).toBe('done')
+    // batch 形态下两个 subagent 都被更新为终态（不再整批丢弃）[U6/D5] done → idle
+    expect(a?.status).toBe('idle')
     expect(a?.agent).toBe('worker')
     expect(a?.endedAt).toBe(1783752000000)
-    expect(b?.status).toBe('done')
+    expect(b?.status).toBe('idle')
     expect(b?.agent).toBe('researcher')
     expect(b?.endedAt).toBe(1783752001000)
   })
@@ -847,7 +854,7 @@ describe('extractSubagentsFromSessionFile — background sessionFile 回退查�
     expect(records).toHaveLength(1)
     expect(records[0].sessionFile).not.toBeNull()
     expect(records[0].sessionFile).toBe(subagentJsonl)
-    expect(records[0].status).toBe('done')
+    expect(records[0].status).toBe('idle')
     expect(records[0].slug).toBe('scan-dir')
   })
 
@@ -931,13 +938,16 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
       }),
     ])
 
+    // [U6/D5] closed 归一：status=idle + closedReason 保留 + deriveClosedDisplay(gc+error)
+    // 派生 stopReason='failed'（toEqual 忽略显式 undefined 键——result/chatMode 等缺省面不变）
     expect(records).toEqual([{
       subagentId: 'sa-1',
       sessionFile: '/data/sa-1.jsonl',
       agent: 'worker',
       slug: 'work',
       task: 'Do work',
-      status: 'closed',
+      status: 'idle',
+      stopReason: 'failed',
       closedReason: 'gc',
       turns: undefined,
       totalTokens: 1234,
@@ -959,8 +969,10 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     ])
 
     expect(records).toHaveLength(1)
-    expect(records[0]!.status).toBe('closed')
+    // [U6/D5] closed 归一 idle + closedReason 保留（user-close 无 error → 派生 completed）
+    expect(records[0]!.status).toBe('idle')
     expect(records[0]!.closedReason).toBe('user-close')
+    expect(records[0]!.stopReason).toBe('completed')
   })
 
   it('U8 两态投影：idle entry 直投 idle + intent/stopReason 下行（意愿/展示维度）', () => {
@@ -982,9 +994,12 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     const legacy = scanSubagentEntries([
       subagentRecordEntry({ id: 'sa-old', status: 'closed', closedReason: 'gc' }),
     ])
-    expect(legacy[0]!.status).toBe('closed')
+    // [U6/D5] closed 归一 idle + closedReason 保留（gc 无 error → deriveClosedDisplay
+    // done → 派生 stopReason:'completed' + one-shot 形态位合成）
+    expect(legacy[0]!.status).toBe('idle')
     expect(legacy[0]!.intent).toBeUndefined()
-    expect(legacy[0]!.stopReason).toBeUndefined()
+    expect(legacy[0]!.stopReason).toBe('completed')
+    expect(legacy[0]!.closedReason).toBe('gc')
   })
 
   it('U8 守卫：轮终 stopReason（failed/completed）有值即投影；closedReason 仍 closed-only；intent 非法值回落 undefined', () => {
