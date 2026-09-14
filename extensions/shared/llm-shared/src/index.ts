@@ -4,6 +4,7 @@
 // config: 泛型配置读写（mtime+size 双 key 缓存 + 原子写）
 export {
 	resolveModel,
+	parseModelRef,
 	getCurrentModelId,
 	normalizeModelSelector,
 	isThinkingLevel,

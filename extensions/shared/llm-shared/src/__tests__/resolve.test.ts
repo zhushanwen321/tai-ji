@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
-import { isThinkingLevel, normalizeModelSelector, resolveModel } from "../resolve.ts";
+import { isThinkingLevel, normalizeModelSelector, parseModelRef, resolveModel } from "../resolve.ts";
 
 /** 构造最小 Model（cast 绕过必填字段，单测只关心 provider/id）。 */
 function makeModel(provider: string, id: string): Model<Api> {
@@ -92,6 +92,28 @@ describe("isThinkingLevel（V2 七值钉值，与 pi-ai ModelThinkingLevel 联�
 		} else {
 			throw new Error("xhigh 应通过谓词");
 		}
+	});
+});
+
+describe("parseModelRef（V2 五形态钉值，ext-simplify-18 D4）", () => {
+	it("合法 ref → {provider, modelId}", () => {
+		expect(parseModelRef("anthropic/claude-5.3")).toEqual({ provider: "anthropic", modelId: "claude-5.3" });
+	});
+
+	it("缺斜杠（'foo'）→ null", () => {
+		expect(parseModelRef("foo")).toBeNull();
+	});
+
+	it("尾空 modelId（'provider/'）→ null", () => {
+		expect(parseModelRef("provider/")).toBeNull();
+	});
+
+	it("首空 provider（'/model'）→ null", () => {
+		expect(parseModelRef("/model")).toBeNull();
+	});
+
+	it("modelId 含斜杠（'a/b/c'）→ 取首个 / 分隔 → {provider:'a', modelId:'b/c'}", () => {
+		expect(parseModelRef("a/b/c")).toEqual({ provider: "a", modelId: "b/c" });
 	});
 });
 

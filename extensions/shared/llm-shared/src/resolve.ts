@@ -67,7 +67,7 @@ export function isThinkingLevel(raw: unknown): raw is ModelThinkingLevel {
 // ──────────────────────── 模型解析 ────────────────────────
 
 /** "provider/modelId" → 拆分（用 indexOf 而非 split，modelId 理论上可含 /，取首个 / 作分隔）。 */
-function parseRef(ref: string): { provider: string; modelId: string } | null {
+export function parseModelRef(ref: string): { provider: string; modelId: string } | null {
 	const idx = ref.indexOf("/");
 	if (idx <= 0 || idx >= ref.length - 1) return null; // 缺 / 或前后为空
 	return { provider: ref.slice(0, idx), modelId: ref.slice(idx + 1) };
@@ -75,7 +75,7 @@ function parseRef(ref: string): { provider: string; modelId: string } | null {
 
 /** ref 精确匹配：find 命中 + hasConfiguredAuth。任一失败返回 null（静默降级）。 */
 function resolveRef(ctx: ExtensionContext, ref: string): Model<Api> | null {
-	const parsed = parseRef(ref);
+	const parsed = parseModelRef(ref);
 	if (!parsed) return null;
 	const model = ctx.modelRegistry.find(parsed.provider, parsed.modelId);
 	if (!model) return null;
