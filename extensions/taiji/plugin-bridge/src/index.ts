@@ -382,7 +382,8 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 
 	// intercept：唯一允许 await 的转发（before_agent_start 本就是等待决策的语义）。
 	// 多条注入收窄为单条 CustomMessage 的 content 数组（pi 0.84.4 result 机制只有单
-	// message 槽位；类型零丢失——消息边界变化对 LLM 上下文等价，设计 §3.2 对比三 a 登记项）
+	// message 槽位；内容零丢失（消息边界收窄语义；结构化 Content 透传承诺已随 D1 降格
+	// 删除）——消息边界变化对 LLM 上下文等价，设计 §3.2 对比三 a 登记项）
 	pi.on("before_agent_start", async (data, ctx) => {
 		// 首个 prompt 准入闸（R2 真相修复，设计 §3.3-D4）：R2 动态实证（2026-09-05，
 		// /tmp/bridge-r2 payload 探针）pi 0.84.4 无固化——registerTool 完成后下一个 LLM
@@ -430,15 +431,15 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 		const result: BeforeAgentStartEventResult = {
 			message: {
 				customType: "plugin-inject",
-			// content 映射恒两路（D1 string-only 裁决）：runtime 管线层校验恒产出
-			// string（非 string 条目管线层丢弃 + warn），string 直用；其余形态（版本
-			// 失配形态）序列化保信息。结构化透传分支已删（零供给方）；结构化注入若未来
-			// 立项，届时随管线层联合设计恢复消费端。undefined/null 兜底 String() 防
-			// text 破约（JSON.stringify 对 undefined 返回 undefined 而非字符串）
-			content: messages.map((content) => ({
-				type: "text" as const,
-				text: typeof content === "string" ? content : (JSON.stringify(content) ?? String(content)),
-			})),
+				// content 映射恒两路（D1 string-only 裁决）：runtime 管线层校验恒产出
+				// string（非 string 条目管线层丢弃 + warn），string 直用；其余形态（版本
+				// 失配形态）序列化保信息。结构化透传分支已删（零供给方）；结构化注入若未来
+				// 立项，届时随管线层联合设计恢复消费端。undefined/null 兜底 String() 防
+				// text 破约（JSON.stringify 对 undefined 返回 undefined 而非字符串）
+				content: messages.map((content) => ({
+					type: "text" as const,
+					text: typeof content === "string" ? content : (JSON.stringify(content) ?? String(content)),
+				})),
 				display: false,
 				details: { count: messages.length },
 			},

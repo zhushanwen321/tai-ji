@@ -263,8 +263,8 @@ export async function handleBridgeIntercept(
     // blocked 透传管线累积注入（git `7a3797d0b` 版 plugin-intercept-injection §D2 block
     // 交互定案 + §D3；文档已退役于 `fadd8b8b4`）：校验先于
     // block 判定，block 插件自身合法注入已进累积——pi 侧对该组合「blocked 只 log、
-    // 注入照常评估」（plugin result 契约无 block 槽位，turn 照常进行；plugin-bridge
-    // :450-457），阻止后续插件与向 LLM 留言互不吞没。
+    // 注入照常评估」（plugin result 契约无 block 槽位，turn 照常进行；
+    // plugin-bridge blocked 只 log 分支），阻止后续插件与向 LLM 留言互不吞没。
     return { blocked: true, reason: hookResult.reason ?? `Blocked by ${hookResult.blockedBy}`, injectedMessages }
   }
 

@@ -2,7 +2,8 @@
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
  * 本文件是 xyz-agent 插件契约的权威定义：面向插件作者对外发布，刻意保持
- * 零依赖自包含（第三方插件作者无需装整个 monorepo）。
+ * 零依赖自包含（第三方插件作者无需装整个 monorepo）——Bridge* 回包形状定义源
+ * 2026-09 D4 后上收协议包，本文件不再零依赖（见下方历史段）。
  *
  * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
@@ -751,7 +752,6 @@ export interface BridgeToolExecuteRequest {
   toolCallId?: string
 }
 
-/** @internal — runtime 内部：Worker 侧 tool 执行处理函数 */
 /** @internal — runtime 内部：Worker 侧 tool 执行处理函数 */
 export type ToolExecuteHandler = (params: {
   arguments: Record<string, unknown>

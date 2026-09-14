@@ -239,7 +239,7 @@
 | A1 | fixture 插件经 bridge 同步注册，模型调用 `probe_echo` | 工具出现在模型工具清单；调用返回 echo 内容（isError 缺省）——D2/D3/D5 删除面零回归。（r1 审查 S1：原③「runtime 日志见 bridge:tool_execute 往返」删除——runtime 对 tool_execute 无日志点，取证通道不存在） |
 | A2 | fixture 插件 hook 注入 string，下一轮 prompt 前触发 | 模型可见 `TOKEN_INJECT:*` 文本（session JSONL 中 plugin-inject CustomMessage.content 为 `[{type:'text',text:'TOKEN_INJECT:*'}]`）——D1 收窄后 string 路由逐字节不变 |
 | A3 | sync 快照消费 | 插件工具注册成功 + 桥侧 sync debug 日志可见（XYZ_AGENT_DEBUG=1 下 extension-logger 输出 `synced N plugin tool(s)`）——D2 消费方透明性；「负载无 commands 键」由 N1 rg + u2 单测断言（r1 审查 S1：sync 回包经 pi stdin 静默 resolve、不在 stdout tee 内，无真机取证物，诚实以单测兜底） |
-| N1 | 负面 rg 断言 | `commands` 在协议/runtime/plugin-sdk/bridge 四包的类型、构造点、注释、测试 fixtures **全部**零命中（r1 审查 MF1 扩面）；`isTextContent`/`InjectedImageContent` 零命中；error 形态分支不存在（`startsWith("Tool not found")` 仅形态②一处）；`getSessionId` 调用点无 try/catch 包裹 |
+| N1 | 负面 rg 断言 | `commands` 在协议/runtime/plugin-sdk/bridge 四包的**bridge sync payload 语义域**（类型、构造点、注释、测试 fixtures）零命中（r1 审查 MF1 扩面；豁免 = 各包既有 commands 域：plugin-sdk manifest `PluginContributesCommand` 域、runtime commands-api/get_commands 域、bridge-interop commands-executor 注释——这些不在 D2 删除面，勿误伤）；`isTextContent`/`InjectedImageContent` 零命中；error 形态分支不存在（`startsWith("Tool not found")` 仅形态②一处）；`getSessionId` 调用点无 try/catch 包裹 |
 | N2 | fallback 序列化（失配形态） | 单测覆盖非 string content → JSON.stringify text 段（生产不可达路径，诚实以单测兜底不设真机场景） |
 | A4 | 既有测试回归 | `pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 三连绿 + runtime plugin-service 相关测试绿 |
 

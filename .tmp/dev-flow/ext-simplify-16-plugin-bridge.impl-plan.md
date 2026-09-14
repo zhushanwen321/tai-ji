@@ -71,7 +71,15 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
 
 ## 5 合理偏差登记表
 
-（空——待阶段 3 审查后登记）
+（阶段 3 一致性审查 reasonable[] 5 条登记，2026-09-14）
+
+| # | 条目 | 理由 | 文档同步 |
+|---|------|------|----------|
+| R1 | 协议 types.ts:33-38 矛盾注释未按设计 §6.4 字面「删除」，改为正向 SSOT 声明 | 单源化后此处正是声明 SSOT 的位置，正向声明比留白更有导航价值；「runtime 是实现侧权威」矛盾表述已消失，设计目标完整达成 | 无需回写设计（v1 已登记 u2 同族裁决） |
+| R2 | bridge-interop.ts blocked 注释族（:262-266）与 :254-256 一并改退役文档指针，超出设计 §8.2 u3 点名的单处 | 同一注释族内同一退役文档引用同款处理，避免半改半不改 | impl-plan v1 u2 自行裁决清单补记此条 |
+| R3 | 计划外扩展 bridge-sync.test.ts 经独立核实干净 | diff 仅三处 D2 删除面断言跟随，无越权 | v1 已登记扩入 u2，闭环 |
+| R4 | D6 返回类型 `string \| undefined` → `string` | 有实装依据（pi dist `getSessionId(): string`），已删 catch 路径的类型层幽灵精确清除 | v1 已登记（主 agent 抽验补修） |
+| R5 | 测试强化：D1 拆两面用例且 N2 兼任透传分支回归哨兵；D5 断言强化为 toEqual 整形断言 | 抓回归能力高于设计要求 | v1 已登记 |
 
 ## 6 状态表
 
@@ -94,3 +102,7 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
   - **u2 轮次 4**（提交门拦截）：plugin-types.ts 新注释中协议包内部路径字面量 `extensions/plugin-bridge/types.ts` 触发一层路径残留检查（check-extension-dependencies.mjs 第 5 节，2026-08-22 分组防回退守卫）——改写为包名+模块名指称（仓内既有惯例），检查器本体未动。
   - u1 自行裁决三项均属设计语义内：D3 调用点双形态注释随分支同域清理；D1 重写+N2 拆两用例；D5 断言强化为 `toEqual({ kind: "ok" })`。u2 自行裁决五项（:262 同文档指针一并修正、:46 保留 getCommands 指引、SDK 头「零依赖」叙事如实化、SDK 双行 re-export（ToolExecuteHandler 本地引用需要）、plugin-types 节头保留）均登记无设计冲突。
   - **u3 轮次 1 + 主 agent 追加**：u3 五处落地（§3.2 降格 / §3.3-D7 关闭登记 / :208 形态 / :238 E2 行 / 变更历史 v4.5，rg 证据 V1-V3 全过）。其领地内观察项——§3.4 表格 E1/E4/E6 行与 E2 同款 `isError: '<文案>'` 速写讹写——主 agent 采信后亲验实装（bridge-handler.ts:105 / bridge-interop.ts:172 均为 `{content, isError: true}`；E4 桥侧 cancelledResult 为 `isError: true` + content 数组、文案实为 `Plugin tool <name>: cancelled.`），裁决一并清偿（E2 修而 E1/E4/E6 不修 = 表格内部自相矛盾且与 :191 注记互斥），变更历史 v4.5 补 ④ 记。
+- v2（2026-09-14）：**阶段 3 一致性审查 + Gate A + 修复批次**。
+  - **一致性审查**（单全局 reviewer，diff a8718fcd5..HEAD = 15 文件 +211/-155 ≤500 行门槛）：映射有效；六决策 D1-D6 + u3 六处全部落地完整；覆盖矩阵无 unclaimed 区；N1 断言族 reviewer 代跑全过；计划外扩展 bridge-sync.test.ts 独立核实干净。结论：reasonable 5（§5 登记表 R1-R5）/ unreasonable 5（全部 P3 注释/缩进级）/ doc_errors 1（设计 §7 N1 行缺豁免括注——主 agent 亲修：补「bridge sync payload 语义域」限定与各包既有 commands 域豁免清单，对齐 impl-plan u2 验收③口径）。
+  - **修复批次**（5 条 unreasonable，合并单批派发 u-dev——每条已被 reviewer 精确定义、总量 ~10 行、仓级 pre-commit extensions typecheck 互锁使并行 commit 无收益，替代 MANDATORY 按组并行规则的登记裁决）：①plugin-sdk types.ts 删重复 @internal 注释行 ②头注释「零依赖」矛盾消除（补 D4 括注） ③plugin-bridge index.ts content 块缩进恢复对齐 ④「类型零丢失」注释术语降格对齐 ⑤bridge-interop.ts 漂移行号 :450-457 语义锚定。修后主 agent diff 行级核验 + 定向复审（合并单发，同批决策）——复审 5 处全 pass（#3 经 `git diff -w` 证明纯空白零 token 变更；#4 与 bridge-rewrite §3.2 降格口径三方一致），另报 2 条 P3 补充修复续聊原 agent 清偿：⑥intercept 测试文件头同源失效行号 :450-457 语义锚定（grep 全仓零残留核验）⑦「见文末历史段」→「见下方历史段」指向修正。相关测试 bridge-interop-intercept 7/7 绿。
+  - **Gate A 全量**（主 agent 直跑，输出落盘 .tmp/dev-flow/ext-simplify-16-plugin-bridge.gate-a-*.log）：extensions 三连 exit 0（26 包全过，plugin-bridge 33/33）；runtime 全量 5940/5940（首跑 5939/5940——logger-tee-rotation.test.ts 行数边界断言 9 vs ≥10，单独重跑 3/3 绿 + 改动面与 infra/logger 零交集归因为并发时序 flake，重跑全绿确认）；`node scripts/bundle-extensions.mjs` exit 0（CP2）。SKIP_* / test.skip / 规则跳过：零。
