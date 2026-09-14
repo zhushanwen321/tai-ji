@@ -92,7 +92,7 @@ graph TD
 |------|------|------|----------|
 | u1 | committed | 1 | ec84f8109（check-extension-dependencies 22 entries 绿 + store layout 绿 + lockfile 5 hunk 纯净） |
 | u2 | committed | 1 | 684d56605（94 tests 绿 + parseRef 零残留 + index 导出） |
-| u12 | committed | 1 | 89e7de4 待回填（T1/T2/T3 绿 + 漂移红验证还原 + self-test 10 用例 + validate-constraints 131 条 + hook 管道模拟命中） |
+| u12 | committed | 1 | 87fae4c8a（T1/T2/T3 绿 + 漂移红验证还原 + self-test 10 用例 + validate-constraints 131 条 + hook 管道模拟命中） |
 | u3 | pending | 0 | - |
 | u4 | pending | 0 | - |
 | u5 | pending | 0 | - |
