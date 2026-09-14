@@ -88,6 +88,15 @@ flowchart LR
 | u1 | session-data-api.ts 实际路径在 plugin-service/api/ 子目录 | 计划笔误；领地意图不变 | impl-plan 领地表以实际路径为准 |
 | u6 | i18n locale 两文件（panel.ts zh/en）伴随面 | truncated banner 文案必要；双 locale 对称 | 无需 |
 | u6 | 软上限覆盖快照替换路径（设计原文侧重增量） | 快照替换是无界写点，只治增量治不住加载路径；A8 验收本要求 entries ≤ 5000 | 已在 commit message 登记 |
+| u7 | useSidebar.ts 接线 + 2 测试 mock 补丁（领地外伴随面） | 任务指令明示接线；SessionCleanupHooks 唯一 renderer 实现点 | 已 commit 登记 |
+| u8 | sweep 挂点 markConnected（设计写「重连路径」） | 共用路径覆盖重连；同步先于 resubscribeAll 时序论证在代码注释 | 已 commit 登记 |
+| u8 | 2 个 _forTest 探针导出 | 无可观测面的最小测试钩子，对齐既有先例 | A9 批次统一降级 |
+| u9 | subagent-service-engine-route.test.ts（领地外） | extractor 返回形状变更直接连锁 mock 适配，不修则全量不可能绿 | 已 commit 登记 |
+| u9 | 侧栏 oversize UI 降级未接线 | 跨包（shared protocol+core+renderer）；oversize 标记已就位 | 遗留：独立排期 |
+| u9 | zcode journal-io 无 engines-root 白名单 | 独立产品问题（zcode-subagent-cli 包），u9 领地超出 | 遗留：独立排期 |
+| u10 | useChat.ts 零改动（任务预期可能要补） | deferFlushFailureCounts 存量已修（5637e0088），语义由新测试锁定 | 闭环成立 |
+| u10 | store.ts（文件清单外接线点） | dispose 补面必须的编排接线 + testInternals 透出 | 已 commit 登记 |
+| 事件 | 越权 commit 0f6d7c93f（fix(ci)） | 某 dev 违反「subagent 零 git」+ 领地外改动（CI workflow+TEST-STRATEGY）；内容正当（vitest flags 失效修复） | 保留 commit；最终汇报向用户报告 |
 | u3 | shared/constants.ts 领地外 1 常量（RING_BUDGET_BYTES） | message-bus.ts 内联 16*1024*1024 触发 no-magic-numbers warning（项目纪律 warning 正面修复）；既有范式 = 字节守卫常量集中 shared SSOT（OUTBOUND_FRAME_* 同款） | 无需（对齐既有范式） |
 | u4 | session-service.ts + index.ts 领地外（facade 委托 + 组合根装配） | SessionHistoryReader 为 Facade 私有、ReclaimSessionDeps 约定组合根装配，窄接口注入链必须经此两点，否则 B8-C 死代码 | 无需（设计本意） |
 | u4 | set() 超限时摘除既有条目（设计原文仅「超限不缓存」） | 防冻结基线：append-only 历史保留旧条目使增量 delta 从旧叶子无界增长，劣于全量重建 | 已同步设计 B8 节（本 commit） |
@@ -104,10 +113,10 @@ flowchart LR
 | u4 | committed | 0 | b54df2bf5 |
 | u5 | committed | 0 | eadb058fa |
 | u6 | committed | 0 | 核验 88/88 |
-| u7 | in-progress | 0 | 波2派发（u2 已 committed 解锁）|
-| u8 | in-progress | 0 | 波2派发 |
-| u9 | in-progress | 0 | 波2派发（含存量 extractor 失败修复）|
-| u10 | in-progress | 0 | 波2派发 |
+| u7 | committed | 0 | 4299b697c 核验 20+38/38 | 波2派发（u2 已 committed 解锁）|
+| u8 | committed | 0 | b2ebde1b1 核验 4+14/14 | 波2派发 |
+| u9 | committed | 0 | 8d3b5dd29 全量 6020/6020 绿（存量 extractor 失败已修） | 波2派发（含存量 extractor 失败修复）|
+| u10 | committed | 0 | ca9924a18 核验 37+3+39/39 | 波2派发 |
 
 ## 7 残留风险与变更历史
 - 残留风险：①16MB ring 预算与 32MB HRC 帽为设计值，A2/A9 实测后校准（登记于设计待验证检查点 3）②A9 量化锚点受 GC 波动影响，已用静置 60s + 中位数缓解③摘碑挂点 plugin-service.ts:441 是单槽回调——实施须链式追加不得二次 setOnSessionCreated 覆盖（简洁审 R4 INFO）。
