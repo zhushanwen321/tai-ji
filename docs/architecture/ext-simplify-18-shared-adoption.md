@@ -137,7 +137,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 |---|---|---|
 | taiji/system-prompt index.ts:250 `${err.name}: ${err.message}` | 不迁 | 含 name 前缀变体，非 toErrorMessage 同构；迁入即行为变化（丢 name） |
 | subagent-workflow bench ×2（err.stack 形态） | 不迁 | bench 测试基建非生产代码；stack 语义不同 |
-| subagent-workflow src/host/relay/relay.mjs:86（err.stack 形态） | 不迁 | 零依赖镜像常量脚本，头注释明言「不能 Import workspace 包」，结构性不可迁移（r1 主审 INFO 补登） |
+| subagent-workflow relay/relay.mjs:86（err.stack 形态） | 不迁 | 零依赖镜像常量脚本，头注释明言「不能 Import workspace 包」，结构性不可迁移（r1 主审 INFO 补登；路径经区 A 审查勘误——实际在 relay/ 无 src/host/ 段） |
 | bte spawn-background.ts:283 / session-reader isRecordManifest | 不动 | 17 号已裁定（撞名 / 形状守卫），复述防重提 |
 | packages/ 层 toErrorMessage/isRecord 副本 | 不动 | 17 号 D3 分层裁决（protocol 同理）；全仓 packages 侧收敛独立立项 |
 | extension-protocol 发布层拆分（9 包私有依赖） | 不做 | 架构级工程（可发布面包新增），独立 tech-design |
@@ -151,7 +151,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 ### 5.1 确定性检查（每条可证伪）
 
 - V1 采用批零残留：`rg -n "instanceof Error \? .*\.message" extensions -g '!*.test.ts' -g '!extensions/shared/**' -g '!**/bench/**'` 命中仅剩 taiji/system-prompt:250 变体 1 处；`rg -n "function isRecord\(|function isPlainObject\(" extensions -g '!*.test.ts' -g '!extensions/shared/**'` 为 0（带词边界括号，规避 isRecordManifest / isRecordedPidStillOriginal 两撞名前缀命中）；`rg -n "=== \"ENOENT\"|!== \"ENOENT\"" extensions -g '!*.test.ts' -g '!extensions/shared/**'` 为 0（注释行除外）。
-- V2 llm-shared 钉值：`parseModelRef` 单测（合法 ref / 缺斜杠 / "provider/"（首尾空）/ "/model"（首空）/ "a/b/c"（modelId 含斜杠取首个分隔）五形态断言）。
+- V2 llm-shared 钉值：`parseModelRef` 单测（合法 ref / 缺斜杠 / "provider/"（尾空 modelId）/ "/model"（首空 provider）/ "a/b/c"（modelId 含斜杠取首个分隔）五形态断言）。
 - V2b permission model-picker 钉值：合法 ref（provider 与 model 双预选命中）行为不变断言 + "provider/" 病态输入新行为（provider 预选回 Auto）钉值（D4 微变的直接验证点）。
 - V3 三连绿：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test`。
 - V4 session-reader 单源化回归：discovery 既有测试全绿 + `readSessionHeaderIdSync` 行为不变（src/__tests__/tool-handler.test.ts:1057-1058 既有用例锚定首行非 header 返 undefined）。

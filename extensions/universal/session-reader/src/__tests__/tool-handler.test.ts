@@ -1055,7 +1055,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
   })
 
   it('CQ3: sa-id 命中但 sessionFile header 读不出 → F6 风格（不降级 record.id 当 sessionId）', async () => {
-    // sessionFile 存在但首行非 session header → readSessionHeaderId 返 undefined
+    // sessionFile 存在但首行非 session header → readSessionHeaderIdSync 返 undefined
     const slug = '--demo-cwd--'
     const sessionFile = join(dir, 'subagents', slug, 'sessions', 'bad.jsonl')
     await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })

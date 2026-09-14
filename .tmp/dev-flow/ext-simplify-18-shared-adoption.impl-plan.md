@@ -109,9 +109,12 @@ graph TD
 | u9 | committed | 1 | 975213e51（ask-user 307 / cw-tool 36 / rename-session 203 全绿；as 断言消除） |
 | u10 | committed | 1 | 29e7a874c（943 tests 绿 + tsc 零错误） |
 | u11 | committed | 1 | d48375304（39 tests 绿 + tsc/eslint 零问题；包外零 import 双重自证） |
-| u13 | in-progress | 1 | V1 grep2 抓出 impl-plan 漏派 bte config.ts:55 isPlainObject（设计 §2.2 在清单内，单元划分遗漏）——补派中 |
+| u13 | committed | 1 | c8ef40e7f（bte 漏点补迁移，238 tests 绿；impl-plan 单元划分漏派、V1 grep 抓出——设计 §2.2 本就在清单内） |
 
 ## 7 残留风险与变更历史
 
-- 风险：u3 含 D4 行为微变（"provider/" 病态输入预选回 Auto）——主 agent 分 commit 时单独成 commit；u5 与 u4 同文件（tool-handler.ts）串行防冲突。
-- 2026-09-14 计划创建（基线见上）。
+- 风险：u3 含 D4 行为微变（"provider/" 病态输入预选回 Auto）——已独立 commit 81cb8790e。
+- 2026-09-14 计划创建（基线 73ecdd2a4）。
+- 2026-09-14 阶段 2 完成：13 单元全 committed（u13 为 V1 grep 抓出的 bte 漏点补迁）。
+- 2026-09-14 阶段 3：双区一致性审查——区 A（采用批）2 low unreasonable（测试注释悬空引用已修；index 收尾义务已兑现）+ 2 doc_error（relay 路径笔误已勘误；u13 状态已回填）；区 B（llm-shared+守卫）0 unreasonable + 1 low doc_error（V2 措辞已修）。**清零**。
+- 2026-09-14 全量测试验收（原 Gate A）：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` → **GATE_A_EXIT=0**，27 个测试文件组全绿（log `.tmp/dev-flow/ext-simplify-18-shared-adoption.gate-a.log`）；零 SKIP 绕过。changeset 批尾已落（`.changeset/ext-simplify-18-shared-adoption.md`：llm-shared minor + 12 包 patch）。
