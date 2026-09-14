@@ -28,13 +28,15 @@ export type PiEventListener = (event: PiMessage) => void
 /**
  * pi CLI 认可的 thinking level 白名单（runtime shared/model-ref 与 pi-subagent-cli
  * spawn-args 两侧字面量面的单源；结构同形，两侧各自类型别名互通）。
+ * 七值与 pi-ai ModelThinkingLevel 对齐（含 'xhigh'，ext-simplify-17 D5 P1-a：
+ * 白名单曾缺 xhigh 致 `:xhigh` 后缀经 asThinkingLevel 静默降级 undefined）。
  */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'max'
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** prompt 命令的 busy 投递语义（pi 权威裁决：steer 抢占 / followUp 入队）。 */
 export type StreamingBehavior = 'steer' | 'followUp'
 
-const THINKING_LEVELS: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'max']
+const THINKING_LEVELS: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
  * 运行时收窄守卫：字符串 → ThinkingLevel 白名单（非法值 undefined，不 throw——
