@@ -48,7 +48,7 @@ snapshot **7 字段 → 2 字段**：删 `toolName` / `toolElapsedMs` / `generat
 
 ### 2.4 i18n 键增删（双侧对称）
 
-新增 `panel.message.generatedChars`（`已生成 {chars} 字符` / `{chars} chars generated`）。删除 `sidebar.turnProgress.*` 四死键：`generatedChars` / `toolElapsed` / `awaitingUser`（消费方随本设计清零）+ **`durationSec`**（warn 化后才死：bar 渲染蕴含 elapsed ≥ 600s，formatDuration 秒分支恒不可达——键与分支一并删，`durationMin`（10–59min）/ `durationHourMin`（≥1h）保留）。保留 `turnElapsed` / `abortTurn` / `keepWaiting`。u2 同步删 `formatDuration` 秒分支，删分支处留一行注释：**两分支正确性前提 = `TURN_PROGRESS_WARN_THRESHOLD_MS` ≥ 60s**（round-2 复审 S3：该阈值在 core 包、formatter 在 renderer 包，跨包耦合无机器守卫；P-3 重定值若跌破 60s 须同步恢复秒分支，否则 `totalMin = 0` 静默渲染「0 分钟」垃圾值）。
+新增 `panel.message.generatedChars`（`已生成 {chars} 字符` / `Generated {chars} chars`，round-2 后措辞以实现落地为准）。删除 `sidebar.turnProgress.*` 四死键：`generatedChars` / `toolElapsed` / `awaitingUser`（消费方随本设计清零）+ **`durationSec`**（warn 化后才死：bar 渲染蕴含 elapsed ≥ 600s，formatDuration 秒分支恒不可达——键与分支一并删，`durationMin`（10–59min）/ `durationHourMin`（≥1h）保留）。保留 `turnElapsed` / `abortTurn` / `keepWaiting`。u2 同步删 `formatDuration` 秒分支，删分支处留一行注释：**两分支正确性前提 = `TURN_PROGRESS_WARN_THRESHOLD_MS` ≥ 60s**（round-2 复审 S3：该阈值在 core 包、formatter 在 renderer 包，跨包耦合无机器守卫；P-3 重定值若跌破 60s 须同步恢复秒分支，否则 `totalMin = 0` 静默渲染「0 分钟」垃圾值）。
 
 **守卫覆盖面（round-1 主审 MUST-FIX 裁决）**：`locale-key-usage-guard` 现只扫 `panel.*` / `settings.providerEdit.*`，被清理的 `sidebar.turnProgress.*` 在守卫盲区——本设计**不扩展守卫**（扩展需先 triage sidebar 段 14 个候选死键：`subagentFilter.*` / `update.upgradeFailed*` 疑似动态组装需逐个定性，真死键清扫属独立 chore）。sidebar 四键清零的验证 = 一次性全仓 rg（§3-A8），「sidebar 段无死键守卫」登记为残留风险（§1 Out-of-scope）。
 

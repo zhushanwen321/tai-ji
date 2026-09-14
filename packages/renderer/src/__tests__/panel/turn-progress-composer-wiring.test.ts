@@ -7,10 +7,11 @@
  * → chatApi.abort(sessionId)（既有 abort RPC 通路，与 Composer stop 按钮同一条链——
  * 不新增任何中止通道）。
  *
- * [session-dead V5②] TurnProgressBar 挂载点自 Composer 内提升到 Panel composer-band
- * （overlay/composer 互斥对之外）——ask_user 等待期 Composer 整体卸载，留在 Composer 内
- * 观测条会一起消失、awaitingUser 分型文案无处渲染（Gate B 实测断点）。abort 接线随挂载点
- * 移到 Panel（staging abortIfInProgress 优先级不保留，见 Panel.vue 挂载处注释）。
+ * [session-dead V5② / remove-turn-progress-bar §2.2] TurnProgressBar 挂载点自 Composer
+ * 内提升到 Panel composer-band（overlay/composer 互斥对之外）；warn 化后组件自判渲染
+ * （snapshot && snapshot.warn，常态/ask_user 豁免期零 DOM），挂载点仅承载存在性与 abort
+ * 接线（staging abortIfInProgress 优先级不保留，见 Panel.vue 挂载处注释）。本文件同锁
+ * dead 排除（A6/W6：dead 优先级吞掉活跃 UI——occupancy 残留非 idle 也不渲染警示条）。
  *
  * mock/stub 集合对齐 composer-smoke.test.ts 既有范式（Panel 真实子树挂 Composer），
  * TurnProgressBar 刻意**不进 stub 表**（接线对象必须真实渲染）。
@@ -122,8 +123,11 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
   config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
 }))
+// session store mock：list 用稳定数组引用（usePanelView 的 isSessionDead 读
+ // list.find(...).status === 'dead'——dead 测试挂载前写入，无需响应式）
+const sessionList = vi.hoisted(() => [] as Array<{ id: string; status: string }>)
 vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
+  useSessionStore: () => ({ active: undefined, list: sessionList, applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
 const ComposerInputMock = defineComponent({
@@ -163,6 +167,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  sessionList.length = 0
   effectScope().run(() => {
     useCompactQueue()
   })
@@ -197,5 +202,29 @@ describe('中止接线（u4 验收④）：TurnProgressBar → 既有 abort 链�
     await nextTick()
     expect(chatApiMock.abort).toHaveBeenCalledTimes(1)
     expect(chatApiMock.abort).toHaveBeenCalledWith(SID)
+  })
+
+  it('A6 dead 排除（W6）：session dead 态即使 occupancy 残留活跃，警示条也不渲染', async () => {
+    // dead 事实先于挂载写入（usePanelView 的 isSessionDead 读 sessionList 快照）
+    sessionList.push({ id: SID, status: 'dead' })
+    const wrapper = mount(Panel, {
+      props: {
+        panelId: 'panel-root',
+        sessionId: SID,
+        sessionLabel: SID,
+        sessionDir: '/repo',
+        status: 'done' as never,
+      },
+      global: { stubs },
+    })
+    // pi 异常退出后 occupancy 不被 markSessionError 复位 → turn 维度残留活跃
+    const store = useChatStore()
+    store.setOccupancy(SID, { turn: 'generating', compacting: false, bash: false })
+    store.applyMessageEvent(SID, { type: 'message.message_start', payload: { sessionId: SID, messageId: 'a1' } })
+    await nextTick()
+    vi.advanceTimersByTime(TURN_PROGRESS_WARN_THRESHOLD_MS + 1_000)
+    await nextTick()
+    // dead 占位上方不得挂警示条（状态撒谎复发防线）
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
   })
 })
