@@ -92,35 +92,10 @@ function isInjectedMessage(v: unknown): v is { content: unknown } {
 	return isRecord(v) && "content" in v;
 }
 
-// ── pi 原生 Content 形态（@earendil-works/pi-ai TextContent/ImageContent 的结构形状；
-// pi-coding-agent 主入口不 re-export 这两个类型，按 subagent-workflow 同款局部接口先例）──
-
-/** TextContent 最小判定形状：textSignature 等可选字段守卫不检查、透传不丢失 */
-interface InjectedTextContent {
-	type: "text";
-	text: string;
-}
-
-/** ImageContent 同构形状：{type:'image', data, mimeType} */
-interface InjectedImageContent {
-	type: "image";
-	data: string;
-	mimeType: string;
-}
-
-function isTextContent(v: unknown): v is InjectedTextContent {
-	return isRecord(v) && v.type === "text" && typeof v.text === "string";
-}
-
-function isImageContent(v: unknown): v is InjectedImageContent {
-	return isRecord(v) && v.type === "image" && typeof v.data === "string" && typeof v.mimeType === "string";
-}
-
-/** 清单 miss 识别（设计 §3.4-E2）：错误闭环 {error:'Tool not found…'} 与工具结果
- * {content:'Tool not found…', isError:true}（runtime bridge-interop 实装形态）双覆盖 */
+/** 清单 miss 识别（设计 §3.4-E2）：工具结果形态 {content:'Tool not found…', isError:true}
+ * （runtime bridge-interop 唯一生产形态；error 闭环形态零供给方，分支已删） */
 function isToolNotFound(raw: unknown): boolean {
 	if (!isRecord(raw)) return false;
-	if (typeof raw.error === "string") return raw.error.startsWith("Tool not found");
 	return raw.isError === true && typeof raw.content === "string" && raw.content.startsWith("Tool not found");
 }
 
@@ -161,22 +136,20 @@ async function callBridge(
 	}
 }
 
-/** sessionId 从 ctx 取（ReadonlySessionManager.getSessionId）；session 文件可能尚未
- * 落盘（pi 延迟写入），取失败不阻断转发——sessionId 缺省时 runtime 按 marker 请求自身路由 */
-function getSessionId(ctx: ExtensionContext): string | undefined {
-	try {
-		return ctx.sessionManager.getSessionId();
-	} catch {
-		return undefined;
-	}
+/** sessionId 从 ctx 取（ReadonlySessionManager.getSessionId，pi 实装纯字段读不可 throw）——
+ * sessionId 缺省时 runtime 按 marker 请求自身路由 */
+function getSessionId(ctx: ExtensionContext): string {
+	return ctx.sessionManager.getSessionId();
 }
 
-// ── 工具执行结果类型（session-manager 同款：details 供下游消费，错误必须 isError）──
+// ── 工具执行结果类型（details 按仓内惯例写入：供 JSONL/devtools 人读诊断，本包无程序化
+// 消费方；error/cancelled/unexpected 是 isError 派生不出的失败原因族信号，保留；ok 无载荷——
+// content[0].text 已完整携带回包信息，不重复持久化。错误必须 isError）──
 
 interface PluginBridgeToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details:
-		| { kind: "ok"; result: BridgeToolExecuteResponse }
+		| { kind: "ok" }
 		| { kind: "error"; error: BridgeErrorResponse | { error: string } }
 		| { kind: "cancelled" }
 		| { kind: "unexpected"; response: unknown };
@@ -254,7 +227,6 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 			});
 			registered++;
 		}
-		// commands 恒空忽略（设计 §3.3-D7：pi 侧命令发现另走 getCommands，死代码不复制）
 		return registered;
 	}
 
@@ -349,8 +321,6 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 		// 即返回 Tool not found（不重新校验：本 turn 的 toolCall 已发出无法重试；R2 真相
 		// 修正——pi 0.84.4 registerTool 后下一个 LLM 请求即携带新工具，下一 turn 模型
 		// 重试即命中新清单，恢复时点 = 下一 turn 而非下个 session。防抖见 ensureSynced）。
-		// 兼容两种形态：错误闭环 {error:'Tool not found…'} 与工具结果
-		// {content:'Tool not found…', isError:true}（runtime bridge-interop 实装形态）
 		if (isToolNotFound(raw)) {
 			await ensureSynced(ctx);
 		}
@@ -360,7 +330,7 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 		if (isBridgeToolExecuteResponse(raw)) {
 			return {
 				content: [{ type: "text", text: raw.content }],
-				details: { kind: "ok", result: raw },
+				details: { kind: "ok" },
 				isError: raw.isError === true ? true : undefined,
 			};
 		}
@@ -460,20 +430,15 @@ export default function pluginBridgeExtension(pi: ExtensionAPI): void {
 		const result: BeforeAgentStartEventResult = {
 			message: {
 				customType: "plugin-inject",
-				content: messages.map((content): InjectedTextContent | InjectedImageContent => {
-					// 已是 pi 原生 Content 形态（TextContent/ImageContent）→ 原样透传：
-					// CustomMessage.content 数组本就接受该形态（设计 §3.2「类型零丢失」
-					// 承诺——如 image 段被 stringify 成 text 会丢失多模态语义）
-					if (isTextContent(content) || isImageContent(content)) return content;
-					// 其余未知形态（含 string）fallback 为 text 段：content 契约是
-					// string | 结构化（旧 bridge 契约 {role, content}），非字符串序列化
-					// 保信息；undefined/null 兜底 String() 防 text 破约（JSON.stringify
-					// 对 undefined 返回 undefined 而非字符串）
-					return {
-						type: "text" as const,
-						text: typeof content === "string" ? content : (JSON.stringify(content) ?? String(content)),
-					};
-				}),
+			// content 映射恒两路（D1 string-only 裁决）：runtime 管线层校验恒产出
+			// string（非 string 条目管线层丢弃 + warn），string 直用；其余形态（版本
+			// 失配形态）序列化保信息。结构化透传分支已删（零供给方）；结构化注入若未来
+			// 立项，届时随管线层联合设计恢复消费端。undefined/null 兜底 String() 防
+			// text 破约（JSON.stringify 对 undefined 返回 undefined 而非字符串）
+			content: messages.map((content) => ({
+				type: "text" as const,
+				text: typeof content === "string" ? content : (JSON.stringify(content) ?? String(content)),
+			})),
 				display: false,
 				details: { count: messages.length },
 			},

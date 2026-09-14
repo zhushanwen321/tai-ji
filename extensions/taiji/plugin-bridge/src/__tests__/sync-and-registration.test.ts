@@ -55,7 +55,6 @@ function createHarness(
 
 const SYNC_PAYLOAD = JSON.stringify({
 	tools: [{ name: "sleep-tool", description: "Sleep for a duration", parameters: { type: "object", properties: { ms: { type: "number" } } } }],
-	commands: [],
 	success: true,
 });
 
@@ -188,15 +187,6 @@ describe("启动 sync（设计 §3.3-D4）", () => {
 		}
 	});
 
-	it("commands 恒空被忽略（设计 §3.3-D7，死代码不复制）——无 registerCommand 调用路径", async () => {
-		const selectMock = methodRouter({ "bridge:sync": [SYNC_PAYLOAD] });
-		const { registered, handlers, ctx } = createHarness(selectMock);
-		triggerSessionStart(handlers, ctx);
-		await vi.waitFor(() => expect(registered).toHaveLength(1));
-		// commands: [] 在 SYNC_PAYLOAD 里——若被消费会产生 pi.registerCommand 调用（harness 未提供该方法，消费即 TypeError）
-		expect(callsOf(selectMock, "bridge:sync")).toHaveLength(1);
-	});
-
 	it("畸形工具条目跳过且不拖垮整批", async () => {
 		const payload = JSON.stringify({
 			tools: [
@@ -204,7 +194,6 @@ describe("启动 sync（设计 §3.3-D4）", () => {
 				{ name: "bad-schema", description: "top-level not object", parameters: { type: "string" } },
 				{ name: 42, description: "name not string", parameters: { type: "object" } },
 			],
-			commands: [],
 			success: true,
 		});
 		const selectMock = methodRouter({ "bridge:sync": [payload] });

@@ -46,7 +46,6 @@ function createHarness(selectImpl: (...args: unknown[]) => unknown) {
 
 const SYNC_PAYLOAD = JSON.stringify({
 	tools: [{ name: "sleep-tool", description: "Sleep", parameters: { type: "object" } }],
-	commands: [],
 	success: true,
 });
 
@@ -103,7 +102,8 @@ describe("execute 转发（bridge:tool_execute）", () => {
 		// timeout 是启动 sync 专属例外，防误传扩散）
 		expect(call.opts?.timeout).toBeUndefined();
 		expect(result.content).toEqual([{ type: "text", text: "slept 90s" }]);
-		expect(result.details.kind).toBe("ok");
+		// ok 变体无 result 全量回填（D5 去重：content[0].text 已完整携带同一信息）
+		expect(result.details).toEqual({ kind: "ok" });
 		expect(result.isError).toBeUndefined();
 	});
 
@@ -202,20 +202,6 @@ describe("execute 转发（bridge:tool_execute）", () => {
 		expect(bridgeCall(full.selectMock, "bridge:sync", 2)).toBeUndefined();
 	});
 
-	it("Tool not found 的错误闭环形态（{error}）同样触发重同步", async () => {
-		const full = createHarness(methodRouter({
-			"bridge:sync": [SYNC_PAYLOAD, SYNC_PAYLOAD],
-			"bridge:tool_execute": [JSON.stringify({ error: "Tool not found: sleep-tool" })],
-		}));
-		const tool = await syncedTool(full);
-		const result = (await tool.execute("call-9", {}, undefined, undefined, full.ctx)) as {
-			content: Array<{ text: string }>; isError?: boolean;
-		};
-		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("Tool not found");
-		expect(bridgeCall(full.selectMock, "bridge:sync", 1)).toBeDefined();
-	});
-
 	it("普通 isError 工具错误不触发重同步（仅清单 miss 触发）", async () => {
 		const full = createHarness(methodRouter({
 			"bridge:sync": [SYNC_PAYLOAD],
@@ -292,7 +278,28 @@ describe("intercept（bridge:intercept，唯一允许 await 的转发）", () =>
 		});
 	});
 
-	it("pi 原生 Content 形态原样透传（类型零丢失，设计 §3.2）", async () => {
+	it("string 注入直用为 text 段（D1 string-only：管线层恒产出 string，零转换）", async () => {
+		const full = createHarness(methodRouter({
+			"bridge:intercept": [JSON.stringify({
+				injectedMessages: [
+					{ role: "user", content: "TOKEN_INJECT:1" },
+					{ role: "assistant", content: "second instruction" },
+				],
+			})],
+		}));
+		const handler = full.handlers.get("before_agent_start")![0] as (data: unknown, ctx: unknown) => Promise<unknown>;
+		const result = (await handler({ type: "before_agent_start", prompt: "hi" }, full.ctx)) as {
+			message: { content: Array<{ type: string; text: string }>; details: { count: number } };
+		};
+
+		expect(result.message.content).toEqual([
+			{ type: "text", text: "TOKEN_INJECT:1" },
+			{ type: "text", text: "second instruction" },
+		]);
+		expect(result.message.details.count).toBe(2);
+	});
+
+	it("N2 失配序列化：非 string content JSON.stringify 进 text 段保信息（无结构化透传）", async () => {
 		const full = createHarness(methodRouter({
 			"bridge:intercept": [JSON.stringify({
 				injectedMessages: [
@@ -303,14 +310,15 @@ describe("intercept（bridge:intercept，唯一允许 await 的转发）", () =>
 		}));
 		const handler = full.handlers.get("before_agent_start")![0] as (data: unknown, ctx: unknown) => Promise<unknown>;
 		const result = (await handler({ type: "before_agent_start", prompt: "hi" }, full.ctx)) as {
-			message: { content: Array<Record<string, unknown>>; details: { count: number } };
+			message: { content: Array<{ type: string; text: string }>; details: { count: number } };
 		};
 
-		// TextContent 形态原样透传：可选字段（textSignature）不丢，不被重新构造为裸 text 段
-		expect(result.message.content[0]).toEqual({ type: "text", text: "native text", textSignature: "sig-1" });
-		// ImageContent 透传：CustomMessage.content 数组原生接受该形态；stringify 兜底
-		// 会把 image 降级成 text 丢失多模态语义
-		expect(result.message.content[1]).toEqual({ type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
+		// 失配形态生产不可达（管线层非 string 丢弃 + warn），序列化保信息而非透传——
+		// 若透传分支被恢复，本断言即红
+		expect(result.message.content).toEqual([
+			{ type: "text", text: '{"type":"text","text":"native text","textSignature":"sig-1"}' },
+			{ type: "text", text: '{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}' },
+		]);
 		expect(result.message.details.count).toBe(2);
 	});
 
