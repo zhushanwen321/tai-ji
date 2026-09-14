@@ -123,13 +123,21 @@ export async function renderMermaid(
   const ID_SKIP_PREFIX = 2
   const ID_LEN = 6
   const id = `md-${Date.now()}-${Math.random().toString(ID_RADIX).slice(ID_SKIP_PREFIX, ID_SKIP_PREFIX + ID_LEN)}`
-  const { svg } = await mermaid.render(id, source)
-  // mermaid.render 在不完整 DOM 环境（happy-dom/jsdom）会静默返回空串（不抛错）。
-  // 真实 Chromium 不应如此——空 svg 视为失败，让上层显示「渲染失败」而非空白。
-  if (!svg || !svg.includes('<svg')) {
-    throw new Error(`mermaid.render 返回空 svg（source 长度=${source.length}，可能 DOM 环境不完整或源码解析失败）`)
+  try {
+    const { svg } = await mermaid.render(id, source)
+    // mermaid.render 在不完整 DOM 环境（happy-dom/jsdom）会静默返回空串（不抛错）。
+    // 真实 Chromium 不应如此——空 svg 视为失败，让上层显示「渲染失败」而非空白。
+    if (!svg || !svg.includes('<svg')) {
+      throw new Error(`mermaid.render 返回空 svg（source 长度=${source.length}，可能 DOM 环境不完整或源码解析失败）`)
+    }
+    return { svg }
+  } finally {
+    // [HISTORICAL] B10（内存泄漏审计中危#4）：mermaid 11.16 的 render() 解析失败时 throw
+    // 先于内部 removeTempElements()，临时 `#d{id}` div 残留 document.body；调用侧每次生成
+    // 新唯一 id，旧残留无法被后续渲染回收（流式期间不完整语法逐帧 parse 失败 → 逐帧泄漏）。
+    // finally 补捞：成功路径 mermaid 已自清（remove 不存在的元素是 no-op），失败路径兜底清除。
+    document.getElementById(`d${id}`)?.remove()
   }
-  return { svg }
 }
 
 /** 重置 mermaid 状态（测试用：清 initializedTheme 强制下次重新 initialize） */

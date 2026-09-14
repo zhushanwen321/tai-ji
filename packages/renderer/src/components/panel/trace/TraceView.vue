@@ -83,6 +83,18 @@
         <FileWarning class="size-3 shrink-0 opacity-70" />
         <span>{{ t('panel.trace.degradedFileSource') }}</span>
       </div>
+      <!--
+           B11 台账截断降级 banner（正交字段 truncated，参照 source:'oversize' 先例——
+           不新增 status 值，台账仍正常渲染）：entries 达 5000 软上限停止追加后提示台账
+           不完整。与 file 降级 banner 同构（icon + 文案），正交可同时出现。 -->
+      <div
+        v-if="partition.truncated"
+        class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
+        data-testid="trace-truncated-banner"
+      >
+        <FileWarning class="size-3 shrink-0 opacity-70" />
+        <span>{{ t('panel.trace.truncatedLedger') }}</span>
+      </div>
       <TraceToolbar
         :rows="rows"
         :context-only="partition.contextOnly"

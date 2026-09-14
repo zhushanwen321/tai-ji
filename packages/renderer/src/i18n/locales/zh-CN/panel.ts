@@ -426,6 +426,8 @@ export default {
     emptyFiltered: '当前过滤条件下无匹配行',
     // RPC 降级 banner（§3.1 失败路径：pi RPC 失败/非活跃 session 走文件直读，无实时增量）
     degradedFileSource: '来自磁盘文件（实时更新不可用）',
+    // B11 台账截断降级（软上限停采后提示台账不完整，truncated 正交字段消费文案）
+    truncatedLedger: '台账已达 5000 条上限，已停止追加（较早条目截断）',
     // SYSTEM 无留痕降级（§3.1：留痕包未装/被禁/旧 session——现取通道在常驻扩展，接线前按钮置灰）
     systemNoTraceHint: '无留痕（该时段留痕 extension 未启用）',
     systemFetchCurrent: '现取当前值',

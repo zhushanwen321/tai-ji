@@ -60,6 +60,14 @@ export interface TraceSessionPartition {
   source: 'rpc' | 'file' | 'empty' | 'oversize' | null
   header?: TraceSessionHeader
   entries: unknown[]
+  /** entry.id 去重集（B11 内存审计中危#9：分区级增量维护，消灭每次推送全量重扫 entries 的
+   *  O(n²)）。与 entries 严格同步——唯二写点：全量快照替换（重建）与 mergeAppendedEntries
+   *  （增量 add）；纯内部去重状态，无消费面（不进模板/computed）。 */
+  seenIds: Set<string>
+  /** 台账截断标记（B11：正交字段，不新增 status 值——参照 source:'oversize' 先例）：
+   *  entries 达 TRACE_ENTRIES_SOFT_CAP 停止追加后置 true；消费面 = TraceView 现有
+   *  降级渲染分支（banner）。全量快照重拉时按新快照重置。 */
+  truncated: boolean
   malformed: SessionTraceMalformedLine[]
   sessionEnd?: TraceSessionEndMeta
   /** 当前叶子 entry id（增量去重 + core 边界计算输入）。 */
@@ -103,6 +111,8 @@ function createDefaultPartition(): TraceSessionPartition {
     status: 'idle',
     source: null,
     entries: [],
+    seenIds: new Set<string>(),
+    truncated: false,
     malformed: [],
     leafId: null,
     errorCode: null,
@@ -174,22 +184,40 @@ function ensureIncrementSubscription(sid: string): void {
 // 系分类失当——缓冲的是数据本体非 UI 瞬态，随 #13 登记转正向注解，PR #186 MF1）
 const pendingAppends = new Map<string, Array<{ entries: unknown[]; leafId?: string | null }>>()
 
+/** trace 台账软上限（B11：内存审计中危#9——entries 无界增长随会话长度放大，是「活性
+ *  无界」结构；5000 条后停止追加，完整性降级由 truncated 标记 + TraceView 降级 banner
+ *  承载。软上限而非环形缓冲：entry.id 去重依赖全量 seen 集，滚动丢弃会失效致重复追加
+ *  （设计 B11 被否项）。 */
+const TRACE_ENTRIES_SOFT_CAP = 5000
+
+/** 从 entries 构建 id 去重集（全量快照替换后重建 seenIds；增量路径不走此函数）。 */
+function buildSeenIds(entries: unknown[]): Set<string> {
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    const id = (entry as { id?: unknown } | null)?.id
+    if (typeof id === 'string') seen.add(id)
+  }
+  return seen
+}
+
 /** 增量合并核心：entry.id 去重追加 + leafId 滚动（protocol「消费端按 entry.id 去重追加」；
- * ready 增量分支与 loading 缓冲 flush 共用同一份语义）。 */
+ * ready 增量分支与 loading 缓冲 flush 共用同一份语义）。B11：去重用分区级 seenIds 增量
+ * add；达软上限后停止追加并置 truncated（leafId 仍滚动——单字符串非内存面，且保持
+ * core 边界计算输入最新）。 */
 function mergeAppendedEntries(
   s: TraceSessionPartition,
   payload: { entries: unknown[]; leafId?: string | null },
 ): void {
-  const seen = new Set(
-    s.entries
-      .map((e) => (e as { id?: unknown } | null)?.id)
-      .filter((id): id is string => typeof id === 'string'),
-  )
   for (const entry of payload.entries) {
     const id = (entry as { id?: unknown } | null)?.id
-    if (typeof id === 'string' && seen.has(id)) continue
+    if (typeof id === 'string' && s.seenIds.has(id)) continue
+    if (s.entries.length >= TRACE_ENTRIES_SOFT_CAP) {
+      // 软上限：停止追加（超限 entry 丢弃），置位正交截断标记供降级 UI 提示
+      s.truncated = true
+      break
+    }
     s.entries.push(entry)
-    if (typeof id === 'string') seen.add(id)
+    if (typeof id === 'string') s.seenIds.add(id)
   }
   if (payload.leafId !== undefined) s.leafId = payload.leafId
 }
@@ -237,7 +265,13 @@ async function loadTrace(sid: string): Promise<void> {
       s.filePath = snap.filePath ?? null
       s.oversizeMessage = snap.oversizeMessage ?? null
       s.header = snap.header as TraceSessionHeader | undefined
-      s.entries = [...snap.entries]
+      // B11：快照超软上限时保尾部（最新 entry 靠尾，context 边界/leafId 在尾部）+ 置
+      // truncated；seenIds 随截断后集合重建（快照替换是 seenIds 唯一重建点）
+      const overCap = snap.entries.length > TRACE_ENTRIES_SOFT_CAP
+      const kept = overCap ? snap.entries.slice(-TRACE_ENTRIES_SOFT_CAP) : snap.entries
+      s.entries = [...kept]
+      s.truncated = overCap
+      s.seenIds = buildSeenIds(kept)
       s.malformed = [...snap.malformed]
       s.sessionEnd = snap.sessionEnd as TraceSessionEndMeta | undefined
       s.leafId = snap.leafId ?? null

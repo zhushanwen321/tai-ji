@@ -273,3 +273,122 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     expect(rows2[4]).toMatchObject({ kind: 'DATA' })
   })
 })
+
+describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 + 5000 软上限 + truncated 正交字段）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    apiMock.getTraceEntries.mockReset()
+    traceStore._resetTraceStoreForTest()
+    setActivePinia(createPinia())
+    traceStore.bindTraceSessionId(computed(() => usePanelStore().focusedSessionId))
+    focusSession(null)
+  })
+
+  /** 线性链 entry fixture（id 可控，去重断言用）。 */
+  function chainEntry(id: string, parentId: string | null): unknown {
+    return { type: 'message', id, parentId, message: { role: 'user', content: `q-${id}` } }
+  }
+
+  /** 强制拉取到 ready（retryTraceLoad 无条件重拉——ensureTraceLoaded 对 ready 分区 no-op）。 */
+  async function loadReady(sid: string, entries: unknown[], extra: Partial<ServerMessageMap['session.traceEntries']> = {}): Promise<void> {
+    apiMock.getTraceEntries.mockResolvedValue(snapshotOf(sid, entries, extra))
+    focusSession(sid)
+    traceStore.retryTraceLoad(sid)
+    await vi.waitFor(() => expect(partitionOf(sid).status).toBe('ready'))
+  }
+
+  it('增量去重等价性：seenIds 增量维护下重复 id 不追加（快照内/历史增量/重拉后均一致）', async () => {
+    await loadReady(SID_A, [chainEntry('e1', null)])
+
+    // 与快照重叠的 id + 新 id 混合推送：重叠丢弃、新增追加（与旧全量重建语义等价）
+    pushAppend(SID_A, [chainEntry('e1', null), chainEntry('e2', 'e1')], 'e2')
+    expect(partitionOf(SID_A).entries.map((e) => (e as { id?: string }).id)).toEqual(['e1', 'e2'])
+
+    // 历史增量的 id 再推：仍去重（seen 集跨推送存活——增量维护不丢历史）
+    pushAppend(SID_A, [chainEntry('e2', 'e1')], 'e2')
+    expect(partitionOf(SID_A).entries).toHaveLength(2)
+
+    // 无 id entry：不进去重集但照常追加（旧语义保留——protocol 无 id 行不丢）
+    const noId = { type: 'session_info', name: 'no-id' }
+    pushAppend(SID_A, [noId], 'e2')
+    expect(partitionOf(SID_A).entries).toHaveLength(3)
+
+    // 重拉（error→retry 或手动刷新路径）：快照替换后 seen 集随新快照重建，重复 id 仍不追加
+    await loadReady(SID_A, [chainEntry('e1', null), chainEntry('e9', 'e1')], { leafId: 'e9' })
+    expect(partitionOf(SID_A).entries).toHaveLength(2)
+    pushAppend(SID_A, [chainEntry('e9', 'e1')], 'e9')
+    expect(partitionOf(SID_A).entries).toHaveLength(2)
+  })
+
+  it('软上限边界：4999 + 2 增量 → 恰 5000 停采 + truncated 置位；重复 id 不触截断', async () => {
+    const base = Array.from({ length: 4999 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
+    await loadReady(SID_A, base, { leafId: 'e4998' })
+    expect(partitionOf(SID_A).truncated).toBe(false)
+
+    // 第 5000 条：达上限但未超——追加成功且不置 truncated
+    pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
+    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).truncated).toBe(false)
+
+    // 已达上限后再推重复 id：去重先行，不触截断标记
+    pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
+    expect(partitionOf(SID_A).truncated).toBe(false)
+
+    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串非内存面，保 core 边界计算输入最新）
+    pushAppend(SID_A, [chainEntry('e5000', 'e4999')], 'e5000')
+    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).truncated).toBe(true)
+    expect(partitionOf(SID_A).leafId).toBe('e5000')
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e4999')
+  })
+
+  it('超限快照：保尾部 5000 + truncated 置位；后续增量立即停采', async () => {
+    const entries = Array.from({ length: 5003 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`))
+    await loadReady(SID_A, entries, { leafId: 'e5002' })
+
+    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).truncated).toBe(true)
+    // 保尾部：丢弃最前 e0/e1/e2，保留 e3..e5002（最新 entry 靠尾 + leafId 在尾部）
+    expect((partitionOf(SID_A).entries[0] as { id?: string }).id).toBe('e3')
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e5002')
+    expect(partitionOf(SID_A).leafId).toBe('e5002')
+
+    // 截断后的增量：直接停采（新 id 不可进入，台账恒有界）
+    pushAppend(SID_A, [chainEntry('e5003', 'e5002')], 'e5003')
+    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).truncated).toBe(true)
+  })
+
+  it('重拉小快照后 truncated 复位：全量快照是权威状态，截断标记随新快照重置', async () => {
+    await loadReady(SID_A, Array.from({ length: 5001 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: 'e5000' })
+    expect(partitionOf(SID_A).truncated).toBe(true)
+
+    await loadReady(SID_A, [chainEntry('n1', null)], { leafId: 'n1' })
+    expect(partitionOf(SID_A).truncated).toBe(false)
+    expect(partitionOf(SID_A).entries).toHaveLength(1)
+    // seen 集已随新快照重建：旧 id 不再被认成重复（新台账独立）
+    pushAppend(SID_A, [chainEntry('e0', null)], 'e0')
+    expect(partitionOf(SID_A).entries).toHaveLength(2)
+  })
+
+  it('loading 窗口缓冲 flush 同受软上限约束：快照 + 缓冲合计超 5000 停采并置位', async () => {
+    let resolveSnap!: (v: ServerMessageMap['session.traceEntries']) => void
+    apiMock.getTraceEntries.mockImplementation(
+      () => new Promise<ServerMessageMap['session.traceEntries']>((res) => { resolveSnap = res }),
+    )
+    focusSession(SID_A)
+    traceStore.ensureTraceLoaded(SID_A)
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'))
+
+    // 窗口内缓冲 3 条（含 1 条与快照重叠）
+    pushAppend(SID_A, [chainEntry('e4998', 'e4997'), chainEntry('e4999', 'e4998'), chainEntry('e5000', 'e4999')], 'e5000')
+
+    resolveSnap(snapshotOf(SID_A, Array.from({ length: 4999 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: 'e4998' }))
+    await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('ready'))
+    // 快照 4999 + flush 去重后新增 e4999（5000 达上限）+ e5000 停采置位
+    expect(partitionOf(SID_A).entries).toHaveLength(5000)
+    expect(partitionOf(SID_A).truncated).toBe(true)
+    expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e4999')
+    expect(partitionOf(SID_A).leafId).toBe('e5000')
+  })
+})

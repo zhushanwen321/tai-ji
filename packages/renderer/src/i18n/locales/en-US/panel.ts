@@ -429,6 +429,8 @@ export default {
     // RPC degraded banner (§3.1 failure paths: pi RPC failed / inactive session reads the
     // file directly — no live incremental updates)
     degradedFileSource: 'From disk file (live updates unavailable)',
+    // B11 ledger truncation degradation (soft-cap stop notice; copy for the truncated flag)
+    truncatedLedger: 'Ledger reached the 5000-entry cap; appends stopped (older entries truncated)',
     // SYSTEM no-trace degradation (§3.1: trace pack absent/disabled or legacy session —
     // fetch-current channel lives in the resident extension; button disabled until wired)
     systemNoTraceHint: 'not traced (trace extension not active in that period)',
