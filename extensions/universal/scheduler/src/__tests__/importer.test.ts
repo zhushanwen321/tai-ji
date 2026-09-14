@@ -40,7 +40,6 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     kind: 'recurring',
     schedule: { mode: 'interval', intervalMs: 60000 },
     enabled: true,
-    force: false,
     createdAt: 1000,
     nextRunAt: 2000,
     runCount: 0,

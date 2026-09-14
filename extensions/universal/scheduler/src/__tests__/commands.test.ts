@@ -104,9 +104,8 @@ describe('/schedule command', () => {
   // ── 子命令路由：run ──
 
   it('run executes task', async () => {
-    // force 任务（L4：直投唯一入口——/schedule 命令创建路径不带 force，run 子命令
-    // 的 dispatch 行为用 force 任务锚定直投路径）
-    const created = await service.create('test', '5m', { force: true })
+    // run 子命令的 dispatch 行为锚定 steer 直投路径
+    const created = await service.create('test', '5m')
     const result = await executeScheduleCommand(service, `run ${created.data!.task.id}`)
     expect(result).toContain('executed')
     // dispatchTask 更新 task 对象（同一引用），runCount 自增到 1。

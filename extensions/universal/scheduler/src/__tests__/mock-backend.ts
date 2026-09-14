@@ -7,7 +7,7 @@ import type { ScheduledTask, SchedulerEntryOp } from '../types.js'
 
 export interface SentMessage {
   msg: { content: string; customType: string; display: boolean }
-  opts?: { deliverAs?: 'followUp'; triggerTurn?: boolean }
+  opts?: { deliverAs?: 'steer'; triggerTurn?: boolean }
 }
 
 /**
@@ -30,7 +30,7 @@ export class MockSchedulerBackend implements SchedulerBackend {
 
   async sendMessage(
     msg: { content: string; customType: string; display: boolean },
-    opts?: { deliverAs?: 'followUp'; triggerTurn?: boolean },
+    opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
   ): Promise<void> {
     this.sentMessages.push({ msg, opts })
   }

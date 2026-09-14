@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-scheduler",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "main": "index.ts",
   "xyz-agent": {
@@ -45,7 +45,6 @@
     }
   },
   "dependencies": {
-    "@xyz-agent/session-delivery": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "croner": "^9.0.0"

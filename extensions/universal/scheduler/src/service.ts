@@ -74,14 +74,13 @@ export class SchedulerService {
             'Next 5 runs:',
             ...nextRuns.map((t, i) => `  ${i + 1}. ${formatRelativeTime(t, now)}`),
           ].join('\n')
-    // 一行紧凑：name(id) + schedule(含 kind 信息) + expires + force。
-    // 删冗余 Kind 行（formatSchedule 已含 once/every）；Expires/Force 合并（默认 no-expires/no-force 显式）。
+    // 一行紧凑：name(id) + schedule(含 kind 信息) + expires。
+    // 删冗余 Kind 行（formatSchedule 已含 once/every）；Expires 合并（默认 no-expires 显式）。
     const expiresLabel = task.expiresAt
       ? `expires ${formatRelativeTime(task.expiresAt, now)}`
       : 'no-expires'
-    const forceLabel = task.force ? 'force' : 'no-force'
     const message = [
-      `Task "${task.name}" (${task.id}) created. ${formatSchedule(task.schedule, task.kind)}, ${expiresLabel}, ${forceLabel}`,
+      `Task "${task.name}" (${task.id}) created. ${formatSchedule(task.schedule, task.kind)}, ${expiresLabel}`,
       runPreview,
     ].join('\n')
 
@@ -129,8 +128,7 @@ export class SchedulerService {
   /**
    * 立即执行任务。语义细分：
    * 任务不存在 → not found 文案；任务存在但 dispatch no-op
-   * （disabled / rate-limited / 同任务入队已在 TTL 窗口内）→ not dispatched 文案。
-   * busy 不再是 no-op：非 force 任务入队 delivery 内核即成功（park 等后续投递）。
+   * （disabled / rate-limited / 同任务在途）→ not dispatched 文案。
    * 修复了旧实现把 no-op 误报为 not found 的混同。
    */
   async run(id: string | undefined): Promise<ServiceResult> {
@@ -144,7 +142,7 @@ export class SchedulerService {
     if (!dispatched) {
       return {
         success: false,
-        message: `Task ${id} not dispatched (disabled, rate-limited, or already queued for delivery).`,
+        message: `Task ${id} not dispatched (disabled, rate-limited, or dispatch in flight).`,
       }
     }
     return { success: true, message: `Task ${id} executed.` }

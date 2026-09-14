@@ -157,10 +157,8 @@ describe('SchedulerService', () => {
   })
 
   describe('run', () => {
-    // run 触达 dispatchDirect 的用例统一 force 任务（L4：无 handle 直投分支已删，
-    // idle/busy 判定移交 delivery 内核，直投唯一入口是 force）
     it('runs task now', async () => {
-      const created = await service.create('test', '5m', { force: true })
+      const created = await service.create('test', '5m')
       const id = created.data!.task.id
       const result = await service.run(id)
       expect(result).toEqual({ success: true, message: `Task ${id} executed.` })
@@ -182,23 +180,21 @@ describe('SchedulerService', () => {
       const result = await service.run(id)
       expect(result).toEqual({
         success: false,
-        message: `Task ${id} not dispatched (disabled, rate-limited, or already queued for delivery).`,
+        message: `Task ${id} not dispatched (disabled, rate-limited, or dispatch in flight).`,
       })
     })
 
-    // 原「无 delivery handle 时 busy 不影响 dispatch（直投）」用例按 L4 裁决改由 force 路径
-    // 覆盖：force 任务 run 直投成功（dispatchDirect 不经 delivery，idle/busy 判定在内核侧）
-    it('force 任务 run 直投成功（不受 busy 影响）', async () => {
-      const busyBackend = new MockSchedulerBackend()
-      const busyService = new SchedulerService(new SchedulerRuntime(busyBackend), () => busyBackend.now())
+    it('run 直投成功', async () => {
+      const backend2 = new MockSchedulerBackend()
+      const service2 = new SchedulerService(new SchedulerRuntime(backend2), () => backend2.now())
 
-      const created = await busyService.create('test', '5m', { force: true })
+      const created = await service2.create('test', '5m')
       const id = created.data!.task.id
-      const result = await busyService.run(id)
+      const result = await service2.run(id)
 
-      // 直投成功（force → dispatchDirect，不检查 idle/busy）
+      // steer 直投成功（runtime 层无 idle/busy 判定）
       expect(result.success).toBe(true)
-      expect(busyBackend.sentMessages).toHaveLength(1)
+      expect(backend2.sentMessages).toHaveLength(1)
     })
   })
 })

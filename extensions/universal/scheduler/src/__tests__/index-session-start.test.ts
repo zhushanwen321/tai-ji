@@ -45,7 +45,7 @@ function createMockPi(): {
 
 /**
  * 最小 fake ctx：覆盖 session_start 装配链读到的全部字段——PiSchedulerBackend 构造
- * （sessionManager）、delivery 内核装配（isIdle/hasPendingMessages，构造器直传 runtime——
+ * （sessionManager）、runtime 装配（构造器直传——
  * L2/L3）、importLegacyStore（cwd，已 mock）、refreshWidget（ui.setWidget）。
  * setWidget 以独立引用导出：session_start 初始渲染 + 每次 tick 末 onAfterTick 各调一次，
  * 是「哪个 runtime 的 timer 还在 tick」的行为观测面。

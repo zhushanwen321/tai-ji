@@ -10,7 +10,6 @@ const makeTask = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
   kind: 'recurring',
   schedule: { mode: 'interval', intervalMs: 60000 },
   enabled: true,
-  force: false,
   createdAt: Date.now(),
   nextRunAt: Date.now() + 60000,
   runCount: 0,

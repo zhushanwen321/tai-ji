@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { createDelivery, type DeliveryHandle, type DeliveryMessage } from '@xyz-agent/session-delivery'
 
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
@@ -44,7 +43,6 @@ let sessionGeneration = 0
  */
 export default function schedulerExtension(pi: ExtensionAPI): void {
   let service: SchedulerService | null = null
-  let deliveryHandle: DeliveryHandle | undefined
   // IMPORT-FLUSH-GUARD（MF-1）：importLegacyStore 对未 flush 的新 session 返回延迟删除 .imported
   // 的 cleanup——turn_end / session_shutdown 时执行：确认 flush（sessionFile 已出现）则删，
   // 未 flush 保留供崩溃恢复重导入（否则未 flush 即退出 → 全部旧任务丢失且源文件已销毁）。
@@ -68,59 +66,18 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // 窗口与 session 替换交错时旧 session_shutdown 可能永远等不到（timer 泄漏源头）。stopScheduler 幂等，
     // shutdown 已停过再停一次无副作用。
     service?.runtime.stopScheduler()
-    // 销毁旧 delivery handle（清队列 + 清 timer + 退订 settled）
-    deliveryHandle?.dispose()
     // 装配点：backend（ctx.sessionManager 读 entries / pi.appendEntry 写 op）→ runtime（内存态 + 调度）→ service（业务入口）
     const backend = new PiSchedulerBackend(ctx, pi)
     // 旧 store 原子导入（CL3 方案A）：必须在 backend.loadTasks() 之前执行——
     // append 的 upsert entry 进入 pi 内存 fileEntries，紧接的 loadTasks replay 统一重放读到导入任务。
     // ctx.cwd 类型为 string（SDK ExtensionContext 必填），无需 ?? process.cwd() 兜底（CL2）。
     importCleanup = importLegacyStore(ctx.cwd, pi, ctx.sessionManager.getSessionFile())
-    // 创建 delivery handle（U4：scheduler 切换内核）
-    // busyPolicy: 'park'（busy 入队不重试，等 tick 外部 flush）
-    // intent: 'after-run'（保持 followUp 语义）
-    // onSettled：延迟绑定——runtime 创建后填充（闭包变量）
-    // #11：整条 msg 透传（runtime 按 msg.dedupeKey=task.id 精确反查，不再 content 匹配）
-    const settledHandlerRef: { current: ((msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void) | undefined } = { current: undefined }
-    deliveryHandle = createDelivery({
-      supportedPayloads: ['custom'],
-      isIdle: () => ctx.isIdle(),
-      hasPendingMessages: () => ctx.hasPendingMessages(),
-      subscribeSettled: (cb) => {
-        // 无退订语义（pi 0.84.1 `pi.on(...)` 全重载返回 void、无 off——实装锚点：
-        // node_modules @earendil-works/pi-coding-agent dist/core/extensions/types.d.ts
-        // `on()` 系列，0.84.1 实测）；disposed 标志包装兑现退订（notifier.ts 同款）
-        let disposed = false
-        pi.on('agent_settled', () => { if (!disposed) cb() })
-        return () => { disposed = true }
-      },
-      send: (msg, intent) => {
-        const piOpts = intent === 'interrupt-at-turn-boundary'
-          ? { triggerTurn: true, deliverAs: 'steer' as const }
-          : { triggerTurn: true, deliverAs: 'followUp' as const }
-        // supportedPayloads 已收窄到 'custom'，payload.kind 恒为 'custom'
-        const content = msg.payload.content
-        return pi.sendMessage(
-          { content, customType: 'pi-scheduler:dispatched', display: true },
-          piOpts,
-        )
-      },
-    }, {
-      intent: 'after-run',
-      busyPolicy: 'park',
-      onSettled: (msg, outcome) => {
-        // 委托给 runtime 的 settledHandler（延迟绑定）
-        settledHandlerRef.current?.(msg, outcome)
-      },
-    })
 
     // G1：注入代际比对（本 runtime 建立时的代数 vs 实时代数），供 tick 前置检查与
     // F2 catch 分诊判定 stale——不依赖 pi 错误文案。
-    // delivery 直传构造器（L2：原经 backend.setDeliveryHandle 中转；装配无条件注入是
-    // L4 删除无 handle 直投分支的依据，装配断言锚定在 index-generation.test.ts）
-    const runtime = new SchedulerRuntime(backend, deliveryHandle, () => sessionGeneration !== myGeneration)
-    // 延迟绑定：runtime 的 handleSettled 绑定到 delivery onSettled 回调
-    settledHandlerRef.current = (msg, outcome) => runtime.handleSettled(msg, outcome)
+    // 投递模型（scheduler-steer-direct-dispatch）：到期任务 steer 直投（backend.sendMessage），
+    // 受理即记账，不经投递内核。
+    const runtime = new SchedulerRuntime(backend, () => sessionGeneration !== myGeneration)
     runtime.loadTasks(backend.loadTasks())
     // W2：tick 后回调刷新 widget（替代独立 widgetTimer + setInterval，节奏对齐 TICK_INTERVAL_MS）
     runtime.onAfterTick(() => refreshWidget(ctx))
@@ -146,9 +103,6 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     if (service) {
       service.runtime.stopScheduler()
     }
-    // 销毁 delivery handle（清队列 + 清 timer + 退订 settled）
-    deliveryHandle?.dispose()
-    deliveryHandle = undefined
     // IMPORT-FLUSH-GUARD（MF-1）：兜底清理——正常路径已由首个 turn_end 完成；此处覆盖
     // 从未产生 turn 的 session（打开未发消息即关闭）。cleanup 确认 flush（sessionFile 已出现）
     // 则删 .imported，未 flush 保留供崩溃恢复重导入

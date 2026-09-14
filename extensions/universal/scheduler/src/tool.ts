@@ -12,7 +12,6 @@ export const ScheduleParams = Type.Object({
   kind: Type.Optional(Type.Union([Type.Literal('once'), Type.Literal('recurring')], { description: 'Task kind. Default: recurring.' })),
   name: Type.Optional(Type.String({ description: 'Human-readable task name. Auto-generated from prompt if omitted.' })),
   expires: Type.Optional(Type.String({ description: 'Expiry duration (30m/2h/7d). Default: 7d. Pass "never" to disable. Only applies to recurring tasks (once tasks fire and are removed, expires is ignored).' })),
-  force: Type.Optional(Type.Boolean({ description: 'Dispatch even when agent is busy. Default: false.' })),
 })
 
 export type ScheduleParamsT = Static<typeof ScheduleParams>
@@ -34,8 +33,8 @@ export const scheduleGuidelines = [
  * 初始化异常不在此 catch——穿透到 index.ts execute 的 catch 兜底（R3）。
  */
 export async function handleSchedule(service: SchedulerService, params: ScheduleParamsT) {
-  const { prompt, schedule: scheduleInput, kind, name, expires, force } = params
-  const result = await service.create(prompt, scheduleInput, { kind, name, expires, force })
+  const { prompt, schedule: scheduleInput, kind, name, expires } = params
+  const result = await service.create(prompt, scheduleInput, { kind, name, expires })
   return toToolResult(result)
 }
 
@@ -53,7 +52,7 @@ export const controlGuidelines = [
   'Use action="list" to see all scheduled tasks.',
   'After listing, use the returned id for toggle/delete/run.',
   'Prefer toggle(enabled=false) over delete for temporary pauses.',
-  'action="run" dispatches the task now: force tasks are sent directly; non-force tasks are enqueued via the delivery kernel and delivered once the agent is idle (busy messages wait in the queue and are flushed later).',
+  'action="run" dispatches the task now: the message is sent immediately via steer (interrupting the current turn if the agent is busy).',
 ]
 
 export async function handleScheduleControl(service: SchedulerService, params: ScheduleControlParamsT) {

@@ -13,11 +13,11 @@
 //   isCtxStale 翻转为 true 且其泄漏 timer 在下个 tick 前置检查自停。闭包级实现（R3-M1
 //   修复前）在此拓扑下恒 false——正是被 R3 实测证伪的生产失效路径。
 //
-// 本文件用 InstrumentedRuntime（继承真实 SchedulerRuntime，记录构造参 delivery 与
-// isCtxStale）捕获注入回调与装配事实。InstrumentedRuntime 全部行为继承父类，不影响装配
-// 链本身（F1 停旧 timer 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
-// 装配断言（ext-simplify-08 L4）：runtime 删除无 handle 直投分支的前提 = 装配点无条件
-// 注入 delivery——此处断言每代 runtime 构造时收到非空 delivery handle，装配缺漏在此拦截。
+// 本文件用 InstrumentedRuntime（继承真实 SchedulerRuntime，记录构造参 isCtxStale）
+// 捕获注入回调与装配事实。InstrumentedRuntime 全部行为继承父类，不影响装配链本身
+// （F1 停旧 timer 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
+// steer 直投模型（scheduler-steer-direct-dispatch）：装配点不再创建 delivery handle，
+// runtime 构造仅收 backend + isCtxStale 两参。
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -36,25 +36,22 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
 // vi.mock factory 会被提升，跨模块共享状态必须经 vi.hoisted。
-const { deliveryCaptures, isCtxStaleCaptures, runtimeInstances } = vi.hoisted(() => ({
-  deliveryCaptures: [] as Array<unknown>,
+const { isCtxStaleCaptures, runtimeInstances } = vi.hoisted(() => ({
   isCtxStaleCaptures: [] as Array<(() => boolean) | undefined>,
   runtimeInstances: [] as Array<{ stopScheduler(): void }>,
 }))
 
 // InstrumentedRuntime 继承真实实现（loadTasks/onAfterTick/startScheduler 均真实执行），
-// 仅捕获构造参（delivery / isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）。
+// 仅捕获构造参（isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）。
 vi.mock('../runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtime.js')>()
   const RealSchedulerRuntime = actual.SchedulerRuntime
   class InstrumentedRuntime extends RealSchedulerRuntime {
     constructor(
       backend: ConstructorParameters<typeof RealSchedulerRuntime>[0],
-      delivery: ConstructorParameters<typeof RealSchedulerRuntime>[1],
       isCtxStale?: () => boolean,
     ) {
-      super(backend, delivery, isCtxStale)
-      deliveryCaptures.push(delivery)
+      super(backend, isCtxStale)
       isCtxStaleCaptures.push(isCtxStale)
       runtimeInstances.push(this)
     }
@@ -101,7 +98,6 @@ function createFakeCtx(sessionFile: string): ExtensionContext {
 
 describe('G1: index.ts 代际接线（S9）', () => {
   beforeEach(() => {
-    deliveryCaptures.length = 0
     isCtxStaleCaptures.length = 0
     runtimeInstances.length = 0
   })
@@ -133,28 +129,6 @@ describe('G1: index.ts 代际接线（S9）', () => {
     expect(isCtxStaleCaptures[0]!()).toBe(true)
     expect(isCtxStaleCaptures[1]!()).toBe(true)
     expect(isCtxStaleCaptures[2]!()).toBe(false)
-  })
-
-  // L4 装配后断言：删除无 handle 直投分支的前提 = 唯一装配点（session_start）对每代
-  // runtime 无条件注入 delivery handle。装配漏注入时非 force dispatch 将在
-  // dispatchViaDelivery 崩溃——本断言把装配缺漏拦截在装配层而非运行期。
-  it('每次 session_start 构造的 runtime 均收到非空 delivery handle（L4 装配契约）', () => {
-    const { pi, events } = createMockPi()
-    schedulerExtension(pi)
-    const sessionStart = events.get('session_start')
-    expect(sessionStart).toBeDefined()
-
-    for (const reason of ['startup', 'new_session', 'resume'] as const) {
-      sessionStart!({ type: 'session_start', reason }, createFakeCtx(`/test/gen-${reason}.json`))
-    }
-
-    expect(deliveryCaptures).toHaveLength(3)
-    for (const delivery of deliveryCaptures) {
-      expect(delivery).toBeDefined()
-      // DeliveryHandle 最小形状：send（入队）与 flush（tick 末冲刷）必为函数
-      expect(typeof (delivery as { send: unknown }).send).toBe('function')
-      expect(typeof (delivery as { flush: unknown }).flush).toBe('function')
-    }
   })
 
   // ── R3-M1/R3-S5：factory 重跑装配级用例（生产主路径拓扑）──

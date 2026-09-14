@@ -76,8 +76,7 @@ describe('schedule_control tool', () => {
   })
 
   it('runs task now', async () => {
-    // force 任务（L4：直投唯一入口，无 handle 直投分支已删）
-    const created = await service.create('test', '5m', { force: true })
+    const created = await service.create('test', '5m')
     const result = await handleScheduleControl(service, { action: 'run', id: created.data!.task.id })
     expect(result.content[0]!.text).toContain('executed')
   })

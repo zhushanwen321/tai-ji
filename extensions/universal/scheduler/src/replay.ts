@@ -205,7 +205,6 @@ function snapshotToTask(snapshot: TaskSnapshot): ScheduledTask {
     kind: snapshot.kind,
     schedule: snapshot.schedule,
     enabled: snapshot.enabled,
-    force: snapshot.force,
     createdAt: snapshot.createdAt,
     nextRunAt: snapshot.nextRunAt,
     expiresAt: snapshot.expiresAt,

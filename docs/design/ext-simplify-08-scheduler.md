@@ -1,5 +1,7 @@
 # ext-simplify-08：universal/scheduler 过度设计收敛（croner 依赖形态根修 + settled 合投语义根修）
 
+> **[SUPERSEDED 2026-09-14] 本文档的投递面（非 force 任务经 session-delivery 内核 park 投递 + per-message settled 记账 + 防重标记/TTL，见 §1/§4/§6.1 D1）已被 [scheduler-steer-direct-dispatch.md](scheduler-steer-direct-dispatch.md) 取代**——验收观测 idle 10min 延迟归因为投递链时序反转缺陷（pi sendMessage void 返回 + 内核同步 settle + set-after-send 反转致防重标记永久残留），用户裁决投递模型过重，全任务改为 steer 直投 + 受理即记账，delivery 链路与 force 字段整体删除。croner 依赖形态（D2）与 low 群清扫（D3）不受影响继续有效；`packages/session-delivery` 的 per-message 语义（D1 的内核半边）已实施并保留（runtime 通路不消费 onSettled，零影响）。
+
 > **一句话结论**：修复 scheduler 在独立安装形态下 cron 功能静默全灭并误报 Invalid 的依赖形态缺陷（croner 从 optional peer 移入 dependencies + 删运行时 import-probe 降级层）；对 M19 合投补偿机制裁决为方向 B——在 `packages/session-delivery` 内核把 onSettled 从「每批一次、只带首条 dedupeKey」根修为 per-message 终态回调，消除常规可达的「合批非首条任务 10 分钟后重复注入」缺陷，scheduler 侧防重 Map/TTL 保留但语义降为回收层异常兜底；low 级残留 API 群登记移交 code-simplify。
 
 ## 开篇（SCQA）

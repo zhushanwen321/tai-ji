@@ -37,7 +37,6 @@ function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
     kind: 'recurring',
     schedule: { mode: 'interval', intervalMs: 60000 },
     enabled: true,
-    force: false,
     createdAt: 0,
     nextRunAt: 100,
     runCount: 0,

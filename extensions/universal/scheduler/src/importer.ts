@@ -53,7 +53,6 @@ function normalizeLegacyTask(t: Partial<ScheduledTask>): ScheduledTask {
     nextRunAt: t.nextRunAt ?? 0,
     runCount: t.runCount ?? 0,
     enabled: t.enabled ?? true,
-    force: t.force ?? false,
     history: t.history ?? [],
     expiresAt: t.expiresAt,
     lastRunAt: t.lastRunAt,
@@ -63,14 +62,14 @@ function normalizeLegacyTask(t: Partial<ScheduledTask>): ScheduledTask {
 }
 
 /**
- * ScheduledTask → TaskSnapshot：显式构造 15 字段
- * （id/name/prompt/kind/schedule/enabled/force/createdAt/nextRunAt/expiresAt?/
+ * ScheduledTask → TaskSnapshot：显式构造
+ * （id/name/prompt/kind/schedule/enabled/createdAt/nextRunAt/expiresAt?/
  * runCount/lastRunAt?/lastStatus?/lastError?/history），剥离 ownerSessionFile（在 op 顶层）
  * 与 pending（运行时标记），history 用 slice() 深拷贝。
  *
  * 显式构造而非复用 runtime.toSnapshot 的解构写法（T-C3-explicit）：旧 store 数据本无
  * ownerSessionFile/pending 运行时字段，显式构造更安全。两处构造逻辑需保持形状一致
- * （对照 types.ts TaskSnapshot 15 字段）。
+ * （对照 types.ts TaskSnapshot 字段）。
  */
 function toTaskSnapshot(task: ScheduledTask): TaskSnapshot {
   return {
@@ -80,7 +79,6 @@ function toTaskSnapshot(task: ScheduledTask): TaskSnapshot {
     kind: task.kind,
     schedule: task.schedule,
     enabled: task.enabled,
-    force: task.force,
     createdAt: task.createdAt,
     nextRunAt: task.nextRunAt,
     expiresAt: task.expiresAt,

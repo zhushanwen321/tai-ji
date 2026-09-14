@@ -13,8 +13,7 @@ function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
     kind: 'recurring',
     schedule: { mode: 'interval', intervalMs: 60000 },
     enabled: true,
-    force: false,
-    createdAt: 0,
+      createdAt: 0,
     nextRunAt: 100,
     runCount: 0,
     history: [],
@@ -102,8 +101,7 @@ describe('MockSchedulerBackend', () => {
     const backend = new MockSchedulerBackend()
     // 构造不抛错（无需 cwd/pi/store mock）
     const runtime = new SchedulerRuntime(backend)
-    // force 任务（L4：直投唯一入口，无 handle 直投分支已删）
-    const task = await runtime.addTask('probe', { mode: 'interval', intervalMs: 60000 }, { force: true })
+    const task = await runtime.addTask('probe', { mode: 'interval', intervalMs: 60000 })
     expect(task).toBeDefined()
     // addTask 后 append upsert op（append-only，零 FS）
     expect(backend.appendedOps).toHaveLength(1)

@@ -32,7 +32,7 @@ import type { ScheduledTask, SchedulerEntryOp } from './types.js'
 export interface SchedulerBackend {
   sendMessage(
     msg: { content: string; customType: string; display: boolean },
-    opts?: { deliverAs?: 'followUp'; triggerTurn?: boolean },
+    opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
   ): Promise<void>
   appendEntry(op: SchedulerEntryOp): void
   getSessionFile(): string | undefined
@@ -81,7 +81,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
 
   async sendMessage(
     msg: { content: string; customType: string; display: boolean },
-    opts?: { deliverAs?: 'followUp'; triggerTurn?: boolean },
+    opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
   ): Promise<void> {
     await this.pi.sendMessage(msg, opts)
   }

@@ -16,7 +16,6 @@ export interface ScheduledTask {
   kind: TaskKind
   schedule: ScheduleSpec            // once 时 intervalMs = delayMs
   enabled: boolean
-  force: boolean                    // true = 即使 agent busy 也 dispatch
   createdAt: number
   nextRunAt: number
   expiresAt?: number                // undefined = 永不过期
@@ -55,7 +54,6 @@ export interface TaskSnapshot {
   kind: TaskKind
   schedule: ScheduleSpec
   enabled: boolean
-  force: boolean
   createdAt: number
   nextRunAt: number
   expiresAt?: number
@@ -98,5 +96,4 @@ export interface AddOptions {
   name?: string
   kind?: TaskKind
   expires?: string
-  force?: boolean
 }

@@ -1,8 +1,6 @@
 import { guardStaleCtx, toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
-import type { DeliveryHandle, DeliveryMessage } from '@xyz-agent/session-delivery'
-
 import type { SchedulerBackend } from './backend.js'
 import { autoName, generateTaskId } from './format.js'
 import { computeNextRunAt, MS_PER_DAY, MS_PER_MINUTE, parseDuration } from './parsing.js'
@@ -18,18 +16,6 @@ import type {
 const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
-// 入队防重标记 TTL 分钟数。TTL 语义 = 回收层有界兜底（ext-simplify-08 D1：内核
-// onSettled 已 per-message 化，合批每条各自终态回调，TTL 不再承担合批补偿主职能），
-// 仅覆盖两类触发源：(a) 终态回调丢失异常（内核 bug / port.send 结果丢失，预期罕见）
-// ——标记过期后放行重投，保持 at-least-once；(b) busy 持续超窗的慢投递（长任务场景
-// 常规可达，< 10min busy 窗口不触发）——per-message 无法防（回调只能等投递终态到达），
-// 副本数 = ⌈busy 超窗时长 / 10min⌉（TTL 窗口自最近一次入队起算），settled 后全部
-// 合批注入：runCount 逐条多计同数，nextRunAt 两次赋值同值不跳周期（computeNextRunAt
-// 绝对时间锚定：interval = start + intervalMs、cron 为 startAt 起下次命中；同批回调
-// 背靠背到达，from 相差毫秒算出同一周期）。10 min 本质是「重复注入风险 vs 投递延迟
-// 上限」的权衡参数，非纯异常兜底。
-const QUEUE_DEDUPE_TTL_MINUTES = 10
-const QUEUE_DEDUPE_TTL_MS = QUEUE_DEDUPE_TTL_MINUTES * MS_PER_MINUTE
 const RATE_LIMIT_PER_MINUTE = 6
 const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
@@ -52,37 +38,17 @@ export class SchedulerRuntime {
   private readonly isCtxStale: (() => boolean) | undefined
   // R3-S1：同任务 dispatch 在途标记（Set<taskId>），见 dispatchTask 注释
   private readonly dispatchesInFlight = new Set<string>()
-  // 入队防重标记（Map<taskId, enqueuedAt>）：非 force 任务 send 进 delivery 内核后、
-  // 终态回调（handleSettled）前，nextRunAt 未推进——tick step2 会按 `now >= nextRunAt`
-  // 重新置 pending，若无此标记，agent busy 的每个 tick 都会再压一份同 prompt 副本进队列
-  // （合批后重复注入）。入队置位、delivered/rejected 清除；任务删除（delete/过期）同步清除。
-  // TTL 兜底：终态回调丢失的回收层有界兜底（两类触发源见 QUEUE_DEDUPE_TTL_MINUTES
-  // 注释；内核 onSettled 已 per-message 化，合批每条各自回调，本标记不再承担合批补偿）
-  // ——标记过期后允许重投，保持 at-least-once。
-  private readonly queuedInDeliveryAt = new Map<string, number>()
-  // delivery handle（构造器直传，ext-simplify-08 L2：原经 backend set/getDeliveryHandle 中转——
-  // backend 自身不消费属穿层传参；非 force 任务走内核队列）
-  private delivery: DeliveryHandle | undefined
 
   /**
    * 依赖反转构造：backend 承担 appendEntry/pi.sendMessage/时间源，runtime 只持有内存态。
    * 不触碰任何 FS / session JSONL（测试可用 MockSchedulerBackend 零副作用注入）。
    *
-   * delivery（L2 直传）：非 force 任务走内核队列的投递 handle，装配点（index.ts
-   * session_start）createDelivery 创建后注入；缺省不注入时仅 force 直投与记账路径可用
-   * （L4：无 handle 直投分支已删，装配契约由 index-generation.test.ts 装配断言锚定）。
-   *
    * isCtxStale（G1 代际检测，S9/R3-M1）：返回 true 表示本 runtime 建立时的 session 已被
    * 替换。index.ts 装配点注入（模块级代数比对，R3-M1），使 stale 分诊不依赖 pi 错误文案；
    * 缺省（不注入）恒视为非 stale——纯 runtime 单测与旧装配路径行为不变。
    */
-  constructor(
-    backend: SchedulerBackend,
-    delivery?: DeliveryHandle,
-    isCtxStale?: () => boolean,
-  ) {
+  constructor(backend: SchedulerBackend, isCtxStale?: () => boolean) {
     this.backend = backend
-    this.delivery = delivery
     this.isCtxStale = isCtxStale
   }
 
@@ -121,7 +87,6 @@ export class SchedulerRuntime {
       kind,
       schedule,
       enabled: true,
-      force: options.force ?? false,
       createdAt: now,
       nextRunAt,
       expiresAt,
@@ -191,7 +156,6 @@ export class SchedulerRuntime {
 
   deleteTask(id: string): boolean {
     const deleted = this.tasks.delete(id)
-    if (deleted) this.queuedInDeliveryAt.delete(id)
     if (deleted) {
       this.appendEntrySafe({ op: 'delete', taskId: id })
     }
@@ -271,7 +235,6 @@ export class SchedulerRuntime {
     for (const [id, task] of this.tasks) {
       if (task.expiresAt && now >= task.expiresAt) {
         this.tasks.delete(id)
-        this.queuedInDeliveryAt.delete(id)
         this.appendEntrySafe({ op: 'delete', taskId: id })
       }
     }
@@ -297,25 +260,20 @@ export class SchedulerRuntime {
 
     // W2：tick 完成后刷新 widget（index.ts 注册 refreshWidget）
     this.onAfterTickCallback?.()
-
-    // delivery flush：park 模式下内核不主动重试，由 scheduler tick 外部触发 flush
-    // 让积压在队列中的消息在每个 tick 尝试投递
-    this.delivery?.flush()
   }
 
   // ── dispatch ──
 
   /**
-   * dispatch 单个任务。返回 true 表示真的发送了 message（force 直投）或已入队（非 force
-   * 经 delivery），false 表示 no-op（task disabled / 已有同任务在途 / rate-limited /
-   * 同任务入队已在 TTL 窗口内）。
+   * dispatch 单个任务。返回 true 表示消息已发出（pi.sendMessage 受理），false 表示
+   * no-op（task disabled / 已有同任务在途 / rate-limited）。
    *
    * R3-S1 in-flight 守卫：tick 为 fire-and-forget，若 tick1 的 `await backend.sendMessage`
    * 挂起超过 TICK_INTERVAL_MS（如 pi 卡死），tick2 的 step2 会再标 pending、step3 对同一
-   * task 并发第二个 dispatch → 同一 prompt 双注入（force 任务绕过 isIdle gate 直接受影响）。
-   * 参照 subagent-workflow resumesInFlight 模式：入口同步置位、finally 清除（覆盖 gate /
-   * rate-limit / sendMessage 抛错 / 成功推进全部退出路径）；命中时 skip 本轮并 warn
-   * （不 throw——tick 继续处理其他任务，本任务 pending 保留到下轮重试）。
+   * task 并发第二个 dispatch → 同一 prompt 双注入。参照 subagent-workflow resumesInFlight
+   * 模式：入口同步置位、finally 清除（覆盖 gate / rate-limit / sendMessage 抛错 / 成功推进
+   * 全部退出路径）；命中时 skip 本轮并 warn（不 throw——tick 继续处理其他任务，本任务
+   * pending 保留到下轮重试）。
    */
   async dispatchTask(task: ScheduledTask): Promise<boolean> {
     if (!task.enabled) return false
@@ -334,7 +292,13 @@ export class SchedulerRuntime {
   /**
    * dispatch 本体（dispatchTask 守卫置位后执行；runTaskNow 与 tick step3 共用入口，
    * 手动 run-now 与挂起中的 tick dispatch 并发时同样被守卫拦截）。
-   * sendMessage 抛错时记录 failed 状态但不 rethrow，让 tick 继续处理其他任务。
+   * steer 直投（scheduler-steer-direct-dispatch 设计）：{deliverAs:'steer', triggerTurn:true}
+   * 在 pi 侧的两分支——busy 时 steer 插入当前 turn（立即被模型看到）、idle 时开新 turn。
+   * 受理即记账：pi extension API sendMessage 是 fire-and-forget（返回 void，错误走
+   * pi 内部 emitError 通道），await 立即通过，无「入队未终态」窗口——nextRunAt 调用即推进，
+   * tick 不重标 pending，无需防重标记。
+   * sendMessage 抛错（同步异常，session 关闭等）时记录 failed 状态但不 rethrow，
+   * 让 tick 继续处理其他任务。
    *
    * 持久化（append-only）：recurring 成功推进 nextRunAt → append advance（status='success' CL8）；
    * once 成功 → append delete。失败 dispatch 不 append（CL7 重试语义，transient 失败 nextRunAt 未推进）。
@@ -343,31 +307,10 @@ export class SchedulerRuntime {
     // 检查速率限制
     if (!this.hasDispatchCapacity(this.backend.now())) return false
 
-    if (task.force) {
-      // force 任务直投（绕过内核队列）。L4（ext-simplify-08）：`|| !this.delivery` 无 handle
-      // 直投分支已删——生产装配（index.ts session_start）无条件注入 delivery，该分支生产死；
-      // 「force 直投」是 dispatchDirect 的唯一入口，装配契约由 index-generation.test.ts 锚定
-      return this.dispatchDirect(task)
-    }
-
-    // 已在内核队列中（入队后未终态且未过 TTL）——step2 会按未推进的 nextRunAt 重新置
-    // pending，此处拦截防重复入队（见 queuedInDeliveryAt 字段注释）
-    const queuedAt = this.queuedInDeliveryAt.get(task.id)
-    if (queuedAt !== undefined && this.backend.now() - queuedAt < QUEUE_DEDUPE_TTL_MS) return false
-
-    // 非 force 任务走 delivery 内核（park 模式：busy 入队等下次 tick flush）
-    return this.dispatchViaDelivery(task)
-  }
-
-  /**
-   * force 任务直投：绕过 delivery 内核队列，直接调 backend.sendMessage（L4 后唯一入口——
-   * 仅 task.force 触达，idle/busy 判定已全部移交 delivery 内核）。
-   */
-  private async dispatchDirect(task: ScheduledTask): Promise<boolean> {
     try {
       await this.backend.sendMessage(
         { content: task.prompt, customType: 'pi-scheduler:dispatched', display: true },
-        { deliverAs: 'followUp', triggerTurn: true },
+        { deliverAs: 'steer', triggerTurn: true },
       )
     } catch {
       task.lastStatus = 'failed'
@@ -380,44 +323,9 @@ export class SchedulerRuntime {
   }
 
   /**
-   * 非 force 任务走 delivery 内核：入队后由内核 flush 时投递。
-   * gate（isIdle/hasPendingMessages）由内核管理，busy 时入队不重试（park 模式）。
-   * onSettled 回调处理成功/失败记账。
-   * 返回 true 表示已入队（非实际发送）。
+   * dispatch 成功后的状态更新与持久化（dispatchTaskInner 受理成功后调用）。
    */
-  private dispatchViaDelivery(task: ScheduledTask): boolean {
-    // 非 force 路径必经 delivery：装配点无条件注入（L4 后无 handle 降级路径——装配缺漏
-    // 属装配 bug，由 index-generation.test.ts 装配断言拦截；缺省构造仅用于 force/记账路径单测）
-    const delivery = this.delivery!
-
-    delivery.send({
-      payload: {
-        kind: 'custom',
-        customType: 'pi-scheduler:dispatched',
-        content: task.prompt,
-        display: true,
-      },
-      intent: 'after-run',
-      // #11：task.id 作为 onSettled 反查键（本 handle 未开 dedupe，dedupeKey 不驱动
-      // 去重，仅随消息透传给 onSettled 回调）。content 反查在同 prompt 多任务下错配。
-      dedupeKey: task.id,
-    })
-
-    // send() 不 throw（park 模式下入队即返回）。
-    // 入队即挂防重标记 + 计入速率限制（nextRunAt 要等 delivered 后才推进，期间 step2
-    // 会持续重标 pending——防重标记拦截重复入队，速率记账覆盖入队侧消耗）。
-    // 成功/失败记账由 onSettled 回调异步处理。
-    this.queuedInDeliveryAt.set(task.id, this.backend.now())
-    this.dispatchTimestamps.push(this.backend.now())
-    task.pending = false
-    return true
-  }
-
-  /**
-   * dispatch 成功后的状态更新与持久化（dispatchDirect 成功后、onSettled delivered 后共用）。
-   * countRate=false 时不再计速率（delivery 路径入队时已计入，delivered 再计会双算）。
-   */
-  private async onDispatchSuccess(task: ScheduledTask, countRate = true): Promise<boolean> {
+  private async onDispatchSuccess(task: ScheduledTask): Promise<boolean> {
     const now = this.backend.now()
     task.runCount++
     task.lastRunAt = now
@@ -448,37 +356,8 @@ export class SchedulerRuntime {
       }
     }
 
-    if (countRate) this.dispatchTimestamps.push(now)
+    this.dispatchTimestamps.push(now)
     return true
-  }
-
-  /**
-   * onSettled 回调入口（index.ts 装配点绑定）：delivery 内核投递终态时调用
-   * （内核 per-message 终态：批次内每条各回调一次，msg 为该条原始消息而非 composed
-   * 合批消息——ext-simplify-08 D1/B1，与 session-delivery delivery.ts 口径一致）。
-   * delivered → 成功记账（onDispatchSuccess）；rejected → 失败记账。
-   * once 任务失败不删持久化（at-least-once 语义）。
-   * #11：按 msg.dedupeKey（dispatch 时挂的 task.id，见 dispatchViaDelivery）精确反查
-   * tasks Map——旧 content 反查在「同 prompt 多任务」下错配（find 取首个命中），
-   * 任务已删除时静默丢弃不误记。反查未命中（once 成功已删 / 非 scheduler 消息）直接返回。
-   */
-  handleSettled(msg: DeliveryMessage, outcome: 'delivered' | 'rejected'): void {
-    const taskId = msg.dedupeKey
-    // 防重标记先清（任务可能已被删除，反查未命中也要清）
-    if (taskId !== undefined) this.queuedInDeliveryAt.delete(taskId)
-    const task = taskId !== undefined ? this.tasks.get(taskId) : undefined
-    if (!task) return // 任务已被删除（once 成功后删）或非 scheduler 发出的消息
-
-    if (outcome === 'delivered') {
-      // fire-and-forget：onDispatchSuccess 内部 catch 不 rethrow（countRate=false：入队时已计速率）
-      void this.onDispatchSuccess(task, false).catch(() => {})
-    } else {
-      // 失败记账
-      task.lastStatus = 'failed'
-      task.history.push({ at: this.backend.now(), status: 'failed' })
-      if (task.history.length > HISTORY_LIMIT) task.history.shift()
-      // once 任务失败不删持久化（at-least-once 语义）
-    }
   }
 
   private hasDispatchCapacity(now: number): boolean {
