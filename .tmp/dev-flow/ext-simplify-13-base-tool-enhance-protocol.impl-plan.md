@@ -1,6 +1,6 @@
 # ext-simplify-13 实施计划
 
-基线: 08ce984d7 | 来源设计: docs/design/ext-simplify-13-base-tool-enhance-protocol.md (v2.2) | 日期: 2026-09-14
+基线: 08ce984d7 | 来源设计: docs/design/ext-simplify-13-base-tool-enhance-protocol.md (v2.3) | 日期: 2026-09-14
 
 ## 0 章节映射
 
@@ -69,7 +69,7 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 
 ## 5 合理偏差登记表
 
-（空——实施中填充）
+> 实施偏差全程记录于 §7 变更历史（u1 serializeRegistryFile 补导出 / write-fail warn 留锁壳层 / onFallback 稳定 step 标识符 / pgrep 诊断归一 / u2 契约常量走 index 出口教训（误从子出口取致 vite 下 undefined、LRU 失效 19 红——子出口仅聚合行为原语）/ kill-tree 消费点实为 5 处 / u3 编排层保留 + registry 原语体薄壳化 / 日志 event+detail 通道等价适配 / 批次 1-3 与微修复各条），不在此重复。
 
 ## 6 状态表
 
@@ -95,3 +95,4 @@ u2/u3/u4/u5 领地互斥可并行（并发 ≤5 内全派）；验收 V3（双�
 - 2026-09-14（阶段 4 收敛）：定向复审三节结论——批次1 pass（mock 打点实缝验证，四段齐全强度≥基线，178/178）；批次2 pass（diff -w 零语义，hint 四句与收殓触发面实存吻合）；批次3 medium 1 条（index.ts:19 文件头漏扫）+ low/observation 各 1——微修复批次已落地并提交（32/233/178 绿，grep 零残留）。阶段 4 一轮修复 + 一轮定向复审 + 一轮微修收敛，0 未决 finding（epoch 范围观察已顺带强化）。转入阶段 5。
 - 2026-09-14（阶段 5）：验收 V1-V6 结果——**V1 PASS**（孤儿+僵尸 register → 孤儿终态后 resume，对账按 running+pid 判死分支补写；JSONL entry data 逐字段 {id,reason:cancelled,status:cancelled}；pending_notifications list 该任务非 active；日志 reconciled:1。诚实注记：孤儿仍活时对账 D12 保守 skip 为设计内行为，生产前提由 runtime reaper 提供）；**V2 PASS**（task_id 即时返回；bash_output 返回含 output 字段=LLM 契约保持；tail 口径字节级精确 51252B/1719 行 truncated=true 残首丢弃；bash_kill 后 detached 组整组消亡）；**V3 PASS**（触发面 A：pi kill -9 即收殓 orphaned；触发面 B：整树 -9 后重启 startup full scan killed=1 stdout 实证；桌面两段式 kill → exited/reason=killed，D6-en 握手成功；corrupt 场景 quarantined 措辞双侧落盘取证——runtime stdout+日志文件行号、bte 侧经 pi CLI 探针同代码链）；**V4 PASS**（bte 写侧/runtime 写侧 registry 双文件字节形态同构：version=1/indent2/尾换行/共享字段序一致；protocol readRegistry 双读零 corrupt；legacy 最小格式兼容 + trim 可处理）；**V5 PASS（TUI 腿 BLOCKED 按设计预设降级）**（桌面组件渲染/goal 清除/TUI marker 负面 grep absent；TUI 完整链路因环境级 headless LLM 不通受阻，P3 helpers.test 单测负面断言兜底 + 桌面组补 GUI 正断言）；**V6 PASS**（纯 CLI 只装 bte 全流程可用，对账 no-op 不报错，D16 optional 保持）。清理由两组验收 agent 确认（进程 PID 级、临时目录、留证件迁移）。
 - 覆盖矩阵备注：V5-TUI 的环境限制与降级已登记；V3-corrupt 的 bte 腿经 pi CLI 探针（桌面内 runtime watch 2s 确定性先行，无法让 bte 先读 corrupt 文件）——机制链同代码，偏差已披露。
+- 2026-09-14（阶段 6 终态同步）：审查四条关系过（除下述 findings）。must-fix 1：ext-simplify-01 :202 对账说明未落地——已补（其附录 A 白名单表后追加 E10/D4 对账块：注释措辞已修正、customType 字符串承诺不变）；suggestion 3：本表头部版本指针 v2.2→v2.3 已更正、§5 空声明改为 §7 指针、base-tool-enhance.md :333 的 pending index 行号指针去行号化（「unregister 落盘形态」文字锚点，消再漂移面）；info 1（reaper.ts 历史出处标记口径）：**显式不补**——审查自评豁免类（前 epoch 历史出处表述，非现存口径），不构成错误，登记为已接受。修复后 13 流水线交付完成。
