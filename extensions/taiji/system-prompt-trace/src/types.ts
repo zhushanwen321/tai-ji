@@ -5,6 +5,7 @@
  * 数据形状见 SystemPromptTraceEntryData。
  */
 
+import { isRecord } from "@zhushanwen/pi-ext-guards";
 import type { SessionStartEvent } from "@earendil-works/pi-coding-agent";
 
 /** 留痕 entry 的 customType（xyz: 前缀 = xyz-agent 自定义命名空间）。 */
@@ -44,11 +45,6 @@ export interface PromptBaseline {
  */
 export interface SwitchStash {
 	pending: PromptBaseline | null;
-}
-
-/** 运行时类型 guard（taste/no-unsafe-cast：断言必须有运行时 guard，这里干脆不用断言）。 */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 /** 留痕 entry data 的运行时 guard（读 JSONL / 测试断言复用）。 */

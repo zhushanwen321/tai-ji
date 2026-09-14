@@ -12,7 +12,9 @@
 
 import { readFileSync } from "node:fs";
 
-import { isRecord, isSystemPromptTraceEntryData, SYSTEM_PROMPT_CUSTOM_TYPE } from "./types.js";
+import { isRecord } from "@zhushanwen/pi-ext-guards";
+
+import { isSystemPromptTraceEntryData, SYSTEM_PROMPT_CUSTOM_TYPE } from "./types.js";
 import type { PromptBaseline } from "./types.js";
 
 /**
