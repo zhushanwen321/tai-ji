@@ -4,6 +4,8 @@
  * 锁定 deleteSession 的两个修复：
  * - S3：删除时调 fileTree.clearSession(id) + useChat.disposeSession(id)
  * - S4：删 active 后 selectSession(next) 失败时 fallback 到 navigation.push({ view: 'chat' })
+ * - [G1 / 2026-09-14 内存审计 §3.4] U-G1：三 Map 分区（terminal 写队列 / slash 命令历史 /
+ *   fork 通知 feed）在 cleanupSessionState 后清理（真实例行为断言）
  *
  * 运行：npx vitest run src/__tests__/useSidebar-delete-cleanup.test.ts
  */
@@ -46,10 +48,33 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   },
 }))
 
+// ── mock useCommandStore 壳单例：真实 core createCommandStore + 内存 KV（G1 断言需要真实
+//    Map 分区行为；不走真实壳单例——其 getPlatform() 依赖 AppShell providePlatform 时序，
+//    测试环境未注入会 fail-fast 抛错）──
+vi.mock('@/composables/features/command/useCommandStore', async () => {
+  const { createCommandStore } = await import('@xyz-agent/core')
+  const kv = new Map<string, string>()
+  const storage = {
+    get: async (key: string) => kv.get(key) ?? null,
+    set: async (key: string, value: string) => { kv.set(key, value) },
+  }
+  let instance: ReturnType<typeof createCommandStore> | null = null
+  return {
+    useCommandStore: () => {
+      if (!instance) instance = createCommandStore(storage)
+      return instance
+    },
+    __resetCommandStoreForTesting: () => { instance = null },
+  }
+})
+
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
+import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
+import { useCommandStore } from '@/composables/features/command/useCommandStore'
+import { useForkNoticeFeed, pushForkNoticeAsk, resetForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import { registerSessionCleanup, __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 
 function makeSummary(id: string): SessionSummary {
@@ -69,6 +94,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   removeMock.mockResolvedValue(undefined)
   switchSessionMock.mockResolvedValue(undefined)
+  // G1：fork feed 模块级状态隔离（同 use-fork-branch-notify.test.ts 范式）
+  resetForkNoticeFeed()
 })
 
 describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
@@ -84,6 +111,45 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     expect(removeMock).toHaveBeenCalledWith('s1')
     expect(clearSessionMock).toHaveBeenCalledWith('s1')
     expect(useChatDisposeMock).toHaveBeenCalledWith('s1')
+
+    scope.stop()
+  })
+
+  it('U-G1: deleteSession 释放三 Map 分区——terminal 写队列 / slash 命令历史 / fork 通知 feed（真实例）', async () => {
+    // [G1 / 2026-09-14 内存审计 §3.4] 三个清理 API 此前全仓零调用——已删 session 的
+    // per-session Map 分区永久残留。本用例用真实模块实例（terminal 队列 pinia store /
+    // core command store / fork feed 模块单例）锁定 deleteSession → cleanupSessionState
+    // → 三 hook 接线的端到端分区释放，且相邻 session 分区不受误伤。
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions(sidebar, ['s1', 's2'])
+
+    // seed 三分区（s1 + 相邻 s2 对照）
+    const terminalQueue = useTerminalWriteQueueStore()
+    terminalQueue.markAlive('s1')
+    terminalQueue.markAlive('s2')
+    const commands = useCommandStore()
+    commands.applyCommands('s1', [{ name: '/compact', source: 'builtin' }])
+    commands.applyCommands('s2', [{ name: '/goal', source: 'builtin' }])
+    pushForkNoticeAsk('s1', 'n1', '提问预览')
+    pushForkNoticeAsk('s2', 'n2', '相邻分支预览')
+    const feed = useForkNoticeFeed()
+    // 前置：seed 生效（防假绿——断言前确认三分区非空）
+    expect(terminalQueue.isPtyAlive('s1')).toBe(true)
+    expect(commands.getCommands('s1')).toHaveLength(1)
+    expect(feed.notices('s1')).toHaveLength(1)
+
+    await sidebar.deleteSession('s1')
+
+    // s1 三分区归零：terminal 写队列（removeSession——isPtyAlive 回落 false 佐证条目已删）、
+    // slash 命令历史（clearCommands）、fork 通知 feed（clearSession）
+    expect(terminalQueue.isPtyAlive('s1')).toBe(false)
+    expect(commands.getCommands('s1')).toHaveLength(0)
+    expect(feed.notices('s1')).toHaveLength(0)
+    // 相邻 session 分区不受误伤
+    expect(terminalQueue.isPtyAlive('s2')).toBe(true)
+    expect(commands.getCommands('s2')).toHaveLength(1)
+    expect(feed.notices('s2')).toHaveLength(1)
 
     scope.stop()
   })

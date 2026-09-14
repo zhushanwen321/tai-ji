@@ -31,6 +31,7 @@ function makeHooks(log: string[]): SessionCleanupHooks & Record<string, ReturnTy
     'clearFileTree', 'clearSubagent', 'clearWorkflow',
     'clearExtensionUI', 'clearExtensionHost', 'evictChat', 'evictVirtualKeys',
     'clearAgentCallMapping', 'disposeChat', 'invalidateStatus', 'browserDestroy',
+    'clearTerminalQueue', 'clearSlashCommands', 'clearForkNotices',
   ] as const
   const hooks = {} as SessionCleanupHooks & Record<string, ReturnType<typeof vi.fn>>
   for (const n of names) {
@@ -351,7 +352,7 @@ describe('deleteSession', () => {
     resetSessionListSubForTest()
   })
 
-  it('TC-4 S3 全 hooks 调用序：panel 解绑→removeFromList→11 hooks（含 B4 browserDestroy）→triggerSessionCleanups', async () => {
+  it('TC-4 S3 全 hooks 调用序：panel 解绑→removeFromList→11 必选 + G1 可选 3 hooks→triggerSessionCleanups', async () => {
     const f = makeFixture()
     seed(f.store, [{ cwd: '/a', sessions: [summary('del')] }])
     f.store.activeId.value = 'del'
@@ -365,16 +366,37 @@ describe('deleteSession', () => {
     expect(f.store.list.value).toHaveLength(0)
     // 删 active 后列表空 → push chat 空态
     expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat' })
-    // S3 全序（log 数组精确顺序断言）；末位 browserDestroy = B4 main 侧 WebContentsView 销毁接线
+    // S3 全序（log 数组精确顺序断言）；末位 browserDestroy = B4 main 侧 WebContentsView 销毁接线，
+    // 尾部 G1 三钩子 = 死清理 API 接线组（terminal 写队列 / slash 命令 / fork 通知 feed 分区）
     const expectedOrder = [
       'clearFileTree(del)', 'clearSubagent(del)', 'clearWorkflow(del)',
       'clearExtensionUI(del)', 'clearExtensionHost(del)', 'evictChat(del)',
       'evictVirtualKeys(del)', 'clearAgentCallMapping(del)', 'disposeChat(del)', 'invalidateStatus(del)',
       'browserDestroy(del)',
+      'clearTerminalQueue(del)', 'clearSlashCommands(del)', 'clearForkNotices(del)',
     ]
     expect(f.log).toEqual(expectedOrder)
     // M1-03：extension-host 分区清理钩子被调用（壳层实现 emit session-destroyed）
     expect(f.hooks.clearExtensionHost).toHaveBeenCalledWith('del')
+    f.dispose()
+  })
+
+  it('TC-4b G1 可选 hook 缺省容忍：不注入 clearTerminalQueue/clearSlashCommands/clearForkNotices 时删除链不炸', async () => {
+    // [G1 / 2026-09-14 内存审计 §3.4] 三 hook 为可选成员（旧实现零破坏）——编排点 ?.
+    // 调用，未注入即跳过（headless 形态 / 渐进接线期）。到类型层：仅必选 11 项即满足接口。
+    const f = makeFixture()
+    delete (f.hooks as Record<string, unknown>).clearTerminalQueue
+    delete (f.hooks as Record<string, unknown>).clearSlashCommands
+    delete (f.hooks as Record<string, unknown>).clearForkNotices
+    seed(f.store, [{ cwd: '/a', sessions: [summary('del')] }])
+    f.store.activeId.value = 'del'
+
+    await expect(f.session.deleteSession('del')).resolves.toBeUndefined()
+
+    // 删除链照常完成（removeFromList + 必选钩子不受可选缺省影响）
+    expect(f.store.list.value).toHaveLength(0)
+    expect(f.hooks.browserDestroy).toHaveBeenCalledWith('del')
+    expect(f.log).not.toContain('clearTerminalQueue(del)')
     f.dispose()
   })
 
@@ -407,6 +429,10 @@ describe('deleteSession', () => {
     expect(f.hooks.disposeChat).toHaveBeenCalledWith('b')
     // B4：非 active 删除同样触发 browserDestroy（与 store 分区清理同生命周期）
     expect(f.hooks.browserDestroy).toHaveBeenCalledWith('b')
+    // G1：非 active 删除同样触发三可选钩子（terminal/slash/fork 分区同生命周期释放）
+    expect(f.hooks.clearTerminalQueue).toHaveBeenCalledWith('b')
+    expect(f.hooks.clearSlashCommands).toHaveBeenCalledWith('b')
+    expect(f.hooks.clearForkNotices).toHaveBeenCalledWith('b')
     f.dispose()
   })
 
@@ -473,6 +499,10 @@ describe('deleteFolder', () => {
     expect(f.hooks.browserDestroy).toHaveBeenCalledTimes(2)
     expect(f.hooks.browserDestroy).toHaveBeenCalledWith('a1')
     expect(f.hooks.browserDestroy).toHaveBeenCalledWith('a2')
+    // G1：folder 批量删除逐 session 触发三可选钩子（同 cleanupSessionState 复用路径）
+    expect(f.hooks.clearTerminalQueue).toHaveBeenCalledTimes(2)
+    expect(f.hooks.clearSlashCommands).toHaveBeenCalledWith('a1')
+    expect(f.hooks.clearForkNotices).toHaveBeenCalledWith('a2')
     // activeId 回退到列表首项 'b1'，selectSession 衔接
     expect(f.store.activeId.value).toBe('b1')
     expect(f.api.switchSession).toHaveBeenCalledWith('b1')

@@ -35,7 +35,8 @@ export interface TerminalWriteQueue {
   enqueueWrite(sid: string, cmd: string): void
   /** 查询 PTY 存活态（TerminalView 工具栏 kill 按钮 disabled 判断用）。 */
   isPtyAlive(sid: string): boolean
-  /** session 销毁时清理（session 销毁编排点调）。 */
+  /** session 销毁时清理（session 销毁编排点调：SessionCleanupHooks.clearTerminalQueue → 壳层
+   *  useTerminalWriteQueueStore().removeSession，[G1 / 2026-09-14 内存审计 §3.4] 接线）。 */
   removeSession(sid: string): void
 }
 

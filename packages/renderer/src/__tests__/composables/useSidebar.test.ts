@@ -90,6 +90,17 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 }))
 // ── useFileTree mock（loadTree fire-forget spy）──
 vi.mock('@/composables/features/file-tree/useFileTree', () => ({ useFileTree: vi.fn(() => ({ loadTree: mocks.loadTree })) }))
+// ── useCommandStore 壳单例 mock（[G1] clearSlashCommands hook 接线后 deleteSession 会取
+//    commandStore.clearCommands；真实壳单例依赖 AppShell providePlatform 时序，测试未注入
+//    会 fail-fast 抛错。原「registerAppCommands 不需 mock」注释随之修正——本文件 initApp
+//    不跑，mock 不影响覆盖面）──
+vi.mock('@/composables/features/command/useCommandStore', () => ({
+  useCommandStore: () => ({
+    appCommands: { value: [] },
+    shortcutOverrides: { value: {} },
+    clearCommands: vi.fn(),
+  }),
+}))
 // ── useNewTaskFlow mock（isActive/cancelFlow/startFlow/currentSession controllable）──
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: vi.fn(() => ({
