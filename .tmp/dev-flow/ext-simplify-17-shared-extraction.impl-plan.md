@@ -117,7 +117,7 @@ graph TD
 
 | 偏差 | 定性 | 处置 |
 |------|------|------|
-| spawn-args 白名单落点漂移至 packages/pi-rpc/src/types.ts:37（U1 归并所致，设计写于分叉期） | 合理（设计 §0 基线声明预见行号漂移；漂移实锤六值缺 xhigh 在合流基线复核实锤不变） | D5 配套（原 spawn-args 项）落点更新为 pi-rpc（u8）；阶段 6 design-code-sync 回写设计文档 |
+| spawn-args 白名单落点漂移至 packages/pi-rpc/src/types.ts:39（U1 归并所致，设计写于分叉期） | 合理（设计 §0 基线声明预见行号漂移；漂移实锤六值缺 xhigh 在合流基线复核实锤不变） | D5 配套（原 spawn-args 项）落点更新为 pi-rpc（u8）；阶段 6 design-code-sync 回写设计文档（已回写，R1 F3） |
 | extension-dependencies.json 位置 = 仓库根（设计语境「bte 的 json」易读作包内文件） | 合理（文件本就统一在根，非漂移） | u3/u5/u13 领地已按根 json 写明 |
 | 设计 §6 group-b/A 侧批次分工失效（两分支已合入 dev-0.9.21） | 合理（index 已记录裁决） | 全单元当前 worktree 实施；批次语义仅保留于 changeset 登记节奏 |
 | D13 truncateCodePoints 签名 3 参 → 5 参（u5 实施发现） | 合理（previewText 300/200/100 是 15 号 §6.4 D4 裁决的三个独立契约数字，判定阈值 ≠ head 长度，3 参无法零变化覆盖双段形态；head/keepTail 以可选默认参表达，单段调用点形态不变，e2e 双维护契约逐字节一致已验证） | 阶段 6 design-code-sync 回写设计 D13 示意签名 |
@@ -157,7 +157,7 @@ graph TD
 
 **残留风险**（阶段 6 终态清账 20260914：0/2/3/4/5 已全部闭合，仅 1 持续有效）：
 
-0. ~~commit 窗口冲突~~ **已闭合**：并行波次全部结束，对策随流水线完成失效（阶段 3 曾两例实测，记录于变更历史 v3/v4）。
+0. ~~commit 窗口冲突~~ **已闭合**：并行波次全部结束，对策随流水线完成失效（两例实测记录见本条目划线原文——u4/u12/u5 编码单元中间态，属阶段 2）。
 1. **行号漂移面（持续有效）**：设计全部 [A/B 基线] 行号在合流基线上仅供方向参考，单元验收一律 grep 符号定位（§0 校准已声明）。
 2. ~~D4 探针证伪路径~~ **已闭合**：探针证实（u0），u16 已执行，SDK env.ts 注释清扫随 9a6c2c86b 完成（env.ts:72-73 实读确认），证伪分支未触发。
 3. ~~词表脚本降级~~ **已闭合**：未降级——脚本已接入 pre-commit（install-hooks.sh:1317 按路径触发）并登记 C-build-10。
@@ -174,3 +174,4 @@ graph TD
 - 2026-09-14 v6：阶段 3 审查闭环——3 区报告聚合（区 1：1 unreasonable 低 + 3 doc_errors；区 2：2 unreasonable P2 计划层遗漏 + 3 doc_errors；区 3：changeset 漏列 8 包 + 3 doc_errors）→ 修复批 2 组并行（A plugin-bridge isRecord / B smart-context D6 + subagent-core 互指注释）+ changeset 补列 15 包 + 设计文档 5 处勘误主 agent 亲改 → 定向复审 PASS（P3 ×3 顺手清）→ **审查清零 commit 057696113**。阶段 5 入口门四条过（V1-V6 已随单元闭合），V7/V8 真机验收并行派发。
 - 2026-09-14 v7：**V8 真机验收 PASS**（报告 .tmp/dev-flow/ext-simplify-17-v8-acceptance.md——thinking 传递 reasoning=65/70 实据 + xhigh 词表不误拒；模型恢复 ref≠主模型区分验证；非阻塞发现：thinking on 时 rename 标题空 = 产品固有 maxTokens 64 预算问题，三段证据归因非迁移回归，登记待产品裁决）。V7 in-flight。
 - 2026-09-14 v8：**V7 真机验收四项全 PASS**（报告 .tmp/dev-flow/ext-simplify-17-v7-acceptance.md——session-manager raw 透传 / plugin-bridge JSON 消费 / 非 JSON→isError+留痕三段证据含 patch 还原零残留 / inflight 零告警反证；登记既有发现 3 条：dev 数据目录钉死（C-dev-01 在 Electron 层失效，TROUBLESHOOTING §15）/ 插件冷启动广播丢失 / stale-ctx 重试噪音）。**V1-V8 验收全绿，阶段 5 收尾**：文档资产同步 = constraints.json C-build-10（词表守卫登记，validate 过）+ CONTEXT.md Marker RPC 词条 + TROUBLESHOOTING §15 + index 17 号终态与债务清账；PRODUCT/ARCHITECTURE/DESIGN/STANDARDS/TEST-STRATEGY 零触发（纯内部重构与缺陷恢复，无产品边界/拓扑/视觉/规范/策略变化）；FEATURE-PRIORITIES 零触发（3 处微变均为恢复性修复，挂掉后果分级依据不变）。
+- 2026-09-14 v9（阶段 6 design-code-sync 终态同步闭环）：终态全量复跑 EXIT=0（gate-a-final.log）+ R1 审查 9 findings（2 must + 6 sug + 1 info，代码零偏离，全部文档/台账滞后）当轮全修 a5002e582 → R2 聚焦复审 9/9 修复成立 + must-fix=0 **循环终止**，新差 S1/S2/I1 当轮清扫。收敛轨迹 R1=2/6/1/0 → R2=0/2/1/0；direction 分布 8 code-right 改文档/台账 + 1 注释修正。Step 5 退役判定：退役 0 / 保留 1（设计文档 = C-build-10 权威源与 index 引用的现行依据）。**流水线整体交付完成。**
