@@ -25,8 +25,8 @@ import { useTurnElapsed } from '../composables/useTurnElapsed'
 /** 测试起点系统时间（任意固定值） */
 const T0 = 1_000_000
 
-function makeAssistant(timestamp: number): Message {
-  return { id: 'a-1', role: 'assistant', content: 'text', status: 'streaming', timestamp }
+function makeAssistant(timestamp: number, content: Message['content'] = 'text', id = 'a-1'): Message {
+  return { id, role: 'assistant', content, status: 'streaming', timestamp }
 }
 
 /** mock document.hidden / visibilityState（happy-dom 下 spyOn getter 生效） */
@@ -46,15 +46,16 @@ function fireVisibilityChange(): void {
  */
 function mountElapsed(assistants: Message[], isStreamingInitial: boolean) {
   const streaming = ref(isStreamingInitial)
-  const exposed = {} as { elapsed: Ref<string>; elapsedSecs: Ref<number> }
+  const exposed = {} as { elapsed: Ref<string>; elapsedSecs: Ref<number>; generatedChars: Ref<number> }
   const Host = defineComponent({
     setup() {
-      const { elapsed, elapsedSecs } = useTurnElapsed(
+      const { elapsed, elapsedSecs, generatedChars } = useTurnElapsed(
         () => assistants,
         () => streaming.value,
       )
       exposed.elapsed = elapsed
       exposed.elapsedSecs = elapsedSecs
+      exposed.generatedChars = generatedChars
       return () => null
     },
   })
@@ -203,6 +204,90 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     await nextTick()
     expect(addedCount()).toBe(2)
     expect(removedCount()).toBe(2)
+    wrapper.unmount()
+  })
+})
+
+// ═════════════════════════════════════════════════════════════
+// u3 remove-turn-progress-bar：generatedChars（设计 §2.1）
+//
+// 口径 = Σ normalizeContent(turn.assistants[].content).length（跨 assistant 段整段计入）。
+// 节拍 = 挂载算一次 / streaming 每秒重算（与 elapsed 同一 interval tick）/ 停表定格一次；
+// 性能纪律 = 不随 delta 重算（绝不在内容 watcher 里算）。失焦停 tick / 恢复补算对齐 elapsed。
+// ═════════════════════════════════════════════════════════════
+describe('useTurnElapsed generatedChars（u3 remove-turn-progress-bar）', () => {
+  it('Σ 口径含多 assistant 段：text→tool→text 跨段整段累计，Segment[] content 经 normalizeContent 归一化', () => {
+    // 三 assistant：'abc'(3) + Segment[] text 'de'(2) + 'f'(1) = 6（旧观测条同口径：
+    // 同函数 normalizeContent，非仅末段）；挂载即算（完成态定格一次）
+    const assistants = [
+      makeAssistant(T0, 'abc', 'a-1'),
+      makeAssistant(T0 + 1000, [{ type: 'text', text: 'de' }], 'a-2'),
+      makeAssistant(T0 + 2000, 'f', 'a-3'),
+    ]
+    const { wrapper, exposed } = mountElapsed(assistants, false)
+    expect(exposed.generatedChars.value).toBe(6)
+    wrapper.unmount()
+  })
+
+  it('streaming 秒级增长：同一 interval tick 后重算，两次 tick 之间内容增长不反映（不随 delta 重算）', () => {
+    const assistants = [makeAssistant(T0, 'a')]
+    const { wrapper, exposed } = mountElapsed(assistants, true)
+    expect(exposed.generatedChars.value).toBe(1)
+
+    // 内容增长（getter 每次拉取最新数组，无需响应式）：下一个 tick 之前不计入
+    assistants[0] = { ...assistants[0], content: 'abc' }
+    expect(exposed.generatedChars.value).toBe(1) // 未到 tick：性能纪律（不在内容变化点算）
+
+    vi.advanceTimersByTime(1000) // 一次 tick
+    expect(exposed.generatedChars.value).toBe(3)
+    wrapper.unmount()
+  })
+
+  it('停表定格：isStreaming true→false 重算一次读到权威内容，之后内容再变不跟随', async () => {
+    const assistants = [makeAssistant(T0, 'abc')]
+    const { wrapper, exposed, streaming } = mountElapsed(assistants, true)
+    expect(exposed.generatedChars.value).toBe(3)
+
+    streaming.value = false
+    await nextTick() // 停表定格重算一次
+    expect(exposed.generatedChars.value).toBe(3)
+
+    // 定格后内容再变（完成态权威覆盖等）：无 tick、无 watcher，值不随内容漂移
+    assistants[0] = { ...assistants[0], content: 'abcdef' }
+    vi.advanceTimersByTime(5000)
+    expect(exposed.generatedChars.value).toBe(3)
+    wrapper.unmount()
+  })
+
+  it('零字符：空 assistants / 空内容均 0（v-if chars>0 不渲染的上游口径）', () => {
+    const { wrapper, exposed } = mountElapsed([], true)
+    expect(exposed.generatedChars.value).toBe(0)
+    wrapper.unmount()
+
+    const assistants = [makeAssistant(T0, '')]
+    const { wrapper: w2, exposed: e2 } = mountElapsed(assistants, true)
+    expect(e2.generatedChars.value).toBe(0)
+    w2.unmount()
+  })
+
+  it('失焦停 tick / 恢复补算语义对齐 elapsed：失焦期内容增长不反映，恢复可见立即补算并重启 tick', () => {
+    const assistants = [makeAssistant(T0, 'ab')]
+    const { wrapper, exposed } = mountElapsed(assistants, true)
+    expect(exposed.generatedChars.value).toBe(2)
+
+    setHidden(true)
+    fireVisibilityChange()
+    assistants[0] = { ...assistants[0], content: 'abcd' }
+    vi.advanceTimersByTime(5000)
+    expect(exposed.generatedChars.value).toBe(2) // 失焦：tick 已停不重算
+
+    setHidden(false)
+    fireVisibilityChange()
+    expect(exposed.generatedChars.value).toBe(4) // 恢复：一次补算
+
+    assistants[0] = { ...assistants[0], content: 'abcdef' }
+    vi.advanceTimersByTime(1000)
+    expect(exposed.generatedChars.value).toBe(6) // tick 已重启：继续每秒跟随
     wrapper.unmount()
   })
 })

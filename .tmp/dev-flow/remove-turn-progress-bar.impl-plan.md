@@ -74,7 +74,10 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（初始为空）
+| # | 偏差 | 判定与依据 |
+|---|------|-----------|
+| R1 | en 文案落地为 `Generated {chars} chars`，设计 §2.4 字面曾为 `{chars} chars generated` | 合理——偏差源于派发 task 指令（主 agent 拟文优先于设计草稿措辞），键位/对称性/参数不受影响；设计文档已同步改为落地措辞（doc 同步，非实现回退） |
+| R2 | TurnMeta prop 落为可选 `generatedChars?: number`（withDefaults 默认 0），非 task 字面的非可选 | 合理——dev 实测 @vue/compiler-sfc：非可选 + withDefaults 编译产出 `required: true`，TurnMeta.test.ts 存量内联 mount 用例触发 Vue warn；改可选后 `required: false + default 0`，对外契约（默认 0）不变，v-if chars>0 语义不变 |
 
 ## 6 状态表
 
@@ -82,7 +85,7 @@ graph TD
 |------|------|------|----------|
 | u1 | committed | 1 | dev sa-d2862f59：core 增量 15/15 绿 + 全量 2085 绿 + tsc 绿 + 退役符号全仓零命中（主 agent 独立重跑 15/15 复核）；TurnProgressBar.vue 三行残留属 u2 领地既定中间态 |
 | u2 | pending | 0 | — |
-| u3 | pending | 0 | — |
+| u3 | committed | 1 | dev sa-b3ad65bf：ui 三文件 67/67 绿（含 generatedChars 新用例）+ renderer 冒烟 5/5 + i18n 守卫 197 绿 + vue-tsc 绿（主 agent 独立重跑 junit 67 testcase 0 failure 复核）；偏差 R1/R2 见 §5 |
 
 ## 7 残留风险与变更历史
 

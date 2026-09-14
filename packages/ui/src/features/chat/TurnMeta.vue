@@ -36,6 +36,14 @@
       <span v-if="firstTs > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
         · {{ formatClock(firstTs) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(lastTs) }}
       </span>
+      <!-- [u3 remove-turn-progress-bar] 已生成字符数（设计 §2.1，B1 完成态定格常驻）：
+           TurnMeta 是 per-turn 事实聚合位，chars 与 elapsed/时刻区间同族事实。样式跟
+           tm-range 档（text-2xs neutral-dim mono）；0 不渲染（零内容 turn 不占行宽） -->
+      <span
+        v-if="generatedChars > 0"
+        data-testid="turn-meta-chars"
+        class="tm-chars ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums"
+      >· {{ t('panel.message.generatedChars', { chars: generatedChars.toLocaleString() }) }}</span>
       <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
       <ChevronRight
         v-if="turn.hasFoldable && !isWorkingTurn"
@@ -66,28 +74,34 @@ import type { MessageTurn } from '@xyz-agent/core/domain/chat'
 import { useChatViewDeps } from './chat-view-deps'
 import { formatClock } from './format-utils'
 
-const props = defineProps<{
-  turn: MessageTurn
-  isWorkingTurn: boolean
-  isStreaming: boolean
-  thinkCount: number
-  toolCount: number
-  elapsed: string
-  /** 已耗时秒数（与 elapsed 字符串同源，用于长时生成分级警示配色） */
-  elapsedSecs: number
-  /** 当前 turn 在 session 内的序列下标（仅展示/testid 用） */
-  turnIndex: number
-  /** 当前 turn 的稳定 key（turnStableId(turn)，M5 stable-key：展开态查询按此，不随消息插删漂移） */
-  turnKey: string
-  /** session id（透传保留） */
-  sessionId: string
-  /** turn 首条 assistant 时刻（epoch ms） */
-  firstTs: number
-  /** turn 末条 assistant 时刻（epoch ms） */
-  lastTs: number
-  /** 是否正在流式生成 */
-  isLive: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    turn: MessageTurn
+    isWorkingTurn: boolean
+    isStreaming: boolean
+    thinkCount: number
+    toolCount: number
+    elapsed: string
+    /** 已耗时秒数（与 elapsed 字符串同源，用于长时生成分级警示配色） */
+    elapsedSecs: number
+    /** 当前 turn 在 session 内的序列下标（仅展示/testid 用） */
+    turnIndex: number
+    /** 当前 turn 的稳定 key（turnStableId(turn)，M5 stable-key：展开态查询按此，不随消息插删漂移） */
+    turnKey: string
+    /** session id（透传保留） */
+    sessionId: string
+    /** turn 首条 assistant 时刻（epoch ms） */
+    firstTs: number
+    /** turn 末条 assistant 时刻（epoch ms） */
+    lastTs: number
+    /** 是否正在流式生成 */
+    isLive: boolean
+    /** [u3 remove-turn-progress-bar] 已生成字符数（useTurnElapsed 秒级 tick 重算/完成定格）；0 不渲染。
+     *  可选 + 默认 0：非可选类型经 withDefaults 会编译出 required:true，漏传即 Vue warn */
+    generatedChars?: number
+  }>(),
+  { generatedChars: 0 },
+)
 
 // turn 展开/折叠经 ChatViewDeps inject（renderer 壳绑 useTurnExpansion store）
 const { isExpanded, toggleExpand: toggle } = useChatViewDeps()

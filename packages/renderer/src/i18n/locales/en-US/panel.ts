@@ -87,6 +87,8 @@ export default {
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
     toolCount: 'Tool ×{count}',
+    // [u3 remove-turn-progress-bar] TurnMeta generated chars (TurnMeta.vue, design §2.1/§2.4)
+    generatedChars: 'Generated {chars} chars',
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
