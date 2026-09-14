@@ -384,6 +384,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | `RECONNECTABLE_FINAL_REASONS` / `isReconnectableFinalReason` | 唯一存活消费点 = record-access.ts `rematerializeReconnectableEntryManifests`（boot 自愈可见性 gate，注释已标注桥接残留） | 重物化 gate 改物理判据（entry 自描述完整 + 归属本 session 树，与 §3.2.3 复活资格判据同源）落地并全绿 | 删集合与判定函数；注释口径随改 |
 | `StopReason` 超集值空间 | 与 ClosedReason 的历史并集（types.ts），13 值中部分无展示面消费 | 逐值 grep GUI/TUI/文案消费方：零消费值清单确认后一个批次收窄（收窄属 types 面破坏性改动，须与 closedReason 字段删除同批走） | 值空间收窄至实际消费集 |
 | manifest 旧三态 + executionStatus 双写 | manifest-store.ts:26-40「永久双写」——仓外已发布 session-reader 包的兼容契约 + 无版本磁盘 schema | session-reader 发布 next-major（README/CHANGELOG 声明新两态词汇）**且**全量存量用户数据经一次重建后无旧 status 读需求——两条件同时满足才评审下线；只满足前者不得动磁盘 schema | 双写降级为「派生投影函数保留、字段退役」评审（届时按 session-reader 实际安装面数据裁决，不预设结论） |
+| **内存面轮终保持 running-resumable（A-lite 桥接，S3-R1）**（2026-09-14 补登记，登记依据 = [subagent-two-state-convergence.md](design/subagent-two-state-convergence.md)——本模型 §3.2.2「[实施形态 A-lite，阶段 3 裁决]」预告的 impl-plan §5 载体已悬空，按元规则补入本表） | record-store-rounds.ts markRoundIdleImpl 簿记①「status 保持 running」+ ⑤ resumable=true——「轮已收口」被编码为 `running + result + resumable + chatMode` 四字段组合，写面/协议面/读面各自重组；已发生事故 = sidebar badge 对 chat 轮终误判占用（session 01a09f83 实测 8 幽灵，止血批读侧谓词已对齐严格口径） | 两态收敛设计 Phase 2（U4 写面翻边）落地后，markRoundIdle 生产路径零「status 保持 running」注释（grep 生产写点 + 同源注释归零；resumable 随 U5 退役） | markRoundIdleImpl 改写 idle + resumable 停写；renderer 判据（isRunningProjection / isDoneProjection）随翻边坍缩为 status 直读（U6 SSOT 谓词终态化） |
 
 > 登记维护规则：本表为桥接词汇唯一台账（SSOT）；每轮 design-code-sync 审查须核对本表条目的判据是否已触发，触发未执行 = must-fix。
 

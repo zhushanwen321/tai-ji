@@ -39,6 +39,7 @@ export {
 import { session as sessionApi } from '@/api'
 import * as events from '@xyz-agent/core/transport/api'
 import { toErrorMessage } from '@xyz-agent/core'
+import { isRunningProjection } from '@/lib/subagent-bucket'
 import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
 
 /**
@@ -118,24 +119,19 @@ export const useSubagentStore = defineStore('subagent', () => {
   /**
    * 该 session 是否有 subagent 仍在 running（供 derivedStatus 计算 hasBackgroundWork）。
    *
-   * [review findings-confirmation #8] 排除 running-resumable：v4 轮终迁移故意回写
-   * status='running'（可冷路径 resume）但已携带本轮 result（轮终写点恒写非空）——「已有
-   * 轮终信号的 running」不是后台真在跑，不算 working。否则 subagent 完成注入后
-   * derivedStatus 恒 working → isSessionActive 恒 true → 末位 turn 永久「工作中」（重开
-   * 后 record=closed 才恢复，live 与 reload 不一致）。result === undefined 的 running
-   * （首轮在跑 / legacy W16 前旧 session）仍算真在跑。isRunning（单 record 判定）不随之
-   * 收紧——SubagentTab 依赖它决定是否订阅实时增量流（resumable 续轮仍有流活动）；
-   * 单 record 窄口径（虚拟 session forceWorking 用）见 isStreamingSubagent。
+   * [two-state-convergence D2 判据单一化] 占用判据 = subagent-bucket 的严格口径 SSOT
+   * （isRunningProjection：running + result=∅ + resumable≠true）——本函数是 import
+   * wrapper，禁止在此重组判据字段。历史背景（review findings-confirmation #8）：v4 轮终
+   * 迁移故意回写 status='running'（可冷路径 resume）但已携带本轮 result，「已有轮终信号
+   * 的 running」不是后台真在跑，不算 working——否则 subagent 完成注入后 derivedStatus
+   * 恒 working → isSessionActive 恒 true → 末位 turn 永久「工作中」。
+   * origin 过滤（S1 判据单源化）保留在调用点参数：调用方（如 useBackgroundWork）需排除
+   * workflow 派发的 record（生命周期归 workflow run 承载，不算宿主 session 的后台工作）。
    */
   function hasRunning(sessionId: string, opts?: { excludeOrigin?: SubagentRecord['origin'] }): boolean {
-    // resumable（无活进程驱动的 running，residual-fixes）与轮终 result 一样不算真在跑
     return getRecordsBySession(sessionId).some(
       (s) =>
-        s.status === 'running' &&
-        s.result === undefined &&
-        s.resumable !== true &&
-        // origin 过滤（S1 判据单源化）：调用方（如 useBackgroundWork）需排除 workflow
-        // 派发的 record（生命周期归 workflow run 承载，不算宿主 session 的后台工作）
+        isRunningProjection(s) &&
         (opts?.excludeOrigin === undefined || s.origin !== opts.excludeOrigin),
     )
   }
@@ -155,29 +151,33 @@ export const useSubagentStore = defineStore('subagent', () => {
     partition.clear(sessionId)
   }
 
-  /** 指定主 session 名下的 subagent 是否仍在 running（读该 sid 分区，不全扫） */
+  /**
+   * 指定主 session 名下的 subagent 是否仍在 running（读该 sid 分区，不全扫）。
+   *
+   * [two-state-convergence D2] 宽松口径（仅 `status==='running'`），与占用判据
+   * isRunningProjection 的分工是刻意设计、非重复：SubagentTab 依赖它决定是否订阅
+   * 实时增量流——resumable 续轮瞬间仍有真实流活动，收紧会断数据通路。写面翻边
+   * （Phase 2 markRoundIdle 落 idle）后本口径与占用判据天然合流，保留订阅语义。
+   */
   function isRunning(mainSessionId: string, subagentId: string): boolean {
     return getRecordsBySession(mainSessionId).find((s) => s.subagentId === subagentId)?.status === 'running'
   }
 
   /**
-   * 指定 subagent 是否「真在流活动中」（running 且无轮终 result）——虚拟 session working
-   * 判定的窄口径 [review round2 R1-遗留-1]。
+   * 指定 subagent 是否「真在流活动中」——虚拟 session working 判定 [review round2 R1-遗留-1]。
    *
-   * hasRunning 同判据的单 record 版：running + result 在场 = 轮终 running-resumable
-   * （v4 轮终迁移故意回写 running，见 hasRunning 注释），不是后台真在跑。与 isRunning 的
-   * 分工（两口径并存是刻意设计，非重复）：isRunning（宽松，running 即 true）供 SubagentTab
-   * 决定是否订阅增量流——resumable 续轮仍有真实流活动，收紧会断数据通路；本函数（窄口径）
-   * 供 MessageStream 虚拟 session forceWorking——轮终后虚拟 session 末位 turn 不再卡
-   * streaming，与主 session working 判定（hasRunning）语义一致。续轮流活动的 streaming
-   * 显示由消息级 status 承担（subscribeStream → applySubagentStreamDelta push
-   * status='streaming' 消息），不依赖本函数。
+   * [two-state-convergence D2 判据单一化] 本函数 = 占用判据 SSOT（isRunningProjection）
+   * 的单 record wrapper：running + result=∅ + resumable≠true（轮终 running-resumable
+   * 不是后台真在跑，见 hasRunning 注释）。与 isRunning 的分工（两口径并存是刻意设计）：
+   * isRunning（宽松，running 即 true）供 SubagentTab 决定是否订阅增量流——resumable 续轮
+   * 仍有真实流活动，收紧会断数据通路；本函数（窄口径）供 MessageStream 虚拟 session
+   * forceWorking——轮终后虚拟 session 末位 turn 不再卡 streaming，与主 session working
+   * 判定（hasRunning）语义一致。续轮流活动的 streaming 显示由消息级 status 承担
+   * （subscribeStream → applySubagentStreamDelta push status='streaming' 消息），不依赖本函数。
    */
   function isStreamingSubagent(mainSessionId: string, subagentId: string): boolean {
     const record = getRecordsBySession(mainSessionId).find((s) => s.subagentId === subagentId)
-    // resumable 排除（residual-fixes R3-SG1）：孤儿兜底/轮终 running 无流活动，不算
-    // streaming——否则与 SubagentList 的四形态口径分叉（列表 waiting、虚拟 session 转圈）。
-    return record?.status === 'running' && record.result === undefined && record.resumable !== true
+    return record !== undefined && isRunningProjection(record)
   }
 
   // ── actions ──

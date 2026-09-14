@@ -173,7 +173,7 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import SubagentFilterBar from '@/components/sidebar/SubagentFilterBar.vue'
-import { countSubagents, filterSubagents, isDoneProjection } from '@/lib/subagent-bucket'
+import { countSubagents, filterSubagents, isDoneProjection, isRunningProjection } from '@/lib/subagent-bucket'
 import { useSubagentBucketFilter } from '@/composables/features/sidebar/useSubagentBucketFilter'
 import type { SubagentRecord } from '@xyz-agent/shared'
 import { deriveClosedDisplay } from '@xyz-agent/shared'
@@ -234,10 +234,11 @@ function onCancelClick(record: SubagentRecord): void {
  *  streaming = 真在跑（进程驱动中，spinner + 取消按钮）；
  *  done = one-shot 轮终（result 有值且 chatMode 显式 false——缺省视为不可确认，
  *    落 waiting 保守兜底：无法确认不是 chat → 不宣告完成）；
- *  waiting = 兜底（chat 轮终等续聊 / 孤儿 IO 兜底 / legacy 轮终），静态圆点无取消。 */
-function isStreaming(record: SubagentRecord): boolean {
-  return record.status === 'running' && record.result === undefined && record.resumable !== true
-}
+ *  waiting = 兜底（chat 轮终等续聊 / 孤儿 IO 兜底 / legacy 轮终），静态圆点无取消。
+ *  [two-state-convergence D2 判据单一化] streaming 判据 = subagent-bucket 严格口径
+ *  SSOT 的 import wrapper（原本地组合判据已删，禁止重复实现）——badge 计数 /
+ *  hasRunning / isStreamingSubagent 与本组件同源，不漂移。 */
+const isStreaming = isRunningProjection
 
 // done 投影展示判据（D4 SSOT）：引用 subagent-bucket 的 isDoneProjection，禁止本地重复实现
 const isDone = isDoneProjection

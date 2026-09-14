@@ -6,6 +6,9 @@
  * 唯一职责：把 SubagentRecord 按意愿维度（intent）分「活跃 / 已收起」二桶 + 派生
  * 「正在跑」占用谓词，供 SubagentList（列表过滤 + 状态点展示判据）、SubagentFilterBar
  * 计数、useSidebarCounts badge 共同消费——判据只写这一处，禁止消费方重复实现（D3）。
+ * [two-state-convergence D2]「与 hasRunning 同源」自 U2 起为结构性事实：hasRunning /
+ * isStreamingSubagent（stores/subagent）与 isStreaming（SubagentList）均已改为 import
+ * 本模块的 isRunningProjection wrapper，全仓「真在跑」判据单一出处（G2）。
  *
  * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（legacy 终态经
  * projectSubagentExecutionStatus 投影 idle 同样可见——「旧 session 显示」只读兼容）；
@@ -31,23 +34,34 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 }
 
 /**
- * 占用谓词（G2「正在跑」）：projectSubagentExecutionStatus 投影 running 且非
- * done 投影——done 投影（running + result + chatMode 显式 false，v4~U7 轮终形态）
- * 是「已收口不算在跑」的旧数据窄口径；idle 与 legacy 终态（投影 idle）不算。
+ * 占用谓词（G2「正在跑」，严格口径 SSOT——two-state-convergence D1/D2）：
+ * `running && result === undefined && resumable !== true` 三子句。result 在场 =
+ * 轮终信号（chat 轮终 / one-shot 轮终 / legacy chatMode=∅ 形态一律不计入——
+ * 旧组合判据 `!isDoneProjection` 对 chatMode=true 的轮终误判占用，即 sidebar
+ * badge 幽灵 running 根因，session 01a09f83 实测 8 幽灵）；resumable=true =
+ * 无活进程驱动的 residual running（孤儿兜底/轮终），同样不算真在跑。
+ * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
+ * 与 isStreaming（SubagentList）均为本函数的 import wrapper（U2 判据单一化），
  * badge 计数（useSidebarCounts）与「正在跑」过滤视图同源消费，不漂移。
  */
 export function isRunningProjection(record: SubagentRecord): boolean {
-  return projectSubagentExecutionStatus(record.status) === 'running' && !isDoneProjection(record)
+  return (
+    projectSubagentExecutionStatus(record.status) === 'running' &&
+    record.result === undefined &&
+    record.resumable !== true
+  )
 }
 
 /**
  * done 投影判据（D4 SSOT）：one-shot 轮终等 GC——v4~U7 写面故意保持 running
- * （可冷路径 resume）但携带轮终 result，此形态以绿点展示且可长期滞留，「轮终不算
- * 真在跑」是 store 既有窄口径语义（hasRunning / isStreamingSubagent 同源注释）。
+ * （可冷路径 resume）但携带轮终 result，此形态以绿点展示且可长期滞留。
  * U8 起成功/失败轮终落 running-resumable 形态（仍经本判据判定 done），并非直接
  * 落 idle——本判据服务全部现存 one-shot 轮终（running + result 形态）+ 旧 session
  * 数据展示，不可退役。
- * SubagentList 展示判据 isDone 必须引用本函数，禁止重复实现。
+ * [two-state-convergence D1] 本函数是**展示判据**（done 绿点 vs chat 等续聊 accent
+ * 点），不参与占用判定——占用谓词 isRunningProjection 已改严格口径（result/resumable
+ * 子句），不再经 `!isDoneProjection` 反向挪用。SubagentList 展示判据 isDone 必须
+ * 引用本函数，禁止重复实现。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {
   return record.status === 'running' && record.result !== undefined && record.chatMode === false

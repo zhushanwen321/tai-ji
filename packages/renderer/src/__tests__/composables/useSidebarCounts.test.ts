@@ -66,15 +66,17 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
-  it('waiting（resumable 等续聊）仍计入；idle（U8 两态收口）不计入（badge = 真有活在跑）', () => {
+  it('residual running（resumable 无活进程驱动）不计入；idle（U8 两态收口）不计入（badge = 真有活在跑，two-state-convergence U1 严格口径）', () => {
     const sid = ref<string | null>('sess-wait')
     const store = useSubagentStore()
     store.applyRecords('sess-wait', [
-      makeRecord({ subagentId: 'bg-wait-1', status: 'running', resumable: true }),
+      makeRecord({ subagentId: 'bg-live-1', status: 'running' }),
+      makeRecord({ subagentId: 'bg-residual-1', status: 'running', resumable: true }),
       makeRecord({ subagentId: 'bg-idle-1', status: 'idle', stopReason: 'completed', turns: 3 }),
     ])
 
     const counts = useSidebarCounts(sid)
+    // 3 条记录里仅 bg-live-1 真在跑：resumable=true = 孤儿兜底/轮终 residual running（badge 幽灵，严格口径排除）
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
@@ -129,8 +131,8 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     store.applyRecords('sess-mix', records)
 
     const counts = useSidebarCounts(sid)
-    // badge（D8 收窄）= 2（m1 streaming + m2 waiting；m3 done 投影 / m4-m6 收口不计入）
-    expect(counts.subagentRunningCount.value).toBe(2)
+    // badge（D8 收窄 + U1 严格口径）= 1（m1 真在跑；m2 resumable residual / m3 done 投影 / m4-m6 收口不计入）
+    expect(counts.subagentRunningCount.value).toBe(1)
     // 与分桶 SSOT 的 running 视图计数恒等（同源判据，badge ↔ 过滤视图不再分叉）
     expect(counts.subagentRunningCount.value).toBe(countSubagents(records).running)
   })

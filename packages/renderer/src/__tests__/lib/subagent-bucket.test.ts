@@ -17,7 +17,12 @@
  * 运行：cd packages/renderer && pnpm test src/__tests__/lib/subagent-bucket.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { SUBAGENT_STATUS_ALL, type SubagentRecord, type SubagentStatus } from '@xyz-agent/shared'
+import {
+  SUBAGENT_STATUS_ALL,
+  projectSubagentExecutionStatus,
+  type SubagentRecord,
+  type SubagentStatus,
+} from '@xyz-agent/shared'
 import {
   DEFAULT_SUBAGENT_FILTER,
   isDoneProjection,
@@ -28,6 +33,7 @@ import {
   type SubagentFilterValue,
   type SubagentBucket,
 } from '@/lib/subagent-bucket'
+import { SESSION_01A09F83_GHOST_FIXTURE, type GhostFixtureSpec } from './subagent-ghost-fixture'
 
 /**
  * [B3] 全集数据源 = shared 导出的 SUBAGENT_STATUS_ALL（不再本地硬拷贝）：shared 扩
@@ -64,7 +70,7 @@ describe('subagentBucket 意愿分桶（白盒：intent 维度，status 不参�
   })
 })
 
-describe('isRunningProjection 占用谓词（白盒：G2「正在跑」两态投影）', () => {
+describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口径，two-state-convergence D1）', () => {
   it('仅 running 落 true（idle 与 legacy 终态全部投影 idle 不算在跑）', () => {
     for (const status of ALL_STATUSES) {
       const expected = status === 'running'
@@ -76,10 +82,22 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」两态投
     expect(isRunningProjection(makeRecord('running', { result: 'round output', chatMode: false }))).toBe(false)
   })
 
-  it('waiting 形态（running + chatMode:true / resumable:true / 仅 result 缺 chatMode）→ true（可复活非终态计入）', () => {
+  it('chat 轮终幽灵形态（running + result + resumable:true + chatMode:true）→ false（result 子句排除——badge 幽灵根因修复，session 01a09f83 实测形态）', () => {
+    expect(isRunningProjection(makeRecord('running', { result: 'round output', resumable: true, chatMode: true }))).toBe(false)
+  })
+
+  it('legacy chatMode=∅ 轮终（running + result + resumable=∅）→ false（result === undefined 子句兜住——旧 entry 无 chatMode 字段的 one-shot 轮终不再永计入）', () => {
+    expect(isRunningProjection(makeRecord('running', { result: 'round output' }))).toBe(false)
+  })
+
+  it('residual running（running + resumable:true 无 result）→ false（resumable !== true 子句排除——孤儿兜底/轮终无活进程驱动，对齐 hasRunning 既有口径）', () => {
+    expect(isRunningProjection(makeRecord('running', { resumable: true }))).toBe(false)
+  })
+
+  it('真在跑形态（running 无 result 无 resumable，chatMode true/false/∅ 皆然）→ true（首轮在跑计入，与形态配置正交）', () => {
+    expect(isRunningProjection(makeRecord('running'))).toBe(true)
     expect(isRunningProjection(makeRecord('running', { chatMode: true }))).toBe(true)
-    expect(isRunningProjection(makeRecord('running', { resumable: true }))).toBe(true)
-    expect(isRunningProjection(makeRecord('running', { result: 'round output' }))).toBe(true)
+    expect(isRunningProjection(makeRecord('running', { chatMode: false }))).toBe(true)
   })
 })
 
@@ -176,14 +194,16 @@ describe('countSubagents（黑盒：计数一致性）', () => {
     expect(countSubagents([])).toEqual({ active: 0, running: 0, archived: 0 })
   })
 
-  it('边界：全收起 / 全在跑', () => {
+  it('边界：全收起 / 全在跑（含 resumable 残留不计入——严格口径）', () => {
     expect(countSubagents([
       makeRecord('idle', { intent: 'archived' }),
       makeRecord('done', { intent: 'archived' }),
     ])).toEqual({ active: 0, running: 0, archived: 2 })
-    expect(countSubagents([makeRecord('running'), makeRecord('running', { resumable: true })])).toEqual({
+    expect(
+      countSubagents([makeRecord('running'), makeRecord('running', { resumable: true })]),
+    ).toEqual({
       active: 2,
-      running: 2,
+      running: 1, // resumable=true = residual running（无活进程驱动），严格口径排除
       archived: 0,
     })
   })
@@ -252,5 +272,45 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
     const revived = makeRecord('idle', { stopReason: 'completed', turns: 4, totalTokens: 88000 })
     expect(subagentBucket(revived)).toBe('active')
     expect(filterSubagents([revived], 'active')).toHaveLength(1)
+  })
+})
+
+// ── [P1 ⛔实施期门] session 01a09f83 形态 fixture 回放（two-state-convergence U1/D1/D7）──
+//
+// 门语义：39 条真实 record 形态按修复后严格口径回放 badge 计数 = 0（D1「幽灵 8→0」）。
+// 失败处置 = 判据矩阵有形态遗漏，补形态后重跑，禁止放宽断言（D7 门探针降级路径）。
+// 对照断言（旧组合判据 = 8）钉住 fixture 判别力：差值恰为 8 个 chat 轮终幽灵，
+// 证明 fixture 编码的正是本次修复的 bug 现场（数据源与脱敏规则见 fixture 头注释）。
+
+describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', () => {
+  /** 脱敏形态规格 → 最小合法 SubagentRecord（只注形态字段，无任何正文内容） */
+  function recordFromSpec(spec: GhostFixtureSpec): SubagentRecord {
+    return makeRecord(spec.status, {
+      subagentId: spec.aliasId,
+      ...(spec.hasResult ? { result: '(redacted)' } : {}),
+      ...(spec.resumable !== undefined ? { resumable: spec.resumable } : {}),
+      ...(spec.chatMode !== undefined ? { chatMode: spec.chatMode } : {}),
+      ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
+    })
+  }
+
+  const fixtureRecords: SubagentRecord[] = SESSION_01A09F83_GHOST_FIXTURE.map(recordFromSpec)
+
+  it('fixture 完整性：39 个 record id（8 幽灵 + 29 one-shot 轮终 + 2 中断收口，与 §2.1 实测分布一致）', () => {
+    expect(SESSION_01A09F83_GHOST_FIXTURE).toHaveLength(39)
+    const ghosts = SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.chatMode === true && s.status === 'running')
+    expect(ghosts).toHaveLength(8)
+  })
+
+  it('⛔门：修复后严格口径回放 badge 计数 = 0（幽灵 8→0；filterSubagents running 视图同步为空）', () => {
+    expect(countSubagents(fixtureRecords).running).toBe(0)
+    expect(filterSubagents(fixtureRecords, 'running')).toEqual([])
+  })
+
+  it('判别力对照：旧组合判据（投影 running 且非 done 投影）回放 = 8——差值恰为 chat 轮终幽灵', () => {
+    const legacyCount = fixtureRecords.filter(
+      (r) => projectSubagentExecutionStatus(r.status) === 'running' && !isDoneProjection(r),
+    ).length
+    expect(legacyCount).toBe(8)
   })
 })

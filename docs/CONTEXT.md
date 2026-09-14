@@ -84,7 +84,7 @@ xyz-agent subagent 体系的子任务执行单元：由引擎进程派生子进�
 
 ### Execution Record
 
-subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `ended`），终态经 `<session>.state` sidecar 标记。
+subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。
 
 ### ToolCall
 
