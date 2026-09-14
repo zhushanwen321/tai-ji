@@ -148,3 +148,53 @@ export function useDrawerControl(): {
 export function _resetDrawerControlForTest(): void {
   controlState._clearAllForTest()
 }
+
+// ── [B9 agentcall LRU 联动] panel 枚举豁免查询源（memory-leak-remediation §3.3-B9）──
+
+/** 全部 panel 的 focusedSessionId 列表源（split 恢复时多 panel 全查；单 panel 恒 1 元素） */
+type ViewedPanelsSource = Ref<readonly (string | null)[]>
+
+/**
+ * panel 枚举绑定（headless 模式，对齐 bindDrawerSessionId）：panel 枚举是 renderer
+ * 数据（panel store），core 不 import renderer——renderer 装配模块（composables/
+ * features/chat/agentcall-lru-linkage.ts）注册 computed(() => usePanelStore().panels
+ * .map(p => p.sessionId))。惰性求值（首次读发生在 LRU 驱逐时，pinia 已 active）。
+ * 幂等：同 ref 重复绑定无副作用；新 ref 覆盖（测试隔离重绑定用）。
+ * 未绑定时 getViewedVids 返回空集（驱逐无豁免，安全默认）。
+ */
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：panel 枚举绑定单例 ref
+const boundViewedPanels: Ref<ViewedPanelsSource | null> = ref(null)
+
+/** 绑定 panel 枚举源（renderer 装配层调用；重绑定覆盖旧源） */
+export function bindViewedVidPanels(source: ViewedPanelsSource): void {
+  boundViewedPanels.value = source
+}
+
+/**
+ * [B9] 当前正在查看的 subagent/agentcall 虚拟 id 集（LRU 联动驱逐的豁免源）。
+ *
+ * 组合链（查询源钉死 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
+ * drawer 分区 → 当前选中 vid。三分量同时满足才计入豁免：
+ * - isOpen：关闭 drawer 后焦点切走，分区应可驱逐（A6「关闭 drawer 后再切走，分区释放」）；
+ * - activeTab === 'subagent'：drawer 开在其他 tab 时 SubagentTab 未挂载，不算正在查看
+ *   （切回 subagent tab 会重挂 + immediate watch 重拉快照，白屏自愈路径不破坏）；
+ * - selectedSubagentId 非空：实际选中的虚拟 id。
+ *
+ * [禁止] drawer 分区全枚举：曾开过 drawer 的 session 焦点切走后分区保留（isOpen/
+ * selectedSubagentId 不被 LRU 清），全枚举会把全部历史 agentcall 分区永久豁免，
+ * B9 对重度用户静默失效。分区读取经 updateFor（updater 零写入，纯读；分区不存在时
+ * 惰性建默认空分区，量级 = panel 数 × 几十字节，接受）。
+ */
+export function getViewedVids(): Set<string> {
+  const viewed = new Set<string>()
+  const panels = boundViewedPanels.value?.value ?? []
+  for (const sid of panels) {
+    if (!sid) continue
+    controlState.updateFor(sid, (p) => {
+      if (p.isOpen && p.activeTab === 'subagent' && p.selectedSubagentId) {
+        viewed.add(p.selectedSubagentId)
+      }
+    })
+  }
+  return viewed
+}

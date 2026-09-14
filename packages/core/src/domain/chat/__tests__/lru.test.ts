@@ -22,6 +22,7 @@ import {
   makeLruEvictDeps,
   setLruMaxSessions,
   _resetLruForTest,
+  _lruSizeForTest,
   LRU_MAX_SESSIONS,
   type LruEvictDeps,
 } from '../lru'
@@ -162,6 +163,101 @@ describe('evictSessionWithVirtual', () => {
     const deps = makeLruEvictDeps(messages, hydrated, () => true, () => {}, () => {}) // 永远豁免
     evictSessionWithVirtual('s1', deps)
     expect(messages.value.has('s1')).toBe(true) // 未被驱逐
+  })
+})
+
+describe('B9 agentcall LRU 联动（agentCallEvictionsOf 注入回调）', () => {
+  /** 构造带联动回调的最小 deps：agentcall 分区以 agentcall: 前缀 key 预置进 messages */
+  function makeLinkageDeps(
+    sids: string[],
+    mapping: Map<string, string[]>,
+  ): { deps: LruEvictDeps; messages: ShallowRef<Map<string, unknown>> } {
+    const messages = shallowRef(new Map(sids.map((s) => [s, {}] as [string, unknown])))
+    const hydrated = shallowRef(new Set<string>())
+    const deps = makeLruEvictDeps(
+      messages,
+      hydrated,
+      () => false,
+      () => {},
+      () => {},
+      // 装配侧回调等价物：workflow 映射 ∖ viewedVids（豁免在回调内应用——豁免集里的 vid 不返回）
+      (mainSid) => (mapping.get(mainSid) ?? []),
+    )
+    return { deps, messages }
+  }
+
+  it('联动驱逐（阈值路径）：主 session 被驱逐时回调返回的 agentcall 分区释放，回调未返回的存活（豁免）', () => {
+    const main = 's1'
+    const viewed = 'agentcall:acs-viewed' // 豁免：装配回调不返回 → 存活
+    const unviewed = 'agentcall:acs-unviewed' // 未查看：回调返回 → 释放
+    const sids = [main, viewed, unviewed]
+    for (let i = 0; i < LRU_MAX_SESSIONS; i++) sids.push(`fill${i}`)
+    sids.forEach((s) => touchLru(s))
+    sids.filter((s) => s !== main).forEach((s) => touchLru(s)) // 让 s1 最旧
+    const { deps, messages } = makeLinkageDeps(sids, new Map([[main, [unviewed]]]))
+    evictIfNeeded(deps)
+    expect(messages.value.has(main)).toBe(false)
+    expect(messages.value.has(unviewed)).toBe(false) // 联动释放
+    expect(messages.value.has(viewed)).toBe(true) // 豁免存活
+  })
+
+  it('两路径都触发：evictSessionWithVirtual 显式驱逐同样联动释放（不论阈值）', () => {
+    const messages = shallowRef(new Map([
+      ['s1', {}],
+      ['agentcall:a1', {}],
+      ['agentcall:a2', {}],
+    ]))
+    const hydrated = shallowRef(new Set<string>())
+    const calls: string[] = []
+    const deps = makeLruEvictDeps(
+      messages,
+      hydrated,
+      () => false,
+      () => {},
+      () => {},
+      (mainSid) => {
+        calls.push(mainSid)
+        return ['agentcall:a1']
+      },
+    )
+    evictSessionWithVirtual('s1', deps)
+    expect(calls).toEqual(['s1']) // 显式路径也触发回调
+    expect(messages.value.has('s1')).toBe(false)
+    expect(messages.value.has('agentcall:a1')).toBe(false) // 联动释放
+    expect(messages.value.has('agentcall:a2')).toBe(true) // 未返回的存活
+  })
+
+  it('未注入回调（默认）：agentcall 分区不受 LRU 驱逐影响（向后兼容，旧行为）', () => {
+    const main = 's1'
+    const sids = [main, 'agentcall:acs-1']
+    for (let i = 0; i < LRU_MAX_SESSIONS; i++) sids.push(`fill${i}`)
+    sids.forEach((s) => touchLru(s))
+    sids.filter((s) => s !== main).forEach((s) => touchLru(s))
+    const messages = shallowRef(new Map(sids.map((s) => [s, {}] as [string, unknown])))
+    const hydrated = shallowRef(new Set<string>())
+    const deps = makeLruEvictDeps(messages, hydrated, () => false, () => {}, () => {})
+    evictIfNeeded(deps)
+    expect(messages.value.has(main)).toBe(false)
+    expect(messages.value.has('agentcall:acs-1')).toBe(true) // 无回调不联动
+  })
+
+  it('联动驱逐同步清 agentcall vid 的时序记录（touchLru 写入的记录不残留）', () => {
+    const messages = shallowRef(new Map<string, unknown>([
+      ['s1', {}],
+      ['agentcall:a1', {}],
+    ]))
+    const hydrated = shallowRef(new Set<string>())
+    touchLru('agentcall:a1')
+    const deps = makeLruEvictDeps(
+      messages,
+      hydrated,
+      () => false,
+      () => {},
+      () => {},
+      () => ['agentcall:a1'],
+    )
+    evictSessionWithVirtual('s1', deps)
+    expect(_lruSizeForTest()).toBe(0)
   })
 })
 

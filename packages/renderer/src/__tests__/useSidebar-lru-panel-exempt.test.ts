@@ -44,7 +44,12 @@ vi.mock('@/stores/subagent', () => ({
 
 const loadWorkflowsMock = vi.hoisted(() => vi.fn())
 vi.mock('@/stores/workflow', () => ({
-  useWorkflowStore: () => ({ loadWorkflows: loadWorkflowsMock }),
+  useWorkflowStore: () => ({
+    loadWorkflows: loadWorkflowsMock,
+    // [B9 agentcall LRU 联动] chat store 装配回调在驱逐时调本方法（豁免后返回待释放 vid）。
+    // 本测试无 agentcall 登记，恒空——回归而补齐 mock 面，防装配回调 TypeError。
+    getAgentCallVirtualIdsByMain: () => [],
+  }),
 }))
 
 const loadTreeMock = vi.hoisted(() => vi.fn())

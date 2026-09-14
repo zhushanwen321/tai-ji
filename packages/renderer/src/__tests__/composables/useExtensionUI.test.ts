@@ -39,6 +39,11 @@ vi.mock('@xyz-agent/core/transport/api/domains/extension', () => ({
   },
   sendExtensionUIResponse: vi.fn(),
   onNotify: () => () => {},
+  // [B9 agentcall LRU 联动] stores/chat 新装配链（agentcall-lru-linkage → workflow store
+  // → @/api）把 settings.ts 的 re-export `onExtensions = extensionDomain.onExtensions`
+  // 带进本测试模块图——vitest 对 re-export 绑定按具名导入校验，mock 需提供该导出
+  //（本测试不消费它，占位 vi.fn 即可）。
+  onExtensions: vi.fn(),
   // subscribe 切换 session 时拉取缓存的 pending 请求；测试默认返回空数组
   getPendingRequests: vi.fn().mockResolvedValue([]),
 }))
