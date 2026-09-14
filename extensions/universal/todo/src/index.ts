@@ -25,7 +25,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { setWidgetDual, type GuiContext } from "@xyz-agent/extension-protocol";
 
 import { registerTodosCommand } from "./commands";
-import { registerTodoEventHandlers } from "./handlers";
+import { registerTodoEventHandlers, type RefreshDisplayFn } from "./handlers";
 import { buildGui } from "./model";
 import { renderStatusText, renderWidgetLines } from "./render";
 import { createTodoSessionState, type TodoSessionState } from "./state";
@@ -45,7 +45,7 @@ import { registerTodoTool } from "./tool";
  * 推送/清屏 × GUI/TUI 模式分派由 protocol setWidgetDual 单点内化
  * （守卫单点化说明见 extension-protocol helpers.ts，本文件不再自持 isGui 判定）。
  */
-export function makeRefreshDisplay(state: TodoSessionState): (ctx: ExtensionContext) => void {
+export function makeRefreshDisplay(state: TodoSessionState): RefreshDisplayFn {
 	return function refreshDisplay(ctx: ExtensionContext): void {
 		const statusText = renderStatusText(state.todos, ctx.ui.theme);
 		ctx.ui.setStatus("todo", statusText || undefined);

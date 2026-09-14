@@ -25,7 +25,8 @@
 ```
 
 - `model.ts` 是依赖底座（纯函数，无 Pi 运行时依赖），被 state/tool/handlers/render/component 引用
-- `tool.ts` 依赖 `render`（renderTodoResult）+ `model` + `state`
+- `tool.ts` 依赖 `render`（renderTodoResult）+ `model` + `state` + `handlers`（仅 `RefreshDisplayFn` 类型别名）
+- `handlers.ts` 依赖 `render`（renderStatusText：before_agent_start 状态行文案，与 refreshDisplay 同一口径）+ `model` + `state`
 - `commands.ts` 依赖 `component`（TUI 视图）
 - `state.ts` 只依赖 `model` 的 `Todo` 类型
 
@@ -56,7 +57,7 @@
 [agent_start]           userMessageCount++             （轮次计数，唯一递增点）
     │
     ▼
-[before_agent_start]    ① setStatus("todo", "📋 N pending")（有未完成时）
+[before_agent_start]    ① setStatus("todo", renderStatusText → "☑ N/M")（有未完成时）
                         ② pendingSteerMessage 非空？→ 消费它（display:false，用户不可见）
                            否则 → buildBeforeAgentStartMessage（pending 注入 todo_context）
     │
@@ -85,13 +86,13 @@ handleCompletionSteer(state)   ← 不短路！继续往下
     动作: completionSteered = true
           pendingSteerMessage = "检查交付质量"
 
-{handled, cleared} = handleAutoClear(state)
-    if !全completed: allCompletedAtCount=null; return {false,false}   ← 未 handled，直接走完
+handleAutoClear(state) → boolean（是否已清空）
+    if !全completed: allCompletedAtCount=null; return false
     if allCompletedAtCount===null: allCompletedAtCount = userMessageCount
     if userMessageCount - allCompletedAtCount >= 2:
-        清空 todos + nextId=1 + 重置标记; return {true,true}          ← handled 短路
-    else: return {true,false}                                        ← handled 短路
-if handled → (cleared 则 refreshDisplay) return
+        清空 todos + nextId=1 + 重置标记; return true
+    else: return false
+if 已清空 → refreshDisplay
 ```
 
 ### 4.2 机制阈值
@@ -110,7 +111,7 @@ if handled → (cleared 则 refreshDisplay) return
 
 ### 4.4 反直觉点
 
-1. **`agent_end` 短路顺序不对称**：completion-steer 不 `return`，auto-clear 命中（`handled`）则 `return`。即使即将 auto-clear，本轮 completion steer 仍会先被置位。
+1. **`agent_end` 无短路**：completion-steer 与 auto-clear 顺序执行，auto-clear 仅在已清空时触发 refreshDisplay。即使即将 auto-clear，本轮 completion steer 仍会先被置位。
 2. **completion-steer 与 auto-clear 的竞态**：全 completed 后 completion-steer 先置 steer，但 auto-clear 可能在 steer 被 `before_agent_start` 消费前就清空 todos。下一 turn 消费 steer 时 todos 已空，"检查交付质量"steer 仍有意义。
 3. **`userMessageCount` 命名误导**：实为 agent 轮次计数，只在 `agent_start` 递增。
 

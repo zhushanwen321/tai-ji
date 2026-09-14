@@ -27,7 +27,7 @@ export interface TodoDetails {
 
 export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
 
-export type ValidStatus = (typeof VALID_STATUSES)[number];
+type ValidStatus = (typeof VALID_STATUSES)[number];
 
 // ── 迁移/兼容 ───────────────────────────────────────
 
@@ -70,6 +70,14 @@ export function migrateTodo(raw: unknown): Todo {
 
 // ── GUI 渲染辅助 ─────────────────────────────────────
 
+/** completed 计数单一来源：buildGui / renderStatusText / renderWidgetLines / component 四个消费点共用口径 */
+export function todoProgress(todos: Todo[]): { completed: number; total: number } {
+	return {
+		completed: todos.filter((t) => t.status === "completed").length,
+		total: todos.length,
+	};
+}
+
 /**
  * 把 todos 组装为 GuiRenderResult（v1.1 meta head 架构，对齐 extension-protocol@0.3.0）。
  *
@@ -85,8 +93,7 @@ export function migrateTodo(raw: unknown): Todo {
  *   completed    → done（success + label 弱化）
  */
 export function buildGui(todos: Todo[]): GuiRenderResult {
-	const total = todos.length;
-	const completed = todos.filter((t) => t.status === "completed").length;
+	const { completed, total } = todoProgress(todos);
 	const inProgress = todos.filter((t) => t.status === "in_progress").length;
 
 	const status: WidgetMeta["status"] =
@@ -118,7 +125,7 @@ export function buildGui(todos: Todo[]): GuiRenderResult {
 /** 建议的单 session todo 数上限（软约束：超限提醒，不硬拒绝） */
 export const RECOMMENDED_MAX_TODOS = 10;
 
-export interface AddResult {
+interface AddResult {
 	newTodos: Todo[];
 	newNextId: number;
 	resultText: string;

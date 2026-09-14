@@ -68,13 +68,13 @@ describe("handleCompletionSteer", () => {
 describe("handleAutoClear", () => {
 	it("does not handle when not all completed, and resets anchor", () => {
 		const s = makeState([{ id: 1, text: "a", status: "pending" }], { allCompletedAtCount: 3 });
-		expect(handleAutoClear(s)).toEqual({ handled: false, cleared: false });
+		expect(handleAutoClear(s)).toBe(false);
 		expect(s.allCompletedAtCount).toBeNull();
 	});
 
 	it("anchors on first all-completed round without clearing", () => {
 		const s = makeState([{ id: 1, text: "a", status: "completed" }], { userMessageCount: 5 });
-		expect(handleAutoClear(s)).toEqual({ handled: true, cleared: false });
+		expect(handleAutoClear(s)).toBe(false);
 		expect(s.allCompletedAtCount).toBe(5);
 		expect(s.todos).toHaveLength(1);
 	});
@@ -83,14 +83,14 @@ describe("handleAutoClear", () => {
 		const s = makeState([{ id: 1, text: "a", status: "completed" }], {
 			userMessageCount: 5, allCompletedAtCount: 4,
 		});
-		expect(handleAutoClear(s)).toEqual({ handled: true, cleared: false });
+		expect(handleAutoClear(s)).toBe(false);
 	});
 
 	it("clears and resets flags after delay elapses", () => {
 		const s = makeState([{ id: 1, text: "a", status: "completed" }], {
 			userMessageCount: 6, allCompletedAtCount: 4, completionSteered: true,
 		});
-		expect(handleAutoClear(s)).toEqual({ handled: true, cleared: true });
+		expect(handleAutoClear(s)).toBe(true);
 		expect(s.todos).toEqual([]);
 		expect(s.nextId).toBe(1);
 		expect(s.allCompletedAtCount).toBeNull();
@@ -229,10 +229,10 @@ describe("reconstructState", () => {
 describe("agent_end short-circuit order", () => {
 	it("completion steer fires before auto-clear (completion does not short-circuit)", () => {
 		const s = makeState([{ id: 1, text: "a", status: "completed" }], { userMessageCount: 5 });
-		// 模拟 agent_end: handleCompletionSteer(不短路) → handleAutoClear(短路)
+		// 模拟 agent_end: handleCompletionSteer(不短路) → handleAutoClear
 		expect(handleCompletionSteer(s)).toBe(true);
 		expect(s.pendingSteerMessage).toContain("交付质量");
-		expect(handleAutoClear(s)).toEqual({ handled: true, cleared: false });
+		expect(handleAutoClear(s)).toBe(false);
 		expect(s.allCompletedAtCount).toBe(5);
 	});
 
@@ -243,7 +243,7 @@ describe("agent_end short-circuit order", () => {
 			completionSteered: true, pendingSteerMessage: "<queued>",
 		});
 		expect(handleCompletionSteer(s)).toBe(false); // 已 steered，不重复
-		expect(handleAutoClear(s).cleared).toBe(true);
+		expect(handleAutoClear(s)).toBe(true);
 		expect(s.todos).toEqual([]);
 		// pendingSteerMessage 仍保留，由下一 turn before_agent_start 消费（此时 todos 已空）
 		expect(s.pendingSteerMessage).toBe("<queued>");

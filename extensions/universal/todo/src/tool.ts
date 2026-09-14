@@ -23,6 +23,7 @@ import {
 	VALID_STATUSES,
 } from "./model";
 import { renderTodoResult } from "./render";
+import type { RefreshDisplayFn } from "./handlers";
 import type { TodoSessionState } from "./state";
 
 // ── TodoParams schema（扁平 Type.Object，OpenAI 兼容）──────────
@@ -185,7 +186,7 @@ function executeTodoAction(
 	params: TodoParamsT,
 	state: TodoSessionState,
 	ctx: ExtensionContext,
-	refreshDisplay: (ctx: ExtensionContext) => void,
+	refreshDisplay: RefreshDisplayFn,
 ): {
 	content: Array<{ type: "text"; text: string }>;
 	details: TodoDetails;
@@ -212,11 +213,10 @@ function executeTodoAction(
 
 	refreshDisplay(ctx);
 
-	// content 组装（T3）：突变附带完整列表；list 已含列表
+	// content 组装（T3）：突变附带完整列表（复用 handleList 的空列表兜底）；list 已含列表
 	let contentText: string;
 	if (isMutation) {
-		const listText = state.todos.length > 0 ? formatTodoList(state.todos) : "No todos";
-		contentText = `${resultText}\n${listText}`;
+		contentText = `${resultText}\n${handleList(state)}`;
 	} else {
 		contentText = resultText;
 	}
@@ -239,7 +239,7 @@ function executeTodoAction(
 export function registerTodoTool(
 	pi: ExtensionAPI,
 	state: TodoSessionState,
-	refreshDisplay: (ctx: ExtensionContext) => void,
+	refreshDisplay: RefreshDisplayFn,
 ): void {
 	pi.registerTool({
 		name: "todo",

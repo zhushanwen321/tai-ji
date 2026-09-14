@@ -2,10 +2,11 @@
  * Todo 渲染函数 — 状态栏、widget（双列）、tool result 渲染。
  */
 
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import {
+	todoProgress,
 	type Todo,
 	type TodoDetails,
 } from "./model";
@@ -41,8 +42,7 @@ function fixedWidth(text: string, width: number): string {
 export function renderStatusText(todoList: Todo[], th: Theme): string {
 	if (todoList.length === 0) return "";
 
-	const completed = todoList.filter((t) => t.status === "completed").length;
-	const total = todoList.length;
+	const { completed, total } = todoProgress(todoList);
 
 	if (completed === total) {
 		return th.fg("success", `\u2713 ${completed}/${total}`);
@@ -52,8 +52,9 @@ export function renderStatusText(todoList: Todo[], th: Theme): string {
 
 // ── Widget 双列渲染 ──────────────────────────────────
 
-/** 渲染单条 todo 的 widget 行（不含缩进），供 component.ts 复用 */
-function renderWidgetItem(t: Todo, th: Theme): string {
+/** 渲染单条 todo 的 widget 行（不含缩进），供 component.ts 复用。
+ * textColor = 非完成态文本颜色（widget 用 "text"，tool result 列表用 "muted"——历史差异显式保留，未做视觉统一）。 */
+function renderWidgetItem(t: Todo, th: Theme, textColor: ThemeColor = "text"): string {
 	const mark =
 		t.status === "completed"
 			? th.fg("success", "\u2713")
@@ -61,7 +62,7 @@ function renderWidgetItem(t: Todo, th: Theme): string {
 				? th.fg("warning", "\u25cf")
 				: th.fg("dim", "\u25cb"); // pending
 	const id = th.fg("accent", `#${t.id}`);
-	const text = t.status === "completed" ? th.fg("dim", t.text) : th.fg("text", t.text);
+	const text = t.status === "completed" ? th.fg("dim", t.text) : th.fg(textColor, t.text);
 	return `${mark} ${id} ${text}`;
 }
 
@@ -112,8 +113,7 @@ export function renderWidgetLines(
 
 	const width = termWidth ?? (process.stdout.columns || FALLBACK_TERM_WIDTH);
 	const lines: string[] = [];
-	const completed = todoList.filter((t) => t.status === "completed").length;
-	const total = todoList.length;
+	const { completed, total } = todoProgress(todoList);
 
 	lines.push(th.fg("accent", "\u2611") + th.fg("muted", ` ${completed}/${total}`));
 
@@ -141,15 +141,7 @@ function buildTodoListText(todoList: Todo[], options: { expanded: boolean }, the
 	let listText = theme.fg("muted", `${todoList.length} todos:`);
 	const display = options.expanded ? todoList : todoList.slice(0, MAX_COLLAPSED_ITEMS);
 	for (const t of display) {
-		const status = t.status;
-		const mark =
-			status === "completed"
-				? theme.fg("success", "\u2713")
-				: status === "in_progress"
-					? theme.fg("warning", "\u25cf")
-					: theme.fg("dim", "\u25cb"); // pending
-		const itemText = status === "completed" ? theme.fg("dim", t.text) : theme.fg("muted", t.text);
-		listText += `\n${mark} ${theme.fg("accent", `#${t.id}`)} ${itemText}`;
+		listText += `\n${renderWidgetItem(t, theme, "muted")}`;
 	}
 	if (!options.expanded && todoList.length > MAX_COLLAPSED_ITEMS) {
 		listText += `\n${theme.fg("dim", `... ${todoList.length - MAX_COLLAPSED_ITEMS} more`)}`;
