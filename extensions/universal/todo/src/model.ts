@@ -27,7 +27,7 @@ export interface TodoDetails {
 
 export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
 
-export type ValidStatus = (typeof VALID_STATUSES)[number];
+type ValidStatus = (typeof VALID_STATUSES)[number];
 
 // ── 迁移/兼容 ───────────────────────────────────────
 
@@ -70,6 +70,14 @@ export function migrateTodo(raw: unknown): Todo {
 
 // ── GUI 渲染辅助 ─────────────────────────────────────
 
+/** completed 计数单一来源：buildGui / renderStatusText / renderWidgetLines / component 四个消费点共用口径 */
+export function todoProgress(todos: Todo[]): { completed: number; total: number } {
+	return {
+		completed: todos.filter((t) => t.status === "completed").length,
+		total: todos.length,
+	};
+}
+
 /**
  * 把 todos 组装为 GuiRenderResult（v1.1 meta head 架构，对齐 extension-protocol@0.3.0）。
  *
@@ -85,8 +93,7 @@ export function migrateTodo(raw: unknown): Todo {
  *   completed    → done（success + label 弱化）
  */
 export function buildGui(todos: Todo[]): GuiRenderResult {
-	const total = todos.length;
-	const completed = todos.filter((t) => t.status === "completed").length;
+	const { completed, total } = todoProgress(todos);
 	const inProgress = todos.filter((t) => t.status === "in_progress").length;
 
 	const status: WidgetMeta["status"] =
@@ -118,7 +125,7 @@ export function buildGui(todos: Todo[]): GuiRenderResult {
 /** 建议的单 session todo 数上限（软约束：超限提醒，不硬拒绝） */
 export const RECOMMENDED_MAX_TODOS = 10;
 
-export interface AddResult {
+interface AddResult {
 	newTodos: Todo[];
 	newNextId: number;
 	resultText: string;
@@ -186,12 +193,17 @@ export function addTodos(
 
 // ── Update 逻辑 ──────────────────────────────────────
 
-export interface UpdateResult {
+/** updateTodos 成功返回形状；校验失败直接 throw（包内单一错误协议）。 */
+interface UpdateResult {
 	updatedTodos: Todo[];
-	error?: string;
-	resultText?: string;
+	resultText: string;
 }
 
+/**
+ * 批量更新 todo。校验失败（重复 id / id 不存在 / 无 status 无 text / 非法 status）
+ * 直接 throw——与 addTodos / handler 同一 throw 协议，文案不带 "Error: " 前缀
+ * （错误形态由 pi 工具错误通道表达）；throw 发生在任何突变之前，state 保持不变。
+ */
 export function updateTodos(
 	currentTodos: Todo[],
 	updates: Array<{ id: number; status?: string; text?: string }>,
@@ -205,34 +217,18 @@ export function updateTodos(
 
 	const ids = updates.map((u) => u.id);
 	if (new Set(ids).size !== ids.length) {
-		return {
-			updatedTodos: currentTodos,
-			error: "duplicate ids in updates",
-			resultText: "Error: duplicate ids in updates",
-		};
+		throw new Error("duplicate ids in updates");
 	}
 	for (const u of updates) {
 		const todo = currentTodos.find((t) => t.id === u.id);
 		if (!todo) {
-			return {
-				updatedTodos: currentTodos,
-				error: `id ${u.id} not found`,
-				resultText: `Error: Todo #${u.id} not found`,
-			};
+			throw new Error(`Todo #${u.id} not found`);
 		}
 		if (!u.status && !u.text) {
-			return {
-				updatedTodos: currentTodos,
-				error: `update item for id ${u.id} has neither status nor text`,
-				resultText: `Error: update item for id ${u.id} has neither status nor text`,
-			};
+			throw new Error(`update item for id ${u.id} has neither status nor text`);
 		}
 		if (u.status && !VALID_STATUSES.includes(u.status as (typeof VALID_STATUSES)[number])) {
-			return {
-				updatedTodos: currentTodos,
-				error: `invalid status: ${u.status}`,
-				resultText: `Error: invalid status '${u.status}' for update item id ${u.id}`,
-			};
+			throw new Error(`invalid status '${u.status}' for update item id ${u.id}`);
 		}
 	}
 

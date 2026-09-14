@@ -24,6 +24,13 @@ export const BACKGROUND_TASK_REGISTRY_FILENAME = 'registry.json' as const
 /** 后台任务根目录名（<agentDir>/ 下，内含 per-sessionId 子目录）。 */
 export const BASE_TOOL_ENHANCE_DIRNAME = 'base-tool-enhance' as const
 
+/**
+ * 任务 id 前缀（taskId 契约注释已约定：bt- 前缀，对账差集只认该前缀——区别于
+ * subagent-workflow 的 bg-/run-）。升级为导出常量：对账/守卫的前缀过滤从此引用
+ * 同一常量，禁止各侧字面量重写。
+ */
+export const BACKGROUND_TASK_ID_PREFIX = 'bt-' as const
+
 /** registry 文件格式版本（读侧 version 不匹配按损坏处理；未来结构变更时迁移判据）。 */
 export const BACKGROUND_TASK_REGISTRY_VERSION = 1 as const
 

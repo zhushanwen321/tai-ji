@@ -191,20 +191,16 @@ export function renderWidgetLines(state: GoalRuntimeState, th: ThemeLike): strin
  *
  * FR-6.6：`uiPort.hasUI === false`（headless）时直接 return。
  *
- * GUI 模式（RPC，uiPort.isGui）：推送 buildGoalGui 的 GuiComponent（guiSetWidget marker
- * 编码，host 侧解码 → GuiComponentRenderer 渲染）。
- * TUI 模式：推送 renderWidgetLines 文本行（向后兼容）。
+ * widget 推送为双模单调用：setWidget 收 dual payload（{ gui, text }），
+ * GUI/TUI 模式分派由 adapter 层委托的 protocol setWidgetDual 单点承担。
  *
  * 终态折叠为单行 status bar（widget 清除）；cancelled/无 state 清除 widget + status。
  */
 export function updateWidget(session: GoalSession, uiPort: UiPort): void {
 	if (!uiPort.hasUI) return;
 
-	const isGui = uiPort.isGui;
-
 	if (!session.state || session.state.status === "cancelled") {
-		if (isGui) uiPort.setGuiWidget("goal", undefined);
-		else uiPort.setWidget("goal", undefined);
+		uiPort.setWidget("goal", undefined);
 		uiPort.setStatus("goal", undefined);
 		return;
 	}
@@ -215,16 +211,15 @@ export function updateWidget(session: GoalSession, uiPort: UiPort): void {
 		if (statusText) {
 			uiPort.setStatus("goal", statusText);
 		}
-		if (isGui) uiPort.setGuiWidget("goal", undefined);
-		else uiPort.setWidget("goal", undefined);
+		uiPort.setWidget("goal", undefined);
 		return;
 	}
 
 	uiPort.setStatus("goal", renderStatusLine(session.state, uiPort.theme));
-	if (isGui) {
-	// 复用 projection/gui.ts 的 buildGoalGui（整个 GuiRenderResult：component + meta 宿主元数据）
-		uiPort.setGuiWidget("goal", buildGoalGui(session.state));
-	} else {
-		uiPort.setWidget("goal", renderWidgetLines(session.state, uiPort.theme));
-	}
+	// 双模 payload 按值立即构造（buildGoalGui/renderWidgetLines 均为廉价纯函数）：
+	// gui 臂复用 projection/gui.ts 的 buildGoalGui（GuiRenderResult：component + meta 宿主元数据）
+	uiPort.setWidget("goal", {
+		gui: buildGoalGui(session.state),
+		text: renderWidgetLines(session.state, uiPort.theme),
+	});
 }

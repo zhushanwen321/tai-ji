@@ -2,7 +2,8 @@
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
  * 本文件是 xyz-agent 插件契约的权威定义：面向插件作者对外发布，刻意保持
- * 零依赖自包含（第三方插件作者无需装整个 monorepo）。
+ * 零依赖自包含（第三方插件作者无需装整个 monorepo）——Bridge* 回包形状定义源
+ * 2026-09 D4 后上收协议包，本文件不再零依赖（见下方历史段）。
  *
  * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
@@ -14,9 +15,16 @@
  * 历史：2026-09-05 前本文件由 packages/plugin-sdk/scripts/sync-types.sh 从
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
  * 记录了当时的刻意重复理由。方向反转为「SDK 为 SSOT、runtime re-export」后
- * sync-types.sh 已删除（生成方向不再存在），依赖方向 = runtime → SDK 单向，
- * SDK 仍零依赖。
+ * sync-types.sh 已删除（生成方向不再存在），依赖方向 = runtime → SDK 单向。
+ * D4 单源化（ext-simplify-16）后 Bridge* 回包形状定义源上收
+ * @xyz-agent/extension-protocol（唯一定义点，下方 re-export 消费），本文件
+ * 不再零依赖，但除该类型依赖外仍无运行时依赖。
  */
+
+// D4 单源化：Bridge* 回包形状唯一定义源 = @xyz-agent/extension-protocol。
+// import 供本文件内 ToolExecuteHandler 返回类型引用；export 保持既有
+// `BridgeInterceptResponse`/`BridgeToolExecuteResponse` 导入面不变。
+import type { BridgeInterceptResponse, BridgeToolExecuteResponse } from '@xyz-agent/extension-protocol'
 
 /**
  * GUI 渲染协议核心类型定义。
@@ -414,7 +422,8 @@ export type HookType = InterceptorHookType | ObserverHookType
 /**
  * @proposed — 拦截器返回结果：允许/阻止/修改数据/注入消息。
  *
- * 三个语义域互不混淆（plugin-intercept-injection 设计 §3.3-D1）：
+ * 三个语义域互不混淆（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D1，文档已退役于
+ * `fadd8b8b4`）：
  * - 阻止：proceed:false — runtime 侧终止后续插件 hook 链并留痕；当前 pi 集成不阻止
  *   agent turn（pi before_agent_start 无 block 槽位，turn 照常进行）
  * - 改写：modifiedData — 改写当前 hook 事件的 data（如 onAfterToolResult 改写工具输出），
@@ -473,7 +482,8 @@ export type PiEventCallback = (eventName: string, data: unknown) => Promise<void
 
 /**
  * @internal — runtime 内部：Hook 通用返回结果（主线程塑形）。
- * injectedMessages 与 transformedData 语义分叉（plugin-intercept-injection 设计 §3.3-D2/D3）：
+ * injectedMessages 与 transformedData 语义分叉（git `7a3797d0b` 版 plugin-intercept-injection
+ * §3.3-D2/D3，文档已退役于 `fadd8b8b4`）：
  * 前者为管线层逐插件形状校验后的合法条目跨插件累积拼接（priority 执行序），后者保持
  * 「链上最后一个」覆盖语义；消费方为 handleBridgeIntercept 的注入映射。
  */
@@ -709,12 +719,8 @@ export const PermissionConstants = Object.freeze({
 /** @stable — 权限常量索引类型（随 PermissionConstants 冻结） */
 export type PermissionConstant = (typeof PermissionConstants)[keyof typeof PermissionConstants]
 
-/** @internal — runtime 内部：Bridge 拦截响应（Worker↔主进程桥接协议） */
-export interface BridgeInterceptResponse {
-  blocked?: boolean
-  reason?: string
-  injectedMessages: unknown[]
-}
+// @internal — runtime 内部塑形对象（Bridge* 回包形状），定义源在协议包（见文件头 D4 单源化）
+export type { BridgeInterceptResponse, BridgeToolExecuteResponse }
 
 // ── Bridge 类型（插件 Worker ↔ 主进程桥接）─────────────────────────
 
@@ -748,13 +754,6 @@ export interface BridgeToolExecuteRequest {
   toolCallId?: string
 }
 
-/** @internal — runtime 内部：插件返回工具执行结果 */
-export interface BridgeToolExecuteResponse {
-  content: string
-  isError?: boolean
-}
-
-/** Worker 侧 tool 执行处理函数 */
 /** @internal — runtime 内部：Worker 侧 tool 执行处理函数 */
 export type ToolExecuteHandler = (params: {
   arguments: Record<string, unknown>

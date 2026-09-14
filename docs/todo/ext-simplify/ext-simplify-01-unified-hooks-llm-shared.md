@@ -200,6 +200,8 @@
 | 文件:行 | 形态 | 保留理由 |
 |---|---|---|
 | `base-tool-enhance/src/tool-error-audit.ts:76` | **生产代码**：`pi.appendEntry("unified-hooks:tool-error", ...)` | 协议字符串 SSOT——历史 entry 不断链承诺（README 承接表 + :7 注释） |
+
+> **对账说明（2026-09-14，ext-simplify-13 E10/D4）**：`tool-error-audit.ts:7` 的注释措辞已随 ext-simplify-13 修正（「消费方无感」→「无代码消费方；保持旧名是历史 entry 可查询性承诺，废弃包名残留为已接受代价」）——本行与上方 P-protocol 承诺所指的 **customType 字符串 `"unified-hooks:tool-error"` 本身不变**，字符串承诺不受注释措辞修正影响。
 | 同文件 :2,:7,:20；`force-patterns.ts:5,28`；`bash-tool.ts:178`；`index.ts:51` | 注释 | bte 能力出处与迁移语义说明（解释代码为什么长这样） |
 | `base-tool-enhance/src/__tests__/{force-patterns,tool-error-audit}.test.ts` | 测试注释/断言 | 断言 customType 协议字符串，与生产承诺绑定 |
 | `subagent-workflow/src/index.ts:166`、`src/injectors/subagent-list-injector.ts:2` | 注释 | 文件归位出处（「迁移自 unified-hooks」） |

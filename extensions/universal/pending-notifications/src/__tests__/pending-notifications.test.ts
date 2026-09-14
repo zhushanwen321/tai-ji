@@ -454,16 +454,16 @@ describe("pendingNotificationsExtension factory", () => {
 	});
 
 	describe("写侧幂等（P2）", () => {
-		it("bte 对账已直接落盘 unregister 后，收尾尽力补 emit 不重复落盘", async () => {
-			// bte 对账权威路径 = 直接 appendEntry（不经本包 listener）；对账平掉差集后，
-			// 任务收尾的尽力补 emit 到达 listener——前置判断对同一份 entries 现算发现
-			// 已注销 → 跳过（历史内存态形态下此路径会产生第二条重复 unregister entry）。
+		it("任一发送方重复发 unregister（对账先落盘、事件后到达等）不重复落盘", async () => {
+			// bte 对账权威路径 = 直接 appendEntry（不经本包 listener）；对账落盘后，
+			// 任一现役发送方重复发 unregister 到 listener——前置判断对同一份 entries
+			// 现算发现已注销 → 跳过（历史内存态形态下此路径会产生第二条重复 unregister entry）。
 			fireSessionStart(setup);
 			setup.handlers.pendingRegister!({ id: "bt-1", type: "bash", name: "run" });
 
 			// 对账直接落盘（模拟 bte：不经 listener 的 pi.appendEntry）
 			setup.appendEntryMock("pending:unregister", { id: "bt-1", reason: "completed", status: "completed" });
-			// 收尾尽力补 emit 到达 listener
+			// 重复 unregister 事件到达 listener
 			setup.handlers.pendingUnregister!({ id: "bt-1", reason: "completed" });
 
 			const unregisterCalls = setup.appendEntryMock.mock.calls.filter((c) => c[0] === "pending:unregister");

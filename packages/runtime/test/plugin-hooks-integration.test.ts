@@ -185,12 +185,12 @@ describe('PluginService.syncToolsToBridge', () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe('PluginService.getBridgeSyncPayload', () => {
-  // ── 空 registry → 空 tools，commands 固定空，success:true ─────────
-  it('空 registry → { tools: [], commands: [], success: true }', () => {
+  // ── 空 registry → 空 tools，success:true ──────────────────────────
+  it('空 registry → { tools: [], success: true }', () => {
     const service = new PluginService({} as never, createMockBroker())
     service.syncToolsToBridge()
 
-    expect(service.getBridgeSyncPayload()).toEqual({ tools: [], commands: [], success: true })
+    expect(service.getBridgeSyncPayload()).toEqual({ tools: [], success: true })
   })
 
   // ── 塑形 ToolRegistration → {name,description,parameters}（剔除 execute handler）──

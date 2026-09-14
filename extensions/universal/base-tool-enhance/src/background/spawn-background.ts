@@ -17,9 +17,9 @@ import { mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
+import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } from "@xyz-agent/extension-protocol/background-task";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } from "../kill-tree.ts";
 import { emitPendingRegister } from "./notify.ts";
 import { ensurePollerRunning } from "./poller.ts";
 import { getRegistryPath, taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
@@ -258,7 +258,12 @@ function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 			// 收尾不受影响。
 			return;
 		}
-		killProcessTree(task.pid);
+		// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
+		killProcessTree(task.pid, (step, err) =>
+			logger.debug(step, {
+				detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+			}),
+		);
 		const marked = markKillingIntent(task.taskId, "timeout");
 		if (marked === undefined) return;
 		writeRegistryEntry(marked.registryPath, taskToRegistryEntry(marked));
@@ -270,8 +275,9 @@ function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 
 /**
  * 到点 pid 身份校验：true = 登记时的原进程仍占用该 pid（可安全 kill-tree）。
- * 判据（精确比较 / startedAt 秒级降级 / 读不到保守 false）单点定义于 kill-tree.ts
- * 的 pidStartMatchesRegistered（原 reaper.ts 单点，收殓下沉后随删除平移）。
+ * 判据（精确比较 / startedAt 秒级降级 / 读不到保守 false）单点定义于
+ * extension-protocol 的 pidStartMatchesRegistered（原 reaper.ts 单点，跨端原语
+ * 归一后经 background-task 子出口消费——ext-simplify-13）。
  */
 function isRecordedPidStillOriginal(task: BackgroundTask): boolean {
 	const actualStartSec = getProcessStartTimeSec(task.pid);

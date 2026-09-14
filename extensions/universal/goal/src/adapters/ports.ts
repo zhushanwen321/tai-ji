@@ -4,7 +4,7 @@
  * 单一 ports 构造点（DRY）：command-adapter / goal-control-adapter / event-handlers / index 共用。
  *
  * - persistence: pi.appendEntry 映射到 appendState / appendHistory（type 字符串区分）
- * - ui: ctx.ui 的 setWidget/setStatus/notify + hasUI + isGui + theme（fg/bold 适配 ThemeLike）
+ * - ui: ctx.ui 的 setWidget/setStatus/notify + hasUI + theme（fg/bold 适配 ThemeLike）
  * - messaging: pi.sendMessage 映射到 sendContextMessage / sendUserMessage
  * - session: ctx.sessionManager.getEntries
  *
@@ -13,8 +13,8 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { guiSetWidget, isGuiCapable } from "@xyz-agent/extension-protocol";
-import type { GuiContext, GuiRenderResult } from "@xyz-agent/extension-protocol";
+import { setWidgetDual } from "@xyz-agent/extension-protocol";
+import type { GuiContext } from "@xyz-agent/extension-protocol";
 
 import { ENTRY_TYPE, HISTORY_ENTRY_TYPE } from "../persistence";
 import type { MessagingPort, PersistencePort, SessionPort, UiPort } from "../ports";
@@ -40,24 +40,16 @@ export function buildPorts(pi: ExtensionAPI, ctx: ExtensionContext): ServicePort
 	};
 
 	const uiPort: UiPort = {
-		setWidget(name: string, content: string[] | string | undefined): void {
-			// SDK setWidget 重载只接受 string[] | undefined（或 factory）。本地 UiPort 允许单 string，
-			// 此处归一化：string 包一层成 [string]，再透传。
-			const lines = typeof content === "string" ? [content] : content;
-			ctx.ui.setWidget(name, lines);
-		},
-		setGuiWidget(name: string, result: GuiRenderResult | undefined): void {
-			// GUI 协议 widget：guiSetWidget 在 RPC 模式用 marker 编码 GuiRenderResult JSON
-			// （component + meta 宿主元数据）进 string[]，复用 ctx.ui.setWidget 通道；
-			// host 侧 EventAdapter（xyz-agent runtime 的 pi 事件适配层）检测 marker 解码还原。guiSetWidget 无 isGui 守卫
-			// （helpers.ts 仅查 ctx.ui?.setWidget 存在性），isGui 判定在 updateWidget
-			// 外层（projection/widget.ts）。
+		setWidget(name, content): void {
+			// 双模 payload 委托 protocol setWidgetDual：推送/清屏 × GUI/TUI 的模式分派
+			// 由 helper 单点内化（守卫单点化说明见 extension-protocol helpers.ts），
+			// 本 adapter 不再自持 isGui 判定/守卫注释。
 			//
 			// 断言根因：pi ExtensionUIContext.custom 是泛型方法（返回 Promise<T>），
 			// 与 GuiContext.ui.custom 的具体返回类型静态不兼容，但 mode/hasUI/ui 其余
 			// 成员形状一致（ExtensionMode 与 GuiContext.mode union 完全相同）——
-			// 单层直接断言可过 tsc（guiSetWidget 仅读 ui.setWidget，custom 不参与）。
-			guiSetWidget(ctx as GuiContext, name, result);
+			// 单层直接断言可过 tsc（setWidgetDual 只读 mode 与 ui.setWidget，custom 不参与）。
+			setWidgetDual(ctx as GuiContext, name, content);
 		},
 		setStatus(name: string, text: string | undefined): void {
 			ctx.ui.setStatus(name, text);
@@ -67,11 +59,6 @@ export function buildPorts(pi: ExtensionAPI, ctx: ExtensionContext): ServicePort
 		},
 		get hasUI(): boolean {
 			return Boolean(ctx.hasUI);
-		},
-		get isGui(): boolean {
-			// RPC 模式 = GUI 渲染通道有效；TUI/json/print 走 pi 原生渲染。
-			// 断言同 setGuiWidget：custom 泛型签名静态不兼容，mode 单字段运行时可靠。
-			return isGuiCapable(ctx as GuiContext);
 		},
 		// ThemeLike 适配：透传 ctx.ui.theme 的 fg/bold。
 		// Theme.fg 只接受 ThemeColor 字面量 union（SDK 契约）；projection 层保证传入 union 内字面量，

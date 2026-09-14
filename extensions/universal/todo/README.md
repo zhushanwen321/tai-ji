@@ -37,7 +37,7 @@ pi install npm:@zhushanwen/pi-todo
 
 ### 错误处理约定
 
-handler 失败**直接 `throw new Error()`**，不返回错误成功模式（见 CLAUDE.md「Tool 设计」）。常见错误：
+handler 失败**直接 `throw new Error()`**，不返回错误成功模式（见 docs/extensions/extension-conventions.md「Tool 设计」）。常见错误：
 
 | 触发 | 错误信息 |
 |------|---------|

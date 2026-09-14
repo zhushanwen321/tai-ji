@@ -198,7 +198,6 @@ describe("todo update batch", () => {
 			{ id: 3, status: "completed", text: "C done" },
 		]);
 
-		expect(result.error).toBeUndefined();
 		expect(result.updatedTodos).toHaveLength(3);
 		expect(result.updatedTodos[0].status).toBe("completed");
 		expect(result.updatedTodos[0].text).toBe("A");
@@ -211,7 +210,6 @@ describe("todo update batch", () => {
 	it("TC6: trims text on apply（批量路径）", () => {
 		const todos: Todo[] = [{ id: 1, text: "A", status: "pending" }];
 		const result = updateTodos(todos, [{ id: 1, text: "  B updated  " }]);
-		expect(result.error).toBeUndefined();
 		expect(result.updatedTodos[0].text).toBe("B updated");
 	});
 
@@ -222,30 +220,33 @@ describe("todo update batch", () => {
 
 	it("should reject duplicate ids in updates[]", () => {
 		const todos: Todo[] = [{ id: 1, text: "A", status: "pending" }];
-		const result = updateTodos(todos, [
-			{ id: 1, status: "completed" },
-			{ id: 1, status: "pending" },
-		]);
-		expect(result.error).toBe("duplicate ids in updates");
-		expect(result.updatedTodos).toEqual(todos);
+		expect(() =>
+			updateTodos(todos, [
+				{ id: 1, status: "completed" },
+				{ id: 1, status: "pending" },
+			]),
+		).toThrow("duplicate ids in updates");
 	});
 
 	it("should reject non-existent ids", () => {
 		const todos: Todo[] = [{ id: 1, text: "A", status: "pending" }];
-		const result = updateTodos(todos, [{ id: 999, status: "pending" }]);
-		expect(result.error).toBe("id 999 not found");
+		expect(() => updateTodos(todos, [{ id: 999, status: "pending" }])).toThrow(
+			"Todo #999 not found",
+		);
 	});
 
 	it("should reject updates[] item missing both status and text", () => {
 		const todos: Todo[] = [{ id: 1, text: "A", status: "pending" }];
-		const result = updateTodos(todos, [{ id: 1 }]);
-		expect(result.error).toContain("neither status nor text");
+		expect(() => updateTodos(todos, [{ id: 1 }])).toThrow(
+			"update item for id 1 has neither status nor text",
+		);
 	});
 
 	it("should reject invalid status values", () => {
 		const todos: Todo[] = [{ id: 1, text: "A", status: "pending" }];
-		const result = updateTodos(todos, [{ id: 1, status: "banana" }]);
-		expect(result.error).toContain("invalid status");
+		expect(() => updateTodos(todos, [{ id: 1, status: "banana" }])).toThrow(
+			"invalid status 'banana' for update item id 1",
+		);
 	});
 });
 
@@ -312,14 +313,12 @@ describe("completed without interception", () => {
 	it("should allow in_progress → completed directly", () => {
 		const todos: Todo[] = [{ id: 1, text: "simple", status: "in_progress" }];
 		const result = updateTodos(todos, [{ id: 1, status: "completed" }]);
-		expect(result.error).toBeUndefined();
 		expect(result.updatedTodos[0].status).toBe("completed");
 	});
 
 	it("should allow pending → completed directly", () => {
 		const todos: Todo[] = [{ id: 1, text: "skip", status: "pending" }];
 		const result = updateTodos(todos, [{ id: 1, status: "completed" }]);
-		expect(result.error).toBeUndefined();
 		expect(result.updatedTodos[0].status).toBe("completed");
 	});
 
@@ -332,7 +331,6 @@ describe("completed without interception", () => {
 			{ id: 1, status: "completed" },
 			{ id: 2, status: "completed" },
 		]);
-		expect(result.error).toBeUndefined();
 		expect(result.updatedTodos[0].status).toBe("completed");
 		expect(result.updatedTodos[1].status).toBe("completed");
 	});

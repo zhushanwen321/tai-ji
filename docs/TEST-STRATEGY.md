@@ -295,4 +295,4 @@ pi 边界可靠性设计的测试面落地（2026-08-27 事故对 → 四支柱�
 **规范 3：teardown 删除 recursive 目录必须带 maxRetries**。`rmSync(dir, { recursive: true })` 与在途异步写竞争 → 间歇 ENOTEMPTY；删除必须带 `maxRetries`（如 `maxRetries: 5, retryDelay: 20`），等待机制与探测一并只读化（规范 1）。pre-commit 护栏 `check_test_flake_hygiene.py` 落地中。
 `[HISTORICAL]` 案例锚：teardown ENOTEMPTY flake → commit `d9ad39cb8`（`packages/subagent-core/src/execution/__tests__/sync-collect-recovery.test.ts:252` rmSync 加 maxRetries）。
 
-**仍在修复中的活案例（pgrep 全机扫描跨包互踩）**：`extensions/universal/base-tool-enhance/src/__tests__/kill-tree.test.ts:66` 用 `pgrep -f "sleep 30"` 全机扫描验证子进程无残留——扫描范围覆盖全机进程，与并行运行的其他测试/无关进程互踩。验证「自己 spawn 的进程已死」应限定 pid/进程组（`pgrep -P <pid>`）或读自有句柄，禁止全机模式扫描做断言。
+`[HISTORICAL]` 案例锚（pgrep 全机扫描跨包互踩）：base-tool-enhance 包原 kill-tree.test.ts 曾用 `pgrep -f "sleep 30"` 全机扫描验证子进程无残留——扫描范围覆盖全机进程，与并行运行的其他测试/无关进程互踩；载体文件已随 ext-simplify-13（进程原语下沉 extension-protocol）删除，现行承接方是 extension-protocol 包的 background-task-process.test.ts（限定 pid 的探针）。规则不变：验证「自己 spawn 的进程已死」应限定 pid/进程组（`pgrep -P <pid>`）或读自有句柄，禁止全机模式扫描做断言。

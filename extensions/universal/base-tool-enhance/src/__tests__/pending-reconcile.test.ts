@@ -1,14 +1,15 @@
 // src/__tests__/pending-reconcile.test.ts —— M3 session_start 对账单元（§3.5 接入细则 4）：
-// 差集收集 / 三类僵尸场景 appendEntry 权威路径 + 尽力 emit / 活任务与缺条目保守跳过
+// bt- 差集（protocol collectActivePendingIds 单点消费）/ 三类僵尸场景 appendEntry
+// 权威路径（唯一写路径，无 emit）/ 活任务与缺条目保守跳过
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { BACKGROUND_TASK_ID_PREFIX, collectActivePendingIds } from "@xyz-agent/extension-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-	collectUnsettledTaskIds,
 	reconcilePendingEntries,
 	type ReconcilePi,
 } from "../background/pending-reconcile.ts";
@@ -18,9 +19,13 @@ import type { RegistryEntry } from "../background/types.ts";
 const DATA_DIR = mkdtempSync(join(tmpdir(), "bte-reconcile-"));
 const SESSION_ID = "sess-reconcile";
 
-function createMockPi(overrides: Partial<Pick<ReconcilePi, "appendEntry">> = {}): ReconcilePi {
+function createMockPi(overrides: Partial<Pick<ReconcilePi, "appendEntry">> = {}): ReconcilePi & {
+	events: { emit: ReturnType<typeof vi.fn> };
+} {
 	return {
 		appendEntry: vi.fn(),
+		// emit 路径已随 ext-simplify-13 删除（恒 no-op 死路径）：events spy 仅用于
+		// 断言实现不再触达 bus emit
 		events: { emit: vi.fn() },
 		...overrides,
 	};
@@ -56,41 +61,60 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("collectUnsettledTaskIds (bt- prefixed register/unregister diff)", () => {
+describe("bt- diff via protocol collectActivePendingIds (single-source diff core)", () => {
+	// 差集本体单点在 protocol pending-entries（ext-simplify-13 D3，与 pending 守卫
+	// 判据同源）；此处锁定 bte 对账消费面的语义（idPrefix = BACKGROUND_TASK_ID_PREFIX）
 	it("collects bt- registers without a matching unregister", () => {
-		const ids = collectUnsettledTaskIds([
-			registerEntry("bt-a"),
-			registerEntry("bt-b"),
-			{ customType: "pending:unregister", data: { id: "bt-b", reason: "completed" } },
-		]);
+		const ids = collectActivePendingIds(
+			[
+				registerEntry("bt-a"),
+				registerEntry("bt-b"),
+				{ customType: "pending:unregister", data: { id: "bt-b", reason: "completed" } },
+			],
+			{ idPrefix: BACKGROUND_TASK_ID_PREFIX },
+		);
 		expect([...ids]).toEqual(["bt-a"]);
 	});
 
 	it("ignores non-bt ids (subagent bg-/run- namespace not ours)", () => {
-		const ids = collectUnsettledTaskIds([
-			registerEntry("bg-1"),
-			registerEntry("run-x-1"),
-			registerEntry("bt-a"),
-		]);
+		const ids = collectActivePendingIds(
+			[registerEntry("bg-1"), registerEntry("run-x-1"), registerEntry("bt-a")],
+			{ idPrefix: BACKGROUND_TASK_ID_PREFIX },
+		);
 		expect([...ids]).toEqual(["bt-a"]);
 	});
 
 	it("dedupes repeated registers and tolerates malformed entries", () => {
-		const ids = collectUnsettledTaskIds([
-			null,
-			undefined,
-			{ customType: "pending:register" }, // data 缺失
-			{ customType: "pending:register", data: { id: 42 } }, // id 非字符串
-			registerEntry("bt-a"),
-			registerEntry("bt-a"),
-			{ customType: "other" },
-		]);
+		const ids = collectActivePendingIds(
+			[
+				null,
+				undefined,
+				{ customType: "pending:register" }, // data 缺失
+				{ customType: "pending:register", data: { id: 42 } }, // id 非字符串
+				registerEntry("bt-a"),
+				registerEntry("bt-a"),
+				{ customType: "other" },
+			],
+			{ idPrefix: BACKGROUND_TASK_ID_PREFIX },
+		);
 		expect([...ids]).toEqual(["bt-a"]);
+	});
+
+	it("register→unregister→register same id stays settled (global cancellation, §5.4①)", () => {
+		const ids = collectActivePendingIds(
+			[
+				registerEntry("bt-a"),
+				{ customType: "pending:unregister", data: { id: "bt-a", reason: "completed" } },
+				registerEntry("bt-a"),
+			],
+			{ idPrefix: BACKGROUND_TASK_ID_PREFIX },
+		);
+		expect(ids.size).toBe(0);
 	});
 });
 
 describe("reconcile scenario ①: graceful-exit leftover (registry exited, entry never written)", () => {
-	it("appends pending:unregister {id, reason, status} matching pending-notifications entry shape + best-effort emit", () => {
+	it("appends pending:unregister {id, reason, status} matching pending-notifications entry shape", () => {
 		const entry = makeRegistryEntry({
 			taskId: "bt-1700000000-zomb01",
 			state: "exited",
@@ -108,11 +132,6 @@ describe("reconcile scenario ①: graceful-exit leftover (registry exited, entry
 			id: entry.taskId,
 			reason: "completed",
 			status: "completed",
-		});
-		// emit 形态 {id, reason}（status 由 listener mapReasonToStatus 计算）
-		expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
-			id: entry.taskId,
-			reason: "completed",
 		});
 	});
 
@@ -211,6 +230,19 @@ describe("conservative no-op paths", () => {
 		]);
 		expect(result.reconciled).toBe(0);
 		expect(pi.appendEntry).not.toHaveBeenCalled();
+	});
+});
+
+describe("best-effort emit removed (ext-simplify-13 D5: appendEntry is the sole authority)", () => {
+	it("reconcile never touches pi.events (the emit path is deleted, not just disabled)", () => {
+		const entry = makeRegistryEntry({ state: "orphaned" });
+		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const pi = createMockPi();
+
+		reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+
+		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
+		expect(pi.events.emit).not.toHaveBeenCalled();
 	});
 });
 

@@ -13,7 +13,8 @@
  * 可查、对账可补），不加同步握手。
  */
 
-import { isPidAlive } from "../kill-tree.ts";
+import { isPidAlive } from "@xyz-agent/extension-protocol/background-task";
+
 import { readTailSummary } from "./output-tail.ts";
 import { readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
 import { finalizeTask, getActiveTasks } from "./task-store.ts";

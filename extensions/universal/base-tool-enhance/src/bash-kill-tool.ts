@@ -18,9 +18,11 @@
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@xyz-agent/extension-protocol/background-task";
 import { Type } from "typebox";
 
-import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "./kill-tree.ts";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
 import { ensurePollerRunning } from "./background/poller.ts";
 import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
 import { getAllTasks, markKillingIntent } from "./background/task-store.ts";
@@ -37,6 +39,8 @@ const BASH_KILL_DESCRIPTION = [
 
 /** JSON 输出缩进（registry.ts 同款）。 */
 const JSON_INDENT = 2;
+
+const logger = getLogger("base-tool-enhance");
 
 function textResult(text: string): AgentToolResult<unknown> {
 	return { content: [{ type: "text", text }], details: undefined };
@@ -77,11 +81,15 @@ export function createBashKillToolDefinition() {
 				}
 				// registry-only 活跃条目 = 他进程任务（本进程活跃任务必在单例表）——跨进程
 				// 不可 kill：处置权归发起进程；属主若已死，孤儿由 xyz-agent runtime 在
-				// session 销毁时或启动期兜底扫描时收殓（属主判定，u-bte-remove 下沉）
+				// session 销毁时或启动期兜底扫描时收殓（属主判定，u-bte-remove 下沉；
+				// 纯 CLI 独立安装无 runtime 收殓兜底，孤儿自然退出或手动杀——E11 已
+				// 接受边界，hint 按形态分流，不写死 runtime 承诺）
 				return killedFalse(
 					"cross-process running task owned by another pi process",
 					"the task is managed by the pi process that started it (bash_kill from that session); " +
-						"if that process is gone, the owning xyz-agent runtime will collect the orphan when its session ends or on app restart",
+						"if that process is gone, the orphan keeps running until it exits on its own; " +
+						"inside the xyz-agent runtime it is collected when the owner's session ends or on app restart; " +
+						"standalone pi: kill the process group manually (kill -- -<pgid>; the registered task pid is the pgid) if it lingers",
 				);
 			}
 			if (isTerminalState(fromStore.state)) {
@@ -125,7 +133,13 @@ export function createBashKillToolDefinition() {
 			if (marked !== undefined) {
 				writeRegistryEntry(marked.registryPath, taskToRegistryEntry(marked));
 			}
-			killProcessTree(fromStore.pid);
+			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2：进程原语
+			// 零日志依赖，协议侧 step 标识符 + 本包落盘通道）
+			killProcessTree(fromStore.pid, (step, err) =>
+				logger.debug(step, {
+					detail: { pid: fromStore.pid, err: err instanceof Error ? err.message : String(err) },
+				}),
+			);
 			// 轮询器确保在跑：边沿收尾（写终态）依赖它
 			ensurePollerRunning();
 			return textResult(

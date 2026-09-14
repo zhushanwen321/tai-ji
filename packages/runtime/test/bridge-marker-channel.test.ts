@@ -55,7 +55,7 @@ function makeMockClient(): { client: IPiEngine; send: ReturnType<typeof vi.fn> }
 /** pluginService 最小 mock：按需提供 bridge 消费的方法（缺省方法模拟 not-available 分支） */
 function makePluginService(overrides: Record<string, unknown> = {}): IPluginService {
   return {
-    getBridgeSyncPayload: () => ({ tools: [], commands: [], success: true }),
+    getBridgeSyncPayload: () => ({ tools: [], success: true }),
     handleBridgeToolExecute: vi.fn().mockResolvedValue({ content: 'tool ok' }),
     handleBridgeEvent: vi.fn(),
     handleBridgeIntercept: vi.fn().mockResolvedValue({ injectedMessages: [] }),
@@ -173,7 +173,7 @@ describe('bridge-handler: sendExtensionUiResponse 序列化形状', () => {
   }
 
   it('bridge:sync（设计 §3.3-D6 枚举的 6 处存量之一）→ payload JSON 字符串 + select', async () => {
-    const syncPayload = { tools: [{ name: 'sleep-tool', description: 'd', parameters: {} }], commands: [], success: true }
+    const syncPayload = { tools: [{ name: 'sleep-tool', description: 'd', parameters: {} }], success: true }
     const { client, send } = makeMockClient()
     const handler = new BridgeHandler(makePluginService({ getBridgeSyncPayload: () => syncPayload }))
     await handler.handleBridgeRequest('sess-1', 'req-1', 'bridge:sync', {}, client)

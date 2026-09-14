@@ -8,6 +8,10 @@
  * - hasPendingId / isPendingActive: 写侧落盘前置判断（register 去重 / unregister 活跃判定）
  *
  * 设计要点：
+ * - 差集规则本体（register 首见去重 + unregister 全局抵消 + id 非法跳过）单点在
+ *   @xyz-agent/extension-protocol 的 pending-entries（与 bte 对账同源消费，
+ *   ext-simplify-13 E6）；本文件在其上只保留 pending 产品语义：类型归一 /
+ *   opts.types / currentSessionId 过滤与写侧判定
  * - session entries 是唯一状态源，本文件无内存状态（历史的内存 registry、session_start
  *   重建、TTL 与 shutdown 机器已删除）——「落盘了什么」与「查询到什么」共用同一份扫描，
  *   结构上不可分歧
@@ -16,6 +20,7 @@
  *   对齐 goal continuation 守卫语义）；历史 session 文件中遗留的带 expiresAt 的
  *   register entry 无需迁移——差集语义不读该键
  */
+import { applyPendingDiff, scanPendingEntries } from "@xyz-agent/extension-protocol";
 
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务） */
 export type PendingType = "workflow" | "subagent" | "bash";
@@ -37,27 +42,6 @@ export interface PendingEntry {
 	registeredAt: number;
 	/** 注册时的 sessionId（用于跨 session 残留过滤） */
 	sessionId: string;
-}
-
-/** pending:register entry 在 entries 里的最小可识别形状 */
-interface RegisterEntryData {
-	id: unknown;
-	type: unknown;
-	name: unknown;
-	registeredAt: unknown;
-	sessionId: unknown;
-}
-
-/** pending:unregister entry 在 entries 里的最小可识别形状。
- *  T2 通知由 subagent-workflow 自有通道 bg-notify-render 承担，不经本事件。 */
-interface UnregisterEntryData {
-	id: unknown;
-}
-
-/** SessionEntry 的最小可识别形状（duck-typed，避免依赖 SDK 具体类型） */
-interface EntryLike {
-	customType?: string;
-	data?: unknown;
 }
 
 /** countActiveFromEntries 的过滤选项。 */
@@ -99,9 +83,9 @@ export function countActiveFromEntries(
 	entries: unknown[],
 	opts?: CountActiveOptions,
 ): CountActiveResult {
-	// 单趟扫描分流 register/unregister（S-10 容错一致），差集过滤见 filterActiveRegisters
-	const { registerEntries, unregisteredIds } = scanPendingEntries(entries);
-	const active = filterActiveRegisters(registerEntries, unregisteredIds, opts);
+	// 差集本体（首见去重 + 抵消 + id 非法跳过，S-10 容错在内）单点委托 protocol；
+	// 本层只叠加 pending 产品过滤（normalize / types / currentSessionId，见 filterActiveRegisters）
+	const active = filterActiveRegisters(applyPendingDiff(scanPendingEntries(entries)), opts);
 
 	return {
 		count: active.length,
@@ -121,9 +105,9 @@ export function hasPendingId(entries: unknown[], id: string): boolean {
 
 /**
  * 写侧前置判断②：id 是否活跃（有 register 且无任何 unregister）。
- * unregister listener 落盘前判断用（U8 未知/已注销 id 忽略）；bte 对账直接
- * appendEntry 的注销与事件落盘的注销在同一份 entries 上生效（构造性一致，
- * 收尾尽力补 emit 天然幂等）。
+ * unregister listener 落盘前判断用（U8 未知/已注销 id 忽略）；构造性一致：
+ * bte 对账直接 appendEntry 的注销与事件落盘的注销落在同一份 entries 上，
+ * 任一发送方重复 unregister 均被本前置判断拦截，天然不重复落盘。
  */
 export function isPendingActive(entries: unknown[], id: string): boolean {
 	const { registerEntries, unregisteredIds } = scanPendingEntries(entries);
@@ -131,43 +115,15 @@ export function isPendingActive(entries: unknown[], id: string): boolean {
 	return registerEntries.some(({ data }) => data.id === id);
 }
 
-/** scanPendingEntries 的结果：register 原始 data 列表 + 已注销 id 集合 */
-interface PendingEntryScan {
-	registerEntries: Array<{ data: RegisterEntryData }>;
-	unregisteredIds: Set<string>;
-}
-
-/** 单趟扫描 entries 按 customType 分流（pending:register / pending:unregister）。 */
-function scanPendingEntries(entries: unknown[]): PendingEntryScan {
-	const scan: PendingEntryScan = { registerEntries: [], unregisteredIds: new Set() };
-
-	for (const raw of entries as EntryLike[]) {
-		// S-10：同 countActiveFromEntries——null/undefined 元素先守卫再访问字段。
-		if (!raw || typeof raw !== "object") continue;
-		if (raw.customType === "pending:register") {
-			scan.registerEntries.push({ data: (raw.data ?? {}) as RegisterEntryData });
-		} else if (raw.customType === "pending:unregister") {
-			const data = (raw.data ?? {}) as UnregisterEntryData;
-			if (typeof data.id === "string") {
-				scan.unregisteredIds.add(data.id);
-			}
-		}
-	}
-
-	return scan;
-}
-
-/** 差集过滤：跳过 id 非法 / 已注销 / 重复 register / 跨 session 残留的 entry，按 opts.types 过滤类型。 */
+/** pending 特有过滤层：normalize 归一 + opts.types 过滤 + 跨 session 残留过滤。
+ *  差集本体（首见去重 / 抵消 / id 非法跳过）已由 protocol applyPendingDiff 单点
+ *  完成——本函数不做任何差集判定，只消费其活跃结果。 */
 function filterActiveRegisters(
-	registerEntries: Array<{ data: RegisterEntryData }>,
-	unregisteredIds: Set<string>,
+	activeRegisters: Array<{ data: Record<string, unknown> }>,
 	opts?: CountActiveOptions,
 ): PendingEntry[] {
 	const active: PendingEntry[] = [];
-	const seen = new Set<string>();
-	for (const { data } of registerEntries) {
-		if (typeof data.id !== "string" || unregisteredIds.has(data.id) || seen.has(data.id)) continue;
-		seen.add(data.id);
+	for (const { data } of activeRegisters) {
 		const entry = normalizeRegisterEntry(data, "");
 		if (opts?.types && !opts.types.includes(entry.type)) continue;
 		// 跨 session 残留跳过（基准 = opts.currentSessionId）。判据读原始 data.sessionId
@@ -202,8 +158,9 @@ export function normalizePendingType(raw: unknown): PendingType {
 	return "workflow";
 }
 
-/** 从 entry data 归一化为 PendingEntry（补默认值，容错缺失字段） */
-function normalizeRegisterEntry(data: RegisterEntryData, currentSessionId: string): PendingEntry {
+/** 从 entry data 归一化为 PendingEntry（补默认值，容错缺失字段）。
+ *  id 的 string 合法性已由差集层（applyPendingDiff）判定，此处直接窄化。 */
+function normalizeRegisterEntry(data: Record<string, unknown>, currentSessionId: string): PendingEntry {
 	const registeredAt = typeof data.registeredAt === "number" ? data.registeredAt : Date.now();
 	return {
 		id: data.id as string,

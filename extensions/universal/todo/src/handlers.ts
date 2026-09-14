@@ -10,6 +10,7 @@ import {
 	migrateTodo,
 	type TodoDetails,
 } from "./model";
+import { renderStatusText } from "./render";
 import type { TodoSessionState } from "./state";
 
 const logger = getLogger("todo");
@@ -94,11 +95,12 @@ export function reconstructState(state: TodoSessionState, ctx: ExtensionContext)
 
 // ── agent_end 子函数 ────────────────────────────────
 
-export function handleAutoClear(state: TodoSessionState): { handled: boolean; cleared: boolean } {
+/** 返回是否已清空（false 含三种形态：未全完成 / 本轮刚锚定 / 延迟未到——调用方均无需刷新） */
+export function handleAutoClear(state: TodoSessionState): boolean {
 	const allCompleted = state.todos.every((t) => t.status === "completed");
 	if (!allCompleted) {
 		state.allCompletedAtCount = null;
-		return { handled: false, cleared: false };
+		return false;
 	}
 	if (state.allCompletedAtCount === null) {
 		state.allCompletedAtCount = state.userMessageCount;
@@ -108,9 +110,9 @@ export function handleAutoClear(state: TodoSessionState): { handled: boolean; cl
 		state.nextId = 1;
 		state.allCompletedAtCount = null;
 		state.completionSteered = false;
-		return { handled: true, cleared: true };
+		return true;
 	}
-	return { handled: true, cleared: false };
+	return false;
 }
 
 export function handleCompletionSteer(state: TodoSessionState): boolean {
@@ -147,7 +149,8 @@ export function registerTodoEventHandlers(
 		try {
 			const pendingTodos = state.todos.filter(isPending);
 			if (pendingTodos.length > 0) {
-				ctx.ui.setStatus("todo", `📋 ${pendingTodos.length} pending`);
+				// 文案与 refreshDisplay 共用 renderStatusText（N/M 口径），避免同一 status 槽两种格式交替
+				ctx.ui.setStatus("todo", renderStatusText(state.todos, ctx.ui.theme));
 			}
 			// 优先级 1: agent_end 设置的延迟 steer
 			if (state.pendingSteerMessage) {
@@ -170,12 +173,8 @@ export function registerTodoEventHandlers(
 			// 全部 completed → 总检查 steer（仅一次）
 			handleCompletionSteer(state);
 
-			// auto-clear（全部完成后延迟清理）
-			const ac = handleAutoClear(state);
-			if (ac.handled) {
-				if (ac.cleared) refreshDisplay(ctx);
-				return;
-			}
+			// auto-clear（全部完成后延迟清理；已清空才需要刷新显示）
+			if (handleAutoClear(state)) refreshDisplay(ctx);
 		} catch (e) {
 			// best-effort：agent_end 事件处理器出错不阻断会话主流程，仅记录调试日志
 			logger.debug("agent_end error", { error: String(e) });

@@ -17,18 +17,23 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 	getAgentDir: () => dataDirRef.dir,
 }));
 
-// kill-tree 转发真实杀 + 记录调用（timeout 分支断言 killProcessTree 被调）
+// 进程原语（ext-simplify-13 后单点在 protocol 子出口）转发真实杀 + 记录调用
+//（timeout 分支断言 killProcessTree 被调）
 const { killTreeCalls } = vi.hoisted(() => ({ killTreeCalls: [] as number[] }));
-vi.mock("../kill-tree.ts", async (importOriginal) => {
-	const orig = await importOriginal<typeof import("../kill-tree.ts")>();
+vi.mock("@xyz-agent/extension-protocol/background-task", async (importOriginal) => {
+	const orig = await importOriginal<
+		typeof import("@xyz-agent/extension-protocol/background-task")
+	>();
 	return {
 		...orig,
-		killProcessTree: (pid: number): void => {
+		killProcessTree: (pid: number, onFallback?: (step: string, err: unknown) => void): void => {
 			killTreeCalls.push(pid);
-			orig.killProcessTree(pid);
+			orig.killProcessTree(pid, onFallback);
 		},
 	};
 });
+
+import { isPidAlive } from "@xyz-agent/extension-protocol/background-task";
 
 import { createBashKillToolDefinition } from "../bash-kill-tool.ts";
 import { createBashOutputToolDefinition } from "../bash-output-tool.ts";
@@ -39,7 +44,6 @@ import type { RegistryEntry } from "../background/types.ts";
 import { DEFAULT_MAX_CONCURRENT_BACKGROUND, spawnBackgroundTask } from "../background/spawn-background.ts";
 import { clearTaskStoreForTest, getActiveTasks, getTask, markKillingIntent } from "../background/task-store.ts";
 import { reapBackgroundTasksNow, resetProcessExitGuardForTest } from "../background/process-exit-guard.ts";
-import { isPidAlive } from "../kill-tree.ts";
 
 const DATA_DIR = mkdtempSync(join(tmpdir(), "bte-data-"));
 dataDirRef.dir = DATA_DIR;

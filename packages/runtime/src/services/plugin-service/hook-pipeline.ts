@@ -13,7 +13,8 @@
  *   每个 handler 超时 5s、超时/异常视为放行，Worker crashed 跳过该 handler。
  * - D2-3 映射层：Worker 响应（InterceptorResult）到 HookResult 的字段映射在此收口
  *   （modifiedData → transformedData），消费侧（event-interpreter 等）读 transformedData。
- * - 注入透传（plugin-intercept-injection 设计 §3.3-D2/D5）：注入形状守卫在本层逐插件
+ * - 注入透传（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D2/D5，文档已退役于
+ *   `fadd8b8b4`）：注入形状守卫在本层逐插件
  *   执行（本层是唯一持有 pluginId 的位置）；injectedMessages 跨插件累积拼接（非覆盖），
  *   消费方为 handleBridgeIntercept 的注入映射（bridge-interop.ts）。
  */

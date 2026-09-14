@@ -1,5 +1,6 @@
 # ext-simplify-04：session-reader 过度设计简化
 
+> **行号快照声明（v2）**：文中行号为 2026-09-11 起草快照（审查已逐条重定位核实内容全部属实——eslint 注释现 592-599、roots.ts 薄包装现 306-322、find.ts resolveSessionRoots 现 682、E5 现 1323-1331/1389-1396、E7 消费点现 833/1016、E8 现 234-284、A4 的 find.ts:103→:63 与 :447-449→:412-415 等），实施时以符号检索定位。
 > **一句话结论**：落实 2026-09-11 审计对 `@zhushanwen/pi-session-reader` 的全部发现——1 项 high（find 分组三次全量扫盘收敛为单次）+ 3 个设计决策（C5 修法、family enrichRefs 去留、行渲染双份收敛）+ 11 项执行清理（doctor 缓存机删除并同批回写设计文档、测试兼容层退役、deps 注入收敛、死字段/双写/重复知识归一），全部不改变 session_read 工具对 LLM 的调用契约。
 
 ## 开篇（SCQA）
@@ -34,8 +35,8 @@
 1. **G1 契约零回归**：LLM 调用 `session_read` 的 schema、action 语义、错误恢复路径（👉 指引）不变；两处输出文本**有意增强**（family subagents 行、outline 旁支标记）单独登记。
 2. **G2 单一权威源**：每份知识只写一次——行渲染格式、identity 尾读、text 块提取、缓存 TTL 判定，消灭已漂移的双份实现。
 3. **G3 family 信息密度**：subagent 的 task/终态/agent 类型进入 family 文本输出（现状只有 slug 短标签），LLM 免一次 outline 往返。
-4. **G4 find 扫盘成本 2-3× → 1×**：真实 agentDir（本机 subagent 根 1330 文件、doctor 实测单次根扫描 210ms）上 find 的目录扫描从恒 2 次（零匹配 3 次）降为 1 次。
-5. **G5 设计文档同步**（C-proc-10）：doctor 缓存删除同批回写 `extensions/universal/session-reader/docs/2026-09-10-session-root-discovery-and-env-transparency.md` 的 §6.3/§7B 要点 8/§11.9 与变更历史——登记即债务，修复即清账。
+4. **G4 find 扫盘成本 2-3× → 1×**：真实 agentDir（本机 subagent 根，文件数以验收当日实测为准——2026-09-13 实测 .jsonl 745/含 .finalized 1131；doctor 实测单次根扫描 210ms）上 find 的目录扫描从恒 2 次（零匹配 3 次）降为 1 次。
+5. **G5 设计文档同步（C-proc-10 回写清单）**：本设计五处执行项各自清偿了 2026-09-10 设计文档/impl-plan 已登记的债务，同批回写义务逐项落到执行项验证列——E3（doctor 缓存）：2026-09-10 设计文档 §6.3/§7B 要点 8/§11.9 与变更历史；E1：impl-plan D-15④ 已知成本清账 + 变更历史登记；E4：impl-plan D-8 挂账清账；E9：2026-09-10 设计文档 §7B 图删 id 字段 + impl-plan D-2 清账；A3：2026-09-10 设计文档 §7B 要点 7 改写（薄包装保留→已退役）+ impl-plan D-3 清账——登记即债务，修复即清账。
 
 **In-scope**：session-reader 包内全部审计发现（含附加 low 项与 1 项正确性顺带修复）、包内测试面清理、上列设计文档回写。
 **Out-of-scope**：extract `commits` 预设（审计判定保留——已登记 + 测试锁定，使用观察零命中前不动）；`resolveWorkflows` 全量 parse 的性能优化（列 §6 待验证）；`parser.ts` 的 `lastLinePartial` 字段（语义真实成本极低，保留）；工具 schema 与 guidelines 的任何变更；xyz-agent 仓内其他包。
@@ -48,7 +49,7 @@
 
 ### 2.1 重复 IO：find 分组三次全量扫盘（审计 C5，high）
 
-先定义**会话根解析**（后文反复使用）：`resolveSessionRoots(signals)`（`discovery/roots.ts`）从信号包推导最多 4 个候选根——`[live]`（宿主 live 目录）、`[default]`（`<agentDir>/sessions/`）、`[legacy]`、`[subagent]`（`<agentDir>/subagents/`）——逐根 realpath 去重后**递归扫描**每个根下的全部 `.jsonl`（readdir + 每文件 stat）。subagent 根在真实环境可达 1330（xyz-agent）~2596（纯 pi）文件，单次全量根扫描实测约 210ms。
+先定义**会话根解析**（后文反复使用）：`resolveSessionRoots(signals)`（`discovery/roots.ts`）从信号包推导最多 4 个候选根——`[live]`（宿主 live 目录）、`[default]`（`<agentDir>/sessions/`）、`[legacy]`、`[subagent]`（`<agentDir>/subagents/`）——逐根 realpath 去重后**递归扫描**每个根下的全部 `.jsonl`（readdir + 每文件 stat）。subagent 根在真实环境为数千文件量级（2026-09-13 实测：纯 pi 根 ~/.pi/agent/subagents .jsonl 745/含 .finalized 1131——即本设计 S1 验收与 real-data 测试锚定的根；xyz-agent 生产根 1458/4228），单次全量根扫描实测约 210ms。
 
 现状 `doFind`（`tool-handler.ts`）无显式 source 时的执行流：
 
@@ -74,7 +75,7 @@ LLM: session_read { action:"find", query:"..." }
 
 **doctor 缓存机**（`doctor.ts:46-95` + 注入点 157）：TTL(5s)+mtime 双通道失效的进程内缓存，赌「agent 高频反复问 doctor」。但同文件已让 subagent 根默认 `'stat'` 只做存在性检查（最贵的 2596 文件路径 opt-in），被缓存的默认路径只剩 main 根 readdir+stat——**缓存保护的已是便宜路径**；且 design §11.9 自记「Gate B 活体 doctor 秒级返回」未依赖缓存命中。更重的间接成本：`§7B 要点 8「find 恒不读缓存」`这条防污染规则（PS-14：缓存会把「首条 assistant 前 0 文件」误报成「主根为空」）**只因这个 doctor 专属缓存存在才需要存在**——设计文档用整段分析防它自伤。
 
-**family enrichRefs 回填**（`discovery/subagents.ts:501-521` + `core/family.ts` 的 M1 占位约定）：core 层把 `SessionRef.fileName`/`SubagentRef.cwd` 占位为空串，discovery 层再全家族遍历回填真实值——两阶段机制服务零读者：文本层 formatFamilyText 只读 sessionId/rootSessionId/slug/cleanedUp/mtime。同时 `SubagentRef` 的富字段（task/agentName/model/status/sessionFile，来自 manifest/identity 组装，不经 enrichRefs）同样无文本读者——manifest 富化组装的信息在 family 输出里完全不可见（LLM 要再发一次 outline 才能看到 subagent 干了什么）。
+**family enrichRefs 回填**（`discovery/subagents.ts:501-521` + `core/family.ts` 的 M1 占位约定）：core 层把 `SessionRef.fileName`/`SubagentRef.cwd` 占位为空串，discovery 层再全家族遍历回填真实值——两阶段机制服务零读者：文本层 formatFamilyText 只读 sessionId/rootSessionId/slug/cleanedUp/mtime。同时 `SubagentRef` 的富字段（task/agentName/model/status/sessionFile，来自 manifest/identity 组装，不经 enrichRefs）同样无文本读者——manifest 富化组装的信息在 **flat family（recursive 默认 false）路径不可见**（recursive:true 执行树路径已渲染 status/slug/agentName/task——execution-tree.ts:500-503；默认形态与 recursive 路径信息密度不对齐，LLM 用默认形态要再发一次 outline 才能看到 subagent 干了什么）。
 
 **死字段群**：`ToolResultSummaryEntry.fullEntry`（render.ts——注释声称「includeToolResult:true 时经此返回全文」，真实全文态走另一分支 push 原 entry，死分支 + 让摘要降噪在 details 层失效）；`SessionRoot.id`（恒等于 kind，注释声称的「doctor 表行键」实际由 kind 承担）；workflow.ts 的 thinkingLevel/contentPreview；`withMetadataCache` 的多余 export；result-action.ts:123-124 的孤儿 doc 注释（拆分残留，两个连续 doc 注释前者无函数可挂）。
 
@@ -144,7 +145,7 @@ subagents:
 #### D2：family enrichRefs 机制去留（选定：删除回填 + 富字段选择性展示）
 
 - **采用**：两件事正交处理。① **删 `enrichRefs`**（`subagents.ts:501-521` + buildFamilyFromFs 步骤 6 调用 + family.ts 的「M1 占位 M2 补全」双阶段约定注释）——回填的 fileName/cwd 零读者，family 路径这两个字段维持占位空串（类型上与 find 路径共享 `SessionRef`，find 路径的 fileName/cwd 有真实消费者，字段本身保留）；`FamilyFsScan.pathToRef` 保留（workflow 腿 resolveWorkflows 反查仍用）。② **formatFamilyText 的 subagents 行增加展示**：`status`（终态短标签）+ `agentName` + `task` 截 60 字符——给 manifest/identity 组装的富字段一个文本消费者，信息密度对齐 find 的 firstMessagePreview。
-- **被否**：**方案 A「保留 enrichRefs + 展示使回填有用」**——enrichRefs 回填的是 fileName/cwd，展示文件路径/工作目录对 LLM 是噪声；即使展示不经 enrichRefs 的 task/model/status，fileName/cwd 回填仍零读者，机制仍该删。**方案 B「纯删除不展示」**——富字段继续不可见，manifest 富化组装（cleanedUp 判定必须读 manifest，富字段是零边际成本的顺带产物）的信息被浪费，LLM 判断「哪个 subagent 分支相关」要多一次 outline 往返。
+- **被否**：**方案 A「保留 enrichRefs + 展示使回填有用」**——enrichRefs 回填的是 fileName/cwd，展示文件路径/工作目录对 LLM 是噪声；即使展示不经 enrichRefs 的 task/model/status，fileName/cwd 回填仍零读者，机制仍该删。**方案 B「纯删除不展示」**——flat family 富字段继续不可见（recursive 路径已可见的表述修正见 §2.3），manifest 富化组装（cleanedUp 判定必须读 manifest，富字段是零边际成本的顺带产物）的信息被浪费，LLM 判断「哪个 subagent 分支相关」要多一次 outline 往返。
 - **证据**：`subagents.ts:501-521`（enrichRefs 仅 buildFamilyFromFs 一处调用）；`tool-handler.ts:607-629`（formatFamilyText 现状只读 4 字段）；全仓 grep 富字段文本消费为零（zcode-subagent-cli/reader.ts 等仓内消费面只透传 details 不解构）。
 - **效果**：G3 成立；SubagentRef 的 model/sessionFile 仍不展示、随 details 透传保留（数据模型面完整性，与 execution-tree 节点字段同口径——接口注释标注「仅 details 可见，不进文本渲染」）。
 
@@ -159,17 +160,17 @@ subagents:
 
 | # | 执行项 | 位置 | 改动 | 验证 |
 |---|---|---|---|---|
-| E1 | find 预解析根复用（D1） | tool-handler.ts doFind + find.ts findSessions + findNoMatch | opts 增可选 roots；doFind 单次解析传入三处 | 探针 P1（调用次数=1）+ find 分组/零匹配既有测试全绿 |
+| E1 | find 预解析根复用（D1） | tool-handler.ts doFind + find.ts findSessions + findNoMatch | opts 增可选 roots；doFind 单次解析传入三处 | 探针 P1（调用次数=1）+ find 分组/零匹配既有测试全绿；**impl-plan D-15④「已知成本」清账 + 变更历史登记（G5）** |
 | E2 | family：删 enrichRefs + 富字段展示（D2） | subagents.ts:501-521,~60 / family.ts 占位注释 / tool-handler.ts formatFamilyText | 删回填机制；subagents 行加 status/agentName/task(截 60) | 真实 session family 输出含新字段；孤儿 cleanedUp 用例仍绿；快照更新 |
-| E3 | doctor 缓存机删除 + 文档同批回写 | doctor.ts:46-95,157 / roots.ts（SessionRootCache 链）/ tool-handler.ts（常量引用）/ 2026-09-10 设计文档 §6.3·§7B8·§11.9·变更历史 / impl-plan 台账 | 删 DoctorCacheEntry/doctorScanCache/doctorRootCache 与注入；连带删 SessionRootCache/SessionRootCacheEntry/ScanOptions.cache/SessionRoot.cached 与 renderDoctor「缓存命中」行（唯一实装消失后全链死代码）；statDirMtimeOrNull 与 TTL 常量迁至 tool-handler（metadata 缓存独占），`METADATA_CACHE_TTL_MS = 5000` 独立定义不再别名；doctor.ts 头注释同步 | doctor 输出无「缓存命中」；重复调用输出一致（每次实扫反而更实时）；设计文档 grep 无残留「进程内缓存」承诺；探针 P2 |
-| E4 | 测试兼容层退役 | tool-handler.ts:87-91,1331（除 SessionReadSignals）+ result-action.ts:8/doctor.ts:4/search-across.ts:8/extract.ts:7 头注释 + tool-handler.test.ts:7-14/result.test.ts:7 | 删 6 条纯转发 re-export；测试 import 改指域模块；4 处「导出面不变」头注释删除；连带 `withMetadataCache` 去 export、`handleSessionRead` 签名收紧为 `SessionReadSignals` 单型（兑现 D-8 挂账，测试裸 string 调用机械改信号包） | extensions 三连全绿（typecheck/lint/test）；`export type { SessionReadSignals }` 保留（index.ts 生产消费） |
+| E3 | doctor 缓存机删除 + 文档同批回写 | doctor.ts:46-95,157 / roots.ts（SessionRootCache 链）/ tool-handler.ts（常量引用）/ 2026-09-10 设计文档 §6.3·§7B8·§11.9·变更历史 / impl-plan 台账 | 删 DoctorCacheEntry/doctorScanCache/doctorRootCache 与注入；连带删 SessionRootCache/SessionRootCacheEntry/ScanOptions.cache/SessionRoot.cached 与 renderDoctor「缓存命中」行（唯一实装消失后全链死代码）；statDirMtimeOrNull 与 TTL 常量迁至 tool-handler（metadata 缓存独占），`METADATA_CACHE_TTL_MS = 5000` 独立定义不再别名，连带清理同类悬空注释两处——tool-handler.ts:1285-1290（METADATA_CACHE_TTL_MS「量级与 doctor 根扫描缓存同档（DOCTOR_CACHE_TTL_MS），待 §11.3a 实测校准」句）与 :1269-1272（MetadataCacheEntry「与 doctor 的 doctorScanCache 独立实例……」同域指称）；doctor.ts 头注释同步 | doctor 输出无「缓存命中」；重复调用输出一致（每次实扫反而更实时）；设计文档 grep 无残留「进程内缓存」承诺；探针 P2 |
+| E4 | 测试兼容层退役 | tool-handler.ts:87-91,1331（除 SessionReadSignals）+ result-action.ts:8/doctor.ts:4/search-across.ts:8/extract.ts:7 头注释 + tool-handler.test.ts:7-14/result.test.ts:7 | 删 6 条纯转发 re-export；测试 import 改指域模块；4 处「导出面不变」头注释删除；连带 `withMetadataCache` 去 export、`handleSessionRead` 签名收紧为 `SessionReadSignals` 单型（兑现 D-8 挂账，测试裸 string 调用机械改信号包） | extensions 三连全绿（typecheck/lint/test）；`export type { SessionReadSignals }` 保留（index.ts 生产消费）；**impl-plan D-8 挂账清账回写（G5）** |
 | E5 | ResultActionDeps 收敛 + err 双轨归一 | tool-handler.ts:1321-1330,1390-1394 / result-action.ts:38-49 / handler-utils.ts | 删 RESULT_ACTION_DEPS 常量与恒被覆盖的 resolveSessionId 死绑定；接口收窄为 3 真私有成员（resolveSessionId/disambiguate/safeParse）；err/stripHash/requireStr 改直接 import（stripHash/requireStr 下沉 handler-utils 并更新其头注释「仅 tool-handler 使用」清单）；sessionIdPrefixLen 改 handler-utils 导出常量 | result 全部用例绿；同包 helper 获取范式单一化（grep 无 deps.err） |
 | E6 | fullEntry 死字段 | render.ts:573-584,623 | 删字段与赋值；接口注释修正（全文态真实路径是 push 原 entry） | typecheck + detail 摘要态用例绿 |
 | E7 | 行渲染统一（D3） | render.ts OutlineResult/renderOutline/renderEntryGranularity + tool-handler.ts formatOutlineText,830,1013 | lines 随结果返回；删 formatOutlineText；旁支标记统一为 `[旁支 N entries]` | outline/export 既有用例快照更新后绿；预算降级用例绿 |
 | E8 | identity 尾读收敛 | find.ts:233-283 / subagents.ts:319-345 | 删 readTailIdentityForMatch；matchSubagentMetadata 的 P-fallback 改调 readTailIdentity 取子集（task/slug/agent） | P-fallback 匹配用例绿；行为差异（缺 rootSessionId 的畸形行从「可匹配」变「不匹配」）登记为可接受——identity 守卫 m0 契约本就要求 rootSessionId+slug 必填 |
-| E9 | SessionRoot.id 删除 | roots.ts:44,106-108,~186 | 删 id 字段；spec() 简化；dedupedInto 赋值改用 kept.kind | typecheck + doctor 去重注记用例绿 |
+| E9 | SessionRoot.id 删除 | roots.ts:44,106-108,~186 | 删 id 字段；spec() 简化；dedupedInto 赋值改用 kept.kind | typecheck + doctor 去重注记用例绿；**2026-09-10 设计文档 §7B 图删 id 字段 + impl-plan D-2 清账（G5）** |
 | E10 | byteBudget / OutlineOptions.budget 定性 | search-across.ts:331-338 / render.ts:21,68 + tool-handler.ts:822,1012 | 两个测试专用缝统一 doc-right 处理：注释明确「测试注入缝、非模型可见参数、动机（64MB fixture / 降级用例小预算）」；tool-handler 两处 `budget: 2000` 字面量删除（走默认常量） | 注释审阅；render/search 用例绿 |
-| E11 | content 提取收敛 + S7 登记修正 | core/render.ts（导出 text 块提取）/ result-action.ts:61 / extract.ts:38 / find.ts:124 五变体 | 以 core 层导出的「纯 text 块 → string[]」提取函数为共享核；3 个纯 text 过滤变体（assistantMessageText ''join / extractContentText '\n'join / extractTextFromContent ' 'join+空返 undefined）改为一行组合调用，join 语义留在各自调用点（S7 警告适用：**不可行为合并**）；filter 集特异的 2 个（messageReadableText 带 thinking/toolCall 占位、searchableText 带 JSON 兜底）保留独立；S7 注释清单修正为完整 5+1 变体映射 | 各 action 用例逐字节比对绿（尤其 result 的 A4 逐字节一致门）；typecheck |
+| E11 | content 提取收敛 + S7 登记修正 | core/render.ts（导出白名单共享核宿主）/ result-action.ts:61 / extract.ts:38 / find.ts:124 / tool-handler.ts:539-557 / search-across.ts:64-82（五变体：3 白名单 + 2 特异） | 共享核筛选语义写死 = **白名单 `type==='text'` 取 text 字段**（与 3 个纯 text 变体现状逐字节等价；render.ts 既有 extractText 为排除法、属 filter 集第 3 个特异变体，**维持独立不改造**——S7 清单映射相应为 4 白名单归一 + 2 特异独立）；3 个纯 text 过滤变体（assistantMessageText ''join / extractContentText '\n'join / extractTextFromContent ' 'join+空返 undefined）改为一行组合调用，join 语义留在各自调用点（S7 警告适用：**不可行为合并**）；filter 集特异的 2 个（messageReadableText 带 thinking/toolCall 占位、searchableText 带 JSON 兜底）保留独立；S7 注释清单修正为完整 5+1 变体映射 | 各 action 用例逐字节比对绿（尤其 result 的 A4 逐字节一致门）；typecheck |
 
 ### 3.4 附加执行项（审计 sr 单元发现，同批顺带，5 组）
 
@@ -177,8 +178,8 @@ subagents:
 |---|---|---|---|---|
 | A1 | session-command 空串 guard（正确性，high） | tui/session-command.ts:42,56 | 两处 listAll 前补空串 guard（对齐 hash-provider.ts:158-162 同款；或抽共享取数 helper） | 空 getCwdSessionDir 时返回 [] 不触发全盘 listAll；单测补一条 |
 | A2 | formatSessionNotFound 窄化 | subagents.ts:76-89 | `resolveSessionRoots({ agentDir }, { subagents: 'stat' })`（该路径只渲染 main 根行） | not-found 错误文案用例绿；subagent 根不再深扫 |
-| A3 | 薄包装删除 | roots.ts:262-288 + subagents.ts:7,117,174 | 删 listMainSessions/listSubagentSessions，subagents.ts 直调 resolveSessionRoots+filter（包装内部即此表达式，恒等价）；CHANGELOG 登记 npm 深 import 移除（minor breaking note） | typecheck + family 用例绿 |
-| A4 | 死字段/注释杂项 | workflow.ts:65,75,148,153,180 / execution-tree.ts 接口注释 / family.ts:131 / find.ts:103+447-449 / tui 三处 / eslint.config.mjs:496-503 / doctor.ts 残留探测注释 | 删 workflow.ts thinkingLevel/contentPreview（version 保留为 details 格式标记并注释）；execution-tree/SubagentRef 节点字段注释标注「仅 details 可见」；删 resolveParentSessionId 快路径（测试 fixture 改路径形态）；`Matched.modified` 收窄为 `Date`、删 modifiedOf 归一层（测试替身改传 Date）；tui 死防御分支删 + 双常量合一 + Omit 注释修正；eslint 注释更新为现状并视代码删除量收紧阈值；detectPiLayoutLeftovers 注释补「迁移期支持，全量迁移确认后可整段删除」 | typecheck + 相应用例绿 |
+| A3 | 薄包装删除 | roots.ts:262-288 + subagents.ts:7,117,174 | 删 listMainSessions/listSubagentSessions，subagents.ts 直调 resolveSessionRoots+filter（包装内部即此表达式，恒等价）；CHANGELOG 登记 npm 深 import 移除（minor breaking note）；2026-09-10 设计文档 §7B 要点 7 改写（薄包装保留→已退役）+ impl-plan D-3 清账（G5） | typecheck + family 用例绿；roots.test.ts 薄包装 describe 改写为 resolveSessionRoots+filter 等价断言（保过滤语义覆盖）或删除（登记覆盖损失） |
+| A4 | 死字段/注释杂项（workflow.test.ts 富字段断言与 fixture 同批删改） | workflow.ts:65,75,148,153,180 / execution-tree.ts 接口注释 / family.ts:131 / find.ts:103+447-449 / tui 三处 / eslint.config.mjs:496-503 / doctor.ts 残留探测注释 | 删 workflow.ts thinkingLevel/contentPreview（version 保留为 details 格式标记并注释）；execution-tree/SubagentRef 节点字段注释标注「仅 details 可见」；删 resolveParentSessionId 快路径（测试 fixture 改路径形态）；`Matched.modified` 收窄为 `Date`、删 modifiedOf 归一层（测试替身改传 Date）；tui 死防御分支删 + 双常量合一 + Omit 注释修正；eslint 注释更新为现状并视代码删除量收紧阈值；detectPiLayoutLeftovers 注释补「迁移期支持，全量迁移确认后可整段删除」 | typecheck + 相应用例绿 |
 | A5 | 孤儿 doc 注释 | result-action.ts:123-124 | 删无函数可挂的前一个注释块 | 审阅 |
 
 ---
@@ -189,7 +190,7 @@ subagents:
 
 | 场景 | 回溯目标 | 真实流程/数据/路径 | 通过标准 |
 |---|---|---|---|
-| S1 find 扫描次数与耗时 | G4 | 在本机真实 agentDir（`~/.pi/agent`，subagent 根 1330+ 文件）上：改前/改后各跑一次 `session_read {action:"find", query:"<真实关键词>"}` 与一次必然零匹配的 query；用临时探针日志统计 `resolveSessionRoots` 调用次数（或 vitest spy 断言 doFind 全路径恰 1 次） | 改前分组 2 次/零匹配 3 次 → 改后恒 1 次；find 返回内容（分组/截断/提示）与改前一致 |
+| S1 find 扫描次数与耗时 | G4 | 在本机真实 agentDir（`~/.pi/agent`，subagent 根文件数以验收当日实测为准）上：改前/改后各跑一次 `session_read {action:"find", query:"<真实关键词>"}` 与一次必然零匹配的 query；用临时探针日志统计 `resolveSessionRoots` 调用次数（或 vitest spy 断言 doFind 全路径恰 1 次） | 改前分组 2 次/零匹配 3 次 → 改后恒 1 次；find 返回内容（分组/截断/提示）与改前一致 |
 | S2 family 输出增强 | G3 | 对一个有 subagent 的真实 session 跑 `family`：subagents 行应含 `[completed/failed/running]`、agent 名、task 摘要（≤60 字符）；对一个含已 GC 孤儿的 session 跑 `family` | 新字段可见且截断生效；孤儿仍标 `[已清理]`；root/parents/forks/workflows 段不变 |
 | S3 outline 渲染与降级 | G2（D3） | 对含 fork 旁支的真实 session 跑 `outline`（旁支标记带 N）与 `export {format:"outline"}`；对一个长 session 验证预算降级形态（砍 assistantBrief 档） | 两 action 旁支行均为 `[旁支 N entries]`；降级档与 stats 尾段与改前语义一致 |
 | S4 doctor 无缓存化 | G2/G5 | 连续两次 `doctor`（默认形态 + `includeSubagents:true` 各一轮） | 输出无「缓存命中」；两次输出一致（文件数/耗时允许自然波动）；默认形态 subagent 根仍「未扫描」；2026-09-10 设计文档 grep「进程内缓存」无 §6.3 语境残留、变更历史有登记条目 |
@@ -217,11 +218,11 @@ subagents:
 | U9 杂项与正确性 | E10 + A1 + A4（eslint/tui 注释部分）+ A5 | 正确性修复（A1）独立可验（S5）；其余为注释级 |
 
 **文件改动地图**（新增文件无；改动集中于）：
-`tool-handler.ts`（U1/U2/U4/U5/U6 触及——预计净减 ~80 行）、`doctor.ts`（U3 大幅缩减）、`roots.ts`（U3 缓存链删除 + U8 id 删除 + U4 薄包装删除）、`find.ts`（U2 roots 参数 + U7 尾读收敛 + U8 提取变体）、`subagents.ts`（U3 stat 窄化 + U4 enrichRefs/直调 + U7）、`family.ts`（U4 注释）、`render.ts`（U5 lines + U8 fullEntry + E11 共享核）、`result-action.ts`/`extract.ts`/`search-across.ts`/`handler-utils.ts`（U1 头注释 + U6 + E11）、`tui/`（U9）、`index.ts`（零改动——工具注册面不动）、测试文件（U1 机械改造 + 各单元快照）、`docs/2026-09-10-*.md` + `.impl-plan.md`（U3 回写）、`eslint.config.mjs`（U9 注释）。
+`tool-handler.ts`（U1/U2/U4/U5/U6 触及——预计净减 ~80 行）、`doctor.ts`（U3 大幅缩减）、`roots.ts`（U3 缓存链删除 + U8 id 删除 + U4 薄包装删除）、`find.ts`（U2 roots 参数 + U7 尾读收敛 + U8 提取变体）、`subagents.ts`（U3 stat 窄化 + U4 enrichRefs/直调 + U7）、`family.ts`（U4 注释）、`render.ts`（U5 lines + U8 fullEntry + E11 共享核）、`result-action.ts`/`extract.ts`/`search-across.ts`/`handler-utils.ts`（U1 头注释 + U6 + E11）、`tui/`（U9）、`index.ts`（零改动——工具注册面不动）、测试文件（U1 机械改造 + 各单元快照）、`docs/2026-09-10-*.md` + `.impl-plan.md`（U1/U2/U3/U4/U8 回写，逐项见执行项验证列 G5 清单）、`eslint.config.mjs`（U9 注释）。
 
 **待验证检查点**（设计阶段无法确定、留给实施期）：
 1. `resolveWorkflows` 全量 parse 的真实耗时（审计发现 7，contested）——若大 session 上 family/workflow 秒级延迟可感，另立优化任务（流式逐行扫），本设计不含。
-2. npm 已发布版（0.4.0）外部深 import `listMainSessions` 的实际影响面（A3 删除后）——审计已核实仓内外零证据，按 minor breaking 在 CHANGELOG 登记即可；若实施期发现真实用户反馈，恢复薄包装成本极低。
+2. npm 已发布版（实施时核对 package.json 当前版本；v1 起草时为 0.4.0、现已 0.5.0）外部深 import `listMainSessions` 的实际影响面（A3 删除后）——审计已核实仓内外零证据，按 minor breaking 在 CHANGELOG 登记即可；若实施期发现真实用户反馈，恢复薄包装成本极低。
 3. family 展示增强后单 subagent 行的 token 量级（task 截 60 是否足够/过长）——S2 验收时以真实输出微调截断宽度。
 
 ---
@@ -246,3 +247,5 @@ subagents:
 ## 附录 C：变更历史
 
 - v1（2026-09-11）：初稿——按审计发现全量覆盖起草，3 决策 + 11 主执行项 + 5 附加项 + 9 实施单元。
+- v2（2026-09-14）：按审查报告（ext-simplify-04-session-reader.review.md，1 MF + 5 S）修订——MF1 G5 扩为 C-proc-10 回写清单（E1/E4/E9/A3 四处债务清偿的回写义务逐项落到执行项验证列 + §5 地图口径）；S1 D2 论证修正（flat/recursive 路径信息密度表述）；S2 A3/A4 测试面处置口径登记（roots.test 等价改写或删除登记损失 / workflow.test 同批删改）；S3 E11 共享核筛选语义写死（白名单；render extractText 排除法维持独立，映射 4+2）；S4 环境快照更新（subagent 根文件数以验收当日实测为准 / npm 版本实施时核对）；S5 行号快照声明 + E3 连带 METADATA_CACHE_TTL_MS 悬空注释清理。方案与决策层无变化。
+- v2.1（2026-09-14）：聚焦复审 PASS（0 MF / 3 S / 2 nano）当轮清偿——F1 环境归属互换修正（745/1131 属纯 pi 根即 S1 锚定根，xyz-agent 生产根 1458/4228）；F2 §5 地图回写单元集合 U2/U3/U4/U6/U8 → U1/U2/U3/U4/U8（U6 无回写义务、U1 漏列）+ G5 计数「四处」→「五处」；F3 E3 连带补第二处同类悬空注释（tool-handler.ts:1269-1272 MetadataCacheEntry）；F4 行号声明清单补 A4 修正（:63/:412-415）；F5 E11 位置列补全五变体路径。

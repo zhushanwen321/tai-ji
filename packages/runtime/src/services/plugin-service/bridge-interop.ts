@@ -145,11 +145,11 @@ export class BridgeToolCache {
 
   /**
    * 构造 bridge:sync 同步负载（plugin 工具 schema 塑形）。
-   * commands 目前固定空（pi 侧命令发现另走 getCommands）。
+   * pi 侧命令发现不走本协议（另走 getCommands 通路）。
    */
   getSyncPayload(): BridgeSyncPayload {
     const tools = this.schemas.map(s => ({ name: s.name, description: s.description, parameters: s.parameters }))
-    return { tools, commands: [], success: true }
+    return { tools, success: true }
   }
 }
 
@@ -251,18 +251,20 @@ export async function handleBridgeIntercept(
 
   const hookResult = await executeHooks(mapping.hookType, context)
 
-  // 纯映射（plugin-intercept-injection 设计 §3.3-D3）：注入形状守卫职责在管线层逐插件
-  // 执行（同设计 §3.3-D2），此处输入恒为管线产出的合法 string[]——无校验无日志职责。
+  // 纯映射（决策原文见 git `7a3797d0b` 版 plugin-intercept-injection §D3；文档已退役于
+  // `fadd8b8b4`）：注入形状守卫职责在管线层逐插件执行（§D2 同源），此处输入恒为管线
+  // 产出的合法 string[]——无校验无日志职责。
   // 每条 string 包一层 {content}，对齐 pi 侧 bridge extension 的 isInjectedMessage 守卫
-  // 形态（extensions/taiji/plugin-bridge/src/index.ts:90，要求对象含 content 键，
+  // 形态（要求对象含 content 键，
   // string 条目会被无留痕过滤）。协议层类型 injectedMessages: unknown[] 不收紧（D3 定案）。
   const injectedMessages = (hookResult.injectedMessages ?? []).map(content => ({ content }))
 
   if (hookResult.blocked) {
-    // blocked 透传管线累积注入（设计 §3.3-D2 block 交互定案 + §3.3-D3）：校验先于
+    // blocked 透传管线累积注入（git `7a3797d0b` 版 plugin-intercept-injection §D2 block
+    // 交互定案 + §D3；文档已退役于 `fadd8b8b4`）：校验先于
     // block 判定，block 插件自身合法注入已进累积——pi 侧对该组合「blocked 只 log、
-    // 注入照常评估」（plugin result 契约无 block 槽位，turn 照常进行；plugin-bridge
-    // :450-457），阻止后续插件与向 LLM 留言互不吞没。
+    // 注入照常评估」（plugin result 契约无 block 槽位，turn 照常进行；
+    // plugin-bridge blocked 只 log 分支），阻止后续插件与向 LLM 留言互不吞没。
     return { blocked: true, reason: hookResult.reason ?? `Blocked by ${hookResult.blockedBy}`, injectedMessages }
   }
 

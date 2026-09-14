@@ -37,6 +37,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@xyz-agent/extension-protocol": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*"
   }
 }

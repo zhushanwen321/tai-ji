@@ -1,5 +1,6 @@
 /**
- * handleBridgeIntercept 纯映射矩阵单测（plugin-intercept-injection 设计 §3.3-D3/D4，
+ * handleBridgeIntercept 纯映射矩阵单测（git `7a3797d0b` 版 plugin-intercept-injection
+ * §3.3-D3/D4，文档已退役于 `fadd8b8b4`，
  * 实施单元 u-i3-bridge-mapping，§5 单元表 I3 行）。
  *
  * 职责边界：本函数为纯映射层——注入形状守卫（非数组整体丢弃/非 string 条目丢弃）
@@ -11,7 +12,7 @@
  * 2. 多条注入 → 每条 string 包一层 {content}，顺序保持（管线累积 priority 执行序）
  * 3. blocked × 无注入 → {blocked:true, reason, injectedMessages:[]}
  * 4. blocked × 有注入 → 注入透传累积（pi 侧「blocked 只 log、注入照常评估」，D2 block
- *    交互定案；plugin-bridge :450-457 实装）
+ *    交互定案；plugin-bridge blocked 只 log 分支实装）
  *
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/bridge-interop-intercept.test.ts
  */

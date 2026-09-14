@@ -27,9 +27,9 @@
  * 本单元不管。
  */
 
+import { killProcessTree } from "@xyz-agent/extension-protocol/background-task";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { killProcessTree } from "../kill-tree.ts";
 import { emitPendingUnregister } from "./notify.ts";
 import { stopPoller } from "./poller.ts";
 import { taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
@@ -76,7 +76,12 @@ export function reapBackgroundTasksNow(): void {
 	stopPoller();
 	for (const task of getActiveTasks()) {
 		try {
-			killProcessTree(task.pid);
+			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
+			killProcessTree(task.pid, (step, err) =>
+				logger.debug(step, {
+					detail: { pid: task.pid, err: err instanceof Error ? err.message : String(err) },
+				}),
+			);
 		} catch (err) {
 			// 单条 kill 失败不阻断其余条目收殓；进程将退出，残余由 runtime 收殓兜底
 			logger.warn("kill-tree failed during process-exit reap", {

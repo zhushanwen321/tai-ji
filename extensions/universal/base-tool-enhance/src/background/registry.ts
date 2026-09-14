@@ -6,41 +6,43 @@
  * 判定依据（u-bte-remove 后 = xyz-agent runtime background-task-reaper），M2 只负责
  * 写入。
  *
+ * 行为原语单点（ext-simplify-13）：解析防御 / corrupt 隔离 / 原子写 / 序列化 /
+ * 终态 LRU 裁剪自 @xyz-agent/extension-protocol background-task 子出口引入——此前
+ * 本地实现与 runtime 侧逐字同构、靠注释对齐；本模块只保留 bte 形态薄壳：Map 投影
+ * readRegistry 与锁内 RMW 写壳。
+ *
  * 写入协议：
- *  - 原子写 temp+rename（tmp 名带 pid+随机段防并发碰撞，llm-shared saveConfig 范式）
+ *  - 原子写 temp+rename、损坏读取防御（§3.6 重命名 .corrupt 保留现场 + 按空表
+ *    重建）、终态条目 LRU 上限 50 均由 protocol 原语承担；诊断日志（corrupt 隔离
+ *    warn 等）经 onLog 注入本包 logger，落盘通道不变
  *  - 锁内 RMW（@zhushanwen/pi-file-lock withFileLockSync）——同 sessionId 目录可能
  *    被桌面端 ephemeral 附着进程与发起进程并发写，跨进程互斥只依赖同一 lockfile
  *    （runtime 收殓器写终态用 xyz-agent 统一锁，与该 lockfile 互斥）
  *  - 锁获取失败不降级无锁写：返回 {success:false}，条目停留 running 由 runtime
  *    收殓兜底（§3.5「registry/entry 写不进则条目停留 running」）
- *  - 损坏读取防御（§3.6）：解析失败/形状非法 → 重命名 .corrupt 保留现场 + 按空表
- *    重建 + warn 日志
- *  - 终态条目 LRU 上限 50（与单例表对称）
- *
- * 契约改引（u-bte-remove）：版本常量 / LRU 上限 / 文件形状自
- * @xyz-agent/extension-protocol background-task.ts 契约引入（此前本地重复定义）。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
+// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约面）；行为原语走
+// background-task 子出口（含 node 内建依赖，不进 index——renderer/core 零触达）
+import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@xyz-agent/extension-protocol";
 import {
-	BACKGROUND_TASK_REGISTRY_VERSION,
-	type BackgroundTaskRegistryFile,
-	MAX_TERMINAL_REGISTRY_ENTRIES,
-} from "@xyz-agent/extension-protocol";
+	atomicWriteRegistry,
+	readRegistry as readRegistryEntries,
+	serializeRegistryFile,
+	trimTerminalEntries,
+	type RegistryFileLogFn,
+} from "@xyz-agent/extension-protocol/background-task";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { withFileLockSync } from "@zhushanwen/pi-file-lock";
 
-import { isTerminalState, type BackgroundTask, type RegistryEntry } from "./types.ts";
+import type { BackgroundTask, RegistryEntry } from "./types.ts";
 
 const logger = getLogger("base-tool-enhance");
 
-const JSON_INDENT = 2;
-// tmp 随机段参数（llm-shared uniqueTmpPath 同款：36 进制随机串，跳过 "0." 前缀）
-const TMP_RADIX = 36;
-const TMP_SLICE_START = 2;
-const TMP_SLICE_END = 10;
+/** protocol registry 原语 → 本包 logger 适配（corrupt 隔离 warn 是排障生命线）。 */
+const registryFileLog: RegistryFileLogFn = (level, event, detail) => logger[level](event, { detail });
 
 export function getBaseToolEnhanceDir(dataDir: string): string {
 	return join(dataDir, "base-tool-enhance");
@@ -51,78 +53,13 @@ export function getRegistryPath(dataDir: string, sessionId: string): string {
 }
 
 /**
- * 最低限度形状校验：核心标识字段缺失即整条丢弃（不因单条脏数据报废全表）。
- */
-function isValidRegistryEntry(item: unknown): item is RegistryEntry {
-	if (typeof item !== "object" || item === null) return false;
-	const e = item as Record<string, unknown>;
-	return (
-		typeof e.taskId === "string" &&
-		typeof e.pid === "number" &&
-		typeof e.command === "string" &&
-		typeof e.outputFile === "string" &&
-		typeof e.startedAt === "number" &&
-		typeof e.state === "string" &&
-		typeof e.ownerPiPid === "number" &&
-		typeof e.sessionId === "string"
-	);
-}
-
-/** 校验并归一化 registry 文件内容；形状非法返回 undefined（走 corrupt 路径）。 */
-function parseRegistryContent(raw: string): BackgroundTaskRegistryFile | undefined {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		return undefined;
-	}
-	if (typeof parsed !== "object" || parsed === null) return undefined;
-	const { version, entries } = parsed as Record<string, unknown>;
-	if (version !== BACKGROUND_TASK_REGISTRY_VERSION || !Array.isArray(entries)) return undefined;
-	const valid: RegistryEntry[] = [];
-	for (const item of entries) {
-		if (isValidRegistryEntry(item)) valid.push(item);
-	}
-	return { version: BACKGROUND_TASK_REGISTRY_VERSION, entries: valid };
-}
-
-/** .corrupt 落点：固定名优先；已存在则带时间戳，不覆盖前一份现场。 */
-function corruptPathFor(registryPath: string): string {
-	const base = `${registryPath}.corrupt`;
-	return existsSync(base) ? `${base}-${Date.now()}` : base;
-}
-
-/**
- * 读取 registry 全量条目。文件不存在 / 读失败 / 解析失败均返回空表（工具面不因
- * registry 问题崩溃）；解析失败时重命名 .corrupt 保留现场 + warn（§3.6）。
+ * 读取 registry 全量条目（Map 投影薄壳）。文件不存在 / 读失败 / 解析失败均返回
+ * 空表（工具面不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
+ * 保留现场 + warn（§3.6）。
  */
 export function readRegistry(registryPath: string): Map<string, RegistryEntry> {
-	if (!existsSync(registryPath)) return new Map();
-	let raw: string;
-	try {
-		raw = readFileSync(registryPath, "utf8");
-	} catch (err) {
-		logger.warn("registry read failed, treating as empty", {
-			detail: { path: registryPath, err: err instanceof Error ? err.message : String(err) },
-		});
-		return new Map();
-	}
-	const parsed = parseRegistryContent(raw);
-	if (parsed === undefined) {
-		const corruptPath = corruptPathFor(registryPath);
-		try {
-			renameSync(registryPath, corruptPath);
-			logger.warn("registry corrupted, renamed to preserve scene and rebuilt empty", {
-				detail: { path: registryPath, corruptPath },
-			});
-		} catch (err) {
-			logger.warn("registry corrupted and rename failed, rebuilding empty in place", {
-				detail: { path: registryPath, err: err instanceof Error ? err.message : String(err) },
-			});
-		}
-		return new Map();
-	}
-	return new Map(parsed.entries.map((e) => [e.taskId, e]));
+	const { entries } = readRegistryEntries(registryPath, registryFileLog);
+	return new Map(entries.map((e) => [e.taskId, e] as const));
 }
 
 /** BackgroundTask → RegistryEntry（剥离运行时字段 intent/timeoutTimer/child/registryPath）。 */
@@ -145,34 +82,10 @@ export function taskToRegistryEntry(task: BackgroundTask): RegistryEntry {
 	};
 }
 
-function serializeRegistry(entries: RegistryEntry[]): string {
-	const shape: BackgroundTaskRegistryFile = { version: BACKGROUND_TASK_REGISTRY_VERSION, entries };
-	return `${JSON.stringify(shape, null, JSON_INDENT)}\n`;
-}
-
-/** 原子写：tmp（pid+随机段唯一化）+ rename（POSIX/Windows 均原子）；失败清理 tmp。 */
-function atomicWriteRegistry(registryPath: string, content: string): void {
-	mkdirSync(dirname(registryPath), { recursive: true });
-	const tmpPath = `${registryPath}.tmp_${process.pid}_${Math.random().toString(TMP_RADIX).slice(TMP_SLICE_START, TMP_SLICE_END)}`;
-	try {
-		writeFileSync(tmpPath, content, "utf8");
-		renameSync(tmpPath, registryPath);
-	} catch (err) {
-		try {
-			if (existsSync(tmpPath)) unlinkSync(tmpPath);
-		} catch (cleanupErr) {
-			// tmp 清理失败不掩盖原错误，仅留诊断
-			logger.warn("registry tmp cleanup failed", {
-				detail: { tmpPath, err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr) },
-			});
-		}
-		throw err;
-	}
-}
-
 /**
  * 写入/更新单条 registry 条目（锁内 RMW：读全量 → 合并同 id 覆盖 → 终态 LRU 50 →
- * 原子写）。任务登记（running）、killing intent、终态三条路径共用。
+ * 原子写；读 / 裁剪 / 序列化 / 原子写由 protocol 原语承担）。任务登记（running）、
+ * killing intent、终态三条路径共用。
  * 失败返回 {success:false}——调用方按「写不进则条目停留 running，runtime 收殓
  * 兜底」处理（M2 只 warn，不重试不阻断主流程）。
  */
@@ -181,20 +94,18 @@ export function writeRegistryEntry(
 	entry: RegistryEntry,
 ): { success: boolean; error?: string } {
 	const writeMerged = (): void => {
-		const merged = readRegistry(registryPath);
+		const { entries } = readRegistryEntries(registryPath, registryFileLog);
+		const merged = new Map(entries.map((e) => [e.taskId, e] as const));
 		merged.set(entry.taskId, entry);
-		const all = [...merged.values()];
-		const terminal = all
-			.filter((e) => isTerminalState(e.state))
-			.sort((a, b) => (a.endedAt ?? a.startedAt) - (b.endedAt ?? b.startedAt));
-		const excess = terminal.length - MAX_TERMINAL_REGISTRY_ENTRIES;
-		for (let i = 0; i < excess; i++) merged.delete(terminal[i].taskId);
-		atomicWriteRegistry(registryPath, serializeRegistry([...merged.values()]));
+		const trimmed = trimTerminalEntries([...merged.values()], MAX_TERMINAL_REGISTRY_ENTRIES);
+		atomicWriteRegistry(registryPath, serializeRegistryFile(trimmed), registryFileLog);
 	};
 	try {
 		withFileLockSync(registryPath, writeMerged);
 		return { success: true };
 	} catch (err) {
+		// 锁壳层写失败 warn 是本模块职责（protocol 原语不发该日志——写失败时的
+		// 「条目停留 running」降级决策在锁壳）
 		const message = err instanceof Error ? err.message : String(err);
 		logger.warn("registry write failed; entry stays as-is (runtime reaper will collect the orphan)", {
 			detail: { path: registryPath, taskId: entry.taskId, err: message },

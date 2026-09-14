@@ -36,8 +36,6 @@ function makeFakePorts(): ServicePorts & {
 			setStatus: () => {},
 			notify: (text, level) => { notifications.push({ text, level }); },
 			hasUI: true,
-			isGui: false,
-			setGuiWidget: () => {},
 			theme: {
 				fg: (_color: string, text: string) => text,
 				bold: (text: string) => text,

@@ -23,6 +23,7 @@ import {
 	VALID_STATUSES,
 } from "./model";
 import { renderTodoResult } from "./render";
+import type { RefreshDisplayFn } from "./handlers";
 import type { TodoSessionState } from "./state";
 
 // ── TodoParams schema（扁平 Type.Object，OpenAI 兼容）──────────
@@ -64,10 +65,10 @@ export const TodoParams = Type.Object(
 export type TodoParamsT = Static<typeof TodoParams>;
 
 // ── 4 个 action handler ──────────────────────────────
-// 错误处理约定（见 CLAUDE.md「Tool 设计」）：handler 失败直接 throw，
-// 不返回「错误成功模式」。model 层纯函数（updateTodos）返回 Result 对象（合法），
-// 由 dispatcher 在拿到 error 时 throw，把友好文案交给 Pi 框架展示。
-// addTodos 的校验失败直接 throw（C1：不再静默 filter）。
+// 错误处理约定（见 docs/extensions/extension-conventions.md「Tool 设计」）：
+// 包内单一 throw 协议——handler 与 model 层纯函数（addTodos / updateTodos）
+// 校验失败均直接 throw，把文案交给 Pi 框架以工具错误展示，不返回「错误成功模式」，
+// handler 也不做 error→throw 翻译。
 
 /** list action — 返回完整格式化列表 */
 function handleList(state: TodoSessionState): string {
@@ -107,9 +108,8 @@ export function handleAdd(state: TodoSessionState, params: TodoParamsT): string 
 /** update action: batch — 失败抛错 */
 function handleBatchUpdate(state: TodoSessionState, params: TodoParamsT): string {
 	const r = updateTodos(state.todos, params.updates ?? []);
-	if (r.error) throw new Error(r.resultText);
 	state.todos = r.updatedTodos;
-	return r.resultText!;
+	return r.resultText;
 }
 
 /** update action: single — 失败抛错 */
@@ -186,7 +186,7 @@ function executeTodoAction(
 	params: TodoParamsT,
 	state: TodoSessionState,
 	ctx: ExtensionContext,
-	refreshDisplay: (ctx: ExtensionContext) => void,
+	refreshDisplay: RefreshDisplayFn,
 ): {
 	content: Array<{ type: "text"; text: string }>;
 	details: TodoDetails;
@@ -213,11 +213,10 @@ function executeTodoAction(
 
 	refreshDisplay(ctx);
 
-	// content 组装（T3）：突变附带完整列表；list 已含列表
+	// content 组装（T3）：突变附带完整列表（复用 handleList 的空列表兜底）；list 已含列表
 	let contentText: string;
 	if (isMutation) {
-		const listText = state.todos.length > 0 ? formatTodoList(state.todos) : "No todos";
-		contentText = `${resultText}\n${listText}`;
+		contentText = `${resultText}\n${handleList(state)}`;
 	} else {
 		contentText = resultText;
 	}
@@ -240,7 +239,7 @@ function executeTodoAction(
 export function registerTodoTool(
 	pi: ExtensionAPI,
 	state: TodoSessionState,
-	refreshDisplay: (ctx: ExtensionContext) => void,
+	refreshDisplay: RefreshDisplayFn,
 ): void {
 	pi.registerTool({
 		name: "todo",

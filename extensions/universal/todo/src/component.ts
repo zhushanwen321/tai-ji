@@ -5,7 +5,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
-import type { Todo } from "./model";
+import { todoProgress, type Todo } from "./model";
 import { FALLBACK_TERM_WIDTH, renderDualColumn } from "./render";
 
 const HEADER_PREFIX_DASHES = 3;
@@ -50,8 +50,7 @@ export class TodoListComponent {
 		if (this.todos.length === 0) {
 			lines.push(truncateToWidth(`${indent}${th.fg("dim", "No todos yet. Ask the agent to add some!")}`, termWidth));
 		} else {
-			const completed = this.todos.filter((t) => t.status === "completed").length;
-			const total = this.todos.length;
+			const { completed, total } = todoProgress(this.todos);
 			lines.push(truncateToWidth(`${indent}${th.fg("muted", `${completed}/${total} completed`)}`, termWidth));
 			lines.push("");
 
