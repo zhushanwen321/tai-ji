@@ -340,3 +340,29 @@ describe("MPT7: DEFAULT_SELECT_THEME（G2/WR2 修正）", () => {
 		expect(result.startsWith("\u25B6")).toBe(true);
 	});
 });
+
+// ──────────────────────── V2b: currentSpec 预选钉值（ext-simplify-18 D4 parseModelRef 采用） ────────────────────────
+
+describe("MPT8: V2b currentSpec 预选钉值（parseModelRef 采用后行为锁定）", () => {
+	it("合法 ref：provider 与 model 双预选命中（两 stage Enter 落到 currentSpec 对应项）", () => {
+		const done = vi.fn();
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1"), makeEntry("co", "m2")] });
+		const comp = new ProviderModelSelectorComponent("co/m2", ["other", "co"], models, done);
+		// provider stage 预选 'co'（index 2：Auto + other + co），Enter → model stage（不 settle）
+		comp.handleInput("\r");
+		expect(done).not.toHaveBeenCalled();
+		// model stage 预选 m2（非列表第一个 m1），Enter → done(specific co/m2)
+		comp.handleInput("\r");
+		expect(done).toHaveBeenCalledWith({ kind: "specific", provider: "co", modelId: "m2" });
+	});
+
+	it("病态输入 'provider/'（尾空 modelId）：parseModelRef 返 null → provider 预选回 Auto", () => {
+		const done = vi.fn();
+		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
+		// 行为微变（ext-simplify-18 D4 登记）：旧版 provider 预选命中 idx+1，
+		// 新版整 ref 无效 → 整体回 Auto（Enter → done({kind:'auto'})）
+		const comp = new ProviderModelSelectorComponent("co/", ["co"], models, done);
+		comp.handleInput("\r"); // 预选 index 0（Auto），Enter → done({kind:'auto'})
+		expect(done).toHaveBeenCalledWith({ kind: "auto" });
+	});
+});

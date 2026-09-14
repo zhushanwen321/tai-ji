@@ -21,6 +21,7 @@
 
 import { type Component, Container, type SelectItem, SelectList, type SelectListTheme, truncateToWidth } from "@earendil-works/pi-tui";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { parseModelRef } from "@zhushanwen/pi-llm-shared";
 
 import type { ResolvedModelEntry } from "./classifier/model-resolver.js";
 import { DEFAULT_SELECT_THEME } from "./select-theme.js";
@@ -182,13 +183,16 @@ export class ProviderModelSelectorComponent extends Container {
 		return items;
 	}
 
-	/** 计算 provider stage 预选 index（currentSpec='auto' → 0；'provider/model' → findIndex）。 */
+	/**
+	 * 计算 provider stage 预选 index（currentSpec='auto' → 0；'provider/model' → findIndex）。
+	 * 无效 ref（缺 / 或前后为空，如 'provider/'）→ parseModelRef 返 null → 0（整体回 Auto，
+	 * ext-simplify-18 D4 登记的行为微变：不再预选半截 provider）。
+	 */
 	private computeProviderSelectedIndex(): number {
 		if (this.currentSpec === "auto") return 0;
-		const slashIdx = this.currentSpec.indexOf("/");
-		if (slashIdx <= 0) return 0;
-		const provider = this.currentSpec.slice(0, slashIdx);
-		const idx = this.providers.indexOf(provider);
+		const parsed = parseModelRef(this.currentSpec);
+		if (!parsed) return 0;
+		const idx = this.providers.indexOf(parsed.provider);
 		return idx >= 0 ? idx + 1 : 0; // +1 跳过 'Auto'
 	}
 
@@ -227,12 +231,11 @@ export class ProviderModelSelectorComponent extends Container {
 		return list;
 	}
 
-	/** 计算 model stage 预选 index。 */
+	/** 计算 model stage 预选 index（无效 ref → parseModelRef 返 null → 0）。 */
 	private computeModelSelectedIndex(models: readonly ResolvedModelEntry[]): number {
-		const slashIdx = this.currentSpec.indexOf("/");
-		if (slashIdx <= 0) return 0;
-		const modelId = this.currentSpec.slice(slashIdx + 1);
-		const idx = models.findIndex((m) => m.id === modelId);
+		const parsed = parseModelRef(this.currentSpec);
+		if (!parsed) return 0;
+		const idx = models.findIndex((m) => m.id === parsed.modelId);
 		return idx >= 0 ? idx : 0;
 	}
 
