@@ -459,6 +459,34 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       expect(sent[0].type).toBe('message.complete')
       expect((sent[0].payload as Record<string, unknown>).errorMessage).toBeUndefined()
     })
+
+    // W1 空消息防御（自 handle-agent-end-empty-messages.test.ts 并入）：
+    // messages 为空数组/undefined 时旧实现取 messages[len-1] 访问 .stopReason 抛 TypeError，
+    // 被整批 try-catch 吞掉 → agent_end 整批事件丢失 → isGenerating 永不复位。
+    // 防御语义：降级为 turn-end { stopReason: 'error' }，保证 onTurnFinalize 仍能触发。
+    it('AE1: agent_end with empty messages array → no throw, onTurnFinalize still fires', async () => {
+      const onTurnFinalize = vi.fn()
+      const defensive = createAdapter({ onTurnFinalize })
+
+      expect(() =>
+        dispatchOne(defensive.adapter, { type: 'agent_end', messages: [] }),
+      ).not.toThrow()
+      await flushAsync()
+
+      expect(onTurnFinalize).toHaveBeenCalledTimes(1)
+    })
+
+    it('AE2: agent_end with undefined messages → no throw, onTurnFinalize still fires', async () => {
+      const onTurnFinalize = vi.fn()
+      const defensive = createAdapter({ onTurnFinalize })
+
+      expect(() =>
+        dispatchOne(defensive.adapter, { type: 'agent_end', messages: undefined }),
+      ).not.toThrow()
+      await flushAsync()
+
+      expect(onTurnFinalize).toHaveBeenCalledTimes(1)
+    })
   })
 
   // ════════════════════════════════════════════════════════════════════

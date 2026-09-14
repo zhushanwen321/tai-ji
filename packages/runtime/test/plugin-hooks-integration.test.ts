@@ -94,27 +94,9 @@ describe('PluginService.executeHooks', () => {
     expect(result).toEqual({ blocked: false })
   })
 
-  // ── TC-HKP-04: 优先级排序 — priority 0 先于 priority 200 ──────
-  it('TC-HKP-04: handlers are sorted by priority ascending', async () => {
-    const broker = createMockBroker()
-    const service = new PluginService({} as never, broker)
-    const reg = serviceRegistry(service)
-
-    // 只验证排序结果，不验证 broadcast 调用
-    reg.hookRegistry.set('onBeforeToolCall', [
-      { pluginId: 'low', handlerId: 'h_low', priority: 200 },
-      { pluginId: 'high', handlerId: 'h_high', priority: 0 },
-      { pluginId: 'mid', handlerId: 'h_mid', priority: 100 },
-    ])
-
-    // 模拟 executeHooks 内部逻辑来验证排序
-    const entries = reg.hookRegistry.get('onBeforeToolCall')!
-    const sorted = [...entries].sort((a, b) => a.priority - b.priority)
-
-    expect(sorted[0].handlerId).toBe('h_high')
-    expect(sorted[1].handlerId).toBe('h_mid')
-    expect(sorted[2].handlerId).toBe('h_low')
-  })
+  // [2026-09 测试舰队审查 r2-15] TC-HKP-04「handlers are sorted by priority ascending」已删：
+  // 测试内自行 [...entries].sort 后断言排序结果，验证的是 JS Array.sort 而非 SUT——恒真；
+  // executeHooks 真实调用序由 plugin-api-hooks.test.ts TC-HK-02（乱序注册按优先级执行）锁定。
 })
 
 // ══════════════════════════════════════════════════════════════════
@@ -290,22 +272,9 @@ describe('PluginService.handleBridgeToolExecute', () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe('PluginService.handleBridgeEvent', () => {
-  // ── TC-HKP-11: 广播事件给注册的 Worker ─────────────────────────
-  it('TC-HKP-11: broadcasts event to registered workers', async () => {
-    const broker = createMockBroker()
-    const service = new PluginService({} as never, broker)
-    const reg = serviceRegistry(service)
-
-    // 注册 hook 类型（Fix-6：'onMessage' 死字面量已删，用真实 pi 事件名走 onPiEvent 映射）
-    reg.hookRegistry.set('onPiEvent', [
-      { pluginId: 'p1', handlerId: 'h1', priority: 100 },
-    ])
-
-    // handleBridgeEvent 不应抛出异常（agent_start 经 PI_HOOK_EVENT_MAP 映射到 onPiEvent observe 路径）
-    service.handleBridgeEvent('agent_start', { text: 'hello' }, 'session-1')
-    // 异步 executeHooks 的内部 broadcast — 等待微任务
-    await new Promise(resolve => setTimeout(resolve, 10))
-  })
+  // [2026-09 测试舰队审查 r2-15] TC-HKP-11「broadcasts event to registered workers」已删：
+  // 零断言（只等 10ms 不抛），无法抓任何回归；bridge 事件真实分发由
+  // plugin-hook-bridge.test.ts（onHookExecute 分支）与 plugin-hooks-e2e.test.ts（零 mock 链路）覆盖。
 
   // ── TC-HKP-12: 无注册 handler 不抛出异常 ───────────────────────
   it('TC-HKP-12: no registered handlers does not throw', () => {

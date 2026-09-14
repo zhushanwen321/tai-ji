@@ -1,10 +1,13 @@
 /**
- * relay env 注入探针单测（E-2，验收 2 + §10-1 探针实测）。
+ * relay env 注入探针单测（E-2，验收 2）。
  *
  * 覆盖：probeNodeExecutor（真 node 通过 / 假执行器失败）、getRelaySpawnEnv 三态
  * （server 激活 + 脚本存在 + 探针通过 → 注入三 env；探针失败 → {}；server 未激活 → {}；
- * staged 脚本缺失 → {}）。同时落 §10-1 探针实测结论：本机 dev 形态 execPath 与
- * process.versions.electron 状态（isElectron 判定依据）。
+ * staged 脚本缺失 → {}）。
+ *
+ * [2026-09 测试舰队审查 r2-22] 「§10-1 探针实测」describe（1 例）已删：断言
+ * `process.versions.electron === undefined` + execPath 含 node 锁的是「vitest 跑在
+ * node 上」这一测试环境自述，非 SUT 行为，环境本就恒真。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -15,20 +18,6 @@ import { initRelayServer, deinitRelayServer } from '../../../infra/relay/relay-s
 import { getActiveRelaySocketPath } from '../../../infra/relay/relay-server.js'
 import { RELAY_ENV_SOCKET, RELAY_ENV_NODE, RELAY_ENV_SCRIPT } from '@zhushanwen/subagent-core/relay-env'
 import type { ServerMessage } from '@xyz-agent/shared'
-
-describe('§10-1 探针实测：本机 dev 形态 execPath', () => {
-  it('记录执行器形态（vitest fork 的 node）：独立 node，无 electron', () => {
-    // 探针结论断言：vitest/tsx（dev 形态 runtime 由 node 系执行器承载）——
-    // process.execPath 是 node 二进制、process.versions.electron undefined。
-    // 打包形态（Electron sidecar）断言留 E-验收 真机面（§9），此处锁 dev 形态不漂移。
-    console.info(
-      `[relay-env probe] execPath=${process.execPath} electron=${String(process.versions.electron)} `
-      + `platform=${process.platform}`,
-    )
-    expect(process.versions.electron).toBeUndefined()
-    expect(process.execPath).toMatch(/node/)
-  })
-})
 
 describe('probeNodeExecutor', () => {
   it('node 执行器 + 非 Electron → 通过', async () => {

@@ -77,13 +77,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     if (problems.length > 0) throw new Error(`\n${problems.join('\n\n')}`)
   })
 
-  it('pi-fixture writeLine：行以换行符结尾（rpc stdin 按行解析的协议前提）', async () => {
-    const written: string[] = []
-    const fakeStdin = { write: (s: string) => { written.push(s); return true } }
-    // writeLine 的实现形态：拼接换行后写入（直接驱动等价闭包验证行为契约）
-    const writeLine = (line: string): void => { fakeStdin.write(line.endsWith('\n') ? line : line + '\n') }
-    writeLine('{"type":"prompt","text":"hi"}')
-    writeLine('{"type":"prompt","text":"second"}\n')
-    expect(written).toEqual(['{"type":"prompt","text":"hi"}\n', '{"type":"prompt","text":"second"}\n'])
-  })
+  // [2026-09 测试舰队审查 r2-26] it2「writeLine 行以换行符结尾」已删：它构造等价闭包
+  // （endsWith 条件追加）再断言闭包自身——恒真且与 pi-fixture.ts:521-523 真实实现
+  // （无条件 `line + '\n'`）行为不一致，属「恒真 + 语义漂移」双重问题。
 })

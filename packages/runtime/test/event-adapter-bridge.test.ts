@@ -142,5 +142,158 @@ describe('EventAdapter extension bridge', () => {
       expect(statusPayload.statusKey).toBe('status')
       expect(statusPayload.text).toBe('Done')
     })
+
+    it('handles missing key/text with defaults', async () => {
+      const onStatusSetUpdate = vi.fn()
+      const { adapter } = createAdapter({ onStatusSetUpdate })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener({ type: 'extension_ui_request', method: 'setStatus' })
+
+      await vi.waitFor(() => onStatusSetUpdate.mock.calls.length > 0)
+
+      expect(onStatusSetUpdate).toHaveBeenCalledWith({
+        sessionId: 'test-session-id',
+        key: '',
+        text: '',
+        textRaw: '',
+      })
+    })
+
+    it('handles undefined text with empty string', async () => {
+      const onStatusSetUpdate = vi.fn()
+      const { adapter } = createAdapter({ onStatusSetUpdate })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener({
+        type: 'extension_ui_request',
+        method: 'setStatus',
+        statusKey: 'todo',
+        statusText: undefined,
+      })
+
+      await vi.waitFor(() => onStatusSetUpdate.mock.calls.length > 0)
+
+      expect(onStatusSetUpdate).toHaveBeenCalledWith({
+        sessionId: 'test-session-id',
+        key: 'todo',
+        text: '',
+        textRaw: '',
+      })
+    })
+
+    it('multiple setStatus events are all captured', async () => {
+      const statusUpdates: Array<{ sessionId: string; key: string; text: string }> = []
+      const { adapter } = createAdapter({
+        onStatusSetUpdate: (data) => {
+          statusUpdates.push(data)
+        },
+      })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener(piEvent({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'goal', statusText: '3/20' }))
+      listener(piEvent({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'todo', statusText: '5/10' }))
+      listener(piEvent({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'goal', statusText: '' })) // clear
+
+      await vi.waitFor(() => statusUpdates.length === 3)
+
+      expect(statusUpdates[0].key).toBe('goal')
+      expect(statusUpdates[1].key).toBe('todo')
+      expect(statusUpdates[2].text).toBe('') // clear event
+    })
+  })
+
+  // ── context.update：onContextUpdate callback from agent_end（自 statusline-event-adapter.test.ts 并入）──
+
+  describe('context.update: onContextUpdate from agent_end', () => {
+    it('calls onContextUpdate when agent_end has usage with inputTokens > 0', async () => {
+      const onContextUpdate = vi.fn()
+      const { adapter, sent } = createAdapter({ onContextUpdate })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener(piEvent({
+        type: 'agent_end',
+        messages: [{
+          role: 'assistant',
+          stopReason: 'end_turn',
+          usage: { input: 5000, output: 3000, totalTokens: 8000 },
+        }] as [{ role: string; stopReason: string; usage: { input: number; output: number; totalTokens: number } }],
+      }))
+
+      // handleEvent is async (void), wait for microtask to flush
+      await vi.waitFor(() => {
+        expect(sent).toHaveLength(1)
+      })
+      expect(sent[0].type).toBe('message.complete')
+
+      // callback is called
+      // [HISTORICAL] context 占用字段 inputTokens 现取 totalTokens（input+output+cacheRead+cacheWrite），
+      // 与 pi calculateContextTokens 同源（commit 31caf7b5）。usage.input 只是单 turn 增量，值很小。
+      expect(onContextUpdate).toHaveBeenCalledTimes(1)
+      expect(onContextUpdate).toHaveBeenCalledWith('test-session-id', {
+        inputTokens: 8000,
+        totalTokens: 8000,
+      })
+    })
+
+    it('does NOT call onContextUpdate when inputTokens is 0', async () => {
+      const onContextUpdate = vi.fn()
+      const { adapter } = createAdapter({ onContextUpdate })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener(piEvent({
+        type: 'agent_end',
+        messages: [{
+          role: 'assistant',
+          stopReason: 'end_turn',
+          usage: { input: 0, output: 0, totalTokens: 0 },
+        }],
+      }))
+
+      await vi.waitFor(() => {
+        expect(onContextUpdate).not.toHaveBeenCalled()
+      })
+    })
+
+    it('does NOT call onContextUpdate when usage is missing', async () => {
+      const onContextUpdate = vi.fn()
+      const { adapter } = createAdapter({ onContextUpdate })
+      const client = { onEvent: vi.fn() }
+      adapter.attach(client)
+
+      const listener = client.onEvent.mock.calls[0][0] as (event: unknown) => void
+
+      listener(piEvent({
+        type: 'agent_end',
+        messages: [{
+          role: 'assistant',
+          stopReason: 'end_turn',
+        }],
+      }))
+
+      await vi.waitFor(() => {
+        expect(onContextUpdate).not.toHaveBeenCalled()
+      })
+    })
   })
 })
+
+/** 构造 pi 事件（wire 局部形态，type + 自定义字段）。 */
+function piEvent(fields: Record<string, unknown> & { type: string }): Record<string, unknown> {
+  return fields
+}

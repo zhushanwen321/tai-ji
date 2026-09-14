@@ -1,12 +1,15 @@
 /**
- * RpcClient bash RPC 超时常量 / env 逃生门测试（timeout-slow-flow-wallclock D2，u-y2）。
+ * RpcClient bash / compact RPC 超时常量与 env 逃生门测试（timeout-slow-flow-wallclock D2/D3，u-y2/u-y3）。
  *
- * 锁定（env 通路三断言 + 不限时形态）：
+ * 锁定（env 通路三断言 + 不限时形态 + compact 常量引用）：
  * - 读取：env `XYZ_RUNTIME_BASH_RPC_TIMEOUT_MS` 合法值覆盖 shared BASH_RPC_TIMEOUT_MS；
  *   env 未设/非法（非数字/负数）回退默认 3_600_000。
  * - 缓存：读一次缓存——首次读取后改 env 不再生效（进程生命周期内超时决策稳定）。
  * - 覆盖：env=0 → 不限时（不挂墙钟 timer，advance 10h 不 reject，迟到响应照常 resolve）。
  * - 默认路径：bash() 超时以 RpcTimeoutError reject 且 timeoutMs 等于生效值（D3a 字段化）。
+ * - compact()：超时引用 shared COMPACT_RPC_TIMEOUT_MS（30min，无跨粒级共用 bash 常量），
+ *   到点以 RpcTimeoutError{commandType:"compact"} reject（D3；自 rpc-client-compact-timeout.test.ts
+ *   并入，恒真的 MARGIN 双保险断言未随迁）。
  *
  * 策略：沿用 rpc-client-observability.test.ts 的 mock 骨架（node:child_process + fake
  * streams），fake timers 驱动超时墙钟（STARTUP_DELAY_MS / RPC timer 均走同一时钟）。
@@ -19,7 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { RpcClient, resolveBashRpcTimeoutMs, resetBashRpcTimeoutForTest } from '../rpc-client.js'
 import { RpcTimeoutError } from '../../../utils/errors.js'
-import { BASH_RPC_TIMEOUT_MS } from '@xyz-agent/shared'
+import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@xyz-agent/shared'
 
 // ── Mocks（对齐 rpc-client-observability.test.ts 骨架）────────────────
 
@@ -219,5 +222,36 @@ describe('bash() 超时行为 —— 默认 / env 覆盖 / 0=不限时', () => {
     }) + '\n')
     await p
     expect(settled).toBe('resolved')
+  })
+})
+
+// ── compact() 超时：shared COMPACT_RPC_TIMEOUT_MS 引用断言（D3，自 rpc-client-compact-timeout.test.ts 并入）──
+
+describe('compact() 超时 —— shared COMPACT_RPC_TIMEOUT_MS 引用断言（D3）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  it('常量前提：COMPACT_RPC_TIMEOUT_MS = 30min，且 < BASH_RPC_TIMEOUT_MS（无跨粒级共用）', () => {
+    expect(COMPACT_RPC_TIMEOUT_MS).toBe(1_800_000)
+    expect(COMPACT_RPC_TIMEOUT_MS).toBeLessThan(BASH_RPC_TIMEOUT_MS)
+  })
+
+  it('边界内 1ms 不误杀；到点以 RpcTimeoutError{commandType:"compact", timeoutMs:1_800_000} reject', async () => {
+    const client = await startClient()
+    let rejected: unknown
+    const p = client.compact().catch((e) => { rejected = e })
+    await vi.advanceTimersByTimeAsync(COMPACT_RPC_TIMEOUT_MS - 1)
+    expect(rejected).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    await p
+    expect(rejected).toBeInstanceOf(RpcTimeoutError)
+    expect((rejected as RpcTimeoutError).commandType).toBe('compact')
+    expect((rejected as RpcTimeoutError).timeoutMs).toBe(1_800_000)
   })
 })

@@ -1,12 +1,14 @@
 /**
- * RpcClient preset 启动参数 CLI args 单测（wave1）。
+ * RpcClient preset / systemPrompt 启动参数 CLI args 单测（wave1）。
  *
  * 覆盖 6 个新增字段的 args push 行为：
  * - tools / excludeTools（逗号连接）
  * - noTools / noSkills / noContextFiles（单 flag）
  * - thinkingLevel（--thinking，非 --thinking-level）
+ * - systemPrompt（--system-prompt，自 rpc-client-system-prompt.test.ts 并入）
  *
- * 复用 rpc-client-system-prompt.test.ts 的 spawn mock 范式（捕获 args 数组）。
+ * spawn mock 范式（捕获 args 数组）为 rpc-client args 系测试共享形态
+ * （rpc-client-start-args-anchor.test.ts 同款）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { RpcClientOptions } from '../src/infra/pi/rpc-client.js'
@@ -186,5 +188,59 @@ describe('RpcClient preset args CLI', () => {
     expect(spawnArgs).toContain('--thinking')
     expect(spawnArgs[spawnArgs.indexOf('--thinking') + 1]).toBe('medium')
     expect(spawnArgs).toContain('--no-skills')
+  })
+})
+
+describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 并入）', () => {
+  let RpcClientCtor: typeof import('../src/infra/pi/rpc-client.js').RpcClient
+
+  beforeEach(async () => {
+    spawnArgs = []
+    fakeProc.on.mockClear()
+    fakeProc.stdin.write.mockClear()
+    fakeProc.kill.mockClear()
+
+    const mod = await import('../src/infra/pi/rpc-client.js')
+    RpcClientCtor = mod.RpcClient
+  })
+
+  afterEach(async () => {
+    // 不 kill 也可以；如 kill 被调用，触发 exit 让清理逻辑走通
+    try {
+      const exitHandlers = fakeProc.on.mock.calls
+        .filter(([event]) => event === 'exit')
+        .map(([, handler]) => handler as (code: number | null) => void)
+      for (const h of exitHandlers) {
+        h(0)
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  })
+
+  it('options.systemPrompt 有值 → args 包含 --system-prompt 和该值', async () => {
+    const options = { cwd: '/project', systemPrompt: 'custom core prompt' } as unknown as RpcClientOptions
+    const client = new RpcClientCtor(options)
+    await client.start()
+
+    expect(spawnArgs).toContain('--system-prompt')
+    const idx = spawnArgs.indexOf('--system-prompt')
+    expect(spawnArgs[idx + 1]).toBe('custom core prompt')
+  })
+
+  it('options.systemPrompt 仅空白 → args 不包含 --system-prompt', async () => {
+    const options = { cwd: '/project', systemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
+    const client = new RpcClientCtor(options)
+    await client.start()
+
+    expect(spawnArgs).not.toContain('--system-prompt')
+  })
+
+  it('options.systemPrompt 未传 → args 不包含 --system-prompt', async () => {
+    const options = { cwd: '/project' } as unknown as RpcClientOptions
+    const client = new RpcClientCtor(options)
+    await client.start()
+
+    expect(spawnArgs).not.toContain('--system-prompt')
   })
 })

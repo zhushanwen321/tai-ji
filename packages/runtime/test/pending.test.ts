@@ -1,9 +1,9 @@
 /**
- * pending.test.ts — F5 失败路径验收测试。
+ * pending.test.ts — PendingTracker 全 API 契约（F5 失败路径验收 + 原语行为，自 pending-tracker.test.ts 归并）。
  *
- * 背景：命令可能超时（30s），需要 reject + 删 pending Map + 迟到响应静默丢弃。
- * 本测试验证：
- * - F5: 命令超时 30s → reject + 删 pending Map + 迟到响应静默丢弃
+ * 背景：PendingTracker 是「三处同构 Map+setTimeout 样板」的提取物，被 plugin-commands-executor、
+ * plugin-tool-execution 等多处消费。锁定：命令超时（30s）→ reject + 删 pending Map + 迟到响应
+ * 静默丢弃，以及 rejectAll 清 timer / 乱序并发 resolve / 泛型 K 等原语语义。
  *
  * 运行：cd packages/runtime && npx vitest run test/pending.test.ts
  */
@@ -150,5 +150,49 @@ describe('PendingTracker · F5 命令超时善后', () => {
 
     const rejected = tracker.reject('non-existent', new Error('err'))
     expect(rejected).toBe(false)
+  })
+
+  // ── 原语增量语义（自 pending-tracker.test.ts 归并）──────────────────
+
+  it('resolve() clears the timeout (no late rejection)', async () => {
+    const t = new PendingTracker<number, string>()
+    const p = t.register(1, 1000, new Error('timeout'))
+    t.resolve(1, 'ok')
+    vi.advanceTimersByTime(5000) // well past timeout
+    await expect(p).resolves.toBe('ok')
+  })
+
+  it('rejectAll() clears timeouts (no double-reject after)', async () => {
+    const t = new PendingTracker<number, string>()
+    const p = t.register(1, 1000, new Error('timeout'))
+    t.rejectAll(new Error('disposed'))
+    vi.advanceTimersByTime(5000)
+    // promise already settled as 'disposed', not the timeout error
+    await expect(p).rejects.toThrow('disposed')
+    expect(t.size).toBe(0)
+  })
+
+  it('handles concurrent out-of-order resolution by key', async () => {
+    const t = new PendingTracker<number, string>()
+    const promises = [
+      t.register(1, 1000, new Error('t')),
+      t.register(2, 1000, new Error('t')),
+      t.register(3, 1000, new Error('t')),
+    ]
+    t.resolve(3, 'C')
+    t.resolve(1, 'A')
+    t.resolve(2, 'B')
+    await expect(Promise.all(promises)).resolves.toEqual(['A', 'B', 'C'])
+  })
+
+  it('number and string keys both work as generic K', async () => {
+    const numT = new PendingTracker<number, string>()
+    const strT = new PendingTracker<string, string>()
+    const pn = numT.register(1, 100, new Error('t'))
+    const ps = strT.register('id-1', 100, new Error('t'))
+    numT.resolve(1, 'n')
+    strT.resolve('id-1', 's')
+    await expect(pn).resolves.toBe('n')
+    await expect(ps).resolves.toBe('s')
   })
 })

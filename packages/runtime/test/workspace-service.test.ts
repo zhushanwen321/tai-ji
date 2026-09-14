@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { WorkspaceService } from '../src/services/workspace/workspace-service.js'
 import type { RecentWorkspacesStore } from '../src/services/workspace/recent-workspaces-store.js'
 
@@ -64,6 +65,13 @@ describe('WorkspaceService — behavior', () => {
 
   it('record skips empty string (INV-1 primary guard)', () => {
     service.record('')
+    expect(mockStore.record).not.toHaveBeenCalled()
+  })
+
+  // 方案 A homedir 守卫（自 workspace-service-homedir.test.ts 并入）：
+  // homedir 是失效 cwd 的兜底目标，作为「最近工作区」无记录价值——service 层堵死。
+  it('record(homedir) → store.record 不被调用（方案A homedir 守卫）', () => {
+    service.record(homedir())
     expect(mockStore.record).not.toHaveBeenCalled()
   })
 

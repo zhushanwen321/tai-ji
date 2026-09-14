@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 
 import { PluginActivator } from '../src/services/plugin-service/plugin-activator.js'
 import type { PluginHost as ActivatorHost } from '../src/services/plugin-service/plugin-activator.js'
@@ -544,5 +544,138 @@ describe('crash 连坐状态守护（V6②：markCrashed 的 CRASHED 不被激�
     } finally {
       errSpy.mockRestore()
     }
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════
+// scan→activate 全链 + error 恢复重激活（自 plugin-integration.test.ts 归并；
+// TC-int-02「storage round-trip through RPC」未随迁——其 getMethod/setMethod 是
+// 测试文件内定义的函数直调 storage，未经 rpcServer.dispatch，与 plugin-storage.test.ts
+// TC-5-01/04 同质零增量；RPC 层真实覆盖在 plugin-injection-guard.test.ts）
+// ══════════════════════════════════════════════════════════════════
+
+describe('plugin-integration 归并：scan 发现 + 激活全链 + error 恢复', () => {
+  let tmpDir: string
+
+  beforeAll(async () => {
+    const { mkdtemp, mkdir, cp } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join, resolve, dirname } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const FIXTURES_DIR = resolve(__dirname, 'fixtures/plugins')
+    tmpDir = await mkdtemp(join(tmpdir(), 'plugin-integration-test-'))
+    const pluginDir = join(tmpDir, 'resources', 'plugins', 'hello-world')
+    // resources/plugins 目录由 registry 映射为 built-in（plugin-registry.ts 第三项），
+    // 避免激活锁（IF3 只锁 external）跳过本集成流程的激活步骤。
+    await mkdir(pluginDir, { recursive: true })
+    await cp(join(FIXTURES_DIR, 'hello-world'), pluginDir, { recursive: true })
+  })
+
+  afterAll(async () => {
+    const { rm } = await import('node:fs/promises')
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('TC-int-01: registry.scan 发现 → 注册 → 事件激活 → 停用全链', async () => {
+    const { PluginRegistry } = await import('../src/services/plugin-service/plugin-registry.js')
+    const registry = new PluginRegistry(tmpDir, tmpDir)
+    const activator = new PluginActivator()
+    // 全链 host 需区分 activate/deactivate 回复（createMockHost 恒回 activated，deactivate 会挂起）
+    const host: ActivatorHost = {
+      assignWorker: vi.fn(() => Promise.resolve('mock-worker-1')),
+      loadPlugin: vi.fn(() => Promise.resolve()),
+      getWorkerHandle: vi.fn((pluginId: string) => ({
+        workerId: 'mock-worker-1',
+        postMessage: vi.fn((msg: unknown) => {
+          const m = msg as { type: string; pluginId?: string }
+          if (m.type === 'activate') {
+            queueMicrotask(() => activator.handleWorkerReply({ type: 'activated', pluginId }))
+          } else if (m.type === 'deactivate') {
+            queueMicrotask(() => activator.handleWorkerReply({ type: 'deactivated', pluginId }))
+          }
+        }),
+      })),
+      terminateWorker: vi.fn(() => Promise.resolve()),
+    }
+
+    // 1. 扫描发现插件（descriptor 形态断言：scan 发现链唯一覆盖点）
+    const descriptors = await registry.scan()
+    expect(descriptors.length >= 1).toBeTruthy()
+    const hw = descriptors.find(d => d.pluginId === 'hello-world')!
+    expect(hw).toBeTruthy()
+    expect(hw.trustLevel).toBe('trusted')
+    expect(hw.activationEvents.includes('onStartupFinished')).toBeTruthy()
+
+    // 2. 注册描述符 + 事件触发激活
+    activator.registerDescriptors(descriptors)
+    expect(activator.getState('hello-world')).toBe('UNLOADED')
+
+    await activator.handleEvent({ type: 'onStartupFinished' }, host)
+    expect(activator.getState('hello-world')).toBe('ACTIVE')
+    expect(activator.getActivePlugins()).toEqual(['hello-world'])
+
+    // 3. slash command 触发已激活插件（幂等）
+    await activator.handleEvent({ type: 'onSlashCommand', command: 'hello' }, host)
+    expect(activator.getState('hello-world')).toBe('ACTIVE')
+
+    // 4. 停用
+    await activator.deactivatePlugin('hello-world', host)
+    expect(activator.getState('hello-world')).toBe('UNLOADED')
+    expect(activator.getActivePlugins().length).toBe(0)
+  })
+
+  it('TC-int-03: error 恢复——激活失败 UNLOADED 后可重新激活到 ACTIVE', async () => {
+    const crashActivator = new PluginActivator()
+    const desc = makeDescriptor({
+      pluginId: 'crash-plugin',
+      trustLevel: 'sandbox',
+      pluginPath: '/tmp/crash-plugin',
+    })
+
+    crashActivator.registerDescriptors([desc])
+
+    // 模拟 Worker 在 activate 时回复 error
+    const errorHost: ActivatorHost = {
+      assignWorker: vi.fn(() => Promise.resolve('crash-worker')),
+      loadPlugin: vi.fn(() => Promise.resolve()),
+      getWorkerHandle: vi.fn((pluginId: string) => ({
+        workerId: 'crash-worker',
+        postMessage: vi.fn(() => {
+          queueMicrotask(() => {
+            crashActivator.handleWorkerReply({
+              type: 'error',
+              pluginId,
+              error: 'Worker crashed during activation',
+            })
+          })
+        }),
+      })),
+      terminateWorker: vi.fn(() => Promise.resolve()),
+    }
+
+    await crashActivator.activatePlugin('crash-plugin', { type: 'onStartupFinished' }, errorHost)
+
+    // 状态应该是 UNLOADED（不是 ACTIVE）——error 不产生 CRASHED 终态
+    expect(crashActivator.getState('crash-plugin')).toBe('UNLOADED')
+    expect(crashActivator.getActivePlugins().length).toBe(0)
+
+    // 可以重新尝试激活（恢复）——error 后 recovery 重激活是本用例独有增量
+    const recoveryHost: ActivatorHost = {
+      assignWorker: vi.fn(() => Promise.resolve('recovery-worker')),
+      loadPlugin: vi.fn(() => Promise.resolve()),
+      getWorkerHandle: vi.fn((pluginId: string) => ({
+        workerId: 'recovery-worker',
+        postMessage: vi.fn(() => {
+          queueMicrotask(() => {
+            crashActivator.handleWorkerReply({ type: 'activated', pluginId })
+          })
+        }),
+      })),
+      terminateWorker: vi.fn(() => Promise.resolve()),
+    }
+
+    await crashActivator.activatePlugin('crash-plugin', { type: 'onStartupFinished' }, recoveryHost)
+    expect(crashActivator.getState('crash-plugin')).toBe('ACTIVE')
   })
 })

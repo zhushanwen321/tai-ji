@@ -782,6 +782,70 @@ describe('SessionService · lifecycle', () => {
       await expect(setup.service.restoreSession('persist-2')).rejects.toThrow('No model configured')
     })
 
+    // W3 事件监听器所有权（自 session-pool-restoresession.test.ts 归并）：
+    // 同 id 二次 restore 必须先 detach 第一次的 adapter（EventAdapter 是 pi 事件监听唯一 owner）
+    it('detaches the first adapter when the same sessionId is restored twice', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'restore-detach-'))
+      const filePath = join(dir, 'persist-detach.jsonl')
+      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
+      try {
+        mockScannedSessions.push({
+          id: 'persist-detach', filePath, cwd: dir, name: null,
+          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
+        })
+        const detachSpy = vi.fn()
+        const attachSpy = vi.fn()
+        const localSetup = createSetup()
+        // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
+        const localService = new SessionService(
+          localSetup.pm,
+          localSetup.broker,
+          () => ({ attach: attachSpy, detach: detachSpy }),
+          '/tmp',
+          localSetup.extensionService,
+          new PiConfigStore(),
+          new PiSessionStore(),
+          localSetup.gitInfoReader,
+          { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
+        )
+        const client = makeMockClient()
+        vi.mocked(localSetup.pm.createSession).mockResolvedValue(client as unknown as IPiEngine)
+
+        await localService.restoreSession('persist-detach')
+        expect(detachSpy).not.toHaveBeenCalled()
+
+        // 同 id 二次 restore——应先 detach 第一次的 adapter
+        await localService.restoreSession('persist-detach')
+        expect(detachSpy).toHaveBeenCalledTimes(1)
+        expect(attachSpy).toHaveBeenCalledTimes(2)
+      } finally {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      }
+    })
+
+    // cwd fallback（自 session-pool-restoresession.test.ts 归并）：死路径 cwd → homedir 兜底
+    it('falls back to home dir when the scanned session cwd does not exist', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'restore-cwd-'))
+      const filePath = join(dir, 'persist-cwd.jsonl')
+      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
+      try {
+        const nonexistentCwd = join(dir, 'xyz-agent-test-cwd-nonexistent')
+        mockScannedSessions.push({
+          id: 'persist-cwd', filePath, cwd: nonexistentCwd, name: null,
+          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
+        })
+        const client = makeMockClient()
+        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
+
+        await setup.service.restoreSession('persist-cwd')
+
+        // createSession 收到的 cwd 不含死路径（F3 归一化兜底 homedir）
+        expect(vi.mocked(setup.pm.createSession).mock.calls[0]?.[1]).not.toContain('xyz-agent-test-cwd-nonexistent')
+      } finally {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      }
+    })
+
     it('destroys created session when switch_session fails', async () => {
       // B7: restoreSession 直读 JSONL 文件，需真实文件
       const dir = mkdtempSync(join(tmpdir(), 'restore-fail-'))

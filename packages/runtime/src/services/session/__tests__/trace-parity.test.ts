@@ -72,10 +72,8 @@ function diffEntries(rpcEntries: unknown[], fileEntries: unknown[]): string[] {
 }
 
 describe('A24 探针 P1：RPC 录制产物 vs 文件直读产物 SessionEntry 序列逐条 diff 为空', () => {
-  it('录制 fixture 清单完整（3 个 session，与录制脚本清单一致）', () => {
-    // 防 fixture 与清单漂移：清单是录制脚本的镜像，缺一即 parity 覆盖面缩水
-    expect(RECORDED_SESSIONS).toHaveLength(3)
-  })
+  // [2026-09 测试舰队审查 r2-23] 「录制 fixture 清单完整」恒真用例已删（清单写死 3 断言 3，
+  // 不具备防漂移能力——真正的 fixture 漂移防护由 it.each 读文件失败翻红承担）。
 
   it.each(RECORDED_SESSIONS)('%s —— parity diff 为空（$note）', ({ name }) => {
     const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf-8')) as {

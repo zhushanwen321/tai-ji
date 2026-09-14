@@ -183,54 +183,7 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
   })
 })
 
-describe('MessageDispatcher —— W3 compact busy 预检', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('W3a: isBashRunning=true 时 compact → throw + 零 compaction 广播（M4 事件驱动）+ 不调 client.compact', async () => {
-    const { dispatcher, compactFn, broadcasts, session } = makeRaceMocks()
-    // 经原语置位（u3c readonly 收口；publish null 与改前直写一致零广播）
-    applySessionOccupancyTransition(session, null, 'bash-start')
-
-    await expect(dispatcher.compact('s1')).rejects.toThrow(/bash running/)
-
-    // 不调 client.compact
-    expect(compactFn).not.toHaveBeenCalled()
-    // 零 compaction 广播（M4：dispatcher 退化为预检+RPC+复位，生命周期由 interpreter 唯一编排）
-    const compactionBroadcasts = broadcasts.filter((m) =>
-      ['session.compacting', 'session.compacted', 'message.compactionSummary'].includes(m.type),
-    )
-    expect(compactionBroadcasts).toHaveLength(0)
-    // 未置 isCompacting（被拒；置位归 interpreter 的 compaction_start）
-    expect(session.isCompacting).toBe(false)
-  })
-
-  it('W3b: isGenerating=true 时 compact → throw + 零 compaction 广播 + 不调 client.compact', async () => {
-    const { dispatcher, compactFn, broadcasts, session } = makeRaceMocks()
-    applySessionOccupancyTransition(session, null, 'generating')
-
-    await expect(dispatcher.compact('s1')).rejects.toThrow(/generating/)
-
-    expect(compactFn).not.toHaveBeenCalled()
-    const compactionBroadcasts = broadcasts.filter((m) =>
-      ['session.compacting', 'session.compacted', 'message.compactionSummary'].includes(m.type),
-    )
-    expect(compactionBroadcasts).toHaveLength(0)
-    expect(session.isCompacting).toBe(false)
-  })
-
-  it('W3c: idle 时 compact 正常进入压缩流程（预检不误拒，零 compaction 广播）', async () => {
-    const { dispatcher, compactFn, broadcasts, session } = makeRaceMocks()
-    // idle（isBashRunning=false, isGenerating=false）
-    await dispatcher.compact('s1')
-
-    // 调 client.compact（RPC 触发保留）
-    expect(compactFn).toHaveBeenCalledTimes(1)
-    // 零 compaction 广播（compacting/compacted/summary 由 interpreter 从 pi 事件驱动）
-    const compactionBroadcasts = broadcasts.filter((m) =>
-      ['session.compacting', 'session.compacted', 'message.compactionSummary'].includes(m.type),
-    )
-    expect(compactionBroadcasts).toHaveLength(0)
-    // isCompacting 兜底复位（finally；置位归 interpreter，此处对 false 无害）
-    expect(session.isCompacting).toBe(false)
-  })
-})
+// [2026-09 测试舰队审查 r2-21] 'W3 compact busy 预检' describe（3 用例）已删：
+// 与 message-dispatcher-compact.test.ts 的 TC5-busy预检（isBashRunning/isGenerating）+
+// TC5-成功（正常进入压缩 + 零广播）逐条重复（同断言集合），compact dispatcher
+// 唯一归并地在彼文件；本文件保留 W1 bashRunToken 竞态段（无重复替身）。

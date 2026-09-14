@@ -1,7 +1,7 @@
 /**
  * SessionManagerHandler 单元测试。
  *
- * 覆盖 U4-A1~A6、U4-A9 验收标准：
+ * 覆盖 U4-A1~A6 验收标准：
  * - A1: create 分支完整链路（四步串行时序）
  * - A2: send/history/status/list/abort 五个 action 分支
  * - A3: malformed 兜底
@@ -671,15 +671,8 @@ describe('SessionManagerHandler', () => {
     })
   })
 
-  describe('U4-A9: handler 接线验证', () => {
-    it('handle 方法签名与 interpreter 回调一致', () => {
-      // 验证 handle 方法接受 (requestId: string, action: string, params: Record<string, unknown>)
-      const opts = makeMockOptions()
-      const handler = new SessionManagerHandler(opts)
+  // [2026-09 测试舰队审查 r2-20] U4-A9「handle 方法签名与 interpreter 回调一致」已删：
+  // `expect(promise).toBeInstanceOf(Promise)` 对任意 async 函数恒真，无独立判别力；
+  // handle 接线的真实行为验证由上方 U4-A1~A6 各 action 用例承担。
 
-      // 类型检查：handle 方法应该接受这些参数
-      const promise = handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test' })
-      expect(promise).toBeInstanceOf(Promise)
-    })
-  })
 })
