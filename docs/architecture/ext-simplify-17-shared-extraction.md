@@ -131,7 +131,7 @@ callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?
 
 **D13 rename-session 码点截断包内合并** [B 基线]：`pure.ts:285-287` / `llm.ts:122-126` / `llm.ts:201-209` 三处 `Array.from` 骨架合并为包内 `truncateCodePoints(text, max, tail)`。不进 shared（跨包第二消费方排查不存在：system-prompt-trace diff.ts 是 UTF-16 码元语义、ask-user 走 pi-tui 显示宽度——真差异）。**注意**：`previewText` 的 300/200/100 数值与 `e2e/harness.mjs:209` `rebuildPreview` 是 15 号 §6.4 D4 裁决的 E2E 双维护契约，重构必须保持行为一致。
 
-**D14 todo `fixedWidth` 就地替换** [B 基线]：`render.ts:31-38` 删除，替换为 pi-tui 0.84.4 实装 `truncateToWidth(text, width, "...", true)`（签名与三分支语义已对照 node_modules dist JS 核实逐一等价；ask-user `question-view.ts:288` 已有 pad 参数生产使用先例）。同步删 `ELLIPSIS_MIN_WIDTH`（:28）。第三方已提供的能力不做第二实现，故此项不进 shared。
+**D14 todo `fixedWidth` 就地替换** [B 基线，实施修订 20260914]：`render.ts` 的 `ELLIPSIS_MIN_WIDTH` 常量与 `fixedWidth` 函数删除，替换为 pi-tui 0.84.4 `truncateToWidth` 组合（renderDualColumn 内局部 fit 闭包）。**原「签名与三分支语义已对照 node_modules dist JS 核实逐一等价」断言经实施期探针证伪核正**：逐一等价的只是可见宽度契约；截断分支可见内容不一致——旧实现内层调用未传空 ellipsis（pi-tui 默认追加 `...`）外层又拼接，超宽输出「4 真实字符 + 6 点」双省略号形态（新单调用形态为「7 字符 + 3 点」）。为守批次 1「零行为变化」定性（3 处微变白名单之外零变化），实施采用保行为组合：负 colWidth 特判保留（JS slice 负索引语义 pi-tui 无法复现）；可见宽 ≤ colWidth 或 colWidth ≤ 3 走 `truncateToWidth(t, w, "...", true)`（补齐与 clipped ellipsis 由 pi-tui 承接）；其余 `truncateToWidth(t, w - ELLIPSIS_WIDTH) + "..."`（旧分支 3 组合结构保留——pi-tui 无单一等价 API，CJK 跨界截断的宽度不守恒旧行为需两参调用字面复现）。端到端对照 180 输出可见一致（literal 差仅 ANSI reset 包裹）；新增 3 用例锁定截断可见形态防回退。第三方已提供的能力不做第二实现，故此项不进 shared；「修复双省略号显示」属产品判断，不随本批顺风带。
 
 ## 4. 负面清单（排查过、判定不抽取——防「为什么没提」复查）
 

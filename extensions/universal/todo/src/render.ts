@@ -25,17 +25,8 @@ const SINGLE_COLUMN_BUDGET = WIDGET_MAX_LINES - 1;
 
 /** 垂直分割线视觉宽度（" │ "） */
 const DIVIDER_VISUAL_WIDTH = 3;
-const ELLIPSIS_MIN_WIDTH = 3;
-
-/** 截断或补齐到精确视觉宽度，截断时追加 "..." */
-function fixedWidth(text: string, width: number): string {
-	const len = visibleWidth(text);
-	if (len <= width) {
-		return text + " ".repeat(width - len);
-	}
-	if (width <= ELLIPSIS_MIN_WIDTH) return "...".slice(0, width);
-	return truncateToWidth(text, width - ELLIPSIS_MIN_WIDTH) + "...";
-}
+/** 省略号视觉宽度（"..."） */
+const ELLIPSIS_WIDTH = 3;
 
 // ── 状态栏 ────────────────────────────────────────────
 
@@ -92,11 +83,22 @@ export function renderDualColumn(
 	const lines: string[] = [];
 	const half = Math.ceil(todos.length / COLUMN_COUNT);
 	const divider = " " + th.fg("borderMuted", "\u2502") + " ";
+	// 补齐/截断到列宽：可见输出与 D14 替换前的列宽逻辑逐字符一致（裁决零行为变化）——
+	// 截断列保持「前缀+6点」旧形态，不可简化为单调用 truncateToWidth(text, colWidth, "...", true)
+	// （会改为前缀+3点）；行为由 __tests__/render.test.ts 锁定。colWidth <= ELLIPSIS_WIDTH 走 pi-tui
+	// clipped-ellipsis 路径，可见一致（ANSI reset 包裹差异不影响渲染）。负列宽（病态窄终端）pi-tui 对
+	// maxWidth<=0 恒空串，无法复现旧 slice 负索引语义，保留原特判。
+	const fit = (text: string): string =>
+		colWidth < 0
+			? "...".slice(0, colWidth)
+			: visibleWidth(text) <= colWidth || colWidth <= ELLIPSIS_WIDTH
+				? truncateToWidth(text, colWidth, "...", true)
+				: truncateToWidth(text, colWidth - ELLIPSIS_WIDTH) + "...";
 	for (let row = 0; row < half; row++) {
-		const left = fixedWidth(indent + renderWidgetItem(todos[row], th), colWidth);
+		const left = fit(indent + renderWidgetItem(todos[row], th));
 		const rightIdx = row + half;
 		const right = rightIdx < todos.length
-			? fixedWidth(renderWidgetItem(todos[rightIdx], th), colWidth)
+			? fit(renderWidgetItem(todos[rightIdx], th))
 			: " ".repeat(colWidth);
 		lines.push(left + divider + right);
 	}
