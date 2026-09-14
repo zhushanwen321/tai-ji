@@ -118,3 +118,5 @@ graph TD
 - 2026-09-14 阶段 2 完成：13 单元全 committed（u13 为 V1 grep 抓出的 bte 漏点补迁）。
 - 2026-09-14 阶段 3：双区一致性审查——区 A（采用批）2 low unreasonable（测试注释悬空引用已修；index 收尾义务已兑现）+ 2 doc_error（relay 路径笔误已勘误；u13 状态已回填）；区 B（llm-shared+守卫）0 unreasonable + 1 low doc_error（V2 措辞已修）。**清零**。
 - 2026-09-14 全量测试验收（原 Gate A）：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` → **GATE_A_EXIT=0**，27 个测试文件组全绿（log `.tmp/dev-flow/ext-simplify-18-shared-adoption.gate-a.log`）；零 SKIP 绕过。changeset 批尾已落（`.changeset/ext-simplify-18-shared-adoption.md`：llm-shared minor + 12 包 patch）。
+- 2026-09-14 阶段 5 真机验收：**V7/V8/V9 全 PASS**（pi CLI `-ne --mode rpc` 实测，报告与输出原件 `.tmp/dev-flow/ext-simplify-18-shared-adoption.acceptance/`）——V7 cache-probe custom entry seq1 全指纹落盘；V9 session_read list+outline 双调用（header 单源化路径）；V8 permission 加载+bash 管线（`/permission model` 交互 rpc 模式结构性不可达，MPT8 单测覆盖登记环境限制）。一次性场景未沉淀 e2e spec。
+- 2026-09-14 文档资产同步检查：constraints.json C-build-10（随 u12）+ ext-simplify index 18 号行终态（随阶段 3 清零 commit）已同步；PRODUCT/ARCHITECTURE/CONTEXT/DESIGN/STANDARDS/TEST-STRATEGY/FEATURE-PRIORITIES/TROUBLESHOOTING **零触发**（纯内部等价重构 + 1 处病态输入微变，无产品边界/拓扑/术语/视觉/规范/策略/排障变化；parseModelRef 为代码符号非领域术语）。
