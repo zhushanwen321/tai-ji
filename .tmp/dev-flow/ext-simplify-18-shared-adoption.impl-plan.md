@@ -88,6 +88,10 @@ graph TD
 | u6 | :66 变体替换移除外层 String() 包装（toErrorMessage 返回即 string，逐语义等价）；import 分组按包内惯例 | 合理 |
 | u4 | 补跑 extensions 全树 tsc --noEmit（vitest 不查类型，严版守卫语义变化需类型面证据）；workflow.ts 首条 import 按包内惯例置位 | 合理 |
 | u3 | D4 病态输入全值核对（唯一微变点仅 computeProviderSelectedIndex 的 'provider/'，与设计登记一致）；MPT8 用例以双 providers+双 models 强钉值；加跑 typecheck+scoped eslint | 合理 |
+| u5 | sync 4KB 常量更名 SYNC_HEADER_READ_BYTES（模块内与 8KB 导出名区分，函数体逐字原样）；删副本后死 import 收窄（find.ts open/FileHandle、tool-handler readSync 等）；原位留指针注释 | 合理（单源化机械推论） |
+| u7 | deprecated re-export JSDoc 补保留依据四条（发布面/深路径可达/breaking/删除时点登记）；加跑 typecheck + scoped eslint | 合理 |
+| u9/u10/u11 | 各自补跑 typecheck（vitest 不查类型的统一先例）；import 分组按包内惯例 | 合理 |
+| 计划缺陷 | u5-u11 状态滞后一次批量回填（流水线滚动中主 agent 优先核验 commit，状态表滞后于实际，无静默跳过） | 记录 |
 
 ## 6 状态表
 
@@ -98,13 +102,14 @@ graph TD
 | u12 | committed | 1 | 87fae4c8a（T1/T2/T3 绿 + 漂移红验证还原 + self-test 10 用例 + validate-constraints 131 条 + hook 管道模拟命中） |
 | u3 | committed | 1 | 27f36ef48（u3a 机械批 581 绿）+ 81cb8790e（u3b D4 微变独立 commit，MPT8 钉值 21→23 用例） |
 | u4 | committed | 1 | c4d96b1eb（407 tests 绿 + extensions 全树 tsc 零错误 + 12/12 消费点匹配设计清单） |
-| u5 | pending | 0 | - |
+| u5 | committed | 1 | 21ec3aa7f（407 tests 绿含 CQ3 锚定 + tsc 零错误；SYNC_HEADER_READ_BYTES 更名与死 import 收窄见偏差表） |
 | u6 | committed | 1 | e1ece142d（22 tests 绿 + 零残留；:66 变体 String 包装按等价论证移除） |
-| u7 | pending | 0 | - |
-| u8 | pending | 0 | - |
-| u9 | pending | 0 | - |
-| u10 | pending | 0 | - |
-| u11 | pending | 0 | - |
+| u7 | committed | 1 | 5331fc835（193 tests 绿 + tsc 零错误；re-export 兼容经既有测试 isPlainObject 值导入实证） |
+| u8 | committed | 1 | d4e7db0a8（52 tests 绿 + tsc/eslint 零问题） |
+| u9 | committed | 1 | 975213e51（ask-user 307 / cw-tool 36 / rename-session 203 全绿；as 断言消除） |
+| u10 | committed | 1 | 29e7a874c（943 tests 绿 + tsc 零错误） |
+| u11 | committed | 1 | d48375304（39 tests 绿 + tsc/eslint 零问题；包外零 import 双重自证） |
+| u13 | in-progress | 1 | V1 grep2 抓出 impl-plan 漏派 bte config.ts:55 isPlainObject（设计 §2.2 在清单内，单元划分遗漏）——补派中 |
 
 ## 7 残留风险与变更历史
 
