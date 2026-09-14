@@ -422,7 +422,8 @@ export type HookType = InterceptorHookType | ObserverHookType
 /**
  * @proposed — 拦截器返回结果：允许/阻止/修改数据/注入消息。
  *
- * 三个语义域互不混淆（plugin-intercept-injection 设计 §3.3-D1）：
+ * 三个语义域互不混淆（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D1，文档已退役于
+ * `fadd8b8b4`）：
  * - 阻止：proceed:false — runtime 侧终止后续插件 hook 链并留痕；当前 pi 集成不阻止
  *   agent turn（pi before_agent_start 无 block 槽位，turn 照常进行）
  * - 改写：modifiedData — 改写当前 hook 事件的 data（如 onAfterToolResult 改写工具输出），
@@ -481,7 +482,8 @@ export type PiEventCallback = (eventName: string, data: unknown) => Promise<void
 
 /**
  * @internal — runtime 内部：Hook 通用返回结果（主线程塑形）。
- * injectedMessages 与 transformedData 语义分叉（plugin-intercept-injection 设计 §3.3-D2/D3）：
+ * injectedMessages 与 transformedData 语义分叉（git `7a3797d0b` 版 plugin-intercept-injection
+ * §3.3-D2/D3，文档已退役于 `fadd8b8b4`）：
  * 前者为管线层逐插件形状校验后的合法条目跨插件累积拼接（priority 执行序），后者保持
  * 「链上最后一个」覆盖语义；消费方为 handleBridgeIntercept 的注入映射。
  */

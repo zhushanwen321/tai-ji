@@ -192,7 +192,7 @@
 - **选 a. 单源化（选定）**：三形状（`BridgeSyncPayload`/`BridgeToolExecuteResponse`/`BridgeInterceptResponse`）以 extension-protocol 为唯一定义源——
   - runtime `plugin-types.ts`：删本地 `BridgeSyncPayload` 定义，改 `export type { ... } from '@xyz-agent/extension-protocol'`（runtime 已依赖该包 package.json:18；13 号 `utils/protocol-background-task.ts` 已有 runtime 引协议先例）；经 SDK re-export 的两形状改指协议源；
   - plugin-sdk：`BridgeToolExecuteResponse`/`BridgeInterceptResponse` 改 re-export 自协议（`ToolExecuteHandler` 返回类型 ：759-763 的作者契约面保持编译不变）；package.json 增 `@xyz-agent/extension-protocol: workspace:*` 依赖（SDK 为 private 包，协议包零依赖叶节点，无环）；
-  - 协议 types.ts:33-35 手工同步注释删除（单源化后失义），「runtime 是实现侧权威」矛盾表述一并清理。
+  - 协议 types.ts:33-35 手工同步注释删除（单源化后失义），「runtime 是实现侧权威」矛盾表述一并清理。**[终态括注]** 实装为正向 SSOT 声明（「本模块是 Bridge* 回包形状的唯一定义源」）取代字面删除——单源化后此处正是声明 SSOT 的位置，正向声明比留白更有导航价值（合理偏差 impl-plan §5 R1，矛盾表述确已消失）。
 - **选 b. 一致性测试（否，即索引原 low 项建议）**：测试冻结重复不消除重复，三处同改税照旧。被取代登记。
 - **选 c. 维持现状（否）**：三处定义 + 双权威矛盾注释，每次形状演进手工同步。
 - **真差异保留**：SDK 的 `BridgeSyncRequest`/`BridgeSyncResponse`/`BridgeState`/`BridgeToolExecuteRequest`（worker↔main RPC 概念域）不动——与协议形状字段结构不同源，非重复定义。

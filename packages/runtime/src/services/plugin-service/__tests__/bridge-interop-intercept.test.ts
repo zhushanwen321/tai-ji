@@ -1,5 +1,6 @@
 /**
- * handleBridgeIntercept 纯映射矩阵单测（plugin-intercept-injection 设计 §3.3-D3/D4，
+ * handleBridgeIntercept 纯映射矩阵单测（git `7a3797d0b` 版 plugin-intercept-injection
+ * §3.3-D3/D4，文档已退役于 `fadd8b8b4`，
  * 实施单元 u-i3-bridge-mapping，§5 单元表 I3 行）。
  *
  * 职责边界：本函数为纯映射层——注入形状守卫（非数组整体丢弃/非 string 条目丢弃）

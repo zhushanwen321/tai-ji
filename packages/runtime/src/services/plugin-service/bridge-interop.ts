@@ -255,7 +255,7 @@ export async function handleBridgeIntercept(
   // `fadd8b8b4`）：注入形状守卫职责在管线层逐插件执行（§D2 同源），此处输入恒为管线
   // 产出的合法 string[]——无校验无日志职责。
   // 每条 string 包一层 {content}，对齐 pi 侧 bridge extension 的 isInjectedMessage 守卫
-  // 形态（extensions/taiji/plugin-bridge/src/index.ts:90，要求对象含 content 键，
+  // 形态（要求对象含 content 键，
   // string 条目会被无留痕过滤）。协议层类型 injectedMessages: unknown[] 不收紧（D3 定案）。
   const injectedMessages = (hookResult.injectedMessages ?? []).map(content => ({ content }))
 

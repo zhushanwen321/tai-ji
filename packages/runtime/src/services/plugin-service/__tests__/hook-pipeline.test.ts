@@ -1,5 +1,6 @@
 /**
- * HookPipeline 注入透传单测（plugin-intercept-injection 设计 §3.3-D2/D5、§5-I2）。
+ * HookPipeline 注入透传单测（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D2/D5、
+ * §5-I2，文档已退役于 `fadd8b8b4`）。
  *
  * 覆盖矩阵：
  * - 逐插件形状守卫（D5 行 1/2）：非数组整体丢弃（Array.isArray 在 push 前——字符串

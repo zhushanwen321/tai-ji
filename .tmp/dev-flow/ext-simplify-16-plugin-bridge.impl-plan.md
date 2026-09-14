@@ -87,20 +87,20 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
 |------|----------------------------------------------|------|----------|
 | u1 | committed | 2 | 3d175e18e；包内 typecheck+test 33/33 绿；N1 bridge 侧零命中；D6 返回类型收紧（主 agent 抽验补修） |
 | u2 | committed | 4 | e519206e8；CP1 双包 typecheck 绿（回退方案未触发）；runtime 三测试文件 61/61；CP2 bundle exit 0；三形状唯一定义点 rg 核实 |
-| u3 | committed | 1 | docs/design/bridge-rewrite-pi-0.84.md 五处落地 + 主 agent 追加 §3.4 E1/E4/E6 同款讹写清偿（见 v1 u3 记录） |
+| u3 | committed | 1 | bb085f57b；docs/design/bridge-rewrite-pi-0.84.md 五处落地 + 主 agent 追加 §3.4 E1/E4/E6 同款讹写清偿（见 v1 u3 记录） |
 
 ## 7 残留风险与变更历史
 
 - **CP1 回退方案**（设计 §8.3 预设）：plugin-sdk 增 workspace 依赖后若 typecheck 链断裂，回退 = SDK 侧维持本地定义，D4 收窄为 runtime 侧单源化并登记（u2 执行时首验）。SDK 实测无 scripts、无构建步骤（main=src/index.ts 源码直消）、private 包，预判零风险。
 - **P3 备查**（不在执行面）：forwardToolExecute 把通道异常折叠为「cancelled.」文案——已登记移交 code-simplify 备选，本次不顺手改。
 - **D2「同批同 PR」兑现方式**：u1/u2 各自独立 commit、同分支合入（注释与 fixture 不参与运行时，批间无行为窗口；co-deployed 无版本偏斜）。
-- **不触碰红线**：设计 §7「已核实非过度」清单与 §2 非目标为 u1/u2 领地内禁改区（三条硬约束头注释、sync 循环、守卫族、SDK worker 通道四类型、plugin-sdk manifest commands 域 :243/:281/:837/:888、bridge-interop 的 commands-executor 相关注释 :39/:71）。
+- **不触碰红线**：设计 §7「已核实非过度」清单与 §2 非目标为 u1/u2 领地内禁改区（三条硬约束头注释、sync 循环、守卫族、SDK worker 通道四类型、plugin-sdk manifest commands 域〔终态 :251/:289/:834/:885 附近，以域命名判定不锚行号〕、bridge-interop 的 commands-executor 相关注释 :39/:71）。
 - v0（2026-09-14）：计划建立，基线 a8718fcd5。计划期补登两条（grep 机械核实）：① forwarding.test.ts:49 `commands: []` 字面量——设计 §6.2 清单未列，按 N1「fixtures 全部零命中」补进 u1；② runtime fixtures 精确行号核实——bridge-marker-channel.test.ts :58/:176、plugin-hooks-integration.test.ts :188-193（含用例名与注释，均 u2 领地）。
 - v1（2026-09-14）：u1/u2 committed（3d175e18e / e519206e8，同批同 PR 兑现 D2）。执行记录与计划外裁决：
   - **领地遗漏补登**：bridge-sync.test.ts（走真实 RuntimeServer→BridgeHandler→getSyncPayload 生产链的集成测试，:227-236/:267 断言生产回包含 commands）设计 §6.2 与本计划 v0 均未列——u2 dev 按领地铁律停下上报，主 agent 实跑核实（2 failed/14 passed）后批准扩入 u2（fix 轮次 2）；其 :386-390 自含形状断言残留同批清理（轮次 3，N1 口径）。
   - **u1 轮次 2**（主 agent 抽验）：getSessionId 返回类型 `string | undefined` → `string`（pi 实装 `getSessionId(): string` 恒返回 string，`| undefined` 是已删 catch 路径的类型层幽灵）。
   - **u2 轮次 4**（提交门拦截）：plugin-types.ts 新注释中协议包内部路径字面量 `extensions/plugin-bridge/types.ts` 触发一层路径残留检查（check-extension-dependencies.mjs 第 5 节，2026-08-22 分组防回退守卫）——改写为包名+模块名指称（仓内既有惯例），检查器本体未动。
-  - u1 自行裁决三项均属设计语义内：D3 调用点双形态注释随分支同域清理；D1 重写+N2 拆两用例；D5 断言强化为 `toEqual({ kind: "ok" })`。u2 自行裁决五项（:262 同文档指针一并修正、:46 保留 getCommands 指引、SDK 头「零依赖」叙事如实化、SDK 双行 re-export（ToolExecuteHandler 本地引用需要）、plugin-types 节头保留）均登记无设计冲突。
+  - u1 自行裁决三项均属设计语义内：D3 调用点双形态注释随分支同域清理；D1 重写+N2 拆两用例；D5 断言强化为 `toEqual({ kind: "ok" })`。**〔阶段 6 补记〕第四项：D1 兜底路实装为 `JSON.stringify(content) ?? String(content)`，较设计的「JSON.stringify 兜底」多一层 undefined/null 防御（JSON.stringify(undefined) 返回 undefined 会使 content text 段破约）——设计「非 string 序列化保信息」语义内强化，代码注释自证理由。** u2 自行裁决五项（:262 同文档指针一并修正、:46 保留 getCommands 指引、SDK 头「零依赖」叙事如实化、SDK 双行 re-export（ToolExecuteHandler 本地引用需要）、plugin-types 节头保留）均登记无设计冲突。
   - **u3 轮次 1 + 主 agent 追加**：u3 五处落地（§3.2 降格 / §3.3-D7 关闭登记 / :208 形态 / :238 E2 行 / 变更历史 v4.5，rg 证据 V1-V3 全过）。其领地内观察项——§3.4 表格 E1/E4/E6 行与 E2 同款 `isError: '<文案>'` 速写讹写——主 agent 采信后亲验实装（bridge-handler.ts:105 / bridge-interop.ts:172 均为 `{content, isError: true}`；E4 桥侧 cancelledResult 为 `isError: true` + content 数组、文案实为 `Plugin tool <name>: cancelled.`），裁决一并清偿（E2 修而 E1/E4/E6 不修 = 表格内部自相矛盾且与 :191 注记互斥），变更历史 v4.5 补 ④ 记。
 - v2（2026-09-14）：**阶段 3 一致性审查 + Gate A + 修复批次**。
   - **一致性审查**（单全局 reviewer，diff a8718fcd5..HEAD = 15 文件 +211/-155 ≤500 行门槛）：映射有效；六决策 D1-D6 + u3 六处全部落地完整；覆盖矩阵无 unclaimed 区；N1 断言族 reviewer 代跑全过；计划外扩展 bridge-sync.test.ts 独立核实干净。结论：reasonable 5（§5 登记表 R1-R5）/ unreasonable 5（全部 P3 注释/缩进级）/ doc_errors 1（设计 §7 N1 行缺豁免括注——主 agent 亲修：补「bridge sync payload 语义域」限定与各包既有 commands 域豁免清单，对齐 impl-plan u2 验收③口径）。
@@ -115,3 +115,4 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
   - 验收 agent 自行裁决 4 项（全登记）：fixture 位置迁 `~/.xyz-agent-dev/plugins/`（dev 的 XYZ_AGENT_DATA_DIR 被 main.ts:137 钉死，实例子目录仅 Electron userData——以运行时真实扫描点为准）；trusted 被宿主强制降 sandbox，改用预写 permissions.json 免审批（bridge 链路与信任级无关）；CP3 等价操作口径；A3 产物级补强。
   - 收尾：dev 进程树按 PID 精确终止（10 PID 两轮核对，打包版太极.app 未受波及——终态 pgrep 3 PID 经主 agent 核实为打包版 Helper）；fixture 与 /tmp 临时文件清理；产物 8 文件落 .tmp/dev-flow/ext-simplify-16-plugin-bridge.acceptance/（gitignored，一次性场景不沉淀 e2e spec）；零 git 写操作。
   - **收尾检查**：功能分级登记零触发（纯内部简化，无新功能/无挂掉后果变化）；文档资产零同步（TEST-STRATEGY 分层无变化 / TROUBLESHOOTING 无新排障规则 / ARCHITECTURE 进程拓扑无变化——bridge 形状单源化属实现层）。
+- v4（2026-09-14）：**阶段 6 design-code-sync 终态同步收敛（1 轮）**。终态全量审查（基线 eaf0d986a）：**0 must-fix**，6 条 finding（1 suggestion contested + 5 info）——代码↔设计（D1-D6 全落地，反引号标识符/git 指针机械核实零悬空）/ 现实↔impl-plan（状态表/残留风险/变更历史逐项实证）/ impl-plan 内部 / 注释口径四关系全 checked。全部当轮修：F1 退役文档裸引 6 处统一「git `7a3797d0b` + 退役于 `fadd8b8b4`」指针形态（代码/测试侧 5 处 fixer + bridge-rewrite:169 主 agent；ext-simplify-16 文档内 :53 已有完整指针自消解、:311 变更历史属快照不动，review.md 属历史快照不动）；F2 设计 §6.4 补终态括注指向 R1；F3 impl-plan v1 补记 u1 兜底序列化强化；F4 bridge-interop 行号锚去除留符号名；F5 状态表 u3 补 hash；F6 §7 红线行号去化。contested 2 条均 suggestion/info 级按默认口径处理（suggestion 级 contested 按 doc-right 修，F4 info 级 contested 按流水线「行号语义锚定」口径修）。验证：runtime 两测试文件 22/22 绿 + plugin-sdk tsc 绿 + 裸引 grep 零命中。**Step 5 退役判定：退役 0 个**（无被整体取代文档；review.md 按本系列惯例原位保留且被 ext-simplify-index.md 引用；impl-plan/验收产物在 .tmp 合规位置）。
