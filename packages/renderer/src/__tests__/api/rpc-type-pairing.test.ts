@@ -162,7 +162,7 @@ describe('U2: command() — payload 受 ClientMessageMap[K] 约束', () => {
     // 负向：session.history 的 payload 是 { sessionId }，不接受 content
     // @ts-expect-error — content 不在 ClientMessageMap['session.history'] 的 payload 里
     silentCommand('session.history', { content: 'x' })
-    expect(true).toBe(true)
+    expect.assertions(0) // 类型级用例：@ts-expect-error 由 typecheck:test 兜住，运行时仅验证不抛
   })
 
   it('message.send 接受 { sessionId, content }', () => {
@@ -173,7 +173,7 @@ describe('U2: command() — payload 受 ClientMessageMap[K] 约束', () => {
   it('message.send 拒绝缺 content', () => {
     // @ts-expect-error — message.send payload 必须含 content
     silentCommand('message.send', { sessionId: 's1' })
-    expect(true).toBe(true)
+    expect.assertions(0) // 类型级用例：@ts-expect-error 由 typecheck:test 兜住，运行时仅验证不抛
   })
 })
 
@@ -194,7 +194,7 @@ describe('U3: command() — 返回类型从 ReplyPayloadMap[K] 推导', () => {
     const p = silentCommand('git.stage', { sessionId: 's1', filePaths: ['/x'] })
     // @ts-expect-error — void 类型无 status 属性
     void p.then((r) => r.status).catch(() => {})
-    expect(true).toBe(true)
+    expect.assertions(0) // 类型级用例：@ts-expect-error 由 typecheck:test 兜住，运行时仅验证不抛
   })
 
   it('session.history 返回 Promise<含 messages>', () => {
