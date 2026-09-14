@@ -24,7 +24,7 @@
 | Unit | 职责 | 领地（精确文件路径） | 依赖 | 隔离 | 验收条款 |
 |------|------|---------------------|------|------|----------|
 | u1 | 依赖地基：5 包新增 `@zhushanwen/pi-ext-guards` workspace:* 依赖 + 根 extension-dependencies.json 登记 + pnpm install 更新 lockfile | `extensions/universal/session-reader/package.json`、`extensions/universal/cache-probe/package.json`、`extensions/universal/cw-tool/package.json`、`extensions/universal/ask-user/package.json`、`extensions/taiji/system-prompt-trace/package.json`、`extension-dependencies.json`、`pnpm-lock.yaml` | - | plain | ① 6 文件 diff 形态正确（依赖版本 workspace:*；json 5 条 dependsOn 条目，格式照 bte 先例）② `CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install` EXIT=0 ③ `node scripts/check-extension-dependencies.mjs` EXIT=0 ④ `.githooks/check_pnpm_store_layout.sh` 绿 |
-| u2 | llm-shared D4 前半：`parseRef` 更名导出 `parseModelRef`（内部调用点同步）+ 五形态钉值单测 | `extensions/shared/llm-shared/src/resolve.ts`、`extensions/shared/llm-shared/src/resolve.test.ts`（追加） | - | plain | ① `parseModelRef` 从 index 导出 ② 单测五形态（合法 ref / 缺斜杠 / "provider/" / "/model" / "a/b/c"）全绿 ③ 内部零 `parseRef` 残留引用 |
+| u2 | llm-shared D4 前半：`parseRef` 更名导出 `parseModelRef`（内部调用点同步）+ 五形态钉值单测 | `extensions/shared/llm-shared/src/resolve.ts`、`extensions/shared/llm-shared/src/__tests__/resolve.test.ts`（追加） | - | plain | ① `parseModelRef` 从 index 导出 ② 单测五形态（合法 ref / 缺斜杠 / "provider/" / "/model" / "a/b/c"）全绿 ③ 内部零 `parseRef` 残留引用 |
 | u3 | permission 全量：D1 toErrorMessage 7 处 + D2 config.ts isPlainObject + D4 model-picker 两方法采用（行为微变，主 agent 单独 commit） | `extensions/universal/permission/src/config.ts`、`index.ts`、`pipeline.ts`、`ast/analyzer.ts`、`ast/loader.ts`、`classifier/classifier.ts`、`model-picker.ts`（+ model-picker 相关测试文件追加 V2b 钉值） | u2 | plain | ① 该包 `instanceof Error ?` 手写 0 残留 ② `function isPlainObject` 定义删除改 import ③ V2b 单测：合法 ref 双预选不变 + "provider/" 回 Auto 钉值 ④ 包内既有测试全绿 |
 | u4 | session-reader D1+D2：tool-handler.ts 5 处 toErrorMessage + core/workflow.ts isRecord 迁移 | `extensions/universal/session-reader/src/tool-handler.ts`、`src/core/workflow.ts` | u1 | plain | ① 两文件目标手写副本 0 残留 ② isRecord 消费点全部走 ext-guards import ③ 包内既有测试全绿 |
 | u5 | session-reader D5：SessionHeader 三副本包内单源（新建 discovery/session-header.ts；两 async 副本删除；sync 4KB 版原样搬入） | `extensions/universal/session-reader/src/discovery/session-header.ts`（新建）、`src/discovery/subagents.ts`、`src/discovery/find.ts`、`src/tool-handler.ts` | u4 | plain | ① 三处旧定义删除、import 统一 ② `readSessionHeaderIdSync` 行为不变（`src/__tests__/tool-handler.test.ts:1057-1058` 既有用例绿）③ discovery 既有测试全绿 |
@@ -80,14 +80,19 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（初始为空）
+| Unit | 偏差 | 判定 |
+|------|------|------|
+| u2 | impl-plan 领地测试路径笔误 src/resolve.test.ts → 实际按包内布局惯例落 src/__tests__/resolve.test.ts（既有文件追加 describe 块） | 合理（布局惯例优先；u2 行领地已勘误） |
+| u1 | install 追加 --no-frozen-lockfile（CI=true 默认 frozen 与更新 lockfile 目标冲突，按 pnpm 报错指引）；三包新建 dependencies 块按既有键序惯例；dependsOn reason 按批次终态写 | 合理（均为指令落地细节） |
+| u12 | constraints.json authority 数组补 18 号文档（登记准确性）；compareCopy 可选第 4 参 recoverySuffix（T1/T2 零变化，T3 fail 指向 18 号 D6）；「排序后比对」落实为 Set 集合差异（天然顺序无关，显式 sort 冗余）；hook 头注释同步比对面描述 | 合理（均优于字面指令且行为面更准）；hook staged 级实测留主 agent（已管道级模拟命中） |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1 | pending | 0 | - |
-| u2 | pending | 0 | - |
+| u1 | committed | 1 | ec84f8109（check-extension-dependencies 22 entries 绿 + store layout 绿 + lockfile 5 hunk 纯净） |
+| u2 | committed | 1 | 684d56605（94 tests 绿 + parseRef 零残留 + index 导出） |
+| u12 | committed | 1 | 89e7de4 待回填（T1/T2/T3 绿 + 漂移红验证还原 + self-test 10 用例 + validate-constraints 131 条 + hook 管道模拟命中） |
 | u3 | pending | 0 | - |
 | u4 | pending | 0 | - |
 | u5 | pending | 0 | - |
