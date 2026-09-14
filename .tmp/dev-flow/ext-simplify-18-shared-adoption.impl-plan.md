@@ -85,6 +85,9 @@ graph TD
 | u2 | impl-plan 领地测试路径笔误 src/resolve.test.ts → 实际按包内布局惯例落 src/__tests__/resolve.test.ts（既有文件追加 describe 块） | 合理（布局惯例优先；u2 行领地已勘误） |
 | u1 | install 追加 --no-frozen-lockfile（CI=true 默认 frozen 与更新 lockfile 目标冲突，按 pnpm 报错指引）；三包新建 dependencies 块按既有键序惯例；dependsOn reason 按批次终态写 | 合理（均为指令落地细节） |
 | u12 | constraints.json authority 数组补 18 号文档（登记准确性）；compareCopy 可选第 4 参 recoverySuffix（T1/T2 零变化，T3 fail 指向 18 号 D6）；「排序后比对」落实为 Set 集合差异（天然顺序无关，显式 sort 冗余）；hook 头注释同步比对面描述 | 合理（均优于字面指令且行为面更准）；hook staged 级实测留主 agent（已管道级模拟命中） |
+| u6 | :66 变体替换移除外层 String() 包装（toErrorMessage 返回即 string，逐语义等价）；import 分组按包内惯例 | 合理 |
+| u4 | 补跑 extensions 全树 tsc --noEmit（vitest 不查类型，严版守卫语义变化需类型面证据）；workflow.ts 首条 import 按包内惯例置位 | 合理 |
+| u3 | D4 病态输入全值核对（唯一微变点仅 computeProviderSelectedIndex 的 'provider/'，与设计登记一致）；MPT8 用例以双 providers+双 models 强钉值；加跑 typecheck+scoped eslint | 合理 |
 
 ## 6 状态表
 
@@ -93,16 +96,15 @@ graph TD
 | u1 | committed | 1 | ec84f8109（check-extension-dependencies 22 entries 绿 + store layout 绿 + lockfile 5 hunk 纯净） |
 | u2 | committed | 1 | 684d56605（94 tests 绿 + parseRef 零残留 + index 导出） |
 | u12 | committed | 1 | 87fae4c8a（T1/T2/T3 绿 + 漂移红验证还原 + self-test 10 用例 + validate-constraints 131 条 + hook 管道模拟命中） |
-| u3 | pending | 0 | - |
-| u4 | pending | 0 | - |
+| u3 | committed | 1 | 27f36ef48（u3a 机械批 581 绿）+ 81cb8790e（u3b D4 微变独立 commit，MPT8 钉值 21→23 用例） |
+| u4 | committed | 1 | c4d96b1eb（407 tests 绿 + extensions 全树 tsc 零错误 + 12/12 消费点匹配设计清单） |
 | u5 | pending | 0 | - |
-| u6 | pending | 0 | - |
+| u6 | committed | 1 | e1ece142d（22 tests 绿 + 零残留；:66 变体 String 包装按等价论证移除） |
 | u7 | pending | 0 | - |
 | u8 | pending | 0 | - |
 | u9 | pending | 0 | - |
 | u10 | pending | 0 | - |
 | u11 | pending | 0 | - |
-| u12 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
 
