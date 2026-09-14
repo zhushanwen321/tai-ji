@@ -97,6 +97,8 @@ flowchart LR
 | u10 | useChat.ts 零改动（任务预期可能要补） | deferFlushFailureCounts 存量已修（5637e0088），语义由新测试锁定 | 闭环成立 |
 | u10 | store.ts（文件清单外接线点） | dispose 补面必须的编排接线 + testInternals 透出 | 已 commit 登记 |
 | 阶段3-修复 | 1 high（B5 触发面收窄 ca058f602）+ 3 low（i18n 527a0f1a3 / 接口契约随组A / skill-warn e1b5c3c88）全清零；8 doc_errors 亲修（f014b994a） | 定向复审 b5-fix-recheck 派发 | 见各 commit |
+| 阶段5-A3 | 删除全链路 8/8 PASS（WS RPC 真删除→列表移除+文件清理；forceQuit 存活对照；废纸篓断言 TCC 拦截→单测+日志代理覆盖）| 脚本 .tmp/dev-flow/memory-leak-remediation.acceptance/a3-delete-chain.mjs | dev 实例真机 | 
+| 阶段5-A4 | 断连重连 9/9 PASS（kill runtime ×5→supervisor 复起+RPC 可达+页面健康+console 零 error；第 5 轮系统内存压力致 reattach 推迟>6s，补验通过）| 脚本 a4-reconnect.mjs | dev 实例真机 |
 | Gate A | runtime 524f/6024t 绿（2 unhandled=用户在制 rpc-client）·core 129f/2104t 绿·renderer 402f/4354t 绿·ext typecheck+lint 绿·根 lint 修 2 行级豁免后绿 | extensions:test 中 pi-subagent-cli 12 失败=既有（基线前 f932d8545 poolKey 退役遗留，本分支区间该三包零 diff，日志 .tmp/dev-flow/gate-a-*.log） | 用户域残留登记 |
 | 事件 | 越权/外来 commit ×3：0f6d7c93f（fix ci vitest flags）·1b0f9dac6（perf ci shard）·8c0e49ef6（perf runtime rpc-client 测试提速，用户本人 commit）| 内容均正当；保留；最终汇报 | 用户在制 test-infra-source-simplify 工作继续中（docs/todo/） |
 | 阶段3 | 三区一致性审查：1 high（B5 触发面越界）+ 3 low unreasonable + 8 doc_errors | 修复组 A/B/C 并行派发；doc_errors 主 agent 亲修 | 审查报告见本表上方 |
