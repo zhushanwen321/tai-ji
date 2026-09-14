@@ -23,6 +23,10 @@ import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWat
 // 事件静默丢弃（crashes/runtime.jsonl 永不创建）。close 挂点属 shutdown 链（u7c）。
 import { initCrashJournal, closeCrashJournal } from './infra/crash-journal.js'
 import { isContainedStreamError } from './infra/system/uncaught-policy.js'
+// B5（memory-leak-remediation §3.2-B5）：sessionData 软删除实现——经 ITrash port
+// （services/ports/trash.ts）由组合根注入 SessionDataStore（三层约束 C-comm-03：
+// services 层不得 value import infra，装配归组合根）。结构匹配 ITrash.trashFile。
+import { trash } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
 import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders } from './infra/pi/pi-provider-store.js'
@@ -463,6 +467,9 @@ async function main(): Promise<void> {
     modelService,
     configDir,
     pluginInstaller,
+    // B5：软删除 port 装配（trash = mac 废纸篓 / 非 mac unlink，失败保留原地报错——
+    // trash.ts G4 语义；结构匹配 ITrash.trashFile）。
+    trashFile: trash,
     broadcastFn: (type, payload) => server.broadcast({ type: type as 'config.sessions', id: `push_${Date.now()}`, payload } as import('@xyz-agent/shared').ServerMessage),
   })
   // wave:perf-w09（接口收敛 wire 归位）：plugin 的 session 级广播点（plugin:viewUpdate /
@@ -963,6 +970,10 @@ async function main(): Promise<void> {
       },
       // pendingReload 定向清（D3 第 6 步，防御性 no-op）。
       clearPendingReload: (s) => reloadOrchestrator.clearPending(s),
+      // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收≠
+      // 销毁（不走 removeSessionEntry），只驱逐缓存；驱逐后重激活走单次全量重建
+      //（P7 张力四要素显式登记的代价）。
+      evictHistoryRebuildCache: (s) => sessionService.evictHistoryRebuildCache(s),
     })
 
   // reaper handle：保存供 shutdown 收口（tick 定时器已 unref 不阻塞退出，stop 是双保险）。

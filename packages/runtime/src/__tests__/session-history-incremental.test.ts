@@ -7,6 +7,8 @@
  * 3. "Entry not found" fallback 全量重拉（D6-4）+ 其他错误走尾读且缓存不动
  * 4. lastLeafId 随成功 getHistory 更新、removeSessionEntry（pi 退出汇聚点）清除
  * 5. HistoryRebuildCache LRU 容量帽 + mergeIncrementalMessages piEntryId 去重
+ * 6. B8（memory-leak-remediation §3.3-B8）：单条目字节帽（超限不入缓存——「缓存从未
+ *   存在」退化，重进走全量重建）+ reclaim 驱逐（驱逐后重激活全量重建并写回新缓存）
  *
  * mock 分层：
  * - client.getEntries：按调用序列返回真实响应形状 {data: {entries, leafId}}；
@@ -35,7 +37,7 @@ const { getHistoryTailFromFile } = await import('../services/session-history.js'
 
 // SUT 在 vi.mock 之后 import（session-service 内部引用 mocked 模块）
 const { SessionService } = await import('../services/session/session-service.js')
-const { HistoryRebuildCache, mergeIncrementalMessages } = await import('../services/session/history-rebuild-cache.js')
+const { HistoryRebuildCache, SessionHistoryReader, mergeIncrementalMessages } = await import('../services/session/history-rebuild-cache.js')
 // Fix-1/7 回归用真实重建（不 mock rebuildHistoryFromEntries，验证孤儿回填补丢失工具输出）
 const { rebuildHistoryFromEntries } = await import('../infra/pi/entry-tree-builder.js')
 
@@ -154,6 +156,32 @@ describe('HistoryRebuildCache', () => {
     cache.set('s', { leafId: 'l', messages: [], truncated: false })
     cache.delete('s')
     expect(cache.get('s')).toBeUndefined()
+  })
+
+  // ── B8：单条目字节帽（memory-leak-remediation §3.3-B8 候选 A）──
+
+  it('B8：单条目超字节帽不入缓存（「缓存从未存在」退化）；帽下正常缓存', () => {
+    // 字节帽注入 256B：单条 msg 序列化 ≈110B 在帽内；content 加长到 200B 后即超限
+    const cache = new HistoryRebuildCache(8, 256)
+    const bigMsg = { ...msg('e1'), content: 'x'.repeat(200) }
+    cache.set('big', { leafId: 'l', messages: [bigMsg], truncated: false })
+    expect(cache.size).toBe(0)
+    expect(cache.get('big')).toBeUndefined()
+
+    cache.set('small', { leafId: 'l', messages: [msg('e1')], truncated: false })
+    expect(cache.get('small')).toBeDefined()
+  })
+
+  it('B8：超限写入同时摘除既有条目（防冻结基线：历史只增不减，保留旧条目会让增量 delta 从旧叶子无界增长）', () => {
+    const cache = new HistoryRebuildCache(8, 256)
+    cache.set('s', { leafId: 'l1', messages: [msg('e1')], truncated: false })
+    expect(cache.size).toBe(1)
+
+    const bigMsg = { ...msg('e2'), content: 'y'.repeat(200) }
+    cache.set('s', { leafId: 'l2', messages: [bigMsg], truncated: false }) // 增量合并后超限
+
+    expect(cache.get('s')).toBeUndefined() // 旧条目也被摘除，不冒充新基线
+    expect(cache.size).toBe(0)
   })
 })
 
@@ -412,5 +440,82 @@ describe('SessionService.getHistory —— 增量窗口语义（真实重建，�
     expect(compactionMsg?.content).toBe('compacted-history')
     expect(compactionMsg?.compactionSummary?.tokensBefore).toBe(1000)
     expect(second.messages[2]?.piEntryId).toBe('e3')
+  })
+})
+
+// ── 集成：SessionHistoryReader B8 字节帽 + reclaim 驱逐（memory-leak-remediation §3.3-B8）──
+
+describe('SessionHistoryReader —— B8 字节帽 + reclaim 驱逐', () => {
+  /**
+   * 直构 SessionHistoryReader（SUT = reader 编排 + 注入字节帽的缓存实例；
+   * mock 分层同 makeService：getEntries 脚本出队 + rebuildHistoryFromEntries 直通）。
+   */
+  function makeReader(
+    script: Array<{ data?: { entries: PiSessionEntry[]; leafId: string | null } } | Error>,
+    opts?: { capBytes?: number },
+  ) {
+    const calls: GetEntriesCall[] = []
+    const client = {
+      getEntries: vi.fn(async (since?: string) => {
+        calls.push({ since })
+        const step = script.shift()
+        if (step instanceof Error) throw step
+        if (!step) throw new Error('getEntries script exhausted')
+        return step
+      }),
+    } as unknown as IPiEngine
+    const pm = {
+      onSessionExit: vi.fn(),
+      getClient: vi.fn(() => client),
+    } as unknown as IProcessManager
+    const sessionStore = {
+      rebuildHistoryFromEntries: vi.fn((entries: PiSessionEntry[]) => ({
+        messages: entries.map((e) => msg(e.id)),
+        orphanToolResults: [],
+      })),
+      scanSessions: vi.fn(() => []),
+      extractSessionOutcome: vi.fn(() => null),
+      persistSessionEnd: vi.fn(),
+    } as never
+    const cache = new HistoryRebuildCache(8, opts?.capBytes)
+    const reader = new SessionHistoryReader({ pm, sessionStore }, cache)
+    return { reader, cache, calls }
+  }
+
+  it('B8-A：超限 session 不缓存——返回值不受影响，重进两次都走全量（无 since）', async () => {
+    // 字节帽注入 16B：单条 msg 序列化 > 16B，两条必超限；返回值照常全量窗口
+    const full = { data: { entries: [entry('e1'), entry('e2')], leafId: 'leaf-1' } }
+    const { reader, cache, calls } = makeReader([full, { ...full }], { capBytes: 16 })
+
+    const first = await reader.getHistory('s-cap')
+    expect(first.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2']) // 返回值不受影响
+    expect(cache.size).toBe(0) // 超限不入缓存
+
+    const second = await reader.getHistory('s-cap') // 重进：无缓存可用 → 全量重建
+    expect(second.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2'])
+    expect(calls.map((c) => c.since)).toEqual([undefined, undefined]) // 两次都无 since
+    expect(cache.size).toBe(0)
+    expect(getHistoryTailFromFile).not.toHaveBeenCalled() // 全量重建成功，不降级尾读
+  })
+
+  it('B8-C：reclaim 驱逐缓存条目——重激活走全量重建并写回新缓存（后续增量命中）', async () => {
+    const full = { data: { entries: [entry('e1'), entry('e2')], leafId: 'leaf-1' } }
+    const { reader, cache, calls } = makeReader([full, { ...full }, { data: { entries: [], leafId: 'leaf-1' } }])
+
+    await reader.getHistory('s-re') // 首次全量 → 写缓存
+    expect(cache.size).toBe(1)
+
+    reader.onSessionReclaimed('s-re') // reclaim 驱逐（reclaimManagedSession 经 deps 接线）
+    expect(cache.size).toBe(0)
+    expect(cache.get('s-re')).toBeUndefined()
+
+    const second = await reader.getHistory('s-re') // 重激活：无缓存 → 全量 → 写回新缓存
+    expect(second.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2'])
+    expect(cache.size).toBe(1) // 全量重建写回
+
+    const third = await reader.getHistory('s-re') // 后续：新缓存生效（since 增量 + 空 delta 短路）
+    expect(calls.map((c) => c.since)).toEqual([undefined, undefined, 'leaf-1'])
+    expect(third.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2'])
+    expect(getHistoryTailFromFile).not.toHaveBeenCalled()
   })
 })

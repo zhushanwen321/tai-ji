@@ -227,6 +227,12 @@ export interface ReclaimSessionDeps {
   reapBackgroundTasks?(sessionId: string): Promise<void>
   /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
   clearPendingReload?(sessionId: string): void
+  /**
+   * 驱逐该 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C：
+   * 回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本）。装配绑
+   * SessionService.evictHistoryRebuildCache → SessionHistoryReader.onSessionReclaimed。
+   */
+  evictHistoryRebuildCache?(sessionId: string): void
 }
 
 export class SessionLifecycle implements ISessionRegistry {
@@ -1173,8 +1179,9 @@ export class SessionLifecycle implements ISessionRegistry {
    * 空闲回收的最小摘除编排（idle-pi-reclamation D3 七步，u2）。
    *
    * 与死亡清理汇聚点 removeSessionEntry（九步销毁）刻意不同：回收**不是销毁**——bus 分区
-   * （订阅/seq 连续，P3 广播流不断）、历史缓存（P7 条件增量收益）、PTY、插件 didDestroy
-   * 投递、终态写等全部跳过（D3 被跳过步骤归属表）。**禁止**为图省事改调 removeSessionEntry
+   * （订阅/seq 连续，P3 广播流不断）、PTY、插件 didDestroy
+   * 投递、终态写等全部跳过（D3 被跳过步骤归属表）；历史缓存例外——B8 起回收时驱逐该
+   * session 条目（evictHistoryRebuildCache，驱逐后重激活走单次全量重建是显式登记的代价）。**禁止**为图省事改调 removeSessionEntry
    * ——被否谱系第 1 条：PTY 连杀 / 广播断流 / 插件 destroy 污染三重冲突（除非三重冲突
    * 全有独立解法，当前没有）。
    *
@@ -1219,6 +1226,11 @@ export class SessionLifecycle implements ISessionRegistry {
       // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
       this.removeEntry(sessionId)
       deps.clearPendingReload?.(sessionId)
+      // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收不是
+      // 销毁，不走 removeSessionEntry 汇聚点，只驱逐缓存这一纯派生数据。挂代际校验
+      // 通过后的成功路径（并发重建取消时新 session 无辜，不摘其缓存）；驱逐后重激活
+      // 走单次全量重建（P7 张力四要素显式登记的代价，见 onSessionReclaimed 注释）。
+      deps.evictHistoryRebuildCache?.(sessionId)
       // ⑤① relay 尾扫（D3 第 5 步①，fire-and-forget）。**单段快照语义**：快照枚举与
       // kill 目标列表在此同步段一次完成，setImmediate 异步执行阶段只用快照闭包、禁止再查
       // 再杀——两段式（异步 kill 后二次复查再杀）可能误杀 restore 后新 session 经 relay
