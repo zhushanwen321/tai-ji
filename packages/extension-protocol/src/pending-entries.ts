@@ -88,3 +88,44 @@ export function collectActivePendingIds(entries: unknown[], opts?: CollectPendin
   }
   return ids
 }
+
+/**
+ * 将 pending:unregister 的 reason 映射为 entry 的 status 字段（落盘契约组成部分、
+ * 权威单点）——pending-notifications index.ts 委托此处（仅做 PendingStatus 类型
+ * 收窄包装），bte pending-reconcile 写侧同引，两侧映射不再可能漂移（ext-simplify-17
+ * D10：bte 原以 status === reason 的 identity 假设落盘，映射表演化时会静默漂移）。
+ *
+ * [U5 / 永久会话模型 §3.2.5 通知词表对齐] subagent-core 新 stopReason 展示值经注销
+ * reason 通道到达（interrupted/interrupted-by-restart/interrupted-by-parent → aborted、
+ * reopened → completed）——防新词落 default 被记为 completed 的误标（cancelled 同族
+ * 事故先例：新枚举值漏映射静默落兜底）。
+ *
+ * 返回值 string：PendingStatus 枚举留在 pending-notifications（本包不引 extension 侧
+ * 类型），产域恒在其联合内，消费方自行收窄。
+ */
+export function mapReasonToStatus(reason: string): string {
+  switch (reason) {
+    case 'completed':
+      return 'completed'
+    case 'failed':
+      return 'failed'
+    case 'cancelled':
+      return 'cancelled'
+    case 'expired':
+      return 'expired'
+    case 'time_limited':
+      return 'time_limited'
+    case 'budget_limited':
+      return 'failed'
+    case 'aborted':
+      return 'aborted'
+    case 'interrupted':
+    case 'interrupted-by-restart':
+    case 'interrupted-by-parent':
+      return 'aborted'
+    case 'reopened':
+      return 'completed'
+    default:
+      return 'completed'
+  }
+}

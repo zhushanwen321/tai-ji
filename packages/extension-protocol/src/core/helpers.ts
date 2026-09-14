@@ -1,5 +1,5 @@
 /**
- * Extension GUI 渲染协议 helper 函数（通用层）。
+ * Extension GUI 渲染协议 helper 函数（通用层）+ toolResult 通用形状提取。
  *
  * 设计原则：
  * - 零运行时依赖（不依赖 pi SDK）
@@ -163,6 +163,15 @@ export function isGuiRenderResult(value: unknown): value is GuiRenderResult {
   if (value === null || typeof value !== 'object') return false
   const obj = value as Record<string, unknown>
   return obj.v === PROTOCOL_VERSION && isGuiComponent(obj.component)
+}
+
+/**
+ * pi toolResult 通用形状提取：content[0] 为 text 块时取其 text，否则空串。
+ * pi 通用形状（非 extension 领域结构），renderResult 文本兜底的共用内核。
+ */
+export function firstContentText(result: { content: Array<{ type: string; text?: string }> }): string {
+  const first = result.content[0]
+  return first?.type === 'text' ? (first.text ?? '') : ''
 }
 
 // ── 内部工具 ──

@@ -13,6 +13,8 @@ import os from "node:os";
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+import { firstContentText } from "@xyz-agent/extension-protocol";
+
 import type { AgentEventLogEntry, DisplayItem, ExecutionStatus } from "@zhushanwen/subagent-core";
 import { DEFAULT_AGENT_NAME } from "@zhushanwen/subagent-core";
 import type {
@@ -562,12 +564,13 @@ export function formatTokenStat(
 /**
  * renderResult 的文本兜底：从 result.content[0] 提取纯文本。
  * 多处 tool 的 renderResult 曾各自内联此逻辑，提取后统一调用。
+ * 内核收敛至 extension-protocol firstContentText（ext-simplify-17 D9）；
+ * 本包装保留 content 可选的宽入参形态（tool renderResult 回调契约 content 可缺省）。
  */
 export function renderTextFallback(
   result: { content?: Array<{ type: string; text?: string }> },
 ): string {
-  const first = result.content?.[0];
-  return first?.type === "text" ? (first.text ?? "") : "";
+  return firstContentText({ content: result.content ?? [] });
 }
 
 /** Format a single activity line: ToolName(argsPreview). */

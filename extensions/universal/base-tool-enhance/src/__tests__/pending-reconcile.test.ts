@@ -6,7 +6,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { BACKGROUND_TASK_ID_PREFIX, collectActivePendingIds } from "@xyz-agent/extension-protocol";
+import {
+	BACKGROUND_TASK_ID_PREFIX,
+	collectActivePendingIds,
+	mapReasonToStatus,
+} from "@xyz-agent/extension-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -146,11 +150,40 @@ describe("reconcile scenario ①: graceful-exit leftover (registry exited, entry
 			writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 			const pi = createMockPi();
 			reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
-			expect(pi.appendEntry).toHaveBeenCalledWith(
-				"pending:unregister",
-				{ id: entry.taskId, reason: expectedReason, status: expectedReason },
-			);
+			// status 断言按「权威映射(reason)」而非 reason 本身表述（D10：identity 假设消除）
+			expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", {
+				id: entry.taskId,
+				reason: expectedReason,
+				status: mapReasonToStatus(expectedReason),
+			});
 		}
+	});
+});
+
+describe("entry status maps via protocol mapReasonToStatus (D10 single-source, identity assumption removed)", () => {
+	// bte 写侧 status 与 pending-notifications unregister listener 同引 protocol 单点
+	// （ext-simplify-17 D10）——原 status: reason 的 identity 假设在非 identity reason
+	// （budget_limited→failed 等）上会静默漂移，映射表演化时两写侧不再可能分叉。
+	// settle 产域四值当前恰为 identity 映射，但断言面按「status === mapReasonToStatus
+	// (reason)」表述：映射表日后改任何一行的口径，本组用例随实现同源自洽。
+	it("appended status equals the authoritative mapping for every reason the settle path can produce", () => {
+		// settledPendingReason 全产域：exited 三分支（natural/timeout/killed|process-exit
+		// 经 toPendingReason）+ orphaned/判死兜底 cancelled + reason 缺失防御分支
+		const settleReasons = ["completed", "failed", "time_limited", "cancelled"] as const;
+		for (const reason of settleReasons) {
+			expect(mapReasonToStatus(reason)).toBe(reason); // 当前口径下四值均为 identity 映射
+		}
+	});
+
+	it("non-identity reasons exist in the authoritative mapping — identity assumption is provably gone", () => {
+		// 这些 reason 上 status ≠ reason 本身：若写侧仍持 identity 假设（status: reason），
+		// settle 产域将来扩展到这些值时落盘 entry 会静默漂移；现实现单点映射自动正确
+		expect(mapReasonToStatus("budget_limited")).toBe("failed");
+		expect(mapReasonToStatus("interrupted")).toBe("aborted");
+		expect(mapReasonToStatus("interrupted-by-restart")).toBe("aborted");
+		expect(mapReasonToStatus("interrupted-by-parent")).toBe("aborted");
+		expect(mapReasonToStatus("reopened")).toBe("completed");
+		expect(mapReasonToStatus("some-future-reason")).toBe("completed");
 	});
 });
 

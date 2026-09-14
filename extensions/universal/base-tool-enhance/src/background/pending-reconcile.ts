@@ -34,6 +34,7 @@
 import {
 	BACKGROUND_TASK_ID_PREFIX,
 	collectActivePendingIds,
+	mapReasonToStatus,
 } from "@xyz-agent/extension-protocol";
 import { isPidAlive } from "@xyz-agent/extension-protocol/background-task";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -91,7 +92,14 @@ export function reconcilePendingEntries(
 		}
 		const pendingReason = settledPendingReason(entry);
 		try {
-			pi.appendEntry("pending:unregister", { id, reason: pendingReason, status: pendingReason });
+			// status 经 protocol mapReasonToStatus 单点映射（ext-simplify-17 D10）：与
+			// pending-notifications unregister listener 同一函数——原 status === reason 的
+			// identity 假设在非 identity reason（budget_limited→failed 等）上会静默漂移
+			pi.appendEntry("pending:unregister", {
+				id,
+				reason: pendingReason,
+				status: mapReasonToStatus(pendingReason),
+			});
 		} catch (err) {
 			logger.warn("reconcile appendEntry failed; retry on next session_start", {
 				detail: { id, err: toErrorMessage(err) },
@@ -115,10 +123,10 @@ function isTerminalByRegistry(entry: RegistryEntry): boolean {
 }
 
 /**
- * 收尾 reason/status 映射：
+ * 收尾 reason 映射（reason→status 的第二跳在写点经 protocol mapReasonToStatus 单点）：
  *  - exited：按条目 reason/exitCode 走 toPendingReason（与 exit 边沿 emit 同一映射，
- *    两路径写出的 entry 语义一致）；reason 缺失按 pending mapReasonToStatus 的
- *    default=completed 语义处理（防御分支，正常路径 finalize 必写 reason）
+ *    两路径写出的 entry 语义一致）；reason 缺失按 cancelled 处理（防御分支，正常路径
+ *    finalize 必写 reason）
  *  - orphaned / running+判死：cancelled（任务非自身成败地终止/消失）
  */
 function settledPendingReason(entry: RegistryEntry): "completed" | "failed" | "time_limited" | "cancelled" {

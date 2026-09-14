@@ -90,6 +90,11 @@
           "reason": "complete action 通过 goalInit slot（globalThis Symbol.for 桥）启动 goal，缺失时降级通知用户"
         },
         {
+          "package": "@xyz-agent/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import firstContentText（src/tool.ts top-level import，ext-simplify-17 D9 收敛），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"

@@ -36,6 +36,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { mapReasonToStatus as mapReasonToStatusImpl } from "@xyz-agent/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
@@ -280,27 +281,12 @@ function parseUnregisterEvent(data: unknown): ParsedUnregister | null {
 }
 
 /** 将事件 reason 映射为 pending:unregister entry 的 status 字段（落盘契约组成部分）。
- *  [U5 / 永久会话模型 §3.2.5 通知词表对齐] subagent-core 新 stopReason 展示值经注销
- *  reason 通道到达（interrupted/interrupted-by-restart/interrupted-by-parent → aborted、
- *  reopened → completed）——防新词落 default 被记为 completed 的误标（cancelled 同族
- *  事故先例：新枚举值漏映射静默落兜底）。 */
+ *  权威单点在 protocol pending-entries（ext-simplify-17 D10）——本函数是对 protocol
+ *  导出的类型收窄包装（PendingStatus 枚举留在本包，protocol 不引 extension 侧类型），
+ *  既有调用点零改动；bte 对账写侧同引 protocol 单点，两侧映射不再可能漂移。
+ *  词表演化背景（U5 / §3.2.5 通知词表对齐）见 protocol 实现处 JSDoc。 */
 function mapReasonToStatus(reason: string): PendingStatus {
-	switch (reason) {
-		case "completed": return "completed";
-		case "failed": return "failed";
-		case "cancelled": return "cancelled";
-		case "expired": return "expired";
-		case "time_limited": return "time_limited";
-		case "budget_limited": return "failed";
-		case "aborted": return "aborted";
-		case "interrupted":
-		case "interrupted-by-restart":
-		case "interrupted-by-parent":
-			return "aborted";
-		case "reopened":
-			return "completed";
-		default: return "completed";
-	}
+	return mapReasonToStatusImpl(reason) as PendingStatus;
 }
 
 /** 格式化 active 列表为可读文本 */

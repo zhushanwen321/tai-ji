@@ -154,12 +154,7 @@ function buildTodoListText(todoList: Todo[], options: { expanded: boolean }, the
 // ── Tool renderResult handler ────────────────────────
 
 import { Text } from "@earendil-works/pi-tui";
-
-/** content[0] 提取 text（缺失/非 text 类型 → 空串） */
-function firstContentText(r: { content: Array<{ type: string; text?: string }> }): string {
-	const text = r.content[0];
-	return text?.type === "text" ? (text.text ?? "") : "";
-}
+import { firstContentText } from "@xyz-agent/extension-protocol";
 
 export function renderTodoResult(result: unknown, options: { expanded: boolean }, theme: Theme): Text {
 	const r = result as { content: Array<{ type: string; text?: string }>; details?: unknown };

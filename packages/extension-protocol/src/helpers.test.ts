@@ -8,6 +8,7 @@ import {
   isGuiComponent,
   isGuiRenderResult,
   extractGui,
+  firstContentText,
   GUI_WIDGET_MARKER,
   PROTOCOL_VERSION,
   type GuiContext,
@@ -269,5 +270,27 @@ describe('isGuiComponent', () => {
     expect(isGuiComponent(null)).toBe(false)
     expect(isGuiComponent('string')).toBe(false)
     expect(isGuiComponent(undefined)).toBe(false)
+  })
+})
+
+describe('firstContentText', () => {
+  it('content[0] 为 text 块 → 取其 text', () => {
+    expect(
+      firstContentText({ content: [{ type: 'text', text: 'hello' }] })
+    ).toBe('hello')
+  })
+
+  it('content[0] 非 text 块 → 空串', () => {
+    expect(
+      firstContentText({ content: [{ type: 'image', url: 'x' } as { type: string }] })
+    ).toBe('')
+  })
+
+  it('content 为空数组 → 空串', () => {
+    expect(firstContentText({ content: [] })).toBe('')
+  })
+
+  it('text 块缺失 text 字段（undefined）→ 空串', () => {
+    expect(firstContentText({ content: [{ type: 'text' }] })).toBe('')
   })
 })

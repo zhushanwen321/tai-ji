@@ -1,6 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { firstContentText } from "@xyz-agent/extension-protocol";
 import { Type } from "typebox";
 
 import { detectGoalCapability, GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
@@ -110,11 +111,10 @@ function renderPlanResult(
   _options: unknown,
   theme: Theme,
 ): Text {
-  const details = result.details;
-  if (!details) {
-    const text = result.content[0];
-    return new Text(text?.type === "text" ? (text.text ?? "") : "", 0, 0);
-  }
+	const details = result.details;
+	if (!details) {
+		return new Text(firstContentText(result), 0, 0);
+	}
 
   const fg = (token: ThemeColor, text: string) => theme.fg(token, text);
   const NL = "\n";

@@ -5,6 +5,7 @@ import {
   scanPendingEntries,
   applyPendingDiff,
   collectActivePendingIds,
+  mapReasonToStatus,
 } from './pending-entries'
 
 const reg = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -108,5 +109,39 @@ describe('collectActivePendingIds（scan + diff + 可选前缀过滤）', () => 
   it('空 entries / 全脏 entries → 空 id 集', () => {
     expect(collectActivePendingIds([])).toEqual(new Set())
     expect(collectActivePendingIds([null, 1, 'x', {}])).toEqual(new Set())
+  })
+})
+
+describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）', () => {
+  // 词表全表逐项锁定——pending-notifications U7b 表驱动（listener 落盘路径）与本表
+  // 同源；此处锁定 protocol 单点本体，任何一侧改词表都被双侧用例抓到
+  it('全词表映射逐项一致（含 U5 新词表）', () => {
+    const cases: Array<[string, string]> = [
+      ['completed', 'completed'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+      ['expired', 'expired'],
+      ['time_limited', 'time_limited'],
+      ['budget_limited', 'failed'],
+      ['aborted', 'aborted'],
+      ['interrupted', 'aborted'],
+      ['interrupted-by-restart', 'aborted'],
+      ['interrupted-by-parent', 'aborted'],
+      ['reopened', 'completed'],
+    ]
+    for (const [reason, expected] of cases) {
+      expect(mapReasonToStatus(reason)).toBe(expected)
+    }
+  })
+
+  it('非 identity reason 显式存在——identity 假设（status 恒等于 reason）在词表内不成立', () => {
+    expect(mapReasonToStatus('budget_limited')).not.toBe('budget_limited')
+    expect(mapReasonToStatus('interrupted-by-restart')).not.toBe('interrupted-by-restart')
+    expect(mapReasonToStatus('reopened')).not.toBe('reopened')
+  })
+
+  it('未知 reason 落 default 兜底 completed（未来新词不再静默误标口径的登记处）', () => {
+    expect(mapReasonToStatus('some-future-reason')).toBe('completed')
+    expect(mapReasonToStatus('')).toBe('completed')
   })
 })
