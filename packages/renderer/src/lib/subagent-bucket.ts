@@ -53,18 +53,31 @@ export function isRunningProjection(record: SubagentRecord): boolean {
 }
 
 /**
- * done 投影判据（D4 SSOT）：one-shot 轮终等 GC——v4~U7 写面故意保持 running
- * （可冷路径 resume）但携带轮终 result，此形态以绿点展示且可长期滞留。
- * U8 起成功/失败轮终落 running-resumable 形态（仍经本判据判定 done），并非直接
- * 落 idle——本判据服务全部现存 one-shot 轮终（running + result 形态）+ 旧 session
- * 数据展示，不可退役。
+ * done 投影判据（D4 SSOT；[two-state-convergence U4] 判据 idle 化——写面翻边后轮终
+ * 权威词 = idle（markRoundIdle 写 idle，对齐 §3.2.2 事件表 settle 行），one-shot 完成
+ * 展示判据随之从「running + result + chatMode=false 的桥接组合」翻为
+ * `idle && chatMode === false`。桥接期旧 entry（running + result 形态）不再命中本
+ * 判据——展示过渡态（U6 归一映射恢复等价显示），占用判定不受影响（isRunningProjection
+ * 独立严格口径）。
  * [two-state-convergence D1] 本函数是**展示判据**（done 绿点 vs chat 等续聊 accent
- * 点），不参与占用判定——占用谓词 isRunningProjection 已改严格口径（result/resumable
- * 子句），不再经 `!isDoneProjection` 反向挪用。SubagentList 展示判据 isDone 必须
- * 引用本函数，禁止重复实现。
+ * 点），不参与占用判定——占用谓词 isRunningProjection 是严格口径（result/resumable
+ * 子句），不经理由本函数反向挪用。SubagentList 展示判据 isDone 必须引用本函数，
+ * 禁止重复实现。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {
-  return record.status === 'running' && record.result !== undefined && record.chatMode === false
+  return record.status === 'idle' && record.chatMode === false
+}
+
+/**
+ * waiting 投影判据（[two-state-convergence U4] SSOT 化 + idle 化——自 SubagentList
+ * 本地实现迁入，判据从 `running && 非占用 && 非 done` 的组合翻为 `idle && chatMode
+ * !== false`）：chat 等续聊 / 孤儿兜底的静态半透明 accent 点。
+ * chatMode 缺省（legacy 存量 entry 无该字段）保守归 chat（!== false 恒真）——无法
+ * 确认不是 chat 就不宣告完成（与 isDoneProjection 的保守方向同构，互补无交叠：
+ * done = idle && chatMode === false）。
+ */
+export function isWaiting(record: SubagentRecord): boolean {
+  return record.status === 'idle' && record.chatMode !== false
 }
 
 /**

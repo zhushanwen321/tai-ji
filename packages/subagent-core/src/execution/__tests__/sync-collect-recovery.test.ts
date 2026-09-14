@@ -805,6 +805,33 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     });
   });
 
+  it("[two-state-convergence U4] 翻边轮终末条（idle entry，覆写不落盘）→ E1 status 子句排除 → 补发可达（与桥接形态同判）", async () => {
+    // 翻边后（U4 写面写 idle）成功成员崩溃时的末条形态：idle + resumable 无 +
+    // result 全文。判据 isCollectPending 的 status 子句排除该形态 → 不顶死在
+    // 「等自然终态」，补发直达（与上方桥接 running+resumable 豁免用例同判据 SSOT）。
+    const childFile = writeChildSessionFile("sa-exempt-idle", "flipped idle terminal task");
+    const store = makeSeedStore();
+    store.reportSubagentRecord(memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync" }));
+    store.reportSubagentRecord(
+      memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync", status: "idle", result: "flipped idle result body" }),
+    );
+
+    const pi = makeAssertPi();
+    const recovery = makeRecoveryService(pi);
+
+    // 前提自检：主文件末条 = 翻边轮终 idle 形态（resumable 无——U4 不再写）。
+    const lastBefore = readMainFileLastEntries().get("sa-exempt-idle")!;
+    expect(lastBefore.status).toBe("idle");
+    expect(lastBefore.resumable).toBeUndefined();
+
+    const spy = spyNotifier(recovery);
+    await recovery.recoverSyncCollectBatch();
+    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
+    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
+    expect(batch[0]!.id).toBe("sa-exempt-idle");
+    expect(batch[0]!.result).toBe("flipped idle result body");
+  });
+
   // ============================================================
   // v2 断链 4（设计 §3.3 D4）：E1 等待分支的 settled 有界重扫。等待不再死等——
   // 成员延迟终态（冷路径 resume → 正常流落 entry）由 settled 边沿驱动重扫收敛。
@@ -1115,8 +1142,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(h1Last).toBeDefined();
     expect(h1Last!.batchFinalized).toBe(true);
     expect(h1Last!.collectMode).toBe("sync");
-    // [U5] 失败轮 settle（markRoundIdle 保持 running-resumable）——entry status 投影
-    // 随之 running（不终态化）
-    expect(h1Last!.status).toBe("running");
+    // [U5] 失败轮 settle（markRoundIdle 落 idle，不终态化——
+    // [two-state-convergence U4/D3] 翻边）——entry status 投影随之 idle
+    expect(h1Last!.status).toBe("idle");
   });
 });

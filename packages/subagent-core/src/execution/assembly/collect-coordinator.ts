@@ -72,15 +72,39 @@ export interface CollectScanRecord {
   closedReason?: string;
   collectMode?: "sync";
   batchFinalized?: boolean;
-  /** SP-5 执行态信号：true = 无活进程驱动的 running（one-shot 成功回退态）。
+  /** SP-5 执行态信号：true = 无活进程驱动的 running（轮终回退态/收养态）。
    *  [U3 补丁] ⛔3 非终态口径的必要补充——one-shot 成功完成后 record 不 archive，
-   *  以 running+resumable 留内存等 message 升级（真链 trace 实证）：结果已定格、
-   *  进程已死 = 已完成待通知，不阻止闭合；否则 sync 批永不闭合。 */
+   *  留内存等 message 升级（真链 trace 实证）：结果已定格、进程已死 = 已完成待通知，
+   *  不阻止闭合；否则 sync 批永不闭合。
+   *  [two-state-convergence U4/D4] 消费点已收拢进 isCollectPending（判据 SSOT，
+   *  见其函数头）——桥接期（running+resumable=true）与翻边后（idle）轮终形态均由
+   *  判据排除。 */
   resumable?: boolean;
 }
 
 /** 闭合判定的全 record 扫描上限（service 冷路径 COLD_LOOKUP_SCAN_LIMIT 同量级）。 */
 export const COLLECT_SCAN_LIMIT = 1000;
+
+/**
+ * [two-state-convergence U4/D4] sync collect「未收口」判据 SSOT（单一导出，两消费方
+ * import——{@link CollectCoordinator} hasRunningSync 主路径闭合门 + sync-collect-domain
+ * E1 恢复扫描过滤器，防同构判据再分叉）：
+ *
+ *   未收口 = `status === 'running' && resumable !== true`
+ *
+ * 双形态兼容（D4 行为级第 1 行四形态）：真在跑（running + resumable 空）→ 未收口
+ * 挂起；桥接期轮终旧 entry（running + resumable=true，SP-5 有意语义）→ resumable 子句
+ * 排除；翻边后轮终（idle，U4 写面权威词）→ status 子句排除；resumable 字段退役
+ * （U5 批）后子句恒真，判据自然退化为纯 status 直读。
+ * 旧「closed 终态」子句（idle ∧ closedReason 有值，[U2 桥接判据]）被 status 子句吸收
+ * （closed 恒 idle → 恒 false）；markSettled 轮间 idle 同样由 status 子句排除。
+ * 被否谱系（设计 D4）：审查建议的纯 `status==='running'`——U4 部署边界存量旧 entry
+ * （桥接形态 status=running）会误判在跑 → sync 批挂起窗口，故 resumable 子句在本批
+ * 必须保留。
+ */
+export function isCollectPending(record: Pick<CollectScanRecord, "status" | "resumable">): boolean {
+  return record.status === "running" && record.resumable !== true;
+}
 
 /** 协调器宿主依赖（全部注入——协调器零 service/store 直依，可独立单测）。 */
 export interface CollectCoordinatorDeps {
@@ -182,21 +206,15 @@ export class CollectCoordinator {
     void this.deps.flushBatch(members);
   }
 
-  /** 是否存在非终态 sync 成员（collectMode=sync && 无 batchFinalized && 非终态）。
-   *  非终态口径（⛔3 U1 已核实 + U3 resumable 补丁）：非已收口且非 resumable
-   *  （[U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值——两态迁移
-   *  不变量；markSettled 的轮间 idle 不携带 closedReason，同样不阻止闭合）。
-   *  ——池排队/在跑成员在 store.register 时即 status="running"，自动计入（闭合等待它）；
-   *  batchFinalized=true 的已离场成员不阻止闭合；running+resumable（SP-5 one-shot
-   *  成功回退态，进程已死结果已定格）视为已完成，不阻止闭合。 */
+  /** 是否存在非终态 sync 成员（collectMode=sync && 无 batchFinalized && isCollectPending）。
+   *  非终态口径（⛔3 U1 已核实 + U3 resumable 补丁 → [two-state-convergence U4/D4]
+   *  判据本体 SSOT 化为 isCollectPending——判据语义/双形态兼容/被否谱系见其函数头，
+   *  此处不再内联副本）：池排队/在跑成员在 store.register 时即 status="running"
+   *  （resumable 空）→ 未收口，闭合等待它；batchFinalized=true 的已离场成员不阻止
+   *  闭合；轮终形态（桥接 running+resumable / 翻边 idle）视为已完成，不阻止闭合。 */
   private hasRunningSync(): boolean {
     for (const record of this.deps.listRecords(COLLECT_SCAN_LIMIT)) {
-      if (
-        record.collectMode === "sync" &&
-        record.batchFinalized !== true &&
-        record.resumable !== true &&
-        !(record.status === "idle" && record.closedReason !== undefined)
-      ) {
+      if (record.collectMode === "sync" && record.batchFinalized !== true && isCollectPending(record)) {
         return true;
       }
     }

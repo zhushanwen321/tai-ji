@@ -560,7 +560,8 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
       agent: "general-purpose",
       model: "prov/model-1",
     });
-    expect(record.status).toBe("running");
+    // [two-state-convergence U4/D3] 轮终翻边 idle（idle 即 resumable）。
+    expect(record.status).toBe("idle");
   });
 
   it("⑤ 绑定写失败（只读目录）不阻塞派发主路径：轮正常 settle，仅 warn", async () => {

@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionRecord } from "../assembly/types.ts";
-import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type RoundSupervisorDeps, type SupervisorCandidateRecord, type SupervisorRecordView } from "../round-supervisor/index.ts";
+import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, isAwakeWarrantedShape, type RoundSupervisorDeps, type SupervisorCandidateRecord, type SupervisorRecordView } from "../round-supervisor/index.ts";
 
 function makeDeps(overrides: Partial<RoundSupervisorDeps> = {}): RoundSupervisorDeps & {
   notices: string[];
@@ -57,6 +57,31 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
     ...overrides,
   } as ExecutionRecord;
 }
+
+// ============================================================
+// [P4-② ⛔ two-state-convergence U4] W4 唤醒链现状守卫（isAwakeWarrantedShape 直测）
+// ——设计 D4 行为级 W4 行：同进程死亡纳管 → 运行时唤醒链；翻边（U4 轮终落 idle）后
+// 轮终形态与 W4 纳管形态的判别由谓词四子句承担（U5 全子集化前的现状锁定）。
+// ============================================================
+describe("[P4-②] isAwakeWarrantedShape W4 唤醒链现状守卫（two-state-convergence U4）", () => {
+  it("W4 纳管态（running + resumable + 无在途 run/无活进程，非 chat）→ true（运行时唤醒链活）", () => {
+    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, false, false)).toBe(true);
+  });
+
+  it("翻边轮终形态（idle）→ false（status 子句排除——轮终收口不属 W4 唤醒域）", () => {
+    expect(isAwakeWarrantedShape({ status: "idle", resumable: true, chatMode: false }, false, false)).toBe(false);
+    // U4 翻边后轮终 resumable 不再写——双形态（残留 true / 新态 undefined）均 false
+    expect(isAwakeWarrantedShape({ status: "idle", resumable: false, chatMode: false }, false, false)).toBe(false);
+  });
+
+  it("真在跑（有在途 run / 有活进程）→ false（该等）；conversation 豁免 → false", () => {
+    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, true, false)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, false, true)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: true }, false, false)).toBe(false);
+    // resumable 空 = 无纳管信号（在飞轮正常形态）→ false
+    expect(isAwakeWarrantedShape({ status: "running", resumable: false, chatMode: false }, false, false)).toBe(false);
+  });
+});
 
 describe("RoundSupervisor 三态判定", () => {
   beforeEach(() => {

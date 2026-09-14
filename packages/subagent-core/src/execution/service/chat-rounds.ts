@@ -361,9 +361,9 @@ export class ChatRounds {
           // 通知 / 交棒 / drain 全在 onRunSettled 单点（D7）。
           continuation.onSettled(outcome);
         } else {
-          // 一次性 run 终态收口（对齐原 settleOneShotOutcome：成功轮 SP-5 回退
-          // running-resumable 等待 upgrade；失败/取消一次性销毁）。[metrics-gate cyclo
-          // 偿还 / 行为保持] 两行映射原样提取 settleOneShotRound。
+          // 一次性 run 终态收口（对齐原 settleOneShotOutcome：成功轮 SP-5 落 idle
+          // [two-state-convergence U4/D3] 等待 message 升级；失败/取消一次性销毁）。
+          // [metrics-gate cyclo 偿还 / 行为保持] 两行映射原样提取 settleOneShotRound。
           await this.settleOneShotRound(record, outcome, signal);
         }
         // background 回注：仅当本路径抢到 CAS 才 notify。gate 三元组（[U5 / §3.2.7]）：
@@ -518,8 +518,8 @@ export class ChatRounds {
     );
   }
 
-  /** 一次性 run 终态收口（对齐原 settleOneShotOutcome：成功轮 SP-5 回退
-   *  running-resumable 等待 upgrade；失败/取消一次性销毁）。 */
+  /** 一次性 run 终态收口（对齐原 settleOneShotOutcome：成功轮 SP-5 落 idle
+   *  [two-state-convergence U4/D3] 等待 message 升级；失败/取消一次性销毁）。 */
   private async settleOneShotRound(
     record: ExecutionRecord,
     outcome: AgentOutcome,
@@ -590,8 +590,9 @@ export class ChatRounds {
     record.controller?.abort();
     // fire = 本轮等待窗口终结（timer 回调已自删 entry，此处幂等清防御收尾段残留）。
     disarmRoundFromProtocol(record.id);
-    // [U5] 失败轮 settle（不终态化——markRoundIdle 保持 running-resumable 万物可续；
-    // watchdog 杀轮非用户放弃，不置放弃轮标记——失败通知必须送达，gate ①②不拦）。
+    // [U5] 失败轮 settle（不终态化——markRoundIdle 落 idle 万物可续
+    // [two-state-convergence U4/D3]；watchdog 杀轮非用户放弃，不置放弃轮标记——失败
+    // 通知必须送达，gate ①②不拦）。
     if (record.status !== "running") {
       return; // 已被 cancel/dispose 抢先收口——不重复收尾（watchdog disarm 由对方承接）
     }

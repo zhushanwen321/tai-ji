@@ -194,8 +194,8 @@ export type Intent = "active" | "archived";
  *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
  *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
- *                              status 保持 running-resumable 不变——U2 桥接策略不推翻，
- *                              本值只承担「上一轮为什么停」的展示 + `.state` 收条 reason
+ *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
+ *                              本值承担「上一轮为什么停」的展示 + `.state` 收条 reason
  *                              词；中断族走 markSettled interrupted 族不经 markRoundIdle，
  *                              与上 4 值无冲突）
  * 仅展示 + 排障（列表主展示用派生 outcome）；复活资格判据是物理三件套

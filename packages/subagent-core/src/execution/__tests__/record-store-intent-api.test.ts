@@ -366,7 +366,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   });
 
   describe("markRoundIdle（簿记全集①-⑨；簿记⑦ .alive 保留）", () => {
-    it("成功轮：result=content、round+1、closedReason 清、resumable=true、idleSince 刷新、注销②、entry 携带新 round", () => {
+    it("成功轮：result=content、round+1、closedReason 清、翻 idle（resumable 不再写）、idleSince 刷新、注销②、entry 携带新 round", () => {
       const record = makeRecord("chat-2", { chatMode: true, round: 1 });
       record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 投影
       record.sessionFile = sessionFile;
@@ -379,11 +379,11 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markRoundIdle("chat-2", { kind: "success", content: "round done" })).toBe(true);
 
-      expect(record.status).toBe("running"); // ① 保持 running（非 idle）
+      expect(record.status).toBe("idle"); // ① 轮终翻边 idle（[two-state-convergence U4/D3]）
       expect(record.result).toBe("round done"); // ②
       expect(record.round).toBe(2); // ③
       expect(record.closedReason).toBeUndefined(); // ④
-      expect(record.resumable).toBe(true); // ⑤
+      expect(record.resumable).toBeUndefined(); // ⑤ resumable 不再写（idle 即 resumable）
       expect(record.idleSince).toBeGreaterThan(0); // ⑥
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明

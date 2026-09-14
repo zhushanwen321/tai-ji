@@ -247,9 +247,10 @@ function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord,
  *     closedReason 迁移映射。
  * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位（closed-only，
  * 防 running + closedReason 脏组合）；stopReason 经 isValidStopReason 守卫后有值即
- * 透传——running entry 的合法停因（A-lite 轮终 running-resumable 携带 completed/
- * failed）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite 阶段 3
- * 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
+ * 透传——running entry 的合法停因（存量桥接形态轮终 entry 携带 completed/failed；
+ * [two-state-convergence U4] 翻边后新轮终 entry 落 idle + stopReason，running+停因
+ * 组合不再新产）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite
+ * 阶段 3 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
  */
 function readEntryTerminalFields(
   d: Record<string, unknown>,

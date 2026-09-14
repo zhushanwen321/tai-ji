@@ -3,8 +3,8 @@
 // [H4 三轴拆分 / 轮次簿记轴] RecordStore 轮次过程原语的实现体：
 //   - appendEvent（事件追加，turns/eventLog/totalTokens 归约）；
 //   - markRoundStarted（轮始重置——字段①②⑤）；
-//   - markRoundIdle（轮末收口簿记全集①-⑪——保持 running-resumable + A-lite
-//     轮终磁盘面 `.state` 收条 + binding 快照 + pending 注销发射点②）；
+//   - markRoundIdle（轮末收口簿记全集①-⑪——[two-state-convergence U4/D3] 轮终翻边
+//     写 idle + A-lite 轮终磁盘面 `.state` 收条 + binding 快照 + pending 注销发射点②）；
 //   - adoptEngineDeath（引擎死亡收养——error/result/resumable 三写）。
 //
 // 变化轴 = 「一轮会话的过程簿记」（轮始重置 / 轮终收口 / 事件归约 / 收养）——
@@ -86,24 +86,29 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
 }
 
 /**
- * 意图原语：轮末收口——**保持 running-resumable**（名称沿用，非置 idle：status 写
- * idle 会断 SP-5 升级链与 hasRunning 判据）。簿记全集（①-⑪，= doFinalizeRoundToIdle
- * 现状簿记 + D3a 修订 + A-lite 轮终磁盘面增补）：
- *   ① status 保持 running；② result 按 outcome 写入（成功=content / 失败=前值??
- *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable=true
- *      （GUI waiting 判据）；⑥ idleSince 刷新（idle-GC 判据）；⑦ **`.alive` 保留**
+ * 意图原语：轮末收口——**写 idle**（[two-state-convergence U4/D3] A-lite 桥接退役：
+ * 「轮已收口」回归 §3.2.2 事件表 `running --settle--> idle` 的单字段编码，对齐
+ * markSettled/`.state` 收条/重建单规则。SP-5 兼容性已核验（设计 D3）：升级 gate
+ * canUpgradeToConversation 查引擎能力不查 status；message 准入走 tryEnterRunning CAS
+ * （idle→running）；onMessage 按 `status!=='running'` 分流进 revive 格——idle 形态
+ * 本就是 revive 直通路径的设计输入）。簿记全集（①-⑪）：
+ *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
+ *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
+ *      不再写（[U4/D3] idle 即 resumable——字段值退役由 U5 批删除，写点先行归零；
+ *      正常路径轮始 markRoundStarted 已清，轮终保持 undefined）；⑥ idleSince 刷新
+ *      （idle-GC 判据锚）；⑦ **`.alive` 保留**
  *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
- *      record 仍 resumable 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
+ *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
  *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
  *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
  *      携带新 round 与本轮 result）；
- *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 仍
- *      running，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
+ *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
+ *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
  *      pi 腿 `.state` 收条 + binding 快照 / zcode 腿锚键 binding 快照——正常轮终后
  *      宿主崩溃 revive 水合 turns/tokens 不归零）。
  * worktree/通知等副作用编排留调用方。
  *
- * @param outcome 轮终结果（kind 判别：success=content / failed=reason）
+ * @param outcome 轮终结果（kind 判别：success=content / 失败=reason）
  * @returns false = id 不在内存（debug 留痕，无副作用）。
  * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
  *         fail-fast，对齐 doFinalizeRoundToIdle A3 断言）。
@@ -134,25 +139,24 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     nextResult = outcome.content || rec.result || "(empty)";
   }
   rec.result = nextResult;
-  // ①③④⑤⑥：保持 running + 轮次推进 + 清残留死因 + 执行态信号 + idle 锚。
-  rec.status = "running";
+  // ①③④⑥：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +
+  // 清残留死因 + idle 锚。resumable 不写（idle 即 resumable，见方法头⑤）。
+  rec.status = "idle";
   rec.closedReason = undefined;
   rec.round = (rec.round ?? 0) + 1;
   rec.idleSince = Date.now();
-  rec.resumable = true;
   // ⑩ [A-lite / 区1-U1+区3-U1] 轮终停因展示位：成功轮 completed / 失败轮 failed
   //（「上一轮为什么停」——SubagentList failed 红点判据词 + 排障有词；投影随 ⑨
-  // entry/recordToSubagent 自动携带）。status 仍 running（U2 桥接 running-resumable
-  // 不动——stopReason 不参与资格判定；中断族走 markSettled interrupted 族不经本
-  // 原语，值域无冲突）。endedAt 内存位不写（终态冻结信号，写了会击穿方法头 A3
-  // 断言——同 record 跨轮轮终第二次即抛错；对齐 markSettled「非终态不写
-  // endedAt」先例），收条时间戳只进磁盘面。
+  // entry/recordToSubagent 自动携带）。status 已翻 idle（U4 翻边）；中断族走
+  // markSettled interrupted 族不经本原语，值域无冲突。endedAt 内存位不写（终态冻结
+  // 信号，写了会击穿方法头 A3 断言——同 record 跨轮轮终第二次即抛错；对齐
+  // markSettled「非终态不写 endedAt」先例），收条时间戳只进磁盘面。
   const stopReason: StopReason = outcome.kind === "failed" ? "failed" : "completed";
   rec.stopReason = stopReason;
   // ⑪ [A-lite / U7 统计口径] 轮终磁盘面（锚分派对齐 markSettled 写法）：
   // 正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding 快照在场
-  //（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口
-  // idle 形态（重建单规则「一律 idle」不受内存 running-resumable 桥接影响）。
+  //（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口 idle
+  // 形态（U4 翻边后内存面与磁盘面同词——重建单规则「一律 idle」不再有桥接例外）。
   // best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面
   // 滞后由下次收口/接管补写）。
   const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
@@ -170,7 +174,8 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   }
   // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
   // ⑧ pending 注销发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
-  // 测试形态 no-op）。
+  // 测试形态 no-op）。第二参数是注销 reason 字面量（notify-host emitPendingUnregister
+  // 契约），非状态投影——轮终翻边不改变该字面量（U4 保留簿记，行为零变更）。
   ctx.emitPendingUnregister(id, "running");
   // ⑨ entry 上报（best-effort 过程面）。
   ctx.reportRecordTransition(rec);

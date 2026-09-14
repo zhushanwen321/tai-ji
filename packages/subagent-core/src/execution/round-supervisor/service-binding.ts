@@ -290,7 +290,9 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
     runReconcileSweep({
       sessionFile: binding.getMainSessionFile(),
       lookupRecordState: (id) => {
-        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+        // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移
+        // 不变量）。[two-state-convergence U4] 轮终翻边 idle（无 closedReason）归 active
+        // ——sweep 对账面行为不变（轮终注销已随 markRoundIdle 簿记⑧发射，不在册）。
         const memory = binding.getStore().getMutable(id);
         if (memory !== undefined) {
           return memory.status === "idle" && memory.closedReason !== undefined

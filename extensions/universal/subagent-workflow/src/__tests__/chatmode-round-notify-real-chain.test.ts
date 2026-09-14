@@ -139,11 +139,12 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     expect(sentMsg.content).toContain(ROUND_REPLY);
     expect(sentMsg.content).not.toContain("(empty)");
 
-    // record 侧：result 从应答 content 真实流入（非手工预置）+ running-resumable + round+1
+    // record 侧：result 从应答 content 真实流入（非手工预置）+ 轮终翻 idle
+    //（[two-state-convergence U4/D3]——idle 即 resumable）+ round+1
     const record = internals.store.getMutable(handle.subagentId);
     expect(record).toBeDefined();
     expect(record!.result).toBe(ROUND_REPLY);
-    expect(record!.status).toBe("running");
+    expect(record!.status).toBe("idle");
     expect(record!.round).toBe(1);
     // 锚点回填：run 应答 outcome.sessionFile 已回填 record（[H1 U6] 旧 idle 相位
     // anchor 驱动退役后的唯一回填点，+ record-binding sidecar 落盘）

@@ -879,6 +879,36 @@ describe("RecordStore", () => {
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
+    it("[P4-② ⛔ two-state-convergence U4] W4 纳管态孤儿（running + resumable + stopReason=failed，entry-born 无锚）跨重启 → 纠偏 idle 等 revive + stopReason=failed 不被兜底覆盖", () => {
+      // W4 形态 = adoptEngineDeath 纳管产物（error + resumable 三写、status 保持
+      // running）。跨重启孤儿纠偏（finalizeEntryOnlyOrphan，R5 MF-1 证据锚 :1195）
+      // 一律 idle 等 revive，stopReason 兜底只对空值（?? interrupted-by-restart）——
+      // failed 停因保留展示（红点等续聊）。
+      // 设计 D6a 登记：W4 跨重启归宿 = 孤儿纠偏 idle 等 revive（非 readopt——
+      // isBootReadoptable 现状空转）。
+      const mainFile = writeMainSession([
+        {
+          v: 1, id: "sa-orphan-w4", agent: "worker", task: "w4 adopt orphan", slug: "w4",
+          status: "running", mode: "background", startedAt: 8000, rootSessionId: "sess-orphan",
+          depth: 0, turns: 2, totalTokens: 40, model: "prov/child-m", eventLog: [], displayItems: [],
+          resumable: true, error: "engine died mid-round", stopReason: "failed",
+        },
+      ]);
+      const { store, appended } = makeRecoveryStore();
+      // entry-born 无子文件锚形态 → recoverEntryOnlyOrphans（finalizeEntryOnlyOrphan）
+      store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
+
+      const entry = appended.find((c) => c.data.id === "sa-orphan-w4");
+      // 纠偏 idle 等 revive（非 readopt、非直断）——message 冷查链 idle 全候选可复活
+      expect(entry?.data.status).toBe("idle");
+      expect(entry?.data.closedReason).toBeUndefined();
+      // stopReason=failed 保留（?? 兜底不覆盖在场值）——失败红点等续聊的展示信号
+      expect(entry?.data.stopReason).toBe("failed");
+      expect(entry?.data.error).toBe("engine died mid-round");
+      // resumable 信号随纠偏保留（可续聊复活资格）
+      expect(entry?.data.resumable).toBe(true);
+    });
+
     it("子文件末行截断 → 纠偏与子文件正文解耦：照常 idle、无截断 error（末行判读路径已删）", () => {
       const sessionFile = path.join(tmpDir, "orphan-truncated.jsonl");
       writeSessionJsonl(sessionFile, {

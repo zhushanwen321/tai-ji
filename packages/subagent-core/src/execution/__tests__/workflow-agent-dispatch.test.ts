@@ -502,7 +502,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     expect(result.content).toBe("done");
   });
 
-  it("origin=tool 负向对照：executeAndAwait 成功仍 SP-5 running-resumable（D7 零外溢）", async () => {
+  it("origin=tool 负向对照：executeAndAwait 成功仍 SP-5 收口可续聊（D7 零外溢；[two-state-convergence U4] 翻边 idle）", async () => {
     const { service, store, fake } = makeHarness();
     const pending = service.executeAndAwait({ task: "tool one-shot", slug: "tool-shot", ctxModel });
     await flush();
@@ -512,8 +512,8 @@ describe("executeWorkflowAgent D7 成功收口", () => {
 
     const record = store.getMutable(result.sessionId ?? "");
     expect(record).toBeDefined();
-    expect(record!.status).toBe("running"); // SP-5：等 message 升级，不终态化
-    expect(record!.resumable).toBe(true);
+    expect(record!.status).toBe("idle"); // SP-5：等 message 升级，不终态化（翻边 idle）
+    expect(record!.resumable).toBeUndefined();
     expect(record!.origin).toBeUndefined();
   });
 });

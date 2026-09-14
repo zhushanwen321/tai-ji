@@ -36,7 +36,7 @@
 
 import { getLogger } from "../../core/logger.ts";
 
-import { CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import { CollectCoordinator, isCollectPending } from "../assembly/collect-coordinator.ts";
 import { DEFAULT_COLLECT_SYNC } from "../assembly/config.ts";
 import type { BatchBudgetParams, BgNotifyRecord } from "../notify/notifier.ts";
 import { bufferedMemberFallbackRecord, syncRebuildToNotifyMember } from "../persistence/sync-rebuild.ts";
@@ -267,11 +267,11 @@ export class SyncCollectDomain {
    *    索引就位」构造性保证，与 flushBatch 同款）→ notifyBatch 补发（内容 = 末条
    *    entry 终态快照；账本 record 同 hash 幂等拒绝 = 已投递/已在账，两种结局都算
    *    「已处理」）；
-   *  - 仍有 running → 本次不动，注册 settled 有界重扫（D4，见 armSettledRescan）——
-   *    成员延迟终态（主 agent 冷路径 resume → 正常流落 entry）由 settled 边沿驱动
-   *    重扫收敛，不再依赖「下次 session_start」作唯一再驱动（v2 §2.4 断链 4）；
-   *    running 口径与协调器同构
-   *    （resumable 豁免，v2 D3——覆写不可达的防御分支残余不被误判「仍在跑」）；
+   *  - 仍有未收口成员（isCollectPending，与协调器同判据 SSOT）→ 本次不动，注册
+   *    settled 有界重扫（D4，见 armSettledRescan）——成员延迟终态（主 agent 冷路径
+   *    resume → 正常流落 entry）由 settled 边沿驱动重扫收敛，不再依赖「下次
+   *    session_start」作唯一再驱动（v2 §2.4 断链 4）；判据双形态兼容见
+   *    collect-coordinator.ts isCollectPending 函数头；
    *  - 补发尝试后统一补 batchFinalized 标记（账本拒绝也算已投递；直接用末条重建快照
    *    落标不经 getFullRecord——子文件缺失/已 GC 时标记仍可落盘，窗口自愈不依赖二次
    *    重启；补标自身崩溃重入幂等收敛，末条 entry last-writer-wins）。
@@ -371,14 +371,14 @@ export class SyncCollectDomain {
         (rootFilter === undefined || r.rootSessionId === rootFilter),
     );
     if (candidates.length === 0) return { outcome: "idle", waitingIds: [] };
-    // [v2 D3] 与协调器 hasRunningSync 同构口径（collect-coordinator.ts）：running+
-    // resumable 视为已完成、不阻止补发——成功成员崩溃时的末条 entry 恒为轮终
-    // running+resumable（SP-5 有意语义），旧口径只看 status !== "closed" 会把主场景
-    // （批内含成功成员）顶死在「等自然终态」永不补发（v2 §2.3 断链 3）。
-    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
-    const running = candidates.filter(
-      (r) => r.resumable !== true && !(r.status === "idle" && r.closedReason !== undefined),
-    );
+    // [v2 D3 → two-state-convergence U4/D4] 与协调器 hasRunningSync 消费同一判据
+    // SSOT（isCollectPending，collect-coordinator.ts 导出——防同构判据再分叉）：
+    // 真在跑（running + resumable 空）→ 挂起等待；桥接期轮终（running+resumable=
+    // true，SP-5 有意语义——成功成员崩溃时的末条 entry 恒此形态）与翻边轮终（idle）
+    // 视为已完成、不阻止补发。旧口径只看 status !== "closed" 会把主场景（批内含成功
+    // 成员）顶死在「等自然终态」永不补发（v2 §2.3 断链 3）；判据语义/双形态兼容/
+    // 被否谱系见 isCollectPending 函数头。
+    const running = candidates.filter((r) => isCollectPending(r));
     if (running.length > 0) {
       logger.debug(
         `[subagents] E1 sync batch recovery: ${running.length} member(s) still running, wait for natural completion`,

@@ -954,12 +954,12 @@ export class RunOrchestration {
 
   /**
    * one-shot（非 chatMode）轮终收口（[U5 / §3.2.2 事件表 settle 行] 终态化退役）：
-   * 成功/失败轮 settle（markRoundIdle——保持 running-resumable 等续聊/升级，万物可续
-   * G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。CAS 前置检查失败
-   *（cancel/dispose 抢先 settle）静默跳过。runAndFinalize（workflow 域）与
-   * kickOffChatRound 非 chatMode 分支共用。closeAfterRound 挂起标志不清——归档消费
-   * 在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 → 归档，
-   * 见 kickOffChatRound 尾部 consumePendingArchive）。
+   * 成功/失败轮 settle（markRoundIdle——落 idle 等续聊/升级 [two-state-convergence
+   * U4/D3]，万物可续 G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。
+   * CAS 前置检查失败（cancel/dispose 抢先 settle）静默跳过。runAndFinalize（workflow
+   * 域）与 kickOffChatRound 非 chatMode 分支共用。closeAfterRound 挂起标志不清——
+   * 归档消费在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 →
+   * 归档，见 kickOffChatRound 尾部 consumePendingArchive）。
    */
   async settleOneShotOutcome(
     record: ExecutionRecord,
@@ -995,7 +995,8 @@ export class RunOrchestration {
       return;
     }
     if (result.success) {
-      // [SP-5] one-shot 成功完成 → 保持 running-resumable，等待 message 触发 upgrade。
+      // [SP-5] one-shot 成功完成 → 落 idle 等待 message 触发升级
+      //（[two-state-convergence U4/D3] 翻边后 idle 即 resumable，SP-5 寻址/升级链不查 status）。
       // [U2b] 轮终簿记①-⑪归口 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
       // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
       // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。

@@ -518,9 +518,10 @@ export class RecordLifecycle {
    * swallow 策略）。
    *
    * [U5 / §3.2.2 事件表 settle 行] 失败轮**不终态化**（旧 closed+gc 一次性销毁退役）：
-   * markRoundIdle failed（保持 running-resumable——与成功 SP-5 同形态，失败轮同样
-   * 万物可续 G1；stopReason/批次投影归轮终簿记）。CAS 前置检查防 cancel/dispose 抢先
-   * settle 后 double bookkeeping（与簿记之间无 await——单线程同步段原子）。
+   * markRoundIdle failed（落 idle——与成功 SP-5 同形态 [two-state-convergence U4/D3]，
+   * 失败轮同样万物可续 G1；stopReason/批次投影归轮终簿记）。CAS 前置检查防
+   * cancel/dispose 抢先 settle 后 double bookkeeping（与簿记之间无 await——单线程
+   * 同步段原子）。
    *
    * [W3 契约变更⑤退役] 旧 worktree cleanup 随终态化退役：失败轮 record 留内存，
    * worktree 随续聊保留 / 随归档（close）回收 / 随 idle-gc（30 天）回收。

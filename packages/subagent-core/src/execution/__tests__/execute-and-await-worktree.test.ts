@@ -107,9 +107,14 @@ describe("executeAndAwait worktree 失败收尾", () => {
     });
 
     // spy store.archive：[U5] 失败轮 settle（markRoundIdle）不终态化——archive
-    // 必须零调用（旧终态化退役）；失败收口 = record 保持 running-resumable 等续聊。
+    // 必须零调用（旧终态化退役）；失败收口 = record 落 idle 等续聊（
+    // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）。
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
+    // 捕获 record id（executeAndAwait reject 时不返回 handle；listAllActive 是 running
+    // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言面）。
+    // spy 只观察不替换实现（register 的入册副作用必须保持）。
+    const registerSpy = vi.spyOn(store, "register");
 
     await expect(
       service.executeAndAwait({
@@ -122,13 +127,16 @@ describe("executeAndAwait worktree 失败收尾", () => {
     ).rejects.toBe(createErr);
 
     // [U5] 失败 settle 完整执行：archive 零调用 + lastError 落 record（markRoundIdle
-    // 簿记⑨——失败原因可达）+ record 留内存（万物可续，可续聊）。
+    // 簿记⑨——失败原因可达）+ record 留内存（万物可续，可续聊；经 getMutable 断言
+    // ——翻边后 record 落 idle，不再入 listAllActive 的 running 视图）。
     expect(archiveSpy).toHaveBeenCalledTimes(0);
-    const records = store.listAllActive();
-    expect(records).toHaveLength(1);
-    expect(records[0]!.lastError).toBe("worktree create boom");
-    expect(records[0]!.resumable).toBe(true);
-    expect(store.getMutable(records[0]!.id)).toBeDefined();
+    const failedId = registerSpy.mock.calls.at(-1)?.[0]?.id;
+    expect(failedId).toBeDefined();
+    const failed = store.getMutable(failedId!);
+    expect(failed).toBeDefined();
+    expect(failed!.lastError).toBe("worktree create boom");
+    expect(failed!.status).toBe("idle");
+    expect(failed!.resumable).toBeUndefined();
   });
 
   // ============================================================

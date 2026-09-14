@@ -30,7 +30,7 @@
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result/resumable 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（保持 running-resumable，非置 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
+// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle，resumable 不再写——idle 即 resumable；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
 // | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
 // | adoptEngineDeath(id, {error}) | 引擎死亡收养（error/result/resumable 三写；监督器接管编排留调用方） | entry（best-effort） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
@@ -49,15 +49,15 @@
 // | markIdleEvicted(record) | 内存回收（30 天 TTL，用户不可见，非终态化——磁盘不动、可重建接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
-//   ① status      —— 轮始重置→markRoundStarted；轮终保持 running→markRoundIdle；
+//   ① status      —— 轮始重置→markRoundStarted；轮终翻边 idle（U4/D3）→markRoundIdle；
 //                    终态→markFinalized/markCancelled（内存冻结由调用方 completeRecord/
 //                    tryTransition 先行，store 收口持久化面）
 //   ② result      —— 轮始清→markRoundStarted；轮终写→markRoundIdle(outcome)；终态→
 //                    markFinalized 序言（completeRecord 冻结后随 entry/manifest 投影）
 //   ③ round       —— 轮终 +1→markRoundIdle
 //   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
-//   ⑤ resumable   —— 轮始清/轮终置 true→markRoundStarted/markRoundIdle；收养→
-//                    adoptEngineDeath
+//   ⑤ resumable   —— 轮始清→markRoundStarted（轮终不再写，U4/D3 idle 即 resumable；
+//                    字段删除归 U5 批）；收养→adoptEngineDeath
 //   ⑥ idleSince   —— 轮终刷新→markRoundIdle
 //   ⑦ sessionFile —— 回填族（run 应答/promote）归调用方内存回填 + register/
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
@@ -66,7 +66,7 @@
 //   ⑨ lastError   —— 轮终失败→markRoundIdle failed 载荷
 //   ⑩ error       —— 收养/失败→adoptEngineDeath/markRoundIdle
 //   ⑪ stopReason  —— 轮终写（成功 completed / 失败 failed，A-lite 展示位——status
-//                    保持 running）→markRoundIdle；settle 写（中断族）→markSettled
+//                    已翻 idle，U4/D3）→markRoundIdle；settle 写（中断族）→markSettled
 //
 // [perf] 两级读写设计（修复 /subagents 打开慢）：
 //   1. 列表扫描 = light：只读文件头部 identity（readIdentityHeader，64KB）+ sidecar
@@ -366,7 +366,7 @@ export class RecordStore {
    * W16 [D4]：类外状态写点上报（record-store 内的迁移点 register/archive 已内置）。
    *
    * 供 service 层直接改 record.status 的恢复写点调用（chatMode 续轮 idle→running
-   * 冷路径 resumeRound、轮终 finalizeRoundToIdle 回 running-resumable）——这些
+   * 冷路径 resumeRound；轮终收口已随 markRoundIdle 簿记⑨内置，不经本方法）——这些
    * 写点绕过 register/archive，若不显式上报，pi 文件缺失该次迁移、重建源滞后。
    * pi 未注入（session_start 前）时可选链静默降级，不阻断主流程。
    */
@@ -410,19 +410,20 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：轮末收口——**保持 running-resumable**（名称沿用，非置 idle：status 写
-   * idle 会断 SP-5 升级链与 hasRunning 判据）。簿记全集（①-⑪，= doFinalizeRoundToIdle
-   * 现状簿记 + D3a 修订 + A-lite 轮终磁盘面增补）：
-   *   ① status 保持 running；② result 按 outcome 写入（成功=content / 失败=前值??
-   *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable=true
-   *      （GUI waiting 判据）；⑥ idleSince 刷新（idle-GC 判据）；⑦ **`.alive` 保留**
+   * 意图原语：轮末收口——**写 idle**（[two-state-convergence U4/D3] A-lite 桥接退役：
+   * 收口权威词对齐 §3.2.2 事件表；SP-5 升级链兼容性依据见 record-store-rounds
+   * 方法头）。簿记全集（①-⑪）：
+   *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
+   *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
+   *      不再写（idle 即 resumable——正常路径轮始已清，轮终保持 undefined）；⑥
+   *      idleSince 刷新（idle-GC 判据锚）；⑦ **`.alive` 保留**
    *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
-   *      record 仍 resumable 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
+   *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
    *      携带新 round 与本轮 result）；
-   *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 仍
-   *      running，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
+   *      ⑩ [A-lite] stopReason 展示位（成功轮 completed / 失败轮 failed——status 已
+   *      idle，endedAt 不写）；⑪ [A-lite / U7] 轮终磁盘面（锚分派对齐 markSettled：
    *      pi 腿 `.state` 收条 + binding 快照 / zcode 腿锚键 binding 快照——正常轮终后
    *      宿主崩溃 revive 水合 turns/tokens 不归零）。
    * worktree/通知等副作用编排留调用方。

@@ -15,8 +15,9 @@ import type { SubagentRecord } from "../assembly/types.ts";
  *
  * [E1 恢复批语义修复] status/outcome/patchFile 三点对齐 notify-host toNotifyRecord
  * 的映射（正常 flush 路径对同一成员的补发形态），不再直通 rec.status：
- * - status：one-shot 成功成员崩溃时末条 entry 恒为 running+resumable（SP-5 轮终
- *   形态，resumable 豁免正据此放行其入批）——直通会让补发记录仍是 running 形态：
+ * - status：one-shot 成功成员崩溃时末条 entry 为轮终收口形态（桥接期 running+resumable
+ *   / [two-state-convergence U4] 翻边后 idle——E1 判据 isCollectPending 双形态兼容，
+ *   两形态均放行入批）——直通会让补发记录仍是收口前形态：
  *   buildBatchLlmContent 批头只统计 closed 成员（全员成功的恢复批显示
  *   「0 finished, 0 failed, 0 cancelled」），条目文案落「finished a round」
  *   （对话轮次语义）。同 toNotifyRecord：closed 或非 chatMode → "closed"（仅

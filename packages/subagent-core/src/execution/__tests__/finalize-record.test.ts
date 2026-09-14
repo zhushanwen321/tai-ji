@@ -576,8 +576,8 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
 
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
 
-    // 状态机（v4 B-1：旧 idle 折入 running，markRoundIdle 设 running）
-    expect(record.status).toBe("running");
+    // 状态机（[two-state-convergence U4/D3] 轮终翻边 idle——idle 即 resumable）
+    expect(record.status).toBe("idle");
     expect(record.round).toBe(1);
     // [B5] .alive marker 轮终保留（旧行为「删 marker」随 D3a 跨轮延续退役）
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
@@ -614,7 +614,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(transitionSpy).toHaveBeenCalledTimes(1);
     // 上报发生在 round 推进之后（entry 携带新轮计数，重建源不滞后）
     expect(record.round).toBe(3);
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
   });
 
   it("record.round 已为 N → round 变 N+1", async () => {
@@ -624,7 +624,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
     expect(record.round).toBe(4);
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
   });
 
   it("不调 store.archive（record 留内存，getMutable 仍可查）", async () => {

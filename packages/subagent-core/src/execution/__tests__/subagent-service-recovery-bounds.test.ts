@@ -258,14 +258,15 @@ describe("T2③ hot-path settled watchdog", () => {
     // watchdog 到期自清（armedTimers 先删条目再执行回调）
     expect(hasSettledWatchdog(record.id)).toBe(false);
     // [H1 U2] fire abort 轮 signal → 在途 run 收敛（替身模拟 abort 合成失败终态）→
-    // onRunSettled 失败分支簿记（chatMode → MF-6 回退 resumable）+ 失败通知
+    // onRunSettled 失败分支簿记（chatMode → MF-6 落 idle 可续聊——
+    // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）+ 失败通知
     fake.runs[0]!.settle({
       content: "",
       error: "engine_run_failed: run aborted (settled watchdog mid-round no-progress); the process was terminated to bound the wait. Recovery: check state with subagents action:'list', then re-send your message to continue.",
       exitCode: null,
     });
-    await vi.waitFor(() => expect(record.resumable).toBe(true));
-    expect(record.status).toBe("running");
+    await vi.waitFor(() => expect(record.status).toBe("idle"));
+    expect(record.resumable).toBeUndefined();
     // [H1 U2 / D7] 失败轮 lastError 写失败原因（result = 前值 ?? 失败摘要——失败摘要
     // 由 Continuation 失败通知独立承载）
     expect(record.lastError).toContain("settled watchdog");

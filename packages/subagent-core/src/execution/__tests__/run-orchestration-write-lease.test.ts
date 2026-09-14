@@ -117,9 +117,10 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       h.fake.runs[0]!.settle({ content: "done text", sessionFile });
 
       const record = h.store.getMutable(handle.subagentId);
-      await vi.waitFor(() => expect(record?.resumable).toBe(true));
-      // SP-5：成功轮保持 running-resumable（markRoundIdle 簿记）
-      expect(record?.status).toBe("running");
+      await vi.waitFor(() => expect(record?.status).toBe("idle"));
+      // SP-5：成功轮落 idle 可续聊（markRoundIdle 簿记；[two-state-convergence
+      // U4/D3] 翻边后 idle 即 resumable）
+      expect(record?.resumable).toBeUndefined();
       expect(record?.closedReason).toBeUndefined();
       expect(record?.result).toBe("done text");
       expect(record?.sessionFile).toBe(sessionFile);
@@ -227,11 +228,12 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
 
       // 成功应答映射（workflow 域 AgentResult.content 承载正文）
       expect(result.content).toBe("wf done");
-      const actives = h.store.listAllActive();
-      expect(actives).toHaveLength(1);
-      const rec = actives[0]!;
-      expect(rec.sessionFile).toBe(sessionFile);
-      expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: rec.id });
+      // [two-state-convergence U4] 轮终翻边 idle——record 经 getMutable 断言
+      //（listAllActive 是 running 过滤视图，不再含轮终收口 record）。
+      const rec = h.store.getMutable(result.sessionId ?? "");
+      expect(rec).toBeDefined();
+      expect(rec!.sessionFile).toBe(sessionFile);
+      expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: rec!.id });
     } finally {
       h.service.dispose();
       clearEngines();
@@ -268,9 +270,10 @@ describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线�
         false,
       );
 
-      // 簿记①-⑥：保持 running + result 写入 + round+1 + closedReason 清除 + resumable
-      expect(record.status).toBe("running");
-      expect(record.resumable).toBe(true);
+      // 簿记①-⑥：翻边 idle（[two-state-convergence U4/D3]）+ result 写入 + round+1
+      // + closedReason 清除（resumable 不再写——idle 即 resumable）
+      expect(record.status).toBe("idle");
+      expect(record.resumable).toBeUndefined();
       expect(record.closedReason).toBeUndefined();
       expect(record.round).toBe(2);
       expect(record.result).toBe("round done");
