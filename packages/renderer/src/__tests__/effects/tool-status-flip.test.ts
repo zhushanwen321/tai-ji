@@ -10,6 +10,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/tool-status-flip.test.ts
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -22,31 +23,7 @@ import type { ToolCall, Message, ServerMessage } from '@xyz-agent/shared'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
 
 // [w6 chat-ui-and-shell T7] 方案 c mount MessageStream：壳 provide 真 deps（useChatViewDeps）→ mock 装配器
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 
 const NOW = Date.now()
 

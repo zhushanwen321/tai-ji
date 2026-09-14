@@ -18,65 +18,17 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { cardTestState, checkForUpdateMock, performDownloadMock, performInstallMock, openFallbackUrlMock, settingsMock, toastMock, useAppUpdateCardModule, settingsApiModule, toastMockModule } from '@/__tests__/helpers/update-card-mock'
 import { mount, flushPromises } from '@vue/test-utils'
-import { reactive } from 'vue'
-import type { UpdateState } from '@xyz-agent/shared'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
 
-// ── mock 捕获层（vi.hoisted 保证在 vi.mock 工厂执行前就绪） ──
-const settingsMock = vi.hoisted(() => ({
-  getProxyConfig: vi.fn(() => Promise.resolve({ mode: 'system', httpProxy: '', httpsProxy: '' })),
-  setProxyConfig: vi.fn(() => Promise.resolve()),
-  testProxy: vi.fn(() => Promise.resolve({ success: true, message: '' })),
-  getUpdateSettings: vi.fn(() => Promise.resolve({ preDownload: false, autoUpdate: false })),
-  setUpdateSettings: vi.fn(() => Promise.resolve()),
-}))
+// mock 捕获层单例 + useAppUpdate 脚手架在 helpers/update-card-mock.ts（原 vi.hoisted 块收敛）
+vi.mock('@/api/domains/settings', () => settingsApiModule())
 
-const toastMock = vi.hoisted(() => ({
-  info: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-}))
+vi.mock('@/composables/useToast', () => toastMockModule())
 
-vi.mock('@/api/domains/settings', () => ({
-  getProxyConfig: settingsMock.getProxyConfig,
-  setProxyConfig: settingsMock.setProxyConfig,
-  testProxy: settingsMock.testProxy,
-  getUpdateSettings: settingsMock.getUpdateSettings,
-  setUpdateSettings: settingsMock.setUpdateSettings,
-}))
-
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => toastMock,
-}))
-
-// UpdateCheckCard → useAppUpdate 单例 state（同 system-page-update.test.ts mock 结构）
-const testState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string; releaseNotes: string } | null,
-  errorMessage: '',
-  percent: 0,
-  releaseNotesHtml: '',
-})
-
-const checkForUpdateMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performDownloadMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performInstallMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const openFallbackUrlMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: testState,
-    checkForUpdate: checkForUpdateMock,
-    performDownload: performDownloadMock,
-    performInstall: performInstallMock,
-    openFallbackUrl: openFallbackUrlMock,
-    initAutoCheck: vi.fn(),
-    restorePendingUpdate: vi.fn(),
-    restorePreloadedUpdate: vi.fn(),
-  }),
-}))
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdatePage from '@/components/settings/update/UpdatePage.vue'
 
@@ -94,7 +46,7 @@ beforeEach(() => {
   settingsMock.getProxyConfig.mockResolvedValue({ mode: 'system', httpProxy: '', httpsProxy: '' })
   settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
   settingsMock.setUpdateSettings.mockResolvedValue(undefined)
-  Object.assign(testState, {
+  Object.assign(cardTestState, {
     state: 'idle',
     latestRelease: null,
     errorMessage: '',

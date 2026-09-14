@@ -15,6 +15,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/subagent-tab.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
@@ -59,31 +60,7 @@ vi.mock('virtua/vue', async () => {
 })
 
 // 壳 deps mock（对齐 MessageStream-subagent-force-working.test.ts：聚焦数据链不需真 deps）
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({
     editAndResend: vi.fn(),

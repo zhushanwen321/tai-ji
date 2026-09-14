@@ -10,6 +10,7 @@
  * selection API 的真实行为留手动/E2E 验证。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -37,31 +38,7 @@ vi.mock('@/composables/logic/file-type', () => ({ extToLang: () => 'ts' }))
 vi.mock('@/lib/path-utils', () => ({ resolvePreviewPath: () => ({ absolute: '/cwd/src/foo.ts' }) }))
 
 // [w6 chat-ui-and-shell T7] DetailPane 壳 provide 真 deps（useChatViewDeps）→ mock 该装配器（原 vi.mock 旧组件路径失效，改模板按名 stub）
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 vi.mock('@/components/panel/detail-renderers/CodeBlock.vue', () => ({
   default: { template: '<div />' },
 }))
