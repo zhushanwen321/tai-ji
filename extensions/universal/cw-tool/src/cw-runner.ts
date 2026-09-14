@@ -14,6 +14,8 @@
  * 与 Pi SDK 解耦（不 import pi 类型），纯逻辑 + 可注入 spawner，便于单测。
  * 所有错误路径返回 `{ ok: false, error }`，不抛异常（由调用方映射为 tool 返回）。
  */
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+
 import type { CwSpawner } from "./cw-spawn.ts";
 
 /**
@@ -187,7 +189,7 @@ export async function executeCwAction(
 	try {
 		result = await spawner(args, undefined, cwd, combined.signal);
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
+		const msg = toErrorMessage(err);
 		return { ok: false, ...base, error: `cw spawn 失败: ${msg}` };
 	} finally {
 		if (timer) clearTimeout(timer);

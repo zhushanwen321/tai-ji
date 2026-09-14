@@ -15,6 +15,8 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
+import { isEnoentError } from "@zhushanwen/pi-ext-guards";
+
 /**
  * cwd 不存在时的可操作错误文案（错误 → 权威源 worktrees.json → 重试闭环）。
  * @param cwd 不存在的路径
@@ -122,8 +124,8 @@ export const defaultCwSpawner: CwSpawner = (args, input, cwd, signal) =>
 			// [worktree-reaper-fix] 拼 cwd 进错误消息：ENOENT 的 err.message 只有 command 名，
 			// 无 cwd 线索会导致误诊（2026-08-11 事故 AI 误判"node 被卸载"）。
 			// exitCode=-1 区分于正常退出码。
-			const errCwd = err.code === "ENOENT" ? `\ncwd: ${cwd}` : "";
-			const hint = err.code === "ENOENT" && !existsSync(cwd) ? `\n${cwdMissingError(cwd)}` : "";
+			const errCwd = isEnoentError(err) ? `\ncwd: ${cwd}` : "";
+			const hint = isEnoentError(err) && !existsSync(cwd) ? `\n${cwdMissingError(cwd)}` : "";
 			finish({ stdout, stderr: `${stderr}\n[spawn error] ${err.message}${errCwd}${hint}`, exitCode: -1 });
 		});
 		child.on("close", (code: number | null) => {

@@ -9,6 +9,7 @@ import {
 	getAskUserAnswer,
 	getAskUserOther,
 } from "@xyz-agent/extension-protocol";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import { createAskUserChannelHandler } from "./channel-handler";
 import { registerAskUserChannelHandler } from "./channel-registry-register";
@@ -307,7 +308,7 @@ Don't:
 				// RPC 通道不可用（真 headless / select 缺失）→ 禁用工具（spec FR-8）。
 				// TUI 分支不禁用——custom 抛错通常是组件临时故障，允许 LLM 重试。
 				// 禁用收尾先行，再 throw（W4）：pi catch 后文案原样成为 toolResult content。
-				const message = err instanceof Error ? err.message : String(err);
+				const message = toErrorMessage(err);
 				if (useRpc) disableAskUser(pi);
 				throw new Error(
 					useRpc

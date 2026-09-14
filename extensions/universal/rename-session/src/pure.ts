@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
+import { isEnoentError } from "@zhushanwen/pi-ext-guards";
 import {
 	isThinkingLevel,
 	loadConfig,
@@ -111,8 +112,7 @@ export function setAutoRenameSwitch(enabled: boolean): void {
 			rmSync(flagPath);
 		} catch (e: unknown) {
 			// flag 不存在视为已关（吞 ENOENT）；其他错误（如权限）如实抛出，不静默
-			const code = (e as NodeJS.ErrnoException).code;
-			if (code !== "ENOENT") throw e;
+			if (!isEnoentError(e)) throw e;
 		}
 	}
 }
