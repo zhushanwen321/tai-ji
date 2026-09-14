@@ -124,6 +124,10 @@ session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、sk
 ### Thinking
 模型的内部推理过程，在回答生成前产生。属于单条 Message（挂在 `Message.thinking[]` 上），不属于整个 Session。UI 中默认折叠展示。
 
+### Marker RPC（select+marker 通道原语，2026-09-14）
+
+extension 与 xyz-agent runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter；错误回包形状单源为 `ChannelErrorResult`。
+
 ### Tool Approval
 工具权限审批。Agent 执行危险操作（如写入文件、运行命令）前请求用户许可。用户回复是三选一：Allow（本次允许）/ Deny（拒绝）/ Always Allow（永久允许该工具）。
 

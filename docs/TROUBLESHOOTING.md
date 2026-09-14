@@ -372,3 +372,9 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 - **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一坍缩为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
 - **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时坍缩」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
+
+### 15. dev 实例数据目录被钉死共享：多 worktree 并行 dev 会互相污染（2026-09-14 V7 验收发现，既有未修）
+
+- **症状**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.xyz-agent-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见）。
+- **机制**：`apps/electron/main.ts` dev 块（:137 附近）钉死数据目录，覆盖了装配器 `dev-instance.mjs` 注入的实例路径——C-dev-01 的实例隔离在 Electron 层失效（装配器 Vite/CDP 端口段隔离仍有效）。
+- **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按 C-dev-01 文档预期推定；需要干净环境时手动清理共享目录或使用 `--fresh`。修复属产品决策另行裁决（ext-simplify-17 验收登记）。
