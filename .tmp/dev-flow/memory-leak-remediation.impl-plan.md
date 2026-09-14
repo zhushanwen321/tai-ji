@@ -80,21 +80,32 @@ flowchart LR
 **提速结论 [MANDATORY]**：可降级 0 项（A9 为最终证据不可降）；可合并 4 项（A1/A2/A5/A6 的 L3 探针全部并入 A9 批次同跑，省 4 个独立派发轮）；可脚本化 8 项（A2-A8 全部 testid/探针/单测可机器断言）；L0 静态守卫清单：`pnpm run lint`、各包 typecheck、`node scripts/validate-constraints.mjs`（若触发）、pre-commit 全链（vue_rules_checker/taste-lint/env 白名单等按路径自动触发）。预计节省派发轮次 ~4 轮（L3 批次合并）。A9 成本 9 为最重项（30min 实跑 + 采样），安排在全部单元 committed 后一次性执行。
 
 ## 5 合理偏差登记表
-（初始为空——实施中发现设计未覆盖的现实约束时登记，格式：Unit | 偏差 | 合理性论证 | 设计文档同步动作）
+| Unit | 偏差 | 合理性论证 | 设计文档同步动作 |
+|------|------|------|------|
+| u2 | useSidebar.ts 领地外 1 hook 接线 + 1 import | SessionCleanupHooks 在 renderer 的唯一实现点；不接线则 browserDestroy hook 是死代码（恰为本治理的反模式本身）；设计 B4 落点「lib/ipc.ts 调用方」即壳层接线 | 无需（设计本意） |
+| u2 | 5 个测试基建文件 mock 补丁（各 1 行） | vitest mock 代理在未知导出属性访问即抛错（?. 拦不住）；TEST-STRATEGY §5 已登记此坑；属 Sidebar.vue 探针的合法测试伴随面 | 无需 |
+| u2 | use-session.ts「12 项」陈旧口径顺手修正为 11 项 | 设计 §2.1 已登记该漂移；hooks 序列本在改动面内 | 已在 R4 文档体现 |
+| u1 | session-data-api.ts 实际路径在 plugin-service/api/ 子目录 | 计划笔误；领地意图不变 | impl-plan 领地表以实际路径为准 |
+| u3 | shared/constants.ts 领地外 1 常量（RING_BUDGET_BYTES） | message-bus.ts 内联 16*1024*1024 触发 no-magic-numbers warning（项目纪律 warning 正面修复）；既有范式 = 字节守卫常量集中 shared SSOT（OUTBOUND_FRAME_* 同款） | 无需（对齐既有范式） |
+| u4 | session-service.ts + index.ts 领地外（facade 委托 + 组合根装配） | SessionHistoryReader 为 Facade 私有、ReclaimSessionDeps 约定组合根装配，窄接口注入链必须经此两点，否则 B8-C 死代码 | 无需（设计本意） |
+| u4 | set() 超限时摘除既有条目（设计原文仅「超限不缓存」） | 防冻结基线：append-only 历史保留旧条目使增量 delta 从旧叶子无界增长，劣于全量重建 | 已同步设计 B8 节（本 commit） |
+| u5 | 回调形态改纯查询 agentCallEvictionsOf（计划写 evictAgentCallsOf） | 免装配侧自引用 chat store（stores 间 import 禁令）；设计待验证检查点 1 本倾向只读查询 | 设计 B9 措辞以纯查询为准 |
+| u5 | 豁免门控补 isOpen + activeTab 分量 | A6 要求关闭 drawer 后释放（isOpen）；非 subagent tab 时 SubagentTab 未挂载不算查看中，切回重挂载即重拉 | 无需（设计链意图内） |
+| u5 | 装配外置 features 层 agentcall-lru-linkage.ts（新文件） | stores 间禁止互相 import 的既有约定迫使跨 store 编排外置 | 无需 |
 
 ## 6 状态表
 | Unit | 状态(pending/in-progress/committed/blocked) | 轮次 | 证据指针 |
 |------|------|------|------|
-| u1 | pending | 0 | - |
-| u2 | pending | 0 | - |
-| u3 | pending | 0 | - |
-| u4 | pending | 0 | - |
-| u5 | pending | 0 | - |
-| u6 | pending | 0 | - |
-| u7 | pending | 0 | - |
-| u8 | pending | 0 | - |
-| u9 | pending | 0 | - |
-| u10 | pending | 0 | - |
+| u1 | committed | 0 | 7f55323f5 |
+| u2 | committed | 0 | 4b3bf3ffc |
+| u3 | committed | 0 | 0f1d445a2 |
+| u4 | committed | 0 | b54df2bf5 |
+| u5 | committed | 0 | eadb058fa |
+| u6 | in-progress | 0 | 波2派发 |
+| u7 | in-progress | 0 | 波2派发（u2 已 committed 解锁）|
+| u8 | in-progress | 0 | 波2派发 |
+| u9 | in-progress | 0 | 波2派发（含存量 extractor 失败修复）|
+| u10 | in-progress | 0 | 波2派发 |
 
 ## 7 残留风险与变更历史
 - 残留风险：①16MB ring 预算与 32MB HRC 帽为设计值，A2/A9 实测后校准（登记于设计待验证检查点 3）②A9 量化锚点受 GC 波动影响，已用静置 60s + 中位数缓解③摘碑挂点 plugin-service.ts:441 是单槽回调——实施须链式追加不得二次 setOnSessionCreated 覆盖（简洁审 R4 INFO）。
