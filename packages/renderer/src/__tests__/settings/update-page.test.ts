@@ -189,3 +189,66 @@ describe('UpdatePage 自动更新卡', () => {
     expect(sw.attributes('data-state')).toBe('checked')
   })
 })
+
+// ── 原 UpdatePage.w3-acceptance.test.ts 并入（同 SUT 异功能区：testProxy 结果两行渲染；
+//    W3-A6 验收，mock 形态对齐本文件 settingsMock，UpdateCheckCard 经 useAppUpdate mock 走真实组件）──
+describe('testProxy 测试代理结果渲染（W3-A6）', () => {
+  it('测试失败时显示两行（message + suggestion）', async () => {
+    settingsMock.testProxy.mockResolvedValue({
+      success: false,
+      message: '无法连接代理 (EHOSTUNREACH)',
+      suggestion: 'macOS 未授予「本地网络」权限。恢复指引：系统设置 → 隐私与安全性 → 本地网络',
+    })
+
+    const wrapper = mount(UpdatePage)
+    await flushPromises()
+
+    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
+    expect(testButton.exists()).toBe(true)
+    await testButton.trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('[data-testid="test-proxy-result"]')
+    expect(result.exists()).toBe(true)
+
+    const text = result.text()
+    // 第一行：错误摘要
+    expect(text).toContain('代理连接失败: 无法连接代理 (EHOSTUNREACH)')
+    // 第二行：恢复指引
+    expect(text).toContain('macOS 未授予「本地网络」权限')
+  })
+
+  it('测试成功时只显示成功消息（不显示 suggestion）', async () => {
+    settingsMock.testProxy.mockResolvedValue({ success: true })
+
+    const wrapper = mount(UpdatePage)
+    await flushPromises()
+
+    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
+    await testButton.trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('[data-testid="test-proxy-result"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('代理连接成功')
+    expect(result.text()).not.toContain('macOS')
+  })
+
+  it('测试失败无 suggestion 时只显示一行', async () => {
+    settingsMock.testProxy.mockResolvedValue({
+      success: false,
+      message: 'fetch failed',
+    })
+
+    const wrapper = mount(UpdatePage)
+    await flushPromises()
+
+    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
+    await testButton.trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('[data-testid="test-proxy-result"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('代理连接失败: fetch failed')
+  })
+})

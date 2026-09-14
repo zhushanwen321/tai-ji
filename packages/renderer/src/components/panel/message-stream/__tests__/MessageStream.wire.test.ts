@@ -392,29 +392,8 @@ describe('MessageStream rail 接线（TurnRail props 契约 + useMessageStreamRa
     wrapper.unmount()
   })
 
-  it('TC-w4-6a: [cw wave w4] vlistRef.value=null（首帧未挂载）→ onJump no-op 不抛错', () => {
-    // vlistRef 必填但 value 可能为 null（首帧 / session 切换 dispose）：onJump 早返回 no-op。
-    const scrollEl = document.createElement('div')
-    const vlistRef = shallowRef<VirtualizerHandle | null>(null)
-    const { rail, wrapper } = mountRail({ scrollEl, vlistRef })
-    expect(() => rail.onJump(1)).not.toThrow()
-    expect(() => rail.onJump(2)).not.toThrow()
-    wrapper.unmount()
-  })
-
-  it('TC-w4-6b: [cw wave w3] virtua 路径（传 vlistRef）onJump(idx) → vlistRef.scrollToIndex(renderIdx, {align:"start"})', () => {
-    // virta 路径：rail.onJump 用 v.scrollToIndex 替代 scrollEl.scrollTop 写入（design §4.1/§3.3）
-    const scrollToIndex = vi.fn()
-    const vlistRef = shallowRef<VirtualizerHandle | null>(createMockVlist({ scrollToIndex }))
-    const { rail, wrapper } = mountRail({ vlistRef })
-    // onJump(1) → railTurns[1]=index=2 → renderItems 下标 1（makeRenderItems：turn/index=1,2,3 各占 0,1,2）
-    rail.onJump(1)
-    expect(scrollToIndex).toHaveBeenCalledWith(1, { align: 'start' })
-    // onJump(2) → renderItems 下标 2
-    rail.onJump(2)
-    expect(scrollToIndex).toHaveBeenLastCalledWith(2, { align: 'start' })
-    wrapper.unmount()
-  })
+  // （TC-w4-6a/6b 已删：vlistRef null no-op 与 scrollToIndex 路由由
+  //  use-message-stream-rail-virtua.test.ts 更全覆盖（:106/:173），此处原走默认 mock vlist。）
 })
 
 /* ──────────────────────────────────────────────────────────────

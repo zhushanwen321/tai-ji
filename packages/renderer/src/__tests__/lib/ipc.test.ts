@@ -1,20 +1,20 @@
 /**
- * lib/ipc 自动升级方法单测（w4 update-frontend · W4TC11）。
+ * lib/ipc 封装单测（update 方法族 + pickFile + revealInFolder，同 SUT 单文件；
+ * 原 ipc-update.test.ts / ipc-pick-file.test.ts / ipc-reveal-in-folder.test.ts 并入，
+ * 共享同一 resetModules + 动态 import + electronAPI stub 脚手架）。
  *
- * 验证两条路径：
- * 1. window.electronAPI 为 undefined（web/mock 环境）：方法优雅降级
- *    - checkForUpdate → { info: null, rateLimited: false }（RM2.3 形状）
- *    - updateDownload → { downloaded: false }
- *    - onUpdateProgress/onUpdateError → no-op（调用返回值不抛错）
- *    - openUpdateFallbackUrl → resolve（不抛错）
- * 2. window.electronAPI 含对应方法：转发到对应方法 + 透传参数/返回值
- *
- * [批次 3] performUpdate 一键封装已删（m17）；updateDownload 改传意图（version 字符串）。
+ * 覆盖：
+ * - update 方法族（W4TC11 / RM2.3）：web/mock 环境优雅降级形状 + electronAPI 转发透传
+ *   （[批次 3] performUpdate 一键封装已删（m17）；updateDownload 改传意图 version 字符串）
+ * - pickFile（TC1，slice5 attach-dragdrop-menu）：无 preload 降级 {canceled:true, path:null}
+ *   + 转发透传（TC1a-variant「electronAPI 存在但无 pickFile」与 TC1a 同一 `!api?.pickFile`
+ *   分支，已省略）
+ * - revealInFolder（C2 trace MALFORMED 行「打开所在目录」）：降级静默 resolve + 透传
  *
  * 关键：ipc.ts 顶层 `const api = window.electronAPI` 在模块加载时捕获，
  * 故每个用例需 vi.resetModules() + 动态 import 以新 module 实例读取新 stub。
  *
- * 运行：cd packages/renderer && npx vitest run src/__tests__/lib/ipc-update.test.ts
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/lib/ipc.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { LatestReleaseInfo } from '@xyz-agent/shared'
@@ -178,5 +178,55 @@ describe('lib/ipc update 方法 · 转发到 electronAPI', () => {
 
     await expect(ipc.getPreloaded()).resolves.toEqual(preloaded)
     expect(spy).toHaveBeenCalledWith()
+  })
+})
+
+describe('lib/ipc pickFile 封装（TC1，原 ipc-pick-file.test.ts 并入）', () => {
+  it('TC1a: 无 preload（api.pickFile 不存在）→ 返回 {canceled:true, path:null}，不 throw', async () => {
+    // 不设置 window.electronAPI（模拟 web/mock 环境）
+    const { pickFile } = await import('@/lib/ipc')
+    const result = await pickFile()
+    expect(result).toEqual({ canceled: true, path: null })
+  })
+
+  it('TC1b: api.pickFile 存在 → 透传 options 并返回其结果', async () => {
+    const pickFileImpl = vi.fn().mockResolvedValue({ canceled: false, path: '/a/b.png' })
+    ;(window as { electronAPI?: unknown }).electronAPI = { pickFile: pickFileImpl }
+    const { pickFile } = await import('@/lib/ipc')
+    const options = { filters: [{ name: 'Images', extensions: ['png', 'jpg'] }] }
+    const result = await pickFile(options)
+    expect(result).toEqual({ canceled: false, path: '/a/b.png' })
+    expect(pickFileImpl).toHaveBeenCalledWith(options)
+  })
+
+  it('TC1b-default: 不传 options → pickFile 以 undefined 调用', async () => {
+    const pickFileImpl = vi.fn().mockResolvedValue({ canceled: false, path: '/x.txt' })
+    ;(window as { electronAPI?: unknown }).electronAPI = { pickFile: pickFileImpl }
+    const { pickFile } = await import('@/lib/ipc')
+    await pickFile()
+    expect(pickFileImpl).toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe('lib/ipc revealInFolder 封装（原 ipc-reveal-in-folder.test.ts 并入）', () => {
+  it('无 preload（electronAPI 不存在）→ 静默 resolve，不 throw', async () => {
+    // 不设置 window.electronAPI（模拟 web/mock 环境）
+    const { revealInFolder } = await import('@/lib/ipc')
+    await expect(revealInFolder('/a/b.jsonl')).resolves.toBeUndefined()
+  })
+
+  it('electronAPI 存在但无 revealInFolder（旧 preload）→ 同样降级', async () => {
+    ;(window as { electronAPI?: unknown }).electronAPI = {}
+    const { revealInFolder } = await import('@/lib/ipc')
+    await expect(revealInFolder('/a/b.jsonl')).resolves.toBeUndefined()
+  })
+
+  it('revealInFolder 存在 → 透传绝对路径并返回其结果', async () => {
+    const impl = vi.fn().mockResolvedValue(true)
+    ;(window as { electronAPI?: unknown }).electronAPI = { revealInFolder: impl }
+    const { revealInFolder } = await import('@/lib/ipc')
+    const result = await revealInFolder('/data/agent/sessions/s1.jsonl')
+    expect(result).toBe(true)
+    expect(impl).toHaveBeenCalledWith('/data/agent/sessions/s1.jsonl')
   })
 })

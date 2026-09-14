@@ -23,26 +23,20 @@ describe('buttonVariants base class — Plan 02 按下物理反馈', () => {
   // base 段恒定出现在输出首部，substring 断言鲁棒。
   const baseClass = buttonVariants()
 
-  it('含 active:scale-[0.97] 按下微缩（AUDIT §3 推荐区中值）', () => {
+  it('正向：含按下微缩 + 显式属性 transition + token 化时长/缓动（契约 C1 全量）', () => {
+    // active:scale-[0.97]（AUDIT §3 推荐区中值）
     expect(baseClass).toContain('active:scale-[0.97]')
-  })
-
-  it('含显式 transform transition（覆盖 background/color/border/transform 四属性）', () => {
-    expect(baseClass).toContain(
-      'transition-[background-color,color,border-color,transform]',
-    )
-  })
-
-  it('引用动效 token：duration-[var(--duration-fast)] 与 ease-[var(--ease)]', () => {
+    // 显式 transform transition（覆盖 background/color/border/transform 四属性）
+    expect(baseClass).toContain('transition-[background-color,color,border-color,transform]')
+    // 动效 token（duration-fast 120ms，AUDIT 100-160ms 区间）
     expect(baseClass).toContain('duration-[var(--duration-fast)]')
     expect(baseClass).toContain('ease-[var(--ease)]')
   })
 
-  it('不含旧值 transition-colors（无 transform 覆盖，按下回弹不平滑）', () => {
+  it('负向：不含旧值 transition-colors 与禁止的 transition-all（AUDIT §5）', () => {
+    // transition-colors 不含 transform 覆盖（按下回弹不平滑）
     expect(baseClass).not.toContain('transition-colors')
-  })
-
-  it('不含禁止的 transition-all（AUDIT §5：显式属性优于 all，避免 GPU 外属性意外参与动画）', () => {
+    // 显式属性优于 all（避免 GPU 外属性意外参与动画）
     expect(baseClass).not.toContain('transition-all')
   })
 })

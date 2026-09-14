@@ -15,54 +15,51 @@
  * stopReason 逐条值不可复原，按设计文档点名实例归约（幽灵行 1 failed 7 completed；
  * one-shot 行全 completed）——stopReason 不参与占用判据（新旧皆然），仅形态保真备注。
  *
- * **门断言语义**：按修复后严格口径（isRunningProjection）回放 badge 计数 = 0；
- * 测试内联旧组合判据（投影 running 且非 done 投影）对照回放 = 8——差值恰为
- * 8 个 chat 轮终幽灵，钉住 fixture 的判别力（防止 fixture 退化为无判别力的全
- * 收口集合，即两判据答案相同的集合）。
+ * **门断言语义**：按修复后严格口径（isRunningProjection）回放 badge 计数 = 0
+ * （[U4] 翻边后轮终形态 status=idle，status 子句直接排除）。
  */
 
-/** 脱敏形态规格（六元组；result/resumable/chatMode 用「有/无」语义而非正文） */
+/** 脱敏形态规格（五元组；result/chatMode 用「有/无」语义而非正文）。
+ *  [U5/D4] resumable 维度已随字段退役从规格中移除——观察时点的 resumable=true
+ *  形态在 U4 翻边后对应 status='idle'（idle 即 resumable），信息由 status 承载。 */
 export interface GhostFixtureSpec {
   /** 脱敏别名（语义前缀 + 序号，与真实 subagentId 解耦） */
   aliasId: string
-  /** entry 最后快照的 status（观察时点桥接期：轮终保持 running，中断收口 idle） */
+  /** entry 最后快照的 status（[U4] 翻边后：轮终写 idle，中断收口 idle） */
   status: 'running' | 'idle'
   /** result 有/无（在场 = 轮终信号；正文已脱敏） */
   hasResult: boolean
-  /** resumable 字段形态：true / undefined（∅） */
-  resumable: true | undefined
   /** chatMode 字段形态：true / false / undefined（legacy 缺省） */
   chatMode: true | false | undefined
   /** 上轮停因（展示位，不参与占用判据） */
   stopReason?: string
 }
 
-/** 8 条 chat 轮终幽灵（badge 误计入的直接来源；status 保持 running + result 在场 + resumable + chatMode=true） */
+/** 8 条 chat 轮终幽灵（badge 误计入的直接来源；[U4] 翻边后轮终形态 = idle + result 在场 + chatMode=true） */
 const CHAT_ROUND_GHOSTS: GhostFixtureSpec[] = [
-  { aliasId: 'ghost-chat-1', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-2', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-3', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-4', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-5', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-6', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-7', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'completed' },
-  { aliasId: 'ghost-chat-8', status: 'running', hasResult: true, resumable: true, chatMode: true, stopReason: 'failed' },
+  { aliasId: 'ghost-chat-1', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-2', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-3', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-4', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-5', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-6', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-7', status: 'idle', hasResult: true, chatMode: true, stopReason: 'completed' },
+  { aliasId: 'ghost-chat-8', status: 'idle', hasResult: true, chatMode: true, stopReason: 'failed' },
 ]
 
 /** 29 条 one-shot 轮终（done 投影，新旧判据都排除；含观察时点 2 条真在跑收口后的终态） */
 const ONESHOT_ROUND_DONE: GhostFixtureSpec[] = Array.from({ length: 29 }, (_, i) => ({
   aliasId: `oneshot-done-${i + 1}`,
-  status: 'running' as const,
+  status: 'idle' as const,
   hasResult: true,
-  resumable: true as const,
   chatMode: false as const,
   stopReason: 'completed',
 }))
 
 /** 2 条中断收口（markSettled 真翻 idle，新旧判据都排除） */
 const INTERRUPTED_SETTLED: GhostFixtureSpec[] = [
-  { aliasId: 'idle-interrupted-1', status: 'idle', hasResult: false, resumable: undefined, chatMode: undefined, stopReason: 'interrupted' },
-  { aliasId: 'idle-interrupted-2', status: 'idle', hasResult: false, resumable: undefined, chatMode: undefined, stopReason: 'interrupted' },
+  { aliasId: 'idle-interrupted-1', status: 'idle', hasResult: false, chatMode: undefined, stopReason: 'interrupted' },
+  { aliasId: 'idle-interrupted-2', status: 'idle', hasResult: false, chatMode: undefined, stopReason: 'interrupted' },
 ]
 
 /** 39 条 record 的最后快照形态全集（8 + 29 + 2） */

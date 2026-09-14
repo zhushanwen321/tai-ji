@@ -41,6 +41,8 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     store.testInternals.armStreamingTimer(sid)
     // retryStates / queueStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
     store.markHistoryFailed(sid)
+    // changeSetStatuses：key 格式 `${sid}:${messageId}`，disposeSession 按前缀清理（W19 Fix-2）
+    store.setChangeSetStatus(sid, 'm1', 'added')
 
     // 前置断言：状态确实写入了
     expect(store.getMessages(sid)).toHaveLength(1)
@@ -58,8 +60,12 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     expect(store.isCompacting(sid)).toBe(false)
     expect(store.getRetryState(sid)).toBeUndefined()
     expect(store.getQueueState(sid)).toBeUndefined()
-    // failedHistory 是 Set，disposeSession 后不再含 sid
-    // 注意：getChangeSetStatus 需要 messageId，这里验证 changeSetStatuses map 不含 sid 前缀的 key
+    // changeSetStatuses 的 `${sid}:` 前缀条目已清理（W19 Fix-2 抽取的
+    // deleteChangeSetStatusesFor 挂点）——此处补上原注释承诺的断言
+    expect(store.getChangeSetStatus(sid, 'm1')).toBeUndefined()
+    // failedHistory 是 Set 且无公开 getter——disposeSession 的 setRefs 遍历
+    // （core store.ts:1306 含 failedHistory）覆盖其清理；可观测回归经
+    // m7-virtual-key-cleanup / delete-cleanup 的分区释放断言承担
     vi.clearAllTimers()
     vi.useRealTimers()
   })

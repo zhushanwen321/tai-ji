@@ -3,6 +3,10 @@
  *
  * 覆盖：
  * - isGenerating：空 session / 有 streaming / 无 streaming / per-session 隔离
+ *   （含原 chat-perf-scan-timer.test.ts 并入的「大分区不跨 session 扫描」用例；
+ *    其 <5ms 墙钟性能断言已删——实现已演进为 computed 惰性派生 + sessionStreamingFlags
+ *    缓存（store.ts:536），「scan 性能」叙事失效，墙钟断言对缓存派生无回归捕捉力且受
+ *    CI 抖动影响；其 timer 用例由 core timers.test.ts 与 chat-streaming-timeout.test.ts 承担）
  * - isActive：isGenerating ∨ pendingSend
  * - finalizeAllStreaming：多 session 同时 streaming → 全部收口（F1 修正）
  * - finalizeAllStreaming：非 streaming session 不受影响
@@ -12,6 +16,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import type { Message } from '@/types/message'
 
 describe('isGenerating 派生 scan（D-005）', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -67,6 +72,24 @@ describe('isGenerating 派生 scan（D-005）', () => {
       payload: { sessionId: sid, messageId: 'a2' },
     })
     expect(store.isGenerating(sid)).toBe(true)
+  })
+
+  it('scan 限定 per-session：大分区（500 complete）不影响其他 session 的判定（原 perf-scan 并入）', () => {
+    const store = useChatStore()
+    // session A 有 500 条 complete
+    const msgsA: Message[] = []
+    for (let i = 0; i < 500; i++) {
+      msgsA.push({ id: `pa-${i}`, role: 'assistant', content: '', status: 'complete', timestamp: i })
+    }
+    store.hydrate('ps-largeA', msgsA)
+    // session B 有 1 条 streaming
+    store.applyMessageEvent('ps-streamB', {
+      type: 'message.message_start',
+      payload: { sessionId: 'ps-streamB', messageId: 'b1' },
+    })
+    // scan sA 不受 sB 影响
+    expect(store.isGenerating('ps-largeA')).toBe(false)
+    expect(store.isGenerating('ps-streamB')).toBe(true)
   })
 
   it('per-session 隔离：session A streaming，session B 不受影响', () => {

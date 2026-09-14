@@ -8,17 +8,13 @@
  * 误识别防御从「正则前瞻/后顾 hack」改为「数据白名单」。pi/3.14/glm-5.2/necessity-sufficiency
  * 全部因不在白名单被否决，正则极简。
  *
- * 覆盖范围：
- *  - AC-1:  PATH_CANDIDATE_RE 性能（病态输入不卡死）
+ * 覆盖范围（功能断言去重后收缩：原 AC-3/4/5/8/11 与 markdown.test.ts 的
+ * U9/U10/U12/U13 系列同语义两套表述，已删——那边是白名单语义主战场）：
+ *  - AC-1:  PATH_CANDIDATE_RE 性能（病态输入不卡死，ReDoS 回归防护）
  *  - AC-7:  BASENAME_CANDIDATE_RE 性能（同构病态，同测）
- *  - AC-9:  静态结构断言（正则源码无嵌套量词，兜底 CI 计时 flaky）
- *  - AC-3:  含/路径识别（注入 env.filePaths 白名单）
- *  - AC-4:  无扩展名路径识别（src/Makefile，注入白名单）
- *  - AC-8:  code_inline 渲染路径（反引号内路径，注入白名单）
- *  - AC-5:  误识别防御（白名单不含即不链接，正则无需 hack）
- *  - AC-6:  取消空格路径支持（docs/My Document.md 不再识别为整条）
- *  - AC-10: emphasis 不被路径识别破坏（P0 回归——重构核心动机）
- *  - AC-11: 白名单外路径不链接
+ *  - AC-9:  静态结构断言（正则源码无嵌套量词，零抖动兜底）
+ *  - AC-6:  取消空格路径支持（docs/My Document.md 不再识别为整条；无他处覆盖）
+ *  - AC-10: emphasis 不被路径识别破坏（P0 回归——重构核心动机，含原始 bug 场景）
  *  - AC-2:  真实渲染不卡顿
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect）。禁止 node:test。
@@ -118,84 +114,6 @@ describe('AC-9 静态结构断言（正则无嵌套量词）', () => {
 
 // ── AC-3 / AC-4：含/路径识别（注入 env.filePaths 白名单）──────────────────
 
-describe('AC-3/AC-4 含/路径识别（filepathCoreRule）', () => {
-  it('AC-3: 相对路径 src/foo.ts 在白名单 → 识别为 md-filepath 链接', async () => {
-    const html = await freshRender('edit src/foo.ts please', { filePaths: new Set(['src/foo.ts']) })
-    expect(html).toContain('class="md-filepath"')
-    expect(html).toContain('>src/foo.ts<')
-  })
-
-  it('AC-3: 路径出现在剩余串中部（前有其他文本）仍由边界符触发命中', async () => {
-    const html = await freshRender('请修改 packages/renderer/src/index.ts 的导出', {
-      filePaths: new Set(['packages/renderer/src/index.ts']),
-    })
-    expect(html).toContain('>packages/renderer/src/index.ts<')
-    expect(html).toContain('class="md-filepath"')
-  })
-
-  it('AC-3: 同段多个路径都识别', async () => {
-    const html = await freshRender('改了 a/b.ts 和 x/y.vue', {
-      filePaths: new Set(['a/b.ts', 'x/y.vue']),
-    })
-    expect(html).toContain('>a/b.ts<')
-    expect(html).toContain('>x/y.vue<')
-    expect(html.match(/md-filepath/g)?.length).toBe(2)
-  })
-
-  it('AC-4: 无扩展名路径 src/Makefile 在白名单 → 识别', async () => {
-    const html = await freshRender('run src/Makefile target', { filePaths: new Set(['src/Makefile']) })
-    expect(html).toContain('>src/Makefile<')
-    expect(html).toContain('class="md-filepath"')
-  })
-})
-
-// ── AC-8：code_inline 渲染路径（反引号内路径，注入白名单）──────────────────
-
-describe('AC-8 code_inline 路径识别（反引号内路径）', () => {
-  it('反引号包裹的路径在白名单 → 识别为 md-filepath 链接', async () => {
-    const html = await freshRender('edit `src/foo.ts` now', { filePaths: new Set(['src/foo.ts']) })
-    expect(html).toContain('class="md-filepath"')
-    expect(html).toContain('>src/foo.ts<')
-    // 外层保留 <code>
-    expect(html).toContain('<code>')
-  })
-
-  it('反引号内绝对路径在白名单 → 识别', async () => {
-    // 注：绝对路径必须完整出现在白名单里（FileNode.path 实际是相对 cwd，这里测白名单命中语义）
-    const html = await freshRender('config in `/etc/nginx/nginx.conf`', {
-      filePaths: new Set(['/etc/nginx/nginx.conf']),
-    })
-    expect(html).toContain('>/etc/nginx/nginx.conf<')
-  })
-})
-
-// ── AC-5：误识别防御（白名单不含即不链接）─────────────────────────────────
-
-describe('AC-5 误识别防御（白名单不含即不链接）', () => {
-  it('版本号 glm-5.2 不识别（白名单不含）', async () => {
-    const html = await freshRender('model glm-5.2 is fast', { filePaths: new Set() })
-    expect(html).not.toContain('class="md-filepath"')
-  })
-
-  it('版本号 node/18.0 不识别（白名单不含）', async () => {
-    const html = await freshRender('requires node/18.0 or above', { filePaths: new Set() })
-    expect(html).not.toContain('class="md-filepath"')
-  })
-
-  it('小数 pi/3.14 不识别（白名单不含）', async () => {
-    const html = await freshRender('value is pi/3.14 approx', { filePaths: new Set() })
-    expect(html).not.toContain('class="md-filepath"')
-  })
-
-  it('英文词组 necessity/sufficiency/tradeoffs 不识别（白名单不含，P0 bug 原始触发场景）', async () => {
-    const html = await freshRender('**bold** necessity/sufficiency/tradeoffs **end**', { filePaths: new Set() })
-    // 词组本身不链接
-    expect(html).not.toContain('md-filepath')
-  })
-})
-
-// ── AC-6：取消空格路径支持（设计取舍）──────────────────────────────────────
-
 describe('AC-6 取消空格路径支持', () => {
   it('docs/My Document.md 不再识别为整条路径', async () => {
     const html = await freshRender('see docs/My Document.md here', {
@@ -262,32 +180,6 @@ describe('AC-10 emphasis 不被路径识别破坏（P0 回归）', () => {
 })
 
 // ── AC-11：白名单外路径不链接 ──────────────────────────────────────────────
-
-describe('AC-11 白名单外路径不链接', () => {
-  it('无 env（fileSearch 未加载）→ 所有路径降级纯文本', async () => {
-    const html = await freshRender('see src/foo.ts and a/b.ts')
-    expect(html).not.toContain('class="md-filepath"')
-    expect(html).toContain('src/foo.ts')
-  })
-
-  it('env.filePaths 为空集 → 路径不链接', async () => {
-    const html = await freshRender('see src/foo.ts', { filePaths: new Set() })
-    expect(html).not.toContain('class="md-filepath"')
-    expect(html).toContain('src/foo.ts')
-  })
-
-  it('路径在白名单外的相似路径不误链接', async () => {
-    // src/foo.ts 在白名单，但 src/foot.ts 不在 → 后者不链接
-    const html = await freshRender('edit src/foo.ts and src/foot.ts', {
-      filePaths: new Set(['src/foo.ts']),
-    })
-    expect(html).toContain('>src/foo.ts<')
-    // src/foot.ts 应为纯文本（不在 a 标签内）
-    expect(html).not.toContain('>src/foot.ts<')
-  })
-})
-
-// ── AC-2 真实渲染不卡顿（real layer 集成场景）──────────────────────────────
 
 describe('AC-2 真实渲染不卡顿', () => {
   it('750+ chars 中英混排+反引号+表格行 单次 render < 200ms 且不抛错', async () => {

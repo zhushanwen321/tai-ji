@@ -43,9 +43,10 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.resource.discovered', { label: 'Skill' })).toBe('已发现的 Skill')
     // loadPaths
     expect(i18n.global.t('settings.loadPaths.title')).toBe('加载路径')
-    // 命令名（快捷键展示用）
+    // 命令名（快捷键展示用；go-overview 增量自 shortcut-config.test.ts 用例 3 并入）
     expect(i18n.global.t('settings.command.new-session')).toBe('新建任务')
     expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('收起侧栏')
+    expect(i18n.global.t('settings.command.go-overview')).toBe('概览')
   })
 
   it('en-US locale 含完整 settings namespace 且 t() 返回英文', async () => {
@@ -74,6 +75,7 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.loadPaths.title')).toBe('Load paths')
     expect(i18n.global.t('settings.command.new-session')).toBe('New session')
     expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('Toggle sidebar')
+    expect(i18n.global.t('settings.command.go-overview')).toBe('Overview')
   })
 
   it('切换 locale 后同一 key 返回不同文案（响应式切换生效）', async () => {

@@ -29,7 +29,7 @@ import type { LatestReleaseInfo, UpdateCheckResult } from '@xyz-agent/shared'
 const hoisted = vi.hoisted(() => {
   // 捕获 onUpdateProgress/onUpdateError 注册的回调，供测试手动触发（模拟 main 推送）
   let progressCb: ((p: { stage: 'downloading' | 'replacing'; percent: number }) => void) | null = null
-  let errorCb: ((e: { stage: string; message: string; errorCode?: string }) => void) | null = null
+  let errorCb: ((e: { stage: string; message: string; errorCode?: string; suggestion?: string }) => void) | null = null
   return {
     checkForUpdate: vi.fn<(opts?: { force?: boolean }) => Promise<UpdateCheckResult>>(),
     updateDownload: vi.fn<(version: string) => Promise<{ downloaded: boolean }>>(),
@@ -55,7 +55,7 @@ const hoisted = vi.hoisted(() => {
     fireProgress: (p: { stage: 'downloading' | 'replacing'; percent: number }) => {
       if (progressCb) progressCb(p)
     },
-    fireError: (e: { stage: string; message: string; errorCode?: string }) => {
+    fireError: (e: { stage: string; message: string; errorCode?: string; suggestion?: string }) => {
       if (errorCb) errorCb(e)
     },
     renderMarkdown: vi.fn<(md: string) => Promise<string>>(),
@@ -357,6 +357,54 @@ describe('useAppUpdate', () => {
     expect(result.state.state).toBe('error')
     expect(result.state.errorMessage).toBe('网络中断')
     stop()
+  })
+
+  // ── W3 验收并入（原独立文件 useAppUpdate.w3-acceptance.test.ts，同 mock 装置）──
+  // errorSuggestion 填充（D9 网络类错误码追加手动下载指引）+ toast 只弹摘要。
+  const MANUAL_HINT_ZH = '也可从 release 页手动下载安装包，放入手动升级目录后重试（目录路径见 设置 → 更新 → 手动升级通道）'
+
+  it('onUpdateError 带 suggestion 的网络类错误 → errorSuggestion = suggestion + D9 追加段', () => {
+    const { result, stop } = setupUseAppUpdate()
+    hoisted.fireError({
+      stage: 'downloading',
+      message: '无法连接代理 (EHOSTUNREACH)',
+      errorCode: 'UPDATE_PROXY_UNREACHABLE',
+      suggestion: 'macOS 未授予「本地网络」权限。恢复指引：系统设置 → 隐私与安全性 → 本地网络 → 允许「太极」，重启应用后重试',
+    })
+
+    expect(result.state.state).toBe('error')
+    expect(result.state.errorMessage).toBe('无法连接代理 (EHOSTUNREACH)')
+    expect(result.state.errorSuggestion).toBe(
+      `macOS 未授予「本地网络」权限。恢复指引：系统设置 → 隐私与安全性 → 本地网络 → 允许「太极」，重启应用后重试\n${MANUAL_HINT_ZH}`,
+    )
+    stop()
+  })
+
+  it('无 suggestion 的网络类错误 → errorSuggestion = D9 手动下载指引', () => {
+    const { result, stop } = setupUseAppUpdate()
+    hoisted.fireError({ stage: 'downloading', message: '网络连接失败', errorCode: 'UPDATE_NETWORK_FAILED' })
+
+    expect(result.state.state).toBe('error')
+    expect(result.state.errorMessage).toBe('网络连接失败')
+    expect(result.state.errorSuggestion).toBe(MANUAL_HINT_ZH)
+    stop()
+  })
+
+  it('onUpdateError 触发 error toast，只弹摘要不弹 suggestion（单参数）', () => {
+    setupUseAppUpdate()
+    // toastFns 为模块级 hoisted spy（不被 beforeEach 重置），用例内先清零隔离
+    toastFns.error.mockClear()
+    hoisted.fireError({
+      stage: 'downloading',
+      message: '无法连接代理 (EHOSTUNREACH)',
+      errorCode: 'UPDATE_PROXY_UNREACHABLE',
+      suggestion: '很长的恢复指引文案...',
+    })
+
+    expect(toastFns.error).toHaveBeenCalledTimes(1)
+    expect(toastFns.error).toHaveBeenCalledWith('无法连接代理 (EHOSTUNREACH)')
+    // toast 只传 message，不传 suggestion
+    expect(toastFns.error.mock.calls[0].length).toBe(1)
   })
 
   // [HISTORICAL] 回归：传给 ipc 的 release 必须是 plain object，不能是 Vue reactive proxy。

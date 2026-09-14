@@ -583,16 +583,16 @@ describe('subagent store — hasRunning / isStreamingSubagent 窄口径（轮终
     expect(store.isRunning('session-1', 'bg-1')).toBe(true)
   })
 
-  it('running + resumable=true（无活进程驱动）→ hasRunning false / isStreamingSubagent false', () => {
+  it('W4 新型（[U5] 登记翻转：running + stopReason=failed 无 result）→ hasRunning true / isStreamingSubagent true（U1 判据不消费 stopReason，U6 对冲）', () => {
     const store = useSubagentStore()
     store.applyRecords('session-1', [
-      makeRecord({ subagentId: 'bg-2', status: 'running', resumable: true }),
+      makeRecord({ subagentId: 'bg-2', status: 'running', stopReason: 'failed' }),
     ])
-    expect(store.hasRunning('session-1')).toBe(false)
-    expect(store.isStreamingSubagent('session-1', 'bg-2')).toBe(false)
+    expect(store.hasRunning('session-1')).toBe(true)
+    expect(store.isStreamingSubagent('session-1', 'bg-2')).toBe(true)
   })
 
-  it('running 无 result 且 resumable 缺省 → hasRunning true / isStreamingSubagent true（真在跑）', () => {
+  it('running 无 result → hasRunning true / isStreamingSubagent true（真在跑）', () => {
     const store = useSubagentStore()
     store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-3', status: 'running' })])
     expect(store.hasRunning('session-1')).toBe(true)

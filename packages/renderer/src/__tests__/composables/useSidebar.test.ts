@@ -287,7 +287,6 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
       task: 'reconnect re-pull',
       status: 'running',
       chatMode: true,
-      resumable: true,
     }
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()
@@ -321,5 +320,33 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     await sidebar.onConnected() // 重连（focusedSessionId=null）
     await new Promise((r) => setTimeout(r, 0))
     expect(getSubagentsMock).not.toHaveBeenCalled()
+  })
+})
+
+// ── 原 select-session-pull.test.ts 并入（同 SUT selectSession 编排、同 mock 骨架）──
+// [HISTORICAL] 2026-07-29 handoff 回复丢失事故：selectSession 须统一注册订阅 + 不再主动
+// 拉列表（remove-bandaids 反转断言）。幂等守卫本体在 core ensureStreamSubscription 内部
+//（本文件 mock 掉该层，幂等由 core useChat 测试锁定），此处锁编排层可见信号。
+describe('selectSession 订阅建立 + 不主动拉列表（remove-bandaids 反转断言）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetAppBootstrap()
+    vi.clearAllMocks()
+  })
+
+  it('selectSession 触发订阅建立（ensureStreamSubscription 绑定目标 sid）', async () => {
+    const sidebar = useSidebar()
+    await sidebar.selectSession('sess-A')
+    expect(mocks.ensureStreamSub).toHaveBeenCalledWith('sess-A', expect.anything(), expect.anything())
+  })
+
+  it('selectSession 不调 getSubagents/getWorkflows（stateSnapshot / workflowUpdate 信号提供），多次切换一致', async () => {
+    const sessionDomain = await import('@xyz-agent/core/transport/api/domains/session')
+    const sidebar = useSidebar()
+    await sidebar.selectSession('sess-A')
+    await sidebar.selectSession('sess-B')
+
+    expect(sessionDomain.getSubagents).not.toHaveBeenCalled()
+    expect(sessionDomain.getWorkflows).not.toHaveBeenCalled()
   })
 })

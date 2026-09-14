@@ -1,25 +1,27 @@
 /**
- * session.subagents 兜底测试 —— 非活跃/活跃 session 的 subagent 终态推送链路。
+ * routeInbound effects 装配兜底测试（session.subagents / session.workflowUpdate 终态推送链路；
+ * 原 session-workflow-update-fallback.test.ts 的 TC2 已并入本文件，同 mock 骨架）。
  *
  * 锁定根因：subagent/workflow 终态推送（session.subagents / session.workflowUpdate）此前只在
  * per-focus 订阅里处理，用户切走 session 即退订 → dispatchSession 静默丢弃
  * → 分区里 running 记录永不更新 → 侧栏菊花永转。修复：routeInbound 兜底，在 dispatchSession 之后
- * 无条件 applyRecords（仿 session.exited / message.complete）。
+ * 无条件 applyRecords / triggerWorkflowReload（仿 session.exited / message.complete）。
  *
- * 验证链路：transport.onMessage 注册的 routeInbound handler 收到 session.subagents →
- *   1. 非活跃 session（focus≠A）：applyRecords(A, [done]) → A 分区更新，hasRunning(A)=false
- *   2. 活跃 session（focus=A）：同样 applyRecords（兜底不判断焦点，幂等/无条件）
+ * 验证链路：transport.onMessage 注册的 routeInbound handler 收到终态推送 →
+ *   1. subagents 非活跃 session（focus≠A）：applyRecords(A, [done]) → A 分区更新，hasRunning(A)=false
+ *   2. workflowUpdate 非活跃 session：终态信号触发 loadWorkflows → 分区 done，hasRunningOrPaused=false
+ *   （running 信号 500ms 延迟重试在 store 层，由 stores/workflow.test.ts triggerWorkflowReload describe 锁定）
  *
  * mock 策略：vi.hoisted 捕获 ws-client.onMessage 注册的 routeInbound handler，测试向其注入
- * ServerMessage。mock ipc/ws-client 避免 init() 真实连接。mock @/api/domains/session.getSubagents
- * 返回 []（store 经 @/api 门面导入 session，需把门面指回 domains 命名空间，同 subagent-push.test.ts）。
+ * ServerMessage。mock ipc/ws-client 避免 init() 真实连接。mock @/api/domains/session 域函数
+ * （store 经 @/api 门面导入 session，需把门面指回 domains 命名空间，同 subagent-push.test.ts）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/session-subagents-fallback.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
-import type { ServerMessage, SessionGroup, SubagentRecord } from '@xyz-agent/shared'
+import type { ServerMessage, SessionGroup, SubagentRecord, WorkflowRunRecord } from '@xyz-agent/shared'
 
 // vi.hoisted 保证 mock 工厂在模块加载前就绪；resetModules 后重新加载 useConnection 时
 // 仍走同一 mock 工厂（mock 在 hoisted 层注册，不受 resetModules 影响）
@@ -60,10 +62,13 @@ vi.mock('@/lib/ipc', () => ({
   restartRuntime: vi.fn(async () => {}),
 }))
 
-// mock sessionApi（subagent store 内部 import；首拉 RPC getSubagents 返回空）
+// mock sessionApi（subagent/workflow store 内部 import；getSubagents 首拉返回空，
+// getWorkflows 用 vi.fn() 由用例内 mockResolvedValueOnce 控制返回值）
 vi.mock('@xyz-agent/core/transport/api/domains/session', () => ({
   getSubagents: vi.fn(async () => []),
   getSubagentHistory: vi.fn(async () => []),
+  getWorkflows: vi.fn(),
+  getAgentCallHistory: vi.fn(),
   // useConnection.ensureDispatcher 经 sessionApi.subscribe 注入 ports（T2 后）
   subscribe: vi.fn(async () => {}),
   unsubscribe: vi.fn(async () => {}),
@@ -82,6 +87,8 @@ let useConnection: typeof import('@/composables/useConnection').useConnection
 let usePanelStore: typeof import('@/stores/panel').usePanelStore
 let useSessionStore: typeof import('@/stores/session').useSessionStore
 let useSubagentStore: typeof import('@/stores/subagent').useSubagentStore
+let useWorkflowStore: typeof import('@/stores/workflow').useWorkflowStore
+let sessionApi: typeof import('@xyz-agent/core/transport/api/domains/session')
 
 beforeEach(async () => {
   setActivePinia(createPinia())
@@ -95,6 +102,8 @@ beforeEach(async () => {
   usePanelStore = (await import('@/stores/panel')).usePanelStore
   useSessionStore = (await import('@/stores/session')).useSessionStore
   useSubagentStore = (await import('@/stores/subagent')).useSubagentStore
+  useWorkflowStore = (await import('@/stores/workflow')).useWorkflowStore
+  sessionApi = await import('@xyz-agent/core/transport/api/domains/session')
 
   // 初始化 session store 含两个 session（A、B）
   const sessionStore = useSessionStore()
@@ -156,28 +165,56 @@ describe('session.subagents routeInbound 兜底', () => {
     expect(subagentStore.hasRunning('sess-A')).toBe(false)
   })
 
-  it('TC4 活跃 session 兜底（幂等/无条件）：focus=A 时 A 的终态推送同样更新 A 分区', async () => {
+  // （原 TC4「活跃 session 兜底」已删：route-inbound 兜底本就不判焦点，与 TC1 走同一
+  // 代码路径产出同一断言，属重复锁面。）
+
+  /** 构造测试 WorkflowRunRecord（最小字段集，覆盖 status 断言） */
+  function makeWorkflow(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
+    return {
+      runId: 'w1',
+      scriptName: 'flow',
+      status: 'done',
+      reason: 'completed',
+      startedAt: '2026-07-10T10:00:00Z',
+      completedAt: '2026-07-10T10:30:00Z',
+      usedTokens: 0,
+      totalCallCount: 0,
+      agentCalls: [],
+      stateFilePath: '/data/w1.jsonl',
+      ...overrides,
+    }
+  }
+
+  it('TC2-W 非活跃 session workflow 终态兜底：focus≠A 时 A 的终态信号触发 loadWorkflows 更新分区', async () => {
     await initAndConnect()
+    expect(mockHolder.routeHandler).not.toBeNull()
 
     const panel = usePanelStore()
-    const subagentStore = useSubagentStore()
+    const workflowStore = useWorkflowStore()
 
-    // 焦点为 A
-    panel.loadSession(panel.panels[0].id, 'sess-A')
+    // 焦点为 B（A 非活跃）
+    panel.loadSession(panel.panels[0].id, 'sess-B')
 
-    // 预填 A 分区 running 记录
-    subagentStore.applyRecords('sess-A', [makeRecord({ subagentId: 'sa-1', status: 'running' })])
-    expect(subagentStore.hasRunning('sess-A')).toBe(true)
+    // 预填 A 分区 running workflow（模拟侧栏菊花）
+    workflowStore.applyRecords('sess-A', [makeWorkflow({ runId: 'w1', status: 'running' })])
+    expect(workflowStore.hasRunningOrPaused('sess-A')).toBe(true)
 
-    // 注入 A 的终态推送（status: done）
+    // getWorkflows 返回 done（终态）
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValueOnce([makeWorkflow({ runId: 'w1', status: 'done' })])
+
+    // 注入 A 的 workflowUpdate 终态信号
     const msg: ServerMessage = {
-      type: 'session.subagents',
-      payload: { sessionId: 'sess-A', subagents: [makeRecord({ subagentId: 'sa-1', status: 'done' })] },
+      type: 'session.workflowUpdate',
+      payload: { sessionId: 'sess-A', update: { runId: 'w1', status: 'done' } },
     }
     mockHolder.routeHandler!(msg)
 
-    // 兜底不判断焦点，活跃 session 同样更新
-    expect(subagentStore.getRecordsBySession('sess-A')[0].status).toBe('done')
-    expect(subagentStore.hasRunning('sess-A')).toBe(false)
+    // 等 loadWorkflows RPC flush
+    await vi.waitFor(() => {
+      expect(workflowStore.getRecordsBySession('sess-A')[0].status).toBe('done')
+    })
+
+    expect(workflowStore.hasRunningOrPaused('sess-A')).toBe(false)
+    expect(sessionApi.getWorkflows).toHaveBeenCalledWith('sess-A')
   })
 })

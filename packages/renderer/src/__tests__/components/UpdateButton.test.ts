@@ -105,19 +105,8 @@ describe('UpdateButton', () => {
     // 红点角标存在
     expect(wrapper.find('[data-testid="update-badge"]').exists()).toBe(true)
 
-    // 触发 hover 打开 HoverCard（reka-ui 走 pointer 事件 + portal teleport 到 document.body）
-    await available.trigger('pointerenter')
-    await new Promise((r) => setTimeout(r, 50))
-
-    // 仅在 HoverCard portal 成功挂载时断言 v-html 渲染。
-    // happy-dom 环境下 reka-ui HoverCard 的 portal 通常不挂载到 document.body，
-    // 此时本用例不验证 v-html 渲染（不再回退断言 testState.releaseNotesHtml——那是测试自身写入的 mock 值，
-    // 断言它包含「新特性」属同义反复，等于没测）；v-html 渲染的端到端验证归 manual/E2E。
-    const notes = document.body.querySelector('[data-testid="update-release-notes"]')
-    if (notes) {
-      expect(notes.innerHTML).toContain('新特性')
-    }
-    // portal 未挂载时不做断言：本用例已覆盖 available 分支 DOM（红点角标 + state 注入），v-html 渲染交由 E2E。
+    // hover 卡片 v-html 渲染验证归 manual/E2E：happy-dom 下 reka-ui HoverCard 的
+    // portal 通常不挂载到 document.body，条件断言（if (notes)）恒跳过属噪音，已删。
   })
 
   it('W4TC9：available click 触发 performDownload', async () => {

@@ -27,6 +27,7 @@ import {
   DEFAULT_SUBAGENT_FILTER,
   isDoneProjection,
   isRunningProjection,
+  isWaiting,
   subagentBucket,
   filterSubagents,
   countSubagents,
@@ -82,50 +83,71 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
     expect(isRunningProjection(makeRecord('running', { result: 'round output', chatMode: false }))).toBe(false)
   })
 
-  it('chat 轮终幽灵形态（running + result + resumable:true + chatMode:true）→ false（result 子句排除——badge 幽灵根因修复，session 01a09f83 实测形态）', () => {
-    expect(isRunningProjection(makeRecord('running', { result: 'round output', resumable: true, chatMode: true }))).toBe(false)
+  it('chat 轮终幽灵形态（U4 翻边后 = idle + result + chatMode:true）→ false（status 子句排除——badge 幽灵根因修复，session 01a09f83 实测形态）', () => {
+    expect(isRunningProjection(makeRecord('idle', { result: 'round output', chatMode: true }))).toBe(false)
   })
 
-  it('legacy chatMode=∅ 轮终（running + result + resumable=∅）→ false（result === undefined 子句兜住——旧 entry 无 chatMode 字段的 one-shot 轮终不再永计入）', () => {
-    expect(isRunningProjection(makeRecord('running', { result: 'round output' }))).toBe(false)
+  it('legacy chatMode=∅ 轮终（U4 翻边后 = idle + result）→ false（status 子句排除——旧 entry 无 chatMode 字段的 one-shot 轮终不再永计入）', () => {
+    expect(isRunningProjection(makeRecord('idle', { result: 'round output' }))).toBe(false)
   })
 
-  it('residual running（running + resumable:true 无 result）→ false（resumable !== true 子句排除——孤儿兜底/轮终无活进程驱动，对齐 hasRunning 既有口径）', () => {
-    expect(isRunningProjection(makeRecord('running', { resumable: true }))).toBe(false)
+  it("W4 新型（running + result=∅ + stopReason='failed'，adoptEngineDeath [U5/D4] 写点形态）→ true（U5 批内计入 badge——设计 D4/U5 行登记的已知翻转：U1 判据不消费 stopReason，对冲发生在 U6 isOccupied 的 stopReason 子句；U4-U6 同 PR 交付无生产暴露）", () => {
+    expect(isRunningProjection(makeRecord('running', { stopReason: 'failed' }))).toBe(true)
   })
 
-  it('真在跑形态（running 无 result 无 resumable，chatMode true/false/∅ 皆然）→ true（首轮在跑计入，与形态配置正交）', () => {
+  it('真在跑形态（running 无 result，chatMode true/false/∅ 皆然）→ true（首轮在跑计入，与形态配置正交）', () => {
     expect(isRunningProjection(makeRecord('running'))).toBe(true)
     expect(isRunningProjection(makeRecord('running', { chatMode: true }))).toBe(true)
     expect(isRunningProjection(makeRecord('running', { chatMode: false }))).toBe(true)
   })
 })
 
-describe('isDoneProjection（白盒 SSOT 直测：仅 running + result 在场 + chatMode 显式 false）', () => {
-  it('running + result + chatMode:false → true（done 投影本体）', () => {
-    expect(isDoneProjection(makeRecord('running', { result: 'round output', chatMode: false }))).toBe(true)
+describe('isDoneProjection（白盒 SSOT 直测：idle + chatMode 显式 false——[two-state-convergence U4] 判据 idle 化）', () => {
+  it('idle + chatMode:false → true（翻边后 one-shot 完成投影本体）', () => {
+    expect(isDoneProjection(makeRecord('idle', { chatMode: false }))).toBe(true)
   })
 
-  it('running + result 空串 + chatMode:false → true（「result 在场」= !== undefined，非真值判定）', () => {
-    expect(isDoneProjection(makeRecord('running', { result: '', chatMode: false }))).toBe(true)
+  it('idle + chatMode:false + result 缺省 → true（判据不消费 result——形态字段独立于产出数据）', () => {
+    expect(isDoneProjection(makeRecord('idle', { chatMode: false, result: undefined }))).toBe(true)
   })
 
-  it('chatMode 缺省（v1 前存量 entry undefined）→ false（保守：无法确认不是 chat 不宣告完成）', () => {
-    expect(isDoneProjection(makeRecord('running', { result: 'round output' }))).toBe(false)
+  it('chatMode 缺省（legacy 存量 entry undefined）→ false（保守：无法确认不是 chat 不宣告完成）', () => {
+    expect(isDoneProjection(makeRecord('idle', { result: 'round output' }))).toBe(false)
   })
 
-  it('result 缺省 → false（首轮未完成，真在跑）', () => {
-    expect(isDoneProjection(makeRecord('running', { chatMode: false }))).toBe(false)
+  it('chatMode:true → false（chat 等续聊，waiting 非完成）', () => {
+    expect(isDoneProjection(makeRecord('idle', { chatMode: true }))).toBe(false)
   })
 
-  it('chatMode:true → false（chat 轮终等续聊，waiting 非完成）', () => {
-    expect(isDoneProjection(makeRecord('running', { result: 'round output', chatMode: true }))).toBe(false)
+  it('running（含桥接期轮终 running + result 形态）→ false（判据 idle 化后 running 恒 false——桥接存量展示过渡态，U6 归一恢复）', () => {
+    expect(isDoneProjection(makeRecord('running', { result: 'round output', chatMode: false }))).toBe(false)
+    expect(isDoneProjection(makeRecord('running', { result: 'x' }))).toBe(false)
   })
 
-  it('idle / 非 running（含显式 done）→ false（本函数只描述 running 形态投影，其余由占用投影承接）', () => {
-    for (const status of ALL_STATUSES.filter((s) => s !== 'running')) {
-      expect(isDoneProjection(makeRecord(status, { result: 'x', chatMode: false })), `status=${status}`).toBe(false)
+  it('legacy 终态字面值（done/failed/cancelled/crashed/closed）→ false（判据直读 status 字面，不经投影——legacy 归一由 runtime 投影层承接，U6 契约收窄）', () => {
+    for (const status of ALL_STATUSES.filter((s) => s !== 'running' && s !== 'idle')) {
+      expect(isDoneProjection(makeRecord(status, { chatMode: false })), `status=${status}`).toBe(false)
     }
+  })
+})
+
+describe('isWaiting（白盒 SSOT 直测：idle + chatMode !== false——[two-state-convergence U4] 自 SubagentList 迁入）', () => {
+  it('idle + chatMode:true → true（chat 轮终等续聊——翻边后 accent-60 半透明点的判据源）', () => {
+    expect(isWaiting(makeRecord('idle', { chatMode: true }))).toBe(true)
+  })
+
+  it('idle + chatMode 缺省（legacy undefined）→ true（保守归 chat： !== false 恒真）', () => {
+    expect(isWaiting(makeRecord('idle'))).toBe(true)
+    expect(isWaiting(makeRecord('idle', { result: 'x' }))).toBe(true)
+  })
+
+  it('idle + chatMode:false → false（与 isDoneProjection 互补无交叠）', () => {
+    expect(isWaiting(makeRecord('idle', { chatMode: false }))).toBe(false)
+  })
+
+  it('running 恒 false（判据 idle 化——真在跑不属 waiting 展示域）', () => {
+    expect(isWaiting(makeRecord('running'))).toBe(false)
+    expect(isWaiting(makeRecord('running', { chatMode: true, result: 'x' }))).toBe(false)
   })
 })
 
@@ -194,16 +216,16 @@ describe('countSubagents（黑盒：计数一致性）', () => {
     expect(countSubagents([])).toEqual({ active: 0, running: 0, archived: 0 })
   })
 
-  it('边界：全收起 / 全在跑（含 resumable 残留不计入——严格口径）', () => {
+  it('边界：全收起 / 全在跑（含 W4 新型计入——U5 批内登记翻转）', () => {
     expect(countSubagents([
       makeRecord('idle', { intent: 'archived' }),
       makeRecord('done', { intent: 'archived' }),
     ])).toEqual({ active: 0, running: 0, archived: 2 })
     expect(
-      countSubagents([makeRecord('running'), makeRecord('running', { resumable: true })]),
+      countSubagents([makeRecord('running'), makeRecord('running', { stopReason: 'failed' })]),
     ).toEqual({
       active: 2,
-      running: 1, // resumable=true = residual running（无活进程驱动），严格口径排除
+      running: 2, // W4 新型（running + stopReason=failed，无 result）U5 批内计入——U6 stopReason 子句对冲
       archived: 0,
     })
   })
@@ -275,6 +297,32 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
   })
 })
 
+// ── [two-state-convergence U4] 翻边后形态断言（写面轮终落 idle 的展示/占用分工）──
+describe('[two-state-convergence U4] 翻边后形态：waiting 计入展示、不计入占用', () => {
+  it('翻边 chat 轮终（idle + chatMode:true + result）→ 不计入占用（badge 不计）+ 计入 waiting（accent-60 展示）', () => {
+    const flipped = makeRecord('idle', { result: '(redacted)', chatMode: true, stopReason: 'completed' })
+    expect(isRunningProjection(flipped)).toBe(false)
+    expect(isWaiting(flipped)).toBe(true)
+    expect(isDoneProjection(flipped)).toBe(false)
+  })
+
+  it('翻边 one-shot 轮终（idle + chatMode:false）→ 不计入占用 + done 展示（绿点）', () => {
+    const flipped = makeRecord('idle', { chatMode: false, stopReason: 'completed' })
+    expect(isRunningProjection(flipped)).toBe(false)
+    expect(isDoneProjection(flipped)).toBe(true)
+    expect(isWaiting(flipped)).toBe(false)
+  })
+
+  it('翻边轮终不影响「正在跑」过滤视图（filterSubagents running 视图零含）', () => {
+    const records = [
+      makeRecord('idle', { subagentId: 'flip-chat', chatMode: true, result: 'x' }),
+      makeRecord('idle', { subagentId: 'flip-oneshot', chatMode: false }),
+      makeRecord('running', { subagentId: 'real-running' }),
+    ]
+    expect(filterSubagents(records, 'running').map((r) => r.subagentId)).toEqual(['real-running'])
+  })
+})
+
 // ── [P1 ⛔实施期门] session 01a09f83 形态 fixture 回放（two-state-convergence U1/D1/D7）──
 //
 // 门语义：39 条真实 record 形态按修复后严格口径回放 badge 计数 = 0（D1「幽灵 8→0」）。
@@ -288,7 +336,6 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
     return makeRecord(spec.status, {
       subagentId: spec.aliasId,
       ...(spec.hasResult ? { result: '(redacted)' } : {}),
-      ...(spec.resumable !== undefined ? { resumable: spec.resumable } : {}),
       ...(spec.chatMode !== undefined ? { chatMode: spec.chatMode } : {}),
       ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
     })
@@ -298,7 +345,8 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
 
   it('fixture 完整性：39 个 record id（8 幽灵 + 29 one-shot 轮终 + 2 中断收口，与 §2.1 实测分布一致）', () => {
     expect(SESSION_01A09F83_GHOST_FIXTURE).toHaveLength(39)
-    const ghosts = SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.chatMode === true && s.status === 'running')
+    // [U4/D4] 翻边后幽灵形态 = idle + chatMode=true（轮终写 idle，U5 前 resumable 维度退役）
+    const ghosts = SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.chatMode === true && s.status === 'idle')
     expect(ghosts).toHaveLength(8)
   })
 
@@ -307,10 +355,18 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
     expect(filterSubagents(fixtureRecords, 'running')).toEqual([])
   })
 
-  it('判别力对照：旧组合判据（投影 running 且非 done 投影）回放 = 8——差值恰为 chat 轮终幽灵', () => {
-    const legacyCount = fixtureRecords.filter(
-      (r) => projectSubagentExecutionStatus(r.status) === 'running' && !isDoneProjection(r),
-    ).length
+  it('判别力对照：桥接期形态（幽灵 status 复刻为 running 残留）按旧组合判据回放 = 8——差值恰为 chat 轮终幽灵（内联复刻历史判据：isDoneProjection 已 idle 化，不再承载旧 running 形态判据）', () => {
+    // 旧组合判据（U1 止血前）：投影 running 且非（running + result 在场 + chatMode=false）。
+    // 内联复刻是刻意的——对照对象是「修复前的判据」，不随现行 SSOT 判据演进漂移。
+    const legacyPredicate = (r: SubagentRecord): boolean =>
+      projectSubagentExecutionStatus(r.status) === 'running' &&
+      !(r.status === 'running' && r.result !== undefined && r.chatMode === false)
+    // 桥接期形态复刻：U4 前 ghost/one-shot 轮终 entry 残留 running（resumable 桥接位，
+    // [U5/D4] 字段退役后由 status=idle 直读承载——此处按历史形态内联构造作对照面）。
+    const bridgedRecords = SESSION_01A09F83_GHOST_FIXTURE.map((spec) =>
+      recordFromSpec(spec.status === 'idle' && spec.hasResult ? { ...spec, status: 'running' as const } : spec),
+    )
+    const legacyCount = bridgedRecords.filter(legacyPredicate).length
     expect(legacyCount).toBe(8)
   })
 })

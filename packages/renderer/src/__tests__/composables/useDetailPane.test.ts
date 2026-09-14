@@ -141,6 +141,46 @@ describe('useDetailPane diff 空 → 自动降级 preview', () => {
   })
 })
 
+describe('U6: useDetailPane 并发守卫（W3 / L3）', () => {
+  // 原独立文件 useDetailPane-concurrency.test.ts 并入（同 SUT 同 mock 面）
+  it('快速切换文件时旧请求的慢响应不覆盖新内容（stale write 防护）', async () => {
+    vi.useFakeTimers()
+    try {
+      const sid = 's1'
+      const sessionId = ref<string | null>(sid)
+
+      // 第一个文件 read 延迟返回 'old-content'，第二个立即返回 'new-content'
+      // 用 promise 手动控制延迟
+      let resolveFirst: (val: unknown) => void = () => {}
+      const firstPromise = new Promise((r) => { resolveFirst = r })
+      mockFileRead.mockImplementationOnce(() => firstPromise)
+      mockFileRead.mockResolvedValueOnce({ content: 'new-content', truncated: false })
+      mockGitGetDiff.mockResolvedValue({ patch: '', binary: false })
+
+      const { state, openPreview } = useDetailPane(sessionId)
+
+      // 连续调 openPreview，不等第一个完成
+      void openPreview(sid, 'file-a')
+      void openPreview(sid, 'file-b')
+
+      // 等第二个（立即返回）resolve
+      await vi.advanceTimersByTimeAsync(0)
+
+      // 第二个请求已完成，content 应为 'new-content'
+      expect(state.value.content).toBe('new-content')
+
+      // 现在让第一个（延迟）resolve —— 旧请求的 'old-content' 应被丢弃
+      resolveFirst({ content: 'old-content', truncated: false })
+      await vi.advanceTimersByTimeAsync(0)
+
+      // content 仍为 'new-content'（旧请求未覆盖）
+      expect(state.value.content).toBe('new-content')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('useDetailPane 变更集卡入口（detailFilePath）', () => {
   /**
    * 回归测试：DetailPane 是在 SideDrawer 内 v-else-if="activeTab==='detail'" 条件挂载的，

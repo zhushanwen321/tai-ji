@@ -701,7 +701,7 @@ describe('Turn · subagent 轮终 running-resumable → isWorkingTurn false（re
     sub.applyRecords('s-resumable', [makeSubagentRecord({ status: 'running' })])
     expect(sessionActive.value).toBe(true)
 
-    // 轮终回写：running + result（resumable）→ 不算 working → sessionActive false
+    // 轮终回写：running + result → 不算 working → sessionActive false
     sub.applyRecords('s-resumable', [makeSubagentRecord({ status: 'running', result: '本轮产出正文' })])
     expect(sessionActive.value).toBe(false)
 

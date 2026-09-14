@@ -4,10 +4,7 @@
  * 覆盖（纯状态机守卫）：
  * - T1.2 startFlow→不调 create、state=landing、currentSessionId=null（统一延迟 create）
  * - T7.1 gitInfo==null→openBranchPopover 抛错回 idle
- * - T8.3 overlay 态 cancelFlow→cancelled
- * - T8.4 cancelled 重入 reenterFlow→landing
- * - T8.5 completed 终态→⌘N→销毁重建 idle→landing（startFlow 不 create，只 transition）
- * - T8.6 非法转换 idle→openBranchModal 抛错回 idle
+ * （T8.3-T8.6 状态机转换用例已删，core flow-state/flow 测试权威覆盖。）
  * - T6.5 openBranchModal 来源守卫：非 branch-popover 来源抛错回 idle
  *
  * 新设计下 landing 态 gitInfo 恒 null（统一延迟 create 后无 session）→
@@ -27,7 +24,8 @@ import type { SessionSummary, SessionGroup } from '@xyz-agent/shared'
 
 const apiMock = vi.hoisted(() => ({
   create: vi.fn(
-    (cwd?: string): Promise<SessionSummary> =>
+    // 六参签名（D14 projectId 透传断言用，原 session-project-attribution.test.ts 并入）
+    (cwd?: string, _label?: string, _presetId?: string, projectId?: string): Promise<SessionSummary> =>
       Promise.resolve({
         id: `s-${Math.random().toString(36).slice(2, 8)}`,
         label: '新会话',
@@ -36,6 +34,7 @@ const apiMock = vi.hoisted(() => ({
         lastActiveAt: Date.now(),
         modelId: 'm',
         tokenCount: 0,
+        projectId: projectId || undefined,
       }),
   ),
   remove: vi.fn((): Promise<void> => Promise.resolve()),
@@ -77,16 +76,22 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: toastMock.error }),
 }))
 
-import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
+import { useNewTaskFlow, resetNewTaskFlow, __resetNewTaskFlowForTesting } from '@/composables/features/new-task/useNewTaskFlow'
 import { useSessionStore } from '@/stores/session'
+import { useProjectStore } from '@/stores/project'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   resetNewTaskFlow()
+  // renderer 壳 cachedFlow 单例（捕获首次调用时的 pinia store）必须重建，
+  // 否则 projectId 读取旧 pinia 的 projectStore（dedup 测试红过）
+  __resetNewTaskFlowForTesting()
   vi.clearAllMocks()
   // 重置 workspaceStore mock
   workspaceStoreMock.records = []
   workspaceStoreMock.defaultCwd = undefined
+  // project store 持久化隔离（projectId 透传用例需要干净默认态）
+  localStorage.removeItem('xyz-agent:projects')
 })
 
 /** 构造带 gitBranch 的 session（git 目录） */
@@ -328,49 +333,9 @@ describe('useNewTaskFlow 状态机', () => {
   // 新设计下 landing 态 gitInfo 恒 null → branch-popover/branch-modal 不可达，
   // 原 overlay 互斥（T8.1）/ Esc 优先级（T8.2）依赖 branch 链路的测试已删（场景不可达）。
 
-  describe('overlay 切 session（T8.3）', () => {
-    it('overlay 打开→cancelFlow→cancelled（不卡死）', async () => {
-      const flow = useNewTaskFlow()
-      await flow.startFlow()
-      flow.openDirPopover()
-      flow.cancelFlow() // 切 session 触发
-      expect(flow.state.value).toBe('cancelled')
-    })
-  })
-
-  describe('cancelled 重入（T8.4）', () => {
-    it('cancelled→reenterFlow→landing（重选空 session 复活）', async () => {
-      const flow = useNewTaskFlow()
-      await flow.startFlow()
-      flow.cancelFlow()
-      expect(flow.state.value).toBe('cancelled')
-      flow.reenterFlow()
-      expect(flow.state.value).toBe('landing')
-    })
-  })
-
-  describe('completed 终态（T8.5）', () => {
-    it('completeFlow→completed→⌘N 再 startFlow→销毁重建 idle→landing（startFlow 不 create，只 transition）', async () => {
-      setGroups([gitSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
-      const flow = useNewTaskFlow()
-      await flow.startFlow() // 统一延迟 create：不调 create
-      expect(apiMock.create).not.toHaveBeenCalled()
-      flow.completeFlow() // 首条消息成功→终态
-      expect(flow.state.value).toBe('completed')
-      await flow.startFlow() // ⌘N 再触发→销毁重建
-      expect(apiMock.create).not.toHaveBeenCalled() // startFlow 仍不 create
-      expect(flow.state.value).toBe('landing')
-      expect(flow.currentSessionId.value).toBeNull() // 重建后清空
-    })
-  })
-
-  describe('非法转换（T8.6）', () => {
-    it('idle 下直接 openBranchModal→抛错回 idle', () => {
-      const flow = useNewTaskFlow()
-      expect(() => flow.openBranchModal()).toThrow()
-      expect(flow.state.value).toBe('idle')
-    })
-  })
+  // （状态机转换 describe T8.3-T8.6 已删：cancelFlow/reenterFlow/completed 重建/非法
+  //  转换的状态机本体由 core flow-state.test.ts（TC-1/2/2b/3）与 flow.test.ts
+  //  （TC-4c/TC-8b）权威覆盖；renderer 壳侧保留消费面用例。）
 
   describe('closeOverlay 幂等（worktree 成功回调重复调用回归）', () => {
     // [HISTORICAL] 2026-07-24 事故：worktree 创建成功后 onWorktreeSuccess 先 selectWorkspace
@@ -635,5 +600,43 @@ describe('useNewTaskFlow 状态机', () => {
 
       expect(flow.gitInfo.value?.isBare).toBe(false)
     })
+  })
+})
+
+// ── 原 session-project-attribution.test.ts 并入（同 SUT 同 mock 套；保留 2 个核心用例，
+//    「切 project 变体」与「空 content guard」分别由本文件 label 派生组 / flow-integration
+//    非法态守卫覆盖，不再重复）──
+describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
+  function seedHistGroup(cwd: string): void {
+    useSessionStore().applySnapshot({ groups: [
+      { cwd, sessions: [{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }] },
+    ] as SessionGroup[] })
+  }
+
+  it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {
+    const projectStore = useProjectStore()
+    projectStore.addProject('Test') // 命名 project 成为 active
+    seedHistGroup('/repo')
+    workspaceStoreMock.defaultCwd = '/repo'
+
+    const flow = useNewTaskFlow()
+    await flow.startFlow()
+    await flow.submitFirstMessage(textToSegments('修 bug'))
+
+    expect(apiMock.create).toHaveBeenCalledTimes(1)
+    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, projectStore.activeProjectId, undefined, 'high')
+  })
+
+  it('默认项目下新建任务 → create 第 4 参数为 undefined（未归类，不写 sidecar）', async () => {
+    // localStorage 空 → 默认 project name=''
+    seedHistGroup('/repo')
+    workspaceStoreMock.defaultCwd = '/repo'
+
+    const flow = useNewTaskFlow()
+    await flow.startFlow()
+    await flow.submitFirstMessage(textToSegments('修 bug'))
+
+    expect(apiMock.create).toHaveBeenCalledTimes(1)
+    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high')
   })
 })

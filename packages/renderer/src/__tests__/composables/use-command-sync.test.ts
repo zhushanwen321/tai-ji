@@ -5,7 +5,11 @@
  * 1. 构建者（白盒）：watch(sessionIdRef, immediate) 拉取 → commandStore.applyCommands(reply.sessionId, reply.commands)
  * 2. 使用者（黑盒）：onOpenPull 触发拉取；in-flight 去重（同 sid 并发只 1 次 RPC）
  * 3. 观察者（形态）：失败 → store 保留旧值、不抛、console.warn；sid null 不拉
- * 4. FM4 回归：props.sessionId 变为 B 后，A 的迟到 session.commands 帧写 A 分区、B 分区不受污染
+ *
+ * [测试缺口登记] 原 FM4 describe 已删：它在测试内手写 events.on handler 复刻
+ * CommandPopover.vue 的订阅修复，SUT 不是 useCommandSync（本文件 SUT 只拉取不订阅）——
+ * 测试绿不证明 CommandPopover 修复在位（假覆盖）。CommandPopover 的真实事件订阅契约
+ * 当前无组件级测试，缺口待补（mount CommandPopover + 真实 events 的组件测试）。
  *
  * mock 边界：session.getCommands mock 掉（transport 层不在本层职责）；commandStore 真实例。
  *
@@ -286,50 +290,5 @@ describe('失败降级（D3）', () => {
     expect(true).toBe(true)
 
     vi.restoreAllMocks()
-  })
-})
-
-describe('FM4 回归：跨分区污染防护（useSessionEvents handler 契约）', () => {
-  it('切 sid 后旧 sid 的迟到 session.commands 帧写旧 sid 分区、新 sid 分区不受污染', async () => {
-    const store = useCommandStore()
-
-    // 模拟 useSessionEvents 的 handler 契约：捕获 sid 写分区（CommandPopover.vue 的 FM4 修复）
-    // 当组件订阅 A 时，handler 闭包捕获 sid=A
-    const handlerA = (msg: ServerMessage, sid: string) => {
-      store.applyCommands(sid, msg.payload.commands as Array<{ name: string; source: string }> )
-    }
-
-    // 订阅 A
-    events.on('A', (msg) => handlerA(msg, 'A'))
-
-    // 推 A 的命令
-    events.dispatchSession('A', {
-      type: 'session.commands',
-      payload: { sessionId: 'A', commands: [{ name: 'cmd-a', source: 'extension' }] },
-    } as ServerMessage<'session.commands'>)
-    await settle()
-    expect(store.getCommands('A').map((c) => c.name)).toEqual(['cmd-a'])
-
-    // 切到 B（useCommandSync 拉取写入 B 分区）
-    mountHost('B')
-    await settle()
-    resolveForSid('B', {
-      sessionId: 'B',
-      commands: [{ name: 'cmd-b', source: 'extension' }],
-    })
-    await settle()
-    expect(store.getCommands('B').map((c) => c.name)).toEqual(['cmd-b'])
-
-    // A 的迟到帧通过旧订阅到达（handler 闭包捕获 sid=A → applyCommands('A', ...)）
-    events.dispatchSession('A', {
-      type: 'session.commands',
-      payload: { sessionId: 'A', commands: [{ name: 'late-skill', source: 'skill' }] },
-    } as ServerMessage<'session.commands'>)
-    await settle()
-
-    // A 分区被迟到帧更新（captured sid 正确）
-    expect(store.getCommands('A').map((c) => c.name)).toEqual(['late-skill'])
-    // B 分区不受污染
-    expect(store.getCommands('B').map((c) => c.name)).toEqual(['cmd-b'])
   })
 })

@@ -16,7 +16,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { ServerMessage } from '@xyz-agent/shared'
+import type { ServerMessage, Segment } from '@xyz-agent/shared'
 import { textToSegments } from '@xyz-agent/shared'
 
 // vi.hoisted 保证 mock 工厂在模块加载前就绪；holder 捕获 streamSubscribe 注册的 handler
@@ -36,6 +36,8 @@ const apiMock = vi.hoisted(() => {
     compact: vi.fn(() => Promise.resolve()),
     steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
+    // useChat subagent 定向消息转发（原 useChat-subagent-directive.test.ts 并入）
+    subagentAction: vi.fn(() => Promise.resolve()),
   }
 })
 
@@ -55,6 +57,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
     writeSegments: vi.fn().mockResolvedValue(undefined),
+    subagentAction: apiMock.subagentAction,
   },
 }))
 
@@ -360,5 +363,52 @@ describe('useChat compact 状态机（#6）', () => {
     // M8: compact 错误走 toast 而非 appendSystemNotice，不再插入 system 消息
     const msgs = chat.getMessages('c-err')
     expect(msgs).toEqual([])
+  })
+})
+
+// ── 原 useChat-subagent-directive.test.ts 并入（同 SUT useChat.send、同 mock 骨架）──
+// U2b chatApiPort.subagentAction 懒转发：send 携带 subagent 段时经端口调
+// session.subagentAction（sid, action, params），不走主 agent send 通道。
+describe('useChat subagent 定向消息转发（@ chip）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetChatModuleState()
+    vi.clearAllMocks()
+    apiMock.holder.handler = null
+  })
+
+  it('send 含 subagent 段（subagentId 非空）→ 调 session.subagentAction(message)，不走主 agent send', async () => {
+    const { send } = useChat()
+    const segments: Segment[] = [
+      { type: 'subagent', subagentId: 'rec-1', slug: 'build-api' },
+      { type: 'text', text: '展开讲讲' },
+    ]
+    await send('s-directive', segments)
+
+    expect(apiMock.subagentAction).toHaveBeenCalledTimes(1)
+    expect(apiMock.subagentAction).toHaveBeenCalledWith('s-directive', 'message', {
+      subagentId: 'rec-1',
+      // 前导空格 = subagent(chip)→text 边界补格（segmentsToText，chip 产出空串后
+      // 补格残留）——8f93d7feb 已裁决该形态「保真随行发出」并同步其测试期望，此处对齐。
+      text: ' 展开讲讲',
+    })
+    // 无主 agent turn（§3.3.8：不经 message.send 通道）
+    expect(apiMock.send).not.toHaveBeenCalled()
+  })
+
+  it('subagentId 空串（新建占位 chip）→ subagentAction(start)，slug 自动生成', async () => {
+    const { send } = useChat()
+    const segments: Segment[] = [
+      { type: 'subagent', subagentId: '', slug: '新任务' },
+      { type: 'text', text: '帮我修 bug' },
+    ]
+    await send('s-start-action', segments)
+
+    expect(apiMock.subagentAction).toHaveBeenCalledWith('s-start-action', 'start', {
+      slug: expect.stringMatching(/^chat-/),
+      // 同上：chip→text 边界补格的前导空格，保真透传（8f93d7feb 口径）
+      task: ' 帮我修 bug',
+    })
+    expect(apiMock.send).not.toHaveBeenCalled()
   })
 })

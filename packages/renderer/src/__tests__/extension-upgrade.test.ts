@@ -42,10 +42,8 @@ describe('extension domain upgrade', () => {
     })
   })
 
-  it('upgrade 返回 pending promise', async () => {
-    const result = extension.upgrade('my-extension')
-    expect(result).toBeInstanceOf(Promise)
-  })
+  // （「upgrade 返回 pending promise」恒真用例已删：任何 request 封装都返回 Promise，
+  //  不锁任何行为。）
 })
 
 describe('extension domain setAutoUpgrade', () => {
@@ -73,8 +71,5 @@ describe('extension domain setAutoUpgrade', () => {
     })
   })
 
-  it('setAutoUpgrade 返回 pending promise', async () => {
-    const result = extension.setAutoUpgrade('my-extension', true)
-    expect(result).toBeInstanceOf(Promise)
-  })
+  // （「setAutoUpgrade 返回 pending promise」恒真用例已删：同上。）
 })

@@ -222,16 +222,6 @@ describe('TerminalView 选区浮动按钮（Phase 4 联动 1）', () => {
     expect(document.body.querySelector('[data-testid="terminal-send-to-ai"]')).toBeNull()
   })
 
-  it('TV-8: mount 不因选区逻辑报错（完整选区→按钮→注入链路在 UI E2E 验收 G5）', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
-    await flushPromises()
-
-    // 组件 mount + 初始化完成无异常（onSelectionChange 已注册，选区逻辑不阻塞渲染）
-    expect(document.body.querySelector('[data-testid="terminal-view"]')).toBeTruthy()
-    // 浮动按钮初始不显示（无选区）
-    expect(document.body.querySelector('[data-testid="terminal-send-to-ai"]')).toBeNull()
-  })
+  // （TV-8 已删：「mount 不因选区逻辑报错」是恒真倾向弱断言，且「浮动按钮初始不显示」
+  //  与 TV-7 重复；完整选区→按钮→注入链路归 UI E2E 验收 G5。）
 })

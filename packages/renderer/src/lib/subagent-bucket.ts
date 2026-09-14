@@ -34,12 +34,12 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 }
 
 /**
- * 占用谓词（G2「正在跑」，严格口径 SSOT——two-state-convergence D1/D2）：
- * `running && result === undefined && resumable !== true` 三子句。result 在场 =
- * 轮终信号（chat 轮终 / one-shot 轮终 / legacy chatMode=∅ 形态一律不计入——
+ * 占用谓词（G2「正在跑」，严格口径 SSOT——two-state-convergence D1/D2；[U5/D4]
+ * resumable 子句随字段退役删除，判据退化为 `running && result === undefined`
+ * 双子句）。result 在场 = 轮终信号（U4 翻边后轮终权威词 = idle，status 子句已排除
+ * 正常轮终；result 子句兜住 U4 部署边界旧 entry 的 running+result 残留形态——
  * 旧组合判据 `!isDoneProjection` 对 chatMode=true 的轮终误判占用，即 sidebar
- * badge 幽灵 running 根因，session 01a09f83 实测 8 幽灵）；resumable=true =
- * 无活进程驱动的 residual running（孤儿兜底/轮终），同样不算真在跑。
+ * badge 幽灵 running 根因，session 01a09f83 实测 8 幽灵）。
  * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
  * 与 isStreaming（SubagentList）均为本函数的 import wrapper（U2 判据单一化），
  * badge 计数（useSidebarCounts）与「正在跑」过滤视图同源消费，不漂移。
@@ -47,8 +47,7 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 export function isRunningProjection(record: SubagentRecord): boolean {
   return (
     projectSubagentExecutionStatus(record.status) === 'running' &&
-    record.result === undefined &&
-    record.resumable !== true
+    record.result === undefined
   )
 }
 
@@ -60,8 +59,8 @@ export function isRunningProjection(record: SubagentRecord): boolean {
  * 判据——展示过渡态（U6 归一映射恢复等价显示），占用判定不受影响（isRunningProjection
  * 独立严格口径）。
  * [two-state-convergence D1] 本函数是**展示判据**（done 绿点 vs chat 等续聊 accent
- * 点），不参与占用判定——占用谓词 isRunningProjection 是严格口径（result/resumable
- * 子句），不经理由本函数反向挪用。SubagentList 展示判据 isDone 必须引用本函数，
+ * 点），不参与占用判定——占用谓词 isRunningProjection 是严格口径（result 子句），
+ * 不经理由本函数反向挪用。SubagentList 展示判据 isDone 必须引用本函数，
  * 禁止重复实现。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {

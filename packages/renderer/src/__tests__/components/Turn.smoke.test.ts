@@ -63,33 +63,16 @@ describe('Turn.vue 冒烟', () => {
     vi.clearAllMocks()
   })
 
-  it('TurnSummary 子组件渲染（承载 handoff 按钮）', () => {
-    const wrapper = mountTurn(makeTurn())
-    // W4 编排器：handoff 按钮下沉到 TurnSummary 子组件，shallowMount 下以 stub 出现
-    expect(wrapper.findComponent({ name: 'TurnSummary' }).exists()).toBe(true)
-  })
-
-  it('TurnSummary 子组件渲染（承载 fork 按钮组）', () => {
-    const wrapper = mountTurn(makeTurn())
-    // W4 编排器：fork 按钮（后台 + 提问）下沉到 TurnSummary 子组件
-    expect(wrapper.findComponent({ name: 'TurnSummary' }).exists()).toBe(true)
-  })
-
-  it('TurnSummary 接收 lastAssistant（handoff/fork 守卫的数据源）', () => {
+  // （原 5 用例压缩为 2：用例 1/2 断言完全相同、用例 3/4 等价——Turn.vue 维度的独立
+  //  断言点只有「TurnSummary 挂载 + lastAssistant 透传」两相；depsOverrides 未被
+  //  shallowMount 断言消费，已去。）
+  it('有 assistant 时挂载 TurnSummary 并透传 lastAssistant（handoff/fork 按钮宿主）', () => {
     const turn = makeTurn()
-    const wrapper = mountTurn(turn, { isHandingOff: () => true })
-    // handoff disabled 守卫（isHandingOff）由 TurnSummary 内部经 ChatViewDeps 消费，Turn 只传 lastAssistant
+    const wrapper = mountTurn(turn)
+    // W4 编排器：handoff/fork 按钮下沉到 TurnSummary 子组件，shallowMount 下以 stub 出现
     const summary = wrapper.findComponent({ name: 'TurnSummary' })
     expect(summary.exists()).toBe(true)
     expect(summary.props('lastAssistant')).toEqual(turn.assistants[0])
-  })
-
-  it('TurnSummary 渲染时 lastAssistant 已传入（fork isForking 防重复守卫的数据依赖）', () => {
-    const wrapper = mountTurn(makeTurn())
-    // isForking 守卫在 TurnSummary 内部，Turn.vue 冒烟只校验子组件挂载 + lastAssistant 透传
-    const summary = wrapper.findComponent({ name: 'TurnSummary' })
-    expect(summary.exists()).toBe(true)
-    expect(summary.props('lastAssistant')).toBeTruthy()
   })
 
   it('无 assistant 时 TurnSummary 收到 null lastAssistant（fork/handoff 按钮在子组件内不渲染）', () => {

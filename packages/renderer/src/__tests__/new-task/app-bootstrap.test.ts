@@ -230,3 +230,38 @@ describe('onConnected：首次 vs 重连 connected 的 workspace 刷新（W8）'
     expect(flow.state.value).toBe('landing')
   })
 })
+
+// ── 原 initapp-default-cwd-session.test.ts 并入（同 initApp 编排、逐字相同 mock 脚手架；
+//    保留 IC-1/IC-2 两条核心来源断言——IC-1b/IC-3 与 IC-1 同语义变体、IC-5 与本文件非首启
+//    loadSessions 用例重叠、IC-6 锁 reduce 实现细节，均不再重复）──
+describe('initApp presetCwd：默认选中上次 session 目录（W3，原 initapp-default-cwd-session 并入）', () => {
+  it('IC-1: 有历史 session → presetCwd 用 lastActiveAt 最大 session 的 cwd（非 workspaceStore.defaultCwd）', async () => {
+    // /a（lastActiveAt=100）较旧，/b（lastActiveAt=200）最新 → 预填 /b
+    sessionCtrl.list.mockResolvedValue([
+      { cwd: '/a', sessions: [mkSession({ id: 'a', cwd: '/a', lastActiveAt: 100 })] },
+      { cwd: '/b', sessions: [mkSession({ id: 'recent', cwd: '/b', lastActiveAt: 200 })] },
+    ])
+    // 故意把 defaultCwd 设成与最大 session 不同的值，证明预设源是 session 而非 workspace
+    workspaceStoreMock.defaultCwd = '/fallback-from-workspace'
+
+    await useSidebar().initApp()
+
+    const flow = useNewTaskFlow()
+    expect(flow.state.value).toBe('landing')
+    // 核心：currentCwd（pendingCwd 派生）= 最大 lastActiveAt session 的 cwd，不是 defaultCwd
+    expect(flow.currentCwd.value).toBe('/b')
+    expect(flow.currentCwd.value).not.toBe('/fallback-from-workspace')
+  })
+
+  it('IC-2: 无 session（sessionStore 空）→ 回退 workspaceStore.defaultCwd', async () => {
+    sessionCtrl.list.mockResolvedValue([])
+    workspaceStoreMock.defaultCwd = '/workspace-default'
+
+    await useSidebar().initApp()
+
+    const flow = useNewTaskFlow()
+    expect(flow.state.value).toBe('landing')
+    // 无 session 时回退 defaultCwd
+    expect(flow.currentCwd.value).toBe('/workspace-default')
+  })
+})

@@ -336,12 +336,11 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
-  it('停因词：running-resumable 轮终（A-lite markRoundIdle 失败轮）→ 有值即渲染（idle-only 放宽）', async () => {
+  it('停因词：W4 新型（[U5/D4] adoptEngineDeath：running + stopReason=failed）→ 有值即渲染', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({
         status: 'running',
         stopReason: 'failed',
-        resumable: true,
         result: 'round did not complete: boom',
       }),
     ])
