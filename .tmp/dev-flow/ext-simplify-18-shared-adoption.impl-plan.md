@@ -1,6 +1,6 @@
 # ext-simplify-18 shared adoption 实施计划
 
-基线: <commit 后回填> | 来源设计: `docs/architecture/ext-simplify-18-shared-adoption.md`（v2 双 PASS） | 日期: 2026-09-14
+基线: 73ecdd2a4 | 来源设计: `docs/architecture/ext-simplify-18-shared-adoption.md`（v2 双 PASS） | 日期: 2026-09-14
 审查报告: `.tmp/tech-design/design-review-ext-simplify-18.md`（must_fix=0）
 
 ## 0 章节映射
