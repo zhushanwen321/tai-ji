@@ -176,28 +176,28 @@ graph LR
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| 06-u0 | committed | 1 | P1 PASS（isActive=false/phase=idle，D6 门开）；P2 steer 时序 PASS + goal 桥断裂新发现（probe-06.md）；plan 包工作区已还原 |
+| 06-u0 | committed | 1 | P1 PASS（isActive=false/phase=idle，D6 门开）；P2 steer 时序 PASS + goal 桥断裂新发现（probe-06.md）；plan 包工作区已还原 ；commit ca54f5392 |
 | 06-u1 | committed | 1 | 64/64 零测试改动；三处动态 import 清零；peer optional 落位；commit 513deb653 |
-| 06-u2 | committed | 1 | 78/78（+14）；tree schema 拒绝 + 五值出口用例齐；typecheck/lint 过 |
-| 06-u3 | committed | 1 | 82/82；5 builtin + 未知 action + D4 对齐守卫齐；fallback 探针 4/4 |
-| 06-u4 | committed | 1 | 82/82；phase 写入清零 + PlanPhase 全仓零命中 + 旧 entry 兼容用例（06 线完成） |
-| 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit 见 git log |
-| 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 |
-| 08-u4 | committed | 1 | 240/240 + extensions 三连全绿 + 守卫双过；L1-L9 除 L7 逐项 grep 证据（08 线完成） |
+| 06-u2 | committed | 1 | 78/78（+14）；tree schema 拒绝 + 五值出口用例齐；typecheck/lint 过 ；commit 627369472 |
+| 06-u3 | committed | 1 | 82/82；5 builtin + 未知 action + D4 对齐守卫齐；fallback 探针 4/4 ；commit 2575c9bcf |
+| 06-u4 | committed | 1 | 82/82；phase 写入清零 + PlanPhase 全仓零命中 + 旧 entry 兼容用例（06 线完成） ；commit 24cd557ee |
+| 08-u1 | committed | 1 | P1 红基线「called 1 times」留档 probe-08.md；73/73 绿 + typecheck 零错误；commit b1496b539 |
+| 08-u23 | committed | 1 | P2 红→绿两态 + P3 live 预演（合批注入 + 双任务同毫秒 advance）；239/239 + extensions typecheck/lint/依赖守卫全过 ；commit 1e2e2aad5 |
+| 08-u4 | committed | 1 | 240/240 + extensions 三连全绿 + 守卫双过；L1-L9 除 L7 逐项 grep 证据（08 线完成） ；commit 02717c973 |
 | 04-U1 | committed | 1 | 398 绿 2 skip；re-export 零命中；G5③ 回写落位；commit 20dcfbe37 |
-| 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 |
-| 04-U3 | committed | 1 | 398 绿；「缓存命中」零命中；G5① 两文档五笔回写齐 |
-| 04-U4 | committed | 1 | 402 绿（+4 富字段用例）；薄包装/enrichRefs 代码面零命中；G5⑤ 回写齐 |
-| 04-U5 | committed | 1 | 406 绿（+4）；两 action 一致性 by construction；formatOutlineText 零命中 |
-| 04-U6 | committed | 1 | 406 绿（零测试改动）；RESULT_ACTION_DEPS 零命中；ResultActionDeps 3 成员 |
-| 04-U7 | committed | 1 | 406 绿；find 专用 readTailIdentityForMatch（56 行）删除复用单实现；畸形行差异注释登记（subagent 中途撞速率限制，主 agent 接替验证收尾） |
-| 04-U8 | committed | 1 | 405 绿；SessionRoot.id/fullEntry 零命中；E11 共享核 3 组合点；G5④ 回写齐 |
-| 04-U9 | committed | 1 | 407 绿（+2 A1 用例）；A1/E10/A4/A5 全落地；阶段 2 全 23 单元完成 |
-| 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 |
-| 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 |
-| 05-S3 | committed | 1 | 579/579；六组符号零命中；barrel 2+2；typecheck/lint 过（05 线完成） |
-| 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 |
-| 11-u1 | committed | 1 | 307/307 绿（+3 用例）+ typecheck/lint 双过 |
+| 04-U2 | committed | 1 | 402 绿 2 skip（+4 P1 用例）；G5② 清账；tsc/eslint/doc-drift 过 ；commit ab305e9d0 |
+| 04-U3 | committed | 1 | 398 绿；「缓存命中」零命中；G5① 两文档五笔回写齐 ；commit 6fd439daa |
+| 04-U4 | committed | 1 | 402 绿（+4 富字段用例）；薄包装/enrichRefs 代码面零命中；G5⑤ 回写齐 ；commit 1fd2bce16 |
+| 04-U5 | committed | 1 | 406 绿（+4）；两 action 一致性 by construction；formatOutlineText 零命中 ；commit a72c6b15b |
+| 04-U6 | committed | 1 | 406 绿（零测试改动）；RESULT_ACTION_DEPS 零命中；ResultActionDeps 3 成员 ；commit d4fbd7113 |
+| 04-U7 | committed | 1 | 406 绿；find 专用 readTailIdentityForMatch（56 行）删除复用单实现；畸形行差异注释登记（subagent 中途撞速率限制，主 agent 接替验证收尾） ；commit e9dd3b8fa |
+| 04-U8 | committed | 1 | 405 绿；SessionRoot.id/fullEntry 零命中；E11 共享核 3 组合点；G5④ 回写齐 ；commit 053a0f7d4 |
+| 04-U9 | committed | 1 | 407 绿（+2 A1 用例）；A1/E10/A4/A5 全落地；阶段 2 全 22 单元完成（08-M0 已并入 u1/u23） ；commit b65749232 |
+| 05-S1 | committed | 1 | 578/578（用例数零增减）；四符号代码面零命中；T2 未触发降级 ；commit 550b4e61a |
+| 05-S2 | committed | 1 | 580/580；T4 字节级双轨（既有断言零改动 + 36/36 探针）；T3/T5 过无降级 ；commit 53d0ec2ee |
+| 05-S3 | committed | 1 | 579/579；六组符号零命中；barrel 2+2；typecheck/lint 过（05 线完成） ；commit 0135a3437 |
+| 10-u1 | committed | 1 | 193/193 绿 + typecheck/lint/doc-drift 三过；净 +13/−61 ；commit 64cfd4384 |
+| 11-u1 | committed | 1 | 307/307 绿（+3 用例）+ typecheck/lint 双过 ；commit 00559246c |
 
 ## 7 残留风险与变更历史
 
@@ -214,6 +214,7 @@ graph LR
 9. **scripts/verify-scheduler-e2e.cjs EXTENSION_PATH 指旧路径（08-u4 上报，领地外）**：无 CI/husky 机器依赖（仅自身 usage 文档引用）；该脚本是 scheduler 端到端实测基础设施，阶段 5 验收 08-V1/V3 时改一行路径复用（主 agent 直改，验证基础设施非 subagent 领地）。→ 已修（2ac4a9b20）。
 10. **08 区验收遗留观测（2026-09-14，建议交付后立案）**：idle 长静默期出现约 10min 精确延迟的投递（V3 两次 + V4① 两 run 共 4 次复现）——延迟恰一次、advance 记账正确、无重复注入（是「延迟」不是「重复」，不违反 V3 通过标准）；机制未归因（内核 backoff ≤5s / watchdog 30s 均解释不了 10min；与 QUEUE_DEDUPE_TTL=10min 数值巧合但无重投副本形态）；本批改动（settled 粒度 + croner 依赖）不触碰该链路，V3 前两轮同链路正常。处置：登记待用户裁决是否立案排查。
 11. **验收期方法学修正与澄清（08/05 区）**：①P2 staging 法需先 `pnpm build` session-delivery（tarball 走 publishConfig dist 形态）；②`schedule_control list` 视图不渲染 runCount（format.ts 既有行为）——runCount 记账以 advance entry 持久化投影承载；③05-A3①：strict 模式不跑 AI 分类，RPC title 生产形态为 3 行（reasoning 行仅 preClassification 非空时出现，该参数生产零调用方、仅单测构造——改前同形态，M6 的 6 行形态由单测锚定）。均为既有事实澄清，非回归。
+12. **11-V3② e2e spec blocked（存量漂移，非本批回归，2026-09-14 GUI 共享轮）**：`e2e/ask-user-real.spec.ts` 三 case 同因失败于 title 断言 `toHaveTitle(/xyz-agent|xyz/i)`（spec:311）——实际 title「太极」（App.vue i18n，zh 太极 / en TaiJi 均不含 xyz）；叠加 `build:e2e` 引用包内不存在 script + 预设模型 `deepseek-router/ds-pro` 本机不存在。spec 停留 f482e73b0（2026-09-05），产品改名晚于该日期。M23 不改前端/协议代码，该 spec 失败与本批零关联；修复属独立 e2e 资产维护任务（title 断言更新 + script 补齐 + 模型参数化），待用户裁决是否立案。
 
 **变更历史**：
 
@@ -222,3 +223,6 @@ graph LR
 - 2026-09-14 阶段 3+4 收敛：5 区审查全部收讫——unreasonable 6 条全 P3（04 区 1 文档边角主 agent 修；06 区缩进微修 subagent 修 commit afb75d36c、版本双轨随批次尾；08 区 2 条设计登记回写主 agent 修 commit 85334247a；10/11 区 1 条补登记）+ doc_errors 8 条全修（c4d57fa1a/80b1358cb/318e03ff3）。unreasonable 与 doc_errors 双清零。
 - 2026-09-14 **Gate A（全量测试验收）PASS**：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test && node scripts/check-doc-symbol-drift.mjs && node scripts/check-extension-dependencies.mjs` 一次串联 exit 0（落盘 .tmp/dev-flow/ext-simplify-group-a.gate-a.log）——26 包 4457 用例全过零失败，doc-drift 14 映射零悬空，extension-dependencies 21 entries 一致。无 SKIP_* 变量、无 test.skip 新增。覆盖矩阵：6 包领地全部有对应包级 vitest 承载（04=407/05=579/06=82/08=240+内核 73/10=193/11=307），无无人认领改动区。
 - 2026-09-14 r1：08-M0 撤销独立单元——P1 红基线用例即 08-u1 的 TDD 测试（需保留转绿），独立 committed 单元会强制「红测试入库」或「属地不干净」二选一；并入 08-u1（P1 门）/08-u23（P2 现状红确认）作为前置步骤。门性质不变：探针失败 = 停线回设计重审。
+- 2026-09-14 **阶段 5 真机验收收口**：5 区脚本化轮全 PASS——04 S1-S5 / 05 A1+A2+A4+A3① / 06 V1-V5（桥断裂形态标注）/ 08 V1+V3+V4+V2staging（13.1min ≥12min 观察窗无重复注入）/ 10 V1+V2 / 11 V1+V3；GUI 共享轮 6 项 = 5 PASS（08-V2/V4 GUI 半、05-A3② 同形态基线、11-V2 TUI 恰一行 Other、子进程双层链拦截实证）+ 1 blocked（11-V3② e2e spec，存量漂移见风险 12）。证据 .tmp/dev-flow/ext-simplify-group-a.acceptance/。登记观察：scheduler idle ~10min 延迟投递（风险 10，待裁决立案）、S2 manifest 双落点、agentName 长路径展示、S3 export 探针已清理恢复。
+- 2026-09-14 阶段 6 终态同步轮 1：双 reviewer（终态对照 + 机械信号扫）——must-fix 0；P2×2（F1 changeset frontmatter 误含 session-delivery 双轨、F3 本台账缺阶段 5 收口条目）+ P3×4（F2 两包 CHANGELOG 节、F4 计数 23→22、F5 状态表补 hash、F6 设计 08 三处移交表述括注）全部当轮修复；机械扫 16 符号/18 测试头/8 生产入口/6 文档零残留零悬空（O-1 时点行号漂移合法不修）。修复全部 doc/changeset 侧、主 agent 机械转录级亲为（零代码零测试面），自验以 reviewer 给出的精确锚点复核。
+- 2026-09-14 批次尾 changeset：ec74f5ca5 落 .changeset/ext-simplify-group-a-extensions.md（04 minor / 05 patch / 06 minor / 11 minor 四包；session-delivery 0.4.0、scheduler 0.6.0、structured-output 5.1.6 为设计明文随单元 commit，不入 frontmatter 防二次跳版——F1 修复后口径）。

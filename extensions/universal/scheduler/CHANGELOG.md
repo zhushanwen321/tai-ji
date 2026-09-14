@@ -1,5 +1,16 @@
 # @zhushanwen/pi-scheduler
 
+## 0.6.0
+
+### Minor Changes
+
+- ext-simplify-08: croner moved from optional peer to dependencies with static
+  import — cron scheduling now works in standalone npm installs and the
+  invalid-expression error is no longer masked by a missing parser; low-group
+  cleanup (error-code channel, delivery-handle indirection, ctx narrowing,
+  HISTORY_LIMIT single source, pass-through handler removal)
+- Requires @xyz-agent/session-delivery >= 0.4.0 (per-message onSettled kernel).
+
 ## 0.5.2
 
 ### Patch Changes

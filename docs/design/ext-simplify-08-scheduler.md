@@ -184,7 +184,7 @@ busy 窗口 < 10min 时：无任何重复注入（busy 持续超 10min 的慢投
 | peer 去 optional | 修复安装但语义错位留存，probe 税继续缴 | 低 | leaky abstraction 未除，三层 undefined 传播仍在 | ❌ |
 | optional + warn 区分错误 | 故障形态自留，双通道复杂化 | 最低 | builtin 下 warn 死代码；独立安装 cron 仍全灭（仅不再误报） | ❌ |
 
-### 6.3 D3：low 群处置（选定：登记移交 code-simplify，批量一次清扫）
+### 6.3 D3：low 群处置（选定：登记移交 code-simplify，批量一次清扫——已按 v2-r3 于本批 08-u4 执行）
 
 审计 low 项均为 code-right（无 contested），移交 code-simplify 在实现阶段批量执行；其中两项涉及「二选一」裁决，在本设计内定案：
 
@@ -253,7 +253,7 @@ busy 窗口 < 10min 时：无任何重复注入（busy 持续超 10min 的慢投
 | M0 探针门 | 跑 §6.4 P1（内核层 vitest）与 P2（独立安装形态） | ⛔ 门槛：D1/D2 前提实证，不通过不开工 |
 | M1 内核根修（D1） | delivery.ts per-message settled + types 契约注释 + 合批用例；session-delivery 全套件绿 | §5.1 合批行为；V3/V4 前置 |
 | M2 scheduler 依赖修复（D2） | package.json + parsing.ts 静态 import 同步化 + runtime.ts 注释改写；P3 预演 + V1-V4 | 目标 1/2/3 全量落地 |
-| M3 low 群清扫（D3） | L1-L9 移交 code-simplify 一次批量 commit；`pnpm extensions:typecheck && extensions:lint && extensions:test` 三连绿 | 目标 4 |
+| M3 low 群清扫（D3） | L1-L9 移交 code-simplify 一次批量 commit（已按 v2-r3 于本批 08-u4 执行）；`pnpm extensions:typecheck && extensions:lint && extensions:test` 三连绿 | 目标 4 |
 
 M1/M2 分两个 commit（跨包契约修正与包内依赖修复分离，review 面清晰）；session-delivery 与 scheduler 版本按包纪律 bump（session-delivery 行为契约修正建议 minor）。
 
