@@ -1,11 +1,13 @@
 import type { ISessionService, IConfigService } from '../../interfaces.js'
 
 // 插件系统类型消费薄壳（D28 方向反转，2026-09-05）：
-// single source of truth = packages/plugin-sdk/src/types.ts（对外发布契约，
-// 零依赖自包含）。本文件原内联的 Worker/AgentAPI/Bridge/Tool 等域类型已上收
-// SDK，此处仅 re-export 保持既有 `from './plugin-types.js'` 导入面不变；
-// 仅保留两个 runtime 专属内部类型（BridgeSyncPayload / IPluginServiceDeps，
-// 依赖 runtime 内部 service port，不进插件作者契约面）。
+// 主域 single source of truth = packages/plugin-sdk/src/types.ts（对外发布契约）；
+// Bridge* 回包形状（BridgeSyncPayload / BridgeToolExecuteResponse /
+// BridgeInterceptResponse）single source of truth = @xyz-agent/extension-protocol
+// （D4 单源化，runtime 与 plugin-sdk 均经协议包 re-export 消费）。本文件原内联的
+// Worker/AgentAPI/Bridge/Tool 等域类型已上收，此处仅 re-export 保持既有
+// `from './plugin-types.js'` 导入面不变；仅保留一个 runtime 专属内部类型
+// （IPluginServiceDeps，依赖 runtime 内部 service port，不进插件作者契约面）。
 // descriptor / rpc 域仍由本地子文件定义（./plugin-types/），hook 域经薄壳
 // hook-types.ts 指向 SDK——三者与 SDK 同构，为最小 diff 过渡形态。
 //
@@ -34,12 +36,10 @@ export type {
   PluginPermission,
   PluginState,
   PermissionConstant,
-  BridgeInterceptResponse,
   BridgeState,
   BridgeSyncRequest,
   BridgeSyncResponse,
   BridgeToolExecuteRequest,
-  BridgeToolExecuteResponse,
   ToolExecuteHandler,
   ToolRegistration,
   ToolEntry,
@@ -50,6 +50,15 @@ export type {
   PluginUIRequest,
 } from 'xyz-agent-plugin-sdk'
 export { PermissionConstants } from 'xyz-agent-plugin-sdk'
+
+// ── Bridge* 回包形状：SSOT 在 @xyz-agent/extension-protocol ────────
+// D4 单源化：唯一定义源 = @xyz-agent/extension-protocol 的 plugin-bridge 协议模块（marker.ts + types.ts），
+// plugin-sdk 亦经协议包 re-export 消费（plugin-sdk 侧保持零本地定义）。
+export type {
+  BridgeSyncPayload,
+  BridgeToolExecuteResponse,
+  BridgeInterceptResponse,
+} from '@xyz-agent/extension-protocol'
 
 // ── Descriptor / Manifest 域 ───────────────────────────────────────
 // 本地子文件定义（sync 时代的历史分层，未上收 SDK 通路）。
@@ -90,19 +99,6 @@ export type {
 } from './plugin-types/hook-types.js'
 
 // ── runtime 专属内部类型（不进 SDK）───────────────────────────────
-
-/**
- * @internal — runtime 内部：bridge:sync 同步负载（plugin-service 塑形后返回，
- * 引用 runtime 内部结构，故不上收 SDK）。
- *
- * transport 只 reply 此对象，不再做 schema 塑形。
- * commands 目前固定为空数组（pi 侧命令发现另走 getCommands）。
- */
-export interface BridgeSyncPayload {
-  tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
-  commands: Array<{ name: string }>
-  success: true
-}
 
 // ── PluginService 依赖注入 ──────────────────────────────────────────
 

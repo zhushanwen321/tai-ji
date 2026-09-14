@@ -224,7 +224,7 @@ describe('RuntimeServer: bridge request routing', () => {
   })
 
   describe('bridge:sync', () => {
-    it('sends tools and commands response via extension_ui_response', async () => {
+    it('sends tools response via extension_ui_response', async () => {
       await server.handleBridgeRequest('sess-1', 'bridge-req-1', 'bridge:sync', {})
 
       // 新契约：回包是 JSON 字符串 + 'select'（bridge-handler stringify 序列化）
@@ -233,7 +233,6 @@ describe('RuntimeServer: bridge request routing', () => {
       const response = parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])
       expect(response).toEqual(expect.objectContaining({
         tools: expect.any(Array),
-        commands: expect.any(Array),
         success: true,
       }))
     })
@@ -264,7 +263,6 @@ describe('RuntimeServer: bridge request routing', () => {
       const response = parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])
 
       expect(response.tools).toHaveLength(0)
-      expect(response.commands).toHaveLength(0)
       expect(response.success).toBe(true)
     })
   })
@@ -385,11 +383,9 @@ describe('Bridge extension message format', () => {
   })
 
   it('bridge:sync response format has tools array', () => {
-    const response = { tools: [], commands: [], success: true }
+    const response = { tools: [], success: true }
     expect(response).toHaveProperty('tools')
     expect(Array.isArray(response.tools)).toBe(true)
-    expect(response).toHaveProperty('commands')
-    expect(Array.isArray(response.commands)).toBe(true)
     expect(response).toHaveProperty('success')
   })
 

@@ -88,7 +88,7 @@ export class BridgeHandler {
   private sendBridgeSync(requestId: string, client: IPiEngine): void {
     const payload = this.pluginService?.getBridgeSyncPayload
       ? this.pluginService.getBridgeSyncPayload()
-      : { tools: [], commands: [], success: true }
+      : { tools: [], success: true }
     client.sendExtensionUiResponse(requestId, JSON.stringify(payload), 'select')
   }
 
