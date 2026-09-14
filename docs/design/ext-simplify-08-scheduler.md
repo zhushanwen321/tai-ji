@@ -7,7 +7,7 @@
 - **S（情境）**：`@zhushanwen/pi-scheduler`（v0.5.2；CHANGELOG：0.5.2 = guardStaleCtx crash-resilience 维护版，与本设计涉及面无交集）是 xyz-agent 的 universal 组 mandatory 扩展（`packages/shared/src/mandatory-extensions.json:10`，tier: feature）——session 级 AI 提醒器：agent 用 `schedule` 工具创建 interval/cron 定时任务，任务归属创建它的 session，到期时把 prompt 注入 owner session。非 force 任务经 `@xyz-agent/session-delivery` 投递内核的 park 队列投递（busy 入队等空闲），终态经 onSettled 回调记账。
 - **C（冲突）**：2026-09-11 过度设计审计（M18/M19 + low 群）证实两处 medium 级问题：① croner（cron 解析库）被声明为 optional peer——npm 7+ 不自动安装 optional peer，README 明示支持的独立安装形态下 cron 功能静默全灭，且合法表达式被误报为 `Invalid schedule`（解析器缺失与表达式非法混用同一错误通道）；② 内核 settle 上报是「每批一次、composed 消息只携带首条 dedupeKey」的实装捷径，scheduler 用 Map+TTL+pending 重标三件套补偿——合批非首条任务收不到终态回调，10 分钟 TTL 过期后重投，同 prompt 重复注入（常规可达，非极端路径）。
 - **Q（问题）**：如何让 cron 功能在全部受支持安装形态下确定可用且错误语义真实？如何让合批投递下每条任务精确记账、不重复注入，且 scheduler 不再需要理解内核合批内部才能写对？
-- **A（答案）**：M18——croner 移入 dependencies 并静态 import，删除 probe 降级层，错误通道归一为「表达式无效」单一语义；M19——裁决方向 B（B1 形态）：内核 onSettled 改 per-message 回调（±10 行，单消息批次行为不变），scheduler 防重 Map/TTL 保留为终态回调丢失的回收层有界兜底。low 群移交 code-simplify。
+- **A（答案）**：M18——croner 移入 dependencies 并静态 import，删除 probe 降级层，错误通道归一为「表达式无效」单一语义；M19——裁决方向 B（B1 形态）：内核 onSettled 改 per-message 回调（±10 行，单消息批次行为不变），scheduler 防重 Map/TTL 保留为回收层有界兜底（触发来源两类：回调丢失异常 + busy 超窗慢投递——后者长任务场景常规可达，见 §5.2）。low 群移交 code-simplify。
 
 **层声明**：本文档是「技术方案设计」层（下一层产物 = 可实施的代码任务 + 测试改造清单），准则 5/6/7 全适用。
 
@@ -39,8 +39,8 @@
 ## 2. 设计目标
 
 1. **cron 功能全形态可用**：独立安装与 builtin 两种形态下，cron 任务创建/触发行为一致；创建失败时错误消息真实反映失败原因（表达式无效 ≠ 解析器缺失）。
-2. **合批投递精确记账**：多个任务同一 busy 窗口到期合批投递时，每条任务恰好注入一次、runCount/nextRunAt 各自精确推进、不再出现 TTL 过期后的重复注入。
-3. **解除跨包 leaky abstraction**：scheduler 的记账正确性不再依赖「内核合批只上报首条 dedupeKey」这一内部实现知识；防重机制语义从「补偿内核缺陷」降为「终态回调丢失的回收层有界兜底」。
+2. **合批投递精确记账**：多个任务同一 busy 窗口到期合批投递时，每条任务恰好注入一次、runCount/nextRunAt 各自精确推进、不再出现 TTL 过期后的合批非首条重复注入（busy 持续超 10min 的慢投递重投属 §5.2 (b) 类已知接受行为，非本目标消灭对象）。
+3. **解除跨包 leaky abstraction**：scheduler 的记账正确性不再依赖「内核合批只上报首条 dedupeKey」这一内部实现知识；防重机制语义从「补偿内核缺陷」降为「回收层有界兜底」（触发来源两类，见 §5.2）。
 4. **残留 API 清扫**：审计 low 群（errorCode 死字段、handle 中转、void ctx 等 9 项）登记移交，不新增代码。
 
 **In-scope**：`extensions/universal/scheduler/`（package.json + src）+ `packages/session-delivery/`（delivery.ts settled 回调语义 + types 契约注释 + 测试）。
@@ -117,7 +117,7 @@ runtime.handleSettled :451-468
   非首条任务：无回调 → 标记留存 → TTL 10min 过期 → 重投（重复注入）→ 终获回调记账
 ```
 
-终态数据流（方向 B 落地后）：`cfg.onSettled?.(composed, ...)` 一处变为「对 inflightBatch 每条消息各调一次 `onSettled(msg, outcome)`」——非首条任务在 ★断头点★ 获得各自终态回调，TTL 过期重投路径从常规路径降为「回调丢失异常」的兜底路径。
+终态数据流（方向 B 落地后）：`cfg.onSettled?.(composed, ...)` 一处变为「对 inflightBatch 每条消息各调一次 `onSettled(msg, outcome)`」——非首条任务在 ★断头点★ 获得各自终态回调，「合批非首条收不到回调」这一重复注入根因被消除；TTL 过期重投路径保留为兜底，触发来源仍有两类——(a) 回调丢失异常（罕见）与 (b) busy 超窗慢投递（长任务常规可达，per-message 根修不消除，见 §5.2）。
 
 ## 5. 终态：使用者眼里将是什么样的
 
@@ -143,7 +143,7 @@ schedule_control list：两个任务 runCount 均 +1，nextRunAt 各自推进到
 
 - **cron 表达式真错**（如 `*/10 * * *`，4 字段）：normalizeCronExpression 返回 undefined → `Invalid schedule: "*/10 * * *". Use duration (5m/2h/1d) or cron expression (*/10 * * * *).` → 👉 按 message 提示修正表达式或改用 duration 重发 schedule 调用。此错误通道在终态下语义唯一：表达式无效（解析器不可能缺失）。
 - **任务到期但被限流**（>6 次/分钟）：dispatch no-op → `Task <id> not dispatched (disabled, rate-limited, or already queued for delivery).` → 👉 `schedule_control run <id>` 稍后重试，或等待下个调度周期自动重试（at-least-once 语义不变）。
-- **防重标记 TTL 10min 过期后的重投**（at-least-once，可能重复注入一次 → 👉 排查看 `~/.pi/agent/logs/`（XYZ_AGENT_DEBUG=1）delivery warn 记录；此即 D1 保留 TTL 的兜底职能）。触发来源**完整两类**（v2 修正，审查 MF1）：
+- **防重标记 TTL 10min 过期后的重投**（at-least-once，可能重复注入一次 → 👉 判定以**时间线为主**（是否发生在 busy 超窗期）；delivery warn 日志仅作排除投递失败重试干扰的**辅助**——(a) 类回调丢失时内核 warn 逻辑上不会发出、(b) 类 parked 路径零日志（审查 S-B）。此即 D1 保留 TTL 的兜底职能）。触发来源**完整两类**（v2 修正，审查 MF1）：
   - **(a) 终态回调丢失异常**（内核 bug / port.send 结果丢失，预期罕见）——回调该到未到；
   - **(b) 投递等待超 10 分钟的慢投递**（agent busy 持续超窗，消息仍 parked、回调尚未有机会发生——xyz-agent 长编码任务是常态场景，**常规可达非异常**）。per-message 根修（D1）只消除「合批非首条收不到回调」一类，**不消除 (b)**；10min TTL 的本质是「重复注入风险 vs 投递延迟」的权衡参数，非纯异常兜底。
 
@@ -220,7 +220,7 @@ schedule_control list：两个任务 runCount 均 +1，nextRunAt 各自推进到
 | `packages/session-delivery/tests/` | 增 | 合批 per-message 用例（2+ 条 → onSettled 调用序列断言）；既有套件零改动须全绿（单消息等价性回归锚） |
 | `extensions/universal/scheduler/package.json` | 改 | croner 移入 dependencies；删 peerDependenciesMeta.croner（D2） |
 | `extensions/universal/scheduler/src/parsing.ts` | 改 | 静态 import Cron；删 getCroner/cronerModule；解析链同步化 + ParseScheduleResult 解包装（D2+L7）；表达式无效 try/catch 保留 |
-| `extensions/universal/scheduler/src/runtime.ts` | 改 | :20-22/:48-54 注释改写（TTL = 回收层异常兜底）；:443-449「已知限制」段删除（D1） |
+| `extensions/universal/scheduler/src/runtime.ts` | 改 | :20-22/:48-54 注释改写（TTL = 回收层有界兜底（触发来源两类：(a) 回调丢失异常 (b) busy 超窗慢投递——见 §5.2，勿照抄旧的单来源口径））；:443-449「已知限制」段删除（D1） |
 | `extensions/universal/scheduler/src/service.ts` + `tool.ts` 等 | 删 | L1/L6 等 low 群（code-simplify 批量） |
 
 错误规格不变量：`computeNextCronRunAt` 返回 undefined 的唯一语义 = 表达式无效（探针 P2 保证解析器恒在）；`send()` 不 throw、入队即返回（park 语义不变）；handleSettled 反查未命中静默返回（非 scheduler 消息 / once 已删）不变；**handleSettled 幂等性边界**：同 key 每条消息恰好一次回调时幂等，同 key 多副本并存（TTL 超窗慢投递产生）逐条累计——runCount 双计、nextRunAt 推进两次可跳下一周期（1min 任务无感、每日任务跳一天；现状合批语义为少记账，两方向各有缺陷、新行为不劣化，审查 S4）。
@@ -271,7 +271,7 @@ M1/M2 分两个 commit（跨包契约修正与包内依赖修复分离，review 
 - §6.4 探针 P1-P3 结果（设计阶段断言均有实读源码依据，纪律上以实跑为准）。
 - pi CLI 安装器对 dependencies 的实际安装行为（审计与本文均按 npm 语义断言，pi 安装器未实测）——V1 覆盖。
 - importer 一次性迁移机制的退役里程碑（审计四问记录建议）：不属本设计 scope，建议在 code-simplify 批量或独立 chore 中登记（如「大版本后删除 importer.ts + 迁移测试」），避免永久持有。
-- 已接受代价汇总（四要素）：**TTL 兜底保留**——量级：两类触发来源（(a) 终态回调丢失异常，预期罕见；(b) busy 持续超 10min 的慢投递，长任务场景常规可达——v2 修正口径，审查 MF1），触发时最多一次重复注入；恢复路径：重投后记账自愈，排查看 delivery warn 日志；重审触发：观察到重复注入时**先区分来源**——核对注入时间线（是否发生在 busy 超窗期）与 delivery warn 日志（有无回调丢失迹象），确认属 (a) 类才回审 D1，(b) 类属已知接受行为不触发回审；显式判定：可接受（符合任务级回收层有界兜底原则）。
+- 已接受代价汇总（四要素）：**TTL 兜底保留**——量级：两类触发来源（(a) 终态回调丢失异常，预期罕见；(b) busy 持续超 10min 的慢投递，长任务场景常规可达——v2 修正口径，审查 MF1），触发时最多一次重复注入；恢复路径：重投后记账自愈，排查看 delivery warn 日志；重审触发：观察到重复注入时**先区分来源**——主判据为时间线（是否发生在 busy 超窗期：超窗 = (b) 类已知行为），delivery warn 日志仅作排除投递失败重试干扰的辅助（(a) 类回调丢失时内核 warn 逻辑上不会发出、(b) 类 parked 路径零日志——审查 S-B）；确认属 (a) 类才回审 D1，(b) 类属已知接受行为不触发回审；显式判定：可接受（符合任务级回收层有界兜底原则）。
 
 ---
 
@@ -279,3 +279,5 @@ M1/M2 分两个 commit（跨包契约修正与包内依赖修复分离，review 
 
 - v1（2026-09-12）：初稿。覆盖审计 M18（croner optional）、M19（queuedInDeliveryAt 合投补偿，裁决方向 B/B1）与 low 群 L1-L9 移交登记；含审计修正两条（M19「整体删除」断言、根修位置归属）与四问记录索引错位更正。
 - v2（2026-09-14）：按审查报告（ext-simplify-08-scheduler.review.md，1 MF + 4 S）修订——MF1 TTL 兜底触发条件改为完整两类来源（(a) 回调丢失异常 (b) busy 超窗慢投递常规可达），§5.1/V3 限定 busy 窗口 + §9.3 重审触发器补区分手段（先辨来源再回审）；S1 五处事实精确性修正（版本 0.5.2 / dependencies 漏列 ext-guards / delivery-receipt 4 用例 / subagent-core 同名异义注 / npmrc 口径）；S2 P2 主探针改 pi CLI 路径（node-import-TS 不可行）+ V3 判定口径；S3 L1 测试牵动面登记；S4 handleSettled 幂等性边界披露（§6.1 + §7 不变量）。决策层（D1-D3）无变化。
+- v2.1（2026-09-14）：聚焦复审 PASS（S 2 条）当轮清偿——S-A 双来源口径贯彻全文 7 处残留（开篇/SCQA-A/目标 2/目标 3/§4 末段硬矛盾/§6.1 采用段/§7 runtime.ts 实施规格行——防实施者照抄失实口径写进新注释）；S-B 区分手段 warn 日志腿降级为辅助（内核 warn 仅覆盖 port.send 失败链，(a) 类逻辑上不发 warn、(b) 类 parked 零日志），主判据 = 时间线，§5.2/§9.3 两处同步。
+- v2.1（2026-09-14）：聚焦复审 PASS（S 2 条）当轮清偿——S-A 双来源口径贯彻全文 7 处残留（开篇/SCQA-A/目标 2/目标 3/§4 末段硬矛盾/§6.1 采用段/§7 runtime.ts 实施规格行——防实施者照抄失实口径写进新注释）；S-B 区分手段 warn 日志腿降级为辅助（内核 warn 仅覆盖 port.send 失败链，(a) 类逻辑上不发 warn、(b) 类 parked 零日志），主判据 = 时间线，§5.2/§9.3 两处同步。
