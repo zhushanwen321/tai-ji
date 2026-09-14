@@ -44,7 +44,7 @@ import {
 } from "@xyz-agent/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import type { TSchema } from "typebox";
-import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // 模块级 logger（factory 首行 setPiHandle 注入后自动走 appendEntry 持久化，
 // 注入前/失败降级文件日志——见 extension-logger 三层通道设计）
@@ -69,10 +69,6 @@ const RESPONSE_PREVIEW_LENGTH = 200;
 // Bridge 回包五守卫（isBridgeErrorResponse / isBridgeToolExecuteResponse /
 // isBridgeSyncPayload / isBridgeInterceptResponse / isSyncedTool）已迁入 protocol 的
 // plugin-bridge 协议模块（D11：「marker + types + 守卫」同住），本包经 barrel import。
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return typeof v === "object" && v !== null && !Array.isArray(v);
-}
 
 /** 拦截注入消息的最小形状（旧 bridge 契约：{role, content}，content 任意类型） */
 function isInjectedMessage(v: unknown): v is { content: unknown } {

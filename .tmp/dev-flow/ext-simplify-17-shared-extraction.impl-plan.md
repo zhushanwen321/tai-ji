@@ -139,12 +139,21 @@ graph TD
 | u10 | committed | 1 | f79f54343（943 用例绿，单文件） |
 | u11 | committed | 1 | NEEDS-FIX 2 MF + 4 S → 设计文档 v7 全修闭合（主 agent 核实事实锚点：callBridge :123 门控 / types.ts sessionId? 活构造均属实）；u12 放行 |
 | u12 | committed | 1 | d997a7fa4（202+41+34+943 用例绿；行为微变①有单测锚定；runtime typecheck 绿；门控保留 :127） |
-| u13 | committed | 1 | fbe6f9f09（与 u14 合并 commit：barrel 同文件两行分属两单元，文件级颗粒度；209+140+943+82 用例绿） |
+| u13 | committed | 1 | fbe6f9f09（与 u14 合并 commit：barrel 同文件两行分属两单元，文件级颗粒度；209+140+943+82 用例绿；审查核正：renderTextFallback 保留薄委托形态是正确终态——签名真差异 content 可选，内核已单源，原验收条款过度收紧） |
 | u14 | committed | 1 | fbe6f9f09（protocol 16 + bte 16 + pending-notifications 34 用例绿；identity 假设消除） |
-| u15 | committed | 1 | 69c726400（protocol 214 + plugin-bridge 34 用例绿；函数体逐 token diff 空） |
+| u15 | committed | 1 | 69c726400（protocol 214 + plugin-bridge 34 用例绿；审查核正证据行：**四函数**逐 token diff 空 + isBridgeErrorResponse 按 D8 单源化改委托 isChannelErrorResult（语义逐条件等价），原「五函数逐 token diff 空」表述失实） |
 | u16 | committed | 1 | 9a6c2c86b（D4 重锚定 + V6 真机回归三项全过，行为微变③独立 commit；ext-guards 38 用例绿） |
 
 ## 7 残留风险与变更历史
+
+**阶段 3 审查发现台账**（聚合处理区）：
+
+- 区 1 unreasonable 1 条（低）：D5 互指注释 subagent-core 侧（model-ref.ts THINKING_ORDER）未落地——与 u2 状态行「待收尾补」同一项；设计外语义：词表守卫 THINKING_ORDER 第三副本纳入 → 登记后续议题不扩本批面。
+- 区 1 doc_errors 3 条：D11「五函数零改动」→「四函数零改动 + isBridgeErrorResponse 委托 isChannelErrorResult（D8 吸收）」；D5 配套段落点补记（与 §5 偏差表重合，阶段 6 回写项确认）；impl-plan u15 证据行「逐 token diff 空」→ 修正为「四函数逐 token diff 空 + 一函数委托」。
+- 区 3 unreasonable 3 条：①（高）changeset 漏 session-manager（行为微变①载体）——补 patch + body；②（低-中）changeset 漏 7 个行为等价收敛包（todo/scheduler/permission/smart-context/pending-notifications/subagent-workflow/plugin-bridge）——按 group-a 先例补列；③（低）台账滞后——已被 c79a53dca 覆盖（reviewer 读的是派发时点态），无需动作。
+- 区 3 doc_errors 3 条：设计 §6:193 index 路径 docs/design/ → docs/todo/ext-simplify/（用户原始消息同款路径错）；D4 终名 SUBAGENT_MARKER → SUBAGENT_MARKER_ENV 回填；spawn-args 落点 :38/:89 核正（与区 1 重合）。
+- 区 2 unreasonable 2 条（均 P2，计划层遗漏传导）：① D3 plugin-bridge isRecord 迁移未做（批次 1 行明文含 plugin-bridge 消费迁移，单元表漏排）——修复 A 一行迁移；② D6 smart-context 消费侧漏排（P1-d 双写只消 rename-session 半边）——修复 B 一行迁移 + 顺带 subagent-core 互指注释（区 1 项）。区 2 doc_errors 3 条：impl-plan u13 验收条款过度收紧（已核正）；D5/D13 落点与签名回写（阶段 6 清单确认项）。
+- 处理状态：修复 A committed（plugin-bridge）/ 修复 B in-flight；changeset 补列 session-manager + 7 包（主 agent 亲改完成）；设计文档 5 处 doc_errors 亲改完成（D11 措辞 / D5 配套落点 / D4 终名 / index 路径 / §6 changeset 补记）。
 
 **残留风险**：
 

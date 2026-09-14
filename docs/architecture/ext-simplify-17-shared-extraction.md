@@ -66,7 +66,7 @@ isRecord（11 文件副本、2 语义变体：排数组 vs 允数组）：两路
 
 **D4 bte subagent 进程判据重锚定**【已预授权，探针证实即修】。
 - 实施前置探针（可证伪）：真机跑一次 pi subagent 任务（`pi --mode rpc` + subagent spawn `env`），断言子进程 env 含 `XYZ_AGENT_SUBAGENT=1` 且不含 `PI_SUBAGENT_ROOT_SESSION_ID` / `PI_SUBAGENT_SELF_RECORD_ID`。证实 → 执行重锚定；证伪 → 只记录不修，回报用户。**探针已执行（20260914，双断言证实——正向 GUI 全链路 pi 引擎 subagent `XYZ_AGENT_SUBAGENT=1` 单行输出旧键族零匹配 + 进程级 ps eww 双引擎互证；反向顶层会话 NO_MATCH；生产 v0.9.20 旧直 spawn 链仍注入全套旧键族，新旧判据按版本衔接无空窗。重锚定放行）**。
-- 修法：`subagent-guard.ts` 判据改锚 `XYZ_AGENT_SUBAGENT === "1"`；谓词与常量收敛进 ext-guards（建议新增 `isSubagentProcess()` + `SUBAGENT_MARKER` 导出），bte 改 import。smart-context `pure.ts:258-260` 的单键版同谓词顺带收敛（其消费语义与 bte 同源）。
+- 修法：`subagent-guard.ts` 判据改锚 `XYZ_AGENT_SUBAGENT === "1"`；谓词与常量收敛进 ext-guards（建议新增 `isSubagentProcess()` + `SUBAGENT_MARKER` 导出；**实施终名 = `isSubagentProcess(env?)`（可选 env 形参便于测试注入）+ `SUBAGENT_MARKER_ENV`**，ENV 后缀更准确——值是 env 键名非标记值），bte 改 import。smart-context `pure.ts:258-260` 的单键版同谓词顺带收敛（其消费语义与 bte 同源）。
 - **键族读者全集与逐个处置**（r1 影响面 M1 增补）：`PI_SUBAGENT_*` 键恒空的失效波及 4 个读者，处置各异——
   ① bte `subagent-guard.ts`（本项修复对象，探针 + 重锚定）；
   ② smart-context 单键版（顺带收敛进 ext-guards，见上）；
@@ -86,7 +86,7 @@ export function isThinkingLevel(v: unknown): v is ModelThinkingLevel;
 
 消费方迁移：rename-session `pure.ts:48-77`（`THINKING_LEVELS` + `isThinkingLevel` 删除改 import）、permission `config.ts:57-68`（同）。**双登记裁决**：llm-shared 持 extensions 侧唯一副本，与 subagent-core `THINKING_ORDER`（`model-ref.ts:40`）注释互指，不建跨包 import（universal 角色禁 import subagent-core，反向破坏分层）；spawn-args 手写字面量面是被迫的（package.json 明文「never subagent-core」+ W9 守卫），本项只补值不收敛结构。
 **机器守卫补强**（r1 主审 S2 采纳）：钉值单测只锚副本自身字面量，副本间漂移不触发任何红灯——P1-a 即该代价已兑现的实证；pi 版本门禁探针族守 runtime 注册表面、不校验 extensions 侧词表（已核实 `check-pi-semantics.mjs` / `diff-probe-thinking.mjs` 锚定范围）。随批次 2 交付构建期词表比对：小脚本从 pi-ai dist `types.d.ts` 提取 `ModelThinkingLevel` 联合成员，与 llm-shared `THINKING_LEVELS` Set 比对，不一致即非零退出，接入现有 pre-commit 按路径触发链（符合「SSOT + 机器守卫」架构偏好）。**实施落定（20260914）**：`scripts/check-thinking-levels.mjs` 已交付并接入 pre-commit（触发面 = llm-shared resolve.ts / pi-rpc types.ts / pnpm-lock.yaml / 脚本自身）；提取逻辑对 pi-ai 实装的 `= "off" | ThinkingLevel` 别名引用形态做递归展开；**比对面 = llm-shared + pi-rpc 两副本**（pi-rpc 为被迫独立的第二副本，顺带比对成本 trivial 已加——超出本段原登记面，此处补记）；pi-ai 版本 bump 引起联合成员变化时红灯指向 resolve.ts 同步。
-**配套 [A 基线]**：`packages/pi-subagent-cli/src/spawn-args.ts` 六值白名单补齐 `xhigh`（P1-a 实锤滞后）。行为变化（有意）：`:xhigh` 后缀从「静默拒掉降级 undefined」变为「接受传递」——与上游类型对齐，恢复上游能力。
+**配套 [A 基线]**：`packages/pi-subagent-cli/src/spawn-args.ts` 六值白名单补齐 `xhigh`（P1-a 实锤滞后）。行为变化（有意）：`:xhigh` 后缀从「静默拒掉降级 undefined」变为「接受传递」——与上游类型对齐，恢复上游能力。**（合流基线落点漂移：U1 归并后白名单本体在 `packages/pi-rpc/src/types.ts`，spawn-args 仅 re-export——实施于 pi-rpc，见词表守卫 T2 比对面）**
 
 **D6 `normalizeModelSelector(raw: unknown): ModelSelector | null` 新导出**（建议新增）。落 `resolve.ts`（`ModelSelector` 类型 SSOT 所在地）。rename-session `pure.ts:171-178` 删本地改 import；smart-context `pure.ts:62-68` 改为 `normalizeModelSelector(r.compactModel) ?? { type: "ref", ref: "" }` 保留其回退语义，行为零变更。
 
@@ -116,7 +116,7 @@ callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?
 
 **D10 pending reason→status 映射单点**。protocol `pending-entries.ts` [B 基线] 新增 `mapReasonToStatus` 导出（string 签名，`PendingStatus` 类型留在 pending-notifications）；pending-notifications 权威实现改为委托导出；**bte 改引落点 = `pending-reconcile.ts:93` 的 `status: pendingReason` identity 假设处**（notify.ts 无 status 写点，emit 只带 reason——r1 主审 INFO 核正），消灭 identity 假设。与 13 号 M13 所修漂移同构，13 号未覆盖此处（E4/E6 只收差集规则），本项为其补遗。
 
-**D11 Bridge 回包形状守卫族迁移**。plugin-bridge `index.ts:63-88` 的 `isBridgeErrorResponse` / `isBridgeToolExecuteResponse` / `isBridgeSyncPayload` / `isBridgeInterceptResponse` / `isSyncedTool` 五函数零改动搬入 protocol `extensions/plugin-bridge/`（新 `guards.ts`，随形状定义同住——session-manager/subagent-inflight 模块已确立「marker + types + 守卫」同住惯例）。**范围排除**：`isInjectedMessage`（16 号附录 A.5 已登记合并议题，迁移是给已判死刑的代码搬家）、`isToolNotFound`（D3 后与 runtime bridge-interop 唯一生产形态 co-deployed 同 PR 纪律覆盖）。诚实声明：守卫族全仓无第二份拷贝，迁移当下零去重收益，价值 = 惯例对齐 + 为 runtime `bridge-handler.ts` 的 5 处 `as string` 断言（:112/114/127/129/146，r1 主审 INFO 核正数量）换校验铺路（第二消费方，后续批次）。
+**D11 Bridge 回包形状守卫族迁移**。plugin-bridge `index.ts:63-88` 的 `isBridgeErrorResponse` / `isBridgeToolExecuteResponse` / `isBridgeSyncPayload` / `isBridgeInterceptResponse` / `isSyncedTool` 五函数搬入 protocol `extensions/plugin-bridge/`（新 `guards.ts`，随形状定义同住——session-manager/subagent-inflight 模块已确立「marker + types + 守卫」同住惯例）。**实施修订（20260914）**：其中四函数逐 token 零改动搬移；`isBridgeErrorResponse` 与 D8 单源化条款交叉，按 D8 方向改委托 core 的 `isChannelErrorResult`（语义逐条件等价，检测逻辑单源），其余四函数零改动。**范围排除**：`isInjectedMessage`（16 号附录 A.5 已登记合并议题，迁移是给已判死刑的代码搬家）、`isToolNotFound`（D3 后与 runtime bridge-interop 唯一生产形态 co-deployed 同 PR 纪律覆盖）。诚实声明：守卫族全仓无第二份拷贝，迁移当下零去重收益，价值 = 惯例对齐 + 为 runtime `bridge-handler.ts` 的 5 处 `as string` 断言（:112/114/127/129/146，r1 主审 INFO 核正数量）换校验铺路（第二消费方，后续批次）。
 
 ### 3.4 桶 4 · 包内收敛（不进 shared）
 
@@ -184,13 +184,13 @@ callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?
 | 批次 3（契约新增） | D8（先按本节形态过一次聚焦评审再实施）+ D9 + D10 + D11 | group-b |
 | 批次 4（预授权探针项） | D4：探针 → 证实即修 → V6 回归；SDK 常量/注释配合改动统一 group-b（两分支零差异，无选侧问题） | 探针双侧无害；修在 group-b |
 
-**changeset 登记**（r1 影响面 S2）：批次收尾各发布包随批提 changeset——ext-guards / llm-shared / extension-protocol 新增导出均 **minor**；llm-shared 新增 runtime dependency（`@zhushanwen/pi-ext-guards`）使独立 pi 用户安装闭包扩大，changeset body 须说明；bte / plan / rename-session 依赖新增随包提（初判 patch；r2 影响面 INFO：按 llm-shared 闭包扩大同口径可 argue minor，type 最终人工定）；系列先例：ext-simplify-01/02/12 设计均登记 changeset 面。
+**changeset 登记**（r1 影响面 S2）：批次收尾各发布包随批提 changeset——ext-guards / llm-shared / extension-protocol 新增导出均 **minor**；llm-shared 新增 runtime dependency（`@zhushanwen/pi-ext-guards`）使独立 pi 用户安装闭包扩大，changeset body 须说明；bte / plan / rename-session 依赖新增随包提（初判 patch；r2 影响面 INFO：按 llm-shared 闭包扩大同口径可 argue minor，type 最终人工定）；**session-manager（行为微变①载体）与全部有实质变更的消费包（todo / scheduler / permission / smart-context / pending-notifications / subagent-workflow / plugin-bridge）按 group-a 先例随批补列 patch，pi-rpc 初稿已列——实施期核正：初稿漏列前述 8 包，阶段 3 审查抓出**；系列先例：ext-simplify-01/02/12 设计均登记 changeset 面。
 
 **实施前置**（r2 环境事实）：group-b worktree 目录已于 20260914 会话期间被删除，分支 ref 仍在（`origin/feat-optimize-extension-overengineering-group-b`，即本地 .bare）。实施批次 1/2/3/4 的 group-b 侧前须先重建：`git worktree add <path> feat-optimize-extension-overengineering-group-b` + `pnpm install`（ELECTRON_SKIP_BINARY_DOWNLOAD=1）。重建属实施动作，须经用户确认后执行。
 
 - 批次 1/2 可并行推进（D3 迁移面为 plugin-bridge + rename-session 两处，与批次 1 的 bte/scheduler 项不同包；rename-session 的 isRecord 迁移（llm.ts 块外三消费点改 import ext-guards，清单见 D3）随批次 2 的 D7 同 PR 闭合——同文件（llm.ts）改动一次完成，无跨批次先后依赖，r2 主审 MF 修复口径）。llm-shared 跨批次被 D1（自身 6 处 toErrorMessage 采用）与 D5/D6/D7（新导出）先后触碰，不同文件区域，按批次顺序实施即可。
 - 批次 4 探针不依赖任何批次，可最先执行。
-- 全部批次完成后：更新 `docs/design/ext-simplify-index.md`（两分支各记一笔，17 号条目 + 本设计登记的跨包债务清账情况）。
+- 全部批次完成后：更新 `docs/todo/ext-simplify/ext-simplify-index.md`（两分支各记一笔，17 号条目 + 本设计登记的跨包债务清账情况；路径勘误：本文档初稿误写 docs/design/，实际索引在 docs/todo/ext-simplify/）。
 
 ## 7. 风险与回退
 

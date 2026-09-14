@@ -7,7 +7,7 @@
 
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import type { ModelSelector } from "@zhushanwen/pi-llm-shared";
-import { loadConfig } from "@zhushanwen/pi-llm-shared";
+import { loadConfig, normalizeModelSelector } from "@zhushanwen/pi-llm-shared";
 
 // ──────────────────────── 配置 schema（D8） ────────────────────────
 
@@ -59,13 +59,8 @@ export function normalizeSmartContextConfig(raw: unknown): SmartContextConfig {
 
 	const enabled = typeof r.enabled === "boolean" ? r.enabled : base.enabled;
 
-	const rawModel = typeof r.compactModel === "object" && r.compactModel !== null
-		? (r.compactModel as Record<string, unknown>)
-		: null;
 	const compactModel: ModelSelector =
-		rawModel?.type === "ref" && typeof rawModel.ref === "string"
-			? { type: "ref", ref: rawModel.ref }
-			: { type: "ref", ref: "" };
+		normalizeModelSelector(r.compactModel) ?? { type: "ref", ref: "" };
 
 	const rawThresholds = Array.isArray(r.reminderThresholds)
 		? r.reminderThresholds
