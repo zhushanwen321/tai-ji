@@ -28,16 +28,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionService } from '../session-service.js'
 import { inflightMirror } from '../inflight-mirror.js'
-import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
-import { PiSessionStore } from '../../../infra/pi/session-store.js'
 import { ReclaimSeat } from '../idle-pi-reaper.js'
 import { getRuntimeCheckpointStore, initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import type { SubagentInFlightReport } from '@xyz-agent/extension-protocol'
-import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
-import type { IExtensionService } from '../../../interfaces.js'
-import type { WorkspaceService } from '../../workspace/workspace-service.js'
+import type { IPiEngine } from '../../ports/pi-engine.js'
+import { createSetup } from './helpers/session-service-setup.js'
 
 const SID = 'sid-mirror'
 const FORK_SID = 'sid-mirror-fork'
@@ -61,40 +57,6 @@ afterAll(() => {
   for (const sid of MIRROR_SIDS) inflightMirror.dropSession(sid)
   rmSync(runDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
-
-interface Setup {
-  service: SessionService
-  pm: {
-    getClient: ReturnType<typeof vi.fn>
-    hasClient: ReturnType<typeof vi.fn>
-    destroySession: ReturnType<typeof vi.fn>
-  }
-}
-
-/** 最小装置：真 SessionService（构造期零 fs 触点），pm 只桩本域触达的方法（checkpoint 测试同款）。 */
-function createSetup(): Setup {
-  const client = { lastActivityAt: 1_700_000_500_000, exited: false } as unknown as IPiEngine
-  const pm = {
-    onSessionExit: vi.fn(),
-    getClient: vi.fn(() => client),
-    hasClient: vi.fn(() => false),
-    destroySession: vi.fn(async () => undefined),
-    destroyAll: vi.fn(async () => undefined),
-  }
-  const pmStub = pm as unknown as IProcessManager
-  const service = new SessionService(
-    pmStub,
-    { broadcast: vi.fn(), send: vi.fn(), sendError: vi.fn() },
-    () => ({ attach: vi.fn(), detach: vi.fn() }),
-    tmpdir(),
-    { getExtensionPaths: vi.fn().mockResolvedValue([]) } as unknown as IExtensionService,
-    new PiConfigStore(),
-    new PiSessionStore(),
-    { readGitInfo: vi.fn(() => undefined), pruneStaleCache: vi.fn() },
-    { record: vi.fn(), list: vi.fn(() => []) } as unknown as WorkspaceService,
-  )
-  return { service, pm }
-}
 
 /** 预置 0 条目的完整形态（新 reporting epoch：inFlight=0 + 未上报 + 未注入）。 */
 const PRESET_ZERO = { injected: false, hasEverReported: false, inFlight: 0 }

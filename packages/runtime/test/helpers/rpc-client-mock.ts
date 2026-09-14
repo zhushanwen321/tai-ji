@@ -127,9 +127,14 @@ export async function piProviderStoreModule() {
   return { ...actual, getDefaultModel: () => null }
 }
 
-/** '../src/infra/logger.js' mock 工厂（createPiSessionLog no-op）。 */
+/** '../src/infra/logger.js' mock 工厂（createPiSessionLog no-op + captureMemorySnapshot 固定快照）。 */
 export function loggerModule() {
-  return { createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }) }
+  return {
+    createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
+    // u5b D6-④：rpc-client crash 链（writePiCrashLog）读内存快照（rpc-client.ts:717）——
+    // mock 面随源码 import 面同步，缺导出会在触发 crash 路径的用例（如 bash abortBash）炸 undefined
+    captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
+  }
 }
 
 // ── 生命周期与驱动 helpers ─────────────────────────────────────────

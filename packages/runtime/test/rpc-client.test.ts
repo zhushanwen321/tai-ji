@@ -16,119 +16,41 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { RpcTimeoutError, type RpcClient } from '../src/infra/pi/rpc-client.js'
+import {
+  clearExitHandlers,
+  emitPiLine,
+  killAndDriveExit,
+  lastWrittenJson,
+  resetRpcClientMock,
+} from './helpers/rpc-client-mock'
 const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
-// ── Mocks ──────────────────────────────────────────────────────────
+// ── Mocks（工厂单源在 helpers/rpc-client-mock.ts，vi.mock 声明留本文件——路径按本文件解析）──
 
-/** 捕获的 stdin 写入行（每条 JSON 字符串）。 */
-const stdinWrites: string[] = []
-
-/** stdout data handler——start() 内 attachLfOnlyLineReader 注册（D10 后不再有 readline）。 */
-let stdoutDataHandler: ((chunk: Buffer | string) => void) | null = null
-
-/** proc.exit handler，start() startup check 用。 */
-let procExitHandlers: Array<(code: number | null) => void> = []
-
-const fakeProc = {
-  on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-    if (event === 'exit') procExitHandlers.push(handler as (code: number | null) => void)
-    return fakeProc
-  }),
-  off: vi.fn(),
-  removeListener: vi.fn(),
-  stdout: {
-    on: vi.fn((event: string, handler: (chunk: Buffer | string) => void) => {
-      if (event === 'data') stdoutDataHandler = handler
-      return fakeProc.stdout
-    }),
-    off: vi.fn(),
-    removeListener: vi.fn(),
-    resume: vi.fn(),
-    destroy: vi.fn(),
-  },
-  stderr: { on: vi.fn() },
-  stdin: {
-    write: vi.fn((chunk: string) => {
-      stdinWrites.push(chunk)
-      return true
-    }),
-    once: vi.fn(),
-  },
-  kill: vi.fn((_signal?: NodeJS.Signals | number) => {
-    // kill 即死（mock 语义）：微任务内 emit exit 短路 killPiProcess 的 grace 真实等待。
-    // [HISTORICAL] 2026-09-14 审计：空 vi.fn() 永不发 exit → 每次 afterEach kill 真睡
-    // DEFAULT_PI_KILL_GRACE_MS(2s)，27 用例 ≈ 68s 纯等待（runtime 测试 top10 慢因头号构成）。
-    // 重复驱动由 kill-chain settled 幂等守卫兜底；收敛目标 = test/helpers/rpc-client-mock.ts。
-    queueMicrotask(() => {
-      if (procExitHandlers.length === 0) return
-      const handlers = procExitHandlers
-      procExitHandlers = []
-      handlers.forEach((h) => h(0))
-    })
-    return true
-  }),
-  pid: 12345,
-}
-
-vi.mock('node:child_process', () => ({
-  spawn: () => fakeProc,
-}))
+vi.mock('node:child_process', async () =>
+  (await import('./helpers/rpc-client-mock')).childProcessModule())
 
 // D10 后 stdout 分帧走 rpc-client 自实现的 LF-only 读取器（同模块直调，无法从模块边界 mock）。
-// 测试改为在 fake stdout 上桥接 'data' handler，emitPiLine 直投「整行 + \n」由读取器分帧——
-// 投递时序与旧 readline 桥接一致（同步直调）；LF-only 分帧行为由 rpc-client-lf-framing.test.ts 专项覆盖。
+// 测试在 fake stdout 上桥接 'data' handler，emitPiLine 直投「整行 + \n」由读取器分帧；
+// LF-only 分帧行为由 rpc-client-lf-framing.test.ts 专项覆盖。
 
-// importOriginal spread 而非完全替换：rpc-client.start 经 ../spawn-env.js re-export 消费
-// shared 的 buildOutboundChildEnv（纯函数、env 全 DI），完全替换式 mock 会随 shared 新增
-// 导出静默断联（b5d3e6329 事故根因）；此处仅覆盖测试需要隔离的常量。
-vi.mock('@xyz-agent/shared', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@xyz-agent/shared')>()),
-  ENV_WHITELIST_PREFIXES: ['PATH', 'HOME', 'USER', 'LANG', 'TERM'],
-}))
+vi.mock('@xyz-agent/shared', async () =>
+  (await import('./helpers/rpc-client-mock')).sharedModule())
 
-vi.mock('@xyz-agent/shared/paths', () => ({
-  getDataDir: () => '/mock/home/.xyz-agent',
-}))
+vi.mock('@xyz-agent/shared/paths', async () =>
+  (await import('./helpers/rpc-client-mock')).sharedPathsModule())
 
-vi.mock('node:os', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:os')>()
-  return { ...actual, homedir: () => '/mock/home' }
-})
+vi.mock('node:os', async () =>
+  (await import('./helpers/rpc-client-mock')).osModule())
 
-// pi-paths 被 rpc-client import，mock 掉避免触碰真实 fs
-vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/infra/pi/pi-paths.js')>()
-  return {
-    ...actual,
-    getSessionsDir: () => '/mock/home/.xyz-agent/sessions',
-    getPiAgentDir: () => '/mock/home/.xyz-agent/agent',
-  }
-})
+vi.mock('../src/infra/pi/pi-paths.js', async () =>
+  (await import('./helpers/rpc-client-mock')).piPathsModule())
 
-// pi-provider-store.getDefaultModel——避免读真实配置
-vi.mock('../src/infra/pi/pi-provider-store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/infra/pi/pi-provider-store.js')>()
-  return { ...actual, getDefaultModel: () => null }
-})
+vi.mock('../src/infra/pi/pi-provider-store.js', async () =>
+  (await import('./helpers/rpc-client-mock')).piProviderStoreModule())
 
-// logger.createPiSessionLog——避免真实文件 IO
-vi.mock('../src/infra/logger.js', () => ({
-  createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
-}))
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-/** 把伪造的 pi 响应行投递给 RpcClient 的 stdout（LF-only 读取器的 data 入口，同步直调）。 */
-function emitPiLine(obj: Record<string, unknown>): void {
-  if (!stdoutDataHandler) throw new Error('stdout data handler not registered yet')
-  stdoutDataHandler(JSON.stringify(obj) + '\n')
-}
-
-/** 从 stdin 写入里解析出最后一条 JSON 对象。 */
-function lastWrittenJson(): Record<string, unknown> {
-  const last = stdinWrites[stdinWrites.length - 1]
-  return JSON.parse(last)
-}
+vi.mock('../src/infra/logger.js', async () =>
+  (await import('./helpers/rpc-client-mock')).loggerModule())
 
 /** 读取 RpcClient 内部 pending 数（反射，仅测试用；U1 pi-rpc 收敛后经 registry 部件 pendingSize 只读面）。 */
 function pendingSize(client: unknown): number {
@@ -141,12 +63,7 @@ describe('RpcClient W1', () => {
   let client: RpcClient
 
   beforeEach(async () => {
-    stdinWrites.length = 0
-    stdoutDataHandler = null
-    procExitHandlers = []
-    fakeProc.on.mockClear()
-    fakeProc.stdout.on.mockClear()
-    fakeProc.stdin.write.mockClear()
+    resetRpcClientMock()
 
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
     client = new RpcClient({ ...clientOpts, cwd: '/project' })
@@ -154,9 +71,9 @@ describe('RpcClient W1', () => {
   })
 
   afterEach(async () => {
-    // kill 走 SIGTERM + 等待 exit；触发 exit handlers 清 pending
+    // kill 走 SIGTERM + 等待 exit；helper fakeProc 的 kill 即死语义微任务驱动 exit 清 pending
     try { await client.kill() } catch { /* noop */ }
-    procExitHandlers = []
+    clearExitHandlers()
   })
 
   // ── U1: sendCommand 归一 payload→data ────────────────────────────
@@ -360,12 +277,7 @@ describe('RpcClient W3 S6 (timedOutIds)', () => {
   let client: RpcClient
 
   beforeEach(async () => {
-    stdinWrites.length = 0
-    stdoutDataHandler = null
-    procExitHandlers = []
-    fakeProc.on.mockClear()
-    fakeProc.stdout.on.mockClear()
-    fakeProc.stdin.write.mockClear()
+    resetRpcClientMock()
 
     const { RpcClient: Client } = await import('../src/infra/pi/rpc-client.js')
     client = new Client({ ...clientOpts, cwd: '/project' })
@@ -375,9 +287,9 @@ describe('RpcClient W3 S6 (timedOutIds)', () => {
   afterEach(async () => {
     // 恢复真实 timer，避免影响后续测试
     vi.useRealTimers()
-    // kill 走 SIGTERM + 等待 exit；触发 exit handlers 清 pending
+    // kill 走 SIGTERM + 等待 exit；helper fakeProc 的 kill 即死语义微任务驱动 exit 清 pending
     try { await client.kill() } catch { /* noop */ }
-    procExitHandlers = []
+    clearExitHandlers()
   })
 
   // ── U8: 超时后迟到响应被丢弃，不当 event 广播 ─────────────────────
@@ -432,14 +344,6 @@ describe('RpcClient W3 S6 (timedOutIds)', () => {
 })
 
 describe('RpcTimeoutError 类型（D3a pi 半死自愈：超时判别收口为类型）', () => {
-  /** kill 并模拟进程退出（fakeProc.kill 不会真触发 exit，手动驱动 exit handlers 让 kill() 立即 resolve）。 */
-  async function killClient(client: { kill(): Promise<void> }): Promise<void> {
-    const killPromise = client.kill()
-    procExitHandlers.forEach((h) => h(0))
-    await killPromise
-    procExitHandlers = []
-  }
-
   it('字段与 message：name/commandType/timeoutMs', () => {
     const err = new RpcTimeoutError('abort', 60_000)
     expect(err).toBeInstanceOf(RpcTimeoutError)
@@ -470,7 +374,7 @@ describe('RpcTimeoutError 类型（D3a pi 半死自愈：超时判别收口为�
     expect((thrown as RpcTimeoutError).timeoutMs).toBe(100)
 
     vi.useRealTimers()
-    await killClient(client)
+    await killAndDriveExit(client)
   })
 
   it('普通 RPC 失败（success:false）reject 普通 Error，不误判为超时', async () => {
@@ -489,6 +393,6 @@ describe('RpcTimeoutError 类型（D3a pi 半死自愈：超时判别收口为�
     expect(thrown).not.toBeInstanceOf(RpcTimeoutError)
     expect((thrown as Error).message).toContain('boom')
 
-    await killClient(client)
+    await killAndDriveExit(client)
   })
 })

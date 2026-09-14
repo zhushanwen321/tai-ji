@@ -987,16 +987,16 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     expect(legacy[0]!.stopReason).toBeUndefined()
   })
 
-  it('U8 守卫（A-lite 放宽）：running-resumable 轮终 stopReason（failed/completed）有值即投影；closedReason 仍 closed-only；intent 非法值回落 undefined', () => {
-    // 失败轮真实形态（markRoundIdle A-lite：status 保持 running + stopReason=failed）
+  it('U8 守卫：轮终 stopReason（failed/completed）有值即投影；closedReason 仍 closed-only；intent 非法值回落 undefined', () => {
+    // W4 新态真实形态（[U5/D4] adoptEngineDeath：running + stopReason=failed + result=∅）
     const failed = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-rf', status: 'running', stopReason: 'failed', result: 'round did not complete: boom', resumable: true }),
+      subagentRecordEntry({ id: 'sa-rf', status: 'running', stopReason: 'failed', result: 'round did not complete: boom' }),
     ])
     expect(failed[0]!.status).toBe('running')
     expect(failed[0]!.stopReason).toBe('failed')
     // 成功轮同理（completed 下行）
     const completed = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-rc', status: 'running', stopReason: 'completed', result: '产出', resumable: true }),
+      subagentRecordEntry({ id: 'sa-rc', status: 'idle', stopReason: 'completed', result: '产出' }),
     ])
     expect(completed[0]!.stopReason).toBe('completed')
     // 不对称守卫另一半保留：running + closedReason 仍不投影（closed-only，防脏组合）

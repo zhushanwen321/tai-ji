@@ -24,19 +24,7 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-
-/** 定位实装 pi 包 dist（cwd 逐级上溯，同 pi-semantics-turn-usage-model.test.ts 范式）。 */
-function locatePiDist(pkg: string, sentinel: string): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', pkg, 'dist')
-    if (existsSync(join(candidate, sentinel))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiDist } from './helpers/pi-semantics-probe.js'
 
 /** 定位仓库根（含 docs/pi-semantics.json 的目录，cwd 逐级上溯）。 */
 function locateRepoRoot(): string | null {

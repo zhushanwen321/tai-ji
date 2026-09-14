@@ -23,19 +23,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-paths-config-dir-contract.test.ts 范式）。 */
-function locatePiCodingAgentDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
-    if (existsSync(join(candidate, 'config.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiCodingAgentDist, methodWindowUntil } from './helpers/pi-semantics-probe.js'
 
 const PI_DIST = locatePiCodingAgentDist()
 const SKIP_REASON = PI_DIST
@@ -64,14 +52,6 @@ function functionWindow(text: string, header: string): string {
   const rest = text.slice(start + header.length)
   const next = /\n(?:export )?function /.exec(rest)
   return next ? rest.slice(0, next.index) : rest.slice(0, 3000)
-}
-
-/** 提取类方法窗口（从方法签名到下一个方法签名，同 pi-semantics-compaction-details.test.ts 范式）。 */
-function methodWindow(text: string, header: string, nextHeader: string): string {
-  const start = text.indexOf(header)
-  if (start === -1) return ''
-  const end = text.indexOf(nextHeader, start)
-  return end === -1 ? text.slice(start, start + 3000) : text.slice(start, end)
 }
 
 describe.skipIf(!PI_DIST)(
@@ -125,7 +105,7 @@ describe.skipIf(!PI_DIST)(
     const agentSessionSrc = readFileSync(join(PI_DIST as string, 'core', 'agent-session.js'), 'utf-8')
 
     it('appendCustomEntry：entry 字面量固定六字段（customType/data 逐字引用，含 timestamp）', () => {
-      const win = methodWindow(sessionManagerSrc, 'appendCustomEntry(customType, data) {', 'appendSessionInfo(')
+      const win = methodWindowUntil(sessionManagerSrc, 'appendCustomEntry(customType, data) {', 'appendSessionInfo(')
       expect(
         win,
         'PS-29 漂移：appendCustomEntry 方法消失/改名——custom entry 落盘入口改形，复核 PS-29 锚点',
@@ -143,7 +123,7 @@ describe.skipIf(!PI_DIST)(
     })
 
     it('agent-session：core 绑定 appendEntry(customType, data) 直呼 appendCustomEntry（同参数序零变换）', () => {
-      const win = methodWindow(agentSessionSrc, 'appendEntry: (customType, data) => {', 'setSessionName:')
+      const win = methodWindowUntil(agentSessionSrc, 'appendEntry: (customType, data) => {', 'setSessionName:')
       expect(
         win,
         'PS-29 漂移：core 绑定 appendEntry 消失/改名——extension 落账入口改形，复核 PS-29 锚点',

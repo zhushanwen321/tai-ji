@@ -29,19 +29,7 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-semantics-agent-session.test.ts 范式）。 */
-function locatePiCodingAgentDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
-    if (existsSync(join(candidate, 'config.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiCodingAgentDist, methodWindow } from './helpers/pi-semantics-probe.js'
 
 /** 定位仓库内相对路径文件（cwd 逐级上溯找 xyz 侧镜像源码）。 */
 function locateWorkspaceFile(rel: string): string | null {
@@ -67,18 +55,6 @@ const FRONTMATTER_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'utils', 'frontmatt
 
 const INJECTOR_PATH = locateWorkspaceFile('packages/runtime/src/services/session/skill-injector.ts')
 const INJECTOR_SRC = INJECTOR_PATH ? readFileSync(INJECTOR_PATH, 'utf-8') : ''
-
-/**
- * 提取类方法窗口：从方法头（4 空格缩进）到下一个同缩度方法/字段/文档注释声明。
- * 窗口为空 = 方法消失/改名，须按「漂移」处理（fail 而非静默通过）。
- */
-function methodWindow(text: string, header: string): string {
-  const start = text.indexOf(header)
-  if (start === -1) return ''
-  const rest = text.slice(start + header.length)
-  const next = /\n    (?:async )?[A-Za-z_$][\w$]*[=(]|\n    \/\*\*/.exec(rest)
-  return next ? rest.slice(0, next.index) : rest.slice(0, 4000)
-}
 
 const count = (text: string, needle: string): number => text.split(needle).length - 1
 

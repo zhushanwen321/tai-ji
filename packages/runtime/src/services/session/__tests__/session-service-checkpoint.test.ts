@@ -20,14 +20,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionService } from '../session-service.js'
-import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
-import { PiSessionStore } from '../../../infra/pi/session-store.js'
 import { ReclaimSeat } from '../idle-pi-reaper.js'
 import { getRuntimeCheckpointStore, initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
-import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
-import type { IExtensionService } from '../../../interfaces.js'
-import type { WorkspaceService } from '../../workspace/workspace-service.js'
+import type { IPiEngine } from '../../ports/pi-engine.js'
+import { createSetup } from './helpers/session-service-setup.js'
 
 const SID = 'sid-checkpoint'
 /** client 空闲信号（u1a）——checkpoint 的 lastActivityAt 权威源。 */
@@ -49,40 +45,6 @@ beforeEach(() => {
 afterAll(() => {
   rmSync(runDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
-
-interface Setup {
-  service: SessionService
-  pm: {
-    getClient: ReturnType<typeof vi.fn>
-    hasClient: ReturnType<typeof vi.fn>
-    destroySession: ReturnType<typeof vi.fn>
-  }
-}
-
-/** 最小装置：真 SessionService（构造期零 fs 触点），pm 只桩本域触达的方法。 */
-function createSetup(): Setup {
-  const client = { lastActivityAt: CLIENT_ACTIVITY_AT, exited: false } as unknown as IPiEngine
-  const pm = {
-    onSessionExit: vi.fn(),
-    getClient: vi.fn(() => client),
-    hasClient: vi.fn(() => false),
-    destroySession: vi.fn(async () => undefined),
-    destroyAll: vi.fn(async () => undefined),
-  }
-  const pmStub = pm as unknown as IProcessManager
-  const service = new SessionService(
-    pmStub,
-    { broadcast: vi.fn(), send: vi.fn(), sendError: vi.fn() },
-    () => ({ attach: vi.fn(), detach: vi.fn() }),
-    tmpdir(),
-    { getExtensionPaths: vi.fn().mockResolvedValue([]) } as unknown as IExtensionService,
-    new PiConfigStore(),
-    new PiSessionStore(),
-    { readGitInfo: vi.fn(() => undefined), pruneStaleCache: vi.fn() },
-    { record: vi.fn(), list: vi.fn(() => []) } as unknown as WorkspaceService,
-  )
-  return { service, pm }
-}
 
 /** 读 checkpoint 主文件条目（不存在返回空数组）。 */
 function readEntries(): Array<Record<string, unknown>> {

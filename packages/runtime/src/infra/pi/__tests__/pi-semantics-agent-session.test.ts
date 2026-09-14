@@ -16,21 +16,9 @@
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-agent-session.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-paths-config-dir-contract.test.ts 范式）。 */
-function locatePiCodingAgentDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
-    if (existsSync(join(candidate, 'config.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiCodingAgentDist, methodWindow } from './helpers/pi-semantics-probe.js'
 
 const PI_DIST = locatePiCodingAgentDist()
 const SKIP_REASON = PI_DIST
@@ -39,18 +27,6 @@ const SKIP_REASON = PI_DIST
 if (!PI_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
 const SESSION_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
-
-/**
- * 提取类方法窗口：从方法头（4 空格缩进）到下一个同缩度方法/字段/文档注释声明。
- * 窗口为空 = 方法消失/改名，调用方须按「漂移」处理（fail 而非静默通过）。
- */
-function methodWindow(text: string, header: string): string {
-  const start = text.indexOf(header)
-  if (start === -1) return ''
-  const rest = text.slice(start + header.length)
-  const next = /\n    (?:async )?[A-Za-z_$][\w$]*[=(]|\n    \/\*\*/.exec(rest)
-  return next ? rest.slice(0, next.index) : rest.slice(0, 4000)
-}
 
 const count = (text: string, needle: string): number => text.split(needle).length - 1
 

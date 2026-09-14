@@ -20,33 +20,13 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-semantics-session-entries.test.ts 范式）。 */
-function locatePiCodingAgentDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
-    if (existsSync(join(candidate, 'config.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiCodingAgentDist, methodWindowUntil } from './helpers/pi-semantics-probe.js'
 
 const PI_DIST = locatePiCodingAgentDist()
 const SKIP_REASON = PI_DIST
   ? ''
   : 'node_modules/@earendil-works/pi-coding-agent/dist 不可达（cwd 上溯 6 级未命中）'
 if (!PI_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
-
-/** 提取类方法窗口（从方法签名到下一个方法签名）。 */
-function methodWindow(text: string, header: string, nextHeader: string): string {
-  const start = text.indexOf(header)
-  if (start === -1) return ''
-  const end = text.indexOf(nextHeader, start)
-  return end === -1 ? text.slice(start, start + 3000) : text.slice(start, end)
-}
 
 /** 行为级断言用：动态 import session-manager.js（取 SessionManager 类做原型桩）。 */
 type SessionManagerModule = {
@@ -68,7 +48,7 @@ describe.skipIf(!PI_DIST)(
     const agentSessionSrc = readFileSync(join(PI_DIST as string, 'core', 'agent-session.js'), 'utf-8')
 
     it('appendCompaction：entry 字面量 details 字段逐字引用入参（无克隆/无白名单）', () => {
-      const win = methodWindow(
+      const win = methodWindowUntil(
         sessionManagerSrc,
         'appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage)',
         'appendCustomEntry(',
