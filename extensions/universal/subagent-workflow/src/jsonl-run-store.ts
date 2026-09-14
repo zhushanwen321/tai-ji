@@ -90,7 +90,7 @@ import {
   pruneStateFilesBeyondCap,
   type RunSnapshot,
 } from "@zhushanwen/subagent-core";
-import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Workflow-record self-describing entry (W17, D4) ─────────
 
@@ -225,16 +225,6 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
 // 行为与收口前一致（差异仅经 core 单源演化时两宿主同步）。
 
 // ── JsonlRunStore ────────────────────────────────────────────
-
-/** Node fs 错误 code 判定（ENOENT = 路径不存在，并发删除场景）。 */
-function isEnoentError(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code: unknown }).code === "ENOENT"
-  );
-}
 
 const logger = getLogger("subagents");
 
