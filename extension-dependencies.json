@@ -279,6 +279,27 @@
           "reason": "运行时经 EventBus emit pending:register/pending:unregister + pi.sendMessage 完成通知（代码层零 import，经 notify.ts 模块级 pi 引用投递）；未加载时通知链路缺失但 bash 后台功能完整（D16 peer 门槛：package.json peerDependencies 声明 optional 版本门槛 workspace:*，发布时解析为实际版本；pi 0.84.1 核实时点无已加载 extensions 枚举 API、后续版本未重验，运行时检测降级为静态声明）"
         }
       ]
+    },
+    {
+      "name": "@zhushanwen/pi-llm-shared",
+      "directory": "extensions/shared/llm-shared",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage/isRecord（src/call.ts、src/config.ts、src/resolve.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/config.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-file-lock",
+          "type": "package",
+          "reason": "代码层静态 import withFileLockSync（src/config.ts top-level import，saveConfig 锁内原子写互斥），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     }
   ]
 }

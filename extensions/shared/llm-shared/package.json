@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-file-lock": "workspace:*"
   },
   "peerDependencies": {

@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, 
 import { dirname, join } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { withFileLockSync } from "@zhushanwen/pi-file-lock";
 
@@ -112,7 +113,7 @@ export function loadConfig<T>(
 		configCache.set(configPath, { mtimeMs: stat.mtimeMs, size: stat.size, config });
 		return clone(config);
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = toErrorMessage(error);
 		onWarning?.(`[llm-shared] Config parse failed at '${configPath}', using default: ${message}`);
 		// 缓存 defaults + 当前 mtime/size，避免每次重读损坏文件（mtime 变化时缓存自动失效）
 		configCache.set(configPath, { mtimeMs: stat.mtimeMs, size: stat.size, config: clone(defaults) });
@@ -184,7 +185,7 @@ export function saveConfig(
 				});
 			} catch (statErr) {
 				// stat 失败不影响保存成功；缓存下次 load 时会重读
-				logger.warn("saveConfig stat after write failed", { detail: { err: statErr instanceof Error ? statErr.message : String(statErr) } });
+				logger.warn("saveConfig stat after write failed", { detail: { err: toErrorMessage(statErr) } });
 			}
 
 			return { success: true };
@@ -194,9 +195,9 @@ export function saveConfig(
 				if (existsSync(tmpPath)) unlinkSync(tmpPath);
 			} catch (cleanupErr) {
 				// tmp 清理失败不能阻塞保存失败的返回；记录原因
-				logger.warn("saveConfig tmp cleanup failed", { detail: { err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr) } });
+				logger.warn("saveConfig tmp cleanup failed", { detail: { err: toErrorMessage(cleanupErr) } });
 			}
-			const message = error instanceof Error ? error.message : String(error);
+			const message = toErrorMessage(error);
 			onWarning?.(`[llm-shared] Failed to save config at '${configPath}': ${message}`);
 			return { success: false, error: `Failed to save config at '${configPath}': ${message}` };
 		}
@@ -206,7 +207,7 @@ export function saveConfig(
 		return withFileLockSync(configPath, writeLocked);
 	} catch (lockErr) {
 		// 锁获取失败（ELOCKED 预算耗尽等）：不降级无锁写（见 docstring），按保存失败返回
-		const message = lockErr instanceof Error ? lockErr.message : String(lockErr);
+		const message = toErrorMessage(lockErr);
 		onWarning?.(`[llm-shared] Config write lock unavailable at '${configPath}': ${message}`);
 		return { success: false, error: `Config write lock unavailable at '${configPath}': ${message}` };
 	}

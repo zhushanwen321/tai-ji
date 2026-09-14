@@ -20,6 +20,7 @@ import type {
 } from "@earendil-works/pi-ai/compat";
 import type { Api, Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ──────────────────────── 类型 ────────────────────────
 
@@ -61,20 +62,37 @@ export type CallLLMResult =
 
 // ──────────────────────── 文本提取 ────────────────────────
 
+/** 类型谓词：content 数组元素是否为 text block（text 字段可缺失，拼接时按 "" 处理）。 */
+function isTextBlock(block: unknown): block is { type: string; text?: string } {
+	return isRecord(block) && block.type === "text";
+}
+
+/**
+ * unknown 安全的 text block 拼接内核：过滤 `type==="text"` 的 block 并 `join(" ")`（不 trim）。
+ *
+ * 非数组输入（含 undefined / 非法 block 元素）安全返回 ""，供消费方对任意 LLM 响应/会话
+ * entry 形状直接调用（ext-simplify-17 D7——rename-session 等包的本地 joinTextBlocks 副本收敛于此）。
+ * trim 是调用方策略（extractText trim，其余调用方自定），内核不含。
+ */
+export function joinTextBlocks(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(isTextBlock)
+		.map((block) => block.text ?? "")
+		.join(" ");
+}
+
 /**
  * 从 AssistantMessage.content 提取所有 text block 拼接并 trim。
  *
  * 参数用结构类型（不直接依赖 AssistantMessage），便于测试 mock —— 调用方传 completeSimple 返回值即可。
  * 无 text block（如纯 ThinkingContent / ToolCall）→ 返回 ""。
+ * trim 契约不变：内部委托 joinTextBlocks 内核再 trim（ext-simplify-17 D7，行为等价由等价探针验证）。
  */
 export function extractText(resp: {
 	content: ReadonlyArray<{ type: string; text?: string }>;
 }): string {
-	return resp.content
-		.filter((block) => block.type === "text")
-		.map((block) => block.text ?? "")
-		.join(" ")
-		.trim();
+	return joinTextBlocks(resp.content).trim();
 }
 
 // ──────────────────────── 调用 ────────────────────────
@@ -143,6 +161,6 @@ export async function callLLM(
 			...(resp.usage ? { usage: resp.usage } : {}),
 		};
 	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		return { ok: false, error: toErrorMessage(error) };
 	}
 }

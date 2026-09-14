@@ -3,7 +3,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { callLLM, extractText } from "../call.ts";
+import { callLLM, extractText, joinTextBlocks } from "../call.ts";
 
 // mock completeSimple —— call.ts 顶层静态 import 会拿到此 mock（探针①已验证静态 import 机制可行，
 // 此处验证 callLLM 逻辑：凭证 narrow / options 构造 / 文本提取 / 错误归一化）。
@@ -279,5 +279,43 @@ describe("extractText", () => {
 
 	it("review: 空 content → ''", () => {
 		expect(extractText({ content: [] })).toBe("");
+	});
+});
+
+describe("joinTextBlocks（unknown 安全内核，D7）", () => {
+	it("text block 过滤拼接：只取 type==='text'，join(' ')，不 trim", () => {
+		expect(
+			joinTextBlocks([
+				{ type: "text", text: "  a" },
+				{ type: "thinking", text: "ignored" },
+				{ type: "text", text: "b  " },
+			]),
+		).toBe("  a b  ");
+	});
+
+	it("非 text block（thinking / tool_call）忽略", () => {
+		expect(joinTextBlocks([{ type: "thinking", text: "x" }, { type: "tool_call" }])).toBe("");
+	});
+
+	it("text 字段缺失的 text block 按 '' 拼接", () => {
+		expect(joinTextBlocks([{ type: "text" }, { type: "text", text: "x" }])).toBe(" x");
+	});
+
+	it("空数组 → ''", () => {
+		expect(joinTextBlocks([])).toBe("");
+	});
+
+	it.each([
+		["undefined", undefined],
+		["null", null],
+		["字符串", "hello"],
+		["数字", 42],
+		["单个 block 对象（非数组）", { type: "text", text: "x" }],
+	])("非数组输入 %s → 安全返回 ''（不 throw）", (_label, raw) => {
+		expect(joinTextBlocks(raw)).toBe("");
+	});
+
+	it("数组内非法元素（null / 非 block 对象）被过滤，不 throw", () => {
+		expect(joinTextBlocks([null, 42, { type: "text", text: "kept" }])).toBe("kept");
 	});
 });
