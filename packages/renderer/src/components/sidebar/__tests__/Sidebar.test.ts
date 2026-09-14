@@ -129,10 +129,8 @@ vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => ({
 vi.mock('@/composables/usePlatformShortcut', () => ({ usePlatformShortcut: () => ({ formatKbd: () => '⌘K' }) }))
 
 // ── mock api/events（onMounted 的 loadSessions / app.info 订阅）──
-// _probeGlobalTypeHandlerCount：Sidebar B3 探针日志行读它（vi.fn(()=>0) 防 undefined 调用）
 vi.mock('@xyz-agent/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
-  _probeGlobalTypeHandlerCount: vi.fn(() => 0),
   dispatchSession: vi.fn(),
   dispatchGlobal: vi.fn(),
 }))
@@ -193,7 +191,7 @@ describe('Sidebar app.info 退订（B3 / 2026-09-14 内存审计 §2.4）', () =
     expect(unsub).toHaveBeenCalledTimes(1)
   })
 
-  it('TC5: 重复挂卸循环对称——每次 mount 订阅一次 / unmount 退订一次（探针计数恒归基线）', () => {
+  it('TC5: 重复挂卸循环对称——每次 mount 订阅一次 / unmount 退订一次（A4 场景：重连重挂后 handler 数恒 1）', () => {
     // 连接抖动模拟：5 轮 mount/unmount，退订函数逐次消费（mock 队列 5 份）
     const unsubs = Array.from({ length: 5 }, () => vi.fn())
     for (const un of unsubs) vi.mocked(onGlobalType).mockReturnValueOnce(un)

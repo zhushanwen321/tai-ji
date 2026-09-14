@@ -185,8 +185,6 @@ export function platformShortcutModule() {
 export function coreTransportApiModule() {
   return {
     onGlobalType: vi.fn(() => () => {}),
-    // [B3 探针] Sidebar.vue 探针日志行读此导出（部分 mock 漏导出会在属性访问时抛错）
-    _probeGlobalTypeHandlerCount: vi.fn(() => 0),
     dispatchSession: vi.fn(),
     dispatchGlobal: vi.fn(),
   }

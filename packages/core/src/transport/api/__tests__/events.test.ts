@@ -64,7 +64,8 @@ describe('events session 通道', () => {
 
 describe('events session 通道 off 删空 Set（B2 / 2026-09-14 内存审计 §2.3）', () => {
   it('最后一个 handler 退订后 Map 无残留条目；非空 Set 保留；on 可重建（语义不变）', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    // 探针日志已降级 debug 级（memory-leak-remediation §4 验收收口），spy 目标同步对齐
+    const logSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
     const before = _probeSessionHandlerEntryCount()
     const h1 = vi.fn()
     const h2 = vi.fn()

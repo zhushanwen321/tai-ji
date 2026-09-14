@@ -46,8 +46,8 @@ export function agentCallLruLinkage(): ChatStoreOptions {
       const evictions = useWorkflowStore()
         .getAgentCallVirtualIdsByMain(mainSid)
         .filter((vid) => !viewed.has(vid))
-      // [B9 验收探针（实施期门，A9 批次验证后降级/移除）] dev 实例观测联动驱逐面：
-      // 主 session 驱逐时释放的分区数 + 豁免命中数（A6「正被查看的分区存活」新活证据）
+      // [B9 验收探针] dev 实例观测联动驱逐面：主 session 驱逐时释放的分区数 + 豁免命中数
+      // （A6「正被查看的分区存活」新活证据）。已按 memory-leak-remediation §4 降级 debug 级（A9 验收完成）。
       if (evictions.length > 0) {
         console.debug(
           `[B9] agentcall LRU 联动驱逐: main=${mainSid} released=${evictions.length} exempted=${viewed.size}`,

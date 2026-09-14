@@ -108,8 +108,6 @@ vi.mock('@/composables/features/chat/useListSync', () => ({ useListSync: vi.fn()
 // ── mock api/events（onMounted 的 loadSessions / app.info 订阅）──
 vi.mock('@xyz-agent/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
-  // [B3 探针] Sidebar.vue 探针日志行读此导出（部分 mock 漏导出会在属性访问时抛错）
-  _probeGlobalTypeHandlerCount: vi.fn(() => 0),
   dispatchSession: vi.fn(),
   dispatchGlobal: vi.fn(),
 }))

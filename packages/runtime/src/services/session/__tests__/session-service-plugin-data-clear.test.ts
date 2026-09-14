@@ -55,6 +55,7 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { IExtensionService, IEventAdapter } from '../../../interfaces.js'
 import type { WorkspaceService } from '../../workspace/workspace-service.js'
 import type { IDispatcherSessionOps, ILifecycleSessionOps, ISessionRegisterDeps } from '../session-internal.js'
+import type { SessionSummary } from '@xyz-agent/shared'
 import type { IConfigStore } from '../../ports/config.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { ScannedSession } from '../types.js'
@@ -180,7 +181,7 @@ function createRestoreLifecycle(service: SessionService, sid: string, bodyFile: 
     getSkillPaths: vi.fn(() => [] as string[]),
     getReplaceSystemPrompt: vi.fn(() => undefined),
     getLaunchPresetOptions: vi.fn(async () => undefined),
-    toSummary: vi.fn((s) => ({
+    toSummary: vi.fn((s): SessionSummary => ({
       id: s.id, label: s.label, cwd: s.cwd, status: 'active',
       lastActiveAt: 1, modelId: 'p/m', tokenCount: 0,
     })),
