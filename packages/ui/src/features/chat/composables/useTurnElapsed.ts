@@ -4,6 +4,13 @@
  * 职责（纯计时关注点，原 misplaced 在展示组件 Turn.vue 内）：
  * - elapsed：streaming 态 setInterval 每秒重算 now-firstTs（live 计时）；
  *   完成态静态 lastTs-firstTs（定格）。
+ * - generatedChars（u3 remove-turn-progress-bar，设计 §2.1）：已生成字符数 =
+ *   Σ normalizeContent(turn.assistants[].content).length（@xyz-agent/shared 同一归一化
+ *   函数，跨 assistant 段整段计入）。节拍与 elapsed 共用同一秒级 interval tick，不新增
+ *   定时器；性能纪律 = 不随 delta 重算（绝不在内容 watcher 里算，只在秒级 tick 与边界点
+ *   算）：挂载算一次（完成/历史 turn 挂载即定格，live≡reload 同一公式重派生）/ streaming
+ *   每秒重算 / isStreaming true→false 停表时重算一次定格；失焦停 tick、恢复可见一次补算，
+ *   语义对齐 elapsed 既有可见性行为。
  * - 可见性停表（Q1-7）：页面失焦（visibilitychange hidden）停止每秒 tick——elapsed 是
  *   Date.now() 绝对差值，停 tick 不丢时间；恢复可见时一次重算即补算失焦期间耗时并重启 tick。
  * - formatElapsed：Xs / Xm SSs 格式化（含 streaming/completed 边界 + 无 assistant 兜底）。
@@ -28,7 +35,7 @@
  * @param onComplete optional isSessionActive true→false 回调（Turn.vue 用它复位 expanded）
  */
 import { ref, watch, onUnmounted, type Ref } from 'vue'
-import type { Message } from '@xyz-agent/shared'
+import { normalizeContent, type Message } from '@xyz-agent/shared'
 
 /** 时间格式化常量（elapsed 计算） */
 const MS_PER_SEC = 1000
@@ -40,8 +47,10 @@ export function useTurnElapsed(
   getIsStreaming: () => boolean,
   getIsSessionActive?: () => boolean,
   onComplete?: () => void,
-): { elapsed: Ref<string>; elapsedSecs: Ref<number>; firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean> } {
+): { elapsed: Ref<string>; elapsedSecs: Ref<number>; firstTs: Ref<number>; lastTs: Ref<number>; isLive: Ref<boolean>; generatedChars: Ref<number> } {
   const elapsedSecs = ref(0)
+  /** 已生成字符数（Σ normalizeContent 口径，节拍见头注释 generatedChars 条目） */
+  const generatedChars = ref(0)
   const firstTs = ref(0)
   const lastTs = ref(0)
   const isLive = ref(getIsStreaming())
@@ -71,6 +80,17 @@ export function useTurnElapsed(
     const m = Math.floor(secs / SEC_PER_MIN)
     const s = secs % SEC_PER_MIN
     return m > 0 ? `${m}m ${String(s).padStart(SEC_PAD_WIDTH, '0')}s` : `${s}s`
+  }
+
+  /**
+   * 重算 generatedChars（u3）：Σ normalizeContent(assistants[].content).length。
+   * 调用点纪律（头注释 generatedChars 条目）：仅秒级 tick 与边界点（挂载/起表/停表/
+   * 恢复可见），禁止在内容变化点（watcher/delta）调用。
+   */
+  function recomputeChars(): void {
+    let total = 0
+    for (const a of getAssistants()) total += normalizeContent(a.content).length
+    generatedChars.value = total
   }
 
   /** visibilitychange listener 挂载标记（幂等挂/摘，防重复注册） */
@@ -105,12 +125,15 @@ export function useTurnElapsed(
   function scheduleTick(): void {
     elapsedTimer = setInterval(() => {
       elapsed.value = formatElapsed()
+      // 与 elapsed 同一 interval tick（不新增定时器）：每秒重算字符数
+      recomputeChars()
     }, MS_PER_SEC)
   }
 
   function startElapsedTimer(): void {
     stopTick()
     elapsed.value = formatElapsed()
+    recomputeChars()
     // listener 仅 streaming 期间挂载（W05 review）：hidden 分支同样要挂——
     // 失焦进入的 streaming 恢复可见时靠它补算重启 tick
     attachVisibilityListener()
@@ -132,12 +155,16 @@ export function useTurnElapsed(
       stopTick()
     } else if (getIsStreaming() && elapsedTimer === null) {
       elapsed.value = formatElapsed()
+      recomputeChars() // 恢复补算（对齐 elapsed 的一次重算语义）
       scheduleTick()
     }
   }
 
-  // 挂载时若已 streaming 即开始 live 计时
+  // 挂载时若已 streaming 即开始 live 计时。
+  // generatedChars 挂载算一次：streaming turn 的首算在 startElapsedTimer 内（不重复算），
+  // 完成/历史 turn 走 else 分支挂载即定格（live≡reload 同一公式重派生）。
   if (getIsStreaming()) startElapsedTimer()
+  else recomputeChars()
 
   // 计时器：isStreaming true→false 停表定格，false→true 开始 live 计时。
   // 仅关注文本生成耗时，不看 ask-user 等待（ask-user 期间 message 已 complete，isStreaming=false）。
@@ -146,9 +173,10 @@ export function useTurnElapsed(
     (nw, old) => {
       isLive.value = nw
       if (old && !nw) {
-        // 文本流完：停表定格
+        // 文本流完：停表定格（isStreaming true→false 重算一次，读到权威内容后定格）
         stopElapsedTimer()
         elapsed.value = formatElapsed()
+        recomputeChars()
       } else if (!old && nw) {
         startElapsedTimer()
       }
@@ -174,5 +202,5 @@ export function useTurnElapsed(
     stopElapsedTimer()
   })
 
-  return { elapsed, elapsedSecs, firstTs, lastTs, isLive }
+  return { elapsed, elapsedSecs, firstTs, lastTs, isLive, generatedChars }
 }

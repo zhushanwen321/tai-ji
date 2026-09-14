@@ -47,6 +47,7 @@
         :first-ts="firstTs"
         :last-ts="lastTs"
         :is-live="isLive"
+        :generated-chars="generatedChars"
         :turn-index="turn.index"
         :turn-key="turnStableId(turn)"
         :session-id="sessionId"
@@ -290,7 +291,7 @@ function onToggleTakeover(): void {
 /**
  * 工作耗时 live 计时。
  */
-const { elapsed, elapsedSecs, firstTs, lastTs, isLive } = useTurnElapsed(
+const { elapsed, elapsedSecs, firstTs, lastTs, isLive, generatedChars } = useTurnElapsed(
   () => props.turn.assistants,
   () => isStreaming.value,
   () => sessionActive.value,

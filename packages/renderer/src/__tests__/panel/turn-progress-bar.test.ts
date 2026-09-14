@@ -1,14 +1,17 @@
 /**
- * TurnProgressBar 组件行为测试（session-dead-structural-fixes §4 V5① 前端部分 / u4 验收③④）。
+ * TurnProgressBar 警示条行为测试（remove-turn-progress-bar 设计 §2.2 / u2 验收 A1/A4/A5）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者白盒：驱动真实 pinia chatStore 事件流（setOccupancy + applyMessageEvent），
- *   断言 core useTurnProgress 派生快照经组件渲染落地
- * - 使用者黑盒：每条用例至少一个用户可见 DOM 断言（testid 文本/存在性）
- * - 观察者形态：v-if 生命周期（turn 结束条消失、无活跃无 DOM）
+ *   断言 core useTurnProgress 派生快照（u1 收窄后 { turnElapsedMs, warn } 两字段）经组件渲染落地
+ * - 使用者黑盒：每条用例至少一个用户可见 DOM 断言（testid 存在性/文本/警示色 class）
+ * - 观察者形态：warn-only 渲染生命周期（常态零 DOM → warn 出现 → snooze/turn 结束消失）
  *
- * 附 i18n 文案断言（u4 验收③）：zh-CN/en-US sidebar.turnProgress 全部文案无判断词
- * （D7 文案纪律：卡死/无响应/异常/建议中止类禁用）。
+ * 附 i18n 文案断言（D7 文案纪律）：zh-CN/en-US sidebar.turnProgress 剩余五键文案无判断词
+ * + 键集合恰为保留面（四死键 generatedChars/toolElapsed/awaitingUser/durationSec 已删，A8②）。
+ *
+ * warn 推进经 fake timers（core 默认时钟 Date.now 被 fake 接管，advanceTimersByTime 跨阈值），
+ * 无真实等待。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/turn-progress-bar.test.ts
  */
@@ -35,6 +38,12 @@ function mountBar() {
   return mount(TurnProgressBar, { props: { sessionId: SID } })
 }
 
+/** 跨过警示阈值（fake 时钟推进阈值 + 1s，秒级 tick 重算快照后 warn=true）。 */
+async function crossWarnThreshold() {
+  vi.advanceTimersByTime(TURN_PROGRESS_WARN_THRESHOLD_MS + 1_000)
+  await nextTick()
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   setActivePinia(createPinia())
@@ -44,53 +53,70 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('TurnProgressBar 使用者视角（V5①）', () => {
-  it('无活跃 turn：不渲染（常驻条 v-if 生命周期）', () => {
+describe('TurnProgressBar warn-only 渲染（u2）', () => {
+  it('无活跃 turn：不渲染（v-if 生命周期）', () => {
     const wrapper = mountBar()
     expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
   })
 
-  it('活跃 turn：展示本 turn 时长 + 已生成字符（流式 delta 计入）', async () => {
+  it('A1 常态（活跃 <10min）：零 DOM 占用——不渲染 turn-progress-bar', async () => {
     const store = useChatStore()
     const wrapper = mountBar()
     startRealTurn(store)
     await nextTick()
-    store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'hello world' } })
+    // 推进到阈值前 1s：turn 活跃、快照存在但 warn=false → 常态零视觉占用
+    vi.advanceTimersByTime(TURN_PROGRESS_WARN_THRESHOLD_MS - 1_000)
     await nextTick()
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
+  })
+
+  it('A4 warn 态（≥10min）：警示色 + 本 turn 时长 + 中止/继续等待两按钮', async () => {
+    const store = useChatStore()
+    const wrapper = mountBar()
+    startRealTurn(store)
+    await nextTick()
+    await crossWarnThreshold()
+    // 用户可见：警示条出现（阈值 10min → 时长文案落在分钟档「10 分钟」）
     const bar = wrapper.find('[data-testid="turn-progress-bar"]')
     expect(bar.exists()).toBe(true)
-    // 用户可见事实文案：turn 时长段 + 字符段（delta 已计入）
-    expect(bar.find('[data-testid="turn-progress-elapsed"]').text()).toContain('turn')
-    expect(bar.find('[data-testid="turn-progress-chars"]').text()).toContain('11')
-    expect(bar.find('[data-testid="turn-progress-tool"]').exists()).toBe(false)
+    expect(bar.find('[data-testid="turn-progress-elapsed"]').text()).toContain('10 分钟')
+    // 警示色（warn 边框/底色 + Clock 警示色 class——色彩由 token CSS 落地）
+    expect(bar.classes()).toContain('bg-warn-soft')
+    expect(bar.classes()).toContain('border-warn/35')
+    expect(bar.find('svg').classes()).toContain('text-warn')
+    // 两个中性操作项（D7：不预置推荐，同权重）
+    expect(bar.find('[data-testid="turn-progress-abort"]').text()).toBe('中止此 turn')
+    expect(bar.find('[data-testid="turn-progress-keep-waiting"]').text()).toBe('继续等待')
   })
 
-  it('当前工具 running：展示工具名与工具时长；工具收口后该段消失', async () => {
+  it('「中止此 turn」：点击 emit abort（由父组件接既有 abort 链路，组件本身不触 RPC）', async () => {
     const store = useChatStore()
     const wrapper = mountBar()
     startRealTurn(store)
-    store.applyMessageEvent(SID, {
-      type: 'message.tool_call_start',
-      payload: { sessionId: SID, entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'write', arguments: {} } },
-    })
     await nextTick()
-    vi.advanceTimersByTime(2_000)
-    expect(wrapper.find('[data-testid="turn-progress-tool"]').text()).toContain('write')
-    store.applyMessageEvent(SID, {
-      type: 'message.tool_call_end',
-      payload: {
-        sessionId: SID,
-        entry: {
-          type: 'message', id: 'tr1', parentId: 'a1', timestamp: new Date().toISOString(),
-          message: { role: 'toolResult', toolCallId: 'tc1', content: [{ type: 'text', text: 'ok' }], timestamp: Date.now() },
-        },
-      },
-    })
-    await nextTick()
-    expect(wrapper.find('[data-testid="turn-progress-tool"]').exists()).toBe(false)
+    await crossWarnThreshold()
+    await wrapper.find('[data-testid="turn-progress-abort"]').trigger('click')
+    expect(wrapper.emitted('abort')).toHaveLength(1)
   })
 
-  it('ask_user pending 豁免态（D6）：只显示「在等待你的输入」分型，不显示计时事实段', async () => {
+  it('A5 「继续等待」：bar 消失且本 turn 内持续抑制（再推进时间也不复现）', async () => {
+    const store = useChatStore()
+    const wrapper = mountBar()
+    startRealTurn(store)
+    await nextTick()
+    await crossWarnThreshold()
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="turn-progress-keep-waiting"]').trigger('click')
+    // warn-only 渲染：warn 抑制 = 整条消失（非常态条收起操作项的旧形态）
+    await nextTick()
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
+    // snooze 持续本 turn：继续推进时间不复现
+    vi.advanceTimersByTime(5 * 60 * 1000)
+    await nextTick()
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
+  })
+
+  it('A5 ask_user pending 豁免（D6）：等待期即使超阈值警示条也不出现', async () => {
     const store = useChatStore()
     const extensionUI = useExtensionUIStore()
     const wrapper = mountBar()
@@ -100,54 +126,24 @@ describe('TurnProgressBar 使用者视角（V5①）', () => {
       sessionId: SID, requestId: 'r1', method: 'select', askUser: true, receivedAt: Date.now(),
     })
     await nextTick()
-    vi.advanceTimersByTime(1_000)
-    await nextTick()
-    expect(wrapper.find('[data-testid="turn-progress-awaiting"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="turn-progress-elapsed"]').exists()).toBe(false)
-    // 豁免态不出现操作项（警示不参与）
-    expect(wrapper.find('[data-testid="turn-progress-abort"]').exists()).toBe(false)
+    // 豁免是 core warn 计算输入（非渲染后隐藏）：超阈值也不渲染
+    await crossWarnThreshold()
+    expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
   })
 
-  it('超阈值：警示色 + 中性操作项出现；「继续等待」抑制警示但事实条保留', async () => {
+  it('turn 结束（occupancy idle）：警示条自动消失（观察者形态）', async () => {
     const store = useChatStore()
     const wrapper = mountBar()
     startRealTurn(store)
     await nextTick()
-    vi.advanceTimersByTime(TURN_PROGRESS_WARN_THRESHOLD_MS + 1_000)
-    await nextTick()
-    // 警示态（用户可见：操作项两个中性按钮，不预置推荐）
-    expect(wrapper.find('[data-testid="turn-progress-abort"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="turn-progress-keep-waiting"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="turn-progress-abort"]').text()).toContain('turn')
-    // 「继续等待」：警示收起，事实条仍在（不是消失）
-    await wrapper.find('[data-testid="turn-progress-keep-waiting"]').trigger('click')
-    expect(wrapper.find('[data-testid="turn-progress-keep-waiting"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="turn-progress-elapsed"]').exists()).toBe(true)
-  })
-
-  it('turn 结束（occupancy idle）：展示自动消失（观察者形态）', async () => {
-    const store = useChatStore()
-    const wrapper = mountBar()
-    startRealTurn(store)
-    await nextTick()
+    await crossWarnThreshold()
     expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(true)
     store.setOccupancy(SID, { turn: 'idle', compacting: false, bash: false })
     await nextTick()
     expect(wrapper.find('[data-testid="turn-progress-bar"]').exists()).toBe(false)
   })
 
-  it('「中止此 turn」：点击 emit abort（由父组件接既有 abort 链路，组件本身不触 RPC）', async () => {
-    const store = useChatStore()
-    const wrapper = mountBar()
-    startRealTurn(store)
-    await nextTick()
-    vi.advanceTimersByTime(TURN_PROGRESS_WARN_THRESHOLD_MS + 1_000)
-    await nextTick()
-    await wrapper.find('[data-testid="turn-progress-abort"]').trigger('click')
-    expect(wrapper.emitted('abort')).toHaveLength(1)
-  })
-
-  it('≥1h 时长桶：formatDuration 进位到「小时+分」档（durationHourMin，R3 S-3 补测）', async () => {
+  it('≥1h 时长桶：formatDuration 进位到「小时+分」档（durationHourMin）', async () => {
     const store = useChatStore()
     const wrapper = mountBar()
     startRealTurn(store)
@@ -161,7 +157,7 @@ describe('TurnProgressBar 使用者视角（V5①）', () => {
   })
 })
 
-describe('i18n 文案纪律断言（u4 验收③，D7）', () => {
+describe('i18n 文案纪律断言（D7）', () => {
   /** D7 禁判断词清单：只陈述事实，禁止「卡死/无响应/异常/建议」类措辞（双语）。 */
   const FORBIDDEN = [
     '卡死', '卡住', '无响应', '没有响应', '异常', '建议', '停滞', '可能失败', '疑似',
@@ -183,7 +179,7 @@ describe('i18n 文案纪律断言（u4 验收③，D7）', () => {
     const section = (sidebar as { turnProgress: Record<string, unknown> }).turnProgress
     expect(section).toBeDefined()
     const leaves = collectLeafTexts(section, 'turnProgress')
-    expect(leaves.length).toBeGreaterThanOrEqual(9)
+    expect(leaves.length).toBeGreaterThanOrEqual(5)
     for (const leaf of leaves) {
       for (const word of FORBIDDEN) {
         expect(leaf.toLowerCase()).not.toContain(word.toLowerCase())
@@ -191,9 +187,11 @@ describe('i18n 文案纪律断言（u4 验收③，D7）', () => {
     }
   })
 
-  it('双语 key 集合一致（对齐检查）', () => {
+  it('双语键集合一致且恰为保留五键（四死键已删，A8② 组件侧锁定）', () => {
+    const expected = ['abortTurn', 'durationHourMin', 'durationMin', 'keepWaiting', 'turnElapsed'].sort()
     const zh = Object.keys((zhSidebar as { turnProgress: Record<string, unknown> }).turnProgress).sort()
     const en = Object.keys((enSidebar as { turnProgress: Record<string, unknown> }).turnProgress).sort()
-    expect(en).toEqual(zh)
+    expect(zh).toEqual(expected)
+    expect(en).toEqual(expected)
   })
 })

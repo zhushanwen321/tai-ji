@@ -1,16 +1,21 @@
 /**
- * turn 进展观测面单测（session-dead-structural-fixes §3.3 D6 C1 方案一 / §3.1 成功路径 C）。
+ * turn 进展观测面单测（session-dead-structural-fixes §3.3 D6 C1 方案一 / §3.1 成功路径 C；
+ * 收窄形态见 remove-turn-progress-bar 设计 §2.3——snapshot 仅 turnElapsedMs/warn 两字段）。
  *
  * 信号源走真实事件流入口：applyMessageEvent（message_start / text_delta / tool_call_*）
  * + store.setOccupancy（session.occupancy 帧 renderer 侧消费入口，useChat
- * handleSessionOccupancy 同一落点）。锁定四个验收语义：
- * - 结构事件边界驱动计时（u4 验收②）：turn-start 起算、tool 边界起止
- * - delta 只累计字数不重置计时（u4 验收②）：elapsed 仅按墙钟走
- * - ask_user pending 豁免（D6 豁免态 + u4 验收②）：超阈值不出警示、分型 awaitingUser
+ * handleSessionOccupancy 同一落点）。锁定验收语义：
+ * - snapshot 收窄不变量：公共接口仅 turnElapsedMs/warn 两字段（snapshot 公共接口 ≡ 运行时
+ *   消费面，设计 §2.3）
+ * - 结构事件边界驱动计时：turn-start 起算，elapsed 仅按墙钟走（delta/事件帧
+ *   不重置计时基线）
+ * - ask_user pending 豁免（D6 豁免态）：经 warn 行为断言——超阈值也不 warn，
+ *   豁免解除后恢复（awaitingUser 不再暴露于 snapshot）
+ * - 「继续等待」snooze：本 turn 内抑制警示，turn 结束后新 turn 复位
  * - turn 结束（occupancy → idle）展示消失 + 记忆复位（设计：展示自动消失，reload
  *   天然无残留——纯本地派生无持久化）
  * - 切 session 分区记忆以 turn 锚守门（F-U1）：后台 turn 已更替 → 切入重落基线不虚高；
- *   同 turn 切回 → 字符累计与计时基线保留
+ *   同 turn 切回 → 计时基线保留
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/turn-progress.test.ts
  */
@@ -40,36 +45,13 @@ function startTurnEvents(store: ChatStoreInstance, sid = SID, messageId = 'a1'):
   store.applyMessageEvent(sid, { type: 'message.message_start', payload: { sessionId: sid, messageId } })
 }
 
-function toolCallStartEvent(store: ChatStoreInstance, sid = SID): void {
-  store.applyMessageEvent(sid, {
-    type: 'message.tool_call_start',
-    payload: { sessionId: sid, entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'write', arguments: {} } },
-  })
-}
-
-function toolCallEndEvent(store: ChatStoreInstance, sid = SID): void {
-  store.applyMessageEvent(sid, {
-    type: 'message.tool_call_end',
-    payload: {
-      sessionId: sid,
-      entry: {
-        type: 'message',
-        id: 'tr1',
-        parentId: 'a1',
-        timestamp: new Date().toISOString(),
-        message: { role: 'toolResult', toolCallId: 'tc1', content: [{ type: 'text', text: 'done' }], timestamp: Date.now() },
-      },
-    },
-  })
-}
-
-/** 推进墙钟并跑一个 tick（interval 周期 1s），返回最新快照。 */
+/** 推进墙钟并跑一个 tick（interval 周期 1s）。 */
 async function advanceAndTick(ms: number): Promise<void> {
   vi.advanceTimersByTime(ms)
   await nextTick()
 }
 
-describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
+describe('turn-progress 结构事件边界驱动', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -77,20 +59,27 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     vi.useRealTimers()
   })
 
+  it('snapshot 收窄形态：公共接口仅 turnElapsedMs/warn 两字段（设计 §2.3 收窄不变量）', async () => {
+    const { scope, store, sut } = makeEnv()
+    startTurnEvents(store)
+    await nextTick()
+    expect(Object.keys(sut.snapshot.value!).sort()).toEqual(['turnElapsedMs', 'warn'])
+    scope.stop()
+  })
+
   it('turn-start（occupancy generating + message_start）起计时，墙钟推进即 elapsed 增长', async () => {
     const { scope, store, sut } = makeEnv()
     vi.advanceTimersByTime(100_000) // 事件到达前墙钟基线
     startTurnEvents(store)
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
+    expect(sut.snapshot.value?.turnElapsedMs).toBe(0)
     vi.advanceTimersByTime(5_000)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(5_000)
     // 计时基线 = message_start 写入的 assistant timestamp（事件点），非 watch 触发点
-    expect(sut.snapshot.value?.generatedChars).toBe(0)
     scope.stop()
   })
 
-  it('delta 只累计字数不重置计时：elapsed 仅按墙钟走，不受 delta 帧影响', async () => {
+  it('delta 不重置计时：elapsed 仅按墙钟走，不受 delta 帧影响', async () => {
     const { scope, store, sut } = makeEnv()
     startTurnEvents(store)
     await nextTick()
@@ -98,37 +87,11 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     expect(sut.snapshot.value?.turnElapsedMs).toBe(60_000)
     store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'hello' } })
     await nextTick()
-    // delta 到达即累计字数（watch 事件驱动），计时基线不动
-    expect(sut.snapshot.value?.generatedChars).toBe(5)
+    // delta 到达（事件边沿）不动计时基线
     expect(sut.snapshot.value?.turnElapsedMs).toBe(60_000)
     vi.advanceTimersByTime(5_000)
     // 若 delta 重置了计时，此处会是 5_000 而非 65_000
     expect(sut.snapshot.value?.turnElapsedMs).toBe(65_000)
-    store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: ' world' } })
-    await nextTick()
-    expect(sut.snapshot.value?.generatedChars).toBe(11)
-    scope.stop()
-  })
-
-  it('tool 边界：tool_call_start 出现当前工具与时长，tool_call_end 收口消失', async () => {
-    const { scope, store, sut } = makeEnv()
-    startTurnEvents(store)
-    await nextTick()
-    expect(sut.snapshot.value?.toolName).toBeNull()
-    vi.advanceTimersByTime(10_000)
-    toolCallStartEvent(store)
-    await nextTick()
-    vi.advanceTimersByTime(2_000)
-    expect(sut.snapshot.value?.toolName).toBe('write')
-    expect(sut.snapshot.value?.toolElapsedMs).toBe(2_000)
-    // 工具执行期间的 delta 不重置工具计时基线
-    store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'x' } })
-    await nextTick()
-    expect(sut.snapshot.value?.toolElapsedMs).toBe(2_000)
-    toolCallEndEvent(store)
-    await nextTick()
-    expect(sut.snapshot.value?.toolName).toBeNull()
-    expect(sut.snapshot.value?.toolElapsedMs).toBeNull()
     scope.stop()
   })
 
@@ -147,7 +110,6 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     await nextTick()
     vi.advanceTimersByTime(1_000)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(1_000)
-    expect(sut.snapshot.value?.generatedChars).toBe(0)
     scope.stop()
   })
 
@@ -161,12 +123,7 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     const sut = scope.run(() => useTurnProgress(sid, store))!
     await nextTick()
     // 挂载即有快照（immediate watch），计时从 message_start 事件点起算（50s），不是挂载点（58s）
-    expect(sut.snapshot.value?.active).toBe(true)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(8_000)
-    // 正在流式的消息已产出部分计入已生成字符
-    store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'abc' } })
-    await nextTick()
-    expect(sut.snapshot.value?.generatedChars).toBe(3)
     scope.stop()
   })
 
@@ -183,7 +140,6 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     vi.advanceTimersByTime(5_000)
     sid.value = SID
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(25_000)
     scope.stop()
   })
@@ -208,41 +164,34 @@ describe('turn-progress 结构事件边界驱动（u4 验收②）', () => {
     // 切入 B：锚失配（b1 ≠ 当前末组首条 b2）→ 重落基线；elapsed ≈ 2s 而非从 b1 记忆（t=0）虚高
     sid.value = 's-other'
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(2_000)
-    expect(sut.snapshot.value?.generatedChars).toBe(0)
     scope.stop()
   })
 
-  it('turn 内多条 assistant 消息（text→toolCall→text）：切走再切回，字符累计与计时保留（F-U1②）', async () => {
+  it('turn 内多条 assistant 消息（text→toolCall→text）：切走再切回计时保留，后续段不重置基线（F-U1②）', async () => {
     const { scope, store, sut, sid } = makeEnv()
     startTurnEvents(store, SID, 'a1')
-    store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'hello' } })
     await nextTick()
-    expect(sut.snapshot.value?.generatedChars).toBe(5)
     vi.advanceTimersByTime(10_000)
-    // 切到 idle session（prev 为非活跃源——锚方案前此路径无条件 startTurn，累计被重置丢失）
+    // 切到 idle session（prev 为非活跃源——锚方案前此路径无条件 startTurn，基线被重置丢失）
     sid.value = 's-other'
     await nextTick()
     expect(sut.snapshot.value).toBeNull()
     vi.advanceTimersByTime(5_000)
-    // 切回：同 turn（锚未变）→ 前段累计与计时基线保留
+    // 切回：同 turn（锚未变）→ 计时基线保留
     sid.value = SID
     await nextTick()
-    expect(sut.snapshot.value?.generatedChars).toBe(5)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(15_000)
-    // turn 内第二条 assistant（后续段）整条计入，前段不丢
+    // turn 内第二条 assistant（后续段）：锚匹配（末组首条仍 a1）→ 基线不重置
     store.applyMessageEvent(SID, { type: 'message.message_start', payload: { sessionId: SID, messageId: 'a2' } })
     store.applyMessageEvent(SID, { type: 'message.text_delta', payload: { sessionId: SID, delta: 'world!' } })
     await nextTick()
-    expect(sut.snapshot.value?.generatedChars).toBe(11)
-    // 计时基线不因 turn 内新 assistant 消息重置（仍从 a1 事件点起算）
     expect(sut.snapshot.value?.turnElapsedMs).toBe(15_000)
     scope.stop()
   })
 })
 
-describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () => {
+describe('turn-progress 阈值警示与豁免（D6）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -250,7 +199,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     vi.useRealTimers()
   })
 
-  it('阈值 10 分钟（P-3 实测后定值）：仅用于警示色切换，未超不警示', async () => {
+  it('阈值 10 分钟（P-3 实测后定值）：仅用于警示切换，未超不警示', async () => {
     const { scope, store, sut } = makeEnv()
     expect(TURN_PROGRESS_WARN_THRESHOLD_MS).toBe(600_000)
     startTurnEvents(store)
@@ -262,7 +211,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     scope.stop()
   })
 
-  it('ask_user pending 豁免：超阈值也不出警示，分型 awaitingUser=true（D6 豁免态）', async () => {
+  it('ask_user pending 豁免（D6）：超阈值也不 warn，豁免解除后警示恢复（经 warn 行为断言）', async () => {
     const { scope, store, sut, awaiting } = makeEnv()
     startTurnEvents(store)
     await nextTick()
@@ -270,8 +219,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     expect(sut.snapshot.value?.warn).toBe(true)
     awaiting.value = true
     vi.advanceTimersByTime(1_000)
-    // 等待用户输入期间：警示不参与，事实计时照常（turnElapsedMs 继续走）
-    expect(sut.snapshot.value?.awaitingUser).toBe(true)
+    // 等待用户输入期间：警示不参与，计时照常（elapsed 继续走）
     expect(sut.snapshot.value?.warn).toBe(false)
     expect(sut.snapshot.value?.turnElapsedMs).toBeGreaterThanOrEqual(TURN_PROGRESS_WARN_THRESHOLD_MS)
     // 豁免解除后警示恢复（豁免是态不是一次性的）
@@ -289,7 +237,6 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     expect(sut.snapshot.value?.warn).toBe(true)
     sut.snoozeWarn()
     expect(sut.snapshot.value?.warn).toBe(false)
-    expect(sut.snapshot.value?.active).toBe(true)
     // turn 结束 → 新 turn：snooze 不跨 turn
     store.setOccupancy(SID, { turn: 'idle', compacting: false, bash: false })
     await nextTick()
@@ -307,7 +254,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     sid.value = SID
     startTurnEvents(store)
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
+    expect(sut.snapshot.value?.turnElapsedMs).toBe(0)
     scope.stop()
   })
 
@@ -317,7 +264,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     const { scope, store, sut, sid } = makeEnv()
     startTurnEvents(store)
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
+    expect(sut.snapshot.value).not.toBeNull()
     // 后台清空 sid（切 landing / session 销毁路径）：watch 边沿与 tick 双路都必须收口
     sid.value = null
     await nextTick()
@@ -336,7 +283,6 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     await nextTick()
     vi.advanceTimersByTime(2_000)
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
     expect(sut.snapshot.value?.turnElapsedMs).toBe(2_000)
     scope.stop()
   })
@@ -345,7 +291,7 @@ describe('turn-progress 阈值警示与豁免（D6/D7，u4 验收②③）', () 
     const { scope, store, sut } = makeEnv()
     startTurnEvents(store)
     await nextTick()
-    expect(sut.snapshot.value?.active).toBe(true)
+    expect(sut.snapshot.value).not.toBeNull()
     // 不 await nextTick：模拟「watch 尚未 flush、interval tick 先到」的边沿漏检窗口
     store.setOccupancy(SID, { turn: 'idle', compacting: false, bash: false })
     vi.advanceTimersByTime(1_000)

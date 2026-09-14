@@ -85,12 +85,8 @@ export default {
   // 文案纪律（D7）：只陈述事实，禁止判断词（卡死/无响应/异常/建议中止）；操作项中性不预置推荐
   turnProgress: {
     turnElapsed: '本 turn 已 {duration}',
-    toolElapsed: '当前 {tool} 已 {duration}',
-    generatedChars: '已生成 {chars} 字符',
-    awaitingUser: '在等待你的输入',
     abortTurn: '中止此 turn',
     keepWaiting: '继续等待',
-    durationSec: '{sec} 秒',
     durationMin: '{min} 分钟',
     durationHourMin: '{h} 小时 {min} 分',
   },

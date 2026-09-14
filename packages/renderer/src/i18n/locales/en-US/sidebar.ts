@@ -86,12 +86,8 @@ export default {
   // Copy discipline (D7): state facts only, no judgment words (stuck/unresponsive/error); neutral actions, no preset recommendation
   turnProgress: {
     turnElapsed: 'Turn running for {duration}',
-    toolElapsed: '{tool} running for {duration}',
-    generatedChars: '{chars} chars generated',
-    awaitingUser: 'Waiting for your input',
     abortTurn: 'Abort this turn',
     keepWaiting: 'Keep waiting',
-    durationSec: '{sec}s',
     durationMin: '{min} min',
     durationHourMin: '{h}h {min}m',
   },

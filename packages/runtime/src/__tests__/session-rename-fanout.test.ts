@@ -1,7 +1,7 @@
 /**
  * createSessionRenamedHandler 单元测试（rename-session-three-modes 设计 D4）。
  *
- * 覆盖（impl-plan u4 验收条款 ② 双断言）：
+ * 覆盖（双断言）：
  * - 得名事件：setLabelCache(sid, name) 后触发整表广播（broadcastSessionList 被调），
  *   且先写后广播——整表广播现算直读内存 label，顺序错会广播旧名
  * - 清名事件（name undefined）：label 回落 basename(cwd) 派生而非空串（与 scanner

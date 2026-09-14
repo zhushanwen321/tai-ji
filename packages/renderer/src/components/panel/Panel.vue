@@ -108,16 +108,17 @@
            （App 装配层 installInboundFrameGuard 已安装）；组件内部按 sessionId 自判 tripped，
            非本 session 不渲染（不连坐）。恢复动作 = 用户切走再切回本会话。 -->
       <InboundFrameDroppedNotice v-if="sessionId" :session-id="sessionId" />
-      <!-- [session-dead V5② 接通] turn 进展观测条挂载在 overlay/composer 互斥对**之外**：
-           ask_user 等待期 Composer 整体卸载（下方 v-if/v-else-if 互斥），观测条原挂
-           Composer 内会在等待期一起消失——awaitingUser 分型文案无处渲染（Gate B 实测
-           断点）。提升后等待期观测条常驻并切换「在等待你的输入」分型。abort 走
-           useChat.abort 既有链路（与 Composer stop 同链；Composer.onStopClick 的
-           staging abortIfInProgress 优先级不保留——staging 是 fork/handoff 预备短态，
-           与观测条 warn 态（>10min 活跃）无实际叠加窗口）。
-           dead 排除（W6「dead 优先级吞掉活跃 UI」同语义）：markSessionError 不复位
+      <!-- [remove-turn-progress-bar §2.2 warn 化] turn 超时警示条（warn 告警条）挂载在
+           overlay/composer 互斥对**之外**：ask_user 等待期 Composer 整体卸载（下方
+           v-if/v-else-if 互斥），警示条独立挂载不受影响——组件内部自判渲染
+           （snapshot && snapshot.warn，常态零 DOM；ask_user 豁免期 core 抑制 warn，
+           bar 不出现，挂载点空转无害）。abort 走 useChat.abort 既有链路（与 Composer
+           stop 同链；Composer.onStopClick 的 staging abortIfInProgress 优先级不保留
+           ——staging 是 fork/handoff 预备短态，与警示条 warn 态（>10min 活跃）无实际
+           叠加窗口）。
+           dead 排除保留（W6「dead 优先级吞掉活跃 UI」同语义）：markSessionError 不复位
            occupancy，pi 异常退出后 turn 维度可能残留非 idle——不排除则 dead 占位上方
-           挂一张永走的计时条（状态撒谎复发）。 -->
+           挂一张永走的警示条（状态撒谎复发）。 -->
       <TurnProgressBar
         v-if="panelView.kind !== 'dead'"
         :session-id="sessionId"

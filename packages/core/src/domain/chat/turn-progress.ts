@@ -1,37 +1,40 @@
 /**
- * turn 进展观测面（session-dead-structural-fixes §3.3 D6 C1 方案一 / 设计 §3.1 成功路径 C）。
+ * turn 进展观测面（session-dead-structural-fixes §3.3 D6 C1 方案一 / 设计 §3.1 成功路径 C；
+ * 收窄形态见 remove-turn-progress-bar 设计 §2.3）。
  *
  * 职责：从 chat store 既有事件流投影（occupancy 分区 + messages 分区）纯本地派生
- * 「本 turn 已进行时长 / 当前工具调用已进行时长 / 已生成字符数」。零协议改动——
- * 信号源 = 结构事件边界的既有落点：
+ * 「本 turn 已进行时长 + 超阈值警示（warn）」。零协议改动——信号源 = 结构事件边界的
+ * 既有落点：
  * - turn 边界：`session.occupancy` 帧 turn 维度（generating 由 message_start(assistant)
  *   驱动、idle 由 agent_settled 驱动——设计 D1 已裁定的 turn-start 物理来源），
  *   dispatching/settling 计入活跃（用户视角 turn 从发送起、到 settled 收口止）。
- * - 工具边界：messages 分区末位 assistant 的 running toolCall（message.tool_call_start
- *   effect 写入 startTime，tool_call_end 收口）。
- * - 字符累计：watch 事件帧驱动增量累计（末位 assistant 内容长度差），delta 只累计
- *   字数不重置任何计时基线；展示刷新用 setInterval 秒级 tick，不每 delta 重算。
+ * - 展示刷新用 setInterval 秒级 tick，事件边沿不重算快照。
  *
- * ask_user 豁免（D6 豁免态）：extension-ui pending 期间展示「在等待你的输入」分型
- * （awaitingUser），停滞警示不参与——超阈值也不出警示色（漏判 = 措辞不准零伤害，
- * 与旧 watchdog 拿豁免做杀/不杀判据的本质区别）。豁免信号由消费方注入（core 不依赖
- * renderer extensionUIStore，结构反转：`getAwaitingUser` 回调）。
+ * ask_user 豁免（D6 豁免态）：extension-ui pending 期间警示不参与——超阈值也不 warn
+ * （漏判 = 措辞不准零伤害，与旧 watchdog 拿豁免做杀/不杀判据的本质区别）。豁免信号由
+ * 消费方注入（core 不依赖 renderer extensionUIStore，结构反转：`getAwaitingUser` 回调）；
+ * awaitingUser 不进 snapshot（分型文案已随 warn 化删除），降为 tick 内局部变量，仅作
+ * warn 计算输入：`warn = !awaitingUser && !snoozed && elapsed ≥ 阈值`。
  *
- * 生命周期：turn 结束（occupancy → idle）展示快照归 null（Composer 展示自动消失）；
- * 纯本地派生无持久化——reload 后天然无残留（设计 §3.3 D6 方案一定性）。
+ * 生命周期：turn 结束（occupancy → idle）快照归 null（消费方渲染自动消失）；纯本地
+ * 派生无持久化——reload 后天然无残留。
  *
  * per-session 隔离：ADR-0049 Map 分区范式（useSessionScopedState），分区存跨帧记忆
- * （turnStartedAt / turn 锚 / 字符累计基线 / snooze 标记），切 session 保留、切回延续计时。
- * 记忆消费以 turn 锚守门（锚 = 记忆 turn 的首条 assistant 消息 id，与 message-turns SSOT
- * 分组的当前末组首条 assistant 比对）：锚匹配（同 turn 切回）→ 延续计时与字符累计；
- * turn 已在后台更替（锚失配）→ 重落基线（startTurn），elapsed 不从陈旧记忆虚高。
- * 残余窗口：锚失配但新 turn 尚无 assistant 消息（dispatching 空窗切入）——新 turn 真实
- * 起点不可观测，基线暂取末位 assistant（属上一 turn）timestamp 偏虚高，message_start
- * 事件到达即重落自纠（快路径短路下同）。
+ * （turnStartedAt / turn 锚 / lastAssistantId 快路径判据 / snooze 标记），切 session
+ * 保留、切回延续计时。记忆消费以 turn 锚守门（锚 = 记忆 turn 的首条 assistant 消息
+ * id，与 message-turns SSOT 分组的当前末组首条 assistant 比对）：锚匹配（同 turn 切回）
+ * → 延续计时；turn 已在后台更替（锚失配）→ 重落基线（startTurn），elapsed 不从陈旧
+ * 记忆虚高。lastAssistantId 由结构边沿回调逐边沿刷新（turnAnchorMatches 的 O(1) 快路径
+ * 判据，不做任何长度差累计——字符观测已退役至 ui 层派生）。残余窗口：锚失配但新 turn
+ * 尚无 assistant 消息（dispatching 空窗切入）——新 turn 真实起点不可观测，基线暂取末位
+ * assistant（属上一 turn）timestamp 偏虚高，message_start 事件到达即重落自纠（快路径
+ * 短路下同）。
+ *
+ * 收窄不变量（remove-turn-progress-bar 设计 §2.3）：snapshot 公共接口 ≡ 运行时消费面
+ * ——快照字段若无消费方即应删除，防死代码漂移（全仓 rg 机械验真）。
  */
 import { onScopeDispose, ref, watch, reactive } from 'vue'
 import type { Ref } from 'vue'
-import { normalizeContent } from '@xyz-agent/shared'
 import type { Message } from '@xyz-agent/shared'
 import { groupTurns } from './message-turns'
 import { useSessionScopedState } from '../../foundation/use-session-scoped-state'
@@ -48,21 +51,11 @@ const DEFAULT_TICK_MS = 1000
  */
 export const TURN_PROGRESS_WARN_THRESHOLD_MS = 600_000
 
-/** 单个 turn 的进展快照（Composer 展示条消费；null = 无活跃 turn，展示消失）。 */
+/** 单个 turn 的进展快照（warn 告警条消费；null = 无活跃 turn，不渲染）。 */
 export interface TurnProgressSnapshot {
-  /** turn 活跃（occupancy turn 非 idle）。恒 true——null 快照即不活跃，字段保留防语义漂移。 */
-  active: boolean
-  /** ask_user 豁免态（D6）：等待用户输入期间为 true，展示分型文案、警示不参与。 */
-  awaitingUser: boolean
   /** 本 turn 已进行时长（ms，墙钟差值，delta 不参与计时）。 */
   turnElapsedMs: number
-  /** 当前 running 工具名（无 running 工具 = null）。 */
-  toolName: string | null
-  /** 当前工具调用已进行时长（ms；基线 = tool_call_start 写入的 startTime）。 */
-  toolElapsedMs: number | null
-  /** 本 turn 已生成字符数（流式 delta 增量累计，跨 turn 内多条 assistant 消息）。 */
-  generatedChars: number
-  /** 超阈值警示色（ask_user 豁免 / 用户点「继续等待」后为 false；阈值见 TURN_PROGRESS_WARN_THRESHOLD_MS）。 */
+  /** 超阈值警示（ask_user 豁免 / 用户点「继续等待」后为 false；阈值见 TURN_PROGRESS_WARN_THRESHOLD_MS）。 */
   warn: boolean
 }
 
@@ -96,15 +89,14 @@ interface TurnPartitionState {
   /**
    * turn 锚：记忆 turn 的首条 assistant 消息 id（startTurn 落锚）。消费记忆前与
    * message-turns SSOT 分组的当前末组首条 assistant 比对——失配 = turn 已更替，
-   * 记忆整体作废重落（防陈旧 elapsed 虚高 / 字符错账）。
+   * 记忆整体作废重落（防陈旧 elapsed 虚高）。
    */
   turnAnchorId: string | null
-  /** 字符增量累计基线：最近观测的 assistant 消息 id（id 变化 = 新消息整条计入）。 */
+  /**
+   * 最近观测的 assistant 消息 id（结构边沿回调逐边沿刷新）：turnAnchorMatches 的
+   * O(1) 快路径判据——末位 assistant 未变即无新 assistant 落地，免 SSOT 分组慢路径。
+   */
   lastAssistantId: string | null
-  /** 字符增量累计基线：该消息上次观测长度（同 id 只累计正向差值，权威覆盖回退不计负）。 */
-  lastAssistantLen: number
-  /** 本 turn 已生成字符累计。 */
-  generatedChars: number
   /** 用户点「继续等待」后本 turn 内抑制警示（turn 结束自动复位）。 */
   snoozed: boolean
 }
@@ -114,8 +106,6 @@ function createEmptyPartition(): TurnPartitionState {
     turnStartedAt: null,
     turnAnchorId: null,
     lastAssistantId: null,
-    lastAssistantLen: 0,
-    generatedChars: 0,
     snoozed: false,
   })
 }
@@ -127,11 +117,6 @@ function findLastAssistantMessage(messages: Message[] | undefined): Message | un
     if (messages[i]!.role === 'assistant') return messages[i]
   }
   return undefined
-}
-
-/** 消息内容字符长度（content 是 string | Segment[] 联合，normalizeContent 归一）。 */
-function messageTextLength(m: Message): number {
-  return normalizeContent(m.content).length
 }
 
 /**
@@ -148,7 +133,7 @@ function currentTurnAnchorId(messages: Message[] | undefined): string | null {
 /**
  * 分区记忆是否仍指向当前 turn（F-U1：startTurn 重落判据——①后台 turn 更替锚失配 → 重落，
  * ②同 turn 切回锚相同 → 保留累计）。
- * 快路径：末位 assistant 自上次观测（lastAssistantId 由 accumulateChars 持续跟进）未变
+ * 快路径：末位 assistant 自上次观测（lastAssistantId 由边沿回调逐边沿刷新）未变
  * → 无新 assistant 落地，末组首条不可能更替（无 assistant 填实的尾随边界不产出/不改末组
  * ——空 turn 折叠），O(1) 短路热路径；否则走 SSOT 分组精确比对。
  */
@@ -160,10 +145,10 @@ function turnAnchorMatches(messages: Message[] | undefined, part: TurnPartitionS
 /**
  * turn 进展观测 composable（C1 方案一）。
  *
- * 响应式接线：watch（occupancy turn 维度 + messages 分区引用）驱动结构边沿检测与
- * 字符增量累计（每事件 O(1)）；快照计算只在 setInterval 秒级 tick 里做（delta 不触发
- * 快照重算）。事件回调统一用 source 快照内捕获的 sid 写分区（updateFor），结构性消除
- * 切 session 竞态（ADR-0049 checklist）。
+ * 响应式接线：watch（occupancy turn 维度 + messages 分区引用）驱动结构边沿检测（每
+ * 事件 O(1)，仅维护分区记忆与快路径判据）；快照计算只在 setInterval 秒级 tick 里做
+ * （事件边沿不触发快照重算）。事件回调统一用 source 快照内捕获的 sid 写分区
+ * （updateFor），结构性消除切 session 竞态（ADR-0049 checklist）。
  *
  * @param sessionId 当前展示目标 session（Composer 的 props.sessionId 响应式引用）
  * @param chat chat store 最小结构接口（TurnProgressChatSource）
@@ -207,8 +192,6 @@ export function useTurnProgress(
     part.turnStartedAt = null
     part.turnAnchorId = null
     part.lastAssistantId = null
-    part.lastAssistantLen = 0
-    part.generatedChars = 0
     part.snoozed = false
     if (sessionId.value === sid) {
       snapshot.value = null
@@ -216,7 +199,7 @@ export function useTurnProgress(
     }
   }
 
-  /** turn-start 边沿 / cold-start（挂载时已活跃）/ 锚失配重落：落计时基线 + 字符基线 + turn 锚。 */
+  /** turn-start 边沿 / cold-start（挂载时已活跃）/ 锚失配重落：落计时基线 + turn 锚。 */
   function startTurn(messages: Message[] | undefined): void {
     // 计时基线优先取末位 assistant timestamp（message_start effect 写入的墙钟——
     // 比 watch 触发时刻更贴近 message_start(assistant) 事件点）；无消息（dispatching
@@ -226,30 +209,7 @@ export function useTurnProgress(
     part.turnStartedAt = last?.timestamp ?? now()
     part.turnAnchorId = currentTurnAnchorId(messages)
     part.lastAssistantId = last?.id ?? null
-    part.lastAssistantLen = last ? messageTextLength(last) : 0
-    // cold-start 时正在流式的消息已产出部分计入（事实陈述）；正常边沿 message_start
-    // 时 content 为空，此值恒 0。
-    part.generatedChars = part.lastAssistantLen
     part.snoozed = false
-  }
-
-  /** 事件帧驱动的字符增量累计（末位 assistant 长度差；O(1)，不重置任何计时基线）。 */
-  function accumulateChars(messages: Message[] | undefined): void {
-    const last = findLastAssistantMessage(messages)
-    if (!last) return
-    const part = currentPartition()
-    if (part.turnStartedAt === null) return
-    const len = messageTextLength(last)
-    if (last.id === part.lastAssistantId) {
-      // 同一条消息：只累计正向增量（delta 增长）；message.complete 权威 content 覆盖
-      // 若短于客户端累积（罕见回退）不计负——展示指标只少不多，不撒谎。
-      if (len > part.lastAssistantLen) part.generatedChars += len - part.lastAssistantLen
-    } else {
-      // turn 内新 assistant 消息（text → toolCall → text 的后续段）：整条计入。
-      part.generatedChars += len
-    }
-    part.lastAssistantId = last.id
-    part.lastAssistantLen = len
   }
 
   // ── 秒级 tick：快照计算（唯一做 O(turn) 工作的地方）──
@@ -275,20 +235,13 @@ export function useTurnProgress(
     // 锚失配兜底（F-U1，防御性同款校验——常态走 turnAnchorMatches 快路径短路）：
     // 记忆 turn 与当前 turn 不一致时重落，tick 快照不从陈旧基线取值。
     if (!turnAnchorMatches(messages, part)) startTurn(messages)
-    const last = findLastAssistantMessage(messages)
-    const runningTools = last?.toolCalls?.filter((t) => t.status === 'running') ?? []
-    const tool = runningTools.length > 0 ? runningTools[runningTools.length - 1] : undefined
-    const nowMs = now()
-    const turnElapsedMs = Math.max(0, nowMs - part.turnStartedAt)
+    // awaitingUser 为 tick 内局部变量（D6 豁免，仅作 warn 计算输入，不进 snapshot
+    // ——snapshot 公共接口 ≡ 运行时消费面，设计 §2.3 收窄）。
     const awaitingUser = options?.getAwaitingUser?.(sid) === true
+    const turnElapsedMs = Math.max(0, now() - part.turnStartedAt)
     snapshot.value = {
-      active: true,
-      awaitingUser,
       turnElapsedMs,
-      toolName: tool?.toolName ?? null,
-      toolElapsedMs: tool ? Math.max(0, nowMs - tool.startTime) : null,
-      generatedChars: part.generatedChars,
-      // D6 豁免：ask_user pending 期间警示不参与（超阈值也不警示，只走分型文案）。
+      // D6 豁免：ask_user pending 期间警示不参与（超阈值也不警示）。
       warn: !awaitingUser && !part.snoozed && turnElapsedMs >= TURN_PROGRESS_WARN_THRESHOLD_MS,
     }
   }
@@ -331,13 +284,14 @@ export function useTurnProgress(
     if (part.turnStartedAt === null || !turnAnchorMatches(next.messages, part)) {
       startTurn(next.messages)
     }
-    accumulateChars(next.messages)
+    // 快路径判据逐边沿刷新（O(1) 尾查）；长度差累计已随字符观测退役（设计 §2.3）。
+    part.lastAssistantId = findLastAssistantMessage(next.messages)?.id ?? null
     ensureTicking()
     tick()
   }
   watch(turnProgressSource, onTurnProgressEdge, { immediate: true })
 
-  /** 用户点「继续等待」（中性操作项）：本 turn 内抑制警示，事实条照常展示。 */
+  /** 用户点「继续等待」（中性操作项）：本 turn 内抑制警示（warn=false，不再告警）。 */
   function snoozeWarn(): void {
     const sid = sessionId.value
     if (!sid) return

@@ -12,7 +12,11 @@
  * - A1 完成/历史态：`.tm-range` 渲染 `· HH:MM:SS → HH:MM:SS`（首末 = firstTs/lastTs 本地时刻）
  * - A2 live 态：结束侧不定格 lastTs，以 `→` + panel.message.inProgress 文案结尾
  *
- * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/TurnMeta.test.ts
+ * [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1）：
+ * - 三态渲染：工作中显示 / 完成态定格常驻（B1）/ chars=0 不渲染
+ * - 数字 toLocaleString() 千分位（用户可见 DOM 断言，锚定 turn-meta-chars testid）
+ *
+ * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/TurnMeta.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -54,6 +58,8 @@ function mountMeta(props: {
   lastTs?: number
   /** 是否正在流式生成 */
   isLive?: boolean
+  /** [u3] 已生成字符数（默认 0 不渲染） */
+  generatedChars?: number
 }) {
   const turn = props.turn ?? makeTurn()
   return mount(TurnMeta, {
@@ -68,6 +74,7 @@ function mountMeta(props: {
       firstTs: props.firstTs ?? NOW,
       lastTs: props.lastTs ?? NOW + 5000,
       isLive: props.isLive ?? false,
+      generatedChars: props.generatedChars ?? 0,
       turnIndex: turn.index,
       turnKey: turnStableId(turn),
       sessionId: SID,
@@ -242,5 +249,38 @@ describe('chat-flow-timestamp U2: TurnMeta 区间（A1/A2）', () => {
     expect(normalized).toBe(`· ${clockOf(FIRST_TS)} → panel.message.inProgress`)
     // live 态结束侧不定格：lastTs 本地时刻不应出现
     expect(normalized).not.toContain(clockOf(LAST_TS))
+  })
+})
+
+// ═════════════════════════════════════════════════════════
+// [u3 remove-turn-progress-bar] TurnMeta 已生成字符数（设计 §2.1，验收 A2/A3）
+//
+// 渲染契约：elapsed/时刻区间之后渲染 `· 已生成 X 字符`（v-if chars>0，B1 完成态定格
+// 常驻——完成态与工作态同构可见）；数字 toLocaleString()；样式跟随 tm-range 档。
+// 测试环境 vue-i18n mock 的 t() 返回 key + 命名参数替换/append（vitest.setup.ts），
+// 文案断言锚定格式化后的数字（用户可见 DOM 断言）。
+// ═════════════════════════════════════════════════════════
+describe('u3 remove-turn-progress-bar: TurnMeta 已生成字符数', () => {
+  it('工作中显示：chars>0 渲染 [data-testid=turn-meta-chars]，数字经 toLocaleString 格式化', () => {
+    const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, generatedChars: 1234 })
+    const chars = wrapper.find('[data-testid="turn-meta-chars"]')
+    expect(chars.exists()).toBe(true)
+    // 数字千分位（用户可见断言，预期用同口径 toLocaleString 求得，不依赖测试环境 locale 假设）
+    expect(chars.text()).toContain((1234).toLocaleString())
+    // 样式跟随 tm-range 档：text-2xs + neutral-dim + mono
+    expect(chars.classes()).toContain('text-neutral-dim')
+    expect(chars.classes()).toContain('font-mono')
+  })
+
+  it('完成态定格显示（B1 常驻）：非 working/非 streaming 态 chars>0 仍渲染', () => {
+    const wrapper = mountMeta({ isWorkingTurn: false, isStreaming: false, generatedChars: 207 })
+    const chars = wrapper.find('[data-testid="turn-meta-chars"]')
+    expect(chars.exists()).toBe(true)
+    expect(chars.text()).toContain('207')
+  })
+
+  it('chars=0 不渲染（零内容 turn 不占行宽）', () => {
+    const wrapper = mountMeta({ generatedChars: 0 })
+    expect(wrapper.find('[data-testid="turn-meta-chars"]').exists()).toBe(false)
   })
 })
