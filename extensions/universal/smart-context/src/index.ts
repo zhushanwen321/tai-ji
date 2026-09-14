@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { guardStaleCtx, isSubagentProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { setPiHandle } from "@zhushanwen/pi-extension-logger";
 
 import {
@@ -27,7 +27,6 @@ import {
 	findCrossedThresholds,
 	getCurrentModelId,
 	isGatingActive,
-	isSubagentProcess,
 	loadSmartContextConfig,
 	type EntryLike,
 } from "./pure.js";
@@ -63,7 +62,8 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 	// 日志通道注入（extension-logger 两阶段初始化：工厂拿 pi → setPiHandle）
 	setPiHandle(pi);
 
-	// R6：subagent 子进程不注册工具、不提醒（PI_SUBAGENT_ROOT_SESSION_ID 标记）
+	// R6：subagent 子进程不注册工具、不提醒（宁缺勿污；XYZ_AGENT_SUBAGENT 标记——
+	// ext-guards isSubagentProcess，ext-simplify-17 D4 重锚）
 	if (isSubagentProcess()) {
 		debugLog("subagent process detected, staying inert");
 		return;

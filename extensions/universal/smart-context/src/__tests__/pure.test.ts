@@ -12,7 +12,6 @@ import {
 	formatK,
 	getCurrentModelId,
 	isGatingActive,
-	isSubagentProcess,
 	isSummaryInflated,
 	normalizeSmartContextConfig,
 	pickMode,
@@ -173,9 +172,6 @@ describe("estimateShadowedTokens 口径契约（D2：与 pi estimateTokens 同�
 	});
 });
 
-describe("subagent 识别（R6）", () => {
-	it("PI_SUBAGENT_ROOT_SESSION_ID 存在即 subagent", () => {
-		expect(isSubagentProcess({ PI_SUBAGENT_ROOT_SESSION_ID: "s1" })).toBe(true);
-		expect(isSubagentProcess({})).toBe(false);
-	});
-});
+// [HISTORICAL] subagent 识别（R6）用例已随本地实现删除移除——现行谓词收敛于
+// ext-guards isSubagentProcess（ext-simplify-17 D4），三态与「宁缺勿污」钉值见
+// extensions/shared/ext-guards/src/__tests__/predicates.test.ts。

@@ -249,16 +249,6 @@ export function buildReinjectSection(contents: ReadonlyArray<{ path: string; con
 	return `\n\n<recently-read-files>\n${parts.join("\n\n")}\n</recently-read-files>`;
 }
 
-// ──────────────────────── subagent 识别（R6） ────────────────────────
-
-/**
- * subagent 子进程检测（D9/R6）：subagent-core session-runner 无条件注入 PI_SUBAGENT_ROOT_SESSION_ID。
- * 命中 → 本进程不注册工具、不提醒（宁缺勿污）。
- */
-export function isSubagentProcess(env: NodeJS.ProcessEnv = process.env): boolean {
-	return env.PI_SUBAGENT_ROOT_SESSION_ID !== undefined;
-}
-
 // ──────────────────────── session entries 统计（D13 纯函数） ────────────────────────
 
 /** sessionManager entries 的宽松形状（降智计数）。 */

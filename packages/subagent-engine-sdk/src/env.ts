@@ -67,7 +67,14 @@ export interface EngineChildEnvOptions {
   electronRunAsNode?: boolean;
   /** L0：relay 三键（宿主 relay 激活时传；三键必经 L0——L1 拒绝 XYZ_SUBAGENT_ 前缀、L2 是 manifest 面，两层都到不了） */
   relay?: EngineRelayEnv;
-  /** L0：引擎侧身份 env（PI_SUBAGENT_ROOT_SESSION_ID 等，base-tool-enhance / 递归可见性消费） */
+  /**
+   * L0：引擎侧身份 env 透传通道（identityEnv）。现行事实（ext-simplify-17 D4，
+   * 20260914 真机探针证实）：PI_SUBAGENT_ROOT_SESSION_ID / PI_SUBAGENT_SELF_RECORD_ID
+   * 两键已无写入方（本通道现无人传值），引擎链统一 subagent 标记 = XYZ_AGENT_SUBAGENT=1
+   * （见 injectL0InfraKeys 恒注入），base-tool-enhance 判据已重锚新标记。通道保留待
+   * 另行裁决，读者见 docs/architecture/ext-simplify-17-shared-extraction.md §3.1 D4
+   * 与探针报告 .tmp/dev-flow/ext-simplify-17-d4-probe.md。
+   */
   identityEnv?: Record<string, string | undefined>;
   /** L2：manifest 声明的 envPrefixes 放行清单（保留前缀拒绝 + 形态校验） */
   envPrefixes?: readonly string[];
