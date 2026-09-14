@@ -5,7 +5,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 import {
+	isThinkingLevel,
 	loadConfig,
+	normalizeModelSelector,
 	saveConfig,
 	type ModelSelector,
 } from "@zhushanwen/pi-llm-shared";
@@ -44,17 +46,6 @@ export interface RenameSessionConfig {
 	thinkingLevel: ModelThinkingLevel;
 }
 
-/** 合法 thinking 级别清单（与 pi-ai ModelThinkingLevel 一致；normalize 校验用）。Set 免 as 断言。 */
-const THINKING_LEVELS: ReadonlySet<string> = new Set([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
 // ──────────────────────── 枚举校验 ────────────────────────
 
 /** 合法触发模式清单（与 RenameMode 一致；normalize 校验用）。Set 免 as 断言。 */
@@ -66,14 +57,6 @@ const RENAME_MODES: ReadonlySet<string> = new Set(["first-prompt", "first-stop",
  */
 function isRenameMode(raw: unknown): raw is RenameMode {
 	return typeof raw === "string" && RENAME_MODES.has(raw);
-}
-
-/**
- * 类型谓词：unknown 是否为合法 thinking 级别（normalizeRenameConfig 校验用，单点断言）。
- * Set.has 运行时兜底 + 类型收窄，调用方无需再断言。
- */
-function isThinkingLevel(raw: unknown): raw is ModelThinkingLevel {
-	return typeof raw === "string" && THINKING_LEVELS.has(raw);
 }
 
 /** 默认配置：关闭、空 ref（跟随会话主模型，见 llm.ts 的空 ref fallback）、first-stop 触发、标题上限 50、不启用 thinking。 */
@@ -158,6 +141,7 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 			? obj.maxTitleLength
 			: DEFAULT_RENAME_CONFIG.maxTitleLength;
 
+	// normalizeModelSelector：llm-shared 导出（ext-simplify-17 D6 收口）
 	const model = normalizeModelSelector(obj.model) ?? DEFAULT_RENAME_CONFIG.model;
 
 	const thinkingLevel = isThinkingLevel(obj.thinkingLevel)
@@ -165,16 +149,6 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 		: DEFAULT_RENAME_CONFIG.thinkingLevel;
 
 	return { enabled, model, mode, maxTitleLength, thinkingLevel };
-}
-
-/** 校验 ModelSelector：只支持 ref 精确指定，其余形式非法返回 null。 */
-function normalizeModelSelector(raw: unknown): ModelSelector | null {
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-	const obj = raw as Record<string, unknown>;
-	if (obj.type === "ref" && typeof obj.ref === "string") {
-		return { type: "ref", ref: obj.ref };
-	}
-	return null;
 }
 
 /**
@@ -259,6 +233,36 @@ export function countSuccessfulAssistantReplies(entries: ReadonlyArray<EntryLike
 // ──────────────────────── 标题清洗 ────────────────────────
 
 /**
+ * 按 Unicode 码点截断（ext-simplify-17 D13：收口包内三处同构 `Array.from` 骨架——
+ * cleanTitle / truncateForTitle / previewText，三处差异全部参数化）。
+ *
+ * Array.from 按码点切分，星面字符（emoji 等，占 2 个 UTF-16 码元）不会被劈成半个代理对。
+ * 码点数 ≤ max（含恰好等于）原样返回；超长返回「前 head 码点 + tail + 原文最后 keepTail 码点」。
+ *
+ * @param max 判定阈值：码点数 ≤ max 原样返回（与 head 独立——previewText 的 300/200/100 是
+ *   15 号 §6.4 D4 裁决的三个独立契约数字，不得由 head+keepTail 推导）
+ * @param tail 超长时追加在 head 段后的字面中缀（如 "…"；单段形态传 ""）
+ * @param head 超长时保留的头部码点数（默认 = max，单段形态下阈值即截断长度）
+ * @param keepTail 超长时保留的原文尾部码点数（默认 0 = 单段形态；双段形态的调用方
+ *   自负 head/keepTail 不重叠——本包内 previewText 的 300/200/100 在超长区间恒不重叠）
+ */
+export function truncateCodePoints(
+	text: string,
+	max: number,
+	tail: string,
+	head = max,
+	keepTail = 0,
+): string {
+	const chars = Array.from(text);
+	if (chars.length <= max) return text;
+	return (
+		chars.slice(0, head).join("") +
+		tail +
+		(keepTail > 0 ? chars.slice(-keepTail).join("") : "")
+	);
+}
+
+/**
  * rename 专属后处理：去首尾成对引号（单/双/中文）+ markdown 强调标记（* ** ` _）+ 尾部标点，按 Unicode 码点截断。
  *
  * 输入是 callLLM 已 extractText+trim 的 string（llm-shared/call.ts 的 extractText 负责从
@@ -281,8 +285,6 @@ export function cleanTitle(content: string, maxLength: number): string {
 		.trim();
 	if (!cleaned) return "";
 
-	// 按 Unicode 码点截断（避免截断多字节字符）
-	const chars = Array.from(cleaned);
-	if (chars.length <= maxLength) return cleaned;
-	return chars.slice(0, maxLength).join("");
+	// 按 Unicode 码点截断（避免截断多字节字符；无尾部后缀的单段形态）
+	return truncateCodePoints(cleaned, maxLength, "");
 }

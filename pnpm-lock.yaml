@@ -484,6 +484,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger

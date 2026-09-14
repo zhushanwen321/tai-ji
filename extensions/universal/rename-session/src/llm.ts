@@ -2,10 +2,11 @@ import path from "node:path";
 
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import { callLLM, resolveModel } from "@zhushanwen/pi-llm-shared";
+import { callLLM, joinTextBlocks, resolveModel } from "@zhushanwen/pi-llm-shared";
 
-import { type RenameSessionConfig, cleanTitle } from "./pure.js";
+import { type RenameSessionConfig, cleanTitle, truncateCodePoints } from "./pure.js";
 
 const logger = getLogger("rename-session");
 
@@ -53,23 +54,10 @@ interface EntryLike {
 }
 
 // ──────────────────────── 标题输入构造（两段信号：首条 user prompt / 触发 turn 最终回复） ────────────────────────
-
-/** unknown → Record 的运行时守卫：extractUserPromptText 逐字段消费 session entries 的宽松数据，字段存在性与类型由守卫核实（不使用 as any）。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-/** 拼接 content 内 type==="text" blocks 的文本（join(" ")，跳过非 text block 与非 string text）。 */
-function joinTextBlocks(content: unknown): string {
-	if (!Array.isArray(content)) return "";
-	const texts: string[] = [];
-	for (const block of content) {
-		if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
-			texts.push(block.text);
-		}
-	}
-	return texts.join(" ");
-}
+//
+// isRecord / joinTextBlocks 均为共享导出（ext-simplify-17 D3/D7）：isRecord 用 ext-guards
+// 排数组严版（数组 message 输入下三消费点 continue/return "" 殊途同归，等价论证见设计
+// 文档 §3.1 D3）；joinTextBlocks 用 llm-shared unknown 安全内核（不 trim，trim 是调用方策略）。
 
 /**
  * 取 session entries 中首条 user message 的 prompt 文本（标题输入信号之一）。
@@ -116,13 +104,11 @@ const MAX_TITLE_INPUT_CODE_POINTS = 4000;
 
 /**
  * 按 Unicode 码点截断标题输入段（两段信号各 4000 码点，中文场景约 4k token/段，成本可控）。
- * Array.from 按码点切分，星面字符（emoji 等，占 2 个 UTF-16 码元）不会被劈成半个代理对；
- * 超长才追加 '…' 后缀，≤ 上限（含恰好等于）原样返回。
+ * 截断内核见 pure.ts truncateCodePoints（ext-simplify-17 D13 收口）；超长才追加 '…' 后缀，
+ * ≤ 上限（含恰好等于）原样返回。
  */
 export function truncateForTitle(text: string): string {
-	const chars = Array.from(text);
-	if (chars.length <= MAX_TITLE_INPUT_CODE_POINTS) return text;
-	return chars.slice(0, MAX_TITLE_INPUT_CODE_POINTS).join("") + "…";
+	return truncateCodePoints(text, MAX_TITLE_INPUT_CODE_POINTS, "…");
 }
 
 /**
@@ -195,16 +181,17 @@ const PREVIEW_TAIL_CODE_POINTS = 100;
 
 /**
  * debug 日志的文本预览（≤300 码点直接全文；超长输出 head 200 码点 + 字面 … + tail 100 码点
- * （head/tail 双段支撑 E2E 对长 prompt 首尾片段的断言）。按码点截断（与 truncateForTitle 同单位，
- * Array.from 切分，代理对/emoji 不被劈开）；e2e/harness.mjs 的 rebuildPreview 是同构实现，两处必须同步改。
+ * （head/tail 双段支撑 E2E 对长 prompt 首尾片段的断言）。截断内核见 pure.ts truncateCodePoints
+ * （ext-simplify-17 D13 收口，双段形态经 head/keepTail 参数表达——300/200/100 是 15 号 §6.4
+ * D4 裁决的三个独立契约数字）；e2e/harness.mjs 的 rebuildPreview 是同构实现，两处必须同步改。
  */
 function previewText(text: string): string {
-	const chars = Array.from(text);
-	if (chars.length <= PREVIEW_MAX_CODE_POINTS) return text;
-	return (
-		chars.slice(0, PREVIEW_HEAD_CODE_POINTS).join("") +
-		"…" +
-		chars.slice(-PREVIEW_TAIL_CODE_POINTS).join("")
+	return truncateCodePoints(
+		text,
+		PREVIEW_MAX_CODE_POINTS,
+		"…",
+		PREVIEW_HEAD_CODE_POINTS,
+		PREVIEW_TAIL_CODE_POINTS,
 	);
 }
 

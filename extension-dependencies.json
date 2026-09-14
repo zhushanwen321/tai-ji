@@ -162,7 +162,12 @@
         {
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
-          "reason": "top-level 静态 import callLLM/resolveModel/loadConfig/saveConfig（src/pure.ts、src/llm.ts），缺失即模块加载抛 Cannot find module"
+          "reason": "top-level 静态 import callLLM/resolveModel/loadConfig/saveConfig/isThinkingLevel/normalizeModelSelector/joinTextBlocks（src/pure.ts、src/llm.ts），缺失即模块加载抛 Cannot find module"
+        },
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import isRecord 排数组严版（src/llm.ts top-level import，extractUserPromptText/extractFinalText/extractMessageText 三消费点），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
