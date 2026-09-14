@@ -21,6 +21,7 @@
  * 白盒直测锚定安全语义（runLayer2 聚合表 / matchNonBashTool 非 bash 语义），故保留。
  */
 
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { lastMatchWins, matchRules, resolvePattern } from "./rules/matcher.js";
 import { wildcardToRegExp } from "./rules/wildcard.js";
@@ -222,7 +223,7 @@ function startAiClassification(
 	signal: AbortSignal,
 ): Promise<ClassifierResult> {
 	return deps.classifier.classifyRisk(ctx, config, signal).catch((err: unknown) => {
-		const msg = err instanceof Error ? err.message : String(err);
+		const msg = toErrorMessage(err);
 		return {
 			outcome: "ask" as const,
 			risk_level: "medium" as const,

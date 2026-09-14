@@ -18,6 +18,7 @@
  */
 
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { CallLLMOptions, CallLLMResult } from "@zhushanwen/pi-llm-shared";
 
 import type {
@@ -90,7 +91,7 @@ function raceResultWithDeadline(
 			(result) => ({ kind: "ok" as const, result }),
 			(error) => ({
 				kind: "ok" as const,
-				result: { ok: false as const, error: error instanceof Error ? error.message : String(error) },
+				result: { ok: false as const, error: toErrorMessage(error) },
 			}),
 		),
 	];
@@ -229,7 +230,7 @@ export function createClassifier(deps: ClassifierDeps): {
 		try {
 			settled = await raceResultWithDeadline(callPromise, timeoutMs, signal);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = toErrorMessage(error);
 			onLog?.(`[pi-permission] classifier: callLLM race threw: ${message}`);
 			return { ...CLASSIFY_FALLBACK_RESULT };
 		}

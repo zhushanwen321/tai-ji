@@ -19,7 +19,7 @@ import {
 	type ExtensionUIContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { oncePerProcess } from "@zhushanwen/pi-ext-guards";
+import { oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { migrateLegacyConfig } from "@zhushanwen/pi-llm-shared";
 
@@ -341,7 +341,7 @@ async function processToolCall(
 		};
 	} catch (error) {
 		// fail-closed：异常 → block + reason（绝不放行）
-		const msg = error instanceof Error ? error.message : String(error);
+		const msg = toErrorMessage(error);
 		logger.warn("tool_call handler exception", { toolName, error: msg });
 		return {
 			block: true,

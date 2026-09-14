@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Language, Parser } from "web-tree-sitter";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 const logger = getLogger("pi-permission/ast");
@@ -121,7 +122,7 @@ export function getBashParser(): Promise<Parser | null> {
 		} catch (err) {
 			// fail-closed：清空缓存让下次调用重试，warn 后返回 null。
 			parserPromise = null;
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = toErrorMessage(err);
 			logger.warn("getBashParser init failed", { error: msg });
 			return null;
 		}

@@ -19,6 +19,7 @@
  */
 
 import type { Node, Tree } from "web-tree-sitter";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import type { BashAnalysis } from "../types.js";
@@ -245,7 +246,7 @@ export async function analyzeBashStructure(command: string): Promise<BashAnalysi
 		};
 	} catch (err) {
 		// 任何意外异常 → fail-closed
-		const msg = err instanceof Error ? err.message : String(err);
+		const msg = toErrorMessage(err);
 		logger.warn("analyzeBashStructure exception", { error: msg });
 		return failClosed(msg || "EXCEPTION");
 	} finally {

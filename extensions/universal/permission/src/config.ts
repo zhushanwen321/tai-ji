@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import {
 	clearConfigCache,
 	getConfigPath as getLlmConfigPath,
@@ -50,12 +51,8 @@ export function getConfigPath(): string {
 
 // ──────────────────────── 归一化 ────────────────────────
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function normalizeClassifierConfig(raw: unknown): ClassifierConfig {
-	const record = isPlainObject(raw) ? raw : {};
+	const record = isRecord(raw) ? raw : {};
 	const timeout = Number(record.timeout);
 	// C3b：classifier.model 只接受 string（'auto' 或 'provider/model-id'）。对象形式（如
 	// `{ "type": "available" }`）不受支持，此前会被静默忽略回落默认——现在显式 warn 消除静默。
@@ -77,7 +74,7 @@ function normalizeClassifierConfig(raw: unknown): ClassifierConfig {
 }
 
 function normalizeRule(raw: unknown, fallbackId: string): Rule | null {
-	if (!isPlainObject(raw)) return null;
+	if (!isRecord(raw)) return null;
 	const tool = typeof raw.tool === "string" ? raw.tool : "*";
 	const pattern = typeof raw.pattern === "string" ? raw.pattern : "*";
 	const action = raw.action;
@@ -89,7 +86,7 @@ function normalizeRule(raw: unknown, fallbackId: string): Rule | null {
 }
 
 function normalizeConfig(raw: unknown): PermissionConfig {
-	const record = isPlainObject(raw) ? raw : {};
+	const record = isRecord(raw) ? raw : {};
 	const mode = isValidPermissionMode(record.mode) ? record.mode : DEFAULT_CONFIG.mode;
 	const enabled = record.enabled !== false;
 	const classifier = normalizeClassifierConfig(record.classifier);
@@ -119,7 +116,7 @@ function ensureConfigFile(configPath: string, onWarning?: (msg: string) => void)
 		mkdirSync(dirname(configPath), { recursive: true });
 		writeFileSync(configPath, createDefaultConfigContent(), { encoding: "utf-8", mode: 0o600 });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = toErrorMessage(error);
 		onWarning?.(`[pi-permission] Failed to create default config at '${configPath}': ${message}`);
 	}
 }
