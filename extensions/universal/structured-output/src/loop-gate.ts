@@ -41,9 +41,9 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { guardStaleCtx, isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-import { isPlainObject, isToolExecutionEndEvent } from "./schema-guards.js";
+import { isToolExecutionEndEvent } from "./schema-guards.js";
 import {
 	extractToolErrorText,
 	SIGNATURE_MAX_CHARS,
@@ -248,10 +248,10 @@ function keysAtPath(args: Record<string, unknown>, path: string): string[] {
 			current = current[index];
 			continue;
 		}
-		if (!isPlainObject(current) || !(segment in current)) return [];
+		if (!isRecord(current) || !(segment in current)) return [];
 		current = current[segment];
 	}
-	return isPlainObject(current) ? Object.keys(current) : [];
+	return isRecord(current) ? Object.keys(current) : [];
 }
 
 /**
@@ -283,7 +283,7 @@ function parseArgsEchoObject(errorText: string, markerIdx: number): Record<strin
 	if (!echoSection) return undefined;
 	try {
 		const parsed: unknown = JSON.parse(echoSection);
-		return isPlainObject(parsed) ? parsed : undefined;
+		return isRecord(parsed) ? parsed : undefined;
 	} catch {
 		return undefined;
 	}
@@ -484,7 +484,7 @@ function writeTerminatedLog(pi: PiAPI, gate: LoopGate): void {
 	} catch (err) {
 		// appendEntry 失败不阻断 shutdown——stderr 通道已落，此处补诊断（同 cache-probe 惯例）
 		process.stderr.write(
-			`[structured-output gate] appendEntry failed: ${err instanceof Error ? err.message : String(err)}\n`,
+			`[structured-output gate] appendEntry failed: ${toErrorMessage(err)}\n`,
 		);
 	}
 }

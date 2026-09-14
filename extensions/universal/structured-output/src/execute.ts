@@ -20,12 +20,13 @@
 
 import type { ValidateFunction } from "ajv";
 
+import { isRecord } from "@zhushanwen/pi-ext-guards";
+
 import { getOrCompileValidator } from "./ajv-validator.js";
 import {
 	CORRECT_USAGE_HINT,
 	echo,
 	hasSchemaKeyword,
-	isPlainObject,
 	tryParseJson,
 } from "./schema-guards.js";
 
@@ -47,7 +48,7 @@ import {
  * 其 ASP 文案按本判定同源条件化——改动本函数判定逻辑必须同步该副本。
  */
 export function isObjectRootSchema(schema: unknown): schema is Record<string, unknown> {
-	if (!isPlainObject(schema)) return false;
+	if (!isRecord(schema)) return false;
 	if (schema.type === "object") return true;
 	if (Array.isArray(schema.type) && schema.type.includes("object")) return true;
 	const OBJECT_ONLY_KEYS = [
@@ -71,7 +72,7 @@ export function isObjectRootSchema(schema: unknown): schema is Record<string, un
  * 不在 execute 层制造第二道校验。
  */
 function unwrapValueField(data: unknown): unknown {
-	if (isPlainObject(data) && "value" in data) {
+	if (isRecord(data) && "value" in data) {
 		return data.value;
 	}
 	return data;
@@ -88,7 +89,7 @@ export function validateAgainstSelfReported(schema: unknown, data: unknown): boo
 	// 1. 互换检测：schema 像数据（对象无 keyword）且 data 像 schema（对象有 keyword）。
 	// 这是最严重的静默腐败路径——若放行，ajv 会把"数据形态的 schema"编译成接受一切，
 	// 真正的 schema（此时在 data 里）被丢弃，校验通过并存入垃圾。
-	if (isPlainObject(schema) && !hasSchemaKeyword(schema) && isPlainObject(data) && hasSchemaKeyword(data)) {
+	if (isRecord(schema) && !hasSchemaKeyword(schema) && isRecord(data) && hasSchemaKeyword(data)) {
 		throw new Error(
 			"Likely swapped: schema looks like data and data looks like a schema. "
 			+ CORRECT_USAGE_HINT
@@ -98,7 +99,7 @@ export function validateAgainstSelfReported(schema: unknown, data: unknown): boo
 
 	// 2. keyword-less schema 拒绝：治静默腐败的根。{} / {a:1} 这类对象会被
 	// ajv strict:false 编译成"接受一切"的 validator，模型把答案塞进 schema 时会静默通过。
-	if (isPlainObject(schema) && !hasSchemaKeyword(schema)) {
+	if (isRecord(schema) && !hasSchemaKeyword(schema)) {
 		throw new Error(
 			"Invalid JSON Schema: schema has no recognized keyword "
 			+ "(type/properties/items/enum/...). If you passed the answer value as schema, "
@@ -113,7 +114,7 @@ export function validateAgainstSelfReported(schema: unknown, data: unknown): boo
 	// object|boolean，消除原先的 `as Record<string,unknown>` 不安全 cast。
 	let validate: ValidateFunction;
 	try {
-		if (isPlainObject(schema) || typeof schema === "boolean") {
+		if (isRecord(schema) || typeof schema === "boolean") {
 			validate = getOrCompileValidator(schema);
 		} else {
 			throw new Error(`schema must be a JSON Schema object or boolean, got ${typeof schema}`);

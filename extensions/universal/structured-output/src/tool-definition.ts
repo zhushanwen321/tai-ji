@@ -18,6 +18,7 @@
  * 两变体的描述文本均被 prompt-quality.test.ts 文本断言锁定。
  */
 
+import { isRecord } from "@zhushanwen/pi-ext-guards";
 import { Type } from "typebox";
 
 import { executeStructuredOutput, isObjectRootSchema } from "./execute.js";
@@ -25,7 +26,6 @@ import {
 	assertJsonSchemaRoot,
 	echo,
 	hasSchemaKeyword,
-	isPlainObject,
 	tryParseJson,
 } from "./schema-guards.js";
 
@@ -93,7 +93,7 @@ export function createWorkflowToolDefinition(envSchema: string) {
 		);
 	}
 
-	if (isPlainObject(schema) && !hasSchemaKeyword(schema)) {
+	if (isRecord(schema) && !hasSchemaKeyword(schema)) {
 		// ERR-3 上移：keyword-less 对象会被编译成 accept-all，workflow 声明的约束静默失效。
 		throw new Error(
 			"Authoritative schema (PI_WORKFLOW_SCHEMA) has no recognized keyword. "

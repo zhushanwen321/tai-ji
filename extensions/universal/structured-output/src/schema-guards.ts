@@ -10,6 +10,8 @@
  * keyword-less schema（{} / {a:1} 这种会被 ajv 静默放行）。
  */
 
+import { isRecord } from "@zhushanwen/pi-ext-guards";
+
 /** JSON Schema draft-07 识别 keyword。只要 schema 含其一就认为是"真 schema"。 */
 export const SCHEMA_KEYWORDS = [
 	// 核心类型
@@ -35,9 +37,12 @@ export const SCHEMA_KEYWORDS = [
 	"minLength", "maxLength", "pattern", "format",
 ] as const;
 
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/**
+ * @deprecated 深路径公开名兼容别名（ext-simplify-18 D2）；新代码直接用 ext-guards isRecord。
+ * 本包独立发布、无 exports 字段且 files 含 src/（深路径对外可达），公开名直接删除是
+ * breaking——保留一个发布周期的 re-export，删除时点登记在 ext-simplify index 18 号行。
+ */
+export const isPlainObject = isRecord;
 
 export function hasSchemaKeyword(obj: Record<string, unknown>): boolean {
 	return SCHEMA_KEYWORDS.some((keyword) => keyword in obj);
@@ -79,7 +84,7 @@ export function tryParseJson(raw: unknown): unknown {
  * 避免在守卫块外直接用 unknown。非合法形态抛清晰错误。
  */
 export function assertJsonSchemaRoot(value: unknown): asserts value is Record<string, unknown> | boolean {
-	if (!(isPlainObject(value) || typeof value === "boolean")) {
+	if (!(isRecord(value) || typeof value === "boolean")) {
 		throw new Error(`authoritative schema must be a JSON Schema object or boolean, got ${typeof value}`);
 	}
 }

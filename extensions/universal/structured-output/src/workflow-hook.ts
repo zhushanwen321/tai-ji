@@ -9,6 +9,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // 截断原语与错误块预算来自 text-primitives（共享叶节点，导出复用勿复制）。原
 // 「反向依赖（环）」已破除：本模块不再 import loop-gate，依赖图单向
@@ -95,7 +96,7 @@ export const HOOK_ENTRY_TYPE = "structured-output:hook";
  * 下一个正常收尾的轮仍会重试 steer，不产生静默哑火。
  */
 function writeSteerFailedLog(pi: PiAPI, hookRetryCount: number, err: unknown): void {
-	const message = err instanceof Error ? err.message : String(err);
+	const message = toErrorMessage(err);
 	process.stderr.write(
 		`[structured-output hook] steer send failed (retry budget NOT consumed, will retry at next turn end): ${message}\n`,
 	);
@@ -110,7 +111,7 @@ function writeSteerFailedLog(pi: PiAPI, hookRetryCount: number, err: unknown): v
 	} catch (appendErr) {
 		// appendEntry 失败不阻断 hook——stderr 通道已落，此处补诊断（同 cache-probe 惯例）
 		process.stderr.write(
-			`[structured-output hook] appendEntry failed: ${appendErr instanceof Error ? appendErr.message : String(appendErr)}\n`,
+			`[structured-output hook] appendEntry failed: ${toErrorMessage(appendErr)}\n`,
 		);
 	}
 }
