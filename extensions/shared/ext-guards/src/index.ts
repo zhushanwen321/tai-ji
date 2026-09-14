@@ -106,7 +106,9 @@ export function isEnoentError(err: unknown): boolean {
 // ── subagent 进程判据（isSubagentProcess，ext-simplify-17 D4）────────────
 //
 // 背景：extension 需要知道「当前 pi 进程是否引擎链上的 subagent 子进程」来决定降级
-// （base-tool-enhance D14 background 降级 / smart-context R6 不注册工具）。判据锚
+// （base-tool-enhance background 降级——bte background 生命周期设计 D14 项，
+// commit 8599abd0c，该设计未在现行 docs 留档 / smart-context R6 不注册工具，
+// 09 号设计）。判据锚
 // XYZ_AGENT_SUBAGENT=1——subagent-engine-sdk env.ts 的 buildEngineChildEnv 对每个引擎
 // 子进程恒注入（L0 层最后写入），再经引擎内二次 spawn（buildOutboundChildEnv 全量
 // 继承）传到 subagent 内的 bash。旧判据（PI_SUBAGENT_ROOT_SESSION_ID /

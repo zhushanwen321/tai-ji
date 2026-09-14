@@ -56,7 +56,7 @@
 | u7 | permission（批次 2 D5 消费）：config.ts `THINKING_LEVELS`+`isThinkingLevel` 删改 import llm-shared | `extensions/universal/permission/src/config.ts` | u2 | plain | `grep "THINKING_LEVELS" .../permission/src/` = 0；permission vitest 绿 |
 | u8 | pi-rpc xhigh（批次 2 D5 配套，落点漂移见 §0 校准）：`packages/pi-rpc/src/types.ts` THINKING_LEVELS 六值补 `xhigh` + V5 钉值单测（七值 + `:xhigh` 后缀从降级变接受） | `packages/pi-rpc/src/types.ts` + 对应测试文件 | - | plain | V5 单测绿（六值→七值断言 + asThinkingLevel("xhigh") 非 undefined）；pi-rpc 既有测试不回归 |
 | u9 | 词表比对脚本（批次 2）：从 pi-ai dist `types.d.ts` 提取 `ModelThinkingLevel` 联合成员与 llm-shared `THINKING_LEVELS` 比对，不一致非零退出；接入 pre-commit 按路径触发链（参照 check-pi-sync.mjs 接入形态）。若接入成本明显超预期 → 降级为设计文档如实登记（§5 合理偏差表） | `scripts/check-thinking-levels.mjs`（新）+ pre-commit 接入点 | u2, u8 | plain | 脚本自身跑过 exit 0；人为删一词表成员时 exit 非 0（探针自测）；pre-commit 触发路径正确或降级登记完成 |
-| u10 | subagent-workflow（批次 2 D2 消费）：jsonl-run-store.ts 宽版 isEnoentError 删本地改 import ext-guards 严版（收严无真实场景损失，设计已论证） | `extensions/universal/subagent-workflow/src/storage/jsonl-run-store.ts`（+ 依赖文件如缺 ext-guards 依赖则登记） | u1 | plain | `grep "function isEnoentError" .../subagent-workflow/src/` = 0；subagent-workflow vitest 绿 |
+| u10 | subagent-workflow（批次 2 D2 消费）：`src/jsonl-run-store.ts` 宽版 isEnoentError 删本地改 import ext-guards 严版（收严无真实场景损失，设计已论证） | `extensions/universal/subagent-workflow/src/jsonl-run-store.ts`（+ 依赖文件如缺 ext-guards 依赖则登记） | u1 | plain | `grep "function isEnoentError" .../subagent-workflow/src/` = 0；subagent-workflow vitest 绿 |
 | u11 | D8 聚焦评审（批次 3 前置，设计 §6 要求）：对设计 §3.3 D8 节 API 形态（MarkerRpcResult/callMarkerRpc/cancelled-timeout 判别/timeout 字段/错误形状单源化/三消费方迁移/行为微变）做聚焦对抗评审 | 报告落 `.tmp/tech-design/design-review-ext-simplify-17-d8-focus.md` | - | plain | 报告 must-fix==0 才放行 u12；有 must-fix → 主 agent 修设计文档后复审 |
 | u12 | protocol D8（批次 3 契约新增）：core 新增 `select-rpc.ts`（MarkerRpcResult + callMarkerRpc，signal.aborted 反推 cancelled）+ `GuiContext.ui.select` 签名补 timeout + 错误回包形状单源化（ChannelErrorResult + isChannelErrorResult + formatChannelErrorText；SessionManagerErrorResult/BridgeErrorResponse 改 type alias，public API 零破坏）+ 迁移 plugin-bridge callBridge / session-manager callSessionManager（行为微变①：非 JSON 回包 → isError + 留痕）/ inflight-reporter 发送半边 + V4 单测 | `packages/extension-protocol/src/core/**` + `packages/extension-protocol/src/extensions/{session-manager,plugin-bridge}/**` + `extensions/universal/session-manager/src/index.ts` + `extensions/taiji/plugin-bridge/src/index.ts` + `extensions/universal/subagent-workflow/src/host/inflight-reporter.ts` | u11 | plain | protocol 单测绿（V4：callMarkerRpc 三态/非 JSON 留痕用例）；session-manager/plugin-bridge/subagent-workflow vitest 绿；runtime re-export 消费方 typecheck 绿（V4）；行为微变①用例单测锚定 |
 | u13 | protocol D9（批次 3）：`firstContentText` 新导出（core 或 core/helpers）+ todo render.ts:157 / subagent-workflow format.ts renderTextFallback / plan tool.ts 内联副本 三包迁移删本地 + plan 新增 protocol 依赖（package.json + 根 json + lockfile，守卫规则 3 豁免不拦截） | `packages/extension-protocol/src/core/**` + `extensions/universal/todo/src/render.ts` + `extensions/universal/subagent-workflow/src/interface/format.ts` + `extensions/universal/plan/src/tool.ts` + plan `package.json` + `extension-dependencies.json` + `pnpm-lock.yaml` | u6（todo render.ts 同文件串行） | plain | `grep -r "function firstContentText\|function renderTextFallback" extensions/universal/{todo,subagent-workflow,plan}/src/` = 0；三包 vitest 绿；plan 依赖闭包含 protocol |
@@ -128,7 +128,7 @@ graph TD
 |------|------|------|----------|
 | u0 | committed | 1 | 双断言证实（报告 .tmp/dev-flow/ext-simplify-17-d4-probe.md）；u16 门禁通过 |
 | u1 | committed | 1 | 6a00b2f28（32 用例绿 + 全量 typecheck 过） |
-| u2 | committed | 1 | 1bc1f6fc4（89 用例绿；llm-shared 成根 json 首个 shared 组主体条目——机器守卫放行，保留；subagent-core 侧 THINKING_ORDER 互指注释待收尾补） |
+| u2 | committed | 1 | 1bc1f6fc4（89 用例绿；llm-shared 成根 json 首个 shared 组主体条目——机器守卫放行，保留；subagent-core 侧 THINKING_ORDER 互指注释已随 057696113 补齐 model-ref.ts:41-48） |
 | u3 | committed | 1 | 3dad19674（233 用例绿） |
 | u4 | committed | 1 | 8883a1a9a（216 用例绿，B2 补严格键集合测试） |
 | u5 | committed | 1 | 298f05901（203 用例绿 + 42 探针逐字节一致；truncateCodePoints 5 参偏差已登记 §5） |
@@ -155,15 +155,14 @@ graph TD
 - 区 2 unreasonable 2 条（均 P2，计划层遗漏传导）：① D3 plugin-bridge isRecord 迁移未做（批次 1 行明文含 plugin-bridge 消费迁移，单元表漏排）——修复 A 一行迁移；② D6 smart-context 消费侧漏排（P1-d 双写只消 rename-session 半边）——修复 B 一行迁移 + 顺带 subagent-core 互指注释（区 1 项）。区 2 doc_errors 3 条：impl-plan u13 验收条款过度收紧（已核正）；D5/D13 落点与签名回写（阶段 6 清单确认项）。
 - 处理状态：修复 A committed（plugin-bridge）/ 修复 B in-flight；changeset 补列 session-manager + 7 包（主 agent 亲改完成）；设计文档 5 处 doc_errors 亲改完成（D11 措辞 / D5 配套落点 / D4 终名 / index 路径 / §6 changeset 补记）。
 
-**残留风险**：
+**残留风险**（阶段 6 终态清账 20260914：0/2/3/4/5 已全部闭合，仅 1 持续有效）：
 
-0. **commit 窗口冲突（新增，20260914 实测两例）**：pre-commit 的 extensions 全量 tsc 扫工作区全部（非仅 staged），任何在跑单元的类型中间态（u4 的 TaskSnapshot / u12 的 GuiContext / u5 的 isRecord 迁移）都会拖挂无关单元的 commit。调度对策：编码单元在跑期间不补发新单元堵窗，等在跑单元完成 → 集中核验 → 按序精确路径 commit → 再开下一波。
-
-1. 行号漂移面：设计全部 [A/B 基线] 行号在合流基线上仅供方向参考，单元验收一律 grep 符号定位（已在 §0 校准声明）。
-2. D4 探针证伪路径：u16 取消 + 只记录回报用户（预授权边界）；此时 SDK env.ts:70 注释清扫不随 u16 消失——由最近的后续波次（u9 或收尾）顺带完成，状态表跟踪。
-3. 词表脚本 pre-commit 接入成本超预期 → 降级为设计文档如实登记「副本间漂移无机器守卫」（设计 D5 已预授权该降级）。
-4. V7 需要 dev patch runtime 注入畸形回包——验收后必须还原不留痕（设计 V7 构造手段）。
-5. u5 触碰 rename-session previewText 双维护契约（e2e/harness.mjs rebuildPreview）——重构行为一致是硬约束，违反即 V8 前暴露。
+0. ~~commit 窗口冲突~~ **已闭合**：并行波次全部结束，对策随流水线完成失效（阶段 3 曾两例实测，记录于变更历史 v3/v4）。
+1. **行号漂移面（持续有效）**：设计全部 [A/B 基线] 行号在合流基线上仅供方向参考，单元验收一律 grep 符号定位（§0 校准已声明）。
+2. ~~D4 探针证伪路径~~ **已闭合**：探针证实（u0），u16 已执行，SDK env.ts 注释清扫随 9a6c2c86b 完成（env.ts:72-73 实读确认），证伪分支未触发。
+3. ~~词表脚本降级~~ **已闭合**：未降级——脚本已接入 pre-commit（install-hooks.sh:1317 按路径触发）并登记 C-build-10。
+4. ~~V7 dev patch 还原~~ **已闭合**：V7 PASS 且报告记录「patch 还原零残留 + git diff runtime 空」。
+5. ~~u5 双维护契约~~ **已闭合**：u5 完成（298f05901，42 探针逐字节一致），V8 PASS。
 
 **变更历史**：
 
@@ -171,7 +170,7 @@ graph TD
 - 2026-09-14 v2：用户指令并发上限 3（覆盖全局 ≤5），调度改滚动补位；u6/u8 停止回 pending。u1 committed 6a00b2f28。
 - 2026-09-14 v3：u0 探针双断言证实（D4 重锚定放行，设计文档已回填）；u11 评审 NEEDS-FIX 2 MF + 4 S，设计文档 v7 修订全闭合（MF1 mode 门控留调用方 / MF2 交集 alias + V4 锚点核正 / S1-S4 采纳 / P2-b 措辞核正 / V7 补 inflight 冒烟），u12 放行——闭合判定依据 = 修复按评审自给方向机械落实 + 主 agent 逐条核实事实锚点，未再耗复审轮。
 - 2026-09-14 v4：阶段 2 全部 16 单元 committed（u0 探针报告 / u1 6a00b2f28 / u2 1bc1f6fc4 / u3 3dad19674 / u4 8883a1a9a / u5 298f05901 / u6 e62a11890 两轮（停手→方案 A 裁决）/ u7 73918cadc / u8 385aff694 / u9 2f6e2a33b / u10 f79f54343 / u11 评审闭环 d6ac64004 / u12 d997a7fa4 / u13+u14 fbe6f9f09 / u15 69c726400 / u16 9a6c2c86b）。3 处行为微变各自独立 commit。changeset 落 .changeset/ext-simplify-17-shared-exports.md。
-- 2026-09-14 v5：阶段 3 全量测试验收（原 Gate A）**全绿**——`pnpm test`（root，全 workspace --no-bail）EXIT=0，**23303 用例通过、零 test.skip**；日志 `.tmp/dev-flow/ext-simplify-17-shared-extraction.gate-a.log`。3 分区 reviewer 审查中。
+- 2026-09-14 v5：阶段 3 全量测试验收（原 Gate A）**全绿**——`pnpm test`（root，全 workspace --no-bail）EXIT=0，**23303 用例通过、零 test.skip**；日志 `.tmp/dev-flow/ext-simplify-17-shared-extraction.gate-a.log`；changeset 初版 7 包落盘 **c79a53dca**（终态 15 包见 057696113 演进）。3 分区 reviewer 审查中。
 - 2026-09-14 v6：阶段 3 审查闭环——3 区报告聚合（区 1：1 unreasonable 低 + 3 doc_errors；区 2：2 unreasonable P2 计划层遗漏 + 3 doc_errors；区 3：changeset 漏列 8 包 + 3 doc_errors）→ 修复批 2 组并行（A plugin-bridge isRecord / B smart-context D6 + subagent-core 互指注释）+ changeset 补列 15 包 + 设计文档 5 处勘误主 agent 亲改 → 定向复审 PASS（P3 ×3 顺手清）→ **审查清零 commit 057696113**。阶段 5 入口门四条过（V1-V6 已随单元闭合），V7/V8 真机验收并行派发。
 - 2026-09-14 v7：**V8 真机验收 PASS**（报告 .tmp/dev-flow/ext-simplify-17-v8-acceptance.md——thinking 传递 reasoning=65/70 实据 + xhigh 词表不误拒；模型恢复 ref≠主模型区分验证；非阻塞发现：thinking on 时 rename 标题空 = 产品固有 maxTokens 64 预算问题，三段证据归因非迁移回归，登记待产品裁决）。V7 in-flight。
 - 2026-09-14 v8：**V7 真机验收四项全 PASS**（报告 .tmp/dev-flow/ext-simplify-17-v7-acceptance.md——session-manager raw 透传 / plugin-bridge JSON 消费 / 非 JSON→isError+留痕三段证据含 patch 还原零残留 / inflight 零告警反证；登记既有发现 3 条：dev 数据目录钉死（C-dev-01 在 Electron 层失效，TROUBLESHOOTING §15）/ 插件冷启动广播丢失 / stale-ctx 重试噪音）。**V1-V8 验收全绿，阶段 5 收尾**：文档资产同步 = constraints.json C-build-10（词表守卫登记，validate 过）+ CONTEXT.md Marker RPC 词条 + TROUBLESHOOTING §15 + index 17 号终态与债务清账；PRODUCT/ARCHITECTURE/DESIGN/STANDARDS/TEST-STRATEGY 零触发（纯内部重构与缺陷恢复，无产品边界/拓扑/视觉/规范/策略变化）；FEATURE-PRIORITIES 零触发（3 处微变均为恢复性修复，挂掉后果分级依据不变）。

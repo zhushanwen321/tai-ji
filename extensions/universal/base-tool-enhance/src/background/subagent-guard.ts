@@ -1,5 +1,5 @@
 /**
- * subagent 进程识别（D14 降级判据）。
+ * subagent 进程识别（bte background 降级判据——生命周期设计 D14 项，commit 8599abd0c）。
  *
  * 判据收敛于 ext-guards isSubagentProcess（`XYZ_AGENT_SUBAGENT === "1"`——引擎
  * spawn 链恒注入的统一标记，ext-simplify-17 D4 重锚定）。命中 = 当前 pi 进程是
