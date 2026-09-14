@@ -276,6 +276,12 @@ export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 export const OUTBOUND_FRAME_WARN_BYTES: number = 8 * 1024 * 1024
 
 /**
+ * B7 ring 字节预算默认值（16MB/session，设计值——A2/A9 实测后校准）。
+ * 条数上限（ring 1000 帧）之外补字节维度：大帧场景下字节才是主导维度。
+ */
+export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
+
+/**
  * server→client 出站帧截断阈值（默认 32MB）[crash-resilience §3.3 D3]。
  *
  * 按通路分两种守卫形态：reply 通路超限 → 替换为 `payload_too_large` 错误 envelope
