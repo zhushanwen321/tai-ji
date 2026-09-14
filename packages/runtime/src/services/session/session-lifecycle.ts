@@ -908,6 +908,7 @@ export class SessionLifecycle implements ISessionRegistry {
     try {
       clearRemovedSessionData(sessionId)
     } catch (e: unknown) {
+      // best-effort 降级：清理失败仅留痕，不阻断删除主流程（B5 清理是软增强非删除前置条件）
       console.warn(`[session-lifecycle] plugin sessionData clear failed (sessionId=${sessionId}):`, e)
     }
     // wave:perf-w26（D9-1 delete 失效点）：session 文件已 trash，目录 TTL 快照 1s 内仍含
