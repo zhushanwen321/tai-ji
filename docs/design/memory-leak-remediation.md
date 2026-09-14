@@ -158,7 +158,7 @@ flowchart LR
 | B2 | **sessionHandlers 空 Set** | events.ts `off()` | delete 后 `if (set.size === 0) sessionHandlers.delete(sessionId)`。全仓无 keys 遍历消费方（三审核实），dispatchSession 对无条目 get 安全跳过，on 会重建，语义不变。被否：定期清扫——off 是唯一删除点，原地补一行即根治 |
 | B3 | **Sidebar 退订** | Sidebar.vue onMounted | 保存退订函数，`onBeforeUnmount` 调用。被否：把 app.info 改为 Pinia store 全局单例——过度设计，一行退订足够 |
 | B4 | **browserDestroy 接线** | use-session.ts cleanupSessionState hooks + lib/ipc.ts 调用方 | hooks 序列追加：删除 session 时 `browserDestroy(id)`，**hook 内显式 `.catch(console.warn)`**（preload invoke 透传 rejection，不 catch 会成 unhandledrejection 上报 error-reporter）。声明：目标面（browser drawer）生产入口休眠中（§2.1），本项 = 接线预备 + 堵「同 id 复活脏旧页面」洞；同 commit 修正 browser-view-manager.ts:33 陈旧头注释（称「无 LRU」实装 MAX_VIEWS=3）。被否：main 侧监听 session 删除广播——main 不应订阅 renderer 可见的公开信道 |
-| B5 | **clearSessionData 接入删除链** | removeSessionEntry 尾段直调 + session-data-store tombstone | ①接线：`removeSessionEntry` 尾段（onSessionDestroyedHandlers 投递之后、与 bus.clearSession 同区域 session-service.ts:1296 附近）直调 `pluginService.clearSessionData(sessionId)`，best-effort try/catch。②**tombstone 防异步复活（R3，主审+影响面审交叉印证）**：didDestroy 投递是 `rpcServer.notify` fire-and-forget（无完成屏障，session-api.ts:113-117），插件 worker 迟到的 `sessionData.set` RPC 无 session 存活校验（session-data-api.ts:46-48）——「先投递后清理」只防同步写；SessionDataStore 加 `clearedSessions: Set<string>`，`clearSession` 登记 tombstone（先于 trash），写 API 对已删 sid 丢弃 + warn 日志——**guard 覆盖 set 与 delete 两入口**（R4 源码自核裁决：迟到 delete 的 `getPartition(k)` 先于 oldValue undefined 短路执行，会 lazy 重建**空内存分区**——文件不复活但分区驻留；set 是文件复活主通道；get/keys 只读不守）。**摘碑双路径（R4，主审 R3-MF1 + 简洁审 INFO-1）**：① `notifySessionCreated` 收敛点（create/restoreSession/forkSession 三入口，主线程同步动作——不依赖经 worker 的异步链，失灵比复活更糟），覆盖废纸篓还原→打开；② import 落地处显式摘碑（import-service.ts doImport 尾部）——doImport 纯文件级不投 didCreate，覆盖「import 同 id 复活后未打开窗口」。③持久性对齐：`rmSync(force:true)` 改走项目 `infra/system/trash.ts`（mac 废纸篓），clearSession 变 async，调用点 `void …catch(warn)`；**trash 失败降级登记**：trash() 失败 = 文件保留原地 + 抛结构化错误，dropPartition 已先行——该 session 的 session-data 重启仍被 restoreFromDisk 预载（B5 对它不生效），接受为 best-effort 降级。被否：挂 onSessionDestroyedHandlers 回调——顺序无法约束；被否：保留 rmSync 永久删——与废纸篓还原/import 复活工作流错位（R1 方案，三审 MF3 否决） |
+| B5 | **clearSessionData 接入删除链** | removeSessionEntry 尾段直调 + session-data-store tombstone | ①接线（**阶段 3 一致性审查修正（ca058f602）**）：清理挂 `lifecycle.delete()` 末尾（active/scanned 双分支共用）——原方案「`removeSessionEntry` 尾段直调」被审查推翻：该汇聚点四路复用（用户删除 / **pi 崩溃退出 onSessionExit** / forceQuit / restore 清场），无条件挂尾部会把**存活** session 的插件数据 tombstone+trash（pi 崩溃 respawn 后插件空状态、旧数据只在废纸篓——违背 §3.1「trash 绑定用户删除」与崩溃恢复目标）。收窄后 pi 崩溃/forceQuit/restore 清场三存活路径不清不碑（respawn 续写原数据）；scanned 分支用户删除随之补齐插件数据清理（§3.1 对齐）。调用形态：经模块级 `clearRemovedSessionData` 分发（SessionService↔PluginService 构造注入成环规避，非 facade 直调——facia `IPluginService.clearSessionData` 契约连同死方法已删），best-effort try/catch，didDestroy 先行、清理在后的顺序保留。②**tombstone 防异步复活（R3，主审+影响面审交叉印证）**：didDestroy 投递是 `rpcServer.notify` fire-and-forget（无完成屏障，session-api.ts:113-117），插件 worker 迟到的 `sessionData.set` RPC 无 session 存活校验（session-data-api.ts:46-48）——「先投递后清理」只防同步写；SessionDataStore 加 `clearedSessions: Set<string>`，`clearSession` 登记 tombstone（先于 trash），写 API 对已删 sid 丢弃 + warn 日志——**guard 覆盖 set 与 delete 两入口**（R4 源码自核裁决：迟到 delete 的 `getPartition(k)` 先于 oldValue undefined 短路执行，会 lazy 重建**空内存分区**——文件不复活但分区驻留；set 是文件复活主通道；get/keys 只读不守）。**摘碑双路径（R4，主审 R3-MF1 + 简洁审 INFO-1）**：① `notifySessionCreated` 收敛点（create/restoreSession/forkSession 三入口，主线程同步动作——不依赖经 worker 的异步链，失灵比复活更糟），覆盖废纸篓还原→打开；② import 落地处显式摘碑（import-service.ts doImport 尾部）——doImport 纯文件级不投 didCreate，覆盖「import 同 id 复活后未打开窗口」。③持久性对齐：`rmSync(force:true)` 改走项目 `infra/system/trash.ts`（mac 废纸篓），clearSession 变 async，调用点 `void …catch(warn)`；**trash 失败降级登记**：trash() 失败 = 文件保留原地 + 抛结构化错误，dropPartition 已先行——该 session 的 session-data 重启仍被 restoreFromDisk 预载（B5 对它不生效），接受为 best-effort 降级。被否：挂 onSessionDestroyedHandlers 回调——顺序无法约束；被否：保留 rmSync 永久删——与废纸篓还原/import 复活工作流错位（R1 方案，三审 MF3 否决） |
 | B6 | **bridgeRequestIds 应答即删** | bridge-handler.ts 各应答分支 | bridge:tool_execute / bridge:intercept 的 await 完成点（成功+异常双路）调 `removeBridgeRequest(requestId)`；bridge:sync / bridge:malformed 同型补；`extensionSessionRequests` 的 per-session Set 在应答时同步删（trackSessionRequest 对偶）。被否：TTL 定期清扫——应答点明确且就在本文件 |
 
 验收统一探针（⛔实施期门）：每项在 dev 实例暴露临时诊断日志行，验收时读取结构 size 断言归零/有界（详见 §4）。
@@ -204,7 +204,7 @@ flowchart LR
 | C. 字节帽逐条计量 | 低 | 高 | 7/10 |
 | D. key 改三段式 `agentcall:<mainSid>:<acsId>`，isVirtualKeyOf 前缀扫描一行扩展全覆盖 | 中——机制最简 | 高——迁移面横跨 types/mutations/workflow store/SubagentTab/drawer/测试（两段式是 lru.ts/workflow.ts 多处注释登记的既有设计 M7/D6） | 7/10：改名回归风险 > 一个回调注入 |
 
-**推荐 A**（R2 补 D 行入谱系）：`evictIfNeeded`（阈值驱逐）与 `evictSessionWithVirtual`（显式驱逐）**两路径都接线**（A6 走阈值路径）——注入 `evictAgentCallsOf(mainSid)` 回调，由 chat store 装配时接 workflow store 映射。**豁免源更正（R2）**：查看态在 drawer control（control.ts:66-80 `selectedSubagentId` 等组合推导，挂 focusedSession 分区），不在 workflow store（其 `mainSessionAgentCalls` 只含「打开过」集合，当豁免源会过度豁免全部历史）；装配时注入 `viewedVids()` 回调，**查询源钉死为 panel 枚举**（逐 panel：focusedSession→drawer 分区→selectedSubagentId 组合当前选中 vid，**禁止 drawer 分区全枚举**——LRU 驱逐不清 drawer 控制分区（isOpen/selectedSubagentId 焦点切走后保留），全枚举会把曾开过 drawer 的全部 session 的 agentcall 分区永久豁免，B9 对重度用户静默失效，R2 复审 S1）；split 模式多 panel 全查（切入链第 11 步只刷新 focusedSession 一个 panel 的 recency，非焦点 panel 的 drawer 有真实被驱逐面，三审核实）。**白屏形态登记**：豁免窗口外被驱逐 = drawer `getMessages(vid)` 返回 `[]` 静态白屏，恢复 = 用户重选 tab 触发 selectedSubagentId watch 重拉快照（一次性交互）；agentcall 分区无 live 写入者（D4 只读契约），不会自愈。
+**推荐 A**（R2 补 D 行入谱系）：`evictIfNeeded`（阈值驱逐）与 `evictSessionWithVirtual`（显式驱逐）**两路径都接线**（A6 走阈值路径）——注入纯查询回调 `agentCallEvictionsOf(mainSid)`（LruEvictDeps 单回调定稿，实装 lru.ts:131-142——豁免集在回调实现侧应用，驱逐执行面留 LRU 模块），由 chat store 装配时接 workflow store 映射。**豁免源更正（R2）**：查看态在 drawer control（control.ts:66-80 `selectedSubagentId` 等组合推导，挂 focusedSession 分区），不在 workflow store（其 `mainSessionAgentCalls` 只含「打开过」集合，当豁免源会过度豁免全部历史）；豁免查询源 = core `control.getViewedVids()`（实装经 `bindViewedVidPanels` 惰性绑定，**查询源钉死为 panel 枚举**、豁免门控三分量 `isOpen && activeTab==='subagent' && selectedSubagentId`）（逐 panel：focusedSession→drawer 分区→selectedSubagentId 组合当前选中 vid，**禁止 drawer 分区全枚举**——LRU 驱逐不清 drawer 控制分区（isOpen/selectedSubagentId 焦点切走后保留），全枚举会把曾开过 drawer 的全部 session 的 agentcall 分区永久豁免，B9 对重度用户静默失效，R2 复审 S1）；split 模式多 panel 全查（切入链第 11 步只刷新 focusedSession 一个 panel 的 recency，非焦点 panel 的 drawer 有真实被驱逐面，三审核实）。**白屏形态登记**：豁免窗口外被驱逐 = drawer `getMessages(vid)` 返回 `[]` 静态白屏，恢复 = 用户重选 tab 触发 selectedSubagentId watch 重拉快照（一次性交互）；agentcall 分区无 live 写入者（D4 只读契约），不会自愈。
 
 **B10 mermaid 失败路径 DOM 泄漏（中危#4）**
 
@@ -216,15 +216,15 @@ flowchart LR
 
 终态：seen 去重集增量维护（消灭 O(n²)）；entries 达软上限后停采集。
 
-推荐：① `TraceSessionPartition` 增加 `seenIds: Set<string>`，`mergeAppendedEntries`（useSessionTrace.ts:179）改增量 add；② entries 软上限 5000 条，超限停止追加并标记截断。**UI 形态定稿（R2）**：不新增 status 值（现状 4 值 idle/loading/ready/error，加第 5 值的改动面波及 TraceView 2 处 + useTraceJump 终态判定 + store 状态机）——截断标记复用现有降级 UI，参照 `source:'oversize'` 正交字段先例（分区上加独立 `truncated: boolean`，消费面 = TraceView 现有降级渲染分支）。被否：环形缓冲滚动丢弃——entry.id 去重依赖全量 seen 集，滚动失效致重复追加；被否：切走视图即清空——设计如此（切回继续收集），改语义超范围。
+推荐：① `TraceSessionPartition` 增加 `seenIds: Set<string>`，`mergeAppendedEntries`（useSessionTrace.ts:179）改增量 add；② entries 软上限 5000 条，超限停止追加并标记截断；**软上限同时覆盖快照替换路径**（加载路径也是无界写点——超限保尾部 5000 条 + truncated 置位 + seenIds 重建，与增量停采同构；重拉小快照时 truncated 随权威快照复位）。**UI 形态定稿（R2）**：不新增 status 值（现状 4 值 idle/loading/ready/error，加第 5 值的改动面波及 TraceView 2 处 + useTraceJump 终态判定 + store 状态机）——截断标记复用现有降级 UI，参照 `source:'oversize'` 正交字段先例（分区上加独立 `truncated: boolean`，消费面 = TraceView 现有降级渲染分支）。被否：环形缓冲滚动丢弃——entry.id 去重依赖全量 seen 集，滚动失效致重复追加；被否：切走视图即清空——设计如此（切回继续收集），改语义超范围。
 
 ### 3.4 第三批：长尾按模式归组（经活性/语料分级过滤）
 
-**G1 死清理 API 接线组**：terminal-write-queue.removeSession、command-store.clearCommands、useForkNoticeEffect.feedMap 接 `cleanupSessionState` hooks（同 B4 模式：加 hook + best-effort + 显式 .catch）；`requestIdSessions` **聚焦 respond 路径**补 delete（ui_timeout 是死链，不排定时器语义——§2.1 已标注）。
+**G1 死清理 API 接线组**：terminal-write-queue.removeSession、command-store.clearCommands、useForkNoticeEffect.feedMap 接 `cleanupSessionState` hooks（同 B4 模式：加 hook + best-effort；**.catch 仅适用于 IPC/异步 hook——本组三 hook 为同步内存操作无 rejection 面，豁免 .catch**，core 侧可选成员 + `?.` 编排零破坏）；`requestIdSessions` **聚焦 respond 路径**补 delete（ui_timeout 是死链，不排定时器语义——§2.1 已标注）。
 
 **G2 活性无界结构治理组**（语料有界项已移 §2.5）：openPiStreams 在流确认 close 后从 Set 摘除（closeLogger 兜底等待契约不变——已 close 流无在途数据）；ws-client `sweepExpiredInFlightSubscribes` 增挂重连路径（resubscribeAll 前触发一次）；§2.5 四项源码注释补审计复核行（文档性）。
 
-**G3 峰值治理组**：subagent-extractor / workflow-extractor 加 READ_PRECHECK 预检（>32MB）→ **降级返回空列表 + 「会话过大」标记**（侧栏 subagent/workflow 面板显示降级提示）——不做尾读部分提取（extractor 是全文扫描语义，部分提取的记录缺失面难界定，三审 INFO-3）；shell-runner 补 maxBuffer 帽对齐 git-executor（10MB，超限截断保留头尾）。
+**G3 峰值治理组**：subagent-extractor / workflow-extractor 加 READ_PRECHECK 预检（>32MB）→ **降级返回空列表 + 「会话过大」标记**（侧栏面板降级提示**接线遗留独立排期**——runtime 侧 oversize 正交字段已就位（extractor 返回形状），协议面 shared/core/renderer 未携带）——不做尾读部分提取（extractor 是全文扫描语义，部分提取的记录缺失面难界定，三审 INFO-3）；shell-runner 补 maxBuffer 帽对齐 git-executor（10MB，超限截断保留头尾）。
 
 **G4 杂项组**（R2 收缩）：prematureTimeoutIds / deferFlushFailureCounts 纳入 disposeSession 清理面；quota fetch 非 2xx 时 `void resp.body?.cancel()`；skill-registry projectWatchers 加 LRU（最近 8 个 cwd，OS fd 资源 + worktree 工作方式使 distinct cwd 持续增长）；ImportSessionDialog close() 清扫描结果。（reclaim 清 ring、executingBash 断连清、respawn 计数删除三项已撤销，见 §1/§2.5。）
 
@@ -234,13 +234,13 @@ ADR-0049 checklist（docs/adr/0049-session-isolation-map-partition.md 的 Code R
 
 ## 4 验收
 
-**首句结论**：每批交付在 dev 实例（`XYZ_DEV_BACKGROUND=1 pnpm dev`）真实操作验证；探针 = 临时诊断日志行（⛔实施期门，随修复代码同 commit、验收后降级 debug 级）。
+**首句结论**：每批交付在 dev 实例（`XYZ_DEV_BACKGROUND=1 pnpm dev`）真实操作验证；探针分层口径（impl-plan §4 提速结论同步）：L1 单测面（_forTest/只读导出）随修复代码同 commit；L3 诊断日志探针并入 A9 批次同跑（⛔验收后统一降级 debug 级）。
 
 | # | 验证场景（回溯目标） | 步骤 | 通过标准 |
 |---|---|---|---|
 | A1 | pi 崩溃恢复后无 pingTimer 残留（G1/B1） | dev 实例开 session 发长任务；`kill -9` pi 进程；等 5s respawn；再等 130s | 诊断日志无幽灵 ping 记录；interpreter 实例数 = 活跃 session 数；respawn 后该 session 空闲可被 reaper 回收（env 缩短 reaper 周期验证） |
 | A2 | ring 字节有界（G1/B7） | 构造 8-16MB payload 帧多条（预算内驱逐路径）+ 单条 >16MB 帧（瞬时超调路径）；断连重连 | ring 探针：多帧场景 ringBytes ≤ 16MB；单帧 >16MB 场景允许瞬时超调但「仅剩最新帧即停」（不逐新帧、不死循环）且记账与实际入 ring 字节一致（truncated 版口径，R3）；wire 收到完整帧（单帧行为不变验证）；重连回放可用，驱逐段静默缺失由切回 hydrate 补齐（探针记录切回后消息完整） |
-| A3 | session 删除后全链路释放（G2/B4/B5/G1） | 开 session：写插件 sessionData、跑终端命令、用命令面板、fork 出通知不读；**dev 下经 electronAPI.browserCreate 直造 view**（生产入口休眠，§2.1）；删除 session | session-data/<sid>.json **进系统废纸篓**（非消失）；terminal-write-queue/command-store/feedMap 分区 size 归零；main 侧 views.size 下降；`sessionHandlers` 无该 sid 条目（含空 Set）；**tombstone 验证**：删除后模拟插件迟到 set()/delete()（RPC 直调）被丢弃且不复活文件与内存分区；经 **import 同 id 或废纸篓还原→打开**复活 session 后 set() 恢复正常（摘碑双路径；create 生成新 sid 不适用此验收——R4 钉死路径） |
+| A3 | session 删除后全链路释放（G2/B4/B5/G1） | 开 session：写插件 sessionData、跑终端命令、用命令面板、fork 出通知不读；**dev 下经 electronAPI.browserCreate 直造 view**（生产入口休眠，§2.1）；删除 session | session-data/<sid>.json **进系统废纸篓**（非消失）；terminal-write-queue/command-store/feedMap 分区 size 归零；main 侧 views.size 下降；`sessionHandlers` 无该 sid 条目（含空 Set）；**tombstone 验证**：删除后模拟插件迟到 set()/delete()（RPC 直调）被丢弃且不复活文件与内存分区；经 **import 同 id 或废纸篓还原→打开**复活 session 后 set() 恢复正常（摘碑双路径；create 生成新 sid 不适用此验收——R4 钉死路径） |（阶段 3 补充验收反例：pi 崩溃 respawn / forceQuit / restore 后插件数据**存留**——修复 ca058f602 的反例用例已落单测）
 | A4 | 断连重连不泄漏 handler（G2/B3） | dev 实例连着；kill runtime 触发 supervisor 拉起 5 次 | 探针：`globalTypeHandlers.get('app.info').size === 1`；piVersion 显示正常更新 |
 | A5 | bridge 请求不累积（G2/B6） | 装一个含工具的插件，触发 20 次工具调用（含失败路径） | bridgeRequestIds.size 每批调用完成后归零 |
 | A6 | agentcall 分区联动驱逐 + 豁免（G2/B9） | 跑多 agent call 的 workflow；开 drawer 选中其中一个 tab；切 ≥8 个其他 session 挤出 LRU | 被驱逐主 session 的未查看 agentcall 分区释放；**正被查看的分区存活、drawer 不白屏**；关闭 drawer 后再切走，分区释放 |
@@ -272,7 +272,7 @@ justification：u1-u6 领地零交集且是三批核心，最大化并行；u7 �
 
 **待验证检查点**（实施期核实，不阻塞设计）：
 
-1. workflow store 映射暴露与 drawer control 豁免查询的精确接口形态（u5 实施时定，倾向只读 `agentCallIdsOf(mainSid)` + `viewedVids()` 两查询）
+1. workflow store 映射暴露与 drawer control 豁免查询的精确接口形态——**已核实（2026-09-14 u5 实施定稿）：合并为单回调 `agentCallEvictionsOf` 纯查询**（renderer 装配于 features 层 `agentcall-lru-linkage.ts`，组合 workflow 映射 ∖ `getViewedVids()` 豁免集；stores import 禁令迫使外置装配）
 2. trash.ts 在 runtime 子进程的废纸篓调用行为（session-data 目录路径下的删除确认进废纸篓；非 mac 平台 unlink 退化——与 session 本体同语义）
 3. ring 预算 16MB 常数的实测量化（A2 验收时校准，先按设计值实施）
 4. skill-registry watcher LRU 驱逐时 chokidar close 的异步完成处理（u10 实施时定）
