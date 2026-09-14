@@ -77,9 +77,9 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
 
 | Unit | 状态(pending/in-progress/committed/blocked) | 轮次 | 证据指针 |
 |------|----------------------------------------------|------|----------|
-| u1 | pending | 0 | — |
-| u2 | pending | 0 | — |
-| u3 | pending | 0 | — |
+| u1 | committed | 2 | 3d175e18e；包内 typecheck+test 33/33 绿；N1 bridge 侧零命中；D6 返回类型收紧（主 agent 抽验补修） |
+| u2 | committed | 4 | e519206e8；CP1 双包 typecheck 绿（回退方案未触发）；runtime 三测试文件 61/61；CP2 bundle exit 0；三形状唯一定义点 rg 核实 |
+| u3 | committed | 1 | docs/design/bridge-rewrite-pi-0.84.md 五处落地 + 主 agent 追加 §3.4 E1/E4/E6 同款讹写清偿（见 v1 u3 记录） |
 
 ## 7 残留风险与变更历史
 
@@ -88,3 +88,9 @@ u1 ⊥ u2 文件级零交集真并行；u3 串行于 u2 之后（文档表述依
 - **D2「同批同 PR」兑现方式**：u1/u2 各自独立 commit、同分支合入（注释与 fixture 不参与运行时，批间无行为窗口；co-deployed 无版本偏斜）。
 - **不触碰红线**：设计 §7「已核实非过度」清单与 §2 非目标为 u1/u2 领地内禁改区（三条硬约束头注释、sync 循环、守卫族、SDK worker 通道四类型、plugin-sdk manifest commands 域 :243/:281/:837/:888、bridge-interop 的 commands-executor 相关注释 :39/:71）。
 - v0（2026-09-14）：计划建立，基线 a8718fcd5。计划期补登两条（grep 机械核实）：① forwarding.test.ts:49 `commands: []` 字面量——设计 §6.2 清单未列，按 N1「fixtures 全部零命中」补进 u1；② runtime fixtures 精确行号核实——bridge-marker-channel.test.ts :58/:176、plugin-hooks-integration.test.ts :188-193（含用例名与注释，均 u2 领地）。
+- v1（2026-09-14）：u1/u2 committed（3d175e18e / e519206e8，同批同 PR 兑现 D2）。执行记录与计划外裁决：
+  - **领地遗漏补登**：bridge-sync.test.ts（走真实 RuntimeServer→BridgeHandler→getSyncPayload 生产链的集成测试，:227-236/:267 断言生产回包含 commands）设计 §6.2 与本计划 v0 均未列——u2 dev 按领地铁律停下上报，主 agent 实跑核实（2 failed/14 passed）后批准扩入 u2（fix 轮次 2）；其 :386-390 自含形状断言残留同批清理（轮次 3，N1 口径）。
+  - **u1 轮次 2**（主 agent 抽验）：getSessionId 返回类型 `string | undefined` → `string`（pi 实装 `getSessionId(): string` 恒返回 string，`| undefined` 是已删 catch 路径的类型层幽灵）。
+  - **u2 轮次 4**（提交门拦截）：plugin-types.ts 新注释中协议包内部路径字面量 `extensions/plugin-bridge/types.ts` 触发一层路径残留检查（check-extension-dependencies.mjs 第 5 节，2026-08-22 分组防回退守卫）——改写为包名+模块名指称（仓内既有惯例），检查器本体未动。
+  - u1 自行裁决三项均属设计语义内：D3 调用点双形态注释随分支同域清理；D1 重写+N2 拆两用例；D5 断言强化为 `toEqual({ kind: "ok" })`。u2 自行裁决五项（:262 同文档指针一并修正、:46 保留 getCommands 指引、SDK 头「零依赖」叙事如实化、SDK 双行 re-export（ToolExecuteHandler 本地引用需要）、plugin-types 节头保留）均登记无设计冲突。
+  - **u3 轮次 1 + 主 agent 追加**：u3 五处落地（§3.2 降格 / §3.3-D7 关闭登记 / :208 形态 / :238 E2 行 / 变更历史 v4.5，rg 证据 V1-V3 全过）。其领地内观察项——§3.4 表格 E1/E4/E6 行与 E2 同款 `isError: '<文案>'` 速写讹写——主 agent 采信后亲验实装（bridge-handler.ts:105 / bridge-interop.ts:172 均为 `{content, isError: true}`；E4 桥侧 cancelledResult 为 `isError: true` + content 数组、文案实为 `Plugin tool <name>: cancelled.`），裁决一并清偿（E2 修而 E1/E4/E6 不修 = 表格内部自相矛盾且与 :191 注记互斥），变更历史 v4.5 补 ④ 记。
