@@ -125,10 +125,10 @@ graph TD
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u0 | in-progress | 1 | 波1 派发 20260914 |
-| u1 | in-progress | 1 | 波1 派发 20260914 |
-| u2 | pending | 0 | - |
-| u3 | pending | 0 | - |
+| u0 | committed | 1 | 双断言证实（报告 .tmp/dev-flow/ext-simplify-17-d4-probe.md）；u16 门禁通过 |
+| u1 | committed | 1 | 6a00b2f28（32 用例绿 + 全量 typecheck 过） |
+| u2 | in-progress | 1 | u1 完成后补发 20260914 |
+| u3 | in-progress | 1 | u0/u11 完成后补发 20260914 |
 | u4 | pending | 0 | - |
 | u5 | pending | 0 | - |
 | u6 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
@@ -136,7 +136,7 @@ graph TD
 | u8 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
 | u9 | pending | 0 | - |
 | u10 | pending | 0 | - |
-| u11 | in-progress | 1 | 波1 派发 20260914 |
+| u11 | committed | 1 | NEEDS-FIX 2 MF + 4 S → 设计文档 v7 全修闭合（主 agent 核实事实锚点：callBridge :123 门控 / types.ts sessionId? 活构造均属实）；u12 放行 |
 | u12 | pending | 0 | - |
 | u13 | pending | 0 | - |
 | u14 | pending | 0 | - |
@@ -156,3 +156,5 @@ graph TD
 **变更历史**：
 
 - 2026-09-14 v1：初版计划。基线校准（§0 五项）+ 16 单元 + DAG 四波 + 验收计划表（V1-V8）。
+- 2026-09-14 v2：用户指令并发上限 3（覆盖全局 ≤5），调度改滚动补位；u6/u8 停止回 pending。u1 committed 6a00b2f28。
+- 2026-09-14 v3：u0 探针双断言证实（D4 重锚定放行，设计文档已回填）；u11 评审 NEEDS-FIX 2 MF + 4 S，设计文档 v7 修订全闭合（MF1 mode 门控留调用方 / MF2 交集 alias + V4 锚点核正 / S1-S4 采纳 / P2-b 措辞核正 / V7 补 inflight 冒烟），u12 放行——闭合判定依据 = 修复按评审自给方向机械落实 + 主 agent 逐条核实事实锚点，未再耗复审轮。

@@ -1,6 +1,6 @@
 # ext-simplify-17：shared 抽取统一设计（B 组 5 包 + scheduler 扫描合并）
 
-> 状态：v6 终态（20260914），双审查至双 PASS 0 must-fix：主审（tech-design-review）R2 PASS；影响面（tech-design-impact-review）v5 最终确认 PASS（消费点 4 处经独立 grep 确证、三消费点等价论证逐点核验、批次表消歧确认；唯一 INFO——§6 :86 旧行号——已顺手修正）。完整轨迹：r1 主审 2 MF + 6 S / 影响面 1 MF + 2 S 全修（MF1 D3 误列 bte、MF2 SDK 归属失实、M1 PI_SUBAGENT_* 键族 4 读者全集 + session-lifecycle 活函数误定性核正）；r2 双审独立发现同一 MF（rename-session isRecord 块外消费点），r3 影响面补全至 4 处消费点（:67 随删 / :84、:100、:110 改 import）并核正自身 r2 清单漏报（sed 截止 :95）。
+> 状态：v7 实施态（20260914 dev-flow 实施中）：①D4 前置探针真机双断言**证实**（GUI 全链路 pi 引擎 subagent env 含 `XYZ_AGENT_SUBAGENT=1`、旧 `PI_SUBAGENT_*` 两键零匹配；顶层会话反向 NO_MATCH——报告 `.tmp/dev-flow/ext-simplify-17-d4-probe.md`，③record-access 防线失效与 ④identity entry 恒不写 两发现已登记，预授权修复放行）；②D8 聚焦评审（§6 批次 3 前置）NEEDS-FIX 2 MF + 4 S → 全修落本文档（MF1 mode 门控留调用方 + MF2 SessionManagerErrorResult 交集扩展 alias 与 V4 锚点核正 + S1-S4 采纳；报告 `.tmp/tech-design/design-review-ext-simplify-17-d8-focus.md`），修复按评审自给方向机械落实、主 agent 逐条核实事实锚点后判定闭合，D8 形态冻结进入实施。此前轨迹：v6 终态（20260914），双审查至双 PASS 0 must-fix：主审（tech-design-review）R2 PASS；影响面（tech-design-impact-review）v5 最终确认 PASS（消费点 4 处经独立 grep 确证、三消费点等价论证逐点核验、批次表消歧确认；唯一 INFO——§6 :86 旧行号——已顺手修正）。完整轨迹：r1 主审 2 MF + 6 S / 影响面 1 MF + 2 S 全修（MF1 D3 误列 bte、MF2 SDK 归属失实、M1 PI_SUBAGENT_* 键族 4 读者全集 + session-lifecycle 活函数误定性核正）；r2 双审独立发现同一 MF（rename-session isRecord 块外消费点），r3 影响面补全至 4 处消费点（:67 随删 / :84、:100、:110 改 import）并核正自身 r2 清单漏报（sed 截止 :95）。
 > 来源：20260914 两路独立扫描合并——①B 组 5 包（todo / rename-session / session-manager / base-tool-enhance / plugin-bridge）逐包 subagent 深度审查；②scheduler 全 12 源文件 jscpd + 语义层 scan。全部候选经主 agent grep/实读核实后采信，无伪问题。
 > 用户裁决（20260914，本设计的前提）：①执行范围 = 先出统一设计文档，过对抗审查后另行实施；②bte subagent 进程判据重锚定**预授权**——探针证实 PI_SUBAGENT_* 两键无人注入即修，证伪则只记录；③isRecord 全仓归一**做**，随批次顺带。
 > **分支基线声明**：本设计覆盖两个 worktree。凡标注「[B 基线]」的行号/文件以 `feat-optimize-extension-overengineering-group-b` 分支为准（B 组 07/15/13/16 已实施终态）；标注「[A 基线]」以 `feat-optimize-extension-over-engineering` 分支为准（scheduler steer 直投重构后）。两分支对同一文件的行号可能不同，实施时以标注为准，禁止跨基线套用。
@@ -45,7 +45,7 @@ ext-simplify 16 份设计（01-16）消解的是「包内过度设计」；本�
 | # | 候选 | 同构证据 |
 |---|------|----------|
 | P2-a | select+marker 通道 RPC 原语（4 处同构） | session-manager `index.ts:61-89`（`callSessionManager`）、plugin-bridge `index.ts:106-137`（`callBridge`）、subagent-workflow `host/inflight-reporter.ts:126-139`（发送半边）、protocol `extensions/ask-user/helpers.ts:36-60`（`askUserInteract`）。核心语句同构（`ctx.ui.select(MARKER, [JSON.stringify(payload)], {timeout?, signal?})`），失败折叠语义同构（取消/超时/通道异常 → null + logger.error 留痕），plugin-bridge:130 与 session-manager:78 注释逐字同款。**两路 scan 独立发现、互相印证** |
-| P2-b | 错误回包形状双定义 | [B 基线] protocol `extensions/session-manager/types.ts:160` `SessionManagerErrorResult {error, hint?}` ≈ [B 基线] `extensions/plugin-bridge/types.ts:60` `BridgeErrorResponse {error, hint?: string}`，逐字段相同（[A 基线] session-manager/types.ts 同形状在 :77，行号随 13 号下沉漂移）；消费侧 session-manager 内联检测（`index.ts:115-123`）与 plugin-bridge `isBridgeErrorResponse`（`:63-65` + `:167-175` hint 拼接）近似变体 |
+| P2-b | 错误回包形状双定义 | [B 基线] protocol `extensions/session-manager/types.ts:160` `SessionManagerErrorResult {error, sessionId?, hint?}`（多 `sessionId?` 可选字段——create 已成功时另附）≈ [B 基线] `extensions/plugin-bridge/types.ts:60` `BridgeErrorResponse {error, hint?: string}`，核心字段相同（聚焦评审 v7 核正：非逐字段相同，session-manager 侧多 `sessionId?` 且 runtime handler 有活构造）；消费侧 session-manager 内联检测（`index.ts:115-123`）与 plugin-bridge `isBridgeErrorResponse`（`:63-65` + `:167-175` hint 拼接）近似变体 |
 | P2-c | `firstContentText` 三包同构 | todo `render.ts:157-160` ≈ subagent-workflow `interface/format.ts:555-563`（`renderTextFallback`）≈ plan `tool.ts:125-126`（内联副本），逐字符同构（`content[0]` → type==="text" 三元 → `text ?? ""`） |
 | P2-d | `isEnoentError` 两成员 | scheduler `importer.ts:97`（instanceof + code 版）≈ subagent-workflow `jsonl-run-store.ts:230`（typeof-object 宽版），语义微差 = 非 Error 对象带 code 的接受度 |
 | P2-e | pending reason→status 落盘知识分居两包 | bte `notify.ts:76-90`（`toPendingReason`）产出 reason、`pending-reconcile.ts:93` 以 `status: pendingReason` **identity 假设**落盘（notify 侧无 status 写点，emit 只带 reason）；权威实现在 pending-notifications `index.ts:283-293`（`mapReasonToStatus`，自注「落盘契约组成部分」）。与 13 号 M13 所修漂移同构：pending 改映射表，bte 写出的 entry status 即静默漂移 |
@@ -65,7 +65,7 @@ isRecord（11 文件副本、2 语义变体：排数组 vs 允数组）：两路
 **D3 `isRecord(value: unknown): value is Record<string, unknown>` 新导出**（建议新增）。canonical = 排数组严版（`Record` 语义本义，plugin-bridge 与 subagent-inflight 两副本已是此形态）。**本批迁移面 = plugin-bridge + rename-session 两处**：plugin-bridge `index.ts:58-60`（排数组版，函数体零改动搬 import，已依赖 ext-guards）；rename-session `llm.ts:58-61`（允数组版，grep 全文件核实消费点共 4 处——r3 影响面 MF 补全，此前两轮清单各漏报）——分流处置：`joinTextBlocks` 内 :67 随 D7 整块删除自然消失；`extractUserPromptText` 内 :84、`extractFinalText` 内 :100、`extractMessageText` 内 :110 均在 D7 删除块之外，三处改 import ext-guards 严版——rename-session 随之新增 ext-guards 依赖。收严行为等价论证（可证伪，三消费点同构）：数组 message 输入下，严版 `isRecord=false` 直接 `continue` / `return ""`；允数组版通过守卫后——:84 被 `message.role !== "user"` 拦下 continue、:100 经 `joinTextBlocks(message.content)` 因 content 非 Array 返回 ""、:110 经 `typeof message.content === "string"` 为 false 再由 `joinTextBlocks(undefined)` 返回 ""——路径不同结果相同，无行为差异；对象输入两版同路径。bte `spawn-background.ts` **无 isRecord 副本**（v1 误列，实为 `isRecordedPidStillOriginal` 前缀撞名误命中，r1 主审 MF1 核正；bte 包内真正的 object 守卫是 `config.ts:55` `isPlainObject`，维持 §4 负面清单「D1 实施时顺带评估」口径）。其余副本（cache-probe / smart-context ×2 / session-reader（`core/workflow.ts`；`discovery/subagents.ts` 的 `isRecordManifest` 是 manifest 形状守卫非泛用副本，r2 主审 INFO）/ system-prompt-trace）登记为各包后续改造顺带的长期采用议题。**明确排除**：packages/ 层 7 处副本与 extension-protocol 内部 2 处（[B 基线] `session-manager/types.ts:62-64`、`subagent-inflight/types.ts:53-55`）——理由：protocol 被 runtime 双端消费，若 protocol 依赖 ext-guards，runtime 将传递依赖 `@zhushanwen/pi-ext-guards`（extensions 层包），制造反向分层边；protocol 内部 2 处副本登记不动。允数组其余副本若未来迁移须先逐包核对真实数组输入场景（本批两处迁移面中 plugin-bridge 本就是排数组版，rename-session 处已给三消费点全量等价论证）。
 
 **D4 bte subagent 进程判据重锚定**【已预授权，探针证实即修】。
-- 实施前置探针（可证伪）：真机跑一次 pi subagent 任务（`pi --mode rpc` + subagent spawn `env`），断言子进程 env 含 `XYZ_AGENT_SUBAGENT=1` 且不含 `PI_SUBAGENT_ROOT_SESSION_ID` / `PI_SUBAGENT_SELF_RECORD_ID`。证实 → 执行重锚定；证伪 → 只记录不修，回报用户。
+- 实施前置探针（可证伪）：真机跑一次 pi subagent 任务（`pi --mode rpc` + subagent spawn `env`），断言子进程 env 含 `XYZ_AGENT_SUBAGENT=1` 且不含 `PI_SUBAGENT_ROOT_SESSION_ID` / `PI_SUBAGENT_SELF_RECORD_ID`。证实 → 执行重锚定；证伪 → 只记录不修，回报用户。**探针已执行（20260914，双断言证实——正向 GUI 全链路 pi 引擎 subagent `XYZ_AGENT_SUBAGENT=1` 单行输出旧键族零匹配 + 进程级 ps eww 双引擎互证；反向顶层会话 NO_MATCH；生产 v0.9.20 旧直 spawn 链仍注入全套旧键族，新旧判据按版本衔接无空窗。重锚定放行）**。
 - 修法：`subagent-guard.ts` 判据改锚 `XYZ_AGENT_SUBAGENT === "1"`；谓词与常量收敛进 ext-guards（建议新增 `isSubagentProcess()` + `SUBAGENT_MARKER` 导出），bte 改 import。smart-context `pure.ts:258-260` 的单键版同谓词顺带收敛（其消费语义与 bte 同源）。
 - **键族读者全集与逐个处置**（r1 影响面 M1 增补）：`PI_SUBAGENT_*` 键恒空的失效波及 4 个读者，处置各异——
   ① bte `subagent-guard.ts`（本项修复对象，探针 + 重锚定）；
@@ -96,19 +96,21 @@ export function isThinkingLevel(v: unknown): v is ModelThinkingLevel;
 
 **D8 select+marker 通道 RPC 原语**（建议新增 `core/select-rpc.ts`，本桶唯一建议先轻量设计评审的项——跨包契约新增 + 4 消费方迁移 + 1 处行为微变）。
 
-API 形态（两路 scan 收敛结论）：
+API 形态（两路 scan 收敛结论 + 聚焦评审 v7 修订）：
 
 ```ts
 type MarkerRpcResult = { ok: true; value: string } | { ok: false; reason: "cancelled" | "timeout" | "channel-error" | "non-json" };
-callMarkerRpc(ctx, marker, payload: unknown, opts?: { signal?: AbortSignal; timeout?: number; log?: (msg: string, detail?: object) => void }): Promise<MarkerRpcResult>;
+callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?: AbortSignal; timeout?: number; log?: (msg: string, detail?: object) => void }): Promise<MarkerRpcResult>;
 ```
 
-- 判别结果而非抛错；parse 为 opt-in（session-manager 返回 raw string 语义不破）；传输核与失败折叠契约共享，回包消费三态（解析 JSON / raw string / ack 前缀）、日志策略、timeout 策略留在调用方（真差异保留）。
-- **cancelled/timeout 判别机制**（r1 主审 S1）：pi 实装两态不可区分（用户取消与超时均 resolve undefined）。原语以 `signal.aborted` 反推：传入 signal 且 aborted → `"cancelled"`；其余情况（含未传 signal）→ `"timeout"`。判别粒度以底层信息源为界，不虚报可区分性。
-- 前置：`GuiContext.ui.select` 签名补 `timeout` 字段（实装已支持——session-manager:74 与 plugin-bridge:118 均在传，协议类型缺声明）。
-- 消费方迁移：plugin-bridge `callBridge` 整体替换（非 JSON 留痕语义由原语承担）；session-manager `callSessionManager` 替换；inflight-reporter 仅用发送+折叠半边（fire-and-forget + ack 判定语义保留，不强制全量 RPC 化）；ask-user `askUserInteract` 本批不动（已半规范化在协议包内，作为原语形态参照，是否收编留待原语落地后评估）。
+- 判别结果而非抛错；原语对回包做 JSON 合法性检测（`"non-json"` 判别 + 留痕），parsed 结果的消费留调用方——`value` 恒 raw string（session-manager 返回 raw string 语义不破）；传输核与失败折叠契约共享，回包消费三态（解析 JSON / raw string / ack 全等匹配）、日志策略、timeout 策略、**mode 门控**留在调用方（真差异保留）。
+- **payload 序列化与 ctx 类型**（聚焦评审 S1/S3 采纳）：签名收 `payload: string`，调用方自行 stringify——与四消费方现状完全等价（序列化形状各异：session-manager 嵌套 {action,params} / plugin-bridge BridgeRequest / inflight 快照帧），原语不引入内部 stringify 异常面；ctx 收 `GuiContext` 结构化类型（protocol 零 pi 依赖先例，gui-context.ts 头注），`ui.select` 缺席前置沿 ask-user `isGuiCapable(ctx) && ctx.ui?.select` 先例留在调用方判定。
+- **mode 门控留调用方**（聚焦评审 MF1 修复）：门控现状三方各异——plugin-bridge 在 `callBridge` 内（`ctx.mode !== "rpc"` 提前 null）、inflight 在 `attachSession` 处、session-manager 无门控。原语不内置门控（保持传输核纯粹，四态 reason 无 non-rpc 语义）；plugin-bridge 迁移后门控前置 if 原样保留在调用方；session-manager 维持无门控现状（裸 TUI 挂 timeout 行为不变，不引入未登记微变）。
+- **cancelled/timeout 判别机制**（r1 主审 S1）：pi 实装不可区分（rpc-mode.js 四路——预 abort / 中途 abort / timeout 到期 / 用户 cancelled 回包——均 resolve undefined）。原语以 `signal.aborted` 反推：传入 signal 且 aborted → `"cancelled"`；其余情况（含未传 signal）→ `"timeout"`。判别粒度以底层信息源为界，不虚报可区分性。
+- 前置：`GuiContext.ui.select` 签名补 `timeout` 字段（实装已支持——session-manager 与 plugin-bridge 均在传，协议类型缺声明）。
+- 消费方迁移：plugin-bridge `callBridge` 传输核替换（mode 门控前置 if 与回包 JSON 消费保留在调用方；非 JSON 留痕语义由原语承担）；session-manager `callSessionManager` 替换（其 execute 的 `_signal` 未透传 select 为现状缺口，等价迁移保持现状，范围外登记）；inflight-reporter 仅用发送+折叠半边（fire-and-forget + ack 全等判定语义保留，不强制全量 RPC 化）；ask-user `askUserInteract` 本批不动（已半规范化在协议包内，作为原语形态参照，是否收编留待原语落地后评估）。
 - **行为变化（有意，改进向）**：session-manager 非 JSON 回包从「catch 后 `parsed=undefined` 静默当成功文本返回」（`index.ts:112-114`）统一为「logger.error 留痕 + isError」——对齐 plugin-bridge 形态。实施 PR 说明须列明。
-- 配套：错误回包形状单源化——protocol core 新增底层形状（如 `ChannelErrorResult {error: string; hint?: string}`，命名标注建议新增）+ `isChannelErrorResult` / `formatChannelErrorText`；`SessionManagerErrorResult` / `BridgeErrorResponse` 改为引用底层形状的 type alias（保留各自导出名，public API 零破坏；runtime plugin-service / session-manager-handler 等 re-export 消费方不受影响）。plugin-bridge `errorResult` 与 session-manager 内联检测改用共享守卫。
+- 配套：错误回包形状单源化——protocol core 新增底层形状（如 `ChannelErrorResult {error: string; hint?: string}`，命名标注建议新增）+ `isChannelErrorResult` / `formatChannelErrorText`；`BridgeErrorResponse` 改为引用底层形状的 type alias；`SessionManagerErrorResult` 因多 `sessionId?` 字段（create 已成功时另附，runtime session-manager-handler 有活构造）改为**交集扩展 alias** `ChannelErrorResult & { sessionId?: string }`（保留各自导出名，public API 零破坏；真实读者 = protocol barrel + session-manager/plugin-bridge 两 extension 包 + runtime session-manager-handler）。plugin-bridge `errorResult` 与 session-manager 内联检测改用共享守卫。
 
 **D9 `firstContentText(result): string` 新导出**（建议新增，落 protocol core 或 `core/helpers`）。todo / subagent-workflow / plan 三包改 import，删各自副本。4 行零依赖纯函数，pi toolResult 通用形状，非领域结构，与 protocol「领域数据结构不进协议层」头注不冲突。**依赖传播面**（r1 影响面 S1）：todo / subagent-workflow 已依赖 extension-protocol；plan **无 protocol 依赖且不在 mandatory 清单**，改 import 需新增该依赖（workspace 内新增，lockfile 随动，守卫规则 3 豁免 packages/ 包条目登记不会拦截）——实施时随包提交 package.json + lockfile 变更。
 
@@ -158,13 +160,13 @@ callMarkerRpc(ctx, marker, payload: unknown, opts?: { signal?: AbortSignal; time
 - V1 采用批零残留：D1/D3/D9/D13/D14 完成后，`grep -rn "instanceof Error ? " <对应包 src/>` 为 0（排除注释与测试夹具）；`grep -rn "function isRecord\|function firstContentText\|function fixedWidth" <对应包 src/>` 为 0。
 - V2 新导出钉值：llm-shared THINKING_LEVELS 七值逐一断言（含 xhigh）的单测；isEnoentError / isRecord 的 canonical 行为单测（含排数组断言）。
 - V3 三连绿：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` 全绿（两 worktree 各自跑各自改动面）。
-- V4 protocol 契约：D8/D9/D10/D11 新增导出的单测；`SessionManagerErrorResult`/`BridgeErrorResponse` re-export 消费方（runtime plugin-service / session-manager-handler）typecheck 绿。
+- V4 protocol 契约：D8/D9/D10/D11 新增导出的单测；`SessionManagerErrorResult`/`BridgeErrorResponse` 真实读者（protocol barrel + session-manager/plugin-bridge 两 extension 包 + runtime session-manager-handler）typecheck 绿（聚焦评审 v7 核正：plugin-service 非两类型读者，原锚点空转）。
 - V5 spawn-args：`:xhigh` 后缀用例从降级变为接受的单测；六值→七值钉值断言。
 
 ### 5.2 真机验收（pi CLI 优先，按 AGENTS.md 本地实测规范）
 
 - V6 D4 探针（实施前置 + 修后回归）：subagent 真机任务 dump env，断言 `XYZ_AGENT_SUBAGENT=1` 存在、`PI_SUBAGENT_*` 两键不存在；修后 subagent 内 `background:true` 恢复 D14 降级（旧行为对照：当前判据失效背景下该降级未生效）。**反向断言**（r1 主审 S4）：非 subagent 主进程（env 无 `XYZ_AGENT_SUBAGENT`）中 `background:true` 任务正常后台化，重锚定后的 guard 不误命中降级。探针报告同时登记 §3.1 D4 ③④ 两处既有失效读者的发现。
-- V7 D8 双通道：session-manager 真机调一 action（raw 回包路径）+ plugin-bridge 真机 sync+tool 调用（JSON 回包路径）+ 构造非 JSON 回包断言 isError + 留痕日志（session-manager 行为微变的直接验证点）。**构造手段**（r1 主审 S5）：临时 dev patch runtime session-manager-handler 的 respond 链注入畸形字符串，验收后还原不留痕。**宿主不变口径**（r1 主审 S3）：runtime 侧本设计零代码改动 + V4 导出面 typecheck 守卫，二者合构成为宿主消费面行为不变论证（已核实 session-manager 回包消费方 = agent toolResult，renderer 无专属展示路径）。
+- V7 D8 双通道 + inflight 冒烟：session-manager 真机调一 action（raw 回包路径）+ plugin-bridge 真机 sync+tool 调用（JSON 回包路径）+ 构造非 JSON 回包断言 isError + 留痕日志（session-manager 行为微变的直接验证点）+ inflight 真机冒烟（任一 subagent 任务后 runtime 侧在途镜像计数正确或 event-adapter 收到 ack 确认帧——聚焦评审 S4 补项）。**构造手段**（r1 主审 S5）：临时 dev patch runtime session-manager-handler 的 respond 链注入畸形字符串，验收后还原不留痕。**宿主不变口径**（r1 主审 S3）：runtime 侧本设计零代码改动 + V4 导出面 typecheck 守卫，二者合构成为宿主消费面行为不变论证（已核实 session-manager 回包消费方 = agent toolResult，renderer 无专属展示路径）。
 - V8 D5/D6：rename-session 真机改名（thinking level 传递 + 模型恢复路径）。
 
 ### 5.3 三视角
