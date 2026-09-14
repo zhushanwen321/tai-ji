@@ -1305,6 +1305,30 @@ ${STAGED_DELETED}"
         echo -e "${GREEN}[OK] 无 pi 派生锚点文件变更，跳过 pi-sync 守卫${NC}"
     fi
 
+    # thinking 档位词表守卫（ext-simplify-17 §3.2 D5 机器守卫补强，按路径触发）：
+    # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组）双向比对。
+    # 钉值单测只锚副本自身字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 实证），
+    # 仅此守卫红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 两副本文件 / 守卫脚本自身；
+    # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
+    # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
+    # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
+    # 本守卫守 extensions/pi-rpc 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 总闸 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$"; then
+        echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对守卫...${NC}"
+        if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器守卫交付物缺失）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-thinking-levels.mjs; then
+            echo -e "${RED}[ERROR] thinking 档位词表守卫未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无 thinking 档位词表文件变更，跳过档位词表比对守卫${NC}"
+    fi
+
     # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配）
     if echo "$STAGED_FILES" | grep -qE "(^|/)(thinking-levels\.ts|use-provider-edit\.ts|builtin-providers\.json|model-capability\.ts)$"; then
         echo -e "${BLUE}[INFO] 档位链路文件有变更，运行 G3 差分探针...${NC}"
@@ -1678,6 +1702,7 @@ echo -e "  ${GREEN}[+]${NC} 打包配置预检查（asarUnpack/files 一致性 +
 echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编码中文）"
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
 echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记守卫 / G3 档位差分探针 / G4 subagent 通道禁则）"
+echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对守卫（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
 echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包守卫（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
 echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界守卫（H3/R5：聚合间 import 台账 + 聚合→壳禁则 + 私有互调门）"
 echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移守卫（C-proc-10：设计文档引用已删除/改名符号即拦截）"
