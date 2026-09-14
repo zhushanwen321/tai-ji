@@ -61,6 +61,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
+import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
 import { clearUnread } from '@/composables/useSessionMarkers'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { registerAppCommands } from '@/composables/features/command/useAppCommands'
@@ -141,6 +142,12 @@ export function useSidebar() {
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
     disposeChat: (sid) => useChat().disposeSession(sid),
     invalidateStatus: (sid) => invalidateStatusCache(sid),
+    // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线：browserDestroy IPC
+    // fire-and-forget——preload invoke 透传 rejection，显式 .catch(console.warn 级) 消化，
+    // 防 unhandledrejection 上报 error-reporter；失败仅降级为 view 驻留至 LRU 挤出（best-effort）。
+    browserDestroy: (sid) => {
+      browserDestroyIpc(sid).catch((e) => console.warn(`[useSidebar] browserDestroy(${sid}) failed:`, e))
+    },
   }
 
   const flow: NewTaskFlowPort = {

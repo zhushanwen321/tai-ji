@@ -24,6 +24,13 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({ disposeSession: useChatDisposeMock }),
 }))
 
+// ── mock lib/ipc：捕获 browserDestroy（B4 接线断言）；其余导出透传真实模块 ──
+const browserDestroyMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+vi.mock('@/lib/ipc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ipc')>()),
+  browserDestroy: browserDestroyMock,
+}))
+
 // ── mock api 域 ──
 const removeMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const switchSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
@@ -79,6 +86,32 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     expect(useChatDisposeMock).toHaveBeenCalledWith('s1')
 
     scope.stop()
+  })
+
+  it('U-B4: deleteSession 触发 browserDestroy IPC；rejection 被 .catch 消化（无 unhandledrejection）', async () => {
+    // [B4 / 2026-09-14 内存审计 §2.1]：browserDestroy 此前是全仓零调用死 API——
+    // 已删 session 的 WebContentsView 驻留至 LRU 挤出。本用例锁定接线 + 错误消化契约
+    // （preload invoke 透传 rejection，不 catch 会成 unhandledrejection 上报 error-reporter）。
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      browserDestroyMock.mockRejectedValueOnce(new Error('ipc down'))
+      const scope = effectScope()
+      const sidebar = scope.run(() => useSidebar())!
+      seedSessions(sidebar, ['s1', 's2'])
+
+      await sidebar.deleteSession('s1')
+
+      expect(browserDestroyMock).toHaveBeenCalledWith('s1')
+      // 微任务排空一个周期后无 unhandledrejection（.catch 消化契约）
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).toEqual([])
+
+      scope.stop()
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 

@@ -66,6 +66,8 @@ vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => ({
 }))
 vi.mock('@xyz-agent/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
+  // [B3 探针] Sidebar.vue 探针日志行读此导出（部分 mock 漏导出会在属性访问时抛错）
+  _probeGlobalTypeHandlerCount: vi.fn(() => 0),
   dispatchSession: vi.fn(),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },

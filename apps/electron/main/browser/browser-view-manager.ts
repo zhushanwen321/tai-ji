@@ -30,7 +30,10 @@
  *    与 CSS px 1:1，**绝对不乘 devicePixelRatio**。renderer 的
  *    getBoundingClientRect() 返回 CSS px，直接透传即可（详见 setRect）。
  *
- * 7. W1 内部用 Map<sessionId, entry>，无 LRU 上限（W4 再加淘汰策略）。
+ * 7. Map<sessionId, entry> 持 view 池，LRU 上限 MAX_VIEWS=3（W4 淘汰策略已落地：超限时
+ *    按 lastUsed 淘汰最旧，removeChildView + webContents.close）。[HISTORICAL] 本条曾误记
+ *    「无 LRU 上限（W4 再加淘汰策略）」，2026-09-14 内存审计（B4 browserDestroy 接线）
+ *    复核时按实装修正。
  *
  * 状态暂存：webContents 事件（did-navigate / did-fail-load / isLoading）W1 先暂存到
  * manager 内部 entry，W2 经 IPC 回传 renderer。

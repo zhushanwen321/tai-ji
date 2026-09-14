@@ -30,7 +30,7 @@ function makeHooks(log: string[]): SessionCleanupHooks & Record<string, ReturnTy
   const names = [
     'clearFileTree', 'clearSubagent', 'clearWorkflow',
     'clearExtensionUI', 'clearExtensionHost', 'evictChat', 'evictVirtualKeys',
-    'clearAgentCallMapping', 'disposeChat', 'invalidateStatus',
+    'clearAgentCallMapping', 'disposeChat', 'invalidateStatus', 'browserDestroy',
   ] as const
   const hooks = {} as SessionCleanupHooks & Record<string, ReturnType<typeof vi.fn>>
   for (const n of names) {
@@ -351,7 +351,7 @@ describe('deleteSession', () => {
     resetSessionListSubForTest()
   })
 
-  it('TC-4 S3 全 hooks 调用序：panel 解绑→removeFromList→10 hooks→triggerSessionCleanups', async () => {
+  it('TC-4 S3 全 hooks 调用序：panel 解绑→removeFromList→11 hooks（含 B4 browserDestroy）→triggerSessionCleanups', async () => {
     const f = makeFixture()
     seed(f.store, [{ cwd: '/a', sessions: [summary('del')] }])
     f.store.activeId.value = 'del'
@@ -365,11 +365,12 @@ describe('deleteSession', () => {
     expect(f.store.list.value).toHaveLength(0)
     // 删 active 后列表空 → push chat 空态
     expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat' })
-    // S3 全序（log 数组精确顺序断言）
+    // S3 全序（log 数组精确顺序断言）；末位 browserDestroy = B4 main 侧 WebContentsView 销毁接线
     const expectedOrder = [
       'clearFileTree(del)', 'clearSubagent(del)', 'clearWorkflow(del)',
       'clearExtensionUI(del)', 'clearExtensionHost(del)', 'evictChat(del)',
       'evictVirtualKeys(del)', 'clearAgentCallMapping(del)', 'disposeChat(del)', 'invalidateStatus(del)',
+      'browserDestroy(del)',
     ]
     expect(f.log).toEqual(expectedOrder)
     // M1-03：extension-host 分区清理钩子被调用（壳层实现 emit session-destroyed）
@@ -404,6 +405,8 @@ describe('deleteSession', () => {
     expect(f.navigation.push).not.toHaveBeenCalled()
     expect(f.hooks.clearFileTree).toHaveBeenCalledWith('b')
     expect(f.hooks.disposeChat).toHaveBeenCalledWith('b')
+    // B4：非 active 删除同样触发 browserDestroy（与 store 分区清理同生命周期）
+    expect(f.hooks.browserDestroy).toHaveBeenCalledWith('b')
     f.dispose()
   })
 
@@ -466,6 +469,10 @@ describe('deleteFolder', () => {
     expect(f.hooks.clearFileTree).toHaveBeenCalledWith('a1')
     expect(f.hooks.clearFileTree).toHaveBeenCalledWith('a2')
     expect(f.hooks.disposeChat).toHaveBeenCalledTimes(2)
+    // B4：folder 批量删除逐 session 触发 browserDestroy（cleanupSessionState 复用路径）
+    expect(f.hooks.browserDestroy).toHaveBeenCalledTimes(2)
+    expect(f.hooks.browserDestroy).toHaveBeenCalledWith('a1')
+    expect(f.hooks.browserDestroy).toHaveBeenCalledWith('a2')
     // activeId 回退到列表首项 'b1'，selectSession 衔接
     expect(f.store.activeId.value).toBe('b1')
     expect(f.api.switchSession).toHaveBeenCalledWith('b1')
