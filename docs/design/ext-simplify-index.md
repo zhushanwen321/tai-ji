@@ -6,7 +6,8 @@
 > **范围收窄后扩大（2026-09-12）**：首轮收窄仅 01/02/12 推进对抗式审查闭环并进入 dev-flow 实施；03/09/14 随后亦经双审查至 0 must-fix 并实施完成。当前已实施 6 份（01/02/03/09/12/14）。
 > **B 组 3 份设计修订闭环（2026-09-14）**：07/15/13 按各 review.md 修 must-fix+suggestion 出 v2（13 号两轮聚焦复审至 PASS）。
 > **B 组 3 份实施完成（2026-09-14）**：三份均走 dev-flow 全七阶段（单元开发 → 一致性审查+Gate A → 真机验收 → design-code-sync 终态同步）交付完成——07 de22a5268 / 15 3b5cef4a2 / 13 584fa92c9；验收记录与收敛轨迹见 .tmp/dev-flow/*impl-plan.md 各变更历史（07 V1-V3 真机 / 15 V4-V5 桌面真机 / 13 V1-V6 双环境，V5-TUI 腿按设计预设降级由单测+桌面侧兜底）。
-> **剩余 9 份已审查（2026-09-13）**：按用户指示以 over-engineering-audit skill 方法论（四问 + 反模式清单 + 证据纪律）对 04-08/10/11/13/15 逐份派 subagent 审查，报告落盘本目录 `ext-simplify-XX-*.review.md`。结果：10/11 两份 PASS（0 must-fix），其余 7 份 NEEDS-FIX 共 12 must-fix（04/05/06/07/08 各 1、13 有 5、15 有 2）——全部为事实基线过时 / 公式自相矛盾 / 跨设计前提失效类文档级问题，**方案方向本身 9/9 全部核实成立（无伪问题、无新增过度设计）**。注意：本次为 over-engineering 单视角审查，非既定双审查流程；修复 must-fix 后是否补 tech-design 双审查待用户裁决。16 号仍未起草。
+> **剩余 9 份已审查（2026-09-13）**：按用户指示以 over-engineering-audit skill 方法论（四问 + 反模式清单 + 证据纪律）对 04-08/10/11/13/15 逐份派 subagent 审查，报告落盘本目录 `ext-simplify-XX-*.review.md`。结果：10/11 两份 PASS（0 must-fix），其余 7 份 NEEDS-FIX 共 12 must-fix（04/05/06/07/08 各 1、13 有 5、15 有 2）——全部为事实基线过时 / 公式自相矛盾 / 跨设计前提失效类文档级问题，**方案方向本身 9/9 全部核实成立（无伪问题、无新增过度设计）**。注意：本次为 over-engineering 单视角审查，非既定双审查流程；修复 must-fix 后是否补 tech-design 双审查待用户裁决。
+> **16 号起草并审查闭环（20260914）**：起草即含证据刷新（管线层 string-only 定案 / 零供给方核查 / 三处形状定义矛盾）+ 语义层四问扫描（新增 2 发现、1 项登记合并议题）；M21 contested 项裁决收窄 string-only。对抗式审查 r1（1 MF + 4 S，事实底座 33 组声称 0 伪问题 0 失实）全修 → 聚焦复审 R2 PASS，0 must-fix。至此 **16/16 全部起草完毕**：9 份已实施（01/02/03/07/09/12/13/14/15），7 份设计就绪待实施（04/05/06/08/10/11/16）。
 
 ## 设计文档清单（16 份）
 
@@ -27,7 +28,7 @@
 | 13 | ext-simplify-13-base-tool-enhance-protocol.md | base-tool-enhance + extension-protocol（下沉侧） | M12 registry 行为原语三处复制→下沉 extension-protocol（pid 判据/tail/LRU/原子写）；M13 bt- 差集双写（方向 A 提强依赖 vs B 下沉 protocol——设计对比后定）；low：task-store 包装链、getTask 零调用。**〔跨设计协调，登记自 12 号设计 §6.4⑤〕**：13 号 D5 计划在 pending-reconcile.ts :135-141 补注释，其前提「pending 内存 registry 仅在其自身 session_start rebuild 后非空」在 12 号终态（registry/rebuild 删除、entries 现算化）下失效——实施 D5 时须按 12 号文档（ext-simplify-12-pending-notifications.md）终态口径改写该注释，不得引用已删除的 registry/rebuild 机制 | session-view-01a09053-2429-*.md | **已实施**（设计 v2.2→v2.3 + dev-flow 六单元 u0-u5 全 committed（30f21b95c 起 10 commits）→ 终态 584fa92c9；Gate A 全绿 5940 runtime tests；V1-V6 双环境验收 PASS；阶段 4/6 各轮审查清零；关键附带修正：protocol 补 "type": "module"（tsx 链子出口 interop 断裂，u3 发现）） |
 | 14 | ext-simplify-14-shared-libs.md | file-lock、cache-probe、extension-logger | C9 file-lock 扩展侧 async 面（65 行零调用）；M22 cache-probe seq 声明未实装；low：file-lock LockCoreOptions/双 Options re-export、extension-logger 类型导出+测试出口、cache-probe 测试导出×3 | session-view-01a0907b-727f-*.md | 已实施（双审查至 0 must-fix；u1-u3 20260912） |
 | 15 | ext-simplify-15-rename-session-session-manager.md | rename-session、session-manager | M20 PI_RENAME_* env 覆盖层；M25 session-manager 契约 4 字段+1 类型死；low：isSubagentSession 路径嗅探（contested→登记 constraints+双端注释）、preview 双维护 | session-view-01a09070-780e-*.md | **已实施**（设计 v2 20260914 范围收敛 D2+B1-B3 + dev-flow u1 6d73d3399 / u2 56a8ea995 → 终态 3b5cef4a2；V4/V5 桌面真机 PASS 含对照构造；设计 v2.2 终态回写） |
-| 16 | ext-simplify-16-plugin-bridge.md | plugin-bridge | M21 Inject*Content 透传机制（contested→设计裁决：收窄 text-fallback vs 保留 forward-ready）；low：BridgeSyncPayload.commands 恒空死字段（双端同 PR）、isToolNotFound error 分支、跨包形状一致性测试（补测试） | session-view-01a0907b-7245-*.md | 待设计 |
+| 16 | ext-simplify-16-plugin-bridge.md | plugin-bridge | M21 Inject*Content 透传机制（contested→设计裁决：**收窄 string-only**——生产端已由 plugin-intercept-injection 拍板 string-only，透传分支结构性不可达）；low：BridgeSyncPayload.commands 恒空死字段（双端同批删除）、isToolNotFound error 分支（零供给方）、跨包形状一致性（**改道：三处定义单源化取代补测试**）；审计新增：details ok 变体全量重复、getSessionId 不可达防御；登记合并议题：{content} 包装↔守卫环形（A.5 不采纳） | session-view-01a0907b-7245-*.md | 设计就绪（v1.2 20260914：起草含证据刷新 + 语义层四问扫描附录；对抗式审查 r1（1 MF + 4 S，事实底座 33 组 0 伪问题）全修 → 聚焦复审 R2 PASS，0 must-fix） |
 
 ## 无任务包（审计「已核实非过度」，不出设计文档）
 
@@ -40,7 +41,7 @@
 | 阶段 | 状态 |
 |------|------|
 | 映射索引（本文件） | ✅ 20260911（20260912 范围收窄更新；20260913 审查状态更新） |
-| 起草（16 份，tech-design 五段骨架） | 01-15 已落盘并提交（16 未起草）；20260912 收窄为仅 01/02/12 推进，后扩大：03/09/14 亦审查实施完成 |
-| 审查 | 01/02/03/09/12/14：双审查（tech-design-review + tech-design-impact-review）完成。04-08/10/11/13/15：20260913 完成 over-engineering-audit 视角审查（9 份报告 `ext-simplify-XX-*.review.md`，2 PASS / 7 NEEDS-FIX 共 12 must-fix，方案方向 9/9 成立）；16 未起草 |
-| 修复循环（每轮全修 must-fix+suggestion 至 0） | 01（3 轮）/ 02（4 轮）/ 12（2 轮）/ 09（2 轮）/ 03（聚焦复审 R1 双 0）/ 14（主审 R1 + 影响面 R2）/ 07（基线刷新轮）/ 15（范围收敛轮）/ 13（复审 2 轮 + 阶段 3 三区聚合 1 轮 + 定向复审微修 1 轮）均收敛至 0 must-fix；04/05/06/08 已于 20260914 修复闭环（04 聚焦复审 PASS+5 清偿 / 05 复审 3 轮闭环（供给方定性重设计）/ 06 复审清单 17 处机械刷新 / 08 聚焦复审 PASS+口径贯彻 8 处）；16 未起草 |
-| 设计就绪宣告 + commit | 01/02/03/09/12/14 + **07/15/13**（20260914，B 组全链路交付：设计闭环 → dev-flow 七阶段 → 终态同步）九份实施完成；04/05/06/08 设计就绪（20260914 修订闭环）；16 未起草 |
+| 起草（16 份，tech-design 五段骨架） | 01-16 全部落盘并提交（16 于 20260914 起草）；20260912 收窄为仅 01/02/12 推进，后扩大：03/09/14 亦审查实施完成 |
+| 审查 | 01/02/03/09/12/14：双审查（tech-design-review + tech-design-impact-review）完成。04-08/10/11/13/15：20260913 完成 over-engineering-audit 视角审查（9 份报告 `ext-simplify-XX-*.review.md`，2 PASS / 7 NEEDS-FIX 共 12 must-fix，方案方向 9/9 成立）。16：20260914 起草当日完成对抗式审查 r1（NEEDS-FIX 1 MF / 4 S，事实底座 33 组声称 0 伪问题 0 失实）+ 聚焦复审 R2 PASS（review.md 含 R2 节） |
+| 修复循环（每轮全修 must-fix+suggestion 至 0） | 01（3 轮）/ 02（4 轮）/ 12（2 轮）/ 09（2 轮）/ 03（聚焦复审 R1 双 0）/ 14（主审 R1 + 影响面 R2）/ 07（基线刷新轮）/ 15（范围收敛轮）/ 13（复审 2 轮 + 阶段 3 三区聚合 1 轮 + 定向复审微修 1 轮）均收敛至 0 must-fix；04/05/06/08 已于 20260914 修复闭环（04 聚焦复审 PASS+5 清偿 / 05 复审 3 轮闭环（供给方定性重设计）/ 06 复审清单 17 处机械刷新 / 08 聚焦复审 PASS+口径贯彻 8 处）；16 r1 全修（MF1 执行契约闭合 + S1-S4）→ R2 PASS（残留 1 suggestion 当轮补登） |
+| 设计就绪宣告 + commit | 01/02/03/09/12/14 + **07/15/13**（20260914，B 组全链路交付：设计闭环 → dev-flow 七阶段 → 终态同步）九份实施完成；04/05/06/08 + **16** 设计就绪（20260914，16 为起草并审查闭环） |
