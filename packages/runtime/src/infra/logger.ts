@@ -138,6 +138,31 @@ interface PiStreamState {
 const openPiStreams = new Set<PiStreamState>()
 
 /**
+ * G2 活性无界治理（docs/design/memory-leak-remediation.md §3.4）：流确认 close 后从
+ * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / relay subagent /
+ * crash log）各注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
+ * Set 随工作流强度无界增长（~0.5-2KB/条，两组审计独立发现）。摘除条件三合一（全满足才删）：
+ * - ended：写入已终止（write 第一道守卫），不再有新数据进流；
+ * - 无在途轮转：轮转续体可能重开新流回放 pending 行（rotatePiStream），窗口内摘除会让
+ *   closeLogger 漏等回放流；
+ * - 无存活流（undefined 或 destroyed）：'close' 事件即 fd 已释放、缓冲全量落盘——
+ *   **已 close 的流没有在途数据**，closeLogger 兜底等待契约不变（摘除条目无可等待者）。
+ * 触发点：各写流 'close' 监听器（ensurePiStream / 轮转重开处挂）、end()（流从未打开 /
+ * 已 destroyed 时无 close 事件可等）、轮转续体 finally（覆盖「轮转窗口内 end 且未重开流」
+ * ——该路径无新 close 事件可达）。
+ */
+function maybeRetirePiStream(state: PiStreamState): void {
+  if (state.ended && state.rotationInFlight === null && (state.stream === undefined || state.stream.destroyed)) {
+    openPiStreams.delete(state)
+  }
+}
+
+/** 测试钩子：openPiStreams 当前条目数（G2 摘除断言用；生产代码零消费）。 */
+export function _openPiStreamCountForTest(): number {
+  return openPiStreams.size
+}
+
+/**
  * 初始化全局 logger。组合根（index.ts main 最早处）调用一次。
  *
  * 副作用：
@@ -821,6 +846,10 @@ function createPiStreamWriter(file: string): PiSessionLog {
       // 轮转进行中时 state.stream 已摘空：回放行由续体写完后再 end（见 rotatePiStream），
       // 续体打开的新流仍留在 state.stream 上，closeLogger 才能等到它 flush 完成。
       state.stream?.end() // 缓冲数据异步 flush 后关闭 fd；closeLogger 会等待其完成
+      // G2 摘除（§3.4）：覆盖「流从未打开（惰性打开未触发）」与「流已 destroyed（error
+      // 自愈前终止）」两形态——此时无 close 事件可等，直接摘除；正常路径由流的 'close'
+      // 监听器（ensurePiStream / 轮转重开处挂载）在 flush 完成后摘除。
+      maybeRetirePiStream(state)
     },
   }
 }
@@ -854,6 +883,9 @@ function ensurePiStream(state: PiStreamState): WriteStream {
   state.stream?.removeAllListeners('error')
   state.stream = createWriteStream(state.file, { flags: 'a' })
   attachStreamErrorHandler(state.stream, `pi:${state.file}`)
+  // G2 摘除（§3.4）：close = fd 释放 + 缓冲全量落盘（无在途数据），此时摘除不破坏
+  // closeLogger 兜底等待契约；ended/轮转条件见 maybeRetirePiStream。
+  state.stream.once('close', () => maybeRetirePiStream(state))
   return state.stream
 }
 
@@ -917,6 +949,8 @@ function rotatePiStream(state: PiStreamState): Promise<void> {
       } else {
         attachStreamErrorHandler(stream, `pi:${file}`)
         state.stream = stream
+        // G2 摘除（§3.4）：轮转重开的流同样挂 close 摘除（含「回放行写完即 end」的短命形态）
+        stream.once('close', () => maybeRetirePiStream(state))
         for (const p of pending) {
           stream.write(p.data)
           state.bytesWritten += p.bytes
@@ -929,6 +963,10 @@ function rotatePiStream(state: PiStreamState): Promise<void> {
       // no-op
     } finally {
       state.rotationInFlight = null
+      // G2 摘除（§3.4）：「轮转窗口内 end 且未重开流」（pending 空 + ended → 续体不建新流）
+      // 无新 close 事件可达，在此兜底摘除；重开了流（回放 + end）则 stream 未 destroyed，
+      // 条件不满足，由该流的 'close' 监听器在 flush 完成后摘除。
+      maybeRetirePiStream(state)
       // 轮转窗口超长（fs 挂起）/ 新流不可用的丢弃：合并记一次 warn（此时 rotationInFlight
       // 已清，writeLogEntry 走正常路径，不递归；只影响缓冲窗口内的行，降级可接受）
       if (state.dropped > 0) {

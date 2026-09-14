@@ -92,7 +92,8 @@ interface CachedExternalMeta {
   size: number
   meta: ExternalSessionMeta
 }
-/** @data-owner #22（纯派生可重建读缓存，失效语义见登记表主表 #22） */
+/** @data-owner #22（纯派生可重建读缓存，失效语义见登记表主表 #22）
+ * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5） */
 const externalMetaCache = new Map<string, CachedExternalMeta>()
 
 /**

@@ -59,6 +59,8 @@ export interface ExecutingBash {
  * taste:allow-no-data-owner W24-EX-B（已落定非草稿）：bash 执行中瞬时反馈态（非任何数据源
  * 的缓存投影——唯一事实来源就是 bashStart/bashResult 帧本身，终态即清、不持久化）；
  * 生命周期挂接 store.disposeSession 统一 cleanup 编排（D3 closure，见文件头注释）。
+ * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5）
+ * （防翻案锚：断连残留裁决曾翻案过一次，见 §2.5 executingBash 行与重审条件）
  */
 const executingBashMap = shallowRef(new Map<string, ExecutingBash>())
 

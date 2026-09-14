@@ -28,6 +28,7 @@ import {
   isInboundValveTripped,
   INBOUND_FRAME_MAX_TEXT_CODE_UNITS,
   _resetInboundGuardForTest,
+  _inFlightSubscribeCountForTest,
   type InboundFrameDroppedInfo,
 } from '../ws-client'
 import { createFakeWebSocket, type FakeWebSocket } from './helpers/fake-websocket'
@@ -287,5 +288,72 @@ describe('ws-client 入站守卫 ③ 终止阀的订阅暂停与恢复', () => {
     expect(dropped).toHaveLength(3)
     expect(dropped.every((d) => d.sessionId === null)).toBe(true)
     expect(isInboundValveTripped('s1')).toBe(false) // 无法归因 → 阀门不误触发
+  })
+})
+
+describe('ws-client 入站守卫 ④ in-flight 簿记重连 sweep（G2 活性治理，memory-leak-remediation §3.4）', () => {
+  // G2：断连使部分 subscribe reply 永不到达（重连后新 id 重订），过期簿记原实现只能等
+  // 超界帧归因死路径触发 sweep。修复 = markConnected（新连接确立，含重连）时 sweep 一次。
+  // fake timers 同步 mock Date（vitest 默认 toFake 含 Date），advanceTimersByTime 驱动 TTL 过期。
+  const RECONNECT_BASE_DELAY_MS = 1_000 // ws-client 内部常量（未导出，字面量对齐）
+  const IN_FLIGHT_TTL_MS = 90_000       // IN_FLIGHT_SUBSCRIBE_TTL_MS（未导出，字面量对齐）
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    installTestPlatform()
+    disconnect()
+    _resetInboundGuardForTest()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    connect('ws://test')
+    latestFake().triggerOpen()
+  })
+
+  afterEach(() => {
+    disconnect()
+    _resetInboundGuardForTest()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  /** 断连 → 1s 退避 → connect 新 fake → open（markConnected = sweep 触发点）。 */
+  function reconnect(): FakeWebSocket {
+    latestFake().triggerClose() // onclose → scheduleReconnect
+    vi.advanceTimersByTime(RECONNECT_BASE_DELAY_MS) // 退避到点 → connect() 建新 fake
+    const next = latestFake()
+    next.triggerOpen() // onopen → markConnected（同步 sweep）
+    return next
+  }
+
+  it('过期条目在重连确立时被扫除：断连致 reply 永不到达的簿记不再驻留到超界帧死路径', () => {
+    expect(send(subscribeMsg('rpc-stale', 's1'))).toBe(true)
+    expect(_inFlightSubscribeCountForTest()).toBe(1)
+
+    vi.advanceTimersByTime(IN_FLIGHT_TTL_MS + 1) // 跨过 TTL（含 fake Date 前进）
+    reconnect()
+
+    expect(_inFlightSubscribeCountForTest()).toBe(0) // sweep 已在重连确立时扫除
+  })
+
+  it('未过期条目在重连后保留（sweep 语义仍是 TTL 惰性过期，重连不连坐清除新鲜簿记）', () => {
+    expect(send(subscribeMsg('rpc-fresh', 's1'))).toBe(true)
+
+    reconnect()
+
+    expect(_inFlightSubscribeCountForTest()).toBe(1) // 未过期（~1s < 90s）：归因锚仍有效
+    // 归因锚仍可用：该 id 的超界 reply 仍归因到目标 session
+    latestFake().triggerMessage(oversizedFrame(subscribeReplyPrefix('rpc-fresh')))
+    expect(isInboundValveTripped('s1')).toBe(false) // 单帧不触发阀门，仅验证归因链路存活
+  })
+
+  it('sweep 早于重订阅登记（markConnected 同步执行，resubscribeAll 触发点在其后）：重连后新订阅正常登记', () => {
+    expect(send(subscribeMsg('rpc-old', 's1'))).toBe(true)
+    vi.advanceTimersByTime(IN_FLIGHT_TTL_MS + 1)
+
+    reconnect() // sweep 在 connected 置位同帧内完成（use-connection 的 state watch 异步其后）
+    expect(_inFlightSubscribeCountForTest()).toBe(0)
+
+    // 重连后 resubscribeAll 形态的新订阅（新 id）正常登记，不被 sweep 误扫
+    expect(send(subscribeMsg('rpc-new', 's1'))).toBe(true)
+    expect(_inFlightSubscribeCountForTest()).toBe(1)
   })
 })

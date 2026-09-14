@@ -200,6 +200,11 @@ export function _resetInboundGuardForTest(): void {
   inboundFrameDroppedHandler = null
 }
 
+/** 测试钩子：in-flight subscribe 簿记当前条目数（G2 重连 sweep 断言用；生产代码零消费）。 */
+export function _inFlightSubscribeCountForTest(): number {
+  return inFlightSubscribes.size
+}
+
 /** 通知队列丢弃（清空方负责 splice，此处只广播） */
 function notifyQueueDrop(msgs: ClientMessage[], reason: SendQueueDropReason): void {
   if (msgs.length === 0) return
@@ -303,6 +308,12 @@ export function connect(url: string, token?: string): void {
     reconnectAttempts = 0
     // 连接成功 → 重置重连计时窗口（下次掉线重新开始计数）
     reconnectStartedAt = null
+    // G2 活性治理（docs/design/memory-leak-remediation.md §3.4）：重连路径增挂 in-flight
+    // subscribe 簿记的 TTL sweep。断连使部分 subscribe reply 永不到达（重连后新 id 重订），
+    // 原实现唯一 sweep 触发点在超界帧归因死路径，过期条目无人扫 → 簿记随工作流强度无界
+    // 增长。新连接确立时扫一次（本函数同步执行，早于 use-connection 的 state watch 触发
+    // resubscribeAll——watcher 异步 flush），sweep 语义仍是 TTL 惰性过期，未过期条目不连坐。
+    sweepExpiredInFlightSubscribes()
     startHeartbeat()
     flushPreAuthQueue()
   }
