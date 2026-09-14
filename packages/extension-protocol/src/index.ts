@@ -48,6 +48,10 @@ export type { DualWidgetContent } from './core/helpers'
 // ── core：ctx 接口 ──
 export type { GuiContext } from './core/gui-context'
 
+// ── core：select+marker 通道 RPC 原语（D8：传输核 + 失败折叠契约 + 错误回包形状单源）──
+export type { MarkerRpcResult, MarkerRpcOptions, ChannelErrorResult } from './core/select-rpc'
+export { callMarkerRpc, isChannelErrorResult, formatChannelErrorText } from './core/select-rpc'
+
 // ── ./extensions/ask-user：富交互（select 通道 + marker，本包内子目录）──
 export type { AskUserQuestion, AskUserOption, AskUserAnswers } from './extensions/ask-user/types'
 export { ASK_USER_MARKER } from './extensions/ask-user/marker'

@@ -4,8 +4,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	SESSION_MANAGER_MARKER,
+	callMarkerRpc,
+	formatChannelErrorText,
+	isChannelErrorResult,
+	type MarkerRpcResult,
 	type SessionManagerAction,
-	type SessionManagerErrorResult,
 } from "@xyz-agent/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
@@ -55,38 +58,37 @@ const SELECT_TIMEOUT_MS: Record<SessionManagerAction, number> = {
 };
 
 /**
- * 通过 select 通道向 runtime handler 发送 session 管理请求。
- * 返回 handler respond 的 JSON 字符串，用户取消/超时返回 null。
+ * 通过 select 通道向 runtime handler 发送 session 管理请求（传输核走 protocol 的
+ * callMarkerRpc 原语，D8）。回包为 handler respond 的 JSON 字符串（value 恒 raw）；
+ * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一折叠 isError。
+ * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
  */
-async function callSessionManager(
+function callSessionManager(
 	ctx: ExtensionContext,
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
-): Promise<string | null> {
+): Promise<MarkerRpcResult> {
 	// 契约 SSOT：请求体 = 嵌套 { action, params } 形状（协议包 @xyz-agent/extension-protocol
 	// 的 session-manager 模块）。runtime event-adapter 的 marker
 	// 分支按 data.params 提取——若扁平化展开（{action, ...params}）params 会丢失变 {}。
 	const payload = JSON.stringify({ action, params });
-	try {
-		const value = await ctx.ui.select(
-			SESSION_MANAGER_MARKER,
-			[payload],
-			{ timeout: SELECT_TIMEOUT_MS[action] },
-		);
-		return value ?? null;
-	} catch (err) {
-		// select 通道异常（非用户取消/超时——那两类是 resolve null）：折叠为 null 供
-		// executeTool 统一转 isError，但必须留痕（静默吞 = runtime handler 故障不可排查）
-		logger.error(`[session-manager] select channel threw for action="${action}"`, {
-			reason: err instanceof Error ? err.message : String(err),
-		});
-		return null;
-	}
+	// 从 ExtensionContext 构造 GuiContext 最小子集（ask-user runRpcInteraction 同款先例）：
+	// ExtensionContext.ui.custom 泛型签名与 GuiContext.ui.custom 静态不兼容，直接传 ctx
+	// 过不了 tsc；callMarkerRpc 只读 ui.select。
+	const guiCtx = {
+		mode: ctx.mode,
+		hasUI: ctx.hasUI,
+		ui: { select: ctx.ui.select.bind(ctx.ui) },
+	};
+	return callMarkerRpc(guiCtx, SESSION_MANAGER_MARKER, payload, {
+		timeout: SELECT_TIMEOUT_MS[action],
+		log: (msg, detail) => logger.error(`[session-manager] ${msg}`, detail),
+	});
 }
 
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
- * 返回标准 AgentToolResult 形状；select 取消/超时/异常是错误路径，
+ * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
  * 必须带 isError: true（extension-conventions「禁止错误成功模式」——
  * 调用方 agent 需能区分成功与失败以决定重试/放弃）。
  */
@@ -95,29 +97,32 @@ async function executeTool(
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
 ): Promise<{ isError?: boolean; content: Array<{ type: "text"; text: string }>; details: undefined }> {
-	const raw = await callSessionManager(ctx, action, params);
-	if (raw === null) {
-		return {
-			isError: true,
-			content: [{ type: "text" as const, text: `Session manager ${action}: cancelled or timed out.` }],
-			details: undefined,
-		};
-	}
-	// runtime 错误闭环（respond({error}) 走同一 select 通道）——解析后检测 error 字段，
-	// 命中即 isError: true（extension-conventions「禁止错误成功模式」：agent 需能区分
-	// 成功与同步失败以决定重试/放弃，不能靠读 content 文本自行判错）。
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		parsed = undefined;
-	}
-	if (parsed !== null && typeof parsed === "object" && typeof (parsed as SessionManagerErrorResult).error === "string") {
-		const err = parsed as SessionManagerErrorResult;
-		const text = err.hint ? `${err.error}\nhint: ${err.hint}` : err.error;
+	const result = await callSessionManager(ctx, action, params);
+	if (!result.ok) {
+		// 行为微变①（D8，有意——对齐 plugin-bridge 形态）：非 JSON 回包从「catch 后
+		// parsed=undefined 静默当成功文本返回」改为 isError + 提示文本（留痕由原语
+		// 经注入的 logger.error 承担）；其余三态维持原 cancelled/timeout 折叠文案。
+		const text =
+			result.reason === "non-json"
+				? `Session manager ${action}: non-JSON response from runtime (protocol mismatch — redeploy same-version runtime + extension; see extension logs).`
+				: `Session manager ${action}: cancelled or timed out.`;
 		return {
 			isError: true,
 			content: [{ type: "text" as const, text }],
+			details: undefined,
+		};
+	}
+	const raw = result.value;
+	// 合法性已由原语检测（ok:true ⇒ 同一字符串 JSON.parse 必成功），parse 只为字段检测。
+	// runtime 错误闭环（respond({error}) 走同一 select 通道）——检测与文本拼接单源于
+	// protocol 的 isChannelErrorResult / formatChannelErrorText（D8）：命中即 isError: true
+	//（extension-conventions「禁止错误成功模式」：agent 需能区分成功与同步失败以决定
+	// 重试/放弃，不能靠读 content 文本自行判错）。
+	const parsed: unknown = JSON.parse(raw);
+	if (isChannelErrorResult(parsed)) {
+		return {
+			isError: true,
+			content: [{ type: "text" as const, text: formatChannelErrorText(parsed) }],
 			details: undefined,
 		};
 	}

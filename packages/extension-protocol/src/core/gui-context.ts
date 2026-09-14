@@ -8,7 +8,7 @@ export interface GuiContext {
   hasUI: boolean
   ui?: {
     setWidget?: (key: string, lines: string[] | undefined) => void
-    select?: (header: string, options: string[], opts?: { signal?: AbortSignal }) => Promise<string | undefined>
+    select?: (header: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>
     input?: (header: string, prompt: string, opts?: { signal?: AbortSignal }) => Promise<string | undefined>
     confirm?: (header: string, prompt: string, opts?: { signal?: AbortSignal }) => Promise<boolean | undefined>
     custom?: (factory: unknown, opts?: unknown) => Promise<Record<string, string | string[]> | undefined>

@@ -7,6 +7,7 @@
  * marker 检测后按 method 分发到对应 handler 分支。
  */
 import type { BRIDGE_METHODS } from './marker.js'
+import type { ChannelErrorResult } from '../../core/select-rpc.js'
 
 /** 协议 v2 的 4 个 method（从 BRIDGE_METHODS 集合派生，值与类型同源） */
 export type BridgeMethod = (typeof BRIDGE_METHODS)[number]
@@ -56,8 +57,7 @@ export interface BridgeInterceptResponse {
   injectedMessages: unknown[]
 }
 
-/** 错误回包：runtime 侧异常折叠（不裸 reject；bridge 侧解析后以 isError 返回） */
-export interface BridgeErrorResponse {
-  error: string
-  hint?: string
-}
+/** 错误回包：runtime 侧异常折叠（不裸 reject；bridge 侧解析后以 isError 返回）。
+ * D8 单源化：底层形状 alias 到 core 的 ChannelErrorResult（导出名与文件位置不变，
+ * public API 零破坏）。 */
+export type BridgeErrorResponse = ChannelErrorResult

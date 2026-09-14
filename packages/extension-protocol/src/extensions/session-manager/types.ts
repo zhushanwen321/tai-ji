@@ -5,6 +5,7 @@
  * marker 检测后按 action 分发到对应 handler 分支。
  */
 import type { SESSION_MANAGER_ACTIONS } from './marker.js'
+import type { ChannelErrorResult } from '../../core/select-rpc.js'
 
 /** session-manager 支持的 6 个 action（从 SESSION_MANAGER_ACTIONS 集合派生，值与类型同源） */
 export type SessionManagerAction = (typeof SESSION_MANAGER_ACTIONS)[number]
@@ -156,10 +157,8 @@ export interface SessionManagerAbortResult {
   success: boolean
 }
 
-/** 错误响应形状（send 同步失败时 = { error, hint }；create 已成功时另附 sessionId） */
-export interface SessionManagerErrorResult {
-  error: string
-  /** create 已成功时附 sessionId + hint */
-  sessionId?: string
-  hint?: string
-}
+/** 错误响应形状（send 同步失败时 = { error, hint }；create 已成功时另附 sessionId）。
+ * D8 单源化：交集扩展 alias——error/hint 单源于 core 的 ChannelErrorResult，sessionId
+ * 为本协议独有扩展（runtime session-manager-handler 活构造：create 已成功但后续步骤
+ * 失败时附 sessionId + hint 恢复路径）。导出名与文件位置不变，public API 零破坏。 */
+export type SessionManagerErrorResult = ChannelErrorResult & { sessionId?: string }

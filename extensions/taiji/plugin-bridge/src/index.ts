@@ -31,6 +31,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
 	BRIDGE_MARKER,
+	callMarkerRpc,
+	formatChannelErrorText,
+	isChannelErrorResult,
 	type BridgeErrorResponse,
 	type BridgeSyncPayload,
 	type BridgeToolExecuteResponse,
@@ -66,9 +69,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** runtime 错误闭环形状 {error, hint?}（设计 §3.3-D1：不裸 reject） */
+/** runtime 错误闭环形状 {error, hint?}（设计 §3.3-D1：不裸 reject）——检测逻辑单源于
+ * protocol 的 isChannelErrorResult（D8），本地名字保留（D11 守卫族迁移的整体对象） */
 function isBridgeErrorResponse(v: unknown): v is BridgeErrorResponse {
-	return isRecord(v) && typeof v.error === "string";
+	return isChannelErrorResult(v);
 }
 
 function isBridgeToolExecuteResponse(v: unknown): v is BridgeToolExecuteResponse {
@@ -121,32 +125,29 @@ async function callBridge(
 	opts?: { signal?: AbortSignal; timeout?: number },
 ): Promise<unknown> {
 	if (ctx.mode !== "rpc") return null;
-	const payload = JSON.stringify(request);
-	try {
-		// signal 透传给 dialog：abort 后 pi 本地 resolve(undefined) 不 reject（rpc-mode
-		// pendingExtensionRequests），用户中断秒级打断挂起等待（G2）。timeout 同为 pi 本地
-		// resolve(undefined)（rpc-mode createDialogPromise），仅启动 sync 传入（控制面就绪
-		// 等待的自愈闸，见 syncOnce 注释）；工具 execute 不传——超时权威在 runtime 侧 D1
-		// 取值链，pi 侧挂 timer 会与 runtime 计时器赛跑。undefined 字段 pi 侧当无约束。
-		const value = await ctx.ui.select(BRIDGE_MARKER, [payload], { signal: opts?.signal, timeout: opts?.timeout });
-		if (value === undefined || value === null) return null;
-		try {
-			return JSON.parse(value);
-		} catch {
-			// 回包非 JSON = 协议版本不匹配（E5/E7 类），必须留痕不静默
-			logger.error(`[plugin-bridge] non-JSON response for ${request.method}`, {
-				responseHead: value.slice(0, RESPONSE_PREVIEW_LENGTH),
-			});
-			return null;
-		}
-	} catch (err) {
-		// select 通道异常（非用户取消/超时——那两类是 resolve undefined）：折叠 null 供
-		// 调用方统一转 isError，但必须留痕（静默吞 = runtime 故障不可排查）
-		logger.error(`[plugin-bridge] select channel threw for ${request.method}`, {
-			reason: toErrorMessage(err),
-		});
-		return null;
-	}
+	// 从 ExtensionContext 构造 GuiContext 最小子集（ask-user runRpcInteraction 同款先例）：
+	// ExtensionContext.ui.custom 泛型签名与 GuiContext.ui.custom 静态不兼容，直接传 ctx
+	// 过不了 tsc；callMarkerRpc 只读 ui.select。
+	const guiCtx = {
+		mode: ctx.mode,
+		hasUI: ctx.hasUI,
+		ui: { select: ctx.ui.select.bind(ctx.ui) },
+	};
+	// 传输核（select 调用 + catch 折叠 + JSON 检测）走 protocol 的 callMarkerRpc 原语（D8）：
+	// signal 透传给 dialog——abort 后 pi 本地 resolve(undefined) 不 reject（rpc-mode
+	// pendingExtensionRequests），用户中断秒级打断挂起等待（G2）；timeout 同为 pi 本地
+	// resolve(undefined)（rpc-mode createDialogPromise），仅启动 sync 传入（控制面就绪
+	// 等待的自愈闸，见 syncOnce 注释）；工具 execute 不传——超时权威在 runtime 侧 D1
+	// 取值链，pi 侧挂 timer 会与 runtime 计时器赛跑。通道异常与非 JSON 回包的留痕由
+	// 原语经注入的 log 承担；失败四态统一折叠 null，由各调用方按语义转 isError 或重试。
+	const result = await callMarkerRpc(guiCtx, BRIDGE_MARKER, JSON.stringify(request), {
+		signal: opts?.signal,
+		timeout: opts?.timeout,
+		log: (msg, detail) => logger.error(`[plugin-bridge] ${msg}`, detail),
+	});
+	if (!result.ok) return null;
+	// ok:true 时 value 必为合法 JSON（原语已检测）；parsed 消费（形状守卫族）留本包
+	return JSON.parse(result.value);
 }
 
 /** sessionId 从 ctx 取（ReadonlySessionManager.getSessionId，pi 实装纯字段读不可 throw）——
@@ -186,11 +187,10 @@ function cancelledResult(toolName: string): PluginBridgeToolResult {
 }
 
 function errorResult(err: BridgeErrorResponse | { error: string }): PluginBridgeToolResult {
-	const hint = "hint" in err && typeof err.hint === "string" ? err.hint : undefined;
-	const text = hint ? `${err.error}\nhint: ${hint}` : err.error;
+	// 文本拼接单源于 protocol 的 formatChannelErrorText（D8）——{error} 变体可赋值（hint 可选缺席）
 	return {
 		isError: true,
-		content: [{ type: "text" as const, text }],
+		content: [{ type: "text" as const, text: formatChannelErrorText(err) }],
 		details: { kind: "error", error: err },
 	};
 }

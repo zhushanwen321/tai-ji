@@ -37,7 +37,7 @@
 // （30min 有界），不丢 errs-safe 兜底。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { SUBAGENT_INFLIGHT_MARKER, isInFlightReportAck } from "@xyz-agent/extension-protocol";
+import { SUBAGENT_INFLIGHT_MARKER, callMarkerRpc, isInFlightReportAck } from "@xyz-agent/extension-protocol";
 import { getInFlightSnapshot } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -142,25 +142,36 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
       sessionId: getSessionId(active),
       emittedAt: Date.now(),
     });
-    let value: unknown;
-    try {
-      value = await active.ui.select(SUBAGENT_INFLIGHT_MARKER, [payload], { timeout: selectTimeoutMs });
-    } catch (err) {
-      // 通道异常折叠（plugin-bridge callBridge 同款：不静默吞，但只首败 warn）。
-      value = undefined;
-      logFailure("select channel threw", err);
-    }
+    // 发送+折叠半边走 protocol 的 callMarkerRpc 原语（D8，fire-and-forget：void 发起
+    // 不变）：ok:false 四态（cancelled/timeout/channel-error/non-json）统一折叠进下方
+    // 延迟重试路径；送达判据 = ack 全等匹配（不是 JSON 消费），留在本侧。原语的失败
+    // 留痕经注入的 log 承载本侧「首败 warn / 后续 debug」防刷屏策略。
+    // guiCtx = ExtensionContext 的 GuiContext 最小子集（ask-user runRpcInteraction 同款
+    // 先例：ui.custom 泛型签名静态不兼容，callMarkerRpc 只读 ui.select）。
+    const guiCtx = {
+      mode: active.mode,
+      hasUI: active.hasUI,
+      ui: { select: active.ui.select.bind(active.ui) },
+    };
+    const result = await callMarkerRpc(guiCtx, SUBAGENT_INFLIGHT_MARKER, payload, {
+      timeout: selectTimeoutMs,
+      log: primitiveLog,
+    });
     attemptInFlight = false;
-    if (typeof value === "string" && isInFlightReportAck(value)) {
+    if (result.ok && isInFlightReportAck(result.value)) {
       // 送达确认：清重试与失败计数，补推积压脏帧。
       failureCount = 0;
       clearRetryTimer();
       if (dirty && ctx !== null) kick();
       return;
     }
-    // 失败折叠（resolve undefined = 超时/取消/无路由）→ 延迟重试，累计到顶放弃
-    //（放弃后镜像按 absent-report 走 errs 推迟，30min 有界，errs-safe 兜底不丢）。
-    logFailure("no ack (timeout, cancelled, or runtime without marker routing)", value);
+    // 失败折叠（resolve undefined = 超时/取消/无路由 / 回包非 ack / 通道异常）→ 延迟
+    // 重试，累计到顶放弃（放弃后镜像按 absent-report 走 errs 推迟，30min 有界，
+    // errs-safe 兜底不丢）。
+    logFailure(
+      result.ok ? "no ack (non-ack response)" : `no ack (${result.reason})`,
+      result.ok ? result.value : undefined,
+    );
     failureCount += 1;
     if (failureCount >= maxAttempts) {
       givenUp = true;
@@ -179,6 +190,12 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
       // unref：不阻塞进程退出（退出收割由既有 process hook 负责，与 plugin-bridge 同款）。
       retryTimer.unref?.();
     }
+  }
+
+  /** 原语留痕注入（D8）：msg/detail 由 callMarkerRpc 产出；防刷屏策略（首败 warn /
+   * 后续 debug）留本侧 logFailure。detail 是原语侧小对象，序列化保信息。 */
+  function primitiveLog(msg: string, detail?: object): void {
+    logFailure(msg, detail === undefined ? undefined : JSON.stringify(detail));
   }
 
   function logFailure(reason: string, detail: unknown): void {
