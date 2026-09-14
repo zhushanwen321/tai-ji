@@ -1,6 +1,6 @@
 # ext-simplify-05：permission 包过度设计收敛
 
-> **一句话结论**：删除 permission 包内五组投机注入面（C6 setter 仪式 / C7 rpcDeps / M7 CommandDeps×2 / M8 cancel 孤儿 / M9 三无读者字段），把三处双写知识（M6 审批卡 / M10 pattern 分发 / M11 ui 适配闭包）收敛到单一权威源，并把 barrel 与 re-export 死面收敛到真实消费——全部改动行为等价，唯一可见变化是 RPC 审批卡补上 TUI 已有的 reasoning 行（修复既有漂移）。
+> **一句话结论**：删除 permission 包内五组投机注入面（C6 setter 仪式 / C7 rpcDeps / M7 CommandDeps×2 / M8 cancel 孤儿 / M9 三无读者字段），把三处双写知识（M6 审批卡 / M10 pattern 分发 / M11 ui 适配闭包）收敛到单一权威源，并把 barrel 与 re-export 死面收敛到真实消费——全部改动行为等价、用户可见零变化（v3 定性修正：M6 的 reasoning 行差异为渲染函数级——`req.preClassification` 生产零供给方，真实模式审批卡两侧均无 AI 字段；收敛后经单测 golden 锚定字段清单一致性）。
 
 ## 开篇（SCQA）
 
@@ -179,7 +179,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 维护者追踪「模型列表从哪来」从两条注入路径 + 一条死 fallback，变成一个直接 import。
 
-**审批卡链**（M6）：`approval.ts` 内新增唯一字段集内核 `buildApprovalFields(req): Array<{ label: string; value: string }>`（Tool/Command/Reason/AI risk/outcome/confidence/reasoning——**结构化字段集，非行数组**）；两外壳消费同一字段集、各自保留既有排版形态：`formatTitle`（RPC）= 紧凑排版（`Tool:`/`Command:`/`Reason:` 各一行 + AI 压成单行摘要 `AI: risk=… outcome=… (conf=…)` + 新增 `  reasoning: …` 行）；`renderApprovalView`（TUI）= 展开排版（现状形态逐字节不变：空行 + `AI classification:` 头 + 4 缩进行）。**收敛的是「显示哪些字段」的清单知识（单源 = 内核字段集）；排版本就是两外壳的形态差异（单行摘要 vs 展开块），不属双写**——v1 的「`string[]` 内核 + join/box 两公式」与「TUI 逐字节不变 + RPC 5→6 行」两硬约束数学上不可兼得（审查 MF1），v2 按结构化字段集修正。**这不是新增抽象**——是把已经存在两份的字段清单知识收敛为一份；内核是纯函数，两外壳的排版代码行数量级不变（各 2-3 行字段读取 + 既有拼装）。
+**审批卡链**（M6）：`approval.ts` 内新增唯一字段集内核 `buildApprovalFields(req): { base: Array<{ label; value }>, ai?: Array<{ label; value }> }`（base = Tool/Command/Reason；ai = risk/outcome/confidence/reasoning——**分组结构化字段集**，AI 组归属单点化，审查 R2-S-2）；两外壳消费同一字段集、各自保留既有排版形态：`formatTitle`（RPC）= 紧凑排版（`Tool:`/`Command:`/`Reason:` 各一行 + AI 压成单行摘要 `AI: risk=… outcome=… (conf=…)` + 新增 `  reasoning: …` 行）；`renderApprovalView`（TUI）= 展开排版（现状形态逐字节不变：空行 + `AI classification:` 头 + 4 缩进行）。**收敛的是「显示哪些字段」的清单知识（单源 = 内核字段集）；排版本就是两外壳的形态差异（单行摘要 vs 展开块），不属双写**——v1 的「`string[]` 内核 + join/box 两公式」与「TUI 逐字节不变 + RPC 5→6 行」两硬约束数学上不可兼得（审查 MF1），v2 按结构化字段集修正。**这不是新增抽象**——是把已经存在两份的字段清单知识收敛为一份；内核是纯函数，两外壳的排版代码行数量级不变（各 2-3 行字段读取 + 既有拼装）。**供给方定性（v3，审查 R2-MF-1）**：`req.preClassification` 生产**零供给方**——`buildApprovalRequest` 仅有的两个生产调用点（pipeline.ts:348 竞速 / :631 askUser）均 3 参，strict/approve 不跑 AI，auto 竞速对话框在 AI settle 前已构建、ask 转人工后不补挂；故 AI 组字段（含 reasoning）生产不可达，**reasoning 差异是渲染函数级漂移而非用户可见漂移**。M6 收敛价值不受影响（两份渲染知识的清单收敛照做），但「RPC 补 reasoning 行」的用户可见承诺撤销，字段清单一致性改由单测 golden 锚定（含 AI fixture），补挂 AI 分类属范围扩张不做（无真实需求方）。
 
 **非 bash 匹配链**（M10+L3）：`pipeline.ts` matchNonBashTool 的 pattern 三元改为调用 `resolvePattern(rule)`（自 `./rules/matcher.js` import）；三个 winner 循环统一走 matcher.ts 的 `lastMatchWins(rules, predicate)`；`matchRules` 删 toolName 参数与不可达守卫。pattern 编译语义 + 匹配语义各只有一个实现，且非 bash 路径免费获得 patternCache。
 
@@ -187,7 +187,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 | 变化 | 触发场景 | 性质 |
 |---|---|---|
-| RPC 审批卡 title 新增 `  reasoning: <AI 理由>` 行 | auto 模式 AI ask 转人工、RPC/GUI 对话框 | **漂移修复**（向 TUI 对齐），信息增量 |
+| ~~RPC 审批卡 title 新增 `  reasoning: <AI 理由>` 行~~ | auto 模式 AI ask 转人工、RPC/GUI 对话框 | **v3 撤销**：preClassification 生产零供给方（§4.1），真实模式两侧均无 reasoning 行——渲染函数级对齐由单测 golden 锚定，非用户可见变化 |
 | 其余一切（命令输出、TUI 审批卡逐字节、规则编辑流程、footer、拦截决策） | 全部 | 零变化（验收 A1-A7 逐项锁定） |
 
 ### 4.3 失败路径与恢复
@@ -248,7 +248,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 ### D5（M6）：字段行内核是否让 RPC 也显示 reasoning
 
-- **采用**：内核含完整结构化字段集（Tool/Command/Reason/AI 四元组 + reasoning，形态见 §4.1），RPC 与 TUI 同源消费、各自排版。RPC title 由 5 行变 6 行（多 `  reasoning: …`）。
+- **采用（v3 定性修正）**：内核含完整分组结构化字段集（base + ai?，形态见 §4.1），RPC 与 TUI 同源消费、各自排版。**reasoning 行生产不可达**（preClassification 零供给方），「RPC title 5→6 行」降为字段集完备性事实（fixture 层经 golden 断言锁定），非用户可见承诺。
 - **被否**：内核只收公共字段、reasoning 留在 TUI 外壳——「哪些字段进审批卡」的知识仍分裂在内核+外壳两处，双写根因未除，只是把已漂移的状态固化。
 - **证据**：漂移现状（§3.6）；RPC select title 本就是多行（formatTitle join("\n")），xyz-agent runtime 对 `extension_ui_request` select 透传渲染，无按行数/文本的解析依赖（`rg "Approval required" packages/ apps/` 零命中）。
 - **效果**：G2 成立——字段集单点决定，两外壳纯排版。
@@ -294,9 +294,9 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 | # | 发现 | 改动（位置） | 测试联动 | 验收钩子 |
 |---|---|---|---|---|
-| E6 | M6 (D5) | approval.ts 新增 `buildApprovalFields(req): Array<{label, value}>`（唯一字段集来源，含 reasoning）；formatTitle = 紧凑排版（AI 单行摘要 + reasoning 行）；renderApprovalView = 展开排版（读同一字段集，现状形态逐字节不变）——排版逻辑留两外壳，字段清单单源（审查 MF1 修正：string[] 内核 + join/box 与两硬约束不可兼得） | approval.test.ts：renderApprovalView 断言不动；RPC title 断言补 reasoning 行 | A3 |
-| E7 | M10 (D3) | pipeline.ts:102 三元 → resolvePattern(rule)（import 自 ./rules/matcher.js） | pipeline.test.ts G1 组不变（行为等价）；可加一条「matchNonBashTool 二次调用命中 patternCache」断言 | A4 |
-| E8 | M11 | index.ts 模块级 `makeUiAdapter(ui)`（notify/select/custom/input 可选展开一处实现），三处闭包（:144-/:181-/:324-）改一行调用；**保留三接口 custom 泛型差异的既有 cast**（RuleEditor/ModelPicker 的 ui 为 unknown、Approval 为 Component——「一行调用」外预期另有数行类型适配，审查 S3） | 覆盖主钩子 = A1（model 闭包真实 RPC）/ A2（rule 闭包真实 select 中继）/ A3（approvalCtx 闭包）；index-integration.test 三组 describe 无 /permission model 路径且多 headless（闭包转发不被调用），仅作补充回归（审查 S2） | A1/A2/A3 |
+| E6 | M6 (D5) | approval.ts 新增 `buildApprovalFields(req): { base, ai? }`（分组字段集单源，审查 R2-S-2）；formatTitle = 紧凑排版（AI 单行摘要 + reasoning 行）；renderApprovalView = 展开排版（读同一字段集，现状形态逐字节不变）——排版逻辑留两外壳，字段清单单源；**先落 golden 逐字节断言（含 AI 字段 fixture）作为 T4 仪器**（审查 R2-S-1：既有 toContain 测不出空行/缩进/行序漂移） | approval.test.ts：golden 断言就位后 renderApprovalView 重写；RPC title golden 补 reasoning 行（fixture 层） | A3 |
+| E7 | M10 (D3) | pipeline.ts:102 三元 → resolvePattern(rule)（import 自 ./rules/matcher.js） | pipeline.test.ts G1 组不变（行为等价）；可加一条「二次调用 resolvePattern 返回同一 RegExp 实例」断言（patternCache 命中从返回值不可观测，审查 R2-N-2） | A4 |
+| E8 | M11 | index.ts 模块级 `makeUiAdapter(ui)`（notify/select/custom/input 可选展开一处实现），三处闭包（:144-/:181-/:324-）改一行调用；**保留三接口 custom 泛型差异的既有 cast**（RuleEditor/ModelPicker 的 ui 为 unknown、Approval 为 Component——「一行调用」外预期另有数行类型适配，审查 S3） | 覆盖主钩子 = A1（model 闭包，TUI 真实链路）/ A2（rule 闭包真实 select 中继）/ A3（approvalCtx 闭包）；index-integration.test 三组 describe 无 /permission model 路径且多 headless（闭包转发不被调用），仅作补充回归（审查 S2） | A1/A2/A3 |
 | E11 | low L3 | matcher.ts 新增 `lastMatchWins(rules, predicate): RuleMatchResult`，matchRulesForArgv/matchRules 两循环改用；matchRules 删 toolName 参数与 :145-147 守卫；pipeline.ts matchNonBashTool 循环改用（import lastMatchWins）、:144/:163 调用点去 "bash" 实参 | matcher.test.ts / pipeline.test.ts 签名联动；「守卫已删」由编译器保证 | A4/A7 |
 
 ### 阶段 3：导出面收敛（E9、E10、E12）
@@ -327,7 +327,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 |---|---|---|---|
 | A1 | G1/G4 | 维护者在本地 pi CLI（TUI）装本地 permission 包，执行 `/permission model`：有两 auth 模型的 provider 下两级选择 → 选中模型 → 通知 "set to: provider/model"；再在无 auth 模型的环境执行同命令 → "No available models" 降级提示 | 选择链路与改前一致；配置文件 `classifier.model` 正确写入；降级提示文案不变（C6/C7/M7/M8/M9/M11 的 TUI 面） |
 | A2 | G1/G4 | 维护者以 `pi --mode rpc --session-dir <tmp> --extension <本地包> --approve` + stdin JSONL 执行 `/permission rule`：RPC 循环真实走 select 中继（add 规则 → Done）→ 规则落盘 | 增删规则流程与改前一致；resolveRpcInput 走 ctx.ui.input 真实分支（C7/M11 的 RPC 面） |
-| A3 | G2 | 用户在 strict 模式触发 `read /etc/passwd` 审批：①本地 pi TUI 会话看审批卡；②xyz-agent dev（GUI，rpc 中继）看审批对话框 | 两种形态字段行集合一致（Tool/Command/Reason/AI risk/outcome/confidence/**reasoning**）；TUI 卡逐字节与改前一致；GUI 对话框 reasoning 行正常渲染（M6；T1 检查点） |
+| A3 | G2 | 用户在 strict 模式触发 `read /etc/passwd` 审批：①本地 pi TUI 会话看审批卡；②xyz-agent dev（GUI，rpc 中继）看审批对话框 | 两形态渲染正常、无渲染异常/截断；TUI 卡逐字节与改前一致；**真实模式两侧均无 reasoning 行（生产零供给方，v3）**——含 reasoning 的字段清单一致性由 E6 golden 单测锚定（T1 检查点的 reasoning 断言同步降为 golden 层） |
 | A4 | G2/G4 | 用户手编 `permission-ext-config.json` 加规则 `deny read /Users/<you>/.ssh/*`（**pattern 需与 read 工具实际收到的 path 字符串同形态**——wildcardToRegExp 全锚定字面编译、无 `~` 展开，`~/.ssh/*` 对绝对路径 input.path 恒不命中；审查 S1。loadAndWatchConfig 热重载生效；规则编辑器 custom 模板写死 tool='bash'，read 规则走手编配置这一包支持的官方路径）→ auto 模式下 agent 调 read `/Users/<you>/.ssh/id_rsa` 被拦截（reason 含 "denied by rule"）；加 `allow read /tmp/*` → `/tmp/x` 放行；bash 命令（`ls`）白名单放行不变 | 非 bash 匹配行为与改前一致（M10/E11；正则编译语义等价）；缓存命中由单测断言同一 RegExp 实例 |
 | A5 | G1（负面） | 维护者全仓 `rg "setDefaultListAvailableModels\|RuleEditorRpcDeps\|PermissionModelCommandDeps\|PermissionRuleCommandDeps"`；`/permission status` 输出 | 两者均零命中；status 输出格式逐字节不变 |
 | A6 | G3（负面） | 维护者 `rg` 验证死面零残留：SelectItem re-export、rerender、RuleOp re-export、DEFAULT_SELECT_THEME re-export、rules 类型 re-export 块、classifier barrel 被删符号 | 全部零命中；rules barrel = 2 符号、classifier barrel = 2 符号 |
@@ -359,7 +359,7 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 | # | 检查点 | 验证时机 | 失败降级路径 |
 |---|---|---|---|
-| T1 | RPC 多行 title（+reasoning 行）在 xyz-agent GUI 对话框渲染无截断/换行异常 | S2 验收 A3 | reasoning 行已在内核末尾，GUI 截断不遮蔽可操作信息；仍异常则仅对 RPC 外壳做行折叠（内核不动） |
+| T1 | RPC 多行 title（含 AI 组 fixture 形态）在 xyz-agent GUI 对话框渲染无截断/换行异常 | S2 验收 A3（fixture 注入形态） | reasoning 行已在字段集 ai 组末尾，GUI 截断不遮蔽可操作信息；仍异常则仅对 RPC 外壳做行折叠（内核不动） |
 | T2 | commands.test.ts vi.mock（model-resolver / rule-editor 两模块）与现有 mock helper 无冲突 | S1 实施中 | 退回 D4 降级形态（listModels 保参数、editRulesViaOverlay 直调） |
 | T3 | patternCache 跨 matcher/pipeline 复用无 key 语义冲突（同 source+pattern 必同编译） | S1 后由 E7 单测断言（同实例返回） | 语义本同构（D3 证据），若断言失败即发现真差异——按实际差异拆 key，不回退方案 |
 | T4 | M6 重构后 renderApprovalView 输出逐字节不变 | S2 实施中（approval.test.ts 既有断言） | 不等则修正内核拼装顺序至全绿（TUI 无漂移是设计硬约束） |
@@ -394,3 +394,4 @@ picker 渲染只读 `m.id` 与 `m.api`（model-picker.ts:221-223 `value: m.id / 
 
 - v1（2026-09-12）：初稿。基于 over-engineering-audit 20260911 + 五份四问记录 + 源码实读复核（行号以 feat-optimize-extensions-over-engineering worktree 2026-09-12 状态为准）。
 - v2（2026-09-14）：按审查报告（ext-simplify-05-permission.review.md，1 MF + 3 S）修订——MF1 M6 内核公式按推荐方案重设计：`buildApprovalFieldLines(req): string[]` + join/box 两公式（与「TUI 逐字节不变 + RPC 5→6 行」数学不可兼得）改为**结构化字段集内核 `buildApprovalFields(req): Array<{label, value}>`**，字段清单单源、排版留两外壳（§4.1/§5 D5/§7 E6 三处同步）；S1 A4 验收 pattern 改绝对路径形态并注明「pattern 需与工具实际收到的 path 同形态」；S2 E8 覆盖主钩子改挂 A1/A2/A3（index 集成测试降为补充回归）；S3 makeUiAdapter 的 custom 泛型差异 cast 预期写入 E8 改动列 + 新增 T5 检查点。决策层（D1-D5）与其余执行项无变化。
+- v3（2026-09-14）：聚焦复审 NEEDS-FIX（1 MF + 2 S + 2 nit）当轮全修——R2-MF-1 供给方追踪坐实 `req.preClassification` 生产零供给方（两个生产调用点均 3 参、strict/approve 不跑 AI、auto 竞速不回挂），「RPC 补 reasoning 行」为渲染函数级漂移而非用户可见漂移：按方案 a 定性修正（一句话结论/§4.1/§4.2/§5 D5/A3/T1 六处），reasoning 断言降为单测 golden 层，「竞速补挂 AI 分类」范围扩张显式不做（无真实需求方）；R2-S-1 E6 先落 golden 逐字节断言作为 T4 仪器（既有 toContain 测不出空行/缩进/行序漂移）；R2-S-2 内核改分组形态 `{ base, ai? }`（AI 组归属单点化）；R2-N-1 E8 括注 A1 模式标正（TUI）；R2-N-2 E7 断言改 resolvePattern 同实例。
