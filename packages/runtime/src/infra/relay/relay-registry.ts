@@ -30,6 +30,7 @@ import { findPiExecutable } from '../pi/find-pi-executable.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import { createPiRelayLog, type PiSessionLog } from '../logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
+import { isPidAlive } from '../../utils/protocol-background-task.js'
 import { RelayTee } from './relay-tee.js'
 import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
 
@@ -121,16 +122,6 @@ function endConn(conn: Socket): void {
   // eslint-disable-next-line taste/no-silent-catch -- 竞态窗口内已 destroyed：无需再关，无信息可记
   } catch {
     // 已 destroyed（竞态）：无需再关
-  }
-}
-
-/** kill(pid, 0) 探活。EPERM 视为活（存在但不可杀——不是本进程组的孤儿）。 */
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
   }
 }
 
