@@ -120,6 +120,7 @@ graph TD
 | spawn-args 白名单落点漂移至 packages/pi-rpc/src/types.ts:37（U1 归并所致，设计写于分叉期） | 合理（设计 §0 基线声明预见行号漂移；漂移实锤六值缺 xhigh 在合流基线复核实锤不变） | D5 配套（原 spawn-args 项）落点更新为 pi-rpc（u8）；阶段 6 design-code-sync 回写设计文档 |
 | extension-dependencies.json 位置 = 仓库根（设计语境「bte 的 json」易读作包内文件） | 合理（文件本就统一在根，非漂移） | u3/u5/u13 领地已按根 json 写明 |
 | 设计 §6 group-b/A 侧批次分工失效（两分支已合入 dev-0.9.21） | 合理（index 已记录裁决） | 全单元当前 worktree 实施；批次语义仅保留于 changeset 登记节奏 |
+| D13 truncateCodePoints 签名 3 参 → 5 参（u5 实施发现） | 合理（previewText 300/200/100 是 15 号 §6.4 D4 裁决的三个独立契约数字，判定阈值 ≠ head 长度，3 参无法零变化覆盖双段形态；head/keepTail 以可选默认参表达，单段调用点形态不变，e2e 双维护契约逐字节一致已验证） | 阶段 6 design-code-sync 回写设计 D13 示意签名 |
 
 ## 6 状态表
 
@@ -127,25 +128,27 @@ graph TD
 |------|------|------|----------|
 | u0 | committed | 1 | 双断言证实（报告 .tmp/dev-flow/ext-simplify-17-d4-probe.md）；u16 门禁通过 |
 | u1 | committed | 1 | 6a00b2f28（32 用例绿 + 全量 typecheck 过） |
-| u2 | in-progress | 1 | u1 完成后补发 20260914 |
-| u3 | in-progress | 1 | u0/u11 完成后补发 20260914 |
-| u4 | pending | 0 | - |
-| u5 | pending | 0 | - |
-| u6 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
-| u7 | pending | 0 | - |
-| u8 | pending | 0 | 波1 曾派发，用户限并发 3 后停止，待空位重发 |
-| u9 | pending | 0 | - |
-| u10 | pending | 0 | - |
+| u2 | committed | 1 | 1bc1f6fc4（89 用例绿；llm-shared 成根 json 首个 shared 组主体条目——机器守卫放行，保留；subagent-core 侧 THINKING_ORDER 互指注释待收尾补） |
+| u3 | committed | 1 | 3dad19674（233 用例绿） |
+| u4 | committed | 1 | 8883a1a9a（216 用例绿，B2 补严格键集合测试） |
+| u5 | committed | 1 | 298f05901（203 用例绿 + 42 探针逐字节一致；truncateCodePoints 5 参偏差已登记 §5） |
+| u6 | committed | 2 | e62a11890（方案 A 保行为 G3 组合，140 用例绿 + 180 E2E 可见一致；设计 D14 勘误同批——等价断言证伪核正，4+6 点形态测试锁定） |
+| u7 | committed | 1 | 73918cadc（579 用例绿，纯去重无漂移） |
+| u8 | committed | 2 | 385aff694（86 用例绿，全链自动打通论证） |
+| u9 | committed | 1 | 2f6e2a33b（守卫脚本 + pre-commit 接入 + 破坏性自测过，未降级；设计 D5 补记同批） |
+| u10 | committed | 1 | f79f54343（943 用例绿，单文件） |
 | u11 | committed | 1 | NEEDS-FIX 2 MF + 4 S → 设计文档 v7 全修闭合（主 agent 核实事实锚点：callBridge :123 门控 / types.ts sessionId? 活构造均属实）；u12 放行 |
-| u12 | pending | 0 | - |
-| u13 | pending | 0 | - |
-| u14 | pending | 0 | - |
-| u15 | pending | 0 | - |
-| u16 | pending | 0 | - |
+| u12 | committed | 1 | d997a7fa4（202+41+34+943 用例绿；行为微变①有单测锚定；runtime typecheck 绿；门控保留 :127） |
+| u13 | committed | 1 | fbe6f9f09（与 u14 合并 commit：barrel 同文件两行分属两单元，文件级颗粒度；209+140+943+82 用例绿） |
+| u14 | committed | 1 | fbe6f9f09（protocol 16 + bte 16 + pending-notifications 34 用例绿；identity 假设消除） |
+| u15 | committed | 1 | 69c726400（protocol 214 + plugin-bridge 34 用例绿；函数体逐 token diff 空） |
+| u16 | committed | 1 | 9a6c2c86b（D4 重锚定 + V6 真机回归三项全过，行为微变③独立 commit；ext-guards 38 用例绿） |
 
 ## 7 残留风险与变更历史
 
 **残留风险**：
+
+0. **commit 窗口冲突（新增，20260914 实测两例）**：pre-commit 的 extensions 全量 tsc 扫工作区全部（非仅 staged），任何在跑单元的类型中间态（u4 的 TaskSnapshot / u12 的 GuiContext / u5 的 isRecord 迁移）都会拖挂无关单元的 commit。调度对策：编码单元在跑期间不补发新单元堵窗，等在跑单元完成 → 集中核验 → 按序精确路径 commit → 再开下一波。
 
 1. 行号漂移面：设计全部 [A/B 基线] 行号在合流基线上仅供方向参考，单元验收一律 grep 符号定位（已在 §0 校准声明）。
 2. D4 探针证伪路径：u16 取消 + 只记录回报用户（预授权边界）；此时 SDK env.ts:70 注释清扫不随 u16 消失——由最近的后续波次（u9 或收尾）顺带完成，状态表跟踪。
@@ -158,3 +161,5 @@ graph TD
 - 2026-09-14 v1：初版计划。基线校准（§0 五项）+ 16 单元 + DAG 四波 + 验收计划表（V1-V8）。
 - 2026-09-14 v2：用户指令并发上限 3（覆盖全局 ≤5），调度改滚动补位；u6/u8 停止回 pending。u1 committed 6a00b2f28。
 - 2026-09-14 v3：u0 探针双断言证实（D4 重锚定放行，设计文档已回填）；u11 评审 NEEDS-FIX 2 MF + 4 S，设计文档 v7 修订全闭合（MF1 mode 门控留调用方 / MF2 交集 alias + V4 锚点核正 / S1-S4 采纳 / P2-b 措辞核正 / V7 补 inflight 冒烟），u12 放行——闭合判定依据 = 修复按评审自给方向机械落实 + 主 agent 逐条核实事实锚点，未再耗复审轮。
+- 2026-09-14 v4：阶段 2 全部 16 单元 committed（u0 探针报告 / u1 6a00b2f28 / u2 1bc1f6fc4 / u3 3dad19674 / u4 8883a1a9a / u5 298f05901 / u6 e62a11890 两轮（停手→方案 A 裁决）/ u7 73918cadc / u8 385aff694 / u9 2f6e2a33b / u10 f79f54343 / u11 评审闭环 d6ac64004 / u12 d997a7fa4 / u13+u14 fbe6f9f09 / u15 69c726400 / u16 9a6c2c86b）。3 处行为微变各自独立 commit。changeset 落 .changeset/ext-simplify-17-shared-exports.md。
+- 2026-09-14 v5：阶段 3 全量测试验收（原 Gate A）**全绿**——`pnpm test`（root，全 workspace --no-bail）EXIT=0，**23303 用例通过、零 test.skip**；日志 `.tmp/dev-flow/ext-simplify-17-shared-extraction.gate-a.log`。3 分区 reviewer 审查中。
