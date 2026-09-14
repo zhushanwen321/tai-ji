@@ -127,6 +127,16 @@ const WATCH_OPTIONS = {
 const MAX_WATCHER_ERRORS = 5
 
 /**
+ * [G4 / 2026-09-14 内存审计] project watcher LRU 容量：最近 MAX_PROJECT_WATCHERS 个 cwd。
+ * 背景：worktree 工作方式下 distinct cwd 持续增长，每 cwd 一个常驻 chokidar watcher（OS fd +
+ * 内存），无界增长最终撞 EMFILE（2026-07-22 事故同族风险）。超出容量驱逐最久未访问 cwd 的
+ * watcher（close 释放 fd）；驱逐只关 watcher 不清 projectCache——缓存条目小（skill 列表），
+ * 且缓存命中路径的「应 watch 无 watcher」补挂逻辑（W3 refreshProjectWatcher）让被驱逐 cwd
+ * 下次访问自动重挂，不因驱逐永久失明。
+ */
+const MAX_PROJECT_WATCHERS = 8
+
+/**
  * SkillRegistry：全局 + 项目级 skill 缓存 + chokidar 文件监听。
  *
  * 生命周期：
@@ -138,6 +148,12 @@ export class SkillRegistry {
   private globalCache: SkillInfo[] = []
   private readonly projectCache = new Map<string, SkillInfo[]>()
   private readonly projectWatchers = new Map<string, FSWatcher>()
+  /**
+   * [G4] projectWatcher 的 LRU 序（尾 = 最近访问），只收录挂了 watcher 的 cwd（无 skill 目录的
+   * cwd 不占 watcher 槽位）。touch 于 setupProjectWatcher 挂载 + getProjectSkills 缓存命中
+   * （有 watcher 时）；驱逐在 touch 内联触发（超容量即 close 最旧）。
+   */
+  private readonly projectWatcherLru: string[] = []
   /**
    * 进行中的 getProjectSkills Promise，按 cwd 去重（防 TOCTOU 竞态导致重复挂 watcher）。
    * 背景：缓存守卫在 await 之前，并发同 cwd 请求会各自走 scanFn + watch()，第二个 set 覆盖丢掉
@@ -256,6 +272,8 @@ export class SkillRegistry {
       // 不阻塞当前返回（返回缓存旧值），重扫完成后 notifyProjectChange 通知上游刷新。
       const dirs = resolveProjectSkillDirs(cwd, this.options.configStore).filter(d => existsSync(d))
       const existingWatcher = this.projectWatchers.get(cwd)
+      // [G4] 缓存命中刷新 watcher recency（活跃 cwd 不被后续新 cwd 挤出 LRU）
+      if (existingWatcher) this.touchProjectWatcher(cwd)
       if (dirs.length > 0 && !existingWatcher) {
         void this.refreshProjectWatcher(cwd, dirs)
       }
@@ -303,6 +321,7 @@ export class SkillRegistry {
       watcher.close().catch(() => {})
     }
     this.projectWatchers.clear()
+    this.projectWatcherLru.length = 0 // [G4] watcher 全清，LRU 序随同清空
     this.projectCache.clear()
     // 清 in-flight：避免在途 getProjectSkills Promise resolve 后把旧扫描结果写回已清空的缓存。
     // 竞态：invalidate 后 in-flight 完成会 projectCache.set 旧值 + setupProjectWatcher(新 dirs)，
@@ -330,6 +349,34 @@ export class SkillRegistry {
       await this.notifyProjectChange(cwd)
     })
     this.projectWatchers.set(cwd, watcher)
+    // [G4] 挂载即 touch（首次挂载 + W3 补挂重挂共用本方法）并按需驱逐最旧
+    this.touchProjectWatcher(cwd)
+  }
+
+  /**
+   * [G4] touch cwd 的 watcher recency 并按需驱逐：超过 MAX_PROJECT_WATCHERS 个时从 LRU 头
+   * （最久未访问）驱逐——close 释放 fd。close 异步完成：fire-and-forget + .catch 吞错
+   * （与 dispose / invalidateAllProjects 同款惯例）；被驱逐 cwd 的重挂由下次 getProjectSkills
+   * 缓存命中的 W3 补挂路径承接。
+   */
+  private touchProjectWatcher(cwd: string): void {
+    const idx = this.projectWatcherLru.indexOf(cwd)
+    if (idx >= 0) this.projectWatcherLru.splice(idx, 1)
+    this.projectWatcherLru.push(cwd)
+    while (this.projectWatcherLru.length > MAX_PROJECT_WATCHERS) {
+      const evicted = this.projectWatcherLru.shift()!
+      const watcher = this.projectWatchers.get(evicted)
+      if (watcher) {
+        watcher.close().catch(() => {})
+        this.projectWatchers.delete(evicted)
+      }
+    }
+  }
+
+  /** [G4] 从 LRU 序摘除 cwd（watcher 已被熔断/清理路径关闭时防幽灵条目残留）。 */
+  private dropProjectWatcherLru(cwd: string): void {
+    const idx = this.projectWatcherLru.indexOf(cwd)
+    if (idx >= 0) this.projectWatcherLru.splice(idx, 1)
   }
 
   /**
@@ -405,6 +452,7 @@ export class SkillRegistry {
       watcher.close().catch(() => {})
     }
     this.projectWatchers.clear()
+    this.projectWatcherLru.length = 0 // [G4] watcher 全清，LRU 序随同清空
     this.projectInFlight.clear()
     this.rebuildInFlight = null
     this.changeHandlers.clear()
@@ -450,6 +498,7 @@ export class SkillRegistry {
         watcher.close().catch(() => {})
         if (debounceKey !== GLOBAL_KEY) {
           this.projectWatchers.delete(debounceKey)
+          this.dropProjectWatcherLru(debounceKey) // [G4] 熔断摘除时同步退出 LRU 序
         } else if (this.globalWatcher === watcher) {
           this.globalWatcher = null
         }

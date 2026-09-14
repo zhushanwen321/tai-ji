@@ -72,7 +72,12 @@ export async function fetchQuotaJson<T>(
 ): Promise<{ ok: true; data: T } | { ok: false; reason: QuotaFetchFailureReason }> {
   try {
     const resp = await doFetch()
-    if (!resp.ok) return { ok: false, reason: statusToReason(resp.status) }
+    if (!resp.ok) {
+      // [u10/G4] 非 2xx 提前 return 不读 body——未消费的 body 会钉住连接（无法回连接池
+      // 复用 + 缓冲驻留），显式 cancel 释放（body 可为 null，如 204/304，optional chain 兜底）。
+      void resp.body?.cancel()
+      return { ok: false, reason: statusToReason(resp.status) }
+    }
 
     let data: T
     try {

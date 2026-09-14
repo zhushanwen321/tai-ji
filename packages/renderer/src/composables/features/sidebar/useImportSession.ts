@@ -229,6 +229,15 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
 
   function close(): void {
     open.value = false
+    // [G4 / 2026-09-14 内存审计] 关闭即清扫描结果：items/dirs/total 是候选全量快照（可达数百条
+    // path/name 对象），对话框为全局单例 UI（无 session 生命周期兑底），不清则驻留到下次打开。
+    // requestSeq++ 使在途迟到的候选响应失效（stale 写回守卫——否则清了又被打回填）；
+    // pending debounce 一并取消（组件侧 watch(open) 注释承诺的「取消 pending debounce」在此落实）。
+    requestSeq++
+    cancelPendingFetch()
+    items.value = []
+    dirs.value = []
+    total.value = 0
   }
 
   /**

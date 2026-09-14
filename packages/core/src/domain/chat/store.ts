@@ -1292,7 +1292,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** 截断 session 消息到 messageId（编辑重发用）。委托 chat-mutations.truncateMessagesFrom。 */
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
-  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/queueStates/failedHistory/changeSetStatuses + timer + LRU 记录。背景见 ./README.md。 */
+  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/queueStates/failedHistory/changeSetStatuses + timer + LRU 记录 + premature timeout 快照（u10/G4）。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
     // Map ref：不可变写保证响应式（new Map + delete + 赋值新 Map）。
     // D-1 后 messages 的 Map entry 是 per-session ShallowRef 分区——本循环删的是 Map entry
@@ -1330,6 +1330,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // D-3 生命周期：streaming flag 惰性派生缓存随 messages 分区同点清理（漏删即慢泄漏，
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
+    // [u10 / G4 dispose 补面] premature timeout 打标快照分区同点清理（streaming-state-machine
+    // 闭包 Map——活跃期清理时机①-④全部依赖后续事件，session 删除后无事件到达，快照条目
+    // 只能由销毁编排回收；2026-09-14 内存审计 G4 杂项组）。
+    streamingStateMachine.disposePrematureTimeoutIds(sessionId)
     // timer 清理（模块级 Map，非响应式）
     for (const clear of [() => clearPendingSendTimer(sessionId), () => clearStreamingTimer(sessionId), () => clearHandingOffTimer(sessionId)]) clear()
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
@@ -1434,6 +1438,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       _sessionStreamingFlagsForTest: sessionStreamingFlags,
       /** [W21] per-session reducer 累积态（断言 applyEntryFrame 喂入/清理语义用，生产代码勿读）。 */
       _entryStatesForTest: entryStates,
+      /** [u10/G4] premature timeout 打标快照只读视图（断言 disposeSession 清理语义用，生产代码勿读）。 */
+      _prematureTimeoutIdsForTest: streamingStateMachine.prematureTimeoutIds,
     },
   }
 }

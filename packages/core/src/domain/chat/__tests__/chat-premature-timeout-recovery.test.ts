@@ -264,6 +264,14 @@ describe('premature-timeout — 清除时机全集（防误恢复）', () => {
     expect(m.content).toBe('截断正文')
     expect(m.prematureTimeout).toBeUndefined()
   })
+
+  it('时机⑤：disposeSession（session 删除）回收打标快照——分区销毁后无残留（u10/G4 dispose 补面）', () => {
+    // 活跃期四时机全部依赖后续事件；session 删除后无事件到达，快照条目由 disposeSession
+    // 显式回收（testInternals 只读视图断言——实体侧分区已删，实体断言不适用）。
+    expect(sut.store.testInternals._prematureTimeoutIdsForTest.has(sid)).toBe(true)
+    sut.store.disposeSession(sid)
+    expect(sut.store.testInternals._prematureTimeoutIdsForTest.has(sid)).toBe(false)
+  })
 })
 
 describe('premature-timeout — P-C 现状回归：complete 对无打标终态气泡 no-op', () => {
