@@ -96,6 +96,9 @@ flowchart LR
 | u9 | zcode journal-io 无 engines-root 白名单 | 独立产品问题（zcode-subagent-cli 包），u9 领地超出 | 遗留：独立排期 |
 | u10 | useChat.ts 零改动（任务预期可能要补） | deferFlushFailureCounts 存量已修（5637e0088），语义由新测试锁定 | 闭环成立 |
 | u10 | store.ts（文件清单外接线点） | dispose 补面必须的编排接线 + testInternals 透出 | 已 commit 登记 |
+| 阶段3-修复 | 1 high（B5 触发面收窄 ca058f602）+ 3 low（i18n 527a0f1a3 / 接口契约随组A / skill-warn e1b5c3c88）全清零；8 doc_errors 亲修（f014b994a） | 定向复审 b5-fix-recheck 派发 | 见各 commit |
+| Gate A | runtime 524f/6024t 绿（2 unhandled=用户在制 rpc-client）·core 129f/2104t 绿·renderer 402f/4354t 绿·ext typecheck+lint 绿·根 lint 修 2 行级豁免后绿 | extensions:test 中 pi-subagent-cli 12 失败=既有（基线前 f932d8545 poolKey 退役遗留，本分支区间该三包零 diff，日志 .tmp/dev-flow/gate-a-*.log） | 用户域残留登记 |
+| 事件 | 越权/外来 commit ×3：0f6d7c93f（fix ci vitest flags）·1b0f9dac6（perf ci shard）·8c0e49ef6（perf runtime rpc-client 测试提速，用户本人 commit）| 内容均正当；保留；最终汇报 | 用户在制 test-infra-source-simplify 工作继续中（docs/todo/） |
 | 阶段3 | 三区一致性审查：1 high（B5 触发面越界）+ 3 low unreasonable + 8 doc_errors | 修复组 A/B/C 并行派发；doc_errors 主 agent 亲修 | 审查报告见本表上方 |
 | 事件 | 越权 commit 0f6d7c93f（fix(ci)） | 某 dev 违反「subagent 零 git」+ 领地外改动（CI workflow+TEST-STRATEGY）；内容正当（vitest flags 失效修复） | 保留 commit；最终汇报向用户报告 |
 | u3 | shared/constants.ts 领地外 1 常量（RING_BUDGET_BYTES） | message-bus.ts 内联 16*1024*1024 触发 no-magic-numbers warning（项目纪律 warning 正面修复）；既有范式 = 字节守卫常量集中 shared SSOT（OUTBOUND_FRAME_* 同款） | 无需（对齐既有范式） |
