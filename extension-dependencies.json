@@ -23,7 +23,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/interface/loop-gate.ts、helpers.ts、session-lifecycle.ts 等 interface/ 与 host/ 下多个文件 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import guardStaleCtx/oncePerProcess/isEnoentError/toErrorMessage（src 根 index.ts/jsonl-run-store.ts/session-lifecycle.ts 与 interface/ 下 helpers/commands/subagents/subagent-tool/tool-workflow/tool-workflow-script、host/ 下 pi-host/inflight-reporter、injectors/ 下 model-list/resource-list-injector——共 13 文件 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-pending-notifications",
@@ -44,7 +44,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/loop-gate.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import guardStaleCtx/isRecord/toErrorMessage（src/loop-gate.ts、tool-definition.ts、execute.ts、workflow-hook.ts、schema-guards.ts top-level import——末者另 re-export isPlainObject 兼容别名，ext-simplify-18 D2），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -145,7 +145,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import oncePerProcess（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import oncePerProcess/isRecord/toErrorMessage（src/index.ts、config.ts、pipeline.ts、ast/analyzer.ts、ast/loader.ts、classifier/classifier.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -156,7 +156,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/runtime.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import guardStaleCtx/isEnoentError/toErrorMessage（src/runtime.ts、replay.ts、service.ts、importer.ts、index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@xyz-agent/session-delivery",
@@ -177,7 +177,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import isRecord 排数组严版（src/llm.ts top-level import，extractUserPromptText/extractFinalText/extractMessageText 三消费点），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import isRecord 排数组严版（src/llm.ts top-level import，extractUserPromptText/extractFinalText/extractMessageText 三消费点）与 isEnoentError（src/pure.ts top-level import，ext-simplify-18 D3），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -232,6 +232,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts）"
+        },
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import isRecord/toErrorMessage（src/index.ts，ext-simplify-17 D3/D1 引入；登记反向缺口由 ext-simplify-18 阶段 6 补齐）"
         }
       ]
     },
@@ -273,7 +278,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/tool.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import guardStaleCtx/isSubagentProcess/isRecord/toErrorMessage（src/index.ts、tool.ts、pure.ts、llm.ts、compact-handler.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -300,7 +305,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import toErrorMessage（src/bash-kill-tool.ts、src/index.ts、src/config.ts 及 background/ 下 spawn-background/registry/pending-reconcile/notify/process-exit-guard——共 8 文件 top-level import，替换 inline 错误信息样板 13 处，ext-simplify-17 D1），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import toErrorMessage（src/bash-kill-tool.ts、src/index.ts 及 background/ 下 spawn-background/registry/pending-reconcile/notify/process-exit-guard，替换 inline 错误信息样板，ext-simplify-17 D1）、isRecord（src/config.ts）及 subagent-guard.ts re-export isSubagentProcess（ext-simplify-17 u16）——共 9 文件 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-extension-logger",

@@ -1,0 +1,112 @@
+[0;32m[OK] pnpm store 布局一致：/Users/zhushanwen/.pnpm-store/v10 [0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[代码规范检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;32m[OK] 无前端源码变更，跳过代码规范检查[0m
+[0;32m[OK] 无 sidecar server.ts，跳过 session 隔离检查[0m
+[0;34m[INFO] 运行 CSS tokens 检查...[0m
+[0;32m[OK] CSS 规范检查通过[0m
+[0;34m[INFO] 运行 ENV_WHITELIST_PREFIXES SSOT 检查...
+[OK] ENV_WHITELIST_PREFIXES SSOT 单一性检查通过（定义点：shared/src/constants.ts）
+[OK] ENGINE_ENV_PREFIXES / ENGINE_ENV_DENY_LIST SDK 镜像与 SSOT 逐项相等
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[出站 env 契约检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] 运行 runtime 子进程 env 出站契约检查（C-proc-09）...[0m
+[spawn-env-boundary] 扫描 ts 文件 588 | 含进程创建调用点 35 个文件 (经构建器通过 22 / 调用点豁免 22 处) | 违规 0
+[0;32m[OK] runtime 子进程 env 出站契约检查通过[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[引擎包边界检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] 运行引擎 SDK / 引擎包边界检查...[0m
+[check-engine-sdk-boundary] OK (42 files scanned, 0 violations)
+[check-engine-package-boundary] OK (3 engine packages scanned: pi-subagent-cli, subagent-engine-sdk, zcode-subagent-cli)
+[0;32m[OK] 引擎包边界检查通过[0m
+[0;34m[INFO] 运行 Pi extension tool schema 顶层 Object 合规检查...[0m
+[OK] Pi extension tool schema 顶层 Object 合规检查通过（所有 parameters 顶层均为 Object）
+[0;34m[INFO] 运行路径白名单动态化检查...
+[OK] 路径白名单动态化检查通过
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[R1 pi session 直写检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] 运行 pi session JSONL 直写检查（R1）...[0m
+[OK] R1 pi session 直写检查通过：扫描 368 文件，allowlist 命中 3 处（scripts/migrate-pi-layout-v2.mjs:106, scripts/zcode-session-db-cleanup.mjs:445, scripts/zcode-session-db-cleanup.mjs:464）
+[0;32m[OK] R1 pi session 直写检查通过[0m
+[0;34m[INFO] 运行 ws-client send 直调检查...[0m
+[OK] ws-client send + electronAPI 直调检查通过（仅白名单文件合法）
+[0;34m[INFO] 运行 runtime services 循环依赖检查...[0m
+[OK] services 循环依赖检查通过（193 条具体类依赖边，无环）
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[架构约束登记检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] 运行 check_pi_type_leak.py ...[0m
+[0;34m[INFO] 运行 check_services_infra_import.py ...[0m
+[0;34m[INFO] 运行 check_shared_node_builtin.py ...[0m
+[0;34m[INFO] 运行 check_runtime_meta_url.py ...[0m
+[0;34m[INFO] 运行 check_staged_forbidden_lines.py ...[0m
+[0;32m[OK] 架构约束登记检查通过[0m
+[0;34m[INFO] 运行 CSP 能力一致性检查...[0m
+[INFO] script-src = 'self'（wasm=False, eval=False）
+[OK] CSP 能力一致性检查通过（源码无未放行的 eval/WebAssembly 用法）
+[0;32m[OK] runtime 源码无变更，跳过 Bundle 验证[0m
+[0;32m[OK] runtime 源码无变更，跳过流写逃逸护栏[0m
+[0;32m[OK] runtime 源码无变更，跳过用户内容出站点守卫[0m
+[0;32m[OK] core 源码无变更，跳过 AC7 边界检查[0m
+[0;32m[OK] 打包配置无变更，跳过 preflight 检查[0m
+[0;34m[INFO] 运行目录规范检查...
+[0;32m[OK] 目录规范检查通过[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[pi 边界可靠性护栏][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+✓ pi-semantics.json 守卫通过（37 条 = probe 20 + observe 17；schema/探针存在性/版本门禁）
+[0;32m[OK] 无 pi 派生锚点文件变更，跳过 pi-sync 守卫[0m
+[0;34m[INFO] thinking 档位词表文件有变更，运行档位词表比对守卫...[0m
+thinking-levels 守卫：权威源 pi-ai 0.84.4 ModelThinkingLevel（7 值）↔ 本地词表副本
+  ✓ T1 llm-shared THINKING_LEVELS 与 pi-ai 0.84.4 ModelThinkingLevel 一致（7 值）
+  ✓ T2 pi-rpc THINKING_LEVELS 与 pi-ai 0.84.4 ModelThinkingLevel 一致（7 值）
+  ✓ T3 subagent-core THINKING_ORDER 与 pi-ai 0.84.4 ModelThinkingLevel 一致（7 值）
+✓ thinking-levels 守卫通过（pi-ai 0.84.4 权威源 ↔ llm-shared + pi-rpc + subagent-core 三副本词表一致）
+[0;32m[OK] 无档位链路文件变更，跳过 G3 差分探针[0m
+[0;32m[OK] 无 subagent-workflow 变更，跳过 G4 通道禁则[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[subagent-core 依赖闭包守卫][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+✓ subagent-core 依赖闭包干净（package.json deps+peers 5 项 · 源码 156 文件 157 个包级 import · worker 入口 6 脚本 + 内联模板，检查点 5 断言通过）
+[0;32m[OK] subagent-core 依赖闭包守卫通过[0m
+[0;32m[OK] 无 service 聚合/壳变更，跳过 subagent-service 聚合边界守卫[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[record 持久化写面守卫][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[record-write-surface] OK：1269 个源文件（packages/*/src + extensions/**/src，tests 豁免） store 外 record 写面零命中（R1 七名函数 + R2 subagent-record entry，S4）
+[0;32m[OK] record 持久化写面守卫通过[0m
+[0;32m[OK] 无设计文档/update 源码变更，跳过文档符号漂移守卫[0m
+[0;32m[OK] 无跟随链路变更，跳过滚动跟随守卫[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[测试 flake 卫生检查][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[OK] 测试 flake 卫生检查通过（scripts.test 含 --no-bail；无测试文件扫描对象，F3 零成本跳过）
+[0;32m[OK] 测试 flake 卫生检查通过[0m
+[0;32m[OK] runtime 源码无变更，跳过 Provider 凭据读取守卫[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[数据布局字面量守卫][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+✓ check-layout-literals：2945 个文件扫描通过（C-pi-14 布局对齐契约；豁免 15 文件）
+[0;32m[OK] 数据布局字面量守卫通过（C-pi-14）[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[所有检查通过][0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;32m代码质量检查全部通过！[0m
+
+[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。[0m
+

@@ -2,7 +2,7 @@
 
 - 日期：2026-09-14 | 分支 dev-0.9.21 | 审查清零 commit 98b259a09 之上
 - 方式：pi CLI 本地实测（AGENTS.md MANDATORY 路径：`pi -ne --mode rpc --session-dir <tmpdir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <绝对路径>` + stdin JSONL prompt；全局 pi 0.85.1）
-- 结论先行：**V7/V8/V9 真机全 PASS**（A8/A9/A10 三项，L3 脚本化执行）；V5 hook 触发面管道级模拟命中（u12 验收时）；V1-V6 随单元与阶段 3 闭合。
+- 结论先行：**V7/V8/V9 真机全 PASS**（A8/A9/A10 三项，L3 脚本化执行）；V1-V6 随单元与阶段 3 闭合。**V5-③ staged 级实测后补闭环（阶段 6 F-1）**：初版报告以管道级模拟替代 staged 级承诺属降级未出声，阶段 6 审查抓出——真跑补验：staged `model-ref.ts` 注释探针 → live pre-commit（core.hooksPath 安装副本）实际拉起档位守卫段，T1/T2/T3 全绿 EXIT=0，探针还原零残留（证据 `v5-staged-hook.log`）。补验同时暴露并修复：live hook 安装副本滞后于 u12 安装源改动（prepare 仅在 pnpm install 时再生），重跑安装器后 model-ref.ts 触发面生效。
 
 ## V7 cache-probe（A8）— PASS
 

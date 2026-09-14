@@ -35,6 +35,7 @@
 | u10 | subagent-workflow D1：2 处 toErrorMessage | `extensions/universal/subagent-workflow/src/injectors/model-list-injector.ts`、`src/host/inflight-reporter.ts` | - | plain | ① 2 处替换 ② 包内既有测试全绿 |
 | u11 | system-prompt-trace D2：exported isRecord 删导出（不保留 re-export），包内 2 消费点改 import ext-guards | `extensions/taiji/system-prompt-trace/src/types.ts`、`src/baseline.ts` | u1 | plain | ① types.ts `export function isRecord` 定义删除 ② baseline.ts/types.ts 消费点 import ext-guards ③ 包内既有测试全绿 |
 | u12 | 守卫 D6 四件连带：提取正则适配+self-test 三形态 / hook 触发面扩 model-ref.ts + 头注释 / T3 比对面 / model-ref.ts 注释 / C-build-10 登记 | `scripts/check-thinking-levels.mjs`、`.githooks/install-hooks.sh`、`docs/constraints.json`、`packages/subagent-core/src/shared/model-ref.ts` | - | plain | ① `node scripts/check-thinking-levels.mjs` EXIT=0（三比对面 T1/T2/T3）② 临时删 THINKING_ORDER 一成员 → 脚本非零退出（验收后还原）③ hook 正则含 model-ref.ts ④ `node scripts/validate-constraints.mjs` 绿 |
+| u13 | 补漏（阶段 2 追加）：bte config.ts isPlainObject 严版副本迁移——设计 §2.2 第 2 行在清单内，单元划分漏派由 V1 grep 抓出（阶段 6 F-3 登记） | `extensions/universal/base-tool-enhance/src/config.ts` | u1 | plain | ① `function isPlainObject` 定义删除 ② 消费点改 import ext-guards isRecord ③ bte 既有测试全绿 |
 
 ## 3 DAG 图
 
@@ -92,6 +93,7 @@ graph TD
 | u7 | deprecated re-export JSDoc 补保留依据四条（发布面/深路径可达/breaking/删除时点登记）；加跑 typecheck + scoped eslint | 合理 |
 | u9/u10/u11 | 各自补跑 typecheck（vitest 不查类型的统一先例）；import 分组按包内惯例 | 合理 |
 | 计划缺陷 | u5-u11 状态滞后一次批量回填（流水线滚动中主 agent 优先核验 commit，状态表滞后于实际，无静默跳过） | 记录 |
+| u13 | 单元划分漏派 bte config.ts（设计 §2.2 在清单内），V1 grep2 抓出补迁（阶段 6 F-3 登记） | 计划缺陷（已补迁，§2 补 u13 行） |
 
 ## 6 状态表
 
@@ -119,4 +121,5 @@ graph TD
 - 2026-09-14 阶段 3：双区一致性审查——区 A（采用批）2 low unreasonable（测试注释悬空引用已修；index 收尾义务已兑现）+ 2 doc_error（relay 路径笔误已勘误；u13 状态已回填）；区 B（llm-shared+守卫）0 unreasonable + 1 low doc_error（V2 措辞已修）。**清零**。
 - 2026-09-14 全量测试验收（原 Gate A）：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` → **GATE_A_EXIT=0**，27 个测试文件组全绿（log `.tmp/dev-flow/ext-simplify-18-shared-adoption.gate-a.log`）；零 SKIP 绕过。changeset 批尾已落（`.changeset/ext-simplify-18-shared-adoption.md`：llm-shared minor + 12 包 patch）。
 - 2026-09-14 阶段 5 真机验收：**V7/V8/V9 全 PASS**（pi CLI `-ne --mode rpc` 实测，报告与输出原件 `.tmp/dev-flow/ext-simplify-18-shared-adoption.acceptance/`）——V7 cache-probe custom entry seq1 全指纹落盘；V9 session_read list+outline 双调用（header 单源化路径）；V8 permission 加载+bash 管线（`/permission model` 交互 rpc 模式结构性不可达，MPT8 单测覆盖登记环境限制）。一次性场景未沉淀 e2e spec。
-- 2026-09-14 文档资产同步检查：constraints.json C-build-10（随 u12）+ ext-simplify index 18 号行终态（随阶段 3 清零 commit）已同步；PRODUCT/ARCHITECTURE/CONTEXT/DESIGN/STANDARDS/TEST-STRATEGY/FEATURE-PRIORITIES/TROUBLESHOOTING **零触发**（纯内部等价重构 + 1 处病态输入微变，无产品边界/拓扑/术语/视觉/规范/策略/排障变化；parseModelRef 为代码符号非领域术语）。
+- 2026-09-14 文档资产同步检查：constraints.json C-build-10（随 u12）+ ext-simplify index 18 号行终态（随阶段 3 清零 commit 98b259a09）已同步；PRODUCT/ARCHITECTURE/CONTEXT/DESIGN/STANDARDS/TEST-STRATEGY/FEATURE-PRIORITIES/TROUBLESHOOTING **零触发**（纯内部等价重构 + 1 处病态输入微变，无产品边界/拓扑/术语/视觉/规范/策略/排障变化；parseModelRef 为代码符号非领域术语）。阶段 5 验收 commit = e6f106462。
+- 2026-09-14 阶段 6 终态同步 r1：1 MF + 2 S + 2 I，全当轮修——**F-1（MF）**：V5-③ staged 级实测真跑闭环（staged model-ref.ts 注释探针 → live pre-commit 实际拉起守卫段 T1/T2/T3 全绿 EXIT=0 → 还原零残留，证据 `acceptance/v5-staged-hook.log`）；**附带发现并修复**：live hook 安装副本（core.hooksPath 指向 .bare/worktrees/<wt>/hooks，由 prepare 于 pnpm install 时再生）滞后于 u12 对安装源的改动——model-ref.ts 触发面在安装副本中缺失，重跑 `bash .githooks/install-hooks.sh` 再生后生效（该发现证明 F-1 staged 实测的不可替代性：管道级模拟无法暴露安装副本滞后）。F-2：里程碑 hash 回填（98b259a09 / e6f106462）；F-3：§2/§5 补 u13 登记；F-4/F-5（model-ref 注释口径 + 既有 5 条依赖登记 reason 位点）fixer 修复中。

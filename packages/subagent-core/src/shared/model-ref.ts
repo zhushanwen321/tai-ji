@@ -39,9 +39,10 @@ export interface ModelRefSource {
 /**
  * thinking level 支持顺序（低→高）。spawn 侧 `:level` 后缀仅接受本白名单值。
  *
- * packages 侧唯一副本；extensions 侧副本两处——llm-shared 的 isThinkingLevel
- * （extensions/shared/llm-shared/src/resolve.ts）与被迫独立的 pi-rpc 词表
- * （packages/pi-rpc/src/types.ts THINKING_LEVELS，禁 subagent-core 依赖所致）。
+ * 本数组为 packages 侧有序数组副本；其余两处——extensions 侧 llm-shared 一处
+ * （isThinkingLevel，extensions/shared/llm-shared/src/resolve.ts）与 packages 侧
+ * pi-rpc 协议包被迫独立一处（packages/pi-rpc/src/types.ts THINKING_LEVELS，
+ * 禁 subagent-core 依赖所致）。
  * 词表变更须三处同步（词表守卫 scripts/check-thinking-levels.mjs 比对
  * pi-ai ↔ llm-shared + pi-rpc + 本数组三副本，本数组为 T3 比对面
  * 〔ext-simplify-18 D6〕——成员集合一致性校验，不判低→高顺序）。
