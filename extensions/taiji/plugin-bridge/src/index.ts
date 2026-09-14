@@ -33,12 +33,14 @@ import {
 	BRIDGE_MARKER,
 	callMarkerRpc,
 	formatChannelErrorText,
-	isChannelErrorResult,
+	isBridgeErrorResponse,
+	isBridgeToolExecuteResponse,
+	isBridgeSyncPayload,
+	isBridgeInterceptResponse,
+	isSyncedTool,
 	type BridgeErrorResponse,
 	type BridgeSyncPayload,
-	type BridgeToolExecuteResponse,
 	type BridgeRequest,
-	type BridgeInterceptResponse,
 } from "@xyz-agent/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import type { TSchema } from "typebox";
@@ -64,38 +66,12 @@ const PROMPT_GATE_TIMEOUT_MS = 5_000;
 const RESPONSE_PREVIEW_LENGTH = 200;
 
 // ── 运行时形状守卫（extensions 约定：断言必须有运行时 guard 兜底）──
+// Bridge 回包五守卫（isBridgeErrorResponse / isBridgeToolExecuteResponse /
+// isBridgeSyncPayload / isBridgeInterceptResponse / isSyncedTool）已迁入 protocol 的
+// plugin-bridge 协议模块（D11：「marker + types + 守卫」同住），本包经 barrel import。
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/** runtime 错误闭环形状 {error, hint?}（设计 §3.3-D1：不裸 reject）——检测逻辑单源于
- * protocol 的 isChannelErrorResult（D8），本地名字保留（D11 守卫族迁移的整体对象） */
-function isBridgeErrorResponse(v: unknown): v is BridgeErrorResponse {
-	return isChannelErrorResult(v);
-}
-
-function isBridgeToolExecuteResponse(v: unknown): v is BridgeToolExecuteResponse {
-	return isRecord(v) && typeof v.content === "string" && (v.isError === undefined || typeof v.isError === "boolean");
-}
-
-function isBridgeSyncPayload(v: unknown): v is BridgeSyncPayload {
-	return isRecord(v) && v.success === true && Array.isArray(v.tools);
-}
-
-function isBridgeInterceptResponse(v: unknown): v is BridgeInterceptResponse {
-	return isRecord(v) && Array.isArray(v.injectedMessages);
-}
-
-/** sync 清单里的单个工具条目（parameters 顶层必须 type:'object'——OpenAI 兼容红线） */
-function isSyncedTool(v: unknown): v is BridgeSyncPayload["tools"][number] {
-	return (
-		isRecord(v) &&
-		typeof v.name === "string" &&
-		typeof v.description === "string" &&
-		isRecord(v.parameters) &&
-		v.parameters.type === "object"
-	);
 }
 
 /** 拦截注入消息的最小形状（旧 bridge 契约：{role, content}，content 任意类型） */

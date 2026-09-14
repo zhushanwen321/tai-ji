@@ -113,6 +113,14 @@ export type {
   BridgeErrorResponse,
 } from './extensions/plugin-bridge/types'
 export { BRIDGE_MARKER, BRIDGE_METHODS } from './extensions/plugin-bridge/marker'
+// 回包形状守卫族（D11：marker + types + 守卫同住，自 plugin-bridge index.ts 迁入）
+export {
+  isBridgeErrorResponse,
+  isBridgeToolExecuteResponse,
+  isBridgeSyncPayload,
+  isBridgeInterceptResponse,
+  isSyncedTool,
+} from './extensions/plugin-bridge/guards'
 
 // ── subagent-engine 协议（引擎可发现性：engines.json 状态文件 + 引擎配置视图；实现在 extensions/universal/subagent-workflow + runtime RPC）──
 export type {
