@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 
 import { PiSchedulerBackend } from './backend.js'
 import { registerScheduleCommand } from './commands.js'
@@ -135,7 +136,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       try {
         return await handleSchedule(getService(), params)
       } catch (err) {
-        throw new Error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+        throw new Error(`Error: ${toErrorMessage(err)}`)
       }
     },
   })
@@ -157,7 +158,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       try {
         return await handleScheduleControl(getService(), params)
       } catch (err) {
-        throw new Error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+        throw new Error(`Error: ${toErrorMessage(err)}`)
       }
     },
   })

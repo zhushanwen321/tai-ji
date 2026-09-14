@@ -1,7 +1,8 @@
+import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
-import { HISTORY_LIMIT } from './types.js'
-import type { ScheduledTask, SchedulerEntryOp, TaskSnapshot } from './types.js'
+import { appendExecutionRecord, snapshotToTask, TASK_ENTRY_TYPE } from './types.js'
+import type { ScheduledTask, SchedulerEntryOp } from './types.js'
 
 const logger = getLogger('scheduler')
 
@@ -20,10 +21,10 @@ export interface SchedulerEntryLike {
  * 从 CustomEntry 序列折叠恢复 per-task 末态（event sourcing）。
  *
  * session_start 重放入口：PiSchedulerBackend.loadTasks() 委托本函数，把当前 session 的
- * pi-scheduler:task custom entries 折叠成运行时任务 Map。
+ * TASK_ENTRY_TYPE custom entries 折叠成运行时任务 Map。
  *
  * 两步：
- * ① 全量折叠（foldEntries）——遍历 customType==='pi-scheduler:task' 的 entries，按 op 类型折叠：
+ * ① 全量折叠（foldEntries）——遍历 customType===TASK_ENTRY_TYPE 的 entries，按 op 类型折叠：
  *    - upsert → 用快照重建任务（ownerSessionFile 来自 op 顶层）
  *    - advance → nextRunAt=新值 / lastRunAt=at / runCount++ / history.push(裁20) / lastStatus=status（gap2）
  *    - toggle → enabled=新值
@@ -49,7 +50,7 @@ export function replayFoldEntries(
     return tasks
   } catch (err) {
     // gap4：session JSONL 损坏 / 迭代器抛错时降级为无任务，不让 session_start 崩溃。
-    logger.warn('replayFoldEntries failed', { error: err instanceof Error ? err.message : String(err) })
+    logger.warn('replayFoldEntries failed', { error: toErrorMessage(err) })
     return new Map()
   }
 }
@@ -57,7 +58,7 @@ export function replayFoldEntries(
 /** 步骤① 全量折叠：跳过非本扩展 entry 与守卫不过的损坏 entry；单条折叠抛错只跳过该条（MF-2）。 */
 function foldEntries(entries: Iterable<SchedulerEntryLike>, tasks: Map<string, ScheduledTask>): void {
   for (const entry of entries) {
-    if (entry.type !== 'custom' || entry.customType !== 'pi-scheduler:task') continue
+    if (entry.type !== 'custom' || entry.customType !== TASK_ENTRY_TYPE) continue
     if (!isSchedulerEntryOp(entry.data)) continue
     const op = entry.data // SchedulerEntryOp（守卫 isSchedulerEntryOp 收窄）
 
@@ -67,7 +68,7 @@ function foldEntries(entries: Iterable<SchedulerEntryLike>, tasks: Map<string, S
       // MF-2：守卫已按变体校验必填字段，但嵌套数据损坏（如 upsert task.history 非数组 →
       // snapshotToTask 的 .map 抛）仍可能抛——逐条 try/catch 只跳过该条，
       // 不让外层整体 catch 把全部任务清成空 Map（一条损坏 entry 不得清空全部任务）
-      logger.warn('skipping corrupted scheduler entry', { error: err instanceof Error ? err.message : String(err) })
+      logger.warn('skipping corrupted scheduler entry', { error: toErrorMessage(err) })
       continue
     }
   }
@@ -109,8 +110,7 @@ function applyAdvance(
   task.nextRunAt = op.nextRunAt
   task.lastRunAt = op.at
   task.runCount += 1
-  task.history.push({ at: op.at, status: op.status })
-  if (task.history.length > HISTORY_LIMIT) task.history.shift()
+  appendExecutionRecord(task, op.at, op.status)
   task.lastStatus = op.status // gap2：advance 必须恢复 lastStatus（不只 nextRunAt/lastRunAt/runCount/history）
 }
 
@@ -191,27 +191,4 @@ function isSchedulerEntryOp(data: unknown): data is SchedulerEntryOp {
     return typeof record.taskId === 'string'
   }
   return false
-}
-
-/**
- * 从 TaskSnapshot 重建 ScheduledTask（剥离 pending——运行时标记不持久化）。
- * history 深拷贝：避免快照与运行时 task 共享同一数组引用（upsert 后 task 继续被 mutate）。
- */
-function snapshotToTask(snapshot: TaskSnapshot): ScheduledTask {
-  return {
-    id: snapshot.id,
-    name: snapshot.name,
-    prompt: snapshot.prompt,
-    kind: snapshot.kind,
-    schedule: snapshot.schedule,
-    enabled: snapshot.enabled,
-    createdAt: snapshot.createdAt,
-    nextRunAt: snapshot.nextRunAt,
-    expiresAt: snapshot.expiresAt,
-    runCount: snapshot.runCount,
-    lastRunAt: snapshot.lastRunAt,
-    lastStatus: snapshot.lastStatus,
-    lastError: snapshot.lastError,
-    history: snapshot.history.map(h => ({ ...h })),
-  }
 }

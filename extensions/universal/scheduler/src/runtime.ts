@@ -4,13 +4,12 @@ import { getLogger } from '@zhushanwen/pi-extension-logger'
 import type { SchedulerBackend } from './backend.js'
 import { autoName, generateTaskId } from './format.js'
 import { computeNextRunAt, MS_PER_DAY, MS_PER_MINUTE, parseDuration } from './parsing.js'
-import { HISTORY_LIMIT } from './types.js'
+import { appendExecutionRecord, toTaskSnapshot } from './types.js'
 import type {
   AddOptions,
   ScheduledTask,
   SchedulerEntryOp,
   ScheduleSpec,
-  TaskSnapshot,
 } from './types.js'
 
 const logger = getLogger('scheduler')
@@ -101,7 +100,7 @@ export class SchedulerRuntime {
       taskId: id,
       // getSessionFile() 在 --no-session 模式返回 undefined → '' 兜底（该模式 appendEntry 无 owner 不落盘）
       ownerSessionFile: this.backend.getSessionFile() ?? '',
-      task: this.toSnapshot(task),
+      task: toTaskSnapshot(task),
     })
     return task
   }
@@ -125,12 +124,7 @@ export class SchedulerRuntime {
     if (enabled && task.nextRunAt < this.backend.now()) {
       const next = computeNextRunAt(task.schedule, this.backend.now())
       if (next === undefined) {
-        // ERR-2 fallback：cron 表达式失效 → 停用任务并记录失败原因。
-        // 禁止 `?? now()` 类 fallback（会使 nextRunAt=now，下个 tick 立即重算 → 死循环）
-        task.enabled = false
-        task.lastStatus = 'failed'
-        task.lastError = 'cron expression invalid'
-        // nextRunAt 保留原值（enabled=false 后 tick 不再触发）
+        this.disableForInvalidCron(task)
       } else {
         task.nextRunAt = next
         recalcedNext = next
@@ -315,8 +309,7 @@ export class SchedulerRuntime {
     } catch {
       task.lastStatus = 'failed'
       task.pending = false
-      task.history.push({ at: this.backend.now(), status: 'failed' })
-      if (task.history.length > HISTORY_LIMIT) task.history.shift()
+      appendExecutionRecord(task, this.backend.now(), 'failed')
       return false
     }
     return this.onDispatchSuccess(task)
@@ -332,8 +325,7 @@ export class SchedulerRuntime {
     task.lastStatus = 'success'
     task.pending = false
     task.lastError = undefined
-    task.history.push({ at: now, status: 'success' })
-    if (task.history.length > HISTORY_LIMIT) task.history.shift()
+    appendExecutionRecord(task, now, 'success')
 
     if (task.kind === 'once') {
       this.tasks.delete(task.id)
@@ -341,9 +333,7 @@ export class SchedulerRuntime {
     } else {
       const next = computeNextRunAt(task.schedule, now)
       if (next === undefined) {
-        task.enabled = false
-        task.lastStatus = 'failed'
-        task.lastError = 'cron expression invalid'
+        this.disableForInvalidCron(task)
       } else {
         task.nextRunAt = next
         this.appendEntrySafe({
@@ -366,6 +356,18 @@ export class SchedulerRuntime {
     return this.dispatchTimestamps.length < RATE_LIMIT_PER_MINUTE
   }
 
+  /**
+   * ERR-2 fallback（ext-simplify-17 B3 抽取）：cron 表达式失效 → 停用任务并记录失败原因
+   * （toggle enable 重算与 dispatch 成功推进两处共用）。禁止 `?? now()` 类 fallback
+   * （会使 nextRunAt=now，下个 tick 立即重算 → 死循环）；nextRunAt 保留原值——
+   * enabled=false 后 tick 不再触发。
+   */
+  private disableForInvalidCron(task: ScheduledTask): void {
+    task.enabled = false
+    task.lastStatus = 'failed'
+    task.lastError = 'cron expression invalid'
+  }
+
   // ── 装配与回调 ──
 
   /** 装配点注入初始任务数组（读盘/重放由 backend 完成，runtime 只持有内存态）。 */
@@ -386,16 +388,7 @@ export class SchedulerRuntime {
     } catch (err) {
       // best-effort 降级（ER-APPEND-FAIL）：append-only 模型下 append 失败仅丢失该 op 的持久化，
       // 内存态已先行更新、不 rethrow，业务流程继续。at-least-once 已知恶化窗口（resume 重放回退）。
-      logger.warn('appendEntry failed', { error: err instanceof Error ? err.message : String(err) })
+      logger.warn('appendEntry failed', { error: toErrorMessage(err) })
     }
-  }
-
-  /**
-   * ScheduledTask → TaskSnapshot：剥离 ownerSessionFile（在 op 顶层）与 pending（运行时标记），
-   * history 深拷贝（避免快照与运行时 task 共享数组引用）。
-   */
-  private toSnapshot(task: ScheduledTask): TaskSnapshot {
-    const { ownerSessionFile: _o, pending: _p, history, ...rest } = task
-    return { ...rest, history: history.slice() }
   }
 }

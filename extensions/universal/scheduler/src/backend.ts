@@ -1,16 +1,34 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 
 import { replayFoldEntries, type SchedulerEntryLike } from './replay.js'
+import { TASK_ENTRY_TYPE } from './types.js'
 import type { ScheduledTask, SchedulerEntryOp } from './types.js'
 
 // ── SchedulerBackend 接口 ──
+
+/**
+ * sendMessage 的 msg 形状（ext-simplify-17 B5）：与 pi 的 CustomMessage 鸭子对齐
+ * （customType/display 必填）——pi 根入口不导出 CustomMessage，鸭子解耦只能文件内收敛，
+ * 接口与实现两处共用（测试 mock-backend 持结构兼容的内联签名，不引用本 alias）。
+ */
+interface SchedulerMessage {
+  content: string
+  customType: string
+  display: boolean
+}
+
+/** sendMessage 的 opts 形状：steer 直投选项（scheduler-steer-direct-dispatch 投递模型）。 */
+interface SchedulerSendOptions {
+  deliverAs?: 'steer'
+  triggerTurn?: boolean
+}
 
 /**
  * 运行时协作后端抽象（依赖反转）。SchedulerRuntime 只依赖此接口：
  * 不触碰 session JSONL、不持有 pi。
  *
  * - sendMessage: 到期 dispatch 的消息注入（生产实现委托 pi.sendMessage）
- * - appendEntry: 按 op 写 pi-scheduler:task custom entry（event sourcing）。
+ * - appendEntry: 按 op 写 TASK_ENTRY_TYPE custom entry（event sourcing）。
  *   生产实现委托 pi.appendEntry（同步落盘）。失败必须被调用方 try-catch（ER-APPEND-FAIL：
  *   runtime 捕获后 logger.warn + 不 rethrow，内存态已更新，at-least-once 已知恶化窗口）
  * - getSessionFile: 当前 session JSONL 路径（addTask 构建 upsert op 的 ownerSessionFile 用；
@@ -30,10 +48,7 @@ import type { ScheduledTask, SchedulerEntryOp } from './types.js'
  * SchedulerRuntime 构造器直传。
  */
 export interface SchedulerBackend {
-  sendMessage(
-    msg: { content: string; customType: string; display: boolean },
-    opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
-  ): Promise<void>
+  sendMessage(msg: SchedulerMessage, opts?: SchedulerSendOptions): Promise<void>
   appendEntry(op: SchedulerEntryOp): void
   getSessionFile(): string | undefined
   now(): number
@@ -70,7 +85,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
   }
 
   /**
-   * 读路径：折叠当前 session 的 pi-scheduler:task custom entries 恢复任务（非接口成员，
+   * 读路径：折叠当前 session 的 TASK_ENTRY_TYPE custom entries 恢复任务（非接口成员，
    * 由装配点 session_start 调用）。replayFoldEntries 内部含 fork owner 过滤与异常兜底。
    */
   loadTasks(): ScheduledTask[] {
@@ -79,15 +94,12 @@ export class PiSchedulerBackend implements SchedulerBackend {
     ]
   }
 
-  async sendMessage(
-    msg: { content: string; customType: string; display: boolean },
-    opts?: { deliverAs?: 'steer'; triggerTurn?: boolean },
-  ): Promise<void> {
+  async sendMessage(msg: SchedulerMessage, opts?: SchedulerSendOptions): Promise<void> {
     await this.pi.sendMessage(msg, opts)
   }
 
   appendEntry(op: SchedulerEntryOp): void {
-    this.pi.appendEntry('pi-scheduler:task', op)
+    this.pi.appendEntry(TASK_ENTRY_TYPE, op)
   }
 
   getSessionFile(): string | undefined {

@@ -1,3 +1,5 @@
+import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
+
 import { formatRelativeTime, formatSchedule } from './format.js'
 import { computeNextRuns, parseSchedule } from './parsing.js'
 import type { SchedulerRuntime } from './runtime.js'
@@ -59,7 +61,7 @@ export class SchedulerService {
     } catch (err) {
       // 失败归一 message 通道（L1）：任务上限 / 意外错误（正常路径不会到达——
       // parseSchedule 已校验 cron 有效性）同样回传原始 message
-      return { success: false, message: err instanceof Error ? err.message : String(err) }
+      return { success: false, message: toErrorMessage(err) }
     }
 
     const count = task.kind === 'once' ? 1 : PREVIEW_RUN_COUNT

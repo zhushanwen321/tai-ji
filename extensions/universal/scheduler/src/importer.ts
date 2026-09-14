@@ -4,9 +4,11 @@ import * as path from 'node:path'
 
 import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { isEnoentError, toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
-import type { ScheduledTask, SchedulerEntryOp, SchedulerStore, TaskSnapshot } from './types.js'
+import { TASK_ENTRY_TYPE, toTaskSnapshot } from './types.js'
+import type { ScheduledTask, SchedulerEntryOp, SchedulerStore } from './types.js'
 
 const logger = getLogger('scheduler')
 
@@ -40,7 +42,7 @@ export function getLegacyStorePath(cwd: string): string {
 
 /**
  * 旧 store 任务字段补全（参考 store.ts load() 默认值兜底）：旧数据可能缺字段，逐字段给默认值。
- * ownerSessionFile/pending 不补全——旧数据本无此二字段，由 toTaskSnapshot 显式剥离。
+ * ownerSessionFile/pending 不补全——旧数据本无此二字段，由 toTaskSnapshot 剥离。
  */
 function normalizeLegacyTask(t: Partial<ScheduledTask>): ScheduledTask {
   return {
@@ -59,45 +61,6 @@ function normalizeLegacyTask(t: Partial<ScheduledTask>): ScheduledTask {
     lastStatus: t.lastStatus,
     lastError: t.lastError,
   }
-}
-
-/**
- * ScheduledTask → TaskSnapshot：显式构造
- * （id/name/prompt/kind/schedule/enabled/createdAt/nextRunAt/expiresAt?/
- * runCount/lastRunAt?/lastStatus?/lastError?/history），剥离 ownerSessionFile（在 op 顶层）
- * 与 pending（运行时标记），history 用 slice() 深拷贝。
- *
- * 显式构造而非复用 runtime.toSnapshot 的解构写法（T-C3-explicit）：旧 store 数据本无
- * ownerSessionFile/pending 运行时字段，显式构造更安全。两处构造逻辑需保持形状一致
- * （对照 types.ts TaskSnapshot 字段）。
- */
-function toTaskSnapshot(task: ScheduledTask): TaskSnapshot {
-  return {
-    id: task.id,
-    name: task.name,
-    prompt: task.prompt,
-    kind: task.kind,
-    schedule: task.schedule,
-    enabled: task.enabled,
-    createdAt: task.createdAt,
-    nextRunAt: task.nextRunAt,
-    expiresAt: task.expiresAt,
-    runCount: task.runCount,
-    lastRunAt: task.lastRunAt,
-    lastStatus: task.lastStatus,
-    lastError: task.lastError,
-    history: task.history.slice(),
-  }
-}
-
-/**
- * 判断 err 是否为 ENOENT（fs.renameSync 源文件不存在）。
- * Record 守卫模式与 replay.ts isSchedulerEntryOp 同款（避免 taste/no-unsafe-cast）。
- */
-function isENOENT(err: unknown): boolean {
-  if (!(err instanceof Error)) return false
-  if (!('code' in err)) return false
-  return (err as Record<'code', unknown>).code === 'ENOENT'
 }
 
 /**
@@ -137,8 +100,7 @@ function importFromFile(
       ownerSessionFile: currentSessionFile,
       task: toTaskSnapshot(task),
     }
-    // customType 与 backend.ts PiSchedulerBackend.appendEntry 同源，改一处必改两处
-    pi.appendEntry('pi-scheduler:task', op)
+    pi.appendEntry(TASK_ENTRY_TYPE, op)
   }
 
   // 空 store（0 任务）无持久化依赖，直接删；resumed session（sessionFile 已存在）已即时落盘，删
@@ -169,7 +131,7 @@ function importFromFile(
         fs.unlinkSync(importedPath)
       } catch (err) {
         // MF-2：并发——另一进程（resumed B）已 unlink → ENOENT 静默；其他 fs 错误（EACCES）不吞
-        if (!isENOENT(err)) throw err
+        if (!isEnoentError(err)) throw err
       }
     }
     // 从未 flush：保留 .imported，下次 session_start 崩溃恢复重导入（不 unlink；不告警——
@@ -211,7 +173,7 @@ function handleImportedResidue(
  * 导入旧 scheduler store 到当前 session（append-only event sourcing 迁移，IF-IMPORT-LEGACY）。
  *
  * 策略：原子 rename scheduler.json → scheduler.json.imported 独占迁移；成功者读取 .imported
- * 逐任务 pi.appendEntry('pi-scheduler:task', upsert) 后删除 .imported；rename 抛 ENOENT
+ * 逐任务 pi.appendEntry(TASK_ENTRY_TYPE, upsert) 后删除 .imported；rename 抛 ENOENT
  * 说明并发场景下别人已 rename 走，走 handleImportedResidue 幂等恢复。
  *
  * 时序（CL3 方案A）：必须在 backend.loadTasks() 之前执行——append 的 upsert entry 进入 pi
@@ -245,7 +207,7 @@ export function importLegacyStore(
     try {
       fs.renameSync(storePath, importedPath)
     } catch (err) {
-      if (isENOENT(err)) {
+      if (isEnoentError(err)) {
         // 并发 S10 / 崩溃恢复：scheduler.json 已不在（被别人 rename 走或上次崩溃）→ 残留恢复
         return handleImportedResidue(importedPath, pi, currentSessionFile)
       }
@@ -257,7 +219,7 @@ export function importLegacyStore(
     return importFromFile(importedPath, pi, currentSessionFile)
   } catch (err) {
     // C1 整体降级：read/parse/appendEntry 任一异常不崩 session_start
-    logger.warn('import failed', { error: err instanceof Error ? err.message : String(err) })
+    logger.warn('import failed', { error: toErrorMessage(err) })
     return undefined
   }
 }
