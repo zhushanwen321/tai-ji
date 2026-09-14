@@ -351,7 +351,7 @@ export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx)
  * record.endedAt 不写（非终态，duration 语义保持 running 起算）。
  *
  * @param stopReason 展示值（成功/失败轮用旧值族、中断轮用 interrupted 族——
- *        值域见 types.ts StopReason；纯展示 + 排障，不参与资格判定）。
+ *        值域见 types.ts StopReason；展示 + 排障，U6 起参与 isOccupied 判定）。
  * @returns true = 收口完成；false = CAS 拒绝（record 非 running）。
  */
 export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason, ctx: TerminalCtx): boolean {

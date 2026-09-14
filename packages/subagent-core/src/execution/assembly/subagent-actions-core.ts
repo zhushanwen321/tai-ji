@@ -19,7 +19,6 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // 守卫 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
-import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
@@ -313,9 +312,10 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
 }
 
 /** SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
- *  parent 从 record.parentRecordId 派生（配合直接父守卫），resumable 从 isResumable 派生
- *  （「可续聊」对外表达）；outcome 一等终态语义（projectOutcome 唯一出口），closedReason
- *  退出对外 JSON（保留为 record 内部诊断字段），对外成败判读收口到 outcome。
+ *  parent 从 record.parentRecordId 派生（配合直接父守卫）；[U5/D4] resumable 字段已
+ *  退役（idle 即可续聊，state 主字段已并存表达）；outcome 一等终态语义（projectOutcome
+ *  唯一出口），closedReason 退出对外 JSON（保留为 record 内部诊断字段），对外成败判读
+ *  收口到 outcome。
  *  agent 是 GUI/TUI list 共用的显示名——取 basename 短名（displayAgentName），
  *  完整路径保留在 record.agent（数据层）。 */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
@@ -331,7 +331,6 @@ export function recordToListItem(r: SubagentRecord): SubagentListItem {
     totalTokens: r.totalTokens,
     sessionFile: r.sessionFile,
     parent: r.parentRecordId,
-    resumable: isResumable(r),
     outcome: projectOutcome(r),
     origin: r.origin,
     parentRunId: r.parentRunId,

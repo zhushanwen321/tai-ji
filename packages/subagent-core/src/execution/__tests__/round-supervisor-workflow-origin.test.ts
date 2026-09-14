@@ -4,7 +4,7 @@
 //（设计 subagent-workflow-record-unification.md §3.3 决策表 v3）：
 //
 //   - adopt 接管：豁免（adoptOnProcessDeath 对 workflow record 不纳管——引擎死亡即
-//     run 失败即 record 终态化，无脚本可回的 resumable 等待无意义）；
+//     run 失败即 record 终态化，无脚本可回的纳管等待无意义）；
 //   - boot 分区重认领：豁免负面断言（classifySupervisorDomain 不把 workflow record
 //     归入可 adopt 域 "run"）；
 //   - superseded 分类：workflow origin 候选豁免（parallel 同 slug 并行是 workflow
@@ -66,19 +66,17 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
     slug: "fix-bug",
     startedAt: Date.now() - 1000,
     status: "running",
-    resumable: true,
     rootSessionId: "sess-root",
     turnCount: 0,
     ...overrides,
   } as ExecutionRecord;
 }
 
-/** 该唤醒形态 view（running + resumable + 无产出 + 无驱动）。 */
+/** 该唤醒形态 view（running + 无产出 + 无驱动）。 */
 function awakeView(id: string, over: Partial<SupervisorRecordView> = {}): SupervisorRecordView {
   return {
     id,
     status: "running",
-    resumable: true,
     hasResult: false,
     chatMode: false,
     rootSessionId: "sess-root",
@@ -121,7 +119,7 @@ describe("adopt 豁免（决策表 v3 改判）", () => {
 });
 
 describe("boot 分区对 workflow 形态负面断言（重认领豁免）", () => {
-  it("running+resumable+无产出的 workflow record 不被 boot 重认领；tool 对照被认领", () => {
+  it("running+无产出的 workflow record 不被 boot 重认领；tool 对照被认领", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     deps.views.set("bg-wf", awakeView("bg-wf", { origin: "workflow" }));

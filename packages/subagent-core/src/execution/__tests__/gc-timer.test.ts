@@ -63,8 +63,8 @@ function makePi(): PiStub {
   };
 }
 
-/** 构造 running + 无活进程 + 指定 idleSince 的 record（GC 扫描的目标态）。
- *  listAllActive 只返回 status==="running"（createRecord 初始即 running）。 */
+/** 构造 idle + 指定 idleSince 的 record（GC 扫描的目标态——[U5/D4] GC 判据
+ *  isResumable 已改 idle 派生，候选 = idle 形态）。 */
 function makeIdleRecord(id: string, idleSince: number): ExecutionRecord {
   const record = createRecord(id, {
     agent: "general-purpose",
@@ -77,6 +77,7 @@ function makeIdleRecord(id: string, idleSince: number): ExecutionRecord {
     chatMode: true,
     controller: new AbortController(),
   });
+  record.status = "idle";
   record.idleSince = idleSince;
   return record;
 }
@@ -99,7 +100,7 @@ describe("[M8] idle record GC 定时器（startGcTimer）", () => {
     service = new SubagentService({ cwd: agentDir, modelService });
     service.initSession({ pi: makePi(), sessionId: "root-session" });
     store = (service as unknown as ServiceInternals).store;
-    // 默认无活进程（isResumable=true）——Path B：进程已回收、可冷路径 resume 的等待续聊态
+    // [U5/D4] GC 候选 = idle 派生（idle 即 resumable）——构造态 idle 即候选。
     _resetCoreSpawnedChildrenMirrorForTest();
     loggerMock.warn.mockClear();
   });
@@ -129,16 +130,19 @@ describe("[M8] idle record GC 定时器（startGcTimer）", () => {
     );
   });
 
-  it("有活进程的 record 不归档（isResumable=false，即使 idleSince 超 TTL）", () => {
+  it("running record 不归档（[U5/D4] GC 候选 = idle 派生——在飞/纳管态 running 不入扫描集）", () => {
     const fireAt = Date.now() + GC_INTERVAL_MS;
-    // Path A：进程保活等待续聊（idle timer armed、镜像登记活句柄）——归档会让活进程失管
-    store.register(makeIdleRecord("sa-live", fireAt - IDLE_TTL_MS - 1));
-    coreSpawnedChildrenMirror().register("sa-live", { pid: 4242, killed: false });
+    // running 形态（createRecord 初始值——在飞轮 / W4 死亡纳管态）：即使 idleSince
+    // 超 TTL 也不归档（兜底 = supervisor 接管链 settle 后落 idle 回到候选集）。
+    const rec = makeIdleRecord("sa-running", fireAt - IDLE_TTL_MS - 1);
+    rec.status = "running";
+    coreSpawnedChildrenMirror().register("sa-running", { pid: 4242, killed: false });
+    store.register(rec);
 
     service.startGcTimer();
     vi.advanceTimersByTime(GC_INTERVAL_MS);
 
-    expect(store.getMutable("sa-live")).toBeDefined(); // 有活进程 → 不归档
+    expect(store.getMutable("sa-running")).toBeDefined(); // running → 不归档
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 

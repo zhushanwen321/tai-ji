@@ -29,10 +29,10 @@
 // |---------|------|---------|
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
-// | markRoundStarted(id) | 轮始重置（status=running + result/resumable 清除） | entry（best-effort） |
-// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle，resumable 不再写——idle 即 resumable；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
+// | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
+// | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
 // | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
-// | adoptEngineDeath(id, {error}) | 引擎死亡收养（error/result/resumable 三写；监督器接管编排留调用方） | entry（best-effort） |
+// | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | entry（best-effort） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
@@ -56,8 +56,8 @@
 //                    markFinalized 序言（completeRecord 冻结后随 entry/manifest 投影）
 //   ③ round       —— 轮终 +1→markRoundIdle
 //   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
-//   ⑤ resumable   —— 轮始清→markRoundStarted（轮终不再写，U4/D3 idle 即 resumable；
-//                    字段删除归 U5 批）；收养→adoptEngineDeath
+//   ⑤ resumable   —— 字段已退役（[U5/D4] idle 即 resumable，字段从 record/entry
+//                    契约删除，无写点）
 //   ⑥ idleSince   —— 轮终刷新→markRoundIdle
 //   ⑦ sessionFile —— 回填族（run 应答/promote）归调用方内存回填 + register/
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
@@ -214,7 +214,7 @@ export class RecordStore {
   private readonly records = new Map<string, ExecutionRecord>();
   private readonly listeners = new Set<ChangeListener>();
   private _disposed = false;
-  /** 孤儿终态恢复的已判定缓存（residual-fixes）：resumable 形态无 sidecar 锚，同进程重复调用跳过。 */
+  /** 孤儿终态恢复的已判定缓存（residual-fixes）：running 残留形态无 sidecar 锚，同进程重复调用跳过。 */
   private orphanJudged = new Set<string>();
   /** Pi handle（用于 appendEntry 上报损坏 manifest）。构造时可空，setPi() 后续注入。
    *  显式存为字段而非构造参数 readonly：setPi 需要写权限。 */
@@ -399,7 +399,7 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：轮始重置（字段①②⑤）。status=running + result/resumable 清除——
+   * 意图原语：轮始重置（字段①②⑤）。status=running + result 清除——
    * §5.4 isStreaming 公式要求 result undefined 才显示 streaming，不清则续轮流仍显示
    * waiting。归口写点：热路径轮始与冷启动 resume 续轮（subagent-service，U3 迁移）。
    *
@@ -415,7 +415,7 @@ export class RecordStore {
    * 方法头）。簿记全集（①-⑪）：
    *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
-   *      不再写（idle 即 resumable——正常路径轮始已清，轮终保持 undefined）；⑥
+   *      字段已退役（[U5/D4] idle 即 resumable，无簿记动作）；⑥
    *      idleSince 刷新（idle-GC 判据锚）；⑦ **`.alive` 保留**
    *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
    *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
@@ -487,9 +487,9 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：引擎死亡收养（字段⑤⑩——error/result/resumable 三写，record 保持
-   * resumable 交监督器接管，禁 completed 谎报 / closed 直接终局）。归口写点：
-   * adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
+   * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
+   * running + stopReason=failed 交监督器接管，禁 completed 谎报 / closed 直接终局）。
+   * 归口写点：adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
    * 监督器 adoptOnProcessDeath 编排留调用方。
    *
    * @returns false = id 不在内存（debug 留痕，无副作用）。
@@ -608,7 +608,7 @@ export class RecordStore {
    * record.endedAt 不写（非终态，duration 语义保持 running 起算）。
    *
    * @param stopReason 展示值（成功/失败轮用旧值族、中断轮用 interrupted 族——
-   *        值域见 types.ts StopReason；纯展示 + 排障，不参与资格判定）。
+   *        值域见 types.ts StopReason；展示 + 排障，U6 起参与 isOccupied 判定）。
    * @returns true = 收口完成；false = CAS 拒绝（record 非 running）。
    */
   markSettled(record: ExecutionRecord, stopReason: StopReason): boolean {
@@ -870,6 +870,16 @@ export class RecordStore {
   }
 
   /**
+   * 列出全部内存 record（running + idle）的可变引用——idle-GC 专用扫描面。
+   * [two-state-convergence U5/D4] GC 判据改 idle 派生后，候选集 = idle record
+   * （listAllActive 的 running 过滤会把它们挡在扫描外，GC 将恒空转）——本方法
+   * 提供不过滤的枚举面，判据（isResumable = idle）在消费方收拢，单一权威不变。
+   */
+  listAllInMemory(): ExecutionRecord[] {
+    return [...this.records.values()];
+  }
+
+  /**
    * 合并内存(running) + 磁盘(sessions/*.jsonl 重建) → SubagentRecord[]。
    *
    *   ╔══════════════════════════════════════════════════════════════════╗
@@ -1121,7 +1131,7 @@ export class RecordStore {
    * 整体删除——record 的 stopReason 已由重建单规则从 `.state` 或 interrupted-by-restart
    * 兜底给出，本方法不做任何终态判定（子文件末行内容不再参与，超长/截断行无感知）。
    *
-   * 覆写前 merge（lastEntry）保留既有信息（批域标记 + 轮终正文/模型 + resumable 信号）：
+   * 覆写前 merge（lastEntry）保留既有信息（批域标记 + 轮终正文/模型）：
    * 覆写是状态迁移不是信息重建。
    */
   private finalizeOrphanRecord(rec: SubagentRecord, lastEntry: SubagentRecord): void {

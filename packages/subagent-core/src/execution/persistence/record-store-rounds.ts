@@ -5,7 +5,7 @@
 //   - markRoundStarted（轮始重置——字段①②⑤）；
 //   - markRoundIdle（轮末收口簿记全集①-⑪——[two-state-convergence U4/D3] 轮终翻边
 //     写 idle + A-lite 轮终磁盘面 `.state` 收条 + binding 快照 + pending 注销发射点②）；
-//   - adoptEngineDeath（引擎死亡收养——error/result/resumable 三写）。
+//   - adoptEngineDeath（引擎死亡收养——error/result/stopReason 三写，[U5/D4] W4 新态）。
 //
 // 变化轴 = 「一轮会话的过程簿记」（轮始重置 / 轮终收口 / 事件归约 / 收养）——
 // 轮次语义演进（SP-5 升级链、A-lite 展示位、U7 统计口径的轮终快照）集中在此。
@@ -65,7 +65,7 @@ export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): 
 }
 
 /**
- * 意图原语：轮始重置（字段①②⑤）。status=running + result/resumable 清除——
+ * 意图原语：轮始重置（字段①②⑤）。status=running + result 清除——
  * §5.4 isStreaming 公式要求 result undefined 才显示 streaming，不清则续轮流仍显示
  * waiting。归口写点：热路径轮始与冷启动 resume 续轮（subagent-service，U3 迁移）。
  *
@@ -79,7 +79,6 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   }
   rec.status = "running";
   rec.result = undefined;
-  rec.resumable = undefined;
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;
@@ -94,8 +93,8 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  * 本就是 revive 直通路径的设计输入）。簿记全集（①-⑪）：
  *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
  *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
- *      不再写（[U4/D3] idle 即 resumable——字段值退役由 U5 批删除，写点先行归零；
- *      正常路径轮始 markRoundStarted 已清，轮终保持 undefined）；⑥ idleSince 刷新
+ *      字段已退役（[U5/D4] idle 即 resumable——字段从 record/entry 契约整体删除，
+ *      无簿记动作）；⑥ idleSince 刷新
  *      （idle-GC 判据锚）；⑦ **`.alive` 保留**
  *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
  *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
@@ -140,7 +139,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   }
   rec.result = nextResult;
   // ①③④⑥：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +
-  // 清残留死因 + idle 锚。resumable 不写（idle 即 resumable，见方法头⑤）。
+  // 清残留死因 + idle 锚。resumable 字段已退役（[U5/D4]，见方法头⑤）。
   rec.status = "idle";
   rec.closedReason = undefined;
   rec.round = (rec.round ?? 0) + 1;
@@ -184,8 +183,10 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
 }
 
 /**
- * 意图原语：引擎死亡收养（字段⑤⑩——error/result/resumable 三写，record 保持
- * resumable 交监督器接管，禁 completed 谎报 / closed 直接终局）。归口写点：
+ * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
+ * entry = running + error + stopReason=failed + result=∅——status 保持 running，core
+ * 机器语义不变（supervisor 接管链照旧），展示面靠 stopReason 子句排除（U6 终态判据
+ * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口写点：
  * adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
  * 监督器 adoptOnProcessDeath 编排留调用方。
  *
@@ -199,7 +200,10 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
   }
   rec.error = opts.error;
   rec.result = undefined;
-  rec.resumable = true;
+  // [U5/D4] W4 死亡纳管的跨重启标记从 resumable=true 迁移为 stopReason='failed'
+  //（resumable 字段退役；failed 如实——引擎死亡即本轮失败证据，与 markRoundIdle
+  // 失败轮的展示位值域一致）。
+  rec.stopReason = "failed";
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;

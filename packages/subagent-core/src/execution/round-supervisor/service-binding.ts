@@ -63,7 +63,6 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
       id: memory.id,
       // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
       status: memory.status === "idle" && memory.closedReason !== undefined ? "closed" : "running",
-      resumable: memory.resumable === true,
       hasResult: memory.result !== undefined,
       chatMode: memory.chatMode === true,
       origin: memory.origin,
@@ -79,7 +78,6 @@ function supervisorRecordView(binding: RoundSupervisorBinding, id: string): Supe
   return {
     id: disk.id,
     status: disk.status === "idle" && disk.closedReason !== undefined ? "closed" : "running",
-    resumable: disk.resumable === true,
     hasResult: disk.result !== undefined,
     chatMode: disk.chatMode === true,
     origin: disk.origin,
@@ -195,7 +193,6 @@ async function supervisorGiveUp(
   };
   record.sessionFile = disk.sessionFile;
   record.round = disk.round;
-  record.resumable = disk.resumable;
   record.hadWorktree = disk.worktree === true;
   record.result = disk.result;
   record.turnCount = disk.turns;

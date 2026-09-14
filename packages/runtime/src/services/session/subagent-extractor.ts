@@ -304,9 +304,9 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // onRoundSettled）恒写非空——renderer hasRunning 据此排除轮终 running（review #8）。
     result: optString(d.result),
     // 执行态细分判据（residual-fixes）：chatMode 显式值（register 起写入；缺省 = v1 前
-    // 存量 entry，消费端按保守方向处理）；resumable = 无活进程驱动的 running。
+    // 存量 entry，消费端按保守方向处理）。[U5/D4] resumable 下行字段已随退役删除
+    // （idle 即 resumable——renderer 判据消费 status/result 组合）。
     chatMode: optBoolean(d.chatMode),
-    resumable: optBoolean(d.resumable),
     // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
     // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
     // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。

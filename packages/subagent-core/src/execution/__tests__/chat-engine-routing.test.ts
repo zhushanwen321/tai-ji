@@ -328,7 +328,6 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
-      expect(rec?.resumable).toBeUndefined();
     });
   });
 

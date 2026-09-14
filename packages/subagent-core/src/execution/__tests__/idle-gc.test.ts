@@ -1,6 +1,6 @@
 // src/execution/__tests__/idle-gc.test.ts
 //
-// [W4] idle-gc 扩展单测：startedAt 锚归档（无 idleSince 的 resumable record）、
+// [W4] idle-gc 扩展单测：startedAt 锚归档（无 idleSince 的 idle record）、
 // 只归档不补注销（archive 不发 pending:unregister——注销统一交对账 sweep）、
 // WorkflowRun store 纳入（startedAt 锚终态化 + save）。fake timers 推进 GC
 // interval；RecordStore 用 mkdtemp 自建目录 + pi=null（archive 纯内存，零磁盘写）。
@@ -53,7 +53,8 @@ function makeRecord(id: string, overrides: Partial<ExecutionRecord> = {}): Execu
     startedAt: Date.now(),
     rootSessionId: "sess-root",
   });
-  record.resumable = true;
+  // [U5/D4] GC 判据 isResumable 已改 idle 派生——候选构造为 idle 形态。
+  record.status = "idle";
   Object.assign(record, overrides);
   return record;
 }
@@ -69,7 +70,7 @@ describe("idle-GC 归口 markIdleArchived（U2b/C1——D3a release 出口②闭
       sessionFile,
     });
     store.register(rec);
-    // 持有期声明在位（模拟 spawn 侧 acquireWriteLease 已声明写权的 resumable record）。
+    // 持有期声明在位（模拟 spawn 侧 acquireWriteLease 已声明写权的可归档 idle record）。
     store.acquireWriteLease(sessionFile, rec.id);
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
 
@@ -114,7 +115,7 @@ describe("idle-GC 归口 markIdleArchived（U2b/C1——D3a release 出口②闭
 });
 
 describe("idle-gc record 锚扩展（W4）", () => {
-  it("无 idleSince 的 resumable record 以 startedAt 为锚：超 30 天归档", async () => {
+  it("无 idleSince 的 idle record 以 startedAt 为锚：超 30 天归档", async () => {
     const store = makeStore();
     const stale = makeRecord("bg-old", { startedAt: Date.now() - 31 * DAY_MS });
     store.register(stale);
@@ -128,7 +129,7 @@ describe("idle-gc record 锚扩展（W4）", () => {
     expect(unregisterEmit).not.toHaveBeenCalled();
   });
 
-  it("有 idleSince 的 resumable record 仍以 idleSince 为锚（现状语义保持）", async () => {
+  it("有 idleSince 的 idle record 仍以 idleSince 为锚（现状语义保持）", async () => {
     const store = makeStore();
     const rec = makeRecord("bg-1", {
       startedAt: Date.now() - 1 * DAY_MS,

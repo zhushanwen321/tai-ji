@@ -266,7 +266,6 @@ describe("T2③ hot-path settled watchdog", () => {
       exitCode: null,
     });
     await vi.waitFor(() => expect(record.status).toBe("idle"));
-    expect(record.resumable).toBeUndefined();
     // [H1 U2 / D7] 失败轮 lastError 写失败原因（result = 前值 ?? 失败摘要——失败摘要
     // 由 Continuation 失败通知独立承载）
     expect(record.lastError).toContain("settled watchdog");

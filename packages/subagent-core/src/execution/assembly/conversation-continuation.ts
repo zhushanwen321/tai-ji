@@ -143,7 +143,7 @@ export interface ContinuationHost {
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
    *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
   reopenRecord(record: ExecutionRecord): boolean;
-  /** 轮始簿记（store.markRoundStarted：status=running + result/resumable 清除 +
+  /** 轮始簿记（store.markRoundStarted：status=running + result 清除 +
    *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写）。 */
   markRoundStarted(record: ExecutionRecord): void;
   /** [U5] idle keepalive 超时的进程回收（idleTimeoutRecycle——归档是用户意愿位，
@@ -468,7 +468,7 @@ export class ConversationContinuation {
     this.activeRunId = roundRunId;
     this.activeController = controller;
     // 轮始簿记归口（[U2b 修复轮/D2] store.markRoundStarted：status=running 重申 +
-    // 清上一轮 result 与 resumable——§5.4 isStreaming 公式要求 result undefined 才
+    // 清上一轮 result——§5.4 isStreaming 公式要求 result undefined 才
     // 显示 streaming，不清则续轮流仍显示 waiting、spinner 无法恢复；迁移上报 entry
     // 落盘让 GUI 派生缓存失效、从 waiting 切回 spinner。U1 原语簿记为原三行现场写
     // 的超集，多出 notifyChange 刷新）。record 不在 store 内存的形态 = false 旁路

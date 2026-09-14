@@ -86,7 +86,6 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     // A3 断言的跨轮轮终）。
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("completed");
-    expect(record.resumable).toBeUndefined();
     expect(record.round).toBe(1);
     expect(record.endedAt).toBeUndefined();
     expect(record.result).toBe("round output");
@@ -126,7 +125,6 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
 
     expect(record.stopReason).toBe("failed");
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.lastError).toBe("engine crashed");
     expect(record.result).toContain("engine crashed");
     const state = readStateJson();

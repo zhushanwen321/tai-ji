@@ -45,7 +45,7 @@ import type { CollectSyncConfig, ExecutionRecord, SubagentRecord } from "../asse
 const logger = getLogger("subagents");
 
 /** [v2 D4] E1 等待分支 settled 有界重扫上限。无上限重扫 = 泄漏（设计 §3.3 D4 被否
- *  谱系）；8 次覆盖重启后主 agent 对 resumable 成员的典型续跑轮次，达限仍有
+ *  谱系）；8 次覆盖重启后主 agent 对滞留成员的典型 readopt 续跑轮次，达限仍有
  *  running → disposed，交下次 session_start 收敛。
  *  [R2] 常量 SSOT 随唯一消费主体（armSettledRescan）自壳文件迁入本聚合。 */
 const SETTLED_RESCAN_LIMIT = 8;
@@ -371,13 +371,13 @@ export class SyncCollectDomain {
         (rootFilter === undefined || r.rootSessionId === rootFilter),
     );
     if (candidates.length === 0) return { outcome: "idle", waitingIds: [] };
-    // [v2 D3 → two-state-convergence U4/D4] 与协调器 hasRunningSync 消费同一判据
-    // SSOT（isCollectPending，collect-coordinator.ts 导出——防同构判据再分叉）：
-    // 真在跑（running + resumable 空）→ 挂起等待；桥接期轮终（running+resumable=
-    // true，SP-5 有意语义——成功成员崩溃时的末条 entry 恒此形态）与翻边轮终（idle）
-    // 视为已完成、不阻止补发。旧口径只看 status !== "closed" 会把主场景（批内含成功
-    // 成员）顶死在「等自然终态」永不补发（v2 §2.3 断链 3）；判据语义/双形态兼容/
-    // 被否谱系见 isCollectPending 函数头。
+    // [v2 D3 → two-state-convergence U4/D4 → U5 翻转] 与协调器 hasRunningSync 消费
+    // 同一判据 SSOT（isCollectPending，collect-coordinator.ts 导出——防同构判据再分
+    // 叉）：真在跑（running）→ 挂起等待（[U5] W4 新态 running+stopReason=failed 亦
+    // 挂起——恢复链 = run 域 readopt settle → settled 边沿重扫 → 补发，达限退化见
+    // armSettledRescan）；轮终（idle，U4 翻边权威词）视为已完成、不阻止补发。
+    // 旧口径只看 status !== "closed" 会把主场景（批内含成功成员）顶死在「等自然终态」
+    // 永不补发（v2 §2.3 断链 3）；判据语义/U5 翻转登记见 isCollectPending 函数头。
     const running = candidates.filter((r) => isCollectPending(r));
     if (running.length > 0) {
       logger.debug(
@@ -438,8 +438,8 @@ export class SyncCollectDomain {
   }
 
   // [E1 语义对齐 toNotifyRecord] 补发成员映射 syncRebuildToNotifyMember 拆至
-  // sync-rebuild.ts（变化轴：恢复批通知语义）：one-shot 成功成员末条恒
-  // running+resumable（SP-5），直通 status 会让恢复批批头「0 finished」且丢
+  // sync-rebuild.ts（变化轴：恢复批通知语义）：one-shot 成功成员末条在 U4 前为
+  // running+resumable（SP-5 桥接形态），直通 status 会让恢复批批头「0 finished」且丢
   // patchFile 的 git-apply 指针——对齐后补发记录为 closed + outcome 物化 +
   // patchFile 透传。调用点：runSyncCollectRecoveryScan。
 }

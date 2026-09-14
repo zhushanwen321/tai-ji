@@ -51,7 +51,6 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
     slug: "fix-bug",
     startedAt: Date.now() - 1000,
     status: "running",
-    resumable: true,
     rootSessionId: "sess-root",
     turnCount: 0,
     ...overrides,
@@ -59,27 +58,29 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
 }
 
 // ============================================================
-// [P4-② ⛔ two-state-convergence U4] W4 唤醒链现状守卫（isAwakeWarrantedShape 直测）
-// ——设计 D4 行为级 W4 行：同进程死亡纳管 → 运行时唤醒链；翻边（U4 轮终落 idle）后
-// 轮终形态与 W4 纳管形态的判别由谓词四子句承担（U5 全子集化前的现状锁定）。
+// [P4-② ⛔ two-state-convergence U5] W4 唤醒链守卫（isAwakeWarrantedShape 直测）
+// ——设计 D4 行为级 W4 行：同进程死亡纳管 → 运行时唤醒链；[U5/D4 MF-B] 判据
+// 全子集化（!chatMode && running && !hasResult && !hasInFlightRun && !hasLiveProcess）
+// ——resumable 字段退役后 W4 形态由「running + 无产出 + 无驱动」识别。
 // ============================================================
-describe("[P4-②] isAwakeWarrantedShape W4 唤醒链现状守卫（two-state-convergence U4）", () => {
-  it("W4 纳管态（running + resumable + 无在途 run/无活进程，非 chat）→ true（运行时唤醒链活）", () => {
-    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, false, false)).toBe(true);
+describe("[P4-②] isAwakeWarrantedShape W4 唤醒链守卫（two-state-convergence U5 全子集谓词）", () => {
+  it("W4 纳管态（running + 无产出 + 无在途 run/无活进程，非 chat）→ true（运行时唤醒链活）", () => {
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: false }, false, false, false)).toBe(true);
+  });
+
+  it("W4 新型（running + stopReason=failed，adoptEngineDeath U5 写点形态）→ true（谓词不消费 stopReason）", () => {
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: false }, false, false, false)).toBe(true);
   });
 
   it("翻边轮终形态（idle）→ false（status 子句排除——轮终收口不属 W4 唤醒域）", () => {
-    expect(isAwakeWarrantedShape({ status: "idle", resumable: true, chatMode: false }, false, false)).toBe(false);
-    // U4 翻边后轮终 resumable 不再写——双形态（残留 true / 新态 undefined）均 false
-    expect(isAwakeWarrantedShape({ status: "idle", resumable: false, chatMode: false }, false, false)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "idle", chatMode: false }, false, false, false)).toBe(false);
   });
 
-  it("真在跑（有在途 run / 有活进程）→ false（该等）；conversation 豁免 → false", () => {
-    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, true, false)).toBe(false);
-    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: false }, false, true)).toBe(false);
-    expect(isAwakeWarrantedShape({ status: "running", resumable: true, chatMode: true }, false, false)).toBe(false);
-    // resumable 空 = 无纳管信号（在飞轮正常形态）→ false
-    expect(isAwakeWarrantedShape({ status: "running", resumable: false, chatMode: false }, false, false)).toBe(false);
+  it("真在跑（有在途 run / 有活进程）→ false（该等）；conversation 豁免 → false；已有产出 → false", () => {
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: false }, false, true, false)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: false }, false, false, true)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: true }, false, false, false)).toBe(false);
+    expect(isAwakeWarrantedShape({ status: "running", chatMode: false }, true, false, false)).toBe(false);
   });
 });
 
@@ -94,7 +95,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("该等：有活进程驱动 → 不干预（无指引、无放弃）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     deps.live.add("bg-1");
     supervisor.adoptOnProcessDeath(makeRecord(), "boom");
     expect(deps.guidances).toHaveLength(0);
@@ -104,7 +105,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("该等：在途 run 记账（noteRunStarted）→ 不干预；noteRunEnded 后重评估", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.noteRunStarted("bg-1");
     supervisor.adoptOnProcessDeath(makeRecord(), "boom");
     expect(deps.guidances).toHaveLength(0);
@@ -112,10 +113,10 @@ describe("RoundSupervisor 三态判定", () => {
     expect(deps.guidances).toHaveLength(1);
   });
 
-  it("该唤醒：resumable 未终态 且 无在途 run/无进程驱动 → 决策指引（一窗一次）+ 看门狗 armed", () => {
+  it("该唤醒：running + 无产出 + 无在途 run/无进程驱动 → 决策指引（一窗一次）+ 看门狗 armed", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.adoptOnProcessDeath(makeRecord(), "engine crashed");
     expect(deps.notices).toEqual(["merged:bg-1"]); // 合并单条通知（failed 如实 + 接管契约）
     expect(deps.guidances).toHaveLength(1);
@@ -130,7 +131,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("[重建不解管] 镜像重填再置死（引擎被动重建）不翻转判定：指引仍只送一次、纳管持续", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     // 死亡事件纳管时镜像已置死（hasLiveProcess=false）→ 该唤醒。
     supervisor.adoptOnProcessDeath(makeRecord(), "engine crashed");
     expect(deps.guidances).toHaveLength(1);
@@ -149,7 +150,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("已有完成产出（SP-5 upgrade 等待态）→ 不唤醒", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: true, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: true, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.adoptOnProcessDeath(makeRecord({ result: "done text" }), "x");
     expect(deps.guidances).toHaveLength(0);
   });
@@ -157,7 +158,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("conversation 形态（chatMode）豁免：不纳管不通知", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    supervisor.adoptOnProcessDeath(makeRecord({ chatMode: true, resumable: true }), "x");
+    supervisor.adoptOnProcessDeath(makeRecord({ chatMode: true }), "x");
     expect(deps.notices).toHaveLength(0);
     expect(supervisor.supervisedIds()).toEqual([]);
   });
@@ -165,7 +166,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("该放弃：决策看门狗到期 → giveUp(watchdog-expired) 并解除纳管；record 已终态则跳过", async () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.adoptOnProcessDeath(makeRecord(), "x");
     expect(deps.givenUp).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
@@ -176,7 +177,7 @@ describe("RoundSupervisor 三态判定", () => {
   it("看门狗等待期内 run 恢复（决策收敛）→ 解除看门狗，不放弃", async () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.adoptOnProcessDeath(makeRecord(), "x");
     supervisor.noteRunStarted("bg-1"); // 主 agent resume = 决策收敛
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
@@ -186,11 +187,11 @@ describe("RoundSupervisor 三态判定", () => {
   it("[F5] 挂账转完成（SP-5 result 回填）→ 解除看门狗：到期不误 giveUp 已完成挂账 record", async () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.adoptOnProcessDeath(makeRecord(), "x"); // 该唤醒 → 指引 + 看门狗 armed
     expect(deps.guidances).toHaveLength(1);
     // upgrade 完成 → result 回填（挂账态），重评估触发（noteRunEnded 携带视图更新）
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: true, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: true, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     supervisor.noteRunEnded("bg-1");
     // armed 的看门狗必须已解除——2h 到期不得把已完成挂账 record 判死
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
@@ -204,7 +205,7 @@ describe("RoundSupervisor 三态判定", () => {
     try {
       const deps = makeDeps();
       const supervisor = new RoundSupervisor(deps);
-      deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+      deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
       supervisor.adoptOnProcessDeath(makeRecord(), "x");
       expect(deps.guidances).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS * 3);
@@ -224,33 +225,32 @@ describe("RoundSupervisor boot 分区", () => {
     vi.useRealTimers();
   });
 
-  it("already-resumable-idle（非 conversation）→ 重认领接管 + 送达指引", () => {
+  it("running 无产出候选（原 already-resumable-idle 重认领形态）→ 纳管接管 + 送达指引", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     deps.candidates.push({ id: "bg-1", rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1 });
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     const { readopted } = supervisor.bootPartition();
     expect(readopted).toEqual(["bg-1"]);
     expect(deps.guidances).toHaveLength(1);
     expect(supervisor.supervisedIds()).toEqual(["bg-1"]);
   });
 
-  it("in-flight 形态（无 resumable 信号）→ 跳过（直断归孤儿恢复，防双收尾）", () => {
+  it("[U5/D4 MF-1] 重认领谓词已删：running 候选防御性全量纳管（生产链路候选门后恒空——磁盘重建恒 idle + 孤儿恢复先纠偏，循环体为防御结构）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     deps.candidates.push({ id: "bg-2", rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1 });
-    deps.views.set("bg-2", { id: "bg-2", status: "running", resumable: false, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-2", { id: "bg-2", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "s", startedAt: 1, closedReason: undefined });
     const { readopted } = supervisor.bootPartition();
-    expect(readopted).toEqual([]);
-    expect(deps.guidances).toHaveLength(0);
-    expect(deps.givenUp).toHaveLength(0);
+    expect(readopted).toEqual(["bg-2"]);
+    expect(supervisor.supervisedIds()).toEqual(["bg-2"]);
   });
 
   it("conversation 形态 → 豁免（现状机制管辖）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     deps.candidates.push({ id: "bg-3", rootSessionId: "r", agent: "chat", slug: "s", startedAt: 1 });
-    deps.views.set("bg-3", { id: "bg-3", status: "running", resumable: true, hasResult: false, chatMode: true, rootSessionId: "r", agent: "chat", slug: "s", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-3", { id: "bg-3", status: "running", hasResult: false, chatMode: true, rootSessionId: "r", agent: "chat", slug: "s", startedAt: 1, closedReason: undefined });
     const { readopted } = supervisor.bootPartition();
     expect(readopted).toEqual([]);
     expect(supervisor.supervisedIds()).toEqual([]);
@@ -268,7 +268,7 @@ describe("RoundSupervisor 通知对账（送指引前查替代）", () => {
   function setupDeadRecord(): { deps: ReturnType<typeof makeDeps>; supervisor: RoundSupervisor } {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    deps.views.set("bg-1", { id: "bg-1", status: "running", resumable: true, hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "fix-bug", startedAt: 1, closedReason: undefined });
+    deps.views.set("bg-1", { id: "bg-1", status: "running", hasResult: false, chatMode: false, rootSessionId: "r", agent: "worker", slug: "fix-bug", startedAt: 1, closedReason: undefined });
     return { deps, supervisor };
   }
 

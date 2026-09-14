@@ -664,15 +664,14 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
   it("派发前轮始簿记（[U2b/D2] 归口 store.markRoundStarted——host 委托达点先于 dispatch）", async () => {
     const record = makeRecord({ round: 1 });
     record.result = "上一轮增量";
-    record.resumable = true;
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
 
     cont.onMessage("next");
 
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
-    // 轮始簿记经 host.markRoundStarted 委托 store 原语（status=running + result/
-    // resumable 清除 + 迁移上报一体——原三行现场写消灭）；record 实际清除语义由
+    // 轮始簿记经 host.markRoundStarted 委托 store 原语（status=running + result
+    // 清除 + 迁移上报一体——原三行现场写消灭）；record 实际清除语义由
     // 真实 store 链在集成面验证。委托先于 dispatch（spinner 恢复时序锚点）。
     expect(calls.roundStarts).toEqual([record.id]);
     expect(calls.order.indexOf(`roundStart:${record.id}`)).toBeLessThan(
@@ -903,9 +902,8 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     fake.runs[0]!.settle({ content: "round two reply" });
 
     await vi.waitFor(() => expect(record.round).toBe(2));
-    // [two-state-convergence U4/D3] 轮终翻边 idle（idle 即 resumable，resumable 不再写）。
+    // [two-state-convergence U4/D3] 轮终翻边 idle。
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.result).toBe("round two reply");
     // route 晚于轮终簿记（簿记 = reportRecordTransition 携带新 round；route 观察到 round=2）
     expect(storeSpy).toHaveBeenCalled();
@@ -926,10 +924,9 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     expect(record.result).not.toContain("stale engine_crashed");
   });
 
-  it("[U2b 修复轮/D2] 轮始 markRoundStarted 接线（真实 store 链）：派发即清上一轮 result/resumable，轮终 round 累加链不断", async () => {
+  it("[U2b 修复轮/D2] 轮始 markRoundStarted 接线（真实 store 链）：派发即清上一轮 result，轮终 round 累加链不断", async () => {
     const record = makeChatRecord("sa-round-start", agentDir);
     record.result = "round 1 text";
-    record.resumable = true;
     store.register(record);
 
     await service.chatActions.deliverChatMessage(record, "round two");
@@ -937,15 +934,13 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     // 轮在途：轮始簿记（store.markRoundStarted）已清执行态信号——isStreaming 公式
     //（result undefined 才显示 streaming）经归口原语达成，status 重申 running。
     expect(record.result).toBeUndefined();
-    expect(record.resumable).toBeUndefined();
     expect(record.status).toBe("running");
     // 轮终链不断：markRoundIdle round+1 + 新一轮 result 写入（round 累加链回归锚）
     fake.runs[0]!.settle({ content: "round two reply" });
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.result).toBe("round two reply");
-    // [two-state-convergence U4/D3] 轮终翻边：idle + resumable 不再写。
+    // [two-state-convergence U4/D3] 轮终翻边：idle。
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
   });
 
   it("失败轮：round 同样 +1 + result = 前值 ?? 失败摘要 + lastError 写入 + 失败通知单发（正文带失败摘要与恢复指引）", async () => {
@@ -965,7 +960,6 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     expect(record.lastError).toBe("engine_round_crashed: child died");
     // [two-state-convergence U4/D3] 失败轮同样翻 idle（万物可续）。
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     // 失败通知：独立载荷（正文 = 失败摘要 + 恢复指引），dedup key = id:2
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
     const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
@@ -988,8 +982,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
 
     const record = store.getMutable(handle.subagentId);
     await vi.waitFor(() => expect(record?.status).toBe("idle"));
-    // [two-state-convergence U4/D3] 失败轮翻 idle（resumable 不再写——idle 即 resumable）。
-    expect(record?.resumable).toBeUndefined();
+    // [two-state-convergence U4/D3] 失败轮翻 idle。
     expect(record?.result).toBe("round did not complete: spawn prepare failed: model not available");
     expect(record?.result).toBeDefined();
     // 失败通知单发
@@ -1147,7 +1140,6 @@ describe("集成：[S1 P1] cancel 后续聊——被取消轮迟到 run 应答�
     expect(record.result).toBe("resume reply");
     // [two-state-convergence U4/D3] 新轮轮终翻 idle。
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
     const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
       [{ details?: { notifyId?: string } }]
@@ -1213,7 +1205,6 @@ describe("集成：one-shot（非 chatMode）settleOneShotOutcome 四分支零�
     const record = makeOneShotRecord("sa-oneshot-ok");
     await settleOneShot(record, { text: "done text", success: true }, false);
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.result).toBe("done text");
     expect(record.closedReason).toBeUndefined();
   });
@@ -1225,7 +1216,6 @@ describe("集成：one-shot（非 chatMode）settleOneShotOutcome 四分支零�
     // [U5] settle 不终态化；标志不清——归档消费在主干尾部 route 之后（本单元
     // settleOneShotOutcome 的职责边界 = settle，通知/归档归 kickOffChatRound 主干）。
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.result).toBe("done");
     expect(record.closeAfterRound).toBe(true);
     expect(record.closedReason).toBeUndefined();
@@ -1236,7 +1226,6 @@ describe("集成：one-shot（非 chatMode）settleOneShotOutcome 四分支零�
     record.closeAfterRound = true;
     await settleOneShot(record, { text: "", success: false, error: "boom" }, false);
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.lastError).toBe("boom");
     expect(record.closeAfterRound).toBe(true);
   });
@@ -1245,7 +1234,6 @@ describe("集成：one-shot（非 chatMode）settleOneShotOutcome 四分支零�
     const record = makeOneShotRecord("sa-oneshot-fail");
     await settleOneShot(record, { text: "", success: false, error: "boom" }, false);
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.closedReason).toBeUndefined();
     expect(record.lastError).toBe("boom");
   });
@@ -1304,7 +1292,6 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     // MF-6：record 轮终落 idle 可续聊（容器不被销毁——用户再 message 自动 resume；
     // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）
     await vi.waitFor(() => expect(record.status).toBe("idle"));
-    expect(record.resumable).toBeUndefined();
     // D8 豁免维持：chatMode 不进监督域接管链（adopt 调用 gate = chatMode !== true）
     expect(adoptSpy).not.toHaveBeenCalled();
     // 单发：Continuation 失败通知恰一条（不存在 supervisor merged notice 双发面）
@@ -1405,7 +1392,6 @@ describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断�
     // settle（markRoundIdle 落 idle 不终态化；watchdog 杀轮非用户放弃，失败通知必须
     // 送达；[two-state-convergence U4/D3] 翻边后 idle 即 resumable）
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
-    expect(record!.resumable).toBeUndefined();
     expect(record!.closedReason).toBeUndefined();
     expect(killChildSpy).toHaveBeenCalledWith(record!.id, "settled watchdog (one-shot)");
     expect(record!.controller?.signal.aborted).toBe(true);

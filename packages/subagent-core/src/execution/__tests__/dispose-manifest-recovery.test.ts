@@ -37,7 +37,6 @@ import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { SubagentService, type PiLike } from "../subagent-service.ts";
 import { endedMessageGuard } from "../assembly/subagent-actions-core.ts";
-import { isBootReadoptable } from "../round-supervisor/domain.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { isReconnectableFinalReason } from "../assembly/types.ts";
 
@@ -379,7 +378,6 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     function registerActiveRecord(opts: {
       id: string;
       chatMode?: boolean;
-      resumable?: boolean;
       result?: string;
     }): { record: ExecutionRecord; sessionFile: string } {
       const sessionFile = path.join(agentDir, `sess-${opts.id}.jsonl`);
@@ -392,7 +390,6 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const record = makeRecord({
         id: opts.id,
         chatMode: opts.chatMode ?? false,
-        resumable: opts.resumable,
         result: opts.result,
         sessionFile,
       });
@@ -454,14 +451,12 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(record.intent).toBe("archived");
     });
 
-    it("行 5 [one-shot 纳管态 × parent-shutdown]：settle idle → isBootReadoptable 恒不命中（idle record 无接管需求——[U5] boot 重认领意愿消亡）", () => {
-      // 纳管态形态：resumable=true 且无 result（监督器死亡接管后重启的 W4 形态）
+    it("行 5 [one-shot 纳管态 × parent-shutdown]：settle idle → boot 重认领意愿消亡（[U5/D4 MF-1] isBootReadoptable 死代码已删，孤儿纠偏 idle 等 revive）", () => {
+      // 纳管态形态：无 result（监督器死亡接管后的 W4 形态）
       const { record, sessionFile } = registerActiveRecord({
         id: "sa-d8-adoptable",
-        resumable: true,
         result: undefined,
       });
-      expect(record.resumable).toBe(true);
       expect(record.result).toBeUndefined();
       service.disposeAllRecords("parent-shutdown");
 
@@ -473,16 +468,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const marker = readDisposedState(sessionFile);
       expect(marker.reason).toBe("interrupted-by-restart");
 
-      // boot 重认领意愿消亡：U3 起孤儿恢复恒 idle（无在飞轮即无接管需求）——
-      // isBootReadoptable（running 谓词）对 dispose 产物构造性失配（空转零副作用）。
-      expect(
-        isBootReadoptable({
-          status: "idle",
-          resumable: record.resumable === true,
-          chatMode: false,
-          hasResult: record.result !== undefined,
-        }),
-      ).toBe(false);
+      // boot 重认领意愿消亡：[U5/D4 MF-1] 磁盘重建单规则恒 idle + 孤儿恢复恒 idle
+      //（无在飞轮即无接管需求）——isBootReadoptable 谓词已随死代码清理删除，
+      // dispose 产物 idle 形态即「等 revive」终态，无重认领路径。
+      expect(record.status).toBe("idle");
     });
   });
 });

@@ -513,7 +513,6 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const record = store.getMutable(result.sessionId ?? "");
     expect(record).toBeDefined();
     expect(record!.status).toBe("idle"); // SP-5：等 message 升级，不终态化（翻边 idle）
-    expect(record!.resumable).toBeUndefined();
     expect(record!.origin).toBeUndefined();
   });
 });
@@ -588,11 +587,8 @@ describe("D6 toNotifyRecord origin gate", () => {
       startedAt: Date.now(),
     });
     const closedWf = { ...base, origin: "workflow" as const, status: "idle" as const, closedReason: "gc" as const };
-    const resumableWf = { ...base, origin: "workflow" as const, resumable: true };
     expect(host.toNotifyRecord(closedWf)).toBeUndefined();
-    expect(host.toNotifyRecord(resumableWf)).toBeUndefined();
     host.notifyComplete(closedWf);
-    host.notifyComplete(resumableWf);
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     // 对照：tool 来源 closed record 正常产通知（gate 仅 workflow）
@@ -634,7 +630,7 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
 
     expect(result.error).toContain("engine_crashed");
     expect(result.content).toBe("");
-    // record 由失败路径立即终态化（closed/gc + archive），不保持 resumable 交监督器
+    // record 由失败路径立即终态化（closed/gc + archive），不保持纳管态交监督器
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
     expect(store.getMutable(record.id)).toBeUndefined();
@@ -676,18 +672,18 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     expect(adopted).toBe(false); // 豁免：不走接管分支
     expect(wfRecord.status).toBe("idle"); // 落空 → finalizeFailed 立即终态化
     expect(wfRecord.closedReason).toBe("gc");
-    expect(wfRecord.resumable).toBeUndefined();
     expect(supervisor.supervisedIds()).toEqual([]);
 
-    // 对照：origin=tool 同形态照常 adopt（保持 resumable 交监督器）
+    // 对照：origin=tool 同形态照常 adopt（保持可续聊纳管态交监督器——[U5/D4] W4 新态）
     const toolRecord = createRecord("sa-triage-tool", {
       agent: "worker", model: "m", mode: "background", task: "t", slug: "s", startedAt: Date.now(),
     });
     store.register(toolRecord);
     const adoptedTool = await runEngineTask(toolRecord, { task: "t", slug: "s" }, deadEngine, undefined);
     expect(adoptedTool).toBe(true);
-    expect(toolRecord.resumable).toBe(true);
     expect(toolRecord.status).toBe("running");
+    // [U5/D4] W4 新态：死亡纳管标记 = stopReason='failed'（resumable 字段已退役）
+    expect(toolRecord.stopReason).toBe("failed");
     expect(supervisor.supervisedIds()).toEqual(["sa-triage-tool"]);
   });
 

@@ -124,7 +124,6 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.status).toBe("idle");
     expect(record.result).toBe("round text");
     expect(record.stopReason).toBe("completed");
-    expect(record.resumable).toBeUndefined();
   });
 
   it("[P3 ⛔ two-state-convergence U4] chat 轮终翻 idle → message → revive 过站直通：status 翻 running + 恰一条迁移 entry + 无其他簿记变更（round/closedReason 不动）", async () => {
@@ -137,7 +136,6 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     await vi.waitFor(() => expect(record.stopReason).toBe("completed"));
     // 翻边形态自检：轮终落 idle（resumable 无、closedReason 清、stopReason=completed）
     expect(record.status).toBe("idle");
-    expect(record.resumable).toBeUndefined();
     expect(record.closedReason).toBeUndefined();
     expect(record.stopReason).toBe("completed");
 
@@ -256,7 +254,6 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
 
   it("轮间 message → Continuation 派发新轮 + 执行态信号清除（[H1 U2] 承接原冷路径语义）", async () => {
     record.result = "上一轮增量";
-    record.resumable = true;
 
     await service.chatActions.deliverChatMessage(record, "after you finish");
 
@@ -269,7 +266,6 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     // 轮始执行态信号清除（§5.4 isStreaming 公式）+ 迁移上报
     expect(record.status).toBe("running");
     expect(record.result).toBeUndefined();
-    expect(record.resumable).toBeUndefined();
   });
 
   it("settle 交棒 = run 应答驱动（D7）：派发后挂中段守护，应答 settle 后轮终守护清空", async () => {

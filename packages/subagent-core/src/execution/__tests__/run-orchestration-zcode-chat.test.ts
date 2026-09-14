@@ -244,7 +244,6 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     await vi.waitFor(() => expect(record.round).toBe(1));
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBeUndefined();
-    expect(record.resumable).toBeUndefined();
     expect(record.result).toBe("round one done");
   });
 

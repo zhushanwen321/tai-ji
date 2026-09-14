@@ -186,7 +186,7 @@ export class WorkflowDispatch {
    * 错误规格（§3.4）：池排队被 abort → run 域 cancelled 收口（acquirePoolOrFinalize
    * 同款 S1 分支）；record 创建失败 → 同步抛错；引擎死亡 → catch 合成 failed result
    * 回脚本（swallow 语义，脚本观察到失败结果非异常）+ record 由失败路径立即终态化
-   * （adopt 豁免——workflow record 无脚本可回，resumable 等待无意义）。
+   * （adopt 豁免——workflow record 无脚本可回，纳管等待无意义）。
    */
   async executeWorkflowAgent(
     opts: AgentCallOpts,
@@ -403,7 +403,7 @@ export class WorkflowDispatch {
     } catch (err) {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
-      // finalizeRecord；adopt 豁免——workflow record 不保持 resumable 交监督器）。
+      // finalizeRecord；adopt 豁免——workflow record 不保持纳管态交监督器）。
       const failed = await this.deps.finalizeFailed(record, err);
       return noteIfWorkflowNoProgressFired(mapToWorkflowAgentResult(failed), noProgress);
     } finally {

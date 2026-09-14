@@ -5,7 +5,7 @@
 // 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2 前置 1
 // （轮次域分类）+ 前置 2（record 去向单一裁决表）+ 三态判定表。
 //
-// 判定域 = run 域一次性任务（resumable 且无进程驱动）+ workflow 域 resumable run。
+// 判定域 = run 域一次性任务（无产出且无进程驱动的 running）+ workflow 域同形态 run。
 // chat/conversation 形态（record.chatMode）**豁免**出 no-progress 判定域：轮终 idle
 // 现状（doFinalizeRoundToIdle + idle timer / idle-gc）+ settled-watchdog 两段守护
 // 管辖——豁免只意味着「监督器不重复管」，不意味着无界（D2 R2 精确化）。
@@ -53,49 +53,28 @@ export function classifySupervisorDomain(
 }
 
 /**
- * 三态判定「该唤醒」的 record 级判据（设计三态表逐字实现）：
- * **resumable 未终态 且 无在途 run / 无进程驱动**。
+ * 三态判定「该唤醒」的 record 级判据（设计三态表逐字实现；[two-state-convergence
+ * U5/D4 MF-B] 判据全子集化——resumable 字段退役后迁移为单一全子集谓词：
+ * **`!chatMode && running && !hasResult && !hasInFlightRun && !hasLiveProcess`**。
+ * W4 死亡纳管态（running + 无产出 + 无在飞 run + 无活进程）不再依赖 resumable
+ * 信号即可识别，唤醒链在字段退役后行为保持）。
  *
- * 入参解耦说明：谓词只消费 record 级状态与两个布尔（在途 run / 活进程句柄），
- * 由调用方（supervisor）供给——「有在途 run」来自 supervisor 的在途记账
- * （subagent-service 报告），「有进程驱动」来自生命周期镜像谓词。本函数不读
- * 镜像/引擎状态，结构性满足「镜像置死只作触发信号不作持续判据」。
- *
- * 「已有完成产出」（SP-5 upgrade 等待态）不在本谓词域——由调用方以 hasResult
- * 单独判定（视图投影面分离，supervisor.evaluate 消费）。
+ * 入参解耦说明：谓词只消费 record 级状态与三个布尔（已有产出 / 在途 run / 活进程
+ * 句柄），由调用方（supervisor）供给——「有在途 run」来自 supervisor 的在途记账
+ * （subagent-service 报告），「有进程驱动」来自生命周期镜像谓词，「已有产出」来自
+ * 视图投影 hasResult。本函数不读镜像/引擎状态，结构性满足「镜像置死只作触发信号
+ * 不作持续判据」。
  */
 export function isAwakeWarrantedShape(
-  record: { status: string; resumable: boolean; chatMode: boolean },
+  record: { status: string; chatMode: boolean },
+  hasResult: boolean,
   hasInFlightRun: boolean,
   hasLiveProcess: boolean,
 ): boolean {
   if (record.chatMode === true) return false; // conversation 豁免
   if (record.status !== "running") return false; // 终态 = 已收口
-  if (hasInFlightRun || hasLiveProcess) return false; // 该等（有驱动）→ 不干预
-  return record.resumable === true;
-}
-
-/**
- * boot 分区「already-resumable-idle」重认领谓词（与裁决表同源——设计 D4 连带面 2
- * ②「启动扫描 resumable 且无进程驱动且非 conversation 形态」的单一权威实现；
- * cold-lookup.ts 的 message 冷查链不承载启动扫描，本谓词即其「cold-resurrect
- * 扩展」落点，record-store 孤儿恢复的保留分支与 supervisor.bootPartition 共同消费
- * 同一判据形态）。
- *
- * 判据：非 conversation 形态 + status=running + resumable 信号（轮终写点 set true；
- * 冷路径续轮清除——重启前已在途的 record resumable=undefined，走 boot 直断分支
- * 而非重认领）+ **无完成产出**（resumable=true 且 result 有值是 SP-5 one-shot
- * 完成态——任务已完成，直断 closed/gc 无损，不属重认领域；result 缺失才是 W4
- * 死亡纳管态跨重启的形态）。
- */
-export function isBootReadoptable(record: {
-  status: string;
-  resumable: boolean;
-  chatMode: boolean;
-  hasResult: boolean;
-}): boolean {
-  if (record.chatMode) return false;
-  if (record.status !== "running") return false;
-  if (!record.resumable) return false;
-  return !record.hasResult;
+  // 已有完成产出（SP-5 upgrade 等待态挂账归 idle-gc）→ 不唤醒；该等（有驱动）→
+  // 不干预；无驱动的 running + 无产出 = W4 死亡纳管态 → 唤醒。
+  if (hasResult) return false;
+  return !hasInFlightRun && !hasLiveProcess;
 }

@@ -840,14 +840,14 @@ describe("RecordStore", () => {
       expect(found?.status).toBe("idle");
     });
 
-    it("SP-5 完成态残留（resumable + result）→ 同款 idle 纠正，merge 保留 result（直断分支退役）", () => {
+    it("SP-5 完成态残留（running + result）→ 同款 idle 纠正，merge 保留 result（直断分支退役）", () => {
       const sessionFile = path.join(tmpDir, "orphan-sp5.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-sp5", agent: "worker", mode: "background", task: "sp5 done",
         startedAt: 6000, rootSessionId: "sess-orphan",
       });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-sp5", agent: "worker", task: "sp5 done", startedAt: 6000, status: "running", resumable: true, result: "final answer text" },
+        { id: "sa-orphan-sp5", agent: "worker", task: "sp5 done", startedAt: 6000, status: "running", result: "final answer text" },
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -860,14 +860,14 @@ describe("RecordStore", () => {
       expect(entry?.data.error).toBeUndefined();
     });
 
-    it("轮终 resumable 残留（无产出）→ idle 纠正 + resumable 信号随 entry 保留（信息不丢）", () => {
+    it("在飞残留 running（无产出）→ idle 纠正（[U5/D4] resumable 字段退役——可续聊资格由 idle 直读承载）", () => {
       const sessionFile = path.join(tmpDir, "orphan-resumable.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-res", agent: "worker", mode: "background", task: "resumable orphan",
         startedAt: 7000, rootSessionId: "sess-orphan",
       });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-res", agent: "worker", task: "resumable orphan", startedAt: 7000, status: "running", resumable: true },
+        { id: "sa-orphan-res", agent: "worker", task: "resumable orphan", startedAt: 7000, status: "running" },
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -875,13 +875,12 @@ describe("RecordStore", () => {
       const entry = appended.find((c) => c.data.id === "sa-orphan-res");
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
-      expect(entry?.data.resumable).toBe(true);
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
-    it("[P4-② ⛔ two-state-convergence U4] W4 纳管态孤儿（running + resumable + stopReason=failed，entry-born 无锚）跨重启 → 纠偏 idle 等 revive + stopReason=failed 不被兜底覆盖", () => {
-      // W4 形态 = adoptEngineDeath 纳管产物（error + resumable 三写、status 保持
-      // running）。跨重启孤儿纠偏（finalizeEntryOnlyOrphan，R5 MF-1 证据锚 :1195）
+    it("[P4-② ⛔ two-state-convergence U5] W4 纳管态孤儿（running + stopReason=failed + error，entry-born 无锚）跨重启 → 纠偏 idle 等 revive + stopReason=failed 不被兜底覆盖", () => {
+      // W4 新态 = adoptEngineDeath 纳管产物（[U5/D4] error/result/stopReason 三写、
+      // status 保持 running）。跨重启孤儿纠偏（finalizeEntryOnlyOrphan）
       // 一律 idle 等 revive，stopReason 兜底只对空值（?? interrupted-by-restart）——
       // failed 停因保留展示（红点等续聊）。
       // 设计 D6a 登记：W4 跨重启归宿 = 孤儿纠偏 idle 等 revive（非 readopt——
@@ -891,7 +890,7 @@ describe("RecordStore", () => {
           v: 1, id: "sa-orphan-w4", agent: "worker", task: "w4 adopt orphan", slug: "w4",
           status: "running", mode: "background", startedAt: 8000, rootSessionId: "sess-orphan",
           depth: 0, turns: 2, totalTokens: 40, model: "prov/child-m", eventLog: [], displayItems: [],
-          resumable: true, error: "engine died mid-round", stopReason: "failed",
+          error: "engine died mid-round", stopReason: "failed",
         },
       ]);
       const { store, appended } = makeRecoveryStore();
@@ -905,8 +904,8 @@ describe("RecordStore", () => {
       // stopReason=failed 保留（?? 兜底不覆盖在场值）——失败红点等续聊的展示信号
       expect(entry?.data.stopReason).toBe("failed");
       expect(entry?.data.error).toBe("engine died mid-round");
-      // resumable 信号随纠偏保留（可续聊复活资格）
-      expect(entry?.data.resumable).toBe(true);
+      // [U5/D4] resumable 字段退役——可续聊复活资格由 idle 直读承载，无需独立信号位
+      expect(entry?.data.status).toBe("idle");
     });
 
     it("子文件末行截断 → 纠偏与子文件正文解耦：照常 idle、无截断 error（末行判读路径已删）", () => {

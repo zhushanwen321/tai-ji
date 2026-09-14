@@ -307,8 +307,9 @@ export class SessionBaselines {
     // sessionRootId 已建立（过滤当前根的 record）；单扫描者判据见 recoverOrphansIfRootProcess）
     this.deps.recoverOrphans();
     // [W4] boot 分区 + 注册对账 sweep（须在孤儿恢复之后——依赖关系见两方法注释：
-    // 孤儿恢复把「重启前在途」record 直断 closed、把 resumable 形态保留 running 落
-    // entry，监督器重认领消费后者；sweep 再对终态 record 补发注销落盘——表 3 行 2
+    // 孤儿恢复把「重启前在途」record 一律纠偏 idle 等 revive（[U5/D4 MF-1] 重认领
+    // 谓词已随死代码清理删除——磁盘重建单规则恒 idle，boot 候选门后恒空，W4 跨重启
+    // 归宿 = idle 等 revive 非重认领）；sweep 再对终态 record 补发注销落盘——表 3 行 2
     // 「注销经对账 sweep 保证落盘」的编排点）。
     this.deps.bootRoundSupervisor();
     this.deps.runPendingReconcileSweep();

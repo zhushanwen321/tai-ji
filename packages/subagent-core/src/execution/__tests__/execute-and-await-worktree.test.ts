@@ -136,7 +136,6 @@ describe("executeAndAwait worktree 失败收尾", () => {
     expect(failed).toBeDefined();
     expect(failed!.lastError).toBe("worktree create boom");
     expect(failed!.status).toBe("idle");
-    expect(failed!.resumable).toBeUndefined();
   });
 
   // ============================================================

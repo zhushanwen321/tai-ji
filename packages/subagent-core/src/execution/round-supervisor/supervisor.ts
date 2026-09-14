@@ -13,9 +13,11 @@
 // 三态判定（判据状态源 = record 级，domain.ts 谓词单源）：
 //  - 该等：有在途 run / 有进程驱动 → 不干预（事件流推进性归 settled-watchdog
 //    中段守护管辖，监督器不重复判定——消两判据并集的第三态缝隙）。
-//  - 该唤醒：resumable 未终态 且 无在途 run / 无进程驱动（run 终态 failed 即驱动
-//    死亡证据；镜像置死仅作死亡事件触发信号——判定只消费 record 级视图，结构性
-//    保证「重建不解管」：引擎进程被动重建重填镜像也不翻转本监督器的判定）。
+//  - 该唤醒：无产出且无在途 run / 无进程驱动的 running（[U5/D4] 全子集谓词——
+//    resumable 字段退役后 W4 死亡纳管态由「running + 无产出 + 无驱动」识别；run
+//    终态 failed 即驱动死亡证据；镜像置死仅作死亡事件触发信号——判定只消费
+//    record 级视图，结构性保证「重建不解管」：引擎进程被动重建重填镜像也不翻转
+//    本监督器的判定）。
 //    → 通知主 agent 决策（经 notifier steer 通道）。
 //  - 该放弃：决策看门狗到期（指引无响应且无收敛信号）→ record 终态化 failed +
 //    注销（合法发射点枚举①：内存 record 走 finalizeRecord 路径；磁盘态 record 走
@@ -40,7 +42,6 @@ import type { ExecutionRecord } from "../assembly/types.ts";
 import {
   classifySupervisorDomain,
   isAwakeWarrantedShape,
-  isBootReadoptable,
 } from "./domain.ts";
 import {
   classifyReplacement,
@@ -115,8 +116,6 @@ export function isSupervisorGiveUpDisabled(): boolean {
 export interface SupervisorRecordView {
   id: string;
   status: "running" | "closed";
-  /** 执行态信号（轮终 idle 写点 / 孤儿恢复兜底）。 */
-  resumable: boolean;
   /** 已有完成产出（record.result !== undefined）——SP-5 upgrade 等待态判据。 */
   hasResult: boolean;
   chatMode: boolean;
@@ -193,9 +192,10 @@ export class RoundSupervisor {
   // ── 纳管模型：死亡事件纳管、重建不解管 ─────────────────────────────────
 
   /**
-   * 死亡事件纳管（表 3 行 1：引擎/子进程死亡，宿主存活——record 保持 resumable
-   * 已由调用方完成，本方法只做监督侧三件事）：合并单条通知（failed 如实 + 已接管
-   * 契约）+ 纳管记账 + 立即三态评估。
+   * 死亡事件纳管（表 3 行 1：引擎/子进程死亡，宿主存活——W4 纳管态已由调用方
+   * 写入（[U5/D4] running + error + stopReason=failed + result=∅），本方法只做
+   * 监督侧三件事）：合并单条通知（failed 如实 + 已接管契约）+ 纳管记账 + 立即
+   * 三态评估。
    *
    * 幂等/竞态守卫：conversation 形态豁免；record 已终态（cancel/dispose 抢先）不
    * 纳管；重复纳管（同 record 二次死亡事件）不重复通知（保留既有 entry）。
@@ -218,16 +218,23 @@ export class RoundSupervisor {
    *    监督器三态继续；
    *  - conversation 形态 → 现状（轮终 idle 机制管辖，不入监督域）。
    *
-   *  in-flight（重启前在途、无 resumable 信号）不在本方法处置面：直断 failed 已由
-   *  record-store 孤儿恢复（recoverOrphanRecords → finalizeOrphanRecord）在先完成
-   *  （[F3] 表 3 行 2 语义：error 载体 failed 投影 + 终态 entry + sidecar），本方法
-   *  重复终态化会双收尾——isBootReadoptable 谓词把 in-flight 形态挡在本方法之外
-   *  （谓词与孤儿恢复保留分支同源，domain.ts）；已直断 record 的注册残留注销由
-   *  reconcile sweep（发射点⑤）对「已终态 record」差集补 appendEntry 权威落盘。
+   *  [two-state-convergence U5/D4 MF-1] 重认领谓词（isBootReadoptable）已随死代码
+   *  清理删除——该链现状恒不可达：①根进程路径，initSession 编排孤儿恢复
+   *  （finalizeOrphanRecord 一律 idle 等 revive）先于本方法，重启前在途/死亡纳管
+   *  形态全部落 idle；②磁盘重建单规则恒 idle（buildRecord markReconstructedStatus
+   *  无条件 idle），entry 源只补本进程主 session 的 zcode record——候选门
+   *  （view.status !== 'running' → continue）后恒无元素。W4 跨重启归宿 = 孤儿纠偏
+   *  idle 等 revive（红点等续聊，无惊吓式自动复跑——设计 D6a 已接受代价）。
+   *  循环体保留为防御性结构（未来形态变化时的重认领通道）。
+   *
+   *  in-flight（重启前在途）不在本方法处置面：直断 failed 已由 record-store 孤儿
+   *  恢复（recoverOrphanRecords → finalizeOrphanRecord）在先完成（[F3] 表 3 行 2
+   *  语义：error 载体 failed 投影 + 终态 entry + sidecar），本方法重复终态化会双
+   *  收尾；已直断 record 的注册残留注销由 reconcile sweep（发射点⑤）对「已终态
+   *  record」差集补 appendEntry 权威落盘。
    *
    * 依赖时序：须在 store 孤儿恢复（recoverOrphanRecords）之后调用——孤儿恢复已把
-   * 「重启前在途且无 resumable 信号」的非 chatMode record 直断 closed（boot 直断的
-   * 唯一实现锚点），并把 resumable 形态保留 running 落 entry（本方法的重认领源）。
+   * 「重启前在途」的非 chatMode record 落 idle（boot 直断的唯一实现锚点）。
    */
   bootPartition(): { readopted: string[] } {
     const readopted: string[] = [];
@@ -239,12 +246,6 @@ export class RoundSupervisor {
       // classifySupervisorDomain 不把 workflow record 归入可 adopt 域（"run"）——
       // boot 重认领对 workflow 形态不生效（豁免落空面无「重认领后 2h 看门狗挂账」）。
       if (classifySupervisorDomain(view) !== "run") continue;
-      // boot 分区只处理「孤儿恢复保留下来的 resumable 且无完成产出的形态」（W4 死亡
-      // 纳管态跨重启）——in-flight 已被孤儿恢复直断（见头注），不再此处重复
-      // 终态化（双收尾防线）；resumable 且 result 有值是 SP-5 完成态（已完成挂账，
-      // idle-gc 锚归档收口，无需监督）。谓词与 record-store 孤儿恢复保留分支同源
-      // （isBootReadoptable，domain.ts）。
-      if (!isBootReadoptable(view)) continue;
       if (!this.supervised.has(view.id)) {
         this.supervised.set(view.id, { guidanceSent: false, timer: undefined });
       }
@@ -303,21 +304,24 @@ export class RoundSupervisor {
       this.clearWatchdogTimer(entry);
       return;
     }
-    if (!isAwakeWarrantedShape(
-      { status: view.status, resumable: view.resumable, chatMode: view.chatMode },
-      hasInFlight,
-      hasLive,
-    )) {
-      // conversation 豁免（纳管入口已滤，防御性到达）——不唤醒。
-      return;
-    }
     if (view.hasResult) {
       // 已有完成产出（SP-5 upgrade 等待态挂账归 idle-gc）——不唤醒。
       // [F5] 挂账态必须解除看门狗：此前的该唤醒评估可能已 armed，转挂账后 timer
       // 若留存，2h 到期会把已完成挂账 record 误 giveUp(watchdog-expired)。对照上方
       // 该等分支的清理形态——不再需要放弃计时的形态（有驱动 / 已收敛挂账）统一
-      // 先清 timer 再退出。
+      // 先清 timer 再退出。[U5/D4 MF-2] 本分支是 hasResult 子句的看门狗拆弹承载，
+      // 禁止随谓词全子集化当死代码清理（挂账转化存在不经 noteRunStarted 的路径：
+      // 迟到回注 / E1 补发 settle）。
       this.clearWatchdogTimer(entry);
+      return;
+    }
+    if (!isAwakeWarrantedShape(
+      { status: view.status, chatMode: view.chatMode },
+      view.hasResult,
+      hasInFlight,
+      hasLive,
+    )) {
+      // conversation 豁免（纳管入口已滤，防御性到达）——不唤醒。
       return;
     }
     // 该唤醒 → 通知对账（送指引前查替代）。
@@ -411,7 +415,6 @@ export class RoundSupervisor {
       id: record.id,
       // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
       status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
-      resumable: record.resumable === true,
       hasResult: record.result !== undefined,
       chatMode: record.chatMode === true,
       origin: record.origin,

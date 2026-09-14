@@ -142,10 +142,10 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // [N1] isResumable 放行：SP-5 one-shot 成功完成后 markRoundIdle 收口——失败轮
     // settle 同形态（[U5] 万物可续），失败通知可达。在跑轮的 record 有活进程，不会被
     // 误放行。
-    // [two-state-convergence U4/D3a 实施期补点] 轮终翻边 idle：收口形态从
-    // running-resumable 翻为 idle（isResumable 只认 running 字面，对翻边后轮终恒
-    // false）——放行子句随之加 status=idle（「已完成待通知」的翻边权威词；桥接期
-    // 该形态集 = legacyClosed 独占，新增放行恰为翻边轮终 idle）。载荷投影分支不受
+    // [two-state-convergence U4/D3a → U5/D4] 轮终翻边 idle：收口形态从
+    // running-resumable 翻为 idle，isResumable 判据随 [U5/D4] 改 idle 派生（idle 即
+    // resumable）——本子句被前置的 `record.status !== "idle"` 短路吸收（status=idle
+    // 时前三子句已放行），保留为谓词语义的显式对齐。载荷投影分支不受
     // 影响：one-shot idle 走 !chatMode → closed，chat 轮终 idle 经 isIdle（timer
     // armed）走 running。拦截集不变：running + 活进程 + 非 timer-armed 仍静默。
     if (!legacyClosed && !archived && record.status !== "idle" && !isIdle(record) && !isResumable(record)) {

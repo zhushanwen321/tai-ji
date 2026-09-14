@@ -173,13 +173,6 @@ export interface SubagentRecord {
    */
   chatMode?: boolean
   /**
-   * 执行态信号（residual-fixes 设计）：true = 无活进程驱动的 running（chat 轮终 idle /
-   * 重建孤儿兜底），不是后台真在跑。写点：轮终迁移（doFinalizeRoundToIdle）、重建分支 4
-   * 兜底（IO 不可读形态）；进程启动（冷路径续轮）清除。renderer 的 isStreaming 判定
-   * （SubagentList spinner / isStreamingSubagent 虚拟 session）据此排除轮终/孤儿 running。
-   */
-  resumable?: boolean
-  /**
    * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：
    * 'tool' = 主 agent 经 subagent 工具手动派发；'workflow' = workflow 脚本 agent()
    * 派发（生产写入方 W2 接线，W1 契约与过滤面先行）。缺省（undefined，存量 record

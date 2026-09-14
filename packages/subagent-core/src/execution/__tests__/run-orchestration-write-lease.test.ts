@@ -7,16 +7,16 @@
 //      `.alive` 存在且 pid=本进程；轮终（settleOneShotOutcome SP-5 → markRoundIdle）
 //      后 marker 跨轮保留（D3a/B5）；
 //   2. 非 pi 引擎死亡 adopt 形态（finalizeEngineOutcome 回填点）：sessionFile 回填
-//      即声明写权，record 保持 resumable、marker 在（adopt 不终态化 → 声明不释放）；
-//   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（running-resumable / round+1 /
+//      即声明写权，record 保持可续聊纳管态、marker 在（adopt 不终态化 → 声明不释放）；
+//   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
 //      result / closedReason 清除）+ `.alive` 不删 + pending:unregister 发射点②
 //      store 簿记⑧单轨发射（恰好一次）；
 //   4. workflow 域（executeAndAwait → runAndFinalize → outcomeToAgentResult 主回填
 //      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程；
 //   5. [U2b 修复轮/D2] adoptEngineDeath 归口（adoptResumableAfterEngineDeath 三写
-//      error/result/resumable 语义等价，真实 store 链）。轮始 markRoundStarted 接线
+//      error/result/stopReason 语义等价，真实 store 链）。轮始 markRoundStarted 接线
 //      的真实链用例在 conversation-continuation.test.ts 集成面（续聊派发即清
-//      result/resumable + round 累加链不断）。
+//      result 清除 + round 累加链不断）。
 //
 // 测试纪律：registerFakePiEngine 协议替身（conversation-continuation.test.ts 同源
 // setup 形态，真实 timers + vi.waitFor）；sessionFile/marker 全部落 mkdtemp 自建目录；
@@ -120,7 +120,6 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       await vi.waitFor(() => expect(record?.status).toBe("idle"));
       // SP-5：成功轮落 idle 可续聊（markRoundIdle 簿记；[two-state-convergence
       // U4/D3] 翻边后 idle 即 resumable）
-      expect(record?.resumable).toBeUndefined();
       expect(record?.closedReason).toBeUndefined();
       expect(record?.result).toBe("done text");
       expect(record?.sessionFile).toBe(sessionFile);
@@ -137,7 +136,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     }
   });
 
-  it("非 pi 引擎死亡 adopt 形态（finalizeEngineOutcome 回填点）：sessionFile 回填即声明写权，record 保持 resumable 且 marker 在", async () => {
+  it("非 pi 引擎死亡 adopt 形态（finalizeEngineOutcome 回填点）：sessionFile 回填即声明写权，record 保持可续聊纳管态且 marker 在", async () => {
     const h = makeService();
     try {
       const sessionFile = path.join(h.agentDir, "adopt-session.jsonl");
@@ -162,7 +161,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
         sessionFile,
       });
 
-      // adopt 分支：record 保持 resumable 交监督器（不终态化 → 写权声明不释放）
+      // adopt 分支：record 保持可续聊纳管态交监督器（不终态化 → 写权声明不释放）
       expect(adopted).toBe(true);
       expect(record.error).toContain("engine crashed");
       expect(record.sessionFile).toBe(sessionFile);
@@ -174,7 +173,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     }
   });
 
-  it("[U2b 修复轮/D2] adoptEngineDeath 归口：error/result/resumable 三写语义等价（真实 store 链）", async () => {
+  it("[U2b 修复轮/D2 + U5/D4] adoptEngineDeath 归口：error/result/stopReason 三写语义等价（真实 store 链）", async () => {
     const h = makeService();
     try {
       const sessionFile = path.join(h.agentDir, "adopt-writes.jsonl");
@@ -189,9 +188,8 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
         rootSessionId: "root-session",
         controller: new AbortController(),
       });
-      // 收养前形态：上一轮 result 在盘 + 无 resumable 信号（被收养对象的典型前置）
+      // 收养前形态：上一轮 result 在盘（被收养对象的典型前置）
       record.result = "previous round output";
-      record.resumable = undefined;
       h.store.register(record);
 
       const adopted = await h.runOrchestration.finalizeEngineOutcome(record, {
@@ -204,10 +202,10 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
 
       expect(adopted).toBe(true);
       // 三写等价（store.adoptEngineDeath）：error 如实 + result 清（禁旧正文冒充
-      // 收养后产出）+ resumable=true（GUI waiting 判据）
+      // 收养后产出）+ stopReason='failed'（[U5/D4] W4 新态展示位——死亡即本轮失败）
       expect(record.error).toBe("engine crashed: SIGKILL");
       expect(record.result).toBeUndefined();
-      expect(record.resumable).toBe(true);
+      expect(record.stopReason).toBe("failed");
       // 归口不改变 adopt 分支的产品语义：保持 running（不终态化、交监督器）
       expect(record.status).toBe("running");
     } finally {
@@ -271,9 +269,8 @@ describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线�
       );
 
       // 簿记①-⑥：翻边 idle（[two-state-convergence U4/D3]）+ result 写入 + round+1
-      // + closedReason 清除（resumable 不再写——idle 即 resumable）
+      // + closedReason 清除
       expect(record.status).toBe("idle");
-      expect(record.resumable).toBeUndefined();
       expect(record.closedReason).toBeUndefined();
       expect(record.round).toBe(2);
       expect(record.result).toBe("round done");

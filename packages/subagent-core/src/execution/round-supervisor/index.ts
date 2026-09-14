@@ -5,7 +5,6 @@
 export {
   classifySupervisorDomain,
   isAwakeWarrantedShape,
-  isBootReadoptable,
   type SupervisorDomain,
 } from "./domain.ts";
 export {

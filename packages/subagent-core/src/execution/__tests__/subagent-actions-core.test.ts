@@ -209,7 +209,7 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
     expect(mapExternalState("idle")).toBe("idle");
   });
 
-  it("running record → item（displayAgentName 短名 + duration 实时 + resumable）", () => {
+  it("running record → item（displayAgentName 短名 + duration 实时）", () => {
     expect(
       recordToListItem(
         makeRec({
@@ -222,7 +222,6 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
           totalTokens: 42,
           sessionFile: "sess-1.jsonl",
           parentRecordId: "bg-0",
-          resumable: true,
         }),
       ),
     ).toEqual({
@@ -237,7 +236,6 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       totalTokens: 42,
       sessionFile: "sess-1.jsonl",
       parent: "bg-0",
-      resumable: true,
     });
   });
 
@@ -251,7 +249,6 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
           outcome: "completed",
           startedAt: 1000,
           endedAt: 9000,
-          resumable: false,
         }),
       ),
     ).toEqual({
@@ -266,7 +263,6 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
       totalTokens: 42,
       sessionFile: "sess-1.jsonl",
       parent: undefined,
-      resumable: false,
       outcome: "completed",
     });
   });
@@ -428,7 +424,6 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
             totalTokens: 77,
             sessionFile: "sess-1.jsonl",
             parent: undefined,
-            resumable: true,
           },
           {
             subagentId: "bg-2",
@@ -442,7 +437,6 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
             totalTokens: 42,
             sessionFile: "sess-1.jsonl",
             parent: undefined,
-            resumable: false,
             outcome: "completed",
           },
         ],

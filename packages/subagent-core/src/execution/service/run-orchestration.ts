@@ -673,7 +673,7 @@ export class RunOrchestration {
       // DefaultConcurrencyPool._active 永不递减——每次引擎任务泄漏一个并发槽，累计
       // maxConcurrent 次后全部 background subagent（pi 与引擎共用同一池）在 acquire 队列永久挂起
       try {
-        // [W4] adopted = 走了表 3 行 1 接管分支（record 保持 resumable 交监督器）——
+        // [W4] adopted = 走了表 3 行 1 接管分支（record 保持可续聊纳管态交监督器）——
         // 跳过 bg 完成回注（合并单条通知由监督器 sendMergedFailureNotice 承担，
         // route 会再发一条 toNotifyRecord 投影通知 = 双通知，正是 R3 要消除的时序窗口）。
         const adopted = await this.runEngineTask(record, opts, engine, signal);
@@ -794,14 +794,14 @@ export class RunOrchestration {
       // journal 尽力而为收口（②级数据源写失败已由 writer 内部 warn 收敛）
       await journal.close();
       // [W4 表 3 行 1] 引擎进程死亡（engine_crashed——run 帧已受理后进程死亡/stdin
-      // 写失败）且宿主存活 → record 保持 resumable 交监督器接管（禁 completed 谎报、
+      // 写失败）且宿主存活 → record 保持可续聊纳管态交监督器接管（禁 completed 谎报、
       // 禁直接 closed 终局——resume 锚点在盘，逻辑任务可续）。prepare 期失败
       // （handshake/protocol/model 拒——进程创建前）维持现状 closed（确定性失败，
-      // 保持 resumable 无意义）。
+      // 纳管无意义）。
       // [H2 W2 / adopt 豁免点一] workflow origin 豁免 adopt 链：引擎死亡即 run 失败
       // 即 record 终态化（失败路径表），adopt 链「唤醒→guidance→2h 看门狗→giveUp」
       // 对无脚本可回的 record 全程无意义——豁免落空即落入下方 finalizeFailed 立即
-      // 终态化（防「无监督、永不终态化、pending 永不注销」的 resumable 僵尸）。
+      // 终态化（防「无监督、永不终态化、pending 永不注销」的纳管僵尸）。
       if (
         err instanceof EngineSdkError &&
         err.code === "engine_crashed" &&
@@ -819,16 +819,16 @@ export class RunOrchestration {
 
   /**
    * [W4 表 3 行 1] 引擎/子进程死亡、宿主存活的 record 处置：run 终态如实记 failed
-   * 证据（record.error），record **保持 resumable**（session 文件在盘，逻辑任务可续
-   * ——冷路径 resume 可直接续写），交监督器接管（合并单条通知 + 三态判定）。禁止
-   * 两个事故方向：completed 谎报（G3）与 closed 直接终局（resume 可能性丢失，等待
-   * 无主——2026-09-08 事故环 2/3 的 core 侧形态）。
+   * 证据（record.error + stopReason='failed'），record **保持可续聊纳管态**
+   * （session 文件在盘，逻辑任务可续——冷路径 resume 可直接续写），交监督器接管
+   * （合并单条通知 + 三态判定）。禁止两个事故方向：completed 谎报（G3）与 closed
+   * 直接终局（resume 可能性丢失，等待无主——2026-09-08 事故环 2/3 的 core 侧形态）。
    *
-   * 判据状态源钉死 record 级：写点只动 record 字段（resumable/result/error），
+   * 判据状态源钉死 record 级：写点只动 record 字段（result/error/stopReason），
    * 不清镜像不查引擎——引擎进程被动重建（ensureConnected 退避重填镜像）不翻转
    * 本处置（纳管模型：死亡事件纳管、重建不解管）。
    *
-   * [U2b 修复轮/D2] 三写簿记（error/result/resumable + 迁移上报）归口
+   * [U2b 修复轮/D2] 三写簿记（error/result/stopReason + 迁移上报）归口
    * store.adoptEngineDeath（U1 原语簿记为直接三写的超集，多出 notifyChange 刷新）；
    * 监督器编排（adoptOnProcessDeath）留调用方。record 不在 store 内存的形态 =
    * false 旁路 debug 留痕（两调用点的 record 均为创建即注册的在册对象）。
@@ -846,7 +846,7 @@ export class RunOrchestration {
    * 进程被信号终止/崩溃的合成 outcome 形态——RemoteEngine 运行中失败合成分支恒
    * exitCode:null，引擎如实上报的 turn 失败带数值 exitCode；engine-client 注释同源
    * 「exitCode null = 被信号杀死，杀链判据」）且宿主存活且非 conversation 形态 →
-   * record 保持 resumable 交监督器接管（如实 failed 证据 + 合并通知 + 三态判定），
+   * record 保持可续聊纳管态交监督器接管（如实 failed 证据 + 合并通知 + 三态判定），
    * 不再 closed 终局。返回 true = 走了接管分支（调用方跳过 bg 完成回注）。
    */
   async finalizeEngineOutcome(record: ExecutionRecord, outcome: AgentOutcome): Promise<boolean> {

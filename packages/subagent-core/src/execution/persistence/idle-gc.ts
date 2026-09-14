@@ -5,7 +5,7 @@
  *
  * [W4 idle-gc 扩展 · 设计 chat-domain-v1x-liveness-governance D4 连带面 2③]
  * 注册翻 process 档后的兜底通道扩展（与翻档同批生效，先行期 = 无兜底挂账窗口）：
- *  1. 锚扩展：无 idleSince 的 resumable record 以 startedAt（创建时确定，
+ *  1. 锚扩展：无 idleSince 的可归档 record 以 startedAt（创建时确定，
  *     types.ts ExecutionRecord.startedAt）为锚——兜底定位 30 天量级终态归档，
  *     创建时锚的精度损失在该量级可接受（同设计对 record startedAt 的 rationale）。
  *  2. **只归档不补注销**：被归档 record 的注册注销统一交 core 注册对账 sweep
@@ -50,7 +50,10 @@ export interface WorkflowRunGcStore {
 /**
  * 启动 idle record GC 定时器，返回 stop 函数（清理 interval；幂等）。
  * 每个扫描周期：
- *  - record 面：对 store 内全部 active record 中 resumable 的，锚点（idleSince
+ *  - record 面：对 store 内全部 active record 中 resumable（[U5/D4] idle 派生——
+ *    GC 候选从「running 桥接形态」扩张到全部 idle，含中断族 idle / `.state` 重建
+ *    idle；W4 死亡纳管态 running 退出候选，supervisor 接管链 settle 后落 idle 回到
+ *    候选集，设计待验证①范围扩张已接受）的，锚点（idleSince
  *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的归档
  *    （[U2b] markIdleEvicted：archive 先 + `.alive` release 后——归档 = 放弃持有
  *    即放弃写权声明，D3a release 出口②）。单条失败不阻断其余（bestEffort 留痕）。
@@ -66,10 +69,12 @@ export interface WorkflowRunGcStore {
 export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStore): () => void {
   const timer = setInterval(() => {
     const now = Date.now();
-    for (const record of store.listAllActive()) {
+    // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
+    // idle 派生，候选集（idle record）不在 listAllActive 的 running 过滤结果里。
+    for (const record of store.listAllInMemory()) {
       if (!isResumable(record)) continue;
-      // [W4 锚扩展] idleSince（轮终写点）优先；缺失（resumable 但无轮终信号的
-      // 存量/异常形态）回退 startedAt（创建时确定）——两锚同为「最晚活性证据」，
+      // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）
+      // 回退 startedAt（创建时确定）——两锚同为「最晚活性证据」，
       // 30 天量级下 created 锚的精度损失可接受。
       const anchorMs = record.idleSince ?? record.startedAt;
       const age = now - anchorMs;
