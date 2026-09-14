@@ -250,6 +250,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
@@ -269,6 +272,9 @@ importers:
       '@xyz-agent/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
@@ -331,6 +337,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.9
@@ -347,6 +356,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       typebox:
         specifier: '*'
         version: 1.3.7
@@ -571,6 +583,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.84.4
         version: 0.84.4
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       typebox:
         specifier: '*'
         version: 1.3.7

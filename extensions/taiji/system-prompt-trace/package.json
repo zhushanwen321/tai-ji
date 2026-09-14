@@ -37,6 +37,7 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*"
   }
 }

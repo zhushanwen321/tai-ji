@@ -19,6 +19,9 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*"
+  },
   "devDependencies": {
     "@zhushanwen/subagent-core": "workspace:*",
     "@vitest/coverage-v8": "^4.1.9",

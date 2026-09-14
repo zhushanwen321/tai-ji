@@ -114,6 +114,11 @@
           "package": "@zhushanwen/pi-subagent-workflow",
           "type": "optional",
           "reason": "ask-user 在 session_start 通过 globalThis Symbol 握手协议（CHANNEL_HANDSHAKE_KEY = Symbol.for('@zhushanwen/pi-subagents.channelHandshake')）注册 ask_user channel handler：subagent-workflow 已就绪则直接 register，未就绪则入 pending 队列由 subagent-workflow flush。无代码层 import（纯运行时 globalThis 握手，加载顺序无关）。缺失时 ask_user channel 无 handler，subagent 子进程的 ask_user 请求降级为普通 select 渲染（主进程直接使用 ask_user 工具不受影响）。"
+        },
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage（src/index.ts top-level import，ext-simplify-18 D1 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -179,17 +184,35 @@
     {
       "name": "@zhushanwen/pi-cw-tool",
       "directory": "extensions/universal/cw-tool",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage/isEnoentError（src/cw-runner.ts、src/cw-spawn.ts top-level import，ext-simplify-18 D1/D3 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-session-reader",
       "directory": "extensions/universal/session-reader",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage/isRecord（src/tool-handler.ts、src/core/workflow.ts top-level import，ext-simplify-18 D1/D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-cache-probe",
       "directory": "extensions/universal/cache-probe",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage/isRecord（src/index.ts、src/fingerprint.ts top-level import，ext-simplify-18 D1/D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-agent-ext",
@@ -225,7 +248,13 @@
     {
       "name": "@zhushanwen/pi-system-prompt-trace",
       "directory": "extensions/taiji/system-prompt-trace",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import isRecord（src/types.ts、src/baseline.ts top-level import，ext-simplify-18 D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-smart-context",

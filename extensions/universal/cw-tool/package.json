@@ -46,6 +46,9 @@
       "optional": true
     }
   },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
