@@ -86,6 +86,8 @@ flowchart LR
 | u2 | 5 个测试基建文件 mock 补丁（各 1 行） | vitest mock 代理在未知导出属性访问即抛错（?. 拦不住）；TEST-STRATEGY §5 已登记此坑；属 Sidebar.vue 探针的合法测试伴随面 | 无需 |
 | u2 | use-session.ts「12 项」陈旧口径顺手修正为 11 项 | 设计 §2.1 已登记该漂移；hooks 序列本在改动面内 | 已在 R4 文档体现 |
 | u1 | session-data-api.ts 实际路径在 plugin-service/api/ 子目录 | 计划笔误；领地意图不变 | impl-plan 领地表以实际路径为准 |
+| u6 | i18n locale 两文件（panel.ts zh/en）伴随面 | truncated banner 文案必要；双 locale 对称 | 无需 |
+| u6 | 软上限覆盖快照替换路径（设计原文侧重增量） | 快照替换是无界写点，只治增量治不住加载路径；A8 验收本要求 entries ≤ 5000 | 已在 commit message 登记 |
 | u3 | shared/constants.ts 领地外 1 常量（RING_BUDGET_BYTES） | message-bus.ts 内联 16*1024*1024 触发 no-magic-numbers warning（项目纪律 warning 正面修复）；既有范式 = 字节守卫常量集中 shared SSOT（OUTBOUND_FRAME_* 同款） | 无需（对齐既有范式） |
 | u4 | session-service.ts + index.ts 领地外（facade 委托 + 组合根装配） | SessionHistoryReader 为 Facade 私有、ReclaimSessionDeps 约定组合根装配，窄接口注入链必须经此两点，否则 B8-C 死代码 | 无需（设计本意） |
 | u4 | set() 超限时摘除既有条目（设计原文仅「超限不缓存」） | 防冻结基线：append-only 历史保留旧条目使增量 delta 从旧叶子无界增长，劣于全量重建 | 已同步设计 B8 节（本 commit） |
@@ -101,7 +103,7 @@ flowchart LR
 | u3 | committed | 0 | 0f1d445a2 |
 | u4 | committed | 0 | b54df2bf5 |
 | u5 | committed | 0 | eadb058fa |
-| u6 | in-progress | 0 | 波2派发 |
+| u6 | committed | 0 | 核验 88/88 |
 | u7 | in-progress | 0 | 波2派发（u2 已 committed 解锁）|
 | u8 | in-progress | 0 | 波2派发 |
 | u9 | in-progress | 0 | 波2派发（含存量 extractor 失败修复）|
