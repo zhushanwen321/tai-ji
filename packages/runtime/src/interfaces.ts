@@ -653,8 +653,9 @@ export interface IPluginService {
   setPluginConfig(pluginId: string, key: string, value: unknown): Promise<void>
   /** 覆盖式写入挂载点集合（renderer 经 plugin.mountPoints.sync 上报，DM3 全量镜像） */
   syncMountPoints(mountPoints: string[]): void
-  /** Clear cached session data */
-  clearSessionData(sessionId: string): void
+  // [B5 触发面收窄 2026-09-15] 原 clearSessionData(sessionId) 条目已删：实装 facade 零调用点
+  // （真删除链经模块级 clearRemovedSessionData 分发，见 session-lifecycle.ts delete），
+  // 且原签名 sync void 与实现 async 不符（陈旧契约，组 A 顺手修 low 项）。
   /** Handle UI response from frontend (confirm/select/input dialogs) */
   handleUiResponse(requestId: string, result: unknown): void
 

@@ -830,15 +830,9 @@ export class PluginService implements IPluginService {
     this.sessionDataStore.flushSession(sessionId)
   }
 
-  /**
-   * 清理指定 session 的数据缓存、dirty 跟踪和 size 记录（B5 接入删除链后为 async：
-   * 磁盘删除走 trash 软删除，与 session 本体持久性对齐）。trash 失败向上传播
-   * （调用方 void…catch(warn) best-effort 消费）；主要消费路径 = SessionService
-   * .removeSessionEntry 尾段经 clearRemovedSessionData 分发（见 session-data-store.ts）。
-   */
-  async clearSessionData(sessionId: string): Promise<void> {
-    await this.sessionDataStore.clearSession(sessionId)
-  }
+  // [B5 触发面收窄 2026-09-15] 原 clearSessionData facade 已删：全仓零调用点（真删除链
+  // 经模块级 clearRemovedSessionData 分发，session-lifecycle.ts delete 直调；生存路径
+  // exit/forceQuit/restore 清场不清插件数据）。IPluginService 同名条目同批删除。
 
   /** 处理前端返回的 UI 响应（供 server.ts 调用）。委托 UiRequestQueue。 */
   handleUiResponse(requestId: string, result: unknown): void {

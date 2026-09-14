@@ -57,9 +57,10 @@ import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 // registry 读 + mtime 轮询 + kill 矩阵实现在 services/background-task/（u-runtime-svc），
 // 本 Facade 只做组装接线（组装点注释见构造器 backgroundTasks 赋值处）。
 import { BackgroundTaskService } from '../background-task/background-task-service.js'
-// B5（memory-leak-remediation §3.2-B5）：removeSessionEntry 尾段直调的 plugin sessionData
-// 清理分发（跨服务模块级分发，模式同 getCrashJournal——见该函数注释的成环规避论证）。
-import { clearRemovedSessionData } from '../plugin-service/session-data-store.js'
+// [B5 触发面收窄 2026-09-15] plugin sessionData 清理分发已从本模块迁出——真删除路径
+// （lifecycle.delete）侧 import 并调用（见 session-lifecycle.ts delete 内 B5 注释）；本模块
+// 的 removeSessionEntry 汇聚点同时收三条 session 存活路径（pi 崩溃 exit / forceQuit /
+// restore 清场），不得在此触发插件数据清理。
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore, SessionOutcome } from '../ports/session.js'
@@ -1307,19 +1308,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 不在 pi flush / turn 结束时清理——ring 容量 1000 会自然 FIFO 淘汰旧 turn delta，
     // turn 边界清理是阶段 2 的精细化策略（届时评估）。
     this.messageBus?.clearSession(sessionId)
-    // B5（memory-leak-remediation §3.2-B5）：plugin sessionData 分区 + 磁盘文件清理——
-    // 本汇聚点是「该 session 已不存在」的精确时点，与 bus.clearSession 同区域（设计钉死
-    // 位置：onSessionDestroyedHandlers 投递之后——didDestroy 是 fire-and-forget，插件 worker
-    // 迟到的 set/delete 由 SessionDataStore tombstone 丢弃）。经模块级 clearRemovedSessionData
-    // 分发（plugin-service 与本服务互为依赖，构造注入成环；模式同 getCrashJournal）。
-    // best-effort：清理失败（trash 拋结构化错误等）只 warn，不阻断销毁收敛链。
-    try {
-      clearRemovedSessionData(sessionId)
-    } catch (e: unknown) {
-      // best-effort 降级：sessionData 清理是销毁收敛链的附属面，失败（分发器同步抛错等）
-      // 不阻断主流程；异步腿的 rejection 已在 clearRemovedSessionData 内部逐实例 catch+warn。
-      console.warn(`[session-service] plugin sessionData clear failed (sessionId=${sessionId}):`, e)
-    }
+    // [B5 触发面收窄 2026-09-15] plugin sessionData 清理（tombstone + trash + 分区摘除）
+    // 的历史挂点在本尾段，已迁出至 lifecycle.delete 真删除路径（session-lifecycle.ts）。
+    // 迁出理由：本汇聚点四路收殓中三路是 session **存活**路径——pi 崩溃 onSessionExit（随后
+    // respawn 复活同 id）/ forceQuit（用户强杀，restore 重开历史完整）/ restore 清场
+    // （clearExistingSessionForRestore，同调用链随后 notifySessionCreated 摘碑复活）——
+    // 无条件清理会把存活 session 的插件数据 tombstone+trash，respawn/复活后插件空状态、
+    // 旧数据只在废纸篓，违背设计 §3.1「插件数据与 session 本体一同进废纸篓」（trash 绑定
+    // 用户删除）。禁止把任何插件数据清理挂回本汇聚点。
   }
 
   getSessionByClient(client: IPiEngine): IManagedSessionView | undefined {

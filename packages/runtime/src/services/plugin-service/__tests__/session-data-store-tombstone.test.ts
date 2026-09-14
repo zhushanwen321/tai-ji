@@ -198,7 +198,7 @@ describe('B5 摘碑双路径：同 id 复活后写通道恢复', () => {
   })
 })
 
-describe('B5 clearRemovedSessionData：removeSessionEntry 尾段直调分发', () => {
+describe('B5 clearRemovedSessionData：lifecycle.delete 真删除路径直调分发（触发面收窄后挂点）', () => {
   it('已注册实例收到清理（tombstone + trash）；dispose 后不再分发', async () => {
     const store = newStore()
     store.set('sid-h', 'k1', 'v1')

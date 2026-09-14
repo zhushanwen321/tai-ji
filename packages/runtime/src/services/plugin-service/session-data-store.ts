@@ -65,8 +65,10 @@ export function isSessionDataCleared(sessionId: string): boolean {
 const activeStores = new Set<SessionDataStore>()
 
 /**
- * B5：removeSessionEntry 尾段直调入口——对全部已注册 store 实例执行 clearSession
- * （tombstone 登记 + 分区摘除 + trash 软删除）。
+ * B5：真删除路径直调入口（lifecycle.delete 尾段，触发面收窄 2026-09-15）——对全部已注册
+ * store 实例执行 clearSession（tombstone 登记 + 分区摘除 + trash 软删除）。三条 session
+ * 存活路径（pi 崩溃 exit / forceQuit / restore 清场）不经此入口：插件数据存活供
+ * respawn / 复活后续写（详见 session-lifecycle.ts delete 内 B5 注释）。
  *
  * 为什么是模块级分发而不是 SessionService 直挂 pluginService：SessionService 与
  * PluginService 互为依赖（plugin-service 经 setSessionService 反向持有 sessionService，
@@ -123,7 +125,7 @@ export class SessionDataStore {
         }
       },
     )
-    // B5：自注册进模块级活跃实例表（removeSessionEntry 尾段经 clearRemovedSessionData
+    // B5：自注册进模块级活跃实例表（lifecycle.delete 真删除路径经 clearRemovedSessionData
     // 分发；见该函数注释的模式论证）。dispose 摘除。
     activeStores.add(this)
   }
@@ -209,7 +211,7 @@ export class SessionDataStore {
    * 软删除（mac 废纸篓 / 非 mac unlink，与 session 本体持久性对齐）。
    *
    * trash 失败（文件保留原地 + 拋结构化错误，trash.ts G4 语义）：本方法向上传播 rejection，
-   * 调用方 best-effort 消费（clearRemovedSessionData / pluginService.clearSessionData 均
+   * 调用方 best-effort 消费（clearRemovedSessionData 内部逐实例
    * void…catch(warn)）；此时文件原地保留，重启后 restoreFromDisk 仍会预载该分量（B5 对它
    * 不生效）——接受为 best-effort 降级（设计登记）。
    *
