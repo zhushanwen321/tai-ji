@@ -22,7 +22,7 @@
  * 字段被丢弃，agent-loop.js:453-483）。handler 可抛（纯逻辑可测）。
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
-import { existsSync, openSync, readSync, closeSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
@@ -34,6 +34,7 @@ import {
   type SessionMetadataProvider,
 } from './discovery/find.js'
 import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
+import { readSessionHeaderIdSync } from './discovery/session-header.js'
 import {
   buildFamilyFromFs,
   listRecordManifests,
@@ -186,50 +187,8 @@ export type ResolveResult =
   | { kind: 'ok'; sessionId: string; fileName: string }
   | { kind: 'multi'; query: string; candidates: MatchedSession[] }
 
-/** readSessionHeaderId 读首行的 buffer 上限。session header（id/cwd/parentSession）实测 < 300 字节，4KB 足够。 */
-const HEADER_READ_BYTES = 4096
-
-/**
- * 同步读 session 文件首行 header，返回 type==='session' 的 id。
- *
- * 任何异常（文件不存在/空文件/解析失败/type 不符）返回 undefined。与 find.ts readFirstLine/
- * parseHeader 同构（定长 buffer 读首行 + JSON.parse + type 校验），但用同步 fs API
- *（resolveSessionId 内仅调用 1 次，同步开销可接受），且不导出——避免与 w1 的 find.ts
- * 文件交叉（CQ2 决策）。
- */
-function readSessionHeaderId(filePath: string): string | undefined {
-  let fd: number | undefined
-  try {
-    fd = openSync(filePath, 'r')
-    const buf = Buffer.alloc(HEADER_READ_BYTES)
-    const bytesRead = readSync(fd, buf, 0, HEADER_READ_BYTES, 0)
-    if (bytesRead === 0) return undefined
-    const text = buf.subarray(0, bytesRead).toString('utf8')
-    const nl = text.indexOf('\n')
-    const line = nl === -1 ? text : text.slice(0, nl)
-    let raw: unknown
-    try {
-      raw = JSON.parse(line)
-    } catch {
-      return undefined
-    }
-    if (typeof raw !== 'object' || raw === null) return undefined
-    const o = raw as Record<string, unknown>
-    if (o.type !== 'session' || typeof o.id !== 'string') return undefined
-    return o.id
-  } catch {
-    return undefined
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd)
-      } catch {
-        // closeSync 失败：fd 可能已无效，header 数据已读取，关闭失败不影响结果（best-effort）
-        void fd
-      }
-    }
-  }
-}
+// readSessionHeaderIdSync（同步读首行 header 取 id，resolveSessionId 形态①/②消费）
+// 在 discovery/session-header.ts（D5 单源，sync 4KB 版原样搬入）。
 
 /** ~ 前缀（home 目录简写），与 expandHome 配套避免 magic number。 */
 const HOME_TILDE_PREFIX = '~/'
@@ -292,7 +251,7 @@ function resolveBySessionPath(session: string): ResolveResult {
   if (!existsSync(expanded)) {
     throw err(`读取失败：${session}（文件不存在）。👉 检查文件或换 session。`)
   }
-  const headerId = readSessionHeaderId(expanded)
+  const headerId = readSessionHeaderIdSync(expanded)
   if (headerId === undefined) {
     throw err(
       `读取失败：${session}（首行非合法 session header）。👉 检查文件或换 session。`,
@@ -319,7 +278,7 @@ async function resolveByRecordId(session: string, agentDir: string, prefetchedMa
   if (!existsSync(record.sessionFile)) {
     throw err(formatSessionGc(record))
   }
-  const headerId = readSessionHeaderId(record.sessionFile)
+  const headerId = readSessionHeaderIdSync(record.sessionFile)
   if (headerId === undefined) {
     // header 读不出不降级 record.id（sa- 形态不可当 sessionId，CQ3）
     throw err(

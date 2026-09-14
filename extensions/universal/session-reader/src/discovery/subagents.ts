@@ -5,6 +5,7 @@ import type { Entry } from '../core/parser.js'
 import type { Family, SessionRef } from '../core/family.js'
 import { buildFamilyIndex, resolveFamily } from '../core/family.js'
 import { resolveSessionRoots, type SessionFileMeta } from './roots.js'
+import { parseSessionHeader, readSessionHeaderFirstLine } from './session-header.js'
 import { resolveWorkflows } from './workflows.js'
 
 /**
@@ -122,7 +123,7 @@ async function collectMainSessions(agentDir: string, scan: FamilyFsScan): Promis
     .filter((r) => r.source === 'main' && r.dedupedInto === undefined)
     .flatMap((r) => r.files)
   for (const meta of mainMetas) {
-    const h = parseHeaderLine(await readFirstLine(meta.path))
+    const h = parseSessionHeader(await readSessionHeaderFirstLine(meta.path))
     if (!h) continue // 非 session/坏 header → 跳过（不入 byId）
     const entry: Entry = { type: 'session', id: h.id, parentId: null, cwd: h.cwd ?? '' }
     if (h.parentSession) entry.parentSession = h.parentSession
@@ -182,7 +183,7 @@ async function collectSubagentIdentities(
   const subMetas =
     (await resolveSessionRoots({ agentDir })).find((r) => r.kind === 'subagent')?.files ?? []
   for (const meta of subMetas) {
-    const h = parseHeaderLine(await readFirstLine(meta.path))
+    const h = parseSessionHeader(await readSessionHeaderFirstLine(meta.path))
     if (!h) continue // 非 session/坏 header → 无真实 session id，无法 id 修正，跳过
     const realId = h.id
     // header 可解析即视为 alive（MF-3）：identity 在文件尾行、完成时才写入，运行中的 subagent
@@ -253,54 +254,11 @@ function appendOrphanIdentities(manifests: RecordManifest[], scan: FamilyFsScan)
 
 // ============================================================
 // 文件读取 helpers（定长 buffer，避免全文读：subagent 文件均 269KB、总量 ~923MB）
+// 首行 header 读取/解析在 session-header.ts（D5 单源）；本文件仅保留尾行 identity 读取。
 // ============================================================
 
-/** 首行读取 buffer 上限。session header（id/cwd/parentSession）实测 < 300 字节，8KB 足够。 */
-const HEADER_READ_BYTES = 8192
 /** 尾行 identity 读取 buffer 上限。identity 含完整 task 文本可达数 KB；实测 64KB 覆盖 3203/3430。 */
 const TAIL_READ_BYTES = 65536
-
-/** 读文件首行（header）。定长 8KB 一次 read；空文件/读失败返回 undefined。 */
-async function readFirstLine(path: string): Promise<string | undefined> {
-  let fh: FileHandle | undefined
-  try {
-    fh = await open(path, 'r')
-    const buf = Buffer.alloc(HEADER_READ_BYTES)
-    const { bytesRead } = await fh.read(buf, 0, HEADER_READ_BYTES, 0)
-    if (bytesRead === 0) return undefined
-    const text = buf.subarray(0, bytesRead).toString('utf8')
-    const nl = text.indexOf('\n')
-    return nl === -1 ? text : text.slice(0, nl)
-  } catch {
-    return undefined
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-}
-
-interface SessionHeader {
-  id: string
-  cwd?: string
-  parentSession?: string
-}
-
-/** 解析 header 首行为 SessionHeader。非 session 行/缺 id → null。 */
-function parseHeaderLine(line: string | undefined): SessionHeader | null {
-  if (!line) return null
-  let raw: unknown
-  try {
-    raw = JSON.parse(line)
-  } catch {
-    return null
-  }
-  if (typeof raw !== 'object' || raw === null) return null
-  const o = raw as Record<string, unknown>
-  if (o.type !== 'session' || typeof o.id !== 'string') return null
-  const h: SessionHeader = { id: o.id }
-  if (typeof o.cwd === 'string') h.cwd = o.cwd
-  if (typeof o.parentSession === 'string') h.parentSession = o.parentSession
-  return h
-}
 
 /** readTailIdentity 的成功返回形状（rootSessionId 必有，其余存在才带） */
 type TailIdentity = {

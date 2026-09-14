@@ -1,5 +1,5 @@
 import { createReadStream, type ReadStream } from 'node:fs'
-import { open, stat, type FileHandle } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { basename, dirname } from 'node:path'
 import type { SessionRef } from '../core/family.js'
@@ -10,6 +10,11 @@ import {
   type SessionRoot,
   type SessionRootSignals,
 } from './roots.js'
+import {
+  parseSessionHeader,
+  readSessionHeaderFirstLine,
+  type SessionHeader,
+} from './session-header.js'
 import {
   listRecordManifests,
   extractSessionIdFromFilename,
@@ -80,30 +85,6 @@ export type SessionMetadataProvider = (dir: string) => Promise<SessionMetadataEn
 
 const DEFAULT_LIMIT = 20
 const PREVIEW_MAX = 80
-/** readFirstLine 单次读取 buffer 上限。session header（id/cwd/parentSession）远小于此。 */
-const HEADER_READ_BYTES = 8192
-
-/**
- * 读文件首行（header）。用定长 buffer 一次 read（避免 stream 开销），
- * 空文件/读失败返回 undefined。header 超 8KB 的极端情况会截断致 parse 失败——
- * session header（id+cwd）实测 < 300 字节，8KB 足够 27 倍余量。
- */
-async function readFirstLine(path: string): Promise<string | undefined> {
-  let fh: FileHandle | undefined
-  try {
-    fh = await open(path, 'r')
-    const buf = Buffer.alloc(HEADER_READ_BYTES)
-    const { bytesRead } = await fh.read(buf, 0, HEADER_READ_BYTES, 0)
-    if (bytesRead === 0) return undefined
-    const content = buf.subarray(0, bytesRead).toString('utf8')
-    const nl = content.indexOf('\n')
-    return nl === -1 ? content : content.slice(0, nl)
-  } catch {
-    return undefined
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-}
 
 /** 从单行 JSON 提取 message entry 的 user role 文本，非 user message 行返回 undefined。 */
 function extractUserText(line: string): string | undefined {
@@ -157,30 +138,6 @@ async function readFirstUserMessageText(path: string): Promise<string | undefine
   } finally {
     stream?.destroy()
   }
-}
-
-interface SessionHeader {
-  id: string
-  cwd?: string
-  parentSession?: string
-}
-
-/** 解析 header 首行为 SessionHeader。非 session 行/缺 id → null。 */
-function parseHeader(line: string | undefined): SessionHeader | null {
-  if (!line) return null
-  let raw: unknown
-  try {
-    raw = JSON.parse(line)
-  } catch {
-    return null
-  }
-  if (typeof raw !== 'object' || raw === null) return null
-  const obj = raw as Record<string, unknown>
-  if (obj.type !== 'session' || typeof obj.id !== 'string') return null
-  const header: SessionHeader = { id: obj.id }
-  if (typeof obj.cwd === 'string') header.cwd = obj.cwd
-  if (typeof obj.parentSession === 'string') header.parentSession = obj.parentSession
-  return header
 }
 
 /**
@@ -322,7 +279,7 @@ async function collectCandidates(
     if (root.dedupedInto !== undefined) continue // 被去重根未实扫（files 恒空），不产候选
     if (sourceFilter !== undefined && root.source !== sourceFilter) continue
     for (const meta of root.files) {
-      const header = parseHeader(await readFirstLine(meta.path))
+      const header = parseSessionHeader(await readSessionHeaderFirstLine(meta.path))
       if (!header) continue // 非 session 文件/坏 header → 跳过
       if (cwdFilter !== undefined && (header.cwd ?? '') !== cwdFilter) continue
       candidates.push(buildCandidate(meta, header, root.source))
