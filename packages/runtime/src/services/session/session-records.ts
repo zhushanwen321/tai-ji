@@ -306,7 +306,11 @@ export class SessionRecords {
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    return extractSubagentsFromSessionFile(target.filePath)
+    // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空 + extractor 侧 warn 留痕
+    // （「会话过大」标记）；侧栏面板降级提示的协议/UI 接线（shared protocol + core +
+    // renderer）跨包超出本单元领地，见 impl-plan 偏差登记。
+    const { records } = extractSubagentsFromSessionFile(target.filePath)
+    return records
   }
 
   /**
@@ -438,7 +442,9 @@ export class SessionRecords {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    return extractWorkflowsFromSessionFile(target.filePath)
+    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + extractor 侧 warn）
+    const { records } = extractWorkflowsFromSessionFile(target.filePath)
+    return records
   }
 
   /**

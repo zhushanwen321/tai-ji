@@ -15,6 +15,7 @@ vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
 })
 
 import { extractSubagentsFromSessionFile, scanSubagentEntries } from '../src/services/session/subagent-extractor.js'
+import { SUBAGENT_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@xyz-agent/shared'
 
 describe('encodeCwd', () => {
   it('encodes Unix cwd path correctly', () => {
@@ -151,7 +152,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
 
     expect(records).toHaveLength(1)
     const r = records[0]
@@ -214,7 +215,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].slug).toBe('')
     expect(records[0].task).toBe('Old task')
@@ -244,13 +245,55 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(0)
   })
 
   it('returns empty array for non-existent file', () => {
-    const records = extractSubagentsFromSessionFile('/nonexistent/path/file.jsonl')
+    const { records, oversize } = extractSubagentsFromSessionFile('/nonexistent/path/file.jsonl')
     expect(records).toHaveLength(0)
+    // ENOENT 走原读路径（stat 预检失败不引入新抛错/新标记）——非降级形态
+    expect(oversize).toBe(false)
+  })
+
+  it('[G3] READ_PRECHECK 预检：>32MB 降级返回空列表 + oversize 标记（不读全文）', () => {
+    const sessionFile = join(tempDir, 'oversize-session.jsonl')
+    // 首行是合法自描述 subagent-record（守卫失效被误读时会产出 1 条记录——若本用例
+    // 断言翻红即说明预检未挡住读路径）；其余为 >32MB 单行填充（JSON.parse 失败行，仅撑体积）
+    const recordLine = JSON.stringify({
+      type: 'custom',
+      customType: SUBAGENT_RECORD_CUSTOM_TYPE,
+      data: { v: 1, id: 'sub-oversize-guard', status: 'running', agent: 'worker', task: 'huge' },
+    })
+    // 阈值 + 1B 超限（READ_PRECHECK_MAX_BYTES = 32MB，shared SSOT——导入引用而非写死，
+    // 阈值调整时本用例跟随）
+    const paddingBytes = READ_PRECHECK_MAX_BYTES + 1 - (Buffer.byteLength(recordLine) + 1)
+    writeFileSync(sessionFile, recordLine + '\n' + 'x'.repeat(paddingBytes))
+
+    const { records, oversize } = extractSubagentsFromSessionFile(sessionFile)
+
+    // 降级契约：不读全文 → 记录空列表 + oversize 正交标记（侧栏面板据此显示「会话过大」）
+    expect(oversize).toBe(true)
+    expect(records).toEqual([])
+  })
+
+  it('[G3] 预检阈值内（<32MB）正常提取：oversize=false', () => {
+    const sessionFile = join(tempDir, 'normal-session.jsonl')
+    const entries = [
+      {
+        type: 'custom',
+        customType: SUBAGENT_RECORD_CUSTOM_TYPE,
+        data: { v: 1, id: 'sub-normal', status: 'running', agent: 'worker', task: 't' },
+        timestamp: '2026-07-11T06:00:00Z',
+      },
+    ]
+    writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
+
+    const { records, oversize } = extractSubagentsFromSessionFile(sessionFile)
+
+    expect(oversize).toBe(false)
+    expect(records).toHaveLength(1)
+    expect(records[0].subagentId).toBe('sub-normal')
   })
 
   it('handles failed background subagent (bg-notify status=failed)', () => {
@@ -317,7 +360,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('failed')
     expect(records[0].error).toBe('Model timeout')
@@ -389,7 +432,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('closed')
     expect(records[0].closedReason).toBe('gc')
@@ -485,7 +528,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('running')
     // 守卫生效：notify 异常残留与 listItem 兜底都不进入输出
@@ -592,7 +635,7 @@ describe('extractSubagentsFromSessionFile', () => {
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(2)
     expect(records[0].subagentId).toBe('bg-a-1-111')
     expect(records[0].agent).toBe('reviewer')
@@ -637,7 +680,7 @@ describe('extractSubagentsFromSessionFile', () => {
     ]
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
 
     expect(records).toHaveLength(1)
     // 不再是 'unknown'，对齐 pi 的 DEFAULT_AGENT_NAME
@@ -690,7 +733,7 @@ describe('extractSubagentsFromSessionFile', () => {
     ]
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
 
     expect(records).toHaveLength(2)
     const a = records.find((r) => r.subagentId === idA)
@@ -733,7 +776,7 @@ describe('extractSubagentsFromSessionFile', () => {
     ]
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
 
     expect(records).toHaveLength(1)
     // agent 是 notify.agent（真实值），不是 startParam.agent
@@ -800,7 +843,7 @@ describe('extractSubagentsFromSessionFile — background sessionFile 回退查�
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].sessionFile).not.toBeNull()
     expect(records[0].sessionFile).toBe(subagentJsonl)
@@ -842,7 +885,7 @@ describe('extractSubagentsFromSessionFile — background sessionFile 回退查�
 
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
 
-    const records = extractSubagentsFromSessionFile(sessionFile)
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].sessionFile).toBeNull()
   })

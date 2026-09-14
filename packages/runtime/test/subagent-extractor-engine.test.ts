@@ -23,6 +23,7 @@ import {
   DEFAULT_SUBAGENT_ENGINE,
   extractRecordEngine,
   readEngineSubagentHistory,
+  resetRuntimeEngineWiringForTests,
   setRuntimeDiscoveryOptionsForTests,
 } from '../src/services/session/subagent-engine-history.js'
 import type { SubagentRecord } from '@xyz-agent/shared'
@@ -284,7 +285,27 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
 
   it('rejects journal path outside engines root without reading it (前缀白名单)', async () => {
     // 越界 journal 指向真实存在的文件且内容是可重放的②级事件——若被读取会产出
-    // "from journal"内容；断言输出是③级 outcome 文本即证明未读该文件
+    // "from journal"内容；断言输出是③级 outcome 文本即证明未读该文件。
+    //
+    // [基线红修复] 本用例必须双重隔离（与 W8 反转用例同款 + 缓存清扫）：
+    // ① 发现隔离——宿主 shell 若泄漏 XYZ_AGENT_ENGINE_ROOTS（如 TaiJi.app 打包会话
+    // env——L1 发现根指向 /Applications/TaiJi.app/.../engines），缺省发现会装载真实
+    // zcode 引擎，①级协议 read 生效后走引擎侧 read()；
+    // ② protocolEntries 缓存清扫——本文件内未隔离的前序用例（tier2 journal 重放）
+    // 在泄漏 env 下已 spawn 真实引擎并缓存（模块级 Map，idle 5min），仅隔离发现会被
+    // 缓存命中旁路（ensureProtocolEntry 先查表）——必须 resetRuntimeEngineWiringForTests
+    // 清掉跨用例残留实例。注意调用顺序：reset 会连带把 discoveryOverrides 置
+    // undefined（恢复缺省发现），隔离必须后设，顺序颠倒则隔离失效（基线红修复期实测）。
+    // 根因形态：引擎侧 journal 重放（zcode-subagent-cli journal-io）无 engines-root
+    // 前缀白名单——①级协议 read 把不可信 journalPath 透传引擎进程直读，越界文件被
+    // 读出（断言收到 'STOLEN CONTENT'），用例随宿主 env 非确定性翻红；隔离后本用例
+    // 确定性验证本文件头部覆盖点 3：宿主侧②级白名单（core session-view-service
+    // readJournalTier 的 isStrictlyUnder(resolveEnginesRoot(dataDir), journalPath)）
+    // 拒绝越界路径且不读文件、降③级。引擎侧缺口是独立产品问题，登记在 u9 验收
+    // 报告 blockers（领地 = zcode-subagent-cli，超出本单元）。
+    // 清扫先行（reset 会把 discoveryOverrides 一并置 undefined——隔离必须后设，顺序不可倒）
+    resetRuntimeEngineWiringForTests()
+    setRuntimeDiscoveryOptionsForTests({ nodeModuleRoots: [], env: {} })
     const outsideDir = mkdtempSync(join(tmpdir(), 'sa-outside-'))
     const outsideJournal = join(outsideDir, 'journal-stolen.jsonl')
     writeFileSync(outsideJournal, `${journalLine(0, { type: 'text_delta', delta: 'STOLEN CONTENT' })}\n`, 'utf-8')
