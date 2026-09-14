@@ -61,7 +61,12 @@ export function hashOf(value: unknown): string {
  *  - OpenAI 兼容：messages 内 role 为 system 或 developer
  *    （pi 源码 ai/src/api/openai-completions.ts 的 useDeveloperRole 分支）
  *  - Anthropic：顶层 system（数组）
- *  - Google：顶层 systemInstruction（对象）
+ *  - Google：顶层字段 systemInstruction 为对象形态——仅手工伪造的输入可达：
+ *    pi-ai 0.84.4 实装（google-generative-ai.js:294 / google-vertex.js:368）恒传
+ *    string（sanitizeSurrogates(context.systemPrompt)），isRecord 分支对 string
+ *    恒不命中，故实装流量下 Google 侧返回 null（spFull 观测恒 no-system）。
+ *    归因是「提取只认对象形态」而非「Google 请求没有 system」，勿把下方
+ *    isRecord(systemInstruction) 分支误读为 Google 口径主通路。
  */
 export function extractSystem(payload: unknown): unknown | null {
 	if (!isRecord(payload)) return null;

@@ -74,7 +74,7 @@ describe("extractSystem（payload 四口径）", () => {
 		]);
 	});
 
-	it("Google：顶层 systemInstruction 对象", () => {
+	it("伪造对象形态：顶层 systemInstruction（实装恒传 string，仅测试构造可达）", () => {
 		expect(extractSystem({ systemInstruction: { role: "system", parts: [] } })).toEqual({
 			role: "system",
 			parts: [],

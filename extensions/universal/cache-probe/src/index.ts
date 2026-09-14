@@ -9,7 +9,9 @@
  *  - before_agent_start（每 turn 1 次）：算 7 个输入侧 hash 暂存 pending
  *    （systemPromptOptions 各字段 + getAllTools 注册表）
  *  - before_provider_request（每笔 LLM 请求，仅消费 turn 首笔）：从最终 payload
- *    提取 spFull（system 消息，兼容 system/developer/anthropic/google 口径）与
+ *    提取 spFull（system 消息，兼容 system/developer/anthropic/google 口径；
+ *    google 口径实装流量恒 no-system——pi-ai 恒传 string，该分支仅手工伪造
+ *    对象输入可达，详见 fingerprint.ts extractSystem 注释）与
  *    toolsSent（tools 数组），与 pending 合并对比，变化/基线时 appendEntry
  *  - agent_end：turn 内无 provider 请求则丢弃 pending（无请求即无归因价值）
  *

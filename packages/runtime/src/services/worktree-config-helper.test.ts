@@ -196,7 +196,7 @@ describe('rename-session 模型配置（config/rename-session-ext-config.json）
     expect(readRawConfig()['model']).toEqual({ type: 'ref', ref: '' })
   })
 
-  it('setRenameModel：非空但不含 "/" 归一为空串（extension parseRef 不认）', () => {
+  it('setRenameModel：非空但不含 "/" 归一为空串（extension parseModelRef 不认）', () => {
     setRenameModel('garbage-no-slash')
     expect(getRenameModel()).toBe('')
     expect(readRawConfig()['model']).toEqual({ type: 'ref', ref: '' })

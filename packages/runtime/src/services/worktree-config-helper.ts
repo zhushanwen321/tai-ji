@@ -323,7 +323,7 @@ export function getRenameModel(): string {
 /**
  * 设置 rename 标题生成模型（读改写，只覆盖 model 字段，保留其他字段）。
  * model 为空串 = 清除回未设置；非空但不含 "/"（provider/modelId 格式非法）归一为空串
- * （extension 的 parseRef 对无 "/" 的 ref 返回 null，写进去也不会生效，不如归一）。
+ * （extension 的 parseModelRef 对无 "/" 的 ref 返回 null，写进去也不会生效，不如归一）。
  * 写入为原子写（tmp+rename），与 extension saveConfig 的序列化格式一致（2 空格缩进 + 尾换行）。
  * 写失败（如目录不可写）抛错由调用方处理。
  *

@@ -14,7 +14,10 @@ export interface SessionHeader {
   parentSession?: string
 }
 
-/** 首行读取 buffer 上限。session header（id/cwd/parentSession）实测 < 300 字节，8KB 足够。 */
+/**
+ * 首行读取 buffer 上限。header 超 8KB 的极端情况会截断致 parse 失败（parseSessionHeader
+ * 返回 null）——session header（id/cwd/parentSession）实测 < 300 字节，8KB 约 27 倍余量。
+ */
 export const HEADER_READ_BYTES = 8192
 
 /** 读文件首行（header）。定长 8KB 一次 read；空文件/读失败返回 undefined。 */

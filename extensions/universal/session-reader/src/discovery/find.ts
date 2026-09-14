@@ -10,6 +10,7 @@ import {
   type SessionRoot,
   type SessionRootSignals,
 } from './roots.js'
+// 首行 header 读取/解析在 discovery/session-header.ts（D5 单源）。
 import {
   parseSessionHeader,
   readSessionHeaderFirstLine,
