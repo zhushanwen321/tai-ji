@@ -68,7 +68,7 @@ function appendFrameJournal(event: 'frame-truncated' | 'registry-miss', reason: 
 const DEFAULT_RING_CAPACITY = 1000
 
 /**
- * B7 ring 字节预算默认值（16MB/session，设计值——A2/A9 实测后校准，见设计待验证检查点 3）。
+ * B7 ring 字节预算默认值（16MB/session，设计值——A9 已按设计值通过，维持 16MB，校准遗留 = 无，见设计待验证检查点 3）。
  * 条数上限（1000 帧）之外补字节维度上限：大帧（截图 base64、大 toolResult）场景下字节才是
  * 主导维度，1000 帧 × 32MB 理论上限无界。超预算从最旧加速淘汰至回到预算内（驱逐下界 =
  * 仅剩最新帧，单帧 truncated ≤32MB > 16MB 时允许瞬时超调）。

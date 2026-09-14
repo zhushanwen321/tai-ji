@@ -276,7 +276,7 @@ export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 export const OUTBOUND_FRAME_WARN_BYTES: number = 8 * 1024 * 1024
 
 /**
- * B7 ring 字节预算默认值（16MB/session，设计值——A2/A9 实测后校准）。
+ * B7 ring 字节预算默认值（16MB/session，设计值——A9 已按设计值通过，维持 16MB，校准遗留 = 无）。
  * 条数上限（ring 1000 帧）之外补字节维度：大帧场景下字节才是主导维度。
  */
 // eslint-disable-next-line no-magic-numbers -- 设计标定阈值非魔法数，校准依据见上方 JSDoc（同 OUTBOUND_FRAME_* 范式）
