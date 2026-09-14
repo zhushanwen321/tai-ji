@@ -10,6 +10,8 @@
 
 import { createHash } from "node:crypto";
 
+import { isRecord } from "@zhushanwen/pi-ext-guards";
+
 /** 指纹 hash 长度（hex 字符数）。 */
 const HASH_LEN = 16;
 
@@ -39,10 +41,6 @@ export interface ProbeEntryData {
 	/** baseline 存全量；normal 只存变化项。 */
 	h?: Partial<Fingerprints>;
 	error?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
 }
 
 /** 递归 sort keys 的稳定序列化（undefined 归一为 null，防 key 顺序抖动产生假变化）。 */
