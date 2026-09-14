@@ -6,6 +6,7 @@
  */
 
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "@zhushanwen/pi-ext-guards";
 import type { ModelSelector } from "@zhushanwen/pi-llm-shared";
 import { loadConfig, normalizeModelSelector } from "@zhushanwen/pi-llm-shared";
 
@@ -254,11 +255,6 @@ export interface EntryLike {
 /** 累计 compaction 次数（D13-12 判据）。 */
 export function countCompactions(entries: ReadonlyArray<EntryLike>): number {
 	return entries.filter((e) => e.type === "compaction").length;
-}
-
-/** unknown 的对象收窄（Record 视图；字段消费再经 typeof / Array.isArray 收窄）。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 /**

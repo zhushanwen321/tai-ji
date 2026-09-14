@@ -14,6 +14,7 @@
 import { buildSessionContext, compact as nativeCompact, convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { CompactionResult, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { createLogger } from "@zhushanwen/pi-extension-logger";
 import { resolveModel } from "@zhushanwen/pi-llm-shared";
 import { readFileSync } from "node:fs";
@@ -319,7 +320,7 @@ export function createBeforeCompactHandler(
 			return { compaction: result };
 		} catch (error) {
 			state.failStreak += 1;
-			warnLog("takeover error, falling back to native", { error: error instanceof Error ? error.message : String(error) });
+			warnLog("takeover error, falling back to native", { error: toErrorMessage(error) });
 			return {}; // D7 回退
 		}
 	};

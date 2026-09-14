@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { guardStaleCtx, isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { Type } from "typebox";
 
 import { debugLog } from "./compact-handler.js";
@@ -65,11 +65,6 @@ const TOOL_DESCRIPTION =
 	"仅在同时满足以下条件时调用：1) 当前任务的一个阶段已完成并验证（如一批文件改完、测试通过）；" +
 	"2) 后续工作不再依赖将被压缩的早期细节；3) 上下文已超过提醒阈值（你会收到 [smart-context 提示]）。" +
 	"若任一条件不满足，不要调用。";
-
-/** unknown 的对象收窄（Record 视图；字段消费再经 typeof 收窄）。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
 
 /** CompactionResult → 宽松形状的 guard 转换（onComplete 回调参数消费，避免 cast）。 */
 function toCompactionResultLike(result: unknown): CompactionResultLike {

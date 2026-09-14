@@ -14,6 +14,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { Context as LlmContext, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
 import type { Tool as LlmTool, Message, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
  * ToolInfo → pi-ai Tool 投影：三字段直取。parameters 是 typebox schema（主会话同源对象，
@@ -127,6 +128,6 @@ export async function callSameModelCompaction(
 		const text = resp.content.map(blockText).join("\n").trim();
 		return { ok: true, text, usage: resp.usage, stopReason: resp.stopReason };
 	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		return { ok: false, error: toErrorMessage(error) };
 	}
 }
