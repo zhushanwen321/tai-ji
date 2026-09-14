@@ -153,7 +153,7 @@ schedule_control list：两个任务 runCount 均 +1，nextRunAt 各自推进到
 
 ### 6.1 D1：M19 合投补偿机制裁决（选定：方向 B，B1 形态——内核 per-message settled 根修 + scheduler 防重兜底保留）
 
-- **采用**：①`packages/session-delivery/src/delivery.ts` 的 `onSendOk`（:294-303）与 `onSendFail` 达上限分支（:323-331）中 `cfg.onSettled?.(composed, outcome)` 改为对批次内每条消息各调一次 `cfg.onSettled?.(msg, outcome)`（`types.ts:102` 契约注释同步改为 per-message 语义）；单消息批次行为不变（循环一次，msg 即原消息）。②scheduler 侧 `queuedInDeliveryAt` Map + TTL + pending 重标拦截**全部保留**，注释从「合批非首条无终态回调的补偿」改写为「入队未终态窗口防重复入队 + 终态回调丢失的回收层有界兜底」；`handleSettled`（runtime.ts:447-449）「已知限制」段删除。
+- **采用**：①`packages/session-delivery/src/delivery.ts` 的 `onSendOk`（:294-303）与 `onSendFail` 达上限分支（:323-331）中 `cfg.onSettled?.(composed, outcome)` 改为对批次内每条消息各调一次 `cfg.onSettled?.(msg, outcome)`（`types.ts:102` 契约注释同步改为 per-message 语义）；单消息批次行为不变（循环一次，msg 即原消息）。②scheduler 侧 `queuedInDeliveryAt` Map + TTL + pending 重标拦截**全部保留**，注释从「合批非首条无终态回调的补偿」改写为「入队未终态窗口防重复入队 + 回收层有界兜底（触发来源两类：(a) 回调丢失异常 (b) busy 超窗慢投递——见 §5.2）」；`handleSettled`（runtime.ts:447-449）「已知限制」段删除。
 - **被否**：
   - **方向 A（机制保留 + constraints.json 登记跨包债务）**——把一个常规可达的正确性缺陷（F2：每次合批非首条都重复注入）和「必须理解内核合批内部」的认知税登记为永久债务，换零跨包成本。三个月后回看：runtime.ts 里「已知限制」注释仍在、用户仍会看到重复注入，而根修本身只有 ±10 行且单消息批次是等价变换。若用 A，§3.1 F2 场景原样保留，§5.1 合批场景的「无重复注入」不成立。
   - **方向 B2（根修 + 防重移交内核 dedupe + 周期 key 全删 scheduler 侧 Map）**——审计「修后本机制整体删除」的完整形态。实读证伪其前提（见审计修正①）：防重 Map 承担的「入队未终态窗口防重复入队」职能（busy parked 期间每 tick 重标 pending，U4-PARK_GATE.test(5) 回归锚定）独立于 settled 粒度，删除它须改用内核 dedupe + 周期唯一 key（`taskId@nextRunAt`）承接——净复杂度不降（key 编码解析 + LruSet maxKeys 调参 + 被吞 send 对 scheduler 不可见三个新面），scheduler 从「理解合批内部」变为「理解 dedupe LRU 内部」，耦合未减。若用 B2，§4 图中 TTL 拦截框替换为内核 dedupe 吞判，行为等价但排障面跨包。
