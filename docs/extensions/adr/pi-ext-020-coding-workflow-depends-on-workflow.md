@@ -4,6 +4,8 @@
 
 Accepted
 
+> **⚠️ 通道死刑注记（2026-09-14，goal-bridge-cross-extension.md §3.3-D6-②）**：pi 0.84.4 为每个扩展创建独立的 ExtensionAPI 对象（loader `createExtensionAPI` per-extension），本 ADR 依赖的「挂 pi API 对象字段」交叉调用通道（`pi.__workflowRun`，与 `pi.__goalInit` 同模式）**运行时恒不可达**——消费方读不到该字段。消费方 coding-workflow 1.x 已退役、`runSingleAgent` 全仓零引用，当前无用户可见影响。禁止未来消费者按本 ADR 的 Accepted 状态信任该模式；若需跨扩展编程式调用，采用 `globalThis[Symbol.for]` slot 形态（C-ext-06 惯例，参照 goal 桥修复设计）。其「与 `pi.__goalInit` 同模式」的类比亦已过时——goal 桥已于同日迁移 slot。
+
 ## Context
 
 Coding-workflow 的 Review-Gate / Test-Fix Loop 需要多 agent 编排能力（循环审查、并行 reviewer、Fix Worker 分组修复）。原始实现用 `runSingleAgent`（spawn `pi --mode json`）逐个执行 agent，缺乏：

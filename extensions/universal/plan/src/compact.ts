@@ -77,17 +77,27 @@ function readPlanFileSafe(planFilePath: string): string {
 }
 
 /**
- * goal 桥的单一断言点：goal 扩展挂在 pi.__goalInit 上的编程式接口（发现 7——
- * 此前 detectGoalCapability / tryGoalInit 两处 inline `pi as ExtensionAPI & { __goalInit? }`）。
+ * goalInit slot key——goal 扩展的跨扩展编程式入口（goal-bridge-cross-extension.md）。
+ * ⚠️ 必须与 `extensions/universal/goal/src/index.ts` 的 GOAL_INIT_SLOT_KEY 字符串完全一致：
+ * 两侧不共享运行时模块（pi-goal 是 optional peer），靠同一字符串拿到同一 globalThis slot。
+ * 改名必须两侧同步。
  */
-function getGoalInit(pi: ExtensionAPI): GoalInitFn | undefined {
-  const api = pi as ExtensionAPI & { __goalInit?: GoalInitFn };
-  return typeof api.__goalInit === "function" ? api.__goalInit : undefined;
+const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
+
+/**
+ * goal 桥的单一断言点：goal 扩展挂在 globalThis slot 上的编程式接口（发现 7——
+ * 此前 detectGoalCapability / tryGoalInit 两处 inline 断言收敛于此；
+ * 桥通道从 pi API 对象挂载迁到 slot：pi 0.84.4 per-extension API 隔离使
+ * pi.__goalInit 形态跨扩展恒不可见，slot 是 C-ext-06 惯例的进程级共享形态）。
+ */
+function getGoalInit(): GoalInitFn | undefined {
+  const fn = Reflect.get(globalThis, GOAL_INIT_SLOT_KEY);
+  return typeof fn === "function" ? (fn as GoalInitFn) : undefined;
 }
 
 /** Detect whether goal extension is available via its programming interface */
-export function detectGoalCapability(pi: ExtensionAPI): boolean {
-  return getGoalInit(pi) !== undefined;
+export function detectGoalCapability(): boolean {
+  return getGoalInit() !== undefined;
 }
 
 /**
@@ -141,11 +151,11 @@ export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]):
 
 /** goalInit 失败原因——五值与 tryGoalInit 的 5 个失败出口一一对应（设计 §6.2 D2）。 */
 export type GoalBridgeFailureReason =
-  | "goal-unavailable" // goal 未加载（正常交互下对话框不会出现 goal 档，防御保留）
+  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——桥修复后是真实可达的防御分支：goal 档仅在 detectGoalCapability 通过时出现，但 slot 残留 fn 失效等窗口仍可能触发）
   | "plan-unreadable" // plan 文件读取失败
   | "no-steps" // plan 内容提取到 0 条步骤
   | "init-refused" // goalInit 返回 false（已有 active goal / ctx 缺失）
-  | "internal-error"; // goalInit 抛出意外异常（catch 出口）
+  | "internal-error"; // goalInit 抛出意外异常（catch 出口，含 slot 残留 fn 调用失效）
 
 /** tryGoalInit 的结构化结果：失败分支携带 reason（+ internal-error 的异常文本）。 */
 export type GoalBridgeOutcome =
@@ -162,9 +172,9 @@ export const GOAL_FAILURE_RECOVERY: Record<GoalBridgeFailureReason, string> = {
 };
 
 /** Try to initialize goal via programming interface; never throws (catch 出口 → internal-error). */
-function tryGoalInit(pi: ExtensionAPI, planFilePath: string, ctx: ExtensionContext): GoalBridgeOutcome {
+function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOutcome {
   try {
-    const goalInit = getGoalInit(pi);
+    const goalInit = getGoalInit();
     if (!goalInit) return { started: false, reason: "goal-unavailable" };
 
     const planFile = readPlanFile(planFilePath);
@@ -242,7 +252,7 @@ function deliverExecutionNotice(
   planFilePath: string,
   execMode: string,
 ): GoalBridgeOutcome | undefined {
-  const outcome = execMode === "goal" ? tryGoalInit(pi, planFilePath, ctx) : undefined;
+  const outcome = execMode === "goal" ? tryGoalInit(planFilePath, ctx) : undefined;
 
   const modeMessages: Record<string, string> = {
     subagent: "Execute via subagent-driven development: delegate each task to an independent subagent for parallel execution.",

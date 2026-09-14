@@ -87,7 +87,7 @@
         {
           "package": "@zhushanwen/pi-goal",
           "type": "optional",
-          "reason": "complete action 通过 __goalInit 启动 goal，缺失时降级通知用户"
+          "reason": "complete action 通过 goalInit slot（globalThis Symbol.for 桥）启动 goal，缺失时降级通知用户"
         },
         {
           "package": "@zhushanwen/pi-ext-guards",

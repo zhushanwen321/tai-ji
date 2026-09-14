@@ -2,7 +2,7 @@
  * Pi /goal Extension — 工厂入口（重构后架构）
  *
  * 注册 command / events，全部委托 adapters 层。
- * __goalInit 内部调 service.createGoal（FR-4.1）。
+ * goalInit slot 内部调 service.createGoal（FR-4.1）。
  *
  * 架构（D-21 双路径 + Ports/Adapters）：
  * - engine/：零 Pi 依赖的纯状态机（goal/budget/types）
@@ -113,14 +113,19 @@ export default function goalExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	// ── External API: __goalInit（FR-4 双轨消除）──────────
+	// ── External API: goalInit slot（FR-4 双轨消除）──────────
 
 	/**
-	 * 允许其他扩展（coding-workflow / plan）通过 pi.__goalInit 编程式初始化 goal。
+	 * 允许其他扩展（plan）通过 goalInit slot 编程式初始化 goal。
 	 * 内部调 service.createGoal（FR-4.1——与 goal_control create 走同一创建逻辑）。
 	 *
 	 * FR-4.2/D-16: ctx 必填（消除 lastCtx 模块级可变状态）。
 	 * ports 构造复用 adapters/ports.buildPorts（DRY：单一 ports 构造点）。
+	 *
+	 * 通道形态（C-ext-06 globalThis slot 惯例）：裸函数直挂——plan 侧使用点以 typeof 守卫
+	 * 读取 `globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]`（plan/src/compact.ts）。
+	 * 不挂 pi API 对象：pi 0.84.4 为每个扩展创建独立 ExtensionAPI，挂 pi 对象的字段
+	 * 跨扩展不可见（设计 docs/design/goal-bridge-cross-extension.md §2.3）。
 	 *
 	 * @param objective 目标描述
 	 * @param budget 预算配置，传 undefined 用默认值
@@ -128,10 +133,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 	 * @param slug 可选短标识（仅 widget 标题 + history 用，不注入 prompt）
 	 * @returns true 创建成功；false 已有 active goal 或 ctx 缺失
 	 */
-	// 交叉类型单步断言（ExtensionAPI 可赋给 ExtensionAPI & { __goalInit? }，无需 unknown 中转）：
-	// __goalInit 字段获得 GoalInitFn 类型（见下方导出），挂载与消费两侧签名强一致。
-	const api = pi as ExtensionAPI & { __goalInit?: GoalInitFn };
-	api.__goalInit = (
+	const goalInitFn: GoalInitFn = (
 		objective: string,
 		budget: GoalInitBudget | undefined,
 		ctx: ExtensionContext,
@@ -141,14 +143,24 @@ export default function goalExtension(pi: ExtensionAPI) {
 		if (!ctx) return false;
 		return createGoal(session, objective, budget ?? {}, buildPorts(pi, ctx), slug, successCriteria);
 	};
+	Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, goalInitFn);
 }
 
 // ── Cross-extension API 类型（单一 source of truth，API-1）──────────
 
 /**
- * `pi.__goalInit` 的预算配置形状。
+ * goalInit 跨扩展通道的 globalThis slot key（C-ext-06「包名.角色」全限定命名）。
  *
- * 跨扩展（coding-workflow / plan）通过 `pi.__goalInit` 编程式初始化 goal 时使用。
+ * ⚠️ 必须与 `extensions/universal/plan/src/compact.ts` 的字符串字面量完全一致——
+ * 两侧不共享运行时模块（plan 对 goal 是 optional peer），靠同一字符串拿到同一 slot。
+ * 改名必须两侧同步。
+ */
+export const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
+
+/**
+ * goalInit slot 的预算配置形状。
+ *
+ * 跨扩展（plan）通过 goalInit slot 编程式初始化 goal 时使用。
  * 与 `BudgetConfig` 的差异：本类型只暴露外部可设的可选字段，且全部 optional。
  */
 export interface GoalInitBudget {
@@ -156,12 +168,13 @@ export interface GoalInitBudget {
 }
 
 /**
- * `pi.__goalInit` 的规范函数签名（API-1：单一 source of truth）。
+ * goalInit slot 的规范函数签名（API-1：单一 source of truth）。
  *
  * 跨扩展消费者应 import 本类型而非重复声明 inline alias，避免签名 drift：
  * ```ts
  * import type { GoalInitFn } from "@zhushanwen/pi-goal";
- * const goalInit = (pi as unknown as { __goalInit?: GoalInitFn }).__goalInit;
+ * const fn = Reflect.get(globalThis, Symbol.for("@zhushanwen/pi-goal.goalInit"));
+ * const goalInit = typeof fn === "function" ? (fn as GoalInitFn) : undefined;
  * ```
  *
  * @param objective 目标描述

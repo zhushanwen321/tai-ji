@@ -186,7 +186,7 @@ describe("registerPlanTool", () => {
       ]);
     });
 
-    it("dialog options include the goal tier when the bridge is reachable (mocked pi.__goalInit world)", async () => {
+    it("dialog options include the goal tier when the bridge is reachable (mocked goalInit slot world)", async () => {
       const { exec, ctx } = setup();
       (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(true);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Goal-driven execution (/goal)");

@@ -5,7 +5,7 @@
  * + 前 3 条 step preview（编号前缀、单条截断 ≤80 chars），合计 ≤4 条
  * （goal schema maxItems:8），每条单行不含 \r\n（goal handler 拒含换行条目）。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
@@ -129,19 +129,30 @@ describe("buildPlanSuccessCriteria — 1 总述 + 前 3 条 preview", () => {
 
 // --- handlePlanComplete → tryGoalInit 端到端 ---
 
-describe("handlePlanComplete — __goalInit 第 5 参数为新形态 string[]", () => {
+/**
+ * goal 桥 slot key——与 compact.ts / goal 侧 index.ts 的字符串一致（本地声明，
+ * 不 import 对方包：pi-goal 是 optional peer）。mock 挂 slot 与真实通道同构。
+ */
+const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
+
+describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]", () => {
   let pi: ReturnType<typeof makePi>;
   let ctx: ReturnType<typeof makeCtx>;
+  let goalInitMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     pi = makePi();
     ctx = makeCtx();
-    (pi as unknown as Record<string, unknown>).__goalInit = vi.fn().mockReturnValue(true);
+    goalInitMock = vi.fn().mockReturnValue(true);
+    Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, goalInitMock);
+  });
+
+  afterEach(() => {
+    Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, undefined);
   });
 
   function getCriteriaArg(): string[] {
-    const goalInitMock = (pi as unknown as Record<string, unknown>).__goalInit as ReturnType<typeof vi.fn>;
     expect(goalInitMock).toHaveBeenCalled();
     return expectSingleLineArray(goalInitMock.mock.calls[0][4]);
   }
@@ -159,7 +170,7 @@ describe("handlePlanComplete — __goalInit 第 5 参数为新形态 string[]", 
     ]);
   });
 
-  it("compact isolation: onComplete 后 __goalInit 收到同形态数组", () => {
+  it("compact isolation: onComplete 后 goalInit 收到同形态数组", () => {
     fsMock.readFileSync.mockReturnValue(makePlanContent(["Step one", "Step two"]));
 
     handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "goal");
@@ -197,12 +208,11 @@ describe("handlePlanComplete — __goalInit 第 5 参数为新形态 string[]", 
     ]);
   });
 
-  it("0 步 plan → tryGoalInit 提前退出，__goalInit 不被调用", () => {
+  it("0 步 plan → tryGoalInit 提前退出，goalInit 不被调用", () => {
     (fsMock.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("## Overview\nNo numbered steps here.");
 
     handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 
-    const goalInitMock = (pi as unknown as Record<string, unknown>).__goalInit as ReturnType<typeof vi.fn>;
     expect(goalInitMock).not.toHaveBeenCalled();
     // steer 仍发出（执行流程不因 goal 缺席中断）
     expect(pi.sendUserMessage).toHaveBeenCalled();

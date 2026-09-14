@@ -11,7 +11,7 @@
 
 **层声明**：本文档是「技术方案设计」层（下一层产物 = 可实施的代码任务 + 测试改造清单），准则 5/6/7 全适用。
 
-**证据基线**：pi SDK 断言全部核对自本 worktree 实装 `@earendil-works/pi-coding-agent@0.84.4` dist 编译产物（`npm ls` 确认版本），SDK 文件引用 `dist/core/extensions/types.d.ts`（下文简写 SDK types）。plan 包行号说明：v1 起草自称「2026-09-11 实读」，但其 compact.ts 行号经 2026-09-13 审查考古（review MF1）证实取自 crash-resilience 合入（8ca11d330，09-10）**之前**的过期快照——v2 已按审查实读刷新 compact.ts 已知行号（系统性 +4~+20），未逐点复核处以符号检索定位；tool.ts/state.ts/command.ts 行号与当前源码基本一致（±2 行）。与 goal 的接口以 `docs/design/ext-simplify-03-goal.md` 的结论为准：goal **保留** `pi.__goalInit` 跨扩展 API（GoalInitFn 为 API-1 单一权威源，goal §1；goal 侧行号已被 03 实施改变，语义不变），Like* 归一与 VALID_TRANSITIONS 保留决策均不触及 plan 消费面。
+**证据基线**：pi SDK 断言全部核对自本 worktree 实装 `@earendil-works/pi-coding-agent@0.84.4` dist 编译产物（`npm ls` 确认版本），SDK 文件引用 `dist/core/extensions/types.d.ts`（下文简写 SDK types）。plan 包行号说明：v1 起草自称「2026-09-11 实读」，但其 compact.ts 行号经 2026-09-13 审查考古（review MF1）证实取自 crash-resilience 合入（8ca11d330，09-10）**之前**的过期快照——v2 已按审查实读刷新 compact.ts 已知行号（系统性 +4~+20），未逐点复核处以符号检索定位；tool.ts/state.ts/command.ts 行号与当前源码基本一致（±2 行）。与 goal 的接口以 `docs/design/ext-simplify-03-goal.md` 的结论为准：goal **保留** `pi.__goalInit` 跨扩展 API（GoalInitFn 为 API-1 单一权威源，goal §1；goal 侧行号已被 03 实施改变，语义不变；**2026-09-14 桥修复注记**：pi 0.84.4 下该挂载形态运行时恒不可达，通道已迁 `globalThis[Symbol.for]` slot 直挂，见 `goal-bridge-cross-extension.md`），Like* 归一与 VALID_TRANSITIONS 保留决策均不触及 plan 消费面。
 
 ---
 
@@ -24,11 +24,11 @@
 1. 用户 `/plan add dark mode`（`src/command.ts:134-188`）：建 `.xyz-harness/add-dark-mode/plan.md`，工具集限为 `["read","bash","grep","find","ls","plan"]`，注入一条 user message 写明只读约束与 Phase B/C/D 流程；状态落盘为 session JSONL 的 `plan-state` custom entry。
 2. AI 探索代码 → `plan(list-template)` 列模板 → `plan(select-template)` 选模板 → bash 写 plan.md。
 3. 用户批准 → AI 调 `plan(complete, isolation=compact|tree|direct)`：先弹对话框让用户选执行方式（`ctx.ui.select`，goal 未装时自动隐去 goal 选项），再按 isolation 分发——compact 先压缩上下文再 steer；direct 直接 steer；tree 只发一句手动导航提示。
-4. 执行方式为 goal 时，经 goal 包挂在 `pi.__goalInit` 上的编程式接口预建 goal（goal 侧 docstring：返回 true 成功；false = 已有 active goal 或 ctx 缺失，`extensions/universal/goal/src/index.ts:129/:171-179`——ext-simplify-03 实施后行号已变，语义不变）。
+4. 执行方式为 goal 时，经 goal 包的编程式接口预建 goal（goalInit slot——原 `pi.__goalInit` 挂载形态已随桥修复迁移，见 `goal-bridge-cross-extension.md`）（goal 侧 docstring：返回 true 成功；false = 已有 active goal 或 ctx 缺失，`extensions/universal/goal/src/index.ts:129/:171-179`——ext-simplify-03 实施后行号已变，语义不变）。
 
 跨边界存活的机制（审计「疑似本质复杂度」四条，本次全部不动）：per-session 状态三件套（`state.ts` Map 缓存 + `appendEntry` 持久化 + session_start 重建）；`session_before_compact` / `session_before_tree` 事件处理器（`compact.ts:14-62`，让 plan 上下文穿越压缩与树导航——两个事件均为 SDK 真实事件，SDK types :442/:499，`on()` 有类型化重载 :913/:917）；工具集限制/恢复与 complete-cancelled 交互；tool/command/事件三入口拆分。
 
-与 goal 的桥是唯一的跨包运行时接触面：`import type { GoalInitFn } from "@zhushanwen/pi-goal"`（compact.ts import 块，**类型擦除，运行时零依赖**——compact.ts:5/:7 另有 pi-ext-guards / extension-logger 两个真实运行时依赖，见 F5），运行时靠 `typeof pi.__goalInit === "function"` 鸭子探测降级（compact.ts:74-82）。
+与 goal 的桥是唯一的跨包运行时接触面：`import type { GoalInitFn } from "@zhushanwen/pi-goal"`（compact.ts import 块，**类型擦除，运行时零依赖**——compact.ts:5/:7 另有 pi-ext-guards / extension-logger 两个真实运行时依赖，见 F5），运行时靠 goalInit slot 的 typeof 守卫探测降级（compact.ts `getGoalInit`——原 `pi.__goalInit` 鸭子探测已随桥修复迁移 slot）。
 
 ## 2. 设计目标
 
@@ -41,7 +41,7 @@
 
 **In-scope**：`extensions/universal/plan/`（src + tests + templates/*.md + package.json）。
 **Out-of-scope**：
-- goal 包本体（`__goalInit` 签名、VALID_TRANSITIONS、Like* 归一均由 ext-simplify-03 承载，本包只做消费方，接口引用不变）；
+- goal 包本体（goalInit 签名（原 `__goalInit`，通道已迁 slot，GoalInitFn 类型不变）、VALID_TRANSITIONS、Like* 归一均由 ext-simplify-03 承载，本包只做消费方，接口引用不变）；
 - `session_before_compact`/`session_before_tree` 两个事件处理器与 per-session 状态三件套（本质复杂度）；
 - execMode=subagent 的 steer-only 语义（它只是给 AI 的委派提示，无 subagent 编排接线——审计未认定其为发现，本次不扩不砍）；
 - low 级清理项中无争议部分（移交 code-simplify，清单见 §8.3）。
@@ -271,7 +271,7 @@ AI: plan(action="complete", isolation="compact")     ← isolation 只有 compac
 
 **审计修正记录**：① 审计记 resolveCompleteChoice 为 tool.ts:281-297、tree case 为 compact.ts:231-235、tryGoalInit 为 :128-149，实读为 :279-298/:233-236/:128-151——纯快照漂移，无语义出入；② tryGoalInit 静默出口审计记「×3 不消费」，实读为 5 个 false 出口（3 处调用点不消费返回值，表述沿用审计口径但出口数以实读为准）；③ phase="complete" 死状态与 navigateTree 的 ctx 归属为本设计实读新增证据（审计未及），分别强化 D6 与 D1。
 
-**引用文档**：`docs/design/ext-simplify-03-goal.md`——goal 保留 `pi.__goalInit`（GoalInitFn API-1 单一权威源）与 VALID_TRANSITIONS 状态表；plan 侧消费方式与接口引用不变，peer optional 化不影响 goal 侧声明。
+**引用文档**：`docs/design/ext-simplify-03-goal.md`——goal 保留 `pi.__goalInit`（GoalInitFn API-1 单一权威源；**2026-09-14 桥修复注记**：通道已迁 goalInit slot，见 `goal-bridge-cross-extension.md`）与 VALID_TRANSITIONS 状态表；plan 侧消费方式与接口引用不变，peer optional 化不影响 goal 侧声明。
 
 **变更历史**：
 - v1（2026-09-12）：初稿。覆盖审计候选 8（C8 high）+ M1/M2/M3 + 四问发现 5/6/7/8 与 suggestions；探针 P1/P2 定为实施期门；3 项 low 移交 code-simplify。

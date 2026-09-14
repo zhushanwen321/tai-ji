@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PlanState } from "../state.js";
 
@@ -52,12 +52,23 @@ function setupFsMock(content: string) {
   fsMock.readFileSync.mockReturnValue(content);
 }
 
-/** 在 mock pi 上挂 goal 桥（单测层 mock 桥可达——真实链路桥断裂由独立缺陷跟踪）。 */
-function attachGoalInit(pi: unknown, impl: () => boolean) {
+/**
+ * goal 桥 slot key——与 compact.ts / goal 侧 index.ts 的字符串一致（本地声明，
+ * 不 import 对方包：pi-goal 是 optional peer，两侧靠同一字符串共享 slot）。
+ */
+const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
+
+/** 在 globalThis slot 上挂 goal 桥——mock 形态与真实通道同构（goal-bridge-cross-extension.md §3.4：goal 侧 Reflect.set 挂 slot，本测试同款挂载）。 */
+function attachGoalInit(impl: () => boolean) {
   const fn = vi.fn(impl);
-  (pi as Record<string, unknown>).__goalInit = fn;
+  Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, fn);
   return fn;
 }
+
+/** 清 slot 防跨用例 globalThis 泄漏（设计 §3.4：teardown 两侧通用）。 */
+afterEach(() => {
+  Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, undefined);
+});
 
 /** 最近一次 steer 消息正文。 */
 function lastSteer(pi: ReturnType<typeof makePi>): string {
@@ -80,7 +91,7 @@ describe("handlePlanComplete", () => {
 
   describe("compact isolation", () => {
     it("goal mode: goalInit deferred to onComplete, then goal steer on success (D2 时序——goal entry 在压缩后世界创建)", () => {
-      const goalInit = attachGoalInit(pi, () => true);
+      const goalInit = attachGoalInit(() => true);
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "goal");
 
@@ -106,7 +117,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("non-goal mode: onComplete sends mode steer without calling goalInit", () => {
-      const goalInit = attachGoalInit(pi, () => true);
+      const goalInit = attachGoalInit(() => true);
 
       handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "subagent");
       ctx._onCompleteFns[0]();
@@ -116,7 +127,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("onError (goal mode, init-refused): compact-failure notify + degraded steer + warning notify, no /goal promise", () => {
-      attachGoalInit(pi, () => false); // goalInit 返回 false：已有 active goal
+      attachGoalInit(() => false); // goalInit 返回 false：已有 active goal
 
       handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "goal");
       ctx._onErrorFns[0](new Error("compact failed"));
@@ -134,7 +145,7 @@ describe("handlePlanComplete", () => {
 
   describe("direct isolation", () => {
     it("goal mode success: returns outcome synchronously, goal steer, no notify", () => {
-      attachGoalInit(pi, () => true);
+      attachGoalInit(() => true);
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 
@@ -145,7 +156,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("non-goal mode: returns undefined, mode steer, no goalInit call", () => {
-      const goalInit = attachGoalInit(pi, () => true);
+      const goalInit = attachGoalInit(() => true);
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "single-agent");
 
@@ -156,7 +167,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("unknown isolation value falls through to direct delivery instead of silently dropping the choice (D1 防御形态)", () => {
-      attachGoalInit(pi, () => true);
+      attachGoalInit(() => true);
 
       handlePlanComplete(pi as never, ctx as never, makeActiveState(), "tree", "goal");
 
@@ -179,7 +190,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("plan-unreadable: plan file read fails → recovery points at the plan file", () => {
-      attachGoalInit(pi, () => true);
+      attachGoalInit(() => true);
       fsMock.readFileSync.mockImplementation(() => { throw new Error("ENOENT: plan.md"); });
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
@@ -190,7 +201,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("no-steps: plan content has no extractable steps", () => {
-      attachGoalInit(pi, () => true);
+      attachGoalInit(() => true);
       setupFsMock("# Plan\n\nProse without any numbered list.");
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
@@ -201,7 +212,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("init-refused: goalInit returns false (active goal exists)", () => {
-      attachGoalInit(pi, () => false);
+      attachGoalInit(() => false);
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 
@@ -211,7 +222,7 @@ describe("handlePlanComplete", () => {
     });
 
     it("internal-error: goalInit throws → outcome carries detail, notify includes it, does not propagate", () => {
-      attachGoalInit(pi, () => { throw new Error("goalInit exploded"); });
+      attachGoalInit(() => { throw new Error("goalInit exploded"); });
 
       const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "goal");
 

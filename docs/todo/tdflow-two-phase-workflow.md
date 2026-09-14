@@ -1,7 +1,7 @@
 # tdflow：两阶段工作流设想（tech-design × dev-flow 参数化编排）
 
 > **状态**：设想登记（2026-09-14，方向已与用户对齐），待后续重构实施。
-> **连带裁决**：本设想落地时一并裁决 plan 包存废（倾向退役）与 goal 桥设计（`docs/design/goal-bridge-cross-extension.md`，已搁置）的命运。在落地前两者维持现状：plan 包冻结（不再投入）、goal 桥不实施。
+> **连带裁决**：本设想落地时一并裁决 plan 包存废（倾向退役）；goal 桥修复不受本项影响、已独立实施（见 `docs/design/goal-bridge-cross-extension.md`）。
 
 ---
 
@@ -68,16 +68,13 @@ pi extension 方案对 zcode 零受益——而用户的主力工作流在 zcode
 
 ## 五、连带处置
 
-**已执行（2026-09-14）**：
-
-- goal 桥设计（`docs/design/goal-bridge-cross-extension.md`，v2.3 三审 0 must-fix，commit edc490faa）**搁置实施**——其唯一消费方是 plan 的 complete goal 档，plan 存废待本设想落地时裁决，现在实施可能白做。文档头部已加搁置注记。
-- `docs/design/ext-simplify-index.md` 06 行的 goal 桥断裂登记同步为「已裁决搁置」。
+**裁决（2026-09-14 用户澄清）**：暂缓的仅本设想的重构本身；goal 桥修复（`docs/design/goal-bridge-cross-extension.md`，三审 0 must-fix）**已独立实施**，plan 包在重构落地前维持现状（桥修好是当下正确形态）。
 
 **待本设想落地时一并裁决**：
 
 1. plan 包退役（npm deprecate + 仓库移除或标 deprecated）vs 保留（残余价值：独立 pi 用户开箱即用 + complete 执行分发）。判定依据：用户实际使用数据（两形态从未用过）+ 外部 npm 用户量。
-2. goal 桥设计最终命运：plan 保留 → 按设计实施（u1-u4）；plan 退役 → 设计作废，仅保留两块有独立价值的资产——D6 的 pi 官方机制观察项与 `pi.__workflowRun` 死通道登记（后者待给 `docs/extensions/adr/pi-ext-020-*.md` 加注，可随任一批次实施）。
-3. ext-simplify-06 / 03 设计文档中 plan/goal 桥表述的回写（goal 桥设计 u3 清单仍有效，裁决后按批执行）。
+2. goal 桥随 plan 的去留：plan 退役后桥的 plan 消费方消失——桥实现可随包移除或保留（goal 侧 slot 挂载本体无害，`GoalInitFn` 仍可供未来消费者使用）；D6 的 pi 官方机制观察项继续有效；`pi.__workflowRun` 死通道登记（pi-ext-020 加注）与桥无关、独立有效。
+3. ext-simplify-06 / 03 设计文档中 plan/goal 桥表述的回写（goal 桥实施已同步其 u3 清单中的桥表述部分；plan 存废裁决后的剩余回写在此执行）。
 
 ## 六、实施件清单（重构时）
 

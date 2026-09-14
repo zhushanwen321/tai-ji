@@ -220,9 +220,9 @@ const EXEC_MODE_OPTIONS: Array<{ label: string; mode: string }> = [
 const CANCEL_OPTIONS = ["Modify the plan first", "Save for later"];
 
 /** Build execution options filtered by available capabilities. */
-function buildExecOptions(pi: ExtensionAPI): string[] {
+function buildExecOptions(): string[] {
   const modeLabels = EXEC_MODE_OPTIONS
-    .filter((opt) => opt.mode !== "goal" || detectGoalCapability(pi))
+    .filter((opt) => opt.mode !== "goal" || detectGoalCapability())
     .map((opt) => opt.label);
   return [...modeLabels, ...CANCEL_OPTIONS];
 }
@@ -242,8 +242,8 @@ type CompleteChoiceOutcome =
  * Cancel / "Modify the plan first" / "Save for later" → cancelled with a
  * complete-cancelled result; otherwise the mapped chosenMode.
  */
-async function resolveCompleteChoice(ctx: ExtensionContext, pi: ExtensionAPI): Promise<CompleteChoiceOutcome> {
-  const execOptions = buildExecOptions(pi);
+async function resolveCompleteChoice(ctx: ExtensionContext): Promise<CompleteChoiceOutcome> {
+  const execOptions = buildExecOptions();
 
   if (typeof ctx.ui.select !== "function") {
     return { kind: "mode", chosenMode: "single-agent" };
@@ -286,7 +286,7 @@ async function executeComplete(
   sessionId: string,
   projectDir: string,
 ): Promise<ActionResult> {
-  const choice = await resolveCompleteChoice(ctx, pi);
+  const choice = await resolveCompleteChoice(ctx);
   if (choice.kind === "cancelled") {
     return choice.result;
   }
