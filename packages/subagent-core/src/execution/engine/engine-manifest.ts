@@ -47,8 +47,11 @@ export const CONSERVATIVE_CAPABILITIES: EngineCapabilities = {
 const CAPABILITY_ENUMS: Record<string, readonly string[]> = {
   schemaEnforcement: ["native", "emulated"],
   steer: ["native", "emulated", "unsupported"],
-  // [U6 / §3.2.6 要点 4] "cold" = 冷恢复会话（resume 读 + 新 session 注入）——
-  // 与 SDK EngineCapabilities.conversation 值域同批扩展，manifest 侧同步收词。
+  // [U6 / §3.2.6 要点 4 + modeless 波2] conversation 轴 = 「怎么续」形态轴兼
+  // message 资格轴（core capability-gate 消费）：native（原地续写，pi）/ cold
+  // （冷恢复重建 + 新 run + resume 锚点，zcode）/ unsupported（无 resume 续聊通道）。
+  // 会话形态已 modeless（唯一形态键 = run.params.resume），本轴不再是 per-run 模式
+  // 开关——值域与 SDK EngineCapabilities.conversation 同批，manifest 侧同步收词。
   conversation: ["native", "cold", "unsupported"],
   personaInjection: ["file", "flag", "prompt"],
   eventGranularity: ["stream", "coarse"],

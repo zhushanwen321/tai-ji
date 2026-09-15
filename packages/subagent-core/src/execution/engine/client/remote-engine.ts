@@ -486,7 +486,6 @@ function toSdkTaskSubset(task: AgentCallOpts): SdkAgentCallOpts {
     // 缺省 undefined 不落 wire（JSON 序列化丢弃，与相邻可选字段同语义）。
     forkSource: task.forkSource,
     worktree: task.worktree,
-    conversation: task.conversation,
     idleTimeoutMs: task.idleTimeoutMs,
     denyTools: task.denyTools,
     permissionMode: task.permissionMode,

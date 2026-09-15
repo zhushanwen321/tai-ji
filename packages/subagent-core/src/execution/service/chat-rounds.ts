@@ -496,9 +496,10 @@ export class ChatRounds {
         // 轮次面）：engine spawn 的子进程注册进 spawnedChildren 记账（cancelBackground
         // SIGTERM / dispose killAll 收割对引擎 per-run 子进程生效）。
         onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
-        // [modeless 波1·core→cli 接缝] 会话形态参数恒置：resume 键存在即 pi-cli
-        // SpawnRunParams.chatMode=true（agent_end 收敛不 kill、agent_settled 收割）——
-        // 万物可续 = 所有 run 都走 chat 语义。续聊轮带锚点（resume.resume），
+        // [modeless 波1→波2·core→cli 接缝] 会话形态由 resume 键携带（唯一形态键）：
+        // pi-cli 引擎内建唯一轮终语义 = agent_end 收敛不 kill + agent_settled resolve
+        // 并收割（[modeless 波2] SpawnRunParams.chatMode 过渡桥已删）——万物可续 =
+        // 所有 run 都走轮次语义。续聊轮带锚点（resume.resume），
         // 首轮 / fresh session 无锚点（引擎开新 session，锚由 run 应答回填）。
         resume: {
           recordId: record.id,
