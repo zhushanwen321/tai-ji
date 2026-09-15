@@ -10,15 +10,12 @@ import {
   extractSessionIdFromFilename,
   type RecordManifest,
 } from '../discovery/subagents.js'
-import { REAL_DATA_TIMEOUT_MS } from './real-data.js'
+import { REAL_AGENT_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
 
 // ---- fixture 常量（uuid 特征，满足 extractSessionIdFromFilename + 互不为子串）----
 const ROOT = '0aaaaaaa-bbbb-7ccc-dddd-000000000001'
 const FORK = '0aaaaaaa-bbbb-7ccc-dddd-000000000002'
 const SUB_REAL = '0aaaaaaa-bbbb-7ccc-dddd-000000000003'
-
-/** 真实 pi agent 目录（本机），用于集成测试。 */
-const REAL_AGENT_DIR = join(homedir(), '.pi', 'agent')
 
 // 同步探测真实 session 是否存在（不存在则 skip，避免在无该数据的机器上硬失败）
 function hasRealSession(sid: string): boolean {

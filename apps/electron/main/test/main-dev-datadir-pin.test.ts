@@ -29,31 +29,46 @@ const mainSource = readFileSync(path.resolve(__dirname, '../main.ts'), 'utf-8')
 
 const DEV_DATA_DIR = path.join(homedir(), '.taiji-dev')
 
-/** 提取 main.ts 中对 TAIJI_AGENT_DATA_DIR 的全部赋值语句（真实源码行，逐行完整） */
-function extractDataDirAssignments(): string[] {
-  const lines = mainSource.match(/^[ \t]*process\.env\.TAIJI_AGENT_DATA_DIR[ \t]*=[^\n]*/gm)
-  if (!lines) throw new Error('main.ts 中未找到 TAIJI_AGENT_DATA_DIR 赋值语句')
-  return lines.map((l) => l.trim())
+/** 提取 main.ts 中对 TAIJI_AGENT_DATA_DIR 的钉死赋值语句（真实源码，2026-09-15 起为
+ * TAIJI_E2E 豁免三目形态，跨多行——从赋值起点取到兜底分支 `.taiji-dev')` 结束） */
+function extractDataDirAssignment(): string {
+  const m = mainSource.match(
+    /process\.env\.TAIJI_AGENT_DATA_DIR[\s\S]*?path\.join\(homedir\(\), '\.taiji-dev'\)/,
+  )
+  if (!m) throw new Error('main.ts 中未找到 TAIJI_AGENT_DATA_DIR 钉死赋值语句')
+  return m[0]
 }
 
 /** 用注入的 process/path/homedir 绑定执行提取到的真实语句，返回执行后的 env 值 */
-function executeAssignments(initial: string | undefined): string | undefined {
-  const env: Record<string, string | undefined> = { TAIJI_AGENT_DATA_DIR: initial }
+function executeAssignments(initial: string | undefined, e2eFlag?: string): string | undefined {
+  const env: Record<string, string | undefined> = {
+    TAIJI_AGENT_DATA_DIR: initial,
+    TAIJI_E2E: e2eFlag,
+  }
   const run = new Function(
     'process',
     'path',
     'homedir',
-    `${extractDataDirAssignments().join('\n')}`,
+    `${extractDataDirAssignment()}`,
   )
   run({ env }, path, homedir)
   return env.TAIJI_AGENT_DATA_DIR
 }
 
 describe('main.ts dev 数据目录钉死（2026-09-08 泄漏事故回归守护）', () => {
-  it('源码守护：isDev 块无条件钉死 TAIJI_AGENT_DATA_DIR（无 ?? 外部采信形态）', () => {
+  it('源码守护：无 TAIJI_E2E 豁免时无条件钉死 ~/.taiji-dev（兜底分支存在）', () => {
     expect(mainSource).toMatch(
-      /process\.env\.TAIJI_AGENT_DATA_DIR = path\.join\(homedir\(\), '\.taiji-dev'\)/,
+      /:\s*path\.join\(homedir\(\), '\.taiji-dev'\)/,
     )
+  })
+
+  it('源码守护：TAIJI_E2E 豁免必须双条件（flag === "1" 且外部值非空），防豁免被弱化为无条件采信', () => {
+    expect(mainSource).toMatch(
+      /process\.env\.TAIJI_E2E === '1' && process\.env\.TAIJI_AGENT_DATA_DIR\s*\n?\s*\?\s*process\.env\.TAIJI_AGENT_DATA_DIR/,
+    )
+  })
+
+  it('源码守护：不得回归「自赋值 ?? 采信外部值」事故形态', () => {
     expect(mainSource).not.toMatch(
       /process\.env\.TAIJI_AGENT_DATA_DIR = process\.env\.TAIJI_AGENT_DATA_DIR/,
     )
@@ -76,5 +91,13 @@ describe('main.ts dev 数据目录钉死（2026-09-08 泄漏事故回归守护�
 
   it('行为守护：env 缺省（undefined）时同样钉到 ~/.taiji-dev', () => {
     expect(executeAssignments(undefined)).toBe(DEV_DATA_DIR)
+  })
+
+  it('行为守护：TAIJI_E2E=1 + 显式注入值（e2e 受控装配）→ 豁免生效、值被保留', () => {
+    expect(executeAssignments('/tmp/e2e-mkdtemp-dir', '1')).toBe('/tmp/e2e-mkdtemp-dir')
+  })
+
+  it('行为守护：TAIJI_E2E=1 但外部值非空才豁免——与无 flag 同样钉死', () => {
+    expect(executeAssignments(undefined, '1')).toBe(DEV_DATA_DIR)
   })
 })
