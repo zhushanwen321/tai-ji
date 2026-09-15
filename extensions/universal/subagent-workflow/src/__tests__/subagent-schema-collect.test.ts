@@ -57,11 +57,15 @@ describe("subagent start schema: collect param (U1 foundation)", () => {
     expect(requiredFields()).not.toContain("collect");
   });
 
-  it("sits flattened at top level beside task/slug/conversation (拍平契约不变)", () => {
+  it("sits flattened at top level beside task/slug/engine (拍平契约不变)", () => {
     const props = Object.keys(properties());
-    for (const sibling of ["task", "slug", "conversation", "engine"]) {
+    for (const sibling of ["task", "slug", "engine"]) {
       expect(props).toContain(sibling);
     }
+  });
+
+  it("conversation param is deleted (modeless 波5：模式消亡，schema 层不可再自报)", () => {
+    expect(Object.keys(properties())).not.toContain("conversation");
   });
 
   it("keeps action as the sole required field (既有契约零回归；mock typebox 不产 required，真实 typebox 环境由 structured-output 侧承担)", () => {

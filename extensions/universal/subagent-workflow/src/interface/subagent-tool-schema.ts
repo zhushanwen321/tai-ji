@@ -28,7 +28,7 @@ export { SLUG_MAX_LENGTH };
 
 // Params schema（跨包契约测试的真实 typebox 校验入口）。
 //
-// action:"start" 的 17 字段（task/slug/agent/model/...）拍平在顶层，不再用 startParam
+// action:"start" 的 16 字段（task/slug/agent/model/...）拍平在顶层，不再用 startParam
 // 嵌套容器包。原因：弱模型（GLM/DeepSeek）信任 schema 结构信号 > 文本信号，经常省略
 // startParam 嵌套层把 task/slug 直接平铺到顶层导致调用失败。拍平后 schema 结构与模型
 // 的自然倾向一致，消除这层误用。task/slug 必填性由 startHandler runtime 校验（flat
@@ -40,7 +40,7 @@ export { SLUG_MAX_LENGTH };
 // 反映必填性。勿在此基础上继续堆 action 条件逻辑——要加就拆 tool。
 export const SubagentParams = Type.Object({
   action: StringEnum(["start", "list", "cancel", "message", "close", "fork-from"], {
-    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to any of your subagents (running or idle — an idle one transparently revives and continues on its original session file; one-shot subagents are auto-upgraded to conversation mode on first message), 'close' archives a subagent (immediately when idle; after the current round, or immediately with force:true, when running), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
+    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to any of your subagents (running or idle — an idle one transparently revives and continues on its original session file), 'close' archives a subagent (immediately when idle; after the current round, or immediately with force:true, when running), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
   }),
   // ── action:"start" fields (flattened to top level). task/slug REQUIRED for start. ──
   // Missing/empty task or slug throws at runtime (startHandler).
@@ -88,40 +88,34 @@ export const SubagentParams = Type.Object({
     description: 'Override the working directory for the subagent execution. Must be an absolute path (no "~" shorthand, no relative paths); ".." segments are rejected. Defaults to the parent session\'s cwd.',
     pattern: "^/",
   })),
-  conversation: Type.Optional(Type.Boolean({
-    description:
-      "Enable continuous chat with this subagent. When true, the subagent stays available after each reply — you can send follow-up messages (action:'message') and it keeps the full conversation context across rounds, with no need to re-spawn or re-explain. " +
-      "\nUse conversation:true for: multi-round collaboration (iterative review-fix loops, back-and-forth refinement), any task where you expect to send follow-up messages after the initial result. " +
-      "\nOmit (or false) for: one-shot tasks — single exploration, lookup, file read, code generation that needs no follow-up. The subagent runs once, notifies on completion, and is cleaned up automatically (default). " +
-      "\nFor long-interval collaboration (each round spaced >5min apart), set conversation:true AND increase idleTimeoutMs to avoid premature timeout. " +
-      "Cost: a conversation-mode subagent holds resources (memory, and a worktree if enabled) until you explicitly end it with action:'close'. Always close when done.",
-  })),
+  // [modeless 波5] conversation 参数已删除：chatMode 字段消亡后「模式」不存在——
+  // 一切 record 永续可续聊（idle 后 message 即续、fork-from 可继承），无模式开关可表达。
   idleTimeoutMs: Type.Optional(Type.Number({
     description:
-      "Idle timeout in milliseconds for conversation-mode subagents. Controls how long an idle subagent (between rounds) stays alive before automatic cleanup. " +
-      "Default: 300000 (5min). Override for long-interval collaboration where each round is spaced >5min apart. " +
-      "Pass 0 or a negative value to DISABLE idle cleanup entirely (subagent stays alive until explicitly closed). " +
-      "Only meaningful with conversation:true; ignored for one-shot subagents.",
+      "Idle-recycle cadence for ALL subagents (modeless: every subagent stays continuable — this is NOT a mode switch). Controls how long an idle subagent (between rounds, no activity) stays before being automatically archived. " +
+      "Default: 300000 (5min). Raise it for long-interval collaboration where your next message may arrive more than 5min after a round ends. " +
+      "Pass 0 or a negative value to DISABLE idle recycling entirely (subagent stays available until you close it). " +
+      "Priority: this param > env XYZ_SUBAGENT_IDLE_TIMEOUT_MS > default.",
   })),
   engine: Type.Optional(StringEnum(["pi", "zcode"], {
     description:
       "Execution engine for this subagent. Omit to inherit the global config. " +
       "Three-layer priority: this parameter > agent .md frontmatter engine > config.json defaultEngine. " +
-      "Non-pi engines do not support conversation/fork/worktree (rejected before the subagent is created).",
+      "Non-pi engines do not support fork/worktree (rejected before the subagent is created).",
   })),
   collect: Type.Optional(StringEnum(["async", "sync"], {
     description:
-      "Completion-notification collection mode for one-shot subagents (subagent-sync-collect). " +
+      "Completion-notification routing (NOT a record mode — batch membership is routing bookkeeping only). " +
       "Omit to use the config default (currently async). " +
-      "Use 'sync' when you dispatch >=2 independent one-shot subagents whose results you will combine: " +
-      "their completions are held until ALL pending sync subagents finish, then delivered as ONE batch " +
-      "notification (single wake-up, results inline). You may keep dispatching more sync subagents in " +
-      "later turns — they join the same pending batch. " +
-      "Independent means no member's prompt or work depends on another member's output — dependent " +
-      "tasks must be chained across messages (one start after the prior completes), never batched. " +
-      "Use 'async' (or omit) for immediate per-subagent completion notifications. " +
-      "Incompatible with conversation:true — that combination is rejected immediately before start; " +
-      "remove either conversation or collect.",
+      "'async' = each subagent's completion notifies immediately. " +
+      "'sync' = batch wake-up: when you dispatch >=2 independent subagents whose results you will " +
+      "combine, their completions are held until ALL pending sync members finish, then delivered as " +
+      "ONE batch notification (single wake-up, results inline); when the batch closes, its members " +
+      "are automatically archived. Batch members cannot be messaged — use action:'fork-from' to " +
+      "continue from one instead. You may keep dispatching more sync subagents in later turns — " +
+      "they join the same pending batch. Independent means no member's prompt or work depends on " +
+      "another member's output — dependent tasks must be chained across messages (one start after " +
+      "the prior completes), never batched.",
   })),
   // action:"list" → listParam OPTIONAL (all fields optional, defaults apply). Ignored by other actions.
   listParam: Type.Optional(Type.Object({
@@ -147,11 +141,12 @@ export const SubagentParams = Type.Object({
   })),
   // action:"message" → messageParam.subagentId + text REQUIRED. Any reachable subagent works —
   // running joins the in-flight round (D2 打断入队)；idle transparently revives on the same
-  // session file（[U4 §3.2.3] 万物可续——形态枚举 gate 消亡）；one-shot auto-upgrades to
-  // conversation mode on first message (SP-5)。description 与实现锚点见 messageHandler。
+  // session file（[U4 §3.2.3] 万物可续——形态枚举 gate 与 SP-5 升级路径均消亡，message 直接
+  // 续聊任何 idle record）。引擎续聊能力轴 gate 保留（core messageHandler 入口）。
+  // description 与实现锚点见 messageHandler。
   messageParam: Type.Optional(Type.Object({
     subagentId: Type.String({
-      description: "REQUIRED for action:'message'. The subagentId to message. Any subagent reachable in this session tree works, running or idle: an idle subagent transparently revives on the same id and continues writing its original session file (a one-shot is auto-upgraded to conversation mode on first message); a running subagent has your message interrupt-and-join its in-flight round. Rejections: unknown id, session file held by another live process, a record from a different session tree, workflow-origin records (their results belong to the workflow run), and one-shot records on engines that do not support conversation upgrade.",
+      description: "REQUIRED for action:'message'. The subagentId to message. Any subagent reachable in this session tree works, running or idle: an idle subagent transparently revives on the same id and continues writing its original session file; a running subagent has your message interrupt-and-join its in-flight round. Rejections: unknown id, session file held by another live process, a record from a different session tree, workflow-origin records (their results belong to the workflow run), and records on engines that do not support continuation (fork-from or re-dispatch instead).",
     }),
     text: Type.String({
       description: "REQUIRED for action:'message'. The message to send. Whitespace-only throws.",

@@ -162,11 +162,11 @@ action:"list" before action:"start" — a reusable subagent may exist; compactio
 
 ## Actions
 
-- action:"start" — run a subagent. Pass task and slug as top-level fields (REQUIRED). Optional: agent, model, thinkingLevel, engine, collect, skillPath, appendSystemPrompt, schema, maxTurns, graceTurns, fork, worktree, cwd, conversation, idleTimeoutMs. Background only: returns a subagentId immediately, notifies on completion.
-- action:"message" — send a follow-up to any of your subagents — running or idle (idle revives in place; one-shots become conversation-mode); full context retained. REQUIRED messageParam: { subagentId, text }. The reply auto-notifies.
+- action:"start" — run a subagent. Pass task and slug as top-level fields (REQUIRED). Optional: agent, model, thinkingLevel, engine, collect, skillPath, appendSystemPrompt, schema, maxTurns, graceTurns, fork, worktree, cwd, idleTimeoutMs. Background only: returns a subagentId immediately, notifies on completion.
+- action:"message" — send a follow-up to any of your subagents — running or idle (idle revives in place; full context retained). REQUIRED messageParam: { subagentId, text }. The reply auto-notifies.
 - action:"close" — archive a subagent (hidden from list, recoverable): idle closes immediately; running finishes the current round first unless force:true (then terminates mid-round). REQUIRED closeParam: { subagentId }.
 - action:"list" — list subagents. listParam: { includeFinished?, includeWorkflow?, limit? } (all optional; includeWorkflow defaults false — workflow-dispatched subagents are hidden unless true). Read an item's sessionFile for full detail.
-- action:"cancel" — stop a background subagent (for conversation-mode use close). REQUIRED cancelParam: { subagentId }.
+- action:"cancel" — stop a background subagent (to archive it instead, use close). REQUIRED cancelParam: { subagentId }.
 - action:"fork-from" — restart-disconnect recovery: spawn a NEW subagent inheriting the old one's history via --fork. REQUIRED forkFromParam: { sourceSubagentId }. Optional: prompt (continuation; default handover frame). Returns { newSubagentId, sourceSessionFile }. Rejects still-running / foreign-live / worktree-bound sources; unparseable history anchors are guided to action:"message" (same-id reopen).
 
 ## Examples
@@ -191,8 +191,8 @@ Completion auto-notifies you (steer wakes the next turn):
 
 ## Batch collection (collect)
 
-- collect:"sync" — >=2 independent one-shot subagents whose results you will combine: completions are held until every pending sync member finishes, then ONE batch notification delivers all results inline (one wake-up). Later sync starts join the same batch; each sync start response reports {"collect":{"mode":"sync","pendingSyncCount":N}}.
-- collect:"async" (default, omit) — immediate per-subagent completion; for conversational work or when each result is needed early.
+- collect:"sync" — >=2 independent subagents whose results you will combine: completions are held until every pending sync member finishes, then ONE batch notification delivers all results inline (one wake-up) and batch members auto-archive. Later sync starts join the same batch; each sync start response reports {"collect":{"mode":"sync","pendingSyncCount":N}}. Batch members cannot be messaged — fork-from continues from one.
+- collect:"async" (default, omit) — immediate per-subagent completion; use when each result is needed early.
 - Subagents in one sync batch must not depend on each other's output — dependent tasks must be chained across messages (see Calling patterns), never batched.
 Items over budget are truncated with a pointer: session_read {"action":"result","session":"<id>"} fetches the full text.
 
@@ -204,16 +204,15 @@ Items over budget are truncated with a pointer: session_read {"action":"result",
 - Treating subagent results as authoritative without verification.
 - Canceling by guessing a subagentId instead of using action:"list" first.
 
-## Continuous chat (conversation mode)
+## Continuing a subagent (modeless)
 
-conversation:true keeps a subagent available across replies — action:"message" continues with full context, action:"close" releases it (always close when done). For review/fix loops and long-interval rounds (>5min apart, raise idleTimeoutMs); omit for one-shot tasks.
-idleTimeoutMs: idle timeout before auto-cleanup (default 300000 / 5min; env XYZ_SUBAGENT_IDLE_TIMEOUT_MS overrides globally, per-call wins).
+Every subagent stays continuable — no mode switch: action:"message" revives an idle record in place (or joins a running one's round), action:"fork-from" branches a new subagent from old history, action:"close" archives it.
+idleTimeoutMs: idle-recycle cadence for ALL subagents — idle records auto-archive on expiry (default 300000 / 5min; 0/negative disables; env XYZ_SUBAGENT_IDLE_TIMEOUT_MS: global default, per-call wins).
 
 ## You cannot
 
 - Get a synchronous/inline result — start always returns a subagentId immediately (background).
 - Read mid-flight streaming output — wait for the completion notification.
-- Combine collect:"sync" with conversation:true — rejected before start; sync is one-shot only (remove one).
 - See intermediate signals while a sync batch waits — nothing arrives until the whole batch closes. Hung member: action:"list" shows what is still running; action:"cancel" it — cancelled members count as terminal and the batch closes.
 
 ## Calling patterns

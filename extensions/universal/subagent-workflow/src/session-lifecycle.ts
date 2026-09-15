@@ -372,7 +372,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
 /**
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
  * 过期 session 文件清理 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
- * 另含 [E1] sync 批崩溃恢复（per-session 域，不用 oncePerProcess——见块内注释）。
+ * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除——collectMode 记录态消亡后
+ * core 侧 recoverSyncCollectBatch 已是 accepted-no-op，调用点随之退役。）
  */
 async function runProcessLevelMaintenance(
   agentDir: string,
@@ -380,22 +381,6 @@ async function runProcessLevelMaintenance(
   service: SubagentService,
   deps: SessionLifecycleDeps,
 ): Promise<void> {
-  // [E1] sync 批崩溃恢复（subagent-sync-collect 设计 §3.1.5 E1，U5 接线）：扫描主
-  // session 末条 entry 重建批缓冲；全员终态未投递 → notifyBatch 补发 + 统一补
-  // batchFinalized 标记（账本同 hash 幂等拒绝也算已投递）。须晚于 initSession（孤儿
-  // 终态恢复先行收敛 running 成员，createOrReuseServices 内部同步完成）与 ledger
-  // bind（补发走 notifyBatch 写账链，见上方 bindNotifyLedgerHost）。per-session 域
-  // （主 session 文件），不用 oncePerProcess；best-effort 不阻断 session_start。
-  // 时序约束在调用点 setupSessionLifecycle 已满足（bindLedgerHostAndRecover 与
-  // createOrReuseServices 均先于本 helper 调用）。
-  try {
-    service.recoverSyncCollectBatch();
-  } catch (err) {
-    logger.warn("[subagents] sync collect batch recovery failed", {
-      reason: toErrorMessage(err),
-    });
-  }
-
   try {
     // 递归扫描 <agentDir>/subagents + unlink 超 TTL 跨 session 文件属进程级维护
     // ——oncePerProcess 守卫防双跑（u-audit-fix）。
