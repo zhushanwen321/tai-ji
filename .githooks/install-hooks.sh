@@ -1621,6 +1621,41 @@ else
 fi
 
 # ============================================================================
+# e2e-map SSOT 结构校验（e2e 感知机制，消费方 scripts/select-affected-e2e.mjs）
+#   staged 命中登记表（docs/testing/e2e-map.json）/ 两个调度脚本 / 其单测时触发：
+#   ① node scripts/validate-e2e-map.mjs —— 结构校验 + asset 磁盘存在强校验
+#     （幽灵资产/死锚点/非法枚举拦在提交前）；
+#   ② npx vitest run scripts/__tests__/select-affected-e2e.test.mjs --silent ——
+#     select 的 diff→rules 匹配逻辑回归（命中/不命中/多 glob/删除文件/--check 语义）。
+#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   守卫脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+E2E_MAP_STAGED=$(git diff --cached --name-only -- docs/testing/e2e-map.json scripts/select-affected-e2e.mjs scripts/validate-e2e-map.mjs scripts/__tests__/select-affected-e2e.test.mjs)
+if echo "$E2E_MAP_STAGED" | grep -qE "^docs/testing/e2e-map\.json$|^scripts/select-affected-e2e\.mjs$|^scripts/validate-e2e-map\.mjs$|^scripts/__tests__/select-affected-e2e\.test\.mjs$"; then
+    print_section "[e2e-map SSOT 结构校验]"
+    if [ ! -f "scripts/validate-e2e-map.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/validate-e2e-map.mjs（守卫脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/validate-e2e-map.mjs; then
+        echo -e "${RED}[ERROR] docs/testing/e2e-map.json 结构校验失败——按上方明细修正登记后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}[INFO] 运行 select-affected-e2e 匹配逻辑单测...${NC}"
+    if ! npx vitest run scripts/__tests__/select-affected-e2e.test.mjs --silent; then
+        echo -e "${RED}[ERROR] select-affected-e2e 单测失败——按上方失败明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] e2e-map SSOT 结构校验通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无 e2e-map 相关变更，跳过 e2e-map 结构校验${NC}"
+fi
+
+# ============================================================================
 # 全部通过
 # ============================================================================
 
@@ -1712,6 +1747,7 @@ echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路守卫（C-state-11：滚
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"
 echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道守卫（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
 echo -e "  ${GREEN}[+]${NC} 数据布局字面量守卫（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
+echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

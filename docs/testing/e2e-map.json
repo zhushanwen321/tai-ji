@@ -1,0 +1,332 @@
+{
+  "_meta": {
+    "name": "taiji e2e 资产登记表（SSOT）",
+    "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
+    "fields": {
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ PROBE（subagent-sync-collect 探针）",
+      "summary": "一句话摘要（仅导航）",
+      "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
+      "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
+      "assets": "数组。{kind: spec|script|probe|harness, ref: 仓库相对路径}。ref 必须磁盘真实存在（scripts/validate-e2e-map.mjs 强校验）",
+      "trigger": "单值：on-diff（diff 命中 scope 时跑）| always（每次固定跑，不看 diff）| on-release（发布管线跑，当前无条目，保留枚举位）| on-pi-bump（pi 版本升级时重验）。一条 rule 一个主触发；同一 asset 需要多个触发面时拆多条 rule（assets 允许重复引用），不引入 trigger 数组——范例：E2E-EQUIV-01（on-diff）与 E2E-EQUIV-02/03/04（on-pi-bump）为同族资产的触发面拆分",
+      "serial": "true = 必须空载串行（真实进程/真实 LLM 轨：跨包跨套件并发会饱和 CPU 或使真实 LLM 轮次越过事件预算）；false = 可并发、可进 CI 常驻环节",
+      "run": "可直接执行的运行命令（仓库根为 cwd）",
+      "owner": "维护归属（包/目录路径）",
+      "authority": "权威文档锚点（仓库相对路径，可含 #锚点）",
+      "note": "可选。登记裁决与理由"
+    },
+    "check": "--check 门禁语义：coverage(rule, file) = scope glob 匹配 ∪ asset ref 精等；watched roots = 全部 scope 的 <prefix>/ 目录 ∪ 资产族目录（同一目录聚合 ≥2 个 asset 才整体看护——资产族之家；孤资产落在 scripts/ 等共享目录时不产生目录级看护根，防通用目录被泛化）。diff 文件落在任一 watched root 下却不被任何 rule coverage → exit 1（防漏登记：新增 e2e 资产或 watched 触发面内的新域必须显式登记）；watched roots 之外的文件不参与该门",
+    "consumers": [
+      "scripts/select-affected-e2e.mjs（--base 按 diff 选受影响 rules + 可运行命令 / --release 选 on-release + on-pi-bump 面 / --layer 过滤 / --check 防漏登记门禁）",
+      "scripts/validate-e2e-map.mjs（结构校验 + asset 磁盘存在强校验；pre-commit 在本文件或两脚本及其单测变更时触发）"
+    ]
+  },
+  "rules": [
+    {
+      "id": "E2E-ELECTRON-01",
+      "summary": "electron-smoke：行为 E2E 的 P0 smoke 子集（@p0-smoke 标签，grep 圈定），CI 每 PR 固定跑",
+      "scope": [
+        "packages/renderer/src/**",
+        "packages/core/src/**",
+        "apps/electron/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
+        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
+        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
+        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
+        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
+        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
+        { "kind": "harness", "ref": "e2e/fixtures/global-setup.ts" },
+        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+      ],
+      "trigger": "always",
+      "serial": false,
+      "run": "npx playwright test --project=electron-smoke",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "smoke 用例圈定 SSOT = playwright.config.ts electron-smoke project 的 grep @p0-smoke（与 electron 全量是子集关系非互斥分轨）；@p0-smoke 标签散布在上述 6 个 spec 共 10 处，本表登记 asset 为文件级"
+    },
+    {
+      "id": "E2E-VISUAL-01",
+      "summary": "visual-chromium：像素 diff 轨（chromium + vite dev mock），CI L1 固定环节",
+      "scope": [
+        "packages/renderer/src/**",
+        "e2e/visual/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        { "kind": "spec", "ref": "e2e/visual/shell.spec.ts" },
+        { "kind": "spec", "ref": "e2e/visual/composer.spec.ts" },
+        { "kind": "harness", "ref": "e2e/visual/fixtures/visual-server.ts" }
+      ],
+      "trigger": "always",
+      "serial": false,
+      "run": "npx playwright test --project=visual-chromium",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#c-层playwright-像素-diffci-内形态级",
+      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记"
+    },
+    {
+      "id": "E2E-MOCK-01",
+      "summary": "行为轨 mock 全量（electron project，mock 构建产物 + _electron.launch，零 token）",
+      "scope": [
+        "packages/renderer/src/**",
+        "packages/core/src/**",
+        "packages/runtime/src/**",
+        "apps/electron/**",
+        "e2e/workspace.spec.ts",
+        "e2e/composer.spec.ts",
+        "e2e/failure-paths.spec.ts",
+        "e2e/file-tree.spec.ts",
+        "e2e/gui-components.spec.ts",
+        "e2e/search-modal.spec.ts",
+        "e2e/state-tearing.spec.ts",
+        "e2e/update-cleanup.spec.ts",
+        "e2e/v6-shell-baseline.spec.ts",
+        "e2e/workflow-sidebar-sync.spec.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        { "kind": "spec", "ref": "e2e/workspace.spec.ts" },
+        { "kind": "spec", "ref": "e2e/composer.spec.ts" },
+        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
+        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
+        { "kind": "spec", "ref": "e2e/gui-components.spec.ts" },
+        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
+        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
+        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
+        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
+        { "kind": "spec", "ref": "e2e/workflow-sidebar-sync.spec.ts" },
+        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx playwright test --project=electron",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集"
+    },
+    {
+      "id": "E2E-REAL-01",
+      "summary": "e2e real 轨：真实 app 启动（launch-app-real）4 spec，开发阶段按改动面空载串行跑",
+      "scope": [
+        "packages/renderer/src/**",
+        "packages/core/src/**",
+        "packages/runtime/src/**",
+        "apps/electron/**",
+        "e2e/workspace-real.spec.ts",
+        "e2e/ask-user-real.spec.ts",
+        "e2e/tasks-drawer-real.spec.ts",
+        "e2e/workflow-thinkinglevel-real.spec.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        { "kind": "spec", "ref": "e2e/workspace-real.spec.ts" },
+        { "kind": "spec", "ref": "e2e/ask-user-real.spec.ts" },
+        { "kind": "spec", "ref": "e2e/tasks-drawer-real.spec.ts" },
+        { "kind": "spec", "ref": "e2e/workflow-thinkinglevel-real.spec.ts" },
+        { "kind": "harness", "ref": "e2e/fixtures/launch-app-real.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
+      "owner": "packages/renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）"
+    },
+    {
+      "id": "E2E-EQUIV-01",
+      "summary": "等价性测试 faux 轨（live ≡ reload / broadcast ≡ get_state / 混沌收敛不变量，TAIJI_SKIP_REAL_PI=1 凭证无关子集）",
+      "scope": [
+        "packages/runtime/src/infra/pi/**",
+        "packages/runtime/src/services/session/**",
+        "packages/core/src/domain/chat/**",
+        "packages/runtime/src/__tests__/equivalence/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "harness", "ref": "packages/runtime/src/__tests__/equivalence/pi-fixture.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/relay-live-reload.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts" },
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动面跑",
+      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，盘面实为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = pi-fixture.ts REAL_PI_READY）属开发阶段按改动面空载串行执行，无 CI/门禁触发面，不在本表登记独立 rule"
+    },
+    {
+      "id": "E2E-EQUIV-02",
+      "summary": "pi-protocol-contract：pi 协议契约面在 pi bump 后必须重验（E2E-EQUIV-01 同资产的第二触发面）",
+      "scope": [
+        "packages/runtime/src/infra/pi/pi-protocol.ts",
+        "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence pi-protocol-contract",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动面跑",
+      "note": "与 E2E-EQUIV-01 拆分登记同一 asset 的 on-pi-bump 触发面（trigger 单值纪律，见 _meta.fields.trigger）"
+    },
+    {
+      "id": "E2E-EQUIV-03",
+      "summary": "tool-call-index：工具调用索引面在 pi bump 后必须重验（E2E-EQUIV-01 同资产的第二触发面）",
+      "scope": [
+        "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": false,
+      "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence tool-call-index",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动面跑",
+      "note": "与 E2E-EQUIV-01 拆分登记同一 asset 的 on-pi-bump 触发面（trigger 单值纪律，见 _meta.fields.trigger）"
+    },
+    {
+      "id": "E2E-EQUIV-04",
+      "summary": "pi-semantics-skill-expansion-golden：skill 扩展 golden 快照在 pi bump 后必须重验",
+      "scope": [
+        "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "spec", "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": false,
+      "run": "pnpm --filter @taiji/runtime test src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "golden 快照锚定 pi 实装行为（runtime vitest main 组成员，pi-semantics 体系的等价物兄弟件）；pi bump 后 golden diff 是语义漂移的合法信号，按重验后更新快照处理"
+    },
+    {
+      "id": "E2E-MODELS-01",
+      "summary": "M1 models.json 脏数据 → bundled pi 拒载 → sanitize 自愈（真机零 mock）",
+      "scope": [
+        "e2e/models-json-sanitize-real.spec.ts",
+        "e2e/fixtures/sanitize-providers.mts",
+        "packages/runtime/src/infra/pi/pi-provider-store.ts",
+        "packages/runtime/src/infra/pi/pi-provider-repair.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        { "kind": "spec", "ref": "e2e/models-json-sanitize-real.spec.ts" },
+        { "kind": "harness", "ref": "e2e/fixtures/sanitize-providers.mts" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": true,
+      "run": "npx playwright test e2e/models-json-sanitize-real.spec.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "spec 头注「R4 保留不翻」：断言面是 bundled pi 二进制的 schema 校验/降级语义（非 LLM 演员），faux 化无意义；pi bump 时必须重验（spec 内含 0.80.3 → 0.84.4 版本语义锚点）"
+    },
+    {
+      "id": "E2E-RENAME-01",
+      "summary": "rename-session e2e faux 场景 A1/A3-A7（真 pi 进程 + faux 演员，触发时机/内容证据链/标题落库契约）",
+      "scope": [
+        "extensions/universal/rename-session/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "harness", "ref": "extensions/universal/rename-session/e2e/harness.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a1.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a3.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a4.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a5.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a6.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a7.mjs" },
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-all.mjs" }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node extensions/universal/rename-session/e2e/run-a1.mjs && node extensions/universal/rename-session/e2e/run-a3.mjs && node extensions/universal/rename-session/e2e/run-a4.mjs && node extensions/universal/rename-session/e2e/run-a5.mjs && node extensions/universal/rename-session/e2e/run-a6.mjs && node extensions/universal/rename-session/e2e/run-a7.mjs",
+      "owner": "extensions/universal/rename-session",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "收录清单原记 L2，按盘面修正为 L2.5——各 run-ax.mjs 头注均为「[L2.5 faux 翻轨，2026-09-15]」（真 pi 进程 + faux LLM 演员，凭证无关）。禁用 run-all 跑本轨：其默认全量含 A2 真 LLM 轮"
+    },
+    {
+      "id": "E2E-RENAME-02",
+      "summary": "rename-session e2e A2：slug 标题风格 ×3 prompt（全仓唯一真依赖模型智能的用例，真 LLM）",
+      "scope": [
+        "extensions/universal/rename-session/src/llm.ts",
+        "extensions/universal/rename-session/e2e/run-a2.mjs"
+      ],
+      "layer": "L3",
+      "assets": [
+        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a2.mjs" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": true,
+      "run": "node extensions/universal/rename-session/e2e/run-a2.mjs",
+      "owner": "extensions/universal/rename-session",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "run-a2.mjs 头注登记的人工触发条件：rename prompt 改动、默认模型切换、pi 版本 bump；scope 覆盖 prompt 生成链（llm.ts buildTitleMessages / systemPrompt）"
+    },
+    {
+      "id": "E2E-SCHED-01",
+      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S17 契约）",
+      "scope": [
+        "extensions/universal/scheduler/**",
+        "scripts/verify-scheduler-e2e.cjs"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "script", "ref": "scripts/verify-scheduler-e2e.cjs" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "node scripts/verify-scheduler-e2e.cjs",
+      "owner": "extensions/universal/scheduler",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
+    },
+    {
+      "id": "E2E-PROBE-01",
+      "summary": "subagent-sync-collect 探针 v2/v3：崩溃批补发与 kill -9 恢复面（PI_PROBE_FAUX=1 通道）",
+      "scope": [
+        "scripts/probes/subagent-sync-collect/**",
+        "packages/subagent-core/src/execution/service/sync-collect-domain.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/common.mjs" },
+        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/faux-script.mjs" },
+        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs" },
+        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs" }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": true,
+      "run": "PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs && PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "收录清单记「packages/runtime 下」按盘面修正为 scripts/probes/subagent-sync-collect/。断言已降级：上游 modeless wave3 E1 移除 crash-redelivery 后补发语义由 extension 侧 E1 恢复钩子承担，断言弱化为容忍形态（批头计数 finished/failed 两形态二选一、kill 时序不可构造时走降级门并注明）。收录裁决：保留 on-pi-bump 重验、不 R3 归档——v2/v3 是 sync-collect 崩溃恢复面唯一机器验收资产；a1-a8/v1 历史探针不入本表（其结论已沉淀 RESULTS.md）"
+    }
+  ]
+}
