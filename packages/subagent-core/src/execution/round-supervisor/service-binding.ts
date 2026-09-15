@@ -184,7 +184,6 @@ async function supervisorGiveUp(
       depth: disk.depth,
       engine: disk.engine,
       engineFallback: disk.engineFallback,
-      collectMode: disk.collectMode,
     }),
     ...(disk.engineHandle !== undefined ? { engineHandle: disk.engineHandle } : {}),
   };

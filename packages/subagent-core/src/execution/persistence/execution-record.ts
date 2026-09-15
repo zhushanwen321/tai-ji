@@ -175,12 +175,6 @@ export function createRecord(
     engine?: string;
     /** 引擎 fallback 留痕（probe 失败路由回默认引擎）。GUI 警告条数据源。 */
     engineFallback?: { from: string; reason: string };
-    /**
-     * 同步收集模式标记（subagent-sync-collect U1 foundation）。undefined = async
-     * （缺省语义，旧记录零迁移）。U2 接线点：service.createRecordForMode 从
-     * ExecuteOptions.collect 读入（opts.collect === "sync" ? "sync" : undefined）。
-     */
-    collectMode?: "sync";
     controller?: AbortController;
   },
 ): ExecutionRecord {
@@ -199,7 +193,6 @@ export function createRecord(
     idleTimeoutMs: identity.idleTimeoutMs,
     engine: identity.engine,
     engineFallback: identity.engineFallback,
-    collectMode: identity.collectMode,
 
     // 状态（实时更新）
     status: "running",

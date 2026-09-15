@@ -556,14 +556,9 @@ export interface ExecutionRecord {
    * 回填（sessionFile 即定位符）。持久化经 subagent-record entry。
    */
   engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
-  /**
-   * 同步收集模式标记（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
-   * 创建时确定不可变；undefined = async（缺省语义，旧记录零迁移）。持久化经
-   * subagent-record entry（record-entry.ts 序列化白名单，entry 唯一写点）。
-   * 消费方：U2 collectCoordinator 路由（sync→批缓冲）、U5 E1 重建投影。
-   * U2 接线点：service.createRecordForMode 从 ExecuteOptions.collect 读入 identity。
-   */
-  readonly collectMode?: "sync";
+  // [modeless 波3·已删除字段] collectMode 随「collect = 派发时路由选项」语义消亡：
+  // sync 批成员身份 = collectCoordinator 登记态（executeViaEngine 派发时点注册），
+  // 非 record 身份；旧 entry 残留键读侧自然忽略，零迁移。
 
   // ── 状态（实时更新）──
   status: ExecutionStatus;
@@ -585,7 +580,8 @@ export interface ExecutionRecord {
    * 离开批的终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
    * 两出口统一落标：① 批闭合 flush 写账成功后；② E9 dispose 逐条转 async 写账后
    * （均 appendEntry 持久化，U3/U5 写点）。undefined = 未离开批 / 旧记录零迁移。
-   * 消费方：U5 E1 重建扫描只收「collectMode=sync 且无本标记」的成员（防双重通知）。
+   * 消费方：E9 dispose 转账落标 + flush 落标（[modeless 波3] 起 E1 排除判据随其
+   * 退役消亡，标记保留为批域审计/孤儿 merge 透传面）。
    */
   batchFinalized?: boolean;
 
@@ -786,13 +782,12 @@ export interface ExecuteOptions {
   conversation?: boolean;
   /**
    * 同步收集模式（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
+   * [modeless 波3] collect = 派发时通知路由选项（sync=完成通知攒批一次唤醒 +
+   * 批闭合自动 close 成员 / async=逐个通知），非 record 模式（collectMode 字段已
+   * 删除，成员身份 = 协调器登记态）。
    * undefined = config collectSync.default（缺省 "async"，新 session 生效）。
    * schema 层枚举限 "async"|"sync"；运行时宽收 string 与 engine 字段同风格
-   * （非法值 ≠ "sync" 按 async 处理）。
-   * "sync" + conversation:true 组合在 startHandler E4 校验即拒
-   * （immediate throw，不产生半启动 record）。
-   * U2 接线点：service.createRecordForMode 读入 createRecord identity.collectMode
-   * （U1 打通类型与 startHandler 透传，record 落点归 U2）。
+   * （非法值 ≠ "sync" 按 async 处理）。E4（sync+conversation 组合拒）已删。
    */
   collect?: string;
   /**
@@ -1052,11 +1047,8 @@ export interface SubagentRecord {
    * subagent-engine-history）；缺省 = pi（走 JSONL 直读链）。
    */
   engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
-  /**
-   * 同步收集模式标记（与 ExecutionRecord.collectMode 同源投影/重建，U1 foundation）。
-   * 缺省（存量 record）= async 投影，消费方零迁移。
-   */
-  collectMode?: "sync";
+  // [modeless 波3·已删除字段] collectMode 快照投影随字段消亡删除（读侧丢弃，
+  // 存量 entry 残留键零迁移）。
   /**
    * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建，U1 foundation）。
    * 缺省 = 未离开批；U5 E1 重建扫描据此排除已离场成员。

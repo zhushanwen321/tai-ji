@@ -1099,7 +1099,7 @@ export class RecordStore {
    * 失败时的次级防线——纠正 entry 落盘后末条变 idle，判据自然不再命中）。
    *
    * [v2 D3] mainSessionFile = merge 数据源（主 session 每 id 末条 entry）：崩溃前的批域
-   * 标记（collectMode/batchFinalized）与轮终 result/model 只活在主文件 entry，覆写前
+   * 标记（batchFinalized）与轮终 result/model 只活在主文件 entry，覆写前
    * 不 merge 就会被抹掉。缺省（undefined）时扫描空集，方法空转（与既有 best-effort
    * 语义一致）。调用方：record-access initSession 恢复段（一次）。
    */
@@ -1212,7 +1212,7 @@ export class RecordStore {
    * （collectLastRecordEntries + rebuildEntryRecord 组合通路，设计 §3.1.3「标记读取
    * 通路」——batchFinalized 落标 entry 写主 session 文件，本扫描同文件域才可见；禁走
    * collectRecords light 路径，它只读子文件 identity 头+sidecar，主 session 落标
-   * entry 不可见）。返回每 id 末条重建的完整 record（含 collectMode/batchFinalized /
+   * entry 不可见）。返回每 id 末条重建的完整 record（含 batchFinalized /
    * 终态五字段，损坏 entry 跳过）；调用方（service.recoverSyncCollectBatch 的 E1 过滤、
    * recoverOrphanRecords 的覆写 merge）自行取舍。主文件不可读（含新 session 未 flush
    * 的 ENOENT）→ 空数组静默。

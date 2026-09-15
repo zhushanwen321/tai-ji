@@ -111,12 +111,8 @@ export interface SubagentRecordEntryData {
    * 透传不枚举内部键（zcode = { sessionId, dbPath }）；缺省 = pi（存量 entry 零迁移）。
    */
   engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
-  /**
-   * 同步收集模式标记（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
-   * undefined = async（缺省语义，旧 entry 零迁移——undefined 经 JSON.stringify 自然缺省）。
-   * 消费方：U5 rebuildEntryRecord 投影扩展 + E1 重建扫描。
-   */
-  collectMode?: "sync";
+  // [modeless 波3·已删除字段] collectMode entry 字段停写删除（collect = 派发时路由
+  // 选项，成员身份 = 协调器登记态）；旧 entry 残留键读侧自然忽略，零迁移。
   /**
    * 离开批终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation）。两出口统一
    * 落标（批闭合 flush / E9 dispose 转换，均 appendEntry 持久化）。undefined =
@@ -174,9 +170,8 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     engine: record.engine,
     engineFallback: record.engineFallback,
     engineHandle: record.engineHandle,
-    // 同步收集两字段（U1 foundation）：undefined 经 JSON.stringify 自然缺省，
-    // 旧记录/旧 entry 序列化产物字节不变（零迁移）。
-    collectMode: record.collectMode,
+    // [modeless 波3] collectMode 投影随字段消亡删除；batchFinalized（U1 foundation）
+    // undefined 经 JSON.stringify 自然缺省，旧 entry 序列化产物字节不变（零迁移）。
     batchFinalized: record.batchFinalized,
     // 来源身份两字段（H2 W1）：undefined 经 JSON.stringify 自然缺省，存量 entry
     // 序列化字节不变（零迁移）。

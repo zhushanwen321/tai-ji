@@ -267,13 +267,14 @@ function readEntryTerminalFields(
   };
 }
 
-/** 批收集域投影（U5 E1）：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。
- *  [U5/D4] resumable 投影已随字段退役删除。 */
+/** 批收集域投影：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。
+ *  [U5/D4] resumable 投影已随字段退役删除。[modeless 波3] collectMode 读侧丢弃
+ * （旧 entry 残留键自然忽略——collect = 派发时路由选项，成员身份 = 协调器登记态）。
+ *  E1 排除判据随其退役消亡，batchFinalized 保留为批域审计/孤儿 merge 透传面。 */
 function readEntryBatchFields(
   d: Record<string, unknown>,
-): Pick<SubagentRecord, "collectMode" | "batchFinalized"> {
+): Pick<SubagentRecord, "batchFinalized"> {
   return {
-    collectMode: d.collectMode === "sync" ? "sync" : undefined,
     batchFinalized: d.batchFinalized === true ? true : undefined,
   };
 }
@@ -327,8 +328,8 @@ export function isEngineHandleShape(
 
 /** entry data 即 SubagentRecord v1 快照——带运行时 guard 重建（taste/no-unsafe-cast）。
  *  损坏 entry（agent/task/startedAt 任一缺失）返回 null，由调用方跳过。
- *  [U5 E1] 投影白名单扩展（设计 §3.1.3「标记读取通路」）：collectMode/batchFinalized
- *  + 终态五字段 status/endedAt/closedReason/result/error——原实现硬编码
+ *  [U5 E1] 投影白名单扩展（设计 §3.1.3「标记读取通路」）：batchFinalized
+ * （[modeless 波3] collectMode 读侧丢弃随字段消亡删除）+ 终态五字段 status/endedAt/closedReason/result/error——原实现硬编码
  *  status:"running" 且不投影终态，E1 重建成员恒被视为 running，「全员终态→补发」
  *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
  *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
@@ -834,10 +835,9 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     engineFallback: r.engineFallback,
     // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本投影），无则 undefined 自然省略
     engineHandle: r.engineHandle,
-    // [U5 修复 U2 披露的投影缺口] 同步收集两字段随本投影持久化（register entry /
-    // archive entry 双写点均经本投影），原缺失时闭合判定 flushBatch 重建、E1 重建扫描等
-    // 消费方读不到原始值。undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
-    collectMode: r.collectMode,
+    // [U5 修复 U2 披露的投影缺口] batchFinalized 随本投影持久化（register entry /
+    // archive entry 双写点均经本投影）。[modeless 波3] collectMode 投影随字段消亡删除。
+    // undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
     batchFinalized: r.batchFinalized,
     // [H2 W1] 来源身份两字段随本投影持久化（register/archive/reportRecordTransition
     // 全部写点均经本投影 → toSubagentRecordEntry）。漏投影则 entry 无 origin，重启后
@@ -857,7 +857,6 @@ export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord):
     cur !== undefined && cur !== "" ? cur : src;
   return {
     ...rec,
-    collectMode: rec.collectMode ?? last.collectMode,
     batchFinalized: rec.batchFinalized ?? last.batchFinalized,
     result: pickStr(rec.result, last.result),
     // 类型收尾：两侧实参恒 string（rec.model 类型非可选；last.model 重建投影自带

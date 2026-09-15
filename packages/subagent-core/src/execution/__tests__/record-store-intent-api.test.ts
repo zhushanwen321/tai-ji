@@ -315,7 +315,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // A2 markBatchFinalized barrier
   // ============================================================
   describe("markBatchFinalized（barrier：manifest 落盘先于批通知写账）", () => {
-    it("entry 写账时点全部成员 manifest 均已落盘；落标 entry 携带 collectMode/batchFinalized", async () => {
+    it("entry 写账时点全部成员 manifest 均已落盘；落标 entry 携带 batchFinalized ([modeless 波3] collectMode 覆写随字段消亡删除)", async () => {
       const members = [makeSubagentRecord("sa-m1"), makeSubagentRecord("sa-m2")];
       // 写账时点断言 barrier：appendEntry 被调时该成员 manifest 必已存在。
       appendEntryMock.mockImplementation((_type: string, data: unknown) => {
@@ -330,7 +330,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(appendEntryMock).toHaveBeenCalledTimes(2);
       expect(appendEntryMock).toHaveBeenCalledWith(
         "subagent-record",
-        expect.objectContaining({ id: "sa-m1", collectMode: "sync", batchFinalized: true }),
+        expect.objectContaining({ id: "sa-m1", batchFinalized: true }),
       );
       // manifest status 如实投影（成功成员此刻 running+resumable）。
       expect(readManifestJson("sa-m1")).toMatchObject({ id: "sa-m1", status: "running" });

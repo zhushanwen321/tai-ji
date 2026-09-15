@@ -7,9 +7,9 @@
 //
 // 与协调器层既有覆盖（collect-coordinator.test.ts "async records never block sync
 // closure" / notify-batch.test.ts "混派正交"）的差异：那两层 stub 了 notifyAsync /
-// toNotifyRecord / listRecords；本文件走 service.execute 全链（record 落 collectMode →
-// kickOffBackground → runAndFinalize → notifyComplete → 协调器真路由 → notifier 真
-// spy），锁「同轮混派」在真实投递接线下的两个方向：
+// toNotifyRecord / listRecords；本文件走 service.execute 全链（[modeless 波3] 派发
+// 登记进协调器 → Continuation 轮终 route → 协调器真路由 → notifier 真 spy），
+// 锁「同轮混派」在真实投递接线下的两个方向：
 //   1. async 成员先终态：立即走 notify 直通（不被 sync 批扣留），批零投递；
 //      随后 sync 成员逐个终态 → 恰 1 次 notifyBatch、成员恰为 2 个 sync id；
 //   2. sync 批先闭合（async 仍在跑）：两个 sync 背靠背紧窗口终态（U8 拆批盲窗的
@@ -19,7 +19,8 @@
 // 三视角（TEST-STRATEGY §3）：
 //   - 使用者黑盒：派发方可见形态 = async 通知即时到达、sync 结果合并为单条批；
 //   - 构建者白盒：协调器路由去向 + notifier spy 调用面；
-//   - 观察者形态：pi.appendEntry 落盘的 subagent-record entry（collectMode 标记）。
+//   - 观察者形态：pi.appendEntry 落盘的 subagent-record entry（[modeless 波3] 无
+//     collectMode 键——写侧停写；batchFinalized 落标标记照常）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -193,7 +194,7 @@ describe("A8 混派正交 service e2e（同轮 2 sync + 1 async，U8）", () => 
     expect(spy.notifyBatch).not.toHaveBeenCalledTimes(2);
   });
 
-  it("观察者形态：同轮混派三 record 的落盘 entry 各自携带正确 collectMode", async () => {
+  it("观察者形态：同轮混派三 record 落盘 entry 无 collectMode 键（[modeless 波3] 字段停写，路由走登记态）", async () => {
     const spy = spyNotifier(service);
     const [, , doneAsync] = makeRelease(fake, 3);
     const hSync1 = await service.execute({ task: "s1", slug: "sync-one", collect: "sync" });
@@ -202,18 +203,18 @@ describe("A8 混派正交 service e2e（同轮 2 sync + 1 async，U8）", () => 
     await until(() => fake.runs.length >= 3);
     doneAsync();
     await until(() => spy.notify.mock.calls.length > 0);
-    // 批不必闭合即可断言落盘（register 期 entry 即带 collectMode）：
-    // sync 成员 entry 带 collectMode:"sync"，async 成员 entry 无该键（缺省 async）
+    // [modeless 波3] collect = 派发时路由选项，成员身份 = 协调器登记态：entry 产物
+    // 恒不含 collectMode 键（含 sync 成员——写侧停写，零迁移）。
     const entriesBy = (id: string) =>
       pi.appendEntry.mock.calls
         .filter((c) => c[0] === "subagent-record")
         .map((c) => c[1] as Record<string, unknown>)
         .filter((d) => d["id"] === id);
-    expect(entriesBy(hSync1.subagentId).some((d) => d["collectMode"] === "sync")).toBe(true);
-    expect(entriesBy(hSync2.subagentId).some((d) => d["collectMode"] === "sync")).toBe(true);
-    expect(
-      entriesBy(hAsync.subagentId).every((d) => !("collectMode" in d) || d["collectMode"] === undefined),
-    ).toBe(true);
+    for (const id of [hSync1.subagentId, hSync2.subagentId, hAsync.subagentId]) {
+      const entries = entriesBy(id);
+      expect(entries.length).toBeGreaterThanOrEqual(1);
+      expect(entries.every((d) => !("collectMode" in d))).toBe(true);
+    }
   });
 });
 

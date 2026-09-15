@@ -140,7 +140,10 @@ function makeExecutionRecord(id: string): ExecutionRecord {
   } as ExecutionRecord;
 }
 
-function makeStoreRec(id: string, collectMode: "sync" | undefined, status: "idle" | "running"): SubagentRecord {
+function makeStoreRec(id: string, _collectMode: "sync" | undefined, status: "idle" | "running"): SubagentRecord {
+  // [modeless 波3] collectMode 形参保留位置兼容既有调用点、值不入 stub——闭合判定
+  // 只读 id/status（成员资格在协调器登记集）。
+  void _collectMode;
   return {
     id,
     agent: "/agents/worker.md",
@@ -160,7 +163,6 @@ function makeStoreRec(id: string, collectMode: "sync" | undefined, status: "idle
     thinkingLevel: undefined,
     eventLog: [],
     displayItems: [],
-    collectMode,
   } as SubagentRecord;
 }
 

@@ -178,11 +178,11 @@ export async function markBatchFinalizedImpl(records: readonly SubagentRecord[],
       }
     }
   }
-  // 批通知写账（barrier 之后）：显式覆写 collectMode/batchFinalized 落标——防非
-  // entry 源重建（getFullRecord sidecar/manifest 分支）丢标记（对齐
-  // appendBatchFinalizedEntry 现状）。
+  // 批通知写账（barrier 之后）：显式覆写 batchFinalized 落标——防非 entry 源重建
+  //（getFullRecord sidecar/manifest 分支）丢标记。[modeless 波3] collectMode 覆写
+  // 随字段消亡删除。
   for (const rec of records) {
-    ctx.reportSubagentRecord({ ...rec, collectMode: "sync", batchFinalized: true });
+    ctx.reportSubagentRecord({ ...rec, batchFinalized: true });
   }
 }
 
