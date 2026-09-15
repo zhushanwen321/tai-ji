@@ -1,0 +1,53 @@
+{
+  "name": "@zhushanwen/pi-todo",
+  "version": "0.9.2",
+  "description": "AI-driven todo list for Pi — stateful task management with session persistence and /todos command.",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "todo",
+    "task",
+    "list"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  }
+}

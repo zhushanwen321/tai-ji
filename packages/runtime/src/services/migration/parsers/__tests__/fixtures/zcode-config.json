@@ -1,0 +1,43 @@
+{
+  "provider": {
+    "bigmodel": {
+      "name": "BigModel",
+      "kind": "anthropic",
+      "enabled": true,
+      "options": {
+        "apiKey": "sk-fake-bigmodel-plaintext",
+        "baseURL": "https://open.bigmodel.cn/api/paas/v4"
+      },
+      "models": {
+        "glm-4.6": {
+          "name": "GLM-4.6",
+          "reasoning": {
+            "enabled": true,
+            "variants": ["low", "medium", "high"],
+            "defaultVariant": "high"
+          },
+          "limit": { "context": 128000, "output": 16384 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] }
+        },
+        "glm-4.5-air": {
+          "name": "GLM-4.5 Air",
+          "limit": { "context": 128000 }
+        }
+      }
+    },
+    "router": {
+      "name": "OpenAI Compatible Router",
+      "kind": "openai-compatible",
+      "enabled": true,
+      "options": {
+        "baseURL": "https://router.example.com/v1"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "GPT-4o",
+          "limit": { "context": 128000, "output": 16384 }
+        }
+      }
+    }
+  }
+}

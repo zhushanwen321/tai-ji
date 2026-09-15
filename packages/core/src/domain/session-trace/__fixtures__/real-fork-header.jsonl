@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"96c61e79-2251-49f7-93bc-1f2734cd036b","timestamp":"2026-08-20T10:22:02.482Z","cwd":"/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/w29-gate-fork-meTnLm","parentSession":"s-fork-src","forkEntryId":"a1"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-08-16T01:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-08-16T01:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}

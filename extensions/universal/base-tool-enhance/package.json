@@ -1,0 +1,56 @@
+{
+  "name": "@zhushanwen/pi-base-tool-enhance",
+  "version": "0.5.3",
+  "description": "Base tool enhancement - override builtin bash tool: foreground delegates to pi official factory, incremental background mode (design decisions documented in source comments)",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "bash",
+    "background"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts",
+    "skills/"
+  ],
+  "dependencies": {
+    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-file-lock": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@zhushanwen/pi-pending-notifications": "workspace:*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@zhushanwen/pi-pending-notifications": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  }
+}

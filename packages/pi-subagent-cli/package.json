@@ -1,0 +1,91 @@
+{
+  "name": "@zhushanwen/pi-subagent-cli",
+  "version": "0.4.0",
+  "description": "pi subagent engine as an independent CLI package (W7 of subagent-engine-protocolization): speaks engine-protocol v1 over NDJSON stdio, depends only on @zhushanwen/subagent-engine-sdk + @zhushanwen/pi-rpc (pi process RPC layer, U1 consolidation; never subagent-core)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "pi-subagent-cli": "bin/pi-subagent-cli.mjs"
+  },
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "default": "./src/index.ts"
+    }
+  },
+  "taiji": {
+    "subagentEngine": {
+      "id": "pi",
+      "bin": "pi-subagent-cli",
+      "protocol": 1,
+      "envPrefixes": [
+        "PI_"
+      ],
+      "capabilities": {
+        "schemaEnforcement": "native",
+        "steer": "unsupported",
+        "conversation": "native",
+        "personaInjection": "flag",
+        "eventGranularity": "stream",
+        "sandbox": "emulated",
+        "sessionRead": "full",
+        "resume": "native",
+        "interrupt": "kill-only",
+        "permissionMode": "native",
+        "maxTurns": true
+      },
+      "modelCatalog": {
+        "dynamic": true,
+        "models": []
+      },
+      "displayName": "pi",
+      "description": "pi coding-agent engine (spawn pi --mode rpc task subprocesses, protocolized host callbacks)"
+    }
+  },
+  "$comment": "W7 (impl-plan §2.7): 引擎包只依赖 SDK，禁止依赖 @zhushanwen/subagent-core（check-engine-package-boundary 同精神，W9 落守卫）。manifest 按 §2.4 schema：capabilities 与 core engines/pi 的 PiEngine.capabilities() 逐位一致（快照权威）；envPrefixes 按实态 = PI_（PI_WORKFLOW_SCHEMA / PI_CODING_AGENT_DIR 等 pi 域 env；TAIJI_* 是保留前缀不可声明，经 SDK env 三层 L0/L1 通道走）。modelCatalog dynamic:true（pi 模型面运行期可变，宿主同步成员读 manifest 快照，运行期真相经协议 listModels 诊断面）。过渡期 core 侧 engines/pi/ 保留不动（TAIJI_SUBAGENT_ENGINE_MODE 双模，W11 删）。发布形态（MF-4/MF-5 修复，约束 C-proc-11）：CLI 包——bin 是唯一 npm 消费面（仓内零生产 import），files 不带 src/（Node 拒载 node_modules 内 .ts，TS 源发布只产出误导 + __tests__/__golden__ 测试资产泄漏），npm 消费走 publishConfig -> dist（双形态约定同 subagent-core D4）；构建 = tsup（src 内部 import 带 .ts 后缀 + allowImportingTsExtensions，tsc emit 不可行），SDK 保持 external 经宿主 node_modules 解析；bin = dist-first + 仅 workspace 形态回退 src（node_modules 判据禁用 npm 形态回退），见 bin/pi-subagent-cli.mjs。main/module/types 顶层字段恒指 dist：npm pack 会强制包含 main 指向的文件（无视 files 白名单），指 src 会把 TS 源塞进不含 src/ 的 tarball；workspace 消费恒走 exports 的 import 条件 → src，顶层字段只是 exports 缺席时的 fallback，无 workspace DX 影响。",
+  "files": [
+    "bin/",
+    "dist/"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        },
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "gen:model-catalog": "node scripts/gen-model-catalog.mjs"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-rpc": "workspace:*",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  }
+}

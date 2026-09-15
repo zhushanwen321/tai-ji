@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>快速 Fork · Fast Fork · 痛点1 交互 demo</title>
+<style>
+  /* token 引自 design-tokens.md（冷蓝暗色 SSOT，2026-07-12 拉距后值） */
+  :root{
+    --bg:#1a1b1f; --surface:#272830; --surface-2:#2e2f38; --surface-hover:#363740;
+    --bg-elevated:#313239; --bg-input:#1e1f24;
+    --fg:#f7f8fc; --muted:#a8a8b5; --subtle:#82828f;
+    --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.15);
+    --accent:#4f8ef7; --accent-hover:#6ba3ff;
+    --accent-soft:color-mix(in oklch,var(--accent) 12%,transparent);
+    --accent-ring:color-mix(in oklch,var(--accent) 30%,transparent);
+    --success:#22c55e; --success-soft:color-mix(in oklch,var(--success) 12%,transparent);
+    --warning:#f5a524; --danger:#ef4444; --info:#38bdf8;
+    --info-soft:color-mix(in oklch,var(--info) 12%,transparent);
+    --radius-sm:3px; --radius:8px; --radius-lg:12px;
+    --shadow-2:0 8px 24px rgba(0,0,0,0.4);
+    --ease:cubic-bezier(0.4,0,0.2,1); --dur-fast:120ms; --dur:200ms; --dur-slow:320ms;
+    --font-sans:Inter,'SF Pro Display','PingFang SC',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 var(--font-sans);
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+
+  /* ===== App 骨架（shell base 平铺 + sidebar 透明融合 + main float） ===== */
+  .app{display:flex;height:100vh;width:100vw}
+  .sidebar{width:280px;flex:none;display:flex;flex-direction:column;
+    background:transparent;border-right:1px solid var(--border);padding:52px 0 0}
+  .main{flex:1;display:flex;flex-direction:column;padding:52px 0 0;min-width:0}
+  .main-inner{flex:1;display:flex;flex-direction:column;padding:0 32px 16px;min-height:0}
+
+  /* sidebar 头 */
+  .sb-head{display:flex;align-items:center;gap:8px;padding:10px 14px}
+  .sb-title{font:600 12px/1 var(--font-mono);color:var(--subtle);
+    letter-spacing:0.08em;text-transform:uppercase;flex:1}
+  .sb-new{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:var(--radius-sm);
+    background:var(--accent-soft);color:var(--accent);font:600 11px/1 var(--font-sans);
+    border:0;cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+  .sb-new:hover{background:color-mix(in oklch,var(--accent) 20%,transparent)}
+  .sb-new svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2.2}
+
+  /* 会话列表 */
+  .sb-list{flex:1;overflow-y:auto;padding:4px 8px}
+  .sb-group-head{font:500 10px/1 var(--font-mono);color:var(--subtle);
+    letter-spacing:0.08em;text-transform:uppercase;padding:10px 8px 6px;
+    display:flex;justify-content:space-between;align-items:center}
+  .sb-group-head b{color:var(--muted);font-weight:500}
+
+  /* Session Item · Card-Inline（引 draft-session-item） */
+  .si{position:relative;display:flex;align-items:flex-start;gap:10px;padding:9px 10px;
+    border-radius:var(--radius);cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+  .si:hover{background:var(--surface-hover)}
+  .si-dot{margin-top:5px}
+  .si-main{flex:1;min-width:0}
+  .si-title{font-size:13px;font-weight:550;color:var(--fg);line-height:1.35;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .si-sub{display:flex;align-items:center;gap:6px;margin-top:3px;
+    font:11px/1 var(--font-mono);color:var(--muted)}
+  .branch{color:var(--accent);background:var(--accent-soft);padding:2px 6px;
+    border-radius:var(--radius-sm);font-size:10px;letter-spacing:0.02em;
+    max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .si-time{color:var(--subtle);white-space:nowrap}
+  .si.active{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent)}
+
+  /* 状态点 */
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;position:relative}
+  .dot-running{background:var(--accent)}
+  .dot-done{background:var(--success)}
+  .dot-stopped{background:var(--subtle)}
+  .dot.pulse::after{content:"";position:absolute;inset:-3px;border-radius:50%}
+  .dot-running.pulse::after{color:rgba(79,142,247,0.55);animation:pulse-ring 1.8s var(--ease) infinite}
+  @keyframes pulse-ring{0%{box-shadow:0 0 0 0 currentColor;opacity:.8}70%{box-shadow:0 0 0 6px transparent;opacity:0}100%{opacity:0}}
+
+  /* ===== 痛点1：当前 session 下方的"分支小列表"（方案3） =====
+     仅当前 session 可见，不碰全局扁平结构。血缘用 4% accent 底 + 缩进区分，
+     不用左色条（design-system 反模式）。 */
+  .fork-group{margin:2px 0 6px;padding:6px 4px;background:color-mix(in oklch,var(--accent) 4%,transparent);
+    border-radius:var(--radius);border:1px solid var(--border)}
+  .fork-group-head{display:flex;align-items:center;gap:7px;padding:4px 8px 6px;
+    font:11px/1 var(--font-mono);color:var(--accent);cursor:pointer;user-select:none}
+  .fork-group-head svg.chev{width:10px;height:10px;stroke:currentColor;fill:none;stroke-width:2;
+    transition:transform var(--dur-fast) var(--ease)}
+  .fork-group.open .fork-group-head svg.chev{transform:rotate(90deg)}
+  .fork-group-head .ct{color:var(--muted);margin-left:auto}
+  .fork-list{display:none;flex-direction:column;gap:1px;padding:0 2px}
+  .fork-group.open .fork-list{display:flex}
+  .fork-list .si{padding:6px 8px}
+  .fork-list .si-title{font-size:12px}
+  .fork-list .si .branch-pill{font:600 9px/1 var(--font-mono);color:var(--accent);
+    background:var(--accent-soft);padding:2px 5px;border-radius:var(--radius-sm);letter-spacing:0.04em}
+  /* 刚 fork 的高亮 3s 后淡出 */
+  .fork-list .si.fresh{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-ring);
+    animation:fresh-fade 3.2s var(--ease) forwards}
+  @keyframes fresh-fade{0%,60%{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-ring)}
+    100%{background:transparent;box-shadow:none}}
+
+  /* ===== Panel Header ===== */
+  .ph{display:flex;align-items:center;gap:10px;padding:0 0 14px;
+    border-bottom:1px solid var(--border);margin-bottom:18px}
+  .ph-dot{margin-top:0}
+  .ph-title{font-size:14px;font-weight:600;color:var(--fg)}
+  .ph-sub{font:11px/1 var(--font-mono);color:var(--subtle);margin-left:4px}
+  .ph-actions{margin-left:auto;display:flex;gap:4px}
+  .kbd-hint{font:10px/1 var(--font-mono);color:var(--subtle);padding:0 8px;
+    border:1px solid var(--border);border-radius:var(--radius-sm);height:22px;
+    display:inline-flex;align-items:center;gap:3px}
+  .kbd-hint kbd{font:600 10px/1 var(--font-mono);color:var(--muted);
+    background:var(--surface-2);padding:2px 4px;border-radius:3px}
+
+  /* ===== 消息流 ===== */
+  .stream{flex:1;overflow-y:auto;padding-right:8px;display:flex;flex-direction:column;gap:18px}
+  .turn{display:flex;flex-direction:column;gap:10px}
+  .bubble-user{align-self:flex-end;max-width:78%;background:var(--surface);
+    border:1px solid var(--border);padding:10px 14px;border-radius:var(--radius-lg);
+    font-size:13.5px;line-height:1.6;color:var(--fg)}
+  .assistant-turn{display:flex;flex-direction:column;gap:0;align-self:stretch;position:relative}
+
+  /* hover 才浮现的 action 行 —— 每条 assistant 都有，含 streaming 态。
+     按钮分两组：[复制 / 复制 MD] | [fork 后台 / fork 提问] */
+  .as-actions{display:flex;align-items:center;gap:2px;height:0;overflow:hidden;
+    opacity:0;transition:opacity var(--dur-fast) var(--ease);margin-top:6px}
+  .assistant-turn:hover .as-actions{opacity:1;height:auto}
+  .assistant-turn.demo-show .as-actions{opacity:1;height:auto}
+  .as-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:0;background:transparent;
+    color:var(--subtle);border-radius:var(--radius-sm);cursor:pointer;font:500 11px/1 var(--font-sans);
+    transition:all var(--dur-fast) var(--ease)}
+  .as-btn:hover{color:var(--fg);background:var(--surface-hover)}
+  .as-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.6}
+  .as-btn.fork,.as-btn.fork-ask{color:var(--accent)}
+  .as-btn.fork:hover,.as-btn.fork-ask:hover{color:var(--accent-hover);background:var(--accent-soft)}
+  .as-btn.fork-ask{font-weight:600}
+  .as-sep{width:1px;height:14px;background:var(--border);margin:0 4px}
+  .as-fork-kbd{font:10px/1 var(--font-mono);color:var(--subtle);
+    background:var(--surface-2);padding:2px 4px;border-radius:3px;margin-left:2px}
+
+  /* 总结正文 */
+  .turn-summary{font-size:13.5px;line-height:1.7;color:var(--fg);padding:2px 0}
+  .turn-summary p+p{margin-top:7px}
+  .turn-summary code{font-family:var(--font-mono);font-size:12px;color:var(--accent);
+    background:var(--accent-soft);padding:1px 5px;border-radius:3px}
+
+  /* streaming 指示器（演示"对话进行中也能 fork"） */
+  .streaming-cursor{display:inline-block;width:7px;height:15px;background:var(--accent);
+    border-radius:1px;vertical-align:text-bottom;animation:blink 1s steps(2) infinite;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ===== 痛点1：fork 反馈行（SystemNotice 变体） ===== */
+  .fork-notice{display:flex;align-items:center;gap:9px;padding:7px 11px;
+    background:var(--info-soft);border:1px solid var(--border);border-radius:var(--radius);
+    font-size:12px;color:var(--muted);animation:notice-in var(--dur) var(--ease)}
+  @keyframes notice-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .fork-notice .ic{width:14px;height:14px;color:var(--info);flex:none;
+    stroke:currentColor;fill:none;stroke-width:1.8}
+  .fork-notice b{color:var(--fg);font-weight:600}
+  .fork-notice .tgt{color:var(--fg);font-weight:550}
+  .fork-notice .view{margin-left:auto;display:inline-flex;align-items:center;gap:4px;
+    color:var(--accent);cursor:pointer;font-weight:500;padding:2px 6px;border-radius:var(--radius-sm);
+    transition:background var(--dur-fast) var(--ease);white-space:nowrap}
+  .fork-notice .view:hover{background:var(--accent-soft)}
+  .fork-notice .view svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+  .fork-notice .dismiss{color:var(--subtle);cursor:pointer;padding:2px;border-radius:var(--radius-sm);
+    font-size:14px;line-height:1}
+  .fork-notice .dismiss:hover{color:var(--fg);background:var(--surface-hover)}
+
+  /* ===== Composer + fork 模式（核心） =====
+     fork 模式下打字发送 = 原子操作（fork 新 session + 发送此条提问），
+     主线不受影响。视觉上用 accent 边框 + 顶部 chip 明确告知"接下来发的字进新分支"。 */
+  .composer{margin-top:14px;background:var(--bg-input);border:1px solid var(--border);
+    border-radius:var(--radius-lg);padding:12px 14px;
+    transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)}
+  .composer:focus-within{border-color:var(--accent)}
+  /* fork 模式：强制 accent 边 + glow ring + 极淡 accent 底，三重视觉强化"现在不一样" */
+  .composer.fork-mode{border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-ring);
+    background:color-mix(in oklch,var(--accent) 5%,var(--bg-input))}
+  .composer-mode-row{display:none;align-items:center;gap:8px;margin-bottom:9px}
+  .composer.fork-mode .composer-mode-row{display:flex;
+    animation:notice-in var(--dur) var(--ease)}
+  .mode-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:var(--radius-sm);
+    background:var(--accent-soft);color:var(--accent);font:600 11px/1 var(--font-mono);letter-spacing:0.02em}
+  .mode-chip svg.fork-ic{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+  .mode-chip .mode-x{margin-left:3px;display:inline-grid;place-items:center;width:16px;height:16px;
+    cursor:pointer;opacity:0.65;border-radius:3px;transition:all var(--dur-fast) var(--ease)}
+  .mode-chip .mode-x:hover{opacity:1;background:color-mix(in oklch,var(--accent) 25%,transparent)}
+  .mode-chip .mode-x svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2.4}
+  .composer-input{width:100%;background:transparent;border:0;outline:none;color:var(--fg);
+    font:14px/1.6 var(--font-sans);min-height:24px;resize:none}
+  .composer-input::placeholder{color:var(--subtle)}
+  .composer.fork-mode .composer-input::placeholder{color:color-mix(in oklch,var(--accent) 55%,var(--subtle))}
+  .composer-foot{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:var(--radius-sm);
+    font:11px/1 var(--font-mono);color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);cursor:pointer}
+  .chip:hover{color:var(--fg);border-color:var(--border-strong)}
+  .send-btn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+    background:var(--surface);color:var(--fg);border:1px solid var(--border-strong);
+    border-radius:var(--radius);font:600 12px/1 var(--font-sans);cursor:pointer;
+    transition:all var(--dur-fast) var(--ease)}
+  .send-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .send-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2}
+  /* fork 模式发送按钮：实心 accent，文案变"fork 并发送" */
+  .send-btn.fork-send{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .send-btn.fork-send:hover{background:var(--accent-hover);color:#fff}
+
+  /* ===== 顶部说明条（demo 专用） ===== */
+  .demo-bar{position:fixed;top:0;left:0;right:0;z-index:50;
+    background:var(--surface-2);border-bottom:1px solid var(--border-strong);
+    padding:8px 16px;display:flex;align-items:center;gap:14px;font-size:12px;color:var(--muted)}
+  .demo-bar b{color:var(--fg)}
+  .demo-bar .tag{font:600 10px/1 var(--font-mono);color:var(--accent);
+    background:var(--accent-soft);padding:3px 7px;border-radius:var(--radius-sm);letter-spacing:0.04em}
+  .demo-bar .spacer{flex:1}
+  .demo-bar button{padding:4px 10px;background:var(--accent);color:#fff;border:0;
+    border-radius:var(--radius-sm);font:600 11px/1 var(--font-sans);cursor:pointer}
+  .demo-bar button.ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+  .demo-bar button:hover{background:var(--accent-hover)}
+  .demo-bar button.ghost:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-hover)}
+
+  .as-btn.fork:active,.as-btn.fork-ask:active{transform:scale(0.94)}
+  .as-btn.forking svg{animation:spin 0.6s linear}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Toast */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius);
+    box-shadow:var(--shadow-2);padding:10px 16px;font-size:12.5px;color:var(--fg);
+    display:flex;align-items:center;gap:10px;opacity:0;pointer-events:none;
+    transition:all var(--dur) var(--ease);z-index:60;max-width:80vw}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast svg{width:14px;height:14px;color:var(--success);stroke:currentColor;fill:none;stroke-width:2;flex:none}
+  .toast b{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- demo 说明条 -->
+<div class="demo-bar">
+  <span class="tag">DEMO</span>
+  <span><b>痛点1 · Fork-to-Ask</b></span>
+  <span style="color:var(--subtle)">hover 第 2 条 assistant 看 <b>fork 提问</b> 按钮 · 点击进入 composer fork 模式 · 打字发送 = fork 新分支 + 首条提问（主线不中断）</span>
+  <span class="spacer"></span>
+  <button onclick="enterForkMode()">进入 fork 提问</button>
+  <button class="ghost" onclick="forkViaShortcut(false)">⌘G 纯 fork</button>
+  <button class="ghost" onclick="resetDemo()">重置</button>
+</div>
+
+<div class="app">
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">会话</span>
+      <button class="sb-new">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        新建
+      </button>
+    </div>
+    <div class="sb-list">
+
+      <div class="sb-group-head"><span>taiji</span><b>3</b></div>
+
+      <!-- 当前激活 session -->
+      <div class="si active">
+        <span class="dot dot-running pulse si-dot"></span>
+        <div class="si-main">
+          <div class="si-title">重构 EventAdapter 分层</div>
+          <div class="si-sub"><span class="branch">feat/event-adapter</span><span class="si-time">进行中</span></div>
+        </div>
+      </div>
+
+      <!-- ★ 当前 session 的分支小列表（方案3）★ -->
+      <div class="fork-group open" id="forkGroup">
+        <div class="fork-group-head" onclick="toggleForkGroup()">
+          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+          <span>本会话的分支</span>
+          <span class="ct" id="forkCount">2</span>
+        </div>
+        <div class="fork-list" id="forkList">
+          <div class="si">
+            <span class="dot dot-done si-dot"></span>
+            <div class="si-main">
+              <div class="si-title">纯文本翻译层要不要引入状态机</div>
+              <div class="si-sub"><span class="branch-pill">分支 1</span><span class="si-time">3 分钟前</span></div>
+            </div>
+          </div>
+          <div class="si">
+            <span class="dot dot-stopped si-dot"></span>
+            <div class="si-main">
+              <div class="si-title">dispatcher 那层能不能复用现有的</div>
+              <div class="si-sub"><span class="branch-pill">分支 2</span><span class="si-time">12 分钟前</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="si">
+        <span class="dot dot-done si-dot"></span>
+        <div class="si-main">
+          <div class="si-title">修复 composer 发送态抖动</div>
+          <div class="si-sub"><span class="branch">fix/composer-jitter</span><span class="si-time">1 小时前</span></div>
+        </div>
+      </div>
+      <div class="si">
+        <span class="dot dot-stopped si-dot"></span>
+        <div class="si-main">
+          <div class="si-title">接入 Diff 审查抽屉</div>
+          <div class="si-sub"><span class="branch">feat/diff-drawer</span><span class="si-time">昨天</span></div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ===== Main Panel ===== -->
+  <main class="main">
+    <div class="main-inner">
+
+      <div class="ph">
+        <span class="dot dot-running pulse ph-dot"></span>
+        <span class="ph-title">重构 EventAdapter 分层</span>
+        <span class="ph-sub">feat/event-adapter</span>
+        <div class="ph-actions">
+          <span class="kbd-hint"><kbd>⌘⇧G</kbd> fork 提问</span>
+          <span class="kbd-hint"><kbd>⌘G</kbd> 纯 fork</span>
+        </div>
+      </div>
+
+      <div class="stream" id="stream">
+
+        <!-- 回合 1 -->
+        <div class="turn">
+          <div class="bubble-user">EventAdapter 现在把 pi 事件翻译和副作用编排混在一起了，帮我拆一下</div>
+          <div class="assistant-turn">
+            <div class="turn-summary">
+              <p>现在 <code>event-adapter.ts</code> 同时做了两件事：翻译 pi 推送的事件流（<code>message_start</code> → ChatMessage），和编排命令副作用（compact 后刷新 context 用量）。建议拆成两层：</p>
+              <p style="color:var(--muted);font-size:12.5px">① 纯翻译层 <code>PiEventTranslator</code>（无状态、可单测）② 副作用编排层留在 <code>message-dispatcher.ts</code>（按 AGENTS.md 规则 7.5）。</p>
+            </div>
+            <!-- 两组按钮：[复制 复制MD] | [fork 后台 / fork 提问] -->
+            <div class="as-actions">
+              <button class="as-btn" title="复制纯文本">
+                <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>
+                复制
+              </button>
+              <button class="as-btn" title="复制 Markdown">
+                <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>
+                MD
+              </button>
+              <span class="as-sep"></span>
+              <button class="as-btn fork" title="fork 到后台空白分支（⌘G）" onclick="forkFromButton(this)">
+                <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+                fork 后台
+                <span class="as-fork-kbd">⌘G</span>
+              </button>
+              <button class="as-btn fork-ask" title="fork 并提问（⌘⇧G）— 进入 composer fork 模式" onclick="enterForkMode()">
+                <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+                fork 提问
+                <span class="as-fork-kbd">⌘⇧G</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 回合 2：streaming 进行中 —— 痛点1 核心：streaming 中也能 fork -->
+        <div class="turn" id="turn2">
+          <div class="bubble-user">翻译层单独拆出来，那 compact 的 context 用量刷新归谁管？</div>
+          <div class="assistant-turn demo-show">
+            <div class="turn-summary">
+              <p>compact 的 context 用量刷新属于<b>命令副作用</b>，不是事件翻译，应该留在 <code>message-dispatcher.ts</code>。理由：compact 是用户主动发起的命令，它的副作用（生命周期广播 + summary 消息 + context 用量刷新）属于编排层职责，不该下沉到纯翻译层<span class="streaming-cursor"></span></p>
+            </div>
+            <div class="as-actions">
+              <button class="as-btn" title="复制纯文本">
+                <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>
+                复制
+              </button>
+              <span class="as-sep"></span>
+              <button class="as-btn fork" title="fork 到后台（⌘G）" onclick="forkFromButton(this)">
+                <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+                fork 后台
+                <span class="as-fork-kbd">⌘G</span>
+              </button>
+              <button class="as-btn fork-ask" title="fork 并提问（⌘⇧G）" onclick="enterForkMode()">
+                <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+                fork 提问
+                <span class="as-fork-kbd">⌘⇧G</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- fork 反馈行动态插入这里 -->
+        <div id="noticeSlot"></div>
+
+      </div>
+
+      <!-- ===== Composer（fork 模式核心） ===== -->
+      <div class="composer" id="composer">
+        <!-- fork 模式才显示的 chip：明确告知"接下来发的字进新分支" -->
+        <div class="composer-mode-row">
+          <span class="mode-chip">
+            <svg class="fork-ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+            将发到新分支 · 与主线隔离
+            <span class="mode-x" onclick="exitForkMode()" title="取消 fork 模式（Esc）">
+              <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </span>
+          </span>
+        </div>
+        <textarea class="composer-input" id="composerInput" rows="1"
+          placeholder="继续主线对话 · 想追问就点 fork 提问 或 ⌘⇧G"></textarea>
+        <div class="composer-foot">
+          <span class="chip" id="branchChip">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h6l3 3v13H4z"/></svg>
+            feat/event-adapter
+          </span>
+          <button class="send-btn" id="sendBtn" onclick="sendComposer()">
+            <span id="sendLabel">发送</span>
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+  <span id="toastMsg"></span>
+</div>
+
+<script>
+  let forkSeq = 2;       // 初始已有 2 个分支
+  let forkMode = false;  // composer 是否在 fork 模式
+
+  /* ===== 当前 session 的分支小列表：折叠/展开 ===== */
+  function toggleForkGroup(){
+    document.getElementById('forkGroup').classList.toggle('open');
+  }
+
+  /* ===== Composer fork 模式（Fork-to-Ask 核心） =====
+     进入后：composer 强制 accent 视觉 + 顶部 chip 明示。
+     用户打字 → 发送 = 原子地（fork 新 session + 把这行作为新 session 首条 user message）。
+     主线 session 完全不参与。发送后自动退出 fork 模式。 */
+  function enterForkMode(){
+    if(forkMode) return;
+    forkMode = true;
+    const c = document.getElementById('composer');
+    c.classList.add('fork-mode');
+    const ci = document.getElementById('composerInput');
+    ci.placeholder = '在新分支提问… 发送 = fork 新 session 并发送此条，主线不受影响';
+    ci.focus();
+    document.getElementById('sendLabel').textContent = 'fork 并发送';
+    document.getElementById('sendBtn').classList.add('fork-send');
+  }
+
+  function exitForkMode(){
+    if(!forkMode) return;
+    forkMode = false;
+    const c = document.getElementById('composer');
+    c.classList.remove('fork-mode');
+    const ci = document.getElementById('composerInput');
+    ci.placeholder = '继续主线对话 · 想追问就点 fork 提问 或 ⌘⇧G';
+    ci.value = '';
+    document.getElementById('sendLabel').textContent = '发送';
+    document.getElementById('sendBtn').classList.remove('fork-send');
+  }
+
+  function sendComposer(){
+    const ci = document.getElementById('composerInput');
+    const content = ci.value.trim();
+    if(!content){
+      if(forkMode) exitForkMode();
+      return;
+    }
+    if(forkMode){
+      doForkWithAsk(content);
+      exitForkMode();
+    } else {
+      // 主线发送（demo 不实际发，仅提示）
+      showToast(`（demo）主线发送：${content.slice(0,30)}`);
+      ci.value = '';
+    }
+  }
+
+  /* fork + 首条提问 —— 高频路径 */
+  function doForkWithAsk(content){
+    forkSeq++;
+    const branchName = `重构 EventAdapter 分层 · 分支 ${forkSeq}`;
+    const preview = content.length > 28 ? content.slice(0,28) + '…' : content;
+
+    // 反馈行：明确"在新分支提问"而非"已 fork"
+    const slot = document.getElementById('noticeSlot');
+    const notice = document.createElement('div');
+    notice.className = 'fork-notice';
+    notice.innerHTML = `
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+      <span>已在新分支提问 · <span class="tgt">${preview}</span></span>
+      <span class="view" onclick="viewBranch('${branchName}')">
+        查看分支
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </span>
+      <span class="dismiss" onclick="this.parentElement.remove()">×</span>
+    `;
+    slot.appendChild(notice);
+
+    // 侧栏分支项：用提问内容作标题（而非"分支 N"），与新建 session 命名一致
+    const list = document.getElementById('forkList');
+    const item = document.createElement('div');
+    item.className = 'si fresh';
+    item.innerHTML = `
+      <span class="dot dot-running pulse si-dot"></span>
+      <div class="si-main">
+        <div class="si-title">${preview}</div>
+        <div class="si-sub"><span class="branch-pill">分支 ${forkSeq}</span><span class="si-time">刚刚 · 提问中</span></div>
+      </div>
+    `;
+    list.appendChild(item);
+    document.getElementById('forkGroup').classList.add('open');
+    document.getElementById('forkCount').textContent = forkSeq;
+
+    showToast(`已 fork 新分支并发送提问 · 主线未打断`);
+  }
+
+  /* 纯后台 fork（空白）—— 低频，⌘G 或 fork 后台按钮 */
+  function forkFromButton(btn){
+    if(btn.classList.contains('forking')) return;
+    btn.classList.add('forking');
+    setTimeout(()=>{
+      btn.classList.remove('forking');
+      doForkBlank();
+    }, 600);
+  }
+
+  function forkViaShortcut(_jump){
+    doForkBlank();
+  }
+
+  function doForkBlank(){
+    forkSeq++;
+    const name = `重构 EventAdapter 分层 · 分支 ${forkSeq}`;
+    const slot = document.getElementById('noticeSlot');
+    const notice = document.createElement('div');
+    notice.className = 'fork-notice';
+    notice.innerHTML = `
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M12 13.5v2"/></svg>
+      <span>已 fork 到后台 · <span class="tgt">${name}</span></span>
+      <span class="view" onclick="viewBranch('${name}')">
+        查看
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </span>
+      <span class="dismiss" onclick="this.parentElement.remove()">×</span>
+    `;
+    slot.appendChild(notice);
+
+    const list = document.getElementById('forkList');
+    const item = document.createElement('div');
+    item.className = 'si fresh';
+    item.innerHTML = `
+      <span class="dot dot-stopped si-dot"></span>
+      <div class="si-main">
+        <div class="si-title">${name}</div>
+        <div class="si-sub"><span class="branch-pill">分支 ${forkSeq}</span><span class="si-time">刚刚 · 空白</span></div>
+      </div>
+    `;
+    list.appendChild(item);
+    document.getElementById('forkGroup').classList.add('open');
+    document.getElementById('forkCount').textContent = forkSeq;
+
+    showToast(`已 fork 空白分支到后台 · 主线未打断`);
+  }
+
+  function viewBranch(name){
+    showToast(`跳转到「${name}」（demo 不实际跳转）`);
+  }
+
+  function showToast(msg){
+    const t = document.getElementById('toast');
+    document.getElementById('toastMsg').innerHTML = msg;
+    t.classList.add('show');
+    clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(()=>t.classList.remove('show'), 2800);
+  }
+
+  /* 快捷键 */
+  document.addEventListener('keydown', e=>{
+    const meta = e.metaKey || e.ctrlKey;
+    if(meta && e.key.toLowerCase()==='g'){
+      e.preventDefault();
+      if(e.shiftKey) enterForkMode();   // ⌘⇧G fork 提问
+      else forkViaShortcut(false);      // ⌘G 纯 fork
+    }
+    if(e.key==='Escape' && forkMode){
+      exitForkMode();
+    }
+    if(meta && e.key==='Enter'){
+      // ⌘Enter 发送（无论是否 fork 模式）
+      e.preventDefault();
+      sendComposer();
+    }
+  });
+
+  function resetDemo(){
+    document.getElementById('noticeSlot').innerHTML = '';
+    const list = document.getElementById('forkList');
+    while(list.children.length > 2) list.removeChild(list.lastChild);
+    forkSeq = 2;
+    document.getElementById('forkCount').textContent = '2';
+    exitForkMode();
+    showToast('已重置');
+  }
+</script>
+
+</body>
+</html>

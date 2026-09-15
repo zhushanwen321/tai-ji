@@ -1,0 +1,20 @@
+{
+  "name": "statusline",
+  "version": "0.3.14",
+  "private": true,
+  "type": "module",
+  "displayName": "Statusline",
+  "description": "Bridges pi extension setStatus events to taiji status bar system",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": [
+      "onStartupFinished"
+    ],
+    "trustLevel": "trusted",
+    "source": "built-in",
+    "permissions": [
+      "hooks.onPiEvent"
+    ]
+  }
+}

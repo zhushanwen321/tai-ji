@@ -1,0 +1,56 @@
+{
+  "name": "taiji",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @taiji/electron dev",
+    "build": "pnpm --filter @taiji/electron build",
+    "lint": "eslint . --max-warnings 0",
+    "prepare": "bash .githooks/install-hooks.sh",
+    "postinstall": "bash scripts/fix-node-pty-permissions.sh",
+    "build:e2e": "pnpm --filter @taiji/electron build:e2e",
+    "test": "pnpm --filter './packages/**' --filter './apps/**' --filter './extensions/**' --no-bail run test",
+    "test:e2e": "playwright test",
+    "dev:smoke": "node scripts/dev-smoke.mjs",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "release:npm": "pnpm --filter @taiji/extension-protocol build && changeset publish",
+    "extensions:typecheck": "cd extensions && npx tsc --noEmit",
+    "extensions:lint": "node scripts/check-stale-ctx-audit-coverage.mjs && npx eslint extensions/",
+    "extensions:test": "pnpm -r --filter '@zhushanwen/pi-*' test",
+    "extensions:test:isolated": "pnpm -r --filter '@zhushanwen/pi-*' test:isolated",
+    "gen:builtin-providers": "node packages/runtime/scripts/gen-builtin-providers.mjs",
+    "prebuild": "node packages/runtime/scripts/gen-builtin-providers.mjs"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4",
+    "@playwright/test": "^1.61.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-vue": "^10.9.1",
+    "typescript": "^5.8",
+    "typescript-eslint": "^8.59.2",
+    "vue-eslint-parser": "^10.4.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "@earendil-works/pi-coding-agent": "0.84.4",
+      "@earendil-works/pi-ai": "0.84.4",
+      "@earendil-works/pi-tui": "0.84.4",
+      "@earendil-works/pi-agent-core": "0.84.4"
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron",
+      "node-pty",
+      "vue-demi"
+    ]
+  }
+}

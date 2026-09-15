@@ -1,0 +1,593 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.taiji-harness/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.taiji-harness/**'
+      - 'LICENSE'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # pnpm workspace 单步安装：根 + packages/* + apps/* 一次装完
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm run lint
+
+      # taste-lint 规则用例（taste-lint/**/*.test.mjs，vitest）：lint 插件规则本体的回归
+      # 面与 ESLint 同 job 触发（规则改坏时用例先红）。pnpm exec 显式走 workspace 本地
+      # node_modules/.bin（node-linker=hoisted 下 vitest 提升到根）；不用 npx——本地无
+      # bin 时会静默从 registry 拉最新版运行（行为漂移而非报错，PR #185 review R2 INFO）。
+      - name: Test - taste-lint rules
+        run: pnpm exec vitest run taste-lint
+
+  typecheck:
+    name: TypeCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeCheck - renderer
+        run: pnpm --filter @taiji/frontend run typecheck
+
+      # 测试 tsconfig（tsconfig.typecheck-test.json）：vitest 测试文件被默认 tsconfig 的
+      # exclude 挡在门外，只有此脚本纳入 include——测试桩与生产契约漂移的唯一编译期拦截点。
+      - name: TypeCheck - renderer tests
+        run: pnpm --filter @taiji/frontend run typecheck:test
+
+      - name: TypeCheck - runtime
+        run: pnpm --filter @taiji/runtime run typecheck
+
+      - name: TypeCheck - shared
+        run: pnpm --filter @taiji/shared run typecheck
+
+      - name: TypeCheck - pi extensions
+        run: pnpm extensions:typecheck
+
+  # SDK 类型同步 job 已删除（D28 方向反转，2026-09-05）：plugin-sdk/src/types.ts
+  # 现为契约 SSOT，runtime 经 plugin-types 薄壳 re-export 消费——不存在「两份
+  # 文件需保持同步」的漂移面，sync-types.sh 生成方向已不存在。
+
+  # Test 拆分为 4 个并行 job（原串行 214s → 关键路径 ~120s，省 ~95s）。
+  # runner 分钟数总量不变（ubuntu 充足），build gate 语义保持（任一失败不启动 build）。
+  # mac 完整 main tests（updater-script-integration 的 mac 专属用例）仍由 build.yml mac 平台跑，
+  # 此处 test-main 只跑 ubuntu 上能跑的子集。
+  test-runtime:
+    # 2 分片：本地实测（2026-09-14，523 文件）suite time Top10 占 56%，rpc-client 家族
+    # （真 spawn pi 进程 ~2.5s/case）主导；且 renderer 分片后 runtime（118s）会成为
+    # 测试阶段新杆，需同步压。shard 线性有效（文件互相独立）。
+    name: Test (runtime, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [1, 2]
+        shard-total: [2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        # 等价性基线双轨（TEST-STRATEGY.md §4）：CI 无 pi 凭证（属用户基础设施，不注入
+        # secrets），显式声明本环境只跑凭证无关子集——真实 LLM turn 用例 skip 且理由
+        # 注入 describe 名（探测机制 SSOT = equivalence/pi-fixture.ts REAL_PI_READY）。
+        env:
+          TAIJI_SKIP_REAL_PI: '1'
+        # [HISTORICAL] 勿改回 `run test -- --flags` 形态：pnpm@10 恢复 npm 式 `--` 透传后，
+        # flag 落在 `--` 之后被 cac 当作文件过滤器，reporter/outputFile 全部静默失效
+        # （2026-09-14 排查：junit 实际写 config 定义的 test-results/vitest-junit.xml，
+        # upload 步骤找 test-results.xml 长期空转，run artifacts 恒为 0）。exec 直传参数
+        # 不经 `--`；reporter/outputFile 以 vitest.config.ts 为准，勿在此重复声明。
+        run: pnpm --filter @taiji/runtime exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-runtime-${{ matrix.shard-index }}
+          path: packages/runtime/test-results/vitest-junit.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  test-renderer:
+    # 2 分片（per-file 开销主导 → shard 线性加速）：本地实测（2026-09-14，402 文件）
+    # 用例纯执行仅占 18%（95.6s/542s 聚合），其余为每文件固定开销（import 185s +
+    # setup 130s[i18n setupFiles 每文件一遍] + happy-dom environment 104s，≈1s/文件）。
+    # 文件中位数 73ms、Top10 仅占 32% —— 修慢文件天花板 ≈ 12%，shard 是唯一有效杠杆；
+    # ubuntu 实测 209s → 2 分片预期 ~120s/片（含 boot）。
+    name: Test (renderer, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [1, 2]
+        shard-total: [2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        # [HISTORICAL] 同 test-runtime：exec 直传参数（pnpm@10 `--` 透传令 CLI flag 全失效，
+        # 其中 --coverage 自落地起从未真正执行过，coverage 阈值门禁形同虚设）。
+        # coverage 门禁不在此跑：插桩 ~2x 会把本 job 推到 ~5min 关键路径——迁往
+        # coverage.yml（nightly + 手动）由每日快照兑底，TEST-STRATEGY.md §7 同步更新。
+        run: pnpm --filter @taiji/frontend exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-renderer-${{ matrix.shard-index }}
+          path: packages/renderer/test-results/vitest-junit.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+
+  test-main:
+    name: Test (main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm --filter @taiji/electron run test:main
+
+  test-extensions:
+    name: Test (extensions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm extensions:test
+
+      # builtin-ext-bundle vitest 套件（scripts/__tests__/builtin-ext-bundle.test.mjs，TC3/TC4/TC7/TC8
+      # + checkManifest 6 失败分支）依赖 prepare-builtin-extensions.sh 预产出的 staged 产物
+      #（gitignored，fresh checkout 不存在）——先 prepare 再跑。pnpm exec 同 taste-lint step
+      # 理由（显式本地 bin，防 npx registry 静默拉版）。
+      - name: Prepare builtin extensions (staged bundles)
+        run: bash scripts/prepare-builtin-extensions.sh
+
+      - name: Test - builtin-ext-bundle
+        run: pnpm exec vitest run scripts/__tests__/builtin-ext-bundle.test.mjs
+
+      # R1-R3 新增 scripts 层护栏测试（check-unsafe-stream-writes / check-core-dist-gate /
+      # gitcode-release-sync，纯函数 + mock fetch，不依赖 staged 产物）接入 CI——护栏测试
+      # 自身也需要回归保护。
+      # npm-publish-surface-guard u3 同批追加 check-publish-surface（发布面守卫本体单测，
+      # vitest + tmpdir fixture 同上惯例）。
+      # session-root-discovery R2-MF1 同批追加 check-layout-literals / check-provider-credential-reads
+      # （守卫正则/白名单回归，同上 fixture 惯例不依赖 staged 产物）。
+      # 逐文件列举刻意维持（禁改目录级 vitest run scripts/__tests__/——builtin-ext-bundle.test.mjs
+      # 依赖上方 prepare 步骤的 staged 产物，目录级会把所有未登记测试一并拉进本 step）。
+      # constraints-registry 复审同批追加 validate-constraints（约束登记校验函数本体单测，
+      # 只读仓库既有文件不依赖 staged 产物，同上 fixture 惯例）。
+      # thinking-levels 守卫测试同批追加 check-thinking-levels（纯函数 + tmp mirror CLI 集成，
+      # mirror 内复制守卫副本运行、pi-ai 走 node_modules symlink，不依赖 staged 产物）。
+      - name: Test - scripts guards
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs
+
+  # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
+  # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
+  # 只需 chromium（无需 electron 二进制/build:e2e）。runner 用 macos-latest 与 baseline 生成
+  # 平台（macOS 本地）一致——ubuntu 无 CJK 字体（UI 全中文→tofu）且跨平台 chromium 渲染
+  # 差异大概率超 maxDiffPixelRatio 0.01 阈值（MF-6）。与 lint/typecheck/test 并行
+  # （非 needs 依赖故并行），但纳入 build 的 needs（E2E 失败阻塞 release 构建）。
+  e2e-visual:
+    name: E2E Visual (mock)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        run: npx playwright install chromium
+
+      - name: Run visual E2E (mock track)
+        env:
+          # visual 轨只需 chromium + vite（不需要 Electron 构建产物），跳过 globalSetup 的
+          # build:e2e 产物检查（fresh checkout 上 build:e2e 别名指向的 apps/electron 无此 script）
+          E2E_VISUAL_ONLY: '1'
+        run: npx playwright test e2e/visual
+
+      # token 消费 chromium 轨（scripts/token-consume-check.mjs）：真实 vite dev server + Tailwind
+      # JIT 产物 + chromium 验证 5 核心组件 computed style 取自 CSS 变量（与 vitest 契约轨双轨互补）。
+      # 本 job 已装 playwright chromium + 依赖，复用环境（MF-9 接线）。
+      - name: Token consume check (chromium track)
+        run: node scripts/token-consume-check.mjs
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-visual
+          path: test-results/
+          retention-days: 7
+
+  # E2E 行为轨 P0 smoke（mock 轨 electron-smoke project，2026-09-15 L1 层接线）：每 PR 固定跑
+  # 8 条 @p0-smoke 用例（_electron.launch + VITE_MOCK mock 构建产物，零 token / 零凭证 / 不 spawn pi）。
+  # 与 e2e-visual 的两个关键差异：① install 不设 ELECTRON_SKIP_BINARY_DOWNLOAD（_electron.launch
+  # 需要 node_modules/electron 真实二进制）；② 不设 E2E_VISUAL_ONLY（globalSetup 检出产物缺失时自动
+  # 跑 build:e2e，VITE_E2E/VITE_MOCK env 由 globalSetup 内部注入，不在本 YAML 复刻）。runner 用
+  # macos-latest 与 e2e-visual 一致（macOS 是 Electron 主开发平台，无需 xvfb）。圈定 SSOT =
+  # playwright.config.ts electron-smoke project 的 grep 标签；用例名单与四层定位框架见
+  # docs/TEST-STRATEGY.md「e2e 资产归宿纪律」。real 轨 spec（*-real）不进本 job（需真实 runtime
+  # /可能烧 token，归 L2 dev-flow 按改动面触发）。
+  e2e-behavior:
+    name: E2E Behavior P0 smoke (mock)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # 不设 ELECTRON_SKIP_BINARY_DOWNLOAD：行为轨 _electron.launch 需要 electron 二进制
+      - name: Install dependencies (with electron binary)
+        run: pnpm install --frozen-lockfile
+
+      # globalSetup 产物缺失时自动跑 build:e2e（不设 E2E_VISUAL_ONLY）；workers=1 串行
+      - name: Run behavior E2E P0 smoke (mock track)
+        run: npx playwright test --project=electron-smoke
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-behavior
+          path: test-results/
+          retention-days: 7
+
+  # D8b（integrity-hardening §3.8）护栏机制化：本地 pre-commit 挂的检查在此建立
+  # CI 等价拦截点，使本地 hooks 未安装/被 SKIP 时不变量仍有红灯。
+  # - 前两步直调 .githooks/ 自包含检查脚本（纯文件系统扫描，无 git index 依赖）；
+  # - 后两步等效实现 scripts/validate-runtime-bundle.sh 的静态段（[2/6] noExternal、
+  #   [3/6] 源码禁令）——该脚本无 preflight 模式，第 [1/6] 步起需构建产物无法在 CI
+  #   单独跑静态段，故等效实现并注明同步维护：改脚本对应段时须同步本 job。
+  # - U7b 新增：G1 pi 语义登记守卫 + G4 subagent 通道禁则（--all 全仓模式）。
+  # 只加红灯：不进 build needs，不阻塞发布链。
+  invariants:
+    name: Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      # C-proc-11 发布面一致性守卫（docs/design/npm-publish-surface-guard.md §3.3 D2）：
+      # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
+      # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
+      # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
+      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 7 包
+      # 8 档再同源直调守卫，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
+      # 见设计 D2）。
+      - name: Build dist packages (publish surface guard)
+        run: |
+          pnpm --filter @taiji/extension-protocol run build
+          pnpm --filter @taiji/session-delivery run build
+          pnpm --filter @zhushanwen/subagent-core run build
+          pnpm --filter @zhushanwen/subagent-core run build:bundle
+          pnpm --filter @zhushanwen/pi-rpc run build
+          pnpm --filter @zhushanwen/subagent-engine-sdk run build
+          pnpm --filter @zhushanwen/pi-subagent-cli run build
+          pnpm --filter @zhushanwen/zcode-subagent-cli run build
+
+      - name: Publish surface guard (C-proc-11)
+        run: node scripts/check-publish-surface.mjs
+
+      # ENV_WHITELIST_PREFIXES SSOT 单一性（与 pre-commit SKIP_ENV_WHITELIST_CHECK 同源）
+      - name: ENV whitelist SSOT check
+        run: python3 .githooks/check_env_whitelist_sync.py
+
+      # 路径白名单动态化（getConfigDir/getPiAgentDir，与 pre-commit SKIP_PATH_WHITELIST_CHECK 同源）
+      - name: Path whitelist check
+        run: python3 .githooks/check_path_whitelist.py
+
+      # 等效 validate-runtime-bundle.sh [3/6]：runtime 源码 CJS 兼容禁令。
+      # 豁免与脚本一致：plugin-host.ts / plugin-version-checker.ts（__dirname 兼容层）、
+      # __tests__（vitest ESM 直跑源码，import.meta 有效）。
+      - name: Runtime source bans (import.meta / globalThis.__dirname)
+        run: |
+          HITS=$(grep -rn "import\.meta" packages/runtime/src --include="*.ts" --exclude-dir=__tests__ 2>/dev/null | grep -v "plugin-host.ts\|plugin-version-checker.ts" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::runtime 源码使用了 import.meta（CJS bundle 下为 undefined）。与 scripts/validate-runtime-bundle.sh [3/6] 段同步维护"
+            echo "$HITS"
+            exit 1
+          fi
+          HITS=$(grep -rn "globalThis\.__dirname" packages/runtime/src --include="*.ts" --exclude-dir=__tests__ 2>/dev/null || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::runtime 源码使用了 globalThis.__dirname（CJS bundle 中恒为 undefined，用 typeof __dirname !== 'undefined' 兼容层）。与 scripts/validate-runtime-bundle.sh [3/6] 段同步维护"
+            echo "$HITS"
+            exit 1
+          fi
+
+      # 等效 validate-runtime-bundle.sh [2/6]：runtime dependencies（workspace:* 除外，tsup
+      # inline）必须列入 tsup.config.ts noExternal；native module（binding.gyp / prebuilds /
+      # *.node）必须保持 external，豁免判定与脚本一致。
+      - name: Runtime deps bundled (noExternal parity)
+        run: |
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+          const pkg = JSON.parse(fs.readFileSync("packages/runtime/package.json", "utf-8"));
+          const tsup = fs.readFileSync("packages/runtime/tsup.config.ts", "utf-8");
+          const m = tsup.match(/noExternal:\s*\[([^\]]+)\]/);
+          const noExternal = new Set(m ? m[1].split(/[,\n]/).map((s) => s.trim().replace(/["\x27]/g, "")).filter(Boolean) : []);
+          const isNative = (dep) => {
+            const dir = path.join("node_modules", dep);
+            try {
+              if (fs.existsSync(path.join(dir, "binding.gyp"))) return true;
+              if (fs.existsSync(path.join(dir, "prebuilds"))) return true;
+              const walk = (d) => fs.readdirSync(d, { withFileTypes: true })
+                .some((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith(".node")));
+              return walk(dir);
+            } catch { return false; }
+          };
+          const missing = Object.entries(pkg.dependencies || {})
+            .filter(([name, spec]) => !spec.startsWith("workspace:") && !noExternal.has(name) && !isNative(name))
+            .map(([name]) => name);
+          if (missing.length > 0) {
+            console.error("runtime 依赖未在 tsup noExternal 中: " + missing.join(" ") + " —— 修复：packages/runtime/tsup.config.ts noExternal 追加。与 scripts/validate-runtime-bundle.sh [2/6] 段同步维护");
+            process.exit(1);
+          }
+          console.log("noExternal parity OK (" + noExternal.size + " entries)");
+          '
+
+      # 包边界守卫（PR #185 review R1 F-3 / R2 S-6）：runtime→core 跨包相对 import 对依赖图
+      # 工具不可见（package.json / pnpm-lock 均无此边），仅靠注释契约。两条断言：
+      #  1. runtime 生产代码（排除 __tests__ 等价性测试直连源码模式）中 from '<相对>/core/src'
+      #     只许出现在 infra/pi/message-converter.ts（apply-entry 入口，W21/W22 包边界重评收敛）；
+      #  2. apply-entry 三件套（apply-entry.ts / apply-entry-convert.ts / apply-entry-utils.ts）
+      #     的 import 白名单 = @taiji/shared + 同目录互引——文件头声明的自包含契约（防止
+      #     core 内部 import 渗入连带 vue/pinia 进 runtime bundle，体积膨胀而非报错）。
+      - name: Runtime cross-package import guard (runtime→core + apply-entry closure)
+        run: |
+          HITS=$(grep -rnE "from ['\"][./]*core/src" packages/runtime/src --include="*.ts" --exclude-dir=__tests__ 2>/dev/null | grep -v "infra/pi/message-converter.ts" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::runtime 生产代码新增 core 相对 import（绕过 package.json 依赖图）。既有豁免仅 infra/pi/message-converter.ts（apply-entry 入口，W21/W22 收敛）；新增需求先在 runtime package.json 声明依赖或经 shared 下沉"
+            echo "$HITS"
+            exit 1
+          fi
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+          const dir = "packages/core/src/domain/chat";
+          const files = ["apply-entry.ts", "apply-entry-convert.ts", "apply-entry-utils.ts"];
+          const violations = [];
+          for (const f of files) {
+            const src = fs.readFileSync(path.join(dir, f), "utf8");
+            for (const m of src.matchAll(/from\s+["\x27]([^"\x27]+)["\x27]/g)) {
+              const spec = m[1];
+              if (spec === "@taiji/shared" || spec.startsWith("./apply-entry")) continue;
+              violations.push(`${f} -> ${spec}`);
+            }
+          }
+          if (violations.length > 0) {
+            console.error("apply-entry 三件套 import 白名单违规（只许 @taiji/shared + 同目录互引，防 vue/pinia 渗入 runtime bundle）：");
+            for (const v of violations) console.error("  " + v);
+            process.exit(1);
+          }
+          console.log("apply-entry closure OK (shared + intra-directory only)");
+          '
+
+      # G1 pi 语义登记守卫（pi-boundary-reliability §3.3 D7，与 pre-commit 同源直调）：
+      # registry schema / 探针存在性 / pi 三包 + runtime pin 四包版本门禁。
+      # 注：docs/** 在 paths-ignore 内——pi-semantics.json 单独变更不触发 CI，
+      # 此步覆盖代码/依赖侧变更（已知边界，D7 护栏设计通则登记）。
+      - name: pi semantics registry guard (G1)
+        run: node scripts/check-pi-semantics.mjs
+
+      # 引擎包边界守卫（W9，subagent-engine-protocolization，与 pre-commit 同源直调）：
+      # ① W1 SDK 边界（SDK 不得 import core，.githooks 守卫随 W9 挂载链同步进 CI）；
+      # ② W9 引擎包边界（packages/subagent-engine-* + pi/zcode-subagent-cli 不得
+      # 依赖/导入 core 内部路径 + DoD#2 exports/barrel 断言）。
+      - name: Engine package boundary guards (W9)
+        run: |
+          node .githooks/check-engine-sdk-boundary.mjs
+          node scripts/check-engine-package-boundary.mjs
+          node packages/subagent-core/scripts/check-engine-spawn-guard.mjs
+
+      # pi 构建期派生锚点守卫（pi-evolution-consistency §3.2 方向 1A / D2，与 pre-commit 同源直调）：
+      # 声明基准（build.yml env / prepare 脚本默认值 / extensions peerDeps 对根 package.json）
+      # + 实装基准（快照 piAiVersion / 快照新鲜度 / KNOWN_PI_API_TYPES / pi-tui 对 node_modules）。
+      # 与上行 G1 逐项零重叠（§2.1 分工声明）：语义漂移归 check-pi-semantics，派生锚点跟随归本守卫。
+      - name: pi sync derived anchors guard
+        run: node scripts/check-pi-sync.mjs
+
+      # G3 思考档位差分探针（pi-boundary-reliability D7-G3「CI invariants 同步」）：
+      # 能力注册表计算路径 vs pi-ai 同源函数直调逐模型比对——防 registry 自身漂移
+      #（U6 删 resolveAvailableLevels 后探针改守卫 registry，见脚本头注）。
+      - name: Thinking diff probe (G3)
+        run: node scripts/diff-probe-thinking.mjs
+
+      # G4 subagent 通道禁则（C-ext-19，与 pre-commit 同源脚本）：CI 无 staged
+      # 上下文，用 --all 全仓扫描模式（「本地 hook 被绕过时的等价拦截点」，D7 通则）。
+      - name: Subagent channel bans (G4, full-repo)
+        run: python3 .githooks/check_subagent_channels.py --all
+
+      # D9-① subagent-core 依赖闭包守卫（与 pre-commit 同源直调）：D9-① 闭包守卫：
+      # pre-commit 之外的 CI 面——闭包红线（零 pi SDK / 零宿主专属依赖 + worker
+      # 入口零宿主服务）在 PR invariants 上同源拦截，防本地 hook 被绕过（D7 通则，
+      # 同上行 G4 的挂载理由）。
+      - name: Subagent-core closure guard (D9-①)
+        run: node scripts/check-subagent-core-closure.mjs
+
+      # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
+      # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /
+      # 跨聚合私有访问禁 / 支撑文件方向门 + 环检测——本地 hook 仅单一 worktree 生效
+      #（core.hooksPath 局部安装），CI 面是跨 worktree 的等价拦截点（D7 通则，
+      # 同上行 D9-① 的挂载理由）。
+      - name: Subagent-service boundary guard (H3)
+        run: node scripts/check-subagent-service-boundary.mjs
+
+      # H4 record 持久化写面守卫（与 pre-commit 同源直调；守卫全量扫描
+      # packages/*/src + extensions/**/src 不依赖 staged 上下文）：store 外 record
+      # 写面直写（R1 六名写函数 + R2 subagent-record entry）零命中——本地 hook 按
+      # staged 路径触发，触发面外的包在 CI 面等价拦截（D7 通则，同上行 H3 /
+      # D9-① 的挂载理由）。
+      - name: Record write surface guard (H4)
+        run: node scripts/check-record-write-surface.mjs
+
+      # 流写逃逸护栏（2026-09-04 runtime 整机崩溃事故护栏，与 pre-commit 同源直调）：
+      # 裸流写 / socket error 未挂载静态扫描——防新增代码在事件回调里裸写半关闭/
+      # destroyed 流，逃逸为 uncaughtException → 整机 shutdown（D7 通则，CI 面同源拦截）。
+      - name: Unsafe stream writes guard
+        run: node scripts/check-unsafe-stream-writes.mjs
+
+      # A2 用户内容出站点守卫（adversarial-review-fixes D-A2-3，与 pre-commit 同源脚本）：
+      # runtime 的 .prompt( / .steer( / .followUp( 调用点必须登记白名单（文件 + 行内
+      # 指纹 + 内容性质 + 注入状态），未登记新调用点即拦截——防新增用户内容出站通路
+      # 忘挂 SkillInjector（MF-B @ 定向 / MF-C landing 首发同类缺口复发）。
+      - name: Prompt outposts guard (A2, full-repo)
+        run: python3 .githooks/check_prompt_outposts.py
+      # vitest alias ↔ tsconfig paths 一致性——subagent-core 深路径 alias（vitest
+      # 运行时解析）必须有 tsconfig paths 镜像（静态工具解析），两侧漂移即拦截
+      # （PR #198 曾因缺失镜像一次产生 138 条 unresolved-import 假阳性）。
+      - name: Alias-tsconfig sync guard
+        run: node scripts/check-alias-tsconfig-sync.mjs
+
+  # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
+  # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。
+  # needs gate：lint/typecheck + 4 个 test job + 两个 E2E job（visual 像素轨 + behavior P0 smoke 轨）
+  # 任一已知失败时不浪费 mac runner（mac 构建 5-8min）。
+  # （sdk-sync 已随 plugin-types SSOT 收敛删除——SDK 升权威源、runtime 薄壳 re-export，无同步可查。）
+  build:
+    name: Build
+    needs: [lint, typecheck, test-runtime, test-renderer, test-main, test-extensions, e2e-visual, e2e-behavior]
+    uses: ./.github/workflows/build.yml
+    with:
+      upload-artifacts: false
+      dir-only: true

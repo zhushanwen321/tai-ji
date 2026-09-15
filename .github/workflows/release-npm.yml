@@ -1,0 +1,134 @@
+name: Release NPM
+
+# npm 包发布（与 Electron 打包 release.yml 解耦）
+#
+# 触发方式：
+#   1. push tag `npm-*` — 正式发布（main 稳定发布线，tag 格式 `npm-<slug>-<date>-<time>`，见 docs/...）
+#   2. workflow_dispatch — 手动触发
+#
+# 注意：Electron 打包走 `v*` tag 前缀（release.yml），npm 走 `npm-*`，两套互不干扰。
+# dev-npm 预发布走另一条线（release-npm-dev.yml + changeset pre），与本 workflow 独立。
+
+on:
+  push:
+    tags:
+      - 'npm-*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-npm-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    # 只在 tag 推送或手动触发时运行（不在 PR 中运行）
+    if: startsWith(github.ref, 'refs/tags/npm-') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # 防御：main 稳定发布线绝不能在 prerelease 模式下跑。
+      # changeset publish() 首行 readPreState() 读 .changeset/pre.json，存在则把整批发到 dev dist-tag。
+      # 若 npm-prerelease.sh 还原失败（阶段 6 未执行）致 pre.json 残留 main，这里必须拦住。
+      # 与 release-npm-dev.yml 的“检查 pre.json 存在才发”对称（那条线检查存在，本线检查不存在）。
+      - name: Verify NOT in prerelease mode
+        run: |
+          if [ -f ".changeset/pre.json" ]; then
+            echo "::error::.changeset/pre.json 存在 — main 稳定发布不能在 prerelease 模式下运行。"
+            echo "这通常是 npm-prerelease.sh 还原失败（阶段 6 未执行）导致 pre.json 残留 main。"
+            echo "本地执行 \`pnpm changeset pre exit\` 并提交删除，或删掉 .changeset/pre.json 后重新触发。"
+            exit 1
+          fi
+          echo "No .changeset/pre.json — stable release mode confirmed."
+
+      - name: Build extension-protocol
+        run: pnpm --filter @taiji/extension-protocol build
+
+      - name: Build session-delivery
+        run: pnpm --filter @taiji/session-delivery build
+
+      # G2 构建入口显式化（docs/design/npm-publish-surface-guard.md §3.3 D4）：subagent-core
+      # 双档产物由显式步骤保证——此前发布流程中唯一构建入口是 smoke 副作用（仅档 1
+      # build），dist.bundle/（自包含 vendoring 档）无任何入口，tarball 缺货零报警
+      # （0.4.0/0.5.1 事故）。smoke 内部档 1 build 保留不动（D4：发布门自证可重复构建）。
+      - name: Build subagent-core
+        run: pnpm --filter @zhushanwen/subagent-core run build && pnpm --filter @zhushanwen/subagent-core run build:bundle
+
+      # W5/W7 引擎三包构建入口（MF-4 修复，约束 C-proc-11：新增产物档须同批挂
+      # workflow 构建步骤 + files 白名单条目 + 守卫覆盖，三者缺一不可）。SDK 的
+      # dist 是两个引擎 CLI dist 的 external 依赖解析目标（npm 形态经宿主
+      # node_modules），构建顺序必须在 CLI 之前。
+      # pi-rpc（C-proc-11 同批）：pi-subagent-cli dependencies 的 registry 解析目标
+      # （tsup noExternal 内联不豁免 npm install 面的依赖解析），必须先于 CLI 构建无
+      # 硬依赖（内联取 src），但 publish 前必须产出 dist——与 SDK 同层放最前。
+      - name: Build pi-rpc
+        run: pnpm --filter @zhushanwen/pi-rpc build
+
+      - name: Build subagent-engine-sdk
+        run: pnpm --filter @zhushanwen/subagent-engine-sdk build
+
+      - name: Build pi-subagent-cli
+        run: pnpm --filter @zhushanwen/pi-subagent-cli build
+
+      - name: Build zcode-subagent-cli
+        run: pnpm --filter @zhushanwen/zcode-subagent-cli build
+
+      # MF-4 防线：发布前 typecheck gate（与 Electron 线 pre-commit validate-runtime-bundle.sh 同级）。
+      # 历史教训：无 gate 时 TS 编译错误直接随源码发布成坏包（pi-ask-user@4.0.0 ESM 加载即崩）。
+      - name: Typecheck extensions
+        run: pnpm extensions:typecheck
+
+      # D9-② dist 发布回归门（subagent-core 包抽离 u1-guards）：npm 消费者视角
+      # 最小回路——build dist → require CJS dist（exports require 条件）→ golden
+      # 回放层免 LLM 免二进制。src 全绿不代表 dist 未坏（tsup 配置漂移/依赖升级/
+      # d.ts 缺陷），发布前强制验证。CI 首跑在下次发布管线（本地只做语法级接线）。
+      - name: Smoke subagent-core dist
+        run: node scripts/smoke-core-dist.mjs
+
+      # D9-① 闭包守卫（与上方 Smoke 同 job、publish 前同源直调）：发布前强制验证
+      # 依赖闭包红线（零 pi SDK / 零宿主专属依赖 + worker 入口零宿主服务）仍成立——
+      # 闭包漂移的包不该发布。CI 首跑在下次发布管线（本地只做语法级接线）。
+      - name: Subagent-core closure guard (D9-①)
+        run: node scripts/check-subagent-core-closure.mjs
+
+      # 发布面一致性守卫（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
+      # files 白名单 ↔ 构建产出双向对齐——幽灵条目拦截 + 产物目录反向覆盖 + 自包含探针。
+      # 硬拦截：红则 job 失败、changeset publish 不执行（报错含恢复指引）。
+      - name: Publish surface guard
+        run: node scripts/check-publish-surface.mjs
+
+      - name: Publish to npm
+        run: pnpm changeset publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## NPM Publish Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published all packages with pending changesets to npm." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This includes:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@taiji/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@taiji/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/pi-*\` extensions (publishes TS source, no build)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pre-publish gates: extensions typecheck + \`@zhushanwen/subagent-core\` dist smoke (build + CJS require + golden replay, D9-②) + publish surface guard (files whitelist ↔ built artifacts, C-proc-11)" >> "$GITHUB_STEP_SUMMARY"

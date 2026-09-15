@@ -1,0 +1,236 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.2.0). Leave empty to use package.json version.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── npm 产物契约 gate（fail-fast，先于三平台构建）─────────
+  # 独立 job 提前到 build 之前：若 npm 产物与 renderer 契约不一致（如 ask-user 误删
+  # 字段），三平台构建（mac/win/linux）不白烧数十分钟。
+  #
+  # npm 产物契约：renderer AskUserOverlay.vue 消费 activeQuestion.multiSelect，
+  # runtime boot 时 ensureMandatoryExtensions() 从 npm 安装 @zhushanwen/pi-ask-user。
+  # 若 Electron 发布（v*）先于 npm 发布（npm-*），产物中 ask_user 交互静默降级。
+  # （2026-08 事故：protocol 0.3.0 误删 allowComment/getAskUserComment，本地 restore 后
+  #   npm 仍长期服务删功能旧版，而打包流程无任何环节校验 npm 产物与 renderer 契约一致性）
+  # [HISTORICAL] 2026-08-10：契约字段由 allowComment 改为 multiSelect。PR #161 端到端
+  #   删除 comment feature（protocol/extension/renderer 三端同步删，CHANGELOG 记录），
+  #   renderer 不再消费 allowComment；gate 若仍检查它会导致 v0.8.61 起每次 Electron
+  #   发布必然失败（npm latest=7.0.1 已不含该字段）。字段更新为 renderer 实际消费的
+  #   multiSelect，防线意图不变：npm 产物必须含 renderer 消费的字段。
+  #
+  # 发布顺序约束（C-3，MANDATORY）：pre 模式期间（.changeset/pre.json 存在），正式
+  # Electron 发布（v* tag）必然被本 gate 拦截——prerelease 版本号（如 5.0.0-dev.0）不是
+  # npm 正式版，npm registry 上没有对应的正式版 tarball（或只有 dev dist-tag），gate 的
+  # check_pkg 会因版本/契约不符而 fail。**必须先 `changeset pre exit` 发 npm 正式版
+  # （npm-* tag），再发 Electron v***。违反此顺序 = Electron 发布失败。
+  # prerelease tag（v<version>-beta，ref 含 '-'）跳过本 gate：prerelease-test.sh 推送的
+  # beta 打包验证不依赖 npm 产物契约（npm 可能尚未发布，gate 硬拦截会让 prerelease 流程
+  # 必然失败）。workflow_dispatch 手工发布仍执行检查（真实发布路径，npm 契约必须成立）。
+  npm-contract-gate:
+    name: npm Contract Gate
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+
+    steps:
+      - name: Check npm extension artifacts match renderer contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 注意：坏版本 fast-fail 已收敛到下面的 tarball 内容契约检查（check_pkg 对 ask-user
+          # 源码限定 grep allowComment）——不再硬编码版本字面量（如 4.0.0），随版本推进不产生死代码。
+          check_pkg() {
+            local pkg="$1" field="$2" version tarball tmpdir
+            shift 2
+            # 限定 grep 范围到源码文件（MF-4 防线）：ask-user 的 README/ARCHITECTURE 文档
+            # 实测含 allowComment 字样，全目录递归 grep 会被文档残留命中——若源码误删该字段
+            # （4.0.0 事故变体），坏版本仍能通过本检查进入 Electron 产物，评论模式静默降级。
+            local include_args=("$@")
+            version=$(npm view "${pkg}" version 2>/dev/null || echo "none")
+            if [ "${version}" = "none" ]; then
+              echo "::error::npm 未发布 ${pkg} —— Electron 发布必须晚于 npm 发布（先发 npm-* 再发 v*）"
+              exit 1
+            fi
+            tarball=$(npm view "${pkg}@latest" dist.tarball)
+            tmpdir=$(mktemp -d)
+            # --max-time 30 --retry 3 --retry-delay 10：应对 npm registry 最终一致性
+            # （npm publish 后短时间内 dist.tarball 可能尚未全球同步，curl 偶发 403/404；
+            #   项目有 E403 事故史，见 AGENTS.md release 章节）
+            curl -fsSL --max-time 30 --retry 3 --retry-delay 10 "${tarball}" -o "${tmpdir}/pkg.tgz"
+            tar -xzf "${tmpdir}/pkg.tgz" -C "${tmpdir}"
+            # workspace: 协议残留检查：changeset publish 会把 workspace:^x.y.z 改写为实际版本号；
+            # 若改写遗漏（绕过 pnpm 直接 npm publish 或 changesets 版本解析异常），字面量会进
+            # tarball，运行时用户扩展安装（npm registry）因 workspace: 解析失败。
+            if grep -q 'workspace:' "${tmpdir}/package/package.json"; then
+              echo "::error::npm 上的 ${pkg}@${version} 的 package.json 含 workspace: 协议残留（changeset publish 未改写）—— 消费者 npm 安装会解析失败"
+              rm -rf "${tmpdir}"
+              exit 1
+            fi
+            if ! grep -rq "${include_args[@]}" "${field}" "${tmpdir}/package"; then
+              echo "::error::npm 上的 ${pkg}@${version} 不含 ${field}（发布产物与本地源码契约不一致）—— 先发布 npm-* 再发 Electron v*"
+              rm -rf "${tmpdir}"
+              exit 1
+            fi
+            echo "npm artifact OK: ${pkg}@${version} (contains ${field})"
+            rm -rf "${tmpdir}"
+          }
+          # ask_user 契约：协议层与扩展层都必须含 renderer 消费的 multiSelect 字段
+          # 源码范围限定：ask-user 只查 *.ts（index.ts + src/），protocol 只查 dist/ 的
+          # tsup 产物（*.mjs/*.d.mts）——文档（README/ARCHITECTURE）里的字段字样不再放行坏版本
+          # （MF-4 防线）。再排除 __tests__ 目录：随包发布的测试文件引用已删字段时也不放行
+          # 坏版本（与 typecheck 的 tsconfig 排除 __tests__ 口径一致，stale 测试不参与编译检查）。
+          check_pkg @zhushanwen/pi-ask-user "multiSelect" --include="*.ts" --exclude-dir=__tests__
+          check_pkg @taiji/extension-protocol "multiSelect" --include="*.mjs" --include="*.d.mts"
+
+  # ── 三平台并行构建（调用 reusable workflow）──────────────────
+  # build 逻辑收敛到 .github/workflows/build.yml，CI 和 release 共用，避免两份漂移。
+  build:
+    name: Build
+    needs: npm-contract-gate
+    # gate failed → build 不跑（fail-fast，省掉三平台 mac/win/linux 构建时间）；
+    # gate skipped（prerelease tag，ref 含 '-'）→ build 正常跑（prerelease 不受 npm 契约 gate 约束）。
+    if: ${{ !cancelled() && (needs.npm-contract-gate.result == 'success' || needs.npm-contract-gate.result == 'skipped') }}
+    uses: ./.github/workflows/build.yml
+    with:
+      upload-artifacts: true
+      version: ${{ inputs.version }}
+
+  # ── 汇总产物，创建 GitHub Release ──────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    # build success 才跑（gate failed → build skipped → release 不跑，fail-fast 干净，
+    # 不在 release job 报「artifact not found」这类误导性错误）；ref/dispatch 判断保持
+    # 原语义（v* tag 或 workflow_dispatch）。
+    if: >-
+      !cancelled() &&
+      needs.build.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # npm 产物契约 gate 已前移为独立 fail-fast job（npm-contract-gate），此处不再重复。
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find release-artifacts -type f | sort
+
+      # 三平台并行构建各自输出 manifest-<platform>.json（见 build.yml generate-manifest 步），
+      # download-artifact merge-multiple 把它们都拉到 release-artifacts/。
+      # 这里用 jq 合并三份为一个 manifest.json（assets 字段取并集），让 app 内自动升级
+      # fallback fetch 一个 manifest 就能查到全平台 asset 的 sha256。
+      # 若某平台产物缺失（极少见，如该平台无 .AppImage），manifest-{platform}.json 也缺失，
+      # jq -s 仍能处理剩余的（assets 取并集，version/releasedAt 取第一份）。
+      - name: Merge platform manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          # 没有 manifest-*.json 时跳过（兼容本地/旧构建），保留可能存在的 manifest.json
+          if ! ls manifest-*.json >/dev/null 2>&1; then
+            echo "[merge] 未找到 manifest-*.json，跳过合并"
+            exit 0
+          fi
+          # jq -s 把多个 JSON 对象 slurp 成数组：
+          #   version / releasedAt 取第一份（三平台构建自同一 package.json，值一致）
+          #   assets 取所有平台 assets 的并集（mac/win/linux 各自的 .dmg/.exe/.AppImage 等）
+          jq -s '{ version: .[0].version, releasedAt: .[0].releasedAt, assets: (map(.assets) | add) }' \
+            manifest-*.json > manifest.json
+          rm -f manifest-*.json
+          echo "[merge] 合并后的 manifest.json："
+          cat manifest.json
+
+      - name: Read version
+        id: changelog
+        run: |
+          VERSION=$(node -p "require('./apps/electron/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+
+          # Check if release notes file was uploaded as artifact
+          if [[ -f release-artifacts/release-notes.md ]]; then
+            echo "body=$(cat release-artifacts/release-notes.md)" >> "$GITHUB_OUTPUT"
+          else
+            # Fallback: generate from conventional commits
+            if [ -n "$LAST_TAG" ]; then
+              LOG_RANGE="$LAST_TAG..HEAD"
+            else
+              LOG_RANGE="HEAD~20..HEAD"
+            fi
+
+            EXCLUDE_PATTERN="^ci:|^chore:|^refactor:|^docs:|^test:|^style:|^build:"
+
+            extract_commits() {
+              local prefix="$1"
+              git log "$LOG_RANGE" --pretty=format:"%s" --no-merges --grep="^${prefix}" \
+                | grep -Ev "${EXCLUDE_PATTERN}" || true
+            }
+
+            strip_prefix() {
+              sed "s/^[a-zA-Z0-9()\\-]*:[[:space:]]*//" | sed 's/^/- /'
+            }
+
+            breaking=$(git log "$LOG_RANGE" --pretty=format:"%s" --no-merges --grep="breaking" | grep -Ev "${EXCLUDE_PATTERN}" || true)
+            feats=$(extract_commits "feat" | strip_prefix)
+            fixes=$(extract_commits "fix" | strip_prefix)
+            perfs=$(extract_commits "perf" | strip_prefix)
+
+            {
+              echo "body<<EOF"
+              echo "## What's Changed"
+              echo ""
+              if [ -n "$breaking" ]; then echo "### Breaking Changes"; echo "$breaking" | sed 's/^/- /'; echo ""; fi
+              if [ -n "$feats" ]; then echo "### Features"; echo "$feats"; echo ""; fi
+              if [ -n "$fixes" ]; then echo "### Bug Fixes"; echo "$fixes"; echo ""; fi
+              if [ -n "$perfs" ]; then echo "### Performance"; echo "$perfs"; echo ""; fi
+              if [ -z "$feats" ] && [ -z "$fixes" ] && [ -z "$perfs" ] && [ -z "$breaking" ]; then echo "- Initial release"; echo ""; fi
+              if [ -n "$LAST_TAG" ]; then echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${VERSION}"; fi
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.changelog.outputs.version }}
+          name: tai-ji v${{ steps.changelog.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          files: release-artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ── GitCode 镜像同步 ────────────────────────
+# 2026-09-16 起移除 CI 自动镜像（原 gitcode-sync job）：runner 跨境直传大附件
+# 必然超时（0.09-0.4MB/s），且镜像失败会污染 run conclusion 误导 verify-ci-release。
+# 镜像（仓库代码 + README + Release 附件）收敛到 merge skill 阶段 6.5 本地执行：
+#   scripts/gitcode-release-sync.mjs sync-from-github（下载+传附件）
+#   scripts/gitcode-release-sync.mjs push-repo --ref-source github（代码+README 镜像）

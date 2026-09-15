@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "engineId": "pi",
+    "description": "pi 引擎 golden 事件序列（统一 AgentEvent 形态——spawn-event-adapter/session-runner 翻译后的 onEvent 出口序列，即 journal 落盘形态）",
+    "source": "从 spawn-event-adapter.test.ts / session-runner 事件形状构造的典型流式序列：bash 工具调用（含 pendingTools 配对）→ 双段 text_delta → message_end（完整 usage）→ turn_end。字段形状与 handleSdkEvent 翻译产物逐一锚定（tool_start.toolName/args、tool_end.result/isError、text_delta.delta、message_end.usage 四项 token、turn_end）",
+    "recordedAt": "2026-08-25",
+    "usageMapping": "message_end.usage = pi SDK message.usage（input/output/cacheRead/cacheWrite 四项 + cost.total 投影为 cost）"
+  },
+  "events": [
+    { "type": "tool_start", "toolName": "bash", "args": { "command": "ls -la /tmp/probe" } },
+    {
+      "type": "tool_end",
+      "toolName": "bash",
+      "args": { "command": "ls -la /tmp/probe" },
+      "result": { "output": "total 0\ndrwxr-xr-x  2 user  staff  64 Aug 25 10:00:00 ." },
+      "isError": false
+    },
+    { "type": "thinking_delta", "delta": "目录为空，无需进一步检查。" },
+    { "type": "text_delta", "delta": "Probe directory is empty. " },
+    { "type": "text_delta", "delta": "Nothing to clean up." },
+    {
+      "type": "message_end",
+      "usage": { "input": 12599, "output": 17, "cacheRead": 512, "cacheWrite": 0, "cost": 0.0001 }
+    },
+    { "type": "turn_end" }
+  ],
+  "content": "Probe directory is empty. Nothing to clean up."
+}

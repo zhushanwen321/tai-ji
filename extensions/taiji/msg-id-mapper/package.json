@@ -1,0 +1,42 @@
+{
+  "name": "@zhushanwen/pi-msg-id-mapper",
+  "version": "1.0.8",
+  "description": "Client UUID ↔ user entry ID mapping extension for Pi — enables metadata preservation across sessions",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "taiji"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "msg-id",
+    "client-uuid",
+    "mapping"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  }
+}

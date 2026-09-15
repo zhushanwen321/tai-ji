@@ -1,0 +1,11 @@
+{"type": "session", "version": 3, "id": "s-compact-single", "timestamp": "2026-09-01T10:00:00.000Z", "cwd": "/Users/dev/work/demo"}
+{"type": "model_change", "id": "mc1", "parentId": null, "timestamp": "2026-09-01T10:00:05.000Z", "provider": "p-a", "modelId": "m-a"}
+{"type": "message", "id": "u1", "parentId": "mc1", "timestamp": "2026-09-01T10:00:10.000Z", "message": {"role": "user", "content": "第一轮问题", "timestamp": 0}}
+{"type": "message", "id": "a1", "parentId": "u1", "timestamp": "2026-09-01T10:00:20.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "text", "text": "第一轮回答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "message", "id": "u2", "parentId": "a1", "timestamp": "2026-09-01T10:00:30.000Z", "message": {"role": "user", "content": "第二轮问题", "timestamp": 0}}
+{"type": "model_change", "id": "mc2", "parentId": "u2", "timestamp": "2026-09-01T10:00:35.000Z", "provider": "p-b", "modelId": "m-b"}
+{"type": "message", "id": "a2", "parentId": "mc2", "timestamp": "2026-09-01T10:00:40.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "toolCall", "id": "tc-read", "name": "read", "arguments": "{\"x\":1}"}, {"type": "text", "text": "第二轮回答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "message", "id": "u3", "parentId": "a2", "timestamp": "2026-09-01T10:00:50.000Z", "message": {"role": "user", "content": "压缩前最后一问", "timestamp": 0}}
+{"type": "compaction", "id": "c1", "parentId": "u3", "timestamp": "2026-09-01T10:01:00.000Z", "summary": "此前对话的结构化摘要。", "firstKeptEntryId": "mc2", "tokensBefore": 54321, "details": {"readFiles": ["a.ts"], "modifiedFiles": ["b.ts"]}}
+{"type": "message", "id": "u4", "parentId": "c1", "timestamp": "2026-09-01T10:02:00.000Z", "message": {"role": "user", "content": "压缩后的问题", "timestamp": 0}}
+{"type": "message", "id": "a3", "parentId": "u4", "timestamp": "2026-09-01T10:02:10.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "text", "text": "压缩后的回答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}

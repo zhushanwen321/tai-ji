@@ -1,0 +1,38 @@
+{
+  "name": "@zhushanwen/pi-agent-ext",
+  "version": "1.2.1",
+  "description": "taiji extension for Pi — internal host commands for extension reload and system prompt fetch",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "taiji"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "agent",
+    "reload"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "@zhushanwen/pi-smart-context",
+  "version": "0.3.1",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal",
+    "startupConfig": [
+      {
+        "path": "config/smart-context-ext-config.json",
+        "content": {
+          "enabled": true,
+          "compactModel": {
+            "type": "ref",
+            "ref": ""
+          },
+          "reminderThresholds": [
+            200000,
+            400000,
+            600000
+          ],
+          "excludedModels": []
+        }
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "skills/",
+    "vitest.config.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  }
+}

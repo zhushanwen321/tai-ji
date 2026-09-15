@@ -1,0 +1,245 @@
+/**
+ * extension-ui store 单测 —— TC1：ask-user/dialog pending 的 session 级 SSOT。
+ *
+ * 覆盖：
+ * - hasPendingAskUser / hasPendingDialog 查询（核心：derivedStatus 入口）
+ * - addRequest requestId dedup（迁移自 useExtensionUI push 去重）
+ * - removeRequest（respond/cancel/timeout 出队）
+ * - clearSession（deleteSession 分区释放）
+ * - clearAllPending（runtime 重连全局清理）
+ * - recordsOf 响应式视图（组件订阅自动更新）
+ * - per-sessionId 分区隔离（A/B 互不干扰）
+ *
+ * store 只 import 类型，无 API 依赖，故无需 mock。
+ *
+ * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/extension-ui.test.ts
+ */
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useExtensionUIStore } from '@/stores/extension-ui'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
+
+/** 构造测试 ExtensionUIRequest（默认 ask-user 富交互请求） */
+function makeAskUser(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequest {
+  return {
+    sessionId: 'sess-A',
+    requestId: 'r1',
+    method: 'select',
+    askUser: true,
+    ...overrides,
+  }
+}
+
+/** 构造测试 ExtensionUIRequest（默认非 ask-user 的简单原语 dialog） */
+function makeDialog(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequest {
+  return {
+    sessionId: 'sess-A',
+    requestId: 'r1',
+    method: 'confirm',
+    ...overrides,
+  }
+}
+
+describe('useExtensionUIStore — hasPendingAskUser / hasPendingDialog', () => {
+  it('session 有 ask-user pending 返回 true，无返回 false；hasPendingDialog 查非 ask-user', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
+    store.addRequest('sess-A', makeDialog({ requestId: 'r2', method: 'confirm' }))
+
+    // r1 是 askUser → hasPendingAskUser(sess-A) === true
+    expect(store.hasPendingAskUser('sess-A')).toBe(true)
+    // sess-B 无任何 pending
+    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    // r2 非 askUser → hasPendingDialog(sess-A) === true
+    expect(store.hasPendingDialog('sess-A')).toBe(true)
+    // sess-B 无 dialog
+    expect(store.hasPendingDialog('sess-B')).toBe(false)
+  })
+
+  it('只有 dialog（无 ask-user）时 hasPendingAskUser 返回 false', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeDialog({ requestId: 'r1', method: 'input' }))
+
+    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingDialog('sess-A')).toBe(true)
+  })
+
+  it('未知 session 查询返回 false', () => {
+    const store = useExtensionUIStore()
+    expect(store.hasPendingAskUser('never')).toBe(false)
+    expect(store.hasPendingDialog('never')).toBe(false)
+  })
+})
+
+describe('useExtensionUIStore — addRequest requestId dedup', () => {
+  it('同 requestId 不重复追加', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
+    // 重复同 requestId（即便字段略不同也按 requestId 唯一化，迁移自 useExtensionUI push 去重）
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true, title: 'dup' }))
+
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+    expect(store.getRequestsBySession('sess-A')[0].requestId).toBe('r1')
+  })
+
+  it('不同 requestId 正常追加', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1' }))
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r2' }))
+
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(2)
+  })
+})
+
+describe('useExtensionUIStore — removeRequest', () => {
+  it('respond 后移除单个请求', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
+    store.addRequest('sess-A', makeDialog({ requestId: 'r2', method: 'confirm' }))
+
+    store.removeRequest('sess-A', 'r1')
+
+    // 只剩 r2（非 ask-user dialog）
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+    expect(store.getRequestsBySession('sess-A')[0].requestId).toBe('r2')
+    // r2 非 askUser → hasPendingAskUser 现在 false
+    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingDialog('sess-A')).toBe(true)
+  })
+
+  it('移除不存在的 requestId 是 no-op', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1' }))
+
+    expect(() => store.removeRequest('sess-A', 'nonexistent')).not.toThrow()
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+  })
+
+  it('移除后队列空 → hasPendingAskUser / hasPendingDialog 均 false', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
+    store.removeRequest('sess-A', 'r1')
+
+    expect(store.getRequestsBySession('sess-A')).toEqual([])
+    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingDialog('sess-A')).toBe(false)
+  })
+})
+
+describe('useExtensionUIStore — clearSession', () => {
+  it('deleteSession 清分区，不影响其他 session', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ sessionId: 'sess-A', requestId: 'r1' }))
+    store.addRequest('sess-B', makeAskUser({ sessionId: 'sess-B', requestId: 'r2' }))
+
+    store.clearSession('sess-A')
+
+    expect(store.getRequestsBySession('sess-A')).toEqual([])
+    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    // sess-B 不受影响
+    expect(store.getRequestsBySession('sess-B')).toHaveLength(1)
+    expect(store.hasPendingAskUser('sess-B')).toBe(true)
+  })
+
+  it('清除不存在的 session 是 no-op', () => {
+    const store = useExtensionUIStore()
+    expect(() => store.clearSession('never')).not.toThrow()
+  })
+})
+
+describe('useExtensionUIStore — clearAllPending', () => {
+  it('清空所有 session（runtime 重连清理）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ sessionId: 'sess-A', requestId: 'r1', askUser: true }))
+    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', method: 'confirm' }))
+
+    store.clearAllPending()
+
+    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    expect(store.getRequestsBySession('sess-A')).toEqual([])
+    expect(store.getRequestsBySession('sess-B')).toEqual([])
+  })
+})
+
+describe('useExtensionUIStore — recordsOf 响应式视图', () => {
+  it('addRequest 后响应式视图自动更新', () => {
+    const store = useExtensionUIStore()
+    const records = store.recordsOf('sess-A')
+
+    // 初始空
+    expect(records.value).toHaveLength(0)
+
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1' }))
+
+    // 响应式触发：computed 重算
+    expect(records.value).toHaveLength(1)
+    expect(records.value[0].requestId).toBe('r1')
+  })
+
+  it('removeRequest 后响应式视图自动更新', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1' }))
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r2' }))
+    const records = store.recordsOf('sess-A')
+    expect(records.value).toHaveLength(2)
+
+    store.removeRequest('sess-A', 'r1')
+
+    expect(records.value).toHaveLength(1)
+    expect(records.value[0].requestId).toBe('r2')
+  })
+
+  it('不同 session 的 recordsOf 互不干扰', () => {
+    const store = useExtensionUIStore()
+    const recordsA = store.recordsOf('sess-A')
+    const recordsB = store.recordsOf('sess-B')
+
+    store.addRequest('sess-A', makeAskUser({ sessionId: 'sess-A', requestId: 'r1' }))
+
+    expect(recordsA.value).toHaveLength(1)
+    expect(recordsB.value).toHaveLength(0)
+  })
+})
+
+describe('useExtensionUIStore — per-sessionId 分区隔离', () => {
+  it('A/B 互不干扰', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ sessionId: 'sess-A', requestId: 'r1', askUser: true }))
+    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r2', method: 'confirm' }))
+
+    // 各分区只含自己的请求
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+    expect(store.getRequestsBySession('sess-A')[0].requestId).toBe('r1')
+    expect(store.getRequestsBySession('sess-B')).toHaveLength(1)
+    expect(store.getRequestsBySession('sess-B')[0].requestId).toBe('r2')
+
+    // 查询也按分区隔离
+    expect(store.hasPendingAskUser('sess-A')).toBe(true)
+    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    expect(store.hasPendingDialog('sess-A')).toBe(false)
+    expect(store.hasPendingDialog('sess-B')).toBe(true)
+  })
+})
+
+describe('useExtensionUIStore — applyRecords 整体替换', () => {
+  it('整体替换该分区（不可变写触发响应式）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-A', makeAskUser({ requestId: 'r1' }))
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
+
+    // applyRecords 整体替换（runtime 推送全量列表场景）
+    store.applyRecords('sess-A', [
+      makeAskUser({ requestId: 'r3' }),
+      makeDialog({ requestId: 'r4' }),
+    ])
+
+    expect(store.getRequestsBySession('sess-A')).toHaveLength(2)
+    expect(store.hasPendingAskUser('sess-A')).toBe(true)
+    expect(store.hasPendingDialog('sess-A')).toBe(true)
+  })
+})

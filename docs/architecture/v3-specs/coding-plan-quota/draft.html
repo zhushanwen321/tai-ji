@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-palette="cold-blue">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Coding Plan 额度查询 — 设计 demo</title>
+<style>
+  /* === Design Tokens（严格对齐 docs/page-design/design-tokens.md 暗色冷蓝） === */
+  :root {
+    --bg: #1a1b1f;
+    --surface: #272830;
+    --surface-hover: #363740;
+    --surface-2: #2e2f38;
+    --bg-elevated: #313239;
+    --bg-input: #1e1f24;
+    --fg: #f7f8fc;
+    --muted: #a8a8b5;
+    --subtle: #82828f;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --accent: #4f8ef7;
+    --accent-hover: #6ba3ff;
+    --accent-soft: color-mix(in oklch, var(--accent) 12%, transparent);
+    --accent-ring: rgba(79,142,247,0.30);
+    --success: #22c55e;
+    --warning: #f5a524;
+    --danger: #ef4444;
+    --info: #38bdf8;
+    --reasoning: #a78bfa;
+    --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+    --warning-soft: color-mix(in oklch, var(--warning) 12%, transparent);
+    --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+    --info-soft: color-mix(in oklch, var(--info) 12%, transparent);
+
+    --font-sans: Inter, 'SF Pro Display', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+    --radius-sm: 3px;
+    --radius: 8px;
+    --radius-lg: 12px;
+
+    --shadow-1: 0 0 0 1px rgba(0,0,0,0.2);
+    --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
+    --shadow-glow: 0 0 0 3px rgba(79,142,247,0.25);
+
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --duration-fast: 120ms;
+    --duration: 200ms;
+    --duration-slow: 320ms;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  /* === 页面布局 === */
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  .page-head {
+    margin-bottom: 48px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .page-head h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 8px;
+  }
+  .page-head .sub {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .page-head .meta {
+    margin-top: 12px;
+    display: flex;
+    gap: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .page-head .meta span::before { content: '· '; color: var(--subtle); }
+  .page-head .meta span:first-child::before { content: ''; }
+
+  section.demo-block {
+    margin-bottom: 64px;
+  }
+  section.demo-block > h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  section.demo-block > h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  section.demo-block > .desc {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin-bottom: 24px;
+    margin-left: 32px;
+  }
+
+  /* 状态对比网格 */
+  .states-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  .state-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    /* overflow: hidden 移除：hover 浮层需溢出 composer-box 边界向上展开。
+       实际产品中 HoverCardContent portal 到 body 无此问题，demo 纯 CSS 模拟需放开裁剪。
+       圆角处边缘会略微露出 state-label 底色，作为视觉折中可接受。 */
+    overflow: visible;
+  }
+  /* state-label 自己保留圆角 + 底色，配合可见 overflow 维持顶部视觉 */
+  .state-card .state-label {
+    border-top-left-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-lg);
+  }
+  .state-card .state-label {
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .state-card .state-label .tag {
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .tag-ok { background: var(--success-soft); color: var(--success); }
+  .tag-warn { background: var(--warning-soft); color: var(--warning); }
+  .tag-danger { background: var(--danger-soft); color: var(--danger); }
+  .tag-info { background: var(--info-soft); color: var(--info); }
+  .tag-muted { background: rgba(255,255,255,0.06); color: var(--subtle); }
+  .state-card .state-body {
+    /* padding-top 加大到 260px 容纳完整 hover 浮层（浮层高约 230px + 8px gap）。
+       Settings 部分用单独的 .state-body.compact 覆盖回小 padding。 */
+    padding: 260px 20px 20px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 200px;
+  }
+  /* Settings 卡片不需要顶部留白（没有 hover 浮层溢出） */
+  .state-body.compact {
+    padding: 20px;
+  }
+
+  /* ============================================== */
+  /* === 1. Settings · ProviderEditModal 片段 === */
+  /* ============================================== */
+
+  /* 模拟 provider 编辑弹窗左侧「凭据配置 + 额度查询」片段 */
+  .provider-edit-fragment {
+    width: 360px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .pef-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .pef-header .title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .pef-header .subtitle {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .pef-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .pef-section:last-child { border-bottom: none; }
+  .pef-section-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  /* Setting Row（A 模式：标签左 + 控件右） */
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+  }
+  .setting-row .label {
+    font-size: 12.5px;
+    color: var(--fg);
+  }
+  .setting-row .label .hint {
+    color: var(--subtle);
+    font-size: 11px;
+    margin-left: 6px;
+  }
+
+  /* Input（模拟 @taiji/ui Input） */
+  .ui-input {
+    height: 28px;
+    padding: 0 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    font-size: 12px;
+    font-family: var(--font-sans);
+    outline: none;
+    transition: border-color var(--duration) var(--ease);
+  }
+  .ui-input:focus { border-color: var(--accent); box-shadow: var(--shadow-glow); }
+  .ui-input.password { width: 180px; }
+  .ui-input.cookie {
+    width: 100%;
+    min-height: 60px;
+    height: auto;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  /* Switch（模拟 @taiji/ui Switch） */
+  .ui-switch {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    background: var(--surface-hover);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background var(--duration) var(--ease);
+  }
+  .ui-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    background: var(--fg);
+    border-radius: 50%;
+    transition: transform var(--duration) var(--ease);
+  }
+  .ui-switch.on { background: var(--accent); }
+  .ui-switch.on::after { transform: translateX(14px); }
+
+  /* Button */
+  .ui-btn {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ui-btn-default {
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
+  .ui-btn-default:hover { background: var(--bg-elevated); }
+  .ui-btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .ui-btn-primary:hover { background: var(--accent-hover); }
+  .ui-btn-ghost {
+    background: transparent;
+    color: var(--muted);
+  }
+  .ui-btn-ghost:hover { background: var(--surface-hover); color: var(--fg); }
+
+  /* 状态指示行（测试查询结果） */
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    padding: 6px 0;
+  }
+  .status-line.success { color: var(--success); }
+  .status-line.error { color: var(--danger); }
+  .status-line.loading { color: var(--info); }
+  .status-line .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status-line.loading .dot {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* 帮助文案 */
+  .help-text {
+    font-size: 11px;
+    color: var(--subtle);
+    line-height: 1.5;
+    margin-top: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .help-text a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .help-text a:hover { text-decoration: underline; }
+
+  /* 内联额度预览（设置页内的「查看额度」展开） */
+  .quota-preview {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .quota-preview .qp-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 11.5px;
+  }
+  .quota-preview .qp-row .qp-label {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .quota-preview .qp-row .qp-value {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+  }
+
+  /* ====================================================== */
+  /* === 2. Composer · Model chip + HoverCard 额度浮层 === */
+  /* ====================================================== */
+
+  /* 模拟 composer-box 工具条 */
+  .composer-box {
+    width: 100%;
+    max-width: 640px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    /* overflow: hidden 移除：hover 浮层 position:absolute; bottom:100% 需向上溢出 composer-box。
+       实际产品中 HoverCardContent portal 到 body 无此问题，demo 纯 CSS 模拟需放开裁剪。
+       composer-input-area 自己保留顶部圆角，配合可见 overflow 维持顶部视觉。 */
+    overflow: visible;
+  }
+  .composer-input-area {
+    padding: 16px 16px 8px;
+    min-height: 56px;
+    color: var(--subtle);
+    font-size: 13px;
+    border-top-left-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-lg);
+  }
+  .composer-bar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px 8px;
+  }
+  .composer-bar .spacer { flex: 1; }
+
+  /* chip trigger（hover 与 click 复合区） */
+  .chip-trigger {
+    position: relative;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--subtle);
+    font-size: 11.5px;
+    border: none;
+    cursor: pointer;
+    transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip-trigger:hover {
+    background: var(--surface-hover);
+    color: var(--muted);
+  }
+  .chip-trigger .model-name {
+    color: var(--fg);
+    font-weight: 500;
+  }
+  /* trigger 上的微型额度指示器（可选） */
+  .quota-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    background: var(--accent-soft);
+    color: var(--accent);
+    line-height: 1.4;
+  }
+  .quota-dot.warn { background: var(--warning-soft); color: var(--warning); }
+  .quota-dot.danger { background: var(--danger-soft); color: var(--danger); }
+  .quota-dot::before {
+    content: '';
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* HoverCard 浮层（模拟 HoverCardContent） */
+  .hover-card {
+    position: absolute;
+    /* 浮层挂在 trigger 上方 */
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: 280px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-2);
+    z-index: 90;
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+    pointer-events: none;
+    transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+  }
+  .chip-trigger:hover .hover-card,
+  .chip-trigger.hover-static .hover-card {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  /* 静态展示态（demo 用，强制显示浮层） */
+  .chip-trigger.hover-static .hover-card { pointer-events: auto; }
+
+  /* 浮层 head */
+  .hc-head {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.015);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .hc-head .provider-name {
+    color: var(--muted);
+  }
+
+  /* 浮层 body */
+  .hc-body {
+    padding: 12px;
+  }
+
+  /* 当前窗口进度条（大） */
+  .current-window {
+    margin-bottom: 12px;
+  }
+  .cw-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .cw-label .name {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .cw-label .pct {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+  }
+  .cw-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .cw-bar .fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width var(--duration-slow) var(--ease);
+  }
+  .fill-accent { background: linear-gradient(to right, var(--accent), var(--accent-hover)); }
+  .fill-warning { background: var(--warning); }
+  .fill-danger { background: var(--danger); }
+  .cw-reset {
+    font-size: 10.5px;
+    color: var(--subtle);
+    font-family: var(--font-mono);
+  }
+
+  /* 3 窗口 stats（2+1 布局） */
+  .wins-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .win-cell {
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+  }
+  .win-cell.full {
+    grid-column: span 2;
+  }
+  .win-cell .wc-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 3px;
+  }
+  .win-cell .wc-value {
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    line-height: 1.2;
+  }
+  .win-cell .wc-value.warn { color: var(--warning); }
+  .win-cell .wc-value.danger { color: var(--danger); }
+  .win-cell .wc-value.muted { color: var(--subtle); font-weight: 500; }
+  .win-cell .wc-reset {
+    font-size: 10px;
+    color: var(--subtle);
+    margin-top: 2px;
+    font-family: var(--font-mono);
+  }
+
+  /* 浮层 footer */
+  .hc-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: var(--subtle);
+  }
+  .hc-footer .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    cursor: pointer;
+    transition: all var(--duration) var(--ease);
+  }
+  .hc-footer .refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* 未配置态浮层（引导去设置） */
+  .hc-empty {
+    padding: 16px 12px;
+    text-align: center;
+  }
+  .hc-empty .empty-icon {
+    width: 32px; height: 32px;
+    margin: 0 auto 8px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--subtle);
+    font-size: 16px;
+  }
+  .hc-empty .empty-text {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  .hc-empty .empty-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--duration) var(--ease);
+  }
+  .hc-empty .empty-btn:hover { background: var(--accent-hover); }
+
+  /* 图标（简单 SVG inline） */
+  .icon {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+  .icon-sm { width: 12px; height: 12px; }
+  .icon-lg { width: 16px; height: 16px; }
+
+  /* ============================================== */
+  /* === 合并浮层：Context Capacity + Coding Plan === */
+  /* ============================================== */
+  /* 紧凑型浮层：每行一个维度，对齐表格化布局，不花哨 */
+
+  .merged-card {
+    width: 260px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-2);
+    overflow: hidden;
+  }
+  .merged-card .mc-head {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.015);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .merged-card .mc-head .provider-name {
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: var(--font-sans);
+    font-size: 11px;
+  }
+  .merged-card .mc-body {
+    padding: 8px 12px;
+  }
+  .merged-card .mc-section-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 6px 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .merged-card .mc-section-label .tag-mini {
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  /* 紧凑行：label | bar | pct | reset 全部一行内（4 列 grid） */
+  .mc-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 32px 52px;
+    column-gap: 8px;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .mc-row .mc-row-label {
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+  .mc-row .mc-row-bar {
+    position: relative;
+    height: 4px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .mc-row .mc-row-bar .fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width var(--duration-slow) var(--ease);
+  }
+  .mc-row .mc-row-pct {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 11px;
+  }
+  .mc-row .mc-row-pct.warn { color: var(--warning); }
+  .mc-row .mc-row-pct.danger { color: var(--danger); }
+  .mc-row .mc-row-pct.muted { color: var(--subtle); font-weight: 500; }
+  .mc-row .mc-row-reset {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--subtle);
+    font-size: 9.5px;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* capacity 区（顶部，复用紧凑行结构但值是 token 数） */
+  .mc-cap-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+  }
+  .mc-cap-row .mc-cap-bar-wrap {
+    grid-column: 1 / -1;
+    height: 4px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 2px 0 4px;
+  }
+  .mc-cap-row .mc-cap-bar-wrap .fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+  .mc-cap-row .mc-cap-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .mc-cap-row .mc-cap-value {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+  }
+  .mc-cap-row .mc-cap-value .pct {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11px;
+    margin-left: 2px;
+  }
+
+  .merged-card .mc-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+  }
+  .merged-card .mc-footer {
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--subtle);
+    font-family: var(--font-mono);
+  }
+  .merged-card .mc-footer .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    font-size: 9.5px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all var(--duration) var(--ease);
+  }
+  .merged-card .mc-footer .refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* 合并浮层挂在 capacity chip 上方 */
+  .capacity-trigger {
+    position: relative;
+  }
+  .capacity-trigger .merged-card {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+    pointer-events: none;
+    transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+    z-index: 90;
+  }
+  .capacity-trigger:hover .merged-card,
+  .capacity-trigger.hover-static .merged-card {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  /* 提示气泡（页面底部说明） */
+  .hint-bubble {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    max-width: 320px;
+    padding: 12px 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-2);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    z-index: 1000;
+  }
+  .hint-bubble strong { color: var(--fg); }
+  .hint-bubble .close {
+    position: absolute;
+    top: 6px; right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--subtle);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  /* 响应式 */
+  @media (max-width: 880px) {
+    .states-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="page-head">
+    <h1>Coding Plan 额度查询 — 设计 demo</h1>
+    <div class="sub">Provider 设置增加 coding-plan 配置 · Composer hover 展示对应 provider 额度使用情况</div>
+    <div class="meta">
+      <span>暗色冷蓝（v3 design-tokens）</span>
+      <span>5 provider 预设</span>
+      <span>hover 浮层对齐 ContextCapacityPopover 模式</span>
+    </div>
+  </header>
+
+  <!-- ============================================== -->
+  <!-- 1. Settings · Provider 编辑弹窗 · 额度查询 Section -->
+  <!-- ============================================== -->
+  <section class="demo-block">
+    <h2><span class="num">1</span> Settings · Provider 编辑弹窗 — Coding Plan 额度查询</h2>
+    <div class="desc">在 ProviderEditModal 左侧「凭据配置」下方新增「Coding Plan 额度查询」Section。仅在 provider 命中内置预设（按 baseUrl / name 匹配）时显示。4 种状态对比。</div>
+
+    <div class="states-grid">
+
+      <!-- 状态 1：未启用 -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 1 · 未启用（默认）</span>
+          <span class="tag tag-muted">OFF</span>
+        </div>
+        <div class="state-body compact">
+          <div class="provider-edit-fragment">
+            <div class="pef-header">
+              <span class="title">智谱 GLM</span>
+              <span class="subtitle">provider · 已连接</span>
+            </div>
+            <div class="pef-section">
+              <div class="pef-section-title">凭据</div>
+              <div class="setting-row">
+                <span class="label">API Key</span>
+                <input class="ui-input password" type="password" value="••••••••••••••••" readonly />
+              </div>
+              <div class="setting-row">
+                <span class="label">Base URL</span>
+                <input class="ui-input" style="width:180px" value="https://bigmodel.cn/api" readonly />
+              </div>
+            </div>
+            <div class="pef-section">
+              <div class="pef-section-title">Coding Plan 额度查询</div>
+              <div class="setting-row">
+                <span class="label">启用额度查询 <span class="hint">查询 5h/周/月 配额使用</span></span>
+                <div class="ui-switch"></div>
+              </div>
+              <div class="help-text">
+                <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span>启用后将周期性查询 bigmodel.cn 的 coding-plan 配额。凭证复用上方 API Key。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态 2：API Key 类已配置 + 查询成功 -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 2 · API Key 类 · 查询成功</span>
+          <span class="tag tag-ok">OK</span>
+        </div>
+        <div class="state-body compact">
+          <div class="provider-edit-fragment">
+            <div class="pef-header">
+              <span class="title">智谱 GLM</span>
+              <span class="subtitle">provider · 已连接</span>
+            </div>
+            <div class="pef-section">
+              <div class="pef-section-title">Coding Plan 额度查询</div>
+              <div class="setting-row">
+                <span class="label">启用额度查询</span>
+                <div class="ui-switch on"></div>
+              </div>
+              <div class="setting-row">
+                <span class="label">认证方式 <span class="hint">复用 API Key</span></span>
+                <span style="font-size:11.5px;color:var(--success);display:inline-flex;align-items:center;gap:4px;">
+                  <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+                  已配置
+                </span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;">
+                <button class="ui-btn ui-btn-default">
+                  <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                  重新查询
+                </button>
+                <button class="ui-btn ui-btn-ghost">查看额度</button>
+              </div>
+              <div class="status-line success">
+                <span class="dot"></span>
+                <span>查询成功 · 2 分钟前更新</span>
+              </div>
+              <!-- 内联额度预览（点击「查看额度」展开） -->
+              <div class="quota-preview">
+                <div class="qp-row">
+                  <span class="qp-label">5h 滚动</span>
+                  <span class="qp-value">68% <span style="color:var(--subtle);font-weight:400;">· 剩 1h23m</span></span>
+                </div>
+                <div class="qp-row">
+                  <span class="qp-label">本周</span>
+                  <span class="qp-value">42% <span style="color:var(--subtle);font-weight:400;">· 剩 3d12h</span></span>
+                </div>
+                <div class="qp-row">
+                  <span class="qp-label">本月</span>
+                  <span class="qp-value" style="color:var(--subtle);">∞ 未订阅月度包</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态 3：Cookie 类已配置 -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 3 · Cookie 类 · 已配置</span>
+          <span class="tag tag-info">COOKIE</span>
+        </div>
+        <div class="state-body compact">
+          <div class="provider-edit-fragment">
+            <div class="pef-header">
+              <span class="title">小米 MiMo</span>
+              <span class="subtitle">provider · 已连接</span>
+            </div>
+            <div class="pef-section">
+              <div class="pef-section-title">Coding Plan 额度查询</div>
+              <div class="setting-row">
+                <span class="label">启用额度查询</span>
+                <div class="ui-switch on"></div>
+              </div>
+              <div style="margin-top:10px;">
+                <div style="font-size:11.5px;color:var(--fg);margin-bottom:4px;">Cookie <span style="color:var(--success);font-size:10.5px;">● 已配置</span></div>
+                <textarea class="ui-input cookie" readonly>sessionid=abc123def456；token=taiji789；platform_session=...（多行 cookie 字符串）</textarea>
+              </div>
+              <div class="help-text">
+                <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span>登录 <a href="#">platform.xiaomimimo.com</a> 后，浏览器 DevTools → Application → Cookies 复制完整 cookie 字符串</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;">
+                <button class="ui-btn ui-btn-default">
+                  <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                  测试查询
+                </button>
+              </div>
+              <div class="status-line success">
+                <span class="dot"></span>
+                <span>Cookie 有效 · 月用量 23%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态 4：查询失败 -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 4 · 查询失败（凭证过期）</span>
+          <span class="tag tag-danger">ERROR</span>
+        </div>
+        <div class="state-body compact">
+          <div class="provider-edit-fragment">
+            <div class="pef-header">
+              <span class="title">opencode.go</span>
+              <span class="subtitle">provider · 已连接</span>
+            </div>
+            <div class="pef-section">
+              <div class="pef-section-title">Coding Plan 额度查询</div>
+              <div class="setting-row">
+                <span class="label">启用额度查询</span>
+                <div class="ui-switch on"></div>
+              </div>
+              <div style="margin-top:10px;">
+                <div style="font-size:11.5px;color:var(--fg);margin-bottom:4px;">Cookie <span style="color:var(--danger);font-size:10.5px;">● 可能已过期</span></div>
+                <textarea class="ui-input cookie" readonly>session=expired_token_abc...（HTTP 302 重定向，cookie 已失效）</textarea>
+              </div>
+              <div class="help-text">
+                <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span>登录 <a href="#">opencode.ai</a> 后重新复制 cookie</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;">
+                <button class="ui-btn ui-btn-primary">更新 Cookie</button>
+                <button class="ui-btn ui-btn-ghost">重试查询</button>
+              </div>
+              <div class="status-line error">
+                <span class="dot"></span>
+                <span>查询失败 · HTTP 302（cookie 过期）</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- 2. Composer · 上下文容量 hover（合并 coding-plan） -->
+  <!-- ============================================== -->
+  <section class="demo-block">
+    <h2><span class="num">2</span> Composer · 上下文容量 hover — 合并 Coding Plan 信息</h2>
+    <div class="desc">hover 上下文容量 chip（<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-size:11px;">6.9万 · 6.9%</code>）时，浮层上半区展示上下文用量，下半区展示 Coding Plan 三窗口额度（5h / 本周 / 本月 + 每维度剩余时间）。未配置 coding-plan 时不显示下半区。布局紧凑，每窗口一行。</div>
+
+    <div class="states-grid">
+
+      <!-- 状态 A：正常（coding-plan 三窗口齐全） -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 A · 正常（智谱，三窗口）</span>
+          <span class="tag tag-ok">OK</span>
+        </div>
+        <div class="state-body">
+          <div class="merged-card">
+            <div class="mc-head">
+              <span>上下文容量</span>
+              <span class="provider-name">GLM-4.6</span>
+            </div>
+            <div class="mc-body">
+              <!-- capacity 区 -->
+              <div class="mc-cap-row">
+                <span class="mc-cap-label">已用 / 总量</span>
+                <span class="mc-cap-value">6.9K<span class="pct">/ 200K · 3.5%</span></span>
+                <div class="mc-cap-bar-wrap"><div class="fill fill-accent" style="width:3.5%"></div></div>
+              </div>
+              <div class="mc-divider"></div>
+              <!-- coding-plan 区 -->
+              <div class="mc-section-label">
+                Coding Plan <span class="tag-mini tag-ok">智谱</span>
+              </div>
+              <div class="mc-row">
+                <span class="mc-row-label">5h</span>
+                <div class="mc-row-bar"><div class="fill fill-accent" style="width:68%"></div></div>
+                <span class="mc-row-pct">68%</span>
+                <span class="mc-row-reset">剩 1h 23m</span>
+              </div>
+              <div class="mc-row">
+                <span class="mc-row-label">本周</span>
+                <div class="mc-row-bar"><div class="fill fill-accent" style="width:42%"></div></div>
+                <span class="mc-row-pct">42%</span>
+                <span class="mc-row-reset">剩 3d 12h</span>
+              </div>
+            </div>
+            <div class="mc-footer">
+              <span>2 分钟前更新</span>
+              <button class="refresh-btn">刷新</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态 B：高用量警告 -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 B · 高用量（Kimi，5h 76%）</span>
+          <span class="tag tag-warn">WARN</span>
+        </div>
+        <div class="state-body">
+          <div class="merged-card">
+            <div class="mc-head">
+              <span>上下文容量</span>
+              <span class="provider-name">Kimi K2</span>
+            </div>
+            <div class="mc-body">
+              <div class="mc-cap-row">
+                <span class="mc-cap-label">已用 / 总量</span>
+                <span class="mc-cap-value">12.3K<span class="pct">/ 128K · 9.6%</span></span>
+                <div class="mc-cap-bar-wrap"><div class="fill fill-accent" style="width:9.6%"></div></div>
+              </div>
+              <div class="mc-divider"></div>
+              <div class="mc-section-label">
+                Coding Plan <span class="tag-mini tag-warn">Kimi</span>
+              </div>
+              <div class="mc-row">
+                <span class="mc-row-label">5h</span>
+                <div class="mc-row-bar"><div class="fill fill-warning" style="width:76%"></div></div>
+                <span class="mc-row-pct warn">76%</span>
+                <span class="mc-row-reset">剩 48m</span>
+              </div>
+              <div class="mc-row">
+                <span class="mc-row-label">本周</span>
+                <div class="mc-row-bar"><div class="fill fill-accent" style="width:58%"></div></div>
+                <span class="mc-row-pct">58%</span>
+                <span class="mc-row-reset">剩 2d 5h</span>
+              </div>
+            </div>
+            <div class="mc-footer">
+              <span>1 分钟前更新</span>
+              <button class="refresh-btn">刷新</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态 C：仅月窗口（MiMo） -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 C · 仅月窗口（小米 MiMo）</span>
+          <span class="tag tag-info">MONTH</span>
+        </div>
+        <div class="state-body">
+          <div class="merged-card">
+            <div class="mc-head">
+              <span>上下文容量</span>
+              <span class="provider-name">MiMo-7B</span>
+            </div>
+            <div class="mc-body">
+              <div class="mc-cap-row">
+                <span class="mc-cap-label">已用 / 总量</span>
+                <span class="mc-cap-value">3.2K<span class="pct">/ 32K · 10.0%</span></span>
+                <div class="mc-cap-bar-wrap"><div class="fill fill-accent" style="width:10%"></div></div>
+              </div>
+              <div class="mc-divider"></div>
+              <div class="mc-section-label">
+                Coding Plan <span class="tag-mini tag-info">MiMo</span>
+              </div>
+              <div class="mc-row">
+                <span class="mc-row-label">本月</span>
+                <div class="mc-row-bar"><div class="fill fill-accent" style="width:23%"></div></div>
+                <span class="mc-row-pct">23%</span>
+                <span class="mc-row-reset">API 不提供</span>
+              </div>
+            </div>
+            <div class="mc-footer">
+              <span>2 分钟前更新</span>
+                <button class="refresh-btn">刷新</button>
+              </div>
+            </div>
+          </div>
+      <!-- 状态 D：未配置 coding-plan（只显容量） -->
+      <div class="state-card">
+        <div class="state-label">
+          <span>状态 D · 未配置 Coding Plan</span>
+          <span class="tag tag-muted">NONE</span>
+        </div>
+        <div class="state-body">
+          <div class="merged-card">
+            <div class="mc-head">
+              <span>上下文容量</span>
+              <span class="provider-name">DeepSeek V3</span>
+            </div>
+            <div class="mc-body">
+              <div class="mc-cap-row">
+                <span class="mc-cap-label">已用 / 总量</span>
+                <span class="mc-cap-value">8.1K<span class="pct">/ 64K · 12.7%</span></span>
+                <div class="mc-cap-bar-wrap"><div class="fill fill-accent" style="width:12.7%"></div></div>
+              </div>
+              <!-- 未配置 coding-plan：不显示下半区，不加 divider，不加 section-label。
+                   浮层自然比其他状态矮一截——这是预期行为，不强求等高。 -->
+            </div>
+            <div class="mc-footer">
+              <span>DeepSeek 无 Coding Plan</span>
+              <button class="refresh-btn">配置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 设计说明 -->
+    <div style="margin-top:20px;padding:12px 16px;background:var(--info-soft);border:1px solid color-mix(in oklch, var(--info) 25%, transparent);border-radius:var(--radius);font-size:12px;color:var(--info);line-height:1.6;">
+      <strong>布局原则</strong>：每个窗口严格一行（<code style="background:rgba(0,0,0,0.2);padding:1px 4px;border-radius:2px;font-size:10.5px;">标签 | 进度条 | 百分比 | 剩余时间</code>）。<strong>∞ 不显示</strong>：某窗口额度无限（未订阅/不支持）时整行隐藏，不占位。<strong>分档配色</strong>：&lt;70% 蓝 / 70-90% 黄 / &gt;90% 红。<strong>未配置 provider</strong>：浮层只保留容量区，footer 显示「无 Coding Plan」+ 配置按钮。
+    </div>
+    <div style="margin-top:12px;padding:12px 16px;background:var(--warning-soft);border:1px solid color-mix(in oklch, var(--warning) 25%, transparent);border-radius:var(--radius);font-size:12px;color:var(--warning);line-height:1.6;">
+      <strong>查询时机</strong>：hover 进入容量 chip 时主动触发一次查询（非后台轮询）。查询成功 → 更新缓存 + 展示；失败 → 展示旧缓存（不删除）+ runtime logger 落盘 log。并发保护：上一次未完成时不重复发起。
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- 3. 实际 hover 交互（可悬停体验） -->
+  <!-- ============================================== -->
+  <section class="demo-block">
+    <h2><span class="num">3</span> 实际 hover 交互体验</h2>
+    <div class="desc">下方为接近真实的 composer。鼠标 hover 到右侧 <code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-size:11px;">6.9万 · 6.9%</code> 容量 chip 上，浮层淡入显示（200ms 动效）。Model chip 回归纯模型切换，不再涉及额度。</div>
+
+    <div style="display:flex;justify-content:center;padding:200px 0 80px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);">
+      <div class="composer-box" style="max-width:560px;">
+        <div class="composer-input-area">把鼠标移到右侧「6.9万 · 6.9%」上 →</div>
+        <div class="composer-bar">
+          <button class="chip-trigger">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            <span>添加</span>
+          </button>
+          <span class="spacer"></span>
+          <!-- 容量 chip（本次合并 coding-plan 的挂载点） -->
+          <div class="capacity-trigger">
+            <span class="chip-trigger">
+              <span style="font-variant-numeric:tabular-nums;">6.9万</span>
+              <span>·</span>
+              <span style="font-variant-numeric:tabular-nums;">6.9%</span>
+            </span>
+            <!-- 合并浮层 -->
+            <div class="merged-card">
+              <div class="mc-head">
+                <span>上下文容量</span>
+                <span class="provider-name">GLM-4.6</span>
+              </div>
+              <div class="mc-body">
+                <div class="mc-cap-row">
+                  <span class="mc-cap-label">已用 / 总量</span>
+                  <span class="mc-cap-value">6.9K<span class="pct">/ 200K · 3.5%</span></span>
+                  <div class="mc-cap-bar-wrap"><div class="fill fill-accent" style="width:3.5%"></div></div>
+                </div>
+                <div class="mc-divider"></div>
+                <div class="mc-section-label">
+                  Coding Plan <span class="tag-mini tag-ok">智谱</span>
+                </div>
+                <div class="mc-row">
+                  <span class="mc-row-label">5h</span>
+                  <div class="mc-row-bar"><div class="fill fill-accent" style="width:68%"></div></div>
+                  <span class="mc-row-pct">68%</span>
+                  <span class="mc-row-reset">剩 1h 23m</span>
+                </div>
+                <div class="mc-row">
+                  <span class="mc-row-label">本周</span>
+                  <div class="mc-row-bar"><div class="fill fill-accent" style="width:42%"></div></div>
+                  <span class="mc-row-pct">42%</span>
+                  <span class="mc-row-reset">剩 3d 12h</span>
+                </div>
+              </div>
+              <div class="mc-footer">
+                <span>2 分钟前更新</span>
+                <button class="refresh-btn">刷新</button>
+              </div>
+            </div>
+          </div>
+          <!-- Model chip（纯模型切换，无额度） -->
+          <span class="chip-trigger">
+            <span class="model-name">GLM-4.6</span>
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.6;"><path d="M6 9l6 6 6-6"/></svg>
+          </span>
+          <span class="chip-trigger">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.66 4A2 2 0 0111.74 2h.52A2 2 0 0114.34 4l.32 1.34A6 6 0 0118 11v2a2 2 0 01-2 2H8a2 2 0 01-2-2v-2a6 6 0 013.34-5.66z"/><path d="M9 19h6"/></svg>
+            <span>auto</span>
+          </span>
+          <button class="ui-btn ui-btn-primary" style="margin-left:4px;">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+</body>
+</html>

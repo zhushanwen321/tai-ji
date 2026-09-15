@@ -1,0 +1,169 @@
+<template>
+  <!-- 非连接态分三种展示：
+       - connecting/disconnected/reconnecting：logo + 「连接中…」（过渡屏）
+       - restarting：logo + 「runtime 重启中…」（崩溃自动恢复，主进程在拉起新实例）
+       - failed：logo + 错误提示 + 重试按钮（自动重启用尽，需用户手动触发）
+       连接后渲染 AppShell。 -->
+  <div v-if="connectionState !== 'connected'" class="connecting-screen grid h-screen w-screen place-items-center bg-bg">
+    <div class="flex flex-col items-center gap-4">
+      <TaijiLogo :size="48" class="text-accent" />
+      <!-- runtime 重启中 -->
+      <template v-if="connectionState === 'restarting'">
+        <Loader2 class="size-4 animate-spin text-neutral-dim" />
+        <span class="text-[12.5px] text-neutral-dim">{{ t('connection.restarting') }}</span>
+      </template>
+      <!-- runtime 重启用尽，需手动重试 -->
+      <template v-else-if="connectionState === 'failed'">
+        <AlertCircle class="size-5 text-danger" />
+        <span class="text-[12.5px] text-neutral-mid">{{ t('connection.failed') }}</span>
+        <Button variant="default" size="sm" data-testid="runtime-retry-btn" @click="onRetry">
+          {{ t('connection.retry') }}
+        </Button>
+      </template>
+      <!-- 默认连接中（connecting/disconnected/reconnecting） -->
+      <span v-else class="text-[12.5px] text-neutral-dim">{{ t('connection.connecting') }}</span>
+    </div>
+  </div>
+  <template v-else>
+    <!-- L0 Shell 挂载点。traffic light 安全区在 AsideRegion 内（padding-top:52px，spec §三）。 -->
+    <AppShell />
+  </template>
+  <!-- Toast 通知：不再在根部固定挂载——ToastContainer 改 absolute 右上角锚定，挂载点
+       收敛到 main-panel 内两分支（PanelContainer main-area（chat 主区）/ MainPanel
+       overview/settings 兜底），避免遮 composer 与 drawer。 -->
+  <!-- renderer 崩溃恢复一次性提示条（crash-resilience §3.1 T2）：窗口级，URL query 标志驱动
+       （main 侧 reloadWindowAfterCrash 注入），useCrashRecoveryNotice 消费即清除标志
+       （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->
+  <CrashRecoveredBar />
+  <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
+       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
+  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
+</template>
+
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { Loader2, AlertCircle } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
+import TaijiLogo from '@/components/icons/TaijiLogo.vue'
+import AppShell from '@/components/shell/AppShell.vue'
+
+import CrashRecoveredBar from '@/components/ui/CrashRecoveredBar.vue'
+import { Button } from '@/components/ui/button'
+import { useConnection } from '@/composables/useConnection'
+import { useSidebar } from '@/composables/features/sidebar/useSidebar'
+import { bootstrapSettingsCore } from '@/composables/shell/useSettingsShell'
+import { usePermissionRequest } from '@/composables/shell/usePermissionRequest'
+import { PermissionRequestDialog } from '@taiji/ui/extension-host'
+import { useSettings, isDevMode, setFailed } from '@taiji/core'
+import { bootstrap } from '@taiji/core/bootstrap'
+import { resolvePlatform } from '@/platform/resolve-platform'
+import { bindForkNoticeEffect } from '@/composables/effects/useForkNoticeEffect'
+import { bindHandoffEffect } from '@/composables/effects/useHandoffEffect'
+import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSync'
+import { useCompactQueue } from '@/composables/panel/useCompactQueue'
+import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
+import { useMemoryPressure } from '@/composables/useMemoryPressure'
+import { hydrateStreamingIdleTimeout } from '@/composables/features/chat/streaming-idle-hydration'
+
+// 应用挂载（onMounted bootstrap 第 2 步）即提交连接编排（mock 模式 200ms 直进 connected；真 runtime 走端口发现）。
+// settings 域核心初始化（transport + 订阅注册）必须在 WS 连接前完成：
+// AppShell 仅在 connected 后渲染，若订阅注册留在 AppShell setup 会晚于 sendInitialState 首推 →
+// 首条 model.list / config.defaults 丢失 → settingsStore.models / defaultModel 永空
+// （模型选择器下拉空 + landing 按钮文案空，[HISTORICAL] 2026-08-05）。platform 注入归
+// main.ts resolvePlatform()（setup 期 settings init 消费点先于 onMounted）。
+bootstrapSettingsCore()
+
+const { t, locale } = useI18n()
+// 窗口标题随语言切换：太极（zh）/ TaiJi（en）。index.html 的 <title> 是渲染前的 fallback。
+// dev 模式加「 - dev」后缀，与打包版并存时窗口标题可区分（renderer 加载前的初始 title
+// 由 window-factory 设 'TaiJi dev'，此处接管后保持一致后缀）。
+watch(locale, () => {
+  document.title = t('app.title') + (isDevMode() ? ' - dev' : '')
+}, { immediate: true })
+const { state: connectionState, teardown, retryRuntime } = useConnection()
+// 启动编排（#1/#3）：连接建立后自动进 new-task landing（首次）或恢复最近 session。
+// 五步 bootstrap（onMounted）第 2 步 initConnection 提交连接编排——resolve = 编排已提交
+// 而非 connected（connectWs 异步握手不等待，D2 裁决②）；state==='connected' 是「连接成功」
+// 唯一可靠信号——watch 它触发 onConnected，appBootstrapped 守卫保证 HMR/重连幂等。
+const { onConnected } = useSidebar()
+// settings 订阅的 dispose（HMR/App 卸载销毁）+ models 兜底拉取（防订阅时序竞态）。
+// 订阅注册在 bootstrapSettingsCore（上见），此处只持有 dispose/refreshModels 句柄。
+const { dispose: disposeSettings, refreshModels } = useSettings()
+// RV1+RV2：fork 反馈行 + 后台分支通知全局订阅（session.forkNotice 广播 → transient feed；
+// useForkBranchNotify diff 分支状态 → 状态变化反馈行）。App setup 是全局 effect 作用域，
+// onScopeDispose 随 App 卸载退订（单实例，与 events.onGlobalType 范式一致）。
+bindForkNoticeEffect()
+// fast-handoff：订阅 session.handoffComplete 广播 → 复位源 session handingOff 态 + 刷新列表 + 跳转新 session。
+// 与 bindForkNoticeEffect 同范式（effect 层订阅，非 useChat switch）。onScopeDispose 随 App 卸载退订。
+bindHandoffEffect()
+// session 全量事件订阅编排：watch sessionStore.list，added → ensureStreamSubscription，removed → disposeSession。
+// 对齐派生态视野（isGenerating 由消息实体 per-session 惰性派生，D-3），消除惰性订阅盲区（非交互 session 终态事件丢失 → 侧栏卡 running）。
+// flush:'sync' 保证 appendSession 同 tick 建订阅（fork-ask 路径 send 前订阅就绪）。onScopeDispose 随 App 卸载退订。
+bindSessionStreamSync()
+// compact-queued-messages：初始化 useCompactQueue 单例。App setup 是全局 effect 作用域，
+// 首次调用绑定 app 级 scope（onScopeDispose 随 App 卸载触发，registerSessionCleanup 常驻，
+// 防模块级 onScopeDispose 警告与过早反注册）。
+useCompactQueue()
+// 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
+// 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
+// warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
+// 【oe-audit C2】此前全链零装配（hook 零调用方 = 双重休眠，impl-plan u7d「经 useRollingRestartStatus
+// 引用链生产挂载」登记失实——该文件仅注释引用范式）；本挂载补齐生产消费方。
+useMemoryPressure()
+// 入站超界帧守卫消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
+// core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态投影 + 切走切回重试订阅。
+// App setup 顶层装配（与 bindForkNoticeEffect 同区），teardown 在 onBeforeUnmount 配对；
+// 提示条由 Panel.vue 会话视图承接（InboundFrameDroppedNotice）。
+installInboundFrameGuard()
+// permissionRequest 全局弹窗状态（bus plugin-permission-request 驱动，session 无关）。
+// App 根挂载 PermissionRequestDialog，复用 ExtensionHost bridge 的 bus 单例。
+const perm = usePermissionRequest()
+// 五步启动编排（core bootstrap：providePlatform → initConnection → restoreSessions →
+// registerMountPoints → scanContributions）。ES1 最小 catch：任一步 reject 上抛在此可见
+// （错误不静默），connected 驱动的视图初始化走下方 watch（bootstrap 不等待 connected）。
+// tc 设计 §5.2 第三条（bootstrap 步骤失败）：catch 内 setFailed 置 failed 终止态 →
+// 上方 failed 分支渲染降级 UI（错误提示 + 重试按钮）。不置则 connectionState 停在
+// connecting，UI 永卡「连接中…」且无重试入口。
+onMounted(() => {
+  void bootstrap({ platform: resolvePlatform() }).catch((err) => {
+    console.error('[App] bootstrap failed', err)
+    setFailed()
+  })
+})
+// [W8] onConnected 内部用模块级 hasConnectedBefore 区分首次 vs 重连：
+// - 首次 connected → initApp（内部含 workspaceStore.load + presetCwd）
+// - 重连 connected → initApp 因 appBootstrapped 守卫直接 return，records 停留在断连前 stale 数据
+//   （runtime 可能重启后从磁盘重载了新记录，如另一窗口写入），故额外 fire-and-forget load() 刷新。
+//   hasConnectedBefore 与 appBootstrapped 同为模块级，组件卸载重挂（非模块重载）时保留值，
+//   避免新实例误判为「首次」再调 initApp（被守卫吞）导致 load 不刷新。
+watch(connectionState, (s) => {
+  if (s === 'connected') {
+    void onConnected()
+    // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
+    // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
+    if (import.meta.env.VITE_MOCK !== 'true') {
+      void refreshModels()
+      // streaming idle 阈值水合：持久化值注入 chat store，新 turn idle timer 按其挂载
+      //（timeout-streaming-ui-idle §5.3 D3 配置链；内部 best-effort，失败保持 core 默认）。
+      void hydrateStreamingIdleTimeout()
+    }
+  }
+})
+
+/** 用户点击「重试」：委托 IPC runtime-restart → 主进程 supervisor.restartRuntime。
+ *  重启成功后 supervisor 广播 runtime-port，onRuntimePort 监听自动重连 → 回到 connected。 */
+function onRetry(): void {
+  void retryRuntime()
+}
+
+onBeforeUnmount(() => {
+  teardown()
+  // 入站守卫消费编排解绑（与 setup 顶层 installInboundFrameGuard 配对：HMR/测试卸载后
+  // 重挂可再次安装；core 侧监听与 focus watch 不留残留）。
+  uninstallInboundFrameGuard()
+  // settings 订阅随 App 卸载销毁（HMR/测试场景）。不断在 AppShell unmount（断连）时销毁——
+  // 订阅跨断重连常驻（global handler 存于模块级 Map，重连后 dispatcher 复用，无需重注册）。
+  disposeSettings()
+})
+</script>
+

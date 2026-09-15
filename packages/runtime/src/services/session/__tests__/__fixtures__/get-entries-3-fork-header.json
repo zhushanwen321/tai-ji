@@ -1,0 +1,54 @@
+{
+ "__recordedAt": "2026-08-20T17:59:47.010Z",
+ "__piBin": "/Users/zhushanwen/Code/tai-ji-workspace/.pi-binary-cache/pi-0.84.1-darwin-arm64/pi-darwin-arm64",
+ "__sourceFixture": "packages/core/src/domain/session-trace/__fixtures__/real-fork-header.jsonl",
+ "__elapsedMs": 231,
+ "response": {
+  "id": "ge-1",
+  "type": "response",
+  "command": "get_entries",
+  "success": true,
+  "data": {
+   "entries": [
+    {
+     "type": "message",
+     "id": "u1",
+     "parentId": null,
+     "timestamp": "2026-08-16T01:00:01.000Z",
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "type": "text",
+        "text": "hi"
+       }
+      ]
+     }
+    },
+    {
+     "type": "message",
+     "id": "a1",
+     "parentId": "u1",
+     "timestamp": "2026-08-16T01:00:02.000Z",
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "hello"
+       }
+      ]
+     }
+    },
+    {
+     "type": "thinking_level_change",
+     "id": "c8d048cb",
+     "parentId": "a1",
+     "timestamp": "2026-08-20T17:59:47.006Z",
+     "thinkingLevel": "medium"
+    }
+   ],
+   "leafId": "c8d048cb"
+  }
+ }
+}

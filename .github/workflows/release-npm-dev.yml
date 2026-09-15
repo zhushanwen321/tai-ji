@@ -1,0 +1,138 @@
+name: Release NPM Dev
+
+# npm 预发布（beta/dev tag）
+#
+# 触发：push 到 `dev-npm-*` 分支
+# 产出：版本号 `-dev.*` 后缀，发布到 npm `dev` dist-tag
+# 消费者：npm install @taiji/extension-protocol@dev
+#         (及 @zhushanwen/pi-* extensions 的 dev 预发布)
+
+on:
+  push:
+    branches:
+      - 'dev-npm-*'
+
+concurrency:
+  group: release-npm-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  prerelease:
+    name: Publish prerelease to npm
+    runs-on: ubuntu-latest
+    # 只在分支 push 时触发，PR 中的 push不触发
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build extension-protocol
+        run: pnpm --filter @taiji/extension-protocol build
+
+      - name: Verify prerelease mode is active
+        id: check_pre
+        run: |
+          if [ ! -f ".changeset/pre.json" ]; then
+            echo "::warning::No .changeset/pre.json found — this branch was not prepared via npm-prerelease.sh."
+            echo "::warning::Publishing now would release to the \`latest\` dist-tag instead of \`dev\`."
+            echo "::warning::Aborting to prevent accidental stable release. Run \`bash scripts/npm-prerelease.sh\` locally first."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found .changeset/pre.json — prerelease mode active."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # dev 线缺口补齐（G3，docs/design/npm-publish-surface-guard.md §2.1/§3.3 D2）：
+      # session-delivery 此前仅正式线有 build 步骤，dev 线 publish 时磁盘无 dist
+      # 会发出坏包（与 subagent-core 事故同型剧本）。与 Smoke / Publish 同条件挂载
+      # ——skip 分支不发布即不构建，维持该 job「warning + skip、整体绿」既有语义。
+      - name: Build session-delivery
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @taiji/session-delivery build
+
+      # G2 构建入口显式化（D4）：subagent-core 双档（dist/ + dist.bundle/ 自包含档）
+      # 此前在 dev 线无任何构建入口（smoke 副作用仅档 1 build）。
+      - name: Build subagent-core
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/subagent-core run build && pnpm --filter @zhushanwen/subagent-core run build:bundle
+
+      # W5/W7 引擎三包构建入口（MF-4 修复，约束 C-proc-11 三者闭合）。SDK 先于
+      # 两个引擎 CLI 构建（CLI dist 的 external 依赖在 npm 形态解析到 SDK dist）。
+      # 与 Publish 同条件挂载——skip 分支不发布即不构建，维持「skip 整体绿」语义。
+      # pi-rpc（C-proc-11 同批）：pi-subagent-cli dependencies 的 registry 解析目标，
+      # publish 前必须产出 dist（与正式线同位置同语义）。
+      - name: Build pi-rpc
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/pi-rpc build
+
+      - name: Build subagent-engine-sdk
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/subagent-engine-sdk build
+
+      - name: Build pi-subagent-cli
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/pi-subagent-cli build
+
+      - name: Build zcode-subagent-cli
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/zcode-subagent-cli build
+
+      # D9-② dist 发布回归门（对齐 release-npm.yml 的 Smoke step）：正常入口
+      # npm-prerelease.sh 阶段 1.5 已含 smoke，此处兜底绕过该脚本直接 push
+      # dev-npm-* 分支触发的场景。与 Publish 同条件——未准备 pre.json 的分支
+      # 不发布也不跑 smoke（维持该 job「warning + skip、整体绿」的既有语义）。
+      - name: Smoke subagent-core dist
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: node scripts/smoke-core-dist.mjs
+
+      # 发布面一致性守卫（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
+      # 与正式线 release-npm.yml 同源直调（幽灵条目 + 反向覆盖 + 自包含探针）。
+      # 与 Smoke / Publish 同条件挂载——skip 分支不发布，发布面校验无对象，
+      # 空跑构建反而破坏「skip 整体绿」语义（npm-prerelease.sh 阶段 4 轮询
+      # CI conclusion，误红会被当发布失败）。
+      - name: Publish surface guard
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: node scripts/check-publish-surface.mjs
+
+      - name: Publish prerelease to npm
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm changeset publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skipped publish (no pre.json)
+        if: steps.check_pre.outputs.should_publish != 'true'
+        run: |
+          echo "## Publish Skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No \`.changeset/pre.json\` — branch was not prepared via \`npm-prerelease.sh\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Run \`bash scripts/npm-prerelease.sh\` locally, commit the generated pre.json + version bumps, then push again." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          echo "## NPM Prerelease Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Branch: \`$BRANCH\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published to npm \`dev\` dist-tag." >> "$GITHUB_STEP_SUMMARY"
+          echo "Includes all packages with pending changesets:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@taiji/extension-protocol\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/pi-*\` extensions + quota-providers" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install: \`npm install @taiji/extension-protocol@dev\`" >> "$GITHUB_STEP_SUMMARY"

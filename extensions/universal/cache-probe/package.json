@@ -1,0 +1,42 @@
+{
+  "name": "@zhushanwen/pi-cache-probe",
+  "version": "0.3.1",
+  "description": "Zero-impact Pi probe extension — records system prompt / tools fingerprint hashes into session custom entries (only on change) to attribute LLM prompt-cache miss to prefix drift vs server-side eviction.",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "cache",
+    "observability",
+    "prompt-caching"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts",
+    "analyze.py"
+  ],
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "name": "@zhushanwen/pi-subagent-workflow",
+  "version": "8.14.0",
+  "type": "module",
+  "main": "index.ts",
+  "description": "Unified subagent execution and multi-agent workflow orchestration for Pi — spawned-process agent runtime with sync/background modes, stateful workflow management with persistence, state machine, and execution tracing.",
+  "keywords": [
+    "pi-package",
+    "extension",
+    "subagent",
+    "agent-runtime",
+    "workflow",
+    "orchestration",
+    "multi-agent"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.ts",
+    "skills/",
+    "scripts/",
+    "relay/",
+    "src/index.ts",
+    "src/jsonl-run-store.ts",
+    "src/session-lifecycle.ts",
+    "src/host/",
+    "src/injectors/",
+    "src/interface/"
+  ],
+  "taiji": {
+    "role": "universal",
+    "subagentEngines": [
+      "pi",
+      "zcode"
+    ],
+    "startupConfig": [
+      {
+        "path": "subagents/config.json",
+        "content": {
+          "version": 1,
+          "maxConcurrent": 6
+        }
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run",
+    "test:isolated": "env $(env | grep -o '^PI_SUBAGENT_[A-Z_]*' | sed 's/^/-u /' | tr '\n' ' ') vitest run"
+  },
+  "dependencies": {
+    "@taiji/extension-protocol": "workspace:*",
+    "@taiji/session-delivery": "workspace:*",
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/subagent-core": "workspace:*",
+    "@zhushanwen/pi-subagent-cli": "workspace:*",
+    "@zhushanwen/zcode-subagent-cli": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
+    "@zhushanwen/pi-pending-notifications": "workspace:*",
+    "@zhushanwen/pi-structured-output": "workspace:*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@zhushanwen/pi-structured-output": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "_meta": "Golden snapshots for BgNotifier.buildLlmContent — captured pre-migration (commit HEAD at time of capture). Used by migration verification to ensure zero behavioral regression.",
+  "single_closed_success": {
+    "input": { "id": "sa-ptr-7", "status": "closed", "agent": "worker", "result": "done", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"worker\" (sa-ptr-7) completed. Result:\ndone"
+  },
+  "single_closed_with_sessionfile": {
+    "input": { "id": "sa-ptr-2", "status": "closed", "agent": "w", "result": "final result", "sessionFile": "/tmp/sessions/child-2.jsonl", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-2) completed. Result:\nfinal result\n\nFull transcript: /tmp/sessions/child-2.jsonl"
+  },
+  "single_running_round": {
+    "input": { "id": "sa-ptr-4", "status": "running", "agent": "w", "round": 2, "result": "round2 text", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-4) finished a round. Reply:\nround2 text"
+  },
+  "single_running_round_with_sessionfile": {
+    "input": { "id": "sa-ptr-1", "status": "running", "agent": "w", "round": 1, "result": "round1 text", "sessionFile": "/tmp/sessions/child-1.jsonl", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-1) finished a round. Reply:\nround1 text\n\nFull transcript: /tmp/sessions/child-1.jsonl"
+  },
+  "single_cancelled": {
+    "input": { "id": "sa-ptr-5", "status": "closed", "closedReason": "cancelled", "agent": "w", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-5) cancelled."
+  },
+  "single_gc_failed": {
+    "input": { "id": "sa-ptr-6", "status": "closed", "closedReason": "gc", "agent": "w", "error": "spawn EPIPE", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-6) failed: spawn EPIPE"
+  },
+  "single_gc_failed_with_patchfile": {
+    "input": { "id": "sa-ptr-8", "status": "closed", "closedReason": "gc", "agent": "w", "error": "spawn EPIPE", "patchFile": "/tmp/patches/sa-ptr-8.patch", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-ptr-8) failed: spawn EPIPE"
+  },
+  "single_closed_with_patchfile_and_sessionfile": {
+    "input": { "id": "sa-ptr-3", "status": "closed", "agent": "w", "result": "did work", "patchFile": "/tmp/patches/sa-ptr-3.patch", "sessionFile": "/tmp/sessions/child-3.jsonl", "startedAt": 1, "endedAt": 2 },
+    "output_contains": "git apply /tmp/patches/sa-ptr-3.patch",
+    "output_ends_with": "\n\nFull transcript: /tmp/sessions/child-3.jsonl"
+  },
+  "single_closed_totalrounds": {
+    "input": { "id": "sa-rounds-1", "status": "closed", "agent": "w", "totalRounds": 3, "result": "", "sessionFile": "/tmp/sessions/child-rounds.jsonl", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-rounds-1) completed after 3 rounds. Result:\n\n\nFull transcript: /tmp/sessions/child-rounds.jsonl"
+  },
+  "single_closed_no_totalrounds": {
+    "input": { "id": "sa-rounds-2", "status": "closed", "agent": "w", "result": "done", "sessionFile": "/tmp/sessions/child-oneshot.jsonl", "startedAt": 1, "endedAt": 2 },
+    "output": "Subagent \"w\" (sa-rounds-2) completed. Result:\ndone\n\nFull transcript: /tmp/sessions/child-oneshot.jsonl"
+  },
+  "batch_two_closed": {
+    "description": "Two closed records merged in one message (simulating 60s merge window)",
+    "records": [
+      { "id": "batch-1", "status": "closed", "agent": "w1", "result": "result1", "startedAt": 1, "endedAt": 2 },
+      { "id": "batch-2", "status": "closed", "agent": "w2", "result": "result2", "startedAt": 3, "endedAt": 4 }
+    ],
+    "separator": "\n\n---\n\n",
+    "details_shape": { "batch": true, "items": "array-of-records" }
+  }
+}

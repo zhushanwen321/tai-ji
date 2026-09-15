@@ -1,0 +1,45 @@
+{
+  "name": "@taiji/runtime",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:equivalence": "vitest run src/__tests__/equivalence/"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.84.4",
+    "@iarna/toml": "^2.2.5",
+    "@taiji/core": "workspace:*",
+    "@taiji/extension-protocol": "workspace:*",
+    "@taiji/session-delivery": "workspace:*",
+    "@taiji/shared": "workspace:*",
+    "@zhushanwen/pi-file-lock": "workspace:*",
+    "@zhushanwen/pi-rpc": "workspace:*",
+    "@zhushanwen/subagent-core": "workspace:*",
+    "taiji-plugin-sdk": "workspace:*",
+    "chokidar": "^4.0.1",
+    "fast-glob": "^3.3.3",
+    "node-pty": "^1.0.0",
+    "semver": "^6.3.1",
+    "tar": "^7.5.16",
+    "ws": "^8"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/semver": "^7.7.1",
+    "@types/ws": "^8",
+    "@vitest/coverage-v8": "^4.1.9",
+    "proper-lockfile": "4.1.2",
+    "tsup": "^8.5.1",
+    "tsx": "^4",
+    "typescript": "^5.8",
+    "vitest": "^4.1.6",
+    "vue": "^3.5"
+  }
+}

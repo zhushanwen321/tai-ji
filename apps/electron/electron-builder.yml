@@ -1,0 +1,232 @@
+appId: com.taiji.app
+productName: 太极
+# electron-builder 在 linux AppImage 上 fallback 用 package.json name（@taiji/electron）
+# 去斜杠后变成 @taijielectron，AppImage 拒绝 @ 字符，故显式指定。
+# executableName / artifactName 统一用 TaiJi（拼音），与 productName「太极」品牌一致：
+# - 用拼音而非中文：可执行文件名 / 下载包名含中文有路径编码与跨工具链风险，拼音零风险。
+# - 不考虑 ≤0.8.40 旧版本自动升级兼容（旧版需手动下载新版重装），故 artifactName 可直接改名；
+#   release-checker.ts ASSET_PATTERNS / postbuild-validate.sh / README 下载指引已同步改为 TaiJi-*。
+executableName: TaiJi
+directories:
+  output: dist/builder-output
+asar: true
+files:
+  - dist/main/**/*
+  - dist/preload/**/*
+  - dist/runtime/**/*   # asarUnpack 的前提：files 必须先包含，才能 unpack
+  # renderer 产物：packages/renderer build 输出到 apps/electron/renderer/dist
+  #（vite.config.ts build.outDir），main 进程 loadFile('renderer/dist/index.html') 依赖此路径
+  - renderer/dist/**/*
+  - package.json
+  # ══════════════════════════════════════════════════════════════
+  # files 规则（违反导致打包膨胀或缺文件）
+  # ──────────────────────────────────────────────────────────────
+  # 只打包主进程直接 require 的包；其余已被 tsup bundle 进 runtime
+  # 新增主进程依赖时必须同步更新此列表
+  # 检查：scripts/preflight-check.sh
+  # ══════════════════════════════════════════════════════════════
+  - node_modules/electron-store/**/*
+  - node_modules/is-glob/**/*
+  - node_modules/markdown-it-footnote/**/*
+  - node_modules/@types/markdown-it-footnote/**/*
+  # node-pty（native module）：runtime 通过 external 引用，必须打包进产物。
+  # native binary（.node + spawn-helper）靠 asarUnpack 解包，子进程才能加载。
+  - node_modules/node-pty/**/*
+  # 排除
+  - "!node_modules/**/test/**"
+  - "!node_modules/**/tests/**"
+  - "!node_modules/**/*.md"
+  - "!node_modules/**/*.map"
+  - "!node_modules/**/*.ts"
+  # 警告：asarUnpack 只作用于已被 files 包含的文件。
+  # 如果在此排除 dist/runtime，asarUnpack 将无文件可解压，
+  # 导致打包产物中缺失整个 runtime，应用启动即崩溃。
+  # 历史回归：2026-05-31 因添加 '!dist/runtime/**/*' 导致 0.3.8 DMG 无法启动。
+  - "!dist/builder-output/**/*"
+
+# runtime 预编译产物必须排除在 asar 之外，
+# 因为 Node.js 子进程无法直接读取 asar 内的文件。
+# 关键约束：asarUnpack 只作用于已被 files 包含的文件。
+# dist/runtime 必须在 files 中存在，然后 asarUnpack 会把它从 asar
+# 中剔除到 app.asar.unpacked/ 目录。如果 files 排除了 dist/runtime，
+# 这里只会静默失败，产物中不会有 app.asar.unpacked/dist/runtime/。
+# 检查：scripts/preflight-check.sh [7/11] asarUnpack vs files consistency
+asarUnpack:
+  - "dist/runtime/**/*"
+  # node-pty native binary（prebuilds/<platform>/pty.node + spawn-helper）
+  # 必须解包到 app.asar.unpacked，子进程（runtime）才能 require .node 和 exec spawn-helper。
+  # spawn-helper 需 +x 权限（见 scripts/fix-node-pty-permissions.sh，postinstall 自动修）。
+  - "node_modules/node-pty/**/*"
+
+# pi Bun binary + bundled agent (extensions + skills)
+# from 路径相对于 apps/electron/（electron-builder 的工作目录）
+extraResources:
+  - from: resources/pi
+    to: pi
+    filter:
+      - "**/*"
+      - "!**/*.tar.gz"
+      - "!**/*.zip"
+  # builtin pi extensions（@zhushanwen/pi-* 包，数量以 mandatory-extensions.json SSOT 为准，
+  # 打包内置，不走 Settings 推荐安装——旧推荐安装机制已废弃 2026-08，也不走 npm install）
+  # prepare-builtin-extensions.sh 预先 deploy 到 resources/extensions/@zhushanwen/<pkg>/
+  # 含真实运行时 deps（tree-sitter-bash/ajv/croner 等），不含 peerDeps（pi 进程提供）
+  - from: resources/extensions
+    to: extensions
+    filter:
+      - "**/*"
+      # 排除 tree-sitter-bash 的 C 源码 + grammar（产物不需要，省 10M）
+      - "!**/tree-sitter-bash/src/**"
+      - "!**/tree-sitter-bash/grammar.js"
+      # 排除 web-tree-sitter 的 debug wasm（804K，非运行时需要）
+      - "!**/web-tree-sitter/debug/**"
+      # 排除测试 + 类型声明（运行时不需要）
+      - "!**/__tests__/**"
+      - "!**/*.test.*"
+      - "!**/*.d.ts"
+      # 排除 sourcemap + 包根级文档（实测 ~8.7MB/包垃圾，设计 §3.2）。
+      # [禁令] 禁止用 !**/*.md 通配：staged extensions 含 7 个 skills/<name>/SKILL.md，
+      # 是 pi 内置 skills 的运行时资源（资源发现机制读取），通配会静默删除内置 skills；
+      # md 只按精确文件名排（包根级文档实测仅 README.md / ARCHITECTURE.md 两种名字）。
+      - "!**/*.map"
+      - "!**/README.md"
+      - "!**/ARCHITECTURE.md"
+  # built-in taiji plugins（resources/plugins/<name>，如 statusline）。
+  # prepare-builtin-plugins.sh 预编译 index.ts → index.js（与源同目录）；plugin-registry
+  # 打包后扫描 <cwd>/resources/plugins（cwd=Resources），故 to 保持 resources/plugins 嵌套。
+  # 排除 .ts 源码（运行时不需要，防体积浪费；入口以 manifest main 的 index.js 为准）。
+  - from: ../../resources/plugins
+    to: resources/plugins
+    filter:
+      - "**/*"
+      - "!**/*.ts"
+  # taiji-settings CLI（从 tsup 打包的 cli.cjs）
+  # packaged app 中位置：resources/bin/taiji-settings
+  # pi Skill 通过绝对路径引用此文件
+  - from: dist/runtime/cli.cjs
+    to: bin/taiji-settings
+  # subagent 引擎 CLI 包（W9，设计 §3.7 Electron 打包态）：bundle-extensions.mjs
+  # 预先 bundle 到 resources/engines/<id>/（数量 = packages/*-subagent-cli 动态发现，
+  # 不在此写死）；runtime 侧 engine-roots.ts 推导 Resources/engines 绝对路径并经 env
+  # TAIJI_AGENT_ENGINE_ROOTS 显式注入 pi 子进程（不 cwd 探测）。sourcemap 不进产物。
+  - from: resources/engines
+    to: engines
+    filter:
+      - "**/*"
+      - "!**/*.map"
+
+# NOTE: macos-latest 是 arm64 runner，无法交叉编译 x64。
+# 如需 Intel Mac 支持，追加 macos-13 (Intel) 或配置 universal。
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # 语言裁剪（设计 §3.2）：构建时删除其余 lproj/pak（实测省 ~48MB/包）。
+  # en 必须在首位作回落，全删有启动风险。
+  # 格式差异：mac lproj 目录用下划线（zh_CN），win/linux pak 文件名用连字符（zh-CN），
+  # electron-builder 按「去扩展名小写后全等或前缀匹配」对账，见 app-builder-lib ElectronFramework.js。
+  electronLanguages: ["en", "zh_CN"]
+  # node-pty prebuilds 平台裁剪（设计 §3.2.2，docs/design/release-artifact-size-optimization-batch3.md）：
+  # node-pty 运行时按 process.platform + "-" + process.arch 拼接 prebuilds/<目录> 加载路径
+  # （node-pty lib/utils.js），跨平台目录在 mac 上永不命中，排除是纯减重无功能影响
+  # （win32-x64 736K + win32-arm64 704K + darwin-x64 64K ≈ 1.5M）。
+  # 平台段 files 与顶层 files 是追加合并语义（app-builder-lib fileMatcher.js:250-253），
+  # 此处排除模式追加到顶层 node_modules/node-pty/**/* 包含规则之后生效。
+  files:
+    - "!node_modules/node-pty/prebuilds/win32-*"
+    - "!node_modules/node-pty/prebuilds/darwin-x64"
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  minimumSystemVersion: 12.0.0
+  # release asset 文件名带版本号（preflight 检查强制；release-checker 用平台后缀 pattern
+  # 如 -mac-arm64.dmg 定位 asset，不依赖固定文件名——ad0bcf86a 起自动升级改走版本化 asset）。
+  # [HISTORICAL] dmg 单形态：mac zip target 已删（设计 §3.3.3-C），更新链路改消费 dmg，
+  # ${ext} 恒解析为 .dmg；存量 v0.8.44~v0.9.13 darwin 用户断供已拍板接受（设计 §2.5）。
+  artifactName: TaiJi-${version}-mac-arm64.${ext}
+
+# dmg 压缩格式（设计 §3.3.2，docs/design/release-artifact-size-optimization-batch3.md）。
+# [位置] dmg 是顶层字段（与 mac/win/nsis 同级），不是 mac 子段：dmg-builder 直读
+# packager.config.dmg（node_modules/dmg-builder/out/dmg.js:19），且 scheme.json 的
+# MacConfiguration 无 dmg 属性——放 mac 段会被 schema 校验拒绝（26.15.3 实测）。
+# ULFO = lzfse 压缩，macOS 10.11+ 即支持（本项目 minimumSystemVersion 12.0.0 兼容），
+# 挂载速度与默认 UDZO(zlib) 相当或更快，体积更小；hdiutil attach 对其透明，updater 无感知。
+# 不用 UDBZ（bzip2）：压缩率虽最高，但 macOS 10.15 起挂载弹弃用警告且解压慢。
+# [禁令] 不要改顶层 compression 字段来实现：packager.compression: maximum 会让
+# AppImage 隐式变 xz + dmg 推导为 UDBZ，副作用路径不可控（设计 §3.4 不做清单锁定）——
+# 各 target 压缩一律用显式字段（dmg.format / appimage.compression）。
+dmg:
+  format: ULFO
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # 语言裁剪：同 mac 注释（en 首位回落）
+  electronLanguages: ["en", "zh-CN"]
+  # node-pty prebuilds 平台裁剪（设计 §3.2.2，同 mac 注释）：
+  # 加载路径按 process.platform 拼接，darwin 目录在 win 上永不命中，排除是纯减重。
+  files:
+    - "!node_modules/node-pty/prebuilds/darwin-*"
+  icon: build/icon.ico
+  # release asset 文件名带版本号（同 mac 注释，release-checker pattern 匹配）。
+  # nsis target 的 ${ext} 解析为 exe。
+  # [HISTORICAL] 版本号必须在 setup 之前（TaiJi-<v>-setup-<arch>.exe）：release-checker
+  # ASSET_PATTERNS.winX64Exe 用 '-setup-x64.exe' 后缀匹配，setup 在 version 前会导致
+  # win 自动升级检测永远匹配不到 release asset（M7-01 P0）。
+  artifactName: TaiJi-${version}-setup-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: TaiJi-${version}-setup-${arch}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  # 语言裁剪：同 mac 注释（en 首位回落）
+  electronLanguages: ["en", "zh-CN"]
+  # node-pty prebuilds 平台裁剪（设计 §3.2.2，同 mac 注释）：
+  # 加载路径按 process.platform 拼接，darwin/win32 目录在 linux 上永不命中，排除是纯减重。
+  files:
+    - "!node_modules/node-pty/prebuilds/darwin-*"
+    - "!node_modules/node-pty/prebuilds/win32-*"
+  category: Development
+  icon: build/icon-512.png
+  # release asset 文件名带版本号（同 mac 注释，release-checker pattern 匹配）。
+  # ${arch} 由 electron-builder 按 target ext 解析（getArtifactArchName）：
+  # AppImage(x64) -> x86_64，${ext} 解析为 AppImage。
+  # 产物：TaiJi-${version}-x86_64.AppImage。
+  # [HISTORICAL] deb 附件已砍（2026-09 产品拍板，设计 §3.3.2b）：更新链路从不消费 deb，
+  # 三重拦截见设计 §2.1——纯下载死附件（v0.9.13 实测 161.5MB/版本）。
+  artifactName: TaiJi-${version}-${arch}.${ext}
+
+# AppImage 内部压缩算法（设计 §3.3.1，docs/design/release-artifact-size-optimization-batch3.md）。
+# [语义锁定] xz 指 AppImage 内部 squashfs 压缩算法（透传 mksquashfs -comp xz
+# -Xdict-size 100% -b 1048576，AppImageTarget.js:83-92 消费），
+# 产物仍是可执行单文件 TaiJi-*.AppImage，不是 .xz 归档。
+# [禁令] 严禁把「xz 压缩」实现为外层再包 .xz 归档：linux updater 替换后直接
+# exec 该文件（updater-script.ts），外层归档会让更新后 app 无法启动且
+# self-healer 不回滚（脚本已写 done）——原生配置字段恰好杜绝这种误实现。
+# 已知代价：xz 解压慢于默认 gzip，首启/更新后首启增加数秒（产品已拍板接受）。
+# [禁令] 不要改顶层 compression 字段来实现（副面警告同上方 dmg 段注释，设计 §3.4：
+# packager.compression: maximum 会让 AppImage 隐式变 xz + dmg 推导 UDBZ，
+# 副作用路径不可控）——各 target 压缩一律用显式字段。
+# [位置] appImage 是顶层段（Configuration.appImage，configuration.d.ts:135；
+# AppImageTarget.js:22 读 packager.config.appImage），不是 linux 子段——
+# scheme.json 的 LinuxConfiguration 无 appimage 属性且 additionalProperties: false，
+# 放 linux 段会被 schema 校验拒绝（26.15.3 实测复现）。设计 §3.3.1 原文写的
+# 「linux: 段内 appimage:」属同型笔误（u3 的 dmg 段位置修正的镜像），已按实装修正。
+# [防混淆] 与 dmg 同为顶层段，但 key 大小写不同：dmg 全小写 vs appImage 驼峰（大写 I）。
+appImage:
+  compression: xz
+
+# 本地构建时 electron-builder 需要至少一个 publish provider
+# 否则 updateInfoBuilder 会因 channel === null 崩溃
+# CI release workflow 会覆盖此配置
+publish:
+  provider: generic
+  url: https://localhost/local-only

@@ -1,0 +1,7 @@
+{
+  "model": "claude-haiku",
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://test.example.com"
+  },
+  "apiKeyHelper": "/Users/testuser/.claude/get-key.sh"
+}

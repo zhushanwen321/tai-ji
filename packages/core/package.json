@@ -1,0 +1,127 @@
+{
+ "name": "@taiji/core",
+ "version": "0.10.0",
+ "private": true,
+ "type": "module",
+ "sideEffects": false,
+ "main": "src/index.ts",
+ "types": "src/index.ts",
+ "exports": {
+  ".": {
+   "types": "./src/index.ts",
+   "import": "./src/index.ts"
+  },
+  "./bootstrap": {
+   "types": "./src/bootstrap.ts",
+   "import": "./src/bootstrap.ts"
+  },
+  "./extension-host": {
+   "types": "./src/extension-host/index.ts",
+   "import": "./src/extension-host/index.ts"
+  },
+  "./platform/port": {
+   "types": "./src/platform/port.ts",
+   "import": "./src/platform/port.ts"
+  },
+  "./rendering-protocol": {
+   "types": "./src/rendering-protocol/index.ts",
+   "import": "./src/rendering-protocol/index.ts"
+  },
+  "./rendering-protocol/custom-registry": {
+   "types": "./src/rendering-protocol/custom-registry.ts",
+   "import": "./src/rendering-protocol/custom-registry.ts"
+  },
+  "./foundation/create-inflight-dedup": {
+   "types": "./src/foundation/create-inflight-dedup.ts",
+   "import": "./src/foundation/create-inflight-dedup.ts"
+  },
+  "./foundation/use-session-scoped-state": {
+   "types": "./src/foundation/use-session-scoped-state.ts",
+   "import": "./src/foundation/use-session-scoped-state.ts"
+  },
+  "./domain/session-trace": {
+   "types": "./src/domain/session-trace/index.ts",
+   "import": "./src/domain/session-trace/index.ts"
+  },
+  "./domain/composer": {
+   "types": "./src/domain/composer/index.ts",
+   "import": "./src/domain/composer/index.ts"
+  },
+  "./domain/settings": {
+   "types": "./src/domain/settings/index.ts",
+   "import": "./src/domain/settings/index.ts"
+  },
+  "./domain/chat": {
+   "types": "./src/domain/chat/index.ts",
+   "import": "./src/domain/chat/index.ts"
+  },
+  "./domain/drawer": {
+   "types": "./src/domain/drawer/index.ts",
+   "import": "./src/domain/drawer/index.ts"
+  },
+  "./domain/session": {
+   "types": "./src/domain/session/index.ts",
+   "import": "./src/domain/session/index.ts"
+  },
+  "./domain/new-task-search": {
+   "types": "./src/domain/new-task-search/index.ts",
+   "import": "./src/domain/new-task-search/index.ts"
+  },
+  "./domain/composer/dispatch": {
+   "types": "./src/domain/composer/dispatch/index.ts",
+   "import": "./src/domain/composer/dispatch/index.ts"
+  },
+  "./domain/composer/context": {
+   "types": "./src/domain/composer/context/index.ts",
+   "import": "./src/domain/composer/context/index.ts"
+  },
+  "./domain/composer/model-thinking": {
+   "types": "./src/domain/composer/model-thinking.ts",
+   "import": "./src/domain/composer/model-thinking.ts"
+  },
+  "./domain/composer/thinking-level-sync": {
+   "types": "./src/domain/composer/thinking-level-sync.ts",
+   "import": "./src/domain/composer/thinking-level-sync.ts"
+  },
+  "./domain/composer/thinking-levels": {
+   "types": "./src/domain/composer/thinking-levels.ts",
+   "import": "./src/domain/composer/thinking-levels.ts"
+  },
+  "./transport/api": {
+   "types": "./src/transport/api/index.ts",
+   "import": "./src/transport/api/index.ts"
+  },
+  "./transport/api/domains/*": {
+   "types": "./src/transport/api/domains/*.ts",
+   "import": "./src/transport/api/domains/*.ts"
+  },
+  "./transport/mock": {
+   "types": "./src/transport/mock/index.ts",
+   "import": "./src/transport/mock/index.ts"
+  },
+  "./transport/mock/*": {
+   "types": "./src/transport/mock/*.ts",
+   "import": "./src/transport/mock/*.ts"
+  },
+  "./transport/ws-client": {
+   "types": "./src/transport/ws-client.ts",
+   "import": "./src/transport/ws-client.ts"
+  }
+ },
+ "scripts": {
+  "typecheck": "tsc --noEmit",
+  "test": "vitest run"
+ },
+ "dependencies": {
+  "@taiji/extension-protocol": "workspace:*",
+  "@taiji/shared": "workspace:*",
+  "vue": "^3.5",
+  "pinia": "^3"
+ },
+ "devDependencies": {
+  "typescript": "^5.8",
+  "@earendil-works/pi-ai": "0.84.4",
+  "@earendil-works/pi-coding-agent": "0.84.4",
+  "@vitest/coverage-v8": "^4.1.9"
+ }
+}

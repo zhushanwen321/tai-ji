@@ -1,0 +1,44 @@
+{
+  "name": "demo-plugin",
+  "version": "0.3.14",
+  "description": "Demo plugin showcasing taiji plugin API (session, storage, hooks, tools, UI)",
+  "displayName": "Demo Plugin",
+  "main": "index.js",
+  "engines": {
+    "taiji": "*"
+  },
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": [
+      "onStartupFinished"
+    ],
+    "trustLevel": "sandbox",
+    "contributes": {
+      "tools": [
+        {
+          "name": "demo_search",
+          "description": "Search for files matching a pattern",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "Glob pattern to search"
+              }
+            },
+            "required": [
+              "pattern"
+            ]
+          }
+        }
+      ],
+      "hooks": [
+        "onBeforeSendMessage"
+      ]
+    },
+    "permissions": [
+      "workspace:file:search"
+    ]
+  }
+}

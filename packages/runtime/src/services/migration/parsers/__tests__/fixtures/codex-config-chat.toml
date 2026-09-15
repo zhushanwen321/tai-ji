@@ -1,0 +1,8 @@
+model = "gpt-5.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "Router"
+base_url = "http://192.168.1.202:9981/v1"
+env_key = "ROUTER_KEY"
+wire_api = "chat"

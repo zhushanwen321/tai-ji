@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow 3 · 主 Agent 编排多子 Agent · flow-3-subagent</title>
+<style>
+  :root{
+    --bg:#1a1b1f; --surface:#222329; --surface-2:#282930; --surface-hover:#2d2e36;
+    --fg:#f7f8fc; --muted:#a8a8b5; --subtle:#82828f;
+    --border:rgba(255,255,255,0.06); --border-strong:rgba(255,255,255,0.12);
+    --accent:#4f8ef7; --accent-hover:#6ba3ff; --accent-soft:rgba(79,142,247,0.12);
+    --success:#22c55e; --warning:#f5a524; --danger:#ef4444; --info:#38bdf8; --reasoning:#a78bfa;
+    --radius-sm:3px; --radius:8px; --radius-lg:12px;
+    --shadow-2:0 8px 24px rgba(0,0,0,0.4);
+    --ease:cubic-bezier(0.4,0,0.2,1); --duration-fast:120ms; --duration:200ms;
+    --font-sans:Inter,'SF Pro Display','PingFang SC',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 var(--font-sans);
+    -webkit-font-smoothing:antialiased;padding:32px 40px 80px;max-width:1280px;margin:0 auto}
+  h1{font-size:26px;font-weight:650;letter-spacing:-0.01em;margin-bottom:6px}
+  h2{font-size:18px;font-weight:600;margin:48px 0 4px;letter-spacing:-0.01em;display:flex;align-items:center;gap:10px}
+  h2 .num{font:600 12px/1 var(--font-mono);color:var(--accent);
+    background:var(--accent-soft);padding:4px 8px;border-radius:var(--radius-sm);letter-spacing:0.05em}
+  h2 .s{font:500 11px/1 var(--font-mono);color:var(--subtle);margin-left:auto}
+  .lede{color:var(--muted);font-size:13px;margin-bottom:8px;max-width:820px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}
+  .meta span{font:500 11px/1 var(--font-mono);color:var(--muted);
+    background:var(--surface);border:1px solid var(--border);padding:5px 9px;border-radius:999px}
+  .meta b{color:var(--fg);font-weight:600}
+  hr{border:0;border-top:1px solid var(--border);margin:40px 0}
+  code{font:12px/1.4 var(--font-mono);background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-sm);color:var(--accent)}
+  .note{font:12px/1.6 var(--font-mono);color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);border-left:2px solid var(--accent);
+    border-radius:var(--radius-sm);padding:9px 11px;margin-top:14px}
+  .note b{color:var(--fg)}
+  .note.warn{border-left-color:var(--warning)}
+  .note.danger{border-left-color:var(--danger)}
+
+  /* 屏幕模拟 · workspace 主区 */
+  .stage{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+    overflow:hidden;margin-top:14px}
+  .stage-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);
+    font:500 11px/1 var(--font-mono);color:var(--subtle);letter-spacing:0.06em;text-transform:uppercase}
+  .stage-head b{color:var(--muted)}
+  .split{display:grid;grid-template-columns:1fr 320px}
+  @media(max-width:980px){.split{grid-template-columns:1fr}}
+  .stream{padding:14px;display:flex;flex-direction:column;gap:10px;min-height:280px}
+
+  /* 状态点 */
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;position:relative}
+  .dot-running{background:var(--accent)} .dot-waiting{background:var(--warning)}
+  .dot-done{background:var(--success)} .dot-stopped{background:var(--subtle)} .dot-error{background:var(--danger)}
+  .dot.pulse::after{content:"";position:absolute;inset:-3px;border-radius:50%}
+  .dot-running.pulse::after{color:rgba(79,142,247,0.55);animation:pr 1.8s var(--ease) infinite}
+  @keyframes pr{0%{box-shadow:0 0 0 0 currentColor;opacity:.8}70%{box-shadow:0 0 0 6px transparent;opacity:0}100%{opacity:0}}
+
+  /* 消息块 · Card-Inline */
+  .blk{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:13px}
+  .blk .who{font:600 11px/1 var(--font-mono);letter-spacing:0.04em;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+  .blk-user .who{color:var(--muted)} .blk-user .who .dot{background:var(--muted)}
+  .blk-main .who{color:var(--accent)} .blk-main .who .dot{background:var(--accent)}
+  .blk .body{color:var(--fg);line-height:1.55}
+  .blk .body.dim{color:var(--muted)}
+  .blk-reason{background:rgba(167,139,250,0.06);border-color:rgba(167,139,250,0.18)}
+  .blk-reason .who{color:var(--reasoning)} .blk-reason .body{color:var(--muted);font-style:italic}
+
+  /* subagent 派发块 · Card（design-system） */
+  .sub-block{background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius);padding:12px}
+  .sub-block .ttl{font:600 11px/1 var(--font-mono);color:var(--info);letter-spacing:0.04em;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+  .sub-block .ttl .dot{background:var(--info)}
+  .sub-list{display:flex;flex-direction:column;gap:6px}
+  .sub-i{display:flex;align-items:flex-start;gap:8px;padding:7px 9px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px}
+  .sub-i .nm{font:600 12px/1.4 var(--font-mono);color:var(--accent);min-width:88px}
+  .sub-i .job{color:var(--muted);flex:1;line-height:1.45}
+  .sub-i .dep{font:10px/1 var(--font-mono);color:var(--subtle);border:1px solid var(--border);padding:3px 5px;border-radius:3px;flex:none}
+
+  /* 编排事件条 */
+  .evt{display:flex;align-items:center;gap:8px;font:12px/1.4 var(--font-mono);color:var(--muted);padding:4px 2px}
+  .evt .t{color:var(--subtle)} .evt b{color:var(--fg);font-weight:600}
+
+  /* progress-zone 多进度聚合 */
+  .pz{background:var(--bg);border-top:1px solid var(--border);padding:13px 14px}
+  .pz-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .pz-head .t{font:500 10px/1 var(--font-mono);color:var(--subtle);letter-spacing:0.08em;text-transform:uppercase}
+  .pz-overall{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .pz-overall .lbl{font:11px/1 var(--font-mono);color:var(--muted)}
+  .pz-overall .bar{flex:1;height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+  .pz-overall .bar i{display:block;height:100%;background:var(--accent)}
+  .pz-overall .pct{font:600 11px/1 var(--font-mono);color:var(--fg)}
+  .pz-rows{display:flex;flex-direction:column;gap:6px}
+  .pz-row{display:flex;align-items:center;gap:8px;font:11px/1 var(--font-mono);cursor:pointer;padding:3px 4px;margin:0 -4px;border-radius:var(--radius-sm)}
+  .pz-row:hover{background:var(--surface-hover)}
+  .pz-row .nm{color:var(--fg);width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pz-row .bar{flex:1;height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+  .pz-row .bar i{display:block;height:100%}
+  .pz-row .pct{color:var(--subtle);width:32px;text-align:right}
+  .pz-row .st{width:7px;height:7px;border-radius:50%;flex:none}
+
+  /* Side Drawer · SubAgent Detail */
+  .drawer{background:var(--surface-2);border-left:1px solid var(--border-strong);display:flex;flex-direction:column}
+  .dr-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--border)}
+  .dr-head .nm{font:600 13px/1 var(--font-sans);color:var(--fg);flex:1}
+  .dr-head .st{font:500 10px/1 var(--font-mono);color:var(--success);background:rgba(34,197,94,0.12);padding:4px 7px;border-radius:var(--radius-sm)}
+  .dr-tabs{display:flex;gap:0;padding:0 13px;border-bottom:1px solid var(--border);font:500 12px/1 var(--font-sans)}
+  .dr-tab{padding:9px 0;margin-right:18px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  .dr-tab.on{color:var(--fg);border-bottom-color:var(--accent)}
+  .dr-body{padding:12px 13px;display:flex;flex-direction:column;gap:8px;overflow:auto;max-height:340px;font-size:12px}
+  .dr-think{background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.18);border-radius:var(--radius-sm);padding:7px 9px;color:var(--muted);font-style:italic;line-height:1.5}
+  .dr-think .h{font:600 10px/1 var(--font-mono);color:var(--reasoning);letter-spacing:0.04em;margin-bottom:4px;font-style:normal}
+  .dr-tool{background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 9px}
+  .dr-tool .h{font:600 10px/1 var(--font-mono);color:var(--info);letter-spacing:0.04em;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+  .dr-tool .h .ok{color:var(--success);margin-left:auto}
+  .dr-tool .r{font:11px/1.5 var(--font-mono);color:var(--muted)}
+  .dr-chg{background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--success);border-radius:var(--radius-sm);padding:7px 9px}
+  .dr-chg .h{font:600 10px/1 var(--font-mono);color:var(--success);margin-bottom:4px}
+  .dr-chg .f{font:11px/1.4 var(--font-mono);color:var(--fg);display:flex;justify-content:space-between}
+  .dr-chg .f .s{color:var(--subtle)} .dr-chg .f .add{color:var(--success)}
+
+  /* steer composer 态 */
+  .steer{background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius);padding:9px 11px;display:flex;align-items:center;gap:9px;margin-top:10px;box-shadow:0 0 0 3px rgba(79,142,247,0.12)}
+  .steer .tgt{font:600 11px/1 var(--font-mono);color:var(--accent);background:var(--accent-soft);padding:5px 9px;border-radius:var(--radius-sm);flex:none;display:flex;align-items:center;gap:5px}
+  .steer input{flex:1;border:0;background:transparent;color:var(--fg);font:13px/1.4 var(--font-sans);outline:none}
+  .steer input::placeholder{color:var(--subtle)}
+  .steer .send{background:var(--accent);color:#fff;border:0;padding:7px 12px;border-radius:var(--radius);font:600 12px/1 var(--font-sans);cursor:pointer}
+
+  /* 矩阵表 */
+  .matrix{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}
+  .matrix th,.matrix td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  .matrix th{background:var(--surface-2);font:600 11px/1.4 var(--font-mono);color:var(--muted);letter-spacing:0.04em}
+  .matrix td{color:var(--fg);line-height:1.5}
+  .matrix td .where{display:block;font:11px/1.4 var(--font-mono);color:var(--subtle);margin-top:3px}
+  .matrix tr:nth-child(even) td{background:rgba(255,255,255,0.015)}
+
+  /* 状态机 */
+  .fsm{font:12px/1.8 var(--font-mono);color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:14px;white-space:pre-wrap}
+  .fsm b{color:var(--fg)}
+  .fsm .a{color:var(--accent)} .fsm .s{color:var(--success)} .fsm .d{color:var(--danger)} .fsm .w{color:var(--warning)}
+</style>
+</head>
+<body>
+  <h1>Flow 3 · 主 Agent 编排多子 Agent</h1>
+  <p class="lede">护城河 flow。用户下达大任务，主 Agent 拆解派发多个子 Agent 并行执行，实时聚合进度，按需 steer/中断，汇总合并。本 flow 是 Flow 2（单 agent 串行）的并行编排升级。<b>不出现 Process Panel</b>（v1 已删）——子 agent 编排走 Side Drawer + progress-zone。</p>
+  <div class="meta">
+    <span>层级 <b>L3 Flow · 护城河</b></span>
+    <span>规范 <b>flow-3-subagent/spec.md</b></span>
+    <span>依赖 <b>composer-states / companion-zones / detail-pane / message-types</b></span>
+    <span>衔接 <b>→ Flow 2 Diff 审查（S6）</b></span>
+  </div>
+
+  <h2><span class="num">S1</span>任务拆解 + 派发计划<span class="s">用户可确认后执行</span></h2>
+  <p class="lede">主 agent 收到大任务 → 思考拆解 → 产出派发计划（N 个子 agent + 分工 + 依赖）。消息流出现 subagent 块。<b>用户控制</b>：可调整后再执行。</p>
+  <div class="stage">
+    <div class="stage-head">主 Panel · 消息流 <b>· refactor/auth</b></div>
+    <div class="stream">
+      <div class="blk blk-user"><div class="who"><span class="dot"></span>你</div><div class="body">重构 auth 模块，拆成 OAuth、Session、Token 三块独立可测</div></div>
+      <div class="blk blk-reason"><div class="who"><span class="dot"></span>思考</div><div class="body dim">三块边界清晰、文件不重叠，适合并行。OAuth 和 Token 都依赖 Session 的接口定义，需前置。</div></div>
+      <div class="blk blk-main"><div class="who"><span class="dot"></span>主 Agent</div>
+        <div class="body">拆成 3 个并行子任务。先确认派发计划：</div>
+        <div class="sub-block" style="margin-top:8px">
+          <div class="ttl"><span class="dot"></span>派发计划 · 3 个子 agent</div>
+          <div class="sub-list">
+            <div class="sub-i"><span class="nm">auth-sess</span><span class="job">定义 Session 接口 + 实现（前置，其它依赖）</span><span class="dep">先行</span></div>
+            <div class="sub-i"><span class="nm">auth-oauth</span><span class="job">OAuth provider 接入，依赖 Session 接口</span><span class="dep">← auth-sess</span></div>
+            <div class="sub-i"><span class="nm">auth-token</span><span class="job">Token 刷新/吊销，依赖 Session 接口</span><span class="dep">← auth-sess</span></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button style="background:var(--accent);color:#fff;border:0;padding:7px 14px;border-radius:var(--radius);font:600 12px/1 var(--font-sans);cursor:pointer">确认派发</button>
+          <button style="background:transparent;color:var(--muted);border:1px solid var(--border);padding:7px 14px;border-radius:var(--radius);font:500 12px/1 var(--font-sans);cursor:pointer">调整计划</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>用户控制（Nielsen #3）</b>：派发计划默认需确认，不是黑盒直接跑。依赖关系标注（auth-sess 先行，其它 waiting）。</div>
+
+  <h2><span class="num">S2</span>并行执行 + 多进度聚合<span class="s">progress-zone 升级</span></h2>
+  <p class="lede">确认后派发。auth-sess 先跑，完成后 OAuth/Token 并行。progress-zone 从单进度 → 多进度聚合。子 agent 细粒度流只进 Side Drawer，主消息流只显编排事件。</p>
+  <div class="stage">
+    <div class="split">
+      <div>
+        <div class="stage-head">主 Panel · 消息流</div>
+        <div class="stream" style="min-height:auto">
+          <div class="evt"><span class="t">09:14:02</span><span class="dot dot-done"></span><b>auth-sess</b> 完成 · Session 接口已定义</div>
+          <div class="evt"><span class="t">09:14:03</span><span class="dot dot-running pulse"></span><b>auth-oauth</b> 启动</div>
+          <div class="evt"><span class="t">09:14:03</span><span class="dot dot-running pulse"></span><b>auth-token</b> 启动</div>
+          <div class="evt"><span class="t">09:18:21</span><span class="dot dot-warning" style="background:var(--warning)"></span><b>auth-token</b> 卡在刷新令牌并发，等待</div>
+        </div>
+        <div class="pz">
+          <div class="pz-head"><span class="t">progress-zone · 多进度聚合</span><span class="t">3 子 agent</span></div>
+          <div class="pz-overall"><span class="lbl">整体</span><span class="bar"><i style="width:64%"></i></span><span class="pct">64%</span></div>
+          <div class="pz-rows">
+            <div class="pz-row"><span class="st" style="background:var(--success)"></span><span class="nm">auth-sess</span><span class="bar"><i style="width:100%;background:var(--success)"></i></span><span class="pct">done</span></div>
+            <div class="pz-row"><span class="st" style="background:var(--accent)"></span><span class="nm">auth-oauth</span><span class="bar"><i style="width:71%;background:var(--accent)"></i></span><span class="pct">71%</span></div>
+            <div class="pz-row"><span class="st" style="background:var(--warning)"></span><span class="nm">auth-token</span><span class="bar"><i style="width:30%;background:var(--warning)"></i></span><span class="pct">30%</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer">
+        <div class="dr-head"><span class="dot dot-running pulse"></span><span class="nm">auth-oauth</span><span class="st">运行中</span></div>
+        <div class="dr-tabs"><div class="dr-tab on">Detail</div><div class="dr-tab">Diff</div></div>
+        <div class="dr-body">
+          <div class="dr-think"><div class="h">思考</div>需要先看现有 OAuth provider 的回调结构，再决定要不要引入 state 参数…</div>
+          <div class="dr-tool"><div class="h"><span class="dot" style="background:var(--info);width:6px;height:6px"></span>read_file · oauth/provider.ts<span class="ok">✓</span></div><div class="r">读取回调处理逻辑，发现未校验 state</div></div>
+          <div class="dr-tool"><div class="h"><span class="dot" style="background:var(--info);width:6px;height:6px"></span>edit_file · oauth/provider.ts</div><div class="r">加入 state 参数校验…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>核心约束</b>：主消息流不被子 agent 噪音淹没——thinking/tool call 只进 Side Drawer（默认收起，点开），主消息流只显编排事件（派发/完成/失败）。progress-zone 是多 session 鸟瞰（Overview）之外，单 session 内看多子 agent 的唯一位。</div>
+
+  <h2><span class="num">S3</span>子完成 / 失败 · 实时回传<span class="s">不阻塞其它</span></h2>
+  <p class="lede">单个子 done/failed 实时回传，进度条变色，主 agent 决定后续。并行独立——一个失败不阻塞其它。</p>
+  <div class="stage">
+    <div class="stage-head">progress-zone · 实时态</div>
+    <div class="pz">
+      <div class="pz-overall"><span class="lbl">整体</span><span class="bar"><i style="width:88%"></i></span><span class="pct">88%</span></div>
+      <div class="pz-rows">
+        <div class="pz-row"><span class="st" style="background:var(--success)"></span><span class="nm">auth-sess</span><span class="bar"><i style="width:100%;background:var(--success)"></i></span><span class="pct">done</span></div>
+        <div class="pz-row"><span class="st" style="background:var(--success)"></span><span class="nm">auth-oauth</span><span class="bar"><i style="width:100%;background:var(--success)"></i></span><span class="pct">done</span></div>
+        <div class="pz-row" style="background:rgba(239,68,68,0.06)"><span class="st" style="background:var(--danger)"></span><span class="nm" style="color:var(--danger)">auth-token</span><span class="bar"><i style="width:30%;background:var(--danger)"></i></span><span class="pct" style="color:var(--danger)">failed</span></div>
+      </div>
+      <div style="margin-top:10px;padding:9px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);font-size:12px;color:var(--danger);line-height:1.5">
+        <b>auth-token 失败</b>：刷新令牌并发竞态，3 次重试均失败。<span style="color:var(--muted)">主 agent 建议：降低并发度后重派新子 agent（旧的 superseded）。</span>
+        <div style="margin-top:7px;display:flex;gap:7px">
+          <button style="background:var(--accent);color:#fff;border:0;padding:5px 11px;border-radius:var(--radius-sm);font:600 11px/1 var(--font-sans);cursor:pointer">重派（并发=1）</button>
+          <button style="background:transparent;color:var(--muted);border:1px solid var(--border);padding:5px 11px;border-radius:var(--radius-sm);font:500 11px/1 var(--font-sans);cursor:pointer">跳过 Token</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">S4</span>SubAgent Detail · Side Drawer<span class="s">点进度条展开</span></h2>
+  <p class="lede">点某子 agent 进度条 → Side Drawer 展开该子的完整 Detail（思考/工具调用/文本/子变更集）。可在 Drawer 内审查 diff（复用 Flow 2 Diff 抽屉）。</p>
+  <div class="stage">
+    <div class="split">
+      <div>
+        <div class="stage-head">主 Panel（保持上下文）</div>
+        <div class="stream" style="min-height:auto">
+          <div class="evt"><span class="dot dot-done"></span><b>auth-sess</b> 完成</div>
+          <div class="evt"><span class="dot dot-done"></span><b>auth-oauth</b> 完成 · 点击查看 →</div>
+        </div>
+      </div>
+      <div class="drawer">
+        <div class="dr-head"><span class="dot dot-done"></span><span class="nm">auth-oauth</span><span class="st">已完成</span></div>
+        <div class="dr-tabs"><div class="dr-tab">Detail</div><div class="dr-tab on">Diff · 2 文件</div></div>
+        <div class="dr-body">
+          <div class="dr-chg"><div class="h">子变更集 · auth-oauth</div>
+            <div class="f"><span>oauth/provider.ts</span><span class="s"><span class="add">+48</span> -12</span></div>
+            <div class="f"><span>oauth/callback.ts</span><span class="s"><span class="add">+22</span></span></div>
+          </div>
+          <div class="dr-tool"><div class="h"><span class="dot" style="background:var(--info);width:6px;height:6px"></span>edit_file · oauth/provider.ts<span class="ok">✓ 已接受</span></div><div class="r">加入 state 参数校验，防 CSRF</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>衔接 Flow 2</b>：子变更集的 Diff 审查复用 Flow 2 的 Accept/Reject 抽屉。每个子 agent 的变更可独立审查，或等 S6 汇总后统一审查。</div>
+
+  <h2><span class="num">S5</span>steer / 中断单个子 agent<span class="s">只影响该子</span></h2>
+  <p class="lede">对运行中的子 agent 下达 steer（调整方向）或中断。steer 经 composer steer 态下发，<b>只影响目标子 agent</b>，不动主 agent 和其它子。</p>
+  <div class="stage">
+    <div class="stage-head">composer · steer 态（目标 auth-oauth）</div>
+    <div style="padding:14px">
+      <div class="steer">
+        <span class="tgt"><span class="dot dot-running pulse"></span>auth-oauth</span>
+        <input value="state 参数用 crypto.randomUUID，别用 timestamp" />
+        <button class="send">steer ↵</button>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;font:12px/1 var(--font-mono);color:var(--subtle)">
+        <span>Shift+Enter 换行</span><span>·</span>
+        <span style="color:var(--danger);cursor:pointer">⏸ 中断此子 agent</span><span>·</span>
+        <span>Esc 退出 steer</span>
+      </div>
+    </div>
+  </div>
+  <div class="note warn"><b>steer ≠ 中断</b>：steer = 调整方向（子 agent 继续跑，吸收新指令）；中断 = 标 stopped（保留已完成部分，停）。两者都只作用于目标子，主 agent 和其它子不受影响。</div>
+
+  <h2><span class="num">S6</span>汇总合并 · 衔接 Flow 2<span class="s">冲突协调</span></h2>
+  <p class="lede">全部子完成 → 主 agent 汇总各子结果。合并冲突时主 agent 协调或求助。产出统一变更集 → 进 Flow 2 Diff 审查。</p>
+  <div class="stage">
+    <div class="stage-head">主 Panel · 汇总</div>
+    <div class="stream" style="min-height:auto">
+      <div class="blk blk-main"><div class="who"><span class="dot"></span>主 Agent</div>
+        <div class="body">3 个子 agent 全部完成，汇总变更：</div>
+        <div class="sub-block" style="margin-top:8px;border-left:2px solid var(--success)">
+          <div class="ttl" style="color:var(--success)"><span class="dot" style="background:var(--success)"></span>统一变更集 · 7 文件 · +312 -88</div>
+          <div class="sub-list">
+            <div class="sub-i"><span class="nm" style="color:var(--success)">auth-sess</span><span class="job">session/types.ts · session/store.ts</span><span class="dep">+98</span></div>
+            <div class="sub-i"><span class="nm" style="color:var(--success)">auth-oauth</span><span class="job">oauth/provider.ts · oauth/callback.ts</span><span class="dep">+70</span></div>
+            <div class="sub-i"><span class="nm" style="color:var(--success)">auth-token</span><span class="job">token/refresh.ts · token/revoke.ts</span><span class="dep">+144</span></div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted)">auth.ts 三方都改过，已自动合并（无冲突）。<a style="color:var(--accent);cursor:pointer">审查全部变更 →</a></div>
+      </div>
+    </div>
+  </div>
+  <div class="note danger"><b>冲突场景</b>：若多个子改同一文件的不同 hunk，主 agent 自动合并；若同 hunk 冲突，主 agent 标 conflict 块求助用户裁决（不静默选边）。</div>
+
+  <h2><span class="num">§7</span>子 Agent 状态机</h2>
+  <div class="fsm"><b>dispatched</b> → <span class="a">running</span> → <span class="s">done</span>
+                  ↓              ↓
+             <span class="w">stopped</span>    <b style="color:var(--subtle)">superseded</b>（主 agent 派了替代）
+                  ↓
+          <span class="d">failed</span> / <span class="d">timeout</span></div>
+  <div class="note"><b>6 态</b>：dispatched（已派未启）/ running / done / stopped（用户中断）/ failed / timeout / superseded（被替代归档）。详见 spec.md 状态机。</div>
+
+  <h2><span class="num">§8</span>L4 联动矩阵 · 主 ↔ 子 agent</h2>
+  <table class="matrix">
+    <thead><tr><th>主 agent 动作</th><th>子 agent 反应</th><th>UI 呈现位</th></tr></thead>
+    <tbody>
+      <tr><td>派发计划确认</td><td>N 个 dispatched</td><td>主消息流 subagent 块 + progress-zone<span class="where">S1</span></td></tr>
+      <tr><td>—（并行）</td><td>running，流式回传</td><td>progress-zone 进度条 + Side Drawer（收起）<span class="where">S2</span></td></tr>
+      <tr><td>收到子 done</td><td>摘要入主消息流</td><td>主消息流 + progress-zone success<span class="where">S3</span></td></tr>
+      <tr><td>收到子 failed</td><td>决定重试/跳过/求助</td><td>progress-zone danger + 错误块<span class="where">S3</span></td></tr>
+      <tr><td>合并冲突</td><td>协调或求助</td><td>主消息流 conflict 块<span class="where">S6</span></td></tr>
+      <tr><td>用户 steer 子</td><td>只影响该子</td><td>composer steer 态 + 该子 Drawer<span class="where">S5</span></td></tr>
+      <tr><td>用户中断子</td><td>该子 stopped</td><td>progress-zone stopped<span class="where">S5</span></td></tr>
+      <tr><td>全部 done</td><td>汇总 → 统一变更集</td><td>主消息流变更集卡 → Flow 2<span class="where">S6</span></td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+  <div class="note"><b>验收对照（handoff §6 P0）</b>：<br>
+  ✅ 编排时序完整（派发/并行/回传/汇总，S1-S6）<br>
+  ✅ progress-zone 多进度聚合方案落地（S2/S3）<br>
+  ✅ SubAgent Detail 呈现 + steer 控制（S4/S5）<br>
+  ✅ 联动矩阵覆盖主↔子双向数据流（§8）<br>
+  ✅ 不出现 Process Panel 旧概念（走 Side Drawer + progress-zone）<br>
+  <br><b>遗留</b>：① 派发计划可视化形态（列表/依赖图）初版列表；② 超时阈值待定（建议 5min）；③ 合并冲突自动协调边界待定；④ 并发上限（建议 5）待定；⑤ 依赖 panel 4 叶定稿后复核联动点。</div>
+</body>
+</html>

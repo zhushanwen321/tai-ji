@@ -1,0 +1,87 @@
+{
+  "name": "@zhushanwen/subagent-engine-sdk",
+  "version": "0.5.0",
+  "description": "Engine-side SDK for the subagent engine protocol: NDJSON stdio contract types, engine primitives (schema emulation, nesting guard, kill chain, journal replay projection, data-dir/paths resolution) — the shared contract root between subagent-core and engine CLI packages (engines import SDK only, never core)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./src/index.ts"
+    },
+    "./protocol": {
+      "import": {
+        "types": "./src/protocol/index.ts",
+        "default": "./src/protocol/index.ts"
+      },
+      "require": {
+        "types": "./dist/protocol/index.d.cts",
+        "default": "./dist/protocol/index.cjs"
+      },
+      "default": "./src/protocol/index.ts"
+    }
+  },
+  "publishConfig": {
+    "main": "dist/index.cjs",
+    "module": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        },
+        "default": "./dist/index.js"
+      },
+      "./protocol": {
+        "import": {
+          "types": "./dist/protocol/index.d.ts",
+          "default": "./dist/protocol/index.js"
+        },
+        "require": {
+          "types": "./dist/protocol/index.d.cts",
+          "default": "./dist/protocol/index.cjs"
+        },
+        "default": "./dist/protocol/index.js"
+      }
+    }
+  },
+  "$comment": "W1 骨架（docs/design/subagent-engine-protocolization.impl-plan.md §2.1）。双形态同 subagent-core 先例（D4）：workspace 消费走 import 条件 -> src；npm 消费走 publishConfig -> dist。exports 面先收窄到 ./ 与 ./protocol（exports = semver 契约，收窄不放宽；引擎包 W5/W7 消费经主 barrel）。协议版本独立于包版本：ENGINE_PROTOCOL_VERSION = 1（src/protocol/engine-protocol.ts）。不变量：本包禁止 import @zhushanwen/subagent-core（守卫 .githooks/check-engine-sdk-boundary.mjs）。src/env.ts 与 src/spawn.ts 是 W12 领地（impl-plan §2.12），本单元仅空骨架占位。tsup entry 逐模块具名登记（§2.1 末行），新增模块必须同步登记。",
+  "files": [
+    "src/",
+    "!src/__tests__",
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  }
+}

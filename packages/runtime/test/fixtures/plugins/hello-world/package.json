@@ -1,0 +1,23 @@
+{
+  "name": "hello-world",
+  "version": "0.3.14",
+  "description": "A test plugin for taiji",
+  "displayName": "Hello World",
+  "taijiPlugin": {
+    "manifestVersion": 1,
+    "main": "index.js",
+    "activationEvents": [
+      "onStartupFinished",
+      "onSlashCommand:hello"
+    ],
+    "trustLevel": "trusted",
+    "contributes": {
+      "slashCommands": [
+        {
+          "name": "hello",
+          "description": "Say hello"
+        }
+      ]
+    }
+  }
+}

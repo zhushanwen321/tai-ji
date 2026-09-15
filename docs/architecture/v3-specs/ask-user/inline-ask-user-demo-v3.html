@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ask-user inline v3 — 无边框一体化</title>
+<style>
+  /* === v3 design tokens (复制自 style.css) === */
+  :root {
+    --bg: #1a1b1f;
+    --surface: #272830;
+    --surface-hover: #363740;
+    --surface-2: #2e2f38;
+    --bg-elevated: #313239;
+    --bg-input: #1e1f24;
+    --fg: #f7f8fc;
+    --muted: #a8a8b5;
+    --subtle: #82828f;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.15);
+    --accent: #4f8ef7;
+    --accent-hover: #6ba3ff;
+    --accent-soft: rgba(79,142,247,0.12);
+    --accent-ring: rgba(79,142,247,0.30);
+    --success: #22c55e;
+    --warning: #f5a524;
+    --danger: #ef4444;
+    --reasoning: #a78bfa;
+    --reasoning-soft: color-mix(in oklch, var(--reasoning) 18%, transparent);
+    --font-sans: Inter, 'SF Pro Display', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --radius-sm: 3px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --duration-fast: 120ms;
+    --duration: 200ms;
+    --duration-slow: 320ms;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { padding: 32px 24px; }
+
+  .page-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .page-desc { color: var(--muted); font-size: 13px; margin-bottom: 28px; max-width: 680px; line-height: 1.6; }
+  .page-desc strong { color: var(--fg); font-weight: 500; }
+  .page-desc code { font-family: var(--font-mono); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 12px; color: var(--fg); }
+
+  .demo-wrap { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+
+  /* 模拟 panel section（surface 底色，overlay 挂在这上面）*/
+  .panel-mock {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+  }
+  .demo-label {
+    font-family: var(--font-mono);
+    font-size: 10px; font-weight: 600; color: var(--subtle);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 14px;
+  }
+
+  /* 对话流尾部（上下文可见）*/
+  .stream-tail { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; padding: 0 4px; }
+  .msg { display: flex; gap: 10px; font-size: 13px; color: var(--muted); }
+  .msg .avatar { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; opacity: 0.5; margin-top: 1px; }
+  .msg.user .avatar { background: var(--accent); }
+  .msg.assistant .avatar { background: var(--success); }
+  .msg .bubble { flex: 1; line-height: 1.55; }
+
+  /* composer-band：overlay 挂载点（padding 模拟 Panel.vue 的 px-3.5 pb-3.5）*/
+  .composer-band { padding: 0 14px 14px 14px; }
+
+  /* ================================================================
+     ask-user overlay v3 — 无边框一体化
+     1. 去掉所有 border-b/border-t 分层，单容器靠间距分区
+     2. 根容器无边框，用 bg-bg-input 凹陷融入 composer-band
+     3. head 无蓝底，透明继承根；tab 紧跟 head 下方
+     4. 选项 inline：indicator + label + description 同行流式
+     5. Other 卡片化：最后一个选项，选中后 label 下展开输入框
+     ================================================================ */
+  .ask-user {
+    background: var(--bg-input);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    animation: slideUp var(--duration-slow) var(--ease);
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ask-user { animation: none; }
+  }
+
+  /* head 行：脉冲点 + (标题 | tab) + 倒计时(absolute 右上)。
+     标题单行 truncate，避免 flex-wrap 导致 dot 对齐错位 */
+  .ask-user-head {
+    position: relative;
+    display: flex; align-items: center; gap: 7px;
+    padding: 10px 14px 0 14px;
+  }
+  .ask-user-head .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); flex-shrink: 0;
+    animation: pulse 2s var(--ease) infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  /* 单问题标题：单行 truncate，pr 给 timer 留空间防 overlap */
+  .head-title {
+    font-size: 13px; font-weight: 500; color: var(--fg);
+    line-height: 1.5; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding-right: 52px;
+  }
+  .ask-user-head .spacer { flex: 1; }
+  /* timer：absolute 固定右上角，单行高度内垂直居中 */
+  .ask-user-head .timer {
+    position: absolute; top: 50%; right: 14px;
+    transform: translateY(-50%);
+    margin-top: 5px;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--subtle);
+    display: flex; align-items: center; gap: 3px;
+    background: var(--bg-input);
+    padding-left: 6px;
+  }
+  .ask-user-head .timer.urgent { color: var(--warning); }
+
+  /* tab：整合到 head 同一行（脉冲点 + tab + spacer + timer）*/
+  .ask-user-tabs {
+    display: flex; gap: 2px; align-items: center;
+  }
+  .ask-user-tab {
+    background: none; border: none;
+    color: var(--subtle);
+    font-family: inherit; font-size: 12px; font-weight: 400;
+    padding: 3px 8px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--duration-fast) var(--ease);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .ask-user-tab:hover { color: var(--muted); background: rgba(255,255,255,0.03); }
+  .ask-user-tab.active {
+    color: var(--fg); font-weight: 500;
+    background: var(--accent-soft);
+  }
+  .ask-user-tab .answered {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--success);
+  }
+
+  /* body：问题 + 选项，紧凑间距 */
+  .ask-user-body {
+    padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  /* 上下文摘要：无边框，仅 reasoning-soft 软底 */
+  .q-context {
+    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+    padding: 7px 10px;
+    background: var(--reasoning-soft);
+    border-radius: var(--radius);
+  }
+
+  /* 问题文本 */
+  .q-text {
+    font-size: 13px; font-weight: 500; color: var(--fg);
+    padding: 2px 0;
+  }
+
+  /* 选项列表 */
+  .opt-list { display: flex; flex-direction: column; gap: 3px; }
+
+  /* 选项卡片：indicator + 内容。flex-start + indicator margin-top 钉首行中线 */
+  .opt {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease);
+  }
+  .opt:hover { background: rgba(255,255,255,0.04); }
+  .opt.selected { background: var(--accent-soft); }
+
+  /* indicator：钉首行文字中线（line-height 19.5px - indicator 15px）/ 2 ≈ 2.25px */
+  .opt-indicator {
+    width: 15px; height: 15px; flex-shrink: 0; margin-top: 2.25px;
+    border: 1.5px solid var(--border-strong); position: relative;
+    transition: all var(--duration-fast) var(--ease);
+  }
+  .opt-indicator.radio { border-radius: 50%; }
+  .opt-indicator.checkbox { border-radius: 3px; }
+  .opt.selected .opt-indicator { border-color: var(--accent); background: var(--accent); }
+  .opt.selected .opt-indicator.radio::after {
+    content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--fg);
+  }
+  .opt.selected .opt-indicator.checkbox::after {
+    content: '✓'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg); font-size: 10px; font-weight: 700; line-height: 1;
+  }
+
+  /* 选项内容：label + description inline 同行；Other 选中时 input 独立成行 */
+  .opt-content {
+    display: flex; flex-direction: column; gap: 0;
+    flex: 1; min-width: 0;
+  }
+  .opt-content-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  }
+  .opt-label {
+    font-size: 13px; font-weight: 400; color: var(--fg);
+    line-height: 1.5;
+  }
+  .opt-desc {
+    font-size: 12px; color: var(--subtle);
+    line-height: 1.5;
+  }
+
+  /* Other 卡片：选中后 input 独立成行展开（与 label 行分离，indicator 仍钉 label 行）*/
+  .opt.other .other-input { display: none; margin-top: 6px; }
+  .opt.other.selected .other-input { display: block; }
+  .other-input-field {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg); font-size: 13px; font-family: inherit;
+    outline: none;
+    transition: border-color var(--duration-fast) var(--ease);
+  }
+  .other-input-field::placeholder { color: var(--subtle); }
+  .other-input-field:focus { border-color: var(--accent); }
+
+  /* 纯自由文本（无 options）*/
+  .free-text {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg); font-size: 13px; font-family: inherit;
+    outline: none; resize: vertical; min-height: 60px; line-height: 1.5;
+    transition: border-color var(--duration-fast) var(--ease);
+  }
+  .free-text::placeholder { color: var(--subtle); }
+  .free-text:focus { border-color: var(--accent); }
+
+  /* comment */
+  .comment-row { display: flex; flex-direction: column; gap: 3px; }
+  .comment-label { font-size: 11px; color: var(--subtle); padding-left: 2px; }
+  .comment-input {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg); font-size: 12.5px; font-family: inherit;
+    outline: none;
+    transition: border-color var(--duration-fast) var(--ease);
+  }
+  .comment-input::placeholder { color: var(--subtle); }
+  .comment-input:focus { border-color: var(--accent); }
+
+  /* actions：无边框，透明继承根，仅靠间距分隔 */
+  .ask-user-actions {
+    display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+    padding: 4px 14px 10px 14px;
+  }
+  .actions-hint { font-size: 11px; color: var(--subtle); margin-right: auto; }
+  .btn {
+    padding: 5px 14px; border-radius: var(--radius-sm);
+    font-size: 12.5px; font-family: inherit; cursor: pointer;
+    border: 1px solid transparent; font-weight: 500;
+    transition: all var(--duration-fast) var(--ease);
+  }
+  .btn-ghost { background: none; color: var(--muted); }
+  .btn-ghost:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { background: transparent; color: var(--subtle); cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<div style="max-width:680px;margin:0 auto 32px;">
+  <h1 class="page-title">ask-user inline v3 — 无边框一体化</h1>
+  <p class="page-desc">
+    核心改动：<strong>去掉所有分段边框</strong>（head border-b / actions border-t），单容器靠间距分区。
+    根容器用 <code>bg-input</code> 凹陷融入 composer-band，无外边框。head 无蓝底透明继承根。
+    选项 <strong>inline 布局</strong>：indicator + label + description 同行流式。Other 作为<strong>最后一个选项卡片</strong>，选中后内联展开输入框。
+  </p>
+</div>
+
+<div class="demo-wrap">
+
+  <!-- ============ 场景 1：单问题单选 + Other ============ -->
+  <div class="panel-mock">
+    <div class="demo-label">场景 1 · 单选 + description inline + Other 卡片化</div>
+
+    <div class="stream-tail">
+      <div class="msg user">
+        <div class="avatar"></div>
+        <div class="bubble">帮我搭一个后端服务，要能持久化数据</div>
+      </div>
+      <div class="msg assistant">
+        <div class="avatar"></div>
+        <div class="bubble">好，我需要先确认数据库选型才能生成迁移脚本…</div>
+      </div>
+    </div>
+
+    <div class="composer-band">
+      <div class="ask-user">
+        <div class="ask-user-head">
+          <span class="dot"></span>
+          <span class="head-title">使用哪种数据库？</span>
+          <span class="timer">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            04:53
+          </span>
+        </div>
+
+        <div class="ask-user-body">
+          <div class="q-context">检测到项目当前没有数据库配置，需要选择一种方案后我才能继续生成迁移脚本。</div>
+
+          <div class="opt-list">
+            <div class="opt selected">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content">
+                <div class="opt-content-row">
+                  <span class="opt-label">PostgreSQL</span>
+                  <span class="opt-desc">推荐，生产环境主流选择，JSON / 全文检索能力强</span>
+                </div>
+              </div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content">
+                <div class="opt-content-row">
+                  <span class="opt-label">MySQL</span>
+                  <span class="opt-desc">兼容性广，运维生态成熟</span>
+                </div>
+              </div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content">
+                <div class="opt-content-row">
+                  <span class="opt-label">SQLite</span>
+                  <span class="opt-desc">零配置，适合本地开发 / 测试</span>
+                </div>
+              </div>
+            </div>
+            <div class="opt other">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content">
+                <span class="opt-label">其他</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ask-user-actions">
+          <span class="actions-hint">Enter 提交 · Esc 取消</span>
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 场景 1b：Other 选中态展开 ============ -->
+  <div class="panel-mock">
+    <div class="demo-label">场景 1b · Other 选中 → 输入框内联展开</div>
+
+    <div class="composer-band">
+      <div class="ask-user">
+        <div class="ask-user-head">
+          <span class="dot"></span>
+          <span class="head-title">使用哪种数据库？</span>
+          <span class="timer">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            04:21
+          </span>
+        </div>
+
+        <div class="ask-user-body">
+          <div class="opt-list">
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content"><span class="opt-label">PostgreSQL</span></div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content"><span class="opt-label">MySQL</span></div>
+            </div>
+            <div class="opt other selected">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content">
+                <span class="opt-label">其他</span>
+                <div class="other-input">
+                  <input class="other-input-field" placeholder="输入自定义答案…" value="MongoDB + Redis 缓存层">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ask-user-actions">
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 场景 2：多问题 tab + 多选 ============ -->
+  <div class="panel-mock">
+    <div class="demo-label">场景 2 · 多问题 tab（head 行内）+ 多选 + comment</div>
+
+    <div class="stream-tail">
+      <div class="msg user">
+        <div class="avatar"></div>
+        <div class="bubble">初始化一个新项目</div>
+      </div>
+    </div>
+
+    <div class="composer-band">
+      <div class="ask-user">
+        <div class="ask-user-head">
+          <span class="dot"></span>
+          <div class="ask-user-tabs">
+            <button class="ask-user-tab active">框架 <span class="answered"></span></button>
+            <button class="ask-user-tab">包管理器 <span class="answered"></span></button>
+            <button class="ask-user-tab">测试框架</button>
+          </div>
+          <span class="spacer"></span>
+          <span class="timer">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            03:47
+          </span>
+        </div>
+
+        <div class="ask-user-body">
+          <div class="q-text">要集成哪些能力？（可多选）</div>
+          <div class="opt-list">
+            <div class="opt selected">
+              <div class="opt-indicator checkbox"></div>
+              <div class="opt-content"><span class="opt-label">ESLint + Prettier</span></div>
+            </div>
+            <div class="opt selected">
+              <div class="opt-indicator checkbox"></div>
+              <div class="opt-content"><span class="opt-label">Husky + lint-staged</span></div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator checkbox"></div>
+              <div class="opt-content">
+                <div class="opt-content-row">
+                  <span class="opt-label">CI（GitHub Actions）</span>
+                  <span class="opt-desc">自动跑 lint + test，PR 卡点</span>
+                </div>
+              </div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator checkbox"></div>
+              <div class="opt-content"><span class="opt-label">Docker</span></div>
+            </div>
+            <div class="opt other">
+              <div class="opt-indicator checkbox"></div>
+              <div class="opt-content"><span class="opt-label">其他</span></div>
+            </div>
+          </div>
+
+          <div class="comment-row">
+            <span class="comment-label">附加评论（可选）</span>
+            <input class="comment-input" placeholder="补充说明…">
+          </div>
+        </div>
+
+        <div class="ask-user-actions">
+          <span class="actions-hint">已答 2/3 · tab 间答案保留</span>
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 场景 3：纯自由文本 ============ -->
+  <div class="panel-mock">
+    <div class="demo-label">场景 3 · 无选项纯自由文本</div>
+
+    <div class="stream-tail">
+      <div class="msg assistant">
+        <div class="avatar"></div>
+        <div class="bubble">重构方案有两个候选，我需要了解你的优先级…</div>
+      </div>
+    </div>
+
+    <div class="composer-band">
+      <div class="ask-user">
+        <div class="ask-user-head">
+          <span class="dot"></span>
+          <span class="head-title">这次重构你最看重什么？（性能 / 可读性 / 兼容性，或自由描述）</span>
+          <span class="timer">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            04:58
+          </span>
+        </div>
+
+        <div class="ask-user-body">
+          <div class="q-context">重构方案有两个候选，我需要了解你的优先级才能定方向。</div>
+          <textarea class="free-text" placeholder="请输入…">优先可读性，其次兼容性，性能不是瓶颈</textarea>
+        </div>
+
+        <div class="ask-user-actions">
+          <span class="actions-hint">Enter 提交 · Shift+Enter 换行</span>
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 场景 4：倒计时紧迫态（<1min）============ -->
+  <div class="panel-mock">
+    <div class="demo-label">场景 4 · 倒计时 &lt; 1min 转 warning 色</div>
+
+    <div class="composer-band">
+      <div class="ask-user">
+        <div class="ask-user-head">
+          <span class="dot"></span>
+          <span class="head-title">使用哪种数据库？</span>
+          <span class="timer urgent">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            00:42
+          </span>
+        </div>
+
+        <div class="ask-user-body">
+          <div class="opt-list">
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content"><span class="opt-label">PostgreSQL</span></div>
+            </div>
+            <div class="opt">
+              <div class="opt-indicator radio"></div>
+              <div class="opt-content"><span class="opt-label">MySQL</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ask-user-actions">
+          <button class="btn btn-ghost">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

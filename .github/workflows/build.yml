@@ -1,0 +1,327 @@
+name: Build
+
+# Reusable workflow：封装 Electron 完整打包流程。
+# 由 ci.yml（PR 验证）和 release.yml（发版出产物）调用。
+# 验证深度 = release 验证深度，避免两份 build 逻辑漂移（AGENTS §4 冲突表面化）。
+
+on:
+  workflow_call:
+    inputs:
+      upload-artifacts:
+        description: '上传 DMG/EXE/AppImage 等产物（release 调用传 true，CI 验证传 false）'
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: '版本号（仅 release workflow_dispatch 用，留空用 package.json 现值）'
+        required: false
+        type: string
+        default: ''
+      dir-only:
+        description: 'CI 模式：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。release 不传，保持完整构建验证深度。'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # 提到 job 级：Cache pi resources 步骤的 key 和 prepare 步骤共用同一版本号。
+      # 与 scripts/prepare-pi-resources.sh 默认值对齐（0.84.4），避免 CI 打包内置旧 pi。
+      # 该值受 scripts/check-pi-sync.mjs S1 守卫（pre-commit 按路径触发 + ci.yml invariants），
+      # 与根 package.json 声明不一致时会被拦截。
+      PI_VERSION: '0.84.4'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # CI/release 构建均不依赖 git 历史（版本号来自 package.json/workflow input，
+          # generate-manifest.sh 不用 git）。release.yml 的 changelog 生成在其独立
+          # Create Release job（自带 fetch-depth: 0），不受此处影响。浅 clone 省 ~13s。
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools rpm
+
+      # pnpm workspace 单步安装：根 + packages/* + apps/* 一次装完
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      # 缓存 Electron 二进制（~100MB），避免每次 CI 都从 GitHub releases 重新下载。
+      # pnpm store 缓存（上方 setup-node 的 cache: pnpm）只覆盖包的 JS 文件，不含 electron
+      # postinstall 下载到 node_modules/electron/dist 的二进制，需独立缓存。
+      # install.js 会校验缓存内容的 sha256，版本升级不会用到错的旧二进制。
+      # key 基于 apps/electron/package.json，electron 版本号变动时自动失效重建。
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('apps/electron/package.json') }}
+
+      # install 步骤跳过了 electron 二进制下载（节省时间），打包需要二进制，显式补回。
+      # node-linker=hoisted（见 .npmrc）：electron 被提升到根 node_modules，
+      # 不在 apps/electron/node_modules 下，所以必须从仓库根执行 install.js。
+      - name: Download Electron binary
+        run: node node_modules/electron/install.js
+
+      - name: Bump version
+        if: inputs.version != ''
+        shell: bash
+        run: |
+          # pnpm 递归 version：更新所有 workspace 包的版本（apps/electron + packages/*）
+          # ELECTRON_SKIP_BINARY_DOWNLOAD 避免触发 electron 二进制下载
+          pnpm --filter @taiji/electron version ${{ inputs.version }} --no-git-tag-version
+          pnpm --filter @taiji/frontend version ${{ inputs.version }} --no-git-tag-version
+          pnpm --filter @taiji/runtime version ${{ inputs.version }} --no-git-tag-version
+          pnpm --filter @taiji/shared version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Preflight check
+        shell: bash
+        run: bash scripts/preflight-check.sh --ci
+
+      # 引擎包边界守卫（W9，与 pre-commit / ci.yml invariants 同源直调）：引擎包
+      # （packages/subagent-engine-* + pi/zcode-subagent-cli）不得依赖/导入 core
+      # 内部路径 + DoD#2 断言——打包链上同源拦截，防本地 hook 被绕过（D7 通则）。
+      - name: Engine package boundary guards (W9)
+        shell: bash
+        run: |
+          node .githooks/check-engine-sdk-boundary.mjs
+          node scripts/check-engine-package-boundary.mjs
+
+      # 缓存 pi resources（~70MB，含二进制 + assets + theme）。
+      # prepare-pi-resources.sh 自身有「binary 存在则跳过下载」逻辑，cache 恢复目录后脚本自动 skip。
+      # key 含 PI_VERSION（版本升级自动失效重建，binary 文件名含版本，旧 cache 不会误用）
+      # + prepare 脚本内容 hash（同版本下脚本改动 assets 组成/下载源时旧 cache 失效，
+      # 防止脚本「binary 存在则跳过」让新增 assets 永不下载）。
+      - name: Cache pi resources
+        uses: actions/cache@v4
+        with:
+          path: apps/electron/resources/pi
+          key: ${{ runner.os }}-pi-${{ env.PI_VERSION }}-${{ runner.arch }}-${{ hashFiles('scripts/prepare-pi-resources.sh') }}
+
+      - name: Download and prepare pi resources
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/prepare-pi-resources.sh
+          ./scripts/prepare-pi-resources.sh "$PI_VERSION"
+
+      # 内置 provider catalog 由构建期脚本从 pi-ai 提取（git 跟踪的 JSON 是构建快照）。
+      # 根 package.json 的 prebuild 只在根 `pnpm run build` 时触发；本 workflow 直接
+      # --filter @taiji/electron run build / build:dir 都会绕过它——必须显式执行，
+      # 否则 pi-ai 升级后 CI 静默用仓库里的旧 JSON（生成物与 pi-ai 版本漂移，
+      # verifyEnvVars 守卫只在本地生效）。
+      - name: Generate builtin providers catalog
+        shell: bash
+        run: node packages/runtime/scripts/gen-builtin-providers.mjs
+
+      # CI 模式（dir-only=true）：用 build:dir，只产出 unpacked 目录，跳过 NSIS/DMG/AppImage 打包压缩。
+      # 安装器打包配置（nsis/dmg 段）的回归交给 release.yml 完整构建覆盖。
+      # 验证分层：CI 验证代码正确性（asar 打包 + runtime unpacked + smoke test），
+      # release 验证打包产物完整性（安装器压缩 + 分发格式）。
+      - name: Build (dir-only)
+        if: inputs.dir-only == true
+        env:
+          # 跳过 macOS 代码签名（未配置 Apple Developer 证书）
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter @taiji/electron run build:dir
+
+      - name: Build
+        if: inputs.dir-only != true
+        env:
+          # 跳过 macOS 代码签名（未配置 Apple Developer 证书）
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter @taiji/electron run build
+
+      - name: Postbuild validation
+        shell: bash
+        run: |
+          if [ "${{ inputs.dir-only }}" = "true" ]; then
+            bash scripts/postbuild-validate.sh --ci --dir-only
+          else
+            bash scripts/postbuild-validate.sh --ci
+          fi
+
+      - name: Runtime smoke test (macOS)
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          # 产物名为 TaiJi.app / TaiJi 可执行文件（electron-builder.yml executableName；
+          # productName「太极」只进 CFBundleName/CFBundleDisplayName，不出现在文件系统名），
+          # .app 名派生方式与 scripts/postbuild-validate.sh 对齐，避免改名后再漂移
+          APP_PATH=$(find apps/electron/dist/builder-output/mac-arm64 -name "*.app" -maxdepth 1 | head -1)
+          RUNTIME="$APP_PATH/Contents/Resources/app.asar.unpacked/dist/runtime/index.cjs"
+          ELECTRON="$APP_PATH/Contents/MacOS/TaiJi"
+          if [ ! -f "$RUNTIME" ]; then
+            echo '::error::Runtime bundle not found in app.asar.unpacked'
+            exit 1
+          fi
+          # Start runtime with ELECTRON_RUN_AS_NODE, verify it listens
+          PORT=3299
+          ELECTRON_RUN_AS_NODE=1 "$ELECTRON" "$RUNTIME" --port=$PORT &
+          PID=$!
+          READY=false
+          for i in $(seq 1 20); do
+            if curl -s --max-time 1 "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q ok; then
+              READY=true; break
+            fi
+            sleep 0.5
+          done
+          kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+          if [ "$READY" != true ]; then
+            echo '::error::Runtime smoke test failed — did not respond to /health'
+            exit 1
+          fi
+          echo 'Runtime smoke test passed'
+
+      - name: Runtime smoke test (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $runtime = "apps/electron/dist/builder-output/win-unpacked/resources/app.asar.unpacked/dist/runtime/index.cjs"
+          $electron = "apps/electron/dist/builder-output/win-unpacked/TaiJi.exe"
+          if (-not (Test-Path $runtime)) { throw "Runtime bundle not found in app.asar.unpacked" }
+          if (-not (Test-Path $electron)) { throw "Electron executable not found" }
+          $port = 3299
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = (Resolve-Path $electron).Path
+          $psi.ArgumentList.Add((Resolve-Path $runtime).Path)
+          $psi.ArgumentList.Add("--port=$port")
+          $psi.UseShellExecute = $false
+          # 不重定向 stderr/stdout — GitHub Actions 没有 inherited console 概念，
+          # 直接让进程写到 CI 捕获流即可（避免管道满 buffer 阻塞 runtime，
+          # 也避开 PowerShell add_ErrorDataReceived 在无 runspace 的工作线程上崩）。
+          $psi.RedirectStandardError = $false
+          $psi.RedirectStandardOutput = $false
+          $process = [System.Diagnostics.Process]::new()
+          $process.StartInfo = $psi
+          if (-not $process.Start()) { throw 'Failed to start Electron runtime' }
+          $ready = $false
+          try {
+            for ($i = 0; $i -lt 20; $i++) {
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 1
+                if ($health.ok -eq $true -or $health.status -eq 'ok') { $ready = $true; break }
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Host
+              if (-not $process.WaitForExit(5000)) {
+                Write-Host "Process did not exit after taskkill"
+              }
+            }
+          }
+          if (-not $ready) { throw "Runtime smoke test failed — did not respond to /health" }
+          Write-Host 'Runtime smoke test passed'
+
+      - name: Runtime smoke test (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          RUNTIME="apps/electron/dist/builder-output/linux-unpacked/resources/app.asar.unpacked/dist/runtime/index.cjs"
+          if [ ! -f "$RUNTIME" ]; then
+            echo '::error::Runtime bundle not found in app.asar.unpacked'
+            exit 1
+          fi
+          echo 'Runtime bundle exists in unpacked directory'
+
+      - name: List build output
+        shell: bash
+        working-directory: apps/electron
+        run: find dist/builder-output -type f 2>/dev/null || echo 'No output directory'
+
+      - name: Generate sha256 manifest
+        shell: bash
+        run: bash scripts/generate-manifest.sh apps/electron/dist/builder-output --platform ${{ matrix.platform }}
+        # --platform <mac|win|linux>：输出 manifest-<platform>.json（三平台并行构建各自命名，
+        # 避免 release.yml 的 download-artifact merge-multiple 同名覆盖。release.yml 用 jq 合并）。
+
+      # 此处原有一个 "Ad-hoc sign mac app" 步骤（scripts/sign-mac-adhoc.sh），2026-08 批次 5
+      # u5d 删除。删除理由（探针 P7 实证 + CI 配置双重确认）：
+      # 1. 该步骤只签 unpacked 目录下的 .app，而上传清单只有 dmg/exe/AppImage——
+      #    签完的产物从不上传，是死步骤；
+      # 2. 它在 electron-builder 之后运行，dmg 早已打包完成，dmg 内的 .app 不可能被签上；
+      # 3. P7 探针实证（2026-08，测于当时尚存的 mac zip 产物）：897 个条目中
+      #    _CodeSignature / CodeResources 条目数 = 0，即发布产物确实未签名；
+      # 4. Build 步骤已设 CSC_IDENTITY_AUTO_DISCOVERY=false（无 Developer ID 证书）。
+      # 结论：产物走「未签名 + xattr -cr 清 quarantine」路线（见 updater-script.ts 头注释），
+      # 需要真签名时走批次 6 签名路线（设计 §3.8，待证书采购后单独实施），不要在此复活本步骤。
+
+      - name: Upload artifacts
+        if: inputs.upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tai-ji-${{ matrix.platform }}
+          path: |
+            apps/electron/dist/builder-output/*.dmg
+            apps/electron/dist/builder-output/*.exe
+            apps/electron/dist/builder-output/*.AppImage
+            apps/electron/dist/builder-output/manifest-*.json
+          retention-days: 7
+          if-no-files-found: error
+
+  # macOS 专属 main 进程测试独立 job（2026-09-14 从 build mac matrix 串行 step 拆出）。
+  # 动机（原 step 注释，语义不变）：ci.yml 的 test job 在 ubuntu 跑 test:main，
+  # updater-script-integration.test.ts 里 mac happy-path / sha mismatch / dmg mount-fail
+  # 回滚用例用 it.skipIf(!IS_MAC) 跳过（.app bundle 语义是 mac 特有，ubuntu 跑不了）——
+  # 这些用例必须在 mac CI 上真正执行，否则「detached bash 升级脚本」最关键的决策树
+  # （sha 校验 + 备份 + 回滚）永远没回归覆盖。
+  # 拆分理由：该 suite 纯源码 vitest（hdiutil/ditto 为 OS 内建），不依赖 build 产物，
+  # 串在 build mac 里 ~100s 全占关键路径（实测 Build mac 207-223s 中占比 ~45%，
+  # 拆出后 build 阶段关键路径 223s → ~140s，由 win job 接棒成为最长杆）。
+  # 与 build matrix 并行；本 job 失败令整个 workflow_call 失败，门禁语义保持 workflow 级。
+  main-tests-mac:
+    name: Main tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm --filter @taiji/electron run test:main

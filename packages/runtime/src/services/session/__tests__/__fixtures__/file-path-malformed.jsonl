@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"a32-file-malformed","timestamp":"2026-08-20T00:00:00.000Z","cwd":"/tmp/trace-a32"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-08-20T00:00:01.000Z","message":{"role":"user","content":"hello"}}
+this line is not json at all
+{"type":"model_change","id":"mc1","parentId":"m1","timestamp":"2026-08-20T00:00:02.000Z","provider":"p1","modelId":"m1"}
+{"broken": 
+{"type":"session_info","name":"renamed-after"}

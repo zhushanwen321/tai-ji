@@ -1,0 +1,43 @@
+{
+  "name": "@zhushanwen/pi-pending-notifications",
+  "version": "0.7.2",
+  "description": "Cross-extension async operation registration/query mechanism for Pi.",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "notifications",
+    "async",
+    "pending"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "typebox": "*"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  }
+}

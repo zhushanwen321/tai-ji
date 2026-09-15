@@ -1,0 +1,11 @@
+{
+  "name": "create-taiji-plugin",
+  "version": "0.10.0",
+  "description": "Scaffold a new taiji plugin project",
+  "private": true,
+  "bin": {
+    "create-taiji-plugin": "./bin/create-taiji-plugin.js"
+  },
+  "main": "src/index.cjs",
+  "license": "MIT"
+}

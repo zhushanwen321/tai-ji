@@ -1,0 +1,676 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   taiji Design Tokens · v6 太极（2026-08-02 定稿反写）
+   ────────────────────────────────────────────────────────────
+   SSOT: docs/DESIGN.md §4
+        + .tmp/v6/src/styles/tokens.css（token 真值源，逐字对齐）
+        + .tmp/v6/src/composables/useTheme.ts（6 太极主题 entry）
+        + .tmp/v6/src/styles/base.css（全局 reset / keyframes / btn 原语）
+
+   主题系统（v6 太极，3 暗 + 3 亮）：
+     暗：玄（:root 默认 · 纯灰）/ 黛蓝 / 暖墨   —— data-theme-preset 覆盖
+     亮：皓（[data-theme=light] 默认 · 宣纸墨黑）/ 青墨 / 朱印
+   切换：玄/皓 不带 preset；黛蓝/暖墨/青墨/朱印 带对应 preset。
+        主题 entry 覆盖 :root 默认值；store 侧 mapping 归 M2。
+   ============================================================ */
+
+:root {
+  /* ── 背景层级（v6 玄：阶梯上抬+加宽级差，暗端防糊）────────── */
+  --bg-stage: #0a0a0c;          /* 舞台深底（最外层衬底，低于 --bg；v6 §4） */
+  --bg: #131316;                /* 画布底层（玄，侧栏/drawer/settings 内容区底） */
+  --bg-sunken: var(--bg);       /* 同画布色（语义变更，靠 surface 浮起分隔） */
+  --surface: #1f1f22;           /* 主面板/drawer 浮起表面 */
+  --surface-hover: #303033;     /* 面板悬停 */
+  --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
+  --bg-elevated: #2b2b2e;       /* tab 型选中态浮起 / popover 浮层 */
+  --bg-input: #17171a;          /* 输入框/凹陷区（比 bg 更深） */
+  --bg-card: #1b1b1e;           /* 设置分组卡片（介于 bg 与 surface） */
+  /* 用户气泡/输入区专用底色（暗：浮起灰 / 亮：纯白，见 [data-theme="light"] 覆盖）。
+     亮色下灰底（surface-hover/bg-input）易读作禁用态，故白纸化——气泡/输入框是内容载体，
+     白色浮起与米白面板区分，墨绿链接对比度同步从 4.24 升至 5.53。 */
+  --bubble-bg: var(--surface-hover);
+  --composer-bg: var(--bg-input);
+  --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
+
+  /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
+  --neutral-fg: #dedee2;        /* 主前景 */
+  --neutral-mid: #96969c;       /* 正文（过 AA） */
+  --neutral-dim: #74747a;       /* 次要（提亮一档） */
+  --neutral-faint: #46464c;     /* 极弱/装饰 */
+  --neutral-ico: #86868c;       /* 图标默认色 */
+  --neutral-ico-hover: #dedee2; /* 图标 hover 色 */
+
+  /* ── 边框/分隔 ─────────────────────────────────────────── */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --hairline: rgba(255, 255, 255, 0.05); /* 行分隔 / drawer L1 栏底线 */
+
+  /* ── 主色（v6 玄：水墨降饱和，克制放开档）────────────── */
+  --accent: #cfcfd4;
+  --accent-hover: #e0e0e4;
+  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
+  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
+  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字） */
+
+  /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
+  --success: #78a87e;
+  --warn: #b79c54;
+  --danger: #bf6b6b;
+  --danger-fg: #f0f0f2;         /* danger 实色上的文字 */
+  --info: #6d99a5;
+  /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
+  --reasoning: #8e85ab;
+  /* 状态色软底（color-mix 派生：palette 切换 / 亮暗主题自动跟随） */
+  --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
+  --info-soft: color-mix(in oklch, var(--info) 12%, transparent);
+  --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
+
+  /* ── 字体 ───────────────────────────────────────────────── */
+  --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
+   * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
+   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器）
+   *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
+  --font-scale-u: 1;
+  --font-scale-mq: 1;
+  /* 分区字号倍率（data-fs-sidebar/chat/drawer 档位映射，见下方选择器）。
+   * 区域根节点挂 [data-fs-scope] 属性后，子树内 --text-* 链乘以对应倍率。 */
+  --font-scale-sidebar: 1;
+  --font-scale-chat: 1;
+  --font-scale-drawer: 1;
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+
+  /* ── 圆角（v6：sm 6px / 8px / lg 12px / card 10px）───────── */
+  --radius-sm: 6px;             /* 输入框/标签 */
+  --radius: 8px;                /* 按钮/卡片（默认）*/
+  --radius-card: 10px;          /* 卡片容器 */
+  --radius-lg: 12px;            /* 面板/弹层 */
+
+  /* ── 间距（4px 栅格）───────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── 阴影 ───────────────────────────────────────────────── */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.2);          /* 描边 */
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);         /* 浮层 */
+  --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent); /* steer/活跃环（composer-shell isActive 分支；focus 聚焦环用 --accent-ring） */
+
+  /* ── 层级 / 组件尺寸 ──────────────────────────────────── */
+  --content-max-w: 720px;       /* 内容列最大宽（settings 等收窄） */
+  --panel-bg: var(--surface);   /* panel 内 sticky 浮层底色契约 */
+  --message-stream-pad-top: 20px; /* 消息流顶部留白：scrollEl pt 与 TurnMeta sticky 覆盖同源（改一处两处同步生效；TurnMeta 用 -mt+pt 同值让 sticky 浮层背景覆盖 padding 区，挡住滚过来的文字） */
+  --z-sticky: 1;
+  --z-popover: 10;
+  --z-overlay: 20;
+  --z-modal: 1000;
+  --bash-output-max-height: 240px;
+  --composer-btn-size: 30px;
+
+  /* ── diff 着色（v6 §4.5 柔化 12%：行背景 + 字符级高饱和）── */
+  --diff-add-bg: color-mix(in oklch, var(--success) 12%, transparent);
+  --diff-del-bg: color-mix(in oklch, var(--danger) 12%, transparent);
+  --diff-add-strong: color-mix(in oklch, var(--success) 45%, transparent);
+  --diff-del-strong: color-mix(in oklch, var(--danger) 45%, transparent);
+
+  /* ── 动效 ───────────────────────────────────────────────── */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration: 200ms;
+  --duration-slow: 320ms;
+
+  /* ── shadcn-vue 命名空间别名 ────────────────────────────
+     @taiji/ui / 本地 components/ui（shadcn copy）依赖 shadcn 命名约定
+     （--primary/--secondary/--destructive 等）。此处把 shadcn 别名映射到
+     v6 等价语义，不引入新色值。
+     已知语义分歧（维持既有消费方，不破 W01）：
+       • --accent：v6=主色 / shadcn=hover 软底 → 维持主色，ghost·outline 的
+         hover:bg-accent 沿用主色（既有状态）
+       • --muted：v3=次级文字色 / shadcn=背景色 → 维持文字色 */
+  --primary: var(--accent);            /* default Button 底 = 主色 */
+  --primary-foreground: var(--neutral-fg);     /* 底上字 */
+  --secondary: var(--surface);         /* secondary Button 底 */
+  --secondary-foreground: var(--neutral-fg);
+  --destructive: var(--danger);        /* destructive Button 底 */
+  --destructive-foreground: var(--neutral-fg);
+  --muted-foreground: var(--neutral-mid);     /* shadcn 次级文字 */
+  --accent-foreground: var(--neutral-fg);      /* ghost hover 底配字 */
+  --background: var(--bg);             /* bg-background / ring-offset-background */
+  --foreground: var(--neutral-fg);             /* text-foreground */
+  --popover: var(--surface);           /* bg-popover */
+  --popover-foreground: var(--neutral-fg);
+  --input: var(--border);              /* border-input */
+  --ring: var(--accent);               /* ring-ring（focus，主色）*/
+
+  /* ── 图表派生 tokens（玄 · 暗，默认 :root）──────────────
+     不手写色值，全部从 --chart-ink 派生（color-mix）。
+     --chart-ink = neutral-fg；黛蓝/暖墨中性谱自带色相故派生自动跟随；
+     彩色亮色 preset（青墨/朱印）掺入 accent 色相，见下方 preset 块覆盖。
+     明度方向自动反转（暗：墨越亮越浓；亮：墨越深越浓）。 */
+  --chart-ink: var(--neutral-fg);
+  /* provider 序列（堆叠柱/图例/排名条，p1 = 占比最高档） */
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  /* 热力日历墨阶（0 = 无消耗底色，5 = 当日最浓） */
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  /* 缓存构成三色（命中/新输入/输出） */
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  /* 交互层（图表 hover 列 / 排名行 hover / 条形底槽 / 热力格描边） */
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+}
+
+/* ============================================================
+   皓主题（亮 · 宣纸墨黑 · 默认亮色）
+   <html data-theme="light"> 触发。真值源：useTheme.ts THEMES['太极 · 皓…']
+   宣纸米白阶梯 + 暖墨文字 + 墨黑 accent；青墨/朱印仅覆盖 accent（见下方 preset）。
+   ============================================================ */
+[data-theme="light"] {
+  /* 亮色最深衬底（窗口底，透过 app-shell 圆角/padding 透出）。
+     TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰（同 --surface-hover 值 #dbd9d4），
+     延续暗色 base(深)→canvas(中)→surface(浅) 三层明度；避免泄漏 :root 暗色 #0a0a0c 形成黑框。 */
+  --bg-stage: #dbd9d4;
+  --bg: #edebe8;
+  --bg-sunken: #edebe8;
+  --surface: #f7f6f3;
+  --surface-hover: #dbd9d4;
+  --surface-2: #e3e1dc;
+  --bg-elevated: #faf9f6;
+  --bg-input: #e5e3df;
+  --bg-card: #f1efec;
+  /* 亮色白纸：用户气泡与 composer 输入区用纯白（灰底读作禁用态，见 :root 注释） */
+  --bubble-bg: #ffffff;
+  --composer-bg: #ffffff;
+
+  --neutral-fg: #2b2a28;
+  --neutral-mid: #706e6a;
+  --neutral-dim: #9d9b96;
+  --neutral-faint: #c7c5c0;
+  --neutral-ico: #82807b;
+  --neutral-ico-hover: #2b2a28;
+
+  --border: rgba(0, 0, 0, 0.07);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --hairline: rgba(0, 0, 0, 0.05);
+
+  /* 墨黑 accent（宣纸上的深颜料） */
+  --accent: #36332f;
+  --accent-hover: #494641;
+  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
+  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
+  --accent-fg: #f5f4f1;
+
+  /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
+  --success: #368047;
+  --warn: #977629;
+  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
+  --danger: #b24c4a;
+  --danger-fg: #faf5f5;
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --info: #3a7688;
+  --reasoning: #71659c;
+
+  /* ── 图表派生 tokens（皓 · 亮色，默认亮色）── 同玄，auto 跟随 neutral-fg + bg */
+  --chart-ink: var(--neutral-fg);
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+}
+
+/* ============================================================
+   太极主题槽位（data-theme-preset 切换）
+   store.setSystem({themePreset}) 同步 <html data-theme-preset>。
+   暗色族：玄 = :root 默认（无 preset）；黛蓝/暖墨 用 :root[data-theme-preset]。
+   亮色族：皓 = [data-theme=light] 默认（无 preset）；青墨/朱印 用 light + preset。
+   真
+   ============================================================ */
+
+/* 黛蓝（暗 · 依稀蓝相，S≈8%，与玄拉开可感知差距但不罩色） */
+:root[data-theme-preset="dailan"] {
+  --bg: #121319;
+  --bg-sunken: #121319;
+  --surface: #1e1f25;
+  --surface-hover: #2f3039;
+  --surface-2: #262731;
+  --bg-elevated: #2a2b34;
+  --bg-input: #16171d;
+  --bg-card: #1a1b22;
+  --neutral-fg: #dedfe5;
+  --neutral-mid: #9597a1;
+  --neutral-dim: #74767f;
+  --neutral-faint: #474853;
+  --neutral-ico: #868895;
+  --neutral-ico-hover: #dedfe5;
+  --accent: #9ca9c9;
+  --accent-hover: #b0bcd4;
+  --accent-fg: #151824;
+  --chart-ink: var(--neutral-fg);
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+}
+
+/* 暖墨（暗 · 宣纸暖相） */
+:root[data-theme-preset="nuanmo"] {
+  --bg: #161413;
+  --bg-sunken: #161413;
+  --surface: #221f1d;
+  --surface-hover: #33302c;
+  --surface-2: #2a2724;
+  --bg-elevated: #2e2b27;
+  --bg-input: #1a1816;
+  --bg-card: #1e1c1a;
+  --neutral-fg: #e2dfdb;
+  --neutral-mid: #9a9690;
+  --neutral-dim: #79756f;
+  --neutral-faint: #4a4743;
+  --neutral-ico: #8a867f;
+  --neutral-ico-hover: #e2dfdb;
+  --accent: #cbc3b3;
+  --accent-hover: #ded7c8;
+  --accent-fg: #201d18;
+  --chart-ink: var(--neutral-fg);
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+}
+
+/* 青墨（亮 · 宣纸花青）：共用宣纸阶梯，只换 accent 颜料 + 图表墨掺花青 */
+[data-theme="light"][data-theme-preset="qingmo"] {
+  --accent: #3d6b6b;
+  --accent-hover: #4e7d7d;
+  --accent-fg: #f2f7f6;
+  --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+}
+
+/* 朱印（亮 · 宣纸朱砂）：朱砂压暗压灰，danger 错开为玫红防撞色 + 图表墨掺朱砂 */
+[data-theme="light"][data-theme-preset="zhuyin"] {
+  --accent: #9c4335;
+  --accent-hover: #b04f41;
+  --accent-fg: #faf3f0;
+  --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
+  --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
+  --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
+  --chart-p3: color-mix(in oklch, var(--chart-ink) 48%, var(--bg));
+  --chart-p4: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --chart-p5: color-mix(in oklch, var(--chart-ink) 17%, var(--bg));
+  --heat-0: color-mix(in oklch, var(--chart-ink) 5%, var(--bg));
+  --heat-1: color-mix(in oklch, var(--chart-ink) 12%, var(--bg));
+  --heat-2: color-mix(in oklch, var(--chart-ink) 24%, var(--bg));
+  --heat-3: color-mix(in oklch, var(--chart-ink) 40%, var(--bg));
+  --heat-4: color-mix(in oklch, var(--chart-ink) 60%, var(--bg));
+  --heat-5: color-mix(in oklch, var(--chart-ink) 82%, var(--bg));
+  --cache-hit: color-mix(in oklch, var(--chart-ink) 85%, var(--bg));
+  --cache-out: color-mix(in oklch, var(--chart-ink) 55%, var(--bg));
+  --cache-in: color-mix(in oklch, var(--chart-ink) 30%, var(--bg));
+  --hover-tint: color-mix(in oklch, var(--neutral-fg) 5%, transparent);
+  --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
+  --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
+  --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
+  --success: #368047;
+  --warn: #977629;
+  --danger: #b23855;
+  --danger-fg: #faf5f6;
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --info: #3a7688;
+  --reasoning: #71659c;
+}
+
+/* ============================================================
+   字体大小槽位（data-font-size → --font-scale-u，D17 + v6 calc 自适应）
+   store.setSystem({fontSize}) 同步 <html data-font-size>。
+   映射到 --font-scale-u，驱动 --text-* calc 链路（base 14px × 档位）。
+   ============================================================ */
+:root[data-font-size="small"] {
+  --font-scale-u: 0.929;
+}
+
+:root[data-font-size="medium"] {
+  --font-scale-u: 1;
+}
+
+:root[data-font-size="large"] {
+  --font-scale-u: 1.143;
+}
+
+/* ============================================================
+   分区字号槽位（data-fs-<region> → --font-scale-<region>）
+   store.setSystem({fontScales}) 经 applySystemToDom 同步 <html data-fs-*>。
+   档位倍率：small ×0.9 / medium ×1 / large ×1.15 / xlarge ×1.3。
+   三个区域共用同一档位表，逐区域写选择器（属性选择器无法参数化 key）。
+   ============================================================ */
+:root[data-fs-sidebar="small"] { --font-scale-sidebar: 0.9; }
+:root[data-fs-sidebar="medium"] { --font-scale-sidebar: 1; }
+:root[data-fs-sidebar="large"] { --font-scale-sidebar: 1.15; }
+:root[data-fs-sidebar="xlarge"] { --font-scale-sidebar: 1.3; }
+
+:root[data-fs-chat="small"] { --font-scale-chat: 0.9; }
+:root[data-fs-chat="medium"] { --font-scale-chat: 1; }
+:root[data-fs-chat="large"] { --font-scale-chat: 1.15; }
+:root[data-fs-chat="xlarge"] { --font-scale-chat: 1.3; }
+
+:root[data-fs-drawer="small"] { --font-scale-drawer: 0.9; }
+:root[data-fs-drawer="medium"] { --font-scale-drawer: 1; }
+:root[data-fs-drawer="large"] { --font-scale-drawer: 1.15; }
+:root[data-fs-drawer="xlarge"] { --font-scale-drawer: 1.3; }
+
+/* 区域字号 scope 槽位：挂在区域根节点（Sidebar 根 / main-area / drawer-area 的
+ * data-fs-scope 属性），对子树重声明 --text-* 链（乘区域倍率）。自定义属性继承，
+ * 子树内所有 text-[length:var(--text-*)] 与 em 相对字号（markdown 标题等）随之
+ * 缩放；硬编码 px 字号类不响应（各区域组件已转换为 token 引用）。
+ * 属性选择器而非类名：与 data-font-size 槽位同范式，且仍是纯 token 重声明。 */
+[data-fs-scope="sidebar"] {
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+}
+
+[data-fs-scope="chat"] {
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+}
+
+[data-fs-scope="drawer"] {
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
+}
+
+/* 视口自适应字号（与 --font-scale-mq 配合：大屏放大、小屏收缩） */
+@media (min-width: 2100px) {
+  :root { --font-scale-mq: 1.08; }
+}
+@media (max-width: 1399px) {
+  :root { --font-scale-mq: 0.95; }
+}
+
+/* ============================================================
+   全局重置 + 基础样式（对齐 demo base.css）
+   ============================================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--neutral-fg);
+  /* v6 §2 三层明度：窗口底为 stage 最深层（#0a0a0c），app-shell(bg #131316 + rounded-[10px])
+     落在 stage 上，圆角/padding 区透出 stage 衬底，形成 base(深)→canvas(中)→surface(浅) 阶梯。
+     原 var(--bg) 与 app-shell 同色，stage 层缺失致三层明度扁平。 */
+  background: var(--bg-stage);
+
+}
+
+body {
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+}
+
+/* 隐蔽 overlay 滚动条（对齐 TurnRail 窄条风格：细 / 透明 track / thumb 默认弱、hover 亮） */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-faint);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
+/* Firefox */
+* { scrollbar-width: thin; scrollbar-color: var(--neutral-faint) transparent; }
+
+/* 注：demo base.css 的 .btn 原语系统不搬入此文件——renderer 用本地 ui 原语 <Button> 组件
+ * （packages/renderer/src/components/ui/button），不消费 .btn-* class。按钮 variant/尺寸
+ * 的 v6 对齐归各消费组件（M5 sidebar/M8 composer 等）按 Button 组件 props 处理。
+ * 选中态范式（design §3.7 D8：tab 型=bg-elevated / 列表项型=bg-surface+accent）由各组件实现。
+ *
+ * 三层样式纪律：style.css 只放 design tokens（CSS 变量）+ base reset + 全局 keyframes SSOT。
+ */
+
+/* ============================================================
+   动画 keyframes SSOT（v6 §5.9：只在全局定义一次）
+   消费方用 animation-name 引用（Tailwind animate-* 工具类 / 内联 animation）。
+   pulse-accent 用 CSS 变量派生，跟随主题（不再硬编码 rgba）。
+   ============================================================ */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-accent {
+  0% { box-shadow: 0 0 0 0 var(--accent-ring); }
+  70% { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes pulse-strong {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(0.92); }
+}
+@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes loader-spin { to { transform: rotate(360deg); } }
+/* running toolcall 透明度呼吸（chat/Block.vue 模板 Tailwind 任意值类
+   animate-[toolcall-breathe_2.4s_ease-in-out_infinite] 消费；keyframes 必须在
+   全局定义——scoped 内定义会被编译器改名为哈希名而失效） */
+@keyframes toolcall-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@keyframes ask-user-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes taiji-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   浮层进出场过渡（reka data-state 驱动）
+   替代失效的 tailwindcss-animate utility（插件未安装，类不生成）。
+   用 transition（可中断 retarget）而非 keyframes（restart from zero）。
+   ============================================================ */
+
+/* popover 族：缩放跟随触发点（reka 计算 --reka-popper-transform-origin） */
+.reka-popover-transition {
+  transition: opacity var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease);
+  transform-origin: var(--reka-popper-transform-origin, center);
+}
+.reka-popover-transition[data-state='open'] {
+  opacity: 1;
+  transform: scale(1);
+}
+.reka-popover-transition[data-state='closed'] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+@starting-style {
+  .reka-popover-transition[data-state='open'] {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* dialog：居中缩放（modal 允许 center origin，transform 保留 translate 居中） */
+.reka-dialog-transition {
+  transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+}
+.reka-dialog-transition[data-state='open'] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.reka-dialog-transition[data-state='closed'] {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
+}
+@starting-style {
+  .reka-dialog-transition[data-state='open'] {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+
+/* dialog 遮罩：纯 opacity */
+.reka-overlay-transition {
+  transition: opacity var(--duration) var(--ease);
+}
+.reka-overlay-transition[data-state='open'] { opacity: 1; }
+.reka-overlay-transition[data-state='closed'] { opacity: 0; }
+@starting-style {
+  .reka-overlay-transition[data-state='open'] { opacity: 0; }
+}
+
+/* ============================================================
+   Reduced motion（PRODUCT.md Accessibility：prefers-reduced-motion 兜底）
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * Reduced motion = 更少更温和，非零（AUDIT §6）。
+   * - 动画（位移/旋转/脉动类）：duration 归零 + 仅播一次 → 瞬切到终态
+   * - transition：只清零运动属性（transform/位移类），保留 opacity/color 过渡
+   *   （辅助理解类反馈不应被一并砍掉）
+   */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+  /* 保留辅助理解的非位移过渡（覆盖上面的 0.01ms）。
+   * transition-property 必须 !important：组件级 transition-* 类特异性 (0,1,0)
+   * 高于元素选择器 (0,0,0)，无 !important 时白名单被组件原属性（含 transform）覆盖，
+   * 位移过渡不瞬切（Plan 05 F2 修复）。transform 移出过渡属性 → 位移瞬切；
+   * opacity/color 等保留 120ms 温和过渡。 */
+  *, *::before, *::after {
+    transition-property: opacity, color, background-color, border-color, fill, stroke, box-shadow, filter !important;
+    transition-duration: var(--duration-fast) !important;
+  }
+}

@@ -1,0 +1,3 @@
+node_modules/
+coverage/
+src/services/plugin-service/plugin-bootstrap.js

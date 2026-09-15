@@ -1,0 +1,62 @@
+{
+  "name": "@taiji/ui",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./rendering-protocol": {
+      "types": "./src/rendering-protocol/index.ts",
+      "import": "./src/rendering-protocol/index.ts"
+    },
+    "./extension-host": {
+      "types": "./src/extension-host/index.ts",
+      "import": "./src/extension-host/index.ts"
+    },
+    "./features/composer": {
+      "types": "./src/features/composer/index.ts",
+      "import": "./src/features/composer/index.ts"
+    },
+    "./features/settings": {
+      "types": "./src/features/settings/index.ts",
+      "import": "./src/features/settings/index.ts"
+    },
+    "./features/drawer": {
+      "types": "./src/features/drawer/index.ts",
+      "import": "./src/features/drawer/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.21.0",
+    "@vueuse/core": "^13",
+    "@taiji/core": "workspace:*",
+    "@taiji/dom-core": "workspace:*",
+    "@taiji/extension-protocol": "workspace:*",
+    "@taiji/shared": "workspace:*",
+    "ansi_up": "^6.0.6",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2",
+    "reka-ui": "^2.9.10",
+    "tailwind-merge": "^3",
+    "vue": "^3.5",
+    "vue-i18n": "^10"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "@vitejs/plugin-vue": "^6",
+    "@vue/test-utils": "^2.4.6",
+    "happy-dom": "^20.9.0",
+    "typescript": "^5.8",
+    "vitest": "^4.1.6",
+    "vue-tsc": "^2"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@zhushanwen/pi-structured-output",
+  "version": "5.1.7",
+  "description": "Structured output tool for Pi — workflow schema enforcement via pi's parameter layer; interactive mode validates self-reported schemas with Ajv",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "structured-output",
+    "json-schema"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "ajv": "^8.17.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "typebox": "*"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

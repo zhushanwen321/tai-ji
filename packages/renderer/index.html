@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <!-- CSP（integrity-hardening D2c，W2 前置 G2）：指令段说明——
+       script-src 'self'：脚本仅限应用自身 bundle，阻断 XSS 注入外源脚本；
+       style-src 'unsafe-inline'：Vue 运行时样式注入（scoped style 挂载 / 动态 style 属性）需要；
+       img-src data:/blob:：前端生成的内联图标与截图 blob；local-file: 是主进程注册的
+       本地图片预览自定义协议（自定义 scheme 不被 'self' 覆盖）；
+       font-src data:：[2026-08-25 已无 bundled 字体，改系统栈] 原 @fontsource 字体在打包态
+       以内联 data:font/woff2 形态加载，现保留此指令兼容未来自定义字体场景；
+       connect-src ws://localhost:*：renderer 连 runtime 的 WebSocket（use-connection 拼
+       ws://localhost:<port>，host 是 localhost 非 127.0.0.1；dev HMR 的同源 ws 已被
+       'self' 覆盖——Chromium 按 CSP3 scheme 家族规则 http↔ws 匹配同源）。
+       依据 dev 实测（W2 门）+ 打包态实测（S3）：round1 违规 ws://localhost:3310（dev）、
+       data:font/woff2（打包），逐一最小增量补齐后双态零违规。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: local-file:; font-src 'self' data:; connect-src 'self' ws://localhost:*" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaiJi</title>
+  <!-- 2026-08-25：字体改系统栈（system-ui 优先），无 bundled 字体，font-src data: 指令保留兼容。 -->
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

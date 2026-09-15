@@ -1,0 +1,214 @@
+/* ============================================================
+   taiji Mobile · Design Tokens（v6 太极，2026-08-02 定稿反写）
+   ────────────────────────────────────────────────────────────
+   提取自 packages/renderer/src/style.css 的 tokens 段（:root 玄 + 皓 light + 字体槽位），
+   供 mobile 壳端到端消费：tailwind.config.ts 把 bg-bg/border-[var(--border)] 等
+   映射到这些 CSS 变量。M1d-02 修复：此前 mobile 包内无任何变量定义，
+   App.vue 的语义 token 类解析为 undefined var（透明背景/无效边框）。
+
+   真值源仍是 renderer style.css（SSOT: docs/DESIGN.md §4）；
+   双壳收敛时抽共享 tokens.css，此文件与其同构（改动须同步两处）。
+   ============================================================ */
+:root {
+  /* ── 背景层级（v6 玄：阶梯上抬+加宽级差，暗端防糊）────────── */
+  --bg-stage: #0a0a0c;          /* 舞台深底（最外层衬底，低于 --bg；v6 §4） */
+  --bg: #131316;                /* 画布底层（玄，侧栏/drawer/settings 内容区底） */
+  --bg-sunken: var(--bg);       /* 同画布色（语义变更，靠 surface 浮起分隔） */
+  --surface: #1f1f22;           /* 主面板/drawer 浮起表面 */
+  --surface-hover: #303033;     /* 面板悬停 */
+  --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
+  --bg-elevated: #2b2b2e;       /* tab 型选中态浮起 / popover 浮层 */
+  --bg-input: #17171a;          /* 输入框/凹陷区（比 bg 更深） */
+  --bg-card: #1b1b1e;           /* 设置分组卡片（介于 bg 与 surface） */
+  /* 用户气泡/输入区专用底色（暗：浮起灰 / 亮：纯白，见 [data-theme="light"] 覆盖）。
+     亮色下灰底（surface-hover/bg-input）易读作禁用态，故白纸化——气泡/输入框是内容载体，
+     白色浮起与米白面板区分，墨绿链接对比度同步从 4.24 升至 5.53。 */
+  --bubble-bg: var(--surface-hover);
+  --composer-bg: var(--bg-input);
+  --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
+
+  /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
+  --neutral-fg: #dedee2;        /* 主前景 */
+  --neutral-mid: #96969c;       /* 正文（过 AA） */
+  --neutral-dim: #74747a;       /* 次要（提亮一档） */
+  --neutral-faint: #46464c;     /* 极弱/装饰 */
+  --neutral-ico: #86868c;       /* 图标默认色 */
+  --neutral-ico-hover: #dedee2; /* 图标 hover 色 */
+
+  /* ── 边框/分隔 ─────────────────────────────────────────── */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --hairline: rgba(255, 255, 255, 0.05); /* 行分隔 / drawer L1 栏底线 */
+
+  /* ── 主色（v6 玄：水墨降饱和，克制放开档）────────────── */
+  --accent: #cfcfd4;
+  --accent-hover: #e0e0e4;
+  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
+  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
+  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字） */
+
+  /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
+  --success: #78a87e;
+  --warn: #b79c54;
+  --danger: #bf6b6b;
+  --danger-fg: #f0f0f2;         /* danger 实色上的文字 */
+  --info: #6d99a5;
+  /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
+  --reasoning: #8e85ab;
+  /* 状态色软底（color-mix 派生：palette 切换 / 亮暗主题自动跟随） */
+  --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
+  --info-soft: color-mix(in oklch, var(--info) 12%, transparent);
+  --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
+
+  /* ── 字体 ───────────────────────────────────────────────── */
+  --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
+   * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
+   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器）
+   *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
+  --font-scale-u: 1;
+  --font-scale-mq: 1;
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+
+  /* ── 圆角（v6：sm 6px / 8px / lg 12px / card 10px）───────── */
+  --radius-sm: 6px;             /* 输入框/标签 */
+  --radius: 8px;                /* 按钮/卡片（默认）*/
+  --radius-card: 10px;          /* 卡片容器 */
+  --radius-lg: 12px;            /* 面板/弹层 */
+
+  /* ── 间距（4px 栅格）───────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── 阴影 ───────────────────────────────────────────────── */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.2);          /* 描边 */
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);         /* 浮层 */
+  --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent); /* 聚焦环（跟随 accent） */
+
+  /* ── 层级 / 组件尺寸 ──────────────────────────────────── */
+  --content-max-w: 720px;       /* 内容列最大宽（settings 等收窄） */
+  --panel-bg: var(--surface);   /* panel 内 sticky 浮层底色契约 */
+  --z-sticky: 1;
+  --z-popover: 10;
+  --z-overlay: 20;
+  --z-modal: 1000;
+  --bash-output-max-height: 240px;
+  --composer-btn-size: 30px;
+
+  /* ── diff 着色（v6 §4.5 柔化 12%：行背景 + 字符级高饱和）── */
+  --diff-add-bg: color-mix(in oklch, var(--success) 12%, transparent);
+  --diff-del-bg: color-mix(in oklch, var(--danger) 12%, transparent);
+  --diff-add-strong: color-mix(in oklch, var(--success) 45%, transparent);
+  --diff-del-strong: color-mix(in oklch, var(--danger) 45%, transparent);
+
+  /* ── 动效 ───────────────────────────────────────────────── */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration: 200ms;
+  --duration-slow: 320ms;
+
+  /* ── shadcn-vue 命名空间别名 ────────────────────────────
+     @taiji/ui / 本地 components/ui（shadcn copy）依赖 shadcn 命名约定
+     （--primary/--secondary/--destructive 等）。此处把 shadcn 别名映射到
+     v6 等价语义，不引入新色值。
+     已知语义分歧（维持既有消费方，不破 W01）：
+       • --accent：v6=主色 / shadcn=hover 软底 → 维持主色，ghost·outline 的
+         hover:bg-accent 沿用主色（既有状态）
+       • --muted：v3=次级文字色 / shadcn=背景色 → 维持文字色 */
+  --primary: var(--accent);            /* default Button 底 = 主色 */
+  --primary-foreground: var(--neutral-fg);     /* 底上字 */
+  --secondary: var(--surface);         /* secondary Button 底 */
+  --secondary-foreground: var(--neutral-fg);
+  --destructive: var(--danger);        /* destructive Button 底 */
+  --destructive-foreground: var(--neutral-fg);
+  --muted-foreground: var(--neutral-mid);     /* shadcn 次级文字 */
+  --accent-foreground: var(--neutral-fg);      /* ghost hover 底配字 */
+  --background: var(--bg);             /* bg-background / ring-offset-background */
+  --foreground: var(--neutral-fg);             /* text-foreground */
+  --popover: var(--surface);           /* bg-popover */
+  --popover-foreground: var(--neutral-fg);
+  --input: var(--border);              /* border-input */
+  --ring: var(--accent);               /* ring-ring（focus，主色）*/
+}
+
+
+[data-theme="light"] {
+  --bg: #edebe8;
+  --bg-sunken: #edebe8;
+  --surface: #f7f6f3;
+  --surface-hover: #dbd9d4;
+  --surface-2: #e3e1dc;
+  --bg-elevated: #faf9f6;
+  --bg-input: #e5e3df;
+  --bg-card: #f1efec;
+  /* 亮色白纸：用户气泡与 composer 输入区用纯白（灰底读作禁用态，见 :root 注释） */
+  --bubble-bg: #ffffff;
+  --composer-bg: #ffffff;
+
+  --neutral-fg: #2b2a28;
+  --neutral-mid: #706e6a;
+  --neutral-dim: #9d9b96;
+  --neutral-faint: #c7c5c0;
+  --neutral-ico: #82807b;
+  --neutral-ico-hover: #2b2a28;
+
+  --border: rgba(0, 0, 0, 0.07);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --hairline: rgba(0, 0, 0, 0.05);
+
+  /* 墨黑 accent（宣纸上的深颜料） */
+  --accent: #36332f;
+  --accent-hover: #494641;
+  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
+  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
+  --accent-fg: #f5f4f1;
+
+  /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
+  --success: #368047;
+  --warn: #977629;
+  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
+  --danger: #b24c4a;
+  --danger-fg: #faf5f5;
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+  --info: #3a7688;
+  --reasoning: #71659c;
+}
+
+
+   字体大小槽位（data-font-size → --font-scale-u，D17 + v6 calc 自适应）
+   store.setSystem({fontSize}) 同步 <html data-font-size>。
+   映射到 --font-scale-u，驱动 --text-* calc 链路（base 14px × 档位）。
+   ============================================================ */
+:root[data-font-size="small"] {
+  --font-scale-u: 0.929;
+}
+
+:root[data-font-size="medium"] {
+  --font-scale-u: 1;
+}
+
+:root[data-font-size="large"] {
+  --font-scale-u: 1.143;
+}
+
+/* 视口自适应字号（与 --font-scale-mq 配合：大屏放大、小屏收缩） */
+@media (min-width: 2100px) {
+  :root { --font-scale-mq: 1.08; }
+}
+@media (max-width: 1399px) {
+  :root { --font-scale-mq: 0.95; }
+}

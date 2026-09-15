@@ -1,0 +1,10 @@
+{
+  "deepseek-router": {
+    "type": "api_key",
+    "key": "sk-fake-deepseek-from-auth"
+  },
+  "zhipu": {
+    "type": "api_key",
+    "key": "sk-fake-zhipu-from-auth"
+  }
+}

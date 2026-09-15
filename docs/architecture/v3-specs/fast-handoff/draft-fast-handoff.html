@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>快速 Handoff · Fast Handoff · 痛点3 交互 demo</title>
+<style>
+  /* token 引自 design-tokens.md（冷蓝暗色 SSOT，2026-07-12 拉距后值） */
+  :root{
+    --bg:#1a1b1f; --surface:#272830; --surface-2:#2e2f38; --surface-hover:#363740;
+    --bg-elevated:#313239; --bg-input:#1e1f24;
+    --fg:#f7f8fc; --muted:#a8a8b5; --subtle:#82828f;
+    --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.15);
+    --accent:#4f8ef7; --accent-hover:#6ba3ff;
+    --accent-soft:color-mix(in oklch,var(--accent) 12%,transparent);
+    --accent-ring:color-mix(in oklch,var(--accent) 30%,transparent);
+    --success:#22c55e; --success-soft:color-mix(in oklch,var(--success) 12%,transparent);
+    --warning:#f5a524; --warning-soft:color-mix(in oklch,var(--warning) 12%,transparent);
+    --danger:#ef4444; --danger-soft:color-mix(in oklch,var(--danger) 12%,transparent);
+    --info:#38bdf8; --info-soft:color-mix(in oklch,var(--info) 12%,transparent);
+    --reasoning:#a78bfa;
+    --radius-sm:3px; --radius:8px; --radius-lg:12px;
+    --shadow-2:0 8px 24px rgba(0,0,0,0.4);
+    --ease:cubic-bezier(0.4,0,0.2,1); --dur-fast:120ms; --dur:200ms; --dur-slow:320ms;
+    --font-sans:Inter,'SF Pro Display','PingFang SC',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 var(--font-sans);
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+
+  /* ===== App 骨架 ===== */
+  .app{display:flex;height:100vh;width:100vw;padding-top:96px}
+  .app > *{padding-top:0}
+  .sidebar{width:280px;flex:none;display:flex;flex-direction:column;
+    background:transparent;border-right:1px solid var(--border)}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .main-inner{flex:1;display:flex;flex-direction:column;padding:0 32px 16px;min-height:0}
+
+  /* sidebar */
+  .sb-head{display:flex;align-items:center;gap:8px;padding:10px 14px}
+  .sb-title{font:600 12px/1 var(--font-mono);color:var(--subtle);
+    letter-spacing:0.08em;text-transform:uppercase;flex:1}
+  .sb-new{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:var(--radius-sm);
+    background:var(--accent-soft);color:var(--accent);font:600 11px/1 var(--font-sans);
+    border:0;cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+  .sb-new:hover{background:color-mix(in oklch,var(--accent) 20%,transparent)}
+  .sb-new svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2.2}
+  .sb-list{flex:1;overflow-y:auto;padding:4px 8px}
+  .sb-group-head{font:500 10px/1 var(--font-mono);color:var(--subtle);
+    letter-spacing:0.08em;text-transform:uppercase;padding:10px 8px 6px;
+    display:flex;justify-content:space-between;align-items:center}
+  .sb-group-head b{color:var(--muted);font-weight:500}
+
+  /* Session Item */
+  .si{position:relative;display:flex;align-items:flex-start;gap:10px;padding:9px 10px;
+    border-radius:var(--radius);cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+  .si:hover{background:var(--surface-hover)}
+  .si-dot{margin-top:5px}
+  .si-main{flex:1;min-width:0}
+  .si-title{font-size:13px;font-weight:550;color:var(--fg);line-height:1.35;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .si-sub{display:flex;align-items:center;gap:6px;margin-top:3px;
+    font:11px/1 var(--font-mono);color:var(--muted)}
+  .si-time{color:var(--subtle);white-space:nowrap}
+  .si.active{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent)}
+  /* handoff 源标记 */
+  .si.handed-off .si-title{color:var(--muted)}
+  .handed-off-tag{display:inline-flex;align-items:center;gap:4px;color:var(--success);
+    font:10px/1 var(--font-mono);background:var(--success-soft);padding:2px 6px;
+    border-radius:var(--radius-sm);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .handed-off-tag svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2}
+
+  /* 状态点 */
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;position:relative}
+  .dot-running{background:var(--accent)}
+  .dot-done{background:var(--success)}
+  .dot.pulse::after{content:"";position:absolute;inset:-3px;border-radius:50%}
+  .dot-running.pulse::after{color:rgba(79,142,247,0.55);animation:pulse-ring 1.8s var(--ease) infinite}
+  @keyframes pulse-ring{0%{box-shadow:0 0 0 0 currentColor;opacity:.8}70%{box-shadow:0 0 0 6px transparent;opacity:0}100%{opacity:0}}
+
+  /* ===== Panel Header ===== */
+  .ph{display:flex;align-items:center;gap:10px;padding:0 0 14px;
+    border-bottom:1px solid var(--border);margin-bottom:18px}
+  .ph-dot{margin-top:0}
+  .ph-title{font-size:14px;font-weight:600;color:var(--fg)}
+  .ph-sub{font:11px/1 var(--font-mono);color:var(--subtle);margin-left:4px}
+  .ph-actions{margin-left:auto;display:flex;gap:4px}
+  .kbd-hint{font:10px/1 var(--font-mono);color:var(--subtle);padding:0 8px;
+    border:1px solid var(--border);border-radius:var(--radius-sm);height:22px;
+    display:inline-flex;align-items:center;gap:3px}
+  .kbd-hint kbd{font:600 10px/1 var(--font-mono);color:var(--muted);
+    background:var(--surface-2);padding:2px 4px;border-radius:3px}
+
+  /* ===== 消息流 ===== */
+  .stream{flex:1;overflow-y:auto;padding-right:8px;display:flex;flex-direction:column;gap:18px}
+  .turn{display:flex;flex-direction:column;gap:10px}
+  .bubble-user{align-self:flex-end;max-width:78%;background:var(--surface);
+    border:1px solid var(--border);padding:10px 14px;border-radius:var(--radius-lg);
+    font-size:13.5px;line-height:1.6;color:var(--fg)}
+  .assistant-turn{display:flex;flex-direction:column;gap:0;align-self:stretch;position:relative}
+
+  /* hover action 行 —— [复制 / 复制MD] | [fork 后台 / fork 提问] | [handoff / handoff 备注]
+     ⚠️ handoff 按钮只在【最后一条】assistant 消息出现（中间消息只有复制/fork）。
+     理由：handoff 是"到此为止交接"，不是 fork 那样"从某点分叉"，没有"交接点"概念 */
+  /* 图标化 action 行：所有按钮 icon-only（24×24 命中区，14px 图标）。
+     文字标签 + 快捷键全部收到原生 title tooltip（hover 1-2s 出现）。
+     分组：[copy copyMD] │ [forkBg forkAsk] │ [handoff handoffAsk]
+     组内靠图标形态区分（线性/实心），组间靠 as-sep + 颜色分组区分。
+     copy=subtle（中性），fork/handoff=accent（操作类），让 6 个点有结构感不混乱 */
+  .as-actions{display:flex;align-items:center;gap:1px;height:0;overflow:hidden;
+    opacity:0;transition:opacity var(--dur-fast) var(--ease);margin-top:6px}
+  .assistant-turn:hover .as-actions,.assistant-turn.demo-show .as-actions{opacity:1;height:auto}
+  .as-btn{display:inline-grid;place-items:center;width:24px;height:24px;border:0;
+    background:transparent;color:var(--subtle);border-radius:var(--radius-sm);
+    cursor:pointer;transition:all var(--dur-fast) var(--ease)}
+  .as-btn:hover{color:var(--fg);background:var(--surface-hover)}
+  .as-btn:active{transform:scale(0.9)}
+  .as-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6}
+  /* 操作组（fork/handoff）：默认也用 subtle（与 copy 一致，6 个安静灰图标不刺眼），
+     hover 才出 accent + accent-soft 底。组级区分靠 as-sep 分隔线，不靠颜色——
+     避免"copy 灰 / fork 蓝"的视觉割裂，更接近 Cursor/VS Code 的安静默认态 */
+  .as-btn.fork:hover,.as-btn.fork-ask:hover,
+  .as-btn.handoff:hover,.as-btn.handoff-ask:hover{
+    color:var(--accent-hover);background:var(--accent-soft)}
+  /* 图标形态区分（图标化后唯一辨识手段，必须可靠）：
+     fork 后台 = 线性 GitFork（stroke only）
+     fork 提问 = 实心 GitFork（fill）— 更"主动"，呼应它进 composer 模式
+     handoff   = 实心 Upload（fill，托盘+上箭头）— "打包送出"
+     handoff 备注 = 实心 Upload + 右上角小圆点标记（带消息） */
+  .as-btn.fork-ask svg{fill:currentColor;stroke:none}
+  .as-btn.handoff svg,.as-btn.handoff-ask svg{fill:currentColor;stroke:none}
+  /* handoff 备注：右上角小圆点徽章（用 ::after 伪元素，表示"带备注"） */
+  .as-btn.handoff-ask{position:relative}
+  .as-btn.handoff-ask::after{content:"";position:absolute;top:5px;right:5px;
+    width:5px;height:5px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 1.5px var(--bg)}
+  .as-sep{width:1px;height:14px;background:var(--border);margin:0 3px;flex:none}
+
+  /* 总结正文 */
+  .turn-summary{font-size:13.5px;line-height:1.7;color:var(--fg);padding:2px 0}
+  .turn-summary p+p{margin-top:7px}
+  .turn-summary code{font-family:var(--font-mono);font-size:12px;color:var(--accent);
+    background:var(--accent-soft);padding:1px 5px;border-radius:3px}
+
+  /* ===== "正在交接" 瞬时提示（对标"压缩中"） =====
+     handoff 生成是异步（pi 跑 /skill:handoff），对话流末尾内联反馈 + 取消 */
+  .handoff-running{display:flex;align-items:center;gap:10px;padding:8px 4px;
+    animation:notice-in var(--dur) var(--ease)}
+  .handoff-running .line{flex:1;height:1px;background:var(--border)}
+  .handoff-running .body{display:inline-flex;align-items:center;gap:8px;flex:none}
+  .spinner{width:13px;height:13px;color:var(--accent);
+    animation:spin 0.9s linear infinite;flex:none}
+  .handoff-running .txt{font:500 11.5px/1 var(--font-sans);color:var(--muted);letter-spacing:0.01em}
+  .handoff-running .txt b{color:var(--fg);font-weight:600}
+  .handoff-running .cancel{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;
+    border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;
+    color:var(--subtle);font:500 11px/1 var(--font-sans);cursor:pointer;
+    transition:all var(--dur-fast) var(--ease);flex:none}
+  .handoff-running .cancel:hover{color:var(--danger);border-color:var(--danger);background:var(--danger-soft)}
+  .handoff-running .cancel svg{width:10px;height:10px;stroke:currentColor;fill:none;stroke-width:2}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes notice-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+  /* ===== HandoffNotice 完成反馈行 ===== */
+  .handoff-notice{display:flex;align-items:center;gap:9px;padding:7px 11px;
+    background:var(--accent-soft);border:1px solid var(--border);border-radius:var(--radius);
+    font-size:12px;color:var(--muted);animation:notice-in var(--dur) var(--ease)}
+  .handoff-notice .ic{width:14px;height:14px;color:var(--accent);flex:none;
+    stroke:currentColor;fill:none;stroke-width:1.8}
+  .handoff-notice b{color:var(--fg);font-weight:600}
+  .handoff-notice .tgt{color:var(--fg);font-weight:550}
+  .handoff-notice .view{margin-left:auto;display:inline-flex;align-items:center;gap:4px;
+    color:var(--accent);cursor:pointer;font-weight:500;padding:2px 6px;border-radius:var(--radius-sm);
+    transition:background var(--dur-fast) var(--ease);white-space:nowrap;background:transparent;border:0}
+  .handoff-notice .view:hover{background:color-mix(in oklch,var(--accent) 18%,transparent)}
+  .handoff-notice .view svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+  .handoff-notice .dismiss{color:var(--subtle);cursor:pointer;padding:2px;border-radius:var(--radius-sm);
+    font-size:14px;line-height:1;background:transparent;border:0}
+  .handoff-notice .dismiss:hover{color:var(--fg);background:var(--surface-hover)}
+
+  /* ===== 新 session 首条：xml tag 包装的 handoff 文档 =====
+     runtime 拿到 agent 产出的文档字符串后，用 <handoff_document> xml tag 包装边界，
+     再追加 action-oriented 指令。新 session agent 读到 xml tag 清楚识别"这是交接上下文" */
+  .handoff-msg{align-self:stretch;max-width:88%;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+  .handoff-msg-head{display:flex;align-items:center;gap:8px;padding:9px 14px;
+    background:color-mix(in oklch,var(--accent) 8%,var(--surface));
+    border-bottom:1px solid var(--border);font:600 11px/1 var(--font-mono);color:var(--accent);
+    letter-spacing:0.04em}
+  .handoff-msg-head svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8}
+  .handoff-msg-head .from{color:var(--muted);font-weight:500;margin-left:2px}
+  .handoff-msg-head .time{margin-left:auto;color:var(--subtle);font-weight:400;letter-spacing:0}
+  /* xml tag 行：mono + subtle，像代码标签标识文档边界 */
+  .xml-tag{font:500 11px/1.4 var(--font-mono);color:var(--subtle);
+    padding:8px 14px 0;letter-spacing:0.02em}
+  .xml-tag.open{padding-top:10px}
+  .xml-tag.close{padding-bottom:4px}
+  .handoff-msg-body{padding:6px 14px 12px;font-size:13px;line-height:1.65;color:var(--fg)}
+  /* 自由格式 markdown 渲染（handoff skill 产出，非结构化 schema） */
+  .handoff-msg-body h2{font:600 14px/1.4 var(--font-sans);color:var(--fg);margin:10px 0 5px}
+  .handoff-msg-body h2:first-child{margin-top:0}
+  .handoff-msg-body h3{font:600 12.5px/1.4 var(--font-sans);color:var(--muted);margin:10px 0 4px}
+  .handoff-msg-body p{margin:0 0 6px}
+  .handoff-msg-body ul{margin:4px 0 8px;padding-left:18px}
+  .handoff-msg-body li{margin:3px 0}
+  .handoff-msg-body li::marker{color:var(--subtle)}
+  .handoff-msg-body code{font-family:var(--font-mono);font-size:11.5px;color:var(--accent);
+    background:var(--accent-soft);padding:1px 5px;border-radius:3px}
+  .handoff-msg-body .done-tick{color:var(--success);font-weight:700;margin-right:3px}
+  .handoff-msg-body .block-warn{color:var(--warning);font-weight:700;margin-right:3px}
+  /* action-oriented 指令区：accent-soft 底块，无侧色条（impeccable 禁令） */
+  .handoff-msg-action{margin:10px 14px 12px;padding:10px 12px;background:var(--accent-soft);
+    border-radius:var(--radius);border:1px solid var(--accent-ring);
+    font-size:12.5px;line-height:1.55;color:var(--fg)}
+  .handoff-msg-action b{color:var(--accent);font-weight:600}
+  .handoff-msg-action .ic{display:inline-flex;vertical-align:-2px;margin-right:5px}
+  .handoff-msg-action .ic svg{width:13px;height:13px;color:var(--accent);stroke:currentColor;fill:none;stroke-width:2}
+
+  /* 新 session 的 assistant 接手回复 */
+  .new-session-agent{align-self:stretch;padding:2px 0}
+  .agent-start{display:inline-flex;align-items:center;gap:7px;font:500 12px/1.4 var(--font-sans);color:var(--muted)}
+  .agent-start b{color:var(--fg)}
+  .agent-start code{font:12px var(--font-mono);color:var(--accent);background:var(--accent-soft);padding:1px 5px;border-radius:3px}
+
+  /* ===== Composer ===== */
+  .composer{margin-top:14px;background:var(--bg-input);border:1px solid var(--border);
+    border-radius:var(--radius-lg);padding:12px 14px;
+    transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)}
+  .composer:focus-within{border-color:var(--accent)}
+  /* handoff 模式：强制 accent 边 + glow ring + 极淡 accent 底，明示"接下来输入进新 session" */
+  .composer.handoff-mode{border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-ring);
+    background:color-mix(in oklch,var(--accent) 5%,var(--bg-input))}
+  .composer-mode-row{display:none;align-items:center;gap:8px;margin-bottom:9px}
+  .composer.handoff-mode .composer-mode-row{display:flex;
+    animation:notice-in var(--dur) var(--ease)}
+  .mode-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:var(--radius-sm);
+    background:var(--accent-soft);color:var(--accent);font:600 11px/1 var(--font-mono);letter-spacing:0.02em}
+  .mode-chip svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+  .mode-chip svg.fill{fill:currentColor;stroke:var(--bg-input)}
+  .mode-chip .mode-x{margin-left:3px;display:inline-grid;place-items:center;width:16px;height:16px;
+    cursor:pointer;opacity:0.65;border-radius:3px;transition:all var(--dur-fast) var(--ease);border:0;background:transparent;color:var(--accent)}
+  .mode-chip .mode-x:hover{opacity:1;background:color-mix(in oklch,var(--accent) 25%,transparent)}
+  .mode-chip .mode-x svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2.4}
+  .composer-input{width:100%;background:transparent;border:0;outline:none;color:var(--fg);
+    font:14px/1.6 var(--font-sans);min-height:24px;resize:none}
+  .composer-input::placeholder{color:var(--subtle)}
+  .composer.handoff-mode .composer-input::placeholder{color:color-mix(in oklch,var(--accent) 55%,var(--subtle))}
+  .composer-foot{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:var(--radius-sm);
+    font:11px/1 var(--font-mono);color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);cursor:pointer}
+  .send-btn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+    background:var(--surface);color:var(--fg);border:1px solid var(--border-strong);
+    border-radius:var(--radius);font:600 12px/1 var(--font-sans);cursor:pointer;
+    transition:all var(--dur-fast) var(--ease)}
+  .send-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .send-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2}
+  /* handoff 模式发送按钮：实心 accent，文案"handoff 并发送" */
+  .send-btn.handoff-send{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .send-btn.handoff-send:hover{background:var(--accent-hover);color:#fff}
+  /* handoff 进行中：源 session composer 禁用（避免交接期间输入干扰） */
+  .composer.disabled{opacity:0.45;pointer-events:none}
+
+  /* ===== demo 说明条 ===== */
+  .demo-bar{position:fixed;top:0;left:0;right:0;z-index:50;
+    background:var(--surface-2);border-bottom:1px solid var(--border-strong);
+    padding:8px 16px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);
+    max-height:56px;overflow:hidden;flex-wrap:wrap}
+  .demo-bar b{color:var(--fg)}
+  .demo-bar .tag{font:600 10px/1 var(--font-mono);color:var(--accent);
+    background:var(--accent-soft);padding:3px 7px;border-radius:var(--radius-sm);letter-spacing:0.04em;flex:none}
+  .demo-bar .tag.p3{color:var(--reasoning);background:color-mix(in oklch,var(--reasoning) 12%,transparent)}
+  .demo-bar .spacer{flex:1}
+  .demo-bar button{padding:4px 10px;background:var(--accent);color:#fff;border:0;
+    border-radius:var(--radius-sm);font:600 11px/1 var(--font-sans);cursor:pointer;flex:none;
+    transition:background var(--dur-fast) var(--ease)}
+  .demo-bar button.ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+  .demo-bar button:hover{background:var(--accent-hover)}
+  .demo-bar button.ghost:hover{color:var(--fg);border-color:var(--border-strong);background:var(--surface-hover)}
+
+  /* 场景 tabs */
+  .scene-tabs{position:fixed;top:56px;left:0;right:0;z-index:49;
+    background:var(--surface);border-bottom:1px solid var(--border);
+    padding:6px 16px;display:flex;gap:4px;flex-wrap:wrap}
+  .scene-tab{padding:5px 12px;background:transparent;border:1px solid transparent;
+    border-radius:var(--radius-sm);color:var(--muted);font:500 11px/1 var(--font-sans);
+    cursor:pointer;transition:all var(--dur-fast) var(--ease)}
+  .scene-tab:hover{color:var(--fg);background:var(--surface-hover)}
+  .scene-tab.active{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-ring)}
+  .scene-tab .n{font:600 9px/1 var(--font-mono);color:var(--subtle);margin-right:5px}
+  .scene-tab.active .n{color:var(--accent)}
+
+  .as-btn:active{transform:scale(0.94)}
+</style>
+</head>
+<body>
+
+<!-- demo 说明条 -->
+<div class="demo-bar">
+  <span class="tag p3">DEMO</span>
+  <span><b>痛点3 · Fast Handoff</b></span>
+  <span style="color:var(--subtle)">基于 <b>handoff skill</b> 提示词生成 · <b>&lt;handoff_document&gt;</b> xml tag 包装注入 · 新 session 立即执行</span>
+  <span class="spacer"></span>
+  <button onclick="setScene('entry')">入口</button>
+  <button onclick="setScene('ask')">handoff 备注</button>
+  <button onclick="setScene('running')">生成中</button>
+  <button class="ghost" onclick="setScene('newsession')">看新 session</button>
+</div>
+
+<!-- 场景切换 -->
+<div class="scene-tabs">
+  <button class="scene-tab" data-scene="entry"><span class="n">01</span>入口 · 仅末条消息</button>
+  <button class="scene-tab" data-scene="ask"><span class="n">02</span>handoff 备注 · composer</button>
+  <button class="scene-tab" data-scene="running"><span class="n">03</span>生成中 · 正在交接</button>
+  <button class="scene-tab" data-scene="done"><span class="n">04</span>完成 · 反馈行</button>
+  <button class="scene-tab" data-scene="newsession"><span class="n">05</span>新 session · 注入</button>
+</div>
+
+<div class="app">
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">会话</span>
+      <button class="sb-new">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        新建
+      </button>
+    </div>
+    <div class="sb-list">
+      <div class="sb-group-head"><span>taiji</span><b>2</b></div>
+
+      <!-- 源 session -->
+      <div class="si active" id="srcSession">
+        <span class="si-dot"><span class="dot dot-running pulse"></span></span>
+        <div class="si-main">
+          <div class="si-title">重构 auth 模块</div>
+          <div class="si-sub"><span class="si-time">main · 刚刚</span></div>
+          <div class="si-sub" id="srcHandoffTag" style="display:none;margin-top:4px">
+            <span class="handed-off-tag">
+              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              已交接 → session #2
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 新 session -->
+      <div class="si" id="newSession" style="display:none">
+        <span class="si-dot"><span class="dot dot-done"></span></span>
+        <div class="si-main">
+          <div class="si-title">重构 auth 模块 · 续</div>
+          <div class="si-sub"><span class="si-time">main · 刚刚</span></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Main: 源 session 视图 ===== -->
+  <main class="main" id="srcMain">
+    <div class="main-inner">
+      <div class="ph">
+        <span class="ph-dot"><span class="dot dot-running pulse"></span></span>
+        <span class="ph-title">重构 auth 模块</span>
+        <span class="ph-sub">main · feat-fast-handoff</span>
+      </div>
+
+      <div class="stream" id="srcStream">
+
+        <!-- turn 1: user -->
+        <div class="turn">
+          <div class="bubble-user">帮我重构 auth 模块，把 JWT 逻辑从 middleware 里抽出来，放到独立的 service 层。要保持所有现有测试通过。</div>
+        </div>
+
+        <!-- turn 2: 中间 assistant —— 只有复制/fork，无 handoff（handoff 仅末条） -->
+        <div class="assistant-turn demo-show">
+          <div class="turn-summary">
+            <p>已分析当前 <code>middleware/auth.ts</code> 结构，JWT 验证逻辑散落在 3 个位置。计划抽成 <code>AuthService.verifyToken()</code> + <code>AuthService.refreshToken()</code>。</p>
+            <p>现有 12 个测试已跑通，重构后会保持兼容。</p>
+          </div>
+          <div class="as-actions">
+            <button class="as-btn" title="复制"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="as-btn" title="复制 Markdown"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <span class="as-sep"></span>
+            <button class="as-btn fork" title="fork 后台（⌘G）"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9M6 9a9 9 0 0 0 9 9"/></svg></button>
+            <button class="as-btn fork-ask" title="fork 提问（⌘⇧G）"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9M6 9a9 9 0 0 0 9 9"/></svg></button>
+          </div>
+        </div>
+
+        <!-- turn 3: user 补充 -->
+        <div class="turn">
+          <div class="bubble-user">对了，refresh token 的过期策略也要一起改，从 7 天改成滑动续期。</div>
+        </div>
+
+        <!-- turn 4: 最后一条 assistant —— handoff 按钮只在这里 -->
+        <div class="assistant-turn demo-show">
+          <div class="turn-summary">
+            <p>滑动续期方案：<code>refreshToken()</code> 每次调用时检查 access token 距过期不足 1 小时，是则签发新 refresh token。已开始改 <code>AuthService.refreshToken()</code>。</p>
+            <p>进度：service 层抽离完成 70%，还剩 middleware 调用点替换 + 滑动续期测试。</p>
+          </div>
+          <div class="as-actions">
+            <button class="as-btn" title="复制"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="as-btn" title="复制 Markdown"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <span class="as-sep"></span>
+            <button class="as-btn fork" title="fork 后台（⌘G）"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9M6 9a9 9 0 0 0 9 9"/></svg></button>
+            <button class="as-btn fork-ask" title="fork 提问（⌘⇧G）"><svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9M6 9a9 9 0 0 0 9 9"/></svg></button>
+            <span class="as-sep"></span>
+            <button class="as-btn handoff" id="handoffBtn" title="handoff · 交接给新 session 继续（⌘⇧H）" onclick="setScene('running')">
+              <svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            </button>
+            <button class="as-btn handoff-ask" id="handoffAskBtn" title="handoff 备注 · 带交接备注（⌘⇧⌥H）" onclick="setScene('ask')">
+              <svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- "正在交接" 瞬时提示（场景 03） -->
+        <div class="handoff-running" id="handoffRunning" style="display:none">
+          <span class="line"></span>
+          <span class="body">
+            <svg class="spinner" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            <span class="txt"><b>正在交接</b> · 运行 handoff skill 生成文档</span>
+            <button class="cancel" onclick="setScene('entry')">
+              <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              取消
+            </button>
+          </span>
+          <span class="line"></span>
+        </div>
+
+        <!-- HandoffNotice 完成反馈行（场景 04） -->
+        <div class="handoff-notice" id="handoffNotice" style="display:none">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+          <span class="txt">已交接 · 新线程 <b class="tgt">「重构 auth 模块 · 续」</b> 已自动接手</span>
+          <button class="view" onclick="setScene('newsession')">
+            查看新 session
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+          <button class="dismiss" onclick="this.parentElement.style.display='none'">×</button>
+        </div>
+
+      </div>
+
+      <!-- Composer（源 session，handoff 模式 / 生成中 状态变化） -->
+      <div class="composer" id="srcComposer">
+        <div class="composer-mode-row" id="handoffModeRow">
+          <span class="mode-chip">
+            <svg class="fill" viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            handoff 模式 · 输入将作为交接备注传给 handoff skill
+            <button class="mode-x" onclick="setScene('entry')"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </span>
+        </div>
+        <textarea class="composer-input" id="srcInput" rows="1" placeholder="发消息继续当前对话…"></textarea>
+        <div class="composer-foot">
+          <span class="chip">📎 附件</span>
+          <span class="chip">/ 命令</span>
+          <button class="send-btn" id="srcSendBtn">
+            发送
+            <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== Main: 新 session 视图（场景 05） ===== -->
+  <main class="main" id="newMain" style="display:none">
+    <div class="main-inner">
+      <div class="ph">
+        <span class="ph-dot"><span class="dot dot-done"></span></span>
+        <span class="ph-title">重构 auth 模块 · 续</span>
+        <span class="ph-sub">main · 继承自 #1</span>
+        <div class="ph-actions">
+          <span class="kbd-hint" style="color:var(--success);border-color:var(--success-soft)">
+            <svg width="10" height="10" viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            已交接
+          </span>
+        </div>
+      </div>
+
+      <div class="stream">
+        <!-- 新 session 首条：xml tag 包装的 handoff 文档（agent 跑 handoff skill 产出的自由格式） -->
+        <div class="handoff-msg">
+          <div class="handoff-msg-head">
+            <svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            HANDOFF
+            <span class="from">from 重构 auth 模块</span>
+            <span class="time">14:32</span>
+          </div>
+          <div class="xml-tag open">&lt;handoff_document source="重构 auth 模块"&gt;</div>
+          <div class="handoff-msg-body">
+            <h2>重构 auth 模块</h2>
+            <p>把 JWT 验证逻辑从 <code>middleware/auth.ts</code> 抽到独立 <code>AuthService</code>；refresh token 改滑动续期。</p>
+
+            <h3>已完成</h3>
+            <ul>
+              <li><span class="done-tick">✓</span><code>AuthService.verifyToken()</code> 抽离完成，12 个现有测试通过</li>
+              <li><span class="done-tick">✓</span>滑动续期方案确定：距过期不足 1h 则签发新 refresh token</li>
+            </ul>
+
+            <h3>进行中</h3>
+            <ul>
+              <li><code>AuthService.refreshToken()</code> 滑动续期逻辑（70%）</li>
+            </ul>
+
+            <h3>卡点</h3>
+            <ul>
+              <li><span class="block-warn">⚠</span><code>token-store.ts</code> 的 TTL 写入被 4 处引用，改前需确认影响面</li>
+            </ul>
+
+            <h3>建议技能</h3>
+            <ul>
+              <li><code>diagnose</code>（调试 token-store 改动影响）</li>
+              <li><code>zcommit</code>（完成后提交）</li>
+            </ul>
+
+            <h3>参考文档</h3>
+            <ul>
+              <li>ADR-0018 视觉方向（按路径引用，不重复内容）</li>
+            </ul>
+          </div>
+          <div class="xml-tag close">&lt;/handoff_document&gt;</div>
+          <!-- action-oriented 指令区（runtime 注入时追加，驱动新 agent 立即执行） -->
+          <div class="handoff-msg-action">
+            <span class="ic"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+            <b>立即执行</b>"已完成/进行中"里尚未完成的下一项（改 <code>token-store.ts</code>）。遇到卡点或 ⚠ 项时停下来问我。完成每步后继续下一项。
+          </div>
+        </div>
+
+        <!-- 新 session agent 接手后立即执行 -->
+        <div class="new-session-agent">
+          <div class="agent-start">
+            <svg class="spinner" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" opacity="0.25"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            <span><b>正在接手</b> · 检查 <code>token-store.ts</code> 的 4 处引用…</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <textarea class="composer-input" rows="1" placeholder="补充指令，或等 agent 接手…"></textarea>
+        <div class="composer-foot">
+          <span class="chip">📎 附件</span>
+          <span class="chip">/ 命令</span>
+          <button class="send-btn">
+            发送
+            <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.scene-tab');
+  const srcMain = document.getElementById('srcMain');
+  const newMain = document.getElementById('newMain');
+  const newSessionItem = document.getElementById('newSession');
+  const srcSessionItem = document.getElementById('srcSession');
+  const srcHandoffTag = document.getElementById('srcHandoffTag');
+  const handoffRunning = document.getElementById('handoffRunning');
+  const handoffNotice = document.getElementById('handoffNotice');
+  const srcComposer = document.getElementById('srcComposer');
+  const handoffModeRow = document.getElementById('handoffModeRow');
+  const srcInput = document.getElementById('srcInput');
+  const srcSendBtn = document.getElementById('srcSendBtn');
+
+  function setScene(scene) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.scene === scene));
+
+    const showNew = scene === 'newsession';
+    srcMain.style.display = showNew ? 'none' : 'flex';
+    newMain.style.display = showNew ? 'flex' : 'none';
+
+    const handedOff = (scene === 'done' || scene === 'newsession');
+    srcSessionItem.classList.toggle('active', !showNew);
+    srcSessionItem.classList.toggle('handed-off', handedOff);
+    srcHandoffTag.style.display = handedOff ? 'block' : 'none';
+    newSessionItem.style.display = handedOff ? 'block' : 'none';
+    newSessionItem.classList.toggle('active', showNew);
+
+    handoffRunning.style.display = scene === 'running' ? 'flex' : 'none';
+    handoffNotice.style.display = scene === 'done' ? 'flex' : 'none';
+
+    // composer 状态
+    const isHandoffMode = scene === 'ask';
+    const isRunning = scene === 'running';
+    srcComposer.classList.toggle('handoff-mode', isHandoffMode);
+    srcComposer.classList.toggle('disabled', isRunning);
+    handoffModeRow.style.display = isHandoffMode ? 'flex' : 'none';
+    srcInput.placeholder = isHandoffMode
+      ? '描述新 session 的重点（可选，传给 handoff skill）…'
+      : '发消息继续当前对话…';
+    srcSendBtn.classList.toggle('handoff-send', isHandoffMode);
+    srcSendBtn.firstChild.textContent = isHandoffMode ? 'handoff 并发送 ' : '发送 ';
+  }
+
+  tabs.forEach(t => t.addEventListener('click', () => setScene(t.dataset.scene)));
+  setScene('entry');
+</script>
+</body>
+</html>

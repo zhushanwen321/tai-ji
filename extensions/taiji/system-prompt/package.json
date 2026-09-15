@@ -1,0 +1,41 @@
+{
+  "name": "@zhushanwen/pi-system-prompt",
+  "version": "1.1.5",
+  "description": "System prompt injection extension for Pi — reads config and appends to system prompt",
+  "type": "module",
+  "main": "src/index.ts",
+  "taiji": {
+    "role": "taiji"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension",
+    "system-prompt",
+    "config"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/",
+    "index.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  }
+}

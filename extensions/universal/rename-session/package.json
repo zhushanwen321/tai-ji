@@ -1,0 +1,70 @@
+{
+  "name": "@zhushanwen/pi-rename-session",
+  "version": "0.9.1",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal",
+    "startupConfig": [
+      {
+        "path": "config/rename-session-ext-config.json",
+        "content": {
+          "enabled": false,
+          "model": {
+            "type": "ref",
+            "ref": ""
+          },
+          "mode": "first-stop",
+          "maxTitleLength": 50,
+          "thinkingLevel": "off"
+        }
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "skills/",
+    "vitest.config.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  }
+}

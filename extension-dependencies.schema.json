@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Extension Dependencies",
+  "description": "Describes dependency relationships between Pi extensions in this monorepo.",
+  "type": "object",
+  "required": ["extensions"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "extensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "directory", "dependsOn"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "npm package name",
+            "pattern": "^@zhushanwen/pi-"
+          },
+          "directory": {
+            "type": "string",
+            "description": "Relative path from monorepo root",
+            "pattern": "^extensions/"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["package", "type", "reason"],
+              "properties": {
+                "package": {
+                  "type": "string",
+                  "description": "npm package name of the dependency"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["runtime", "package", "optional"],
+                  "description": "Dependency type: runtime=needs extension installed but no code import, package=code-level import, optional=enhancement when present"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why this dependency exists"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

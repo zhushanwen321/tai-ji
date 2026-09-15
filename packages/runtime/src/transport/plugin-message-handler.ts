@@ -1,0 +1,151 @@
+/**
+ * Plugin message handler for plugin.* message types.
+ * Extracted from RuntimeServer to reduce file size.
+ */
+import type { WebSocket as WsType } from 'ws'
+import type { ClientMessage, ClientMessageType } from '@taiji/shared'
+import type { IPluginService } from '../interfaces.js'
+import type { MessageHandlerContext } from './message-context.js'
+
+export interface PluginHandlerContext extends MessageHandlerContext {
+  pluginService: IPluginService | null
+}
+
+export class PluginMessageHandler {
+  constructor(private ctx: PluginHandlerContext) {}
+
+  /** D1: 本 handler 认领的 ClientMessageType 清单。 */
+  readonly handles: ClientMessageType[] = [
+    'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
+    'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
+    'plugin.mountPoints.sync',
+  ]
+
+  async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
+    // D3: service-not-available 前置守卫（与 extension 的 requireExt 同形）。
+    if (!this.ctx.pluginService) {
+      return this.ctx.sendError(ws, 'handler_error', 'Plugin service not available', msg.id)
+    }
+    // 表驱动分发：查表命中即分发；未命中落空（与原 switch 无 default 逐字节一致——隐式
+    // resolve undefined）。msg.type 即查表 key（运行时 guard），payload 收窄由各 case 函数
+    // 依据同一 key 断言（Extract 与 switch narrowing 同构，ClientMessageMap 为协议 SSOT）。
+    // cast 仅放宽索引键域（Partial 化），不改变任何 handler 的签名与运行时行为。
+    const handler = (PLUGIN_CASE_HANDLERS as Partial<Record<ClientMessageType, PluginCaseHandler>>)[msg.type]
+    if (!handler) return
+    return handler(this.ctx, msg, ws, this.ctx.pluginService)
+  }
+}
+
+/** 本 handler 认领的 plugin.* type 全集（与 handles 清单一一对应，TS 层收窄用）。 */
+type PluginHandledType =
+  | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+  | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
+  | 'plugin.mountPoints.sync'
+
+/** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
+type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
+
+/** 表驱动 case handler 统一签名。pluginService 由主函数前置守卫后显式传递（收窄丢失补偿）。 */
+type PluginCaseHandler = (
+  ctx: PluginHandlerContext,
+  msg: ClientMessage,
+  ws: WsType,
+  pluginService: IPluginService,
+) => Promise<void>
+
+async function handlePluginList(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.list'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const plugins = pluginService.getDiscoveredPlugins()
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins })
+}
+
+async function handlePluginToggle(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.toggle'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const toggledPlugins = await pluginService.togglePlugin(msg.payload.pluginId, msg.payload.enabled)
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: toggledPlugins })
+}
+
+async function handlePluginUninstall(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.uninstall'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const uninstalledPlugins = await pluginService.uninstallPlugin(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: uninstalledPlugins })
+}
+
+async function handlePluginApprovePermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.approvePermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.approvePermissions(msg.payload.pluginId, msg.payload.permissions)
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+}
+
+async function handlePluginRevokePermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.revokePermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.revokePermissions(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+}
+
+async function handlePluginExecuteCommand(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.executeCommand'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.executeCommand(msg.payload.pluginId, msg.payload.commandId, msg.payload.args)
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+async function handlePluginConfigGet(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.config.get'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const configValue = await pluginService.getPluginConfig(msg.payload.pluginId, msg.payload.key)
+  const configKey = msg.payload.key ?? '__all__'
+  return ctx.reply(ws, msg.id, 'plugin:config', { pluginId: msg.payload.pluginId, config: configKey === '__all__' ? (configValue as Record<string, unknown>) : { [configKey]: configValue } })
+}
+
+async function handlePluginConfigSet(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.config.set'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.setPluginConfig(msg.payload.pluginId, msg.payload.key, msg.payload.value)
+  const allConfig = await pluginService.getPluginConfig(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'plugin:config', { pluginId: msg.payload.pluginId, config: allConfig as Record<string, unknown> })
+}
+
+async function handlePluginInstall(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.install'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  const { packageSpec: packageSpecifier } = msg.payload as { packageSpec: string }
+  if (!packageSpecifier) {
+    return ctx.sendError(ws, 'invalid_params', 'Missing packageSpec', msg.id)
+  }
+  const result = await pluginService.installPlugin(packageSpecifier)
+  if (result.success) {
+    const plugins = pluginService.getDiscoveredPlugins()
+    ctx.reply(ws, msg.id, 'config.plugins', { plugins })
+  } else {
+    ctx.sendError(ws, 'install_failed', result.error ?? 'Install failed', msg.id)
+  }
+  // 原 case 以 break 结束（函数末尾隐式返回 undefined）——落空语义逐字节保持。
+}
+
+async function handlePluginUiResponse(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.uiResponse'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // handleUiResponse 已在 IPluginService 接口声明（interfaces.ts）；顶部 guard 保证非空
+  // （提取后经 pluginService 参数显式传递，原 `?.` 的 null 短路不可达，等价改写为直接调用；
+  // 原 payload 双重 as 断言由 PluginMsgOf 收窄等价替代——ClientMessageMap SSOT 同形状）。
+  pluginService.handleUiResponse(msg.payload.requestId, msg.payload.result)
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+async function handlePluginMountPointsSync(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.mountPoints.sync'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // renderer→runtime 挂载点整表上报（DM3：覆盖式写入，不合并）。
+  // renderer 壳层（s2/s5）在 MountPointRegistry 注册/注销后调用；
+  // runtime 存副本供 plugin.views.listMountPoints 中继查询（AC10）。
+  pluginService.syncMountPoints(msg.payload.mountPoints)
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+/**
+ * plugin.* 分发表（形态 2 表驱动分发）：key = ClientMessageType 字面量，值 = 该 case 的
+ * 处理函数（msg 参数按该 key 收窄）。主函数只留查表 + 落空（未命中行为与原 switch 无
+ * default 一致）。
+ */
+const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
+  ctx: PluginHandlerContext,
+  msg: PluginMsgOf<K>,
+  ws: WsType,
+  pluginService: IPluginService,
+) => Promise<void> } = {
+  'plugin.list': handlePluginList,
+  'plugin.toggle': handlePluginToggle,
+  'plugin.uninstall': handlePluginUninstall,
+  'plugin.approvePermissions': handlePluginApprovePermissions,
+  'plugin.revokePermissions': handlePluginRevokePermissions,
+  'plugin.executeCommand': handlePluginExecuteCommand,
+  'plugin.config.get': handlePluginConfigGet,
+  'plugin.config.set': handlePluginConfigSet,
+  'plugin.install': handlePluginInstall,
+  'plugin.uiResponse': handlePluginUiResponse,
+  'plugin.mountPoints.sync': handlePluginMountPointsSync,
+}

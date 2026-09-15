@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    // 无 declaration：core 是 source-consumed 内部包（main/types→src/index.ts，无 build/dist/发布），
+    // declaration:true 在 noEmit 下不产出 .d.ts，仅多跑一道可移植性检查。ProviderId 品牌类型
+    // 经 node_modules 跨包推断展开时会误报 TS2742（provider 模块路径不可移植），移除以消除断言型误报。
+    // rootDir "../../"（packages/ 层）：测试（apply-entry-equivalence）import runtime 源文件做
+    // live≡reload 等价性验证，rootDir "./src" 与跨包源 import 冲突；抬到 packages 层同时满足
+    // TS2209 的包根消歧（package.json exports map 解析需要 rootDir）。
+    // skipLibCheck 对齐 subagent-core：跳过依赖包 .d.ts 内部错误（undici-types 相对路径解析等）。
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "rootDir": "../../",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

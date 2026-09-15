@@ -1,0 +1,309 @@
+{
+  "_comment": "recorded by packages/subagent-core/scripts/record-engine-fixtures.mjs (W10)；裁剪/脱敏后 wire 帧 + 结构白名单；复跑 = pnpm test:engine-protocol",
+  "schemaVersion": 1,
+  "engineId": "fake",
+  "recordedAt": "2026-09-08T23:41:59.728Z",
+  "protocolVersion": 1,
+  "wire": {
+    "hostToEngine": [
+      {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "hostInfo": {
+            "name": "record-engine-fixtures",
+            "version": "1",
+            "dataRoot": "<dataRoot>"
+          },
+          "engineConfig": {}
+        }
+      },
+      {
+        "id": 2,
+        "method": "probe",
+        "params": {
+          "force": false
+        }
+      },
+      {
+        "id": 3,
+        "method": "run",
+        "params": {
+          "runId": "run-fake-record",
+          "task": "recorded smoke task (redacted)",
+          "ctx": {
+            "poolKey": "shared",
+            "cwd": "<workdir>"
+          }
+        }
+      },
+      {
+        "id": "rev-log-100",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-pool-101",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-ready-102",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-child-103",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-stream-104",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-stream-105",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": "rev-perm-106",
+        "result": {
+          "unsupported": true
+        }
+      },
+      {
+        "id": "rev-ask-107",
+        "result": {
+          "unsupported": true
+        }
+      },
+      {
+        "id": "rev-childst-108",
+        "result": {
+          "ok": true
+        }
+      },
+      {
+        "id": 4,
+        "method": "dispose",
+        "params": {}
+      }
+    ],
+    "engineToHost": [
+      {
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "engineId": "fake",
+          "engineVersion": "0.1.0",
+          "adapterVersion": "fake-adapter-1",
+          "capabilities": {
+            "schemaEnforcement": "emulated",
+            "steer": "unsupported",
+            "conversation": "native",
+            "personaInjection": "prompt",
+            "eventGranularity": "stream",
+            "sandbox": "none",
+            "sessionRead": "full",
+            "resume": "cold",
+            "interrupt": "kill-only",
+            "permissionMode": "ignored",
+            "maxTurns": true
+          }
+        }
+      },
+      {
+        "id": 2,
+        "result": {
+          "ok": true,
+          "engineVersion": "0.1.0",
+          "checks": [
+            {
+              "name": "binary",
+              "ok": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "rev-log-100",
+        "method": "host/log",
+        "params": {
+          "level": "info",
+          "component": "fake",
+          "message": "run started (redacted)"
+        }
+      },
+      {
+        "id": "rev-ready-102",
+        "method": "host/handleReady",
+        "params": {
+          "runId": "run-fake-record",
+          "sessionRef": {
+            "sessionId": "sess-fixture"
+          }
+        }
+      },
+      {
+        "id": "rev-child-103",
+        "method": "host/childSpawned",
+        "params": {
+          "pid": 43751,
+          "recordId": "run-smoke-1"
+        }
+      },
+      {
+        "id": "rev-stream-104",
+        "method": "host/streamDelta",
+        "params": {
+          "runId": "run-fake-record",
+          "delta": "<redacted>"
+        }
+      },
+      {
+        "method": "event",
+        "params": {
+          "runId": "run-fake-record",
+          "seq": 1,
+          "event": {
+            "type": "text_delta",
+            "delta": "<redacted>"
+          }
+        }
+      },
+      {
+        "id": "rev-stream-105",
+        "method": "host/streamDelta",
+        "params": {
+          "runId": "run-fake-record",
+          "delta": "<redacted>"
+        }
+      },
+      {
+        "method": "event",
+        "params": {
+          "runId": "run-fake-record",
+          "seq": 2,
+          "event": {
+            "type": "text_delta",
+            "delta": "<redacted>"
+          }
+        }
+      },
+      {
+        "method": "event",
+        "params": {
+          "runId": "run-fake-record",
+          "seq": 3,
+          "event": {
+            "type": "message_end",
+            "usage": {
+              "input": 10,
+              "output": 5,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "rev-ask-107",
+        "method": "host/askUser",
+        "params": {
+          "runId": "run-fake-record",
+          "request": {
+            "method": "select",
+            "id": "q1"
+          }
+        }
+      },
+      {
+        "method": "event",
+        "params": {
+          "runId": "run-fake-record",
+          "seq": 4,
+          "event": {
+            "type": "turn_end"
+          }
+        }
+      },
+      {
+        "id": "rev-childst-108",
+        "method": "host/childStateChanged",
+        "params": {
+          "pid": 43751,
+          "recordId": "run-smoke-1",
+          "state": "exited",
+          "killed": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": 3,
+        "result": {
+          "handle": {
+            "v": 1,
+            "engineId": "fake",
+            "sessionRef": {
+              "sessionId": "sess-fixture"
+            },
+            "adapterVersion": "fake-adapter-1"
+          },
+          "outcome": {
+            "content": "Hello world",
+            "error": null,
+            "exitCode": 0,
+            "engineId": "fake"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "result": {
+          "ok": true
+        }
+      }
+    ]
+  },
+  "run": {
+    "result": {
+      "handle": {
+        "v": 1,
+        "engineId": "fake",
+        "sessionRef": {
+          "sessionId": "sess-fixture"
+        },
+        "adapterVersion": "fake-adapter-1"
+      },
+      "outcome": {
+        "content": "Hello world",
+        "error": null,
+        "exitCode": 0,
+        "engineId": "fake"
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "text_delta"
+    },
+    {
+      "type": "text_delta"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "turn_end"
+    }
+  ]
+}

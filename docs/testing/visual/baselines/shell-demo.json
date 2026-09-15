@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "page": "shell",
+    "target": "demo",
+    "screenshot": "<workspace>/feat-optimize-ui/.taiji-harness/visual/2026-08-03-shell/demo-shell.png",
+    "specRef": "v6-master-spec §4.1/4.2/4.4 + §3.4 D8 + ShellView 拓扑 + §3.5.6",
+    "timestamp": "2026-08-02T16:27:57Z",
+    "model": "minimax-token-plan-router/minimax-m3"
+  },
+  "regions": [
+    {
+      "region": "整体配色·太极玄暗色系统",
+      "present": true,
+      "issue": "ok：整体为中性深灰暗色而非纯黑或蓝调；aside 使用更深画布色，main-panel 明显亮一档并带细边框、圆角与阴影；文字为浅灰近白，强调元素也采用浅灰。"
+    },
+    {
+      "region": "shell 三栏拓扑（aside + main-panel 浮起 + 顶部留白）",
+      "present": true,
+      "issue": "ok：左侧窄 aside 与右侧宽 main-panel 分区明确；aside 顶部约 52px 区域容纳 macOS traffic lights 和导航控件；main-panel 四周留有画布间距并通过边框、圆角和阴影形成浮起感。"
+    },
+    {
+      "region": "D8 选中态二分规则（列表项型 bg-surface+强调字）",
+      "present": true,
+      "issue": "ok：当前会话项「重构 composer 输入区」使用整行实色底块，主文字提亮；玄主题强调色表现为浅灰，未出现左侧竖条或外框 ring。"
+    },
+    {
+      "region": "侧栏内容结构（Brand/SessionList/UserArea）",
+      "present": true,
+      "issue": "ok：顶部可见「太极 v1.4.0」品牌区，中部可见多组会话与分支列表，底部可见 user 用户区及帮助、告警、设置入口。"
+    },
+    {
+      "region": "滚动条细窄低调",
+      "present": true,
+      "issue": "ok：对话区域右侧可见约 4px 的细窄圆角 thumb，track 透明且对比度低，没有粗大醒目的滚动条。"
+    }
+  ],
+  "verdict": "aligned"
+}

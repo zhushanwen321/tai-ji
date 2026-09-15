@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>压缩待发消息队列区展示 + 压缩中通栏活动带 · 视觉规格（方案 2）</title>
+<style>
+  :root {
+    --bg-stage:#0a0a0c; --bg:#131316; --surface:#1f1f22; --surface-hover:#303033; --surface-2:#27272a;
+    --bg-input:#17171a; --bubble-bg:#303033;
+    --neutral-fg:#dedee2; --neutral-mid:#96969c; --neutral-dim:#74747a; --neutral-faint:#46464c; --neutral-ico:#86868c;
+    --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13); --hairline:rgba(255,255,255,.05);
+    --accent:#cfcfd4; --accent-fg:#1a1a1c; --accent-soft:color-mix(in oklch, var(--accent) 10%, transparent);
+    --info:#6d99a5; --info-soft:color-mix(in oklch, var(--info) 12%, transparent);
+    --composer-bg:var(--bg-input);
+    --text-2xs:11px; --text-xs:12px; --text-sm:13px; --text-base:14px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg-stage); }
+  body {
+    color:var(--neutral-fg);
+    font-family:system-ui,'PingFang SC','Helvetica Neue','Microsoft YaHei','Noto Sans CJK SC',sans-serif;
+    padding:28px 20px 48px;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── demo 说明头 ─────────────────────────────── */
+  .demo-head {
+    width:min(880px,100%); margin:0 auto 20px;
+    display:flex; gap:24px; align-items:flex-start; justify-content:space-between;
+  }
+  .demo-head h1 { font-size:16px; font-weight:600; letter-spacing:.2px; }
+  .demo-head h1 em { font-style:normal; color:var(--neutral-dim); font-weight:400; font-size:13px; margin-left:8px; }
+  .demo-head ul { margin-top:10px; list-style:none; display:flex; flex-direction:column; gap:6px; }
+  .demo-head li { font-size:12.5px; line-height:1.6; color:var(--neutral-mid); display:flex; gap:8px; }
+  .demo-head li b { color:var(--neutral-fg); font-weight:500; }
+  .num {
+    flex:none; width:16px; height:16px; margin-top:2px; border-radius:50%;
+    background:var(--surface-2); color:var(--neutral-mid);
+    font-size:10px; font-style:normal; display:grid; place-items:center;
+  }
+
+  /* ── 面板模拟 ─────────────────────────────── */
+  .panel {
+    width:min(880px,100%); margin:0 auto; height:calc(100vh - 190px); min-height:540px;
+    background:var(--bg); border:1px solid var(--border); border-radius:16px;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .chat {
+    flex:1; min-height:0; overflow:hidden;
+    display:flex; flex-direction:column; justify-content:flex-end;
+    padding:20px 18px 10px;
+  }
+  .msg-a { max-width:85%; font-size:var(--text-base); line-height:1.65; color:var(--neutral-fg); padding:2px 6px; }
+
+  /* ── 方案 2 · 压缩中：全宽活动带（accent-soft 底 + 上下 hairline，通栏）── */
+  .strip-band {
+    flex:none;
+    background:var(--accent-soft);
+    border-top:1px solid var(--hairline);
+    border-bottom:1px solid var(--hairline);
+    padding:14px 20px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .strip-band svg.spin { width:14px; height:14px; color:var(--accent); animation:spin 1s linear infinite; }
+  .strip-band .t-main { font-size:var(--text-sm); color:var(--neutral-fg); }
+  .strip-band .t-dot { color:var(--neutral-faint); margin:0 2px; }
+  .strip-band .t-sub { font-size:var(--text-xs); color:var(--neutral-mid); }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ── composer ─────────────────────────────── */
+  .composer-zone { padding:8px 18px 16px; }
+  .composer-box {
+    background:var(--composer-bg);
+    border:1px solid var(--border-strong); border-radius:12px;
+    overflow:hidden;
+  }
+  .queue {
+    border-bottom:1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+    padding:8px 14px 6px;
+    display:flex; flex-direction:column; gap:1px;
+  }
+  .qrow { display:flex; align-items:center; gap:6px; padding:3px 0; font-size:var(--text-xs); color:var(--neutral-fg); }
+  .qicon { flex:none; display:grid; place-items:center; }
+  .qicon svg { width:13px; height:13px; }
+  .qicon.is-accent { color:var(--accent); }
+  .qicon.is-info { color:var(--info); }
+  .chip {
+    flex:none; font-size:var(--text-2xs); line-height:1;
+    padding:3px 6px; border-radius:4px;
+    background:var(--info-soft); color:var(--info);
+  }
+  .qtext { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qhint { flex:none; font-size:var(--text-2xs); color:var(--neutral-dim); }
+  .row-x {
+    flex:none; width:18px; height:18px; border:0; border-radius:4px; cursor:pointer;
+    background:transparent; color:var(--neutral-dim);
+    display:grid; place-items:center; opacity:0; transition:opacity .15s;
+  }
+  .row-x svg { width:10px; height:10px; }
+  .row-x:hover { color:#bf6b6b; background:var(--surface-hover); }
+  .qrow:hover .row-x { opacity:1; }
+
+  .input-row { padding:11px 14px 2px; font-size:var(--text-base); color:var(--neutral-faint); }
+  .toolbar { padding:6px 8px 8px; display:flex; align-items:center; gap:8px; }
+  .toolbar .spacer { flex:1; }
+  .tool {
+    width:30px; height:30px; border:0; border-radius:999px; cursor:pointer;
+    background:transparent; color:var(--neutral-ico); display:grid; place-items:center;
+  }
+  .tool:hover { background:var(--surface-hover); color:var(--neutral-fg); }
+  .tool svg { width:16px; height:16px; }
+  .model-chip {
+    font-size:var(--text-xs); color:var(--neutral-dim);
+    padding:4px 9px; border-radius:6px; border:1px solid var(--hairline);
+  }
+  .send {
+    width:30px; height:30px; border:0; border-radius:999px; cursor:pointer;
+    background:var(--accent); color:var(--accent-fg); display:grid; place-items:center;
+  }
+  .send svg { width:15px; height:15px; }
+</style>
+</head>
+<body>
+
+<header class="demo-head">
+  <div>
+    <h1>压缩待发消息队列区展示 + 压缩中通栏活动带 <em>视觉规格 · 方案 2（三方案用户裁决选定）</em></h1>
+    <ul>
+      <li><i class="num">1</i><span>压缩待发行用<b>专属 Hourglass icon</b> + 行首<b>「压缩后」小 chip</b>（info-soft 底），与 steer（Zap）/ followup（Clock）三种语义一眼区分</span></li>
+      <li><i class="num">2</i><span><b>「压缩中」升级为通栏活动带</b>：accent-soft 背景 + 上下 hairline，padding 14px（高度 ≈49px，现状 ≈25px），居中呈现</span></li>
+      <li><i class="num">3</i><span>活动带右侧整合<b>「完成后自动发送 1 条待发消息」</b>——压缩状态与队列联动信息闭环，用户知道消息没丢。实施以本文档配套设计 docs/design/compact-defer-composer-queue.md 为 SSOT（含归一规则修订：defer 行仅渲染未提交条目）</span></li>
+    </ul>
+  </div>
+</header>
+
+<main class="panel">
+  <div class="chat">
+    <div class="msg-a">已确认 ssh carbon 上的 pi 与 extension 更新完成。上下文快到阈值了，我先压缩一下会话记忆，再继续只读任务的回归验证。</div>
+  </div>
+
+  <!-- 压缩中活动带 · 方案 2 -->
+  <div class="strip-band" title="方案 2：通栏 accent-soft 活动带，高度 ≈49px">
+    <svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+    <span class="t-main">压缩中</span>
+    <span class="t-dot">·</span>
+    <span class="t-sub">完成后自动发送 1 条待发消息</span>
+  </div>
+
+  <div class="composer-zone">
+    <div class="composer-box">
+
+      <!-- 队列区：steer / followUp / 压缩待发（专属沙漏 + chip） -->
+      <div class="queue">
+        <div class="qrow" title="steer：并入当前回合">
+          <span class="qicon is-accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg></span>
+          <span class="qtext">帮我把 reports 页面的导出按钮改成 async</span>
+        </div>
+        <div class="qrow" title="followUp：当前回合结束后发送">
+          <span class="qicon is-info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+          <span class="qtext">顺便跑一下 lint 确认没有类型错误</span>
+        </div>
+        <div class="qrow" title="我更新了 ssh carbon 上的 pi 和 extension，可以试试重跑一些简单的只读任务，看看 subagent 和 workflow 能否执行，结果是否符合预期。没问题，再看看当前日报、周报是否残缺？是否需要补齐，你开发的功能测试是否要继续完善">
+          <span class="qicon is-info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></span>
+          <span class="chip">压缩后</span>
+          <span class="qtext">我更新了 ssh carbon 上的 pi 和 extension，可以试试重跑一些简单的只读任务，看看 subagent 和 workflow 能否执行…</span>
+          <button class="row-x" title="撤销"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+      </div>
+
+      <div class="input-row">输入消息…</div>
+      <div class="toolbar">
+        <button class="tool" title="添加"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+        <span class="spacer"></span>
+        <span class="model-chip">MiMo-V2.5-Pro</span>
+        <button class="send" title="发送（将进入待发队列）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

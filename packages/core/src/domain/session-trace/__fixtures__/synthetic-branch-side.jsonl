@@ -1,0 +1,10 @@
+{"type": "session", "version": 3, "id": "s-branch-side", "timestamp": "2026-09-01T10:00:00.000Z", "cwd": "/Users/dev/work/demo"}
+{"type": "message", "id": "u1", "parentId": null, "timestamp": "2026-09-01T10:00:00.000Z", "message": {"role": "user", "content": "主链问题", "timestamp": 0}}
+{"type": "message", "id": "a1", "parentId": "u1", "timestamp": "2026-09-01T10:00:10.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "text", "text": "主链回答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "message", "id": "u2", "parentId": "a1", "timestamp": "2026-09-01T10:00:20.000Z", "message": {"role": "user", "content": "主链追问", "timestamp": 0}}
+{"type": "message", "id": "a2", "parentId": "u2", "timestamp": "2026-09-01T10:00:30.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "text", "text": "主链再答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "message", "id": "s1", "parentId": "a1", "timestamp": "2026-09-01T10:00:15.000Z", "message": {"role": "user", "content": "侧支消息（不在 leaf 路径）", "timestamp": 0}}
+{"type": "message", "id": "s2", "parentId": "s1", "timestamp": "2026-09-01T10:00:16.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "text", "text": "侧支回答（不在 leaf 路径）"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "branch_summary", "id": "bs1", "parentId": "a1", "timestamp": "2026-09-01T10:00:17.000Z", "fromId": "s2", "summary": "侧支摘要（不在 leaf 路径）"}
+{"type": "label", "id": "l1", "parentId": "u2", "timestamp": "2026-09-01T10:00:40.000Z", "targetId": "a2", "label": "关键回答"}
+{"type": "branch_summary", "id": "bs2", "parentId": "a2", "timestamp": "2026-09-01T10:00:50.000Z", "fromId": "s2", "summary": "主链末端的分支摘要。"}

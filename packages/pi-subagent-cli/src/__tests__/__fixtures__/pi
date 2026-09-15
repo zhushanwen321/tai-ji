@@ -1,0 +1,7 @@
+#!/bin/sh
+# e2e fake pi wrapper（PATH 注入形态）：缺省直载 fake-pi.mjs（一次性形态）；
+# FAKE_PI_MODE=chat 时直载 fake-pi-chat.mjs（chat 会话长驻形态——protocol-chat-e2e 用）。
+if [ "$FAKE_PI_MODE" = "chat" ]; then
+  exec node "$(dirname "$0")/fake-pi-chat.mjs" "$@"
+fi
+exec node "$(dirname "$0")/fake-pi.mjs" "$@"

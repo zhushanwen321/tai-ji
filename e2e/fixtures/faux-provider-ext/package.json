@@ -1,0 +1,9 @@
+{
+  "name": "taiji-e2e-faux-provider",
+  "version": "0.0.0",
+  "private": true,
+  "description": "e2e real 轨 faux LLM provider 注入壳：re-export runtime 测试 fixtures 的 faux-llm-ext（TAIJI_EXTENSION_PATHS 经 scanUserExtensions 要求目录 + isValidPiExtension，单文件不可用）",
+  "pi": {
+    "extensions": ["index.ts"]
+  }
+}

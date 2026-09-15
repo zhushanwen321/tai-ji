@@ -1,0 +1,52 @@
+{
+  "name": "@zhushanwen/pi-plan",
+  "version": "0.4.6",
+  "description": "Lightweight plan mode for Pi coding agent",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "extension"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.73.0",
+    "typebox": "*",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@zhushanwen/pi-goal": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@zhushanwen/pi-goal": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "files": [
+    "index.ts",
+    "src/",
+    "templates/"
+  ],
+  "dependencies": {
+    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@zhushanwen/pi-extension-logger",
+  "version": "0.6.0",
+  "description": "Shared logging helper for Pi extensions — two-channel routing (audit appendEntry / debug file log; the third AI-realtime channel stays with pi native) (shared library, not a Pi extension - no install.mjs needed)",
+  "type": "module",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "logger",
+    "logging",
+    "observability"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4"
+  },
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

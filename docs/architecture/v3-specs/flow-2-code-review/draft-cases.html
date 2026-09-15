@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow 2 · 代码变更审查 — 局部示例</title>
+<style>
+  /* ===== zcode 冷蓝暗色 token（design-tokens.md 单一源）===== */
+  :root {
+    --bg: #1a1b1f;
+    --surface: #222329;
+    --surface-hover: #282930;
+    --fg: #f7f8fc;
+    --muted: #a8a8b5;
+    --subtle: #82828f;
+    --border: rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.12);
+    --accent: #4f8ef7;
+    --accent-hover: #6ba3ff;
+    --accent-soft: rgba(79,142,247,0.12);
+    --success: #22c55e;
+    --warning: #f5a524;
+    --danger: #ef4444;
+    --info: #38bdf8;
+    --font-sans: Inter, 'SF Pro Display', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --radius-sm: 3px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+    --shadow-1: 0 0 0 1px rgba(0,0,0,0.2);
+    --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --dur-fast: 120ms; --dur: 200ms;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.55 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    padding: var(--space-8) var(--space-6) 120px;
+    max-width: 1100px; margin: 0 auto;
+  }
+  /* ===== 页面框架 ===== */
+  .page-head { margin-bottom: var(--space-8); }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .page-head p { color: var(--muted); margin-top: 6px; font-size: 13px; }
+  .page-head .ref { color: var(--subtle); font-family: var(--font-mono); font-size: 11px; margin-top: 10px; }
+  .group { margin-top: var(--space-12, 48px); }
+  .group > h2 {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--accent); margin-bottom: var(--space-3);
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .case { margin-bottom: var(--space-8); }
+  .case-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); flex-wrap: wrap; }
+  .case-num {
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+    background: var(--accent-soft); padding: 2px 8px; border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+  .case-title { font-size: 15px; font-weight: 600; }
+  .case-desc { color: var(--muted); font-size: 13px; margin-bottom: var(--space-3); max-width: 72ch; }
+
+  /* ===== 局部渲染区（带画布感背景）===== */
+  .demo {
+    background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: var(--space-4); position: relative;
+    box-shadow: var(--shadow-1);
+  }
+  .demo.dark-pad { background: #0a0a0c; } /* 更深一档区分嵌套场景 */
+
+  /* ===== 消息气泡 ===== */
+  .bubble { max-width: 80%; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; line-height: 1.6; }
+  .bubble-user { background: var(--accent-soft); color: var(--fg); margin-left: auto; border: 1px solid rgba(79,142,247,0.2); }
+  .bubble-assistant { background: var(--surface); border: 1px solid var(--border); }
+  .msg-row { display: flex; margin-bottom: var(--space-2); position: relative; }
+  .msg-row.user .bubble { margin-left: auto; }
+  .msg-role { font-size: 11px; color: var(--subtle); margin-bottom: 4px; font-family: var(--font-mono); }
+
+  /* ===== 消息操作菜单 ===== */
+  .msg-row:hover .msg-trigger { opacity: 1; }
+  .msg-trigger {
+    position: absolute; top: 0; right: -36px;
+    opacity: 0; transition: opacity var(--dur-fast) var(--ease);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    width: 28px; height: 28px; display: grid; place-items: center; color: var(--muted); cursor: pointer;
+  }
+  .msg-trigger:hover { color: var(--fg); border-color: var(--border-strong); }
+  .menu {
+    position: absolute; top: 30px; right: -8px; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+    box-shadow: var(--shadow-2); min-width: 180px; padding: 4px;
+  }
+  .menu-item {
+    padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center; color: var(--fg);
+  }
+  .menu-item:hover { background: var(--surface-hover); }
+  .menu-item.danger { color: var(--danger); }
+  .menu-item .kbd { font-family: var(--font-mono); font-size: 10px; color: var(--subtle); }
+  .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* ===== composer ===== */
+  .composer {
+    border: 1px solid var(--accent); border-radius: var(--radius-lg);
+    background: var(--surface); padding: var(--space-3);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .composer-input { background: transparent; border: 0; outline: 0; color: var(--fg); font: inherit; width: 100%; min-height: 44px; }
+  .composer-foot { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2); }
+  .composer-hint { font-family: var(--font-mono); font-size: 11px; color: var(--subtle); }
+  .composer-hint kbd { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 5px; }
+  .mention {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm);
+    padding: 1px 6px; font-family: var(--font-mono); font-size: 12px;
+  }
+  .mention-pop {
+    margin-top: var(--space-2); background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); box-shadow: var(--shadow-2); width: 320px; padding: 4px;
+  }
+  .mention-pop-head { font-size: 10px; color: var(--subtle); padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .mention-item { padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; display: flex; gap: var(--space-2); align-items: center; }
+  .mention-item.sel { background: var(--accent-soft); }
+  .mention-item .ico { color: var(--muted); font-family: var(--font-mono); font-size: 11px; width: 28px; }
+  .mention-item .name { color: var(--fg); font-family: var(--font-mono); font-size: 12px; }
+  .mention-item .path { color: var(--subtle); font-size: 11px; margin-left: auto; }
+
+  /* ===== thinking 块（折叠）===== */
+  .thinking {
+    border-left: 2px solid var(--border-strong); padding: 6px 12px; margin-bottom: var(--space-2);
+    color: var(--muted); font-size: 12px; cursor: pointer;
+  }
+  .thinking .label { font-family: var(--font-mono); }
+  .thinking .caret { color: var(--subtle); margin-right: 6px; }
+
+  /* ===== tool call 卡 ===== */
+  .tool-card {
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    padding: 10px 12px; margin-bottom: var(--space-2); font-size: 12px; max-width: 80%;
+  }
+  .tool-head { display: flex; align-items: center; gap: var(--space-2); }
+  .tool-name { font-family: var(--font-mono); color: var(--fg); }
+  .tool-target { color: var(--muted); font-family: var(--font-mono); }
+  .tool-status { margin-left: auto; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; }
+  .tool-status.running { color: var(--accent); }
+  .tool-status.done { color: var(--success); }
+  .tool-status.failed { color: var(--danger); }
+  .spinner { width: 11px; height: 11px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===== 变更集卡（5 状态）===== */
+  .cs {
+    border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface);
+    padding: 12px 14px; max-width: 80%; margin-top: var(--space-2); cursor: pointer;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .cs:hover { background: var(--surface-hover); }
+  .cs-row { display: flex; align-items: center; gap: var(--space-2); }
+  .cs-icon { width: 18px; height: 18px; flex-shrink: 0; display: grid; place-items: center; }
+  .cs-title { font-size: 13px; font-weight: 500; }
+  .cs-count { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .cs-count .add { color: var(--success); }
+  .cs-count .del { color: var(--danger); }
+  .cs-action { margin-left: auto; color: var(--accent); font-size: 12px; }
+  .cs-bar { height: 3px; background: var(--bg); border-radius: 2px; margin-top: var(--space-2); overflow: hidden; }
+  .cs-bar > i { display: block; height: 100%; background: var(--accent); width: 60%; animation: pulse 1.4s var(--ease) infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+  .cs-meta { font-size: 11px; color: var(--subtle); margin-top: 6px; font-family: var(--font-mono); }
+
+  .cs.accumulating { border-color: rgba(79,142,247,0.3); }
+  .cs.ready { }
+  .cs.partial { border-color: var(--warning); }
+  .cs.partial .cs-icon { color: var(--warning); }
+  .cs.resolved { border-color: rgba(34,197,94,0.3); opacity: 0.85; }
+  .cs.resolved .cs-title { color: var(--success); }
+  .cs.superseded { opacity: 0.45; filter: saturate(0.4); }
+  .cs.incomplete { border-color: var(--warning); border-style: dashed; }
+
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+  .badge.warn { background: rgba(245,165,36,0.15); color: var(--warning); }
+  .badge.info { background: var(--accent-soft); color: var(--accent); }
+
+  /* ===== 右抽屉（Diff）===== */
+  .drawer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .drawer-head { display: flex; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--border); font-size: 12px; }
+  .tab { padding: 6px 12px; border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; }
+  .tab.active { background: var(--accent-soft); color: var(--accent); }
+  .file-list { border-right: 1px solid var(--border); width: 240px; padding: var(--space-2); }
+  .file-item { padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: var(--space-2); }
+  .file-item.sel { background: var(--accent-soft); }
+  .file-item.accepted { color: var(--success); }
+  .file-item.accepted .fname { text-decoration: line-through; opacity: 0.7; }
+  .file-item .fname { font-family: var(--font-mono); }
+  .file-item .nums { margin-left: auto; font-family: var(--font-mono); font-size: 11px; }
+  .file-item .nums .add { color: var(--success); }
+  .file-item .nums .del { color: var(--danger); }
+  .diff-cols { display: flex; min-height: 200px; }
+  .diff-body { flex: 1; font-family: var(--font-mono); font-size: 12px; overflow: auto; padding: var(--space-2) 0; }
+  .diff-line { display: flex; padding: 0 var(--space-3); line-height: 1.7; }
+  .diff-line .ln { width: 32px; color: var(--subtle); text-align: right; padding-right: var(--space-3); user-select: none; }
+  .diff-line.add { background: rgba(34,197,94,0.08); }
+  .diff-line.add .code::before { content: '+'; color: var(--success); margin-right: 8px; }
+  .diff-line.del { background: rgba(239,68,68,0.08); }
+  .diff-line.del .code::before { content: '−'; color: var(--danger); margin-right: 8px; }
+  .diff-line.ctx .code::before { content: ' '; margin-right: 8px; color: var(--subtle); }
+  .diff-fold { padding: 4px var(--space-3); color: var(--subtle); font-family: var(--font-mono); font-size: 11px; background: var(--bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .diff-foot { display: flex; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--border); align-items: center; }
+  .reviewed-count { font-size: 12px; color: var(--muted); font-family: var(--font-mono); margin-right: auto; }
+  .accepted-flag { font-size: 11px; color: var(--success); font-family: var(--font-mono); }
+
+  /* ===== 按钮 ===== */
+  .btn { padding: 7px 14px; border-radius: var(--radius); font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid transparent; font-family: inherit; transition: all var(--dur-fast) var(--ease); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { background: transparent; color: var(--fg); border-color: var(--border-strong); }
+  .btn-ghost:hover { background: var(--surface-hover); }
+  .btn-danger { background: transparent; color: var(--danger); border-color: rgba(239,68,68,0.3); }
+  .btn-danger:hover { background: rgba(239,68,68,0.1); }
+  .btn.error { background: var(--danger); color: #fff; animation: shake 0.4s; }
+  @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+
+  /* ===== toast ===== */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border-strong); border-left: 3px solid var(--danger); border-radius: var(--radius); padding: 10px 16px; box-shadow: var(--shadow-2); font-size: 13px; display: flex; align-items: center; gap: var(--space-2); z-index: 100; }
+  .toast .retry { color: var(--accent); font-size: 12px; cursor: pointer; margin-left: 8px; }
+
+  /* ===== 折叠的 resolved 变更集（S6）===== */
+  .cs-collapsed { display: flex; align-items: center; gap: var(--space-2); color: var(--success); font-size: 12px; max-width: 80%; padding: 8px 12px; border: 1px solid rgba(34,197,94,0.2); border-radius: var(--radius); background: rgba(34,197,94,0.05); cursor: pointer; }
+  .cs-collapsed .expand { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+
+  /* ===== 二进制 / 空 diff 提示 ===== */
+  .empty-diff { padding: var(--space-8); text-align: center; color: var(--muted); font-size: 13px; }
+  .empty-diff .ico { font-size: 28px; opacity: 0.4; margin-bottom: var(--space-2); }
+
+  /* ===== 局部标注（指向当前状态）===== */
+  .annot { font-size: 11px; color: var(--info); background: rgba(56,189,248,0.1); border-radius: var(--radius-sm); padding: 3px 8px; display: inline-block; margin-top: var(--space-2); font-family: var(--font-mono); }
+  .state-tag { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: var(--radius-sm); text-transform: uppercase; letter-spacing: 0.05em; }
+  .state-tag.accum { background: var(--accent-soft); color: var(--accent); }
+  .state-tag.ready { background: rgba(138,138,149,0.15); color: var(--muted); }
+  .state-tag.partial { background: rgba(245,165,36,0.15); color: var(--warning); }
+  .state-tag.done { background: rgba(34,197,94,0.15); color: var(--success); }
+  .state-tag.archive { background: rgba(90,90,101,0.2); color: var(--subtle); }
+
+  hr.sep { border: 0; border-top: 1px dashed var(--border); margin: var(--space-6) 0; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>Flow 2 · 代码变更审查 — 局部示例</h1>
+  <p>单 Agent 对话 → 变更集聚合 → Diff 审查 → 决策落定的视觉锚点。每个 case 是局部组件，不画完整三栏。</p>
+  <div class="ref">ref: docs/flows/flow-2-code-change-review.md · token: docs/design-tokens.md (zcode 冷蓝)</div>
+</div>
+
+<!-- ===== 分组 1：屏幕序列 ===== -->
+<section class="group">
+  <h2>屏幕序列 S1 — S6</h2>
+  <div id="seq">
+
+    <!-- S1 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S1</span><span class="case-title">任务下达</span></div>
+      <div class="case-desc">composer 聚焦，支持 @-mention 注入文件/符号上下文。打 @ 触发文件搜索浮层。</div>
+      <div class="demo">
+        <div class="composer">
+          <div class="composer-input" contenteditable="true">帮我修复登录超时问题，引用 <span class="mention">@ src/auth/login.ts</span> 和 <span class="mention">@ src/auth/session.ts</span>，超时阈值|</div>
+          <div class="mention-pop">
+            <div class="mention-pop-head">文件 · 匹配 "超时"</div>
+            <div class="mention-item sel"><span class="ico">fn</span><span class="name">checkTimeout()</span><span class="path">src/auth/session.ts</span></div>
+            <div class="mention-item"><span class="ico">const</span><span class="name">DEFAULT_TIMEOUT</span><span class="path">src/config.ts</span></div>
+            <div class="mention-item"><span class="ico">fn</span><span class="name">retryLogin()</span><span class="path">src/auth/login.ts</span></div>
+          </div>
+          <div class="composer-foot">
+            <span class="composer-hint">@ 文件 · / 命令 · Shift+Enter 换行</span>
+            <span class="composer-hint">发送 <kbd>⌘</kbd> <kbd>↵</kbd></span>
+          </div>
+        </div>
+        <span class="annot">聚焦环 + @-mention 浮层，选中项高亮 accent-soft</span>
+      </div>
+    </div>
+
+    <!-- S2 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S2</span><span class="case-title">Agent 流式响应</span></div>
+      <div class="case-desc">顺序渲染：thinking（折叠）→ tool call 卡 → 文本。tool 卡显示工具名/目标/状态。</div>
+      <div class="demo">
+        <div class="msg-role">assistant</div>
+        <div class="bubble bubble-assistant">
+          <div class="thinking"><span class="caret">▸</span><span class="label">思考了 8 秒</span> · 分析了登录流程，发现 session 刷新在 token 过期后未重试…</div>
+          <div class="tool-card">
+            <div class="tool-head"><span class="tool-name">Read</span><span class="tool-target">src/auth/session.ts</span><span class="tool-status done">✓ 完成</span></div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-head"><span class="tool-name">Edit</span><span class="tool-target">src/auth/session.ts</span><span class="tool-status running"><span class="spinner"></span>修改中</span></div>
+          </div>
+          <p style="margin-top:8px">我在 <code style="font-family:var(--font-mono);color:var(--accent)">refreshSession()</code> 里加了过期重试逻辑，超时阈值改为可配置<span style="background:var(--accent);width:7px;height:14px;display:inline-block;vertical-align:-2px;margin-left:2px;animation:pulse 1s infinite"></span></p>
+        </div>
+        <span class="annot">thinking 可展开 · running tool 带 spinner · 末尾流式光标</span>
+      </div>
+    </div>
+
+    <!-- S3 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S3</span><span class="case-title">变更集聚合</span></div>
+      <div class="case-desc">Agent 改完文件后，变更集卡出现在 assistant 消息下方。此处为 accumulating 态。</div>
+      <div class="demo">
+        <div class="msg-role">assistant</div>
+        <div class="bubble bubble-assistant" style="margin-bottom:8px">修改完成，共涉及 3 个文件，主要是 session 刷新逻辑和配置项。</div>
+        <div class="cs accumulating">
+          <div class="cs-row">
+            <span class="cs-icon">⏺</span>
+            <span class="cs-title">正在生成变更…</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+            <span class="cs-action">查看全部 ›</span>
+          </div>
+          <div class="cs-bar"><i></i></div>
+          <div class="cs-meta">3 个文件 · 实时聚合中</div>
+        </div>
+        <span class="annot">边框 accent · 底部进度条 pulse · 文件数实时增长</span>
+      </div>
+    </div>
+
+    <!-- S4 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S4</span><span class="case-title">Diff 审查（右抽屉展开）</span></div>
+      <div class="case-desc">点变更集卡 → 右抽屉展开 Diff tab。文件列表 + 统一 diff + Accept/Reject 全套。</div>
+      <div class="demo">
+        <div class="drawer">
+          <div class="drawer-head"><span class="tab active">Diff</span><span class="tab">终端</span><span class="tab">浏览器</span></div>
+          <div class="diff-cols">
+            <div class="file-list">
+              <div class="file-item sel"><span class="fname">login.ts</span><span class="nums"><span class="add">+12</span><span class="del">−3</span></span></div>
+              <div class="file-item"><span class="fname">session.ts</span><span class="nums"><span class="add">+8</span><span class="del">−1</span></span></div>
+              <div class="file-item"><span class="fname">config.ts</span><span class="nums"><span class="add">+27</span><span class="del">−8</span></span></div>
+            </div>
+            <div class="diff-body">
+              <div class="diff-line ctx"><span class="ln">42</span><span class="code">async function refreshSession(token) {</span></div>
+              <div class="diff-line del"><span class="ln">43</span><span class="code">  return fetch('/api/refresh', { headers: { auth: token } })</span></div>
+              <div class="diff-line add"><span class="ln">43</span><span class="code">  const ctrl = new AbortController()</span></div>
+              <div class="diff-line add"><span class="ln">44</span><span class="code">  const t = setTimeout(() => ctrl.abort(), DEFAULT_TIMEOUT)</span></div>
+              <div class="diff-line add"><span class="ln">45</span><span class="code">  try {</span></div>
+              <div class="diff-line add"><span class="ln">46</span><span class="code">    return await fetch('/api/refresh', {</span></div>
+              <div class="diff-line add"><span class="ln">47</span><span class="code">      signal: ctrl.signal, headers: { auth: token }</span></div>
+              <div class="diff-line add"><span class="ln">48</span><span class="code">    })</span></div>
+              <div class="diff-line ctx"><span class="ln">49</span><span class="code">  } finally { clearTimeout(t) }</span></div>
+            </div>
+          </div>
+          <div class="diff-foot">
+            <span class="reviewed-count">0/3 已审查</span>
+            <button class="btn btn-danger">Reject</button>
+            <button class="btn btn-primary">Accept</button>
+            <span style="width:1px;background:var(--border);height:20px;margin:0 4px"></span>
+            <button class="btn btn-ghost">Reject All</button>
+            <button class="btn btn-ghost">Accept All</button>
+          </div>
+        </div>
+        <span class="annot">文件列表 +/- 行数 · 统一 diff（可切分屏）· 4 个决策按钮</span>
+      </div>
+    </div>
+
+    <!-- S5 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S5</span><span class="case-title">决策落定</span></div>
+      <div class="case-desc">Accept → 当前文件标绿，计数 +1，自动跳下一个未审查文件。</div>
+      <div class="demo">
+        <div class="drawer">
+          <div class="diff-cols">
+            <div class="file-list">
+              <div class="file-item accepted"><span>✓</span><span class="fname">login.ts</span><span class="nums"><span class="add">+12</span><span class="del">−3</span></span></div>
+              <div class="file-item accepted"><span>✓</span><span class="fname">session.ts</span><span class="nums"><span class="add">+8</span><span class="del">−1</span></span></div>
+              <div class="file-item sel"><span class="fname">config.ts</span><span class="nums"><span class="add">+27</span><span class="del">−8</span></span></div>
+            </div>
+            <div class="diff-body">
+              <div class="diff-line add"><span class="ln">1</span><span class="code">export const DEFAULT_TIMEOUT = 8000 // ms</span></div>
+              <div class="diff-line add"><span class="ln">2</span><span class="code">export const MAX_RETRY = 3</span></div>
+              <div class="diff-line ctx"><span class="ln">3</span><span class="code">export const SESSION_KEY = 'auth_token'</span></div>
+            </div>
+          </div>
+          <div class="diff-foot">
+            <span class="reviewed-count">2/3 已审查 · 自动跳转下一个</span>
+            <span class="accepted-flag">✓ login.ts · session.ts 已接受</span>
+            <button class="btn btn-danger">Reject</button>
+            <button class="btn btn-primary">Accept</button>
+          </div>
+        </div>
+        <span class="annot">已接受文件标绿+删除线 · 计数实时更新 · 自动聚焦下个未审查</span>
+      </div>
+    </div>
+
+    <!-- S6 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">S6</span><span class="case-title">继续对话</span></div>
+      <div class="case-desc">关闭抽屉回消息流，resolved 变更集折叠成单行，composer 等待新输入。</div>
+      <div class="demo">
+        <div class="msg-role">assistant</div>
+        <div class="bubble bubble-assistant" style="margin-bottom:8px">修改完成，登录超时现在会重试 3 次。</div>
+        <div class="cs-collapsed">
+          <span>✓</span><span>3 个变更已落地 · +47 −12</span>
+          <span class="expand">展开 ⌄</span>
+        </div>
+        <div style="margin-top:24px;border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-3);background:var(--surface);color:var(--subtle);font-size:13px">继续追问，或下达新任务…</div>
+        <span class="annot">resolved 卡折叠为单行 · 不占视觉空间 · 可随时展开回看</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===== 分组 2：变更集卡状态机 ===== -->
+<section class="group">
+  <h2>变更集卡状态机 · 5 态</h2>
+  <div id="states">
+    <div class="case-desc">同一个变更集卡在生命周期中的 5 个状态。状态迁移：accumulating → ready → partially-reviewed → resolved；superseded 为旁支。</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px">
+
+      <!-- accumulating -->
+      <div>
+        <div class="case-head"><span class="state-tag accum">accumulating</span></div>
+        <div class="case-desc">agent 还在改，文件数实时增长。</div>
+        <div class="cs accumulating">
+          <div class="cs-row">
+            <span class="cs-icon">⏺</span><span class="cs-title">正在生成变更…</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+          </div>
+          <div class="cs-bar"><i></i></div>
+          <div class="cs-meta">3 个文件 · 聚合中</div>
+        </div>
+      </div>
+
+      <!-- ready -->
+      <div>
+        <div class="case-head"><span class="state-tag ready">ready</span></div>
+        <div class="case-desc">agent 完成，等待审查。</div>
+        <div class="cs ready">
+          <div class="cs-row">
+            <span class="cs-icon">⊕</span><span class="cs-title">3 个文件变更</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+            <span class="cs-action">查看全部 ›</span>
+          </div>
+          <div class="cs-meta">待审查 · 刚刚</div>
+        </div>
+      </div>
+
+      <!-- partially-reviewed -->
+      <div>
+        <div class="case-head"><span class="state-tag partial">partially-reviewed</span></div>
+        <div class="case-desc">部分 accept/reject，还有未审查项。</div>
+        <div class="cs partial">
+          <div class="cs-row">
+            <span class="cs-icon">◐</span><span class="cs-title">1/3 已审查</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+            <span class="cs-action">继续 ›</span>
+          </div>
+          <div class="cs-meta">login.ts ✓ · 还剩 2 个</div>
+        </div>
+      </div>
+
+      <!-- resolved -->
+      <div>
+        <div class="case-head"><span class="state-tag done">resolved</span></div>
+        <div class="case-desc">全部处理完，折叠归档。</div>
+        <div class="cs resolved">
+          <div class="cs-row">
+            <span class="cs-icon">✓</span><span class="cs-title">3 个变更已落地</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+          </div>
+          <div class="cs-meta">2 接受 · 1 拒绝 · 5 分钟前</div>
+        </div>
+      </div>
+
+      <!-- superseded -->
+      <div>
+        <div class="case-head"><span class="state-tag archive">superseded</span></div>
+        <div class="case-desc">agent 又改了一轮，旧变更集折叠归档。</div>
+        <div class="cs superseded">
+          <div class="cs-row">
+            <span class="cs-icon">⊘</span><span class="cs-title">已归档 · 被新轮覆盖</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+          </div>
+          <div class="cs-meta">查看历史 ›</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ===== 分组 3：消息操作菜单 ===== -->
+<section class="group">
+  <h2>消息操作菜单（critique P0 短板）</h2>
+  <div id="menu">
+    <div class="case-desc">hover 用户消息 → 右侧 ··· 出现 → 点击弹菜单。4 项操作，删除带确认。</div>
+    <div class="demo" style="padding-right:60px">
+      <div class="msg-role">你</div>
+      <div class="msg-row user">
+        <div class="bubble bubble-user">帮我修复登录超时问题，引用 @login.ts 和 @session.ts</div>
+        <span class="msg-trigger">⋯</span>
+        <div class="menu">
+          <div class="menu-item">编辑并重发 <span class="kbd">⏎</span></div>
+          <div class="menu-item">复制 <span class="kbd">⌘C</span></div>
+          <div class="menu-item">引用到新消息</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item danger">删除… <span class="kbd">⌫</span></div>
+        </div>
+      </div>
+      <span class="annot">默认隐藏，hover 才显 · 编辑重发触发 Flow 4 分支 · 删除弹二次确认</span>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 分组 4：边缘状态 ===== -->
+<section class="group">
+  <h2>边缘状态 · 7 例</h2>
+  <div id="edges">
+
+    <!-- E1 只读没改 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E1</span><span class="case-title">Agent 只读没改</span></div>
+      <div class="case-desc">只回答问题/解释代码，没有文件改动 → <b>不出变更集卡</b>。</div>
+      <div class="demo">
+        <div class="msg-role">assistant</div>
+        <div class="bubble bubble-assistant"><code style="font-family:var(--font-mono);color:var(--accent)">refreshSession()</code> 的作用是在 token 过期时调 <code style="font-family:var(--font-mono);color:var(--accent)">/api/refresh</code> 换新 token。当前实现没有超时和重试…</div>
+        <span class="annot">纯对话 · 无变更集卡 · 不触发 Diff 流程</span>
+      </div>
+    </div>
+
+    <!-- E2 50+ 文件折叠 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E2</span><span class="case-title">改动跨 50+ 文件</span></div>
+      <div class="case-desc">变更集卡折叠显示总数，抽屉启用虚拟滚动，不一次性渲染全部。</div>
+      <div class="demo">
+        <div class="cs ready">
+          <div class="cs-row">
+            <span class="cs-icon">⊕</span><span class="cs-title">52 个文件变更</span>
+            <span class="cs-count"><span class="add">+1,247</span> <span class="del">−389</span></span>
+            <span class="cs-action">查看全部 ›</span>
+          </div>
+          <div class="cs-meta">大范围重构 · 建议分批审查</div>
+        </div>
+        <div class="drawer" style="margin-top:16px">
+          <div class="file-list" style="width:100%;border-right:0">
+            <div class="file-item"><span class="fname">auth/login.ts</span><span class="nums"><span class="add">+12</span></span></div>
+            <div class="file-item"><span class="fname">auth/session.ts</span><span class="nums"><span class="add">+8</span></span></div>
+            <div class="file-item"><span class="fname">config/index.ts</span><span class="nums"><span class="add">+27</span></span></div>
+            <div class="diff-fold" style="margin:8px 0;border-radius:var(--radius-sm)">⋯ 还有 49 个文件（虚拟滚动）</div>
+            <div class="file-item" style="opacity:0.4"><span class="fname">utils/helpers.ts</span></div>
+          </div>
+        </div>
+        <span class="annot">总数折叠 · 虚拟滚动避免卡顿 · 引导分批审查</span>
+      </div>
+    </div>
+
+    <!-- E3 中断未完成 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E3</span><span class="case-title">Agent 中途被中断</span></div>
+      <div class="case-desc">变更集标"未完成"（虚线警告边框），部分文件只有 partial diff。</div>
+      <div class="demo">
+        <div class="cs incomplete">
+          <div class="cs-row">
+            <span class="cs-icon" style="color:var(--warning)">⏸</span><span class="cs-title">变更未完成</span>
+            <span class="badge warn">已中断</span>
+            <span class="cs-count"><span class="add">+23</span> <span class="del">−5</span></span>
+          </div>
+          <div class="cs-meta">2/3 文件完整 · config.ts 为 partial diff</div>
+        </div>
+        <div class="drawer" style="margin-top:16px">
+          <div class="diff-body">
+            <div class="diff-line add"><span class="ln">1</span><span class="code">export const DEFAULT_TIMEOUT = 8000</span></div>
+            <div class="diff-fold">⋯ partial diff · 编辑被中断</div>
+          </div>
+        </div>
+        <span class="annot">虚线边框区分中断态 · 明确标出哪些文件不完整</span>
+      </div>
+    </div>
+
+    <!-- E4 Reject 重试 superseded -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E4</span><span class="case-title">Reject 后 Agent 重试</span></div>
+      <div class="case-desc">用户 Reject 后 agent 重试 → 新变更集出现，旧的标 superseded 归档。两卡并存。</div>
+      <div class="demo">
+        <div class="cs superseded" style="margin-bottom:12px">
+          <div class="cs-row">
+            <span class="cs-icon">⊘</span><span class="cs-title">第 1 轮 · 已拒绝归档</span>
+            <span class="cs-count"><span class="add">+47</span> <span class="del">−12</span></span>
+            <span class="cs-action">查看 ›</span>
+          </div>
+        </div>
+        <div class="cs ready">
+          <div class="cs-row">
+            <span class="cs-icon">⊕</span><span class="cs-title">第 2 轮 · 3 个文件变更</span>
+            <span class="cs-count"><span class="add">+52</span> <span class="del">−14</span></span>
+            <span class="cs-action">查看全部 ›</span>
+          </div>
+          <div class="cs-meta">已采纳你的反馈：改用 AbortController</div>
+        </div>
+        <span class="annot">旧轮降饱和归档 · 新轮高亮 · 历史可追溯</span>
+      </div>
+    </div>
+
+    <!-- E5 单行超长 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E5</span><span class="case-title">单行超长（500+ 字符）</span></div>
+      <div class="case-desc">diff 横向滚动，相同连续行折叠为"⋯ N 行相同"。</div>
+      <div class="demo">
+        <div class="drawer">
+          <div class="diff-body" style="overflow-x:auto">
+            <div class="diff-line ctx"><span class="ln">10</span><span class="code" style="white-space:nowrap">const config = { /* ... */ }</span></div>
+            <div class="diff-fold">⋯ 15 行相同</div>
+            <div class="diff-line del"><span class="ln">26</span><span class="code" style="white-space:nowrap">const url = "https://api.example.com/v2/users?fields=id,name,email,avatar,role,createdAt,updatedAt,lastLoginAt,preferences,settings,notifications"</span></div>
+            <div class="diff-line add"><span class="ln">26</span><span class="code" style="white-space:nowrap">const url = buildApiUrl('users', { fields: ['id','name','email','avatar','role'], expand: ['preferences','settings'] })</span></div>
+          </div>
+        </div>
+        <span class="annot">超长行横向滚动不换行 · 相同行折叠减少噪音</span>
+      </div>
+    </div>
+
+    <!-- E6 断网写回失败 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E6</span><span class="case-title">审查时断网 · Accept 写回失败</span></div>
+      <div class="case-desc">抽屉本地可用，但 Accept 写回磁盘失败 → 按钮抖动变红 + toast 重试提示。</div>
+      <div class="demo">
+        <div class="drawer">
+          <div class="diff-foot">
+            <span class="reviewed-count">2/3 已审查</span>
+            <button class="btn btn-danger">Reject</button>
+            <button class="btn error">✗ 写入失败</button>
+          </div>
+        </div>
+        <div class="toast" style="position:static;transform:none;margin-top:16px;justify-content:center">
+          <span>⚠</span><span>文件写入失败：磁盘忙 / 网络中断</span><span class="retry">重试</span>
+        </div>
+        <span class="annot">本地审查不丢 · 写回失败明确提示 + 重试入口</span>
+      </div>
+    </div>
+
+    <!-- E7 二进制文件 -->
+    <div class="case">
+      <div class="case-head"><span class="case-num">E7</span><span class="case-title">diff 二进制文件</span></div>
+      <div class="case-desc">无法逐行 diff → 显示文件信息 + 大小变化，不勉强渲染。</div>
+      <div class="demo">
+        <div class="drawer">
+          <div class="diff-cols">
+            <div class="file-list">
+              <div class="file-item"><span class="fname">logo.svg</span><span class="nums"><span class="add">+18</span></span></div>
+              <div class="file-item sel"><span class="fname">icon.png</span><span class="badge info" style="margin-left:auto">二进制</span></div>
+            </div>
+            <div class="empty-diff">
+              <div class="ico" style="width:38px;height:38px;border:2px dashed var(--subtle);border-radius:6px;margin:0 auto 8px;font-size:0"></div>
+              <div>二进制文件 · 无法预览逐行 diff</div>
+              <div style="font-family:var(--font-mono);font-size:12px;color:var(--subtle);margin-top:8px">icon.png · 24.1 KB → 28.7 KB (+4.6 KB)</div>
+              <div style="margin-top:12px"><button class="btn btn-ghost">在 Finder 中显示</button></div>
+            </div>
+          </div>
+        </div>
+        <span class="annot">诚实占位 · 只给大小变化 · 不假装能 diff</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div id="toast-slot"></div>
+
+</body>
+</html>

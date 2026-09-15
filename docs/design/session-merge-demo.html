@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Session Merge · 交互原型（graph conversation P1）</title>
+<style>
+  /* ============================================================
+     Design tokens — 太极·玄纯灰暗色，值与 docs/page-design/design-tokens.md
+     （v6 定稿表）逐字对齐。本文件为自包含原型，故内联副本；真值以 SSOT 为准。
+     ============================================================ */
+  :root{
+    /* 层级底色 */
+    --bg-stage:#0a0a0c; --bg:#131316; --surface:#1f1f22; --surface-hover:#303033;
+    --surface-2:#27272a; --bg-elevated:#2b2b2e; --bg-input:#17171a; --bg-card:#1b1b1e;
+    /* 文字 / 图标 */
+    --neutral-fg:#dedee2; --neutral-mid:#96969c; --neutral-dim:#74747a;
+    --neutral-faint:#46464c; --neutral-ico:#86868c; --neutral-ico-hover:#dedee2;
+    /* 线 */
+    --border:rgba(255,255,255,0.07); --border-strong:rgba(255,255,255,0.13);
+    --hairline:rgba(255,255,255,0.05);
+    /* 主色（纯灰亮灰） */
+    --accent:#cfcfd4; --accent-hover:#e0e0e4; --accent-fg:#1a1a1c;
+    --accent-soft:color-mix(in oklch,var(--accent) 10%,transparent);
+    --accent-ring:color-mix(in oklch,var(--accent) 30%,transparent);
+    /* 状态色（水墨降饱和） */
+    --success:#78a87e; --warn:#b79c54; --danger:#bf6b6b; --info:#6d99a5; --reasoning:#8e85ab;
+    --success-soft:color-mix(in oklch,var(--success) 12%,transparent);
+    --danger-soft:color-mix(in oklch,var(--danger) 12%,transparent);
+    --info-soft:color-mix(in oklch,var(--info) 12%,transparent);
+    --warn-soft:color-mix(in oklch,var(--warn) 14%,transparent);
+    --reasoning-soft:color-mix(in oklch,var(--reasoning) 12%,transparent);
+    /* 圆角 / 间距 / 阴影 / 动效 */
+    --radius-sm:6px; --radius:8px; --radius-card:10px; --radius-lg:12px;
+    --shadow-2:0 8px 24px rgba(0,0,0,0.4);
+    --ease:cubic-bezier(0.4,0,0.2,1); --dur-fast:120ms; --dur:200ms; --dur-slow:320ms;
+    /* 字体与字号 scale */
+    --font-sans:Inter,'SF Pro Display','PingFang SC',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,monospace;
+    --font-scale-u:1; --font-scale-mq:1;
+    --text-2xs:calc(11px * var(--font-scale-u) * var(--font-scale-mq));
+    --text-xs:calc(12px * var(--font-scale-u) * var(--font-scale-mq));
+    --text-sm:calc(13px * var(--font-scale-u) * var(--font-scale-mq));
+    --text-base:calc(14px * var(--font-scale-u) * var(--font-scale-mq));
+    --text-md:calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--neutral-fg);
+    font:var(--text-base)/1.6 var(--font-sans);
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+  ::selection{background:var(--accent-ring)}
+  button{font-family:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:focus-visible,label:focus-within,a:focus-visible{
+    outline:none;box-shadow:inset 0 0 0 1px var(--accent-ring),0 0 0 3px var(--accent-ring)}
+  svg.ic{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+  /* ============ 顶栏 ============ */
+  .topbar{position:sticky;top:0;z-index:20;height:52px;display:flex;align-items:center;gap:16px;
+    padding:0 20px;background:var(--bg-stage);border-bottom:1px solid var(--border)}
+  .brand{display:flex;align-items:center;gap:9px}
+  .brand-badge{width:26px;height:26px;border-radius:var(--radius);background:var(--surface-2);
+    border:1px solid var(--border-strong);display:grid;place-items:center;color:var(--accent)}
+  .brand-name{font-weight:600;font-size:var(--text-base);letter-spacing:.01em}
+  .brand-tag{font:500 10px/1 var(--font-mono);color:var(--neutral-dim);
+    border:1px solid var(--border);padding:3px 7px;border-radius:var(--radius-sm);letter-spacing:.06em}
+  .scen-tabs{display:flex;gap:4px;margin-left:auto;background:var(--bg-input);
+    border:1px solid var(--border);border-radius:var(--radius);padding:3px}
+  .scen-tab{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:5px 12px;
+    border-radius:var(--radius-sm);transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+  .scen-tab .t1{font-size:var(--text-sm);font-weight:550;line-height:1.2}
+  .scen-tab .t2{font:400 10px/1.2 var(--font-mono);color:var(--neutral-dim)}
+  .scen-tab:hover{background:var(--surface-hover)}
+  .scen-tab.active{background:var(--accent);color:var(--accent-fg)}
+  .scen-tab.active .t2{color:color-mix(in oklch,var(--accent-fg) 70%,transparent)}
+  .fault{display:flex;align-items:center;gap:8px;margin-left:8px;cursor:pointer;user-select:none}
+  .fault-txt{font-size:var(--text-xs);color:var(--neutral-mid);white-space:nowrap}
+  .sw{width:30px;height:17px;border-radius:9px;background:var(--surface-2);border:1px solid var(--border-strong);
+    position:relative;transition:background var(--dur-fast) var(--ease);flex:none}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;
+    background:var(--neutral-dim);transition:transform var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)}
+  input:checked+.sw{background:var(--danger-soft);border-color:var(--danger)}
+  input:checked+.sw::after{transform:translateX(13px);background:var(--danger)}
+
+  /* ============ 布局骨架 ============ */
+  .app{display:flex;align-items:flex-start}
+  .sidebar{width:296px;flex:none;position:sticky;top:52px;height:calc(100vh - 52px);
+    display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--bg)}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:22px 28px 40px}
+
+  /* ============ Sidebar：会话多选 ============ */
+  .sb-head{display:flex;align-items:baseline;gap:8px;padding:14px 16px 8px}
+  .sb-title{font:600 var(--text-2xs)/1 var(--font-mono);letter-spacing:.08em;
+    text-transform:uppercase;color:var(--neutral-dim);flex:1}
+  .sb-count{font:500 var(--text-2xs)/1 var(--font-mono);color:var(--accent)}
+  .sb-list{flex:1;overflow-y:auto;padding:2px 10px 12px}
+  .grp-head{display:flex;align-items:center;gap:6px;padding:10px 6px 4px;
+    font:500 10px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--neutral-faint)}
+  /* 树形血缘连线：竖线贯穿兄弟列，末枝截半 */
+  .tree,.tree ul{list-style:none}
+  .tree ul{padding-left:15px}
+  .tree li{position:relative;padding-left:13px}
+  .tree li::before{content:"";position:absolute;left:4px;top:-3px;width:1px;height:calc(100% - 8px);
+    background:var(--border-strong)}
+  .tree li::after{content:"";position:absolute;left:4px;top:24px;width:9px;height:1px;background:var(--border-strong)}
+  .tree li:last-child::before{height:27px}
+  .tree-root>li::before,.tree-root>li::after{display:none}
+  .si{display:flex;align-items:flex-start;gap:9px;padding:8px 9px;border-radius:var(--radius);
+    cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+  .si:hover{background:var(--surface-hover)}
+  .si.sel{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent-ring)}
+  .si.dimmed{opacity:.55}
+  .si.dimmed:hover{background:transparent;cursor:not-allowed}
+  /* 自定义 checkbox（保留原生 input 保键盘可达性） */
+  .cb{margin-top:3px;width:15px;height:15px;flex:none;position:relative;display:inline-block;cursor:pointer}
+  .cb input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .cb .box{position:absolute;inset:0;border-radius:4px;border:1px solid var(--border-strong);
+    background:var(--bg-input);display:grid;place-items:center;transition:all var(--dur-fast) var(--ease)}
+  .cb .box svg{width:9px;height:9px;stroke:var(--accent-fg);stroke-width:3;fill:none;
+    stroke-linecap:round;stroke-linejoin:round;opacity:0;transform:scale(.5);transition:all var(--dur-fast) var(--ease)}
+  .cb input:checked+.box{background:var(--accent);border-color:var(--accent)}
+  .cb input:checked+.box svg{opacity:1;transform:scale(1)}
+  .cb input:disabled+.box{border-style:dashed;opacity:.5;cursor:not-allowed}
+  .si-main{flex:1;min-width:0}
+  .si-top{display:flex;align-items:center;gap:6px}
+  .si-name{font-size:var(--text-sm);font-weight:550;line-height:1.35;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .pill{font:500 10px/1 var(--font-mono);color:var(--neutral-mid);background:var(--surface-2);
+    border:1px solid var(--hairline);padding:2px 6px;border-radius:var(--radius-sm);
+    white-space:nowrap;flex:none}
+  .pill.merge{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+  .pill.sub{color:var(--neutral-faint);background:transparent;border-style:dashed}
+  .si-meta{margin-top:2px;font:400 var(--text-2xs)/1.4 var(--font-mono);color:var(--neutral-dim)}
+  .sb-foot{padding:10px 16px;border-top:1px solid var(--hairline);
+    font:400 var(--text-2xs)/1.6 var(--font-mono);color:var(--neutral-dim)}
+  .sb-foot b{color:var(--neutral-mid);font-weight:500}
+
+  /* ============ 步骤指示器 ============ */
+  .steps{display:flex;align-items:center;gap:0;padding:2px 0 18px}
+  .stp{display:flex;align-items:center;gap:8px;color:var(--neutral-faint)}
+  .stp-dot{width:22px;height:22px;border-radius:50%;border:1px solid var(--border-strong);
+    display:grid;place-items:center;font:600 var(--text-2xs)/1 var(--font-mono);
+    background:var(--bg-input);transition:all var(--dur) var(--ease)}
+  .stp-lbl{font-size:var(--text-sm);font-weight:500}
+  .stp.on{color:var(--neutral-fg)}
+  .stp.on .stp-dot{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+  .stp.done{color:var(--neutral-mid);cursor:pointer}
+  .stp.done .stp-dot{border-color:var(--accent-ring);color:var(--accent)}
+  .stp.done:hover{color:var(--neutral-fg)}
+  .stp.locked{cursor:default}
+  .stp-line{width:34px;height:1px;background:var(--border-strong);margin:0 10px;flex:none}
+  .step-note{margin-left:auto;font:400 var(--text-2xs)/1 var(--font-mono);color:var(--neutral-faint)}
+
+  /* ============ 面板通用 ============ */
+  .panel{display:none;animation:fade-up var(--dur-slow) var(--ease)}
+  .panel.active{display:block}
+  @keyframes fade-up{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .sec-title{font-size:var(--text-md);font-weight:600;letter-spacing:.005em}
+  .sec-desc{margin-top:5px;font-size:var(--text-sm);color:var(--neutral-mid);max-width:72ch}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);
+    padding:16px 18px}
+  .actbar{display:flex;align-items:center;gap:10px;margin-top:20px;padding-top:16px;
+    border-top:1px solid var(--hairline)}
+  .btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 14px;
+    border-radius:var(--radius);font-size:var(--text-sm);font-weight:550;
+    transition:all var(--dur-fast) var(--ease)}
+  .btn.primary{background:var(--accent);color:var(--accent-fg)}
+  .btn.primary:hover{background:var(--accent-hover)}
+  .btn.primary:disabled{background:var(--surface-2);color:var(--neutral-faint);cursor:not-allowed}
+  .btn.ghost{border:1px solid var(--border-strong);color:var(--neutral-mid)}
+  .btn.ghost:hover{background:var(--surface-hover);color:var(--neutral-fg)}
+  .btn.danger{border:1px solid var(--danger);color:var(--danger)}
+  .btn.danger:hover{background:var(--danger-soft)}
+  .btn.sm{height:26px;padding:0 10px;font-size:var(--text-xs)}
+  .actbar .spacer{flex:1}
+
+  /* Step1 选择页 */
+  .sample-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .btn-sample{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
+    border-radius:var(--radius);border:1px dashed var(--border-strong);
+    font-size:var(--text-xs);color:var(--neutral-mid);
+    transition:all var(--dur-fast) var(--ease)}
+  .btn-sample:hover{border-color:var(--accent-ring);color:var(--neutral-fg);background:var(--accent-soft)}
+  .btn-sample.err1:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+  .btn-sample.err2:hover{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;min-height:26px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+    background:var(--accent-soft);color:var(--accent);font-size:var(--text-xs)}
+  .chip .x{display:grid;place-items:center;width:14px;height:14px;border-radius:50%;cursor:pointer}
+  .chip .x:hover{background:var(--accent-ring)}
+  .chip-empty{font-size:var(--text-xs);color:var(--neutral-faint);align-self:center}
+  .hint-box{margin-top:14px;display:flex;gap:9px;padding:11px 13px;border-radius:var(--radius);
+    background:var(--info-soft);font-size:var(--text-xs);color:var(--neutral-mid);line-height:1.65;max-width:80ch}
+  .hint-box .ic{margin-top:3px;color:var(--info)}
+
+  /* Step2 检测页 */
+  .lca-head{display:flex;align-items:flex-start;gap:11px}
+  .st-ic{width:30px;height:30px;border-radius:var(--radius);display:grid;place-items:center;flex:none}
+  .st-ic.ok{background:var(--success-soft);color:var(--success)}
+  .st-ic.bad{background:var(--danger-soft);color:var(--danger)}
+  .st-ic.warn2{background:var(--warn-soft);color:var(--warn)}
+  .lca-title{font-size:var(--text-md);font-weight:600;line-height:1.45}
+  .lca-sub{margin-top:3px;font-size:var(--text-sm);color:var(--neutral-mid)}
+  code.k{font:500 92%/1.4 var(--font-mono);color:var(--neutral-fg);background:var(--surface-2);
+    padding:2px 6px;border-radius:4px;border:1px solid var(--hairline)}
+  .tbl-wrap{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden}
+  table.tbl{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+  .tbl th{text-align:left;font:500 var(--text-2xs)/1 var(--font-mono);letter-spacing:.07em;
+    text-transform:uppercase;color:var(--neutral-dim);padding:9px 14px;background:var(--surface);
+    border-bottom:1px solid var(--border)}
+  .tbl td{padding:10px 14px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+  .tbl tr:last-child td{border-bottom:0}
+  .tbl tr:hover td{background:color-mix(in oklch,var(--surface-hover) 40%,transparent)}
+  .seg-dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;vertical-align:baseline}
+  .mono{font-family:var(--font-mono);font-size:.92em}
+  .cov{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .cov .mini{font:500 10px/1 var(--font-mono);padding:2px 6px;border-radius:var(--radius-sm)}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+    font:500 var(--text-2xs)/1.6 var(--font-mono)}
+  .badge.cache{background:var(--success-soft);color:var(--success)}
+  .badge.fresh{background:var(--accent-soft);color:var(--accent)}
+  .badge.run{background:var(--info-soft);color:var(--info)}
+  .badge.err{background:var(--danger-soft);color:var(--danger)}
+  .badge.queued{background:var(--surface-2);color:var(--neutral-dim)}
+
+  /* 树图 + 图例 */
+  .treewrap{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-card);
+    background:var(--bg-card);padding:14px 16px 10px;overflow-x:auto}
+  .tw-cap{font:500 var(--text-2xs)/1 var(--font-mono);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--neutral-dim);margin-bottom:6px}
+  #treesvg{display:block;width:100%;height:auto}
+  #treesvg .segrect{cursor:pointer;transition:opacity var(--dur-fast) var(--ease)}
+  #treesvg .segrect:hover{opacity:.82}
+  .legend{display:flex;flex-wrap:wrap;gap:7px 16px;margin-top:12px;padding:2px}
+  .lg-item{display:inline-flex;align-items:center;gap:7px;font-size:var(--text-xs);color:var(--neutral-mid)}
+  .lg-sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .lg-line{width:16px;height:2px;border-radius:1px;flex:none}
+
+  /* 失败卡 */
+  .err-card{border-color:color-mix(in oklch,var(--danger) 30%,transparent)}
+  .recover{margin-top:12px;padding:11px 13px;border-radius:var(--radius);background:var(--surface);
+    border:1px solid var(--hairline)}
+  .recover-t{font:500 var(--text-2xs)/1 var(--font-mono);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--neutral-dim);margin-bottom:6px}
+  .recover-li{display:flex;gap:8px;font-size:var(--text-sm);color:var(--neutral-mid);padding:2px 0}
+  .recover-li .ic{margin-top:3px;color:var(--neutral-ico)}
+  .recover-li b{color:var(--neutral-fg);font-weight:550}
+
+  /* Step3 进度页 */
+  .prog-list{display:flex;flex-direction:column;gap:9px;margin-top:16px}
+  .pr-row{display:grid;grid-template-columns:minmax(210px,300px) 1fr auto;gap:14px;align-items:center;
+    padding:11px 14px;border:1px solid var(--border);border-radius:var(--radius-card);
+    background:var(--bg-card);transition:border-color var(--dur) var(--ease)}
+  .pr-row.running{border-color:var(--accent-ring)}
+  .pr-row.done{border-color:transparent}
+  .pr-row.failed{border-color:var(--danger)}
+  .pr-id{min-width:0}
+  .pr-name{font-size:var(--text-sm);font-weight:550;display:flex;align-items:center;gap:8px}
+  .pr-range{font:400 var(--text-2xs)/1.5 var(--font-mono);color:var(--neutral-dim)}
+  .bar{height:6px;border-radius:3px;background:var(--bg-input);overflow:hidden;
+    border:1px solid var(--hairline)}
+  .bar-fill{height:100%;width:0%;border-radius:3px;background:var(--accent);
+    transition:width linear}
+  .bar-fill.cached{background:var(--success)}
+  .bar-fill.errf{background:var(--danger)}
+  .pr-st{min-width:96px;text-align:right}
+  .pct{font:500 var(--text-2xs)/1 var(--font-mono);color:var(--neutral-dim);display:block;margin-top:5px}
+  .retry-inline{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:9px 11px;
+    border-radius:var(--radius);background:var(--danger-soft)}
+  .retry-msg{font-size:var(--text-xs);color:var(--danger);flex:1}
+  .prog-note{margin-top:14px;font-size:var(--text-xs);color:var(--neutral-dim);
+    display:flex;align-items:center;gap:7px}
+
+  /* Step4 结果页 */
+  .prod-strip{display:flex;align-items:center;gap:12px;padding:13px 16px;border-radius:var(--radius-card);
+    border:1px solid var(--accent-ring);background:linear-gradient(0deg,var(--accent-soft),var(--accent-soft)),var(--bg-card)}
+  .prod-ic{width:34px;height:34px;border-radius:var(--radius);background:var(--accent);
+    color:var(--accent-fg);display:grid;place-items:center;flex:none}
+  .prod-name{font-size:var(--text-md);font-weight:600}
+  .prod-meta{margin-top:2px;font:400 var(--text-xs)/1.5 var(--font-mono);color:var(--neutral-mid)}
+  .pv-frame{margin-top:18px;border:1px solid var(--border);border-radius:var(--radius-lg);
+    overflow:hidden;background:var(--bg)}
+  .pv-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--surface);
+    border-bottom:1px solid var(--border);font:500 var(--text-2xs)/1 var(--font-mono);
+    letter-spacing:.07em;text-transform:uppercase;color:var(--neutral-dim)}
+  .pv-body{padding:18px 20px 8px;display:flex;flex-direction:column;gap:14px;max-width:860px}
+  /* branch_summary 系统消息卡 */
+  .msg-sys{border:1px solid var(--border-strong);border-radius:var(--radius-card);
+    background:var(--bg-card);overflow:hidden}
+  .sys-head{display:flex;align-items:center;gap:9px;padding:10px 15px;background:var(--surface);
+    border-bottom:1px solid var(--hairline)}
+  .sys-ic{color:var(--accent)}
+  .sys-title{font-size:var(--text-sm);font-weight:600}
+  .sys-meta{margin-left:auto;font:400 var(--text-2xs)/1 var(--font-mono);color:var(--neutral-dim)}
+  .sys-body{padding:14px 16px;font-size:var(--text-sm);line-height:1.75;color:var(--neutral-fg)}
+  .sys-body h5{font-size:var(--text-2xs);font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--neutral-dim);margin:12px 0 5px}
+  .sys-body h5:first-child{margin-top:0}
+  .sys-body ul{padding-left:2px;list-style:none}
+  .sys-body li{position:relative;padding-left:15px;margin:3px 0;color:var(--neutral-mid)}
+  .sys-body li::before{content:"";position:absolute;left:2px;top:.72em;width:5px;height:5px;
+    border-radius:1.5px;background:var(--neutral-faint)}
+  .sys-body li b{color:var(--neutral-fg);font-weight:550}
+  .src-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:var(--text-xs)}
+  .src-tbl th{text-align:left;font:500 10px/1 var(--font-mono);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--neutral-dim);padding:6px 9px;border-bottom:1px solid var(--border)}
+  .src-tbl td{padding:7px 9px;border-bottom:1px solid var(--hairline);color:var(--neutral-mid)}
+  .src-jump{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:var(--radius-sm);
+    border:1px solid var(--border-strong);font-size:var(--text-2xs);color:var(--neutral-mid);
+    transition:all var(--dur-fast) var(--ease)}
+  .src-jump:hover{color:var(--accent);border-color:var(--accent-ring);background:var(--accent-soft)}
+  .composer{display:flex;align-items:center;gap:9px;background:var(--bg-input);
+    border:1px solid var(--border);border-radius:var(--radius-lg);padding:9px 12px;color:var(--neutral-faint)}
+  .composer .ph{flex:1;font-size:var(--text-sm)}
+  .composer .send{width:30px;height:30px;border-radius:var(--radius);background:var(--surface-2);
+    display:grid;place-items:center;color:var(--neutral-faint)}
+
+  /* marker 折叠面板 */
+  .collapse{margin-top:18px;border:1px solid var(--border);border-radius:var(--radius-card);
+    background:var(--bg-card);overflow:hidden}
+  .cl-head{width:100%;display:flex;align-items:center;gap:9px;padding:12px 15px;text-align:left;
+    transition:background var(--dur-fast) var(--ease)}
+  .cl-head:hover{background:var(--surface)}
+  .cl-chev{transition:transform var(--dur) var(--ease);color:var(--neutral-dim)}
+  .collapse.open .cl-chev{transform:rotate(90deg)}
+  .cl-title{font-size:var(--text-sm);font-weight:550}
+  .cl-sub{font:400 var(--text-2xs)/1 var(--font-mono);color:var(--neutral-dim);margin-left:auto}
+  pre.code{display:none;padding:4px 16px 15px;overflow-x:auto;
+    font:400 var(--text-xs)/1.7 var(--font-mono);color:var(--neutral-mid)}
+  .collapse.open pre.code{display:block}
+  .tok-k{color:var(--neutral-dim)} .tok-s{color:var(--info)}
+  .tok-n{color:var(--warn)} .tok-b{color:var(--reasoning)} .tok-p{color:var(--neutral-faint)}
+  .copy-btn{margin-left:10px;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
+    border-radius:var(--radius-sm);border:1px solid var(--border-strong);
+    font:500 var(--text-2xs)/1 var(--font-mono);color:var(--neutral-mid);
+    transition:all var(--dur-fast) var(--ease)}
+  .copy-btn:hover{color:var(--neutral-fg);background:var(--surface-hover)}
+
+  /* Drawer 源段预览 */
+  .overlay{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.42);opacity:0;
+    pointer-events:none;transition:opacity var(--dur) var(--ease)}
+  .overlay.show{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;bottom:0;z-index:1000;width:392px;max-width:92vw;
+    background:var(--surface);border-left:1px solid var(--border-strong);box-shadow:var(--shadow-2);
+    transform:translateX(102%);transition:transform var(--dur-slow) var(--ease);
+    display:flex;flex-direction:column}
+  .drawer.show{transform:none}
+  .dw-head{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .dw-title{font-size:var(--text-sm);font-weight:600;flex:1;min-width:0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .dw-close{width:26px;height:26px;border-radius:var(--radius-sm);display:grid;place-items:center;
+    color:var(--neutral-ico);transition:all var(--dur-fast) var(--ease)}
+  .dw-close:hover{background:var(--surface-hover);color:var(--neutral-ico-hover)}
+  .dw-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  .dw-foot{padding:11px 16px;border-top:1px solid var(--hairline);font-size:var(--text-2xs);
+    color:var(--neutral-dim);line-height:1.6}
+  .bubble-u{align-self:flex-end;max-width:86%;background:var(--surface-hover);
+    border:1px solid var(--hairline);border-radius:var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+    padding:9px 12px;font-size:var(--text-sm);line-height:1.6}
+  .bubble-a{align-self:flex-start;max-width:92%;background:var(--bg-card);border:1px solid var(--hairline);
+    border-radius:var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
+    padding:9px 12px;font-size:var(--text-sm);line-height:1.6;color:var(--neutral-mid)}
+  .who{font:500 10px/1 var(--font-mono);letter-spacing:.07em;text-transform:uppercase;
+    color:var(--neutral-faint);margin-bottom:5px}
+  .entry-no{float:right;font:400 10px/1 var(--font-mono);color:var(--neutral-faint);margin-left:8px}
+
+  /* Toast */
+  .toasts{position:fixed;right:18px;bottom:18px;z-index:1200;display:flex;flex-direction:column;
+    gap:8px;pointer-events:none}
+  .toast{pointer-events:auto;display:flex;align-items:center;gap:9px;min-width:240px;max-width:380px;
+    padding:10px 13px;border-radius:var(--radius);background:var(--bg-elevated);
+    border:1px solid var(--border-strong);box-shadow:var(--shadow-2);font-size:var(--text-xs);
+    animation:t-in var(--dur-slow) var(--ease)}
+  .toast.out{opacity:0;transform:translateY(6px);transition:all var(--dur) var(--ease)}
+  .toast .ic{flex:none}
+  .toast.ok .ic{color:var(--success)} .toast.err .ic{color:var(--danger)} .toast.info .ic{color:var(--info)}
+  @keyframes t-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  /* tooltip（树图 hover） */
+  #tip{position:fixed;z-index:1100;pointer-events:none;opacity:0;transition:opacity var(--dur-fast) var(--ease);
+    max-width:280px;background:var(--bg-elevated);border:1px solid var(--border-strong);
+    box-shadow:var(--shadow-2);border-radius:var(--radius);padding:8px 11px;font-size:var(--text-2xs);
+    line-height:1.6;color:var(--neutral-mid)}
+  #tip.show{opacity:1}
+  #tip .tt-t{font-weight:600;color:var(--neutral-fg);margin-bottom:2px}
+
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:var(--surface-2);border-radius:5px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-badge" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg></span>
+    <span class="brand-name">Session Merge 交互原型</span>
+    <span class="brand-tag">graph conversation · P1</span>
+  </div>
+  <nav class="scen-tabs" id="scenTabs" aria-label="场景切换">
+    <button class="scen-tab" data-scen="case2"><span class="t1">三分支嵌套 merge</span><span class="t2">Case 2 · A→B→{C,D}，A→E</span></button>
+    <button class="scen-tab" data-scen="case3"><span class="t1">二次 merge 缓存复用</span><span class="t2">Case 3 · F 从 D@35 fork 后 merge(F,C)</span></button>
+  </nav>
+  <label class="fault" title="开启后，首次执行到「新摘要」段时会模拟一次 LLM 超时（对应错误规格 E5），可体验「重试该段」恢复路径">
+    <input type="checkbox" id="faultSwitch" checked hidden><span class="sw"></span>
+    <span class="fault-txt">注入 LLM 超时故障</span>
+  </label>
+</header>
+
+<div class="app">
+  <!-- ======== 左侧：会话多选（fork 血缘树） ======== -->
+  <aside class="sidebar">
+    <div class="sb-head"><span class="sb-title">会话家族</span><span class="sb-count" id="selCount">已选 0</span></div>
+    <div class="sb-list" id="sessionList"><!-- JS 渲染 --></div>
+    <div class="sb-foot" id="sidebarFoot"></div>
+  </aside>
+
+  <!-- ======== 主区：四步向导 ======== -->
+  <main class="main">
+    <nav class="steps" id="stepsNav" aria-label="向导步骤"></nav>
+
+    <!-- Step 1 · 选择 -->
+    <section class="panel" id="panel-1">
+      <h2 class="sec-title">选择要合并的会话</h2>
+      <p class="sec-desc">在左侧勾选 2~N 个同族会话。merge 输入粒度为 (会话, 叶条目)，原型默认取各会话最新叶子；
+        subagent/workflow 会话不参与合并。检测、分段与缓存命中均按设计文档 §3.5 Case 表的算法行为模拟。</p>
+      <div class="sample-row" role="group" aria-label="快捷样例">
+        <button class="btn-sample" data-sample="ok2">
+          <svg class="ic" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+          样例：三分支嵌套（Case 2 正常路径）
+        </button>
+        <button class="btn-sample err1" data-sample="e1">
+          <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l14.14 14.14"/></svg>
+          失败样例：混入无关会话（E1 无公共祖先）
+        </button>
+        <button class="btn-sample err2" data-sample="e2">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M15 10l5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg>
+          失败样例：祖先-后代退化（E2 fast-forward）
+        </button>
+        <button class="btn-sample" data-sample="clear">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          清空选择
+        </button>
+      </div>
+      <div class="hint-box">
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>勾选变化会使后续步骤的检测结果失效并回到本步。失败样例按钮会自动注入对应勾选并直接运行检测。</span>
+      </div>
+      <div class="chips" id="selChips" aria-live="polite"></div>
+      <div class="actbar">
+        <span class="spacer"></span>
+        <button class="btn primary" id="btnDetect">
+          <svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          合并会话
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 2 · 检测 -->
+    <section class="panel" id="panel-2"><!-- JS 渲染 --></section>
+
+    <!-- Step 3 · 摘要进度 -->
+    <section class="panel" id="panel-3"><!-- JS 渲染 --></section>
+
+    <!-- Step 4 · 结果 -->
+    <section class="panel" id="panel-4"><!-- JS 渲染 --></section>
+  </main>
+</div>
+
+<!-- 源段预览抽屉 -->
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="来源段预览">
+  <div class="dw-head">
+    <svg class="ic sys-ic" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+    <span class="dw-title" id="dwTitle">来源段预览</span>
+    <button class="dw-close" id="dwClose" aria-label="关闭"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="dw-body" id="dwBody"></div>
+  <div class="dw-foot">原型示意：实际实现中此处将跳转到源会话视图并定位至该段起始条目（trace 反向跳转复用 useTraceJump 通路）。</div>
+</aside>
+
+<div id="tip" role="tooltip"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const IC = {
+  check:'<svg class="ic" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>',
+  x:'<svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+  ok:'<svg class="ic" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>',
+  warn:'<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  err:'<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+  info:'<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  merge:'<svg class="ic" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>',
+  search:'<svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>',
+  chev:'<svg class="ic cl-chev" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>',
+  ext:'<svg class="ic" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>',
+  send:'<svg class="ic" viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
+};
+
+function toast(type, msg){
+  const box = document.createElement('div');
+  box.className = 'toast ' + type;
+  box.innerHTML = IC[type === 'ok' ? 'ok' : type === 'err' ? 'err' : 'info'] + '<span>' + msg + '</span>';
+  $('#toasts').appendChild(box);
+  setTimeout(() => { box.classList.add('out'); setTimeout(() => box.remove(), 300); }, 3400);
+}
+
+/* ================= 场景数据（对齐设计文档 §3.5 Case 表） ================= */
+const SCEN = {
+  case2: {
+    vbW: 440,
+    sessions: [
+      { id:'A', name:'主会话 · 排查合并可行性', parent:null, forkAt:null, n:10 },
+      { id:'B', name:'方案一 · 运行时编排', parent:'A', forkAt:10, n:10 },
+      { id:'C', name:'方案一细化 · 分段缓存', parent:'B', forkAt:20, n:10 },
+      { id:'D', name:'方案一细化 · 原子落盘', parent:'B', forkAt:20, n:15 },
+      { id:'E', name:'方案二 · composer 现场聚合', parent:'A', forkAt:10, n:5 },
+      { id:'X', name:'无关任务 · 修 CI 超时', orphan:true, n:12 },
+      { id:'SA', name:'code-review 子代理', subagent:true },
+    ],
+    lca: { host:'A', entry:10, time:'2026-08-20 14:32' },
+    pool: [
+      { key:'trunkBD', name:'B 主干（共享上下文）', range:'11b – 20b', n:10, cov:['C','D'], cache:'fresh', color:'shared', edge:'AB',
+        bullet:'两条细化分支共同继承了方案一的完整推导：以 runtime 编排承载 merge，pi 格式零改动。',
+        turns:[['u','把方案一的推理过程完整走一遍，我要在此基础上分别细化'],['a','好的。方案一的核心结论有三点：① fork 复制保留 entry id，全家族是一棵全局 entry 树；② merge 由 runtime 编排，pi 无感知；③ 产物挂在 LCA 下。下面逐条展开依据……']] },
+      { key:'incC', name:'C 增量 · 分段缓存', range:'21c – 30c', n:10, cov:['C'], cache:'fresh', color:'c1', edge:'BC',
+        bullet:'确定了双层缓存模型：原子段为缓存单元，键含 contentHash 与 prompt 版本；劈开降级为参考摘要。',
+        turns:[['u','缓存键如果直接用 merge 段边界会有什么问题？'],['a','会被「从任意消息 fork」系统性击穿：F 从 D@28 fork 后，新段边界 (21d,28d) 与旧缓存 (21d,35d) 不等，全量 miss。所以要下沉到结构锚点的原子段粒度，并增加参考摘要降级层。']] },
+      { key:'incD', name:'D 增量 · 原子落盘与互斥', range:'21d – 35d', n:15, cov:['D'], cache:'fresh', color:'c2', edge:'BD',
+        bullet:'产物走 tmp 组装 + rename 原子到位；同族 merge 按 familyRoot 串行排队；崩溃不留幽灵会话。',
+        turns:[['u','并发两个 merge 会怎样？'],['a','三个后果：sidecar 读改写竞态丢更新、重叠段双倍 LLM 成本、ephemeral 进程翻倍触发限流。所以按 familyRoot 维度串行化，产物一律 tmp+rename。']] },
+      { key:'incE', name:'E 增量 · composer 方案的取舍', range:'11e – 15e', n:5, cov:['E'], cache:'fresh', color:'c3', edge:'AE',
+        bullet:'composer 现场聚合无法支撑离线批量收敛（N>2 不成立），但其预览编辑交互被吸收进向导确认步骤。',
+        turns:[['u','v3 的 fast-merge 为什么不行？'],['a','它绑定单个活跃会话现场操作，摘要结果是一次性文本、无结构留存。批量收敛和画布拓扑都拿不到数据。不过它的“摘要进 composer 让用户改”姿势值得保留。']] },
+    ],
+  },
+  case3: {
+    vbW: 590,
+    sessions: [
+      { id:'A', name:'主会话 · 排查合并可行性', parent:null, forkAt:null, n:10 },
+      { id:'B', name:'方案一 · 运行时编排', parent:'A', forkAt:10, n:10 },
+      { id:'C', name:'方案一细化 · 分段缓存', parent:'B', forkAt:20, n:10 },
+      { id:'D', name:'方案一细化 · 原子落盘', parent:'B', forkAt:20, n:15 },
+      { id:'F', name:'并发专项压测', parent:'D', forkAt:35, n:10 },
+      { id:'E', name:'方案二 · composer 现场聚合', parent:'A', forkAt:10, n:5 },
+      { id:'X', name:'无关任务 · 修 CI 超时', orphan:true, n:12 },
+      { id:'SA', name:'code-review 子代理', subagent:true },
+    ],
+    lca: { host:'B', entry:20, time:'2026-08-25 09:12' },
+    pool: [
+      { key:'ftrunk', name:'F 路径 · D 主干部分', range:'21d – 35d', n:15, cov:['F'], cache:'hit', color:'c2', edge:'BD',
+        bullet:'（Case 2 已摘要）原子落盘与同族串行结论原样复用，本次零 LLM 调用。',
+        turns:[['u','并发两个 merge 会怎样？'],['a','三个后果：sidecar 读改写竞态丢更新、重叠段双倍 LLM 成本、ephemeral 进程翻倍触发限流。所以按 familyRoot 维度串行化，产物一律 tmp+rename。']] },
+      { key:'fnew', name:'F 新增 · 压测结论', range:'36f – 45f', n:10, cov:['F'], cache:'fresh', color:'c4', edge:'DF',
+        bullet:'50 文件家族建树耗时 38ms，现算可行；暂不需要 scanner 常驻索引（待验证检查点 4 可关闭）。',
+        turns:[['u','压测结果如何？'],['a','大家族建树 O(条目数) 实测线性：50 文件 38ms、200 文件 161ms。merge 时现算完全可行，常驻索引推迟到画布二期再评估。']] },
+      { key:'incC', name:'C 增量 · 分段缓存', range:'21c – 30c', n:10, cov:['C'], cache:'hit', color:'c1', edge:'BC',
+        bullet:'（Case 2 已摘要）双层缓存模型结论原样复用。',
+        turns:[['u','缓存键如果直接用 merge 段边界会有什么问题？'],['a','会被「从任意消息 fork」系统性击穿。要下沉到结构锚点的原子段粒度，并增加参考摘要降级层。']] },
+    ],
+  },
+};
+
+const COLOR = {
+  shared:'var(--accent)', c1:'var(--info)', c2:'var(--reasoning)',
+  c3:'var(--success)', c4:'var(--warn)',
+};
+const CACHE_BADGE = {
+  hit:'<span class="badge cache">已复用缓存</span>',
+  fresh:'<span class="badge fresh">新摘要</span>',
+  ref:'<span class="badge queued">基于旧边界</span>',
+  run:'<span class="badge run">摘要中…</span>',
+  err:'<span class="badge err">LLM 超时</span>',
+  done_hit:'<span class="badge cache">已复用缓存</span>',
+  done_fresh:'<span class="badge fresh">已完成</span>',
+};
+
+/* ================= 状态 ================= */
+const state = { scen:'case2', sel:new Set(), step:1, det:null, job:null, fault:true };
+const S = () => SCEN[state.scen];
+const sess = id => S().sessions.find(s => s.id === id);
+
+/* ================= Sidebar 会话树 ================= */
+function treeHTML(){
+  const byParent = {};
+  S().sessions.forEach(s => { const p = s.orphan ? '@orphan' : (s.parent || '@root'); (byParent[p] ||= []).push(s); });
+  const item = s => {
+    const dis = !!s.subagent;
+    return '<li><div class="si' + (dis ? ' dimmed' : '') + '" data-id="' + s.id + '">' +
+      '<label class="cb"><input type="checkbox" data-id="' + s.id + '"' + (dis ? ' disabled' : '') + (state.sel.has(s.id) ? ' checked' : '') + '><span class="box">' + IC.check + '</span></label>' +
+      '<div class="si-main"><div class="si-top"><span class="si-name">' + esc(s.name) + '</span>' +
+      (s.subagent ? '<span class="pill sub">subagent</span>' : '') +
+      (!s.subagent && !s.orphan && s.parent ? '<span class="pill">+' + s.n + '</span>' : '') +
+      (!s.subagent && !s.orphan && !s.parent ? '<span class="pill">根 · ' + s.n + ' 条</span>' : '') +
+      (s.orphan ? '<span class="pill">独立 · ' + s.n + ' 条</span>' : '') +
+      '</div><div class="si-meta">' +
+      (s.subagent ? '执行嵌套会话 · 不参与 merge（D8）' :
+       s.orphan ? '无 fork 血缘 · 用于演示 E1 失败路径' :
+       s.parent ? 'fork 自 ' + sess(s.parent).id + ' @' + s.forkAt + ' · ' + s.n + ' 条新增' :
+       'familyRoot · ' + s.n + ' 条') +
+      '</div></div></div></li>';
+  };
+  let html = '';
+  (byParent['@root'] || []).forEach(r => {
+    html += '<ul class="tree tree-root">' + item(r);
+    const kids = byParent[r.id] || [];
+    if (kids.length) html += '<ul>' + kids.map(k => item(k) + ((byParent[k.id]||[]).length ? '<ul>' + byParent[k.id].map(item).join('') + '</ul>' : '')).join('') + '</ul>';
+    html += '</ul>';
+  });
+  (byParent['@orphan'] || []).forEach(o => { html += '<ul class="tree tree-root">' + item(o) + '</ul>'; });
+  return html;
+}
+
+function renderSidebar(){
+  $('#sessionList').innerHTML = treeHTML();
+  $$('#sessionList input[type=checkbox]:not([disabled])').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.checked ? state.sel.add(cb.dataset.id) : state.sel.delete(cb.dataset.id);
+      onSelectionChange();
+    });
+  });
+  $$('#sessionList .si').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('label') || row.classList.contains('dimmed')) return;
+      const cb = row.querySelector('input');
+      if (cb.disabled) return;
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event('change'));
+    });
+  });
+}
+
+function onSelectionChange(){
+  if (state.step > 1){ state.step = 1; state.det = null; state.job = null; }
+  renderSidebar(); renderChips(); renderSteps(); showPanel(1);
+}
+
+function renderChips(){
+  const ids = [...state.sel];
+  $('#selCount').textContent = '已选 ' + ids.length;
+  $('#selChips').innerHTML = ids.length
+    ? ids.map(id => '<span class="chip">' + esc(sess(id).name) + '<span class="x" data-id="' + id + '">' + IC.x + '</span></span>').join('')
+    : '<span class="chip-empty">尚未选择会话 —— 或使用上方快捷样例</span>';
+  $$('#selChips .x').forEach(x => x.addEventListener('click', () => { state.sel.delete(x.dataset.id); onSelectionChange(); }));
+  $('#btnDetect').disabled = ids.length < 2;
+  $('#sidebarFoot').innerHTML = '输入粒度 (会话, 叶) · subagent 不参与合并<br>当前剧本缓存源：<b>' +
+    (state.scen === 'case3' ? 'Case 2 合并产物' : '（首次合并，缓存为空）') + '</b>';
+}
+
+/* ================= 步骤导航 ================= */
+const STEP_NAMES = ['选择会话', '血缘检测', '分段摘要', '合并结果'];
+function renderSteps(){
+  $('#stepsNav').innerHTML = STEP_NAMES.map((n, i) => {
+    const num = i + 1;
+    const cls = num === state.step ? 'on' : num < state.step ? 'done' : 'locked';
+    return (i ? '<span class="stp-line"></span>' : '') +
+      '<button class="stp ' + cls + '" data-step="' + num + '"><span class="stp-dot">' + (num < state.step ? '&#10003;' : num) + '</span><span class="stp-lbl">' + n + '</span></button>';
+  }).join('') + '<span class="step-note" id="stepNote"></span>';
+  $$('#stepsNav .stp.done').forEach(b => b.addEventListener('click', () => {
+    state.step = +b.dataset.step;
+    if (state.step === 1){ state.det = null; state.job = null; }
+    if (state.step === 2){ state.job = null; }
+    showPanel(state.step); renderSteps();
+  }));
+}
+function showPanel(n){
+  $$('.panel').forEach(p => p.classList.remove('active'));
+  $('#panel-' + n).classList.add('active');
+}
+
+/* ================= Step 2 · 检测 ================= */
+function detect(){
+  const sel = [...state.sel];
+  if (sel.includes('X')){
+    const other = sel.find(i => i !== 'X');
+    return { ok:false, code:'E1', x:'X', other,
+      msg:'「' + esc(sess('X').name) + '」与「' + esc(sess(other).name) + '」没有共同的 fork 来源，无法合并' };
+  }
+  if (sel.includes('A') && (sel.includes('B') || sel.includes('E'))){
+    return { ok:false, code:'E2',
+      msg:'A 是所选会话的祖先且自身无独有增量（停在 fork 点 @10），直接继续后代会话即可，无需合并' };
+  }
+  const fam = sel.filter(i => !sess(i).orphan && !sess(i).subagent);
+  const segs = S().pool
+    .filter(p => p.cov.some(c => fam.includes(c)))
+    .map(p => ({ ...p, covShow: p.cov.filter(c => fam.includes(c)) }));
+  return { ok:true, segs,
+    total: segs.reduce((a, s) => a + s.n, 0),
+    hits: segs.filter(s => s.cache === 'hit').length };
+}
+
+function runDetect(){
+  state.det = detect();
+  renderPanel2();
+  state.step = 2; renderSteps(); showPanel(2);
+}
+
+function renderPanel2(){
+  const d = state.det, box = $('#panel-2');
+  if (!d.ok){
+    box.innerHTML = '<div class="card err-card"><div class="lca-head"><span class="st-ic bad">' + IC.err + '</span>' +
+      '<div><div class="lca-title">' + (d.code === 'E1' ? '检测失败 · 无公共祖先（E1）' : '无需合并 · 祖先-后代退化（E2）') + '</div>' +
+      '<div class="lca-sub">' + d.msg + '</div></div></div>' +
+      '<div class="recover"><div class="recover-t">恢复指引</div>' +
+      (d.code === 'E1'
+        ? '<div class="recover-li">' + IC.info + '<span>取消选择 <b>' + esc(sess(d.x).name) + '</b>，仅保留同族会话后重新检测</span></div>' +
+          '<div class="recover-li">' + IC.info + '<span>或单独对「' + esc(sess(d.other).name) + '」所在家族重新发起合并</span></div>'
+        : '<div class="recover-li">' + IC.info + '<span>直接继续使用后代会话 <b>' + esc((sess('B')||{}).name || '') + '</b>；如需其结论的摘要版本挂回祖先，属于 cherry-pick 能力（二期）</span></div>') +
+      '</div><div class="actbar"><button class="btn ghost" id="back1">' + IC.x + '返回调整选择</button></div></div>';
+    $('#back1').addEventListener('click', () => { state.step = 1; showPanel(1); renderSteps(); });
+    return;
+  }
+  const rows = d.segs.map(s =>
+    '<tr><td><span class="seg-dot" style="background:' + COLOR[s.color] + '"></span>' + esc(s.name) + '</td>' +
+    '<td class="mono">' + s.range + '</td><td class="mono">' + s.n + '</td>' +
+    '<td><span class="cov">' + s.covShow.map(c => '<span class="mini pill">' + c + '</span>').join(' ') +
+    (s.covShow.length > 1 ? ' <span style="font-size:10px;color:var(--neutral-dim)">共享</span>' : '') + '</span></td>' +
+    '<td>' + CACHE_BADGE[s.cache] + '</td></tr>').join('');
+  box.innerHTML =
+    '<div class="card"><div class="lca-head"><span class="st-ic ok">' + IC.ok + '</span><div>' +
+    '<div class="lca-title">检测到共同起点：<code class="k">' + S().lca.host + ' @entry ' + S().lca.entry + '</code>（' + S().lca.time + '）</div>' +
+    '<div class="lca-sub">将分段汇总 ' + d.segs.length + ' 个段、共 ' + d.total + ' 条消息。LCA 本身归入共同前缀拷贝区，不参与摘要。</div>' +
+    '</div></div>' +
+    '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>段</th><th>条目范围</th><th>条数</th><th>覆盖会话</th><th>缓存判定</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="treewrap"><div class="tw-cap">全局 entry 树 · 分段着色（hover 查看详情）</div><svg id="treesvg"></svg>' +
+    '<div class="legend" id="legend"></div></div>' +
+    '<div class="actbar"><button class="btn ghost" id="back1b">' + IC.x + '返回调整选择</button><span class="spacer"></span>' +
+    '<button class="btn primary" id="btnGo">开始合并 · ' + (d.total - d.segs.filter(s=>s.cache==='hit').reduce((a,s)=>a+s.n,0)) + ' 条待摘要</button></div></div>';
+  $('#back1b').addEventListener('click', () => { state.step = 1; showPanel(1); renderSteps(); });
+  $('#btnGo').addEventListener('click', startMerge);
+  drawTree(d.segs); drawLegend(d.segs);
+}
+
+/* ---- SVG 树图 ---- */
+const POS = { A:[64,142], B:[218,78], C:[372,42], D:[372,136], F:[520,136], E:[218,212] };
+const EDGES = [ ['A','B'], ['B','C'], ['B','D'], ['D','F'], ['A','E'] ];
+// 树边 → 段 key 的映射随剧本不同：Case 3 中 BD 边属于 ftrunk 段（21d–35d 缓存命中），AB/AE 已属 LCA 前缀拷贝区不着色
+const EDGE_MAP = {
+  case2: { AB:'trunkBD', BC:'incC', BD:'incD', AE:'incE' },
+  case3: { BC:'incC', BD:'ftrunk', DF:'fnew' },
+};
+function activeColor(segs, key){
+  const s = segs.find(x => x.key === key);
+  return s ? COLOR[s.color] : null;
+}
+function drawTree(segs){
+  const svg = $('#treesvg');
+  const hasF = !!POS.F && S().sessions.some(s => s.id === 'F');
+  const edgeMap = EDGE_MAP[state.scen];
+  svg.setAttribute('viewBox', '0 0 ' + S().vbW + ' 258');
+  let out = '';
+  EDGES.forEach(([a, b]) => {
+    if (b === 'F' && !hasF) return;
+    const segKey = edgeMap[a + b];
+    const [x1,y1] = POS[a], [x2,y2] = POS[b];
+    out += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="rgba(255,255,255,.10)" stroke-width="1.5"/>';
+    const col = activeColor(segs, segKey);
+    if (col){
+      const t = 0.16;
+      const px = x1+(x2-x1)*t, py = y1+(y2-y1)*t;
+      out += '<line class="segrect" data-edge="'+segKey+'" x1="'+px+'" y1="'+py+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-width="5" stroke-linecap="round" opacity=".92"/><line x1="'+x1+'" y1="'+y1+'" x2="'+px+'" y2="'+py+'" stroke="'+col+'" stroke-width="5" stroke-linecap="round" opacity=".38"/>';
+    }
+  });
+  Object.keys(POS).forEach(id => {
+    if (id === 'F' && !hasF) return;
+    const [x, y] = POS[id];
+    out += '<g class="segrect" data-node="'+id+'"><rect x="'+(x-19)+'" y="'+(y-13)+'" width="38" height="26" rx="7" fill="var(--surface-2)" stroke="rgba(255,255,255,.16)"/><text x="'+x+'" y="'+(y+4)+'" text-anchor="middle" font-size="12" font-family="var(--font-mono)" fill="var(--neutral-fg)">'+id+'</text></g>';
+  });
+  const [lx, ly] = POS[S().lca.host];
+  out += '<circle cx="'+lx+'" cy="'+ly+'" r="27" fill="none" stroke="var(--success)" stroke-width="1.5" stroke-dasharray="4 3" opacity=".9"/>' +
+    '<text x="'+lx+'" y="'+(ly+42)+'" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--success)">LCA · '+S().lca.host+'@'+S().lca.entry+'</text>';
+  svg.innerHTML = out;
+  svg.querySelectorAll('[data-edge]').forEach(el => el.addEventListener('mousemove', e => {
+    const s = segs.find(x => x.key === el.dataset.edge); if (s) showTip(e, '<div class="tt-t">' + esc(s.name) + '</div>条目 ' + s.range + ' · ' + s.n + ' 条<br>覆盖：' + s.covShow.join(', ') + ' · ' + (s.cache==='hit'?'缓存命中':'需新摘要'));
+  }));
+  svg.querySelectorAll('[data-node]').forEach(el => el.addEventListener('mousemove', e => {
+    const s = sess(el.dataset.node); if (s) showTip(e, '<div class="tt-t">' + esc(s.name) + '</div>' + (s.parent ? 'fork 自 '+s.parent+' @'+s.forkAt+' · '+s.n+' 条新增' : (s.orphan?'独立会话':(s.subagent?'subagent':'根会话 · '+s.n+' 条'))));
+  }));
+  svg.addEventListener('mouseleave', hideTip);
+}
+function drawLegend(segs){
+  const seen = new Map();
+  segs.forEach(s => seen.set(s.color, s.covShow.length > 1 ? '共享主干（coverage ≥ 2）' : sess(s.covShow[0]).name + ' 增量'));
+  $('#legend').innerHTML =
+    [...seen.entries()].map(([c, label]) => '<span class="lg-item"><span class="lg-sw" style="background:'+COLOR[c]+'"></span>'+esc(label)+'</span>').join('') +
+    '<span class="lg-item"><span class="lg-sw" style="border:1.5px dashed var(--success);background:none"></span>LCA 锚点（拷贝区，不摘要）</span>' +
+    '<span class="lg-item"><span class="lg-line" style="background:var(--success)"></span>缓存命中段</span>' +
+    '<span class="lg-item"><span class="lg-line" style="background:var(--accent)"></span>新摘要段</span>';
+}
+
+/* ================= Step 3 · 进度 ================= */
+function startMerge(){
+  const segs = state.det.segs.map(s => ({ ...s, status:s.cache === 'hit' ? 'hit-wait' : 'wait', pct:0 }));
+  state.job = { segs, combine:{ status:'wait', pct:0 }, faultUsed:false, startedAt:Date.now() };
+  renderPanel3(); state.step = 3; renderSteps(); showPanel(3);
+  runJob();
+}
+function renderPanel3(){
+  const j = state.job;
+  const freshN = j.segs.filter(s => s.cache !== 'hit').length;
+  $('#stepNote') && ($('#stepNote').textContent = 'job ' + jobId());
+  $('#panel-3').innerHTML = '<div class="card"><div class="sec-title">分段摘要进行中</div>' +
+    '<p class="sec-desc">共 ' + j.segs.length + ' 个段：' + (j.segs.length - freshN) + ' 段复用缓存、' + freshN + ' 段生成新摘要（withEphemeralPi 短命进程并行模拟）。' +
+    '完成后执行一次 combine 综合（意图相关取舍只在这一步发生）。</p>' +
+    '<div class="prog-list">' + j.segs.map((s, i) => progRow(s, i)).join('') + progRow(j.combine, -1, '汇总综合摘要（combine · fresh）', '全家族') + '</div>' +
+    '<div class="prog-note">' + IC.info + '<span>进度经 mergeJob 广播 + getMergeJobs 主动拉取（D10）；此处模拟其渲染层。</span></div></div>';
+  bindRetry();
+}
+function progRow(s, i, nameOverride, rangeOverride){
+  const isCombine = i === -1;
+  const badge = s.status === 'run' ? CACHE_BADGE.run : s.status === 'err' ? CACHE_BADGE.err :
+    s.status === 'hit-done' ? CACHE_BADGE.done_hit : s.status === 'fresh-done' ? CACHE_BADGE.done_fresh :
+    s.cache === 'hit' ? CACHE_BADGE.hit : CACHE_BADGE.fresh;
+  const cls = s.status === 'run' ? 'running' : s.status === 'err' ? 'failed' : (s.status.includes('done') ? 'done' : '');
+  return '<div class="pr-row ' + cls + '" data-i="' + i + '"><div class="pr-id"><div class="pr-name">' +
+    (isCombine ? '' : '<span class="seg-dot" style="background:'+COLOR[s.color]+'"></span>') +
+    esc(nameOverride || s.name) + '</div><div class="pr-range">' + (rangeOverride || s.range) + ' · ' + (isCombine ? '' : s.n + ' 条 · ') + 'coverage: ' + (isCombine ? 'all' : s.covShow.join(',')) + '</div></div>' +
+    '<div class="bar"><div class="bar-fill' + (s.cache === 'hit' ? ' cached' : '') + (s.status === 'err' ? ' errf' : '') + '" style="width:' + s.pct + '%"></div></div>' +
+    '<div class="pr-st">' + badge + '<span class="pct">' + Math.round(s.pct) + '%</span></div>' +
+    (s.status === 'err' ? '<div class="retry-inline"><button class="btn danger sm retry-btn" data-i="' + i + '">重试该段</button><span class="retry-msg">仅重跑失败段；已完成原子段走缓存，重试零重复（E5）。</span></div>' : '') +
+    '</div>';
+}
+let jobIdCounter = 41;
+const jobId = () => 'mj-' + (jobIdCounter++) + '-7f3a';
+
+function bindRetry(){
+  $$('#panel-3 .retry-btn').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i; state.job.faultUsed = true;
+    const seg = state.job.segs[i];
+    seg.status = 'run'; seg.pct = 0; renderPanel3();
+    animateSeg(seg, i, false);
+  }));
+}
+function animateSeg(seg, i){
+  return new Promise(resolve => {
+    seg.status = 'run'; updateRowState(i);
+    const total = 1600 + Math.random()*1400;
+    const canFail = state.fault && !state.job.faultUsed;
+    const failAt = canFail ? 45 + Math.random()*25 : Infinity;
+    const iv = setInterval(() => {
+      seg.pct += 100/total*40;
+      if (seg.pct >= failAt){
+        clearInterval(iv); seg.pct = failAt; seg.status = 'err'; state.job.faultUsed = true;
+        updateRowState(i); toast('err', '第 ' + (i+1) + ' 段摘要失败：LLM 超时（E5 已注入）');
+        resolve('failed'); return;
+      }
+      if (seg.pct >= 100){ clearInterval(iv); seg.pct = 100; seg.status = 'fresh-done'; updateRowState(i); resolve('done'); return; }
+      updateRowState(i);
+    }, 40);
+  });
+}
+function waitSegDone(i){
+  return new Promise(res => {
+    const check = setInterval(() => {
+      const st = state.job.segs[i].status;
+      if (st === 'fresh-done' || st === 'hit-done'){ clearInterval(check); res(); }
+    }, 120);
+  });
+}
+function updateRowState(i){
+  const j = state.job; const d = j.segs[i];
+  const row = $$('#panel-3 .pr-row')[i]; if (!row) return;
+  const wrap = document.createElement('div'); wrap.innerHTML = progRow(d, i);
+  row.replaceWith(wrap.firstElementChild); bindRetry();
+}
+async function runJob(){
+  const j = state.job;
+  for (let i = 0; i < j.segs.length; i++){
+    const seg = j.segs[i];
+    if (seg.cache === 'hit'){
+      seg.status = 'run'; updateRowState(i);
+      await new Promise(r => setTimeout(r, 480));
+      seg.pct = 100; seg.status = 'hit-done'; updateRowState(i);
+    } else {
+      const r = await animateSeg(seg, i);
+      if (r === 'failed') await waitSegDone(i);
+    }
+  }
+  const c = j.combine;
+  c.status = 'run';
+  const crow = $$('#panel-3 .pr-row')[j.segs.length];
+  await new Promise(r => setTimeout(r, 300));
+  await tickCombine(c, 1500);
+  c.status = 'fresh-done';
+  renderFinalCombineRow();
+  await new Promise(r => setTimeout(r, 500));
+  buildResult();
+  state.step = 4; renderSteps(); showPanel(4);
+  toast('ok', '合并完成：产物会话已创建（leaf = branch_summary）');
+}
+function tickCombine(c, ms){
+  const row = $$('#panel-3 .pr-row')[state.job.segs.length];
+  return new Promise(res => {
+    const iv = setInterval(() => {
+      c.pct += 100/(ms/40);
+      if (c.pct >= 100){ c.pct = 100; clearInterval(iv); res(); }
+      if (row){ row.querySelector('.bar-fill').style.width = c.pct + '%'; row.querySelector('.pct').textContent = Math.round(c.pct) + '%'; }
+    }, 40);
+  });
+}
+function renderFinalCombineRow(){
+  const row = $$('#panel-3 .pr-row')[state.job.segs.length]; if (!row) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = progRow({ ...state.job.combine, cache:'fresh', covShow:['all'], range:'全家族', n:'' }, -1, '汇总综合摘要（combine · fresh）', '全家族').replace('data-i="-1"','data-i="'+state.job.segs.length+'"');
+  row.replaceWith(wrap.firstElementChild);
+}
+
+/* ================= Step 4 · 结果 ================= */
+let RESULT = null;
+function buildResult(){
+  const j = state.job;
+  RESULT = {
+    id:'M-' + state.scen.toUpperCase(), name: state.scen === 'case2' ? 'C+D+E 合并' : 'F+C 合并',
+    forkFrom: S().lca.host + ' @entry ' + S().lca.entry,
+    segs: j.segs, intent:'',
+  };
+  const bullets = j.segs.map(s => '<li><b>' + esc(s.covShow.map(c => sess(c).name).join('、')) + '：</b>' + s.bullet + '</li>').join('');
+  const openItems = '<li>超长段的 map-reduce 子块键规格待实施期定稿（E3）</li><li>KV cache 观测口尚未实现，S5 为软观测项</li>';
+  const srcRows = j.segs.map((s, idx) =>
+    '<tr><td class="mono">' + esc(sess(s.covShow[0]).name) + '</td><td class="mono">' + s.range + '</td><td class="mono">' + s.n + '</td>' +
+    '<td>' + (s.cache === 'hit' ? '缓存复用' : '新摘要') + '</td>' +
+    '<td><button class="src-jump" data-seg="' + idx + '">' + IC.ext + '查看原文</button></td></tr>').join('');
+  const prodName = RESULT.name;
+  $('#panel-4').innerHTML =
+    '<div class="prod-strip"><span class="prod-ic">' + IC.merge + '</span><div><div class="prod-name">' + esc(prodName) + '</div>' +
+    '<div class="prod-meta">fork 自 ' + RESULT.forkFrom + ' · leaf = branch_summary · familyRoot = A（根 sessionId）</div></div></div>' +
+    '<div class="pv-frame"><div class="pv-bar">产物会话首屏预览</div><div class="pv-body">' +
+    '<div class="msg-sys"><div class="sys-head"><span class="sys-ic">' + IC.merge + '</span><span class="sys-title">分支合并摘要</span>' +
+    '<span class="sys-meta">branch_summary · fromId=' + S().lca.host + '@' + S().lca.entry + '</span></div>' +
+    '<div class="sys-body"><h5>共享与各分支结论</h5><ul>' + bullets + '</ul>' +
+    '<h5>未决问题</h5><ul>' + openItems + '</ul>' +
+    '<h5>来源清单（可溯源）</h5><table class="src-tbl"><thead><tr><th>来源会话</th><th>条目范围</th><th>条数</th><th>摘要来源</th><th></th></tr></thead><tbody>' + srcRows + '</tbody></table>' +
+    '</div></div>' +
+    '<div class="composer"><span class="ph">继续追问，例如：「目前哪些事还没做完？」</span><span class="send">' + IC.send + '</span></div>' +
+    '</div></div>' +
+    '<div class="collapse" id="mkCollapse"><button class="cl-head" id="mkHead">' + IC.chev + '<span class="cl-title">custom entry · taiji.branch-merge（merge 拓扑唯一真相源）</span>' +
+    '<span class="cl-sub">D4 结构</span><span class="copy-btn" id="mkCopy">复制 JSON</span></button><pre class="code" id="mkCode"></pre></div>' +
+    '<div class="actbar"><button class="btn ghost" id="againBtn">重新体验本剧本</button></div>';
+  $('#mkCode').innerHTML = hljson(markerJson());
+  $('#mkHead').addEventListener('click', e => {
+    if (e.target.closest('#mkCopy')) return;
+    $('#mkCollapse').classList.toggle('open');
+  });
+  $('#mkCopy').addEventListener('click', e => {
+    e.stopPropagation(); navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(markerJson(), null, 2));
+    toast('ok', 'marker JSON 已复制');
+  });
+  $$('#panel-4 .src-jump').forEach(b => b.addEventListener('click', () => openDrawer(+b.dataset.seg)));
+  $('#againBtn').addEventListener('click', () => { state.step = 1; state.det = null; state.job = null; onSelectionChange(); });
+}
+function markerJson(){
+  const j = state.job;
+  return {
+    schemaVersion: 1,
+    customType: 'taiji.branch-merge',
+    familyRoot: 'A（根 sessionId）',
+    lcaEntryId: S().lca.host.toLowerCase() + '-' + String(S().lca.entry).padStart(2,'0') + 'a7',
+    parents: j.segs.flatMap(s => s.covShow.map(c => ({ session:c, tipEntryId: s.range.split('–')[1].trim() })) )
+      .filter((v, i, arr) => arr.findIndex(x => x.session === v.session) === i),
+    segments: j.segs.map(s => ({ from:s.range.split('–')[0].trim(), to:s.range.split('–')[1].trim(), coverage:s.covShow, cache:s.cache === 'hit' ? 'reused' : 'fresh', n:s.n })),
+    intent: null,
+    createdAt: new Date().toISOString().slice(0, 19) + 'Z',
+    usage: { segmentCalls: j.segs.filter(s => s.cache !== 'hit').length + 1, cachedSegments: j.segs.filter(s => s.cache === 'hit').length, approxTokens: j.segs.reduce((a, s) => a + s.n * 137, 412) },
+  };
+}
+function hljson(obj){
+  const raw = esc(JSON.stringify(obj, null, 2));
+  return raw.replace(/(&quot;[^&]*?&quot;)(\s*:)?/g, (m, s, c) =>
+    c ? '<span class="tok-k">' + s + '</span><span class="tok-p">' + c + '</span>' : '<span class="tok-s">' + s + '</span>')
+    .replace(/:\s(&quot;.*?&quot;)/g, ': <span class="tok-s">$1</span>')
+    .replace(/\b(true|false|null)\b/g, '<span class="tok-b">$1</span>');
+}
+
+/* ================= 抽屉 ================= */
+function openDrawer(idx){
+  const s = state.job.segs[idx];
+  $('#dwTitle').textContent = sess(s.covShow[0]).name + ' · ' + s.range;
+  $('#dwBody').innerHTML = s.turns.map(t =>
+    t[0] === 'u' ? '<div class="bubble-u"><div class="who">user · entry</div>' + esc(t[1]) + '</div>'
+                 : '<div class="bubble-a"><div class="who">assistant</div>' + esc(t[1]) + '</div>').join('') +
+    '<div class="bubble-a" style="opacity:.65"><div class="who">assistant · 工具调用（折叠）</div>' + esc('bash ▸ ls packages/runtime/src/services/session … 3 次工具调用按 callId 配对折叠') + '</div>';
+  $('#overlay').classList.add('show'); $('#drawer').classList.add('show');
+}
+function closeDrawer(){ $('#overlay').classList.remove('show'); $('#drawer').classList.remove('show'); }
+$('#dwClose').addEventListener('click', closeDrawer);
+$('#overlay').addEventListener('click', closeDrawer);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+/* ================= Tooltip ================= */
+let tipEl = $('#tip');
+function showTip(e, html){
+  tipEl.innerHTML = html; tipEl.classList.add('show');
+  const pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  const r = tipEl.getBoundingClientRect();
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+}
+function hideTip(){ tipEl.classList.remove('show'); }
+
+/* ================= 顶栏接线 ================= */
+$$('#scenTabs .scen-tab').forEach(t => t.addEventListener('click', () => {
+  if (t.dataset.scen === state.scen) return;
+  state.scen = t.dataset.scen; state.sel.clear(); state.det = null; state.job = null; state.step = 1;
+  $$('#scenTabs .scen-tab').forEach(x => x.classList.toggle('active', x.dataset.scen === state.scen));
+  const okBtn = $('.btn-sample[data-sample=ok2]');
+  okBtn.innerHTML = IC.merge + (state.scen === 'case2' ? '样例：三分支嵌套（Case 2 正常路径）' : '样例：二次合并（Case 3 · 选 F+C 看缓存复用）');
+  renderSidebar(); renderChips(); renderSteps(); showPanel(1);
+  toast('info', state.scen === 'case2' ? 'Case 2 剧本：首次合并，缓存为空，全部新摘要' : 'Case 3 剧本：沿用 Case 2 产物缓存，观察「已复用缓存」标记');
+}));
+$('#faultSwitch').addEventListener('change', e => {
+  state.fault = e.target.checked;
+  toast('info', state.fault ? '已注入故障：下一个新摘要段将模拟 LLM 超时（E5）' : '故障注入已关闭');
+});
+$$('.btn-sample').forEach(b => b.addEventListener('click', () => {
+  const k = b.dataset.sample;
+  if (k === 'clear'){ state.sel.clear(); onSelectionChange(); return; }
+  state.sel.clear();
+  if (k === 'ok2') (state.scen === 'case2' ? ['C','D','E'] : ['F','C']).forEach(i => state.sel.add(i));
+  if (k === 'e1'){ state.sel.add('X'); state.sel.add(state.scen === 'case2' ? 'C' : 'F'); }
+  if (k === 'e2'){ state.sel.add('A'); state.sel.add('B'); }
+  onSelectionChange();
+  if (k !== 'clear') runDetect();
+}));
+$('#btnDetect').addEventListener('click', runDetect);
+
+/* ================= init ================= */
+$('.scen-tab[data-scen=case2]').classList.add('active');
+renderSidebar(); renderChips(); renderSteps(); showPanel(1);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{"type": "session", "version": 3, "id": "s-full-kinds", "timestamp": "2026-09-01T10:00:00.000Z", "cwd": "/Users/dev/work/demo", "parentSession": "/Users/dev/work/demo/older-session.jsonl", "forkEntryId": "a-old"}
+{"type": "custom", "id": "sp1", "parentId": null, "timestamp": "2026-09-01T10:00:01.000Z", "customType": "taiji:system-prompt", "data": {"version": 2, "hash": "ab12cd34", "reason": "resume", "charCount": 12702}}
+{"type": "model_change", "id": "mc1", "parentId": "sp1", "timestamp": "2026-09-01T10:00:02.000Z", "provider": "p-a", "modelId": "m-a"}
+{"type": "thinking_level_change", "id": "t1", "parentId": "mc1", "timestamp": "2026-09-01T10:00:03.000Z", "thinkingLevel": "high"}
+{"type": "message", "id": "u1", "parentId": "t1", "timestamp": "2026-09-01T10:00:10.000Z", "message": {"role": "user", "content": "完整链路的问题", "timestamp": 0}}
+{"type": "message", "id": "a1", "parentId": "u1", "timestamp": "2026-09-01T10:00:20.000Z", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "…", "signature": "s"}, {"type": "toolCall", "id": "tc-read", "name": "read", "arguments": "{\"x\":1}"}, {"type": "text", "text": "带工具调用的回答"}], "provider": "demo-provider", "model": "demo-model", "usage": {"input": 100, "output": 50}, "stopReason": "stop"}}
+{"type": "message", "id": "tr1", "parentId": "a1", "timestamp": "2026-09-01T10:00:25.000Z", "message": {"role": "toolResult", "content": "file content here", "toolCallId": "tc-read", "toolName": "read", "isError": false, "timestamp": 0}}
+{"type": "message", "id": "b1", "parentId": "tr1", "timestamp": "2026-09-01T10:00:30.000Z", "message": {"role": "bashExecution", "command": "npm test", "output": "all passed", "exitCode": 0, "cancelled": false, "truncated": false, "timestamp": 0}}
+{"type": "custom_message", "id": "cm1", "parentId": "b1", "timestamp": "2026-09-01T10:00:35.000Z", "customType": "demo:notice", "content": "扩展注入的通知内容", "display": true}
+{"type": "message", "id": "mcx1", "parentId": "cm1", "timestamp": "2026-09-01T10:00:36.000Z", "message": {"role": "custom", "customType": "demo:msg-role", "content": "role=custom 的消息", "display": true, "timestamp": 0}}
+{"type": "message", "id": "u2", "parentId": "mcx1", "timestamp": "2026-09-01T10:00:40.000Z", "message": {"role": "user", "content": "压缩点之前的问题", "timestamp": 0}}
+{"type": "compaction", "id": "c1", "parentId": "u2", "timestamp": "2026-09-01T10:01:00.000Z", "summary": "压缩摘要正文。", "firstKeptEntryId": "u2", "tokensBefore": 99999}
+{"type": "branch_summary", "id": "bs1", "parentId": "c1", "timestamp": "2026-09-01T10:01:10.000Z", "fromId": "u1", "summary": "分支摘要正文。"}
+{"type": "message", "id": "u3", "parentId": "bs1", "timestamp": "2026-09-01T10:02:00.000Z", "message": {"role": "user", "content": "压缩后的问题", "timestamp": 0}}
+{"type": "session_info", "id": "si1", "parentId": "u3", "timestamp": "2026-09-01T10:02:05.000Z", "name": "demo-session"}
+{"type": "label", "id": "l1", "parentId": "si1", "timestamp": "2026-09-01T10:02:06.000Z", "targetId": "u3", "label": "检查点"}
+{"type": "custom", "id": "cd1", "parentId": "l1", "timestamp": "2026-09-01T10:02:07.000Z", "customType": "demo:data", "data": {"k": "v"}}
+{"type": "message", "id": "u4", "parentId": "cd1", "timestamp": "2026-09-01T10:02:10.000Z", "message": {"role": "user", "content": "leaf 之前的问题", "timestamp": 0}}
+{"type": "handoff_marker", "handedOffTo": "s-next-session", "timestamp": "2026-09-01T10:03:00.000Z"}

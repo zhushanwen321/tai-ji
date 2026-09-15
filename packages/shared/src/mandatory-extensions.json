@@ -1,0 +1,20 @@
+[
+  { "name": "@zhushanwen/pi-ask-user", "description": "Inline adaptive ask_user tool", "tier": "feature" },
+  { "name": "@zhushanwen/pi-goal", "description": "Codex-style /goal command, persistent goal-driven autonomous loop", "tier": "feature" },
+  { "name": "@zhushanwen/pi-todo", "description": "AI-driven todo list with session persistence and /todos", "tier": "feature" },
+  { "name": "@zhushanwen/pi-pending-notifications", "description": "Cross-extension async operation registration/query", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-subagent-workflow", "description": "Unified subagent execution and multi-agent workflow orchestration", "tier": "feature" },
+  { "name": "@zhushanwen/pi-session-reader", "description": "Read pi session JSONL for subagent/workflow discovery (session tree, family, execution tree)", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-structured-output", "description": "Structured output tool with JSON Schema / Ajv validation", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-permission", "description": "Permission tool for tool execution approval/denial", "tier": "feature" },
+  { "name": "@zhushanwen/pi-scheduler", "description": "Task scheduling and delayed execution", "tier": "feature" },
+  { "name": "@zhushanwen/pi-rename-session", "description": "Auto-generate session title after first successful round", "tier": "feature" },
+  { "name": "@zhushanwen/pi-agent-ext", "description": "Internal host commands for extension reload and system prompt fetch", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-system-prompt", "description": "System prompt injection extension", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-msg-id-mapper", "description": "Client UUID ↔ user entry ID mapping extension", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-system-prompt-trace", "description": "System prompt trace: append taiji:system-prompt entries when the effective system prompt is established or changes", "tier": "feature" },
+  { "name": "@zhushanwen/pi-smart-context", "description": "Agent-driven context compaction: compact_context tool, dual-mode summary takeover, tiered reminders", "tier": "feature" },
+  { "name": "@zhushanwen/pi-session-manager", "description": "Agent-managed sessions: create/send/history/status/list/abort child sessions via select+marker channel to runtime handler", "tier": "feature" },
+  { "name": "@zhushanwen/pi-base-tool-enhance", "description": "Bash tool override: foreground delegates to pi official factory, incremental background mode + tool error audit (migrated from unified-hooks)", "tier": "infrastructure" },
+  { "name": "@zhushanwen/pi-plugin-bridge", "description": "Plugin system bridge: register plugin tools into pi and relay events/intercepts via select marker channel", "tier": "infrastructure" }
+]

@@ -1,0 +1,145 @@
+!.env.example
+.DS_Store
+.env
+.env.*
+# .superpowers/ skill 临时产物（plan/brainstorm 等），全目录忽略。
+# 旧规则只匹配 2026-04-* 和 brainstorm/，漏 2026-06+（事故：2026-06-22-sidebar-polish/plan.md 漏网被 commit）。
+.superpowers/
+*.local
+*.log
+dist/
+node_modules
+sidecar/dist/
+sidecar/node_modules/
+src-tauri/binaries/
+src-tauri/gen/
+src-tauri/target/
+src/dist/
+src/node_modules/
+superpowers/20*/
+target/
+.claude/worktrees/
+
+# pi resources — pi binary downloaded by prepare-pi-resources.sh from badlogic/pi-mono
+# gh releases. Builtin extensions are staged esbuild bundles (prepare-builtin-extensions.sh,
+# under extensions/@zhushanwen/), skills are user/project-level — all build-generated,
+# none tracked here.
+apps/electron/resources/
+
+# built-in taiji plugins 编译产物（scripts/prepare-builtin-plugins.sh 构建期生成，
+# 源 index.ts 是 SSOT，产物与源同目录但不进 git）
+resources/plugins/*/index.js
+
+# .pi/ 目录：只跟踪源码（workflows），忽略运行时缓存/会话数据。
+# check_directory_rules.py 会强制只允许 .pi/workflows/ 进 git（见 PI_ALLOWED 检查）。
+# pi extension 相关内容（如 extension-dependencies.json）不在 .pi/ 下，是 npm 包。
+.pi/*
+!.pi/workflows/
+
+
+# Electron binary cache (immutable, shared across worktrees)
+.electron-dist/
+**/__pycache__/
+*.pyc
+
+# Playwright E2E artifacts + per-package Vitest junit timing reports (reports / cache)
+test-results/
+/playwright-report/
+
+# Vitest coverage report (S3-W1 coverage gate 产物，不进 git)
+coverage/
+/playwright/.cache/
+/blob-report/
+/playwright/.auth/
+
+# ZCode plan mode artifacts (session-local planning docs)
+.zcode/plans/
+
+# Legacy build dir from pre-monorepo layout (commit 0f6eed87 migrated src-electron/
+# to packages/* + apps/electron). Leftover build artifacts + node_modules linger in
+# some worktrees; ignore to prevent accidental staging.
+src-electron/
+
+# Ad-hoc screenshots (debugging artifacts, not source)
+screenshot.png
+
+# CW v1 subagent dispatch payloads (临时入参文件，派发完即废弃)
+.cw-rsu-*.json
+
+# impeccable skill 产生的 UI critique 报告（临时审查产物，非源码）。
+# AGENTS.md 规则 13 禁止 impeccable/ 目录进版本管理；历史遗留的 4 个已 git rm --cached 清理。
+# 子目录也要匹配（事故：packages/renderer/src/.impeccable/ 漏网被 commit），用 /**/.impeccable/ 兜底。
+.impeccable/
+/**/.impeccable/
+
+# .v3-audit/ 一次性 v3 重建审计档案（已清理，results/handoffs/verify 等过程产物，
+# 代码引用已改为指向 git 历史）。防止再次创建。
+.v3-audit/
+
+# === cw v1 工作流临时产物（根目录散落，应放 .taiji-harness/ 归档）===
+# .cw-*.json/.md 是 cw 跑完手动归档的中间产物，不是源码；.cw/（带斜杠）的 run-*.sh 是 tracked 测试脚本，不忽略。
+/.cw-*.json
+/.cw-*.md
+# .cw/<slug>/ 子目录是 cw v1 运行时中间产物（clarify/plan/design-review 等 input JSON），不是源码，忽略。
+# 只忽略子目录，保留 .cw/*.sh tracked 测试脚本（run-*.sh）。
+/.cw/*/
+# .cw/ 直下的 *-design.json 是 cw 当前版本（wave-plan 流程）的运行时设计产物，同样忽略；
+# 仍保留 .cw/*.sh tracked。
+/.cw/*.json
+# 根目录散落的截图调试脚本（browser-automation 临时产物）。
+/.shot-*.mjs
+# wave-* / clarify / plan / design-review 等是 cw 当前 wave 的运行时产物。
+/wave-*.json
+/wave-*.md
+/clarify.json
+/clarify-*.json
+/design-review.json
+/plan.json
+/plan.md
+/exec-review.json
+/retrospect.json
+/closeout.json
+/test.json
+# cw/agent 产生的根目录审查报告（review-*.md），应归档到 .taiji-harness/ 而非散落项目根。
+/review-*.md
+
+# pr-cr-fix skill 运行时产物（review 报告 .review/run-*/ + premerge-result marker）
+/.review/
+
+# 手动测试残留的假数据目录（测试代码用 tmpdir()，不读根目录 session-data/）
+/session-data/
+/packages/runtime/session-data/
+
+# renderer 构建产物（dist 原入口 + dist-new 共存接缝 spike 新壳产物）
+/apps/electron/renderer/dist/
+/apps/electron/renderer/dist-new/
+
+# === npm lock 文件（本项目用 pnpm，package-lock.json 是历史遗留/误生成产物）===
+# 详见 AGENTS.md「包管理器与 lock 文件纪律」。pnpm-lock.yaml 是唯一权威 lock。
+# 含 extensions/ 下迁移自旧 pi 扩展仓（已废弃）的历史 lock 垃圾。
+package-lock.json
+package-lock.json.*
+**/package-lock.json
+**/package-lock.json.*
+# 若未来某个子包独立用 npm，在子包自己的 .gitignore 里放开此规则。
+
+# === 备份/临时后缀兜底 ===
+*.bak
+*.tmp
+*.swp
+*.orig
+*~
+
+# === v6 Vue demo 工作区（从 docs/page-design/ 迁出）===
+/.tmp/
+.review-reports/
+
+# === dev 模式自制 Electron app bundle（dev-electron.mjs 生成，太极图标）===
+# dev 启动时按需重建，不进版本库
+/apps/electron/.dev-electron/
+
+# === 运行时数据目录误入 apps/electron（cwd 相对推导的 ConfigService 落盘，2026-05 误提交已清）===
+/apps/electron/.taiji/
+
+# === 本地决策/工作流档案（2026-09-13 裁决：不入库，靠 commit 与 docs 承载决策追溯）===
+/.taiji-harness/
