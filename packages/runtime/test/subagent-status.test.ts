@@ -18,7 +18,6 @@ describe('normalizeSubagentStatus（[U6] 两态直出 + legacy 展示位合成�
       expect(normalizeSubagentStatus(raw), raw).toEqual({
         status: 'idle',
         derivedStopReason: 'completed',
-        derivedChatMode: false,
       })
     }
   })
@@ -68,7 +67,6 @@ describe('normalizeSubagentStatus（[U6] 两态直出 + legacy 展示位合成�
       status: 'idle',
       derivedStopReason: 'completed',
       derivedClosedReason: 'parent-fork',
-      derivedChatMode: false,
     })
   })
 
