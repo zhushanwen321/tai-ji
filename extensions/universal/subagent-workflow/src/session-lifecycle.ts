@@ -300,7 +300,6 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
         process.env.PI_SUBAGENT_FORK_DEPTH !== undefined
           ? Number(process.env.PI_SUBAGENT_FORK_DEPTH)
           : undefined,
-      chatMode: process.env.PI_SUBAGENT_CHAT_MODE === "true",
       // [review round2] worktree 隔离标志（session-runner 注入）：跨重启重建路径据此
       // 拒绝续聊（handle 不可序列化，reattach 不可行）。
       worktree: process.env.PI_SUBAGENT_WORKTREE === "true",
