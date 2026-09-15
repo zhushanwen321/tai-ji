@@ -89,7 +89,6 @@ function viewOf(record: ExecutionRecord, overrides: Partial<SupervisorRecordView
     id: record.id,
     status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
     hasResult: record.result !== undefined,
-    chatMode: record.chatMode === true,
     rootSessionId: record.rootSessionId,
     agent: record.agent,
     slug: record.slug,
@@ -156,14 +155,17 @@ describe("[W6/D2 表 3 行 1] 引擎死亡 → failed 如实 + 监督器接管�
   });
 });
 
-describe("[W6/D2 裁决表 conversation 行] chat 域豁免", () => {
-  it("chatMode record 的死亡事件不入监督域（轮终 idle / settled-watchdog 管辖）", () => {
+describe("[W6/D2 裁决表 conversation 行 → modeless 波1 豁免消亡]", () => {
+  it("record 的死亡事件同入监督域（保守多管不漏——轮终 idle 有 result 的豁免归 hasResult 子句）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    supervisor.adoptOnProcessDeath(makeRecord({ chatMode: true }), SIGTERM_CRASH_MESSAGE);
-    expect(deps.notices).toHaveLength(0);
-    expect(deps.guidances).toHaveLength(0);
-    expect(supervisor.supervisedIds()).toEqual([]);
+    const record = makeRecord({ id: "bg-chat-death" });
+    deps.views.set("bg-chat-death", viewOf(record));
+    supervisor.adoptOnProcessDeath(record, SIGTERM_CRASH_MESSAGE);
+    expect(deps.notices).toHaveLength(1);
+    // 无在途记账 / 无活进程 → 该唤醒（送决策指引——替代对账候选缺省无命中）
+    expect(deps.guidances).toHaveLength(1);
+    expect(supervisor.supervisedIds()).toEqual(["bg-chat-death"]);
   });
 });
 

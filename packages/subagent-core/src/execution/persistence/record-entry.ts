@@ -93,14 +93,13 @@ export interface SubagentRecordEntryData {
   patchFile?: string;
   /** 创建时是否启用 worktree 隔离。 */
   worktree?: boolean;
-  /** 对话轮次计数（仅 chatMode 有意义；round+1 由轮终迁移写点携带）。 */
+  /** 对话轮次计数（每轮轮终迁移写点携带 +1；modeless 波1 起全 record 自增）。 */
   round?: number;
   /**
-   * 对话模式标志（residual-fixes）：chat 与否——GUI 侧 done/waiting 细分判据
-   * （one-shot 轮终 chatMode=false + result 有值 → 完成态）。register 起写入显式值
-   * （one-shot 为显式 false）；v1 前存量 entry 缺省，消费端按保守方向处理。
+   * [modeless 波1·已删除字段] 对话模式标志 chatMode 停写删除：万物可续后「模式」
+   * 不再是 record 状态。旧 entry 残留键读侧自然忽略（legacy 缺省归 chat 语义与
+   * modeless 天然一致，零迁移）。
    */
-  chatMode?: boolean;
   /**
    * 实际执行引擎 id（P4 路由留痕，D9①）。缺省（存量 entry）= pi 投影，消费方零迁移。
    */
@@ -172,7 +171,6 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     patchFile: record.patchFile,
     worktree: record.worktree,
     round: record.round,
-    chatMode: record.chatMode,
     engine: record.engine,
     engineFallback: record.engineFallback,
     engineHandle: record.engineHandle,

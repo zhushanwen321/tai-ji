@@ -168,9 +168,8 @@ export function createRecord(
     parentRecordId?: string;
     /** subagent 递归深度。顶层=0。 */
     depth?: number;
-    /** 对话模式标志（true = 可持续对话，轮次完成进 idle）。默认 undefined/false = 一次性。 */
-    chatMode?: boolean;
-    /** 空闲超时毫秒数（仅 chatMode 有意义）。覆盖默认 5min。 */
+    /** [modeless 波1] chatMode 停写删除——「模式」不再是 record 状态（万物可续）。
+     *  空闲超时毫秒数（idle GC 回收节奏，覆盖默认 5min）。 */
     idleTimeoutMs?: number;
     /** 实际执行引擎 id（P4 路由留痕，D9①）。缺省 = pi 投影（存量零迁移）。 */
     engine?: string;
@@ -197,7 +196,6 @@ export function createRecord(
     rootSessionId: identity.rootSessionId,
     parentRecordId: identity.parentRecordId,
     depth: identity.depth ?? 0,
-    chatMode: identity.chatMode,
     idleTimeoutMs: identity.idleTimeoutMs,
     engine: identity.engine,
     engineFallback: identity.engineFallback,
@@ -211,7 +209,8 @@ export function createRecord(
     turnCount: 0,
     totalTokens: 0,
     lastError: undefined,
-    // 对话轮次计数（首轮 = 0，每完成一轮 finalizeRoundToIdle +1）。非 chatMode 不自增。
+    // 对话轮次计数（首轮 = 0，每完成一轮 finalizeRoundToIdle +1）。modeless 波1 起
+    // 全 record 自增（万物可续）。
     round: 0,
 
     // 完成（completeRecord 唯一写点）
@@ -918,7 +917,6 @@ export function snapshot(record: ExecutionRecord): RecordSnapshot {
     task: record.task,
     slug: record.slug,
     status: record.status,
-    chatMode: record.chatMode,
     turns: record.turnCount,
     totalTokens: record.totalTokens,
     startedAt: record.startedAt,

@@ -89,7 +89,6 @@ function makeChatRecord(id: string, agentDir: string): ExecutionRecord {
     slug: "cont",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   record.status = "running";

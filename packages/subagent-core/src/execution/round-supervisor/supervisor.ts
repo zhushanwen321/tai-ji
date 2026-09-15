@@ -116,9 +116,8 @@ export function isSupervisorGiveUpDisabled(): boolean {
 export interface SupervisorRecordView {
   id: string;
   status: "running" | "closed";
-  /** 已有完成产出（record.result !== undefined）——SP-5 upgrade 等待态判据。 */
+  /** 已有完成产出（record.result !== undefined）——轮终 idle 挂账态判据。 */
   hasResult: boolean;
-  chatMode: boolean;
   /** [H2 W2] 来源身份（adopt 链豁免域判据——classifySupervisorDomain 消费）。 */
   origin?: "tool" | "workflow";
   rootSessionId: string | undefined;
@@ -214,9 +213,9 @@ export class RoundSupervisor {
 
   /**
    * boot 分区（裁决表行 2/3——initSession 扫描）：
-   *  - already-resumable-idle（非 conversation）→ 重认领接管（注册存续，process 档），
-   *    监督器三态继续；
-   *  - conversation 形态 → 现状（轮终 idle 机制管辖，不入监督域）。
+   *  - running 候选（防御性结构——现状恒不可达，见下）→ 重认领接管（注册存续，
+   *    process 档），监督器三态继续；[modeless 波1] conversation 豁免域随 chatMode
+   *    消亡删除（判据统一管全部 running record）。
    *
    *  [two-state-convergence U5/D4 MF-1] 重认领谓词（isBootReadoptable）已随死代码
    *  清理删除——该链现状恒不可达：①根进程路径，initSession 编排孤儿恢复
@@ -234,7 +233,7 @@ export class RoundSupervisor {
    *  record」差集补 appendEntry 权威落盘。
    *
    * 依赖时序：须在 store 孤儿恢复（recoverOrphanRecords）之后调用——孤儿恢复已把
-   * 「重启前在途」的非 chatMode record 落 idle（boot 直断的唯一实现锚点）。
+   * 「重启前在途」的 record 落 idle（boot 直断的唯一实现锚点）。
    */
   bootPartition(): { readopted: string[] } {
     const readopted: string[] = [];
@@ -315,13 +314,8 @@ export class RoundSupervisor {
       this.clearWatchdogTimer(entry);
       return;
     }
-    if (!isAwakeWarrantedShape(
-      { status: view.status, chatMode: view.chatMode },
-      view.hasResult,
-      hasInFlight,
-      hasLive,
-    )) {
-      // conversation 豁免（纳管入口已滤，防御性到达）——不唤醒。
+    if (!isAwakeWarrantedShape({ status: view.status }, view.hasResult, hasInFlight, hasLive)) {
+      // 形态不构成唤醒条件（终态 / 已有产出）——不唤醒。
       return;
     }
     // 该唤醒 → 通知对账（送指引前查替代）。
@@ -416,7 +410,6 @@ export class RoundSupervisor {
       // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
       status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
       hasResult: record.result !== undefined,
-      chatMode: record.chatMode === true,
       origin: record.origin,
       rootSessionId: record.rootSessionId,
       agent: record.agent,

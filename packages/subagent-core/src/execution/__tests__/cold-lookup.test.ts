@@ -142,9 +142,8 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(record.status).toBe("running");
     expect(record.closedReason).toBeUndefined();
     expect(record.endedAt).toBeUndefined();
-    // [v4 A-3 → H1 U6 / D4-D5] 水合保留持久化 chatMode：候选未持久化 chatMode
+    // [modeless 波1] chatMode 水合丢弃（旧持久化残留键不进内存 record）
     //（undefined）→ 重建 false（升级置位归 Continuation revive 格 + gate，不在重建层）
-    expect(record.chatMode).toBe(false);
     // 身份/续聊字段从磁盘候选回填
     expect(record.sessionFile).toBe(sessionFile);
     expect(record.round).toBe(2);
@@ -259,14 +258,13 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
   });
 
-  it("候选持久化 chatMode=true（chat 容器）→ 水合保留 true（续聊直接走，无需升级格）", () => {
+  it("候选持久化 chatMode=true（旧文件残留）→ [modeless 波1] 水合丢弃（message 资格只看引擎轴）", () => {
     const sessionFile = writeSessionFixture();
-    const deps = makeDeps({ disk: [makeFound({ sessionFile, status: "running", chatMode: true })] });
+    const deps = makeDeps({ disk: [makeFound({ sessionFile, status: "running" })] });
 
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
 
     expect(record.status).toBe("running");
-    expect(record.chatMode).toBe(true);
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 

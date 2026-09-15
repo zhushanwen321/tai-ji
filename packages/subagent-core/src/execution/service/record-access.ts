@@ -375,7 +375,8 @@ export class RecordAccess {
       rootSessionId: this.deps.getSessionRootId() ?? undefined,
       parentRecordId,
       depth,
-      chatMode: opts.conversation === true,
+      // [modeless 波1] conversation 参数 accepted-no-op：chatMode 不再落 record
+      //（「模式」不是 record 状态——万物可续）。idleTimeoutMs 对全 record 生效。
       idleTimeoutMs: opts.idleTimeoutMs,
       // P4 引擎留痕（D9①）：opts.engine/engineFallback 由引擎适配层写入（PiEngine.run
       // 从 RunContext 回填；缺省 = pi 投影，存量调用方零感知）

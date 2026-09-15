@@ -1,7 +1,11 @@
 // src/execution/__tests__/chat-rounds-stdout-wedge-self-heal.test.ts
 //
-// [stdout-wedge self-heal] onOneShotSettledWatchdogTimeout 自愈段单测（ChatRounds
-// 直构 + RemoteEngine/EngineClient 实例 + 方法级 spy 注入）。
+// [stdout-wedge self-heal] healEngineStdoutWedge 自愈段单测（ChatRounds 直构 +
+// RemoteEngine/EngineClient 实例 + 方法级 spy 注入）。[modeless 波1] 自愈段随
+// onOneShotSettledWatchdogTimeout 删除迁入 armRoundWatchdog 的 fire 处置
+//（Continuation onWatchdogFire 后追加调用）；收口路径（kill + 失败轮 settle）归
+// Continuation 统一流（conversation-continuation.test.ts 楔死轮用例覆盖），本文件
+// 只测自愈段判据面。
 //
 // 设计依据（2026-09-15 实证事故）：单一 TaiJi-as-node 引擎进程（stdio socketpair）
 // 前 3 个 run 的引擎→宿主事件通知全部静默丢失（宿主零 journal、run() 永不 resolve、
@@ -16,8 +20,7 @@
 //   - 零事件 + 多路由（activeRunCount=2）→ 只诊断不杀（并发 run 连坐防护）；
 //   - 有事件（eventsReceivedForRun>0）→ 自愈段零动作（正常超时类 fire 行为零变化）；
 //   - 非 cli 形态引擎（pi 未注册 stub 形态的 inproc port）→ 零动作零诊断。
-// 既有收口路径（killRecordChildWithEscalation / markRoundIdle / 失败通知）在自愈段
-// 加入后逐项断言不变。
+// 自愈段判据面（零事件 / 在册路由数 / cli 形态 / 解析失败）逐项断言。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -95,7 +98,7 @@ function makeRemotePiEngine(): RemoteEngine {
   });
 }
 
-/** one-shot（非 chatMode）running record。 */
+/** 楔死轮 running record。 */
 function makeOneShotRecord(id: string): ExecutionRecord {
   const record = createRecord(id, {
     agent: "general-purpose",
@@ -104,7 +107,6 @@ function makeOneShotRecord(id: string): ExecutionRecord {
     task: "wedged task",
     slug: "wedge",
     startedAt: 1000,
-    chatMode: false,
     controller: new AbortController(),
   });
   record.status = "running";
@@ -128,20 +130,16 @@ function spyOnClient(events: number, activeRuns: number): SpyBundle {
 
 function makeChatRounds(resolveChatEnginePort: () => unknown): {
   chatRounds: ChatRounds;
-  markRoundIdle: ReturnType<typeof vi.fn>;
-  notify: ReturnType<typeof vi.fn>;
 } {
-  const markRoundIdle = vi.fn();
-  const notify = vi.fn();
   // deps 只填 fire 回调触达面（getStore/getNotifyHost/resolveChatEnginePort），余项
   // fire 路径零触达——vi.fn() 占位（构造期零求值，不调用）。
   const deps = {
     assertReady: vi.fn(),
-    getStore: () => ({ markRoundIdle }),
+    getStore: vi.fn(),
     getModelService: vi.fn(),
     getCwd: vi.fn(),
     getWorktreeManager: vi.fn(),
-    getNotifyHost: () => ({ notify }),
+    getNotifyHost: vi.fn(),
     getPool: vi.fn(),
     getPi: vi.fn(),
     getSessionRootId: vi.fn(),
@@ -160,7 +158,7 @@ function makeChatRounds(resolveChatEnginePort: () => unknown): {
     effectiveMaxConcurrentFor: vi.fn(),
     resolveChatEnginePort,
   } as unknown as ChatRoundsDeps;
-  return { chatRounds: new ChatRounds(deps), markRoundIdle, notify };
+  return { chatRounds: new ChatRounds(deps) };
 }
 
 /** 自愈段点名诊断 warn 断言（任务规格文案：wedge suspected + relay log 证据源）。 */
@@ -173,13 +171,13 @@ function expectWedgeWarn(recordId: string): void {
   );
 }
 
-describe("[stdout-wedge self-heal] onOneShotSettledWatchdogTimeout 自愈段", () => {
-  it("零事件 + 单路由 → 点名诊断 + killEngineForStdoutWedge 被调（reason 含 runId）+ 既有收口不变", () => {
+describe("[stdout-wedge self-heal] healEngineStdoutWedge 自愈段（[modeless 波1] watchdog fire 处置接线）", () => {
+  it("零事件 + 单路由 → 点名诊断 + killEngineForStdoutWedge 被调（reason 含 runId）", () => {
     const record = makeOneShotRecord("sw-run-1");
     const spies = spyOnClient(0, 1);
-    const { chatRounds, markRoundIdle, notify } = makeChatRounds(() => makeRemotePiEngine());
+    const { chatRounds } = makeChatRounds(() => makeRemotePiEngine());
 
-    chatRounds.onOneShotSettledWatchdogTimeout(record, FIRE);
+    chatRounds.healEngineStdoutWedge(record);
 
     // 自愈段：诊断 + 杀引擎（fire-and-forget 已被调，reason 点名 runId）。
     expectWedgeWarn(record.id);
@@ -187,52 +185,31 @@ describe("[stdout-wedge self-heal] onOneShotSettledWatchdogTimeout 自愈段", (
     expect(spies.killSpy).toHaveBeenCalledWith(
       expect.stringContaining(record.id),
     );
-    // 既有收口路径零变化：kill + abort + [U5] 失败轮 settle + 失败通知单发。
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (one-shot)");
-    expect(record.controller?.signal.aborted).toBe(true);
-    expect(markRoundIdle).toHaveBeenCalledTimes(1);
-    expect(markRoundIdle.mock.calls[0]![0]).toBe(record.id);
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect((notify.mock.calls[0]![0] as { error?: string }).error).toContain(
-      "subagent did not reach agent_settled",
-    );
   });
 
   it("零事件 + 多路由（其他活跃 run 在册）→ 只诊断不杀（并发 run 连坐防护）", () => {
     const record = makeOneShotRecord("sw-run-2");
     const spies = spyOnClient(0, 2);
-    const { chatRounds, markRoundIdle } = makeChatRounds(() => makeRemotePiEngine());
+    const { chatRounds } = makeChatRounds(() => makeRemotePiEngine());
 
-    chatRounds.onOneShotSettledWatchdogTimeout(record, FIRE);
+    chatRounds.healEngineStdoutWedge(record);
 
     expectWedgeWarn(record.id); // 诊断仍发出（可诊断性）
     expect(spies.killSpy).not.toHaveBeenCalled(); // 不杀——组杀会连坐并发 run 的事件流
-    // 既有收口照常（record 正常失败收口，不因连坐防护跳过）。
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (one-shot)");
-    expect(markRoundIdle).toHaveBeenCalledWith(
-      record.id,
-      expect.objectContaining({ kind: "failed" }),
-    );
   });
 
   it("有事件（eventsReceivedForRun > 0）→ 自愈段零动作（正常超时类 fire 行为零变化）", () => {
     const record = makeOneShotRecord("sw-run-3");
     const spies = spyOnClient(5, 1);
-    const { chatRounds, markRoundIdle } = makeChatRounds(() => makeRemotePiEngine());
+    const { chatRounds } = makeChatRounds(() => makeRemotePiEngine());
 
-    chatRounds.onOneShotSettledWatchdogTimeout(record, FIRE);
+    chatRounds.healEngineStdoutWedge(record);
 
     // 零 wedge 诊断、零杀引擎——判据面只看事件计数，与在册路由数无关（顺序短路）。
     expect(loggerMock.warn).not.toHaveBeenCalledWith(
       expect.stringContaining("stdout leg wedge suspected"),
     );
     expect(spies.killSpy).not.toHaveBeenCalled();
-    // 既有收口零变化。
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (one-shot)");
-    expect(markRoundIdle).toHaveBeenCalledWith(
-      record.id,
-      expect.objectContaining({ kind: "failed" }),
-    );
   });
 
   it("非 cli 形态引擎（inproc 形态 port）→ 零动作零诊断（无协议客户端可判）", () => {
@@ -245,35 +222,24 @@ describe("[stdout-wedge self-heal] onOneShotSettledWatchdogTimeout 自愈段", (
       run: vi.fn(),
       read: vi.fn(),
     };
-    const { chatRounds, markRoundIdle } = makeChatRounds(() => inprocPort);
+    const { chatRounds } = makeChatRounds(() => inprocPort);
 
-    expect(() => chatRounds.onOneShotSettledWatchdogTimeout(record, FIRE)).not.toThrow();
+    expect(() => chatRounds.healEngineStdoutWedge(record)).not.toThrow();
 
     expect(loggerMock.warn).not.toHaveBeenCalledWith(
       expect.stringContaining("stdout leg wedge suspected"),
     );
-    // 既有收口零变化（stub 引擎不影响 record 收口）。
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (one-shot)");
-    expect(markRoundIdle).toHaveBeenCalledWith(
-      record.id,
-      expect.objectContaining({ kind: "failed" }),
-    );
   });
 
-  it("引擎解析抛错（未注册非 pi id）→ 自愈段静默跳过，既有收口不变（错误不逃出 fire 回调）", () => {
+  it("引擎解析抛错（未注册非 pi id）→ 自愈段静默跳过（错误不逃出 fire 回调）", () => {
     const record = makeOneShotRecord("sw-run-5");
     Object.assign(record, { engine: "zcode-unknown" }); // engine 只读——Object.assign 赋值（测试注入非 pi 未注册 id）
-    const { chatRounds, markRoundIdle } = makeChatRounds(() => makeRemotePiEngine());
+    const { chatRounds } = makeChatRounds(() => makeRemotePiEngine());
 
-    expect(() => chatRounds.onOneShotSettledWatchdogTimeout(record, FIRE)).not.toThrow();
+    expect(() => chatRounds.healEngineStdoutWedge(record)).not.toThrow();
 
     expect(loggerMock.debug).toHaveBeenCalledWith(
       expect.stringContaining("stdout-wedge self-heal skipped"),
-    );
-    expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (one-shot)");
-    expect(markRoundIdle).toHaveBeenCalledWith(
-      record.id,
-      expect.objectContaining({ kind: "failed" }),
     );
   });
 });

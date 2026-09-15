@@ -365,7 +365,7 @@ export class RecordStore {
   /**
    * W16 [D4]：类外状态写点上报（record-store 内的迁移点 register/archive 已内置）。
    *
-   * 供 service 层直接改 record.status 的恢复写点调用（chatMode 续轮 idle→running
+   * 供 service 层直接改 record.status 的恢复写点调用（续轮 idle→running
    * 冷路径 resumeRound；轮终收口已随 markRoundIdle 簿记⑨内置，不经本方法）——这些
    * 写点绕过 register/archive，若不显式上报，pi 文件缺失该次迁移、重建源滞后。
    * pi 未注入（session_start 前）时可选链静默降级，不阻断主流程。
@@ -1127,7 +1127,7 @@ export class RecordStore {
    * （orphanJudged 标记）已由调用方完成。
    *
    * 一律保留 idle（锚在，等 revive）：旧直断分支（SP-5 完成态 closed+gc / in-flight
-   * closed+gc+error / chatMode-resumable 分流 / 末行截断判读）随「不存在不可逆终态」
+   * closed+gc+error / resumable 分流 / 末行截断判读）随「不存在不可逆终态」
    * 整体删除——record 的 stopReason 已由重建单规则从 `.state` 或 interrupted-by-restart
    * 兜底给出，本方法不做任何终态判定（子文件末行内容不再参与，超长/截断行无感知）。
    *
@@ -1412,7 +1412,7 @@ export class RecordStore {
     // 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。undefined = 未命中
     // （落到下方探测），null = 负条目命中（零探测跳过）。
     // [UF-1] 绑定 sidecar 存在的文件跳过索引投影：SessionsIndexEntry 不含
-    // chatMode/round（身份域子集），索引命中会把绑定承载的对话形态域抹成 undefined。
+    // round（身份域子集），索引命中会把绑定承载的轮次域抹成 undefined。
     if (stamps.binding === null) {
       const fromIndex = this.buildEntryFromIndex(file, stamps);
       if (fromIndex !== undefined) return fromIndex;

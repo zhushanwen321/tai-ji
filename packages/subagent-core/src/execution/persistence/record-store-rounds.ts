@@ -87,7 +87,9 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   rec.result = undefined;
   // [U6/D4 轮始清点族扩字段] 上轮停因随轮始清点——isOccupied 的 stopReason 子句
   // 依赖本清点（W4 新态 failed 在飞期不存在：adoptEngineDeath 纳管态无新轮可派）。
+  // [modeless 波1] 上轮失败 error 随轮始清点（失败轮 markRoundIdle 写入的镜像清除）。
   rec.stopReason = undefined;
+  rec.error = undefined;
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;
@@ -140,11 +142,15 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   let nextResult: string | undefined;
   if (outcome.kind === "failed") {
     rec.lastError = outcome.reason;
+    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——collect
+    // 域 toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
+    // 路径经 finalizeFailed → completeRecord 写 error 的等价承接）。
+    rec.error = outcome.reason;
     nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
-  } else if (rec.chatMode) {
-    nextResult = outcome.content || "(no output this round)";
   } else {
-    nextResult = outcome.content || rec.result || "(empty)";
+    // [modeless 波1] 成功轮统一 chat 占位语义（旧 one-shot 分支
+    // `content || rec.result || "(empty)"` 随 chatMode 消亡）。
+    nextResult = outcome.content || "(no output this round)";
   }
   rec.result = nextResult;
   // ①③④⑥：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +

@@ -10,7 +10,7 @@ import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orche
 import { bestEffort } from "./assembly/best-effort.ts";
 // [R2] 域 #5 聚合转发 getter 返回类型标注（值装配已迁聚合，仅 type 引用）。
 import type { CollectCoordinator } from "./assembly/collect-coordinator.ts";
-// [V2 决策 3] lifecycle-manager idle timer：chatMode record 的 disarm 面（终态化/取消
+// [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写面迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
 // 迁 service/run-orchestration.ts——本文件 lifecycle-manager 零 import。
@@ -367,11 +367,10 @@ export class SubagentService {
         this.recordLifecycle.finalizeRecord(record, result, status, closedReason),
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
-      // [2026-09-13 design-code-sync 接线] chat 域轮次派发回调（本体在 ChatRounds——
-      // executeViaEngine 的 chatMode 首轮与 one-shot 派发调用点经此编排，G2「经壳编排」）。
-      startFirstChatRound: (record, task) => this.chatRounds.startFirstChatRound(record, task),
-      kickOffChatRound: (record, opts, identity, signal, priority) =>
-        this.chatRounds.kickOffChatRound(record, opts, identity, signal, priority),
+      // [2026-09-13 design-code-sync 接线 / modeless 波1 四象限坍缩] 首轮派发回调
+      //（本体在 ChatRounds——executeViaEngine 的唯一派发调用点经此编排，G2「经壳
+      // 编排」；one-shot 直派回调随分支消亡删除）。
+      startFirstChatRound: (record, opts) => this.chatRounds.startFirstChatRound(record, opts),
     });
     // [2026-09-13 design-code-sync 兑现] chat 域轮次编排聚合（Continuation 协作面 +
     // kickOffChatRound 族 + SP-5 升级 gate + Continuation 生命周期显式接口——自
@@ -691,9 +690,8 @@ export class SubagentService {
   // 消费，删转发判据满足）。
 
   /**
-   * close action 的统一行为分流（running 子态 × force：chatMode abort+清队+立即终态 /
-   * one-shot closeAfterRound 挂起 / force 走 cancelBackground）。本体已迁 RecordLifecycle；
-   * 壳纯转发，签名不变。
+   * close action 的统一行为分流（running 子态 × force：优雅收口挂起 / force 走
+   * cancelBackground + 归档）。本体已迁 RecordLifecycle；壳纯转发，签名不变。
    */
   private closeSubagent(record: ExecutionRecord, force: boolean): Promise<void> {
     return this.recordLifecycle.closeSubagent(record, force);
@@ -781,16 +779,16 @@ export class SubagentService {
   }
 
   /**
-   * [D5 双写点 gate 判据] SP-5 升级（one-shot → chatMode）的 conversation 位检查。
-   *  本体已迁 ChatRounds（2026-09-13 design-code-sync 接线）；壳纯转发
-   * （subagent-actions-core 消费）。 */
-  canUpgradeToConversation(record: Pick<ExecutionRecord, "engine">): boolean {
-    return this.chatRounds.canUpgradeToConversation(record);
+   * [modeless 波1] message 资格的引擎能力轴检查（conversation 位——与 record 无关）。
+   *  本体在 ChatRounds；壳纯转发（subagent-actions-core 消费）。
+   */
+  engineSupportsConversation(record: Pick<ExecutionRecord, "engine">): boolean {
+    return this.chatRounds.engineSupportsConversation(record);
   }
 
   /**
-   * [V2 决策 3 → H1 U2 改写 / U6 定形] chatMode 统一投递入口。本体已迁
-   *  ChatRounds（2026-09-13 design-code-sync 接线）；壳纯转发（chatActions 聚合面消费）。 */
+   * [V2 决策 3 → H1 U2 改写 / U6 定形] message 统一投递入口（modeless：全 record）。
+   *  本体已迁 ChatRounds；壳纯转发（chatActions 聚合面消费）。 */
   private async deliverChatMessage(record: ExecutionRecord, text: string): Promise<void> {
     return this.chatRounds.deliverChatMessage(record, text);
   }

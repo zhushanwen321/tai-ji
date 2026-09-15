@@ -352,8 +352,10 @@ export function statStateStamp(sessionFile: string): SidecarStat | null {
 
 /**
  * 绑定 sidecar 载荷（v1）。字段集 = record-store 磁盘重建 light record 所需的
- * 全部身份域（IdentityHeaderRecon 投影源）+ 对话形态域（chatMode/round）。
+ * 全部身份域（IdentityHeaderRecon 投影源）+ 对话形态域（round）。
  * undefined 字段经 JSON.stringify 自然缺省（读侧守卫归一）。
+ * [modeless 波1] chatMode 字段停写删除（legacy binding 残留键读侧自然忽略——
+ * 万物可续语义与旧「缺省归 chat」天然一致，零迁移）。
  */
 export interface RecordBinding {
   /** schema 版本。消费方按 v 判别解析，不认识的版本跳过而非猜测。 */
@@ -371,8 +373,6 @@ export interface RecordBinding {
   /** 执行模式（窄字面量跟随 types.ts ExecutionMode 现值；扩展时随 schema v2）。 */
   mode: "background";
   startedAt: number;
-  /** 对话形态标志（message 链恢复语义的分流域）。 */
-  chatMode: boolean;
   /** 已完成对话轮数（绑定写时点快照；回填点早于轮终 +1，恢复值可滞后一拍）。 */
   round?: number;
   model: string;
@@ -531,7 +531,6 @@ export function readRecordBinding(sessionFile: string): RecordBinding | undefine
     parentRecordId: optional.parentRecordId,
     depth: optional.depth,
     slug: optional.slug,
-    chatMode: parsed.chatMode === true,
     round: optional.round,
     model: optional.model,
     thinkingLevel: optional.thinkingLevel,

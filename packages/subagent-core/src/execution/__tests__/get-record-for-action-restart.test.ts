@@ -168,8 +168,8 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
 
     const record = service.chatActions.getRecordForAction("sa-restart-1");
 
-    // [v4 A-3 → H1 U6] 水合保留：磁盘无 chatMode → false（升级在 message 链 gate 化）
-    expect(record.chatMode).toBe(false);
+    // [modeless 波1] chatMode 水合丢弃：磁盘无（或有）该键均不进内存 record
+    //（message 资格只看引擎轴，与 record 无关）
     // sessionFile 从磁盘重建结果回填
     expect(record.sessionFile).toBe(file);
     // round 从 found 回填：light 磁盘重建无 round（内存态字段，跨重启不恢复）→ undefined

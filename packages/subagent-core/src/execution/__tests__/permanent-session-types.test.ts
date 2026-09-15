@@ -61,7 +61,6 @@ function baseBinding(): RecordBinding {
     slug: "do-things",
     mode: "background",
     startedAt: 1,
-    chatMode: true,
     model: "test/model",
     worktree: false,
   };

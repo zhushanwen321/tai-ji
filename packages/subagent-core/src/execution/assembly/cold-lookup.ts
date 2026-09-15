@@ -2,7 +2,7 @@
 // 私有的 findColdLookupCandidate / assertReconnectAllowed / resurrectColdRecord /
 // coldLookupForAction + isReconnectableClosed 判定，W3 后寄居 cold-resurrect.ts）。
 // [H1 U6] cold-resurrect.ts 随 chat 域退役改名落位本文件：其中「跨重启磁盘重建无条件
-// 置 chatMode=true」的升级语义已迁 Continuation D4 revive 格 + D5 gate
+// 置 chatMode=true」的升级语义已随 modeless 波1 删除（message 资格 = 引擎轴）
 //（conversation-continuation.ts reviveOrThrow / subagent-actions-core messageHandler
 // 双写点），本文件只保留冷查定位 / 准入守卫 / 磁盘重建注册链——UF-1 跨重启续聊
 // 绑定链（getRecordForAction → coldLookupForAction → 绑定重建 → Continuation）的
@@ -237,11 +237,8 @@ function resurrectColdRecord(
     rootSessionId: found.rootSessionId,
     parentRecordId: found.parentRecordId,
     depth: found.depth,
-    // [v4 A-3 → H1 U6 / D4-D5] 水合保留持久化 chatMode（UF-1 绑定 sidecar 的身份域
-    // 投影，record-store buildRecord 已承载）：磁盘上是什么就是什么。原「无条件置
-    // chatMode=true」的升级语义迁 Continuation D4 revive 格 + D5 gate 双写点
-    //（one-shot 跨重启重建 chatMode=false 后收到 message → gate 放行 → 升级置位再续聊）。
-    chatMode: found.chatMode === true,
+    // [modeless 波1] chatMode 水合丢弃：磁盘残留值不进内存 record（万物可续，
+    // message 资格只看引擎 conversation 能力轴，与 record 无关）。
     // [A3/S3 修复] 引擎域透传：跨重启重建不透传 engine 时 record.engine=undefined，
     // resolveRoundEnginePort 按 record.engine ?? DEFAULT_ENGINE_ID 把 zcode record
     // 错投 pi 引擎（engine_not_found）。engine 属 identity 域经 createRecord 重建；

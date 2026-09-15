@@ -124,25 +124,15 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     // 应答回注。[U5 适配] 新形态 = idle + intent=archived + 放弃轮标记（gate ①②
     // 双重阻断）——record 补 register 进 store 对齐「store 外 record 无编排性关闭
     // 可达」的生产形态。
+    // [modeless 波1] 经 Continuation 统一入口驱动：message 派发轮（run 挂起）→
+    // 编排性关闭先行（markArchived——disposeAllRecords 的 store 原语）→ 迟到引擎
+    // 应答被 gate ①静默（intent=archived + 放弃轮标记 gate ②双重阻断）。
     record.status = "idle";
-    record.intent = "archived";
-    record.lastAbandonedRound = { epoch: 0, round: 0 };
     store.register(record);
-    // [W3] 轮次编排入口 kickOffChatRound（私有，bracket 调用先例）——协议 run 发起后
-    // 挂起，编排性关闭先行，再模拟引擎应答（迟到回注被门拦）。
-    // [2026-09-13 design-code-sync 接线] kickOffChatRound 本体已迁 ChatRounds 聚合
-    // （自 RunOrchestration 拆出的第三文件）——bracket 路径改经聚合实例（断言对象与
-    // 强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
-    const orchestration = (
-      service as unknown as { chatRounds: { kickOffChatRound: (...args: unknown[]) => void } }
-    ).chatRounds;
-    const identity = {
-      agent: "general-purpose",
-      agentConfig: undefined,
-      resolved: { model: { id: "model", name: "Model", provider: "test", reasoning: false }, thinkingLevel: undefined },
-    };
-    orchestration.kickOffChatRound(record, { task: "t", slug: "gate" }, identity, undefined, 1000);
+    await service.chatActions.deliverChatMessage(record, "go");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
+    store.markArchived(record);
     fake.runs[0]!.settle({ content: "late round text" });
     await Promise.resolve();
     await Promise.resolve();
@@ -152,7 +142,7 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("kickOffChatRound 应答回注对真实失败收口（gc 遗留形态）仍通知", async () => {
+  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，三元组无阻断）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -166,24 +156,14 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 同上：失败收口（idle + gc 遗留展示位——[U2 桥接] 旧终态形态读侧兼容）+
-    // register 进 store 的完整生产形态——迟到回注按 CAS 输家路径走，三元组无阻断。
+    // 旧终态遗留形态（idle + gc 遗留展示位——[U2 桥接] 旧终态形态读侧兼容）+
+    // register 进 store 的完整生产形态。message → revive 翻边清遗留位（closedReason
+    // 残留会让 notifyGate 门误拦本轮通知）→ 轮终 route 送达。
     record.status = "idle";
     record.endedAt = Date.now();
     record.closedReason = "gc";
     store.register(record);
-    // [2026-09-13 design-code-sync 接线] kickOffChatRound 本体已迁 ChatRounds 聚合
-    // （自 RunOrchestration 拆出的第三文件）——bracket 路径改经聚合实例（断言对象与
-    // 强度不变；this 绑定 = 聚合实例，即方法真实宿主）。
-    const orchestration = (
-      service as unknown as { chatRounds: { kickOffChatRound: (...args: unknown[]) => void } }
-    ).chatRounds;
-    const identity = {
-      agent: "general-purpose",
-      agentConfig: undefined,
-      resolved: { model: { id: "model", name: "Model", provider: "test", reasoning: false }, thinkingLevel: undefined },
-    };
-    orchestration.kickOffChatRound(record, { task: "t", slug: "gate" }, identity, undefined, 1000);
+    await service.chatActions.deliverChatMessage(record, "continue");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     fake.runs[0]!.settle({ content: "round" });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());

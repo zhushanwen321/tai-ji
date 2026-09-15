@@ -32,7 +32,6 @@ function makeRecord(worktreeHandle?: WorktreeHandle): ExecutionRecord {
     mode: "background",
     startedAt: Date.now(),
     turnCount: 0,
-    chatMode: false,
     ...(worktreeHandle !== undefined ? { worktreeHandle } : {}),
   } as unknown as ExecutionRecord;
 }

@@ -78,7 +78,6 @@ function awakeView(id: string, over: Partial<SupervisorRecordView> = {}): Superv
     id,
     status: "running",
     hasResult: false,
-    chatMode: false,
     rootSessionId: "sess-root",
     agent: "worker",
     slug: "fix-bug",
@@ -113,7 +112,7 @@ describe("adopt 豁免（决策表 v3 改判）", () => {
   it("conversation 豁免语义不回归：chatMode record 照旧不入监督域", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
-    supervisor.adoptOnProcessDeath(makeRecord({ id: "bg-chat", chatMode: true }), "x");
+    supervisor.adoptOnProcessDeath(makeRecord({ id: "bg-chat" }), "x");
     expect(supervisor.supervisedIds()).toEqual([]);
   });
 });

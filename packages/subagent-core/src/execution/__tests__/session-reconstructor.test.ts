@@ -563,14 +563,13 @@ describe("reconstructFromFile", () => {
       expect(tc.startedTs).toBe(1000);
     });
 
-    it("identity 的 chatMode/worktree/forkDepth 经展开透传到 record", () => {
+    it("identity 的 worktree/forkDepth 经展开透传到 record（[modeless 波1] chatMode 读侧丢弃）", () => {
       writeJsonl([
         headerLine(),
         identityEntry({ id: "r1", agent: "w", mode: "background", task: "t", startedAt: 100, chatMode: true, worktree: true, forkDepth: 2 }),
         assistantEntry([{ type: "text", text: "ok" }]),
       ]);
       const rec = reconstructFromFile(filePath);
-      expect(rec!.chatMode).toBe(true);
       expect(rec!.worktree).toBe(true);
       expect(rec!.forkDepth).toBe(2);
     });
@@ -623,7 +622,6 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
       parentRecordId: undefined,
       depth: 1,
       forkDepth: 0,
-      chatMode: undefined,
       worktree: undefined,
       model: "p1/m1",
       thinkingLevel: "high",
@@ -702,12 +700,12 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
     });
   });
 
-  it("identity 的 chatMode/worktree 透传到轻量 recon", () => {
+  it("identity 的 worktree 透传到轻量 recon（[modeless 波1] chatMode 读侧丢弃——旧文件残留键忽略）", () => {
     writeRaw([
       JSON.stringify(headerLine()),
       JSON.stringify(identityEntry({ id: "bg-chat", agent: "w", mode: "background", task: "t", startedAt: 1, chatMode: true, worktree: true })),
     ]);
-    expect(readIdentityHeader(filePath)).toMatchObject({ chatMode: true, worktree: true });
+    expect(readIdentityHeader(filePath)).toMatchObject({ worktree: true });
   });
 
   it("identity data 非法（缺 task）→ 各入口 undefined", () => {

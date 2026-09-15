@@ -480,27 +480,39 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     expect(task.appendSystemPrompt).toEqual(["extra"]);
   });
 
-  it("[骨架] run resolve 成功 → record 终态 done + result=content", async () => {
+  it("[骨架] run resolve 成功 → 轮终收口 idle + result=content（[modeless 波1] 万物可续——不终态化销毁）", async () => {
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("hello result") });
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
 
-    // record 终态化即 archive（无 sessionFile 不可磁盘重建）→ 内存查询落空
-    await vi.waitFor(() => expect(service.queries.findRecord(handle.subagentId)).toBeUndefined());
-    // 完成通知（chat 域宿主职责）：notifier 立即 flush（无其他 running）→ result 进 sendMessage 正文
+    // 轮终 settle（markRoundIdle——落 idle 留守可续聊，round 1）
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+      expect(rec?.result).toBe("hello result");
+      expect(rec?.round).toBe(1);
+    });
+    // 轮终通知（chat 域宿主职责）：notifier 立即 flush（无其他 running）→ result 进 sendMessage 正文
     await vi.waitFor(() => {
       const sent = pi.sendMessage.mock.calls.some((c) => String(c[0]?.content).includes("hello result"));
       expect(sent).toBe(true);
     });
   });
 
-  it("[骨架] outcome.error → record 终态 failed", async () => {
+  it("[骨架] outcome.error → 失败轮 settle（idle 可恢复 + 失败通知）", async () => {
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = () =>
       Promise.resolve({ handle: fakeHandle(), outcome: { ...doneOutcome(""), error: "engine_run_failed: boom", engineId: "zcode" } });
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
 
-    await vi.waitFor(() => expect(service.queries.findRecord(handle.subagentId)).toBeUndefined());
+    // [modeless 波1 / MF-6] 失败轮不销毁——落 idle 可恢复（stopReason=failed +
+    // result 失败摘要；lastError 不进列表投影，经失败通知可达）
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+      expect(rec?.stopReason).toBe("failed");
+      expect(rec?.result).toContain("engine_run_failed: boom");
+    });
     await vi.waitFor(() => {
       const sent = pi.sendMessage.mock.calls.some((c) => String(c[0]?.content).includes("boom"));
       expect(sent).toBe(true);
@@ -626,11 +638,15 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     expect(service.queries.collectRecords(10, "all")).toHaveLength(0);
   });
 
-  it("[journal] taskId=record.id 落 engines/zcode/shared/（[池抽象降级] 固定分组，无 retarget），journalPath 同源回填", async () => {
+  it("[journal→modeless] chat 域 zcode 轮不接 event journal（原生会话库即数据源）+ engineHandle 经 onHandleReady 回填（无 journalPath）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = (task, ctx) => {
       ctx.onEvent?.({ type: "message_end" } as AgentEvent);
+      // 真实 zcode 引擎在 session/create 应答后触发 onHandleReady（B-routing：
+      // 每轮新会话，新 sessionRef 经此回传——[modeless 波1] 全 record 经 Continuation
+      // 轮路径，resolved handle 不再终态回填，onHandleReady 是唯一锚点通道）。
+      ctx.onHandleReady?.({ sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" } });
       return Promise.resolve({
         handle: {
           data: {
@@ -644,27 +660,30 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       });
     };
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(service.queries.findRecord(handle.subagentId)).toBeUndefined());
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+    });
 
-    // journal 文件名 = journal-<record.id>.jsonl，落在 engines/zcode/shared/ 下
+    // [modeless 波1] chat 域不接 journal（pi 子 session / zcode 会话库即原生数据源；
+    // journal 接线仅 workflow 域 SAR）——无 journal 文件落盘。
     const journalPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
-    expect(fs.existsSync(journalPath)).toBe(true);
-    const firstLine = JSON.parse(fs.readFileSync(journalPath, "utf8").split("\n")[0]);
-    expect(firstLine.taskId).toBe(handle.subagentId);
+    expect(fs.existsSync(journalPath)).toBe(false);
 
-    // archive entry 的 engineHandle：三键齐全，journalPath 与实际落盘路径一致（同源）
+    // 轮终 entry 的 engineHandle：sessionRef 经 onHandleReady 回填，无 journalPath。
     const entry = lastRecordEntry(pi);
     expect(entry?.engineHandle).toEqual({
       sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" },
       poolKey: "shared",
-      journalPath,
     });
   });
 
-  it("[engineHandle] 失败终态 sessionId 缺失 → 仍回填 dbPath（①级降②级防御形态）", async () => {
+  it("[engineHandle→modeless] 失败轮 sessionId 缺失 → onHandleReady 部分回填仍保 dbPath（①级降②级防御形态经统一轮次面承接）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = (task, ctx) => {
+      // 失败前的部分回填（create 应答已到、session 未建——dbPath 已知 sessionId 缺失）
+      ctx.onHandleReady?.({ sessionRef: { dbPath: "sessions.db" } });
       return Promise.resolve({
         handle: {
           data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db" }, adapterVersion: "test" },
@@ -673,12 +692,15 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       });
     };
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(service.queries.findRecord(handle.subagentId)).toBeUndefined());
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+      expect(rec?.stopReason).toBe("failed");
+    });
 
     const h = lastRecordEntry(pi)?.engineHandle as Record<string, unknown> | undefined;
     expect(h?.sessionRef).toEqual({ dbPath: "sessions.db" });
     expect(h?.poolKey).toBe("shared");
-    expect(h?.journalPath).toBe(resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId));
   });
 
   // ============================================================
@@ -711,17 +733,18 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       expect(withHandle.length).toBeGreaterThan(0);
     });
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
+    // [modeless 波1] chat 域不接 journal——engineHandle 无 journalPath 键
     expect(running?.engineHandle).toEqual({
       sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
       poolKey: "shared",
-      journalPath: resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId),
     });
-    // 运行中尚未落盘（writer 只在事件到达后写文件）——路径即最终落盘路径
-    expect(fs.existsSync(resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId))).toBe(false);
 
-    // 终态收口（防 dangling）
+    // 轮终收口（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
-    await vi.waitFor(() => expect(service["findRecord"](handle.subagentId)).toBeUndefined());
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+    });
   }, 10_000);
 
   it("[onHandleReady F1] sessionId 先落 + 迟到只补 sessionFile → 按字段补缺落位；已有值不被迟到值覆盖（幂等）", async () => {
@@ -761,7 +784,6 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
         sessionFile: LATE_SESSION_FILE,
       },
       poolKey: "shared",
-      journalPath: resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId),
     });
     // 补缺经 entry 持久化（运行中 GUI 经 entry 重建 record 即可见），且 ③ 的
     // 「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条）。
@@ -774,9 +796,12 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     );
     expect(withLateSessionFile).toHaveLength(1);
 
-    // 终态收口（防 dangling）
+    // 轮终收口（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
-    await vi.waitFor(() => expect(service["findRecord"](handle.subagentId)).toBeUndefined());
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+    });
   }, 10_000);
 
   it("[onHandleReady] 引擎不回调（spawn 形态）时零回填——终态回填仍兜底（行为不变）", async () => {
@@ -791,15 +816,16 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       });
     };
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-    await vi.waitFor(() => expect(service["findRecord"](handle.subagentId)).toBeUndefined());
+    await vi.waitFor(() => {
+      const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
+      expect(rec?.status).toBe("idle");
+    });
     const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
-    // 运行中回填 entry 不存在（register 写点无 engineHandle；archive 终态侧才有）
-    const runningEntries = entries.slice(0, -1);
-    for (const c of runningEntries) {
+    // [modeless 波1] onHandleReady 是唯一锚点通道（resolved handle 不再终态回填）：
+    // 引擎不回调 → engineHandle 恒缺省（读链经 ①级 sessionRef 降级由引擎侧兜底）。
+    for (const c of entries) {
       expect((c[1] as Record<string, unknown>).engineHandle).toBeUndefined();
     }
-    const final = entries[entries.length - 1][1] as Record<string, unknown>;
-    expect(final.engineHandle).toMatchObject({ poolKey: "shared" });
   });
 
   it("[D5 回归] pi 纯缺省路径 entry 不含 engine/engineFallback/engineHandle 键", async () => {
@@ -828,9 +854,12 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
 
     for (let i = 0; i < 7; i++) {
       const h = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-      // 等本条终态化（record 离开内存）再发下一条——泄漏形态下第 7 条 acquire 永久
+      // 等本条轮终收口（idle 留守）再发下一条——泄漏形态下第 7 条 acquire 永久
       // 排队、record 永卡 running，本 waitFor 即超时失败
-      await vi.waitFor(() => expect(service.queries.findRecord(h.subagentId)).toBeUndefined());
+      await vi.waitFor(() => {
+        const rec = service.queries.collectRecords(10, "all").find((r) => r.id === h.subagentId);
+        expect(rec?.status).toBe("idle");
+      });
     }
     // 7 次引擎 run 全部真实执行（第 7 次未被泄漏槽阻塞）
     expect(zcode.runs.length).toBe(7);

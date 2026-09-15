@@ -614,7 +614,10 @@ describe("D6 toNotifyRecord origin gate", () => {
 });
 
 // ============================================================
-// 6. 引擎死亡 + adopt 豁免双点（service 分诊）
+// 6. 引擎死亡 + adopt 豁免（service 分诊；[modeless 波1] runEngineTask/
+//    finalizeEngineOutcome 直注双测随 one-shot engine-run 编排消亡删除——
+//    豁免语义由上方 engine_crashed 端到端用例覆盖：workflow record 不 adopt、
+//    立即终态化回脚本）
 // ============================================================
 
 describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
@@ -639,85 +642,6 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     expect(supervisor.supervisedIds()).toEqual([]);
   });
 
-  it("豁免点一（runEngineTask catch）：workflow record 不 adopt → finalizeFailed 立即终态化；tool 对照照常 adopt", async () => {
-    const { service, store } = makeHarness();
-    const supervisor = Reflect.get(service, "roundSupervisor") as { supervisedIds(): string[] };
-    // [R4 深绑改写] runEngineTask 本体已迁 RunOrchestration 聚合（service/
-    // run-orchestration.ts）——bracket 路径改经聚合实例（断言对象与强度不变）。
-    const runEngineTask = (
-      Reflect.get(Reflect.get(service, "runOrchestration"), "runEngineTask") as (
-        record: ExecutionRecord,
-        opts: { task: string; slug: string },
-        engine: EnginePort,
-        signal: AbortSignal | undefined,
-      ) => Promise<boolean>
-    ).bind(Reflect.get(service, "runOrchestration"));
-    const deadEngine: EnginePort = {
-      id: "pi",
-      capabilities: () => ({ ...STRICT_CAPS, conversation: "native", sandbox: "emulated", resume: "native", maxTurns: true }),
-      probe: async () => ({ ok: true, engineVersion: "x", checks: [] }),
-      run: () => Promise.reject(new EngineSdkError("engine_crashed", "died", "retry")),
-      read: async () => ({ engineId: "pi", turns: [], source: "outcome-only" }),
-    };
-
-    const wfRecord: ExecutionRecord = {
-      ...createRecord("sa-triage-wf", {
-        agent: "worker", model: "m", mode: "background", task: "t", slug: "s", startedAt: Date.now(),
-      }),
-      origin: "workflow",
-      parentRunId: "run-13",
-    };
-    store.register(wfRecord);
-    const adopted = await runEngineTask(wfRecord, { task: "t", slug: "s" }, deadEngine, undefined);
-    expect(adopted).toBe(false); // 豁免：不走接管分支
-    expect(wfRecord.status).toBe("idle"); // 落空 → finalizeFailed 立即终态化
-    expect(wfRecord.closedReason).toBe("gc");
-    expect(supervisor.supervisedIds()).toEqual([]);
-
-    // 对照：origin=tool 同形态照常 adopt（保持可续聊纳管态交监督器——[U5/D4] W4 新态）
-    const toolRecord = createRecord("sa-triage-tool", {
-      agent: "worker", model: "m", mode: "background", task: "t", slug: "s", startedAt: Date.now(),
-    });
-    store.register(toolRecord);
-    const adoptedTool = await runEngineTask(toolRecord, { task: "t", slug: "s" }, deadEngine, undefined);
-    expect(adoptedTool).toBe(true);
-    expect(toolRecord.status).toBe("running");
-    // [U5/D4] W4 新态：死亡纳管标记 = stopReason='failed'（resumable 字段已退役）
-    expect(toolRecord.stopReason).toBe("failed");
-    expect(supervisor.supervisedIds()).toEqual(["sa-triage-tool"]);
-  });
-
-  it("豁免点二（finalizeEngineOutcome exitCode===null）：workflow record 不 adopt → 正常终态化", async () => {
-    const { service, store } = makeHarness();
-    const supervisor = Reflect.get(service, "roundSupervisor") as { supervisedIds(): string[] };
-    // [R4 深绑改写] finalizeEngineOutcome 本体已迁 RunOrchestration 聚合（豁免点二
-    // 分诊形态原样随迁）——bracket 路径改经聚合实例。
-    const finalizeEngineOutcome = (
-      Reflect.get(Reflect.get(service, "runOrchestration"), "finalizeEngineOutcome") as (
-        record: ExecutionRecord,
-        outcome: { content: string; engineId: string; error: string; exitCode: null },
-      ) => Promise<boolean>
-    ).bind(Reflect.get(service, "runOrchestration"));
-
-    const wfRecord: ExecutionRecord = {
-      ...createRecord("sa-triage2-wf", {
-        agent: "worker", model: "m", mode: "background", task: "t", slug: "s", startedAt: Date.now(),
-      }),
-      origin: "workflow",
-      parentRunId: "run-14",
-    };
-    store.register(wfRecord);
-    const adopted = await finalizeEngineOutcome(wfRecord, {
-      content: "",
-      engineId: "pi",
-      error: "killed by signal",
-      exitCode: null,
-    });
-    expect(adopted).toBe(false); // 豁免：exitCode===null 合成死亡形态不走接管
-    expect(wfRecord.status).toBe("idle"); // 落空 → 正常终态化
-    expect(wfRecord.closedReason).toBe("gc");
-    expect(supervisor.supervisedIds()).toEqual([]);
-  });
 });
 
 // ── settled-watchdog 原语守护（[H2 W4] 自 subprocess-agent-runner-no-progress-

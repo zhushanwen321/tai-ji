@@ -71,7 +71,7 @@ const MANIFEST_RECOVERY_TAIL = "修 manifest capabilities / 升级引擎包（�
  *
  * fork 判据说明（借位裁定）：fork 依赖父 session 上下文继承（父会话文件作为分叉源），
  * 引擎具备该语义的能力面信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
- * 'unsupported'，**OR 语义任一可用即放行**）。pi conversation='native'（chatMode idle
+ * 'unsupported'，**OR 语义任一可用即放行**）。pi conversation='native'（轮终 idle
  * 复用）→ 放行；zcode conversation='cold'（续聊 = 冷查重建 + 新 run + resume 锚点，
  * 协议线 run.params.chat 承载）→ 同样放行。拒绝例证（假设值）：steer 与 conversation
  * 双 'unsupported' 的引擎无父 session 上下文继承通道 → fork/fork-from 一并拒绝。
@@ -171,26 +171,28 @@ export function assertGateCapabilitiesMatched(
 }
 
 // ============================================================
-// 能力位方向判定③：SP-5 升级 gate（H1 U2 / D5 双写点共用文案单源）
+// 能力位方向判定③：message 资格 gate（[modeless 波1] SP-5 升级路径删除后保留的
+// 引擎能力轴——双写点共用文案单源）
 // ============================================================
 
 /**
- * [H1 U2 / D5 双写点] SP-5 升级（one-shot → chatMode）被 conversation 位拒绝时的
- * 统一错误构造（文案/错误码/恢复指引单一权威）。
+ * [modeless 波1] message 被引擎 conversation 位拒绝时的统一错误构造（文案/错误码/
+ * 恢复指引单一权威）。原 SP-5 升级 gate 的「canUpgradeToConversation 记录级门」
+ * 随 chatMode 消亡删除——message 资格 = 引擎 conversation 能力（pi native /
+ * zcode cold 均可续），与 record 无关。
  *
- * 两个写点共同消费（现场契约「改动这两处必须协同」的 gate 化落点）：
- *   - 写点①进程内热升级：subagent-actions-core messageHandler；
- *   - 写点②跨重启冷升级（D4 revive 格）：conversation-continuation（U6 已删
- *     cold-resurrect 无条件置位——语义迁入本格，磁盘重建只水合持久化 chatMode）。
+ * 两个写点共同消费（改动这两处必须协同）：
+ *   - 写点①messageHandler 入口：subagent-actions-core；
+ *   - 写点②Continuation revive 翻边格：conversation-continuation。
  *
- * unsupported 引擎（zcode）的 one-shot 收到 message 不升级——升级后续聊行为悬空
- * （Continuation 续聊轮依赖引擎 resume 能力），guard 文案指引 fork/重派。
+ * unsupported 引擎的 record 收到 message 即拒——续聊行为悬空（Continuation 续聊轮
+ * 依赖引擎 resume 能力），guard 文案指引 fork/重派。
  */
-export function engineConversationUpgradeUnsupportedError(engineId: string): EngineError {
+export function engineConversationMessageUnsupportedError(engineId: string): EngineError {
   return new EngineError(
     "engine_capability_unsupported",
-    `subagent completed as one-shot on engine '${engineId}' (capabilities.conversation = 'unsupported') — ` +
-      `it cannot be upgraded to a resumable conversation, so the message is rejected.`,
+    `engine '${engineId}' cannot continue this subagent by message ` +
+      `(capabilities.conversation = 'unsupported' — no resume channel), so the message is rejected.`,
     `Recovery: re-dispatch the follow-up as a new subagent (action:'start'), ` +
       `or branch from its session history with action:'fork-from', ` +
       `or pick an engine that declares the conversation capability.`,

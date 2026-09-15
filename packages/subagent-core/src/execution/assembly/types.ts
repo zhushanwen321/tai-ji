@@ -528,14 +528,13 @@ export interface ExecutionRecord {
    */
   readonly parentRunId?: string;
   /**
-   * 对话模式标志（可持续对话 subagent）。true = 轮次完成进 idle 态（保留 record +
-   * worktree）等待续聊，而非一次性终态化。
-   * undefined/false = 一次性模式（默认，行为完全不变）。
-   * 向后兼容：旧 record / 旧 session 文件无此字段，按一次性模式处理。
+   * [modeless 波1·已删除字段] chatMode（对话模式标志）停写删除：万物可续后
+   * 「模式」不再是 record 状态——每个 record 轮终落 idle 可续聊（message 即续、
+   * fork 可继承）。旧持久化数据（entry / binding / session identity）残留键读侧
+   * 自然忽略，legacy 缺省归 chat 语义与 modeless 天然一致，零迁移。
    */
-  readonly chatMode?: boolean;
   /**
-   * 空闲超时毫秒数（仅 chatMode 有意义）。覆盖默认 5min idle timeout。
+   * 空闲超时毫秒数（idle GC 回收节奏，全 record 生效）。覆盖默认 5min idle timeout。
    * 优先级：参数 > env XYZ_SUBAGENT_IDLE_TIMEOUT_MS > 默认 300000ms。
    * 向后兼容：旧 record 无此字段，按默认值处理。
    */
@@ -630,8 +629,8 @@ export interface ExecutionRecord {
   /** 运行期最近一次 error 事件的消息（getEventLog 派生 error 条目用）。 */
   lastError: string | undefined;
   /**
-   * 对话轮次计数（仅 chatMode 有意义）。首轮运行时 = 0；每完成一轮（finalizeRoundToIdle
-   * 进 idle）+1。undefined 时视为 0。非 chatMode 不自增。
+   * 对话轮次计数（modeless 波1 起全 record 语义）。首轮运行时 = 0；每完成一轮
+   * （finalizeRoundToIdle 进 idle）+1。undefined 时视为 0。
    */
   round?: number;
   // [H1 U6 / D7 ③] roundBaseTurnIndex（增量通知 base 记账）已退役删除——消费函数
@@ -643,10 +642,11 @@ export interface ExecutionRecord {
    */
   idleSince?: number;
   /**
-   * close 优雅关闭标志（M2-B3）。chatMode record 运行中调 `close {force:false}` 时置 true；
-   * runAndFinalize 的 done 分流检查此标志——true 则终态化为 done（而非进 idle），并清标志。
-   * undefined/false = 正常 idle 分流（对话模式轮次完成进 idle 等续聊）。
-   * 仅 chatMode + running 时有意义；force:true（立即终止）不走此标志。
+   * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
+   * 收口轮的轮次通知送达后归档消费（Continuation settle 分支 / one-shot 主干尾部，
+   * 顺序约束 [写死]——intent 翻转必须在通知链之后）。
+   * undefined/false = 正常 idle 分流（轮次完成进 idle 等续聊）。
+   * 仅 running 时有意义；force:true（立即终止）不走此标志。
    */
   closeAfterRound?: boolean;
 
@@ -777,9 +777,11 @@ export interface ExecuteOptions {
   /** 覆盖执行 cwd（默认 mainCwd）。 */
   cwd?: string;
   /**
-   * 可持续对话模式（决策 8：独立 chatMode 标志，不扩展 ExecutionMode）。
-   * true = record 标记 chatMode，轮次完成进 idle 态（保留 record + worktree，等待 message 续聊）；
-   * undefined/false = 一次性模式（默认，行为完全不变）。service.execute 透传到 createRecordForMode。
+   * [modeless 波1·deprecated accepted-no-op] 可持续对话模式参数。chatMode 字段
+   * 消亡后本参数不再影响行为——一切 record 永续可续聊（idle 后 message 即续、
+   * fork 可继承）。保留 typed optional 一个弃用窗（上层 subagent-workflow 扩展
+   * 波 5 删参数，期间传了不报错）；capability-gate 仍按引擎 conversation 能力轴
+   * 预检（显式 true + unsupported 引擎 → 同步拒）。
    */
   conversation?: boolean;
   /**
@@ -1026,17 +1028,15 @@ export interface SubagentRecord {
    */
   worktree?: boolean;
   /**
-   * 对话轮次计数（仅 chatMode idle record 有意义）。round 仅在内存维护（doFinalizeRoundToIdle
-   * 递增），跨重启不恢复（round 无磁盘持久化）；非对话模式 / 非 idle record 为 undefined。内存源由 recordToSubagent 从
-   * ExecutionRecord.round 投影。
+   * 对话轮次计数（modeless 波1 起全 record 语义）。round 仅在内存维护
+   * （doFinalizeRoundToIdle 递增），跨重启不恢复（round 无磁盘持久化）；
+   * 非 idle record 为 undefined。内存源由 recordToSubagent 从 ExecutionRecord.round 投影。
    */
   round?: number;
   /**
-   * 对话模式标志（与 ExecutionRecord.chatMode 同义；投影给 GUI 侧 streaming/waiting/done
-   * 细分判据——one-shot 轮终（chatMode 非 true + result 有值）显示完成态，chat 轮终显示
-   * 等续聊。内存源由 recordToSubagent 投影，磁盘源经 subagent-record entry 重建）。
+   * [modeless 波1·已删除字段] chatMode 投影随 ExecutionRecord.chatMode 消亡删除
+   * （旧 entry/binding 残留键读侧忽略——万物可续后该区分无信息量）。
    */
-  chatMode?: boolean;
   /** fork 模式下的 worktree handle。 */
   worktreeHandle?: WorktreeHandle;
   /**
@@ -1129,8 +1129,6 @@ export interface RecordSnapshot {
   /** 短标签（≤35 字符）。来自 record.slug。 */
   readonly slug: string;
   readonly status: ExecutionStatus;
-  /** 对话模式标志（与 ExecutionRecord.chatMode 同源）。cancel 别名判定用。 */
-  readonly chatMode?: boolean;
   readonly turns: number;
   readonly totalTokens: number;
   readonly startedAt: number;

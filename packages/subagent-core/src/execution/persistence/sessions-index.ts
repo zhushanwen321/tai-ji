@@ -51,7 +51,7 @@ export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
  * 正索引条目：「该文件有 identity」的身份字段 + stat 戳。
  *
  * 不含 sessionFile（加载侧由 sessionsDir + basename 重构，绝对路径因 agentDir 迁移
- * 整体失效）；不含 forkDepth/chatMode（投影源 SubagentRecord 无此二字段，buildRecord
+ * 整体失效）；不含 forkDepth（投影源 SubagentRecord 无此字段，buildRecord
  * 构造 light 时不读——存了也无消费方；未来需要时升 INDEX_VERSION）。
  */
 export interface SessionsIndexEntry {

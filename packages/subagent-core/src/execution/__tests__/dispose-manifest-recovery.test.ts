@@ -62,7 +62,6 @@ function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}):
     slug: "gate-b",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: false,
     controller: new AbortController(),
   });
   Object.assign(r, rest);
@@ -389,7 +388,6 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       );
       const record = makeRecord({
         id: opts.id,
-        chatMode: opts.chatMode ?? false,
         result: opts.result,
         sessionFile,
       });
@@ -403,7 +401,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     }
 
     it("行 1 [chat × parent-shutdown]：.state 收条 status=idle + stopReason=interrupted-by-restart + .alive release", () => {
-      const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-shutdown", chatMode: true });
+      const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-shutdown" });
       expect(service.disposeAllRecords("parent-shutdown")).toBe(1);
 
       const marker = readDisposedState(sessionFile);
@@ -418,7 +416,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     });
 
     it("行 2 [chat × parent-fork]：stopReason=interrupted-by-parent——自动收起后 message 寻回可续（旧 fork-from 承接通道消亡）", () => {
-      const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-fork", chatMode: true });
+      const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-fork" });
       service.disposeAllRecords("parent-fork");
 
       const marker = readDisposedState(sessionFile);

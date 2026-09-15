@@ -142,17 +142,17 @@ export interface BgNotifyRecord {
   endedAt: number | undefined;
   /**
    * 对话轮次计数（仅 idle 有意义）。dedup key 按 `id:round` 去重——对话模式每轮 round
-   * 不同，60s 内多轮不被吞；非 chatMode round 恒定（0/undefined），key 同旧 id 行为不变。
+   * 不同，60s 内多轮不被吞；首轮前 round 恒定（0/undefined），key 同旧 id 行为不变。
    */
   round?: number;
   /** [MF#1] worktree 模式下子 agent 改动的 patch 路径（worktree 外，cleanup 后留存）。
    *  done 时通知文本显式提示 `git apply`，否则 background 子 agent 在隔离 worktree 的改动
    *  会静默丢失——父 LLM 不知 patch 路径，无法应用。 */
   patchFile?: string;
-  /** [wave2] 子 agent session 文件路径（增量语义的全文恢复通道）。
-   *  仅 chatMode 透传（toNotifyRecord 条件透传）——轮次/完成通知末尾追加
-   *  "Full transcript: <path>" 指针行，父 LLM 可按需读全文；one-shot 不透传，
-   *  通知输出逐字节不变。缺失时 buildLlmContent 省略整行。 */
+  /** [wave2 → modeless 波1] 子 agent session 文件路径（全文恢复通道）。
+   *  全体透传（toNotifyRecord 无条件携带）——通知末尾追加
+   *  "Full transcript: <path>" 指针行，父 LLM 可按需读全文；万物可续下每个
+   *  record 都要能被 message/fork 定位。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
   /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
    *  epoch>0 时扩为 `id:epoch:round`——reopen 后 round 归零不与历史轮撞键，epoch=0
@@ -174,7 +174,7 @@ export interface BgNotifyRecord {
    */
   dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
-   *  仅 chatMode close 语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
+   *  仅归档提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
@@ -375,10 +375,10 @@ export function buildBatchLlmContent(
 function buildLlmContent(record: BgNotifyRecord): string {
   const agent = record.agent;
   const id = record.id;
-  // [wave2 指针行] 增量语义下轮次通知只携带本轮增量，异步 flush 窗口丢失时不可重发
-  //（见 subagent-service.ts onRoundSettled 注释），恢复通道是 session 文件全文。
-  // 仅 chatMode 透传 sessionFile，one-shot 通知不含该行；cancelled/gc-failed 不追加
-  //（无成功结果可读，指针无意义）；缺失时省略整行（追加空串 = 输出逐字节不变）。
+  // [wave2 指针行 → modeless 波1] 轮次通知携带本轮增量，异步 flush 窗口丢失时不可
+  // 重发，恢复通道是 session 文件全文。全体透传 sessionFile（万物可续——每个
+  // record 都要能被 message/fork 定位）；cancelled/gc-failed 不追加（无成功结果
+  // 可读，指针无意义）；缺失时省略整行（追加空串 = 输出逐字节不变）。
   const transcriptPointer = record.sessionFile
     ? `\n\nFull transcript: ${record.sessionFile}`
     : "";
@@ -397,9 +397,9 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) failed: ${record.error}`;
       }
       // 成功完成或通用结束：展示结果。
-      // [C-2] chatMode close 终态通知附轮次统计（设计 D2 路径①"completed after N rounds"）。
-      // totalRounds 仅 close 语义携带（notifyClosed）；one-shot 完成通知不设置（round 无轮次
-      // 语义），文案保持 "completed. Result:" 逐字节（G4 硬约束，one-shot 字节锁测试锚定）。
+      // [C-2] close 归档提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
+      // totalRounds 仅 notifyClosed（归档提示）携带；轮次通知不设置（轮次身份由
+      // round 承载），文案保持 "completed. Result:" 逐字节（G4 硬约束锚定）。
       const roundsSuffix =
         record.totalRounds != null && record.totalRounds > 0
           ? ` after ${record.totalRounds} round${record.totalRounds === 1 ? "" : "s"}`

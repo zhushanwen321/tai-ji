@@ -71,7 +71,6 @@ function seedBinding(sessionFile: string): void {
     slug: "do-things",
     mode: "background",
     startedAt: 1,
-    chatMode: false,
     model: "test/model",
     worktree: false,
   });

@@ -112,7 +112,6 @@ function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}):
     slug: "cont",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   Object.assign(r, rest);
@@ -174,7 +173,7 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     killRoundChild: (id, source) => {
       calls.killedRound.push({ recordId: id, source });
     },
-    upgradeGateAllows: () => calls.gateAllows,
+    engineSupportsConversation: () => calls.gateAllows,
     reviveClosedRecord: (rec) => {
       calls.revived.push(rec.id);
     },
@@ -226,11 +225,11 @@ function makeOutcome(partial: Partial<AgentOutcome> = {}): AgentOutcome {
   return { content: "", engineId: "pi", ...partial } as AgentOutcome;
 }
 
-describe("ConversationContinuation — [U4 万物可续] idle → running 翻边（revive 格，含非 chatMode 升级两成员）", () => {
+describe("ConversationContinuation — [U4 万物可续] idle → running 翻边（revive 格；[modeless 波1] 升级概念消亡）", () => {
   it.each(["disconnected", "parent-shutdown", "user-close", "cancelled", "gc", "parent-fork", "parent-new"] as const)(
-    "idle + closedReason=%s（旧终态遗留位）+ 非 chatMode → D5 gate 放行 → 升级 chatMode=true + revive + 续聊轮派发（resume 锚点）",
+    "idle + closedReason=%s（旧终态遗留位）→ revive 翻边 + 续聊轮派发（resume 锚点）",
     async (reason) => {
-      const record = makeRecord({ id: `sa-revive-${reason}`, chatMode: false });
+      const record = makeRecord({ id: `sa-revive-${reason}` });
       record.status = "idle";
       record.closedReason = reason;
       const { host, calls } = makeHost(record);
@@ -238,8 +237,7 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
 
       cont.onMessage("continue please");
 
-      // 升级置位（D4 revive 格——v4 显式化：水合保留持久化 chatMode 后的升级语义）
-      expect(record.chatMode).toBe(true);
+      // [modeless 波1] 无升级置位——「模式」不是 record 状态，翻边即续聊。
       expect(record.status).toBe("running");
       expect(record.closedReason).toBeUndefined();
       expect(calls.revived).toEqual([record.id]);
@@ -253,8 +251,8 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
     },
   );
 
-  it("idle + 非 chatMode + D5 gate 不过（unsupported 引擎）→ 硬拒 + fork/重派指引，chatMode 不置位", async () => {
-    const record = makeRecord({ id: "sa-gate-deny", chatMode: false, engine: "zcode" });
+  it("idle + 引擎 conversation 位不过（unsupported）→ 硬拒 + fork/重派指引（[modeless 波1] message 资格 = 引擎轴，与 record 无关）", async () => {
+    const record = makeRecord({ id: "sa-gate-deny", engine: "zcode" });
     record.status = "idle";
     record.closedReason = "disconnected";
     const { host, calls } = makeHost(record, { gateAllows: false });
@@ -267,18 +265,17 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
       gateError = err as Error & { recovery?: string };
     }
     // message = 失败原因（capabilities.conversation = 'unsupported' 依据）
-    expect(gateError?.message).toContain("cannot be upgraded to a resumable conversation");
-    // recovery = fork/重派指引（D5：避免升级后续聊行为悬空）
+    expect(gateError?.message).toContain("cannot continue this subagent by message");
+    // recovery = fork/重派指引（引擎轴 gate：避免续聊行为悬空）
     expect(gateError?.recovery).toContain("fork-from");
     expect(gateError?.recovery).toContain("action:'start'");
-    expect(record.chatMode).toBe(false);
     expect(record.status).toBe("idle");
     expect(calls.revived).toEqual([]);
     expect(calls.dispatched.length).toBe(0);
   });
 
-  it("idle + chatMode 已置位 → 不经 gate 直接 revive（gate 判据不触达）", async () => {
-    const record = makeRecord({ id: "sa-revive-chat", chatMode: true });
+  it("idle + gate 放行 → 直接 revive 翻边（[modeless 波1] 无升级分流）", async () => {
+    const record = makeRecord({ id: "sa-revive-chat" });
     record.status = "idle";
     record.closedReason = "parent-shutdown";
     const { host, calls } = makeHost(record);
@@ -292,7 +289,7 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
   });
 
   it("[U4 / §3.2.3] 锚失效（字段在、文件被回收）→ reopen 降级：markReopened（round 归零 + epoch+1 + stopReason=reopened）+ resume:undefined + 摘要前缀注入", async () => {
-    const record = makeRecord({ id: "sa-reopen", chatMode: true, round: 3, result: "prior conclusion", turnCount: 7 });
+    const record = makeRecord({ id: "sa-reopen", round: 3, result: "prior conclusion", turnCount: 7 });
     record.status = "idle";
     record.closedReason = "disconnected";
     // 删除 fixture 文件 = 锚失效（transcript 被回收）
@@ -324,7 +321,7 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
   });
 
   it("[U4] reopen CAS 拒绝（host.reopenRecord false）→ 同步响亮拒绝，不派发", () => {
-    const record = makeRecord({ id: "sa-reopen-cas", chatMode: true });
+    const record = makeRecord({ id: "sa-reopen-cas" });
     record.status = "idle";
     fs.rmSync(fixtureFile);
     const { host, calls } = makeHost(record, { reopenAllowed: false });
@@ -337,7 +334,7 @@ describe("ConversationContinuation — [U4 万物可续] idle → running 翻边
   });
 
   it("[U4] 锚字段缺失（从未开跑）→ 全新 session 直派（无 markReopened、无世代推进）", async () => {
-    const record = makeRecord({ id: "sa-noanchor", chatMode: true, sessionFile: undefined });
+    const record = makeRecord({ id: "sa-noanchor", sessionFile: undefined });
     record.status = "idle";
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
@@ -359,7 +356,7 @@ describe("ConversationContinuation — D2 打断 / abort 不终态化 / 单飞",
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     const round1Signal = calls.dispatched[0]!.signal;
 
@@ -377,7 +374,7 @@ describe("ConversationContinuation — D2 打断 / abort 不终态化 / 单飞",
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     cont.onMessage("msg A");
     cont.onMessage("msg B");
@@ -415,7 +412,7 @@ describe("ConversationContinuation — D2 打断 / abort 不终态化 / 单飞",
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     const signal = calls.dispatched[0]!.signal;
     cont.onMessage("queued during round");
@@ -433,7 +430,7 @@ describe("ConversationContinuation — [S1 P1] cancel 废弃轮身份 + 迟到�
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     expect(cont.hasActiveRound).toBe(true);
 
@@ -455,7 +452,7 @@ describe("ConversationContinuation — [S1 P1] cancel 废弃轮身份 + 迟到�
     const record = makeRecord({ id: "sa-stale-drop" });
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     const staleHandlers = calls.dispatched[0]!.handlers;
 
@@ -489,7 +486,7 @@ describe("ConversationContinuation — [S1 P1] cancel 废弃轮身份 + 迟到�
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     cont.onMessage("queued msg"); // D2 打断（abort 轮 signal + 入队，轮身份保留）
 
@@ -652,7 +649,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     const signal = calls.dispatched[0]!.signal;
 
@@ -738,7 +735,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
 
     try {
       const cont = new ConversationContinuation(record, host);
-      cont.startFirstRound("round 1"); // firstRound=true，无锚点守卫
+      cont.startFirstRound({ task: "round 1", slug: "cont" }); // firstRound=true，无锚点守卫
       await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
       cont.onMessage("queued while running");
       expect(cont.pendingCount).toBe(1);
@@ -784,7 +781,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     record.lastAbandonedRound = { epoch: 0, round: 1 };
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound("round 1");
+    cont.startFirstRound({ task: "round 1", slug: "cont" });
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     cont.onMessage("queued while running");
     // 防御形态触发：controller 丢失（drain 守卫 throw 面）
@@ -851,7 +848,6 @@ function makeChatRecord(id: string, agentDir: string): ExecutionRecord {
     slug: "cont",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   record.status = "running";
@@ -1379,37 +1375,40 @@ describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("one-shot 轮 arm 恢复（轮开跑即挂中段守护）+ fire → kill + abort + [U5] 失败轮 settle + 失败通知单发", async () => {
+  it("楔死轮 arm（轮开跑即挂中段守护）+ fire → kill + abort + [U5] 失败轮 settle + 失败通知单发（[modeless 波1] one-shot/chat 统一 Continuation 流）", async () => {
     // 测试注入秒级窗（M6 seam）——fire 走真实 timer 全链（arm → mid-round 到期 → 处置）。
     // 窗值须大于 vi.waitFor 轮询间隔（50ms），保证 arm 断言先于 fire 到期。
     _setMidRoundNoProgressWindowMsForTest(120);
+    // 杀链收敛建模：轮 signal abort → run reject（真实链路 = cancel 帧驱动引擎进程
+    // 死亡 → engine_crashed reject；settle 单写者 = run 应答一条路）。
+    fake.autoRejectOnAbort = true;
     const handle = await service.execute({ task: "wedged task", slug: "oneshot-wedge" });
     const record = store.getMutable(handle.subagentId);
     expect(record).toBeDefined();
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    // arm 恢复断言（回归锚点：H1 重构曾误删——修复前本断言红，楔死 run 无恢复计时）
+    // arm 断言（回归锚点：H1 重构曾误删——修复前本断言红，楔死 run 无恢复计时）
     await vi.waitFor(() => expect(hasSettledWatchdog(record!.id)).toBe(true));
     expect(getSettledWatchdogPhase(record!.id)).toBe("mid-round");
 
-    // fire（在途 run 永悬 = 楔死形态）→ 处置：kill + abort 轮 signal + [U5] 失败轮
-    // settle（markRoundIdle 落 idle 不终态化；watchdog 杀轮非用户放弃，失败通知必须
-    // 送达；[two-state-convergence U4/D3] 翻边后 idle 即 resumable）
+    // fire（在途 run 永悬 = 楔死形态）→ 处置：kill + abort 轮 signal → run 收敛
+    //（reject）→ Continuation 失败分支统一收口（[U5] markRoundIdle 落 idle 不终态化；
+    // watchdog 杀轮非用户放弃，失败通知必须送达；[two-state-convergence U4/D3]
+    // 翻边后 idle 即 resumable）
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
     expect(record!.closedReason).toBeUndefined();
-    expect(killChildSpy).toHaveBeenCalledWith(record!.id, "settled watchdog (one-shot)");
-    expect(record!.controller?.signal.aborted).toBe(true);
-    // 失败文案（旧 onHotPathSettledWatchdogTimeout 非 chatMode 分支同文——含恢复指引）
-    expect(record!.lastError).toContain("subagent did not reach agent_settled");
-    expect(record!.lastError).toContain("settled watchdog");
-    expect(record!.lastError).toContain("Recovery");
+    expect(killChildSpy).toHaveBeenCalledWith(record!.id, "settled watchdog (mid-round)");
+    // 失败文案：lastError = run reject 原因（杀链收敛面）；result = 失败摘要 +
+    // 恢复指引（markRoundIdleImpl failed 写入规则）。
+    expect(record!.lastError).toContain("engine run aborted");
+    expect(record!.result).toContain("round did not complete");
     // 失败通知发出（独立载荷过 notifyGate 门 → notifyHost.notify）
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
     const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
       [{ content?: string; details?: { notifyId?: string; outcome?: string } }]
     >;
     expect(calls[0]?.[0]?.content).toContain(`Subagent "general-purpose" (${record!.id}) failed`);
-    expect(calls[0]?.[0]?.content).toContain("settled watchdog");
+    expect(calls[0]?.[0]?.content).toContain("round did not complete");
     expect(calls[0]?.[0]?.content).toContain("Recovery");
     expect(calls[0]?.[0]?.details?.outcome).toBe("failed");
   });
@@ -1431,7 +1430,7 @@ describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断�
   });
 });
 
-describe("集成：[A5] D5 gate 判定本体直测（canUpgradeToConversation——此前仅被 mock）", () => {
+describe("集成：[A5] message 资格引擎轴判定本体直测（engineSupportsConversation——此前仅被 mock；[modeless 波1] 记录级升级门删除）", () => {
   let agentDir: string;
   let service: SubagentService;
 
@@ -1453,12 +1452,12 @@ describe("集成：[A5] D5 gate 判定本体直测（canUpgradeToConversation—
     const caps = { ...fake.capabilities(), conversation: "unsupported" as const };
     registerEngine("stub-unsupported", () => ({ id: "stub-unsupported", capabilities: () => caps }) as never);
 
-    expect(service.canUpgradeToConversation({ engine: "stub-unsupported" })).toBe(false);
+    expect(service.engineSupportsConversation({ engine: "stub-unsupported" })).toBe(false);
   });
 
   it("引擎未注册 → fail-closed false（catch 分支）；engine 缺省 → 默认引擎（pi conversation=native）放行", () => {
-    expect(service.canUpgradeToConversation({ engine: "no-such-engine" })).toBe(false);
-    expect(service.canUpgradeToConversation({})).toBe(true);
+    expect(service.engineSupportsConversation({ engine: "no-such-engine" })).toBe(false);
+    expect(service.engineSupportsConversation({})).toBe(true);
   });
 });
 

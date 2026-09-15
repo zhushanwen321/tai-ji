@@ -58,7 +58,6 @@ function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     startedAt: 1000,
     rootSessionId: "sess-current",
     // 对齐生产 register 路径（subagent-service createRecord：one-shot 显式 false）
-    chatMode: false,
   });
   return { ...base, ...over };
 }
@@ -943,7 +942,8 @@ describe("RecordStore", () => {
       const entry = appended.find((c) => c.data.id === "sa-orphan-3");
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
-      expect(entry?.data.chatMode).toBe(true);
+      // [modeless 波1] chatMode 停写——entry 无此键（旧 entry 残留键读侧忽略）
+      expect(entry?.data.chatMode).toBeUndefined();
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
@@ -1061,7 +1061,7 @@ describe("RecordStore", () => {
       // register 时点序列化存活字段（undefined 值字段按生产序列化丢弃）：
       // chatMode 必须显式在场（one-shot=false）——renderer isDone 判据依赖它。
       expect(Object.keys(data).sort()).toEqual([
-        "agent", "chatMode", "depth", "displayItems", "eventLog",
+        "agent", "depth", "displayItems", "eventLog",
         "id", "mode", "model", "rootSessionId", "round", "slug", "startedAt",
         "status", "task", "totalTokens", "turns", "v", "worktree",
       ]);
@@ -1074,7 +1074,6 @@ describe("RecordStore", () => {
         mode: "background",
         startedAt: 1000,
         rootSessionId: "sess-current",
-        chatMode: false,
         turns: 0,
         totalTokens: 0,
         model: "m",
@@ -1107,7 +1106,7 @@ describe("RecordStore", () => {
 
     it("reportRecordTransition：类外恢复写点上报（chatMode 续轮 round 携带）", () => {
       const { store, appended } = makeStoreWithPi();
-      const r = makeRecord({ chatMode: true, round: 1 });
+      const r = makeRecord({ round: 1 });
       store.reportRecordTransition(r);
 
       expect(appended).toHaveLength(1);

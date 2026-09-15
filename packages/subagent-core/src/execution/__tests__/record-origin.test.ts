@@ -54,7 +54,6 @@ function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     startedAt: 1000,
     rootSessionId: "sess-origin",
     // 对齐生产 register 路径（one-shot 显式 false）
-    chatMode: false,
   });
   return { ...base, ...over };
 }

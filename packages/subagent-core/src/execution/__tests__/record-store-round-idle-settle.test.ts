@@ -39,7 +39,6 @@ function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionR
     slug: "round-settle",
     startedAt: 1000,
     rootSessionId: "sess-current",
-    chatMode: true,
   });
   return { ...base, ...over };
 }

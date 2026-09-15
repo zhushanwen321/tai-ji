@@ -78,7 +78,6 @@ function makeRecord(
     task: "test",
     startedAt: 1000,
     rootSessionId: sessionRootId,
-    chatMode: true,
     controller: new AbortController(),
     ...overrides,
     slug: overrides.slug ?? "test",

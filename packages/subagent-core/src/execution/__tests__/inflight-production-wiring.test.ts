@@ -109,7 +109,6 @@ function makeResumableRecord(id: string): ReturnType<typeof createRecord> {
     slug: "chat",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
   });
   record.status = "running";
   record.round = 1;

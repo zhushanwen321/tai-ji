@@ -271,7 +271,6 @@ function makeIntentRecord(id: string, overrides: Partial<ExecutionRecord> = {}):
     slug: "u5",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   Object.assign(r, overrides);

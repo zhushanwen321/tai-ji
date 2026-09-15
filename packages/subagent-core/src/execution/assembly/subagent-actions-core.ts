@@ -38,9 +38,9 @@ import type {
 } from "./types.ts";
 import { ResurrectDeniedError } from "./types.ts";
 import { COLLECT_SCAN_LIMIT } from "./collect-coordinator.ts";
-// [H1 U2 / D5 双写点①] SP-5 升级 gate 的错误构造（文案/错误码/恢复指引单一权威，
-// 与 Continuation D4 revive 格写点②共用）+ 默认引擎 id（engine 留痕缺省判据）。
-import { engineConversationUpgradeUnsupportedError } from "../engine/common/capability-gate.ts";
+// [modeless 波1] message 资格 gate 的错误构造（文案/错误码/恢复指引单一权威，与
+// Continuation revive 翻边格写点②共用）+ 默认引擎 id（engine 留痕缺省判据）。
+import { engineConversationMessageUnsupportedError } from "../engine/common/capability-gate.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 
 // ============================================================
@@ -104,7 +104,8 @@ export interface StartHandlerInput {
   worktree?: boolean;
   /** 覆盖子 agent 工作目录（默认 mainCwd）。 */
   cwd?: string;
-  /** 可持续对话模式（true = chatMode，轮次完成进 idle 等续聊）。 */
+  /** [modeless 波1·deprecated accepted-no-op] 可持续对话模式参数——传了不影响
+   *  行为（一切 record 永续可续聊）；保留一个弃用窗（上层波 5 删参数）。 */
   conversation?: boolean;
   /**
    * 空闲超时毫秒数（仅 conversation 模式有意义，覆盖默认 5min）。
@@ -518,14 +519,9 @@ export async function cancelHandler(
   if (rec.mode !== "background") {
     throw new Error(`Cannot cancel subagent ${id} (unsupported mode: ${rec.mode})`);
   }
-  // 对话模式 cancel = close(force:true) 别名：chatMode record（running/idle）
-  // 走 close 行为路径（idle 终态化 done；running 立即 SIGTERM cancelled），
-  // 返回 cancel 响应（向后兼容 cancel action 的返回类型）。非 chatMode 保持现有 cancel 行为。
-  if (rec.chatMode) {
-    const chatRecord = service.chatActions.getRecordForAction(id);
-    await service.chatActions.closeSubagent(chatRecord, true);
-    return { subagentId: id, response: { cancelled: true } };
-  }
+  // [modeless 波1] cancel 语义统一：cancel = 打断在飞轮 + settle interrupted（record
+  // 留 idle 可续聊，不归档——旧 chatMode record 的 close(force:true) 别名分支随
+  // chatMode 消亡删除：cancel 不是归档动作，收起归 close action）。
   // step 3: service.cancel boolean（list-view 契约不变）；false = 已终态（CAS 抢锁失败）。
   // 注意：不嵌入 rec.status——findRecord 快照可能已过期（TOCTOU：cancel 期间 detached
   // 路径 CAS 到 done/failed）。重新查当前状态，避免「status: running」与「already finished」矛盾。
@@ -535,7 +531,10 @@ export async function cancelHandler(
     // 诚实报告 "unknown (evicted from memory)" 而非回落到可能过期的 rec.status。
     const now = service.queries.findRecord(id);
     const statusDesc = now ? now.status : "unknown (evicted from memory)";
-    throw new Error(`Subagent ${id} could not be cancelled (it likely just finished; status: ${statusDesc})`);
+    throw new Error(
+      `Subagent ${id} could not be cancelled (it has no in-flight round; status: ${statusDesc}). ` +
+      `For an idle record use action:'close' to archive it, or action:'message' to continue it.`,
+    );
   }
   return { subagentId: id, response: { cancelled: true } };
 }
@@ -595,27 +594,16 @@ export async function messageHandler(
     );
   }
 
-  // one-shot upgrade：非 chatMode 的 active record（running/idle——[U4] idle 纳入：
-  // markSettled 轮收口 / 跨重启磁盘重建产出 idle 非 chatMode 形态，收 message 时
-  // 自动升级为 chatMode，后续走 Continuation 统一续聊路径（新 run + resume 锚点）。
-  // chatMode 是 ExecutionRecord 的 readonly 字段，用 Mutable<T> 显式断言绕过 readonly 约束（upgrade 语义）。
-  // Object.assign 隐式绕过 readonly 不可追踪，改为单字段显式赋值。
-  // 进程内 upgrade 入口——one-shot 首条 message 触发 upgrade 置位 chatMode=true。
-  // 与 conversation-continuation 的 D4 revive 格（跨重启冷升级写点②）分工协同：
-  // 本入口服务进程内 one-shot，跨重启路径恒被 getRecordForAction 磁盘重建绕过
-  //（该处经 Continuation revive 格 gate 化）。改动这两处必须协同。
-  // [H1 U2 / D5 双写点①] 升级前置 gate：conversation 位检查——unsupported 引擎
-  //（zcode）的 one-shot 收到 message 不升级（升级后续聊行为悬空），硬拒 + fork/重派
-  // 指引（engineConversationUpgradeUnsupportedError 文案单源）。
-  if (!record.chatMode) {
-    if (!service.canUpgradeToConversation(record)) {
-      throw engineConversationUpgradeUnsupportedError(record.engine ?? DEFAULT_ENGINE_ID);
-    }
-    type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-    (record as Mutable<ExecutionRecord>).chatMode = true;
+  // [modeless 波1·升级路径删除] 「模式」不是 record 状态——message 对任何归属内
+  // record 直接续聊（无 one-shot → chatMode 升级概念，Mutable<> 置位 hack 消亡）。
+  // 引擎能力轴的 message 资格检查保留（与 record 无关：pi native / zcode cold 均
+  // 可续；unsupported 引擎硬拒 + fork/重派指引——与 Continuation revive 翻边格
+  // 写点②分工协同，改动这两处必须协同）。
+  if (!service.engineSupportsConversation(record)) {
+    throw engineConversationMessageUnsupportedError(record.engine ?? DEFAULT_ENGINE_ID);
   }
 
-  // chatMode 统一投递：Continuation 编排（§3.4——两态分流 / D2 打断语义）。
+  // 统一投递：Continuation 编排（§3.4——两态分流 / D2 打断语义）。
   // [H1 U6] 旧「进程死活分流热/冷路径」消亡（每轮 = 新 run + resume 锚点），
   // interrupt 参数随 D2 打断统一语义退役（在途轮存在即打断入队，不区分抢占/排队）。
   await service.chatActions.deliverChatMessage(record, text);

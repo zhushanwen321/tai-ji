@@ -51,7 +51,7 @@ export interface SubagentChatActions {
   getRecordForAction(id: string, opts?: { allowReconnect?: boolean }): ExecutionRecord;
   /** close action 的统一行为分流（running 子态 × force）。 */
   closeSubagent(record: ExecutionRecord, force: boolean): Promise<void>;
-  /** chatMode 统一投递入口（message action → ConversationContinuation.onMessage，
+  /** message 统一投递入口（modeless：全 record → ConversationContinuation.onMessage，
    *  [H1 U6] interrupt 参数随 D2 打断统一语义退役）。 */
   deliverChatMessage(record: ExecutionRecord, text: string): Promise<void>;
 }

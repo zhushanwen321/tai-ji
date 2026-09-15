@@ -17,9 +17,9 @@
 // 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + one-shot
 // settled-watchdog fire 处置 + 轮末收口协作 + SP-5 升级 gate + Continuation 生命周期
 // 显式接口）。两文件零互调零 import（workflow-dispatch 同款形态）：
-//   - 本聚合 → chat-rounds：executeViaEngine 的 chatMode 首轮派发与 one-shot 轮派发
-//     调用点，经 deps 回调 startFirstChatRound / kickOffChatRound（壳装配闭包指
-//     ChatRounds 实例方法）；
+//   - 本聚合 → chat-rounds：executeViaEngine 的首轮派发调用点，经 deps 回调
+//     startFirstChatRound（壳装配闭包指 ChatRounds 实例方法；[modeless 波1] 四象限
+//     坍缩后唯一派发路径，kickOffChatRound 回调已删）；
 //   - chat-rounds → 本聚合：taskSpecWithModel / outcomeToAgentResult / settleOneShotOutcome
 //     / writeBindingForRecord / effectiveMaxConcurrentFor / resolveChatEnginePort 六项
 //     编排原语（壳装配闭包指本聚合实例方法）。
@@ -35,8 +35,8 @@
 //   collectCoordinator）getter 现读同一实例——深绑测试的 FR 替换语义保持。
 // 2. 转发壳写法：壳保留同名方法单行转发（execute/executeAndAwait/resolveModel 对外面 +
 //   executeWorkflowAgent → WorkflowDispatch / canUpgradeToConversation + deliverChatMessage
-//   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/kickOffEngineRun/
-//   runEngineTask/settleOneShotOutcome 族等）不经壳。
+//   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
+//   settleOneShotOutcome 族等）不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5 + B-6）：
 //   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作面迁
 //     chat-rounds.ts，壳经其 clearContinuations() 显式接口（R4 兑现，接线 2026-09-13）。
@@ -184,19 +184,14 @@ export interface RunOrchestrationDeps {
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] 排队中被 abort 的收尾（[U5] cancel 语义 settle）。 */
   readonly finalizeAborted: (record: ExecutionRecord) => Promise<AgentResult>;
-  /** [ChatRounds 协作回调 / 2026-09-13 design-code-sync 接线] chatMode 首轮派发
+  /** [ChatRounds 协作回调 / 2026-09-13 design-code-sync 接线] 首轮派发
    *  （continuationFor ensure + startFirstRound——本体在 ChatRounds；executeViaEngine
-   *  的 pi 与非 pi chatMode 两分支消费）。 */
-  readonly startFirstChatRound: (record: ExecutionRecord, task: string) => void;
-  /** [ChatRounds 协作回调] pi 引擎 background 轮次派发主干（one-shot 与 Continuation
-   *  轮同路——本体在 ChatRounds；executeViaEngine 的 pi one-shot 分支消费。回调签名
-   *  收窄为本聚合真实消费的五参形态，resume/continuation 缺省语义归聚合）。 */
-  readonly kickOffChatRound: (
+   *  消费。[modeless 波1] 四象限（isPiRoute × chatMode）坍缩后的唯一派发路径：
+   *  opts/identity 全量透传保 schema/maxTurns 等首轮声明（Continuation 续轮按
+   *  record 最小重建）；kickOffChatRound 回调随 one-shot 分支消亡删除。 */
+  readonly startFirstChatRound: (
     record: ExecutionRecord,
     opts: ExecuteOptions,
-    identity: ResolvedIdentity,
-    signal: AbortSignal | undefined,
-    priority: number,
   ) => void;
 }
 
@@ -454,7 +449,6 @@ export class RunOrchestration {
       slug: record.slug,
       mode: record.mode,
       startedAt: record.startedAt,
-      chatMode: record.chatMode === true,
       round: record.round,
       model: record.model,
       thinkingLevel: record.thinkingLevel,
@@ -483,8 +477,9 @@ export class RunOrchestration {
     // [D3-④ 预检 capabilities 化] 唯一实现 = common/capability-gate（capabilities
     // 驱动，含 maxTurns 扩位）。检查点钉死：execute/executeViaEngine 同步段、record
     // 创建前（engine.capabilities() 同步可得）——承接「全部同步拒绝发生在 record
-    // 创建前、不产生孤儿 record」不变量（其后的 kickOffEngineRun 是 fire-and-forget，
-    // 检查若只落在 engine.run 内则拒绝异步化为「派发成功 + 静默失败 record」）。
+    // 创建前、不产生孤儿 record」不变量（其后的 startFirstChatRound 派发链是
+    // fire-and-forget，检查若只落在 engine.run 内则拒绝异步化为「派发成功 +
+    // 静默失败 record」）。
     // [W3 契约变更③补注（协议化能力位方向判定）] 同步拒只覆盖「manifest 少声明」
     // 方向；**manifest 多声明**（声明支持而引擎实际不支持）由首个 run 的协议握手
     // `initialize` 发现 → engine_capability_mismatch 该 run 失败 + record 标 failed，
@@ -493,10 +488,9 @@ export class RunOrchestration {
     // warn 留痕不阻断（诊断面归 EngineClient，设计 §3.3 能力位段）。
     assertTaskShapeSupported(engine.id, engine.capabilities(), opts);
 
-    // [metrics-gate cyclo 偿还·第二轮 / 行为保持] 沿既有拆解方向（见 eslint.config
-    // [HISTORICAL] cyclo 偿还段）继续原地拆解：identity 分支构造 → resolveIdentityForRoute、
-    // record 盖章 → stampEngineOnRecordOpts、派发分流 → kickOffBackgroundDispatch——
-    // 判据 / 分支产物 / 次序逐字节等价。worktree 段保持内联：[create-await 竞态守卫]
+    // 沿既有拆解方向：identity 分支构造 → resolveIdentityForRoute、record 盖章 →
+    // stampEngineOnRecordOpts（[modeless 波1] 派发分流四象限已坍缩为
+    // startFirstChatRound 单路径）。worktree 段保持内联：[create-await 竞态守卫]
     // 的「赋值 → 收口检查 → kick-off 同一同步段」实现约束禁止在检查与 kick-off 间
     // 插入 await，不宣 extract。
     const { isPiRoute, engineModel, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
@@ -539,7 +533,15 @@ export class RunOrchestration {
       }
     }
 
-    this.kickOffBackgroundDispatch(record, recordOpts, identity, engine, isPiRoute, worktreeHandle);
+    // [modeless 波1·四象限坍缩] isPiRoute × chatMode 分派分支消亡——全 record 首轮
+    // 经 ChatRounds Continuation 编排（chat 语义：resume 键恒置、轮终 markRoundIdle
+    // 留守、失败 MF-6 落 idle 可恢复）。opts/identity 全量透传保 schema/maxTurns 等
+    // 首轮声明（Continuation 续轮按 record 最小重建）。worktreeHandle 已回填 record
+    // （worktreeHandle 分支），Continuation 派发时经 record.worktreeHandle 读取。
+    void engine;
+    void isPiRoute;
+    void worktreeHandle;
+    this.deps.startFirstChatRound(record, recordOpts);
     return { mode: "background", subagentId: record.id, sessionFile: record.sessionFile, details: project(record) };
   }
 
@@ -604,277 +606,6 @@ export class RunOrchestration {
   }
 
   /**
-   * [metrics-gate cyclo 偿还·第二轮 / 行为保持] executeViaEngine 的尾部分流提取
-   * （同步调用面，零时序变化）——四象限（isPiRoute × chatMode）归并为 chatMode 优先
-   * 两段判（分支映射逐字节等价）：
-   *   - chatMode（pi 与非 pi 同形）：首轮经 ConversationContinuation（[H1 U2] §3.5
-   *     终态数据流：轮末分流 chatMode → Continuation onRunSettled；one-shot →
-   *     settleOneShotOutcome 照旧）；首轮 task = dispatchRound([task])（无 resume
-   *     ——新 session，锚点由 run 应答回填）。[2026-09-13 design-code-sync]
-   *     continuationFor/startFirstRound 本体已迁 ChatRounds——派发经 deps 回调；
-   *     [U6b / B-firstround] 非 pi chatMode（zcode conversation:'cold'）首轮同经
-   *     Continuation 编排对齐 pi 分支形态——若走 kickOffEngineRun 的 one-shot 编排
-   *     （finalizeEngineOutcome tryTransition 终态化），chatMode record 首轮 settle
-   *     即终态化，续聊链从第一轮就断；
-   *   - pi one-shot：one-shot background 派发主干（kickOffChatRound 共享部分，D6
-   *     保留泛化；[2026-09-13 design-code-sync] 本体已迁 ChatRounds——派发经 deps 回调）；
-   *   - 非 pi one-shot：engine.run 自足执行（handle+outcome），编排侧 journal 接线
-   *     + 终态迁移（kickOffEngineRun）。
-   */
-  private kickOffBackgroundDispatch(
-    record: ExecutionRecord,
-    recordOpts: ExecuteOptions,
-    identity: ResolvedIdentity,
-    engine: EnginePort,
-    isPiRoute: boolean,
-    worktreeHandle: WorktreeHandle | undefined,
-  ): void {
-    if (record.chatMode) {
-      this.deps.startFirstChatRound(record, recordOpts.task);
-      return;
-    }
-    if (isPiRoute) {
-      this.deps.kickOffChatRound(
-        record,
-        { ...recordOpts, worktree: worktreeHandle },
-        identity,
-        record.controller!.signal,
-        PRIORITY_BACKGROUND,
-      );
-      return;
-    }
-    this.kickOffEngineRun(record, recordOpts, engine);
-  }
-
-  /**
-   * 非 pi 引擎的 detached 执行编排（与 pi 轮次 kick-off 同构的 background 语义）：
-   * pool 并发槽（maxConcurrent 对非 pi 引擎同样生效）→ journal 接线（D6 第②级：
-   * taskId=record.id，固定分组 key 'shared'）→ engine.run（signal 接 record controller，
-   * kill-chain 两级生效）→ engineHandle 回填（终态迁移落 entry 前）→ 终态迁移 →
-   * bg notify（chat 域宿主职责，与 pi 完成通知同语义）。
-   */
-  kickOffEngineRun(record: ExecutionRecord, opts: ExecuteOptions, engine: EnginePort): void {
-    const signal = record.controller?.signal;
-    // [W4] 在途记账（监督器「该等」判据源）：run 发起即记账，finally 收口重评估。
-    this.deps.getRoundSupervisor().noteRunStarted(record.id);
-    void (async () => {
-      try {
-        await this.deps.getPool().acquire(PRIORITY_BACKGROUND, this.effectiveMaxConcurrentFor(record), signal);
-      } catch {
-        // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致（runAndFinalize 同款）
-        if (signal?.aborted) {
-          await this.deps.finalizeAborted(record);
-        } else {
-          await this.deps.finalizeFailed(record, new Error("aborted"));
-        }
-        return;
-      }
-      // [review MF1] acquire 成功后必须 finally release：不 release 则
-      // DefaultConcurrencyPool._active 永不递减——每次引擎任务泄漏一个并发槽，累计
-      // maxConcurrent 次后全部 background subagent（pi 与引擎共用同一池）在 acquire 队列永久挂起
-      try {
-        // [W4] adopted = 走了表 3 行 1 接管分支（record 保持可续聊纳管态交监督器）——
-        // 跳过 bg 完成回注（合并单条通知由监督器 sendMergedFailureNotice 承担，
-        // route 会再发一条 toNotifyRecord 投影通知 = 双通知，正是 R3 要消除的时序窗口）。
-        const adopted = await this.runEngineTask(record, opts, engine, signal);
-        // cancel 抢先（closedReason='cancelled'）时 cancelBackground 自己 notify，跳过
-        if (!adopted && record.closedReason !== "cancelled") {
-          this.deps.getCollectCoordinator().route(record);
-        }
-      } finally {
-        this.deps.getPool().release();
-        this.deps.getRoundSupervisor().noteRunEnded(record.id);
-      }
-    })();
-  }
-
-  /**
-   * kickOffEngineRun 的 acquire 后主体：journal 接线（D6 第②级：taskId=record.id，
-   * 固定分组 key 'shared'——[池抽象降级 2026-09-13] 无 retarget，路径构造即终值）
-   * → engine.run（signal 接 record controller，kill-chain 两级生效）→ engineHandle
-   * 回填（终态迁移落 entry 前）→ 终态迁移。bg notify 归编排侧（与 pi 轮次收尾通知归编排对称）。
-   */
-  async runEngineTask(
-    record: ExecutionRecord,
-    opts: ExecuteOptions,
-    engine: EnginePort,
-    signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    // [D3-③ journal 接线合一] writer + 路径权威收敛 common/journal-wiring
-    //（与 SAR 同一实现）。chat 域无下游 onEvent 消费者——journal 是事件唯一出口，
-    // 不传 forwardEvents。
-    const journal = wireEventJournal({ engineId: engine.id, taskId: record.id });
-    // [R4 §3.4 不变量 3] 运行中句柄回填：create 应答后（远早于 run resolve）回填
-    // record.engineHandle 并经 reportRecordTransition 落 entry——运行中的 GUI 经 entry
-    // 重建 record 即拿到 ①②级读取钥匙（sessionRef/dbPath/journalPath），
-    // 不再等终态回填（详情页中途打开可见当时进度快照）。journalPath 由 journal writer
-    // 定稿（[池抽象降级] 无 retarget，路径构造即终值）。
-    // 仅 chat 域接线——workflow 域 SAR 无运行中 record 读取方，刻意不做同类回填（防误扩展）。
-    // [F1 修复] 幂等语义 = 按字段补缺，不是整条丢弃：已有值一律不被迟到值覆盖，缺失
-    // 字段照常补上。「sessionId 先落、迟到 handleReady 只补 sessionFile」是本 replay
-    // 批次新打通且更有价值的形态（close 期 LC-4 后缀反查会在 sessionId 已知后补发
-    // sessionFile）——旧守卫「有 sessionId 即整条 return」会把该
-    // 回填永久吞掉，令冷续 resume 锚点（anchor.sessionRef.sessionFile）与引擎 interact
-    // 定位拿不到 sessionFile（[H1 U6] chatHandleFor 已随 interact 面退役）。journalPath 不参与补缺：
-    // journalPath 权威归 journal writer（本闭包写入即定稿），迟到值不得重置。仅在确有
-    // 字段落位时才落 entry——无新字段不写噪（迟到重复回调即零副作用，GUI 无额外投影）。
-    // [池抽象降级] record.engineHandle.poolKey 恒 SHARED_POOL_KEY——持久化形状保留字段
-    //（record-store 读侧守卫要求非空），协议面 poolKey 已删，无引擎侧实际值。
-    const backfillEngineHandle = (partial: { sessionRef: Record<string, string> }): void => {
-      const current = record.engineHandle;
-      if (current === undefined) {
-        record.engineHandle = {
-          sessionRef: { ...partial.sessionRef },
-          poolKey: SHARED_POOL_KEY,
-          journalPath: journal.path,
-        };
-        this.deps.getStore().reportRecordTransition(record);
-        return;
-      }
-      const merged: Record<string, string> = { ...current.sessionRef };
-      let filled = false;
-      for (const [key, value] of Object.entries(partial.sessionRef)) {
-        if (value === undefined || value === "") continue; // 空值不是可落位的字段值
-        const existing = merged[key];
-        if (existing === undefined || existing === "") {
-          merged[key] = value;
-          filled = true;
-        }
-      }
-      if (!filled) return;
-      record.engineHandle = { ...current, sessionRef: merged };
-      this.deps.getStore().reportRecordTransition(record);
-    };
-    // [H2 Gate B 修复] live reducer 喂入恢复（runWorkflowEngineTask observedEvent 同款）：
-    // 非 pi 引擎派发此前 onEvent 直连 journal.onEvent——事件只落 ②级 journal，live record
-    // 零喂入（turns/totalTokens 恒 0，chat 域 record 与 tool one-shot 经非 pi 引擎同病）。
-    // 此处恢复 updateFromEvent 喂入：reducer 与 journal-replay / session-view-service
-    // 重放路径同源（C5 守护），live ≡ replay 构造性成立。喂入窗口 = run await 窗口，
-    // 终态后残余事件仅写内存 record 不落盘——与 workflow 域修法同一取舍。不接
-    // refreshFromProtocolEvent：非 pi 派发无轮次 no-progress 守护（arm 点在轮次域），
-    // 恒 no-op 不加。
-    const journalOnEvent = journal.onEvent;
-    const observedEvent = (event: AgentEvent): void => {
-      updateFromEvent(record, event);
-      journalOnEvent(event);
-    };
-    const runCtx: RunContext = {
-      taskId: record.id,
-      signal,
-      ctxModel: opts.ctxModel,
-      onEvent: observedEvent,
-      // [R4 §3.4 不变量 3] 运行中句柄回填通道（engine/port.ts RunContext.onHandleReady）
-      onHandleReady: backfillEngineHandle,
-      // D9①：路由层 fallback 留痕投影进 outcome（zcode 无独立 record 通路）
-      ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
-      // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）
-      ...(this.sessionRootId !== null && this.sessionRootId !== ""
-        ? { sessionRootId: this.sessionRootId }
-        : {}),
-      // D10 终止链：engine spawn 的子进程注册进 spawnedChildren 记账
-      //（cancelBackground SIGTERM / dispose killAll 收割对非 pi record 生效）
-      onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
-    };
-    try {
-      const { handle, outcome } = await engine.run(executeOptionsToEngineTaskSpec(opts), runCtx);
-      // engineHandle 终态回填（U2：终态迁移落 entry 前；R4 起为兜底面——运行中回填
-      // 已由 onHandleReady 提前落 entry，此处覆写终态权威值）。sessionRef 整体透传——
-      // 失败终态 sessionId 缺失时也回填已有部分（dbPath），读侧①级降②级的防御形态；
-      // journalPath 取实际落盘路径（writer 是路径权威）；poolKey 恒 SHARED_POOL_KEY
-      //（持久化形状保留字段，[池抽象降级] 后无引擎侧实际值）。
-      record.engineHandle = {
-        sessionRef: handle.data.sessionRef,
-        poolKey: SHARED_POOL_KEY,
-        journalPath: journal.path,
-      };
-      await journal.close();
-      return await this.finalizeEngineOutcome(record, outcome);
-    } catch (err) {
-      // engine.run prepare 期 reject（进程创建前）→ failed 终态（与 runAndFinalize catch 同语义）；
-      // journal 尽力而为收口（②级数据源写失败已由 writer 内部 warn 收敛）
-      await journal.close();
-      // [W4 表 3 行 1] 引擎进程死亡（engine_crashed——run 帧已受理后进程死亡/stdin
-      // 写失败）且宿主存活 → record 保持可续聊纳管态交监督器接管（禁 completed 谎报、
-      // 禁直接 closed 终局——resume 锚点在盘，逻辑任务可续）。prepare 期失败
-      // （handshake/protocol/model 拒——进程创建前）维持现状 closed（确定性失败，
-      // 纳管无意义）。
-      // [H2 W2 / adopt 豁免点一] workflow origin 豁免 adopt 链：引擎死亡即 run 失败
-      // 即 record 终态化（失败路径表），adopt 链「唤醒→guidance→2h 看门狗→giveUp」
-      // 对无脚本可回的 record 全程无意义——豁免落空即落入下方 finalizeFailed 立即
-      // 终态化（防「无监督、永不终态化、pending 永不注销」的纳管僵尸）。
-      if (
-        err instanceof EngineSdkError &&
-        err.code === "engine_crashed" &&
-        record.chatMode !== true &&
-        record.origin !== "workflow" &&
-        record.status === "running"
-      ) {
-        this.adoptResumableAfterEngineDeath(record, toErrorMessage(err));
-        return true;
-      }
-      await this.deps.finalizeFailed(record, err);
-      return false;
-    }
-  }
-
-  /**
-   * [W4 表 3 行 1] 引擎/子进程死亡、宿主存活的 record 处置：run 终态如实记 failed
-   * 证据（record.error + stopReason='failed'），record **保持可续聊纳管态**
-   * （session 文件在盘，逻辑任务可续——冷路径 resume 可直接续写），交监督器接管
-   * （合并单条通知 + 三态判定）。禁止两个事故方向：completed 谎报（G3）与 closed
-   * 直接终局（resume 可能性丢失，等待无主——2026-09-08 事故环 2/3 的 core 侧形态）。
-   *
-   * 判据状态源钉死 record 级：写点只动 record 字段（result/error/stopReason），
-   * 不清镜像不查引擎——引擎进程被动重建（ensureConnected 退避重填镜像）不翻转
-   * 本处置（纳管模型：死亡事件纳管、重建不解管）。
-   *
-   * [U2b 修复轮/D2] 三写簿记（error/result/stopReason + 迁移上报）归口
-   * store.adoptEngineDeath（U1 原语簿记为直接三写的超集，多出 notifyChange 刷新）；
-   * 监督器编排（adoptOnProcessDeath）留调用方。record 不在 store 内存的形态 =
-   * false 旁路 debug 留痕（两调用点的 record 均为创建即注册的在册对象）。
-   */
-  adoptResumableAfterEngineDeath(record: ExecutionRecord, errMsg: string): void {
-    this.deps.getStore().adoptEngineDeath(record.id, { error: errMsg });
-    this.deps.getRoundSupervisor().adoptOnProcessDeath(record, errMsg);
-  }
-
-  /**
-   * engine.run resolve 的终态迁移：outcome.error → failed（success=false + error 文案）；
-   * 否则 done（result=content）。CAS 抢锁（tryTransition）防与 cancelBackground 双收尾。
-   *
-   * [W4 表 3 行 1] 进程死亡分诊：outcome.error 存在且 **exitCode === null**（引擎侧
-   * 进程被信号终止/崩溃的合成 outcome 形态——RemoteEngine 运行中失败合成分支恒
-   * exitCode:null，引擎如实上报的 turn 失败带数值 exitCode；engine-client 注释同源
-   * 「exitCode null = 被信号杀死，杀链判据」）且宿主存活且非 conversation 形态 →
-   * record 保持可续聊纳管态交监督器接管（如实 failed 证据 + 合并通知 + 三态判定），
-   * 不再 closed 终局。返回 true = 走了接管分支（调用方跳过 bg 完成回注）。
-   */
-  async finalizeEngineOutcome(record: ExecutionRecord, outcome: AgentOutcome): Promise<boolean> {
-    if (outcome.sessionFile !== undefined) {
-      record.sessionFile = outcome.sessionFile;
-      // [D3a 时机①] 统一入口 writeBindingForRecord 内 acquire 写权声明（U2b）。
-      this.writeBindingForRecord(record);
-    }
-    if (
-      outcome.error !== undefined &&
-      outcome.exitCode === null &&
-      record.chatMode !== true &&
-      // [H2 W2 / adopt 豁免点二] workflow origin 豁免（同 runEngineTask catch 分诊点一
-      //——豁免落空走下方 tryTransition+finalizeRecord 立即终态化，不交监督器）。
-      record.origin !== "workflow" &&
-      record.status === "running"
-    ) {
-      this.adoptResumableAfterEngineDeath(record, outcome.error);
-      return true;
-    }
-    const result = this.outcomeToAgentResult(record, outcome);
-    if (tryTransition(record, "closed", "gc")) {
-      await this.deps.finalizeRecord(record, result, "closed", "gc");
-    }
-    return false;
-  }
-
-  /**
    * workflow 域"干活 + 收尾"（sync await；[W3] 执行叶 = 协议 engine.run——原 inproc
    * runSpawn 链随 inproc pi 引擎目录 删除消亡，journal 接线 / record 终态迁移语义保持）。
    * 编排分段保持「装配（池槽/worktree）→ 执行 → 回收（finally）→ 错误收口 → 终态收口」。
@@ -899,7 +630,7 @@ export class RunOrchestration {
     // worktree 句柄经 executeOptionsToEngineTaskSpec(opts).worktree 直传引擎
     //（AgentCallOpts.worktree 接受 WorktreeHandle——原 runSpawn 显式传参的协议形态）。
     const engine = this.resolveChatEnginePort();
-    // journal 接线（D6 第②级，与 kickOffEngineRun 同一实现）：forwardEvents = onEvent
+    // journal 接线（D6 第②级，workflow 域专用）：forwardEvents = onEvent
     //（workflow liveRecord 桥接，D-A8）。
     const journal = wireEventJournal({ engineId: engine.id, taskId: record.id, forwardEvents: onEvent });
 
@@ -932,7 +663,7 @@ export class RunOrchestration {
       // engine.run prepare 期 reject（进程创建前）→ 合成 failed result + 收尾。
       // swallow（不 re-throw）：sync 调用方拿到合成 failed result，避免异常逃逸到
       // tool 层 + record 卡 running。（[H1 U6] 旧 chatMode 分支 finalizeChatSpawnFailure
-      // 已随 resumeColdRound/旧 chat 载体退役——chatMode 轮不经 runAndFinalize，
+      // 已随 resumeColdRound/旧 chat 载体退役——轮次不经 runAndFinalize，
       // Continuation 轮收口归 onRoundRejected/onRunSettled。）
       return this.deps.finalizeFailed(record, err);
     } finally {
@@ -953,11 +684,11 @@ export class RunOrchestration {
   }
 
   /**
-   * one-shot（非 chatMode）轮终收口（[U5 / §3.2.2 事件表 settle 行] 终态化退役）：
-   * 成功/失败轮 settle（markRoundIdle——落 idle 等续聊/升级 [two-state-convergence
+   * one-shot 轮终收口（[U5 / §3.2.2 事件表 settle 行] 终态化退役；[modeless 波1]
+   * 消费方只剩 workflow 域 runAndFinalize——chat 域全 record 改经 Continuation 轮终
+   * 簿记）：成功/失败轮 settle（markRoundIdle——落 idle 等续聊 [two-state-convergence
    * U4/D3]，万物可续 G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。
-   * CAS 前置检查失败（cancel/dispose 抢先 settle）静默跳过。runAndFinalize（workflow
-   * 域）与 kickOffChatRound 非 chatMode 分支共用。closeAfterRound 挂起标志不清——
+   * CAS 前置检查失败（cancel/dispose 抢先 settle）静默跳过。closeAfterRound 挂起标志不清——
    * 归档消费在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 →
    * 归档，见 kickOffChatRound 尾部 consumePendingArchive）。
    */
@@ -1008,8 +739,7 @@ export class RunOrchestration {
   }
 
   /** AgentOutcome → execution AgentResult 单一映射源（workflow run 域映射；
-   *  finalizeEngineOutcome 终态 result 复用此处构造——exitCode null = 被信号杀死的
-   *  合成终态，error 如实透传）。 */
+   *  exitCode null = 被信号杀死的合成终态，error 如实透传）。 */
   outcomeToAgentResult(record: ExecutionRecord, outcome: AgentOutcome): AgentResult {
     if (outcome.sessionFile !== undefined) {
       record.sessionFile = outcome.sessionFile;

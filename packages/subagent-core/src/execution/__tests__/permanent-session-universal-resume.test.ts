@@ -218,7 +218,6 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     record.result = "round one conclusion";
     record.turnCount = 7;
     record.totalTokens = 500;
-    (record as { -readonly [K in keyof typeof record]: typeof record[K] }).chatMode = true;
     record.controller = new AbortController();
 
     fs.rmSync(file); // 锚失效：transcript 被 GC 回收

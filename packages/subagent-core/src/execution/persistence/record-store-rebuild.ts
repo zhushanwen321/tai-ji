@@ -381,7 +381,8 @@ export function rebuildEntryRecord(id: string, d: Record<string, unknown>): Suba
     error: entryStr(d, "error"),
     sessionFile: entryStr(d, "sessionFile"),
     patchFile: entryStr(d, "patchFile"),
-    chatMode: d.chatMode === true,
+    // [modeless 波1] chatMode 读侧丢弃（旧 entry 残留键自然忽略——万物可续语义
+    // 与 legacy 缺省归 chat 天然一致）。
     round: entryNum(d, "round"),
     ...readEntryEngineFields(d),
     ...readEntryBatchFields(d),
@@ -476,7 +477,7 @@ export function identityFromBinding(binding: RecordBinding | undefined, file: st
     parentRecordId: binding.parentRecordId,
     depth: binding.depth,
     forkDepth: undefined,
-    chatMode: binding.chatMode,
+    // [modeless 波1] chatMode 读侧丢弃（旧 binding 残留键自然忽略）。
     worktree: binding.worktree,
     // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
     // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
@@ -542,7 +543,6 @@ export function buildRecord(
       result: base.result,
       error: base.error,
       sessionFile: base.sessionFile,
-      chatMode: base.chatMode,
       worktree: base.worktree,
     };
   } else {
@@ -572,7 +572,6 @@ export function buildRecord(
       result: undefined,
       error: undefined,
       sessionFile: base.sessionFile,
-      chatMode: base.chatMode,
       worktree: base.worktree,
     };
   }
@@ -825,11 +824,10 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     error: r.error,
     sessionFile: r.sessionFile,
     round: r.round,
-    // [E2E 实测抓漏] 缺 chatMode 投影时该字段在 recordToSubagent 处被丢弃，
-    // entry 序列化后无此字段 → renderer isDone（需显式 chatMode===false）恒不成立，
+    // [modeless 波1] chatMode 投影随字段消亡删除（renderer isDone 判据改走
+    // idle+result 形态，GUI 链波 4 处理）：
     // 完成态 one-shot 永远显示 waiting。单测 schema 断言曾因内存对象保留 undefined
     // 键名而未拦截（真实 JSONL 丢 undefined 值），故 schema 测试改为序列化后断言。
-    chatMode: r.chatMode,
     // [review round2] worktree 隔离标志：内存源有 handle 或跨重启重建带 hadWorktree 均为 true。
     worktree: r.worktreeHandle !== undefined || r.hadWorktree === true,
     engine: r.engine,

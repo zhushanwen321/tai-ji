@@ -66,7 +66,6 @@ function piRecord(id: string, sessionFile: string, over: Partial<ExecutionRecord
     slug: "do-things",
     startedAt: 1,
     rootSessionId: "root-1",
-    chatMode: true,
   });
   (rec as { sessionFile?: string }).sessionFile = sessionFile;
   return Object.assign(rec, over) as ExecutionRecord;
@@ -115,7 +114,6 @@ function zcodeRecord(id: string, dbPath: string, sessionId: string, over: Partia
     slug: "zcode-things",
     startedAt: 1,
     rootSessionId: "root-1",
-    chatMode: true,
     engine: "zcode",
   });
   rec.engineHandle = { sessionRef: { sessionId, dbPath }, poolKey: "shared" };
@@ -138,7 +136,6 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
       slug: "do-things",
       mode: "background",
       startedAt: 1,
-      chatMode: true,
       model: "test/model",
       worktree: false,
       rootSessionId: "root-1",
@@ -172,7 +169,6 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
       slug: "do-things",
       mode: "background",
       startedAt: 1,
-      chatMode: true,
       model: "test/model",
       worktree: false,
       rootSessionId: "root-1",
@@ -447,7 +443,6 @@ describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆
       slug: "do-things",
       mode: "background",
       startedAt: 1,
-      chatMode: true,
       model: "test/model",
       worktree: false,
       rootSessionId: "root-1",

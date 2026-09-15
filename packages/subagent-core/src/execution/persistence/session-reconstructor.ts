@@ -101,10 +101,9 @@ export interface SubagentIdentityData {
   /** [MF#4] 本 session 的 fork 深度（session-runner 写入 parentForkDepth+1）。旧文件可能缺失。 */
   forkDepth?: number;
   /**
-   * 对话模式标志（可持续对话 subagent）。旧文件缺失 → undefined（按一次性模式处理）。
-   * session-runner 写入；reconstructFromFile 经 ...identity 展开自动透传到 ReconstructedRecord。
+   * [modeless 波1·已删除字段] chatMode 读侧丢弃：旧 session identity entry 残留键
+   * 自然忽略（万物可续语义与 legacy 缺省归 chat 天然一致，零迁移）。
    */
-  chatMode?: boolean;
   /**
    * [review round2] worktree 隔离标志（该 subagent 创建时 worktree:true）。旧文件缺失 →
    * undefined。仅供跨重启重建路径判定「worktree 绑定已丢失」——WorktreeHandle 本身不可
@@ -163,8 +162,6 @@ export interface ReconstructedRecord {
   depth: number;
   /** [MF#4] 本 session 的 fork 深度（来自 identity custom entry；旧文件为 undefined）。 */
   forkDepth: number | undefined;
-  /** 对话模式标志（来自 identity custom entry；旧文件为 undefined）。 */
-  chatMode?: boolean;
   /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
   worktree?: boolean;
   /**
@@ -624,7 +621,6 @@ export interface IdentityHeaderRecon {
   parentRecordId: string | undefined;
   depth: number;
   forkDepth: number | undefined;
-  chatMode?: boolean;
   /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
   worktree?: boolean;
   /** 来源身份（H2 S3 修复，守卫归一后；缺省 undefined = "tool" 语义）。light 列表投影用。 */
@@ -805,7 +801,6 @@ function toIdentityRecon(
     parentRecordId: identity.parentRecordId,
     depth: identity.depth ?? 0,
     forkDepth: identity.forkDepth,
-    chatMode: identity.chatMode,
     worktree: identity.worktree,
     origin: normalizeReconOrigin(identity.origin),
     parentRunId: normalizeReconParentRunId(identity.parentRunId),

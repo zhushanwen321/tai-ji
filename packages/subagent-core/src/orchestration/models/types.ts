@@ -220,9 +220,10 @@ export interface AgentCallOpts {
    * Worker-layer flag only — not consumed by any engine (dropped at the pi boundary). */
   returnMeta?: boolean;
  /**
-  * 可持续对话模式（原 AgentTaskSpec.conversation 并入）：true = record 标记 chatMode，
-  * 轮次完成进 idle 态等待 message 续聊。chat 域（ExecuteOptions.conversation 同名）经
-  * host-task-spec 填充；workflow agent() 无写入方。
+  * [modeless 波1·deprecated accepted-no-op] 可持续对话模式参数：chatMode 字段消亡后
+  * 不再影响行为（一切 record 永续可续聊）。保留 typed optional 一个弃用窗（上层
+  * subagent-workflow 扩展波 5 删参数）；capability-gate 仍按引擎 conversation 能力轴
+  * 预检（显式 true + unsupported 引擎 → 同步拒）。
   */
   conversation?: boolean;
  /**

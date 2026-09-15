@@ -35,13 +35,26 @@ export class FakeRun {
   private reject!: (err: unknown) => void;
   readonly promise: Promise<EngineRunResult>;
 
-  constructor(task: AgentCallOpts, ctx: RunContext) {
+  constructor(task: AgentCallOpts, ctx: RunContext, autoRejectOnAbort = false) {
     this.task = task;
     this.ctx = ctx;
     this.promise = new Promise<EngineRunResult>((res, rej) => {
       this.resolve = res;
       this.reject = rej;
     });
+    if (autoRejectOnAbort && ctx.signal !== undefined) {
+      // [modeless 波1] 杀链收敛建模：轮 signal abort（watchdog fire / cancel 打断）
+      // → run reject——真实链路中 cancel 帧驱动引擎进程死亡、run 以 engine_crashed
+      // reject 收敛（单写者：settle 只走 run 应答一条路）。默认关闭（既有测试对
+      // abort 后手动 settle/fail 的编排有依赖）。
+      ctx.signal.addEventListener("abort", () => {
+        this.reject(
+          Object.assign(new Error(`engine run aborted (signal): ${ctx.signal?.reason ?? "aborted"}`), {
+            name: "EngineSdkError",
+          }),
+        );
+      }, { once: true });
+    }
   }
 
   /** 模拟 run 正常应答（agent_settled 口径；outcome 缺省 = 成功空轮）。 */
@@ -90,6 +103,9 @@ export class FakePiEnginePort implements EnginePort {
   /** run 调用捕获（按序）。 */
   readonly runs: FakeRun[] = [];
 
+  /** [modeless 波1] run 的轮 signal abort → 自动 reject（杀链收敛建模，默认关）。 */
+  autoRejectOnAbort = false;
+
   capabilities(): EngineCapabilities {
     // 与 pi-subagent-cli manifest 逐位一致（gate 同步面放行 pi 全参数——V4⑤ 反向守护）。
     return {
@@ -112,7 +128,7 @@ export class FakePiEnginePort implements EnginePort {
   }
 
   run(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
-    const captured = new FakeRun(task, ctx);
+    const captured = new FakeRun(task, ctx, this.autoRejectOnAbort);
     this.runs.push(captured);
     return captured.promise;
   }

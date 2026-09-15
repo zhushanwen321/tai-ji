@@ -69,7 +69,6 @@ function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}):
     slug: "test",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   Object.assign(r, rest);

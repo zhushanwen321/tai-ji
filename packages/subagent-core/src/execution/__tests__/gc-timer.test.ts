@@ -74,7 +74,6 @@ function makeIdleRecord(id: string, idleSince: number): ExecutionRecord {
     slug: "test",
     startedAt: idleSince,
     rootSessionId: "root-session",
-    chatMode: true,
     controller: new AbortController(),
   });
   record.status = "idle";

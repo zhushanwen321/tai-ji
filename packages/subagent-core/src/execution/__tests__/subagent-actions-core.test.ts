@@ -109,7 +109,6 @@ function makeExecRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     error: undefined,
     agentResult: undefined,
     controller: undefined,
-    chatMode: true,
     sessionFile: "sess-1.jsonl",
     ...over,
   } as ExecutionRecord;
@@ -135,7 +134,6 @@ function makeRec(over: Partial<SubagentRecord> = {}): SubagentRecord {
     eventLog: [],
     displayItems: [],
     sessionFile: "sess-1.jsonl",
-    chatMode: true,
     ...over,
   } as SubagentRecord;
 }
@@ -153,9 +151,9 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     getRecordForAction: vi.fn(),
     closeSubagent: vi.fn(),
     deliverChatMessage: vi.fn(),
-    // [H1 U2 / D5 双写点①] messageHandler 升级 gate 判据读 service.canUpgradeToConversation
-    //（stub 缺省放行 = pi 默认引擎语义；gate 拒绝面专项见 conversation-continuation.test.ts）。
-    canUpgradeToConversation: vi.fn(() => true),
+    // [modeless 波1] messageHandler 的引擎轴资格判据读 service.engineSupportsConversation
+    //（stub 缺省放行 = pi 默认引擎语义；拒绝面专项见 conversation-continuation.test.ts）。
+    engineSupportsConversation: vi.fn(() => true),
     // [U2] startHandler 缺省 collect 解析读真实 config（偏差#3 接线）：stub 缺省 async
     //（本文件不测 collect 语义，专项见 start-collect-guard.test.ts）。
     getCollectSyncDefault: vi.fn(() => "async" as const),
@@ -164,9 +162,9 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
   return {
     execute: m.execute,
     cancel: m.cancel,
-    // [H1 U2 / D5 双写点①] messageHandler 升级 gate 判据经平铺访问器（真实 service 为
+    // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
     // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
-    canUpgradeToConversation: m.canUpgradeToConversation,
+    engineSupportsConversation: m.engineSupportsConversation,
     // [U2 偏差#3 接线] startHandler 经平铺访问器读 config 缺省 collect（真实 service
     // 为平铺方法 subagent-service.ts:1786，非 queries 聚合面成员），stub 须同构挂载。
     getCollectSyncDefault: m.getCollectSyncDefault,
@@ -534,19 +532,19 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     });
   });
 
-  it("chatMode → close(force:true) 别名路径 + cancel 响应", async () => {
+  it("[modeless 波1] cancel 语义统一：record（running）→ service.cancel 打断在飞轮（无 close 别名归档）", async () => {
     const closeSubagent = vi.fn(async () => {});
-    const chatRecord = makeExecRecord({ id: "bg-1", chatMode: true });
     const r = await cancelHandler(
       makeService({
-        findRecord: vi.fn(() => makeRec({ id: "bg-1", chatMode: true })),
-        getRecordForAction: vi.fn(() => chatRecord),
+        findRecord: vi.fn(() => makeRec({ id: "bg-1" })),
+        cancel: vi.fn(() => true),
         closeSubagent,
       }),
       { subagentId: "bg-1" },
     );
     expect(r).toEqual({ subagentId: "bg-1", response: { cancelled: true } });
-    expect(closeSubagent).toHaveBeenCalledWith(chatRecord, true);
+    // cancel 不再是 close(force) 别名（归档归 close action；record 留 idle 可续聊）
+    expect(closeSubagent).not.toHaveBeenCalled();
   });
 
   it("CAS 失败 + re-query evicted → 'unknown (evicted from memory)' 文案", async () => {
@@ -557,7 +555,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
           makeService({
             findRecord: vi.fn(() => {
               calls += 1;
-              return calls === 1 ? makeRec({ id: "bg-1", chatMode: undefined }) : undefined;
+              return calls === 1 ? makeRec({ id: "bg-1" }) : undefined;
             }),
             cancel: vi.fn(() => false),
           }),
@@ -566,7 +564,9 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
       ),
     ).toEqual({
       errorName: "Error",
-      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: unknown (evicted from memory))",
+      message:
+        "Subagent bg-1 could not be cancelled (it has no in-flight round; status: unknown (evicted from memory)). " +
+        "For an idle record use action:'close' to archive it, or action:'message' to continue it.",
     });
   });
 
@@ -579,7 +579,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
             findRecord: vi.fn(() => {
               calls += 1;
               return calls === 1
-                ? makeRec({ id: "bg-1", chatMode: undefined })
+                ? makeRec({ id: "bg-1" })
                 : makeRec({ id: "bg-1", status: "idle", endedAt: 5000 });
             }),
             cancel: vi.fn(() => false),
@@ -589,14 +589,16 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
       ),
     ).toEqual({
       errorName: "Error",
-      message: "Subagent bg-1 could not be cancelled (it likely just finished; status: idle)",
+      message:
+        "Subagent bg-1 could not be cancelled (it has no in-flight round; status: idle). " +
+        "For an idle record use action:'close' to archive it, or action:'message' to continue it.",
     });
   });
 
   it("cancel 成功 → cancelled:true", async () => {
     const r = await cancelHandler(
       makeService({
-        findRecord: vi.fn(() => makeRec({ id: "bg-1", chatMode: undefined })),
+        findRecord: vi.fn(() => makeRec({ id: "bg-1" })),
         cancel: vi.fn(() => true),
       }),
       { subagentId: "bg-1" },
@@ -622,9 +624,9 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     });
   });
 
-  it("chatMode record → deliverChatMessage(text trim) + 领域对象（[H1 U6] interrupt 退役）", async () => {
+  it("record → deliverChatMessage(text trim) + 领域对象（[H1 U6] interrupt 退役；[modeless 波1] 全 record 同路）", async () => {
     const deliverChatMessage = vi.fn(async () => {});
-    const chatRecord = makeExecRecord({ id: "bg-1", chatMode: true, slug: "src-slug" });
+    const chatRecord = makeExecRecord({ id: "bg-1", slug: "src-slug" });
     const r = await messageHandler(
       makeService({ getRecordForAction: vi.fn(() => chatRecord), deliverChatMessage }),
       { subagentId: "bg-1", text: "  go on  ", interrupt: true },
@@ -638,34 +640,32 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     expect(deliverChatMessage).toHaveBeenCalledWith(chatRecord, "go on");
   });
 
-  it("one-shot upgrade：非 chatMode running record 收 message → 置位 chatMode 后投递", async () => {
+  it("[modeless 波1·升级删除] running record 收 message → 直接投递（无 chatMode 置位）", async () => {
     const deliverChatMessage = vi.fn(async () => {});
-    const upgradeRec = makeExecRecord({ id: "bg-1", chatMode: false, status: "running" });
+    const rec = makeExecRecord({ id: "bg-1", status: "running" });
     await messageHandler(
-      makeService({ getRecordForAction: vi.fn(() => upgradeRec), deliverChatMessage }),
+      makeService({ getRecordForAction: vi.fn(() => rec), deliverChatMessage }),
       { subagentId: "bg-1", text: "hi" },
     );
-    expect(upgradeRec.chatMode).toBe(true);
-    expect(deliverChatMessage).toHaveBeenCalledWith(upgradeRec, "hi");
+    expect(deliverChatMessage).toHaveBeenCalledWith(rec, "hi");
   });
 
-  it("[H1 U2 / D5 双写点①] one-shot upgrade gate 拒绝：unsupported 引擎（canUpgradeToConversation=false）→ 硬拒 + fork/重派指引，chatMode 不置位", async () => {
+  it("[modeless 波1] message 资格引擎轴拒绝：unsupported 引擎（engineSupportsConversation=false）→ 硬拒 + fork/重派指引", async () => {
     const deliverChatMessage = vi.fn(async () => {});
-    const zcodeRec = makeExecRecord({ id: "bg-z", chatMode: false, status: "running", engine: "zcode" });
+    const zcodeRec = makeExecRecord({ id: "bg-z", status: "running", engine: "zcode" });
     const err = await errOf(() =>
       messageHandler(
         makeService({
           getRecordForAction: vi.fn(() => zcodeRec),
           deliverChatMessage,
-          canUpgradeToConversation: vi.fn(() => false),
+          engineSupportsConversation: vi.fn(() => false),
         }),
         { subagentId: "bg-z", text: "hi" },
       ),
     );
-    // 文案 = engineConversationUpgradeUnsupportedError 单源（错误码前缀 + 拒绝依据）
+    // 文案 = engineConversationMessageUnsupportedError 单源（错误码前缀 + 拒绝依据）
     expect(err.errorName).toBe("EngineError");
-    expect(err.message).toContain("cannot be upgraded to a resumable conversation");
-    expect(zcodeRec.chatMode).toBe(false);
+    expect(err.message).toContain("cannot continue this subagent by message");
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
@@ -716,11 +716,11 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
       const r = await messageHandler(
         makeService({
           getRecordForAction: vi.fn(() => {
-            const rec = makeExecRecord({ id: "bg-1", chatMode: true });
+            const rec = makeExecRecord({ id: "bg-1" });
             rec.closedReason = closedReason;
             return rec;
           }),
-          canUpgradeToConversation: vi.fn(() => true),
+          engineSupportsConversation: vi.fn(() => true),
           deliverChatMessage: deliver,
         }),
         { subagentId: "bg-1", text: "hi" },

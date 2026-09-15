@@ -1,6 +1,6 @@
 // src/execution/lifecycle/settled-watchdog.ts
 //
-// [T2-③ / LC-1] chatMode settled 等待两段式守护（回收层「上界族 + 无进展检测」共享原语）。
+// [T2-③ / LC-1] 会话轮 settled 等待两段式守护（回收层「上界族 + 无进展检测」共享原语）。
 //
 // 设计：docs/design/timeout-zcode-turn-and-settled-watchdog.md §6-D9 / §7（两段式重锚定，
 // P0-4 核心）。等待 agent_settled 的窗口拆两段，判定语义与被保护对象逐段匹配：
@@ -10,7 +10,7 @@
 //     连续静默 SETTLED_MID_ROUND_NO_PROGRESS_MS=30min → kill + 该轮失败终态化）。
 //     对齐既有 keep-alive 无进展检测先例的 30min 量级（同构思路：
 //     「仍在推进」由 stdout 有效事件定义而非总时长，修复旧 10min 全程固定窗对
-//     >10min 合法 chatMode 单轮的误杀）。
+//     >10min 合法单轮的误杀）。
 //
 //   收尾段（agent_end → agent_settled）：post-run 收尾（compact 检查等）——固定硬上限
 //     （armSettledWatchdog，锚点：agent_end 到达时经 handoverMidRoundToSettled 交棒；
@@ -169,7 +169,7 @@ function resolveSettledWatchdogEnv(): { disabled: boolean; overrideMs?: number }
   if (parsed <= 0) {
     logger.warn(
       `[settled-watchdog] ${SETTLED_WATCHDOG_ENV}=${parsed} disables BOTH watchdog phases (mid-round ` +
-        `no-progress + settled phase limit) for ALL domains. Consequences: (1) a wedged chatMode round ` +
+        `no-progress + settled phase limit) for ALL domains. Consequences: (1) a wedged round ` +
         `(no agent_end, or agent_settled never arriving) has NO independent recovery timer — the process ` +
         `leaks until the host exits (the "three-no-window" shape); (2) the workflow-domain no-progress ` +
         `fuse (M3: workflow dispatch arms through this same primitive — ` +
@@ -282,7 +282,7 @@ export function armSettledWatchdog(recordId: string, onTimeout: (info: SettledWa
  * [D9 交棒] agent_end 到达：中段让位收尾段。
  *
  * 清中段计时（已过时间不继承），用挂载点记账的 onSettleTimeout 挂收尾段（从
- * agent_end 起独立计时）。未挂载（非 chatMode / env 关闭 / 已清）或已交棒 /
+ * agent_end 起独立计时）。未挂载（env 关闭 / 已清）或已交棒 /
  * 已 fire 时幂等 no-op——stdout pump 对每轮 agent_end 都调本函数，幂等由
  * phase 判定保证。
  */

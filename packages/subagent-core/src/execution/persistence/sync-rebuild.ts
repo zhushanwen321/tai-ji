@@ -20,8 +20,9 @@ import type { SubagentRecord } from "../assembly/types.ts";
  *   两形态均放行入批）——直通会让补发记录仍是收口前形态：
  *   buildBatchLlmContent 批头只统计 closed 成员（全员成功的恢复批显示
  *   「0 finished, 0 failed, 0 cancelled」），条目文案落「finished a round」
- *   （对话轮次语义）。同 toNotifyRecord：closed 或非 chatMode → "closed"（仅
- *   chatMode 轮次形态保持 running——sync 成员恒 one-shot，此分支为防御完整性）。
+ *   （对话轮次语义）。同 toNotifyRecord：legacy closed → "closed"，轮终收口
+ *   idle（modeless 万物可续形态）→ "running"（[modeless 波1] chatMode 分支
+ *   消亡——collect 域批通知形态的进一步收敛归波 3）。
  * - outcome：closed 状态物化（单一权威 deriveOutcome）——resumable 成员末条未
  *   终态化，closedReason 缺省与正常 flush 路径同形，无 error 即 completed、有
  *   error 即 failed；notifier.notifyBatch 投影边界的 `??` 兜底对此幂等。
@@ -31,8 +32,10 @@ import type { SubagentRecord } from "../assembly/types.ts";
  */
 export function syncRebuildToNotifyMember(rec: SubagentRecord): BgNotifyRecord {
   // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
+  // [modeless 波1·collectMode 不动] sync 成员保持 closed 载荷（与 notify-host
+  // toNotifyRecord 同拍——攒批 one-shot 语义保持，collect 域 modeless 化归波 3）。
   const status: BgNotifyRecord["status"] =
-    (rec.status === "idle" && rec.closedReason !== undefined) || !rec.chatMode
+    (rec.status === "idle" && rec.closedReason !== undefined) || rec.collectMode === "sync"
       ? "closed"
       : "running";
   return {
@@ -89,7 +92,6 @@ export function bufferedMemberFallbackRecord(
     result: m.result,
     error: m.error,
     sessionFile: undefined,
-    chatMode: false,
     patchFile: m.patchFile,
   };
 }

@@ -229,10 +229,10 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
     expect(piEngine.runs.length).toBe(0);
     const record = recordOf(handle.subagentId);
-    expect(record.chatMode).toBe(true);
-    // chatMode 轮协议键必传（recordId 关联键）；首轮无 resume 锚
+    // [modeless 波1] 会话轮协议键恒传（recordId 关联键）；首轮无 resume 锚
     expect(zcode.runs[0]!.ctx.resume).toEqual({ recordId: record.id });
-    // taskSpec 透传 conversation（引擎侧 cold 会话判据）
+    // [modeless 波1] conversation 参数 accepted-no-op——首轮 taskSpec 原样透传
+    //（显式 true 不拦截；引擎侧冷会话判据 = resume 键）
     expect(zcode.runs[0]!.task.conversation).toBe(true);
     expect(zcode.runs[0]!.task.prompt).toBe("zcode cold chat");
 
@@ -278,7 +278,9 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       resume: { sessionRef: { sessionId: "sess_cold_1", dbPath: zcodeDb } },
     });
     expect(zcode.runs[1]!.task.prompt).toBe("second round");
-    expect(zcode.runs[1]!.task.conversation).toBe(true);
+    // [modeless 波1] 续轮最小重建不携带 conversation（accepted-no-op，行为同旧
+    // chatMode 续轮——会话形态由 resume 键承载）
+    expect(zcode.runs[1]!.task.conversation).toBeUndefined();
   });
 
   it("[B-routing/onHandleReady] 续轮新 sessionRef 覆写旧锚（cold 每轮换锚）——engineHandle.sessionRef 更新为新一轮 session 且落 entry", async () => {
@@ -326,7 +328,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     });
   });
 
-  it("[B-routing] 未注册引擎 id 的 Continuation 轮：registry 解析 throw 被承接为失败轮（record 可续，失败通知可达），不崩宿主", async () => {
+  it("[B-routing→modeless] 未注册引擎 id：message 资格引擎轴 fail-closed 拒绝（与 record 无关），不崩宿主", async () => {
     await seedZcodeSession("sess_cold_1");
     const handle = await service.execute({
       task: "zcode cold chat",
@@ -342,12 +344,14 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
 
     // 引擎从 registry 摘除（模拟宿主重启后引擎包不可达的续轮形态）
     clearEngines();
-    await service.chatActions.deliverChatMessage(record, "second round");
-    // dispatchRoundAsync 的 catch 承接端口解析 throw → 失败轮末分流（markRoundIdle
-    // failed：round+1 + lastError，record 落 idle 可续聊——不崩宿主）
-    await vi.waitFor(() => expect(record.round).toBe(2));
+    // [modeless 波1] 引擎轴 message 资格检查先于派发（getEngine throw →
+    // fail-closed false → 硬拒 + fork/重派指引）——不进派发链、不崩宿主。
+    await expect(service.chatActions.deliverChatMessage(record, "second round")).rejects.toThrow(
+      /cannot continue this subagent by message/,
+    );
+    // record 不受损（idle 可续，无轮次推进）
+    expect(record.round).toBe(1);
     expect(record.status).toBe("idle");
-    expect(record.lastError).toContain("engine_not_found");
   });
 
   // ============================================================
@@ -359,9 +363,8 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
     expect(zcode.runs.length).toBe(0);
     const record = recordOf(handle.subagentId);
-    expect(record.chatMode).toBe(true);
     expect(piEngine.runs[0]!.ctx.onHandleReady).toBeUndefined();
-    // pi chatMode 轮协议键形态保持（recordId 关联键；首轮无锚）
+    // pi 会话轮协议键形态保持（recordId 关联键；首轮无锚——[modeless 波1] 恒传）
     expect(piEngine.runs[0]!.ctx.resume).toEqual({ recordId: record.id });
     piEngine.runs[0]!.settle({ content: "pi round done" });
     await vi.waitFor(() => expect(record.round).toBe(1));

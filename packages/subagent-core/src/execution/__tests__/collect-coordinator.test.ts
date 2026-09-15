@@ -193,7 +193,7 @@ describe("CollectCoordinator async routing", () => {
 
   it("routes chatMode records async (对话回流不入批，D8)", () => {
     const h = makeHarness();
-    const record = makeRec({ id: "sa-chat", chatMode: true });
+    const record = makeRec({ id: "sa-chat" });
     expect(h.coordinator.route(record)).toBe("async");
     expect(h.notifyAsync).toHaveBeenCalledTimes(1);
   });

@@ -229,7 +229,6 @@ function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): Suba
     result: undefined,
     error: undefined,
     sessionFile: undefined,
-    chatMode: false,
     collectMode: "sync",
     ...overrides,
   };

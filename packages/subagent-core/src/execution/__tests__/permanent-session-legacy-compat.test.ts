@@ -67,7 +67,6 @@ function writeLegacyBinding(sessionFile: string, id: string, startedAt: number):
     slug: "legacy",
     mode: "background",
     startedAt,
-    chatMode: false,
     model: "test/model",
     worktree: false,
   });
@@ -82,7 +81,6 @@ function makeExecutionRecord(id: string, overrides: Partial<ExecutionRecord> = {
     slug: "compat",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: false,
     controller: new AbortController(),
   });
   Object.assign(r, overrides);

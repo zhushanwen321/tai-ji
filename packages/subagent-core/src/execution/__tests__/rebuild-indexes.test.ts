@@ -70,7 +70,6 @@ function makeRecord(id: string, overrides: Partial<ExecutionRecord> = {}): Execu
     slug: "rebuild",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: false,
     controller: new AbortController(),
   });
   Object.assign(r, overrides);

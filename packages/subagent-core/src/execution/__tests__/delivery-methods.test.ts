@@ -56,7 +56,6 @@ function makeIdleRecord(id = "sa-chat"): ExecutionRecord {
     slug: "chat",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
   });
   // v4 B-1：idle 折入 running。"等待续聊"态现为 status="running"（isIdle/isResumable 派生谓词区分）。
   record.status = "running";
@@ -107,7 +106,8 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     const run = fake.runs[0]!;
     expect(run.task.prompt).toBe("next round msg");
-    expect(run.task.conversation).toBe(true);
+    // [modeless 波1] 续轮最小重建不携带 conversation（accepted-no-op；会话形态 = resume 键）
+    expect(run.task.conversation).toBeUndefined();
     expect(run.ctx.resume).toEqual({
       recordId: record.id,
       resume: {
@@ -139,9 +139,8 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.closedReason).toBeUndefined();
     expect(record.stopReason).toBe("completed");
 
-    // revive 过站守卫自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）+
-    // chatMode=true（revive 格 gate 分支跳过——gate 仅对非 chatMode record 生效）
-    expect(record.chatMode).toBe(true);
+    // revive 过站守卫自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）。
+    // [modeless 波1] 升级 gate 分支消亡——引擎轴资格与 record 形态无关。
 
     // message 前清迁移上报计数——「恰一条」锚定 message 触发的 entry 序列。快照式
     // 捕获（spread 字段）而非存引用：revive entry 与轮始 entry 共享同一 record 对象，

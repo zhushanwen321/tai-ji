@@ -502,7 +502,6 @@ export function fullBindingPayload(record: ExecutionRecord, transcriptRef: Trans
     slug: record.slug,
     mode: "background",
     startedAt: record.startedAt,
-    chatMode: record.chatMode === true,
     model: record.model,
     thinkingLevel: record.thinkingLevel,
     worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,

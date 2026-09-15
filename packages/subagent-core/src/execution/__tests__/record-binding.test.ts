@@ -112,7 +112,7 @@ function writeBindingFixture(file: string, overrides: Partial<RecordBinding> = {
     slug: "bind-test",
     mode: "background",
     startedAt: STARTED_AT,
-    chatMode: true,
+
     round: 1,
     model: "prov/model-1",
     thinkingLevel: undefined,
@@ -136,7 +136,7 @@ describe("[UF-1] record 绑定 sidecar 读写（state-marker）", () => {
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("原子写落盘 + 读回 roundtrip（载荷含 recordId/rootSessionId/chatMode/round/startedAt）；无 tmp 残留", () => {
+  it("原子写落盘 + 读回 roundtrip（载荷含 recordId/rootSessionId/round/startedAt）；无 tmp 残留", () => {
     const sessionFile = path.join(dir, "child.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     writeBindingFixture(sessionFile);
@@ -151,7 +151,7 @@ describe("[UF-1] record 绑定 sidecar 读写（state-marker）", () => {
       v: 1,
       recordId: "sa-bind-1",
       rootSessionId: "root-session",
-      chatMode: true,
+
       round: 1,
       startedAt: STARTED_AT,
       agent: "general-purpose",
@@ -219,7 +219,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/chatMode/round/sessionFile）", () => {
+  it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/round/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
     const store = new RecordStore(sessionsDir);
@@ -232,7 +232,6 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("interrupted-by-restart");
     expect(rec.rootSessionId).toBe("root-session");
-    expect(rec.chatMode).toBe(true);
     expect(rec.round).toBe(1);
     expect(rec.sessionFile).toBe(file);
     expect(rec.agent).toBe("general-purpose");
@@ -365,7 +364,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真", () => {
       `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`,
       JSON.stringify({
         v: 1, recordId: "sa-bind-1", agent: "a", task: "t", mode: "background",
-        startedAt: STARTED_AT, chatMode: false, depth: 0, slug: "s", model: "m", worktree: false,
+        startedAt: STARTED_AT, depth: 0, slug: "s", model: "m", worktree: false,
         totalTokens: "garbage", turns: null, endedAt: false,
       }),
       "utf-8",
@@ -487,7 +486,7 @@ function makeChatRecord(id: string, sessionFile: string): ExecutionRecord {
     slug: "cont",
     startedAt: 1000,
     rootSessionId: "root-session",
-    chatMode: true,
+
     controller: new AbortController(),
   });
   record.status = "running";
@@ -533,7 +532,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
-  it("① chat 轮 run 应答回填点触发绑定落盘：载荷 = recordId/rootSessionId/chatMode/round 快照", async () => {
+  it("① chat 轮 run 应答回填点触发绑定落盘：载荷 = recordId/rootSessionId/round 快照", async () => {
     const sessionFile = path.join(agentDir, "sa-bind-live-session.jsonl");
     const record = makeChatRecord("sa-bind-live", sessionFile);
     store.register(record);
@@ -552,7 +551,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
       v: 1,
       recordId: "sa-bind-live",
       rootSessionId: "root-session",
-      chatMode: true,
+
       // [A-lite] 轮终 markRoundIdle 亦 merge 快照（U7 水合口径）——binding.round
       // = 轮终 round+1 后最新值（原「回填点写点时点快照、round 滞后一拍」由轮终
       // 快照增补覆盖，与 markSettled settleSnapshotPatch 同构）。
@@ -593,7 +592,6 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
 
     // 重启形态：内存空，冷查链（findLightById miss → collectRecords 绑定重建）命中
     const record = service.chatActions.getRecordForAction("sa-bind-1");
-    expect(record.chatMode).toBe(true);
     expect(record.sessionFile).toBe(file);
     expect(record.rootSessionId).toBe("root-session");
     expect(record.status).toBe("running");
