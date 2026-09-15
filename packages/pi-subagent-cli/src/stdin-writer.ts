@@ -91,7 +91,7 @@ export function respond(child: ChildProcess, id: string, out: UiResponse, signal
  * pi 的 runRpcMode 只通过 stdin RpcCommand 驱动——positional task arg / -p flag
  * 在 rpc mode 下被 resolveAppMode 无视，必须在 spawn 后主动喂 prompt 命令。
  *
- * [V2 决策 3] chatMode 续聊热路径用 prompt + streamingBehavior 统一投递，pi 权威
+ * [V2 决策 3] 续聊热路径用 prompt + streamingBehavior 统一投递，pi 权威
  * 裁决 busy/idle：busy 时 followUp 入队/steer 抢占；idle 时开新 turn。省略
  * streamingBehavior 时行为不变（首帧 prompt）。
  */

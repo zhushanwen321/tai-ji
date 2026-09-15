@@ -18,10 +18,11 @@
 //   - relay 归属键按 W8/H12 重写：SOCKET/NODE/SCRIPT 原样转发，SESSION_ID/
 //     RECORD_ID 从 run ctx 重写（不靠 env 继承——spawn env 的 deny 清单已剥）。
 //
-// 保留在 core 的面（deviations 登记）：chatMode 编排（record 状态回写 / 续聊轮
-// 派发——ConversationContinuation）在 core 侧。轮次执行与 agent_settled 轮终已由
-// 本包承载（chatMode 参数；[H1 U5] 原 chat-session 会话管理器已删除——chat-run
-// 统一后续聊 = 新 run + resume 锚点，见 SpawnRunParams.chatMode 注释）。
+// 保留在 core 的面（deviations 登记）：record 状态回写与续聊轮派发
+// （ConversationContinuation）在 core 侧。轮次执行与 agent_settled 轮终已由
+// 本包承载（[modeless 波2] agent_end 轮收敛不 kill + agent_settled resolve 并收割
+// 是唯一语义；[H1 U5] 原 chat-session 会话管理器已删除——续聊 = 新 run + resume
+// 锚点）。
 
 import type { ChildProcess } from "node:child_process";
 
@@ -58,9 +59,8 @@ import {
   reportChildSpawned,
   wireChildStdoutPump,
   type RunEndState,
-  type SessionIdentityTracker,
 } from "./spawn-run-pump.ts";
-import { performGetStateHandshake, requestGetStateOnce } from "./get-state-handshake.ts";
+import { performGetStateHandshake } from "./get-state-handshake.ts";
 import { clearEpipeFailure, sendPromptCommand } from "./stdin-writer.ts";
 import { cleanupTempPrompt, writePromptToTempFile } from "./temp-prompt.ts";
 import { WRAP_UP_HINT } from "./turn-limiter.ts";
@@ -75,12 +75,6 @@ import {
 } from "./logs/stderr-rotation.ts";
 
 const logger = getLogger("session-runner");
-
-/**
- * agent_end 惰性回补的单次 get_state 超时（设计决策 2；超时哲学 §5.4：控制面单请求
- * 秒级）——kill 最多延后此时长，对已完成 turn 的子进程无副作用。
- */
-const LAZY_GET_STATE_TIMEOUT_MS = 1_000;
 
 // 毫秒→秒换算（SIGKILL 升级 warn 日志的秒数显示）。文件内私有定义：工程内
 // MS_PER_SECOND 惯例是各使用文件私有常量（subagent-engine-sdk kill-chain 等
@@ -109,17 +103,17 @@ export interface SpawnRunCallbacks {
   /** text_delta 分流出口（→ host/streamDelta）。 */
   onDelta?: (delta: string) => void;
   /**
-   * [chatMode] agent_end（非 willRetry，队列排空）到达：本轮收敛。不 kill 子进程
-   * （等 agent_settled——pi 的 compact/收尾在 agent_end 后执行）。[H1 U5] 原
+   * agent_end（非 willRetry，队列排空）到达：本轮收敛（输出完整即轮终）。不 kill
+   * 子进程（等 agent_settled——pi 的 compact/收尾在 agent_end 后执行）。[H1 U5] 原
    * chat-session 会话管理器的 settled 相位上报消费已随 registry 删除；本回调保留为
-   * chatMode 语义的可观测面（run-spawn-once.integration 断言轮次时序）。
+   * 轮次时序的可观测面（run-spawn-once.integration 断言轮次时序）。
    */
   onChatRoundEnd?: () => void;
   /**
-   * [chatMode] agent_settled（真空闲边界）到达：run 在此 resolve（exit 0 口径）并
-   * 收割子进程（runSpawnOnce 内建，见 SpawnRunParams.chatMode 注释）。[H1 U5] 原
-   * chat-session 会话管理器的 idle 相位上报消费已随 registry 删除；本回调保留为
-   * chatMode 语义的可观测面。
+   * agent_settled（真空闲边界）到达：run 在此 resolve（exit 0 口径）并收割子进程
+   * （runSpawnOnce 内建，见 runSpawnOnce 生命周期注释）。[H1 U5] 原 chat-session
+   * 会话管理器的 idle 相位上报消费已随 registry 删除；本回调保留为轮次时序的
+   * 可观测面。
    */
   onChatAgentSettled?: () => void;
 }
@@ -162,16 +156,6 @@ export interface SpawnRunParams {
   mirrorFlags?: MirrorFlags;
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
-  /**
-   * [H1 U3 chat 轮 run 形态]（设计 docs/architecture/subagent-chat-run-unification.md
-   * §3.3 D7）：agent_end 不 kill（pi 的 compact/收尾在 agent_end 后执行，提前 kill
-   * 截断收尾截断 session 文件），agent_settled（真空闲）resolve run（exit 0 口径）
-   * **并收割子进程**——每轮一进程，续聊 = 新 run + resume 锚点（--session 续写），
-   * 进程不再保活（[H1 U5] ChatSessionRegistry 长驻语义已随 registry 删除）。
-   * run 的 resolve 与 kill 均以 agent_settled 为准。缺省 = 一次性 run（agent_end 即
-   * 终态）。字段名沿用会话形态参数的构造面（run.params.resume 传入）。
-   */
-  chatMode?: boolean;
 }
 
 /** runSpawnOnce 的产物。 */
@@ -201,10 +185,12 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
 }
 
 /**
- * 单次 spawn run（workflow 域形态）：spawn pi rpc 子进程 → pump stdout → 收集结果。
+ * 单次 spawn run：spawn pi rpc 子进程 → pump stdout → 收集结果。
  *
- * 生命周期：resolve = 子进程 close（exit/error）。abort（signal）经 spawnEngineChild
- * 的 signal 通道发 SIGTERM，升级链由 killPiChild 兜底。
+ * 生命周期（[modeless 波2] 唯一语义）：正常轮终 = agent_settled（真空闲）resolve
+ * （exit 0 口径）并收割子进程；异常/abort = 子进程 close（exit/error，128+ 折算
+ * 判据）。abort（signal）经 spawnEngineChild 的 signal 通道发 SIGTERM，升级链由
+ * killPiProcess 兜底。
  */
 /**
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 XYZ_LOG_MAX_BYTES rename
@@ -269,112 +255,38 @@ async function writeAppendPromptFile(params: SpawnRunParams) {
     : undefined;
 }
 
-/**
- * agent_end 惰性 get_state 回补（设计决策 2：消费零调用方的 `requestGetStateOnce`）。
- *
- * 回补结果走 identity tracker 既有回填面（`addStateListener` 内部已过
- * `applyGetStateFields`；此处再显式调用一次与握手调用点同款，幂等——同值不重发
- * handleReady），落 `outcome.sessionFile`。查询失败/超时按 miss 处理（
- * `requestGetStateOnce` 契约：永不 reject），由 close 收尾与下游兜底接手。
- */
-export async function backfillSessionFileAtAgentEnd(
-  child: ChildProcess,
-  identity: SessionIdentityTracker,
-): Promise<void> {
-  const fields = await requestGetStateOnce(
-    child,
-    identity.addStateListener,
-    LAZY_GET_STATE_TIMEOUT_MS,
-  );
-  identity.applyGetStateFields(fields);
-}
-
-/** agent_end 回补编排入参（backfill 可注入：验收需构造回补链抛错证明 kill 必达）。 */
-export interface AgentEndBackfillOrchestrationOpts {
-  /** run 收尾状态句柄（同步段置 endedCleanly）。 */
-  runEnd: RunEndState;
-  /** 归因日志用 record id。 */
-  recordId: string;
-  /** 回补实现（生产 = backfillSessionFileAtAgentEnd 单次查询）。 */
-  backfill: () => Promise<unknown>;
-  /** 终结子进程（生产 = killChain 包装；回补链任意抛错的 finally 必达点）。 */
-  killChild: (source: string) => void;
-}
-
-/**
- * agent_end 回补编排（R1 MF-2 kill 必达约束）：
- *   - **同步段**先置 `runEnd.endedCleanly`（agent_end 已到 = 本轮正常终结）——回补
- *     异步化不得破坏「end 与 close 之间被杀」的 exit 0 口径；
- *   - 回补段整体 try（异常按 miss 处理 + warn，不阻断收尾）；
- *   - `killChild` 放 finally **必达**：回补链任意位置抛错都不得跳过 kill，否则 run
- *     永挂（正常完成路径退化为依赖兜底 = 规则 20 红线）。
- */
-export function orchestrateAgentEndBackfill(opts: AgentEndBackfillOrchestrationOpts): void {
-  opts.runEnd.endedCleanly = true;
-  void (async () => {
-    try {
-      await opts.backfill();
-    } catch (err) {
-      logger.warn(
-        `[session-runner] agent_end get_state backfill failed for ${opts.recordId} `
-          + `(treated as miss; kill proceeds): ${toErrorMessage(err)}`,
-      );
-    } finally {
-      opts.killChild("agent_end final kill");
-    }
-  })();
-}
-
-/** SDK 事件翻译器 opts 装配（agent_end/agent_settled 的 chatMode 分派 + run 收尾状态接线）。 */
+/** SDK 事件翻译器 opts 装配（agent_end 轮收敛不 kill / agent_settled resolve+收割 + run 收尾状态接线）。 */
 function buildTranslatorOpts(
   params: SpawnRunParams,
   callbacks: SpawnRunCallbacks,
-  child: ChildProcess,
-  identity: SessionIdentityTracker,
   killChild: (source: string) => void,
   runEnd: RunEndState,
 ): SdkTranslatorOpts {
-  const chatMode = params.chatMode === true;
   return {
     maxTurns: params.maxTurns,
     graceTurns: params.graceTurns,
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
     abort: () => killChild("turn limiter abort"),
-    onAgentEnd: chatMode
-      ? () => {
-        // [chatMode] 轮收敛（输出完整）：不 kill（等 agent_settled 收割边界）；
-        // endedCleanly 置位让「end 与 settled 之间被杀」的 close 也按 0 口径收尾。
-        runEnd.endedCleanly = true;
-        callbacks.onChatRoundEnd?.();
-      }
-      : () => {
-        // [一次性 run] agent_end 即终态：先惰性补一次 get_state（子进程刚完成 turn、
-        // 空闲，成功率远高于 spawn 期；原事故形态的 sessionFile 缺失在此补回），再
-        // kill 触发 close → run 应答。编排的同步段/kill 必达约束见
-        // orchestrateAgentEndBackfill 头注。
-        orchestrateAgentEndBackfill({
-          runEnd,
-          recordId: params.recordId,
-          backfill: () => backfillSessionFileAtAgentEnd(child, identity),
-          killChild,
-        });
-      },
-    ...(chatMode
-      ? {
-        onAgentSettled: () => {
-          // [H1 U3] agent_settled（真空闲）= chat 轮 run 的 resolve 与收割边界（D7）：
-          // onChatAgentSettled 回调先于 run resolve（run-spawn-once.integration 的
-          // 轮次时序断言面），resolveChatRun settle exitPromise（run 应答不等收割），
-          // 随后 fire-and-forget
-          // 杀链收割子进程——续聊 = 新 run + resume 锚点，进程不再保活。
-          runEnd.endedCleanly = true;
-          callbacks.onChatAgentSettled?.();
-          runEnd.resolveChatRun?.(0);
-          killChild("agent_settled reap");
-        },
-      }
-      : {}),
+    // agent_end（非 willRetry，队列排空）= 轮收敛（输出完整即轮终）：不 kill（等
+    // agent_settled 收割边界——pi 的 compact/收尾在 agent_end 后执行，提前 kill 截断
+    // 收尾截断 session 文件）；endedCleanly 置位让「end 与 settled 之间被杀」的 close
+    // 也按 0 口径收尾。
+    onAgentEnd: () => {
+      runEnd.endedCleanly = true;
+      callbacks.onChatRoundEnd?.();
+    },
+    // agent_settled（真空闲，agent_end 之后、post-run 完成后才 emit）= run 的 resolve
+    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：onChatAgentSettled 回调先于
+    // run resolve（run-spawn-once.integration 的轮次时序断言面），resolveChatRun
+    // settle exitPromise（run 应答不等收割），随后 fire-and-forget 杀链收割子进程
+    // ——每轮一进程，续聊 = 新 run + resume 锚点，进程不再保活。
+    onAgentSettled: () => {
+      runEnd.endedCleanly = true;
+      callbacks.onChatAgentSettled?.();
+      runEnd.resolveChatRun?.(0);
+      killChild("agent_settled reap");
+    },
   };
 }
 
@@ -434,18 +346,18 @@ export async function runSpawnOnce(
         },
       });
     };
-    // agent_end 终结（F1.2）：正常完成后的主动 kill，close 带信号但语义是成功
-    // （旧 core waitForChildExit 的 code ?? 0 同义——signal 退出码 143 只属异常路径）。
-    // [chatMode] agent_settled 的 run resolve 句柄（inproc state.resolveRun 同款：
+    // agent_settled 收割（[modeless 波2] 唯一终结语义）：轮终（真空闲）resolve 后的
+    // 主动 kill，close 带信号但语义是成功（旧 core waitForChildExit 的 code ?? 0
+    // 同义——signal 退出码 143 只属异常路径）。
+    // agent_settled 的 run resolve 句柄（inproc state.resolveRun 同款：
     // 声明先于 handler 装配，exitPromise executor 内落位——事件只会在 pump 启动后
     // 异步到达，无空窗）。
     const runEnd: RunEndState = { endedCleanly: false };
-    // 身份写入口先行装配：translator 的 agent_end 惰性回补与 stdout pump 共用同一
-    // tracker（回补走既有 addStateListener + applyGetStateFields 回填面）。
+    // 身份写入口先行装配：stdout pump 的 get_state 应答回填与握手共用同一 tracker。
     const identity = createSessionIdentityTracker(params.sessionDir, callbacks);
     const handleSdkEvent = createSdkEventTranslator(
       record,
-      buildTranslatorOpts(params, callbacks, child, identity, killChild, runEnd),
+      buildTranslatorOpts(params, callbacks, killChild, runEnd),
     );
 
     // 2b. stderr tee 落盘（W11，设计 §3.9 同款契约）：pi 任务子进程 stderr 此前
@@ -480,7 +392,7 @@ export async function runSpawnOnce(
     });
 
     // 7. get_state 握手 fire-and-forget（RPC mode 无 header 行，靠握手回填身份）——
-    //    先于 prompt 发出：chat 会话形态的 idle 相位 anchor 与 run 应答 handle 都需要
+    //    先于 prompt 发出：续聊轮的 idle 相位 anchor 与 run 应答 handle 都需要
     //    sessionFile，身份先知再驱动轮次（stdout 流序保证握手应答先于轮终事件）。
     //    身份回填主体在 identity 的响应行同步路径（见 spawn-run-pump.ts 头注），此处
     //    仅兜底超时重试轮次拿到的新值（同值去重，不重发 handleReady）。

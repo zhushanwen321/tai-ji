@@ -1,21 +1,13 @@
 // src/execution/__tests__/get-state-handshake.test.ts
 //
-// [T1/RC-1] requestGetStateOnce 单测：agent_end 决策点惰性回补用的单次 get_state 请求辅助。
-//
-// 契约锚点（与 performGetStateHandshake 共用消息构造 sendGetStateCommand + 字段提取
-// extractGetStateFields，但不做重试循环）：
-//   1. response 到达 → resolve 提取后的 GetStateResult（无条件 finish，单次语义无重试）；
-//   2. 超时 → resolve 空对象（调用方走保守分支）；
-//   3. stdin 同步写失败（EPIPE 形态）→ resolve 空对象、永不 reject（fire-and-forget 契约）；
-//   4. 自清理：finish 后从监听表注销本请求 resolver（消费注册器返回的注销函数）；
-//      注册器不返回注销函数时退化为 no-op（与握手同形态）。
-//
-// performGetStateHandshake 重试节奏（2s 超时 + 500ms 间隔 × 3 次 + 加速路径）由本文件
-// 第二个 describe 覆盖（fake timers 驱动）。
+// performGetStateHandshake 单测（FR-4）：spawn 期 get_state 握手的重试节奏
+// （2s 超时 + 500ms 间隔 × 3 次 + 加速路径；fake timers 驱动）。
+// [modeless 波2] 原第一个 describe（requestGetStateOnce——agent_end 惰性回补单次
+// 请求）已随 one-shot 回补机械删除（git 可追溯）。
 
 import { describe, expect, it, vi } from "vitest";
 
-import { performGetStateHandshake, requestGetStateOnce } from "../get-state-handshake.ts";
+import { performGetStateHandshake } from "../get-state-handshake.ts";
 import type { ChildProcess } from "node:child_process";
 
 /**
@@ -63,93 +55,6 @@ function makeListenerRegistry() {
   };
   return { resolvers, removed, add };
 }
-
-describe("requestGetStateOnce（[T1/RC-1] 惰性回补单次请求）", () => {
-  it("response 到达 → resolve 提取的 sessionFile/sessionId，并从监听表注销", async () => {
-    const { child, writes } = makeFakeStdin();
-    const reg = makeListenerRegistry();
-
-    const promise = requestGetStateOnce(child, reg.add, 1000);
-    // 消息构造：单行 JSON {id, type:"get_state"}（与 performGetStateHandshake 同一 sendGetStateCommand）
-    expect(writes).toHaveLength(1);
-    const sent = JSON.parse(writes[0]!) as { id: string; type: string };
-    expect(sent.type).toBe("get_state");
-    expect(reg.resolvers.has(sent.id)).toBe(true);
-
-    // response 到达（含空串 sessionFile 应被过滤的字段形态覆盖提取规则）
-    reg.resolvers.get(sent.id)?.({
-      sessionFile: "/tmp/sessions/abc.jsonl",
-      sessionId: "sess-1",
-    });
-
-    await expect(promise).resolves.toEqual({
-      sessionFile: "/tmp/sessions/abc.jsonl",
-      sessionId: "sess-1",
-    });
-    // 自清理：finish 后从监听表移除本请求 resolver
-    expect(reg.resolvers.has(sent.id)).toBe(false);
-    expect(reg.removed).toEqual([sent.id]);
-  });
-
-  it("response 只含部分字段（仅 sessionId）→ resolve 已提取部分（单次语义：到达即 finish，不等重试）", async () => {
-    const { child } = makeFakeStdin();
-    const reg = makeListenerRegistry();
-
-    const promise = requestGetStateOnce(child, reg.add, 1000);
-    const id = reg.resolvers.keys().next().value as string;
-    reg.resolvers.get(id)?.({ sessionId: "only-id" });
-
-    await expect(promise).resolves.toEqual({ sessionId: "only-id" });
-  });
-
-  it("超时无 response → resolve 空对象（不 reject，不调注销前的 resolver）", async () => {
-    vi.useFakeTimers();
-    try {
-      const { child } = makeFakeStdin();
-      const reg = makeListenerRegistry();
-
-      const promise = requestGetStateOnce(child, reg.add, 1000);
-      await vi.advanceTimersByTimeAsync(1000);
-
-      await expect(promise).resolves.toEqual({});
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stdin 同步写失败（EPIPE code，writeStdinLine rethrow 路径）→ 立即 resolve 空对象、永不 reject", async () => {
-    // writeStdinLine 只对 code 为 EPIPE / ERR_STREAM_DESTROYED 的错误 rethrow（[R3]），
-    // requestGetStateOnce 的 catch 捕获后按「回补失败」resolve 空对象（同超时语义）。
-    const { child } = makeFakeStdin({ throwOnWrite: epipeError() });
-    const reg = makeListenerRegistry();
-
-    await expect(requestGetStateOnce(child, reg.add, 1000)).resolves.toEqual({});
-    // 写失败路径不注册监听（未发出请求）
-    expect(reg.resolvers.size).toBe(0);
-  });
-
-  it("注册器不返回注销函数（void 形态，对齐旧握手调用方）→ 正常 resolve 不抛", async () => {
-    const { child } = makeFakeStdin();
-    const resolvers = new Map<string, (data: unknown) => void>();
-    const addVoid = (id: string, resolver: (data: unknown) => void): void => {
-      resolvers.set(id, resolver);
-    };
-
-    const promise = requestGetStateOnce(child, addVoid, 1000);
-    const id = resolvers.keys().next().value as string;
-    resolvers.get(id)?.({ sessionFile: "/tmp/x.jsonl" });
-
-    await expect(promise).resolves.toEqual({ sessionFile: "/tmp/x.jsonl" });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// performGetStateHandshake（FR-4 重试握手）
-//
-// 节奏常量（源码内私有）：GET_STATE_TIMEOUT_MS=2000 / RETRY_INTERVAL_MS=500 /
-// MAX_RETRIES=3。时序（全超时形态）：try1@0 → 超时@2000 → +500 → try2@2500 →
-// 超时@4500 → +500 → try3@5000 → 超时@7000 → resolve collected。
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe("performGetStateHandshake（FR-4 重试握手）", () => {
   it("首次 response 带 sessionFile → 立即 resolve（加速路径，不等剩余重试）", async () => {

@@ -294,7 +294,7 @@ describe("sendPromptCommand", () => {
     expect(() => sendPromptCommand(child, "task")).not.toThrow();
   });
 
-  // [V2 决策 3] streamingBehavior 可选参数：chatMode 统一投递热路径用 prompt+streamingBehavior
+  // [V2 决策 3] streamingBehavior 可选参数：续聊热路径用 prompt+streamingBehavior 统一投递
   it("options.streamingBehavior='followUp' → 写入 streamingBehavior:followUp 字段", () => {
     const child = makeChild();
     sendPromptCommand(child, "queue this", { streamingBehavior: "followUp" });
@@ -316,7 +316,7 @@ describe("sendPromptCommand", () => {
     expect(cmd.streamingBehavior).toBe("steer");
   });
 
-  it("省略 options → 不写入 streamingBehavior 字段（向后兼容，首帧 prompt / 非 chatMode 调用方）", () => {
+  it("省略 options → 不写入 streamingBehavior 字段（向后兼容，首帧 prompt 形态）", () => {
     const child = makeChild();
     sendPromptCommand(child, "first task");
 

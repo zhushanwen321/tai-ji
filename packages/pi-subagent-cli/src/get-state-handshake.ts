@@ -123,8 +123,7 @@ export function performGetStateHandshake(
           }
         });
       } catch (err) {
-        // 同步抛错（stdin 已断的 EPIPE 等）按「本轮未应答」处理：与
-        // requestGetStateOnce 的「stdin 失败按 miss 处理」同源；剩余轮次照排，
+        // 同步抛错（stdin 已断的 EPIPE 等）按「本轮未应答」处理；剩余轮次照排，
         // 耗尽即 resolve 已收集字段——异常绝不逃出 tryOnce（见头注契约）。
         logger.warn(
           `[subagents] get_state handshake attempt ${attempts}/${GET_STATE_MAX_RETRIES} failed `
@@ -135,47 +134,5 @@ export function performGetStateHandshake(
     }
 
     tryOnce();
-  });
-}
-
-/**
- * [T1/RC-1] 单次 get_state 请求（agent_end 决策点惰性回补专用）。
- *
- * 不做重试循环、不 share 握手语义：调用方在子进程 idle 时现场补一次查询，
- * 超时/失败即放弃，由调用方走既有保守分支。永不 reject——stdin 已断的同步写
- * 失败按「回补失败」处理 resolve 空对象。
- */
-export function requestGetStateOnce(
-  child: ChildProcess,
-  addResponseListener: AddGetStateResponseListener,
-  timeoutMs: number,
-): Promise<GetStateResult> {
-  return new Promise<GetStateResult>((resolve) => {
-    let settled = false;
-    let removeListener: () => void = () => {};
-
-    const finish = (r: GetStateResult): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      removeListener();
-      resolve(r);
-    };
-
-    let reqId: string;
-    try {
-      reqId = sendGetStateCommand(child);
-    } catch {
-      resolve({});
-      return;
-    }
-    removeListener =
-      addResponseListener(reqId, (data: unknown) => {
-        const r: GetStateResult = {};
-        extractGetStateFields(data, r);
-        finish(r);
-      }) ?? (() => {});
-    const timer: ReturnType<typeof setTimeout> = setTimeout(() => finish({}), timeoutMs);
-    timer.unref();
   });
 }

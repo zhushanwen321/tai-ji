@@ -9,9 +9,9 @@
 //   - run 一次性任务：SpawnRunParams 还原（字段透传 / ctxModel 覆盖 / forkSource）、
 //     回调接线（onEvent/onHandleReady/onChildSpawned/onDelta/askUser）、
 //     EngineHandle + AgentOutcome 应答装配（usage 域映射 / toolCalls 投影）；
-//   - run chat 轮（[H1 U3] run 派发形态，续聊 = 新 run + resume 锚点——[H1 U5] 起
-//     引擎侧无 interact 面）：chatMode 分派 + resume 锚点透传（--session 穿透）+
-//     recordId 锚定 handle；
+//   - run 续聊轮（[H1 U3] run 派发形态，续聊 = 新 run + resume 锚点——[H1 U5] 起
+//     引擎侧无 interact 面；[modeless 波2] 轮终 settled 收割为引擎内建唯一语义）：
+//     resume 锚点透传（--session 穿透）+ recordId 锚定 handle；
 //   - read 三级降级形态（journal 重放 / outcome-only）、dispose 收割幂等；
 //   - dataDir 缺失 → engine_not_found（prepare 期 reject，不产生 handle）。
 
@@ -332,7 +332,6 @@ describe("PiEngine.run（一次性任务形态）", () => {
       // <encoded(cwd)>（cwd 未传 = process.cwd()）；权威 = 宿主注入（见下方优先用例）
       sessionDir: join("/tmp/engine-data", "subagents", "sessions", process.cwd().replace(/[^a-zA-Z0-9_-]+/g, "_")),
     });
-    expect(cap.params.chatMode).toBeUndefined();
 
     await settleRun(
       cap,
@@ -443,7 +442,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
 });
 
 describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
-  it("会话形态轮：recordId 锚定 + resume 锚点透传（--session 穿透）+ chatMode 分派，不经 ChatSessionRegistry", async () => {
+  it("会话形态轮：recordId 锚定 + resume 锚点透传（--session 穿透），不经 ChatSessionRegistry", async () => {
     const { engine, captured } = makeEngine();
     const runP = engine.run(
       { prompt: "chat turn" },
@@ -460,9 +459,8 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
     expect(cap.params).toMatchObject({
       recordId: "rec-chat-9",
       task: "chat turn",
-      // [H1 U3] 会话形态轮 = run 派发形态：chatMode 仅作 spawn-runner 的 agent_settled
-      // resolve+收割分派（D7），不再经 ChatSessionRegistry.startRound
-      chatMode: true,
+      // [H1 U3] 会话形态轮 = run 派发形态（agent_settled resolve+收割是引擎内建
+      // 唯一语义，[modeless 波2] 无 per-run 形态参数），不经 ChatSessionRegistry.startRound
       resumeSessionFile: "/tmp/sess-c9.jsonl",
       sessionRootId: "root-sess-f6",
       // [LEGACY fallback] ctx.sessionDir 缺省 → 旧推导不变（LEGACY 语义锁定）
@@ -495,7 +493,6 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
       resume: { recordId: "rec-new" },
     });
     expect(captured[0]!.params.resumeSessionFile).toBeUndefined();
-    expect(captured[0]!.params.chatMode).toBe(true);
     // [F6] ctx.sessionRootId 缺省 → SpawnRunParams 不挂键（additive 语义）
     expect(captured[0]!.params).not.toHaveProperty("sessionRootId");
     await settleRun(captured[0]!, spawnRunResult());
@@ -525,7 +522,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
 // [H1 U5] PiEngine.interact 三分派用例族（message 投递 / close / cancel / 冷路径 /
 // EPIPE 兜底 / chat 轮 run 域分支过渡兼容面）已随 interact 方法退役删除：
 //   - 续聊投递的 run 通道形态覆盖 = 上方「PiEngine.run（chat 轮 run 派发形态）」
-//     （resume 锚点透传 + chatMode 分派 + recordId 锚定 handle）；
+//     （resume 锚点透传 + recordId 锚定 handle；[modeless 波2] 轮终形态为引擎内建）；
 //   - EPIPE 兜底语义由 stdin-writer.test（writeStdinLine EPIPE 检测）单元直测；
 //   - cancel/abort 通道 = run 域 cancel 帧（server AbortController → signal），
 //     server.test cancel 用例覆盖；

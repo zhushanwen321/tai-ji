@@ -36,7 +36,6 @@ export { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 export { createTurnLimiter, WRAP_UP_HINT } from "./turn-limiter.ts";
 export {
   performGetStateHandshake,
-  requestGetStateOnce,
   type GetStateResult,
 } from "./get-state-handshake.ts";
 export {

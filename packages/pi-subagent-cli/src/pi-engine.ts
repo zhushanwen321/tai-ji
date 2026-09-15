@@ -242,13 +242,12 @@ function resolveEngineDataRootOrThrow(explicit: string | undefined): string {
   );
 }
 
-/** run 的 spawn 入参还原（协议 RunParams → SpawnRunParams；一次性 run 与续聊轮
+/** run 的 spawn 入参还原（协议 RunParams → SpawnRunParams；首轮与续聊轮
  * 共用同一派发形态——[H1 U3/U6] chat-run 统一 + resume 键为唯一会话形态键，设计 §3.3 D6/D7）：
  *   - record 锚：续聊轮 = ctx.resume.recordId（childSpawned 帧的关联键），
- *     一次性 run = runId；
+ *     首轮 = runId；
  *   - resume 锚点穿透：ctx.resume.resume.sessionRef.sessionFile → resumeSessionFile →
- *     spawn-args `--session` 续写原文件（首轮无锚点 = 新建）；
- *   - chatMode（agent_settled resolve + 收割，D7）仅在会话形态轮置位。 */
+ *     spawn-args `--session` 续写原文件（首轮无锚点 = 新建）。 */
 function buildRunParams(
   task: AgentCallOpts,
   ctx: RunContext,
@@ -266,7 +265,7 @@ function buildRunParams(
     // 旧推导与宿主布局不等价——见 resolveSessionDir 注释）。
     sessionDir: ctx.sessionDir ?? resolveSessionDir(dataDir, cwd),
     cwd,
-    ...buildRunResumeFlags(resumeParams, resumeFile),
+    ...buildRunResumeFlags(resumeFile),
   };
 }
 
@@ -279,8 +278,8 @@ function resolveResumeSessionFile(resumeParams: RunContext["resume"]): string | 
 }
 
 /** 身份域：record 锚（续聊轮 = ctx.resume.recordId（childSpawned 帧的关联键），
- * 一次性 run = runId）+ agent 名 + canonical model。hasResume 决定 agent 兜底名
- * （会话形态轮 chat-agent / 一次性 workflow-agent）。 */
+ * 首轮 = runId）+ agent 名 + canonical model。hasResume 决定 agent 兜底名
+ * （续聊轮 chat-agent / 首轮 workflow-agent）。 */
 function buildRunIdentityParams(
   task: AgentCallOpts,
   ctx: RunContext,
@@ -313,15 +312,11 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
   };
 }
 
-/** 会话形态轮 flags（chat-run 统一 [H1 U3/U6]，resume 键为唯一会话形态键，设计 §3.3 D6/D7）：
- * chatMode（agent_settled resolve + 收割，D7）仅在会话形态轮置位；resume 锚点
- * resumeSessionFile 续写原文件。 */
-function buildRunResumeFlags(
-  resumeParams: RunContext["resume"],
-  resumeFile: string | undefined,
-): Partial<SpawnRunParams> {
+/** resume 轮 flags（resume 键为唯一会话形态键，[H1 U3/U6] + [modeless 波2]）：
+ * agent_end 轮收敛不 kill + agent_settled resolve 并收割是引擎内建唯一语义（无
+ * per-run 形态参数）；此处仅携带 resume 锚点 resumeSessionFile 续写原文件。 */
+function buildRunResumeFlags(resumeFile: string | undefined): Partial<SpawnRunParams> {
   return {
-    ...(resumeParams !== undefined ? { chatMode: true } : {}),
     ...(resumeFile !== undefined ? { resumeSessionFile: resumeFile } : {}),
   };
 }

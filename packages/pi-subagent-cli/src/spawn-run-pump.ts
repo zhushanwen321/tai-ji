@@ -39,9 +39,9 @@ const SIGNAL_EXIT_CODE_BASE = 128;
  */
 const SPAWN_ERROR_EXIT_CODE = 127;
 
-/** run 收尾状态（agent_end / agent_settled 与 close 收尾共享的可变句柄）。 */
+/** run 收尾状态（轮收敛（agent_end/agent_settled）与 close 收尾共享的可变句柄）。 */
 export interface RunEndState {
-  /** agent_end 置位：主动终结的 close 按成功口径（exit 0）收尾。 */
+  /** 轮终置位（agent_end / agent_settled）：主动收割的 close 按成功口径（exit 0）收尾。 */
   endedCleanly: boolean;
   /**
    * child 'error' 事件的消息快照（spawn 失败形态：子进程从未运行）。error 事件
@@ -50,7 +50,7 @@ export interface RunEndState {
    * 见 spawn-runner collectOutcome）。
    */
   childErrorMessage?: string;
-  /** [chatMode] agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
+  /** agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
   resolveChatRun?: (code: number) => void;
 }
 
@@ -136,8 +136,8 @@ export function createSessionIdentityTracker(
       const found = findSessionFileByHeaderId(sessionDir, sessionId);
       if (found === undefined) return;
       // 走既有回填面（与 M2 回补同一条路）：sessionFile 落位（collectOutcome 的
-      // outcome.sessionFile 生效）+ handleReady 通知宿主回写 record——chat 域的 run
-      // 在 agent_settled 已应答，close 兜底是 record 补 transcript 锚点的最后时机
+      // outcome.sessionFile 生效）+ handleReady 通知宿主回写 record——run 在
+      // agent_settled 已应答，close 兜底是 record 补 transcript 锚点的最后时机
       // （只补 sessionFile，sessionId 已知不再变更）。
       applyGetStateFields({ sessionFile: found });
     },
@@ -207,7 +207,7 @@ function reportChildExited(
   });
 }
 
-/** close 退出码口径：agent_end 主动终结 = 0；其余 signal 退出按 128+ 折算（异常判据）。 */
+/** close 退出码口径：轮终主动收割 = 0；其余 signal 退出按 128+ 折算（异常判据）。 */
 function normalizeExitCode(
   endedCleanly: boolean,
   code: number | null,
@@ -217,16 +217,16 @@ function normalizeExitCode(
 }
 
 /**
- * close 收尾的 sessionFile 仍缺响亮 warn：握手 / 迟到应答 / agent_end 补查 / LC-4
- * 后缀反查全 miss 本身是应响亮报错的异常信号，不做启发式自动认领（prompt 头键
- * 误配的代价——错 sessionFile 让冷续 resume 共写他 session 文件——高于收益，且旗舰
- * 并发形态头部同质必然多命中、结构性地采不中）。warn 附人工排查指引，不静默。
+ * close 收尾的 sessionFile 仍缺响亮 warn：握手 / 迟到应答 / LC-4 后缀反查全 miss
+ * 本身是应响亮报错的异常信号，不做启发式自动认领（prompt 头键误配的代价——错
+ * sessionFile 让冷续 resume 共写他 session 文件——高于收益，且旗舰并发形态头部
+ * 同质必然多命中、结构性地采不中）。warn 附人工排查指引，不静默。
  */
 function warnSessionFileUnobtainable(deps: StdoutPumpDeps): void {
   const { recordId, identity } = deps;
   if (identity.sessionFile !== undefined) return;
   logger.warn(
-    `[sessionfile] unobtainable for ${recordId} (all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup); ` +
+    `[sessionfile] unobtainable for ${recordId} (all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup); ` +
       `record finalized without transcript anchor. Recovery: 若需 transcript 取证，用 session-reader 列 sessionDir 内 mtime 窗口文件人工归档；若需完整结果，重派任务。`,
   );
 }
@@ -267,7 +267,7 @@ function createCloseFinalizer(
       // LC-4 之后仍缺 = 全路 miss 的异常信号：响亮 warn + 人工排查指引（不自动认领）
       bestEffort("sessionfile unobtainable warn", () => warnSessionFileUnobtainable(deps));
     } finally {
-      // agent_end 主动终结的 close 是正常完成（exit code 0 口径）；其余信号退出
+      // 轮终主动收割（agent_settled reap）的 close 是正常完成（exit code 0 口径）；其余信号退出
       // 保持 128+ 折算（异常路径判据）。child 'error'（spawn 失败，子进程从未
       // 运行）必须按失败码收尾——(code=null, signal=null) 落回 0 折算会把从未
       // 启动的 run 伪成功（F4）。resolveExit 无条件必达。
@@ -288,7 +288,7 @@ function createCloseFinalizer(
 export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
   const { child } = deps;
   return new Promise<number>((resolveExit) => {
-    // [chatMode] agent_settled resolve 句柄落位（见 runEnd 声明处注释）
+    // agent_settled resolve 句柄落位（见 runEnd 声明处注释）
     deps.runEnd.resolveChatRun = resolveExit;
     const consumeLine = createLineConsumer(deps);
     const onClose = createCloseFinalizer(deps, resolveExit);

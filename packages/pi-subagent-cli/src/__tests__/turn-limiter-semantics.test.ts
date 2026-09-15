@@ -1,14 +1,15 @@
 // src/execution/__tests__/turn-limiter-semantics.test.ts
 //
-// SP-9: turn-limiter chatMode 语义——chatMode 下 maxTurns 每轮 reset（不跨轮累计）。
-// 设计 D9 决策：续聊本质是无限轮，累计上限违背 G1。
+// SP-9: turn-limiter 轮次语义——agent_settled 后 maxTurns 每轮 reset（不跨轮累计）。
+// 设计 D9 决策：续聊本质是无限轮，累计上限违背 G1。（[modeless 波2] 全体 run 均为
+// 轮次形态，spawn-event-translator 在 agent_settled 恒调 reset。）
 
 import { describe, expect, it, vi } from "vitest";
 
 import { createTurnLimiter } from "../turn-limiter.ts";
 
-describe("SP-9: turn-limiter chatMode semantics (maxTurns reset per round)", () => {
-  describe("TC-1: chatMode 多轮后 maxTurns 每轮 reset（不累计）", () => {
+describe("SP-9: turn-limiter round semantics (maxTurns reset per round)", () => {
+  describe("TC-1: 多轮后 maxTurns 每轮 reset（不累计）", () => {
     it("reset 后 maxTurns 不累计——第二轮从 0 开始，不触发 steer/abort", () => {
       const steer = vi.fn();
       const abort = vi.fn();
@@ -21,7 +22,7 @@ describe("SP-9: turn-limiter chatMode semantics (maxTurns reset per round)", () 
       expect(steer).toHaveBeenCalledTimes(1);
       expect(abort).not.toHaveBeenCalled();
 
-      // agent_settled → reset（模拟 chatMode 每轮 reset）
+      // agent_settled → reset（每轮 reset，modeless 下全体 run 同语义）
       limiter.reset();
 
       // 第二轮从 turnCount=0 开始（record.turnCount 由 session-runner 归零）：
@@ -45,7 +46,7 @@ describe("SP-9: turn-limiter chatMode semantics (maxTurns reset per round)", () 
       expect(steer).toHaveBeenCalledTimes(1);
       expect(abort).toHaveBeenCalledTimes(1);
 
-      // reset（chatMode 新轮）
+      // reset（新轮）
       limiter.reset();
       expect(limiter.didSteer).toBe(false);
       expect(limiter.didAbort).toBe(false);
@@ -87,7 +88,7 @@ describe("SP-9: turn-limiter chatMode semantics (maxTurns reset per round)", () 
       limiter.onTurnEnd(3); // grace turn 1
       expect(abort).not.toHaveBeenCalled();
 
-      // reset（模拟 chatMode agent_settled）
+      // reset（模拟 agent_settled）
       limiter.reset();
 
       // 第二轮：从 turn 1 开始，graceTurns 重新从 0 计数
@@ -124,13 +125,13 @@ describe("SP-9: turn-limiter chatMode semantics (maxTurns reset per round)", () 
     });
   });
 
-  describe("TC-3: 非 chatMode 行为不变（全程累计）", () => {
+  describe("TC-3: 无 reset 时全程累计（limiter 原语行为锁定）", () => {
     it("不调用 reset 时 turn-limiter 行为与原来完全一致", () => {
       const steer = vi.fn();
       const abort = vi.fn();
       const limiter = createTurnLimiter({ maxTurns: 3, graceTurns: 2, steer, abort });
 
-      // 全程累计（非 chatMode，不 reset）：3→steer，5→abort
+      // 全程累计（不 reset——原语行为锁定）：3→steer，5→abort
       limiter.onTurnEnd(1);
       limiter.onTurnEnd(2);
       limiter.onTurnEnd(3); // steer

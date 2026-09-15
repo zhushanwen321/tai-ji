@@ -5,8 +5,9 @@
 //
 // 被测链路 = 真实 runSpawnOnce → 真实 pump/close finalizer，仅 pi 对端用 fake 脚本
 // 替代（同 run-spawn-once.integration.test.ts 手法）。fake pi 形态 =「get_state 全程
-// 不应答」（握手 3 轮 + agent_end 补查全 miss 的原事故现实形态）+ 正常跑完、不落任何
-// session 文件（sessionId 未知 → LC-4 后缀反查无从发起）→ 四路全 miss。
+// 不应答」（握手 3 轮全 miss 的事故现实形态）+ 正常跑完、不落任何 session 文件
+// （sessionId 未知 → LC-4 后缀反查无从发起）→ 三路全 miss（[modeless 波2] agent_end
+// 回补路已随 one-shot 分支删除）。
 //
 // 用户裁定（prompt 头键兜底采纳机制已移除）：全 miss 本身是应响亮报错的异常信号，
 // 不做启发式自动认领——正确形态 = warn 留痕（含 recordId + 全路 miss 归因 + 人工
@@ -32,9 +33,10 @@ import { resetAllEpipeFailures } from "../stdin-writer.ts";
 
 /**
  * fake pi：rpc 形态子进程。
- * - `get_state` **全程不应答**（原事故形态；spawn 期握手与 agent_end 回补同样收不到应答）；
- * - 收到 prompt 后正常收尾：message_end → agent_end（→ 引擎 M2 回补 1s 超时后 kill，
- *   触发 close）；不落任何 session 文件（sessionId 恒未知 → LC-4 无从反查）。
+ * - `get_state` **全程不应答**（原事故形态；spawn 期握手同样收不到应答）；
+ * - 收到 prompt 后正常收尾：message_end → agent_end → agent_settled（[modeless 波2]
+ *   settled = run resolve + 收割点，触发 close）；不落任何 session 文件
+ *   （sessionId 恒未知 → LC-4 无从反查）。
  */
 const FAKE_PI_SCRIPT = `
 import readline from "node:readline";
@@ -46,12 +48,13 @@ rl.on("line", (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.type === "extension_ui_response") return;
-  // 握手 / agent_end 回补的 get_state 一律不应答（不写 response 行）
+  // 握手 / 后续的 get_state 一律不应答（不写 response 行）
   if (msg.type === "get_state") return;
   if (msg.type !== "prompt") return;
 
   send({ type: "message_end", message: { stopReason: "stop" } });
   send({ type: "agent_end", willRetry: false, reason: "end_turn" });
+  send({ type: "agent_settled" });
 });
 `;
 
@@ -112,12 +115,12 @@ afterEach(() => {
 });
 
 describe("close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi 全程不应答）", () => {
-  it("四路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态", async () => {
+  it("三路全 miss → warn 留痕（recordId + unobtainable + 排查指引）且 run 正常终态", async () => {
     const h = makeHarness();
 
     const result: SpawnRunResult = await runSpawnOnce(baseParams(), callbacksOf(h));
 
-    // run 正常终态：resolveExit 必达（await 不挂死）+ agent_end 主动终结的 exit 0 口径
+    // run 正常终态：resolveExit 必达（await 不挂死）+ agent_settled resolve 的 exit 0 口径
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
     // 全 miss 形态：身份面无锚点（不自动认领）
@@ -131,7 +134,7 @@ describe("close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi �
       .map((l) => l.message);
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain("unobtainable for rec-warn-e2e");
-    expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup");
+    expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup");
     expect(warns[0]).toContain("record finalized without transcript anchor");
     expect(warns[0]).toContain("Recovery:");
   }, 15_000);

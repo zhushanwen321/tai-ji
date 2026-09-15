@@ -4,15 +4,16 @@
 // JSONL 驱动 / stdout JSONL 事件流），驱动 spawn-runner → spawn-run-pump →
 // spawn-event-translator 全链（不含真实 pi 二进制）。覆盖验收面：
 //   - rpc 模式成功流：get_state 握手身份回填、事件翻译（tool/text/thinking/turn/
-//     message_end usage）、agent_end 主动终结的 exit 0 口径、stderr tee 落盘、
+//     message_end usage）、agent_settled resolve 的 exit 0 口径、stderr tee 落盘、
 //     invalid 行 / extension_ui_request 管道不中断；
 //   - header 模式（json mode）：header 行身份 + 握手同值去重（不重发 handleReady）；
 //   - 失败退出（exit 3）→ success=false + failureKind 分诊；
 //   - message_end stopReason=aborted → record.lastError → success=false（stale 分诊）；
 //   - abort signal → SIGTERM → 128+signal 折算退出码；
 //   - spawn 失败（relay node 不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
-//   - chatMode（[H1 U3] run 派发形态）：agent_end 不 kill、agent_settled resolve
-//     （exit 0）+ 杀链收割（每轮一进程，续聊 = 新 run + resume）；
+//   - 轮终语义（[modeless 波2] 唯一形态，原 chatMode 分支统一）：agent_end 轮收敛
+//     不 kill、agent_settled resolve（exit 0）+ 杀链收割（每轮一进程，续聊 = 新
+//     run + resume）；
 //   - model 缺失 → prepare 期抛错（不 spawn）。
 //
 // fake pi 脚本落 mkdtemp 临时目录；process.argv[1] 临时指向它（getPiInvocation
@@ -85,6 +86,7 @@ rl.on("line", (line) => {
     );
     send({ type: "message_end", message: { stopReason: "stop" } });
     send({ type: "agent_end", willRetry: false, reason: "end_turn" });
+    send({ type: "agent_settled" });
     return;
   }
   if (mode === "stop-aborted") {
@@ -106,7 +108,7 @@ rl.on("line", (line) => {
   send({ type: "message_end", message: { usage: { input: 11, output: 7, cacheRead: 2, cacheWrite: 3, cost: { total: 0.42 } }, stopReason: "stop" } });
   send({ type: "agent_end", willRetry: false, reason: "end_turn" });
   send({ type: "agent_settled" });
-  // 一次性模式：宿主 agent_end → SIGTERM 收割；chatMode：settled resolve 后杀链收割（U3 每轮一进程）
+  // settled resolve 后杀链收割（每轮一进程——续聊 = 新 run + resume 锚点）
 });
 `;
 
@@ -196,10 +198,11 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       );
 
       // 结果聚合（translator 事件流 → reducer → collector）
-      expect(result.success).toBe(true); // agent_end 主动终结 = exit 0 口径
+      expect(result.success).toBe(true); // agent_settled resolve = exit 0 口径
       expect(result.error).toBeUndefined();
       expect(result.content).toBe("hello world");
-      expect(result.turns).toBe(1);
+      // settled 按轮归零 turnCount（SP-9：轮独立预算）——outcome.turns 恒 0
+      expect(result.turns).toBe(0);
       expect(result.sessionId).toBe("fake-sess-1");
       expect(result.sessionFile).toBe(
         "/tmp/fake-sessions/20260910T010101_00000000-0000-0000-0000-0000000000aa.jsonl",
@@ -233,7 +236,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
         sessionRef: { sessionId: "fake-sess-1", sessionFile: result.sessionFile },
         });
 
-      // 镜像上报：childSpawned 先行 + running/exited 状态（killed=true = agent_end 收割）
+      // 镜像上报：childSpawned 先行 + running/exited 状态（killed=true = settled 收割）
       expect(h.childSpawned).toHaveLength(1);
       expect(h.childSpawned[0]!.recordId).toBe("rec-int-1");
       expect(h.stateChanges.map((s) => s.state)).toEqual(["running", "exited"]);
@@ -287,9 +290,13 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       // 握手三轮应答都缺 sessionFile（S2 契约：视同未应答 → 3 轮耗尽 resolve 已收集字段）
       // → 身份只有 sessionId；sessionFile 只可能来自 close 期的 LC-4 后缀反查
       expect(result.sessionId).toBe("fake-sess-1");
-      expect(result.sessionFile).toBe(lc4File);
+      // [modeless 波2] run 在 agent_settled 即应答（早于收割 close）——outcome 收集
+      // 时刻 sessionFile 仍缺；LC-4 后缀反查在 close 收尾才发生，transcript 锚点经
+      // handleReady 通知补齐（record 锚不进 outcome）。
+      expect(result.sessionFile).toBeUndefined();
       // handleReady 恰一次且携带 sessionFile：spawn 期应答无 sessionFile（不发通知），
       // 故这一条只能由 close 期的 LC-4 落位产生 ——「只在 close 后发一次」
+      await waitFor(() => h.handleReady.length === 1);
       expect(h.handleReady).toEqual([
         { sessionRef: { sessionId: "fake-sess-1", sessionFile: lc4File }},
       ]);
@@ -372,12 +379,12 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("chatMode（[H1 U3] run 派发形态）：agent_end 不 kill；agent_settled resolve（exit 0）并收割子进程", async () => {
+  it("轮次时序观测面（modeless 唯一语义）：onChatRoundEnd/onChatAgentSettled 各一次；agent_settled resolve（exit 0）并收割子进程", async () => {
     const h = await makeHarness("success");
     let roundEnded = 0;
     let settled = 0;
     try {
-      const result = await runSpawnOnce(baseParams(h, { chatMode: true, maxTurns: 2 }), {
+      const result = await runSpawnOnce(baseParams(h, { maxTurns: 2 }), {
         ...callbacksOf(h),
         onChatRoundEnd: () => {
           roundEnded += 1;
@@ -391,7 +398,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(settled).toBe(1);
       expect(result.success).toBe(true); // resolveChatRun(0)，与 close 信号无关
       expect(result.content).toBe("hello world");
-      // agent_settled 消费面按轮重置 turnCount（SP-9：chat 续聊轮独立预算）
+      // agent_settled 消费面按轮重置 turnCount（SP-9：续聊轮独立预算）
       expect(result.turns).toBe(0);
 
       // [H1 U3] agent_settled resolve 后杀链收割（每轮一进程——续聊 = 新 run +

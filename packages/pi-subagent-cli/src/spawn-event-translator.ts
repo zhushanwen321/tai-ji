@@ -44,9 +44,9 @@ export interface SdkTranslatorOpts {
   onEvent: (e: AgentEvent) => void;
   onDelta?: (d: string) => void;
   abort: () => void;
-  /** agent_end（非 willRetry）到达：turn 已终态、pi rpc 常驻进程需外部终结。 */
+  /** agent_end（非 willRetry）到达：turn 已终态、轮收敛（不 kill，收割等 agent_settled）。 */
   onAgentEnd?: () => void;
-  /** [chatMode] agent_settled（真空闲）到达：run resolve 点 + idle 相位锚点。 */
+  /** agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。 */
   onAgentSettled?: () => void;
 }
 
@@ -125,18 +125,17 @@ function handleToolExecutionUpdate(
   agentEvent(TOOL_ACTIVITY_EVENT);
 }
 
-/** agent_end → 终结语义分派（非 willRetry 才是轮终）。 */
+/** agent_end → 轮收敛分派（非 willRetry 才是轮终）。 */
 function handleAgentEnd(raw: SdkEvent, opts: SdkTranslatorOpts): void {
-  // [F1.2 根修，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；
-  // 旧 core runSpawn 的 routeAgentEnd（agent_end → 非 willRetry → 终结子进程
-  // → close → runSpawn resolve）在 W7 协议化提取时丢失，导致 run 永不终态
-  // （事件流出齐全、outcome 悬挂）。此处恢复终结语义：message_end/turn_end
-  // 已先于 agent_end 到达并累积进 record，kill 触发 close 后正常收尾。
+  // [F1.2 根修，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；旧 core
+  // runSpawn 的 routeAgentEnd（agent_end → 非 willRetry → 终结子进程 → close →
+  // runSpawn resolve）在 W7 协议化提取时丢失，导致 run 永不终态（事件流出齐全、
+  // outcome 悬挂）。此处承载轮终收敛语义：message_end/turn_end 已先于 agent_end
+  // 到达并累积进 record，run 的 resolve 挂 agent_settled（真空闲），收割在其后
+  // （[modeless 波2] 唯一语义，无分支）。
   // 旧实现的 pending 后代 keep-alive 分支（session 文件 pending:register 差集
   // 判活 + no-progress timer + notifier steer 唤醒）未随迁移——本执行器口径是
-  // workflow 域单次 run（见文件头），后台后代保活编排登记为协议化偏差。
-  // [v1.x chatMode] 长驻形态分支：不 kill（轮收敛交 onChatRoundEnd 上报），
-  // resolve 改挂 agent_settled（真空闲）——对齐 inproc chatMode。
+  // 每 run 一进程，后台后代保活编排登记为协议化偏差。
   if (raw.willRetry !== true) opts.onAgentEnd?.();
 }
 
@@ -146,11 +145,9 @@ function handleAgentSettled(
   limiter: ReturnType<typeof createTurnLimiter>,
   opts: SdkTranslatorOpts,
 ): void {
-  // [v1.x chatMode] 真空闲边界（agent_end 之后、post-run 完成后才 emit——
-  // pi agent-session _runAgentPrompt finally 块）。仅长驻形态消费：run 在此
-  // resolve，turn 计数与 limiter 标志按轮重置（SP-9 对齐：续聊轮独立预算，
-  // maxTurns 不跨轮累计）。一次性 run 不消费（agent_end 已 kill，进程不会
-  // 活到 settled）。
+  // 真空闲边界（agent_end 之后、post-run 完成后才 emit——pi agent-session
+  // _runAgentPrompt finally 块）= run 的 resolve 与收割点：turn 计数与 limiter
+  // 标志按轮重置（SP-9 对齐：续聊轮独立预算，maxTurns 不跨轮累计）。
   if (opts.onAgentSettled !== undefined) {
     record.turnCount = 0;
     limiter.reset();

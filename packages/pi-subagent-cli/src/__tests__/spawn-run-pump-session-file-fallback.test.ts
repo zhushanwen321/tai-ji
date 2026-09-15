@@ -152,7 +152,7 @@ describe("close finalizer sessionFile 兜底接线（LC-4 + 仍缺响亮 warn）
     const warns = sessionFileWarnings();
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain("unobtainable for rec-pump-test");
-    expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, agent_end backfill, LC-4 suffix lookup");
+    expect(warns[0]).toContain("all acquisition paths missed: spawn handshake, late response, LC-4 suffix lookup");
     expect(warns[0]).toContain("record finalized without transcript anchor");
     expect(warns[0]).toContain("Recovery:");
   });
