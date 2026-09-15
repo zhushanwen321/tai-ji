@@ -57,6 +57,7 @@ import { updateFromEvent } from "../persistence/execution-record.ts";
 import { doFinalizeRoundToIdle, type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
+import { RemoteEngine } from "../engine/client/remote-engine.ts";
 import type { EnginePort, EngineRunResult } from "../engine/port.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
@@ -80,6 +81,7 @@ import {
 } from "../lifecycle/settled-watchdog.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
+import { bestEffort } from "../assembly/best-effort.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,
@@ -590,6 +592,12 @@ export class ChatRounds {
     record.controller?.abort();
     // fire = 本轮等待窗口终结（timer 回调已自删 entry，此处幂等清防御收尾段残留）。
     disarmRoundFromProtocol(record.id);
+    // [stdout-wedge self-heal] 自愈段（零事件判据 + 单路由杀引擎触发 respawn）——
+    // 刻意置于 CAS 抢锁检查之前：引擎级楔死与 record 收口状态正交（cancel/dispose
+    // 抢先收口的 raced 形态同样需要引擎自愈），且不依赖失败通知门放行。全程不抛
+    // （timer 回调同步上下文，错误逃出 = 崩宿主）；杀链 fire-and-forget，异常 catch 归
+    // best-effort。事件计数 >0 的正常超时类 fire 在段内零动作（行为零变化）。
+    this.healEngineStdoutWedge(record);
     // [U5] 失败轮 settle（不终态化——markRoundIdle 落 idle 万物可续
     // [two-state-convergence U4/D3]；watchdog 杀轮非用户放弃，不置放弃轮标记——失败
     // 通知必须送达，gate ①②不拦）。
@@ -625,6 +633,63 @@ export class ChatRounds {
       startedAt: record.startedAt,
       endedAt: record.endedAt ?? Date.now(),
     });
+  }
+
+  /**
+   * [stdout-wedge self-heal] one-shot 轮 settled-watchdog fire 的引擎 stdout 腿楔死
+   * 自愈段：零事件判据（eventsReceivedForRun === 0）→ warn 点名诊断；零事件且仅
+   * 本 run 在册（activeRunCount() === 1，无并发 run 连坐）→ 杀引擎（
+   * killEngineForStdoutWedge → killAll 组杀），下次派发 respawn 新引擎。
+   *
+   * 设计依据（2026-09-15 实证事故）：单一引擎进程（TaiJi-as-node 子进程，stdio
+   * socketpair）前 3 个 run 的引擎→宿主事件通知全部静默丢失（宿主零 journal、run()
+   * 永不 resolve、settled-watchdog 30 分钟后 fire 误报失败），同一引擎后续 run 又全部
+   * 正常——传输层物理完好，事件在引擎侧写出后丢失（疑似 Bun×Electron-as-node×
+   * socketpair 冷启动楔死，fire 时段的 kill 操作疑似「踢活」了流）。本段把静默楔死
+   * 变成 fire 时的自愈 + 可诊断。
+   *
+   * 访问路径：record.engine → resolveRoundEnginePort（pi = deps.resolveChatEnginePort，
+   * 非 pi = registry getEngine）→ cli 形态 port 即 RemoteEngine → protocolClient
+   * （EngineClient 诊断/自愈面）。非 cli 形态（pi 未注册 stub）无协议客户端可判——
+   * 零动作；引擎解析失败（未注册非 pi id）debug 留痕零动作（fire 主处置已收口，不因
+   * 自愈段报错冒泡）。
+   *
+   * 分级：零事件但有其他活跃 run → 只诊断不杀（组杀会连坐并发 run 的在途事件流；
+   * workflow 域挂载点为后续工作——本期范围 = one-shot chat 域）；事件计数 >0 =
+   * 正常超时类 fire，零动作（行为零变化）。
+   */
+  private healEngineStdoutWedge(record: ExecutionRecord): void {
+    let engine: EnginePort;
+    try {
+      engine = this.resolveRoundEnginePort(record);
+    } catch (err) {
+      logger.debug(
+        `[subagents] stdout-wedge self-heal skipped: engine port resolution failed for ${record.id} (${
+          err instanceof Error ? err.message : String(err)
+        })`,
+      );
+      return;
+    }
+    if (!(engine instanceof RemoteEngine)) return;
+    const client = engine.protocolClient;
+    if (client.eventsReceivedForRun(record.id) > 0) return; // 正常超时类 fire——零动作
+    logger.warn(
+      `[subagents] engine stdout leg wedge suspected (zero events received for this run; ` +
+        `relay log at ~/.xyz-agent/logs/pi-relay-<date>-${record.id}.jsonl is the evidence source) — ` +
+        `2026-09-15 incident shape: engine→host notifications were silently dropped for the first runs ` +
+        `of a fresh engine process while later runs on the same engine were fine (cold-start stdout wedge). ` +
+        `Verify in the relay log whether the engine wrote frames the host never received.`,
+    );
+    if (client.activeRunCount() !== 1) {
+      // 其他活跃 run 在册——组杀会连坐其事件流（本期范围：one-shot chat 域只诊断
+      // 不杀；workflow 域挂载点为后续工作）。
+      return;
+    }
+    void client
+      .killEngineForStdoutWedge(
+        `settled watchdog fired with zero engine events for run ${record.id}`,
+      )
+      .catch((err: unknown) => bestEffort(err, "stdout-wedge self-heal engine kill"));
   }
 
   // [H1 U6] chat 域相位机整族已随旧协议轮次相位通道退役删除（语义迁移归属）：

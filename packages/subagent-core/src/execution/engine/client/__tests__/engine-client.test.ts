@@ -546,3 +546,59 @@ describe("pidfile 启动期清扫（EngineClient 接线，R9-3）", () => {
     await cleanup();
   });
 });
+
+describe("[stdout-wedge self-heal] run 事件计数旁路观测 + 引擎自愈杀链", () => {
+  // 设计依据（2026-09-15 实证事故）：单一 TaiJi-as-node 引擎进程前 3 个 run 的
+  // 引擎→宿主事件通知全部静默丢失（settled-watchdog 30 分钟误报），同引擎后续 run
+  // 又全部正常——计数面把「零事件楔死」从不可见变成 fire 时可判可自愈。
+
+  it("事件计数：未收帧 0 →（emit 1 帧）→ 1；注销后计数清理；未知 runId 恒 0；activeRunCount 随注册/注销增减", async () => {
+    const { client, cleanup } = makeClient({
+      args: [
+        FAKE_ENGINE,
+        "--run-actions",
+        JSON.stringify([{ op: "emit", seq: 1, event: { type: "text_delta", delta: "hello" } }]),
+      ],
+    });
+    const unregister = client.registerRunRoute("run-1", {});
+    // 路由行为零变化：旁路观测面只计数，不改路由决策。
+    expect(client.eventsReceivedForRun("run-1")).toBe(0); // 注册后未收帧 = 0
+    expect(client.eventsReceivedForRun("never-registered")).toBe(0); // 未知 runId 恒 0
+    expect(client.activeRunCount()).toBe(1);
+    await client.ensureConnected();
+    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
+    // fixture 的 run 处理器固定先回一帧 run-params 回显事件（seq 0），再加 emit 帧——
+    // 1 次 emit = 2 帧（回显帧也是 event 通知，计数面不区分语义，到达即 +1）。
+    expect(client.eventsReceivedForRun("run-1")).toBe(2);
+    unregister();
+    expect(client.activeRunCount()).toBe(0);
+    expect(client.eventsReceivedForRun("run-1")).toBe(0); // 注销后计数随路由清理
+    await cleanup();
+  });
+
+  it("killEngineForStdoutWedge：复用既有 killAll 杀链（mock 验证透传 reason）", async () => {
+    const { client, cleanup } = makeClient();
+    await client.ensureConnected();
+    const killAllSpy = vi.spyOn(client, "killAll").mockResolvedValue(undefined);
+    await client.killEngineForStdoutWedge("wedge-test reason");
+    expect(killAllSpy).toHaveBeenCalledTimes(1);
+    expect(killAllSpy).toHaveBeenCalledWith("wedge-test reason");
+    killAllSpy.mockRestore();
+    await cleanup();
+  });
+
+  it("killEngineForStdoutWedge：真实杀链杀引擎进程 + state 离开 ready（下次派发 respawn 前提）", async () => {
+    const { client, cleanup } = makeClient();
+    await client.ensureConnected();
+    const enginePid = client.enginePid!;
+    expect(client.currentState).toBe("ready");
+    await client.killEngineForStdoutWedge("real wedge kill");
+    await waitFor(() => isProcessAlive(enginePid) === false); // 引擎进程被杀
+    expect(client.currentState).not.toBe("ready"); // killAll 收口（非 unavailable——可重建）
+    // 自愈语义闭环：杀后 ensureConnected respawn 新引擎（新 pid）。
+    await client.ensureConnected();
+    expect(client.currentState).toBe("ready");
+    expect(client.enginePid).not.toBe(enginePid);
+    await cleanup();
+  }, 20_000);
+});

@@ -166,6 +166,13 @@ export class EngineClient {
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
+  /**
+   * [stdout-wedge self-heal] runId → 已收引擎→宿主 event 通知帧计数（旁路观测）。
+   * 生命周期与 run 路由同拍：路由注销 / teardownProcess 清表时一并清理（防 runId
+   * 键无界累积）。计数不参与任何路由 / 生命周期决策——settled-watchdog fire 时经
+   * eventsReceivedForRun 读取，区分「零事件楔死」与「有事件正常超时」。
+   */
+  private readonly runEventCounts = new Map<string, number>();
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
   private connectInFlight: Promise<void> | undefined;
@@ -221,6 +228,26 @@ export class EngineClient {
   /** 最近一次 host/handleReady 回填（RemoteEngine 崩溃合成 handle 用）。 */
   getPartialHandle(): { sessionRef: Record<string, string> } | undefined {
     return this.lastPartialHandle;
+  }
+
+  /**
+   * [stdout-wedge self-heal] 某 run 已收引擎→宿主 event 通知帧计数（旁路观测面）。
+   * 0 = 该 run 全静默——引擎 stdout 腿楔死判据；路由不存在（未注册 / 已注销 / 已
+   * teardown）同样返回 0。设计依据（2026-09-15 实证事故）：单一 TaiJi-as-node 引擎
+   * 进程（stdio socketpair）前 3 个 run 的引擎→宿主事件通知全部静默丢失（宿主零
+   * journal、run() 永不 resolve、settled-watchdog 30 分钟后 fire 误报失败），同一
+   * 引擎后续 run 又全部正常——传输层物理完好，事件在引擎侧写出后丢失（疑似 Bun×
+   * Electron-as-node×socketpair 冷启动楔死）。调用方（chat-rounds settled-watchdog
+   * fire 处置）以零事件为判据把静默楔死变成自愈 + 可诊断。
+   */
+  eventsReceivedForRun(runId: string): number {
+    return this.runEventCounts.get(runId) ?? 0;
+  }
+
+  /** [stdout-wedge self-heal] 当前在册 run 路由数（fire 侧「仅本 run 在册」判据——
+   *  杀引擎不连坐并发 run 的前置检查；计数面 = 本引擎的 client，跨引擎 run 不在册）。 */
+  activeRunCount(): number {
+    return this.runRoutes.size;
   }
 
   /** initialize 应答（诊断面；RemoteEngine 诊断留痕用）。 */
@@ -493,6 +520,9 @@ export class EngineClient {
   }
 
   private onEventNotification(runId: string, event: unknown): void {
+    // [stdout-wedge self-heal] 旁路观测：收到任意 event 通知帧即 +1（含无路由时的
+    // 迟到帧——到达本身即证明 stdout 腿活着）。不改变下方路由行为。
+    this.runEventCounts.set(runId, (this.runEventCounts.get(runId) ?? 0) + 1);
     this.runRoutes.get(runId)?.onEvent?.(event);
   }
 
@@ -548,11 +578,14 @@ export class EngineClient {
     });
   }
 
-  /** 注册 run 作用域反向通知路由；返回注销函数。 */
+  /** 注册 run 作用域反向通知路由；返回注销函数（路由与事件计数一并清理）。 */
   registerRunRoute(runId: string, route: RunRoute): () => void {
     this.runRoutes.set(runId, route);
     return () => {
-      if (this.runRoutes.get(runId) === route) this.runRoutes.delete(runId);
+      if (this.runRoutes.get(runId) === route) {
+        this.runRoutes.delete(runId);
+        this.runEventCounts.delete(runId);
+      }
     };
   }
 
@@ -583,6 +616,20 @@ export class EngineClient {
       await waitForChildExit(child, SIGKILL_REAP_TIMEOUT_MS);
     }
     this.teardownProcess(reason);
+  }
+
+  /**
+   * [stdout-wedge self-heal] stdout 腿楔死自愈杀链：复用 killAll 组杀引擎进程，下次
+   * 派发经 ensureConnected respawn 新引擎（killAll 后 state 回落 exited，非
+   * unavailable——连接状态机允许重建）。warn 诊断含 reason，供排障区分「宿主收割」
+   * 与「楔死自愈」。设计依据（2026-09-15 实证事故，详见 eventsReceivedForRun 注释）：
+   * fire 时段的 kill 操作疑似「踢活」了楔死的流，主动杀 = 以 respawn 换确定性恢复。
+   */
+  async killEngineForStdoutWedge(reason: string): Promise<void> {
+    logger.warn(
+      `[engine-client:${this.engineId}] [stdout-wedge self-heal] killing engine process for stdout-leg wedge recovery (${reason}); next dispatch respawns a fresh engine`,
+    );
+    await this.killAll(reason);
   }
 
   /**
@@ -640,6 +687,7 @@ export class EngineClient {
     }
     this.pending.clear();
     this.runRoutes.clear();
+    this.runEventCounts.clear(); // [stdout-wedge self-heal] 观测面随路由清空（引擎已死，计数无意义）
     this.lastPartialHandle = undefined;
     this.killLeakedAliveChild(detail);
     if (this.state !== "unavailable" && this.state !== "disposed") {
