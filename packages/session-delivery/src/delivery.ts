@@ -130,6 +130,41 @@ function settleChecked(
   return rejected
 }
 
+// ─── isIdle 安全调用（catch → 视为不可发送） ──────────────
+function safeIsIdle(port: DeliveryPort): boolean {
+  try {
+    return port.isIdle()
+  } catch {
+    // session 已关闭等异常 → 视为不可发送
+    return false
+  }
+}
+
+// ─── busy 判定（isIdle + hasPendingMessages 双条件，G4）────
+// 旧 scheduler gate 为 !isIdle() || hasPendingMessages()；内核单判 isIdle 会把
+// 「idle 但 pi 队列尚有消息未注入」误判为可投，提前投递与迁移前不等价。
+function isBusy(port: DeliveryPort): boolean {
+  if (!safeIsIdle(port)) return true
+  try {
+    return port.hasPendingMessages()
+  } catch {
+    // 探测异常（session 关闭等）→ 保守视为 busy 不投
+    return true
+  }
+}
+
+// ─── warn 辅助（U4 出口参数化）────────────────────────────
+// 注入优先（装配方接 extensionLogger 落盘）；缺省 console.warn 保持通用包
+// 零 logger 依赖（投递失败必须可见）。
+function resolveWarnSink(config?: DeliveryConfigWithWarn): (msg: string, err?: unknown) => void {
+  return (
+    config?.warn ??
+    ((msg: string, err?: unknown) => {
+      console.warn(`[session-delivery] ${msg}`, err ?? '')
+    })
+  )
+}
+
 /**
  * 创建投递句柄。
  *
@@ -196,28 +231,8 @@ export function createDelivery(
     armMergeTimer()
   }
 
-  // ─── busy 判定（isIdle + hasPendingMessages 双条件，G4）────
-  // 旧 scheduler gate 为 !isIdle() || hasPendingMessages()；内核单判 isIdle 会把
-  // 「idle 但 pi 队列尚有消息未注入」误判为可投，提前投递与迁移前不等价。
-  function isBusy(): boolean {
-    if (!safeIsIdle()) return true
-    try {
-      return port.hasPendingMessages()
-    } catch {
-      // 探测异常（session 关闭等）→ 保守视为 busy 不投
-      return true
-    }
-  }
-
-  // ─── isIdle 安全调用（catch → 视为不可发送） ──────────────
-  function safeIsIdle(): boolean {
-    try {
-      return port.isIdle()
-    } catch {
-      // session 已关闭等异常 → 视为不可发送
-      return false
-    }
-  }
+  // ─── busy 判定 / isIdle 安全调用 ──────────────────────────
+  // isBusy / safeIsIdle 见模块级（仅依赖 port，无闭包状态）
 
   // ─── settled 订阅管理 ──────────────────────────────────────
   function ensureSettledSub(): void {
@@ -225,7 +240,7 @@ export function createDelivery(
     settledUnsub = port.subscribeSettled(() => {
       if (disposed) return
       // settled 边沿 → busy 复核（isIdle 已先于事件复位，agent-session.js:327-336）→ flush
-      if (!isBusy()) {
+      if (!isBusy(port)) {
         flush()
       }
     })
@@ -245,7 +260,7 @@ export function createDelivery(
     watchdogTimer = setInterval(() => {
       if (disposed || inFlight) return
       if (queue.length === 0) return
-      if (!isBusy()) {
+      if (!isBusy(port)) {
         flush()
       }
     }, cfg.watchdogMs)
@@ -410,7 +425,7 @@ export function createDelivery(
     }
 
     // busy gate（isIdle + hasPendingMessages 双条件）
-    if (isBusy() && attempt < cfg.backoff.max) {
+    if (isBusy(port) && attempt < cfg.backoff.max) {
       if (port.subscribeSettled) {
         // 有订阅装配：busy 消息由 settled 边沿驱动，退避强发不启动（与事件驱动
         // 竞速会提前注入正在进行的 run）；watch-dog 兜底 settled 丢失（D8）
@@ -430,13 +445,8 @@ export function createDelivery(
   }
 
   // ─── warn 辅助（U4 出口参数化）────────────────────────────
-  // 注入优先（装配方接 extensionLogger 落盘）；缺省 console.warn 保持通用包
-  // 零 logger 依赖（投递失败必须可见）。
-  const warnSink: (msg: string, err?: unknown) => void =
-    config?.warn ??
-    ((msg: string, err?: unknown) => {
-      console.warn(`[session-delivery] ${msg}`, err ?? '')
-    })
+  // 出口解析见模块级 resolveWarnSink（注入优先，缺省 console.warn）。
+  const warnSink = resolveWarnSink(config)
 
   function warn(msg: string, err?: unknown): void {
     warnSink(msg, err)
