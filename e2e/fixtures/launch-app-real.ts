@@ -100,6 +100,7 @@ const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-prov
  *   TAIJI_FAUX_SCRIPT env 经 shared buildOutboundChildEnv 白名单透传到孙进程。
  */
 function seedFauxDataDir(dataDir: string, faux: FauxOptions): { scriptPath: string } {
+  const JSON_INDENT = 2
   const agentDir = path.join(dataDir, 'agent')
   fs.mkdirSync(agentDir, { recursive: true })
   fs.writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({
@@ -107,7 +108,7 @@ function seedFauxDataDir(dataDir: string, faux: FauxOptions): { scriptPath: stri
     defaultModel: 'faux-1',
     enabledModels: FAUX_ACTORS.map((a) => `faux/${a.id}`),
     retry: { enabled: false },
-  }, null, 2))
+  }, null, JSON_INDENT))
   fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify({
     providers: {
       faux: {
@@ -124,7 +125,7 @@ function seedFauxDataDir(dataDir: string, faux: FauxOptions): { scriptPath: stri
         })),
       },
     },
-  }, null, 2))
+  }, null, JSON_INDENT))
   const scriptPath = path.join(agentDir, 'faux-responses.json')
   fs.writeFileSync(scriptPath, JSON.stringify(faux.responses))
   // pi 孙进程自动发现装载 faux extension（子进程 --extension 镜像断链的既定绕法）
@@ -145,7 +146,7 @@ function seedFauxDataDir(dataDir: string, faux: FauxOptions): { scriptPath: stri
         enabled: true,
       },
     },
-  }, null, 2))
+  }, null, JSON_INDENT))
   return { scriptPath }
 }
 
@@ -238,7 +239,23 @@ export async function waitForRuntime(dataDir: string, timeoutMs = RUNTIME_START_
  * <dataDir>/runtime-token——main spawn runtime 时写入，轮询等文件出现）。auth 失败直接
  * 抛错（token 文件缺失 = runtime 未起或装配断链，fail-fast）。
  */
-async function openAuthedWs(port: number, dataDir: string, timeoutMs = 15_000): Promise<WebSocket> {
+/** runtime WS 帧最小面（e2e 只消费 type/id/payload；更深结构由调用方按需收窄） */
+export interface WsFrame {
+  id?: string
+  type?: string
+  payload?: Record<string, unknown>
+}
+
+/** auth 握手与轮询的节奏常量 */
+const AUTH_TIMEOUT_MS = 15_000
+const TOKEN_POLL_INTERVAL_MS = 300
+const ROUND_TRIP_TIMEOUT_MS = 30_000
+const KEEPALIVE_INTERVAL_MS = 20_000
+const EXT_READY_TIMEOUT_MS = 90_000
+const EXT_READY_MIN_COUNT = 8
+const EXT_READY_POLL_INTERVAL_MS = 1000
+
+async function openAuthedWs(port: number, dataDir: string, timeoutMs = AUTH_TIMEOUT_MS): Promise<WebSocket> {
   const tokenFile = path.join(dataDir, 'runtime-token')
   const deadline = Date.now() + timeoutMs
   let token: string | null = null
@@ -246,8 +263,11 @@ async function openAuthedWs(port: number, dataDir: string, timeoutMs = 15_000): 
     try {
       token = fs.readFileSync(tokenFile, 'utf-8').trim()
       if (token) break
-    } catch { /* runtime-token 尚未写入，轮询 */ }
-    await new Promise((r) => setTimeout(r, 300))
+    } catch {
+      // best-effort 轮询：runtime-token 未写入属预期慢路径，超时统一由 deadline 兜底
+      console.warn('[launch-real] runtime-token not ready yet, retrying')
+    }
+    await new Promise((r) => setTimeout(r, TOKEN_POLL_INTERVAL_MS))
   }
   if (!token) throw new Error(`runtime-token not found in ${dataDir} within ${timeoutMs}ms`)
   const ws: WebSocket = await new Promise((resolve, reject) => {
@@ -271,10 +291,10 @@ async function openAuthedWs(port: number, dataDir: string, timeoutMs = 15_000): 
 }
 
 /** 连 runtime WS（auth 握手后），发消息，等指定 id 的 reply */
-export async function wsRoundTrip(port: number, msg: object, replyId: string, timeoutMs = 30_000, dataDir?: string): Promise<any> {
+export async function wsRoundTrip(port: number, msg: object, replyId: string, timeoutMs = ROUND_TRIP_TIMEOUT_MS, dataDir?: string): Promise<WsFrame> {
   const ws = await openAuthedWs(port, dataDir ?? guessDataDir(), timeoutMs)
   try {
-    return await new Promise<any>((resolve, reject) => {
+    return await new Promise<WsFrame>((resolve, reject) => {
       const to = setTimeout(() => reject(new Error(`WS reply ${replyId} timeout ${timeoutMs}ms`)), timeoutMs)
       ws.on('message', (data) => {
         const m = JSON.parse(data.toString())
@@ -299,23 +319,29 @@ export async function wsRoundTrip(port: number, msg: object, replyId: string, ti
  * 心跳 keepalive：runtime 45s 无消息断连（HEARTBEAT_TIMEOUT_MS），监听期静默连接会被
  * 周期 config.get（只读 RPC，reply 带 id 不入 events）保活；ws close 时自动停。
  */
-export async function openListenWs(port: number, sessionId?: string): Promise<{ ws: WebSocket; events: any[] }> {
+export async function openListenWs(port: number, sessionId?: string): Promise<{ ws: WebSocket; events: WsFrame[] }> {
   const ws = await openAuthedWs(port, guessDataDir())
-  const events: any[] = []
+  const events: WsFrame[] = []
   if (sessionId) {
     ws.send(JSON.stringify({ type: 'session.subscribe', id: `sub-${Date.now()}`, payload: { sessionId } }))
   }
   const keepalive = setInterval(() => {
     try {
       ws.send(JSON.stringify({ type: 'config.get', id: `ka-${Date.now()}`, payload: {} }))
-    } catch { /* ws 已关闭 */ }
-  }, 20_000)
+    } catch {
+      // best-effort 保活：ws 已关闭时发送必失败，close handler 已清掉定时器
+      console.warn('[launch-real] keepalive config.get send failed (ws closing)')
+    }
+  }, KEEPALIVE_INTERVAL_MS)
   ws.on('close', () => clearInterval(keepalive))
   ws.on('message', (data) => {
     try {
       const m = JSON.parse(data.toString())
       if (!m.id && m.type !== 'auth.result') events.push(m)
-    } catch { /* ignore */ }
+    } catch {
+      // 非 JSON 帧忽略（心跳等二进制/杂帧），不计入 events
+      console.warn('[launch-real] received non-JSON ws frame, ignored')
+    }
   })
   return { ws, events }
 }
@@ -358,7 +384,11 @@ export function readPiLogs(dataDir: string): string {
  * dev 装配下 mandatory 扩展走源码目录扫描，无 npm 安装等待，但仍以日志信号确认）。
  * 信号：runtime 日志最后一次 resolved N ≥ minCount。
  */
-export async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000, minCount = 8): Promise<number> {
+export async function waitForExtensionsReady(
+  dataDir: string,
+  timeoutMs = EXT_READY_TIMEOUT_MS,
+  minCount = EXT_READY_MIN_COUNT,
+): Promise<number> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const logs = readRuntimeLogs(dataDir)
@@ -367,7 +397,7 @@ export async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000
       const last = parseInt(matches[matches.length - 1][1], 10)
       if (last >= minCount) return last
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await new Promise((r) => setTimeout(r, EXT_READY_POLL_INTERVAL_MS))
   }
   return 0
 }
