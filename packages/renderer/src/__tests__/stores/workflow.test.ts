@@ -128,10 +128,15 @@ describe('workflow store', () => {
   })
 })
 
-// ── 空结果守卫（sidebar-sync-plan P1）：RPC 成功返回 [] 且分区非空 → 不覆盖 ──
-// runtime getWorkflows 读盘失败时 catch 降级返回 []，瞬时读失败不得清掉 renderer 分区历史。
+// ── 空结果守卫接线冒烟（R7 归一）：strike 机制全部行为（阈值计数 / 非空打断重置 /
+// reset 清零 / 分区空放行 / warn 文案结构）直测锁定在
+// __tests__/lib/partitioned-session-records.test.ts（守卫工厂单源，S4 A1；不 import store，无环）。
+// 此处只证明守卫经本 store 接线真实可达：strike 放行路径 + catch 重置路径；
+// clearSession 联动见下方 clearSession describe 的簿记用例。
+// 背景（sidebar-sync-plan P1 + R1 business-logic S3）：runtime getWorkflows 读盘失败时
+// catch 降级返回 []，连续 2 次空才判真实删空覆盖分区，瞬时读失败不得清掉分区历史。
 
-describe('workflow store — loadWorkflows 空结果守卫', () => {
+describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', () => {
   let warnSpy: MockInstance
 
   beforeEach(() => {
@@ -142,79 +147,26 @@ describe('workflow store — loadWorkflows 空结果守卫', () => {
     warnSpy.mockRestore()
   })
 
-  it('RPC 返回 [] 且分区已有数据 → 不覆盖分区 + warn 含 sessionId', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])
-
-    const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
-    await store.loadWorkflows('sess-1')
-
-    // 守卫契约：保留旧分区，warn 说明保留行为并携带 sessionId
-    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-keep')
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('keeping existing records'), 'sess-1')
-    // 守卫不是错误态：不设 loadError，isLoading 正常复位
-    expect(store.loadError).toBeNull()
-    expect(store.isLoading).toBe(false)
-  })
-
-  it('RPC 返回 [] 且分区为空 → 分区保持为空，不告警', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])
-
-    const store = useWorkflowStore()
-    await store.loadWorkflows('sess-1')
-
-    // 分区本就为空 → [] 是合法结果，正常写入（仍为空），无守卫告警
-    expect(store.getRecordsBySession('sess-1')).toEqual([])
-    expect(warnSpy).not.toHaveBeenCalled()
-    expect(store.loadError).toBeNull()
-  })
-
-  it('RPC 返回非空且分区已有数据 → 正常覆盖为新数据（守卫不生效）', async () => {
-    const fresh = [makeRecord({ runId: 'wf-fresh' })]
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue(fresh)
-
-    const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-old' })])
-    await store.loadWorkflows('sess-1')
-
-    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-fresh')
-    expect(warnSpy).not.toHaveBeenCalled()
-  })
-
-  // ── R1 business-logic S3：连续空命中（strike）区分「瞬时读失败降级 []」与「真实删空」──
-
-  it('连续第 2 次 RPC 空 → 判真实删空，清分区 + warn 说明放行', async () => {
+  it('连续第 2 次 RPC 空 → 判真实删空，清分区（strike 1/2 保留 → 2/2 放行全程经 store 可达 + 接线 tag）', async () => {
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])
 
     const store = useWorkflowStore()
     store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
     await store.loadWorkflows('sess-1') // strike 1/2：保留
+    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
+    // 接线参数：warn 前缀含 store 传入的 logTag + fetchLabel（文案结构归共享直测）
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[workflow-store] getWorkflows returned empty list'),
+      'sess-1',
+    )
     await store.loadWorkflows('sess-1') // strike 2/2：真实删空判定，放行覆盖
-
     expect(store.getRecordsBySession('sess-1')).toEqual([])
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('clearing partition'),
       'sess-1',
     )
+    // 守卫不是错误态：不设 loadError
     expect(store.loadError).toBeNull()
-  })
-
-  it('空结果被非空结果打断 → strike 重置，再遇单次空仍保留（不累计误清）', async () => {
-    const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
-
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([]) // strike 1/2
-    await store.loadWorkflows('sess-1')
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([makeRecord({ runId: 'wf-keep' })])
-    await store.loadWorkflows('sess-1') // 非空 → strike 清零
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue([]) // 重新 strike 1/2
-    await store.loadWorkflows('sess-1')
-
-    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-keep')
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {
@@ -319,10 +271,10 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
   })
 
   it('strike 簿记随分区清除：clearSession 后重新预置分区，strike 从 0 重新计（不残留旧计数）', async () => {
-    // R3 test-coverage S1 强化：旧断言 clearSession 后未重新预置非空分区，守卫条件
-    // （空结果 && 分区非空）本就不满足——无法区分计数清除与残留。此处重新预置非空分区，
-    // 若 clearSession 漏删 strike（workflow.ts emptyResultStrikes.delete），残留计数 1 会让
-    // 下一次空结果直接 strike 2/2 误判删空 → 分区保留断言红。
+    // R3 test-coverage S1 强化 + R7 接线冒烟：reset 语义（清零后重新计数）归共享直测
+    // （partitioned-session-records.test.ts），此处锁 clearSession 接线确实调了 reset——
+    // 若 clearSession 漏调 strikeGuard.reset，残留计数 1 会让下一次空结果直接
+    // strike 2/2 误判删空 → 分区保留断言红。
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useWorkflowStore()
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue([])

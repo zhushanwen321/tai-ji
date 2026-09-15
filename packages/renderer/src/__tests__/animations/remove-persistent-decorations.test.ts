@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
@@ -10,7 +10,15 @@ const rendererSrc = resolve(__dirname, '../../..')
 const read = (rel: string) => readFileSync(resolve(rendererSrc, rel), 'utf-8')
 
 const segmentedTab = read('src/components/sidebar/SegmentedTab.vue')
-const sessionItem = read('src/components/sidebar/SessionItem.vue')
+// [R6 拆分适配 2026-09-14] SessionItem 按职责块拆子组件（session-item/ 子目录），spinning icon
+// 实现物理迁至 SessionItemDisplay.vue——断言对象聚合「主组件 + 子组件目录」跟随实现位置，
+// TC2 断言内容不变（仍锁 running 态 animate-spin 不被误删）。
+const sessionItem = [
+  read('src/components/sidebar/SessionItem.vue'),
+  ...readdirSync(resolve(rendererSrc, 'src/components/sidebar/session-item')).map((f) =>
+    read(`src/components/sidebar/session-item/${f}`),
+  ),
+].join('\n')
 const composerShell = read('src/composables/panel/composer-shell.ts')
 const sessionStatus = read('src/composables/logic/sessionStatus.ts')
 const styleCss = read('src/style.css')

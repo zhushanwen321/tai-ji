@@ -15,37 +15,19 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import type { LatestReleaseInfo, UpdateCheckResult } from '@xyz-agent/shared'
+import type { UpdateCheckResult } from '@xyz-agent/shared'
+import { updateIpcBridge, updateIpcModule } from '../helpers/update-ipc-mock'
 
-const hoisted = vi.hoisted(() => {
-  return {
-    checkForUpdate: vi.fn<(opts?: { force?: boolean }) => Promise<UpdateCheckResult>>(),
-    updateDownload: vi.fn<(release: LatestReleaseInfo) => Promise<{ downloaded: boolean }>>(),
-    updateInstall: vi.fn<() => Promise<{ triggerRestart: boolean }>>(),
-    getPreloaded: vi.fn<() => Promise<{ release: LatestReleaseInfo; filePath: string } | null>>(),
-    getPendingUpdate: vi.fn<() => Promise<LatestReleaseInfo | null>>(),
-    getUpdateSettings: vi.fn<() => Promise<{ preDownload: boolean; autoUpdate?: boolean }>>(),
-    openUpdateFallbackUrl: vi.fn<(url: string) => Promise<void>>(),
-    onUpdateProgress: vi.fn(() => () => {}),
-    onUpdateError: vi.fn(() => () => {}),
-    renderMarkdown: vi.fn<(md: string) => Promise<string>>(),
-  }
-})
+// IPC 桥 mock 底座收敛在 helpers/update-ipc-mock.ts（r2-01：原 vi.hoisted 块外移为
+// helper 模块单例，vi.mock 工厂经顶层 import 转发注册）。原文件 onUpdateProgress/onUpdateError
+// 为 no-op stub，统一为桥的回调捕获版：本文件从不 fire，行为等价；getLaunchResult 原未注册
+// （SUT 侧 checkLaunchResult 对 undefined 依赖已有 catch 兜底），桥统一注册后行为更干净。
+vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
 
-vi.mock('@/api/domains/settings', () => ({
-  checkForUpdate: hoisted.checkForUpdate,
-  updateDownload: hoisted.updateDownload,
-  updateInstall: hoisted.updateInstall,
-  getPreloaded: hoisted.getPreloaded,
-  getPendingUpdate: hoisted.getPendingUpdate,
-  getUpdateSettings: hoisted.getUpdateSettings,
-  openUpdateFallbackUrl: hoisted.openUpdateFallbackUrl,
-  onUpdateProgress: hoisted.onUpdateProgress,
-  onUpdateError: hoisted.onUpdateError,
-}))
-
+// markdown mock 留文件内：默认 html 属本文件行为面（非 IPC 桥）
+const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
 vi.mock('@/composables/logic/markdown', () => ({
-  renderMarkdown: hoisted.renderMarkdown,
+  renderMarkdown: hoistedRenderMarkdown,
 }))
 
 import { useAppUpdate, _resetForTest } from '@/composables/features/settings/useAppUpdate'
@@ -80,17 +62,17 @@ beforeEach(() => {
   vi.setSystemTime(1_700_000_000_000)
   vi.stubGlobal('__APP_VERSION__', '0.0.0')
   setHidden(false)
-  hoisted.checkForUpdate.mockReset().mockResolvedValue({ info: null, rateLimited: false })
-  hoisted.updateDownload.mockReset().mockResolvedValue({ downloaded: true })
-  hoisted.updateInstall.mockReset().mockResolvedValue({ triggerRestart: true })
-  hoisted.getPreloaded.mockReset().mockResolvedValue(null)
-  hoisted.getPendingUpdate.mockReset().mockResolvedValue(null)
+  updateIpcBridge.checkForUpdate.mockReset().mockResolvedValue({ info: null, rateLimited: false })
+  updateIpcBridge.updateDownload.mockReset().mockResolvedValue({ downloaded: true })
+  updateIpcBridge.updateInstall.mockReset().mockResolvedValue({ triggerRestart: true })
+  updateIpcBridge.getPreloaded.mockReset().mockResolvedValue(null)
+  updateIpcBridge.getPendingUpdate.mockReset().mockResolvedValue(null)
   // u4a：initAutoCheck 读 autoUpdate 开关（visibility 用例默认 true，保持周期调度行为）
-  hoisted.getUpdateSettings.mockReset().mockResolvedValue({ preDownload: false, autoUpdate: true })
-  hoisted.openUpdateFallbackUrl.mockReset()
-  hoisted.onUpdateProgress.mockClear()
-  hoisted.onUpdateError.mockClear()
-  hoisted.renderMarkdown.mockReset().mockResolvedValue('<h2>notes</h2>')
+  updateIpcBridge.getUpdateSettings.mockReset().mockResolvedValue({ preDownload: false, autoUpdate: true })
+  updateIpcBridge.openUpdateFallbackUrl.mockReset()
+  updateIpcBridge.onUpdateProgress.mockClear()
+  updateIpcBridge.onUpdateError.mockClear()
+  hoistedRenderMarkdown.mockReset().mockResolvedValue('<h2>notes</h2>')
 })
 
 afterEach(() => {
@@ -108,12 +90,12 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
 
     // 30s 首次触发 → hidden 跳过
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
 
     // 连 hidden 多个 60min 周期均不发联网请求
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
     stop()
   })
 
@@ -124,13 +106,13 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过，标记 skippedWhileHidden
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
 
     setHidden(false)
     fireVisibilityChange()
     // 补查同步发起，立即断言可见
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1)
-    expect(hoisted.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
     stop()
   })
 
@@ -143,11 +125,11 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     setHidden(false)
     fireVisibilityChange()
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
 
     // 补查的 runAutoCheck 重排了周期定时器：60min 后再次检测
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(2)
     stop()
   })
 
@@ -158,14 +140,14 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
 
     // 可见期间正常 30s 首次检测（无跳过记录）
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
 
     // 失焦又恢复（hidden 期间无周期触发 → 无跳过记录）
     setHidden(true)
     fireVisibilityChange()
     setHidden(false)
     fireVisibilityChange()
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1) // 不补查
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1) // 不补查
     stop()
   })
 
@@ -176,11 +158,11 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     result.state.state = 'downloaded'
 
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
 
     setHidden(false)
     fireVisibilityChange()
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled() // 不补查（升级流程不被打断）
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled() // 不补查（升级流程不被打断）
     stop()
   })
 
@@ -195,13 +177,13 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
 
     setHidden(false)
     fireVisibilityChange()
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
   })
 
   it('补查 await 期间 dispose：await 恢复后不排新周期 timer（卸载后 60min 内不联网，W05 review）', async () => {
     // 让 checkForUpdate 挂起，制造 runAutoCheck 的 await 窗口（此窗口无 pending timer）
     let resolveCheck!: (v: UpdateCheckResult) => void
-    hoisted.checkForUpdate.mockImplementation(
+    updateIpcBridge.checkForUpdate.mockImplementation(
       () =>
         new Promise<UpdateCheckResult>((res) => {
           resolveCheck = res
@@ -213,11 +195,11 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     // u4a：initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过，标记 skippedWhileHidden
-    expect(hoisted.checkForUpdate).not.toHaveBeenCalled()
+    expect(updateIpcBridge.checkForUpdate).not.toHaveBeenCalled()
 
     setHidden(false)
     fireVisibilityChange() // 补查发起：runAutoCheck 进入 await checkForUpdate（挂起中）
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1)
 
     stop() // await 挂起期间 dispose（clearAutoCheckTimer 无 pending timer 可清）
     resolveCheck({ info: null, rateLimited: false }) // await 恢复：disposed 已置位 → 不排下一周期 timer
@@ -226,6 +208,6 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     // 无新周期 timer 排上：推进 20min 不再联网
     expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(20 * 60 * 1000)
-    expect(hoisted.checkForUpdate).toHaveBeenCalledTimes(1) // 仍只有补查那一次
+    expect(updateIpcBridge.checkForUpdate).toHaveBeenCalledTimes(1) // 仍只有补查那一次
   })
 })
