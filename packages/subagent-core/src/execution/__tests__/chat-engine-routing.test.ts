@@ -641,18 +641,22 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   it("[journal→modeless] chat 域 zcode 轮不接 event journal（原生会话库即数据源）+ engineHandle 经 onHandleReady 回填（无 journalPath）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
+    // [hygiene] dbPath 必须绝对（tmp 域内）：binding sidecar 落 zcodeAnchorBasePath
+    //（`<dbPath>.<sessionId>`）同目录——相对路径会把 `sessions.db.sess-1.record-binding`
+    // 残留写进测试进程 cwd（包目录泄漏事故，2026-09）。
+    const dbPath = path.join(agentDir, "sessions.db");
     zcode.runImpl = (task, ctx) => {
       ctx.onEvent?.({ type: "message_end" } as AgentEvent);
       // 真实 zcode 引擎在 session/create 应答后触发 onHandleReady（B-routing：
       // 每轮新会话，新 sessionRef 经此回传——[modeless 波1] 全 record 经 Continuation
       // 轮路径，resolved handle 不再终态回填，onHandleReady 是唯一锚点通道）。
-      ctx.onHandleReady?.({ sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" } });
+      ctx.onHandleReady?.({ sessionRef: { dbPath, sessionId: "sess-1" } });
       return Promise.resolve({
         handle: {
           data: {
             v: 1,
             engineId: "zcode",
-            sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" },
+            sessionRef: { dbPath, sessionId: "sess-1" },
             adapterVersion: "test",
           },
         },
@@ -673,7 +677,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     // 轮终 entry 的 engineHandle：sessionRef 经 onHandleReady 回填，无 journalPath。
     const entry = lastRecordEntry(pi);
     expect(entry?.engineHandle).toEqual({
-      sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" },
+      sessionRef: { dbPath, sessionId: "sess-1" },
       poolKey: "shared",
     });
   });
@@ -683,10 +687,11 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = (task, ctx) => {
       // 失败前的部分回填（create 应答已到、session 未建——dbPath 已知 sessionId 缺失）
-      ctx.onHandleReady?.({ sessionRef: { dbPath: "sessions.db" } });
+      const dbPath = path.join(agentDir, "sessions.db");
+      ctx.onHandleReady?.({ sessionRef: { dbPath } });
       return Promise.resolve({
         handle: {
-          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db" }, adapterVersion: "test" },
+          data: { v: 1, engineId: "zcode", sessionRef: { dbPath }, adapterVersion: "test" },
         },
         outcome: { ...doneOutcome(""), error: "engine_run_failed: boom", engineId: "zcode" },
       });
@@ -699,7 +704,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     });
 
     const h = lastRecordEntry(pi)?.engineHandle as Record<string, unknown> | undefined;
-    expect(h?.sessionRef).toEqual({ dbPath: "sessions.db" });
+    expect((h?.sessionRef as Record<string, unknown>)?.dbPath).toBe(path.join(agentDir, "sessions.db"));
     expect(h?.poolKey).toBe("shared");
   });
 
@@ -807,10 +812,12 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   it("[onHandleReady] 引擎不回调（spawn 形态）时零回填——终态回填仍兜底（行为不变）", async () => {
     process.env.XYZ_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
+    // [hygiene] dbPath 绝对化（tmp 域内）——防 binding sidecar 相对路径 cwd 泄漏。
+    const dbPath = path.join(agentDir, "sessions.db");
     zcode.runImpl = (task, ctx) => {
       return Promise.resolve({
         handle: {
-          data: { v: 1, engineId: "zcode", sessionRef: { dbPath: "sessions.db", sessionId: "sess-1" }, adapterVersion: "test" },
+          data: { v: 1, engineId: "zcode", sessionRef: { dbPath, sessionId: "sess-1" }, adapterVersion: "test" },
         },
         outcome: doneOutcome("ok"),
       });
