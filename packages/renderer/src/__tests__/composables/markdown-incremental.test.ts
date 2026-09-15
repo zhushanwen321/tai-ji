@@ -17,8 +17,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type {
   IncrementalRenderCache,
   IncrementalRenderResult,
-  MarkdownSegment,
 } from '@/composables/logic/markdown-incremental'
+import type { MarkdownSegment } from '@/composables/logic/markdown'
 
 // stub shiki：避免真实语法加载（fine-grained 后入口是 shiki/core）；codeToHtml 计数同时用作「前缀零重渲染」的可观测探针
 const fakeCodeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`)

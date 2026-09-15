@@ -26,8 +26,13 @@ import { createMockChatDeps } from '@/__tests__/helpers/chat-view-deps'
 // （fine-grained 后 markdown.ts 从 shiki/core import，mock 入口同步为 shiki/core）
 const fakeCodeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`)
 
-/** 每用例拿到干净的 markdown 模块（renderMarkdown 内部缓存 markdown-it 实例 + highlighter 单例） */
-async function freshModule(): Promise<typeof import('@/composables/logic/markdown')> {
+/** 每用例拿到干净的 markdown 模块（renderMarkdown 内部缓存 markdown-it 实例 + highlighter 单例）。
+ *  返回 markdown + markdown-incremental 合并命名空间：增量轴符号（renderIncremental 等）定义在
+ *  markdown-incremental，renderMarkdownSegments 留守 markdown；两 import 同处 resetModules 后的
+ *  同一 fresh 模块图（shiki stub 对整图生效），合并对象成员与增量轴内部引用同一实例。 */
+async function freshModule(): Promise<
+  typeof import('@/composables/logic/markdown-incremental') & typeof import('@/composables/logic/markdown')
+> {
   vi.resetModules()
   vi.doMock('shiki/core', () => ({
     createHighlighterCore: () =>
@@ -36,7 +41,11 @@ async function freshModule(): Promise<typeof import('@/composables/logic/markdow
         getLoadedLanguages: () => ['typescript', 'javascript', 'vue'],
       }),
   }))
-  return await import('@/composables/logic/markdown')
+  const [inc, md] = await Promise.all([
+    import('@/composables/logic/markdown-incremental'),
+    import('@/composables/logic/markdown'),
+  ])
+  return { ...inc, ...md }
 }
 
 // ── rAF 手动队列（异步语义：scheduleRender 的 rafId 赋值在同步回调下会残留 stale id 丢帧）──

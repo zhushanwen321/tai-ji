@@ -37,13 +37,13 @@ import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
+import { renderMarkdownSegments } from '@/composables/logic/markdown'
 import {
   createIncrementalRenderCache,
   renderIncremental,
-  renderMarkdownSegments,
   shouldFinalizeStreamingFence,
   STREAMING_FENCE_SILENCE_MS,
-} from '@/composables/logic/markdown'
+} from '@/composables/logic/markdown-incremental'
 import { renderMermaid } from '@/composables/logic/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'

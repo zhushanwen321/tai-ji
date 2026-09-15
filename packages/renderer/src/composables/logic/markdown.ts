@@ -21,8 +21,9 @@
  * 避免 .md/.io 等 ccTLD 把文件名误判成 URL（见 getMarkdown 内注释）。
  *
  * 增量流式轴（D-5/W22-W23：findStableBoundary / renderIncremental / shouldFinalizeStreamingFence
- * 及块扫描私有辅助）已拆至 ./markdown-incremental（源码简化 R4，2026-09），本文件 re-export
- * 维持对外导入路径不变；共享协议类型 MarkdownSegment / MarkdownEnv 留守本文件。
+ * 及块扫描私有辅助）已拆至 ./markdown-incremental（源码简化 R4，2026-09），消费方直接从该模块
+ * 导入（曾用 re-export shim 维持旧路径，因与增量轴的反向 import 形成循环依赖已拆除）；
+ * 共享协议类型 MarkdownSegment / MarkdownEnv 留守本文件。
  */
 import katex from 'katex'
 import MarkdownIt from 'markdown-it'
@@ -609,28 +610,6 @@ export function decodeBase64(b64: string): string {
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
   return textDecoder.decode(bytes)
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// D-5 增量流式轴（已拆出 './markdown-incremental'，源码简化 R4）
-//
-// 增量流式轴（findStableBoundary / renderIncremental / shouldFinalizeStreamingFence
-// 及其块扫描私有辅助）整体迁移至 markdown-incremental.ts，此处 re-export 维持对外
-// 导入路径（'@/composables/logic/markdown'）不变。共享类型 MarkdownSegment（上方）
-// 与 MarkdownEnv 留守本模块（渲染管线与增量轴共用的协议类型）。
-// ═══════════════════════════════════════════════════════════════════════════
-
-export {
-  createIncrementalRenderCache,
-  findStableBoundary,
-  renderIncremental,
-  shouldFinalizeStreamingFence,
-  STREAMING_FENCE_SILENCE_MS,
-} from './markdown-incremental'
-export type {
-  FenceFinalizeState,
-  IncrementalRenderCache,
-  IncrementalRenderResult,
-} from './markdown-incremental'
 
 /**
  * 用 shiki 单例高亮一段代码，返回双主题 HTML（带 --shiki-dark/--shiki-light 变量的 span）。

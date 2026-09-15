@@ -7,10 +7,9 @@
  * 占位 finalize 判定。权威安全网：markdown-incremental.test.ts（9 形态矩阵 + 拼接等价）。
  *
  * 对 markdown.ts 的依赖面只有其公开导出（MarkdownSegment / MarkdownEnv 类型 +
- * renderMarkdownSegments），不触碰其内部私有；markdown.ts 反向 re-export 本模块符号
- * （对外导入路径 '@/composables/logic/markdown' 不变）。模块图因此含一个 ESM 循环
- * （markdown ⇄ markdown-incremental），双方顶层零执行依赖（renderMarkdownSegments 仅在
- * 函数体内经 live binding 调用），加载顺序安全。
+ * renderMarkdownSegments），不触碰其内部私有；依赖严格单向（incremental → markdown，无循环）。
+ * 曾由 markdown.ts 反向 re-export 本模块符号维持旧导入路径，因构成 ESM 循环依赖
+ * （markdown ⇄ markdown-incremental，metrics-gate 拦截）已拆除，消费方直接从本模块导入。
  *
  * 测试 mock 说明：shiki stub 经 vi.doMock('shiki/core') 对整模块图生效（本模块 →
  * markdown.ts → shiki/core），freshModule 动态 import 范式与拆分前等价。
