@@ -63,6 +63,12 @@ export function formatChannelErrorText(err: ChannelErrorResult): string {
   return err.hint ? `${err.error}\nhint: ${err.hint}` : err.error
 }
 
+/** 失败留痕单点（channel-error / non-json 两态调用）：`opts?.log` 双层可选链收口，
+ * msg + detail 由调用点产出；log 缺席时静默（日志策略归调用方，D8 真差异保留） */
+function emitRpcLog(opts: MarkerRpcOptions | undefined, msg: string, detail: object): void {
+  opts?.log?.(msg, detail)
+}
+
 /**
  * 经 select 通道发起一次 marker RPC。
  *
@@ -90,7 +96,7 @@ export async function callMarkerRpc(
   try {
     value = await select(marker, [payload], { signal: opts?.signal, timeout: opts?.timeout })
   } catch (err) {
-    opts?.log?.(`select channel threw (marker ${JSON.stringify(marker)})`, {
+    emitRpcLog(opts, `select channel threw (marker ${JSON.stringify(marker)})`, {
       reason: err instanceof Error ? err.message : String(err),
     })
     return { ok: false, reason: 'channel-error' }
@@ -103,7 +109,7 @@ export async function callMarkerRpc(
   }
   if (typeof value !== 'string') {
     // pi 契约回包恒 string | undefined；非 string 到达 = 通道契约破坏，按 channel-error 折叠
-    opts?.log?.(`select resolved non-string value (marker ${JSON.stringify(marker)})`, {
+    emitRpcLog(opts, `select resolved non-string value (marker ${JSON.stringify(marker)})`, {
       valueType: typeof value,
     })
     return { ok: false, reason: 'channel-error' }
@@ -112,7 +118,7 @@ export async function callMarkerRpc(
     JSON.parse(value)
   } catch {
     // 非 JSON 回包 = 协议版本不匹配类故障，必须留痕不静默
-    opts?.log?.(`non-JSON response (marker ${JSON.stringify(marker)})`, {
+    emitRpcLog(opts, `non-JSON response (marker ${JSON.stringify(marker)})`, {
       responseHead: value.slice(0, RESPONSE_PREVIEW_LENGTH),
     })
     return { ok: false, reason: 'non-json' }
