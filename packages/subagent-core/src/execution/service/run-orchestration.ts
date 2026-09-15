@@ -56,14 +56,13 @@
 //   killStaleChildBeforeDispatch）随消费主体迁 chat-rounds.ts（2026-09-13 接线）。
 
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
-import { toErrorMessage } from "../../core/error-message.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { CollectCoordinator } from "../assembly/collect-coordinator.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
-import { project, tryTransition, updateFromEvent } from "../persistence/execution-record.ts";
+import { project, tryTransition } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -88,7 +87,6 @@ import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
-import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,

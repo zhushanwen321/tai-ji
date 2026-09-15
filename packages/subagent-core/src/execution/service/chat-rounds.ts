@@ -63,8 +63,6 @@ import type { AgentOutcome } from "../engine/types.ts";
 import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
-// [H1 U2] notify 门（notifier.ts）——轮末回注闸（Continuation settle 双闸消费）。
-import { notifyGateAllowsDelivery } from "../notify/notifier.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态，边界守卫台账登记边）。
@@ -72,9 +70,7 @@ import type { ResolvedIdentity } from "./record-access.ts";
 import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import {
   armMidRoundNoProgress,
-  disarmRoundFromProtocol,
   refreshFromProtocolEvent,
-  type SettledWatchdogFireInfo,
 } from "../lifecycle/settled-watchdog.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
@@ -88,7 +84,7 @@ import type {
 } from "../assembly/types.ts";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
-import { PRIORITY_BACKGROUND, MS_PER_SECOND, SECONDS_PER_MINUTE } from "./service-constants.ts";
+import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 
 const logger = getLogger("subagents");
 
