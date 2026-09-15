@@ -83,6 +83,7 @@ ESLint 规则放弃后，per-session 范式靠 **code-review 强制检查项** �
    - 实例级状态依赖组件树天然隔离（实例级反模式，useExtensionUI 曾因此 bug）
 3. **WS handler 是否用 `updateFor(sid, ...)` 而非 `update(...)`？** WS handler 闭包捕获订阅时 sid，须用 `updateFor(capturedSid, ...)` 显式指定分区，不读 `sid.value` 实时值（防 session 切换退订异步期间的竞态，M1 修复）。
 4. **session 销毁时分区是否 cleanup？** 正常路径由 `useSidebar.deleteSession` → `triggerSessionCleanups(id)` 自动触发（工厂 setup 时自动注册，scope dispose 时反注册）。若 composable 有特殊生命周期，确认 cleanup 已挂钩。
+5. **新增/修改的 per-session 状态是否接线销毁编排？**（2026-09-14 扩，memory-leak-remediation G4——机械检查）判据：任何按 sessionId 分区/归属的状态新增或改动时——含模块级或 factory 闭包内的 `Map`/`Set` 分区、IPC 资源、子进程句柄、main 侧进程级资源——确认其清理已挂入销毁编排汇聚点：renderer/core 侧 `cleanupSessionState` 的 `SessionCleanupHooks` 钩子序列（`use-session.ts`，hook 清单以接口定义为准，不写死数量）+ `triggerSessionCleanups`，或 runtime 侧 `SessionService.removeSessionEntry` 尾段。**纯加状态不接线的 PR 打回**——活跃期事件驱动的清理时机在 session 删除后永不触发（2026-09-14 审计的 prematureTimeoutIds dispose 缺口即此类实例）。
 
 #### 覆盖边界：含持 sessionId prop 的组件（2026-08-24 扩，context-consistency G3）
 
@@ -192,6 +193,12 @@ review 阶段发现 M1 竞态（切 sid 的 WS 消息写入）+ M2 测试假绿�
 - **SideDrawer.test.ts mock** 从 `sidRef.value` 实时匹配改为注册时 sid 快照，对齐真实 useSessionEvents 行为。M2 假绿确证已修（临时验证脚本确认 handler 被真触发）
 
 核心思路：**隔离靠结构（handler 捕获订阅时 sid + updateFor 显式分区），不靠时序（watch flush 退订）**。即使 flush:pre 异步退订窗口内有旧 sid 迟到消息，也只写旧 sid 分区。
+
+## 变更历史
+
+- 2026-07-21：初版（Map 分区派范式 + `useSessionScopedState` 工厂 + Code Review Checklist + 例外清单）。
+- 2026-08-24：覆盖边界扩到持 sessionId prop 的组件（context-consistency G3）；例外清单历经 w4/W21/W27 等增补（文内各表审批栏为凭，不在此逐条重录）。
+- 2026-09-14：Code Review Checklist 增补第 5 条机械检查「销毁编排接线」（memory-leak-remediation G4 / u10；C-proc-10 同 commit 登记）。
 
 ## References
 

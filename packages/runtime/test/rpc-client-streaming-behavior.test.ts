@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
+const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── stdin.write 捕获 ──
 const writeCalls: unknown[][] = []
@@ -30,15 +31,30 @@ const stdoutEmitter = new EventEmitter()
 
 // ── Mock modules ──
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({
-    stdin: fakeStdin,
-    stdout: stdoutEmitter,
-    stderr: new EventEmitter(),
-    kill: vi.fn(),
-    pid: 12345,
-    on: vi.fn(),
-    removeListener: vi.fn(),
-  })),
+  spawn: vi.fn(() => {
+    // exit listener 捕获：kill 即死语义（微任务驱动）短路 killPiProcess grace 真实等待
+    const exitListeners: Array<(...args: unknown[]) => void> = []
+    const proc = {
+      stdin: fakeStdin,
+      stdout: stdoutEmitter,
+      stderr: new EventEmitter(),
+      kill: vi.fn((_signal?: NodeJS.Signals | number) => {
+        queueMicrotask(() => exitListeners.splice(0).forEach((h) => h(0)))
+        return true
+      }),
+      pid: 12345,
+      on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'exit') exitListeners.push(handler)
+        return proc
+      }),
+      removeListener: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        const i = exitListeners.indexOf(handler)
+        if (event === 'exit' && i >= 0) exitListeners.splice(i, 1)
+        return proc
+      }),
+    }
+    return proc
+  }),
 }))
 
 vi.mock('../src/infra/pi/pi-paths.js', () => ({
@@ -86,12 +102,10 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
     return JSON.parse(raw.trim())
   }
 
-  /** 启动 client（跳过 STARTUP_DELAY_MS 等待） */
+  /** 启动 client（startupDelayMs=0 已注入，start() 即时 settle） */
   async function startClient(): Promise<InstanceType<typeof RpcClient>> {
-    const client = new RpcClient({ cwd: '/tmp', sessionId: 'test-sid' })
-    const startPromise = client.start()
-    await new Promise(r => setTimeout(r, 600))
-    await startPromise
+    const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'test-sid' })
+    await client.start()
     return client
   }
 
@@ -168,7 +182,7 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
   it('U2: 端口签名 arity——prompt 接受 4 个参数（content, images?, streamingBehavior?, options?）', () => {
     // 编译期类型测试：IPiEngine.prompt 的参数数量由 TypeScript 保证，
     // 运行期断言 RpcClient.prompt 的 length（4 = content + images + streamingBehavior + options）
-    const client = new RpcClient({ cwd: '/tmp', sessionId: 'arity-check' })
+    const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'arity-check' })
     // prompt.length 是声明参数数（不含有默认值的参数），4 个参数 = arity 4。
     // 第 4 参 options（SendCommandOptions）为 R8① maintenance 透传（idle-pi-reclamation D1）：
     // promptReload 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除，

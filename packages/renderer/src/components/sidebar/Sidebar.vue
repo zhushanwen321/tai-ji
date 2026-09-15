@@ -210,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Plus, Search, Settings, FolderOpen, AlertCircle, Puzzle, Download } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { SearchModal } from '@xyz-agent/ui'
@@ -276,11 +276,21 @@ function statusOf(id: string) { return derivedStatus(id).value }
 const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, onRetryWorkflows, onRetrySubagents, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ focusedSessionId, selectSession, restoreSession, newSession, goOverview, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
 const { onSelectSubagent, onCancelSubagent, onSelectWorkflow, onWorkflowBack, onSelectAgentCall, onWorkflowAction } = useSidebarSubagentActions(focusedSessionId)
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
+// [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以
+// v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是
+// 设计内常态——丢弃退订函数会每次重挂泄漏一份 handler + 组件响应式子图
+// （piVersion ref → versionLabel computed → 渲染 effect）；A4 断言（重连后 handler 数恒 1）
+// 由 Sidebar.test.ts B3 组退订对称单测守卫（原挂载/卸载探针日志行验收后已删）。
+let unsubscribeAppInfo: (() => void) | null = null
 onMounted(() => {
   void loadSessions()
-  events.onGlobalType('app.info', (msg) => { piVersion.value = msg.payload.piVersion })
+  unsubscribeAppInfo = events.onGlobalType('app.info', (msg) => { piVersion.value = msg.payload.piVersion })
   useListSync({ tab: 'subagents', load: subagentStore.loadSubagents })
   useListSync({ tab: 'workflows', load: workflowStore.loadWorkflows })
+})
+onBeforeUnmount(() => {
+  unsubscribeAppInfo?.()
+  unsubscribeAppInfo = null
 })
 useAppUpdate().initAutoCheck() // setup 顶层同步调用（非 onMounted）：initAutoCheck 的 onScopeDispose 须在活跃 effect scope 内绑定
 </script>

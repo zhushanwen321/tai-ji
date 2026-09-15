@@ -20,19 +20,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-paths-config-dir-contract.test.ts 范式）。 */
-function locatePiCodingAgentDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist')
-    if (existsSync(join(candidate, 'config.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiCodingAgentDist } from './helpers/pi-semantics-probe.js'
 
 const PI_DIST = locatePiCodingAgentDist()
 const SKIP_REASON = PI_DIST

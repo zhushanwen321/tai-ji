@@ -434,3 +434,27 @@ describe('zhipuFetcher', () => {
     }
   })
 })
+
+describe('fetchQuotaJson 共享骨架（[u10/G4] 非 2xx body 释放）', () => {
+  it('非 2xx：resp.body 被 cancel——连接不被未消费 body 钉住（无法回池复用 + 缓冲驻留）', async () => {
+    const { fetchQuotaJson, isRecord } = await import('../types.js')
+    const resp = jsonResponse({ error: 'boom' }, 500)
+    const cancelSpy = vi.spyOn(resp.body!, 'cancel')
+
+    const out = await fetchQuotaJson('test', async () => resp, isRecord)
+
+    expect(out).toEqual({ ok: false, reason: 'network' })
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('2xx 正常路径：不 cancel body（json() 消费，cancel 会破坏正常读取）', async () => {
+    const { fetchQuotaJson, isRecord } = await import('../types.js')
+    const resp = jsonResponse({ success: true })
+    const cancelSpy = vi.spyOn(resp.body!, 'cancel')
+
+    const out = await fetchQuotaJson('test', async () => resp, isRecord)
+
+    expect(out).toEqual({ ok: true, data: { success: true } })
+    expect(cancelSpy).not.toHaveBeenCalled()
+  })
+})

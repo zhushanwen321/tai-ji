@@ -54,7 +54,18 @@ export function on(sessionId: string, handler: MessageHandler): () => void {
 
 /** 取消订阅（按 sessionId + handler） */
 export function off(sessionId: string, handler: MessageHandler): void {
-  sessionHandlers.get(sessionId)?.delete(handler)
+  const set = sessionHandlers.get(sessionId)
+  if (!set) return
+  set.delete(handler)
+  // [B2 / 2026-09-14 内存审计 §2.3] 删空 Set 时移除 Map 条目：off 是唯一删除点，此前每个
+  // 订阅过的 session/虚拟 id 留一个空 Set（~100B）永久残留。dispatchSession 对无条目 get
+  // 安全跳过、on 会重建——语义不变（全仓无 keys 遍历消费方，三审核实）。
+  if (set.size === 0) {
+    sessionHandlers.delete(sessionId)
+    // [memory-probe] L3 诊断日志探针，已按 memory-leak-remediation §4 降级 debug 级（A9 验收
+    // 完成）：A3 场景删 session 后本行出现且 mapSize 回落；机器断言走 _probeSessionHandlerEntryCount 单测面。
+    console.debug(`[memory-probe] off removed empty sessionHandlers entry sid=${sessionId}, mapSize=${sessionHandlers.size}`)
+  }
 }
 
 export function dispatchSession(sessionId: string, msg: ServerMessage): void {
@@ -126,4 +137,15 @@ export function onCrossSession(handler: MessageHandler): () => void {
 /** 分发消息到 crossSession 通道（route-inbound dispatchRouted 有 sid 序言的 crossSession 声明分支调用）。ADR-0060。 */
 export function dispatchCrossSession(msg: ServerMessage): void {
   if (crossSessionHandlers.size > 0) safeForEach(crossSessionHandlers, msg)
+}
+
+// ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收已收口，非业务 API）──
+// L1 单测面：A3/B2 经 before/after delta 断言 sessionHandlers 无残留条目（events.test.ts B2 组）。
+// A4（断连重连后 'app.info' handler 数恒 1）的机器断言在组件侧闭环：Sidebar 退订对称单测
+// （Sidebar.test.ts B3 组 TC4/TC5）；原 _probeGlobalTypeHandlerCount 唯一消费方是 Sidebar
+// 探针日志行，验收后随日志行一并删除。
+
+/** session 通道 Map 条目数（含空 Set 残留检测；B2/A3 探针，单测在用——勿删） */
+export function _probeSessionHandlerEntryCount(): number {
+  return sessionHandlers.size
 }

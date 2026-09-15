@@ -4,7 +4,7 @@
 // 设计 subagent-permanent-session-model.md §3.2.6 要点 3/4）：
 //   - B-firstround：executeViaEngine 非 pi 分支对 conversation:true（zcode
 //     conversation:'cold'——U6 后 capability gate 放行）走 Continuation.startFirstRound
-//     ——轮末 markRoundIdle 收口（status 保持 running-resumable + round+1 +
+//     ——轮末 markRoundIdle 收口（status 翻 idle [two-state-convergence U4/D3] + round+1 +
 //     closedReason 清除），不走 kickOffEngineRun one-shot 编排（finalizeEngineOutcome
 //     tryTransition：status='idle' + closedReason='gc' 且 round 不推进）；
 //   - B-routing：会话轮引擎按 record.engine 经 registry 解析——zcode chatMode 轮
@@ -236,15 +236,14 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     expect(zcode.runs[0]!.task.conversation).toBe(true);
     expect(zcode.runs[0]!.task.prompt).toBe("zcode cold chat");
 
-    // 轮应答 → Continuation 轮末分流（markRoundIdle：status 保持 running-resumable、
-    // round+1、closedReason 清除）——与 kickOffEngineRun one-shot 编排
+    // 轮应答 → Continuation 轮末分流（markRoundIdle：status 翻 idle、
+    // round+1、closedReason 清除——[two-state-convergence U4/D3]）——与 kickOffEngineRun one-shot 编排
     // （finalizeEngineOutcome：status='idle' + closedReason='gc' + round 不推进）
     // 的判别断言
     zcode.runs[0]!.settle("round one done");
     await vi.waitFor(() => expect(record.round).toBe(1));
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
     expect(record.closedReason).toBeUndefined();
-    expect(record.resumable).toBe(true);
     expect(record.result).toBe("round one done");
   });
 
@@ -345,9 +344,9 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     clearEngines();
     await service.chatActions.deliverChatMessage(record, "second round");
     // dispatchRoundAsync 的 catch 承接端口解析 throw → 失败轮末分流（markRoundIdle
-    // failed：round+1 + lastError，record 保持 running-resumable——不崩宿主可续聊）
+    // failed：round+1 + lastError，record 落 idle 可续聊——不崩宿主）
     await vi.waitFor(() => expect(record.round).toBe(2));
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
     expect(record.lastError).toContain("engine_not_found");
   });
 
@@ -366,6 +365,6 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     expect(piEngine.runs[0]!.ctx.resume).toEqual({ recordId: record.id });
     piEngine.runs[0]!.settle({ content: "pi round done" });
     await vi.waitFor(() => expect(record.round).toBe(1));
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
   });
 });

@@ -24,6 +24,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve, relative, sep } from 'node:path'
 import zhSettings from '../../i18n/locales/zh-CN/settings'
 import enSettings from '../../i18n/locales/en-US/settings'
+import zhPanel from '../../i18n/locales/zh-CN/panel'
+import enPanel from '../../i18n/locales/en-US/panel'
 
 const REPO_ROOT = resolve(__dirname, '../../../../..')
 /** providerEdit key 的源码消费根；locale 与测试自身不算消费方 */
@@ -32,6 +34,12 @@ const SKIP_DIRS = new Set(['node_modules', '__tests__', 'dist'])
 const SOURCE_EXT = /\.(vue|ts|js|mjs)$/
 /** `providerEdit.<key>` 且 key 后紧跟引号/反引号收尾（动态拼接不匹配） */
 const KEY_REF = /providerEdit\.([A-Za-z0-9_]+)(?=["'`])/g
+/**
+ * `panel.context.quotaFail<Reason>` 字面引用（reason→key 映射表消费，见 useQuotaQuery.ts
+ * QUOTA_FAIL_REASON_KEYS）。原 quota-reason-i18n.test.ts 的显式数组职责由本扫描吸收
+ * （该数组范式曾自证失败：数组漏列 → 删 locale 值仍全绿，见原文件头 U-3 补齐记录）。
+ * 限定 quotaFail 前缀：panel.context 下非 quota 语义的 key 不在本守卫范围。 */
+const PANEL_CONTEXT_KEY_REF = /panel\.context\.(quotaFail[A-Za-z0-9_]+)(?=["'`])/g
 
 /** 本改动新增的 providerEdit key（locale 基线 62a9651e5 → HEAD 的 providerEdit 新增键全量） */
 const NEW_UI_KEYS_REQUIRED = [
@@ -66,8 +74,8 @@ type FlatLocale = Record<string, string | undefined>
 const ZH_PROVIDER_EDIT = (zhSettings as unknown as { providerEdit: FlatLocale }).providerEdit
 const EN_PROVIDER_EDIT = (enSettings as unknown as { providerEdit: FlatLocale }).providerEdit
 
-/** 扫源码收集 `providerEdit.<key>` 引用；同 key 只记首个出现文件（用于报错定位） */
-function collectSourceRefs(): Map<string, string> {
+/** 扫源码收集 `providerEdit.<key>` / `panel.context.quotaFail*` 引用；同 key 只记首个出现文件（用于报错定位） */
+function collectSourceRefs(ref: RegExp): Map<string, string> {
   const refs = new Map<string, string>()
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -78,7 +86,7 @@ function collectSourceRefs(): Map<string, string> {
       }
       if (!SOURCE_EXT.test(entry.name)) continue
       if (full.includes(`${sep}i18n${sep}locales${sep}`)) continue
-      for (const m of readFileSync(full, 'utf-8').matchAll(KEY_REF)) {
+      for (const m of readFileSync(full, 'utf-8').matchAll(ref)) {
         if (!refs.has(m[1])) refs.set(m[1], full)
       }
     }
@@ -88,13 +96,22 @@ function collectSourceRefs(): Map<string, string> {
 }
 
 describe('providerEdit i18n key 存在性机器闸门（U-3）', () => {
-  const refs = collectSourceRefs()
+  const refs = collectSourceRefs(KEY_REF)
+  // panel.context quotaFail 简短文案（原 quota-reason-i18n.test.ts 的 panel.context describe 并入）
+  const panelContextRefs = collectSourceRefs(PANEL_CONTEXT_KEY_REF)
 
   it('源码扫描通路有效（扫到的 key 数量足以证明根路径与正则生效）', () => {
     expect(
       refs.size,
       '未从 packages/ui/src + packages/renderer/src 扫到足量 providerEdit key，扫描根/正则可能失效',
     ).toBeGreaterThan(100)
+  })
+
+  it('panel.context 扫描通路有效（quotaFail key 下界自证，防空集合恒绿）', () => {
+    expect(
+      panelContextRefs.size,
+      `panel.context.quotaFail 扫描数量异常（期望 ≥6 个 reason 映射，实得 ${panelContextRefs.size}），扫描根/正则可能失效`,
+    ).toBeGreaterThanOrEqual(6)
   })
 
   for (const locale of ['zh-CN', 'en-US'] as const) {
@@ -114,6 +131,22 @@ describe('providerEdit i18n key 存在性机器闸门（U-3）', () => {
       const problems: string[] = []
       for (const [key, file] of refs) {
         const value = providerEdit[key]
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          problems.push(`${key}（引用自 ${relative(REPO_ROOT, file)}）`)
+        }
+      }
+      expect(problems, `${locale} 缺失/空值 key:\n${problems.join('\n')}`).toEqual([])
+    })
+  }
+
+  const ZH_PANEL_CONTEXT = (zhPanel as unknown as { context: FlatLocale }).context
+  const EN_PANEL_CONTEXT = (enPanel as unknown as { context: FlatLocale }).context
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    it(`${locale}: 每个被源码引用的 panel.context.quotaFail key 都存在且非空`, () => {
+      const context = locale === 'zh-CN' ? ZH_PANEL_CONTEXT : EN_PANEL_CONTEXT
+      const problems: string[] = []
+      for (const [key, file] of panelContextRefs) {
+        const value = context[key]
         if (typeof value !== 'string' || value.trim().length === 0) {
           problems.push(`${key}（引用自 ${relative(REPO_ROOT, file)}）`)
         }

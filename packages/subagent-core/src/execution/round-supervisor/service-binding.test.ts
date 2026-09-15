@@ -156,7 +156,7 @@ function makeBinding(overrides: {
   return { binding, store: storeHarness, pi, finalizeClosed };
 }
 
-/** 内存 ExecutionRecord 替身（字段访问面：id/agent/slug/status/resumable/result/
+/** 内存 ExecutionRecord 替身（字段访问面：id/agent/slug/status/result/
  *  chatMode/rootSessionId/startedAt/closedReason/turnCount）。 */
 function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return {
@@ -168,7 +168,6 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
     slug: "fix-bug",
     startedAt: Date.now() - 1000,
     status: "running",
-    resumable: true,
     rootSessionId: "root-1",
     turnCount: 3,
     ...overrides,
@@ -194,7 +193,6 @@ function makeDiskRecord(sessionFile: string | undefined, overrides: Partial<Suba
     model: "m",
     eventLog: [],
     displayItems: [],
-    resumable: true,
     sessionFile,
     ...overrides,
   } as unknown as SubagentRecord;
@@ -563,7 +561,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     const h = makeBinding({ sessionFile });
     h.store.disk.set(
       "bg-old",
-      makeDiskRecord(sessionFile, { id: "bg-old", status: "idle", closedReason: "gc", resumable: false }),
+      makeDiskRecord(sessionFile, { id: "bg-old", status: "idle", closedReason: "gc" }),
     );
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended).toEqual([
@@ -690,7 +688,7 @@ describe("createRoundSupervisorForService 通知装配", () => {
     const { readopted } = supervisor.bootPartition();
 
     expect(readopted).toEqual(["bg-disk"]);
-    // 磁盘投影视图驱动判定：resumable + 无完成产出 → 决策指引送达
+    // 磁盘投影视图驱动判定：running + 无完成产出（[U5/D4] 全子集谓词）→ 决策指引送达
     expect(h.pi?.sent).toHaveLength(1);
     expect(h.pi?.sent[0]?.message.content).toContain("died mid-task and stays resumable");
   });

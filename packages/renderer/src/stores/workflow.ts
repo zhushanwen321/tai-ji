@@ -255,6 +255,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /**
    * [M7 D6] 查询主 session 名下的全部 agentcall virtualId（deleteSession 调，精确清理不泄漏）。
    * 返回后调用方负责 delete messages[key]。virtualId 由 registerAgentCall 登记。
+   * [B9] 消费方新增 LRU 联动驱逐（agentcall-lru-linkage 装配回调：筛除 viewedVids 后
+   * 交 core lru.ts 执行删除）；deleteSession 路径仍全量清理（无豁免）。
    */
   function getAgentCallVirtualIdsByMain(mainSessionId: string): string[] {
     return [...(mainSessionAgentCalls.get(mainSessionId) ?? [])]

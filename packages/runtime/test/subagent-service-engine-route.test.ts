@@ -91,7 +91,7 @@ function zcodeRecord(engineHandle: unknown): SubagentRecord {
     agent: 'reviewer',
     slug: 'rev',
     task: 'routed task',
-    status: 'closed',
+    status: 'idle', // [U6] closed legacy 值已收窄出类型——终态 fixture 用归一后的两态词
     startedAt: 1756000000000,
     endedAt: 1756000005000,
     result: 'routed outcome',
@@ -122,7 +122,8 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
   })
 
   it('routes zcode record to the engine chain (tier3 outcome-only)', async () => {
-    mockExtract.mockReturnValue([zcodeRecord({ poolKey: 'reviewer', sessionRef: {} })])
+    // [G3] extractor 返回形状改为 {records, oversize}——mock 适配（oversize=false 走正常提取链）
+    mockExtract.mockReturnValue({ records: [zcodeRecord({ poolKey: 'reviewer', sessionRef: {} })], oversize: false })
 
     const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
 
@@ -144,9 +145,12 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
       ].join('\n') + '\n',
       'utf-8',
     )
-    mockExtract.mockReturnValue([
-      zcodeRecord({ poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, journalPath }),
-    ])
+    mockExtract.mockReturnValue({
+      records: [
+        zcodeRecord({ poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, journalPath }),
+      ],
+      oversize: false,
+    })
 
     const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
 
@@ -159,7 +163,7 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
     const record = zcodeRecord(undefined)
     delete record.engine
     delete record.engineHandle
-    mockExtract.mockReturnValue([record])
+    mockExtract.mockReturnValue({ records: [record], oversize: false })
 
     const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
     expect(messages).toEqual([])

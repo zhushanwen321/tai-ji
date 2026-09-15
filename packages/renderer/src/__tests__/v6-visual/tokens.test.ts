@@ -3,8 +3,10 @@
  *
  * 三类用例：
  *  - TC1：CSS 变量定义存在性（纯 JS 解析 style.css :root，≥8 核心变量 + --primary 别名）
- *  - TC2：happy-dom var() 展开行为探测（记录结论，始终 pass——不判 happy-dom 对错）
- *  - TC3：组件消费层断言（vitest 契约验证：注入 :root 变量 + Tailwind 等价语义类 CSS，
+ *  - chromium 轨脚本存在性（双轨防静默删除）
+ *  （原 TC2 恒真探测记录与 TC3 自证循环——注入自写 CSS 再读取、未 mount 任何组件——已删；
+ *   组件真实消费验证归 chromium 轨 scripts/token-consume-check.mjs。）
+ *  【历史结构】TC3：组件消费层断言（vitest 契约验证：注入 :root 变量 + Tailwind 等价语义类 CSS，
  *         5 组件各 ≥1 条 color/background 取自 var()；chromium 轨 scripts/token-consume-
  *         check.mjs 作真实验证双轨——加载真实 vite dev server + Tailwind JIT 编译产物）
  *
@@ -133,24 +135,6 @@ describe('TC1: CSS 变量定义存在性（style.css :root）', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TC2：happy-dom var() 展开行为探测（记录结论，始终 pass）
-// ---------------------------------------------------------------------------
-
-describe('TC2: happy-dom var() 展开行为探测', () => {
-  it('记录 happy-dom 是否展开 var()（探测结论，非 pass/fail 判定）', () => {
-    // 探测在模块顶层已执行（PROBE），此处记录结论到测试输出
-    // eslint-disable-next-line no-console
-    console.log(
-      `[TC2 probe] inline=${PROBE.inline} | classPath=${PROBE.classPath} | ` +
-        `消费层断言归属=${PROBE.classPath ? 'vitest（本套件 TC3）' : 'chromium（scripts/token-consume-check.mjs，ERR2 降级——happy-dom 不解析注入 <style> 的 class→var() 消费，无法验证组件 Tailwind 类）'}`,
-    )
-    // 探测用例始终 pass——它记录环境能力，不判 happy-dom 对错
-    expect(typeof PROBE.inline).toBe('boolean')
-    expect(typeof PROBE.classPath).toBe('boolean')
-  })
-})
-
-// ---------------------------------------------------------------------------
 // TC3：组件消费层断言（vitest 契约验证——happy-dom 支持 var()，注入等价 CSS 验证
 //      5 组件 Tailwind 语义类 → var() 消费关系；chromium 轨作真实验证双轨）
 // ---------------------------------------------------------------------------
@@ -169,50 +153,7 @@ const COMPONENT_CONSUME: Array<{
   { component: 'Settings', cls: 'bg-surface', prop: 'backgroundColor', varName: '--surface' },
 ]
 
-describe('TC3: 5 核心组件 token 消费层断言（vitest 契约验证）', () => {
-  // 注入 :root 变量（style.css）+ Tailwind 等价语义类 CSS（对齐 tailwind.config theme.extend.colors
-  // 映射：bg-bg→var(--bg) 等）。模拟 Tailwind JIT 编译产物，验证「类名→var()」消费契约。
-  // chromium 轨（scripts/token-consume-check.mjs）加载真实 Tailwind 编译产物作端到端验证。
-  beforeAll(() => {
-    const css = readFileSync(STYLE_CSS_PATH, 'utf-8')
-    const vars = parseRootVars(css)
-    for (const [name, value] of Object.entries(vars)) {
-      document.documentElement.style.setProperty(name, value)
-    }
-    const style = document.createElement('style')
-    style.textContent = [
-      '.bg-bg{background-color:var(--bg)}',
-      '.bg-bg-input{background-color:var(--bg-input)}',
-      '.bg-surface{background-color:var(--surface)}',
-      '.text-neutral-fg{color:var(--neutral-fg)}',
-      '.text-accent{color:var(--accent)}',
-      '.border-border{border-color:var(--border)}',
-    ].join('')
-    document.head.appendChild(style)
-  })
-
-  it.each(COMPONENT_CONSUME)(
-    '$component 消费 $cls → $prop 取自 $varName（非硬编码）',
-    ({ cls, prop, varName, component }) => {
-      const el = document.createElement('div')
-      el.className = cls
-      document.body.appendChild(el)
-      const actual = getComputedStyle(el)[prop]
-      const expected = getComputedStyle(document.documentElement)
-        .getPropertyValue(varName)
-        .trim()
-      el.remove()
-      // actual 应等于 varName 展开值（happy-dom 可能返回 hex 或 rgb 规范化形式）
-      const expectedRgb = hexToRgb(expected)
-      const matches =
-        actual === expected || (expectedRgb !== null && actual === expectedRgb)
-      expect(
-        matches,
-        `${component} ${cls} ${prop}: 期望取自 ${varName}=${expected}（rgb=${expectedRgb}）, 实际=${actual}`,
-      ).toBe(true)
-    },
-  )
-
+describe('chromium 轨真实验证（双轨守卫）', () => {
   it('chromium 轨真实验证脚本存在（scripts/token-consume-check.mjs，双轨）', () => {
     // 静态守卫：chromium 轨加载真实 vite dev server + Tailwind JIT 验证组件真实消费
     const scriptPath = resolve(

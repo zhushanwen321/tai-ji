@@ -8,6 +8,10 @@
  *   ② provider 导航项存在（settings-nav-provider）
  *   ③ 默认 provider 页区渲染（ProviderPage 表单区）
  *
+ * 另含（原独立文件 settings-modal-skill-dirs.test.ts 并入，同 mount 脚手架）：
+ * W2 · D10 回归——onUpdateSkillDirs 的 transport.setSkillDirs reject 时 error toast
+ * 反馈（非静默吞，CLAUDE.md 规则 #3）。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/settings-modal-smoke.test.ts
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
@@ -75,13 +79,20 @@ vi.mock('@/lib/ipc', () => ({
   getProxyConfig: vi.fn(async () => ({})),
   setProxyConfig: vi.fn(async () => undefined),
   testProxy: vi.fn(async () => ({ success: true })),
+  // SettingsResourcePage forcedDirs 动态化调用（返回 undefined 走默认值兜底）
+  getDataDir: vi.fn(async () => undefined),
+  // 目录选择（SystemPage chooseDirectory）
+  chooseDirectory: vi.fn(async () => null),
 }))
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
+import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
 import { makeQuotaStateStub } from '../helpers/quota-state-stub'
+import type { SkillDirConfig } from '@xyz-agent/shared'
+import { useToast } from '@/composables/useToast'
 
-/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空）。 */
-function stubTransport(): SettingsTransport {
+/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空；可按用例覆写成员）。 */
+function stubTransport(overrides: Partial<SettingsTransport> = {}): SettingsTransport {
   const noopUnsub = (): void => {}
   return {
     listProviders: async () => ({ providers: [] }),
@@ -103,6 +114,7 @@ function stubTransport(): SettingsTransport {
     onDefaults: () => noopUnsub,
     onSystemPrompt: () => noopUnsub,
     onTerminalConfig: () => noopUnsub,
+    ...overrides,
   }
 }
 
@@ -194,5 +206,51 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
     const firstNav = document.body.querySelector<HTMLElement>('[data-testid="settings-nav-provider"]')
     expect(firstNav).not.toBeNull()
     expect(document.activeElement).toBe(firstNav)
+  })
+})
+
+describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-modal-skill-dirs.test.ts 并入）', () => {
+  it('transport.setSkillDirs reject → 触发 error toast（非静默失败）', async () => {
+    providePlatform({
+      kind: 'mock',
+      storage: inMemoryStorage(),
+      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
+    })
+    provideSettingsTransport(stubTransport({ setSkillDirs: () => Promise.reject(new Error('network down')) }))
+
+    // toast 断言走真实 useToast 单例（SETTINGS_TOAST_KEY 桥接到 useToast）
+    const { toasts } = useToast()
+    toasts.value = []
+
+    const wrapper = mount(SettingsModal, {
+      props: { open: true },
+      attachTo: document.body,
+      global: {
+        provide: {
+          [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
+          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
+          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
+          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+        },
+      },
+    })
+    await flushPromises()
+
+    // 切到 skill 菜单（SettingsResourcePage 在 skill 菜单下渲染）
+    const skillBtn = document.body.querySelector('[data-testid="settings-nav-skill"]')
+    expect(skillBtn).toBeTruthy()
+    skillBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    const resourcePage = wrapper.findComponent(SettingsResourcePage)
+    expect(resourcePage.exists()).toBe(true)
+    const dirs: SkillDirConfig[] = [{ path: '/x', enabled: true, scope: 'global' }]
+    resourcePage.vm.$emit('update-dirs', dirs)
+    await flushPromises()
+
+    // 断言：error toast 已产生（非静默吞）
+    expect(toasts.value.some((t) => t.type === 'error')).toBe(true)
+    expect(toasts.value.some((t) => t.message.includes('network down'))).toBe(true)
   })
 })

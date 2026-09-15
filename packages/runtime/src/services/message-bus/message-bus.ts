@@ -21,6 +21,13 @@
  * seq 是 per-session 内部分配器，publish 时写入 ServerMessage.seq（protocol.ts 已定义可选字段），
  * 供 renderer routeInbound 做 gap 检测和去重。
  *
+ * 字节预算（B7，memory-leak-remediation §3.3-B7 纯 A 方案）：条数有界（ringCapacity）之外补
+ * 字节维度上限（ringBudgetBytes，默认 16MB/session，构造注入）——记账口径 = 实际入 ring 那份
+ * 的字节数（截断档帧按 truncated 版计），超预算从最旧加速淘汰至回到预算内（下界 = 仅剩最新帧，
+ * 允许瞬时超调）；stateSnapshot 纳入同款记账但仅观测（覆盖式当前值口径，超预算 warn 不驱逐）。
+ * 单帧行为完全不变：wire≡ring 同一份（32MB 档既有截断照旧双写，8-32MB warn 档照旧双完整），
+ * 不引入任何单帧截断/丢帧逻辑。
+ *
  * 错误路径：
  * - ES1：clearSession 对不存在 session no-op（幂等）。
  * - ES2：unsubscribe / unsubscribeAll 对未订阅 ws no-op（幂等）。
@@ -59,6 +66,14 @@ function appendFrameJournal(event: 'frame-truncated' | 'registry-miss', reason: 
 
 /** streamRing 默认容量（O(1) 覆盖写环形缓冲）。 */
 const DEFAULT_RING_CAPACITY = 1000
+
+/**
+ * B7 ring 字节预算默认值（16MB/session，设计值——A9 已按设计值通过，维持 16MB，校准遗留 = 无，见设计待验证检查点 3）。
+ * 条数上限（1000 帧）之外补字节维度上限：大帧（截图 base64、大 toolResult）场景下字节才是
+ * 主导维度，1000 帧 × 32MB 理论上限无界。超预算从最旧加速淘汰至回到预算内（驱逐下界 =
+ * 仅剩最新帧，单帧 truncated ≤32MB > 16MB 时允许瞬时超调）。
+ */
+import { RING_BUDGET_BYTES } from '@xyz-agent/shared'
 
 /**
  * topic 三分类（02 文档 D5-1）。
@@ -244,18 +259,25 @@ export class MessageBus implements IMessageBus {
   private readonly wsSubscriptions = new Map<BusClient, Set<string>>()
   /** ring 容量（构造时固定）。 */
   private readonly ringCapacity: number
+  /** ring 字节预算（B7，构造时固定；超预算从最旧加速淘汰）。 */
+  private readonly ringBudgetBytes: number
 
   /**
    * @param ringCapacity streamRing 容量上限，默认 1000。满时 publish 覆盖写最旧槽位（O(1)）。
    * @param guardOptions 出站帧守卫选项（u4a：阈值参数化——生产默认 shared 常量 8MB/32MB；
    *   测试注入小阈值走真实行为逻辑，A10 阈值校准法同型）。resolveSessionFilePath 组合根
    *   可选注入（占位文案填 session 文件实路径；未注入走「见 runtime 日志」占位）。
+   * @param ringBudgetBytes per-session ring 字节预算（B7，默认 16MB；阈值参数化对齐
+   *   guardOptions 范式——测试注入小预算走真实驱逐逻辑）。stateSnapshot 纳入同款预算
+   *   但仅观测（超预算 warn 不驱逐）。
    */
   constructor(
     ringCapacity: number = DEFAULT_RING_CAPACITY,
     private readonly guardOptions: OutboundFrameGuardOptions = DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS,
+    ringBudgetBytes: number = RING_BUDGET_BYTES,
   ) {
     this.ringCapacity = ringCapacity
+    this.ringBudgetBytes = ringBudgetBytes
   }
 
   /**
@@ -333,18 +355,24 @@ export class MessageBus implements IMessageBus {
         })
       }
       const truncated = guarded.message
+      // B7 记账口径（R3）：截断档帧入 ring 的是 truncated 版另行序列化——记账须用实际入
+      // ring 那份的字节数，不可复用外层截断前 bytes（否则高估占用致过早驱逐）。该序列化
+      // 与广播共用同一次（truncatedJson 只 stringify 一回）。单帧行为不变：wire 与 ring
+      // 仍是同一份截断版（预算驱逐只影响 ring 驻留，不新增任何截断/丢帧）。
+      const truncatedJson = JSON.stringify(truncated)
+      const truncatedBytes = Buffer.byteLength(truncatedJson, 'utf8')
       if (!isTransient) {
         // 截断版替代原消息占位：stream 入 ring、state 写快照——回放/重订阅拿到同一份截断版。
         if (topic === 'state') {
           const typeKey = stateTypeKey(truncated)
           if (typeKey !== null) {
-            state.stateSnapshot.set(typeKey, truncated)
+            this.setStateSnapshotEntry(state, typeKey, truncated, truncatedBytes, sessionId)
           }
         } else {
-          this.ringPush(state.streamRing, truncated)
+          this.ringPush(state.streamRing, truncated, truncatedBytes)
         }
       }
-      this.broadcastText(state.subscribers, JSON.stringify(truncated))
+      this.broadcastText(state.subscribers, truncatedJson)
       return
     }
     if (bytes > this.guardOptions.warnBytes) {
@@ -365,14 +393,14 @@ export class MessageBus implements IMessageBus {
       return
     }
     if (topic === 'state') {
-      // state：写快照（同 typeKey 覆盖，状态去重语义），不入 ring。
+      // state：写快照（同 typeKey 覆盖，状态去重语义），不入 ring。字节记账（B7）仅观测。
       const typeKey = stateTypeKey(message)
       if (typeKey !== null) {
-        state.stateSnapshot.set(typeKey, message)
+        this.setStateSnapshotEntry(state, typeKey, message, bytes, sessionId)
       }
     } else {
-      // stream：入 O(1) 环形缓冲（满则覆盖最旧）。
-      this.ringPush(state.streamRing, message)
+      // stream：入 O(1) 环形缓冲（满则覆盖最旧 + B7 字节记账/超预算加速淘汰）。
+      this.ringPush(state.streamRing, message, bytes)
     }
     this.broadcastText(state.subscribers, payload)
   }
@@ -474,20 +502,83 @@ export class MessageBus implements IMessageBus {
   }
 
   /**
-   * ring 写入（D5-3 O(1) 覆盖写）：写入 (head + size) % capacity 槽位；满时 head 前移
-   * （最旧元素被覆盖）。无数组搬移，单条写入 O(1)。
+   * ring 写入（D5-3 O(1) 覆盖写 + B7 字节记账/超预算加速淘汰）：写入 (head + size) % capacity
+   * 槽位；满时 head 前移（最旧元素被覆盖，同步扣减其字节）。无数组搬移，单条写入 O(1)。
+   *
+   * B7 记账：push 累计 frameBytes（实际入 ring 那份的字节——截断档帧是 truncated 版的
+   * 序列化字节数）；容量覆盖写与预算驱逐淘汰时扣减。超预算（ringBudgetBytes，默认
+   * 16MB）从最旧加速淘汰至回到预算内——ring 保持「最近 N 帧或 M 字节内」语义，
+   * live 流量与 wire 行为不变（驱逐段回放静默缺失，切回 session 时 getHistory hydrate
+   * 补齐，见设计代价四要素）。
+   *
+   * 驱逐下界（R4，影响 S4）：淘汰至「仅剩最新帧」即停、允许瞬时超调——单帧 truncated
+   * ≤32MB > 16MB 预算时不误逐刚 push 帧也不死循环（循环条件 size > 1 结构性保证）。
+   *
+   * @param ring 目标环形缓冲
+   * @param message 待写入消息（实际入 ring 的那份——截断档帧传 truncated 版）
+   * @param frameBytes 实际入 ring 那份的序列化字节数（与 wire 同源，不可用截断前 bytes）
    */
-  private ringPush(ring: StreamRingBuffer, message: ServerMessage): void {
+  private ringPush(ring: StreamRingBuffer, message: ServerMessage, frameBytes: number): void {
     const cap = ring.buf.length
     // 容量 0 = 不保留 ring 历史（与旧 push/shift 实现在 capacity=0 下的行为等价），且避开 %0 NaN。
     if (cap === 0) return
     const pos = (ring.head + ring.size) % cap
-    ring.buf[pos] = message
     if (ring.size < cap) {
       ring.size += 1
     } else {
-      // 满：写入位置即最旧元素位置，head 前移一格完成淘汰。
+      // 满：写入位置即最旧元素位置，head 前移一格完成淘汰（+ 记账扣减被覆盖帧字节）。
+      ring.bytes -= ring.slotBytes[pos]
       ring.head = (ring.head + 1) % cap
+    }
+    ring.buf[pos] = message
+    ring.slotBytes[pos] = frameBytes
+    ring.bytes += frameBytes
+    // 超预算加速淘汰：从最旧起逐帧淘汰至回到预算内；下界 = 仅剩最新帧（size > 1），
+    // 单帧自身超预算时瞬时超调驻留，不逐刚 push 帧不死循环。
+    while (ring.bytes > this.ringBudgetBytes && ring.size > 1) {
+      this.evictOldest(ring)
+    }
+  }
+
+  /**
+   * B7：淘汰最旧帧——引用置 undefined（释放驻留对象）+ 记账扣减 + head/size 前移。
+   * 不触 seqCounter / subscribers：驱逐只影响 ring 驻留窗口，seq 连续性与 gap 判定
+   * （handler 的 fromSeq < ring 最旧 seq）自动适应变短的窗口。
+   */
+  private evictOldest(ring: StreamRingBuffer): void {
+    const cap = ring.buf.length
+    ring.buf[ring.head] = undefined
+    ring.bytes -= ring.slotBytes[ring.head]
+    ring.slotBytes[ring.head] = 0
+    ring.head = (ring.head + 1) % cap
+    ring.size -= 1
+  }
+
+  /**
+   * B7：stateSnapshot 写入 + 字节记账（**仅观测**，超预算 warn 不驱逐）。
+   *
+   * 覆盖式当前值口径：同 typeKey set 替换时按新值重计（差值语义），非累计求和——
+   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（6 个 state topic），
+   * 每次重算总和 O(6)。该 warn 同时作为回收态 state 快照的跟进信号（回收态 ring 驻留
+   * 已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
+   */
+  private setStateSnapshotEntry(
+    state: SessionBusState,
+    typeKey: string,
+    message: ServerMessage,
+    bytes: number,
+    sessionId: string,
+  ): void {
+    state.stateSnapshot.set(typeKey, message)
+    state.stateSnapshotBytes.set(typeKey, bytes)
+    let total = 0
+    for (const b of state.stateSnapshotBytes.values()) {
+      total += b
+    }
+    if (total > this.ringBudgetBytes) {
+      console.warn(
+        `[message-bus] stateSnapshot bytes over budget (observe-only, no eviction): sessionId=${sessionId} typeKey=${typeKey} totalBytes=${total} budget=${this.ringBudgetBytes}`,
+      )
     }
   }
 
@@ -530,8 +621,15 @@ export class MessageBus implements IMessageBus {
     if (!state) {
       state = {
         seqCounter: 0,
-        streamRing: { buf: new Array(this.ringCapacity), head: 0, size: 0 },
+        streamRing: {
+          buf: new Array(this.ringCapacity),
+          head: 0,
+          size: 0,
+          bytes: 0,
+          slotBytes: new Array(this.ringCapacity).fill(0),
+        },
         stateSnapshot: new Map(),
+        stateSnapshotBytes: new Map(),
         subscribers: new Set(),
       }
       this.sessions.set(sessionId, state)

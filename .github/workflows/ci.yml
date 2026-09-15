@@ -101,8 +101,16 @@ jobs:
   # mac 完整 main tests（updater-script-integration 的 mac 专属用例）仍由 build.yml mac 平台跑，
   # 此处 test-main 只跑 ubuntu 上能跑的子集。
   test-runtime:
-    name: Test (runtime)
+    # 2 分片：本地实测（2026-09-14，523 文件）suite time Top10 占 56%，rpc-client 家族
+    # （真 spawn pi 进程 ~2.5s/case）主导；且 renderer 分片后 runtime（118s）会成为
+    # 测试阶段新杆，需同步压。shard 线性有效（文件互相独立）。
+    name: Test (runtime, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [1, 2]
+        shard-total: [2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,20 +134,35 @@ jobs:
         # 注入 describe 名（探测机制 SSOT = equivalence/pi-fixture.ts REAL_PI_READY）。
         env:
           XYZ_SKIP_REAL_PI: '1'
-        run: pnpm --filter @xyz-agent/runtime run test -- --reporter=junit --outputFile=test-results.xml
+        # [HISTORICAL] 勿改回 `run test -- --flags` 形态：pnpm@10 恢复 npm 式 `--` 透传后，
+        # flag 落在 `--` 之后被 cac 当作文件过滤器，reporter/outputFile 全部静默失效
+        # （2026-09-14 排查：junit 实际写 config 定义的 test-results/vitest-junit.xml，
+        # upload 步骤找 test-results.xml 长期空转，run artifacts 恒为 0）。exec 直传参数
+        # 不经 `--`；reporter/outputFile 以 vitest.config.ts 为准，勿在此重复声明。
+        run: pnpm --filter @xyz-agent/runtime exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-runtime
-          path: packages/runtime/test-results.xml
+          name: test-results-runtime-${{ matrix.shard-index }}
+          path: packages/runtime/test-results/vitest-junit.xml
           retention-days: 7
           if-no-files-found: ignore
 
   test-renderer:
-    name: Test (renderer)
+    # 2 分片（per-file 开销主导 → shard 线性加速）：本地实测（2026-09-14，402 文件）
+    # 用例纯执行仅占 18%（95.6s/542s 聚合），其余为每文件固定开销（import 185s +
+    # setup 130s[i18n setupFiles 每文件一遍] + happy-dom environment 104s，≈1s/文件）。
+    # 文件中位数 73ms、Top10 仅占 32% —— 修慢文件天花板 ≈ 12%，shard 是唯一有效杠杆；
+    # ubuntu 实测 209s → 2 分片预期 ~120s/片（含 boot）。
+    name: Test (renderer, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [1, 2]
+        shard-total: [2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -158,24 +181,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: pnpm --filter @xyz-agent/frontend run test -- --reporter=junit --outputFile=test-results.xml --coverage
+        # [HISTORICAL] 同 test-runtime：exec 直传参数（pnpm@10 `--` 透传令 CLI flag 全失效，
+        # 其中 --coverage 自落地起从未真正执行过，coverage 阈值门禁形同虚设）。
+        # coverage 门禁不在此跑：插桩 ~2x 会把本 job 推到 ~5min 关键路径——迁往
+        # coverage.yml（nightly + 手动）由每日快照兑底，TEST-STRATEGY.md §7 同步更新。
+        run: pnpm --filter @xyz-agent/frontend exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-renderer
-          path: packages/renderer/test-results.xml
+          name: test-results-renderer-${{ matrix.shard-index }}
+          path: packages/renderer/test-results/vitest-junit.xml
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: packages/renderer/coverage/
-          retention-days: 7
 
   test-main:
     name: Test (main)

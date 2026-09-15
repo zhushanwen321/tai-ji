@@ -101,8 +101,6 @@ export interface SubagentRecordEntryData {
    * （one-shot 为显式 false）；v1 前存量 entry 缺省，消费端按保守方向处理。
    */
   chatMode?: boolean;
-  /** 执行态信号（residual-fixes）：true = 无活进程驱动的 running（轮终/孤儿兜底）。 */
-  resumable?: boolean;
   /**
    * 实际执行引擎 id（P4 路由留痕，D9①）。缺省（存量 entry）= pi 投影，消费方零迁移。
    */
@@ -175,7 +173,6 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     worktree: record.worktree,
     round: record.round,
     chatMode: record.chatMode,
-    resumable: record.resumable,
     engine: record.engine,
     engineFallback: record.engineFallback,
     engineHandle: record.engineHandle,

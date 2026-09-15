@@ -290,13 +290,22 @@ describe('Bridge reconnect lifecycle', () => {
     })
 
     it('tracks bridge request IDs for session cleanup', async () => {
+      // 到达即登记（B6 语义：应答完成后即删，登记事实经 spy 锁定）
+      const mgr = (server as unknown as {
+        extensionTimeoutMgr: {
+          isBridgeRequest(id: string): boolean
+          addBridgeRequest(sessionId: string, requestId: string): void
+        }
+      }).extensionTimeoutMgr
+      const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
       await server.handleBridgeRequest(SESSION_ID, 'req-bridge', 'bridge:sync', {})
       await server.handleBridgeRequest(SESSION_ID, 'req-bridge2', 'bridge:tool_execute', {})
 
-      // Bridge request IDs should be tracked internally
-      const mgr = (server as unknown as { extensionTimeoutMgr: { isBridgeRequest(id: string): boolean } }).extensionTimeoutMgr
-      expect(mgr.isBridgeRequest('req-bridge')).toBe(true)
-      expect(mgr.isBridgeRequest('req-bridge2')).toBe(true)
+      expect(addSpy).toHaveBeenCalledWith(SESSION_ID, 'req-bridge')
+      expect(addSpy).toHaveBeenCalledWith(SESSION_ID, 'req-bridge2')
+      // B6 应答即删：完成后不残留（bridgeRequestIds 有界）
+      expect(mgr.isBridgeRequest('req-bridge')).toBe(false)
+      expect(mgr.isBridgeRequest('req-bridge2')).toBe(false)
     })
   })
 

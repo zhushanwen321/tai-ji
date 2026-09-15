@@ -237,34 +237,9 @@ describe('RuntimeServer: bridge request routing', () => {
       }))
     })
 
-    it('aggregates tools from plugin contributions', async () => {
-      const pluginService = new PluginService({} as never, server)
-      // Override getDiscoveredPlugins to return a plugin (PluginInfo[]; tools
-      // are now surfaced via getBridgeSyncPayload, not descriptor contributes)
-      vi.mocked(pluginService.getDiscoveredPlugins).mockReturnValue([
-        {
-          pluginId: 'test-plugin',
-          version: '1.0.0',
-          displayName: 'Test Plugin',
-          description: 'A test plugin',
-          status: 'active',
-          trustLevel: 'sandbox',
-          enabled: true,
-        },
-      ])
-
-      // Re-set services to use the overridden mock
-      const sessionService = new SessionService({} as never, {} as never, {} as never, '/tmp', {} as never, {} as never, {} as never, noopGitInfoReader, {} as never)
-      server.setServices(sessionService, {} as never, {} as never, { extension: {} as never, plugin: pluginService })
-      mockSendExtensionUiResponse.mockClear()
-
-      await server.handleBridgeRequest('sess-1', 'bridge-req-2', 'bridge:sync', {})
-
-      const response = parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])
-
-      expect(response.tools).toHaveLength(0)
-      expect(response.success).toBe(true)
-    })
+    // [2026-09 测试舰队审查 r2-13] 'aggregates tools from plugin contributions' 用例已删：
+    // 聚合点已迁移（tools 经 getBridgeSyncPayload），该用例名不副实地断言恒空数组，
+    // 空回包容器形状由上一用例的 tools/commands Array 断言覆盖。
   })
 
   describe('bridge:tool_execute', () => {
@@ -361,11 +336,18 @@ describe('RuntimeServer: bridge timeout exclusion', () => {
   })
 
   it('tracks bridge requestIds in bridgeRequestIds set', async () => {
+    // B6 应答即删（memory-leak-remediation §3.2-B6）：登记事实经 spy 锁定，完成后不残留
+    const mgr = (server as unknown as {
+      extensionTimeoutMgr: {
+        isBridgeRequest(id: string): boolean
+        addBridgeRequest(sessionId: string, requestId: string): void
+      }
+    }).extensionTimeoutMgr
+    const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     await server.handleBridgeRequest('sess-1', 'req-bridge-track', 'bridge:sync', {})
 
-    // Bridge requestIds should be tracked
-    const mgr = (server as unknown as { extensionTimeoutMgr: { isBridgeRequest(id: string): boolean } }).extensionTimeoutMgr
-    expect(mgr.isBridgeRequest('req-bridge-track')).toBe(true)
+    expect(addSpy).toHaveBeenCalledWith('sess-1', 'req-bridge-track')
+    expect(mgr.isBridgeRequest('req-bridge-track')).toBe(false)
   })
 
   // [2026-07-16] extension UI 超时已取消（confirm/select/input 等统一不超时）。
@@ -373,68 +355,6 @@ describe('RuntimeServer: bridge timeout exclusion', () => {
   // sendExtensionUiResponse，行为已移除，测试删除。
 })
 
-// ── Bridge extension message format validation ───────────────────
-
-describe('Bridge extension message format', () => {
-  it('bridge:sync request format has method and optional data', () => {
-    const msg = { method: 'bridge:sync' }
-    expect(msg).toHaveProperty('method')
-    expect(msg.method).toBe('bridge:sync')
-  })
-
-  it('bridge:sync response format has tools array', () => {
-    const response = { tools: [], success: true }
-    expect(response).toHaveProperty('tools')
-    expect(Array.isArray(response.tools)).toBe(true)
-    expect(response).toHaveProperty('success')
-  })
-
-  it('bridge:tool_execute request format has toolName and params', () => {
-    const msg = { method: 'bridge:tool_execute', toolName: 'hello', params: { arg1: 'value1' }, toolCallId: 'tc-1', sessionId: 'sess-1' }
-    expect(msg).toHaveProperty('method', 'bridge:tool_execute')
-    expect(msg).toHaveProperty('toolName')
-    expect(msg).toHaveProperty('params')
-    expect(msg).toHaveProperty('toolCallId')
-    expect(msg).toHaveProperty('sessionId')
-  })
-
-  it('bridge:event request format has eventName and data', () => {
-    const msg = { method: 'bridge:event', eventName: 'agent_start', data: { sessionId: 'sess-1', query: 'hello' }, sessionId: 'sess-1' }
-    expect(msg).toHaveProperty('method', 'bridge:event')
-    expect(msg).toHaveProperty('eventName')
-    expect(msg).toHaveProperty('data')
-    expect(msg).toHaveProperty('sessionId')
-  })
-
-  it('bridge:intercept request format has eventName, data, sessionId', () => {
-    const msg = { method: 'bridge:intercept', eventName: 'before_agent_start', data: { sessionId: 'sess-1' }, sessionId: 'sess-1' }
-    expect(msg).toHaveProperty('method', 'bridge:intercept')
-    expect(msg).toHaveProperty('eventName')
-    expect(msg).toHaveProperty('data')
-    expect(msg).toHaveProperty('sessionId')
-  })
-
-  it('bridge:intercept response can contain injectedMessages', () => {
-    const resp = {
-      injectedMessages: [
-        { role: 'user', content: 'system message from plugin' },
-        { role: 'assistant', content: 'plugin response' },
-      ],
-    }
-    expect(resp).toHaveProperty('injectedMessages')
-    expect(resp.injectedMessages).toHaveLength(2)
-    expect(resp.injectedMessages[0]).toHaveProperty('role', 'user')
-    expect(resp.injectedMessages[0]).toHaveProperty('content')
-  })
-
-  it('tool entry in bridge:sync response has name, description, parameters', () => {
-    const tool = {
-      name: 'hello',
-      description: 'Says hello',
-      parameters: { type: 'object', properties: { name: { type: 'string' } } },
-    }
-    expect(tool).toHaveProperty('name')
-    expect(tool).toHaveProperty('description')
-    expect(tool).toHaveProperty('parameters')
-  })
-})
+// [2026-09 测试舰队审查 r2-13] 'Bridge extension message format' describe（8 例）已删：
+// 全部为「构造字面对象 → 断言自身属性」恒真断言，零 SUT 交互；bridge 请求/回包真实形状
+// 由上方 handleBridgeRequest 路由用例（parseBridgeResponse 断言）覆盖。

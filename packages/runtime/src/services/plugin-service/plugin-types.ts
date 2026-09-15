@@ -115,4 +115,10 @@ export interface IPluginServiceDeps {
    * （NpmPluginInstaller）。installPlugin 在缺省时返回 { success:false } 而非 spawn。
    */
   pluginInstaller?: import('../ports/plugin-installer.js').IPluginInstaller
+  /**
+   * 文件软删除 port（结构匹配 ITrash.trashFile）。组合根注入 infra adapter（trash）；
+   * session 真删除时 session-data 清理经 trash（mac 废纸篓 / 非 mac unlink），缺省 undefined
+   * 时 SessionDataStore 回退直接 unlink（B5）。
+   */
+  trashFile?: import('../ports/trash.js').ITrash['trashFile']
 }

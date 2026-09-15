@@ -24,50 +24,24 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/system-page-update.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { cardTestState, checkForUpdateMock, performDownloadMock, performInstallMock, openFallbackUrlMock, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
 import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick, reactive } from 'vue'
-import type { UpdateState } from '@xyz-agent/shared'
+import { nextTick } from 'vue'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub
-
-// 单例 state：测试通过 setTestState 改写驱动组件分支渲染
-const testState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string; releaseNotes: string } | null,
-  errorMessage: '',
-  percent: 0,
-  releaseNotesHtml: '',
-})
 
 /** 构造 mock release（available/downloaded 用例需 version 填充占位符） */
 function makeRelease(version: string): { version: string; htmlUrl: string; releaseNotes: string } {
   return { version, htmlUrl: 'https://example.com/release', releaseNotes: '' }
 }
 
-// vi.hoisted 保证在 vi.mock 工厂执行前就绪
-const checkForUpdateMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performDownloadMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const performInstallMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const openFallbackUrlMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-
-vi.mock('@/composables/features/settings/useAppUpdate', () => ({
-  useAppUpdate: () => ({
-    state: testState,
-    checkForUpdate: checkForUpdateMock,
-    performDownload: performDownloadMock,
-    performInstall: performInstallMock,
-    openFallbackUrl: openFallbackUrlMock,
-    initAutoCheck: vi.fn(),
-    restorePendingUpdate: vi.fn(),
-    restorePreloadedUpdate: vi.fn(),
-  }),
-}))
+vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateCheckCard from '@/components/settings/UpdateCheckCard.vue'
 
 /** 设置测试态（驱动组件 v-if/v-else-if 分支） */
-function setTestState(partial: Partial<typeof testState>): void {
-  Object.assign(testState, partial)
+function setTestState(partial: Partial<typeof cardTestState>): void {
+  Object.assign(cardTestState, partial)
 }
 
 let wrapper: ReturnType<typeof mount> | null = null
@@ -77,7 +51,7 @@ beforeEach(() => {
   performDownloadMock.mockReset()
   performInstallMock.mockReset()
   openFallbackUrlMock.mockReset()
-  Object.assign(testState, {
+  Object.assign(cardTestState, {
     state: 'idle',
     latestRelease: null,
     errorMessage: '',

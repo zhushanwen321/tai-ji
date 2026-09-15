@@ -1,14 +1,14 @@
 /**
  * useSideDrawer per-session 控制态隔离单测（W3: U1-U10）。
  *
- * 验证从模块级单例 isOpen/activeTab/docked 重构为 per-session Map 分区后：
+ * 验证从模块级单例 isOpen/activeTab/docked 重构为 per-session Map 分区后
+ * （U2 切回恢复三态/U4 docked 不污染/U10 reactive 容器契约与 core
+ * domain/drawer/__tests__/control.test.ts 逐字重复，已删——经兼容层转发以外的
+ * renderer 侧增量保留）：
  * - U1 (AC-1): 跨 session 不干扰——切走/切回不互相污染
- * - U2 (AC-2): 切回恢复三态（isOpen/activeTab/docked）
- * - U4 (AC-4): docked 不污染其他 session
  * - U5 (AC-5): deleteSession 清理分区
  * - U6 (AC-6): 手动关后切回不被重开（无新事件）
  * - U9 (AC-9): 双 panel standby 无独立 drawer 状态
- * - U10 (AC-10): sid 稳定下手动 open
  *
  * [P4 s5 drawer-widget-removal] U3 (pendingOpen 切回消费)/ U7 (快速来回切幂等)/
  * U8 (手动 open 清 pendingOpen) 已删：pendingOpen 机制随 tasks 域移除（PluginViewContainer 承接）。
@@ -81,44 +81,6 @@ describe('useSideDrawer U1 (AC-1) 跨 session 不干扰', () => {
   })
 })
 
-describe('useSideDrawer U2 (AC-2) 切回恢复三态', () => {
-  it('A 的 drawer 开/docked，切 B 再切回 A 全恢复', () => {
-    focusSession('A')
-    const drawer = useSideDrawer()
-    drawer.open('git')
-    drawer.toggleDock() // A 分区 docked=true
-
-    // 切到 B（B 独立操作，不影响 A 分区）
-    focusSession('B')
-    const drawerB = useSideDrawer()
-    expect(drawerB.isOpen.value).toBe(false)
-    expect(drawerB.activeTab.value).toBe('terminal')
-
-    // 切回 A
-    focusSession('A')
-    const drawerA = useSideDrawer()
-    expect(drawerA.isOpen.value).toBe(true)
-    expect(drawerA.activeTab.value).toBe('git')
-    expect(drawerA.docked.value).toBe(true)
-  })
-})
-
-describe('useSideDrawer U4 (AC-4) docked 不污染其他 session', () => {
-  it('A 的 drawer docked=true，切到 B，B 的 docked 是自己记忆(false)', () => {
-    focusSession('A')
-    useSideDrawer().open('git')
-    useSideDrawer().toggleDock() // A docked=true（仅 A 分区）
-
-    focusSession('B')
-    const drawerB = useSideDrawer()
-    expect(drawerB.docked.value).toBe(false) // B 默认，不被 A 污染
-
-    // 切回 A，A 的 docked 仍 true
-    focusSession('A')
-    expect(useSideDrawer().docked.value).toBe(true)
-  })
-})
-
 describe('useSideDrawer U5 (AC-5) deleteSession 清理分区', () => {
   it('triggerSessionCleanups(A) 清掉 A 控制态分区', () => {
     focusSession('A')
@@ -171,20 +133,5 @@ describe('useSideDrawer U9 (AC-9) 双 panel standby 无独立状态', () => {
     focusSession('A')
     expect(useSideDrawer().isOpen.value).toBe(true)
     expect(useSideDrawer().activeTab.value).toBe('git')
-  })
-})
-
-describe('useSideDrawer U10 (AC-10) sid 稳定下手动 open（回归 plain object init 失效 bug）', () => {
-  it('focus(A) 后不切 session，直接 open → isOpen 立即为 true', () => {
-    // 回归：init 工厂漏 reactive() 时，sid 稳定下 open() 的 mutate 不触发 computed 重算，
-    // isOpen 缓存旧值 false。修复后 reactive 容器使 mutate 正确传播。
-    focusSession('A')
-    const drawer = useSideDrawer()
-    expect(drawer.isOpen.value).toBe(false) // 缓存建立（模拟组件已渲染）
-
-    drawer.open('git') // 手动 toggle，sid 未变化
-
-    expect(drawer.isOpen.value).toBe(true) // 修复前为 false（bug）
-    expect(drawer.activeTab.value).toBe('git')
   })
 })

@@ -15,8 +15,10 @@
  *   → onChange(kind) → pushNotice(srcSessionId, { kind, branchName }) 追加状态行
  *
  * Transient 语义：feed 仅前端内存维护，不写 chat store messages（不持久化、不进 JSONL）。
- * session 删除时 clearSession 清 feed，避免悬挂。模块级单例 ref 让所有 MessageStream 实例
- * 共享同一份 feed（同 useForkModeChannel 模式），无需 store 或 provide/inject。
+ * session 删除时 clearSession 清 feed，避免悬挂（[G1 / 2026-09-14 内存审计 §3.4] 接线：
+ * SessionCleanupHooks.clearForkNotices → useSidebar hooks 实现 → 本函数，销毁唯一编排点
+ * cleanupSessionState 触发）。模块级单例 ref 让所有 MessageStream 实例共享同一份 feed
+ * （同 useForkModeChannel 模式），无需 store 或 provide/inject。
  *
  * 生命周期：App.vue onMounted 调 bindForkNoticeEffect() 注册全局订阅（onScopeDispose 退订）；
  * MessageStream 各实例调 useForkNoticeFeed() 读自身 session 的通知渲染。
@@ -75,7 +77,7 @@ export function useForkNoticeFeed(): {
   notices: (sessionId: string) => DeepReadonly<ForkNoticeEntry[]>
   /** 移除单条通知（用户点关闭 ×） */
   dismissNotice: (sessionId: string, noticeId: number) => void
-  /** 清空指定 session 全部通知（session 删除时调） */
+  /** 清空指定 session 全部通知（session 销毁编排调：SessionCleanupHooks.clearForkNotices，G1 接线） */
   clearSession: (sessionId: string) => void
   /** feed 原始 ref（测试/调试用） */
   feedRef: Ref<Map<string, ForkNoticeEntry[]>>

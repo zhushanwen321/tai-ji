@@ -62,6 +62,12 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 // 统一回填入口（sidecar-binding-sync 设计文档拍板接线在此），同样随 R3 收口。新写
 // services 代码不得再效仿此处直引 infra。
 import { getSessionsDir } from '../../infra/pi/pi-paths.js'
+// B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
+// plugin sessionData 清理分发（tombstone + 分区摘除 + trash 软删除）。挂点从 removeSessionEntry
+// 汇聚点收窄到本模块 delete——汇聚点四路收殓中三路（pi 崩溃 exit / forceQuit / restore 清场）
+// session 存活，无条件清理会把存活 session 的插件数据 tombstone+trash。跨服务模块级分发
+// 模式同 getCrashJournal（plugin-service 与 session-service 互为依赖，构造注入成环）。
+import { clearRemovedSessionData } from '../plugin-service/session-data-store.js'
 // 空闲回收占座原语与编排依赖类型（idle-pi-reclamation D6-2/D3，u2）。ReclaimSeat 是
 // reaper 判定循环与 reclaimManagedSession 共享的互斥状态（同实例注入，u3 装配）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
@@ -227,6 +233,12 @@ export interface ReclaimSessionDeps {
   reapBackgroundTasks?(sessionId: string): Promise<void>
   /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
   clearPendingReload?(sessionId: string): void
+  /**
+   * 驱逐该 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C：
+   * 回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本）。装配绑
+   * SessionService.evictHistoryRebuildCache → SessionHistoryReader.onSessionReclaimed。
+   */
+  evictHistoryRebuildCache?(sessionId: string): void
 }
 
 export class SessionLifecycle implements ISessionRegistry {
@@ -883,6 +895,22 @@ export class SessionLifecycle implements ISessionRegistry {
       if (existsSync(target.filePath)) await this.sessionStore.trash(target.filePath)
       this.purgeSessionSidecars(target.filePath)
     }
+    // B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
+    // + 磁盘文件）与 session 本体一同进废纸篓——trash 绑定**真删除**，active / scanned 两
+    // 分支共用本点（用户删除非活跃 session 的插件数据同样随本体清理）。三条 session 存活
+    // 路径刻意**不清**：pi 崩溃（session-service onSessionExit）/ forceQuit（dispatcher
+    // 强杀，restore 重开历史完整）/ restore 清场（clearExistingSessionForRestore，同链随后
+    // notifySessionCreated 摘碑复活）——它们随后 respawn / restore 复活同 id，插件数据必须
+    // 原样存活供继续读写（tombstone 也不能打：迟到写守卫只属真删除）。顺序约束（设计
+    // §3.2-B5）：在 removeSessionEntry 之后——didDestroy 投递（fire-and-forget）先行，插件
+    // worker 迟到的 set/delete 由 SessionDataStore tombstone 丢弃。best-effort：清理失败
+    // 只 warn，不阻断删除主流程（异步腿 rejection 在分发器内部逐实例 catch+warn）。
+    try {
+      clearRemovedSessionData(sessionId)
+    } catch (e: unknown) {
+      // best-effort 降级：清理失败仅留痕，不阻断删除主流程（B5 清理是软增强非删除前置条件）
+      console.warn(`[session-lifecycle] plugin sessionData clear failed (sessionId=${sessionId}):`, e)
+    }
     // wave:perf-w26（D9-1 delete 失效点）：session 文件已 trash，目录 TTL 快照 1s 内仍含
     // 已删条目——显式失效，删除后立即从侧栏列表消失（05 文档 V5 验收）。
     this.sessionStore.invalidateScanCache()
@@ -1173,8 +1201,9 @@ export class SessionLifecycle implements ISessionRegistry {
    * 空闲回收的最小摘除编排（idle-pi-reclamation D3 七步，u2）。
    *
    * 与死亡清理汇聚点 removeSessionEntry（九步销毁）刻意不同：回收**不是销毁**——bus 分区
-   * （订阅/seq 连续，P3 广播流不断）、历史缓存（P7 条件增量收益）、PTY、插件 didDestroy
-   * 投递、终态写等全部跳过（D3 被跳过步骤归属表）。**禁止**为图省事改调 removeSessionEntry
+   * （订阅/seq 连续，P3 广播流不断）、PTY、插件 didDestroy
+   * 投递、终态写等全部跳过（D3 被跳过步骤归属表）；历史缓存例外——B8 起回收时驱逐该
+   * session 条目（evictHistoryRebuildCache，驱逐后重激活走单次全量重建是显式登记的代价）。**禁止**为图省事改调 removeSessionEntry
    * ——被否谱系第 1 条：PTY 连杀 / 广播断流 / 插件 destroy 污染三重冲突（除非三重冲突
    * 全有独立解法，当前没有）。
    *
@@ -1219,6 +1248,11 @@ export class SessionLifecycle implements ISessionRegistry {
       // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
       this.removeEntry(sessionId)
       deps.clearPendingReload?.(sessionId)
+      // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收不是
+      // 销毁，不走 removeSessionEntry 汇聚点，只驱逐缓存这一纯派生数据。挂代际校验
+      // 通过后的成功路径（并发重建取消时新 session 无辜，不摘其缓存）；驱逐后重激活
+      // 走单次全量重建（P7 张力四要素显式登记的代价，见 onSessionReclaimed 注释）。
+      deps.evictHistoryRebuildCache?.(sessionId)
       // ⑤① relay 尾扫（D3 第 5 步①，fire-and-forget）。**单段快照语义**：快照枚举与
       // kill 目标列表在此同步段一次完成，setImmediate 异步执行阶段只用快照闭包、禁止再查
       // 再杀——两段式（异步 kill 后二次复查再杀）可能误杀 restore 后新 session 经 relay

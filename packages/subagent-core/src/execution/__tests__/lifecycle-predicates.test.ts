@@ -96,23 +96,16 @@ describe("lifecycle-predicates (v4 B-1)", () => {
 
   });
 
-  describe("isResumable (= running && !hasLiveProcessHandle)", () => {
-    it("running + no live process → true (Path B / 跨重启)", () => {
-      expect(isResumable(makeRecord({ status: "running" }))).toBe(true);
+  // [two-state-convergence U5/D4] isResumable 判据改 idle 派生（idle 即 resumable）——
+  // 旧「running && 无活进程」判据依赖的轮终桥接形态已随 U4 翻边消亡。
+  describe("isResumable (= status === 'idle'，[U5/D4] idle 派生)", () => {
+    it("idle → true (轮终收口即可续聊——含 one-shot 完成 / chat 等续聊 / 中断族)", () => {
+      expect(isResumable(makeRecord({ status: "idle" }))).toBe(true);
     });
 
-    it("running + live process (镜像) → false (Path A 保活 / 正在执行)", () => {
+    it("running（无论有无活进程镜像）→ false (在飞轮不可冷路径 resume)", () => {
+      expect(isResumable(makeRecord({ status: "running" }))).toBe(false);
       const rec = makeRecord({ status: "running" });
-      coreSpawnedChildrenMirror().register(rec.id, { pid: 1, killed: false });
-      expect(isResumable(rec)).toBe(false);
-    });
-
-    it("closed + no live process → false (终态不可 resume)", () => {
-      expect(isResumable(makeRecord({ status: "idle" }))).toBe(false);
-    });
-
-    it("closed + live process → false (终态优先)", () => {
-      const rec = makeRecord({ status: "idle" });
       coreSpawnedChildrenMirror().register(rec.id, { pid: 1, killed: false });
       expect(isResumable(rec)).toBe(false);
     });

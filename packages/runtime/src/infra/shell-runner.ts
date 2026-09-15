@@ -21,7 +21,8 @@
  * lineBuffer，chunk 进来后先 append，再 split('\n')，最后一段（不含 \n）回写 lineBuffer
  * 留给下次。这样子进程输出 'installing pack' + 'age done\n' 两个 chunk 时，onOutput 只收到
  * 一行 'installing package done'（契约：逐行回调），不会先收到半行 'installing pack'。
- * close 时 flush 各 buffer 的剩余半行（若有）。累积 stdout/stderr 仍用原始字符串（含 \n）。
+ * close 时 flush 各 buffer 的剩余半行（若有）。累积 stdout/stderr 保留原始字符（含 \n），
+ * 但经 CappedStreamAccumulator 字节帽（G3：10MB 对齐 git-executor，超限截断保留头尾）。
  */
 import { EventEmitter } from 'node:events'
 import { buildOutboundChildEnv } from './spawn-env.js'
@@ -36,6 +37,72 @@ import type { IShellRunner, ShellRunnerExecuteOptions, ShellRunnerResult, SpawnF
  * 仍未 close 则 SIGKILL 强制终止。
  */
 const ESCALATION_DELAY_MS = 5000
+
+/**
+ * stdout/stderr 累积字节帽（G3 峰值治理，memory-leak-remediation §3.4）：对齐
+ * git-executor 的 GIT_MAX_BUFFER_BYTES（10MB）——失控脚本（如死循环 echo）的输出累积
+ * 不得无界钉死 runtime 堆。超限截断保留头尾：头部保留脚本输出起点（错误上下文），
+ * 尾部保留最终结论（错误摘要通常在末尾），中段丢弃并留截断标记（丢弃字节数可观测）。
+ *
+ * 仅帽「累积结果串」（resolve 返回的 stdout/stderr）——onOutput 逐行流式回调是消费即
+ * 释散的增量通道，不在帽内（行为不变）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 10MB = 10 * 1024 * 1024 bytes，对齐 git-executor
+const SHELL_MAX_BUFFER_BYTES = 10 * 1024 * 1024
+/** 尾部保留窗口（头部保留 = 总帽 - 尾窗口）。头 8MB / 尾 2MB：错误摘要在末尾、上下文在开头。 */
+// eslint-disable-next-line no-magic-numbers -- 2MB 尾窗，头部 = 10MB - 2MB = 8MB
+const SHELL_TAIL_RETAIN_BYTES = 2 * 1024 * 1024
+
+/**
+ * 帽内流累积器：字节记账（Buffer.byteLength，与 execFile maxBuffer 同计数口径）。
+ * 两阶段：头段直累积，越过头部保留窗（总帽 - 尾窗）后切换尾段滚动窗（丢旧留新，
+ * 中段丢弃计数）。单次 append 超调一个 chunk（管道 chunk 通常 ≤64KB，有界）——不做
+ * 字节精确回切（UTF-8 多字节字符的串内字节定位代价大于收益）；尾段滚动按字符近似
+ * 切（UTF-8 每字符 1-4 字节 → 切 excess 字符必丢 ≥ excess 字节，ASCII 恰精确）。
+ */
+class CappedStreamAccumulator {
+  private head = ''
+  private tail = ''
+  private headBytes = 0
+  private tailBytes = 0
+  private droppedBytes = 0
+  private tailMode = false
+
+  constructor(private readonly stream: 'stdout' | 'stderr') {}
+
+  append(text: string): void {
+    const bytes = Buffer.byteLength(text)
+    if (!this.tailMode) {
+      this.head += text
+      this.headBytes += bytes
+      if (this.headBytes > SHELL_MAX_BUFFER_BYTES - SHELL_TAIL_RETAIN_BYTES) {
+        // 头段满（本次 append 已入头段，超调 ≤ 一个 chunk）：后续进尾段滚动窗
+        this.tailMode = true
+      }
+      return
+    }
+    this.tail += text
+    this.tailBytes += bytes
+    if (this.tailBytes > SHELL_TAIL_RETAIN_BYTES) {
+      const excess = this.tailBytes - SHELL_TAIL_RETAIN_BYTES
+      const cut = Math.min(this.tail.length, excess)
+      const dropped = this.tail.slice(0, cut)
+      const droppedByteLen = Buffer.byteLength(dropped)
+      this.droppedBytes += droppedByteLen
+      this.tail = this.tail.slice(cut)
+      this.tailBytes -= droppedByteLen
+    }
+  }
+
+  /** 关闭收尾：无丢弃返回原样；有丢弃返回 头 + 截断标记 + 尾。 */
+  finish(): string {
+    if (!this.tailMode) return this.head
+    const marker =
+      `\n...[shell-runner] ${this.stream} truncated: dropped ${this.droppedBytes} bytes ` +
+      `(cap ${SHELL_MAX_BUFFER_BYTES} bytes, head+tail retained)...\n`
+    return this.head + marker + this.tail
+  }
+}
 
 /**
  * ShellRunner infra 适配器。spawn 经依赖注入，可替换为 mock 做单测。
@@ -84,6 +151,10 @@ export class ShellRunner implements IShellRunner {
     // 跨 chunk 行缓冲：stdout / stderr 各自独立，避免两个流的半行互相拼接（stream 标识必须正确）。
     let stdoutBuffer = ''
     let stderrBuffer = ''
+    // G3 累积帽：结果串经 CappedStreamAccumulator 记账（>10MB 截断保留头尾）；
+    // 行缓冲 lineBuffer 不在帽内（单行有界于行长，流式语义不受影响）。
+    const stdoutAcc = new CappedStreamAccumulator('stdout')
+    const stderrAcc = new CappedStreamAccumulator('stderr')
     let timedOut = false
     let closed = false
     let timer: NodeJS.Timeout | undefined
@@ -108,12 +179,12 @@ export class ShellRunner implements IShellRunner {
       }
       const onStdoutData = (chunk: Buffer | string): void => {
         const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-        stdout += text
+        stdoutAcc.append(text)
         emitLines(text, 'stdout')
       }
       const onStderrData = (chunk: Buffer | string): void => {
         const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-        stderr += text
+        stderrAcc.append(text)
         emitLines(text, 'stderr')
       }
       const cleanupTimers = (): void => {
@@ -134,6 +205,8 @@ export class ShellRunner implements IShellRunner {
         }
         stdoutBuffer = ''
         stderrBuffer = ''
+        stdout = stdoutAcc.finish()
+        stderr = stderrAcc.finish()
         resolve({ exitCode: exitCode ?? 0, stdout, stderr })
       }
       const onError = (err: NodeJS.ErrnoException): void => {

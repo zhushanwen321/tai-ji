@@ -6,14 +6,16 @@
  * 唯一职责：把 SubagentRecord 按意愿维度（intent）分「活跃 / 已收起」二桶 + 派生
  * 「正在跑」占用谓词，供 SubagentList（列表过滤 + 状态点展示判据）、SubagentFilterBar
  * 计数、useSidebarCounts badge 共同消费——判据只写这一处，禁止消费方重复实现（D3）。
+ * [two-state-convergence D2]「与 hasRunning 同源」自 U2 起为结构性事实：hasRunning /
+ * isStreamingSubagent（stores/subagent）与 isStreaming（SubagentList）均已改为 import
+ * 本模块的 isRunningProjection wrapper，全仓「真在跑」判据单一出处（G2）。
  *
- * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（legacy 终态经
- * projectSubagentExecutionStatus 投影 idle 同样可见——「旧 session 显示」只读兼容）；
+ * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（[U6] 契约收窄后类型已
+ * 两态，legacy 终态由 runtime 归一层映射 idle 同样可见——「旧 session 显示」只读兼容）；
  * intent=archived 默认隐藏，「已收起」过滤视图可寻回（场景 3：寻回靠 message 隐含
  * 翻回 active，GUI 只负责展示与入口）。
  */
 import type { SubagentRecord } from '@xyz-agent/shared'
-import { projectSubagentExecutionStatus } from '@xyz-agent/shared'
 
 /** 筛选值（FilterBar 三视图：全部活跃 / 只看正在跑 / 已收起） */
 export type SubagentFilterValue = 'active' | 'running' | 'archived'
@@ -31,33 +33,56 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 }
 
 /**
- * 占用谓词（G2「正在跑」）：projectSubagentExecutionStatus 投影 running 且非
- * done 投影——done 投影（running + result + chatMode 显式 false，v4~U7 轮终形态）
- * 是「已收口不算在跑」的旧数据窄口径；idle 与 legacy 终态（投影 idle）不算。
+ * 占用谓词（G2「正在跑」严格口径 SSOT——two-state-convergence D1/D2；[U6] 判据
+ * 终态化：`status === 'running' && stopReason === undefined`（D5 R3 终态判据，§3.1
+ * isOccupied 本体）。U1 桥接判据的 result/resumable 子句已删——U4 翻边后轮终权威词
+ * = idle（status 子句直接排除），result 子句的旧 entry 兜底职责由 runtime 归一层
+ * 第五归一（`running && resumable===true → idle`，D5）承接；stopReason 子句排除
+ * W4 死亡纳管态（running + stopReason='failed'，[U5/D4] adoptEngineDeath 写点），
+ * 依赖轮始清点族扩字段（markRoundStarted / revive 格翻 running 时清 stopReason）——
+ * 在飞期上轮停因不可见 = 显式裁决的代价（§3.1 注释）。
+ * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
+ * 与 isStreaming（SubagentList）均为本函数的 import wrapper（U2 判据单一化），
  * badge 计数（useSidebarCounts）与「正在跑」过滤视图同源消费，不漂移。
  */
 export function isRunningProjection(record: SubagentRecord): boolean {
-  return projectSubagentExecutionStatus(record.status) === 'running' && !isDoneProjection(record)
+  return record.status === 'running' && record.stopReason === undefined
 }
 
 /**
- * done 投影判据（D4 SSOT）：one-shot 轮终等 GC——v4~U7 写面故意保持 running
- * （可冷路径 resume）但携带轮终 result，此形态以绿点展示且可长期滞留，「轮终不算
- * 真在跑」是 store 既有窄口径语义（hasRunning / isStreamingSubagent 同源注释）。
- * U8 起成功/失败轮终落 running-resumable 形态（仍经本判据判定 done），并非直接
- * 落 idle——本判据服务全部现存 one-shot 轮终（running + result 形态）+ 旧 session
- * 数据展示，不可退役。
- * SubagentList 展示判据 isDone 必须引用本函数，禁止重复实现。
+ * done 投影判据（D4 SSOT；[two-state-convergence U4] 判据 idle 化——写面翻边后轮终
+ * 权威词 = idle（markRoundIdle 写 idle，对齐 §3.2.2 事件表 settle 行），one-shot 完成
+ * 展示判据随之从「running + result + chatMode=false 的桥接组合」翻为
+ * `idle && chatMode === false`。桥接期旧 entry（running + result 形态）不再命中本
+ * 判据——展示过渡态（U6 归一映射恢复等价显示），占用判定不受影响（isRunningProjection
+ * 独立严格口径）。
+ * [two-state-convergence D1] 本函数是**展示判据**（done 绿点 vs chat 等续聊 accent
+ * 点），不参与占用判定——占用谓词 isRunningProjection 是严格口径（result 子句），
+ * 不经理由本函数反向挪用。SubagentList 展示判据 isDone 必须引用本函数，
+ * 禁止重复实现。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {
-  return record.status === 'running' && record.result !== undefined && record.chatMode === false
+  return record.status === 'idle' && record.chatMode === false
 }
 
 /**
- * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3，U8b 重述）：shared 扩
- * SubagentStatus 枚举时，新值经 projectSubagentExecutionStatus 落「非 running」半边
- * ——对 isRunningProjection 恒 false（安全方向）；但展示层（SubagentList 状态点）与
- * 全集覆盖矩阵须同步评估新值的三态归属，subagent-bucket.test.ts 断言表缺键即测试红。
+ * waiting 投影判据（[two-state-convergence U4] SSOT 化 + idle 化——自 SubagentList
+ * 本地实现迁入，判据从 `running && 非占用 && 非 done` 的组合翻为 `idle && chatMode
+ * !== false`）：chat 等续聊 / 孤儿兜底的静态半透明 accent 点。
+ * chatMode 缺省（legacy 存量 entry 无该字段）保守归 chat（!== false 恒真）——无法
+ * 确认不是 chat 就不宣告完成（与 isDoneProjection 的保守方向同构，互补无交叠：
+ * done = idle && chatMode === false）。
+ */
+export function isWaiting(record: SubagentRecord): boolean {
+  return record.status === 'idle' && record.chatMode !== false
+}
+
+/**
+ * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3，U8b 重述；[U6] 后全集 = 两态）：
+ * shared 扩 SubagentStatus 枚举时，新「进行中类」值对本占用谓词的归属必须显式评估
+ * ——isRunningProjection 直读 status，新值默认落 false（安全方向）；但展示层
+ * （SubagentList 状态点）与全集覆盖矩阵须同步评估新值的三态归属，
+ * subagent-bucket.test.ts 断言表缺键即测试红。
  */
 export function filterSubagents(records: SubagentRecord[], filter: SubagentFilterValue): SubagentRecord[] {
   if (filter === 'archived') return records.filter((r) => subagentBucket(r) === 'archived')

@@ -8,6 +8,7 @@ import {
   on, off, dispatchSession,
   onGlobal, onGlobalType, dispatchGlobal,
   onCrossSession, dispatchCrossSession,
+  _probeSessionHandlerEntryCount,
 } from '../events'
 
 function msg(type: string, payload: Record<string, unknown> = {}): ServerMessage {
@@ -58,6 +59,40 @@ describe('events session 通道', () => {
 
   it('dispatchSession 无订阅者 no-op 不抛', () => {
     expect(() => dispatchSession('ghost', msg('message.text_delta'))).not.toThrow()
+  })
+})
+
+describe('events session 通道 off 删空 Set（B2 / 2026-09-14 内存审计 §2.3）', () => {
+  it('最后一个 handler 退订后 Map 无残留条目；非空 Set 保留；on 可重建（语义不变）', () => {
+    // 探针日志已降级 debug 级（memory-leak-remediation §4 验收收口），spy 目标同步对齐
+    const logSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const before = _probeSessionHandlerEntryCount()
+    const h1 = vi.fn()
+    const h2 = vi.fn()
+    const un1 = on('leak-check', h1)
+    on('leak-check', h2)
+    // 订阅建立条目
+    expect(_probeSessionHandlerEntryCount()).toBe(before + 1)
+    // 退一个：Set 非空 → 条目保留（h2 仍可收）
+    un1()
+    expect(_probeSessionHandlerEntryCount()).toBe(before + 1)
+    dispatchSession('leak-check', msg('message.text_delta'))
+    expect(h2).toHaveBeenCalledTimes(1)
+    // 退最后一个：Set 空 → Map 条目删除（无空 Set 永久残留）
+    off('leak-check', h2)
+    expect(_probeSessionHandlerEntryCount()).toBe(before)
+    // on 会重建——再次订阅可正常接收
+    const h3 = vi.fn()
+    unsubscribers.push(on('leak-check', h3))
+    dispatchSession('leak-check', msg('message.text_delta'))
+    expect(h3).toHaveBeenCalledTimes(1)
+    logSpy.mockRestore()
+  })
+
+  it('off 对不存在的 sessionId no-op（不创建空条目）', () => {
+    const before = _probeSessionHandlerEntryCount()
+    expect(() => off('ghost-sid', vi.fn())).not.toThrow()
+    expect(_probeSessionHandlerEntryCount()).toBe(before)
   })
 })
 

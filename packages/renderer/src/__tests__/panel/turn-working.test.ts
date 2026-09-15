@@ -701,8 +701,8 @@ describe('Turn · subagent 轮终 running-resumable → isWorkingTurn false（re
     sub.applyRecords('s-resumable', [makeSubagentRecord({ status: 'running' })])
     expect(sessionActive.value).toBe(true)
 
-    // 轮终回写：running + result（resumable）→ 不算 working → sessionActive false
-    sub.applyRecords('s-resumable', [makeSubagentRecord({ status: 'running', result: '本轮产出正文' })])
+    // 轮终（[U6] renderer 实收形态 idle + result + completed）→ 不算 working → sessionActive false
+    sub.applyRecords('s-resumable', [makeSubagentRecord({ status: 'idle', result: '本轮产出正文', stopReason: 'completed' })])
     expect(sessionActive.value).toBe(false)
 
     // Turn 挂载（isSessionActive = 真实派生值，isLastTurn=true）：isWorkingTurn=false 的
@@ -739,9 +739,10 @@ describe('Turn · subagent 轮终 running-resumable → isWorkingTurn false（re
     const sessionActive = useSessionActive(sessionId, computed(() => false))
     const sub = useSubagentStore()
 
-    sub.applyRecords('s-parity', [makeSubagentRecord({ status: 'running', result: 'done' })])
+    // [U6] live 轮终形态（idle + result + completed——归一后 renderer 实收）与重开 idle 形态派生一致
+    sub.applyRecords('s-parity', [makeSubagentRecord({ status: 'idle', result: 'done', stopReason: 'completed' })])
     const liveFinal = sessionActive.value
-    sub.applyRecords('s-parity', [makeSubagentRecord({ status: 'closed', closedReason: 'parent-shutdown' })])
+    sub.applyRecords('s-parity', [makeSubagentRecord({ status: 'idle', closedReason: 'parent-shutdown' })])
     const reloadFinal = sessionActive.value
     expect(liveFinal).toBe(false)
     expect(reloadFinal).toBe(false)
@@ -761,7 +762,7 @@ describe('Turn · subagent 轮终 running-resumable → isWorkingTurn false（re
     // [R2-1] one-shot 空文本成功轮：轮终写点补的占位「(empty)」（extensions finalize-record
     // 第四分支）经 extractor 投影为 SubagentRecord.result——判据只看非 undefined，占位形态
     // 同样排除 working。写点若保持 undefined（修复前），此 record 会让末位 turn 永久「工作中」
-    sub.applyRecords('s-oneshot-empty', [makeSubagentRecord({ status: 'running', result: '(empty)' })])
+    sub.applyRecords('s-oneshot-empty', [makeSubagentRecord({ status: 'idle', result: '(empty)', stopReason: 'completed' })])
     expect(sessionActive.value).toBe(false)
   })
 })
@@ -801,12 +802,12 @@ describe('Turn · subagent 虚拟 session 轮终 running-resumable 不再卡 str
     const { useSubagentStore, subagentVirtualId } = await import('@/stores/subagent')
     const sub = useSubagentStore()
 
-    // 轮终回写：running + result（resumable）
-    sub.applyRecords('s-virt-main', [makeSubagentRecord({ status: 'running', result: '本轮产出正文' })])
-    // 窄口径（forceWorking 数据源）：轮终信号在场 → 不算真在跑
+    // 轮终（[U6] 实收形态 idle + result + completed）
+    sub.applyRecords('s-virt-main', [makeSubagentRecord({ status: 'idle', result: '本轮产出正文', stopReason: 'completed' })])
+    // 窄口径（forceWorking 数据源）：轮终 idle → 不算真在跑
     expect(sub.isStreamingSubagent('s-virt-main', 'sub-1')).toBe(false)
-    // 宽松口径（SubagentTab 订阅判定）不收紧：resumable 续轮仍有流活动
-    expect(sub.isRunning('s-virt-main', 'sub-1')).toBe(true)
+    // 宽松口径（SubagentTab 订阅判定）：U4 翻边后轮终 = idle——两口径合流（设计 §2.3）
+    expect(sub.isRunning('s-virt-main', 'sub-1')).toBe(false)
 
     // useSessionActive 虚拟 session 分支直接回退 forceWorking（MessageStream 同款链）
     const sessionId = ref<string | null>(subagentVirtualId('s-virt-main', 'sub-1'))
@@ -874,8 +875,8 @@ describe('Turn · subagent 虚拟 session 轮终 running-resumable 不再卡 str
     sub.applyRecords('s-virt-flip', [makeSubagentRecord({ status: 'running' })])
     expect(forceWorking.value).toBe(true)
 
-    // 轮终迁移（WS 推送 record 更新，running + result 回写）
-    sub.applyRecords('s-virt-flip', [makeSubagentRecord({ status: 'running', result: '轮终产出' })])
+    // 轮终迁移（WS 推送 record 更新，[U6] idle + result + completed 实收形态）
+    sub.applyRecords('s-virt-flip', [makeSubagentRecord({ status: 'idle', result: '轮终产出', stopReason: 'completed' })])
     expect(forceWorking.value).toBe(false)
   })
 })

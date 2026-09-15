@@ -277,68 +277,7 @@ describe.skipIf(!REAL_PI_READY)(
     usageState.dispose()
   })
 
-  it('RPC 频率采样（P0.5② 终判输入）：2 轮对话 + 失效风暴的双实例快照 RPC 次数与 p95 延迟', { timeout: 600_000 }, async () => {
-    const fx = await spawnPiFixture()
-    fixture = fx
-
-    // 包装两个 fetch：分 RPC 统计次数 + 逐次延迟（ms；get_state 采样已随 queue 实例撤销移除，PR #185 MF2）
-    const samples = { get_session_stats: [] as number[], get_commands: [] as number[] }
-    const counts = { get_session_stats: 0, get_commands: 0 }
-    const timed = async (rpc: keyof typeof samples, run: () => Promise<unknown>): Promise<unknown> => {
-      counts[rpc] += 1
-      const t0 = performance.now()
-      const result = await run()
-      samples[rpc].push(performance.now() - t0)
-      return result
-    }
-    const fetchStats = async (): Promise<StatsShape> =>
-      (await timed('get_session_stats', () => fx.sendCommand('get_session_stats')).then((r) => (r as { data?: Record<string, unknown> }).data ?? {})) as StatsShape
-    const fetchCommands = async (): Promise<unknown> => {
-      const r = await timed('get_commands', () => fx.sendCommand('get_commands'))
-      // pi get_commands 响应形态 = { commands: [...] }（rpc-mode.ts:683；生产 rpc-client.getCommands
-      // 已解包数组，fixture 直发 RPC 需自行取 data.commands 对齐）
-      return (r as { data?: { commands?: unknown } }).data?.commands ?? []
-    }
-
-    const usageState = new ReplicatedState(createUsageStateConfig(fetchStats))
-    const commandsState = new ReplicatedState(createCommandsStateConfig(fetchCommands))
-
-    // 生产等价：注册播种（2 refetch；queue 实例已撤销，PR #185 MF2——深度走帧内推送投影）
-    const states = [usageState, commandsState]
-    for (const s of states) s.refetch()
-    await waitUntil('seed', () => states.every((s) => s.get() !== undefined))
-    const seededCounts = { ...counts }
-
-    // 2 轮对话：每轮等 agent_end 后按生产接线失效（applyContextUpdate 汇聚点 → usage markDirty）
-    for (let i = 0; i < 2; i++) {
-      const round = i + 1
-      const turnMark = fx.markEvents()
-      await fx.sendCommand('prompt', { message: `Reply with exactly: w8-sample-${round}` })
-      await fx.waitForEvent((e) => e.type === 'agent_end', { since: turnMark, timeoutMs: TURN_TIMEOUT_MS })
-      usageState.markDirty()
-      await waitUntil(`round-${round} usage converge`, () => !usageState.isDirty())
-    }
-
-    // commands 查询失效（getCommands 接线）
-    commandsState.markDirty()
-    await waitUntil('commands converge', () => !commandsState.isDirty())
-
-    // nearest-rank p95（1-indexed 第 ceil(0.95n) 位；分 RPC 输出 + 双 RPC 合并口径）
-    const p95 = (xs: number[]): number => {
-      const sorted = [...xs].sort((a, b) => a - b)
-      const rank = Math.max(1, Math.ceil(sorted.length * 0.95))
-      return sorted[rank - 1] as number
-    }
-    const all = [...samples.get_session_stats, ...samples.get_commands]
-    console.log(
-      `[W8 RPC 采样] 操作序列 = 2 轮对话 + 每轮 usage 失效 + commands 1 次失效 | ` +
-      `get_session_stats=${counts.get_session_stats} 次(p95 ${p95(samples.get_session_stats).toFixed(1)}ms) ` +
-      `get_commands=${counts.get_commands} 次(p95 ${p95(samples.get_commands).toFixed(1)}ms) | ` +
-      `合计 ${all.length} 次，合并 p95 = ${p95(all).toFixed(1)}ms，max = ${Math.max(...all).toFixed(1)}ms`,
-    )
-    expect(all.length).toBeGreaterThan(0)
-    expect(counts.get_session_stats).toBeGreaterThanOrEqual(seededCounts.get_session_stats + 2)
-
-    for (const s of states) s.dispose()
-  })
+  // [2026-09 测试舰队审查 r2-26] it6「RPC 频率采样」已删：测量型用例（唯一产出是
+  // console.log 采样数字，断言 near-constant），P0.5② 一次性验收输入——采样应由
+  // bench 脚本承担而非回归套件，且每跑一次消耗 2 轮真实 LLM。
 })

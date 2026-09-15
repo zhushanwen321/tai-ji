@@ -954,55 +954,8 @@ describe('UsageStatsService', () => {
     expect(result.sessionCount).toBe(1)
   })
 
-  // ── 真实数据冒烟测试 ────────────────────────────────────
+  // [2026-09 测试舰队审查 r2-27] 「真实数据冒烟测试」用例已删：目录不存在/rows 为空
+  // 双静默 return 使其永不红（探针非回归测试），且引用真实数据目录并占 60s 超时预算；
+  // 合规性断言已由上方各解析/聚合/缓存用例以受控 fixture 覆盖。
 
-  it('真实数据冒烟测试：默认目录 getStats() 输出合规', async () => {
-    const realSessionsDir = getSessionsDir()
-
-    // 检查目录是否存在
-    let dirExists = false
-    try {
-      const s = await stat(realSessionsDir)
-      dirExists = s.isDirectory()
-    } catch {
-      dirExists = false
-    }
-
-    if (!dirExists) {
-      // 跳过：目录不存在
-      console.warn(`[smoke] sessions dir not found: ${realSessionsDir}, skipping`)
-      return
-    }
-
-    const svc = new UsageStatsService(realSessionsDir)
-    const result = await svc.getStats()
-
-    if (result.rows.length === 0) {
-      // 目录存在但无可计数据（新机器 / 空历史）——非合规性失败，跳过冒烟断言
-      console.warn(`[smoke] sessions dir empty of usage rows: ${realSessionsDir}, skipping`)
-      return
-    }
-
-    // rows 非空（真实数据应有 assistant 消息）
-    expect(result.rows.length).toBeGreaterThan(0)
-
-    for (const row of result.rows) {
-      // date 匹配 YYYY-MM-DD
-      expect(row.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-      // 数值非 NaN
-      expect(row.input).not.toBeNaN()
-      expect(row.output).not.toBeNaN()
-      expect(row.cacheRead).not.toBeNaN()
-      expect(row.cacheWrite).not.toBeNaN()
-      expect(row.costUSD).not.toBeNaN()
-      expect(row.messages).not.toBeNaN()
-      // 数值非负
-      expect(row.input).toBeGreaterThanOrEqual(0)
-      expect(row.output).toBeGreaterThanOrEqual(0)
-      expect(row.messages).toBeGreaterThanOrEqual(1)
-    }
-
-    console.info(`[smoke] ${result.rows.length} rows, ${result.sessionCount} sessions, ${result.skippedLines} skipped`)
-    // 真实数据全量扫描（~/.xyz-agent/agent/sessions），并行负载下 IO+CPU 争抢明显超默认 5s
-  }, 60_000)
 })

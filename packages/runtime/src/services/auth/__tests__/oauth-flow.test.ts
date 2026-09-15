@@ -12,6 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { BuiltinOAuthConfig } from '@xyz-agent/shared'
 import { runOAuthLogin, type OAuthFlowHooks } from '../oauth-flow.js'
 
+const POLL_TUNING = { minIntervalMs: 5, slowDownIncrementMs: 5 } as const // 轮询节奏注入：免真实睡眠（否则 device flow 每用例真睡 1-2s）
+
 // 每个测试开头重设（模块加载与测试执行间隔在设备/回调等待后可达数秒，断言 expires 需相对测试起点）
 let now = Date.now()
 
@@ -134,7 +136,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
         expect(body.client_id).toBe('xai-client')
         return jsonResponse({
           device_code: 'dc-1', user_code: 'ABCD-EFGH',
-          verification_uri: 'https://auth.x.ai/activate', interval: 1, expires_in: 1800,
+          verification_uri: 'https://auth.x.ai/activate', interval: 0.05, expires_in: 1800,
         })
       }
       if (url === 'https://auth.x.ai/oauth2/token') {
@@ -150,7 +152,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
     })
 
     const hooks: OAuthFlowHooks = { onDeviceCode: vi.fn() }
-    const flow = runOAuthLogin('xai', XAI_CONFIG, hooks, new AbortController().signal)
+    const flow = runOAuthLogin('xai', XAI_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     // 首次轮询需要 advance：waitBeforeFirstPoll 等一个 interval。测试里让第一次 fetch 直接返回 pending
     const credential = await flow
@@ -163,7 +165,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
     expect(hooks.onDeviceCode).toHaveBeenCalledWith(expect.objectContaining({
       userCode: 'ABCD-EFGH',
       verificationUri: 'https://auth.x.ai/activate',
-      interval: 1,
+      interval: 0.05,
     }))
   })
 
@@ -175,7 +177,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
           device_code: 'dc-k', user_code: 'KIMI-CODE',
           verification_uri: 'https://auth.kimi.com/activate',
           verification_uri_complete: 'https://auth.kimi.com/activate?code=KIMI-CODE',
-          interval: 1, expires_in: 900,
+          interval: 0.05, expires_in: 900,
         })
       }
       if (url === 'https://auth.kimi.com/api/oauth/token') {
@@ -185,7 +187,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
     })
 
     const hooks: OAuthFlowHooks = { onDeviceCode: vi.fn() }
-    const credential = await runOAuthLogin('kimi-coding', KIMI_CONFIG, hooks, new AbortController().signal)
+    const credential = await runOAuthLogin('kimi-coding', KIMI_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     expect(credential.access).toBe('at-kimi')
     // 无 skew：实际运行 now + 120s（容差覆盖 waitBeforeFirstPoll）
@@ -202,7 +204,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
       if (url === 'https://auth.x.ai/oauth2/device/code') {
         return jsonResponse({
           device_code: 'dc-1', user_code: 'ABCD-EFGH',
-          verification_uri: 'https://auth.x.ai/activate', interval: 1, expires_in: 1800,
+          verification_uri: 'https://auth.x.ai/activate', interval: 0.05, expires_in: 1800,
         })
       }
       if (url === 'https://auth.x.ai/oauth2/token') {
@@ -211,7 +213,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
       }
       return jsonResponse({}, 404)
     })
-    const credential = await runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal)
+    const credential = await runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal, POLL_TUNING)
     expect(credential.access).toBe('at')
   })
 
@@ -220,12 +222,12 @@ describe('runOAuthLogin — 标准 device flow', () => {
       if (url === 'https://auth.x.ai/oauth2/device/code') {
         return jsonResponse({
           device_code: 'dc-1', user_code: 'ABCD-EFGH',
-          verification_uri: 'https://auth.x.ai/activate', interval: 1, expires_in: 1800,
+          verification_uri: 'https://auth.x.ai/activate', interval: 0.05, expires_in: 1800,
         })
       }
       return jsonResponse({ error: 'expired_token' }, 400)
     })
-    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth device code expired')
   })
 })
@@ -241,7 +243,7 @@ describe('runOAuthLogin — github-copilot 两段式', () => {
         expect(body.scope).toBe('read:user')
         return jsonResponse({
           device_code: 'dc-gh', user_code: 'GH-CODE',
-          verification_uri: 'https://github.com/login/device', interval: 1, expires_in: 900,
+          verification_uri: 'https://github.com/login/device', interval: 0.05, expires_in: 900,
         })
       }
       if (url === 'https://github.com/login/oauth/access_token') {
@@ -258,7 +260,7 @@ describe('runOAuthLogin — github-copilot 两段式', () => {
     })
 
     const hooks: OAuthFlowHooks = { onDeviceCode: vi.fn() }
-    const credential = await runOAuthLogin('github-copilot', COPILOT_CONFIG, hooks, new AbortController().signal)
+    const credential = await runOAuthLogin('github-copilot', COPILOT_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     expect(credential.access).toBe('copilot-token')
     // refresh 存 GitHub token（pi 侧 refresh 用它换新 copilot token）
@@ -303,7 +305,7 @@ describe('runOAuthLogin — openai-codex 非标 device 协议', () => {
     })
 
     const hooks: OAuthFlowHooks = { onDeviceCode: vi.fn() }
-    const credential = await runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, hooks, new AbortController().signal)
+    const credential = await runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     expect(credential.access).toBe('at-codex')
     expect(credential.refresh).toBe('rt-codex')
@@ -338,7 +340,7 @@ describe('runOAuthLogin — callback flow', () => {
     }))
 
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, new AbortController().signal)
+    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     // 等 server 起来拿到授权 URL，然后模拟浏览器回调
     // onAuthUrl 在 server listen 后同步触发（startCallbackServer await 完成后才调 hooks）
@@ -380,7 +382,7 @@ describe('runOAuthLogin — callback flow', () => {
     }))
 
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, new AbortController().signal)
+    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
 
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
@@ -405,7 +407,7 @@ describe('runOAuthLogin — callback flow', () => {
     mockFetch(async () => jsonResponse({}, 404))
     const controller = new AbortController()
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, controller.signal)
+    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, controller.signal, POLL_TUNING)
 
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
@@ -423,7 +425,7 @@ describe('runOAuthLogin — device 起始端点失败（MF-2）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth device authorization failed (HTTP 400)')
   })
 
@@ -434,7 +436,7 @@ describe('runOAuthLogin — device 起始端点失败（MF-2）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('github-copilot', COPILOT_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('github-copilot', COPILOT_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth device authorization failed (HTTP 422)')
   })
 
@@ -445,7 +447,7 @@ describe('runOAuthLogin — device 起始端点失败（MF-2）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth device authorization failed (HTTP 400)')
   })
 })
@@ -460,7 +462,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
       return realFetch(url, init)
     }))
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, new AbortController().signal)
+    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
     // 先挂 rejection handler：exchange 在 callback 到达后立即 reject，早于下方 await fetch 返回，
     // 不先挂 handler 会被 Node 报为 unhandled rejection
     const assertion = expect(flow).rejects.toThrow('OAuth token exchange failed (HTTP 500)')
@@ -484,7 +486,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
       return realFetch(url, init)
     }))
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, new AbortController().signal)
+    const flow = runOAuthLogin('openrouter', OPENROUTER_CONFIG, hooks, new AbortController().signal, POLL_TUNING)
     // 先挂 rejection handler（同 anthropic：exchange 在 callback 到达后立即 reject）
     const assertion = expect(flow).rejects.toThrow('OAuth key exchange failed (HTTP 500)')
     await vi.waitFor(() => {
@@ -510,7 +512,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('openai-codex', OPENAI_CODEX_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth token exchange failed (HTTP 500)')
   })
 
@@ -519,7 +521,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
       if (url === 'https://github.com/login/device/code') {
         return jsonResponse({
           device_code: 'dc-gh', user_code: 'GH-CODE',
-          verification_uri: 'https://github.com/login/device', interval: 1, expires_in: 900,
+          verification_uri: 'https://github.com/login/device', interval: 0.05, expires_in: 900,
         })
       }
       if (url === 'https://github.com/login/oauth/access_token') {
@@ -530,7 +532,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('github-copilot', COPILOT_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('github-copilot', COPILOT_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('Copilot token exchange failed (HTTP 500)')
   })
 
@@ -551,7 +553,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
 
     const controller = new AbortController()
     const hooks: OAuthFlowHooks = { onAuthUrl: vi.fn() }
-    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, controller.signal)
+    const flow = runOAuthLogin('anthropic', ANTHROPIC_CONFIG, hooks, controller.signal, POLL_TUNING)
     await vi.waitFor(() => {
       expect(hooks.onAuthUrl).toHaveBeenCalled()
     })
@@ -573,7 +575,7 @@ describe('runOAuthLogin — device poll 错误处理（MF-3）', () => {
       if (url === 'https://auth.x.ai/oauth2/device/code') {
         return jsonResponse({
           device_code: 'dc-1', user_code: 'ABCD-EFGH',
-          verification_uri: 'https://auth.x.ai/activate', interval: 1, expires_in: 1800,
+          verification_uri: 'https://auth.x.ai/activate', interval: 0.05, expires_in: 1800,
         })
       }
       if (url === 'https://auth.x.ai/oauth2/token') {
@@ -582,7 +584,7 @@ describe('runOAuthLogin — device poll 错误处理（MF-3）', () => {
       }
       return jsonResponse({}, 404)
     })
-    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal))
+    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal, POLL_TUNING))
       .rejects.toThrow('OAuth device token request timed out')
   })
 })

@@ -241,24 +241,9 @@ describe('TC2: removeProviderByKind(catalog) 清 auth.json 凭据 + override + e
     expect(ret).toEqual({ removed: true, newDefault: { provider: 'other-llm', modelId: 'their-m' } })
   })
 
-  it('MF-3：重选 default 时跳过候选 provider 的已禁用 model（model 级 enabled 校验，M5-03 路径）', async () => {
-    // 场景：catalog provider openai 无 override 承载 default，移除后重选到候选 provider，
-    // 但其 models[0] 被用户显式禁用（enabled:false）。旧实现 pickEnabledDefaultModel
-    // 只校验 provider 级 p.enabled + p.models[0] 存在性，会把已禁用 model 写成新 default。
-    // 候选用 custom id（B-2 混合合并后 catalog 候选的 models 含 builtin 条目，会掩盖
-    // 「跳过禁用 model」的意图——custom 候选集固定为 mock 的 models）。
-    const { svc, store } = makeService({
-      models: { 'other-llm': { models: [{ id: 'disabled-m', enabled: false }, { id: 'enabled-m', enabled: true }] } },
-      enabledModels: ['openai/*', 'other-llm/*'],
-    })
-    ;(store.removeProvider as ReturnType<typeof vi.fn>).mockReturnValueOnce({ removed: false })
-    ;(store.getDefaultModel as ReturnType<typeof vi.fn>).mockReturnValueOnce({ provider: 'openai', modelId: 'gpt-4' })
-
-    const ret = await svc.removeProviderByKind('openai', 'catalog')
-
-    expect(store.setDefaultModel).toHaveBeenCalledWith('other-llm', 'enabled-m')
-    expect(ret).toEqual({ removed: true, newDefault: { provider: 'other-llm', modelId: 'enabled-m' } })
-  })
+  // [2026-09 测试舰队审查 r2-24] MF-3（M5-03 路径）用例已删：与 config-service-toggle.test.ts
+  // MF-3（M5-02 路径）同测 pickEnabledDefaultModel 跳过禁用 model，二留一保留 toggle 版
+  // （其状态化 mock 更接近生产路径）。
 })
 
 // ══ TC3: custom 分支——删 models.json 条目 + 清残留 ═══════════════════════════════════

@@ -27,6 +27,8 @@ export { setCompactQueueProviderForEffects, resetCompactQueueProviderForEffectsF
 export { DEFER_FLUSH_MARKER_RE } from './apply-entry-convert'
 export type { CompactQueueLike, CompactQueueEntrySnapshot } from './useChat'
 export { createChatStore, DEFAULT_STREAMING_IDLE_TIMEOUT_MS, STREAMING_IDLE_TIMEOUT_MIN_MS, STREAMING_IDLE_TIMEOUT_MAX_MS } from './store'
+
+export type { ChatStoreOptions } from './store'
 // [session-occupancy u5b] occupancy 投影类型（sessionPhase 数据源，P4 ActivityStrip/发送位消费）
 export type { SessionOccupancyState } from './store'
 export * from './derive-status'

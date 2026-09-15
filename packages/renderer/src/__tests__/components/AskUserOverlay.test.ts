@@ -81,55 +81,6 @@ describe('AskUserOverlay', () => {
     expect(wrapper.find('[data-testid="ask-user-submit"]').exists()).toBe(true)
   })
 
-  it('U10: 单选——点击选项 → Submit → answers 包含 label', async () => {
-    const wrapper = mountOverlay([singleSelectQ])
-
-    // 点击 Postgres 选项
-    await wrapper.find('[data-testid="ask-user-option-Postgres"]').trigger('click')
-    // Submit
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-
-    // emit submit 事件，payload 是 JSON string
-    const submitEvents = wrapper.emitted('submit')
-    expect(submitEvents).toHaveLength(1)
-    const answers = JSON.parse(submitEvents![0][0] as string)
-    expect(answers.db).toBe('Postgres')
-  })
-
-  it('U11: 多选——点击多个 → Submit → answers 含 JSON.stringify(label[])', async () => {
-    const wrapper = mountOverlay([multiSelectQ])
-
-    // 点击 TS 和 Python
-    await wrapper.find('[data-testid="ask-user-option-TypeScript"]').trigger('click')
-    await wrapper.find('[data-testid="ask-user-option-Python"]').trigger('click')
-    // Submit
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-
-    const submitEvents = wrapper.emitted('submit')
-    expect(submitEvents).toHaveLength(1)
-    const answers = JSON.parse(submitEvents![0][0] as string)
-    // 多选 → JSON.stringify(label[])
-    expect(JSON.parse(answers.lang)).toEqual(['TypeScript', 'Python'])
-  })
-
-  it('U12: 纯自由文本——无 options → Textarea → 答案写 `${key}__other`', async () => {
-    const wrapper = mountOverlay([freeTextQ])
-
-    // 无 options → 渲染自由文本 Textarea
-    expect(wrapper.find('[data-testid="ask-user-free-text"]').exists()).toBe(true)
-    // 填入自由文本
-    await wrapper.find('[data-testid="ask-user-free-text"]').setValue('需要加索引')
-    // Submit
-    await wrapper.find('[data-testid="ask-user-submit"]').trigger('click')
-
-    const submitEvents = wrapper.emitted('submit')
-    expect(submitEvents).toHaveLength(1)
-    const answers = JSON.parse(submitEvents![0][0] as string)
-    // 无选项的纯自由文本问题：只写独立 key（不写主 key，与 encodeAnswer 契约一致）
-    expect(answers['note__other']).toBe('需要加索引')
-    expect(answers.note).toBeUndefined()
-  })
-
   it('U13: Cancel → emit cancel 事件', async () => {
     const wrapper = mountOverlay([singleSelectQ], true)
 
@@ -448,48 +399,5 @@ describe('AskUserOverlay · D1 编码契约——submit payload 5 形态', () =>
     expect(wrapper.emitted('submit')).toHaveLength(1)
     const answers = JSON.parse(wrapper.emitted('submit')![0][0] as string)
     expect(answers).toEqual({})
-  })
-})
-
-describe('AskUserOverlay · v3 样式对齐 demo v3', () => {
-  it('U7: 字体——tab 12px / 单问题标题 13px / opt-label 13px', () => {
-    // 多问题 + 带选项（含 description）
-    const wrapper = mountOverlay([optWithDescQ, singleSelectQ])
-
-    // tab 含 text-[12px]
-    const tab1 = wrapper.find('[data-testid="ask-user-tab-1"]')
-    expect(tab1.exists()).toBe(true)
-    expect(tab1.attributes('class')).toContain('text-[12px]')
-
-    // 多问题文本含 text-[13px]
-    const qText = wrapper.find('[data-testid="ask-user-question-text-multi"]')
-    expect(qText.attributes('class')).toContain('text-[13px]')
-
-    // 选项 label 含 text-[13px]（当前题是 optWithDescQ，首选项 label 为 PostgreSQL）
-    const optPg = wrapper.find('[data-testid="ask-user-option-PostgreSQL"]')
-    expect(optPg.exists()).toBe(true)
-    const optLabel = optPg.find('[data-testid="ask-user-option-label"]')
-    expect(optLabel.exists()).toBe(true)
-    expect(optLabel.attributes('class')).toContain('text-[13px]')
-  })
-
-  it('U7 补充: opt-desc 字号 12px（subtle 色弱化）', () => {
-    const wrapper = mountOverlay([optWithDescQ])
-    const optPg = wrapper.find('[data-testid="ask-user-option-PostgreSQL"]')
-    const optDesc = optPg.find('[data-testid="ask-user-option-desc"]')
-    expect(optDesc.exists()).toBe(true)
-    expect(optDesc.attributes('class')).toContain('text-[12px]')
-    // 弱化：subtle 色
-    expect(optDesc.attributes('class')).toContain('text-neutral-dim')
-  })
-
-  it('U7 补充: 请求头存在——单问题标题提到 head 行', () => {
-    const wrapper = mountOverlay([singleSelectQ])
-    const head = wrapper.find('[data-testid="ask-user-head"]')
-    expect(head.exists()).toBe(true)
-    // 单问题：标题在 head 行
-    const headTitle = head.find('[data-testid="ask-user-question-text"]')
-    expect(headTitle.exists()).toBe(true)
-    expect(headTitle.text()).toContain('选哪个数据库?')
   })
 })

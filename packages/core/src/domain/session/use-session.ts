@@ -106,6 +106,10 @@ export interface ChatHydratePort {
  * - evictVirtualKeys → workflowStore.getAgentCallVirtualIdsByMain + chatStore.evictVirtualKey
  * - clearAgentCallMapping → workflowStore.clearAgentCallMapping
  * - disposeChat → useChat().disposeSession；invalidateStatus → invalidateStatusCache
+ * - browserDestroy → 壳层 lib/ipc browserDestroy(sid)（.catch 消化 rejection；B4，2026-09-14 内存审计）
+ * - clearTerminalQueue → 壳层 useTerminalWriteQueueStore().removeSession（G1，可选）
+ * - clearSlashCommands → 壳层 useCommandStore().clearCommands（G1，可选）
+ * - clearForkNotices → 壳层 useForkNoticeFeed().clearSession（G1，可选）
  */
 export interface SessionCleanupHooks {
   clearFileTree(sid: string): void
@@ -122,6 +126,29 @@ export interface SessionCleanupHooks {
   clearAgentCallMapping(sid: string): void
   disposeChat(sid: string): void
   invalidateStatus(sid: string): void
+  /**
+   * [B4 / 2026-09-14 内存审计 §2.1] 销毁该 session 的 main 侧 WebContentsView
+   * （browserDestroy IPC）。此前 browserDestroy 是全仓零调用死 API——已删 session 的 view
+   * （独立 Chromium 渲染进程，重页面百 MB 级）驻留至 LRU 挤出/app 退出。目标面（browser
+   * drawer）生产入口休眠中，本 hook 是接线预备 + 堵「同 id 复活脏旧页面」洞（create 幂等
+   * 复用旧 entry）。实现必须 best-effort：IPC rejection 显式 .catch 消化（preload invoke
+   * 透传 rejection，不 catch 会成 unhandledrejection 上报 error-reporter）。
+   */
+  browserDestroy(sid: string): void
+  /**
+   * [G1 / 2026-09-14 内存审计 §3.4] 以下三项为「死清理 API 接线组」可选 hook（旧实现零破坏）。
+   * 三个清理函数此前实现完整但全仓零调用——terminal-write-queue.removeSession /
+   * command-store.clearCommands / useForkNoticeFeed.clearSession——删除 session 后各自的
+   * per-session Map 分区（≤100 条待写命令 / slash 命令历史 / transient fork 通知）永久残留。
+   * 设计形态：可选成员 + 编排点 ?. 调用（壳接线后生效，headless/测试夹具不注入即跳过）；
+   * 三者均为同步内存操作，无可消化 rejection 面（区别于 browserDestroy 的 IPC .catch 契约）。
+   */
+  /** terminal 写队列 sessions 分区释放（含 ≤100 条待写命令） */
+  clearTerminalQueue?(sid: string): void
+  /** slash 命令历史分区（commandsBySession）释放 */
+  clearSlashCommands?(sid: string): void
+  /** fork 通知 transient feed 分区（feedMap）释放 */
+  clearForkNotices?(sid: string): void
 }
 
 /**
@@ -148,7 +175,7 @@ export interface UseSessionDeps {
   navigation: NavigationPort
   /** chat 历史回填（壳注入 useChat + tasks 适配） */
   chat: ChatHydratePort
-  /** 跨 store 清理钩子（DM2 12 项） */
+  /** 跨 store 清理钩子（DM2 + B4 browserDestroy 必选 11 项 + G1 可选 3 项） */
   hooks: SessionCleanupHooks
   /** 新建任务流程（可选；缺省时 newSession 返回 null——壳未接线状态，w5 必须接线） */
   flow?: NewTaskFlowPort
@@ -404,7 +431,8 @@ export function createUseSession(deps: UseSessionDeps) {
    *
    * S3 顺序（与 renderer cleanupSessionState 逐条对齐）：
    * panel 解绑 → overlay 清理 → removeFromList →
-   * 12 项跨 store 钩子（clearFileTree→…→invalidateStatus）→ triggerSessionCleanups。
+   * 11 项必选跨 store 钩子（clearFileTree→…→invalidateStatus→browserDestroy）→
+   * G1 可选 3 钩子（clearTerminalQueue/clearSlashCommands/clearForkNotices）→ triggerSessionCleanups。
    */
   function cleanupSessionState(id: string): void {
     // 删除的 session 若绑定到 panel，清空 panel 绑定，避免悬空引用指向已删 session。
@@ -434,6 +462,15 @@ export function createUseSession(deps: UseSessionDeps) {
     hooks.disposeChat(id)
     // 清除该 session 的 derivedStatus/sessionDigest 缓存，避免已删 session 的 computed 残留
     hooks.invalidateStatus(id)
+    // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线（hooks 序列末位追加）：
+    // fire-and-forget——rejection 由 hook 实现方显式 .catch 消化（见接口契约），不阻塞删除链。
+    hooks.browserDestroy(id)
+    // [G1 / 2026-09-14 内存审计 §3.4] 死清理 API 接线组（可选成员 ?. 防御调用——旧实现
+    // 不注入即跳过，零破坏）：terminal 写队列 / slash 命令历史 / fork 通知 feed 三类
+    // per-session Map 分区随 session 销毁释放。同步内存操作，无 rejection 面。
+    hooks.clearTerminalQueue?.(id)
+    hooks.clearSlashCommands?.(id)
+    hooks.clearForkNotices?.(id)
     // ADR-0049 W5：触发所有 useSessionScopedState 实例清理该 sid 的 Map 分区，
     // 防已销毁 session 的 per-session 状态条目在 Map 中积累导致内存泄漏（AC-8）。
     // 销毁唯一编排点契约：triggerSessionCleanups 只经 deleteSession/deleteFolder 触发。

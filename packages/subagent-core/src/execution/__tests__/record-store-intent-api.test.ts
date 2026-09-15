@@ -342,22 +342,33 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // ============================================================
   // A2 markRoundStarted / markRoundIdle 簿记
   // ============================================================
-  describe("markRoundStarted（轮始重置：字段①②⑤）", () => {
-    it("status=running + result/resumable 清除 + entry 上报", () => {
+  describe("markRoundStarted（轮始重置：字段①②⑤ + [U6/D4] stopReason 清点）", () => {
+    it("status=running + result 清除 + entry 上报", () => {
       const record = makeRecord("chat-1", { chatMode: true });
       record.result = "prev round";
-      record.resumable = true;
       store.register(record);
       appendEntryMock.mockClear();
 
       expect(store.markRoundStarted("chat-1")).toBe(true);
       expect(record.status).toBe("running");
       expect(record.result).toBeUndefined();
-      expect(record.resumable).toBeUndefined();
       expect(appendEntryMock).toHaveBeenCalledWith(
         "subagent-record",
         expect.objectContaining({ id: "chat-1" }),
       );
+    });
+
+    it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在飞 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接守卫）", () => {
+      const record = makeRecord("chat-1b", { chatMode: true });
+      record.result = "prev round";
+      record.stopReason = "completed"; // 上轮轮终写入的展示位（markRoundIdleImpl 簿记⑩）
+      store.register(record);
+      appendEntryMock.mockClear();
+
+      expect(store.markRoundStarted("chat-1b")).toBe(true);
+      expect(record.status).toBe("running");
+      expect(record.result).toBeUndefined();
+      expect(record.stopReason).toBeUndefined();
     });
 
     it("id 不在内存 → false 无副作用", () => {
@@ -366,7 +377,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   });
 
   describe("markRoundIdle（簿记全集①-⑨；簿记⑦ .alive 保留）", () => {
-    it("成功轮：result=content、round+1、closedReason 清、resumable=true、idleSince 刷新、注销②、entry 携带新 round", () => {
+    it("成功轮：result=content、round+1、closedReason 清、翻 idle、idleSince 刷新、注销②、entry 携带新 round", () => {
       const record = makeRecord("chat-2", { chatMode: true, round: 1 });
       record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 投影
       record.sessionFile = sessionFile;
@@ -379,11 +390,10 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markRoundIdle("chat-2", { kind: "success", content: "round done" })).toBe(true);
 
-      expect(record.status).toBe("running"); // ① 保持 running（非 idle）
+      expect(record.status).toBe("idle"); // ① 轮终翻边 idle（[two-state-convergence U4/D3]）
       expect(record.result).toBe("round done"); // ②
       expect(record.round).toBe(2); // ③
       expect(record.closedReason).toBeUndefined(); // ④
-      expect(record.resumable).toBe(true); // ⑤
       expect(record.idleSince).toBeGreaterThan(0); // ⑥
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明
@@ -433,7 +443,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.appendEvent("nope", { type: "text_delta", delta: "x" })).toBe(false);
     });
 
-    it("adoptEngineDeath：error/result/resumable 三写 + entry；id 不在内存 → false", () => {
+    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）+ entry；id 不在内存 → false", () => {
       const record = makeRecord("adopt-1");
       record.result = "partial";
       store.register(record);
@@ -442,10 +452,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.adoptEngineDeath("adopt-1", { error: "engine crashed" })).toBe(true);
       expect(record.error).toBe("engine crashed"); // ⑩
       expect(record.result).toBeUndefined();
-      expect(record.resumable).toBe(true); // ⑤ 收养
       expect(appendEntryMock).toHaveBeenCalledWith(
         "subagent-record",
-        expect.objectContaining({ id: "adopt-1", resumable: true }),
+        expect.objectContaining({ id: "adopt-1", stopReason: "failed" }),
       );
       expect(store.adoptEngineDeath("nope", { error: "x" })).toBe(false);
     });

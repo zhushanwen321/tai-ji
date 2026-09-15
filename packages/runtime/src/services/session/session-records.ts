@@ -306,7 +306,11 @@ export class SessionRecords {
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    return extractSubagentsFromSessionFile(target.filePath)
+    // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空 + extractor 侧 warn 留痕
+    // （「会话过大」标记）；侧栏面板降级提示的协议/UI 接线（shared protocol + core +
+    // renderer）跨包超出本单元领地，见 impl-plan 偏差登记。
+    const { records } = extractSubagentsFromSessionFile(target.filePath)
+    return records
   }
 
   /**
@@ -438,7 +442,9 @@ export class SessionRecords {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    return extractWorkflowsFromSessionFile(target.filePath)
+    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + extractor 侧 warn）
+    const { records } = extractWorkflowsFromSessionFile(target.filePath)
+    return records
   }
 
   /**
@@ -559,9 +565,10 @@ export class SessionRecords {
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
  * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
  * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
- * [U8b / GUI 快修①] result/resumable/chatMode 三字段补入：轮终迁移恰翻这三个字段
- * （result 写入 / resumable 置位 / chatMode 显式化），缺比对会把「轮终等待续聊」的
+ * [U8b / GUI 快修①] result/chatMode 补入：轮终迁移恰翻这些字段
+ * （result 写入 / chatMode 显式化），缺比对会把「轮终等待续聊」的
  * 显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
+ * [U5/D4] resumable 比对位随字段退役删除——轮终翻转由 status 位天然触发。
  * [engine 域浅比较] engineHandle/engineFallback 是嵌套对象，applyRecordEntries 每轮
  * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
  * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
@@ -609,16 +616,17 @@ function recordStatsEquals(a: SubagentRecord, b: SubagentRecord): boolean {
 }
 
 /**
- * [状态展示组] 状态 + 终态/展示信号九字段：status / error / closedReason + 轮终
- * 三字段（result / resumable / chatMode）+ intent / stopReason / origin——publish
+ * [状态展示组] 状态 + 终态/展示信号七字段：status / error / closedReason + 轮终
+ * 两字段（result / chatMode）+ intent / stopReason / origin——publish
  * 去重的全部「显示形态」信号集中于此组，翻任一字段即触发 publish。
+ * [U5/D4] resumable 比对位已随字段退役删除——轮终翻转由 status 位天然触发
+ * （U4 翻边后轮终写 idle），result/chatMode 仍需显式比对（running 期覆盖写场景）。
  */
 function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.status === b.status
     && a.error === b.error
     && a.closedReason === b.closedReason
     && a.result === b.result
-    && a.resumable === b.resumable
     && a.chatMode === b.chatMode
     && a.intent === b.intent
     && a.stopReason === b.stopReason

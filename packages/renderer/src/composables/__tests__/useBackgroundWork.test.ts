@@ -63,9 +63,10 @@ describe('useBackgroundWork', () => {
   // [review findings-confirmation #8] TC1b：running-resumable（轮终回写 running + result）
   // 不是后台真在跑——v4 轮终迁移故意回写 running（可冷路径 resume），result 有值即轮终信号。
   // 不排除会致 derivedStatus 恒 working → 末位 turn 永久「工作中」。
-  it('TC1b: subagent running + result（轮终 running-resumable）→ false', () => {
+  it('[U6] TC1b: subagent 轮终形态（idle + result + completed）→ false', () => {
     const sub = useSubagentStore()
-    sub.applyRecords('s1', [makeSubagent({ status: 'running', result: '本轮产出' })])
+    // [U6] renderer 实收轮终形态（U4 翻边 + runtime 归一后）——status 子句直接排除
+    sub.applyRecords('s1', [makeSubagent({ status: 'idle', result: '本轮产出', stopReason: 'completed' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(false)
   })
@@ -230,7 +231,7 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
   // v4 running-resumable 设计）→ derivedStatus 不再 working（回 done）→ sessionActive
   // false → isWorkingTurn false。这是「完成注入后末位 turn 永久工作中」的核心回归：
   // live 期行为对齐重开后（record=closed → done）。
-  it('subagent 轮终（running + result）→ derivedStatus = done（非 working）；真在跑（无 result）→ working', async () => {
+  it('[U6] subagent 轮终（idle + result + completed）→ derivedStatus = done（非 working）；真在跑（无 result）→ working', async () => {
     const { useSessionDerivations, invalidateStatusCache } = await import(
       '@/composables/features/chat/useSessionDerivations'
     )
@@ -244,8 +245,8 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
     sub.applyRecords(sessionId, [makeSubagent({ subagentId: 'sub-tc9c', status: 'running' })])
     expect(derivedStatus(sessionId).value).toBe('working')
 
-    // 轮终回写 running + result（resumable）→ 不算 working，回落 done
-    sub.applyRecords(sessionId, [makeSubagent({ subagentId: 'sub-tc9c', status: 'running', result: '本轮产出' })])
+    // 轮终（[U6] 实收形态 idle + result + completed）→ 不算 working，回落 done
+    sub.applyRecords(sessionId, [makeSubagent({ subagentId: 'sub-tc9c', status: 'idle', result: '本轮产出', stopReason: 'completed' })])
     expect(derivedStatus(sessionId).value).toBe('done')
   })
 

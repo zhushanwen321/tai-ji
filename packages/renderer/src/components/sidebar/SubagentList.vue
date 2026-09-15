@@ -173,10 +173,9 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import SubagentFilterBar from '@/components/sidebar/SubagentFilterBar.vue'
-import { countSubagents, filterSubagents, isDoneProjection } from '@/lib/subagent-bucket'
+import { countSubagents, filterSubagents, isRunningProjection } from '@/lib/subagent-bucket'
 import { useSubagentBucketFilter } from '@/composables/features/sidebar/useSubagentBucketFilter'
 import type { SubagentRecord } from '@xyz-agent/shared'
-import { deriveClosedDisplay } from '@xyz-agent/shared'
 import { resolveEngineIcon } from '@/constants/engine-icons'
 
 /** token 数超过此阈值显示 k 单位 */
@@ -230,21 +229,15 @@ function onCancelClick(record: SubagentRecord): void {
   cancellingId.value = record.subagentId
 }
 
-/** 执行态判据（四形态合并为三态展示，权威源 residual-fixes 设计 §5.4 等价公式）：
- *  streaming = 真在跑（进程驱动中，spinner + 取消按钮）；
- *  done = one-shot 轮终（result 有值且 chatMode 显式 false——缺省视为不可确认，
- *    落 waiting 保守兜底：无法确认不是 chat → 不宣告完成）；
- *  waiting = 兜底（chat 轮终等续聊 / 孤儿 IO 兜底 / legacy 轮终），静态圆点无取消。 */
-function isStreaming(record: SubagentRecord): boolean {
-  return record.status === 'running' && record.result === undefined && record.resumable !== true
-}
-
-// done 投影展示判据（D4 SSOT）：引用 subagent-bucket 的 isDoneProjection，禁止本地重复实现
-const isDone = isDoneProjection
-
-function isWaiting(record: SubagentRecord): boolean {
-  return record.status === 'running' && !isStreaming(record) && !isDone(record)
-}
+/** 执行态判据（[two-state-convergence] 两态终态）：streaming = 真在跑（进程驱动中，
+ *  spinner + 取消按钮）；非 streaming = 静态圆点（done 绿 / waiting accent-60 / 失败红 /
+ *  中断灰），细分由下方 STATUS_DOT_RULES 全表表驱动（[U6] 坍缩后组件不再单独引用
+ *  isDone/isWaiting 判据——两判据保留在 subagent-bucket SSOT 作展示公式与测试面）。
+ *  [two-state-convergence D2/U2] streaming 判据 = subagent-bucket SSOT 的 import
+ *  wrapper（isRunningProjection 终态判据 `running && stopReason === undefined`）——
+ *  badge 计数 / hasRunning / isStreamingSubagent 与本组件同源，不漂移。runtime 归一层
+ *  保证 renderer 永不见 legacy 值（U6/D5 边界归一），状态点全表只需两态词表。 */
+const isStreaming = isRunningProjection
 
 /** 中断类停因（G2「为什么停」展示）：取消 / 各类被打断，落中性灰。 */
 const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
@@ -256,36 +249,34 @@ type StatusDotRule = {
 }
 
 /**
- * 状态点颜色映射（design-tokens 语义色，三态主分类 + 中断细分）——优先级表驱动：
- * 自上而下首个 match 生效，顺序即语义（挪动条目前先核对该条注释）。
- *  U8b 两态：idle 三分支（stopReason 派生——失败红 / 中断灰 / 已收口绿）；running 失败轮
- *  （A-lite stopReason=failed，markRoundIdle 保持 running-resumable）红点优先于 done/waiting
- *  投影，其余沿用 spinner + done 投影绿 + waiting 半透明 accent；legacy 五值（done/failed/
- *  crashed/cancelled/closed）保留只读兼容（旧 session 显示，S8），closed 经 deriveClosedDisplay 派生。
+ * 状态点颜色映射（design-tokens 语义色）——优先级表驱动：自上而下首个 match 生效，
+ * 顺序即语义（挪动条目前先核对该条注释）。
+ * [two-state-convergence U6/D5] 全表坍缩终态（五行）：四行 idle-gated + 第五行
+ * running+failed 红。U4 前移的最小 accent 分支、running 三分空转分支、legacy 五值
+ * 分支（done/failed/crashed/cancelled/closed）全部吸收删除——legacy 值经 runtime
+ * 归一层映射为 idle + stopReason/closedReason/chatMode 展示位（closed 经
+ * deriveClosedDisplay 派生 stopReason，「deriveClosedDisplay 改 stopReason 派生」），
+ * 与收窄前三分显示等价（A4 门）：cancelled→灰（interrupted 族）/ failed→红 /
+ * done→绿（one-shot 形态位合成保证落 idle 兜底行而非 accent 行）。
+ * 顺序语义：失败红 / 中断灰先于等续聊 accent-60 先于完成绿兜底。
  */
 const STATUS_DOT_RULES: StatusDotRule[] = [
-  // 失败红（A-lite）：markRoundIdle 失败轮携带 stopReason='failed' 且保持 running-resumable——
-  // 红点先于 done/waiting 投影判据（绿点/半透明点都会误导失败轮）；与 idle failed 同判据同色；
-  // 红点只表达「上一轮失败」，不改变续聊资格语义。
+  // running 失败红（W4 死亡纳管态，[U5/D4] adoptEngineDeath 写 stopReason='failed'；
+  // R5 补行）：红点兜住引擎死亡失败态展示，否则落 accent 兜底丢失失败信息。红点只
+  // 表达「上一轮失败」，不改变续聊资格语义。
   { match: (r) => r.status === 'running' && r.stopReason === 'failed', cls: 'bg-danger' },
+  // idle 失败红：轮终失败 / 归一后的 legacy failed|crashed / closed-failed 派生。
   { match: (r) => r.status === 'idle' && r.stopReason === 'failed', cls: 'bg-danger' },
-  // running：spinner 只给 isStreaming（模板层 v-if 渲染，不落此表）；one-shot 轮终投影 done
-  // 用绿点、其余（等续聊/孤儿兜底）用 accent 静态点（进行中的非活跃态，区别于 done 绿/error 红/cancelled 灰）。
-  { match: (r) => r.status === 'running' && isDone(r), cls: 'bg-success' },
-  { match: (r) => r.status === 'running' && isWaiting(r), cls: 'bg-accent opacity-60' },
-  { match: (r) => r.status === 'running', cls: 'bg-accent' },
-  // idle：中断类停因（见 INTERRUPTED_STOP_REASONS）落中性灰；已收口（completed/reopened/无停因）绿。
+  // idle 中断灰：中断类停因（见 INTERRUPTED_STOP_REASONS）——中断语义先于等续聊展示。
+  // 归一后的 legacy cancelled 与 closed-cancelled 派生（'cancelled'）同落此行。
   { match: (r) => r.status === 'idle' && r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason), cls: 'bg-neutral-dim opacity-50' },
+  // idle chat 等续聊 → 半透明 accent 点：chat 轮终（idle + chatMode true/缺省）。
+  // chatMode !== false 对 legacy 缺省保守归 chat；「非 interrupted 族」由上一行灰分支
+  // 顺序保证，显式条件防未来顺序挪动破坏语义。failed 由上方红分支先行承接。
+  { match: (r) => r.status === 'idle' && r.chatMode !== false && !(r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason)), cls: 'bg-accent opacity-60' },
+  // idle 兜底绿：已收口（one-shot 完成——completed/reopened/无停因且 chatMode=false）。
+  // legacy done 与 closed-done 经归一的 one-shot 形态位合成（chatMode=false）落此行。
   { match: (r) => r.status === 'idle', cls: 'bg-success' },
-  // legacy 五值只读兼容（旧 session 显示，S8）；crashed（子进程崩溃）与 failed 同为异常终态
-  // 共用 danger 色（running 走 spinner 不会到这里，故不混淆）；closed 三分（v4 B-1 统一终态）：
-  // cancelled→中性 / gc 失败（error 有值）→红 / 自然完成·级联关闭→绿。
-  { match: (r) => r.status === 'done', cls: 'bg-success' },
-  { match: (r) => r.status === 'failed' || r.status === 'crashed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'cancelled', cls: 'bg-neutral-dim opacity-50' },
-  { match: (r) => r.status === 'closed' && deriveClosedDisplay(r) === 'cancelled', cls: 'bg-neutral-dim opacity-50' },
-  { match: (r) => r.status === 'closed' && deriveClosedDisplay(r) === 'failed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'closed', cls: 'bg-success' },
 ]
 
 /** 状态点颜色查表（映射语义 SSOT 见上方规则表；未知 status 兜底 accent 防无色） */

@@ -17,6 +17,20 @@
  *   - writeContents（本 turn write 工具写入的 content，untracked 行数回退用）
  *   - diffChain / turnGen / turnFinalizing（W18 帧序三件套）
  *
+ * [T4 协作对象拆分] 五个特性域中状态面独立、与主循环无时序耦合的四域抽为同目录协作对象
+ *（本类构造时装配、方法委托；协作对象不持本类引用，只收窄接口回调）：
+ *   - event-interpreter-gen-stats.ts：LlmWindowSampler——composer-gen-stats LLM 请求窗口
+ *     状态机（turnStartedAt / llmWindowDurationMs 配对消费，登记方向 ①）
+ *   - event-interpreter-settled-delay.ts：AgentSettledDelayer——agent_settled V7 延迟注入
+ *     + disposed 销毁短路（登记方向 ②）；收敛窗常量随迁避免反向 import 成环
+ *   - event-interpreter-ping.ts：PingProbe——ADR-0047 进程健康探测循环（登记五域之外，
+ *     同为独立状态面、挂点仅 turn-start/turn-end/dispose 三处）
+ *   - event-interpreter-compaction.ts：CompactionNotifier——compaction 双事件到 WS 帧 +
+ *     副作用回调的纯同步编排（无内部状态，不牵动主循环时序，评估为低风险）
+ * 保留在本类：file_changes 帧序三件套（diffChain/turnGen/turnFinalizing 与 turn-start/end、
+ * tool-call hook 链交织，抽取牵动主循环时序）、session-manager 路由（单 case 5 行透传，
+ * 不构成独立变化轴量）、occupancy 原语与 UserStoppedGate（多模块共享原语/门面，非本类私有域）。
+ *
  * [ADR-0024 D5] git 作为唯一真值源：写操作后 diff 当前 git status，agent_end 推 ready 全集。
  * 非 git 仓库 / cwd 缺省 → 跳过 diff（不推 file_changes）。
  * [R-09] turn-start 不再采 baseline——diffSnapshots 输出只依赖 current（死参数已删）。
@@ -26,20 +40,17 @@
  */
 import type { ServerMessage, ServerMessageType } from '@xyz-agent/shared'
 import type { FileChange } from '@xyz-agent/shared'
-
-/**
- * [ADR-0047] ping 间隔：turn 进行中每 60s 发一次 get_state 进程健康探测。
- *
- * 阈值依据见 ADR-0047「阈值依据」。平衡 RPC 流量（轻量）与响应速度。
- *
- * export 供测试 import（SR6 SSOT：测试跟随源码常量，不漂移）。
- */
-export const PING_INTERVAL_MS = 60_000
-/** [ADR-0047] 连续失败阈值：3 次（180s）→ 判定 pi 进程真死 → onSilentAbort。export 供测试（SR6）。 */
-export const PING_FAIL_THRESHOLD = 3
-/** [AC-8] 连续 2 次失败（120s）→ 广播 message.stream_warn 一次（提示性，不中断）。export 供测试（SR6）。 */
-export const PING_WARN_FAIL_COUNT = 2
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@xyz-agent/shared'
+import { CompactionNotifier } from './event-interpreter-compaction.js'
+import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
+import { PingProbe } from './event-interpreter-ping.js'
+import { AgentSettledDelayer, ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-delay.js'
+
+// [T4 协作对象拆分] 常量本体随域迁至协作对象文件（ping 三常量 → event-interpreter-ping.ts、
+// 收敛窗常量 → event-interpreter-settled-delay.ts），此处 re-export 保住既有导出面
+//（event-interpreter-ping-dispose.test.ts 等直接 import 本文件；SR6 SSOT）。
+export { ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-delay.js'
+export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import type { SessionManagerAction } from '@xyz-agent/extension-protocol'
 import type { IFileChangeDiff } from '../ports/file-change-diff.js'
@@ -182,48 +193,9 @@ export function applySessionOccupancyTransition(
 
 // ── userStopped 标记门面 + restore-abort 收敛环（session-dead-structural-fixes D4）──
 
-/**
- * 收敛静默观察窗初值（D4：abort 完成起算，窗满且最后一次被掐 turn 的 agent_settled 已到达
- * → 判收敛清标记）。常量 export 供测试跟随（SR6 SSOT 惯例）；实施期按 P-1 探针实测标定
- * （设计 §3.5：初值 3s，可调）。
- */
-export const ABORT_STALL_CONVERGENCE_WINDOW_MS = 3_000
-
-/**
- * [V7 验收基建，实施期裁决保留（设计 §4.2 开关保留策略已登记偏离默认理由）] dev-only 事件流延迟注入开关。
- *
- * 环境变量 XYZ_AGENT_DEV_SETTLING_DELAY_MS 设置为正数（毫秒）时生效：agent_settled 事件
- * 延迟 N ms 再处理，用于在 dev 环境拉长 settling 窗口，构造 D2 行为变更（settling 预检
- * 拒绝入队）的正向验收场景（V7）。真实链路定性（设计 v3）：pi 与 provider 交互完全真实，
- * 本注入是时间维度的 chaos 延迟手法，非 mock、不替换任何依赖。
- *
- * [与 D4 收敛窗的耦合约束（定向复审缺陷 1）] 上界 = ABORT_STALL_CONVERGENCE_WINDOW_MS：
- * delay 达到收敛静默窗量级时，restore-abort 受害 turn 的 agent_settled 会被推迟到窗满
- * 之后——该 turn 不经 noteAgentStart（主 abort 受害），pendingSettled=false 下
- * onWindowElapsed 会在 settled 未到时误判收敛清标记（设计 v4 ③「掐而 settled 未到」
- * 边界缝被确定性重开）。故 delay ≥ 窗口值时拒绝生效（warn + 返回 null = 零行为差异），
- * 不做 clamp——clamp 会让实际延迟悄悄偏离设定值、V7 验收观测失真；拒绝则显式零差异
- * 且 warn 指路（调小 delay 或缩短验收构造）。
- *
- * 未设 / 非法值（非数字、≤0、≥ 上界）→ 返回 null = 零行为差异（不带默认值进 prod）。
- * 纯内存延迟不落盘。export 供测试跟随（SR6 SSOT 惯例）。
- */
-export function readDevSettlingDelayMs(): number | null {
-  const raw = process.env.XYZ_AGENT_DEV_SETTLING_DELAY_MS
-  if (raw === undefined || raw === '') return null
-  const n = Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return null
-  if (n >= ABORT_STALL_CONVERGENCE_WINDOW_MS) {
-    console.warn(
-      `[event-interpreter] XYZ_AGENT_DEV_SETTLING_DELAY_MS=${raw} rejected: delay must stay below ` +
-      `ABORT_STALL_CONVERGENCE_WINDOW_MS(${ABORT_STALL_CONVERGENCE_WINDOW_MS}ms) or the delayed ` +
-      `agent_settled lands past the restore-abort convergence window and breaks its settled-based ` +
-      `convergence judgment (design v4 boundary seam). Lower the delay.`,
-    )
-    return null
-  }
-  return n
-}
+// [T4 协作对象拆分] 收敛窗常量（ABORT_STALL_CONVERGENCE_WINDOW_MS）与 dev settling 延迟读取
+//（readDevSettlingDelayMs）迁至 event-interpreter-settled-delay.ts——后者上界约束引用前者，
+// 同文件避免 settled-delay → event-interpreter 反向 import 成环；常量经顶部 re-export 转发。
 
 /**
  * userStopped 门面 + 收敛环控制器（D4）。
@@ -593,26 +565,15 @@ export class EventInterpreter {
   private diffChain: Promise<void> = Promise.resolve()
   /** 回合代际守卫：turn-start 自增；链上执行时 gen 不匹配 → 丢弃 accumulating（ready 绕过恒推，见 sendDiffFileChanges） */
   private turnGen = 0
-  /**
-   * composer-gen-stats（D2/genstats-speed-llm-window D1）：LLM 请求窗口起算本地时钟
-   *（assistant message_start 到达时记——turn-start kind 的物理来源，event-adapter :786-797/:853-858；
-   * assistant message_end 结算后清 null；无配对 turn-usage 消费的残留由下轮 turn-start 重锚覆写）。
-   *
-   * 起算点刻意选 message_start 到达而非请求发出时刻：message_start 是 turn 的定义性事件
-   *（每轮必到，异常配对才有唯一锚），且不把 provider 首包延迟（TTFT 段）敏感度引入
-   *「生成速度」语义。代价 = 窗口不含「请求发出→首事件」准备段（context 转换 + HTTP 握手），
-   * 测得值略偏乐观——设计内接受的偏差（D1 量级声明）；重审触发 = 用户反馈显示值系统性
-   * 高于体感。被否：以 pi turn_start 为起算——该事件不翻译（adapter NULL_EVENTS），为其
-   * 新增翻译面纯增量，且窗口会混入 steering 注入段，语义更差。
-   */
-  private turnStartedAt: number | null = null
-  /**
-   * composer-gen-stats（genstats-speed-llm-window D1/D3）：最近结算的 LLM 请求窗口时长
-   *（assistant message_end 到达时结算 Date.now() - turnStartedAt，并同步清 turnStartedAt）。
-   * turn-usage 消费后置 null（一次性语义）；异常路径残留由下轮 turn-start 重锚同步清除
-   *（重锚清除不变量——窗口时长生命周期严格限本 turn，封死「旧窗口 × 新 token」垃圾样本）。
-   */
-  private llmWindowDurationMs: number | null = null
+  // ── 协作对象（T4 拆分：构造时装配，状态与逻辑见各自文件；本类只持委托挂点）──
+  /** composer-gen-stats LLM 请求窗口状态机（genstats-speed-llm-window D1/D3，登记方向 ①）。 */
+  private readonly llmWindows: LlmWindowSampler
+  /** agent_settled V7 延迟注入 + disposed 销毁短路（登记方向 ②，缺陷 2 短路随迁）。 */
+  private readonly settledDelayer: AgentSettledDelayer
+  /** pi 进程健康探测循环（ADR-0047，登记五域外独立状态面）。 */
+  private readonly pingProbe: PingProbe
+  /** compaction 双事件编排（M4，纯同步无内部状态，评估低风险）。 */
+  private readonly compaction: CompactionNotifier
   /** turn-end 压制标记：true 后到达的 accumulating 直接 no-op（同回合迟到 tool-call-end 不产生新帧） */
   private turnFinalizing = false
   /**
@@ -622,44 +583,45 @@ export class EventInterpreter {
    */
   private toolCallContentIndex: Map<string, number> = new Map()
 
-  // ── [ADR-0047] ping 探测状态 ──
-  /** ping 定时器句柄（null = 未在探测） */
-  private pingTimer: ReturnType<typeof setInterval> | null = null
-  /** 当前连续失败计数（成功即清零） */
-  private pingFailCount = 0
-  /** 本 turn 是否已广播过 message.stream_warn（避免重复） */
-  private pingWarned = false
-  /**
-   * [V7 验收基建] agent_settled 延迟注入的 pending timer（null = 无延迟在途）。仅 dev-only
-   * 开关生效时非 null；未设开关时恒 null 零开销。
-   */
-  private settlingDelayTimer: ReturnType<typeof setTimeout> | null = null
-  /**
-   * [定向复审缺陷 2] 会话销毁标志：dispose()（经 EventAdapter.detach 转调，覆盖 forceQuit /
-   * exit / delete / restore 清场全部销毁路径）置位。置位后本实例的全部 agent_settled 副作用
-   * 短路——防销毁后在途延迟 timer 打在「同 id restore 重注册的新 session 记录」上（幽灵
-   * idle 写 + fanOutSettled 幽灵置闲）。其他 interpret 路径不需此标志：detach 已 unsub 事件
-   * 源，唯一残留副作用源就是本 timer。
-   */
-  private disposed = false
-
   /**
    * 会话销毁清理（组合根经 EventAdapter.detach 转调）：清在途 settling 延迟 timer + 置
-   * disposed 短路标志。幂等。仅 V7 开关生效时存在真实 timer；未设开关的实例调用本方法
-   * 只置标志（零开销）。
+   * disposed 短路标志 + 停 ping 探测循环。幂等。仅 V7 开关生效时存在真实 settling timer；
+   * 未设开关时该 timer 恒 null（零开销）。
+   *
+   * B1（memory-leak-remediation §3.2-B1，2026-09-14）：pi turn 中崩溃 → onSessionExit →
+   * adapter.detach → 本 dispose 后事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点；
+   * 5s 后 respawn 为同 sessionId 生成新 client，pingPi 的 pm.getClient(sessionId) 延迟解析
+   * 打到新 client 必然成功 → 失败计数恒清零，3 次失败自停条件永不成立 → interval 永续
+   *（且 ping 双向 touch lastActivityAt 钉死 idle-pi-reaper 回收）。pingProbe.stop 幂等且已
+   * in-flight 的 tick 被 `timer === null` 守卫拦截（SR1）。settling 延迟 timer 与 disposed
+   * 短路标志同迁 settledDelayer（T4），本方法只做两腿委托。
    */
   dispose(): void {
-    this.disposed = true
-    if (this.settlingDelayTimer !== null) {
-      clearTimeout(this.settlingDelayTimer)
-      this.settlingDelayTimer = null
-    }
+    this.settledDelayer.dispose()
+    this.pingProbe.stop()
   }
 
   constructor(
     private readonly sessionId: string,
     private readonly opts: EventInterpreterOptions,
-  ) {}
+  ) {
+    this.llmWindows = new LlmWindowSampler(opts.onGenStats)
+    this.settledDelayer = new AgentSettledDelayer(() => this.applyAgentSettledEffects())
+    this.pingProbe = new PingProbe({
+      sessionId,
+      send: opts.send,
+      pingPi: opts.pingPi,
+      onSilentAbort: opts.onSilentAbort,
+    })
+    this.compaction = new CompactionNotifier({
+      sessionId,
+      send: opts.send,
+      onCompactingStateChange: opts.onCompactingStateChange,
+      onOccupancyTransition: opts.onOccupancyTransition,
+      onContextUpdate: opts.onContextUpdate,
+      onTraceSync: opts.onTraceSync,
+    })
+  }
 
   /**
    * 消费一批翻译事件，逐个编排。
@@ -753,10 +715,10 @@ export class EventInterpreter {
         void this.handleToolCallEnd(ev)
         return
       case 'compaction-start':
-        this.handleCompactionStart(ev)
+        this.compaction.onCompactionStart(ev.reason)
         return
       case 'compaction-end':
-        this.handleCompactionEnd(ev)
+        this.compaction.onCompactionEnd(ev)
         return
     }
     if (this.handleConversationEvent(ev)) return
@@ -773,10 +735,9 @@ export class EventInterpreter {
       case 'message':
         this.opts.send(ev.message)
         // composer-gen-stats（genstats-speed-llm-window D1/D2）：assistant message_end 帧 =
-        // LLM 请求窗口闭合点（先于工具执行到达，pi 语义 P1）→ 结算窗口时长。role 守卫：
-        // user/toolResult/custom 的 message_end 帧同经本 case 全量下发（MESSAGE_END_ALLOWED_ROLES），
-        // 无守卫会被错误闭合截断 duration（D3 第八行）。
-        this.settleLlmWindowOnMessageEnd(ev.message)
+        // LLM 请求窗口闭合点（先于工具执行到达，pi 语义 P1）→ 结算窗口时长（role 守卫与
+        // payload 防御提取在协作对象内）。委托原样保留转发后的调用位置——闭合时点语义不变。
+        this.llmWindows.settleOnMessageEnd(ev.message)
         // subagent bg-notify：更新内存态终态 → 广播 session.subagents
         this.handleSubagentBgNotify(ev.message)
         // workflow-result（run 完成）：广播 session.workflows 增量信号
@@ -810,14 +771,8 @@ export class EventInterpreter {
         this.currentMessageId = ev.messageId
         this.turnGen += 1
         this.turnFinalizing = false
-        // composer-gen-stats（D2/genstats-speed-llm-window D1）：LLM 请求窗口起算本地时钟
-        //（本 case 的物理触发 = assistant message_start 到达；pi-statusline 同口径，
-        // pi entry 无起算点，只能用 runtime 本地时钟）
-        this.turnStartedAt = Date.now()
-        // 重锚清除不变量（genstats-speed-llm-window D3 结构性说明）：同步清上一 turn 可能
-        // 残留的窗口时长——「usage 缺席」「合成对」等异常路径的残留 d 生命周期严格限本 turn，
-        // 结构性封死「旧窗口 × 新 token」垃圾样本（stale-d 复合行），不再依赖「下轮 end 必到」。
-        this.llmWindowDurationMs = null
+        // composer-gen-stats：LLM 请求窗口重锚起算 + 重锚清除不变量（注释详见 LlmWindowSampler.onTurnStart）。
+        this.llmWindows.onTurnStart()
         // occupancy #2（D2 迁移）：turn-start → 'generating'。dispatching（prompt 已发）到本
         // 事件的边界；幂等写直写目标值，retry/followUp 续跑（settling 中再收 turn-start）同样
         // 落 generating。三布尔派生（isGenerating=true）在原语内原子完成。
@@ -827,8 +782,8 @@ export class EventInterpreter {
         this.writeContents = new Map()
         // [ADR-0047] turn 开始启动 ping 探测（每 60s get_state）。
         // ping 在 turn 进行中持续，turn-end / agent_end / onSilentAbort 停止（见各分支）。
-        // turn 间不探测（AC-3）：startPingLoop 在 turn-start 调用，确保只在 turn 内跑。
-        this.startPingLoop()
+        // turn 间不探测（AC-3）：start 在 turn-start 挂点调用，确保只在 turn 内跑。
+        this.pingProbe.start()
         return true
       case 'turn-end':
         this.handleTurnEnd(ev)
@@ -841,36 +796,15 @@ export class EventInterpreter {
         this.opts.onContextUpdate?.(ev.sessionId, { inputTokens: ev.inputTokens, totalTokens: ev.totalTokens })
         this.opts.onTurnUsage?.(ev.sessionId)
         // composer-gen-stats（D1/D2）：组装生成指标样本采样（fire-and-forget 同步，不阻塞事件流）。
-        // durationMs 取 llmWindowDurationMs（genstats-speed-llm-window D1：assistant
-        // message_start → message_end 的 LLM 请求窗口，不含工具执行时间）；真缺闭/缺起 → null
-        // （速度样本由 service 跳过，命中率样本照常——promptTotal 与时间无关）。消费后置空
-        // 锚点（一次性语义）：缺配对的后续 turn-usage 不得拿上一 turn 旧锚点算出系统性偏大
-        // duration，须 §3.5 承诺的 durationMs=null。
-        if (this.opts.onGenStats) {
-          // durationMs 改源 llmWindowDurationMs（genstats-speed-llm-window D1）：assistant
-          // message_end 结算的 LLM 请求窗口（不含工具执行时间）。null = 真缺闭/缺起（pi
-          // 崩溃/断连致闭合帧不到达，或 runtime 中途启动/丢 message_start 致无起算点，
-          // 设计 §3.1 失败路径 / D3 矩阵）→ 速度样本由 service 侧跳过（命中率照常）。
-          // 消费后置 null（一次性语义）。保留 turnStartedAt 清 null（防纵深，D3 零成本）：
-          // 缺配对的后续 turn-usage 不得拿旧锚点算出系统性偏大 duration（§3.5 一致性）。
-          const windowMs = this.llmWindowDurationMs
-          this.llmWindowDurationMs = null
-          this.turnStartedAt = null
-          this.opts.onGenStats(ev.sessionId, {
-            outputTokens: ev.outputTokens,
-            durationMs: windowMs,
-            model: ev.model,
-            provider: ev.provider,
-            input: ev.input,
-            cacheRead: ev.cacheRead,
-            cacheWrite: ev.cacheWrite,
-          })
-        }
+        // durationMs 取 llmWindowDurationMs（assistant message_start → message_end 的 LLM 请求
+        // 窗口，不含工具执行时间）；真缺闭/缺起 → null；一次性消费语义、未注入 onGenStats 时
+        // 整块跳过——组装与状态清理由 LlmWindowSampler.consume 承载（注释详见该处）。
+        this.llmWindows.consume(ev.sessionId, ev)
         return true
       case 'agent-settled':
         // [V7] 延迟编排入口：dev-only 开关生效时整体延迟处理（注入点在 settling→idle 转移
-        // 处理之前，见 handleAgentSettled 注释）；未设开关 = 直通零开销。
-        this.handleAgentSettled()
+        // 处理之前）；未设开关 = 直通零开销。延迟 timer 与 disposed 短路在 AgentSettledDelayer。
+        this.settledDelayer.handleSettled()
         return true
       case 'trace-trigger':
         // session-trace 增量腿（A33）：触发事件到达 → 追赶式 since 补拉（fire-and-forget，
@@ -883,41 +817,10 @@ export class EventInterpreter {
   }
 
   /**
-   * agent_settled 处理路径编排（W1 bash flush + occupancy #4 idle + D4 收敛环 settled 挂点
-   * 三件副作用的统一入口）。
-   *
-   * [V7 验收基建，实施期裁决保留（设计 §4.2 已登记）] 环境开关
-   * XYZ_AGENT_DEV_SETTLING_DELAY_MS 设置时整体延迟 N ms 执行。注入点时点约束（设计 v4）：
-   * 延迟必须作用于 settling→idle 转移处理**之前**——若落在转移后仅延迟广播，settling 窗口
-   * 构造会静默失败且难与「注入无效」区分，故本方法包住全部三件副作用（含转移）。
-   *
-   * 受控 timer 异步延迟：interpret 循环对后续事件照常同步处理，不阻塞事件流。延迟窗口内
-   * 重复 agent_settled（物理上极窄：pi 单 run 结束只发一次）→ 先同步 flush 前一个再排新
-   * timer——顺序保持、事件不丢（applyAgentSettled 各副作用均幂等，flush 乱序无害）。
+   * agent_settled 的三件副作用（原 applyAgentSettled 迁移，经 settledDelayer 的 apply 回调
+   * 进入——V7 延迟编排与 disposed 销毁短路在 AgentSettledDelayer.handleSettled/run 承担）。
    */
-  private handleAgentSettled(): void {
-    const delayMs = readDevSettlingDelayMs()
-    if (delayMs === null) {
-      this.applyAgentSettled()
-      return
-    }
-    if (this.settlingDelayTimer !== null) {
-      clearTimeout(this.settlingDelayTimer)
-      this.settlingDelayTimer = null
-      this.applyAgentSettled()
-    }
-    this.settlingDelayTimer = setTimeout(() => {
-      this.settlingDelayTimer = null
-      this.applyAgentSettled()
-    }, delayMs)
-  }
-
-  /** agent_settled 的三件副作用（原 agent-settled case 逐字迁移，行为保持提取）。 */
-  private applyAgentSettled(): void {
-    // [定向复审缺陷 2] 销毁短路：interpreter 已随 adapter detach 而废弃（同 id restore 会
-    // 重注册新实例），在途延迟 timer 到点的幽灵副作用（idle 行无条件写 + fanOutSettled
-    // 置闲）必须拦在本实例入口——session 记录/收敛环都无从辨别「旧实例的迟到帧」。
-    if (this.disposed) return
+  private applyAgentSettledEffects(): void {
     // W1（fix-chat-flow-order）：run 级联结束（晚于 pi finally 的 bash 落盘 flush）→
     // dispatcher 按序发布 per-session bash 待落列（见 opts.onAgentSettled 注释）。
     this.opts.onAgentSettled?.(this.sessionId)
@@ -1146,7 +1049,7 @@ export class EventInterpreter {
     this.writeContents = new Map()
 
     // [ADR-0047] turn 结束停止 ping 探测（AC-3：turn 间不探测）。
-    this.stopPingLoop()
+    this.pingProbe.stop()
   }
 
   /**
@@ -1219,32 +1122,7 @@ export class EventInterpreter {
     return next
   }
 
-  // ── composer-gen-stats：LLM 请求窗口闭合（genstats-speed-llm-window D1/D2）──
-
-  /**
-   * assistant message_end 帧到达 → 结算 LLM 请求窗口（D1：assistant message_start →
-   * assistant message_end 的 runtime 本地时钟差，不含工具执行时间）。
-   *
-   * role 守卫（D2）：仅 entry.message.role === 'assistant' 时结算——user/toolResult 的
-   * message_end 帧同经本 case 全量下发（MESSAGE_END_ALLOWED_ROLES），custom 的
-   * subagent-directive 亦然，无守卫会被错误闭合截断 duration（D3 第八行）。
-   *
-   * 缺起防御（D3 第二行）：turnStartedAt 为 null（runtime 中途启动/丢 message_start）时
-   * 静默跳过，不产窗口——与「无配对 turn-start → durationMs=null」现行契约同语义。
-   *
-   * payload 结构防御性提取：payload/entry/message/role 任何层级畸形（缺字段/role 非字符串）
-   * 一律按「非 assistant end」跳过不抛（计时是旁路观测，畸形帧不产生错误路径；与
-   * handleSubagentBgNotify 的 payload 提取范式一致）。结算后同步清 turnStartedAt（配对
-   * 消费，防同窗口被二次结算）。
-   */
-  private settleLlmWindowOnMessageEnd(msg: ServerMessage): void {
-    if (msg.type !== 'message.message_end') return
-    const payload = msg.payload as { entry?: { message?: { role?: unknown } } } | undefined
-    if (payload?.entry?.message?.role !== 'assistant') return
-    if (this.turnStartedAt === null) return
-    this.llmWindowDurationMs = Date.now() - this.turnStartedAt
-    this.turnStartedAt = null
-  }
+  // ── composer-gen-stats 窗口结算已迁 LlmWindowSampler（event-interpreter-gen-stats.ts，T4）──
 
   // ── subagent / workflow record 失效信号（W18：事件直写退役）──
 
@@ -1275,172 +1153,7 @@ export class EventInterpreter {
     this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'workflow-record')
   }
 
-  // ── compaction 生命周期编排（M4 事件驱动：interpreter 唯一源）──
+  // ── compaction 生命周期编排已迁 CompactionNotifier（event-interpreter-compaction.ts，T4）──
 
-  /**
-   * compaction_start → 广播 session.compacting{reason} + 置 runtime active.isCompacting=true。
-   *
-   * reason 透传给前端，驱动 compacting 浮层文案区分手动（'manual'）/自动（'threshold'|'overflow'）。
-   * runtime active.isCompacting 经 onCompactingStateChange 回调置位，sendPrompt/sendBash 预检据此互斥。
-   */
-  private handleCompactionStart(ev: PiTranslatedEvent & { kind: 'compaction-start' }): void {
-    this.opts.send({
-      type: 'session.compacting',
-      payload: { sessionId: this.sessionId, status: 'compacting', reason: ev.reason },
-    })
-    this.opts.onCompactingStateChange?.(this.sessionId, true)
-    // occupancy #5（D2 迁移）：compaction_start → 'compacting-start'。原语派生 isCompacting=true
-    // + 合并 compacting=true（与 turn 维度正交：threshold 模式 turn 内压缩 = generating+compacting
-    // 并存，overflow/manual 多为 idle/settling+compacting）。上方 onCompactingStateChange 通道
-    // 由组合根接线到同一原语行，幂等去重。
-    this.opts.onOccupancyTransition?.('compacting-start')
-  }
-
-  /**
-   * compaction_end → 唯一驱动 compaction 终态（成功/aborted/failed 三路）。
-   *
-   * 失败判据：errorMessage 真值为 failed（非 aborted 字段、非 key 存在性）—— pi 三种 aborted:true
-   * 形态在 errorMessage 真值层面一致（extension cancel/signal abort 无 key；手动 catch 取消类
-   * errorMessage 为 undefined）。分叉干净。
-   *
-   * 三路均复位 isCompacting（与 compaction_start 置位对称，SUG-新2）—— 否则 auto compact 结束后
-   * active.isCompacting 永远 true，sendPrompt 预检永远拒，session 卡死。
-   *
-   * 孤儿 end 容错（SUG-新3）：overflow「已 retry 过一次」早退路径无 preceding start，end handler
-   * 复位对「本来就 false 的 isCompacting」幂等无害；不维护 start/end 配对状态机。
-   */
-  private handleCompactionEnd(ev: PiTranslatedEvent & { kind: 'compaction-end' }): void {
-    const hasError = !!ev.errorMessage
-    if (hasError) {
-      // failed：广播 session.compacted{error}（前端 compacted handler error 非空 → 不 flush，队列保留）
-      // + message.error 进对话流（错误作为 assistant 消息插入，AGENTS.md 规则 #3）。
-      this.opts.send({
-        type: 'session.compacted',
-        payload: { sessionId: this.sessionId, status: 'compacted', error: ev.errorMessage },
-      })
-      this.opts.send({
-        type: 'message.error',
-        payload: { sessionId: this.sessionId, message: `上下文压缩失败：${ev.errorMessage}（可重试 /compact，上下文未压缩、agent 记忆未变）` },
-      })
-    } else {
-      // 成功（result 真值）或 aborted（无 errorMessage 真值）—— 都不带 error，前端 compacted handler flush queue。
-      // 成功额外发 compactionSummary 进对话流 + applyContextUpdate 刷新 context 用量。
-      if (ev.result) {
-        const r = ev.result as { summary?: string; tokensBefore?: number; estimatedTokensAfter?: number }
-        // [D2 closure] 恒发帧（原 `if (r.summary)` 真值门删除，conversation-turn-attribution-
-        // closure D2）：pi appendCompaction 无条件落盘（手动 :1432 / auto :1670），summary 缺失的
-        // 成功 compaction 旧逻辑 live 无消息、重开有 reducer fallback「上下文已压缩」行（登记
-        // 例外④）。下游已全就绪——shared CompactionSummary.summary 可选、registry
-        // readCompactionSummary 空串透传门（`s !== undefined`，实施审查 MF-1：truthiness 门会把
-        // '' 丢成 undefined 制造两侧内容分叉）+ 条件窄化、reducer `summary ?? fallback`——
-        // undefined 与 '' 两种形态各自两侧同值同路径（E4b/E4c 锁定）。
-        this.opts.send({
-          type: 'message.compactionSummary',
-          payload: {
-            sessionId: this.sessionId,
-            summary: r.summary,
-            tokensBefore: r.tokensBefore,
-            timestamp: Date.now(),
-          },
-        })
-        if (typeof r.estimatedTokensAfter === 'number' && r.estimatedTokensAfter > 0) {
-          // compact 后无 turn_end，context 用量不会自动刷新。用 pi 返回的估算值触发 applyContextUpdate。
-          this.opts.onContextUpdate?.(this.sessionId, {
-            inputTokens: r.estimatedTokensAfter,
-            totalTokens: r.estimatedTokensAfter,
-          })
-        }
-      }
-      this.opts.send({
-        type: 'session.compacted',
-        payload: { sessionId: this.sessionId, status: 'compacted' },
-      })
-    }
-    // 三路复位对称（SUG-新2）
-    this.opts.onCompactingStateChange?.(this.sessionId, false)
-    // occupancy #6（D2 迁移）：compaction_end（成功/失败/aborted 三路均复位）→ 'compacting-end'。
-    // 原语派生 isCompacting=false + 合并 compacting=false；上方通道同原语行，幂等去重。
-    this.opts.onOccupancyTransition?.('compacting-end')
-    // session-trace 增量腿（A33）：compaction entry 的 append 先于 compaction_end emit
-    //（时序已核实，design D4），成功/aborted 路径都补拉（aborted 无新 entry 时 sync 内部
-    // 空 delta 不广播）；failed 路径也补——追赶式拉取以 pi 侧实际状态为准。
-    this.opts.onTraceSync?.(this.sessionId, 'compaction_end')
-  }
-
-  // ── [ADR-0047] ping 探测（进程健康检测，替代事件静默检测）──
-
-  /**
-   * 启动 ping 探测循环（turn-start 调用）。
-   *
-   * 幂等：若已有循环在跑（如上一 turn 未正常 stop），先清。每次 turn-start 重置
-   * 失败计数与 warned，确保跨 turn 独立计数（本 turn 第 1 次失败 = 新一轮，不继承上 turn）。
-   */
-  private startPingLoop(): void {
-    this.stopPingLoop()
-    this.pingFailCount = 0
-    this.pingWarned = false
-    // [vitest 时序] setInterval 回调同步调度 tick；tick 内 await pingPi() 是微任务，
-    // vi.advanceTimersByTimeAsync 能同时推进宏任务（setInterval tick）与被 flush 的微任务。
-    this.pingTimer = setInterval(() => { void this.pingTick() }, PING_INTERVAL_MS)
-  }
-
-  /** 停止 ping 探测循环（turn-end / agent_end / onSilentAbort 调用）。幂等。 */
-  private stopPingLoop(): void {
-    if (this.pingTimer !== null) {
-      clearInterval(this.pingTimer)
-      this.pingTimer = null
-    }
-  }
-
-  /**
-   * 单次 ping tick：调 pingPi() 探测 pi 进程是否响应 get_state。
-   *
-   * 成功（resolve 非 undefined）→ 清零失败计数 + warned 标志（AC-8b：中途成功重置累积）。
-   * 失败（reject 或 resolve undefined）→ failCount++；达 2 次且 !warned 广播 WARN；达 3 次触发 onSilentAbort + stopPingLoop（AC-7）。
-   */
-  private async pingTick(): Promise<void> {
-    const cb = this.opts.pingPi
-    if (!cb) return // 未注入 pingPi（如组合根尚未接入）→ 不探测，不误 abort
-    let ok = false
-    try {
-      const state = await cb()
-      // resolve(undefined) 计为失败但不抛错（AC-9：client 未就绪不算崩溃信号，累积到 3 次仍 abort）
-      ok = state !== undefined
-    } catch (e) {
-      // SR5：记日志（经 logger patchConsole 落盘，架构约定 #4），不静默吞错——pi 卡死的真实诊断依赖此处
-      console.warn('[event-interpreter] ping get_state failed:', e)
-      ok = false
-    }
-    // SR1（M1 并发 bug）：await cb() 窗口最长 PING_INTERVAL_MS，期间 turn-end 可能已到来
-    // 触发 stopPingLoop（清 timer）。此时已 in-flight 的 pingTick 绝不能继续更新 failCount——
-    // 否则 turn 已正常结束却因累积达阈值误触发 onSilentAbort，广播 aborted。
-    // pingTimer === null 即被 stop，直接 return（不增计数、不广播、不 abort）。
-    if (this.pingTimer === null) return
-    if (ok) {
-      // 健康响应 → 清零（AC-8b：中途成功后需重新累积 2 次才 WARN）
-      this.pingFailCount = 0
-      this.pingWarned = false
-      return
-    }
-    this.pingFailCount += 1
-    // AC-8：连续 2 次失败广播 message.stream_warn 一次（提示性，不中断流）
-    if (this.pingFailCount === PING_WARN_FAIL_COUNT && !this.pingWarned) {
-      this.pingWarned = true
-      this.opts.send({
-        type: 'message.stream_warn',
-        payload: {
-          sessionId: this.sessionId,
-          // SR3：间隔由 PING_INTERVAL_MS 决定，不硬编码 60（常量 SSOT）
-          // 1000 = ms→s 换算常数，无语义歧义
-          // eslint-disable-next-line no-magic-numbers
-          content: `pi 进程连续 ${this.pingFailCount * (PING_INTERVAL_MS / 1000)}s 未响应健康探测，可能卡死`,
-        },
-      })
-    }
-    // ADR-0047：连续 3 次失败 → 判定 pi 进程真死 → onSilentAbort + 停止 ping（AC-7）
-    if (this.pingFailCount >= PING_FAIL_THRESHOLD) {
-      this.stopPingLoop()
-      this.opts.onSilentAbort?.({ sessionId: this.sessionId })
-    }
-  }
+  // handle() 的 compaction-start/end case 直调协作对象（纯同步、无内部状态，不牵动主循环时序）。
 }

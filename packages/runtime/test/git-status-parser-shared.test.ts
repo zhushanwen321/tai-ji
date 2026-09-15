@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { parseGitStatus, deriveCounts, parseNumstatEntries, xyToGitStatus } from '../src/infra/git/git-status-parser.js'
+import type { GitFileStatus } from '@xyz-agent/shared'
 
 describe('xyToGitStatus', () => {
   it('?? → untracked', () => {
@@ -46,9 +47,11 @@ describe('xyToGitStatus', () => {
     expect(xyToGitStatus('UU')).toBe('unmerged')
   })
 
-  it('DD / AA → unmerged (both deleted / both added)', () => {
+  it('DD / AA / DU / UD → unmerged（both deleted/added + 单侧删除）', () => {
     expect(xyToGitStatus('DD')).toBe('unmerged')
     expect(xyToGitStatus('AA')).toBe('unmerged')
+    expect(xyToGitStatus('DU')).toBe('unmerged')
+    expect(xyToGitStatus('UD')).toBe('unmerged')
   })
 })
 
@@ -228,5 +231,29 @@ describe('parseNumstatEntries', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0].add).toBeUndefined()
     expect(entries[0].del).toBe(5)
+  })
+})
+
+// ── 原版独有边界（自 git-status-parser.test.ts 并入，2026-09 测试舰队审查去重）──
+
+describe('parseGitStatus / deriveCounts / parseNumstatEntries — 原版独有边界', () => {
+  it('path with spaces preserved (NUL safety)', () => {
+    const out = '## main\0M \tmy file with spaces.ts'
+    const res = parseGitStatus(out)
+    expect(res.files[0]?.path).toBe('my file with spaces.ts')
+  })
+
+  it('mixed: AM counts staged only（X=A staged，Y=M unstaged——verify single staged 不双计）', () => {
+    const files: GitFileStatus[] = [{ path: 'p', xyCode: 'AM', status: 'added' }]
+    const c = deriveCounts(files)
+    expect(c.stagedCount).toBe(1)
+    expect(c.unstagedCount).toBe(1)
+  })
+
+  it('numstat 半二进制：单字段为 -（add 有效、del 二进制）→ add 保留、del undefined', () => {
+    const entries = parseNumstatEntries('5\t-\tmixed.bin')
+    expect(entries).toHaveLength(1)
+    expect(entries[0].add).toBe(5)
+    expect(entries[0].del).toBeUndefined()
   })
 })

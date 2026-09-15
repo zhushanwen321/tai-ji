@@ -36,7 +36,6 @@ import { INVALID_BRANCH_REGEX } from '@xyz-agent/shared'
 import type { IShellRunner } from '../ports/shell-runner.js'
 import type { IGitExecutor } from '../ports/git-executor.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
-import type { IConfigService } from '../../interfaces.js'
 import type {
   IWorktreeService,
   WorktreeCreateParams,
@@ -46,12 +45,30 @@ import type {
   WorkspaceDetectResult as WorkspaceDetectResultPort,
 } from '../ports/worktree-service.js'
 
+/**
+ * WorktreeService 实际消费的 config 读取子集（ISP 收窄，源码简化 T7）。
+ * 方法签名与 IConfigService 对应方法逐字一致——生产装配（index.ts）传完整 ConfigService
+ * 经结构化类型自动满足；测试 mock 只需 stub 这 5 个方法，不再复制 60+ 方法胖接口。
+ */
+export interface WorktreeConfigService {
+  /** 默认基分支（create 未显式指定 baseBranch 时的 fallback），默认 'origin/main'。 */
+  getDefaultBaseBranch(): string
+  /** bare-workspace 初始化脚本相对路径（不存在则跳过）。 */
+  getBareSetupScript(): string
+  /** worktree 根目录（plain-repo dedicated-dir 布局的根），默认 '~/worktrees'。 */
+  getWorktreeRootDir(): string
+  /** plain-repo setup 脚本相对路径（不存在则跳过）。 */
+  getSetupScript(): string
+  /** worktree 创建超时（秒，setup 脚本执行上限；Service 侧 ×1000 转 ms）。 */
+  getTimeout(): number
+}
+
 /** WorktreeService 依赖（全注入，可 mock）。 */
 export interface WorktreeServiceDeps {
   gitExecutor: IGitExecutor
   shellRunner: IShellRunner
   gitInfoReader: IGitInfoReader
-  configService: IConfigService
+  configService: WorktreeConfigService
   /** node:fs 子集（测试用 vi.doMock 后传入） */
   fs: {
     existsSync: (path: string) => boolean

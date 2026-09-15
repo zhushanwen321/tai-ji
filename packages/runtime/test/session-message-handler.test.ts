@@ -27,6 +27,7 @@ function makeHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> 
     getHistory: vi.fn().mockResolvedValue([]),
     getSummary: vi.fn().mockReturnValue(undefined),
     restoreSession: vi.fn().mockResolvedValue({ id: 's1' }),
+    deleteByCwd: vi.fn().mockResolvedValue({ cwd: '', deleted: [], failed: [] }),
     ...sessionOverrides,
   }
   const ctx = {
@@ -166,6 +167,64 @@ describe('SessionMessageHandler — error envelope 回归', () => {
     it('forceQuit 抛错 → 异常上抛（由 server.ts 外层 catch 转 sendError），不 reply', async () => {
       const { cap, handler } = makeHandler({ forceQuit: vi.fn().mockRejectedValue(new Error('kill failed')) })
       await expect(handler.handleSessionMessage(msg('session.forceQuit', { sessionId: 's1' }), WS)).rejects.toThrow('kill failed')
+      expect(cap.replies).toHaveLength(0)
+    })
+  })
+
+  // ── session.deleteByCwd（自 session-message-handler-deletebycwd.test.ts 并入）────────
+  // D6a（integrity-hardening §3.6）后契约：handler 不再逐个直接调 clearExtensionTimeoutsForSession
+  // ——挂起 UI 请求清理已汇聚到 onSessionDestroyed 回调（见 server-destroyed-converged-cleanup.test.ts）。
+  // 本 describe 锁定路由行为（deleteByCwd 调用 / reply / broadcast / invalid_payload 守卫）。
+  describe('session.deleteByCwd', () => {
+    it('W1TC4 正常 deleteByCwd + reply + broadcastSessionList（清理经 onSessionDestroyed 汇聚点，不经 handler）', async () => {
+      const { cap, handler, ctx } = makeHandler({
+        deleteByCwd: vi.fn().mockResolvedValue({ cwd: '/p', deleted: ['s1', 's3'], failed: [] }),
+      })
+      await handler.handleSessionMessage(msg('session.deleteByCwd', { cwd: '/p' }), WS)
+
+      // deleteByCwd 调用参数透传
+      expect(ctx.sessionService.deleteByCwd).toHaveBeenCalledWith('/p')
+      // reply 1 次，payload 透传 BatchDeleteResult
+      expect(cap.replies).toHaveLength(1)
+      expect(cap.replies[0]).toMatchObject({
+        id: 'm1',
+        type: 'session.deletedByCwd',
+        payload: { cwd: '/p', deleted: ['s1', 's3'], failed: [] },
+      })
+      // broadcastSessionList 1 次
+      expect(ctx.broadcastSessionList).toHaveBeenCalledTimes(1)
+    })
+
+    it('W1TC5 部分失败 → reply 含 failed 数组（清理语义同上，经汇聚点）', async () => {
+      const { cap, handler, ctx } = makeHandler({
+        deleteByCwd: vi.fn().mockResolvedValue({
+          cwd: '/p',
+          deleted: ['s1'],
+          failed: [{ sessionId: 's2', error: 'EPERM' }],
+        }),
+      })
+      await handler.handleSessionMessage(msg('session.deleteByCwd', { cwd: '/p' }), WS)
+
+      expect(cap.replies[0].payload).toEqual({
+        cwd: '/p',
+        deleted: ['s1'],
+        failed: [{ sessionId: 's2', error: 'EPERM' }],
+      })
+      expect(ctx.broadcastSessionList).toHaveBeenCalledTimes(1)
+    })
+
+    it('W1TC6 空 cwd → sendError invalid_payload（不调 deleteByCwd）', async () => {
+      const { cap, handler, ctx } = makeHandler({
+        deleteByCwd: vi.fn().mockResolvedValue({ cwd: '', deleted: [], failed: [] }),
+      })
+      await handler.handleSessionMessage(msg('session.deleteByCwd', { cwd: '' }), WS)
+
+      expect(ctx.sessionService.deleteByCwd).not.toHaveBeenCalled()
+      expect(cap.errors[0]).toMatchObject({
+        id: 'm1',
+        code: 'invalid_payload',
+        message: 'session.deleteByCwd requires a non-empty "cwd" string',
+      })
       expect(cap.replies).toHaveLength(0)
     })
   })

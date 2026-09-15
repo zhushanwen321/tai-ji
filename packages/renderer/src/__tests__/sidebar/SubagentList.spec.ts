@@ -27,7 +27,7 @@ function makeRecord(overrides: Partial<SubagentRecord> = {}): SubagentRecord {
     agent: 'reviewer',
     slug: 'review-changes',
     task: 'Review the code changes',
-    status: 'done',
+    status: 'idle', // [U6] 两态词表（legacy done 已收窄出类型）；stopReason 由用例按形态注入
     turns: 5,
     totalTokens: 10000,
     elapsedSeconds: 60,
@@ -74,7 +74,7 @@ describe('SubagentList 布局结构（滚动修复）', () => {
 })
 
 describe('SubagentList', () => {
-  it('渲染 subagent 卡片列表（默认视图含 legacy 终态——可见性翻转后 done 不再隐藏）', () => {
+  it('渲染 subagent 卡片列表（默认视图含 idle 终态——可见性翻转后不再隐藏）', () => {
     const records = [
       makeRecord({ subagentId: 'run-a-1', agent: 'reviewer', task: 'Review code', turns: 5, totalTokens: 10000, elapsedSeconds: 60 }),
       makeRecord({ subagentId: 'run-b-2', agent: 'worker', task: 'Fix bug', turns: 10, totalTokens: 20000, elapsedSeconds: 120 }),
@@ -131,8 +131,8 @@ describe('SubagentList', () => {
     expect(wrapper.find('[data-testid="subagent-card-spinner"]').exists()).toBe(false)
   })
 
-  it('done 状态不显示 spinner，显示绿点', () => {
-    const records = [makeRecord({ status: 'done', subagentId: 'run-done-1' })]
+  it('[U6] one-shot 完成形态（idle + chatMode:false + completed）不显示 spinner，显示绿点', () => {
+    const records = [makeRecord({ status: 'idle', chatMode: false, stopReason: 'completed', subagentId: 'run-done-1' })]
 
     const wrapper = mountList(records)
 
@@ -144,8 +144,8 @@ describe('SubagentList', () => {
     expect(dot.exists()).toBe(true)
   })
 
-  it('crashed 状态显示 danger 色点（与 failed 同为异常终态，不落 default bg-accent）', () => {
-    const records = [makeRecord({ status: 'crashed', subagentId: 'run-crash-1' })]
+  it('[U6] failed 形态（idle + stopReason=failed，含归一后的 crashed）显示 danger 色点', () => {
+    const records = [makeRecord({ status: 'idle', stopReason: 'failed', subagentId: 'run-crash-1' })]
 
     const wrapper = mountList(records)
 
@@ -158,18 +158,19 @@ describe('SubagentList', () => {
     expect(dot.exists()).toBe(true)
   })
 
-  // ── v4 B-1 closed 统一终态：按 closedReason/error 派生状态点颜色（legacy 只读兼容）──
+  // ── [U6] v4 closed 终态经 runtime 归一（idle + closedReason 保留 + deriveClosedDisplay
+  // 派生 stopReason）→ 五行表等价显示（A4 门：与收窄前三分一致）──
 
-  it('closed + closedReason=gc + error → danger 色点（v4 真实失败终态）', () => {
-    const records = [makeRecord({ status: 'closed', closedReason: 'gc', error: 'Model timeout', subagentId: 'run-closed-fail' })]
+  it('[U6] closed(gc+error) 归一形态（idle + closedReason + stopReason:failed）→ danger 色点', () => {
+    const records = [makeRecord({ status: 'idle', closedReason: 'gc', stopReason: 'failed', error: 'Model timeout', subagentId: 'run-closed-fail' })]
     const wrapper = mountList(records)
 
     expect(wrapper.find('[data-testid="subagent-card-spinner"]').exists()).toBe(false)
     expect(wrapper.find('.bg-danger').exists()).toBe(true)
   })
 
-  it('closed + closedReason=cancelled → 中性色点（不落 danger/success）', () => {
-    const records = [makeRecord({ status: 'closed', closedReason: 'cancelled', subagentId: 'run-closed-cancel' })]
+  it('[U6] closed(cancelled) 归一形态（idle + stopReason:cancelled）→ 中性色点（不落 danger/success）', () => {
+    const records = [makeRecord({ status: 'idle', closedReason: 'cancelled', stopReason: 'cancelled', subagentId: 'run-closed-cancel' })]
     const wrapper = mountList(records)
 
     expect(wrapper.find('.bg-danger').exists()).toBe(false)
@@ -177,12 +178,12 @@ describe('SubagentList', () => {
     expect(wrapper.find('.bg-neutral-dim').exists()).toBe(true)
   })
 
-  it('closed 自然完成（parent-new 级联关闭等）→ success 色点', () => {
-    const records = [makeRecord({ status: 'closed', closedReason: 'parent-new', subagentId: 'run-closed-ok' })]
+  it('[U6] closed 自然完成（parent-new 级联关闭）归一形态（idle + completed + one-shot 形态位）→ success 色点', () => {
+    const records = [makeRecord({ status: 'idle', closedReason: 'parent-new', stopReason: 'completed', chatMode: false, subagentId: 'run-closed-ok' })]
     const wrapper = mountList(records)
 
     expect(wrapper.find('.bg-success').exists()).toBe(true)
-    // 历史 bug 回归防护：closed 不落 default bg-accent（成功/失败语义丢失）
+    // 历史 bug 回归防护：不落 accent 兜底（成功语义丢失）
     expect(wrapper.find('.bg-accent').exists()).toBe(false)
   })
 
@@ -256,18 +257,17 @@ describe('SubagentList', () => {
   })
 })
 
-// ── statusDotClass 状态点映射（U8b：两态三分支 + legacy 五值只读兼容）──
+// ── statusDotClass 状态点映射（[two-state-convergence U6] 全表坍缩五行终态）──
 //
-// 展示三态主分类（G2 + GUI 快修「列表三态」）：
+// 展示语义（G2 + GUI 快修「列表三态」；runtime 归一层保证 renderer 永不见 legacy 值）：
 //   1. running 真在跑           → spinner（Loader2 动画，无静态圆点）
-//   2. running one-shot 轮终投影 → bg-success 绿点（result 有值且 chatMode 显式 false）
-//   3. running 等续聊/孤儿兜底    → bg-accent opacity-60 半透明 accent 点
-//   3b. running 失败轮（A-lite stopReason=failed，markRoundIdle 保持 running-resumable）
-//                              → bg-danger 红点（优先于 done 绿/waiting 半透明）
-//   4. idle 失败（stopReason=failed）→ bg-danger 红点
-//   5. idle 中断（stopReason=interrupted*）→ bg-neutral-dim opacity-50 中性点
-//   6. idle 已收口（completed/reopened/无停因）→ bg-success 绿点
-//   7. legacy：done→绿 / failed,crashed→红 / cancelled→灰 / closed→deriveClosedDisplay 派生
+//   5. running + stopReason=failed（W4 纳管态）→ bg-danger 红点
+//   2. idle 失败（stopReason=failed）→ bg-danger 红点
+//   3. idle 中断（stopReason=interrupted*）→ bg-neutral-dim opacity-50 中性点
+//   4. idle chat 等续聊/孤儿兜底（chatMode true/缺省）→ bg-accent opacity-60 半透明点
+//   6. idle 其余（one-shot completed/reopened/无停因且 chatMode=false）→ bg-success 绿点
+//   其余 running 形态（无 stopReason 信号的结果残留等理论形态）→ statusDotClass 兜底
+//   bg-accent 实心（防无色；生产链路由 runtime 归一层消化，不进本表）
 describe('SubagentList statusDotClass 状态点映射', () => {
   /** 单卡片挂载，返回 dot 元素与 spinner 探测（隔离断言，防多卡片 class 串扰） */
   function mountDot(overrides: Partial<SubagentRecord>) {
@@ -278,30 +278,43 @@ describe('SubagentList statusDotClass 状态点映射', () => {
     }
   }
 
-  it('态1 running 真在跑（无 result、resumable 缺省）→ spinner，无静态圆点', () => {
+  it('态1 running 真在跑（无 result）→ spinner，无静态圆点', () => {
     const { dot, spinner } = mountDot({ status: 'running', subagentId: 'dot-run-1' })
     expect(spinner.exists()).toBe(true)
     expect(dot.exists()).toBe(false)
   })
 
-  it('态2 running one-shot 轮终投影（result 有值 + chatMode 显式 false）→ bg-success 绿点（非 spinner 非 accent）', () => {
+  it('态2 [two-state-convergence U4] 翻边 one-shot 轮终（idle + chatMode 显式 false）→ bg-success 绿点（非 spinner 非 accent）', () => {
     const { dot, spinner } = mountDot({
-      status: 'running',
-      result: '本轮产出正文',
+      status: 'idle',
       chatMode: false,
+      stopReason: 'completed',
       subagentId: 'dot-done-proj-1',
     })
     expect(spinner.exists()).toBe(false)
     expect(dot.exists()).toBe(true)
     expect(dot.classes()).toContain('bg-success')
     expect(dot.classes()).not.toContain('bg-accent')
-  })
-
-  it('态3a running 等续聊（result 有值 + chatMode true）→ bg-accent opacity-60 半透明点（区别于 done 绿点）', () => {
-    const { dot, spinner } = mountDot({
+    // A-lite 轮终残留（running + result + completed——归一层第五归一未触发的理论形态）：
+    // 五行表不命中 → statusDotClass 兜底实心 accent（生产链路该形态已被 runtime 归一为 idle）
+    const legacyBridge = mountDot({
       status: 'running',
       result: '本轮产出正文',
+      chatMode: false,
+      stopReason: 'completed',
+      subagentId: 'dot-done-proj-legacy-1',
+    })
+    expect(legacyBridge.spinner.exists()).toBe(false)
+    expect(legacyBridge.dot.classes()).toContain('bg-accent')
+    expect(legacyBridge.dot.classes()).not.toContain('bg-success')
+  })
+
+  it('态3a [two-state-convergence U4] 翻边 chat 轮终（idle + chatMode true）→ bg-accent opacity-60 半透明点（等续聊，区别于 done 绿点）', () => {
+    const { dot, spinner } = mountDot({
+      status: 'idle',
+      result: '本轮产出正文',
       chatMode: true,
+      stopReason: 'completed',
       subagentId: 'dot-wait-chat-1',
     })
     expect(spinner.exists()).toBe(false)
@@ -309,35 +322,65 @@ describe('SubagentList statusDotClass 状态点映射', () => {
     expect(dot.classes()).toContain('bg-accent')
     expect(dot.classes()).toContain('opacity-60')
     expect(dot.classes()).not.toContain('bg-success')
+    // A-lite chat 轮终残留（running + result + completed）：兜底实心 accent（无 opacity-60）
+    const legacyBridge = mountDot({
+      status: 'running',
+      result: '本轮产出正文',
+      chatMode: true,
+      stopReason: 'completed',
+      subagentId: 'dot-wait-chat-legacy-1',
+    })
+    expect(legacyBridge.dot.classes()).toContain('bg-accent')
+    expect(legacyBridge.dot.classes()).not.toContain('opacity-60')
   })
 
-  it('态3b running + resumable=true（无活进程驱动的 running）→ 半透明 accent 点，不算真在跑', () => {
-    const { dot, spinner } = mountDot({ status: 'running', resumable: true, subagentId: 'dot-wait-resumable-1' })
-    expect(spinner.exists()).toBe(false)
-    expect(dot.classes()).toContain('bg-accent')
-    expect(dot.classes()).toContain('opacity-60')
+  it('态3b [two-state-convergence U5] 孤儿兜底（idle + chatMode 缺省）→ accent-60 半透明点（[U5/D4] resumable 维度退役，idle 直读）；桥接 running 存量落实心 accent', () => {
+    // 翻边后孤儿纠偏产物：idle + chatMode 缺省 → 保守归 chat（accent-60）
+    const flipped = mountDot({ status: 'idle', subagentId: 'dot-wait-resumable-1' })
+    expect(flipped.spinner.exists()).toBe(false)
+    expect(flipped.dot.classes()).toContain('bg-accent')
+    expect(flipped.dot.classes()).toContain('opacity-60')
+    // A-lite 轮终残留（running + result + completed）：兜底实心 accent（生产链路已由
+    // runtime 第五归一消化为 idle——此处仅钉兜底防无色行为）
+    const legacyBridge = mountDot({ status: 'running', result: '本轮产出正文', stopReason: 'completed', subagentId: 'dot-wait-resumable-legacy-1' })
+    expect(legacyBridge.spinner.exists()).toBe(false)
+    expect(legacyBridge.dot.classes()).toContain('bg-accent')
+    expect(legacyBridge.dot.classes()).not.toContain('opacity-60')
   })
 
-  it('态3c running + result 有值但 chatMode 缺省（无法确认非 chat）→ 保守落等待态半透明点，不宣告 done', () => {
-    const { dot, spinner } = mountDot({ status: 'running', result: '产出', subagentId: 'dot-wait-default-1' })
-    expect(spinner.exists()).toBe(false)
-    expect(dot.classes()).toContain('bg-accent')
-    expect(dot.classes()).toContain('opacity-60')
+  it('态3c [two-state-convergence U4] idle + chatMode 缺省（legacy 轮终，无法确认非 chat）→ 保守落等续聊半透明点，不宣告 done；桥接 running 存量落实心 accent', () => {
+    const flipped = mountDot({ status: 'idle', result: '产出', subagentId: 'dot-wait-default-1' })
+    expect(flipped.spinner.exists()).toBe(false)
+    expect(flipped.dot.classes()).toContain('bg-accent')
+    expect(flipped.dot.classes()).toContain('opacity-60')
+    const legacyBridge = mountDot({ status: 'running', result: '产出', stopReason: 'completed', subagentId: 'dot-wait-default-legacy-1' })
+    expect(legacyBridge.dot.classes()).toContain('bg-accent')
+    expect(legacyBridge.dot.classes()).not.toContain('opacity-60')
   })
 
-  it('态4 idle + stopReason=failed → bg-danger 红点（投影契约锁定：写面已落地（markRoundIdle A-lite）——失败轮实际落 running-resumable 形态，见态4b）', () => {
+  it('态4 idle + stopReason=failed → bg-danger 红点（投影契约锁定：失败轮轮终落 idle + stopReason=failed，见态4b）', () => {
     const { dot } = mountDot({ status: 'idle', stopReason: 'failed', subagentId: 'dot-idle-failed-1' })
     expect(dot.classes()).toContain('bg-danger')
     expect(dot.classes()).not.toContain('bg-success')
   })
 
-  it('态4b running-resumable 失败轮（A-lite markRoundIdle 真实形态：stopReason=failed 下行）→ bg-danger 红点（优先于 done 绿/waiting 半透明）', () => {
+  it('态4b [U6 第五行] running + stopReason=failed（W4 纳管态）→ bg-danger 红点（spinner 判据已排除——stopReason 子句对冲生效后走静态圆点，R5 补行兜住失败信息）', () => {
+    // W4 新型（无 result——[U5/D4] adoptEngineDeath：running+failed+result=∅）：
+    // isRunningProjection = running && stopReason===undefined → false → 静态圆点，
+    // 五行表第一行（running+failed 红）承接——失败信息不落 accent 兜底丢失
+    const w4 = mountDot({
+      status: 'running',
+      stopReason: 'failed',
+      subagentId: 'dot-rf-w4-1',
+    })
+    expect(w4.spinner.exists()).toBe(false)
+    expect(w4.dot.exists()).toBe(true)
+    expect(w4.dot.classes()).toContain('bg-danger')
     // chat 失败轮（chatMode true：等续聊形态，不再落半透明 accent 点）
     const chat = mountDot({
       status: 'running',
       result: 'round did not complete: boom',
       chatMode: true,
-      resumable: true,
       stopReason: 'failed',
       subagentId: 'dot-rf-chat-1',
     })
@@ -371,17 +414,26 @@ describe('SubagentList statusDotClass 状态点映射', () => {
     expect(dot.classes()).toContain('opacity-50')
   })
 
-  it('态6 idle + stopReason=completed / 无停因 → bg-success 绿点（已收口）', () => {
-    const completed = mountDot({ status: 'idle', stopReason: 'completed', subagentId: 'dot-idle-done-1' })
+  it('态6 [two-state-convergence U4] idle one-shot 完成形态（stopReason=completed + chatMode:false / 无停因）→ bg-success 绿点；chatMode 缺省保守归 chat 落 accent-60', () => {
+    // 已收口绿点 = one-shot 形态（chatMode 显式 false——翻边后等续聊/缺省形态优先落 accent-60 分支）
+    const completed = mountDot({ status: 'idle', stopReason: 'completed', chatMode: false, subagentId: 'dot-idle-done-1' })
     expect(completed.dot.classes()).toContain('bg-success')
-    const noReason = mountDot({ status: 'idle', subagentId: 'dot-idle-noreason-1' })
+    const noReason = mountDot({ status: 'idle', chatMode: false, subagentId: 'dot-idle-noreason-1' })
     expect(noReason.dot.classes()).toContain('bg-success')
+    // chatMode 缺省（legacy 存量）保守归 chat——绿点兜底被 accent-60 分支拦截（U4 最小展示子集）
+    const legacyChat = mountDot({ status: 'idle', stopReason: 'completed', subagentId: 'dot-idle-legacy-chat-1' })
+    expect(legacyChat.dot.classes()).toContain('bg-accent')
+    expect(legacyChat.dot.classes()).toContain('opacity-60')
+    expect(legacyChat.dot.classes()).not.toContain('bg-success')
   })
 
-  it('态7 legacy done → bg-success 绿点；failed → bg-danger 红点；cancelled → 中性点', () => {
-    expect(mountDot({ status: 'done', subagentId: 'dot-legacy-done-1' }).dot.classes()).toContain('bg-success')
-    expect(mountDot({ status: 'failed', error: 'boom', subagentId: 'dot-legacy-failed-1' }).dot.classes()).toContain('bg-danger')
-    const cancelled = mountDot({ status: 'cancelled', subagentId: 'dot-legacy-cancel-1' })
+  it('态7 [U6] legacy 值归一后形态：done→绿 / failed→红 / cancelled→中性点（A4 门等价显示）', () => {
+    // done 经归一：idle + stopReason:'completed' + one-shot 形态位（chatMode=false 合成）
+    expect(mountDot({ status: 'idle', stopReason: 'completed', chatMode: false, subagentId: 'dot-legacy-done-1' }).dot.classes()).toContain('bg-success')
+    // failed/crashed 经归一：idle + stopReason:'failed'
+    expect(mountDot({ status: 'idle', stopReason: 'failed', error: 'boom', subagentId: 'dot-legacy-failed-1' }).dot.classes()).toContain('bg-danger')
+    // cancelled 经归一：idle + stopReason:'cancelled'（interrupted 族）
+    const cancelled = mountDot({ status: 'idle', stopReason: 'cancelled', subagentId: 'dot-legacy-cancel-1' })
     expect(cancelled.dot.classes()).toContain('bg-neutral-dim')
     expect(cancelled.dot.classes()).toContain('opacity-50')
   })
@@ -442,7 +494,7 @@ describe('SubagentList 二级筛选接线', () => {
     const records = [
       makeRecord({ subagentId: 'live-1', agent: 'runner', status: 'running' }),
       makeRecord({ subagentId: 'idle-1', agent: 'researcher', status: 'idle', stopReason: 'completed' }),
-      makeRecord({ subagentId: 'end-1', agent: 'reviewer', status: 'done' }),
+      makeRecord({ subagentId: 'end-1', agent: 'reviewer', stopReason: 'completed' }),
     ]
     const wrapper = mountList(records)
 

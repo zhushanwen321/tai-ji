@@ -24,6 +24,7 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -59,31 +60,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn(), selectSession: vi.fn() }),
 }))
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 
 import ActivityStrip from '../ActivityStrip.vue'
 import MessageStream from '../../MessageStream.vue'

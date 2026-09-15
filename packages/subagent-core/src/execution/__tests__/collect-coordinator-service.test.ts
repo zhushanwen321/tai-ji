@@ -282,8 +282,9 @@ describe("collectCoordinator service integration (U2)", () => {
 
     // 观察者形态：主 session 落盘的末条 subagent-record entry 带 batchFinalized=true +
     // collectMode=sync（reportSubagentRecord 直投影 SubagentRecord，不经 recordToSubagent）。
-    // status 不在此锁：one-shot 成功链走 SP-5 resumable 回退（record 留内存 running 态，
-    // 真实形态），E1 排除判据只依赖 collectMode+batchFinalized 两字段。
+    // status 不在此锁：one-shot 成功链走 SP-5 收口（[two-state-convergence U4/D3]
+    // 翻边后轮终落 idle，record 留内存可续聊），E1 排除判据只依赖
+    // collectMode+batchFinalized 两字段。
     const marked = pi.appendEntry.mock.calls
       .filter((c) => c[0] === "subagent-record")
       .map((c) => c[1] as Record<string, unknown>)
@@ -291,7 +292,8 @@ describe("collectCoordinator service integration (U2)", () => {
     expect(marked).toHaveLength(1);
     expect(marked[0]?.["collectMode"]).toBe("sync");
     expect(marked[0]?.["result"]).toBe("ok");
-    expect(marked[0]?.["resumable"]).toBe(true); // SP-5 成功回退态（真链形态保真）
+    expect(marked[0]?.["status"]).toBe("idle"); // SP-5 轮终收口态（真链形态保真）
+    expect(marked[0]?.["resumable"]).toBeUndefined(); // 翻边后 resumable 不再写
   });
 
   it("flush 屏障：manifest 写完成先于 notifyBatch 写账（通知可达 ⇒ 索引就位，构造性保证）", async () => {

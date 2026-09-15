@@ -15,7 +15,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { COLLECT_SCAN_LIMIT, CollectCoordinator } from "../assembly/collect-coordinator.ts";
+import { COLLECT_SCAN_LIMIT, CollectCoordinator, isCollectPending } from "../assembly/collect-coordinator.ts";
 import type { CollectCoordinatorDeps } from "../assembly/collect-coordinator.ts";
 import type { BgNotifyRecord } from "../notify/notifier.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
@@ -123,6 +123,58 @@ function makeHarness(storeRecords: SubagentRecord[] = []): Harness {
 async function settleFlush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
+
+// ============================================================
+// [two-state-convergence U4/D4 → U5 翻转] isCollectPending 判据 SSOT 形态矩阵
+// ============================================================
+// 门语义（设计 D4 行为级第 1 行 / U5 批行为翻转登记）：resumable 字段退役后判据
+// 退化为 status 直读——真在跑 → 挂起等待；翻边轮终（idle，U4 写面权威词）→ 补发；
+// W4 新态（running + stopReason=failed + result=∅，adoptEngineDeath 产物）→ 翻为
+// 挂起等待（readopt settle → settled 边沿重扫 → 补发，SETTLED_RESCAN_LIMIT 达限
+// 退化为下次 session_start）。矩阵同时钉住 SSOT 双消费方（hasRunningSync 主路径 +
+// E1 恢复扫描过滤器）共用同一函数——两处各断言一次同一形态表（防单点回退内联）。
+
+describe("[P-collect ⛔] isCollectPending 判据 SSOT 形态矩阵（two-state-convergence U5 翻转）", () => {
+  it("形态①真在跑（running）→ true（闭合等待/补发挂起）", () => {
+    expect(isCollectPending({ status: "running" })).toBe(true);
+  });
+
+  it("形态②翻边轮终（idle）→ false（status 子句排除——U4 写面权威词）", () => {
+    expect(isCollectPending({ status: "idle" })).toBe(false);
+  });
+
+  it("形态③W4 新态（running + stopReason=failed，adoptEngineDeath）→ true（U5 翻转挂起——readopt 闭合链承接）", () => {
+    expect(isCollectPending({ status: "running" })).toBe(true);
+  });
+
+  it("closed 终态（idle + closedReason）→ false（status 子句吸收旧 closed 子句）", () => {
+    expect(isCollectPending({ status: "idle" })).toBe(false);
+  });
+});
+
+describe("[P-collect ⛔] 协调器主路径（hasRunningSync）对各形态的 route 行为", () => {
+  it("真在跑 sync 成员阻止闭合（buffered）；翻边轮终 sync 成员不阻止（flushed）", async () => {
+    const h = makeHarness([
+      makeStoreRec({ id: "sa-running", collectMode: "sync", status: "running" }),
+    ]);
+    expect(h.coordinator.route(makeRec({ id: "sa-flip", collectMode: "sync" }))).toBe("sync-buffered");
+
+    // 翻边轮终形态：running 成员轮终翻 idle → 闭合放行
+    const h2 = makeHarness([
+      makeStoreRec({ id: "sa-flipped", collectMode: "sync", status: "idle" }),
+    ]);
+    expect(h2.coordinator.route(makeRec({ id: "sa-flip", collectMode: "sync" }))).toBe("sync-flushed");
+    await settleFlush();
+    expect(h2.flushBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("W4 新态 sync 成员（running + stopReason=failed）阻止闭合（U5 翻转：挂起等 readopt settle）", async () => {
+    const h = makeHarness([
+      makeStoreRec({ id: "sa-w4-new", collectMode: "sync", status: "running", stopReason: "failed" }),
+    ]);
+    expect(h.coordinator.route(makeRec({ id: "sa-x", collectMode: "sync" }))).toBe("sync-buffered");
+  });
+});
 
 // ============================================================
 // async 路由（字节不变语义）

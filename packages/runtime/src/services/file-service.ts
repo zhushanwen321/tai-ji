@@ -85,6 +85,42 @@ interface CachedIgnoreMatcher {
   readonly matcher: IgnoreMatcher
 }
 
+/**
+ * 超时包装（NFR ④K-2，源码简化 T9 从 FileService 私有方法提取为可直测独立单元）：
+ * promise 与定时器赛跑，超时 → reject FileError('timeout')，message 携带 label 定位操作。
+ * FileService.callFs 是唯一生产消费点（READ_TIMEOUT_MS 全局统一超时）；导出供测试直测
+ * 超时触发 / clearTimeout 无泄漏 / FileError 形状（此前私有不可直测，测试被迫本地复制副本）。
+ *
+ * 实现用单 Promise 构造器 + 手动 settle（非 Promise.race）：定时器回调直接调外层 reject，
+ * 不产生被 reject 的中间 timeout promise —— 避免「落败 promise 异步 reject 触发
+ * unhandledRejection」的竞态（Promise.race + setTimeout 超时模式的已知坑）。
+ * promise settle 后立即 clearTimeout，无悬挂定时器。
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new FileError('timeout', `${label} timed out after ${ms}ms`))
+    }, ms)
+    promise.then(
+      (v) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
 /** 空 matcher 单例（无 .gitignore / 内容为空时共享，matchPath 永远 false）。 */
 const EMPTY_MATCHER: IgnoreMatcher = compileIgnoreRules('')
 
@@ -115,7 +151,7 @@ export class FileService implements IFileService {
     // 越界守门（NFR-AC-S2 统一守门，cwd 自身恒在子树内，守门为一致性）
     if (!isUnderOrEqual(cwd, cwd)) throw new FileError('out_of_cwd', cwd)
     const matcher = await this.loadMatcher(cwd)
-    const topEntries = await this.callFs(() => this.opts.executor.listDir(cwd))
+    const topEntries = await this.callFs(() => this.opts.executor.listDir(cwd), 'listDir')
     const topNodes: FileNode[] = []
     for (const e of topEntries) {
       const node = this.entryToNode(e, '') // 顶层 relParent='' → path=name
@@ -156,8 +192,8 @@ export class FileService implements IFileService {
     // 防 `../../etc/passwd` 相对穿越与 `~/...` / `/etc/...` 绝对路径越界 → 越界抛 FileError('out_of_cwd')。
     // cwd 外文件读取（BC-3 skill 文件预览）走 readFileFromWhitelist（自带 allowedReadDirs 白名单）。
     if (!isUnderOrEqual(cwd, resolvePath_)) throw new FileError('out_of_cwd', path)
-    const statResult = await this.callFs(() => this.opts.executor.stat(resolvePath_))
-    const full = await this.callFs(() => this.opts.executor.readFile(resolvePath_))
+    const statResult = await this.callFs(() => this.opts.executor.stat(resolvePath_), 'stat')
+    const full = await this.callFs(() => this.opts.executor.readFile(resolvePath_), 'readFile')
     if (statResult.size > MAX_FILE_SIZE) {
       return { content: full.slice(0, MAX_FILE_SIZE), truncated: true }
     }
@@ -178,8 +214,8 @@ export class FileService implements IFileService {
     if (!allowed.some((dir) => isUnderOrEqual(dir, absPath))) {
       throw new FileError('out_of_cwd', `路径不在允许的 skill 目录内: ${path}`)
     }
-    const statResult = await this.callFs(() => this.opts.executor.stat(absPath))
-    const full = await this.callFs(() => this.opts.executor.readFile(absPath))
+    const statResult = await this.callFs(() => this.opts.executor.stat(absPath), 'stat')
+    const full = await this.callFs(() => this.opts.executor.readFile(absPath), 'readFile')
     if (statResult.size > MAX_FILE_SIZE) {
       return { content: full.slice(0, MAX_FILE_SIZE), truncated: true }
     }
@@ -240,7 +276,7 @@ export class FileService implements IFileService {
     // 直接 stat 会 ENOENT 误判 not_found；归一后与 session 路（requireCwd 给出的规范绝对路径）同域
     const normalizedCwd = resolvePath(expandHome(cwd))
     // cwd 准入（设计 D6）：stat 校验目录存在性——ENOENT 经 callFs 分类为 not_found；非目录显式 not_found
-    const stat = await this.callFs(() => this.opts.executor.stat(normalizedCwd))
+    const stat = await this.callFs(() => this.opts.executor.stat(normalizedCwd), 'stat')
     if (stat == null || stat.type !== 'dir') {
       throw new FileError('not_found', `cwd 不存在或不是目录: ${normalizedCwd}`)
     }
@@ -292,7 +328,7 @@ export class FileService implements IFileService {
       }
       let entries: FsEntry[]
       try {
-        entries = await this.callFs(() => this.opts.executor.listDir(absPath, { withSize: false }))
+        entries = await this.callFs(() => this.opts.executor.listDir(absPath, { withSize: false }), 'listDir')
       } catch {
         // per-directory 容错：单目录 EACCES/ENOENT/timeout 跳过，不中断整体递归
         return
@@ -371,7 +407,7 @@ export class FileService implements IFileService {
     relParent: string,
     matcher: IgnoreMatcher,
   ): Promise<FileNode[]> {
-    const entries = await this.callFs(() => this.opts.executor.listDir(absPath))
+    const entries = await this.callFs(() => this.opts.executor.listDir(absPath), 'listDir')
     const nodes: FileNode[] = []
     for (const e of entries) {
       const node = this.entryToNode(e, relParent)
@@ -516,52 +552,19 @@ export class FileService implements IFileService {
 
   /**
    * 执行一次 executor 调用：超时包装（NFR ④K-2）+ 错误分类（EACCES/ENOENT → FileError）。
-   * - 超时 → FileError('timeout')（withTimeout 已抛）
+   * - 超时 → FileError('timeout')（withTimeout 已抛，label 定位是哪个 fs 操作）
    * - EACCES/EPERM → FileError('permission_denied')
    * - ENOENT → FileError('not_found')
    * - 其余（含已分类的 FileError）→ 透传
    */
-  private async callFs<T>(op: () => Promise<T>): Promise<T> {
+  private async callFs<T>(op: () => Promise<T>, label: string): Promise<T> {
     try {
-      return await this.withTimeout(op)
+      return await withTimeout(op(), READ_TIMEOUT_MS, label)
     } catch (e) {
       const code = (e as { code?: string } | null)?.code
       if (code === 'EACCES' || code === 'EPERM') throw new FileError('permission_denied')
       if (code === 'ENOENT') throw new FileError('not_found')
       throw e // FileError('timeout') 或未知错误透传
     }
-  }
-
-  /**
-   * 超时包装（NFR ④K-2）：op() 与定时器赛跑，超时 → reject FileError('timeout')。
-   *
-   * 实现用单 Promise 构造器 + 手动 settle（非 Promise.race）：定时器回调直接调外层 reject，
-   * 不产生被 reject 的中间 timeout promise —— 避免「落败 promise 异步 reject 触发
-   * unhandledRejection」的竞态（Promise.race + setTimeout 超时模式的已知坑）。
-   * op() 的 resolve/reject 在外层 settle 后已 clearTimeout，无悬挂 promise。
-   */
-  private withTimeout<T>(op: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      let settled = false
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        reject(new FileError('timeout'))
-      }, READ_TIMEOUT_MS)
-      op().then(
-        (v) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          resolve(v)
-        },
-        (e) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          reject(e)
-        },
-      )
-    })
   }
 }

@@ -28,8 +28,31 @@ import type { GuiComponent } from '@xyz-agent/extension-protocol'
 import type { ToolEntry } from './plugin-types.js'
 
 const MAX_FIND_FILES_RESULTS = 1000
+/** MAX_FIND_FILES_RESULTS 导出供测试断言上限语义（T10：SUT 改上限时测试同步红）。 */
+export { MAX_FIND_FILES_RESULTS }
 const DEFAULT_STATUS_BAR_PRIORITY = 100
 const MIN_MODEL_PARTS = 2
+
+/**
+ * workspace.findFiles 核心（源码简化 T10 从内联 handler 闭包提取为可直测纯函数）：
+ * fast-glob 按 pattern 搜 cwd 下文件，忽略 node_modules/.git，返回绝对路径，
+ * 截断到 MAX_FIND_FILES_RESULTS（DoS 兜底）。任何错误（glob 非法 pattern 等）
+ * 吞噬为空数组——handler 侧不向插件暴露 fs 异常细节。
+ * 导出供 plugin-findfiles.test.ts 直测（此前内联闭包不可直测，测试被迫本地复制实现）。
+ */
+export async function findFiles(pattern: string, cwd: string): Promise<string[]> {
+  try {
+    const fastGlob = (await import('fast-glob')).default
+    const entries = await fastGlob(pattern, {
+      cwd,
+      ignore: ['**/node_modules/**', '**/.git/**'],
+      absolute: true,
+    }) as string[]
+    return entries.slice(0, MAX_FIND_FILES_RESULTS)
+  } catch {
+    return []
+  }
+}
 
 /**
  * 向后兼容的 test helper（P6 后为 no-op）。
@@ -308,18 +331,6 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
       const cwd = process.cwd()
       return cwd.split(/[/\\]/).pop() ?? ''
     },
-    findFiles: async (pattern: string) => {
-      try {
-        const fastGlob = (await import('fast-glob')).default
-        const entries = await fastGlob(pattern, {
-          cwd: process.cwd(),
-          ignore: ['**/node_modules/**', '**/.git/**'],
-          absolute: true,
-        }) as string[]
-        return entries.slice(0, MAX_FIND_FILES_RESULTS)
-      } catch {
-        return []
-      }
-    },
+    findFiles: (pattern: string) => findFiles(pattern, process.cwd()),
   })
 }

@@ -138,7 +138,9 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * ② 该 session 任一非 timeout 的 finalizeSession（finalizeMessages 内联，真实终态覆盖后标记失效；
    *    resetTransientStates/finalizeAllStreaming 内部走 finalizeSession，时机④随之覆盖）；
    * ③ 该 session 下一条 message_start（registry handler clearPrematureTimeoutIds，防跨 turn 错配）；
-   * ④ resetTransientStates（见②——disconnect 默认 reason 经 finalizeMessages 非 timeout 分支清）。
+   * ④ resetTransientStates（见②——disconnect 默认 reason 经 finalizeMessages 非 timeout 分支清）；
+   * ⑤ disposeSession（store.disposeSession 编排，u10/G4 dispose 补面——①-④全部依赖后续
+   *    事件驱动，session 删除后无任何事件到达，快照条目只能由销毁编排显式回收）。
    */
   const prematureTimeoutIds = new Map<string, Set<string>>()
 
@@ -297,6 +299,16 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     commitMessages(messages, sessionId, prev.map((m) => (m.prematureTimeout === true ? { ...m, prematureTimeout: undefined } : m)))
   }
 
+  /**
+   * [u10 / G4 dispose 补面] session 销毁时回收 per-session 打标快照（时机⑤，
+   * store.disposeSession 编排）。与 clearPrematureTimeoutIds（时机③，message_start 场景
+   * 带实体清扫）不同：销毁时 messages 分区已删，实体侧无清扫对象，只回收快照条目。
+   * 幂等；对未打标 session no-op。
+   */
+  function disposePrematureTimeoutIds(sessionId: string): void {
+    prematureTimeoutIds.delete(sessionId)
+  }
+
   return {
     applySubagentStreamDelta,
     finalizeSubagentStream,
@@ -305,5 +317,9 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     clearIndependentTransient,
     takePrematureTimeoutIds,
     clearPrematureTimeoutIds,
+    disposePrematureTimeoutIds,
+    /** [u10/G4] 打标快照只读视图——store.testInternals 透出供 disposeSession 清理语义断言
+     * （生产代码勿读；先例 = store.testInternals._sessionStreamingFlagsForTest）。 */
+    prematureTimeoutIds: prematureTimeoutIds as ReadonlyMap<string, ReadonlySet<string>>,
   }
 }

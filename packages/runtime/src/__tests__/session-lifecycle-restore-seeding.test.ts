@@ -26,6 +26,8 @@ import type { ISessionStore } from '../services/ports/session.js'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../services/session/session-internal.js'
 import type { IEventAdapter } from '../interfaces.js'
+// applyHeaderCwdFallback 自 session-lifecycle 迁出（max-lines 行数合规），权威源在本文件同目录。
+import { applyHeaderCwdFallback } from '../services/session/restore-seeding.js'
 
 // ── mock 辅助 ────────────────────────────────────────────────
 
@@ -174,7 +176,7 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
   })
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true })
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   async function runRestore(
@@ -427,5 +429,45 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     const data = JSON.parse(readFileSync(sidecarPath, 'utf-8'))
     expect(data.modelId).toBe('fp/fresh')
     expect(data.thinkingLevel).toBe('high')
+  })
+})
+
+// ── applyHeaderCwdFallback（自 test/session-file-utils.test.ts 并入，随 SUT 归位）──
+// F3 归一化管线内 header cwd 降级，纯字符串变换。权威源在本目录 restore-seeding.ts:104。
+
+describe('applyHeaderCwdFallback（F3 归一化管线内 header cwd 降级，纯字符串变换）', () => {
+  it('替换首行 session header 的 cwd，其余 entry 原样保留', () => {
+    const content = [
+      JSON.stringify({ type: 'session', version: 3, id: 'test-id', cwd: '/dead/cwd', timestamp: '2025-01-01T00:00:00Z' }),
+      JSON.stringify({ type: 'message', id: 'u1', message: { role: 'user', content: [] } }),
+      JSON.stringify({ type: 'message', id: 'a1', message: { role: 'assistant', content: [] } }),
+    ].join('\n') + '\n'
+
+    const patched = applyHeaderCwdFallback(content, '/home/fallback')
+
+    const lines = patched.split('\n')
+    const header = JSON.parse(lines[0])
+    expect(header.cwd).toBe('/home/fallback')
+    // 其他 header 字段与后续 entry 字节不变（只动 cwd）
+    expect(header.id).toBe('test-id')
+    expect(header.version).toBe(3)
+    expect(lines[1]).toBe(JSON.stringify({ type: 'message', id: 'u1', message: { role: 'user', content: [] } }))
+    expect(lines[2]).toBe(JSON.stringify({ type: 'message', id: 'a1', message: { role: 'assistant', content: [] } }))
+    // 末尾换行保留（pi _persist 期望每行以 \n 结尾，与 stripSessionEndEntries 契约一致）
+    expect(patched.endsWith('\n')).toBe(true)
+  })
+
+  it('首行非 session 类型 → 原样返回（防御，与原 patchSessionCwd 同语义）', () => {
+    const content = JSON.stringify({ type: 'other', cwd: '/old' }) + '\n'
+    expect(applyHeaderCwdFallback(content, '/new')).toBe(content)
+  })
+
+  it('首行 JSON 损坏 → 原样返回不抛', () => {
+    const content = 'not-json\nmore\n'
+    expect(applyHeaderCwdFallback(content, '/new')).toBe(content)
+  })
+
+  it('空文本 → 原样返回', () => {
+    expect(applyHeaderCwdFallback('', '/new')).toBe('')
   })
 })

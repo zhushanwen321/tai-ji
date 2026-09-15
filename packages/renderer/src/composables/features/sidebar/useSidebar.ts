@@ -61,6 +61,10 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
+import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
+import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
+import { useCommandStore } from '@/composables/features/command/useCommandStore'
+import { useForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import { clearUnread } from '@/composables/useSessionMarkers'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { registerAppCommands } from '@/composables/features/command/useAppCommands'
@@ -141,6 +145,21 @@ export function useSidebar() {
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
     disposeChat: (sid) => useChat().disposeSession(sid),
     invalidateStatus: (sid) => invalidateStatusCache(sid),
+    // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线：browserDestroy IPC
+    // fire-and-forget——preload invoke 透传 rejection，显式 .catch(console.warn 级) 消化，
+    // 防 unhandledrejection 上报 error-reporter；失败仅降级为 view 驻留至 LRU 挤出（best-effort）。
+    browserDestroy: (sid) => {
+      browserDestroyIpc(sid).catch((e) => console.warn(`[useSidebar] browserDestroy(${sid}) failed:`, e))
+    },
+    // [G1 / 2026-09-14 内存审计 §3.4] 死清理 API 接线组：三个此前全仓零调用的清理 API
+    // （terminal-write-queue.removeSession / command-store.clearCommands /
+    // useForkNoticeFeed.clearSession）接入销毁编排，已删 session 的 per-session Map 分区
+    // 不再永久残留。可选成员（core 侧 ?. 调用）+ 同步内存操作：无可消化 rejection 面
+    // （B4 browserDestroy 的 .catch 防御不适用）；useCommandStore 延迟到 hook 调用点取
+    // （AppShell providePlatform 之后，对齐 useFileTreeStore 惰性取用范式）。
+    clearTerminalQueue: (sid) => useTerminalWriteQueueStore().removeSession(sid),
+    clearSlashCommands: (sid) => useCommandStore().clearCommands(sid),
+    clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
   }
 
   const flow: NewTaskFlowPort = {

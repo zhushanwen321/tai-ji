@@ -13,6 +13,12 @@
  * 超时撤窗：WS plugin:uiRequestExpired（plugin 源 dialog 到期取消，D2）经
  * onUiRequestExpired → requestId 反查 sessionId → queue 按 requestId 出队（不发回传）。
  *
+ * [G1 / 2026-09-14 内存审计 §3.4] requestIdSessions respond 路径补删：反查表此前唯一删除点
+ * 是 plugin:uiRequestExpired 撤窗广播（plugin 源独有）——pi 源 dialog 的有效清理路径只有
+ * respond，而 extension.ui_timeout 是死链（registerTimeout 已不排定时器，§2.1），条目按弹窗数
+ * 只增不减。表提升为模块级共享（source 投递写入 / transport respond 删除两工厂共管），
+ * respond（sendPiResponse + sendPluginResponse 双通道）即删。
+ *
  * 分流契约（feature clarify C2/C4）：askUser 请求由 useExtensionUI 消费（Panel inline 独占），
  * 本适配层只投递非 askUser（CompanionBand 独占 dialog）；两者在数据源层分流，零重叠。
  */
@@ -100,6 +106,14 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   }
 }
 
+// ── requestId → sessionId 反查表（撤窗广播无 sid，靠投递流补齐；条目量级=弹窗数）──
+// [G1] 模块级共享：createDialogRequestSource（投递写入）与 createUiResponseTransport
+// （respond 删除）是两个独立工厂、壳层（useExtensionHostBridge）各自 provide——表在模块级
+// 才能让 respond 路径删条目。生产每进程单 source + 单 transport（initExtensionHostBridge
+// 一次性 provide）；测试经 __resetDialogRequestIdSessionsForTest 隔离。
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：requestId→sessionId 反查表（dialog 撤窗/应答路由），非 GUI 数据
+const requestIdSessions = new Map<string, string>()
+
 /**
  * 创建 DialogRequestSource（bus 'ui-request' + WS extension.ui_timeout / plugin:uiRequestExpired 适配）：
  * - onUiRequest：无 sessionId 跳过 + console.warn（C2，防 '' 分区脏数据）；
@@ -112,9 +126,6 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
  *   从未投递 / 广播迟到于出队）→ noop 幂等（V4b miss 语义：广播无条件发出，miss 是正常时序）。
  */
 export function createDialogRequestSource(bus: InternalEventBus): DialogRequestSource {
-  /** requestId → sessionId 反查表（撤窗广播无 sid，靠投递流补齐；条目量级=弹窗数） */
-  const requestIdSessions = new Map<string, string>()
-
   return {
     onUiRequest(handler) {
       return bus.on('ui-request', (e) => {
@@ -150,7 +161,7 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
         const sessionId = requestIdSessions.get(payload.requestId)
           ?? (typeof payload.sessionId === 'string' ? payload.sessionId : undefined)
         // miss noop 幂等（V4b）：已 respond 关闭 / 排队中从未展示 / 未知请求的撤窗广播
-        // 直接忽略；命中则先删表项（生命周期至撤窗为止）再出队。
+        // 直接忽略；命中则先删表项（生命周期至撤窗/respond 为止，G1）再出队。
         if (sessionId === undefined) return
         requestIdSessions.delete(payload.requestId)
         handler({ sessionId, requestId: payload.requestId })
@@ -171,14 +182,31 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
  * - sendPiResponse：复用 sendExtensionUIResponse（extension.ui_response，method 透传，
  *   runtime 按 method 构建 pi 响应格式，AC9）
  * - sendPluginResponse：发 plugin.uiResponse（runtime UiRequestQueue.handleResponse 消费，AC6）
+ * - [G1] 双通道 respond 即删 requestIdSessions 表项（本函数与 createDialogRequestSource
+ *   共管模块级反查表）——删除后迟到的撤窗广播按 miss noop 语义跳过，不误触已达应答 dialog。
  */
 export function createUiResponseTransport(): UiResponseTransport {
   return {
     sendPiResponse(sessionId, requestId, method, result) {
+      requestIdSessions.delete(requestId)
       sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
     },
     sendPluginResponse(requestId, result) {
+      requestIdSessions.delete(requestId)
       send({ type: 'plugin.uiResponse', payload: { requestId, result } })
     },
   }
+}
+
+// ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收后降级/移除，非业务 API）──
+// G1 respond 删除路径的机器可断言信号源：单测经 before/after delta 断言表项归零。
+
+/** requestIdSessions 表项数（G1 respond 删除路径探针） */
+export function _probeDialogRequestIdSessionsSize(): number {
+  return requestIdSessions.size
+}
+
+/** 测试隔离：清空模块级反查表（beforeEach 调，防跨用例泄漏） */
+export function __resetDialogRequestIdSessionsForTest(): void {
+  requestIdSessions.clear()
 }

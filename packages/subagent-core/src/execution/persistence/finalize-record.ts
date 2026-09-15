@@ -253,9 +253,9 @@ export type RoundSettlementOutcome =
  *   - 不调 completeRecord（record 不冻结，保留 turns[] 等运行时状态供续聊累积）
  *   - 不调 store.archive（record 留内存，getMutable 可查、list 可见）
  *   - 不 cleanup worktree（保留对话模式工作目录）
- *   - 不写 manifest（轮终回 running-resumable 非终态化，无终态快照可写）
+ *   - 不写 manifest（轮终落 idle 非终态化 [two-state-convergence U4/D3]，无终态快照可写）
  *   - **[B5/D3a] `.alive` 不再删除**——写权声明跨轮延续（release = 终态原语或
- *     idle-GC 归档两出口；轮终 record 仍 resumable、随时续聊 spawn 写同一
+ *     idle-GC 归档两出口；轮终 record 保持 idle 可续聊态、随时续聊 spawn 写同一
  *     sessionFile，删则轮后跨进程防御空窗）
  *   - [A3] 终态簿记已冻结（endedAt 已设）的调用由 store 内硬断言 fail-fast
  *     （复活终态的调用即 bug——S7 防御），throw 先于 store 簿记⑧的注销发射

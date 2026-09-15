@@ -164,15 +164,6 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: pnpm --filter @xyz-agent/electron run build
 
-      # macOS 专属：在 mac runner 上跑 main 进程测试。
-      # 动机：ci.yml 的 test job 在 ubuntu 跑 test:main，updater-script-integration.test.ts
-      # 里 mac happy-path / sha mismatch / dmg mount-fail 回滚用例用 it.skipIf(!IS_MAC) 跳过
-      # （.app bundle 语义是 mac 特有，ubuntu 跑不了）。这些用例必须在 mac CI 上真正执行，
-      # 否则「detached bash 升级脚本」最关键的决策树（sha 校验 + 备份 + 回滚）永远没回归覆盖。
-      - name: Run main tests (macOS)
-        if: matrix.platform == 'mac'
-        run: pnpm --filter @xyz-agent/electron run test:main
-
       - name: Postbuild validation
         shell: bash
         run: |
@@ -300,3 +291,36 @@ jobs:
             apps/electron/dist/builder-output/manifest-*.json
           retention-days: 7
           if-no-files-found: error
+
+  # macOS 专属 main 进程测试独立 job（2026-09-14 从 build mac matrix 串行 step 拆出）。
+  # 动机（原 step 注释，语义不变）：ci.yml 的 test job 在 ubuntu 跑 test:main，
+  # updater-script-integration.test.ts 里 mac happy-path / sha mismatch / dmg mount-fail
+  # 回滚用例用 it.skipIf(!IS_MAC) 跳过（.app bundle 语义是 mac 特有，ubuntu 跑不了）——
+  # 这些用例必须在 mac CI 上真正执行，否则「detached bash 升级脚本」最关键的决策树
+  # （sha 校验 + 备份 + 回滚）永远没回归覆盖。
+  # 拆分理由：该 suite 纯源码 vitest（hdiutil/ditto 为 OS 内建），不依赖 build 产物，
+  # 串在 build mac 里 ~100s 全占关键路径（实测 Build mac 207-223s 中占比 ~45%，
+  # 拆出后 build 阶段关键路径 223s → ~140s，由 win job 接棒成为最长杆）。
+  # 与 build matrix 并行；本 job 失败令整个 workflow_call 失败，门禁语义保持 workflow 级。
+  main-tests-mac:
+    name: Main tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm --filter @xyz-agent/electron run test:main

@@ -16,19 +16,7 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-
-/** 定位实装 pi-coding-agent dist（cwd 逐级上溯，同 pi-paths-config-dir-contract.test.ts 范式）。 */
-function locatePiDist(pkgDistSentinel: string, sentinel: string): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', pkgDistSentinel, 'dist')
-    if (existsSync(join(candidate, sentinel))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
+import { locatePiDist } from './helpers/pi-semantics-probe.js'
 
 const CODING_AGENT_DIST = locatePiDist('pi-coding-agent', 'config.js')
 const PI_AI_DIST = locatePiDist('pi-ai', 'models.js')

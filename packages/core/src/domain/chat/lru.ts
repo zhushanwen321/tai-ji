@@ -12,7 +12,12 @@
  *   deleteSession 流程中被删 session（必然还绑定 panel）被 exempt 拦截 → 内存泄漏
  * - 驱逐用 delete key（与 disposeSession 一致，D13）
  * - subagent:xxx 三段式虚拟 key 按主 session 前缀同步驱逐（M7 修复，AC-2）
- * - agentcall:xxx 两段式虚拟 key 不走 LRU 联动（无 mainSid 命名空间），由 workflow store 映射清理（D6）
+ * - agentcall:xxx 两段式虚拟 key 经注入回调联动驱逐（B9，memory-leak-remediation §3.3-B9）：
+ *   主 session 被驱逐时由装配侧回调（agentCallEvictionsOf，workflow store 映射 ∖ viewedVids
+ *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源钉死 panel 枚举
+ *   （core/domain/drawer/control.ts getViewedVids），禁止 drawer 分区全枚举（曾开过 drawer
+ *   的 session 焦点切走后分区保留，全枚举会永久过度豁免，R2 S1）。deleteSession 路径的
+ *   agentcall 清理仍走 hooks.evictVirtualKeys（workflow 映射全量，无豁免——session 已删）
  * - 驱逐时同步清 hydrated 标记（AC-8：切回重新 hydrate）
  *
  * LRU 时序：用模块级 Map<sessionId, timestamp> 记录访问顺序。
@@ -97,8 +102,8 @@ export function isVirtualKey(sessionId: string): boolean {
  *
  * [M7] 仅 subagent 用三段式（含 mainSid 命名空间）可按前缀匹配。
  * agentcall 保持两段式（参数是 agent call 自己 session id，无独立子 id），
- * 无法按主 session 前缀定位，其清理走 workflow store 的 mainSessionId 映射（D6），
- * 不在 LRU 联动清理范围内。
+ * 无法按主 session 前缀定位：deleteSession 走 workflow store 的 mainSessionId 映射
+ * （D6，hooks.evictVirtualKeys），LRU 驱逐走注入回调 agentCallEvictionsOf（B9）。
  */
 export function isVirtualKeyOf(virtualId: string, mainSid: string): boolean {
   return virtualId.startsWith(`subagent:${mainSid}:`)
@@ -124,6 +129,19 @@ export interface LruEvictDeps {
   deleteMessageKey: (sessionId: string) => void
   /** 删除 hydrated 标记 */
   deleteHydrated: (sessionId: string) => void
+  /**
+   * [B9 agentcall LRU 联动] 查询主 session 名下应联动释放的 agentcall 虚拟分区 id。
+   *
+   * 纯查询契约（返回待驱逐列表，豁免已由实现侧应用——renderer 装配为 workflow store 映射
+   * ∖ viewedVids panel 枚举豁免集）；驱逐执行面留本模块（deleteMessageKey + 时序记录清理），
+   * 与 subagent 前缀联动同构，且免装配侧自引用 chat store（stores 间 import 禁令 +
+   * defineStore 装配环）。未装配时（core 单测 / 无 renderer 装配环境）默认空数组 = 不联动。
+   *
+   * 两驱逐路径共用（evictIfNeeded 阈值路径 + evictSessionWithVirtual 显式路径）——
+   * 显式路径消费方 deleteSession 会在 hooks.evictVirtualKeys 再全量清一次（含豁免 vid），
+   * 双重调用幂等（deleteMessageKey 有 has 守卫）。
+   */
+  agentCallEvictionsOf: (mainSid: string) => string[]
 }
 
 /**
@@ -168,7 +186,7 @@ export function evictIfNeeded(deps: LruEvictDeps): void {
     deps.deleteHydrated(sid)
     sessionLastAccessed.delete(sid)
 
-    // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，由 workflow store 映射清理）
+    // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，走下方 B9 回调）
     // [Q1-9] 直接迭代 Map keys（免 [...keys()] 二次拷贝）：deleteMessageKey 是不可变替换
     // （new Map + 赋 .value，旧 Map 不被 mutate），for...of 迭代器绑定取值时的 Map 对象，
     // 循环内替换 .value 不影响迭代安全，行为与快照拷贝版一致。
@@ -178,6 +196,9 @@ export function evictIfNeeded(deps: LruEvictDeps): void {
         sessionLastAccessed.delete(virtualKey)
       }
     }
+
+    // B9：联动释放该主 session 未查看的 agentcall 虚拟分区（豁免已在回调实现侧应用）
+    evictAgentCallPartitions(deps.agentCallEvictionsOf(sid), deps)
   }
 }
 
@@ -195,13 +216,31 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
   deps.deleteHydrated(sessionId)
   sessionLastAccessed.delete(sessionId)
 
-  // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，由 workflow store 映射清理）
+  // AC-2：同步驱逐关联的 subagent:sid:xxx 三段式虚拟 key（agentcall 两段式无 mainSid 前缀，走下方 B9 回调）
   // [Q1-9] 同 evictIfNeeded：直接迭代 keys，deleteMessageKey 不可变替换不影响迭代安全。
   for (const virtualKey of deps.messagesValue().keys()) {
     if (isVirtualKeyOf(virtualKey, sessionId)) {
       deps.deleteMessageKey(virtualKey)
       sessionLastAccessed.delete(virtualKey)
     }
+  }
+
+  // B9：联动释放该主 session 未查看的 agentcall 虚拟分区（两路径共用，见 LruEvictDeps.agentCallEvictionsOf 注释）
+  evictAgentCallPartitions(deps.agentCallEvictionsOf(sessionId), deps)
+}
+
+/**
+ * [B9] 执行 agentcall 虚拟分区联动驱逐（两驱逐路径共用内联段）。
+ *
+ * vid 列表来自注入回调（装配侧已应用 viewedVids 豁免），本函数只做机械删除：
+ * deleteMessageKey（清 messages 分区 + streaming flag / changeSetStatuses 派生缓存）+
+ * sessionLastAccessed 时序记录清理（与 subagent 前缀联动同构——虚拟 key 可能经
+ * hydrate/touchLru 写入时序记录，驱逐后残留会让 Map 慢增长）。
+ */
+function evictAgentCallPartitions(vids: string[], deps: LruEvictDeps): void {
+  for (const vid of vids) {
+    deps.deleteMessageKey(vid)
+    sessionLastAccessed.delete(vid)
   }
 }
 
@@ -211,6 +250,11 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
 export function _resetLruForTest(): void {
   sessionLastAccessed.clear()
   setLruMaxSessions(null)
+}
+
+/** 测试辅助：读时序记录条数（断言驱逐路径不残留虚拟 key 时序记录用）。生产代码禁止调用。 */
+export function _lruSizeForTest(): number {
+  return sessionLastAccessed.size
 }
 
 /**
@@ -224,6 +268,10 @@ export function disposeLruEntry(sessionId: string): void {
  * 构造 LRU 驱逐依赖（W3 H3）。
  * evictIfNeeded / evictSessionWithVirtual 共用此 deps 构造器。
  * 从 chat.ts 移入以控制文件行数。
+ *
+ * [B9] agentCallEvictionsOf 可选注入（默认空数组 = 不联动）：renderer 装配点
+ * （stores/chat.ts → composables/features/chat/agentcall-lru-linkage.ts）注入
+ * workflow store 映射 ∖ viewedVids 的组合查询；core 单测 / 无装配环境保持旧行为。
  */
 export function makeLruEvictDeps(
   messages: { value: Map<string, unknown> },
@@ -231,6 +279,7 @@ export function makeLruEvictDeps(
   isExempt: (sid: string) => boolean,
   deleteStreamingFlag: (sid: string) => void,
   deleteChangeSetStatuses: (sid: string) => void,
+  agentCallEvictionsOf: (mainSid: string) => string[] = () => [],
 ): LruEvictDeps {
   return {
     // [W7] getter 而非快照——deleteMessageKey/deleteHydrated 会替换 .value，
@@ -264,5 +313,6 @@ export function makeLruEvictDeps(
         hydrated.value = next
       }
     },
+    agentCallEvictionsOf,
   }
 }

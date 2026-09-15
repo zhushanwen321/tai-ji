@@ -32,12 +32,8 @@ describe('SubagentFilterBar 渲染（白盒：计数 + 选中高亮）', () => {
     }
   })
 
-  it('计数文案渲染 counts 载荷（active 4 / running 2 / archived 1）', () => {
-    const wrapper = mountBar()
-    expect(wrapper.find('[data-testid="subagent-filter-count-active"]').text()).toBe('4')
-    expect(wrapper.find('[data-testid="subagent-filter-count-running"]').text()).toBe('2')
-    expect(wrapper.find('[data-testid="subagent-filter-count-archived"]').text()).toBe('1')
-  })
+  // （计数渲染断言由「计数元素三视图齐全」用例承担（exists + contains 超集），
+  //  此处原直等版本与其重复，已删。）
 
   it('选中视图含 bg-bg-elevated 浮起 class 且 data-active="true"', () => {
     const wrapper = mountBar('active')

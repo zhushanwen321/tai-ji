@@ -65,33 +65,7 @@ describe('U12: 快捷键配置（降级只读展示）', () => {
     expect(sidebarStore).toBeDefined()
   })
 
-  it('appCommands 含 shortcut 的命令可被 SystemPage 筛选展示', async () => {
-    const { registerAppCommands } = await import('@/composables/features/command/useAppCommands')
-
-    registerAppCommands({ newSession: vi.fn(), goOverview: vi.fn() })
-
-    // SystemPage.shortcutCommands 过滤条件：id 在 new-session/toggle-sidebar/go-overview 中
-    const SHORTCUT_LABELS: Record<string, true> = {
-      'new-session': true,
-      'toggle-sidebar': true,
-      'go-overview': true,
-    }
-    const cmds = appCmdsMock.registerApp.mock.calls[0]![0] as Array<{ id: string; shortcut?: string }>
-    const shortcutCommands = cmds.filter((c) => c.id in SHORTCUT_LABELS)
-    expect(shortcutCommands).toHaveLength(3)
-    expect(shortcutCommands.map((c) => c.id).sort()).toEqual(['go-overview', 'new-session', 'toggle-sidebar'])
-  })
-
-  it('i18n command namespace 含三个命令的显示名', async () => {
-    const { setLocale } = await import('@/i18n')
-    const i18n = (await import('@/i18n')).default
-    await setLocale('zh-CN')
-    expect(i18n.global.t('settings.command.new-session')).toBe('新建任务')
-    expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('收起侧栏')
-    expect(i18n.global.t('settings.command.go-overview')).toBe('概览')
-    await setLocale('en-US')
-    expect(i18n.global.t('settings.command.new-session')).toBe('New session')
-    expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('Toggle sidebar')
-    expect(i18n.global.t('settings.command.go-overview')).toBe('Overview')
-  })
+  // （原用例 2「appCommands 可被 SystemPage 筛选展示」已删：在测试内复刻 SystemPage 的
+  //  filter 白名单再 filter——断言的是测试自己写的 filter，实现改坏时不红，恒真风险；
+  //  原用例 3 i18n 文案断言与 settings-i18n.test.ts 重复，go-overview 增量已并入该文件。）
 })

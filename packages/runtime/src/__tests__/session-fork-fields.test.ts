@@ -50,26 +50,7 @@ describe('W1 fork 字段透传', () => {
 
   // ── U1：SessionSummary 含 4 个新可选字段 ─────────────────────────
 
-  it('U1: SessionSummary 接受 parentSession / forkEntryId / handedOffTo / lastMergedAt 字段', () => {
-    // 类型契约测试：把含全部新字段的对象赋值给 SessionSummary 类型变量。
-    // 若 W1 实现移除任一字段，此赋值在 tsc --noEmit 下报错（字段名不在类型中）。
-    // 运行时不断言（expect 对象有属性是恒真「空绿」），类型契约由 tsc --noEmit 承载。
-    const summary: SessionSummary = {
-      id: 'sess-1',
-      label: 'test',
-      cwd: '/test',
-      status: 'idle',
-      lastActiveAt: Date.now(),
-      modelId: 'p/m',
-      tokenCount: 0,
-      parentSession: '/path/to/parent.jsonl',
-      forkEntryId: 'entry-123',
-      handedOffTo: 'child-session-456',
-      lastMergedAt: 1234567890,
-    }
-    // 引用 summary 避免未使用告警；运行时不做属性恒真断言（类型层已保障）。
-    expect(summary.id).toBe('sess-1')
-  })
+  // [2026-09 测试舰队审查 r2-20] U1 运行时空绿占位断言已裁（类型契约由 tsc 承担）。
 
   // ── U2：parseSessionHeader 解析 parentSession + forkEntryId ──────────
 
@@ -258,31 +239,5 @@ describe('W1 fork 字段透传', () => {
 
   // ── U6：ScannedSessionMeta 两处定义字段对齐 ────────────────────────
 
-  it('U6: ScannedSessionMeta 两处定义都含 parentSession / forkEntryId / handedOffTo 字段', () => {
-    // 类型契约测试：同一个含全部字段的对象同时赋值给两处 ScannedSessionMeta 类型别名
-    // （infra/pi/session-file-utils.ts 与 services/ports/session.ts）。若两处定义字段集分歧
-    // （如一处删了 parentSession），对应赋值在 tsc --noEmit 下报错。运行时不断言属性恒真
-    // （空绿），类型契约由 tsc --noEmit 承载；此处仅引用变量避免未使用告警。
-    const meta = {
-      id: 'sess-1',
-      filePath: '/test/sess-1.jsonl',
-      cwd: '/test',
-      timestamp: '2026-07-07T01:00:00.000Z',
-      name: 'test',
-      outcome: 'done' as const,
-      lastModified: Date.now(),
-      size: 100,
-      parentSession: '/path/to/parent.jsonl',
-      forkEntryId: 'entry-123',
-      handedOffTo: 'child-session-456',
-    }
-
-    // infra/pi/session-file-utils.ts 的定义
-    const metaInfra: ScannedSessionMetaInfra = meta
-    // services/ports/session.ts 的定义
-    const metaPort: ScannedSessionMetaPort = meta
-
-    // 运行时不做属性恒真断言（类型层已保障两处接受同一字段集），仅引用防未使用。
-    expect(metaInfra.id).toBe(metaPort.id)
-  })
+  // [2026-09 测试舰队审查 r2-20] U6 运行时空绿占位断言已裁（类型契约由 tsc 承担）。
 })

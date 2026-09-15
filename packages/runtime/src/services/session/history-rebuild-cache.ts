@@ -10,10 +10,13 @@
  * renderer 无 append 入口可用；runtime 是唯一持有「上次重建结果」的层。
  *
  * 生命周期（D6-1）：
- * - 写入：getHistory 每次成功重建后（全量与增量路径都写）
+ * - 写入：getHistory 每次成功重建后（全量与增量路径都写；B8 起单条目字节帽 32MB，
+ *   超限不入缓存——「缓存从未存在」退化，见 HistoryRebuildCache 类注释）
  * - 读取：getHistory 命中时走 getEntries(since=lastLeafId) 增量（空增量 = 缓存新鲜）
  * - 清除：SessionHistoryReader.onSessionDisposed（Facade removeSessionEntry 第 ⑤ 步直调，
- *   与 traceSync/projection/records 并列；session 删除 + pi 进程退出两条路汇聚点）+ 容量帽 LRU 驱逐
+ *   与 traceSync/projection/records 并列；session 删除 + pi 进程退出两条路汇聚点）
+ *   + 容量帽 LRU 驱逐 + reclaim 驱逐（B8：onSessionReclaimed，reclaimManagedSession 经
+ *   ReclaimSessionDeps 注入调用——驱逐后重激活走单次全量重建，显式登记代价）
  * - 无持久化：重开 app 后 runtime 内存已空，必然全量重建（纯派生数据，丢弃无一致性风险）
  *
  * pi get_entries(since) 行为（2026-08-16 实测，pi 0.84.0，脚本 /tmp/verify-pi-since.mjs 已验证后删除）：
@@ -60,16 +63,50 @@ export interface HistoryRebuildCacheEntry {
 const HISTORY_CACHE_MAX_SESSIONS = 8
 
 /**
+ * 单条目字节帽 = 32MB（B8，memory-leak-remediation §3.3-B8 候选 A）。语义对齐
+ * READ_PRECHECK_MAX_BYTES（shared SSOT，同为 32MB）——超过该量级的 session 本就走
+ * 离线分块路径，不值得整份驻留缓存；超限条目不入缓存（「缓存从未存在」退化：下次
+ * getHistory 全量重建，行为等价于从未命中缓存）。量级口径 = 全量 Message[] 逐条
+ * Buffer.byteLength(JSON.stringify(m)) 求和（estimateMessagesBytes，与
+ * applyHistoryBudgetWindow 的预算字节同源）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（对齐 READ_PRECHECK_MAX_BYTES），校准依据见上方 JSDoc
+const HISTORY_CACHE_MAX_ENTRY_BYTES = 32 * 1024 * 1024
+
+/**
+ * 估算全量 Message[] 的序列化字节（B8 字节帽量级口径）：逐条求和（与
+ * selectTurnWindowStart 的预算字节同源——近 wire reply 实际体积，images base64
+ * 等大字段如实计入）。分条求和而非整串 JSON.stringify：避免单次巨串分配，且与既有
+ * 预算窗口代码逐条口径一致。
+ */
+function estimateMessagesBytes(messages: Message[]): number {
+  let bytes = 0
+  for (const m of messages) {
+    bytes += Buffer.byteLength(JSON.stringify(m), 'utf-8')
+  }
+  return bytes
+}
+
+/**
  * per-session 重建缓存（LRU，Map 插入序实现）。
  *
  * LRU 语义：get/set 命中时把 key 移到 Map 尾部（delete + set），超帽驱逐 Map 头部
  * （最久未访问）。与 renderer chat store 的 LRU 窗口对齐——被 renderer 驱逐的 session
  * 下次重进走全量重建，等价于「缓存从未存在」，行为退化为现状。
+ *
+ * 字节帽（B8，memory-leak-remediation §3.3-B8 候选 A）：条目写入前量全量 Message[]
+ * 序列化字节，超 32MB 不入缓存。缓存基线**始终存全量重建结果**（增量合并正确性依赖
+ * ——被否候选 B「缓存也切预算窗」的否决理由：增量基线错位 = 会话内容错乱），故字节
+ * 维度只能整条目取舍，不做窗口化。
  */
 export class HistoryRebuildCache {
   private readonly entries = new Map<string, HistoryRebuildCacheEntry>()
 
-  constructor(private readonly maxSessions = HISTORY_CACHE_MAX_SESSIONS) {}
+  constructor(
+    private readonly maxSessions = HISTORY_CACHE_MAX_SESSIONS,
+    /** 单条目字节帽（B8；构造参数注入便于测试，对齐 B7 ring 预算注入范式）。 */
+    private readonly maxEntryBytes = HISTORY_CACHE_MAX_ENTRY_BYTES,
+  ) {}
 
   /** 取缓存并刷新 LRU 位置。无缓存返回 undefined。 */
   get(sessionId: string): HistoryRebuildCacheEntry | undefined {
@@ -81,8 +118,23 @@ export class HistoryRebuildCache {
     return entry
   }
 
-  /** 写入/覆盖缓存条目（超帽驱逐最久未访问的 session 条目）。 */
+  /**
+   * 写入/覆盖缓存条目。两道帽：
+   * 1. 单条目字节帽（B8-A）——set 前量全量 Message[] 序列化字节，超 maxEntryBytes
+   *    不入缓存并摘除既有条目（「缓存从未存在」退化：该 session 每次 getHistory 全量
+   *    重建）。摘除旧条目防「冻结基线」——历史 append-only 只增不减，保留旧条目会让
+   *    增量 delta 从旧叶子无界增长，退化不如全量重建。
+   * 2. 容量帽 LRU——超 maxSessions 驱逐最久未访问的 session 条目（原有行为）。
+   */
   set(sessionId: string, entry: HistoryRebuildCacheEntry): void {
+    const bytes = estimateMessagesBytes(entry.messages)
+    if (bytes > this.maxEntryBytes) {
+      console.warn(
+        `[history-rebuild-cache] entry exceeds byte cap, skipping cache (sessionId=${sessionId}: ${bytes} > ${this.maxEntryBytes} bytes), session degrades to full rebuild per getHistory`,
+      )
+      this.entries.delete(sessionId)
+      return
+    }
     if (this.entries.has(sessionId)) this.entries.delete(sessionId)
     this.entries.set(sessionId, entry)
     while (this.entries.size > this.maxSessions) {
@@ -305,7 +357,7 @@ export class SessionHistoryReader {
    * getHistory 命中缓存时走 getEntries(since=lastLeafId) 增量；onSessionDisposed
    * （session 删除 + pi 进程退出汇聚点）清除。纯派生数据，可随时丢弃退化为全量重建。
    */
-  private readonly historyCache = new HistoryRebuildCache()
+  private readonly historyCache: HistoryRebuildCache
   /**
    * W20 review Fix-5：per-session getHistory inflight 复用。并发 getHistory 共享同一
    * promise（GitStateService inflightSnapshot 同款模式），消除「后完成者的旧 delta 与
@@ -313,7 +365,13 @@ export class SessionHistoryReader {
    */
   private readonly inflightGetHistory = new Map<string, Promise<HistoryWindowResult>>()
 
-  constructor(private readonly deps: SessionHistoryReaderDeps) {}
+  /**
+   * @param historyCache 缓存实例注入（B8 测试缝：字节帽/容量帽可注入，对齐 B7 ring
+   * 「预算构造参数注入」范式）；缺省默认帽（8 session / 32MB 单条目）。
+   */
+  constructor(private readonly deps: SessionHistoryReaderDeps, historyCache?: HistoryRebuildCache) {
+    this.historyCache = historyCache ?? new HistoryRebuildCache()
+  }
 
   /**
    * 拉取 session 历史（wave:perf-w20 D6：重建缓存 + lastLeafId 增量）。
@@ -577,14 +635,30 @@ export class SessionHistoryReader {
    * session.history 游标翻页，全量通路删除——游标翻页完全替代）。
    *
    * 销毁清理（Facade removeSessionEntry 第 ⑤ 步直调，与 traceSync/projection/records
-   * 的 onSessionDisposed 并列）：清历史重建缓存 + lastLeafId——真删除后缓存必须清，
-   * 行为本身正确。但「缓存基线（lastLeafId）跨进程必失效、保留只会走 "Entry not found"
-   * fallback」的旧因果断言已被实测推翻：空闲回收（reclaimManagedSession）刻意不走
-   * removeSessionEntry、保留缓存，P7 真机实测回收→恢复后 leafId 命中空增量短路零重建
-   *（PASS incremental，2026-09-11，证据：packages/runtime/src/__tests__/services/
-   * idle-pi-reclaim-integration.test.ts 阶段 4）。
+   * 的 onSessionDisposed 并列）：清历史重建缓存 + lastLeafId——真删除后缓存必须清。
+   * [HISTORICAL] 空闲回收曾刻意保留缓存（P7 真机实测 2026-09-11 回收→恢复 leafId
+   * 命中空增量短路零重建，PASS incremental，证据：packages/runtime/src/__tests__/
+   * services/idle-pi-reclaim-integration.test.ts 阶段 4）；B8
+   *（memory-leak-remediation §3.3-B8 候选 C）起 reclaim 改经 onSessionReclaimed
+   * 驱逐——回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本（代价
+   * 四要素显式登记于设计 §3.3-B8「与 P7 实测的张力」）。
    */
   onSessionDisposed(sessionId: string): void {
+    this.historyCache.delete(sessionId)
+  }
+
+  /**
+   * B8（memory-leak-remediation §3.3-B8 候选 C）：空闲回收（reclaimManagedSession）时
+   * 驱逐该 session 的缓存条目。回收不是销毁——**禁止**改调 removeSessionEntry 汇聚点
+   *（会连带 bus 分区清理断流 / PTY 连杀 / 插件 didDestroy 投递，D3 三重冲突）；本
+   * 方法只驱逐历史缓存（纯派生数据，丢弃无一致性风险）。驱逐后重激活走单次全量
+   * 重建（P7「回收→恢复零重建」路径被显式放弃，代价四要素：量级 = 单次全量重建
+   * 典型数百 ms~秒级；恢复路径 = 无需恢复（重建即路径）；重审条件 = 回收→重激活
+   * 频率实测升高时重审「回收态保留缓存」策略；显式判定 = 接受）。装配：
+   * reclaimManagedSession 经 ReclaimSessionDeps.evictHistoryRebuildCache（组合根绑
+   * SessionService.evictHistoryRebuildCache → 本方法）。
+   */
+  onSessionReclaimed(sessionId: string): void {
     this.historyCache.delete(sessionId)
   }
 

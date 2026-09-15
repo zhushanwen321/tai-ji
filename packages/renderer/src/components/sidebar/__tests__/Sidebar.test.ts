@@ -136,6 +136,7 @@ vi.mock('@xyz-agent/core/transport/api', () => ({
 }))
 
 import Sidebar from '@/components/sidebar/Sidebar.vue'
+import { onGlobalType } from '@xyz-agent/core/transport/api'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -172,5 +173,34 @@ describe('Sidebar plugins tab（MF-10 渲染 gate）', () => {
 
     expect(wrapper.findComponent(PluginViewContainer).exists()).toBe(false)
     wrapper.unmount()
+  })
+})
+
+describe('Sidebar app.info 退订（B3 / 2026-09-14 内存审计 §2.4）', () => {
+  it('TC4: onMounted 保存退订函数，onBeforeUnmount 调用——断连重挂不泄漏 handler', async () => {
+    // A4 场景（kill runtime ×5 重连）：AppShell 每次重挂都会重新走 onMounted——
+    // 退订函数若被丢弃，globalTypeHandlers 'app.info' 逐次累积。本用例锁定组件侧闭环。
+    const unsub = vi.fn()
+    vi.mocked(onGlobalType).mockReturnValueOnce(unsub)
+
+    const wrapper = shallowMount(Sidebar)
+    expect(onGlobalType).toHaveBeenCalledWith('app.info', expect.any(Function))
+    expect(unsub).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it('TC5: 重复挂卸循环对称——每次 mount 订阅一次 / unmount 退订一次（A4 场景：重连重挂后 handler 数恒 1）', () => {
+    // 连接抖动模拟：5 轮 mount/unmount，退订函数逐次消费（mock 队列 5 份）
+    const unsubs = Array.from({ length: 5 }, () => vi.fn())
+    for (const un of unsubs) vi.mocked(onGlobalType).mockReturnValueOnce(un)
+
+    for (let i = 0; i < 5; i++) {
+      const wrapper = shallowMount(Sidebar)
+      expect(unsubs[i]).not.toHaveBeenCalled()
+      wrapper.unmount()
+      expect(unsubs[i]).toHaveBeenCalledTimes(1)
+    }
   })
 })

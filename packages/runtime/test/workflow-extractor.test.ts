@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { extractWorkflowsFromSessionFile, scanWorkflowEntries } from '../src/services/session/workflow-extractor.js'
+import { READ_PRECHECK_MAX_BYTES } from '@xyz-agent/shared'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -125,7 +126,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     ]
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
 
     expect(result).toHaveLength(1)
     const record = result[0]
@@ -186,15 +187,70 @@ describe('extractWorkflowsFromSessionFile', () => {
     ]
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
 
     // wf-A 版本不匹配（v1 旧版本）跳过，wf-B 文件不存在跳过 → 空数组
     expect(result).toEqual([])
   })
 
   it('边界：主 session 文件不存在返回空数组', () => {
-    const result = extractWorkflowsFromSessionFile(join(tempDir, 'no-such-file.jsonl'))
+    const { records: result, oversize } = extractWorkflowsFromSessionFile(join(tempDir, 'no-such-file.jsonl'))
     expect(result).toEqual([])
+    // ENOENT 走原读路径（stat 预检失败不引入新抛错/新标记）——非降级形态
+    expect(oversize).toBe(false)
+  })
+
+  it('[G3] READ_PRECHECK 预检：>32MB 降级返回空列表 + oversize 标记（不读全文）', () => {
+    const sessionFile = join(tempDir, 'oversize-main-session.jsonl')
+    // 首两行是合法自描述 workflow-record（守卫失效被误读时会产出 1 条记录——若本用例
+    // 断言翻红即说明预检未挡住读路径）；其余为 >32MB 单行填充（JSON.parse 失败行，仅撑体积）
+    const snapshot = {
+      v: 'wf-run-v2',
+      runId: 'wf-oversize-guard',
+      spec: { scriptName: 'huge-flow', description: 'test' },
+      state: { status: 'running', budget: { usedTokens: 1, usedCost: 0, totalCallCount: 1 }, calls: [], trace: [] },
+      meta: { startedAt: '2026-08-19T00:00:00Z' },
+    }
+    const recordLine = JSON.stringify({
+      type: 'custom',
+      customType: 'workflow-record',
+      data: { v: 1, snapshot, updatedAt: '2026-08-19T00:00:01Z' },
+    })
+    // 阈值 + 1B 超限（READ_PRECHECK_MAX_BYTES = 32MB，shared SSOT——导入引用而非写死，
+    // 阈值调整时本用例跟随）
+    const paddingBytes = READ_PRECHECK_MAX_BYTES + 1 - (Buffer.byteLength(recordLine) + 1)
+    writeFileSync(sessionFile, recordLine + '\n' + 'x'.repeat(paddingBytes))
+
+    const { records, oversize } = extractWorkflowsFromSessionFile(sessionFile)
+
+    // 降级契约：不读全文 → 记录空列表 + oversize 正交标记（侧栏面板据此显示「会话过大」）
+    expect(oversize).toBe(true)
+    expect(records).toEqual([])
+  })
+
+  it('[G3] 预检阈值内（<32MB）正常提取：oversize=false', () => {
+    const sessionFile = join(tempDir, 'normal-main-session.jsonl')
+    const snapshot = {
+      v: 'wf-run-v2',
+      runId: 'wf-normal',
+      spec: { scriptName: 'normal-flow', description: 'test' },
+      state: { status: 'running', budget: { usedTokens: 1, usedCost: 0, totalCallCount: 1 }, calls: [], trace: [] },
+      meta: { startedAt: '2026-08-19T00:00:00Z' },
+    }
+    const entries = [
+      {
+        type: 'custom',
+        customType: 'workflow-record',
+        data: { v: 1, snapshot, updatedAt: '2026-08-19T00:00:01Z' },
+      },
+    ]
+    writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+
+    const { records, oversize } = extractWorkflowsFromSessionFile(sessionFile)
+
+    expect(oversize).toBe(false)
+    expect(records).toHaveLength(1)
+    expect(records[0].runId).toBe('wf-normal')
   })
 
   // [review 修复] 结构守卫回归：JSON.parse 对 "null" / "42" / 缺 v 字段的合法 JSON
@@ -233,7 +289,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
     // 三种坏结构均跳过，不抛 TypeError
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
     expect(result).toEqual([])
   })
 
@@ -266,7 +322,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
     // 三种 v2 匹配的坏结构均跳过，不抛 TypeError
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
     expect(result).toEqual([])
   })
 
@@ -317,7 +373,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
     // 坏 trace 的 run 跳过，好 run 保留——不抛 TypeError、不废整个列表
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
     expect(result).toHaveLength(1)
     expect(result[0].runId).toBe('wf-good')
     expect(result[0].scriptName).toBe('good-flow')
@@ -360,7 +416,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     ]
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
     expect(result).toHaveLength(1)
     expect(result[0].runId).toBe('wf-null-items')
     expect(result[0].agentCalls).toHaveLength(1)
@@ -388,7 +444,7 @@ describe('extractWorkflowsFromSessionFile', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const result = extractWorkflowsFromSessionFile(sessionFile)
+      const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
       expect(result).toEqual([])
       expect(warnSpy).toHaveBeenCalledTimes(1)
       const msg = String(warnSpy.mock.calls[0][0])
@@ -547,7 +603,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     ]
     writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
 
-    const result = extractWorkflowsFromSessionFile(sessionFile)
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
 
     expect(result).toHaveLength(1)
     const record = result[0]

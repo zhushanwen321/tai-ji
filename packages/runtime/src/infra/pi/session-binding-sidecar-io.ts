@@ -45,6 +45,7 @@ interface CachedSessionMeta {
 // persistHandoffSidecar / scanSessionMeta 等，均为 .get/.set/.delete 方法调用，绑定只读
 // 无碍）；对外语义维持原状——file-utils 不再转出，消费方仍经 _resetSessionMetaCacheForTest
 // / invalidateSessionMetaCache 治理函数触达。
+// 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（docs/design/memory-leak-remediation.md §2.5）
 export const sessionMetaCache = new Map<string, CachedSessionMeta>()
 
 // ── sidecar 家族公共骨架（原 session-file-utils.ts，函数体逐字节不变迁入）────────

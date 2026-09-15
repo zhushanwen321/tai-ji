@@ -188,7 +188,8 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     // merge 后终态收敛（增量快照覆盖 running 基线，列表仍是全量派生）
     expect(subMsgs[1]!.payload).toEqual({
       sessionId: sid,
-      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'closed', closedReason: 'gc' })],
+      // [U6/D5] closed 归一 idle + closedReason 保留（gc+error → 派生 stopReason:failed）
+      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'idle', closedReason: 'gc', stopReason: 'failed' })],
     })
   })
 
@@ -252,7 +253,8 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs[subMsgs.length - 1]!.payload).toEqual({
       sessionId: sid,
-      subagents: [expect.objectContaining({ subagentId: 'sa-2', status: 'closed' })],
+      // [U6/D5] closed 归一 idle（gc 无 error → 派生 completed）
+      subagents: [expect.objectContaining({ subagentId: 'sa-2', status: 'idle', stopReason: 'completed' })],
     })
   })
 
@@ -287,7 +289,8 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs[subMsgs.length - 1]!.payload).toEqual({
       sessionId: sid,
-      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'closed' })],
+      // [U6/D5] closed 归一 idle
+      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'idle' })],
     })
   })
 

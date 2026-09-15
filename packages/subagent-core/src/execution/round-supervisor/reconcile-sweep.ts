@@ -46,7 +46,9 @@ const logger = getLogger("subagents");
 /** sweep 的 record 状态判据（subagent-service 供 store 读侧：内存 getMutable ∪
  *  磁盘 findLightById 两级）。 */
 export type SupervisedRecordState =
-  /** 活跃（running-resumable，监督域或等待 upgrade）——不动。 */
+  /** 活跃（真在跑 / [two-state-convergence U4] 轮终翻边 idle——sweep 只对账
+   *  pending-notifications registry，轮终 record 的注销已随 markRoundIdle 簿记⑧
+   *  发射、不在册，保守归 active 不动）——不动。 */
   | "active"
   /** 终态（closed，含 closedReason——映射 pending reason 用）。 */
   | { terminal: true; closedReason: string | undefined }

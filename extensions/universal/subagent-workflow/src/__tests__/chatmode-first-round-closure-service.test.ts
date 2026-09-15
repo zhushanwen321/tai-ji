@@ -157,12 +157,13 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     // 随相位机退役）：本轮内容为增量权威（live turns 留引擎进程）
     run.settle({ content: "first-round-done" });
 
-    // [改动 2 承接] 轻量 idle 化（v4 B-1：idle 折入 running）：status=running（notify 守卫放行）
-    // + round 0→1（dedup key 递增）+ record.result 从应答 content 写入（单写点，非手工预置）
+    // [two-state-convergence U4/D3] 写面翻边：轮终落 idle（idle 即 resumable，resumable
+    // 不再写）+ round 0→1（dedup key 递增）+ record.result 从应答 content 写入。notify
+    // 载荷 status 仍 "running"（chatMode 轮次完成对主 agent 的对话语义，载荷与实态正交）。
     await vi.waitFor(() => expect(spy).toHaveBeenCalled());
     const record = internals.store.getMutable(handle.subagentId);
     expect(record).toBeDefined();
-    expect(record!.status).toBe("running");
+    expect(record!.status).toBe("idle");
     expect(record!.round).toBe(1);
     expect(record!.result).toBe("first-round-done");
     // 首条通知入参为 toNotifyRecord 映射后的 BgNotifyRecord（chatMode running →
@@ -181,8 +182,12 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     const handle = await service.execute({ task: "do something", slug: "test", conversation: true });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     const run1 = fake.runs[0];
-    // [H1 U6] settle 交棒 = run 应答驱动（旧 idle 相位帧随相位机退役）
-    run1.settle({ content: "round one", sessionFile: path.join(agentDir, "round-1.jsonl") });
+    // [H1 U6] settle 交棒 = run 应答驱动（旧 idle 相位帧随相位机退役）。锚文件实体落盘：
+    // [two-state-convergence U4] 翻边后轮终 idle，message 走 reviveOrThrow——锚不可解析
+    // 会触发完整 reopen 降级（round 归零世代推进），续轮直通要求锚可解析（existsSync）。
+    const anchorFile = path.join(agentDir, "round-1.jsonl");
+    fs.writeFileSync(anchorFile, "{}\n", "utf-8");
+    run1.settle({ content: "round one", sessionFile: anchorFile });
     await vi.waitFor(() => {
       expect(internals.store.getMutable(handle.subagentId)?.round).toBe(1); // 第一轮已完成
     });
@@ -197,7 +202,8 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
 
     const record = internals.store.getMutable(handle.subagentId);
     await vi.waitFor(() => expect(record?.round).toBe(2)); // 第二轮 round 累加
-    expect(record!.status).toBe("running");
+    // [two-state-convergence U4/D3] 第二轮轮终翻 idle（idle 即 resumable）
+    expect(record!.status).toBe("idle");
     expect(record!.result).toBe("round two");
   });
 
@@ -318,10 +324,11 @@ describe("[N1] one-shot 成功完成通知：SP-5 回退 resumable 后仍送达"
     await new Promise((r) => setTimeout(r, 20));
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 
-    // SP-5 语义不破坏：record 回退 running-resumable（可 message 升级续聊），未终态化
+    // SP-5 语义不破坏：record 落 idle 可续聊（[two-state-convergence U4/D3] 翻边后
+    // idle 即 resumable，可 message 升级续聊），未终态化
     const record = internals.store.getMutable(handle.subagentId);
     expect(record).toBeDefined();
-    expect(record!.status).toBe("running");
+    expect(record!.status).toBe("idle");
     expect(record!.result).toBe("done");
   });
 });

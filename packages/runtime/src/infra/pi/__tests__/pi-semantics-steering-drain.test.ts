@@ -15,21 +15,9 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { locatePiDist } from './helpers/pi-semantics-probe.js'
 
-/** 定位实装 pi-agent-core dist（cwd 逐级上溯，同 pi-paths-config-dir-contract.test.ts 范式）。 */
-function locatePiAgentCoreDist(): string | null {
-  let dir = process.cwd()
-  for (let i = 0; i < 6; i++) {
-    const candidate = join(dir, 'node_modules', '@earendil-works', 'pi-agent-core', 'dist')
-    if (existsSync(join(candidate, 'agent.js'))) return candidate
-    const parent = join(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
-
-const CORE_DIST = locatePiAgentCoreDist()
+const CORE_DIST = locatePiDist('pi-agent-core', 'agent.js')
 const SKIP_REASON = CORE_DIST
   ? ''
   : 'node_modules/@earendil-works/pi-agent-core/dist 不可达（cwd 上溯 6 级未命中）'

@@ -31,9 +31,9 @@
 //      单批 + 落标 → 二次重启零补发；
 //   8. async 对照（同构造无 collectMode）：覆写 entry 批域字段不出现、result 按
 //      merge 补齐（拉齐修复口径）；
-//   9. 豁免路径（断言 pi，覆写不落盘）：E1 直读轮终 running+resumable entry 走
-//      resumable 豁免判定 → 补发可达（判定侧另一分支，与协调器 hasRunningSync 同构）；
-//  10. P-rebuild：rebuildEntryRecord 新投影字段（resumable/sessionFile）不改变
+//   9. 轮终放行路径（断言 pi，覆写不落盘）：E1 直读轮终 idle entry（[U4] 翻边）经
+//      status 判据放行 → 补发可达（与协调器 hasRunningSync 同构）；
+//  10. P-rebuild：rebuildEntryRecord 投影字段（sessionFile）不改变
 //      recoverEntryOnlyOrphans 的「只认 running 末条」候选判定；
 //  11. v2 断链 4（设计 §3.3 D4）延迟闭合：E1 waiting → 注册 settled 有界重扫 →
 //      成员补种终态 entry → settled 边沿重扫补发单批 + 落标 → 后续 settled 零处理；
@@ -346,15 +346,17 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     return childFile;
   }
 
-  /** 种下「崩溃前主文件末条序列」：register（running+sync）→ 轮终（running+
-   *  resumable + result 全文 + sessionFile）——成功成员崩溃时的真实末条形态
-   *  （SP-5 one-shot 轮终写点，finalize-record.ts doFinalizeRoundToIdle）。
+  /** 种下「崩溃前主文件末条序列」：register（running+sync）→ 轮终（idle + result
+   *  全文 + sessionFile）——[U4/D3] 翻边后轮终权威形态（markRoundIdle 写 idle；
+   *  U5 前 SP-5 桥接形态 running+resumable 已随 [U5/D4] 字段退役消亡）。
    *  collectMode 必须显式传（"sync" 主用例 / undefined async 对照）——不可给默认值：
    *  JS 默认参数对显式 undefined 也触发，async 对照会被默认 "sync" 污染。 */
   function seedRoundTerminalEntries(id: string, childFile: string, result: string, model: string, collectMode: "sync" | undefined): void {
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id, sessionFile: childFile, model, collectMode }));
-    store.reportSubagentRecord(memberRecord({ id, sessionFile: childFile, model, collectMode, resumable: true, result }));
+    store.reportSubagentRecord(
+      memberRecord({ id, sessionFile: childFile, model, collectMode, status: "idle", stopReason: "completed", result }),
+    );
   }
 
   it("标记与终态五字段经真实落盘→扫描投影后可见（rebuildEntryRecord 白名单扩展）", () => {
@@ -650,8 +652,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   // 与 E1 在同一测试里真实跑）。
   // ============================================================
 
-  it("kill -9 同构主用例：orphan 覆写 merge 保留批标记与 result/model → E1 补发单批 + 落标 → 二次重启零补发", async () => {
-    // ── 崩溃前形态：register（running+sync）→ 轮终（running+resumable+result 全文）──
+  it("kill -9 同构主用例：轮终 idle 末条自洽（[U4] 翻边后无需 orphan 纠偏）→ E1 补发单批 + 落标 → 二次重启零补发", async () => {
+    // ── 崩溃前形态：register（running+sync）→ 轮终（idle+result 全文，[U4] 翻边）──
     const childFile = writeChildSessionFile("sa-kill9", "kill -9 crash task");
     seedRoundTerminalEntries("sa-kill9", childFile, "kill-9 full result body", "prov/round-m", "sync");
 
@@ -660,14 +662,13 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const recoveryPi = makeWritingPi(mainFile);
     const recovery = makeRecoveryService(recoveryPi);
 
-    // 断链 2 核心断言：覆写 entry（主文件末条）保留批域标记与轮终正文/模型——
-    // 重建矩阵不含这些字段，不 merge 就会被覆写抹掉（E1 候选集恒空的真根因）。
+    // [U4/D4 → U5] 末条轮终 idle 自洽（纠偏对象 = 残留 running，轮终形态不触发
+    // orphan 覆写）——末条直接携带轮终正文/模型/批标记（真实轮终 entry 全集），
+    // E1 直接补发，无需 merge 保真。stopReason 对齐 markRoundIdle 簿记⑩。
     const overwritten = readMainFileLastEntries().get("sa-kill9")!;
     expect(overwritten.status).toBe("idle");
-    // [U3 / §3.2.4] 纠偏一律保留 idle：无旧终态遗留位（closedReason），stopReason
-    // 走重建单规则兜底
     expect(overwritten.closedReason).toBeUndefined();
-    expect(overwritten.stopReason).toBe("interrupted-by-restart");
+    expect(overwritten.stopReason).toBe("completed");
     expect(overwritten.collectMode).toBe("sync");
     expect(overwritten.result).toBe("kill-9 full result body");
     expect(overwritten.model).toBe("prov/round-m");
@@ -675,7 +676,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // entry 落盘后末条变 idle，判据不再命中」构造性承接）
     expect(fs.existsSync(`${childFile}.state`)).toBe(false);
 
-    // ── E1 真实跑：末条（覆写后 closed entry）候选命中 → 补发 + 落标 ──
+    // ── E1 真实跑：末条 idle 候选命中（status 判据放行）→ 补发 + 落标 ──
     const spy = spyNotifier(recovery);
     await recovery.recoverSyncCollectBatch();
     expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
@@ -683,7 +684,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
     expect(batch).toHaveLength(1);
     expect(batch[0]!.id).toBe("sa-kill9");
-    // 成功成员正文含 result 全文（来自覆写 entry 的 merge 保留，非 "(empty)"）
+    // 成功成员正文含 result 全文（来自轮终 entry，非 "(empty)"）
     expect(batch[0]!.result).toBe("kill-9 full result body");
     expect(batch[0]!.status).toBe("closed");
 
@@ -735,12 +736,18 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(overwritten.model).toBe("prov/async-m");
   });
 
-  it("merge 保留方向反向锁定：子文件 identity 重建 model=A 非空 + 主文件轮终 model=B → 覆写 entry 取 rec 侧 A（仅补不覆盖）", () => {
+  it("merge 保留方向反向锁定：子文件 identity 重建 model=A 非空 + 主文件残留 running 末条 model=B → 覆写 entry 取 rec 侧 A（仅补不覆盖）", () => {
     // 反向构造（既有用例只测「rec 侧空 → src 补齐」方向，恒取 src 的覆盖语义回归下
     // 仍绿）：rec 侧 model 来自子文件头部 model_change 的 light 重建（A），last 侧
-    // model 来自主文件轮终 entry（B≠A）→ 覆写 entry 必须保留 A。
+    // model 来自主文件在飞残留 running entry（B≠A，kill -9 在飞死亡 + 轮中
+    // model_change 的真实形态）→ 覆写 entry 必须保留 A。
+    // [U4/D4] 纠偏前提 = 末条残留 running（轮终 idle 形态不触发覆写），故本用例
+    // 末条种 running（在飞死亡），与 seedRoundTerminalEntries 的轮终 idle 序列分流。
     const childFile = writeChildSessionFile("sa-merge-dir", "merge direction task", "prov-child/child-m-a");
-    seedRoundTerminalEntries("sa-merge-dir", childFile, "merge direction result", "prov/round-m-b", "sync");
+    const store = makeSeedStore();
+    store.reportSubagentRecord(
+      memberRecord({ id: "sa-merge-dir", sessionFile: childFile, model: "prov/round-m-b", collectMode: "sync", result: "merge direction result" }),
+    );
 
     const recoveryPi = makeWritingPi(mainFile);
     makeRecoveryService(recoveryPi); // initSession 内 orphan 覆写（merge 生效点）真实跑
@@ -750,7 +757,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     // rec 侧 A（identity 重建值）胜出：merge 是「仅补 undefined/空值、不覆盖已有值」，
     // 恒取 src 的覆盖语义会把这里改写成 B —— pickStr 的 cur 半边由此锁定。
     expect(overwritten.model).toBe("prov-child/child-m-a");
-    // 前提自检（非 vacuous）：src 侧轮终 entry（覆写前已落盘，仍在文件中）确携带
+    // 前提自检（非 vacuous）：src 侧 running entry（覆写前已落盘，仍在文件中）确携带
     // 异值 B——证明 cur 侧非空时 src 侧有可覆盖的异值被让位，而非「无源可取」。
     const allModels = fs.readFileSync(mainFile, "utf-8").split("\n")
       .filter((l) => l.includes(SUBAGENT_RECORD_CUSTOM_TYPE) && l.includes("sa-merge-dir"))
@@ -758,27 +765,26 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(allModels).toContain("prov/round-m-b");
   });
 
-  it("豁免路径：轮终 running+resumable 末条（覆写不落盘）→ E1 resumable 豁免 → 补发可达 + manifest 如实投影 running", async () => {
+  it("轮终 idle 末条（覆写不落盘）→ E1 status 判据放行 → 补发可达 + manifest 如实投影", async () => {
     const childFile = writeChildSessionFile("sa-exempt", "exempt path task");
     seedRoundTerminalEntries("sa-exempt", childFile, "exempt full result body", "prov/round-m", "sync");
 
-    // 断言 pi：orphan 覆写 entry 不落盘——主文件末条保持轮终 running+resumable 形态，
-    // E1 读的是该 entry（覆写不可达的防御分支残余，正是豁免口径要覆盖的形态）。
+    // 断言 pi：orphan 覆写 entry 不落盘——主文件末条保持轮终 idle 形态（[U4] 翻边
+    // 权威词），E1 读的是该 entry（覆写不可达的防御分支残余）。
     const pi = makeAssertPi();
     const recovery = makeRecoveryService(pi);
 
-    // 前提自检：主文件末条仍是轮终 running+resumable（旧口径 status !== "closed"
-    // 会把它顶死在「等自然终态」，本用例锁定豁免判定让补发可达）。
+    // 前提自检：主文件末条仍是轮终 idle（旧口径 status !== "closed"
+    // 会把它顶死在「等自然终态」，本用例锁定 status 判据放行让补发可达）。
     const lastBefore = readMainFileLastEntries().get("sa-exempt")!;
-    expect(lastBefore.status).toBe("running");
-    expect(lastBefore.resumable).toBe(true);
+    expect(lastBefore.status).toBe("idle");
 
     const spy = spyNotifier(recovery);
     await recovery.recoverSyncCollectBatch();
     expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
     const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
     expect(batch[0]!.id).toBe("sa-exempt");
-    // 补发内容 = 轮终快照（result 全文；resumable 投影使豁免判定可见）
+    // 补发内容 = 轮终快照（result 全文；status 判据放行）
     expect(batch[0]!.result).toBe("exempt full result body");
 
     // 落标 entry（断言 pi 的内存面）：覆写被豁免放行的成员同样统一补标
@@ -789,8 +795,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(marks.map((m) => m.id)).toEqual(["sa-exempt"]);
 
     // [v2 D1/D2 断链 1] E1 补发路径（rebuildEntryRecord 重建快照来源）的 manifest：
-    // 写账前屏障 await 补写（await 返回时必在场），成功成员此刻实态 running+
-    // resumable → status 如实投影 "running"（D2：不撒谎写 closed）；sessionFile
+    // 写账前屏障 await 补写（await 返回时必在场），成功成员末条轮终 idle →
+    // status 如实投影（D2：不撒谎写 closed）；sessionFile
     // 来自 W1 的投影扩展（前置依赖）。
     const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-exempt.json");
     expect(fs.existsSync(manifestFile)).toBe(true);
@@ -803,6 +809,33 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       createdAt: 1000,
       sessionFile: childFile,
     });
+  });
+
+  it("[two-state-convergence U4] 翻边轮终末条（idle entry，覆写不落盘）→ E1 status 子句排除 → 补发可达（与桥接形态同判）", async () => {
+    // 翻边后（U4 写面写 idle）成功成员崩溃时的末条形态：idle + resumable 无 +
+    // result 全文。判据 isCollectPending 的 status 子句排除该形态 → 不顶死在
+    // 「等自然终态」，补发直达（与上方桥接 running+resumable 豁免用例同判据 SSOT）。
+    const childFile = writeChildSessionFile("sa-exempt-idle", "flipped idle terminal task");
+    const store = makeSeedStore();
+    store.reportSubagentRecord(memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync" }));
+    store.reportSubagentRecord(
+      memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync", status: "idle", result: "flipped idle result body" }),
+    );
+
+    const pi = makeAssertPi();
+    const recovery = makeRecoveryService(pi);
+
+    // 前提自检：主文件末条 = 翻边轮终 idle 形态（resumable 无——U4 不再写）。
+    const lastBefore = readMainFileLastEntries().get("sa-exempt-idle")!;
+    expect(lastBefore.status).toBe("idle");
+    expect(lastBefore.resumable).toBeUndefined();
+
+    const spy = spyNotifier(recovery);
+    await recovery.recoverSyncCollectBatch();
+    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
+    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
+    expect(batch[0]!.id).toBe("sa-exempt-idle");
+    expect(batch[0]!.result).toBe("flipped idle result body");
   });
 
   // ============================================================
@@ -939,14 +972,13 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     ).toBe(false);
   });
 
-  it("P-rebuild：新投影字段不改变 entry-born 孤儿判定（轮终 running 末条无子文件锚仍入判定覆写）", () => {
-    // 轮终形态末条（running + resumable + sessionFile 字段在 entry 里），子文件不
-    // 存在——recoverEntryOnlyOrphans 的「只认 running 末条」判定不应因新投影字段
-    // （resumable/sessionFile）而跳过该 id（resumable 豁免只在 E1 口径，不在
-    // entry-born 域）。
+  it("P-rebuild：投影字段不改变 entry-born 孤儿判定（register running 末条无子文件锚仍入判定覆写）", () => {
+    // register 形态末条（running + sessionFile 字段在 entry 里），子文件不存在
+    // ——recoverEntryOnlyOrphans 的「只认 running 末条」判定不应因投影字段
+    // （sessionFile 等）而跳过该 id。
     const seedStore = makeSeedStore();
     seedStore.reportSubagentRecord(
-      memberRecord({ id: "sa-p-rebuild", resumable: true, result: "round done", sessionFile: path.join(agentDir, "no-such-child.jsonl") }),
+      memberRecord({ id: "sa-p-rebuild", result: "round done", sessionFile: path.join(agentDir, "no-such-child.jsonl") }),
     );
 
     const pi = makeAssertPi();
@@ -1016,18 +1048,18 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   // rebuildEntryRecord 补 patchFile 投影。
   // ============================================================
 
-  it("E1 恢复批语义：one-shot 成功成员（running+resumable 末条）补发记录为 closed 形态——批头计数正确 + patchFile 提示在场", async () => {
+  it("E1 恢复批语义：one-shot 成功成员（轮终 idle 末条）补发记录为 closed 形态——批头计数正确 + patchFile 提示在场", async () => {
     const patchPath = path.join(agentDir, "patches", "sa-ntf.patch");
-    // 崩溃前主文件末条序列：register → 轮终 running+resumable + result 全文 + patchFile
-    //（worktree one-shot 成功成员 kill -9 后的真实末条形态，SP-5 轮终写点）。
+    // 崩溃前主文件末条序列：register → 轮终 idle + result 全文 + patchFile
+    //（worktree one-shot 成功成员 kill -9 后的真实末条形态，[U4] 翻边轮终写点）。
     const store = makeSeedStore();
     store.reportSubagentRecord(memberRecord({ id: "sa-ntf", collectMode: "sync", patchFile: patchPath }));
     store.reportSubagentRecord(
       memberRecord({
         id: "sa-ntf",
         collectMode: "sync",
-        resumable: true,
-        result: "resumable full result body",
+        status: "idle",
+        result: "idle round full result body",
         endedAt: 2000,
         patchFile: patchPath,
       }),
@@ -1053,7 +1085,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(sent.content).toContain("Subagent batch completed: 1 finished, 0 failed, 0 cancelled.");
     // 条目文案：completed 终态而非「finished a round」（对话轮次语义）
     expect(sent.content).toContain("completed. Result:");
-    expect(sent.content).toContain("resumable full result body");
+    expect(sent.content).toContain("idle round full result body");
     expect(sent.content).not.toContain("finished a round");
     // patchFile 的 git-apply 回收指针在场（修复前投影缺失 → 提示整行丢失）
     expect(sent.content).toContain(`git apply ${patchPath}`);
@@ -1115,8 +1147,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(h1Last).toBeDefined();
     expect(h1Last!.batchFinalized).toBe(true);
     expect(h1Last!.collectMode).toBe("sync");
-    // [U5] 失败轮 settle（markRoundIdle 保持 running-resumable）——entry status 投影
-    // 随之 running（不终态化）
-    expect(h1Last!.status).toBe("running");
+    // [U5] 失败轮 settle（markRoundIdle 落 idle，不终态化——
+    // [two-state-convergence U4/D3] 翻边）——entry status 投影随之 idle
+    expect(h1Last!.status).toBe("idle");
   });
 });

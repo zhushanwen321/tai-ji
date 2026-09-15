@@ -1,0 +1,52 @@
+name: Coverage
+
+# Renderer 覆盖率门禁（阈值 SSOT = packages/renderer/vitest.config.ts coverage.thresholds，
+# 基线-2~3% 原则与方法论见 docs/TEST-STRATEGY.md §7「先测量后设阈」）。
+# [HISTORICAL] 原设计把 --coverage 挂在 ci.yml renderer test 步骤（S3-W1），但 pnpm@10
+# 恢复 npm 式 `--` 透传后该 flag 落在 cac 文件过滤器位，自落地起从未真正执行（2026-09-14
+# 排查确认）。修复透传时将门禁迁至此独立 workflow：PR CI 不跑插桩（~2x 会把 renderer
+# 推到 ~5min 关键路径），阈值防侵蚀由每日快照 + 手动触发兜底——vitest thresholds 任一
+# 指标跌破即非零退出（红灯）。注意：schedule 仅在默认分支生效（GitHub 限制）。
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每日 01:30 UTC = 09:30 CST，避开整点高峰
+    - cron: '30 1 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  renderer-coverage:
+    name: Renderer coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      # exec 直传参数不经 `--`（同 ci.yml [HISTORICAL] 注记）；coverage 阈值与
+      # include/exclude 全部以 vitest.config.ts 为准，此处不重复声明。
+      - name: Test with coverage
+        run: pnpm --filter @xyz-agent/frontend exec vitest run --coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: packages/renderer/coverage/
+          retention-days: 14

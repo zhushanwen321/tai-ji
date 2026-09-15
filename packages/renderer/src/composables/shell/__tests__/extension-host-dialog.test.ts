@@ -4,7 +4,8 @@
  * 覆盖：TC1-TC4 convertToDialogRequest 转换（source 判定 / askUser 改写 / options 归一 /
  * method 超界恢复 + receivedAt）；TC5 无 sessionId 跳过；TC6 投递层 askUser 过滤（C4 分流）；
  * TC7/TC8 回传双通道（plugin.uiResponse / extension.ui_response 复用）；TC9 onUiTimeout WS 订阅；
- * TC10 onUiRequestExpired 撤窗订阅（D2，requestId 反查 sessionId + miss noop）。
+ * TC10 onUiRequestExpired 撤窗订阅（D2，requestId 反查 sessionId + miss noop）；
+ * TC-G1 respond 路径反查表删除（memory-leak-remediation G1）。
  *
  * 策略：convertToDialogRequest 直测（纯函数）；createDialogRequestSource 用真实
  * InternalEventBus（bus.emit）+ dispatchGlobal（onGlobal 通道）——对齐 useExtensionHostBridge.test.ts
@@ -29,6 +30,8 @@ import {
   convertToDialogRequest,
   createDialogRequestSource,
   createUiResponseTransport,
+  _probeDialogRequestIdSessionsSize,
+  __resetDialogRequestIdSessionsForTest,
 } from '../extension-host-dialog'
 
 function makeUiRequestEvent(overrides: Partial<{ sessionId: string; pluginId: string; requestId: string; kind: 'select' | 'confirm' | 'input' }> = {}): Extract<InternalEvent, { kind: 'ui-request' }> {
@@ -211,6 +214,7 @@ describe('createDialogRequestSource（C2/C3/C4 分流）', () => {
 describe('createUiResponseTransport（AC6/AC9）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    __resetDialogRequestIdSessionsForTest()
   })
 
   it('TC7: sendPluginResponse 发 plugin.uiResponse（runtime handleUiResponse 消费）', () => {
@@ -234,5 +238,80 @@ describe('createUiResponseTransport（AC6/AC9）', () => {
     const t = createUiResponseTransport()
     t.sendPiResponse('s1', 'r1', 'unknown-method', true)
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'input', true)
+  })
+})
+
+describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation §3.4）', () => {
+  let bus: InternalEventBus
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    __resetDialogRequestIdSessionsForTest()
+    bus = new InternalEventBus()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** 投递一个非 askUser dialog（写入 requestIdSessions 反查表）并返回投递 handler 调用数基线 */
+  function deliverRequest(requestId: string, sessionId = 's1'): void {
+    const source = createDialogRequestSource(bus)
+    const handler = vi.fn()
+    const unsub = source.onUiRequest(handler)
+    bus.emit({ kind: 'ui-request', sessionId, request: { requestId, pluginId: 'p1', kind: 'confirm' } })
+    unsub()
+  }
+
+  it('TC-G1a: pi respond（sendPiResponse）后表项删除——迟到撤窗广播 miss noop', () => {
+    // [G1] 此前唯一删除点是 plugin:uiRequestExpired 撤窗广播（plugin 源独有）；pi 源 dialog
+    // 的有效清理路径只有 respond，而 extension.ui_timeout 是死链（不排定时器，§2.1）。
+    const source = createDialogRequestSource(bus)
+    const expiredHandler = vi.fn()
+    const unsubExpired = source.onUiRequestExpired(expiredHandler)
+    deliverRequest('r1')
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    // respond：用户作答 → 回传 extension.ui_response → 表项删除
+    const transport = createUiResponseTransport()
+    transport.sendPiResponse('s1', 'r1', 'confirm', true)
+    expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+
+    // 已 respond 的请求收到迟到撤窗广播 → 反查 miss → noop（不误触已达应答 dialog）
+    dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r1', pluginId: 'p1' } })
+    expect(expiredHandler).not.toHaveBeenCalled()
+    unsubExpired()
+  })
+
+  it('TC-G1b: plugin respond（sendPluginResponse）后表项删除——迟到撤窗广播 miss noop', () => {
+    const source = createDialogRequestSource(bus)
+    const expiredHandler = vi.fn()
+    const unsubExpired = source.onUiRequestExpired(expiredHandler)
+    deliverRequest('r2')
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    const transport = createUiResponseTransport()
+    transport.sendPluginResponse('r2', { value: 'x' })
+    expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+
+    dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r2', pluginId: 'p1' } })
+    expect(expiredHandler).not.toHaveBeenCalled()
+    unsubExpired()
+  })
+
+  it('TC-G1c: 未 respond 的表项保留——撤窗反查仍命中（respond 删除不误伤展示中条目）', () => {
+    // 防御性边界：respond 补删不能波及排队/展示中（未作答）条目——撤窗路径仍按 D2 语义反查出队
+    const source = createDialogRequestSource(bus)
+    const expiredHandler = vi.fn()
+    const unsubExpired = source.onUiRequestExpired(expiredHandler)
+    deliverRequest('r3', 's9')
+    expect(_probeDialogRequestIdSessionsSize()).toBe(1)
+
+    // 无 respond，直接撤窗 → 反查命中（投递时归属 sid）+ 出队后表项删除（原有语义保持）
+    dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r3', pluginId: 'p1' } })
+    expect(expiredHandler).toHaveBeenCalledTimes(1)
+    expect(expiredHandler).toHaveBeenCalledWith({ sessionId: 's9', requestId: 'r3' })
+    expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+    unsubExpired()
   })
 })

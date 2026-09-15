@@ -95,7 +95,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 保持 running", async () => {
+  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 翻 idle（[two-state-convergence U4] 写面翻边）", async () => {
     const beforeRound = record.round;
 
     await service.chatActions.deliverChatMessage(record, "next round msg");
@@ -118,9 +118,66 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // 模拟引擎 agent_settled 应答（轮末分流 = run 应答驱动，D7）
     run.settle({ content: "round text" });
 
-    // 等 detached 完成：round 累加、record 保持 running-resumable（v4 B-1 idle 折入 running）
+    // 等 detached 完成：round 累加、轮终翻 idle（[two-state-convergence U4/D3] 写面
+    // 翻边——idle 即 resumable，续聊经 revive 过站，SP-5 寻址链不查 status）
     await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1));
+    expect(record.status).toBe("idle");
+    expect(record.result).toBe("round text");
+    expect(record.stopReason).toBe("completed");
+  });
+
+  it("[P3 ⛔ two-state-convergence U4] chat 轮终翻 idle → message → revive 过站直通：status 翻 running + 恰一条迁移 entry + 无其他簿记变更（round/closedReason 不动）", async () => {
+    // 前置：让 record 先真实轮终一轮（写面翻边 idle 形态——markRoundIdle 收口）。
+    // 等 stopReason（轮终产物）而非 round——makeIdleRecord 预置 round=1，round 判据
+    // 会在 settle 前立即通过。
+    await service.chatActions.deliverChatMessage(record, "first round");
+    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
+    fake.runs[0]!.settle({ content: "first round text" });
+    await vi.waitFor(() => expect(record.stopReason).toBe("completed"));
+    // 翻边形态自检：轮终落 idle（resumable 无、closedReason 清、stopReason=completed）
+    expect(record.status).toBe("idle");
+    expect(record.closedReason).toBeUndefined();
+    expect(record.stopReason).toBe("completed");
+
+    // revive 过站守卫自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）+
+    // chatMode=true（revive 格 gate 分支跳过——gate 仅对非 chatMode record 生效）
+    expect(record.chatMode).toBe(true);
+
+    // message 前清迁移上报计数——「恰一条」锚定 message 触发的 entry 序列。快照式
+    // 捕获（spread 字段）而非存引用：revive entry 与轮始 entry 共享同一 record 对象，
+    // markRoundStarted 清 result 会回写污染引用捕获。
+    const storeLike = service as unknown as {
+      store: { reportRecordTransition: (rec: ExecutionRecord) => void };
+    };
+    const entrySnapshots: Array<{ status?: string; result?: string; round?: number }> = [];
+    const transitionSpy = vi.spyOn(storeLike.store, "reportRecordTransition").mockImplementation((rec) => {
+      entrySnapshots.push({ status: rec.status, result: rec.result, round: rec.round });
+    });
+    const roundBefore = record.round;
+
+    await service.chatActions.deliverChatMessage(record, "revive after idle round");
+
+    // revive 过站：tryEnterRunning 翻回 running（dispatchRoundGuarded 守卫由此放行）
     expect(record.status).toBe("running");
+    // 迁移 entry 精确断言（R3——断言「恰一条」而非「无副作用」）：message 链共落两条
+    // 设计内 entry——①revive 迁移 entry（reviveClosedRecord 无条件落，携带上轮 result）
+    // 恰一条；②轮始重置 entry（markRoundStarted 簿记，result 已清）恰一条。
+    const reviveEntries = entrySnapshots.filter((e) => e.result !== undefined);
+    const startedEntries = entrySnapshots.filter((e) => e.result === undefined);
+    expect(reviveEntries).toHaveLength(1);
+    expect(reviveEntries[0]!.result).toBe("first round text");
+    expect(startedEntries).toHaveLength(1);
+    // 无其他簿记变更：round 不推进（revive 格不累加，轮始 markRoundStarted 才归口）、
+    // closedReason 保持清除态。result 在 message 返回时点已被轮始清点
+    //（markRoundStarted 归口——isStreaming 公式要求），revive 过站瞬间 result 保留的
+    // 证据由上方 revive entry 快照承载（e.result = "first round text"）。
+    expect(record.round).toBe(roundBefore);
+    expect(record.closedReason).toBeUndefined();
+    expect(record.result).toBeUndefined();
+    // 新轮派发：fake 引擎收到续轮 run（resume 续写原文件）
+    await vi.waitFor(() => expect(fake.runs.length).toBe(2));
+    expect(fake.runs[1]!.task.prompt).toBe("revive after idle round");
+    expect(entrySnapshots).toHaveLength(2);
   });
 
   it("[U4 万物可续] 旧终态遗留位 record（idle + closedReason=gc）→ 直接接管派发，不硬拒（形态枚举 gate 消亡）", async () => {
@@ -197,7 +254,6 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
 
   it("轮间 message → Continuation 派发新轮 + 执行态信号清除（[H1 U2] 承接原冷路径语义）", async () => {
     record.result = "上一轮增量";
-    record.resumable = true;
 
     await service.chatActions.deliverChatMessage(record, "after you finish");
 
@@ -210,7 +266,6 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     // 轮始执行态信号清除（§5.4 isStreaming 公式）+ 迁移上报
     expect(record.status).toBe("running");
     expect(record.result).toBeUndefined();
-    expect(record.resumable).toBeUndefined();
   });
 
   it("settle 交棒 = run 应答驱动（D7）：派发后挂中段守护，应答 settle 后轮终守护清空", async () => {

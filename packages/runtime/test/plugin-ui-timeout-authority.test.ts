@@ -562,3 +562,88 @@ describe('expired 撤窗广播分流（R1-1）', () => {
     expect(expired[0].payload.sessionId).toBe('sess-1')
   })
 })
+
+// ══════════════════════════════════════════════════════════════════
+// MF-2/MF-3 sessionId 注入回归（自 plugin-ui-dialog.test.ts 归并）
+// 无 sid 的 uiRequest 会被前端 C2 守卫丢弃 → plugin dialog 永不弹出。
+// ══════════════════════════════════════════════════════════════════
+
+describe('UI Dialog sessionId 注入（MF-2/MF-3 R2 回归）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** 活跃 session 桩：listPersistedSessions 返回 status==='active' 的 session（ActiveSessionResolver 全盘扫描依据）。 */
+  function createActiveSessionStub(sessionId: string): ISessionService {
+    return {
+      listPersistedSessions: () => [{
+        cwd: '/tmp',
+        sessions: [{ id: sessionId, label: sessionId, cwd: '/tmp', status: 'active', lastActiveAt: 1, modelId: 'test-model' }],
+      }],
+    } as unknown as ISessionService
+  }
+
+  function createDialogService(depsOverrides?: Partial<{ sessionService: ISessionService }>): {
+    service: PluginService
+    broadcasts: Array<{ type: string; payload: Record<string, unknown> }>
+  } {
+    const broadcasts: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const broker = {
+      send: vi.fn(),
+      sendError: vi.fn(),
+      broadcast: vi.fn((msg: { type: string; payload: unknown }) => {
+        broadcasts.push({ type: msg.type, payload: msg.payload as Record<string, unknown> })
+      }),
+    }
+    const registry = new PluginRegistry('/tmp/fake-project', '/tmp/fake-project')
+    const service = new PluginService(registry, broker as unknown as IMessageBroker, {
+      broadcastFn: (type, payload) => broker.broadcast({ type, payload }),
+      sessionService: depsOverrides?.sessionService,
+    })
+    ;(service as unknown as { registerRpcMethods(): void }).registerRpcMethods()
+    return { service, broadcasts }
+  }
+
+  it('MF-3：无活跃 session（deps.sessionService 未注入）→ broadcast payload sessionId 为 undefined', async () => {
+    const { service, broadcasts } = createDialogService()
+    const methods = (service as unknown as {
+      rpcServer: { methods: Map<string, (params: Record<string, unknown>) => Promise<unknown>> }
+    }).rpcServer.methods
+    const confirmPromise = methods.get('plugin.ui.showConfirm')!({
+      pluginId: 'test-plugin',
+      title: 'Confirm?',
+      message: 'Are you sure?',
+    })
+
+    const call = broadcasts.find(m => m.type === 'plugin:uiRequest')
+    expect(call).toBeDefined()
+    // 注入缺失回归：无 sid 的 uiRequest 会被前端 C2 守卫按 sessionId 分区丢弃
+    expect(call!.payload.sessionId).toBeUndefined()
+
+    service.handleUiResponse(call!.payload.requestId as string, true)
+    await expect(confirmPromise).resolves.toBe(true)
+  })
+
+  it('MF-2：活跃 session 注入 → broadcast payload 携带 active sessionId', async () => {
+    const { service, broadcasts } = createDialogService({ sessionService: createActiveSessionStub('s1') })
+    const methods = (service as unknown as {
+      rpcServer: { methods: Map<string, (params: Record<string, unknown>) => Promise<unknown>> }
+    }).rpcServer.methods
+    const confirmPromise = methods.get('plugin.ui.showConfirm')!({
+      pluginId: 'test-plugin',
+      title: 'Confirm?',
+      message: 'Are you sure?',
+    })
+
+    const call = broadcasts.find(m => m.type === 'plugin:uiRequest')
+    expect(call).toBeDefined()
+    // 核心注入断言——resolve 时点注入 broadcast payload（与 views.update 同源）
+    expect(call!.payload.sessionId).toBe('s1')
+
+    service.handleUiResponse(call!.payload.requestId as string, true)
+    await expect(confirmPromise).resolves.toBe(true)
+  })
+})

@@ -284,7 +284,7 @@ describe('SEC-A5 legal identifiers pass end-to-end', () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe('SEC-A5 store-layer resolve defense (bypassing entry layer)', () => {
-  it('SEC-A5: SessionDataStore directly rejects traversal sessionId on get/set/keys/clearSession', () => {
+  it('SEC-A5: SessionDataStore directly rejects traversal sessionId on get/set/keys/clearSession', async () => {
     const { root, configDir, cleanup } = makeTempRoot()
     const store = new SessionDataStore(configDir)
 
@@ -294,7 +294,6 @@ describe('SEC-A5 store-layer resolve defense (bypassing entry layer)', () => {
       () => store.get('../../evil', 'k'),
       () => store.set('../../evil', 'k', 'v'),
       () => store.keys('../../evil'),
-      () => store.clearSession('../../evil'),
     ]) {
       try {
         fn()
@@ -304,6 +303,8 @@ describe('SEC-A5 store-layer resolve defense (bypassing entry layer)', () => {
         expect((err as Error).message).toContain(SAFE_KEY_REGEX_LITERAL)
       }
     }
+    // clearSession 已 async（B5 trash 软删除）——防御拒绝转为 rejection（仍先于任何状态变更）
+    await expect(store.clearSession('../../evil')).rejects.toMatchObject({ code: 'INVALID_SESSION_ID' })
 
     // persist 路径与 load 共用 resolveSessionFilePath；即使构造出 dirty 分区
     // （正常途径不可能——set 先被 load 拦截），flush 也无法把文件写到目录外。

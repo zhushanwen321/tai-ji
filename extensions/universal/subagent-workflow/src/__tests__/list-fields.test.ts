@@ -4,24 +4,15 @@
 //
 // 验证 list 输出的字段派生正确：
 //   - parent：从 record.parentRecordId 派生（顶层 record → undefined）
-//   - resumable：从 isResumable 派生（running && 无活进程句柄）
 //   - outcome：一等终态语义（projectOutcome 唯一出口）；closedReason 退出对外 JSON，
 //     存量/重建 record（无 outcome 字段）由 deriveOutcome(closedReason, error) 兜底
 //
-// Mock 策略：vi.mock lifecycle-predicates 的 isResumable，控制其返回值模拟「有/无
-// 活进程句柄」两种 running 子态。isResumable 真实逻辑（running && !hasLiveProcessHandle）
-// 由 lifecycle-predicates.test.ts 覆盖；本测试聚焦 recordToListItem 的字段派生与透传。
+// [two-state-convergence U5/D4] resumable 字段已从 SubagentListItem 退役（idle 即
+// resumable——state 主字段已并存表达可续聊），相关派生单测随字段删除。
 
-import { describe, expect, it, vi } from "vitest";
-
-// mock lifecycle-predicates：控制 isResumable 返回值。
-// recordToListItem 内部 import 的 isResumable 经 vitest 自动接线拿到此 mock 版本。
-vi.mock( "@zhushanwen/subagent-core/execution/lifecycle/lifecycle-predicates.ts", () => ({
-	isResumable: vi.fn(),
-}));
+import { describe, expect, it } from "vitest";
 
 import { recordToListItem } from "../interface/subagent-actions.ts";
-import { isResumable } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 
 // ── SubagentRecord stub 工厂（最小合法 record） ──
@@ -52,7 +43,7 @@ function makeRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
 	};
 }
 
-describe("recordToListItem — parent/resumable (v4 A-6)", () => {
+describe("recordToListItem — parent/outcome (v4 A-6 + U3 C-outcome)", () => {
 	// ═══ parent：从 record.parentRecordId 派生 ═══
 
 	it("parent：嵌套 record（parentRecordId='sa-A'）→ parent='sa-A'", () => {
@@ -65,24 +56,14 @@ describe("recordToListItem — parent/resumable (v4 A-6)", () => {
 		expect(recordToListItem(rec).parent).toBeUndefined();
 	});
 
-	// ═══ resumable：isResumable 透传（mock 模拟有/无活进程句柄） ═══
+	// ═══ resumable 字段退役断言（[U5/D4]）：list JSON 不再携带该键 ═══
 
-	it("resumable：running + 无活进程句柄（isResumable=true）→ true（B-1 续聊态）", () => {
-		vi.mocked(isResumable).mockReturnValue(true);
-		const rec = makeRecord({ status: "running" });
-		expect(recordToListItem(rec).resumable).toBe(true);
-	});
-
-	it("resumable：running + 有活进程句柄（isResumable=false）→ false（正在执行）", () => {
-		vi.mocked(isResumable).mockReturnValue(false);
-		const rec = makeRecord({ status: "running" });
-		expect(recordToListItem(rec).resumable).toBe(false);
-	});
-
-	it("resumable：已收口（idle+closedReason 桥接形态，isResumable=false）→ false", () => {
-		vi.mocked(isResumable).mockReturnValue(false);
-		const rec = makeRecord({ status: "idle", closedReason: "gc" });
-		expect(recordToListItem(rec).resumable).toBe(false);
+	it("resumable 字段已退役：list item 不携带（idle 即 resumable，state 主字段承载）", () => {
+		const rec = makeRecord({ status: "idle" });
+		const item = recordToListItem(rec);
+		expect("resumable" in item).toBe(false);
+		const parsed = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
+		expect("resumable" in parsed).toBe(false);
 	});
 
 	// ═══ outcome：一等终态披露（U3 C-outcome，projectOutcome 唯一出口）═══

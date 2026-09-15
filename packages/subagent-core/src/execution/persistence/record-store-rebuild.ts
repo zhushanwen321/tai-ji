@@ -247,9 +247,10 @@ function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord,
  *     closedReason 迁移映射。
  * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位（closed-only，
  * 防 running + closedReason 脏组合）；stopReason 经 isValidStopReason 守卫后有值即
- * 透传——running entry 的合法停因（A-lite 轮终 running-resumable 携带 completed/
- * failed）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite 阶段 3
- * 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
+ * 透传——running entry 的合法停因（存量桥接形态轮终 entry 携带 completed/failed；
+ * [two-state-convergence U4] 翻边后新轮终 entry 落 idle + stopReason，running+停因
+ * 组合不再新产）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite
+ * 阶段 3 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
  */
 function readEntryTerminalFields(
   d: Record<string, unknown>,
@@ -266,14 +267,14 @@ function readEntryTerminalFields(
   };
 }
 
-/** 批收集域投影（U5 E1）：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。 */
+/** 批收集域投影（U5 E1）：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。
+ *  [U5/D4] resumable 投影已随字段退役删除。 */
 function readEntryBatchFields(
   d: Record<string, unknown>,
-): Pick<SubagentRecord, "collectMode" | "batchFinalized" | "resumable"> {
+): Pick<SubagentRecord, "collectMode" | "batchFinalized"> {
   return {
     collectMode: d.collectMode === "sync" ? "sync" : undefined,
     batchFinalized: d.batchFinalized === true ? true : undefined,
-    resumable: d.resumable === true ? true : undefined,
   };
 }
 
@@ -332,11 +333,11 @@ export function isEngineHandleShape(
  *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
  *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
  *  守卫已滤非 running 末条）；closedReason 经 isValidClosedReason 枚举守卫。
- *  [v2 D3] 再补 resumable/sessionFile 两投影：成功成员崩溃时末条恒为轮终
- *  running+resumable entry（SP-5 有意语义），不投影 resumable 则 E1 无法与协调器
- *  hasRunningSync 同构豁免（§2.3 断链 3）；sessionFile 原硬编码 undefined，导致
+ *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除——
+ *  桥接期豁免判据由 isCollectPending 的 status 子句承载）：sessionFile 原硬编码
+ *  undefined，导致
  *  E1 落标路径重建快照丢失反查索引锚（断链 1 前置依赖）。recoverEntryOnlyOrphans
- *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，两新字段不参与
+ *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，该字段不参与
  *  判定（P-rebuild 探针守卫面）。
  *  [E1 恢复批语义修复] 再补 patchFile 投影：entry data 携带该字段
  *  （toSubagentRecordEntry 落盘含 patchFile）但原投影丢弃 → E1 补发记录丢失
@@ -614,8 +615,9 @@ export function buildRecord(
     rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
   } else {
     // 无 sidecar：在途中断（崩溃）或尚未收口（§3.2.4「文件不存在」行）——
-    // interrupted-by-restart 纯展示值（G2：为什么停不参与资格判定）。closedReason
-    // 不写（无终态遗留位 → legacy 投影 running「活跃会话」）、endedAt 不写（非终态）。
+    // interrupted-by-restart 展示值（G2：为什么停；U6 起参与 isOccupied 判定）。
+    // closedReason 不写（无终态遗留位 → legacy 投影 running「活跃会话」）、endedAt
+    // 不写（非终态）。
     rec.stopReason = "interrupted-by-restart";
   }
   return rec;
@@ -823,12 +825,11 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     error: r.error,
     sessionFile: r.sessionFile,
     round: r.round,
-    // [E2E 实测抓漏] 缺这两行时 chatMode/resumable 在 recordToSubagent 处被丢弃，
+    // [E2E 实测抓漏] 缺 chatMode 投影时该字段在 recordToSubagent 处被丢弃，
     // entry 序列化后无此字段 → renderer isDone（需显式 chatMode===false）恒不成立，
     // 完成态 one-shot 永远显示 waiting。单测 schema 断言曾因内存对象保留 undefined
     // 键名而未拦截（真实 JSONL 丢 undefined 值），故 schema 测试改为序列化后断言。
     chatMode: r.chatMode,
-    resumable: r.resumable,
     // [review round2] worktree 隔离标志：内存源有 handle 或跨重启重建带 hadWorktree 均为 true。
     worktree: r.worktreeHandle !== undefined || r.hadWorktree === true,
     engine: r.engine,
@@ -865,9 +866,6 @@ export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord):
     // `?? ""`），pickStr 签名宽返回 string|undefined —— `?? ""` 运行时不可达，
     // 仅满足 model 非可选类型，空串回退语义不变（cur 空 → src，src 也空 → ""）。
     model: pickStr(rec.model, last.model) ?? "",
-    // 轮终执行态信号（resumable）随末条 entry 保留：子文件侧重建（reconstructAll）
-    // 不带该信号，merge 保真（信息不丢失；消费面判据随 U4/U5 意愿动作统一重写）。
-    resumable: rec.resumable ?? last.resumable,
   };
 }
 

@@ -16,8 +16,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import { bindDrawerSessionId, useDrawerControl, getBoundSessionId } from '../control'
-import { openDrawerTab, toggleDrawerDock, _resetDrawerForTest } from '../coordination'
+import { bindDrawerSessionId, useDrawerControl, getBoundSessionId, bindViewedVidPanels, getViewedVids, drawerControl } from '../control'
+import { openDrawerTab, toggleDrawerDock, closeDrawer, setDrawerTab, _resetDrawerForTest } from '../coordination'
 
 /** 当前测试分区键（每用例新建，bindDrawerSessionId 覆盖绑定） */
 let sid: Ref<string | null>
@@ -118,5 +118,74 @@ describe('null sid no-op 语义', () => {
 
     refA.value = 'A2' // 旧 ref 不再生效（已解绑）
     expect(getBoundSessionId()).toBe('B')
+  })
+})
+
+describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举）', () => {
+  // [B9] 豁免查询源钉死 panel 枚举：逐 panel → focusedSessionId → drawer 分区 → 当前选中
+  // vid（isOpen + activeTab==='subagent' + selectedSubagentId 三分量同时满足）。禁止 drawer
+  // 分区全枚举（曾开过 drawer 的 session 焦点切走后分区保留，全枚举会永久过度豁免）。
+  /** panel 枚举源（每用例新建 + 重绑定，模拟 renderer 装配层注册） */
+  let panels: Ref<Array<string | null>>
+
+  beforeEach(() => {
+    panels = ref<Array<string | null>>([])
+    bindViewedVidPanels(panels)
+  })
+
+  it('panel 焦点 session 的 drawer 正在查看 subagent tab → 该 vid 计入豁免集', () => {
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set(['agentcall:acs-1']))
+  })
+
+  it('关闭 drawer 后不豁免（A6：关闭 drawer 后再切走，分区应可释放）', () => {
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    closeDrawer()
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('drawer 开在其他 tab（非 subagent）→ 不算正在查看，不豁免', () => {
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    setDrawerTab('terminal')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set())
+  })
+
+  it('多 panel 全查（split 模式）：各 panel 焦点分区的选中 vid 都计入；null panel 跳过', () => {
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-a', 'workflow')
+    focusSession('B')
+    drawerControl.setSubagentView('subagent:B:s1', 'chat')
+    panels.value = ['A', null, 'B']
+
+    expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a', 'subagent:B:s1']))
+  })
+
+  it('禁止全枚举：panel 枚举外的分区（曾开过 drawer、焦点已切走）不计入豁免集', () => {
+    // B 曾开过 drawer 选中 acs-b，焦点切走后 B 分区保留——但 panel 枚举只含 A，
+    // B 的选中 vid 不得进入豁免集（否则永久过度豁免）
+    focusSession('B')
+    drawerControl.setSubagentView('agentcall:acs-b', 'workflow')
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-a', 'workflow')
+    panels.value = ['A']
+
+    expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a']))
+  })
+
+  it('panel 枚举为空列表（无 panel 或全 null）→ 空集（安全默认：驱逐无豁免）', () => {
+    panels.value = [] // beforeEach 绑定后即空列表
+    focusSession('A')
+    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+
+    expect(getViewedVids()).toEqual(new Set())
   })
 })

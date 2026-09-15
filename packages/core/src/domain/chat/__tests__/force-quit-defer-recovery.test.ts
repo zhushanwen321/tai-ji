@@ -184,4 +184,38 @@ describe('forceQuit 队列回收 —— core 重投状态清理（session-dead D
     expect(f.flush).not.toHaveBeenCalled()
     f.dispose()
   })
+
+  it('u10/G4: disposeSession 清连续失败计数——重开后的新失败序列从零起算（残留计数会让首次重开即熔断）', async () => {
+    const f = makeFixture()
+    const SID = 's-dispose-count'
+
+    // 预置 4 次连续失败（恰差一次到阈值 5）：若 disposeSession 不清计数，重开后首次失败即达 5 触发熔断提示
+    f.emit(SID, occupancyIdle(SID))
+    await settleFlushChain()
+    for (let i = 0; i < 3; i++) {
+      vi.advanceTimersByTime(1000)
+      await settleFlushChain()
+    }
+    expect(f.flush).toHaveBeenCalledTimes(4)
+    expect(f.toast.warning).not.toHaveBeenCalled()
+
+    // session 销毁（清 timer + 连续失败计数；重开 = ensureStreamSubscription 重建订阅）
+    f.useChat.disposeSession(SID)
+
+    // 重开后的新失败序列：4 次不熔断（计数从零起算；若残留，第 1 次即恰达阈值触发提示）
+    f.emit(SID, occupancyIdle(SID))
+    await settleFlushChain()
+    for (let i = 0; i < 3; i++) {
+      vi.advanceTimersByTime(1000)
+      await settleFlushChain()
+    }
+    expect(f.toast.warning).not.toHaveBeenCalled()
+
+    // 第 5 次恰达阈值 → 一次熔断提示（证明重开序列完整、非重投链断裂的假绿）
+    f.emit(SID, occupancyIdle(SID))
+    await settleFlushChain()
+    expect(f.toast.warning).toHaveBeenCalledTimes(1)
+    expect(f.toast.warning).toHaveBeenCalledWith('composable.deferFlushStalled')
+    f.dispose()
+  })
 })

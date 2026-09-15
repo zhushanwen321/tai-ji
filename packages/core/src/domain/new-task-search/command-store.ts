@@ -259,7 +259,8 @@ export function createCommandStore(storage: KVStorage) {
     }
   }
 
-  /** 清除指定 session 的命令（session 删除时） */
+  /** 清除指定 session 的命令（session 销毁编排调：SessionCleanupHooks.clearSlashCommands →
+   *  壳层 useCommandStore().clearCommands，[G1 / 2026-09-14 内存审计 §3.4] 接线） */
   function clearCommands(sessionId: string): void {
     if (!commandsBySession.value.has(sessionId)) return
     commandsBySession.value = new Map(commandsBySession.value)

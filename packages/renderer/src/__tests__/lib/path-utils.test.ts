@@ -1,5 +1,6 @@
 /**
- * 前端路径工具测试（mock 层）。
+ * 前端路径工具测试（mock 层；原 path-utils-improve.test.ts 已并入——同 SUT 补充用例，
+ * U 编号各自从头无并存理由）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/lib/path-utils.test.ts
  */
@@ -40,6 +41,26 @@ describe('resolvePreviewPath', () => {
   it('U7: 绝对路径在 cwd 外时 relative 为 null', () => {
     const result = resolvePreviewPath('/project', '/var/tmp/x.md')
     expect(result.absolute).toBe('/var/tmp/x.md')
+    expect(result.relative).toBeNull()
+  })
+})
+
+describe('Windows / ~ 路径补充（原 path-utils-improve.test.ts 并入）', () => {
+  it('U-imp-1: C:\\project\\src\\main.ts under C:\\project → relative src/main.ts', () => {
+    const result = resolvePreviewPath('C:\\project', 'C:\\project\\src\\main.ts')
+    expect(result.absolute).toBe('C:\\project\\src\\main.ts')
+    expect(result.relative).toBe('src/main.ts')
+  })
+
+  it('U-imp-1b: Windows path with mixed separators → 归一化正斜杠', () => {
+    const result = resolvePreviewPath('C:/project', 'C:\\project\\src\\main.ts')
+    expect(result.relative).toBe('src/main.ts')
+  })
+
+  it('U-imp-2: ~ path is absolute and relative is null', () => {
+    expect(isAbsolutePath('~/Code/foo.md')).toBe(true)
+    const result = resolvePreviewPath('/Users/me/project', '~/Code/foo.md')
+    expect(result.absolute).toBe('~/Code/foo.md')
     expect(result.relative).toBeNull()
   })
 })

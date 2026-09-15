@@ -457,3 +457,63 @@ describe('writePiCrashLog（pi 崩溃 stderr 全量落盘，U3-4）', () => {
     expect(content).toContain('second crash')
   })
 })
+
+// ── 基础行为独有用例（自 test/logger.test.ts 归并，2026-09 测试舰队审查 r2-12）──
+// 级别过滤 / pi 补换行 / 未 init no-op / initLogger 幂等——src 版此前未覆盖的四个分支。
+
+describe('logger 基础行为（自 test/logger.test.ts 归并）', () => {
+  it('级别过滤：XYZ_LOG_LEVEL=warn 时 debug/info 不落盘，warn/error 落盘', async () => {
+    logger = await loadLogger({ XYZ_LOG_LEVEL: 'warn' })
+    logger.initLogger(dataDir)
+    console.debug('debug-should-be-filtered')
+    console.info('info-should-be-filtered')
+    console.warn('warn-should-pass')
+    console.error('error-should-pass')
+    await logger.closeLogger()
+
+    const content = mainLogFiles().map((n) => readFileSync(join(logsDir(), n), 'utf8')).join('')
+    expect(content).not.toContain('debug-should-be-filtered')
+    expect(content).not.toContain('info-should-be-filtered')
+    expect(content).toContain('warn-should-pass')
+    expect(content).toContain('error-should-pass')
+  })
+
+  it('createPiSessionLog 写入自动补换行（pi JSONL 行可能无尾换行）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const sessionLog = logger.createPiSessionLog('test-sid-nl')
+    sessionLog.write('{"a":1}') // 无换行
+    sessionLog.write('{"b":2}\n') // 有换行
+    sessionLog.end()
+    await logger.closeLogger()
+
+    const piFile = readdirSync(logsDir()).find((n) => n.includes('test-sid-nl'))
+    expect(piFile).toBeDefined()
+    const lines = readFileSync(join(logsDir(), piFile!), 'utf8').split('\n').filter((l) => l.trim())
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toBe('{"a":1}')
+    expect(lines[1]).toBe('{"b":2}')
+  })
+
+  it('未 initLogger 时 createPiSessionLog 返回 no-op 写入器（不抛错）', async () => {
+    logger = await loadLogger()
+    // 不调 initLogger
+    const sessionLog = logger.createPiSessionLog('uninitialized-sid')
+    expect(() => {
+      sessionLog.write('{"type":"test"}')
+      sessionLog.end()
+    }).not.toThrow()
+  })
+
+  it('initLogger 幂等：重复调用不重复 patch console（内容只写一遍）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    logger.initLogger(dataDir) // 重复调用
+    console.log('after-double-init')
+    await logger.closeLogger()
+
+    const content = mainLogFiles().map((n) => readFileSync(join(logsDir(), n), 'utf8')).join('')
+    const matches = content.match(/after-double-init/g) ?? []
+    expect(matches).toHaveLength(1)
+  })
+})

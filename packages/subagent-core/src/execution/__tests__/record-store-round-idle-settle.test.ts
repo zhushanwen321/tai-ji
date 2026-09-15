@@ -6,8 +6,9 @@
 //   1. 成功/失败轮后 `.state` 收条在场（{status:"idle", reason: completed|failed,
 //      endedAt}——轮收口 idle 形态，重建单规则一律 idle）；
 //   2. binding 快照 turns/totalTokens 在场（U7 统计口径）；
-//   3. rec.stopReason 内存展示位（completed/failed）且 status 保持
-//      running-resumable、endedAt 不写（A3 终态冻结判据不击穿——跨轮轮终不抛）；
+//   3. rec.stopReason 内存展示位（completed/failed）且 status 翻 idle（
+//      [two-state-convergence U4/D3] 写面翻边）、endedAt 不写（A3 终态冻结判据不击穿
+//      ——跨轮轮终不抛）；
 //   4. 新 store 实例 markResurrected revive 水合不归零（turns/tokens/round 从
 //      binding 快照恢复——正常轮终后宿主崩溃的最常见形态）；
 //   5. zcode 腿锚分派：无 sessionFile 时快照写 transcriptRef 派生锚键、`.state`
@@ -72,7 +73,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
   const readStateJson = (): Record<string, unknown> =>
     JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as Record<string, unknown>;
 
-  it("成功轮（pi 锚）：收条 reason=completed + binding 快照在场 + 内存 stopReason/保持 running + revive 水合不归零", () => {
+  it("成功轮（pi 锚）：收条 reason=completed + binding 快照在场 + 内存翻 idle/stopReason + revive 水合不归零", () => {
     const record = makeRecord("bg-ok", { sessionFile });
     record.turnCount = 3;
     record.totalTokens = 1200;
@@ -80,14 +81,15 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
 
     expect(store.markRoundIdle("bg-ok", { kind: "success", content: "round output" })).toBe(true);
 
-    // ⑩ 内存展示位：status 保持 running-resumable（A-lite 不动 U2 桥接形态）、
-    // endedAt 不写（终态冻结信号——写了会击穿方法头 A3 断言的跨轮轮终）。
-    expect(record.status).toBe("running");
+    // ⑩ 内存展示位：status 翻 idle（[two-state-convergence U4/D3] 写面翻边——idle 即
+    // resumable，resumable 不再写）、endedAt 不写（终态冻结信号——写了会击穿方法头
+    // A3 断言的跨轮轮终）。
+    expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("completed");
-    expect(record.resumable).toBe(true);
     expect(record.round).toBe(1);
     expect(record.endedAt).toBeUndefined();
     expect(record.result).toBe("round output");
+    expect(record.idleSince).toBeTypeOf("number");
     // ⑪ `.state` 收条：轮收口 idle 形态（重建单规则一律 idle）。
     const state = readStateJson();
     expect(state["status"]).toBe("idle");
@@ -122,7 +124,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(store.markRoundIdle("bg-fail", { kind: "failed", reason: "engine crashed" })).toBe(true);
 
     expect(record.stopReason).toBe("failed");
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
     expect(record.lastError).toBe("engine crashed");
     expect(record.result).toContain("engine crashed");
     const state = readStateJson();
@@ -183,7 +185,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
 
     expect(() => store.markRoundIdle("bg-noanchor", { kind: "success", content: "x" })).not.toThrow();
     expect(record.stopReason).toBe("completed");
-    expect(record.status).toBe("running");
+    expect(record.status).toBe("idle");
     // tmpdir 下无任何 `.state` / `.record-binding` 产出（无锚无写面）。
     const stray = fs
       .readdirSync(tmpDir, { recursive: true })

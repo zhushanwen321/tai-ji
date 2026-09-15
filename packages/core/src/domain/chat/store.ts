@@ -314,10 +314,21 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
 }
 
 /**
- * 构造 chat 域全部 state + actions（无参）。factory 模式与归位历史见 ./README.md。
+ * 构造 chat 域全部 state + actions。factory 模式与归位历史见 ./README.md。
  * 内部用 onScopeDispose（清 timer），调用方需在 effectScope 上下文内执行本 factory。
+ *
+ * [B9 agentcall LRU 联动] options.agentCallEvictionsOf：主 session LRU 驱逐时查询应联动
+ * 释放的 agentcall 虚拟分区（豁免已由实现侧应用）。renderer 装配点
+ * （stores/chat.ts → composables/features/chat/agentcall-lru-linkage.ts）注入 workflow
+ * store 映射 ∖ viewedVids 组合查询；缺省不联动（core 单测 / 无装配环境保持旧行为）。
+ * 依赖方向：core 不 import renderer store，回调经参数注入（对齐 LruEvictDeps 模式）。
  */
-export function createChatStore() {
+export interface ChatStoreOptions {
+  /** [B9] 查询主 session 名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
+  agentCallEvictionsOf?: (mainSid: string) => string[]
+}
+
+export function createChatStore(options: ChatStoreOptions = {}) {
   /** 按 sessionId 分区的消息表（UC-2 隔离） */
   // W10 D-1 容器范式：`ShallowRef<Map<string, ShallowRef<Message[]>>>`——外层 Map 恒等稳定
   // （只在增删 sid key 时替换），每 sid 持有独立内层 ShallowRef。同 sid commit 只替换该分区
@@ -473,8 +484,8 @@ export function createChatStore() {
    * pendingSend 空窗期 timer（按 sessionId 隔离）。
    *
    * [ADR-0049 例外] 本 Map 不套 useSessionScopedState。判据：createChatStore() factory 由
-   * renderer defineStore('chat', () => createChatStore()) 包装（renderer stores/chat.ts），
-   * Pinia 按 store id 缓存——factory body 全应用只执行一次，本 Map 实质单例。factory 体内非
+   * renderer defineStore('chat', () => createChatStore(agentCallLruLinkage())) 包装（renderer
+   * stores/chat.ts，B9 联动 options 经装配模块注入），Pinia 按 store id 缓存——factory body 全应用只执行一次，本 Map 实质单例。factory 体内非
    * Vue setup 上下文（虽在 effectScope 内用 onScopeDispose，但无 sidRef: Ref<string|null>）；
    * Map 存的是 timer handle（ReturnType<typeof setTimeout>，非 reactive 业务状态）。
    * useSessionScopedState 是 setup-scoped 工厂（要求 sidRef + reactive 容器契约），factory
@@ -593,6 +604,8 @@ export function createChatStore() {
       // [u4d] 截断窗口状态同点清理（重建型，驱逐重进后重 hydrate 重建）
       clearHistoryWindow(sid)
     },
+    // [B9] agentcall 联动驱逐查询（renderer 装配注入；缺省空数组 = 不联动）
+    options.agentCallEvictionsOf,
   )
   /** W3 H3：LRU 驱逐（阈值触发）/ 显式驱逐（带虚拟 key）/ [M7] 单虚拟 key 删除 */
   function evictIfNeeded(): void { lruEvictIfNeeded(lruEvictDeps) }
@@ -1279,7 +1292,7 @@ export function createChatStore() {
   /** 截断 session 消息到 messageId（编辑重发用）。委托 chat-mutations.truncateMessagesFrom。 */
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
-  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/queueStates/failedHistory/changeSetStatuses + timer + LRU 记录。背景见 ./README.md。 */
+  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/queueStates/failedHistory/changeSetStatuses + timer + LRU 记录 + premature timeout 快照（u10/G4）。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
     // Map ref：不可变写保证响应式（new Map + delete + 赋值新 Map）。
     // D-1 后 messages 的 Map entry 是 per-session ShallowRef 分区——本循环删的是 Map entry
@@ -1317,6 +1330,10 @@ export function createChatStore() {
     // D-3 生命周期：streaming flag 惰性派生缓存随 messages 分区同点清理（漏删即慢泄漏，
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
+    // [u10 / G4 dispose 补面] premature timeout 打标快照分区同点清理（streaming-state-machine
+    // 闭包 Map——活跃期清理时机①-④全部依赖后续事件，session 删除后无事件到达，快照条目
+    // 只能由销毁编排回收；2026-09-14 内存审计 G4 杂项组）。
+    streamingStateMachine.disposePrematureTimeoutIds(sessionId)
     // timer 清理（模块级 Map，非响应式）
     for (const clear of [() => clearPendingSendTimer(sessionId), () => clearStreamingTimer(sessionId), () => clearHandingOffTimer(sessionId)]) clear()
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
@@ -1421,6 +1438,8 @@ export function createChatStore() {
       _sessionStreamingFlagsForTest: sessionStreamingFlags,
       /** [W21] per-session reducer 累积态（断言 applyEntryFrame 喂入/清理语义用，生产代码勿读）。 */
       _entryStatesForTest: entryStates,
+      /** [u10/G4] premature timeout 打标快照只读视图（断言 disposeSession 清理语义用，生产代码勿读）。 */
+      _prematureTimeoutIdsForTest: streamingStateMachine.prematureTimeoutIds,
     },
   }
 }

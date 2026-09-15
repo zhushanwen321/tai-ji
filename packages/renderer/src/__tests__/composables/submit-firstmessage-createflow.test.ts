@@ -1,14 +1,19 @@
 /**
  * TC-5：submitFirstMessage 改调 core createSessionFlow（C-W5-2 / FU-1）集成测试。
  *
- * 三分支断言：null→abort send / 非 null→create 快照化透传 + send(migratedSegments) /
- * retry（currentSession 已绑定）不调 createSessionFlow。
+ * 两分支断言：null→abort send / 非 null→create 快照化透传 + send(migratedSegments)。
+ * （原第 3 用例「retry 分支」经审计为弱断言——仅复述用例 2 已建立的前置状态，retry
+ * 路径本体未被驱动，已删；retry 语义由 flow-integration.test.ts「重试场景」用例承担。）
  *
  * U2b（D5 契约快照化）：thinkingLevel 经 create 入参 pendingThinkingLevel 一次到位，
  * 壳层 C-W4-3 setThinkingLevel 补 apply 已删（useModel().setThinkingLevel 恒不调）。
  * [U2d 后现状] 壳已注入 ports.launchConfig（preset store + settings 单例基座）——本
  * 测试 mock 面下 preset 列表空 + settings/KV 空，resolve 输入与空基座等价（model 终值
  * null、presetId null；thinking 落最高可用档 high），故终值断言不变。
+ *
+ * 另含（原独立文件 submit-firstmessage-pull.test.ts 并入，同 SUT 同 mock 骨架）：
+ * wave:remove-bandaids 反转断言——submitFirstMessage 不再主动拉 subagent/workflow/
+ * commands 列表（数据经 subscribe stateSnapshot / workflowUpdate 增量信号提供）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/submit-firstmessage-createflow.test.ts
  */
@@ -71,19 +76,20 @@ vi.mock('@/composables/features/model/useModel', () => ({
 vi.mock('@/composables/features/file-tree/useFileTree', () => ({ useFileTree: vi.fn(() => ({ loadTree: vi.fn() })) }))
 
 import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
-import { createSessionFlow } from '@xyz-agent/core'
+import { createSessionFlow, transition, useNewTaskFlowController } from '@xyz-agent/core'
+import { session as sessionApi } from '@/api'
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }
 }
 
-describe('submitFirstMessage 改调 createSessionFlow（TC-5 / FU-1）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    resetNewTaskFlow()
-    vi.clearAllMocks()
-  })
+beforeEach(() => {
+  setActivePinia(createPinia())
+  resetNewTaskFlow()
+  vi.clearAllMocks()
+})
 
+describe('submitFirstMessage 改调 createSessionFlow（TC-5 / FU-1）', () => {
   it('null 分支（空 content guard）→ abort：不 create 不 send，直接 return', async () => {
     vi.mocked(createSessionFlow).mockResolvedValue(null)
     const flow = useNewTaskFlow()
@@ -120,7 +126,7 @@ describe('submitFirstMessage 改调 createSessionFlow（TC-5 / FU-1）', () => {
     expect(sendMock).toHaveBeenCalledWith('ns', migrated)
   })
 
-  it('retry 分支（currentSession 已绑定）→ 不调 createSessionFlow，直接 send', async () => {
+  it('retry 分支（currentSession 已绑定 + state 回 landing）→ 不调 createSessionFlow，直接 send', async () => {
     // 首次提交绑定 session（createSessionFlow 返回非 null）
     vi.mocked(createSessionFlow).mockResolvedValue({
       session: summary({ id: 'ns' }),
@@ -132,12 +138,61 @@ describe('submitFirstMessage 改调 createSessionFlow（TC-5 / FU-1）', () => {
     expect(createSessionFlow).toHaveBeenCalledTimes(1)
     sendMock.mockClear()
 
-    // 模拟 send 失败后 retry：state 仍可重提交（submitFirstMessage 的 guard 是 state==='landing'，
-    // 首次成功后 transition completed——故此处验证「currentSession 已绑定时再提交不再调 createSessionFlow」
-    // 需重置 state 到 landing 模拟 retry。用 transitionUnchecked 经 controller 不可达，改验证语义：
-    // currentSession 已绑定时 createSessionFlow 不再被调（由分支条件 !currentSession.value 守卫）。
-    // 此用例以「首次提交后 currentSession 已绑定」为基线，断言若再次进入提交路径不会重复 create。
-    // 注：实际 retry 路径需 state 回 landing（由 Composer editAndResend 触发），此处断言绑定态守卫语义。
-    expect(flow.currentSession.value?.id).toBe('ns')
+    // 模拟 retry：send 失败后 state 回 landing（editAndResend 流程；completed 是终态无出口，
+    // 测试内经 resetNewTaskFlow 回 idle 后重新 transition，等价于应用层重新 startFlow 的重建路径），
+    // currentSession 仍绑定 → 再提交走 !currentSession 守卫的 else 分支（不 create 直接 send）。
+    resetNewTaskFlow()
+    const controller = useNewTaskFlowController()
+    controller.bindCurrentSession(summary({ id: 'ns' }))
+    transition('landing')
+    await flow.submitFirstMessage(textToSegments('again'))
+    expect(createSessionFlow).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledWith('ns', textToSegments('again'))
+  })
+})
+
+describe('wave:remove-bandaids: submitFirstMessage 不再主动拉 subagent/workflow/commands（原 submit-firstmessage-pull.test.ts 并入）', () => {
+  /** 预设 NewTaskFlow 到 landing 态并绑定 fake session（跳过 create 路径） */
+  function setupLandingWithSession(): SessionSummary {
+    const controller = useNewTaskFlowController()
+    const fakeSession: SessionSummary = {
+      id: 'sess-new-001',
+      label: 'test',
+      cwd: '/tmp',
+      createdAt: '2026-07-15T10:00:00Z',
+      lastActivity: '2026-07-15T10:00:00Z',
+      piSessionFile: '',
+    }
+    transition('landing')
+    controller.bindCurrentSession(fakeSession)
+    return fakeSession
+  }
+
+  it('submitFirstMessage 不调 getSubagents（subagents 经 subscribe stateSnapshot 提供）', async () => {
+    setupLandingWithSession()
+    const flow = useNewTaskFlow()
+
+    await flow.submitFirstMessage(textToSegments('hello'))
+
+    expect(sessionApi.getSubagents).not.toHaveBeenCalled()
+  })
+
+  it('submitFirstMessage 不调 getWorkflows（workflows 经 streamRing workflowUpdate 增量信号→RPC 闭环）', async () => {
+    setupLandingWithSession()
+    const flow = useNewTaskFlow()
+
+    await flow.submitFirstMessage(textToSegments('hello'))
+
+    expect(sessionApi.getWorkflows).not.toHaveBeenCalled()
+  })
+
+  it('submitFirstMessage 不调 getCommands（commands 经 subscribe stateSnapshot 提供）', async () => {
+    setupLandingWithSession()
+    const flow = useNewTaskFlow()
+
+    await flow.submitFirstMessage(textToSegments('hello'))
+
+    expect(sessionApi.getCommands).not.toHaveBeenCalled()
   })
 })

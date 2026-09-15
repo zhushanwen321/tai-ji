@@ -591,3 +591,45 @@ describe('error 态 envelope message 透出（crash-resilience §3.4 回流修�
     view.unmount()
   })
 })
+
+describe('B11 台账截断降级 banner（truncated 正交字段→现有降级渲染分支，不新增 status 值）', () => {
+  it('超限快照：保尾部 5000 + truncated 置位 → banner 可见且台账仍正常渲染', async () => {
+    // 5001 条线性链（软上限 5000 → 丢弃头部 e0，保 e1..e5000）
+    const entries: unknown[] = []
+    let parent: string | null = null
+    for (let i = 0; i < 5001; i++) {
+      const id = `t${i}`
+      entries.push({ type: 'message', id, parentId: parent, message: { role: 'user', content: `row ${i}` } })
+      parent = id
+    }
+    apiMock.getTraceEntries.mockResolvedValue({
+      sessionId: SID,
+      source: 'file',
+      entries,
+      malformed: [],
+      leafId: 't5000',
+    } satisfies ServerMessageMap['session.traceEntries'])
+
+    const view = await mountTraceView()
+    // 分区层：软上限生效（A8「entries ≤ 5000 且 truncated 标记」）
+    const p = useSessionTrace().partition.value
+    expect(p.truncated).toBe(true)
+    expect(p.entries).toHaveLength(5000)
+    expect(p.status).toBe('ready') // 台账仍 ready——截断不是错误态，不新增 status 值
+
+    // 用户可见 DOM 断言：降级 banner（与 file 降级 banner 同构）+ 台账主体仍在
+    const banner = view.find('[data-testid="trace-truncated-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('5000')
+    expect(banner.text()).toContain('已停止追加')
+    expect(view.find('[data-testid="trace-list"]').exists()).toBe(true)
+    view.unmount()
+  })
+
+  it('未截断分区：banner 不渲染（默认无降级噪音）', async () => {
+    const view = await mountTraceView() // beforeEach 默认 fixture（十几个 entry，远低于上限）
+    expect(useSessionTrace().partition.value.truncated).toBe(false)
+    expect(view.find('[data-testid="trace-truncated-banner"]').exists()).toBe(false)
+    view.unmount()
+  })
+})

@@ -269,3 +269,26 @@ describe('clearIndependentTransient', () => {
     expect(queueStates.value).toBe(queueSnapshot)
   })
 })
+
+describe('disposePrematureTimeoutIds（[u10/G4] dispose 补面，时机⑤）', () => {
+  it('timeout 收口置快照 → dispose 回收（take 空）；未 dispose 分区不受牵连；幂等', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([
+      ['s1', shallowRef([streamingAssistant('a1')])],
+      ['s2', shallowRef([streamingAssistant('a2')])],
+    ])
+
+    sm.finalizeMessages('s1', 'timeout')
+    sm.finalizeMessages('s2', 'timeout')
+
+    // dispose 只回收指定 session 的快照条目
+    sm.disposePrematureTimeoutIds('s1')
+    expect(sm.takePrematureTimeoutIds('s1').size).toBe(0)
+    // 对照：未 dispose 的 s2 快照完好（take 返回打标 id）
+    expect(sm.takePrematureTimeoutIds('s2').size).toBe(1)
+
+    // 幂等：对未打标 / 已回收的 session no-op
+    expect(() => sm.disposePrematureTimeoutIds('s1')).not.toThrow()
+    expect(() => sm.disposePrematureTimeoutIds('ghost')).not.toThrow()
+  })
+})

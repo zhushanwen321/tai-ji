@@ -143,8 +143,9 @@ export interface ContinuationHost {
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
    *  false = CAS 拒绝（record 非 idle——竞态收口，调用方按降级失败响亮上抛）。 */
   reopenRecord(record: ExecutionRecord): boolean;
-  /** 轮始簿记（store.markRoundStarted：status=running + result/resumable 清除 +
-   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写）。 */
+  /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
+   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
+   *  [U6/D4] stopReason 清点随轮始清点族扩字段）。 */
   markRoundStarted(record: ExecutionRecord): void;
   /** [U5] idle keepalive 超时的进程回收（idleTimeoutRecycle——归档是用户意愿位，
    *  超时回收不动 intent/占用位，record 保持 idle 可续聊）。 */
@@ -245,8 +246,9 @@ export class ConversationContinuation {
   onMessage(text: string): void {
     const record = this.record;
     // [U5 / §3.2.2 事件表] archived + message = **隐含寻回**——挂点独立于 revive 格：
-    // 轮间 running（markRoundIdle 保持 running-resumable）同样可达 close 归档后的
-    // 续聊，寻回不能只在 idle 分流内。幂等：非 archived 时 markReactivated no-op。
+    // 轮终 idle（markRoundIdle 翻边收口 [two-state-convergence U4/D3]）与轮间 running
+    // 同样可达 close 归档后的续聊，寻回不能只在 idle 分流内。幂等：非 archived 时
+    // markReactivated no-op。
     this.host.reactivateRecord(record);
     if (record.status !== "running") {
       this.reviveOrThrow();
@@ -467,7 +469,7 @@ export class ConversationContinuation {
     this.activeRunId = roundRunId;
     this.activeController = controller;
     // 轮始簿记归口（[U2b 修复轮/D2] store.markRoundStarted：status=running 重申 +
-    // 清上一轮 result 与 resumable——§5.4 isStreaming 公式要求 result undefined 才
+    // 清上一轮 result——§5.4 isStreaming 公式要求 result undefined 才
     // 显示 streaming，不清则续轮流仍显示 waiting、spinner 无法恢复；迁移上报 entry
     // 落盘让 GUI 派生缓存失效、从 waiting 切回 spinner。U1 原语簿记为原三行现场写
     // 的超集，多出 notifyChange 刷新）。record 不在 store 内存的形态 = false 旁路
@@ -532,7 +534,7 @@ export class ConversationContinuation {
       });
     } catch (err) {
       // 主干同步段 throw（stream 创建 / 端口解析等）：转失败轮末分流（与 run reject
-      // 同语义——record 保持 running-resumable，宿主经失败通知感知）。
+      // 同语义——record 轮终落 idle 可续聊 [two-state-convergence U4/D3]，宿主经失败通知感知）。
       concludeRound();
       this.onRoundRejected(err);
     }
@@ -587,7 +589,7 @@ export class ConversationContinuation {
         rebuild = await this.host.rebuildWorktree(record);
       } catch (err) {
         // 形态③：重建 IO 错（GitRunError/DirtyWorktreeError）——转失败轮末分流
-        //（失败通知 + 恢复指引；record 保持 running-resumable）。
+        //（失败通知 + 恢复指引；record 轮终落 idle 可续聊 [two-state-convergence U4/D3]）。
         this.clearActiveRound();
         this.onRoundRejected(err);
         return { kind: "rejected" };
@@ -694,7 +696,8 @@ export class ConversationContinuation {
    * 失败/中断分支：lastError + 轮终簿记（failed——round 同样 +1，result = 前值 ??
    * 失败摘要）+ 失败通知（独立构造载荷——不经 route(record)：其正文恒读
    * record.result = 前值，直接复用会以旧正文冒充失败通知；正文 = 失败摘要 + 恢复
-   * 指引，可达性迁移自 [T2-③/LC-1]）+ record 保持 running-resumable（MF-6）。
+   * 指引，可达性迁移自 [T2-③/LC-1]）+ record 轮终落 idle 可续聊（MF-6；
+   * [two-state-convergence U4/D3] 翻边后 idle 即 resumable）。
    * 发前过 notifyGate 三元组门（[U5]：①归档静默——编排性关闭自动收起后迟到应答 /
    * ②放弃轮标记命中——cancel 中断轮防双发；守卫是入口一次性判定，覆盖不了簿记
    * await 链内的中途归档窗）。
@@ -713,7 +716,7 @@ export class ConversationContinuation {
       id: record.id,
       // status:"closed" + outcome:"failed" 载荷 = buildLlmContent 的失败文案形态
       // `Subagent "agent" (id) failed: <error>`——载荷只是通知文案载体，record 实态
-      // 保持 running-resumable（容器未被销毁，status 面 GUI 照常显示运行中）。
+      // 保持可续聊 [two-state-convergence U4/D3]（容器未被销毁，轮终已翻 idle 展示等续聊）。
       status: "closed",
       closedReason: "gc",
       outcome: "failed",
@@ -744,18 +747,29 @@ export class ConversationContinuation {
    *（Node ≥15 默认崩宿主）且队列消息静默丢失。可达触发例：首轮在途时 message 打断
    * 入队 → 首轮崩溃（合成 outcome 无 sessionFile）→ 失败 settle → drain 以
    * firstRound=false 走锚点守卫 → throw。转换语义：失败通知（独立载荷过 notifyGate
-   * 门，与 settleRoundFailed 失败单发同构——record 保持 running-resumable，载荷
+   * 门，与 settleRoundFailed 失败单发同构——record 轮终落 idle 可续聊，载荷
    * closed+failed 仅是文案载体）+ 队列丢弃留痕（warn）。onMessage 同步入口的守卫
    * throw 保留（设计 §3.1 失败路径表的工具错误面，不经本方法）。
    */
   private drain(): void {
-    if (this.record.status !== "running") {
+    // 终态簿记冻结（close/cancel 抢先收口窗——endedAt 已设）不复活，排队消息作废
+    // （旧守卫「非 running 即清队列」的终态拦截语义保持）。
+    if (this.record.status !== "running" && this.record.endedAt !== undefined) {
       this.queue.length = 0;
       return;
     }
     if (this.queue.length === 0) return;
     const next = this.queue.splice(0);
     try {
+      // [two-state-convergence U4/D3a 实施期补点] 轮终翻边 idle：排队消息续派前经
+      // revive 过站翻回 running（与 onMessage 同一准入——升级 gate + tryEnterRunning +
+      // revive 迁移上报），不再静默丢弃。桥接期轮终保持 running 时本分支不可达；
+      // 翻边后 settle 尾部 drain 必经（dispatchRoundGuarded 的 running 守卫由此满足）。
+      // revive 同步拒绝（升级 gate / CAS 竞态——当前形态不可达，防御保留）走下方
+      // 既有丢弃通知面（[A2] 错误就地转面语义不变）。
+      if (this.record.status !== "running") {
+        this.reviveOrThrow();
+      }
       this.dispatchRoundGuarded(next, false);
     } catch (err) {
       const reason = toErrorMessage(err);
@@ -779,7 +793,7 @@ export class ConversationContinuation {
         this.host.notifyRecord({
           id: this.record.id,
           // status:"closed" + outcome:"failed" 载荷 = 失败文案形态（settleRoundFailed
-          // 同构）——载荷只是通知文案载体，record 实态保持 running-resumable。
+          // 同构）——载荷只是通知文案载体，record 实态轮终已落 idle 可续聊。
           status: "closed",
           closedReason: "gc",
           outcome: "failed",
@@ -898,10 +912,15 @@ export class ConversationContinuation {
     }
     // 旧终态遗留位清除（对齐 resurrectClosed 桥接语义——closedReason 残留会让
     // notifyGate 门误拦本轮通知：parent-new/parent-fork/cancelled 在拦截集）。
-    // stopReason 保留：新展示位「上一轮为什么停」（reopen 降级轮 = reopened）在
-    // 轮运行期间保留展示，settle 时由 markSettled 覆写。
+    // [U6/D4 轮始清点族扩字段] stopReason 同步清（与 markRoundStartedImpl 同族——
+    // isOccupied 终态判据 `running && stopReason === undefined` 要求在飞期停因为空，
+    // 旧展示位「上一轮为什么停」在轮运行期间保留的行为随清点族退役）。
+    // reopen 归宿：markReopened 写的 stopReason='reopened' 展示位随之退役——重开
+    // 信息由 reopen 摘要注入 prompt 体感承载（buildReopenSummaryPrompt），不再依赖
+    // 展示位字段。settle 时由 markSettled/markRoundIdle 覆写新停因。
     record.closedReason = undefined;
     record.endedAt = undefined;
+    record.stopReason = undefined;
     // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);

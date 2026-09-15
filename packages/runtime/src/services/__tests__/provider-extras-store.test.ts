@@ -323,23 +323,23 @@ describe('XyzProviderStore', () => {
     })
 
     it('高并发交错：多次 modifyScopedModels + 多次 modify，最终状态一致', async () => {
-      // 10 个并发操作：5 个 modifyScopedModels 追加 + 5 个 modify 写入不同 provider
+      // 20 个并发操作：10 个 modifyScopedModels 追加 + 10 个 modify 写入不同 provider
       await Promise.all([
-        ...Array.from({ length: 5 }, (_, i) =>
+        ...Array.from({ length: 10 }, (_, i) =>
           store.modifyScopedModels((cur) => [...cur, `provider-${i}/model-${i}`]),
         ),
-        ...Array.from({ length: 5 }, (_, i) =>
+        ...Array.from({ length: 10 }, (_, i) =>
           store.modify(`provider-${i}`, () => ({ authMethod: 'api_key' as const })),
         ),
       ])
 
-      // scopedModels 有 5 个条目（顺序可能因并发而变，但数量正确）
+      // scopedModels 有 10 个条目（顺序可能因并发而变，但数量正确）
       const scoped = store.getScopedModelsSync()
-      expect(scoped).toHaveLength(5)
+      expect(scoped).toHaveLength(10)
       expect(scoped.every(m => /^provider-\d+\/model-\d+$/.test(m))).toBe(true)
 
-      // 5 个 provider 的 extras 都保留
-      for (let i = 0; i < 5; i++) {
+      // 10 个 provider 的 extras 都保留
+      for (let i = 0; i < 10; i++) {
         expect(store.getExtrasSync(`provider-${i}`)).toEqual({ authMethod: 'api_key' })
       }
     })

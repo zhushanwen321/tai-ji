@@ -2,30 +2,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { findFiles, MAX_FIND_FILES_RESULTS } from '../src/services/plugin-service/plugin-rpc-setup.js'
 
 /**
- * 直接测试 fast-glob 的 findFiles 行为（真实临时目录，无 mock）。
+ * 直测 SUT 导出的 findFiles（plugin-rpc-setup.ts，T10 提取后可直测——真实临时目录，
+ * 无 mock；此前测试在文件内本地复制实现自测，SUT 改 ignore/上限/错误吞噬均不红）。
  *
- * findFiles handler 的核心逻辑：
- * 1. 用 fast-glob 按模式搜索
+ * findFiles 核心语义：
+ * 1. 用 fast-glob 按模式搜索 cwd
  * 2. 忽略 node_modules / .git
- * 3. 返回绝对路径，截断到 1000 条
+ * 3. 返回绝对路径，截断到 MAX_FIND_FILES_RESULTS
+ * 4. 任何错误吞噬为空数组
+ *
+ * 运行：cd packages/runtime && npx vitest run test/plugin-findfiles.test.ts
  */
-async function findFiles(pattern: string, cwd: string): Promise<string[]> {
-  try {
-    const fastGlob = (await import('fast-glob')).default
-    const entries = await fastGlob(pattern, {
-      cwd,
-      ignore: ['**/node_modules/**', '**/.git/**'],
-      absolute: true,
-    }) as string[]
-    return entries.slice(0, 1000)
-  } catch {
-    return []
-  }
-}
-
-describe('findFiles (FR-6)', () => {
+describe('findFiles（plugin-rpc-setup SUT 直测，T10）', () => {
   let tmpDir: string
 
   beforeEach(() => {
@@ -36,7 +27,7 @@ describe('findFiles (FR-6)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('用 **/*.json 能返回匹配文件', async () => {
+  it('基本匹配：用 **/*.json 能返回匹配文件', async () => {
     fs.writeFileSync(path.join(tmpDir, 'a.json'), '{}')
     fs.writeFileSync(path.join(tmpDir, 'b.json'), '{}')
     fs.writeFileSync(path.join(tmpDir, 'c.txt'), 'hello')
@@ -46,7 +37,7 @@ describe('findFiles (FR-6)', () => {
     expect(results.every(f => f.endsWith('.json'))).toBe(true)
   })
 
-  it('忽略 node_modules 和 .git 目录', async () => {
+  it('ignore 排除：忽略 node_modules 和 .git 目录', async () => {
     // 正常文件
     fs.writeFileSync(path.join(tmpDir, 'src.ts'), 'code')
 
@@ -67,29 +58,37 @@ describe('findFiles (FR-6)', () => {
     expect(basenames).not.toContain('data.ts')
   })
 
-  it('超过 1000 条时截断', async () => {
-    // 创建 1005 个文件
-    for (let i = 0; i < 1005; i++) {
+  it('上限截断：超过 MAX_FIND_FILES_RESULTS 条时截断到上限', async () => {
+    // 创建上限 +5 个文件
+    for (let i = 0; i < MAX_FIND_FILES_RESULTS + 5; i++) {
       fs.writeFileSync(path.join(tmpDir, `file-${i}.txt`), `${i}`)
     }
 
     const results = await findFiles('**/*.txt', tmpDir)
-    expect(results).toHaveLength(1000)
+    expect(MAX_FIND_FILES_RESULTS).toBe(1000) // 上限常量语义（SUT 改上限此断言同步红）
+    expect(results).toHaveLength(MAX_FIND_FILES_RESULTS)
     expect(results.every(f => f.endsWith('.txt'))).toBe(true)
   })
 
-  it('返回绝对路径', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'abs.json'), '{}')
+  it('cwd 边界：只搜给定 cwd 子树，返回以 cwd 为前缀的绝对路径', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'root.json'), '{}')
+    const subDir = path.join(tmpDir, 'sub')
+    fs.mkdirSync(subDir)
+    fs.writeFileSync(path.join(subDir, 'inner.json'), '{}')
 
-    const results = await findFiles('**/*.json', tmpDir)
+    // cwd 指向子目录：只命中子目录内文件（父级 root.json 不越界搜入）
+    const results = await findFiles('**/*.json', subDir)
     expect(results).toHaveLength(1)
+    expect(path.basename(results[0])).toBe('inner.json')
     expect(path.isAbsolute(results[0])).toBe(true)
+    expect(results[0].startsWith(subDir)).toBe(true)
   })
 
-  it('无匹配时返回空数组', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'a.txt'), 'hello')
+  it('错误吞噬：glob 抛错（非法 pattern）返回空数组而非向外抛', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'a.json'), '{}')
 
-    const results = await findFiles('**/*.json', tmpDir)
+    // fast-glob 对非字符串 pattern 抛 TypeError → findFiles 契约吞噬为 []
+    const results = await findFiles(null as unknown as string, tmpDir)
     expect(results).toEqual([])
   })
 })

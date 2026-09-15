@@ -47,8 +47,9 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  * §3.2.1/§3.2.2；U2 两态转正，终态概念删除）：
  *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
  *
- * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障，不参与资格判定）；
- * 旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
+ * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障；U6 起 stopReason
+ * 参与 isOccupied 占用判定——`running && stopReason === undefined`，W4 死亡纳管态
+ * 靠它排除）；旧 running 的隐性子态（resumable/纳管态）由「idle + transcriptRef 在」统一表达。
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
  * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
@@ -194,12 +195,15 @@ export type Intent = "active" | "archived";
  *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
  *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
- *                              status 保持 running-resumable 不变——U2 桥接策略不推翻，
- *                              本值只承担「上一轮为什么停」的展示 + `.state` 收条 reason
+ *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
+ *                              本值承担「上一轮为什么停」的展示 + `.state` 收条 reason
  *                              词；中断族走 markSettled interrupted 族不经 markRoundIdle，
  *                              与上 4 值无冲突）
- * 仅展示 + 排障（列表主展示用派生 outcome）；复活资格判据是物理三件套
- * （§3.2.3），本字段不参与任何资格判定。
+ * 展示 + 排障（列表主展示用派生 outcome）+ [U6] 占用资格判定（isOccupied =
+ * `running && stopReason === undefined`——W4 死亡纳管态据此排除，见下方字段注释）；
+ * 复活资格判据仍是物理三件套（§3.2.3）。在飞期本字段被轮始清点族清空
+ *（markRoundStarted / revive 格，[U6/D4]）——「stopReason 不参与任何资格判定」的
+ * 旧裁决随 two-state-convergence U6 退役。
  */
 export type StopReason =
   | ClosedReason
@@ -531,13 +535,6 @@ export interface ExecutionRecord {
    */
   readonly chatMode?: boolean;
   /**
-   * 执行态信号（residual-fixes 设计）：true = 该 record 无活进程驱动（轮终 idle /
-   * 重建孤儿兜底），处于「可续聊/等续聊」态——不是后台真在跑。轮终迁移
-   * （doFinalizeRoundToIdle）置 true，冷路径续轮（进程启动）清除；GUI 侧
-   * streaming/waiting 细分与 hasRunning 判据消费。缺省 falsy = 有进程或旧数据。
-   */
-  resumable?: boolean;
-  /**
    * 空闲超时毫秒数（仅 chatMode 有意义）。覆盖默认 5min idle timeout。
    * 优先级：参数 > env XYZ_SUBAGENT_IDLE_TIMEOUT_MS > 默认 300000ms。
    * 向后兼容：旧 record 无此字段，按默认值处理。
@@ -603,7 +600,9 @@ export interface ExecutionRecord {
   intent?: Intent;
   /**
    * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
-   * undefined = 从未收口 / 旧数据。仅展示+排障，不参与资格判定。
+   * undefined = 从未收口 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
+   * （`running && stopReason === undefined`——W4 死亡纳管态 stopReason=failed 据此
+   * 排除，[U5/D4] adoptEngineDeath 写点）。
    */
   stopReason?: StopReason;
   /**
@@ -851,9 +850,6 @@ export interface SubagentListItem {
   /** 直接父 subagent record ID（顶层 record 为 undefined）。[v4 A-6] 从
    *  record.parentRecordId 派生，配合 A-5 直接父守卫（message/close 仅作用于直接子）。 */
   parent?: string;
-  /** 可冷路径 resume（running 且无活进程句柄）。[v4 A-6] B-1「可续聊」对外表达，
-   *  agent 据 list 判断哪些 running subagent 实际可续聊（vs 正在忙）。 */
-  resumable?: boolean;
   /**
    * 终态三态对外语义（U3 C-outcome 一等披露，projectOutcome 唯一出口）：
    * completed / failed / cancelled，历史 record 无 outcome 字段时兜底派生，
@@ -1041,11 +1037,6 @@ export interface SubagentRecord {
    * 等续聊。内存源由 recordToSubagent 投影，磁盘源经 subagent-record entry 重建）。
    */
   chatMode?: boolean;
-  /**
-   * 执行态信号（与 ExecutionRecord.resumable 同义）：true = 无活进程驱动的 running
-   * （轮终 idle / 重建孤儿兜底），GUI 侧据此排除「真在跑」判定。
-   */
-  resumable?: boolean;
   /** fork 模式下的 worktree handle。 */
   worktreeHandle?: WorktreeHandle;
   /**

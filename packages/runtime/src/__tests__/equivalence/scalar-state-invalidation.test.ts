@@ -7,13 +7,10 @@
  *   （thinkingLevel 实例仍在用；label 实例用例随实例撤销删除——session_info_changed 的
  *   现行编排 = onSessionRenamed 直写，覆盖见 event-interpreter.test.ts TC-RN1/RN2 与
  *   session-service.test.ts U-setLabel-1/2/3，PR #185 MF1）
- * - RPC 频率采样（P0.5② 首次采样）：「3 轮对话 + 1 次切模型」的实例侧 get_state 次数与
- *   p95 延迟 → describe「真实 pi 子进程」it 1（数字 console.log 输出，写进 builder 汇报；
- *   落登记表由主 agent 串行处理，本 wave 只记录不决策）
  *
- * skip-if-no-real-pi：真实 pi 用例以 describe.skipIf(!REAL_PI_READY) 包裹（binary + LLM 凭证
- * 双判定，describe 名注入理由，约定见 pi-fixture.ts 头注释）；mock 层 describe 不依赖凭证，
- * 无条件执行（CI 覆盖凭证无关子集）。mock 层用例用 fake timers（项目规范，禁真实 sleep）。
+ * [2026-09 测试舰队审查 r2-26] 「真实 pi 子进程」describe（RPC 频率采样，P0.5② 一次性
+ * 验收输入）已删：断言 near-constant、唯一产出 console.log 数字——采样应由 bench 脚本
+ * 承担而非回归套件。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ProviderId } from '@xyz-agent/shared'
@@ -27,7 +24,6 @@ import {
 } from '../../services/session/replicated-states.config.js'
 import type { IMessageBroker } from '../../interfaces.js'
 import type { IPiEngine, IProcessManager } from '../../services/ports/pi-engine.js'
-import { spawnPiFixture, REAL_PI_READY, REAL_PI_SKIP_REASON, type PiFixture } from './pi-fixture.js'
 
 /** pi get_state 的宽形态 mock（三字段齐全的最小权威快照）。 */
 type StateShape = Record<string, unknown>
@@ -139,96 +135,6 @@ describe('W7 scalar-state 失效接线（mock RPC 层）', () => {
   })
 })
 
-/** 真实 timers 轮询等待（真实 pi 用例；fake timers 禁用于真实子进程 IO）。 */
-async function waitUntil(label: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const start = Date.now()
-  while (!predicate()) {
-    if (Date.now() - start >= timeoutMs) {
-      throw new Error(`waitUntil timed out after ${timeoutMs}ms: ${label}`)
-    }
-    await new Promise((r) => setTimeout(r, 25))
-  }
-}
-
-/** 等 turn 完成的上限（真实 LLM 调用；对齐 live-reload.test.ts 的余量口径） */
-const TURN_TIMEOUT_MS = 120_000
-
-describe.skipIf(!REAL_PI_READY)(
-  `W7 equivalence: 标量实例失效收敛（真实 pi 子进程${REAL_PI_SKIP_REASON ? `｜skip：${REAL_PI_SKIP_REASON}` : ''}）`,
-  () => {
-  let fixture: PiFixture | null = null
-
-  afterEach(async () => {
-    if (fixture) {
-      await fixture.dispose()
-      fixture = null
-    }
-  })
-
-  it('RPC 频率采样（P0.5②）：3 轮对话 + 1 次切模型的实例侧 get_state 次数与 p95 延迟', { timeout: 180_000 }, async () => {
-    const fx = await spawnPiFixture()
-    fixture = fx
-
-    // 包装 fetchState：统计次数 + 逐次延迟（ms）
-    const latencies: number[] = []
-    let calls = 0
-    const fetchState = async (): Promise<StateShape> => {
-      calls += 1
-      const t0 = performance.now()
-      const resp = await fx.sendCommand('get_state')
-      latencies.push(performance.now() - t0)
-      return (resp.data ?? {}) as StateShape
-    }
-    const thinkingLevelState = new ReplicatedState(createThinkingLevelStateConfig(fetchState))
-    const modelIdState = new ReplicatedState(createModelIdStateConfig(fetchState))
-
-    // 生产等价：注册播种（2 refetch；label 实例已撤销，PR #185 MF1）
-    const states = [thinkingLevelState, modelIdState]
-    for (const s of states) s.refetch()
-    await waitUntil('seed', () => states.every((s) => s.get() !== undefined))
-    const seededCalls = calls
-
-    // 3 轮对话：每轮等「新的」agent_end（markEvents 打点 + since 游标 = 新鲜度语义，只匹配
-    // 打点之后的事件；裸 waitForEvent 无 since 会匹配历史缓存立即返回，下一轮 prompt 撞
-    // pi already-processing）；期间到达的 thinking_level_changed 按生产接线喂给对应实例
-    // markDirty（interpreter 生产行为），并等防抖拉取收敛。session_info_changed 不再触发
-    // 实例失效（label 实例已撤销，PR #185 MF1——真值走 onSessionRenamed 直写 setLabelCache，
-    // 无 get_state 拉取）
-    for (let i = 0; i < 3; i++) {
-      const round = i + 1
-      const turnMark = fx.markEvents()
-      const tlBefore = fx.collectEvents((e) => e.type === 'thinking_level_changed').length
-      await fx.sendCommand('prompt', { message: `Reply with exactly: round-${round}` })
-      await fx.waitForEvent((e) => e.type === 'agent_end', { since: turnMark, timeoutMs: TURN_TIMEOUT_MS })
-      if (fx.collectEvents((e) => e.type === 'thinking_level_changed').length > tlBefore) {
-        thinkingLevelState.markDirty()
-        await waitUntil(`round-${round} thinkingLevel converge`, () => !thinkingLevelState.isDirty())
-      }
-    }
-
-    // 1 次切模型（set_model 成功响应 → modelId markDirty，生产接线）。
-    // pi set_model 参数 = 裸 provider + 裸 modelId（Model.id，非 'provider/model' 组合）
-    const modelResp = await fx.sendCommand('get_state')
-    const currentModel = modelResp.data?.model as { provider?: string; id?: string } | undefined
-    expect(currentModel?.provider).toBeTruthy()
-    expect(currentModel?.id).toBeTruthy()
-    await fx.sendCommand('set_model', { provider: currentModel!.provider, modelId: currentModel!.id })
-    modelIdState.markDirty()
-    await waitUntil('modelId converge', () => !modelIdState.isDirty())
-
-    // nearest-rank p95（1-indexed 第 ceil(0.95n) 位）
-    const sorted = [...latencies].sort((a, b) => a - b)
-    const rank = Math.max(1, Math.ceil(sorted.length * 0.95))
-    const p95 = sorted[rank - 1] as number
-    // 采样数字（写进 builder 汇报；落登记表由主 agent 串行处理——本 wave 只记录不决策）
-    console.log(
-      `[W7 RPC 采样] 操作序列 = 3 轮对话 + 1 次切模型 | get_state 总次数 = ${calls}` +
-      `（播种 ${seededCalls} + 失效驱动 ${calls - seededCalls}）| p95 延迟 = ${p95.toFixed(1)}ms` +
-      `（n=${latencies.length}，max=${(sorted[sorted.length - 1] as number).toFixed(1)}ms）`,
-    )
-    expect(calls).toBeGreaterThan(0)
-    expect(latencies.length).toBe(calls)
-
-    for (const s of states) s.dispose()
-  })
-})
+// [2026-09 测试舰队审查 r2-26] 真实 pi describe（含唯一采样用例）已删：`calls > 0` 恒真、
+// `latencies.length === calls` 在同一函数体内恒成立——唯一产出是 console.log 采样数字，
+// P0.5② 验收流程遗留；mock 层 3 用例（markDirty 语义）保留在上方。

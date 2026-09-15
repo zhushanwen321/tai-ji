@@ -16,6 +16,7 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/MessageStream.wire.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 // [w6 chat-ui-and-shell T7] ui 包组件：Turn/TurnRail 迁 ui；Turn 展开态经 deps inject（真实 useTurnExpansion 在 renderer 壳 useChatViewDeps）
 import { computed, nextTick, ref, shallowRef, defineComponent, h, reactive } from 'vue'
@@ -47,31 +48,7 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 }))
 
 // [w6] MessageStream 壳装配 useChatViewDeps（TC-w4-9/9b mount 真组件）→ mock 装配器，壳内 ui 组件经 deps inject 消费
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 
 /** 构造 toolCall（status 可指定，默认 completed） */
 function makeToolCall(id: string, status: ToolCall['status'] = 'completed'): ToolCall {
@@ -392,29 +369,8 @@ describe('MessageStream rail 接线（TurnRail props 契约 + useMessageStreamRa
     wrapper.unmount()
   })
 
-  it('TC-w4-6a: [cw wave w4] vlistRef.value=null（首帧未挂载）→ onJump no-op 不抛错', () => {
-    // vlistRef 必填但 value 可能为 null（首帧 / session 切换 dispose）：onJump 早返回 no-op。
-    const scrollEl = document.createElement('div')
-    const vlistRef = shallowRef<VirtualizerHandle | null>(null)
-    const { rail, wrapper } = mountRail({ scrollEl, vlistRef })
-    expect(() => rail.onJump(1)).not.toThrow()
-    expect(() => rail.onJump(2)).not.toThrow()
-    wrapper.unmount()
-  })
-
-  it('TC-w4-6b: [cw wave w3] virtua 路径（传 vlistRef）onJump(idx) → vlistRef.scrollToIndex(renderIdx, {align:"start"})', () => {
-    // virta 路径：rail.onJump 用 v.scrollToIndex 替代 scrollEl.scrollTop 写入（design §4.1/§3.3）
-    const scrollToIndex = vi.fn()
-    const vlistRef = shallowRef<VirtualizerHandle | null>(createMockVlist({ scrollToIndex }))
-    const { rail, wrapper } = mountRail({ vlistRef })
-    // onJump(1) → railTurns[1]=index=2 → renderItems 下标 1（makeRenderItems：turn/index=1,2,3 各占 0,1,2）
-    rail.onJump(1)
-    expect(scrollToIndex).toHaveBeenCalledWith(1, { align: 'start' })
-    // onJump(2) → renderItems 下标 2
-    rail.onJump(2)
-    expect(scrollToIndex).toHaveBeenLastCalledWith(2, { align: 'start' })
-    wrapper.unmount()
-  })
+  // （TC-w4-6a/6b 已删：vlistRef null no-op 与 scrollToIndex 路由由
+  //  use-message-stream-rail-virtua.test.ts 更全覆盖（:106/:173），此处原走默认 mock vlist。）
 })
 
 /* ──────────────────────────────────────────────────────────────

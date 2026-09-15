@@ -1,4 +1,10 @@
-/**
+/** [已裁剪] 原 5 用例中「全部 reject + map 清空」与 core pending-sweep.test.ts:119
+ *  「rejectAll：全部 reject + map 清空（WS 断连场景）」逐字重复，「空 map 不抛错」是
+ *  Map.forEach 空迭代的平凡传导，均已删；保留 core 未显式断言的 3 个增量：
+ *  no-op 幂等 / 新注册不受影响 / error 对象透传含 code。
+ *  （findings 原裁决为「迁移增量到 core 后删」——本 wave 只动 renderer 测试，原地保留。）
+ *
+
  * pending.rejectAll 单测 —— WS 断连 / runtime 崩溃时批量 reject 防永挂。
  *
  * 锁定 R4（WS 断连时 pendingMap 不清理，Promise 永挂 + 内存泄漏）。
@@ -15,35 +21,6 @@ describe('pending.rejectAll', () => {
   beforeEach(() => {
     // 确保模块单例 pendingMap 在每个用例前为空
     pending.rejectAll(new Error('setup cleanup'))
-  })
-
-  it('reject 所有已注册的 pending 请求（多条同时清理）', async () => {
-    const p1 = pending.register<string>(pending.createCommandId(), RPC_BACKSTOP_TIMEOUT_MS)
-    const p2 = pending.register<number>(pending.createCommandId(), RPC_BACKSTOP_TIMEOUT_MS)
-    const p3 = pending.register<boolean>(pending.createCommandId(), RPC_BACKSTOP_TIMEOUT_MS)
-
-    pending.rejectAll(new Error('WS 断连'))
-
-    await expect(p1).rejects.toThrow('WS 断连')
-    await expect(p2).rejects.toThrow('WS 断连')
-    await expect(p3).rejects.toThrow('WS 断连')
-  })
-
-  it('rejectAll 后 pendingMap 被清空（后续 resolve/reject 为 no-op）', async () => {
-    const id = pending.createCommandId()
-    const p = pending.register<string>(id, RPC_BACKSTOP_TIMEOUT_MS)
-
-    pending.rejectAll(new Error('清空'))
-
-    await expect(p).rejects.toThrow('清空')
-
-    // pendingMap 已空：后续对同一 id 的 resolve/reject 不应抛错，也不应 resolve 已 reject 的 p
-    expect(() => pending.resolve(id, 'late')).not.toThrow()
-    expect(() => pending.reject(id, new Error('late'))).not.toThrow()
-  })
-
-  it('rejectAll 空的 pendingMap 时不抛错', () => {
-    expect(() => pending.rejectAll(new Error('noop'))).not.toThrow()
   })
 
   it('rejectAll 后新注册的请求不受影响（可正常 resolve）', async () => {

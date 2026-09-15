@@ -42,12 +42,9 @@ vi.mock('ws', () => {
 })
 
 describe('rpc', () => {
-  it('sends message with correct type and payload', async () => {
-    // W1: verify WS message format matches runtime expectations
-    const promise = rpc('config.getProviders', {})
-    // test will fail until ws-client implementation exists (red light)
-    expect(promise).toBeInstanceOf(Promise)
-  })
+  // [2026-09 测试舰队审查 r2-27] 首用例「sends message with correct type and payload」已删：
+  // 只断言 `toBeInstanceOf(Promise)` 且不 emit open——零交互恒真占位（红灯期遗迹）；
+  // auth 握手与命令发送语义由 S1-W1 系用例承担。
 
   it('S1-W1: open 后首条消息是 auth（携带 token 文件内容），auth ok 后才发实际命令', async () => {
     const promise = rpc('config.getProviders', { extra: 1 })

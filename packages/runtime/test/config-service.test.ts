@@ -170,8 +170,7 @@ describe('ConfigService · provider 级 enabled 读写链路（U2，enabledModel
     configService.toggleProviderEnabled('p1', false)
 
     // 直接读盘验证（绕过 service 缓存）：enabledModels 白名单落盘到 settings.json（非 models.json）
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- 动态读盘验证
-    const raw = require('node:fs').readFileSync(
+    const raw = readFileSync(
       join(tmpDir, 'agent', 'settings.json'),
       'utf-8',
     )

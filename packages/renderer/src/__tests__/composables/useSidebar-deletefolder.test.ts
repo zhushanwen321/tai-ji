@@ -8,7 +8,9 @@
  * - W2TC4：removeByCwd reject 时 deleteFolder rejects，removeFromList 不被调
  *
  * mock 策略：参照 useSidebar-delete-cleanup.test.ts —— mock fileTree store + useChat +
- *   api 域（removeByCwd / switchSession / getCommands / getHistory）。
+ *   api 域（removeByCwd / switchSession / getCommands / getHistory）+ useCommandStore 壳单例
+ *   （[G1] clearSlashCommands hook 接线后 deleteFolder 会取 commandStore.clearCommands；
+ *   真实壳单例依赖 AppShell providePlatform 时序，测试未注入会 fail-fast 抛错）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useSidebar-deletefolder.test.ts
  */
@@ -76,6 +78,15 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getWorkflows: vi.fn(() => Promise.resolve([])),
     getAgentCallHistory: vi.fn(() => Promise.resolve([])),
   },
+}))
+
+// ── useCommandStore 壳单例 mock（[G1] clearSlashCommands hook 接线配套；见文件头 mock 策略）──
+vi.mock('@/composables/features/command/useCommandStore', () => ({
+  useCommandStore: () => ({
+    appCommands: { value: [] },
+    shortcutOverrides: { value: {} },
+    clearCommands: vi.fn(),
+  }),
 }))
 
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'

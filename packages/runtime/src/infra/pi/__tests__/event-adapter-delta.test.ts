@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { translate } from '../event-adapter.js'
-import type { PiEvent, PiMessageUpdateEvent } from '../pi-protocol.js'
+import type { PiMessageUpdateEvent } from '../pi-protocol.js'
 
 /** 构造 message_update 事件（assistantMessageEvent 子事件形状）。 */
 function messageUpdate(sub: Record<string, unknown>): PiMessageUpdateEvent {
@@ -51,8 +51,6 @@ describe('EventAdapter delta contentIndex 透传（wave:perf-w07 微项 1）', (
     expect(msg.payload).toEqual({ sessionId: 's1', delta: 'hi', contentIndex: 0 })
   })
 
-  it('W07-5d: translate 对 delta 子事件保持纯函数（同输入同输出）', () => {
-    const ev: PiEvent = messageUpdate({ type: 'thinking_delta', delta: 'a', contentIndex: 1 })
-    expect(translate(ev, 's1')).toEqual(translate(ev, 's1'))
-  })
+  // [HISTORICAL] W07-5d「translate 纯函数同输入同输出」用例已删（2026-09 测试舰队审查 r2-22）：
+  // 对任意纯函数恒真，不锁任何 delta 特有行为；纯函数性由全文件 toEqual 精确断言隐式承担。
 })

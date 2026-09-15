@@ -52,13 +52,14 @@ beforeEach(() => {
 })
 
 describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
-  it('done 投影（running + result + chatMode false）不计入，真 running 计入', () => {
+  it('[U6] done 投影（idle + result + chatMode false + completed）不计入，真 running 计入', () => {
     const sid = ref<string | null>('sess-badge')
     const store = useSubagentStore()
     store.applyRecords('sess-badge', [
       makeRecord({ subagentId: 'bg-live-1', status: 'running' }),
-      makeRecord({ subagentId: 'bg-done-proj-1', status: 'running', result: '本轮产出', chatMode: false }),
-      makeRecord({ subagentId: 'bg-terminal-1', status: 'done' }),
+      // [U6] 轮终形态 = U4 翻边后 renderer 实收形态（idle + stopReason 展示位）
+      makeRecord({ subagentId: 'bg-done-proj-1', status: 'idle', result: '本轮产出', chatMode: false, stopReason: 'completed' }),
+      makeRecord({ subagentId: 'bg-terminal-1', status: 'idle', stopReason: 'completed' }),
     ])
 
     const counts = useSidebarCounts(sid)
@@ -66,15 +67,18 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
-  it('waiting（resumable 等续聊）仍计入；idle（U8 两态收口）不计入（badge = 真有活在跑）', () => {
+  it('[U6] W4 新型不计入（stopReason 子句对冲生效）；idle 不计入（badge = 真有活在跑）', () => {
     const sid = ref<string | null>('sess-wait')
     const store = useSubagentStore()
     store.applyRecords('sess-wait', [
-      makeRecord({ subagentId: 'bg-wait-1', status: 'running', resumable: true }),
+      makeRecord({ subagentId: 'bg-live-1', status: 'running' }),
+      makeRecord({ subagentId: 'bg-w4-new-1', status: 'running', stopReason: 'failed' }),
       makeRecord({ subagentId: 'bg-idle-1', status: 'idle', stopReason: 'completed', turns: 3 }),
     ])
 
     const counts = useSidebarCounts(sid)
+    // [U6/D5 终态判据] isOccupied = running && stopReason===undefined：W4 新型（死亡
+    // 纳管态 stopReason=failed）被 stopReason 子句排除——badge 只计真在跑（G1 闭环）
     expect(counts.subagentRunningCount.value).toBe(1)
   })
 
@@ -87,7 +91,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     store.applyRecords('sess-wf', [
       makeRecord({ subagentId: 'bg-tool-live', status: 'running' }),
       makeRecord({ subagentId: 'bg-wf-live', status: 'running', origin: 'workflow' }),
-      makeRecord({ subagentId: 'bg-wf-wait', status: 'running', resumable: true, origin: 'workflow' }),
+      makeRecord({ subagentId: 'bg-wf-wait', status: 'running', origin: 'workflow' }),
     ])
 
     const counts = useSidebarCounts(sid)
@@ -120,7 +124,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     const store = useSubagentStore()
     const records = [
       makeRecord({ subagentId: 'm1', status: 'running' }),
-      makeRecord({ subagentId: 'm2', status: 'running', resumable: true }),
+      makeRecord({ subagentId: 'm2', status: 'running', stopReason: 'failed' }),
       makeRecord({ subagentId: 'm3', status: 'running', result: '本轮产出', chatMode: false }),
       makeRecord({ subagentId: 'm4', status: 'done' }),
       makeRecord({ subagentId: 'm5', status: 'failed', error: 'boom' }),
@@ -129,7 +133,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     store.applyRecords('sess-mix', records)
 
     const counts = useSidebarCounts(sid)
-    // badge（D8 收窄）= 2（m1 streaming + m2 waiting；m3 done 投影 / m4-m6 收口不计入）
+    // badge（D8 收窄 + [U5] 判据）= 2（m1 真在跑 + m2 W4 新型计入——U5 登记翻转；m3 done 投影 / m4-m6 收口不计入）
     expect(counts.subagentRunningCount.value).toBe(2)
     // 与分桶 SSOT 的 running 视图计数恒等（同源判据，badge ↔ 过滤视图不再分叉）
     expect(counts.subagentRunningCount.value).toBe(countSubagents(records).running)
