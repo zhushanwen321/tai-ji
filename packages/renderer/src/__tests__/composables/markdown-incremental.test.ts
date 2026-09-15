@@ -18,13 +18,13 @@ import type {
   IncrementalRenderCache,
   IncrementalRenderResult,
   MarkdownSegment,
-} from '@/composables/logic/markdown'
+} from '@/composables/logic/markdown-incremental'
 
 // stub shiki：避免真实语法加载（fine-grained 后入口是 shiki/core）；codeToHtml 计数同时用作「前缀零重渲染」的可观测探针
 const fakeCodeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`)
 
 /** 每用例拿到干净的 markdown 模块（renderMarkdown 内部缓存 markdown-it 实例 + highlighter 单例） */
-async function freshModule(): Promise<typeof import('@/composables/logic/markdown')> {
+async function freshModule(): Promise<typeof import('@/composables/logic/markdown-incremental')> {
   vi.resetModules()
   vi.doMock('shiki/core', () => ({
     createHighlighterCore: () =>
@@ -33,7 +33,7 @@ async function freshModule(): Promise<typeof import('@/composables/logic/markdow
         getLoadedLanguages: () => ['typescript', 'javascript', 'vue'],
       }),
   }))
-  return await import('@/composables/logic/markdown')
+  return await import('@/composables/logic/markdown-incremental')
 }
 
 /** 段序列 → 可比较 HTML（mermaid/占位段映射为标记，与 renderMarkdownSegments 的拆分口径对齐） */
