@@ -122,14 +122,6 @@ test.describe('搜索浮层 E2E', () => {
   })
 
   test('SM-E2E-6（recents 持久化）：confirm 文件项 → 重唤起 → 最近分组含该文件', async ({ page }) => {
-    // [2026-09-15 查证定性：真回归（mock 轨通路断点），保留待修] 现象 = Enter confirm 文件项后
-    // search-modal-root 5s 内持续可见。UI 意图明确是关闭（AC-6.7：SearchModal.vue confirmSel
-    // result.ok → emit('update:open', false)）。根因 = useSearchModalDeps.ts:62 的 fileRead 直接
-    // import @taiji/core/transport/api/domains/file（real 域），绕过 renderer @/api 门面的
-    // isMock 切换（api/index.ts:49）——mock 轨下 file.read RPC 无 handler，挂到
-    // RPC_BACKSTOP_TIMEOUT_MS=65s 才 reject，5s 断言窗口内 confirm 永远 pending、浮层不关。
-    // 修复方向：fileRead 改走 @/api 门面（mock 下走 mockApi.file.read）。bug 修复另行裁决。
-    test.fixme(true, 'BLOCKED: mock 轨 fileRead 绕过 @/api 门面，file.read RPC 挂 65s backstop，confirm 后浮层不关（真回归，待修）')
     await openSearch(page)
     // 输入 auth 查到文件，Enter confirm（useSearchJump.confirmFile → mock file.read）
     await page.getByTestId('search-input').pressSequentially('auth')

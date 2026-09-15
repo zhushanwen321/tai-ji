@@ -320,7 +320,7 @@ jobs:
           retention-days: 7
 
   # E2E 行为轨 P0 smoke（mock 轨 electron-smoke project，2026-09-15 L1 层接线）：每 PR 固定跑
-  # 8 条 @p0-smoke 用例（_electron.launch + VITE_MOCK mock 构建产物，零 token / 零凭证 / 不 spawn pi）。
+  # 9 条 @p0-smoke 用例（_electron.launch + VITE_MOCK mock 构建产物，零 token / 零凭证 / 不 spawn pi）。
   # 与 e2e-visual 的两个关键差异：① install 不设 ELECTRON_SKIP_BINARY_DOWNLOAD（_electron.launch
   # 需要 node_modules/electron 真实二进制）；② 不设 E2E_VISUAL_ONLY（globalSetup 检出产物缺失时自动
   # 跑 build:e2e，VITE_E2E/VITE_MOCK env 由 globalSetup 内部注入，不在本 YAML 复刻）。runner 用

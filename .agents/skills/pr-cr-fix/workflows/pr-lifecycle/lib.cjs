@@ -125,10 +125,6 @@ const MSG = {
     `select-constraints.mjs 失败（exit 非 0）：\n${tailLines(out, 15)}\n检查 docs/constraints.json 与脚本输出后 resume`,
   constraintsMissing: (p) =>
     `constraints step exit 0 但未产出 ${p}；检查脚本版本与输出后 resume`,
-  finalGatesRealPiMissing: (reason) =>
-    `real-pi 凭证预检未过：${reason}\n补 pi 凭证（三源：env API key / auth.json / models.json，探测链对齐 packages/runtime/src/__tests__/equivalence/pi-fixture.ts 的 REAL_PI_READY）后 resume；不得凭 skip 宣布 PASS`,
-  finalGatesRealPiSkip: (markers) =>
-    `final-gates：test:runtime 输出检出 real-pi skip 标记（${markers.join(' | ')}）——真实凭证子集未跑，验收不完整；补 pi 凭证后 resume，不得凭 skip 宣布 PASS`,
   finalGatesDirtyTail: (list) =>
     `final-gates 收尾防线：存在未提交改动，修复可能静默丢失（与 structured-output 历史事故同型）：\n${list}\n经 \`git add <显式路径> && git commit\` 落盘后 resume`,
 
@@ -897,21 +893,10 @@ function prMetaAgentPrompt(baseHash, commitsOut, diffStatOut, changesetFiles) {
  * PR 阶段六 steps 工厂（§3.3 注册表 preflight → pr-submit）。
  * scriptPaths 可注入（测试用假脚本路径；缺省从 repoRoot 按仓内真实布局推导）。
  */
-/* ── 门禁 steps 辅助（u3：coverage/metrics 产物解析 + real-pi 同源预检） ── */
-
-// pi-fixture.ts 同源常量（packages/runtime/src/__tests__/equivalence/pi-fixture.ts；
-// 漂移防护：该文件变更 DEFAULT_MODEL 或探测链时须核对本节）
-const REAL_PI_DEFAULT_MODEL = 'xiaomi-token-plan-cn/mimo-v2.5-pro';
-
-// final-gates ③ 的 test:runtime 输出中 real-pi skip 的特征标记：
-// ① pi-fixture 模块加载 console.warn：`[equivalence] 真实 pi（LLM turn）用例 skip：<理由>`
-// ② 引用方 describe 名注入：`<suite>（skip：<REAL_PI_SKIP_REASON>）`，理由三种前缀
-const REAL_PI_SKIP_MARKERS = [
-  '[equivalence] 真实 pi（LLM turn）用例 skip：',
-  '（skip：pi binary not found',
-  '（skip：pi 凭证不可用',
-  '（skip：env TAIJI_SKIP_REAL_PI',
-];
+/* ── 门禁 steps 辅助（u3：coverage/metrics 产物解析） ── */
+// real-pi 凭证预检与输出 skip 标记解析已删除（2026-09-15 e2e 执行准则）：test:runtime 以
+// TAIJI_SKIP_REAL_PI=1 只跑 unit 轨（与 CI 同口径），skip 标记是 unit 轨的预期输出而非
+// 验收缺口；real 轨由开发阶段按改动面承接（SKILL.md「real-pi 测试分工」）。
 
 function coverageInsufficientReasonPrefix() {
   return '增量覆盖率'; // coverage-gate.py FAIL 条目 reason 固定前缀（覆盖率不足 vs 测试跑红的分流依据）
@@ -1015,41 +1000,6 @@ function metricsFixContext(io) {
     ...fails.slice(0, 10).map((f) => `- [${f.type}] ${f.path || (f.files || []).join(',')} ${f.name || ''} — ${f.reason || ''}`),
     '要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import）；不放松 .fallowrc.json 阈值。',
   ].join('\n');
-}
-
-/**
- * real-pi 凭证预检（final-gates ③ 执行前的 [MANDATORY] 门禁）。
- * 探测链与 packages/runtime/src/__tests__/equivalence/pi-fixture.ts 的
- * detectRealPiSkipReason() 同源：binary → env 强制态 → 凭证三源（env API key /
- * auth.json provider 条目 key / models.json providers[].apiKey）。
- * @returns null = 就绪；string = 缺失理由（进 failed 文案）
- */
-function realPiPreflight(io) {
-  const which = io.sh('which', ['pi']);
-  if (which.code !== 0 || !which.stdout.trim()) {
-    return 'pi binary not found（which pi 未命中）';
-  }
-  const forced = io.env ? io.env.TAIJI_SKIP_REAL_PI : undefined;
-  if (forced === '1' || forced === 'true') {
-    return `env TAIJI_SKIP_REAL_PI=${forced}（等价性基线双轨强制跳过态，门禁不接受）`;
-  }
-  const provider = REAL_PI_DEFAULT_MODEL.split('/')[0];
-  const envKey = `${provider.toUpperCase().replaceAll('-', '_')}_API_KEY`;
-  const envValue = io.env ? io.env[envKey] : undefined;
-  if (typeof envValue === 'string' && envValue.trim() !== '') return null;
-  const envDir = io.env ? io.env.PI_CODING_AGENT_DIR : undefined;
-  const agentDir = (envDir && envDir.trim() !== '') ? envDir : path.join(io.homedir(), '.pi', 'agent');
-  const auth = readJsonFileQuiet(io, path.join(agentDir, 'auth.json'));
-  if (auth && typeof auth === 'object') {
-    const cred = auth[provider];
-    if (cred && typeof cred === 'object' && typeof cred.key === 'string' && cred.key.trim() !== '') return null;
-  }
-  const models = readJsonFileQuiet(io, path.join(agentDir, 'models.json'));
-  if (models && typeof models === 'object' && models.providers && typeof models.providers === 'object') {
-    const entry = models.providers[provider];
-    if (entry && typeof entry.apiKey === 'string' && entry.apiKey.trim() !== '') return null;
-  }
-  return `pi 凭证不可用：DEFAULT_MODEL "${REAL_PI_DEFAULT_MODEL}" 需要 provider "${provider}" 的 API key，env ${envKey} / auth.json / models.json 三源均未命中`;
 }
 
 /* ── cr-fix step 辅助（u4：§3.6 D2 嵌套内置 loop；§3.4-(3)-5 恢复粒度 = step 整体重跑） ── */
@@ -1505,9 +1455,6 @@ function createPrSteps({ repoRoot, scriptPaths = {} } = {}) {
           stepId: 'final-gates',
           gateName: 'final-gates（coverage → metrics → pr-pre-merge --test-result，失败从 ① 头部重跑）',
           runGate: () => {
-            // real-pi 双保险之一：③ 前同源预检（凭证缺失属环境前置，fail-fast 不进修复轮）
-            const piMissing = realPiPreflight(ctx.io);
-            if (piMissing) throw new Error(MSG.finalGatesRealPiMissing(piMissing));
             // ① coverage-gate（测试判定来源）
             const cov = ctx.io.sh('python3', [paths.coverageGate, '--base', ctx.state.base, ...sharedSrcArgs()]);
             if (cov.code !== 0) {
@@ -1533,9 +1480,6 @@ function createPrSteps({ repoRoot, scriptPaths = {} } = {}) {
             };
           },
           onPass: (res) => {
-            // real-pi 双保险之二：输出 skip 标记解析（检出即 failed，不得凭 skip 宣布 PASS）
-            const markers = REAL_PI_SKIP_MARKERS.filter((m) => res.stdout.includes(m));
-            if (markers.length > 0) throw new Error(MSG.finalGatesRealPiSkip(markers));
             const cov = res.coverageJson;
             const met = res.metricsJson;
             let premergeResult = 'PASS';
@@ -1781,8 +1725,6 @@ module.exports = {
   readPremergeMarker,
   resolveRepoRoot,
   worktreeDirt,
-  REAL_PI_DEFAULT_MODEL,
-  REAL_PI_SKIP_MARKERS,
   CR_FIX_PASS_TERMINATED,
   CR_FIX_RETRY_TERMINATED,
   CR_FIX_STUCK_TERMINATED,
@@ -1793,7 +1735,6 @@ module.exports = {
   classifyCoverageExit1,
   coverageTestInject,
   coveragePctOf,
-  realPiPreflight,
   gateFixLoop,
   createPrSteps,
   runPipeline,

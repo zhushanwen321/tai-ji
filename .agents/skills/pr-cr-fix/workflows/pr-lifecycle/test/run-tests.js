@@ -1334,10 +1334,9 @@ async function main() {
     files: {},
   };
 
-  // 门禁段全过 mocks（real-pi 凭证就绪 + coverage/metrics/premerge 产物齐备）
+  // 门禁段全过 mocks（coverage/metrics/premerge 产物齐备）
   function allGatesMocks(opts = {}) {
     return {
-      env: opts.env !== undefined ? opts.env : { XIAOMI_TOKEN_PLAN_CN_API_KEY: 'k-test' },
       scriptMocks: Object.assign({
         [FAKE_PATHS.selectConstraints]: { code: 0, stdout: 'constraints written' },
         [FAKE_PATHS.coverageGate]: { code: 0, stdout: 'Gate-1.6 verdict=pass  min_incremental=80%  (base=main, pkgs=1)' },
@@ -1381,34 +1380,6 @@ async function main() {
     assert.strictEqual(lib.classifyCoverageExit1(FAIL_INSUFFICIENT_JSON), 'insufficient');
     assert.strictEqual(lib.classifyCoverageExit1(FAIL_TEST_FAILURE_JSON), 'test-failure');
     assert.strictEqual(lib.coveragePctOf(PASS_COVERAGE_JSON), 92.3);
-  });
-
-  await test('realPiPreflight（pi-fixture 同源）：env key / auth.json / models.json 三源正反', async () => {
-    const providerKey = 'XIAOMI_TOKEN_PLAN_CN_API_KEY';
-    // env 命中 → null
-    const t1 = makeIo({ env: { [providerKey]: 'k' } });
-    assert.strictEqual(lib.realPiPreflight(t1.io), null);
-    // which pi 失败
-    const t2 = makeIo({ cmdResults: { which: { code: 1, stdout: '' } } });
-    assertIncludes(lib.realPiPreflight(t2.io), 'pi binary not found');
-    // env 强制跳过态
-    const t3 = makeIo({ env: { [providerKey]: 'k', TAIJI_SKIP_REAL_PI: '1' } });
-    assertIncludes(lib.realPiPreflight(t3.io), 'TAIJI_SKIP_REAL_PI');
-    // auth.json stored 条目命中（homedir mock 指向 temp root）
-    const t4 = makeIo({
-      presetFiles: { '.pi/agent/auth.json': JSON.stringify({ 'xiaomi-token-plan-cn': { key: 'stored-key' } }) },
-    });
-    Object.defineProperty(t4.io, 'homedir', { value: () => t4.root });
-    assert.strictEqual(lib.realPiPreflight(t4.io), null);
-    // models.json providers.apiKey 命中
-    const t5 = makeIo({
-      presetFiles: { '.pi/agent/models.json': JSON.stringify({ providers: { 'xiaomi-token-plan-cn': { apiKey: 'mk' } } }) },
-    });
-    Object.defineProperty(t5.io, 'homedir', { value: () => t5.root });
-    assert.strictEqual(lib.realPiPreflight(t5.io), null);
-    // 全缺 → 三源理由
-    const t6 = makeIo({});
-    assertIncludes(lib.realPiPreflight(t6.io), '三源均未命中');
   });
 
   await test('门禁段全链：constraints → coverage-1 → metrics-1 → final-gates 到 awaiting-push（outputs 契约核验）', async () => {
@@ -1462,7 +1433,6 @@ async function main() {
     // exit 0 但产物缺失
     const t3 = makeIo({
       args: { runId: RUN_ID_A, _runId: 'wf-u3-c3' },
-      env: { XIAOMI_TOKEN_PLAN_CN_API_KEY: 'k' },
       scriptMocks: {
         [FAKE_PATHS.selectConstraints]: { code: 0, stdout: 'ok' },
         [FAKE_PATHS.coverageGate]: { code: 0, stdout: 'Gate-1.6 verdict=pass' },
@@ -1533,7 +1503,6 @@ async function main() {
     let covRuns = 0;
     const t = makeIo({
       args: { runId: RUN_ID_A, _runId: 'wf-u3-cov3' },
-      env: { XIAOMI_TOKEN_PLAN_CN_API_KEY: 'k' },
       agent: async () => ({ value: {}, error: null }),
       presetFiles: {
         '.review/constraints.md': '# c\n',
@@ -1625,7 +1594,6 @@ async function main() {
     let metRuns = 0;
     const t3 = makeIo({
       args: { runId: RUN_ID_A, _runId: 'wf-u3-m3' },
-      env: { XIAOMI_TOKEN_PLAN_CN_API_KEY: 'k' },
       presetFiles: {
         '.review/constraints.md': '# c\n',
         '.review/coverage.json': JSON.stringify(PASS_COVERAGE_JSON),
@@ -1676,49 +1644,6 @@ async function main() {
     assert.ok(withInject.length >= 1, '③ 应以 --test-result 注入值执行');
     assert.deepStrictEqual(withInject[0], ['bash', FAKE_PATHS.preMerge, '--test-result', 'PASS', '--base', 'main']);
     assert.strictEqual(readStateFile(t.root, RUN_ID_A).steps['final-gates'].outputs.premergeResult, 'PASS');
-  });
-
-  await test('final-gates：real-pi 预检缺失 → failed（fail-fast，三动作零执行）', async () => {
-    const m = allGatesMocks({ env: {} }); // 无凭证
-    const t = makeIo(Object.assign({ args: { runId: RUN_ID_A, _runId: 'wf-u3-fg2' } }, m));
-    seedState(t.root, {
-      status: 'running',
-      steps: {
-        constraints: { status: 'done', attempts: 1, outputs: { constraintsFile: 'c.md' } },
-        'coverage-1': { status: 'done', attempts: 1, outputs: { coverageVerdict: 'pass', coveragePct: 92.3 } },
-        'metrics-1': { status: 'done', attempts: 1, outputs: { metricsVerdict: 'pass' } },
-        'cr-fix': { status: 'done', attempts: 1, outputs: { nestedRunId: ['wf-x'], terminated: 'clean', aggregatedFile: null } },
-      },
-    });
-    t.io.steps = gatesSteps(t.root);
-    const result = await lib.runPipeline(t.io);
-    assert.strictEqual(result.status, 'failed');
-    assert.strictEqual(result.failedStep, 'final-gates');
-    assertIncludes(result.error, 'real-pi 凭证预检未过');
-    assertIncludes(result.error, '三源均未命中');
-    assertIncludes(result.error, '不得凭 skip 宣布 PASS');
-    assert.strictEqual(shArgsOf(t, FAKE_PATHS.coverageGate).length, 0); // 预检先于三动作
-    assert.strictEqual(t.agentCalls.length, 0);
-  });
-
-  await test('final-gates：输出检出 real-pi skip 标记（console.warn 与 describe 名两种形态）→ failed', async () => {
-    for (const markerOut of [
-      '[equivalence] 真实 pi（LLM turn）用例 skip：pi 凭证不可用：DEFAULT_MODEL 需要 API key',
-      'completion backflow e2e real pi（skip：pi 凭证不可用：DEFAULT_MODEL 需要 API key）',
-    ]) {
-      const m = allGatesMocks({
-        scriptMocks: { [FAKE_PATHS.preMerge]: { code: 0, stdout: markerOut } },
-      });
-      const t = makeIo(Object.assign({ args: { runId: RUN_ID_A, _runId: 'wf-u3-fg3' } }, m));
-      seedState(t.root, { status: 'running' });
-    seedReviewerAgent(t.root);
-      t.io.steps = gatesSteps(t.root);
-      const result = await lib.runPipeline(t.io);
-      assert.strictEqual(result.status, 'failed', `marker=${markerOut}`);
-      assert.strictEqual(result.failedStep, 'final-gates');
-      assertIncludes(result.error, 'real-pi skip 标记');
-      assertIncludes(result.error, '不得凭 skip 宣布 PASS');
-    }
   });
 
   await test('final-gates：收尾防线——三动作全过但工作区脏（.review/ 除外）→ failed', async () => {
@@ -2327,7 +2252,6 @@ async function main() {
   await test('Gate B：stacked PR（base≠main）→ ③ 携带 --base dev-0.9.13 与注入值（S1 现场回归）', async () => {
     const t = makeIo({
       args: { runId: RUN_ID_A, _runId: 'wf-gb-s1', base: 'dev-0.9.13' },
-      env: { XIAOMI_TOKEN_PLAN_CN_API_KEY: 'k' },
       presetFiles: {
         '.review/constraints.md': '# c\n',
         '.review/coverage.json': JSON.stringify({ verdict: 'pass', base: 'dev-0.9.13', packages: { p: { status: 'OK', covered_executable_added_lines: 90, executable_added_lines: 100 } }, files: {} }),

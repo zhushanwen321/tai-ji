@@ -4,7 +4,7 @@
  * ui 包 SearchModal（w4 迁入）经 props.deps 消费 search 编排依赖（SearchDeps）。
  * 本 composable 把 renderer 真实现适配组装：
  * - ports 7 项：isMock（VITE_MOCK）/ isMac（navigator.platform，D8 收编）/ searchMock
- *   （mockApi.search.query）/ fileRead（api/domains/file.read，AC-6.9 不经吞错层）/
+ *   （mockApi.search.query）/ fileRead（@/api 门面 file.read，mock/real 构建期切换；AC-6.9 不经吞错层）/
  *   fileCandidates（api/domains/composer.getFileCandidates）/ sessionList（api/domains/session.list）/
  *   selectSession（壳传入 useSidebar().selectSession，C-W3-2）/ watchFileChanges
  *   （useFileChangeInvalidation.watchFileChangesForInvalidation，C-W3-3）/ t（i18n）
@@ -23,10 +23,12 @@
 import { ref } from 'vue'
 import { getPlatform } from '@taiji/core'
 import type { SearchDeps } from '@taiji/core'
-import * as fileApi from '@taiji/core/transport/api/domains/file'
 import * as composerApi from '@taiji/core/transport/api/domains/composer'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import * as mockApi from '@taiji/core/transport/mock'
+// SM-E2E-6：fileRead 必须经 @/api 门面（isMock 切换 mockApi.file / realFile）——直引 core real 域
+// 会绕过 mock 切换，mock 轨 file.read RPC 无 handler 挂 65s backstop，confirm 永不完成
+import { file } from '@/api'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useFileSearchStore } from '@/composables/features/search/useFileSearchStore'
 import { useFileTree } from '@/composables/features/file-tree/useFileTree'
@@ -59,7 +61,7 @@ export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
       isMock,
       isMac: navigator.platform.includes('Mac'),
       searchMock: isMock ? mockApi.search.query : undefined,
-      fileRead: (path, sessionId) => fileApi.read(path, sessionId).then(() => {}),
+      fileRead: (path, sessionId) => file.read(path, sessionId).then(() => {}),
       fileCandidates: composerApi.getFileCandidates,
       sessionList: sessionApi.list,
       // C-W3-2：SessionSelectPort 接收点归实现域（useSidebar().selectSession）

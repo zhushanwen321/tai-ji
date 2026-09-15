@@ -131,6 +131,23 @@ bash scripts/check-version-bump.sh
    `packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts`，红 = 上游协议漂移）——
    先处理协议漂移再 bump，不要动版本号
 
+### 阶段 3.7: L3 e2e pre-tag 冒烟
+
+> **执行时机**：阶段 4 打 tag 之前。正式 merge 发布线专属——prerelease（`*-beta.*`，prerelease skill 线）不走本阶段；pre 模式或无 L3 触发面时输出「本轮无 L3 资产，跳过」即过（合法跳过，非失败）。
+
+阶段 1 的 merge 门禁不跑 e2e（与 CI 同口径），但正式发布打 tag 前须对**发布触发面的 L3 真机资产**做一次按需冒烟——清单由 e2e 调度器从 docs/testing/e2e-map.json SSOT 圈定，不靠人工背清单：
+
+```bash
+cd $WS_ROOT/main && node scripts/select-affected-e2e.mjs --release
+```
+
+脚本圈出 trigger ∈ {on-release, on-pi-bump} 的全部 rule（当前 = rename A2 真机 + M1 models-json-sanitize 真机零 mock + sync-collect probes pi-bump 面；每条 rule 附 `运行` 命令与空载串行标注，输出集为空即按上方跳过语义放行）。pi bump 时联动既有 W25 门禁（`pi-protocol-contract` 契约测试，脚本输出 E2E-EQUIV-02）——阶段 3.5 的 check-version-bump.sh 已内联该测试，此处红则先解决协议漂移再进阶段 4。
+
+**人工定跑哪些**：
+- **A2（`E2E-RENAME-02`）烧真实 token [MANDATORY 用户确认]**：必须用户在场明确确认后才跑
+- **faux/mock 轨不在此阶段跑**：CI 已覆盖（mock 轨 = CI 同口径单测、faux 轨 = faux 通道探针），发布前不强制重跑
+- **真机 L3 按触发面跑**：M1 models-json-sanitize（`E2E-MODELS-01`）在本次发布含 pi bump 时跑，按脚本标注空载串行
+
 ### 阶段 4: 版本 bump + 发布
 
 ```bash
@@ -465,6 +482,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 | 3 | PR CI + 合并（阶段 2） | |
 | 4 | Post-merge CI（阶段 3） | |
 | 5 | ⚠️ 版本校验（阶段 3.5） | `bash scripts/check-version-bump.sh` |
+| 5.7 | ⚠️ L3 e2e pre-tag 冒烟（阶段 3.7） | `node scripts/select-affected-e2e.mjs --release`（人工定跑；A2 烧真实 token 须用户在场确认） |
 | 6 | Electron 版本 bump + 发布（阶段 4） | `bash scripts/verify-ci-release.sh ...` (在 push 后调用) |
 | 6N | ⚠️ npm 发布（阶段 4N，可选） | 仅含 extensions/ 改动时执行：人工定 type（check + apply 脚本）+ npm-* tag |
 | 7 | 创建 Release（阶段 5） | |
