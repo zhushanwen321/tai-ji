@@ -112,11 +112,6 @@ function optNumber(v: unknown): number | undefined {
   return typeof v === 'number' ? v : undefined
 }
 
-/** 自描述 entry 可选布尔字段守卫（typeof boolean ? 值 : undefined） */
-function optBoolean(v: unknown): boolean | undefined {
-  return typeof v === 'boolean' ? v : undefined
-}
-
 /**
  * origin 字面量守卫（H2 R3-1 修复：自描述投影透传 origin，renderer 侧栏计数 / 后台工作
  * 指示 / 列表桶按 `origin === 'workflow'` 负向过滤）。守卫语义对齐 core record-store.ts
@@ -272,8 +267,8 @@ function projectEngineSpreadFields(
  * （eventLog/displayItems 等扩展内部字段不进 runtime 契约）；缺必填字段视为坏 entry 返回 null。
  *
  * [U6/D5] 状态归一在此扩参承载：①legacy 值映射的展示位合成（derivedStopReason/
- * derivedClosedReason/derivedChatMode——entry 自带字段恒优先，合成仅兜缺失）；
- * ②第五归一上下文 resumable（存量桥接 entry 专有，[U5] 后新 entry 无此字段）。
+ * derivedClosedReason——entry 自带字段恒优先，合成仅兜缺失；chatMode 形态位已随
+ * modeless 波4 字段消亡删除）；②第五归一上下文 resumable（存量桥接 entry 专有，[U5] 后新 entry 无此字段）。
  */
 function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): SubagentRecord | null {
   if (typeof d.id !== 'string' || typeof d.status !== 'string') return null
@@ -315,10 +310,8 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // result 回归纯数据职责（「running-resumable 轮终信号」判据已随 U6 谓词终态化
     // 退役为 status+stopReason 直读）。
     result: optString(d.result),
-    // 执行态细分判据（residual-fixes）：chatMode 显式值（register 起写入；缺省 = v1 前
-    // 存量 entry，消费端按保守方向处理）。[U5/D4] resumable 下行字段已随退役删除。
-    // [U6] 归一合成（legacy done 族 one-shot 形态位）仅兜缺失。
-    chatMode: optBoolean(d.chatMode) ?? norm.derivedChatMode,
+    // [modeless 波4] chatMode 投影已随字段消亡删除：新 entry 不再携带该键，旧 entry
+    // 残留键在此被忽略（读侧容忍——万物可续后「模式」不再是执行态判据）。
     // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
     // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
     // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
@@ -671,9 +664,9 @@ function buildLegacySubagentRecord(
     closedReason: norm.derivedClosedReason,
     // [U6/D5] legacy 值展示位合成（done→completed / failed|crashed→failed /
     // cancelled→cancelled / closed→deriveClosedDisplay 派生）——legacy 路径 entry
-    // 无自带 stopReason/chatMode 字段（W16 前产物），合成值即唯一来源。
+    // 无自带 stopReason 字段（W16 前产物），合成值即唯一来源；chatMode 形态位已随
+    // modeless 波4 字段消亡删除。
     stopReason: norm.derivedStopReason,
-    chatMode: norm.derivedChatMode,
   }
 }
 

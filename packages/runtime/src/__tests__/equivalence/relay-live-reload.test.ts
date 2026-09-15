@@ -39,7 +39,7 @@ const VIRTUAL_ID = subagentVirtualId(MAIN_SID, RECORD_ID)
 
 // ── 同一 subagent 任务的逻辑会话（两腿 fixture 的唯一事实源）──────────────────
 //
-// 两轮形态覆盖 chatMode 续聊轮（R1 根因场景）+ 工具调用全链（R2：assistant 带 toolCall →
+// 两轮形态覆盖续聊轮（R1 根因场景）+ 工具调用全链（R2：assistant 带 toolCall →
 // toolResult 回填 → 总结 assistant），usage/fileChanges 提取路径随消息体两侧同源透传。
 const CONVERSATION = {
   round1: {
@@ -172,7 +172,7 @@ function toChildStdoutLines(): string[] {
     msgStart(c1.summary.timestamp),
     ...deltas(['入口是 main.ts\n导出', ' main 函数']),
     JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: c1.summary.text }], stopReason: c1.summary.stopReason, timestamp: c1.summary.timestamp } }),
-    // round 2（chatMode 续聊轮）：user → assistant
+    // round 2（续聊轮）：user → assistant
     JSON.stringify({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: c2.user.text }], timestamp: c2.user.timestamp } }),
     msgStart(c2.reply.timestamp),
     ...deltas(['测试目录包含 ', '3 个用例文件']),

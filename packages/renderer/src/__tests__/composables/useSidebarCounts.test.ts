@@ -52,13 +52,13 @@ beforeEach(() => {
 })
 
 describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
-  it('[U6] done 投影（idle + result + chatMode false + completed）不计入，真 running 计入', () => {
+  it('[U6] 轮终完成投影（idle + result + completed）不计入，真 running 计入', () => {
     const sid = ref<string | null>('sess-badge')
     const store = useSubagentStore()
     store.applyRecords('sess-badge', [
       makeRecord({ subagentId: 'bg-live-1', status: 'running' }),
       // [U6] 轮终形态 = U4 翻边后 renderer 实收形态（idle + stopReason 展示位）
-      makeRecord({ subagentId: 'bg-done-proj-1', status: 'idle', result: '本轮产出', chatMode: false, stopReason: 'completed' }),
+      makeRecord({ subagentId: 'bg-done-proj-1', status: 'idle', result: '本轮产出', stopReason: 'completed' }),
       makeRecord({ subagentId: 'bg-terminal-1', status: 'idle', stopReason: 'completed' }),
     ])
 
@@ -125,7 +125,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     const records = [
       makeRecord({ subagentId: 'm1', status: 'running' }),
       makeRecord({ subagentId: 'm2', status: 'running', stopReason: 'failed' }),
-      makeRecord({ subagentId: 'm3', status: 'running', result: '本轮产出', chatMode: false }),
+      makeRecord({ subagentId: 'm3', status: 'running', result: '本轮产出' }),
       makeRecord({ subagentId: 'm4', status: 'done' }),
       makeRecord({ subagentId: 'm5', status: 'failed', error: 'boom' }),
       makeRecord({ subagentId: 'm6', status: 'idle', stopReason: 'completed' }),
@@ -133,7 +133,7 @@ describe('useSidebarCounts D8 badge 口径（subagentRunningCount）', () => {
     store.applyRecords('sess-mix', records)
 
     const counts = useSidebarCounts(sid)
-    // badge（D8 收窄 + [U5] 判据）= 2（m1 真在跑 + m2 W4 新型计入——U5 登记翻转；m3 done 投影 / m4-m6 收口不计入）
+    // badge（D8 收窄 + [U5] 判据）= 2（m1 真在跑 + m2 W4 新型计入——U5 登记翻转；m3 带 result 在跑 / m4-m6 收口不计入）
     expect(counts.subagentRunningCount.value).toBe(2)
     // 与分桶 SSOT 的 running 视图计数恒等（同源判据，badge ↔ 过滤视图不再分叉）
     expect(counts.subagentRunningCount.value).toBe(countSubagents(records).running)

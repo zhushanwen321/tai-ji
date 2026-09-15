@@ -35,7 +35,7 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
 /**
  * 占用谓词（G2「正在跑」严格口径 SSOT——two-state-convergence D1/D2；[U6] 判据
  * 终态化：`status === 'running' && stopReason === undefined`（D5 R3 终态判据，§3.1
- * isOccupied 本体）。U1 桥接判据的 result/resumable 子句已删——U4 翻边后轮终权威词
+ * isOccupied 本体）。U1 桥接判据的 result 子句已删——U4 翻边后轮终权威词
  * = idle（status 子句直接排除），result 子句的旧 entry 兜底职责由 runtime 归一层
  * 第五归一（`running && resumable===true → idle`，D5）承接；stopReason 子句排除
  * W4 死亡纳管态（running + stopReason='failed'，[U5/D4] adoptEngineDeath 写点），
@@ -50,31 +50,15 @@ export function isRunningProjection(record: SubagentRecord): boolean {
 }
 
 /**
- * done 投影判据（D4 SSOT；[two-state-convergence U4] 判据 idle 化——写面翻边后轮终
- * 权威词 = idle（markRoundIdle 写 idle，对齐 §3.2.2 事件表 settle 行），one-shot 完成
- * 展示判据随之从「running + result + chatMode=false 的桥接组合」翻为
- * `idle && chatMode === false`。桥接期旧 entry（running + result 形态）不再命中本
- * 判据——展示过渡态（U6 归一映射恢复等价显示），占用判定不受影响（isRunningProjection
- * 独立严格口径）。
- * [two-state-convergence D1] 本函数是**展示判据**（done 绿点 vs chat 等续聊 accent
- * 点），不参与占用判定——占用谓词 isRunningProjection 是严格口径（result 子句），
- * 不经理由本函数反向挪用。SubagentList 展示判据 isDone 必须引用本函数，
- * 禁止重复实现。
+ * done 展示判据（[modeless 波4] 判据 idle+result 化——chatMode 比对位随字段消亡删除）：
+ * idle + 有 result = 完成展示（轮终产出在场）。万物可续后 idle 不再细分「完成 vs 等续聊」
+ * （chatMode===false 特判删除）——本函数保留作展示公式与测试面，状态点色表已不消费
+ * （idle 统一绿兜底，见 SubagentList STATUS_DOT_RULES）。
+ * [two-state-convergence D1] 本函数不参与占用判定——占用谓词 isRunningProjection 是
+ * 严格口径，不经本函数反向挪用。
  */
 export function isDoneProjection(record: SubagentRecord): boolean {
-  return record.status === 'idle' && record.chatMode === false
-}
-
-/**
- * waiting 投影判据（[two-state-convergence U4] SSOT 化 + idle 化——自 SubagentList
- * 本地实现迁入，判据从 `running && 非占用 && 非 done` 的组合翻为 `idle && chatMode
- * !== false`）：chat 等续聊 / 孤儿兜底的静态半透明 accent 点。
- * chatMode 缺省（legacy 存量 entry 无该字段）保守归 chat（!== false 恒真）——无法
- * 确认不是 chat 就不宣告完成（与 isDoneProjection 的保守方向同构，互补无交叠：
- * done = idle && chatMode === false）。
- */
-export function isWaiting(record: SubagentRecord): boolean {
-  return record.status === 'idle' && record.chatMode !== false
+  return record.status === 'idle' && record.result !== undefined
 }
 
 /**

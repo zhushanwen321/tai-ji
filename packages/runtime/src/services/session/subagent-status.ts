@@ -9,8 +9,8 @@ import { deriveClosedDisplay } from '@xyz-agent/shared'
  * running/closed、PR #85 的 manifest 写 completed/failed、子进程崩溃重建路径推断
  * crashed、U4 前自描述 entry 的 A-lite 轮终 running+resumable 桥接形态），本函数统一
  * 收敛到两态；legacy 值（done/failed/cancelled/crashed/closed）在边界映射为
- * idle + stopReason/closedReason/chatMode 展示位合成（D5「legacy 四值映射」），
- * renderer 永不见 legacy 值。
+ * idle + stopReason/closedReason 展示位合成（D5「legacy 值映射」，chatMode 形态位
+ * 已随 modeless 波4 字段消亡删除），renderer 永不见 legacy 值。
  *
  * runtime 的 subagent-extractor（磁盘路径：自描述 entry 投影 + legacy toolResult 配对
  * 路径）共用此函数，避免多处手写映射漂移（历史 bug：event-interpreter 的三元缺
@@ -35,15 +35,6 @@ export interface NormalizedSubagentStatus {
   derivedStopReason?: string
   /** legacy closed 归一保留的 L2 诊断位（SubagentRecord.closedReason 下行，§3.2.9 台账第 1 条另行退役） */
   derivedClosedReason?: string
-  /**
-   * legacy done 族（含 closed 的 done 派生分支）归一合成的 one-shot 形态位
-   * （SubagentRecord.chatMode 下行）：done/closed-done 是 W16 前终态「完成」，
-   * 当时无 chat 概念（chatMode 字段不存在）——语义上 ≙ one-shot 完成（chatMode=false）。
-   * 合成它不是造数据，而是把「§3.4 迁移矩阵第 9 行 legacy done → 绿」的判据承载位
-   * 补齐：五行状态点表的绿 = idle 兜底行，要求 chatMode 不保守归 chat。合成仅发生在
-   * entry 自带 chatMode 缺失时（消费方 `optBoolean(d.chatMode) ?? derivedChatMode`）。
-   */
-  derivedChatMode?: false
 }
 
 /** 归一上下文（调用方按数据源可用性传入；legacy toolResult 路径无 resumable） */
@@ -68,11 +59,9 @@ function closedDisplayToStopReason(display: 'done' | 'failed' | 'cancelled'): st
 /** 占用族（running/pending/active——pi 各出口命名不一致的历史堆叠，语义等价「有任务在飞」） */
 const OCCUPIED_STATUSES: ReadonlySet<string> = new Set(['running', 'pending', 'active'])
 
-/** legacy 终态查表描述：stopReason 直投值 + done 族才有的 one-shot 形态位合成标记 */
+/** legacy 终态查表描述：stopReason 直投值。 */
 interface LegacyTerminalDescriptor {
   derivedStopReason: 'completed' | 'failed' | 'cancelled'
-  /** done 族（§3.4 第 9 行「绿」的判据承载）——failed/cancelled 族无形态合成 */
-  oneShotChatMode?: true
 }
 
 /**
@@ -82,9 +71,9 @@ interface LegacyTerminalDescriptor {
  * 原型链键必须落未知值兜底 warn，不能被原型继承成员误命中。
  */
 const LEGACY_TERMINAL_MAP: ReadonlyMap<string, LegacyTerminalDescriptor> = new Map([
-  ['done', { derivedStopReason: 'completed', oneShotChatMode: true }],
-  ['completed', { derivedStopReason: 'completed', oneShotChatMode: true }],
-  ['success', { derivedStopReason: 'completed', oneShotChatMode: true }],
+  ['done', { derivedStopReason: 'completed' }],
+  ['completed', { derivedStopReason: 'completed' }],
+  ['success', { derivedStopReason: 'completed' }],
   ['failed', { derivedStopReason: 'failed' }],
   ['error', { derivedStopReason: 'failed' }],
   ['crashed', { derivedStopReason: 'failed' }],
@@ -109,7 +98,7 @@ export function normalizeSubagentStatus(
 
 /** 占用族归一。[U6/D5 第五归一] 存量桥接形态（U4 部署边界旧 entry：running + resumable=true）
  * → idle：覆盖 §3.4 迁移矩阵第 2-5 行全部桥接形态（chat 轮终 / one-shot 轮终 /
- * legacy chatMode=∅ / 重建孤儿 result=∅），不设 result≠∅ 条件。缺此行则单字段
+ * legacy 无模式字段轮终 / 重建孤儿 result=∅），不设 result≠∅ 条件。缺此行则单字段
  * isOccupied 会对存量桥接形态重新计入幽灵（A1/A4 回归）。展示位不在此合成——
  * 存量 entry 自带 A-lite stopReason（completed/failed），自带字段优先。 */
 function normalizeOccupiedStatus(opts: NormalizeSubagentStatusOpts): NormalizedSubagentStatus {
@@ -117,25 +106,21 @@ function normalizeOccupiedStatus(opts: NormalizeSubagentStatusOpts): NormalizedS
   return { status: 'running' }
 }
 
-/** legacy 终态归一（查表命中）：idle + stopReason 直投；done 族合成 one-shot 形态位
- *（§3.4 第 9 行「绿」的判据承载，见 derivedChatMode 注释）。failed 族红点判据不依赖
- * chatMode、cancelled 族 interrupted 灰点判据同——均无形态合成必要。 */
+/** legacy 终态归一（查表命中）：idle + stopReason 直投。[modeless 波4] one-shot 形态位
+ *（derivedChatMode）随字段消亡删除——idle 统一绿兜底行不再依赖形态位区分。 */
 function normalizeLegacyTerminal(d: LegacyTerminalDescriptor): NormalizedSubagentStatus {
-  const result: NormalizedSubagentStatus = { status: 'idle', derivedStopReason: d.derivedStopReason }
-  if (d.oneShotChatMode) result.derivedChatMode = false
-  return result
+  return { status: 'idle', derivedStopReason: d.derivedStopReason }
 }
 
 /** legacy closed 终态归一：idle + closedReason 保留（诊断位）+ 展示语义经
  * deriveClosedDisplay 派生映射为 stopReason（cancelled→灰 / failed→红 / done→绿，
- * 与收窄前三分行等价——A4 门）。done 派生分支同样合成 one-shot 形态位。 */
+ * 与收窄前三分行等价——A4 门）。 */
 function normalizeClosedStatus(opts: NormalizeSubagentStatusOpts): NormalizedSubagentStatus {
   const display = deriveClosedDisplay({ closedReason: opts.closedReason, error: opts.error })
   return {
     status: 'idle',
     derivedStopReason: closedDisplayToStopReason(display),
     derivedClosedReason: opts.closedReason,
-    ...(display === 'done' ? { derivedChatMode: false as const } : {}),
   }
 }
 

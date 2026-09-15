@@ -466,7 +466,7 @@ describe('subagent store — subscribeStream / stopStream（streaming 订阅生�
 
     // 收口 streaming 实体（chat store sealed 收口）
     expect(chat.finalizeSubagentStream).toHaveBeenCalledWith('subagent:session-1:bg-1')
-    // 订阅保留（chatMode 续聊轮后续 delta 仍可达）+ 无 refetch（定稿由 entry 帧投影链覆盖）
+    // 订阅保留（续聊轮后续 delta 仍可达）+ 无 refetch（定稿由 entry 帧投影链覆盖）
     for (const unsubSpy of unsubSpies) expect(unsubSpy).not.toHaveBeenCalled()
     await Promise.resolve()
     expect(sessionApi.getSubagentHistory).not.toHaveBeenCalled()

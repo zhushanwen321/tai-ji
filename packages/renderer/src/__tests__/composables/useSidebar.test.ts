@@ -286,7 +286,6 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
       slug: 'probe',
       task: 'reconnect re-pull',
       status: 'running',
-      chatMode: true,
     }
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()

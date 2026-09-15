@@ -939,7 +939,7 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     ])
 
     // [U6/D5] closed 归一：status=idle + closedReason 保留 + deriveClosedDisplay(gc+error)
-    // 派生 stopReason='failed'（toEqual 忽略显式 undefined 键——result/chatMode 等缺省面不变）
+    // 派生 stopReason='failed'（toEqual 忽略显式 undefined 键——result 等缺省面不变）
     expect(records).toEqual([{
       subagentId: 'sa-1',
       sessionFile: '/data/sa-1.jsonl',

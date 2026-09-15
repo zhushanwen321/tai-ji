@@ -230,9 +230,10 @@ function onCancelClick(record: SubagentRecord): void {
 }
 
 /** 执行态判据（[two-state-convergence] 两态终态）：streaming = 真在跑（进程驱动中，
- *  spinner + 取消按钮）；非 streaming = 静态圆点（done 绿 / waiting accent-60 / 失败红 /
+ *  spinner + 取消按钮）；非 streaming = 静态圆点（完成绿 / 失败红 /
  *  中断灰），细分由下方 STATUS_DOT_RULES 全表表驱动（[U6] 坍缩后组件不再单独引用
- *  isDone/isWaiting 判据——两判据保留在 subagent-bucket SSOT 作展示公式与测试面）。
+ *  isDone/isWaiting 判据——[modeless 波4] done/chat 分桶特判随 chatMode 字段消亡删除，
+ *  展示公式仅存 subagent-bucket 测试面）。
  *  [two-state-convergence D2/U2] streaming 判据 = subagent-bucket SSOT 的 import
  *  wrapper（isRunningProjection 终态判据 `running && stopReason === undefined`）——
  *  badge 计数 / hasRunning / isStreamingSubagent 与本组件同源，不漂移。runtime 归一层
@@ -251,31 +252,27 @@ type StatusDotRule = {
 /**
  * 状态点颜色映射（design-tokens 语义色）——优先级表驱动：自上而下首个 match 生效，
  * 顺序即语义（挪动条目前先核对该条注释）。
- * [two-state-convergence U6/D5] 全表坍缩终态（五行）：四行 idle-gated + 第五行
- * running+failed 红。U4 前移的最小 accent 分支、running 三分空转分支、legacy 五值
- * 分支（done/failed/crashed/cancelled/closed）全部吸收删除——legacy 值经 runtime
- * 归一层映射为 idle + stopReason/closedReason/chatMode 展示位（closed 经
- * deriveClosedDisplay 派生 stopReason，「deriveClosedDisplay 改 stopReason 派生」），
- * 与收窄前三分显示等价（A4 门）：cancelled→灰（interrupted 族）/ failed→红 /
- * done→绿（one-shot 形态位合成保证落 idle 兜底行而非 accent 行）。
- * 顺序语义：失败红 / 中断灰先于等续聊 accent-60 先于完成绿兜底。
+ * [two-state-convergence U6/D5] 契约收窄后全表只剩两态词表：legacy 值经 runtime
+ * 归一层映射为 idle + stopReason/closedReason 展示位（closed 经 deriveClosedDisplay
+ * 派生 stopReason，「deriveClosedDisplay 改 stopReason 派生」），与收窄前三分显示
+ * 等价（A4 门）：cancelled→灰（interrupted 族）/ failed→红 / done→绿。
+ * [modeless 波4] idle 等续聊 accent-60 行随 chatMode 字段消亡删除——万物可续后
+ * 该区分无信息量，idle 统一落绿兜底行（有 result=完成态，无 result 亦可 fork/message 续）。
+ * 顺序语义：失败红 / 中断灰先于完成绿兜底。
  */
 const STATUS_DOT_RULES: StatusDotRule[] = [
   // running 失败红（W4 死亡纳管态，[U5/D4] adoptEngineDeath 写 stopReason='failed'；
-  // R5 补行）：红点兜住引擎死亡失败态展示，否则落 accent 兜底丢失失败信息。红点只
+  // R5 补行）：红点兜住引擎死亡失败态展示，否则落绿兜底丢失失败信息。红点只
   // 表达「上一轮失败」，不改变续聊资格语义。
   { match: (r) => r.status === 'running' && r.stopReason === 'failed', cls: 'bg-danger' },
   // idle 失败红：轮终失败 / 归一后的 legacy failed|crashed / closed-failed 派生。
   { match: (r) => r.status === 'idle' && r.stopReason === 'failed', cls: 'bg-danger' },
-  // idle 中断灰：中断类停因（见 INTERRUPTED_STOP_REASONS）——中断语义先于等续聊展示。
+  // idle 中断灰：中断类停因（见 INTERRUPTED_STOP_REASONS）——中断语义先于完成展示。
   // 归一后的 legacy cancelled 与 closed-cancelled 派生（'cancelled'）同落此行。
   { match: (r) => r.status === 'idle' && r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason), cls: 'bg-neutral-dim opacity-50' },
-  // idle chat 等续聊 → 半透明 accent 点：chat 轮终（idle + chatMode true/缺省）。
-  // chatMode !== false 对 legacy 缺省保守归 chat；「非 interrupted 族」由上一行灰分支
-  // 顺序保证，显式条件防未来顺序挪动破坏语义。failed 由上方红分支先行承接。
-  { match: (r) => r.status === 'idle' && r.chatMode !== false && !(r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason)), cls: 'bg-accent opacity-60' },
-  // idle 兜底绿：已收口（one-shot 完成——completed/reopened/无停因且 chatMode=false）。
-  // legacy done 与 closed-done 经归一的 one-shot 形态位合成（chatMode=false）落此行。
+  // idle 兜底绿：无任务在飞即已收口（[modeless 波4] 有 result=完成态；无 result 的
+  // 重建孤儿同样落此行——万物可续，可 fork/message 续）。legacy done 与 closed-done
+  // 经归一（stopReason='completed' 合成）落此行，不再依赖 chatMode 形态位。
   { match: (r) => r.status === 'idle', cls: 'bg-success' },
 ]
 

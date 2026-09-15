@@ -267,7 +267,7 @@ export const useSubagentStore = defineStore('subagent', () => {
    * - lines === undefined → 单条 assistant 定稿的清除帧：仅收口 streaming 实体
    *   （chatFinalizeStream），**不停订阅不 refetch**——E-4（subagent-realtime-channel
    *   §6.3 退役步骤 1 + R1 消解）：tee 侧每条 assistant message_end 都发清除帧（非任务
-   *   终态），停订阅会断 chatMode 续聊轮（R1 复活）；定稿内容由同事件必发的
+   *   终态），停订阅会断续聊轮（R1 复活）；定稿内容由同事件必发的
    *   session.subagentEntriesAppended entry 帧投影覆盖（routeInbound 兜底链，不经本订阅），
    *   refetch 变冗余。旧 extension widget 通道（E-3 合入前的过渡窗口）的 delta 为累积全文
    *   替换式，收口即完整文本，无 entry 帧也不丢定稿。
@@ -303,7 +303,7 @@ export const useSubagentStore = defineStore('subagent', () => {
       if (payload.recordId !== recordId) return
 
       if (payload.lines === undefined) {
-        // 清除帧 = 单条 assistant 定稿：只收口 streaming 实体。订阅保留（chatMode 续聊轮
+        // 清除帧 = 单条 assistant 定稿：只收口 streaming 实体。订阅保留（续聊轮
         // 的后续 delta 仍可达，R1 构造性消解）；定稿内容由 entry 帧投影链覆盖。
         chatFinalizeStream(virtualId)
         return

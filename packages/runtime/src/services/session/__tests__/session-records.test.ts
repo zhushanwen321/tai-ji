@@ -239,7 +239,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
-  it('轮终三字段（result/resumable/chatMode）任一翻转都触发 publish（GUI 快修① diff 基线）', async () => {
+  it('轮终翻转维度（result 写入 / resumable 桥接→idle）触发 publish；legacy chatMode 键容忍不触发（modeless 去比对维度）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e1')], leafId: 'e1' } })
@@ -248,11 +248,11 @@ describe('refreshRecordEntries：拉取与发布', () => {
     await flushDebounce()
     expect(publish).toHaveBeenCalledTimes(1)
 
-    // 三字段逐个翻转：去重层若缺比对会把「轮终等待续聊」的显示信号静默吞掉（不 publish）
+    // 逐维度翻转：去重层若缺比对会把「轮终」的显示信号静默吞掉（不 publish）
+    // resumable 翻转经第五归一（running+resumable → idle）由 status 位天然触发
     for (const extra of [
       { result: 'round output' },
       { resumable: true },
-      { chatMode: false },
     ] as Array<Record<string, unknown>>) {
       client.getEntries.mockResolvedValue({
         data: { entries: [subagentRecordEntry('sa-1', 'running', `e-${Object.keys(extra)[0]}`, extra)], leafId: 'e-x' },
@@ -260,7 +260,17 @@ describe('refreshRecordEntries：拉取与发布', () => {
       records.invalidateRecordEntries('s1', 'subagent-record')
       await flushDebounce()
     }
-    expect(publish).toHaveBeenCalledTimes(4)
+    expect(publish).toHaveBeenCalledTimes(3)
+
+    // [modeless 波4] chatMode 已从 record 消亡：旧 entry 残留该键被投影层忽略，
+    // 不再构成 publish 信号（去重维度去 chatMode 化——同键重复到达不重发）。
+    // 叠加在前一形态（resumable 在场）之上：仅新增 chatMode 键，其余字段全同
+    client.getEntries.mockResolvedValue({
+      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e-chatmode-legacy', { resumable: true, chatMode: false })], leafId: 'e-x' },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(publish).toHaveBeenCalledTimes(3)
   })
 
   it('engine 域同值新引用不重复发布（字段级浅比较——引用比较会把每轮重解析误判为变化）', async () => {
