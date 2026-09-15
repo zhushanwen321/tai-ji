@@ -23,6 +23,7 @@ import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sep } from 'node:path'
 import { CREATE_DERIVED_CALLERS, type BindingFieldKey } from '../infra/pi/session-binding-fields.js'
+import { extractCallWindows } from './helpers/bracket-call-window.js'
 
 /** 本测试文件位于 <src>/__tests__/，上两级即扫描根 packages/runtime/src */
 const SRC_DIR = resolve(fileURLToPath(import.meta.url), '..', '..')
@@ -74,49 +75,9 @@ function listSourceFiles(dir: string): string[] {
   return out
 }
 
-interface CallWindow {
-  /** 调用起始行号（1-based，仅用于报错定位） */
-  line: number
-  /** 从 `sessionService.create(` 所在行起至调用右括号闭合为止的文本窗口 */
-  text: string
-}
-
-/**
- * 提取内容中每处 `sessionService.create(` 调用的参数文本窗口：自锚点 '(' 起做括号深度
- * 计数，归零即闭合。超过 MAX_WINDOW_LINES 仍未闭合视为源码格式异常——抛错（失败要出声），
- * 不静默截断出错误窗口。
- */
-const MAX_WINDOW_LINES = 40
-function extractCallWindows(content: string): CallWindow[] {
-  const windows: CallWindow[] = []
-  const anchor = 'sessionService.create('
-  let idx = content.indexOf(anchor)
-  while (idx !== -1) {
-    const line = content.slice(0, idx).split('\n').length
-    let depth = 0
-    let end = -1
-    for (let i = idx + anchor.length - 1; i < content.length; i++) {
-      const ch = content[i]
-      if (ch === '(') depth++
-      if (ch === ')') {
-        depth--
-        if (depth === 0) {
-          end = i
-          break
-        }
-      }
-      if (ch === '\n' && i - idx > MAX_WINDOW_LINES * 120) break // 双保险：行数估算防爆循环
-    }
-    if (end === -1) {
-      throw new Error(
-        `第 ${line} 行 sessionService.create( 在 ${MAX_WINDOW_LINES} 行内未闭合右括号，` +
-        '静态扫描窗口提取失败——请检查该文件调用格式是否异常',
-      )
-    }
-    windows.push({ line, text: content.slice(idx, end + 1) })
-    idx = content.indexOf(anchor, idx + anchor.length)
-  }
-  return windows
+/** 提取每处 sessionService.create( 调用窗（括号平衡 + 字符串感知语义在共享 helper，T11 收敛）。 */
+function extractSessionCreateWindows(content: string) {
+  return extractCallWindows(content, /sessionService\.create\(/g)
 }
 
 describe('CREATE_DERIVED_CALLERS 入口清单守卫（sidecar-binding-sync §3.3 决策 1b）', () => {
@@ -155,7 +116,7 @@ describe('CREATE_DERIVED_CALLERS 入口清单守卫（sidecar-binding-sync §3.3
   it('每个登记项的实际传参窗口包含其 passedBindingFields 全部字段（锚定传参承诺，防漏传）', () => {
     for (const caller of CREATE_DERIVED_CALLERS) {
       const content = readFileSync(resolve(SRC_DIR, caller.file), 'utf8')
-      const windows = extractCallWindows(content)
+      const windows = extractSessionCreateWindows(content)
       expect(windows.length, `${caller.file} 中提取到 0 处 sessionService.create 调用窗口，无法校验传参承诺`).toBeGreaterThan(0)
 
       for (const window of windows) {
@@ -175,7 +136,7 @@ describe('CREATE_DERIVED_CALLERS 入口清单守卫（sidecar-binding-sync §3.3
   it('各 semantic 通道的实际传参窗口不含禁传绑定字段（防顺手继承漂移）', () => {
     for (const caller of CREATE_DERIVED_CALLERS) {
       const content = readFileSync(resolve(SRC_DIR, caller.file), 'utf8')
-      for (const window of extractCallWindows(content)) {
+      for (const window of extractSessionCreateWindows(content)) {
         for (const field of FORBIDDEN_FIELDS_BY_SEMANTIC[caller.semantic]) {
           const names = acceptedNames(field)
           expect(

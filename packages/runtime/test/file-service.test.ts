@@ -1,9 +1,11 @@
 /**
- * file-service.test.ts — searchFilesInCwd cwd 路用例（u2-runtime，landing `$` 候选数据通路）。
+ * file-service.test.ts — searchFilesInCwd cwd 路用例（u2-runtime，landing `$` 候选数据通路）
+ * + F6 文件操作超时直测。
  *
- * 历史：原文件还有 F6 describe 测「文件操作超时」，但其断言对象是测试文件内
- * 复制的 withTimeout 副本（非 SUT 私有方法），2026-09 测试舰队审查（r2-16）裁撤；
- * SUT 写骨架 not_implemented 语义由 file-message-handler.test.ts（AC-14.4）覆盖。
+ * 历史：原 F6 describe 断言对象是测试文件内复制的 withTimeout 副本（非 SUT），
+ * 2026-09 测试舰队审查（r2-16）裁撤；源码简化 T9 把 withTimeout 提取为可直测导出单元
+ * （src/services/file-service.ts），本文件按 6 场景重建为 import SUT 直测——
+ * 超时触发 / clearTimeout 无泄漏 / FileError 形状 / 常量语义 / 底层错误透传 / 并发互不影响。
  *
  * mock 策略照 file-service-ignore-cache.test.ts 范式（IFileExecutor + ISessionService
  * 构造注入，纯 mock 不触真实 fs）。覆盖验收条款：
@@ -13,11 +15,91 @@
  * - session 路等价回归：searchFiles('s1') ≡ searchFilesInCwd(cwd)（薄包装行为不变），
  *   且 session 不存在仍抛 session_not_found（requireCwd 保留在包装层）
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { MAX_SEARCH_RESULTS, FileService, type FileServiceOptions } from '../src/services/file-service.js'
+import { MAX_SEARCH_RESULTS, READ_TIMEOUT_MS, FileService, withTimeout, type FileServiceOptions } from '../src/services/file-service.js'
+import { FileError } from '../src/services/file-error.js'
 import type { IFileExecutor, FsEntry } from '../src/services/ports/file-executor.js'
+
+/**
+ * F6 文件操作超时（T9 重建：直测 SUT 导出的 withTimeout，非本地副本）。
+ * 6 场景沿 r2-16 裁撤前的用例清单；用例 3 的 vi.getTimerCount() 断言是新增覆盖——
+ * SUT 漏 clearTimeout（定时器泄漏）在此红灯，修复「SUT 坏而测试恒绿」的假覆盖根因。
+ */
+describe('FileService · F6 文件操作超时（withTimeout SUT 直测，T9）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('F6: 超时常量 10s 语义不变（READ_TIMEOUT_MS 导出值）', () => {
+    expect(READ_TIMEOUT_MS).toBe(10_000)
+  })
+
+  it('F6: 超时触发 — 永不 settle 的 promise 在 READ_TIMEOUT_MS 后 reject FileError("timeout")', async () => {
+    const neverResolve = new Promise<string>(() => {})
+    const promise = withTimeout(neverResolve, READ_TIMEOUT_MS, 'listDir')
+
+    vi.advanceTimersByTime(READ_TIMEOUT_MS)
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'FileError',
+      code: 'timeout',
+      message: `listDir timed out after ${READ_TIMEOUT_MS}ms`,
+    })
+  })
+
+  it('F6: 超时前完成 — 不抛错且 clearTimeout 无定时器泄漏（settle 后到点不再二次 settle）', async () => {
+    expect(vi.getTimerCount()).toBe(0)
+    const promise = withTimeout(Promise.resolve('file-content'), READ_TIMEOUT_MS, 'readFile')
+    expect(vi.getTimerCount()).toBe(1) // 挂起超时定时器存在
+
+    const result = await promise
+    expect(result).toBe('file-content')
+    expect(vi.getTimerCount()).toBe(0) // settle 即 clearTimeout（SUT 漏 clearTimeout 此处红）
+
+    // 到点后不产生二次 settle / 迟到的 timeout reject
+    vi.advanceTimersByTime(READ_TIMEOUT_MS)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('F6: FileError 结构 — message + code（timeout 码构造形状）', () => {
+    const error = new FileError('timeout', 'File read timeout')
+
+    expect(error).toBeInstanceOf(FileError)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toBe('File read timeout')
+    expect(error.code).toBe('timeout')
+  })
+
+  it('F6: 底层 promise reject 透传（非 timeout）— 消费 rejected promise 无 unhandledRejection', async () => {
+    const failing = Promise.reject(new Error('IO error'))
+    const promise = withTimeout(failing, READ_TIMEOUT_MS, 'stat')
+
+    await expect(promise).rejects.toThrow('IO error')
+    expect(vi.getTimerCount()).toBe(0) // 底层失败路径同样 clearTimeout
+  })
+
+  it('F6: 多个并发超时 — 互不影响，各自按自身 label/code reject', async () => {
+    const never1 = new Promise<string>(() => {})
+    const never2 = new Promise<string>(() => {})
+    const never3 = new Promise<string>(() => {})
+
+    const p1 = withTimeout(never1, READ_TIMEOUT_MS, 'op-1')
+    const p2 = withTimeout(never2, READ_TIMEOUT_MS, 'op-2')
+    const p3 = withTimeout(never3, READ_TIMEOUT_MS, 'op-3')
+
+    vi.advanceTimersByTime(READ_TIMEOUT_MS)
+
+    await expect(p1).rejects.toMatchObject({ code: 'timeout', message: 'op-1 timed out after 10000ms' })
+    await expect(p2).rejects.toMatchObject({ code: 'timeout', message: 'op-2 timed out after 10000ms' })
+    await expect(p3).rejects.toMatchObject({ code: 'timeout', message: 'op-3 timed out after 10000ms' })
+  })
+})
 
 describe('FileService · searchFilesInCwd cwd 路 + searchFiles 薄包装等价回归', () => {
   const executor = { listDir: vi.fn(), stat: vi.fn(), readFile: vi.fn() }

@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs'
 import { hydrateBindingMeta, BINDING_FIELDS } from '../infra/pi/session-binding-fields.js'
 import type { BindingFieldKey, BindingEntryKind } from '../infra/pi/session-binding-fields.js'
 import type { ScannedSessionMeta } from '../infra/pi/session-file-utils.js'
+import { extractCallWindows } from './helpers/bracket-call-window.js'
 
 // ── 公共夹具 ─────────────────────────────────────────────────────────
 
@@ -202,38 +203,11 @@ describe('hydrateBindingMeta · 设计文档 §3.3 决策 1 矩阵（期望硬�
 // ── Part 2：入口接线锁定（源码结构断言） ─────────────────────────────
 
 /**
- * 提取源码中 callee( 开始到圆括号平衡结束的完整调用块文本。
- *
- * 平衡扫描跳过引号字符串字面量与转义符，避免字符串内 ')' 截断块边界；
- * 全局正则逐个匹配，匹配失败残留不影响后续（regex lastIndex 由 while 驱动）。
+ * 提取源码中 callee( 开始到圆括号平衡结束的完整调用块文本（T11 收敛：
+ * 括号平衡 + 字符串感知语义在共享 helper bracket-call-window.ts，此处仅绑定锚点取 text）。
  */
 function extractCallBlocks(source: string, callee: RegExp): string[] {
-  const blocks: string[] = []
-  const re = new RegExp(callee.source, 'g')
-  let m: RegExpExecArray | null
-  while ((m = re.exec(source)) !== null) {
-    let i = re.lastIndex // '(' 之后一位
-    let depth = 1
-    while (i < source.length && depth > 0) {
-      const ch = source[i]
-      if (ch === '"' || ch === "'" || ch === '`') {
-        const quote = ch
-        i++
-        while (i < source.length && source[i] !== quote) {
-          if (source[i] === '\\') i++ // 跳过转义字符
-          i++
-        }
-      } else if (ch === '(') {
-        depth++
-      } else if (ch === ')') {
-        depth--
-      }
-      i++
-    }
-    blocks.push(source.slice(m.index, i))
-    re.lastIndex = i // 嵌套调用不重复报告
-  }
-  return blocks
+  return extractCallWindows(source, callee).map((w) => w.text)
 }
 
 /** 测试文件位于 src/__tests__/，../ 即 src/ 根 */

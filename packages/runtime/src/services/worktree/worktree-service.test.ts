@@ -62,95 +62,17 @@ function mockGitInfoReader(branch?: string) {
   }
 }
 
-/** 创建 mock IConfigService。 */
+/**
+ * 创建 mock config（WorktreeConfigService 5 方法子集，ISP 收窄 T7——
+ * SUT 只消费这 5 个读取方法，无需再 stub IConfigService 胖接口的其余 60+ 方法）。
+ */
 function mockConfigService(worktreeRootDir = '/home/user/worktrees') {
   return {
-    checkEnvVars: vi.fn(() => ({})),
-    refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    getWorktreeRootDir: vi.fn(() => worktreeRootDir),
-    setWorktreeRootDir: vi.fn(),
-    getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
-    setSetupScript: vi.fn(),
-    getBareSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
-    setBareSetupScript: vi.fn(),
-    getTimeout: vi.fn(() => 60),
-    setTimeout: vi.fn(),
-    // 对话流式空闲超时 stub（worktree 测试不涉及，默认 1800s）
-    getStreamingIdleTimeout: vi.fn(() => 1800),
-    setStreamingIdleTimeout: vi.fn((timeout: number) => timeout),
     getDefaultBaseBranch: vi.fn(() => 'origin/main'),
-    setDefaultBaseBranch: vi.fn(),
-    // auto-rename 开关 stub（worktree 测试不涉及，默认关闭）
-    getAutoRenameEnabled: vi.fn(() => false),
-    setAutoRenameEnabled: vi.fn(),
-    // rename 模型 stub（worktree 测试不涉及，默认未设置）
-    getRenameModel: vi.fn(() => ''),
-    setRenameModel: vi.fn(),
-    // rename 触发模式 stub（worktree 测试不涉及，默认 first-stop）
-    getRenameMode: vi.fn(() => 'first-stop' as const),
-    setRenameMode: vi.fn(),
-    // smart-context 配置 stub（worktree 测试不涉及，默认全量默认值）
-    getSmartContextConfig: vi.fn(() => ({
-      enabled: true,
-      compactModel: '',
-      reminderThresholds: [200_000, 400_000, 600_000],
-      excludedModels: [],
-    })),
-    setSmartContextEnabled: vi.fn(),
-    setSmartContextCompactModel: vi.fn(),
-    setSmartContextThresholds: vi.fn(),
-    setSmartContextExcludedModels: vi.fn(),
-    // scoped models stub（scoped-model unit 新增 IConfigService 方法，worktree 测试不涉及）
-    getScopedModels: vi.fn(() => []),
-    modifyScopedModels: vi.fn(async (fn: (current: string[]) => string[]) => fn([])),
-    // 其他方法 stub
-    listProviders: vi.fn(() => []),
-    listBuiltinProviders: vi.fn(() => []),
-    getDefaultModel: vi.fn(() => null),
-    setDefaultModel: vi.fn(),
-    setProvider: vi.fn(),
-    // wave4 补全：toggleProviderEnabled / removeProviderByKind（IConfigService 新增方法 stub）
-    toggleProviderEnabled: vi.fn(() => ({})),
-    removeProviderByKind: vi.fn(async () => ({ removed: true })),
-    deleteProvider: vi.fn().mockResolvedValue(undefined),
-    getProvider: vi.fn(),
-    updateToolPermissions: vi.fn(),
-    setSkillDirs: vi.fn(),
-    getSkillDirs: vi.fn(() => []),
-    getSkillPathScopes: vi.fn(() => ({ projectPaths: [], globalPaths: [] })),
-    setAgentDirs: vi.fn(),
-    getAgentDirs: vi.fn(() => []),
-    getAgentPathScopes: vi.fn(() => ({ projectPaths: [], globalPaths: [] })),
-    setExtensionDirs: vi.fn(),
-    getExtensionDirs: vi.fn(() => []),
-    getExtensionPathScopes: vi.fn(() => ({ projectPaths: [], globalPaths: [] })),
-    migrateSettingsSkillsToDiscovery: vi.fn(),
-    loadSkills: vi.fn(() => []),
-    saveSkills: vi.fn(),
-    upsertSkill: vi.fn(),
-    deleteSkill: vi.fn(),
-    loadAgents: vi.fn(() => []),
-    saveAgents: vi.fn(),
-    upsertAgent: vi.fn(),
-    deleteAgent: vi.fn(),
-    scanSkills: vi.fn(() => []),
-    scanAgents: vi.fn(() => []),
-    // 迁移源检测 stub（W1，worktree 测试不涉及）
-    detectSources: vi.fn(() => []),
-    // 迁移 provider 导入 stub（W2，worktree 测试不涉及）
-    previewImportProviders: vi.fn(() => ({ error: { code: 'SOURCE_NOT_INSTALLED', message: 'not installed' } })),
-    applyImportProviders: vi.fn(() => Promise.resolve({ error: { code: 'PREVIEW_EXPIRED', message: 'expired' } })),
-    getPiAgentDir: vi.fn(() => '/home/user/.pi/agent'),
-    getConfigDir: vi.fn(() => '/home/user/.xyz-agent'),
-    getSystemPromptConfig: vi.fn(() => ({ config: { version: 1, replace: { enabled: false, prompt: '' }, append: { enabled: false, prompt: '' } }, corrupted: false })),
-    setSystemPromptConfig: vi.fn(() => ({ ok: true })),
-    getReplaceSystemPrompt: vi.fn(() => undefined),
-    // Terminal config stubs
-    getTerminalConfig: vi.fn(() => ({ config: { version: 1, shell: '/bin/zsh', shellArgs: [], fontSize: 14, fontFamily: 'monospace', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
-    setTerminalConfig: vi.fn(() => ({ ok: true })),
-    // LLM retry config stubs
-    getRetryConfig: vi.fn(() => ({ config: { enabled: true, maxRetries: 3, baseDelayMs: 2000, provider: { maxRetries: 0, maxRetryDelayMs: 60000 } }, configured: false })),
-    setRetryConfig: vi.fn(() => ({ ok: true })),
+    getBareSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
+    getWorktreeRootDir: vi.fn(() => worktreeRootDir),
+    getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
+    getTimeout: vi.fn(() => 60),
   }
 }
 
