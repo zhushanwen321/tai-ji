@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import type { Message } from '@/types/message'
+import type { Message } from '@xyz-agent/shared'
 
 function seedStreamingAssistant(sid: string, overrides: Partial<Message> = {}): Message {
   return {

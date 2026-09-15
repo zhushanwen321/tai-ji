@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import type { Message } from '@/types/message'
+import type { Message } from '@xyz-agent/shared'
 
 describe('isGenerating 派生 scan（D-005）', () => {
   beforeEach(() => setActivePinia(createPinia()))
