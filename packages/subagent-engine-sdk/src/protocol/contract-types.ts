@@ -196,13 +196,14 @@ export interface EngineCapabilities {
   /** 注意区分「引擎 RPC 层有此能力」与「subagent 链路已接通」。 */
   steer: "native" | "emulated" | "unsupported";
   /**
-   * [H1 D5 语义收窄] resume 能力位（chat 续聊 = 新 run + resume 锚点的承载前提；
+   * [H1 D5 语义收窄 + modeless] 「怎么续」形态轴兼 message 资格轴：
+   * 位非 'unsupported' = 引擎可续聊（core capability-gate 的 message 资格门消费），
+   * 值区分续聊形态——native（原地续写）/ cold（冷恢复重建 + 新 run + resume 锚点）。
    * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
-   * 「resume 续聊能力」，gate 判据与消费方不变）。
-   * [U6 / 永久会话模型 §3.2.6 要点 4] 新值 "cold" = 冷恢复会话：resume 读通道取
-   * 结构化历史 + 新 session 注入（无热 steering）。gate 判据仍是 `=== "unsupported"`
-   * 拒绝——"cold" 在 gate 面与 "native" 等价放行，差异只在续聊形态（新 session
-   * 注入 vs 原地续写）。
+   * 「resume 续聊能力」。[modeless 波2] 会话形态键只剩 run.params.resume（协议
+   * task.conversation 已删），本轴不再是 per-run 模式开关——描述各引擎的真实
+   * 续聊差异（gate 判据仍是 `=== "unsupported"` 拒绝，"cold" 与 "native" 等价
+   * 放行）。
    */
   conversation: "native" | "cold" | "unsupported";
   /** 决定 persona 路由策略（file/flag/prompt 通道）。 */
@@ -321,7 +322,7 @@ export interface ModelCatalogEntry {
  *
  * 字段裁决（对照 core orchestration/models/types.ts AgentCallOpts，2026-09-09）：
  * - 入选 = 引擎消费面：任务语义（prompt/schema/thinkingLevel/skill/skillPath/agent/persona 注入）、
- *   轮次预算（maxTurns/graceTurns/conversation/idleTimeoutMs）、隔离与权限（worktree/
+ *   轮次预算（maxTurns/graceTurns/idleTimeoutMs）、隔离与权限（worktree/
  *   fork/forkSource/denyTools/permissionMode）、诊断（description/scene）；
  * - 排除并改挂 run.params.ctx（协议层已单列，task 内双写会分叉）：model（→ctx.model）、
  *   schemaEnv（→ctx.schemaEnv）、cwd（→ctx.cwd）、engineFallback（→ctx.engineFallback）；
@@ -368,9 +369,7 @@ export interface AgentCallOpts {
   forkSource?: string;
   /** Filesystem isolation: 新建 worktree | 复用外部已创建 worktree | 不隔离。 */
   worktree?: boolean | WorktreeHandle;
-  /** 可持续对话模式：true = 轮次完成进 idle 态等待 message 续聊。 */
-  conversation?: boolean;
-  /** 空闲超时毫秒数（仅 conversation 模式有意义）。显式 0/负 = 禁用 idle GC。 */
+  /** 空闲超时毫秒数（[modeless] 全体 record 的 idle 回收节奏；显式 0/负 = 禁用 idle GC）。 */
   idleTimeoutMs?: number;
   /** 工具 denylist（各引擎做语法映射）。 */
   denyTools?: string[];

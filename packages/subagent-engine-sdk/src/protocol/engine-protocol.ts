@@ -11,10 +11,11 @@
 // 不影响其他引擎与宿主。
 //
 // [v1.x 增量语义（chat-domain 设计 §3.2 D1-A/§3.3）][H1 后历史叙述——run.params.chat
-// 已随 U6 删除，现唯一会话形态键 = run.params.resume]：chat 域增量（原 run.params.chat
-// 可选参数、host/streamDelta 的 recordId 关联形态）曾以**可选载荷/可选参数**形态向后
-// 兼容，major 不 bump、不引入 minor 协商位：
-//   - 新 core × 旧引擎：conversation 请求（resume 续聊形态）被 conversation gate
+// 已随 U6 删除，现唯一会话形态键 = run.params.resume；[modeless 波2] 协议 task 的
+// conversation 键已删（core 侧 deprecated 参数不再上 wire，resume 键携带全部会话
+// 形态）]：chat 域增量曾以**可选载荷/可选参数**形态向后兼容，major 不 bump、不引入
+// minor 协商位：
+//   - 新 core × 旧引擎：会话形态请求（resume 续聊）被 conversation gate
 //     同步拒（manifest 无 gate 位，
 //     A6 方向——engine_capability_unsupported + 升级引擎包指引）；run 域零影响；
 //   事件变体增量同政策（例：activity 活性信号变体）：新变体以可选载荷形态进
