@@ -369,6 +369,9 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       routeRecord: () => {
         order.push("route");
       },
+      // [modeless 波3] 批成员资格查询（失败轮分流判据）——本 stub 恒 false（async
+      // 失败单发路径；批成员入批形态见 collect-coordinator 测试）。
+      isCollectMember: () => false,
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
@@ -409,6 +412,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       dispatchChatRound: vi.fn(),
       finalizeRoundOutcome: async () => {},
       routeRecord: vi.fn(),
+      isCollectMember: vi.fn(() => false),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
@@ -507,6 +511,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
       },
       finalizeRoundOutcome: async () => {},
       routeRecord: vi.fn(),
+      isCollectMember: vi.fn(() => false),
       notifyRecord: (n: { error?: string }) => calls.notified.push(n),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),

@@ -162,6 +162,9 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
       calls.order.push(`route:${rec.id}`);
       calls.routed.push(rec.id);
     },
+    // [modeless 波3] 批成员资格查询（失败轮分流判据）——本文件 stub 恒 false
+    //（失败通知单发路径的既有断言面保持；批成员入批形态见 collect-coordinator 测试）。
+    isCollectMember: (id: string) => calls.routed.includes(id) && false,
     notifyRecord: (n) => {
       calls.order.push("notify");
       calls.notified.push(n);

@@ -1,11 +1,11 @@
 // src/execution/__tests__/collect-coordinator-service.test.ts
 //
 // collectCoordinator 的 service 集成面（subagent-sync-collect U2）：
-//   1. 偏差#4 落点：execute({collect:"sync"}) 的 record 落 collectMode="sync"
-//      （观察者形态：subagent-record entry 落盘产物断言，非 mock record）；
-//   2. notifyComplete 统一路由：sync 成员终态 → 协调器缓冲 → 单成员闭合 → 降级
-//      flush → notifier.notify 收到该成员（观察点：替换 notifier.notify 为 spy，
-//      闭包经 this 运行时读取，替换生效）；
+//   1. [modeless 波3] 派发登记落点：execute({collect:"sync"}) 的 record 在派发时点
+//      登记进协调器（成员身份 = 协调器登记态，非 record 字段）；
+//   2. 统一路由：sync 成员终态 → 协调器缓冲 → 单成员闭合 → flush → notifyBatch
+//      批投递（观察点：替换 notifier.notify/notifyBatch 为 spy，闭包经 this 运行时
+//      读取，替换生效）；
 //   3. async record（无 collect）直通同一 notifier.notify（现状路径字节不变）；
 //   4. 偏差#3 接线：getCollectSyncDefault 读真实 config（缺省 async / 配置 sync +
 //      reloadGlobalConfig 后生效）；
@@ -133,17 +133,61 @@ describe("collectCoordinator service integration (U2)", () => {
     return created;
   }
 
-  it("stamps collectMode on the in-memory record visible to the coordinator routing (偏差#4 落点)", async () => {
-    // 注：entry 落盘观察者断言（subagent-record entry 含 collectMode）依赖
-    // record-store.recordToSubagent 投影扩展——U5 领地（偏差登记）；本用例锁
-    // 内存 record 经协调器路由的可见行为：sync 成员终态 → 单成员闭合 → notifyBatch
-    // 批投递（下方用例），async 成员直通。本条记录 execute 链零异常完成。
+  it("registers the dispatched record as a batch member visible to the coordinator ([modeless 波3] 派发登记落点)", async () => {
+    // [modeless 波3] 成员身份 = 协调器登记态（executeViaEngine 读 collect 路由选项后
+    // 登记）——本用例锁 execute 链零异常完成 + 登记态计数含本条（pendingSyncMemberCount）。
+    const spy = spyNotifier(service);
+    const handle = await service.execute({ task: "collect me", slug: "collect-me", collect: "sync" });
+    expect(service.pendingSyncMemberCount()).toBeGreaterThanOrEqual(1);
+    await until(() => fake.runs.length >= 1);
+    await settleLast();
+    await until(() => spy.notifyBatch.mock.calls.length > 0);
+    expect(handle.subagentId).toMatch(/^sa-/);
+  });
+
+  it("batch member notification carries the closed payload with result ([modeless 波3] 终态通知形态)", async () => {
+    // 批成员完成 = 终态通知（closed 载荷带 result）——批头计数 / patchFile 提示依赖
+    // closed+outcome 形态；载荷形态由协调器 route 入缓冲路径的 batchMember 标志驱动
+    // （notify-host toNotifyRecord），collectMode 字段门已消亡。
     const spy = spyNotifier(service);
     const handle = await service.execute({ task: "collect me", slug: "collect-me", collect: "sync" });
     await until(() => fake.runs.length >= 1);
     await settleLast();
     await until(() => spy.notifyBatch.mock.calls.length > 0);
-    expect(handle.subagentId).toMatch(/^sa-/);
+    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
+    const member = batch.find((m) => m.id === handle.subagentId)!;
+    expect(member.status).toBe("closed");
+    expect(member.result).toBe("ok");
+    // async 成员（对照）保持轮终 running 形态
+    const spy2 = spyNotifier(service);
+    const h2 = await service.execute({ task: "plain", slug: "plain-2" });
+    await until(() => fake.runs.length >= 2);
+    fake.runs[fake.runs.length - 1]!.settle({ content: "ok-async" });
+    await until(() => spy2.notify.mock.calls.length > 0);
+    const direct = spy2.notify.mock.calls.map((c) => c[0] as Record<string, unknown>).find((n) => n.id === h2.subagentId)!;
+    expect(direct.status).toBe("running");
+  });
+
+  it("auto-closes batch members after the batch flush delivers ([modeless 波3] 批闭合自动 close)", async () => {
+    // 成员是「一次性计算单元」：批通知送达后协调器自动对成员执行归档（close）——
+    // 通知送达后才归档（close 顺序约束 [写死] 同款），归档静默不再发「已收起」提示
+    // （批通知即成员终态通知，逐成员归档提示会击穿攒批一次唤醒语义）。
+    const spy = spyNotifier(service);
+    const handle = await service.execute({ task: "collect me", slug: "collect-me", collect: "sync" });
+    await until(() => fake.runs.length >= 1);
+    await settleLast();
+    await until(() => spy.notifyBatch.mock.calls.length > 0);
+    // flush 投递后自动归档：intent 翻 archived（观察者形态——subagent-record entry）
+    await until(() => {
+      const entries = pi.appendEntry.mock.calls
+        .filter((c) => c[0] === "subagent-record")
+        .map((c) => c[1] as Record<string, unknown>)
+        .filter((d) => d["id"] === handle.subagentId);
+      return entries.some((d) => d["intent"] === "archived");
+    });
+    // 归档后无逐成员「已收起」提示（spy.notify 只可能收到 flush 前的轮终直发——
+    // sync 成员零单发），攒批一次唤醒语义保持
+    expect(spy.notify).not.toHaveBeenCalled();
   });
 
   it("routes a finished sync member into a single-member batch (U3 接线：单成员闭合 → notifyBatch)", async () => {
@@ -280,19 +324,17 @@ describe("collectCoordinator service integration (U2)", () => {
     await settleLast();
     await until(() => spy.notifyBatch.mock.calls.length > 0);
 
-    // 观察者形态：主 session 落盘的末条 subagent-record entry 带 batchFinalized=true +
-    // collectMode=sync（reportSubagentRecord 直投影 SubagentRecord，不经 recordToSubagent）。
-    // status 不在此锁：one-shot 成功链走 SP-5 收口（[two-state-convergence U4/D3]
-    // 翻边后轮终落 idle，record 留内存可续聊），E1 排除判据只依赖
-    // collectMode+batchFinalized 两字段。
+    // 观察者形态：主 session 落盘的 subagent-record entry 带 batchFinalized=true
+    //（reportSubagentRecord 直投影 SubagentRecord，不经 recordToSubagent）。
+    // [modeless 波3] collectMode 断言随字段消亡删除；标记 entry 可出现两笔（flush
+    // 落标 + 自动 close 归档透传），存在性断言。status 不在此锁：one-shot 成功链走
+    // SP-5 收口（[two-state-convergence U4/D3] 翻边后轮终落 idle）。
     const marked = pi.appendEntry.mock.calls
       .filter((c) => c[0] === "subagent-record")
       .map((c) => c[1] as Record<string, unknown>)
       .filter((d) => d["id"] === handle.subagentId && d["batchFinalized"] === true);
-    expect(marked).toHaveLength(1);
-    expect(marked[0]?.["collectMode"]).toBe("sync");
+    expect(marked.length).toBeGreaterThanOrEqual(1);
     expect(marked[0]?.["result"]).toBe("ok");
-    expect(marked[0]?.["status"]).toBe("idle"); // SP-5 轮终收口态（真链形态保真）
     expect(marked[0]?.["resumable"]).toBeUndefined(); // 翻边后 resumable 不再写
   });
 

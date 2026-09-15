@@ -496,6 +496,12 @@ export class RunOrchestration {
     const { isPiRoute, engineModel, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
     const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, isPiRoute);
     const record = this.deps.createRecordForMode(identity, recordOpts, mode);
+    // [modeless 波3] collect 路由选项派发落点：sync 路由成员在派发时点登记进协调器
+    // （成员身份 = 协调器登记态，非 record 字段——collectMode 已出 record）。登记后
+    // record 本条计入 pendingSyncCount（start 响应回显段），终态通知经 route 入批。
+    if (recordOpts.collect === "sync") {
+      this.deps.getCollectCoordinator().registerMember(record.id);
+    }
     this.deps.getNotifyHost().emitPendingRegister(record.id, record.agent);
 
     // ── worktree 创建（仅 worktree===true 或已传入 handle 时）──

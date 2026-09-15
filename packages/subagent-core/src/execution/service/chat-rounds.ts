@@ -626,6 +626,8 @@ export class ChatRounds {
       dispatchChatRound: (rec, input) => this.dispatchChatRoundForContinuation(rec, input),
       finalizeRoundOutcome: (rec, outcome) => this.finalizeRoundToIdle(rec, outcome),
       routeRecord: (rec) => this.deps.getCollectCoordinator().route(rec),
+      // [modeless 波3] 批成员资格查询（失败轮分流判据——登记态现读，collectMode 已出 record）。
+      isCollectMember: (id) => this.deps.getCollectCoordinator().isMember(id),
       notifyRecord: (n) => this.deps.getNotifyHost().notify(n),
       killStaleChild: (id) => this.killStaleChildBeforeDispatch(id),
       killRoundChild: (id, source) => this.killRoundChildForWatchdog(id, source),

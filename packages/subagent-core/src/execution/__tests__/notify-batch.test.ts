@@ -113,7 +113,7 @@ function makeMember(id: string, over: Partial<BgNotifyRecord> = {}): BgNotifyRec
 
 // ─── 协调器集成 harness（collect-coordinator.test.ts 同款注入风格）──
 
-function makeExecutionRecord(id: string, collectMode: "sync" | undefined): ExecutionRecord {
+function makeExecutionRecord(id: string): ExecutionRecord {
   return {
     id,
     agent: "/agents/worker.md",
@@ -137,7 +137,6 @@ function makeExecutionRecord(id: string, collectMode: "sync" | undefined): Execu
     error: undefined,
     agentResult: undefined,
     controller: undefined,
-    collectMode,
   } as ExecutionRecord;
 }
 
@@ -382,6 +381,7 @@ describe("CollectCoordinator ↔ notifyBatch 集成 — 跨轮续累单批（D2 
     });
     const coordinator = new CollectCoordinator({
       notifyAsync: () => {},
+      // [modeless 波3] 批成员快照恒 closed 载荷形态（route 入缓冲路径带 batchMember）
       toNotifyRecord: (record) => ({
         id: record.id,
         status: "closed" as const,
@@ -396,7 +396,10 @@ describe("CollectCoordinator ↔ notifyBatch 集成 — 跨轮续累单批（D2 
         notifier.notifyBatch(members);
       },
     });
-    return { mock, notifier, coordinator };
+    // [modeless 波3] 成员身份 = 登记态：测试面用 registerSync 模拟「派发时点登记 +
+    // 终态 route」两步（旧 collectMode 路由判据消亡）。
+    const registerSync = (id: string): void => coordinator.registerMember(id);
+    return { mock, notifier, coordinator, registerSync };
   }
 
 /** [U8 拆批修复] 闭合合批排程窗口等待：flush 排程 = setTimeout(0)（Node 1ms clamp），
@@ -412,16 +415,19 @@ async function settleFlush(): Promise<void> {
       makeStoreRec("sa-2", "sync", "idle"),
       makeStoreRec("sa-3", "sync", "running"),
     ];
-    const { mock, coordinator } = makeHarness(storeRecords);
+    const { mock, coordinator, registerSync } = makeHarness(storeRecords);
+    registerSync("sa-1");
+    registerSync("sa-2");
+    registerSync("sa-3");
 
-    expect(coordinator.route(makeExecutionRecord("sa-1", "sync"))).toBe("sync-buffered");
-    expect(coordinator.route(makeExecutionRecord("sa-2", "sync"))).toBe("sync-buffered");
+    expect(coordinator.route(makeExecutionRecord("sa-1"))).toBe("sync-buffered");
+    expect(coordinator.route(makeExecutionRecord("sa-2"))).toBe("sync-buffered");
     expect(coordinator.pendingCount).toBe(2);
     expect(mock.sentMessages).toHaveLength(0);
 
     // 第二轮：sa-3 终态（store 快照同步终态）→ 闭合 → 单批 3 成员
     storeRecords[2] = makeStoreRec("sa-3", "sync", "idle");
-    expect(coordinator.route(makeExecutionRecord("sa-3", "sync"))).toBe("sync-flushed");
+    expect(coordinator.route(makeExecutionRecord("sa-3"))).toBe("sync-flushed");
     await settleFlush();
     expect(coordinator.pendingCount).toBe(0);
 
@@ -436,13 +442,15 @@ async function settleFlush(): Promise<void> {
 
   it("flush 后新 sync 成员开新批（缓冲清空语义），两批 hash 互异", async () => {
     const storeRecords = [makeStoreRec("sa-1", "sync", "idle")];
-    const { mock, coordinator } = makeHarness(storeRecords);
+    const { mock, coordinator, registerSync } = makeHarness(storeRecords);
+    registerSync("sa-1");
+    registerSync("sa-2");
 
-    expect(coordinator.route(makeExecutionRecord("sa-1", "sync"))).toBe("sync-flushed");
+    expect(coordinator.route(makeExecutionRecord("sa-1"))).toBe("sync-flushed");
     await settleFlush();
-    // 第一批已投（仍挂 pending——idle），第二批成员入缓冲
+    // 第一批已投（sa-1 自登记集离场），第二批成员入缓冲
     storeRecords.push(makeStoreRec("sa-2", "sync", "idle"));
-    expect(coordinator.route(makeExecutionRecord("sa-2", "sync"))).toBe("sync-flushed");
+    expect(coordinator.route(makeExecutionRecord("sa-2"))).toBe("sync-flushed");
     await settleFlush();
 
     expect(mock.sentMessages).toHaveLength(2);
@@ -490,8 +498,9 @@ async function settleFlush(): Promise<void> {
       },
     });
 
-    expect(coordinator.route(makeExecutionRecord("sa-async", undefined))).toBe("async");
-    expect(coordinator.route(makeExecutionRecord("sa-sync", "sync"))).toBe("sync-flushed");
+    coordinator.registerMember("sa-sync");
+    expect(coordinator.route(makeExecutionRecord("sa-async"))).toBe("async");
+    expect(coordinator.route(makeExecutionRecord("sa-sync"))).toBe("sync-flushed");
     await settleFlush();
     // async 直通收集器（生产接 notifier.notify），批通道只见 sync 成员
     expect(asyncDirect.map((r) => r.id)).toEqual(["sa-async"]);

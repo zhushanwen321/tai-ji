@@ -15,7 +15,8 @@
 //    聚合公共面 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
 //    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler/uiObservability，清单① C-3）；
-//    本域直写他域字段的写点收敛为 deps 显式回调（resetSettledRescan ← initSession
+//    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
+//    随 E1 退役删除——历史写点见 git）
 //    直写 settledRescanState，清单① C-2；R2 抽取后回调改指其聚合显式接口）。
 // 4. 深绑测试改写：ServiceInternals / Reflect.get(service, "字段") 改经
 //    `baselines` 聚合路径（断言对象与强度不变，路径对齐终态结构——见
@@ -114,9 +115,9 @@ export interface SubagentServiceSessionInit {
  * - 断言状态 getter（readAssertState）：D4 形态 `() => ({pi, disposed})`——pi 在
  *   initSession 时点晚绑定注入、disposed 随壳 dispose/revive 翻转，构造期注值必持
  *   过期引用破 session 复活，必须断言时现读。
- * - 复活/重置回调（reviveDisposed / resetSettledRescan）：initSession 对壳旗标与
- *   他域字段（#5 SyncCollect 的 settledRescanState，清单① C-2）的写点显式化——
- *   R2 抽取后回调改指其聚合显式接口，聚合间零直写（G2）。
+ * - 复活回调（reviveDisposed）：initSession 对壳旗标的写点显式化。
+ *   [modeless 波3] 旧 resetSettledRescan 回调（#5 SyncCollect 的 settledRescanState
+ *   复活重置，清单① C-2）随 E1 恢复面退役删除。
  * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/bootRoundSupervisor/
  *   runPendingReconcileSweep）：initSession 复活后的跨域编排时序（R3/R4 域）以回调
  *   注入，聚合→壳零 import（D4）；R3/R4 抽取后同点改指聚合显式接口。
@@ -126,8 +127,6 @@ export interface SessionBaselinesDeps {
   readonly readAssertState: () => { pi: PiLike | null; disposed: boolean };
   /** session 复活：壳 `_disposed` 置 false（dispose 的逆操作，/resume /fork /new 后）。 */
   readonly reviveDisposed: () => void;
-  /** [C-2 显式回调] settled 重扫状态重置（壳 #5 SyncCollect 字段置 null；R2 改指聚合显式接口）。 */
-  readonly resetSettledRescan: () => void;
   /** RecordStore 窄门面（setPi 同步注入 + revive；store 为 #1 留壳共享依赖）。 */
   readonly getStore: () => { setPi(pi: PiLike): void; revive(): void };
   /** NotifyHost 窄门面（revive；通知面 #1 留壳）。 */
@@ -294,13 +293,8 @@ export class SessionBaselines {
     // revive（dispose 的逆操作：/resume /fork /new 后复活）——壳 _disposed 旗标经 deps
     // 回调复位（旗标所有权留壳：assertReady 断言面 readAssertState 的写侧）。
     this.deps.reviveDisposed();
-    // [v2 D4] settled 重扫状态随 revive 重置：新 session 的 E1 若再判「仍有 running」
-    // 可重新注册。旧 handler 闭包捕获旧 state：正常时序（session_shutdown →
-    // session_start）下已随 dispose() 惰化；未经 dispose 的时序残留仍会在 settled
-    // 边沿执行——其扫描壳 mainSessionFile 当前值（非注册时的旧文件），行为等价于
-    // 新 session 多注册一次扫描，由账本 sync-batch:<hash> 幂等 + batchFinalized 候选
-    // 过滤收敛，无跨 session 污染面。（C-2：#5 字段写点显式化为 deps 回调。）
-    this.deps.resetSettledRescan();
+    // [modeless 波3] 旧 settled 重扫状态复活重置（C-2 回调）随 E1 恢复面退役——
+    // 批协调状态为协调器内存登记态，随 dispose()/clear() 全量清空，无跨 session 残留。
     this.deps.getStore().revive();
     this.deps.getNotifyHost().revive();
     // 孤儿终态恢复（放 initSession 末尾：setPi 已注入（appendEntry 可用）、

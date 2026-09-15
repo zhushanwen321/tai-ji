@@ -394,6 +394,35 @@ export class RecordLifecycle {
     await this.archiveRecord(record, "close(idle)");
   }
 
+  /** [modeless 波3] 批闭合自动 close：collect 批 flush 投递后对成员执行归档
+   *  （SyncCollectDomain flushBatch 闭包消费，经壳装配闭包注入）。
+   *
+   *  archiveIdleRecord 的静默变体：保活进程回收 + 监护器撤下 + 归档编排（worktree
+   *  patch 前移/cleanup + markArchived + pending 注销）全部同款，唯一差异 = **不发
+   *  「已收起」提示**（notifyClosed）——批通知即成员的终态通知（closed 载荷带
+   *  result，随 flush 投递），逐成员归档提示会击穿「攒批一次唤醒」语义。归档幂等
+   *  （markArchived no-op）；成员已离场（getMutable 落空——GC/早前归档）安全跳过。
+   *  归档后续聊路径 = fork-from（归档 record 可 fork，已有能力）。 */
+  async archiveBatchMembers(recordIds: readonly string[]): Promise<void> {
+    for (const id of recordIds) {
+      const record = this.deps.getStore().getMutable(id);
+      if (!record) continue;
+      disarmIdleTimer(record.id);
+      disarmSettledWatchdog(record.id);
+      disarmRoundFromProtocol(record.id);
+      killRecordChildWithEscalation(record.id, "archiveBatchMembers");
+      if (record.worktreeHandle) {
+        await this.archiveWorktreeResources(record, "batch-close");
+      }
+      // 批域标记随归档 entry 透传：落标 entry（batchFinalized=true）由 flush 的重建
+      // record 写出，本内存 record 不携带——归档 entry（last-writer-wins）若不补标记
+      // 会把落标标记抹掉。归档即成员离场，标记语义为真。
+      record.batchFinalized = true;
+      this.deps.getStore().markArchived(record);
+      this.deps.getNotifyHost().emitPendingUnregister(record.id, "archived");
+    }
+  }
+
   /**
    * [U5 / §3.2.1 资源组] idle 超时**进程回收**（现状 5min 保留）：idle timer 到期
    * 只回收保活进程——归档（archived）是用户意愿位（close 专属），超时不是用户动作，

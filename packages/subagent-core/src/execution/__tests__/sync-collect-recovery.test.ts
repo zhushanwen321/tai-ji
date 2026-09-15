@@ -1,57 +1,26 @@
 // src/execution/__tests__/sync-collect-recovery.test.ts
 //
-// U5 崩溃恢复钩子（E1）+ dispose 转换（E9）的真实文件通路测试（subagent-sync-collect
-// 设计 §3.1.5）。
+// sync collect 域真实文件通路测试（subagent-sync-collect 设计 §3.1.5）。
+// [modeless 波3] E1 崩溃恢复面（扫描补发 / settled 有界重扫 / 账本幂等窗口 / dispose
+// 惰化）随 collectMode 记录态消亡退役——批协调状态 = 协调器内存登记态，随 session
+// 生命周期消亡，崩溃后批次协调不恢复（成员 record 本体仍健全）。本文件保留：
+//   1. 投影白名单：batchFinalized/终态五字段经末条 entry 重建后可见（rebuildEntryRecord）；
+//   2. E9 dispose：缓冲终态成员逐条转 async notify + 落标 + 协调状态清空；在跑成员
+//      走现有退出路径（不通知）；
+//   3. U4 deviation #8 接线：config collectSync 预算热读传入 flush 的 notifyBatch
+//      budget 参数；
+//   4. 波3 语义：kill -9 同构形态下重启——orphan 覆写自洽 + 批协调不恢复（零补发零落标）；
+//   5. manifest 屏障失败 warn 留痕（D6 #7a/SC-1，flush 路径驱动）；
+//   6. orphan 覆写 merge 语义（async 对照 / 保留方向反向锁定）；
+//   7. P-rebuild / P-manifest 探针不变量（投影不改变孤儿判定 / manifest 存在不改变
+//      重建投影）；
+//   8. S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标。
 //
 // 通路保真（U8 红线：禁 mock record 断言）：
 //   种子 entry 经真实 RecordStore.reportSubagentRecord → toSubagentRecordEntry 序列化
-//   → 真实 appendFileSync 落 tmpdir 主 session JSONL → 恢复侧真实 readFileSync 扫描
+//   → 真实 appendFileSync 落 tmpdir 主 session JSONL → 读侧真实 readFileSync 扫描
 //   （scanLastRecordEntries → collectLastRecordEntries + rebuildEntryRecord 投影）。
 //   断言全部打在「磁盘文件内容 + 真实投影产物」上，scan/投影/序列化三层零 mock。
-//
-// 场景：
-//   1. 标记与终态五字段可见性：collectMode/batchFinalized/status/endedAt/closedReason/
-//      result/error 经末条 entry 重建后全部可见（rebuildEntryRecord 投影白名单扩展）；
-//   2. E1 补发：崩溃残留（全员终态 + 无标记）→ manifest 屏障（await 落盘，先于
-//      写账——「通知可达 ⇒ 索引就位」构造性保证）→ notifyBatch 单批补发（内容 = 末条终态
-//      快照）+ 统一落标；async 成员 / 已标记成员（E9 排除）/ 异根成员均不入批；
-//   3. E1 幂等窗口：账本同 hash 拒绝（accepted=false）也统一补标 → 标记落盘后二次
-//      恢复零补发（收敛）；
-//   4. E1 仍有 running：不补发，等自然终态；
-//   5. E9 dispose：缓冲中已终态成员逐条转 async notify（放弃攒批）+ 落标；在跑成员
-//      走现有退出路径（不通知）；
-//   6. U4 deviation #8 接线：notifyBatch 收到 config 热读的 budget 参数。
-//
-// v2 断链 2+3（设计 subagent-sync-collect-v2.md §3.3 D3）真实序列种子（形态取自
-// kill -9 真实链路，v1 教训：种子绕过 orphan 恢复直接写终态 entry = 测不到断链）：
-//   7. 主用例（写文件 pi）：主文件种 register（running+sync）→ 轮终（running+
-//      resumable+result 全文）两笔 entry，sessionsDir 构造子 session 文件（identity +
-//      末行完整 JSON）且不写三 sidecar（分支 4 命中）→ initSession 后 orphan 覆写
-//      （finalizeOrphanRecord 真实跑，merge 保留批标记与 result/model）→ E1 补发
-//      单批 + 落标 → 二次重启零补发；
-//   8. async 对照（同构造无 collectMode）：覆写 entry 批域字段不出现、result 按
-//      merge 补齐（拉齐修复口径）；
-//   9. 轮终放行路径（断言 pi，覆写不落盘）：E1 直读轮终 idle entry（[U4] 翻边）经
-//      status 判据放行 → 补发可达（与协调器 hasRunningSync 同构）；
-//  10. P-rebuild：rebuildEntryRecord 投影字段（sessionFile）不改变
-//      recoverEntryOnlyOrphans 的「只认 running 末条」候选判定；
-//  11. v2 断链 4（设计 §3.3 D4）延迟闭合：E1 waiting → 注册 settled 有界重扫 →
-//      成员补种终态 entry → settled 边沿重扫补发单批 + 落标 → 后续 settled 零处理；
-//  12. D4 上限：成员恒 running → settled 驱动 8 次重扫达限 → disposed（warn 留痕含滞留 id，
-//      D6 #7b/SC-2），第 9 次（成员此刻已终态）不再扫描；
-//  13. v2 断链 1（设计 §3.3 D1/D2）E1 路径 manifest：写账前屏障 await 补写
-//      records/<sa-id>.json（时序竞态修订：原落标出口 fire-and-forget）——成功成员
-//      status 如实投影 "running"（豁免形态末条）/"closed"（覆写后末条），sessionFile
-//      投影（W1 前置依赖）随批补发就位；
-//  14. P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 collectRecords 投影
-//      与删 manifest 后一致（byId.has 跳过语义：有子文件锚的成员永不被 manifest
-//      补充投影覆盖，running manifest 不改变 list 形态）；
-//  15. D4 dispose 惰化：E1 waiting → dispose() → trailing settled 边沿不扫描不落标
-//      （notifier 已 dispose，跑了 notifyBatch 必 false 不写账而落标照发 → 通知永久
-//      丢失；惰化后通知留给下次重启 E1 兑现）；
-//  16. D3 merge 保留方向反向锁定：子文件头部 model_change 重建 model=A 非空 + 主
-//      文件轮终 entry model=B（≠A）→ 覆写 entry 取 rec 侧 A（仅补不覆盖——防未来
-//      被改成恒取 src 的覆盖语义而既有只测「补齐方向」的用例仍绿）。
 //
 // mock 手法对齐 collect-coordinator-service.test.ts：mock session-runner（不 spawn 真子
 // 进程）+ logger；record-store / config 走真实实现（tmpdir 自建自删，红线）。
@@ -71,7 +40,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // [U3 适配] RecordStore 构造点接线 manifestDir 后，markBatchFinalized 的 manifest 面走
 // writeAtomicFileSync 同步写（不再经 manifestStore.writeManifest）——屏障失败注入面
-// 随之迁移到本模块（默认透传真实现，仅「屏障失败」用例内 mockImplementationOnce）。
+// 在本模块（默认透传真实现，仅「屏障失败」用例内 mockImplementationOnce）。
 vi.mock("../../shared/atomic-write.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../shared/atomic-write.ts")>();
   return { ...actual, writeAtomicFileSync: vi.fn(actual.writeAtomicFileSync) };
@@ -88,6 +57,7 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { SyncCollectDomain } from "../service/sync-collect-domain.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
@@ -107,37 +77,8 @@ const ENV_KEYS_TO_STRIP = [
 
 const ROOT_SESSION = "root-session-crash";
 
-/** settled handler 捕获 + 驱动（D4 重扫用例用）：pi 实装为列表分发（P-settled 定谳，
- *  0.84.4 dist loader.js on() push 进数组 + runner.js emit() 遍历全部 handler 并逐一
- *  await），捕获数组同构——emitAgentSettled 逐一 await 已注册 handler（D4 重扫
- *  handler 已 async 化：E1 补发前有 manifest 屏障 await），模拟一次 settled 边沿。 */
-interface SettledDriver {
-  /** 驱动一次 agent_settled 边沿（快照遍历，防 handler 内注册/变异干扰本轮）。 */
-  emitAgentSettled(): Promise<void>;
-}
-
-// on/sendMessage 给显式 Mock 签名：vi.fn() 默认 Mock<Procedure | Constructable>
-// 不可赋给 PiLike 的具名方法签名（PiLike 结构兼容要求参数可逆变）
-function settledCapture(): {
-  driver: SettledDriver;
-  on: Mock<(event: string, handler: () => void | Promise<void>) => void>;
-} {
-  const handlers: Array<() => void | Promise<void>> = [];
-  return {
-    driver: {
-      emitAgentSettled: async () => {
-        for (const h of [...handlers]) await h();
-      },
-    },
-    on: vi.fn((event: string, handler: () => void | Promise<void>) => {
-      if (event === "agent_settled") handlers.push(handler);
-    }),
-  };
-}
-
 /** 种子 pi：appendEntry 真写主 session JSONL（每 entry 一行，pi 落盘形态）。 */
 function makeWritingPi(mainFile: string) {
-  const { driver, on } = settledCapture();
   return {
     appendEntry: vi.fn((customType: string, data: unknown) => {
       fs.appendFileSync(
@@ -155,20 +96,17 @@ function makeWritingPi(mainFile: string) {
     }),
     events: { emit: vi.fn() },
     sendMessage: vi.fn((_m: unknown, _o?: unknown) => {}),
-    on,
-    emitAgentSettled: driver.emitAgentSettled,
+    on: vi.fn(),
   };
 }
 
 /** 断言 pi：appendEntry 只记录不落盘（断言恢复侧写点用）。 */
 function makeAssertPi() {
-  const { driver, on } = settledCapture();
   return {
     appendEntry: vi.fn(),
     events: { emit: vi.fn() },
     sendMessage: vi.fn((_m: unknown, _o?: unknown) => {}),
-    on,
-    emitAgentSettled: driver.emitAgentSettled,
+    on: vi.fn(),
   };
 }
 
@@ -229,12 +167,11 @@ function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): Suba
     result: undefined,
     error: undefined,
     sessionFile: undefined,
-    collectMode: "sync",
     ...overrides,
   };
 }
 
-describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
+describe("sync collect 域真实文件通路（[modeless 波3] E9/flush/投影）", () => {
   let agentDir: string;
   let mainFile: string;
 
@@ -246,6 +183,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   });
 
   afterEach(() => {
+    clearEngines();
     // maxRetries：E9 落标的 manifest fire-and-forget 原子写（tmp→fsync→rename，
     // 链尾 fsyncDir 仍在飞；批通知路径的屏障 await 已含 fsyncDir，无此竞态）+
     // sessions-index fire 写都可能与删除并发（ENOTEMPTY 竞态，根级全量并行时机器
@@ -263,8 +201,8 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     );
   }
 
-  /** 恢复侧 service：断言 pi（覆写不落盘，断言内存面）/ 写文件 pi（覆写真实落盘，
-   *  E1 读覆写后末条——kill -9 真实链路同构）两用。 */
+  /** 恢复侧 service：断言 pi（覆写不落盘，断言内存面）/ 写文件 pi（覆写真实落盘）
+   *  两用。 */
   /** [W3] 协议替身注册（per-test 调用；afterEach clearEngines 统一清理）。 */
   function makeRecoveryFake(): FakePiEnginePort {
     clearEngines();
@@ -345,22 +283,24 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     return childFile;
   }
 
-  /** 种下「崩溃前主文件末条序列」：register（running+sync）→ 轮终（idle + result
-   *  全文 + sessionFile）——[U4/D3] 翻边后轮终权威形态（markRoundIdle 写 idle；
-   *  U5 前 SP-5 桥接形态 running+resumable 已随 [U5/D4] 字段退役消亡）。
-   *  collectMode 必须显式传（"sync" 主用例 / undefined async 对照）——不可给默认值：
-   *  JS 默认参数对显式 undefined 也触发，async 对照会被默认 "sync" 污染。 */
-  function seedRoundTerminalEntries(id: string, childFile: string, result: string, model: string, collectMode: "sync" | undefined): void {
+  /** 种下「崩溃前主文件末条序列」：register（running）→ 轮终（idle + result 全文 +
+   *  sessionFile）——[U4/D3] 翻边后轮终权威形态（markRoundIdle 写 idle）。
+   *  [modeless 波3] collectMode 种子参数随字段消亡删除（批成员身份在协调器登记态）。 */
+  function seedRoundTerminalEntries(id: string, childFile: string, result: string, model: string): void {
     const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id, sessionFile: childFile, model, collectMode }));
+    store.reportSubagentRecord(memberRecord({ id, sessionFile: childFile, model }));
     store.reportSubagentRecord(
-      memberRecord({ id, sessionFile: childFile, model, collectMode, status: "idle", stopReason: "completed", result }),
+      memberRecord({ id, sessionFile: childFile, model, status: "idle", stopReason: "completed", result }),
     );
   }
 
-  it("标记与终态五字段经真实落盘→扫描投影后可见（rebuildEntryRecord 白名单扩展）", () => {
+  // ============================================================
+  // 投影白名单（rebuildEntryRecord）
+  // ============================================================
+
+  it("批标记与终态五字段经真实落盘→扫描投影后可见（rebuildEntryRecord 白名单扩展）", () => {
     const store = makeSeedStore();
-    // 成员 A：register（running+sync）→ 终态（closed + gc + result）两笔真实 entry
+    // 成员 A：register（running）→ 终态（idle + gc + result）两笔真实 entry
     store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
     store.reportSubagentRecord(
       memberRecord({
@@ -380,18 +320,14 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     store.reportSubagentRecord(
       memberRecord({ id: "sa-c", status: "idle", closedReason: "gc", endedAt: 4000, batchFinalized: true }),
     );
-    // 成员 D：async（无 collectMode）终态
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-d", status: "idle", closedReason: "gc", endedAt: 5000, collectMode: undefined }),
-    );
 
-    // 恢复侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问，与
+    // 读侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问，与
     // collect-coordinator-service.test.ts 访问 notifier 同款手法）
     const recovery = makeRecoveryService(makeAssertPi());
     const scanned = (recovery as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
     const byId = new Map(scanned.map((r) => [r.id, r]));
 
-    // 终态五字段 + 两标记字段全可见（末条 last-writer-wins）
+    // 终态五字段 + 落标标记全可见（末条 last-writer-wins）
     const a = byId.get("sa-a");
     expect(a).toBeDefined();
     expect(a!.status).toBe("idle");
@@ -399,7 +335,6 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(a!.closedReason).toBe("gc");
     expect(a!.result).toBe("done-A");
     expect(a!.error).toBeUndefined();
-    expect(a!.collectMode).toBe("sync");
     expect(a!.batchFinalized).toBeUndefined();
 
     const b = byId.get("sa-b");
@@ -407,157 +342,11 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(b!.result).toBeUndefined();
 
     expect(byId.get("sa-c")!.batchFinalized).toBe(true);
-    expect(byId.get("sa-d")!.collectMode).toBeUndefined();
   });
 
-  it("E1 补发：全员终态无标记 → notifyBatch 单批（末条终态快照）+ 统一落标；async/已标记/异根排除", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
-    store.reportSubagentRecord(memberRecord({ id: "sa-b" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-b", status: "idle", closedReason: "gc", endedAt: 3000, error: "boom" }),
-    );
-    // 排除面 1：async 终态成员不入批
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-async", status: "idle", closedReason: "gc", endedAt: 4000, collectMode: undefined }),
-    );
-    // 排除面 2：已标记成员（E9 转换后重启形态）不入批
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-marked", status: "idle", closedReason: "gc", endedAt: 5000, batchFinalized: true }),
-    );
-    // 排除面 3：异根成员不入批
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-foreign", status: "idle", closedReason: "gc", endedAt: 6000, rootSessionId: "other-root" }),
-    );
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const spy = spyNotifier(recovery);
-    // 屏障断言钩子（严格时序门）：notifyBatch（写账入口）被调用的时刻，成员 manifest
-    // 必已在磁盘——「通知可达 ⇒ 索引就位」的构造性保证（修复前 manifest 在写账后
-    // fire-and-forget 写，该时刻只大概率成立）。
-    let manifestExistsAtLedgerWrite = false;
-    spy.notifyBatch.mockImplementation(() => {
-      manifestExistsAtLedgerWrite = fs.existsSync(
-        path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-a.json"),
-      );
-      return true;
-    });
-    await recovery.recoverSyncCollectBatch();
-
-    // 单批补发：只有 sa-a / sa-b 入批，内容 = 末条终态快照
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
-    expect(batch.map((m) => m.id).sort()).toEqual(["sa-a", "sa-b"]);
-    const a = batch.find((m) => m.id === "sa-a")!;
-    expect(a.status).toBe("closed");
-    expect(a.result).toBe("done-A");
-    expect(a.closedReason).toBe("gc");
-    const b = batch.find((m) => m.id === "sa-b")!;
-    expect(b.error).toBe("boom");
-    // 单条 notify 零调用（补发形态是批，不是逐条）
-    expect(spy.notify).not.toHaveBeenCalled();
-    // E1 屏障：写账时刻成员 manifest 已落盘（严格时序门）
-    expect(manifestExistsAtLedgerWrite).toBe(true);
-
-    // 统一落标：两成员各一笔 batchFinalized entry（appendEntry 直投影，含终态快照）
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id).sort()).toEqual(["sa-a", "sa-b"]);
-  });
-
-  it("屏障失败 warn 留痕（D6 #7a/SC-1）：manifest 同步写失败不阻断补发，warn 含成员 id（U1 同步分支形态）", async () => {
-    const childFile = writeChildSessionFile("sa-bar-fail", "barrier fail task");
-    seedRoundTerminalEntries("sa-bar-fail", childFile, "barrier result", "prov/bar-m", "sync");
-
-    const recovery = makeRecoveryService(makeAssertPi());
-    const spy = spyNotifier(recovery);
-    loggerMock.warn.mockClear(); // logger 模块级共享，计数从本用例起算
-    // [U3 适配] 构造点接线 manifestDir 后屏障走 writeAtomicFileSync 同步分支——失败
-    // 注入面从 manifestStore.writeManifest（异步降级分支打桩）迁至原子写模块。单成员
-    // 批 = 单次调用，mockImplementationOnce 恰好命中；同步分支 try/catch 吞错 =
-    // 不阻断落标/写账投递（best-effort 与旧 allSettled 同源）。
-    vi.mocked(writeAtomicFileSync).mockImplementationOnce(() => {
-      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-    });
-
-    await recovery.recoverSyncCollectBatch();
-
-    // best-effort 语义：写账照常推进（反查索引缺失只影响指针行反查，不构成写账失败）
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    // D6 #7a 适配（U1 同步分支 warn 形态）：message 含 sync write failed 语义 +
-    // detail.id 定位成员（manifest 路径由 recordsDir/<id>.json 推导——异步分支的
-    // 路径直书线索未纳入 U1 同步分支实装，按现行为断言）。
-    const barrierWarns = loggerMock.warn.mock.calls.filter((c) =>
-      String(c[0]).startsWith("[subagents] batch-finalized manifest sync write failed"),
-    );
-    expect(barrierWarns).toHaveLength(1);
-    expect((barrierWarns[0]![1] as { detail?: { id?: string } }).detail?.id).toBe("sa-bar-fail");
-  });
-
-  it("E1 幂等窗口：账本同 hash 拒绝（accepted=false）也统一补标 → 标记落盘后二次恢复零补发", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
-
-    // 第一次恢复：notifyBatch 返回 false（模拟「批闭合写账成功、落标前崩溃」后账本已在该批）
-    const pi1 = makeAssertPi();
-    const first = makeRecoveryService(pi1);
-    const spy1 = spyNotifier(first);
-    spy1.notifyBatch.mockReturnValue(false);
-    await first.recoverSyncCollectBatch();
-    expect(spy1.notifyBatch).toHaveBeenCalledTimes(1);
-    // 账本拒绝也算已投递 → 仍统一补标
-    const marks1 = pi1.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks1.map((m) => m.id)).toEqual(["sa-a"]);
-
-    // 标记真实落盘（写文件 pi 把补标 entry 追加进主文件——flush 后形态）
-    const seedForMark = makeSeedStore();
-    seedForMark.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A", batchFinalized: true }),
-    );
-
-    // 第二次恢复：全员已标记 → 零补发零 notify（收敛，无振荡）
-    const second = makeRecoveryService(makeAssertPi());
-    const spy2 = spyNotifier(second);
-    await second.recoverSyncCollectBatch();
-    expect(spy2.notifyBatch).not.toHaveBeenCalled();
-    expect(spy2.notify).not.toHaveBeenCalled();
-  });
-
-  it("E1 仍有 running 成员：不补发不落标（等自然终态走正常流）", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
-    // 在跑成员：末条 running（子进程活到重启后的形态）
-    store.reportSubagentRecord(memberRecord({ id: "sa-running" }));
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    expect(spy.notify).not.toHaveBeenCalled();
-    expect(
-      pi.appendEntry.mock.calls
-        .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-        .map((c) => c[1] as Record<string, unknown>)
-        .some((d) => d.batchFinalized === true),
-    ).toBe(false);
-  });
+  // ============================================================
+  // E9 dispose（缓冲转账 + 协调状态清空）
+  // ============================================================
 
   it("E9 dispose：缓冲终态成员逐条转 async notify + 落标；在跑成员走现有退出路径（不通知）", async () => {
     // 复用 execute 真链：成员 1 受控终态（入缓冲后批因成员 2 在跑不闭合），成员 2 悬置 running
@@ -610,16 +399,15 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       .map((c) => c[1] as Record<string, unknown>)
       .filter((d) => d.batchFinalized === true);
     expect(marks.map((m) => m.id)).toEqual([h1.subagentId]);
-    expect(marks[0]!.collectMode).toBe("sync");
     expect(marks[0]!.result).toBe("ok-terminal");
+
+    // [modeless 波3] E9 后批协调状态清空（clear）：无挂起排程可触发、登记集消亡——
+    // dispose 后 settle 链不可能再入批（成员 2 走 disposeAllRecords 退出路径，无通知）。
+    expect(spy.notify).toHaveBeenCalledTimes(1);
   });
 
-  it("U4 deviation #8 接线：config collectSync 预算热读传入 notifyBatch budget 参数", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
+  it("U4 deviation #8 接线：config collectSync 预算热读传入 flush 的 notifyBatch budget 参数", async () => {
+    const fake = makeRecoveryFake();
     // 写 config（collectSync 预算字段）+ reload —— 与 getCollectSyncDefault 同款访问链
     const configPath = path.join(agentDir, "subagents", "config.json");
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -630,105 +418,82 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     );
 
     const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const modelService = (recovery as unknown as { modelService: ModelConfigService }).modelService;
+    const service = makeRecoveryService(pi);
+    const modelService = (service as unknown as { modelService: ModelConfigService }).modelService;
     modelService.reloadGlobalConfig();
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
+    const spy = spyNotifier(service);
+    const handle = await service.execute({ task: "budget task", slug: "budget", collect: "sync" });
+    await until(() => fake.runs.length >= 1);
+    fake.runs[0]!.settle({ content: "ok-budget" });
+    await until(() => spy.notifyBatch.mock.calls.length > 0);
 
     expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
     expect(spy.notifyBatch.mock.calls[0]![1]).toEqual({ perItemChars: 1234, totalChars: 5678 });
-
-    // 文件末条确为无标记终态（本用例的数据前提自检）
-    const last = readMainFileLastEntries().get("sa-a");
-    expect(last!.batchFinalized).toBeUndefined();
+    expect(spy.notifyBatch.mock.calls[0]![0]).toMatchObject([{ id: handle.subagentId }]);
   });
 
   // ============================================================
-  // v2 断链 2+3（设计 §3.3 D3）：orphan 覆写 merge + E1 resumable 豁免。
-  // 种子形态取自 kill -9 真实链路（v1 教训：绕过 orphan 恢复直接写终态 entry
-  // 测不到断链——主文件两笔 entry + 子文件 + 无三 sidecar，让 finalizeOrphanRecord
-  // 与 E1 在同一测试里真实跑）。
+  // [modeless 波3] kill -9 同构形态：重启后批协调不恢复
+  // （E1 恢复面退役——成员 record 本体健全，零补发零落标）
   // ============================================================
 
-  it("kill -9 同构主用例：轮终 idle 末条自洽（[U4] 翻边后无需 orphan 纠偏）→ E1 补发单批 + 落标 → 二次重启零补发", async () => {
-    // ── 崩溃前形态：register（running+sync）→ 轮终（idle+result 全文，[U4] 翻边）──
+  it("kill -9 同构主用例（波3）：轮终 idle 末条自洽 → 重启 orphan 判定自洽 + 批协调不恢复（零补发）", async () => {
+    // ── 崩溃前形态：register（running）→ 轮终（idle+result 全文，[U4] 翻边）──
     const childFile = writeChildSessionFile("sa-kill9", "kill -9 crash task");
-    seedRoundTerminalEntries("sa-kill9", childFile, "kill-9 full result body", "prov/round-m", "sync");
+    seedRoundTerminalEntries("sa-kill9", childFile, "kill-9 full result body", "prov/round-m");
 
-    // ── 重启恢复（写文件 pi：orphan 覆写 entry 真实落盘，E1 读覆写后末条）──
-    // initSession 内已真实跑 orphan 恢复（ENV 已剥 → 根进程判定 → finalizeOrphanRecord）。
+    // ── 重启（写文件 pi：orphan 覆写 entry 真实落盘）──
+    // initSession 内已真实跑 orphan 恢复（ENV 已剥 → 根进程判定）。
     const recoveryPi = makeWritingPi(mainFile);
     const recovery = makeRecoveryService(recoveryPi);
 
     // [U4/D4 → U5] 末条轮终 idle 自洽（纠偏对象 = 残留 running，轮终形态不触发
-    // orphan 覆写）——末条直接携带轮终正文/模型/批标记（真实轮终 entry 全集），
-    // E1 直接补发，无需 merge 保真。stopReason 对齐 markRoundIdle 簿记⑩。
+    // orphan 覆写）——末条直接携带轮终正文/模型（真实轮终 entry 全集）。
+    // stopReason 对齐 markRoundIdle 簿记⑩。
     const overwritten = readMainFileLastEntries().get("sa-kill9")!;
     expect(overwritten.status).toBe("idle");
     expect(overwritten.closedReason).toBeUndefined();
     expect(overwritten.stopReason).toBe("completed");
-    expect(overwritten.collectMode).toBe("sync");
     expect(overwritten.result).toBe("kill-9 full result body");
     expect(overwritten.model).toBe("prov/round-m");
     // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删；幂等由「纠偏
     // entry 落盘后末条变 idle，判据不再命中」构造性承接）
     expect(fs.existsSync(`${childFile}.state`)).toBe(false);
 
-    // ── E1 真实跑：末条 idle 候选命中（status 判据放行）→ 补发 + 落标 ──
+    // ── [modeless 波3] 批协调不恢复：E1 已退役 → 零补发零落标 ──
+    // 成员通知已在崩溃前的 flush 投递（或随 dispose 转 async 兑底）；协调器登记态
+    // 随旧 session 消亡，重启后无人重收集——成员 record 本体（idle+result+锚）健全，
+    // fork/message 续用能力不受影响。
     const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
+    await recovery.recoverSyncCollectBatch(); // accepted-no-op
+    expect(spy.notifyBatch).not.toHaveBeenCalled();
     expect(spy.notify).not.toHaveBeenCalled();
-    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
-    expect(batch).toHaveLength(1);
-    expect(batch[0]!.id).toBe("sa-kill9");
-    // 成功成员正文含 result 全文（来自轮终 entry，非 "(empty)"）
-    expect(batch[0]!.result).toBe("kill-9 full result body");
-    expect(batch[0]!.status).toBe("closed");
-
-    // 补发后落标 batchFinalized（主文件末条）
     const marked = readMainFileLastEntries().get("sa-kill9")!;
-    expect(marked.batchFinalized).toBe(true);
-    expect(marked.collectMode).toBe("sync");
+    expect(marked.batchFinalized).toBeUndefined();
 
-    // [v2 D1] E1 路径 manifest：写账前屏障 await 补写 records/<sa-id>.json（时序
-    // 竞态修订：原为落标出口 fire-and-forget），反查索引随补发就位（指针行消费前
-    // 可得——await 返回时屏障已完成，无需轮询）。[U3 / §3.2.4] 纠偏 entry 无旧终态
-    // 遗留位 → legacyManifestStatusFields 按桥接判据投影 legacy "running"（§3.2.8
-    // 下行映射：idle∧无 closedReason → 活跃成员）；sessionFile 来自 W1 的
-    // rebuildEntryRecord 投影扩展。
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-kill9.json");
-    expect(fs.existsSync(manifestFile)).toBe(true);
-    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as Record<string, unknown>;
-    expect(manifest).toMatchObject({
-      id: "sa-kill9",
-      rootSessionId: ROOT_SESSION,
-      agentName: "/agents/worker.md",
-      status: "running",
-      sessionFile: childFile,
-    });
-
-    // ── 二次重启（V2 验收「零重发」）：已标记 → 候选空 → 零补发 ──
-    const second = makeRecoveryService(makeAssertPi());
-    const spy2 = spyNotifier(second);
-    await second.recoverSyncCollectBatch();
-    expect(spy2.notifyBatch).not.toHaveBeenCalled();
-    expect(spy2.notify).not.toHaveBeenCalled();
+    // orphan 覆写幂等自检：二次重启零追加（末条已 idle，判据不再命中）
+    const before = readMainFileLastEntries().get("sa-kill9")!;
+    makeRecoveryService(makeAssertPi());
+    const after = readMainFileLastEntries().get("sa-kill9")!;
+    expect(after).toEqual(before);
   });
+
+  // ============================================================
+  // v2 断链 2+3 遗产（设计 §3.3 D3）：orphan 覆写 merge 语义。
+  // 种子形态取自 kill -9 真实链路（主文件两笔 entry + 子文件 + 无三 sidecar，
+  // 让 finalizeOrphanRecord 在同一测试里真实跑）。
+  // ============================================================
 
   it("async 对照：覆写 entry 批域字段不出现，result/model 按 merge 补齐（拉齐修复口径）", () => {
     const childFile = writeChildSessionFile("sa-async-ctl", "async crash task");
-    // 同构造但无 collectMode（undefined 覆盖 memberRecord 默认 "sync"）
-    seedRoundTerminalEntries("sa-async-ctl", childFile, "async full result body", "prov/async-m", undefined);
+    seedRoundTerminalEntries("sa-async-ctl", childFile, "async full result body", "prov/async-m");
 
     const recoveryPi = makeWritingPi(mainFile);
     makeRecoveryService(recoveryPi); // initSession 内 orphan 覆写真实跑
 
     const overwritten = readMainFileLastEntries().get("sa-async-ctl")!;
     expect(overwritten.status).toBe("idle");
-    // 批域字段对非 sync 成员恒 no-op：序列化产物不含这两键（merge 无值可补）
-    expect(Object.hasOwn(overwritten, "collectMode")).toBe(false);
+    // 批域标记对非批成员恒 no-op：序列化产物不含该键（merge 无值可补）
     expect(Object.hasOwn(overwritten, "batchFinalized")).toBe(false);
     // result/model 修补对 async 成员同样生效（light 重建丢 result/model 的拉齐修复）
     expect(overwritten.result).toBe("async full result body");
@@ -745,7 +510,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const childFile = writeChildSessionFile("sa-merge-dir", "merge direction task", "prov-child/child-m-a");
     const store = makeSeedStore();
     store.reportSubagentRecord(
-      memberRecord({ id: "sa-merge-dir", sessionFile: childFile, model: "prov/round-m-b", collectMode: "sync", result: "merge direction result" }),
+      memberRecord({ id: "sa-merge-dir", sessionFile: childFile, model: "prov/round-m-b", result: "merge direction result" }),
     );
 
     const recoveryPi = makeWritingPi(mainFile);
@@ -762,213 +527,6 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
       .filter((l) => l.includes(SUBAGENT_RECORD_CUSTOM_TYPE) && l.includes("sa-merge-dir"))
       .map((l) => (JSON.parse(l) as { data?: { model?: string } }).data?.model);
     expect(allModels).toContain("prov/round-m-b");
-  });
-
-  it("轮终 idle 末条（覆写不落盘）→ E1 status 判据放行 → 补发可达 + manifest 如实投影", async () => {
-    const childFile = writeChildSessionFile("sa-exempt", "exempt path task");
-    seedRoundTerminalEntries("sa-exempt", childFile, "exempt full result body", "prov/round-m", "sync");
-
-    // 断言 pi：orphan 覆写 entry 不落盘——主文件末条保持轮终 idle 形态（[U4] 翻边
-    // 权威词），E1 读的是该 entry（覆写不可达的防御分支残余）。
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-
-    // 前提自检：主文件末条仍是轮终 idle（旧口径 status !== "closed"
-    // 会把它顶死在「等自然终态」，本用例锁定 status 判据放行让补发可达）。
-    const lastBefore = readMainFileLastEntries().get("sa-exempt")!;
-    expect(lastBefore.status).toBe("idle");
-
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
-    expect(batch[0]!.id).toBe("sa-exempt");
-    // 补发内容 = 轮终快照（result 全文；status 判据放行）
-    expect(batch[0]!.result).toBe("exempt full result body");
-
-    // 落标 entry（断言 pi 的内存面）：覆写被豁免放行的成员同样统一补标
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id)).toEqual(["sa-exempt"]);
-
-    // [v2 D1/D2 断链 1] E1 补发路径（rebuildEntryRecord 重建快照来源）的 manifest：
-    // 写账前屏障 await 补写（await 返回时必在场），成功成员末条轮终 idle →
-    // status 如实投影（D2：不撒谎写 closed）；sessionFile
-    // 来自 W1 的投影扩展（前置依赖）。
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-exempt.json");
-    expect(fs.existsSync(manifestFile)).toBe(true);
-    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as Record<string, unknown>;
-    expect(manifest).toMatchObject({
-      id: "sa-exempt",
-      rootSessionId: ROOT_SESSION,
-      agentName: "/agents/worker.md",
-      status: "running",
-      createdAt: 1000,
-      sessionFile: childFile,
-    });
-  });
-
-  it("[two-state-convergence U4] 翻边轮终末条（idle entry，覆写不落盘）→ E1 status 子句排除 → 补发可达（与桥接形态同判）", async () => {
-    // 翻边后（U4 写面写 idle）成功成员崩溃时的末条形态：idle + resumable 无 +
-    // result 全文。判据 isCollectPending 的 status 子句排除该形态 → 不顶死在
-    // 「等自然终态」，补发直达（与上方桥接 running+resumable 豁免用例同判据 SSOT）。
-    const childFile = writeChildSessionFile("sa-exempt-idle", "flipped idle terminal task");
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-exempt-idle", sessionFile: childFile, model: "prov/round-m", collectMode: "sync", status: "idle", result: "flipped idle result body" }),
-    );
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-
-    // 前提自检：主文件末条 = 翻边轮终 idle 形态（resumable 无——U4 不再写）。
-    const lastBefore = readMainFileLastEntries().get("sa-exempt-idle")!;
-    expect(lastBefore.status).toBe("idle");
-    expect(lastBefore.resumable).toBeUndefined();
-
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
-    expect(batch[0]!.id).toBe("sa-exempt-idle");
-    expect(batch[0]!.result).toBe("flipped idle result body");
-  });
-
-  // ============================================================
-  // v2 断链 4（设计 §3.3 D4）：E1 等待分支的 settled 有界重扫。等待不再死等——
-  // 成员延迟终态（冷路径 resume → 正常流落 entry）由 settled 边沿驱动重扫收敛。
-  // ============================================================
-
-  it("D4 延迟闭合：E1 仍有 running → 注册 settled 重扫（单注册）→ 成员补种终态 entry → 边沿重扫补发单批+落标 → disposed", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
-    // 在跑成员：末条 running（子进程活到重启后的形态，与既有 waiting 用例同构造）
-    store.reportSubagentRecord(memberRecord({ id: "sa-late" }));
-
-    // 断言 pi：orphan 覆写不落盘 → 主文件末条保持 running，E1 走等待分支（前提自检）
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-
-    // 等待分支：零补发 + 注册 settled 重扫恰一次（agent_settled 单注册断言）
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    const settledRegistrations = pi.on.mock.calls.filter((c) => c[0] === "agent_settled");
-    expect(settledRegistrations).toHaveLength(1);
-
-    // 成员延迟终态：冷路径 resume → 正常流终态落 entry（reportSubagentRecord 真实写点同构）
-    const lateStore = makeSeedStore();
-    lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-late", status: "idle", closedReason: "gc", endedAt: 9000, result: "late full result" }),
-    );
-
-    // settled 边沿 → 重扫一次（await 完整补发链：manifest 屏障 → 写账 → 落标）：
-    // 全员终态 → 补发单批（两成员，含延迟成员 result 全文）
-    await pi.emitAgentSettled();
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-    const batch = spy.notifyBatch.mock.calls[0]![0] as Array<Record<string, unknown>>;
-    expect(batch.map((m) => m.id).sort()).toEqual(["sa-a", "sa-late"]);
-    expect(batch.find((m) => m.id === "sa-late")!.result).toBe("late full result");
-
-    // 重扫落标：两成员统一补 batchFinalized（断言 pi 内存面）
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id).sort()).toEqual(["sa-a", "sa-late"]);
-
-    // disposed 验证：补发完成后再驱动 settled 边沿 → 零处理（无第二次补发）
-    await pi.emitAgentSettled();
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
-  });
-
-  it("D4 上限：成员恒 running → settled 驱动 8 次重扫达限 disposed（warn 留痕含滞留 id，D6 #7b）→ 第 9 次（成员已终态）不再扫描", async () => {
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-stuck" }));
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const spy = spyNotifier(recovery);
-    loggerMock.debug.mockClear(); // logger 是模块级共享，计数从本用例起算
-    await recovery.recoverSyncCollectBatch();
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    expect(pi.on.mock.calls.filter((c) => c[0] === "agent_settled")).toHaveLength(1);
-
-    // 连续 8 次 settled：每次重扫（成员末条恒 running → 每次都判「仍在等」）。
-    // waiting 判定过滤用消息前缀精确匹配（达限日志文案同样含 "still running" 词）。
-    const e1WaitingLogs = () => loggerMock.debug.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith("[subagents] E1 sync batch recovery:"));
-    for (let i = 0; i < 8; i++) await pi.emitAgentSettled();
-    // 首扫 1 + 重扫 8 = 9 次 waiting 判定留痕；达限 warn 恰一次（D6 #7b/SC-2：debug→warn，含滞留成员 id）
-    expect(e1WaitingLogs()).toHaveLength(9);
-    const limitCalls = loggerMock.warn.mock.calls.filter((c) =>
-      String(c[0]).startsWith("[subagents] E1 settled rescan: reached limit"),
-    );
-    expect(limitCalls).toHaveLength(1);
-    expect(limitCalls[0]![1]).toEqual({ ids: ["sa-stuck"] });
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-
-    // 第 9 次驱动时成员已补种终态：disposed 不再扫描（零补发 + waiting 日志不增）
-    const lateStore = makeSeedStore();
-    lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-stuck", status: "idle", endedAt: 9500, result: "too late" }),
-    );
-    await pi.emitAgentSettled();
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    expect(e1WaitingLogs()).toHaveLength(9);
-  });
-
-  it("D4 dispose 惰化：E1 waiting → dispose() → trailing settled 边沿不扫描不落标（通知不丢失）", async () => {
-    // 与「D4 延迟闭合」同构造（成员补种终态 + settled 边沿 → 补发落标）作对照：
-    // 本用例在边沿前插入 dispose()——handler 已惰化，扫描/补发/落标全不发生。
-    // 失败模式（修复前）：dispose 后 notifier 已 dispose → notifyBatch 短路 false
-    // 且不写账，而 E1 dispatched 段不判 accepted 仍统一落标 → 批被标 batchFinalized
-    // 而通知从未写账（永久丢失）；惰化后通知由下次重启 E1 首扫兑现（无标记可达）。
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-A" }),
-    );
-    // 在跑成员：末条 running → E1 走等待分支并注册 settled 重扫
-    store.reportSubagentRecord(memberRecord({ id: "sa-late" }));
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch();
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    expect(pi.on.mock.calls.filter((c) => c[0] === "agent_settled")).toHaveLength(1);
-
-    // session_shutdown：dispose 惰化重扫 handler
-    recovery.dispose();
-
-    // 成员补种终态 + trailing settled 边沿：handler 已惰化 → 零扫描（无 E1 日志）
-    const lateStore = makeSeedStore();
-    lateStore.reportSubagentRecord(
-      memberRecord({ id: "sa-late", status: "idle", endedAt: 9000, result: "late full result" }),
-    );
-    loggerMock.debug.mockClear();
-    loggerMock.warn.mockClear();
-    await pi.emitAgentSettled();
-    expect(spy.notifyBatch).not.toHaveBeenCalled();
-    const e1Logs = () =>
-      [...loggerMock.debug.mock.calls, ...loggerMock.warn.mock.calls]
-        .map((c) => String(c[0]))
-        .filter((m) => m.startsWith("[subagents] E1"));
-    expect(e1Logs()).toHaveLength(0);
-
-    // 不落标：无 batchFinalized entry —— 通知不写账也不封门，留给下次重启兑现
-    expect(
-      pi.appendEntry.mock.calls
-        .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-        .map((c) => c[1] as Record<string, unknown>)
-        .some((d) => d.batchFinalized === true),
-    ).toBe(false);
   });
 
   it("P-rebuild：投影字段不改变 entry-born 孤儿判定（register running 末条无子文件锚仍入判定覆写）", () => {
@@ -996,23 +554,29 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   });
 
   // ============================================================
-  // v2 断链 1（设计 §3.3 D1/D2 + 探针 P-manifest）：落标出口 manifest 落盘后，
-  // running manifest 不得触发 collectRecords 孤儿补充投影——有子文件锚的成员
-  // 永不被 manifest 补充投影覆盖（record-store byId.has 跳过语义）。
+  // v2 断链 1 遗产 + 探针 P-manifest：批落标出口 manifest 落盘后，running manifest
+  // 不得触发 collectRecords 孤儿补充投影——有子文件锚的成员永不被 manifest 补充
+  // 投影覆盖（record-store byId.has 跳过语义）。
   // ============================================================
 
-  it("P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 list 投影与删 manifest 后逐字段一致", async () => {
-    // 豁免形态构造（区分度最强）：落标写出的 manifest.status="running"（D2 如实
-    // 投影）与子文件 sidecar 重建投影 closed+gc 可辨——若 manifest 被错误投影，
-    // status/closedReason 形态差异立即暴露。
+  it("P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 list 投影与删 manifest 后逐字段一致", () => {
+    // 落标形态构造：子文件锚（identity/子文件重建源）+ markBatchFinalized 落标
+    //（batchFinalized entry + manifest 同步落盘——批闭合 flush 的真实写面）。
     const childFile = writeChildSessionFile("sa-pm", "p-manifest task");
-    seedRoundTerminalEntries("sa-pm", childFile, "p-manifest full result", "prov/pm-m", "sync");
-    const recovery = makeRecoveryService(makeAssertPi()); // initSession：orphan 判定 + sidecar 真实落盘
-    const spy = spyNotifier(recovery);
-    await recovery.recoverSyncCollectBatch(); // E1 豁免补发：manifest 屏障（先于写账）→ 落标
-    expect(spy.notifyBatch).toHaveBeenCalledTimes(1);
+    const store = new RecordStore(
+      getSubagentSessionDir(agentDir, agentDir),
+      new ManifestStore(getSubagentRecordsDir(agentDir, agentDir)),
+      makeWritingPi(mainFile),
+      getSubagentRecordsDir(agentDir, agentDir),
+    );
+    // 种子：末条轮终 idle + 锚（子文件在）→ 落标（原语内部序：manifest 落盘完成先于
+    // entry）。[modeless 波3] E1 已退役，落标数据源直接喂 record（与 flush 路径
+    // getFullRecord 重建产物同构——本用例断言面在 manifest 存在性不变量，不在重建链）。
+    void store.markBatchFinalized([
+      memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" }),
+    ]);
     const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-pm.json");
-    expect(fs.existsSync(manifestFile)).toBe(true); // 屏障：await 返回时必已落盘
+    expect(fs.existsSync(manifestFile)).toBe(true);
 
     // 模拟重启重建：全新 RecordStore + ManifestStore（内存缓存零残留），manifest 存在时
     const freshStore = () =>
@@ -1024,8 +588,7 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     const pm = withManifest.find((r) => r.id === "sa-pm");
     expect(pm).toBeDefined();
     // 投影来自子文件锚重建（[U3 / §3.2.4] 纠偏 idle + interrupted-by-restart，无
-    // sidecar 落盘），非 manifest（status="running" 下行投影）——closedReason 有无
-    // 仍是可辨差异位
+    // sidecar 落盘），非 manifest（status 下行投影）——closedReason 有无仍是可辨差异位
     expect(pm!.status).toBe("idle");
     expect(pm!.closedReason).toBeUndefined();
     expect(pm!.stopReason).toBe("interrupted-by-restart");
@@ -1038,78 +601,15 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
   });
 
   // ============================================================
-  // E1 恢复批语义修复（review round1 簇 B）：one-shot 成功成员崩溃时末条 entry 恒为
-  // running+resumable（SP-5 轮终形态）——syncRebuildToNotifyMember 直通 status 的旧
-  // 形态使补发记录仍是 running：批头只统计 closed 成员 → 全员成功的恢复批显示
-  // 「0 finished」，条目文案落「finished a round」（对话轮次语义），且 rebuildEntryRecord
-  // 不投影 patchFile → worktree 改动的 git-apply 回收指针丢失。修复 = 对齐
-  // notify-host toNotifyRecord 映射（closed + outcome 物化 + patchFile 透传）+
-  // rebuildEntryRecord 补 patchFile 投影。
+  // S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标
   // ============================================================
 
-  it("E1 恢复批语义：one-shot 成功成员（轮终 idle 末条）补发记录为 closed 形态——批头计数正确 + patchFile 提示在场", async () => {
-    const patchPath = path.join(agentDir, "patches", "sa-ntf.patch");
-    // 崩溃前主文件末条序列：register → 轮终 idle + result 全文 + patchFile
-    //（worktree one-shot 成功成员 kill -9 后的真实末条形态，[U4] 翻边轮终写点）。
-    const store = makeSeedStore();
-    store.reportSubagentRecord(memberRecord({ id: "sa-ntf", collectMode: "sync", patchFile: patchPath }));
-    store.reportSubagentRecord(
-      memberRecord({
-        id: "sa-ntf",
-        collectMode: "sync",
-        status: "idle",
-        result: "idle round full result body",
-        endedAt: 2000,
-        patchFile: patchPath,
-      }),
-    );
-
-    const pi = makeAssertPi();
-    const recovery = makeRecoveryService(pi);
-
-    // 投影层断言：rebuildEntryRecord 补 patchFile 投影后，E1 扫描快照可见
-    //（修复前投影丢弃 → 补发记录无从携带 git-apply 指针）。
-    const scanned = (recovery as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
-    expect(scanned.find((r) => r.id === "sa-ntf")!.patchFile).toBe(patchPath);
-
-    // 真实 notifier 通路（不 spy——测试进程无 ledger/投递域装配 → 内核直发降级，
-    // pi.sendMessage 同步可捕获）：断言主 agent 实际消费的批通知内容。
-    await recovery.recoverSyncCollectBatch();
-    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-    const sent = pi.sendMessage.mock.calls[0]![0] as {
-      content: string;
-      details?: { items?: Array<Record<string, unknown>> };
-    };
-    // 批头计数：closed+completed 成员计入 finished（修复前 running 直通 → 0 finished）
-    expect(sent.content).toContain("Subagent batch completed: 1 finished, 0 failed, 0 cancelled.");
-    // 条目文案：completed 终态而非「finished a round」（对话轮次语义）
-    expect(sent.content).toContain("completed. Result:");
-    expect(sent.content).toContain("idle round full result body");
-    expect(sent.content).not.toContain("finished a round");
-    // patchFile 的 git-apply 回收指针在场（修复前投影缺失 → 提示整行丢失）
-    expect(sent.content).toContain(`git apply ${patchPath}`);
-    // 补发记录一等断言（details items = ledger/GUI 同源消费形态）：closed + outcome 物化
-    expect(sent.details?.items?.[0]).toMatchObject({
-      id: "sa-ntf",
-      status: "closed",
-      outcome: "completed",
-      patchFile: patchPath,
-    });
-
-    // 落标不受影响：批补发后统一补 batchFinalized
-    const marks = pi.appendEntry.mock.calls
-      .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
-      .map((c) => c[1] as Record<string, unknown>)
-      .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id)).toEqual(["sa-ntf"]);
-  });
-
-  it("S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标（防重启后 E1 异 hash 双投递）", async () => {
+  it("S11：flushBatch 中 getFullRecord miss 成员用缓冲快照兜底落标", async () => {
     // 成员 1：失败终态（archive 出内存）且不写子文件 → getFullRecord 双 miss
     //（内存已出 + 子文件缺失——子文件被 GC/删除的窗口形态）；
     // 成员 2：SP-5 成功回退（留内存）→ getFullRecord 内存命中（正常落标对照）。
     const fake = makeRecoveryFake();
-    // 写文件 pi：标记 entry 真实落盘主文件，E1 扫描通路（rebuildEntryRecord）可重解析
+    // 写文件 pi：标记 entry 真实落盘主文件，扫描通路（rebuildEntryRecord）可重解析
     const pi = makeWritingPi(mainFile);
     const service = makeRecoveryService(pi);
     const spy = spyNotifier(service);
@@ -1132,22 +632,89 @@ describe("sync collect recovery (U5 E1/E9) — 真实文件通路", () => {
     expect(batchIds).toEqual([h1.subagentId, h2.subagentId].sort());
 
     // 落标全员覆盖：miss 成员 h1 缓冲快照兜底 + full 成员 h2 正常落标
-    //（修复前 h1 被跳过 → 无标记 → 重启后 E1 重新收集该成员，以异成员集 hash
-    // 重新补发 → 同成员双投递）
+    //（修复前 h1 被跳过 → 无标记 → 批域排除判据失位）。
+    // [modeless 波3] 标记 entry 每成员可出现两笔（flush 落标 + 自动 close 归档透传
+    // ——archiveBatchMembers 把 batchFinalized 带进归档 entry，防 last-writer-wins
+    // 抹掉落标标记），按成员去重断言覆盖。
     const marks = pi.appendEntry.mock.calls
       .filter((c) => c[0] === SUBAGENT_RECORD_CUSTOM_TYPE)
       .map((c) => c[1] as Record<string, unknown>)
       .filter((d) => d.batchFinalized === true);
-    expect(marks.map((m) => m.id).sort()).toEqual([h1.subagentId, h2.subagentId].sort());
+    expect([...new Set(marks.map((m) => m.id))].sort()).toEqual([h1.subagentId, h2.subagentId].sort());
 
-    // 兜底标记 entry 经 E1 扫描通路可重解析且带标记（重启后候选排除判据就位）
+    // 兜底标记 entry 经扫描通路可重解析且带标记（批域排除判据就位）
     const scanned = (service as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
     const h1Last = scanned.find((r) => r.id === h1.subagentId);
     expect(h1Last).toBeDefined();
     expect(h1Last!.batchFinalized).toBe(true);
-    expect(h1Last!.collectMode).toBe("sync");
     // [U5] 失败轮 settle（markRoundIdle 落 idle，不终态化——
     // [two-state-convergence U4/D3] 翻边）——entry status 投影随之 idle
     expect(h1Last!.status).toBe("idle");
+  });
+
+  // ============================================================
+  // [modeless 波3] 屏障失败 warn 留痕（D6 #7a/SC-1，flush 路径驱动）
+  // ============================================================
+
+  it("屏障失败 warn 留痕（D6 #7a/SC-1）：manifest 同步写失败不阻断投递，warn 含成员 id", async () => {
+    // 直构 SyncCollectDomain（确定性单成员批 = 单次 writeAtomicFileSync 调用，
+    // mockImplementationOnce 恰好命中）：成员 route 入批 → 去抖窗口闭合 flush。
+    // 同步分支 try/catch 吞错 = 不阻断落标/写账投递（best-effort 与旧 allSettled 同源）。
+    const store = new RecordStore(
+      getSubagentSessionDir(agentDir, agentDir),
+      undefined,
+      makeWritingPi(mainFile),
+      getSubagentRecordsDir(agentDir, agentDir),
+    );
+    const notifyBatch = vi.fn(() => true);
+    const domain = new SyncCollectDomain({
+      getStore: () => store,
+      getNotifyHost: () => ({
+        toNotifyRecord: (record: { id: string }) => ({
+          id: record.id,
+          status: "closed" as const,
+          agent: "/agents/worker.md",
+          model: "prov/m1",
+          result: undefined,
+          error: undefined,
+          startedAt: 1000,
+          endedAt: 2000,
+        }),
+        notify: () => {},
+        notifyBatch,
+      }),
+      closeMembers: async () => {},
+      getSessionRootId: () => ROOT_SESSION,
+      getCollectSyncSection: () => undefined,
+    });
+    loggerMock.warn.mockClear(); // logger 模块级共享，计数从本用例起算
+    vi.mocked(writeAtomicFileSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    });
+
+    domain.collectCoordinator.registerMember("sa-bar-fail");
+    expect(
+      domain.collectCoordinator.route({
+        id: "sa-bar-fail",
+        agent: "/agents/worker.md",
+        model: "prov/m1",
+        startedAt: 1000,
+        endedAt: 2000,
+        result: "barrier result",
+      } as never),
+    ).toBe("sync-flushed");
+    // 去抖窗口到期 → flushBatch 闭包（屏障吞错 → 写账 → 落标 → close）
+    await until(() => notifyBatch.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // closeMembers 落标链排空
+
+    // best-effort 语义：写账照常推进（反查索引缺失只影响指针行反查，不构成写账失败）
+    expect(notifyBatch).toHaveBeenCalledTimes(1);
+    // D6 #7a 适配（U1 同步分支 warn 形态）：message 含 sync write failed 语义 +
+    // detail.id 定位成员。
+    const barrierWarns = loggerMock.warn.mock.calls.filter((c) =>
+      String(c[0]).startsWith("[subagents] batch-finalized manifest sync write failed"),
+    );
+    expect(barrierWarns).toHaveLength(1);
+    expect((barrierWarns[0]![1] as { detail?: { id?: string } }).detail?.id).toBe("sa-bar-fail");
   });
 });

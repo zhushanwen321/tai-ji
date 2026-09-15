@@ -234,12 +234,6 @@ export class SubagentService {
         reviveDisposed: () => {
           this._disposed = false;
         },
-        // [C-2 显式回调 → R2 已对接] #5 SyncCollect 的 settledRescanState 复活重置改指
-        // SyncCollectDomain 显式接口（resetSettledRescan）——聚合间零直写（G2）。晚绑定
-        // 闭包构造期零求值，syncCollect 后置构造安全（R1 打样时预留的对接点）。
-        resetSettledRescan: () => {
-          this.syncCollect.resetSettledRescan();
-        },
         getStore: () => this.store,
         getNotifyHost: () => this.notifyHost,
         // [跨域编排回调] initSession 复活后编排（R3/R4 域方法；抽取后改指聚合显式接口）。
@@ -291,9 +285,11 @@ export class SubagentService {
     this.syncCollect = new SyncCollectDomain({
       getStore: () => this.store,
       getNotifyHost: () => this.notifyHost,
-      getPi: () => this.pi,
+      // [modeless 波3] 批闭合自动 close（flush 投递后归档成员——一次性计算单元终态
+      // 收口，无续聊留守；归档编排本体在 RecordLifecycle.archiveBatchMembers，静默
+      // 变体：不发「已收起」提示，批通知即成员终态通知）。
+      closeMembers: (ids) => this.recordLifecycle.archiveBatchMembers(ids),
       getSessionRootId: () => this.sessionRootId,
-      getMainSessionFile: () => this.mainSessionFile,
       getCollectSyncSection: () => this.modelService.getGlobalConfig().collectSync,
     });
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
@@ -533,11 +529,21 @@ export class SubagentService {
     return this.syncCollect.collectCoordinator;
   }
 
-  /** [E1] sync 批崩溃恢复（index.ts session_start 恢复编排处调用）。本体已迁
-   *  SyncCollectDomain（扫描/补发/落标/settled 重扫时序逐行等价随迁）；壳纯转发，
-   *  对外签名不变。 */
+  /** [modeless 波3·deprecated accepted-no-op] sync 批崩溃恢复（E1）已随 collectMode
+   *  记录态消亡退役：批协调状态 = 协调器内存登记态（executeViaEngine 派发登记），
+   *  随 session 生命周期消亡，崩溃后批次协调不恢复。成员 record 本体仍健全——已
+   *  settle 成员 idle+result（批通知已投递/缓冲随 dispose 转 async 兑底），崩溃在途
+   *  成员由孤儿恢复纠偏 idle+interrupted。调用方（subagent-workflow session-lifecycle
+   *  的 session_start 编排）保留 no-op 调用至波 5 清理。 */
   recoverSyncCollectBatch(): Promise<void> {
-    return this.syncCollect.recoverSyncCollectBatch();
+    return Promise.resolve();
+  }
+
+  /** [modeless 波3] 当前未闭合批的 sync 成员数（pendingSyncCount 口径，start 响应
+   *  回显段消费）：协调器登记态计数（executeViaEngine 派发时点登记 + flush 离场；
+   *  含本条——登记先于 start 响应构造）。 */
+  pendingSyncMemberCount(): number {
+    return this.syncCollect.memberCount;
   }
 
   /** collectSync.default 当前生效值（startHandler 缺省 collect 解析用；本体与配置读取
@@ -871,10 +877,6 @@ export class SubagentService {
     if (this._disposed) return;
     this._disposed = true;
     this.stopGcTimer();
-    // [v2 D4/C-1] settled 重扫 handler 惰化：原直改聚合内部态 settledRescanState.disposed
-    // （r0-inventory 清单① C-1 跨聚合边，R2 兑现收敛为显式接口）——时序契约注释随迁
-    // SyncCollectDomain.lazyDispose（trailing 边沿不扫描防「已落标未写账」的永久丢失）。
-    this.syncCollect.lazyDispose();
     // [dispose stub] 第一时间换 stub，防 trailing ui_request 调到 stale handler 闭包
     // （仍持有 disposed session 的 ctx）产生误导性 console.error。stub 干净降级为 cancelled。
     // 必须在 emit/abort 之前——这些步骤可能同步触发 trailing pump。

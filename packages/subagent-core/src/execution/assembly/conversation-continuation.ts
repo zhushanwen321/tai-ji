@@ -137,6 +137,10 @@ export interface ContinuationHost {
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
   /** 成功通知路由（collectCoordinator.route——正文权威 = record.result）。 */
   routeRecord(record: ExecutionRecord): void;
+  /** [modeless 波3] 批成员资格查询（collectCoordinator.isMember——失败轮分流判据：
+   *  成员失败入批（批头 failed 计数）/ async 失败单发。route 自带通知副作用，
+   *  不可作谓词使用）。 */
+  isCollectMember(recordId: string): boolean;
   /** 失败通知直投（独立构造载荷——不经 route，正文不读 record.result）。 */
   notifyRecord(record: BgNotifyRecord): void;
   /** 红线②派发前兜底：镜像在途子进程活着 → kill 等退出（引擎存活期状态错配）。 */
@@ -726,11 +730,12 @@ export class ConversationContinuation {
     }
     // dedup key = id:epoch:round（notifier notifyId 构造段口径；epoch=0 恒旧格式
     // record:round）：round 已随簿记 +1，失败轮通知与上一轮成功通知天然分离（60s 窗不吞）。
-    // [modeless 波1·collectMode 不动] sync 成员经 route 进攒批缓冲（批语义保持：
+    // [modeless 波3·成员资格判定] sync 成员经 route 进攒批缓冲（批语义保持：
     // 失败成员同样计入批头 failed 计数与一次唤醒；载荷经 toNotifyRecord 投影——
-    // markRoundIdle failed 已写 record.error，outcome 派生正确）。async 成员保持
+    // markRoundIdle failed 已写 record.error，outcome 派生正确），成员资格由协调器
+    // 登记集承载（isCollectMember 查询——collectMode 已出 record）。async 成员保持
     // 失败单发（独立载荷 + 恢复指引，可达性 [T2-③/LC-1]）。
-    if (record.collectMode === "sync") {
+    if (this.host.isCollectMember(record.id)) {
       this.host.routeRecord(record);
       if (record.closeAfterRound === true) {
         await this.host.archiveAfterClosingRound(record);
