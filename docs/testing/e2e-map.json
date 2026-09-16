@@ -32,14 +32,38 @@
       ],
       "layer": "L1",
       "assets": [
-        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
-        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
-        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
-        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
-        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
-        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/global-setup.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/state-tearing.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/v6-shell-baseline.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/file-tree.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/update-cleanup.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/search-modal.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/failure-paths.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/global-setup.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app.ts"
+        }
       ],
       "trigger": "always",
       "serial": false,
@@ -57,9 +81,18 @@
       ],
       "layer": "L1",
       "assets": [
-        { "kind": "spec", "ref": "e2e/visual/shell.spec.ts" },
-        { "kind": "spec", "ref": "e2e/visual/composer.spec.ts" },
-        { "kind": "harness", "ref": "e2e/visual/fixtures/visual-server.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/visual/shell.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/visual/composer.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/visual/fixtures/visual-server.ts"
+        }
       ],
       "trigger": "always",
       "serial": false,
@@ -89,17 +122,50 @@
       ],
       "layer": "L2",
       "assets": [
-        { "kind": "spec", "ref": "e2e/workspace.spec.ts" },
-        { "kind": "spec", "ref": "e2e/composer.spec.ts" },
-        { "kind": "spec", "ref": "e2e/failure-paths.spec.ts" },
-        { "kind": "spec", "ref": "e2e/file-tree.spec.ts" },
-        { "kind": "spec", "ref": "e2e/gui-components.spec.ts" },
-        { "kind": "spec", "ref": "e2e/search-modal.spec.ts" },
-        { "kind": "spec", "ref": "e2e/state-tearing.spec.ts" },
-        { "kind": "spec", "ref": "e2e/update-cleanup.spec.ts" },
-        { "kind": "spec", "ref": "e2e/v6-shell-baseline.spec.ts" },
-        { "kind": "spec", "ref": "e2e/workflow-sidebar-sync.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/workspace.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/composer.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/failure-paths.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/file-tree.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/gui-components.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/search-modal.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/state-tearing.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/update-cleanup.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/v6-shell-baseline.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/workflow-sidebar-sync.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -123,11 +189,26 @@
       ],
       "layer": "L2",
       "assets": [
-        { "kind": "spec", "ref": "e2e/workspace-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/ask-user-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/tasks-drawer-real.spec.ts" },
-        { "kind": "spec", "ref": "e2e/workflow-thinkinglevel-real.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/launch-app-real.ts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/workspace-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/ask-user-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/tasks-drawer-real.spec.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "e2e/workflow-thinkinglevel-real.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/launch-app-real.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
@@ -147,25 +228,82 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "packages/runtime/src/__tests__/equivalence/pi-fixture.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/relay-live-reload.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts" },
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts" }
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-fixture.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/attach-lifecycle.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/broadcast-getstate.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/chaos.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/completion-backflow-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/d1-usage-protocol-invariants.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/live-reload.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/relay-live-reload.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/scalar-state-invalidation.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/send-queue-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-e2e-fixture-unit.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/thinking-level-effective-e2e.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/usage-queue-commands-invalidation.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w10-usage-switchmodel-race.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w12-owner-snapshot-publish.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/w18-record-entry-chaos.test.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -183,7 +321,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -200,7 +341,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/tool-call-index.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -217,7 +361,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "spec", "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts" }
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": false,
@@ -237,8 +384,14 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "spec", "ref": "e2e/models-json-sanitize-real.spec.ts" },
-        { "kind": "harness", "ref": "e2e/fixtures/sanitize-providers.mts" }
+        {
+          "kind": "spec",
+          "ref": "e2e/models-json-sanitize-real.spec.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/sanitize-providers.mts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
@@ -255,14 +408,38 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/rename-session/e2e/harness.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a1.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a3.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a4.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a5.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a6.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a7.mjs" },
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-all.mjs" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/rename-session/e2e/harness.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a1.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a3.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a4.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a5.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a6.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a7.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-all.mjs"
+        }
       ],
       "trigger": "on-diff",
       "serial": false,
@@ -280,7 +457,10 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "script", "ref": "extensions/universal/rename-session/e2e/run-a2.mjs" }
+        {
+          "kind": "script",
+          "ref": "extensions/universal/rename-session/e2e/run-a2.mjs"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
@@ -298,7 +478,10 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "script", "ref": "scripts/verify-scheduler-e2e.cjs" }
+        {
+          "kind": "script",
+          "ref": "scripts/verify-scheduler-e2e.cjs"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
@@ -318,15 +501,21 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" },
-        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链——pi -ne RPC stdin JSONL 剧本随阶段 5 A1 环境落建后回填可执行命令）",
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A1）bash .tmp/dev-flow/subagents-batch-tool-fanout.acceptance/s1-basic-chain.sh <worktree>（一次性剧本，环境三要素内嵌：TAIJI_AGENT_ENGINE_ROOTS=<worktree>/packages，pi 进程 cwd=<worktree> 根，模板副本布 .pi/workflows/（含 _shared））",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板 / core 执行链（orchestration + execution/service）改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok"
+      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板 / core 执行链（orchestration + execution/service）改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok； 真机已过：status=ok/results=2/taskIndex 0,1/计数正确/wf-done 落账。"
     },
     {
       "id": "E2E-BATCH-02",
@@ -336,7 +525,10 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
@@ -355,15 +547,21 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" },
-        { "kind": "harness", "ref": "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts" }
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链——剧本随阶段 5 A1 同环境落建后回填可执行命令）",
+      "run": "（开发阶段手测链，已执行 4/5 PASS 2026-09-17 A3；④缺陷已修 commit 1543b39c1）a3-s3-partial.sh + a3b（错配）+ a3-reverify.sh（④回归）同目录同环境",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）； ④冷复活绕过守卫缺陷 = 本场景真机产出，修复含单测锁定。"
     },
     {
       "id": "E2E-BATCH-04",
@@ -376,15 +574,21 @@
       ],
       "layer": "L3",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" },
-        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链——与 S1 同剧本环境派发后立即 abort 分支，落建后回填可执行命令）",
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A4）a4-s4-abort.sh（FIFO 派发后立即 abort 分支 + ps 孤儿核对）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），孤儿进程 ps 核对为通过条件之一（设计 S4）"
+      "note": "R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），孤儿进程 ps 核对为通过条件之一（设计 S4）； 真机已过：done(aborted) 通知照达 + 零孤儿进程。"
     },
     {
       "id": "E2E-BATCH-05",
@@ -396,15 +600,21 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts" },
-        { "kind": "harness", "ref": "packages/subagent-core/src/execution/persistence/record-store-rebuild.ts" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/persistence/record-store-rebuild.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链——真机带 collect 字段的存量式 subagent start + 含 batchFinalized entry 的旧 session 打开渲染；剧本随阶段 5 A5 落建后回填）",
+      "run": "（开发阶段手测链，已执行 PASS 2026-09-17 A5）a5-s5-collect-retire.sh（带 collect:'sync' 的存量式 start + 事件流批副作用断言；旧 session 可读由 u6 mock 轨 24/24 覆盖）",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：触发面 = collect 退役相关面（schema 退役留痕 / 存量 entry 读侧容忍投影 / session-reader 反查）改动。真机确认项 = pi 静默放行结论（typebox 无 additionalProperties——S5 期门实测：未知字段静默放行且不剥离，退役后语义等价原 async 缺省路径，迁移说明见 docs/CONTEXT.md fan-out 词条）；读侧容忍已有 mock 轨守卫（batch-finalized / rebuild-indexes / permanent-session-legacy-compat 改造后用例断言「存量 entry 可读」），真机轨验旧 session 打开渲染不炸"
+      "note": "R2 态：触发面 = collect 退役相关面（schema 退役留痕 / 存量 entry 读侧容忍投影 / session-reader 反查）改动。真机确认项 = pi 静默放行结论（typebox 无 additionalProperties——S5 期门实测：未知字段静默放行且不剥离，退役后语义等价原 async 缺省路径，迁移说明见 docs/CONTEXT.md fan-out 词条）；读侧容忍已有 mock 轨守卫（batch-finalized / rebuild-indexes / permanent-session-legacy-compat 改造后用例断言「存量 entry 可读」），真机轨验旧 session 打开渲染不炸； 静默放行分支真机闭合（u4 typebox 证据链一致）。"
     },
     {
       "id": "E2E-BATCH-06",
@@ -415,15 +625,21 @@
       ],
       "layer": "L2.5",
       "assets": [
-        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/helpers.ts" },
-        { "kind": "harness", "ref": "packages/subagent-core/src/execution/notify/notify-ledger.ts" }
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/interface/helpers.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/notify/notify-ledger.ts"
+        }
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（A6 断连重放剧本未落建前不执行、无验收脚本——账本化（u9）已合入，随阶段 5 环境落建后翻 R2 态回填可执行命令）",
+      "run": "（已执行 PASS 2026-09-17 A6）dev 环境：GUI 批量派发 → kill 成员 relay 代理（PID 精确）→ kill-on-disconnect 连坐 → 断言会话文件 ledger/ack/送达各恰 1 条（ground truth = session jsonl + runtime log）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R3 占位：账本化（u9，commit 12f783120）已合入——完整激活与阶段 5 绑定：A6 断连重放剧本随阶段 5 环境落建后翻 R2 态回填可执行命令，此前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）"
+      "note": "R3 占位：账本化（u9，commit 12f783120）已合入——完整激活与阶段 5 绑定：A6 断连重放剧本随阶段 5 环境落建后翻 R2 态回填可执行命令，此前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）； 已执行：done(failed) 全员死亡形态通知照达 + wf-done 落账/ack 销账恰一次。"
     }
   ]
 }
