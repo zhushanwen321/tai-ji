@@ -3,7 +3,7 @@
  *
  * 覆盖场景：
  * - RPC 模式 create/complete/report_blocked → details 无 __gui__ 字段（状态展示改由
- *   handle* 内 updateWidget 经 guiSetWidget 推送 M17 对话流 widget 面板）
+ *   handle* 内 updateWidget 经 guiSetWidget 推送 composer 任务托盘的协议 widget 区）
  * - RPC 模式 + session.state = null → 前置 handler throw（分支不可达）
  * - 非 RPC 模式（tui/json/print）→ details 同样无 __gui__，content 文本正常
  *

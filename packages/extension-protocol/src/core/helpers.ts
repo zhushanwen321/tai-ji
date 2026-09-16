@@ -29,7 +29,7 @@ export function isGuiCapable(ctx: GuiContext): boolean {
 }
 
 /**
- * 构造 GuiRenderResult。当前主用途是 guiSetWidget 的载荷（M17 对话流 widget 面板）；
+ * 构造 GuiRenderResult。当前主用途是 guiSetWidget 的载荷（composer 任务托盘的协议 widget 区）；
  * details.__gui__（tool result 通道）为遗留兼容路径，todo/goal 已不再使用。
  * stripUndefined 确保序列化不含 undefined（JSON.stringify 会丢弃 undefined 字段）。
  */
@@ -123,11 +123,12 @@ export function setWidgetDual(
 // ── widget icon paths 白名单校验（自定义形状的防御单点，宿主 fallback 消费）──
 
 /**
- * d 语法白名单字符集：SVG path 命令字母（MLCQAZHV 大小写）+ 数字 + 空格/逗号/
- * 小数点/负号。刻意不含 e/E 等其余任何字符——白名单外即拒，故无注入面（渲染侧
- * 也只用 DOM 属性赋值，无 innerHTML）。
+ * d 语法白名单字符集：SVG path 命令字母（MLCQAZHVST 大小写——含 S/s/T/t 平滑曲线
+ * 命令，@lucide/vue 全量图标约 1% 的 d 串用到）+ 数字 + 空格/逗号/小数点/负号。
+ * 刻意不含 e/E 等其余任何字符——白名单外即拒，故无注入面（渲染侧也只用 DOM 属性
+ * 赋值，无 innerHTML）。
  */
-const ICON_PATH_D_ALLOWED_RE = /^[MLCQAZHVmlcqazhv0-9 ,.\-]+$/
+const ICON_PATH_D_ALLOWED_RE = /^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$/
 const ICON_PATHS_MAX_ENTRIES = 8
 const ICON_PATH_MAX_CHARS = 512
 const ICON_PATHS_MAX_TOTAL_CHARS = 2048

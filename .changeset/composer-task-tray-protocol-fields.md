@@ -20,7 +20,8 @@ Composer task tray protocol fields (all additive, backward compatible):
   length mismatch degrades to display-only plus a warn.
 - New `validateWidgetIconPaths` helper (`WidgetIconPathsValidation` /
   `WidgetIconPathsRejection`): whitelist validation for custom icon path
-  `d` strings (charset `^[MLCQAZHVmlcqazhv0-9 ,.\-]+$`, at most 8 paths,
-  at most 512 chars per path, at most 2048 chars in total). Never throws —
-  it returns the validated paths copy or a rejection reason so the host can
-  fall back to a built-in icon and warn.
+  `d` strings (charset `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$` — S/s/T/t smooth
+  curve commands included so ~1% of real-world shapes are not rejected; at
+  most 8 paths, at most 512 chars per path, at most 2048 chars in total).
+  Never throws — it returns the validated paths copy or a rejection reason
+  so the host can fall back to a built-in icon and warn.

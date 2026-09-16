@@ -108,7 +108,7 @@ export interface GuiRenderResult {
   v: typeof PROTOCOL_VERSION
   component: GuiComponent
   /**
-   * widget 宿主元数据（M17 对话流 widget 面板消费）：标题/状态点/进度计数由
+   * widget 宿主元数据（composer 任务托盘的协议 widget 区消费）：标题/状态点/进度计数由
    * 宿主壳层统一渲染成单一 head（含折叠交互），extension 不再用 card 原语
    * 的 header 表达这些（壳层 head 与 payload card header 双头重复的根因修复）。
    * 可选：不发时宿主 fallback 到 viewId 标题、无状态点/进度。

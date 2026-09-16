@@ -314,6 +314,18 @@ describe('validateWidgetIconPaths（自定义 icon paths 白名单，宿主 fall
       expect(validateWidgetIconPaths([pathOfChars(512)]).valid).toBe(true)
       expect(validateWidgetIconPaths(Array.from({ length: 4 }, () => pathOfChars(512))).valid).toBe(true)
     })
+
+    it('S/s/T/t 平滑曲线命令通过（@lucide/vue 全量 5869 条 d 串中 58 条用到；旧白名单误拒）', () => {
+      const paths = [
+        // 真实 lucide 形状（rocket.mjs / waves-horizontal.mjs）
+        'M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5',
+        'M2 12q2.5 2 5 0t5 0 5 0 5 0',
+        // 大写 S/T（平滑三次/二次曲线续段）
+        'M4 20S8 4 12 4',
+        'M4 20Q6 4 8 4T12 4',
+      ]
+      expect(validateWidgetIconPaths(paths)).toEqual({ valid: true, paths })
+    })
   })
 
   describe('非法字符拒绝', () => {
@@ -324,6 +336,7 @@ describe('validateWidgetIconPaths（自定义 icon paths 白名单，宿主 fall
       ['换行', 'M0 0\nL1 1'],
       ['中文', 'M0 0中文'],
       ['分号分隔（非白名单标点）', 'M0 0;L1 1'],
+      ['白名单未整体放开（g 非 d 命令字母）', 'M0 0g5 5'],
     ])('%s → illegal-char', (_label, path) => {
       expect(validateWidgetIconPaths([path])).toEqual({ valid: false, reason: 'illegal-char' })
     })

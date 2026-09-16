@@ -6,7 +6,7 @@
  *
  * 与 projection/widget.ts 的分工：
  * - widget.ts：TUI 模式渲染（ANSI 字符串，经 ctx.ui.setWidget）
- * - gui.ts：RPC 模式渲染（结构化 GuiComponent 描述符，经 guiSetWidget 推送给 M17 对话流 widget 面板）
+ * - gui.ts：RPC 模式渲染（结构化 GuiComponent 描述符，经 guiSetWidget 推送给 composer 任务托盘的协议 widget 区）
  *
  * 预算阈值经 engine/budget.ts 的 getBudgetSeverity 单源化（H4）：
  * buildGoalGui（percent→severity）与 widget.getBudgetColor（percent→color）共用阈值。

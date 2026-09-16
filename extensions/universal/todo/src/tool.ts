@@ -227,7 +227,7 @@ function executeTodoAction(
 		nextId: state.nextId,
 	};
 	// 状态展示不再进 tool result（GUI 渲染字段已移除）：GUI 走 refreshDisplay 的
-	// guiSetWidget 推送（M17 widget 面板），TUI 走原生文本渲染（contentText 已在 content 中）。
+	// guiSetWidget 推送（composer 任务托盘的协议 widget 区），TUI 走原生文本渲染（contentText 已在 content 中）。
 	return {
 		content: [{ type: "text" as const, text: contentText }],
 		details,

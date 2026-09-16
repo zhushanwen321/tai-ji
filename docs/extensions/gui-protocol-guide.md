@@ -105,7 +105,7 @@ export const myTool: ToolDefinition = {
 | 入口点 | 适配方式 | 双向交互 |
 |---|---|---|
 | renderResult（tool 结果） | `details.__gui__` | 否 |
-| setWidget（持久面板） | `guiSetWidget(ctx, key, component)` | 否 |
+| setWidget（持久面板） | `setWidgetDual(ctx, key, { gui, text })` | 否 |
 | setStatus（状态栏） | pi 原生，无需改造 | 否 |
 | ctx.ui.custom（交互式） | `askUserInteract(ctx, questions)` | 是 |
 | registerMessageRenderer（消息卡片） | `message.details.__gui__` | 否 |
@@ -121,28 +121,33 @@ export const myTool: ToolDefinition = {
 
 ### 3.2 setWidget：持久化面板
 
-Widget 是 editor 上下方持续存在的面板（如任务列表）。RPC 模式下 `ctx.ui.setWidget` 的 factory 参数被丢弃，`guiSetWidget()` helper 把 GuiComponent 编码进 `string[]`（NUL 标记 JSON），runtime 解码为结构化 WS 帧。
+Widget 是常驻面板（如任务列表）；GUI 下渲染到 **composer 任务托盘的协议 widget 区**，按 widgetKey 一行一个 icon 条目（`meta` 驱动 icon/badge/状态色），条目面板内渲染组件树。RPC 模式下 `ctx.ui.setWidget` 的 factory 参数被丢弃、只吃 `string[]`，所以协议 helper 把 `GuiRenderResult` 编码进单行 `string[]`（NUL 标记 JSON），runtime 解码为结构化 WS 帧。
+
+**双模唯一入口 = `setWidgetDual(ctx, key, { gui, text } | undefined)`**：内部按 `isGuiCapable(ctx)` 分派两臂——RPC 走 marker 编码的 GUI 臂，TUI/json/print 把 `text` 原样推给 pi 原生 widget；`undefined` 清屏与模式无关。**不要自己写 `ctx.mode` 分支，也不要单独调 `guiSetWidget`**（见下方注意事项）。
 
 ```typescript
-import { guiSetWidget, guiComponent, type GuiContext } from '@zhushanwen/extension-protocol'
+import {
+  setWidgetDual, guiResult, guiComponent, type GuiContext,
+} from '@zhushanwen/extension-protocol'
 
 // 在 tool execute 或 event handler 中：
 async execute(toolCallId, params, signal, onUpdate, ctx) {
   const tasks = await getTasks()
 
-  // ★ RPC 模式：编码 GuiComponent 进 string[]（用通用原语组合表达任务列表）
-  guiSetWidget(ctx as GuiContext, 'my-widget', guiComponent('list-tree', {
-    items: tasks.map(t => ({
-      label: t.text,
-      icon: t.done ? 'check' : 'circle',
-      status: t.done ? 'done' : 'running',
-    })),
-  }))
-
-  // TUI 模式：guiSetWidget 无操作，需自行调原生 ctx.ui.setWidget
-  if (ctx.mode === 'tui') {
-    ctx.ui.setWidget('my-widget', new MyWidgetComponent(tasks))
-  }
+  // ★ 双模一次调用：gui 臂走 GUI 托盘，text 臂走 pi 原生面板
+  setWidgetDual(ctx as GuiContext, 'my-widget', {
+    gui: guiResult(
+      guiComponent('list-tree', {
+        items: tasks.map(t => ({
+          label: t.text,
+          status: t.done ? 'done' : 'running',
+        })),
+      }),
+      // meta 可选：head（标题/状态点/进度）+ 托盘 icon/badge（见协议权威文档 §3.5）
+      { title: 'Tasks', status: 'running', badge: String(tasks.filter(t => !t.done).length) },
+    ),
+    text: renderWidgetLines(tasks),   // TUI/json/print：pi 原生渲染的文本行
+  })
 
   return { content: [{ type: 'text', text: 'Widget updated' }], details: {} }
 }
@@ -151,13 +156,13 @@ async execute(toolCallId, params, signal, onUpdate, ctx) {
 **清除 widget**：
 
 ```typescript
-guiSetWidget(ctx as GuiContext, 'my-widget', undefined)
+setWidgetDual(ctx as GuiContext, 'my-widget', undefined)   // 模式无关；托盘 icon 条目随之消失
 ```
 
 **注意事项**：
-- TUI 模式下 `guiSetWidget()` 是 no-op，extension 必须自行调原生 `ctx.ui.setWidget` 传 Component factory
+- ⚠️ **`guiSetWidget()` 不是 no-op，而是没有 mode 守卫**——它只查 `ctx.ui?.setWidget` 是否存在。TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式分派只在 `setWidgetDual` 内部（单点），extension 不要自行复写 `isGuiCapable` 判定；「no-op」只属于「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 - 不需要手动拼接 NUL 标记或 JSON.stringify——helper 已封装
-- 前端通过 `extension:widgetGui` WS 消息接收，路由到对应 widgetKey 的面板
+- 前端通过 `extension:widgetGui` WS 消息接收（`ViewHostStore` per-session 缓存）→ composer 任务托盘的 icon 条目/面板；推 `undefined` = invalidate = 条目消失
 
 ### 3.3 setStatus：状态栏
 
@@ -266,18 +271,19 @@ async onMessage(msg, ctx) {
 
 ## 4. GuiComponent 类型速查
 
-8 个内置类型，全部是结构性通用原语（完整类型定义与 props 契约见协议权威文档 §3）。当前前端渲染状态随类型标注。
+8 个布局/文本原语 + `custom` 逃生口，全部是结构性通用原语（完整类型定义与 props 契约见协议权威文档 §3）。前端渲染状态随类型标注。
 
 | 类型 | 用途 | 关键 props | 渲染状态 |
 |---|---|---|---|
 | `ansi-text` | ANSI 文本兜底 | `lines: string[]` | 已实现（ansi_up，XSS 安全） |
-| `card` | 卡片容器 | `variant?` / `header?` / `body[]` | P2 待实现 |
-| `stats-line` | 统计行 | `items: { label?, value, severity?, icon? }[]` | P2 待实现 |
-| `progress-bar` | 进度条 | `label?` / `current` / `total` / `unit?` / `severity?` | P2 待实现 |
-| `list-tree` | 列表树 | `items: { label, icon?, status?, depth?, children? }[]` | P2 待实现 |
-| `columns` | 双列网格 | `children[]` / `ratios?` | P2 待实现 |
-| `tab-bar` | 标签栏 | `tabs: { label, active?, status? }[]` / `sections?: GuiComponent[][]`（与 `tabs` 等长的分段子树容器，宿主渲染 active 段并本地持有切换态） | P2 待实现 |
-| `custom` | 自定义逃生口 | `component`（注册名）/ `props` | P2 待实现 |
+| `card` | 卡片容器 | `variant?` / `header?` / `body[]` | 已实现 |
+| `stats-line` | 统计行 | `items: { label?, value, severity?, icon? }[]` | 已实现 |
+| `progress-bar` | 进度条 | `label?` / `current` / `total` / `unit?` / `severity?` | 已实现 |
+| `list-tree` | 列表树 | `items: { label, icon?, status?, depth?, children? }[]` / `numbered?`（行首弱化序号） | 已实现 |
+| `group` | 垂直组合容器（无视觉样式） | `children: GuiComponent[]` | 已实现 |
+| `columns` | 双列网格 | `children[]` / `ratios?` | 已实现 |
+| `tab-bar` | 标签栏 | `tabs: { label, active?, status? }[]` / `sections?: GuiComponent[][]`（与 `tabs` 等长的分段子树容器） | 已实现（容器化：`sections` 与 `tabs` 等长时渲染 `tabs[active]` 的子树，active 归宿主本地持有、后续推送不重置；长度不等或缺渲染器上下文时退化为纯展示 + warn） |
+| `custom` | 自定义逃生口 | `component`（注册名）/ `props` | 注册表机制已实现（仅内置 extension 编译期注册；未注册名降级 JSON 文本） |
 
 `list-tree` 的 `icon` 取值：`'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pause' | 'branch'`；`status` 取值：`'running' | 'done' | 'failed'`。
 
@@ -294,9 +300,10 @@ async onMessage(msg, ctx) {
 | Helper | 用途 | 关键行为 |
 |---|---|---|
 | `isGuiCapable(ctx)` | 检测 RPC 模式 | `GuiContext` 是结构化子类型（零 pi SDK 依赖），pi ctx 天然满足 |
-| `guiResult(component)` | 构造 `details.__gui__` 值 | 返回 `{ v: 1, component }`；递归删除 undefined 字段 |
+| `guiResult(component, meta?)` | 构造 `details.__gui__` / widget 载荷值 | 返回 `{ v: 1, component, meta? }`；递归删除 undefined 字段 |
 | `guiComponent(type, props)` | 构造组件 | 类型参数约束 props 形状 |
-| `guiSetWidget(ctx, key, component)` | 设置/清除 widget | RPC 编码 NUL 标记 JSON；TUI no-op；传 `undefined` 清除 |
+| `setWidgetDual(ctx, key, { gui, text } \| undefined)` | 设置/清除 widget（双模唯一入口） | 内部做 `isGuiCapable` 分派：RPC 编码 NUL 标记 JSON、TUI/json/print 推原生文本行；`undefined` 清屏且模式无关 |
+| `guiSetWidget(ctx, key, result \| undefined)` | 推送 GUI 臂（低层原语） | ⚠️ 无 mode 守卫：TUI/json/print 误调会把 marker 行推进原生 widget（乱码）；正常路径用 `setWidgetDual` |
 | `askUserInteract(ctx, questions, options?)` | 富交互问答 | 借 select 通道 + marker；取消返回 `null`；TUI 抛错 |
 | `getAskUserAnswer / getAskUserOther / getAskUserComment` | 答案解析 | 多选自动 `JSON.parse`；Other/Comment 读 `${header}__*` key |
 | `extractGui(details)` | 提取 `__gui__`（带版本校验） | 前端消费侧用，extension 一般不需要 |
@@ -305,7 +312,7 @@ async onMessage(msg, ctx) {
 
 ## 6. 完整迁移示例：任务列表 extension 改造
 
-用通用原语 `list-tree` + `card` 组合表达任务列表，不依赖专属组件类型。
+用通用原语 `list-tree` + `card` 组合表达任务列表，不依赖专属组件类型（示意组合；pi-todo 实装用 `tab-bar` + `sections`，见协议权威文档 §4.3）。
 
 ### 改造前（TUI-only）
 
@@ -338,7 +345,7 @@ import {
   isGuiCapable,
   guiResult,
   guiComponent,
-  guiSetWidget,
+  setWidgetDual,
   type GuiContext,
 } from '@zhushanwen/extension-protocol'
 
@@ -364,18 +371,19 @@ export const todoTool: ToolDefinition = {
     const doneCount = tasks.filter(t => t.status === 'completed').length
 
     // ── Widget（持久面板）──
-    if (isGuiCapable(guiCtx)) {
-      // RPC 模式：用 list-tree + card 组合表达任务列表
-      guiSetWidget(guiCtx, 'todo', guiComponent('card', {
-        header: `任务 (${doneCount}/${tasks.length})`,
-        body: [
-          guiComponent('list-tree', { items: toTreeItems(tasks) }),
-        ],
-      }))
-    } else if (ctx.ui?.setWidget) {
-      // TUI 模式：原生 Component
-      ctx.ui.setWidget('todo', new TodoWidget(tasks))
-    }
+    // 双模一次调用：gui 臂走 GUI 托盘（marker 通道），text 臂走 pi 原生面板
+    setWidgetDual(guiCtx, 'todo', {
+      gui: guiResult(
+        guiComponent('card', {
+          header: `任务 (${doneCount}/${tasks.length})`,
+          body: [
+            guiComponent('list-tree', { items: toTreeItems(tasks) }),
+          ],
+        }),
+        { title: 'Todo', icon: 'list-checks', badge: String(tasks.length - doneCount) },
+      ),
+      text: renderWidgetLines(tasks),   // TUI/json/print：pi 原生文本行（示例函数）
+    })
 
     // ── Tool result（结果展示）──
     const details: Record<string, unknown> = { tasks }
@@ -431,21 +439,22 @@ return {
 }
 ```
 
-### 7.2 忘记 TUI 分支
+### 7.2 widget 的双模覆盖
 
-`guiSetWidget()` 在 TUI 模式下是 no-op。如果 extension 只调 `guiSetWidget()` 不调原生 `ctx.ui.setWidget()`，TUI 用户会丢失 widget。
+`setWidgetDual()` 是双模唯一入口——一次调用覆盖两种模式：`gui` 臂走 GUI 托盘（marker 通道），`text` 臂走 pi 原生面板。不需要再手写 `ctx.mode` 分支。
 
 ```typescript
-// 错误 —— TUI 模式下 widget 消失
-guiSetWidget(ctx, 'key', component)
+// 正确 —— 双模一次调用
+setWidgetDual(ctx as GuiContext, 'key', {
+  gui: guiResult(guiComponent('list-tree', { items }), { title: 'Tasks' }),
+  text: renderWidgetLines(items),
+})
 
-// 正确 —— 双模都覆盖
-if (isGuiCapable(ctx)) {
-  guiSetWidget(ctx, 'key', component)
-} else if (ctx.ui?.setWidget) {
-  ctx.ui.setWidget('key', new MyTuiComponent(...))
-}
+// 清屏（模式无关）——托盘 icon 条目随之消失
+setWidgetDual(ctx as GuiContext, 'key', undefined)
 ```
+
+**别拿 `guiSetWidget()` 当双模入口**：它是 `setWidgetDual` 内部的 GUI 臂原语，**没有 mode 守卫**（只查 `ctx.ui?.setWidget` 是否存在）——TUI/json/print 模式下调用会把 marker 编码行推进 pi 原生 widget，表现为乱码，**不是 no-op**。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 
 同理 `askUserInteract()` —— TUI 模式下它抛错。extension 需按 ctx.mode 分支，TUI 调 `ctx.ui.custom()`，RPC 调 `askUserInteract()`。
 
@@ -476,7 +485,7 @@ if (isGuiCapable(ctx)) {
 - [ ] `execute()` 内用 `isGuiCapable(ctx)` 做 RPC 分支判断
 - [ ] RPC 分支构造 `guiComponent(type, props)` + `guiResult()` 放进 `details.__gui__`
 - [ ] TUI 分支保留原有 `renderResult` / `ctx.ui.setWidget` / `ctx.ui.custom` 逻辑
-- [ ] widget 用 `guiSetWidget()`（RPC）+ 原生 `ctx.ui.setWidget`（TUI）双覆盖
+- [ ] widget 用 `setWidgetDual()` 双模一次调用（`gui` 臂 + `text` 臂），清屏传 `undefined`；不要单独调 `guiSetWidget()`（它是无 mode 守卫的 GUI 臂原语，TUI 误调会乱码）
 - [ ] 交互用 `askUserInteract()`（RPC 模式）/ `ctx.ui.custom()`（TUI 模式）按 ctx.mode 分支
 - [ ] `content` 只放 LLM 可见的摘要文本，结构化数据放 `details`
 - [ ] `details.__gui__` 放在 `result.details` 下，不在 `content` 内
