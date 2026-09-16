@@ -157,6 +157,11 @@ graph TD
 | D5 | u-tray-native | `TrayNativePanel.vue` script 403 行超 300 门禁，按登记制 `split-justified: built-in 三件面板同一语义域` 放行至 500 | 单元领地固定两文件；三件行渲染/行内操作/分桶状态同属一个面板语义域 | 接受（登记制 = 2026-09-11 用户裁决机制，已核实 checker 输出 INFO 非错误） |
 | D6 | u-tray-native | 桶标签两套词：bash 用「运行中」（进程域）/ subagent·workflow 用「进行中」（任务域） | 沿用 sidebar.ts 已登记域差异；设计 D2 亦分别写「运行中/已结束」与「进行中/已结束/已收起」 | 接受（裁决登记在两个 locale 文件头） |
 | D7 | u-tray-native | 面板 emits 为空（契约以文件头注释写明，非 defineEmits） | 面板自持数据源与动作：行内操作直连 store/RPC、行点击直连 drawer API，外壳无需回调 | 接受 |
+| D8 | u-tabbar | 渲染器接入不走 PrimitiveRouter 静态回退（inject-only + 新增 `no-renderer` 降级分支） | 避免 Router↔TabBar 二文件 import 环（container-registry 头注断环不变量；迁入注册表需改 3 个领地外文件） | 接受（环实测 0；应用路径均经 GuiComponentRenderer provide（已核 L42）；降级分支有用例；设计 §3.5 同 commit 新增该行） |
+| D9 | u-tabbar | warn 去重：同 (原因, tabs 数, sections 数) 形态只出声一次，恢复合法后重置 | 防每次推送刷屏（对齐 A7「无 warn 刷屏」精神） | 接受（设计 §3.5 行同 commit 扩写） |
+| D10 | u-tabbar | 探针 P5 降级路径（模块级 per-widgetKey active 缓存）未启用 | 行为测试证明经 GuiComponentRenderer setProps 推送后 DOM 元素同一（组件未重建）+ 本地选择保持 | 接受——**探针 P5 ⛔ 门关闭（无需降级）** |
+| D11 | u-tabbar | 新增 `data-testid="gui-tab-bar-section"` / class `tab-bar__section` | section 容器定位锚点（供后续 e2e / 组件断言） | 接受 |
+| D12 | u-tabbar | 「无 sections 与现状完全一致」精确口径 = 元素/class/属性/交互一致；fragment 根新增两个注释节点（v-if 占位 + 模板说明注释） | 无元素计数/样式/text() 影响（CSS 结构伪类与邻接选择器忽略注释节点） | 接受 |
 
 ## 6 状态表
 
@@ -164,7 +169,7 @@ graph TD
 |------|------|------|----------|
 | u-proto | committed | 1 | commit「feat(tray): u-proto protocol fields...」；vitest 14 files/227 pass + tsc --noEmit ok + plugin-sdk 副本 identical=True + 主 agent 复核重跑同结果 |
 | u-tray-native | committed | 1 | commit「feat(tray): u-tray-native counts + native panel」；tray vitest 2 files/31 pass + check:i18n 201 pass + typecheck ok + 主 agent 重跑复核同结果；契约：pinned 必须由 u-tray-shell 透传 |
-| u-tabbar | pending | 0 | — |
+| u-tabbar | committed | 1 | commit「feat(tray): u-tabbar sections container」；TabBar.test 16 pass + ui 全包 806 pass + ui typecheck ok + 主 agent 重跑复核同结果；P5 门关闭（见偏差 D10） |
 | u-tray-widget | pending | 0 | — |
 | u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
 | u-tray-shell | pending | 0 | — |
@@ -192,3 +197,4 @@ graph TD
 | 2026-09-16 | u-proto committed（协议字段 + 白名单校验函数 + plugin-sdk 副本 + changeset + 协议文档；vitest 227 绿，主 agent 重跑复核通过） |
 | 2026-09-16 | u-ext-goal committed（meta.icon='target'，badge 不补推见偏差 D1；vitest 403 绿，主 agent 重跑复核通过） |
 | 2026-09-16 | u-tray-native committed（useTrayCounts + TrayNativePanel + i18n tray 模块；tray vitest 31 绿 + check:i18n 201 绿，主 agent 重跑复核通过；偏差 D3-D7 登记） |
+| 2026-09-16 | u-tabbar committed（TabBar 容器化 + 本地 active + 探针 P5 门关闭；ui 806 绿，主 agent 重跑复核通过；偏差 D8-D12 登记，设计 §3.5 同步两行） |

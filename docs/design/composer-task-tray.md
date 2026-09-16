@@ -233,7 +233,8 @@ built-in（native 直连，无协议变化）:
 | meta.icon 未知 key / paths 超限 | 落兜底 icon，console warn 一次（去重） | extension 修正 icon 值（探针 P6 门） |
 | meta.badge 超长 | truncate 至 6 字符 + title 全文 | extension 收敛 badge 长度 |
 | guiTree 含未知原语 type | GuiComponentRenderer 现状：该节点渲染降级占位 | 协议版本对齐后自愈 |
-| tab-bar sections 与 tabs 长度不等 | 忽略 sections 退化为纯展示 tab-bar + warn | extension 修正结构 |
+| tab-bar sections 与 tabs 长度不等 | 忽略 sections 退化为纯展示 tab-bar + warn（同形态去重：同 (原因, tabs 数, sections 数) 只出声一次，恢复合法后重置） | extension 修正结构 |
+| tab-bar 无渲染器上下文（PRIMITIVE_RENDER_KEY 未 provide，仅 standalone 挂载触发） | 忽略 sections 退化为纯展示 + 可操作 warn（应用内消费路径均经 GuiComponentRenderer provide 渲染器，不触发） | 消费方经 GuiComponentRenderer 渲染（或显式 provide 渲染器） |
 | ViewHostStore 推送频次高 | 托盘只读 meta 派生 badge/status（O(1)），guiTree 仅面板打开时渲染 | —（性能面：todo/goal 推送频率 = tool call 级，远低于渲染预算） |
 | WS 断连 | 计数冻结（不虚报不闪烁）；bash 面板顶部断连提示条 | 重连自动重拉（既有恢复腿） |
 
