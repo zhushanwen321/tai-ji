@@ -363,7 +363,7 @@
       "run": "（开发阶段手测链——剧本随阶段 5 A1 同环境落建后回填可执行命令）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧将追加新句 \"To get these results, re-dispatch via the subagents tool.\"，新句断言随修复组 1 落地、agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
     },
     {
       "id": "E2E-BATCH-04",

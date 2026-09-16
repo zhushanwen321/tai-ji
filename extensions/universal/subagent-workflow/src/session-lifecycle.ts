@@ -339,9 +339,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
         pi.on("agent_settled", handler);
       },
       sendDelivery: (message) => {
-        // 单通道（u9 偏差裁决，D7 账本化配套）：唯一发送形态 =
-        // sendCustomMessage({triggerTurn:true})，courier 已在发送前二次复查
-        // isIdle，多通道投递选项已删。
+        // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
+        // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
         // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
         // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
         // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
