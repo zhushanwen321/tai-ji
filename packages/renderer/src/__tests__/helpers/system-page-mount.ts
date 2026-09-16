@@ -32,8 +32,6 @@ export function createSettingsApiMocks() {
     setSmartContextThresholds: vi.fn(),
     setSmartContextExcludedModels: vi.fn(),
     // streaming-idle Section（SystemPage 常驻 Section）在 mount 时消费，缺导出即 "No export defined"
-    getStreamingIdleTimeout: vi.fn(),
-    setStreamingIdleTimeout: vi.fn(),
   }
 }
 
@@ -158,6 +156,4 @@ export function resetSettingsApiMocks(m: SettingsApiMocks): void {
   m.setSmartContextCompactModel.mockResolvedValue({ model: '' })
   m.setSmartContextThresholds.mockResolvedValue({ thresholds: [...SMART_CONTEXT_DEFAULT_THRESHOLDS] })
   m.setSmartContextExcludedModels.mockResolvedValue({ models: [] })
-  m.getStreamingIdleTimeout.mockResolvedValue({ timeout: 300 })
-  m.setStreamingIdleTimeout.mockResolvedValue({ timeout: 300 })
 }

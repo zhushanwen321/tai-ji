@@ -147,7 +147,6 @@ export type ClientMessageType =
   | 'config.setSetupScript' | 'config.getSetupScript'
   | 'config.setBareSetupScript' | 'config.getBareSetupScript'
   | 'config.setTimeout' | 'config.getTimeout'
-  | 'config.setStreamingIdleTimeout' | 'config.getStreamingIdleTimeout'
   | 'config.setDefaultBaseBranch' | 'config.getDefaultBaseBranch'
   | 'config.setAutoRenameEnabled' | 'config.getAutoRenameEnabled'
   | 'config.setRenameModel' | 'config.getRenameModel'
@@ -642,12 +641,6 @@ export interface ClientMessageMap {
   'config.setTimeout': { timeout: number }
   /** config.getTimeout：读取 worktree 创建超时时间配置（前端读取）。 */
   'config.getTimeout': Record<string, never>
-  /** config.setStreamingIdleTimeout：设置对话流式空闲超时阈值（秒，前端写入）。
-   *  clamp 校验语义（docs/design/timeout-streaming-ui-idle.md §5.3 D3 单一权威口径）：
-   *  合法域 [60, 3600] 秒，越界不拒绝而是 clamp 到边界，reply 返回 clamp 后生效值。 */
-  'config.setStreamingIdleTimeout': { timeout: number }
-  /** config.getStreamingIdleTimeout：读取对话流式空闲超时阈值（秒，未配置时回默认 1800）。 */
-  'config.getStreamingIdleTimeout': Record<string, never>
   /** config.setDefaultBaseBranch：设置默认基分支（前端写入）。 */
   'config.setDefaultBaseBranch': { baseBranch: string }
   /** config.getDefaultBaseBranch：读取默认基分支配置（前端读取）。 */
@@ -899,7 +892,6 @@ export type ServerMessageType =
   | 'config.setupScript'
   | 'config.bareSetupScript'
   | 'config.worktreeTimeout'
-  | 'config.streamingIdleTimeout'
   | 'config.defaultBaseBranch'
   | 'config.autoRenameEnabled'
   | 'config.renameModel'
@@ -1675,8 +1667,6 @@ export interface ServerMessageMapBase {
   'config.bareSetupScript': { script: string }
   /** config.worktreeTimeout：config.getTimeout 的 reply。 */
   'config.worktreeTimeout': { timeout: number }
-  /** config.streamingIdleTimeout：config.get/setStreamingIdleTimeout 的 reply（clamp 后生效值，秒）。 */
-  'config.streamingIdleTimeout': { timeout: number }
   /** config.defaultBaseBranch：config.getDefaultBaseBranch 的 reply。 */
   'config.defaultBaseBranch': { baseBranch: string }
   /** config.autoRenameEnabled：config.getAutoRenameEnabled 的 reply。 */
@@ -2188,8 +2178,6 @@ export interface ReplyPayloadMap {
   'config.getBareSetupScript': ServerMessageMap['config.bareSetupScript']
   'config.setTimeout': ServerMessageMap['config.worktreeTimeout']
   'config.getTimeout': ServerMessageMap['config.worktreeTimeout']
-  'config.setStreamingIdleTimeout': ServerMessageMap['config.streamingIdleTimeout']
-  'config.getStreamingIdleTimeout': ServerMessageMap['config.streamingIdleTimeout']
   'config.setDefaultBaseBranch': ServerMessageMap['config.defaultBaseBranch']
   'config.getDefaultBaseBranch': ServerMessageMap['config.defaultBaseBranch']
   'config.setAutoRenameEnabled': ServerMessageMap['config.autoRenameEnabled']

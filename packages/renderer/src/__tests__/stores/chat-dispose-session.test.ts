@@ -38,7 +38,6 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     store.hydrate(sid, [makeMessage('m1')])
     store.addPendingSend(sid)
     store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
-    store.testInternals.armStreamingTimer(sid)
     // retryStates / queueStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
     store.markHistoryFailed(sid)
     // changeSetStatuses：key 格式 `${sid}:${messageId}`，disposeSession 按前缀清理（W19 Fix-2）

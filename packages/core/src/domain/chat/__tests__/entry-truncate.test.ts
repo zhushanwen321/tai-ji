@@ -178,7 +178,6 @@ describe('live overlay（registry tool_call_end）与 reducer 同函数一致性
       markChangeSetsSuperseded: vi.fn(),
       finalizeSession: vi.fn(),
       clearPendingSend: vi.fn(),
-      armStreamingTimer: vi.fn(),
       drainN: vi.fn(() => []),
       reconcilePending: vi.fn(),
       appendUser: vi.fn(),
@@ -187,8 +186,6 @@ describe('live overlay（registry tool_call_end）与 reducer 同函数一致性
       incrementInflight: vi.fn(),
       decrementInflight: vi.fn(),
       clearInflight: vi.fn(),
-      takePrematureTimeoutIds: vi.fn(() => new Set<string>()),
-      clearPrematureTimeoutIds: vi.fn(),
     } as unknown as MessageEffectContext
   }
 

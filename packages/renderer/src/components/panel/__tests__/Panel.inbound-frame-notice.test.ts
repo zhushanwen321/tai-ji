@@ -57,7 +57,7 @@ const chatMock = vi.hoisted(() => ({
   isActive: vi.fn(() => false),
   isCompacting: vi.fn(() => false),
   isRespawnPending: vi.fn(() => false),
-  // occupancy 投影读口（turn-progress 消费；缺省全 idle，对齐 store.getOccupancy 无记录缺省）
+  // occupancy 投影读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
   getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
   failedHistory: new Map<string, boolean>(),
 }))

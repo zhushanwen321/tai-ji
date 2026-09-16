@@ -102,9 +102,7 @@ export default {
     // [W4 turn-attribution] 后台续跑 turn 起点行（Turn.vue trigger==='bg-notify'）与 bash 执行中瞬时行前缀（MessageStream.vue）
     turnTriggerBgNotify: '后台任务完成 · 已继续处理',
     executingBash: '正在执行',
-    // [premature-timeout] idle 超时误判收口的恢复指引（Turn.vue，docs/design/timeout-streaming-ui-idle.md §4.2；
     // 不写死阈值数字——阈值用户可调，写死会漂移）
-    prematureTimeoutNotice: '响应已超时收口。若任务仍在后台进行，完成后将自动恢复显示；确认已停止可重新发送。',
   },
   git: {
     commit: '提交',

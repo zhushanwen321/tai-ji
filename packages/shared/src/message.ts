@@ -424,14 +424,6 @@ export interface Message {
    * （docs/design/timeout-streaming-ui-idle.md §5.4 D4），渲染兼容分支保留）。
    */
   error?: string
-  /**
-   * [premature-timeout] UI idle 超时收口标记（docs/design/timeout-streaming-ui-idle.md §5.2 D2）。
-   * true = 该气泡是 idle timer 收口的「UI 误判窗口」产物（timeout → error 是前端兜底强推，
-   * 非 pi 真实终态）：renderer 据此显示超时提示 + 恢复指引；迟到的 message.complete 到达时
-   * 由 registry 恢复分支清标并恢复真实终态（权威 content/usage 覆盖）。
-   * live 态标记，不持久化——reload 从 session JSONL 重建权威状态（设计 §4.2 恢复窗口矩阵④）。
-   */
-  prematureTimeout?: boolean
   /** 上下文压缩摘要（W07-C，message.compactionSummary） */
   compactionSummary?: CompactionSummary
   /** 分支摘要（W07-C，message.branchSummary） */

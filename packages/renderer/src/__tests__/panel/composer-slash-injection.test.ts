@@ -67,7 +67,6 @@ vi.mock('@/stores/chat', () => ({
     isCompacting: () => false,
     // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
     sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
     getMessages: () => [],
     getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
   }),

@@ -63,7 +63,6 @@ import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSyn
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
 import { useMemoryPressure } from '@/composables/useMemoryPressure'
-import { hydrateStreamingIdleTimeout } from '@/composables/features/chat/streaming-idle-hydration'
 
 // 应用挂载（onMounted bootstrap 第 2 步）即提交连接编排（mock 模式 200ms 直进 connected；真 runtime 走端口发现）。
 // settings 域核心初始化（transport + 订阅注册）必须在 WS 连接前完成：
@@ -143,9 +142,6 @@ watch(connectionState, (s) => {
     // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
     if (import.meta.env.VITE_MOCK !== 'true') {
       void refreshModels()
-      // streaming idle 阈值水合：持久化值注入 chat store，新 turn idle timer 按其挂载
-      //（timeout-streaming-ui-idle §5.3 D3 配置链；内部 best-effort，失败保持 core 默认）。
-      void hydrateStreamingIdleTimeout()
     }
   }
 })

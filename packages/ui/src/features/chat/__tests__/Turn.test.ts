@@ -24,7 +24,6 @@ vi.mock('vue-i18n', () => ({
         'panel.message.traceCollapse': '恢复精简',
         'panel.message.traceFailed': '含 {count} 次失败',
         'panel.message.turnTriggerBgNotify': '后台任务完成 · 已继续处理',
-        'panel.message.prematureTimeoutNotice': '响应已超时收口。若任务仍在后台进行，完成后将自动恢复显示；确认已停止可重新发送。',
       }
       let s = msgs[key] ?? key
       if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v))
@@ -116,7 +115,7 @@ function makeWindowTurn(opts: {
 // ─── mount helper ───────────────────────────────────────────────
 
 /** Block stub：根节点带 .trace-blk + data-type/data-status/data-streaming，供断言 trace 块渲染与 props 透传。
- *  data-content 透传 text 正文（premature-timeout 恢复用例的「内容完整」DOM 断言锚点）。 */
+ *  data-content 透传 text 正文（DOM 断言锚点）。 */
 const BlockStub = {
   name: 'Block',
   props: {
@@ -559,60 +558,5 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
     })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="turn-inline-bash"]').exists()).toBe(true)
-  })
-})
-
-// ═════════════════════════════════════════════════════════════════
-// describe 6：premature-timeout 恢复指引渲染（timeout-streaming-ui-idle §4.2 / §5.2 D2）
-//
-// 打标气泡（timeout 收口误判）显示超时 + 自动恢复指引；complete 自愈清标后指引消失。
-// core 侧恢复链见 core chat-premature-timeout-recovery.test.ts（本套只锁渲染契约）。
-// ═════════════════════════════════════════════════════════════════
-describe('premature-timeout: 超时收口恢复指引渲染', () => {
-  /** timeout 误判收口的 assistant（error + prematureTimeout 标） */
-  function makeMarkedTurn(): MessageTurn {
-    return {
-      index: 1,
-      user: { id: 'u1', role: 'user', content: '跑长任务', status: 'complete', timestamp: NOW },
-      assistants: [
-        {
-          id: 'a1',
-          role: 'assistant',
-          content: '截断正文',
-          status: 'error',
-          prematureTimeout: true,
-          timestamp: NOW,
-        },
-      ],
-      isStreaming: false,
-      hasFoldable: false,
-    }
-  }
-
-  it('打标气泡（error + prematureTimeout）→ 恢复指引行渲染且含「自动恢复」语义文案（用户可见 DOM 断言）', () => {
-    const wrapper = mountTurn({ turn: makeMarkedTurn() })
-    const notice = wrapper.find('[data-testid="turn-premature-timeout"]')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('超时收口')
-    expect(notice.text()).toContain('自动恢复')
-  })
-
-  it('普通 error 气泡（无标）→ 指引不渲染（不把真实错误误标为可恢复）', () => {
-    const turn = makeMarkedTurn()
-    delete (turn.assistants[0] as Partial<Message>).prematureTimeout
-    const wrapper = mountTurn({ turn })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(false)
-  })
-
-  it('complete 自愈恢复后（status 翻 complete + 清标）→ 指引消失、正文完整可见', async () => {
-    const turn = makeMarkedTurn()
-    const wrapper = mountTurn({ turn })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(true)
-    // 模拟 core 恢复分支产物：status 翻 complete + prematureTimeout 清除 + 权威 content 覆盖
-    turn.assistants[0] = { ...turn.assistants[0], status: 'complete', content: '权威完整正文', prematureTimeout: undefined }
-    await wrapper.setProps({ turn: { ...turn } })
-    expect(wrapper.find('[data-testid="turn-premature-timeout"]').exists()).toBe(false)
-    // 内容完整：恢复后的权威正文透传到 text 块（Block stub data-content 锚点）
-    expect(wrapper.find('.trace-blk[data-type="text"]').attributes('data-content')).toBe('权威完整正文')
   })
 })

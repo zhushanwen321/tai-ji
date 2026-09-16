@@ -45,8 +45,6 @@ import {
   setBareSetupScript as setBareSetupScriptImpl,
   getTimeout as getTimeoutImpl,
   setTimeout as setTimeoutImpl,
-  getStreamingIdleTimeout as getStreamingIdleTimeoutImpl,
-  setStreamingIdleTimeout as setStreamingIdleTimeoutImpl,
   getDefaultBaseBranch as getDefaultBaseBranchImpl,
   setDefaultBaseBranch as setDefaultBaseBranchImpl,
   getAutoRenameEnabled as getAutoRenameEnabledImpl,
@@ -316,16 +314,6 @@ export class ConfigService implements IConfigService {
 
   setTimeout(timeout: number): void {
     setTimeoutImpl(this.appConfig(), timeout)
-  }
-
-  /** 读取对话流式空闲超时（config.json.streamingIdleTimeout，秒），默认 1800s（timeout-streaming-ui-idle §5.3 D3）。 */
-  getStreamingIdleTimeout(): number {
-    return getStreamingIdleTimeoutImpl(this.appConfig())
-  }
-
-  /** 设置对话流式空闲超时（clamp 到 [60, 3600] 秒后落盘，返回生效值）。 */
-  setStreamingIdleTimeout(timeout: number): number {
-    return setStreamingIdleTimeoutImpl(this.appConfig(), timeout)
   }
 
   getDefaultBaseBranch(): string {

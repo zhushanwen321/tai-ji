@@ -630,32 +630,30 @@ describe('settings 域', () => {
     expect(mockCommand.mock.calls[7][0]).toBe('config.getTimeout')
   })
 
-  it('行为配置：streamingIdleTimeout / defaultBaseBranch / autoRename / renameModel / renameMode', async () => {
-    mockCommand.mockResolvedValue({ timeout: 1800 })
-    await settings.setStreamingIdleTimeout(1800)
-    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setStreamingIdleTimeout', { timeout: 1800 }])
-    await settings.getStreamingIdleTimeout()
-    expect(mockCommand.mock.calls[1][0]).toBe('config.getStreamingIdleTimeout')
-
+  it('行为配置：defaultBaseBranch / autoRename / renameModel / renameMode', async () => {
+    mockCommand.mockResolvedValue({ baseBranch: 'main' })
     await settings.setDefaultBaseBranch('main')
-    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setDefaultBaseBranch', { baseBranch: 'main' }])
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.setDefaultBaseBranch', { baseBranch: 'main' }])
     await settings.getDefaultBaseBranch()
-    expect(mockCommand.mock.calls[3][0]).toBe('config.getDefaultBaseBranch')
+    expect(mockCommand.mock.calls[1][0]).toBe('config.getDefaultBaseBranch')
 
+    mockCommand.mockResolvedValue({ enabled: true })
     await settings.setAutoRenameEnabled(true)
-    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setAutoRenameEnabled', { enabled: true }])
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setAutoRenameEnabled', { enabled: true }])
     await settings.getAutoRenameEnabled()
-    expect(mockCommand.mock.calls[5][0]).toBe('config.getAutoRenameEnabled')
+    expect(mockCommand.mock.calls[3][0]).toBe('config.getAutoRenameEnabled')
 
+    mockCommand.mockResolvedValue({ model: 'p/m' })
     await settings.setRenameModel('p/m')
-    expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setRenameModel', { model: 'p/m' }])
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.setRenameModel', { model: 'p/m' }])
     await settings.getRenameModel()
-    expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameModel')
+    expect(mockCommand.mock.calls[5][0]).toBe('config.getRenameModel')
 
+    mockCommand.mockResolvedValue({ mode: 'first-prompt' })
     await settings.setRenameMode('first-prompt')
-    expect(mockCommand.mock.calls[8].slice(0, 2)).toEqual(['config.setRenameMode', { mode: 'first-prompt' }])
+    expect(mockCommand.mock.calls[6].slice(0, 2)).toEqual(['config.setRenameMode', { mode: 'first-prompt' }])
     await settings.getRenameMode()
-    expect(mockCommand.mock.calls[9][0]).toBe('config.getRenameMode')
+    expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameMode')
   })
 
   it('smart-context 配置组', async () => {
