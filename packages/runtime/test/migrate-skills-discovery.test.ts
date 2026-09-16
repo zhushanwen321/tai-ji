@@ -102,7 +102,9 @@ describe('migrateSettingsSkillsToDiscovery', () => {
   it('settings.json.skills 为空 → no-op', () => {
     writeFileSync(join(piAgentDir, 'settings.json'), JSON.stringify({ skills: [] }), 'utf-8')
     migrateSettingsSkillsToDiscovery()
-    expect(getSkillPaths()).toEqual([])
+    // no-op 语义不变：迁移不写 discovery.json；文件缺失时读端回落 DEFAULT_DISCOVERY_CONFIG
+    // （feat: discovery scan dirs default-enabled），skill preset 默认勾选 → 非空。
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
   })
 
   it('旧路径父目录不是容器（无 SKILL.md 子目录）→ 过滤掉', () => {
@@ -114,7 +116,9 @@ describe('migrateSettingsSkillsToDiscovery', () => {
 
     migrateSettingsSkillsToDiscovery()
 
-    expect(getSkillPaths()).toEqual([])
+    // 非容器被正确过滤（未写入 discovery）；迁移无有效产物提前 return 不写盘，
+    // 读端回落 DEFAULT_DISCOVERY_CONFIG 默认勾选（feat: default-enabled）→ 非空。
+    expect(getSkillPaths()).toEqual(['.agents/skills', '~/.pi/agent/skills', '~/.agents/skills'])
   })
 
   it('迁移后 discovery 为 v2 结构（容器进 globalPaths）', () => {
@@ -125,9 +129,14 @@ describe('migrateSettingsSkillsToDiscovery', () => {
 
     const d = readDiscovery()
     expect(d.version).toBe(2)
-    expect(d.skill.globalPaths).toHaveLength(1)
+    // 迁移写入 writeDiscovery({ ...readDiscovery(), skill: scoped }) 只覆盖 skill 段；
+    // agent/extension 段保留读端回落值（文件缺失 → DEFAULT_DISCOVERY_CONFIG 默认勾选，
+    // feat: default-enabled）——守护「迁移不丢其他 kind 段」。
+    expect(d.skill.globalPaths).toEqual([container])
     expect(d.skill.projectPaths).toEqual([])
-    expect(d.agent.projectPaths).toEqual([])
-    expect(d.agent.globalPaths).toEqual([])
+    expect(d.agent.projectPaths).toEqual(['.agents/agents'])
+    expect(d.agent.globalPaths).toEqual(['~/.pi/agent/agents', '~/.agents/agents'])
+    expect(d.extension.projectPaths).toEqual(['.pi/extensions', '.taiji/extensions'])
+    expect(d.extension.globalPaths).toEqual(['~/.pi/agent/extensions'])
   })
 })
