@@ -70,8 +70,6 @@ export default {
     viewCommandDoc: '查看命令文档',
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
-    // [compact-defer-composer-queue u1] 压缩中活动带副文案（u3 消费；u1 负责新增 key）
-    compactingFlushHint: '完成后自动发送 {count} 条待发消息',
     // [system-notice-rendering-upgrade U3] 压缩中「待发 N」chip（ActivityStrip 消费，D4；
     // 形态从副文案长句变 chip，计数口径不变）
     compactingQueueChip: '待发 {count}',
@@ -111,13 +109,12 @@ export default {
     bashUnknownCommand: '(未知命令)',
     // [system-notice-rendering-upgrade U3] background-bash 结构化行的「后台」chip（D2）
     bashBackgroundChip: '后台',
-    // [W4 turn-attribution] 后台续跑 turn 起点行（Turn.vue trigger==='bg-notify'）与 bash 执行中瞬时行前缀（MessageStream.vue）
-    turnTriggerBgNotify: '后台任务完成 · 已继续处理',
     // [system-notice-rendering-upgrade U3] 边界行拆主/从两段（D5，U6 消费）：计数主文案 +
     // 「已继续处理」从文案。值不带前导点——点号由消费侧按「有主文案才加」条件渲染
     // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
     turnTriggerBgNotifySummary: '{count} 个后台任务完成',
     turnTriggerBgNotifyContinued: '已继续处理',
+    // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
     // [premature-timeout] idle 超时误判收口的恢复指引（Turn.vue，docs/design/timeout-streaming-ui-idle.md §4.2；
     // 不写死阈值数字——阈值用户可调，写死会漂移）

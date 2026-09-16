@@ -36,8 +36,11 @@ AI 在 session X 执行 `pnpm test`（命中 force-test 白名单强制后台）
 ```text
 AI 调 bash {command:"pnpm test"} → 立即返回 {task_id:"bt-1789...-a1b2c3", pid:53241, ...}
 AI 继续干别的；测试在后台跑
-[约 4 分钟后] 对话流出现一条 custom 消息（background-bash 类型，SystemNotice 兜底文本行）：
-  「后台任务 bt-1789...-a1b2c3 已完成 exitCode=1，tail: Tests: 12 failed, 31 passed...」
+[约 4 分钟后] 对话流出现一条 custom 消息（background-bash 类型，SystemNotice 结构化行）：
+  ─── ⌨ pnpm test [后台] · exit 1 · 4m12s ───
+  （命令 mono 主体 + 「后台」chip + exit/耗时 meta，exit≠0 走 warn 色；写给 LLM 接力的 content
+   日志行不再上屏。旧 session 数据无 details → 结构化解析落空，仍走 Archive 图标 + content
+   原文兜底行——两形态并存。）
 ```
 
 用户此刻的困境：
@@ -55,7 +58,7 @@ AI 继续干别的；测试在后台跑
 | pi 进程内单例表 | `extensions/universal/base-tool-enhance/src/background/task-store.ts:42`（模块级 Map，无订阅 API；:16-29 为 D6-en 不变量注释块） | 实时 | 不出进程；他进程/重启前的任务不在表内 |
 | registry.json | `<piAgentDir>/base-tool-enhance/<sessionId>/registry.json`（extension 侧统一写入口 `registry.ts:179`；runtime reaper 写 orphaned `background-task-reaper.ts:308`；两侧共用 `<registry.json>.lock` proper-lockfile 磁盘协议，跨进程互斥已核实） | 每次状态迁移原子写（tmp+rename，锁内 RMW） | **无变更广播**——reader 需自行发现变化 |
 | outputFile | `<...>/<sessionId>/<task_id>.log`（子进程持 fd 直写，`spawn-background.ts:150`） | 实时（可随时 tail；`output-tail.ts:34-74` 字节窗口从文件末尾读） | stdout/stderr 混流无标记 |
-| 完成通知 | `pi.sendMessage` customType `background-bash`（`notify.ts:152-155`）→ `message.customStart` → 对话流 SystemNotice | exit 边沿 | 仅对话流展示，非结构化状态；kill 路径不发（`notify.ts:146`） |
+| 完成通知 | `pi.sendMessage` customType `background-bash`（`notify.ts:155-162`，携结构化 details：命令/exit/耗时）→ `message.customStart` → 对话流 SystemNotice 结构化行（命令 mono + 「后台」chip + exit/耗时 meta；无 details 的旧数据落 content 原文兜底行） | exit 边沿 | 仍只落对话流（一次性边沿通知，非可查询状态）；kill 路径不发（`notify.ts:146`） |
 | reaper | `packages/runtime/src/services/session/background-task-reaper.ts`（runtime 内；启动 5s + session 删除两触发面） | 事件触发 | 无 WS 广播，观测面只有 console.log |
 
 **plugin 区与 widget 系现状**（关键背景）：
@@ -79,7 +82,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 │  └→ task-store 单例表(内存)  │
 │  └→ registry.json 原子写 ──────────────────────────────→ <piAgentDir>/base-tool-enhance/<sid>/registry.json
 │ poller 2s tick: exit 边沿   │                （runtime 与 renderer 均无任何消费/监听 ← 问题所在）
-│  └→ notify: pi.sendMessage ─┼──pi RPC 事件──→ EventAdapter → message.customStart → 对话流（唯一到达用户的路径）
+│  └→ notify: pi.sendMessage ─┼──pi RPC 事件──→ EventAdapter → message.customStart → 对话流 SystemNotice（本条通知的到达路径；用户另经本视图的 registry 直读路径可见，见 §3）
 └─────────────────────────────┘
 ```
 
@@ -182,7 +185,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 **D6：kill 回路 = 完整分支矩阵 + killing-intent 预写（选定；R1 审查后结构性修订）**
 
 先决事实（R1 审查攻击出的两个坑，是本决策形态的成因）：
-- **坑 1（AI 误唤醒）**：若 runtime 只发 kill 信号不写 intent，extension poller 边沿终态 reason=natural（C4）≠ killed → `handleTaskExit` 对非 killed reason 一律 `pi.sendMessage(deliverAs:'steer', triggerTurn:true)`（`notify.ts:143-171`）→ **用户终止任务反而唤醒 AI 并告知「任务失败」，AI 可能自行重启刚被用户杀掉的任务**——G3 被系统性削弱。
+- **坑 1（AI 误唤醒）**：若 runtime 只发 kill 信号不写 intent，extension poller 边沿终态 reason=natural（C4）≠ killed → `handleTaskExit` 对非 killed reason 一律 `pi.sendMessage(deliverAs:'steer', triggerTurn:true)`（`notify.ts:144-173`）→ **用户终止任务反而唤醒 AI 并告知「任务失败」，AI 可能自行重启刚被用户杀掉的任务**——G3 被系统性削弱。
 - **坑 2（悬挂/误杀）**：分支不全的 kill handler 在「pid 已死+属主活（poller 冻结则 registry 永停 running）」「Windows 无 ps → pidStartTime 普遍缺省（照抄 reaper 保守跳过 = Windows kill 系统性失效）」「终态写失败（恢复粒度未定义）」三个分支上被迫临场发明设计。
 
 **采用——kill handler 完整分支矩阵**（前置：读 registry 条目 + 锁内校验，所有写均走 `<registry.json>.lock` RMW，与 extension/reaper 写侧互斥已核实）：
@@ -201,7 +204,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 **D6-en（enabling change，base-tool-enhance 唯一改动）：poller 终态化时合并读回 registry killing 状态**
 - **采用**：`poller.ts` exit 边沿 finalize 时，若内存 entry 无 intent，**读回该条目的 registry 条目：`state==='killing'` 且内存 intent 缺省 ↔ reason=killed**（经 registryPath；读失败按无 intent 处理，不阻塞终态化）。信号等价性依据：killing 条目在 registry 中的唯一可读信号就是 state 字段（bash_kill/timeout 落盘同样剥离 intent，`taskToRegistryEntry` 明文剥离；协议零改动，与 D9 一致）。效果：① 分支①的 reason 语义正确（killed 而非 natural，C4 在 UI 代杀路径收窄）；② `handleTaskExit` 对 killed 不 sendMessage（既有语义）→ **主路径 AI 零感知、不被唤醒**。改动与 extension 自身设计自洽（「intent 写入单例表与 registry 两侧」本就是其声明行为，缺的只是读回）。同 app 发布版本内耦合（builtin 打包，mandatory-extensions 同 bundle，无版本漂移面；独立 pi CLI 用户无 UI，不受影响；dev-link 本地开发存在旧 extension × 新 runtime 的临时偏斜，已知可接受）。**配套加固（U6 内，2 行）**：`armBackgroundTimeout` 在 pid 已死（`isRecordedPidStillOriginal` 为假）时跳过 `markKillingIntent('timeout')`——否则 UI kill 与 timeout 到期同秒重叠时，内存 intent 被无条件覆盖为 timeout → reason=timeout ≠ killed → sendMessage 唤醒 AI（R2-S1 残余窗口）。接受语义微移：到期前 ~2s 内自然死亡的任务改标 natural（仅影响 AI 通知文案）；该加固同时**改善既有** AI bash_kill × timeout 交叉行为（原：bash_kill 后 timeout 到点无条件覆盖 intent → 误报「timed out」；加固后保持 killed 无通知）。**不变量登记（U6 注释级）**：intent 不可丢失依赖纪律性约束「extension 对某条目的每次 registry 写都先经该条目的内存状态更新」（已枚举全部 5 个 `writeRegistryEntry` 调用点成立：spawn=新条目 / bash_kill 先 mark / timeout 先 mark / poller=终态 / process-exit-guard reapBackgroundTasksNow=终态；实施期 grep 核实修正，设计初版枚举 4 点漏计第 5 点，两处终态写同序均成立）；runtime 预写的 killing 不会被 stale 内存态冲回即依赖此约束，未来新增写路径（如 maintenance 类）须保持。
 - **被否**：① **extension 零改动**（本设计 R0 立场）——**被坑 1 反例击穿**：UI kill 必然触发 AI steer 唤醒 + 「任务失败」误导通知，G3 的「可控」名存实亡；接受该副作用（R1 建议选项 a）不可取——用户终止任务的意图是「停止工作」，AI 被唤醒后自行重启任务是最差结果。② runtime 伪造 bash_kill 工具调用（pi 无工具调用 RPC 面，且语义污染）；③ 只发信号不写 intent（= 被否①的变体，同样触发坑 1）。
-- **证据**：`notify.ts:143-171`（非 killed 一律 sendMessage + steer/triggerTurn）；`notify.ts:146`（killed 不发）；`bash-kill-tool.ts:76-87`（跨进程拒绝语义——kill 本就允许非发起方路径存在）；extension 设计 §3.5「kill 路径不 sendMessage」先例。
+- **证据**：`notify.ts:144-173`（非 killed 一律 sendMessage + steer/triggerTurn）；`notify.ts:146`（killed 不发）；`bash-kill-tool.ts:76-87`（跨进程拒绝语义——kill 本就允许非发起方路径存在）；extension 设计 §3.5「kill 路径不 sendMessage」先例。
 - **效果**：G3 主路径完整成立（终止 + 不惊扰 AI）；S2/P7 验收断言对话侧零变化（主路径口径）。**边界注（诚实登记，R2 复审后收窄口径）**：① 分支③属主活 + poller 健康的覆盖写仍按 poller 语义（natural → sendMessage）——该场景任务本就自己死了，通知 AI 属既有行为语义，不是 UI kill 引入的；② timeout 交叉残余窗口——kill 与 armed timeout 到期同秒级重叠时，extension 的 `markKillingIntent('timeout')` 无条件覆盖内存 intent（runtime 预写对 pi 内存不可见）→ 该次 kill 的 reason=timeout → 通知「timed out」唤醒 AI。窗口 = 同秒重叠 + poller tick 落在 mark 之后，且同型竞态在 AI bash_kill × timeout 交叉中本就是 extension 既有行为（非本设计新造）；经 U6 配套加固（pid 已死跳过 mark）后**收窄至 SIGKILL 生效前的毫秒级重叠窗**（timeout 到期恰逢已发令未 reap 且身份校验仍匹配时 mark 仍会覆盖——实施期审查修正初版「构造性关闭」的过强措辞），加固未上线的版本组合下窗口仍在（发布面同 bundle 不出现）。
 
 **D7：输出详情 = 按需 tail RPC + running 时 2s 自动跟随（选定）**
@@ -251,7 +254,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 
 | # | 场景（回溯目标） | 步骤 | 通过标准 |
 |---|---|---|---|
-| S1 | 后台任务全程可见（G1/G2） | 让 AI「后台跑 pnpm test」→ 切该 session 的插件→后台命令 tab：验证筛选槽三桶计数与切换（运行中→已结束→全部），守到测试结束 | 默认「运行中」桶只含运行中任务、计数正确；结束 ≤3s icon 翻转为 exited 语义色（成功=success 点 / 失败=danger 点，色档由 bucket SSOT `backgroundTaskStatusIcon` 派生）并自动归入「已结束」桶（计数 +1 / 运行中 -1，角标随消）；「全部」桶运行中置顶 + 分隔线 + 历史倒序；点击行 drawer 显示 exitCode 与输出尾部（`backgroundTask.output` 按需拉取，D7——实施期审查修正初版误写的「tailSummary」展示位，该字段是 RegistryEntry 数据字段、无 UI 展示位）与对话流 background-bash 消息内容一致 |
+| S1 | 后台任务全程可见（G1/G2） | 让 AI「后台跑 pnpm test」→ 切该 session 的插件→后台命令 tab：验证筛选槽三桶计数与切换（运行中→已结束→全部），守到测试结束 | 默认「运行中」桶只含运行中任务、计数正确；结束 ≤3s icon 翻转为 exited 语义色（成功=success 点 / 失败=danger 点，色档由 bucket SSOT `backgroundTaskStatusIcon` 派生）并自动归入「已结束」桶（计数 +1 / 运行中 -1，角标随消）；「全部」桶运行中置顶 + 分隔线 + 历史倒序；点击行 drawer 显示 exitCode 与输出尾部（`backgroundTask.output` 按需拉取，D7——实施期审查修正初版误写的「tailSummary」展示位，该字段是 RegistryEntry 数据字段、无 UI 展示位）；同一任务在 drawer 与对话流呈现同一状态数据（结构化字段：命令 / exit / 耗时同值——对话流不再显示 content 原文，旧数据无 details 时的原文兜底行与 drawer 的 exit/耗时亦可互证） |
 | S2 | 长驻任务可控且不惊扰 AI（G3） | 让 AI 起 `pnpm dev`（force-longrun 自动后台）→ 列表行内两段式终止（✕→✓），再起一个用 drawer「终止任务」→ 持续观察对话流 30s | 两条路径均 ≤5s 变终态（killing 翻转即时；killed 终态最坏 ~4s，P3 同框口径；reason=killed）；`lsof -i :1420` 确认端口释放、`ps aux \| grep vite` 无残留；**对话流无新增 background-bash 消息、会话无新 turn（AI 未被唤醒）、pending 通知标 cancelled** |
 | S3 | session 隔离（G4） | session A 起后台任务 → 切 session B 看插件 tab → 切回 A | B 的列表不含 A 的任务（空态或仅 B 自己的历史）；切回 A 立即见 running 行（拉取兜底生效，不依赖广播） |
 | S4 | 历史与孤儿（G1） | 跑完几个任务后完全退出 app 再启动；再模拟强杀 pi（kill -9 pi 进程）后重启 app | 重启后终态历史仍在（registry 持久）；孤儿任务显示 orphaned（info 色 icon），不悬挂 running——**Gate B 实测修正**：孤儿收殓实际由 runtime 在运行期 ~1.5s 内自动完成——收殓链路是 pi 进程退出收敛（pm.onSessionExit → session-service removeSessionEntry 收殓挂点 reapSessionBackgroundTasks，即 §2.2 已登记的 reaper「session 删除」触发面；强杀 pi 当拍即殁、无遗留可杀），启动收殓仅作兜底；D2 事件钩子无收殓能力（强杀 pi 后事件流终止，钩子不可能触发）；最终态与设计一致 |

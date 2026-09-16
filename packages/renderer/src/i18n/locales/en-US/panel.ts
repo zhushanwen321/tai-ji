@@ -71,8 +71,6 @@ export default {
     viewCommandDoc: 'View command docs',
     compressing: 'Compacting',
     autoCompressing: 'Auto-compacting context…',
-    // [compact-defer-composer-queue u1] compacting band sub-copy (consumed by u3; key added by u1)
-    compactingFlushHint: 'Will send {count} queued message(s) when done',
     // [system-notice-rendering-upgrade U3] compacting "N queued" chip (consumed by ActivityStrip, D4;
     // long sub-copy becomes a chip, count semantics unchanged)
     compactingQueueChip: '{count} queued',
@@ -112,13 +110,12 @@ export default {
     bashUnknownCommand: '(unknown command)',
     // [system-notice-rendering-upgrade U3] "background" chip of the structured background-bash row (D2)
     bashBackgroundChip: 'background',
-    // [W4 turn-attribution] bg-notify trigger turn origin row (Turn.vue) + executing-bash transient row prefix (MessageStream.vue)
-    turnTriggerBgNotify: 'Background task finished · resumed',
     // [system-notice-rendering-upgrade U3] boundary row splits into main/sub copies (D5, consumed by
     // U6): count main copy + "resumed" sub copy. No leading dot in the value — the separator is
     // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
     turnTriggerBgNotifySummary: '{count} background task(s) completed',
     turnTriggerBgNotifyContinued: 'resumed',
+    // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
     // [premature-timeout] recovery guidance for idle-timeout premature close (Turn.vue, docs/design/timeout-streaming-ui-idle.md §4.2;
     // no hardcoded threshold — user-adjustable, a literal would drift)
