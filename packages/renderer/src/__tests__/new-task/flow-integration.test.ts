@@ -199,6 +199,57 @@ describe('选目录链路（selectWorkspace / openDirDialog，#5）', () => {
   })
 })
 
+describe('worktree 创建回灌（adoptWorktreeCwd，fix-new-worktree-not-switch）', () => {
+  it('T-WT.1 创建成功即回灌：worktree-modal 态写 pendingCwd 不 transition（成功屏期间 state 不变），record 热更新，关 overlay 后保持', async () => {
+    setGroups([mkSession({ id: 'old', cwd: '/ws', lastActiveAt: 1 })])
+    const flow = useNewTaskFlow()
+    await flow.startFlow()
+    flow.openCreateWorktree() // landing→worktree-modal
+    expect(flow.state.value).toBe('worktree-modal')
+
+    flow.adoptWorktreeCwd('/ws/new-wt') // CreateWorktreeModal success emit
+
+    // chip 同刻切换 + state 保持 worktree-modal（不 transition，modal 成功屏仍在展示）
+    expect(flow.currentCwd.value).toBe('/ws/new-wt')
+    expect(flow.state.value).toBe('worktree-modal')
+    expect(workspaceStoreMock.record).toHaveBeenCalledWith('/ws/new-wt') // 热更新最近工作区
+    // 关闭（2s 定时器/用户提前关）→ landing，cwd 保持
+    flow.closeOverlay()
+    expect(flow.state.value).toBe('landing')
+    expect(flow.currentCwd.value).toBe('/ws/new-wt')
+  })
+
+  it('T-WT.2 守卫：非 worktree-modal 态 noop；同值 noop（不重复 record）', async () => {
+    setGroups([mkSession({ id: 'old', cwd: '/ws', lastActiveAt: 1 })])
+    const flow = useNewTaskFlow()
+    await flow.startFlow()
+    flow.adoptWorktreeCwd('/ws/other') // landing 态 → noop
+    expect(flow.currentCwd.value).toBeNull()
+
+    flow.openCreateWorktree()
+    flow.adoptWorktreeCwd('/ws/new-wt')
+    flow.adoptWorktreeCwd('/ws/new-wt') // 同值 → noop
+    expect(flow.currentCwd.value).toBe('/ws/new-wt')
+    expect(workspaceStoreMock.record).toHaveBeenCalledTimes(1)
+  })
+
+  it('T-WT.3 adopt 后首发提交：session 建在 adopted cwd（防旧链路「切换丢失→create 落旧目录」回归）', async () => {
+    setGroups([mkSession({ id: 'old', cwd: '/ws', lastActiveAt: 900 })])
+    workspaceStoreMock.defaultCwd = '/ws'
+    createCtrl.create.mockResolvedValue(mkSession({ id: 's-wt', cwd: '/ws/new-wt' }))
+    const flow = useNewTaskFlow()
+    await flow.startFlow()
+    flow.openCreateWorktree()
+    flow.adoptWorktreeCwd('/ws/new-wt')
+    flow.closeOverlay() // modal 关闭（定时器或用户提前关）
+
+    await flow.submitFirstMessage(textToSegments('go'))
+
+    // create 用 adopted pendingCwd（/ws/new-wt），而非 defaultCwd（/ws）
+    expect(createCtrl.create).toHaveBeenCalledWith('/ws/new-wt', 'go', undefined, undefined, undefined, 'high')
+  })
+})
+
 describe('OS dialog 分支（openDirDialog，#5）', () => {
   it('T3.3 pickDirectory canceled=false→只记 pendingCwd（延迟 create，不建 session），chip 回灌新 cwd', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
