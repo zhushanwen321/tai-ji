@@ -5,8 +5,9 @@
 //     rebuildIndexes + 查询面惰性通道 mergedRecords 双通道各自可独立触发）；
 //   - 失败降级：无 identity 的损坏/异构文件不在扫描集 → 不重建不抛（sessions-index
 //     「损坏静默回退全扫」同款先例）；幸存 manifest 不覆写（幂等补缺）；
-//   - G2 词汇双写：四 manifest 写面（markFinalized/markCancelled/markBatchFinalized/
-//     markIdleArchived）旧 status 三态投影 + executionStatus/closedReason 并存。
+//   - G2 词汇双写：manifest 写面（markFinalized/markCancelled/markIdleArchived）
+//     旧 status 三态投影 + executionStatus/closedReason 并存。[collect 退役]
+//     markBatchFinalized 写面已删，批成员 manifest 改为存量读侧容忍用例。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -16,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { ManifestStore } from "../persistence/manifest-store.ts";
 import { INDEX_FILENAME } from "../persistence/sessions-index.ts";
 import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
@@ -76,7 +78,7 @@ function makeRecord(id: string, overrides: Partial<ExecutionRecord> = {}): Execu
   return r;
 }
 
-/** markBatchFinalized 入参的最小 SubagentRecord。 */
+/** 存量批成员 record 形态（[collect 退役] 批写侧已删，作存量模拟种子）。 */
 function makeSubagentRecord(id: string, sessionFile?: string): SubagentRecord {
   return {
     id,
@@ -300,16 +302,34 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.dispose();
   });
 
-  it("markBatchFinalized：批成员 running 投影双写（barrier 面词汇一致）", async () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
-    const sessionFile = path.join(sessionsDir, "20260912T000009_batch.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+  it("[collect 退役] 存量批成员 manifest（running 投影双写词汇）读侧容忍：重建投影可读", () => {
+    // 批写侧已删，构造磁盘遗留形态（原批写面 batchManifestRecord 产物词汇）：
+    // legacy status=running + executionStatus=running + closedReason 缺省 + 无
+    // 子 session 文件（manifest 源兜底投影路径）。
+    fs.writeFileSync(
+      path.join(recordsDir, "sa-batch-legacy.json"),
+      JSON.stringify({
+        id: "sa-batch-legacy",
+        rootSessionId: "root-session",
+        agentName: "worker",
+        status: "running",
+        executionStatus: "running",
+        createdAt: 1000,
+        completedAt: 2000,
+        task: "batch task",
+        slug: "batch",
+      }),
+      "utf-8",
+    );
 
-    await store.markBatchFinalized([makeSubagentRecord("sa-batch", sessionFile)]);
-    const manifest = readManifest("sa-batch");
-    expect(manifest.status).toBe("running");
-    expect(manifest.executionStatus).toBe("running");
-    expect(manifest.closedReason).toBeUndefined();
+    const store = new RecordStore(sessionsDir, new ManifestStore(recordsDir));
+    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-batch-legacy");
+    expect(rec).toBeDefined();
+    // manifest 源投影按 executionStatus 两态权威词读回；legacy running = §3.2.8
+    // 活跃成员词汇 → running 投影（活跃可见），不炸。
+    expect(rec?.status).toBe("running");
+    expect(rec?.agent).toBe("worker");
+    expect(rec?.task).toBe("batch task");
     store.dispose();
   });
 

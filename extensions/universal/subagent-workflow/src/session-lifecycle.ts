@@ -372,8 +372,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
 /**
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
  * 过期 session 文件清理 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
- * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除——collectMode 记录态消亡后
- * core 侧 recoverSyncCollectBatch 已是 accepted-no-op，调用点随之退役。）
+ * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除；[collect 退役] core 侧
+ * recoverSyncCollectBatch 方法本体已删——sync 批机制不存在，无恢复面可接线。）
  */
 async function runProcessLevelMaintenance(
   agentDir: string,

@@ -382,8 +382,8 @@ export class RecordAccess {
       // 从 RunContext 回填；缺省 = pi 投影，存量调用方零感知）
       engine: opts.engine,
       engineFallback: opts.engineFallback,
-      // [modeless 波3] collect 路由选项不在 record 落值——sync 成员由 executeViaEngine
-      // 派发时点登记进协调器（成员身份 = 登记态，非 record 字段）。
+      // [collect 退役] collect 路由选项不在 record 落值（原 sync 成员由
+      // executeViaEngine 派发时点登记进协调器，随批机制删除——collect 值从未入 record）。
       controller,
     });
     // [H2 W2] 来源身份在对象构造点落位（origin/parentRunId 为 readonly，创建期一次性

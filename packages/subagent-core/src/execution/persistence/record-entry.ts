@@ -114,9 +114,10 @@ export interface SubagentRecordEntryData {
   // [modeless 波3·已删除字段] collectMode entry 字段停写删除（collect = 派发时路由
   // 选项，成员身份 = 协调器登记态）；旧 entry 残留键读侧自然忽略，零迁移。
   /**
-   * 离开批终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation）。两出口统一
-   * 落标（批闭合 flush / E9 dispose 转换，均 appendEntry 持久化）。undefined =
-   * 未离开批 / 旧 entry 零迁移。消费方：U5 E1 重建扫描只收无标记成员（防双重通知）。
+   * 离开批终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**：原写点
+   * 批闭合 flush / E9 dispose 转换已随 sync 批机制删除）。undefined = 未离开批 /
+   * 退役后新 entry。旧 session 文件的标记 entry 必须容忍解析（读侧守卫：
+   * batch-finalized.test.ts / sync-collect-recovery.test.ts）。
    */
   batchFinalized?: boolean;
   /**

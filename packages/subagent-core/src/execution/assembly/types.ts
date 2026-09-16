@@ -577,11 +577,10 @@ export interface ExecutionRecord {
    */
   outcome?: ExecutionOutcome;
   /**
-   * 离开批的终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
-   * 两出口统一落标：① 批闭合 flush 写账成功后；② E9 dispose 逐条转 async 写账后
-   * （均 appendEntry 持久化，U3/U5 写点）。undefined = 未离开批 / 旧记录零迁移。
-   * 消费方：E9 dispose 转账落标 + flush 落标（[modeless 波3] 起 E1 排除判据随其
-   * 退役消亡，标记保留为批域审计/孤儿 merge 透传面）。
+   * 离开批的终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**）。
+   * 历史写点（批闭合 flush 落标 / E9 dispose 落标）已随 sync 批机制退役删除；磁盘上
+   * 存量 record 的 batchFinalized entry 必须容忍解析（旧 session 文件可读），标记保留
+   * 为批域审计/孤儿 merge 透传面。undefined = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
 
@@ -772,16 +771,9 @@ export interface ExecuteOptions {
   worktree?: boolean | WorktreeHandle;
   /** 覆盖执行 cwd（默认 mainCwd）。 */
   cwd?: string;
-  /**
-   * 同步收集模式（subagent-sync-collect 设计 §3.1.3，U1 foundation 契约）。
-   * [modeless 波3] collect = 派发时通知路由选项（sync=完成通知攒批一次唤醒 +
-   * 批闭合自动 close 成员 / async=逐个通知），非 record 模式（collectMode 字段已
-   * 删除，成员身份 = 协调器登记态）。
-   * undefined = config collectSync.default（缺省 "async"，新 session 生效）。
-   * schema 层枚举限 "async"|"sync"；运行时宽收 string 与 engine 字段同风格
-   * （非法值 ≠ "sync" 按 async 处理）。
-   */
-  collect?: string;
+  // [collect 退役] 原 collect 字段（sync 批通知路由选项，U1 foundation）已随批机制
+  // 整体删除——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为逐条 async
+  // 投递。pi 对未知字段静默放行，存量调用形态的 collect 值不进本选项。
   /**
    * 空闲超时毫秒数（全 record 生效的 idle GC 节奏——原「仅 conversation 模式」
    * 限定随 chatMode 消亡移除）。覆盖默认 5min idle timeout。
@@ -876,13 +868,8 @@ export interface BgResponse {
    * 值语义由 U2（execution/notify-ledger.ts）兑现。
    */
   notifyContract: "ledger+at-least-once";
-  /**
-   * 同步收集登记回显段（subagent-sync-collect 设计 §3.1.1 交互样例，U1 foundation）。
-   * 仅 resolved 模式为 sync 时附带（async 响应字节零变化，G3）：mode = 生效模式；
-   * pendingSyncCount = 当前未闭合批的 sync 成员总数（含本条；跨轮派发续累不重置，
-   * 与 D2 隐式批一致）。
-   */
-  collect?: { mode: "sync"; pendingSyncCount: number };
+  // [collect 退役] 原 collect 回显段（sync 登记回显，§3.1.1）已随批机制删除——
+  // 完成通知恒为逐条 async 投递，无回显段。
 }
 
 /** list 的内层响应（挂在 SubagentToolResult.listResponse）。 */
@@ -1043,8 +1030,9 @@ export interface SubagentRecord {
   // [modeless 波3·已删除字段] collectMode 快照投影随字段消亡删除（读侧丢弃，
   // 存量 entry 残留键零迁移）。
   /**
-   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建，U1 foundation）。
-   * 缺省 = 未离开批；U5 E1 重建扫描据此排除已离场成员。
+   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建——存量 entry
+   * 读侧兼容面，[collect 退役] 起只读不写：旧 session 文件反查投影仍携带）。
+   * 缺省 = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
 }
@@ -1054,26 +1042,12 @@ export interface SubagentRecord {
 // ============================================================
 
 /**
- * 同步收集（sync collect）配置节类型（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
- * 权威默认值在 config.ts DEFAULT_COLLECT_SYNC；坏值 sanitize 回默认不炸启动（E5，
- * 与 maxConcurrent 同判）。类型定义于 types.ts（避免 config → types 反向依赖成环），
- * config.ts re-export。
- */
-export interface CollectSyncConfig {
-  /** start 未显式传 collect 时的缺省模式。新 session 生效（与 engine 配置时机一致）。 */
-  default: "async" | "sync";
-  /** 批通知单条目结果正文预算（字符）：超出截断并接 session_read 指针行。flush 时热读。 */
-  perItemChars: number;
-  /** 批通知结果正文总量预算（字符）：Σ 超限时统一收紧 effectivePerItem（U4 算法）。flush 时热读。 */
-  totalChars: number;
-}
-
-/**
  * 全局配置（~/.pi/agent/subagents/config.json）。
  *
  * 模型解析已退化为「主 agent model 优先，仅 override 时查 registry」——
  * 不再有 category/fallback/yolo 字段。config.json 只保留 maxConcurrent
  * （pool 大小）。旧 config.json 中的 categories/fallback 等字段读取时忽略。
+ * [collect 退役] 原 collectSync 节随 sync 批机制删除，残留键读取时忽略（零迁移）。
  */
 export interface SubagentsGlobalConfig {
   version: number;
@@ -1085,11 +1059,6 @@ export interface SubagentsGlobalConfig {
   defaultEngine?: string;
   /** 引擎路由策略（D9①）：strict=true 时一切 probe 失败直接报错（不 fallback）。 */
   engineRouting?: { strict: boolean };
-  /**
-   * 同步收集配置节（subagent-sync-collect 设计 §3.1.3，U1 foundation）。
-   * 整节缺省 = DEFAULT_COLLECT_SYNC（config.ts）；逐字段 sanitize 回默认（E5）。
-   */
-  collectSync?: CollectSyncConfig;
 }
 
 // ============================================================

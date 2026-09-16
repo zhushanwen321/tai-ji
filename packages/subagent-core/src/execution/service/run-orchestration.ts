@@ -31,8 +31,8 @@
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——pi/会话基线运行时可变态
 //   （execNesting/sessionRootId/streamSink/uiObservability）经壳 getter 现读；
-//   #1 留壳共享依赖（store/manifestStore/modelService/notifyHost/pool/worktreeManager/
-//   collectCoordinator）getter 现读同一实例——深绑测试的 FR 替换语义保持。
+//   #1 留壳共享依赖（store/manifestStore/modelService/notifyHost/pool/worktreeManager）
+//   getter 现读同一实例——深绑测试的 FR 替换语义保持。
 // 2. 转发壳写法：壳保留同名方法单行转发（execute/executeAndAwait/resolveModel 对外面 +
 //   executeWorkflowAgent → WorkflowDispatch / engineSupportsConversation + deliverChatMessage
 //   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
@@ -60,7 +60,6 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
-import type { CollectCoordinator } from "../assembly/collect-coordinator.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project, tryTransition } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
@@ -112,7 +111,7 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
- *   getPool/getWorktreeManager/getCwd/getRoundSupervisor/getCollectCoordinator）：
+ *   getPool/getWorktreeManager/getCwd/getRoundSupervisor）：
  *   getter 现读同一实例（B-6 roundSupervisor 留壳、C-6 装配闭包经壳 late-bound）。
  * - 会话基线 getter（getExecNesting/getSessionRootId）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
@@ -147,8 +146,6 @@ export interface RunOrchestrationDeps {
   readonly getExecNesting: () => ExecutionNestingContext;
   /** [B-6 留壳] 轮次活性监督器（在途记账/死亡分诊 adoptOnProcessDeath）。 */
   readonly getRoundSupervisor: () => RoundSupervisor;
-  /** [R2 SyncCollect 显式接口] collectCoordinator 公共投影（bg 完成回注 route 投递）。 */
-  readonly getCollectCoordinator: () => CollectCoordinator;
   /** [R3 RecordAccess 显式接口] 步骤 1 身份解析（三层：override → agentConfig → 主
    *  agent model；含 pi 未命中跨引擎候选文案）。 */
   readonly resolveIdentity: (
@@ -495,12 +492,8 @@ export class RunOrchestration {
     const { isPiRoute, engineModel, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
     const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, isPiRoute);
     const record = this.deps.createRecordForMode(identity, recordOpts, mode);
-    // [modeless 波3] collect 路由选项派发落点：sync 路由成员在派发时点登记进协调器
-    // （成员身份 = 协调器登记态，非 record 字段——collectMode 已出 record）。登记后
-    // record 本条计入 pendingSyncCount（start 响应回显段），终态通知经 route 入批。
-    if (recordOpts.collect === "sync") {
-      this.deps.getCollectCoordinator().registerMember(record.id);
-    }
+    // [collect 退役] 原 sync 路由派发落点（recordOpts.collect === "sync" 时登记进
+    // 协调器）已随批机制删除——完成通知恒为逐条 async 投递。
     this.deps.getNotifyHost().emitPendingRegister(record.id, record.agent);
 
     // ── worktree 创建（仅 worktree===true 或已传入 handle 时）──

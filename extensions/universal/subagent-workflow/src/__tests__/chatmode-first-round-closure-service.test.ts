@@ -145,7 +145,9 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
   it("首轮 run 应答 settle：running(idle 折入) + round 0→1 + notifyComplete（status=running、round 透传）", async () => {
     const pi = makePi();
     service.initSession({ pi, sessionId: "root-session" }); // 换上带 spy 的 pi
-    const spy = vi.spyOn(internals.notifyHost, "notify");
+    // [collect 退役] 成功轮完成通知唯一通道 = notifyHost.notifyComplete（内部
+    // toNotifyRecord 映射 + notifier.notify）——观察点挂 notifyComplete（record 入参）。
+    const spy = vi.spyOn(internals.notifyHost, "notifyComplete");
 
     const handle = await service.execute({ task: "do something", slug: "test" });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
@@ -165,11 +167,12 @@ describe("[V2 决策 2/3] chatMode 首轮闭环：run 应答 settle（协议形�
     expect(record!.status).toBe("idle");
     expect(record!.round).toBe(1);
     expect(record!.result).toBe("first-round-done");
-    // 首条通知入参为 toNotifyRecord 映射后的 BgNotifyRecord（chatMode running →
-    // status="running"，round 透传供 dedup key 递增）。spy 可能收到 settle 内 notify 与
-    // run 续体 collectCoordinator 回注两次调用——同 id:round 在 notifier dedup 层吞并，
-    // 用户可见面（pi.sendMessage）恒 1 条（末尾断言）。
-    expect(spy.mock.calls[0]?.[0]).toMatchObject({ id: record!.id, status: "running", round: 1 });
+    // 首条通知入参 = 完成通知的 record（轮终翻边 idle，round 已随簿记 +1 透传，
+    // result 从应答 content 写入——BgNotifyRecord 投影 status="running" 由
+    // notify-host 的映射用例承保）。[collect 退役] 原「settle 内 notify 与 run 续体
+    // collectCoordinator 回注」双调用点收敛为成功轮单通道——用户可见面
+    //（pi.sendMessage）恒 1 条（末尾断言）。
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ id: record!.id, round: 1, result: "first-round-done" });
     // record 留 store（首轮完成不终态化——原 early-return 的正语义）
     expect(internals.store.getMutable(record!.id)).toBe(record);
     // 双通知点同 id:round → dedup：用户可见恰 1 条

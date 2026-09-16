@@ -4,7 +4,8 @@
 //   - legacy 终态族（markFinalized / markCancelled——workflow D7 例外族专用，U5 退役）；
 //   - settle / 意愿动作族（markSettled / markReactivated / markReopened / markArchived /
 //     markIdleEvicted——永久会话模型 §3.2.2/§3.2.5）；
-//   - sync 批终态（markBatchFinalized）与磁盘终态位翻活（markResurrected）；
+//   - 磁盘终态位翻活（markResurrected）；[collect 退役] 原 sync 批终态
+//     （markBatchFinalized）已随批机制删除；
 //   - binding settle 快照族（settleSnapshotPatch / fullBindingPayload /
 //     persistSettleSnapshot——U7 统计口径的写侧载荷）与写权 release 锚分派
 //     （releaseWriteLeaseImpl）。
@@ -15,7 +16,7 @@
 // [D7 写面约束] 本文件不 import 任何 `.state`/`.alive`/manifest 写函数——
 // 七名写函数的调用字面只留在 record-store.ts（守卫 R1 与 eslint
 // no-restricted-imports 的白名单物理边界），经 TerminalCtx 注入（ctx 字段名
-// 刻意避开七名：persistFinalized / acquireLease / releaseLease / writeBatchManifest）。
+// 刻意避开七名：persistFinalized / acquireLease / releaseLease）。
 // 依赖方向单向：terminal → rebuild（投影），rebuild/rounds 不回 import 本文件。
 
 import * as fs from "node:fs";
@@ -27,11 +28,10 @@ import { resurrectClosed } from "./execution-record.ts";
 import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath, STATE_SIDECAR_EXT } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
-import { batchManifestRecord, derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
+import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
 import { ResurrectDeniedError, isPiTranscriptRef } from "../assembly/types.ts";
 import type { ClosedReason, ExecutionRecord, StopReason, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
-import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
 const logger = getLogger("subagents");
 
@@ -55,8 +55,6 @@ export interface TerminalCtx {
   acquireLease: (sessionFile: string, marker: { pid: number; id: string; startedAt: number }) => void;
   /** `.alive` 写权释放（removeAliveMarker 注入位）。 */
   releaseLease: (sessionFile: string) => void;
-  /** manifest 异步写（ManifestStore.writeManifest 注入位——降级分支用）。 */
-  writeBatchManifest: (manifest: ManifestRecord) => Promise<void>;
   /** [D8 v7] manifest 同步写目录（构造时快照；undefined = 纯内存测试形态）。 */
   manifestDir: string | undefined;
   archive: (record: ExecutionRecord) => void;
@@ -141,50 +139,7 @@ export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): bo
   return true;
 }
 
-/**
- * 意图原语：sync 批终态（统一写点）。内部写序显式复刻 barrier：manifest 落盘
- * **完成**先于批通知写账（batchFinalized 落标 entry）——「通知可达 ⇒ 索引就位」
- * 构造性保证（session-reader 指针行反查依赖；缓存降级下 barrier 不可删，D4②/D5）。
- * manifestDir 提供时为同步写（写完即返回）；缺省降级 allSettled 异步屏障（原
- * writeSyncBatchManifestBarrier，已随 U3 归口删除）。
- */
-export async function markBatchFinalizedImpl(records: readonly SubagentRecord[], ctx: TerminalCtx): Promise<void> {
-  if (ctx.manifestDir !== undefined) {
-    for (const rec of records) {
-      try {
-        writeAtomicFileSync(
-          path.join(ctx.manifestDir, `${rec.id}.json`),
-          JSON.stringify(batchManifestRecord(rec), null, MANIFEST_INDENT_SPACES),
-        );
-      } catch (err) {
-        logger.warn("[subagents] batch-finalized manifest sync write failed (pointer lookup index missing for this member)", {
-          detail: { id: rec.id, error: err instanceof Error ? err.message : String(err) },
-        });
-      }
-    }
-  } else {
-    // 缺省降级分支（仅纯内存测试形态可达）：异步屏障 allSettled（失败 warn 不
-    // 阻断写账——反查索引缺失只影响指针行反查，session-reader 错误文案已指引
-    // 绝对路径兜底）。
-    const results = await Promise.allSettled(
-      records.map((rec) => ctx.writeBatchManifest(batchManifestRecord(rec))),
-    );
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!;
-      if (result.status === "rejected") {
-        logger.warn("[subagents] batch-finalized manifest write failed", {
-          detail: { id: records[i]!.id, error: result.reason instanceof Error ? result.reason.message : String(result.reason) },
-        });
-      }
-    }
-  }
-  // 批通知写账（barrier 之后）：显式覆写 batchFinalized 落标——防非 entry 源重建
-  //（getFullRecord sidecar/manifest 分支）丢标记。[modeless 波3] collectMode 覆写
-  // 随字段消亡删除。
-  for (const rec of records) {
-    ctx.reportSubagentRecord({ ...rec, batchFinalized: true });
-  }
-}
+// [collect 退役] 原 markBatchFinalizedImpl（sync 批终态统一写点）已随批机制整体删除。
 
 /**
  * 意图原语：磁盘终态位翻回活态（透明重生回边整体收编，D3c 规格）。

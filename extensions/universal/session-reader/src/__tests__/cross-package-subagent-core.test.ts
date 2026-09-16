@@ -20,20 +20,21 @@ import {
 } from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 /**
- * W4 跨包集成测试（subagent-sync-collect v2 impl-plan W4 验收条款①，设计 §5 W4：
- * 「subagent-core 真实 tmpdir 产出磁盘状态 → session-reader result action sa- id 反查，
- * 不 mock manifest 写入」）。
+ * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动面
+ * 随 sync 批机制删除，现行真实投影出口 = store 重建通道 rebuildIndexes——manifest
+ * 是可丢缓存，boot 全量腿按磁盘子文件锚幂等补缺）。「subagent-core 真实 tmpdir
+ * 产出磁盘状态 → session-reader result action sa- id 反查，不 mock manifest 写入」
+ * 的跨包契约保持不变。
  *
- * 与 result.test.ts 的分工：result.test.ts 的 fixture **手工预写** manifest（U6 时期
- * W3 投影代码尚不存在）；本文件 manifest 内容必须来自 v2 W3 的投影代码路径——
- * subagent-core 侧真实驱动 E1 崩溃恢复（kill -9 同构链路：真实 RecordStore 落盘
- * register/轮终 entry → initSession 内 orphan 覆写真实跑 → recoverSyncCollectBatch
- * 落标出口 appendBatchFinalizedEntry fire-and-forget 真写 records/<sa-id>.json），
- * session-reader 侧零 mock 读同一 tmpdir 断言反查闭环。
+ * 与 result.test.ts 的分工：result.test.ts 的 fixture **手工预写** manifest；本文件
+ * manifest 内容必须来自投影代码路径——subagent-core 侧真实驱动（真实 RecordStore
+ * 落盘 register/轮终 entry → initSession 内 orphan 覆写真实跑 → rebuildIndexes
+ * derivedManifestRecord 投影真写 records/<sa-id>.json），session-reader 侧零 mock
+ * 读同一 tmpdir 断言反查闭环。
  *
  * 构造形态取自 subagent-core sync-collect-recovery.test.ts 的 kill -9 同构主用例
- * （W1 领地，形态同构是 v1 教训「种子绕过真实链路 = 假绿」的执行）：子 session 文件
- * 在其基础上补 message entries（result action 的正文提取源）。
+ * （形态同构是 v1 教训「种子绕过真实链路 = 假绿」的执行）：子 session 文件在其
+ * 基础上补 message entries（result action 的正文提取源）。
  *
  * mock 面最小：仅构造 SubagentService 所需的最小 pi 形状（appendEntry 真写主文件，
  * 其余 no-op stub）——零 vi.mock、notifier/store/config 全真实实现，agentDir 全部
@@ -102,8 +103,6 @@ function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): Suba
     result: undefined,
     error: undefined,
     sessionFile: undefined,
-    chatMode: false,
-    collectMode: 'sync',
     ...overrides,
   }
 }
@@ -118,7 +117,7 @@ interface MemberSeed {
   model: string
 }
 
-describe('跨包集成：subagent-core E1 落标 manifest → session-reader result 反查（W4）', () => {
+describe('跨包集成：subagent-core 重建 manifest → session-reader result 反查（W4）', () => {
   let agentDir: string
   let mainFile: string
   let services: SubagentService[]
@@ -224,20 +223,10 @@ describe('跨包集成：subagent-core E1 落标 manifest → session-reader res
     )
   }
 
-  /** 手写短轮询（真实 timers，vitest 4.1.8 vi.waitFor 对 falsy callback 不轮询——
-   *  subagent-core 同款纪律）：manifest 为 fire-and-forget 异步写，需轮询等落盘。 */
-  async function until(cond: () => boolean, timeoutMs = 3000): Promise<void> {
-    const start = Date.now()
-    while (!cond()) {
-      if (Date.now() - start > timeoutMs) {
-        throw new Error(`cross-pkg: condition not met within ${timeoutMs}ms`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-  }
-
-  /** 全链路驱动：种子 → 恢复 service（orphan 覆写）→ E1（落标出口真写 manifest）。
-   *  返回子 session 文件路径表。 */
+  /** 全链路驱动：种子 → 恢复 service（orphan 覆写）→ rebuildIndexes（现行 boot
+   *  全量重建通道——derivedManifestRecord 投影真写 manifest）。返回子 session 文件
+   *  路径表。[collect 退役] 原 E1 落标出口（recoverSyncCollectBatch →
+   *  appendBatchFinalizedEntry）随 sync 批机制删除。 */
   async function driveSyncBatchRecovery(members: MemberSeed[]): Promise<Map<string, string>> {
     const childFiles = new Map<string, string>()
     for (const m of members) {
@@ -246,12 +235,15 @@ describe('跨包集成：subagent-core E1 落标 manifest → session-reader res
       seedRoundTerminalEntries(m, childFile)
     }
     const service = makeRecoveryService()
-    service.recoverSyncCollectBatch()
-    // E1 落标出口 appendBatchFinalizedEntry 的 manifest 是 fire-and-forget best-effort
-    // 写——轮询等全部成员 manifest 真实落盘（W3 投影代码路径的产物）。
-    await until(() =>
-      members.every((m) => fs.existsSync(path.join(getSubagentRecordsDir(agentDir, agentDir), `${m.id}.json`))),
-    )
+    service.rebuildIndexes()
+    // derivedManifestRecord 投影为同步落盘——全成员 manifest 即刻可见（W3 投影
+    // 代码路径的产物，非手工预写）。
+    for (const m of members) {
+      expect(
+        fs.existsSync(path.join(getSubagentRecordsDir(agentDir, agentDir), `${m.id}.json`)),
+        `manifest of ${m.id}`,
+      ).toBe(true)
+    }
     return childFiles
   }
 
@@ -265,10 +257,10 @@ describe('跨包集成：subagent-core E1 落标 manifest → session-reader res
     }
     const childFiles = await driveSyncBatchRecovery([m])
 
-    // manifest 内容断言（W3 appendBatchFinalizedEntry 投影路径的产物，非手工预写）：
-    // sessionFile 来自 W1 投影扩展。[U2/U3 两态桥接] E1 落标成员经恢复链覆写后处于
-    // idle（重建单规则）/running 形态、无旧终态遗留位 → legacy status 如实投影
-    // "running"（batchManifestRecord 单点派生，session-reader 视角的活跃成员）。
+    // manifest 内容断言（rebuildIndexes → derivedManifestRecord 投影路径的产物，
+    // 非手工预写）：sessionFile 来自 W1 投影扩展。[U2/U3 两态桥接] 恢复链覆写后成员
+    // 处于 idle（重建单规则）、无旧终态遗留位 → legacy status 如实投影 "running"
+    //（legacyManifestStatusFields 单点派生，session-reader 视角的活跃成员）。
     const manifest = JSON.parse(
       fs.readFileSync(path.join(getSubagentRecordsDir(agentDir, agentDir), 'sa-cross-1.json'), 'utf-8'),
     ) as Record<string, unknown>

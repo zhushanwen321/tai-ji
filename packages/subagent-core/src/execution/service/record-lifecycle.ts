@@ -35,9 +35,8 @@
 //      编排消费——R4 领地，本单元留置不动（壳直调壳字段，非跨聚合写）。
 //    - closeSubagent 对 Continuation 队列的清空（continuations.get(...)?.abortAndClearQueue）：
 //      deps.abortContinuationQueue 回调（同 C-5 邻接面，R4 改指聚合显式接口）。
-//    - cancelBackground 的 collectCoordinator.route（#5 SyncCollect 显式 getter 投影）：
-//      deps.getCollectCoordinator() 晚绑定现读——聚合间经显式接口协作（route 是
-//      CollectCoordinator 公共方法），零私有互调。
+//    - [collect 退役] 原 cancelBackground 的 collectCoordinator.route 协作（#5
+//      SyncCollect 显式 getter 投影）随批机制退役删除。
 // 4. 只搬不改：方法体除依赖注入通道替换外逐字节保留——本聚合是 H4 落点宿主，写点
 //    通道表（r0-inventory 清单②）中 #4 的 promoteSessionFileFromEngineHandle（A 通道
 //    唯一 R3 迁移项）+ store.archive（B）+ manifest/sidecar（D/E）原样随迁。
@@ -77,11 +76,12 @@ const logger = getLogger("subagents");
 /**
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
- * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。跨域边三类：
+ * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。跨域边两类：
  * - 断言面（assertReady）：close/cancel 入口的就绪门（本体在 SessionBaselines，壳转发）。
  * - 跨域汇聚回调（onRecordFinalizedCleanup / abortContinuationQueue）：#14 Continuation
  *   协作面的终态清理与队列清空（C-5），壳装配指向壳方法；R4 抽取后改指聚合显式接口。
- * - 显式接口协作（getCollectCoordinator）：#5 SyncCollect 的公共投影（route 投递）。
+ *   [collect 退役] 原显式接口协作 getCollectCoordinator（#5 SyncCollect route 投递）
+ *   随批机制退役删除。
  */
 export interface RecordLifecycleDeps {
   /** [D4 下沉] assertReady 断言（本体在 SessionBaselines，壳转发）。 */
@@ -407,34 +407,8 @@ export class RecordLifecycle {
     await this.archiveRecord(record, "close(idle)");
   }
 
-  /** [modeless 波3] 批闭合自动 close：collect 批 flush 投递后对成员执行归档
-   *  （SyncCollectDomain flushBatch 闭包消费，经壳装配闭包注入）。
-   *
-   *  archiveIdleRecord 的静默变体：保活进程回收 + 监护器撤下 + 归档编排（worktree
-   *  patch 前移/cleanup + markArchived + pending 注销）全部同款，唯一差异 = **不发
-   *  「已收起」提示**（notifyClosed）——批通知即成员的终态通知（closed 载荷带
-   *  result，随 flush 投递），逐成员归档提示会击穿「攒批一次唤醒」语义。归档幂等
-   *  （markArchived no-op）；成员已离场（getMutable 落空——GC/早前归档）安全跳过。
-   *  归档后续聊路径 = fork-from（归档 record 可 fork，已有能力）。 */
-  async archiveBatchMembers(recordIds: readonly string[]): Promise<void> {
-    for (const id of recordIds) {
-      const record = this.deps.getStore().getMutable(id);
-      if (!record) continue;
-      disarmIdleTimer(record.id);
-      disarmSettledWatchdog(record.id);
-      disarmRoundFromProtocol(record.id);
-      killRecordChildWithEscalation(record.id, "archiveBatchMembers");
-      if (record.worktreeHandle) {
-        await this.archiveWorktreeResources(record, "batch-close");
-      }
-      // 批域标记随归档 entry 透传：落标 entry（batchFinalized=true）由 flush 的重建
-      // record 写出，本内存 record 不携带——归档 entry（last-writer-wins）若不补标记
-      // 会把落标标记抹掉。归档即成员离场，标记语义为真。
-      record.batchFinalized = true;
-      this.deps.getStore().markArchived(record);
-      this.deps.getNotifyHost().emitPendingUnregister(record.id, "archived");
-    }
-  }
+  // [collect 退役] 原 archiveBatchMembers（批闭合自动 close——flush 投递后对成员
+  // 静默归档）已随 sync 批机制整体删除。
 
   /**
    * [U5 / §3.2.1 资源组] idle 超时**进程回收**（现状 5min 保留）：idle timer 到期

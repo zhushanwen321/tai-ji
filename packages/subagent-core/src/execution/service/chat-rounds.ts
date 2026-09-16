@@ -30,8 +30,8 @@
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——#1 留壳共享依赖
-//   （store/modelService/notifyHost/pool/worktreeManager/roundSupervisor/
-//    collectCoordinator）getter 现读同一实例；会话基线运行时可变态
+//   （store/modelService/notifyHost/pool/worktreeManager/roundSupervisor）
+//   getter 现读同一实例；会话基线运行时可变态
 //   （sessionRootId/streamSink/uiObservability/pi/cwd）经壳 getter 现读；R3 聚合显式
 //    接口（finalizeFailed/finalizeAborted/idleTimeoutRecycle/archiveRecord）壳装配指
 //    RecordLifecycle 实例方法。
@@ -45,7 +45,6 @@
 import { getLogger } from "../../core/logger.ts";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
-import type { CollectCoordinator } from "../assembly/collect-coordinator.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import {
   ConversationContinuation,
@@ -113,7 +112,7 @@ function delay(ms: number): Promise<void> {
  * - 断言面（assertReady）：deliverChatMessage 入口就绪门（本体在 SessionBaselines，
  *   壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/getPool/
- *   getWorktreeManager/getCwd/getPi/getRoundSupervisor/getCollectCoordinator）：
+ *   getWorktreeManager/getCwd/getPi/getRoundSupervisor）：
  *   getter 现读同一实例。
  * - 会话基线 getter（getSessionRootId/getStreamSink/getUiObservability）：initSession
  *   注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
@@ -152,9 +151,6 @@ export interface ChatRoundsDeps {
   readonly getUiObservability: () => UiRequestObservability;
   /** [B-6 留壳] 轮次活性监督器（轮次在途记账 noteRunStarted/noteRunEnded）。 */
   readonly getRoundSupervisor: () => RoundSupervisor;
-  /** [R2 SyncCollect 显式接口] collectCoordinator 公共投影（轮末回注 route 投递 +
-   *  Continuation routeRecord 回调面）。 */
-  readonly getCollectCoordinator: () => CollectCoordinator;
   /** [R3 RecordLifecycle 显式接口] 轮次 run 失败的收尾（kickOffChatRound catch 面）。 */
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] one-shot 轮排队中被 abort 的收尾（[U5] cancel 语义
@@ -622,9 +618,7 @@ export class ChatRounds {
     const created = new ConversationContinuation(record, {
       dispatchChatRound: (rec, input) => this.dispatchChatRoundForContinuation(rec, input),
       finalizeRoundOutcome: (rec, outcome) => this.finalizeRoundToIdle(rec, outcome),
-      routeRecord: (rec) => this.deps.getCollectCoordinator().route(rec),
-      // [modeless 波3] 批成员资格查询（失败轮分流判据——登记态现读，collectMode 已出 record）。
-      isCollectMember: (id) => this.deps.getCollectCoordinator().isMember(id),
+      notifyComplete: (rec) => this.deps.getNotifyHost().notifyComplete(rec),
       notifyRecord: (n) => this.deps.getNotifyHost().notify(n),
       killStaleChild: (id) => this.killStaleChildBeforeDispatch(id),
       killRoundChild: (id, source) => this.killRoundChildForWatchdog(id, source),

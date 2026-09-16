@@ -154,9 +154,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 的引擎轴资格判据读 service.engineSupportsConversation
     //（stub 缺省放行 = pi 默认引擎语义；拒绝面专项见 conversation-continuation.test.ts）。
     engineSupportsConversation: vi.fn(() => true),
-    // [U2] startHandler 缺省 collect 解析读真实 config（偏差#3 接线）：stub 缺省 async
-    //（本文件不测 collect 语义，专项见 start-collect-guard.test.ts）。
-    getCollectSyncDefault: vi.fn(() => "async" as const),
     ...over,
   };
   return {
@@ -165,9 +162,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
     // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
     engineSupportsConversation: m.engineSupportsConversation,
-    // [U2 偏差#3 接线] startHandler 经平铺访问器读 config 缺省 collect（真实 service
-    // 为平铺方法 subagent-service.ts:1786，非 queries 聚合面成员），stub 须同构挂载。
-    getCollectSyncDefault: m.getCollectSyncDefault,
     queries: {
       findRecord: m.findRecord,
       lookupRecordAnyState: m.lookupRecordAnyState,

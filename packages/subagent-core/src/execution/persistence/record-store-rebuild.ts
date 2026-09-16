@@ -334,8 +334,9 @@ export function isEngineHandleShape(
  *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
  *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
  *  守卫已滤非 running 末条）；closedReason 经 isValidClosedReason 枚举守卫。
- *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除——
- *  桥接期豁免判据由 isCollectPending 的 status 子句承载）：sessionFile 原硬编码
+ *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除；
+ *  [collect 退役] 原桥接期豁免判据 isCollectPending 的 status 子句已随批机制删除）：
+ *  sessionFile 原硬编码
  *  undefined，导致
  *  E1 落标路径重建快照丢失反查索引锚（断链 1 前置依赖）。recoverEntryOnlyOrphans
  *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，该字段不参与
@@ -656,32 +657,6 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
   };
 }
 
-/** 批成员 manifest 投影（markBatchFinalized 用；原 writeBatchMemberManifest，
- *  已随 U3 归口删除——status 如实投影[成功成员此刻 running+resumable]，后续
- *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。
- *  [U2 两态桥接] 旧 status 三态经桥接判据派生（idle ∧ closedReason 有值 → 终态投影），
- *  executionStatus 直投两态词汇。[U8] intent + engine 域随投影下行（同 derived）。 */
-export function batchManifestRecord(rec: SubagentRecord): ManifestRecord {
-  return {
-    id: rec.id,
-    rootSessionId: rec.rootSessionId ?? "",
-    parentRecordId: rec.parentRecordId,
-    agentName: rec.agent,
-    ...legacyManifestStatusFields(rec),
-    executionStatus: rec.status,
-    intent: rec.intent,
-    closedReason: rec.closedReason,
-    createdAt: rec.startedAt,
-    completedAt: rec.endedAt,
-    sessionFile: rec.sessionFile,
-    task: rec.task,
-    slug: rec.slug,
-    model: rec.model,
-    engine: rec.engine,
-    engineHandle: rec.engineHandle,
-  };
-}
-
 /**
  * [U2 两态桥接 + U8 / §3.2.8] 旧 status 三态（session-reader 兼容契约）的派生单点。
  * 判定序（先命中先出）：
@@ -696,7 +671,7 @@ export function batchManifestRecord(rec: SubagentRecord): ManifestRecord {
  *      「为什么停」经 executionStatus + 下游 stopReason 通道表达，不翻旧终态：
  *      settle 的 record 仍可 message 续聊，投 closed 会让旧版把它当已完成分区成员，
  *      message 寻回后再翻回 running = 状态反复横跳，比恒 running 更漂移）。
- * derivedManifestRecord 与 batchManifestRecord 共用（防两处手写判据漂移）。
+ * derivedManifestRecord 唯一消费（[collect 退役] batchManifestRecord 投影随批写侧删除）。
  */
 function legacyManifestStatusFields(
   rec: SubagentRecord,

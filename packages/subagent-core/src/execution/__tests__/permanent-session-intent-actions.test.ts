@@ -366,12 +366,11 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       finalizeRoundOutcome: async () => {
         order.push("finalize");
       },
-      routeRecord: () => {
+      // [collect 退役] 原 routeRecord（collectCoordinator.route 成功通知路由）收敛为
+      // notifyComplete 直通面；isCollectMember 失败轮分流判据随批机制删除。
+      notifyComplete: () => {
         order.push("route");
       },
-      // [modeless 波3] 批成员资格查询（失败轮分流判据）——本 stub 恒 false（async
-      // 失败单发路径；批成员入批形态见 collect-coordinator 测试）。
-      isCollectMember: () => false,
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
@@ -411,8 +410,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
     const host = {
       dispatchChatRound: vi.fn(),
       finalizeRoundOutcome: async () => {},
-      routeRecord: vi.fn(),
-      isCollectMember: vi.fn(() => false),
+      notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
@@ -433,7 +431,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 
     cont.onRunSettled({ content: "normal round", engineId: "pi" } as never);
 
-    await vi.waitFor(() => expect(host.routeRecord).toHaveBeenCalled());
+    await vi.waitFor(() => expect(host.notifyComplete).toHaveBeenCalled());
     await new Promise((r) => {
       setTimeout(r, 10);
     });
@@ -510,8 +508,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
         void rec;
       },
       finalizeRoundOutcome: async () => {},
-      routeRecord: vi.fn(),
-      isCollectMember: vi.fn(() => false),
+      notifyComplete: vi.fn(),
       notifyRecord: (n: { error?: string }) => calls.notified.push(n),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),

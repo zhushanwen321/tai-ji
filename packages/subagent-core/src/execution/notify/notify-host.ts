@@ -8,7 +8,7 @@ import { displayAgentName } from "../../shared/agent-ref.ts";
 import { snapshot } from "../persistence/execution-record.ts";
 import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import { hasLiveProcessHandle, isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
-import type { BgNotifier, BatchBudgetParams, NotifierHost } from "./notifier.ts";
+import type { BgNotifier, NotifierHost } from "./notifier.ts";
 import { createNotifier } from "./notifier.ts";
 import type { BgNotifyRecord } from "./notifier.ts";
 import type { ExecutionRecord, RecordSnapshot } from "../assembly/types.ts";
@@ -50,16 +50,11 @@ export interface NotifyHost {
   emitPendingRegister(id: string, name?: string): void;
   /** pending-notifications 注销（原模块函数 emitPendingUnregister）。 */
   emitPendingUnregister(id: string, reason: string): void;
-  /** [sync-collect U2 合并] record → BgNotifyRecord 映射——collectCoordinator 的
-   *  toNotifyRecord/notifyAsync 依赖注入消费（守卫放行逻辑单一权威在本文件）。
-   *  [modeless 波3] batchMember=true = sync 批成员终态载荷形态（closed 载荷），由
-   *  协调器 route 入缓冲路径传入——成员身份承载自协调器登记集，非 record 字段。 */
-  toNotifyRecord(record: ExecutionRecord, opts?: { batchMember?: boolean }): BgNotifyRecord | undefined;
-  /** [sync-collect 合并] 单条直发——collectCoordinator notifyAsync 与 E9 dispose
-   *  转换路径消费（已越过 toNotifyRecord 守卫的成品通知）。 */
+  /** record → BgNotifyRecord 映射（notifyComplete/notifyClosed 与 Continuation
+   *  成功轮直发通道共用；守卫放行逻辑单一权威在本文件）。 */
+  toNotifyRecord(record: ExecutionRecord): BgNotifyRecord | undefined;
+  /** 单条直发——已越过 toNotifyRecord 守卫的成品通知（Continuation 失败轮直投）。 */
   notify(record: BgNotifyRecord): void;
-  /** [sync-collect 合并] sync 批投递——collectCoordinator flushBatch 消费。 */
-  notifyBatch(records: readonly BgNotifyRecord[], budget?: BatchBudgetParams): boolean;
   /** dispose 的逆操作（initSession 复活，原 notifier.revive 委托）。 */
   revive(): void;
   /** dispose 前冲刷待发通知（原 notifier.flushPendingNotifications 委托）。 */
@@ -128,13 +123,12 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
    *  → closed 载荷（completed 文案族）。 */
   const toNotifyRecord = (
     record: ExecutionRecord,
-    opts?: { batchMember?: boolean },
   ): BgNotifyRecord | undefined => {
     // [H2 W2 / D6] workflow origin 回注全静默（单漏斗 origin gate）：完成/关闭/失败
     // 回注经此全部拒绝——workflow agent 结果由脚本返回值承载（无 message 对端），
     // 回注只会把已隐藏的 record 通知主 agent（设计 D6 出口枚举化；失败回注同静默，
-    // v3 扩）。单漏斗盖住全部调用点（notifyComplete/notifyClosed/collectCoordinator
-    // route 六调用面全经此，禁止散改调用点）；监督器 steer 通知族不经本漏斗——随
+    // v3 扩）。单漏斗盖住全部调用点（notifyComplete/notifyClosed/Continuation 成功
+    // 轮直发通道全经此，禁止散改调用点）；监督器 steer 通知族不经本漏斗——随
     // adopt 豁免对 workflow record 零触发。
     if (record.origin === "workflow") return undefined;
     const snap = snapshot(record);
@@ -159,18 +153,12 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // legacyClosed/archived → BgNotifyRecord.closed（终态/已收起文案族）；轮终收口
     // idle（含失败轮回退）→ running（轮次完成，等待 message 续）。
     // [modeless 波1·SP-5 统一] one-shot 成功轮不再折 closed——统一 idle 留守 +
-    // 轮终通知带 result（closed 载荷只留给 legacy 终态遗留 / 归档提示 / 批成员终态；
+    // 轮终通知带 result（closed 载荷只留给 legacy 终态遗留 / 归档提示；
     // record 的 closed 终态通知延到 idle GC 到期归档后的需要时点）。worktree patchFile
     // 的 git apply 提示仍在 closed+completed 分支文案——one-shot worktree 轮终通知
     // 随 SP-5 统一迁移 running 形态，patch 回收指针改由 result 轮次通知后的
     // fork/close 流程承接（GUI 波 4 收口）。
-    // [modeless 波3·批成员身份判定] sync 批成员保持 closed 载荷（攒批一次唤醒的
-    // one-shot 语义——批头计数 / patchFile 提示依赖 closed+outcome 形态；批成员
-    // 完成 = 终态通知带 result，随后随批闭合自动 close）。成员身份由协调器登记集
-    // 承载（route 入缓冲路径显式传入 batchMember）——collectMode 字段已出 record，
-    // 波 1 临时保留的 record.collectMode 门随之消亡。async 成员按统一轮终形态 running。
-    const notifyStatus: BgNotifyRecord["status"] =
-      legacyClosed || archived || opts?.batchMember === true ? "closed" : "running";
+    const notifyStatus: BgNotifyRecord["status"] = legacyClosed || archived ? "closed" : "running";
     return {
       id: snap.id,
       status: notifyStatus,
@@ -241,16 +229,12 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       emitPendingUnregister(deps.getPi(), id, reason);
     },
 
-    toNotifyRecord(record: ExecutionRecord, opts?: { batchMember?: boolean }): BgNotifyRecord | undefined {
-      return toNotifyRecord(record, opts);
+    toNotifyRecord(record: ExecutionRecord): BgNotifyRecord | undefined {
+      return toNotifyRecord(record);
     },
 
     notify(record: BgNotifyRecord): void {
       notifier.notify(record);
-    },
-
-    notifyBatch(records: readonly BgNotifyRecord[], budget?: BatchBudgetParams): boolean {
-      return notifier.notifyBatch(records, budget);
     },
 
     revive(): void {

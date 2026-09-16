@@ -110,16 +110,10 @@ export interface StartHandlerInput {
   idleTimeoutMs?: number;
   /** 执行引擎（三层路由第一层：本参数 > agent frontmatter engine > config defaultEngine）。 */
   engine?: string;
-  /**
-   * 同步收集模式（subagent-sync-collect U1 foundation）。undefined = config
-   * collectSync.default（缺省 "async"）。schema 层枚举限 "async"|"sync"；运行时
-   * 宽收 string 与 engine 字段同风格（pi 工具框架把 schema Static 解析为 string；
-   * 非法值 ≠ "sync" 按 async 处理）。透传 service.execute（ExecuteOptions.collect）。
-   * [modeless 波3] collect 是派发时的通知路由选项（sync=完成通知攒批一次唤醒 +
-   * 批闭合自动 close 成员 / async=逐个通知），非 record 模式；与 conversation 参数
-   * 的组合限制（E4）已删——sync 路由成员在派发时点登记进协调器（executeViaEngine）。
-   */
-  collect?: string;
+  // [collect 退役] 原 collect 字段（sync 批通知路由选项）已随 collect 批机制整体删除：
+  // pi 对未知字段静默放行（typebox 无 additionalProperties），存量调用形态的 collect
+  // 值到达此处即被忽略——批量编排走 `subagents` tool（fan-out 模板），完成通知恒为
+  // 逐条 async 投递。
 }
 
 /** start 领域对象（宿主 adapter 包成 bg 工具结果）。 */
@@ -364,15 +358,6 @@ export async function startHandler(
   );
   if (slug.length > SLUG_MAX_LENGTH) throw new Error(`slug must be ≤${SLUG_MAX_LENGTH} chars (got ${slug.length}). Shorten to a kebab-case label, e.g. "fix-login", "extract-urls".`);
 
-  // ── collect 解析（subagent-sync-collect）──
-  // resolved = 显式参数 ?? config collectSync.default（U2 偏差#3 接线：经 service
-  // 公开访问器读真实 config，内部 DEFAULT 兑底——config 未配/读失败不炸）。
-  // [modeless 波3·E4 删除] 旧「collect:"sync" + conversation:true 即拒」守卫随批闭合
-  // 自动 close 消亡：collect 是派发时的通知路由选项（sync=攒批一次唤醒 + 批闭合自动
-  // close 成员），不再是 record 模式，与 conversation 参数（accepted-no-op，波 5 删）
-  // 的组合不再构成语义冲突，无需前置拒。
-  const resolvedCollect = input.collect ?? service.getCollectSyncDefault();
-
   const handle = await service.execute({
     task,
     slug,
@@ -389,11 +374,6 @@ export async function startHandler(
     cwd: input.cwd,
     idleTimeoutMs: input.idleTimeoutMs,
     engine: input.engine,
-    // B1（code-simplify 审查发现的行为缺口）：config collectSync.default=sync 且调用方
-    // 省略 collect 时，本条派发也要按 sync 路由登记（设计 §3.1.3「缺省 = config 默认」
-    // 作用于派发路由，而非仅回显）——原样透传 input.collect 会让本条走 async 逐条通知
-    // 而响应声称已入批。仅 sync 落值：async/缺省路径传 undefined 语义字节不变。
-    collect: resolvedCollect === "sync" ? "sync" : input.collect,
     ctxModel,
     signal,
     // background detached 运行，完成由 notify 驱动新 turn。
@@ -405,13 +385,8 @@ export async function startHandler(
     message: BG_MESSAGE,
     notifyContract: NOTIFY_CONTRACT,
   };
-  // 同步收集登记回显段（设计 §3.1.1）：仅 resolved 为 sync 时附段——async 响应
-  // 字节零变化（G3）。pendingSyncCount = 未闭合批 sync 成员总数（含本条，跨轮续累）。
-  // 本条已在 executeViaEngine 派发时点登记进协调器（[modeless 波3]），计数天然含本条，
-  // 无需补偿。
-  if (resolvedCollect === "sync") {
-    response.collect = { mode: "sync", pendingSyncCount: service.pendingSyncMemberCount() };
-  }
+  // [collect 退役] 原 sync 路由登记回显段（response.collect）已随批机制删除——
+  // 完成通知恒为逐条 async 投递。
 
   return {
     kind: "bg",
@@ -521,18 +496,15 @@ export async function cancelHandler(
  *
  * [U4 / §3.2.3 万物可续] 状态分流面收敛：任何非 workflow-origin record 的 message
  * 都放行——idle → Continuation 派发新轮（锚失效自动 markReopened 降级，同 id 带
- * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝面（四类）：异进程占用
- *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界 / **collect:"sync" 批
- * 成员**（[round2-notify-fix] 一次性成员硬拒——批身份/通知账本幂得以「单轮成员」
- * 为前提，续轮会撞第一轮已销账的批键致通知静默丢失，2026-09-14 事故；恢复 =
- * close 后重派，见 G1 例外登记 permanent-session-model.md §1.3）。interrupt 输入字段
+ * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝面（三类）：异进程占用
+ *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界（results are collected
+ * by the workflow run——一次性成员不可续聊，重派走 `subagents` tool）。interrupt 输入字段
  * 保留（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但
  * 不参与分派（D2 统一打断语义）。
  *
  * 归属守卫：getRecordForAction 内部校验 rootSessionId + 直接父。
  *
- * @throws Error subagentId/text 缺失 / 不存在或非本 session 所有 / workflow 域边界 /
- *   collect:"sync" 批成员（恢复指引：close 后重派）
+ * @throws Error subagentId/text 缺失 / 不存在或非本 session 所有 / workflow 域边界
  * @throws ResurrectDeniedError 异进程占用（唯一占用拒绝形态，文案含 pid）
  */
 export async function messageHandler(
