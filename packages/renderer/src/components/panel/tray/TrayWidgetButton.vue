@@ -219,7 +219,10 @@ function warnIconOnce(viewId: string, reason: string): void {
 /** icon fallback 链（D4 四档顺序，见文件头）。越限/未知各 warn 一次后继续下探。 */
 function resolveWidgetIcon(viewId: string, raw: WidgetMeta['icon'] | undefined): WidgetIcon {
   if (raw !== undefined && typeof raw !== 'string') {
-    const validation = validateWidgetIconPaths(raw.paths)
+    // 显式 null 是协议可达形态（wire 上 stripUndefined 只删 undefined 不删 null，第三方独立
+    // 安装扩展可推 icon: null）——null 无 paths 可取，归 'not-array' 走既有兜底链（与非法
+    // paths 同路：warn 一次 + 下探内置映射），守住「坏数据不崩渲染」契约
+    const validation = validateWidgetIconPaths(raw === null ? undefined : raw.paths)
     if (validation.valid) return { kind: 'paths', paths: validation.paths }
     warnIconOnce(viewId, validation.reason)
   } else if (typeof raw === 'string' && raw.trim() !== '') {

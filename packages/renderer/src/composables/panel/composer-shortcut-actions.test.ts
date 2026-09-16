@@ -6,8 +6,8 @@
  *   composer 内选区（放行原生剪切 + 三个切换键与选区无关）/ staging 活跃 / landing 态 / 已建态 /
  *   档位仅 off / 模型 ≤1。IME 行不在本文件测：分发链 IME 段是单点防线（composer-keydown.test.ts
  *   钉住），本表不复判（over-engineering-audit 20260916 裁决）。
- *   §3.3 键位表：修饰键约束（alt+p 不绑定、meta 系不命中）+ 循环取值起点规则（不在列表/
- *   undefined/脏值/绕回/enabled 过滤）。
+ *   §3.3 键位表：修饰键约束（alt+p 不绑定、meta 系不命中）+ 大写 key 平台变体（capslock/shift
+ *   下 key='P'，toLowerCase 防线）+ 循环取值起点规则（不在列表/undefined/脏值/绕回/enabled 过滤）。
  *   决策 8 意图目标生命周期：设立/等值清/reject 清/sessionId 清/进 staging 清/RTT 内连按逐次递进。
  *   §3.5 错误规格：clipboard reject toast error / 空流 no-op 无 toast / 错误消息照常复制 /
  *   空串照常提示。
@@ -174,6 +174,26 @@ describe('useComposerShortcutActions', () => {
       const { deps, onModelSelect } = makeDeps({ currentModelId: 'prov/b' })
       const handler = useComposerShortcutActions(deps)
       const { e } = makeKeyEvent('p', { ctrl: true, shift: true })
+
+      expect(handler(e)).toBe(true)
+      expect(onModelSelect).toHaveBeenCalledTimes(1)
+      expect(onModelSelect.mock.calls[0][0]).toEqual({ modelId: 'a', provider: 'prov' })
+    })
+
+    it('大写 \'P\' + ctrl 命中 model-forward（capslock/shift 平台 key 上报大写，toLowerCase 防线）', () => {
+      const { deps, onModelSelect } = makeDeps({ currentModelId: 'prov/b' })
+      const handler = useComposerShortcutActions(deps)
+      const { e } = makeKeyEvent('P', { ctrl: true })
+
+      expect(handler(e)).toBe(true)
+      expect(onModelSelect).toHaveBeenCalledTimes(1)
+      expect(onModelSelect.mock.calls[0][0]).toEqual({ modelId: 'c', provider: 'prov' })
+    })
+
+    it('大写 \'P\' + ctrl+shift 命中 model-backward（与 ctrl+p 是两个不同 action，独立实例防续步混淆）', () => {
+      const { deps, onModelSelect } = makeDeps({ currentModelId: 'prov/b' })
+      const handler = useComposerShortcutActions(deps)
+      const { e } = makeKeyEvent('P', { ctrl: true, shift: true })
 
       expect(handler(e)).toBe(true)
       expect(onModelSelect).toHaveBeenCalledTimes(1)

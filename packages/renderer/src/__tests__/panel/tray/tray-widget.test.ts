@@ -289,6 +289,19 @@ describe('TrayWidgetButton icon fallback 链（D4）', () => {
     expect(String(warnSpy.mock.calls[0][0])).toContain('illegal-char')
   })
 
+  it('档③ meta.icon 显式 null（协议可达坏形态）→ 落内置映射 + warn，不崩渲染', () => {
+    // icon 类型不含 null，但 wire 上 stripUndefined 只删 undefined 不删 null（第三方独立
+    // 安装扩展可达）——归 'not-array' 走兜底链，与非法 paths 同路（协议契约「坏数据不崩渲染」）
+    const wrapper = mountButton({
+      viewId: 'todo',
+      meta: makeMeta({ icon: null as unknown as WidgetMeta['icon'] }),
+    })
+    expect(wrapper.find('[data-testid="tray-widget-icon-paths"]').exists()).toBe(false)
+    expect(wrapper.find('svg.lucide-list-checks').exists()).toBe(true)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0][0])).toContain('not-array')
+  })
+
   it('档④ 通用兜底：未知 viewId + 未知 key → LayoutGrid（与 view 兜底 icon 同源）', () => {
     const wrapper = mountButton({ viewId: 'custom-note', meta: makeMeta({ icon: 'no-such-icon' }) })
     expect(wrapper.find('svg.lucide-layout-grid').exists()).toBe(true)

@@ -237,6 +237,12 @@ describe("real spawn lifecycle (poll edge finalization)", () => {
 });
 
 describe("bash_output tool", () => {
+	it("description pins the auto-notify contract (on-demand checks only, DO NOT bash sleep)", () => {
+		// 与 bash description / 启动回执同一契约话术（统一 "DO NOT bash sleep"）——删改必须红灯
+		expect(bashOutput.description).toContain("completion is auto-notified");
+		expect(bashOutput.description).toContain("DO NOT bash sleep");
+	});
+
 	it("list merges store + registry terminal entries, store wins on same id", async () => {
 		// 单例表：一个 running 真任务
 		const spawned = spawnBg("sleep 5");
