@@ -908,7 +908,7 @@ Flows tab 与 workflow 空态占位已随退役删除（workflow 观察入口 = 
 
 ## §2 组件结构概述
 
-`Sidebar.vue` 的 SegmentedTab 现为 3 个等宽 tab（会话/文件/Plugins；原 Agents/Flows 两枚任务 tab 与各自 badge 已退役）。subagent 列的现行宿主 = composer 任务托盘：托盘 icon 计数（三态：进行中亮计数 / 仅历史 dim / 全无隐藏）+ hover 面板行集（分桶 tab `进行中/已结束/已收起`，行内两段式取消）；原 `subagent-list` / `subagent-card` / `subagent-list-empty` 等容器随组件退役删除。
+`Sidebar.vue` 的 SegmentedTab 现为 3 个等宽 tab（会话/文件/Plugins；原 Agents/Flows 两枚任务 tab 与各自 badge 已退役）。subagent 列的现行宿主 = composer 任务托盘：托盘 icon 计数（三态：进行中亮计数 / 仅历史 dim / 全无隐藏）+ hover 面板行集（分桶 tab `进行中/已结束` 两桶——判据 = `isRunningProjection` 及其取反；原「已收起」第三桶已随 2026-09-16 裁决随 intent 位删除退役，行内两段式取消）；原 `subagent-list` / `subagent-card` / `subagent-list-empty` 等容器随组件退役删除。
 
 Panel 层：进入 subagent 视图时 PanelHeader 显示返回入口 + subagent label（`${record.agent} · ${subagentId 前缀}`），MessageStream 以 `subagent:<id>` 虚拟 sessionId 透明复用，无需特殊处理。
 
@@ -1002,7 +1002,7 @@ pnpm dev → Electron (--remote-debugging-port=9222)
 |------|------|------|
 | R-1 | 启动 `pnpm dev`，等 Electron 窗口渲染 | CDP 9222 可连，首窗加载 session 列表 |
 | R-2 | 点 sessions tab → 选 chat_project cwd 的 session | session 激活，panel 显示对话流 |
-| R-3 | hover composer 工具条的 subagent 托盘 icon（原：点 Agents tab） | 面板打开，出现 subagent 行集（进行中/已结束/已收起分桶 tab） |
+| R-3 | hover composer 工具条的 subagent 托盘 icon（原：点 Agents tab） | 面板打开，出现 subagent 行集（进行中/已结束两桶分桶 tab，2026-09-16 裁决后无第三桶） |
 | R-4 | 检查行内容 | agent=general-purpose，status=done（绿点），task 描述可见 |
 | R-5 | 点 subagent 行 | panel 切换到对话流，header 显示返回按钮 + subagent label |
 | R-6 | 点返回按钮 | panel 恢复原 session |
