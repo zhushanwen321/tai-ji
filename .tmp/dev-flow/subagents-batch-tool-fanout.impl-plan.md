@@ -124,6 +124,12 @@ graph TD
 | u4 | 过渡态红点 2 处（core sync-collect-recovery.test.ts ×1、session-reader cross-package-subagent-core.test.ts ×2）：因 recoverSyncCollectBatch 删除，领地外未动 | 合理（跨单元过渡态，归属明确） | **并入 u5 随测试族删改修复**（u5 行已更新） |
 | u4 | 领地外死代码 `bg-notify-render.ts` batch 分支（extractBatch，渲染 notifyBatch 形态）无归属 | 计划缺口（领地表未覆盖） | **并入 u5 删除**（u5 行已更新） |
 | u6 | 副本路径串改写（D-1）：主文件/manifest 副本中 sessionFile 指针由真实 ~/.taiji 路径改写为临时布局路径（防 session-reader existsSync 泄出读真实数据目录）；保真对照 = 剔除路径串后逐字节全等（113+32 处 span，entry 结构/标记/正文原样） | 合理（红线封闭性要求，数据结构不变） | 固化 |
+| u8 | 摘除 E2E-PROBE-01（超出六项字面清单）：sync-collect 探针 scope 引用已删文件，保留则 merge 发布流程会跑必死探针——按 R3 纪律退役归档（TEST-STRATEGY:155 归档记录 + AGENTS.md/merge SKILL 例举清理） | 合理（grep 全量核对语义场授权 + e2e 三态纪律） | 固化；**遗留：`scripts/probes/subagent-sync-collect/` 目录（17 文件）领地外待删——u9 后微单元清理** |
+| u8 | 6 条新 rule 的 assets 锚定能力本体文件（真机剧本属源码面领地外不可创建），note 声明「剧本随阶段 5 A1/A5 环境落建后同 commit 回填」 | 合理（validate 脚本强校验 asset 存在的必然妥协） | 固化；阶段 5 回填 |
+| u8 | S2 trigger 取 on-pi-bump（R3 人工形态声明不进机器执行面，E2E-RENAME-02 先例） | 合理 | 固化 |
+| u8 | permanent-session-model.md:59 条款主语改写（死主语「collect:'sync' 批成员」→「workflow-origin/one-shot 批成员」，死锚换现行锚） | 合理（现行 SSOT 条款指向已删机制会误导读者） | 固化 |
+| u8 | 迁移说明落点 CONTEXT.md（二选一授权内，术语表是查阅读者第一落点） | 合理 | 固化 |
+| u8 | E2E-BATCH-06 在 --check 对真实 diff 对账时被圈出（u9 在途改动落其 scope）——登记语义正确（Phase 3 合入即激活） | 披露性（非偏差） | 无需处理 |
 | u5 | routeRecord/isCollectMember 删除后成功轮通知收敛为 notifyComplete 单通道（与原 async 直通分支逐行等价，失败轮统一走既有 async 失败单发；closeAfterRound 两分支本就同构） | 合理（删 sync 双路后的必然形态，非行为变更） | 固化 |
 | u5 | sync-collect-recovery.test.ts 未整删：含非 collect 覆盖面（存量 entry 投影白名单/orphan merge/P-rebuild/P-manifest 不变量）——删 7 批机制用例、改造保留 6 例 | 合理（随删/随改指令） | 固化 |
 | u5 | notifier-golden-snapshot 合批 merge 用例保留主体（60s 合批窗口是内核行为、降级形态仍存在），仅删批量渲染锁段；合批 details 降级宿主走 pi 默认渲染兜底 | 合理 | 固化 |
@@ -141,7 +147,7 @@ graph TD
 | u4-collect-shell | committed | 1 | commit 014721b1b；shell 包 79 文件/965 passed（重跑核验一致，对账 972−5golden−2schema=965 闭合）；typecheck/lint exit=0；红点核验：core sync-collect-recovery.test.ts 1 failed 确认红因（recoverSyncCollectBatch not a function）→ 归 u5；S5 期门结论 = 静默忽略分支（证据链 typebox 探针 + pi-ai validation.js:280-299） |
 | u5-collect-core | committed | 2（首任限流零产出 + 接替完成） | commit 3da148eb7；42 文件 +433/−4126；重跑核验 core 3037/0 失败、shell 964/0、session-reader 407/0（u4 遗留 2 例修复确认）；grep 终扫三类剩余（非 collect 英文动词/读侧保留面/留痕注释，4 处命中抽验均为 [collect 退役] 注释）；extractBatch 零命中；notify-ledger.ts 幸存确认 |
 | u6-collect-compat | committed | 1 | 验证记录 `.tmp/dev-flow/collect-compat-u6.md` + 脚本 u6-verify-collect-compat.mts（保留供阶段 5 复验）；⛔ 期门通过：真实存量样本（24 处 + 8 处 batchFinalized）三项验证 24/24 断言过——record-store 重建容忍 / session-reader 反查（result 单查+批量）/ initSession 恢复全链；仓库源码零改动，D6 无需回改 |
-| u8-collect-docs | pending | 0 | — |
+| u8-collect-docs | committed | 1 | commit fb46cd0e8；三门禁重跑全绿（validate-e2e-map 18 rules / select-affected-e2e --check PASS / doc-symbol-drift OK）；7 文档实质抽验（architecture §4 批量编排行 / CONTEXT Fan-out 词条+迁移三句 / E2E-BATCH-01..06）；grep 正面证明 sync 批符号活性表述零残留 |
 | u9-notify-ledger | pending | 0 | — |
 
 ## 7 残留风险与变更历史
