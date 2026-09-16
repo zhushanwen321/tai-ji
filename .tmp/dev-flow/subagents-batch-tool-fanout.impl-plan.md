@@ -124,6 +124,12 @@ graph TD
 | u4 | 过渡态红点 2 处（core sync-collect-recovery.test.ts ×1、session-reader cross-package-subagent-core.test.ts ×2）：因 recoverSyncCollectBatch 删除，领地外未动 | 合理（跨单元过渡态，归属明确） | **并入 u5 随测试族删改修复**（u5 行已更新） |
 | u4 | 领地外死代码 `bg-notify-render.ts` batch 分支（extractBatch，渲染 notifyBatch 形态）无归属 | 计划缺口（领地表未覆盖） | **并入 u5 删除**（u5 行已更新） |
 | u4 | 领地外 stale 注释 2 处（shell session-lifecycle.ts:375-376、core sync-collect-domain.ts:13） | 合理（文件属 u5 清算面） | **并入 u5**（后者随文件整体删除自然消解） |
+| u5 | routeRecord/isCollectMember 删除后成功轮通知收敛为 notifyComplete 单通道（与原 async 直通分支逐行等价，失败轮统一走既有 async 失败单发；closeAfterRound 两分支本就同构） | 合理（删 sync 双路后的必然形态，非行为变更） | 固化 |
+| u5 | sync-collect-recovery.test.ts 未整删：含非 collect 覆盖面（存量 entry 投影白名单/orphan merge/P-rebuild/P-manifest 不变量）——删 7 批机制用例、改造保留 6 例 | 合理（随删/随改指令） | 固化 |
+| u5 | notifier-golden-snapshot 合批 merge 用例保留主体（60s 合批窗口是内核行为、降级形态仍存在），仅删批量渲染锁段；合批 details 降级宿主走 pi 默认渲染兜底 | 合理 | 固化 |
+| u5 | rebuild-indexes/legacy-compat 各 1 个 markBatchFinalized 写侧用例改造为存量 manifest 读侧容忍（断言取值以探针实测投影行为为准，非照搬原写侧断言） | 合理（D6 读侧守卫改造授权） | 固化 |
+| u5 | entry-only record 不经 store.collectRecords 投影（mergeEntrySourceRecords 刻意收窄 engine==='zcode'）为设计内既有语义，未改 | 合理（既有语义确认） | 固化 |
+| u5 | engine/__tests__/conformance/H9-test-disposition.md 提及已删测试文件名 | 合理（历史处置档案当时事实快照，AGENTS.md 规则 22 历史档案不回填） | 固化 |
 
 ## 6 状态表
 
@@ -133,7 +139,7 @@ graph TD
 | u2-batch-tool | committed | 1 | commit fce282acf；vitest 80 文件/972 passed（重跑核验一致）；typecheck+lint exit=0；契约抽验（schema 平铺 L59-76 / 无 __gui__ L102 / ONE notification+SINGLE status L146-147 / reentry 共用 L255,300 / slug 生成 L127） |
 | u3-render-check | committed | 1 | 核对记录 `.tmp/dev-flow/render-check-u3.md`；三处消费点零改核实（message-turns.ts:699-701 / event-interpreter.ts:1011-1016 / Block.vue:434-435+L99-121 模板区）；三包零 diff 佐证；附带发现（Block.vue:96 注释漂移）登记待阶段 3 |
 | u4-collect-shell | committed | 1 | commit 014721b1b；shell 包 79 文件/965 passed（重跑核验一致，对账 972−5golden−2schema=965 闭合）；typecheck/lint exit=0；红点核验：core sync-collect-recovery.test.ts 1 failed 确认红因（recoverSyncCollectBatch not a function）→ 归 u5；S5 期门结论 = 静默忽略分支（证据链 typebox 探针 + pi-ai validation.js:280-299） |
-| u5-collect-core | pending | 0 | — |
+| u5-collect-core | committed | 2（首任限流零产出 + 接替完成） | commit 3da148eb7；42 文件 +433/−4126；重跑核验 core 3037/0 失败、shell 964/0、session-reader 407/0（u4 遗留 2 例修复确认）；grep 终扫三类剩余（非 collect 英文动词/读侧保留面/留痕注释，4 处命中抽验均为 [collect 退役] 注释）；extractBatch 零命中；notify-ledger.ts 幸存确认 |
 | u6-collect-compat | pending | 0 | — |
 | u8-collect-docs | pending | 0 | — |
 | u9-notify-ledger | pending | 0 | — |
