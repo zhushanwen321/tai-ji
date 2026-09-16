@@ -192,9 +192,9 @@ graph TD
 | D39 | u-retire-native-view | 顺带清扫 `useExtensionHostBridge.ts` 内 2 处 WidgetArea 注释 | 该文件不在 widgetarea 领地，不清扫即跨单元死结 | 接受 |
 | D40 | u-retire-sidebar | 领地外必要同步 3 文件：`components/sidebar/__tests__/Sidebar.test.ts`（vi.mock 指向已删模块）、`__tests__/i18n/{i18n-value-smoke,locale-sync-check}.test.ts`（断言死键值；check:i18n 是硬门） | 不改则红；属设计 D10 基线名单点名文件的路径枚举偏差 | 接受（最小等价替换，测试语义不变） |
 | D41 | u-retire-sidebar | `useSidebarSessionActions.ts` 超「仅头注」：删 `onRetryWorkflows`/`onRetrySubagents` 与 store 依赖 | D13 明文「retry 全在退役面内」；不删则未使用 import 触发 lint | 接受（`focusedSessionId` 注入字段保留并注明） |
-| D42 | u-retire-sidebar | i18n 删除面含兄弟单元消费键：`sidebar.backgroundTaskList.*` 10 键（随 BackgroundTaskListView 删除）+ 4 个既有零引用死键 | locale 文件是本单元唯一领地；保留即无人认领死键 | 接受（逐键全仓 grep 证实零消费） |
+| D42 | u-retire-sidebar | i18n 删除面含兄弟单元消费键：`sidebar.backgroundTaskList.*` **20 叶子键**（filter 3 + 直属字符串 9 + status 6 + 横幅 2；随 BackgroundTaskListView 删除——P3 审查实测修正，原登记 10 为少计）+ 2 个存量零引用死键（loadSubagentFailed / agentCallLoadFailed）+ 2 个随消费点删除而失效的键（cancelSubagentFailed / agentCallFailed，基线由 useSidebarSubagentActions 消费） | locale 文件是本单元唯一领地；保留即无人认领死键 | 接受（逐键全仓 grep 证实零消费；subagentFilter.* 经模板串动态消费非死键） |
 | D43 | u-retire-sidebar | 注释清扫写法 = 去标识符保语义（[HISTORICAL] 注记改写为描述性表述，不书写已删模块名） | 使 D10 宽口径在领地内零命中；历史细节由 git 承载 | 接受 |
-| D44 | u-retire-sidebar | 保留未动：`lib/subagent-bucket` 的 `filterSubagents`/`countSubagents`/`DEFAULT_SUBAGENT_FILTER` 与 `stores/workflow` 的 `workflowCount`（现零生产消费） | D2/D10 明文「SSOT 模块不随 UI 宿主退役」；设计枚举的视图 2 清单不含 workflowCount | 接受（登记为后续清理候选，不扩权） |
+| D44 | u-retire-sidebar | 保留未动：`lib/subagent-bucket` 的 `filterSubagents`/`countSubagents`/`DEFAULT_SUBAGENT_FILTER` 与 `stores/workflow` 的 `workflowCount`（现零生产消费） | D2/D10 明文「SSOT 模块不随 UI 宿主退役」；设计枚举的视图 2 清单不含 workflowCount | 接受（登记为后续清理候选，不扩权）；**补登（P4 审查）**：`lib/background-task-bucket.countBackgroundTasks` 与 `lib/subagent-bucket.isDoneProjection` 同为 test-only 导出（本次删两消费点后零生产消费，托盘计数由 filterBackgroundTasks 行集长度派生）——裁决 = 保留 SSOT 谓词 + JSDoc 改写如实描述（见 u-fix-docs） |
 | D45 | u-retire-* 批（观察） | u-retire-sidebar 领地清单中 `__tests__/sidebar/*` glob 未覆盖 `components/sidebar/__tests__/`（同类路径歧义第二例） | 派发时以 glob 兜底而非逐文件枚举所致 | 接受（已由 D40 覆盖）；教训：退役单元领地须逐文件枚举，减少 glob |
 
 ## 6 状态表
@@ -213,15 +213,18 @@ graph TD
 | u-retire-native-view | committed | 1 | commit 3b5f35c19「refactor(tray): u-retire-native-view retires the background-tasks native view」（12 文件 / -1329 行）；偏差 D38-D39 登记；core typecheck 红为基线存量（git show HEAD 复现证明） |
 | u-retire-widgetarea | committed | 2 | commit ae10aff90「refactor(tray): u-retire-widgetarea retires the WidgetArea pill」（10 文件 / -844 行）；偏差 D35-D37 登记（D37 经续聊定向修） |
 | u-retire-refs-sweep | committed | 2 | commit 37607c9df「docs(tray): sweep dangling references...」（28 文件）；doc-symbol-drift 绿（改前 2 红）+ validate-constraints 131 条绿 + 18 文件自对账零命中；第二段续聊修 i18n bashTaskHint（zh/en） |
-| u-e2e | pending | 0 | — |
+| u-e2e | committed | 2 | commit de4dad065「test(e2e): u-e2e rewrites affected specs, baselines and map registrations」（7 文件）；mock 轨 9 pass + 像素轨 pass（基线重生）+ **real faux 轨 3 pass**（真 runtime/WS 帧/route-inbound 下托盘 widget 链路端到端实证）+ validate-e2e-map / --check 绿；登记补齐：REAL-01 scope +extensions/universal、VISUAL-01 +baselines 与 +packages/ui/src、MOCK-01 +packages/ui/src；偏差 D1-D7 登记（含 mock crossSession 缺口 B1 → 基础设施债务） |
+| u-fix-tray | committed | 2 | commit 92e824e70「fix(tray): u-fix-tray single data instance, no loading flash, full hot zone」；tray 5 files/99 pass + 邻域 768 pass + 变异验证 3 处（改坏→红）；U1 单例化（provide/inject，无回退）/ U2 判据收窄 / U3 等价修法（reka-ui 不透传 handler） |
+| u-fix-proto | committed | 2 | commit 78ed72ad6「fix(protocol): allow smooth-curve path commands and sync protocol docs」（13 文件）；S/T 放行实测（58/5869 → 0 拒）+ extension-protocol 229 pass + extensions 三连绿 + changeset；D4 字面量与旧 changeset 字符集由主 agent 收口修正 |
+| u-fix-docs | committed | 2 | commit 579b8c021「docs(tray): fix stale counts, bucket shapes and retired-consumer wording」（11 文件）；doc-symbol-drift 绿 + 三包测试绿；主 agent 追加 2 处同类残引（DESIGN.md 波次表 / background-task-sidebar-view G1）与 DESIGN.md composer-bar 组成行收口 |
 
 ## 7 残留风险与变更历史
 
 **残留风险**：
 
-0. **文档存量滞后（非本次引入，另行建档）**：① extension-gui-protocol.md §4.3 helper 示例签名 / §5.2 签名行 / gui-protocol-guide.md Helper 表三处滞后（现实走 setWidgetDual + GuiRenderResult）；② gui-protocol-guide.md §4 速查表「渲染状态」列整列标「P2 待实现」但 8 原语已实现；③ 架构文档 §3.2 list-tree props 缺 `numbered`、GuiComponentProps 缺 `group`（指南称「8 个内置类型」）。均为本次改动前既存，交项目文档债务另行处理。
+0. **文档存量滞后（非本次引入/未闭环者，另行建档）**：① ~~extension-gui-protocol.md §4.3 / §5.2 / guide Helper 表~~（pilot 修复单元 u-fix-proto 已闭环：更新为 setWidgetDual 现行形态 + 导出清单补齐 + §9.3 废弃标注 + guide §4 整列刷新）；② 遗留观察（u-fix-proto 领地内未派发级）：goal/todo 源码注释与 todo/ARCHITECTURE.md 仍写 `guiSetWidget`（实装走 setWidgetDual）——注释级，交后续 doc-sync；③ guide §3.4/§5 与 arch doc §6.3/§6.5 的 `allowComment`/`getAskUserComment` 条目指向包内已不存在的 helper（comment 随 D2 删除）——独立 doc-sync 单元范围；④ docs/testing/00-overview.md:13 覆盖表仍列 6 个已合并的源文件名（04/05/06/07/09/14-*.md 全部 MISSING）——存量滞后，未在任何机器守卫射程内。
 
-1. **探针 P7（浮层溢出/翻转）**：composer 底部向上弹面板，窗口最小宽度下可能裁剪——u-tray-shell 实施期首验，降级路径 = 手写 anchored 浮层（设计 §3.6 明示两种仓内成熟范式）。
+1. **探针 P7（浮层溢出/翻转）+ §5 检查点 3（composer.toolbar 布局挤压）**：composer 底部向上弹面板，窗口最小宽度下可能裁剪/挤压——**阶段 5 真机执行并回填设计 §3.6 探针状态位与 §5 检查点；P5/P6 已实施期关闭（设计 §3.6 已回填 ✅）**；降级路径 = 手写 anchored 浮层（设计 §3.6 明示两种仓内成熟范式）。
 2. **探针 P5（TabBar 本地 active）**：vue 更新机制若导致组件重建，active 需提升模块级 per-widgetKey 缓存（代价 0，不改协议）——u-tabbar 行为测试兜底。
 3. **D14 共存窗口**：P2（托盘）与 P3（退役）之间双入口共存期 ≤1 工作日、不跨 changeset 发版；窗口内穿帮面仅计数口径（同源 store 派生）。恢复路径：P3 前单点摘挂载/revert P2；P3 后 revert P3。
 4. **性能面**：ViewHostStore 推送频次 = tool call 级；托盘只读 meta 派生（O(1)），guiTree 仅面板打开时渲染（设计 §3.5）。
@@ -242,3 +245,5 @@ graph TD
 | 2026-09-16 | u-tray-shell committed（外壳 + 挂载 + trayLabel + DESIGN.md；tray 90 绿 + 回归 278 绿 + 变异验证 6 处；偏差 D26-D34 登记）→ 阶段 2 全部 11 单元就差退役三件 |
 | 2026-09-16 | W4 三退役单元开发完成（并行派发）；**批次门通过**：N1 窄口径零命中 + renderer 355 files/4116 全绿（主 agent 独立重跑）+ 15 删除路径 gone=15；doc-symbol-drift 报 2 处文档路径引用待清扫（阻塞提交）→ 新开 u-retire-refs-sweep |
 | 2026-09-16 | 退役批次 4 commit 落盘：ae10aff90（widgetarea）/ 3b5f35c19（native-view）/ 9fa8db44d（sidebar）/ 37607c9df（refs-sweep）；工作区干净；阶段 2（开发循环）完成（12 单元 committed）→ 进入 u-e2e（W5） |
+| 2026-09-16 | 阶段 3 一致性对抗审查（基线 40dc35b2e..HEAD，126 文件）按 4 区并行完成：P1 协议扩展面（0 严重 unreasonable + 7 doc_errors）/ P2 托盘宿主面（**4 unreasonable：U1 面板重复拉取、U2 首帧 loading、U3 热区缺口、U4 真机门欠账** + 5 doc_errors）/ P3 退役面 renderer（0 unreasonable + 8 doc_errors）/ P4 跨包文档面（1 low unreasonable + 9 doc_errors）；主 agent 亲为修订设计文档 7 处 doc_errors；修复批次 3 组并行派发（u-fix-tray / u-fix-proto / u-fix-docs） |
+| 2026-09-16 | 修复批次 4 commit 落盘：92e824e70（u-fix-tray）/ 78ed72ad6（u-fix-proto，含 S/T 放行）/ 579b8c021（u-fix-docs）/ de4dad065（u-e2e 含 real faux 轨 3 pass 实证）；U4（P7 真机门与布局挤压检查点）转阶段 5；e2e 边界三轨在已提交源码上复验绿 |

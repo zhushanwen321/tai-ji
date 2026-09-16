@@ -93,9 +93,9 @@ todo/goal:      extension setWidget → event-adapter → WS extension:widgetGui
 | 失败 | 表现 | 恢复 |
 |---|---|---|
 | widget guiTree 解码失败 | 该 widget 面板显示协议错误占位（ansi-text 兜底），托盘 icon 不消失 | extension 修复推送后自动恢复；`~/.pi/agent/logs/` 查扩展日志 |
-| 后台命令 list RPC 失败 | bash 面板顶部断连提示条（沿用 S6 范式），计数冻结不虚报 | WS 重连边沿自动重拉（useBackgroundTasks 既有恢复腿） |
+| 后台命令 list RPC 失败 | 保留缓存不虚报（fetchFailed 置位）；断连时面板顶部显示断连提示条（沿用 S6 范式） | WS 重连边沿自动重拉（useBackgroundTasks 既有恢复腿） |
 | subagent/workflow 广播丢失或切 session 后未拉取 | 面板数据滞后（计数冻结不虚报） | 托盘挂载即 watch sessionId 触发首拉（useTrayCounts 内，useBackgroundTasks 同范式，见 D13）；面板内 retry 按钮 |
-| 自定义 icon paths 非法 | 落兜底通用 icon + console warn | extension 修正 paths（白名单字符集见 D4） |
+| 自定义 icon paths 非法 | 落 icon fallback 链下一档（内置 widgetKey 映射 → 通用 icon）+ console warn 一次（去重） | extension 修正 paths（白名单字符集见 D4；精确字符集以协议文档 §3.5 为准） |
 
 ### 3.2 方案对比
 
@@ -140,13 +140,13 @@ interface WidgetMeta {
 }
 ```
 
-  icon fallback 链：`meta.icon(paths 自定义) → meta.icon(key 解析) → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon`。badge fallback：`meta.badge → progress.label ?? String(progress.current) → 无`；badge 视觉态（亮/色）归 `meta.status`（running=accent+呼吸点 / done=success / failed=danger / idle=dim），与 built-in 三件计数同视觉语言。**自定义 paths 的风格强制**：宿主渲染统一 `viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="1.75" stroke-linecap/join="round"`——extension 只能定义形状（path d 数组），线宽/颜色/尺寸由宿主锁死，输出必然是太极纯灰体系的细线 icon（与 @lucide 构成同构）。防御：d 字符白名单正则 `^[MLCQAZHVmlcqazhv0-9 ,.\-]+$`、条数 ≤8、单条 ≤512 字符、总数 ≤2048——超限落兜底 icon + warn；渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。兼容性事实（✅ 核实 `helpers.ts:162-166`）：`isGuiRenderResult` 守卫只校验 `v` 与 `component`，不校验 meta 形状——新增可选 meta 字段对旧宿主/旧 extension 双向透明。
+  icon fallback 链：`meta.icon(paths 自定义) → meta.icon(key 解析) → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon`。badge fallback：`meta.badge → progress.label ?? String(progress.current) → 无`；badge 视觉态（亮/色）归 `meta.status`（running=accent+呼吸点 / done=success / failed=danger / idle=dim），与 built-in 三件计数同视觉语言。**自定义 paths 的风格强制**：宿主渲染统一 `viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="1.75" stroke-linecap/join="round"`——extension 只能定义形状（path d 数组），线宽/颜色/尺寸由宿主锁死，输出必然是太极纯灰体系的细线 icon（与 @lucide 构成同构）。防御：d 字符白名单正则 `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$`（含 S/s/T/t 平滑曲线命令；首版实现遗漏，经 P1 一致性审查实测对 @lucide 全量 d 串约 1% 误拒后放行）、条数 ≤8、单条 ≤512 字符、总数 ≤2048——超限落兜底 icon + warn；渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。兼容性事实（✅ 核实 `helpers.ts:162-166`）：`isGuiRenderResult` 守卫只校验 `v` 与 `component`，不校验 meta 形状——新增可选 meta 字段对旧宿主/旧 extension 双向透明。
 - **被否**：受控封闭枚举（extension 不能自定义形状——违反 §1 裁决记录⑤「允许 extension 自定义形状但风格由宿主锁死」，该裁决是记录在案的产品需求非想象未来）；自由 SVG/emoji 字符串（视觉主权失控 + 注入面）；badge 用 number 类型（goal 的 '42%' 证明字符串更通用）。
 - **证据**：§1 裁决记录⑤（icon 自定义形状是用户记录在案需求）；`progress.label` 已有「extension 全权格式化」先例（types.ts L123）；lucide 即 24×24 stroke paths 集，混排视觉无缝。
 - **效果**：§1 目标 2 成立（extension 两行代码获得风格一致的 icon+badge）。
 
 **D5：tab-bar 原语容器化——本地切换、不回传（选定）**
-- **采用**：协议 `tab-bar` props 扩展可选 `sections?: GuiComponent[][]`（与 `tabs` 等长，缺省维持纯展示现状）。渲染器 `TabBar.vue` 升级为容器：渲染 active tab 的对应 section；**active 态归宿主本地**——首次挂载取推送的 `tabs[i].active`，用户点击仅切本地索引（extension 下次推送更新内容但**不重置用户选择**，除非组件重建）。todo 的 buildGui 改为：`tab-bar{ tabs:[待办N,已完成M], sections:[待办 list-tree, 已完成 list-tree] }` + meta 补 icon/badge。
+- **采用**：协议 `tab-bar` props 扩展可选 `sections?: GuiComponent[][]`（与 `tabs` 等长，缺省维持纯展示现状）。渲染器 `TabBar.vue` 升级为容器：渲染 active tab 的对应 section；**active 态归宿主本地**——首次挂载取推送的 `tabs[i].active`，用户点击仅切本地索引（extension 下次推送更新内容但**不重置用户选择**，除非组件重建）。todo 的 buildGui 改为：`tab-bar{ tabs:[待办N,已完成M], sections:[待办 list-tree, 已完成 list-tree] }` + meta 补 icon/badge（**待办段 = 未完成项（pending+in_progress）**，tab 标签计数与 badge 均与该段内容同源；完整清单以两段之并呈现）。
 - **被否**：tab 点击回传 extension（协议无 UI→extension 写通道，引入它超出本次 scope 且语义混乱——「用户切了个 tab」不该是 agent 事件）；宿主按行 status 过滤渲染（宿主懂 todo 语义 = 定制逻辑，违背 D3 且对第三方 widget 不可泛化）；堆叠双 section（`group[待办]+list-tree` + `group[已完成]+list-tree`，纯既有原语零协议改动）——被否因 §1 裁决记录③已定 tab 切换形态，且堆叠时已完成段常驻占位，长清单下待办被挤出首屏。
 - **证据**：`TabBar.vue` 现状纯展示无 click；todo 面板两桶数据 extension 全知（buildGui 已有 todos 全量）。
 - **效果**：todo 两 tab 成立（§1 裁决记录③，真实消费方 = todo 双桶）；extension 一次推送全量、宿主本地切换零往返。运行时断言「后续推送不重置用户本地 tab 选择」⛔ 实施期门（探针 P5，见 §3.6）。
@@ -250,8 +250,8 @@ built-in（native 直连，无协议变化）:
 | P2 | goal 终态 → widget 清屏（折叠 status bar） | 读 `goal/src/projection/widget.ts:205-218`（isTerminalStatus → setWidget('goal', undefined)） | ✅ 代码核实 |
 | P3 | getViewIds() 返回数组已按插入序（Map 迭代序 = 插入序，ECMAScript 规范语义；reactive 包装不改迭代序）——托盘排序可直接消费数组序，无需 seq 字段 | 读 `view-host-store.ts` getViewIds 实现 + `session-scoped-map.ts`（内部 `new Map()`） | ✅ 代码核实 |
 | P4 | tab-bar 原语现无交互（无 click/emit），active 由推送值单方决定 | 读 `packages/ui/src/rendering-protocol/primitives/TabBar.vue`（纯展示组件） | ✅ 代码核实 |
-| P5 | TabBar 容器化后，用户本地 active 选择在后续 widget 推送（guiTree 更新）时不被重置 | 实施期：组件 key 稳定性验证 + vitest 行为测试（推新 tabs/sections 断言 active 索引保持） | ⛔ 实施期门（降级：若 vue 更新机制导致组件重建无法避免，TabBar 内部将 active 序号提升到模块级 per-widgetKey 缓存，代价 0，不改协议） |
-| P6 | 自定义 icon paths 白名单正则拒非法输入且渲染不崩 | 实施期：协议层单测（白名单 + 条数/长度上限 + 越限落兤底）+ 渲染快照 | ⛔ 实施期门（降级：正则或上限从严到不可用程度时，先只开放 key 点名模式、paths 特性延后——两者独立发布） |
+| P5 | TabBar 容器化后，用户本地 active 选择在后续 widget 推送（guiTree 更新）时不被重置 | 实施期：组件 key 稳定性验证 + vitest 行为测试（推新 tabs/sections 断言 active 索引保持） | ✅ 实施期关闭（TabBar 16 用例含 setProps 推送后 DOM 元素同一性 + 本地 active 保持；降级路径未启用——组件被 patch 非重建） |
+| P6 | 自定义 icon paths 白名单正则拒非法输入且渲染不崩 | 实施期：协议层单测（白名单 + 条数/长度上限 + 越限落兜底）+ 渲染快照 | ✅ 实施期关闭（协议层四边界单测 + S/T 放行后回归；渲染侧四档 fallback 由 tray-widget.test.ts 锁定） |
 | P7 | composer 底部向上弹出面板无裁剪/翻转异常（溢出行为） | 实施期：真机 CDP 截图（browser-automation）窗口最小宽度下验证 | ⛔ 实施期门（降级：reka Popover 翻转异常则换手写 anchored 浮层，两者均为仓内成熟范式） |
 
 ---
@@ -270,7 +270,7 @@ built-in（native 直连，无协议变化）:
 | A5 | 入口唯一（目标 4） | 检查侧栏与 drawer | SegmentedTab 仅 会话/文件/Plugins 三枚；Agents/Flows tab 不存在；Plugins 下无「后台命令」L2 视图；对话流无 WidgetArea pill；**drawer subagent/workflow/bashTask tab 行为不变**（点托盘行打开后内容/返回链路正常——邻居不变量）；对话流内联块保留且点击开 drawer（现状不变） |
 | A6 | 切 session 跟随（目标 1） | 单实例下切到另一 session（各有任务）再切回 | 托盘计数/面板数据随 sessionId 即时切换，不残留旧 session 任务（per-session 过滤；注：panel 现为恒单 PanelLeaf，split 已移除，本场景验证单实例数据归属） |
 | A7 | 协议兼容性（目标 2） | 不升级的第三方 widget extension 推 setWidget（无 icon/badge 字段） | 托盘出现该 widget：通用兜底 icon + badge 从 progress 派生或无 badge；面板正常渲染；无 warn 刷屏 |
-| N1 | 负面：不可达入口（目标 4） | 断言退役面（import/组件引用级，非注释命中） | `rg -l "from.*(SubagentList|WorkflowList|BackgroundTaskListView|SubagentFilterBar|WorkflowDetail|useListSync|useSidebarSubagentActions|useSubagentBucketFilter|useBackgroundTaskBucketFilter)" packages/renderer/src` 活代码零命中（窄口径验 import 直引；vi.mock 路径串 / 含模块名或 id 字面量的形态由 D10 宽口径圈定补齐（双引号日志名/目录名等语义无关字符串不在其射程），不在本断言射程；漏删时 tsc 不报错，机器断言是唯一门禁；保留文件的头注提及不计）；NATIVE_VIEWS 路由表为空/移除；相关 i18n 死键按共享键排除规则清理 |
+| N1 | 负面：不可达入口（目标 4） | 断言退役面（import/组件引用级，非注释命中） | `rg -l "from.*(SubagentList|WorkflowList|BackgroundTaskListView|SubagentFilterBar|WorkflowDetail|useListSync|useSidebarSubagentActions|useSubagentBucketFilter|useBackgroundTaskBucketFilter)" packages/renderer/src` 活代码零命中（窄口径验 import 直引；vi.mock 路径串 / 含模块名或 id 字面量的形态由 D10 宽口径圈定补齐（双引号日志名/目录名等语义无关字符串不在其射程），不在本断言射程；漏删时 tsc 不报错，机器断言是唯一门禁；保留文件的头注提及不计——**本次实施头注豁免未被使用**（保留文件亦零标识符命中，注释一律去标识符保语义）；NATIVE_VIEWS 路由表为空/移除；相关 i18n 死键按共享键排除规则清理 |
 | N2 | 负面：归零不虚亮（目标 3） | 全空闲态截图 + DOM 断言 | 托盘无任何 accent/呼吸点元素；`data-testid` 层面计数元素不存在而非 opacity:0 |
 
 **e2e 影响面评估**（SSOT：`node scripts/select-affected-e2e.mjs --base main`，登记 `docs/testing/e2e-map.json`）：
@@ -296,7 +296,7 @@ built-in（native 直连，无协议变化）:
 | 阶段 | 单元 | 内容 | justification / 验收挂钩 |
 |---|---|---|---|
 | P1 协议层 | `packages/extension-protocol`：types（WidgetMeta +icon/badge、tab-bar +sections）+ helpers（icon paths 白名单校验函数）+ 单测；**同步 `packages/plugin-sdk/src/types.ts`**（手维护的 GuiComponentProps/GuiRenderResult/WidgetMeta 平行副本，头注「修改契约：直接编辑本文件」）——**extension-protocol 独立 changeset 小版本发布；plugin-sdk 为 private 工作区包（`.changeset/config.json` ignore 名单内、经 runtime bundle 内联），副本随同 commit 同步、不单独发版** | 先立契约，宿主与 extension 并行开发有 SSOT；plugin-sdk 副本漏同步 = taiji Plugin 系统类型双源漂移 | 独立 changeset 小版本（extension-protocol）；A7 兼容性由可选字段保证 |
-| P2 宿主层（新增） | `packages/renderer`：`ComposerTray.vue`（挂载+排序+互斥+hover/pin）+ `TrayWidgetItems`（ViewHostStore 消费、icon/badge fallback 链）+ `TrayNativePanel` 三件（bash/sub/wf 面板，逻辑自 SubagentList/WorkflowList/BackgroundTaskListView 迁移）+ `useTrayCounts.ts`（三件计数 + **D13 首拉触发迁移：watch sessionId 拉取**，自 useSidebarCounts/useListSync 迁移收口）+ `packages/ui` TabBar.vue 容器化 + i18n + 组件测试（vitest，三视角）。**实施注意**：widget 区必须复刻 WidgetArea 的响应式依赖追踪模式——getViewIds 与 getView 在同一 computed 调用路径内触碰 reactive Map 才能建链（拆开即断链、推送后不重算，WidgetArea.vue entries computed 头注）。共存窗口代价 = D14 四要素 | 托盘本体；先并行于旧入口共存（侧栏暂不删），真机可阶段性验收 A1-A4/A6/A2b | 与旧入口共存期 = 双口径穿帮风险窗口（D14 受控：≤1 工作日不跨发版） |
+| P2 宿主层（新增） | `packages/renderer`：`ComposerTray.vue`（挂载+排序+互斥+hover/pin）+ `TrayWidgetButton.vue` + `TrayWidgetPanel.vue` + `tray-order.ts`（widget 区：ViewHostStore 消费、排序、icon/badge fallback 链；原拟名 TrayWidgetItems 落地时拆为按钮/面板/排序纯函数三件）+ `TrayNativePanel` 三件（bash/sub/wf 面板，逻辑自 SubagentList/WorkflowList/BackgroundTaskListView 迁移）+ `useTrayCounts.ts`（三件计数 + **D13 首拉触发迁移：watch sessionId 拉取**，自 useSidebarCounts/useListSync 迁移收口）+ `packages/ui` TabBar.vue 容器化 + i18n + 组件测试（vitest，三视角）。**实施注意**：widget 区必须复刻 WidgetArea 的响应式依赖追踪模式——getViewIds 与 getView 在同一 computed 调用路径内触碰 reactive Map 才能建链（拆开即断链、推送后不重算，WidgetArea.vue entries computed 头注）。共存窗口代价 = D14 四要素 | 托盘本体；先并行于旧入口共存（侧栏暂不删），真机可阶段性验收 A1-A4/A6/A2b | 与旧入口共存期 = 双口径穿帮风险窗口（D14 受控：≤1 工作日不跨发版） |
 | P3 退役层 | 侧栏收敛：SegmentedTab 三 tab + SidebarTab 类型收窄 + D10 全部退役清单（行为面：四组件 + WorkflowDetail 链 + Sidebar.vue 挂载分支 + useListSync + useSidebarSubagentActions 列表动作链 + 两个 bucket filter + builtin-contributions 声明 + NATIVE_VIEWS/L2_TAB_BADGE 接线 + useSidebarCounts 瘦身；机械面：sidebar 测试群 + sidebar-mount helper + PluginViewContainer NATIVE_VIEWS 分支 + Panel 两测试的范式 provide 清理 + i18n 死键）+ WidgetArea 退役（Panel.vue 摘挂 + @taiji/ui 组件/barrel 导出/测试删除）+ `getViewIds` 陈旧头注顺手修正（顺序契约 JSDoc）+ e2e-map 登记 | 入口唯一化（A5/N1/N2）；放在托盘可用之后，每一步 git 可回滚 | 逐组件退役逐 commit（打包约束经验：大面改动小步验证） |
 | P4 extension 层 | `extensions/universal/todo`：buildGui 加 tab-bar sections（待办/已完成两段）+ meta 推 icon/badge；`extensions/universal/goal`：meta 推 icon（badge 用现有 progress.label 推导即可，可选补推）；两包各补 changeset；`pnpm extensions:typecheck && lint && test` + 本地 pi CLI 实测（`pi -ne --mode rpc` 推送 JSONL 验证 meta 字段真机到达）；**文档同步**：`docs/architecture/extension-gui-protocol.md`（tab-bar/WidgetMeta 字段节，plugin-sdk @see 指向它）+ DESIGN.md composer 工具条节（资产登记表触发条件命中）+ FEATURE-PRIORITIES.md P0 用例组「subagent 列表/运行计数」入口迁移 | **合入顺序约束**：meta 字段（icon/badge）additive 可在 P1 后先行；**tab-bar sections 改造依赖 P2 的 TabBar 容器化**（旧 TabBar 纯展示会丢弃 sections，先行即产出可发布破坏态——todo 列表只存在于 sections 内）；C-proc-10 文档同步纪律 | A3 验收 |
 
