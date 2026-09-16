@@ -77,7 +77,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染 |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
-| 快捷键与 side drawer | 全局快捷键、文件预览/diff/git tab（testing 05） |
+| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | ImportSessionDialog |
 | 后台任务侧边栏 | background task 展示（testing 14） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |

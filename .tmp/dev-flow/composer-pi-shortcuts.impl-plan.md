@@ -78,6 +78,19 @@ graph TD
 
 机器对账差异披露：脚本输出仅 2 条 always 轨（按 `git diff main...HEAD` 当前仅设计文档 1 文件；U1 committed 后重跑对账，预期命中不变）；无人工清单独有条目。执行要求：空载串行。
 
+**验收执行结果（阶段 5 终态，2026-09-16）**：13 场景 = 12 pass + 1 blocked（环境限制）+ 0 fail。
+
+| # | 场景 | 结果 | 证据指针 |
+|---|------|------|----------|
+| A1 | L1 守卫矩阵+循环取值+意图生命周期 | pass | 44+37 用例全绿；Gate A 全量 4202/4202（composer-pi-shortcuts.gate-a.log） |
+| A8 | visual 轨像素无回归 | pass | 2/2（visual-chromium 含 composer.spec.ts，mock 轨零 token） |
+| A2-A4 | 核心组 S1/S2/S4/S10/S11 | pass | a2a4-report.md（5/5；S11 原生剪切以 execCommand 同层通路取证，真实人手按键留人工复核） |
+| A5 | 守卫组 S5/S6/S7/S12/S13 | pass | a5-report.md（5/5；决策 7 机制证据 = window 探针 0 次收到 ctrl+shift+p；决策 8/9 = 26 keydown 单步 + 焦点保持） |
+| A6 | S3 landing 首发继承+迁移 / S8 staging 透传 | pass | a6a7-report.md（S8 三层实锤：UI chip / assistant 消息 model 字段 / runtime spawn `--model --thinking` 参数；S3 pi 文件 modelId/provider/thinkingLevel 三字段一致） |
+| A7 | S9 non-reasoning no-op 抽验 | blocked | dev 环境 12 个 enabled 模型档位集均 ≥3 档，「仅 off」不可构造；L1 用例在列且绿（composer-shortcut-actions.test.ts），如实报 blocked 未编造 |
+
+附带登记（非缺陷）：session 刚切换真值未就绪即进 staging 时，快照抓到占位值致首按按起点规则从第一档起算——既有 staging 通路时序窗，非本次改动引入，真值就绪后行为正常。
+
 ## 5 合理偏差登记表
 
 | # | 偏差 | 裁决 | 依据 |
@@ -106,3 +119,5 @@ graph TD
 - 2026-09-16 U1 交付核验通过并 commit（diff 8 文件 ⊆ 领地；vitest 两目标 80/80 + vue-tsc 0 重跑一致；script setup 287/300）。
 - 2026-09-16 阶段 3 一致性审查 + Gate A（单 reviewer 合并承载）：Gate A 四项全绿（renderer 全量 4201/4201、typecheck 0、根 lint 0、core 零改动；绕过扫描零命中；日志 .tmp/dev-flow/composer-pi-shortcuts.gate-a.log）；机制层逐项核实一致（链序/决策 7/决策 8 五清除/起点对称/§3.5 逐行/G2 同入口）。结论：unreasonable 2 low（COMPOSER_ACTION_KEYS 锚点未落地→派修复批次对齐设计；core 注释残留→R4 登记）；doc_errors 2（S6 冒号笔误、§3.4 landing×ctrl+x 措辞）已由主 agent 修正设计文档；coverage 补测 1 条（选区×ctrl+p 触发）并入同批修复。
 - 2026-09-16 审查清零 commit（阶段 5 入口门标记）：修复批次 R1 核验通过（diff 2 文件 ⊆ 领地、81/81 + vue-tsc 0 重跑一致、主 agent 定向复审 diff 逐行通过——常量查表等价改写零语义漂移、新用例真实 DOM 断言）；设计文档 2 处 doc_errors 修正同 commit。Gate A 最终态全绿：renderer 全量 4202/4202（+1 补测用例）、根 lint exit 0、vue-tsc exit 0、core 零改动。
+- 2026-09-16 阶段 5 端到端验收完成：A1 → A8 → A2-A4 核心组 → A5 守卫组 → A6+A7 末组依次通过；13 场景 12 pass + 1 blocked（S9 环境不可构造，L1 已覆盖）+ 0 fail。剧本分流：全部 L4 场景判一次性（本设计特有键盘交互验证），产物落 `.tmp/dev-flow/composer-pi-shortcuts.acceptance/`（3 份报告 md 随收尾 commit 入库，截图/console log 留盘不入库）；无可复用 e2e spec 沉淀——回归防线主体为 L1 单测矩阵（设计 §4 裁决）。
+- 2026-09-16 收尾检查：功能分级同步（docs/FEATURE-PRIORITIES.md §4「快捷键与 side drawer」行并入 composer 快捷键；P2 依据 = 键盘入口挂掉后 UI 点选通路无损，模型/档位能力本身仍 P0）；文档资产对照 8 项，仅 FEATURE-PRIORITIES 触发，其余零同步。
