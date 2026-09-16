@@ -8,6 +8,9 @@
  * - **回执接线**（D2 两阶段）：message_end(user) 裸标记命中 → 条目 delivered + onSettled 记账
  * - **错误分类迁移**（D6）：pi 两条 busy 拒绝串 → compacting 持有重投 / processing 反转 occupancy
  * 另覆盖合批拆分（内核 doSend 合批 → 适配层按标记逐条还原，V1/V6/V9/V10 前提）。
+ * 末尾两组为缺陷修复回归（u3a 核验发现）：① 用户回收（cancel/drain）不广播 message.error
+ * （V9/V11 语义 = 文本回草稿，非投递失败）；② delivery.resync 对 failed 条目的用户重试
+ * （§3.4 错误规格表「重试钮 = resync 单条重报」）。
  *
  * 材料：真实 createDelivery 内核 + 真实 registry + mock pi client / mock session view（
  * 内核 timer 走 vitest fake timers）。pi 事件流用 onEvent 订阅替身驱动（回执注入点）。
@@ -419,5 +422,149 @@ describe('u2 撤销（cancel）', () => {
     const redelivered = h.promptCalls.slice(2).map((c) => c[0] as string)
     expect(redelivered.some((t) => t.includes('保留的'))).toBe(true)
     expect(redelivered.every((t) => !t.includes('撤销的'))).toBe(true)
+  })
+})
+
+// ── 缺陷修复回归①：用户回收（cancel/drain）不广播 message.error（V9/V11） ──────
+// 缺陷：内核 cancel/drain 对挂起 sendChecked waiter 的 reject（'delivery cancelled' /
+// 'delivery drained'）走 onDeliveryFailure 的无条件广播面 → 撤销成功仍弹错误气泡，与
+// 「文本回草稿」语义矛盾（设计 §3.4 / V9 / V11）。修复 = 双信号过滤（契约文案前缀 +
+// 条目不在 active 且 tombstone=cancelled）后只记日志；真失败（受理失败 / 重试耗尽）不受影响。
+
+describe('回收语义（V9/V11）：cancel/drain 不广播 message.error', () => {
+  const errorsOf = (published: ServerMessage[]): ServerMessage[] =>
+    published.filter((m) => m.type === 'message.error')
+
+  it('queued 态撤销：无 message.error（撤销 = 文本回草稿）+ 条目终态 cancelled', async () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const id = 'u-10000001-0000-4000-8000-000000000001'
+    h.registry.submit('s1', { content: '要撤的', clientUuid: id })
+    await h.flush()
+
+    const outcome = await h.registry.cancel('s1', id)
+    await h.flush()
+
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.content).toContain('要撤的')
+    expect(errorsOf(h.published)).toHaveLength(0)
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+  })
+
+  it('投递中（出站批次在途、条目仍 queued）撤销：无 message.error + 挂起 waiter 收尾不留悬挂', async () => {
+    const h = makeHarness()
+    // 出站批次卡在 prompt（未受理窗口）：条目仍 queued，sendChecked 挂起（reject 面可达）
+    h.client.prompt.mockImplementation(() => new Promise(() => {}))
+    const id = 'u-10000002-0000-4000-8000-000000000002'
+    h.registry.submit('s1', { content: '投递中撤的', clientUuid: id })
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued')
+
+    const outcome = await h.registry.cancel('s1', id)
+    await h.flush()
+
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.content).toContain('投递中撤的')
+    expect(errorsOf(h.published)).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+  })
+
+  it('delivery.drain（forceQuit 全量回收）：无 message.error + 全文取回 + cancelled 判重锚', async () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const id1 = 'u-10000003-0000-4000-8000-000000000003'
+    const id2 = 'u-10000004-0000-4000-8000-000000000004'
+    h.registry.submit('s1', { content: '第一条', clientUuid: id1 })
+    h.registry.submit('s1', { content: '第二条', clientUuid: id2 })
+    await h.flush()
+
+    const drained = h.registry.drain('s1')
+    await h.flush()
+
+    expect(drained.map((d) => d.clientUuid)).toEqual([id1, id2])
+    expect(drained[0]?.content).toContain('第一条')
+    expect(drained[1]?.content).toContain('第二条')
+    expect(errorsOf(h.published)).toHaveLength(0)
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    // drain 后同 id 重报不复活（cancelled tombstone 判重锚）：resync 返回判重命中集
+    await expect(h.registry.resync('s1', [id1])).resolves.toEqual([id1])
+  })
+
+  it('真失败（受理失败）仍有 message.error：过滤条件不吞真失败', async () => {
+    const h = makeHarness({ promptError: new Error('Authentication failed: 401') })
+    const id = 'u-10000005-0000-4000-8000-000000000005'
+    h.registry.submit('s1', { content: '真失败', clientUuid: id })
+    await h.flush()
+
+    const errors = errorsOf(h.published)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      type: 'message.error',
+      payload: { message: expect.stringContaining('Authentication failed: 401') },
+    })
+    // 受理失败条目入口即拦（移出内核、不落 cancelled tombstone）——非回收语义
+    expect(h.registry.entries('s1')?.tombstones).toHaveLength(0)
+  })
+})
+
+// ── 缺陷修复回归②：delivery.resync 用户重试（§3.4「重试钮 = resync 单条重报」） ──
+// 缺陷：resync 对 active 中的 id 一律 skip → failed 条目点重试零反应，「不会静默积压」的
+// 恢复动作落空。修复 = 对 active 中 state='failed' 的重报 id 走内核 requeue（failed → queued
+// 唯一入口）+ flush；其余 active 条目（queued/in-flight）行为不变。
+
+describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 并重投', () => {
+  it('failed 条目经 resync 单条重报 → 回到 queued 并重投（pi 恢复后闭环 delivered）', async () => {
+    const h = makeHarness({ promptError: new Error('pi unreachable') })
+    const handle = h.registry.getOrCreateDelivery('s1')
+    const id = 'u-20000001-0000-4000-8000-000000000001'
+    // failed 只能由非 checked 批次产生（checked 条目入口即拦 reject，不落 failed）——
+    // agent 通路经 handle.send 提交（completion-backflow 同形）。内核 backoff 默认
+    // ms=100 / max=50 → 第 51 次尝试转 failed（§3.4 重试耗尽行）。
+    handle.send({ payload: { kind: 'text', content: '重试我' } }, { id })
+    await h.flush()
+    for (let i = 0; i < 60; i += 1) await vi.advanceTimersByTimeAsync(100)
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'failed' })
+    const attemptsBeforeRetry = h.promptCalls.length
+    expect(attemptsBeforeRetry).toBeGreaterThan(50)
+
+    // 用户点重试钮 = delivery.resync 单条重报：failed → queued（requeue）+ 立即 flush
+    const deduped = await h.registry.resync('s1', [id])
+    expect(deduped).toEqual([]) // 非终态：不进判重命中集（条目仍是队列行）
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'queued' })
+    expect(h.promptCalls.length).toBeGreaterThan(attemptsBeforeRetry) // 重投确实发生
+
+    // pi 可达后重投受理成功 → 终态 delivered（恢复动作闭环）
+    h.client.prompt.mockImplementation(async (text: string, images?: unknown, behavior?: unknown) => {
+      h.promptCalls.push([text, images, behavior])
+      return {}
+    })
+    await vi.advanceTimersByTimeAsync(150)
+    await h.flush()
+    const full = h.registry.entries('s1')!
+    expect(full.active).toHaveLength(0)
+    expect(full.tombstones.some((t) => t.id === id && t.state === 'delivered')).toBe(true)
+  })
+
+  it('resync 对 queued/delivered 条目保持现状（不误重投）：queued 不动 + delivered 命中判重集', async () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const heldId = 'u-20000002-0000-4000-8000-000000000002'
+    h.registry.submit('s1', { content: '滞留中', clientUuid: heldId })
+    await h.flush()
+
+    await expect(h.registry.resync('s1', [heldId])).resolves.toEqual([])
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id: heldId, state: 'queued' })
+    expect(h.promptCalls).toHaveLength(0) // 持有期不因 resync 抢跑
+
+    applySessionOccupancyTransition(h.view, null, 'compacting-end')
+    await vi.advanceTimersByTimeAsync(600)
+    await h.flush()
+    const sent = h.promptCalls[0]?.[0] as string
+    h.userMessageEnd(sent) // 送达回执
+    await expect(h.registry.resync('s1', [heldId])).resolves.toEqual([heldId])
   })
 })

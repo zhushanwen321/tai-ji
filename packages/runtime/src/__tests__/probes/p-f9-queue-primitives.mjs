@@ -19,7 +19,7 @@
  * 退出码：0 全绿 / 1 断言失败 / 2 环境不可用（pi binary 缺失）
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -90,7 +90,11 @@ async function main() {
         const p = pending.get(msg.id)
         pending.delete(msg.id)
         clearTimeout(p.timer)
-        msg.success === false ? p.reject(new Error(msg.error ?? 'rpc failed')) : p.resolve(msg)
+        if (msg.success === false) {
+          p.reject(new Error(msg.error ?? 'rpc failed'))
+        } else {
+          p.resolve(msg)
+        }
       } else {
         events.push(msg)
       }
@@ -119,7 +123,6 @@ async function main() {
   try {
     // 冷启动：get_state 应答即就绪
     await rpc('get_state', {}, 20_000)
-    const coldIdx = events.length
     console.log('[probe] pi rpc 就绪:', piPath)
 
     // ── P-F9a：steer（空闲入队，F11 不报错）→ clear_queue 返回全文 ──────────────

@@ -675,4 +675,24 @@ export default [
       'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
     },
   },
+  // [HISTORICAL] 投递所有权内核两文件（design delivery-ownership-kernel u1/u2 交付物）：
+  // 二者都是「单闭包聚合中心」——同一函数体内多职责互引，拆任一职责段都必须为闭包互引
+  // 注入上下文（registry：对账器回调 handle、port 闭包读运行时态、cancel 复用对账回收
+  // 路径，四职责同源；delivery：五态状态机 / 出站批次重试 / v2 所有权 API 共享 active +
+  // checkedPending + 三组 timer 状态）。在不动行为、不改测试契约的前提下拆分不可低风险
+  // 完成（等价于重写 u1/u2 已验收实现），故按 event-adapter / chat.ts 聚合中心先例豁免
+  // （实测 registry 760 行 / 577 函数，delivery 642 行 / 496 函数）。
+  // 长期方向（本债务本体，改动这两文件时不得再增行）：registry → reconciler（五触发点 +
+  // 三分处置）/ receipt（两阶段回执）/ port 装配；delivery → 状态机 + 投影 + 回收 API
+  // 分模块（闭包态经上下文对象注入）。拆分属独立重构任务，须带两包测试全绿。
+  {
+    files: [
+      'packages/runtime/src/services/session/session-delivery-registry.ts',
+      'packages/session-delivery/src/delivery.ts',
+    ],
+    rules: {
+      'max-lines': 'off',
+      'max-lines-per-function': 'off',
+    },
+  },
 ];

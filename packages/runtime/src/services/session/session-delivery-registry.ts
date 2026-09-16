@@ -129,6 +129,8 @@ export interface SessionDeliveryRegistry {
 
 /** 裸标记（D2）：出站恒为裸 uuid 形态；入站兼容 u- 原文形态（renderer 回执正则同款双形态）。 */
 const BARE_MARKER_RE = /<!--taiji:msg:([^>]*)-->/g
+/** 协议层 clientUuid 前缀（renderer 乐观气泡 id 形态 `u-<uuid>`；裸标记取其后段）。 */
+const CLIENT_UUID_PREFIX = 'u-'
 /** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
 const BATCH_SEP = '\n\n---\n\n'
 /** 持有期空闲边沿轮询间隔（V2「settled 边沿后 ≤5s 自愈」预算内）。 */
@@ -137,6 +139,16 @@ const HOLD_POLL_MS = 500
 const WATCHDOG_MS = 30_000
 /** 同一 session 两次对账的最小间隔（多触发点同帧到达时合并，防 clear_queue 风暴）。 */
 const RECONCILE_MIN_INTERVAL_MS = 200
+/** 本地生成条目 id 的时间戳进制（`m-<base36 时间戳>-<序号>`；短且同毫秒内靠序号单调）。 */
+const LOCAL_ID_TIME_RADIX = 36
+/** 日志中 payload 预览的截断长度（整段消息不进日志）。 */
+const LOG_PAYLOAD_PREVIEW_CHARS = 60
+/**
+ * 内核「用户主动回收」对挂起 sendChecked waiter 的 reject 文案前缀契约（delivery.ts：
+ * cancel → `delivery cancelled: <id>`、drain → `delivery drained`）。用户回收不是投递
+ * 失败，不得进 message.error 广播面（§3.4 / V9 / V11）。
+ */
+const KERNEL_RECLAIM_REJECT_PREFIXES = ['delivery cancelled', 'delivery drained'] as const
 
 /** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-22/PS-23 探针锁守卫，pi 版本 bump 时探针红 =
  *  文案漂移，须同步本常量；识别函数是 D6 错误分类的迁移落点——内核适配器 catch 面）。 */
@@ -159,7 +171,7 @@ export function classifyPromptRejection(errorMessage: string): PromptRejectionRe
 
 /** 出站裸标记 id 形态：条目 id（协议层 clientUuid `u-<uuid>`）取裸 uuid（u3b 回执契约）。 */
 export function bareMarkerId(id: string): string {
-  return id.startsWith('u-') ? id.slice(2) : id
+  return id.startsWith(CLIENT_UUID_PREFIX) ? id.slice(CLIENT_UUID_PREFIX.length) : id
 }
 
 /** 出站文本尾附裸标记（D2；扩展 input hook 不剥离，随文本进 transcript 成为逐消息身份）。 */
@@ -299,7 +311,7 @@ let localIdSeq = 0
 /** 本地生成条目 id（老协议调用方无 clientUuid：plugin-service / 内部调用）。 */
 function genLocalId(): string {
   localIdSeq += 1
-  return `m-${Date.now().toString(36)}-${localIdSeq}`
+  return `m-${Date.now().toString(LOCAL_ID_TIME_RADIX)}-${localIdSeq}`
 }
 
 /**
@@ -798,9 +810,29 @@ export function createSessionDeliveryRegistry(
     }
   }
 
+  /**
+   * 判定 reject 是否源于**用户主动回收**（cancel / drain）——双信号一致判据，缺一不成立：
+   * ① reject 文案命中内核 cancel/drain 契约前缀（KERNEL_RECLAIM_REJECT_PREFIXES）；
+   * ② 条目已不在 active 且 tombstone 终态 = cancelled（cancel/drain 已终结该条目）。
+   * 刻意取「双信号」而非单信号：契约文案漂移或终态被后续操作改写时，判据退回「按真实
+   * 失败处理」——宁可多播一个错误，不可吞掉真失败（受理失败 / 重试耗尽必须仍可见）。
+   */
+  function isUserReclaimRejection(rt: SessionRuntime, id: string, message: string): boolean {
+    if (!KERNEL_RECLAIM_REJECT_PREFIXES.some((prefix) => message.startsWith(prefix))) return false
+    const full = rt.handle.entries()
+    if (full.active.some((e) => e.id === id)) return false
+    return full.tombstones.some((t) => t.id === id && t.state === 'cancelled')
+  }
+
   /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见面（老协议无帧消费时的兜底通道）。 */
   function onDeliveryFailure(sessionId: string, rt: SessionRuntime, id: string, e: unknown): void {
     const message = e instanceof Error ? e.message : String(e)
+    if (isUserReclaimRejection(rt, id, message)) {
+      // 用户撤销 / forceQuit 回收：语义是「文本回草稿」（V9/V11），条目已被内核终结，
+      // 此处的 waiter reject 只是挂起 promise 的收尾——弹错误气泡与语义矛盾，只记日志。
+      warn('delivery reclaimed by user (cancel/drain), no error surfaced, sid=', sessionId, 'id=', id, message)
+      return
+    }
     warn('delivery failed (terminal), sid=', sessionId, 'id=', id, message)
     deps.getMessageBus()?.publish(sessionId, {
       type: 'message.error',
@@ -897,7 +929,11 @@ export function createSessionDeliveryRegistry(
         // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）
         onSettled: (msg, outcome) => {
           if (outcome === 'rejected') {
-            warn('kernel onSettled(rejected), sid=', sessionId, payloadText(msg.payload).slice(0, 60))
+            warn(
+              'kernel onSettled(rejected), sid=',
+              sessionId,
+              payloadText(msg.payload).slice(0, LOG_PAYLOAD_PREVIEW_CHARS),
+            )
           }
         },
       })
@@ -1010,8 +1046,18 @@ export function createSessionDeliveryRegistry(
       if (!rt) return []
       const full = rt.handle.entries()
       const finalIds = new Set(full.tombstones.map((t) => t.id))
-      const activeIds = new Set(full.active.map((e) => e.id))
-      const unknown = clientUuids.filter((id) => !finalIds.has(id) && !activeIds.has(id))
+      const activeStateById = new Map(full.active.map((e) => [e.id, e.state] as const))
+      // 用户重试（§3.4 错误规格表：队列区 failed 行的重试钮 = delivery.resync 单条重报）：
+      // failed → queued 的唯一入口是内核 requeue（types.ts 状态机迁移表）——重投入队首并
+      // 立即 flush 复核 gate（idle 即投；busy 由 settled/watchdog 驱动）。其余活跃条目
+      // （queued/in-flight）行为不变（它们在队列里，重报不改变状态）。
+      const retryIds = clientUuids.filter((id) => activeStateById.get(id) === 'failed')
+      if (retryIds.length > 0) {
+        const requeued = rt.handle.requeue(retryIds)
+        rt.handle.flush()
+        warn(`resync: retry ${requeued} failed entry(ies) as user-requested, sid=`, sessionId, retryIds)
+      }
+      const unknown = clientUuids.filter((id) => !finalIds.has(id) && !activeStateById.has(id))
       if (unknown.length === 0) return clientUuids.filter((id) => finalIds.has(id))
       // 判重表已清空（runtime 重启 reattach）+ 未知条目：判重锚回落 transcript 标记扫描
       // （D5②），全量读取一次供全部重报 id 复用
@@ -1022,7 +1068,7 @@ export function createSessionDeliveryRegistry(
           deduped.push(id)
           continue
         }
-        if (activeIds.has(id)) continue
+        if (activeStateById.has(id)) continue
         const needle = `<!--taiji:msg:${bareMarkerId(id)}-->`
         if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
         else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
