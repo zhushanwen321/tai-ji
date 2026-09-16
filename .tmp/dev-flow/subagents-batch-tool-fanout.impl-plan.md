@@ -135,6 +135,7 @@ graph TD
 | u9 | 降级路径 deliverAs:'steer' 改 triggerTurn 单通道直发（对齐 notifier 内核降级形态），g4-allow 两处豁免清除，notify-stale-guard 断言同批更新 | 合理（G4 守卫全绿） | 固化 |
 | u9 | notifiedRunIds 内存 Set 保留：与账本幂等构成两层去重（内存拦同进程重复回调，持久 notifyId 承接重启/窗口挤出），W3C2/W3TC11-13 契约零改动保持绿 | 合理 | 固化 |
 | u9 | docs/architecture/pi-boundary-reliability.md L377 附录 B 待办（workflow 完成通知账本化迁移）已可销账——领地外未动手 | 合理（移交） | **随阶段 6 design-code-sync 终态同步处理** |
+| 阶段3审查 | reasonable 12 条登记：core 区 4 条（workerData.scriptPath 缺席 fail-fast 加固 / ledger 回执接受域收窄防撞键误销账 / aggregate 缺 conclusion 兜底降 partial 非静默 / grep 终扫剩余物全设计内）；shell 区 5 条（spec 组装随 tool-workflow 先例补三字段 / fan-out 执行体缺席 fail-fast 带 Recovery+可用清单 / slug+time 双闸与 workflow tool 逐字对称 / u9 测试三处生产形态声称核实为真 / 偏差登记表逐条落地核实）；文档区 5 条（探针 R3 闭环完整 / BATCH-02 沿 RENAME-02 先例 / TEST-STRATEGY 范例删除必要[建议补现行示例] / 结果通知行零改动正确 / 文档断言与代码零漂移抽查通过） | 合理（设计纪律内演化，无破坏设计目标） | 固化；阶段 6 design-code-sync 按各条 doc_sync 建议同步 D3/D4/D7/D9 表述 |
 | u5 | routeRecord/isCollectMember 删除后成功轮通知收敛为 notifyComplete 单通道（与原 async 直通分支逐行等价，失败轮统一走既有 async 失败单发；closeAfterRound 两分支本就同构） | 合理（删 sync 双路后的必然形态，非行为变更） | 固化 |
 | u5 | sync-collect-recovery.test.ts 未整删：含非 collect 覆盖面（存量 entry 投影白名单/orphan merge/P-rebuild/P-manifest 不变量）——删 7 批机制用例、改造保留 6 例 | 合理（随删/随改指令） | 固化 |
 | u5 | notifier-golden-snapshot 合批 merge 用例保留主体（60s 合批窗口是内核行为、降级形态仍存在），仅删批量渲染锁段；合批 details 降级宿主走 pi 默认渲染兜底 | 合理 | 固化 |
@@ -170,3 +171,4 @@ graph TD
 - 2026-09-16 v1：初版计划，基于三审 5 轮收敛的设计文档（design-review-20260916-151713 三报告）
 - 2026-09-16 v2：u1/u2/u3/u4 committed；u4 归属修正（core collect 路由并入 u5）；S5 期门结论 = 静默忽略分支；ledger 基建落点核实（风险 #1 解除）；u6 样本定位
 - 2026-09-16 v3：u5 首任 dev 因 provider 限流中断（运行 64min，零产出，工作区干净）——按接替程序补派新 dev 从零执行（前任无可附证据包），轮次 +1
+- 2026-09-16 v4：阶段 3 三区一致性审查完成（90 文件 +2892/−8111）。**三区均无 P0/P1 违背，D1-D9 契约逐条通过**。聚合：unreasonable 7 条（P2×2 + P3×5）、doc_errors 5 条（设计文档 3 处——D4 outcome 死枚举 "error"/D5① promptGuidelines 不存在前提/D3 spec 清单缺三字段——主 agent 亲修完毕；项目 docs 2 处归修复组）、reasonable 12 条已登记。修复批次 2 组并行派发（组1 core 代码面 / 组2 shell+文档面；S3 新文案由编排者裁定固定消除组间依赖）
