@@ -63,10 +63,8 @@
       }
     }
   },
-  "$comment": "W1 骨架（docs/design/subagent-engine-protocolization.impl-plan.md §2.1）。双形态同 subagent-core 先例（D4）：workspace 消费走 import 条件 -> src；npm 消费走 publishConfig -> dist。exports 面先收窄到 ./ 与 ./protocol（exports = semver 契约，收窄不放宽；引擎包 W5/W7 消费经主 barrel）。协议版本独立于包版本：ENGINE_PROTOCOL_VERSION = 1（src/protocol/engine-protocol.ts）。不变量：本包禁止 import @zhushanwen/subagent-core（守卫 .githooks/check-engine-sdk-boundary.mjs）。src/env.ts 与 src/spawn.ts 是 W12 领地（impl-plan §2.12），本单元仅空骨架占位。tsup entry 逐模块具名登记（§2.1 末行），新增模块必须同步登记。",
+  "$comment": "W1 骨架（docs/design/subagent-engine-protocolization.impl-plan.md §2.1）。双形态同 subagent-core 先例（D4）：workspace 消费走 import 条件 -> src；npm 消费走 publishConfig -> dist。exports 面先收窄到 ./ 与 ./protocol（exports = semver 契约，收窄不放宽；引擎包 W5/W7 消费经主 barrel）。协议版本独立于包版本：ENGINE_PROTOCOL_VERSION = 1（src/protocol/engine-protocol.ts）。不变量：本包禁止 import @zhushanwen/subagent-core（守卫 .githooks/check-engine-sdk-boundary.mjs）。src/env.ts 与 src/spawn.ts 是 W12 领地（impl-plan §2.12），本单元仅空骨架占位。tsup entry 逐模块具名登记（§2.1 末行），新增模块必须同步登记。files 不含 src/（对齐 subagent-core 2026-09-16 同型收敛）：npm 消费面经 publishConfig 整体替换后全指 dist，TS 源仅服务 workspace（node_modules symlink 直读磁盘源文件，不经 tarball）；dist 产物无 sourcemap/sourceMappingURL，移除 src 零断链。已知残留：顶层 main（src/index.ts，workspace 形态载体）被 npm files 规则强制隐含打进 tarball，对 npm 消费者不可达，纯体积噪声。",
   "files": [
-    "src/",
-    "!src/__tests__",
     "dist/"
   ],
   "scripts": {
