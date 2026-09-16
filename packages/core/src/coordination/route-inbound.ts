@@ -201,7 +201,7 @@ function applySeqGap(sid: string, msg: ServerMessage): boolean {
 
 /**
  * 路由序言的 session 半边（dispatchRouted 有 sid 分支提取，行为零改变）：
- * seqGate → dispatchSession → crossSession? → payloadGuard → sessionEffect → stream_delta 桥接。
+ * seqGate → dispatchSession → crossSession? → payloadGuard → sessionEffect。
  * 闭包变量 resolved.events / effectsCtx 改经参数注入。
  */
 function dispatchSessionRouted(

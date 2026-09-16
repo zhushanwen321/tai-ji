@@ -1933,29 +1933,6 @@
       ]
     },
     {
-      "id": "C-comm-13",
-      "summary": "chat 流式 UI 判死必须 idle 语义：streaming timer 只由活动刷新计时（message 帧挂 refresh，stream_warn 除外），禁固定墙钟；活跃性定义含编排期子代理产出——subagent.stream_delta 帧经 route-inbound 桥接刷新父 session timer，禁止旁路帧不经 chat store 的静默检测；timeout 收口必须打标（Message.prematureTimeout）并允许迟到 message.complete 自愈恢复真实终态；阈值经 settings 配置链读写持久化（默认 1800s、clamp 60–3600s 单一权威 DEFAULT_STREAMING_IDLE_TIMEOUT_MS），禁新增 env 死配置口",
-      "scope": [
-        "packages/core/src/domain/chat/**",
-        "packages/core/src/coordination/**",
-        "packages/renderer/src/composables/effects/**",
-        "packages/shared/src/subagent-frame.ts"
-      ],
-      "authority": [
-        "../packages/core/src/domain/chat/timers.ts",
-        "../AGENTS.md"
-      ],
-      "dimensions": [
-        "business-logic"
-      ],
-      "enforcement": [
-        {
-          "type": "review",
-          "agent": "review-business-logic"
-        }
-      ]
-    },
-    {
       "id": "C-proc-11",
       "summary": "npm 发布面一致性：dist 发布包 files 白名单 ↔ 构建产出双向对齐——files 条目须磁盘存在且非空（幽灵条目拦截，npm pack 对幽灵条目静默跳过）、包内顶层 dist* 产物目录须被 files 覆盖（漏声明方向反向覆盖），由 check-publish-surface.mjs 在发布门（release workflow publish 前）与 CI PR invariants 双点强制（刻意不挂 pre-commit：dist 产物被 gitignore，干净 checkout 必红）；新增产物档须同批挂 workflow 构建步骤 + files 白名单条目 + 守卫覆盖（三者缺一不可）；自包含档命名约定 dist.bundle 且须内联全部运行时依赖（静态 require 探针，裸名外部说明符红）；非发布用途构建目录禁用 dist 前缀（否则反向覆盖检查误红，改名即可）；非 workspace 包机制上不经 changeset 发布线（changesets 按 workspace 发现包），防手滑 npm publish 一律 private:true",
       "scope": [

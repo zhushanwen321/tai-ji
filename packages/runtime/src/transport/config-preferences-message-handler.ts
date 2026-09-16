@@ -1,11 +1,10 @@
 /**
- * Workspace 偏好组 config.* message handler（worktree 目录/脚本/超时 + streaming idle +
- * 默认基分支，12 条简单读写转发 case）。
+ * Workspace 偏好组 config.* message handler（worktree 目录/脚本/超时 + 默认基分支，
+ * 10 条简单读写转发 case）。
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * 「Extracted from RuntimeServer to reduce file size」；本组 case 全部仅消费
  * ctx.configService + ctx.reply，无广播/sendError 耦合，迁移零行为变化）。
- * streaming idle 两条为 timeout-streaming-ui-idle §5.3 D3 配置链的 runtime 端。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage } from '@taiji/shared'

@@ -251,6 +251,6 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率）、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
 
 ### 任务托盘（Widget Tray）
-composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/pause/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。
+composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。设计文档 `docs/design/composer-task-tray.md`。
 
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。
