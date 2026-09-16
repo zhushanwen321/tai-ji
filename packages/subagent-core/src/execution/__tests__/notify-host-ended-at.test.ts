@@ -3,7 +3,8 @@
 // [U8 / 设计 §3.3 D5 耗时来源] toNotifyRecord 的 endedAt 物化域单测：
 //   1. running 轮终（生产 markRoundIdle 收口形态：status="idle" ∧ 无 closedReason）→
 //      载荷含 number 型 endedAt（物化前恒 undefined——bg-notify 边界行的耗时恒不显）；
-//   2. 批成员（batchMember=true，closed 载荷形态）→ 同样物化；
+//   2. ~~批成员（batchMember=true，closed 载荷形态）~~ [collect 退役 merge] 用例随
+//      批机制删除（toNotifyRecord 收窄单参）；
 //   3. legacyClosed（status="idle" ∧ closedReason 有值）保持原值透传（有则透传、
 //      无则不补）——原「archived 归档提示」域外分支已随 2026-09-16 全链路删除裁决
 //      消亡（收口提示与任务结束同刻，无「收起延迟」失真源）；
@@ -100,24 +101,10 @@ describe("[U8] 物化域 = running 轮终 + 批成员", () => {
     expect(notify!.endedAt).toBe(FROZEN_NOW);
   });
 
-  it("批成员载荷（closed 形态）同样物化 endedAt", () => {
-    const host = makeHost();
-    const record = makeRecord("sa-batch-member", { status: "idle" });
-
-    const notify = host.toNotifyRecord(record, { batchMember: true });
-
-    expect(notify).toBeDefined();
-    expect(notify!.status).toBe("closed");
-    expect(notify!.endedAt).toBe(FROZEN_NOW);
-  });
-
   it("物化域内快照已有 endedAt 优先透传（不覆写为投影时刻）", () => {
     const host = makeHost();
     const roundTerminal = makeRecord("sa-has-ended", { status: "idle", endedAt: 4242 });
-    const batchMember = makeRecord("sa-has-ended-batch", { status: "idle", endedAt: 4242 });
-
     expect(host.toNotifyRecord(roundTerminal)!.endedAt).toBe(4242);
-    expect(host.toNotifyRecord(batchMember, { batchMember: true })!.endedAt).toBe(4242);
   });
 });
 
@@ -160,7 +147,6 @@ describe("[U8] 投影边界一次完成 + record 内存零触碰", () => {
     const legacy = makeRecord("sa-mem-legacy", { status: "idle", closedReason: "gc" });
 
     host.toNotifyRecord(roundTerminal);
-    host.toNotifyRecord(roundTerminal, { batchMember: true });
     host.toNotifyRecord(legacy);
 
     expect(roundTerminal.endedAt).toBeUndefined();

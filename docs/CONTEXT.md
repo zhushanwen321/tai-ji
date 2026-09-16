@@ -82,6 +82,15 @@ taiji 与 pi 之间对 pi 私有语义的统一适配层（[ADR-0064](../adr/dec
 
 taiji subagent 体系的子任务执行单元：由引擎进程派生子进程（pi 引擎 spawn pi 子进程；zcode 引擎走 app-server RPC）执行子任务，宿主与引擎经 engine-protocol v1（NDJSON stdio）通信。体系由 5 类包协作：shell（`extensions/universal/subagent-workflow`）→ host core（`packages/subagent-core`）→ engine（`packages/pi-subagent-cli` / `packages/zcode-subagent-cli`）→ contract（`packages/subagent-engine-sdk`）。结构导航 SSOT：[docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)。
 
+### Fan-out / 批量派发
+
+2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收口后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
+
+**collect 退役迁移说明（2026-09-16 落地）**：
+1. 旧调用形态（`subagent start` 显式带 `collect` 字段）不会被 pi 拒绝——typebox 参数校验无 `additionalProperties`，未知字段静默放行且不剥离；字段退役后行为等价原 `collect:"async"` 缺省路径（立即逐条通知），无迁移动作、无功能损失。
+2. 误读风险 = 调用方以为仍会攒批、等一条聚合通知——`subagent` tool 的 start description 已留迁移期提示（"The former collect param is removed — for 2+ independent tasks in one dispatch, use the `subagents` tool instead."）。
+3. 2+ 独立任务并行的正确调用 = `subagents` tool（`tasks` 数组、一次调用、一条聚合结果通知）。
+
 ### Execution Record
 
 subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。

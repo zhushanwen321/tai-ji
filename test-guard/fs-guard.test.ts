@@ -28,8 +28,8 @@ import { open as fspOpen } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isDestructiveAllowed, isRealDataDir } from '../../test/fs-guard-impl.js'
-import { setup } from '../../test/global-setup.js'
+import { isDestructiveAllowed, isRealDataDir } from './fs-guard-impl.js'
+import { setup } from './global-setup.js'
 
 describe('fs-guard 判定（纯函数）', () => {
   it('真实数据目录等值与其内任意深度路径一律拒绝', () => {
@@ -180,7 +180,7 @@ describe('fs-guard 写句柄入口（fd/流写路径防线）', () => {
   })
 
   it('只读 openSync("r") 对任意路径不拦（读不在防护范围，含本仓库文件）', () => {
-    const repoPkg = fileURLToPath(new URL('../../../../package.json', import.meta.url))
+    const repoPkg = fileURLToPath(new URL('../package.json', import.meta.url))
     const fd = openSync(repoPkg, 'r')
     closeSync(fd)
   })

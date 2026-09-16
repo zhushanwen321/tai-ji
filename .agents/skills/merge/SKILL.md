@@ -141,7 +141,7 @@ bash scripts/check-version-bump.sh
 cd $WS_ROOT/main && node scripts/select-affected-e2e.mjs --release
 ```
 
-脚本圈出 trigger ∈ {on-release, on-pi-bump} 的全部 rule（当前 = rename A2 真机 + M1 models-json-sanitize 真机零 mock + sync-collect probes pi-bump 面；每条 rule 附 `运行` 命令与空载串行标注，输出集为空即按上方跳过语义放行）。pi bump 时联动既有 W25 门禁（`pi-protocol-contract` 契约测试，脚本输出 E2E-EQUIV-02）——阶段 3.5 的 check-version-bump.sh 已内联该测试，此处红则先解决协议漂移再进阶段 4。
+脚本圈出 trigger ∈ {on-release, on-pi-bump} 的全部 rule（当前 = rename A2 真机 + M1 models-json-sanitize 真机零 mock；每条 rule 附 `运行` 命令与空载串行标注，输出集为空即按上方跳过语义放行）。pi bump 时联动既有 W25 门禁（`pi-protocol-contract` 契约测试，脚本输出 E2E-EQUIV-02）——阶段 3.5 的 check-version-bump.sh 已内联该测试，此处红则先解决协议漂移再进阶段 4。
 
 **人工定跑哪些**：
 - **A2（`E2E-RENAME-02`）烧真实 token [MANDATORY 用户确认]**：必须用户在场明确确认后才跑

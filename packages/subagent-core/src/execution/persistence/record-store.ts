@@ -31,7 +31,7 @@
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
 // | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
 // | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑪见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照） | `.state` 收条 + binding 快照（A-lite）+ entry + 注销发射点② |
-// | markBatchFinalized(records) | sync 批终态（barrier：manifest 落盘完成先于批通知写账——「通知可达 ⇒ 索引就位」构造性保证） | barrier + 批 entry + manifest |
+// | [collect 退役] markBatchFinalized 原语行已随 sync 批机制删除 |
 // | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | entry（best-effort） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
@@ -132,7 +132,6 @@ import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record
 // 依赖方向单向：store → terminal → {rebuild}（terminal 不回 import store，无环）。
 import {
   MANIFEST_INDENT_SPACES,
-  markBatchFinalizedImpl,
   markCancelledImpl,
   markFinalizedImpl,
   markIdleEvictedImpl,
@@ -255,7 +254,7 @@ export class RecordStore {
   /**
    * [D8 v7] manifest 同步写目录（与 manifestStore 同一 records 目录，由构造方提供——
    * manifestStore.dir 私有，本类不经反射访问）。提供时终态原语（markFinalized /
-   * markCancelled / markBatchFinalized）走 writeAtomicFileSync 同步落盘——停机窗
+   * markCancelled）走 writeAtomicFileSync 同步落盘——停机窗
    * fire-and-forget 竞态构造性消灭（disposeAllRecords 同步链全链同步段内完成）；
    * 已接线（subagent-service.ts 构造点 recordsDir）；缺省分支仅纯内存测试形态。
    */
@@ -308,7 +307,6 @@ export class RecordStore {
       persistSettledState: (file, payload) => writeSettledState(file, payload),
       acquireLease: (file, marker) => writeAliveMarker(file, marker),
       releaseLease: (file) => removeAliveMarker(file),
-      writeBatchManifest: (m) => this.manifestStore!.writeManifest(m),
       manifestDir,
       archive: (r) => this.archive(r),
       register: (r) => this.register(r),
@@ -472,16 +470,8 @@ export class RecordStore {
     return markCancelledImpl(record, this.terminalCtx);
   }
 
-  /**
-   * 意图原语：sync 批终态（统一写点）。内部写序显式复刻 barrier：manifest 落盘
-   * **完成**先于批通知写账（batchFinalized 落标 entry）——「通知可达 ⇒ 索引就位」
-   * 构造性保证（session-reader 指针行反查依赖；缓存降级下 barrier 不可删，D4②/D5）。
-   * manifestDir 提供时为同步写（写完即返回）；缺省降级 allSettled 异步屏障（原
-   * writeSyncBatchManifestBarrier，已随 U3 归口删除）。
-   */
-  async markBatchFinalized(records: readonly SubagentRecord[]): Promise<void> {
-    await markBatchFinalizedImpl(records, this.terminalCtx);
-  }
+  // [collect 退役] 原 markBatchFinalized（sync 批终态统一写点——manifest 屏障 +
+  // batchFinalized 落标 entry）已随批机制整体删除。
 
   /**
    * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
@@ -656,8 +646,8 @@ export class RecordStore {
   // [H4 三轴拆分] releaseWriteLease（写权 release 锚分派）已迁 record-store-terminal.ts
   // （releaseWriteLeaseImpl）——markIdleEvicted/markSettledOut 实现内部消费。
 
-  // [H4 三轴拆分] terminalManifestRecord / batchManifestRecord /
-  // legacyManifestStatusFields / derivedManifestRecord（manifest 投影族）已迁
+  // [H4 三轴拆分] terminalManifestRecord / legacyManifestStatusFields /
+  // derivedManifestRecord（manifest 投影族）已迁
   // record-store-rebuild.ts（投影轴）——本类经 import 调用，投影单点语义不变。
 
   /**
@@ -1184,9 +1174,9 @@ export class RecordStore {
    * 通路」——batchFinalized 落标 entry 写主 session 文件，本扫描同文件域才可见；禁走
    * collectRecords light 路径，它只读子文件 identity 头+sidecar，主 session 落标
    * entry 不可见）。返回每 id 末条重建的完整 record（含 batchFinalized /
-   * 终态五字段，损坏 entry 跳过）；调用方（service.recoverSyncCollectBatch 的 E1 过滤、
-   * recoverOrphanRecords 的覆写 merge）自行取舍。主文件不可读（含新 session 未 flush
-   * 的 ENOENT）→ 空数组静默。
+   * 终态五字段，损坏 entry 跳过）；调用方（[collect 退役] 原批域排除判据已随批机制
+   * 删除，现行消费 = recoverOrphanRecords 的覆写 merge 与读侧守卫测试）自行取舍。
+   * 主文件不可读（含新 session 未 flush 的 ENOENT）→ 空数组静默。
    */
   scanLastRecordEntries(mainSessionFile: string | undefined): SubagentRecord[] {
     if (mainSessionFile === undefined) return [];

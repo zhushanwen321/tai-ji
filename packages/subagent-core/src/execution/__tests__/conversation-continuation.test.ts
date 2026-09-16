@@ -156,13 +156,12 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
       // 由 finalize 清除前的窗口构成，门是防御性第二闸）。
       record.round = (record.round ?? 0) + 1;
     },
-    routeRecord: (rec) => {
+    // [collect 退役] 原 routeRecord（collectCoordinator.route 成功通知路由）收敛为
+    // notifyComplete 直通面；isCollectMember 失败轮分流判据随批机制删除。
+    notifyComplete: (rec) => {
       calls.order.push(`route:${rec.id}`);
       calls.routed.push(rec.id);
     },
-    // [modeless 波3] 批成员资格查询（失败轮分流判据）——本文件 stub 恒 false
-    //（失败通知单发路径的既有断言面保持；批成员入批形态见 collect-coordinator 测试）。
-    isCollectMember: (id: string) => calls.routed.includes(id) && false,
     notifyRecord: (n) => {
       calls.order.push("notify");
       calls.notified.push(n);
@@ -884,17 +883,19 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("成功轮：round+1 + result = 本轮 content + route 晚于簿记（次序断言）+ record 落 idle（[two-state-convergence U4] 翻边）", async () => {
+  it("成功轮：round+1 + result = 本轮 content + 完成通知晚于簿记（次序断言）+ record 落 idle（[two-state-convergence U4] 翻边）", async () => {
     const record = makeChatRecord("sa-round-ok", agentDir);
     store.register(record);
     const routeOrder: string[] = [];
-    const coord = (service as unknown as {
-      collectCoordinator: { route(r: ExecutionRecord): unknown };
-    }).collectCoordinator;
+    // [collect 退役] 原 collectCoordinator.route 观察点收敛为 notifyHost.notifyComplete
+    //（成功轮完成通知直通面）。
+    const host = (service as unknown as {
+      notifyHost: { notifyComplete(r: ExecutionRecord): void };
+    }).notifyHost;
     const storeSpy = vi.spyOn(store, "reportRecordTransition");
-    const original = coord.route.bind(coord);
-    Object.assign(coord, {
-      route: (r: ExecutionRecord) => {
+    const original = host.notifyComplete.bind(host);
+    Object.assign(host, {
+      notifyComplete: (r: ExecutionRecord) => {
         routeOrder.push(`route:round=${r.round}`);
         original(r);
       },

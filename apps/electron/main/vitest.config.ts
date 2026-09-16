@@ -1,26 +1,29 @@
-import { defineConfig } from 'vitest/config'
+import { taijiTestConfig, FS_GUARD_PATH, GLOBAL_SETUP_PATH } from '../../../test-guard/factory.ts'
 
 // main 进程纯函数测试。
 // main/ 不在 workspace 包内（非 renderer/runtime/shared），但 vitest 已 hoist 到根 node_modules，
 // @taiji/shared 经 workspace symlink 解析。仅测无 electron 运行时依赖的纯函数。
 //
+// 防线（[HISTORICAL] 2026-09-02 会话丢失事故双层防线；2026-09-16 起上收仓库根 test-guard/
+// factory 统一注入，main/test/ 下的自包含副本已删除）：globalSetup（root 级，对所有池生效）
+// = TAIJI_AGENT_DATA_DIR 钉 tmp + 真实数据目录白名单 fail-fast；fs-guard 切面仅 guarded 池
+// 显式挂载（projects 内 setupFiles 不继承 root 级，见 runtime/vitest.config.ts 同款注释）。
+//
 // 分池（形态对齐 packages/runtime/vitest.config.ts 的 projects 先例；vitest 4 调度契约：
 // groups 之间严格串行，先主组后尾组）：
 // - guarded：crash-resilience u5a 起的新增真实文件 IO 测试（logs/__tests__/），挂全套
 //   fs-guard 防线（仓规测试红线：破坏性 fs 只落白名单 tmp，真实 ~/.taiji 无条件拒绝）。
-//   guard 三件套自包含复制自 runtime/test/（main 非 workspace 包，跨包相对引用测试基建太脆）。
 // - legacy：存量 40+ 测试文件。**有意不挂 fs-guard**：挂载后暴露存量用例自身的设计缺陷
 //   （如 update-self-healer.test.ts 在 vitest 环境经 getOldBackupPath 的
 //   dirname×3(process.execPath) 推导出真实 ~/.nvm/versions/node.old 并 rmSync——guard
 //   正确拦截但该用例需 mock execPath 才能修，文件在 u5a 领地外，缺陷已上报主 agent）。
-//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理。
-// globalSetup（root 级，对所有池生效）：TAIJI_AGENT_DATA_DIR 指向 tmp + 真实数据目录
-// fail-fast（[HISTORICAL] 2026-09-02 会话丢失事故第一层防线，对齐 runtime 形态）。
-export default defineConfig({
+//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理；globalSetup 层（env 钉死 +
+//   真实数据目录 fail-fast）对 legacy 池仍生效。
+export default taijiTestConfig({
   test: {
     reporters: ['default', 'junit'],
     outputFile: { junit: './test-results/vitest-junit.xml' },
-    globalSetup: ['./test/global-setup.ts'],
+    globalSetup: [GLOBAL_SETUP_PATH],
     projects: [
       {
         test: {
@@ -34,7 +37,7 @@ export default defineConfig({
             'images/__tests__/**/*.test.ts',
             'diagnostics/__tests__/**/*.test.ts',
           ],
-          setupFiles: ['./test/fs-guard.ts'],
+          setupFiles: [FS_GUARD_PATH],
         },
       },
       {

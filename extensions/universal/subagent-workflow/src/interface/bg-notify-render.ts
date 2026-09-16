@@ -79,9 +79,9 @@ interface BgNotifyRecord {
  *   display:true 时 Pi 调本方法，返回 BorderedBgBox（紫色背景 + 圆角边框）。
  *   details 异常 → 返回 undefined 走 Pi 默认渲染（兜底）。
  *
- *   details 两种形态：
- *     - 单条：BgNotifyRecord（status/agent/id/result/error）
- *     - 批量：{ batch: true, items: BgNotifyRecord[] }（notifier 合并窗口内多条完成）
+ *   details 形态（单条）：BgNotifyRecord（status/agent/id/result/error）。
+ *   [collect 退役] 原批量形态 { batch: true, items }（sync 批通知 notifyBatch 产物）
+ *   随批机制删除——details 非单条形态走 Pi 默认渲染兜底。
  */
 export function renderBgNotifyMessage(
   message: { details?: unknown },
@@ -90,14 +90,6 @@ export function renderBgNotifyMessage(
 ): Component | undefined {
   const t = theme as ThemeLike;
 
-  // 批量分支：多条合并，各自渲染一行
-  const batch = extractBatch(message.details);
-  if (batch) {
-    const lines = batch.flatMap((r) => renderRecordLines(r, t));
-    return new BorderedBgBox(lines, t);
-  }
-
-  // 单条分支
   const record = extractBgNotifyRecord(message.details);
   if (!record) return undefined;
   return new BorderedBgBox(renderRecordLines(record, t), t);
@@ -260,22 +252,6 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
       // v4 B-1: 对话模式轮次完成（旧 idle 折入 running）——仅标题行。
       return [head];
   }
-}
-
-/**
- * 从 message.details 防御性提取批量 record。
- * 形态：{ batch: true, items: BgNotifyRecord[] }。结构不全返回 undefined。
- */
-function extractBatch(details: unknown): BgNotifyRecord[] | undefined {
-  if (typeof details !== "object" || details === null) return undefined;
-  const d = details as Record<string, unknown>;
-  if (d.batch !== true || !Array.isArray(d.items)) return undefined;
-  const records: BgNotifyRecord[] = [];
-  for (const item of d.items) {
-    const r = extractBgNotifyRecord(item);
-    if (r) records.push(r);
-  }
-  return records.length > 0 ? records : undefined;
 }
 
 /**

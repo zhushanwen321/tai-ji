@@ -176,7 +176,10 @@ describe("pump → executeWorkflowAgent 端到端", () => {
 
     // 2. 引擎应答 → worker 协议回包 + trace node 终态摘要
     //    （settle 后链路含 journal.close 的真 fs await，用 waitFor 收敛）
-    h.fake.runs[0]!.settle({ content: "ok", sessionId: "sess-1", sessionFile: "/tmp/sess-1.jsonl", durationMs: 5 });
+    // sessionFile 落 os.tmpdir() 白名单（fs-guard 防线要求），禁写 /tmp 根：
+    // settle 链路含 writeAliveMarker 真实写 `<sessionFile>.alive`，/tmp 根不在白名单会被拦截。
+    const sessionFile = path.join(h.tmpRoot, "sess-1.jsonl");
+    h.fake.runs[0]!.settle({ content: "ok", sessionId: "sess-1", sessionFile, durationMs: 5 });
     await vi.waitFor(() => {
       expect(findAgentResultPost(h.postMessage, 1)).toBeDefined();
     });
@@ -191,7 +194,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const node = h.run.state.trace.find(1);
     expect(node?.status).toBe("completed");
     expect(node?.result?.content).toBe("ok");
-    expect(node?.result?.sessionFile).toBe("/tmp/sess-1.jsonl");
+    expect(node?.result?.sessionFile).toBe(sessionFile);
     expect(node?.completedAt).toBeDefined();
     expect(h.run.state.calls.get(1)?.status).toBe("done");
 

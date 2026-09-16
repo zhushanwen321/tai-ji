@@ -238,39 +238,33 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     store.dispose();
   });
 
-  it("桥接终态（idle ∧ closedReason=cancelled）→ legacy status=cancelled（旧语义保留）", async () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
-    // markBatchFinalized 走 batchManifestRecord → legacyManifestStatusFields（同一派生单点）
-    await store.markBatchFinalized([
-      {
+  it("[collect 退役] 存量批成员 manifest（桥接终态 cancelled 词汇）读侧容忍：投影 idle + closedReason 保留", () => {
+    // 批写侧（markBatchFinalized → batchManifestRecord → legacyManifestStatusFields
+    // 派生单点）已删。构造磁盘遗留形态（批时代产物词汇：legacy status=cancelled +
+    // executionStatus=idle + closedReason/intent 缺省）——旧 session 文件必须可读。
+    fs.writeFileSync(
+      path.join(manifestDir, "sa-bridge.json"),
+      JSON.stringify({
         id: "sa-bridge",
-        agent: "worker",
+        rootSessionId: "root-session",
+        agentName: "worker",
+        status: "cancelled",
+        executionStatus: "idle",
+        closedReason: "cancelled",
+        createdAt: 1000,
+        completedAt: 2000,
         task: "bridge task",
         slug: "bridge",
-        status: "idle",
-        closedReason: "cancelled",
-        stopReason: "interrupted",
-        mode: "background",
-        startedAt: 1000,
-        rootSessionId: "root-session",
-        parentRecordId: undefined,
-        depth: 0,
-        endedAt: 2000,
-        turns: 1,
-        totalTokens: 10,
-        model: "test/model",
-        thinkingLevel: undefined,
-        eventLog: [],
-        displayItems: [],
-        result: undefined,
-        error: undefined,
-        sessionFile: undefined,
-      },
-    ]);
+      }),
+      "utf-8",
+    );
 
-    const manifest = readManifest("sa-bridge");
-    expect(manifest.status).toBe("cancelled");
-    expect(manifest.executionStatus).toBe("idle");
+    const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-bridge");
+    expect(rec).toBeDefined();
+    // 旧 cancelled 词汇读侧投影：idle（两态收敛）+ manifest closedReason 透传保留
+    expect(rec?.status).toBe("idle");
+    expect(rec?.closedReason).toBe("cancelled");
     store.dispose();
   });
 

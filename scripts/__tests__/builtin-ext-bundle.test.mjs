@@ -10,8 +10,9 @@
  * TC1/TC2/TC5/TC6（dev/packaged 发会话、permission 解析 bash、source map）是 integration/e2e/manual，留 T7/T8。
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, mkdirSync, copyFileSync, readdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const REPO = process.cwd();
@@ -45,9 +46,10 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 
 	it("TC7: verify-staged 对残缺产物 fail-fast（pi-permission 缺 wasm → exit 1）", () => {
 		// 构造残缺 staged：复制 permission（index.js + package.json）但故意不拷 2 个 wasm
-		const tmpScoped = join(REPO, ".cw/builtin-ext-bundle/tmp-staged/@zhushanwen");
+		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦）
+		const tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-staged-"));
+		const tmpScoped = join(tmpBase, "@zhushanwen");
 		const tmpPerm = join(tmpScoped, "pi-permission");
-		rmSync(tmpScoped, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 		mkdirSync(tmpPerm, { recursive: true });
 		copyFileSync(join(STAGED, "pi-permission/index.js"), join(tmpPerm, "index.js"));
 		copyFileSync(join(STAGED, "pi-permission/package.json"), join(tmpPerm, "package.json"));
@@ -59,7 +61,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		} catch (err) {
 			exitCode = err.status ?? 1;
 		}
-		rmSync(tmpScoped, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+		rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 		// fail-fast：缺 wasm 必须被拦截（exit 非 0），否则残缺产物会到 pi 加载时报错
 		expect(exitCode, "缺 wasm 时 verify-staged exit 非 0").not.toBe(0);
 	});
@@ -127,20 +129,23 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
  */
 describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
 	const VERIFY = join(REPO, "scripts/verify-staged-extensions.mjs");
+	let tmpBase;
 	let tmpScoped;
 	let tmpPkg;
 
 	beforeEach(() => {
-		tmpScoped = join(REPO, ".cw/builtin-ext-bundle/tmp-verify/@zhushanwen");
+		// fs-guard：fixture 落 os.tmpdir() mkdtemp 自建自删（仓库相对 .cw/ 路径在白名单外被拦；
+		// mkdtemp 每次全新目录，免旧路径的预清理 rmSync）
+		tmpBase = mkdtempSync(join(tmpdir(), "builtin-ext-bundle-verify-"));
+		tmpScoped = join(tmpBase, "@zhushanwen");
 		tmpPkg = join(tmpScoped, "pi-test-pkg");
-		rmSync(tmpScoped, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 		mkdirSync(tmpPkg, { recursive: true });
 		// 合法 index.js：过文件级检查（index.js 存在 + 无 .ts 残留），到达 checkManifest
 		writeFileSync(join(tmpPkg, "index.js"), "export default {};\n", "utf8");
 	});
 
 	afterEach(() => {
-		rmSync(tmpScoped, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+		rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 	});
 
 	/** 运行 verify-staged，返回 exit code（0=通过，非0=失败） */

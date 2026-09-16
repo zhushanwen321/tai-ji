@@ -18,11 +18,18 @@
 //   ① record：appendEntry(ledger entry) 落盘（先于一切投递尝试）
 //   ② deliver：settled 边沿 / 看门狗触发 attemptDeliver——单通道
 //      pi.sendMessage({triggerTurn:true})（steer/followUp/nextTurn 通道已全部删除，
-//      D5）；同一边沿的多条 pending 合并为一条注入
-//   ③ ack：回执判定成功（主 session 出现 notifyId 匹配的 subagent-bg-notify
-//      custom_message entry）后 appendEntry("subagent-bg-notify-ack")
+//      D5）；同一边沿的多条 pending 合并为一条注入。[u9] 送达通道按条目可指：
+//      record(..., { deliveryCustomType }) 允许外部结果语义通知携带自己的送达
+//      customType（如 workflow 收口通知的 "workflow-result"——runtime
+//      event-interpreter 按该类型识别 run 完成驱动 W18 workflow-record 失效信号，
+//      不能复用 NOTIFY_CUSTOM_TYPE）；缺省仍为 NOTIFY_CUSTOM_TYPE（既有行为零
+//      变化）。分组投递：默认通道组保持合批，外部通道组逐条（batch 合并形态
+//      {batch,items} 对外部通道无消费契约，且 details 须保持调用方原样）。
+//   ③ ack：回执判定成功（主 session 出现 notifyId 匹配的送达 custom_message
+//      entry——customType ∈ {NOTIFY_CUSTOM_TYPE} ∪ 在账条目声明的外部通道）后
+//      appendEntry("subagent-bg-notify-ack")
 //   ④ replay：重启恢复扫描 ledger/ack/abandoned entry 差集重放；重放按 notifyId 幂等去重
-//    （details 携带 notifyId，重复条目可识别）
+//    （details 携带 notifyId，重复条目可识别），送达通道随 entry 保留
 //
 // 止损上半场（T4③/PS-6）：④只保证「送达保证」下半场，回执确认不可达时（如送达
 // entry 被 compaction 清除）attempts 无上限 = 同一条通知每 120s 重复注入并
@@ -114,12 +121,35 @@ export interface NotifyLedgerEntryData {
   content: string;
   /** details record（回执匹配键 notifyId 在其内）。 */
   record: object;
+  /**
+   * [u9] 送达 customType（NotifyRecordOptions.deliveryCustomType 的落盘形态）。
+   * 缺省（undefined）= NOTIFY_CUSTOM_TYPE 旧格式——存量 entry 零迁移，恢复扫描
+   * 对缺省按默认通道处理。
+   */
+  deliveryCustomType?: string;
 }
 
 /** ack entry 的 data schema（v1）。 */
 export interface NotifyAckEntryData {
   v: 1;
   notifyId: string;
+}
+
+/**
+ * record 的投递通道选项（[u9] notifyDone 账本化——C-ext-19 迁移）。
+ *
+ * 背景：workflow 收口通知的送达 customType 是 "workflow-result"（runtime
+ * event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号，
+ * taiji 完成通知 display 覆写 SSOT 亦按它收录），不能复用 NOTIFY_CUSTOM_TYPE——
+ * 值由调用方声明，core 对具体外部通道值不可知（不 import 壳侧常量）。
+ */
+export interface NotifyRecordOptions {
+  /**
+   * 该条通知的送达 customType：sendDelivery 透传给 pi.sendMessage + 回执扫描的
+   * 接受域扩展（details.notifyId 匹配仍在，通道只是匹配前置条件）。缺省
+   * （undefined）= NOTIFY_CUSTOM_TYPE，既有调用零变化。
+   */
+  deliveryCustomType?: string;
 }
 
 /** [T4③/PS-6] abandoned entry 的 data schema（v1，与 ack 同形——终态标记只需身份键）。 */
@@ -155,13 +185,17 @@ interface NotifyLedgerItem {
   sentAt: number | undefined;
   /** 投递尝试次数（含首次；达 NOTIFY_REDELIVERY_MAX_ATTEMPTS 后超期即放弃，诊断用）。 */
   attempts: number;
+  /** [u9] 送达通道（undefined = NOTIFY_CUSTOM_TYPE 默认通道）。 */
+  deliveryCustomType: string | undefined;
 }
 
 /** 通知账本（四步生命周期载体）。 */
 export interface NotifyLedger {
   /** ① 写账（appendEntry 先于一切投递尝试）。幂等：同 notifyId 已在账（pending/sent）
-   *  或已销账 → 返回 false（调用方跳过投递——notifyId 幂等去重）。 */
-  record(notifyId: string, content: string, record: object): boolean;
+   *  或已销账 → 返回 false（调用方跳过投递——notifyId 幂等去重）。
+   *  [u9] options.deliveryCustomType 声明该条的送达通道（缺省 = NOTIFY_CUSTOM_TYPE），
+   *  随 ledger entry 落盘、恢复重放保留。 */
+  record(notifyId: string, content: string, record: object, options?: NotifyRecordOptions): boolean;
   /** ② 投递尝试：isIdle 二次复查，busy / 探测异常 → 挂回 pending 等下一边沿；idle →
    *  同批 pending 合并单条送达（triggerTurn 直达）。 */
   attemptDeliver(): void;
@@ -219,8 +253,16 @@ function scanSessionLedgerEntries(entries: readonly unknown[]): {
       const content = data["content"];
       const record = data["record"];
       if (typeof content === "string" && isPlainObject(record)) {
-        // 后写覆盖：fork 文件含同 notifyId 多条 ledger entry 时取最新
-        ledger.set(notifyId, { v: 1, notifyId, content, record });
+        // 后写覆盖：fork 文件含同 notifyId 多条 ledger entry 时取最新；
+        // deliveryCustomType 缺省/形态异常 → undefined（默认通道，存量 entry 兼容）
+        const deliveryCustomType = data["deliveryCustomType"];
+        ledger.set(notifyId, {
+          v: 1,
+          notifyId,
+          content,
+          record,
+          deliveryCustomType: typeof deliveryCustomType === "string" ? deliveryCustomType : undefined,
+        });
       }
     } else if (customType === NOTIFY_ACK_CUSTOM_TYPE) {
       acked.add(notifyId);
@@ -231,56 +273,21 @@ function scanSessionLedgerEntries(entries: readonly unknown[]): {
   return { ledger, acked, abandoned };
 }
 
-/**
- * [U9] 合并投递的 items 构造：批 wrapper record（{batch:true, notifyId, items}）展平
- * 一层，其成员 spread 进外层 items 并补 wrapper 身份键；非 wrapper record 原样保留。
- *
- * 为什么必须展平：两个 sync 批在父 session busy 窗口先后闭合时，同一边沿的两条 pending
- * 合并会产出 {batch:true, items:[{batch:true, items:[…]}, …]} 嵌套——下游
- * parseBgNotifyDetails 只解一层，对 wrapper 逐条 null，全 wrapper 时整条 null、整批
- * 记录静默消失（触发拓扑可达：批工具描述明示「Later sync starts join the same batch」）。
- *
- * 为什么必须补身份键：改「展平不补键」会切断销账链——合并态的回执匹配面 =
- * collectDeliveredNotifyIds 经 details.items[].notifyId，成员共享批 notifyId 即该批
- * 整体回执语义；不补则批账目永不销账 → 120s 重投 + 达上限假放弃。这与 notifier.ts
- * notifyBatch 的「批身份键必须顶层可达」是同一条不变量在合并态的同款保全。
- *
- * 身份键取值 = item.notifyId（账本身份键 = 回执匹配的判据键）而非 record.notifyId：
- * 批路径两者恒等（notifier 把 batchNotifyId 同时用作账本键与 details 顶层键），账本键
- * 才是销账判据，二者万一背离时以销账可达为准。
- */
-function flattenBatchItems(batch: NotifyLedgerItem[]): unknown[] {
-  const items: unknown[] = [];
-  for (const item of batch) {
-    const members = batchWrapperMembers(item.record);
-    if (members === undefined) {
-      items.push(item.record);
-      continue;
-    }
-    for (const member of members) {
-      items.push(isPlainObject(member) ? { ...member, notifyId: item.notifyId } : member);
-    }
-  }
-  return items;
-}
-
-/** [U9] 批 wrapper record 判定 + 成员取出：{batch:true, items:[…]} → 成员数组；
- *  其余形态（单条 BgNotifyRecord / 非法载荷）→ undefined（调用方原样保留）。 */
-function batchWrapperMembers(record: unknown): readonly unknown[] | undefined {
-  if (!isPlainObject(record) || record["batch"] !== true) return undefined;
-  const members = record["items"];
-  return Array.isArray(members) ? members : undefined;
-}
-
 /** 收集 wanted 集合中已送达（custom_message entry 出现）的 notifyId。
  *  送达 entry 两种形态都匹配：单条 details.notifyId / 批量 details.items[].notifyId
- *  （对齐 courier 合并投递的 details 结构）。 */
-function collectDeliveredNotifyIds(entries: readonly unknown[], wanted: Set<string>): Set<string> {
+ *  （对齐 courier 合并投递的 details 结构）。[u9] channelTypes = 回执接受域
+ *  （默认通道 ∪ 在账条目声明的外部通道）——送达 customType 必须在域内才参与
+ *  notifyId 匹配，防止无关 custom_message 的 details 撞键误销账。 */
+function collectDeliveredNotifyIds(
+  entries: readonly unknown[],
+  wanted: Set<string>,
+  channelTypes: ReadonlySet<string>,
+): Set<string> {
   const delivered = new Set<string>();
   if (wanted.size === 0) return delivered;
   for (const entry of entries) {
     if (!isPlainObject(entry) || entry["type"] !== "custom_message") continue;
-    if (entry["customType"] !== NOTIFY_CUSTOM_TYPE) continue;
+    if (typeof entry["customType"] !== "string" || !channelTypes.has(entry["customType"])) continue;
     const details = entry["details"];
     if (!isPlainObject(details)) continue;
     const notifyId = details["notifyId"];
@@ -325,7 +332,7 @@ export function createNotifyLedger(
   let watchdogTimer: ReturnType<typeof setInterval> | undefined;
 
   const api: NotifyLedger = {
-    record(notifyId, content, record): boolean {
+    record(notifyId, content, record, options?): boolean {
       if (disposed) return false;
       // 幂等去重：在账（pending/sent）/ 已销账 / 已放弃（[T4③] 终态绝不重发）→ false
       // [round2-notify-fix] 拒绝时 warn 留痕：历史上此分支静默（零日志），同键碰撞导致的
@@ -340,13 +347,23 @@ export function createNotifyLedger(
         );
         return false;
       }
+      const deliveryCustomType = options?.deliveryCustomType;
       host.appendLedgerEntry(NOTIFY_LEDGER_CUSTOM_TYPE, {
         v: 1,
         notifyId,
         content,
         record,
+        deliveryCustomType,
       } satisfies NotifyLedgerEntryData);
-      items.set(notifyId, { notifyId, content, record, recordedAt: Date.now(), sentAt: undefined, attempts: 0 });
+      items.set(notifyId, {
+        notifyId,
+        content,
+        record,
+        recordedAt: Date.now(),
+        sentAt: undefined,
+        attempts: 0,
+        deliveryCustomType,
+      });
       ensureWatchdog();
       return true;
     },
@@ -362,28 +379,36 @@ export function createNotifyLedger(
       } catch {
         return;
       }
-      const message = mergeItems(pending);
-      try {
-        host.sendDelivery(message);
-      } catch {
-        // 受理失败：留 pending（账已落盘，下一边沿重试 + 重启恢复兜底）。
-        // U4 ②settleRejected 桶：投递尝试被拒按事件次计数（对齐内核 onSettled
-        // per-message 终态口径——批次内每条各回调一次，ext-simplify-08 D1/B1），
-        // 增量落日志供回归定位。
-        buckets.settleRejected += 1;
-        emitBucketLog("settleRejected", buckets.settleRejected, { pending: pending.length });
-        return;
-      }
-      const now = Date.now();
+      // [u9] 按送达通道分组（Map 迭代序 = pending 出现序，确定性）：默认通道保持
+      // 合批（D5 既有行为）；外部通道组逐条投递——batch 合并形态 {batch,items} 对
+      // 外部通道无消费契约，且 details 必须保持调用方原样（如 workflow 收口通知的
+      // WorkflowNotifyDetails 单条形态）。部分组失败不影响其他组（成功组照常标
+      // sent，失败组留 pending 等下一边沿）。
+      const groups = new Map<string, NotifyLedgerItem[]>();
       for (const item of pending) {
-        item.sentAt = now;
-        item.attempts += 1;
+        const channel = item.deliveryCustomType ?? NOTIFY_CUSTOM_TYPE;
+        const group = groups.get(channel);
+        if (group) group.push(item);
+        else groups.set(channel, [item]);
+      }
+      for (const [channel, group] of groups) {
+        if (channel === NOTIFY_CUSTOM_TYPE) {
+          deliverBatch(channel, group);
+        } else {
+          for (const item of group) deliverBatch(channel, [item]);
+        }
       }
     },
 
     checkReceipts(): void {
       if (disposed || items.size === 0) return;
-      const delivered = collectDeliveredNotifyIds(host.readSessionEntries(), new Set(items.keys()));
+      // [u9] 回执接受域 = 默认通道 ∪ 在账条目声明的外部通道（逐次现算——通道集合
+      // 随账面变化，不做缓存态）
+      const channels = new Set<string>([NOTIFY_CUSTOM_TYPE]);
+      for (const item of items.values()) {
+        if (item.deliveryCustomType !== undefined) channels.add(item.deliveryCustomType);
+      }
+      const delivered = collectDeliveredNotifyIds(host.readSessionEntries(), new Set(items.keys()), channels);
       for (const notifyId of delivered) {
         ack(notifyId);
       }
@@ -406,6 +431,7 @@ export function createNotifyLedger(
           recordedAt: Date.now(),
           sentAt: undefined,
           attempts: 0,
+          deliveryCustomType: entry.deliveryCustomType,
         });
         replayed += 1;
       }
@@ -435,6 +461,7 @@ export function createNotifyLedger(
             notifyId: item.notifyId,
             content: item.content,
             record: item.record,
+            deliveryCustomType: item.deliveryCustomType,
           } satisfies NotifyLedgerEntryData);
           rewritten += 1;
         }
@@ -509,24 +536,41 @@ export function createNotifyLedger(
   /** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
    *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
    *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
-   *  [U9] items 经 flattenBatchItems 展平一层——两条 pending 均为批 wrapper 时不展平
-   *  会产嵌套载荷致整批静默消失，展平成员补批身份键保回执销账（详见该函数注释）。
-   *  单条分支不动：单条批的 details 即 wrapper 本体，顶层 notifyId 天然可达。 */
+   *  [u9] 不再携带 customType——送达通道由 deliverBatch 的分组键统一决定。 */
   function mergeItems(batch: NotifyLedgerItem[]): {
-    customType: string;
     content: string;
     display: boolean;
     details?: unknown;
   } {
     if (batch.length === 1) {
-      return { customType: NOTIFY_CUSTOM_TYPE, content: batch[0]!.content, display: true, details: batch[0]!.record };
+      return { content: batch[0]!.content, display: true, details: batch[0]!.record };
     }
     return {
-      customType: NOTIFY_CUSTOM_TYPE,
       content: batch.map((i) => i.content).join("\n\n---\n\n"),
       display: true,
-      details: { batch: true, items: flattenBatchItems(batch) },
+      details: { batch: true, items: batch.map((i) => i.record) },
     };
+  }
+
+  /** [u9] 单个发送单元：一批条目（默认通道多条合批 / 其余逐条时为单条）按指定
+   *  通道发送，受理成功全批标 sent（attempts 累加），失败留 pending（账已落盘，
+   *  下一边沿重试 + 重启恢复兜底）。U4 ②settleRejected 桶：投递尝试被拒按事件次
+   *  计数（对齐内核 onSettled per-message 终态口径——批次内每条各回调一次，
+   *  ext-simplify-08 D1/B1），增量落日志供回归定位。 */
+  function deliverBatch(channel: string, batch: NotifyLedgerItem[]): void {
+    const message = mergeItems(batch);
+    try {
+      host.sendDelivery({ customType: channel, content: message.content, display: message.display, details: message.details });
+    } catch {
+      buckets.settleRejected += 1;
+      emitBucketLog("settleRejected", buckets.settleRejected, { pending: batch.length });
+      return;
+    }
+    const now = Date.now();
+    for (const item of batch) {
+      item.sentAt = now;
+      item.attempts += 1;
+    }
   }
 
   /** [T4③/PS-6] 放弃终态：appendEntry(abandoned) 落盘终态标记（重启恢复不复活）+

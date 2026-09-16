@@ -54,6 +54,7 @@ import { notifyDone, trackNotifiedRunId } from "./interface/helpers.ts";
 import { registerSubagentTool } from "./interface/subagent-tool.ts";
 // ═══ interface/ 层（tools/commands/tui 合并） ═══
 import { registerSubagentsCommand } from "./interface/subagents.ts";
+import { registerSubagentsTool } from "./interface/tool-subagents.ts";
 import { registerWorkflowTool } from "./interface/tool-workflow.ts";
 import { registerWorkflowScriptTool } from "./interface/tool-workflow-script.ts";
 // ═══ 经 core barrel 消费 workflow 域（引擎与 worker 住 packages/subagent-core） ═══
@@ -648,6 +649,9 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   };
 
   registerWorkflowTool(pi, lazyDeps, guard);
+  // subagents（批量派发入口）与 workflow tool 共用同一 guard——两者是同一条
+  // runWorkflow 管道的入口，单守卫防双 guard 语义漂移（D3 复用裁决）。
+  registerSubagentsTool(pi, lazyDeps, guard);
   registerWorkflowScriptTool(pi, registry, isScriptRunning);
 
   // ════════════════════════════════════════════════════════════

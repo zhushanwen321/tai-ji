@@ -334,8 +334,9 @@ export function isEngineHandleShape(
  *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
  *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
  *  守卫已滤非 running 末条）；closedReason 经 isValidClosedReason 枚举守卫。
- *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除——
- *  桥接期豁免判据由 isCollectPending 的 status 子句承载）：sessionFile 原硬编码
+ *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除；
+ *  [collect 退役] 原桥接期豁免判据 isCollectPending 的 status 子句已随批机制删除）：
+ *  sessionFile 原硬编码
  *  undefined，导致
  *  E1 落标路径重建快照丢失反查索引锚（断链 1 前置依赖）。recoverEntryOnlyOrphans
  *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，该字段不参与
@@ -480,7 +481,7 @@ export function identityFromBinding(binding: RecordBinding | undefined, file: st
     // [modeless 波1] chatMode 读侧丢弃（旧 binding 残留键自然忽略）。
     worktree: binding.worktree,
     // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
-    // origin，收口/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
+    // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
     // binding 读侧（readRecordBinding）已字面量守卫归一，此处直传。
     origin: binding.origin,
     parentRunId: binding.parentRunId,
@@ -654,31 +655,6 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
   };
 }
 
-/** 批成员 manifest 投影（markBatchFinalized 用；原 writeBatchMemberManifest，
- *  已随 U3 归口删除——status 如实投影[成功成员此刻 running+resumable]，后续
- *  upgrade 终态时原子覆盖）。[U4c / G2] executionStatus/closedReason 双写同 terminal 投影。
- *  [U2 两态桥接] 旧 status 三态经桥接判据派生（idle ∧ closedReason 有值 → 终态投影），
- *  executionStatus 直投两态词汇。[U8] engine 域随投影下行（同 derived）。 */
-export function batchManifestRecord(rec: SubagentRecord): ManifestRecord {
-  return {
-    id: rec.id,
-    rootSessionId: rec.rootSessionId ?? "",
-    parentRecordId: rec.parentRecordId,
-    agentName: rec.agent,
-    ...legacyManifestStatusFields(rec),
-    executionStatus: rec.status,
-    closedReason: rec.closedReason,
-    createdAt: rec.startedAt,
-    completedAt: rec.endedAt,
-    sessionFile: rec.sessionFile,
-    task: rec.task,
-    slug: rec.slug,
-    model: rec.model,
-    engine: rec.engine,
-    engineHandle: rec.engineHandle,
-  };
-}
-
 /**
  * [U2 两态桥接 + U8 / §3.2.8] 旧 status 三态（session-reader 兼容契约）的派生单点。
  * 判定序（先命中先出）：
@@ -695,7 +671,7 @@ export function batchManifestRecord(rec: SubagentRecord): ManifestRecord {
  *      [u-arch] 原收起位 → closed 第一分支随收起概念删除退役
  *      （close 收口落账 record 投 running——对外两态下旧 reader 的 closed 分区
  *      语义不再被本仓维护为 close 专属，§3.4 方案 A 裁决）。
- * derivedManifestRecord 与 batchManifestRecord 共用（防两处手写判据漂移）。
+ * derivedManifestRecord 唯一消费（[collect 退役] batchManifestRecord 投影随批写侧删除）。
  */
 function legacyManifestStatusFields(
   rec: SubagentRecord,
@@ -710,7 +686,7 @@ function legacyManifestStatusFields(
 
 /**
  * [U4c / G1+G2] 状态派生 manifest 投影（rebuildIndexes / 反查 miss 惰性通道 /
- * markIdleEvicted 回收点 / markSettled 收口点 / markSettledOut 收口落账点共用）。
+ * markIdleEvicted 回收点 / markSettled 收口点 / markArchived 归档点共用）。
  * 数据源 = SubagentRecord 投影（identity entry/binding + `.state` sidecar 矩阵，
  * D1「.state 权威 + entry 尽力」）——词汇双写同终态写面。
  * [U2 两态桥接] 旧 status 三态派生收口 legacyManifestStatusFields 单点：
@@ -748,10 +724,8 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
  *  [U8 / §3.2.8 双写回读] executionStatus（两态权威词）在场且合法时优先——旧三态
  *  status 只是 session-reader 下行投影，settle 产物（legacy running + idle）按
  *  权威词读回 idle；旧 manifest（无 executionStatus）回落 mapManifestStatus。
- *  [U8] engine 域回读：zcode manifest 孤儿恢复引擎身份（engineHandle 经
- *  isEngineHandleShape 守卫，未知 JSON 不裸收）。
- *  [u-arch] intent 回读停（概念已删除）：旧 manifest 残留 intent 键在此被忽略
- *  （manifest-store.ts「未知字段跳过」自证旧 reader 双向无破坏）。 */
+ *  [U8] engine 域回读（manifest 持久化锚的读侧半边）：zcode manifest 孤儿恢复引擎身份（engineHandle 经 isEngineHandleShape
+ *  守卫，未知 JSON 不裸收）。 */
 export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
   const status = manifestStatusToExecution(m);
   if (status === null) return null;

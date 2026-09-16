@@ -448,6 +448,26 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
+
+  it("[A3/S3] 冷查重建透传来源身份：workflow 批成员候选（origin+parentRunId）复活后保留——否则绕过 messageHandler one-shot 守卫；tool 候选缺省 → 仍 undefined", () => {
+    const sessionFile = writeSessionFixture();
+    const wfDeps = makeDeps({
+      disk: [makeFound({ sessionFile, origin: "workflow", parentRunId: "wf-run-1" })],
+    });
+
+    const wfRecord = coldLookupForAction(wfDeps, "sa-cold-1", true)!;
+
+    // workflow 批成员收口归档出内存后，message 冷复活必须带着 origin 进守卫
+    //（subagent-actions-core messageHandler 按 record.origin === "workflow" 拒绝）
+    expect(wfRecord.origin).toBe("workflow");
+    expect(wfRecord.parentRunId).toBe("wf-run-1");
+
+    // tool 来源候选（无 origin）缺省形态不破坏：两字段 undefined 透传为 undefined
+    const toolDeps = makeDeps({ disk: [makeFound({ sessionFile })] });
+    const toolRecord = coldLookupForAction(toolDeps, "sa-cold-1", true)!;
+    expect(toolRecord.origin).toBeUndefined();
+    expect(toolRecord.parentRunId).toBeUndefined();
+  });
 });
 
 // ============================================================

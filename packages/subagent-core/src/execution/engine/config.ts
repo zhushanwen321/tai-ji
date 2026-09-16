@@ -9,7 +9,8 @@
 //   - `enabled: false` → 该引擎不装载（A12⑤：不进清单 + 派发报错含恢复指引）。
 //
 // 与 execution/config.ts 的关系：那边是全局配置的 sanitize 权威（maxConcurrent /
-// defaultEngine / engineRouting / collectSync），其 SubagentsGlobalConfig 类型不含
+// defaultEngine / engineRouting；[collect 退役] 原 collectSync 节已删），其
+// SubagentsGlobalConfig 类型不含
 // engines 键（sanitize 未知键忽略）。本模块只取 engines 段并逐条目校验——独立解析
 // 避免 execution/config.ts 类型面为发现器扩键（发现器消费 raw 形态，字段级容错在本
 // 模块内做，坏条目 warn 跳过、不影响其他条目）。

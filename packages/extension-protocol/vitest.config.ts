@@ -1,6 +1,6 @@
-import { defineConfig } from 'vitest/config'
+import { taijiTestConfig } from '../../test-guard/factory.ts'
 
-export default defineConfig({
+export default taijiTestConfig({
   test: {
     include: ['src/**/*.test.ts'],
     // 每次运行自动落盘用例级耗时报告（junit 的 testcase/@time 即单个用例耗时，

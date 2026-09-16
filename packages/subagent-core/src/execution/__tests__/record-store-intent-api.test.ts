@@ -3,12 +3,10 @@
 // [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 立面专属测试。
 //
 // 覆盖（验收条款 A1/A2/A5/A6）：
-//   - A1 十意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
-//     markFinalized/markCancelled/markBatchFinalized/adoptEngineDeath/
-//     markResurrected/markIdleEvicted）+ acquireWriteLease（A6）；
-//   - A2 终态写序（D8 v7）：`.state` writeSync 先 → entry/archive → manifest
-//     writeSync → `.alive` 删除；markBatchFinalized barrier（manifest 落盘完成
-//     先于批通知写账）；markRoundIdle 簿记⑦ `.alive` 保留；markIdleEvicted
+//   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
+//     markFinalized/markCancelled/adoptEngineDeath/markResurrected/markIdleEvicted，
+//     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
+//     markSettledOut 随意图机制退役收口）+ acquireWriteLease（A6）；
 //     archive 先 release 后（archive 抛错 marker 必未删）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
@@ -180,7 +178,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // A1 十原语齐备
   // ============================================================
   describe("A1 意图原语立面", () => {
-    it("十意图原语 + store 内部 acquire 动作齐备", () => {
+    it("九意图原语 + store 内部 acquire 动作齐备（[collect 退役] markBatchFinalized 原语已删）", () => {
       const fns = [
         "register",
         "appendEvent",
@@ -188,7 +186,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
         "markRoundIdle",
         "markFinalized",
         "markCancelled",
-        "markBatchFinalized",
         "adoptEngineDeath",
         "markResurrected",
         "markIdleEvicted",
@@ -312,32 +309,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     });
   });
 
-  // ============================================================
-  // A2 markBatchFinalized barrier
-  // ============================================================
-  describe("markBatchFinalized（barrier：manifest 落盘先于批通知写账）", () => {
-    it("entry 写账时点全部成员 manifest 均已落盘；落标 entry 携带 batchFinalized ([modeless 波3] collectMode 覆写随字段消亡删除)", async () => {
-      const members = [makeSubagentRecord("sa-m1"), makeSubagentRecord("sa-m2")];
-      // 写账时点断言 barrier：appendEntry 被调时该成员 manifest 必已存在。
-      appendEntryMock.mockImplementation((_type: string, data: unknown) => {
-        const d = data as { id?: string };
-        if (typeof d?.id === "string") {
-          expect(fs.existsSync(manifestPathOf(d.id)), `manifest of ${d.id} at entry time`).toBe(true);
-        }
-      });
-
-      await store.markBatchFinalized(members);
-
-      expect(appendEntryMock).toHaveBeenCalledTimes(2);
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "sa-m1", batchFinalized: true }),
-      );
-      // manifest status 如实投影（成功成员此刻 running+resumable）。
-      expect(readManifestJson("sa-m1")).toMatchObject({ id: "sa-m1", status: "running" });
-      expect(readManifestJson("sa-m2")).toMatchObject({ id: "sa-m2", status: "running" });
-    });
-  });
+  // [collect 退役] 原 markBatchFinalized barrier 用例（manifest 屏障写序 + 落标
+  // entry 携带标记）随批机制删除；存量 batchFinalized entry 的读侧容忍由
+  // batch-finalized.test.ts / sync-collect-recovery.test.ts 读侧守卫承接。
 
   // ============================================================
   // A2 markRoundStarted / markRoundIdle 簿记

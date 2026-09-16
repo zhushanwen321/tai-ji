@@ -579,6 +579,14 @@ jobs:
       - name: Alias-tsconfig sync guard
         run: node scripts/check-alias-tsconfig-sync.mjs
 
+      # vitest 防线挂载守卫（2026-09-16 误跑 workspace 全仓 vitest、runtime 包防线配置
+      # 未加载致测试删除用户真实 ~/.taiji 数据目录的事故防线）：所有含 vitest 测试的包，
+      # 其 vitest.config.ts 必须经仓库根 test-guard/factory 的 taijiTestConfig 包装
+      # （TAIJI_AGENT_DATA_DIR 钉死 + fs-guard 切面）。静态特征校验，不执行测试；
+      # 新包/新 config 漏挂防线在此红灯。
+      - name: Vitest test-guard mount guard
+        run: node scripts/check-vitest-guard.mjs
+
   # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
   # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。
   # needs gate：lint/typecheck + 4 个 test job + 两个 E2E job（visual 像素轨 + behavior P0 smoke 轨）
