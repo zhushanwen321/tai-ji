@@ -478,7 +478,14 @@ export class RecordAccess {
   private readonly coldLookupDeps: ColdLookupDeps = {
     findLightById: (id) => this.deps.getStore().findLightById(id),
     collectRecords: (limit, statusFilter, rootFilter) =>
-      this.deps.getStore().collectRecords(limit, statusFilter, rootFilter),
+      // [a3rv 归因修复] 冷查兜底全扫必须 includeWorkflow:true——冷查是「按 id 定位
+      // action 候选」的治理语义，不是 list 展示消费面；[H2 W1] origin 展示过滤若在
+      // 此生效，归档出内存的 workflow record 会被滤掉 → 候选 undefined → 上转
+      // 「not found or not owned」→ endedMessageGuard 误分流为「different session
+      // tree」（同树也误报，a3rv 重验实测）。messageHandler 的 D7 workflow-origin
+      // 域边界守卫依赖冷查能定位到 workflow record；与 lookupRecordAnyState 的 [S2]
+      // 「查询能力必须与文案指引一致」同款论证。
+      this.deps.getStore().collectRecords(limit, statusFilter, rootFilter, true),
     register: (record) => this.deps.getStore().register(record),
     reportRecordTransition: (record) => this.deps.getStore().reportRecordTransition(record),
     // [U2a/B4] 透明重生回边原语（store.markResurrected）——ColdLookupDeps 新增字段的
