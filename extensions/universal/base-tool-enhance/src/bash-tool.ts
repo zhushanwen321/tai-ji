@@ -54,6 +54,9 @@ const enhancedBashSchema = Type.Object({
  *  1. background:true 语义（立即返回 task_id，bash_output 查询 / bash_kill 终止）
  *  2. 白名单命中命令自动转后台（即使未要求 background）
  *  3. timeout 单位秒、显式填写会被尊重（唯一例外：白名单强转后台时忽略，D13）
+ *  4. 自动通知契约（统一话术 "DO NOT bash sleep"）：任务完成 steer 自动唤醒新
+ *     turn（notify.ts），LLM 文案必须传达「不要 sleep 空等」——实测大量 agent
+ *     启动后台任务后跑 bash sleep 轮询空等，机制在而契约不在所致
  *
  * bash_output / bash_kill 工具由 M2 单元注册，description 先行提及（D2/§3.5 要求）。
  */
@@ -62,10 +65,11 @@ const ENHANCED_BASH_DESCRIPTION = [
 	"Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file.",
 	"Optionally provide a timeout in seconds; an explicit timeout is respected, except when a whitelisted long-running command is force-routed to background. If no timeout is given, a configured default timeout applies when set.",
 	"",
-	"Background mode: set background: true to start the command without waiting for it. The tool returns immediately with a task_id, the pid, and an output file path, and you can continue other work while it runs.",
-	"Poll progress and fetch output with bash_output {task_id} (omit task_id to list known background tasks); terminate a task with bash_kill {task_id}.",
+	"Background mode: set background: true to start the command without waiting for it. The tool returns immediately with a task_id, the pid, and an output file path.",
+	"Completion is auto-notified: when the task finishes, a steer message with its output tail wakes your next turn — DO NOT bash sleep (e.g. run `sleep 30` in another bash call) or busy-wait while it runs. Do useful non-overlapping work, otherwise just stop and let the notification arrive.",
+	"bash_output {task_id} is for on-demand progress checks only (omit task_id to list known background tasks); never use it as a wait loop. Terminate a task with bash_kill {task_id}.",
 	"",
-	"Commands matching the force-background whitelist (test suites, dev servers, watch jobs and similar long-running commands) are automatically routed to background even when background was not requested; in that case the result carries a task_id to poll.",
+	"Commands matching the force-background whitelist (test suites, dev servers, watch jobs and similar long-running commands) are automatically routed to background even when background was not requested; the result carries a task_id and completion auto-notifies — the same DO NOT bash sleep rule applies.",
 ].join("\n");
 
 /**
@@ -101,7 +105,7 @@ function startBackgroundAndReply(
 					`task_id: ${task.taskId}  pid: ${task.pid}`,
 					`Output file: ${task.outputFile}`,
 					...extraNotes,
-					`Poll with bash_output {task_id:"${task.taskId}"} or omit task_id to list all tasks; terminate with bash_kill {task_id:"${task.taskId}"}.`,
+					`Completion is auto-notified — DO NOT bash sleep while waiting. On-demand check: bash_output {task_id:"${task.taskId}"} (or omit task_id to list all tasks); terminate with bash_kill {task_id:"${task.taskId}"}.`,
 				].join("\n"),
 			},
 		],

@@ -139,7 +139,7 @@ export function adapter(
   // reminder 作为第二个 text block（独立追加，不污染 details/JSON schema）。
   // 只有 list 触发——start 的 reminder 已在 BG_MESSAGE 里；cancel 无需。
   const reminder = action === "list"
-    ? "\n\nReminder: Subagent completion is auto-notified via auto-injected message (turn-triggering on idle). Do NOT poll in a loop — there is no poll action. Use action:'list' only when you concretely need state, then continue working or stop." // g4-allow: 契约文案——reminder 字符串描述自动注入通道（triggerTurn 单通道，U2/D5 无 deliverAs），非实际投递调用
+    ? "\n\nReminder: Subagent completion is auto-notified via auto-injected message (turn-triggering on idle). DO NOT bash sleep or poll in a loop — there is no poll action. Use action:'list' only when you concretely need state, then continue working or stop." // g4-allow: 契约文案——reminder 字符串描述自动注入通道（triggerTurn 单通道，U2/D5 无 deliverAs），非实际投递调用
     : "";
 
   return {

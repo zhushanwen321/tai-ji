@@ -270,7 +270,7 @@ export function registerWorkflowTool(
       "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
       "workflow-script generate for patterns already covered by available workflows.",
       "run: pass the workflow ref as name — the listed <name> (builtin/saved workflow) or its <location> absolute .js path from <available_workflows> — then start in background (no user confirmation needed).",
-      "Do NOT poll status after starting — results appear automatically via notifyDone.",
+      "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
       "Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.",
       "Call shapes (JSON): " +
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
@@ -474,8 +474,8 @@ export async function actionRun(
       {
         type: "text",
         text: params.slug
-          ? `Started workflow '${script.name}' · ${params.slug} (${runId}). Running in background — do NOT poll status.`
-          : `Started workflow '${script.name}' (${runId}). Running in background — do NOT poll status.`,
+          ? `Started workflow '${script.name}' · ${params.slug} (${runId}). Running in background — DO NOT bash sleep or poll status; results are auto-delivered via notifyDone.`
+          : `Started workflow '${script.name}' (${runId}). Running in background — DO NOT bash sleep or poll status; results are auto-delivered via notifyDone.`,
       },
     ],
     details: { action: "run", runId, status: "running", name: script.name, slug: params.slug, stateFile: deps.store.stateFilePath(runId) },
