@@ -17,8 +17,9 @@
  * （等值清 watch）/ 动作 reject / sessionId 变化 / 进入 staging（watch [sessionId, isStaging]）。
  * 仅已建态设立与续步——staging/landing 分支是同步写（无 RTT 窗口），不设意图。
  *
- * 守卫矩阵（§3.4 全行）：浮层 open 整体跳过（强模态上下文）→ IME 组合不触发 → auto-repeat：
- * 三个切换键忽略（按住只走一步，防 RPC 风暴）、ctrl+x 不忽略（幂等无 RPC，决策 8 例外）→
+ * 守卫矩阵（§3.4 全行）：浮层 open 整体跳过（强模态上下文）→ IME 组合不触发（分发链 IME 段
+ * 先行放行，本表不复判——over-engineering-audit 20260916 裁决：处理器只经分发链调用）→
+ * auto-repeat：三个切换键忽略（按住只走一步，防 RPC 风暴）、ctrl+x 不忽略（幂等无 RPC，决策 8 例外）→
  * composer 内有选区时 ctrl+x 放行原生剪切 → 档位可用集仅 off / 模型列表 ≤1 时 no-op
  * （键吞掉，无报错无 toast 噪音）。
  */
@@ -30,7 +31,7 @@ import { normalizeSupportedLevels } from '@taiji/core/domain/composer'
  * toast 窄接口：入参 = i18n key，翻译在壳层组装适配时完成（翻译时刻 = 触发时刻，
  * locale 切换后反馈文案跟随；本模块零 i18n 依赖，与分发链纯分派器同风格）。
  */
-export interface ComposerShortcutToast {
+interface ComposerShortcutToast {
   info: (i18nKey: string) => void
   error: (i18nKey: string) => void
 }
@@ -66,7 +67,7 @@ export interface ComposerShortcutActionDeps {
  * 与 pi keybindings.json 同构——P1 注册表化（统一 KeybindingRegistry）时的迁移锚点，
  * 本版不做用户配置。ShortcutAction 与键位判定/动作编排均由本表取值，单一来源防漂移。
  */
-export const COMPOSER_ACTION_KEYS = {
+const COMPOSER_ACTION_KEYS = {
   'shift+tab': 'app.thinking.cycle',
   'ctrl+p': 'app.model.cycleForward',
   'ctrl+shift+p': 'app.model.cycleBackward',
@@ -218,8 +219,6 @@ export function useComposerShortcutActions(
     if (deps.cmdOpen.value) return false
     const action = matchShortcutAction(e)
     if (!action) return false // 未命中 → 原样放行（不拦截、不阻断冒泡，既有段行为不变）
-    // IME 组合中不触发（分发链 IME 段已先行放行；此处为模块级同语义防御：放行不吞键）
-    if (e.isComposing) return false
     if (action === COMPOSER_ACTION_KEYS['ctrl+x']) {
       // §3.4 选区行：composer 内有选区 → 放行原生剪切（不拦截），不触发复制动作
       if (hasSelectionInFocusedEditor()) return false

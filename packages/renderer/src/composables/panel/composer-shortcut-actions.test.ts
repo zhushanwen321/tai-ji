@@ -2,9 +2,10 @@
  * composer-shortcut-actions 单测——composer-pi-shortcuts U1⑥（设计回归防线主体，验收 A1 全量下沉 L1）。
  *
  * 覆盖矩阵（与设计文档逐条对应）：
- *   §3.4 守卫矩阵全行（每行至少 1 条）：浮层 open / IME / auto-repeat（含 ctrl+x 不忽略例外）/
+ *   §3.4 守卫矩阵全行（每行至少 1 条）：浮层 open / auto-repeat（含 ctrl+x 不忽略例外）/
  *   composer 内选区（放行原生剪切 + 三个切换键与选区无关）/ staging 活跃 / landing 态 / 已建态 /
- *   档位仅 off / 模型 ≤1。
+ *   档位仅 off / 模型 ≤1。IME 行不在本文件测：分发链 IME 段是单点防线（composer-keydown.test.ts
+ *   钉住），本表不复判（over-engineering-audit 20260916 裁决）。
  *   §3.3 键位表：修饰键约束（alt+p 不绑定、meta 系不命中）+ 循环取值起点规则（不在列表/
  *   undefined/脏值/绕回/enabled 过滤）。
  *   决策 8 意图目标生命周期：设立/等值清/reject 清/sessionId 清/进 staging 清/RTT 内连按逐次递进。
@@ -41,10 +42,9 @@ type KeyMods = {
   ctrl?: boolean
   meta?: boolean
   repeat?: boolean
-  isComposing?: boolean
 }
 
-/** 构造带 preventDefault/stopPropagation spy 的键盘事件（repeat/isComposing 经 defineProperty 注入，构造器初始化支持面不稳） */
+/** 构造带 preventDefault/stopPropagation spy 的键盘事件（repeat 经 defineProperty 注入，构造器初始化支持面不稳） */
 function makeKeyEvent(key: string, mods: KeyMods = {}) {
   const e = new KeyboardEvent('keydown', {
     key,
@@ -55,7 +55,6 @@ function makeKeyEvent(key: string, mods: KeyMods = {}) {
     cancelable: true,
   })
   Object.defineProperty(e, 'repeat', { value: !!mods.repeat })
-  Object.defineProperty(e, 'isComposing', { value: !!mods.isComposing })
   const preventDefault = vi.fn()
   const stopPropagation = vi.fn()
   e.preventDefault = preventDefault
@@ -231,21 +230,8 @@ describe('useComposerShortcutActions', () => {
       expect(onModelSelect).not.toHaveBeenCalled()
     })
 
-    // 行 2：IME 组合中 → 不触发（模块级防御与分发链 IME 段同语义：放行不吞键）
-    it('IME 组合中（isComposing）：shift+tab / ctrl+p 不触发、放行不吞键', () => {
-      const { deps, onThinkingSelect, onModelSelect } = makeDeps()
-      const handler = useComposerShortcutActions(deps)
-
-      const tab = makeKeyEvent('Tab', { shift: true, isComposing: true })
-      expect(handler(tab.e)).toBe(false)
-      expect(tab.preventDefault).not.toHaveBeenCalled()
-      const p = makeKeyEvent('p', { ctrl: true, isComposing: true })
-      expect(handler(p.e)).toBe(false)
-      expect(p.preventDefault).not.toHaveBeenCalled()
-
-      expect(onThinkingSelect).not.toHaveBeenCalled()
-      expect(onModelSelect).not.toHaveBeenCalled()
-    })
+    // 行 2（IME）：模块级不复判——分发链 IME 段是单点防线（composer-keydown.test.ts 钉住），
+    // 本表只经分发链调用（over-engineering-audit 20260916 裁决删除模块级二次守卫）
 
     // 行 3：auto-repeat —— 三个切换键忽略；ctrl+x 不忽略（决策 8 幂等例外）
     it('auto-repeat：shift+tab 忽略（吞键不动作，防 RPC 风暴）', () => {
