@@ -120,7 +120,7 @@ graph TD
 |------|------|------|----------|
 | u1-fanout-template | committed | 1 | commit 672f0e6c3；vitest 49 passed（fan-out-script 19 + builtin-workflows-structure 30）；extensions:typecheck+lint exit=0；契约抽验（fail-fast L81 / taskIndex 派发序 L117-134 / truncated 保序 L185-216） |
 | u2-batch-tool | committed | 1 | commit fce282acf；vitest 80 文件/972 passed（重跑核验一致）；typecheck+lint exit=0；契约抽验（schema 平铺 L59-76 / 无 __gui__ L102 / ONE notification+SINGLE status L146-147 / reentry 共用 L255,300 / slug 生成 L127） |
-| u3-render-check | pending | 0 | — |
+| u3-render-check | committed | 1 | 核对记录 `.tmp/dev-flow/render-check-u3.md`；三处消费点零改核实（message-turns.ts:699-701 / event-interpreter.ts:1011-1016 / Block.vue:434-435+L99-121 模板区）；三包零 diff 佐证；附带发现（Block.vue:96 注释漂移）登记待阶段 3 |
 | u4-collect-shell | pending | 0 | — |
 | u5-collect-core | pending | 0 | — |
 | u6-collect-compat | pending | 0 | — |
