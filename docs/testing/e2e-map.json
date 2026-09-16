@@ -558,10 +558,10 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（开发阶段手测链，已执行 4/5 PASS 2026-09-17 A3；④缺陷已修 commit 1543b39c1）a3-s3-partial.sh + a3b（错配）+ a3-reverify.sh（④回归）同目录同环境",
+      "run": "（开发阶段手测链，已执行 5/5 PASS 2026-09-17 A3——④经双缺陷修复真机终验全绿：1543b39c1 冷复活 origin 透传 + 5ccdccd59 message 冷查口径 includeWorkflow:true）a3-s3-partial.sh + a3b（错配）+ a3-reverify.sh（④回归）同目录同环境",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）； ④冷复活绕过守卫缺陷 = 本场景真机产出，修复含单测锁定。"
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；④冷复活绕过守卫为双缺陷：①origin/parentRunId 透传缺失 ②冷查兜底全扫吃 origin 展示过滤（原 A3 通过系 list 预热索引的无关副作用），两修复均有红绿回归用例；agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
     },
     {
       "id": "E2E-BATCH-04",
@@ -618,7 +618,7 @@
     },
     {
       "id": "E2E-BATCH-06",
-      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R3 占位，账本化已合入；A6 剧本随阶段 5 环境落建后翻 R2 态）",
+      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R2 已激活并执行 PASS 2026-09-17 A6）",
       "scope": [
         "extensions/universal/subagent-workflow/src/interface/helpers.ts",
         "packages/subagent-core/src/execution/notify/**"
@@ -639,7 +639,7 @@
       "run": "（已执行 PASS 2026-09-17 A6）dev 环境：GUI 批量派发 → kill 成员 relay 代理（PID 精确）→ kill-on-disconnect 连坐 → 断言会话文件 ledger/ack/送达各恰 1 条（ground truth = session jsonl + runtime log）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R3 占位：账本化（u9，commit 12f783120）已合入——完整激活与阶段 5 绑定：A6 断连重放剧本随阶段 5 环境落建后翻 R2 态回填可执行命令，此前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）； 已执行：done(failed) 全员死亡形态通知照达 + wf-done 落账/ack 销账恰一次。"
+      "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
     }
   ]
 }
