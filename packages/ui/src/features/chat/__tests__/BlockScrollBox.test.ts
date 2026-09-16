@@ -7,7 +7,7 @@
  * - 渐隐 class 切换：mock 滚动几何 + scroll 事件 → 上/下渐隐条按滚动方向切 opacity class
  * - 渐隐底色上下文：surface prop → 根 --block-scroll-fade-bg（thinking/画布底 vs bash 凹槽底）
  * - 行区间信息条：行高实测路径（computed line-height）与无布局引擎降级路径（字号 × leading-snug）
- * - 展开切换：按钮文案（展开/收起 + 方向箭头）+ aria-expanded + 展开态信息条保留
+ * - 展开切换：按钮文案（展开全部/收起 + 方向箭头）+ aria-expanded + 展开态信息条保留
  * - streaming 吸底：内容增长且未上滚 → 贴底；用户上滚后停吸、回底恢复；展开态不吸底
  *
  * 环境说明：happy-dom 无布局引擎（scrollHeight/clientHeight 恒 0），几何值全部经
@@ -19,13 +19,23 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // vue-i18n 的 useI18n 覆盖为自包含 t（vitest.setup.ts 默认 mock 直接回 key——
-// 本用例要断言展开/收起文案切换，故给真实文案字典；对齐 Turn.test.ts 的覆盖范式）
+// 本用例要断言展开/收起与行区间文案，故给真实文案字典 + 命名参数插值；对齐 Turn.test.ts 覆盖范式）
 vi.mock('vue-i18n', () => {
   const messages: Record<string, string> = {
-    'panel.message.expand': '展开',
+    'panel.message.blockScrollExpandAll': '展开全部',
     'panel.message.collapse': '收起',
+    'panel.message.blockScrollLines': '{from}–{to} / {total} 行',
   }
-  return { useI18n: () => ({ t: (key: string) => messages[key] ?? key }) }
+  const t = (key: string, named?: Record<string, unknown>): string => {
+    let text = messages[key] ?? key
+    if (named) {
+      for (const [name, value] of Object.entries(named)) {
+        text = text.replace(`{${name}}`, String(value))
+      }
+    }
+    return text
+  }
+  return { useI18n: () => ({ t }) }
 })
 
 import { mount } from '@vue/test-utils'
@@ -190,25 +200,25 @@ describe('BlockScrollBox 限高与信息条渲染', () => {
 })
 
 describe('BlockScrollBox 行区间信息条', () => {
-  it('行高实测路径（20px）：内容 400px / 视口 240px → 1–12 / 20；滚到底 → 9–20 / 20', async () => {
+  it('行高实测路径（20px）：内容 400px / 视口 240px → 1–12 / 20 行；滚到底 → 9–20 / 20 行', async () => {
     const box = setupBox({ lineHeight: CONTENT_LINE_HEIGHT })
     box.metrics.scrollHeight = 400
     box.metrics.clientHeight = 240
     await box.scrollTo(0)
-    expect(box.wrapper.get(RANGE_SEL).text()).toBe('1–12 / 20')
+    expect(box.wrapper.get(RANGE_SEL).text()).toBe('1–12 / 20 行')
 
     await box.scrollTo(160)
-    expect(box.wrapper.get(RANGE_SEL).text()).toBe('9–20 / 20')
+    expect(box.wrapper.get(RANGE_SEL).text()).toBe('9–20 / 20 行')
     box.wrapper.unmount()
   })
 
-  it('行高降级路径（line-height normal + 字号 14px → 字号 × leading-snug 估算）：500px 内容 → 1–12 / 26', async () => {
+  it('行高降级路径（line-height normal + 字号 14px → 字号 × leading-snug 估算）：500px 内容 → 1–12 / 26 行', async () => {
     const box = setupBox({ fontSize: FALLBACK_FONT_SIZE })
     box.metrics.scrollHeight = 500
     box.metrics.clientHeight = 240
     await box.scrollTo(0)
     // 14 × 1.375 = 19.25px → round(500 / 19.25) = 26 行（若误用 16px 默认字号会得 23 行）
-    expect(box.wrapper.get(RANGE_SEL).text()).toBe('1–12 / 26')
+    expect(box.wrapper.get(RANGE_SEL).text()).toBe('1–12 / 26 行')
     box.wrapper.unmount()
   })
 })
@@ -222,7 +232,7 @@ describe('BlockScrollBox 展开全部切换', () => {
 
     const toggle = box.wrapper.get(TOGGLE_SEL)
     expect(toggle.attributes('aria-expanded')).toBe('false')
-    expect(box.wrapper.get(LABEL_SEL).text()).toBe('展开')
+    expect(box.wrapper.get(LABEL_SEL).text()).toBe('展开全部')
     expect(toggle.text()).toContain('↓')
 
     await toggle.trigger('click')

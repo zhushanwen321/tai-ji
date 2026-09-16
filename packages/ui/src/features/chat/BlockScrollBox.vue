@@ -139,13 +139,19 @@ const viewportStyle = computed<Record<string, string>>(() => ({
 /** 信息条渲染判据：超限高（常态）或展开态（收起按钮唯一入口，不能随限高消失一起消失） */
 const showInfoBar = computed(() => overflowed.value || expanded.value)
 
-/** 行区间文本。设计字面为「{from}–{to} / {total} 行」——「行」单位词与「展开全部」需新增
- *  i18n 键，locale 文件不在本单元领地（见实施计划 U7 偏差登记）：当前用语言中性的
- *  「{from}–{to} / {total}」+ 复用既有 panel.message.expand / collapse 键。 */
-const rangeText = computed(() => `${fromLine.value}–${toLine.value} / ${totalLines.value}`)
+/** 行区间文本：'{from}–{to} / {total} 行'（zh）/ '{from}–{to} of {total} lines'（en） */
+const rangeText = computed(() =>
+  t('panel.message.blockScrollLines', {
+    from: fromLine.value,
+    to: toLine.value,
+    total: totalLines.value,
+  }),
+)
 
+/** 按钮文案：展开态专用 blockScrollExpandAll（「展开全部」——既有 expand 键无「全部」语义）；
+ *  收起态复用既有 collapse（不另立键） */
 const toggleLabel = computed(() =>
-  expanded.value ? t('panel.message.collapse') : t('panel.message.expand'),
+  expanded.value ? t('panel.message.collapse') : t('panel.message.blockScrollExpandAll'),
 )
 
 /** 行高测量锚点：slot 内容首个元素（承载实际 line-height 的元素，如 .tool-result 的 leading-snug）；

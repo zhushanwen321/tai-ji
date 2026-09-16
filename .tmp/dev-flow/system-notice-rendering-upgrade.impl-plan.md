@@ -137,21 +137,25 @@ graph TD
 
 | # | 单元 | 设计原文 | 实现实际 | 分类 | 处置 |
 |---|------|----------|----------|------|------|
-| | | | | | |
+| D1 | U1 | §5 文件地图把 `docs/architecture/background-task-sidebar-view.md` 标为 [U1] | impl-plan 单元表 U1 领地只列两个源码文件（计划期遗漏该文档条目）；且其描述口径（§2.1 引文 / §2.2 数据面表 / S1 一致性）依赖 U3/U6 落地后才准确 | 合理（归属调整） | sidebar 文档更新改归**尾单元 U10**（含行号引用 `notify.ts:155-162` 修正 + U3/U6 落地后的口径面），U10 领地扩容登记于状态表 |
+| D2 | U1 | D1 表述 details「shared 登记」 | extension 侧本地声明 `BackgroundBashDetails` 接口（本包是独立 npm 包、不 import taiji 内部 shared）——已注释登记「字面量镜像」义务并与 U2 实装逐项核对（字段名/可空性/枚举值三处一致） | 合理（包边界约束） | 固化：两侧镜像义务写入源码注释（U1 已做）；后续任何一侧变更须同改另一侧 |
+| D3 | U7 | §5 U7 未列 `Block.vue` 行数约束 | `Block.vue` script 343 行（存量 331 已超 vue_rules_checker 300 行上限，本次 +12）——该门禁 pre-commit 扫描面仅 `packages/renderer/src`，`packages/ui` 不在内故不阻断提交；正确修复 = 提取 composable（新建领地外文件，属独立重构） | 合理（存量技术债 + 门禁范围外） | 不在本设计 scope 内展开：登记为后续技术债（Block.vue 提 composable）；本次不阻断 |
+| D4 | U7 | D6「markdown 显『约 {total} 行』」双测量路径 | 三条接入点统一 from–to 行区间（markdown 行高实测路径对 `.md-render` 根同样成立，「约」文案需新增键） | 合理（实现简化，语义等价） | 固化：「约」字文案可随 U3 键批量补（非必需）；S5 验收按 from–to 断言 |
+| D5 | U6 | — | `message-turns.ts` 超 max-lines 500（U6 在途引入） | 不合理（门禁红灯） | 已 SendMessage 打回 U6 收尾拆分（提取 notify-summary 独立模块）；轮次内修复 |
 
 ## 6 状态表
 
 | Unit | 状态(pending/in-progress/committed/blocked) | 轮次 | 证据指针 |
 |------|--------------------------------------------|------|----------|
-| U1 | pending | 0 | - |
-| U2 | pending | 0 | - |
+| U1 | committed | 1 | af7cd31a6（notify 19 passed + 变异探针验证；extensions typecheck OK） |
+| U2 | committed | 1 | 21579fb88（bg-details 13 + workflow-notify 12；index.ts 导出补全解 blocker） |
 | U3 | pending | 0 | - |
 | U4 | pending | 0 | - |
 | U5 | pending | 0 | - |
 | U6 | pending | 0 | - |
-| U7 | pending | 0 | - |
-| U8 | pending | 0 | - |
-| U9 | pending | 0 | - |
+| U7 | committed | 1 | 12ed93f7f（BlockScrollBox 9 + Block 回归 39 = 48 passed；ui 全量 824 passed；tailwind 实编译验证） |
+| U8 | committed | 1 | 50ef50902（notify-host-ended-at 9 passed + 包内全量 3118 passed；物化域=running 轮终+批成员） |
+| U9 | committed | 1 | 1e5102725（notify-batch 18 + notify-ledger 36 = 54 passed；变异探针证测试非空转） |
 | U10 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
