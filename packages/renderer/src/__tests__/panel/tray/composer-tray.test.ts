@@ -11,12 +11,15 @@
  *   pinned 透传（hover 态无行内按钮 = false；pin 后有 = true——「必须显式透传」契约的可证伪断言）。
  *
  * mock 策略：
- * - `useTrayCounts` mock：三件计数/行集直接注入（口径与首拉触发另有 useTrayCounts.test.ts），
- *   本文件只验外壳三态判定与交互；
+ * - `useTrayCounts` 替身（默认 fixture 模式）：三件计数/行集直接注入（口径与首拉触发另有
+ *   useTrayCounts.test.ts），本文件只验外壳三态判定与交互；`useReal` 模式透传真实现——
+ *   U1 用例需要真实拉取腿可被 spy 计数（「面板开关不重发首拉 RPC」）。
  * - **真实** TrayNativePanel / TrayWidgetPanel：面板分流与 pinned 透传必须经真实组件落地
- *   （stub 会把「必须显式透传 pinned」测成空断言）；
+ *   （stub 会把「必须显式透传 pinned」测成空断言）；面板数据面经 TRAY_COUNTS_KEY 消费外壳实例
+ *   （U1），故 `useTrayCounts` 替身的调用次数 = 数据面实例数（> 1 即面板自建第二实例）。
  * - `VIEW_HOST_SOURCE_KEY` provide 响应式 mock（同构壳层桥：shallowReactive 外层分区 Map +
  *   reactive 内层分区 Map）——推送/更新/清屏直接改分区即驱动重算；
+ * - `useBackgroundTasks` mock：仅 U1 的真实数据面用例会消费（避免真实 list RPC / 物理订阅）；
  * - 真实 pinia（面板内 store 依赖）+ vue-i18n 走全局 setup（断言 zh-CN 文案）。
  *
  * timer 说明：vi.useFakeTimers({ now: FIXED_NOW })——160/240ms 边界要精确推进；reka 的
@@ -28,12 +31,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 import { computed, nextTick, reactive, shallowReactive } from 'vue'
+import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import ComposerTray from '@/components/panel/tray/ComposerTray.vue'
+import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
+import { useSubagentStore } from '@/stores/subagent'
+import { useWorkflowStore } from '@/stores/workflow'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
@@ -44,71 +51,117 @@ type TrayKind = 'bash' | 'subagent' | 'workflow'
 interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
+  bashLoaded: boolean
   subagentRunning: SubagentRecord[]
   subagentEnded: SubagentRecord[]
+  subagentLoading: boolean
   workflowRunning: WorkflowRunRecord[]
   workflowEnded: WorkflowRunRecord[]
+  workflowLoading: boolean
 }
 
 function createTrayState(): TrayState {
   return {
     bashRunning: [],
     bashEnded: [],
+    bashLoaded: true,
     subagentRunning: [],
     subagentEnded: [],
+    subagentLoading: false,
     workflowRunning: [],
     workflowEnded: [],
+    workflowLoading: false,
   }
 }
 
 /** reactive 容器（字段变更驱动下游 computed；对象本身恒不替换，防 computed 依赖失联） */
 const trayState = reactive<TrayState>(createTrayState())
 
+/**
+ * 数据面替身/透传开关（U1）：`calls` = useTrayCounts 调用次数 = 数据面实例创建次数——外壳
+ * 只创建唯一实例并 provide，面板 inject 消费，故任意开合次数下都应恒为 1；`useReal` 打开时
+ * 透传真实现（U1 用例用真实拉取腿 + spy 断言不重发首拉）。
+ */
+const trayCountsSwitch = vi.hoisted(() => ({ useReal: false, calls: 0 }))
+
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
   return {
     ...actual,
-    useTrayCounts: () => ({
-      counts: computed(() => ({
-        bash: {
-          running: trayState.bashRunning.length,
-          ended: trayState.bashEnded.length,
-          total: trayState.bashRunning.length + trayState.bashEnded.length,
-        },
-        subagent: {
-          running: trayState.subagentRunning.length,
-          ended: trayState.subagentEnded.length,
-          archived: 0,
-          total: trayState.subagentRunning.length + trayState.subagentEnded.length,
-        },
-        workflow: {
-          running: trayState.workflowRunning.length,
-          ended: trayState.workflowEnded.length,
-          total: trayState.workflowRunning.length + trayState.workflowEnded.length,
-        },
-      })),
-      lists: {
-        bash: {
-          running: computed(() => trayState.bashRunning),
-          ended: computed(() => trayState.bashEnded),
-        },
-        subagent: {
-          running: computed(() => trayState.subagentRunning),
-          ended: computed(() => trayState.subagentEnded),
-          archived: computed(() => [] as SubagentRecord[]),
-        },
-        workflow: {
-          running: computed(() => trayState.workflowRunning),
-          ended: computed(() => trayState.workflowEnded),
-        },
-      },
-      bashPartition: computed(() => ({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })),
-      errors: { subagent: computed(() => null), workflow: computed(() => null) },
-      loading: { bash: computed(() => false), subagent: computed(() => false), workflow: computed(() => false) },
-      retry: vi.fn().mockResolvedValue(undefined),
-    }),
+    useTrayCounts: (sessionIdRef: Ref<string | null | undefined>): UseTrayCountsReturn => {
+      trayCountsSwitch.calls += 1
+      return trayCountsSwitch.useReal ? actual.useTrayCounts(sessionIdRef) : createTrayFixture()
+    },
   }
 })
+
+/** fixture 数据面（计数/行集由 trayState 注入；`UseTrayCountsReturn` 类型标注 = 契约漂移门） */
+function createTrayFixture(): UseTrayCountsReturn {
+  return {
+    counts: computed(() => ({
+      bash: {
+        running: trayState.bashRunning.length,
+        ended: trayState.bashEnded.length,
+        total: trayState.bashRunning.length + trayState.bashEnded.length,
+      },
+      subagent: {
+        running: trayState.subagentRunning.length,
+        ended: trayState.subagentEnded.length,
+        archived: 0,
+        total: trayState.subagentRunning.length + trayState.subagentEnded.length,
+      },
+      workflow: {
+        running: trayState.workflowRunning.length,
+        ended: trayState.workflowEnded.length,
+        total: trayState.workflowRunning.length + trayState.workflowEnded.length,
+      },
+    })),
+    lists: {
+      bash: {
+        running: computed(() => trayState.bashRunning),
+        ended: computed(() => trayState.bashEnded),
+      },
+      subagent: {
+        running: computed(() => trayState.subagentRunning),
+        ended: computed(() => trayState.subagentEnded),
+        archived: computed(() => [] as SubagentRecord[]),
+      },
+      workflow: {
+        running: computed(() => trayState.workflowRunning),
+        ended: computed(() => trayState.workflowEnded),
+      },
+    },
+    bashPartition: computed(() => ({
+      tasks: [],
+      loaded: trayState.bashLoaded,
+      corrupted: false,
+      fetchFailed: false,
+    })),
+    errors: { subagent: computed(() => null), workflow: computed(() => null) },
+    loading: {
+      bash: computed(() => !trayState.bashLoaded),
+      subagent: computed(() => trayState.subagentLoading),
+      workflow: computed(() => trayState.workflowLoading),
+    },
+    retry: vi.fn().mockResolvedValue(undefined),
+  }
+}
+
+/**
+ * bash 分区状态根替身：仅 U1 用例（`useReal` 模式）会消费——真实 useTrayCounts 内部调
+ * useBackgroundTasks，替身避免测试打真实 list RPC / 挂物理订阅。
+ */
+vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
+  useBackgroundTasks: () => ({
+    current: computed(() => ({
+      tasks: [] as BackgroundTaskEntry[],
+      loaded: true,
+      corrupted: false,
+      fetchFailed: false,
+    })),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}))
 
 const SID = 's-tray-shell'
 const SID2 = 's-tray-shell-2'
@@ -246,6 +299,20 @@ function panelNodes(): HTMLElement[] {
   return Array.from(document.body.querySelectorAll<HTMLElement>('[data-testid="tray-panel"]'))
 }
 
+/**
+ * 浮层根节点（PopoverContent 渲染的定位盒 = 面板节点的父元素）。
+ * 热区判据（U3）：内边距必须在**面板节点自身**上——面板节点即浮层内容 div，覆盖浮层全幅；
+ * 若内边距留在浮层根上，指针停在约 6px 的 padding 带内不会触发 pointerenter（收起计时不取消）。
+ * jsdom 无命中测试，故以该结构不变量 + 行为断言共同锁定（行为：面板节点上 pointerenter
+ * 取消收起、pointerleave 240ms 收起）。
+ */
+function panelLayerNode(): HTMLElement {
+  const panel = panelNodes()[0]
+  const layer = panel?.parentElement
+  if (!panel || !layer) throw new Error('panel layer missing')
+  return layer
+}
+
 /** 当前打开面板的键集合（互斥断言主入口） */
 function panelKeys(): string[] {
   return panelNodes().map((n) => n.dataset.panelKey ?? '')
@@ -255,6 +322,13 @@ function panelKeys(): string[] {
 function panelContentNodes(testid: string): HTMLElement[] {
   const panel = panelNodes()[0]
   return panel ? Array.from(panel.querySelectorAll<HTMLElement>(`[data-testid="${testid}"]`)) : []
+}
+
+/** 浮层节点（面板内容 div，覆盖浮层全幅）——派发「进入/离开整体」类指针事件 */
+function layerNode(): HTMLElement {
+  const node = panelNodes()[0]
+  if (!node) throw new Error('panel node missing')
+  return node
 }
 
 /** 在浮层内元素上派发 DOM 事件（portal 内容不在 wrapper 树内，走原生 dispatch） */
@@ -286,6 +360,8 @@ async function advance(ms: number): Promise<void> {
 beforeEach(() => {
   setActivePinia(createPinia())
   Object.assign(trayState, createTrayState())
+  trayCountsSwitch.useReal = false
+  trayCountsSwitch.calls = 0
   vi.useFakeTimers({ now: FIXED_NOW })
 })
 
@@ -404,30 +480,56 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
     expect(builtinButton('bash').attributes('aria-expanded')).toBe('false')
   })
 
-  it('指针移入面板内不收起（离开 icon 的 240ms 计时器被面板 pointerenter 取消）', async () => {
+  it('指针移入浮层内不收起（离开 icon 的 240ms 计时器被浮层 pointerenter 取消）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mountTray(makeWidgetSource())
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
 
-    // icon → 面板 的间隙移动：先离开 icon，再进入面板
+    // icon → 面板 的间隙移动：先离开 icon，再进入浮层
     await builtinButton('bash').trigger('pointerleave')
     await advance(OPEN_MS)
-    fire(panelNodes()[0], 'pointerenter')
+    fire(layerNode(), 'pointerenter')
     await advance(CLOSE_MS * 3)
 
     expect(panelKeys()).toEqual(['native:bash'])
   })
 
-  it('指针离开面板 → 240ms 后收起（面板与 icon 同语义）', async () => {
+  it('热区覆盖浮层 padding 带（U3）：内边距在热区元素自身，指针停在其中同样取消收起计时', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mountTray(makeWidgetSource())
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
-    fire(panelNodes()[0], 'pointerenter')
-    fire(panelNodes()[0], 'pointerleave')
+
+    // 结构不变量：p-1.5 必须在挂 pointerenter 的面板节点上（= 覆盖浮层全幅），
+    // 留在浮层根上就会形成一圈不会取消收起计时的缺口（U3 根因）
+    const panel = layerNode()
+    expect(panel.className).toContain('p-1.5')
+    expect(panelLayerNode().className).not.toContain('p-1.5')
+
+    await builtinButton('bash').trigger('pointerleave')
+    fire(panel, 'pointerenter')
+    await advance(CLOSE_MS * 3)
+    expect(panelKeys()).toEqual(['native:bash'])
+
+    // 离开浮层整体 → 回落到 240ms 收起（不是「永不开合」）
+    fire(panel, 'pointerleave')
+    await advance(CLOSE_MS - 1)
+    expect(panelKeys()).toEqual(['native:bash'])
+    await advance(1)
+    expect(panelKeys()).toEqual([])
+  })
+
+  it('指针离开浮层 → 240ms 后收起（浮层与 icon 同语义）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource())
+
+    await builtinButton('bash').trigger('pointerenter')
+    await advance(OPEN_MS)
+    fire(layerNode(), 'pointerenter')
+    fire(layerNode(), 'pointerleave')
 
     await advance(CLOSE_MS)
     expect(panelKeys()).toEqual([])
@@ -657,6 +759,29 @@ describe('ComposerTray widget 区与面板分流', () => {
     expect(panelContentNodes('tray-widget-panel')[0].textContent).toContain('v2')
   })
 
+  it('widget 面板热区同款（U3）：浮层内（含 padding 带）pointerenter 取消收起，离开浮层 240ms 收起', async () => {
+    const mock = makeWidgetSource()
+    mock.push(makeEntry('todo', [ansiLine('t')], { title: 'Todo' }))
+    mountTray(mock)
+
+    await row().find('[data-testid="tray-widget-button"][data-widget-key="todo"]').trigger('pointerenter')
+    await advance(OPEN_MS)
+    expect(panelKeys()).toEqual(['widget:todo'])
+
+    const panel = layerNode()
+    expect(panel.className).toContain('p-1.5')
+    expect(panelLayerNode().className).not.toContain('p-1.5')
+
+    await row().find('[data-testid="tray-widget-button"][data-widget-key="todo"]').trigger('pointerleave')
+    fire(panel, 'pointerenter')
+    await advance(CLOSE_MS * 3)
+    expect(panelKeys()).toEqual(['widget:todo'])
+
+    fire(panel, 'pointerleave')
+    await advance(CLOSE_MS)
+    expect(panelKeys()).toEqual([])
+  })
+
   it('清屏（invalidate）→ 条目消失 + 面板一并消失 + pin 不诈尸（重注册不自动弹回）', async () => {
     const mock = makeWidgetSource()
     mock.push(makeEntry('todo', [ansiLine('t')], { title: 'Todo' }))
@@ -749,5 +874,83 @@ describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）
 
     expect(panelKeys()).toEqual([])
     expect(row().find('[data-testid="composer-tray"]').attributes('data-session-id')).toBe(SID2)
+  })
+})
+
+// ── ⑦ 数据面单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取腿）──
+
+describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不重发首拉 RPC）', () => {
+  it('面板打开/关闭/换件/重开：数据面实例恒一个、loadSubagents / loadWorkflows 各仅一次', async () => {
+    // 真实数据面（外壳仍是唯一调用点）+ spy 拉取腿：断言的是 load RPC 次数，不是替身内部行为
+    trayCountsSwitch.useReal = true
+    const subagentStore = useSubagentStore()
+    const workflowStore = useWorkflowStore()
+    const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
+    const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
+    // 拉取腿被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
+    subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
+    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+
+    mountTray(makeWidgetSource())
+    await flushPromises()
+
+    expect(trayCountsSwitch.calls).toBe(1) // 唯一实例 = 外壳（面板若自建即为 2+）
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+    expect(loadSubSpy).toHaveBeenCalledWith(SID)
+    expect(loadWfSpy).toHaveBeenCalledTimes(1)
+
+    // 首次打开面板（面板挂载）：行集来自外壳实例，无新增 RPC
+    await builtinButton('subagent').trigger('click')
+    await nextTick()
+    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelContentNodes('tray-subagent-row')).toHaveLength(1)
+    expect(trayCountsSwitch.calls).toBe(1)
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+
+    // 关闭 → 换另一件打开（旧面板卸载）→ 再关再开：每次重挂都不得重发首拉
+    await builtinButton('subagent').trigger('click')
+    await nextTick()
+    expect(panelKeys()).toEqual([])
+    await builtinButton('workflow').trigger('click')
+    await nextTick()
+    expect(panelKeys()).toEqual(['native:workflow'])
+    expect(panelContentNodes('tray-workflow-row')).toHaveLength(1)
+    await builtinButton('workflow').trigger('click')
+    await nextTick()
+    await builtinButton('subagent').trigger('click')
+    await nextTick()
+    expect(panelKeys()).toEqual(['native:subagent'])
+
+    expect(trayCountsSwitch.calls).toBe(1)
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+    expect(loadWfSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', () => {
+  it('subagent：在途（loading）但该类已有数据 → 面板打开首帧即列表，不渲染加载占位', async () => {
+    trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
+    trayState.subagentLoading = true
+    mountTray(makeWidgetSource())
+
+    await builtinButton('subagent').trigger('pointerenter')
+    await advance(OPEN_MS)
+
+    expect(panelKeys()).toEqual(['native:subagent'])
+    expect(panelContentNodes('tray-panel-loading')).toHaveLength(0)
+    expect(panelContentNodes('tray-subagent-row')).toHaveLength(1)
+  })
+
+  it('bash：从未成功 list 过但有广播投递的任务 → 直出列表（loading 只吞「无数据的真首拉」）', async () => {
+    trayState.bashLoaded = false
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    mountTray(makeWidgetSource())
+
+    await builtinButton('bash').trigger('pointerenter')
+    await advance(OPEN_MS)
+
+    expect(panelKeys()).toEqual(['native:bash'])
+    expect(panelContentNodes('tray-panel-loading')).toHaveLength(0)
+    expect(panelContentNodes('tray-bash-row')).toHaveLength(1)
   })
 })

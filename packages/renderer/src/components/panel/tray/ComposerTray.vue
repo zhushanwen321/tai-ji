@@ -5,8 +5,8 @@
   ── 结构与挂载（D1/D12）──
   挂 `Composer.vue` 的 `.composer-bar` 左簇、AddMenuPopover 之后（`v-if="sessionId"`，landing 态
   隐藏与 GenStatsTriggers 同判据）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
-  的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`，widget 走 ViewHostStore 的 per-session
-  分区，切 session 即跟随。
+  的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
+  「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
   条目 = built-in 三件（bash → subagent → workflow，固定序恒在最左）+ 协议 widget 区（排序后逐个
   TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），面板内容按类型分流：
 
@@ -19,7 +19,9 @@
   全无记录 → 该按钮不渲染（DOM 层不存在，而非 opacity:0 —— 归零不虚亮的结构性保证）
 
   ── 交互状态机（D8）──
-  hover icon 160ms → 开面板；指针离开 icon+面板整体 240ms → 收起；期间指针移入面板内不收起。
+  hover icon 160ms → 开面板；指针离开 icon+面板整体 240ms → 收起；期间指针移入浮层内不收起
+  （热区 = 浮层内容 div，其内边距 p-1.5 在内容 div 自身上 ⇒ 覆盖浮层全幅，指针停在 padding
+  带上同样取消计时；U3 修复）。
   点击 icon = pin（面板常驻；hover 态刻意不渲染行内按钮防误触，见 TrayNativePanel 契约）；
   再点 / Esc / 点面板外 = 解除。**同一时刻至多一个面板**——由单一 activeKey 结构性保证（互斥不是
   靠多实例互检），派生视觉（按钮 aria-*、面板 data-pinned）全部由它派生，无双份真相。
@@ -49,8 +51,10 @@
   __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。
 
   ── 数据面归属（D2/D13）──
-  计数/首拉/错误态全部在 useTrayCounts（本组件只读计数做三态判定）；行集与行内操作在 TrayNativePanel
-  自持（面板 emits 为空，外壳无需回调）。
+  计数/首拉/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
+  挂载/卸载，数据面必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首拉 RPC）——创建即
+  provide(TRAY_COUNTS_KEY)，面板经 useTrayCountsContext inject 消费同一实例；行集与行内操作在
+  TrayNativePanel 自持（面板 emits 为空，外壳无需回调）。
 -->
 <template>
   <div
@@ -111,12 +115,15 @@
           >{{ item.running }}</span>
         </Button>
       </PopoverAnchor>
-      <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，面板自身 max-h 60vh 内滚动 -->
+      <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，面板自身 max-h 60vh 内滚动。
+           热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
+           指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根做不到——
+           reka PopoverContent 不向下透传非 prop 属性/原生监听，fallthrough 落在 Teleport 根被丢弃）。 -->
       <PopoverContent
         side="top"
         align="start"
         :side-offset="6"
-        class="w-[400px] p-1.5"
+        class="w-[400px]"
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
@@ -124,7 +131,7 @@
           data-testid="tray-panel"
           :data-panel-key="builtinKey(item.kind)"
           :data-pinned="isPinnedOf(builtinKey(item.kind)) ? 'true' : 'false'"
-          class="flex max-h-[60vh] min-h-0 flex-col"
+          class="flex max-h-[60vh] min-h-0 flex-col p-1.5"
           @pointerenter="onPanelEnter"
           @pointerleave="onPanelLeave"
         >
@@ -159,7 +166,7 @@
         side="top"
         align="start"
         :side-offset="6"
-        class="w-[400px] p-1.5"
+        class="w-[400px]"
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
@@ -167,7 +174,7 @@
           data-testid="tray-panel"
           :data-panel-key="widgetKey(item.viewId)"
           :data-pinned="isPinnedOf(widgetKey(item.viewId)) ? 'true' : 'false'"
-          class="flex max-h-[60vh] min-h-0 flex-col"
+          class="flex max-h-[60vh] min-h-0 flex-col p-1.5"
           @pointerenter="onPanelEnter"
           @pointerleave="onPanelLeave"
         >
@@ -189,7 +196,7 @@
  * 脚本分区：常量与类型 / 数据面（计数 + widget entries） / 外壳状态机（hover·pin·互斥） /
  * 关闭路径接线（reka 层） / 会话切换与卸载清理。
  */
-import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bot, SquareTerminal, Workflow } from '@lucide/vue'
@@ -199,7 +206,7 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
+import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
 import type { TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
 import { orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
@@ -223,7 +230,7 @@ const HOVER_CLOSE_DELAY_MS = 240
 /** built-in 三件固定序（D1：不参与 widget 动态排序，恒在最左） */
 const BUILTIN_ORDER: readonly TrayTaskKind[] = ['bash', 'subagent', 'workflow']
 
-/** built-in 三件 icon（与侧栏 tab 同视觉语言：Bot/Workflow 复用 SegmentedTab，bash 复用后台命令视图） */
+/** built-in 三件 icon（三件各自语义直取：bash = 终端、subagent = Bot、workflow = 流程） */
 const BUILTIN_ICONS: Record<TrayTaskKind, Component> = {
   bash: SquareTerminal,
   subagent: Bot,
@@ -262,8 +269,13 @@ interface WidgetItem {
 /** 托盘根节点：层外 pointerdown 判定用（点击自身按钮行不算「面板外」，见文件头） */
 const trayRootEl = ref<HTMLElement | null>(null)
 
-/** built-in 三件计数（口径/首拉/错误态全在 useTrayCounts；本组件只做三态判定） */
+/**
+ * built-in 三件计数（口径/首拉/错误态全在 useTrayCounts；本组件只做三态判定）。
+ * **数据面单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
+ * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首拉 RPC。
+ */
 const tray = useTrayCounts(computed(() => props.sessionId))
+provide(TRAY_COUNTS_KEY, tray)
 
 /**
  * built-in 条目 = 有记录的三件（三态：running > 0 亮 / 有历史 dim / 全无 → 不渲染）。

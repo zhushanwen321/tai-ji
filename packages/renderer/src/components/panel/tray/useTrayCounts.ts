@@ -6,9 +6,10 @@
  * - **三件计数与分桶**：bash / subagent / workflow 的「进行中 / 已结束（subagent 另有
  *   已收起）」行集与计数。计数恒等于行集长度（同一 computed 派生），杜绝「tab 数字与
  *   列表条数不一致」的双口径穿帮面（§1 设计目标 4）。
- * - **D13 首拉触发迁移**：挂载即 `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
+ * - **D13 首拉触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
  *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（原侧栏任务列表的首拉腿已随该视图退役，
- *   迁入此处成为唯一实现）。
+ *   迁入此处成为唯一实现；「外壳挂载」而非「面板打开」是 U1 的语义前提：面板每次 hover 打开
+ *   都重新挂载，数据面必须活在外壳上，打开时数据已在）。
  *   历史 record（已结束桶 / dim 常驻判据）依赖首拉：广播腿只覆盖在跑任务，缺此腿切 session
  *   后托盘空/滞后。WS 重连腿仍归 useSidebar.onConnected（D13 明文不迁），本处不重复挂。
  * - **面板错误态 retry 支撑**：按类重拉（bash → useBackgroundTasks.refresh；
@@ -32,11 +33,13 @@
  * composable 已随退役单元删除（原件不在，本文件为唯一实现）。谓词本体一律 import SSOT
  * （lib/subagent-bucket、lib/background-task-bucket），本文件不重写任何判定。
  *
- * 消费方：u-tray-shell（三件 icon 计数/三态）+ TrayNativePanel（分桶列表与 tab 计数）。
- * 本文件不渲染 UI、不发任何写类 RPC（行内操作在面板组件内）。
+ * 消费方：u-tray-shell（三件 icon 计数/三态——**唯一实例创建者**，创建后经
+ * TRAY_COUNTS_KEY provide 给面板）+ TrayNativePanel（分桶列表与 tab 计数，经
+ * useTrayCountsContext inject 消费外壳实例，**不自建实例**）。本文件不渲染 UI、不发任何
+ * 写类 RPC（行内操作在面板组件内）。
  */
-import { computed, watch } from 'vue'
-import type { ComputedRef, Ref } from 'vue'
+import { computed, inject, watch } from 'vue'
+import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useBackgroundTasks } from '@/composables/features/sidebar/useBackgroundTasks'
@@ -120,8 +123,33 @@ export interface UseTrayCountsReturn {
 }
 
 /**
+ * 数据面单例注入键：外壳（ComposerTray）在 setup 创建**唯一**实例并 provide，built-in 面板
+ * inject 消费。面板随 Popover 每次打开重新挂载（reka Presence 卸载/重建），若各自调
+ * useTrayCounts 则每次打开重发首拉 RPC（loadSubagents + loadWorkflows，bash 另加 list）；
+ * 单例把实例生命周期钉在外壳（= Composer 生命周期）上，面板卸载不销毁、不重拉。
+ */
+export const TRAY_COUNTS_KEY: InjectionKey<UseTrayCountsReturn> = Symbol('tray-counts')
+
+/**
+ * 消费外壳提供的托盘数据面（TrayNativePanel 专用）。token 缺失即抛错：面板只能在
+ * ComposerTray 内渲染；**刻意不设「自建实例」回退**——回退即面板自持第二数据实例，正是
+ * 「每次 hover 打开重发首拉 RPC」的根因（错误信息给出恢复动作）。
+ */
+export function useTrayCountsContext(): UseTrayCountsReturn {
+  const tray = inject(TRAY_COUNTS_KEY)
+  if (!tray) {
+    throw new Error(
+      '[tray] 数据面注入缺失：TrayNativePanel 必须在 ComposerTray 内渲染' +
+        '（外壳需 provide(TRAY_COUNTS_KEY, useTrayCounts(sessionId))）。',
+    )
+  }
+  return tray
+}
+
+/**
  * 托盘 built-in 三件数据面。必须在组件 setup 同步调用（内部 watch 依赖实例 scope；
- * useBackgroundTasks 同样要求 setup 上下文）。
+ * useBackgroundTasks 同样要求 setup 上下文）。**整个应用只有一个调用点**——外壳
+ * ComposerTray；面板走 useTrayCountsContext 消费同一实例（见 TRAY_COUNTS_KEY）。
  *
  * @param sessionIdRef 焦点 session id（string | null | undefined；undefined 归一为 null）
  */

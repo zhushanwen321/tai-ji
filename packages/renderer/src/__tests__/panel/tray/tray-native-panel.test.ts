@@ -7,14 +7,20 @@
  *   agent/slug/task、scriptName/进度）、tab 切换、空态按钮、两段式首击确认态
  * - 观察者（形态）：pin 门控（hover 态无行内按钮）、错误态 retry、断连提示条、加载态
  * - 构建者（白盒）：行点击归宿矩阵（drawer 三 tab）与 RPC 参数（计数口径在
- *   useTrayCounts.test.ts 覆盖）
+ *   useTrayCounts.test.ts 覆盖）；数据面单例（U1：真实 useTrayCounts + spy 断言面板开合
+ *   不重发首拉 RPC）
  *
  * mock 策略：
- * - `useTrayCounts` mock：数据面（计数/行集/错误/加载）直接注入——口径测试在同目录
- *   useTrayCounts.test.ts，本文件只验渲染与交互
+ * - 数据面经 `TRAY_COUNTS_KEY` **provide 替身**（非模块 mock）：面板已改 inject 消费外壳单例
+ *   （U1），替身是 `UseTrayCountsReturn` 类型标注的固定数据面——契约漂移即编译报错；口径测试
+ *   在同目录 useTrayCounts.test.ts，本文件只验渲染与交互
+ * - U1 用例用**真实** useTrayCounts（外壳替身持有）+ spy 拉取腿（`loadSubagents` /
+ *   `loadWorkflows`）：断言面板开合不重复触发首拉（旧实现每次 hover 打开都重发，是 U1 根因）
  * - 真实 pinia + 真实 subagent/workflow store：cancel 防误报读 store 真判据
  *   （isStreamingSubagent），workflow 操作回执路径真实
  * - `@taiji/core/transport/api/domains/*` mock：kill / workflowAction RPC 可控
+ * - `useBackgroundTasks` mock：bash 分区直接注入（真实状态根另有专项测试；U1 用例的真实
+ *   useTrayCounts 会调它，避免测试打真实 list RPC）
  * - vue-i18n 走全局 setup（从 zh-CN locale 取值）：断言真实中文文案 + 插值形态
  * - 时间：vi.useFakeTimers({ now: FIXED_NOW })——bash running 行耗时确定性
  *
@@ -22,7 +28,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { computed, reactive, ref } from 'vue'
+import { computed, defineComponent, h, provide, reactive, ref } from 'vue'
+import type { PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSubagentStore } from '@/stores/subagent'
@@ -32,6 +39,8 @@ import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionSc
 import { bindDrawerSessionId, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import { subagentVirtualId } from '@taiji/shared'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
+import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
+import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
@@ -40,7 +49,7 @@ import * as sessionApi from '@taiji/core/transport/api/domains/session'
 
 type TrayKind = 'bash' | 'subagent' | 'workflow'
 
-// ── mock：数据面（计数/行集/错误/加载态；口径与首拉触发在 useTrayCounts.test.ts）──
+// ── 数据面替身（inject 消费点：panel 已不自建实例；U1 用例另用真实 useTrayCounts）──
 interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
@@ -81,66 +90,78 @@ function createTrayState(): TrayState {
 const trayState = reactive<TrayState>(createTrayState())
 const retryMock = vi.hoisted(() => vi.fn<(kind: TrayKind) => Promise<void>>().mockResolvedValue(undefined))
 
-vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
-  return {
-    ...actual,
-    useTrayCounts: () => ({
-      counts: computed(() => ({
-        bash: {
-          running: trayState.bashRunning.length,
-          ended: trayState.bashEnded.length,
-          total: trayState.bashRunning.length + trayState.bashEnded.length,
-        },
-        subagent: {
-          running: trayState.subagentRunning.length,
-          ended: trayState.subagentEnded.length,
-          archived: trayState.subagentArchived.length,
-          total:
-            trayState.subagentRunning.length +
-            trayState.subagentEnded.length +
-            trayState.subagentArchived.length,
-        },
-        workflow: {
-          running: trayState.workflowRunning.length,
-          ended: trayState.workflowEnded.length,
-          total: trayState.workflowRunning.length + trayState.workflowEnded.length,
-        },
-      })),
-      lists: {
-        bash: {
-          running: computed(() => trayState.bashRunning),
-          ended: computed(() => trayState.bashEnded),
-        },
-        subagent: {
-          running: computed(() => trayState.subagentRunning),
-          ended: computed(() => trayState.subagentEnded),
-          archived: computed(() => trayState.subagentArchived),
-        },
-        workflow: {
-          running: computed(() => trayState.workflowRunning),
-          ended: computed(() => trayState.workflowEnded),
-        },
-      },
-      bashPartition: computed(() => ({
-        tasks: [],
-        loaded: trayState.bashLoaded,
-        corrupted: trayState.bashCorrupted,
-        fetchFailed: trayState.bashFetchFailed,
-      })),
-      errors: {
-        subagent: computed(() => trayState.subagentError),
-        workflow: computed(() => trayState.workflowError),
-      },
-      loading: {
-        bash: computed(() => !trayState.bashLoaded),
-        subagent: computed(() => trayState.subagentLoading),
-        workflow: computed(() => trayState.workflowLoading),
-      },
-      retry: retryMock,
-    }),
-  }
-})
+/**
+ * 固定数据面替身（`UseTrayCountsReturn` 类型标注 = 契约漂移门：成员增删改名即编译报错）。
+ * 经 TRAY_COUNTS_KEY provide 给被测面板——面板不再 import useTrayCounts（U1），替身即其唯一数据源。
+ * 模块级构造：所有计算属性都从 trayState 惰性派生，用例之间无需重建。
+ */
+const trayFixture: UseTrayCountsReturn = {
+  counts: computed(() => ({
+    bash: {
+      running: trayState.bashRunning.length,
+      ended: trayState.bashEnded.length,
+      total: trayState.bashRunning.length + trayState.bashEnded.length,
+    },
+    subagent: {
+      running: trayState.subagentRunning.length,
+      ended: trayState.subagentEnded.length,
+      archived: trayState.subagentArchived.length,
+      total:
+        trayState.subagentRunning.length +
+        trayState.subagentEnded.length +
+        trayState.subagentArchived.length,
+    },
+    workflow: {
+      running: trayState.workflowRunning.length,
+      ended: trayState.workflowEnded.length,
+      total: trayState.workflowRunning.length + trayState.workflowEnded.length,
+    },
+  })),
+  lists: {
+    bash: {
+      running: computed(() => trayState.bashRunning),
+      ended: computed(() => trayState.bashEnded),
+    },
+    subagent: {
+      running: computed(() => trayState.subagentRunning),
+      ended: computed(() => trayState.subagentEnded),
+      archived: computed(() => trayState.subagentArchived),
+    },
+    workflow: {
+      running: computed(() => trayState.workflowRunning),
+      ended: computed(() => trayState.workflowEnded),
+    },
+  },
+  bashPartition: computed(() => ({
+    tasks: [],
+    loaded: trayState.bashLoaded,
+    corrupted: trayState.bashCorrupted,
+    fetchFailed: trayState.bashFetchFailed,
+  })),
+  errors: {
+    subagent: computed(() => trayState.subagentError),
+    workflow: computed(() => trayState.workflowError),
+  },
+  loading: {
+    bash: computed(() => !trayState.bashLoaded),
+    subagent: computed(() => trayState.subagentLoading),
+    workflow: computed(() => trayState.workflowLoading),
+  },
+  retry: retryMock,
+}
+
+// ── mock：bash 分区状态根（bash 数据面；U1 用例的真实 useTrayCounts 会调用它）──
+vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
+  useBackgroundTasks: () => ({
+    current: computed(() => ({
+      tasks: [] as BackgroundTaskEntry[],
+      loaded: true,
+      corrupted: false,
+      fetchFailed: false,
+    })),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}))
 
 // ── mock：bash kill RPC ──
 vi.mock('@taiji/core/transport/api/domains/background-task', () => ({
@@ -235,8 +256,28 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord> & { runId: string })
 function mountPanel(kind: TrayKind, extra: { pinned?: boolean } = {}) {
   return mount(TrayNativePanel, {
     props: { kind, sessionId: SID, pinned: false, ...extra },
+    global: { provide: { [TRAY_COUNTS_KEY as symbol]: trayFixture } },
   })
 }
+
+/**
+ * 外壳替身（U1 用例）：唯一真实 useTrayCounts 实例创建于此并 provide，面板按 open 挂载/卸载
+ * ——复刻真实生命周期「外壳常驻 + 面板随 Popover 开合反复挂载」。
+ */
+const ShellHarness = defineComponent({
+  props: {
+    sessionId: { type: String, required: true },
+    open: { type: Boolean, default: false },
+    kind: { type: String as PropType<TrayKind>, default: 'subagent' },
+  },
+  setup(props) {
+    provide(TRAY_COUNTS_KEY, useTrayCounts(computed(() => props.sessionId)))
+    return () =>
+      props.open
+        ? h(TrayNativePanel, { kind: props.kind, sessionId: props.sessionId, pinned: false })
+        : null
+  },
+})
 
 type PanelWrapper = ReturnType<typeof mountPanel>
 function rowTexts(wrapper: PanelWrapper, testid: string): string[] {
@@ -639,7 +680,7 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     wrapper.unmount()
   })
 
-  it('加载态：首拉在途渲染加载文案（bash = 从未拉到过一次）', async () => {
+  it('加载态：在途且无数据显示加载文案（bash = 从未拉到过一次）', async () => {
     trayState.bashLoaded = false
     const wrapper = mountPanel('bash')
     await flushPromises()
@@ -669,6 +710,83 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     trayState.bashCorrupted = true
     await flushPromises()
     expect(wrapper.find('[data-testid="tray-bash-corrupt-banner"]').text()).toContain(zhTray.tray.corruptBanner)
+    wrapper.unmount()
+  })
+})
+
+describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', () => {
+  it('面板关闭再打开（卸载重挂）不触发重复首拉：loadSubagents / loadWorkflows 各仅外壳挂载一次', async () => {
+    const subagentStore = useSubagentStore()
+    const workflowStore = useWorkflowStore()
+    // 拉取腿用 spy 计数（真实实现被替身：无 RPC，数据由用例直接种入分区）
+    const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
+    const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
+    subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'running' })])
+    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+
+    const wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
+    await flushPromises()
+
+    // 外壳挂载（= 数据面唯一实例创建点）即首拉，各一次
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+    expect(loadSubSpy).toHaveBeenCalledWith(SID)
+    expect(loadWfSpy).toHaveBeenCalledTimes(1)
+    expect(loadWfSpy).toHaveBeenCalledWith(SID)
+
+    // 打开面板 = 首次挂载：行来自外壳同一实例（同一分区），无新增拉取
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tray-native-panel"]').attributes('data-kind')).toBe('subagent')
+    expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+    expect(loadWfSpy).toHaveBeenCalledTimes(1)
+
+    // 关闭（面板卸载）→ 再打开（重新挂载）：仍不重发（旧实现此处会再拉一轮）
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tray-native-panel"]').exists()).toBe(false)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
+    expect(loadSubSpy).toHaveBeenCalledTimes(1)
+    expect(loadWfSpy).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
+
+  it('缺 TRAY_COUNTS_KEY 时响亮失败（不得静默自建第二数据实例）', () => {
+    // 面板只能在 ComposerTray 内渲染：无 provide 即抛错（错误信息含恢复动作）；若后人改回
+    // 「自建实例」回退，本用例转红（U1 的双实例路径不得复活）
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => mount(TrayNativePanel, { props: { kind: 'subagent', sessionId: SID } }))
+        .toThrowError(/TRAY_COUNTS_KEY/)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+})
+
+describe('TrayNativePanel 首帧即列表（U2：有数据不闪加载态）', () => {
+  it('subagent：在途（loading）但该 sid 已有数据 → 直出列表，不渲染加载占位', async () => {
+    trayState.subagentLoading = true
+    trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
+    const wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('bash：从未拉到过一次但分区已有任务 → 直出列表（提示条语义不受影响）', async () => {
+    trayState.bashLoaded = false
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    const wrapper = mountPanel('bash')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="tray-bash-row"]')).toHaveLength(1)
     wrapper.unmount()
   })
 })
