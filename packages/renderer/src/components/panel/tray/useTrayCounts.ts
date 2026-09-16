@@ -6,10 +6,9 @@
  * - **三件计数与分桶**：bash / subagent / workflow 的「进行中 / 已结束」两视图行集与
  *   计数。计数恒等于行集长度（同一 computed 派生），杜绝「tab 数字与列表条数不一致」
  *   的双口径穿帮面（§1 设计目标 4）。
- *   [两视图裁决 2026-09-16] subagent 面板收窄为两视图——「已收起」从托盘 UI 退役：
- *   它是 subagent-core 执行层治理机制（intent 自动归档 + message 隐含寻回），不是用户
- *   可见状态，托盘不再以第三状态呈现；已收起记录（intent=archived）归入「已结束」桶。
- *   intent 字段本体保留于 subagent-core 执行层，renderer 不再消费。
+ *   [两视图裁决 2026-09-16] subagent 面板收窄为两视图——「已收起」机制已全链路删除
+ *   （2026-09-16 裁决，intent 意愿维度自 shared 契约至执行层均不复存在），已结束桶
+ *   判据 = !isRunningProjection，托盘无第三状态。
  * - **D13 首拉触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
  *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（原侧栏任务列表的首拉腿已随该视图退役，
  *   迁入此处成为唯一实现；「外壳挂载」而非「面板打开」是 U1 的语义前提：面板每次 hover 打开
@@ -27,8 +26,7 @@
  *   record 由 workflow 面板承载；该过滤口径原在侧栏任务计数内，已随侧栏任务视图退役、
  *   托盘为唯一实现）+ subagent-bucket SSOT 谓词：
  *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
- *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle、死亡纳管态与 intent=archived
- *   的收口归档记录全落此桶）。
+ *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle 与死亡纳管态全落此桶）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
  *   已结束 = 其余（done）。
  *
@@ -167,8 +165,8 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
       .value.filter((r) => r.origin !== 'workflow'),
   )
   const subagentRunning = computed(() => subagentRecords.value.filter((r) => isRunningProjection(r)))
-  // 已结束 = !isRunningProjection（[两视图裁决 2026-09-16]：intent=archived 的收口归档
-  // 记录同落此桶——执行层治理机制不再以第三状态呈现）。两桶互斥且并集 = 全量。
+  // 已结束 = !isRunningProjection（[两视图裁决 2026-09-16]：「已收起」机制已全链路删除，
+  // 已结束桶判据 = !isRunningProjection）。两桶互斥且并集 = 全量。
   const subagentEnded = computed(() =>
     subagentRecords.value.filter((r) => !isRunningProjection(r)),
   )

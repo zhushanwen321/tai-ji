@@ -130,24 +130,21 @@ afterEach(() => {
 })
 
 describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
-  it('subagent：进行中 = isRunningProjection；running+stopReason 与 archived 均落已结束（[两视图裁决 2026-09-16]）', async () => {
+  it('subagent：进行中 = isRunningProjection；running+stopReason 与 idle 均落已结束（[两视图裁决 2026-09-16]）', async () => {
     const subagentStore = useSubagentStore()
     subagentStore.applyRecords(SID, [
       makeSubagent({ subagentId: 'a-running', status: 'running' }),
       // 死亡纳管态（W4 adoptEngineDeath：running + stopReason='failed'）→ 不落进行中
       makeSubagent({ subagentId: 'a-dead', status: 'running', stopReason: 'failed' }),
       makeSubagent({ subagentId: 'a-idle', status: 'idle' }),
-      // 收口归档记录（intent=archived）→ 归入已结束桶（不再有第三桶）
-      makeSubagent({ subagentId: 'a-archived', status: 'idle', intent: 'archived' }),
     ])
     mountHarness()
 
-    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 3, total: 4 })
+    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 2, total: 3 })
     expect(data().lists.subagent.running.value.map((r) => r.subagentId)).toEqual(['a-running'])
     expect(data().lists.subagent.ended.value.map((r) => r.subagentId)).toEqual([
       'a-dead',
       'a-idle',
-      'a-archived',
     ])
     // 两桶互斥且全覆盖（running + ended = total）
     const counts = data().counts.value.subagent

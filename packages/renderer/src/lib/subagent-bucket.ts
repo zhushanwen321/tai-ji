@@ -11,10 +11,10 @@
  * [HISTORICAL] 2026-09-16 用户裁决托盘两态化：intent 意愿分桶自 UI 退役。原分桶面
  * （SubagentFilterValue / SubagentBucket / DEFAULT_SUBAGENT_FILTER / subagentBucket /
  * filterSubagents / countSubagents，设计 subagent-sidebar-filter §3.4，原设计文档已删除、
- * git 可追溯）随「已收起」视图一并删除——「已收起」是 subagent-core 执行层治理机制
- * （intent 自动归档 + message 隐含寻回），不是用户可见状态，托盘不再以第三状态呈现；
- * 已收起记录归入「已结束」桶（已结束 = !isRunningProjection）。intent 字段本体保留于
- * subagent-core 执行层，renderer 不再按它分桶。
+ * git 可追溯）随「已收起」视图一并删除——「已收起」不是用户可见状态，托盘不再以第三
+ * 状态呈现；已收起记录归入「已结束」桶（已结束 = !isRunningProjection）。同日全链路
+ * 清除终态：「已收起」机制已全链路删除——intent 字段自 shared 契约与 subagent-core
+ * 执行层一并移除，renderer 不再按它分桶。
  */
 import type { SubagentRecord } from '@taiji/shared'
 

@@ -450,10 +450,11 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     wrapper.unmount()
   })
 
-  it('subagent：已收起记录（intent=archived）落已结束桶渲染（[两视图裁决 2026-09-16]，无寻回入口）', async () => {
-    // 已收起记录由数据面归入已结束行集（口径断言在 useTrayCounts.test.ts）；面板层断言
-    // 两 tab 形态下该记录走「已结束」tab 可见，且无「查看已收起」寻回按钮
-    trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-a1', status: 'idle', intent: 'archived' })]
+  it('subagent：已结束记录落已结束桶渲染（[两视图裁决 2026-09-16]，无寻回入口）', async () => {
+    // 已结束记录由数据面归入已结束行集（口径断言在 useTrayCounts.test.ts）；面板层断言
+    // 空「进行中」tab 下经「查看已结束」跳转后该记录走「已结束」tab 可见，且无
+    // 「查看已收起」寻回按钮（「已收起」机制已全链路删除，第三桶不存在）
+    trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-a1', status: 'idle' })]
     const wrapper = mountPanel('subagent')
     await flushPromises()
 

@@ -20,7 +20,10 @@
  * 不存在——对齐永久会话模型 subagent-permanent-session-model §3.2.2）：
  * - running：本轮有任务在飞
  * - idle：无任务在飞，随时可接下一条 message（轮终权威词——「为什么停」由 stopReason
- *   表达，列表可见性由 intent 表达）
+ *   表达）
+ *
+ * [2026-09-16 裁决] 「已收起」第三状态（意愿维度字段）已全链路删除——列表可见性
+ * 不再由独立字段表达。
  *
  * [U6] legacy 兼容值（done/failed/cancelled/crashed/closed）已从类型面删除：扩展写面
  * U2 起不再产出，历史 session 数据的旧值在解析边界（runtime normalizeSubagentStatus
@@ -142,18 +145,6 @@ export interface SubagentRecord {
    * （cancelled→'cancelled' / failed→'failed' / done→'completed'）。
    */
   closedReason?: string
-  /**
-   * 意愿维度（永久会话模型 §3.2.1，U8 下行投影）：会话是否已被收口归档。
-   * 'archived' = 已收起——写点是 subagent-core 执行层的收口归档（closeAfterRound /
-   * idle close / dispose / batch close 走 markArchived），**不是用户列表操作**；
-   * message 到达自动翻回 'active' = 隐含寻回。缺省（undefined，存量 record 与
-   * 旧扩展投影）= 'active'。
-   * 来源：自描述 subagent-record entry（U8 起 close/寻回迁移写点携带）。
-   * [2026-09-16 用户裁决] 本字段是执行层列表治理机制，不是用户可见的第三状态：
-   * composer 任务托盘面板已收窄为两视图（进行中/已结束，archived 记录并入已结束），
-   * 宿主 UI 不再按本字段分桶；执行层治理语义（归档/寻回/通知归档映射）不变。
-   */
-  intent?: 'active' | 'archived'
   /**
    * 展示维度（永久会话模型 §3.2.1，U8 下行投影）：上一轮为什么停。值域 =
    * 旧 closedReason 七值沿用 + 四个新展示值（interrupted / interrupted-by-restart /

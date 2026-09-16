@@ -563,8 +563,9 @@ export class SessionRecords {
  * 结构固定（shared SubagentRecord），逐字段比对而非 JSON.stringify（顺序无关、无序列化抖动）。
  * origin 在比对面（R3-1②）：活 record 的 origin 实际不变，但本函数管 publish 去重——
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
- * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
- * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
+ * [U8 / §3.2.8] stopReason/engine 域进基线：settle 停因、zcode 续聊换锚
+ * （engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。[2026-09-16 裁决]
+ * intent 比对位随「已收起」机制全链路删除（旧 entry 残留键被投影层忽略）。
  * [U8b / GUI 快修①] result 补入：轮终迁移恰翻该字段（result 写入），缺比对会把
  * 「轮终等待续聊」的显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
  * [modeless 波4] chatMode 比对维度随字段消亡删除（旧 entry 残留键被投影层忽略，
@@ -617,19 +618,19 @@ function recordStatsEquals(a: SubagentRecord, b: SubagentRecord): boolean {
 }
 
 /**
- * [状态展示组] 状态 + 终态/展示信号六字段：status / error / closedReason + 轮终
- * result + intent / stopReason / origin——publish
+ * [状态展示组] 状态 + 终态/展示信号五字段：status / error / closedReason + 轮终
+ * result + stopReason / origin——publish
  * 去重的全部「显示形态」信号集中于此组，翻任一字段即触发 publish。
  * [U5/D4] resumable 比对位已随字段退役删除——轮终翻转由 status 位天然触发
  * （U4 翻边后轮终写 idle）；[modeless 波4] chatMode 比对位随字段消亡删除（旧 entry
- * 残留键投影层忽略）；result 仍需显式比对（running 期覆盖写场景）。
+ * 残留键投影层忽略）；result 仍需显式比对（running 期覆盖写场景）；
+ * [2026-09-16 裁决] intent 比对位随「已收起」机制全链路删除。
  */
 function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.status === b.status
     && a.error === b.error
     && a.closedReason === b.closedReason
     && a.result === b.result
-    && a.intent === b.intent
     && a.stopReason === b.stopReason
     && a.origin === b.origin
 }

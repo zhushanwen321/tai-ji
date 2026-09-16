@@ -246,8 +246,8 @@
  * ── 形态 ──
  * - 分桶 tab（凹陷槽范式：外槽 bg-bg-input + active bg-bg-elevated 浮起），计数与行集同源
  *   （tab 数字恒等于列表条数）：三件均两视图「进行中 / 已结束」——[两视图裁决 2026-09-16]
- *   subagent 的「已收起」桶自托盘退役（intent 是 subagent-core 执行层治理机制，非用户可见
- *   状态，已收起记录归入「已结束」桶）；
+ *   subagent 的「已收起」桶自托盘退役（「已收起」机制已全链路删除，已结束桶判据 =
+ *   !isRunningProjection）；
  * - 行：bash = 状态 icon + 命令 + 耗时 + pid/exit + 两段式终止；subagent = 引擎 icon + 状态点/
  *   spinner + agent + slug + turns/tokens/耗时 + task 摘要 + 两段式取消；workflow = 状态点/spinner
  *   + scriptName + slug + 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除）；

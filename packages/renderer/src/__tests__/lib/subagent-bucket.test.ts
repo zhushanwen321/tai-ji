@@ -4,9 +4,9 @@
  *
  * [两视图裁决 2026-09-16 托盘两态化] 原分桶面（subagentBucket / filterSubagents /
  * countSubagents / DEFAULT_SUBAGENT_FILTER 及其类型）随托盘「已收起」桶退役删除，
- * 其用例一并退役——已收起记录（intent=archived）归入「已结束」桶（= !isRunningProjection），
- * 口径断言现承载于 `__tests__/panel/tray/useTrayCounts.test.ts`。本文件保留两谓词本体
- * 的完整断言体系：
+ * 其用例一并退役——已结束桶判据 = !isRunningProjection（「已收起」机制现已全链路删除，
+ * intent 字段不复存在），口径断言现承载于 `__tests__/panel/tray/useTrayCounts.test.ts`。
+ * 本文件保留两谓词本体的完整断言体系：
  *
  * 三视角：
  * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）、
@@ -80,8 +80,8 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
     expect(isRunningProjection(makeRecord('running', { result: 'x' }))).toBe(true)
   })
 
-  it('intent=archived 不参与占用判定（[两视图裁决 2026-09-16] 收口归档记录落已结束桶 = 非 running）', () => {
-    expect(isRunningProjection(makeRecord('idle', { intent: 'archived' }))).toBe(false)
+  it('idle 记录不参与占用判定（[两视图裁决 2026-09-16] 已结束桶判据 = !isRunningProjection；「已收起」机制已全链路删除，无第三桶维度）', () => {
+    expect(isRunningProjection(makeRecord('idle'))).toBe(false)
   })
 })
 
@@ -173,7 +173,7 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
     {
       // 形态 2：R4 MF-A 第 2+ 轮在飞型（轮始清点扩字段后的应有形态——markRoundStarted
       // 已清上轮 stopReason，record 与首轮在飞同形）。若清点失效（stale stopReason
-      // 残留）本谓词将误排除——该失效由 core 轮始清点测试守卫（record-store-intent-api），
+      // 残留）本谓词将误排除——该失效由 subagent-core 轮始清点测试守卫，
       // 本行钉住「扩字段后第 2+ 轮在飞不误排除」的renderer侧终态。
       name: '2 第 2+ 轮在飞（轮始清点后：running + result=∅ + stopReason 已清）',
       rec: makeRecord('running'),
