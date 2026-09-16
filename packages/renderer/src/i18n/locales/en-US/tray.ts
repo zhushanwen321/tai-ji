@@ -51,8 +51,6 @@ export default {
     alreadyEnded: 'Task already finished',
     cancelFailed: 'Failed to cancel subagent: {msg}',
     /** Row actions (workflows) */
-    pause: 'Pause',
-    resume: 'Resume',
     abort: 'Stop',
     abortConfirm: 'Confirm stop?',
     workflowOpFailed: 'Workflow action failed: {msg}',

@@ -235,12 +235,12 @@ export async function getAgentCallFilePath(sessionId: string, agentCallSessionId
 }
 
 /**
- * 触发 workflow 生命周期操作（pause/resume/abort）。
+ * 触发 workflow 生命周期操作（abort；pause/resume 已随扩展 D-2 一次性生命周期移除）。
  * runtime 经 client.prompt("/workflows <action> <runId>") 调扩展 slash command（不经 LLM）。
  */
 export function workflowAction(
   sessionId: string,
-  action: 'pause' | 'resume' | 'abort',
+  action: 'abort',
   runId: string,
 ): Promise<void> {
   return command('session.workflowAction', { sessionId, action, runId }, RPC_BACKSTOP_TIMEOUT_MS)

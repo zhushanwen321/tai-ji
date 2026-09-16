@@ -27,7 +27,7 @@
     </div>
 
     <template v-else>
-      <!-- header：workflow 名 + slug + 暂停/中止（running 态 Pause+Abort，paused 态 Resume+Abort） -->
+      <!-- header：workflow 名 + slug + 中止（running 态 Abort 两段式） -->
       <div class="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" />
         <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-neutral-fg">
@@ -36,21 +36,8 @@
         <span v-if="workflow.slug" class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ workflow.slug }}
         </span>
-        <div
-          v-if="workflow.status === 'running' || workflow.status === 'paused'"
-          class="flex shrink-0 items-center gap-0.5"
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-5 text-neutral-dim hover:text-neutral-fg"
-            :title="workflow.status === 'running' ? t('sidebar.workflowDetail.pause') : t('sidebar.workflowDetail.resume')"
-            data-testid="drawer-workflow-pause"
-            @click="onAction(workflow.status === 'running' ? 'pause' : 'resume')"
-          >
-            <Pause v-if="workflow.status === 'running'" class="size-3" />
-            <Play v-else class="size-3" />
-          </Button>
+        <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
+        <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
           <Button
             variant="ghost"
             size="icon"
@@ -121,7 +108,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Loader2, Pause, Play, Square, Workflow } from '@lucide/vue'
+import { Check, Loader2, Square, Workflow } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
@@ -251,8 +238,8 @@ function onAbortClick(): void {
   }
 }
 
-/** workflow 操作（pause/resume/abort）：调 runtime RPC + 刷新列表 */
-async function onAction(action: 'pause' | 'resume' | 'abort'): Promise<void> {
+/** workflow abort：调 runtime RPC + 刷新列表（pause/resume 随扩展 D-2 一次性生命周期移除） */
+async function onAction(action: 'abort'): Promise<void> {
   const wf = workflow.value
   const sid = panelStore.focusedSessionId
   if (!wf || !sid) return

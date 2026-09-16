@@ -30,7 +30,7 @@ export function useBackgroundWork() {
    */
   function hasBackgroundWork(sessionId: string): boolean {
     const subagentWorking = subagentStore.hasRunning(sessionId, { excludeOrigin: 'workflow' })
-    return subagentWorking || workflowStore.hasRunningOrPaused(sessionId)
+    return subagentWorking || workflowStore.hasRunningWorkflow(sessionId)
   }
 
   return { hasBackgroundWork }

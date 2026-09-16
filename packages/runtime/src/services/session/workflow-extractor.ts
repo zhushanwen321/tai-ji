@@ -386,8 +386,7 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
     scriptName: snapshot.spec.scriptName,
     slug: snapshot.spec.slug,
     description: snapshot.spec.description,
-    // v2 两态直接赋值（是 WorkflowRunStatus 三态的子集，无需断言；
-    // 'paused' 是 WorkflowRunStatus 的 legacy 读侧值，v2 快照不产出）
+    // v2 两态直接赋值（与 WorkflowRunStatus 一致，无需断言；一次性生命周期 D-2 只产出 running/done）
     status: snapshot.state.status,
     reason: snapshot.state.reason,
     startedAt: snapshot.meta.startedAt,

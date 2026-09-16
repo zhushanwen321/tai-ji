@@ -426,7 +426,7 @@ export interface ClientMessageMap {
   'session.getWorkflows': { sessionId: string }
   'session.getAgentCallHistory': { sessionId: string; agentCallSessionId: string }
   'session.getAgentCallFilePath': { sessionId: string; agentCallSessionId: string }
-  'session.workflowAction': { sessionId: string; action: 'pause' | 'resume' | 'abort'; runId: string }
+  'session.workflowAction': { sessionId: string; action: 'abort'; runId: string }
   // session.subagentAction：subagent 生命周期/定向消息操作（cancel/message/start，对称 workflowAction
   // 的扩展 slash command 转发）。runtime 经 client.prompt("/subagents <action> ...") 调扩展（不经 LLM）。
   // 字段按 action 取用：cancel 用 subagentId，message 用 subagentId+text，start 用 slug+task
@@ -1535,7 +1535,7 @@ export interface ServerMessageMapBase {
     fetchedAt: string
   }
   // session.workflowActionDone：workflow 操作完成确认（session.workflowAction RPC reply）
-  'session.workflowActionDone': { sessionId: string; action: 'pause' | 'resume' | 'abort'; runId: string }
+  'session.workflowActionDone': { sessionId: string; action: 'abort'; runId: string }
   // session.subagentActionDone：subagent 操作完成确认（session.subagentAction RPC reply）。
   // 字段按 action 回显目标标识：cancel/message 回 subagentId，start 回 slug（text/task 不回显——
   // ack 型 payload，回显长文本无消费方）。

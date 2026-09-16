@@ -479,12 +479,12 @@ export class SessionRecords {
   }
 
   /**
-   * 触发 workflow 生命周期操作（pause/resume/abort）。
+   * 触发 workflow 生命周期操作（abort；pause/resume 已随扩展 D-2 一次性生命周期移除）。
    * 经 client.prompt("/workflows <action> <runId>") 调扩展 slash command，
    * pi 检测 / 开头直接执行 command handler（不经 LLM）。
    * 扩展侧 RPC 分支已实现（commands.ts ctx.mode==='rpc'）。
    */
-  async workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> {
+  async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> {
     const client = this.deps.pm.getClient(sessionId)
     if (!client) throw new Error(`Session ${sessionId} not active`)
     await client.prompt(`/workflows ${action} ${runId}`)

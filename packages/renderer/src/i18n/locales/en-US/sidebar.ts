@@ -145,8 +145,6 @@ export default {
   // (`panel.tray.bucket.running` task scope / `panel.tray.bucket.runningProcess` process scope)
   // and the turnProgress section of this file. A true conceptual difference — do not unify.
   workflowDetail: {
-    pause: 'Pause',
-    resume: 'Resume',
     terminate: 'Terminate',
     terminateConfirm: 'Confirm terminate?',
     pendingHint: 'Waiting to start',

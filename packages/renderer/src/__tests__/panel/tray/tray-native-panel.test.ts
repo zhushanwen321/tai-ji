@@ -168,7 +168,7 @@ vi.mock('@taiji/core/transport/api/domains/background-task', () => ({
   kill: vi.fn(),
 }))
 
-// ── mock：workflow pause/resume/abort RPC（session 域其余导出保持真实）──
+// ── mock：workflow abort RPC（session 域其余导出保持真实）──
 vi.mock('@taiji/core/transport/api/domains/session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/session')>()
   return { ...actual, workflowAction: vi.fn() }
@@ -394,10 +394,10 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     wrapper.unmount()
   })
 
-  it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（paused 行无 spinner）', async () => {
+  it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（done 行无 spinner，状态点替代）', async () => {
     trayState.workflowRunning = [
       makeWorkflow({ runId: 'wf-1', status: 'running' }),
-      makeWorkflow({ runId: 'wf-2', status: 'paused' }),
+      makeWorkflow({ runId: 'wf-2', status: 'done', reason: 'completed' }),
     ]
     const wrapper = mountPanel('workflow')
     await flushPromises()
@@ -409,7 +409,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(rows[0].find('[data-testid="tray-workflow-slug"]').text()).toBe('rel')
     expect(rows[0].text()).toContain(msg(zhTray.tray.agentsLabel, { done: 1, total: 2 }))
     expect(rows[0].text()).toContain('1m0s')
-    // running 行有 spinner，paused 行无（状态点替代）
+    // running 行有 spinner，done 行无（状态点替代）
     expect(rows[0].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(true)
     expect(rows[1].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(false)
     wrapper.unmount()
@@ -496,7 +496,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
 
     const workflowPinned = mountPanel('workflow', { pinned: true })
     await flushPromises()
-    expect(workflowPinned.find('[data-testid="tray-workflow-pause"]').exists()).toBe(true)
+    expect(workflowPinned.find('[data-testid="tray-workflow-pause"]').exists()).toBe(false)
     expect(workflowPinned.find('[data-testid="tray-workflow-abort"]').exists()).toBe(true)
     workflowPinned.unmount()
   })
@@ -578,41 +578,27 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     wrapper.unmount()
   })
 
-  it('workflow：pause 单击即发 RPC；abort 两段式（首击确认不发，再击发 abort）', async () => {
+  it('workflow：abort 两段式（首击确认不发，再击发 abort）；无 pause/resume 钮（D-2 一次性生命周期）', async () => {
     const workflowStore = useWorkflowStore()
     const loadSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
     const wrapper = mountPanel('workflow', { pinned: true })
     await flushPromises()
 
-    await wrapper.find('[data-testid="tray-workflow-pause"]').trigger('click')
-    await flushPromises()
-    expect(sessionApi.workflowAction).toHaveBeenCalledWith(SID, 'pause', 'wf-1')
-    expect(loadSpy).toHaveBeenCalledWith(SID)
+    // D-2：一次性生命周期，宿主不暴露 pause/resume
+    expect(wrapper.find('[data-testid="tray-workflow-pause"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-workflow-resume"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="tray-workflow-abort"]').trigger('click')
     await flushPromises()
-    expect(sessionApi.workflowAction).toHaveBeenCalledTimes(1)
+    expect(sessionApi.workflowAction).toHaveBeenCalledTimes(0)
     expect(wrapper.find('[data-testid="tray-workflow-abort-confirm"]').attributes('data-confirming')).toBe('true')
 
     await wrapper.find('[data-testid="tray-workflow-abort-confirm"]').trigger('click')
     await flushPromises()
-    expect(sessionApi.workflowAction).toHaveBeenCalledTimes(2)
+    expect(sessionApi.workflowAction).toHaveBeenCalledTimes(1)
     expect(sessionApi.workflowAction).toHaveBeenLastCalledWith(SID, 'abort', 'wf-1')
-    wrapper.unmount()
-  })
-
-  it('workflow：paused 行显示 resume 钮（点击发 resume）', async () => {
-    const workflowStore = useWorkflowStore()
-    vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
-    trayState.workflowRunning = [makeWorkflow({ runId: 'wf-2', status: 'paused' })]
-    const wrapper = mountPanel('workflow', { pinned: true })
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="tray-workflow-pause"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="tray-workflow-resume"]').trigger('click')
-    await flushPromises()
-    expect(sessionApi.workflowAction).toHaveBeenCalledWith(SID, 'resume', 'wf-2')
+    expect(loadSpy).toHaveBeenCalledWith(SID)
     wrapper.unmount()
   })
 })

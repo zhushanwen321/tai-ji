@@ -142,8 +142,6 @@ export default {
   // [词表裁决]（`panel.tray.bucket.running` 任务域 / `panel.tray.bucket.runningProcess`
   // 进程域）+ 本文件 turnProgress 节。概念域不同属真差异，勿合并措辞。
   workflowDetail: {
-    pause: '暂停',
-    resume: '恢复',
     terminate: '终止',
     terminateConfirm: '确认终止？',
     pendingHint: '等待执行中',

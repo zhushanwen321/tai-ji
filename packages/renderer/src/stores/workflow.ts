@@ -101,9 +101,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return partition.get(sessionId)
   }
 
-  /** 该 session 是否有 workflow 仍在 running 或 paused（供 derivedStatus 计算 hasBackgroundWork） */
-  function hasRunningOrPaused(sessionId: string): boolean {
-    return getRecordsBySession(sessionId).some((s) => s.status === 'running' || s.status === 'paused')
+  /** 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork） */
+  function hasRunningWorkflow(sessionId: string): boolean {
+    return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
 
   /** 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发） */
@@ -243,7 +243,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // per-session 分区读写（ADR-0049 Map 分区派）
     recordsOf,
     getRecordsBySession,
-    hasRunningOrPaused,
+    hasRunningWorkflow,
     applyRecords,
     clearSession,
     // actions

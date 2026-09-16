@@ -175,17 +175,9 @@
                 </span>
                 <span v-if="record.slug" data-testid="tray-workflow-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
-                <!-- 行内操作（仅 pin 态）：running 态 pause + abort，paused 态 resume + abort -->
-                <template v-if="pinned && (record.status === 'running' || record.status === 'paused')">
-                  <Button
-                    variant="ghost" size="icon" class="size-5 shrink-0 text-neutral-dim hover:text-neutral-fg"
-                    :title="record.status === 'running' ? t('panel.tray.pause') : t('panel.tray.resume')"
-                    :data-testid="record.status === 'running' ? 'tray-workflow-pause' : 'tray-workflow-resume'"
-                    @click.stop="runWorkflowAction(record.status === 'running' ? 'pause' : 'resume', record.runId)"
-                  >
-                    <Pause v-if="record.status === 'running'" class="size-3" />
-                    <Play v-else class="size-3" />
-                  </Button>
+                <!-- 行内操作（仅 pin 态）：running 态 abort 两段式。workflow 一次性生命周期
+                     （subagent-workflow D-2）：pause/resume 已在扩展侧移除，宿主不再暴露 -->
+                <template v-if="pinned && record.status === 'running'">
                   <Button
                     variant="ghost" size="icon"
                     :data-testid="abortingRunId === record.runId ? 'tray-workflow-abort-confirm' : 'tray-workflow-abort'"
@@ -268,7 +260,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, AlertTriangle, Check, Loader2, Pause, Play, Square, WifiOff, X } from '@lucide/vue'
+import { AlertCircle, AlertTriangle, Check, Loader2, Square, WifiOff, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
@@ -517,7 +509,7 @@ function subagentDotClass(record: SubagentRecord): string {
 // ── workflow 行色档（状态点与进度条同源；承自侧栏 workflow 列表的复制迁移件）──
 function workflowToneClass(record: WorkflowRunRecord): string {
   if (record.status === 'done') return record.reason === 'completed' ? 'bg-success' : 'bg-danger'
-  return record.status === 'paused' ? 'bg-warn' : 'bg-accent'
+  return 'bg-accent'
 }
 function completedAgentCount(record: WorkflowRunRecord): number {
   return record.agentCalls.filter((call) => call.status === 'completed' || call.status === 'failed').length
@@ -580,7 +572,7 @@ async function cancelSubagent(record: SubagentRecord): Promise<void> {
   }
 }
 
-// ── 行内操作 3：workflow pause / resume / abort（abort 两段式）──
+// ── 行内操作 3：workflow abort（两段式；pause/resume 随扩展 D-2 一次性生命周期移除）──
 const abortingRunId = ref<string | null>(null)
 function onAbortClick(runId: string): void {
   if (abortingRunId.value === runId) {
@@ -591,7 +583,7 @@ function onAbortClick(runId: string): void {
   abortingRunId.value = runId
 }
 /** 调 runtime RPC + 刷新列表（不做乐观写——workflow 状态由 runtime 推送权威） */
-async function runWorkflowAction(action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> {
+async function runWorkflowAction(action: 'abort', runId: string): Promise<void> {
   try {
     await sessionApi.workflowAction(props.sessionId, action, runId)
     void workflowStore.loadWorkflows(props.sessionId)

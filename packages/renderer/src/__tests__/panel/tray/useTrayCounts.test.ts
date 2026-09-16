@@ -3,7 +3,7 @@
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
- *   archived 归已收起、workflow paused 计入进行中、bash 两视图由 background-task-bucket
+ *   archived 归已收起、workflow running 计入进行中、bash 两视图由 background-task-bucket
  *   SSOT 谓词派生；D13 首拉触发与 retry 调用序；错误态/加载态暴露面
  * - 使用者（黑盒）：本文件是纯逻辑面（无 DOM）；用户可见断言在 tray-native-panel.test.ts
  * - 观察者（形态）：同上（面板渲染形态由组件测试承载）
@@ -162,17 +162,16 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
     expect(data().lists.subagent.running.value.map((r) => r.subagentId)).toEqual(['a-tool'])
   })
 
-  it('workflow：running / paused 计入进行中，done 落已结束', async () => {
+  it('workflow：running 计入进行中，done 落已结束（一次性生命周期 D-2：无 paused 态）', async () => {
     const workflowStore = useWorkflowStore()
     workflowStore.applyRecords(SID, [
       makeWorkflow({ runId: 'wf-run', status: 'running' }),
-      makeWorkflow({ runId: 'wf-paused', status: 'paused' }),
       makeWorkflow({ runId: 'wf-done', status: 'done', reason: 'completed' }),
     ])
     mountHarness()
 
-    expect(data().counts.value.workflow).toEqual({ running: 2, ended: 1, total: 3 })
-    expect(data().lists.workflow.running.value.map((r) => r.runId)).toEqual(['wf-run', 'wf-paused'])
+    expect(data().counts.value.workflow).toEqual({ running: 1, ended: 1, total: 2 })
+    expect(data().lists.workflow.running.value.map((r) => r.runId)).toEqual(['wf-run'])
     expect(data().lists.workflow.ended.value.map((r) => r.runId)).toEqual(['wf-done'])
   })
 

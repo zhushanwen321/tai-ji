@@ -26,7 +26,7 @@
  *   进行中）；已结束 = `!isRunningProjection` 且 `subagentBucket(record) !== 'archived'`；
  *   已收起 = `intent === 'archived'`（意愿维度与 status 正交，已退役的侧栏筛选条原承载的
  *   寻回入口现由托盘「已收起」视图唯一承载）。
- * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status ∈ {running, paused}`，
+ * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
  *   已结束 = 其余（done）。
  *
  * [迁移语义 D14「复制不抽走」] 计数口径与首拉范式自侧栏任务视图域复制迁入；该域组件 /
@@ -180,13 +180,13 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     ),
   )
 
-  // ── workflow：进行中 = running | paused（paused 仍是「进行中的 run」，设计 D2 明文）──
+  // ── workflow：进行中 = running（一次性生命周期 D-2：paused 值已从状态机删除）──
   const workflowRecords = computed(() => workflowStore.recordsOf(normalizedSid.value ?? '').value)
   const workflowRunning = computed(() =>
-    workflowRecords.value.filter((r) => r.status === 'running' || r.status === 'paused'),
+    workflowRecords.value.filter((r) => r.status === 'running'),
   )
   const workflowEnded = computed(() =>
-    workflowRecords.value.filter((r) => r.status !== 'running' && r.status !== 'paused'),
+    workflowRecords.value.filter((r) => r.status !== 'running'),
   )
 
   // ── bash：两视图由 background-task-bucket SSOT 谓词派生（过滤 + 排序同源，不二次加工）──

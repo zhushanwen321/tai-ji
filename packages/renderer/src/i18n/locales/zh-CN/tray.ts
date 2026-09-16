@@ -52,8 +52,6 @@ export default {
     alreadyEnded: '任务已结束',
     cancelFailed: '取消子代理失败：{msg}',
     /** 行内操作（工作流） */
-    pause: '暂停',
-    resume: '恢复',
     abort: '终止',
     abortConfirm: '确认终止？',
     workflowOpFailed: '工作流操作失败：{msg}',
