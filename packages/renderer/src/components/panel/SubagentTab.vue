@@ -188,7 +188,7 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
     if (!call) return null
     return {
       agent: call.agent,
-      // model 'default' 不显示（对齐 WorkflowDetail modelDefault 语义）
+      // model 'default' 不显示（占位值不展示，语义沿用退役的侧栏工作流详情视图）
       meta: call.model && call.model !== 'default' ? call.model : undefined,
     }
   }

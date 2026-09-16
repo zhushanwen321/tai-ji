@@ -13,7 +13,9 @@
  *
  * [GUI 快修⑤ GUI 侧验收] idle record（U7 冷重启 hydrateReviveBaseline 恢复的
  * turns/tokens 形态）默认可见且计数信号非零的投影面由「idle 归 active 桶」矩阵
- * 承接；列表文本渲染断言见 SubagentList.spec.ts。
+ * 承接；列表消费面（分桶视图渲染/行文本）现行承载 = composer 任务托盘
+ * `__tests__/panel/tray/tray-native-panel.test.ts`（原 Agents tab 列表 spec 随侧栏
+ * 任务 tab 退役删除，2026-09-16）。
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/lib/subagent-bucket.test.ts
  */

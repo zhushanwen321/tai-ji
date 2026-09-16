@@ -145,10 +145,13 @@ describe('U8: 组件 <template> 无新增 CJK 字符（豁免清单外）', () =
  *
  * 背景：vue-i18n message format 里 `@` 是 linked message 起始符，消息值里的字面 `@`
  * （如「调用 @subagent 工具」）会被编译器按 linked 语法解析 → 运行时 console 编译
- * 告警（2026-09-12 Gate B 真机验收在 sidebar.subagentList.emptyHint 实测）。修法 =
+ * 告警（2026-09-12 Gate B 真机验收在 `sidebar.subagentList.emptyHint` 实测）。修法 =
  * vue-i18n 字面量插值 `{'@'}` 转义（t() 输出仍为字面 @）。本守卫扫双侧全部消息
- * 字符串，剥掉合法 `{'@'}` 后仍含 `@` 即红——覆盖未来新增的任何 key，不只事故两处
- * （sidebar.subagentList.emptyHint / settings.preset.builtinExtensionHint）。
+ * 字符串，剥掉合法 `{'@'}` 后仍含 `@` 即红——覆盖未来新增的任何 key。
+ * [2026-09-16] 原事故锚二（侧栏子代理列表的空态提示键）随侧栏任务 tab 退役删除
+ * （该键的消费组件同批退役，文案承载面迁 composer 任务托盘的 `panel.tray.*`，措辞去掉了
+ * @subagent 提法）——运行时锚点收敛为下方唯一一条 `settings.preset.builtinExtensionHint`；
+ * 上位「逐文件全量扫描」用例不受影响。
  */
 describe('U9: locale 消息无裸 @（linked-message 语法冲突守卫）', () => {
   it.each(['zh-CN', 'en-US'] as const)('%s 全部消息字符串无未转义 @', (locale) => {
@@ -166,7 +169,7 @@ describe('U9: locale 消息无裸 @（linked-message 语法冲突守卫）', () 
     ).toEqual([])
   })
 
-  it('事故两 key 转义后 t() 输出含字面 @ 且编译零告警', async () => {
+  it('转义 key 转义后 t() 输出含字面 @ 且编译零告警', async () => {
     const { createI18n } = await import('vue-i18n')
     const zhCN = (await import('../../i18n/locales/zh-CN')).default
     const logs: string[] = []
@@ -174,7 +177,6 @@ describe('U9: locale 消息无裸 @（linked-message 语法冲突守卫）', () 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => logs.push(`error: ${String(args[0])}`))
     try {
       const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
-      expect(i18n.global.t('sidebar.subagentList.emptyHint')).toContain('@subagent')
       expect(i18n.global.t('settings.preset.builtinExtensionHint')).toContain('@zhushanwen/pi-agent-ext')
       expect(logs).toEqual([])
     } finally {

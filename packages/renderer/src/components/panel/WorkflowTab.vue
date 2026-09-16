@@ -3,7 +3,9 @@
 
   形态对齐 demo.html + spec §11：header（workflow 名 + 暂停/中止）+ phase 分组 +
   agent call 行（status 圆点 + agent + slug + tokens/turns/duration + running/pending）。
-  phase 分组逻辑复用自 sidebar WorkflowDetail.vue（同数据结构 WorkflowRunRecord.agentCalls）。
+  phase 分组逻辑现居本组件（同数据结构 WorkflowRunRecord.agentCalls）——原实现侧
+  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收口本 tab，
+  分组/dot/format 逻辑以本文件为唯一在役出处。
 
   agent call 本质是 subagent（D4）：点 agent call 行 → openSubagent({ virtualId: agentCallVirtualId(call.sessionId),
   enteredFrom:'workflow' }) 切到 subagent tab（D4：从 workflow 进入显返回按钮）。
@@ -65,7 +67,7 @@
         </div>
       </div>
 
-      <!-- agent call 列表（按 phase 分组），复用 WorkflowDetail 的分组/dot/format 逻辑 -->
+      <!-- agent call 列表（按 phase 分组），分组/dot/format 逻辑见下方 phaseGroups -->
       <ScrollArea class="min-h-0 flex-1">
         <div class="flex flex-col px-1.5 pb-2">
           <div v-for="group in phaseGroups" :key="group.phase" class="mb-2">
@@ -130,7 +132,7 @@ import { workflowAction } from '@taiji/core/transport/api/domains/session'
 import { useToast } from '@/composables/useToast'
 import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 
-/** token 数超过此阈值显示 k 单位（复用 WorkflowDetail 阈值） */
+/** token 数超过此阈值显示 k 单位（沿用自退役的侧栏工作流详情视图同值） */
 const TOKEN_K_THRESHOLD = 1000
 const MS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
@@ -160,7 +162,7 @@ const workflow = computed<WorkflowRunRecord | null>(() => {
   return byName.length > 0 ? byName[byName.length - 1] : null
 })
 
-/** phase 分组 + 组内状态聚合（复用自 WorkflowDetail） */
+/** phase 分组 + 组内状态聚合（原从侧栏工作流详情视图迁入，该视图已退役） */
 interface PhaseGroup {
   phase: string
   calls: WorkflowAgentCall[]

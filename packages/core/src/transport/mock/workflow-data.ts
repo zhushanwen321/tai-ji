@@ -1,11 +1,14 @@
 /**
- * Workflow/subagent mock fixture —— E2E 验证 Flows/Agents tab 渲染 + 跟随 session 切换。
+ * Workflow/subagent mock fixture —— E2E 验证任务列表渲染（composer 任务托盘面板 /
+ * drawer workflow tab）+ 跟随 session 切换。
  *
  * 从 mock/index.ts 拆出（文件行数超 500 限制）。
+ * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言面迁至任务托盘
+ * （workflow 详情视图 2 = drawer WorkflowTab）。
  */
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
-/** Mock workflow fixture（至少 1 条含 agentCalls，供 WorkflowDetail 视图2 + agent call overlay E2E） */
+/** Mock workflow fixture（至少 1 条含 agentCalls，供托盘面板 + drawer WorkflowTab E2E） */
 export const fixtureWorkflows: WorkflowRunRecord[] = [
   {
     runId: 'wf-mock-001',
