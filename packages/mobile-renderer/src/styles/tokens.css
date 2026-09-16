@@ -72,6 +72,7 @@
    *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
   --font-scale-u: 1;
   --font-scale-mq: 1;
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
   --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
   --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
   --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
@@ -193,6 +194,7 @@
 }
 
 
+/* ============================================================
    字体大小槽位（data-font-size → --font-scale-u，D17 + v6 calc 自适应）
    store.setSystem({fontSize}) 同步 <html data-font-size>。
    映射到 --font-scale-u，驱动 --text-* calc 链路（base 14px × 档位）。

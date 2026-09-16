@@ -20,11 +20,11 @@
  * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + thinking 行接管；
  *   executingBash 瞬时行迁入（bashStart 帧驱动）；fork notice 与活动条的文档流定位顺序
  *   （活动条在前——ForkNotice 为文档流 block，按文档序自然堆叠）
- * - P5 i18n key 完整：四个行文案 key 在 zh/en locale 均定义
+ * - P5 i18n key 完整：五个文案 key（四个行文案 + 待发 chip）在 zh/en locale 均定义
  *
  * i18n：vitest 全局 setup（vitest-i18n-setup.ts）mock useI18n → t() 返回 zh-CN 文案。
- * 待发 chip 文案键（panel.message.compactingQueueChip）由并行单元在 locales 落地，本文件
- * 以「键未就绪则注入占位、就绪即让位」的方式解耦（见文件顶部注入块）。
+ * 待发 chip 文案键（panel.message.compactingQueueChip）已在 zh/en locales 落地，本文件
+ * 不做任何键注入——chip 用例按「同键同参」消费真实 locales，键缺失由 P5 断言直接判红。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts
  */
@@ -37,18 +37,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
-import zhCN from '@/i18n/locales/zh-CN'
 import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
-
-/**
- * 待发 chip 文案键注入（跨单元解耦）：`panel.message.compactingQueueChip` 由 i18n 领地的
- * 并行单元新增（本文件不得改 locales）。键未就绪时向全局 i18n mock 实际读取的 zh-CN
- * locale 对象补一个占位文案（同一模块实例，写入即生效），就绪后跳过（不覆盖真实文案）——
- * 两种状态下 chip 文案断言都有真实语义（占位态 = '待发 N'，就绪态 = locales 文案，
- * 断言按「同键同参」比对，不锁文案措辞）。
- */
-const panelMessage = zhCN.panel.message as Record<string, string>
-if (!('compactingQueueChip' in panelMessage)) panelMessage.compactingQueueChip = '待发 {count}'
 
 /** 全局 i18n mock 的 t（与组件同一消费面）：chip 文案按「同键同参」比对，不锁措辞 */
 const { t } = useI18n()
@@ -248,7 +237,7 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const chip = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
     expect(chip.exists()).toBe(true)
-    // 文案 = 同键同参解析结果（键就绪 → locales 文案；未就绪 → 本文件顶部注入的占位文案）；
+    // 文案 = 同键同参解析结果（键在 zh-CN locale 定义，完整性由 P5 断言锁死）；
     // 计数错误（如把已提交条目计入 = 4）会让两侧文案不等
     expect(chip.text()).toBe(t('panel.message.compactingQueueChip', { count: 2 }))
     // chip 形态（D3 表）：mono text-3xs + border-strong 描边（替代原副文案长句的「·」拼接）
@@ -504,15 +493,16 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 })
 
 describe('ActivityStrip · i18n key 完整（P5）', () => {
-  /** 四个行文案 key：compacting 手动/自动、bash、thinking（ActivityStrip 唯一新增消费面） */
+  /** 五个文案 key：compacting 手动/自动 + 待发 chip、bash、thinking（ActivityStrip 唯一新增消费面） */
   const KEYS: Array<[string, string, string]> = [
     ['panel.message.compressing', "compressing: '压缩中'", "compressing: 'Compacting'"],
     ['panel.message.autoCompressing', "autoCompressing: '正在自动压缩上下文'", "autoCompressing: 'Auto-compacting context…'"],
+    ['panel.message.compactingQueueChip', "compactingQueueChip: '待发 {count}'", "compactingQueueChip: '{count} queued'"],
     ['panel.message.executingBash', "executingBash: '正在执行'", "executingBash: 'Running'"],
     ['panel.message.dispatching', "dispatching: '思考中…'", "dispatching: 'Thinking…'"],
   ]
 
-  it('compressing/autoCompressing/executingBash/dispatching 在 zh/en locale 均定义', () => {
+  it('compressing/autoCompressing/compactingQueueChip/executingBash/dispatching 在 zh/en locale 均定义', () => {
     const zh = readFileSync(resolve(__dirname, '../../../../i18n/locales/zh-CN/panel.ts'), 'utf8')
     const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en-US/panel.ts'), 'utf8')
     for (const [key, zhLine, enLine] of KEYS) {
