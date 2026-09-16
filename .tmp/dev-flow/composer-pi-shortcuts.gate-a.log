@@ -43,13 +43,13 @@ stderr | src/__tests__/components/button.test.ts
    Start at  15:09:57
    Duration  48.83s (transform 30.22s, setup 103.07s, import 151.72s, tests 64.58s, environment 76.62s)
 
-JUNIT report written to /Users/zhushanwen/Code/tai-ji-workspace/feat-shortcut-follow-pi/packages/renderer/test-results/vitest-junit.xml
+JUNIT report written to <workspace>/<worktree>/packages/renderer/test-results/vitest-junit.xml
 
-> @taiji/frontend@0.10.0 typecheck /Users/zhushanwen/Code/tai-ji-workspace/feat-shortcut-follow-pi/packages/renderer
+> @taiji/frontend@0.10.0 typecheck <workspace>/<worktree>/packages/renderer
 > vue-tsc --noEmit
 
 
-> taiji@0.10.0 lint /Users/zhushanwen/Code/tai-ji-workspace/feat-shortcut-follow-pi
+> taiji@0.10.0 lint <workspace>/<worktree>
 > eslint . --max-warnings 0
 
 
@@ -69,3 +69,13 @@ core zero-change: 0 files under packages/core
 Composer.vue script setup = lines 200-486 = 287 lines (limit 300, lint-passed)
 typecheck: vue-tsc --noEmit exit 0
 lint: eslint . --max-warnings 0 exit 0 (both exit codes observed in session)
+
+== FINAL STATE RUN (design-code-sync round-1 fix, comments/docs-only changes) 2026-09-16T17:23Z ==
+command: cd packages/renderer && pnpm vitest run
+ Test Files  360 passed (360)
+      Tests  4202 passed (4202)
+   Duration  85.34s
+command: cd packages/renderer && pnpm typecheck (vue-tsc --noEmit) -> exit 0
+command: pnpm run lint (eslint . --max-warnings 0) -> exit 0
+scope: fixes in this round are comment/doc text only (zero behavioral code change);
+       4202 = 4201 from the first run above + 1 coverage test added by the review-fix batch

@@ -1,5 +1,5 @@
 # composer-pi-shortcuts 实施计划
-基线: 36a605c1e | 来源设计: docs/design/composer-pi-shortcuts.md | 日期: 2026-09-16
+基线: e69a01fa8 | 来源设计: docs/design/composer-pi-shortcuts.md | 日期: 2026-09-16
 
 ## 0 章节映射
 | 内容 | 设计文档实际位置 |
@@ -28,7 +28,7 @@
 
 **合并理由**（dag-authoring 合并判据）：设计 §5 的 U1-U4 同属 renderer panel 单领地、总量 <400 行、相互依赖线性（keydown 接线与 shell 组装都消费 U1 的接口）、subagent 派发成本远大于单元体量——拆 4 个单元产生 3 次纯派发开销与跨单元上下文重建，零并行收益。无共享契约文件需要独立根节点（deps 接口内聚在新文件内导出），U1 即 DAG 根。
 
-**行数红线**：`Composer.vue` `<script setup>` 当前 285/300（vue_rules_checker MAX_SCRIPT_LINES=300 硬拦）。传参超 2 行时必须把组装逻辑下沉 `composer-shell.ts`，禁止顶爆红线。
+**行数红线**：`Composer.vue` `<script setup>` 上限 300（vue_rules_checker MAX_SCRIPT_LINES 硬拦；checker 计数口径 = script 体排除标签行）。计划期 283（基线 e69a01fa8）、交付后 285。传参超 2 行时必须把组装逻辑下沉 `composer-shell.ts`，禁止顶爆红线。
 
 **行为规格唯一来源**：设计文档 §3.3 键位表 + 决策 6/7/8/9 + §3.4 守卫矩阵 + §3.5 错误规格表。实现与设计冲突时以设计为准；发现设计缺陷走偏差三分类（§5 合理偏差登记表 / 打回修 / 主 agent 改文档）。
 
@@ -82,7 +82,7 @@ graph TD
 
 | # | 场景 | 结果 | 证据指针 |
 |---|------|------|----------|
-| A1 | L1 守卫矩阵+循环取值+意图生命周期 | pass | 44+37 用例全绿；Gate A 全量 4202/4202（composer-pi-shortcuts.gate-a.log） |
+| A1 | L1 守卫矩阵+循环取值+意图生命周期 | pass | 44+37 用例全绿；Gate A 全量 4202/4202（composer-pi-shortcuts.gate-a.log：交付时 4201/4201 段 + 阶段 6 终态 4202/4202 段） |
 | A8 | visual 轨像素无回归 | pass | 2/2（visual-chromium 含 composer.spec.ts，mock 轨零 token） |
 | A2-A4 | 核心组 S1/S2/S4/S10/S11 | pass | a2a4-report.md（5/5；S11 原生剪切以 execCommand 同层通路取证，真实人手按键留人工复核） |
 | A5 | 守卫组 S5/S6/S7/S12/S13 | pass | a5-report.md（5/5；决策 7 机制证据 = window 探针 0 次收到 ctrl+shift+p；决策 8/9 = 26 keydown 单步 + 焦点保持） |
@@ -104,11 +104,11 @@ graph TD
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| U1 | committed | 0 | dev sa-c9a60dd1 交付，主 agent 硬核验通过：diff 8 文件 ⊆ 领地、vitest 两目标文件 80/80 + vue-tsc exit 0 重跑与证据一致、Composer.vue script setup 287/300；V1-V5 全过，偏差 4 条登记 §5 |
+| U1 | committed | 0 | dev sa-c9a60dd1 交付，主 agent 硬核验通过（以下为交付时快照）：diff 8 文件 ⊆ 领地、vitest 两目标文件 80/80 + vue-tsc exit 0 重跑与证据一致、Composer.vue script setup 287 行（含标签口径；checker 口径 285）；V1-V5 全过，偏差 4 条登记 §5。修复批次后终态 81/81（44+37），见 §7 变更历史 |
 
 ## 7 残留风险与变更历史
 
-- **风险 R1**：`useComposerKeydown` 的 deps 在 `Composer.vue:418` 组装（285/300 贴线）——传参必须极简；若引发行数超限，下沉 composer-shell（领地内已含该文件，无需扩领地）。
+- **风险 R1**：`useComposerKeydown` 的 deps 在 `Composer.vue:419` 组装（现 285/300，checker 口径）——传参必须极简；若引发行数超限，下沉 composer-shell（领地内已含该文件，无需扩领地）。
 - **风险 R2**：`isStaging` 信号源 = composer-shell 的 `staging.activeStaging`（设计 §5 U1 deps 清单已列）——若 staging 结构暴露面不足，允许在 composer-shell 内派生只读 computed，禁止改 core（core 不在领地）。
 - **风险 R3**：subagent 环境间歇 exit 143（本会话 tech-design 复审阶段连发）——dev 派发失败时用 action:message 续跑恢复（上下文保留），连续 2 次失败改串行单发。
 - **残留 R4（阶段 3 审查登记）**：设计 §6 INFO 交接的 core `model-thinking.ts`「RPC + 乐观更新」注释残留 5 处（:88,:90,:331,:366,:450）未清扫——core 不在本流水线领地（设计 §4 renderer-only 裁决），随下次 core 触碰批次顺带清扫，禁止为清扫单独扩领地。
@@ -116,8 +116,9 @@ graph TD
 ### 变更历史
 - 2026-09-16 计划创建（设计 docs/design/composer-pi-shortcuts.md 三审 0 must-fix 收敛后）。
 - 2026-09-16 中断恢复校准：以 git log 与工作区实物核实 U1 领地零实物（前任 dev sa-e3de5ce0 跨会话不可达、无产出），按 execute.md 接替程序补派新 dev（sa-c9a60dd1），轮次 0 重计。
-- 2026-09-16 U1 交付核验通过并 commit（diff 8 文件 ⊆ 领地；vitest 两目标 80/80 + vue-tsc 0 重跑一致；script setup 287/300）。
+- 2026-09-16 U1 交付核验通过并 commit（diff 8 文件 ⊆ 领地；vitest 两目标 80/80 + vue-tsc 0 重跑一致；script setup 287 行含标签 / checker 口径 285）。
 - 2026-09-16 阶段 3 一致性审查 + Gate A（单 reviewer 合并承载）：Gate A 四项全绿（renderer 全量 4201/4201、typecheck 0、根 lint 0、core 零改动；绕过扫描零命中；日志 .tmp/dev-flow/composer-pi-shortcuts.gate-a.log）；机制层逐项核实一致（链序/决策 7/决策 8 五清除/起点对称/§3.5 逐行/G2 同入口）。结论：unreasonable 2 low（COMPOSER_ACTION_KEYS 锚点未落地→派修复批次对齐设计；core 注释残留→R4 登记）；doc_errors 2（S6 冒号笔误、§3.4 landing×ctrl+x 措辞）已由主 agent 修正设计文档；coverage 补测 1 条（选区×ctrl+p 触发）并入同批修复。
 - 2026-09-16 审查清零 commit（阶段 5 入口门标记）：修复批次 R1 核验通过（diff 2 文件 ⊆ 领地、81/81 + vue-tsc 0 重跑一致、主 agent 定向复审 diff 逐行通过——常量查表等价改写零语义漂移、新用例真实 DOM 断言）；设计文档 2 处 doc_errors 修正同 commit。Gate A 最终态全绿：renderer 全量 4202/4202（+1 补测用例）、根 lint exit 0、vue-tsc exit 0、core 零改动。
 - 2026-09-16 阶段 5 端到端验收完成：A1 → A8 → A2-A4 核心组 → A5 守卫组 → A6+A7 末组依次通过；13 场景 12 pass + 1 blocked（S9 环境不可构造，L1 已覆盖）+ 0 fail。剧本分流：全部 L4 场景判一次性（本设计特有键盘交互验证），产物落 `.tmp/dev-flow/composer-pi-shortcuts.acceptance/`（3 份报告 md 随收尾 commit 入库，截图/console log 留盘不入库）；无可复用 e2e spec 沉淀——回归防线主体为 L1 单测矩阵（设计 §4 裁决）。
 - 2026-09-16 收尾检查：功能分级同步（docs/FEATURE-PRIORITIES.md §4「快捷键与 side drawer」行并入 composer 快捷键；P2 依据 = 键盘入口挂掉后 UI 点选通路无损，模型/档位能力本身仍 P0）；文档资产对照 8 项，仅 FEATURE-PRIORITIES 触发，其余零同步。
+- 2026-09-16 阶段 6 design-code-sync 第 1 轮（终态全量审查，基线 c20b379b1）：11 条 findings（2 must-fix / 5 suggestion / 4 info；零 contested、零 code-right）全部当轮修复。must-fix：基线 SHA 悬空（36a605c1e → e69a01fa8，前者为 rebase 前旧 SHA 不可达）、A1 证据指针与日志不符（gate-a.log 追加终态段后指针改为双段口径）；其余：设计文档行数口径 299 → 285 ×2（含 §3.2 决策 1 C 行）、§3.4 事件拦截补选区例外（§3.3 决策 7 同模式涟漪一并收口）、§2.2 core 锚点 :78 → :53-58、决策 8 机制归属（runtime replicated-state markDirty）、§5「瞬态 ref」→「瞬态变量」、impl-plan R1 行号 418 → 419 与状态表快照标注、gate-a.log 本机绝对路径清理（规则 22）。核验：5 文件 diff 逐行 ⊆ 领地（注释/文档文本，零行为代码改动）、终态全量 4202/4202 + vue-tsc exit 0 + lint exit 0。

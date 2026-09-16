@@ -6,12 +6,15 @@
  * 直接注入 fake deps 单测返回的 handler。断言到依赖调用层面（哪个 dep 被调/未被调 +
  * preventDefault 次数），非「不抛错」式弱断言。
  *
- * 覆盖矩阵（与源文件头部分发语义逐条对应，u5b D6 改造后）：
+ * 覆盖矩阵（与源文件头部分发语义逐条对应，u5b D6 + composer-pi-shortcuts U1② 改造后）：
  *   bare-arrow：裸 ↑/↓ → preventDefault + moveCaretVertical；moved 不翻历史；
  *   at-edge ↑/↓ 翻历史；修饰键 + ↑/↓ 放行原生。
  *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ steer 路由行 → onFollowUp；
  *   Alt+⏎ defer/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收口在
  *   core dispatch/send，keydown 层不分流）；⇧⏎ 放行换行。
+ *   动作表接线（composer-pi-shortcuts）：链序（动作表先于 staging Esc）、消费短路（命中
+ *   返回 true → 链终止）、未命中放行（返回 false → 既有段照常触达）、浮层未消费仍咨询
+ *   （cmdOpen 入口守卫归动作表自判）、IME 段先行（组合中动作表不被咨询）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick, ref } from 'vue'
