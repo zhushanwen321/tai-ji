@@ -48,6 +48,12 @@ export default {
     thinkingHeader: '## Thinking',
     expand: 'Expand',
     collapse: 'Collapse',
+    // [system-notice-rendering-upgrade U3] scroll-box info bar + expand button (consumed by
+    // BlockScrollBox, U7): line range carries the unit word ('{from}–{to} of {total} lines');
+    // the expand state gets a dedicated "Expand all" (the bare expand key lacks "all" semantics;
+    // the collapsed state reuses collapse, no new key)
+    blockScrollLines: '{from}–{to} of {total} lines',
+    blockScrollExpandAll: 'Expand all',
     thinkingBlock: 'Thinking',
     imagePlaceholder: 'Image cache full',
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
@@ -67,6 +73,9 @@ export default {
     autoCompressing: 'Auto-compacting context…',
     // [compact-defer-composer-queue u1] compacting band sub-copy (consumed by u3; key added by u1)
     compactingFlushHint: 'Will send {count} queued message(s) when done',
+    // [system-notice-rendering-upgrade U3] compacting "N queued" chip (consumed by ActivityStrip, D4;
+    // long sub-copy becomes a chip, count semantics unchanged)
+    compactingQueueChip: '{count} queued',
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
@@ -81,8 +90,10 @@ export default {
     railInProgress: 'in progress…',
     startConversation: 'Start a conversation, or select a session from the left',
     scrollToBottom: 'Scroll to bottom',
-    compacted: 'Context compacted{tokens}',
-    compactedTokens: ' ({tokens} tokens)',
+    // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
+    // phrase, tokens move out to the right-pinned mono meta (compactedTokens drops parentheses)
+    compacted: 'Context compacted',
+    compactedTokens: '{tokens} tokens',
     branchCreated: 'Branch created (from {from})',
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
@@ -99,8 +110,15 @@ export default {
     bashNoContext: 'no context',
     bashCancel: 'Cancel',
     bashUnknownCommand: '(unknown command)',
+    // [system-notice-rendering-upgrade U3] "background" chip of the structured background-bash row (D2)
+    bashBackgroundChip: 'background',
     // [W4 turn-attribution] bg-notify trigger turn origin row (Turn.vue) + executing-bash transient row prefix (MessageStream.vue)
     turnTriggerBgNotify: 'Background task finished · resumed',
+    // [system-notice-rendering-upgrade U3] boundary row splits into main/sub copies (D5, consumed by
+    // U6): count main copy + "resumed" sub copy. No leading dot in the value — the separator is
+    // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
+    turnTriggerBgNotifySummary: '{count} background task(s) completed',
+    turnTriggerBgNotifyContinued: 'resumed',
     executingBash: 'Running',
     // [premature-timeout] recovery guidance for idle-timeout premature close (Turn.vue, docs/design/timeout-streaming-ui-idle.md §4.2;
     // no hardcoded threshold — user-adjustable, a literal would drift)
