@@ -11,7 +11,19 @@
  * getHistory 返回类型用内联结构（{ messages; truncated; loadedTurns; totalTurnsEstimate }），
  * 不依赖 chat 域的 HistoryResult（保持 core 平台无关）。
  */
-import type { Message, SegmentsMetadataEntry, ServerMessageUnion } from '@taiji/shared'
+import type { Message, SegmentsMetadataEntry, ServerMessageMap, ServerMessageUnion } from '@taiji/shared'
+
+/**
+ * delivery DTO 的结构派生别名（投递所有权内核 D5，u-contracts 契约）。
+ *
+ * 为什么派生而非命名 import：u-contracts 新类型暂不可经 shared 根入口命名 import
+ * （根入口为显式白名单 re-export——实施计划残留风险 #8，收编动作归属 u3a 领地）；
+ * deep import 被 shared exports map 挡。ServerMessageMap 已导出且含全部 delivery 键，
+ * 索引派生与源类型零漂移（u3a 收编白名单后可换回直接命名 import）。
+ */
+export type DeliverySubmitReply = ServerMessageMap['delivery.submit']
+/** session.delivery 帧条目（D5）：{clientUuid, preview, state, lane}。 */
+export type DeliveryFrameEntry = ServerMessageMap['session.delivery']['entries'][number]
 
 /**
  * chat 域后端操作端口。
@@ -27,6 +39,19 @@ export interface ChatApiPort {
    * 不传时 RPC payload 不带 clientUuid 键（向后兼容）。
    */
   send(sessionId: string, promptText: string, options?: { clientUuid?: string }): Promise<void>
+  /**
+   * 统一提交入口（delivery.submit，投递所有权内核 D1/D5）：乐观气泡后一律走本 RPC，
+   * lane（direct/steer/queued）由 runtime 内核判定——renderer 只提交不判定。clientUuid =
+   * 乐观气泡 id（appendUser 产物 `u-<uuid>`），内核条目 id + 出站裸标记身份源（D2）+
+   * resync 判重锚（D5②）。reply 携带初始 lane/条目态（受理确认）；权威状态演进经
+   * session.delivery 状态帧，不经过本返回值驱动 UI。旧 send 保留至 u5 协议退役。
+   */
+  submitDelivery(
+    sessionId: string,
+    content: string,
+    clientUuid: string,
+    images?: Array<{ data: string; mimeType: string }>,
+  ): Promise<DeliverySubmitReply>
   /**
    * subagent 定向消息 / 生命周期操作（session.subagentAction RPC，composer 四符号 `@` 发送分流）。
    * 契约对齐 renderer api/domains/session.subagentAction（U5 扩签名）：action='message' 带

@@ -13,11 +13,11 @@
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/store.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { effectScope, effect, toRaw } from 'vue'
+import { effectScope, effect } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
-import { textToSegments, segmentsToText } from '@taiji/shared'
+import { textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { replayEntries } from '../apply-entry'
 
@@ -496,21 +496,24 @@ describe('createChatStore factory', () => {
       expect(liveMsgs.map(strip)).toEqual(reloadState.messages.map(strip))
     })
 
-    it('steer 投递（queue_update drain）后 user 气泡进消息流且 segments 完整（用户可见行为）', () => {
-      const sid = 's-w2-steer'
+    // [投递所有权内核 u3b / D7] 前身用例「steer 投递（queue_update drain）后 user 气泡进消息流
+    // 且 segments 完整（用户可见行为）」已迁移：queue_update 帧降级为内核内部回执，不再直驱
+    // 对话流（D7 队列区数据源 = session.delivery 状态帧单一源），其显示链（submit 乐观气泡 →
+    // session.delivery 帧 morph → message_end 标记回执按原段回填）编排在 useChat 层——用户可见
+    // 行为断言（skill 段引用恒等 + segmentsToText 保真，原判据原样保留）迁至 useChat.test.ts
+    // 「送达回执 → 按序入流」用例；等价性维度见 apply-entry-equivalence.test.ts E5a/E5c。
+    // 此处保留退役锁断言（防无设计依据地复活该驱动链）。
+    it('[u3b/D7 退役锁] queue_update 帧不再驱动 ref 气泡（队列区数据源 = session.delivery 状态帧单一源）', () => {
+      const sid = 's-w2-steer-retired'
       const segs: Segment[] = [{ type: 'skill', name: 'deploy' }, { type: 'text', text: ' --prod' }]
       sut.store.pushPending(sid, segs, 'steer')
-      // pi 入队（全量数组，展开后文本 ≠ 原文）→ 投递（数组清空）：countDrained N=1 → FIFO 取出
+      // pi 入队帧 + drain 帧（前身腿 1 的投递证据链，逐字节保留原形态）：退役后两帧都不再
+      // 产生 ref 气泡、也不再消费 pendingBuffer
       sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: ['skill deploy 展开后全文'], pendingMessageCount: 1 } } as ServerMessage)
       sut.store.applyMessageEvent(sid, { type: 'message.queue_update', payload: { sessionId: sid, steering: [], pendingMessageCount: 0 } } as ServerMessage)
-      const msgs = sut.store.getMessages(sid)
-      expect(msgs).toHaveLength(1)
-      expect(msgs[0].role).toBe('user')
-      expect(msgs[0].status).toBe('complete')
-      // 引用断言：drainN 从深响应式 pendingBuffer 取出的 segments 是 reactive Proxy，
-      // toRaw 解回原引用（与 pending-drain-fifo.test.ts 同判据——FIFO 取最早的精确判据）
-      expect(toRaw(msgs[0].content)).toBe(segs)
-      expect(segmentsToText(msgs[0].content as Segment[])).toBe('<taiji-skill name="deploy"/> --prod')
+      expect(sut.store.getMessages(sid)).toHaveLength(0)
+      // pendingBuffer 是 store 存量分区（退役归 u5）：帧不再 drainN 消费它
+      expect(sut.store.pendingBuffer.value.get(sid) ?? []).toHaveLength(1)
     })
   })
 
@@ -874,13 +877,13 @@ describe('createChatStore factory', () => {
       const s2 = 's2'
       // s1：streaming assistant（messages 分区来源的候选）
       sut.store.setMessages(s1, [userMsg('u1'), streamingAssistant('a1', { content: '生成中' })])
-      // s2：无消息实体、仅 retry/queue 瞬态（瞬态 Map 来源的候选——只遍历 messages 会漏）
+      // s2：无消息实体、仅 retry/compacting 瞬态（瞬态 Map 来源的候选——只遍历 messages 会漏）
       sut.store.applyMessageEvent(s2, msg(s2, 'message.auto_retry_start', { attempt: 1 }))
-      sut.store.applyMessageEvent(s2, msg(s2, 'message.queue_update', { steering: ['q1'] }))
+      // [u3b/D7] 原 queue_update 写 queueStates 的候选来源已退役（handler 删除，无生产写方）——
+      // 瞬态候选维度由 retryStates + compactingSessions 承担，断言面不缩水。
       sut.store.setOccupancy(s2, { turn: 'idle', compacting: true, bash: false })
       expect(sut.store.isGenerating(s1)).toBe(true)
       expect(sut.store.getRetryState(s2)).toBeDefined()
-      expect(sut.store.getQueueState(s2)).toBeDefined()
       expect(sut.store.isCompacting(s2)).toBe(true)
 
       sut.store.finalizeAllStreaming('disconnect')
@@ -888,9 +891,9 @@ describe('createChatStore factory', () => {
       // streaming 实体收口为 error（disconnect 属 error 类 reason）→ isGenerating 复位
       expect(sut.store.getMessages(s1)[1].status).toBe('error')
       expect(sut.store.isGenerating(s1)).toBe(false)
-      // 独立瞬态（retry/queue/compacting）清空——clearIndependentTransient 断连兜底
+      // 独立瞬态（retry/compacting）清空——clearIndependentTransient 断连兜底
+      // （queueStates 维度已随 D7 退役，分区/方法收尾归 u5）
       expect(sut.store.getRetryState(s2)).toBeUndefined()
-      expect(sut.store.getQueueState(s2)).toBeUndefined()
       expect(sut.store.isCompacting(s2)).toBe(false)
     })
 
@@ -930,16 +933,18 @@ describe('createChatStore factory', () => {
       expect(sut.store.isCompacting(sid)).toBe(false)
     })
 
-    it('清 retryStates / queueStates（经 applyMessageEvent 写入后）', () => {
+    // [u3b/D7 裁决] 前身「清 retryStates / queueStates（经 applyMessageEvent 写入后）」的
+    // queueStates 维度已删：快照唯一写方（message.queue_update handler）随 D7 退役（队列区
+    // 数据源 = session.delivery 状态帧），经 applyMessageEvent 无法再构造该态；分区与方法的
+    // 最终退役归 u5（store.ts 不在 u3b 领地）。retryStates 维度保留（其写方 message.auto_retry_*
+    // 未退役）。
+    it('清 retryStates（经 applyMessageEvent 写入后）', () => {
       const sid = 's1'
       sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_start', { attempt: 1, maxAttempts: 3 }))
-      sut.store.applyMessageEvent(sid, msg(sid, 'message.queue_update', { steering: ['pending-steer'] }))
       expect(sut.store.getRetryState(sid)).toBeDefined()
-      expect(sut.store.getQueueState(sid)).toBeDefined()
 
       sut.store.disposeSession(sid)
       expect(sut.store.getRetryState(sid)).toBeUndefined()
-      expect(sut.store.getQueueState(sid)).toBeUndefined()
     })
 
     it('TC5: 清 pendingBuffer（与 queueStates 对称）', () => {
@@ -952,19 +957,11 @@ describe('createChatStore factory', () => {
     })
   })
 
-  describe('clearQueueState（session-dead G1：forceQuit 后清 pi 快照展示态）', () => {
-    it('清指定 session 的 queueStates 快照，其他 session 不受影响', () => {
-      sut.store.applyMessageEvent('sq-1', msg('sq-1', 'message.queue_update', { steering: ['pending-steer'] }))
-      sut.store.applyMessageEvent('sq-2', msg('sq-2', 'message.queue_update', { followUp: ['pending-follow-up'] }))
-      expect(sut.store.getQueueState('sq-1')).toBeDefined()
-      expect(sut.store.getQueueState('sq-2')).toBeDefined()
-
-      sut.store.clearQueueState('sq-1')
-
-      expect(sut.store.getQueueState('sq-1')).toBeUndefined()
-      expect(sut.store.getQueueState('sq-2')).toBeDefined()
-    })
-
+  // [u3b/D7 裁决] 前身用例「清指定 session 的 queueStates 快照，其他 session 不受影响」已删：
+  // 快照唯一写方（message.queue_update handler）随 D7 退役（队列区数据源 = session.delivery
+  // 状态帧），经 applyMessageEvent 无法再构造该态——clearQueueState 方法与其调用面
+  //（useChat 转发 / renderer forceQuit）保留至 u5 收口，此处保留其实际可测行为面。
+  describe('clearQueueState（[D7 注记] 快照写方已随 queue_update handler 退役；分区/API 收尾归 u5）', () => {
     it('无快照 session 幂等 no-op（forceQuit 空队列路径）', () => {
       expect(sut.store.getQueueState('sq-none')).toBeUndefined()
       expect(() => sut.store.clearQueueState('sq-none')).not.toThrow()

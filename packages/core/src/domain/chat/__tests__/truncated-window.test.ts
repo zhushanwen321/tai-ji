@@ -43,6 +43,7 @@ function makeFixture() {
   const chatStore = scope.run(() => createChatStore())!
   const chatApi = {
     send: vi.fn().mockResolvedValue(undefined),
+    submitDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }),
     subagentAction: vi.fn().mockResolvedValue(undefined),
     steer: vi.fn().mockResolvedValue(undefined),
     followUp: vi.fn().mockResolvedValue(undefined),
@@ -60,13 +61,6 @@ function makeFixture() {
     getSessionStore: () => ({ applySnapshot: vi.fn(), revive: vi.fn() }),
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
-    getCompactQueue: () => ({
-      flush: vi.fn().mockResolvedValue(true),
-      enqueue: vi.fn(),
-      peek: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      confirmDelivery: vi.fn(() => false),
-    }),
   }
   const useChat = scope.run(() => createUseChat(deps))!
   return {

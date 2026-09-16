@@ -142,9 +142,9 @@ graph TD
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u-contracts | committed | 1 | commit 3ff81b8f5 之后的流转 commit；两包 typecheck 绿 + session-delivery 73 测试全绿（主 agent 复跑证实） |
-| u1 | pending | 0 | - |
-| u2 | pending | 0 | - |
-| u3b | pending | 0 | - |
+| u1 | committed | 1 | 内核 v2 + 129 测试全绿（56 新增）+ typecheck 绿；两段式 cancel in-flight、confirmDelivered 接受 queued（D3② rebuild/竞态事实优先）、deliveredWindow:0 bug 修复；偏差见变更历史 |
+| u2 | pending | 1 | 首轮派发（agent_908692ab）因 5h 套餐额度耗尽中断（重置 2026-09-16 18:46:46）：工作区零产出（packages/runtime 无任何改动），整单元重派 |
+| u3b | pending | 1 | 首轮派发（agent_b6ca9129）因同一额度中断：**部分工作保留在工作区未提交**（core 22 文件，含 4 个旧腿测试文件删除 + 新增 effects-delivery-receipt.test.ts）；typecheck 495 = 基线零扩大；core 全量测试 7 failed / 2025 passed——失败全部为 queue_update→queueStates 旧腿断言未迁移（store.test.ts ×4、apply-entry-equivalence.test.ts ×3）；走接替程序续作 |
 | u3a | pending | 0 | - |
 | u4 | pending | 0 | - |
 | u3c | pending | 0 | - |
@@ -165,3 +165,7 @@ graph TD
 **变更历史**：
 - 2026-09-16：计划首版（基于设计 v4 审查通过版）。S3 拆分为 u3a/u3b/u3c（≤5 文件判据）；S5 集中收口登记偏差 D-1。
 - 2026-09-16：u-contracts committed。偏差 D-2/D-3/D-4 登记；残留风险 #7（core 存量红 + u3b 验收口径调整）、#8（index.ts 收编归属：u1 领地 + session-delivery/src/index.ts，u3a 领地 + shared/src/index.ts）。
+- 2026-09-16：u1 committed。偏差 D-5（D9⑤ 落地更新 8 个既有用例口径断言）、D-6（状态机两处实施扩展：confirmDelivered 接受 queued 态、cancel in-flight 两段式）登记；eslint max-lines 2 warnings 为 v1 存量类别放大，u5 收口裁决。
+- 2026-09-16 17:0x：u2/u3b 并行派发期间 5h 套餐额度耗尽（限额 18:46:46 重置），两 agent 中断。主 agent 现场核验：u2 零产出；u3b 留下未完工的部分工作区改动（详见状态表证据指针）。处置 = 落盘 quota-wait 状态 + 定时额度恢复后接续（不丢 u3b 已有工作，走接替程序；u2 重派）。接替 dev 须完成 u3b 剩余项：7 个旧腿测试迁移/退役（apply-entry-equivalence E5a/E5b/E5c 属 live ≡ reload 等价性守卫——项目规则 9 的历史资产，迁移须保持断言强度，不得弱化删除）、api-port.ts 领地外改动必要性申报（deviations）、检查点 2 staging grep、core 全量测试绿 + typecheck 错误集零扩大（基线 495）。
+- 2026-09-16 17:2x：额度提前恢复（用户确认），定时调度删除，立即续跑——u3b 接替 dev（agent_6164d889）与 u2 重派（agent_78a639f5）已并行后台派发。
+- 2026-09-16 20:25：两 agent 运行约 90 分钟后被 provider rate limit 掐断（非额度、非单元质量问题）。主 agent 现场核验：u2 留下实质进展（rpc-client clearQueue + registry 重写 1044 行：Reconciler 六触发/三分处置/hasPendingMessages 真值化/onSettled 接线），缺口 = typecheck 1 错（submit 误写 async 与接口同步受理口径冲突）+ dispatcher/event-adapter 未动 + 探针与增量单测未落；u3b 续作零推进（core 仍 7 failed / 2025 passed，与开工前一致）。处置 = 以 SendMessage 唤醒两 agent 带上下文续跑（附实测现状与精准缺口清单与建议顺序），不新起 agent。

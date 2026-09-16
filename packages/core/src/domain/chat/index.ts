@@ -21,10 +21,14 @@ export * from './bash-effects'
 export * from './effect-types'
 export * from './truncate-tool-output'
 export { dispatchMessageEvent } from './effects/registry'
-// [session-occupancy u4a] message_end(user) 三分支 ① 机制（defer 队列 provider 注入点）
-export { setCompactQueueProviderForEffects, resetCompactQueueProviderForEffectsForTest } from './effects/user-delivery'
-// [簇 A2] defer flush 投递确认标记正则（SSOT = apply-entry-convert，显示层剥标记 import 用）
-export { DEFER_FLUSH_MARKER_RE } from './apply-entry-convert'
+// [投递所有权内核 u3b] session.delivery 投影消费口（D7——队列区/气泡 morph 单一数据源，
+// u3c QueueBubble 单源化消费）+ 送达回执标记正则（显示层剥标记 import 用）
+export {
+  getDeliveryProjection,
+  getDeliveryProjectionRef,
+  DEFER_FLUSH_MARKER_RE,
+} from './effects/user-delivery'
+export type { DeliveryFrameEntry, DeliverySubmitReply } from './api-port'
 export type { CompactQueueLike, CompactQueueEntrySnapshot } from './useChat'
 export { createChatStore, DEFAULT_STREAMING_IDLE_TIMEOUT_MS, STREAMING_IDLE_TIMEOUT_MIN_MS, STREAMING_IDLE_TIMEOUT_MAX_MS } from './store'
 
@@ -43,9 +47,8 @@ export * from './summarize-turn'
 export * from './trace-window'
 
 export { createUseChat, ensureStreamSubscription, invalidateStreamSubscription, resetChatModuleStateForTest } from './useChat'
-// [session-occupancy u4b] defer 队列 flush 逐条提交入口（D5.1 send/steer 等价编排）
-export { submitQueuedEntry } from './useChat'
-export type { UseChatDeps, EnsureStreamSubDeps, SubmitQueuedEntryDeps, SessionStoreLike } from './useChat'
+// [投递所有权内核 u3b] submitQueuedEntry / SubmitQueuedEntryDeps 已随 defer flush 退役摘除
+export type { UseChatDeps, EnsureStreamSubDeps, SessionStoreLike } from './useChat'
 // [u4d-truncated-ui] 历史预算截断窗口状态（D4：store SSOT + 响应归一；use-session 切入链消费归一函数）
 export { historyWindowFromReply } from './truncated-window'
 export type { HistoryWindow, HistoryWindowReply } from './truncated-window'

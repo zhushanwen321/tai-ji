@@ -55,13 +55,6 @@ function makeFixture(): Fixture {
     // [session-dead 第三环] warning：defer 重投熔断提示的注入面（本用例不触发）
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
-    getCompactQueue: () => ({
-      flush: vi.fn().mockResolvedValue(true),
-      enqueue: vi.fn(),
-      peek: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      confirmDelivery: vi.fn(),
-    }),
   }
   return {
     ensure: (sid) =>

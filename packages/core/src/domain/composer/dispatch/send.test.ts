@@ -1,24 +1,23 @@
 /**
- * useComposerSend 单元测试（D6 统一发送分发器，session-occupancy u5b）。
+ * useComposerSend 单元测试（u5b D6 统一分发器 → 投递所有权内核 u3b/D1 收敛统一 submit）。
  *
  * 被测对象：domain/composer/dispatch/send.ts —— Composer onSend 统一分发入口
  * （Enter / Alt+Enter / 发送按钮共用）。
- * 职责：staging > [steer 路由] > canSend 守卫 > staging.send > [defer 路由] >
- * landing > bash > /compact > send + 失败 restoreSegments 回滚。
+ * 职责：staging > canSend 守卫 > staging.send > landing > bash > /compact > send
+ * （统一 submit）+ 失败 restoreSegments 回滚。
  *
- * [u5b 改造] isCompacting dep 退役 → getSendRoute（D6 路由：direct/steer/defer）；
- * 新增 steer dep（steer 路由终端）与 hasInput dep（steer 分支空输入守卫）。
- * 三/四/五用例由 isCompacting 判定改为 defer 路由驱动；新增 steer 路由分支行为用例
- * （行 2/3 语义：turn 活跃追加当前回合——优先级倒挂消除的核心断言）。
+ * [u3b/D1 改造] getSendRoute / steer / enqueueCompact 三 deps 退役（lane 判定收归 runtime
+ * 内核，renderer 不再判定车道）：steer 路由与 defer 入队两分支删除，终端统一 deps.send
+ * （useChat.send：乐观气泡 + delivery.submit）。canSend 守卫语义收窄为「可提交」
+ * （hasInput ∧ ¬isSending——占用不再拦截，内核排队取代拦截/拒绝）；busy 期命令拒绝退役。
  *
- * 路由表六行的纯函数断言见 ./send-route.test.ts；本文件锁定分发器行为。
+ * 发送位预测表六行的纯函数断言见 ./send-route.test.ts；本文件锁定分发器行为。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
 import { computed, ref } from 'vue'
 import { useComposerSend, type ComposerSendDeps } from './send'
-import type { SendRoute } from './send-route'
 import type { BashCommandExtract } from '../types'
 import type { StagingAction, StagingConfig } from '../types'
 import type { Segment } from '@taiji/shared'
@@ -26,7 +25,6 @@ import type { Segment } from '@taiji/shared'
 interface DepsControl {
   canSend: boolean
   hasInput: boolean
-  sendRoute: SendRoute
   hasActiveStaging: boolean
   activeStagingAllowsEmpty: boolean
   variant: 'panel' | 'landing'
@@ -49,9 +47,7 @@ interface Spies {
   restoreSegments: Spy<(segments: Segment[]) => void>
   submitFirstMessage: Spy<ComposerSendDeps['flow']['submitFirstMessage']>
   send: Spy<(sessionId: string, segments: Segment[]) => Promise<void>>
-  steer: Spy<(sessionId: string, segments: Segment[]) => Promise<boolean>>
   compact: Spy<(sessionId: string, customInstructions?: string) => Promise<void>>
-  enqueueCompact: Spy<(sessionId: string, text: string, segments: Segment[]) => void>
   toastError: Spy<(msg: string) => void>
   trySendBash: Spy<(rawText: string) => Promise<boolean>>
   extractBashCommand: Spy<(text: string) => BashCommandExtract>
@@ -64,7 +60,6 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
   const ctrl: DepsControl = {
     canSend: true,
     hasInput: true,
-    sendRoute: 'direct',
     hasActiveStaging: false,
     activeStagingAllowsEmpty: false,
     variant: 'panel',
@@ -83,9 +78,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     submitFirstMessage: vi.fn(async () => {}) as unknown as Spies['submitFirstMessage'],
     send: vi.fn(async (_sessionId: string, _segments: Segment[]) => {}),
-    steer: vi.fn(async (_sessionId: string, _segments: Segment[]) => true),
     compact: vi.fn(async (_sessionId: string, _customInstructions?: string) => {}),
-    enqueueCompact: vi.fn((_sessionId: string, _text: string, _segments: Segment[]) => {}),
     toastError: vi.fn((_msg: string) => {}),
     trySendBash: vi.fn(async (_rawText: string) => ctrl.bashTryReturn),
     extractBashCommand: vi.fn((_text: string) => ctrl.bashExtract),
@@ -105,7 +98,6 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     getStagingConfig: spies.getStagingConfig,
     canSend: computed(() => ctrl.canSend),
     hasInput: computed(() => ctrl.hasInput),
-    getSendRoute: () => ctrl.sendRoute,
     draft: computed(() => ctrl.draft),
     inputRef: computed(() => ({ getSegments: spies.getSegments })) as unknown as ComposerSendDeps['inputRef'],
     sessionIdRef: computed(() => ctrl.sessionId),
@@ -120,9 +112,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     flow: { submitFirstMessage: spies.submitFirstMessage },
     localThinkingLevel: ref(ctrl.localThinkingLevel),
     send: spies.send,
-    steer: spies.steer,
     compact: spies.compact,
-    enqueueCompact: spies.enqueueCompact,
     toastError: spies.toastError,
     t: ((k: string) => k) as ComposerSendDeps['t'],
   }
@@ -130,7 +120,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
 }
 
 describe('useComposerSend.onSend', () => {
-  it('① staging 守卫拦截：canSend=false + 非 staging 活跃 → return，不调任何发送', async () => {
+  it('① 守卫拦截：canSend=false + 非 staging 活跃 → return，不调任何发送', async () => {
     const { deps, spies } = setup({ canSend: false, hasActiveStaging: false })
     await useComposerSend(deps).onSend()
     expect(spies.stagingSend).not.toHaveBeenCalled()
@@ -139,7 +129,8 @@ describe('useComposerSend.onSend', () => {
   })
 
   it('①b [GUI 快修④] blocked 不再静默：有输入被拦 → toast「占用中」反馈（区分空输入）', async () => {
-    // canSend=false 因 isBusy（hasInput=true）：双发/流式期点击发送的用户可见反馈
+    // [u3b] canSend=false 语义 = 双发锁期（isSending）——占用期发送已合法（内核排队），
+    // 守卫只剩双发锁一类「有输入被拦」形态。
     const { deps, spies } = setup({ canSend: false, hasActiveStaging: false, hasInput: true })
     await useComposerSend(deps).onSend()
     expect(spies.toastError).toHaveBeenCalledTimes(1)
@@ -163,7 +154,7 @@ describe('useComposerSend.onSend', () => {
 
   it('②b staging 活跃 + isSending=true（双发锁）→ 拦截，不调 staging.send', async () => {
     // isSending 是 staging 发送唯一忙锁：fork/handoff 发送自身置位期间禁止重入。
-    // 真实链路 isSending=true → canSend 必为 false（canSend=hasInput∧¬isBusy），mock 同组合。
+    // 真实链路 isSending=true → canSend 必为 false（canSend=hasInput∧¬isSending），mock 同组合。
     const { deps, spies } = setup({ canSend: false, hasActiveStaging: true, stagingSendReturn: true })
     ;(deps.isSending as unknown as { value: boolean }).value = true
     await useComposerSend(deps).onSend()
@@ -177,81 +168,15 @@ describe('useComposerSend.onSend', () => {
     expect(spies.stagingSend).not.toHaveBeenCalled()
   })
 
-  // ── [D6 u5b] steer 路由（行 2/3：turn 活跃 = dispatching/generating）──
+  // ── [u3b/D1] 统一 submit：车道判定退役，终端收敛 deps.send ──
 
-  it('②d steer 路由（turn=generating + 本地 busy）→ steer(sid, segments) + clearInput，不走 canSend 拦截', async () => {
-    // canSend=false（turn 活跃 → isActive → isBusy）：steer 判定先于 canSend 守卫——
-    // 优先级倒挂消除的核心行为（turn 活跃时 Enter 语义 = 追加当前回合，不被 busy 锁拦死）。
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer' })
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).toHaveBeenCalledWith('s1', SEGMENTS)
-    expect(spies.clearInput).toHaveBeenCalledTimes(1)
-    expect(spies.send).not.toHaveBeenCalled()
-    expect(spies.compact).not.toHaveBeenCalled()
-  })
-
-  it('②e steer 路由（行 3：generating + compacting）→ 仍走 steer（turn 活跃优先于 compacting 维度）', async () => {
-    // threshold turn 内压缩：D6 表行 3 steer（压缩后 turn 继续跑，steering 队列在压缩完成的
-    // 下一次 LLM 调用前投递）——不误入 defer 队列。
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer', draft: '补充：别忘了加测试' })
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).toHaveBeenCalledWith('s1', SEGMENTS)
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-  })
-
-  // ── [D2] routeSteer 失败恢复：steer 返回 false → restoreSegments 恢复完整草稿 ──
-
-  it('②j [D2] steer 返回 false（WS 断连）→ restoreSegments(SEGMENTS) 恢复草稿（text + chips 不丢）', async () => {
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer' })
-    spies.steer.mockResolvedValueOnce(false)
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).toHaveBeenCalledWith('s1', SEGMENTS)
-    expect(spies.clearInput).toHaveBeenCalledTimes(1)
-    // 失败恢复：快照的 segments 完整回滚（clearInput 已清空 DOM，不恢复即静默丢失）
-    expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
-  })
-
-  it('②k [D2] steer 返回 true → 不恢复草稿（正常投递，输入已清）', async () => {
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer' })
-    spies.steer.mockResolvedValueOnce(true)
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).toHaveBeenCalledTimes(1)
-    expect(spies.restoreSegments).not.toHaveBeenCalled()
-  })
-
-  it('②f steer 路由（本地 busy）+ 空输入 → 拦截（不调 steer 不清输入）+ [GUI 快修④] 空输入 toast 反馈', async () => {
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer', hasInput: false })
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).not.toHaveBeenCalled()
-    expect(spies.clearInput).not.toHaveBeenCalled()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendEmptyHint')
-  })
-
-  it('②g steer 路由（本地 busy）+ isSending=true（双发锁）→ 拦截 + [GUI 快修④] 占用 toast 反馈', async () => {
-    const { deps, spies } = setup({ canSend: false, sendRoute: 'steer' })
-    ;(deps.isSending as unknown as { value: boolean }).value = true
-    await useComposerSend(deps).onSend()
-    expect(spies.steer).not.toHaveBeenCalled()
-    expect(spies.clearInput).not.toHaveBeenCalled()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.sendBusy')
-  })
-
-  it('②i 投影失配窗口（route=steer + 本地 idle）→ 落 direct 流程（send 兜底，不丢输入）', async () => {
-    // 续跑 turn-start 先于 message_start 的毫秒级窗口：本地已收口（canSend=true）而投影
-    // 已 flip steer——不进 steer 分支（steer 内部 isActive 守卫会静默吞输入），落 direct
-    // 由 useChat.send B 策略/拒绝兜底自愈。分发器层断言：不丢输入、不误入 defer 队列。
-    const { deps, spies } = setup({ canSend: true, sendRoute: 'steer', draft: '失配窗口消息' })
+  it('②d RET: steer/defer 路由退役——不分车道，终端统一 send（统一 submit，D1）', async () => {
+    // 前身：sendRoute='steer' → deps.steer / sendRoute='defer' → enqueueCompact。
+    // 收敛后 onSend 不再有车道分支——调度器层不存在「按车道走不同终端」的输入。
+    const { deps, spies } = setup({ draft: '普通消息' })
     await useComposerSend(deps).onSend()
     expect(spies.send).toHaveBeenCalledWith('s1', SEGMENTS)
-    expect(spies.steer).not.toHaveBeenCalled()
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-  })
-
-  it('②h staging 活跃 + steer 路由 → staging 优先于路由（staging 提交与 occupancy 路由正交）', async () => {
-    const { deps, spies } = setup({ sendRoute: 'steer', hasActiveStaging: true, stagingSendReturn: true })
-    await useComposerSend(deps).onSend()
-    expect(spies.stagingSend).toHaveBeenCalledWith('hello', {})
-    expect(spies.steer).not.toHaveBeenCalled()
+    expect(spies.toastError).not.toHaveBeenCalled()
   })
 
   it('②i [D4-c] staging 提交载荷 = segmentsToPrompt(segments)——命令 chip 在中部时归位产物以 /cmd 开首', async () => {
@@ -259,8 +184,7 @@ describe('useComposerSend.onSend', () => {
     // staged prompt 中 /cmd 不在行首被 pi 当字面文本（命令静默失效）。
     // [轮 3 注释校正] fixture 的 draft: '任务描述/compact' 是**构造值，生产不可达**：真实
     // getText() 走 segmentsToText，产出（已归位 + 边界空格）'/compact 任务描述'。此构造值
-    // 专门锁定「判定源不得退回 draft.value」——若退回按 draft 判定，该未归位草稿不以
-    // '/compact' 起首 → 漏命中、测试红；按 segmentsToPrompt 判定才命中。
+    // 专门锁定「判定源不得退回 draft.value」。
     const midSlashSegments: Segment[] = [
       { type: 'text', text: '任务描述' },
       { type: 'slash', name: 'compact' },
@@ -277,90 +201,28 @@ describe('useComposerSend.onSend', () => {
     expect(spies.send).not.toHaveBeenCalled()
   })
 
-  // ── [D6 u5b] defer 路由（行 4/5/6：settling / compacting / bash）──
+  // ── [u3b/D1] 占用期发送 = 统一 submit 的常态路径（busy 拦截/命令拒绝退役）──
 
-  it('③ defer 路由 + `/` 前缀命令 → toastError 拒绝，不入队（命令无法延迟重放）', async () => {
-    // [D4-c] `/` 半边判定源 = segmentsToPrompt：mock segments 提供行首 slash 段。
-    const { deps, spies } = setup({ sendRoute: 'defer', draft: '/compact later' })
+  it('③ RET: 命令拒绝退役——`/` 前缀命令文本占用期照常统一 submit（与 idle 态同语义）', async () => {
+    // 前身：defer 路由对 `/` 前缀 toast commandQueuedRejected（命令无法延迟重放）。
+    // 内核化后命令文本作为普通消息提交（内核排队/入槽，pi 侧处理），与 idle 态行为对齐。
+    // 非 /compact 命令（/review）不经 compact 拦截（⑨ 系锁定）→ 终端统一 send。
+    const { deps, spies } = setup({ draft: '/review later' })
     spies.getSegments.mockReturnValue([
-      { type: 'slash', name: 'compact' },
+      { type: 'slash', name: 'review' },
       { type: 'text', text: 'later' },
     ])
     await useComposerSend(deps).onSend()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.commandQueuedRejected')
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-    expect(spies.clearInput).not.toHaveBeenCalled()
-  })
-
-  it('④ defer 路由 + `!` 前缀命令 → toastError 拒绝，不入队', async () => {
-    const { deps, spies } = setup({ sendRoute: 'defer', draft: '!ls' })
-    await useComposerSend(deps).onSend()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.commandQueuedRejected')
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-  })
-
-  it('⑤ defer 路由（settling / bash 忙）+ 普通文本 → enqueueCompact（含 segments 快照）+ clearInput', async () => {
-    // defer 泛化：settling（行 4）与 bash（行 6）与 compacting（行 5）同走入队——
-    // 路由值由 sessionPhase 派生，分发器不区分忙的来源维度。
-    // [defer segments 化] 入队携带完整 segments（getSegments 快照，MF-A 根修）——
-    // 纯文本条目的 segments = text 单段，富内容条目含 image/skill/file chip 段。
-    const { deps, spies } = setup({ sendRoute: 'defer', draft: 'queued msg' })
-    await useComposerSend(deps).onSend()
-    expect(spies.getSegments).toHaveBeenCalledTimes(1)
-    expect(spies.enqueueCompact).toHaveBeenCalledWith('s1', 'queued msg', SEGMENTS)
-    expect(spies.clearInput).toHaveBeenCalledTimes(1)
-    expect(spies.send).not.toHaveBeenCalled()
-  })
-
-  it('⑤c defer 路由 + 富内容（image/skill chip 段）→ segments 完整透传入队不丢段', async () => {
-    // MF-A 场景锁定：bash/compacting 占用期发图 + skill chip，段必须随 enqueue 走
-    //（改造前只传 draft 纯文本，chip 段被 clearInput 清掉静默丢失）。
-    const richSegments: Segment[] = [
-      { type: 'text', text: '帮我看下这个报错' },
-      { type: 'image', id: 'img-1', path: '/tmp/shot.png', fileName: 'shot.png', displayName: '截图.png' },
-      { type: 'skill', name: 'code-review' },
-    ]
-    const { deps, spies } = setup({
-      sendRoute: 'defer',
-      draft: '帮我看下这个报错',
-    })
-    spies.getSegments.mockReturnValue(richSegments)
-    await useComposerSend(deps).onSend()
-    expect(spies.enqueueCompact).toHaveBeenCalledWith('s1', '帮我看下这个报错', richSegments)
-    expect(spies.clearInput).toHaveBeenCalledTimes(1)
-  })
-
-  it('⑤d [D4-c] defer 路由 + 命令 chip 在中部 → segmentsToPrompt 归位命中拒绝', async () => {
-    // `/` 半边判定源 = segmentsToPrompt（slash 段归位提首 + 边界空格）→ 命中拒绝。
-    // [轮 3 注释校正] fixture 的 draft: '任务描述/compact' 是**构造值，生产不可达**：真实
-    // getText() 走 segmentsToText，产出 '/compact 任务描述'。此构造值锁定「判定源不得退回
-    // draft.value」——退回则未归位草稿不以 '/compact' 起首 → 漏命中、测试红。
-    const midSlashSegments: Segment[] = [
-      { type: 'text', text: '任务描述' },
-      { type: 'slash', name: 'compact' },
-    ]
-    const { deps, spies } = setup({ sendRoute: 'defer', draft: '任务描述/compact' })
-    spies.getSegments.mockReturnValue(midSlashSegments)
-    await useComposerSend(deps).onSend()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.commandQueuedRejected')
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-    expect(spies.clearInput).not.toHaveBeenCalled()
-  })
-
-  it('⑤e [D4-c] defer 路由 + `!` 半边仍读 draft.value（! 不产 chip，两源恒一致）', async () => {
-    // 裁决表：`!` 半边不迁——DOM 序 draft '!ls' 直接命中，segments 无 slash 段不影响判定。
-    const { deps, spies } = setup({ sendRoute: 'defer', draft: '!ls' })
-    await useComposerSend(deps).onSend()
-    expect(spies.toastError).toHaveBeenCalledWith('panel.composer.commandQueuedRejected')
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-  })
-
-  it('⑤b defer 路由 + landing（无 session）→ 不入队（sessionIdRef null 防御守卫）', async () => {
-    const { deps, spies } = setup({ sendRoute: 'defer', variant: 'landing', sessionId: null })
-    await useComposerSend(deps).onSend()
-    expect(spies.enqueueCompact).not.toHaveBeenCalled()
-    expect(spies.clearInput).not.toHaveBeenCalled()
+    expect(spies.send).toHaveBeenCalledTimes(1)
     expect(spies.toastError).not.toHaveBeenCalled()
+    expect(spies.clearInput).toHaveBeenCalledTimes(1)
+  })
+
+  it('④ bash 分流不动：`!` 前缀占用期仍走 trySendBash（bash/slash 守卫不动，§3.1 终态图首行）', async () => {
+    const { deps, spies } = setup({ draft: '!ls', bashTryReturn: true })
+    await useComposerSend(deps).onSend()
+    expect(spies.trySendBash).toHaveBeenCalledWith('!ls')
+    expect(spies.send).not.toHaveBeenCalled()
   })
 
   it('⑥ landing + bash empty → return，不提交', async () => {
@@ -403,8 +265,6 @@ describe('useComposerSend.onSend', () => {
     // 命令 chip 之前的正文）。
     // [轮 3 注释校正] fixture 的 draft: '整理一下/compact focus on auth' 是**构造值，生产
     // 不可达**：真实 getText() 走 segmentsToText，产出（已归位）'/compact 整理一下focus on auth'。
-    // 此构造值锁定「判定源不得退回 draft.value」——若退回按 draft 判定，该未归位草稿不以
-    // '/compact' 起首 → 漏命中、测试红。
     const midSlashSegments: Segment[] = [
       { type: 'text', text: '整理一下' },
       { type: 'slash', name: 'compact' },
@@ -422,9 +282,8 @@ describe('useComposerSend.onSend', () => {
     expect(spies.send).not.toHaveBeenCalled()
   })
 
-  it('⑨ `/compact` 命令 → compact(sessionId, undefined)', async () => {
-    // [D4-c] 判定源已迁 segmentsToPrompt：mock segments 提供对应 slash 段保持语义真实
-    //（迁移前 mock 只需 draft 一致；现 draft 与 segments 需同现同一输入）。
+  it('⑨ `/compact` 命令 → compact(sessionId, undefined)（slash 守卫不动）', async () => {
+    // [D4-c] 判定源已迁 segmentsToPrompt：mock segments 提供对应 slash 段保持语义真实。
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
     spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
     await useComposerSend(deps).onSend()
@@ -442,7 +301,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.compact).toHaveBeenCalledWith('s1', 'focus on auth')
   })
 
-  it('⑩ 普通发送 → send(sessionId, segments)', async () => {
+  it('⑩ 普通发送 → send(sessionId, segments)（统一 submit 终端）', async () => {
     const { deps, spies } = setup({ variant: 'panel', draft: 'hello' })
     await useComposerSend(deps).onSend()
     expect(spies.send).toHaveBeenCalledWith('s1', SEGMENTS)

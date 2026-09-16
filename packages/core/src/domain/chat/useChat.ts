@@ -33,17 +33,23 @@ import { collectImagesFromMessages, persistImagesNewestFirst, disposeImageCacheF
 import { createMessageCoalescer } from './delta-coalescer'
 import { getExecutingBash } from './bash-effects'
 import { toErrorMessage } from '../../utils/error-message'
-import type { EnsureStreamSubDeps, SessionStoreLike, SubmitQueuedEntryDeps, UseChatDeps } from './use-chat-types'
+import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
+import type { DeliveryFrameEntry } from './api-port'
+import {
+  replaceDeliveryProjection,
+  captureMorphSegments,
+  clearDeliveryProjection,
+  resetDeliveryProjectionForTest,
+} from './effects/user-delivery'
 
 // 类型契约原样迁 use-chat-types.ts（max-lines 行为保持抽取，纯类型零运行时）；
 // re-export 保持既有 import 路径（domain/chat/index.ts 与 __tests__ 经 './useChat'
-// 消费）零改动。
+// 消费）零改动。[u3b] SubmitQueuedEntryDeps 已随 defer flush 退役摘除。
 export type {
   CompactQueueEntrySnapshot,
   CompactQueueLike,
   EnsureStreamSubDeps,
   SessionStoreLike,
-  SubmitQueuedEntryDeps,
   UseChatDeps,
 } from './use-chat-types'
 
@@ -102,86 +108,18 @@ const coalescer = createMessageCoalescer()
 const manualCompactionState = new Map<string, boolean>()
 
 /**
- * [session-occupancy-send-closure D2] per-session 未决直发记录（sid → 本次 send 的
- * clientUuid + 入队用原文）。
- *
- * send() 在乐观插入（appendUser）时写入（editAndResend 自 A2 起同样写入，holdsInflight=false
- * 区分），供 ensureStreamSubscription 的 send.rejected handler 消歧：
- * - 记录存在 → 本编排器的直发被拒 → 回滚乐观气泡 +（holdsInflight 时）inflight 回滚 + 兜底入队；
- * - 记录不存在 → flush 重放 / 迟到帧 → 不回滚不入队（重入队会双条目双投递；flush 来源
- *   经 clientUuid 命中队列条目识别后静默，A1）。
- * payload.clientUuid 回带命中记录时为强确认（u2 落地后）；现状 runtime 未回带时以记录存在性兜底
- * 判定（WS FIFO 保证 rejected 帧先于 RPC reply 到达，故 send await resolve 后清除记录安全）。
- * 与 streamSubscriptions/manualCompactionState 同模式：模块级 Map + resetChatModuleStateForTest
- * 清理 + disposeSession 按 sid 删除（ADR-0049 全局 sid 协调器例外）。
+ * [session-occupancy-send-closure D2 → 投递所有权内核 u3b 退役] per-session 未决直发记录
+ * 已退役：唯一消费方 handleSendRejected（send.rejected handler）随「内核永远不拒绝用户消息」
+ * （D5 排队取代拒绝）整体删除。git 可追溯。
  */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：未决直发记录（流程状态，非 GUI 数据）
-const pendingDirectSends = new Map<string, { clientUuid: string; text: string; holdsInflight: boolean }>()
 
 /**
- * [簇 A1] defer 队列 flush 失败重投 timer（per-session）。
- *
- * 为什么需要：[HISTORICAL] 原始故障形态（session-dead 事故修复前）——S1 busy 拒绝后条目留队，
- * 原设计「等下一次 occupancy idle 帧重投」在拒绝转译路径不可达：runtime handlePromptFailure
- * 对 pi 的 processing 拒绝也复位 idle，那帧正是触发本次 flush 的那一帧（先于 flush 发出），
- * flush 失败后的 agent_settled 同值 idle 被幂等写去重（无变化不广播）；失败 attempt 自产的
- * dispatching→idle 帧又因 WS FIFO 先于 RPC reply 到达、被 S2 in-flight 守卫并集进当次
- * promise——其后不再有任何 idle 帧，timer 是当时唯一保证可达的重投脉冲。
- * [session-dead 2026-09-10 修复后] 该前提已失效：runtime #8 按拒绝分型，processing 拒绝不再
- * 伪造空闲（改写 generating），idle 帧重新由 agent_settled（#4）提供 → 帧驱动重投恢复可达。
- * timer 现定位 = 「idle 帧丢失」的兜底脉冲，且失败有界（见下方熔断阈值）。
- *
- * 终止性（拒绝循环行为论证）：每次重投 = 真实投递尝试，pi settling 有界（V8 探针门
- * P95 ≤ 2s）→ 界内某次成功（flush resolve true 不再 re-arm）或条目被确认/撤销清空
- *（hasPending false 早退）；[HISTORICAL] 原文「pi 活跃但持续拒绝时以 1s 有界节奏重试
- *（消息不丢优先，对齐 ADR-0047「静默 ≠ 卡死」不判死语义）」是**无上限**重试——session-dead
- * 事故证明它在「pi 持续拒绝且 occupancy 无变化」时退化为静默空转（用户零感知）。现由
- * DEFER_FLUSH_MAX_CONSECUTIVE_FAILURES 熔断：连续 N 次失败即停 timer 自驱重投 + 一次可见提示，
- * 帧驱动路径不受限（idle 帧到达照常 flush）。传输级 reject 不 arm
- *（重连后 occupancy state topic 快照回放 idle 帧照常触发，§3.5 错误规格表）。
- *
- * [D1 占用短路] fire 回调查 occupancy 投影：仍忙（bash/compacting/turn 非 idle）→ 直接
- * return，不重排 timer、不调 flush——帧驱动优先（occupancy 回 idle 帧触发现有 handler），
- * timer 只兜「idle 帧丢失」场景（上述拒绝转译路径）。小时级 bash 占用下原实现每秒空转发
- * 一次注定被拒的 send RPC。投影查不到（快照缺失——getOccupancy 无记录回落全 idle 缺省，
- * store.ts getOccupancy 契约）→ 保守走原重试路径（flush + false 再 re-arm）防死锁。
+ * [簇 A1 / session-dead 第三环 → 投递所有权内核 u3b 退役] defer 队列 flush 失败重投 timer（1s）、
+ * 连续失败熔断阈值（N=5）与 per-session 失败计数三件套已整体退役（设计 §3.1 删除面）：重投职责
+ * 由内核 backoff + settled 边沿 + 30s watchdog 三路吸收；S1 拒绝检测与 send.rejected 全链退役
+ * （内核排队取代拒绝，D5）；renderer 不再持有待投递队列（useCompactQueue 退役归 u3c）。
+ * 声明与全部读写点同批删除（零残留死状态），git 可追溯。
  */
-const DEFER_FLUSH_RETRY_DELAY_MS = 1000
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已落定登记表 §4 ⑧ 补登 2026-09-07）：flush 失败重投 timer
-//（流程状态句柄，非 GUI 数据——与下方 pendingDirectSends 同类豁免）
-const deferFlushRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-/**
- * [session-dead 第三环 / 拒绝风暴熔断] 连续 flush 失败阈值（1s 一次重投，N=5 ≈ 5s）。
- *
- * 事故链路（runtime 日志实证 90s 内 82 次拒绝，1 秒 1 次）：runtime 持续 busy 拒绝 →
- * 本文件全 reason 静默入队（toast 已退役，用户零感知）→ flush 失败后 armDeferFlushRetry
- * 排 1s timer → fire 时投影全 idle 再 flush → 再被拒 → 无上限静默重投。本阈值是熔断点。
- *
- * 只熔断「timer 自驱动重投」一条通路：occupancy 帧驱动的 flush 不受影响（帧到达仍照常
- * 投递，条目留队不丢）——见 deferFlushFailureCounts 注释。
- */
-const DEFER_FLUSH_MAX_CONSECUTIVE_FAILURES = 5
-
-/**
- * [session-dead 第三环] per-session 连续 flush 失败计数（达阈值停 timer 重投 + 一次提示）。
- *
- * per-session 语义与 deferFlushRetryTimers 对齐：异 session 的失败互不牵连（一个卡死
- * session 不静音另一个 session 的重投）。
- *
- * 计数重置：① flush 成功（submitted === true，新一轮拒绝序列从头计）；② 用户重新发送 /
- * 条目重新入队（新一轮用户意图 = 重投机制恢复可用，防历史计数永久误伤后续正常发送）。
- * 边界：重置只覆盖 core 可观测的发送/入队路径（send / editAndResend / 被拒重入队）；renderer
- * composer 的 defer 路由（dispatch/send.ts enqueueCompact，settling/compacting/bash 占用期直
- * 连入队）不经 core，不触发重置——该路径的新消息仍由 occupancy 帧驱动投递（不丢），首次
- * 成功投递即清零。
- * 清理：disposeSession 走 clearDeferFlushRetryTimer、测试隔离走 resetChatModuleStateForTest。
- *
- * 提示只给一次：仅计数恰为阈值时提示（== 而非 >=——否则后续 occupancy 帧驱动的失败每次
- * 都重复刷屏）；提示后仅不 re-arm timer，帧驱动路径照常。
- */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，与上方 deferFlushRetryTimers 同类豁免）：flush 连续失败计数
-const deferFlushFailureCounts = new Map<string, number>()
 
 /**
  * 重置 useChat 模块级状态（仅供测试隔离）。
@@ -213,16 +151,9 @@ export function resetChatModuleStateForTest(): void {
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
   // MF-1：清 manual compact 标记（测试间不 reset 会泄漏到下一用例）
   manualCompactionState.clear()
-  // D2：清未决直发记录（测试间不 reset 会把上一用例的 send 记录泄漏进下一用例的
-  // rejected handler，误触发回滚/入队分支）
-  pendingDirectSends.clear()
-  // [簇 A1] 清 flush 重投 timer（测试间不 reset 会让上一用例的 1s timer 在下一用例
-  // 中途开火，flush mock 的跨用例残留调用造成非确定性断言）
-  for (const timer of deferFlushRetryTimers.values()) clearTimeout(timer)
-  deferFlushRetryTimers.clear()
-  // [session-dead 第三环] 清连续失败计数（与 deferFlushRetryTimers 同款：残留计数会把
-  // 上一用例的失败次数带进下一用例，提前触发熔断/提示）
-  deferFlushFailureCounts.clear()
+  // [投递所有权内核 u3b] 清内核投影 + morph 段（测试间不 reset 会把上一用例的
+  // session.delivery 投影带进下一用例的回执/morph 断言）
+  resetDeliveryProjectionForTest()
   // wave:renderer-subscribe：重置 MessageBus 订阅状态（subscriptionStates 模块级 Map）。
   // 与 streamSubscriptions 同理——测试间不 reset 会泄漏到下一用例
   //（subscriptionStates 残留 → routeInbound gap 检测误判）。
@@ -238,7 +169,7 @@ export function resetChatModuleStateForTest(): void {
  * 的回滚，且其 busy→steer 路由对新 fork session 不适用。
  *
  * [TD5] deps 参数：ensureStreamSubscription 是模块级函数（非 factory 内），无法闭包拿
- * createUseChat 的 deps，故接收 EnsureStreamSubDeps（chatApi/toast/t/getCompactQueue 子集）。
+ * createUseChat 的 deps，故接收 EnsureStreamSubDeps（chatApi/toast/t 子集）。
  * renderer composables/features/useChat.ts 导出同名包装（coreEnsureStreamSubscription 别名
  * import + 注入 renderer deps），4 复用点零改动。
  */
@@ -248,141 +179,48 @@ export function resetChatModuleStateForTest(): void {
  */
 
 /**
- * occupancy 投影是否全 idle（flush 触发条件的三维半边，与 handleSessionOccupancy 的
- * 帧判定同构；无记录 = getOccupancy 缺省全 idle，与「未收到帧 = 未占用」语义一致）。
- */
-function isOccupancyFullyIdle(occupancy: { turn: string; compacting: boolean; bash: boolean }): boolean {
-  return occupancy.turn === 'idle' && !occupancy.compacting && !occupancy.bash
-}
-
-/**
- * [簇 A1] defer 队列 flush 的统一消费入口（occupancy idle 帧 / 入队时已 idle 两触发源共用）。
+ * [投递所有权内核 u3b / D7] session.delivery 帧消费（state topic 全量快照，last-value）：
+ * ① 投影整体替换（effects/user-delivery 模块级 ref，队列区/气泡 morph 的单一数据源，
+ * u3c QueueBubble 单源化消费）；② 乐观气泡 morph 编排——非 direct 车道（steer/queued）的
+ * 活跃条目（queued/in-flight/failed）命中有乐观气泡时：气泡移出对话流（truncateFrom）+
+ * 原始 segments 捕获（送达回执时按原段按序入流，不降级纯文本）+ dispatching 占位回收。
+ * direct 车道气泡保持待确认（送达回执经 message_end ① 标记匹配抵消占位，D7「既有
+ * inflightCounts 抵消机制保留服务 direct」）；delivered 条目无 morph 面（其 transcript
+ * 权威由 reducer 喂入，回执/快照两侧幂等）。
  *
- * resolve false（S1 busy 类拒绝，条目留队）→ 自排 timer 重投（注释见 deferFlushRetryTimers）；
- * reject（传输级真错误，如 WS 断连）→ toast「发送失败: {原因}」，气泡保持 pending、队列保留，
- * 恢复后 occupancy 快照回放 idle 自动重放（§3.5 错误规格表）。
- * [D1] 接收 chat store：重投 timer fire 的占用短路判定需要读 occupancy 投影。
+ * 倒序 morph：多条连发气泡在流内连续尾排，truncateFrom(inclusive) 会截掉其后内容——
+ * 从最后一条起逐条截，防前条 morph 误删后条气泡（气泡恒尾排：appendUser 尾插 +
+ * morph 即移除，流内不残留中间气泡）。
  */
-function flushDeferQueueAfterIdle(sid: string, chat: ChatStoreInstance, deps: EnsureStreamSubDeps): void {
-  void deps
-    .getCompactQueue()
-    .flush(sid)
-    .then((submitted) => {
-      if (submitted) {
-        // [session-dead 第三环] 投递成功：计数清零（阈值不跨「成功投递」累计）
-        deferFlushFailureCounts.delete(sid)
-        return
-      }
-      // [session-dead 第三环] S1 busy 类拒绝：计数 + 达阈值熔断 timer 自驱动重投
-      const failures = (deferFlushFailureCounts.get(sid) ?? 0) + 1
-      deferFlushFailureCounts.set(sid, failures)
-      if (failures >= DEFER_FLUSH_MAX_CONSECUTIVE_FAILURES) {
-        // 恰达阈值 → 一次可操作提示（pi 可能已卡住 → 侧栏右键强制退出）。此后只停 timer
-        // 脉冲：occupancy idle 帧驱动的 flush 照常投递（条目留队，卡死解除后仍能送达）。
-        if (failures === DEFER_FLUSH_MAX_CONSECUTIVE_FAILURES) {
-          deps.toast.warning(deps.t('composable.deferFlushStalled'))
-        }
-        return
-      }
-      armDeferFlushRetry(sid, chat, deps)
-    })
-    .catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e)
-      deps.toast.error(deps.t('composable.sendFailed', { msg }))
-    })
-}
-
-/** [簇 A1] 排一次延迟重投（幂等：已有 pending timer 不重复排；fire 后自删再按需 re-arm）。
- *  [D1] fire 时占用短路：投影仍忙 → 不重排不 flush（等 occupancy idle 帧触发现有 handler）；
- *  投影缺失（getOccupancy 无记录回落全 idle 缺省）→ 保守走原重试路径防死锁。 */
-function armDeferFlushRetry(sid: string, chat: ChatStoreInstance, deps: EnsureStreamSubDeps): void {
-  if (deferFlushRetryTimers.has(sid)) return
-  const timer = setTimeout(() => {
-    deferFlushRetryTimers.delete(sid)
-    if (!deps.getCompactQueue().hasPending(sid)) return
-    // [D1] 占用短路：仍忙 → 直接 return（不 re-arm 不 flush）——帧驱动优先（occupancy
-    // 回 idle 帧照常触发 handleSessionOccupancy 的 flush），timer 只兜 idle 帧丢失场景。
-    if (!isOccupancyFullyIdle(chat.getOccupancy(sid))) return
-    flushDeferQueueAfterIdle(sid, chat, deps)
-  }, DEFER_FLUSH_RETRY_DELAY_MS)
-  deferFlushRetryTimers.set(sid, timer)
-}
-
-/** [簇 A1] 清指定 session 的重投 timer（disposeSession 编排 + 测试隔离共用）。
- *  [session-dead 第三环] 同步清连续失败计数（与 timer 同生命周期，防跨用例/跨会话泄漏）。
- *  [session-dead 结构性修复 D3] 经 createUseChat 返回面暴露给 renderer forceQuit 编排
- *  （不进 domain/chat barrel——对外导出面不变）：用户强制退出后队列整体回收进 Composer
- *  草稿，重投脉冲与失败计数随之失效（否则残留 1s timer 对空队列重投、计数跨入下一轮意图）。 */
-function clearDeferFlushRetryTimer(sid: string): void {
-  const timer = deferFlushRetryTimers.get(sid)
-  if (timer !== undefined) {
-    clearTimeout(timer)
-    deferFlushRetryTimers.delete(sid)
-  }
-  deferFlushFailureCounts.delete(sid)
-}
-
-/** [send.rejected] 兜底通道（D-006 独立类型，不进对话流）——session-occupancy D2 改造：
- * 乐观气泡回滚 + inflight 回滚对全部 reason 立即生效（修复 §2.2 窗口 2 的「气泡残留 +
- * 计数悬空」）；u5b 起 P3 全 reason 静默入队（flush 触发源切 session.occupancy 全 idle——
- * busy/processing 的拒绝入队等 occupancy 回 idle 即投递，不再有「等不到触发源」的滞留，
- * 设计 D2 被否 ③ 的前置条件已解除）；clientUuid 命中队列已有条目 = flush 重放来源，
- * 跳过重入队（flush 的 S1 窗口订阅已处理失败保留，重入队会双条目双投递）。 */
-function handleSendRejected(
+function handleSessionDelivery(
   sid: string,
   chat: ChatStoreInstance,
-  deps: EnsureStreamSubDeps,
-  msg: ServerMessage<'send.rejected'>,
+  msg: ServerMessage<'session.delivery'>,
 ): void {
-  // reason（busy/compacting/processing）P3 起不再参与分型判定（全 reason 统一静默入队），
-  // 仅作为 runtime 转译语义保留在 wire 契约。
-  const { clientUuid: rejectedUuid, message: rejectMessage } = msg.payload
-  const pending = pendingDirectSends.get(sid)
-  // flush 重放来源消歧：rejected 回带的 clientUuid 命中 compactQueue 已有条目（u4b 起
-  // flush 提交携带条目 id）→ 该次发送来自 flush，只回滚不入队。
-  const uuidQueued =
-    rejectedUuid != null && deps.getCompactQueue().peek(sid).some((m) => m.id === rejectedUuid)
-  if (pending && (rejectedUuid == null || rejectedUuid === pending.clientUuid)) {
-    // 本编排器的未决直发被拒（payload 回带命中 / 现状 runtime 未回带两种形态）：
-    // 回滚乐观副作用（与入队正交，全 reason）。
-    chat.truncateFrom(sid, pending.clientUuid, true) // 移除未确认的乐观气泡（appendUser 尾插，其后无消息）
-    // 消除计数悬空（后续 steer 确认被错抵的根因）——仅回收 send 通道挂的占位；
-    // editAndResend 不挂配额（steer-bubble u2 契约，A2 起 holdsInflight 区分）。
-    if (pending.holdsInflight) chat.decrementInflight(sid, 1)
+  const entries = msg.payload.entries as DeliveryFrameEntry[]
+  replaceDeliveryProjection(sid, entries)
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!
+    // direct → 待确认气泡保持；delivered → transcript 权威已入流（reducer），无 morph 面
+    if (entry.lane === 'direct' || entry.state === 'delivered') continue
+    const bubble = chat.getMessages(sid).find((m) => m.id === entry.clientUuid)
+    if (!bubble || bubble.role !== 'user') continue
+    // 乐观气泡移出对话流（气泡 id = clientUuid，appendUser 契约；truncateFrom 幂等：
+    // 已 morph/不存在的 id no-op）
+    chat.truncateFrom(sid, entry.clientUuid, true)
+    // 捕获原始 segments（user 气泡 content 承载 Segment[]——appendUser 契约），供送达
+    // 回执按原段入流；宽形态防御（异常帧 content 非数组时包 text 单段，可见性不丢）。
+    captureMorphSegments(
+      sid,
+      entry.clientUuid,
+      Array.isArray(bubble.content)
+        ? (bubble.content as unknown as Segment[])
+        : [{ type: 'text', text: String(bubble.content ?? '') }],
+    )
+    // morph = 非 direct 车道：无「本条即将触发 message_start」的 dispatching 空窗，
+    // 乐观占位立即回收（direct 车道占位仍由 message_start 自动清）
     chat.clearPendingSend(sid)
-    pendingDirectSends.delete(sid)
-    // P3 全 reason 静默入队（D2 接管表）：toast 退役（三种拒绝统一 defer 语义——
-    // occupancy 回 idle 自动投递 + pending 气泡可见），原文（未加标记）入队。
-    // [GUI 快修④] 完全静默会让用户以为「消息发出去了/丢了」——补一次性提示告知已自动
-    // 重试（自愈入队行为保留，不改 D2 接管语义；flush 失败另有 queueFlushFailed toast）。
-    // [defer segments 化 / D-A1-1] 重入队带段：pending.text 是已序列化 promptText
-    // （直发被拒的提交文本），包 [{type:'text',text}] 单段并同步写 submitText
-    // （原文本即提交文本，①b 兜底匹配源与 flush 提交时写入的语义对齐）。
-    if (!uuidQueued) {
-      // [session-dead 第三环] 新条目入队 = 新一轮用户意图：计数清零（否则上一轮达阈值后，
-      // 后续正常发送的失败被历史计数直接吞掉 timer 重投）
-      deferFlushFailureCounts.delete(sid)
-      deps.toast.warning(deps.t('composable.sendAutoRequeued'))
-      deps.getCompactQueue().enqueue(sid, pending.text, [{ type: 'text', text: pending.text }], pending.text)
-      // [簇 A1] 入队晚于 idle 帧（runtime handlePromptFailure 先广播 occupancy idle 再广播
-      // send.rejected，WS FIFO）——idle 帧处理时队列尚空未 flush；其后 agent_settled 的同值
-      // idle 被幂等写去重不再来帧。入队后读当前投影：已全 idle → 立即 flush（否则消息滞留到
-      // 下一个无关 occupancy 转移）；仍忙（bash/compacting 等预检拒绝形态）→ 由后续 idle 帧
-      // 照常触发。flush false（S1 再拒）由 flushDeferQueueAfterIdle 自排 timer 重投。
-      if (isOccupancyFullyIdle(chat.getOccupancy(sid))) {
-        flushDeferQueueAfterIdle(sid, chat, deps)
-      }
-    }
-    return
   }
-  // 无未决直发记录（flush 重放 / 迟到帧）：[A1] flush 来源帧（clientUuid 命中队列条目）
-  // 静默 return——D2 接管表声明 toast「Agent 正在处理」删除，busy 类拒绝留队后由下一次
-  // occupancy idle 帧自动重投（自愈路径），与 flush 侧的 queueFlushFailed 双 toast 一并
-  // 消除；非队列来源的无记录迟到帧（真正孤儿帧）保持既有 toast 反馈。
-  // editAndResend 自 A2 起写未决记录走上方 pending 分支，不再落入此处。
-  chat.clearPendingSend(sid)
-  if (uuidQueued) return
-  deps.toast.error(rejectMessage ?? deps.t('composable.agentProcessing'))
 }
 
 /** subagent.directive：`@` 定向消息的可见气泡信号（composer-symbol-system §3.3.3a
@@ -429,10 +267,9 @@ function handleSessionCompacting(
  * in-flight 时标记——auto-compaction 的 compaction_end handler 见 key 不在则跳过（不污染）。
  * 成功/失败/aborted 均置 true：只要 compaction_end 到达，说明 pi 已处理 compact，结果（含错误）
  * 由 interpreter 进对话流，catch 不再 toast（避免双提示 / 对 aborted 误提示失败）。
- * [u5b / D6] flush 触发源切换：session.compacted 不再直接 flush——统一由 session.occupancy
- * handler 的「全 idle 且队列非空」判定触发（sendRoute 解除语义）。
- * 行为变化（设计 §3.5 错误规格表已声明）：压缩失败（compacted{error}）后 occupancy
- * 三路复位 compacting=false → 同样满足 idle 条件 → 队列照常投递（消息不丢优先）。 */
+ * [HISTORICAL → u3b 退役] flush 触发源职责已随 defer 队列退役：压缩结束后的投递由内核
+ * 对账器/投递通道接管（compaction_end 是 runtime 侧 Reconciler 触发点之一，D3），renderer
+ * 不再触发 flush。行为连续性：压缩失败后队列照常投递（消息不丢优先）由内核保证。 */
 function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   chat.setCompactingReason(sid, undefined)
   // MF-1：仅 manual compact in-flight 时标记——auto-compaction 的 compaction_end handler
@@ -440,35 +277,18 @@ function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   if (manualCompactionState.has(sid)) manualCompactionState.set(sid, true)
 }
 
-/** [u5b / D1+D3] occupancy 投影消费（state topic：live 广播 + subscribeSession 的
- * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，
- * G4）。写入 chat store 投影分区（sessionPhase 单一数据源）。
- * [u5b / D6] defer 队列 flush 触发（sendRoute 解除语义 = 路由表行 1 的三维形态）：
- * turn=idle 且 compacting=false 且 bash=false 且队列非空 → 投递。bash 参与条件
- * （行 6 bash=true 时路由 defer，投递时机上 bash 结束解除）；renderer 的 bash flag
- * 从 occupancy 帧取得（runtime #7 挂点写入）。
- * 覆盖场景：压缩完成（原 session.compacted 触发语义）/ settling 收口 / bash 结束 /
- * 断连重连快照恢复 idle（V6a：恢复后自动重放）。幂等：occupancy 帧变化才广播
- * （runtime 去重）+ flush per-session in-flight 守卫 + 空队列 no-op。 */
+/** [u5b / D1+D3 → u3b/D7 简化] occupancy 投影消费（state topic：live 广播 + subscribeSession 的
+ * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，G4）。
+ * 写入 chat store 投影分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
+ * [HISTORICAL → u3b 退役] defer 队列 flush 触发（「全 idle 且队列非空」→ 投递）已随 defer
+ * 队列整体退役：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定的触发源，
+ * renderer 只渲染投影）。本 handler 只保留投影写入。 */
 function handleSessionOccupancy(
   sid: string,
   chat: ChatStoreInstance,
-  deps: EnsureStreamSubDeps,
   msg: ServerMessage<'session.occupancy'>,
 ): void {
   chat.setOccupancy(sid, { turn: msg.payload.turn, compacting: msg.payload.compacting, bash: msg.payload.bash })
-  if (
-    msg.payload.turn === 'idle'
-    && !msg.payload.compacting
-    && !msg.payload.bash
-    && deps.getCompactQueue().hasPending(sid)
-  ) {
-    // [簇 A1] flush 消费统一走共享入口：S1 拒绝（resolve false）自排 timer 重投——
-    // 拒绝循环下本帧（失败 attempt 自产的 dispatching→idle）先于 RPC reply 到达被 S2
-    // 守卫并集，其后无帧可达，timer 是唯一保证重投脉冲（详见 deferFlushRetryTimers 注释）。
-    // RPC reject（传输级真错误）toast「发送失败: {原因}」的既有语义在入口内保持不变。
-    flushDeferQueueAfterIdle(sid, chat, deps)
-  }
 }
 
 /** pi 改写 session 名（session_info_changed → session.renamed，见 event-adapter.ts）。
@@ -562,10 +382,9 @@ export function ensureStreamSubscription(
     console.warn(`[useChat] subscribeSession failed for session ${sid}:`, e),
   )
   const unsub = deps.chatApi.streamSubscribe(sid, (msg) => {
-    if (msg.type === 'send.rejected') {
-      handleSendRejected(sid, chat, deps, msg)
-      return
-    }
+    // [HISTORICAL → u3b 退役] send.rejected handler 已删除：内核排队取代拒绝（D5——内核
+    // FIFO 无界接受，拒绝语义失去存在场景），乐观气泡经 session.delivery 帧 morph/回执
+    // 闭环，renderer 不再需要拒绝回滚/兜底入队。
     if (msg.type === 'subagent.directive') {
       handleSubagentDirective(sid, chat, msg)
       return
@@ -600,7 +419,12 @@ export function ensureStreamSubscription(
         break
       }
       case 'session.occupancy': {
-        handleSessionOccupancy(sid, chat, deps, msg)
+        handleSessionOccupancy(sid, chat, msg)
+        break
+      }
+      // [投递所有权内核 u3b / D7] 内核条目状态快照：队列区/气泡 morph 的单一数据源
+      case 'session.delivery': {
+        handleSessionDelivery(sid, chat, msg)
         break
       }
       case 'session.renamed': {
@@ -622,104 +446,26 @@ export function ensureStreamSubscription(
   streamSubscriptions.set(sid, unsub)
 }
 
-/**
- * [session-occupancy u4b / D5.1] defer 队列 flush 的逐条提交入口（send/steer 等价编排）。
- *
- * 为什么不直接复用 send()/steer()：send 的编排含 appendUser（defer 条目的入流由入队时的
- * pending 气泡承担，重复插入会双气泡）+ pendingDirectSends 记录（rejected handler 据此回滚
- * 乐观气泡——flush 无乐观气泡可回滚）+ addPendingSend（defer 条目无主 agent turn 占位语义）
- * + isActive 时的 steer 路由（flush 时点路由已由队列语义决定，不容重判）；steer 的编排含
- * pushPending 暂存（defer 条目不进 pendingBuffer——其确认走 message_end(user) ① 的队列
- * 分区匹配，非腿 1 drainN 暂存取出）。故按 D5.1 提炼两通道的公共最小编排为本导出：
- * - channel='send'（队首，启动新 run）：挂 inflight 占位（防确认帧被 message_end 处理序
- *   ②「inflight>0 纯计数」误拦后漏配 ① 分区匹配，见 effects/user-delivery.ts）→
- *   ensureStreamSubscription（订阅保障，与 send 同款）→ chatApi.send 携 clientUuid=条目 id
- *   （D2 消歧：rejected 回带命中队列条目，兜底 handler 不重入队）。
- * - channel='steer'（后续条目，并入当前 run）：仅 chatApi.steer——不挂占位（steer 条目
- *   无确认配额语义，命中 ① 时不动计数）、不 pushPending（理由见上）。
- *
- * [defer segments 化 / D-A1-2/D-A1-3] 条目携带 segments（富内容段）：提交文本 =
- * entry.submitText（flush 侧算好的 segmentsToPrompt 结果，避免双算；缺省回退现场序列化
- * ——纯文本条目单 text 段等价形态）+ 尾部裸标记；富内容条目（含非 text 段）写 segments
- * sidecar 按 deferEntryId = 条目 id（裸 uuid key，不复用 clientUuid——msg-id-mapper 对
- * clientUuid 有 u-<uuid> 形态约定，两套写入方同字段会语义漂移）。sidecar 与 appendUser
- * 写路径互斥（confirmDelivery 的 appendUser 不写 sidecar），无双写。steer 通道提交
- * segments 无障碍（runtime steerMessage 已挂注入器，主审核实）。
- *
- * 占位三态闭环（挂/收/回滚）的「回滚」不在本函数：RPC reject 与 S1 窗口 rejected 两种
- * 未投递判定的知晓方都是 flush 循环（per-entry 记账），回滚集中在 flush 侧执行
- * （useCompactQueue.ts doFlush），本函数只负责「挂」。
- *
- * 错误处理：RPC 失败原样上抛（flush 侧 catch 决策留队/回滚/停止提交后续）——不 toast
- * 不吞错（RPC reject 经 flush 上抛至 useChat occupancy handler toast「发送失败: {原因}」，
- * S1 busy 拒绝静默自愈——A1 起 queueFlushFailed 退役）。
- */
-export async function submitQueuedEntry(
-  sid: string,
-  entry: { id: string; text: string; segments?: Segment[]; submitText?: string },
-  channel: 'send' | 'steer',
-  deps: SubmitQueuedEntryDeps,
-): Promise<void> {
-  // [簇 A2] 提交文本尾附加投递确认标记（裸 uuid 形态，与 submitSegments 的 u- 前缀
-  // clientUuid 标记同构但 id 空间互斥）：entry.id = crypto.randomUUID()（无 u- 前缀），
-  // msg-id-mapper 的 TAG_MATCH 只剥 u- 前缀标记 → 裸标记全程存活——send 通道经 pi
-  // prompt() input hook（不匹配即 transform 不发生）、steer 通道 pi steer() 根本不发
-  // input hook，pi 落盘文本与 message_end(user) 回流文本都携带标记 → core ① 优先按
-  // 标记 id 确认出队（文本被 skill-injector 三入口 / BeforeSend hook 改写后仍可达，
-  // 对齐 C-data-08「禁文本匹配」）。该断言已锚定 PS-26（docs/pi-semantics.json；探针
-  // pi-semantics-defer-marker-survival：transform 面唯一性 + 两通路存活 + 标记互斥）。
-  // 已知权衡（registry #6 修订注记同步登记）：裸标记不被 TAG_STRIP 剥离 → 随消息文本
-  // 进入 LLM 上下文（prompt 尾部一行 ~40 字符 HTML 注释，每条 flush 消息至多一条，
-  // 量级有界）；与 u- 协议「strip 后 LLM 不可见」的形态差异显式接受，演进方向 = 协议
-  // 身份帧（sendMessage custom 帧替代文本尾标记，标记不再进文本，届时须同步 ①a 提取
-  // 通路）。QueueBubble 显示侧对快照文本剥标记（steer 通道文本会镜像进 queue_update
-  // 快照）。
-  // [defer segments 化] 基文本从纯 text 改 segments 序列化产物（submitText 优先——
-  // flush 侧已算好；纯文本条目两路径结果一致）。
-  const segments: Segment[] = entry.segments ?? [{ type: 'text', text: entry.text }]
-  const baseText = entry.submitText ?? segmentsToPrompt(segments)
-  const markedText = `${baseText}\n<!--taiji:msg:${entry.id}-->`
-  // [defer segments 化 / D-A1-2] 富内容条目写 sidecar（与 submitSegments 的 needsBackfill
-  // 谓词同款：全部 text 段或 slash 段跳过 sidecar 写入；defer 路径 slash 段不可达——
-  // send.ts enqueueDuringDefer 对 segmentsToPrompt 以 / 开头一律拒绝，此处排除 slash
-  // 纯为与 submit 路径谓词单点统一；未知新类型默认写，失败方向安全）。key 用
-  // deferEntryId（裸 uuid），reload 侧 entry-tree-builder 编排层提取裸标记 id 直查回填。
-  // fire-and-forget：失败 console.warn 不阻断（sidecar 丢失只降级为占位文本，非硬错误）。
-  const needsBackfill = segments.some((s) => s.type !== 'text' && s.type !== 'slash')
-  if (needsBackfill) {
-    deps
-      .writeSegments({
-        sessionId: sid,
-        entry: { deferEntryId: entry.id, segments, timestamp: Date.now() },
-      })
-      .catch((e) => console.warn('[useChat] defer writeSegments failed:', e))
-  }
-  if (channel === 'steer') {
-    await deps.chatApi.steer(sid, markedText)
-    return
-  }
-  // 挂占位先于 RPC（乐观语义，对齐 send 的 incrementInflight 挂点）：确认帧到达时
-  // inflight>0 由 ① 分区匹配优先消费（回收占位），不被 ② 误拦。
-  deps.chat.incrementInflight(sid, 1)
-  ensureStreamSubscription(sid, deps.chat, deps.sessionStore, {
-    chatApi: deps.chatApi,
-    toast: deps.toast,
-    t: deps.t,
-    getCompactQueue: deps.getCompactQueue,
-  })
-  await deps.chatApi.send(sid, markedText, { clientUuid: entry.id })
-}
 
 /**
- * createUseChat —— chat 业务编排 factory（P3 chat 域 w5）。
+ * [HISTORICAL → 投递所有权内核 u3b 退役] submitQueuedEntry（defer 队列 flush 的逐条提交
+ * 入口，u4b/D5.1）已删除：defer 队列状态机整体退役（设计 §3.1 删除面），用户消息统一经
+ * delivery.submit 提交（下方 submitNewMessage 编排），lane 判定与逐条投递由 runtime 内核
+ * 承担（D1）。出站裸标记附加（簇 A2）随消息出站统一由内核出站侧负责，renderer 不再拼标记。
+ * renderer 唯一消费方 useCompactQueue.doFlush 随 u3c 退役。git 可追溯。
+ */
+
+/**
+ * createUseChat —— chat 业务编排 factory（P3 chat 域 w5；[投递所有权内核 u3b] 发送链
+ * 收敛为统一 submit——乐观气泡 + delivery.submit，lane 判定移交 runtime 内核（D1），
+ * renderer 不再判定车道也不再做任何时序防御（defer flush/S1/timer/熔断已退役））。
  *
  * [TD1] factory + wrapper 模式（对齐 w4 createChatStore）：core 不绑 renderer 跨域依赖，
  * 全经 UseChatDeps 注入。renderer useChat() 薄包装注入 deps，20 消费方零 churn。
  *
- * @param deps 依赖注入（chatApi/writeSegments/getChatStore/getSessionStore/toast/t/getCompactQueue）
+ * @param deps 依赖注入（chatApi/writeSegments/getChatStore/getSessionStore/toast/t）
  * @returns send/steer/followUp/abort/compact/editAndResend/hydrateHistory/loadMoreHistory/
- *          hasMoreHistory/setHistoryTruncated/disposeSession/sendBash/abortBash/
- *          clearDeferFlushRetryTimer
+ *          hasMoreHistory/disposeSession/sendBash/abortBash/clearQueueState
  */
 export function createUseChat(deps: UseChatDeps) {
   const chat = deps.getChatStore()
@@ -729,28 +475,29 @@ export function createUseChat(deps: UseChatDeps) {
     chatApi: deps.chatApi,
     toast: deps.toast,
     t: deps.t,
-    getCompactQueue: deps.getCompactQueue,
   }
 
   /**
-   * 统一发送编排器：把 segments 转成 promptText 并发送。
+   * 统一提交编排器：把 segments 转成 promptText 并经 delivery.submit 提交（u3b/D1）。
    *
-   * 三条发送通路（send / editAndResend / 后续 landing）共享此逻辑。
-   *
-   * 调用方负责：appendUser / truncateFrom / pendingSend 等状态机编排
-   * （submitSegments 只管「文本化 + 发送」核心步骤）：
+   * 调用方负责：appendUser / pendingSend 等乐观状态编排已上提至 submitNewMessage
+   * （send/steer/followUp/editAndResend 四通路共享）。submitSegments 只管「文本化 +
+   * 提交」核心步骤：
    *   1. segmentsToPrompt（pi prompt 文本，原文保真，image 段产出裸路径）
    *   2. 写 segments.json sidecar（clientUuid 关联，重开时回填 badge）——仅非纯文本消息
-   *   3. chatApi.send(promptText + clientUuid 标记)——仅非纯文本消息（最小写入，见下方注释）
+   *   3. chatApi.submitDelivery(promptText + clientUuid 标记, clientUuid)——内核出站
+   *      裸标记由 runtime 出站侧统一附加（u3b 契约：标记 id = clientUuid 的裸 uuid 形态），
+   *      renderer 不再拼投递确认标记（defer 时代的簇 A2 拼标记退役）
    *
    * 图片走路径模式（对齐 pi TUI）：路径已在 promptText 里（segmentsToText 产出裸路径），
-   * LLM 自己调 read 工具读（vision/非 vision 模型都能处理）。不再传 images base64 字段。
+   * LLM 自己调 read 工具读（vision/非 vision 模型都能处理）。不传 images base64 字段。
    *
    * @param sessionId           目标 session
    * @param segments            结构化 segments（含 image/file/text/skill/mention）
-   * @param clientUuid          调用方 appendUser 生成的 user message id（`u-<uuid>`），
+   * @param clientUuid          appendUser 生成的 user message id（`u-<uuid>`），
    *                            用作 segments.json 主键 + prompt 标记 uuid（建立 clientUuid ↔
-   *                            pi userEntryId 映射，extension input hook 剥标记后写 custom entry）
+   *                            pi userEntryId 映射，extension input hook 剥标记后写 custom
+   *                            entry）+ delivery.submit 条目 id（回执/morph/resync 判重锚）
    * @param precomputedPromptText 调用方已算过的 segmentsToPrompt(segments)（非空白——调用方
    *                            !text.trim() 守卫保证）。传入复用避免 submitSegments
    *                            内部再算一遍（S4 修复，热路径去重）。
@@ -768,8 +515,8 @@ export function createUseChat(deps: UseChatDeps) {
     // 不变式：sidecar 条目存在 ⟺ 映射 custom entry 存在（两侧同谓词门控）。
     // [D4-d] slash 段（命令 chip）计入纯文本——无 badge 还原需求：UserBubble 已按归位序把
     // slash 段渲染为 `/name` 纯文本，与 reload 侧 textToSegments(归位文本) 同形（live ≡ reload），
-    // 故不为此引入 sidecar 写入。本处谓词同时门控 sidecar 写入与 custom entry 标记（defer
-    // 重放路径 `submitQueuedEntry` 另有一处同款谓词）。
+    // 故不为此引入 sidecar 写入。本处谓词同时门控 sidecar 写入与 custom entry 标记
+    //（[HISTORICAL] defer 重放路径 submitQueuedEntry 的同款谓词已随其退役）。
     const needsBackfill = segments.some((s) => s.type !== 'text' && s.type !== 'slash')
     // 写 segments.json sidecar（重开 session 时回填 image/file badge 用）。
     // 异步 fire-and-forget：失败 console.warn 不阻断（sidecar 丢失只是降级为占位文本，非硬错误）。
@@ -788,22 +535,62 @@ export function createUseChat(deps: UseChatDeps) {
     // extension input hook 见不到标记即不写映射 custom entry（自然 no-op）。
     // 标记格式严格：`<!--taiji:msg:<uuid>-->`，uuid 是 clientUuid 完整值（u-<uuid>），
     // 与 extension TAG 正则（u-[0-9a-fA-F-]{36}）+ segments.json clientUuid key 严格一致。
+    // [u3b] 本标记只服务 msg-id-mapper 映射回填（D8：与内核出站裸标记双标记共存，已登记）；
+    // 投递身份的裸标记由内核出站侧统一附加。
     const markedPromptText = needsBackfill ? `${promptText}\n<!--taiji:msg:${clientUuid}-->` : promptText
     // 图片走路径模式（对齐 pi TUI）：路径已在 promptText 里（segmentsToText 产出裸路径），
-    // LLM 自己调 read 工具读。不再传 images base64 字段。
-    // options.clientUuid（session-occupancy D2）：RPC 参数透传（与 prompt 内标记正交——标记
-    // 服务 pi extension 映射回填，RPC 参数服务 runtime 拒绝广播原样回带）。
-    await deps.chatApi.send(sessionId, markedPromptText, { clientUuid })
+    // LLM 自己调 read 工具读。不传 images base64 字段。
+    // [u3b/D1] 统一提交：chatApi.send → chatApi.submitDelivery——lane 判定移交 runtime 内核，
+    // reply 仅受理确认，权威状态演进经 session.delivery 状态帧（handleSessionDelivery 消费）。
+    await deps.chatApi.submitDelivery(sessionId, markedPromptText, clientUuid)
   }
 
   /**
-   * 发送消息：appendUser → 确保会话级订阅 → submitSegments（提取 + api.send）。
+   * [投递所有权内核 u3b / D1+D7] 统一提交编排：appendUser 乐观气泡 → inflight 占位 →
+   * ensureStreamSubscription → dispatching 占位 → submitSegments（delivery.submit）。
+   * send / steer / followUp / editAndResend 四通路共享；lane 由 runtime 内核判定，失败
+   * 回滚乐观副作用后原样上抛，由通路各自分型（send toast 不 throw / steer 转 false）。
+   *
+   * 返回 clientUuid（= 乐观气泡 id = 内核条目 id），供调用方断言/对账。
+   */
+  async function submitNewMessage(sid: string, segments: Segment[], promptText: string): Promise<string> {
+    // appendUser 返回生成的 user message id（u-<uuid>），作为 clientUuid 传给 submitSegments
+    // （写 segments.json sidecar + prompt 标记，建立 clientUuid ↔ pi userEntryId 映射）+
+    // delivery.submit 条目 id（session.delivery 帧 / 送达回执标记 / morph 的身份锚）。
+    const clientUuid = chat.appendUser(sid, segments)
+    // 乐观气泡占位：其送达回执（message_end(user) ① 标记匹配）到达时抵消，防重复入流；
+    // RPC 失败路径回滚（下方 catch）。[D7] direct 车道抵消机制保留。
+    chat.incrementInflight(sid, 1)
+    ensureStreamSubscription(sid, chat, session, subDeps)
+    // dispatching 空窗占位（填 isGenerating 空窗，让停止按钮/输入可用性立即翻转）：
+    // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收。
+    chat.addPendingSend(sid)
+    try {
+      // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
+      await submitSegments(sid, segments, clientUuid, promptText)
+    } catch (e) {
+      // RPC 失败回滚（三件套）：pi/内核侧无消息、送达回执永不到来——
+      // ① 乐观气泡移除（[u3b] 前身靠 send.rejected 兜底回滚，内核化后无拒绝帧，必须在
+      //    此回滚，否则气泡永久悬挂）；truncateFrom 幂等（id 不存在 no-op）；
+      // ② dispatching 占位回收；③ inflight 占位回收。
+      // 错误反馈由通路 catch 分型（toast 或转 false），本函数不吞。
+      chat.truncateFrom(sid, clientUuid, true)
+      chat.clearPendingSend(sid)
+      chat.decrementInflight(sid, 1)
+      throw e
+    }
+    return clientUuid
+  }
+
+  /**
+   * 发送消息：统一 submit（乐观气泡 + delivery.submit）。
    *
    * 流式状态由会话级订阅的事件驱动（message_start→true，complete/error→false），
-   * 不依赖 send() 的 resolve 时机——避免 ack 早于首个 chunk 导致订阅被提前拆除。
+   * 不依赖 submit 的 resolve 时机——避免 ack 早于首个 chunk 导致订阅被提前拆除。
    *
-   * dispatching 态在 send 前置位（填 isGenerating 空窗期，让 Composer 停止按钮/steer 立即可用），
-   * message_start 到达时 clearPendingSend 自动清；失败也清（catch）。
+   * [u3b/D1] B 策略（busy→steer 本地判定）退役：busy 期发送不再本地转车道，统一乐观气泡
+   * + delivery.submit——lane 判定移交 runtime 内核（queued/steer 车道气泡经 session.delivery
+   * 帧 morph 为队列条目，D7）。
    *
    * 显式接收 sessionId：双 panel 下 Composer 各自有独立 sessionId（panel leaf 绑定），
    * send 目标由调用方传入，不读全局 session.activeId（否则 standby panel 发消息会串到 active panel）。
@@ -811,9 +598,6 @@ export function createUseChat(deps: UseChatDeps) {
   async function send(sessionId: string, segments: Segment[]): Promise<void> {
     const sid = sessionId
     if (segments.length === 0) return
-    // [session-dead 第三环] 用户重新发送 = 新一轮用户意图：清连续失败计数（否则上一 session
-    // 卡死期累计的计数会让本轮失败立即命中阈值，timer 重投永不启动）
-    deferFlushFailureCounts.delete(sid)
     // `@` 定向分流（composer-symbol-system §3.3.4/§3.3.7）：含 subagent 段的消息改走
     // session.subagentAction RPC，不经 message.send 主 agent 通道（结构性保证无主 agent
     // turn，§3.3.8 命题 1）。分流点必须在下方两道 guard 之前：
@@ -831,49 +615,13 @@ export function createUseChat(deps: UseChatDeps) {
     const promptText = segmentsToPrompt(segments)
     if (!promptText.trim()) return
 
-    // [B 策略 D-001] busy 时自动转 steer（追加上下文，不打断当前回合）
-    if (chat.isActive(sid)) {
-      await steer(sid, segments)
-      return
-    }
-
-    // appendUser 返回生成的 user message id（u-<uuid>），作为 clientUuid 传给 submitSegments
-    // （写 segments.json sidecar + prompt 标记，建立 clientUuid ↔ pi userEntryId 映射）。
-    const clientUuid = chat.appendUser(sid, segments)
-    // [session-occupancy D2] 记录未决直发（clientUuid + 入队用原文），供 send.rejected handler
-    // 消歧直发被拒 vs flush 重放被拒。入队 text 用未加标记的 promptText 原文（flush 重放
-    // 直发原文，带 `<!--taiji:msg:-->` 标记会污染重放文本）。holdsInflight=true：本通道挂了
-    // inflight 占位（下方 incrementInflight），被拒时 handler 同步回收。
-    pendingDirectSends.set(sid, { clientUuid, text: promptText, holdsInflight: true })
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D2 维护点 2]
-    // send 乐观 +1：乐观插入即「已显示」，其自身投递的 message_end(user) 到达时被
-    // inflight 计数抵消（不落入腿 2 includes 兜底——send 文本通常不在队列数组，但与
-    // 队列未投递条目同文本碰撞时会误命中，计数优先裁决）。挂钩在 send 调用点（与
-    // appendUser 相邻但不在其内）：防腿 1 的 drainN→appendUser 路径双计、防
-    // editAndResend 等其他 appendUser 调用方误挂（编辑重发的 message_end 走 includes
-    // 不命中跳过，无需配额）。busy 转 steer 分支（上方 B 策略）不挂——走 pushPending
-    // 暂存，投递时由腿 1/腿 2 消费各自计数。
-    chat.incrementInflight(sid, 1)
-    ensureStreamSubscription(sid, chat, session, subDeps)
-    chat.addPendingSend(sid)
+    // [u3b/D1] 统一 submit：乐观气泡 + delivery.submit（失败 toast 不 throw——错误已消化，
+    // 消费侧 Composer.onSend 的 catch 不再触发；throw 只会变 unhandled rejection）。
     try {
-      // S4：复用上面算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
-      await submitSegments(sid, segments, clientUuid, promptText)
+      await submitNewMessage(sid, segments, promptText)
     } catch (e) {
-      // [W2] 错误处理策略与 steer/followUp/abort 对齐：清 pendingSend + toast，不 throw。
-      // 消费侧 Composer.onSend 已有 try/catch+toast 防御，此处不 throw 后 Composer 的 catch 不再触发；
-      // Turn.vue submitEdit（调 editAndResend，无 try/catch）也不再产生 unhandled rejection。
-      // throw 只会变 unhandled rejection，错误已通过 toast 消化。
-      chat.clearPendingSend(sid)
-      // [steer-bubble u2 / D2] RPC 失败回滚 −1：pi 侧无消息、message_end 永不到来，
-      // 不回滚则配额永久悬空、下一次 F1 投递的 message_end 确认被错抵。
-      chat.decrementInflight(sid, 1)
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))
-    } finally {
-      // [session-occupancy D2] 未决记录收口：RPC ack/reject 时 send.rejected 帧必然已处理
-      // （WS FIFO：dispatcher 同步广播先于 reply），handler 已消费记录，此处删除防泄漏。
-      pendingDirectSends.delete(sid)
     }
   }
 
@@ -940,13 +688,16 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
-   * 追加 steer：AI 执行中（isGenerating）时，把补充消息排入 steering 队列，
-   * 当前回合工具调用结束后、下次 LLM 调用前投递，不打断当前回合。
+   * 追加 steer（AI 执行中补充消息）——[u3b/D1] 统一 submit 化。
    *
-   * [D2] 返回值契约（Promise<boolean>）：true = 提交成功或无事发生（早退路径无投递
-   * 动作、无错误，调用方无需恢复草稿）；false = RPC 失败（内部已 toast + 回滚 pending
-   * 暂存，不 throw）——调用方（send.ts routeSteer / submit.ts onSteer）据 false 恢复
-   * 草稿（restoreSegments），否则 clearInput 已清空的输入静默丢失。
+   * 旧实现（message.steer 直发 + pendingBuffer 暂存）已退役：lane 判定移交 runtime 内核，
+   * 本方法与 send 同走乐观气泡 + delivery.submit（内核判 steer 车道 → 气泡 morph 队列条目），
+   * pendingBuffer 计数腿不再存在。
+   *
+   * [D2] 返回值契约保持（Promise<boolean>）：true = 提交成功或无事发生（早退路径无投递
+   * 动作、无错误，调用方无需恢复草稿）；false = RPC 失败（内部已 toast + 回滚乐观副作用，
+   * 不 throw）——调用方（composer/submit.ts onSteer）据 false 恢复草稿（restoreSegments），
+   * 否则 clearInput 已清空的输入静默丢失。
    *
    * 显式接收 sessionId：与 send 同理，per-panel 隔离，不读全局 activeId。
    */
@@ -956,19 +707,10 @@ export function createUseChat(deps: UseChatDeps) {
     const promptText = segmentsToPrompt(segments)
     if (!promptText.trim() || !chat.isActive(sid)) return true
 
-    // [steer-bubble u2] pending 暂存（**不进对话流**）：steer 提交先写 pendingBuffer 暂存
-    // （store.pushPending），投递时经腿 1（queue_update drain 差集）/ 腿 2（message_end(user)
-    // includes 兜底）消费入流（docs/design/steer-followup-user-bubble-display.md D1）。
-    // S7「steer 发出后立即入流，投递时转 complete」的旧设计与实现早已背离（pending 从
-    // 不进对话流），过时注释易误导后续维护——本注释为设计 §2 根因 3 的文档性收尾。
-    // [W1] API 失败（WS 断连/steer_failed envelope/hook 拦截）回滚 pending + toast 提示，
-    // 不 throw（错误已消化：pending 已回滚 + 用户已得反馈；throw 只会变 unhandled rejection）。
-    chat.pushPending(sid, segments, 'steer')
     try {
-      await deps.chatApi.steer(sid, promptText)
+      await submitNewMessage(sid, segments, promptText)
       return true
     } catch (e) {
-      chat.abortPending(sid, promptText, 'steer')
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.supplementSendFailed', { msg }))
       return false
@@ -976,7 +718,8 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
-   * 追加 follow-up：把消息排入 followUp 队列，当前回合结束后另起一轮处理。
+   * 追加 follow-up——[u3b/D1] 统一 submit 化（同 steer：内核 queued 车道承接「当前回合
+   * 结束后另起一轮」语义，pendingBuffer 暂存退役）。
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
    * 显式接收 sessionId：与 send 同理，per-panel 隔离。
@@ -993,16 +736,9 @@ export function createUseChat(deps: UseChatDeps) {
       return
     }
 
-    // [steer-bubble u2] pending 暂存（**不进对话流**）：followUp 提交先写 pendingBuffer
-    // 暂存（store.pushPending），turn 结束投递时经腿 1 / 腿 2 消费入流（同 steer，见该处
-    // 注释；S7 过时注释清理亦同）。混合提交下 followUp 待投递期间 QueueBubble 持续显示
-    //（G-023 条件清），其投递时腿 1 prev 在场——F4 修复后的正常路径。
-    // [W1] API 失败回滚 pending + toast 提示（同 steer，不 throw）。
-    chat.pushPending(sid, segments, 'follow-up')
     try {
-      await deps.chatApi.followUp(sid, promptText)
+      await submitNewMessage(sid, segments, promptText)
     } catch (e) {
-      chat.abortPending(sid, promptText, 'follow-up')
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.nextTurnSendFailed', { msg }))
     }
@@ -1136,8 +872,8 @@ export function createUseChat(deps: UseChatDeps) {
    * `(sessionId, userMessageId, segments: Segment[])`。调用方（Turn.vue submitEdit）
    * 负责构造 segments——从原 user message 保留 image segments + 编辑后的 text segment。
    *
-   * 委托 submitSegments：与 send 同通路（segmentsToPrompt + chatApi.send），image 段
-   * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
+ * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
+ * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
    *
    * 显式接收 sessionId：编辑可发生在非 active 的 standby panel，不能依赖全局 activeId。
    *
@@ -1148,33 +884,16 @@ export function createUseChat(deps: UseChatDeps) {
   async function editAndResend(sessionId: string, userMessageId: string, segments: Segment[]): Promise<void> {
     const promptText = segmentsToPrompt(segments)
     if (!promptText.trim() || chat.isActive(sessionId)) return
-    // [session-dead 第三环] 用户重新发送（编辑重发路线）：同 send，清连续失败计数
-    deferFlushFailureCounts.delete(sessionId)
     chat.truncateFrom(sessionId, userMessageId, true)
-    // appendUser 返回生成的 user message id（u-<uuid>），作为 clientUuid 传给 submitSegments
-    // （写 segments.json sidecar + prompt 标记，建立 clientUuid ↔ pi userEntryId 映射）。
-    const clientUuid = chat.appendUser(sessionId, segments)
-    // [A2] 记录未决直发（与 send 同一消歧/回滚通路）：editAndResend 仅 idle 态可用，
-    // 但提交到 ack 之间仍有竞态窗口（occupancy 刚翻忙）——被拒时 send.rejected handler
-    // 据此回滚乐观气泡（否则气泡残留，重开 session 消失，live ≠ reload）。
-    // holdsInflight=false：editAndResend 不挂 inflight 配额（steer-bubble u2 契约——其
-    // message_end 走腿 2 includes 不命中跳过，无需配额），handler 不 decrement。
-    pendingDirectSends.set(sessionId, { clientUuid, text: promptText, holdsInflight: false })
-    ensureStreamSubscription(sessionId, chat, session, subDeps)
-    chat.addPendingSend(sessionId)
+    // [u3b/D1] 与 send 同一统一 submit 编排（乐观气泡 + inflight 占位 + delivery.submit）：
+    // 编辑重发同样持有确认配额（其 message_end 走 ① 标记匹配回收），失败统一回滚。
     try {
-      // S4：复用上面算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
-      await submitSegments(sessionId, segments, clientUuid, promptText)
+      await submitNewMessage(sessionId, segments, promptText)
     } catch (e) {
-      // [W2] 错误处理策略与 send/steer/followUp/abort 对齐：清 pendingSend + toast，不 throw。
+      // [W2] 错误处理策略与 send/steer/followUp/abort 对齐：toast + 不 throw。
       // 消费侧 Turn.vue submitEdit 无 try/catch，不 throw 避免其产生 unhandled rejection（错误已通过 toast 消化）。
-      chat.clearPendingSend(sessionId)
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))
-    } finally {
-      // [A2] 未决记录收口（与 send finally 同款）：WS FIFO 保证 rejected 帧先于 RPC reply
-      // 处理（handler 已消费记录）；RPC 失败时无 rejected 帧，此处删除防泄漏。
-      pendingDirectSends.delete(sessionId)
     }
   }
 
@@ -1276,8 +995,8 @@ export function createUseChat(deps: UseChatDeps) {
     coalescer.flush(sessionId)
     // [u4d] 截断窗口状态由下方 chat.disposeSession 内统一清理（store 分区），无需单独清
     manualCompactionState.delete(sessionId) // MF-1：清 manual compact 标记
-    pendingDirectSends.delete(sessionId) // D2：清未决直发记录（session 已销毁，rejected 不再有意义）
-    clearDeferFlushRetryTimer(sessionId) // [簇 A1] 清 flush 重投 timer（session 已销毁，重投无意义）
+    // [投递所有权内核 u3b] 清内核投影 + morph 段（session 已销毁，帧/回执不再有意义）
+    clearDeliveryProjection(sessionId)
     // wave:renderer-subscribe：清除 MessageBus 订阅状态（SubscriptionState）。
     // 与 streamSubscriptions.delete 配对——session 删除后若不清，routeInbound 的 gap 检测
     // 仍会读残留 state（lastSeenSeq 基线 stale），且 Map 永久增长。
@@ -1302,10 +1021,9 @@ export function createUseChat(deps: UseChatDeps) {
     disposeSession,
     sendBash,
     abortBash,
-    // [session-dead 结构性修复 D3] forceQuit 队列回收编排消费：清重投 timer + 失败计数
-    clearDeferFlushRetryTimer,
-    // [session-dead G1] forceQuit 后清 pi queue_update 快照（气泡残留修复）——steer 队列随
-    // pi 死亡作废，restore 后无 queue_update 帧再清它；转发 core store 同名 action
+    // [session-dead G1 → u3b 注记] forceQuit 后清 pi queue_update 快照——queueStates 分区
+    // 已随 queue_update 计数腿退役不再写入（本转发保持返回面稳定，最终清理归 u5）；
+    // 队列区数据源 = session.delivery 投影（disposeSession → clearDeliveryProjection 清理）。
     clearQueueState: (sessionId: string) => chat.clearQueueState(sessionId),
   }
 }

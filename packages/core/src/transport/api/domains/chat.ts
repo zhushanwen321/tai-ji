@@ -1,13 +1,26 @@
 /**
- * Chat 域 —— send/abort/streamSubscribe。
+ * Chat 域 —— delivery.submit/cancel/drain/resync + send/abort/streamSubscribe。
  *
- * 依赖方向：command（RPC，send/abort/steer/followUp/compact/getHistory）+ events（streamSubscribe 路由）。
+ * 依赖方向：command（RPC，delivery 四面 / send/abort/steer/followUp/compact/getHistory）+ events（streamSubscribe 路由）。
  *
  * 注意：streamSubscribe 的 handler 参数类型是 ServerMessageUnion（shared 协议类型），
  * 不臆造 StreamChunk。调用方在 handler 内过滤 message.text_delta 等事件。
  * 注：mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { Message, ServerMessageUnion } from '@taiji/shared'
+import type {
+  Message,
+  ServerMessageMap,
+  ServerMessageUnion,
+} from '@taiji/shared'
+
+/**
+ * delivery reply DTO 索引派生别名（u-contracts 契约；shared 根入口白名单暂不可命名
+ * import——实施计划残留风险 #8，收编归 u3a；ServerMessageMap 已导出，索引派生零漂移）。
+ */
+type DeliverySubmitReply = ServerMessageMap['delivery.submit']
+type DeliveryCancelReply = ServerMessageMap['delivery.cancel']
+type DeliveryDrainReply = ServerMessageMap['delivery.drain']
+type DeliveryResyncReply = ServerMessageMap['delivery.resync']
 import {
   BASH_RPC_TIMEOUT_MS,
   COMPACT_RPC_TIMEOUT_MS,
@@ -93,7 +106,63 @@ export function send(
   )
 }
 
-/** 追加 steer（当前回合工具调用结束后、下次 LLM 调用前投递） */
+// ── delivery 域（投递所有权内核 D1/D5）────────────────────────────────────────
+// renderer 统一提交/单条撤销/全量回收/断连重报的客户端封装。lane 判定在 runtime 内核
+// （D1——renderer 只提交不判定）；内核排队取代拒绝（send.rejected 全链退役，D5）。
+// 旧 message.send/steer/followUp 封装保留（退役归 u5 收口——A6 测试锁 + plugin-service
+// 存量调用方经 runtime 侧 message.send 内核适配器透明承接）。
+
+/**
+ * 统一提交入口（delivery.submit，D1/D7）：乐观气泡后一律走本 RPC，lane（direct/steer/queued）
+ * 由 runtime 内核判定。reply 携带初始 lane 与条目态（DeliverySubmitReply）；权威状态演进
+ * 经 session.delivery 状态帧（全量快照）推送，reply 仅作提交受理确认，不驱动 UI 状态机。
+ *
+ * clientUuid = 乐观气泡 id（appendUser 产物 `u-<uuid>`）：内核条目 id、出站裸标记身份源
+ * （D2）、resync 判重锚（D5②）。images 形态对齐 message.send（base64，不含 data: 前缀）；
+ * undefined 时不带键（payload 归一模式对称）。
+ */
+export function submitDelivery(
+  sessionId: string,
+  content: string,
+  clientUuid: string,
+  images?: Array<{ data: string; mimeType: string }>,
+): Promise<DeliverySubmitReply> {
+  return sendCommand(
+    'delivery.submit',
+    images
+      ? { sessionId, content, images, clientUuid }
+      : { sessionId, content, clientUuid },
+    RPC_BACKSTOP_TIMEOUT_MS,
+  )
+}
+
+/**
+ * 单条撤销（delivery.cancel，V9/V10）：queued 态立即移除；投递中（在 pi 槽位）走内核
+ * clear_queue 全收→标记识别→其余重投。cancelled=false = 不可撤（已 delivered 或收回失败
+ * ——条目由对账器下轮兜底，调用方提示「已投递不可撤」）；撤销成功时 reply 携带全文 +
+ * segments 快照（D7/ADR-0043），供文本回输入框草稿。
+ */
+export function cancelDelivery(sessionId: string, clientUuid: string): Promise<DeliveryCancelReply> {
+  return sendCommand('delivery.cancel', { sessionId, clientUuid }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 全量回收（delivery.drain，D10/V11）：forceQuit 专用（abort 不清队列）。返回全部被回收
+ *  条目（发送序，全文 + segments 快照），文本回草稿。 */
+export function drainDelivery(sessionId: string): Promise<DeliveryDrainReply> {
+  return sendCommand('delivery.drain', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 断连/刷新重连后重报本地未确认条目（delivery.resync，D5）：clientUuid 幂等去重在 runtime
+ * （终态判重 tombstone D5②）；reply.deduped = 命中判重记录的 uuid（调用方据此丢弃本地残留），
+ * 存留条目的权威状态经 session.delivery 快照帧恢复（last-value 单源）。
+ */
+export function resyncDelivery(sessionId: string, clientUuids: string[]): Promise<DeliveryResyncReply> {
+  return sendCommand('delivery.resync', { sessionId, clientUuids }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 追加 steer（当前回合工具调用结束后、下次 LLM 调用前投递）。
+ *  [u3b/D5] renderer 发送链已收敛 delivery.submit，本封装仅存续至 u5 协议退役（无 core 内活调用方）。 */
 export function steer(sessionId: string, text: string): Promise<void> {
   return sendCommand('message.steer', { sessionId, content: text }, RPC_BACKSTOP_TIMEOUT_MS)
 }

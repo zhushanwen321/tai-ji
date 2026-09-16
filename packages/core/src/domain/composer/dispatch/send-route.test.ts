@@ -1,9 +1,10 @@
 /**
- * resolveSendRoute 单元测试（session-occupancy u5b / D6 路由表六行逐一断言）。
+ * resolveSendRoute 单元测试（u5b D6 六行表 → u3b/D1 降级为发送位 UI 预测，六行语义不变）。
  *
- * 被测对象：domain/composer/dispatch/send-route.ts —— sessionPhase → sendRoute 纯函数。
- * 验收条款（u5b）：② D6 路由表六行逐一断言（含 threshold 形态 generating+compacting → steer、
- * settling → defer、bash+idle → defer）。
+ * 被测对象：domain/composer/dispatch/send-route.ts —— sessionPhase → 发送位预测形态纯函数。
+ * [u3b/D1] 本表已非投递决策（lane 判定收归 runtime 内核，renderer 统一 delivery.submit），
+ * 保留职责 = Composer 发送位按钮形态预测；六行预测语义与内核判定同构（同读 occupancy
+ * 三维投影），'defer' 字面随 defer 队列退役改为 'queued'（内核车道语义对齐）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send-route.test.ts
  */
@@ -15,8 +16,8 @@ function phase(over: Partial<{ turn: 'idle' | 'dispatching' | 'generating' | 'se
   return { ...IDLE_SESSION_PHASE, ...over }
 }
 
-describe('resolveSendRoute —— D6 路由表六行', () => {
-  it('行 1：全 idle → direct（flush 触发的解除形态）', () => {
+describe('resolveSendRoute —— 发送位预测表六行（u3b/D1 UI 预测）', () => {
+  it('行 1：全 idle → direct（预测「提交即直达」）', () => {
     expect(resolveSendRoute(IDLE_SESSION_PHASE)).toBe('direct')
     expect(resolveSendRoute(phase({ turn: 'idle', compacting: false, bash: false }))).toBe('direct')
   })
@@ -26,26 +27,24 @@ describe('resolveSendRoute —— D6 路由表六行', () => {
     expect(resolveSendRoute(phase({ turn: 'generating' }))).toBe('steer')
   })
 
-  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ steer（优先级倒挂消除）', () => {
-    // turn 活跃优先于 compacting 维度：压缩后 turn 继续跑，消息经 steer 在压缩完成的
-    // 下一次 LLM 调用前投递（不产生 pending 气泡——steer 分档正确）。
+  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ steer（turn 活跃优先）', () => {
     expect(resolveSendRoute(phase({ turn: 'generating', compacting: true }))).toBe('steer')
     expect(resolveSendRoute(phase({ turn: 'dispatching', compacting: true }))).toBe('steer')
   })
 
-  it('行 4：turn=settling（无论是否 compacting）→ defer（settling 是收尾不是活跃 turn）', () => {
-    expect(resolveSendRoute(phase({ turn: 'settling' }))).toBe('defer')
-    expect(resolveSendRoute(phase({ turn: 'settling', compacting: true }))).toBe('defer')
+  it('行 4：turn=settling（无论是否 compacting）→ queued（settling 是收尾不是活跃 turn）', () => {
+    expect(resolveSendRoute(phase({ turn: 'settling' }))).toBe('queued')
+    expect(resolveSendRoute(phase({ turn: 'settling', compacting: true }))).toBe('queued')
   })
 
-  it('行 5：turn=idle + compacting（manual / overflow / 工具触发）→ defer', () => {
-    expect(resolveSendRoute(phase({ turn: 'idle', compacting: true }))).toBe('defer')
+  it('行 5：turn=idle + compacting（manual / overflow / 工具触发）→ queued', () => {
+    expect(resolveSendRoute(phase({ turn: 'idle', compacting: true }))).toBe('queued')
   })
 
-  it('行 6：bash=true 且 turn=idle → defer（bash 结束解除 defer，flush 随 idle 广播自然触发）', () => {
-    expect(resolveSendRoute(phase({ turn: 'idle', bash: true }))).toBe('defer')
-    // 组合形态：settling + bash 同忙仍 defer（任一维度忙即 defer）
-    expect(resolveSendRoute(phase({ turn: 'settling', bash: true }))).toBe('defer')
+  it('行 6：bash=true 且 turn=idle → queued（bash 结束后内核解除）', () => {
+    expect(resolveSendRoute(phase({ turn: 'idle', bash: true }))).toBe('queued')
+    // 组合形态：settling + bash 同忙仍 queued（任一维度忙即排队预测）
+    expect(resolveSendRoute(phase({ turn: 'settling', bash: true }))).toBe('queued')
   })
 
   it('优先级：turn 活跃优先于 bash / compacting 维度（判定顺序 = 先 turn → 再维度）', () => {

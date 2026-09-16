@@ -122,6 +122,30 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[0][0]).toBe('message.abortBash')
   })
 
+  // ── [投递所有权内核 u3b/D5] delivery 四面封装 ──
+  it('delivery.submit：type/payload 透传（无 images 不带键）+ reply 解包', async () => {
+    mockCommand.mockImplementation(async () => ({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }))
+    const r = await chat.submitDelivery('s1', 'hi', 'u-x')
+    expect(mockCommand.mock.calls[0][0]).toBe('delivery.submit')
+    expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', clientUuid: 'u-x' })
+    expect(mockCommand.mock.calls[0][2]).toBe(RPC_BACKSTOP_TIMEOUT_MS)
+    expect(r).toEqual({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' })
+    const images = [{ data: 'abc', mimeType: 'image/png' }]
+    await chat.submitDelivery('s1', 'hi', 'u-x', images)
+    expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', content: 'hi', images, clientUuid: 'u-x' })
+  })
+
+  it('delivery.cancel / drain / resync 走对应 type + payload 形状', async () => {
+    mockCommand.mockImplementation(async () => ({ sessionId: 's1', entries: [] }))
+    await chat.cancelDelivery('s1', 'u-x')
+    expect(mockCommand.mock.calls[0]).toEqual(['delivery.cancel', { sessionId: 's1', clientUuid: 'u-x' }, RPC_BACKSTOP_TIMEOUT_MS])
+    await chat.drainDelivery('s1')
+    expect(mockCommand.mock.calls[1][0]).toBe('delivery.drain')
+    expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1' })
+    await chat.resyncDelivery('s1', ['u-a', 'u-b'])
+    expect(mockCommand.mock.calls[2]).toEqual(['delivery.resync', { sessionId: 's1', clientUuids: ['u-a', 'u-b'] }, RPC_BACKSTOP_TIMEOUT_MS])
+  })
+
   it('streamSubscribe 经 events.on 注册并返回其取消函数', () => {
     const off = vi.fn()
     mockOn.mockReturnValue(off)

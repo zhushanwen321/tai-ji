@@ -114,38 +114,16 @@ export interface EnsureStreamSubDeps {
   /**
    * [u4b 收窄] handler 内 chatApi 的唯一用法是 streamSubscribe（ensureStreamSubscription
    * 是订阅建立入口，不做 RPC）。宽→窄收窄对既有消费方结构兼容（完整 ChatApiPort 满足
-   * Pick 子集），u4b 的 submitQueuedEntry 依赖组装得以按实际用量窄化注入。
+   * Pick 子集）。
+   * [投递所有权内核 u3b] getCompactQueue 成员已随 defer flush/S1/timer/熔断退役摘除。
    */
   chatApi: Pick<ChatApiPort, 'streamSubscribe'>
   /**
-   * [session-dead 第三环] error = 操作失败；warning = defer 重投连续失败达阈值的「可能卡死、
-   * 需用户处置」信号（与 error 语义区分，壳侧 useToast().warning 对接）。
+   * [session-dead 第三环] error = 操作失败；warning = 需用户处置的信号（与 error 语义区分，
+   * 壳侧 useToast().warning 对接）。
    */
   toast: { error: (msg: string) => void; warning: (msg: string) => void }
   t: (key: string, params?: Record<string, unknown>) => string
-  getCompactQueue: () => CompactQueueLike
-}
-
-/**
- * [session-occupancy u4b / D5.1] submitQueuedEntry 的依赖注入（TD5 同款：模块级导出函数
- * 拿不到 createUseChat 闭包 deps，接收显式 deps 子集；renderer flush 侧组装）。
- */
-export interface SubmitQueuedEntryDeps {
-  /** send/steer/streamSubscribe：flush 逐条提交的全部 RPC 面（窄化注入，同上方收窄理由） */
-  chatApi: Pick<ChatApiPort, 'send' | 'steer' | 'streamSubscribe'>
-  /**
-   * [defer segments 化 / D-A1-2] 写 segments.json sidecar（session.writeSegments RPC）——
-   * 富内容条目（含非 text 段）提交时按 deferEntryId 写，重开 session 回填 badge。
-   * fire-and-forget（失败 console.warn 不阻断，对齐 submitSegments 的 sidecar 写模式）。
-   */
-  writeSegments: WriteSegmentsFn
-  /** chat store：send 通道挂 inflight 占位 + 透传 ensureStreamSubscription */
-  chat: ChatStoreInstance
-  sessionStore: SessionStoreLike
-  /** [session-dead 第三环] 同 EnsureStreamSubDeps：本 deps 向 ensureStreamSubscription 透传 toast 端口 */
-  toast: { error: (msg: string) => void; warning: (msg: string) => void }
-  t: (key: string, params?: Record<string, unknown>) => string
-  getCompactQueue: () => CompactQueueLike
 }
 
 /**
@@ -153,17 +131,18 @@ export interface SubmitQueuedEntryDeps {
  *
  * - chatApi：chat 域后端唯一通道（IF6 ChatApiPort）
  * - writeSegments：写 segments.json sidecar（session 域 RPC，useChat 消费者）
- * - getChatStore/getSessionStore/getCompactQueue：getter 函数（延迟调用，规避 pinia/composable
+ * - getChatStore/getSessionStore：getter 函数（延迟调用，规避 pinia/composable
  *   必须在 setup 上下文调用的约束；factory 调用时机与 store 实例化解耦）
  * - toast/t：壳层 UI/i18n 注入（core 不绑 toast/i18n 实现）
+ * [投递所有权内核 u3b] getCompactQueue 成员已随 defer 队列状态机退役摘除；
+ * CompactQueueLike/CompactQueueEntrySnapshot 类型保留至 u3c useCompactQueue 退役后清扫。
  */
 export interface UseChatDeps {
   chatApi: ChatApiPort
   writeSegments: WriteSegmentsFn
   getChatStore: () => ChatStoreInstance
   getSessionStore: () => SessionStoreLike
-  /** [session-dead 第三环] warning 同 EnsureStreamSubDeps（defer 重投熔断的行动信号） */
+  /** [session-dead 第三环] warning 同 EnsureStreamSubDeps */
   toast: { error: (msg: string) => void; warning: (msg: string) => void }
   t: (key: string, params?: Record<string, unknown>) => string
-  getCompactQueue: () => CompactQueueLike
 }

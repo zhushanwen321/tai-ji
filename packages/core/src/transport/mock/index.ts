@@ -215,6 +215,8 @@ const cancelled = new Set<string>()
 /** 运行中的 setTimeout 句柄，resolve 后自动移除，避免 Set 无限增长 */
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 定时器句柄集合
 const timers = new Set<ReturnType<typeof setTimeout>>()
+/** session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义） */
+const DELIVERY_PREVIEW_MAX_CHARS = 80
 /**
  * mock 队列状态镜像（steer/followUp pending）。
  * steer/followUp 入队时 push + emit 全量 queue_update（QueueBubble 渲染），
@@ -704,6 +706,38 @@ export const chat = {
         timestamp: Date.now(),
       },
     })
+  },
+
+  /**
+   * [投递所有权内核 u3b] 统一提交 mock：与 send 同流（ack + 流式序列），并广播一条
+   * session.delivery 快照帧（direct/in-flight）供前端投影/morph 链路在 mock 模式可见。
+   * 内核状态机不在 mock 层复刻（真实形态由 runtime 侧 u2/u3a 提供）——mock 只保证
+   * 「提交 → 快照帧 → 回执」三帧在 mock 模式可达。
+   */
+  async submitDelivery(
+    sessionId: string,
+    text: string,
+    clientUuid: string,
+    _images?: Array<{ data: string; mimeType: string }>,
+  ): Promise<ServerMessageMap['delivery.submit']> {
+    cancelled.delete(sessionId)
+    await sleep(TIMING.ack)
+    emit(sessionId, {
+      type: 'session.delivery',
+      payload: {
+        sessionId,
+        entries: [{ clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS), state: 'in-flight', lane: 'direct' }],
+      },
+    })
+    void runSendStream(sessionId, text, {
+      nextId,
+      emit,
+      sleep,
+      pushSession,
+      isCancelled: (s) => cancelled.has(s),
+      TIMING,
+    })
+    return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
   /**
