@@ -172,3 +172,4 @@ graph TD
 - 2026-09-16 v2：u1/u2/u3/u4 committed；u4 归属修正（core collect 路由并入 u5）；S5 期门结论 = 静默忽略分支；ledger 基建落点核实（风险 #1 解除）；u6 样本定位
 - 2026-09-16 v3：u5 首任 dev 因 provider 限流中断（运行 64min，零产出，工作区干净）——按接替程序补派新 dev 从零执行（前任无可附证据包），轮次 +1
 - 2026-09-16 v4：阶段 3 三区一致性审查完成（90 文件 +2892/−8111）。**三区均无 P0/P1 违背，D1-D9 契约逐条通过**。聚合：unreasonable 7 条（P2×2 + P3×5）、doc_errors 5 条（设计文档 3 处——D4 outcome 死枚举 "error"/D5① promptGuidelines 不存在前提/D3 spec 清单缺三字段——主 agent 亲修完毕；项目 docs 2 处归修复组）、reasonable 12 条已登记。修复批次 2 组并行派发（组1 core 代码面 / 组2 shell+文档面；S3 新文案由编排者裁定固定消除组间依赖）
+- 2026-09-16 v5：修复批次双双核验流转——组1 core（commit 06923f617：S3 拒绝文案新句 + 依赖闭包修正；pre-commit 全绿，定向测试 42/42 含新句逐字断言）、组2 shell+docs（commit f0026b5f3：e2e-map 三处更正 + constants.ts 注释收敛 W18 表述）。攒批微修（复审回流 3 处 D5 悬空引用）commit b18759086——执行 agent 同文件扩改 4 处同款引用（领地内纯措辞，语义不变，核验通过：diff 逐行确认 + vitest 970/970 复现）。定向复审（只审两修复 commit 影响面）在途，到达后记 v6
