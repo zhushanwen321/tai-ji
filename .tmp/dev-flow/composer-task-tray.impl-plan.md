@@ -162,6 +162,11 @@ graph TD
 | D10 | u-tabbar | 探针 P5 降级路径（模块级 per-widgetKey active 缓存）未启用 | 行为测试证明经 GuiComponentRenderer setProps 推送后 DOM 元素同一（组件未重建）+ 本地选择保持 | 接受——**探针 P5 ⛔ 门关闭（无需降级）** |
 | D11 | u-tabbar | 新增 `data-testid="gui-tab-bar-section"` / class `tab-bar__section` | section 容器定位锚点（供后续 e2e / 组件断言） | 接受 |
 | D12 | u-tabbar | 「无 sections 与现状完全一致」精确口径 = 元素/class/属性/交互一致；fragment 根新增两个注释节点（v-if 占位 + 模板说明注释） | 无元素计数/样式/text() 影响（CSS 结构伪类与邻接选择器忽略注释节点） | 接受 |
+| D13 | u-tray-widget | icon key 解析 = 宿主 registry 白名单（10 条，命中前归一化大小写/-/_）而非 `@lucide/vue` 全量 namespace 解析 | namespace import 击穿 tree-shaking（1500+ icon 进 renderer bundle） | 接受（未知名走兜底链 + warn 一次；已文件头登记） |
+| D14 | u-tray-widget | 非法/越限自定义 paths 的下一档取「宿主内置 widgetKey 映射」（'todo' 坏 paths 仍显 ListChecks），非直接通用 icon | 按派发链序实现（自定义 → key → 内置映射 → 通用） | 接受（设计 §3.1「落兜底通用 icon」为宽松措辞，安全性同一；登记备查） |
+| D15 | u-tray-widget | 组件 props 驱动（不 inject ViewHostStore）；单一数据源 = 外壳 entries computed | 与 WidgetArea 模式一致（区级 computed → 子组件 props），避免第二份真相 | 接受（依赖追踪复刻写入 tray-widget.test.ts 的「外壳契约复刻」含反证用例，供 u-tray-shell 照抄） |
+| D16 | u-tray-widget | 新增原型链防护：内置 icon 映射用 Map、status→色用 switch | viewId/status 由 extension 决定且 core 只校验 meta.title；裸对象下标会把 'constructor' 等原型链键取成函数渲染 | 接受（新增脏数据防护用例） |
+| D17 | u-tray-widget | 无 fake timers 用例（两组件不持计时器；hover 计时归外壳） | 无 timer 路径可测 | 接受（头注写明后续引入计时时的 fake timers 范式） |
 
 ## 6 状态表
 
@@ -170,7 +175,7 @@ graph TD
 | u-proto | committed | 1 | commit「feat(tray): u-proto protocol fields...」；vitest 14 files/227 pass + tsc --noEmit ok + plugin-sdk 副本 identical=True + 主 agent 复核重跑同结果 |
 | u-tray-native | committed | 1 | commit「feat(tray): u-tray-native counts + native panel」；tray vitest 2 files/31 pass + check:i18n 201 pass + typecheck ok + 主 agent 重跑复核同结果；契约：pinned 必须由 u-tray-shell 透传 |
 | u-tabbar | committed | 1 | commit「feat(tray): u-tabbar sections container」；TabBar.test 16 pass + ui 全包 806 pass + ui typecheck ok + 主 agent 重跑复核同结果；P5 门关闭（见偏差 D10） |
-| u-tray-widget | pending | 0 | — |
+| u-tray-widget | committed | 1 | commit「feat(tray): u-tray-widget ordering + widget button/panel」；tray 目录 4 files/64 pass + typecheck(:test) ok + 主 agent 重跑复核同结果；对接契约（button props/emits、panel props、视觉序）已写入两组件文件头 |
 | u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
 | u-tray-shell | pending | 0 | — |
 | u-ext-todo | pending | 0 | — |
@@ -198,3 +203,4 @@ graph TD
 | 2026-09-16 | u-ext-goal committed（meta.icon='target'，badge 不补推见偏差 D1；vitest 403 绿，主 agent 重跑复核通过） |
 | 2026-09-16 | u-tray-native committed（useTrayCounts + TrayNativePanel + i18n tray 模块；tray vitest 31 绿 + check:i18n 201 绿，主 agent 重跑复核通过；偏差 D3-D7 登记） |
 | 2026-09-16 | u-tabbar committed（TabBar 容器化 + 本地 active + 探针 P5 门关闭；ui 806 绿，主 agent 重跑复核通过；偏差 D8-D12 登记，设计 §3.5 同步两行） |
+| 2026-09-16 | u-tray-widget committed（排序/按钮/面板 + 依赖追踪复刻契约测试；tray 64 绿，主 agent 重跑复核通过；偏差 D13-D17 登记） |
