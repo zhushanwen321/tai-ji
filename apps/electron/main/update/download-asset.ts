@@ -1047,8 +1047,8 @@ function buildFetchOptions(
 /**
  * 探测目标是否支持多段并行下载（GET `Range: bytes=0-0` 检查 206 + Content-Range total）。
  *
- * [多源改造] 原 HEAD + accept-ranges 判定废弃：GitCode（AtomGit 下载域）实测禁 HEAD，
- * HEAD 探测会让 AtomGit 源多段静默退化为单段；且 RFC 7233 对 206 仅强制 Content-Range，
+ * [多源改造] 原 HEAD + accept-ranges 判定废弃：GitCode（下载域）实测禁 HEAD，
+ * HEAD 探测会让 GitCode 源多段静默退化为单段；且 RFC 7233 对 206 仅强制 Content-Range，
  * accept-ranges 在该形态不可依赖。改为 GET `Range: bytes=0-0`（走 upgradeFetch 双引擎
  * 与超时语义不变），四出口归类（全形态显式，判定解析失败不抛错只落 not supported）：
  *   ① 206 + `Content-Range: bytes 0-0/{total}` 且 total ≥ MIN_MULTI_PART_SIZE → supported；

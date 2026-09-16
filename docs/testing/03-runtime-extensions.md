@@ -477,7 +477,7 @@ bash scripts/validate-runtime-bundle.sh    # 作为第 7 步自动运行（pre-c
 | testid | 组件 | 所在文件 |
 |---|---|---|
 | switch-auto-update | 自动更新开关 | packages/renderer/src/components/settings/update/UpdatePage.vue |
-| select-update-source | 更新来源三选 Select（自动（推荐）/GitHub/AtomGit，切换即持久化） | packages/renderer/src/components/settings/update/UpdatePage.vue |
+| select-update-source | 更新来源三选 Select（自动（推荐）/GitHub/GitCode，切换即持久化） | packages/renderer/src/components/settings/update/UpdatePage.vue |
 | current-version-pill | 当前版本 pill | packages/renderer/src/components/settings/update/UpdatePage.vue |
 | switch-pre-download | 预下载开关 | packages/renderer/src/components/settings/update/UpdatePage.vue |
 | input-http-proxy / input-https-proxy | 代理输入（手动模式） | packages/renderer/src/components/settings/update/UpdatePage.vue |

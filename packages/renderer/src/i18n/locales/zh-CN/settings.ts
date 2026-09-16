@@ -883,7 +883,7 @@ export default {
     updateSourceLabel: '更新来源',
     updateSourceAuto: '自动（推荐）',
     updateSourceGithub: 'GitHub',
-    updateSourceAtomgit: 'AtomGit',
+    updateSourceGitcode: 'GitCode',
     currentVersionLabel: '当前版本',
     channelHint: 'stable 渠道 · 更新完成后需重启应用生效',
   },

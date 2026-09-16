@@ -60,16 +60,16 @@ function readEntries(): Array<Record<string, unknown>> {
 /** 基础 source-selection 输入（auto 探测形态）。 */
 function selectionInput(overrides?: Partial<SourceSelectionLogInput>): SourceSelectionLogInput {
   return {
-    order: ['github', 'atomgit'],
+    order: ['github', 'gitcode'],
     winner: 'github',
     probe: {
       executed: true,
       results: [
         { source: 'github', reachable: true, basis: 'undici-resolve' },
-        { source: 'atomgit', reachable: true, basis: 'curl-200' },
+        { source: 'gitcode', reachable: true, basis: 'curl-200' },
       ],
     },
-    tags: { github: 'v0.9.15', atomgit: 'v0.9.15' },
+    tags: { github: 'v0.9.15', gitcode: 'v0.9.15' },
     ...overrides,
   }
 }
@@ -78,9 +78,9 @@ function failoverInput(overrides?: Partial<SourceFailoverLogInput>): SourceFailo
   return {
     segment: 'check',
     from: 'github',
-    to: 'atomgit',
+    to: 'gitcode',
     errorCode: 'UPDATE_NETWORK_FAILED',
-    manifestFrom: 'atomgit',
+    manifestFrom: 'gitcode',
     ...overrides,
   }
 }
@@ -89,7 +89,7 @@ function downloadSuccessInput(overrides?: Partial<DownloadSuccessLogInput>): Dow
   return {
     multiPart: true,
     engine: 'undici',
-    releaseSource: 'atomgit',
+    releaseSource: 'gitcode',
     ...overrides,
   }
 }
@@ -121,48 +121,48 @@ describe('source-selection 登记', () => {
     const entry = entries[0]
     expect(entry.source).toBe('source-selection')
     expect(entry.at).toEqual(expect.any(String))
-    expect(entry.order).toEqual(['github', 'atomgit'])
+    expect(entry.order).toEqual(['github', 'gitcode'])
     expect(entry.winner).toBe('github')
     const probe = entry.probe as ProbeShape
     expect(probe.executed).toBe(true)
     expect(probe.results).toEqual([
       { source: 'github', reachable: true, basis: 'undici-resolve' },
-      { source: 'atomgit', reachable: true, basis: 'curl-200' },
+      { source: 'gitcode', reachable: true, basis: 'curl-200' },
     ])
-    expect(entry.tags).toEqual({ github: 'v0.9.15', atomgit: 'v0.9.15' })
+    expect(entry.tags).toEqual({ github: 'v0.9.15', gitcode: 'v0.9.15' })
   })
 
   it('降频：同输入不重复写；tags/探测结果/排序/胜出源任一变化才写', () => {
     // 起点输入与上一用例错开（winner + order 相异保证首步必写），本用例自含完整状态序列
-    const base = selectionInput({ winner: 'atomgit', order: ['atomgit', 'github'] })
+    const base = selectionInput({ winner: 'gitcode', order: ['gitcode', 'github'] })
     logSourceSelection(base)
     expect(readLogLines()).toHaveLength(1)
 
     // 完全相同输入：不写
-    logSourceSelection(selectionInput({ winner: 'atomgit', order: ['atomgit', 'github'] }))
+    logSourceSelection(selectionInput({ winner: 'gitcode', order: ['gitcode', 'github'] }))
     expect(readLogLines()).toHaveLength(1)
 
     // tags 变化：写（F5 观测面依赖维度）
     logSourceSelection(
       selectionInput({
-        winner: 'atomgit',
-        order: ['atomgit', 'github'],
-        tags: { github: 'v0.9.16', atomgit: 'v0.9.15' },
+        winner: 'gitcode',
+        order: ['gitcode', 'github'],
+        tags: { github: 'v0.9.16', gitcode: 'v0.9.15' },
       }),
     )
     let entries = readEntries()
     expect(entries).toHaveLength(2)
-    expect(entries[1].tags).toEqual({ github: 'v0.9.16', atomgit: 'v0.9.15' })
+    expect(entries[1].tags).toEqual({ github: 'v0.9.16', gitcode: 'v0.9.15' })
 
     // 探测结果变化：写
     logSourceSelection(
       selectionInput({
-        winner: 'atomgit',
-        order: ['atomgit', 'github'],
-        tags: { github: 'v0.9.16', atomgit: 'v0.9.15' },
+        winner: 'gitcode',
+        order: ['gitcode', 'github'],
+        tags: { github: 'v0.9.16', gitcode: 'v0.9.15' },
         probe: {
           executed: true,
-          results: [{ source: 'atomgit', reachable: true, basis: 'curl-200' }],
+          results: [{ source: 'gitcode', reachable: true, basis: 'curl-200' }],
         },
       }),
     )
@@ -173,28 +173,28 @@ describe('source-selection 登记', () => {
     // 排序变化：写
     logSourceSelection(
       selectionInput({
-        winner: 'atomgit',
-        order: ['github', 'atomgit'],
-        tags: { github: 'v0.9.16', atomgit: 'v0.9.15' },
+        winner: 'gitcode',
+        order: ['github', 'gitcode'],
+        tags: { github: 'v0.9.16', gitcode: 'v0.9.15' },
         probe: {
           executed: true,
-          results: [{ source: 'atomgit', reachable: true, basis: 'curl-200' }],
+          results: [{ source: 'gitcode', reachable: true, basis: 'curl-200' }],
         },
       }),
     )
     entries = readEntries()
     expect(entries).toHaveLength(4)
-    expect(entries[3].order).toEqual(['github', 'atomgit'])
+    expect(entries[3].order).toEqual(['github', 'gitcode'])
 
     // 胜出源变化：写
     logSourceSelection(
       selectionInput({
         winner: 'github',
-        order: ['github', 'atomgit'],
-        tags: { github: 'v0.9.16', atomgit: 'v0.9.15' },
+        order: ['github', 'gitcode'],
+        tags: { github: 'v0.9.16', gitcode: 'v0.9.15' },
         probe: {
           executed: true,
-          results: [{ source: 'atomgit', reachable: true, basis: 'curl-200' }],
+          results: [{ source: 'gitcode', reachable: true, basis: 'curl-200' }],
         },
       }),
     )
@@ -207,7 +207,7 @@ describe('source-selection 登记', () => {
     logSourceSelection(
       selectionInput({
         winner: 'github',
-        tags: { github: 'v0.9.17', atomgit: 'v0.9.15' },
+        tags: { github: 'v0.9.17', gitcode: 'v0.9.15' },
         probe: { executed: false, reason: 'proxy-short-circuit' },
       }),
     )
@@ -229,7 +229,7 @@ describe('source-selection 登记', () => {
           executed: true,
           results: [
             { source: 'github', reachable: false, basis: 'undici-connect-error' },
-            { source: 'atomgit', reachable: false, basis: 'curl-timeout' },
+            { source: 'gitcode', reachable: false, basis: 'curl-timeout' },
           ],
         },
       }),
@@ -253,16 +253,16 @@ describe('source-failover 登记', () => {
     expect(entry.source).toBe('source-failover')
     expect(entry.stage).toBe('checking')
     expect(entry.from).toBe('github')
-    expect(entry.to).toBe('atomgit')
+    expect(entry.to).toBe('gitcode')
     expect(entry.errorCode).toBe('UPDATE_NETWORK_FAILED')
-    expect(entry.manifestFrom).toBe('atomgit')
+    expect(entry.manifestFrom).toBe('gitcode')
   })
 
   it('下载段降级：stage=downloading；manifestFrom 缺省时 JSONL 不落该 key', () => {
     logSourceFailover(
       failoverInput({
         segment: 'download',
-        from: 'atomgit',
+        from: 'gitcode',
         to: 'github',
         errorCode: 'UPDATE_NETWORK_TIMEOUT',
         manifestFrom: undefined, // 显式抹掉基础值，断言缺省形态不落 key
@@ -271,7 +271,7 @@ describe('source-failover 登记', () => {
 
     const entry = readEntries()[0]
     expect(entry.stage).toBe('downloading')
-    expect(entry.from).toBe('atomgit')
+    expect(entry.from).toBe('gitcode')
     expect(entry.to).toBe('github')
     expect(entry.errorCode).toBe('UPDATE_NETWORK_TIMEOUT')
     expect('manifestFrom' in entry).toBe(false)
@@ -291,7 +291,7 @@ describe('download-success 登记', () => {
     expect(entry.stage).toBe('downloading')
     expect(entry.multiPart).toBe(true)
     expect(entry.engine).toBe('undici')
-    expect(entry.releaseSource).toBe('atomgit')
+    expect(entry.releaseSource).toBe('gitcode')
   })
 
   it('curl 引擎形态：multiPart=false 与 engine=curl 同条落盘（S1 注记形态）', () => {
@@ -358,7 +358,7 @@ describe('轮转通道复用（512KB×2 语义不回退）', () => {
 
     const current = readFileSync(TEST_LOG_PATH, 'utf-8')
     writeFileSync(TEST_LOG_PATH, current + 'y'.repeat(512 * 1024), 'utf-8')
-    logSourceFailover(failoverInput({ from: 'atomgit', to: 'github' }))
+    logSourceFailover(failoverInput({ from: 'gitcode', to: 'github' }))
 
     // 旧 .1（首轮大内容）被第二轮转覆盖为上一轮主文件内容（failover 条目）
     const rotated = readFileSync(`${TEST_LOG_PATH}.1`, 'utf-8')
@@ -366,7 +366,7 @@ describe('轮转通道复用（512KB×2 语义不回退）', () => {
     expect(rotated.startsWith('{"at"')).toBe(true)
     const entries = readEntries()
     expect(entries).toHaveLength(1)
-    expect(entries[0].from).toBe('atomgit')
+    expect(entries[0].from).toBe('gitcode')
   })
 
   it('未超阈值不轮转', () => {
@@ -402,7 +402,7 @@ describe('写入失败不抛（对齐既有容错语义）', () => {
 
   it('写失败不推进降频快照：恢复后同状态补写（不因一次落盘失败永久丢观测）', () => {
     mkdirSync(TEST_LOG_PATH, { recursive: true })
-    const input = selectionInput({ winner: null, tags: { atomgit: 'v0.9.19' } })
+    const input = selectionInput({ winner: null, tags: { gitcode: 'v0.9.19' } })
 
     // 写失败阶段：不抛（快照不推进）
     expect(() => logSourceSelection(input)).not.toThrow()

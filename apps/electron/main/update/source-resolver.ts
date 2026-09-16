@@ -5,12 +5,12 @@
  * §7.2（source-resolver.ts 行）。消费方：ReleaseChecker 构造注入 `{ resolveSourceOrder }`。
  *
  * 决策表（settings 来源偏好 → 源优先级序列）：
- *   - 显式偏好 github/atomgit → [该源, 对侧]（偏好语义 = 优先级而非独占，D3：
+ *   - 显式偏好 github/gitcode → [该源, 对侧]（偏好语义 = 优先级而非独占，D3：
  *     降级到对侧的能力恒在，本模块只决定顺序）
- *   - auto + 解析出代理 URL → [github, atomgit]（代理短路：能配代理 = github 可达
+ *   - auto + 解析出代理 URL → [github, gitcode]（代理短路：能配代理 = github 可达
  *     概率高，跳过探测省一次网络往返，目标 2「代理用户零额外延迟」）
  *   - auto + 无代理 → 并行探测两主域，可达者排前、均可达 github 优先（tie-break）、
- *     均不可达回退 [github, atomgit]（= 现状单源行为，不比现状差）
+ *     均不可达回退 [github, gitcode]（= 现状单源行为，不比现状差）
  *
  * 探测方法与判定语义（D4 关键细节）：
  *   - 不用 HEAD——本仓 sync 脚本实测「GitCode 禁 HEAD，用 GET Range 206」，HEAD 对
@@ -49,7 +49,7 @@ export type SourceOrder = UpdateSource[]
  * 取主域下载域而非 API 域：D4 被否谱系 b——探测是域名级链路判定，不打真实 API 端点。
  */
 const GITHUB_PROBE_URL = `https://${RELEASE_SOURCE_HOSTS.githubDownload}`
-const GITCODE_PROBE_URL = `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}`
+const GITCODE_PROBE_URL = `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}`
 
 /** 单位换算常量（消 no-magic-numbers，对齐 update-self-healer.ts 命名先例）。 */
 const MS_PER_SECOND = 1_000
@@ -163,11 +163,11 @@ export async function resolveSourceOrder(pref: UpdateSourcePref = 'auto'): Promi
   // 同时重置决策记录——显式偏好不是探测决策（见 lastProbeOutcome 维护口径）
   if (pref === 'github') {
     lastProbeOutcome = null
-    return ['github', 'atomgit']
+    return ['github', 'gitcode']
   }
-  if (pref === 'atomgit') {
+  if (pref === 'gitcode') {
     lastProbeOutcome = null
-    return ['atomgit', 'github']
+    return ['gitcode', 'github']
   }
 
   // auto：代理短路（readProxyConfig + resolveProxyUrl 现有 SSOT，proxy-config.ts）
@@ -179,7 +179,7 @@ export async function resolveSourceOrder(pref: UpdateSourcePref = 'auto'): Promi
       results: { github: { reachable: true } },
       decidedAt: Date.now(),
     }
-    return ['github', 'atomgit']
+    return ['github', 'gitcode']
   }
 
   // auto + 无代理：探测结果 TTL 缓存命中 → 不重复探测，决策详情恢复自缓存
@@ -201,15 +201,15 @@ export async function resolveSourceOrder(pref: UpdateSourcePref = 'auto'): Promi
   const gitcodeReachable = gitcodeProbe.status === 'fulfilled' && gitcodeProbe.value
 
   // 排序：github 可达恒排前（仅 github 可达 / 均可达 tie-break / 双败回退均落此分支）；
-  // 仅 gitcode 可达 → gitcode 排前（目标 1：国内自动落 AtomGit）
+  // 仅 gitcode 可达 → gitcode 排前（目标 1：国内自动落 GitCode）
   const order: SourceOrder =
-    githubReachable || !gitcodeReachable ? ['github', 'atomgit'] : ['atomgit', 'github']
+    githubReachable || !gitcodeReachable ? ['github', 'gitcode'] : ['gitcode', 'github']
 
   const outcome: ProbeOutcome = {
     via: 'probe',
     results: {
       github: { reachable: githubReachable },
-      atomgit: { reachable: gitcodeReachable },
+      gitcode: { reachable: gitcodeReachable },
     },
     decidedAt: now,
   }

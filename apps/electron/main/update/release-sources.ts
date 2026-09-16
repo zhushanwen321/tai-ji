@@ -1,26 +1,26 @@
 /**
- * Release 源适配层（多源改造 D1/D2）：GitHub / AtomGit 双源 fetch + normalize 单点。
+ * Release 源适配层（多源改造 D1/D2）：GitHub / GitCode 双源 fetch + normalize 单点。
  *
  * 设计：docs/design/update-multi-source.md
  * - §6.1 D1：源抽象收敛在本模块——fetchSourceRelease / fetchLatestRelease /
- *   fetchReleaseByTag 按源分派（github / atomgit 两个适配实现），输出统一 normalize
+ *   fetchReleaseByTag 按源分派（github / gitcode 两个适配实现），输出统一 normalize
  *   后的结构；checker 保持编排门面。
- * - §6.2 D2：AtomGit 字段差异在 normalize 层补齐（逐字段规格见 normalizeSourceRelease）。
+ * - §6.2 D2：GitCode 字段差异在 normalize 层补齐（逐字段规格见 normalizeSourceRelease）。
  * - §7.2：github 分支迁移自 release-checker.ts 的 doFetchGitHubLatestRelease
  *   （URL / headers / 形状守卫 / HTTP status 分流语义）；两源共用 upgradeFetch 双引擎
  *   + 代理通道参数（代理优先 + 网络失败降直连重试一次，对齐 fetchGitHubLatestRelease 编排）。
  *
  * M0 探针输入（impl-plan §0.1 实测，2026-09-07）：
- * - P1：AtomGit 附件（type=attach）browser_download_url 落域 gitcode.com
+ * - P1：GitCode 附件（type=attach）browser_download_url 落域 gitcode.com
  *   （by-tag 直链形态 releases/download/{tag}/{file}）→ 白名单精确登记一项。
- * - P6：AtomGit prerelease 为 boolean、draft/published_at/html_url 为 null、release_status 'none'
+ * - P6：GitCode prerelease 为 boolean、draft/published_at/html_url 为 null、release_status 'none'
  *   → `=== true` 收窄保留为防御性收窄（防 API 演化为字符串编码——先例见
  *   scripts/gitcode-release-sync.mjs createRelease 以 String(prerelease) 字符串编码写入，
- *   truthy 语义会把 "false" 误判为 true 致 AtomGit 源检查全灭）。
+ *   truthy 语义会把 "false" 误判为 true 致 GitCode 源检查全灭）。
  *
  * 错误分类（对齐 release-checker.ts 现状 catch 风格 + 适配层失败显式化）：
  * - ReleaseFetchError(kind)：'network'（网络失败/非法 JSON）/ 'rate-limited'（GitHub 403/429；
- *   AtomGit 无限流响应头，不识别限流，一律按 HTTP 失败收口 null）/ 'bad-shape'（形状守卫失败）。
+ *   GitCode 无限流响应头，不识别限流，一律按 HTTP 失败收口 null）/ 'bad-shape'（形状守卫失败）。
  *   u-checker 编排按 kind 把失败归入「该源失败」进源降级。
  * - 404/其他非 2xx 返回 null（服务器已响应、重试无意义，对齐 doFetchGitHubLatestRelease 现状；
  *   by-tag 无此 tag = 发布时间窗/部分同步失败窗口，null 交由调用方判定对侧不可用）。
@@ -31,7 +31,7 @@
  *   （对方已标 [同构副本声明]），非领地阻塞；收敛前提 = 本模块导出组装辅助（当前私有），
  *   切换单一来源的评估留待后续 cleanup。
  * - ReleaseAsset.size 已于 shared 落地可选化（size?: number，commit 363b9b7fe），
- *   AtomGit 无 API size（§6.2 规格：undefined，由 checker manifest fallback 填充）。
+ *   GitCode 无 API size（§6.2 规格：undefined，由 checker manifest fallback 填充）。
  *
  * 依赖方向：release-sources → @taiji/shared + ./proxy-config + ./upgrade-fetch。
  * 不 import release-checker（u-checker 将反向消费本模块，避免循环依赖）。
@@ -44,7 +44,7 @@ import { upgradeFetch, isCurlHttpStatusError } from './upgrade-fetch.js'
 // validate-release 白名单 / source-resolver 探测域 / 本模块 API 端点均消费此处，
 // 防「白名单域」与「适配器产物落域」两处漂移（D1 效果段防漂移断言的锚点）。
 
-/** 两源 API 域与下载域（命名事实：平台名 AtomGit，域名保持 GitCode 客观事实，设计 §1） */
+/** 两源 API 域与下载域（平台与域名统一为 GitCode，2026-09 平台更名；旧值序列化兼容见 update-settings normalize，设计 §1） */
 export const RELEASE_SOURCE_HOSTS = {
   /** GitHub API 域 */
   githubApi: 'api.github.com',
@@ -52,20 +52,20 @@ export const RELEASE_SOURCE_HOSTS = {
   githubDownload: 'github.com',
   /** GitHub 下载 302 二跳落域（签名 CDN，历史白名单成员） */
   githubAssetsCdn: 'objects.githubusercontent.com',
-  /** AtomGit（GitCode）API 域 */
-  atomgitApi: 'api.gitcode.com',
-  /** AtomGit 下载直链域（P1 探针实测附件落域） */
-  atomgitDownload: 'gitcode.com',
+  /** GitCode API 域 */
+  gitcodeApi: 'api.gitcode.com',
+  /** GitCode 下载直链域（P1 探针实测附件落域） */
+  gitcodeDownload: 'gitcode.com',
 } as const
 
 /**
- * 下载域白名单（install 前校验的同源集合，D6）：GitHub 现行 2 域 + AtomGit 下载域。
+ * 下载域白名单（install 前校验的同源集合，D6）：GitHub 现行 2 域 + GitCode 下载域。
  * validate-release 消费此集合（u-download-failover 领地内切换），不再各自维护。
  */
 export const ALLOWED_DOWNLOAD_HOSTS: ReadonlySet<string> = new Set<string>([
   RELEASE_SOURCE_HOSTS.githubDownload,
   RELEASE_SOURCE_HOSTS.githubAssetsCdn,
-  RELEASE_SOURCE_HOSTS.atomgitDownload,
+  RELEASE_SOURCE_HOSTS.gitcodeDownload,
 ])
 
 // ── 可归类错误 ───────────────────────────────────────────────────────
@@ -103,18 +103,18 @@ export class ReleaseFetchError extends Error {
 
 /** GitHub 仓库（release-checker.ts 现行常量迁移） */
 const GITHUB_REPO = 'zhushanwen321/tai-ji'
-/** AtomGit 仓库（发布流程单向同步目标，文件与 GitHub 逐字节一致） */
-const ATOMGIT_REPO = 'qq_18433817/tai-ji'
+/** GitCode 仓库（发布流程单向同步目标，文件与 GitHub 逐字节一致） */
+const GITCODE_REPO = 'qq_18433817/tai-ji'
 
 const GITHUB_API_BASE = `https://${RELEASE_SOURCE_HOSTS.githubApi}/repos/${GITHUB_REPO}/releases`
-const ATOMGIT_API_BASE = `https://${RELEASE_SOURCE_HOSTS.atomgitApi}/api/v5/repos/${ATOMGIT_REPO}/releases`
-/** AtomGit release 页面链接 base（html_url 拼接用，§6.2；页面格式 v0.9.14 实测） */
-const ATOMGIT_RELEASE_PAGE_BASE = `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/${ATOMGIT_REPO}/releases`
+const GITCODE_API_BASE = `https://${RELEASE_SOURCE_HOSTS.gitcodeApi}/api/v5/repos/${GITCODE_REPO}/releases`
+/** GitCode release 页面链接 base（html_url 拼接用，§6.2；页面格式 v0.9.14 实测） */
+const GITCODE_RELEASE_PAGE_BASE = `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/${GITCODE_REPO}/releases`
 
 /**
  * 请求头：Accept（GitHub JSON 媒体类型）+ X-GitHub-Api-Version + User-Agent。
  * GitHub API 要求 User-Agent 非空（否则 403）——upgradeFetch 默认已带 UA，
- * 此处显式补 GitHub 特有头。AtomGit 匿名 GET 无特殊 headers（仅默认 UA）。
+ * 此处显式补 GitHub 特有头。GitCode 匿名 GET 无特殊 headers（仅默认 UA）。
  */
 const GITHUB_HEADERS = {
   Accept: 'application/vnd.github+json',
@@ -139,7 +139,7 @@ interface SourceAdapter {
   headers?: Record<string, string>
   /**
    * 是否识别限流信号：GitHub 有 60 次/h 匿名配额，403/429 → rate-limited 可归类错误；
-   * AtomGit 无限流响应头（§4.1），403/429 与其他非 2xx 同收口 null。
+   * GitCode 无限流响应头（§4.1），403/429 与其他非 2xx 同收口 null。
    */
   rateLimitAware: boolean
 }
@@ -151,9 +151,9 @@ const ADAPTERS: Record<UpdateSource, SourceAdapter> = {
     headers: { ...GITHUB_HEADERS },
     rateLimitAware: true,
   },
-  atomgit: {
-    latestUrl: `${ATOMGIT_API_BASE}/latest`,
-    byTagUrl: (tag) => `${ATOMGIT_API_BASE}/tags/${encodeURIComponent(tag)}`,
+  gitcode: {
+    latestUrl: `${GITCODE_API_BASE}/latest`,
+    byTagUrl: (tag) => `${GITCODE_API_BASE}/tags/${encodeURIComponent(tag)}`,
     rateLimitAware: false,
   },
 }
@@ -162,16 +162,16 @@ const ADAPTERS: Record<UpdateSource, SourceAdapter> = {
 
 /**
  * normalize 后的单个 asset（GitHubRelease asset 同形，别名容错已归一）。
- * size 可选：AtomGit 实测无 size（null/缺字段），GitHub 恒有；digest 仅 GitHub 提供。
+ * size 可选：GitCode 实测无 size（null/缺字段），GitHub 恒有；digest 仅 GitHub 提供。
  */
 export interface SourceReleaseAsset {
   /** 文件名（如 'TaiJi-0.9.15-mac-arm64.dmg' / 'manifest.json'） */
   name: string
   /** 下载直链 */
   browser_download_url: string
-  /** 文件大小（字节）；AtomGit 无 → undefined（由 checker manifest fallback 填充） */
+  /** 文件大小（字节）；GitCode 无 → undefined（由 checker manifest fallback 填充） */
   size?: number
-  /** GitHub 服务端摘要（'sha256:<hex>' 形态）；AtomGit 无 → undefined */
+  /** GitHub 服务端摘要（'sha256:<hex>' 形态）；GitCode 无 → undefined */
   digest?: string
 }
 
@@ -181,22 +181,22 @@ export interface SourceReleaseAsset {
  *
  * 字段语义：
  * - prerelease：显式 `=== true` 收窄后的 boolean（恒存在，非 boolean 一律 false）
- * - draft：github 原样 boolean；atomgit 恒 undefined（API 只返回已发布 release，
+ * - draft：github 原样 boolean；gitcode 恒 undefined（API 只返回已发布 release，
  *   防御 b 的 `if (release.draft)` 对 undefined 自然放行，语义等价，§6.2）
- * - release_status：忽略（AtomGit 特有，prerelease 防御不依赖它）
+ * - release_status：忽略（GitCode 特有，prerelease 防御不依赖它）
  */
 export interface SourceRelease {
   /** 原始 tag（如 'v0.9.15'） */
   tag_name: string
   /** Release body markdown 原文 */
   body?: string
-  /** 发布时间；atomgit 无此字段 → ''（LatestReleaseInfo.publishedAt 现有 ?? '' 容错） */
+  /** 发布时间；gitcode 无此字段 → ''（LatestReleaseInfo.publishedAt 现有 ?? '' 容错） */
   published_at?: string
-  /** release 页面 URL；atomgit 拼 gitcode.com 页面链接 */
+  /** release 页面 URL；gitcode 拼 gitcode.com 页面链接 */
   html_url?: string
   /** prerelease 标记（收窄后恒 boolean） */
   prerelease: boolean
-  /** draft 标记；atomgit → undefined */
+  /** draft 标记；gitcode → undefined */
   draft?: boolean
   /** 产物资产列表（含 manifest.json 等非平台资产） */
   assets: SourceReleaseAsset[]
@@ -234,7 +234,7 @@ function normalizeAssetSize(v: unknown): number | undefined {
  * - name：name / file_name / path / filename 族
  * - url：browser_download_url 权威；path / filename 仅当其值为 https 绝对 URL 时兜底
  *   （两字段在先例中是文件名语义，防文件名被误当下载直链）
- * - size：size / filesize / file_size / attach_size 族（AtomGit 现状全缺 → undefined）
+ * - size：size / filesize / file_size / attach_size 族（GitCode 现状全缺 → undefined）
  * name 或 url 缺失的条目丢弃（对齐先例 filter(a => a.name) 纪律 + 坏 URL 不进下载面）。
  */
 function normalizeSourceAsset(a: unknown): SourceReleaseAsset | undefined {
@@ -257,9 +257,9 @@ function normalizeSourceAsset(a: unknown): SourceReleaseAsset | undefined {
  * - 形状守卫（两源同款）：tag_name 非 string / 资产容器非 array → bad-shape 可归类错误
  *   （不把错误推迟到下游消费点——对齐 doFetchGitHubLatestRelease 守卫意图，失败显式化）
  * - prerelease → `=== true` 收窄（防字符串编码 "false" 被 truthy 误判）
- * - draft → 非 boolean 一律 undefined（AtomGit null → undefined）
- * - published_at → atomgit 恒 ''（无此字段）；github 原样
- * - html_url → atomgit 拼 `https://gitcode.com/{repo}/releases/{tag}`；github 原样
+ * - draft → 非 boolean 一律 undefined（GitCode null → undefined）
+ * - published_at → gitcode 恒 ''（无此字段）；github 原样
+ * - html_url → gitcode 拼 `https://gitcode.com/{repo}/releases/{tag}`；github 原样
  * - release_status → 忽略
  * - asset size/digest → 缺失即 undefined（checker manifest fallback 填充）
  *
@@ -292,10 +292,10 @@ export function normalizeSourceRelease(source: UpdateSource, raw: unknown): Sour
     tag_name: r.tag_name,
     body: typeof r.body === 'string' ? r.body : undefined,
     published_at:
-      source === 'atomgit' ? '' : typeof r.published_at === 'string' ? r.published_at : undefined,
+      source === 'gitcode' ? '' : typeof r.published_at === 'string' ? r.published_at : undefined,
     html_url:
-      source === 'atomgit'
-        ? `${ATOMGIT_RELEASE_PAGE_BASE}/${r.tag_name}`
+      source === 'gitcode'
+        ? `${GITCODE_RELEASE_PAGE_BASE}/${r.tag_name}`
         : typeof r.html_url === 'string'
           ? r.html_url
           : undefined,
@@ -339,7 +339,7 @@ async function doFetchSourceRelease(
       timeoutMs: FETCH_TIMEOUT_MS,
     })
     if (!result.ok) {
-      // 限流是服务器明确响应（AtomGit 无限流语义不识别）→ 可归类错误，不并入 null 也不降级直连
+      // 限流是服务器明确响应（GitCode 无限流语义不识别）→ 可归类错误，不并入 null 也不降级直连
       if (
         adapter.rateLimitAware &&
         (result.status === HTTP_STATUS_FORBIDDEN || result.status === HTTP_STATUS_TOO_MANY_REQUESTS)
@@ -433,7 +433,7 @@ function extractSha256(digest?: string): string | undefined {
   return /^[0-9a-f]{64}$/i.test(digest) ? digest : undefined
 }
 
-/** 与 ReleaseAsset 同构（size 已可选化），简化候选（后续 cleanup）；AtomGit 无 API size，规格见 §6.2 */
+/** 与 ReleaseAsset 同构（size 已可选化），简化候选（后续 cleanup）；GitCode 无 API size，规格见 §6.2 */
 type ReleaseAssetLoose = Omit<ReleaseAsset, 'size'> & { size?: number }
 
 /** 按 pattern 从 asset 列表挑选单平台资产；sha256 取 asset.digest（manifest fallback 由 checker 做） */
@@ -459,7 +459,7 @@ function pickAsset(
  * 不承载 prerelease/draft 字段，拦截必须在信息丢失前完成。防御 c（严格 semver）
  * 与版本比较仍归 checker（version 字段可校验，信息未丢失）。
  *
- * size 单字段断言：AtomGit 无 API size → 运行时 undefined（checker manifest fallback
+ * size 单字段断言：GitCode 无 API size → 运行时 undefined（checker manifest fallback
  * 填充），类型收敛债务见文件头注释。
  */
 function toLatestReleaseInfo(source: UpdateSource, release: SourceRelease): LatestReleaseInfo | null {

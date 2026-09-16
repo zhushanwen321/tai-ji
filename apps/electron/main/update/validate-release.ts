@@ -9,7 +9,7 @@
  *
  * [HISTORICAL] 设计要点：
  * - downloadUrl 白名单：只允许两源 release 下载域（GitHub：github.com +
- *   objects.githubusercontent.com；AtomGit：gitcode.com——多源改造 D6）的 https URL
+ *   objects.githubusercontent.com；GitCode：gitcode.com——多源改造 D6）的 https URL
  *   （防 SSRF + file:// + 内网探测）。域集合消费 release-sources 的
  *   ALLOWED_DOWNLOAD_HOSTS 单一来源（D1 防漂移：白名单与适配器产物落域同源，
  *   本模块不再各自维护副本）

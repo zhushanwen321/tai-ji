@@ -256,7 +256,7 @@ describe('validate-release', () => {
 // ── 多源白名单（update-multi-source D6：域集合消费 release-sources 单一来源）────
 
 describe('validate-release 多源白名单', () => {
-  it('gitcode.com 域（AtomGit 下载直链，P1 探针落域）→ 放行', () => {
+  it('gitcode.com 域（GitCode 下载直链，P1 探针落域）→ 放行', () => {
     const release = makeRelease()
     release.assets.macArm64Dmg!.downloadUrl =
       'https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.9.15/TaiJi-mac-arm64.dmg'
@@ -271,9 +271,9 @@ describe('validate-release 多源白名单', () => {
   })
 
   it('域集合与 release-sources 导出同源：白名单 = 两源下载域精确集合（防漂移断言）', () => {
-    // 单一来源 SSOT 内容锁定：GitHub 现行 2 域 + AtomGit 下载域
+    // 单一来源 SSOT 内容锁定：GitHub 现行 2 域 + GitCode 下载域
     expect([...ALLOWED_DOWNLOAD_HOSTS].sort()).toEqual([
-      RELEASE_SOURCE_HOSTS.atomgitDownload,
+      RELEASE_SOURCE_HOSTS.gitcodeDownload,
       RELEASE_SOURCE_HOSTS.githubDownload,
       RELEASE_SOURCE_HOSTS.githubAssetsCdn,
     ])

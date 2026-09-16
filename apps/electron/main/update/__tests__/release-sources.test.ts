@@ -5,13 +5,13 @@
  *   - prerelease 字符串 "false" 不误判为 true（D2 === true 收窄，防 GitCode 字符串编码）
  *   - prerelease boolean true 正确判定（非 stable 拦截 → null）
  *   - draft null → undefined；release_status 不影响防御字段
- *   - assets 无 size 时 size undefined（AtomGit 无 API size，checker manifest fallback 填充）
+ *   - assets 无 size 时 size undefined（GitCode 无 API size，checker manifest fallback 填充）
  *   - 形状坏（tag_name 非 string / assets 非 array）抛可归类错误 kind 'bad-shape'
  *   - asset 字段别名容错（容器 assets/attach_files/attachFiles、name/url/size 别名族，
  *     对齐 scripts/gitcode-release-sync.mjs assetList 先例）
  *   - 两源全部产物 downloadUrl + manifest 直链 hostname ⊆ ALLOWED_DOWNLOAD_HOSTS（防漂移）
- *   - by-tag 404 → null；github by-tag/atomgit by-tag 端点形态
- *   - github 403/429 → rate-limited 可归类错误；atomgit 不识别限流（一律 null）
+ *   - by-tag 404 → null；github by-tag/gitcode by-tag 端点形态
+ *   - github 403/429 → rate-limited 可归类错误；gitcode 不识别限流（一律 null）
  *   - 网络失败 → kind 'network'；代理失败降直连重试（通道编排）；形状坏不触发通道重试
  *   - 域常量单一来源：ALLOWED_DOWNLOAD_HOSTS = GitHub 现行 2 域 + gitcode.com
  *
@@ -99,8 +99,8 @@ function githubReleaseJson(overrides: Record<string, unknown> = {}): Record<stri
   }
 }
 
-/** AtomGit releases/latest 响应形态（M0 探针 P6 实测：prerelease boolean / draft 等 null / 无 size/digest） */
-function atomgitReleaseJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** GitCode releases/latest 响应形态（M0 探针 P6 实测：prerelease boolean / draft 等 null / 无 size/digest） */
+function gitcodeReleaseJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     tag_name: 'v0.9.15',
     body: 'release notes ag',
@@ -113,13 +113,13 @@ function atomgitReleaseJson(overrides: Record<string, unknown> = {}): Record<str
     assets: [
       {
         name: 'TaiJi-0.9.15-mac-arm64.dmg',
-        browser_download_url: `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/TaiJi-0.9.15-mac-arm64.dmg`,
+        browser_download_url: `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/TaiJi-0.9.15-mac-arm64.dmg`,
         type: 'attach',
         id: 1001,
       },
       {
         name: 'manifest.json',
-        browser_download_url: `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/manifest.json`,
+        browser_download_url: `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/manifest.json`,
         type: 'attach',
         id: 1002,
       },
@@ -173,9 +173,9 @@ afterEach(() => {
 // ─── normalizeSourceRelease：D2 逐字段规格表测 ───────────────────────────────
 
 describe('normalizeSourceRelease（D2 规格表测）', () => {
-  it('atomgit prerelease 字符串 "false" 不误判为 true（=== true 收窄，防字符串编码）', () => {
-    const raw = atomgitReleaseJson({ prerelease: 'false' })
-    const release = normalizeSourceRelease('atomgit', raw)
+  it('gitcode prerelease 字符串 "false" 不误判为 true（=== true 收窄，防字符串编码）', () => {
+    const raw = gitcodeReleaseJson({ prerelease: 'false' })
+    const release = normalizeSourceRelease('gitcode', raw)
     expect(release.prerelease).toBe(false)
   })
 
@@ -184,13 +184,13 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
     expect(release.prerelease).toBe(false)
   })
 
-  it('atomgit prerelease boolean true 正确判定为 true', () => {
-    const release = normalizeSourceRelease('atomgit', atomgitReleaseJson({ prerelease: true }))
+  it('gitcode prerelease boolean true 正确判定为 true', () => {
+    const release = normalizeSourceRelease('gitcode', gitcodeReleaseJson({ prerelease: true }))
     expect(release.prerelease).toBe(true)
   })
 
-  it('atomgit draft null → undefined（防御 b 对 undefined 自然放行，§6.2）', () => {
-    const release = normalizeSourceRelease('atomgit', atomgitReleaseJson())
+  it('gitcode draft null → undefined（防御 b 对 undefined 自然放行，§6.2）', () => {
+    const release = normalizeSourceRelease('gitcode', gitcodeReleaseJson())
     expect(release.draft).toBeUndefined()
   })
 
@@ -199,24 +199,24 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
     expect(normalizeSourceRelease('github', githubReleaseJson({ draft: false })).draft).toBe(false)
   })
 
-  it('atomgit release_status 任意值不影响防御字段（release_status 被忽略，§6.2）', () => {
+  it('gitcode release_status 任意值不影响防御字段（release_status 被忽略，§6.2）', () => {
     const release = normalizeSourceRelease(
-      'atomgit',
-      atomgitReleaseJson({ release_status: 'prerelease', prerelease: false, draft: null }),
+      'gitcode',
+      gitcodeReleaseJson({ release_status: 'prerelease', prerelease: false, draft: null }),
     )
     expect(release.prerelease).toBe(false)
     expect(release.draft).toBeUndefined()
   })
 
-  it('atomgit published_at 无此字段（null）→ normalize 产物为 \'\'', () => {
-    const release = normalizeSourceRelease('atomgit', atomgitReleaseJson())
+  it('gitcode published_at 无此字段（null）→ normalize 产物为 \'\'', () => {
+    const release = normalizeSourceRelease('gitcode', gitcodeReleaseJson())
     expect(release.published_at).toBe('')
   })
 
-  it('atomgit html_url null → 拼 gitcode.com release 页面链接（§6.2）', () => {
-    const release = normalizeSourceRelease('atomgit', atomgitReleaseJson())
+  it('gitcode html_url null → 拼 gitcode.com release 页面链接（§6.2）', () => {
+    const release = normalizeSourceRelease('gitcode', gitcodeReleaseJson())
     expect(release.html_url).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/qq_18433817/tai-ji/releases/v0.9.15`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/qq_18433817/tai-ji/releases/v0.9.15`,
     )
   })
 
@@ -228,17 +228,17 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
     )
   })
 
-  it('atomgit assets 无 size → size undefined；github size 原样（§6.2 manifest fallback 前提）', () => {
-    const ag = normalizeSourceRelease('atomgit', atomgitReleaseJson())
+  it('gitcode assets 无 size → size undefined；github size 原样（§6.2 manifest fallback 前提）', () => {
+    const ag = normalizeSourceRelease('gitcode', gitcodeReleaseJson())
     expect(ag.assets.every((a) => a.size === undefined)).toBe(true)
     const gh = normalizeSourceRelease('github', githubReleaseJson())
     expect(gh.assets[0].size).toBe(135_681_147)
   })
 
   it('形状坏：tag_name 非 string → 抛 ReleaseFetchError kind bad-shape', () => {
-    expect(() => normalizeSourceRelease('atomgit', { tag_name: 123, assets: [] })).toThrow(ReleaseFetchError)
-    expect(() => normalizeSourceRelease('atomgit', { tag_name: 123, assets: [] })).toThrow(
-      expect.objectContaining({ kind: 'bad-shape', source: 'atomgit' }),
+    expect(() => normalizeSourceRelease('gitcode', { tag_name: 123, assets: [] })).toThrow(ReleaseFetchError)
+    expect(() => normalizeSourceRelease('gitcode', { tag_name: 123, assets: [] })).toThrow(
+      expect.objectContaining({ kind: 'bad-shape', source: 'gitcode' }),
     )
   })
 
@@ -255,25 +255,25 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
   })
 
   it('形状坏：响应体非对象 → bad-shape', () => {
-    expect(() => normalizeSourceRelease('atomgit', 'not-an-object')).toThrow(
+    expect(() => normalizeSourceRelease('gitcode', 'not-an-object')).toThrow(
       expect.objectContaining({ kind: 'bad-shape' }),
     )
   })
 
   it('别名容错：容器 attach_files / attachFiles（对齐 sync 脚本先例）', () => {
     const asset = { name: 'a.dmg', browser_download_url: 'https://gitcode.com/x/a.dmg' }
-    expect(normalizeSourceRelease('atomgit', { tag_name: 'v1.0.0', attach_files: [asset] }).assets).toHaveLength(1)
-    expect(normalizeSourceRelease('atomgit', { tag_name: 'v1.0.0', attachFiles: [asset] }).assets).toHaveLength(1)
+    expect(normalizeSourceRelease('gitcode', { tag_name: 'v1.0.0', attach_files: [asset] }).assets).toHaveLength(1)
+    expect(normalizeSourceRelease('gitcode', { tag_name: 'v1.0.0', attachFiles: [asset] }).assets).toHaveLength(1)
   })
 
   it('别名容错：asset name 族 file_name/path/filename', () => {
     const url = 'https://gitcode.com/x/a.dmg'
-    const ag1 = normalizeSourceRelease('atomgit', {
+    const ag1 = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [{ file_name: 'a.dmg', browser_download_url: url }],
     })
     expect(ag1.assets[0].name).toBe('a.dmg')
-    const ag2 = normalizeSourceRelease('atomgit', {
+    const ag2 = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [{ filename: 'b.dmg', browser_download_url: url }],
     })
@@ -281,13 +281,13 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
   })
 
   it('别名容错：url 缺失时 path/filename 仅当为 https 绝对 URL 才兜底（防文件名误当直链）', () => {
-    const ag1 = normalizeSourceRelease('atomgit', {
+    const ag1 = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [{ name: 'a.dmg', path: 'https://gitcode.com/x/a.dmg' }],
     })
     expect(ag1.assets[0].browser_download_url).toBe('https://gitcode.com/x/a.dmg')
     // path 为文件名语义（非绝对 URL）→ 不作 URL 命中，条目丢弃
-    const ag2 = normalizeSourceRelease('atomgit', {
+    const ag2 = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [{ name: 'a.dmg', path: 'a.dmg' }],
     })
@@ -295,7 +295,7 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
   })
 
   it('别名容错：size 族 filesize/file_size/attach_size（含数字字符串归一）', () => {
-    const ag = normalizeSourceRelease('atomgit', {
+    const ag = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [
         { name: 'a.dmg', browser_download_url: 'https://gitcode.com/x/a.dmg', file_size: '123' },
@@ -312,7 +312,7 @@ describe('normalizeSourceRelease（D2 规格表测）', () => {
   })
 })
 
-// ─── fetchLatestRelease：github / atomgit 分派 ───────────────────────────────
+// ─── fetchLatestRelease：github / gitcode 分派 ───────────────────────────────
 
 describe('fetchLatestRelease（github 分支）', () => {
   it('happy path：URL/headers 正确，输出 normalize 后 LatestReleaseInfo（含 source/sha256 提取）', async () => {
@@ -384,16 +384,16 @@ describe('fetchLatestRelease（github 分支）', () => {
   })
 })
 
-describe('fetchLatestRelease（atomgit 分支）', () => {
+describe('fetchLatestRelease（gitcode 分支）', () => {
   it('happy path：URL 正确、匿名 GET 无特殊 headers（仅默认 UA）、字段映射齐备', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockResolvedValue(jsonResponse(atomgitReleaseJson()))
+    fetchMock.mockResolvedValue(jsonResponse(gitcodeReleaseJson()))
 
-    const info = await fetchLatestRelease('atomgit')
+    const info = await fetchLatestRelease('gitcode')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitApi}/api/v5/repos/qq_18433817/tai-ji/releases/latest`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeApi}/api/v5/repos/qq_18433817/tai-ji/releases/latest`,
     )
     const headers = lastFetchHeaders(fetchMock)
     expect(headers['User-Agent']).toBeTruthy()
@@ -403,44 +403,44 @@ describe('fetchLatestRelease（atomgit 分支）', () => {
     expect(info).not.toBeNull()
     expect(info?.version).toBe('0.9.15')
     expect(info?.tagName).toBe('v0.9.15')
-    expect(info?.source).toBe('atomgit')
+    expect(info?.source).toBe('gitcode')
     expect(info?.releaseNotes).toBe('release notes ag')
     expect(info?.publishedAt).toBe('')
     expect(info?.htmlUrl).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/qq_18433817/tai-ji/releases/v0.9.15`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/qq_18433817/tai-ji/releases/v0.9.15`,
     )
-    // AtomGit 无 API size → undefined（checker manifest fallback 填充，§6.2）
+    // GitCode 无 API size → undefined（checker manifest fallback 填充，§6.2）
     expect(info?.assets.macArm64Dmg?.size).toBeUndefined()
     expect(info?.assets.macArm64Dmg?.sha256).toBeUndefined()
-    expect(info?.assets.macArm64Dmg?.downloadUrl).toContain(RELEASE_SOURCE_HOSTS.atomgitDownload)
+    expect(info?.assets.macArm64Dmg?.downloadUrl).toContain(RELEASE_SOURCE_HOSTS.gitcodeDownload)
   })
 
-  it('atomgit prerelease "false" 字符串不误判 → 正常返回 info（非 null，AtomGit 源检查不全灭）', async () => {
+  it('gitcode prerelease "false" 字符串不误判 → 正常返回 info（非 null，GitCode 源检查不全灭）', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockResolvedValue(jsonResponse(atomgitReleaseJson({ prerelease: 'false' })))
-    const info = await fetchLatestRelease('atomgit')
+    fetchMock.mockResolvedValue(jsonResponse(gitcodeReleaseJson({ prerelease: 'false' })))
+    const info = await fetchLatestRelease('gitcode')
     expect(info).not.toBeNull()
     expect(info?.version).toBe('0.9.15')
   })
 
-  it('atomgit prerelease boolean true → null（非 stable 拦截）', async () => {
+  it('gitcode prerelease boolean true → null（非 stable 拦截）', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockResolvedValue(jsonResponse(atomgitReleaseJson({ prerelease: true })))
-    await expect(fetchLatestRelease('atomgit')).resolves.toBeNull()
+    fetchMock.mockResolvedValue(jsonResponse(gitcodeReleaseJson({ prerelease: true })))
+    await expect(fetchLatestRelease('gitcode')).resolves.toBeNull()
   })
 
-  it('atomgit 403/429 不识别限流（无限流响应头，§4.1）→ null 而非 rate-limited', async () => {
+  it('gitcode 403/429 不识别限流（无限流响应头，§4.1）→ null 而非 rate-limited', async () => {
     const fetchMock = stubFetch()
     fetchMock.mockResolvedValue(jsonResponse({}, 429))
-    await expect(fetchLatestRelease('atomgit')).resolves.toBeNull()
+    await expect(fetchLatestRelease('gitcode')).resolves.toBeNull()
   })
 
-  it('atomgit 形状坏 → bad-shape 可归类错误', async () => {
+  it('gitcode 形状坏 → bad-shape 可归类错误', async () => {
     stubFetch()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ foo: 1 })))
-    await expect(fetchLatestRelease('atomgit')).rejects.toMatchObject({
+    await expect(fetchLatestRelease('gitcode')).rejects.toMatchObject({
       kind: 'bad-shape',
-      source: 'atomgit',
+      source: 'gitcode',
     })
   })
 })
@@ -473,7 +473,7 @@ describe('通道编排', () => {
     const fetchMock = stubFetch()
     fetchMock.mockRejectedValue(abortError())
 
-    await expect(fetchLatestRelease('atomgit')).rejects.toMatchObject({ kind: 'network' })
+    await expect(fetchLatestRelease('gitcode')).rejects.toMatchObject({ kind: 'network' })
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -503,12 +503,12 @@ describe('通道编排', () => {
 describe('fetchSourceRelease（完整产物，含原始 assets 数组）', () => {
   it('返回 normalize 后完整产物：原始 assets 含 manifest.json 条目，prerelease/draft 字段保留', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockImplementation(async () => jsonResponse(atomgitReleaseJson()))
+    fetchMock.mockImplementation(async () => jsonResponse(gitcodeReleaseJson()))
 
-    const release = await fetchSourceRelease('atomgit')
+    const release = await fetchSourceRelease('gitcode')
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitApi}/api/v5/repos/qq_18433817/tai-ji/releases/latest`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeApi}/api/v5/repos/qq_18433817/tai-ji/releases/latest`,
     )
     expect(release).not.toBeNull()
     // 原始 assets 数组：平台资产与 manifest.json 等非平台资产全部保留（平台分流只发生在
@@ -528,12 +528,12 @@ describe('fetchSourceRelease（完整产物，含原始 assets 数组）', () =>
 
   it('与 fetchLatestRelease 复用同一 fetch+normalize 管线：prerelease 产物完整返回而 LatestReleaseInfo 出口拦截为 null（分工仅在出口层）', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockImplementation(async () => jsonResponse(atomgitReleaseJson({ prerelease: true })))
+    fetchMock.mockImplementation(async () => jsonResponse(gitcodeReleaseJson({ prerelease: true })))
 
-    const release = await fetchSourceRelease('atomgit')
+    const release = await fetchSourceRelease('gitcode')
     expect(release?.prerelease).toBe(true)
 
-    const info = await fetchLatestRelease('atomgit')
+    const info = await fetchLatestRelease('gitcode')
     expect(info).toBeNull()
     // 同一 latest 端点被命中两次（同一管线，非第二套 fetch 实现）
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -574,30 +574,30 @@ describe('fetchReleaseByTag', () => {
     expect(info?.tagName).toBe('v0.9.15')
   })
 
-  it('atomgit by-tag 端点形态正确', async () => {
+  it('gitcode by-tag 端点形态正确', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockResolvedValue(jsonResponse(atomgitReleaseJson()))
+    fetchMock.mockResolvedValue(jsonResponse(gitcodeReleaseJson()))
 
-    const info = await fetchReleaseByTag('atomgit', 'v0.9.15')
+    const info = await fetchReleaseByTag('gitcode', 'v0.9.15')
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitApi}/api/v5/repos/qq_18433817/tai-ji/releases/tags/v0.9.15`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeApi}/api/v5/repos/qq_18433817/tai-ji/releases/tags/v0.9.15`,
     )
-    expect(info?.source).toBe('atomgit')
+    expect(info?.source).toBe('gitcode')
   })
 
-  it('by-tag 404（无此 tag）→ null：github 与 atomgit 同语义（发布时间窗 = 对侧不可用）', async () => {
+  it('by-tag 404（无此 tag）→ null：github 与 gitcode 同语义（发布时间窗 = 对侧不可用）', async () => {
     // 每次调用返回新 Response（upgradeFetch 消费 res.text()，Response 实例不可复用）
     const fetchMock = stubFetch()
     fetchMock.mockImplementation(async () => jsonResponse({ message: 'Not Found' }, 404))
     await expect(fetchReleaseByTag('github', 'v9.9.9')).resolves.toBeNull()
-    await expect(fetchReleaseByTag('atomgit', 'v9.9.9')).resolves.toBeNull()
+    await expect(fetchReleaseByTag('gitcode', 'v9.9.9')).resolves.toBeNull()
   })
 
   it('by-tag 命中 prerelease tag → null（同款防御，对侧不可作降级目标）', async () => {
     const fetchMock = stubFetch()
-    fetchMock.mockResolvedValue(jsonResponse(atomgitReleaseJson({ prerelease: true })))
-    await expect(fetchReleaseByTag('atomgit', 'v0.9.16-rc.1')).resolves.toBeNull()
+    fetchMock.mockResolvedValue(jsonResponse(gitcodeReleaseJson({ prerelease: true })))
+    await expect(fetchReleaseByTag('gitcode', 'v0.9.16-rc.1')).resolves.toBeNull()
   })
 })
 
@@ -605,14 +605,14 @@ describe('fetchReleaseByTag', () => {
 
 describe('resolveManifestDownloadUrl', () => {
   it('按 name === manifest.json 取 browser_download_url（§4.2⑤ assets 直链，非 latest 别名）', () => {
-    const assets = normalizeSourceRelease('atomgit', atomgitReleaseJson()).assets
+    const assets = normalizeSourceRelease('gitcode', gitcodeReleaseJson()).assets
     expect(resolveManifestDownloadUrl(assets)).toBe(
-      `https://${RELEASE_SOURCE_HOSTS.atomgitDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/manifest.json`,
+      `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}/qq_18433817/tai-ji/releases/download/v0.9.15/manifest.json`,
     )
   })
 
   it('无 manifest 资产 → undefined', () => {
-    const assets = normalizeSourceRelease('atomgit', {
+    const assets = normalizeSourceRelease('gitcode', {
       tag_name: 'v1.0.0',
       assets: [{ name: 'a.dmg', browser_download_url: 'https://gitcode.com/x/a.dmg' }],
     }).assets
@@ -631,7 +631,7 @@ describe('域常量与防漂移断言', () => {
 
   it('两源适配器产出的全部 assets downloadUrl + manifest 直链 hostname ⊆ ALLOWED_DOWNLOAD_HOSTS（防漂移）', () => {
     const gh = normalizeSourceRelease('github', githubReleaseJson())
-    const ag = normalizeSourceRelease('atomgit', atomgitReleaseJson())
+    const ag = normalizeSourceRelease('gitcode', gitcodeReleaseJson())
     const manifestUrls = [gh.assets, ag.assets]
       .map((assets) => resolveManifestDownloadUrl(assets))
       .filter((u): u is string => u !== undefined)
@@ -644,19 +644,19 @@ describe('域常量与防漂移断言', () => {
     for (const url of allUrls) {
       expect(ALLOWED_DOWNLOAD_HOSTS.has(new URL(url).hostname)).toBe(true)
     }
-    // 落域实测事实锚定（P1）：github 产物落 github.com、atomgit 产物落 gitcode.com
+    // 落域实测事实锚定（P1）：github 产物落 github.com、gitcode 产物落 gitcode.com
     expect(new URL(gh.assets[0].browser_download_url).hostname).toBe(RELEASE_SOURCE_HOSTS.githubDownload)
-    expect(new URL(ag.assets[0].browser_download_url).hostname).toBe(RELEASE_SOURCE_HOSTS.atomgitDownload)
+    expect(new URL(ag.assets[0].browser_download_url).hostname).toBe(RELEASE_SOURCE_HOSTS.gitcodeDownload)
   })
 
   it('fetch 全链路产物（LatestReleaseInfo 平台分流后）downloadUrl hostname 同样 ⊆ 白名单', async () => {
     const fetchMock = stubFetch()
     fetchMock
       .mockResolvedValueOnce(jsonResponse(githubReleaseJson()))
-      .mockResolvedValueOnce(jsonResponse(atomgitReleaseJson()))
+      .mockResolvedValueOnce(jsonResponse(gitcodeReleaseJson()))
 
     const gh = await fetchLatestRelease('github')
-    const ag = await fetchLatestRelease('atomgit')
+    const ag = await fetchLatestRelease('gitcode')
 
     for (const info of [gh, ag]) {
       for (const asset of [info?.assets.macArm64Dmg, info?.assets.winX64Exe, info?.assets.linuxX64AppImage]) {

@@ -884,7 +884,7 @@ export default {
     updateSourceLabel: 'Update Source',
     updateSourceAuto: 'Auto (recommended)',
     updateSourceGithub: 'GitHub',
-    updateSourceAtomgit: 'AtomGit',
+    updateSourceGitcode: 'GitCode',
     currentVersionLabel: 'Current Version',
     channelHint: 'stable channel · restart the app for the update to take effect',
   },

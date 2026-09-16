@@ -253,9 +253,9 @@ const FAILOVER_TRIGGER_ERROR_CODES: ReadonlySet<string> = new Set([
   'UPDATE_PROXY_UNREACHABLE',
 ])
 
-/** UpdateSource 两值枚举的补集（github ↔ atomgit）。 */
+/** UpdateSource 两值枚举的补集（github ↔ gitcode）。 */
 function oppositeSource(source: UpdateSource): UpdateSource {
-  return source === 'github' ? 'atomgit' : 'github'
+  return source === 'github' ? 'gitcode' : 'github'
 }
 
 /**

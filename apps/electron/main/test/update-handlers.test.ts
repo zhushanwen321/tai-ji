@@ -163,7 +163,7 @@ describe('W2: update-handlers IPC (W2TC7)', () => {
     const inWindowChecker: IReleaseChecker = {
       checkForLatestRelease: vi.fn(async (): Promise<LatestReleaseInfo | null> => null),
       fetchReleaseByTag: stubFetchReleaseByTag(),
-      // 模拟两源退避截止不同（github +2h、atomgit +1h）→ 聚合最早解除时刻 = +1h > now
+      // 模拟两源退避截止不同（github +2h、gitcode +1h）→ 聚合最早解除时刻 = +1h > now
       getRateLimitedUntil: () => Date.now() + 60 * 60 * 1000,
     }
     registerUpdateHandlers({ releaseChecker: inWindowChecker } as never)

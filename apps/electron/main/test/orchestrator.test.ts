@@ -343,10 +343,10 @@ const RELEASE_FROM_GITHUB: LatestReleaseInfo = {
   assets: { macArm64Dmg: { ...SOURCE_ASSET } },
 }
 
-/** 对侧（AtomGit）by-tag 返回：tagName 一致 + 同名 asset（downloadUrl 落 gitcode.com） */
-const SIDE_RELEASE_ATOMGIT: LatestReleaseInfo = {
+/** 对侧（GitCode）by-tag 返回：tagName 一致 + 同名 asset（downloadUrl 落 gitcode.com） */
+const SIDE_RELEASE_GITCODE: LatestReleaseInfo = {
   ...MAC_RELEASE,
-  source: 'atomgit',
+  source: 'gitcode',
   assets: {
     macArm64Dmg: {
       name: 'mac.dmg',
@@ -427,17 +427,17 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     ] as const
     for (const code of triggerCodes) {
       vi.clearAllMocks()
-      const { checker, fetchReleaseByTag } = arrangePrimaryFailSideSucceed(code, SIDE_RELEASE_ATOMGIT)
+      const { checker, fetchReleaseByTag } = arrangePrimaryFailSideSucceed(code, SIDE_RELEASE_GITCODE)
 
       const result = await downloadUpdate(RELEASE_FROM_GITHUB, undefined, { releaseChecker: checker })
 
       // 降级发生：对侧源 by-tag 精确查询（经 IReleaseChecker 接口）
       expect(fetchReleaseByTag).toHaveBeenCalledTimes(1)
-      expect(fetchReleaseByTag).toHaveBeenCalledWith('atomgit', 'v0.9.0')
+      expect(fetchReleaseByTag).toHaveBeenCalledWith('gitcode', 'v0.9.0')
       // 第二次 downloadAsset = 对侧 downloadUrl + 本源完整性基准（仅替换 downloadUrl）
       expect(downloadMocks.downloadAsset).toHaveBeenCalledTimes(2)
       const sideAssetArg = downloadMocks.downloadAsset.mock.calls[1][0]
-      expect(sideAssetArg.downloadUrl).toBe(SIDE_RELEASE_ATOMGIT.assets.macArm64Dmg!.downloadUrl)
+      expect(sideAssetArg.downloadUrl).toBe(SIDE_RELEASE_GITCODE.assets.macArm64Dmg!.downloadUrl)
       expect(sideAssetArg.name).toBe(SOURCE_ASSET.name)
       expect(sideAssetArg.sha256).toBe(SOURCE_ASSET.sha256)
       expect(sideAssetArg.size).toBe(SOURCE_ASSET.size)
@@ -446,21 +446,21 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     }
   })
 
-  it('source=atomgit → 对侧为 github（补集双向覆盖）', async () => {
+  it('source=gitcode → 对侧为 github（补集双向覆盖）', async () => {
     setPlatform('darwin')
     const { downloadUpdate } = await loadModule()
-    const releaseFromAtomgit: LatestReleaseInfo = {
+    const releaseFromGitcode: LatestReleaseInfo = {
       ...RELEASE_FROM_GITHUB,
-      source: 'atomgit',
+      source: 'gitcode',
       assets: { macArm64Dmg: { ...SOURCE_ASSET, downloadUrl: 'https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.9.0/mac.dmg' } },
     }
     const { checker, fetchReleaseByTag } = makeSideChecker()
-    fetchReleaseByTag.mockResolvedValue({ ...SIDE_RELEASE_ATOMGIT, source: 'github' })
+    fetchReleaseByTag.mockResolvedValue({ ...SIDE_RELEASE_GITCODE, source: 'github' })
     downloadMocks.downloadAsset
       .mockImplementationOnce(async () => { throw makeNetError('UPDATE_NETWORK_FAILED') })
       .mockResolvedValueOnce({ filePath: '/tmp/side-resumed.bin', multiPart: true, engine: 'undici' })
 
-    await downloadUpdate(releaseFromAtomgit, undefined, { releaseChecker: checker })
+    await downloadUpdate(releaseFromGitcode, undefined, { releaseChecker: checker })
 
     expect(fetchReleaseByTag).toHaveBeenCalledWith('github', 'v0.9.0')
   })
@@ -542,10 +542,10 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     const { downloadUpdate } = await loadModule()
     // 两形态：assets 全空 / 同键位 asset name 不一致（同名上传不变量破坏）
     const partialForms: Array<LatestReleaseInfo> = [
-      { ...SIDE_RELEASE_ATOMGIT, assets: {} },
+      { ...SIDE_RELEASE_GITCODE, assets: {} },
       {
-        ...SIDE_RELEASE_ATOMGIT,
-        assets: { macArm64Dmg: { ...SIDE_RELEASE_ATOMGIT.assets.macArm64Dmg!, name: 'renamed.dmg' } },
+        ...SIDE_RELEASE_GITCODE,
+        assets: { macArm64Dmg: { ...SIDE_RELEASE_GITCODE.assets.macArm64Dmg!, name: 'renamed.dmg' } },
       },
     ]
     for (const sideRelease of partialForms) {
@@ -567,7 +567,7 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     setPlatform('darwin')
     const { downloadUpdate } = await loadModule()
     const { checker, fetchReleaseByTag } = makeSideChecker()
-    fetchReleaseByTag.mockResolvedValue({ ...SIDE_RELEASE_ATOMGIT, tagName: 'v0.9.1' })
+    fetchReleaseByTag.mockResolvedValue({ ...SIDE_RELEASE_GITCODE, tagName: 'v0.9.1' })
     downloadMocks.downloadAsset.mockRejectedValue(makeNetError('UPDATE_NETWORK_FAILED'))
 
     await expect(
@@ -599,7 +599,7 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     setPlatform('darwin')
     const { downloadUpdate } = await loadModule()
     const { checker, fetchReleaseByTag } = makeSideChecker()
-    fetchReleaseByTag.mockResolvedValue(SIDE_RELEASE_ATOMGIT)
+    fetchReleaseByTag.mockResolvedValue(SIDE_RELEASE_GITCODE)
     downloadMocks.downloadAsset
       .mockImplementationOnce(async () => { throw makeNetError('UPDATE_NETWORK_FAILED') })
       .mockImplementationOnce(async () => { throw makeNetError('UPDATE_NETWORK_TIMEOUT') })
@@ -616,14 +616,14 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     // 降级确实发生（转向对侧）：source-failover 已落盘；但终态错误 = 原错误
     const failovers = readUpdateErrorLog().filter((e) => e['source'] === 'source-failover')
     expect(failovers).toHaveLength(1)
-    expect(failovers[0]).toMatchObject({ from: 'github', to: 'atomgit', errorCode: 'UPDATE_NETWORK_FAILED' })
+    expect(failovers[0]).toMatchObject({ from: 'github', to: 'gitcode', errorCode: 'UPDATE_NETWORK_FAILED' })
   })
 
   it('降级续传产物 sha 不符（UpdateIntegrityError）→ 原样上抛不被吞（D8：完整性错误不降格为网络错误）', async () => {
     setPlatform('darwin')
     const { downloadUpdate } = await loadModule()
     const { checker, fetchReleaseByTag } = makeSideChecker()
-    fetchReleaseByTag.mockResolvedValue(SIDE_RELEASE_ATOMGIT)
+    fetchReleaseByTag.mockResolvedValue(SIDE_RELEASE_GITCODE)
     downloadMocks.downloadAsset
       .mockImplementationOnce(async () => { throw makeNetError('UPDATE_NETWORK_FAILED') })
       .mockRejectedValueOnce(new UpdateIntegrityError('side sha256 mismatch'))
@@ -639,7 +639,7 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     const { downloadUpdate } = await loadModule()
     const { checker, fetchReleaseByTag } = arrangePrimaryFailSideSucceed(
       'UPDATE_PROXY_UNREACHABLE',
-      SIDE_RELEASE_ATOMGIT,
+      SIDE_RELEASE_GITCODE,
     )
 
     await downloadUpdate(RELEASE_FROM_GITHUB, undefined, { releaseChecker: checker })
@@ -649,7 +649,7 @@ describe('u-download-failover: 下载段跨源降级（mock 双引擎失败注�
     expect(failover).toBeDefined()
     expect(failover).toMatchObject({
       from: 'github',
-      to: 'atomgit',
+      to: 'gitcode',
       errorCode: 'UPDATE_PROXY_UNREACHABLE',
       stage: 'downloading',
     })
@@ -750,7 +750,7 @@ describe('u-download-failover: totalBytes 三组合（真实 download-asset + st
     const actual = await vi.importActual<typeof import('../update/download-asset.js')>('../update/download-asset.js')
     const { checker, fetchReleaseByTag } = makeSideChecker()
     fetchReleaseByTag.mockResolvedValue({
-      ...SIDE_RELEASE_ATOMGIT,
+      ...SIDE_RELEASE_GITCODE,
       assets: { macArm64Dmg: { name: RESUME_ASSET.name, downloadUrl: SIDE_RESUME_URL, size: FULL_SIZE, sha256: FULL_SHA256 } },
     })
     downloadMocks.downloadAsset

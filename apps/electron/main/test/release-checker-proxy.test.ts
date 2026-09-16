@@ -8,7 +8,7 @@
  *   A10: 降级逻辑即时性（无额外延迟）
  *
  * 多源改造联动维护（update-multi-source §7.2 存量测试迁移）：
- * - resolveSourceOrder 经构造注入固定为 [github, atomgit]（消除 auto 探测请求混入）
+ * - resolveSourceOrder 经构造注入固定为 [github, gitcode]（消除 auto 探测请求混入）
  * - 逐源降级语义：主源失败继续试次源——A6c/A9 的调用次数断言按新语义更新
  *   （通道维度「404 不降级直连」语义不变，仅新增次源尝试）
  * - error-log 模块 mock（checker 每轮检查结束登记 source-selection，不落盘）
@@ -35,7 +35,7 @@ vi.mock('../update/error-log.js', () => ({
 }))
 
 /** 构造注入固定源顺序的 checker（消除 auto 探测请求混入） */
-function makeChecker(order: UpdateSource[] = ['github', 'atomgit']): ReleaseChecker {
+function makeChecker(order: UpdateSource[] = ['github', 'gitcode']): ReleaseChecker {
   return new ReleaseChecker({ resolveSourceOrder: async () => order })
 }
 
@@ -214,7 +214,7 @@ describe('W5: release-checker 代理优先 + 失败降级直连', () => {
 
       expect(result).toBeNull()
       // 通道语义不变：404 是服务器响应，github 恰 1 次（不触发直连重试）；
-      // 逐源降级语义（多源联动维护）：随后试 atomgit 1 次
+      // 逐源降级语义（多源联动维护）：随后试 gitcode 1 次
       expect(callCount).toBe(2)
       // 关键断言：即使 HTTP 失败，两源首次调用仍带 dispatcher（代理）
       expect((fetchCalls[0] as Record<string, unknown>).dispatcher).toBeDefined()

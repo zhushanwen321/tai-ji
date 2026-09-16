@@ -6,6 +6,7 @@
  *   2. setUpdateSettings 后 getUpdateSettings 读回
  *   3. 损坏 JSON 时 getUpdateSettings 降级默认值
  *   4. updateSource 配置链（多源 D3）：合法三值写入读回 / 非法值回退 auto / 缺失字段向后兼容
+ *   5. 旧值兼容（v0.10.0）：落盘 'atomgit' 读取归一为 'gitcode'
  *
  * Mock 策略参考 pending-update.test.ts：用真实 fs（临时目录），经
  * TAIJI_AGENT_DATA_DIR 重定向 getUpdateSettingsFile() 落点（路径延迟求值，
@@ -30,7 +31,7 @@ interface UpdateSettingsModule {
   setUpdateSettings: (settings: Partial<UpdateSettings>) => void
   DEFAULT_UPDATE_SETTINGS: UpdateSettings
   UPDATE_SOURCE_PREFS: readonly string[]
-  isUpdateSourcePref: (value: unknown) => value is UpdateSourcePref
+  normalizeUpdateSourcePref: (value: unknown) => UpdateSourcePref | undefined
 }
 
 // 动态 import：确保 env 赋值先生效
@@ -145,15 +146,15 @@ describe('update-settings (升级设置存储 SSOT)', () => {
 
   // ── 4. updateSource 配置链（多源 update-multi-source D3） ────────────
   it('UPDATE_SOURCE_PREFS：合法值集合恰为三值（读取侧与 handler 校验共用 SSOT，防漂移）', () => {
-    expect([...mod.UPDATE_SOURCE_PREFS].sort()).toEqual(['atomgit', 'auto', 'github'])
-    // 守卫与集合一致：三值全真、非法全假
+    expect([...mod.UPDATE_SOURCE_PREFS].sort()).toEqual(['auto', 'gitcode', 'github'])
+    // 归一与集合一致：三值全真（原样返回自身）、非法全 undefined
     for (const v of mod.UPDATE_SOURCE_PREFS) {
-      expect(mod.isUpdateSourcePref(v)).toBe(true)
+      expect(mod.normalizeUpdateSourcePref(v)).toBe(v)
     }
-    expect(mod.isUpdateSourcePref('gitee')).toBe(false)
-    expect(mod.isUpdateSourcePref(42)).toBe(false)
-    expect(mod.isUpdateSourcePref(null)).toBe(false)
-    expect(mod.isUpdateSourcePref(undefined)).toBe(false)
+    expect(mod.normalizeUpdateSourcePref('gitee')).toBeUndefined()
+    expect(mod.normalizeUpdateSourcePref(42)).toBeUndefined()
+    expect(mod.normalizeUpdateSourcePref(null)).toBeUndefined()
+    expect(mod.normalizeUpdateSourcePref(undefined)).toBeUndefined()
   })
 
   it('updateSource：合法值 github 写入读回一致（局部更新不覆盖 preDownload）', () => {
@@ -167,8 +168,8 @@ describe('update-settings (升级设置存储 SSOT)', () => {
     expect(settings.preDownload).toBe(true)
   })
 
-  it('updateSource：合法三值轮转写入读回一致（github → atomgit → auto）', () => {
-    const prefs: UpdateSourcePref[] = ['github', 'atomgit', 'auto']
+  it('updateSource：合法三值轮转写入读回一致（github → gitcode → auto）', () => {
+    const prefs: UpdateSourcePref[] = ['github', 'gitcode', 'auto']
     for (const pref of prefs) {
       mod.setUpdateSettings({ updateSource: pref })
       expect(mod.getUpdateSettings().updateSource).toBe(pref)
@@ -215,5 +216,33 @@ describe('update-settings (升级设置存储 SSOT)', () => {
     expect(settings.updateSource).toBe('auto')
     expect(settings.preDownload).toBe(true)
     expect(settings.autoUpdate).toBe(false)
+  })
+
+  // ── 5. 旧值兼容（v0.10.0 平台更名）：落盘 'atomgit' 读取归一为 'gitcode' ──
+  it('updateSource：落盘 {"updateSource":"atomgit"}（v0.10.0 旧值）→ 读取归一为 gitcode，显式偏好不因改名丢失', () => {
+    mkdirSync(path.dirname(UPDATE_SETTINGS_FILE), { recursive: true })
+    // v0.10.0 存量落盘形状：旧标识符 'atomgit' + 其他开关共存
+    writeFileSync(
+      UPDATE_SETTINGS_FILE,
+      JSON.stringify({ preDownload: true, autoUpdate: false, updateSource: 'atomgit' }),
+      'utf-8',
+    )
+
+    const settings = mod.getUpdateSettings()
+    // 语义等价一次性迁移：旧值 = GitCode 平台更名前旧称，归一后偏好保持「该源优先」
+    expect(settings.updateSource).toBe('gitcode')
+    // 归一不污染其他字段的读取
+    expect(settings.preDownload).toBe(true)
+    expect(settings.autoUpdate).toBe(false)
+  })
+
+  it('normalizeUpdateSourcePref：旧值 atomgit → gitcode；三值合法原样；其余 undefined（读取侧与 IPC 入参共用）', () => {
+    expect(mod.normalizeUpdateSourcePref('atomgit')).toBe('gitcode')
+    expect(mod.normalizeUpdateSourcePref('auto')).toBe('auto')
+    expect(mod.normalizeUpdateSourcePref('github')).toBe('github')
+    expect(mod.normalizeUpdateSourcePref('gitcode')).toBe('gitcode')
+    expect(mod.normalizeUpdateSourcePref('ATOMGIT')).toBeUndefined() // 大小写敏感：旧落盘值恒小写
+    expect(mod.normalizeUpdateSourcePref('')).toBeUndefined()
+    expect(mod.normalizeUpdateSourcePref(42)).toBeUndefined()
   })
 })

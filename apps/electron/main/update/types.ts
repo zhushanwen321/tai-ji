@@ -83,7 +83,7 @@ export const UPDATE_ERROR_MESSAGES: Record<UpdateErrorCode, Omit<UpdateErrorInfo
     message: '网络连接失败',
     stage: 'downloading',
     // 多源（update-multi-source §7.3）：不提「GitHub」专名——双源时代下载可能恒走
-    // AtomGit，「访问不了 GitHub」与其故障无关；保留网络/防火墙排查指引的可操作性
+    // GitCode，「访问不了 GitHub」与其故障无关；保留网络/防火墙排查指引的可操作性
     suggestion: '请检查网络连接和防火墙设置',
   },
   UPDATE_SHA256_MISMATCH: {

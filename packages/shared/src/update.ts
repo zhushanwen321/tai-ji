@@ -6,13 +6,13 @@
 /**
  * 更新来源（发布渠道）。
  * - 'github'：GitHub Releases（原唯一源）
- * - 'atomgit'：AtomGit Releases（发布流程自 GitHub 单向同步，内容一致）
+ * - 'gitcode'：GitCode Releases（发布流程自 GitHub 单向同步，内容一致）
  */
-export type UpdateSource = 'github' | 'atomgit'
+export type UpdateSource = 'github' | 'gitcode'
 
 /**
  * 更新来源偏好（UpdateSettings.updateSource 的值域）。
- * 'auto' = 自动决定源顺序（默认）；显式 'github' / 'atomgit' = 该源优先
+ * 'auto' = 自动决定源顺序（默认）；显式 'github' / 'gitcode' = 该源优先
  * （优先级语义而非独占，任一环节失败仍自动经另一源完成升级）。
  */
 export type UpdateSourcePref = 'auto' | UpdateSource
@@ -50,7 +50,7 @@ export interface LatestReleaseInfo {
 /**
  * 单个 Release 资产。
  * sha256 来自 GitHub asset.digest strip 'sha256:' 前缀，或 manifest fallback
- * （AtomGit 源唯一来源）；缺失时为 undefined。
+ * （GitCode 源唯一来源）；缺失时为 undefined。
  */
 export interface ReleaseAsset {
   /** 文件名（如 'TaiJi-mac-arm64.dmg'） */
@@ -58,7 +58,7 @@ export interface ReleaseAsset {
   /** 下载直链（browser_download_url） */
   downloadUrl: string
   /**
-   * 文件大小（字节）。AtomGit API 不返回 size（实测响应无此字段），
+   * 文件大小（字节）。GitCode API 不返回 size（实测响应无此字段），
    * 由 manifest fallback 填充（GitHub API size 恒有）；缺失为 undefined。
    */
   size?: number
@@ -146,7 +146,7 @@ export interface IProxyConfig {
  * - autoUpdate：启动时自动检查更新并提示下载（v6 demo 语义）。默认 true
  *   （2026-08-28 拍板，设计 §3.6 RM1；存量用户现状即自动检查，见 update-settings.ts）。
  *   可选字段：调用方可以只传部分字段做局部更新（setUpdateSettings 内部与现有值合并）。
- * - updateSource：更新来源偏好（'auto' / 'github' / 'atomgit'）。默认/缺省 'auto'。
+ * - updateSource：更新来源偏好（'auto' / 'github' / 'gitcode'）。默认/缺省 'auto'。
  */
 export interface UpdateSettings {
   /** 检测到新版时自动后台预下载 */
@@ -154,7 +154,7 @@ export interface UpdateSettings {
   /** 启动时自动检查更新并提示下载 */
   autoUpdate?: boolean
   /**
-   * 更新来源偏好：'auto'（自动决定源顺序，默认）/ 'github' / 'atomgit'。
+   * 更新来源偏好：'auto'（自动决定源顺序，默认）/ 'github' / 'gitcode'。
    * 语义为「优先级」而非「独占」——显式选择某源 = 该源优先，失败仍自动降级另一源。
    * 可选 + 缺省/非法值回退 'auto'：旧 settings 文件无此字段 = 'auto'（向后兼容）。
    */

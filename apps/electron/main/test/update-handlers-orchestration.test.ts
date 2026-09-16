@@ -14,7 +14,7 @@
  *        - setSettings 传非法 updateSource（非三值）抛 'Invalid settings'（多源 D3）
  *        - getPending 透传 readPendingUpdate
  *   D3s  UPDATE_ERROR_MESSAGES.UPDATE_NETWORK_FAILED suggestion 文案中性化断言
- *        （多源 §7.3：去 GitHub 专名，双源时代用户可能恒走 AtomGit）
+ *        （多源 §7.3：去 GitHub 专名，双源时代用户可能恒走 GitCode）
  *   S#11 handler 全部经 deps.updateOrchestrator.* 调用（DI 契约含 downloadUpdate/installUpdate），
  *        测试用 mock DI 接口替换快路径/预下载能力——本文件即验证此可测性。
  *
@@ -52,8 +52,8 @@ const settingsMocks = vi.hoisted(() => ({
   getUpdateSettings: vi.fn<() => UpdateSettings>(),
   setUpdateSettings: vi.fn<(settings: Partial<UpdateSettings>) => void>(),
 }))
-// [多源 D3] 部分真实：isUpdateSourcePref / UPDATE_SOURCE_PREFS / DEFAULT_UPDATE_SETTINGS
-// 取真实导出（handler 的 updateSource 枚举校验消费真实守卫，杜绝 mock 复刻三值列表漂移）。
+// [多源 D3] 部分真实：normalizeUpdateSourcePref / UPDATE_SOURCE_PREFS / DEFAULT_UPDATE_SETTINGS
+// 取真实导出（handler 的 updateSource 归一校验消费真实守卫，杜绝 mock 复刻三值列表漂移）。
 // constants.ts 已全路径延迟求值（module-eager-binding 修复），importOriginal 无 fs 副作用；
 // get/set 两个 fs 函数仍走 mock（本文件不读真实 fs）。
 vi.mock('../update/update-settings.js', async (importOriginal) => {
@@ -261,12 +261,13 @@ describe('S#9 update-handlers: settings & pending IPC', () => {
     expect(settingsMocks.setUpdateSettings).not.toHaveBeenCalled()
   })
 
-  it('update:setSettings 合法 updateSource（atomgit）→ 透传 setUpdateSettings（多源 D3）', async () => {
+  it('update:setSettings 旧值 updateSource（v0.10.0 落盘 atomgit）→ 经 IPC 归一为 gitcode 落盘（多源 D3 + 平台更名兼容）', async () => {
     const handler = handlers.get('update:setSettings')!
     const result = await handler({}, { updateSource: 'atomgit' })
 
     expect(settingsMocks.setUpdateSettings).toHaveBeenCalledTimes(1)
-    expect(settingsMocks.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'atomgit' })
+    // 旧标识符接受不拒（该源即 GitCode 旧称），落盘值归一为新标识符——与读取侧 normalize 同源守卫
+    expect(settingsMocks.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'gitcode' })
     expect(result).toEqual({ success: true })
   })
 
@@ -738,7 +739,7 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
 
 // ── D3s：UPDATE_ERROR_MESSAGES suggestion 文案中性化（多源 update-multi-source §7.3）──
 describe('D3s update types: UPDATE_NETWORK_FAILED suggestion 文案', () => {
-  it('suggestion 无 GitHub 专名（双源时代用户可能恒走 AtomGit），且保留网络/防火墙排查指引', async () => {
+  it('suggestion 无 GitHub 专名（双源时代用户可能恒走 GitCode），且保留网络/防火墙排查指引', async () => {
     const { UPDATE_ERROR_MESSAGES } = await import('../update/types.js')
     const suggestion = UPDATE_ERROR_MESSAGES.UPDATE_NETWORK_FAILED.suggestion
     // 去 GitHub 专名（大小写两种形态都断言，防「github.com」式回潮）

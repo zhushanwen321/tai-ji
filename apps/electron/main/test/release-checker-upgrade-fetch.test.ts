@@ -72,7 +72,7 @@ const GITHUB_MANIFEST_URL =
 // ─── 测试工具 ─────────────────────────────────────────────────────
 
 /** 构造注入固定源顺序的 checker（消除 auto 探测请求混入；默认主源 github 优先） */
-function makeChecker(order: UpdateSource[] = ['github', 'atomgit']): ReleaseChecker {
+function makeChecker(order: UpdateSource[] = ['github', 'gitcode']): ReleaseChecker {
   return new ReleaseChecker({ resolveSourceOrder: async () => order })
 }
 
@@ -183,7 +183,7 @@ function githubLatestCallCount(): number {
 
 beforeEach(() => {
   upgradeFetchMock.mockReset()
-  // 次源（atomgit）默认 404 收口（服务器已响应 → 该源失败），mock 未显式设置时
+  // 次源（gitcode）默认 404 收口（服务器已响应 → 该源失败），mock 未显式设置时
   // 保证逐源降级路径行为确定，不依赖 vi.fn() 的 undefined 返回
   upgradeFetchMock.mockResolvedValue(httpErrorResult(404))
   // 默认 disabled（与既有测试一致，防真实 proxy-config.json 干扰）
@@ -240,7 +240,7 @@ describe('u5: latest 检测路径经 upgradeFetch', () => {
 
     expect(result).toBeNull()
     // 通道语义：github 404 恰 1 次（服务器已响应，不触发直连重试）；
-    // 逐源降级语义：随后试 atomgit 1 次
+    // 逐源降级语义：随后试 gitcode 1 次
     expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
     expect(githubLatestCallCount()).toBe(1)
     expect(callOpts(0).proxyUrl).toBe(PROXY_URL)
@@ -286,7 +286,7 @@ describe('u5: 代理失败→直连重试一次（编排保留在适配层）', 
     const result = await checker.checkForLatestRelease('0.8.14')
 
     expect(result).toBeNull()
-    // github 1 次（无通道重试）+ atomgit 1 次
+    // github 1 次（无通道重试）+ gitcode 1 次
     expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
     expect(githubLatestCallCount()).toBe(1)
   })
@@ -325,7 +325,7 @@ describe('u5: CurlFetchError 归网络错误桶（触发直连降级，不触发
     const result = await checker.checkForLatestRelease('0.8.14')
 
     expect(result).toBeNull()
-    expect(upgradeFetchMock).toHaveBeenCalledTimes(2) // github 1（网络失败）+ atomgit 1
+    expect(upgradeFetchMock).toHaveBeenCalledTimes(2) // github 1（网络失败）+ gitcode 1
     expect(checker.getRateLimitedUntil()).toBe(0)
   })
 })
@@ -344,17 +344,17 @@ describe('u5: 403/429 限流直通不降级（per-source 退避窗口生效）',
 
       expect(result).toBeNull()
       // 关键断言：限流是服务器明确响应，github 直通不触发第二步直连降级（恰 1 次）
-      expect(upgradeFetchMock).toHaveBeenCalledTimes(2) // github 1 + atomgit 1（逐源降级）
+      expect(upgradeFetchMock).toHaveBeenCalledTimes(2) // github 1 + gitcode 1（逐源降级）
       expect(githubLatestCallCount()).toBe(1)
       expect(callOpts(0).proxyUrl).toBe(PROXY_URL)
       // per-source 退避窗口（2h）已记录
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
       // 窗口内 force 查询：退避源短路（github 计数恒 1，零请求）；非退避次源照常尝试
       const inWindow = await checker.checkForLatestRelease('0.8.14', { force: true })
       expect(inWindow).toBeNull()
       expect(githubLatestCallCount()).toBe(1)
-      expect(upgradeFetchMock).toHaveBeenCalledTimes(3) // github 0 + atomgit 1
+      expect(upgradeFetchMock).toHaveBeenCalledTimes(3) // github 0 + gitcode 1
     },
   )
 })
@@ -373,12 +373,12 @@ describe('u5 D8: curl 引擎 HTTP 状态交互规则', () => {
 
       // curl 引擎 403/429 与 undici 引擎同语义：限流信号直通（RM2.3 退避两引擎等价）
       expect(result).toBeNull()
-      // 服务器已响应 → 不触发「代理→直连」通道重试（github 恰 1 次）+ atomgit 逐源 1 次
+      // 服务器已响应 → 不触发「代理→直连」通道重试（github 恰 1 次）+ gitcode 逐源 1 次
       expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
       expect(githubLatestCallCount()).toBe(1)
       expect(callOpts(0).proxyUrl).toBe(PROXY_URL)
       // 退避窗口生效：github 记 per-source 退避
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
       // 窗口内 force 查询：退避源短路零请求，github 计数恒 1
       const inWindow = await checker.checkForLatestRelease('0.8.14', { force: true })
@@ -436,7 +436,7 @@ describe('u5 D8: curl 引擎 HTTP 状态交互规则', () => {
       // manifest 单次调用（无第二步直连）；记该源退避窗口；GitHub 路径 release 组装不被阻塞
       expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
       expect(callUrl(1)).toContain('manifest.json')
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
       // 白盒补充：退避确已记录（github 在窗口内）——全源语义下 getRateLimitedUntil 为 0 不丢该证明
       const internals = checker as unknown as { backoffUntil: Map<string, number> }
@@ -464,14 +464,14 @@ describe('u5 R2: 直连重试第二步不吞限流信号 + manifest 两引擎对
       const checker = makeChecker()
       const result = await checker.checkForLatestRelease('0.8.14')
 
-      // github 两步都走完（第一步带代理、第二步直连）→ atomgit 逐源 1 次 → null
+      // github 两步都走完（第一步带代理、第二步直连）→ gitcode 逐源 1 次 → null
       expect(result).toBeNull()
       expect(upgradeFetchMock).toHaveBeenCalledTimes(3)
       expect(callOpts(1).proxyUrl).toBeUndefined()
       // 关键断言：第二步撞 429 记退避（修复前被裸 catch 吞、rateLimitedUntil 保持 0）
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
-      // 窗口内 force 查询：github 退避短路（计数恒 2），atomgit 照常 1 次
+      // 窗口内 force 查询：github 退避短路（计数恒 2），gitcode 照常 1 次
       const inWindow = await checker.checkForLatestRelease('0.8.14', { force: true })
       expect(inWindow).toBeNull()
       expect(githubLatestCallCount()).toBe(2)
@@ -501,7 +501,7 @@ describe('u5 R2: 直连重试第二步不吞限流信号 + manifest 两引擎对
       expect(callOpts(2).proxyUrl).toBeUndefined()
       expect(result!.assets.macArm64Dmg?.sha256).toBeUndefined()
       // 关键断言：第二步撞 429 就地记退避（修复前被裸 catch 吞）
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
       // 白盒补充：退避确已记录（github 在窗口内）——全源语义下 getRateLimitedUntil 为 0 不丢该证明
       const internals = checker as unknown as { backoffUntil: Map<string, number> }
@@ -524,7 +524,7 @@ describe('u5 R2: 直连重试第二步不吞限流信号 + manifest 两引擎对
       expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
       expect(callUrl(1)).toContain('manifest.json')
       // 与 curl 引擎对偶：同记 2h 退避（修复前 undici 侧 !ok 一律 null 不退避 = 两引擎漂移）
-      // 仅 github 记退避、atomgit 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
+      // 仅 github 记退避、gitcode 可用 → 全源语义（update-multi-source §6.5）返回 0；退避生效由本用例计数/短路断言证明
       expect(checker.getRateLimitedUntil()).toBe(0)
       // 白盒补充：退避确已记录（github 在窗口内）——全源语义下 getRateLimitedUntil 为 0 不丢该证明
       const internals = checker as unknown as { backoffUntil: Map<string, number> }

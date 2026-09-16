@@ -4,7 +4,7 @@
  * 持久化用户对升级行为的偏好设置，当前含「预下载开关」「自动更新开关」与「更新来源偏好」：
  * - preDownload：检测到新版时自动在后台下载安装包，用户点击更新时跳过下载等待直接进入替换重启
  * - autoUpdate：启动时自动检查更新并提示下载（v6 demo 语义）
- * - updateSource：更新来源偏好（'auto' / 'github' / 'atomgit'）。语义为「优先级」而非
+ * - updateSource：更新来源偏好（'auto' / 'github' / 'gitcode'）。语义为「优先级」而非
  *   「独占」（设计 update-multi-source §6.3 D3）：显式选某源 = 该源优先，任一环节失败
  *   仍自动降级另一源；缺省/非法值回退默认 'auto'（老 settings 文件无此字段 = auto，向后兼容）
  *
@@ -23,20 +23,29 @@ import { getUpdateSettingsFile } from './constants.js'
 /**
  * updateSource 的合法值集合（多源 D3 三值枚举 SSOT）。
  *
- * 读取侧逐字段校验（本文件 getUpdateSettings 经 isUpdateSourcePref）与 gateway 层
+ * 读取侧逐字段校验（本文件 getUpdateSettings 经 normalizeUpdateSourcePref）与 gateway 层
  * update:setSettings 入参校验共用同一来源，防两处枚举漂移。
  * 命名/形态对齐 shared 的 LAUNCH_RESULT_STATUSES as const 先例。
  */
-export const UPDATE_SOURCE_PREFS = ['auto', 'github', 'atomgit'] as const satisfies readonly UpdateSourcePref[]
+export const UPDATE_SOURCE_PREFS = ['auto', 'github', 'gitcode'] as const satisfies readonly UpdateSourcePref[]
 
 /**
- * updateSource 合法值守卫（类型谓词）：unknown → UpdateSourcePref 窄化。
+ * updateSource 归一 + 合法性判定：unknown → UpdateSourcePref | undefined。
  *
- * 供本文件读取侧逐字段校验与 update:setSettings handler 入参校验复用——
- * 两处「什么算合法来源」的判定恒一致。
+ * 旧值兼容（'atomgit' → 'gitcode'）：v0.10.0 落盘的 update-settings.json 与旧版
+ * renderer 可能携带 'atomgit'——该源即 GitCode（平台更名前旧称），语义完全等价，
+ * 一次性映射为 'gitcode'，存量用户显式偏好不因改名丢失。本字面量是全仓唯一
+ * 允许的 'atomgit' 残留（兼容入口，勿在他处复用）。
+ *
+ * 返回 undefined = 非法值（含其他任意 unknown），调用方回退默认 'auto'。
+ * 读取侧（getUpdateSettings）与 gateway 入参校验（update-handlers update:setSettings）
+ * 共用本函数——两处「什么算合法来源 + 旧值如何归一」判定恒一致。
  */
-export function isUpdateSourcePref(value: unknown): value is UpdateSourcePref {
+export function normalizeUpdateSourcePref(value: unknown): UpdateSourcePref | undefined {
+  if (value === 'atomgit') return 'gitcode'
   return (UPDATE_SOURCE_PREFS as readonly string[]).includes(value as string)
+    ? (value as UpdateSourcePref)
+    : undefined
 }
 
 /**
@@ -93,10 +102,12 @@ export function getUpdateSettings(): UpdateSettings {
     if (typeof obj.autoUpdate === 'boolean') {
       settings.autoUpdate = obj.autoUpdate
     }
-    // updateSource 枚举校验（多源 D3）：仅三值合法，非法/缺失保持默认 'auto'，
+    // updateSource 归一 + 枚举校验（多源 D3）：三值合法原样；旧落盘值归一映射
+    // （v0.10.0 旧值兼容，见 normalizeUpdateSourcePref 注释）；非法/缺失保持默认 'auto'，
     // 对齐上方 boolean 字段的「回退默认值」模式
-    if (isUpdateSourcePref(obj.updateSource)) {
-      settings.updateSource = obj.updateSource
+    const normalizedSource = normalizeUpdateSourcePref(obj.updateSource)
+    if (normalizedSource !== undefined) {
+      settings.updateSource = normalizedSource
     }
   }
   return settings

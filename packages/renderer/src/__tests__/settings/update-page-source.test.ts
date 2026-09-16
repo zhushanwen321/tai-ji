@@ -3,7 +3,7 @@
  *
  * 覆盖（更新来源行，自动更新卡内）：
  *  - testid 存在：DOM 含 select-update-source（SelectTrigger）
- *  - 三选项渲染：下拉打开后 option 文案含「自动（推荐）」「GitHub」「AtomGit」
+ *  - 三选项渲染：下拉打开后 option 文案含「自动（推荐）」「GitHub」「GitCode」
  *  - 加载回填：getUpdateSettings.updateSource → trigger 显示对应选项；字段缺失 → 缺省「自动（推荐）」
  *  - 切换持久化：点选 GitHub → setUpdateSettings({ updateSource: 'github' }) 且 trigger 显示 GitHub
  *  - 不触发 force 检查：切换只写偏好，checkForUpdate 不被调用（D3：生效以缓存 TTL 为界）
@@ -99,26 +99,26 @@ describe('UpdatePage 更新来源三选控件', () => {
     expect(wrapper.find('[data-testid="select-update-source"]').exists()).toBe(true)
   })
 
-  it('三选项渲染：下拉 option 含「自动（推荐）」「GitHub」「AtomGit」', async () => {
+  it('三选项渲染：下拉 option 含「自动（推荐）」「GitHub」「GitCode」', async () => {
     wrapper = mount(UpdatePage)
     await flushPromises()
     const options = await openSourceDropdown()
     const labels = options.map((el) => el.textContent ?? '')
     expect(labels).toContain('自动（推荐）')
     expect(labels).toContain('GitHub')
-    expect(labels).toContain('AtomGit')
+    expect(labels).toContain('GitCode')
     expect(labels).toHaveLength(3)
   })
 
-  it('加载回填：updateSource=atomgit → trigger 显示 AtomGit', async () => {
+  it('加载回填：updateSource=gitcode → trigger 显示 GitCode', async () => {
     settingsMock.getUpdateSettings.mockResolvedValue({
       preDownload: false,
       autoUpdate: false,
-      updateSource: 'atomgit',
+      updateSource: 'gitcode',
     })
     wrapper = mount(UpdatePage)
     await flushPromises()
-    expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('AtomGit')
+    expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('GitCode')
   })
 
   it('加载回填：updateSource 缺失（旧 settings 文件）→ 缺省显示「自动（推荐）」', async () => {
@@ -138,11 +138,11 @@ describe('UpdatePage 更新来源三选控件', () => {
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('GitHub')
   })
 
-  it('切换持久化：点选 AtomGit → setUpdateSettings({ updateSource: "atomgit" })', async () => {
+  it('切换持久化：点选 GitCode → setUpdateSettings({ updateSource: "gitcode" })', async () => {
     wrapper = mount(UpdatePage)
     await flushPromises()
-    await pickOption('AtomGit')
-    expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'atomgit' })
+    await pickOption('GitCode')
+    expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'gitcode' })
   })
 
   it('切换后不触发 force 检查：checkForUpdate 不被调用（D3：生效以缓存 TTL 为界）', async () => {

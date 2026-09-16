@@ -1,6 +1,6 @@
 <!--
   Settings · 更新设置页。
-  自动更新开关 + 更新来源三选（自动/GitHub/AtomGit）+ 当前版本 + 检查更新状态机
+  自动更新开关 + 更新来源三选（自动/GitHub/GitCode）+ 当前版本 + 检查更新状态机
   + 预下载开关 + 代理模式选择 + 手动模式下 HTTP/HTTPS 代理输入 + 测试代理连接。
 -->
 <template>
@@ -22,7 +22,7 @@
             @update:model-value="onToggleAutoUpdate"
           />
         </div>
-        <!-- 更新来源行（三选：自动（推荐）/GitHub/AtomGit；选择即优先级，切换即持久化） -->
+        <!-- 更新来源行（三选：自动（推荐）/GitHub/GitCode；选择即优先级，切换即持久化） -->
         <div class="flex items-center justify-between border-t border-border px-4 py-3">
           <Label class="text-[12px] text-fg">{{ t('settings.update.updateSourceLabel') }}</Label>
           <Select
@@ -39,7 +39,7 @@
             <SelectContent>
               <SelectItem value="auto">{{ t('settings.update.updateSourceAuto') }}</SelectItem>
               <SelectItem value="github">{{ t('settings.update.updateSourceGithub') }}</SelectItem>
-              <SelectItem value="atomgit">{{ t('settings.update.updateSourceAtomgit') }}</SelectItem>
+              <SelectItem value="gitcode">{{ t('settings.update.updateSourceGitcode') }}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -232,7 +232,7 @@ const autoUpdate = ref(false)
 const autoUpdateSaving = ref(false)
 
 /** 更新来源偏好枚举（与 SelectItem value 一一对应）。 */
-const UPDATE_SOURCE_PREFS = ['auto', 'github', 'atomgit'] as const
+const UPDATE_SOURCE_PREFS = ['auto', 'github', 'gitcode'] as const
 
 /** 更新来源偏好（选择即优先级非独占：任一源失败仍自动降级另一源；切换即持久化） */
 const updateSource = ref<UpdateSourcePref>('auto')

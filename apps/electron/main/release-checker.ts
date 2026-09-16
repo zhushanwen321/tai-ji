@@ -31,7 +31,7 @@
  * 返回 0（无任何记录同样 0）——handler 判定式 `> Date.now()` 与既有 mock 形态不变，
  * §6.5「全部源都在退避窗口才报 rateLimited」由此精确成立。
  * 退避记录点：源 latest fetch 撞 GitHub 403/429（适配层 rate-limited 分类）；
- * manifest fetch 撞 GitHub 403/429（两引擎同形态重建）。AtomGit manifest 的
+ * manifest fetch 撞 GitHub 403/429（两引擎同形态重建）。GitCode manifest 的
  * 403/429 是 auth_key 签名直链的签名/权限拒绝（§4.1），按普通失败收口不记退避，
  * 由该源失败降级兜底。
  *
@@ -39,10 +39,10 @@
  * 直链 = resolveManifestDownloadUrl(胜出源完整 assets)（适配层 browser_download_url，
  * by-tag 精确对齐本次 release，无 latest 别名的错位竞态）。
  * - 解析扩展为 Map<name, {sha256, size?}>；asset size 取值 `API size ?? manifest size`
- *   （AtomGit 无 API size，size 全靠 manifest）
+ *   （GitCode 无 API size，size 全靠 manifest）
  * - GitHub 路径：digest 优先，manifest 失败（含 assets 无 manifest.json 资产）不阻塞
  *   （sha256 undefined → 下载侧 size 校验兜底）
- * - AtomGit 路径：sha256/size 唯一来源是 manifest → 直链缺失/fetch 失败（网络/404/
+ * - GitCode 路径：sha256/size 唯一来源是 manifest → 直链缺失/fetch 失败（网络/404/
  *   解析失败/目标资产缺失）计为「该源失败」→ 回循环试次源（D2 源归类）
  *
  * [HISTORICAL] 不变量：
@@ -95,7 +95,7 @@ const RATE_LIMIT_BACKOFF_MS =
  * RELEASE_SOURCE_HOSTS 的键是 host 用途名而非源名，不可作源枚举）。新增源时
  * 同批更新本常量，防类型面与运行时枚举双轨漂移。
  */
-const KNOWN_UPDATE_SOURCES: readonly UpdateSource[] = ['github', 'atomgit']
+const KNOWN_UPDATE_SOURCES: readonly UpdateSource[] = ['github', 'gitcode']
 
 /** HTTP 状态码：GitHub API 限流/配额拒绝（RM2.3 可区分信号） */
 const HTTP_STATUS_FORBIDDEN = 403
@@ -179,7 +179,7 @@ function pickPlatformAsset(
 
 /**
  * 胜出源 SourceRelease → LatestReleaseInfo（平台分流，size 可为 undefined——
- * AtomGit 无 API size，由 manifest fallback 填充，§6.2）。
+ * GitCode 无 API size，由 manifest fallback 填充，§6.2）。
  */
 function buildLatestReleaseInfo(source: UpdateSource, release: SourceRelease): LatestReleaseInfo {
   const tagName = release.tag_name
@@ -200,7 +200,7 @@ function buildLatestReleaseInfo(source: UpdateSource, release: SourceRelease): L
 
 // ── manifest 解析结构 ──────────────────────────────────────────────
 
-/** manifest 单资产条目（多源扩展：size 可选——AtomGit 的 API size 缺失由 manifest 补） */
+/** manifest 单资产条目（多源扩展：size 可选——GitCode 的 API size 缺失由 manifest 补） */
 interface ManifestAssetInfo {
   sha256: string
   size?: number
@@ -340,7 +340,7 @@ export class ReleaseChecker implements IReleaseChecker {
       // 首个判定有新版的源为胜出候选 → 组装 + manifest 填充（§4.2⑤）
       const filled = await this.fillManifestForWinner(source, release)
       if (!filled) {
-        // AtomGit 路径 manifest 是 sha256/size 唯一来源：URL 缺失/fetch 失败/解析失败/
+        // GitCode 路径 manifest 是 sha256/size 唯一来源：URL 缺失/fetch 失败/解析失败/
         // 目标资产缺失均计「该源失败」→ 回循环试次源（D2；GitHub 路径失败在此前已不阻塞返回）
         failedSources.push({ source, errorCode: 'manifest-failed' })
         continue
@@ -470,7 +470,7 @@ export class ReleaseChecker implements IReleaseChecker {
    * 仅在至少一个目标平台 asset 缺 sha256 时 fetch manifest（lazy，现状语义）。
    * 解析 Map 扩展为 <name, {sha256, size?}>，size 取值 `API size ?? manifest size`。
    *
-   * @returns 填充后的 info；AtomGit 路径 manifest 必经失败（直链缺失/fetch 失败/
+   * @returns 填充后的 info；GitCode 路径 manifest 必经失败（直链缺失/fetch 失败/
    *          解析失败/目标资产缺失）返回 null（调用方计该源失败 → 次源）；
    *          GitHub 路径 manifest 失败不阻塞（digest 优先 + API size 兜底，现状语义）
    */
@@ -486,16 +486,16 @@ export class ReleaseChecker implements IReleaseChecker {
     if (!needsManifest) return info
 
     // manifest 直链取自胜出源 assets 中 manifest.json 的 browser_download_url；
-    // 资产缺失（发布同步事故形态）按源归类：AtomGit 必经失败，GitHub 不阻塞
+    // 资产缺失（发布同步事故形态）按源归类：GitCode 必经失败，GitHub 不阻塞
     const manifestUrl = resolveManifestDownloadUrl(release.assets)
     if (!manifestUrl) {
-      return source === 'atomgit' ? null : info
+      return source === 'gitcode' ? null : info
     }
 
     const manifestMap = await this.fetchManifest(source, manifestUrl)
 
-    if (source === 'atomgit') {
-      // AtomGit：manifest 是 sha256/size 唯一来源——fetch 失败或目标资产缺失均不可下载
+    if (source === 'gitcode') {
+      // GitCode：manifest 是 sha256/size 唯一来源——fetch 失败或目标资产缺失均不可下载
       if (!manifestMap) return null
       const filled = applyManifestToInfo(info, manifestMap)
       const stillMissing = Object.values(filled.assets).some(
@@ -514,7 +514,7 @@ export class ReleaseChecker implements IReleaseChecker {
    *   { version, releasedAt, assets: { "<filename>": { sha256, size } } }
    * 失败（网络/超时/解析/404）一律返回 null（不阻塞，按源归类由调用方分派）；
    * GitHub 路径 403/429 额外记录该源 2h 限流退避（两引擎同形态）后同样返回 null；
-   * AtomGit 路径 403/429 按普通 manifest 失败收口（auth_key 签名直链的 403 = 签名/
+   * GitCode 路径 403/429 按普通 manifest 失败收口（auth_key 签名直链的 403 = 签名/
    * 权限拒绝，非限流信号，见 closeManifestHttpError）。
    *
    * 通道编排与 latest 同策略：代理优先 + 失败降级直连（引擎降级内嵌 upgradeFetch）。
@@ -592,7 +592,7 @@ export class ReleaseChecker implements IReleaseChecker {
       if (err instanceof ReleaseRateLimitedError) throw err
       // D8 curl 引擎 HTTP 状态交互规则：携带 httpStatusCode 的 CurlFetchError = 服务器
       // 已响应——GitHub 403/429 重建限流信号供外层记退避且不触发直连重试；404/5xx 与
-      // AtomGit 403/429 按 manifest null 语义收口（同样不触发直连重试）
+      // GitCode 403/429 按 manifest null 语义收口（同样不触发直连重试）
       if (isCurlHttpStatusError(err)) {
         return closeManifestHttpError(source, err.httpStatusCode)
       }
@@ -605,13 +605,13 @@ export class ReleaseChecker implements IReleaseChecker {
 
 /**
  * manifest HTTP 错误状态分流（两引擎同款，D8 无漂移）：GitHub 403/429 重建
- * ReleaseRateLimitedError（外层记该源退避）；AtomGit 403/429 与其他 HTTP 错误
+ * ReleaseRateLimitedError（外层记该源退避）；GitCode 403/429 与其他 HTTP 错误
  * 按普通 manifest null 语义收口（不记限流退避）。
  *
  * 按源分派的依据（§4.1）：「403 = 限流/配额拒绝」前提仅在 GitHub 域成立（60 次/h
- * 匿名配额 + X-RateLimit-* 头）；AtomGit manifest 直链落 file-cdn.gitcode.com 的
+ * 匿名配额 + X-RateLimit-* 头）；GitCode manifest 直链落 file-cdn.gitcode.com 的
  * auth_key 签名 URL，403 = 签名/权限拒绝而非限流——误记 2h 退避会使国内主场景
- * （AtomGit 优先）的后续检查被短路降级。AtomGit 的失败由该源失败降级兜底。
+ * （GitCode 优先）的后续检查被短路降级。GitCode 的失败由该源失败降级兜底。
  */
 function closeManifestHttpError(source: UpdateSource, status: number): null {
   if (
@@ -651,7 +651,7 @@ function parseManifestAssets(bodyText: string | undefined): Map<string, Manifest
 /**
  * 把 manifest 条目回填到 LatestReleaseInfo 的目标平台 asset：
  * sha256 取 `asset.sha256 ?? manifest.sha256`（digest 优先，现状语义）；
- * size 取 `API size ?? manifest size`（AtomGit 无 API size，size 全靠 manifest，§6.2）。
+ * size 取 `API size ?? manifest size`（GitCode 无 API size，size 全靠 manifest，§6.2）。
  */
 function applyManifestToInfo(
   info: LatestReleaseInfo,
