@@ -728,7 +728,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
 
     if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0]).toMatchObject({ id: 'kimi-main', status: 'imported' })
+    expect(applyOut.result.imported[0]).toMatchObject({ id: 'kimi-main', status: 'imported', quotaAutoEnabled: true })
     expect(store.modify).toHaveBeenCalledTimes(1)
     expect(store.modify.mock.calls[0][0]).toBe('kimi-main')
     // fetcher 必须显式落盘：catalog provider 无 models.json 条目时 fetch 侧
@@ -760,9 +760,11 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
 
     const prev = previewImport('pi')
     if (!('importId' in prev)) throw new Error('preview should succeed')
-    await applyImport(prev.importId, ['mimo-main'], undefined, store)
+    const applyOut = await applyImport(prev.importId, ['mimo-main'], undefined, store)
 
     expect(store.modify).not.toHaveBeenCalled()
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
   })
 
   it('组1 custom：preset 未命中（无 baseUrl/name 关联）不写 extras', async () => {
@@ -795,6 +797,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     // provider 本身照常导入（现状不变），只是不写 quota extras
     if (!('result' in applyOut)) throw new Error('apply should succeed')
     expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
     expect(store.modify).not.toHaveBeenCalled()
   })
 
@@ -811,6 +814,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
 
     if (!('result' in applyOut)) throw new Error('apply should succeed')
     expect(applyOut.result.imported[0]).toMatchObject({ status: 'skipped' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
     expect(store.modify).not.toHaveBeenCalled()
   })
 
@@ -827,7 +831,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
 
     const prev = previewImport('pi')
     if (!('importId' in prev)) throw new Error('preview should succeed')
-    await applyImport(prev.importId, ['kimi-coding', 'zai-coding-cn', 'xiaomi'], undefined, store)
+    const applyOut = await applyImport(prev.importId, ['kimi-coding', 'zai-coding-cn', 'xiaomi'], undefined, store)
 
     const calls = store.modify.mock.calls
     expect(calls).toHaveLength(2)
@@ -837,6 +841,12 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     // zai-coding-cn：模板 baseUrl 'open.bigmodel.cn' 命中 zhipu preset
     expect(byId.get('zai-coding-cn')).toEqual({ quota: { enabled: true, fetcher: 'zhipu' } })
     expect(byId.has('xiaomi')).toBe(false)
+    // 结果条目标记：写成功的两条置 quotaAutoEnabled（前端 toast 依据），xiaomi 不置位
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    const flagById = new Map(applyOut.result.imported.map((i) => [i.id, i.quotaAutoEnabled]))
+    expect(flagById.get('kimi-coding')).toBe(true)
+    expect(flagById.get('zai-coding-cn')).toBe(true)
+    expect(flagById.get('xiaomi')).toBeUndefined()
   })
 
   it('merge 语义：保留既有 extras 字段域（authMethod）与既有 quota 字段，只写 enabled + fetcher', async () => {
@@ -866,6 +876,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
 
     if (!('result' in applyOut)) throw new Error('apply should succeed')
     expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
   })
 
   it('best-effort：extras 写失败不阻断导入（provider 已落盘，额度可手动配置）', async () => {
@@ -880,6 +891,8 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
 
     if (!('result' in applyOut)) throw new Error('apply should succeed')
     expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    // 写失败不置位：前端不得对未生效的自动开启 toast 实报
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
     expect(applyOut.result.failedCount).toBe(0)
   })
 })

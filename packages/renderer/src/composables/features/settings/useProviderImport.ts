@@ -114,6 +114,14 @@ export function useProviderImport() {
       if (orphanImportedCount > 0) {
         toastInfo(t('settings.provider.importToast.orphanImported', { count: orphanImportedCount }))
       }
+      // coding-plan 额度显示自动开启提示（导入即默认同意）：runtime 在结果条目标记
+      // quotaAutoEnabled（写 extras 成功才置位），前端不推算不实报。单条带 name，多条带 count
+      const quotaEnabledItems = imported.filter((i) => i.status === 'imported' && i.quotaAutoEnabled)
+      if (quotaEnabledItems.length === 1) {
+        toastInfo(t('settings.provider.importToast.quotaAutoEnabledOne', { name: quotaEnabledItems[0].name }))
+      } else if (quotaEnabledItems.length > 1) {
+        toastInfo(t('settings.provider.importToast.quotaAutoEnabledMany', { count: quotaEnabledItems.length }))
+      }
       resetImportState()
     } catch (e) {
       // transport 层 reject（请求超时 / WebSocket 断连 pending.rejectAll / 传输发送失败）：

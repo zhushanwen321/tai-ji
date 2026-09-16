@@ -154,12 +154,15 @@ export interface ProviderImportPreview {
  * - status 'imported'：成功 upsert 到 models.json。
  * - status 'skipped'：因冲突（duplicate-id）跳过，未写入。
  * - status 'failed'：upsertProvider 抛异常，reason 含错误信息。
+ * - quotaAutoEnabled：本次导入已自动开启 coding-plan 额度显示（导入即默认同意，
+ *   写 extras 成功才置位；前端据此 toast 提示）。缺省 = 未开启（不命中条件或写失败）。
  */
 export interface ProviderImportedItem {
   id: string
   name: string
   status: 'imported' | 'skipped' | 'failed'
   reason?: string
+  quotaAutoEnabled?: boolean
 }
 
 /**

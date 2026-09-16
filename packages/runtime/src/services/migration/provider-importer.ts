@@ -102,18 +102,21 @@ function matchAutoEnablePreset(
  * 传 fetcher）。credentialSource 刻意不写：缺省推导 'provider'（复用导入落盘的 provider
  * key），不制造 secrets 中间态。
  *
- * best-effort：失败不阻断导入主语义（provider 已落盘，额度显示可在设置里手动配置），warn 即可。
+ * 返回写入是否成功：成功才在结果条目置 quotaAutoEnabled（前端 toast 依据），失败只 warn
+ * （best-effort：导入主语义已成功，额度显示可在设置里手动配置）。
  */
-async function autoEnableQuotaDisplay(store: QuotaExtrasWriter, providerId: string, fetcherId: string): Promise<void> {
+async function autoEnableQuotaDisplay(store: QuotaExtrasWriter, providerId: string, fetcherId: string): Promise<boolean> {
   try {
     await store.modify(providerId, current => ({
       ...current,
       quota: { ...current?.quota, enabled: true, fetcher: fetcherId },
     }))
+    return true
   } catch (err) {
     // best-effort 降级（非 silent-catch）：导入主语义（provider 定义+凭据+白名单）已成功，
     // 额度显示缺失属可恢复态（设置里手动配置即可）；在此中断/回滚反而让导入结果与磁盘态背离。
     console.warn(`[provider-importer] auto-enable quota display failed for ${providerId}:`, err)
+    return false
   }
 }
 
@@ -526,8 +529,9 @@ export async function applyImport(
   // apply 时再次查冲突（preview 后 models.json 可能被改）
   const existingIds = new Set(getProviderNames())
   const imported: ProviderImportedItem[] = []
-  // 自动开启额度显示的目标（决策用完整数据在此收集，写入在主流程成功后统一执行）
-  const autoEnableTargets: Array<{ id: string; fetcher: string }> = []
+  // 自动开启额度显示的目标（决策用完整数据在此收集，写入在主流程成功后统一执行；
+  // 携带结果条目引用——写成功才置 quotaAutoEnabled，前端 toast 据此提示）
+  const autoEnableTargets: Array<{ item: ProviderImportedItem; fetcher: string }> = []
 
   // ══ 组 1：models.json 已定义的 provider（分体系处理）══
   for (const provider of entry.providers) {
@@ -539,7 +543,7 @@ export async function applyImport(
         { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
         provider._credentialType,
       )
-      if (preset) autoEnableTargets.push({ id: provider._sourceName, fetcher: preset.fetcher })
+      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
     }
   }
 
@@ -554,7 +558,7 @@ export async function applyImport(
       const preset = tpl
         ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
         : undefined
-      if (preset) autoEnableTargets.push({ id: oc.providerId, fetcher: preset.fetcher })
+      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
     }
   }
 
@@ -574,9 +578,10 @@ export async function applyImport(
   // coding-plan 额度显示自动开启（导入即默认同意）：只对本次真实落盘（imported）的条目；
   // skipped（duplicate）不动——不覆盖用户对既存 provider 的配置。写入必须在本函数返回前
   // 完成：handler 随后广播 provider 列表，闸门（renderer quota.enabled）直接消费本次写值。
-  if (quotaExtrasStore) {
-    for (const target of autoEnableTargets) {
-      await autoEnableQuotaDisplay(quotaExtrasStore, target.id, target.fetcher)
+  // 写成功才在结果条目置 quotaAutoEnabled（写失败不置位，前端不 toast 不实报告）。
+  for (const target of autoEnableTargets) {
+    if (quotaExtrasStore && await autoEnableQuotaDisplay(quotaExtrasStore, target.item.id, target.fetcher)) {
+      target.item.quotaAutoEnabled = true
     }
   }
 
