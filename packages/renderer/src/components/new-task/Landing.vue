@@ -173,12 +173,18 @@ function onSelectBranch(payload: { name: string }): void {
   flow.selectBranch(payload.name)
 }
 /**
- * worktree 创建成功（CreateWorktreeModal emit success）：
- * 选定新 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing。
+ * worktree 创建成功（CreateWorktreeModal emit success）：创建成功即回灌新 worktree cwd
+ * （chip 同刻切换），不关 overlay——modal 成功屏自行展示后 emit close（或用户提前关），
+ * 统一走 closeOverlay 回 landing。
+ * [HISTORICAL] 旧链路：success emit 挂在 modal 的 2s 展示定时器上，窗口内关 modal
+ * → 卸载清 timer → 切换静默丢失（chip 留旧目录，首发 create 也落旧目录）。
  */
+function onWorktreeCreated(payload: { cwd: string }): void {
+  flow.adoptWorktreeCwd(payload.cwd)
+}
 /**
- * worktree 创建成功 / exists 态「直接开始」（CreateWorktreeModal emit success / use-existing）：
- * 选定 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing。
+ * exists 态「直接开始」（CreateWorktreeModal emit use-existing）：
+ * 选定 worktree 的 cwd（chip 回灌）+ 关 overlay 回 landing（无成功屏，直接切换）。
  */
 function onWorktreeActivated(payload: { cwd: string }): void {
   flow.selectWorkspace(payload.cwd)
@@ -299,11 +305,13 @@ function onPresetSelect(payload: { presetId: string }): void {
     <CreateBranchModal v-if="isBranchModalOpen" />
 
     <!-- 创建 worktree modal（W2 wave）：BranchSelectPopover emit create-worktree → openCreateWorktree →
-         state=worktree-modal → 渲染。modal 内五态自管，success/use-existing → selectWorkspace + closeOverlay。 -->
+         state=worktree-modal → 渲染。modal 内五态自管；success → adoptWorktreeCwd（chip 同刻切换，
+         不关 overlay）；close（2s 定时器/用户关）→ closeOverlay 回 landing；
+         use-existing → selectWorkspace + closeOverlay（无成功屏直接切换）。 -->
     <CreateWorktreeModal
       v-if="isWorktreeModalOpen"
       @close="flow.closeOverlay()"
-      @success="onWorktreeActivated"
+      @success="onWorktreeCreated"
       @use-existing="onWorktreeActivated"
     />
   </div>

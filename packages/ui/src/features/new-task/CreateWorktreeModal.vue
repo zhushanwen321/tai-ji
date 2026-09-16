@@ -183,14 +183,22 @@ async function runCreate(branch: string, base: string): Promise<void> {
   try {
     const result = await createWorktree({ branch, baseBranch: base, locationMode: locationMode.value, workspaceHint: repoPath.value || pendingCwd.value || undefined })
     if (cancelled.value) return
-    phase.value = 'success'; scheduleSuccessEmit(result.cwd)
+    // 创建成功 ⇒ chip 切换同刻发生：success 事件立即 emit（不挂定时器），父层据此回灌
+    // pendingCwd。2s 成功屏只承担展示 + 延迟关闭（scheduleCloseEmit）——窗口内用户关 modal
+    // （Esc/点外/X/切 session）最多丢「延迟关闭」，不会丢切换。
+    // [HISTORICAL] 旧链路 success emit 挂在 2s 定时器上且卸载即取消，窗口内关 modal
+    // → 切换静默丢失（chip 留旧目录，首发 create 也落旧目录）。
+    phase.value = 'success'
+    emit('success', { cwd: result.cwd })
+    scheduleCloseEmit()
   } catch (e) {
     if (cancelled.value) return
     const err = (e as WorktreeError) ?? {}; lastError.value = err
     phase.value = err.code === 'WORKTREE_EXISTS' ? 'exists' : 'error'
   }
 }
-function scheduleSuccessEmit(cwd: string): void { clearSuccessTimer(); successTimer.value = setTimeout(() => { emit('success', { cwd }); emit('close') }, SUCCESS_EMIT_DELAY_MS) }
+/** 成功屏展示窗后仅负责关闭（切换已在 success 事件同步完成）。 */
+function scheduleCloseEmit(): void { clearSuccessTimer(); successTimer.value = setTimeout(() => emit('close'), SUCCESS_EMIT_DELAY_MS) }
 function clearSuccessTimer(): void { if (successTimer.value != null) { clearTimeout(successTimer.value); successTimer.value = null } }
 async function onRetry(): Promise<void> { await runCreate(trimmedName.value, baseBranch.value) }
 function onCleanup(): void { emit('close') }
