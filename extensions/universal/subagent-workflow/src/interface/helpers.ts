@@ -96,7 +96,8 @@ interface WorkflowNotifyDetails {
  *      看门狗，送达 customType 保持 "workflow-result"）→ ③ 回执销账 → ④ 断连/
  *      重启经 recoverFromSession at-least-once 重放（机制见 notify-ledger.ts）。
  * 账本未装配时（旧宿主 / 无 ledger 测试）降级为 fire-once 直发（at-most-once，
- * 对齐 notifier 内核降级路径；triggerTurn 单通道，deliverAs 已删——D5 单通道化）。
+ * 对齐 notifier 内核降级路径；triggerTurn 单通道，deliverAs 已删——u9 偏差裁决，
+ * D7 账本化配套）。
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
  * 同 runId 的重复收口回调在写账前即拦截（跨 session_shutdown 等边界防重复）；
@@ -202,8 +203,8 @@ export function notifyDone(
   }
 
   // 降级：ledger 未装配（旧宿主 / 无账本测试）→ fire-once 直发（at-most-once）。
-  // triggerTurn 单通道（deliverAs 已删——D5 单通道化：busy 场景的投递时机治理本就
-  // 由账本路径承担，降级路径不再依赖 pi 内存队列的 steer 形态）；stale ctx 防御
+  // triggerTurn 单通道（deliverAs 已删——u9 偏差裁决，D7 账本化配套：busy 场景的
+  // 投递时机治理本就由账本路径承担，降级路径不再依赖 pi 内存队列的 steer 形态）；stale ctx 防御
   // （crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：session 替换窗口
   // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection 崩 pi（E1 同机制）。
   // stale 静默降级（完成通知不投递，用户可从 session 历史 / 工具结果看到 workflow

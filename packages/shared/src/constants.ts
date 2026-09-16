@@ -24,7 +24,7 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['subagent'])
 
 /** pi-subagent-workflow 扩展的 workflow 族 tool 名集合（识别 workflow run 调用用，SSOT）。
  *  workflow 扩展通过名为 "workflow" 的 tool 执行 workflow run，event-interpreter 据此
- *  捕获发起时刻（action=run → 广播 session.workflows 增量信号）。
+ *  做 W18 record 失效兜底分类（entry_appended 主信号丢失时的双保险收敛）。
  *  'subagents' = 批量派发入口（N 个独立任务一次派发，handler 转译 runWorkflow("fan-out")）：
  *  执行的是一次性 workflow run（record 快照为 workflow-record entry），故与 'workflow'
  *  同集合——单收录是零 runtime 改动的唯一全对解（D1 裁决：进 SUBAGENT 集合会误触发

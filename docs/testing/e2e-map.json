@@ -312,7 +312,9 @@
       "summary": "S1 批量基本链：subagents 双任务并行 → 一条 notifyDone 收齐（pi CLI 真机，真 LLM）",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
-        "packages/subagent-core/workflows/fan-out.js"
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/src/execution/service/**"
       ],
       "layer": "L3",
       "assets": [
@@ -324,7 +326,7 @@
       "run": "（开发阶段手测链——pi -ne RPC stdin JSONL 剧本随阶段 5 A1 环境落建后回填可执行命令）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok"
+      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板 / core 执行链（orchestration + execution/service）改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok"
     },
     {
       "id": "E2E-BATCH-02",
@@ -361,14 +363,16 @@
       "run": "（开发阶段手测链——剧本随阶段 5 A1 同环境落建后回填可执行命令）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 re-dispatch via subagents、agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧将追加新句 \"To get these results, re-dispatch via the subagents tool.\"，新句断言随修复组 1 落地、agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
     },
     {
       "id": "E2E-BATCH-04",
       "summary": "S4 中途停止：派发后 workflow abort → run 终态 aborted + 通知到达 + 无孤儿 pi 子进程",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
-        "packages/subagent-core/workflows/fan-out.js"
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/src/execution/service/**"
       ],
       "layer": "L3",
       "assets": [
@@ -404,7 +408,7 @@
     },
     {
       "id": "E2E-BATCH-06",
-      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R3 占位，Phase 3 账本化合入后激活）",
+      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R3 占位，账本化已合入；A6 剧本随阶段 5 环境落建后翻 R2 态）",
       "scope": [
         "extensions/universal/subagent-workflow/src/interface/helpers.ts",
         "packages/subagent-core/src/execution/notify/**"
@@ -416,10 +420,10 @@
       ],
       "trigger": "on-diff",
       "serial": true,
-      "run": "（Phase 3 激活前不执行、无验收脚本——u9 合入时激活为 R2 并回填可执行命令）",
+      "run": "（A6 断连重放剧本未落建前不执行、无验收脚本——账本化（u9）已合入，随阶段 5 环境落建后翻 R2 态回填可执行命令）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R3 占位：触发条件注明「Phase 3 notifyDone 账本化合入后激活」（账本化为同 PR 序列 u9 单元）——激活前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）"
+      "note": "R3 占位：账本化（u9，commit 12f783120）已合入——完整激活与阶段 5 绑定：A6 断连重放剧本随阶段 5 环境落建后翻 R2 态回填可执行命令，此前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）"
     }
   ]
 }

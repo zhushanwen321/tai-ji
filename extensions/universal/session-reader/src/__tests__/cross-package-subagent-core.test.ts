@@ -227,7 +227,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
    *  全量重建通道——derivedManifestRecord 投影真写 manifest）。返回子 session 文件
    *  路径表。[collect 退役] 原 E1 落标出口（recoverSyncCollectBatch →
    *  appendBatchFinalizedEntry）随 sync 批机制删除。 */
-  async function driveSyncBatchRecovery(members: MemberSeed[]): Promise<Map<string, string>> {
+  async function driveManifestRebuild(members: MemberSeed[]): Promise<Map<string, string>> {
     const childFiles = new Map<string, string>()
     for (const m of members) {
       const childFile = writeChildSessionFile(m)
@@ -255,7 +255,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
       assistantParts: ['part one', 'part two'],
       model: 'prov/round-m',
     }
-    const childFiles = await driveSyncBatchRecovery([m])
+    const childFiles = await driveManifestRebuild([m])
 
     // manifest 内容断言（rebuildIndexes → derivedManifestRecord 投影路径的产物，
     // 非手工预写）：sessionFile 来自 W1 投影扩展。[U2/U3 两态桥接] 恢复链覆写后成员
@@ -295,7 +295,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
       { id: 'sa-cross-a', resultText: 'alpha final answer', assistantParts: ['alpha final answer'], model: 'prov/ma' },
       { id: 'sa-cross-b', resultText: 'beta final answer', assistantParts: ['beta final answer'], model: 'prov/mb' },
     ]
-    await driveSyncBatchRecovery(members)
+    await driveManifestRebuild(members)
 
     const r = await handleSessionRead({ action: 'result', session: 'sa-cross-a,sa-cross-b' }, { agentDir })
     const text = r.content[0]?.text ?? ''

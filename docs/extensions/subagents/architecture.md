@@ -67,7 +67,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 子域 | 内容 |
 |---|---|
-| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（五聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` + `service-bootstrap`） |
+| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
 | `src/execution/persistence/` | record 持久化轴：`record-store.ts`（内存 + 磁盘重建容器，意图原语唯一写入口 C-data-20；H4 三轴拆分后 = 容器 + 原语立面 + D7 写面收口本体，三轴实现拆至 `record-store-terminal.ts`（终态原语轴）/ `record-store-rounds.ts`（轮次簿记轴）/ `record-store-rebuild.ts`（重建与投影轴）——轴文件经 ctx 注入写面，守卫白名单零改动）、`execution-record.ts`（唯一状态对象与 CAS）、`finalize-record.ts`、`record-entry.ts`、`state-marker.ts` / `alive-store.ts`（轮收口收条与写权声明 sidecar）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts` / `session-file-gc.ts` / `idle-gc.ts`（持久化与回收） |
 | `src/execution/notify/` | 通知轴：`notifier.ts` / `notify-host.ts` / `notify-ledger.ts`（确认式送达） |
 | `src/execution/worktree/` | worktree 隔离轴：`worktree-manager.ts` / `worktree-git-ops.ts` / `worktree-reconcile.ts` / `worktree-registry.ts`（worktree 隔离与归档重建对账） |
