@@ -18,7 +18,7 @@
  *
  * Mock 边界与 session-service.test.ts 一致（pm/broker/extensionService 注入 mock，existsSync 真实）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -73,6 +73,10 @@ vi.mock('../src/services/session-history.js', () => ({ getHistoryFromFile: vi.fn
 
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 import { SessionService } from '../src/services/session/session-service.js'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+} from '../src/services/session/session-delivery-registry.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../src/infra/pi/session-store.js'
 
@@ -197,6 +201,16 @@ function createSetup() {
     workspaceService as unknown as ConstructorParameters<typeof SessionService>[8],
   )
 
+  // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步在注册表适配层）——
+  // fixture 按真实组合根装配接内核（session 视图 / ensureActive / workspace.record 同源）。
+  const deliveryRegistry = createSessionDeliveryRegistry({
+    getSession: (sid) => service.getSession(sid),
+    ensureActive: (sid) => service.ensureActive(sid),
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspaceService.record(cwd),
+    getMessageBus: () => null, // 本文件装置不注入 bus（dispatcher 侧 null-safety 同款）
+  })
+
   const seedSession = async (opts: { label?: string; sessionFile?: string } = {}) => {
     const piSid = `pi-seed-${++autoId}`
     const client = makeMockClient({
@@ -213,7 +227,7 @@ function createSetup() {
 
   return {
     service, pm, broker, clientMap,
-    seedSession,
+    seedSession, deliveryRegistry,
     triggerExit: (sid: string, code: number | null, stderr = '') => exitCb?.(sid, code, stderr),
   }
 }
@@ -224,7 +238,17 @@ interface Setup {
   broker: IMessageBroker
   clientMap: Map<string, MockClient>
   seedSession: (opts?: { label?: string; sessionFile?: string }) => Promise<{ id: string; client: MockClient }>
+  /** [u2] 投递所有权内核注册表（dispatcher 只提交，出站交接在适配层）。 */
+  deliveryRegistry: ReturnType<typeof createSessionDeliveryRegistry>
   triggerExit: (sid: string, code: number | null, stderr?: string) => void
+}
+
+/**
+ * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
+ * → 三副作用置位）——isGenerating 等三副作用在 prompt 受理之后（D-18），断言前须推进微任务。
+ */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
 function resetMockState(): void {
@@ -239,6 +263,11 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
     resetMockState()
     autoId = 0
     setup = createSetup()
+  })
+  afterEach(() => {
+    // [u2] 释放投递内核 timer（30s watchdog / 持有期轮询）并复位活动注册表槽
+    setup?.deliveryRegistry.disposeAll()
+    resetActiveDeliveryRegistryForTest()
   })
 
   // ── handleTurnUsageSideEffects（turn_end：label 兜底直写已随 W1 机制删除）──
@@ -271,8 +300,9 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
   describe('handleTurnEndSideEffects（agent_end → isGenerating 复位；label 不再直写）', () => {
     it('复位 isGenerating=false（不迁移则 session 永远 busy，下条消息被拒）', async () => {
       const { id } = await setup.seedSession()
-      // 先标记为生成中（模拟 sendPrompt 后的状态）
+      // 先标记为生成中（模拟 sendPrompt 后的状态；u2 起三副作用在适配层受理之后置位）
       await setup.service.sendMessage(id, 'hi')
+      await flushDelivery()
       expect(setup.service.getSummary(id)?.status).toBe('active')
 
       setup.service.handleTurnEndSideEffects(id)
@@ -387,7 +417,11 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
 
     // 前向引用：createAdapter 闭包需引用 service（在构造后才赋值），
     // 用 holder 变量使闭包读到构造后的实例（组合根同样靠闭包捕获，sessionService 在 adapterFactory 之后赋值）。
-    const holder: { service: SessionService } = { service: null as unknown as SessionService }
+    const holder: {
+      service: SessionService
+      /** [u2] 本用例独立构造的投递内核注册表（用例尾 dispose，防 timer 泄漏）。 */
+      deliveryRegistry?: ReturnType<typeof createSessionDeliveryRegistry>
+    } = { service: null as unknown as SessionService }
     const createAdapter = (sessionId: string, send: (msg: import('@taiji/shared').ServerMessage) => void) => {
       const interpreter = new EventInterpreter(sessionId, {
         send,
@@ -412,6 +446,16 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     )
     service2.setMessageBus(bus)
     holder.service = service2
+    // [u2 投递所有权内核] 本用例独立构造 service2 → 按真实组合根接内核（sendMessage 经
+    // dispatcher → 注册表 submit → 适配层出站交接）
+    const deliveryRegistry2 = createSessionDeliveryRegistry({
+      getSession: (sid) => service2.getSession(sid),
+      ensureActive: (sid) => service2.ensureActive(sid),
+      subscribeAgentSettled: () => () => {},
+      recordWorkspace: () => {},
+      getMessageBus: () => bus,
+    })
+    holder.deliveryRegistry = deliveryRegistry2
 
     const piSid = `pi-e2-final-${++autoId}`
     const eventListeners: PiEventListener[] = []
@@ -436,8 +480,9 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     const summary = await service2.create(tmpdir(), 'e2-label')
     expect(summary.id).toBe(piSid)
 
-    // 标记生成中（模拟 sendPrompt）
+    // 标记生成中（模拟 sendPrompt；u2 起三副作用在适配层受理之后置位，D-18）
     await service2.sendMessage(piSid, 'do something')
+    await flushDelivery()
     expect(service2.getSummary(piSid)?.status).toBe('active')
 
     // 派发完整 pi 事件序列到 EventAdapter 注册的 listener
@@ -488,5 +533,8 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     // wave:perf-w09 后 session 级消息走 bus.publish，不再经 broker.broadcast）
     const published = vi.mocked(bus.publish).mock.calls.map(c => c[1].type)
     expect(published).toContain('message.complete')
+
+    // [u2] 本用例独立注册表收尾（释放 timer）
+    holder.deliveryRegistry?.disposeAll()
   })
 })

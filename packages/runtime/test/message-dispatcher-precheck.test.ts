@@ -15,7 +15,11 @@
  *
  * 运行：npx vitest run test/message-dispatcher-precheck.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+} from '../src/services/session/session-delivery-registry.js'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../src/services/session/session-internal.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
@@ -44,6 +48,13 @@ function makeMockSession(isGenerating: boolean): IManagedSessionView {
   }
 }
 
+/**
+ * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt）。
+ */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve()
+}
+
 function makeMocks(opts: { isGenerating?: boolean; promptError?: Error } = {}) {
   const session = makeMockSession(opts.isGenerating ?? false)
   const promptFn = opts.promptError
@@ -67,41 +78,46 @@ function makeMocks(opts: { isGenerating?: boolean; promptError?: Error } = {}) {
     detachSession: vi.fn(),
   }
 
-  // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空守卫分支）
+  // getClient → undefined：无附着 client 形态（入口 touch 的空守卫分支）
   const pm = { getClient: vi.fn(() => undefined) } as unknown as IProcessManager
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
+
+  // [u2] 按真实装配接内核：dispatcher 提交 → 适配层出站交接（ensureActive → prompt → 置位）
+  createSessionDeliveryRegistry({
+    getSession: (sid) => (sid === session.id ? session : undefined),
+    ensureActive: svc.ensureActive as never,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspace.record(cwd),
+    getMessageBus: () => bus,
+  })
 
   const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
   return { dispatcher, session, promptFn, broadcasts, bus }
 }
 
-describe('MessageDispatcher D-009 预检（busy → send.rejected）', () => {
+describe('MessageDispatcher busy 维度（u2 退役 D-009 预检：排队取代拒绝）', () => {
   beforeEach(() => vi.clearAllMocks())
+  afterEach(() => resetActiveDeliveryRegistryForTest())
 
-  it('isGenerating=true → 广播 send.rejected + 不调 pi.prompt + 返回 rejected:true', async () => {
+  it('isGenerating=true → 零 send.rejected + 按 steer 车道即时投递（turn 边界注入）', async () => {
     const { dispatcher, promptFn, broadcasts } = makeMocks({ isGenerating: true })
-    // sendMessage 调 sendPrompt（hookContent = content）
     const result = await dispatcher.sendMessage('s1', 'hello')
-    // pi.prompt 未被调用
-    expect(promptFn).not.toHaveBeenCalled()
-    // 广播了 send.rejected
-    const rejected = broadcasts.find((m) => m.type === 'send.rejected')
-    expect(rejected).toBeDefined()
-    expect(rejected!.payload).toMatchObject({
-      sessionId: 's1',
-      reason: 'busy',
-    })
-    // 返回 rejected
-    expect(result.rejected).toBe(true)
-    expect(result.blocked).toBe(true)
+    await flushDelivery()
+    // 迁移前：预检拒绝（send.rejected + prompt 不调）；迁移后：内核承接并按 lane=steer 投递
+    expect(promptFn).toHaveBeenCalledTimes(1)
+    expect((promptFn.mock.calls[0] as unknown[])[2]).toBe('steer')
+    expect(broadcasts.find((m) => m.type === 'send.rejected')).toBeUndefined()
+    expect(result.blocked).toBe(false)
+    expect(result.rejected).toBeUndefined()
   })
 
-  it('isGenerating=false → 正常调 pi.prompt + 不广播 send.rejected', async () => {
+  it('isGenerating=false → 正常投递（含内核裸标记）+ 不广播 send.rejected', async () => {
     const { dispatcher, promptFn, broadcasts } = makeMocks({ isGenerating: false })
     await dispatcher.sendMessage('s1', 'hello')
-    expect(promptFn).toHaveBeenCalledWith('hello', undefined)
-    const rejected = broadcasts.find((m) => m.type === 'send.rejected')
-    expect(rejected).toBeUndefined()
+    await flushDelivery()
+    expect(promptFn).toHaveBeenCalledTimes(1)
+    expect((promptFn.mock.calls[0] as unknown[])[0] as string).toContain('hello')
+    expect(broadcasts.find((m) => m.type === 'send.rejected')).toBeUndefined()
   })
 })
 
@@ -114,6 +130,7 @@ describe('MessageDispatcher 错误路径', () => {
       promptError: new Error('pi crashed'),
     })
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     expect(promptFn).toHaveBeenCalled()
     // isGenerating 被复位
     expect(session.isGenerating).toBe(false)
@@ -144,12 +161,21 @@ describe('MessageDispatcher 错误路径', () => {
     const pm = { getClient: vi.fn(() => undefined) } as unknown as IProcessManager
     const workspace = { record: vi.fn(() => { throw new Error('cache boom') }) } as unknown as WorkspaceService
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // [u2] 接内核（record 是出站交接三副作用之一：prompt 受理成功后置位）
+    createSessionDeliveryRegistry({
+      getSession: (sid) => (sid === session.id ? session : undefined),
+      ensureActive: svc.ensureActive as never,
+      subscribeAgentSettled: () => () => {},
+      recordWorkspace: (cwd) => workspace.record(cwd),
+      getMessageBus: () => bus,
+    })
     const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
 
     // 不该向上抛
     const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     // pi.prompt 仍被调用（record 失败不阻断发消息主流程）
-    expect(promptFn).toHaveBeenCalledWith('hello', undefined)
+    expect(promptFn).toHaveBeenCalledTimes(1)
     // isGenerating 保持 true（prompt 成功，record 副作用失败不影响状态机）
     expect(session.isGenerating).toBe(true)
     // 正常返回（非 blocked）

@@ -1,19 +1,45 @@
 /**
- * SessionDeliveryRegistry — runtime 侧的 delivery 内核装配 + sessionId 单例注册表。
+ * SessionDeliveryRegistry — runtime 侧投递所有权内核装配（设计 delivery-ownership-kernel.md
+ * §3，单元 u2 重写：从「sd-u5 代理式适配器」升级为**投递所有权内核的 runtime 适配层**）。
  *
- * sd-u5（session-manager send 排队）的 runtime 适配器（design.md §3.1 调用方 B）：
- * - payload 能力仅 'text'（runtime 通路拿不到 pi custom message，D9）
- * - isIdle 读 runtime 状态标志（isGenerating / isCompacting / isBashRunning 三者互斥判定）
- * - hasPendingMessages 一期保守 false（端口同步签名拿不到异步 RPC 结果，design.md §5 待验证 1）
- * - subscribeSettled 经组合根 onAgentSettled 多播（index.ts agentSettledListeners）
- * - port.send：ensureActive → skill 注入（A2 MF-C）→ prompt(streamingBehavior) →
- *   成功后 skillNotice 广播 + 置位 + record（D7 保留副作用）
+ * 职责四面（§3.1 终态流程图 / §3.4+ 接管归属表）：
+ * 1. **投递入口**（D1 单一判定源）：`submit()` 判定 lane（direct/steer/queued）→ 出站文本尾附
+ *    裸标记（D2 身份）→ 内核 `sendChecked` 提交（受理口径 resolve，D9⑤）。lane 判定读 runtime
+ *    权威 occupancy 投影（C-data-19 单写原语维护），renderer / extension 不再各自判定。
+ * 2. **port 适配**（内核对外的唯一接口 DeliveryPort）：send = 真正的 pi 交接点——ensureActive
+ *    → skill 注入 → 三副作用置位（lastActiveAt + occupancy 'dispatching' + workspace.record
+ *    best-effort，§3.4+ 表「禁止遗漏第三项」）→ prompt(streamingBehavior)。**pi 词汇
+ *    （streamingBehavior / clear_queue）封闭在本文件**，内核包保持零依赖。
+ * 3. **两阶段回执**（D2）：受理 = prompt 受理（内核 in-flight）；送达 = pi `message_end(user)`
+ *    文本命中裸标记 → `handle.confirmDelivered(id)`。裸标记是身份而非内容匹配，取代
+ *    「出口即遗忘」的 fire-and-forget（§2.3 所有权落脚点③）。
+ * 4. **对账器 Reconciler**（D3）：五触发点（agent_settled / compaction_end / abort 完成 /
+ *    pi restored / 30s watchdog）→ 条件「空闲 + pi 槽位非空」→ `clear_queue` 全收 → 三分处置
+ *    （自有条目回队首重投 / 带标记无记录条目按 transcript 扫描重建 / 无标记外来文本收养）。
+ *    pi 只有队列级原语（F9），条目级收回在本层以「全收 + 标记识别 + 其余重投」实现。
  *
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
- * sd-u6（完成回流）将复用本注册表，禁止自行 createDelivery。
+ * sd-u6（完成回流）复用本注册表；session_manager send / completion-backflow / landing 首发
+ * 三个既有调用方经注册表 handle（或 sendDirect）零改动承接。
+ *
+ * 装配槽说明（deviations 登记）：`getActiveDeliveryRegistry()` 是「进程内活动注册表」访问器
+ * （与 relay registry `getActiveRelayRegistry()` 同款范式）——MessageDispatcher 经它取投递面，
+ * 避免为「dispatcher → 注册表」新增组合根接线（index.ts / session-service.ts 非本单元领地）。
+ * 长期方案 = 组合根显式构造注入（u3a/u4 改 index.ts 时收编）。
  */
 import { createDelivery } from '@zhushanwen/session-delivery'
-import type { DeliveryHandle } from '@zhushanwen/session-delivery'
+import type {
+  DeliveryEntriesFull,
+  DeliveryEntriesProjection,
+  DeliveryEntryState,
+  DeliveryHandle,
+  DeliveryHandleV2,
+  DeliveryIntent,
+  DeliveryLane,
+  DeliveryMessage,
+  DeliveryPayload,
+  DeliveryProjectionOptions,
+} from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import { SkillInjector } from './skill-injector.js'
@@ -23,7 +49,7 @@ import { applySessionOccupancyTransition, userStoppedGate } from './event-interp
 
 /** 组合根注入的装配材料（全部窄签名，测试可 mock） */
 export interface SessionDeliveryDeps {
-  /** 读 session 运行时状态标志（isIdle 判定 + D7 置位副作用） */
+  /** 读 session 运行时状态标志（lane 判定 + 持有判定 + 置位副作用） */
   getSession(sessionId: string): IManagedSessionView | undefined
   /** pi 死则 restore 拉起（D7 保留：投递可达性前提） */
   ensureActive(sessionId: string): Promise<IPiEngine>
@@ -31,161 +57,1023 @@ export interface SessionDeliveryDeps {
   subscribeAgentSettled(cb: (sessionId: string) => void): () => void
   /** 最近工作区记账（D7 保留：best-effort，调用方不感知失败） */
   recordWorkspace(cwd: string): void
-  /**
-   * MessageBus 当前值（[A2 D-A2-2] skillNotice 广播用；与 SessionRecordsDeps 同款
-   * getter 晚期注入语义，返回 null → notice 发布 no-op，注入文本处理照常）。
-   */
+  /** MessageBus 当前值（skillNotice 广播 + 投递失败 message.error 用） */
   getMessageBus(): IMessageBus | null
 }
 
-/** 注册表对外接口（SessionManagerHandler 经此消费 delivery 能力） */
+/** 提交入参（delivery.submit / message.send 适配器共用） */
+export interface DeliverySubmitInput {
+  /** 用户原文（出站裸标记由本层附加，调用方不拼投递标记） */
+  content: string
+  /** shared 形状图片附件（{data;mimeType}；undefined 时不带键） */
+  images?: Array<{ data: string; mimeType: string }>
+  /** 客户端幂等 id（renderer 乐观气泡 id `u-<uuid>`；缺省由本层生成——老协议无 uuid 调用方） */
+  clientUuid?: string
+  /** 投递意图（缺省 interrupt-at-turn-boundary；'after-run' = followUp 车道） */
+  intent?: DeliveryIntent
+}
+
+/** 提交回执（delivery.submit reply 的 runtime 侧形状；state/lane 由 u3a 映射为帧条目字段） */
+export interface DeliverySubmitResult {
+  clientUuid: string
+  state: DeliveryEntryState
+  lane: DeliveryLane
+}
+
+/** 单条撤销结果（delivery.cancel reply 的 runtime 侧形状） */
+export interface DeliveryCancelOutcome {
+  cancelled: boolean
+  /** 撤销成功时返回全文（草稿恢复；segments 切分归上层，ADR-0043） */
+  content?: string
+  reason?: string
+}
+
+/** 对账触发点（设计 D3 五触发点 + 撤销兜底） */
+export type ReconcileTrigger =
+  | 'agent-settled'
+  | 'compaction-end'
+  | 'abort-idle'
+  | 'pi-restored'
+  | 'watchdog'
+  | 'cancel'
+
+/** 注册表对外接口（SessionManagerHandler / MessageDispatcher / transport u3a 经此消费投递能力） */
 export interface SessionDeliveryRegistry {
-  /** 同 sessionId 复用同一 handle（单例约束）；factory 仅供测试注入替身 */
-  getOrCreateDelivery(sessionId: string, factory?: (sessionId: string) => DeliveryHandle): DeliveryHandle
+  /** 同 sessionId 复用同一 handle（单例约束）；factory 仅供测试注入替身（v1 句柄面，内部适配） */
+  getOrCreateDelivery(sessionId: string, factory?: (sessionId: string) => DeliveryHandle): DeliveryHandleV2
+  /** 投递入口（D1）：lane 判定 + 裸标记 + 内核提交（受理即回执，不阻塞等待送达） */
+  submit(sessionId: string, input: DeliverySubmitInput): DeliverySubmitResult
+  /** 单条撤销（delivery.cancel）：queued 本地移除；投递中走 clear_queue 收回-重投路径 */
+  cancel(sessionId: string, clientUuid: string): Promise<DeliveryCancelOutcome>
+  /** 全量回收（delivery.drain，forceQuit 专用）：返回全部条目全文供草稿恢复 + 尽力清空 pi 槽位 */
+  drain(sessionId: string): Array<{ clientUuid: string; content: string }>
+  /** 断连重报判重（delivery.resync）：返回命中终态判重记录（含 transcript 回执证据）的 uuid */
+  resync(sessionId: string, clientUuids: readonly string[]): Promise<string[]>
+  /** 内核条目双视图（D9②；帧装配由 u3a 经 handle 投影视图消费） */
+  entries(sessionId: string): DeliveryEntriesFull | undefined
   /** port 同款直投（handleCreate 初始 prompt：新 session 必 idle 无竞态，不走内核队列，失败照旧 throw） */
   sendDirect(sessionId: string, content: string): Promise<void>
   /**
-   * 该 sid 的 delivery 内核是否有未终态投递（排队等待 + 在途投递中 + 错误重试中）。
-   * 只读查询（idle pi reclamation D2 #5 豁免信号，u3a）；handle 未创建 / 空队列 → false。
+   * 该 sid 的 delivery 内核是否有未终态投递（排队等待 + 在途投递中）。failed 不计——重试
+   * 耗尽的条目等用户处置，计入会让 idle pi 回收饿死（只读查询，回收豁免信号）。
    */
   hasDeliveryActivity(sessionId: string): boolean
+  /** 对账器入口（五触发点共用；内部自行节流与幂等） */
+  reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void>
   /** 丢弃单 session 队列（session 删除等场景） */
   dispose(sessionId: string): void
   disposeAll(): void
 }
 
+// ── 常量与纯工具 ─────────────────────────────────────────────
+
+/** 裸标记（D2）：出站恒为裸 uuid 形态；入站兼容 u- 原文形态（renderer 回执正则同款双形态）。 */
+const BARE_MARKER_RE = /<!--taiji:msg:([^>]*)-->/g
+/** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
+const BATCH_SEP = '\n\n---\n\n'
+/** 持有期空闲边沿轮询间隔（V2「settled 边沿后 ≤5s 自愈」预算内）。 */
+const HOLD_POLL_MS = 500
+/** 对账 watchdog 间隔（D3 触发点⑤）。 */
+const WATCHDOG_MS = 30_000
+/** 同一 session 两次对账的最小间隔（多触发点同帧到达时合并，防 clear_queue 风暴）。 */
+const RECONCILE_MIN_INTERVAL_MS = 200
+
+/** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-22/PS-23 探针锁守卫，pi 版本 bump 时探针红 =
+ *  文案漂移，须同步本常量；识别函数是 D6 错误分类的迁移落点——内核适配器 catch 面）。 */
+export const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction is in progress'
+export const PI_REJECTION_PROCESSING = 'Agent is already processing'
+
+/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误面）。 */
+export type PromptRejectionReason = 'compacting' | 'processing'
+
 /**
- * intent → pi streamingBehavior 的映射表（D3：pi 词汇封闭在适配器内）。
- * streamingBehavior 同时是 runtime 通路的安全网——isIdle 读的是 runtime 侧状态标志，
- * 与 pi 实际 isStreaming 存在 TOCTOU；竞态命中时由 pi 队列兜底（不抛错）。
+ * 识别 pi prompt() 的 busy 类确定性拒绝（按错误消息原文）——错误分类迁移落点（D6）：
+ * 从 message-dispatcher.sendPrompt 的 catch 面迁到内核适配器（promptWithBusyRetry 的消费点，
+ * 逐字保持识别口径；dispatcher 侧 re-export 保持既有 import 路径与 PS-22/23 探针锁定面）。
  */
-function toStreamingBehavior(intent: 'interrupt-at-turn-boundary' | 'after-run'): 'steer' | 'followUp' {
+export function classifyPromptRejection(errorMessage: string): PromptRejectionReason | null {
+  if (errorMessage.includes(PI_REJECTION_COMPACTING)) return 'compacting'
+  if (errorMessage.includes(PI_REJECTION_PROCESSING)) return 'processing'
+  return null
+}
+
+/** 出站裸标记 id 形态：条目 id（协议层 clientUuid `u-<uuid>`）取裸 uuid（u3b 回执契约）。 */
+export function bareMarkerId(id: string): string {
+  return id.startsWith('u-') ? id.slice(2) : id
+}
+
+/** 出站文本尾附裸标记（D2；扩展 input hook 不剥离，随文本进 transcript 成为逐消息身份）。 */
+export function withDeliveryMarker(text: string, id: string): string {
+  return `${text}\n<!--taiji:msg:${bareMarkerId(id)}-->`
+}
+
+/** 提取文本中的全部标记 id（裸形态原文；含 u- 前缀的原文形态原样返回）。 */
+export function extractMarkerIds(text: string): string[] {
+  const out: string[] = []
+  for (const m of text.matchAll(BARE_MARKER_RE)) {
+    if (m[1]) out.push(m[1])
+  }
+  return out
+}
+
+/** 文本集合中是否含指定条目 id 的裸标记（撤销/收回判定用）。 */
+function hasMarkerFor(texts: readonly string[], id: string): boolean {
+  const bare = bareMarkerId(id)
+  return texts.some((t) => extractMarkerIds(t).includes(bare))
+}
+
+/** payload 文本（两 kind 同形；custom 通路的 content 即正文）。 */
+function payloadText(payload: DeliveryPayload): string {
+  return payload.content
+}
+
+/** pi message content（parts 数组 / string）→ 纯文本（非 text part 忽略）。 */
+function piContentText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  let text = ''
+  for (const part of content) {
+    const p = part as { type?: unknown; text?: unknown }
+    if (p && p.type === 'text' && typeof p.text === 'string') text += p.text
+  }
+  return text
+}
+
+/** 空闲等待（持有期轮询；fake timers 下由测试推进）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 进程内活动注册表（装配槽：dispatcher 取投递面；见文件头「装配槽说明」）。 */
+let activeRegistry: SessionDeliveryRegistry | undefined
+
+/** 取当前进程的活动投递注册表（组合根创建后可用；未创建时 undefined → 调用方降级）。 */
+export function getActiveDeliveryRegistry(): SessionDeliveryRegistry | undefined {
+  return activeRegistry
+}
+
+/** 测试隔离：清空活动注册表槽（对齐 resetChatModuleStateForTest 先例）。生产勿调。 */
+export function resetActiveDeliveryRegistryForTest(): void {
+  activeRegistry = undefined
+}
+
+// ── 持有判定（D1 唯一判定源） ─────────────────────────────────
+
+/** 不可投原因：pi 暂不可收（内核持有等时机）。null = 可投。 */
+type HoldReason = 'compacting' | 'bash' | 'settling'
+
+/**
+ * 持有判定（D1 唯一判定源，读 runtime 权威 occupancy 投影）：
+ * - compacting：F10 prompt 在压缩中抛错 → 持有（compaction_end 后再投）；
+ * - bash：bash 与 prompt 互斥（runtime 侧既有语义）→ 持有；
+ * - settling（turn-end..agent-settled 的 pi post-run 窗口）：**保守按不可收**——settling 不是
+ *   队列 drain 点（F2/F3 的 drain 全在 run 循环内），此时入槽即滞留（故事 B 形态），故等
+ *   settled 边沿后按新状态投递（检查点 4：保守档，见交付说明）。
+ */
+function holdReasonOf(view: IManagedSessionView | undefined): HoldReason | null {
+  if (!view) return null // 无视图（测试/异常装配）按可投，投递阶段 ensureActive 失败可见
+  if (view.isCompacting) return 'compacting'
+  if (view.isBashRunning) return 'bash'
+  return (view.occupancy ?? { turn: 'idle' as const }).turn === 'settling' ? 'settling' : null
+}
+
+/** lane 判定（D1）：不可投 → 'queued'；活跃 run → 'steer'；其余 → 'direct'。 */
+function laneOf(view: IManagedSessionView | undefined): DeliveryLane {
+  if (holdReasonOf(view) !== null) return 'queued'
+  const turn = view?.occupancy?.turn ?? 'idle'
+  return turn === 'generating' || turn === 'dispatching' ? 'steer' : 'direct'
+}
+
+/** intent → pi streamingBehavior（pi 词汇封闭在本层）：非流式时 pi 忽略该参数（F12 旁证）。 */
+function toStreamingBehavior(intent: DeliveryIntent): 'steer' | 'followUp' {
   return intent === 'interrupt-at-turn-boundary' ? 'steer' : 'followUp'
+}
+
+/** 持有结束边沿 → 对账触发点命名（D3 触发点①②③）。 */
+function triggerOfHold(reason: HoldReason | 'compacting-pi'): ReconcileTrigger {
+  if (reason === 'compacting' || reason === 'compacting-pi') return 'compaction-end'
+  if (reason === 'settling') return 'agent-settled'
+  return 'abort-idle'
+}
+
+// ── 每 session 运行时（注册表私有） ──────────────────────────
+
+/** 已提交出站文本记录（合批拆分校验源 + 标记 id → 条目 id 反查）。 */
+interface SubmittedRecord {
+  /** 内核条目 id（协议层 clientUuid）。 */
+  id: string
+  /** 出站全文（含裸标记）。 */
+  text: string
+}
+
+/** 运行时可变态（与 handle 分离：port 闭包需要它，而 handle 由 createDelivery 后置产出）。 */
+interface RuntimeState {
+  sessionId: string
+  /** 条目 id（裸标记形态为 key）→ 出站全文。 */
+  submitted: Map<string, SubmittedRecord>
+  /** rebuild 判定「已送达」的条目 id：重建条目抑制真实投递，只做记账（tombstone 判重锚）。 */
+  suppressed: Set<string>
+  /** 内核在途条目数镜像（onChange 维护；port.hasPendingMessages 的同步数据源）。 */
+  inFlightCount: number
+  /** 最近一次 ensureActive 拿到的 pi 句柄（实例身份 → pi restored 判定）。 */
+  client?: IPiEngine
+  /**
+   * pi 侧压缩事实持有标记（D6 'compacting' 拒绝的释放条件）：pi 报压缩中但 runtime
+   * occupancy 尚未置位（TOCTOU/事件丢失）时置位，由 compaction_end 事件清除——
+   * 事件驱动的持有释放，避免按挂钟空转重试（规则 19）。
+   */
+  piCompactingBlocked: boolean
+  unsubClient?: () => void
+  unsubSettled?: () => void
+  watchdog?: ReturnType<typeof setInterval>
+  reconciling: boolean
+  lastReconcileAt: number
+  disposed: boolean
+}
+
+interface SessionRuntime extends RuntimeState {
+  handle: DeliveryHandleV2
+}
+
+let localIdSeq = 0
+/** 本地生成条目 id（老协议调用方无 clientUuid：plugin-service / 内部调用）。 */
+function genLocalId(): string {
+  localIdSeq += 1
+  return `m-${Date.now().toString(36)}-${localIdSeq}`
+}
+
+/**
+ * 测试替身句柄适配（factory 注入路径，`DeliveryHandle` v1 → v2 视图）：v2 独占方法给空实现
+ * （替身无内核状态），状态查询 depth() 委托原句柄（reclaim 豁免判定消费面）。唯一 cast 是
+ * entries 的 overload 合并（full/projection 两形态），有测试替身形态不作为生产路径的运行时
+ * guard 兜底（factory 仅测试使用——接口注释为契约）。
+ */
+function asHandleV2(handle: DeliveryHandle): DeliveryHandleV2 {
+  const maybe = handle as Partial<DeliveryHandleV2>
+  const emptyEntries = ((options?: DeliveryProjectionOptions): DeliveryEntriesFull | DeliveryEntriesProjection =>
+    options ? { entries: [] } : { active: [], tombstones: [] }) as DeliveryHandleV2['entries']
+  return {
+    send: (msg, opts) => handle.send(msg, opts),
+    sendChecked: (msg) => handle.sendChecked(msg),
+    flush: () => handle.flush(),
+    depth: () => handle.depth(),
+    dispose: () => handle.dispose(),
+    entries: maybe.entries?.bind(handle) ?? emptyEntries,
+    onChange: maybe.onChange?.bind(handle) ?? (() => () => {}),
+    confirmDelivered: maybe.confirmDelivered?.bind(handle) ?? (() => false),
+    requeue: maybe.requeue?.bind(handle) ?? (() => 0),
+    cancel: maybe.cancel?.bind(handle) ?? (() => ({ kind: 'not-found' as const })),
+    drain: maybe.drain?.bind(handle) ?? (() => []),
+  }
+}
+
+/** 出站交接选项。 */
+interface DeliverOptions {
+  /** pi streamingBehavior（intent 映射；undefined = 直投，create 首发）。 */
+  behavior?: 'steer' | 'followUp'
+  /** 图片附件（合批分裂后只随首段）。 */
+  images?: Array<{ data: string; mimeType: string }>
 }
 
 export function createSessionDeliveryRegistry(
   deps: SessionDeliveryDeps,
-  // [A2 D-A2-1] skill 注入器：deliverText 出站前统一处理（与 MessageDispatcher 同款
-  // 「默认实例化 + 可替换」形态，测试注入 spy）。
+  // [A2 D-A2-1] skill 注入器：出站前统一处理（与 MessageDispatcher 同款「默认实例化 + 可替换」）
   injector: SkillInjector = new SkillInjector(),
 ): SessionDeliveryRegistry {
-  // @data-owner #15（docs/architecture/data-source-registry.md）：sessionId → handle 注册表，
-  // handle 内的投递队列 = delivery outbox（内存、非持久，session 删除时 dispose 清空）
-  const handles = new Map<string, DeliveryHandle>()
+  const runtimes = new Map<string, SessionRuntime>()
+
+  function warn(...args: unknown[]): void {
+    console.warn('[session-delivery]', ...args)
+  }
+
+  function viewOf(sessionId: string): IManagedSessionView | undefined {
+    return deps.getSession(sessionId)
+  }
+
+  /** pi 队列级原语（F9；IPiEngine 端口未收编 —— 见交付说明 deviations，按结构化窄面 + guard 承接）。 */
+  function queuePrimitive(client: IPiEngine): { clearQueue(): Promise<{ steering: string[]; followUp: string[] }> } | null {
+    const candidate = client as Partial<{ clearQueue(): Promise<{ steering: string[]; followUp: string[] }> }>
+    return typeof candidate.clearQueue === 'function'
+      ? (candidate as { clearQueue(): Promise<{ steering: string[]; followUp: string[] }> })
+      : null
+  }
+
+  // ── 出站交接（port.send 的实现面） ────────────────────────────────────────
 
   /**
-   * port 层投递原语：ensureActive → inject → prompt → notice → D7 置位副作用。
-   * 置位晚于 prompt 受理（成功才显示 working，与 dispatcher「先置位后 prompt」的差异是
-   * 内核 gate 语义的要求：置位晚于 gate 判定不构成矛盾——gate 只在投递前判）。
-   *
-   * [A2 MF-C] skill 注入（D-A2-1）：client.prompt 之前。三个消费方（landing 首发直投
-   * sendDirect / session_manager send 工具的 agent 构造 prompt / completion-backflow
-   * 回流通知）统一行为——字面 `<taiji-skill/>` 标记即展开、无标记 no-op 零 RPC 原文
-   * 通过（设计裁决：首发用户内容是注入目标；代理构造/回流模板文本被模仿输出标记时
-   * 展开与主链语义一致化，接受）。
+   * 合批拆分（u2 适配层；V1/V6/V9/V10 的结构性前提）：内核 doSend/pump 会把同时处于 queued
+   * 的多条条目合批为一条 composed 消息（buildBatchPayload 以 BATCH_SEP 连接）——agent 通路的
+   * 合批语义保留，但用户消息必须逐条进 transcript（每条一个 user entry + 可单条撤销）。
+   * 拆法：按已提交全文（submitted 表）在 composed 文本中按标记序做**精确子串**定位并逐段切出；
+   * 段间只允许 BATCH_SEP 或未知文本（agent 通路条目无标记）。任一定位失败 → 放弃拆分，按内核
+   * 合批语义整条投递（不猜测切分——宁合不裂）。
    */
-  const deliverText = async (
+  function splitComposed(text: string, state: RuntimeState): string[] {
+    const known = extractMarkerIds(text).map((bare) => findSubmittedByMarker(state, bare))
+    if (known.length === 0 || known.some((r) => r === undefined)) return [text]
+    const parts: string[] = []
+    let cursor = 0
+    for (const record of known as SubmittedRecord[]) {
+      const idx = text.indexOf(record.text, cursor)
+      if (idx < 0) return [text]
+      if (idx > cursor) {
+        const gap = text.slice(cursor, idx)
+        if (!gap.startsWith(BATCH_SEP)) return [text]
+        const unknown = gap.slice(BATCH_SEP.length)
+        if (unknown.length > 0) parts.push(unknown)
+      }
+      parts.push(record.text)
+      cursor = idx + record.text.length
+    }
+    if (cursor < text.length) {
+      const tail = text.slice(cursor)
+      if (!tail.startsWith(BATCH_SEP)) return [text]
+      const unknown = tail.slice(BATCH_SEP.length)
+      if (unknown.length > 0) parts.push(unknown)
+    }
+    return parts
+  }
+
+  /** 标记 id → 已提交记录（裸形态优先，兼容 u- 原文形态）。 */
+  function findSubmittedByMarker(state: RuntimeState, markerId: string): SubmittedRecord | undefined {
+    const direct = state.submitted.get(markerId)
+    if (direct) return direct
+    for (const record of state.submitted.values()) {
+      if (record.id === markerId) return record
+    }
+    return undefined
+  }
+
+  /** 出站文本 → 已提交记录（精确匹配；agent 通路条目无记录）。 */
+  function findSubmittedByText(state: RuntimeState, text: string): SubmittedRecord | undefined {
+    for (const record of state.submitted.values()) {
+      if (record.text === text) return record
+    }
+    return undefined
+  }
+
+  /** 条目是否仍在册（未终态）：持有期被撤销/终结 → 放弃投递（撤销只终结未受理条目）。 */
+  function stillActive(handle: DeliveryHandleV2, id: string): boolean {
+    return handle.entries().active.some((e) => e.id === id)
+  }
+
+  /** 三副作用置位（prompt 受理成功后；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。 */
+  function markSessionActive(sessionId: string): void {
+    const view = viewOf(sessionId)
+    if (!view) return
+    view.lastActiveAt = Date.now()
+    applySessionOccupancyTransition(view, deps.getMessageBus(), 'dispatching')
+    try {
+      deps.recordWorkspace(view.cwd)
+    } catch (e) {
+      // best-effort：record 失败仅 warn 不传播（isGenerating 已置位不回退）
+      warn('workspace.record failed (non-blocking), sid=', sessionId, e)
+    }
+  }
+
+  /**
+   * 等待可投（持有期轮询）：持有期间同时承担**空闲边沿检测**——compacting/settling/bash 的
+   * 结束边沿即对账触发点①②③（本单元无组合根事件挂点，见交付说明 deviations：由持有期轮询
+   * + pi 事件订阅合成）。
+   */
+  async function waitDeliverable(sessionId: string, state: RuntimeState): Promise<void> {
+    let reason = currentHold(sessionId, state)
+    while (reason !== null) {
+      if (state.disposed) return
+      await sleep(HOLD_POLL_MS)
+      const next = currentHold(sessionId, state)
+      if (next === null) void reconcile(sessionId, triggerOfHold(reason))
+      reason = next
+    }
+  }
+
+  /** 当前持有原因（view 判定 ⊕ pi 侧压缩事实；piCompactingBlocked 由 compaction_end 事件释放）。 */
+  function currentHold(sessionId: string, state: RuntimeState): HoldReason | 'compacting-pi' | null {
+    const fromView = holdReasonOf(viewOf(sessionId))
+    if (fromView !== null) return fromView
+    return state.piCompactingBlocked ? 'compacting-pi' : null
+  }
+
+  /**
+   * prompt + busy 类拒绝处置（D6：occupancy 语义只增不改）：
+   * - 'processing'（pi 报已有 turn 在跑 = runtime 不知情的 turn，权威信号）→ 触发
+   *   'reject-processing' 反转（isGenerating=true + turn='generating'），**重试一次**并
+   *   显式带 steer（入队必定被受理）——不反转则幽灵空闲复现（前端占用短路失效 + 直投再撞墙）；
+   *   二次仍拒 = pi 行为异常，抛出交内核失败路径（有界，不空转）。
+   * - 'compacting'（TOCTOU：压缩已开始但事件未落，view 读不到）→ 'reject-other' 复位 turn +
+   *   置 `piCompactingBlocked`（pi 侧权威事实），**按 compaction_end 事件释放**（事件驱动，
+   *   不按挂钟轮询——规则 19：等边沿，不烧预算；也防事件丢失时死循环）。
+   * - 其余错误原样抛（内核按受理失败走 backoff 重试 / failed 终态）。
+   */
+  async function promptWithBusyRetry(
     sessionId: string,
-    content: string,
-    streamingBehavior?: 'steer' | 'followUp',
-  ): Promise<void> => {
-    // [session-dead-structural-fixes D4 显式投递清标记（u3b 补线）] 经 runtime delivery 的投递
-    // （session_manager send / completion-backflow 回流 / landing 首发直投 sendDirect——三者
-    // 全部汇聚于本函数）= 新意图，投递前清 userStopped 标记放行 + 停收敛环。与 sendPrompt
-    // 同构：清标记先于 ensureActive/restore（restore-abort 读不到标记即不掐），也先于
-    // client.prompt（显式投递开 turn 的 agent_start 事件回流时环已停，不会被收敛环误掐）。
-    userStoppedGate.consumeForExplicitDelivery(sessionId)
-    const client = await deps.ensureActive(sessionId)
-    const injection = await injector.inject(client, content)
-    await client.prompt(injection.text, undefined, streamingBehavior)
-    // [A2 D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败
-    // throw 不发（调用方错误通路覆盖）。
-    publishSkillNotices(deps.getMessageBus(), sessionId, content, injection.notices)
-    // D7 保留副作用：prompt 受理成功后一并置位（侧栏 working 显示 + lastActiveAt 排序新鲜度）。
-    // [session-dead-structural-fixes D2 挂点迁移（u3b）] 原直写 isGenerating=true 是「只写布尔
-    // 不写 occupancy」的第三个漂移写点（设计 §2.2 问题一），改调 'dispatching' 行——原语原子
-    // 完成 isGenerating=true 派生 + turn='dispatching' 合并 + state 帧广播，与 sendPrompt 的
-    // markSessionActive（#1）同构（prompt 已受理、message_start 未到；turn-start 事件随后把
-    // 投影推进到 'generating'）。lastActiveAt 非 occupancy 维度，保持直写。
-    const session = deps.getSession(sessionId)
-    if (session) {
-      session.lastActiveAt = Date.now()
-      applySessionOccupancyTransition(session, deps.getMessageBus(), 'dispatching')
+    state: RuntimeState,
+    client: IPiEngine,
+    text: string,
+    opts: DeliverOptions,
+  ): Promise<void> {
+    let steerRetried = false
+    for (;;) {
       try {
-        deps.recordWorkspace(session.cwd)
+        await client.prompt(text, opts.images, opts.behavior)
+        return
       } catch (e) {
-        // D7 保留：best-effort，失败仅 warn 不传播（isGenerating 已置位不回退）
-        console.warn('[session-delivery] workspace.record failed (non-blocking), sid=', sessionId, e)
+        const reason = classifyBusyRejection(e)
+        if (reason === null) throw e
+        const view = viewOf(sessionId)
+        if (reason === 'processing') {
+          if (steerRetried) throw e
+          warn('prompt rejected (agent already processing) — occupancy reversed, retry as steer, sid=', sessionId)
+          if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-processing')
+          opts = { ...opts, behavior: 'steer' }
+          steerRetried = true
+          continue
+        }
+        warn('prompt rejected (compaction in progress) — holding until compaction ends, sid=', sessionId)
+        if (view) applySessionOccupancyTransition(view, deps.getMessageBus(), 'reject-other')
+        state.piCompactingBlocked = true
+        await waitDeliverable(sessionId, state)
+        if (state.disposed) throw e
       }
     }
   }
 
-  const buildHandle = (sessionId: string): DeliveryHandle =>
-    createDelivery(
-      {
-        supportedPayloads: ['text'],
-        isIdle: () => {
-          const s = deps.getSession(sessionId)
-          return !!s && !s.isGenerating && !s.isCompacting && !s.isBashRunning
-        },
-        // 一期保守（design.md §5 待验证 1，登记表 #15 known-limitation）：同步签名拿不到
-        // get_state 的 pendingMessageCount——恒判空使 gate 只剩 isIdle 单条件，依赖 TOCTOU
-        // 宽度 + pi 队列兜底；补齐路径 = get_state.pendingMessageCount 异步拉取或 settled 复核
-        hasPendingMessages: () => false,
-        subscribeSettled: (cb) =>
-          deps.subscribeAgentSettled((sid) => {
-            if (sid === sessionId) cb()
-          }),
-        send: (msg, intent) => {
-          if (msg.payload.kind !== 'text') {
-            // 内核已按 supportedPayloads fail-fast，此为防御性双保险（不静默忽略）
-            throw new Error(`[session-delivery] unsupported payload kind: ${msg.payload.kind}`)
-          }
-          return deliverText(sessionId, msg.payload.content, toStreamingBehavior(intent))
-        },
-      },
-      // 默认意图：turn 边界抢占（D3，F1 教训内化）
-      { intent: 'interrupt-at-turn-boundary' },
-    )
+  function classifyBusyRejection(e: unknown): PromptRejectionReason | null {
+    return classifyPromptRejection(e instanceof Error ? e.message : String(e))
+  }
 
-  return {
+  /**
+   * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
+   * 抑制/撤销守卫 → 持有等待 → 显式投递放行 → ensureActive → skill 注入 → prompt（busy 类
+   * 拒绝按 D6 处置）→ skillNotice → 三副作用置位。置位晚于 prompt 受理（成功才显示 working）。
+   */
+  async function deliverOne(
+    sessionId: string,
+    state: RuntimeState,
+    handle: DeliveryHandleV2,
+    text: string,
+    opts: DeliverOptions = {},
+  ): Promise<void> {
+    const record = findSubmittedByText(state, text)
+    if (record && state.suppressed.has(record.id)) {
+      state.suppressed.delete(record.id) // rebuild 判定已送达：只记账，不碰 pi
+      return
+    }
+    if (record && !stillActive(handle, record.id)) return // 持有期被撤销：撤销生效
+    await waitDeliverable(sessionId, state)
+    if (record && !stillActive(handle, record.id)) return
+    // [D4] 显式投递清标记（新意图）：先于 ensureActive/restore（restore-abort 读不到标记即不掐）
+    userStoppedGate.consumeForExplicitDelivery(sessionId)
+    const client = await deps.ensureActive(sessionId)
+    watchClient(sessionId, state, handle, client)
+    const injection = await injector.inject(client, text)
+    await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
+    publishSkillNotices(deps.getMessageBus(), sessionId, text, injection.notices)
+    markSessionActive(sessionId)
+  }
+
+  /**
+   * 无标记出站条目（agent 通路：session_manager send / 完成回流——出站文本原样不改）在受理时点
+   * 落地记账：agent 通路无标记身份、无回执锚点，v1 记账口径恰在受理时点（D9⑤ 显式例外），
+   * 此处保持等价，防在途条目永挂（污染 hasPendingMessages 与回收豁免判定）。
+   */
+  function confirmMarkerlessAccepted(state: RuntimeState, handle: DeliveryHandleV2, text: string): void {
+    if (extractMarkerIds(text).length > 0) return
+    const hit = handle
+      .entries()
+      .active.find((e) => e.state === 'queued' && extractMarkerIds(payloadText(e.payload)).length === 0
+        && payloadText(e.payload) === text)
+    if (hit) handle.confirmDelivered(hit.id)
+  }
+
+  // ── pi 事件订阅：送达回执 + compaction_end 触发点 ────────────────────────
+
+  /** 订阅当前 pi 句柄的事件流（幂等；句柄变更 = pi 被回收/崩溃后 respawn → 触发点④）。 */
+  function watchClient(
+    sessionId: string,
+    state: RuntimeState,
+    handle: DeliveryHandleV2,
+    client: IPiEngine,
+  ): void {
+    if (state.client === client && state.unsubClient) return
+    state.unsubClient?.()
+    state.unsubClient = undefined
+    const changed = state.client !== undefined && state.client !== client
+    state.client = client
+    if (typeof client.onEvent !== 'function') {
+      // 装配面缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
+      // 投递本身照常（不因此失败）
+      warn('client event stream unavailable — receipts degrade to reconcile-only, sid=', sessionId)
+      return
+    }
+    state.unsubClient = client.onEvent((event) => {
+      const e = event as { type?: unknown; message?: { role?: unknown; content?: unknown } }
+      if (e.type === 'message_end') confirmByMessageEnd(state, handle, e.message)
+      else if (e.type === 'compaction_end') {
+        state.piCompactingBlocked = false // pi 侧压缩结束 = 持有释放条件（D6）
+        void reconcile(sessionId, 'compaction-end')
+      }
+    })
+    if (changed) {
+      warn('pi handle changed (respawned) — reconciling transcript, sid=', sessionId)
+      void reconcile(sessionId, 'pi-restored')
+    }
+  }
+
+  /**
+   * 送达回执（D2 第二阶段）：message_end(user) 文本命中裸标记 → 条目 delivered。
+   * 标记 id 精确匹配（身份）取代计数 FIFO / 文本匹配（D2 被否项①②）。
+   */
+  function confirmByMessageEnd(
+    state: RuntimeState,
+    handle: DeliveryHandleV2,
+    message: { role?: unknown; content?: unknown } | undefined,
+  ): void {
+    if (!message || message.role !== 'user') return
+    const text = piContentText(message.content)
+    if (text === '') return
+    for (const bare of extractMarkerIds(text)) {
+      const record = findSubmittedByMarker(state, bare)
+      if (record && handle.confirmDelivered(record.id)) state.submitted.delete(bare)
+    }
+  }
+
+  // ── 对账器（D3） ────────────────────────────────────────────────────────
+
+  /** 对账入口（五触发点共用）：空闲 + pi 槽位非空 → clear_queue → 三分处置。 */
+  async function reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void> {
+    const rt = runtimes.get(sessionId)
+    if (!rt || rt.disposed || rt.reconciling) return
+    const view = viewOf(sessionId)
+    if (!view) return
+    // 触发条件①：空闲（settling 保守算非空闲——D10 / 检查点 4 口径，不抢占 post-run 窗口）
+    if (holdReasonOf(view) !== null) return
+    const now = Date.now()
+    if (now - rt.lastReconcileAt < RECONCILE_MIN_INTERVAL_MS) return
+    rt.reconciling = true
+    rt.lastReconcileAt = now
+    try {
+      const client = rt.client ?? (await clientForAttachedTrigger(sessionId, rt, trigger))
+      const primitive = client ? queuePrimitive(client) : null
+      if (primitive) {
+        // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；F9）
+        const cleared = await primitive.clearQueue()
+        const texts = [...cleared.steering, ...cleared.followUp]
+        if (texts.length > 0) {
+          warn(`reconcile(${trigger}): reclaimed ${texts.length} parked message(s), sid=`, sessionId)
+          await disposeCleared(sessionId, rt, texts)
+        }
+      }
+      // 在途未确认扫描（§3.4 pi 崩溃/被回收行 / D5② reattach 判重锚）：不在槽位里（未随
+      // clear_queue 收回）的在途条目只有两种事实——已进 transcript（确认送达）或随旧进程
+      // 蒸发（重投）。宽限窗避免与刚受理的投递竞速（updatedAt 新鲜者跳过）。
+      await sweepInFlight(sessionId, rt)
+    } catch (e) {
+      // §3.4 clear_queue 自身失败（pi 卡死）：本轮放弃，下轮触发点重试
+      warn(`reconcile(${trigger}) failed (retry at next trigger), sid=`, sessionId, e)
+    } finally {
+      rt.reconciling = false
+    }
+  }
+
+  /**
+   * 事件型触发下的 client 解析：settled / compaction_end / abort / pi restored 四类事件成立
+   * = pi 必已附着（事件只能来自活进程），此时 ensureActive 是幂等读取（不新建进程）；
+   * watchdog 触发**不解析**——静默的 idle session 不应被对账唤醒（idle pi 回收语义）。
+   */
+  async function clientForAttachedTrigger(
+    sessionId: string,
+    rt: SessionRuntime,
+    trigger: ReconcileTrigger,
+  ): Promise<IPiEngine | undefined> {
+    if (trigger === 'watchdog') return undefined
+    try {
+      const client = await deps.ensureActive(sessionId)
+      watchClient(sessionId, rt, rt.handle, client)
+      return client
+    } catch (e) {
+      warn('reconcile: ensureActive failed (session not attached), sid=', sessionId, e)
+      return undefined
+    }
+  }
+
+  /** 在途条目宽限窗（ms）：刚受理的投递（出站批在途）不参与扫描。 */
+  const IN_FLIGHT_GRACE_MS = 10_000
+
+  /** 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）。 */
+  async function sweepInFlight(sessionId: string, rt: SessionRuntime): Promise<void> {
+    const aged = rt.handle
+      .entries()
+      .active.filter((e) => e.state === 'in-flight' && Date.now() - e.updatedAt > IN_FLIGHT_GRACE_MS)
+      .filter((e) => extractMarkerIds(payloadText(e.payload)).length > 0)
+    if (aged.length === 0) return
+    const texts = await readTranscriptUserTexts(sessionId, rt)
+    const requeue: string[] = []
+    for (const entry of aged) {
+      const needle = `<!--taiji:msg:${bareMarkerId(entry.id)}-->`
+      if (texts !== null && texts.some((t) => t.includes(needle))) {
+        rt.handle.confirmDelivered(entry.id)
+        rt.submitted.delete(bareMarkerId(entry.id))
+      } else {
+        requeue.push(entry.id)
+      }
+    }
+    if (requeue.length > 0) {
+      warn(`reconcile: ${requeue.length} in-flight entry(ies) not in transcript — requeue, sid=`, sessionId)
+      rt.handle.requeue(requeue)
+      rt.handle.flush()
+    }
+  }
+
+  /**
+   * 三分处置（D3；判别逻辑在本层——内核保持零 pi 依赖）：
+   * - ① own：标记命中内核在册条目 → 重置 queued 至队首（保持原相对序）重投；
+   * - ② rebuild：带标记但内核无记录（runtime 重启 reattach，判重表已清空）→ 先按标记对
+   *   transcript 全量扫描判 delivered（已进 transcript 不重建投递），未进才重建条目重投；
+   * - ③ adopt：无标记外来文本（subagent notifyDone / scheduler 提醒等存量注入）→ 收养：
+   *   以新 id 入内核 FIFO 正常投递，不丢弃、不原样回塞。
+   * exclude = delivery.cancel 的目标条目（目标回草稿、其余保持相对序自动重投，§3.1 场景 D）。
+   */
+  async function disposeCleared(
+    sessionId: string,
+    rt: SessionRuntime,
+    texts: readonly string[],
+    exclude?: ReadonlySet<string>,
+  ): Promise<void> {
+    const own: string[] = []
+    const rebuild: Array<{ id: string; text: string }> = []
+    const adopt: string[] = []
+    for (const text of texts) {
+      const markers = extractMarkerIds(text)
+      if (markers.length === 0) {
+        adopt.push(text)
+        continue
+      }
+      for (const bare of markers) {
+        const record = findSubmittedByMarker(rt, bare)
+        const id = record?.id ?? bare
+        if (exclude?.has(id)) continue
+        if (record && stillActive(rt.handle, record.id)) own.push(record.id)
+        else rebuild.push({ id, text })
+      }
+    }
+    if (own.length > 0) {
+      rt.handle.requeue(own)
+      rt.handle.flush() // 重投立即走 gate 复核（空闲即投；busy 由 settled/watchdog 驱动）
+    }
+    for (const item of rebuild) await rebuildEntry(sessionId, rt, item.id, item.text)
+    for (const text of adopt) adoptText(sessionId, rt, text)
+  }
+
+  /**
+   * rebuild 处置：transcript 全量标记扫描（D5② 判重锚，仅 reattach/pi 重生低频事件）判 delivered
+   * ——已送达 → 抑制真实投递只重建记账（tombstone 供 resync 判重）；未送达 → 正常重投。
+   */
+  async function rebuildEntry(sessionId: string, rt: SessionRuntime, id: string, text: string): Promise<void> {
+    const delivered = await transcriptHasMarker(sessionId, rt, id)
+    if (delivered) rt.suppressed.add(id)
+    await submitToKernel(sessionId, rt, { id, text, lane: 'direct' })
+    if (delivered) {
+      // 已进 transcript：只落终态记账（tombstone 供 resync 判重 / reattach 收养去重），不重投
+      rt.handle.confirmDelivered(id)
+      rt.submitted.delete(bareMarkerId(id))
+    }
+    warn(`rebuild: marker-only entry ${delivered ? 'delivered' : 'requeued'}, sid=`, sessionId, id)
+  }
+
+  /** transcript 标记扫描（get_entries 全量按 uuid 查找；失败保守判未送达=重投，必达优先）。 */
+  async function transcriptHasMarker(sessionId: string, rt: SessionRuntime, id: string): Promise<boolean> {
+    const texts = await readTranscriptUserTexts(sessionId, rt)
+    if (texts === null) return false
+    const needle = `<!--taiji:msg:${bareMarkerId(id)}-->`
+    return texts.some((t) => t.includes(needle))
+  }
+
+  /**
+   * transcript 的 user 文本集合（get_entries 全量；resync/rebuild/在途扫描的共用读取点）。
+   * null = 无附着 client 或读取失败（保守判「未送达」=重投，必达优先于去重）。
+   * 刻意不用 ensureActive 拉起 pi：对账/resync 是只读查询，拉起会复活被 idle 回收的 session。
+   */
+  async function readTranscriptUserTexts(sessionId: string, rt: SessionRuntime): Promise<string[] | null> {
+    const client = rt.client
+    if (!client) return null
+    try {
+      const msg = (await client.getEntries()) as { data?: { entries?: unknown } }
+      const entries = msg.data?.entries
+      if (!Array.isArray(entries)) return null
+      const texts: string[] = []
+      for (const entry of entries) {
+        const e = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } }
+        if (e.type === 'message' && e.message?.role === 'user') texts.push(piContentText(e.message.content))
+      }
+      return texts
+    } catch (e) {
+      warn('transcript read failed (treated as not delivered), sid=', sessionId, e)
+      return null
+    }
+  }
+
+  /** 收养（D3③）：外来无标记文本以新 id 入内核 FIFO 正常投递（不丢弃、不原样回塞）。 */
+  function adoptText(sessionId: string, rt: SessionRuntime, text: string): void {
+    const id = genLocalId()
+    warn('adopted foreign parked message, sid=', sessionId, 'newId=', id)
+    void submitToKernel(sessionId, rt, { id, text: withDeliveryMarker(text, id), lane: 'direct' })
+  }
+
+  /** 内核提交（submit/收养/重建共用）：出站文本已含标记，条目 id 显式传入（判重锚 D5②）。 */
+  async function submitToKernel(
+    sessionId: string,
+    rt: SessionRuntime,
+    args: { id: string; text: string; lane: DeliveryLane; intent?: DeliveryIntent },
+  ): Promise<void> {
+    rt.submitted.set(bareMarkerId(args.id), { id: args.id, text: args.text })
+    const message: DeliveryMessage = {
+      payload: { kind: 'text', content: args.text },
+      ...(args.intent !== undefined && { intent: args.intent }),
+    }
+    try {
+      await rt.handle.sendChecked(message, { id: args.id, lane: args.lane })
+    } catch (e) {
+      onDeliveryFailure(sessionId, rt, args.id, e)
+    }
+  }
+
+  /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见面（老协议无帧消费时的兜底通道）。 */
+  function onDeliveryFailure(sessionId: string, rt: SessionRuntime, id: string, e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e)
+    warn('delivery failed (terminal), sid=', sessionId, 'id=', id, message)
+    deps.getMessageBus()?.publish(sessionId, {
+      type: 'message.error',
+      payload: { sessionId, message: `消息投递失败：${message}` },
+    })
+  }
+
+  // ── 触发点装配（settled 边沿 / watchdog） ───────────────────────────────
+
+  /** settled 边沿订阅（触发点①）：settled → 对账（槽位滞留自愈 V2）+ 内核自身 flush 由内核自持。 */
+  function ensureSettledSub(sessionId: string, state: RuntimeState): void {
+    if (state.unsubSettled || state.disposed) return
+    state.unsubSettled = deps.subscribeAgentSettled((sid) => {
+      if (sid !== sessionId) return
+      void reconcile(sessionId, 'agent-settled')
+    })
+  }
+
+  /** watchdog（触发点⑤）：定期对账 + 打开 gate 的条目补投（settled 事件丢失 / 边沿漏判兜底）。 */
+  function ensureWatchdog(sessionId: string, rt: SessionRuntime): void {
+    if (rt.watchdog !== undefined || rt.disposed) return
+    rt.watchdog = setInterval(() => {
+      if (rt.disposed) return
+      void reconcile(sessionId, 'watchdog')
+      rt.handle.flush()
+    }, WATCHDOG_MS)
+  }
+
+  // ── 运行时装配 ──────────────────────────────────────────────────────────
+
+  /** port 实现（send 的四族成员；handle 后置产出 → 经 handleRef 读取）。 */
+  function buildPort(
+    sessionId: string,
+    state: RuntimeState,
+    handleRef: { handle?: DeliveryHandleV2 },
+  ): Parameters<typeof createDelivery>[0] {
+    return {
+      supportedPayloads: ['text'],
+      // port.isIdle 维持 v1 三标志语义（内核 gate 面——只影响 gated 路径 send/requeue 的 flush
+      // 时机；投递决策的唯一判定源 = holdReasonOf/laneOf）
+      isIdle: () => {
+        const s = viewOf(sessionId)
+        return !!s && !s.isGenerating && !s.isCompacting && !s.isBashRunning
+      },
+      // D9② 真值化（旧实现恒 false，busy gate 半瞎）：内核在途条目数（未拿送达回执的投递）
+      // ——同步签名可得，供 gate 判「pi 槽位尚有未落地投递」而不重复堆叠。
+      hasPendingMessages: () => state.inFlightCount > 0,
+      subscribeSettled: (cb) =>
+        deps.subscribeAgentSettled((sid) => {
+          if (sid === sessionId) cb()
+        }),
+      send: async (msg, intent) => {
+        const handle = handleRef.handle
+        if (!handle) return { accepted: false, reason: 'runtime not ready' }
+        if (msg.payload.kind !== 'text') {
+          // 内核已按 supportedPayloads fail-fast，此为防御性双保险（不静默忽略）
+          throw new Error(`[session-delivery] unsupported payload kind: ${msg.payload.kind}`)
+        }
+        const images = msg.payload.images
+        const parts = splitComposed(msg.payload.content, state)
+        for (let i = 0; i < parts.length; i += 1) {
+          // images 只随首段投递（合批拼接的 images 归属首条；一期 renderer 走路径模式不传
+          // images——已知窄边界，见交付说明）
+          const part = parts[i] as string
+          await deliverOne(sessionId, state, handle, part, {
+            behavior: toStreamingBehavior(intent),
+            ...(i === 0 && images !== undefined && images.length > 0 ? { images } : {}),
+          })
+          confirmMarkerlessAccepted(state, handle, part)
+        }
+        return { accepted: true }
+      },
+    }
+  }
+
+  function buildRuntime(sessionId: string, injected?: DeliveryHandleV2): SessionRuntime {
+    const state: RuntimeState = {
+      sessionId,
+      submitted: new Map(),
+      suppressed: new Set(),
+      inFlightCount: 0,
+      piCompactingBlocked: false,
+      reconciling: false,
+      lastReconcileAt: 0,
+      disposed: false,
+    }
+    // handle 后置产出（port 构造先于 createDelivery 返回）——经 handleRef 让 port 读到最终句柄
+    const handleRef: { handle?: DeliveryHandleV2 } = {}
+    const handle =
+      injected ??
+      createDelivery(buildPort(sessionId, state, handleRef), {
+        // 默认意图：turn 边界抢占（D3）；pi 词汇映射在 toStreamingBehavior
+        intent: 'interrupt-at-turn-boundary',
+        // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）
+        onSettled: (msg, outcome) => {
+          if (outcome === 'rejected') {
+            warn('kernel onSettled(rejected), sid=', sessionId, payloadText(msg.payload).slice(0, 60))
+          }
+        },
+      })
+    handleRef.handle = handle
+    // 同一对象上补 handle 字段（Object.assign 返回 target 本身——state 与 rt 必须同源，
+    // port 闭包持有 state，任何拷贝都会让后续写入不可见）
+    const rt: SessionRuntime = Object.assign(state, { handle })
+    // 在途镜像（port.hasPendingMessages 的同步数据源）
+    handle.onChange(() => {
+      state.inFlightCount = handle.entries().active.filter((e) => e.state === 'in-flight').length
+    })
+    ensureSettledSub(sessionId, state)
+    return rt
+  }
+
+  function ensureRuntime(sessionId: string, factory?: (sessionId: string) => DeliveryHandle): SessionRuntime {
+    const existing = runtimes.get(sessionId)
+    if (existing) return existing
+    const rt = buildRuntime(sessionId, factory ? asHandleV2(factory(sessionId)) : undefined)
+    runtimes.set(sessionId, rt)
+    if (!factory) ensureWatchdog(sessionId, rt)
+    return rt
+  }
+
+  /** 条目态查询（submit 回执用；活跃集 → tombstone）。 */
+  function entryStateOf(rt: SessionRuntime, id: string): DeliveryEntryState | undefined {
+    const full = rt.handle.entries()
+    const active = full.active.find((e) => e.id === id)
+    if (active) return active.state
+    return full.tombstones.find((t) => t.id === id)?.state
+  }
+
+  const registry: SessionDeliveryRegistry = {
     getOrCreateDelivery(sessionId, factory) {
-      const existing = handles.get(sessionId)
-      if (existing) return existing
-      const handle = factory ? factory(sessionId) : buildHandle(sessionId)
-      handles.set(sessionId, handle)
-      return handle
+      return ensureRuntime(sessionId, factory).handle
+    },
+    submit(sessionId, input) {
+      const rt = ensureRuntime(sessionId)
+      const lane = laneOf(viewOf(sessionId))
+      const id = input.clientUuid ?? genLocalId()
+      const text = withDeliveryMarker(input.content, id)
+      const message: DeliveryMessage = {
+        payload: {
+          kind: 'text',
+          content: text,
+          ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
+        },
+        intent: input.intent ?? 'interrupt-at-turn-boundary',
+      }
+      rt.submitted.set(bareMarkerId(id), { id, text })
+      // 受理口径（D9⑤ 锁定）：submit 同步返回受理回执（lane + 条目态），不等底层受理——
+      // 内核 sendChecked 的 settle 时点与送达正交（受理 ≠ 送达，调用方不被投递阻塞）。
+      // 失败（受理失败 / 重试耗尽）经 fail-fast 出口广播 + 日志（条目由内核拒绝或转 failed）。
+      void rt.handle.sendChecked(message, { id, lane }).catch((e: unknown) =>
+        onDeliveryFailure(sessionId, rt, id, e),
+      )
+      return { clientUuid: id, state: entryStateOf(rt, id) ?? 'queued', lane }
+    },
+    async cancel(sessionId, clientUuid) {
+      const rt = runtimes.get(sessionId)
+      if (!rt) return { cancelled: false, reason: 'session delivery unknown' }
+      const first = rt.handle.cancel(clientUuid)
+      if (first.kind === 'cancelled') return { cancelled: true, content: payloadText(first.entry.payload) }
+      if (first.kind === 'not-found') return { cancelled: false, reason: 'not found' }
+      if (first.kind === 'already-final') return { cancelled: false, reason: `already ${first.tombstone.state}` }
+      // 投递中（在 pi 槽位）：复用对账回收-重投路径——clear_queue 全收 → 目标条目回草稿，
+      // 其余条目保持相对序自动重投（D3 / §3.1 场景 D）
+      const exclude = new Set([clientUuid])
+      const client = rt.client
+      const primitive = client ? queuePrimitive(client) : null
+      if (!primitive) return await settleCancelWithoutReclaim(sessionId, rt, clientUuid)
+      const cleared = await primitive.clearQueue().catch((e: unknown) => {
+        warn('cancel: clear_queue failed, sid=', sessionId, e)
+        return null
+      })
+      if (cleared === null) {
+        // §3.4 收回失败（pi 卡死无响应）：本轮放弃，目标条目留守原态（对账器下轮兜底）
+        return { cancelled: false, reason: '已投递不可撤（收回失败，稍后可再试）' }
+      }
+      await disposeCleared(sessionId, rt, [...cleared.steering, ...cleared.followUp], exclude)
+      if (await transcriptHasMarker(sessionId, rt, clientUuid)) {
+        rt.handle.confirmDelivered(clientUuid) // delivered 事实 > cancel 意图（D-3 口径）
+        return { cancelled: false, reason: '已投递不可撤' }
+      }
+      if (!hasMarkerFor([...cleared.steering, ...cleared.followUp], clientUuid)) {
+        // 目标文本不在收回集（既不在槽位、也不在 transcript）：留守原态，不谎报撤销
+        warn('cancel: target not in reclaimed set nor transcript, sid=', sessionId, clientUuid)
+        return { cancelled: false, reason: '已投递不可撤（未找到在途文本）' }
+      }
+      const second = rt.handle.cancel(clientUuid)
+      return second.kind === 'cancelled'
+        ? { cancelled: true, content: payloadText(second.entry.payload) }
+        : { cancelled: false, reason: '已投递不可撤' }
+    },
+    drain(sessionId) {
+      const rt = runtimes.get(sessionId)
+      if (!rt) return []
+      const drained = rt.handle.drain()
+      rt.submitted.clear()
+      // 尽力清空 pi 槽位（D10：forceQuit 才回收；session 即将销毁 → 滞留文本不再收养投递）
+      const client = rt.client
+      const primitive = client ? queuePrimitive(client) : null
+      if (primitive) {
+        void primitive.clearQueue().catch((e: unknown) => warn('drain: clear_queue failed, sid=', sessionId, e))
+      }
+      return drained.map((d) => ({ clientUuid: d.id, content: payloadText(d.payload) }))
+    },
+    async resync(sessionId, clientUuids) {
+      const rt = runtimes.get(sessionId)
+      if (!rt) return []
+      const full = rt.handle.entries()
+      const finalIds = new Set(full.tombstones.map((t) => t.id))
+      const activeIds = new Set(full.active.map((e) => e.id))
+      const unknown = clientUuids.filter((id) => !finalIds.has(id) && !activeIds.has(id))
+      if (unknown.length === 0) return clientUuids.filter((id) => finalIds.has(id))
+      // 判重表已清空（runtime 重启 reattach）+ 未知条目：判重锚回落 transcript 标记扫描
+      // （D5②），全量读取一次供全部重报 id 复用
+      const texts = await readTranscriptUserTexts(sessionId, rt)
+      const deduped: string[] = []
+      for (const id of clientUuids) {
+        if (finalIds.has(id)) {
+          deduped.push(id)
+          continue
+        }
+        if (activeIds.has(id)) continue
+        const needle = `<!--taiji:msg:${bareMarkerId(id)}-->`
+        if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
+        else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
+      }
+      return deduped
+    },
+    entries(sessionId) {
+      return runtimes.get(sessionId)?.handle.entries()
     },
     sendDirect(sessionId, content) {
-      // create 初始 prompt：新 session 必 idle，不传 streamingBehavior（无竞态窗口）
-      return deliverText(sessionId, content)
+      // create 初始 prompt：新 session 必 idle，不传 streamingBehavior（无竞态窗口）、无标记
+      const rt = ensureRuntime(sessionId)
+      return deliverOne(sessionId, rt, rt.handle, content)
     },
-    // D2 #5「delivery 内核有排队投递（completion-backflow 回流）」的只读查询（u3a）。
-    //
-    // 查询面选择：DeliveryHandle 不暴露 isIdle（isIdle 是注入 createDelivery 的
-    // DeliveryPort 成员，registry 拿到的 handle 上不可达），但暴露队列深度查询
-    // depth()——文档语义「未终态消息数：等待队列 + 在途（含错误重试中）」，按
-    // 「handle 暴露队列状态查询则用之」采用 depth()。
-    //
-    // 为什么不是「handle 存在即豁免」：handle 是 per-session 单例，生命周期覆盖
-    // session 全程（D3 归属表还刻意在回收态保留 sid→handle 映射），存在性恒真会
-    // 让回收饿死；depth() > 0 才表示真有投递在途。
-    //
-    // 为什么不用 buildHandle 的 isIdle 三维标志：那与豁免 #1 occupancy 同源（同读
-    // deps.getSession 的三维标志），重复豁免无增量；depth() 恰好覆盖 occupancy 不
-    // 覆盖的窗口——session 已空闲但回流消息停在队列/在途投递中（此时回收会杀掉
-    // 承接投递的 pi）。
     hasDeliveryActivity(sessionId) {
-      const handle = handles.get(sessionId)
-      return handle !== undefined && handle.depth() > 0
+      // 口径沿用 v1 = handle.depth()（尚未被底层通道受理的排队条目数；reclaim 豁免 #5 与
+      // 查询面契约锁定）。在途未确认不计入（与 v1 同）——pi 被回收后由 pi-restored 对账
+      // 的 transcript 标记扫描恢复（D5②/G2），不靠豁免拦回收。
+      const rt = runtimes.get(sessionId)
+      return rt !== undefined && rt.handle.depth() > 0
+    },
+    reconcile(sessionId, trigger) {
+      return reconcile(sessionId, trigger)
     },
     dispose(sessionId) {
-      handles.get(sessionId)?.dispose()
-      handles.delete(sessionId)
+      const rt = runtimes.get(sessionId)
+      if (!rt) return
+      rt.disposed = true
+      rt.unsubClient?.()
+      rt.unsubSettled?.()
+      if (rt.watchdog !== undefined) clearInterval(rt.watchdog)
+      rt.handle.dispose()
+      runtimes.delete(sessionId)
     },
     disposeAll() {
-      for (const handle of handles.values()) handle.dispose()
-      handles.clear()
+      for (const sid of [...runtimes.keys()]) registry.dispose(sid)
     },
   }
+
+  /** 无 client（pi 未附着）时的撤销收口：transcript 不可读 → 本地终结（未投递即撤销）。 */
+  async function settleCancelWithoutReclaim(
+    sessionId: string,
+    rt: SessionRuntime,
+    clientUuid: string,
+  ): Promise<DeliveryCancelOutcome> {
+    const second = rt.handle.cancel(clientUuid)
+    if (second.kind === 'cancelled') return { cancelled: true, content: payloadText(second.entry.payload) }
+    warn('cancel: pi not attached and entry not cancellable, sid=', sessionId, clientUuid)
+    return { cancelled: false, reason: '已投递不可撤' }
+  }
+
+  activeRegistry = registry
+  return registry
 }

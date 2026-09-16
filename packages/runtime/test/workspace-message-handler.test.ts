@@ -14,6 +14,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { ClientMessage } from '@taiji/shared'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+  type SessionDeliveryDeps,
+} from '../src/services/session/session-delivery-registry.js'
+
+/**
+ * [u2 投递所有权内核] 装配投递内核（dispatcher 只提交，出站交接在适配层）。
+ * fixture 的 getSession/ensureActive/workspace.record 与真实装配同源。
+ */
+function wireDeliveryKernel(deps: {
+  getSession: (sid: string) => unknown
+  ensureActive: unknown
+  record: (cwd: string) => void
+  bus: unknown
+}): void {
+  createSessionDeliveryRegistry({
+    getSession: (sid) => deps.getSession(sid) as ReturnType<SessionDeliveryDeps['getSession']>,
+    ensureActive: deps.ensureActive as SessionDeliveryDeps['ensureActive'],
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: deps.record,
+    getMessageBus: () => deps.bus as ReturnType<SessionDeliveryDeps['getMessageBus']>,
+  })
+}
+
+/** flush 投递交接异步链（port.send → ensureActive → inject → prompt → 三副作用）。 */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve()
+}
 
 // ── T1.9: WorkspaceMessageHandler RPC 贯穿 ─────────────────────
 
@@ -254,12 +283,18 @@ describe('MessageDispatcher — 写入时机 record', () => {
       bus,
     )
 
+    // [u2 内核化] record 是出站交接的三副作用之一（deliverOne）——按真实装配接内核
+    wireDeliveryKernel({ getSession: () => activeSession, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
+
     const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
 
     expect(result.blocked).toBe(false)
     expect(workspaceRecord).toHaveBeenCalledWith('/project')
     expect(workspaceRecord).toHaveBeenCalledTimes(1)
   })
+
+  beforeEach(() => resetActiveDeliveryRegistryForTest())
 
   it('T2.4: hook blocked → record 未被调', async () => {
     const { MessageDispatcher } = await import('../src/services/session/message-dispatcher.js')
@@ -283,7 +318,10 @@ describe('MessageDispatcher — 写入时机 record', () => {
     // 注册一个会 block 的 hook
     dispatcher.setSendMessageHook(vi.fn().mockResolvedValue({ blocked: true, reason: 'blocked by hook' }))
 
+    wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
+
     const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
 
     expect(result.blocked).toBe(true)
     expect(workspaceRecord).not.toHaveBeenCalled()
@@ -308,7 +346,16 @@ describe('MessageDispatcher — 写入时机 record', () => {
       bus,
     )
 
-    await expect(dispatcher.sendMessage('s1', 'hello')).rejects.toThrow('restore failed')
+    wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
+
+    // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
+    // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行
+    const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
+    expect(result.blocked).toBe(false)
     expect(workspaceRecord).not.toHaveBeenCalled()
+    const types = (bus as unknown as { publish: { mock: { calls: unknown[][] } } }).publish.mock.calls
+      .map((c) => (c[1] as { type: string }).type)
+    expect(types).toContain('message.error')
   })
 })

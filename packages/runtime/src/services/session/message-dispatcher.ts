@@ -4,12 +4,21 @@
  * 负责:sendMessage / abort / steerMessage / followUpMessage / compact +
  * sendMessageHook 注册。
  *
- * sendMessage 经 sendPrompt 骨架(hook 拦截 → ensureActive → 标记活跃 → prompt)。
- * [occupancy D2 拒绝转译] pi busy 类确定性拒绝(manual 压缩 / auto 压缩+post-run)经
- * classifyPromptRejection 识别转译为 send.rejected{reason:'compacting'|'processing'},
- * 不进 message.error 错误气泡;busy 预检按命中维度分型(isCompacting → 'compacting')。
+ * [投递所有权内核 u2] 三条用户消息路径（sendMessage / steerMessage / followUpMessage）
+ * **内核化**：投递所有权移交 SessionDeliveryRegistry（D1 单一所有者）——本类保留
+ * 「BeforeSend hook 拦截 + 入口 touch + 错误面编排」，投递交由 `registry.submit()`
+ * （lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执全在注册表/内核侧）。退役面：
+ * busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy 类拒绝转译）、
+ * markSessionActive 三副作用（迁至注册表 deliverOne 的出站交接点，§3.4+ 表）、
+ * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留面：BeforeSend hook
+ * （提交前）、入口 touchActivity（idle-pi-reclamation D6-1）、pi busy 类拒绝识别函数
+ * （classifyPromptRejection 定义迁至注册表，此处 re-export 保持既有 import 路径与
+ * PS-22/23 探针锁定面）。
+ * [occupancy D2 拒绝转译] 错误分类迁移后由注册表的出站交接 catch 面消费（D6）。
  * [HISTORICAL] sendSubagentMessage(marker 拼装分支)已删除(composer 四符号设计 D2)——
  * 定向消息改走 session-service.subagentAction 直发 client.prompt,不经本骨架。
+ * 注：bash 通道（sendBash / abortBash）不经 LLM turn、不经投递内核，行为不变
+ * （设计 §1.3 In/Out：bash 通道不在本期改造面）。
  *
  * 依赖经构造注入:svc(dispatcher 窄接口 IDispatcherSessionOps,按消费者收窄——
  * 调用点实测 6 方法,见 session-internal.ts)、
@@ -23,9 +32,9 @@ import type { SendMessageHook, PendingBashResultData, IManagedSessionView, Force
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
-import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
-import { SkillInjector, type SkillNotice } from './skill-injector.js'
-import { publishSkillNotices as publishSkillNoticesShared } from './skill-notice-publisher.js'
+import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { getActiveDeliveryRegistry } from './session-delivery-registry.js'
+import type { DeliveryIntent } from '@zhushanwen/session-delivery'
 import { AbortLiveness } from './abort-liveness.js'
 import type { AbortSource } from './abort-liveness.js'
 
@@ -97,34 +106,11 @@ function randomTokenSuffix(): string {
 }
 
 /**
- * pi prompt() 确定性拒绝的错误原文（session-occupancy-send-closure D2 转译识别依据）。
- * 字符串受 pi-semantics PS-22 / PS-23 探针锁守卫（pi 版本 bump 时探针红 = 文案漂移，须同步此处）。
+ * pi prompt() busy 类确定性拒绝的识别函数（错误分类迁移落点，D6）——定义已迁至内核适配器
+ * （session-delivery-registry.ts 的出站交接 catch 面消费），此处 re-export 保持既有 import
+ * 路径与 PS-22/PS-23 探针锁定面（pi-semantics-prompt-rejection.test.ts 引本符号名）。
  */
-const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction is in progress'
-const PI_REJECTION_PROCESSING = 'Agent is already processing'
-
-/** send.rejected 拒绝提示文案（人类可读中文，renderer toast 用；P1 阶段 'compacting' 会入队）。 */
-const REJECT_MESSAGE_COMPACTING = '压缩进行中，消息将自动排队'
-const REJECT_MESSAGE_BUSY = 'Agent 正在处理'
-
-export type PromptRejectionReason = 'compacting' | 'processing'
-
-/**
- * 识别 pi prompt() 的 busy 类确定性拒绝（按错误消息原文），输出转译 reason；非 busy 类返回 null。
- *
- * 两个拒绝分支（pi 0.84.4 agent-session.js prompt()）：
- * - manual 压缩中：`_compactionAbortController` 置位窗口 throw "Cannot submit a prompt while
- *   compaction is in progress..." → 'compacting'
- * - auto 压缩 / post-run settling 窗口：isStreaming getter（含 post-run）为 true 且无
- *   streamingBehavior 时 throw "Agent is already processing..." → 'processing'
- *
- * 独立小函数（非内联）：单测直测映射表 + 未来探针/调用方复用。
- */
-export function classifyPromptRejection(errorMessage: string): PromptRejectionReason | null {
-  if (errorMessage.includes(PI_REJECTION_COMPACTING)) return 'compacting'
-  if (errorMessage.includes(PI_REJECTION_PROCESSING)) return 'processing'
-  return null
-}
+export { classifyPromptRejection, type PromptRejectionReason } from './session-delivery-registry.js'
 
 export class MessageDispatcher {
   private sendMessageHook: SendMessageHook | null = null
@@ -141,9 +127,6 @@ export class MessageDispatcher {
     private readonly pm: IProcessManager,
     private readonly workspaceService: WorkspaceService,
     private messageBus?: IMessageBus,
-    // [composer-multi-skill-injection D9] skill 注入器：三入口统一调用（hook 之后、
-    // client 发送之前）；构造注入便于测试替换 spy（每入口恰好单次调用的结构化幂等）。
-    private readonly injector: SkillInjector = new SkillInjector(),
   ) {
     this.abortLiveness = new AbortLiveness({
       getClient: (sessionId) => this.pm.getClient(sessionId),
@@ -171,240 +154,68 @@ export class MessageDispatcher {
   }
 
   /**
+   * 用户消息发送入口（message.send RPC / plugin-service / handoff 通路）。
+   *
    * 返回 { blocked: true } 表示消息被 BeforeSend hook 拦截（已广播 message.error 错误气泡），
    * 调用方（session-message-handler）必须据此走 error envelope（带请求 id）让 renderer
    * pending.reject，不得 reply success（round7 must-fix #3：避免「composer 清空 + 错误气泡」矛盾态）。
+   *
+   * [投递所有权内核 u2] 三层职责（D1 单一所有者）：①入口同步 touch（idle 回收防误杀）
+   * ②BeforeSend hook 拦截（提交前，唯一 veto 面）③内核提交 `registry.submit()`
+   * （lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执）。busy 预检与 send.rejected 已退役
+   * ——排队取代拒绝（D5）：暂不可收时态（compacting / bash）由内核持有，settled 边沿/
+   * 对账器驱动投递，消息不再被拒回 renderer。
+   *
+   * rejected 返回值保留为类型完备（恒 undefined）——handler 的 message.status{rejected}
+   * ack 分支自此不可达，protocol 条目退役归 u5。
    */
   async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> {
-    return this.sendPrompt(sessionId, content, images, clientUuid)
-  }
+    // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
+    // 出站交接（ensureActive/restore 600ms-3s + prompt）在注册表侧异步发生，若不入口
+    // touch，「hook 执行中 + 交接在途」窗口内空闲回收判定会误回收在途 session。
+    // client 未附着（已回收态）时无需 touch：restore spawn 的新 client lastActivityAt
+    // 初值 = spawn 时刻，空闲时长天然不达标。
+    this.pm.getClient(sessionId)?.touchActivity()
 
-  /**
-   * sendMessage 的发送骨架。
-   * @param sessionId    会话 id
-   * @param hookContent  hook 审核的文本(用户原文)
-   * @param images       shared 形状图片附件（{data;mimeType}），透传给 client.prompt。
-   *                     undefined 时不传 images，走原路径。
-   * @param clientUuid   客户端幂等 id（message.send RPC 透传，session-occupancy-send-closure D2）。
-   *                     拒绝广播（预检与 catch 转译两路）原样带回，renderer 据此消歧发送来源
-   *                     （flush 重放的拒绝不重入队）；正常路径不消费。
-   */
-  private async sendPrompt(
-    sessionId: string,
-    hookContent: string,
-    images?: Array<{ data: string; mimeType: string }>,
-    clientUuid?: string,
-  ): Promise<{ blocked: boolean; rejected?: boolean }> {
-    // ── dispatcher 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
-    // markSessionActive 置 occupancy=dispatching 位于 await runBeforeSendHook（插件
-    // hook，单 handler 5s 超时）与 await ensureActiveOrBroadcast（restore 600ms-3s）
-    // 之后——若不入口 touch，「prompt 已发出、hook/restore 执行中」窗口内空闲回收
-    // 判定满足阈值会误回收在途 session。client 未附着（已回收态）时无需 touch：
-    // restore spawn 的新 client lastActivityAt 初值 = spawn 时刻，空闲时长天然不达标。
-    const attachedClient = this.pm.getClient(sessionId)
-    if (attachedClient) {
-      attachedClient.touchActivity()
-    }
-
-    // ── BeforeSend hook ──
+    // ── BeforeSend hook（提交前唯一拦截面）──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
-    const hookOutcome = await this.runBeforeSendHook(sessionId, hookContent)
+    const hookOutcome = await this.runBeforeSendHook(sessionId, content)
     if (hookOutcome.blocked) {
       return { blocked: true }
     }
-
-    // D4 显式投递清标记：经 runtime sendPrompt 的投递（用户新消息 / 前端队列 flush 重放）
-    // = 新意图，投递前清 userStopped 标记放行 + 停收敛环——新 turn 是显式意图，不受任何
-    // 闸门拦截。时序构造性保证：清标记先于 ensureActive/restore（restore-abort 读不到标记
-    // 即不掐），也先于 client.prompt（显式投递开 turn 的 agent_start 事件回流时环已停，
-    // 不会被收敛环误掐）。不经 runtime 的补发腿（notify-ledger）不适用本放行——区分点 =
-    // 投递路径本身。
-    userStoppedGate.consumeForExplicitDelivery(sessionId)
-
-    // ── ensureActive(必要时 restore)──
-    const client = await this.ensureActiveOrBroadcast(sessionId)
-
-    // ── 标记活跃 + 生成中（busy 预检拒绝时中止）──
-    const activeSession = this.svc.getSessionByClient(client)
-    if (activeSession) {
-      if (this.rejectBusyPrecheck(sessionId, activeSession, clientUuid)) {
-        return { blocked: true, rejected: true }
-      }
-      this.markSessionActive(activeSession, sessionId)
-    }
-    // ── 发送 prompt + 错误广播 ──
-    const promptText = hookOutcome.modifiedContent ?? hookContent
-    // [composer-multi-skill-injection D9] 注入器：BeforeSend hook 之后、client.prompt 之前
-    // 统一处理（展开 / 预检降级 / 失效透传）。hook 审核的是用户原文，注入器处理改写后文本；
-    // hook 若破坏标记完整性，注入器内部走残缺透传 + notice（D8）。每入口恰好单次调用。
-    const injection = await this.injector.inject(client, promptText)
-    try {
-      await client.prompt(injection.text, images)
-    } catch (e) {
-      return this.handlePromptFailure(sessionId, activeSession, clientUuid, e)
-    }
-    // [D6/D8] 发送成功后才发布 skillNotice：消息已真正入队，提示描述的注入形态才成立；
-    // prompt 失败路径不发（handlePromptFailure 的 message.error 已覆盖用户可见错误）。
-    this.publishSkillNotices(sessionId, promptText, injection.notices)
+    this.submitToKernel(sessionId, hookOutcome.modifiedContent ?? content, { images, clientUuid })
     return { blocked: false }
   }
 
   /**
-   * ensureActive(必要时 restore)骨架：失败时补广播 message.error 后原样 rethrow。
+   * 内核提交（三路径共用）：取活动注册表（组合根装配的单例）→ `submit`（受理口径，
+   * D9⑤：同步返回受理回执，不等送达）。
    *
-   * 补广播 message.error：让已订阅 session 通道的前端能在聊天流看到错误气泡。
-   * 之前只靠 server.ts 外层 handler_error envelope（走 pending.reject，不进聊天流），
-   * 导致 ensureActive 失败（如 pi 进程已死、restore 再 spawn 再 exit）时用户在对话流看不到错误。
+   * 装配缺失（无注册表 = 组合根未接线）：显式失败（message.error 广播 + blocked），
+   * 不静默丢消息（"失败要出声"）。
    */
-  private async ensureActiveOrBroadcast(sessionId: string): Promise<IPiEngine> {
-    try {
-      return await this.svc.ensureActive(sessionId)
-    } catch (e) {
-      const errMsg = `Failed to restore session: ${toErrorMessage(e)}`
-      console.error(`[message-dispatcher] ${errMsg}`)
-      const msg = { type: 'message.error' as const, payload: { sessionId, message: errMsg } }
-      this.messageBus?.publish(sessionId, msg)
-      throw e
-    }
-  }
-
-  /**
-   * [D-009 预检] busy 预检拒绝（send.rejected 已广播，返回 true 调用方中止发送，不调 pi.prompt）。
-   *
-   * [W3, U6] 加 isCompacting：compact 进行中时 prompt 会与压缩竞态，同样必须拒。
-   * [composer-bash-execute W1] 加 isBashRunning：bash 执行中 prompt 会与 bash 竞态，双向互斥。
-   * [session-dead-structural-fixes D2 预检改读 occupancy（u3b settling 预检裁决）] 预检门
-   * 改读 occupancy 投影（occupancy 为体，D1 立场）：turn !== 'idle'（dispatching/generating/
-   * **settling**）/ compacting / bash 任一命中即拒——settling 自此计为忙（与前端 D1 双门归一），
-   * 拒绝转 send.rejected{busy} → 消息入 defer 队列 → agent_settled idle 帧自动投递。这是
-   * D2 显式声明的行为变更（原 settling 窗口直发成功的消息现在延迟 ≤2s 投递，P-2 探针门
-   * P95 ≤ 2s）。occupancy 与三布尔经原语原子同步，缺省（undefined）按 idle 兜底。
-   */
-  private rejectBusyPrecheck(
+  private submitToKernel(
     sessionId: string,
-    activeSession: IManagedSessionView,
-    clientUuid: string | undefined,
-  ): boolean {
-    const occ = activeSession.occupancy ?? IDLE_SESSION_OCCUPANCY
-    if (occ.turn !== 'idle' || occ.compacting || occ.bash) {
-      const reason = occ.compacting ? ('compacting' as const) : ('busy' as const)
-      console.warn(`[message-dispatcher] preemptive reject (${reason}), sid=${sessionId}`)
-      this.publishSendRejected(sessionId, reason, clientUuid)
-      return true
-    }
-    return false
-  }
-
-  /**
-   * 预检通过后的活跃标记：occupancy #1 'dispatching' 转移（原语派生 isGenerating=true）+
-   * workspace record best-effort 副作用。
-   *
-   * occupancy #1（D2 迁移）：sendPrompt 预检通过 → 'dispatching'（prompt 已发、message_start
-   * 未到）。isGenerating=true 由原语 flags 原子派生（不再直写布尔）。本挂点先于 client.prompt
-   * ——pi busy 类拒绝（catch 转译）发生时 turn 已处于 dispatching，由 #8 按拒绝分型收口：
-   * processing 拒绝（pi 有 runtime 不知情的 turn 在跑）→ 'reject-processing'，compacting 拒绝
-   * 与非 busy 真失败 → 'reject-other'（见 handlePromptFailure 注释）。
-   */
-  private markSessionActive(activeSession: IManagedSessionView, sessionId: string): void {
-    activeSession.lastActiveAt = Date.now()
-    applySessionOccupancyTransition(activeSession, this.messageBus, 'dispatching')
-    // [W6] record 是非用户阻塞的副作用（记最近工作区），不应阻断发消息主流程。
-    // 当前 record 同步链路（WorkspaceService.record → store.record → cache.set/trim）几乎不抛，
-    // 但作为防御：未来 store 实现变更（如引入 sync flush）或 lazy partition 加载异常都不该让
-    // session 卡在「生成中」。包 try/catch：失败仅 warn，isGenerating 已置 true 不回退，pi.prompt 照常执行。
-    try {
-      this.workspaceService.record(activeSession.cwd)
-    } catch (e) {
-      // best-effort 降级：record 是非用户阻塞的副作用，失败仅 warn 不传播——
-      // isGenerating 已置 true 不回退，pi.prompt 照常执行（见上方 W6 说明）。
-      console.warn('[message-dispatcher] workspace.record failed (non-blocking), sid=',
-        sessionId, e instanceof Error ? e.message : e)
-    }
-  }
-
-  /**
-   * prompt 失败收口（catch 体整体，恒 blocked）：按拒绝分型收口 isGenerating + occupancy →
-   * pi busy 类确定性拒绝转译 send.rejected 分型广播；其余错误广播 message.error。
-   *
-   * [occupancy D2b] 复位语义按 classifyPromptRejection 分型分叉（不再无条件回 idle）：
-   * - 'processing'：pi 明确拒绝「已有一个 turn 在跑」——该 turn 由 pi 自发起（auto-retry /
-   *   steer / followUp），runtime 此前已收 agent_end 复位 isGenerating（幽灵空闲）故预检放行。
-   *   此时以 pi 的拒绝为权威信号反转状态：置 isGenerating=true + turn:'generating'。
-   *   若仍写 idle（改动前行为）：前端 occupancy 投影为 idle → D1 占用短路失效 → defer 队列
-   *   1 秒一次无限重投（实测 90 秒 82 次 `prompt failed: ... Agent is already processing`）。
-   * - 'compacting' / 非 busy 真失败：turn 确实没跑起来 → isGenerating=false + turn:'idle'（现状）。
-   */
-  private handlePromptFailure(
-    sessionId: string,
-    activeSession: IManagedSessionView | undefined,
-    clientUuid: string | undefined,
-    e: unknown,
-  ): { blocked: true; rejected?: boolean } {
-    const errMsg = toErrorMessage(e)
-    console.error(`[message-dispatcher] prompt failed: sessionId=${sessionId}`, errMsg)
-    // [occupancy D2 拒绝转译] pi busy 类确定性拒绝分型：决定下方复位语义，并广播
-    // send.rejected（不走 message.error 错误气泡链路——busy 类不进对话流；非 busy 的 pi
-    // 错误保留现状）。返回 rejected:true 与预检拒绝同构：handler 回 message.status{rejected}
-    // 让 renderer pending 干净 resolve（send.rejected 兜底已接管用户反馈；error envelope
-    // 会让 pending.reject 恢复草稿，与入队/回滚流程冲突）。
-    const rejectionReason = classifyPromptRejection(errMsg)
-    if (activeSession) {
-      // occupancy #8（D2 迁移）：prompt 抛错 → turn 收口。核实：#1 已先于 client.prompt 置
-      // dispatching，故两个分支都必须写终态，否则 turn 永卡 dispatching、occupancy 永不全
-      // idle（P3 起 renderer flush 触发条件，G2 投递必达被破坏）。
-      if (rejectionReason === 'processing') {
-        // pi 侧 turn 正在跑（runtime 之前误判空闲），拒绝的语义不是「turn 没跑起来」——
-        // 以 pi 的拒绝为权威信号反推状态（'reject-processing' 行：派生 isGenerating=true +
-        // turn='generating'），让前端 D1 占用短路生效、defer 队列停止重投（本挂点不再伪造空闲）。
-        // [session-dead 2026-09-10 已收口] 复位依赖该 turn 正常收尾——但**不能只靠 agent_end**：
-        // pi 实装里 agent_end 每次 attempt 都发（retry / auto-compaction 续跑会重发），真正的 run
-        // 终点是 _runAgentPrompt 的 finally 中 _emitAgentSettled()（pi dist/core/agent-session.js:772-786），
-        // 且存在「post-run 尾段直接 settle」这条不含 agent_end 的收尾路径。若 prompt 落在该窗口，
-        // 本分支置的 true 会永久残留（occupancy 已被 #4 复位 idle → 前端 flush，但 busy 预检读
-        // occupancy → 后续消息恒被拒）。故第二复位点挂在 agent_settled：组合根 onAgentSettled →
-        // SessionStateProjection.handleAgentSettledSideEffects。
-        // isGenerating 复位点全集：agent_end（handleTurnEndSideEffects）/ agent_settled（本补丁）/
-        // abort / forceQuit / session 退出。
-        applySessionOccupancyTransition(activeSession, this.messageBus, 'reject-processing')
-      } else {
-        // compacting 拒绝（窗口 1）与非 busy 真失败：turn 确实没跑起来，'reject-other' 行
-        // （派生 isGenerating=false + turn='idle'）。compacting 拒绝后续仅 compaction_start/end
-        // （#5/#6 只写 compacting 维度），同样依赖此处复位。
-        applySessionOccupancyTransition(activeSession, this.messageBus, 'reject-other')
-      }
-    }
-    if (rejectionReason) {
-      this.publishSendRejected(sessionId, rejectionReason, clientUuid)
-      return { blocked: true, rejected: true }
-    }
-    const errMsgMsg = { type: 'message.error' as const, payload: { sessionId, message: errMsg } }
-    this.messageBus?.publish(sessionId, errMsgMsg)
-    // 与 hook 拦截同等对待：已广播 message.error 气泡，返回 blocked 让 handler 走 error envelope（sendError），
-    // renderer pending.reject 触发 Composer 恢复草稿。否则 handler reply success → pending.resolve 误判发送成功。
-    return { blocked: true }
-  }
-
-  /**
-   * send.rejected 拒绝广播（busy 预检与 pi 拒绝转译两路共用的发布原语）。
-   * 文案按 isCompacting 分型映射；clientUuid 原样带回（undefined 时缺省），renderer
-   * 据此消歧发送来源（flush 重放的拒绝不重入队）。
-   */
-  private publishSendRejected(
-    sessionId: string,
-    reason: PromptRejectionReason | 'busy',
-    clientUuid: string | undefined,
+    content: string,
+    opts: { images?: Array<{ data: string; mimeType: string }>; clientUuid?: string; intent?: DeliveryIntent },
   ): void {
-    const msg = {
-      type: 'send.rejected' as const,
-      payload: {
-        sessionId,
-        reason,
-        message: reason === 'compacting' ? REJECT_MESSAGE_COMPACTING : REJECT_MESSAGE_BUSY,
-        ...(clientUuid !== undefined && { clientUuid }),
-      },
+    const registry = getActiveDeliveryRegistry()
+    if (!registry) {
+      const errMsg = 'delivery registry not wired (composition root)'
+      console.error(`[message-dispatcher] submit rejected: ${errMsg}, sid=${sessionId}`)
+      this.messageBus?.publish(sessionId, { type: 'message.error', payload: { sessionId, message: `消息未发送：${errMsg}` } })
+      return
     }
-    this.messageBus?.publish(sessionId, msg)
+    const result = registry.submit(sessionId, {
+      content,
+      ...(opts.images !== undefined && { images: opts.images }),
+      ...(opts.clientUuid !== undefined && { clientUuid: opts.clientUuid }),
+      ...(opts.intent !== undefined && { intent: opts.intent }),
+    })
+    console.log(
+      `[message-dispatcher] submitted to delivery kernel: sid=${sessionId}, id=${result.clientUuid}, lane=${result.lane}, state=${result.state}`,
+    )
   }
 
   /**
@@ -509,6 +320,10 @@ export class MessageDispatcher {
     }
     const completeMsg = { type: 'message.complete' as const, payload: { sessionId, stopReason: 'aborted' as const } }
     this.messageBus?.publish(sessionId, completeMsg)
+    // [投递所有权内核 u2 / D3 触发点③ + D10 子形态] abort 完成 → occupancy 已复位 idle →
+    // 对账器本轮回收 pi 槽位滞留（abort 不清 pi 队列，F5）并立即重投，避免用户消息滞留
+    // 等下一次发送才被顺带取走（故事 B 形态）。fire-and-forget（对账内部自节流/幂等）。
+    void getActiveDeliveryRegistry()?.reconcile(sessionId, 'abort-idle')
   }
 
   /**
@@ -934,34 +749,22 @@ export class MessageDispatcher {
   }
 
   /**
-   * [composer-multi-skill-injection D6/D8] 发布 skill 注入提示广播（session.skillNotice，
-   * payload 契约见 protocol.ts）。三入口共用：注入器产出的 notices 逐条定向发布。
-   *
-   * [A2 D-A2-2] 广播编排提取为共享函数（skill-notice-publisher.ts）——subagentAction
-   * （session-records.ts）与 deliverText（session-delivery-registry.ts）两个新挂载点
-   * 同款复用；本方法保留薄委托（调用点不变，messageBus 的 undefined 语义照旧）。
-   * clientUuid 提取与 payload 形态见共享函数注释。
+   * 追加 steer（message.steer，AI 执行中追加上下文）——内核化（u2）：与 sendMessage 同走
+   * `submitToKernel`（lane 判定 / 裸标记 / 两阶段回执 / skill 注入全部在注册表出站交接点）。
+   * 语义保持：turn 边界注入（intent interrupt-at-turn-boundary → pi streamingBehavior 'steer'）。
    */
-  private publishSkillNotices(sessionId: string, sentText: string, notices: SkillNotice[]): void {
-    publishSkillNoticesShared(this.messageBus, sessionId, sentText, notices)
-  }
-
   async steerMessage(sessionId: string, content: string): Promise<void> {
-    const client = this.getClientOrThrow(sessionId, 'steer')
-    // [composer-multi-skill-injection D9] 注入器：入队前统一处理（与 sendPrompt 同构）。
-    // steer 路径现状无 BeforeSend hook 调用点（hook 仅注册在 sendMessage 骨架），
-    // 「hook 之后」约束在此自然成立。
-    const injection = await this.injector.inject(client, content)
-    await client.steer(injection.text)
-    this.publishSkillNotices(sessionId, content, injection.notices)
+    this.pm.getClient(sessionId)?.touchActivity()
+    this.submitToKernel(sessionId, content, {})
   }
 
+  /**
+   * 追加 follow-up（message.follow_up，当前回合结束后开新轮）——内核化（u2）：
+   * intent 'after-run' → pi streamingBehavior 'followUp'（run 收尾注入，F3 语义逐字保持）。
+   */
   async followUpMessage(sessionId: string, content: string): Promise<void> {
-    const client = this.getClientOrThrow(sessionId, 'followUp')
-    // [composer-multi-skill-injection D9] 同 steerMessage：入队前统一处理，恰一次调用。
-    const injection = await this.injector.inject(client, content)
-    await client.followUp(injection.text)
-    this.publishSkillNotices(sessionId, content, injection.notices)
+    this.pm.getClient(sessionId)?.touchActivity()
+    this.submitToKernel(sessionId, content, { intent: 'after-run' })
   }
 
   /**

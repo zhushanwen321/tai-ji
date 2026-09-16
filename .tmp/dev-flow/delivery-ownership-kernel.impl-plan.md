@@ -136,6 +136,20 @@ graph TD
 | D-2 | 协议侧 state/lane 字面量在 DeliveryFrameEntry 内联双定义（非 import 内核类型）——session-delivery 零依赖包边界，shared 不反向依赖 | u-contracts 决策1；session.occupancy 帧与 event-interpreter 先例同款，逐字面对齐义务注释化，错位由 u3a 装配赋值编译期拦截 | 已接受 |
 | D-3 | delivery.cancel Reply 扩展携带全文 + Segment[] 快照（设计仅明确 drain 携带） | u-contracts 决策3；renderer 刷新后帧仅 preview，V9「文本回草稿」依赖 cancel reply 全文，按 D7/ADR-0043 同款口径，optional 字段不破坏最小消费 | 已接受 |
 | D-4 | lane 'steer' 字面量与 session-delivery「零 pi 词汇」头注释的表面张力 | u-contracts 决策2；投递车道语义名非 pi API 词汇（intent→底层参数翻译在适配器），头注释已补裁决说明 | 已接受 |
+| D-7 | u3b 领地外 4 文件（`domain/chat/api-port.ts`、`index.ts`、`use-chat-types.ts`、`transport/mock/index.ts`）判定为**必需**（编译阻断：ChatApiPort 缺 submitDelivery / barrel 悬空导出 / deps 退役成员 / mock 臂同构），保留并随 u3b 一并提交 | 四者均为 D1 统一提交 + defer 退役的必然可编译前提；u3c 消费口（getDeliveryProjection 等）经 index.ts 暴露；u3b 报告 D-7 | 已接受 |
+| D-8 | 回执三分支新增 ②「无本地气泡的投递 → 纯文本降级入流」（`effects/user-delivery.ts`）——前身腿 2 includes 兜底的显示职责被前任实现遗漏，缺它则 live ≢ reload（外来注入/reattach 形态） | 设计 §3.4+ 接管归属表（退役腿职责被送达回执 + reducer 通路承接）+ D2 等值兜底职责必须被吸收；u3b 报告 D-2 | 已接受（职责吸收，非机制新增） |
+| D-9 | renderer 过渡红窗口：u3b 契约退役使 `packages/renderer` vue-tsc 红（11 错，全指 u3c 领地）——保留结构干净，不降级 optional 做双轨 | 计划 DAG U3B→U3C 直接后继关闭；u3b 报告 D-11 | 已接受 |
+| D-10 | 风险窗口：renderer fork 首发（`useForkActions.ts:119` chatApi.send 不带 clientUuid）与内核条目 clientUuid 异源——当前触发条件不成立（新 session 恒 direct 车道）；u3c 迁移发送链后自然收敛 | u3b 报告 D-12；转 u3c 实施期核验 | 已接受（窗口登记） |
+| D-11 | 检查点 2 结论：staging 通路有交点——fork 经 `message.send`（= 内核适配器路径，自动覆盖）；handoff 直调 pi（`handoff-service.ts:255/311`）绕开 dispatcher，与内核在途条目零交点 | u3b 报告 D-13 grep 证据 | 已接受（结论固化，u2/u3c 实施期复述） |
+| D-12 | u3b commit 被仓库级守卫 `check_pi_type_leak.py`（目录全扫，非 staged 范围）阻塞——u2 在途 registry 重写引入 `PiEventListener` 泄漏（services 层禁 PiXxx）；处置 = 令 u2 正面修复，u3b commit 待其清零 | C-comm-02；非 u3b 语义问题；`IPiEngine` 不触雷（正则 `\bPi[A-Z]`） | 已解决（u2 改内联 lambda 后守卫 exit 0，u3b 已 commit 0bd885fd0） |
+| D-13 | 内核标记形态 = **裸 uuid**（非 u- 形态）：msg-id-mapper 的 TAG_STRIP 只剥 u- 形态，标记若用 u- 会被 input hook 剥掉 → transcript 无标记 → 回执永不触发；连带放宽 `skill-notice-publisher` 提取正则为双形态（领地外 1 文件，注释已说明理由） | u2 偏离 #1；PS-26 探针（裸标记不被 mapper 剥除） | 已接受 |
+| D-14 | per-message 投递：用户消息走 sendChecked + 适配层持有 + **合批拆分**（splitComposed 按全文精确子串校验逐条还原）——不拆则内核 buildBatchPayload 合批，V1/V6/V9/V10 的「每条一个 user entry + 可单条撤销」失效；校验失败退回合批语义（宁合不裂） | u2 偏离 #2；设计 D2/D5 单条条目语义 | 已接受 |
+| D-15 | `clearQueue` 未收编 `IPiEngine` 端口（ports 不在 u2 领地）→ 注册表侧结构化窄接口 + 运行时 guard 承接；**长期动作 = u3a/u4 改 index.ts/ports 时收编** | u2 偏离 #3 | 已接受（待收编项登记） |
+| D-16 | 「dispatcher → 注册表」接线用模块级活动注册表槽 `getActiveDeliveryRegistry()`（与 getActiveRelayRegistry 同款范式；index.ts/session-service.ts 不在领地）；**长期方案 = 组合根显式构造注入** | u2 偏离 #4 | 已接受（待收编项登记） |
+| D-17 | 对账触发点②③④为合成来源（compaction_end 取 pi 事件流 / abort-idle 取 dispatcher.abort 成功点 / pi-restored 取交付时 client 实例变更 / settled 取既有 agentSettledListeners / watchdog 自建 30s）；槽位非空判定用 **clear_queue 返回值**（pi 权威、操作时刻）替代 queue_update 缓存投影——后者需改 event-adapter（且计划写的 `services/session/event-adapter.ts` 实装为 `src/infra/pi/event-adapter.ts`，缓存有滞后） | u2 偏离 #5/#10；设计 D3 对账器五触发点 | 已接受 |
+| D-18 | markSessionActive 三副作用落在适配层 deliverOne 且**位于 prompt 受理之后**（旧 dispatcher 为 prompt 之前）；旧顺序仅服务已退役的拒绝复位逻辑，适配层顺序与既有 registry 契约（A5 测试）一致 | u2 偏离 #6 | 已接受 |
+| D-19 | 对账两处实施扩展：①在途未确认扫描（>10s 宽限 + 槽位未命中 → transcript 扫描 → 确认或重投，V3/G2 恢复通道）；②rebuild-delivered 用 suppressed 集抑制真实投递 + confirmDelivered 落 tombstone（判重锚）；`hasDeliveryActivity` 保持 depth() 口径（queued-only，在途未确认不计入回收豁免，由 pi-restored 对账兜底） | u2 偏离 #7/#8 | 已接受 |
+| D-20 | u2 领地扩展：`test/**` 3 文件旧腿迁移（dispatcher-bus / workspace-message-handler / message-dispatcher-precheck）+ `skill-notice-publisher.ts`；**残余 20 例**（occupancy-runtime 5 / session-service 11 / session-service-w3 2 / user-stopped-convergence 2）由专职收口 dev 承接 | u2 偏离 #9 + 主 agent 复跑实测（20 failed / 5838 passed） | 处理中 |
 
 ## 6 状态表
 
@@ -143,8 +157,8 @@ graph TD
 |------|------|------|----------|
 | u-contracts | committed | 1 | commit 3ff81b8f5 之后的流转 commit；两包 typecheck 绿 + session-delivery 73 测试全绿（主 agent 复跑证实） |
 | u1 | committed | 1 | 内核 v2 + 129 测试全绿（56 新增）+ typecheck 绿；两段式 cancel in-flight、confirmDelivered 接受 queued（D3② rebuild/竞态事实优先）、deliveredWindow:0 bug 修复；偏差见变更历史 |
-| u2 | pending | 1 | 首轮派发（agent_908692ab）因 5h 套餐额度耗尽中断（重置 2026-09-16 18:46:46）：工作区零产出（packages/runtime 无任何改动），整单元重派 |
-| u3b | pending | 1 | 首轮派发（agent_b6ca9129）因同一额度中断：**部分工作保留在工作区未提交**（core 22 文件，含 4 个旧腿测试文件删除 + 新增 effects-delivery-receipt.test.ts）；typecheck 495 = 基线零扩大；core 全量测试 7 failed / 2025 passed——失败全部为 queue_update→queueStates 旧腿断言未迁移（store.test.ts ×4、apply-entry-equivalence.test.ts ×3）；走接替程序续作 |
+| u2 | committed | 4 | 主 agent 复跑：runtime 全量 500 files / 5858 passed（0 failed）+ `tsc --noEmit` 零错 + `check_pi_type_leak` exit 0 + u2 十文件 109/109 绿 + 探针 `p-f9-queue-primitives.mjs` exit 0（检查点 4 实测 settling 死窗口成立 → 保守档必需；检查点 3 结论=插件 `{queued}` 语义透明）；残余 20 例由专职收口 dev 迁移完成（四文件 202 绿，迁移逐条附设计依据、无弱化）。偏差 D-13~D-20 |
+| u3b | verified（commit 待落） | 2 | 主 agent 复跑：`pnpm test` 126 files / 2031 passed / 5 todo（0 failed）+ `npx tsc --noEmit` 495 = 基线零扩大；E5a/E5b/E5c 迁移保留全部原判据（恰一条气泡 / `toRaw(content)===segments` 引用恒等 / segmentsToText 保真 / reducer 镜像等价 / id 异源窗断言）；4 个退役腿测试文件删除 + 新增 effects-delivery-receipt.test.ts（9 例）；偏差 D-7~D-12。commit 阻塞：仓库级守卫 check_pi_type_leak 命中 u2 在途文件（见 D-12） |
 | u3a | pending | 0 | - |
 | u4 | pending | 0 | - |
 | u3c | pending | 0 | - |
@@ -169,3 +183,6 @@ graph TD
 - 2026-09-16 17:0x：u2/u3b 并行派发期间 5h 套餐额度耗尽（限额 18:46:46 重置），两 agent 中断。主 agent 现场核验：u2 零产出；u3b 留下未完工的部分工作区改动（详见状态表证据指针）。处置 = 落盘 quota-wait 状态 + 定时额度恢复后接续（不丢 u3b 已有工作，走接替程序；u2 重派）。接替 dev 须完成 u3b 剩余项：7 个旧腿测试迁移/退役（apply-entry-equivalence E5a/E5b/E5c 属 live ≡ reload 等价性守卫——项目规则 9 的历史资产，迁移须保持断言强度，不得弱化删除）、api-port.ts 领地外改动必要性申报（deviations）、检查点 2 staging grep、core 全量测试绿 + typecheck 错误集零扩大（基线 495）。
 - 2026-09-16 17:2x：额度提前恢复（用户确认），定时调度删除，立即续跑——u3b 接替 dev（agent_6164d889）与 u2 重派（agent_78a639f5）已并行后台派发。
 - 2026-09-16 20:25：两 agent 运行约 90 分钟后被 provider rate limit 掐断（非额度、非单元质量问题）。主 agent 现场核验：u2 留下实质进展（rpc-client clearQueue + registry 重写 1044 行：Reconciler 六触发/三分处置/hasPendingMessages 真值化/onSettled 接线），缺口 = typecheck 1 错（submit 误写 async 与接口同步受理口径冲突）+ dispatcher/event-adapter 未动 + 探针与增量单测未落；u3b 续作零推进（core 仍 7 failed / 2025 passed，与开工前一致）。处置 = 以 SendMessage 唤醒两 agent 带上下文续跑（附实测现状与精准缺口清单与建议顺序），不新起 agent。
+- 2026-09-16 20:40：u3b 接替完成（续跑轮次 2）。主 agent 硬核验通过：领地 diff 与申报一致；复跑 core 全量 126 files / 2031 passed / 5 todo（0 failed）、tsc 495 = 基线；抽查实质——E5x 迁移保留/加强断言（`toRaw` 引用恒等、单气泡、inflight 归零、reducer 镜像等价），store.test 退役锁 + 维度转移有 D7 依据，跨包消费面仅 renderer（D-9 登记，u3c 关闭）。偏差 D-7~D-12 登记入 §5。流转 commit 被仓库级守卫 check_pi_type_leak 拦下（命中 u2 在途文件，非 u3b 问题）→ 通知 u2 正面修复后补提交；同时按「u3b 实现已验证在盘」判定 u3c 可并行启动（调度偏差登记于 D-9 说明）。
+- 2026-09-16 20:50：u2 主体完成（续跑轮次 3，报 partial）。主 agent 硬核验：runtime typecheck 零错、守卫 exit 0（PiEventListener 已改内联 lambda）、u2 十文件 109/109 绿、探针 exit 0（检查点 4 结论=settling 死窗口成立 → 保守档为必需；检查点 3 结论=插件 {queued} 语义透明）、文件集与申报一致。**u3b 补提交落地（0bd885fd0，25 文件，hooks 全绿）**。残余：`test/**` 4 文件 20 例锁定旧 dispatcher 语义（prompt 实参形态 / occupancy 置位顺序 / send.rejected 广播 / steer-followUp 直调）未迁移，u2 上下文预算耗尽自报残余债务 → 派专职收口 dev（D-20）。u2 偏差 D-13~D-19 登记入 §5。旁证：`src/__tests__/services/idle-pi-reclaim-integration.test.ts` 首轮全量红、二轮绿（真进程并发抖动嫌疑）——登记为观察项，待三轮数据判 flake。
+- 2026-09-16 21:10：u2 残余收口完成（专职 dev）。主 agent 硬核验：领地干净（只动 `test/**` 四文件，零源码改动）；四文件复跑 202 passed；全量复跑 500 files / 5858 passed（0 failed）；`tsc --noEmit` 零错；抽查迁移实质——`steerMessage/followUpMessage` 直调断言 → 内核车道（`streamingBehavior='steer'/'followUp'` + 调用次数 + 正文包含），「throws when session not active」→ 「resolves + message.error 错因可见」，与设计「send.rejected 全链退役（内核永远不拒绝用户消息）」逐字对得上，无弱化。idle-pi 三轮数据：红/绿/绿（全量复跑绿）→ 按并发抖动归档观察，不进 flake 档案。u2 状态 = committed。

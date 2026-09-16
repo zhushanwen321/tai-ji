@@ -411,22 +411,20 @@ describe('MessageDispatcher sendBash —— bash RPC 超时诚实终态（timeou
   })
 })
 
-describe('MessageDispatcher —— bash/message 双向互斥（T7, G1 修复）', () => {
+describe('MessageDispatcher —— bash/message 双向互斥（T7 迁移：内核持有承接，u2）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('T7: isBashRunning=true 时 sendMessage → 广播 send.rejected + 不调 client.prompt', async () => {
+  it('T7: isBashRunning=true 时 sendMessage → 零 send.rejected + 不调 client.prompt（内核持有等 bash 结束）', async () => {
     const { dispatcher, promptFn, broadcasts } = makeMocks({ isBashRunning: true })
     const result = await dispatcher.sendMessage('s1', 'hello')
 
-    // client.prompt 未被调用（G1 修复：bash 进行中不允许发消息）
+    // client.prompt 未被调用（bash 进行中不允许发消息——语义保持，实现从「拒绝」改为「内核持有」）
     expect(promptFn).not.toHaveBeenCalled()
-    // 广播 send.rejected
-    const rejected = broadcasts.find((m) => m.type === 'send.rejected')
-    expect(rejected).toBeDefined()
-    expect(rejected!.payload).toMatchObject({ sessionId: 's1', reason: 'busy' })
-    // 返回 rejected
-    expect(result.rejected).toBe(true)
-    expect(result.blocked).toBe(true)
+    // send.rejected 退役（D5 排队取代拒绝）：busy 度不再产生拒绝广播
+    expect(broadcasts.find((m) => m.type === 'send.rejected')).toBeUndefined()
+    // 受理口径：RPC 不再收到 rejected ack（消息由内核 FIFO 承接，bash 结束后投递）
+    expect(result.blocked).toBe(false)
+    expect(result.rejected).toBeUndefined()
   })
 })
 

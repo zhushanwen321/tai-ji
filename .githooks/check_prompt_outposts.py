@@ -91,12 +91,15 @@ OUTPOST_CALLSITES = [
     ),
     (
         "services/session/session-delivery-registry.ts",
-        "client.prompt(injection.text, undefined, streamingBehavior)",
+        "await client.prompt(text, opts.images, opts.behavior)",
         "user",
         "injected",
-        "[A2 MF-C] deliverText 单点出站：三消费方（landing 首发直投 sendDirect / "
-        "session_manager send 的 agent 构造 prompt / completion-backflow 回流通知）"
-        "统一「字面标记即展开、无标记 no-op」（设计 D-A2-1 裁决）",
+        "[u2 内核化] deliverOne 单点出站（port.send 逐条实现 + sendDirect 共用；landing 首发 / "
+        "session_manager send / completion-backflow 三消费方均经此）：唯一调用方在 "
+        "injector.inject 之后按注入后文本调用（deliverOne 内 injection.text → "
+        "promptWithBusyRetry 透传），busy-retry 只改 opts.behavior、文本不换，复用同一"
+        "已注入文本；前一版 deliverText 调用点随重构消失，旧条目 "
+        "client.prompt(injection.text, undefined, streamingBehavior) 已替换",
     ),
     (
         "services/session/session-records.ts",

@@ -54,6 +54,22 @@ export interface AvailableModelSnapshot {
   thinkingLevelMap?: Record<string, string | null>
 }
 
+/**
+ * pi 队列级原语 clear_queue 的响应形状（F9 实装核对：pi 0.84.4 dist
+ * `agent-session.js:1195-1203 clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
+ * ——`_steeringMessages` / `_followUpMessages` 的浅拷贝，元素是入队时的整段文本）。
+ *
+ * 这是「队列级」原语：pi 不提供条目级收回（F8 出队判定本身就是按文本 indexOf 匹配，无 id），
+ * 故投递所有权内核的收回路径 = 全收 → 上层按裸标记识别目标条目 → 其余文本重投
+ * （设计 delivery-ownership-kernel.md §3.1 场景 D / D3）。
+ */
+export interface PiQueueSnapshot {
+  /** steering 队列全文（入队序）。 */
+  steering: string[]
+  /** followUp 队列全文（入队序）。 */
+  followUp: string[]
+}
+
 export interface RpcClientOptions {
   cwd?: string
   model?: string
@@ -118,6 +134,12 @@ const STARTUP_DELAY_MS = 500
 const STDERR_CRASH_MAX_BYTES = 1_000_000
 /** 错误消息 / exitCallback 载荷里的 stderr 尾部行数（展示路径，D4 后语义不变） */
 const STDERR_TAIL_LINES = 10
+
+/** pi stdout 行分帧等场景的未知值 → 字符串数组归一（非数组 / 非字符串元素一律丢弃）。 */
+function toStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string')
+}
 
 // ── start 提取 helper（复杂度债务偿还，行为保持提取：按处理阶段下沉，主函数只留编排）──
 
@@ -798,6 +820,29 @@ export class RpcClient implements IPiEngine {
 
   abort(): Promise<PiMessage> {
     return this.sendCommand('abort')
+  }
+
+  /**
+   * 清空 pi 的两个内存待注入队列（steer / followUp）并取回全文（pi F9）。
+   *
+   * 投递所有权内核的收回原语：pi 只有队列级 clear_queue（无条目级收回——F8 出队判定按
+   * 文本 indexOf 匹配，无 id），上层（delivery registry 对账器）据此完成「全收 → 按裸标记
+   * 识别 → 自有条目重投 / 外来文本收养」（§3.1 场景 D / D3）。
+   *
+   * 超时用 FAST_TIMEOUT_MS：纯内存操作 + 同步 emit（pi 实装 `clearQueue` 无 await），
+   * 属控制面单请求（AGENTS.md 规则 19 粒度原则）——秒级即失败，不占任务级预算；失败
+   * 语义由调用方处置（对账器本轮放弃、下轮触发点重试；cancel 路径回「已投递不可撤」）。
+   *
+   * 形状守卫：响应非对象或缺数组字段时归一为空数组（协议异常不炸对账主链——对账器把
+   * 「空」解释为「无滞留」，最坏形态是滞留留到下一触发点，而非对账链路抛错）。
+   */
+  async clearQueue(): Promise<PiQueueSnapshot> {
+    const msg = await this.sendCommand('clear_queue', {}, FAST_TIMEOUT_MS)
+    const data = msg.data as Record<string, unknown> | undefined
+    return {
+      steering: toStringArray(data?.steering),
+      followUp: toStringArray(data?.followUp),
+    }
   }
 
   steer(content: string): Promise<PiMessage> {

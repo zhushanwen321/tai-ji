@@ -22,6 +22,10 @@ import {
 } from '../src/services/session/event-interpreter.js'
 import { EventInterpreter } from '../src/services/session/event-interpreter.js'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+} from '../src/services/session/session-delivery-registry.js'
 import { RpcTimeoutError } from '../src/utils/errors.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { UserStoppedMarkStore } from '../src/services/session/types.js'
@@ -52,6 +56,14 @@ function makeGate() {
   const gate = new UserStoppedGate()
   gate.configure({ marks: store, abortSession })
   return { gate, store, abortSession }
+}
+
+/**
+ * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
+ * → 三副作用置位）——dispatcher 只提交，显式投递清标记（D4）随出站交接异步落地。
+ */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
 // ── Part A：UserStoppedGate 收敛环状态机（fake timers）──────────
@@ -260,6 +272,9 @@ describe('EventInterpreter 收敛环挂点接线', () => {
 // ── Part C：dispatcher 置位分型（K1/K2）与显式投递清标记 ─────────
 
 describe('MessageDispatcher 置位分型与显式投递清标记', () => {
+  /** [u2] 出厂交接 async 链持有的 timer（watchdog / 持有期轮询）在用例间清理。 */
+  let cleanupRegistry: (() => void) | undefined
+
   function makeDispatcher(opts: {
     session?: IManagedSessionView
     abortBehavior?: 'ok' | 'rpc-timeout'
@@ -270,8 +285,13 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
     const abortFn = opts.abortBehavior === 'rpc-timeout'
       ? vi.fn(async () => { throw new RpcTimeoutError('abort', 60000) })
       : vi.fn(async () => {})
+    /** prompt 时刻的标记快照（时序构造性断言：清标记必须先于 prompt）。 */
+    let markAtPrompt: boolean | undefined
     const client = {
-      prompt: vi.fn(async () => ({}) as unknown as Awaited<ReturnType<IPiEngine['prompt']>>),
+      prompt: vi.fn(async () => {
+        if (markAtPrompt === undefined) markAtPrompt = store.hasUserStoppedMark(session.id)
+        return {} as unknown as Awaited<ReturnType<IPiEngine['prompt']>>
+      }),
       abort: abortFn,
       // idle-pi-reclamation D6-1：dispatcher 入口同步 touch（attached client 必有该面）
       touchActivity: vi.fn(),
@@ -290,8 +310,21 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
       destroySession: vi.fn(async () => {}),
     } as unknown as IProcessManager
     const publish = vi.fn()
+    // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步在注册表）——
+    // fixture 按真实组合根装配接内核；显式投递清标记（D4）落在适配层 deliverOne
+    const deliveryRegistry = createSessionDeliveryRegistry({
+      getSession: (sid) => svc.getSession(sid),
+      ensureActive: svc.ensureActive as (sid: string) => Promise<IPiEngine>,
+      subscribeAgentSettled: () => () => {},
+      recordWorkspace: () => {},
+      getMessageBus: () => null,
+    })
+    cleanupRegistry = () => deliveryRegistry.disposeAll()
     const dispatcher = new MessageDispatcher(svc, pm, { record: vi.fn() } as unknown as WorkspaceService, { publish } as unknown as IMessageBus)
-    return { dispatcher, session, publish, abortFn, persistSessionOutcome }
+    return {
+      dispatcher, session, publish, abortFn, persistSessionOutcome, deliveryRegistry,
+      markAtPrompt: () => markAtPrompt,
+    }
   }
 
   function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
@@ -314,6 +347,9 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
   })
   afterEach(() => {
     vi.useRealTimers()
+    cleanupRegistry?.()
+    cleanupRegistry = undefined
+    resetActiveDeliveryRegistryForTest()
     userStoppedGate.resetForTest()
   })
 
@@ -378,19 +414,24 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
   })
 
   it('sendPrompt 显式投递：投递前清标记放行，标记不在时照常投递（零开销）', async () => {
-    const { dispatcher } = makeDispatcher()
+    const { dispatcher, markAtPrompt } = makeDispatcher()
     userStoppedGate.markUserStopped('s1', 'user_force_quit')
     gateBegin('s1')
     const result = await dispatcher.sendMessage('s1', 'hello')
     expect(result.blocked).toBe(false)
+    await flushDelivery() // 出站交接在适配层（u2）：清标记随 deliverOne 异步落地
     expect(store.hasUserStoppedMark('s1')).toBe(false) // 投递前已清
+    // 时序构造性：prompt 发出时刻标记已清（清标记先于 prompt，restore-abort 收敛环看不到标记）
+    expect(markAtPrompt()).toBe(false)
   })
 
   it('显式投递开 turn 的 agent_start 事件回流不被收敛环误掐（时序构造性：清标记先于 prompt）', async () => {
-    const { dispatcher } = makeDispatcher()
+    const { dispatcher, markAtPrompt } = makeDispatcher()
     userStoppedGate.markUserStopped('s1', 'user_force_quit')
     gateBegin('s1')
     await dispatcher.sendMessage('s1', 'hello') // 清标记 + 停环 + prompt 发出
+    await flushDelivery()
+    expect(markAtPrompt()).toBe(false) // prompt 受理时标记已清、环已停
     // 模拟 pi 处理 prompt 后开 turn，agent_start 事件回流 interpreter
     const sent: ServerMessage[] = []
     const interpreter = new EventInterpreter('s1', { send: (m) => { sent.push(m) } })

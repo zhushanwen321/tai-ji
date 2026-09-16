@@ -1,27 +1,34 @@
 /**
- * MessageDispatcher 发送拒绝转译测试（session-occupancy-send-closure D2 runtime 侧）。
+ * 错误分类迁移（D6）与拒绝面退役验收测试（u2 迁移自 message-dispatcher-send-rejection.test.ts）。
  *
- * 锁定：
- * - classifyPromptRejection：pi 双拒绝字符串 → 'compacting' | 'processing'，非 busy → null
- * - busy 预检分型：isCompacting → 'compacting'；isGenerating / isBashRunning → 'busy'（存量）
- * - catch 转译：pi busy 类拒绝 → send.rejected 分型广播 + 零 message.error（不进错误气泡链路）
- *   + 复位语义按分型分叉（processing → isGenerating=true + occupancy generating「pi 有 runtime
- *   不知情的 turn 在跑」；compacting → false + idle）+ 返回 rejected:true（handler 走
- *   message.status{rejected} ack，与预检拒绝同构）
- * - 非 busy pi 错误（auth/无模型等）：保留现状 message.error 广播，无 send.rejected
- * - clientUuid 原样回带：预检与转译两路；未传时 payload 不含该键
+ * 迁移口径（原断言 → 新落点）：
+ * - `classifyPromptRejection` 双字符串映射：**逐字保留**（迁移后由内核适配器
+ *   session-delivery-registry.promptWithBusyRetry 消费；dispatcher 侧 re-export 保持既有
+ *   import 路径与 PS-22/PS-23 探针锁定面）。registry 侧行为断言见
+ *   src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
+ * - busy 预检分型 + `send.rejected` 广播：**退役**（排队取代拒绝 D5）——原断言强度平移到
+ *   「零拒绝广播 + 内核在册承接」面；compacting 拒绝 → 持有等 compaction_end（D6 行）；
+ *   processing 拒绝 → occupancy 反转 generating（D6 行，防幽灵空闲）。
+ * - 非 busy pi 错误：message.error 保留（错因可见），零 send.rejected。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-send-rejection.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher, classifyPromptRejection } from '../services/session/message-dispatcher.js'
 import { SessionMessageHandler } from '../transport/session-message-handler.js'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+  type SessionDeliveryDeps,
+} from '../services/session/session-delivery-registry.js'
+import { applySessionOccupancyTransition } from '../services/session/event-interpreter.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
 import type { IManagedSessionView } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../services/ports/pi-engine.js'
 import type { ClientMessage, ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
+import type { SkillInjector, SkillInjectionResult } from '../services/session/skill-injector.js'
 
 /** pi 0.84.4 agent-session.js prompt() 双拒绝分支原文（PS-22 / PS-23 探针锁守卫）。 */
 const PI_COMPACTING_MSG = 'Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.'
@@ -41,9 +48,6 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     isCompacting: false,
     isBashRunning: false,
     bashRunToken: undefined,
-    // registerSession 在真实链路里把 occupancy 初始化为 idle；显式给出才能断言
-    // dispatching → idle / generating 的转移与广播帧（缺省时 updateSessionOccupancy 按 idle
-    // 兜底合并，同样成立，但转移断言需要可读的初值）。
     occupancy: { turn: 'idle', compacting: false, bash: false },
     ...overrides,
   }
@@ -57,45 +61,57 @@ interface MockOpts {
 }
 
 function makeMocks(opts: MockOpts = {}) {
-  const isBashRunning = opts.isBashRunning ?? false
-  const isGenerating = opts.isGenerating ?? false
-  const isCompacting = opts.isCompacting ?? false
-  // [u3b 预检改读 occupancy] 预检输入源从三布尔改为 occupancy 投影（session-dead-structural-fixes
-  // D2 settling 预检裁决）。真实链路里二者经转移原语原子同步（同一挂点「合并 + 派生」双写合一），
-  // fixture 镜像该同步——置布尔的用例同时给对应投影态；布尔保留供非预检读点与派生断言使用。
   const session = makeMockSession({
-    isBashRunning,
-    isGenerating,
-    isCompacting,
-    occupancy: { turn: isGenerating ? 'generating' : 'idle', compacting: isCompacting, bash: isBashRunning },
+    isBashRunning: opts.isBashRunning ?? false,
+    isGenerating: opts.isGenerating ?? false,
+    isCompacting: opts.isCompacting ?? false,
+    occupancy: {
+      turn: opts.isGenerating ? 'generating' : 'idle',
+      compacting: opts.isCompacting ?? false,
+      bash: opts.isBashRunning ?? false,
+    },
   })
-
-  const promptFn = opts.promptError
-    ? vi.fn(async () => { throw opts.promptError! })
-    : vi.fn(async () => ({ role: 'assistant', content: 'ok' }))
-
-  // touchActivity：sendPrompt 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient
-  // 到达 fake client——fake 须补齐该接口成员
-  const client = { prompt: promptFn, touchActivity: vi.fn() } as unknown as IPiEngine
-
-  // dispatcher 只依赖 publish 抽象：mock bus 收集发布消息供断言
+  const promptCalls: unknown[][] = []
+  const promptFn = vi.fn(async (...args: unknown[]) => {
+    promptCalls.push(args)
+    if (opts.promptError) throw opts.promptError
+    return {}
+  })
+  const client = {
+    prompt: promptFn,
+    touchActivity: vi.fn(),
+    getEntries: vi.fn(async () => ({ data: { entries: [] } })),
+    clearQueue: vi.fn(async () => ({ steering: [], followUp: [] })),
+    onEvent: vi.fn(() => () => {}),
+  }
   const broadcasts: ServerMessage[] = []
   const bus = { publish: vi.fn((_sid: string, m: ServerMessage) => { broadcasts.push(m) }) } as unknown as IMessageBus
-
   const svc: IDispatcherSessionOps = {
-    ensureActive: vi.fn(async () => client),
+    ensureActive: vi.fn(async () => client as unknown as IPiEngine),
     getSessionByClient: vi.fn(() => session),
+    getSession: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
-    getSession: vi.fn(),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   }
-
-  const pm = { getClient: vi.fn(() => client) } as unknown as IProcessManager
+  const pm = { getClient: vi.fn(() => client as unknown as IPiEngine) } as unknown as IProcessManager
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
-
+  const injector = {
+    inject: vi.fn(async (_c: IPiEngine, text: string): Promise<SkillInjectionResult> => ({ text, notices: [] })),
+  } as unknown as SkillInjector
+  const deps: SessionDeliveryDeps = {
+    getSession: (sid) => (sid === 's1' ? session : undefined),
+    ensureActive: svc.ensureActive as (sid: string) => Promise<IPiEngine>,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: vi.fn(),
+    getMessageBus: () => bus,
+  }
+  const registry = createSessionDeliveryRegistry(deps, injector)
   const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
-  return { dispatcher, session, promptFn, broadcasts }
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 40; i += 1) await Promise.resolve()
+  }
+  return { dispatcher, registry, session, broadcasts, promptFn, promptCalls, flush, client }
 }
 
 /** 取广播中的唯一 send.rejected payload（不存在则 undefined）。 */
@@ -109,19 +125,23 @@ function findError(broadcasts: ServerMessage[]) {
   return broadcasts.find((m) => m.type === 'message.error')
 }
 
-/**
- * 取广播中的 session.occupancy turn 序列（顺序即转移序）。
- *
- * session.occupancy 是前端占用投影的唯一输入（renderer D1 占用短路 / defer 队列 flush
- * 触发条件都读它）——断言它是「用户可见状态」级证据，而非纯内部字段。
- */
+/** session.occupancy 帧的 turn 序列（前端占用投影唯一输入——用户可见状态级证据）。 */
 function occupancyTurns(broadcasts: ServerMessage[]): string[] {
   return broadcasts
     .filter((m) => m.type === 'session.occupancy')
     .map((m) => (m.payload as ServerMessage<'session.occupancy'>['payload']).turn)
 }
 
-describe('classifyPromptRejection —— pi 拒绝原文映射（D2 识别函数）', () => {
+beforeEach(() => {
+  vi.useFakeTimers()
+  resetActiveDeliveryRegistryForTest()
+})
+afterEach(() => {
+  vi.useRealTimers()
+  resetActiveDeliveryRegistryForTest()
+})
+
+describe('classifyPromptRejection —— pi 拒绝原文映射（D6 识别函数，迁移落点 = 内核适配器）', () => {
   it('manual 压缩原文 → compacting', () => {
     expect(classifyPromptRejection(PI_COMPACTING_MSG)).toBe('compacting')
   })
@@ -135,170 +155,101 @@ describe('classifyPromptRejection —— pi 拒绝原文映射（D2 识别函数
     expect(classifyPromptRejection(`${PI_COMPACTING_MSG} (session s1)`)).toBe('compacting')
   })
 
-  it('非 busy 的 pi 错误（auth / 无模型等）→ null（保留 message.error 现状）', () => {
+  it('非 busy 的 pi 错误（auth / 无模型等）→ null（走普通错误面）', () => {
     expect(classifyPromptRejection('No model configured')).toBeNull()
     expect(classifyPromptRejection('Authentication failed: 401')).toBeNull()
     expect(classifyPromptRejection('')).toBeNull()
   })
 })
 
-describe('sendPrompt busy 预检分型（D2：按命中维度分型广播）', () => {
-  beforeEach(() => vi.clearAllMocks())
+describe('busy 预检与 send.rejected 退役（D5：排队取代拒绝）', () => {
+  it('isCompacting=true：零 send.rejected + 内核排队 + 不调 prompt；compaction_end 后自动投递', async () => {
+    const h = makeMocks({ isCompacting: true })
+    const result = await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(result).toEqual({ blocked: false })
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(h.promptFn).not.toHaveBeenCalled()
+    expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（不丢）
 
-  it('isCompacting=true → send.rejected{reason:"compacting"} + 中文提示 + 不调 prompt + rejected ack', async () => {
-    const { dispatcher, promptFn, broadcasts } = makeMocks({ isCompacting: true })
-
-    const result = await dispatcher.sendMessage('s1', 'hello')
-
-    expect(promptFn).not.toHaveBeenCalled()
-    expect(result).toEqual({ blocked: true, rejected: true })
-    const payload = findRejected(broadcasts)
-    expect(payload).toMatchObject({ sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' })
-    // 转译/预检拒绝不进错误气泡链路
-    expect(findError(broadcasts)).toBeUndefined()
+    applySessionOccupancyTransition(h.session, null, 'compacting-end')
+    await vi.advanceTimersByTimeAsync(600)
+    await h.flush()
+    expect(h.promptFn).toHaveBeenCalledTimes(1)
   })
 
-  it('仅 isGenerating=true → reason:"busy"（存量）', async () => {
-    const { dispatcher, promptFn, broadcasts } = makeMocks({ isGenerating: true })
-
-    const result = await dispatcher.sendMessage('s1', 'hello')
-
-    expect(promptFn).not.toHaveBeenCalled()
-    expect(result).toEqual({ blocked: true, rejected: true })
-    expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'busy', message: 'Agent 正在处理' })
+  it('仅 isGenerating=true：零 send.rejected + 按 lane=steer 即时投递（turn 边界注入）', async () => {
+    const h = makeMocks({ isGenerating: true })
+    const result = await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(result).toEqual({ blocked: false })
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(h.promptCalls[0]?.[2]).toBe('steer')
   })
 
-  it('仅 isBashRunning=true → reason:"busy"（存量，T7 语义保持）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isBashRunning: true })
-
-    const result = await dispatcher.sendMessage('s1', 'hello')
-
-    expect(result).toEqual({ blocked: true, rejected: true })
-    expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'busy' })
+  it('仅 isBashRunning=true：零 send.rejected + 持有（不调 prompt）', async () => {
+    const h = makeMocks({ isBashRunning: true })
+    const result = await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(result).toEqual({ blocked: false })
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(h.promptFn).not.toHaveBeenCalled()
   })
 
-  it('预检拒绝 + clientUuid → payload 原样回带（compacting 维度）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isCompacting: true })
-
-    await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-pre-1')
-
-    expect(findRejected(broadcasts)).toMatchObject({ reason: 'compacting', clientUuid: 'uuid-pre-1' })
-  })
-
-  it('预检拒绝 + clientUuid → payload 原样回带（busy 维度）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isBashRunning: true })
-
-    await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-pre-2')
-
-    expect(findRejected(broadcasts)).toMatchObject({ reason: 'busy', clientUuid: 'uuid-pre-2' })
-  })
-
-  it('预检拒绝未传 clientUuid → payload 不含 clientUuid 键', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ isCompacting: true })
-
-    await dispatcher.sendMessage('s1', 'hello')
-
-    const payload = findRejected(broadcasts)
-    expect(payload).toBeDefined()
-    expect('clientUuid' in payload!).toBe(false)
+  it('clientUuid 透传进入内核条目 id（renderer 消歧锚从广播挪到条目 id）', async () => {
+    const h = makeMocks()
+    await h.dispatcher.sendMessage('s1', 'hello', undefined, 'u-11111111-1111-4111-8111-111111111111')
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]?.id).toBe('u-11111111-1111-4111-8111-111111111111')
+    expect(h.promptCalls[0]?.[0] as string).toContain('<!--taiji:msg:11111111-1111-4111-8111-111111111111-->')
   })
 })
 
-describe('sendPrompt catch 拒绝转译（D2：pi busy 类拒绝不进 message.error）', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('manual 压缩原文 → send.rejected{reason:"compacting"} + 零 message.error + isGenerating/turn 复位 idle + rejected ack', async () => {
-    const { dispatcher, session, broadcasts } = makeMocks({ promptError: new Error(PI_COMPACTING_MSG) })
-
-    const result = await dispatcher.sendMessage('s1', 'hello')
-
-    expect(result).toEqual({ blocked: true, rejected: true })
-    // 转译广播（恰一条 send.rejected）+ 不进错误气泡链路
-    const rejected = findRejected(broadcasts)
-    expect(rejected).toMatchObject({ sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' })
-    expect(broadcasts.filter((m) => m.type === 'send.rejected')).toHaveLength(1)
-    expect(findError(broadcasts)).toBeUndefined()
-    // 复位语义保持：compacting 拒绝意味着 turn 没跑起来（#1 dispatching → #8 idle）
-    expect(session.isGenerating).toBe(false)
-    expect(session.occupancy?.turn).toBe('idle')
-    expect(occupancyTurns(broadcasts)).toEqual(['dispatching', 'idle'])
+describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () => {
+  it('manual 压缩原文（TOCTOU）→ 零 send.rejected + 持有等 compaction_end（不误判失败）', async () => {
+    const h = makeMocks({ promptError: new Error(PI_COMPACTING_MSG) })
+    const result = await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(result).toEqual({ blocked: false })
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(findError(h.broadcasts)).toBeUndefined() // 不进错误气泡链路
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued') // 持有（非 failed）
   })
 
-  it('auto 压缩 / post-run 原文（pi 有 runtime 不知情的 turn 在跑）→ send.rejected{reason:"processing"} + 零 message.error + isGenerating=true + turn generating', async () => {
-    const { dispatcher, session, broadcasts } = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
-
-    const result = await dispatcher.sendMessage('s1', 'hello')
-
-    expect(result).toEqual({ blocked: true, rejected: true })
-    expect(findRejected(broadcasts)).toMatchObject({ sessionId: 's1', reason: 'processing', message: 'Agent 正在处理' })
-    expect(findError(broadcasts)).toBeUndefined()
-    // 以 pi 的拒绝为权威信号：pi 在跑 → 置 generating，不得伪造 idle（否则 defer 队列无限重投）
-    expect(session.isGenerating).toBe(true)
-    expect(session.occupancy?.turn).toBe('generating')
+  it('auto 压缩 / post-run 原文 → occupancy 反转 generating（防幽灵空闲），零 send.rejected', async () => {
+    const h = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
+    await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(h.session.isGenerating).toBe(true)
+    expect(h.session.occupancy?.turn).toBe('generating')
+    // 用户可见断言：occupancy 帧是前端 sessionPhase / 占用短路的唯一输入，末帧必为 generating
+    const turns = occupancyTurns(h.broadcasts)
+    expect(turns.length).toBeGreaterThan(0)
+    expect(turns[turns.length - 1]).toBe('generating')
   })
 
-  it('processing 拒绝：messageBus 收到 session.occupancy{turn:"generating"} 帧且全程无 idle 帧（前端占用投影的唯一输入）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
-
-    await dispatcher.sendMessage('s1', 'hello')
-
-    // 用户可见断言：occupancy 帧是前端 sessionPhase / D1 占用短路 / defer flush 的唯一输入
-    const frames = broadcasts.filter((m) => m.type === 'session.occupancy')
-    expect(frames.length).toBeGreaterThan(0)
-    expect(frames[frames.length - 1]!.payload).toMatchObject({ sessionId: 's1', turn: 'generating' })
-    expect(occupancyTurns(broadcasts)).not.toContain('idle')
-  })
-
-  it('转译拒绝 + clientUuid → payload 原样回带', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ promptError: new Error(PI_COMPACTING_MSG) })
-
-    await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-trans-1')
-
-    expect(findRejected(broadcasts)).toMatchObject({ reason: 'compacting', clientUuid: 'uuid-trans-1' })
-  })
-
-  it('转译路径单次复位：广播面恰好一条 send.rejected、零 message.error（无重复/遗漏）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
-
-    await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-trans-2')
-
-    expect(broadcasts.filter((m) => m.type === 'send.rejected')).toHaveLength(1)
-    expect(broadcasts.filter((m) => m.type === 'message.error')).toHaveLength(0)
-  })
-})
-
-describe('非 busy 的 pi 错误保留现状（D2 接管副作用表：非 busy 不转译）', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('prompt 抛非 busy 错误 → message.error 广播（现状）+ 无 send.rejected + blocked 无 rejected（error envelope → pending.reject）', async () => {
-    const { dispatcher, session, broadcasts } = makeMocks({ promptError: new Error('No model configured') })
-
-    const result = await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-nonbusy')
-
-    expect(result).toEqual({ blocked: true })
-    expect(findRejected(broadcasts)).toBeUndefined()
-    const err = findError(broadcasts)
+  it('非 busy pi 错误（No model configured）→ message.error 广播（错因可见）+ 零 send.rejected', async () => {
+    const h = makeMocks({ promptError: new Error('No model configured') })
+    const result = await h.dispatcher.sendMessage('s1', 'hello')
+    await h.flush()
+    expect(result).toEqual({ blocked: false })
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    const err = findError(h.broadcasts)
     expect(err).toBeDefined()
-    expect((err!.payload as { message: string }).message).toBe('No model configured')
-    // 现状复位语义不变：非 busy 真失败 → turn 回 idle（#1 dispatching → #8 idle）
-    expect(session.isGenerating).toBe(false)
-    expect(session.occupancy?.turn).toBe('idle')
-    expect(occupancyTurns(broadcasts)).toEqual(['dispatching', 'idle'])
+    expect((err!.payload as { message: string }).message).toContain('No model configured')
   })
 })
 
 describe('正常路径行为不变', () => {
-  beforeEach(() => vi.clearAllMocks())
-
   it('prompt 成功 → 零 send.rejected / message.error + {blocked:false}', async () => {
-    const { dispatcher, promptFn, broadcasts } = makeMocks()
-
-    const result = await dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-ok')
-
+    const h = makeMocks()
+    const result = await h.dispatcher.sendMessage('s1', 'hello', undefined, 'uuid-ok')
+    await h.flush()
     expect(result).toEqual({ blocked: false })
-    expect(promptFn).toHaveBeenCalledWith('hello', undefined)
-    expect(findRejected(broadcasts)).toBeUndefined()
-    expect(findError(broadcasts)).toBeUndefined()
+    expect((h.promptCalls[0]?.[0] as string)).toContain('hello')
+    expect(findRejected(h.broadcasts)).toBeUndefined()
+    expect(findError(h.broadcasts)).toBeUndefined()
   })
 })
 
@@ -306,7 +257,7 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
   // makeHandler 范式同 session-message-handler-subscribe.test.ts：mock ctx，捕获 reply 与
   // sessionService.sendMessage 实参（transport 层解构/传参断言；sessionService → dispatcher
   // 为一行签名委托，由 typecheck + 上文 dispatcher 单测覆盖）。
-  function makeSendHandler() {
+  function makeSendHandler(replyStatus?: { blocked: boolean; rejected?: boolean }) {
     const cap = {
       replies: [] as { id: string | undefined; type: string; payload: Record<string, unknown> }[],
       sendArgs: [] as unknown[][],
@@ -320,7 +271,7 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
       sessionService: {
         sendMessage: vi.fn(async (...args: unknown[]) => {
           cap.sendArgs.push(args)
-          return { blocked: true, rejected: true }
+          return replyStatus ?? { blocked: false }
         }),
       },
     }
@@ -332,7 +283,7 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
     return { type: 'message.send', id: 'req-1', payload } as unknown as ClientMessage
   }
 
-  it('payload 带 clientUuid → sessionService.sendMessage 收到四参（含 clientUuid），rejected ack 正常', async () => {
+  it('payload 带 clientUuid → sessionService.sendMessage 收到四参（含 clientUuid），成功后 reply message.status', async () => {
     const { cap, handler } = makeSendHandler()
 
     await handler.handleSessionMessage(
@@ -344,17 +295,22 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
     expect(cap.sendArgs[0]).toEqual(['s1', 'hello', undefined, 'uuid-e2e-1'])
     expect(cap.replies).toHaveLength(1)
     expect(cap.replies[0].type).toBe('message.status')
-    expect(cap.replies[0].payload).toMatchObject({ sessionId: 's1', status: 'rejected' })
   })
 
   it('payload 不带 clientUuid → sendMessage 第 4 参 undefined（存量调用形态不变）', async () => {
     const { cap, handler } = makeSendHandler()
 
-    await handler.handleSessionMessage(
-      sendMsg({ sessionId: 's1', content: 'hello' }),
-      {} as never,
-    )
+    await handler.handleSessionMessage(sendMsg({ sessionId: 's1', content: 'hello' }), {} as never)
 
     expect(cap.sendArgs[0]).toEqual(['s1', 'hello', undefined, undefined])
+  })
+
+  it('handler 侧 rejected ack 分支保留（协议兼容面；u5 随协议条目退役清理）', async () => {
+    const { cap, handler } = makeSendHandler({ blocked: true, rejected: true })
+
+    await handler.handleSessionMessage(sendMsg({ sessionId: 's1', content: 'hello' }), {} as never)
+
+    expect(cap.replies[0].type).toBe('message.status')
+    expect(cap.replies[0].payload).toMatchObject({ sessionId: 's1', status: 'rejected' })
   })
 })

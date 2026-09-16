@@ -112,6 +112,10 @@ vi.mock('../src/services/session-history.js', () => ({
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
 import { SessionService } from '../src/services/session/session-service.js'
+import {
+  createSessionDeliveryRegistry,
+  resetActiveDeliveryRegistryForTest,
+} from '../src/services/session/session-delivery-registry.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../src/services/session/replicated-states.config.js'
 import { encodeDirectiveText } from '../src/services/session/session-records.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
@@ -216,6 +220,8 @@ interface Setup {
   clientMap: Map<string, MockClient>
   /** mock 的 IGitInfoReader（readGitInfo 恒 undefined → 摘要 git 字段留空）。供 localSession 复用。 */
   gitInfoReader: IGitInfoReader
+  /** [u2] 投递所有权内核注册表（dispatcher 只提交，出站交接在适配层）。 */
+  deliveryRegistry: ReturnType<typeof createSessionDeliveryRegistry>
   triggerExit: (sessionId: string, code: number | null, stderr?: string) => void
   /** 直接挂载一个 client 到 clientMap（不走 create），用于 dispatcher 类测试。 */
   mountClient: (sessionId: string, client?: MockClient) => MockClient
@@ -318,6 +324,17 @@ function createSetup(): Setup {
   )
   service.setMessageBus(messageBus)
 
+  // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步落在注册表）——
+  // fixture 按真实组合根装配接内核：session 视图 / ensureActive / workspace.record / bus 同源。
+  // 未接线时 dispatcher 的 submitToKernel 显式失败（message.error「delivery registry not wired」）。
+  const deliveryRegistry = createSessionDeliveryRegistry({
+    getSession: (sid) => service.getSession(sid),
+    ensureActive: (sid) => service.ensureActive(sid),
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspaceService.record(cwd),
+    getMessageBus: () => messageBus,
+  })
+
   const mountClient = (sessionId: string, client?: MockClient): MockClient => {
     const c = client ?? makeMockClient()
     clientMap.set(sessionId, c)
@@ -340,12 +357,17 @@ function createSetup(): Setup {
     return { id: piSid, client }
   }
 
-  return {
+  const setup: Setup = {
     service, pm, broker, messageBus, extensionService, clientMap, gitInfoReader,
     triggerExit: (sid, code, stderr = '') => exitCb?.(sid, code, stderr),
-    mountClient, seedSession,
+    mountClient, seedSession, deliveryRegistry,
   }
+  lastCreatedSetup = setup
+  return setup
 }
+
+/** 最近一次 createSetup 的装置（用例间清理注册表 timer 用）。 */
+let lastCreatedSetup: Setup | undefined
 
 /** 辅助：找指定 type 的已发布消息（按 type 收窄返回 payload 类型）。
  * wave:perf-w09（D1-2）双通道查询：session 级消息走 bus.publish（call[1]），
@@ -390,6 +412,15 @@ async function seedUsageSnapshot(
 }
 
 /**
+ * [u2 投递所有权内核] flush 投递交接异步链（port.send → ensureActive → inject → prompt
+ * → 三副作用置位）——dispatcher 只提交，出站交接异步落在注册表适配层，紧随 sendMessage
+ * 的断言（prompt 实参 / isGenerating / message.error）必须先推进微任务链。
+ */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve()
+}
+
+/**
  * W12：等 state 话题快照挂钩发布落地——对齐 w12-owner-snapshot-publish.test.ts 正解
  * （fake timers 推进，替换旧「真 timers 固定睡 400ms」）。
  *
@@ -409,6 +440,13 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+// [u2] 用例间清理投递内核：释放 30s watchdog / 持有期轮询 timer 并复位活动注册表槽
+afterEach(() => {
+  lastCreatedSetup?.deliveryRegistry.disposeAll()
+  lastCreatedSetup = undefined
+  resetActiveDeliveryRegistryForTest()
+})
+
 // ───────────────────────────────────────────────────────────────────
 // dispatcher 类
 // ───────────────────────────────────────────────────────────────────
@@ -426,7 +464,13 @@ describe('SessionService · dispatcher', () => {
     it('calls client.prompt with the user content on normal send', async () => {
       const client = setup.mountClient('sid-1')
       await setup.service.sendMessage('sid-1', 'hello pi')
-      expect(client.prompt).toHaveBeenCalledWith('hello pi', undefined)
+      await flushDelivery()
+      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      const [text, images] = client.prompt.mock.calls[0] as unknown as [string, unknown]
+      expect(text).toContain('hello pi')
+      expect(text).toMatch(/<!--taiji:msg:[^>]+-->$/) // 裸标记 id（D2 身份）
+      expect(images).toBeUndefined()
     })
 
     it('does not call prompt when hook blocks, and broadcasts message.error with reason', async () => {
@@ -450,14 +494,18 @@ describe('SessionService · dispatcher', () => {
       const client = setup.mountClient('sid-1')
       setup.service.setSendMessageHook(async () => ({ blocked: false }))
       await setup.service.sendMessage('sid-1', 'go')
-      expect(client.prompt).toHaveBeenCalledWith('go', undefined)
+      await flushDelivery()
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      expect((client.prompt.mock.calls[0] as unknown as [string])[0]).toContain('go')
     })
 
     it('passes through when hook returns null', async () => {
       const client = setup.mountClient('sid-1')
       setup.service.setSendMessageHook(async () => null)
       await setup.service.sendMessage('sid-1', 'go')
-      expect(client.prompt).toHaveBeenCalledWith('go', undefined)
+      await flushDelivery()
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      expect((client.prompt.mock.calls[0] as unknown as [string])[0]).toContain('go')
     })
 
     // Fix-1：onBeforeSendMessage 的 transform 语义消费侧——hook 返回 modifiedContent
@@ -469,8 +517,11 @@ describe('SessionService · dispatcher', () => {
         modifiedContent: content.replace('!important', 'IMPORTANT'),
       }))
       await setup.service.sendMessage('sid-1', 'hello !important world')
+      await flushDelivery()
       expect(client.prompt).toHaveBeenCalledTimes(1)
-      expect(client.prompt).toHaveBeenCalledWith('hello IMPORTANT world', undefined)
+      const sentText = (client.prompt.mock.calls[0] as unknown as [string])[0]
+      expect(sentText).toContain('hello IMPORTANT world')
+      expect(sentText).not.toContain('!important') // 改写生效（原文未送出）
     })
 
     it('blocks take precedence over modifiedContent (no prompt sent)', async () => {
@@ -500,13 +551,18 @@ describe('SessionService · dispatcher', () => {
       const client = setup.mountClient('sid-1')
       client.prompt.mockRejectedValueOnce(new Error('pi down'))
       await setup.service.sendMessage('sid-1', 'go')
+      await flushDelivery()
+      // [u2] 非 busy 受理失败的错误面出口 = 内核失败出口（适配层 onDeliveryFailure），
+      // 文案带「消息投递失败」前缀但错因逐字可见（本轮迁移仅前缀演化，断言按错因收窄）
       const err = findBroadcast(setup, 'message.error')
-      expect(err?.payload).toMatchObject({ sessionId: 'sid-1', message: 'pi down' })
+      expect(err?.payload).toMatchObject({ sessionId: 'sid-1' })
+      expect(String(err?.payload.message)).toContain('pi down')
     })
 
     it('marks session isGenerating when session is active (via create)', async () => {
       const { id } = await setup.seedSession()
       await setup.service.sendMessage(id, 'hi')
+      await flushDelivery() // 三副作用置位在 prompt 受理之后（D-18）
       const summary = setup.service.getSummary(id)
       expect(summary?.status).toBe('active')
     })
@@ -545,24 +601,45 @@ describe('SessionService · dispatcher', () => {
       await expect(setup.service.abort('missing')).rejects.toThrow('Session missing not found')
     })
 
-    it('steerMessage calls client.steer with content', async () => {
+    it('steerMessage 经内核车道投递（pi streamingBehavior=steer，turn 边界注入）', async () => {
       const client = setup.mountClient('sid-s')
       await setup.service.steerMessage('sid-s', 'steer me')
-      expect(client.steer).toHaveBeenCalledWith('steer me')
+      await flushDelivery()
+      // [u2 内核化] 原直调 client.steer → 内核 submit + 适配层 prompt（steer 语义经
+      // pi 契约原语 streamingBehavior 表达，零绕过）
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      const [text, , behavior] = client.prompt.mock.calls[0] as unknown as [string, unknown, unknown]
+      expect(text).toContain('steer me')
+      expect(behavior).toBe('steer')
     })
 
-    it('steerMessage throws when session not active', async () => {
-      await expect(setup.service.steerMessage('missing', 'x')).rejects.toThrow('not active')
+    it('steerMessage 对未附着 session 不再同步拒投（D1 受理口径；失败经错误面异步广播）', async () => {
+      // [u2 内核化] 原「throws when session not active」来自 getClientOrThrow 前置抛错——
+      // 三路径统一 submit 后该前置校验退役（D1）：投递可达性由 ensureActive（含 restore）承担，
+      // 失败经内核失败出口广播 message.error（错因可见），调用方不被同步阻塞
+      await expect(setup.service.steerMessage('missing', 'x')).resolves.toBeUndefined()
+      await flushDelivery()
+      const err = findBroadcast(setup, 'message.error')
+      expect(err?.payload).toMatchObject({ sessionId: 'missing' })
+      expect(String(err?.payload.message)).toContain('not found') // 错因可见（restore 根因文案）
     })
 
-    it('followUpMessage calls client.followUp with content', async () => {
+    it('followUpMessage 经内核车道投递（pi streamingBehavior=followUp，run 收尾注入）', async () => {
       const client = setup.mountClient('sid-f')
       await setup.service.followUpMessage('sid-f', 'follow')
-      expect(client.followUp).toHaveBeenCalledWith('follow')
+      await flushDelivery()
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      const [text, , behavior] = client.prompt.mock.calls[0] as unknown as [string, unknown, unknown]
+      expect(text).toContain('follow')
+      expect(behavior).toBe('followUp')
     })
 
-    it('followUpMessage throws when session not active', async () => {
-      await expect(setup.service.followUpMessage('missing', 'x')).rejects.toThrow('not active')
+    it('followUpMessage 对未附着 session 不再同步拒投（D1 受理口径；失败经错误面异步广播）', async () => {
+      await expect(setup.service.followUpMessage('missing', 'x')).resolves.toBeUndefined()
+      await flushDelivery()
+      const err = findBroadcast(setup, 'message.error')
+      expect(err?.payload).toMatchObject({ sessionId: 'missing' })
+      expect(String(err?.payload.message)).toContain('not found') // 错因可见（restore 根因文案）
     })
   })
 
@@ -1176,7 +1253,8 @@ describe('SessionService · Facade', () => {
 
     it('handleTurnEndSideEffects 复位 isGenerating（agent_end 迁移）', async () => {
       const { id } = await setup.seedSession()
-      await setup.service.sendMessage(id, 'hi') // 标记 generating
+      await setup.service.sendMessage(id, 'hi') // 标记 generating（受理后三副作用置位，D-18）
+      await flushDelivery()
       expect(setup.service.getSummary(id)?.status).toBe('active')
       setup.service.handleTurnEndSideEffects(id)
       expect(setup.service.getSummary(id)?.status).toBe('idle')

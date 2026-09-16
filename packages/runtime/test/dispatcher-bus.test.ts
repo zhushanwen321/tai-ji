@@ -26,14 +26,20 @@
  *
  * 运行：npx vitest run test/dispatcher-bus.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../src/services/session/session-internal.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
+import { createSessionDeliveryRegistry, resetActiveDeliveryRegistryForTest } from '../src/services/session/session-delivery-registry.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
+
+/** flush 投递交接异步链（port.send → ensureActive → inject → prompt）。 */
+async function flushDelivery(): Promise<void> {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve()
+}
 
 function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
   return {
@@ -113,6 +119,16 @@ function makeMocks(opts: {
 
   const messageBus = opts.messageBus ?? { publish: vi.fn() }
 
+  // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步）——fixture 按真实
+  // 装配接内核（recordWorkspace 走 workspace.record，消息总线走同一 messageBus）
+  createSessionDeliveryRegistry({
+    getSession: (sid) => svc.getSession(sid),
+    ensureActive: svc.ensureActive,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspace.record(cwd),
+    getMessageBus: () => messageBus as unknown as IMessageBus,
+  })
+
   // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）
   const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus)
   return { dispatcher, session, promptFn, bashFn, abortFn, abortBashFn, compactFn, svc, pm, messageBus }
@@ -120,6 +136,7 @@ function makeMocks(opts: {
 
 describe('message-dispatcher bus integration', () => {
   beforeEach(() => vi.clearAllMocks())
+  afterEach(() => resetActiveDeliveryRegistryForTest())
 
   // ── sendMessage paths ──
 
@@ -128,6 +145,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('pi crashed'),
     })
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.error' }))
     // occupancy 帧（u5a-p3）先于 message.error 入列，按 type 定位（原 calls[0] 断言失真同步）
     const errCall = messageBus.publish.mock.calls.map((c: any[]) => c[1]).find((m: ServerMessage) => m.type === 'message.error')
@@ -135,10 +153,13 @@ describe('message-dispatcher bus integration', () => {
     expect(errCall!.payload.message).toContain('pi crashed')
   })
 
-  it('sendMessage busy → bus.publish(send.rejected)', async () => {
+  it('sendMessage busy → 零 send.rejected（u2 退役：排队取代拒绝，改由内核按 steer 承接）', async () => {
     const { dispatcher, messageBus } = makeMocks({ isGenerating: true })
     await dispatcher.sendMessage('s1', 'hello')
-    expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'send.rejected' }))
+    await flushDelivery()
+    // 退役面显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
+    const types = messageBus.publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
+    expect(types).not.toContain('send.rejected')
   })
 
   it('hook blocked → bus.publish(message.error)', async () => {
@@ -373,6 +394,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     // occupancy 帧（u5a-p3：dispatching + catch 复位 idle）与 message.error 并存，
     // 本用例锁的是 message.error 单通道无双发——按 type 过滤后计数（原全量计数失真同步）。
     const errCalls = messageBus.publish.mock.calls.filter(
@@ -389,6 +411,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('my-session-123', 'hello')
+    await flushDelivery()
     expect(messageBus.publish).toHaveBeenCalledWith('my-session-123', expect.any(Object))
   })
 })
