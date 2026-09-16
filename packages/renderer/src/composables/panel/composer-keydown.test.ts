@@ -65,12 +65,19 @@ function makeDeps(overrides: {
   /** D6 发送路由（默认 direct） */
   route?: SendRoute
   stagingActive?: boolean
+  /** 命令动作表返回值（composer-pi-shortcuts U1②；默认 false = 未命中放行） */
+  shortcutConsumed?: boolean
+  /** 命令浮层 open 态（接线矩阵用） */
+  cmdOpen?: boolean
+  /** 浮层 handleKeydown 返回值（null = 不接浮层实例；默认 null） */
+  popoverConsumes?: boolean | null
 } = {}) {
   const moveCaretVertical = vi.fn(() => overrides.caret ?? 'at-edge')
   const handleArrowUp = vi.fn()
   const handleArrowDown = vi.fn()
   const onFollowUp = vi.fn()
   const onSend = vi.fn()
+  const shortcutActions = vi.fn(() => overrides.shortcutConsumed ?? false)
   const staging = {
     // Esc 路由默认不消费（消费与否属于 staging.action 自身测试，不在本矩阵）
     handleEsc: vi.fn(() => false),
@@ -79,18 +86,33 @@ function makeDeps(overrides: {
       overrides.stagingActive ? ({ type: 'fork' } as unknown as StagingAction) : null,
     ),
   }
+  const popoverHandle =
+    overrides.popoverConsumes === null || overrides.popoverConsumes === undefined
+      ? null
+      : { handleKeydown: vi.fn(() => overrides.popoverConsumes) }
   const deps: ComposerKeydownDeps = {
-    cmdOpen: ref(false),
-    commandPopoverRef: ref(null),
+    cmdOpen: ref(overrides.cmdOpen ?? false),
+    commandPopoverRef: ref(popoverHandle) as ComposerKeydownDeps['commandPopoverRef'],
     inputRef: ref({ moveCaretVertical } as unknown as ShellInputInstance),
     staging,
     sendRoute: computed(() => overrides.route ?? 'direct'),
+    shortcutActions,
     handleArrowUp,
     handleArrowDown,
     onFollowUp,
     onSend,
   }
-  return { deps, moveCaretVertical, handleArrowUp, handleArrowDown, onFollowUp, onSend }
+  return {
+    deps,
+    moveCaretVertical,
+    handleArrowUp,
+    handleArrowDown,
+    onFollowUp,
+    onSend,
+    shortcutActions,
+    staging,
+    popoverHandle,
+  }
 }
 
 describe('useComposerKeydown', () => {
@@ -268,6 +290,87 @@ describe('useComposerKeydown', () => {
   })
 
   /**
+   * 分发链接线（composer-pi-shortcuts U1②）：命令动作表分支插在 IME 之后、staging Esc 之前。
+   * 本矩阵只锁链序与短路语义（动作表消费 → 链终止；未消费 → 链继续），动作表内部
+   * 键位判定/守卫/编排由 composer-shortcut-actions.test.ts 全量覆盖。
+   */
+  describe('分发链接线：命令动作表分支（composer-pi-shortcuts）', () => {
+    it('动作表消费（shift+tab 命中返回 true）：链短路——staging Esc / 裸箭头 / Enter 均不触达', () => {
+      const { deps, moveCaretVertical, onSend, shortcutActions, staging } = makeDeps({
+        shortcutConsumed: true,
+        caret: 'at-edge',
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('Tab', { shift: true })
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(shortcutActions).toHaveBeenCalledWith(e)
+      expect(staging.handleEsc).not.toHaveBeenCalled()
+      expect(moveCaretVertical).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+    })
+
+    it('动作表未命中（返回 false）：链继续——裸箭头导航照常触达（既有段行为不变）', () => {
+      const { deps, moveCaretVertical, handleArrowUp, shortcutActions } = makeDeps({
+        shortcutConsumed: false,
+        caret: 'at-edge',
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('ArrowUp')
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(moveCaretVertical).toHaveBeenCalledTimes(1)
+      expect(handleArrowUp).toHaveBeenCalledTimes(1)
+    })
+
+    it('链序：动作表先于 staging Esc（同键 Esc 未命中时 handleEsc 在其后被咨询）', () => {
+      const { deps, shortcutActions, staging } = makeDeps({ shortcutConsumed: false })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('Escape')
+
+      onKeydown(e)
+
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(staging.handleEsc).toHaveBeenCalledTimes(1)
+      expect(shortcutActions.mock.invocationCallOrder[0]).toBeLessThan(
+        staging.handleEsc.mock.invocationCallOrder[0],
+      )
+    })
+
+    it('IME 组合中动作表不被咨询（IME 段先于动作表放行——§3.4 插序约束）', () => {
+      const { deps, shortcutActions, onSend } = makeDeps()
+      const onKeydown = useComposerKeydown(deps)
+      const { e, preventDefault } = makeKeyEvent('Tab', { shift: true })
+      Object.defineProperty(e, 'isComposing', { value: true })
+
+      onKeydown(e)
+
+      expect(shortcutActions).not.toHaveBeenCalled()
+      expect(preventDefault).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+    })
+
+    it('浮层 open 且浮层未消费该键：动作表仍被咨询（消费与否由其 cmdOpen 入口守卫自判）', () => {
+      const { deps, shortcutActions, onSend, popoverHandle } = makeDeps({
+        cmdOpen: true,
+        popoverConsumes: false,
+      })
+      const onKeydown = useComposerKeydown(deps)
+      const { e } = makeKeyEvent('a')
+
+      onKeydown(e)
+
+      expect(popoverHandle!.handleKeydown).toHaveBeenCalledTimes(1)
+      expect(shortcutActions).toHaveBeenCalledTimes(1)
+      expect(onSend).not.toHaveBeenCalled() // 'a' 非 Enter，正常落空
+    })
+  })
+
+  /**
    * D2 时序锁（composer-chip-insertion-semantics 设计 §3.3 D2 + P5）：浮层 open 时 Enter
    * 经 CommandPopover window capture 消费（preventDefault + stopPropagation 截断）后，
    * 事件不得到达 composer 的 onKeydown/onSend——这是删除 defaultPrevented 防御层后的
@@ -322,6 +425,7 @@ describe('useComposerKeydown', () => {
         inputRef: ref(null),
         staging: { handleEsc: vi.fn(() => false), activeStaging: computed(() => null) },
         sendRoute: computed(() => 'direct' as SendRoute),
+        shortcutActions: vi.fn(() => false),
         handleArrowUp: vi.fn(),
         handleArrowDown: vi.fn(),
         onFollowUp: vi.fn(),

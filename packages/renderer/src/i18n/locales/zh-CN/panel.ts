@@ -35,6 +35,9 @@ export default {
     handoffBusy: '正在回复中，请等待当前回复完成或先停止后再交接',
     handoffExit: '退出交接模式',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
+    // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
+    copyLastReply: '已复制最后回复',
+    copyLastReplyFailed: '复制失败',
   },
   message: {
     copy: '复制',

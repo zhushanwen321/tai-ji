@@ -80,13 +80,18 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（初始为空，阶段 3 审查时填写）
+| # | 偏差 | 裁决 | 依据 |
+|---|------|------|------|
+| 1 | deps.toast 窄接口入参为 i18n key，翻译在 composer-shell 组装适配时完成（翻译时刻=触发时刻） | 合理——动作模块零 i18n 依赖，locale 切换后文案跟随；设计 §5 只列 `toast` 未规定翻译落点 | 设计 §5 U1 deps 清单未细化 |
+| 2 | 「composer 内有选区」判定操作化为 window.getSelection 非折叠且 anchorNode ⊆ document.activeElement | 合理——本表只挂输入框 keydown 链，焦点元素即输入框；设计 §3.4 未规定 DOM 判定细节 | 同上 |
+| 3 | enabledModels 的 enabled 兜底过滤落在 composer-shell 组装（deps 契约=已过滤序源），模块单测只锁「按注入序循环」；壳层 filter 一行无独立单测（composer-shell.test.ts 不在领地） | 合理——过滤逻辑与 ModelSelectPopover 双保险同款且由 L1 全量回归覆盖调用路径 | 领地锁定约束的直接后果 |
+| 4 | RPC reject 清为无条件清（决策 8 原文）：连按中先发 RPC 晚到 reject 会清掉后发意图 | 按设计执行非偏差——极端时序回退一步由下一次按键自愈（回执真值起算）；callId 归属收窄属新机制，设计未要求 | 设计 §3.3 决策 8 原文 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| U1 | pending | 0 | — |
+| U1 | committed | 0 | dev sa-c9a60dd1 交付，主 agent 硬核验通过：diff 8 文件 ⊆ 领地、vitest 两目标文件 80/80 + vue-tsc exit 0 重跑与证据一致、Composer.vue script setup 287/300；V1-V5 全过，偏差 4 条登记 §5 |
 
 ## 7 残留风险与变更历史
 
@@ -96,3 +101,4 @@ graph TD
 
 ### 变更历史
 - 2026-09-16 计划创建（设计 docs/design/composer-pi-shortcuts.md 三审 0 must-fix 收敛后）。
+- 2026-09-16 中断恢复校准：以 git log 与工作区实物核实 U1 领地零实物（前任 dev sa-e3de5ce0 跨会话不可达、无产出），按 execute.md 接替程序补派新 dev（sa-c9a60dd1），轮次 0 重计。

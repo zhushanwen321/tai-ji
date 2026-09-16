@@ -14,6 +14,10 @@
  * sendRoute 决定 Alt+⏎ 的 followUp 保留语义）：
  *   浮层 open → 浮层内部路由（handleKeydown 真值短路 return）
  *   IME 组合中 → 放行不拦截
+ *   命令动作表（composer-shortcut-actions，composer-pi-shortcuts 设计）→ 四键位
+ *     shift+tab / ctrl+p / ctrl+shift+p / ctrl+x：命中任一键位（含 no-op 行）即
+ *     stopPropagation + preventDefault 拦截（决策 7：阻断 window 层 open-preset-select
+ *     双触发；浮层 open 时动作表自身入口守卫跳过），未命中原样放行
  *   Esc → staging.handleEsc（fork/handoff 互斥路由，内部自管 preventDefault）
  *   裸 ↑/↓ → preventDefault → moveCaretVertical 垂直移光标；at-edge 时 ↑ 历史 / ↓ 历史
  *   修饰键 + ↑/↓ → 放行原生（选区扩展/按词移动/段首段尾跳转）
@@ -44,6 +48,12 @@ export interface ComposerKeydownDeps {
   staging: Pick<ComposerShellReturn['staging'], 'handleEsc' | 'activeStaging'>
   /** 当前 session 的发送路由（D6 表 direct/steer/defer；Alt+⏎ steer 行保留 followUp 语义） */
   sendRoute: ComputedRef<SendRoute>
+  /**
+   * 命令动作表处理器（composer-shortcut-actions，composer-pi-shortcuts U1）：四键位命中
+   * （含 no-op 行）返回 true = 已 stopPropagation + preventDefault；浮层 open 时其入口守卫
+   * 自行跳过（§3.4 首行），本链只按返回真值短路
+   */
+  shortcutActions: (e: KeyboardEvent) => boolean
   /** ↑ 到顶 → 历史上一条（core input/history） */
   handleArrowUp: () => void
   /** ↓ 到底 → 历史下一条（core input/history） */
@@ -107,7 +117,9 @@ function createEnterDispatcher(
 
 /**
  * 构建 Composer 键盘分发器（ComposerInput @keydown 绑定消费）。
- * 处理顺序：浮层路由 → IME 守卫 → staging Esc → 裸箭头导航 → Enter 分派；落空放行原生。
+ * 处理顺序：浮层路由 → IME 守卫 → 命令动作表 → staging Esc → 裸箭头导航 → Enter 分派；
+ * 落空放行原生。动作表插在 IME 之后（IME 组合中的按键绝不触发动作）、staging Esc 之前
+ * （动作表只判定自己的 4 键，与 Esc 无交集，无顺序耦合——composer-pi-shortcuts §3.4）。
  */
 export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent) => void {
   const {
@@ -116,6 +128,7 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
     inputRef,
     staging,
     sendRoute,
+    shortcutActions,
     handleArrowUp,
     handleArrowDown,
     onFollowUp,
@@ -126,6 +139,8 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
   return function onKeydown(e: KeyboardEvent): void {
     if (cmdOpen.value && commandPopoverRef.value?.handleKeydown(e)) return
     if (e.isComposing) return // IME 组合中不拦截（与 useContenteditableInput 守卫一致）
+    // 命令动作表（composer-pi-shortcuts）：命中四键位（含 no-op 行）即拦截短路
+    if (shortcutActions(e)) return
     // Staging Esc 路由：经 staging.handleEsc → activeStaging.handleEsc（fork/handoff 互斥下不会同时活跃）
     if (staging.handleEsc(e)) return
     if (handleBareArrowNav(e)) return

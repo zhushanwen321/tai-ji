@@ -328,6 +328,7 @@ const shell = useComposerShell({
   isSending,
   drafts,
   isActive,
+  cmdOpen,
 })
 const {
   currentModelId,
@@ -421,6 +422,7 @@ const onKeydown = useComposerKeydown({
   inputRef: shellInputRef,
   staging,
   sendRoute,
+  shortcutActions: shell.shortcutActions,
   handleArrowUp,
   handleArrowDown,
   onFollowUp,
