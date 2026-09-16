@@ -1,4 +1,7 @@
 import type { Segment } from './segments'
+// workflow-result 通知的 reason 判据词表镜像（类型级引用：workflow.ts 只导出类型、无运行时值，
+// 镜像表 WORKFLOW_DONE_REASON_OUTCOME 以 Record 穷尽性把增删值收敛到编译期）
+import type { WorkflowDoneReason } from './workflow'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -340,6 +343,129 @@ function parseSingleRecord(d: Record<string, unknown>): BgNotifyRecord | null {
   const record: BgNotifyRecord = { ...required }
   copyOptionalRecordFields(d, record)
   return record
+}
+
+// ── 完成通知 details 防御解析（background-bash / workflow-result）─────────────────
+// 与 parseBgNotifyDetails / parseSubagentDirective / parseRespawnNoticeVariant 同址并列：
+// 同族解析器单点收敛，避免消费方各自读 details 字段造成字面量漂移面。
+
+/**
+ * background-bash 结束原因（对话流系统通知渲染升级 D1 收敛值）。
+ *
+ * 只两值：killed 与 process-exit 不可达——notify.ts handleTaskExit 对 reason === "killed"
+ * 提前返回不通知；process-exit 由收殓路径直接 finalizeTask（无投递目标不发消息）。
+ * schema 不落死值。
+ */
+export type BackgroundBashEndReason = 'natural' | 'timeout'
+
+/**
+ * background-bash 完成通知的结构化 details（D1 schema）。
+ *
+ * 生产端：extensions/universal/base-tool-enhance/src/background/notify.ts（后台任务 poller
+ * 检测终态 → pi.sendMessage(customType:"background-bash") 时附 details）。content 模板字符串
+ * 保持原文（triggerTurn:true 的载荷给 LLM 接力），结构化字段只服务渲染。
+ */
+export interface BackgroundBashDetails {
+  taskId: string
+  command: string
+  durationMs: number
+  endReason: BackgroundBashEndReason
+  /** 进程退出码。timeout（超时杀进程）语义下为 null；可空字段缺失时解析归 null。 */
+  exitCode: number | null
+}
+
+/** endReason 字面量校验：=== 链与 BackgroundBashEndReason 逐一对齐，非法值 → null */
+function asBackgroundBashEndReason(v: unknown): BackgroundBashEndReason | null {
+  return v === 'natural' || v === 'timeout' ? v : null
+}
+
+/**
+ * 防御性解析 customType:"background-bash" 的 details → 结构化字段。
+ *
+ * 与 parseBgNotifyDetails 同款防御范式（消费侧单点收敛，避免字面量漂移）：
+ * - 必需字段（taskId/command/durationMs/endReason）缺失、空串或类型异常 → null；
+ *   消费侧降级为 content 原文行（旧数据逐字节回到现状渲染）
+ * - exitCode 可空：null / 缺失 → 归 null（timeout 语义，降级只显命令 + 耗时）；
+ *   其余非 number 值 → 整体拒绝（字段类型异常不静默吞）
+ */
+export function parseBackgroundBashDetails(details: unknown): BackgroundBashDetails | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  const d = details as Record<string, unknown>
+  const taskId = asRecordString(d.taskId)
+  const command = asRecordString(d.command)
+  const durationMs = asRecordNumber(d.durationMs)
+  const endReason = asBackgroundBashEndReason(d.endReason)
+  // 空串视为缺失（沿用 BgNotifyRecord 必需字段的空串拒绝语义）
+  if (!taskId || !command || durationMs === null || !endReason) return null
+  const rawExitCode = d.exitCode
+  if (rawExitCode !== undefined && rawExitCode !== null && typeof rawExitCode !== 'number') return null
+  return { taskId, command, durationMs, endReason, exitCode: rawExitCode ?? null }
+}
+
+/**
+ * workflow-result 完成通知的 reason 三态判定（D5 边界聚合 failedCount/neutralCount 的判据输入）。
+ * - completed：reason === 'completed'（正常完成）
+ * - failed：reason 属失败族（failed / aborted / budget_limited / time_limited）
+ * - neutral：reason 缺失或不在 shared WorkflowDoneReason 镜像词表内（枚举漂移防御——词表外
+ *   一律中性，不静默当成功；消费侧并入 neutralCount，与 cancelled 同档）
+ *
+ * bg-notify 载荷的成败判据不在此列（仍复用 deriveClosedDisplay，D5 两段式判据）。
+ */
+export type WorkflowResultOutcome = 'completed' | 'failed' | 'neutral'
+
+/**
+ * reason → 三态判定镜像表。
+ *
+ * Record<WorkflowDoneReason, ...> 穷尽性由编译器强制：shared/workflow.ts 的
+ * WorkflowDoneReason（只导出类型、无运行时值）增删值本处即编译期报错，不静默漂移。
+ * invalid_args 不在镜像词表内（runAndWait 合成返回值——run 从未创建、不进入
+ * run.state.reason，无生产方）。
+ */
+const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOutcome> = {
+  completed: 'completed',
+  failed: 'failed',
+  aborted: 'failed',
+  budget_limited: 'failed',
+  time_limited: 'failed',
+}
+
+/** reason 词表成员判定（hasOwnProperty.call 守卫原型链键如 toString/constructor；不用
+ *  Object.hasOwn——renderer 侧 vue-tsc 的 lib 是 ES2020，报 TS2550，同 core route-inbound 先例） */
+function asWorkflowDoneReason(v: unknown): WorkflowDoneReason | null {
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(WORKFLOW_DONE_REASON_OUTCOME, v)
+    ? (v as WorkflowDoneReason)
+    : null
+}
+
+/** workflow-result 完成通知的解析结果（runId + 三态判定） */
+export interface WorkflowResultNotify {
+  /** run 唯一标识（details.runId）——聚合层去重键（与 subagent 通知 id[:round] 去重对称） */
+  runId: string
+  /** 三态判定（消费侧映射：failed → failedCount；neutral → neutralCount；completed → 成功计数） */
+  outcome: WorkflowResultOutcome
+  /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome） */
+  reason?: WorkflowDoneReason
+}
+
+/**
+ * 防御性解析 customType:"workflow-result" 的 details → 完成通知三态。
+ *
+ * 生产端：extensions/universal/subagent-workflow/src/interface/helpers.ts notifyDone
+ * （details = {runId, name, status, reason, traceLength, __gui__?}）。
+ *
+ * 失败分级（D5，消费侧落点不同）：
+ * - runId 缺失 / 非 string / 空串 → null：去重键不可得，消费侧落「消息级」中性
+ *   （不产出 record、只增 neutralCount）
+ * - reason 缺失 / 词表外 → outcome:'neutral'：记录级中性
+ */
+export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotify | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  const d = details as Record<string, unknown>
+  const runId = asRecordString(d.runId)
+  if (!runId) return null
+  const reason = asWorkflowDoneReason(d.reason)
+  if (!reason) return { runId, outcome: 'neutral' }
+  return { runId, outcome: WORKFLOW_DONE_REASON_OUTCOME[reason], reason }
 }
 
 // ── Flow-2 代码变更审查数据契约（FileChanges 通道）──────────────────
