@@ -59,10 +59,10 @@ jobs:
           echo "No .changeset/pre.json — stable release mode confirmed."
 
       - name: Build extension-protocol
-        run: pnpm --filter @taiji/extension-protocol build
+        run: pnpm --filter @zhushanwen/extension-protocol build
 
       - name: Build session-delivery
-        run: pnpm --filter @taiji/session-delivery build
+        run: pnpm --filter @zhushanwen/session-delivery build
 
       # G2 构建入口显式化（docs/design/npm-publish-surface-guard.md §3.3 D4）：subagent-core
       # 双档产物由显式步骤保证——此前发布流程中唯一构建入口是 smoke 副作用（仅档 1
@@ -127,8 +127,8 @@ jobs:
           echo "Published all packages with pending changesets to npm." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "This includes:" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`@taiji/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`@taiji/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/pi-*\` extensions (publishes TS source, no build)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Pre-publish gates: extensions typecheck + \`@zhushanwen/subagent-core\` dist smoke (build + CJS require + golden replay, D9-②) + publish surface guard (files whitelist ↔ built artifacts, C-proc-11)" >> "$GITHUB_STEP_SUMMARY"

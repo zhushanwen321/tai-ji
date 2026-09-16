@@ -96,7 +96,7 @@ jobs:
           # （MF-4 防线）。再排除 __tests__ 目录：随包发布的测试文件引用已删字段时也不放行
           # 坏版本（与 typecheck 的 tsconfig 排除 __tests__ 口径一致，stale 测试不参与编译检查）。
           check_pkg @zhushanwen/pi-ask-user "multiSelect" --include="*.ts" --exclude-dir=__tests__
-          check_pkg @taiji/extension-protocol "multiSelect" --include="*.mjs" --include="*.d.mts"
+          check_pkg @zhushanwen/extension-protocol "multiSelect" --include="*.mjs" --include="*.d.mts"
 
   # ── 三平台并行构建（调用 reusable workflow）──────────────────
   # build 逻辑收敛到 .github/workflows/build.yml，CI 和 release 共用，避免两份漂移。

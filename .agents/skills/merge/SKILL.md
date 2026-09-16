@@ -291,7 +291,7 @@ git push github "npm-${SLUG}-${STAMP}"
 `npm-*` tag push 触发 `release-npm.yml` CI：
 1. `pnpm install --frozen-lockfile`
 2. **Verify NOT in prerelease mode**（检查 `.changeset/pre.json` 不存在；若残留会整批误发 dev tag，CI hard fail）
-3. `pnpm --filter @taiji/extension-protocol build` + `pnpm extensions:typecheck`
+3. `pnpm --filter @zhushanwen/extension-protocol build` + `pnpm extensions:typecheck`
 4. `pnpm changeset publish`（预查 registry，只发未发布版本；extensions 直接发 .ts 源码）
 
 验证 CI 完成 + npm 上线：

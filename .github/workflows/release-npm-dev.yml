@@ -4,7 +4,7 @@ name: Release NPM Dev
 #
 # 触发：push 到 `dev-npm-*` 分支
 # 产出：版本号 `-dev.*` 后缀，发布到 npm `dev` dist-tag
-# 消费者：npm install @taiji/extension-protocol@dev
+# 消费者：npm install @zhushanwen/extension-protocol@dev
 #         (及 @zhushanwen/pi-* extensions 的 dev 预发布)
 
 on:
@@ -42,7 +42,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build extension-protocol
-        run: pnpm --filter @taiji/extension-protocol build
+        run: pnpm --filter @zhushanwen/extension-protocol build
 
       - name: Verify prerelease mode is active
         id: check_pre
@@ -63,7 +63,7 @@ jobs:
       # ——skip 分支不发布即不构建，维持该 job「warning + skip、整体绿」既有语义。
       - name: Build session-delivery
         if: steps.check_pre.outputs.should_publish == 'true'
-        run: pnpm --filter @taiji/session-delivery build
+        run: pnpm --filter @zhushanwen/session-delivery build
 
       # G2 构建入口显式化（D4）：subagent-core 双档（dist/ + dist.bundle/ 自包含档）
       # 此前在 dev 线无任何构建入口（smoke 副作用仅档 1 build）。
@@ -133,6 +133,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Published to npm \`dev\` dist-tag." >> "$GITHUB_STEP_SUMMARY"
           echo "Includes all packages with pending changesets:" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`@taiji/extension-protocol\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/extension-protocol\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/pi-*\` extensions + quota-providers" >> "$GITHUB_STEP_SUMMARY"
-          echo "Install: \`npm install @taiji/extension-protocol@dev\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install: \`npm install @zhushanwen/extension-protocol@dev\`" >> "$GITHUB_STEP_SUMMARY"

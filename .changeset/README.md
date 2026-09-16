@@ -6,7 +6,7 @@
 
 ## 已发布包
 
-- `@taiji/extension-protocol` — Extension GUI 渲染协议
+- `@zhushanwen/extension-protocol` — Extension GUI 渲染协议
 
 ## 添加 Changeset
 

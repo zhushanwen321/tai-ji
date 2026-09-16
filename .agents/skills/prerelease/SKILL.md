@@ -43,7 +43,7 @@ cd <workspace-root>/main
 bash scripts/prerelease-test.sh
 
 # npm target
-bash scripts/npm-prerelease.sh                          # 默认 @taiji/extension-protocol
+bash scripts/npm-prerelease.sh                          # 默认 @zhushanwen/extension-protocol
 bash scripts/npm-prerelease.sh @zhushanwen/pi-goal      # 指定包名
 ```
 

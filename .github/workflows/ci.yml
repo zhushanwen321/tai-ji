@@ -396,8 +396,8 @@ jobs:
       # 见设计 D2）。
       - name: Build dist packages (publish surface guard)
         run: |
-          pnpm --filter @taiji/extension-protocol run build
-          pnpm --filter @taiji/session-delivery run build
+          pnpm --filter @zhushanwen/extension-protocol run build
+          pnpm --filter @zhushanwen/session-delivery run build
           pnpm --filter @zhushanwen/subagent-core run build
           pnpm --filter @zhushanwen/subagent-core run build:bundle
           pnpm --filter @zhushanwen/pi-rpc run build
