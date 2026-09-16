@@ -3,8 +3,8 @@
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
- *   archived 归已收起、workflow running 计入进行中、bash 两视图由 background-task-bucket
- *   SSOT 谓词派生；D13 首拉触发与 retry 调用序；错误态/加载态暴露面
+ *   archived 归已结束（[两视图裁决 2026-09-16]）、workflow running 计入进行中、bash 两视图由
+ *   background-task-bucket SSOT 谓词派生；D13 首拉触发与 retry 调用序；错误态/加载态暴露面
  * - 使用者（黑盒）：本文件是纯逻辑面（无 DOM）；用户可见断言在 tray-native-panel.test.ts
  * - 观察者（形态）：同上（面板渲染形态由组件测试承载）
  *
@@ -130,24 +130,28 @@ afterEach(() => {
 })
 
 describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
-  it('subagent：进行中 = isRunningProjection；running+stopReason 落已结束；archived 归已收起', async () => {
+  it('subagent：进行中 = isRunningProjection；running+stopReason 与 archived 均落已结束（[两视图裁决 2026-09-16]）', async () => {
     const subagentStore = useSubagentStore()
     subagentStore.applyRecords(SID, [
       makeSubagent({ subagentId: 'a-running', status: 'running' }),
       // 死亡纳管态（W4 adoptEngineDeath：running + stopReason='failed'）→ 不落进行中
       makeSubagent({ subagentId: 'a-dead', status: 'running', stopReason: 'failed' }),
       makeSubagent({ subagentId: 'a-idle', status: 'idle' }),
+      // 收口归档记录（intent=archived）→ 归入已结束桶（不再有第三桶）
       makeSubagent({ subagentId: 'a-archived', status: 'idle', intent: 'archived' }),
     ])
     mountHarness()
 
-    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 2, archived: 1, total: 4 })
+    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 3, total: 4 })
     expect(data().lists.subagent.running.value.map((r) => r.subagentId)).toEqual(['a-running'])
-    expect(data().lists.subagent.ended.value.map((r) => r.subagentId)).toEqual(['a-dead', 'a-idle'])
-    expect(data().lists.subagent.archived.value.map((r) => r.subagentId)).toEqual(['a-archived'])
-    // 三桶互斥且全覆盖（running + ended + archived = total）
+    expect(data().lists.subagent.ended.value.map((r) => r.subagentId)).toEqual([
+      'a-dead',
+      'a-idle',
+      'a-archived',
+    ])
+    // 两桶互斥且全覆盖（running + ended = total）
     const counts = data().counts.value.subagent
-    expect(counts.running + counts.ended + counts.archived).toBe(counts.total)
+    expect(counts.running + counts.ended).toBe(counts.total)
   })
 
   it('subagent：origin=workflow 的 record 不计入任何桶（workflow 面板承载）', async () => {
@@ -158,7 +162,7 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
     ])
     mountHarness()
 
-    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 0, archived: 0, total: 1 })
+    expect(data().counts.value.subagent).toEqual({ running: 1, ended: 0, total: 1 })
     expect(data().lists.subagent.running.value.map((r) => r.subagentId)).toEqual(['a-tool'])
   })
 
@@ -211,7 +215,7 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
 
     await wrapper.setProps({ sessionId: SID2 })
     await vi.waitFor(() => expect(data().counts.value.subagent.total).toBe(2))
-    expect(data().counts.value.subagent).toEqual({ running: 0, ended: 2, archived: 0, total: 2 })
+    expect(data().counts.value.subagent).toEqual({ running: 0, ended: 2, total: 2 })
   })
 })
 

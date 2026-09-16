@@ -202,6 +202,7 @@ graph TD
 | D49 | u-e2e | 像素基线重生方式偏离「直接 --update-snapshots」字面：托盘进 composer-bar 的 diff 约 0.7% 低于该 spec 1% 容差 → 直接 -u 不重写（基线隐性滞后）；改为先删 PNG 再生 + 加「截图主体在场」断言 | 防「托盘未挂载被静默照成基线」 | 接受（未动容差；机制经 playwright CLI preset 核实） |
 | D50 | u-e2e | real 轨只跑改动面命中的 tasks-drawer-real（未跑 REAL-01 聚合命令的其余 3 spec）；另补跑 P0 smoke 子集作为侧栏收敛的额外证据 | AGENTS.md「按改动面跑、禁全量扫跑」 | 接受（P0 smoke 首跑 1 例时序 flake 已隔离复跑绿，非本次引入） |
 | D51 | 阶段 5 验收 | 托盘/抽屉 workflow 行的 Pause/Resume 按钮链整体退役（abort-only） | 真机发现 subagent-workflow 扩展已随 D-2 一次性生命周期移除 pause/resume（slash command 对 pause 只回 warning），TrayNativePanel 与 drawer WorkflowTab 的 Pause/Resume 按钮是 D14 复制迁移件带来的死链（点了必无效） | 接受并已修复：宿主全链对齐扩展语义——两组件删 pause/resume 按钮、`workflowAction` 类型收窄 `'abort'`（shared protocol + core api + runtime interfaces/records/service 连锁）、`WorkflowRunStatus` 删 `'paused'` legacy 值（shared 头注明示的收口时机到达）、useTrayCounts/workflow store 谓词同步、i18n 死键 4 处清理、相关测试改 abort-only 口径；设计 §4 A2b 判据同步修正 |
+| D52 | 交付后用户裁决（2026-09-16 三问） | ① subagent 面板三视图收窄两视图（进行中/已结束）：「已收起」是 subagent-core 执行层收口自动归档的治理标记，非用户可操作状态，UI 不以第三状态呈现；archived 记录并入已结束桶，可续性（隐含寻回）不变。② hover 面板内容区固定高（h-340px，max-h-60vh 兜底）+ 超长滚动：切内部 tab 容器不塌缩，hover 态指针不落空。③ workflow 保持现状（行点击 → drawer workflow tab 看 phase/agent call）；subagent「关闭」= 行内 cancel 即可，不加收起操作 | intent 字段保留（执行层治理），renderer 消费面（useTrayCounts 三桶/subagent-bucket 分桶函数/i18n archived 键组）退役；单元 u-two-bucket |
 
 ## 6 状态表
 
@@ -281,4 +282,5 @@ graph TD
 | 2026-09-16 | 终批定向复审（代码组 + 文档/e2e 组）回执：31 项修复全核实，2 low unreasonable（驳回登记）+ 7 low doc_errors → 终批微修两单元；u-fix-final-tray commit a8fdc1e58；设计 §4 e2e 表两行收口 + 计划 P5 关闭/偏差 D46-D50 → commit c34238f32；u-fix-final-docs commit c98bba195（完成通知被上下文压缩吞没，主 agent 逐 diff 核验后代提交） |
 | 2026-09-16 | **阶段 5 真机验收执行**：dev 实例（CDP :9300，真实 LLM）跑 N2/A1/A2/A2b/A3/A3b/A4/A5/A6/P7 全场景——详见 §6.1 验收记录表；发现 1 个 must-fix（workflow Pause/Resume 死按钮链，D14 复制迁移件带过已死语义）→ 修复循环：TrayNativePanel + WorkflowTab 删按钮、workflowAction 全链收窄 'abort'、WorkflowRunStatus 删 'paused'、i18n/测试同步（改动面 renderer 124 用例 + 全量套件 + mock/visual 轨复验绿） |
 | 2026-09-16 | **阶段 3 出口（Gate A）**：c98bba195 工作树全绿——`pnpm run lint` / `pnpm extensions:typecheck` / `pnpm extensions:lint` / `pnpm test`（workspace 全量 --no-bail，含 apps/electron 72 files/1133 pass）四段 exit 0，5m21s；证据 `.tmp/dev-flow/composer-task-tray.gate-a.log`；入口门四条通过 → 进入阶段 5 真机验收 |
+| 2026-09-16 | 交付后用户三问裁决并立项 u-two-bucket：问题 3 澄清（执行状态本就两态；「已收起」= 执行层治理标记，UI 两桶化、intent 字段保留）+ 问题 2 方案 A（面板固定高+滚动）+ 问题 1 维持 cancel/现状；设计 D2/场景 A/D9 与 shared intent 注释同步两态语义 |
 | 2026-09-16 | 阶段 5 收口三 commit 落盘（台账补记）：0bd5e91a3（fix pause/resume 死链退役 abort-only，= §6.1 验收 must-fix / 偏差 D51 修复——前条「阶段 5 真机验收执行」描述的修复循环即此 commit，当时漏记 hash）/ ba00f8887（设计 §4 A2b/A3 判据修正 + §3.6 P7/§5 检查点回填 + §6.1 验收记录落盘）/ f99fa7e68（FEATURE-PRIORITIES subagent/workflow 行 abort-only 对齐）；状态表补 u-fix-stage5 行 |

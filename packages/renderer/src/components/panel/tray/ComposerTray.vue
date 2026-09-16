@@ -26,8 +26,10 @@
   再点 / Esc / 点面板外 = 解除。**同一时刻至多一个面板**——由单一 activeKey 结构性保证（互斥不是
   靠多实例互检），派生视觉（按钮 aria-*、面板 data-pinned）全部由它派生，无双份真相。
 
-  ── 面板浮层（D8 + 探针 P7）──
-  锚定 icon 上方（side="top"）、宽 400px、max-h 60vh 内滚动；浮层样式沿用仓内 popover 范式
+  ── 面板浮层（D8 + 探针 P7 + [固定高裁决 2026-09-16]）──
+  锚定 icon 上方（side="top"）、宽 400px、内容区固定高 h-[340px]（小屏 max-h 60vh 兜底）内
+  滚动——固定高使切内部 tab 时容器不塌缩，hover 态指针不落空（面板收起的根因消除）；浮层
+  样式沿用仓内 popover 范式
   （PopoverContent：bg-elevated + border-strong + shadow-2 + radius-md；锚点范式见 docs/DESIGN.md
   §5.12）。面板本身不设宽度/高度（尺寸由外壳承载，见两面板组件头注契约）。
   [探针 P7 真机复核，阶段 5] 若窗口最小宽度下 reka Popover 翻转/裁剪异常，降级预案 = 手写
@@ -115,12 +117,12 @@
           >{{ item.running }}</span>
         </Button>
       </PopoverAnchor>
-      <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，面板自身 max-h 60vh 内滚动。
-           热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
-           指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根做不到——
-           本仓 PopoverContent 包装组件的根是 PopoverPortal/Teleport，未声明为 props/emits 的
-           原生监听在 Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经 PopperContent 的
-           `$attrs` 透传到浮层根）。 -->
+      <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，内容区固定高（h-[340px]，小屏 60vh 兜底）
+           内滚动。热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖
+           浮层全幅，指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根
+           做不到——本仓 PopoverContent 包装组件的根是 PopoverPortal/Teleport，未声明为
+           props/emits 的原生监听在 Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经
+           PopperContent 的 `$attrs` 透传到浮层根）。 -->
       <PopoverContent
         side="top"
         align="start"
@@ -129,11 +131,12 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
+        <!-- 固定高：切内部 tab 容器不塌缩，hover 态指针不落空（用户裁决 2026-09-16） -->
         <div
           data-testid="tray-panel"
           :data-panel-key="builtinKey(item.kind)"
           :data-pinned="isPinnedOf(builtinKey(item.kind)) ? 'true' : 'false'"
-          class="flex max-h-[60vh] min-h-0 flex-col p-1.5"
+          class="flex h-[340px] max-h-[60vh] flex-col p-1.5"
           @pointerenter="onPanelEnter"
           @pointerleave="onPanelLeave"
         >
@@ -172,15 +175,17 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
+        <!-- 固定高：切内部 tab 容器不塌缩，hover 态指针不落空（用户裁决 2026-09-16）；
+             ScrollArea flex-1 + min-h-0：固定高下内容超出即内部滚动，不足则顶部对齐留白 -->
         <div
           data-testid="tray-panel"
           :data-panel-key="widgetKey(item.viewId)"
           :data-pinned="isPinnedOf(widgetKey(item.viewId)) ? 'true' : 'false'"
-          class="flex max-h-[60vh] min-h-0 flex-col p-1.5"
+          class="flex h-[340px] max-h-[60vh] flex-col p-1.5"
           @pointerenter="onPanelEnter"
           @pointerleave="onPanelLeave"
         >
-          <ScrollArea class="min-h-0">
+          <ScrollArea class="min-h-0 flex-1">
             <TrayWidgetPanel
               :view-id="item.viewId"
               :meta="item.entry.meta"

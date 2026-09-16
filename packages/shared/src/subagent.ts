@@ -143,11 +143,15 @@ export interface SubagentRecord {
    */
   closedReason?: string
   /**
-   * 意愿维度（永久会话模型 §3.2.1，U8 下行投影）：用户是否把会话收起来了。
-   * 'archived' = 已收起（close 动作；message 到达自动翻回 'active' = 隐含寻回）。
-   * 缺省（undefined，存量 record 与旧扩展投影）= 'active'（默认列表可见）。
-   * 来源：自描述 subagent-record entry（U8 起 close/寻回迁移写点携带）。列表
-   * 可见性过滤器（U8b）按 `intent === 'archived'` 判「已收起」分区。
+   * 意愿维度（永久会话模型 §3.2.1，U8 下行投影）：会话是否已被收口归档。
+   * 'archived' = 已收起——写点是 subagent-core 执行层的收口归档（closeAfterRound /
+   * idle close / dispose / batch close 走 markArchived），**不是用户列表操作**；
+   * message 到达自动翻回 'active' = 隐含寻回。缺省（undefined，存量 record 与
+   * 旧扩展投影）= 'active'。
+   * 来源：自描述 subagent-record entry（U8 起 close/寻回迁移写点携带）。
+   * [2026-09-16 用户裁决] 本字段是执行层列表治理机制，不是用户可见的第三状态：
+   * composer 任务托盘面板已收窄为两视图（进行中/已结束，archived 记录并入已结束），
+   * 宿主 UI 不再按本字段分桶；执行层治理语义（归档/寻回/通知归档映射）不变。
    */
   intent?: 'active' | 'archived'
   /**

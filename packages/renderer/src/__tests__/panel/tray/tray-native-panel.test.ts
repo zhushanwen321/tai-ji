@@ -55,7 +55,6 @@ interface TrayState {
   bashEnded: BackgroundTaskEntry[]
   subagentRunning: SubagentRecord[]
   subagentEnded: SubagentRecord[]
-  subagentArchived: SubagentRecord[]
   workflowRunning: WorkflowRunRecord[]
   workflowEnded: WorkflowRunRecord[]
   subagentError: string | null
@@ -73,7 +72,6 @@ function createTrayState(): TrayState {
     bashEnded: [],
     subagentRunning: [],
     subagentEnded: [],
-    subagentArchived: [],
     workflowRunning: [],
     workflowEnded: [],
     subagentError: null,
@@ -105,11 +103,7 @@ const trayFixture: UseTrayCountsReturn = {
     subagent: {
       running: trayState.subagentRunning.length,
       ended: trayState.subagentEnded.length,
-      archived: trayState.subagentArchived.length,
-      total:
-        trayState.subagentRunning.length +
-        trayState.subagentEnded.length +
-        trayState.subagentArchived.length,
+      total: trayState.subagentRunning.length + trayState.subagentEnded.length,
     },
     workflow: {
       running: trayState.workflowRunning.length,
@@ -125,7 +119,6 @@ const trayFixture: UseTrayCountsReturn = {
     subagent: {
       running: computed(() => trayState.subagentRunning),
       ended: computed(() => trayState.subagentEnded),
-      archived: computed(() => trayState.subagentArchived),
     },
     workflow: {
       running: computed(() => trayState.workflowRunning),
@@ -368,18 +361,18 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     wrapper.unmount()
   })
 
-  it('subagent：三 tab（已收起计数 0 时 dim）+ 行渲染 agent/slug/摘要/turns/tokens/耗时', async () => {
+  it('subagent：两 tab（进行中/已结束，无第三桶）+ 行渲染 agent/slug/摘要/turns/tokens/耗时', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running', engine: 'pi' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-2', status: 'idle', stopReason: 'failed' })]
     const wrapper = mountPanel('subagent')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-tab-running"]').text()).toContain(zhTray.tray.bucket.running)
-    expect(wrapper.find('[data-testid="tray-panel-tab-archived"]').text()).toContain(zhTray.tray.bucket.archived)
+    expect(wrapper.find('[data-testid="tray-panel-tab-ended"]').text()).toContain(zhTray.tray.bucket.ended)
     expect(wrapper.find('[data-testid="tray-panel-tab-count-running"]').text()).toBe('1')
-    expect(wrapper.find('[data-testid="tray-panel-tab-count-archived"]').text()).toBe('0')
-    // 计数 0 dim 不亮（class 断言）
-    expect(wrapper.find('[data-testid="tray-panel-tab-count-archived"]').classes()).toContain('opacity-40')
+    expect(wrapper.find('[data-testid="tray-panel-tab-count-ended"]').text()).toBe('1')
+    // [两视图裁决 2026-09-16] 「已收起」桶退役：archived tab 不存在
+    expect(wrapper.find('[data-testid="tray-panel-tab-archived"]').exists()).toBe(false)
 
     // 行渲染：引擎 icon + spinner（running）+ agent + slug + task 摘要 + turns/tokens/耗时
     const row = wrapper.find('[data-testid="tray-subagent-row"]')
@@ -457,18 +450,23 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     wrapper.unmount()
   })
 
-  it('subagent：已结束也为空但已收起有内容 → 提供「查看已收起 (N)」寻回入口（D2 承接）', async () => {
-    trayState.subagentArchived = [makeSubagent({ subagentId: 'sub-a1', status: 'idle', intent: 'archived' })]
+  it('subagent：已收起记录（intent=archived）落已结束桶渲染（[两视图裁决 2026-09-16]，无寻回入口）', async () => {
+    // 已收起记录由数据面归入已结束行集（口径断言在 useTrayCounts.test.ts）；面板层断言
+    // 两 tab 形态下该记录走「已结束」tab 可见，且无「查看已收起」寻回按钮
+    trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-a1', status: 'idle', intent: 'archived' })]
     const wrapper = mountPanel('subagent')
     await flushPromises()
 
-    const jump = wrapper.find('[data-testid="tray-panel-empty-jump-archived"]')
-    expect(jump.text()).toBe(msg(zhTray.tray.viewArchived, { count: 1 }))
+    // 空态（进行中为空）只有「查看已结束」可行动按钮
+    const jump = wrapper.find('[data-testid="tray-panel-empty-jump-ended"]')
+    expect(jump.text()).toBe(msg(zhTray.tray.viewEnded, { count: 1 }))
+    expect(wrapper.find('[data-testid="tray-panel-empty-jump-archived"]').exists()).toBe(false)
 
     await jump.trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-testid="tray-panel-tab-archived"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="tray-panel-tab-ended"]').attributes('data-active')).toBe('true')
     expect(rowTexts(wrapper, 'tray-subagent-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Review the code changes')
     wrapper.unmount()
   })
 })

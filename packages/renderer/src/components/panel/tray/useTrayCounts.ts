@@ -3,9 +3,13 @@
  * （设计 docs/design/composer-task-tray.md §3.3 D2/D13 + §3.4 终态数据流）。
  *
  * 职责三件：
- * - **三件计数与分桶**：bash / subagent / workflow 的「进行中 / 已结束（subagent 另有
- *   已收起）」行集与计数。计数恒等于行集长度（同一 computed 派生），杜绝「tab 数字与
- *   列表条数不一致」的双口径穿帮面（§1 设计目标 4）。
+ * - **三件计数与分桶**：bash / subagent / workflow 的「进行中 / 已结束」两视图行集与
+ *   计数。计数恒等于行集长度（同一 computed 派生），杜绝「tab 数字与列表条数不一致」
+ *   的双口径穿帮面（§1 设计目标 4）。
+ *   [两视图裁决 2026-09-16] subagent 面板收窄为两视图——「已收起」从托盘 UI 退役：
+ *   它是 subagent-core 执行层治理机制（intent 自动归档 + message 隐含寻回），不是用户
+ *   可见状态，托盘不再以第三状态呈现；已收起记录（intent=archived）归入「已结束」桶。
+ *   intent 字段本体保留于 subagent-core 执行层，renderer 不再消费。
  * - **D13 首拉触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
  *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（原侧栏任务列表的首拉腿已随该视图退役，
  *   迁入此处成为唯一实现；「外壳挂载」而非「面板打开」是 U1 的语义前提：面板每次 hover 打开
@@ -23,9 +27,8 @@
  *   record 由 workflow 面板承载；该过滤口径原在侧栏任务计数内，已随侧栏任务视图退役、
  *   托盘为唯一实现）+ subagent-bucket SSOT 谓词：
  *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
- *   进行中）；已结束 = `!isRunningProjection` 且 `subagentBucket(record) !== 'archived'`；
- *   已收起 = `intent === 'archived'`（意愿维度与 status 正交，已退役的侧栏筛选条原承载的
- *   寻回入口现由托盘「已收起」视图唯一承载）。
+ *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle、死亡纳管态与 intent=archived
+ *   的收口归档记录全落此桶）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
  *   已结束 = 其余（done）。
  *
@@ -44,7 +47,7 @@ import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useBackgroundTasks } from '@/composables/features/sidebar/useBackgroundTasks'
 import type { UseBackgroundTasksReturn } from '@/composables/features/sidebar/useBackgroundTasks'
-import { isRunningProjection, subagentBucket } from '@/lib/subagent-bucket'
+import { isRunningProjection } from '@/lib/subagent-bucket'
 import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
@@ -52,13 +55,13 @@ import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 /** built-in 三件（面板类型 / 数据面分区键） */
 export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
 
-/** 分桶视图值：running/ended 三类共有；archived 仅 subagent（寻回视图，subagent-bucket §D4） */
-export type TrayBucketValue = 'running' | 'ended' | 'archived'
+/** 分桶视图值：三件共有的两视图（[两视图裁决 2026-09-16] subagent 不再有第三桶） */
+export type TrayBucketValue = 'running' | 'ended'
 
-/** 各件的分桶视图集合（顺序 = 面板 tab 渲染顺序；已收起恒在末位） */
+/** 各件的分桶视图集合（顺序 = 面板 tab 渲染顺序） */
 export const TRAY_BUCKETS: Record<TrayTaskKind, readonly TrayBucketValue[]> = {
   bash: ['running', 'ended'],
-  subagent: ['running', 'ended', 'archived'],
+  subagent: ['running', 'ended'],
   workflow: ['running', 'ended'],
 }
 
@@ -72,14 +75,9 @@ export interface TrayKindCounts {
   total: number
 }
 
-/** subagent 计数（多一桶：已收起） */
-export interface TraySubagentCounts extends TrayKindCounts {
-  archived: number
-}
-
 export interface TrayCounts {
   bash: TrayKindCounts
-  subagent: TraySubagentCounts
+  subagent: TrayKindCounts
   workflow: TrayKindCounts
 }
 
@@ -92,7 +90,6 @@ export interface TrayLists {
   subagent: {
     running: ComputedRef<SubagentRecord[]>
     ended: ComputedRef<SubagentRecord[]>
-    archived: ComputedRef<SubagentRecord[]>
   }
   workflow: {
     running: ComputedRef<WorkflowRunRecord[]>
@@ -163,21 +160,17 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   // 托盘不另挂订阅（AGENTS 规则 2：物理订阅在 store/状态根层收敛）。
   const backgroundTasks = useBackgroundTasks(normalizedSid)
 
-  // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 三视图分桶 ──
+  // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
   const subagentRecords = computed(() =>
     subagentStore
       .recordsOf(normalizedSid.value ?? '')
       .value.filter((r) => r.origin !== 'workflow'),
   )
   const subagentRunning = computed(() => subagentRecords.value.filter((r) => isRunningProjection(r)))
-  // 已收起与已结束互斥（archived 优先归寻回视图）：两桶 + 进行中 = 全量，无重叠无遗漏
-  const subagentArchived = computed(() =>
-    subagentRecords.value.filter((r) => subagentBucket(r) === 'archived'),
-  )
+  // 已结束 = !isRunningProjection（[两视图裁决 2026-09-16]：intent=archived 的收口归档
+  // 记录同落此桶——执行层治理机制不再以第三状态呈现）。两桶互斥且并集 = 全量。
   const subagentEnded = computed(() =>
-    subagentRecords.value.filter(
-      (r) => !isRunningProjection(r) && subagentBucket(r) !== 'archived',
-    ),
+    subagentRecords.value.filter((r) => !isRunningProjection(r)),
   )
 
   // ── workflow：进行中 = running（一次性生命周期 D-2：paused 值已从状态机删除）──
@@ -203,7 +196,6 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     subagent: {
       running: subagentRunning.value.length,
       ended: subagentEnded.value.length,
-      archived: subagentArchived.value.length,
       total: subagentRecords.value.length,
     },
     workflow: {
@@ -246,7 +238,7 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     counts,
     lists: {
       bash: { running: bashRunning, ended: bashEnded },
-      subagent: { running: subagentRunning, ended: subagentEnded, archived: subagentArchived },
+      subagent: { running: subagentRunning, ended: subagentEnded },
       workflow: { running: workflowRunning, ended: workflowEnded },
     },
     bashPartition: backgroundTasks.current,

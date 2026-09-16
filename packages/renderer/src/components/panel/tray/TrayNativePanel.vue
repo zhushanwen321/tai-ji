@@ -6,7 +6,7 @@
 <!-- split-justified: built-in 三件面板同一语义域（分桶 tab + 行渲染 + 行内操作 + 行点击归宿） -->
 <template>
   <div
-    class="flex max-h-[60vh] w-full min-h-0 flex-col gap-1"
+    class="flex min-h-0 w-full flex-1 flex-col gap-1"
     data-testid="tray-native-panel" :data-kind="kind" :aria-label="t(titleKey)"
   >
     <!-- 损坏错误条（bash，S7 sticky 语义）：自愈拍（tasks 非空）清位后消失 -->
@@ -217,7 +217,7 @@
           v-for="item in jumpBuckets" :key="item" variant="ghost"
           class="h-6 text-[length:var(--text-2xs)] text-accent" :data-testid="`tray-panel-empty-jump-${item}`"
           @click="setBucket(item)"
-        >{{ t(jumpLabelKey(item), { count: bucketCount(item) }) }}</Button>
+        >{{ t('panel.tray.viewEnded', { count: bucketCount(item) }) }}</Button>
       </div>
     </template>
   </div>
@@ -239,12 +239,15 @@
  *   缺失时 useTrayCountsContext 直接抛错（不静默降级）。
  * emits: 无 —— 面板自持动作：行内操作直连既有 store / RPC（结果经 store 广播回流，外壳计数
  *   自动跟随），行点击直连 drawer API（D2 入口唯一化），外壳无需回调。
- * 尺寸：面板不设宽度（w-full，max-h 60vh 兜底滚动）；浮层宽 400px / max-height 60vh 由外壳承载（D8）。
+ * 尺寸：面板不设宽度（w-full），根节点 flex-1 撑满外壳的固定高内容区（h-[340px]，小屏
+ * max-h 60vh 兜底，见 ComposerTray 挂载点）——空态 flex-1 居中、列表 ScrollArea flex-1 +
+ * min-h-0 超出滚动；浮层宽 400px 由外壳承载（D8 + 固定高裁决 2026-09-16）。
  *
  * ── 形态 ──
  * - 分桶 tab（凹陷槽范式：外槽 bg-bg-input + active bg-bg-elevated 浮起），计数与行集同源
- *   （tab 数字恒等于列表条数）：bash / workflow 两视图，subagent 三视图（+ 已收起寻回视图，
- *   计数 0 时 dim 不亮）；
+ *   （tab 数字恒等于列表条数）：三件均两视图「进行中 / 已结束」——[两视图裁决 2026-09-16]
+ *   subagent 的「已收起」桶自托盘退役（intent 是 subagent-core 执行层治理机制，非用户可见
+ *   状态，已收起记录归入「已结束」桶）；
  * - 行：bash = 状态 icon + 命令 + 耗时 + pid/exit + 两段式终止；subagent = 引擎 icon + 状态点/
  *   spinner + agent + slug + turns/tokens/耗时 + task 摘要 + 两段式取消；workflow = 状态点/spinner
  *   + scriptName + slug + 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除）；
@@ -312,7 +315,7 @@ const bucketPartition = useSessionScopedState<TrayBucketPartition>(
   computed(() => props.sessionId),
   () => reactive<TrayBucketPartition>({ bucket: 'running' }),
 )
-/** 当前桶：kind 切换后遗留的越界值（如 workflow 面板拿到 'archived'）按默认「进行中」渲染 */
+/** 当前桶：分区遗留的越界值（跨版本持久化 / 扩枚举残留）按默认「进行中」渲染 */
 const activeBucket = computed<TrayBucketValue>(() =>
   TRAY_BUCKETS[props.kind].includes(bucketPartition.current.value.bucket)
     ? bucketPartition.current.value.bucket
@@ -333,38 +336,34 @@ function bucketLabelKey(bucket: TrayBucketValue): string {
   if (bucket === 'running') {
     return props.kind === 'bash' ? 'panel.tray.bucket.runningProcess' : 'panel.tray.bucket.running'
   }
-  return bucket === 'ended' ? 'panel.tray.bucket.ended' : 'panel.tray.bucket.archived'
+  return 'panel.tray.bucket.ended'
 }
 /** 空态提示 key（{name} 插值 = 三件标题） */
 const emptyKey = computed(() => {
   if (activeBucket.value === 'running') {
     return props.kind === 'bash' ? 'panel.tray.empty.runningProcess' : 'panel.tray.empty.running'
   }
-  return activeBucket.value === 'ended' ? 'panel.tray.empty.ended' : 'panel.tray.empty.archived'
+  return 'panel.tray.empty.ended'
 })
-/** 桶计数（与行集同源派生；subagent 已收起桶仅该件存在） */
+/** 桶计数（与行集同源派生） */
 function bucketCount(bucket: TrayBucketValue): number {
-  if (bucket === 'archived') return props.kind === 'subagent' ? tray.counts.value.subagent.archived : 0
   return tray.counts.value[props.kind][bucket]
 }
-/** 空态可行动按钮（D9：仅默认桶为空、且其他桶有内容时渲染；点击显式切桶） */
+/** 空态可行动按钮（D9：仅默认桶为空、且其他桶有内容时渲染；点击显式切桶）。
+ *  [两视图裁决 2026-09-16] 可跳桶只剩「已结束」，按钮文案固定 viewEnded（原
+ *  jumpLabelKey 泛化分派随第三桶退役删除）。 */
 const jumpBuckets = computed<TrayBucketValue[]>(() => {
   if (activeBucket.value !== 'running') return []
   return buckets.value.filter((bucket) => bucket !== 'running' && bucketCount(bucket) > 0)
 })
-function jumpLabelKey(bucket: TrayBucketValue): string {
-  return bucket === 'ended' ? 'panel.tray.viewEnded' : 'panel.tray.viewArchived'
-}
 
 // ── 当前桶的行集（三件各一；面板按 kind 分支渲染）──
 const bashRows = computed<BackgroundTaskEntry[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.bash.ended.value : tray.lists.bash.running.value,
 )
-const subagentRows = computed<SubagentRecord[]>(() => {
-  if (activeBucket.value === 'archived') return tray.lists.subagent.archived.value
-  if (activeBucket.value === 'ended') return tray.lists.subagent.ended.value
-  return tray.lists.subagent.running.value
-})
+const subagentRows = computed<SubagentRecord[]>(() =>
+  activeBucket.value === 'ended' ? tray.lists.subagent.ended.value : tray.lists.subagent.running.value,
+)
 const workflowRows = computed<WorkflowRunRecord[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.workflow.ended.value : tray.lists.workflow.running.value,
 )

@@ -11,7 +11,7 @@
  * （subagent / workflow）用「进行中」——沿用 sidebar.ts 已登记的域差异（任务域 = 占用中的
  * 子代理会话；进程域 = 仅进程 running 状态），托盘不合并两类措辞，也不把两套术语混进同一标签。
  *
- * 空态文案用 {name} 插值（调用方传 title.<kind>）：四个桶的措辞对称，避免逐 kind 复制四份。
+ * 空态文案用 {name} 插值（调用方传 title.<kind>）：各桶措辞对称，避免逐 kind 复制多份。
  */
 export default {
   tray: {
@@ -23,12 +23,11 @@ export default {
       subagent: '子代理',
       workflow: '工作流',
     },
-    /** 分桶视图标签（runningProcess 仅 bash 使用，见文件头词表裁决） */
+    /** 分桶视图标签（runningProcess 仅 bash 使用，见文件头词表裁决；[两视图裁决 2026-09-16] subagent 无第三桶） */
     bucket: {
       running: '进行中',
       runningProcess: '运行中',
       ended: '已结束',
-      archived: '已收起',
     },
     loading: '加载中…',
     loadFailed: '加载失败（{error}）',
@@ -38,11 +37,9 @@ export default {
       running: '没有进行中的{name}',
       runningProcess: '没有运行中的{name}',
       ended: '暂无已结束的{name}',
-      archived: '没有已收起的{name}',
     },
     /** 空态可行动按钮（D9：显式切桶，不自动跳转） */
     viewEnded: '查看已结束 ({count})',
-    viewArchived: '查看已收起 ({count})',
     /** 行内操作（后台命令） */
     kill: '终止',
     killConfirm: '确认终止',

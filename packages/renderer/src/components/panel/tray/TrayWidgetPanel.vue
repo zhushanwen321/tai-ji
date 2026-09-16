@@ -8,8 +8,9 @@
   props.guiTree: GuiComponent[] —— body 渲染源（entry.guiTree，逐项交 GuiComponentRenderer）
   emits: 无 —— 只读渲染面板：协议无 UI→extension 写通道（面板内人写操作 out-of-scope），交互
     原语（如 tab-bar 本地切 tab）由原语自身承载，本组件不解析协议语义（D3：托盘不解释 guiTree）
-  尺寸：面板不设宽度（w-full）与 max-height——浮层宽 400px / max-h 60vh / 锚定 icon 上方
-    由外壳承载（D8）。
+  尺寸：面板不设宽度（w-full）与高度——外壳内容区固定高 h-[340px]（小屏 max-h 60vh 兜底，
+  固定高裁决 2026-09-16：切内部 tab 容器不塌缩，hover 态指针不落空），body 超出经外壳
+  ScrollArea（flex-1 + min-h-0）内部滚动；浮层宽 400px / 锚定 icon 上方由外壳承载（D8）。
 
   ── 数据链（D3/D7）──
   条目存在与否由外壳 entries computed 决定（ViewHostStore 有 entry 即渲染、invalidate 即消失）；

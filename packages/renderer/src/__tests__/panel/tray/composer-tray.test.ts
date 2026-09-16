@@ -107,7 +107,6 @@ function createTrayFixture(): UseTrayCountsReturn {
       subagent: {
         running: trayState.subagentRunning.length,
         ended: trayState.subagentEnded.length,
-        archived: 0,
         total: trayState.subagentRunning.length + trayState.subagentEnded.length,
       },
       workflow: {
@@ -124,7 +123,6 @@ function createTrayFixture(): UseTrayCountsReturn {
       subagent: {
         running: computed(() => trayState.subagentRunning),
         ended: computed(() => trayState.subagentEnded),
-        archived: computed(() => [] as SubagentRecord[]),
       },
       workflow: {
         running: computed(() => trayState.workflowRunning),

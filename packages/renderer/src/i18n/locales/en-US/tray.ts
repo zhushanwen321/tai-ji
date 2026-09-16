@@ -22,12 +22,11 @@ export default {
       subagent: 'Subagents',
       workflow: 'Workflows',
     },
-    /** Bucket view labels (runningProcess is bash-only, see header note) */
+    /** Bucket view labels (runningProcess is bash-only, see header note; two-view ruling 2026-09-16: no third bucket) */
     bucket: {
       running: 'In progress',
       runningProcess: 'Running',
       ended: 'Finished',
-      archived: 'Archived',
     },
     loading: 'Loading…',
     loadFailed: 'Failed to load ({error})',
@@ -37,11 +36,9 @@ export default {
       running: 'No {name} in progress',
       runningProcess: 'No {name} running',
       ended: 'No finished {name}',
-      archived: 'No archived {name}',
     },
     /** Actionable empty state (D9: explicit bucket switch, never auto-jump) */
     viewEnded: 'View finished ({count})',
-    viewArchived: 'View archived ({count})',
     /** Row actions (background commands) */
     kill: 'Stop',
     killConfirm: 'Confirm stop',

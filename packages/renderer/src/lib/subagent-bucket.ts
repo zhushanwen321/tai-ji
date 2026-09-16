@@ -1,43 +1,22 @@
 /**
- * subagent 分桶判据 SSOT 模块（纯函数，设计 subagent-sidebar-filter §3.4 / D3 D4——原设计文档
- * docs/design/subagent-sidebar-filter.md 已删除，git 可追溯，现行判据以 subagent-bucket.test.ts
- * 断言表为准；永久会话模型 §3.2.8 默认可见性翻转，U8b 重写）。
+ * subagent 判据 SSOT 模块（纯函数）。
  *
- * 唯一职责：把 SubagentRecord 按意愿维度（intent）分「活跃 / 已收起」二桶 + 派生
- * 「正在跑」占用谓词，供 composer 任务托盘 subagent 面板（三视图分桶：进行中 / 已结束 /
- * 已收起）与 useTrayCounts 计数共同消费——判据只写这一处，禁止消费方重复实现（D3）。
- * [two-state-convergence D2]「与 hasRunning 同源」自 U2 起为结构性事实：hasRunning /
- * isStreamingSubagent（stores/subagent）均已改为 import 本模块的 isRunningProjection
- * wrapper，全仓「真在跑」判据单一出处（G2）。
- * [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：原侧栏消费面（子代理列表过滤 + 状态点展示
- * 判据、筛选栏计数、侧栏 tab 徽标计数）随两枚任务 tab 删除，其口径与视图已复制迁入托盘
- * （D14「复制不抽走」→ 本单元 P3 删原件）；本模块本体（谓词/分桶/计数）按其既有定位保留
- * ——它是判据 SSOT，不随 UI 宿主迁移而退役。
+ * 唯一职责：导出两个投影判据，全仓「真在跑 / 完成展示」的判定只写这一处，禁止消费方
+ * 重复实现：
+ * - **isRunningProjection**——占用谓词，全仓「真在跑」唯一出处（G2）：hasRunning /
+ *   isStreamingSubagent（stores/subagent）均为本函数的 import wrapper（U2 判据单一化），
+ *   托盘计数（useTrayCounts）与「进行中」分桶视图同源消费，不漂移。
+ * - **isDoneProjection**——done 展示公式（idle + 有 result = 完成展示）。
  *
- * [U8b 可见性翻转] 默认列表 = running + idle(active) 全显（[U6] 契约收窄后类型已
- * 两态，legacy 终态由 runtime 归一层映射 idle 同样可见——「旧 session 显示」只读兼容）；
- * intent=archived 默认隐藏，「已收起」过滤视图可寻回（场景 3：寻回靠 message 隐含
- * 翻回 active，GUI 只负责展示与入口）。
+ * [HISTORICAL] 2026-09-16 用户裁决托盘两态化：intent 意愿分桶自 UI 退役。原分桶面
+ * （SubagentFilterValue / SubagentBucket / DEFAULT_SUBAGENT_FILTER / subagentBucket /
+ * filterSubagents / countSubagents，设计 subagent-sidebar-filter §3.4，原设计文档已删除、
+ * git 可追溯）随「已收起」视图一并删除——「已收起」是 subagent-core 执行层治理机制
+ * （intent 自动归档 + message 隐含寻回），不是用户可见状态，托盘不再以第三状态呈现；
+ * 已收起记录归入「已结束」桶（已结束 = !isRunningProjection）。intent 字段本体保留于
+ * subagent-core 执行层，renderer 不再按它分桶。
  */
 import type { SubagentRecord } from '@taiji/shared'
-
-/**
- * 筛选值（原 FilterBar 三视图词汇：全部活跃 / 只看正在跑 / 已收起；FilterBar 已随侧栏
- * 任务 tab 退役，词汇保留为本模块分桶/计数 API 的取值空间，托盘面板视图与之同名同义）。
- */
-export type SubagentFilterValue = 'active' | 'running' | 'archived'
-/** 分桶结果（数据语义二值：意愿维度；'running' 是筛选值不是桶） */
-export type SubagentBucket = 'active' | 'archived'
-
-export const DEFAULT_SUBAGENT_FILTER: SubagentFilterValue = 'active'
-
-/**
- * 意愿分桶判据（§3.2.1 intent 维度）：archived = 用户收起；缺省（存量 record 与
- * 旧扩展投影）= active（默认列表可见）。status 不参与本判据——占用与意愿正交。
- */
-export function subagentBucket(record: SubagentRecord): SubagentBucket {
-  return record.intent === 'archived' ? 'archived' : 'active'
-}
 
 /**
  * 占用谓词（G2「正在跑」严格口径 SSOT——two-state-convergence D1/D2；[U6] 判据
@@ -51,6 +30,10 @@ export function subagentBucket(record: SubagentRecord): SubagentBucket {
  * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
  * 均为本函数的 import wrapper（U2 判据单一化），托盘计数（useTrayCounts）与「进行中」
  * 分桶视图同源消费，不漂移。
+ * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3；[U6] 后全集 = 两态）：shared 扩
+ * SubagentStatus 枚举时，新「进行中类」值对本谓词的归属必须显式评估——本函数直读
+ * status，新值默认落 false（安全方向）；但展示层（托盘 subagent 行状态点）与全集覆盖
+ * 矩阵须同步评估新值的三态归属，subagent-bucket.test.ts 断言表缺键即测试红。
  */
 export function isRunningProjection(record: SubagentRecord): boolean {
   return record.status === 'running' && record.stopReason === undefined
@@ -66,26 +49,4 @@ export function isRunningProjection(record: SubagentRecord): boolean {
  */
 export function isDoneProjection(record: SubagentRecord): boolean {
   return record.status === 'idle' && record.result !== undefined
-}
-
-/**
- * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3，U8b 重述；[U6] 后全集 = 两态）：
- * shared 扩 SubagentStatus 枚举时，新「进行中类」值对本占用谓词的归属必须显式评估
- * ——isRunningProjection 直读 status，新值默认落 false（安全方向）；但展示层
- * （托盘 subagent 行状态点）与全集覆盖矩阵须同步评估新值的三态归属，
- * subagent-bucket.test.ts 断言表缺键即测试红。
- */
-export function filterSubagents(records: SubagentRecord[], filter: SubagentFilterValue): SubagentRecord[] {
-  if (filter === 'archived') return records.filter((r) => subagentBucket(r) === 'archived')
-  if (filter === 'running') return records.filter((r) => isRunningProjection(r))
-  return records.filter((r) => subagentBucket(r) === 'active')
-}
-
-/** 三视图计数（active 与 running 计数集常态包含，编排性关闭打断窗口可短暂交叠） */
-export function countSubagents(records: SubagentRecord[]): { active: number; running: number; archived: number } {
-  return {
-    active: records.filter((r) => subagentBucket(r) === 'active').length,
-    running: records.filter((r) => isRunningProjection(r)).length,
-    archived: records.filter((r) => subagentBucket(r) === 'archived').length,
-  }
 }
