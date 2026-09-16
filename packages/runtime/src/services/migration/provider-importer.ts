@@ -21,6 +21,11 @@
  * provider id 语义：_sourceName 是源里的 provider 名（如 Pi 的 'deepseek-router'），
  * 导入后作为 taiji models.json 的 provider id（不重命名）。
  *
+ * coding-plan 额度显示自动开启（导入即默认同意）：apply 成功且凭证为明文的条目，若按
+ * 完整数据命中 api-key 类 QuotaPreset，则向 providers.json extras 写 quota
+ * { enabled: true, fetcher }（用户可随时在设置里关闭；skipped 条目不动）。见
+ * matchAutoEnablePreset / autoEnableQuotaDisplay。
+ *
  * 日志安全：preview/apply 的日志只记 importId/source/status/count，不记 apiKey（DM1）。
  */
 import { homedir } from 'node:os'
@@ -45,6 +50,9 @@ import { isCatalogProvider } from '../provider-catalog.js'
 // （applyProviderEntry / applyOrphanWithTemplate）都在 upsert 前接载体，防线落在写入点。
 import { applyProviderWritePolicy, type ProviderWriteKind } from '../provider-config-helper.js'
 import type { CredentialWriter } from '../auth/auth-storage.js'
+import { matchQuotaPreset } from '@taiji/shared'
+import type { QuotaPreset } from '@taiji/shared'
+import type { TaijiProviderStore } from '../provider-extras-store.js'
 
 /**
  * catalog provider 导入在 credentialWriter 未注入时的降级 reason（设计 D1④）。
@@ -54,6 +62,60 @@ import type { CredentialWriter } from '../auth/auth-storage.js'
  */
 const CATALOG_CREDENTIAL_WRITER_UNAVAILABLE =
   'built-in provider import requires credential writer: configure credentials via the settings UI'
+
+/**
+ * coding-plan 额度显示自动开启的 extras 写入通道（可选注入，对齐 credentialWriter 先例）。
+ * 生产由 ConfigService.applyImportProviders 传入 providerExtrasStore（providers.json 唯一
+ * 读写者）；未注入（部分测试场景）时跳过写入，不影响导入主语义。
+ */
+type QuotaExtrasWriter = Pick<TaijiProviderStore, 'modify'>
+
+/**
+ * 判定「导入即默认同意」是否适用（coding-plan 额度显示自动开启）：返回应落盘的 preset，
+ * 不适用返回 undefined。四个条件缺一不可：
+ * - credentialType === 'plaintext'：env/command 落盘的是占位串（$VAR / !command，由 pi
+ *   运行时解析），quota 凭证链读原始串不解占位——自动开启只会得到查询失败；明文 key 即刻可用
+ * - matchQuotaPreset 命中：用导入的完整数据（baseUrl/name）匹配，与脱敏 preview 无关。
+ *   name 取 provider.name ?? _sourceName，与 listProviders custom 侧的 name 派生一致
+ * - preset.auth 含 'api-key'：凭证复用 provider 自己的 key（credentialSource 缺省推导
+ *   'provider' → auth.json → models.json，正是导入落盘位置）。cookie 类（mimo / opencode-go）
+ *   不适用——导入不提取 cookie，自动开启只会得到 no-credential 失败态
+ * - 非 requiresWorkspace：资源维度 fetcher（opencode-go）还需 workspace 配置才算齐备
+ */
+function matchAutoEnablePreset(
+  provider: { baseUrl?: string; name?: string },
+  credentialType: ParsedProvider['_credentialType'],
+): QuotaPreset | undefined {
+  if (credentialType !== 'plaintext') return undefined
+  const preset = matchQuotaPreset(provider)
+  if (!preset) return undefined
+  if (!preset.auth.includes('api-key')) return undefined
+  if (preset.requiresWorkspace) return undefined
+  return preset
+}
+
+/**
+ * extras 落盘 quota（merge 语义：保留 authMethod/modelStates 与既有 quota 字段，只写
+ * enabled + fetcher）。fetcher 显式落盘的必要性：catalog provider（如 zai-coding-cn /
+ * kimi-coding 孤儿凭据场景）无 models.json 条目，fetch 侧 getFetcherForProvider 的
+ * baseUrl/name 自动匹配读不到定义——与手动配置路径一致（useQuotaConfigure 保存时也显式
+ * 传 fetcher）。credentialSource 刻意不写：缺省推导 'provider'（复用导入落盘的 provider
+ * key），不制造 secrets 中间态。
+ *
+ * best-effort：失败不阻断导入主语义（provider 已落盘，额度显示可在设置里手动配置），warn 即可。
+ */
+async function autoEnableQuotaDisplay(store: QuotaExtrasWriter, providerId: string, fetcherId: string): Promise<void> {
+  try {
+    await store.modify(providerId, current => ({
+      ...current,
+      quota: { ...current?.quota, enabled: true, fetcher: fetcherId },
+    }))
+  } catch (err) {
+    // best-effort 降级（非 silent-catch）：导入主语义（provider 定义+凭据+白名单）已成功，
+    // 额度显示缺失属可恢复态（设置里手动配置即可）；在此中断/回滚反而让导入结果与磁盘态背离。
+    console.warn(`[provider-importer] auto-enable quota display failed for ${providerId}:`, err)
+  }
+}
 
 /**
  * previewImport 的成功返回（importId 供 Step2 applyImport 用 + 脱敏 preview 供前端渲染）。
@@ -434,6 +496,11 @@ function ensureWhitelistForImported(imported: ProviderImportedItem[]): void {
  *
  * @param importId Step1 previewImport 返回的 importId。
  * @param selectedIds 用户勾选导入的 provider id 列表（对应 _sourceName）。
+ * @param credentialWriter catalog 分路的凭据写入通道（A1-4，见上）。
+ * @param quotaExtrasStore providers.json 写通道（可选）：导入成功的条目命中 api-key 类
+ *          QuotaPreset 且凭证为明文时，写 quota { enabled: true, fetcher } 自动开启
+ *          coding-plan 额度显示（导入即默认同意，用户可关闭；skipped/failed 不动）。
+ *          未注入时跳过（部分测试场景）。
  * @returns 成功 { result }；缓存过期/不存在 { error: { code: 'PREVIEW_EXPIRED' } }；
  *          入参非法 { error: { code: 'INVALID_REQUEST' } }。
  *
@@ -445,6 +512,7 @@ export async function applyImport(
   // A1-4 收口：catalog 分路写凭据经 CredentialWriter（AuthService.saveCredential），
   // 不再直接持有 authStorage.set——auth.json 写入唯一入口在 AuthService。
   credentialWriter?: CredentialWriter,
+  quotaExtrasStore?: QuotaExtrasWriter,
 ): Promise<ApplyImportSuccess | ImportError> {
   // W1：输入校验（防 WS 异常 payload 导致 crash）
   const validationError = validateApplyRequest(importId, selectedIds)
@@ -458,17 +526,36 @@ export async function applyImport(
   // apply 时再次查冲突（preview 后 models.json 可能被改）
   const existingIds = new Set(getProviderNames())
   const imported: ProviderImportedItem[] = []
+  // 自动开启额度显示的目标（决策用完整数据在此收集，写入在主流程成功后统一执行）
+  const autoEnableTargets: Array<{ id: string; fetcher: string }> = []
 
   // ══ 组 1：models.json 已定义的 provider（分体系处理）══
   for (const provider of entry.providers) {
     const item = await applyProviderEntry(provider, selectedIds, existingIds, credentialWriter)
-    if (item) imported.push(item)
+    if (!item) continue
+    imported.push(item)
+    if (item.status === 'imported') {
+      const preset = matchAutoEnablePreset(
+        { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
+        provider._credentialType,
+      )
+      if (preset) autoEnableTargets.push({ id: provider._sourceName, fetcher: preset.fetcher })
+    }
   }
 
   // ══ 组 2：孤儿凭据（sa3 F1，分体系处理：catalog → auth.json，否则 → models.json 模板）══
   for (const oc of entry.orphanCredentials) {
     const item = await applyOrphanCredential(oc, selectedIds, existingIds, credentialWriter)
-    if (item) imported.push(item)
+    if (!item) continue
+    imported.push(item)
+    if (item.status === 'imported') {
+      // 决策用模板的完整定义（baseUrl/name），凭证形态用 oc 的六态判定
+      const tpl = matchBuiltinTemplate(oc.providerId)
+      const preset = tpl
+        ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
+        : undefined
+      if (preset) autoEnableTargets.push({ id: oc.providerId, fetcher: preset.fetcher })
+    }
   }
 
   // S6：selectedIds 中不在 imported 条目里的 id 补 failed 条目（不在 preview 里的给用户反馈）
@@ -484,11 +571,21 @@ export async function applyImport(
   // 边界1（wave3 TC5 / C2）：白名单守卫
   ensureWhitelistForImported(imported)
 
+  // coding-plan 额度显示自动开启（导入即默认同意）：只对本次真实落盘（imported）的条目；
+  // skipped（duplicate）不动——不覆盖用户对既存 provider 的配置。写入必须在本函数返回前
+  // 完成：handler 随后广播 provider 列表，闸门（renderer quota.enabled）直接消费本次写值。
+  if (quotaExtrasStore) {
+    for (const target of autoEnableTargets) {
+      await autoEnableQuotaDisplay(quotaExtrasStore, target.id, target.fetcher)
+    }
+  }
+
   // 日志只记 id/source/status/count（不记 apiKey，DM1）
   const importedCount = imported.filter((i) => i.status === 'imported').length
   const skippedCount = imported.filter((i) => i.status === 'skipped').length
+  const autoEnabledLog = quotaExtrasStore ? autoEnableTargets.length : 0
   console.log(
-    `[provider-importer] apply source=${entry.source} importId=${importId} imported=${importedCount} skipped=${skippedCount} failed=${failedCount}`,
+    `[provider-importer] apply source=${entry.source} importId=${importId} imported=${importedCount} skipped=${skippedCount} failed=${failedCount} quotaAutoEnabled=${autoEnabledLog}`,
   )
 
   return { result: { source: entry.source, imported, failedCount } }

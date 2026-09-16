@@ -465,6 +465,11 @@ export interface IConfigService {
    * apply 成功后立即删缓存（一次性，防 importId 复用）。apply 时再次查冲突（preview 后 models.json 可能被改），
    * 同名 provider 标 skipped（不覆写）。
    *
+   * coding-plan 额度显示自动开启（导入即默认同意）：本次真实落盘（imported）且命中 api-key 类
+   * QuotaPreset、凭证为明文的条目，写 providers.json extras quota { enabled: true, fetcher }
+   * ——浮层 coding-plan 区即刻显示；用户可在设置里关闭。cookie 类（mimo/opencode-go）与
+   * env/command 占位凭证不自动开启（查询条件不齐备），需手动配置。
+   *
    * @param importId previewImportProviders 返回的 importId。
    * @param selectedIds 用户勾选导入的 provider id 列表（对应源里的 provider 名）。
    * @returns 成功 { result }；缓存过期/不存在 { error: { code: 'PREVIEW_EXPIRED', message } }。
