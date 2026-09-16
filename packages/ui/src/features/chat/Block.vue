@@ -198,7 +198,7 @@
                   class="text-neutral-dim"
                 >{{ item.text }}</span>
               </div>
-              <!-- GUI 协议输出自管理高度，不包 ScrollBox（设计 D6 接入点③） -->
+              <!-- GUI 协议输出自管理高度，不包 BlockScrollBox（设计 D6 接入点③） -->
               <div v-if="guiComponent" :class="toolResultClass">
                 <GuiComponentRenderer :component="guiComponent" />
               </div>
