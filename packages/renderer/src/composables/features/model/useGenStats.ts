@@ -19,8 +19,9 @@
  *   帧 recency 守卫（RPC 发起后已有更新帧落地则跳过写入，防陈旧 reply 回滚）；
  * - cleanup：registerSessionCleanup 挂进 useSidebar.deleteSession 清理编排。
  *
- * 显示语义 = 模型视角（D4）：分区值是「session 当前模型」的全局快照——同模型多 session
- * 分区值相同是预期行为，非串台。
+ * 显示语义 = 混合视角：分区值是「session 当前模型」的帧——current 字段为本会话私有样本
+ * （本会话最近一次请求；同模型多 session 各自独立，无回落），day/d7/d30 为该模型跨会话
+ * 全局聚合（同模型多 session 聚合值相同是预期行为，非串台）。
  *
  * 消费方：GenStatsTriggers.vue 纯读。必须在组件 setup 同步调用（内部 useSessionEvents
  * 依赖 getCurrentInstance 守卫）。

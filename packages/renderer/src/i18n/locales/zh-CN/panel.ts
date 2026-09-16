@@ -161,15 +161,15 @@ export default {
     genStatsSpeedTitle: 'TOKEN 速度',
     genStatsCacheTitle: '缓存命中率',
     genStatsCurrent: '本次',
-    // 「本次」label 的 hover 补句（C4）：current 无窗口过滤，样本可能来自较早的记录
-    genStatsCurrentNote: '来自最近一次请求的记录',
+    // 「本次」label 的 hover 补句（C4）：current 无窗口过滤且为会话私有样本（本会话最近一次请求）
+    genStatsCurrentNote: '本会话最近一次请求的记录',
     genStatsCurrentReq: '本次请求',
     genStatsDay: '今日均值（此模型）',
     genStatsD7: '近 7 天',
     genStatsD30: '近 30 天',
-    genStatsDayShort: '今日加权',
-    genStatsSpeedNote: 'output tokens ÷ 生成耗时，按模型分文件累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
-    genStatsCacheNote: 'cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
+    genStatsDayShort: '今日加权（此模型）',
+    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
+    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
     genStatsNoData: '暂无数据',
   },
   sideDrawer: {
