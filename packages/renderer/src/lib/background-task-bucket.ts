@@ -86,7 +86,12 @@ export function filterBackgroundTasks(
   return [...activeSorted, ...endedSorted]
 }
 
-/** 三桶计数（FilterBar 计数预告 + L2 角标「运行中桶 > 0」同源派生，D4④/D10①）。 */
+/**
+ * 三桶计数（D10① 分桶判据 SSOT 的计数派生）：active / ended / all（all = 全量长度）。
+ * 现行消费面 = 无生产消费——托盘 bash 面板的桶计数恒由 {@link filterBackgroundTasks} 的
+ * 行集长度派生（useTrayCounts）；本函数保留为分桶判据的公开谓词与测试锚点（SSOT 模块
+ * 不随 UI 宿主退役）。
+ */
 export function countBackgroundTasks(tasks: BackgroundTaskEntry[]): {
   active: number
   ended: number

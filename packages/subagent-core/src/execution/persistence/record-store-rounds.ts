@@ -161,7 +161,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   rec.round = (rec.round ?? 0) + 1;
   rec.idleSince = Date.now();
   // ⑩ [A-lite / 区1-U1+区3-U1] 轮终停因展示位：成功轮 completed / 失败轮 failed
-  //（「上一轮为什么停」——SubagentList failed 红点判据词 + 排障有词；投影随 ⑨
+  //（「上一轮为什么停」——任务卡片 failed 状态词 + 排障有词；投影随 ⑨
   // entry/recordToSubagent 自动携带）。status 已翻 idle（U4 翻边）；中断族走
   // markSettled interrupted 族不经本原语，值域无冲突。endedAt 内存位不写（终态冻结
   // 信号，写了会击穿方法头 A3 断言——同 record 跨轮轮终第二次即抛错；对齐

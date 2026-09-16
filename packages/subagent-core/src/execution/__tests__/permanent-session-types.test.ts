@@ -155,7 +155,7 @@ describe("StopReason 枚举完整性", () => {
     }
     // [A-lite 裁决翻转] completed/failed 原锁拒绝（派生 outcome 词汇不混入
     // stopReason 词表）——区1-U1+区3-U1 一致性审查后 markRoundIdle 正常轮终
-    // 需要停因展示位（SubagentList failed 判据 + 排障「为什么停」），两词入值域
+    // 需要停因展示位（任务卡片 failed 状态词 + 排障「为什么停」），两词入值域
     //（轮终翻边 idle——[two-state-convergence U4/D3]，见 types.ts StopReason 注释）。
     expect(isValidStopReason("completed")).toBe(true);
     expect(isValidStopReason("failed")).toBe(true);

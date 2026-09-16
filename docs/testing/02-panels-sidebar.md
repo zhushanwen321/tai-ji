@@ -1056,14 +1056,14 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 
 AI 把 bash 命令转后台执行后，任务落在 per-session registry.json。本功能提供用户可见可控面：
 
-- **列表**（现行 = composer 任务托盘的 bash 面板；原 = Sidebar plugins tab →「后台命令」L2 tab，已退役）：三桶筛选（运行中/已结束/全部 + 计数，默认运行中）、两行式 item（状态 icon + 命令 + 耗时 / pid · exit）、running 行行内两段式终止（✕ → ✓）、点击行开 drawer；
+- **列表**（现行 = composer 任务托盘的 bash 面板；原 = Sidebar plugins tab →「后台命令」L2 tab，已退役）：两桶筛选（运行中/已结束 + 计数，默认运行中；无「全部」桶）、两行式 item（状态 icon + 命令 + 耗时 / pid · exit）、running 行行内两段式终止（✕ → ✓）、点击行开 drawer；
 - **drawer 详情**（bashTask tab，第 8 tab）：命令全文（可复制）、元信息行（taskId · pid · 开始 · 时长 · exit · reason）、输出尾部（running 时 2s 跟随）、两段式终止按钮 + 回执分支 toast。
 
 数据链路：runtime `BackgroundTaskService` 直读 registry（拉取 RPC + 变更广播），renderer `useBackgroundTasks` per-session 分区。测试框架（vitest 用例）：drawer 侧 `packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`；列表侧原组件测试文件（background-task-list-view.test.ts，renderer 组件测试目录下）已随视图退役删除，现行列表/计数断言 = `packages/renderer/src/__tests__/panel/tray/`（tray-native-panel / useTrayCounts）。
 
 ## §2 组件结构概述
 
-列表侧（**已退役，2026-09-16**）：原由 `PluginViewContainer.vue`（NATIVE_VIEWS 路由，viewId='background-tasks'）挂 `BackgroundTaskListView.vue`（容器 `background-task-list`），含全量空态、三桶筛选槽、两行式任务行与行内两段式终止、损坏/断连横幅。该路由表、视图组件与筛选分区 composable 均已删除；同一形态（三桶筛选槽 + 两行式 item + 行内两段式终止 + 空态三分）现由 composer 任务托盘的 bash 面板承载（`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`，testid `tray-bash-*` / `tray-panel-*`），分桶判据仍是同一 SSOT（`packages/renderer/src/lib/background-task-bucket.ts`）。
+列表侧（**已退役，2026-09-16**）：原由 `PluginViewContainer.vue`（NATIVE_VIEWS 路由，viewId='background-tasks'）挂 `BackgroundTaskListView.vue`（容器 `background-task-list`），含全量空态、三桶筛选槽、两行式任务行与行内两段式终止、损坏/断连横幅。该路由表、视图组件与筛选分区 composable 均已删除；同一形态（两桶筛选槽 + 两行式 item + 行内两段式终止 + 可行动空态）现由 composer 任务托盘的 bash 面板承载（`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`，testid `tray-bash-*` / `tray-panel-*`）：托盘为运行中/已结束两桶（无「全部」桶），面板内恒渲染筛选槽与单一空态（默认桶空 → 「查看已结束 (N)」显式切桶），无原「全量空态不渲染筛选条」分支（全量无记录时托盘条目整体不渲染，面板不可达）；分桶判据仍是同一 SSOT（`packages/renderer/src/lib/background-task-bucket.ts`）。
 
 Drawer 侧（现行）：`DrawerPanel.vue` tab 栏 bashTask 值（`drawer-tab-bashTask`，复用既有 `drawer-tab-{key}` 模板），`PanelContainer.vue` v-if 分支挂 `BackgroundTaskDetailPanel.vue`（容器 `bash-task-detail`）：命令全文 `bash-task-command` + 复制按钮 `bash-task-copy`、元信息行 `bash-task-meta`（状态色点 `bash-task-status-dot` + taskid/pid/started/duration/exit/reason 各 span）、输出区三态互斥（`bash-task-output` 有内容且 running 时 2s 跟随 / `bash-task-output-unavailable` 文件已清理 / `bash-task-output-empty` loaded 且空）、running 时的两段式终止按钮 `bash-task-kill`（`data-armed="true"` 为确认态）。
 
@@ -1113,11 +1113,11 @@ testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有�
 
 - running 计时用 fake timers（列表 1s tick / drawer 输出跟随 2s interval；托盘面板行同款）；
 - 杀进程是 mock RPC，不会真杀——行内终止断言两段式状态机（testid 切换）而非进程消失；
-- i18n key：drawer 侧见 `packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`（`panel.sideDrawer.bashTask*`）；列表/计数侧见 `tray.ts`（`panel.tray.*`，聚合器展开并入 panel 命名空间）——原 `sidebar.backgroundTaskList.*` 18 键已随 L2 视图退役删除。文案断言用 override `t(key)` 注入而非依赖 locale 文件（组件测试既有形态）。
+- i18n key：drawer 侧见 `packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`（`panel.sideDrawer.bashTask*`）；列表/计数侧见 `tray.ts`（`panel.tray.*`，聚合器展开并入 panel 命名空间）——原 `sidebar.backgroundTaskList.*` 20 键（filter 3 + 直属字符串 9 + status 6 + 横幅 2）已随 L2 视图退役删除。文案断言用 override `t(key)` 注入而非依赖 locale 文件（组件测试既有形态）。
 
 ## §4 相关文档
 
 - 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
 - SideDrawer 宿主：bashTask tab 为第 8 tab（drawer 4 点接线见 background-task-sidebar-view.md D5）
 - 列表面范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
-- 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（13 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）
+- 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（16 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）
