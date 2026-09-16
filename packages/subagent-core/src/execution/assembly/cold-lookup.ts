@@ -248,6 +248,12 @@ function resurrectColdRecord(
     // engineHandle 是可变回填域（run resolve 后回填的形态，不在 createRecord 签名），
     // 与 sessionFile 同列水合。
     engine: found.engine,
+    // [A3/S3 修复] 来源身份透传（同 engine 惯例走 createRecord 而非水合）：workflow 批
+    // 成员收口归档出内存后，message 冷复活漏传 origin 会让守卫读 undefined 放行，
+    // 成员真的收到消息并回话（违反 one-shot 批成员契约，S3 反向断言）。tool 来源
+    // record 两字段本就 undefined，透传无害。
+    origin: found.origin,
+    parentRunId: found.parentRunId,
     controller: new AbortController(),
   });
   record.sessionFile = found.sessionFile;
