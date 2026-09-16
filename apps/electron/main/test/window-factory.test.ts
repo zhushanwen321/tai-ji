@@ -15,6 +15,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
+// 静态 import：vi.mock 有 hoisting，electron mock 对静态加载同样生效；
+// 曾用动态 import('../window/window-factory.ts')——带 .ts 扩展名触发 TS5097
+// （tsconfig 未开 allowImportingTsExtensions），静态 import 无需该开关
+import { createWindow } from '../window/window-factory.js'
 
 // ── showInactive env 矩阵（S10：mock BrowserWindow 运行时行为断言）────────
 // 源码断言（下方）验证配置文本存在；本组用 runtime mock 验证行为：
@@ -47,8 +51,6 @@ vi.mock('electron', () => {
     BrowserWindow: MockBrowserWindow,
   }
 })
-
-const { createWindow } = await import('../window/window-factory.ts')
 
 const sourcePath = new URL('../window/window-factory.ts', import.meta.url)
 const source = readFileSync(sourcePath, 'utf-8')
