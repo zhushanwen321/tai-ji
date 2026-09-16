@@ -40,13 +40,13 @@ export { SLUG_MAX_LENGTH };
 // 反映必填性。勿在此基础上继续堆 action 条件逻辑——要加就拆 tool。
 export const SubagentParams = Type.Object({
   action: StringEnum(["start", "list", "cancel", "message", "close", "fork-from"], {
-    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to any of your subagents (running or idle — an idle one transparently revives and continues on its original session file), 'close' archives a subagent (immediately when idle; after the current round, or immediately with force:true, when running), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
+    description: "Operation: 'start' runs a subagent (for 2+ independent tasks dispatched together in ONE call, use the `subagents` tool instead — it batches them and returns all results as one notification), 'list' shows subagents, 'cancel' stops a background subagent, 'message' sends a follow-up to any of your subagents (running or idle — an idle one transparently revives and continues on its original session file), 'close' archives a subagent (immediately when idle; after the current round, or immediately with force:true, when running), 'fork-from' spawns a NEW subagent inheriting an older one's history (recovery for restart-disconnected subagents; the old record is untouched).",
   }),
   // ── action:"start" fields (flattened to top level). task/slug REQUIRED for start. ──
   // Missing/empty task or slug throws at runtime (startHandler).
   // (flat JSON Schema can't express conditional requirement — see file-level TODO.)
   task: Type.Optional(Type.String({
-    description: "REQUIRED for action:'start'. The task for the subagent to execute. Throws if missing or whitespace-only.",
+    description: "REQUIRED for action:'start'. The task for the subagent to execute. Throws if missing or whitespace-only. For 2+ independent tasks in one dispatch, use the `subagents` tool (tasks array) instead of N separate starts — same subagent semantics, one call, one combined result notification.",
   })),
   slug: Type.Optional(Type.String({
     description:
