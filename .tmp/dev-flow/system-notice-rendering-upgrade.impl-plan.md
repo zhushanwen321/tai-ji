@@ -141,7 +141,17 @@ graph TD
 | D2 | U1 | D1 表述 details「shared 登记」 | extension 侧本地声明 `BackgroundBashDetails` 接口（本包是独立 npm 包、不 import taiji 内部 shared）——已注释登记「字面量镜像」义务并与 U2 实装逐项核对（字段名/可空性/枚举值三处一致） | 合理（包边界约束） | 固化：两侧镜像义务写入源码注释（U1 已做）；后续任何一侧变更须同改另一侧 |
 | D3 | U7 | §5 U7 未列 `Block.vue` 行数约束 | `Block.vue` script 343 行（存量 331 已超 vue_rules_checker 300 行上限，本次 +12）——该门禁 pre-commit 扫描面仅 `packages/renderer/src`，`packages/ui` 不在内故不阻断提交；正确修复 = 提取 composable（新建领地外文件，属独立重构） | 合理（存量技术债 + 门禁范围外） | 不在本设计 scope 内展开：登记为后续技术债（Block.vue 提 composable）；本次不阻断 |
 | D4 | U7 | D6「markdown 显『约 {total} 行』」双测量路径 | 三条接入点统一 from–to 行区间（markdown 行高实测路径对 `.md-render` 根同样成立，「约」文案需新增键） | 合理（实现简化，语义等价） | 固化：「约」字文案可随 U3 键批量补（非必需）；S5 验收按 from–to 断言 |
-| D5 | U6 | — | `message-turns.ts` 超 max-lines 500（U6 在途引入） | 不合理（门禁红灯） | 已 SendMessage 打回 U6 收尾拆分（提取 notify-summary 独立模块）；轮次内修复 |
+| D5 | U6 | — | `message-turns.ts` 超 max-lines 500（U6 在途引入） | 不合理（门禁红灯） | 已打回 U6 收尾拆分：新增 `notify-summary.ts`（判据两段式 + 去重 + 耗时聚合），message-turns 563→449，lint 复绿 |
+| D6 | U5 | D4 连带面 | 两常量取 D3 规格算式计算值 32（jsdom 无真实布局） | 合理（设计检查点 1 已预留 dev 实测校准位） | 注释已标校准位；阶段 5 dev 断言实测回写 |
+| D7 | U5 | D4 十处清单 | 补 A7 行（含「带」指称）+ §1.3 第二处死链修正 | 合理（同族命中面补齐） | 固化 |
+| D8 | U6 | D5 失败分句键 | 复用既有 `panel.message.traceFailed`（「含 {count} 次失败」）+「·」分隔，不新立 `turnTriggerBgNotifyFailed` 键 | 合理（语义等价、零硬编码、避免死键） | 固化；视觉文案与设计「· M 失败」的细微差异可接受 |
+| D9 | U6 | 耗时格式 | U3（SystemNotice）与 U6（Turn.vue）各有一个同构小函数（formatDurationMs / formatNotifyDuration，均输出 `26m03s` 形态） | 合理（并行单元各自实现；公共 util 属领地外） | 登记为后续收敛项（统一到 format-utils，非本设计阻塞） |
+| D10 | U6 | D5 等价性义务「诚实定性：当前不可复现」 | 实现期实测**存在可复现路径**（已填实 trigger turn 的尾部序列走全量重扫，签名不含 hiddenNotifies 会复用陈旧 summary）；已补测试固定（变异探针证非空转） | **doc_error**（设计断言被实现证伪） | 需回写设计文档 D5 等价性义务段的定性（阶段 3 一致性审查统一处理）；实现无需改动 |
+| D11 | 环境 | — | `pnpm --filter @taiji/core typecheck` 495 条 TS 错（兄弟包 TS5097 + 存量测试文件 chatMode，源自初始导入提交）；renderer `system-page-smart-context` 全量并发下 5s 超时（单跑 1.3s 绿） | 存量问题（非本次引入） | 登记不改（本轮 scope 外）；阶段 3 全量测试时复现则另立 |
+| D12 | 计划勘误 | §4.1 测试命令 | `@taiji/renderer` 实为 `@taiji/frontend`；`@taiji/subagent-core` 实为 `@zhushanwen/subagent-core` | 计划笔误 | 以实跑包名为准（各单元已按实跑执行） |
+| D13 | U10 | — | 退役键的 W4 注释拆半（注释同覆盖存活键 executingBash）→ 退役子句删、存活子句改写移项；sidebar 行号修正面比枚举多两处（notify.ts:143-171 区间漂移 → 144-173，实测重锚） | 合理（同面补齐 + 语义保全） | 固化 |
+
+**各单元 committed 后状态汇总**：10/10 committed（U1-U10）；工作区干净。进入阶段 3（一致性审查 + 全量测试）。
 
 ## 6 状态表
 
@@ -149,14 +159,14 @@ graph TD
 |------|--------------------------------------------|------|----------|
 | U1 | committed | 1 | af7cd31a6（notify 19 passed + 变异探针验证；extensions typecheck OK） |
 | U2 | committed | 1 | 21579fb88（bg-details 13 + workflow-notify 12；index.ts 导出补全解 blocker） |
-| U3 | pending | 0 | - |
-| U4 | pending | 0 | - |
-| U5 | pending | 0 | - |
-| U6 | pending | 0 | - |
-| U7 | committed | 1 | 12ed93f7f（BlockScrollBox 9 + Block 回归 39 = 48 passed；ui 全量 824 passed；tailwind 实编译验证） |
+| U3 | committed | 1 | 162da70aa（SystemNotice 18 passed；i18n 新增 8 键 + compacted* 改写；locale sync/CJK 守卫绿） |
+| U4 | committed | 1 | c037eab51（DESIGN.md §6.1 规格列 + §4.7 token 登记；doc-drift/constraints 守卫绿；逐项核对记录） |
+| U5 | committed | 1 | eb0a1099c（ActivityStrip 25 passed；两常量 50/24→32 计算值；compact-defer 十处同步；preset 校准 9） |
+| U6 | committed | 1 | 35df385d6（core 2118 passed / Turn 38 / 等价性 48；notify-summary 拆模块解 max-lines；四路变异探针） |
+| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐） |
 | U8 | committed | 1 | 50ef50902（notify-host-ended-at 9 passed + 包内全量 3118 passed；物化域=running 轮终+批成员） |
 | U9 | committed | 1 | 1e5102725（notify-batch 18 + notify-ledger 36 = 54 passed；变异探针证测试非空转） |
-| U10 | pending | 0 | - |
+| U10 | committed | 1 | 21e9ad399（退役 2 键双侧；i18n 子集 198 passed 含 locale-key-usage-guard 转绿；sidebar 文档四面 + 行号实测重锚） |
 
 ## 7 残留风险与变更历史
 
