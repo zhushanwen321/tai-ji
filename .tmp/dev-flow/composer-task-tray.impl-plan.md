@@ -201,6 +201,7 @@ graph TD
 | D48 | u-e2e | e2e-map 登记面超派发枚举：VISUAL-01 scope 补 `e2e/visual-baselines/**`（否则提交重生基线 PNG 会让 --check 红）；后续追加 MOCK-01/VISUAL-01 补 `packages/ui/src/**` | `e2e/` 前缀匹配不覆盖 `e2e/visual-baselines/`；packages/ui 承载 8 原语 + 托盘 TabBar，此前不在任何 rule scope（机器选择器抓不到） | 接受（与 REAL-01 补 extensions 同类登记缺口；均经探针实测生效 + 门禁绿） |
 | D49 | u-e2e | 像素基线重生方式偏离「直接 --update-snapshots」字面：托盘进 composer-bar 的 diff 约 0.7% 低于该 spec 1% 容差 → 直接 -u 不重写（基线隐性滞后）；改为先删 PNG 再生 + 加「截图主体在场」断言 | 防「托盘未挂载被静默照成基线」 | 接受（未动容差；机制经 playwright CLI preset 核实） |
 | D50 | u-e2e | real 轨只跑改动面命中的 tasks-drawer-real（未跑 REAL-01 聚合命令的其余 3 spec）；另补跑 P0 smoke 子集作为侧栏收敛的额外证据 | AGENTS.md「按改动面跑、禁全量扫跑」 | 接受（P0 smoke 首跑 1 例时序 flake 已隔离复跑绿，非本次引入） |
+| D51 | 阶段 5 验收 | 托盘/抽屉 workflow 行的 Pause/Resume 按钮链整体退役（abort-only） | 真机发现 subagent-workflow 扩展已随 D-2 一次性生命周期移除 pause/resume（slash command 对 pause 只回 warning），TrayNativePanel 与 drawer WorkflowTab 的 Pause/Resume 按钮是 D14 复制迁移件带来的死链（点了必无效） | 接受并已修复：宿主全链对齐扩展语义——两组件删 pause/resume 按钮、`workflowAction` 类型收窄 `'abort'`（shared protocol + core api + runtime interfaces/records/service 连锁）、`WorkflowRunStatus` 删 `'paused'` legacy 值（shared 头注明示的收口时机到达）、useTrayCounts/workflow store 谓词同步、i18n 死键 4 处清理、相关测试改 abort-only 口径；设计 §4 A2b 判据同步修正 |
 
 ## 6 状态表
 
@@ -222,6 +223,27 @@ graph TD
 | u-fix-tray | committed | 2 | commit 92e824e70「fix(tray): u-fix-tray single data instance, no loading flash, full hot zone」；tray 5 files/99 pass + 邻域 768 pass + 变异验证 3 处（改坏→红）；U1 单例化（provide/inject，无回退）/ U2 判据收窄 / U3 等价修法（reka-ui 不透传 handler） |
 | u-fix-proto | committed | 2 | commit 78ed72ad6「fix(protocol): allow smooth-curve path commands and sync protocol docs」（13 文件）；S/T 放行实测（58/5869 → 0 拒）+ extension-protocol 229 pass + extensions 三连绿 + changeset；D4 字面量与旧 changeset 字符集由主 agent 收口修正 |
 | u-fix-docs | committed | 2 | commit 579b8c021「docs(tray): fix stale counts, bucket shapes and retired-consumer wording」（11 文件）；doc-symbol-drift 绿 + 三包测试绿；主 agent 追加 2 处同类残引（DESIGN.md 波次表 / background-task-sidebar-view G1）与 DESIGN.md composer-bar 组成行收口 |
+| u-fix-final-tray | committed | 3 | commit a8fdc1e58「test(tray): cover the loading criterion and fix the popover comment attribution」；U2 判据收窄落成 6 变异验证用例（tray 5 files/105 pass）+ ComposerTray popover 注释归因修正（reka-ui 不透传 handler 至 Teleport 根）；定向复审全过 |
+| u-fix-final-docs | committed | 3 | commit c98bba195「test(e2e): fail fast on stale mock bundle and sync protocol docs」（8 文件）；launch-app-real pre-flight（mock 产物在场即 fail-fast 带重建命令，tasks-drawer-real 经共享 fixture 获得该门）+ 协议文档 §9.1/§15.3/§15.5 终态刷新 + guide Helper 行真实导出名 + todo/goal 注释改 setWidgetDual + e2e-map 注记事实修正；守卫三连（doc-symbol-drift / validate-e2e-map / select-affected-e2e --check）+ playwright --list 编译冒烟全绿，主 agent 逐 diff 核验 |
+
+## 6.1 阶段 5 验收记录（2026-09-16）
+
+| 场景 | 结果 | 证据（.tmp/dev-flow/composer-task-tray.acceptance/） |
+|------|------|------|
+| N2/A4-cold 冷态零条目 | PASS 3/3 | cold.result.json + cold.png |
+| A1 三腿真派发可见性（bash=1/sub=2/wf=1 + 呼吸点） | PASS 5/5 | a1.result.json + a1.png（真实 LLM MiMo-V2.5-Pro 派发，workflow=zz-taiji-tray-demo） |
+| A2 subagent 面板（hover/pin/两段式 cancel/行→drawer） | PASS（11 项中 10 直接过 + 1 项为脚本选择器 bug，正确选择器补证 PASS：cancel 计数 1→0 + 呼吸点消失） | a2.result.json + a2-supplement.result.json |
+| A2b workflow 面板（abort-only 口径） | PASS 11 项（pause/resume 死链修复后复验：无 pause/resume 钮 + abort 两段式 1→0 + 行→drawer workflow tab + composer 并排） | a2b-v2.result.json + a2b-v2b.result.json |
+| A3 widget 挂载（todo badge=2 / goal icon+blocked 状态色 / 面板两段 tab 本地切换） | PASS（6 项中 5 直接过；goal badge 判据按偏差 D1 修正为条件式——实测目标无 token 预算故无 badge，设计内） | a3.result.json + a3b-static.png |
+| A3b 刷新不重置用户所在 tab | PASS（badge 2→1 传播 + 视图保持） | a3b-v2.result.json + a3b-static.png |
+| A4 常态归零（bash kill 两段式 + subagent cancel + todo 清空 + goal complete） | PASS（旧 session 4/4：呼吸点/计数全消、三件 dim 常驻；widget 侧 todo 清空消失 + goal complete 后消失 widgets=0——blocked 非终态保留显示为正确行为） | a4.result.json + a4-widgets.result.json |
+| A5 入口唯一性 | PASS 5/5（tray 恒一 / 每 kind ≤1 / 互斥面板 max=1） | a5.result.json |
+| A6 切 session 分区 | PASS 3/3（切走摘除 / 切回恢复 D13 首拉） | a6.result.json |
+| A7 协议兼容 | L1 组件测试覆盖（TrayWidgetButton fallback 链测试）；仓内不存在未升级 extension，无真机第三方样本——如实登记 | — |
+| P7 浮层溢出/翻转（760 宽） | PASS 4/4（面板 398px 右缘 759≤760 贴边收窄、无翻转丢失） | p7-v2.result.json + p7-760w.png |
+| N1 退役面零 import | PASS（窄口径 rg 零命中，阶段 2 出口已验） | — |
+
+**验收期发现并修复**：workflow Pause/Resume 死按钮链（= 偏差 D51，1 个 must-fix）。**验收期环境事实**：① demo workflow 需 `@pi-meta` YAML 元数据块（旧 const meta 格式 available=false 不入清单）——临时脚本 `~/.agents/workflows/zz-taiji-tray-demo.js` 验收后删除；② session 在 HMR 后 landing 态发消息会新建 session（19:07 分叉），后续 prompt 全部进入新 session——不影响断言对象。
 
 ## 7 残留风险与变更历史
 
@@ -254,3 +276,6 @@ graph TD
 | 2026-09-16 | 退役批次 4 commit 落盘：ae10aff90（widgetarea）/ 3b5f35c19（native-view）/ 9fa8db44d（sidebar）/ 37607c9df（refs-sweep）；工作区干净；阶段 2（开发循环）完成（12 单元 committed）→ 进入 u-e2e（W5） |
 | 2026-09-16 | 阶段 3 一致性对抗审查（基线 40dc35b2e..HEAD，126 文件）按 4 区并行完成：P1 协议扩展面（0 严重 unreasonable + 7 doc_errors）/ P2 托盘宿主面（**4 unreasonable：U1 面板重复拉取、U2 首帧 loading、U3 热区缺口、U4 真机门欠账** + 5 doc_errors）/ P3 退役面 renderer（0 unreasonable + 8 doc_errors）/ P4 跨包文档面（1 low unreasonable + 9 doc_errors）；主 agent 亲为修订设计文档 7 处 doc_errors；修复批次 3 组并行派发（u-fix-tray / u-fix-proto / u-fix-docs） |
 | 2026-09-16 | 修复批次 4 commit 落盘：92e824e70（u-fix-tray）/ 78ed72ad6（u-fix-proto，含 S/T 放行）/ 579b8c021（u-fix-docs）/ de4dad065（u-e2e 含 real faux 轨 3 pass 实证）；U4（P7 真机门与布局挤压检查点）转阶段 5；e2e 边界三轨在已提交源码上复验绿 |
+| 2026-09-16 | 终批定向复审（代码组 + 文档/e2e 组）回执：31 项修复全核实，2 low unreasonable（驳回登记）+ 7 low doc_errors → 终批微修两单元；u-fix-final-tray commit a8fdc1e58；设计 §4 e2e 表两行收口 + 计划 P5 关闭/偏差 D46-D50 → commit c34238f32；u-fix-final-docs commit c98bba195（完成通知被上下文压缩吞没，主 agent 逐 diff 核验后代提交） |
+| 2026-09-16 | **阶段 5 真机验收执行**：dev 实例（CDP :9300，真实 LLM）跑 N2/A1/A2/A2b/A3/A3b/A4/A5/A6/P7 全场景——详见 §6.1 验收记录表；发现 1 个 must-fix（workflow Pause/Resume 死按钮链，D14 复制迁移件带过已死语义）→ 修复循环：TrayNativePanel + WorkflowTab 删按钮、workflowAction 全链收窄 'abort'、WorkflowRunStatus 删 'paused'、i18n/测试同步（改动面 renderer 124 用例 + 全量套件 + mock/visual 轨复验绿） |
+| 2026-09-16 | **阶段 3 出口（Gate A）**：c98bba195 工作树全绿——`pnpm run lint` / `pnpm extensions:typecheck` / `pnpm extensions:lint` / `pnpm test`（workspace 全量 --no-bail，含 apps/electron 72 files/1133 pass）四段 exit 0，5m21s；证据 `.tmp/dev-flow/composer-task-tray.gate-a.log`；入口门四条通过 → 进入阶段 5 真机验收 |

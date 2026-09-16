@@ -252,7 +252,7 @@ built-in（native 直连，无协议变化）:
 | P4 | tab-bar 原语现无交互（无 click/emit），active 由推送值单方决定 | 读 `packages/ui/src/rendering-protocol/primitives/TabBar.vue`（纯展示组件） | ✅ 代码核实 |
 | P5 | TabBar 容器化后，用户本地 active 选择在后续 widget 推送（guiTree 更新）时不被重置 | 实施期：组件 key 稳定性验证 + vitest 行为测试（推新 tabs/sections 断言 active 索引保持） | ✅ 实施期关闭（TabBar 16 用例含 setProps 推送后 DOM 元素同一性 + 本地 active 保持；降级路径未启用——组件被 patch 非重建） |
 | P6 | 自定义 icon paths 白名单正则拒非法输入且渲染不崩 | 实施期：协议层单测（白名单 + 条数/长度上限 + 越限落兜底）+ 渲染快照 | ✅ 实施期关闭（协议层四边界单测 + S/T 放行后回归；渲染侧四档 fallback 由 tray-widget.test.ts 锁定） |
-| P7 | composer 底部向上弹出面板无裁剪/翻转异常（溢出行为） | 实施期：真机 CDP 截图（browser-automation）窗口最小宽度下验证 | ⛔ 实施期门（降级：reka Popover 翻转异常则换手写 anchored 浮层，两者均为仓内成熟范式） |
+| P7 | composer 底部向上弹出面板无裁剪/翻转异常（溢出行为） | 实施期：真机 CDP 截图（browser-automation）窗口最小宽度下验证 | ✅ 已关闭（2026-09-16 真机：CDP Emulation 压视口 760 宽，bash 面板 398px 打开、右缘 759≤760 贴边收窄不越界、无翻转丢失；reka Popover collision 处理生效，无需降级） |
 
 ---
 
@@ -264,8 +264,8 @@ built-in（native 直连，无协议变化）:
 |---|---|---|---|
 | A1 | 并行任务可见性（目标 1） | 真机 session 里让 agent 派发 ≥2 subagent + 启 1 个 workflow + 后台 1 个 bash（`sleep 300 &` 类）；等 5s；再切走 session 切回 | composer-bar 左簇出现 `[termⁿ][botⁿ][flowⁿ]`，三计数与实际进行中数量一致、accent 亮 + 呼吸点；切回后历史桶（已结束/dim 常驻）非空（D13 首拉腿生效）；截图比对太极纯灰风格（无彩色溢出） |
 | A2 | hover 面板与操作（目标 1） | hover bot icon ≥160ms；pin；对一行执行 cancel 两段式；点一行 | 面板 400px 锚定 icon 上方，「进行中/已结束/已收起」三 tab 默认进行中（已收起计数 0 时 dim）；hover 态无行内按钮，pin 后出现；cancel 首击变红确认态、再击后该行状态流转，计数 -1；点击行 → drawer subagent tab 打开（并排详情，与现状卡片点击同归宿） |
-| A2b | workflow 面板与操作（目标 1） | hover flow icon；pin；对 running 行执行 pause → resume；对另一行 abort 两段式；点行 | 面板两 tab 与计数正确；pause 后行状态转 paused、呼吸点停；resume 后恢复；abort 首击确认、再击后行进入终止态、计数 -1；点击行 → drawer workflow tab（phase 分组 agent call 列表） |
-| A3 | widget 挂载（目标 2） | 同 session 让 agent 用 todo tool 建清单、用 goal_control 建带预算目标 | 托盘出现 `[☑ 2]`（badge=未完成数）与 `[◎ n%]`（badge=预算百分比）；hover 面板 = meta head + tab-bar（待办/已完成）+ list-tree；点 tab 本地切换不卡顿；再次 tool call 后内容刷新且**用户所在 tab 不被重置** |
+| A2b | workflow 面板与操作（目标 1） | hover flow icon；pin；对 running 行执行 abort 两段式；点行。**[2026-09-16 真机验收修正]** 原判据含 pause → resume，实机发现 subagent-workflow 扩展已随 D-2 一次性生命周期移除 pause/resume（slash command 对 pause 只回 warning），托盘/抽屉的 Pause/Resume 按钮链是迁移复制件带过来的死链——已修复（宿主全链收窄为 abort-only，见 impl-plan 偏差 D51），判据同步改为 abort-only | 面板两 tab 与计数正确；**无 pause/resume 按钮（D-2 一次性生命周期）**；abort 首击确认、再击后行进入终止态、计数 -1（真机实测 1→0，终止翻转有秒级延迟）；点击行 → drawer workflow tab（phase 分组 agent call 列表） |
+| A3 | widget 挂载（目标 2） | 同 session 让 agent 用 todo tool 建清单、用 goal_control 建带预算目标 | 托盘出现 todo 条目（badge=未完成数）与 goal 条目（**badge 条件式**：仅当目标带 token 预算时由宿主 fallback 链自 `progress.label` 派生百分比，偏差 D1 裁决 extension 不补推；无预算目标无 badge）；hover 面板 = meta head + tab-bar（待办/已完成）+ list-tree；点 tab 本地切换不卡顿；再次 tool call 后内容刷新且**用户所在 tab 不被重置** |
 | A4 | 常态归零（目标 3） | A1/A3 任务全部结束：todo 清空、goal complete、bash 结束、subagent 完成 | 计数与呼吸点消失；有历史的三件 dim 常驻（无计数）；widget icon 消失（todo 清屏/goal 终态清屏）；冷启动新 session 托盘零条目 |
 | A5 | 入口唯一（目标 4） | 检查侧栏与 drawer | SegmentedTab 仅 会话/文件/Plugins 三枚；Agents/Flows tab 不存在；Plugins 下无「后台命令」L2 视图；对话流无 WidgetArea pill；**drawer subagent/workflow/bashTask tab 行为不变**（点托盘行打开后内容/返回链路正常——邻居不变量）；对话流内联块保留且点击开 drawer（现状不变） |
 | A6 | 切 session 跟随（目标 1） | 单实例下切到另一 session（各有任务）再切回 | 托盘计数/面板数据随 sessionId 即时切换，不残留旧 session 任务（per-session 过滤；注：panel 现为恒单 PanelLeaf，split 已移除，本场景验证单实例数据归属） |
@@ -311,7 +311,7 @@ built-in（native 直连，无协议变化）:
 
 **待验证检查点**（设计期无法确定，留实施期；与 §3.6 ⛔ 探针门对应）：
 
-1. reka Popover vs 手写 anchored 浮层在 composer-bar 内的溢出/翻转行为（= 探针 P7）——P2 首个 spike
-2. todo 高频推送（连续 add）下 TabBar 本地 active 保持的实现细节（= 探针 P5：组件不重建路径 vue key 稳定性）
-3. `composer.toolbar` ViewHost 与托盘的布局挤压（flex-wrap 换行边界）——真机验证
-4. WidgetArea 响应式依赖追踪模式在托盘 widget 区的复刻（getViewIds + getView 同 computed 路径建链）——P2 实施首验，断链症状 = 推送后托盘不重算
+1. reka Popover vs 手写 anchored 浮层在 composer-bar 内的溢出/翻转行为（= 探针 P7）——✅ 已关闭（真机 760 宽实测 collision 收窄不越界，见 §3.6 P7 回填）
+2. todo 高频推送（连续 add）下 TabBar 本地 active 保持的实现细节（= 探针 P5：组件不重建路径 vue key 稳定性）——✅ 已关闭（实施期行为测试证明，§3.6 P5 回填）
+3. `composer.toolbar` ViewHost 与托盘的布局挤压（flex-wrap 换行边界）——✅ 已关闭（2026-09-16 真机：760 宽 + 满托盘条目（三 native + 两 widget）下 composer.toolbar 单行不换行，条目按固定序收缩正常，无溢出折行）
+4. WidgetArea 响应式依赖追踪模式在托盘 widget 区的复刻（getViewIds + getView 同 computed 路径建链）——✅ 已关闭（P2 实施首验通过 + 契约测试锁定）
