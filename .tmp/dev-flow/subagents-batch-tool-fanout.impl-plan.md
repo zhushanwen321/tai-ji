@@ -1,6 +1,6 @@
 # subagents 批量编排 tool + fan-out 模板 + collect 退役 实施计划
 
-基线: (待 commit 后回填) | 来源设计: `.tmp/tech-design/subagents-batch-tool-fanout.md` | 日期: 2026-09-16
+基线: 0c2b313b7 | 来源设计: `.tmp/tech-design/subagents-batch-tool-fanout.md` | 日期: 2026-09-16
 
 对抗式审查证据：`.tmp/tech-design/design-review-20260916-151713.md`（主审）+ `-impact.md`（影响面审）+ `-simplicity.md`（简洁审），经 5 轮修复循环收敛至三份报告 0 must-fix（R5 终轮确认），设计就绪。
 
@@ -99,13 +99,18 @@ graph TD
 
 ## 5 合理偏差登记表
 
-（初始为空，阶段 3 一致性审查填充）
+| Unit | 偏差 | 判定 | 处理 |
+|------|------|------|------|
+| u1 | 验收命令「node --check」对 worker body 形态顶层 return 天然报 Illegal return（既有 5 模板同形态）——用 AsyncFunction 编译 + lintScript + 探针真实执行等价替代 | 合理（工具限制，验证强度不降） | 固化：u1 验证方式以此为准 |
+| u1 | aggregate 失败语义设计未明载（D4 只定「末尾一个 agent() 归约」）——延伸为：归约成员失败不炸 run，status 降 partial、outcome.aggregate 携带 {error}，results 照常收口 | 合理（G2「成员失败不炸 run」的直接延伸，测试覆盖） | 固化；设计文档 D4 如需回写由阶段 6 终态同步处理 |
+| u1 | meta.phases 用带引号形态（checkPhaseConsistency 声明提取只认带引号字符串，unquoted 会误报 2 条 warning） | 合理（lintScript 解析器约束，YAML 内注释已注明原因） | 固化 |
+| u1 | outcome 附带 message 字段（D4 形状未列） | 合理（对齐 parallel.js 既有收口惯例，人类可读摘要行） | 固化 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u1-fanout-template | pending | 0 | — |
+| u1-fanout-template | committed | 1 | commit 672f0e6c3；vitest 49 passed（fan-out-script 19 + builtin-workflows-structure 30）；extensions:typecheck+lint exit=0；契约抽验（fail-fast L81 / taskIndex 派发序 L117-134 / truncated 保序 L185-216） |
 | u2-batch-tool | pending | 0 | — |
 | u3-render-check | pending | 0 | — |
 | u4-collect-shell | pending | 0 | — |
