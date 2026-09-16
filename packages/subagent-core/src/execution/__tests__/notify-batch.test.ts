@@ -12,6 +12,9 @@
 //   5. notifyBatch 无 ledger 降级：内核路径单条 send（dedupeKey = 批 hash）；
 //   6. CollectCoordinator ↔ notifyBatch 集成：跨轮续累（D2 探针）——分两轮 route
 //      2+1 sync → 闭合时单批 3 成员一次投递。
+//   7. [U9] 批嵌套展平 + 回执身份保全：父 busy 窗口两批同边沿合并 → 载荷单层 +
+//      展平成员带各自批 notifyId + settled 后双批销账（R7/R8 审查发现的结构性丢弃
+//      与回执断链两缺陷的回归锁）。
 //
 // fake ledger host 手法对齐 notify-ledger.test.ts（同款 mock host + settled 回调）；
 // 全程 tmpdir 零文件 IO（本族纯内存）；env 剥离见 beforeEach（RELAY/PI_SUBAGENT
@@ -26,6 +29,8 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import {
   bindNotifyLedgerHost,
+  getBoundNotifyLedger,
+  NOTIFY_ACK_CUSTOM_TYPE,
   NOTIFY_CUSTOM_TYPE,
   NOTIFY_LEDGER_CUSTOM_TYPE,
   _resetNotifyLedgerForTest,
@@ -557,5 +562,114 @@ async function settleFlush(): Promise<void> {
     expect(mock.sentMessages).toHaveLength(1);
     const details = mock.sentMessages[0]!.details as { items: BgNotifyRecord[] };
     expect(details.items.map((i) => i.id)).toEqual(["sa-sync"]);
+  });
+});
+
+// ─── 7. [U9] 批嵌套展平 + 回执身份保全 ─────────────────────
+//
+// 回归背景（R7/R8 审查发现的两个缺陷）：两个 sync 批在父 session busy 窗口先后闭合
+// → 同一边沿的两条 pending 合并投递。原 mergeItems 把批 wrapper 整体放进外层 items，
+// 产出 {batch:true, items:[{batch:true, items:[…]}, …]} 嵌套——下游 parseBgNotifyDetails
+// 只解一层，对 wrapper 逐条 null，全 wrapper 时整条 null（整批记录静默消失，触发拓扑
+// 可达：工具描述明示「Later sync starts join the same batch」）。修复 = 展平一层 +
+// 展平成员补批 notifyId（只展平不补键会切断销账链：批账目永不销账 → 120s 重投 +
+// 达上限假放弃）。
+
+describe("[U9] 批嵌套展平 + 回执身份保全（父 busy 窗口两批同边沿合并）", () => {
+  const batchA = [makeMember("sa-a1"), makeMember("sa-a2")];
+  const batchB = [makeMember("sa-b1")];
+
+  const fireSettled = (mock: LedgerHostMock): void => {
+    for (const handler of mock.settledHandlers) handler();
+  };
+
+  /** 两批在父 busy 窗口先后闭合（均挂 pending）→ 单次 settled 边沿合并投递。 */
+  function deliverMergedBatches(): { mock: LedgerHostMock; notifier: ReturnType<typeof createNotifier> } {
+    const mock = makeLedgerHost();
+    bindNotifyLedgerHost(mock.host);
+    mock.setIdle(false);
+    const notifier = createNotifier({
+      sendMessage: () => {},
+      hasRunningBackground: () => false,
+      isIdle: () => true, // ledger 已 bind：本用例不触内核路径，投递时机判据在 mock.host
+    });
+
+    expect(notifier.notifyBatch(batchA)).toBe(true);
+    expect(notifier.notifyBatch(batchB)).toBe(true);
+    expect(mock.sentMessages).toHaveLength(0); // busy：两条批通知均挂 pending
+
+    mock.setIdle(true);
+    fireSettled(mock); // 父空闲后的下一 settled 边沿：两条 pending 合并为单条注入
+    expect(mock.sentMessages).toHaveLength(1);
+    return { mock, notifier };
+  }
+
+  it("① 两 sync 批合并 → 载荷单层 {batch:true, items:[…]}（items 内无嵌套 wrapper）；content join 不变", () => {
+    // 对照基准：同两批在空闲时分别投递（各成一条），捕获各自 content——合并态 content
+    // 必须是两者的 "\n\n---\n\n" join（join 逻辑逐字节不变的判据，不依赖内部构造）
+    const soloMock = makeLedgerHost();
+    bindNotifyLedgerHost(soloMock.host);
+    const soloNotifier = createNotifier({
+      sendMessage: () => {},
+      hasRunningBackground: () => false,
+      isIdle: () => true,
+    });
+    expect(soloNotifier.notifyBatch(batchA)).toBe(true);
+    expect(soloNotifier.notifyBatch(batchB)).toBe(true);
+    expect(soloMock.sentMessages).toHaveLength(2);
+    const soloContents = soloMock.sentMessages.map((m) => m.content);
+    soloNotifier.dispose(); // 先于 _reset：dispose 会摘除当前绑定（顺序颠倒会误摘主实例）
+    _resetNotifyLedgerForTest();
+
+    const { mock, notifier } = deliverMergedBatches();
+    const sent = mock.sentMessages[0]!;
+    const details = sent.details as { batch: boolean; items: Array<Record<string, unknown>> };
+    expect(details.batch).toBe(true);
+    // 单层判据：items 内无嵌套 wrapper（batch===true 的项不存在）
+    expect(details.items.some((i) => i["batch"] === true)).toBe(false);
+    // 成员按账面插入顺序展平（批 A 成员在前）：wrapper 容器被其成员替换，成员自身字段保留
+    expect(details.items.map((i) => i["id"])).toEqual(["sa-a1", "sa-a2", "sa-b1"]);
+    expect(sent.content).toBe(`${soloContents[0]}\n\n---\n\n${soloContents[1]}`);
+
+    notifier.dispose();
+  });
+
+  it("② 展平后全部成员带批 notifyId（值 = 各自 wrapper 的批身份键）", () => {
+    const { mock, notifier } = deliverMergedBatches();
+    const idA = buildBatchNotifyId(batchA);
+    const idB = buildBatchNotifyId(batchB);
+
+    // 账面身份键 = wrapper 顶层 notifyId（两批独立写账）
+    const ledgerIds = mock.entries
+      .filter((e) => e.customType === NOTIFY_LEDGER_CUSTOM_TYPE)
+      .map((e) => e.data?.["notifyId"]);
+    expect(ledgerIds).toEqual([idA, idB]);
+
+    // 展平成员逐条补键：批 A 两成员共享 idA、批 B 成员带 idB
+    const details = mock.sentMessages[0]!.details as { items: Array<{ id: string; notifyId?: string }> };
+    expect(details.items.map((i) => i.notifyId)).toEqual([idA, idA, idB]);
+
+    notifier.dispose();
+  });
+
+  it("③ fireSettled 后两批账目各自销账（回执不变量：缺批 notifyId 则永不销账）", () => {
+    const { mock, notifier } = deliverMergedBatches();
+    const idA = buildBatchNotifyId(batchA);
+    const idB = buildBatchNotifyId(batchB);
+    const ledger = getBoundNotifyLedger();
+    expect(ledger).toBeDefined();
+    expect(ledger!.waitingReceiptCount()).toBe(2); // 已送达待回执：两批各一条
+
+    // 合并载荷落盘后的下一 settled 边沿：collectDeliveredNotifyIds 经 details.items[].notifyId
+    // 命中 → 两批各写一条 ack entry（批整体回执语义）
+    fireSettled(mock);
+    const ackedIds = mock.entries
+      .filter((e) => e.customType === NOTIFY_ACK_CUSTOM_TYPE)
+      .map((e) => e.data?.["notifyId"]);
+    expect(new Set(ackedIds)).toEqual(new Set([idA, idB]));
+    expect(ledger!.pendingCount()).toBe(0);
+    expect(ledger!.waitingReceiptCount()).toBe(0);
+
+    notifier.dispose();
   });
 });

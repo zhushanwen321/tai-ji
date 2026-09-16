@@ -27,59 +27,49 @@
   - turn=generating 不渲染行：streaming 本体由末位 turn 的 TurnMeta「工作中」行承担
     （D6 活动条列「streaming 本体」，不重复指示）；全部 idle 渲染 nothing。
 
-  视觉（[compact-defer-composer-queue §2.2]）：compacting 行升级为通栏活动带——accent-soft
-  底 + border-y hairline + py-[14px] 居中，副文案联动待发队列未提交计数（count===0 时副文案
-  与「·」不渲染）；bash/thinking/settling 行维持 system-notice 形态（左右 hairline +
-  Loader2 spinner + --text-xs，太极纯灰 tokens，无 emoji 无硬编码颜色）。文档流 block
-  （Virtualizer 之后），fork notice 等后续文档流内容自然堆叠在其后（ForkNotice 为文档流
-  block，无 absolute 定位——定位链已随 D6 死路径清理删除）。
+  视觉（D3 增强规格横线分隔行，四行同构）：compacting 行自「通栏 accent-soft 活动带」降级回归
+  本族（2026-09-16 裁决，design §3.3 D4）——摘除 -mx-5 通栏 / bg-[var(--accent-soft)] 底 /
+  border-y，与 bash/thinking/settling 行共用一套 DOM 结构：两端渐隐横线（transparent→
+  --border-strong 18%→82%→transparent）+ 13px/stroke 2.2 Loader2 spinner（neutral-mid）+
+  text-sm/fg/550 主文案 + 可选 mono 命令 + 可选「待发 N」chip（mono text-3xs + border-strong
+  描边，替代原 compactingFlushHint 副文案长句——计数口径不变：未提交全量条数，count===0 时
+  chip 不渲染，压缩状态本身独立成立）。system-notice + content-col 保留（居中 720 内容列）。
+  文档流 block（Virtualizer 之后），fork notice 等后续文档流内容自然堆叠在其后（ForkNotice
+  为文档流 block，无 absolute 定位——定位链已随 D6 死路径清理删除）。
   dev 断言：COMPACTING_NOTICE_HEIGHT / EXECUTING_BASH_NOTICE_HEIGHT 常量漂移检测随行迁入
-  （useConstantHeightAssert，生产裁剪零开销）。
+  （useConstantHeightAssert，生产裁剪零开销）；两常量随降级同批重测（D4 连带面）。
 -->
 <template>
   <div v-if="rows.length > 0" class="flex flex-col" data-testid="activity-strip">
-    <template v-for="row in rows" :key="row.kind">
-      <!-- compacting 行：[compact-defer-composer-queue §2.2] 通栏活动带——摘除 content-col /
-           system-notice（hairline 视觉由 border-y 承担，notice-in 动画不再复用），accent-soft 底 +
-           上下 hairline；-mx-5 抵消滚动容器 px-5，任意面板宽（含 >720px）下通栏到面板边缘。 -->
-      <div
-        v-if="row.kind === 'compacting'"
-        :ref="(el) => bindRowRef(row.kind, el)"
-        class="-mx-5 flex items-center justify-center gap-2 border-y border-hairline bg-[var(--accent-soft)] px-5 py-[14px]"
-        :data-testid="`activity-strip-row-${row.kind}`"
+    <!-- 四行同构（D3 增强规格）：左渐隐线 / spinner / 主文案（+ 可选命令 + 可选 chip）/ 右渐隐线。
+         两端渐隐用 Tailwind 任意值声明 background-image（bg-[image:…]，h-px 高度由 class 承担）。 -->
+    <div
+      v-for="row in rows"
+      :key="row.kind"
+      :ref="(el) => bindRowRef(row.kind, el)"
+      class="system-notice content-col flex min-w-0 items-center gap-2 py-1.5"
+      :data-testid="`activity-strip-row-${row.kind}`"
+    >
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
+      <Loader2 class="size-[13px] shrink-0 animate-spin text-neutral-mid" stroke-width="2.2" />
+      <span
+        class="flex min-w-0 items-center gap-1"
+        :data-testid="`activity-strip-text-${row.kind}`"
       >
-        <Loader2 class="size-3.5 shrink-0 animate-spin text-accent" />
+        <span class="shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg">{{ row.text }}</span>
         <span
-          class="text-[length:var(--text-sm)] text-neutral-fg"
-          :data-testid="`activity-strip-text-${row.kind}`"
-        >{{ row.text }}</span>
-        <template v-if="flushCount > 0">
-          <span class="text-neutral-faint">·</span>
-          <span
-            class="text-[length:var(--text-xs)] text-neutral-mid"
-            :data-testid="`activity-strip-flush-hint-${row.kind}`"
-          >{{ t('panel.message.compactingFlushHint', { count: flushCount }) }}</span>
-        </template>
-      </div>
-      <!-- bash / thinking / settling 行：维持原 system-notice + content-col 形态（左右 hairline） -->
-      <div
-        v-else
-        :ref="(el) => bindRowRef(row.kind, el)"
-        class="system-notice content-col flex min-w-0 items-center gap-2 py-1"
-        :data-testid="`activity-strip-row-${row.kind}`"
-      >
-        <span class="h-px flex-1 bg-border" />
-        <Loader2 class="size-3 shrink-0 animate-spin text-neutral-mid" />
+          v-if="row.command"
+          class="min-w-0 truncate font-mono text-[length:var(--text-xs)] font-medium text-neutral-fg"
+        >{{ row.command }}</span>
+        <!-- 待发 chip（compacting 行专属形态）：计数口径与 composer 队列区 defer 行归一规则同源 -->
         <span
-          class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-snug text-neutral-mid"
-          :data-testid="`activity-strip-text-${row.kind}`"
-        >
-          <span class="shrink-0">{{ row.text }}</span>
-          <span v-if="row.command" class="min-w-0 truncate font-mono">{{ row.command }}</span>
-        </span>
-        <span class="h-px flex-1 bg-border" />
-      </div>
-    </template>
+          v-if="row.chipCount"
+          class="shrink-0 rounded-[4px] border border-border-strong px-1.5 font-mono text-[length:var(--text-3xs)] font-medium leading-[1.8] text-neutral-mid"
+          :data-testid="`activity-strip-flush-hint-${row.kind}`"
+        >{{ t('panel.message.compactingQueueChip', { count: row.chipCount }) }}</span>
+      </span>
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
+    </div>
   </div>
 </template>
 
@@ -113,7 +103,18 @@ interface ActivityRow {
   text: string
   /** bash 行专属：mono 命令文本 */
   command?: string
+  /** compacting 行专属：待发 chip 计数（>0 才渲染 chip——见 flushCount 口径） */
+  chipCount?: number
 }
+
+const queue = useCompactQueue()
+
+/** 待发队列未提交条目计数（chip 口径，[compact-defer-composer-queue §2.1]）：只计
+ *  mode === undefined 的未提交条目，与 composer 队列区 defer 行归一规则同源——
+ *  flush 提交后已提交条目（mode 已写）不计入（承接面分通道：steer 镜像行 / send 无行）。
+ *  count === 0 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。口径不随形态变化：
+ *  原副文案长句（compactingFlushHint）与新「待发 N」chip 同源同值。 */
+const flushCount = computed(() => queue.peek(props.sessionId).filter((m) => m.mode === undefined).length)
 
 const rows = computed<ActivityRow[]>(() => {
   const list: ActivityRow[] = []
@@ -128,6 +129,7 @@ const rows = computed<ActivityRow[]>(() => {
       text: reason === 'threshold' || reason === 'overflow'
         ? t('panel.message.autoCompressing')
         : t('panel.message.compressing'),
+      chipCount: flushCount.value,
     })
   }
   // bash 行（`!` 命令执行期瞬时反馈；与 compacting 可并存——threshold turn 内压缩 + bash）
@@ -150,16 +152,8 @@ const rows = computed<ActivityRow[]>(() => {
   return list
 })
 
-const queue = useCompactQueue()
-
-/** 待发队列未提交条目计数（副文案口径，[compact-defer-composer-queue §2.2]）：只计
- *  mode === undefined 的未提交条目，与 composer 队列区 defer 行归一规则（§2.1）同源——
- *  flush 提交后已提交条目（mode 已写）不计入（承接面分通道：steer 镜像行 / send 无行）。
- *  count === 0 时副文案与「·」不渲染（活动带仍在，压缩状态本身独立成立）。 */
-const flushCount = computed(() => queue.peek(props.sessionId).filter((m) => m.mode === undefined).length)
-
-// dev-only 像素常量漂移检测（随行迁入本组件；compacting 行升级通栏带后 COMPACTING_NOTICE_HEIGHT
-// 已随 §2.2 同步 24 → 50，bash 行结构不变 EXECUTING_BASH_NOTICE_HEIGHT 不动）
+// dev-only 像素常量漂移检测（随行迁入本组件）：compacting 行降级回归横线分隔行后两常量同批重测
+// （COMPACTING 50 → 32 / EXECUTING_BASH 24 → 32，算式与实测校准位见 message-stream-layout.ts）
 const [compactingEl, executingBashEl] = useConstantHeightAssert([
   { name: 'COMPACTING_NOTICE_HEIGHT', expected: COMPACTING_NOTICE_HEIGHT },
   { name: 'EXECUTING_BASH_NOTICE_HEIGHT', expected: EXECUTING_BASH_NOTICE_HEIGHT },

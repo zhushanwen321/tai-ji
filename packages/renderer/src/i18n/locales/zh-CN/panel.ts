@@ -48,6 +48,11 @@ export default {
     thinkingHeader: '## 思考',
     expand: '展开',
     collapse: '收起',
+    // [system-notice-rendering-upgrade U3] 展开块内滚动信息条与展开按钮（BlockScrollBox 消费，U7）：
+    // 行区间含单位词（'{from}–{to} / {total} 行'）；展开态专用「展开全部」——既有 expand 键
+    // 无「全部」语义（收起态复用 collapse，不另立键）
+    blockScrollLines: '{from}–{to} / {total} 行',
+    blockScrollExpandAll: '展开全部',
     thinkingBlock: '思考',
     imagePlaceholder: '图片缓存已满',
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
@@ -65,8 +70,9 @@ export default {
     viewCommandDoc: '查看命令文档',
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
-    // [compact-defer-composer-queue u1] 压缩中活动带副文案（u3 消费；u1 负责新增 key）
-    compactingFlushHint: '完成后自动发送 {count} 条待发消息',
+    // [system-notice-rendering-upgrade U3] 压缩中「待发 N」chip（ActivityStrip 消费，D4；
+    // 形态从副文案长句变 chip，计数口径不变）
+    compactingQueueChip: '待发 {count}',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
@@ -81,8 +87,10 @@ export default {
     railInProgress: '进行中…',
     startConversation: '开始对话，或从左侧选择一个会话',
     scrollToBottom: '回到底部',
-    compacted: '已压缩上下文{tokens}',
-    compactedTokens: '（{tokens} tokens）',
+    // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
+    // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
+    compacted: '已压缩上下文',
+    compactedTokens: '{tokens} tokens',
     branchCreated: '已创建分支（自 {from}）',
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
@@ -99,8 +107,17 @@ export default {
     bashNoContext: '不进上下文',
     bashCancel: '取消',
     bashUnknownCommand: '(未知命令)',
-    // [W4 turn-attribution] 后台续跑 turn 起点行（Turn.vue trigger==='bg-notify'）与 bash 执行中瞬时行前缀（MessageStream.vue）
-    turnTriggerBgNotify: '后台任务完成 · 已继续处理',
+    // [system-notice-rendering-upgrade U3] background-bash 结构化行的「后台」chip（D2）
+    bashBackgroundChip: '后台',
+    // [system-notice-rendering-upgrade U3] 边界行拆主/从两段（D5，U6 消费）：计数主文案 +
+    // 「已继续处理」从文案。值不带前导点——点号由消费侧按「有主文案才加」条件渲染
+    // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
+    turnTriggerBgNotifySummary: '{count} 个后台任务完成',
+    turnTriggerBgNotifyContinued: '已继续处理',
+    // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
+    // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
+    turnTriggerBgNotifyFailed: '{count} 失败',
+    // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
     // 不写死阈值数字——阈值用户可调，写死会漂移）
   },

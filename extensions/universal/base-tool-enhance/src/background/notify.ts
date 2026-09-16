@@ -153,7 +153,12 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 	if (pi === undefined) return;
 	try {
 		pi.sendMessage(
-			{ customType: BACKGROUND_BASH_CUSTOM_TYPE, content: buildNotificationContent(task), display: true },
+			{
+				customType: BACKGROUND_BASH_CUSTOM_TYPE,
+				content: buildNotificationContent(task),
+				display: true,
+				details: buildNotifyDetails(task),
+			},
 			{ deliverAs: "steer", triggerTurn: true },
 		);
 	} catch (err) {
@@ -197,6 +202,49 @@ export function buildNotificationContent(task: BackgroundTask): string {
 	}
 	lines.push(`Full output: ${task.outputFile}; use bash_output {task_id:"${task.taskId}"} for details.`);
 	return lines.join("\n");
+}
+
+/**
+ * sendMessage details 载荷（设计 §3.3 D1 schema）。
+ *
+ * 为什么另立 details 而非让上层解析 content：content 是本模块内部模板字符串、写给
+ * LLM 接力的日志行，格式漂移即静默打破解析；details 经既有透传管道（event-adapter
+ * → registry → reducer → Message.details）结构化到达渲染层，content 原文对 LLM 逐
+ * 字节不变。
+ *
+ * 字面量镜像：消费侧解析器 `packages/shared/src/message.ts` 的
+ * `parseBackgroundBashDetails`（本包是独立 npm 包，不 import taiji 内部 shared）——
+ * 字段名、可空性、枚举值三处必须逐字对齐，改动须同步另一侧。
+ *
+ * 枚举收敛：`endReason` 只落 natural | timeout——killed 在 handleTaskExit 提前返回、
+ * process-exit 走收殓路径（只 emit 不发消息、根本不进本函数），两者均不可达（D1
+ * 源码核实），不为不可达形态造死值。
+ */
+export interface BackgroundBashDetails {
+	taskId: string;
+	command: string;
+	/** 存活时长（毫秒），与 content 中的耗时同源同口径。 */
+	durationMs: number;
+	endReason: "natural" | "timeout";
+	/** 无退出码时为 null（timeout / 被信号终止语义，D1 可空字段）。 */
+	exitCode: number | null;
+}
+
+/**
+ * 完成通知 details（D1）：终态字段与 buildNotificationContent 同源——durationMs
+ * 同用 `?? 0` 归一（终态条目必已物化，缺省仅防御）。
+ *
+ * command 取原始终态值不截断：截断（PENDING_NAME_LIMIT）是 content 行宽约束，结构化
+ * 消费方的行宽由渲染层自己决定（旧数据无 details 时仍走 content 原文兜底）。
+ */
+export function buildNotifyDetails(task: BackgroundTask): BackgroundBashDetails {
+	return {
+		taskId: task.taskId,
+		command: task.command,
+		durationMs: task.durationMs ?? 0,
+		endReason: task.reason === "timeout" ? "timeout" : "natural",
+		exitCode: task.exitCode ?? null,
+	};
 }
 
 /** 耗时换算常量（毫秒/秒/分/时 + 时分两位补零宽度）。 */

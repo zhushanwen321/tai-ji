@@ -19,18 +19,71 @@
       @edit-state-change="emit('edit-state-change', $event)"
     />
 
-    <!-- trigger 起点行（W4·D3）：无 user 起点的后台续跑 turn（隐藏完成通知边界开启）渲染轻量
-         弱化起点行替代 user 气泡——横线分隔 + Bell 图标 + 小号文案，视觉语言对齐 SystemNotice
-         元信息行（不冒充用户发言）。assistant 自启 turn（user:null 无 trigger）两者皆不渲染。 -->
+    <!-- trigger 起点行（W4·D3 + U6·D5 聚合增强）：无 user 起点的后台续跑 turn（隐藏完成通知
+         边界开启）渲染轻量弱化起点行替代 user 气泡——横线分隔（D3 增强规格：border-strong +
+         两端渐隐）+ 三态图标 + 计数/成败/耗时，视觉语言对齐 SystemNotice 元信息行（不冒充用户
+         发言）。计数/成败/耗时来自 core 分组层 notifySummary（D5 单一派生点），渲染层零解析、
+         零回扫 store。assistant 自启 turn（user:null 无 trigger）两者皆不渲染。 -->
     <div
       v-else-if="turn.trigger === 'bg-notify'"
-      class="mx-auto flex w-full min-w-0 items-center gap-2 py-1 animate-notice-in"
+      class="mx-auto flex w-full min-w-0 items-center gap-2 py-1.5 animate-notice-in"
       data-testid="turn-trigger-bgnotify"
     >
-      <span class="h-px flex-1 bg-border" />
-      <Bell class="size-3 shrink-0 text-neutral-mid" />
-      <span class="min-w-0 shrink-0 text-[length:var(--text-xs)] leading-snug text-neutral-mid">{{ t('panel.message.turnTriggerBgNotify') }}</span>
-      <span class="h-px flex-1 bg-border" />
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
+      <component
+        :is="notifyIcon"
+        class="size-[13px] shrink-0"
+        :class="notifyIconClass"
+        stroke-width="2.2"
+        data-testid="turn-trigger-bgnotify-icon"
+      />
+      <!-- 主文案：count>0 才渲染计数段（D5）；count===0（全解析失败/中性）只剩图标 + 从文案 -->
+      <span
+        v-if="notifyCount > 0"
+        class="shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg"
+        data-testid="turn-trigger-bgnotify-count"
+      >{{ t('panel.message.turnTriggerBgNotifySummary', { count: notifyCount }) }}</span>
+      <!-- 失败分句（D5「· M 失败」）：仅 failedCount>0 追加 -->
+      <template v-if="notifyFailedText">
+        <span class="shrink-0 text-neutral-faint" data-testid="turn-trigger-bgnotify-sep">·</span>
+        <span
+          class="shrink-0 text-[length:var(--text-xs)] text-neutral-mid"
+          data-testid="turn-trigger-bgnotify-failed"
+        >{{ notifyFailedText }}</span>
+      </template>
+      <!-- 状态点列（D5）：≤8 逐点三色（成功绿 / 失败金 / 中性灰）；>8 只显计数不渲染点列 -->
+      <span
+        v-if="notifyDots.length > 0"
+        class="flex shrink-0 items-center gap-[3px]"
+        data-testid="turn-trigger-bgnotify-dots"
+      >
+        <span
+          v-for="(outcome, i) in notifyDots"
+          :key="i"
+          class="size-1.5 rounded-full"
+          :class="NOTIFY_DOT_CLASS[outcome]"
+          data-testid="turn-trigger-bgnotify-dot"
+        />
+      </span>
+      <!-- 从文案：无主文案时不带前导点（D5） -->
+      <span
+        v-if="notifyCount > 0"
+        class="shrink-0 text-neutral-faint"
+        data-testid="turn-trigger-bgnotify-sep"
+      >·</span>
+      <span
+        class="shrink-0 text-[length:var(--text-xs)] text-neutral-mid"
+        data-testid="turn-trigger-bgnotify-continued"
+      >{{ t('panel.message.turnTriggerBgNotifyContinued') }}</span>
+      <!-- 耗时 meta（D3 meta 规格，钉右）：无含值记录不显 -->
+      <template v-if="notifyDuration">
+        <span class="shrink-0 text-neutral-faint" data-testid="turn-trigger-bgnotify-sep">·</span>
+        <span
+          class="shrink-0 font-mono text-[length:var(--text-2xs)] font-medium tabular-nums text-neutral-dim"
+          data-testid="turn-trigger-bgnotify-duration"
+        >{{ notifyDuration }}</span>
+      </template>
+      <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
     </div>
 
     <!-- assistant 区 -->
@@ -142,9 +195,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bell } from '@lucide/vue'
-import type { MessageTurn, FlatBlock } from '@taiji/core/domain/chat'
+import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
+import type { MessageTurn, FlatBlock, NotifyOutcome } from '@taiji/core/domain/chat'
 import { countThinking, countToolCalls, flattenTurnBlocks, computeTraceWindow, turnStableId, W } from '@taiji/core/domain/chat'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
 import ChangeSetCard from './ChangeSetCard.vue'
@@ -173,6 +227,94 @@ const props = withDefaults(
 
 /** trigger 起点行文案（W4·D3）：仅 bg-notify turn 渲染，见 template 注释。 */
 const { t } = useI18n()
+
+// ── trigger 起点行聚合展示（D5，U6）─────────────────────────────────────────
+// 聚合口径全部在 core（domain/chat/notify-summary 的 NotifySummary，经分组层旁挂到 turn），
+// 本组件只做「数字 → 文案/色」的展示映射：图标三态 + 主文案计数 + 失败分句 + 状态点列 + 耗时 meta。
+
+/** 状态点列上限（D5）：≤8 逐点三色；>8 只显计数（点列过密不可读） */
+const MAX_NOTIFY_DOTS = 8
+
+/** 边界行三态（D5）：失败 / 中性（未判定——旧 session 无 details / cancelled，不冒充成功）/
+ *  成功。count===0（全解析失败/中性，罕见）落中性档，只渲染图标 + 从文案。 */
+type NotifyTone = 'failed' | 'neutral' | 'success'
+
+const NOTIFY_ICON: Record<NotifyTone, Component> = {
+  failed: TriangleAlert,
+  neutral: Bell,
+  success: CheckCircle2,
+}
+
+const NOTIFY_TONE_CLASS: Record<NotifyTone, string> = {
+  failed: 'text-warn',
+  neutral: 'text-neutral-mid',
+  success: 'text-success',
+}
+
+/** 状态点三色（D5）：成功绿 / 失败金 / 中性灰 */
+const NOTIFY_DOT_CLASS: Record<NotifyOutcome, string> = {
+  success: 'bg-success',
+  failed: 'bg-warn',
+  neutral: 'bg-neutral-dim',
+}
+
+const notifyTone = computed<NotifyTone>(() => {
+  const s = props.turn.notifySummary
+  if (s && s.failedCount > 0) return 'failed'
+  if (s && s.neutralCount > 0) return 'neutral'
+  return 'success'
+})
+
+const notifyIcon = computed(() => NOTIFY_ICON[notifyTone.value])
+const notifyIconClass = computed(() => NOTIFY_TONE_CLASS[notifyTone.value])
+
+const notifyCount = computed(() => props.turn.notifySummary?.count ?? 0)
+
+/** 状态点列（去重后逐 record；>8 只显计数不渲染点列） */
+const notifyDots = computed<NotifyOutcome[]>(() => {
+  const outcomes = props.turn.notifySummary?.outcomes ?? []
+  return outcomes.length > MAX_NOTIFY_DOTS ? [] : outcomes
+})
+
+/**
+ * 失败分句（D5「· M 失败」）：专用键 `panel.message.turnTriggerBgNotifyFailed`（zh「{count} 失败」）。
+ * 不复用 TraceCompactorRow 的 `traceFailed`（「含 {count} 次失败」/「{count} failed」）——两者
+ * 语义域不同（收编行子计数 vs 边界行失败分句），复用会致 zh 呈现与设计字面不符。
+ */
+const notifyFailedText = computed(() => {
+  const failedCount = props.turn.notifySummary?.failedCount ?? 0
+  return failedCount > 0 ? t('panel.message.turnTriggerBgNotifyFailed', { count: failedCount }) : ''
+})
+
+/** 耗时 meta（D5）：去重后含 endedAt 值记录的 max(endedAt) − min(startedAt)；无值不显 */
+const notifyDuration = computed(() => {
+  const ms = props.turn.notifySummary?.durationMs
+  return ms === undefined ? '' : formatNotifyDuration(ms)
+})
+
+/** 耗时格式常数（秒宽 / 分段宽；与秒换算） */
+const MS_PER_SECOND = 1000
+const SECONDS_PER_MINUTE = 60
+const MINUTES_PER_HOUR = 60
+const TWO_DIGIT_WIDTH = 2
+
+/**
+ * 耗时格式（D5 边界行 meta）：秒内 "45s" → 分 "26m03s" → 时 "1h02m03s"（秒/分补零两位，
+ * 对齐 design §3.1 终态样本）。format-utils.formatDuration 输出 "26.1min" 形态，与本行样本
+ * 不一致故不复用（与 U3 SystemNotice 的 background-bash 耗时格式同源需求，跨单元统一见 U6 汇报）。
+ */
+function formatNotifyDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / MS_PER_SECOND))
+  const sec = totalSec % SECONDS_PER_MINUTE
+  const min = Math.floor(totalSec / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR
+  const hour = Math.floor(totalSec / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR))
+  const secText = String(sec).padStart(TWO_DIGIT_WIDTH, '0')
+  if (hour > 0) {
+    return `${hour}h${String(min).padStart(TWO_DIGIT_WIDTH, '0')}m${secText}s`
+  }
+  if (min > 0) return `${min}m${secText}s`
+  return `${totalSec}s`
+}
 
 /**
  * B9：编辑状态变化通知父组件。

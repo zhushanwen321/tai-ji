@@ -6,6 +6,8 @@
     - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只 header 红）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
+    - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
+      渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
     - failed：无鲜红全展开（红框已删），改中性灰默认 + hover 染 warn，错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
@@ -42,7 +44,7 @@
           <!-- thinking 块行尾时刻 -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
-        <!-- 展开内容区：copy 按钮在左上角，始终可见 -->
+        <!-- 展开内容区：copy 按钮在左上角，始终可见（BlockScrollBox 外层，层级不动） -->
         <Transition name="block-expand">
         <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.7] text-neutral-mid">
           <Button
@@ -55,8 +57,11 @@
             <Check v-if="copied === `thinking-${thinkingId ?? 'block'}`" class="size-3 text-success" />
             <CopyIcon v-else class="size-3" />
           </Button>
-          <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
-          <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
+          <!-- G5/D6：thinking 展开区统一块内滚动（240px 限高 + 渐隐 + 行区间信息条 + streaming 吸底） -->
+          <BlockScrollBox>
+            <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
+            <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
+          </BlockScrollBox>
         </div>
         </Transition>
       </div>
@@ -168,16 +173,21 @@
             </div>
             <!-- bash 整体容器：v6 §5 扁平凹槽（无 border + bg-input 深于父级，深度差即边界） -->
             <div v-if="isBashTool" class="rounded-sm bg-bg-input">
+              <!-- 命令头：保持在凹槽内、BlockScrollBox 之外 = 不随输出滚动（恒吸顶是布局的免费性质，
+                   无需「移入滚动区首位 + sticky + 底色遮盖」三件套，见设计 D6 接入点②） -->
               <div v-if="argPath" class="border-b border-hairline pl-4 py-1.5 font-mono text-[length:var(--text-sm)] text-neutral-fg">
                 {{ argPath }}
               </div>
-              <!-- 输出文本区内容守卫：均空时不渲染该 div（只剩命令块，无空白假展开） -->
-              <div v-if="displayContent || outputRaw || parsedJsonOutput" class="tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 py-1.5 select-text text-neutral-mid">
-                <AnsiText v-if="outputRaw" :content="outputRaw" />
-                <!-- JSON output（如 bash 执行 cw 命令的结构化输出）格式化缩进，限高滚动避免撑爆对话流 -->
-                <pre v-else-if="parsedJsonOutput" class="m-0 max-h-80 overflow-auto whitespace-pre">{{ parsedJsonOutput }}</pre>
-                <span v-else>{{ displayContent }}</span>
-              </div>
+              <!-- 输出文本区内容守卫：均空时不渲染（只剩命令块，无空白假展开）；
+                   限高滚动 + 行区间信息条由 BlockScrollBox 统一承担（含原 max-h-80 的 JSON 分支） -->
+              <BlockScrollBox v-if="displayContent || outputRaw || parsedJsonOutput" surface="recessed">
+                <div :class="toolResultClass">
+                  <AnsiText v-if="outputRaw" :content="outputRaw" />
+                  <!-- JSON output（如 bash 执行 cw 命令的结构化输出）格式化缩进 -->
+                  <pre v-else-if="parsedJsonOutput" class="m-0 whitespace-pre">{{ parsedJsonOutput }}</pre>
+                  <span v-else>{{ displayContent }}</span>
+                </div>
+              </BlockScrollBox>
             </div>
             <!-- 非 bash：meta 条 + 输出 -->
             <template v-else>
@@ -188,15 +198,18 @@
                   class="text-neutral-dim"
                 >{{ item.text }}</span>
               </div>
-              <div
-                class="tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 select-text"
-                :class="isFailed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'"
-              >
-                <GuiComponentRenderer v-if="guiComponent" :component="guiComponent" />
-                <AnsiText v-else-if="outputRaw" :content="outputRaw" />
-                <pre v-else-if="parsedJsonOutput" class="m-0 max-h-80 overflow-auto whitespace-pre">{{ parsedJsonOutput }}</pre>
-                <span v-else>{{ displayContent }}</span>
+              <!-- GUI 协议输出自管理高度，不包 BlockScrollBox（设计 D6 接入点③） -->
+              <div v-if="guiComponent" :class="toolResultClass">
+                <GuiComponentRenderer :component="guiComponent" />
               </div>
+              <!-- 文本 / ANSI / JSON 输出：统一块内滚动（G5/D6） -->
+              <BlockScrollBox v-else>
+                <div :class="toolResultClass">
+                  <AnsiText v-if="outputRaw" :content="outputRaw" />
+                  <pre v-else-if="parsedJsonOutput" class="m-0 whitespace-pre">{{ parsedJsonOutput }}</pre>
+                  <span v-else>{{ displayContent }}</span>
+                </div>
+              </BlockScrollBox>
             </template>
             <!-- [D6-⑨ u7] toolResult 图片（bash/非 bash 分支共用的统一出口；路径引用渲染
                  + 帽满占位/降级 badge，见 ToolResultImages） -->
@@ -232,6 +245,7 @@ import { openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
+import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
 import { formatDuration, formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
@@ -369,6 +383,17 @@ const isBashTool = computed(() => toolName.value === 'bash')
 const result = computed(() => props.tool?.output)
 /** 展示用内容：output 优先，failed 时兜底 tool.error（如 read ENOENT 输出为空但 error 有值） */
 const displayContent = computed(() => result.value || (isFailed.value ? (props.tool?.error ?? '') : ''))
+/** 输出区容器 class（bash 凹槽 / 非 bash / GUI 分支共用）：
+ *  - py-1.5：bash 凹槽内的竖向留白（既有形态；非 bash 输出区无此留白）
+ *  - hover:text-neutral-fg：非 bash 失败态提升可读性（既有形态，bash 无） */
+const TOOL_RESULT_CLASS = 'tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 select-text text-neutral-mid'
+const toolResultClass = computed(() => [
+  TOOL_RESULT_CLASS,
+  {
+    'py-1.5': isBashTool.value,
+    'hover:text-neutral-fg': !isBashTool.value && isFailed.value,
+  },
+])
 
 /** JSON.stringify 缩进空格数（具名常量避 no-magic-numbers） */
 const JSON_INDENT = 2

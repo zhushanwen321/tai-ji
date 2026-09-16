@@ -171,6 +171,19 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // 波 1 临时保留的 record.collectMode 门随之消亡。async 成员按统一轮终形态 running。
     const notifyStatus: BgNotifyRecord["status"] =
       legacyClosed || archived || opts?.batchMember === true ? "closed" : "running";
+    // [U8 / 设计 §3.3 D5 耗时来源] endedAt 物化域 =「running 轮终 + 批成员」——在投影
+    // 边界一次合成固定值（进返回对象的数值不随调用方读取时刻增长）。根因：轮终收口
+    // markRoundIdle 不写内存 endedAt（「终态冻结信号」不变量），running 轮终载荷的
+    // endedAt 恒缺失 → bg-notify 边界行的耗时恒不显；批成员只是载荷形态折 closed，
+    // 同缺内存值，一并物化。
+    // 域外两分支不合成新值（原值透传：有则透传、无则保持 undefined）：
+    //   ① archived 归档提示——归档时刻 ≠ 任务结束时刻，合成会把「收起延迟」当耗时
+    //      （过夜后收起可显几十小时）；
+    //   ② legacyClosed 旧终态遗留——保持本映射既有透传语义（有则透传、无则不补）。
+    // 归档提示经 notifyClosed 复用本映射 → 物化判定必须落在投影边界而非各调用点。
+    // 快照已有值优先（settleRoundFailed / drain-drop 两条自带 endedAt 的既有构造路径
+    // 保真）；record 内存零触碰——本函数只读快照，不回写 record.endedAt。
+    const materializeEndedAt = notifyStatus === "running" || opts?.batchMember === true;
     return {
       id: snap.id,
       status: notifyStatus,
@@ -179,7 +192,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       result: snap.result,
       error: snap.error,
       startedAt: snap.startedAt,
-      endedAt: snap.endedAt,
+      endedAt: materializeEndedAt ? (snap.endedAt ?? Date.now()) : snap.endedAt,
       patchFile: record.patchFile,
       // round 透传给 notifier 的 dedup key（对话模式按轮次去重，G1 决策 9）。
       round: record.round,

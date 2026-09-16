@@ -231,6 +231,47 @@ function scanSessionLedgerEntries(entries: readonly unknown[]): {
   return { ledger, acked, abandoned };
 }
 
+/**
+ * [U9] 合并投递的 items 构造：批 wrapper record（{batch:true, notifyId, items}）展平
+ * 一层，其成员 spread 进外层 items 并补 wrapper 身份键；非 wrapper record 原样保留。
+ *
+ * 为什么必须展平：两个 sync 批在父 session busy 窗口先后闭合时，同一边沿的两条 pending
+ * 合并会产出 {batch:true, items:[{batch:true, items:[…]}, …]} 嵌套——下游
+ * parseBgNotifyDetails 只解一层，对 wrapper 逐条 null，全 wrapper 时整条 null、整批
+ * 记录静默消失（触发拓扑可达：批工具描述明示「Later sync starts join the same batch」）。
+ *
+ * 为什么必须补身份键：改「展平不补键」会切断销账链——合并态的回执匹配面 =
+ * collectDeliveredNotifyIds 经 details.items[].notifyId，成员共享批 notifyId 即该批
+ * 整体回执语义；不补则批账目永不销账 → 120s 重投 + 达上限假放弃。这与 notifier.ts
+ * notifyBatch 的「批身份键必须顶层可达」是同一条不变量在合并态的同款保全。
+ *
+ * 身份键取值 = item.notifyId（账本身份键 = 回执匹配的判据键）而非 record.notifyId：
+ * 批路径两者恒等（notifier 把 batchNotifyId 同时用作账本键与 details 顶层键），账本键
+ * 才是销账判据，二者万一背离时以销账可达为准。
+ */
+function flattenBatchItems(batch: NotifyLedgerItem[]): unknown[] {
+  const items: unknown[] = [];
+  for (const item of batch) {
+    const members = batchWrapperMembers(item.record);
+    if (members === undefined) {
+      items.push(item.record);
+      continue;
+    }
+    for (const member of members) {
+      items.push(isPlainObject(member) ? { ...member, notifyId: item.notifyId } : member);
+    }
+  }
+  return items;
+}
+
+/** [U9] 批 wrapper record 判定 + 成员取出：{batch:true, items:[…]} → 成员数组；
+ *  其余形态（单条 BgNotifyRecord / 非法载荷）→ undefined（调用方原样保留）。 */
+function batchWrapperMembers(record: unknown): readonly unknown[] | undefined {
+  if (!isPlainObject(record) || record["batch"] !== true) return undefined;
+  const members = record["items"];
+  return Array.isArray(members) ? members : undefined;
+}
+
 /** 收集 wanted 集合中已送达（custom_message entry 出现）的 notifyId。
  *  送达 entry 两种形态都匹配：单条 details.notifyId / 批量 details.items[].notifyId
  *  （对齐 courier 合并投递的 details 结构）。 */
@@ -467,7 +508,10 @@ export function createNotifyLedger(
 
   /** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
    *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
-   *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。 */
+   *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
+   *  [U9] items 经 flattenBatchItems 展平一层——两条 pending 均为批 wrapper 时不展平
+   *  会产嵌套载荷致整批静默消失，展平成员补批身份键保回执销账（详见该函数注释）。
+   *  单条分支不动：单条批的 details 即 wrapper 本体，顶层 notifyId 天然可达。 */
   function mergeItems(batch: NotifyLedgerItem[]): {
     customType: string;
     content: string;
@@ -481,7 +525,7 @@ export function createNotifyLedger(
       customType: NOTIFY_CUSTOM_TYPE,
       content: batch.map((i) => i.content).join("\n\n---\n\n"),
       display: true,
-      details: { batch: true, items: batch.map((i) => i.record) },
+      details: { batch: true, items: flattenBatchItems(batch) },
     };
   }
 
