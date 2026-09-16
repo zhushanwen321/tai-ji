@@ -1,6 +1,6 @@
 # 投递所有权内核 实施计划
 
-基线: (回填于首次 commit 后) | 来源设计: .tmp/tech-design/delivery-ownership-kernel.md（v4 审查通过） | 日期: 2026-09-16
+基线: 6dc14b6ee | 来源设计: .tmp/tech-design/delivery-ownership-kernel.md（v4 审查通过） | 日期: 2026-09-16
 
 ## 0 章节映射
 
