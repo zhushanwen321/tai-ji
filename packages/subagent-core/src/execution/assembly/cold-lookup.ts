@@ -264,8 +264,8 @@ function resurrectColdRecord(
   // [review round2] 跨重启 worktree 绑定丢失防护：原 record 创建时启用了 worktree 隔离
   //（session entry 的 worktree 标志），但 WorktreeHandle 不可序列化、重建后恒缺失。
   // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
-  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收起
-  // markArchived 不触本守卫；旧 closeChatIdle 语义已改优雅收口归档，泄漏的 worktree
+  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收口落账
+  // markSettledOut 不触本守卫；旧 closeChatIdle 语义已改优雅收口，泄漏的 worktree
   // 由 reaper 兜底回收）。
   // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
   record.hadWorktree = found.worktree === true;
@@ -295,7 +295,7 @@ function resurrectColdRecord(
  *
  *  [U4] allowReconnect 参数退役保留：两态下 idle 全候选（万物可续），message 专属的
  *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见面随之统一为
- *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口/归档，符合新语义）。
+ *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口落账，符合新语义）。
  *  参数保留是因调用方 record-access.ts 的签名面（领地外）不做破坏性变更。
  *
  *  @returns 重建的 record；磁盘也无则 undefined

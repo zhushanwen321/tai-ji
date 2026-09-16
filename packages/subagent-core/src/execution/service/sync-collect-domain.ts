@@ -68,8 +68,8 @@ export interface SyncCollectDomainDeps {
     notify(record: BgNotifyRecord): void;
     notifyBatch(records: readonly BgNotifyRecord[], budget?: BatchBudgetParams): boolean;
   };
-  /** 批成员自动 close（[modeless 波3]：批闭合自动归档——成员为一次性计算单元，
-   *  批通知即终态通知；归档编排本体在 RecordLifecycle.archiveBatchMembers，经壳装配
+  /** 批成员自动 close（[modeless 波3]：批闭合自动收口落账——成员为一次性计算单元，
+   *  批通知即终态通知；收口编排本体在 RecordLifecycle.archiveBatchMembers，经壳装配
    *  闭包注入。本聚合零 lifecycle 直依）。 */
   readonly closeMembers: (recordIds: readonly string[]) => Promise<void>;
   /** 所属根 session ID（flushBatch 兜底落标归属；#2 聚合字段现读）。 */
@@ -95,7 +95,7 @@ export class SyncCollectDomain {
    *  落标合一原语，屏障 await 全部落盘——出口①，见下方闭包注释）先于
    *  notifier.notifyBatch 单条批投递（幂等键 sync-batch:<hash> ledger 写账 →
    *  attemptDeliver 边沿投递），投递后批成员自动 close（[modeless 波3]，通知送达后
-   *  归档——close 顺序约束 [写死] 同款）；闭合触发排程合批 flush：同宏任务去抖窗口
+   *  收口落账——close 顺序约束 [写死] 同款）；闭合触发排程合批 flush：同宏任务去抖窗口
    *  收纳背靠背 route——U8 拆批盲窗修复。屏障先于写账 = 「通知可达 ⇒ 索引就位」的
    *  构造性保证（时序竞态修复，见 flushBatch 闭包注释）。
    *  [U8] 排程与 E9 交互：dispose 经 convertPendingSyncBufferToAsync 先取消挂起排程
@@ -159,11 +159,11 @@ export class SyncCollectDomain {
             { detail: { memberIds: members.map((m) => m.id) } },
           );
         }
-        // [modeless 波3] 批闭合自动 close：通知送达后归档成员（close 顺序约束 [写死]
-        // 同款——归档即 gate ①静默，提前会吞批通知）。成员为一次性计算单元，批通知
+        // [modeless 波3] 批闭合自动 close：通知送达后收口落账成员（close 顺序约束 [写死]
+        // 同款——提前收口会吞批通知）。成员为一次性计算单元，批通知
         // 即终态通知；自动 close 后 record 不再 idle 留守，E4（sync+conversation 组合）
-        // 的升级语义面结构性消亡。「续聊批成员」路径 = fork-from（归档 record 可 fork，
-        // 已有能力）。归档幂等（markArchived no-op）；此处 await 完整归档编排
+        // 的升级语义面结构性消亡。「续聊批成员」路径 = fork-from（已收口 record 可 fork，
+        // 已有能力）。收口落账幂等（markSettledOut 恒安全）；此处 await 完整收口编排
         //（worktree 回收含在内——见 RecordLifecycle.archiveBatchMembers）。
         await this.deps.closeMembers(members.map((m) => m.id));
       },

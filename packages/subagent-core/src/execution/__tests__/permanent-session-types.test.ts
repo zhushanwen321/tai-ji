@@ -10,7 +10,7 @@
 //   ③ RecordBinding 新字段（epoch/transcriptRef/lastAbandonedRound）持久化
 //      往返保真 + 损坏载荷守卫归一 + 存量 binding 零迁移；
 //   ④ ExecutionRecord 新字段可选性（构造零破坏：缺省 undefined + 可选赋值）；
-//   ⑤ store 新意图原语骨架 throw not implemented（生产路径禁调的编程错误信号）。
+//   ⑤ store 新收口原语骨架 throw not implemented（生产路径禁调的编程错误信号）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -34,7 +34,6 @@ import {
 } from "../assembly/types.ts";
 import type {
   Epoch,
-  Intent,
   TranscriptRef,
 } from "../assembly/types.ts";
 
@@ -167,10 +166,7 @@ describe("StopReason 枚举完整性", () => {
 // ── 新词汇类型面（值域编译锚） ────────────────────────────────────────────────
 
 describe("新词汇类型面值域", () => {
-  it("Intent / Epoch 值域", () => {
-    const intents: Intent[] = ["active", "archived"];
-    expect(intents).toEqual(["active", "archived"]);
-
+  it("Epoch 值域", () => {
     const epoch: Epoch = 0;
     expect(epoch).toBe(0);
   });
@@ -245,24 +241,21 @@ describe("RecordBinding 新字段（epoch / transcriptRef / lastAbandonedRound�
 // ── ④ ExecutionRecord 新字段可选性 ──────────────────────────────────────────
 
 describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
-  it("createRecord 不传新字段时五字段均 undefined（旧词汇零迁移）", () => {
+  it("createRecord 不传新字段时四字段均 undefined（旧词汇零迁移）", () => {
     const rec = baseRecord();
-    expect(rec.intent).toBeUndefined();
     expect(rec.stopReason).toBeUndefined();
     expect(rec.epoch).toBeUndefined();
     expect(rec.lastAbandonedRound).toBeUndefined();
     expect(rec.transcriptRef).toBeUndefined();
   });
 
-  it("五字段可选赋值（类型层验证：U2 写点就绪）", () => {
+  it("四字段可选赋值（类型层验证：U2 写点就绪）", () => {
     const rec = baseRecord();
-    rec.intent = "archived";
     rec.stopReason = "interrupted-by-parent";
     rec.epoch = 1;
     rec.lastAbandonedRound = { epoch: 0, round: 3 };
     rec.transcriptRef = { engine: "pi", sessionFile: "a.jsonl" };
 
-    expect(rec.intent).toBe("archived");
     expect(rec.stopReason).toBe("interrupted-by-parent");
     expect(rec.epoch).toBe(1);
     expect(rec.lastAbandonedRound).toEqual({ epoch: 0, round: 3 });
@@ -270,11 +263,11 @@ describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
   });
 });
 
-// ── ⑤ store 新意图原语（U2 已实装，冒烟）────────────────────────────────────
+// ── ⑤ store 新收口原语（U2 已实装，冒烟）────────────────────────────────────
 // 详细行为矩阵（CAS 语义 / 原语副作用面 / epoch 递增）见
 // permanent-session-state-machine.test.ts；此处仅锁定「骨架已填肉、可调用」。
 
-describe("store 新意图原语（U2 实装冒烟）", () => {
+describe("store 新收口原语（U2 实装冒烟）", () => {
   it("markSettled：running record 收口为 idle + stopReason（骨架 throw 已移除）", () => {
     const store = new RecordStore(path.join(dir, "sessions"));
     const rec = baseRecord();

@@ -6,8 +6,8 @@
 //     值域 closed/completed/failed/cancelled，无 executionStatus/intent）经新代码读侧
 //     投影：恒 idle + stopReason 桥接（finalized→reason / cancelled→interrupted），
 //     不炸、不丢 identity；
-//   - manifest 双写映射（U5-D10）：markSettled 轮间 idle → legacy running（活跃成员）
-//     / markArchived archived intent → legacy closed（「已收起」= 结束）；
+//   - manifest 双写映射：markSettled 轮间 idle / markSettledOut 收口落账 → legacy
+//     running（[u-arch / §3.4 方案 A] 收起概念删除，可续聊 record = 活跃成员）；
 //   - 双写回读：manifest 源按 executionStatus（两态权威词）优先，settle 产物
 //     （legacy running + executionStatus idle）读回 idle；
 //   - [B-restart manifest 契约面] engine/engineHandle 域下行 + manifest 源回读
@@ -188,7 +188,7 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
   });
 });
 
-describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", () => {
+describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
@@ -208,7 +208,7 @@ describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", 
   const readManifest = (id: string): Record<string, unknown> =>
     JSON.parse(fs.readFileSync(path.join(manifestDir, `${id}.json`), "utf-8")) as Record<string, unknown>;
 
-  it("markSettled 轮间 idle（无 closedReason，非 archived）→ legacy status=running + executionStatus=idle", () => {
+  it("markSettled 轮间 idle（无 closedReason）→ legacy status=running + executionStatus=idle", () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     const record = makeExecutionRecord("sa-settle");
     store.register(record);
@@ -218,22 +218,23 @@ describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", 
     expect(manifest.status).toBe("running"); // §3.2.8 活跃成员下行（可续聊 = 活跃）
     expect(manifest.executionStatus).toBe("idle");
     expect(manifest.closedReason).toBeUndefined();
-    expect(manifest.intent).toBeUndefined();
+    expect(manifest.intent).toBeUndefined(); // [u-arch] intent 停写（概念删除）
     store.dispose();
   });
 
-  it("markArchived（archived intent）→ legacy status=closed + intent 下行 + executionStatus=idle", () => {
+  it("markSettledOut 收口落账 → legacy status=running + executionStatus=idle（[u-arch / §3.4 方案 A] 收起概念删除）", () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     const record = makeExecutionRecord("sa-arch");
     store.register(record);
     store.markSettled(record, "gc");
-    store.markArchived(record);
+    store.markSettledOut(record);
 
     const manifest = readManifest("sa-arch");
-    // U5-D10：archived → 旧 closed（「已收起」在旧消费者语义里 = 结束）
-    expect(manifest.status).toBe("closed");
-    expect(manifest.intent).toBe("archived");
+    // [u-arch / §3.4 方案 A] close 收口落账 record 投 running——可续聊 record =
+    // 旧 reader 视角的活跃成员（原「收起位 → closed」下行分支随概念删除退役）。
+    expect(manifest.status).toBe("running");
     expect(manifest.executionStatus).toBe("idle");
+    expect(manifest.intent).toBeUndefined(); // intent 停写
     store.dispose();
   });
 
@@ -290,18 +291,17 @@ describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", 
     reader.dispose();
   });
 
-  it("双写回读：archived manifest 源读回 idle + intent=archived（归档意图跨重启不丢）", () => {
+  it("双写回读：markSettledOut 收口落账产物 manifest 源读回 idle（intent 停写停读）", () => {
     const writer = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     const record = makeExecutionRecord("sa-arch-rt");
     writer.register(record);
     writer.markSettled(record, "gc");
-    writer.markArchived(record);
+    writer.markSettledOut(record);
     writer.dispose();
 
     const reader = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
     const rec = reader.collectRecords(10, "all").find((r) => r.id === "sa-arch-rt");
     expect(rec?.status).toBe("idle");
-    expect(rec?.intent).toBe("archived");
     reader.dispose();
   });
 
@@ -334,9 +334,11 @@ describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", 
     reader.dispose();
   });
 
-  it("entry intent 透传：archived 末条 entry 重建（rebuildEntryRecord）→ manifest 补建投影 closed", () => {
-    // 离线形态：主 session 末条 subagent-record entry 携带 intent=archived（close 落盘），
-    // manifest 缺失 → rebuildIndexes 惰性补建按 intent 派生 legacy closed。
+  it("旧 entry 残留 intent 键被忽略（[u-arch] 停读证明）→ manifest 补建投 running、engine 域仍下行", () => {
+    // 离线形态：主 session 末条 subagent-record entry 携带旧数据残留 intent 键
+    //（收起概念删除前 close 落盘形态），manifest 缺失 → rebuildIndexes 惰性补建。
+    // [u-arch] 读侧停读：残留键被忽略（与 chatMode 消亡同款先例），补建不再按
+    // intent 派生 legacy closed——按 §3.4 方案 A 判定投 running。
     const mainSessionFile = path.join(tmpDir, "main-session.jsonl");
     const entry = JSON.stringify({
       type: "custom",
@@ -377,11 +379,10 @@ describe("[U8/U5-D10] manifest 双写映射 + 双写回读 + engine 域下行", 
     store.recoverEntryOnlyOrphans(mainSessionFile, "root-session");
     const visible = store.collectRecords(10, "all").find((r) => r.id === "sa-entry-arch");
     expect(visible?.engine).toBe("zcode");
-    expect(visible?.intent).toBe("archived");
 
     const manifest = readManifest("sa-entry-arch");
-    expect(manifest.status).toBe("closed"); // intent=archived 下行（U5-D10）
-    expect(manifest.intent).toBe("archived");
+    expect(manifest.status).toBe("running"); // 残留 intent 键不再派生 closed（§3.4 方案 A）
+    expect(manifest.intent).toBeUndefined(); // 补建停写 intent
     expect(manifest.executionStatus).toBe("idle");
     expect(manifest.engine).toBe("zcode"); // entry 重建的 engine 域随补建下行
     store.dispose();

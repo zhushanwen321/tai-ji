@@ -10,7 +10,7 @@
 // pending_notifications 工具虚报活跃。
 //
 // 补发机制：对「本 session 的 register entry × 对应 record 状态 ∈ 终态集 ∪ record
-// 已归档/不存在」的差集补发 unregister。**已归档**（archive 从内存移除、磁盘有
+// 已离场/不存在」的差集补发 unregister。**已离场**（archive 从内存移除、磁盘有
 // finalized sidecar → 读侧重建 closed）与**不存在**（畸形条目对不上任何 record）
 // 同视同终态——「查不到即补注销」判据兜底链才闭合。
 //
@@ -52,7 +52,7 @@ export type SupervisedRecordState =
   | "active"
   /** 终态（closed，含 closedReason——映射 pending reason 用）。 */
   | { terminal: true; closedReason: string | undefined }
-  /** 已归档/不存在（视同终态，补注销）。 */
+  /** 已离场/不存在（视同终态，补注销）。 */
   | "missing";
 
 /** sweep 依赖注入（全部单测可替身）。 */

@@ -48,12 +48,12 @@ export interface RoundsCtx {
  * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
  * 放大 entry 写面，编排粒度属调用方职责）。
  *
- * @returns false = id 不在内存（未注册/已归档）——事件丢弃并 debug 留痕。
+ * @returns false = id 不在内存（未注册/已回收）——事件丢弃并 debug 留痕。
  */
 export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
-    logger.debug("[subagents] appendEvent: record not in memory (not registered / archived)", {
+    logger.debug("[subagents] appendEvent: record not in memory (not registered)", {
       detail: { id, eventType: event.type },
     });
     return false;
@@ -108,7 +108,7 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  *      字段已退役（[U5/D4] idle 即 resumable——字段从 record/entry 契约整体删除，
  *      无簿记动作）；⑥ idleSince 刷新
  *      （idle-GC 判据锚）；⑦ **`.alive` 保留**
- *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
+ *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
  *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
  *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
  *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry

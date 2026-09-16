@@ -285,9 +285,9 @@ export class SubagentService {
     this.syncCollect = new SyncCollectDomain({
       getStore: () => this.store,
       getNotifyHost: () => this.notifyHost,
-      // [modeless 波3] 批闭合自动 close（flush 投递后归档成员——一次性计算单元终态
-      // 收口，无续聊留守；归档编排本体在 RecordLifecycle.archiveBatchMembers，静默
-      // 变体：不发「已收起」提示，批通知即成员终态通知）。
+      // [modeless 波3] 批闭合自动 close（flush 投递后收口落账成员——一次性计算单元终态
+      // 收口，无续聊留守；收口编排本体在 RecordLifecycle.archiveBatchMembers，静默
+      // 变体：不发「已结束」提示，批通知即成员终态通知）。
       closeMembers: (ids) => this.recordLifecycle.archiveBatchMembers(ids),
       getSessionRootId: () => this.sessionRootId,
       getCollectSyncSection: () => this.modelService.getGlobalConfig().collectSync,
@@ -307,7 +307,7 @@ export class SubagentService {
       getMainSessionFile: () => this.mainSessionFile,
       getExecNesting: () => this.execNesting,
     });
-    // [R3] 域 #4/#11/#17/#18 聚合（[U5] 意愿动作写面：dispose 批量收起/close 归档三路/
+    // [R3] 域 #4/#11/#17/#18 聚合（[U5] 收口动作写面：dispose 批量收口/close 收口落账三路/
     // cancel 中断/finalize 簇——D5「store 与写面入口的唯一宿主」，H4 落点）。跨聚合边
     // 收敛：C-5（onRecordFinalizedCleanup 汇聚点 + Continuation 队列清空，本体在壳
     // #14 协作面）经 deps 回调。C-6（roundSupervisor/reconcile sweep 装配闭包调
@@ -697,7 +697,7 @@ export class SubagentService {
 
   /**
    * close action 的统一行为分流（running 子态 × force：优雅收口挂起 / force 走
-   * cancelBackground + 归档）。本体已迁 RecordLifecycle；壳纯转发，签名不变。
+   * cancelBackground + 收口落账）。本体已迁 RecordLifecycle；壳纯转发，签名不变。
    */
   private closeSubagent(record: ExecutionRecord, force: boolean): Promise<void> {
     return this.recordLifecycle.closeSubagent(record, force);
@@ -705,8 +705,8 @@ export class SubagentService {
 
   // [H1 U6] closeAfterRoundSettled（[M5] chat 域「轮完成时终态化」消费面）已随 chat 域
   // closeAfterRound 挂起标志退役删除：D4 close = abort 在途 + 清空队列 + 立即终态化
-  //（[U5] 旧 closeChatIdle 语义 = abort + 清队 + 立即终态化，已改优雅收口归档）；
-  // one-shot 域的 closeAfterRound 消费走 consumePendingArchive（主干尾部 route 后归档）
+  //（[U5] 旧 closeChatIdle 语义 = abort + 清队 + 立即终态化，已改优雅收口落账）；
+  // one-shot 域的 closeAfterRound 消费走 consumePendingArchive（主干尾部 route 后收口落账）
   //（settleOneShotOutcome，照旧）。
 
   // ── 域 #17 取消 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──

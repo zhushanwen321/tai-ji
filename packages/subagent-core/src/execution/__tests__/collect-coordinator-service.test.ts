@@ -169,23 +169,24 @@ describe("collectCoordinator service integration (U2)", () => {
   });
 
   it("auto-closes batch members after the batch flush delivers ([modeless 波3] 批闭合自动 close)", async () => {
-    // 成员是「一次性计算单元」：批通知送达后协调器自动对成员执行归档（close）——
-    // 通知送达后才归档（close 顺序约束 [写死] 同款），归档静默不再发「已收起」提示
-    // （批通知即成员终态通知，逐成员归档提示会击穿攒批一次唤醒语义）。
+    // 成员是「一次性计算单元」：批通知送达后协调器自动对成员执行收口落账（close）——
+    // 通知送达后才收口（close 顺序约束 [写死] 同款），收口不再发「已结束」提示
+    // （批通知即成员终态通知，逐成员收口提示会击穿攒批一次唤醒语义）。
     const spy = spyNotifier(service);
     const handle = await service.execute({ task: "collect me", slug: "collect-me", collect: "sync" });
     await until(() => fake.runs.length >= 1);
     await settleLast();
     await until(() => spy.notifyBatch.mock.calls.length > 0);
-    // flush 投递后自动归档：intent 翻 archived（观察者形态——subagent-record entry）
+    // flush 投递后自动收口落账（观察者形态——subagent-record entry 出现收口后
+    // batchFinalized 补标记投影）
     await until(() => {
       const entries = pi.appendEntry.mock.calls
         .filter((c) => c[0] === "subagent-record")
         .map((c) => c[1] as Record<string, unknown>)
         .filter((d) => d["id"] === handle.subagentId);
-      return entries.some((d) => d["intent"] === "archived");
+      return entries.some((d) => d["batchFinalized"] === true && d["status"] === "idle");
     });
-    // 归档后无逐成员「已收起」提示（spy.notify 只可能收到 flush 前的轮终直发——
+    // 收口后无逐成员「已结束」提示（spy.notify 只可能收到 flush 前的轮终直发——
     // sync 成员零单发），攒批一次唤醒语义保持
     expect(spy.notify).not.toHaveBeenCalled();
   });

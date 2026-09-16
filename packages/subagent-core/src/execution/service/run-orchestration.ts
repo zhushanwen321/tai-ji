@@ -352,14 +352,14 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [S5 修复] 创建即置 hadWorktree：归档清句（markArchived）后 entry/binding 的
+        // [S5 修复] 创建即置 hadWorktree：close 收口清句（markSettledOut）后 entry/binding 的
         // worktree 投影与 Continuation 重建守卫（hadWorktree && !worktreeHandle）靠本
-        // 标志承载——缺置 = 归档后守卫第一条不满足、重建永不触发。
+        // 标志承载——缺置 = 收口后守卫第一条不满足、重建永不触发。
         record.hadWorktree = true;
         // [U5 判据] cancel/dispose 抢先 = record 已离 running（markSettled settle 为
         // idle——新语义不写 closedReason，status 单判据即收口判读；两态状态机下
         // running 才有在飞任务）。赋值后同同步段检查：已收口则主动 cleanup（幂等，
-        // 抢先路径的收起回收覆盖）+ throw cancelled（不进轮次——避免子进程白跑）。
+        // 抢先路径的收口回收覆盖）+ throw cancelled（不进轮次——避免子进程白跑）。
         if (record.status !== "running") {
           cancelledDuringCreate = true;
         }
@@ -453,7 +453,7 @@ export class RunOrchestration {
       thinkingLevel: record.thinkingLevel,
       worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
       // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
-      // origin 的唯一现行载体，漏写则归档/重启后 workflow record 逃过 D1 投影过滤。
+      // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
       origin: record.origin,
       parentRunId: record.parentRunId,
     });
@@ -518,12 +518,12 @@ export class RunOrchestration {
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：归档清句
-        //（markArchived）后 worktree 投影与 Continuation 重建守卫靠本标志承载。
+        // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：close 收口清句
+        //（markSettledOut）后 worktree 投影与 Continuation 重建守卫靠本标志承载。
         record.hadWorktree = true;
         // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可把 record
         // settle 成已收口态（[U5 判据] status 离 running 即已收口——cancel/dispose
-        // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收起回收被跳过）。
+        // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收口回收被跳过）。
         // 赋值后同同步段检查：已收口则主动 cleanup（幂等，抢先的 fire-and-forget
         // 清理无害）+ early-failed 返回，不进轮次 kick-off（避免子进程白跑）。
         // 实现约束：赋值 → 收口检查 → kick-off 必须在同一同步段，中间禁止插入 await。
@@ -694,8 +694,8 @@ export class RunOrchestration {
    * 簿记）：成功/失败轮 settle（markRoundIdle——落 idle 等续聊 [two-state-convergence
    * U4/D3]，万物可续 G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。
    * CAS 前置检查失败（cancel/dispose 抢先 settle）静默跳过。closeAfterRound 挂起标志不清——
-   * 归档消费在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 →
-   * 归档，见 kickOffChatRound 尾部 consumePendingArchive）。
+   * 收口落账消费在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 →
+   * 收口落账，见 kickOffChatRound 尾部 consumePendingArchive）。
    */
   async settleOneShotOutcome(
     record: ExecutionRecord,

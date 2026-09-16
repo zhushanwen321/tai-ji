@@ -47,8 +47,8 @@ export interface FinalizeDeps {
    * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
    * 监督器放弃（finalizeClosed）+ finalizeEngineOutcome 兜底（引擎死亡不可接管形态
    * 的终态化）。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
-   * settle/markRoundIdle 不终态化（万物可续 G1），close = 归档（consumePendingArchive）、
-   * dispose = settle + 自动收起，均不经本钩子。收口面现 = Continuation 实例清理
+   * settle/markRoundIdle 不终态化（万物可续 G1），close = 收口落账（consumePendingArchive）、
+   * dispose = settle + 自动收口，均不经本钩子。收口面现 = Continuation 实例清理
    *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销面已随 interact 面退役）。
    * finalizeRoundToIdle 不经本钩子（回 idle 非终态，续聊仍需容器）。
    */
@@ -255,7 +255,7 @@ export type RoundSettlementOutcome =
  *   - 不 cleanup worktree（保留对话模式工作目录）
  *   - 不写 manifest（轮终落 idle 非终态化 [two-state-convergence U4/D3]，无终态快照可写）
  *   - **[B5/D3a] `.alive` 不再删除**——写权声明跨轮延续（release = 终态原语或
- *     idle-GC 归档两出口；轮终 record 保持 idle 可续聊态、随时续聊 spawn 写同一
+ *     idle-GC 回收两出口；轮终 record 保持 idle 可续聊态、随时续聊 spawn 写同一
  *     sessionFile，删则轮后跨进程防御空窗）
  *   - [A3] 终态簿记已冻结（endedAt 已设）的调用由 store 内硬断言 fail-fast
  *     （复活终态的调用即 bug——S7 防御），throw 先于 store 簿记⑧的注销发射
