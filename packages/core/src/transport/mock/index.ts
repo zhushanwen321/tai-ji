@@ -28,7 +28,7 @@ import type {
   ProviderId,
   QuotaConfigurePayload,
 } from '@taiji/shared'
-import { recommendedExtensions } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, MENTION_CANDIDATES, FILE_CANDIDATES } from './composer-data'
@@ -778,26 +778,34 @@ const agentsSub = makeMockSubscription(() => fixtureAgents.map((a) => ({ ...a })
 const defaultsSub = makeMockSubscription(() => 'Anthropic/claude-sonnet-4.5')
 
 // ADR-0021 §1 discovery 加载路径配置（v2 嵌套 project/global，UI 层 A 勾选/↑↓ 用）。
-// preset 按 §2.3 路径特征拆 project（相对）/ global（绝对 ~ 或 / 开头），对齐 runtime buildDirConfigs 归属。
-const PRESET_SKILL_DIRS_PROJECT = ['.agents/skills']
-const PRESET_SKILL_DIRS_GLOBAL = ['~/.pi/agent/skills', '~/.claude/skills', '~/.agents/skills']
-const PRESET_AGENT_DIRS_PROJECT = ['.agents/agents']
-const PRESET_AGENT_DIRS_GLOBAL = ['~/.pi/agent/agents', '~/.claude/agents', '~/.agents/agents']
-const PRESET_EXTENSION_DIRS_PROJECT = ['.agents/extensions']
-const PRESET_EXTENSION_DIRS_GLOBAL = ['~/.pi/agent/extensions', '~/.claude/extensions', '~/.agents/extensions']
+// preset 直接引 shared SSOT（PRESET_*_DIRS），scope 按路径特征拆（相对→project / ~或/开头→global），
+// 消除此前本地副本漂移（旧副本含已移除的 ~/.claude/* 与不存在的 .agents/extensions）。
+const isGlobalShape = (p: string): boolean => p.startsWith('/') || p.startsWith('~')
+const splitPreset = (preset: readonly string[]): { project: string[]; global: string[] } => ({
+  project: preset.filter((p) => !isGlobalShape(p)),
+  global: preset.filter(isGlobalShape),
+})
+const PRESET_SKILL_DIRS_PROJECT = splitPreset(PRESET_SKILL_DIRS).project
+const PRESET_SKILL_DIRS_GLOBAL = splitPreset(PRESET_SKILL_DIRS).global
+const PRESET_AGENT_DIRS_PROJECT = splitPreset(PRESET_AGENT_DIRS).project
+const PRESET_AGENT_DIRS_GLOBAL = splitPreset(PRESET_AGENT_DIRS).global
+const PRESET_EXTENSION_DIRS_PROJECT = splitPreset(PRESET_EXTENSION_DIRS).project
+const PRESET_EXTENSION_DIRS_GLOBAL = splitPreset(PRESET_EXTENSION_DIRS).global
 
-// v2 mock 当前态：完整 SkillDirConfig[]（含 enabled + scope）。初始 fixture 与 runtime buildDirConfigs 顺序一致。
+/** scoped 路径组 → SkillDirConfig[]（全部 enabled，对齐 runtime 默认态 = preset 全勾）。 */
+const toEnabledConfigs = (scoped: { projectPaths: readonly string[]; globalPaths: readonly string[] }): SkillDirConfig[] => [
+  ...scoped.projectPaths.map((path) => ({ path, enabled: true, scope: 'project' as const })),
+  ...scoped.globalPaths.map((path) => ({ path, enabled: true, scope: 'global' as const })),
+]
+
+// v2 mock 当前态：完整 SkillDirConfig[]（含 enabled + scope）。初始 fixture = 默认态
+// （DEFAULT_DISCOVERY_CONFIG，pi+taiji 全勾，与 runtime ENOENT 回落一致），
+// 顺序与 runtime buildDirConfigs 一致（project.enabled → global.enabled → ...）。
 // setSkillDirs 等整体透传 SkillDirConfig[]（v2 scope 穿越路 A，不降维为 string[]）。
-let mockSkillDirs: SkillDirConfig[] = [
-  { path: '~/.pi/agent/skills', enabled: true, scope: 'global' },
-  { path: '~/.claude/skills', enabled: true, scope: 'global' },
-  { path: '~/.agents/skills', enabled: true, scope: 'global' },
-]
-let mockAgentDirs: SkillDirConfig[] = [
-  { path: '~/.agents/agents', enabled: true, scope: 'global' },
-]
-// extension 默认空（Phase 4，仅强制目录生效）
-let mockExtensionDirs: SkillDirConfig[] = []
+let mockSkillDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.skill)
+let mockAgentDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.agent)
+// extension 默认同样全勾（与 runtime 默认态一致）
+let mockExtensionDirs: SkillDirConfig[] = toEnabledConfigs(DEFAULT_DISCOVERY_CONFIG.extension)
 
 /**
  * v2 buildMockDirConfigs：产带 scope 的 SkillDirConfig[]，顺序对齐 runtime buildDirConfigs

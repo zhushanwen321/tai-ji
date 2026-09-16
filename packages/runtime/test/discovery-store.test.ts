@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { SkillDirConfig } from '@taiji/shared'
+import { DEFAULT_DISCOVERY_CONFIG } from '@taiji/shared'
 import {
   readDiscovery,
   writeDiscovery,
@@ -22,12 +23,20 @@ import {
 const mkdtempP = promisify(mkdtemp)
 const rmP = promisify(rm)
 
-/** v2 空配置（六字段全空）。 */
-const DEFAULT_V2 = {
+/** v2 空配置（六字段全空）。迁移空 v1 的产物（非 ENOENT 默认态——后者是 preset 全勾）。 */
+const EMPTY_V2 = {
   version: 2,
   skill: { projectPaths: [], globalPaths: [] },
   agent: { projectPaths: [], globalPaths: [] },
   extension: { projectPaths: [], globalPaths: [] },
+}
+
+/** ENOENT / 损坏回落默认态：全部 preset 目录默认勾选（pi + taiji，无 claude）。 */
+const DEFAULTS_V2 = {
+  version: 2,
+  skill: { ...DEFAULT_DISCOVERY_CONFIG.skill },
+  agent: { ...DEFAULT_DISCOVERY_CONFIG.agent },
+  extension: { ...DEFAULT_DISCOVERY_CONFIG.extension },
 }
 
 /** 包装为 project scope 的 SkillDirConfig。 */
@@ -50,8 +59,9 @@ afterEach(async () => {
 
 describe('discovery-store', () => {
   describe('readDiscovery', () => {
-    it('returns default empty v2 config when file does not exist', () => {
-      expect(readDiscovery()).toEqual(DEFAULT_V2)
+    it('returns default (preset-enabled) v2 config when file does not exist', () => {
+      // 默认态 = preset 全勾（pi + taiji 相关目录），新装用户打开设置即见勾选态
+      expect(readDiscovery()).toEqual(DEFAULTS_V2)
     })
 
     it('reads existing v2 config', () => {
@@ -68,12 +78,12 @@ describe('discovery-store', () => {
 
     it('returns default on corrupt JSON', () => {
       writeFileSync(discoveryPath, '{ broken', 'utf-8')
-      expect(readDiscovery()).toEqual(DEFAULT_V2)
+      expect(readDiscovery()).toEqual(DEFAULTS_V2)
     })
 
     it('returns default on non-object JSON (e.g. array)', () => {
       writeFileSync(discoveryPath, '[1,2,3]', 'utf-8')
-      expect(readDiscovery()).toEqual(DEFAULT_V2)
+      expect(readDiscovery()).toEqual(DEFAULTS_V2)
     })
 
     it('filters non-string entries in v2 projectPaths/globalPaths', () => {
@@ -127,14 +137,14 @@ describe('discovery-store', () => {
       expect(getSkillDirs()).toEqual(['.agents/skills', '.taiji/skills', '~/.pi/agent/skills', '/abs/x'])
     })
 
-    it('空 v1 → 空 v2（六字段全空）', () => {
+    it('空 v1 → 空 v2（六字段全空；迁移产物是空态而非 ENOENT 默认态）', () => {
       writeFileSync(discoveryPath, JSON.stringify({
         version: 1,
         skillDirs: [],
         agentDirs: [],
         extensionDirs: [],
       }), 'utf-8')
-      expect(readDiscovery()).toEqual(DEFAULT_V2)
+      expect(readDiscovery()).toEqual(EMPTY_V2)
     })
 
     it('v1 迁移后写回落盘为 v2（deserialize 迁移值经 writeDiscovery 持久化）', () => {
@@ -164,9 +174,10 @@ describe('discovery-store', () => {
     })
 
     it('writes skillDirs and preserves existing agentDirs', () => {
-      setSkillDirs([glob('~/.pi/agent/skills'), glob('~/.claude/skills')])
+      // 注：~/.claude/skills 已移出预设，不作为 preset 豁免用例（存在性过滤不确定性），改用 ~/.agents/skills
+      setSkillDirs([glob('~/.pi/agent/skills'), glob('~/.agents/skills')])
       setAgentDirs([glob('~/.agents/agents')])
-      expect(getSkillDirs()).toEqual(['~/.pi/agent/skills', '~/.claude/skills'])
+      expect(getSkillDirs()).toEqual(['~/.pi/agent/skills', '~/.agents/skills'])
       expect(getAgentDirs()).toEqual(['~/.agents/agents'])
     })
 
@@ -183,16 +194,17 @@ describe('discovery-store', () => {
       expect(onDisk.skill).toEqual({ projectPaths: [], globalPaths: ['~/.pi/agent/skills'] })
     })
 
-    it('deletes file when all six fields empty', () => {
+    it('keeps file when all six fields empty（全空 = 用户显式取消全部勾选，不被默认态复活）', () => {
       setSkillDirs([glob('~/.pi/agent/skills')])
       expect(existsSync(discoveryPath)).toBe(true)
-      // 清空 → 六字段全空 → 删文件
+      // 清空 → 六字段全空 → 文件保留（旧「空则删」已移除：删文件会让下次读回落默认态，
+      // 用户关掉的目录在下次读取时「复活」为勾选）
       setSkillDirs([])
       setAgentDirs([])
       setExtensionDirs([])
-      expect(existsSync(discoveryPath)).toBe(false)
-      // 再读返回默认 v2，不崩
-      expect(readDiscovery()).toEqual(DEFAULT_V2)
+      expect(existsSync(discoveryPath)).toBe(true)
+      // 再读返回用户显式写入的全空态，而非 preset 默认勾选态
+      expect(readDiscovery()).toEqual(EMPTY_V2)
     })
   })
 
@@ -206,7 +218,7 @@ describe('discovery-store', () => {
       expect(getAgentDirs()).toEqual(['~/.agents/agents'])
     })
 
-    it('does not delete file when only extension is non-empty', () => {
+    it('keeps file when extension emptied too（全空文件保留，不再删档）', () => {
       setSkillDirs([glob('~/.pi/agent/skills')])
       setSkillDirs([])
       setAgentDirs([])
@@ -214,7 +226,8 @@ describe('discovery-store', () => {
       expect(existsSync(discoveryPath)).toBe(true)
       expect(getExtensionDirs()).toEqual(['~/.pi/agent/extensions'])
       setExtensionDirs([])
-      expect(existsSync(discoveryPath)).toBe(false)
+      expect(existsSync(discoveryPath)).toBe(true)
+      expect(getExtensionDirs()).toEqual([])
     })
   })
 
