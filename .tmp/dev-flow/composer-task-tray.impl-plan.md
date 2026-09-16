@@ -209,10 +209,10 @@ graph TD
 | u-tray-shell | committed | 1 | commit「feat(tray): u-tray-shell composer tray shell + mount」；tray 5 files/90 pass + check:i18n 203 pass + typecheck(:test) ok + 改动面回归 26 files/278 pass + 变异验证 6 处；主 agent 重跑复核同结果；偏差 D26-D33 登记 |
 | u-ext-todo | committed | 1 | commit「feat(tray): u-ext-todo tab-bar sections」；todo vitest 8 files/144 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果；带出计划级漏项 1（e2e/tasks-drawer-real.spec.ts 断言陈旧）+ 文档滞后 2（见 u-doc-sync） |
 | u-doc-sync | committed | 1 | commit「docs(protocol): sync todo tab-bar shape + tab-bar sections」；doc-symbol-drift 绿 + 逐处 grep 自对账通过（陈旧断言清零）；偏差 D24-D25 登记 |
-| u-retire-sidebar | in-progress（开发完成，待批次提交） | 1 | N1 窄口径零命中 + renderer 355 files/4116 pass + typecheck + check:i18n 198 pass + SegmentedTab 三枚断言 + 15 删除路径 gone=15（主 agent 独立重跑复核同结果）；偏差 D40-D45 登记 |
-| u-retire-native-view | in-progress（开发完成，待批次提交） | 1 | renderer 355 files/4116 pass + core 2106 pass + ui 789 pass + typecheck(:frontend/:ui) 绿 + `rg NATIVE_VIEWS|L2_TAB_BADGE` 零命中；偏差 D38-D39 登记；core typecheck 红为基线存量（git show HEAD 复现证明） |
-| u-retire-widgetarea | in-progress（开发完成，待批次提交） | 2 | ui 789 pass + core 2106 pass + Panel 簇 19 pass + i18n 守卫 198 pass（死键修复后）+ typecheck(:frontend/:ui) 绿；偏差 D35-D37 登记（D37 经续聊定向修） |
-| u-retire-refs-sweep | in-progress（在途：全仓悬空引用清扫——注释 13 文件 + 失效 stub 1 + 文档 8 份） | 0 | 依赖三退役单元；验收 = doc-symbol-drift 绿 + validate-constraints 绿 + 逐处自对账 |
+| u-retire-sidebar | committed | 1 | commit 9fa8db44d「refactor(tray): u-retire-sidebar converges sidebar to three tabs」；N1 窄口径零命中 + renderer 355 files/4116 pass + typecheck + check:i18n 198 pass + SegmentedTab 三枚断言 + 15 删除路径 gone=15；偏差 D40-D45 登记 |
+| u-retire-native-view | committed | 1 | commit 3b5f35c19「refactor(tray): u-retire-native-view retires the background-tasks native view」（12 文件 / -1329 行）；偏差 D38-D39 登记；core typecheck 红为基线存量（git show HEAD 复现证明） |
+| u-retire-widgetarea | committed | 2 | commit ae10aff90「refactor(tray): u-retire-widgetarea retires the WidgetArea pill」（10 文件 / -844 行）；偏差 D35-D37 登记（D37 经续聊定向修） |
+| u-retire-refs-sweep | committed | 2 | commit 37607c9df「docs(tray): sweep dangling references...」（28 文件）；doc-symbol-drift 绿（改前 2 红）+ validate-constraints 131 条绿 + 18 文件自对账零命中；第二段续聊修 i18n bashTaskHint（zh/en） |
 | u-e2e | pending | 0 | — |
 
 ## 7 残留风险与变更历史
@@ -241,3 +241,4 @@ graph TD
 | 2026-09-16 | u-doc-sync committed（协议文档 §4.3 示例 + §14.4 覆盖表 + 指南速查表 tab-bar 行；doc-symbol-drift 绿；偏差 D24-D25 登记，存量文档债务入 §7 残留风险 0） |
 | 2026-09-16 | u-tray-shell committed（外壳 + 挂载 + trayLabel + DESIGN.md；tray 90 绿 + 回归 278 绿 + 变异验证 6 处；偏差 D26-D34 登记）→ 阶段 2 全部 11 单元就差退役三件 |
 | 2026-09-16 | W4 三退役单元开发完成（并行派发）；**批次门通过**：N1 窄口径零命中 + renderer 355 files/4116 全绿（主 agent 独立重跑）+ 15 删除路径 gone=15；doc-symbol-drift 报 2 处文档路径引用待清扫（阻塞提交）→ 新开 u-retire-refs-sweep |
+| 2026-09-16 | 退役批次 4 commit 落盘：ae10aff90（widgetarea）/ 3b5f35c19（native-view）/ 9fa8db44d（sidebar）/ 37607c9df（refs-sweep）；工作区干净；阶段 2（开发循环）完成（12 单元 committed）→ 进入 u-e2e（W5） |
