@@ -22,6 +22,11 @@ import type { GenStatsService } from '../services/session/gen-stats-service.js'
 // BusClient（wave:bus-core）：ws 适配为 bus 订阅者的最小契约 { readyState, send }。
 // ws 库的 WebSocket 天然满足，但类型不完全一致，用 as unknown as BusClient 显式标记边界（R2）。
 import type { BusClient } from '../services/message-bus/types.js'
+// delivery 域（投递所有权内核 D5，u3a）：session.delivery state topic 装配 + 四 RPC。
+// type-only：注册表由组合根经 server.setServices({ delivery }) 注入（与 SessionManagerHandler
+// 同一实例——sessionId 单例约束），transport 不构造它。
+import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
+import { SessionDeliveryTopic, frameLaneOf, frameStateOf, stripDeliveryMarkers } from './session-delivery-topic.js'
 
 /**
  * backgroundTask 域 WS 消费端口（background-task-sidebar D3，u-runtime-rpc）：
@@ -75,6 +80,14 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    * 可选：未注入时该 case 报 unsupported（组合根保证注入）。
    */
   genStatsService?: GenStatsService
+  /**
+   * 投递所有权内核注册表（投递所有权内核 D5，u3a）：delivery.* 四 RPC 与 session.delivery
+   * state topic（帧装配数据源）共用。组合根经 server.setServices({ delivery }) 注入
+   * （与 SessionManagerHandler 同一实例——registry 的 sessionId 单例约束）。
+   * 可选：未注入时 delivery.* 报 delivery_unsupported 防御分支（组合根保证注入；
+   * 缺省仅出现在测试最小 mock 中，对齐 backgroundTasks 惯例）。
+   */
+  deliveryRegistry?: SessionDeliveryRegistry
   nextPushId(): string
   broadcastSessionList(): void
   /** 广播一条 ServerMessage 给所有连接（FR-12：fork 后广播 session.forkNotice）。 */
@@ -92,7 +105,29 @@ type SessionCaseRoutes = {
 }
 
 export class SessionMessageHandler {
-  constructor(private ctx: SessionHandlerContext) {}
+  /**
+   * session.delivery 帧发布器（D5/D7）：per-session 内核 onChange 订阅 + 全量快照发布。
+   * 依赖经 ctx 按调用时刻读取（bus 由 setMessageBus 注入、registry 由 setServices 注入，
+   * 均可能晚于本 handler 构造）。
+   */
+  private readonly deliveryTopic: SessionDeliveryTopic
+
+  constructor(private ctx: SessionHandlerContext) {
+    this.deliveryTopic = new SessionDeliveryTopic({
+      getRegistry: () => this.ctx.deliveryRegistry,
+      getBus: () => this.ctx.messageBus,
+      nextPushId: () => this.ctx.nextPushId(),
+    })
+  }
+
+  /**
+   * 解绑某 session 的 session.delivery 订阅（session 销毁清理，由 server 的
+   * onSessionDestroyed 汇聚点调用——覆盖主动删 / 进程退出 / restore 清场全部路径，
+   * 与 extension timeout 清理同挂点）。幂等；内核条目清理由 registry.dispose 负责。
+   */
+  releaseDeliveryTopic(sessionId: string): void {
+    this.deliveryTopic.release(sessionId)
+  }
 
   /** D1: 本 handler 认领的 ClientMessageType 清单（session.compact 单独路由，故不在此列）。 */
   readonly handles: ClientMessageType[] = [
@@ -119,6 +154,9 @@ export class SessionMessageHandler {
     'session.getGenStats',
     'message.send', 'message.abort', 'message.steer', 'message.follow_up',
     'message.bash', 'message.abortBash',
+    // delivery 域（投递所有权内核 D5，u3a）：统一提交 / 单条撤销 / 全量回收回草稿 / 断连重报
+    // 四 RPC（ADR-0046 配对；message.steer/follow_up 与 send.rejected 的退役归 u5）。
+    'delivery.submit', 'delivery.cancel', 'delivery.drain', 'delivery.resync',
     // backgroundTask 域（background-task-sidebar D3，u-runtime-rpc）：后台命令拉取/详情/终止 3 RPC。
     // 变更广播不经此处（SessionService 组装的 onTasksChanged → bus.publish 单向推送）。
     'backgroundTask.list', 'backgroundTask.output', 'backgroundTask.kill',
@@ -169,6 +207,11 @@ export class SessionMessageHandler {
     'message.abort': (msg, ws) => this.handleMessageAbort(msg, ws),
     'message.bash': (msg, ws) => this.handleMessageBash(msg, ws),
     'message.abortBash': (msg, ws) => this.handleMessageAbortBash(msg, ws),
+    // delivery 域（投递所有权内核 D5，u3a）：四 RPC（reply 与 request 同名，payload 消费型）。
+    'delivery.submit': (msg, ws) => this.handleDeliverySubmit(msg, ws),
+    'delivery.cancel': (msg, ws) => this.handleDeliveryCancel(msg, ws),
+    'delivery.drain': (msg, ws) => this.handleDeliveryDrain(msg, ws),
+    'delivery.resync': (msg, ws) => this.handleDeliveryResync(msg, ws),
     // backgroundTask 域（background-task-sidebar D3，u-runtime-rpc）：后台命令拉取/详情/终止 3 RPC。
     // 变更广播不经此处（SessionService 组装的 onTasksChanged → bus.publish 单向推送）。
     'backgroundTask.list': (msg, ws) => this.handleBackgroundTaskList(msg, ws),
@@ -601,6 +644,11 @@ export class SessionMessageHandler {
       // messageBus 未注入（理论不可达——组合根保证），防御性报错。
       return this.ctx.sendError(ws, 'subscribe_unsupported', 'message bus not available', msg.id, { sessionId })
     }
+    // delivery 域装配（D5/D7）：subscribe **之前**发一帧 session.delivery 全量快照——
+    // 本次 subscribe 的 stateSnapshot 即含该帧，renderer 队列区在切 session/重连后零竞态恢复
+    // （G2/V5「断连重连队列区自动恢复」的装配面）。零抛错（sync 内部 warn 降级）：
+    // 帧装配失败不得拖垮订阅主链。已有内核运行时才发帧（无运行时 = 无队列事实可投影）。
+    this.deliveryTopic.sync(sessionId)
     const result = bus.subscribe(sessionId, ws as unknown as BusClient)
     let gap = false
     let snapshot = result.snapshot
@@ -848,6 +896,96 @@ export class SessionMessageHandler {
       return this.ctx.sendError(ws, 'abort_bash_not_sent', 'No bash execution to abort', msg.id, { sessionId: abortBashSid })
     }
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: abortBashSid, status: 'aborted' })
+  }
+
+  // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
+  //
+  // 四 RPC = 内核适配器（u2 registry）的协议面：handler 只做「payload 校验 → 委托 →
+  // 帧发布 → reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
+  // 每次调用后 `deliveryTopic.sync()` 发布一帧全量快照（内核 onChange 已内联触发一次，
+  // sync 幂等再发一帧兜底「首次调用前无订阅」的装配缺口）——帧先于 reply 到达 renderer，
+  // 保证 reply 语义（受理确认）落地时 UI 状态已在位。
+
+  private async handleDeliverySubmit(msg: Extract<ClientMessage, { type: 'delivery.submit' }>, ws: WsType): Promise<void> {
+    const { sessionId, content, images, clientUuid } = msg.payload
+    const registry = this.ctx.deliveryRegistry
+    if (!registry) {
+      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
+    // 字段校验（协议面防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof content !== 'string' || typeof clientUuid !== 'string' || clientUuid === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.submit requires non-empty sessionId, content and clientUuid', msg.id, { sessionId })
+    }
+    // 受理口径（D9⑤）：submit 同步返回（lane + 条目态），不等底层送达——内核 FIFO 无界，
+    // 正常路径无拒绝态（send.rejected 退役归 u5）。受理失败经 registry 侧广播 + 日志。
+    const result = registry.submit(sessionId, { content, images, clientUuid })
+    this.deliveryTopic.sync(sessionId)
+    return this.ctx.reply(ws, msg.id, 'delivery.submit', {
+      clientUuid: result.clientUuid,
+      // 条目态映射（D5③：cancelled 不投影）。submit 返回时刻 cancelled 结构上不可达
+      // （同 tick 无用户撤销动作），映射缺席走 queued 兜底而非谎报终态。
+      state: frameStateOf(result.state) ?? 'queued',
+      lane: frameLaneOf(result.lane),
+    })
+  }
+
+  private async handleDeliveryCancel(msg: Extract<ClientMessage, { type: 'delivery.cancel' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuid } = msg.payload
+    const registry = this.ctx.deliveryRegistry
+    if (!registry) {
+      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
+    if (typeof sessionId !== 'string' || sessionId === '' || typeof clientUuid !== 'string' || clientUuid === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.cancel requires non-empty sessionId and clientUuid', msg.id, { sessionId })
+    }
+    // queued/failed 本地移除；in-flight 走 clear_queue 收回-重投（D3 复用对账路径）。
+    // 不可撤（已 delivered / 收回失败）→ cancelled:false + reason（§3.4），条目由对账器兜底。
+    const outcome = await registry.cancel(sessionId, clientUuid)
+    this.deliveryTopic.sync(sessionId)
+    // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
+    const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
+    return this.ctx.reply(ws, msg.id, 'delivery.cancel', {
+      clientUuid,
+      cancelled: outcome.cancelled,
+      ...(content !== undefined ? { content } : {}),
+      ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+    })
+  }
+
+  private async handleDeliveryDrain(msg: Extract<ClientMessage, { type: 'delivery.drain' }>, ws: WsType): Promise<void> {
+    const { sessionId } = msg.payload
+    const registry = this.ctx.deliveryRegistry
+    if (!registry) {
+      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.drain requires a non-empty sessionId', msg.id, { sessionId })
+    }
+    // 全量回收（D10/V11，forceQuit 专用）：kernel drain 同步取回全部未终态条目文本（发送序）；
+    // registry 侧尽力 clear_queue 清 pi 槽位（滞留清理，session 即将销毁 → 不再收养投递）。
+    const drained = registry.drain(sessionId)
+    this.deliveryTopic.sync(sessionId)
+    return this.ctx.reply(ws, msg.id, 'delivery.drain', {
+      sessionId,
+      entries: drained.map((d) => ({ clientUuid: d.clientUuid, content: stripDeliveryMarkers(d.content) })),
+    })
+  }
+
+  private async handleDeliveryResync(msg: Extract<ClientMessage, { type: 'delivery.resync' }>, ws: WsType): Promise<void> {
+    const { sessionId, clientUuids } = msg.payload
+    const registry = this.ctx.deliveryRegistry
+    if (!registry) {
+      return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
+    if (typeof sessionId !== 'string' || sessionId === '' || !Array.isArray(clientUuids)) {
+      return this.ctx.sendError(ws, 'invalid_payload', 'delivery.resync requires a non-empty sessionId and clientUuids array', msg.id, { sessionId })
+    }
+    // 断连/刷新重连重报（D5）：clientUuid 幂等去重（内核查终态判重记录 + reattach 场景
+    // transcript 标记扫描，判重锚全在 runtime）。reply 只带 deduped——存留条目的权威状态
+    // 经随后的 session.delivery 全量快照帧恢复（last-value 单源，防双源分叉）。
+    const deduped = await registry.resync(sessionId, clientUuids)
+    this.deliveryTopic.sync(sessionId)
+    return this.ctx.reply(ws, msg.id, 'delivery.resync', { sessionId, deduped })
   }
 
   async handleSessionCompact(msg: Extract<ClientMessage, { type: 'session.compact' }>, ws: WsType): Promise<void> {

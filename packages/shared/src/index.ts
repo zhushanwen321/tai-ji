@@ -19,6 +19,11 @@ export type {
   RollingRestartStatusPayload,
   ReattachDeferReason, ReattachDeferredPayload,
   ConnectionTestResultRow,
+  // delivery 域 DTO（投递所有权内核 D5/D7，u-contracts 定义 → u3a 收编根入口）：
+  // session.delivery 帧条目 + 四 RPC 的 reply 具名类型。protocol.ts 内联引用其形状，
+  // 跨包具名消费（core chat 域 / renderer 队列区）经本出口。
+  DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply,
+  DeliveryDrainReplyEntry, DeliveryDrainReply, DeliveryResyncReply,
 } from './protocol'
 export { isMessage, isSessionSummary, isSubagentRecord } from './protocol'
 export type {

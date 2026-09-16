@@ -113,6 +113,12 @@ const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // occupancy（session-occupancy-send-closure P3）：占用三维快照。state topic last-value——
   // 断连重连 / 切回 session 经 stateSnapshot 回放恢复（G4），不依赖广播时序。
   'session.occupancy': 'state',
+  // session.delivery（投递所有权内核 D5）：投递内核条目全量快照（队列区单一数据源 D7）。
+  // state topic last-value——断连重连 / 切回 session 经 stateSnapshot 回放恢复（G2/V5），
+  // 不入 ring。帧体积有界（≤ deliveredWindow + 活跃条目数，D5③ 投影规则在装配侧），
+  // 故不入 outbound-frame-registry 大字段表。装配点 = transport 侧
+  // （session-message-handler.ts + session-delivery-topic.ts，u3a；本表只认类型）。
+  'session.delivery': 'state',
   // ── stream 类：分配 seq、入 ring（O(1) 覆盖写）──
   'message.message_start': 'stream',
   'message.complete': 'stream',
@@ -205,6 +211,10 @@ const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   // 时 subscribe 返回的 stateSnapshot 含此帧，renderer sessionPhase 从快照恢复（G4）。
   // 写快照/回放对 stateSnapshot Map 的任意 key 自动生效，无需其他登记点。
   'session.occupancy': 'occupancy',
+  // session.delivery（投递所有权内核 D5）：队列条目 last-value 快照 key——重连/切回 session
+  // 时 subscribe 的 stateSnapshot 含此帧，renderer 队列区从快照恢复（V5/G2「断连不丢队列」）。
+  // 同 key 覆盖：同一次队列变更序列只留最新一帧（帧本身即全量快照，无需历史）。
+  'session.delivery': 'delivery',
 }
 
 /**
@@ -558,9 +568,10 @@ export class MessageBus implements IMessageBus {
    * B7：stateSnapshot 写入 + 字节记账（**仅观测**，超预算 warn 不驱逐）。
    *
    * 覆盖式当前值口径：同 typeKey set 替换时按新值重计（差值语义），非累计求和——
-   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（6 个 state topic），
-   * 每次重算总和 O(6)。该 warn 同时作为回收态 state 快照的跟进信号（回收态 ring 驻留
-   * 已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不武装先观测」哲学）。
+   * 否则同 key 反复 set 会虚假推高水位触发假 warn。typeKey 集合固定（7 个 state topic，见
+   * STATE_TYPE_KEY_MAP），每次重算总和 O(7)。该 warn 同时作为回收态 state 快照的跟进信号
+   * （回收态 ring 驻留已有界、state 快照不受帽的 P3 语义维持——观测先行，对齐「看门狗不
+   * 武装先观测」哲学）。
    */
   private setStateSnapshotEntry(
     state: SessionBusState,

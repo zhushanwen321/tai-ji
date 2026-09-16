@@ -239,6 +239,9 @@ export class RuntimeServer implements IMessageBroker {
     // 注册的 didDestroy 投递不受影响。
     this.sessionService.setOnSessionDestroyed((summary) => {
       this.clearExtensionTimeoutsForSession(summary.id)
+      // delivery 域（u3a）：解绑该 session 的 session.delivery onChange 订阅（per-session 资源
+      // 生命周期）；内核条目本身由组合根的 registry.dispose 清理（同一销毁汇聚点，各自一类资源）。
+      this.sessionHandler?.releaseDeliveryTopic(summary.id)
     })
     this.configService = config
     this.modelService = model
@@ -340,6 +343,9 @@ export class RuntimeServer implements IMessageBroker {
       importService: this.importService,
       // composer-gen-stats（u3）：session.getGenStats 恢复腿 RPC 路由依赖。
       genStatsService: this.genStatsService,
+      // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
+      // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
+      deliveryRegistry: optional.delivery,
       // wave:runtime-wiring：注入 MessageBus 供 session.subscribe/unsubscribe RPC 用。
       messageBus: this.messageBus,
       nextPushId: () => this.broker.nextPushId(),
