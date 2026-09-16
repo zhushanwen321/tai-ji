@@ -114,39 +114,6 @@ export function setTimeout(app: AppConfigAccessors, timeout: number): void {
   app.save(config)
 }
 
-// ── 对话流式空闲超时（config.json.streamingIdleTimeout，秒）──
-// docs/design/timeout-streaming-ui-idle.md §5.3 D3：settings 表单配置口的持久化端。
-// 与 worktree setTimeout 的「越界 throw」不同，本域是 clamp 语义（越界收到边界 + 返回
-// 生效值）——表单端拦截为主，runtime clamp 是第二道防线，保证落盘值恒在合法域。
-
-/** 默认对话流式空闲超时（秒）＝ 1800s，对齐 core DEFAULT_STREAMING_IDLE_TIMEOUT_MS。 */
-const DEFAULT_STREAMING_IDLE_TIMEOUT_S = 1800
-/** 合法域下界（秒）：1min。 */
-const STREAMING_IDLE_TIMEOUT_MIN_S = 60
-/** 合法域上界（秒）：60min。 */
-const STREAMING_IDLE_TIMEOUT_MAX_S = 3600
-
-function clampStreamingIdleTimeout(seconds: number): number {
-  return Math.min(Math.max(seconds, STREAMING_IDLE_TIMEOUT_MIN_S), STREAMING_IDLE_TIMEOUT_MAX_S)
-}
-
-export function getStreamingIdleTimeout(app: AppConfigAccessors): number {
-  const val = app.load()['streamingIdleTimeout']
-  return typeof val === 'number' && Number.isFinite(val)
-    ? clampStreamingIdleTimeout(val)
-    : DEFAULT_STREAMING_IDLE_TIMEOUT_S
-}
-
-/** clamp 到合法域后落盘，返回生效值（reply 用，表单据此回显 runtime 实际接受的值）。 */
-export function setStreamingIdleTimeout(app: AppConfigAccessors, timeout: number): number {
-  const effective = typeof timeout === 'number' && Number.isFinite(timeout)
-    ? clampStreamingIdleTimeout(timeout)
-    : DEFAULT_STREAMING_IDLE_TIMEOUT_S
-  const config = app.load()
-  config['streamingIdleTimeout'] = effective
-  app.save(config)
-  return effective
-}
 
 export function getDefaultBaseBranch(app: AppConfigAccessors): string {
   const val = app.load()['defaultBaseBranch']

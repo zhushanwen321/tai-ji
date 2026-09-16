@@ -508,10 +508,6 @@ export interface IConfigService {
   getTimeout(): number
   /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。 */
   setTimeout(timeout: number): void
-  /** 读取对话流式空闲超时阈值（config.json.streamingIdleTimeout，秒），默认 1800 秒（timeout-streaming-ui-idle §5.3 D3）。 */
-  getStreamingIdleTimeout(): number
-  /** 写入对话流式空闲超时阈值：clamp 到 [60, 3600] 秒后落盘，返回生效值。 */
-  setStreamingIdleTimeout(timeout: number): number
   /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
   getDefaultBaseBranch(): string
   /** 写入默认基分支到 config.json.defaultBaseBranch。 */

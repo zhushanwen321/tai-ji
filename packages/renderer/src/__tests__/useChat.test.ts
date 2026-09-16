@@ -261,22 +261,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     vi.useRealTimers()
   })
 
-  it('streaming 超时兜底：message.complete 永不到 → armStreamingTimer 强制收口（W3 扩展）', () => {
-    vi.useFakeTimers()
-    const chat = useChatStore()
-    // 创建 streaming entity + arm 超时 timer（取代 setStreaming 二合一）
-    chat.applyMessageEvent('s-stream-timeout', { type: 'message.message_start', payload: { sessionId: 's-stream-timeout', messageId: 'a1' } })
-    chat.testInternals.armStreamingTimer('s-stream-timeout')
-    expect(chat.isGenerating('s-stream-timeout')).toBe(true)
-    // 阈值 DEFAULT_STREAMING_IDLE_TIMEOUT_MS=30min idle（1_800_000ms）：30min-1s 零帧未超时，仍 streaming
-    vi.advanceTimersByTime(1_799_000)
-    expect(chat.isGenerating('s-stream-timeout')).toBe(true)
-    // 推进到 30min+1s 触发超时回调，finalizeSession('timeout') 强制收口
-    vi.advanceTimersByTime(2_000)
-    expect(chat.isGenerating('s-stream-timeout')).toBe(false)
-    vi.useRealTimers()
-  })
-
   it('finalizeAllStreaming 强制收口所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
     const chat = useChatStore()
     // 创建 streaming entity（isActive=true via isGenerating）

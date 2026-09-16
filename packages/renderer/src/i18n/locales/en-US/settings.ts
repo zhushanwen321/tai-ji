@@ -675,12 +675,6 @@ export default {
     llmRetryUnitMs: 'ms',
     llmRetryEmptyAsZero: 'empty = 0',
     llmRetryTimeoutPlaceholder: 'empty = follow global',
-    // ── Streaming idle timeout (SystemStreamingIdleSection, timeout-streaming-ui-idle §4.3) ──
-    streamingIdleTitle: 'Chat Streaming',
-    streamingIdleLabel: 'Streaming idle timeout (minutes)',
-    streamingIdleDesc: 'If a streaming bubble receives no new content for this long, it is finalized with a recovery hint; it auto-restores when the task actually finishes. Applies to turns started after saving',
-    streamingIdleUnitMin: 'min',
-    streamingIdleInvalid: 'Enter a value between {min} and {max}',
     saved: 'Saved',
     saveFailed: 'Save failed',
     shortcutTitle: 'Shortcuts',

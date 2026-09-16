@@ -107,18 +107,6 @@
         <span v-if="showStreamingCursor" class="streaming-tail ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
 
-      <!-- [premature-timeout] idle 超时误判收口的恢复指引（docs/design/timeout-streaming-ui-idle.md §4.2）：
-           该气泡的 error 是前端 idle timer 兜底强推（非 pi 真实终态），提示用户「等待自愈 / 手动止损 / 调阈值」；
-           迟到的 message.complete 自愈清标后本行随 computed 消失。turn 内任一 assistant 命中即显示（聚合一次）。 -->
-      <div
-        v-if="hasPrematureTimeout"
-        data-testid="turn-premature-timeout"
-        class="flex items-start gap-1.5 text-[length:var(--text-sm)] leading-snug text-warn"
-      >
-        <Timer class="mt-0.5 size-3.5 shrink-0" />
-        <span class="min-w-0 flex-1">{{ t('panel.message.prematureTimeoutNotice') }}</span>
-      </div>
-
       <!-- 操作栏：TurnSummary 子组件（去内容化后仅 hover actions） -->
       <TurnSummary
         :turn="turn"
@@ -155,7 +143,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bell, Timer } from '@lucide/vue'
+import { Bell } from '@lucide/vue'
 import type { MessageTurn, FlatBlock } from '@taiji/core/domain/chat'
 import { countThinking, countToolCalls, flattenTurnBlocks, computeTraceWindow, turnStableId, W } from '@taiji/core/domain/chat'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
@@ -273,15 +261,6 @@ const assistantById = computed(() => {
   for (const a of props.turn.assistants) m.set(a.id, a)
   return m
 })
-
-/**
- * [premature-timeout] 本 turn 是否含 idle 超时误判收口的气泡（§4.2）：error 态且带
- * prematureTimeout 标记。complete 自愈恢复（status 翻 complete + 清标）后 computed 失效，
- * 恢复指引行自动消失——不依赖用户重开 session。
- */
-const hasPrematureTimeout = computed(() =>
-  props.turn.assistants.some((a) => a.status === 'error' && a.prematureTimeout === true),
-)
 
 /** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。未 provide setTakeover 时 no-op。 */
 function onToggleTakeover(): void {

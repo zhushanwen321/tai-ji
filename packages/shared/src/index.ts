@@ -161,8 +161,6 @@ export {
   isAgentCallVirtualId,
   extractAgentCallSessionId,
 } from './virtual-session-id'
-// subagent.stream_delta 帧父 session 解析（idle-refresh 桥接纯函数，双通道形态归一）
-export { resolveSubagentParentSessionId } from './subagent-frame'
 // Coding Plan 额度查询类型
 export type {
   QuotaWindow,

@@ -674,12 +674,6 @@ export default {
     llmRetryUnitMs: '毫秒',
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
-    // ── 对话流式空闲超时（SystemStreamingIdleSection，timeout-streaming-ui-idle §4.3）──
-    streamingIdleTitle: '对话流',
-    streamingIdleLabel: '流式空闲超时（分钟）',
-    streamingIdleDesc: '生成中气泡持续无新内容超过该时长后收口并提示；若任务实际仍在进行，完成时会自动恢复显示。保存后对新对话轮次生效',
-    streamingIdleUnitMin: '分钟',
-    streamingIdleInvalid: '请输入 {min}-{max} 之间的数值',
     saved: '已保存',
     saveFailed: '保存失败',
     shortcutTitle: '快捷键',

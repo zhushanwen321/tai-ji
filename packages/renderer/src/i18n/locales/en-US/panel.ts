@@ -102,9 +102,7 @@ export default {
     // [W4 turn-attribution] bg-notify trigger turn origin row (Turn.vue) + executing-bash transient row prefix (MessageStream.vue)
     turnTriggerBgNotify: 'Background task finished · resumed',
     executingBash: 'Running',
-    // [premature-timeout] recovery guidance for idle-timeout premature close (Turn.vue, docs/design/timeout-streaming-ui-idle.md §4.2;
     // no hardcoded threshold — user-adjustable, a literal would drift)
-    prematureTimeoutNotice: 'Response timed out and was closed. If the task is still running, it will be restored automatically when it completes; resend if you confirmed it stopped.',
   },
   git: {
     commit: 'Commit',

@@ -53,15 +53,6 @@ export class ConfigPreferencesMessageHandler {
         this.ctx.reply(ws, msg.id, 'config.worktreeTimeout', { timeout: this.ctx.configService.getTimeout() })
         return true
       }
-      case 'config.setStreamingIdleTimeout': {
-        const effective = this.ctx.configService.setStreamingIdleTimeout(msg.payload.timeout)
-        this.ctx.reply(ws, msg.id, 'config.streamingIdleTimeout', { timeout: effective })
-        return true
-      }
-      case 'config.getStreamingIdleTimeout': {
-        this.ctx.reply(ws, msg.id, 'config.streamingIdleTimeout', { timeout: this.ctx.configService.getStreamingIdleTimeout() })
-        return true
-      }
       case 'config.setDefaultBaseBranch': {
         this.ctx.configService.setDefaultBaseBranch(msg.payload.baseBranch)
         this.ctx.reply(ws, msg.id, 'config.defaultBaseBranch', { baseBranch: this.ctx.configService.getDefaultBaseBranch() })

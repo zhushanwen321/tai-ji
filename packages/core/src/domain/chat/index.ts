@@ -26,14 +26,13 @@ export { setCompactQueueProviderForEffects, resetCompactQueueProviderForEffectsF
 // [簇 A2] defer flush 投递确认标记正则（SSOT = apply-entry-convert，显示层剥标记 import 用）
 export { DEFER_FLUSH_MARKER_RE } from './apply-entry-convert'
 export type { CompactQueueLike, CompactQueueEntrySnapshot } from './useChat'
-export { createChatStore, DEFAULT_STREAMING_IDLE_TIMEOUT_MS, STREAMING_IDLE_TIMEOUT_MIN_MS, STREAMING_IDLE_TIMEOUT_MAX_MS } from './store'
+export { createChatStore } from './store'
 
 export type { ChatStoreOptions } from './store'
 // [session-occupancy u5b] occupancy 投影类型（sessionPhase 数据源，P4 ActivityStrip/发送位消费）
 export type { SessionOccupancyState } from './store'
 export * from './derive-status'
 // [session-dead C1 方案一] turn 进展观测面（设计 §3.3 D6/D7：结构事件边界派生计时 + ask_user 豁免）
-export * from './turn-progress'
 export { createStreamingStateMachine, type StreamingStateMachineDeps } from './streaming-state-machine'
 export type { ChatStoreInstance, ChatStoreReaders, ChatStoreOps } from './store'
 // w5 chat-use-chat：useChat composable 迁移（createUseChat factory + ChatApiPort）

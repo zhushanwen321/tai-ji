@@ -108,22 +108,6 @@
            （App 装配层 installInboundFrameGuard 已安装）；组件内部按 sessionId 自判 tripped，
            非本 session 不渲染（不连坐）。恢复动作 = 用户切走再切回本会话。 -->
       <InboundFrameDroppedNotice v-if="sessionId" :session-id="sessionId" />
-      <!-- [remove-turn-progress-bar §2.2 warn 化] turn 超时警示条（warn 告警条）挂载在
-           overlay/composer 互斥对**之外**：ask_user 等待期 Composer 整体卸载（下方
-           v-if/v-else-if 互斥），警示条独立挂载不受影响——组件内部自判渲染
-           （snapshot && snapshot.warn，常态零 DOM；ask_user 豁免期 core 抑制 warn，
-           bar 不出现，挂载点空转无害）。abort 走 useChat.abort 既有链路（与 Composer
-           stop 同链；Composer.onStopClick 的 staging abortIfInProgress 优先级不保留
-           ——staging 是 fork/handoff 预备短态，与警示条 warn 态（>10min 活跃）无实际
-           叠加窗口）。
-           dead 排除保留（W6「dead 优先级吞掉活跃 UI」同语义）：markSessionError 不复位
-           occupancy，pi 异常退出后 turn 维度可能残留非 idle——不排除则 dead 占位上方
-           挂一张永走的警示条（状态撒谎复发）。 -->
-      <TurnProgressBar
-        v-if="panelView.kind !== 'dead'"
-        :session-id="sessionId"
-        @abort="onProgressAbort"
-      />
       <!-- ask-user 渲染 ⟺ (conversation || trace) && input==='ask-user'（D5）：dead 态被
            派生优先级吞掉（kind==='dead'），保留 W6「dead 不渲染 ask-user」语义；trace 同样
            承接 ask-user（session-trace 契约「不打断对话能力」，V4）；landing/empty 无 session，
@@ -159,9 +143,7 @@ import Landing from '@/components/new-task/Landing.vue'
 import AskUserOverlay from '@/components/extension/ask-user/AskUserOverlay.vue'
 import InboundFrameDroppedNotice from '@/components/ui/InboundFrameDroppedNotice.vue'
 import DiagnosticsExportAction from './DiagnosticsExportAction.vue'
-import TurnProgressBar from './TurnProgressBar.vue'
 import { usePanelView } from '@/composables/features/panel/usePanelView'
-import { useChat } from '@/composables/features/chat/useChat'
 import { useChatStore } from '@/stores/chat'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useToast } from '@/composables/useToast'
@@ -241,13 +223,6 @@ function onAskUserCancel(): void {
   cancel(req.requestId)
 }
 
-const { abort: abortSession } = useChat()
-/** [session-dead V5②] 观测条「中止此 turn」：走既有 abort 链路（useChat.abort，与
- *  Composer stop 按钮同链，见模板处挂载位置注释）。 */
-async function onProgressAbort(): Promise<void> {
-  if (!props.sessionId) return
-  await abortSession(props.sessionId)
-}
 /** getHistory 失败态（landing 重试出口，AC-2.6） */
 const historyError = computed(() =>
   props.sessionId ? chat.failedHistory.has(props.sessionId) : false,

@@ -73,12 +73,12 @@ export function truncateMessagesFrom(
  * 终态消息 patch（message.complete 双通道单源，S4-A6 收口）。
  *
  * 为什么在此导出：message.complete 的两条消费链——registry 的 streaming 收口分支与
- * complete-recovery 的 premature-timeout 恢复分支——对同一气泡应用同一组终态字段
+ * message.complete 追加分支——对同一气泡应用同一组终态字段
  * （status / usage / error / content 条件展开），此前靠注释「finalizeMessages 双通道同语义」
  * 人肉同步。本函数把该不变量结构化：任一分支的终态字段演化只需改这一处。
  *
  * 只做字段 patch，不含通道各自的命中守卫（streaming 收口 vs timeoutIds 打标实体）与
- * prematureTimeout 清标（仅恢复分支需要，调用方 spread 后追加）。外层守卫留在调用方。
+ * 外层守卫留在调用方。
  */
 export interface TerminalMessagePatchOptions {
   /** 末位 assistant 索引（usage 回填 / content 覆盖 / error 写入只作用于末位，turn 级聚合） */
