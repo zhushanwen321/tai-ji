@@ -15,6 +15,8 @@
  */
 export default {
   tray: {
+    /** 托盘 icon 行的 aria-label（整行为一个语义组；各 icon 另有 title.<kind>） */
+    trayLabel: '任务托盘',
     /** 三件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
     title: {
       bash: '后台命令',

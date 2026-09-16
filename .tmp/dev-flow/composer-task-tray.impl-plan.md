@@ -176,6 +176,15 @@ graph TD
 | D23 | u-ext-todo | `buildGui([])` badge 推 `'0'` 无特判（仅测试可达） | 生产路径空清单走清屏；不加无生产效果的分支（YAGNI） | 接受 |
 | D24 | u-doc-sync | refreshDisplay 示例定位修正：派发写的 §3.2 实际位于 §4.3（§3.2 已由 u-proto 同步） | 按符号唯一定位改 §4.3 | 接受 |
 | D25 | u-doc-sync | 登记未改的相邻文档存量滞后（超射程）：① §4.3 helper 示例签名与 §5.2/指南 Helper 表滞后（现走 setWidgetDual + GuiRenderResult）；② 指南 §4 速查表「渲染状态」列整列仍标「P2 待实现」而 8 原语已实现；③ 架构文档 §3.2 list-tree props 未列 `numbered`、GuideComponentProps 未列 `group` | 属存量滞后（非本次引入），改动横跨 3+ 处超领地 | 接受暂不改；入 §7 残留风险登记另行建档 |
+| D26 | u-tray-shell | 浮层实现 = reka Popover（每条目一个受控 `:open`），未用手写 anchored | 设计 D8 二选一 + 派发「先按仓内 popover 范式」 | 接受（P7 降级预案写入 ComposerTray.vue 文件头；真机复核在阶段 5） |
+| D27 | u-tray-shell | 新增 1 个 i18n 键 `panel.tray.trayLabel`（中英对称） | 托盘 icon 行 `role=group` aria-label | 接受 |
+| D28 | u-tray-shell | 面板键命名空间化（`native:<kind>` / `widget:<viewId>`）+ 互斥实现为单一 activeKey | 设计只要求「至多一个面板」，未规定键形态；单键持有使互斥结构性成立，前缀防 widget 名为 bash/flow 时撞键 | 接受 |
+| D29 | u-tray-shell | 新增 `renderedPanelKeys` 守卫（widget 清屏 / built-in 归零 → 面板与 pin 一并作废，条目回来不弹回） | D7 只写条目可见性，未明说「条目消失时交互态如何处置」——边界补齐 | 接受（2 条用例锁定 + 变异验证） |
+| D30 | u-tray-shell | 面板打开拦截 reka FocusScope 自动聚焦（`open-auto-focus → preventDefault`） | hover 预览打开不得抢走 composer 输入焦点（打字中被打断属正常路径破坏） | 接受（断言 `document.activeElement` 不变 + 变异验证） |
+| D31 | u-tray-shell | 层外点击判定排除托盘按钮行内目标（`onInteractOutside` 对托盘根内 target preventDefault） | 设计只写「点面板外解除」；不排除则「再点 icon 解除」被 pointerdown 先解除、click 再 pin 回来（永远解不开） | 接受（真实 pointerdown+click 时序用例锁定） |
+| D32 | u-tray-shell | DESIGN.md 只加 1 条 bullet（composer-bar 任务托盘 + 位置），未改「composer-bar 6 元素」原行 | 该行本就不全（缺 GenStatsTriggers / composer.toolbar）；最小必要补充 | 接受 |
+| D33 | u-tray-shell | 测试用真实 TrayNativePanel/TrayWidgetPanel（不 stub）+ 变异验证（6 处改坏→红） | `pinned` 透传必须由真实 DOM 断言（防空断言）；hover 计时期望独立常量化 | 接受（质量加分项） |
+| D34 | （观察，非偏差） | tray 测试 stderr 的 Vue warn「no active effect scope」 | 存量模式：抽样既有 composer-smoke=2 / context-chips-bar=1，非本次引入 | 不处置 |
 
 ## 6 状态表
 
@@ -186,7 +195,7 @@ graph TD
 | u-tabbar | committed | 1 | commit「feat(tray): u-tabbar sections container」；TabBar.test 16 pass + ui 全包 806 pass + ui typecheck ok + 主 agent 重跑复核同结果；P5 门关闭（见偏差 D10） |
 | u-tray-widget | committed | 1 | commit「feat(tray): u-tray-widget ordering + widget button/panel」；tray 目录 4 files/64 pass + typecheck(:test) ok + 主 agent 重跑复核同结果；对接契约（button props/emits、panel props、视觉序）已写入两组件文件头 |
 | u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
-| u-tray-shell | pending | 0 | — |
+| u-tray-shell | committed | 1 | commit「feat(tray): u-tray-shell composer tray shell + mount」；tray 5 files/90 pass + check:i18n 203 pass + typecheck(:test) ok + 改动面回归 26 files/278 pass + 变异验证 6 处；主 agent 重跑复核同结果；偏差 D26-D33 登记 |
 | u-ext-todo | committed | 1 | commit「feat(tray): u-ext-todo tab-bar sections」；todo vitest 8 files/144 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果；带出计划级漏项 1（e2e/tasks-drawer-real.spec.ts 断言陈旧）+ 文档滞后 2（见 u-doc-sync） |
 | u-doc-sync | committed | 1 | commit「docs(protocol): sync todo tab-bar shape + tab-bar sections」；doc-symbol-drift 绿 + 逐处 grep 自对账通过（陈旧断言清零）；偏差 D24-D25 登记 |
 | u-retire-sidebar | pending | 0 | — |
@@ -218,3 +227,4 @@ graph TD
 | 2026-09-16 | u-tray-widget committed（排序/按钮/面板 + 依赖追踪复刻契约测试；tray 64 绿，主 agent 重跑复核通过；偏差 D13-D17 登记） |
 | 2026-09-16 | u-ext-todo committed（sections 双 tab + icon/badge；todo 144 绿，主 agent 重跑复核通过；偏差 D18-D23 登记；带出计划级漏项 1（tasks-drawer-real spec）→ 设计 §4 e2e 表修正 + u-e2e 领地扩展；文档滞后 2 → 新增 u-doc-sync 单元） |
 | 2026-09-16 | u-doc-sync committed（协议文档 §4.3 示例 + §14.4 覆盖表 + 指南速查表 tab-bar 行；doc-symbol-drift 绿；偏差 D24-D25 登记，存量文档债务入 §7 残留风险 0） |
+| 2026-09-16 | u-tray-shell committed（外壳 + 挂载 + trayLabel + DESIGN.md；tray 90 绿 + 回归 278 绿 + 变异验证 6 处；偏差 D26-D34 登记）→ 阶段 2 全部 11 单元就差退役三件 |

@@ -14,6 +14,8 @@
  */
 export default {
   tray: {
+    /** Tray row aria-label (the icon row as one landmark; each icon carries title.<kind>) */
+    trayLabel: 'Task tray',
     /** Kind titles (panel aria-label; the shell reuses them for icon title/aria) */
     title: {
       bash: 'Background commands',

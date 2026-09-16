@@ -110,6 +110,9 @@
       <div class="composer-bar flex flex-wrap items-center justify-end gap-0 px-2.5 pb-2 mt-1">
         <!-- + 添加内容（左锚定，spec §1 ①，click 出浮层：附件 / 命令；# 文件改走 inline 触发） -->
         <AddMenuPopover @select="onAddSelect" />
+        <!-- 任务托盘（设计 docs/design/composer-task-tray.md D1：`+` 之后、composer.toolbar 之前）。
+             landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。 -->
+        <ComposerTray v-if="sessionId" :session-id="sessionId" />
         <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
              plugin 贡献工具栏视图 → ViewHost 渲染。empty="hidden"：无贡献时零 DOM 不影响布局。
              见 02-extension-host-wiring.md 重构 2。 -->
@@ -205,6 +208,7 @@ import { Button } from '@/components/ui/button'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
+import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
 import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import GenStatsTriggers from './GenStatsTriggers.vue'
