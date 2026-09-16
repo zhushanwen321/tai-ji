@@ -130,6 +130,11 @@ graph TD
 | u8 | permanent-session-model.md:59 条款主语改写（死主语「collect:'sync' 批成员」→「workflow-origin/one-shot 批成员」，死锚换现行锚） | 合理（现行 SSOT 条款指向已删机制会误导读者） | 固化 |
 | u8 | 迁移说明落点 CONTEXT.md（二选一授权内，术语表是查阅读者第一落点） | 合理 | 固化 |
 | u8 | E2E-BATCH-06 在 --check 对真实 diff 对账时被圈出（u9 在途改动落其 scope）——登记语义正确（Phase 3 合入即激活） | 披露性（非偏差） | 无需处理 |
+| u9 | 实施形态裁量：不复用 notifier.notify() 通道，notifyDone 直接受 NotifyLedger + core 扩展 per-entry deliveryCustomType。依据：notify() 的 BgNotifyRecord 契约（文案形态/id:round 幂等键/bg-notify-render 消费）是 subagent 会话语义，workflow 收口通知塞入会破坏 G4 文案字节锁定；送达 customType 必须保持 workflow-result（runtime event-interpreter W18 信号锚 + taiji display 覆写 SSOT）。core 扩展只增不删（可选第 4 参/可选字段，存量 entry 零迁移），无 options 默认路径逐字节等价（既有 36 用例零改动全绿） | 合理（任务书授权裁量，依据充分） | 固化 |
+| u9 | 外部通道组（deliveryCustomType 声明）不合批逐条投递：batch 合并形态对外部通道无消费契约 + 多 run 同边沿收口低频 | 合理 | 固化 |
+| u9 | 降级路径 deliverAs:'steer' 改 triggerTurn 单通道直发（对齐 notifier 内核降级形态），g4-allow 两处豁免清除，notify-stale-guard 断言同批更新 | 合理（G4 守卫全绿） | 固化 |
+| u9 | notifiedRunIds 内存 Set 保留：与账本幂等构成两层去重（内存拦同进程重复回调，持久 notifyId 承接重启/窗口挤出），W3C2/W3TC11-13 契约零改动保持绿 | 合理 | 固化 |
+| u9 | docs/architecture/pi-boundary-reliability.md L377 附录 B 待办（workflow 完成通知账本化迁移）已可销账——领地外未动手 | 合理（移交） | **随阶段 6 design-code-sync 终态同步处理** |
 | u5 | routeRecord/isCollectMember 删除后成功轮通知收敛为 notifyComplete 单通道（与原 async 直通分支逐行等价，失败轮统一走既有 async 失败单发；closeAfterRound 两分支本就同构） | 合理（删 sync 双路后的必然形态，非行为变更） | 固化 |
 | u5 | sync-collect-recovery.test.ts 未整删：含非 collect 覆盖面（存量 entry 投影白名单/orphan merge/P-rebuild/P-manifest 不变量）——删 7 批机制用例、改造保留 6 例 | 合理（随删/随改指令） | 固化 |
 | u5 | notifier-golden-snapshot 合批 merge 用例保留主体（60s 合批窗口是内核行为、降级形态仍存在），仅删批量渲染锁段；合批 details 降级宿主走 pi 默认渲染兜底 | 合理 | 固化 |
@@ -148,7 +153,10 @@ graph TD
 | u5-collect-core | committed | 2（首任限流零产出 + 接替完成） | commit 3da148eb7；42 文件 +433/−4126；重跑核验 core 3037/0 失败、shell 964/0、session-reader 407/0（u4 遗留 2 例修复确认）；grep 终扫三类剩余（非 collect 英文动词/读侧保留面/留痕注释，4 处命中抽验均为 [collect 退役] 注释）；extractBatch 零命中；notify-ledger.ts 幸存确认 |
 | u6-collect-compat | committed | 1 | 验证记录 `.tmp/dev-flow/collect-compat-u6.md` + 脚本 u6-verify-collect-compat.mts（保留供阶段 5 复验）；⛔ 期门通过：真实存量样本（24 处 + 8 处 batchFinalized）三项验证 24/24 断言过——record-store 重建容忍 / session-reader 反查（result 单查+批量）/ initSession 恢复全链；仓库源码零改动，D6 无需回改 |
 | u8-collect-docs | committed | 1 | commit fb46cd0e8；三门禁重跑全绿（validate-e2e-map 18 rules / select-affected-e2e --check PASS / doc-symbol-drift OK）；7 文档实质抽验（architecture §4 批量编排行 / CONTEXT Fan-out 词条+迁移三句 / E2E-BATCH-01..06）；grep 正面证明 sync 批符号活性表述零残留 |
-| u9-notify-ledger | pending | 0 | — |
+| u9-notify-ledger | committed | 1 | commit 12f783120；6 文件 +381/−57；重跑核验 core 3041/0 失败（+8 对账闭合）、shell 80 文件/970（+6 对账闭合）；抽验 wf-done: 幂等键常量 / g4-allow 清零 / workflow-result customType 保持；G4 守卫绿；S7 mock 轨证据 + 真机步骤已备（阶段 5 A6） |
+| u10-probe-cleanup | pending | 0 | — |
+
+**u10-probe-cleanup（微单元，u8 移交项）**：删除 `scripts/probes/subagent-sync-collect/` 整目录（17 文件——sync-collect 探针已随 u5 机制退役，E2E-PROBE-01 已摘除），更新 `docs/TEST-STRATEGY.md:155` 归档记录的「待后续清理单元删除」标注为已删；grep 终扫 `subagent-sync-collect` 活性引用零残留（u8 已清文档引用，本单元终扫确认）；门禁 select-affected-e2e --check + validate-e2e-map 绿。依赖：u8、u5（已满足）。
 
 ## 7 残留风险与变更历史
 
