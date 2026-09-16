@@ -3,7 +3,8 @@
  *
  * 覆盖矩阵（与设计文档逐条对应）：
  *   §3.4 守卫矩阵全行（每行至少 1 条）：浮层 open / IME / auto-repeat（含 ctrl+x 不忽略例外）/
- *   composer 内选区（放行原生剪切）/ staging 活跃 / landing 态 / 已建态 / 档位仅 off / 模型 ≤1。
+ *   composer 内选区（放行原生剪切 + 三个切换键与选区无关）/ staging 活跃 / landing 态 / 已建态 /
+ *   档位仅 off / 模型 ≤1。
  *   §3.3 键位表：修饰键约束（alt+p 不绑定、meta 系不命中）+ 循环取值起点规则（不在列表/
  *   undefined/脏值/绕回/enabled 过滤）。
  *   决策 8 意图目标生命周期：设立/等值清/reject 清/sessionId 清/进 staging 清/RTT 内连按逐次递进。
@@ -287,7 +288,7 @@ describe('useComposerShortcutActions', () => {
       expect(writeText).toHaveBeenCalledWith('streaming partial')
     })
 
-    // 行 4：composer 内有选区 —— ctrl+x 放行原生剪切；shift+tab 正常触发（与选区无关）
+    // 行 4：composer 内有选区 —— ctrl+x 放行原生剪切；三个切换键正常触发（选区守卫只挂 copy 分支）
     it('选区行：composer 内有选区时 ctrl+x 放行原生剪切（不拦截、不触发复制动作）', () => {
       const editor = document.createElement('div')
       editor.setAttribute('contenteditable', 'true')
@@ -334,6 +335,27 @@ describe('useComposerShortcutActions', () => {
 
       expect(handler(makeKeyEvent('Tab', { shift: true }).e)).toBe(true)
       expect(onThinkingSelect).toHaveBeenCalledTimes(1)
+    })
+
+    it('选区行：composer 内有选区时 ctrl+p / ctrl+shift+p 正常触发模型双向循环（选区守卫只挂 copy 分支）', () => {
+      const editor = document.createElement('div')
+      editor.setAttribute('contenteditable', 'true')
+      document.body.appendChild(editor)
+      editor.focus()
+      mockSelection(editor)
+
+      // 独立实例：避免决策 8 意图续步把第一按目标当第二按起点，保持「选区无关」单变量语义
+      const forward = makeDeps({ currentModelId: 'prov/b' })
+      const forwardHandler = useComposerShortcutActions(forward.deps)
+      expect(forwardHandler(makeKeyEvent('p', { ctrl: true }).e)).toBe(true)
+      expect(forward.onModelSelect).toHaveBeenCalledTimes(1)
+      expect(forward.onModelSelect).toHaveBeenCalledWith({ modelId: 'c', provider: 'prov' })
+
+      const backward = makeDeps({ currentModelId: 'prov/b' })
+      const backwardHandler = useComposerShortcutActions(backward.deps)
+      expect(backwardHandler(makeKeyEvent('p', { ctrl: true, shift: true }).e)).toBe(true)
+      expect(backward.onModelSelect).toHaveBeenCalledTimes(1)
+      expect(backward.onModelSelect).toHaveBeenCalledWith({ modelId: 'a', provider: 'prov' })
     })
 
     // 行 5：staging 活跃 —— 切换改暂存值（core 快照路由，经同一 onModelSelect/onThinkingSelect）；复制正常

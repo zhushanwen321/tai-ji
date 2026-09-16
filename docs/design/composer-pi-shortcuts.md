@@ -170,7 +170,7 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 | 键盘 auto-repeat（`e.repeat === true`，按住不放） | 忽略（只首按走一步，决策 8） | 忽略 | **不忽略**（幂等无 RPC，决策 8 例外——与 §3.3 键位表注记同口径） |
 | composer 内有选区 | 正常触发（与选区无关） | 正常触发 | **放行原生剪切**，不触发动作 |
 | staging 活跃（fork/handoff） | 改暂存档位（快照） | 改暂存模型（快照） | 正常复制（staging 不影响消息流） |
-| landing 态（sessionId=null） | 写 `localThinkingLevel`（authored） | 写 `pendingModel` | 正常复制 |
+| landing 态（sessionId=null） | 写 `localThinkingLevel`（authored） | 写 `pendingModel` | 按 §3.5 空流规则 no-op（landing 必无消息流） |
 | 已建 session | RPC + 回执真值（连按按决策 8 续步） | 同左 | 正常复制 |
 | 档位可用集仅 `off`（non-reasoning） | no-op（键吞掉） | — | — |
 | 模型列表 ≤1 个 | — | no-op（键吞掉） | — |
@@ -209,7 +209,7 @@ thinking 循环同构（`onThinkingSelect` → `session.setThinkingLevel` → �
 | S3 | 新任务页（landing，session 未建）按 `ctrl+p` 切到目标模型，输入首发消息提交 | G2 | 创建的 session 使用该模型（session 详情/chip 显示）；再次 `shift+tab` 在新 session 上生效（landing → 已建迁移无断裂） |
 | S4 | 有 ≥1 条 AI 回复的 session 中按 `ctrl+x`，到外部编辑器粘贴；再在流式输出中按一次 | G1 | 非流式时粘贴内容 = 最后一条回复全文（含 markdown 纯文本形态）；流式时 = 当前已生成部分文本；toast「已复制最后回复」出现 |
 | S5 | composer 内输入文字并选中一段，按 `ctrl+x` | G3 | 触发原生剪切（文字进剪贴板、从输入框消失），**无**「已复制最后回复」toast |
-| S6 | 按 `/`（或既有唤起方式）打开命令浮层，按 `ctrl+p` 与 `shift+tab`；再按 `ctrl+shift+p` | G3 | 浮层行为不受影响，模型/档位 chip 不变；`ctrl+shift:p` 冒泡触发预设 popover 弹出（既有行为：浮层 open 时动作表 cmdOpen 守卫不拦截、全局表正常命中——两 popover 并存为现状语义，非本设计引入） |
+| S6 | 按 `/`（或既有唤起方式）打开命令浮层，按 `ctrl+p` 与 `shift+tab`；再按 `ctrl+shift+p` | G3 | 浮层行为不受影响，模型/档位 chip 不变；`ctrl+shift+p` 冒泡触发预设 popover 弹出（既有行为：浮层 open 时动作表 cmdOpen 守卫不拦截、全局表正常命中——两 popover 并存为现状语义，非本设计引入） |
 | S7 | 中文输入法组合中（候选词悬浮）按 `shift+tab` 与 `ctrl+p` | G3 | 组合不中断、不触发任何动作；上屏后按键恢复正常触发 |
 | S8 | 进入 fork staging 模式（chip 出现），按 `shift+tab`/`ctrl+p`，提交 fork | G2/G3 | 源 session 的模型/档位不变；新 fork session 使用暂存后的值（`getStagingConfig` 透传） |
 | S9 | 单模型环境（或仅剩 1 个 enabled 模型）按 `ctrl+p`；non-reasoning 模型按 `shift+tab` | G3 | 无反应、无报错、无 toast 噪音 |

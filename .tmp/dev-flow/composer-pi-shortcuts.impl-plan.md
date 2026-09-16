@@ -98,7 +98,11 @@ graph TD
 - **风险 R1**：`useComposerKeydown` 的 deps 在 `Composer.vue:418` 组装（285/300 贴线）——传参必须极简；若引发行数超限，下沉 composer-shell（领地内已含该文件，无需扩领地）。
 - **风险 R2**：`isStaging` 信号源 = composer-shell 的 `staging.activeStaging`（设计 §5 U1 deps 清单已列）——若 staging 结构暴露面不足，允许在 composer-shell 内派生只读 computed，禁止改 core（core 不在领地）。
 - **风险 R3**：subagent 环境间歇 exit 143（本会话 tech-design 复审阶段连发）——dev 派发失败时用 action:message 续跑恢复（上下文保留），连续 2 次失败改串行单发。
+- **残留 R4（阶段 3 审查登记）**：设计 §6 INFO 交接的 core `model-thinking.ts`「RPC + 乐观更新」注释残留 5 处（:88,:90,:331,:366,:450）未清扫——core 不在本流水线领地（设计 §4 renderer-only 裁决），随下次 core 触碰批次顺带清扫，禁止为清扫单独扩领地。
 
 ### 变更历史
 - 2026-09-16 计划创建（设计 docs/design/composer-pi-shortcuts.md 三审 0 must-fix 收敛后）。
 - 2026-09-16 中断恢复校准：以 git log 与工作区实物核实 U1 领地零实物（前任 dev sa-e3de5ce0 跨会话不可达、无产出），按 execute.md 接替程序补派新 dev（sa-c9a60dd1），轮次 0 重计。
+- 2026-09-16 U1 交付核验通过并 commit（diff 8 文件 ⊆ 领地；vitest 两目标 80/80 + vue-tsc 0 重跑一致；script setup 287/300）。
+- 2026-09-16 阶段 3 一致性审查 + Gate A（单 reviewer 合并承载）：Gate A 四项全绿（renderer 全量 4201/4201、typecheck 0、根 lint 0、core 零改动；绕过扫描零命中；日志 .tmp/dev-flow/composer-pi-shortcuts.gate-a.log）；机制层逐项核实一致（链序/决策 7/决策 8 五清除/起点对称/§3.5 逐行/G2 同入口）。结论：unreasonable 2 low（COMPOSER_ACTION_KEYS 锚点未落地→派修复批次对齐设计；core 注释残留→R4 登记）；doc_errors 2（S6 冒号笔误、§3.4 landing×ctrl+x 措辞）已由主 agent 修正设计文档；coverage 补测 1 条（选区×ctrl+p 触发）并入同批修复。
+- 2026-09-16 审查清零 commit（阶段 5 入口门标记）：修复批次 R1 核验通过（diff 2 文件 ⊆ 领地、81/81 + vue-tsc 0 重跑一致、主 agent 定向复审 diff 逐行通过——常量查表等价改写零语义漂移、新用例真实 DOM 断言）；设计文档 2 处 doc_errors 修正同 commit。Gate A 最终态全绿：renderer 全量 4202/4202（+1 补测用例）、根 lint exit 0、vue-tsc exit 0、core 零改动。

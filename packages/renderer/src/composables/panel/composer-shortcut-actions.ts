@@ -62,12 +62,19 @@ export interface ComposerShortcutActionDeps {
 }
 
 /**
- * 动作种类。命名锚点沿用 pi keybindings 的 namespaced id（设计 §3.3 键位表）：
- * thinking-cycle=app.thinking.cycle / model-forward=app.model.cycleForward /
- * model-backward=app.model.cycleBackward / copy=app.message.copy。
- * P1 注册表化（统一 KeybindingRegistry）时以此为迁移锚点，本版不做用户配置。
+ * 键位→动作 id 映射：动作 id 沿用 pi 0.84.4 keybindings 的 namespaced id（设计 §3.3 键位表），
+ * 与 pi keybindings.json 同构——P1 注册表化（统一 KeybindingRegistry）时的迁移锚点，
+ * 本版不做用户配置。ShortcutAction 与键位判定/动作编排均由本表取值，单一来源防漂移。
  */
-type ShortcutAction = 'thinking-cycle' | 'model-forward' | 'model-backward' | 'copy'
+export const COMPOSER_ACTION_KEYS = {
+  'shift+tab': 'app.thinking.cycle',
+  'ctrl+p': 'app.model.cycleForward',
+  'ctrl+shift+p': 'app.model.cycleBackward',
+  'ctrl+x': 'app.message.copy',
+} as const
+
+/** 动作 id（= COMPOSER_ACTION_KEYS 值联合，成员即 pi namespaced id） */
+type ShortcutAction = (typeof COMPOSER_ACTION_KEYS)[keyof typeof COMPOSER_ACTION_KEYS]
 
 /** 复制反馈 i18n key（文案落在 i18n/locales/*.panel.ts composer 段，设计 §3.3 决策 4 / §3.5） */
 const COPY_SUCCESS_KEY = 'panel.composer.copyLastReply'
@@ -82,12 +89,14 @@ const COPY_FAILED_KEY = 'panel.composer.copyLastReplyFailed'
 function matchShortcutAction(e: KeyboardEvent): ShortcutAction | null {
   const key = e.key.toLowerCase()
   if (key === 'tab') {
-    return e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey ? 'thinking-cycle' : null
+    return e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey ? COMPOSER_ACTION_KEYS['shift+tab'] : null
   }
   if (key === 'p' && e.ctrlKey && !e.altKey && !e.metaKey) {
-    return e.shiftKey ? 'model-backward' : 'model-forward'
+    return e.shiftKey ? COMPOSER_ACTION_KEYS['ctrl+shift+p'] : COMPOSER_ACTION_KEYS['ctrl+p']
   }
-  if (key === 'x' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) return 'copy'
+  if (key === 'x' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+    return COMPOSER_ACTION_KEYS['ctrl+x']
+  }
   return null
 }
 
@@ -211,7 +220,7 @@ export function useComposerShortcutActions(
     if (!action) return false // 未命中 → 原样放行（不拦截、不阻断冒泡，既有段行为不变）
     // IME 组合中不触发（分发链 IME 段已先行放行；此处为模块级同语义防御：放行不吞键）
     if (e.isComposing) return false
-    if (action === 'copy') {
+    if (action === COMPOSER_ACTION_KEYS['ctrl+x']) {
       // §3.4 选区行：composer 内有选区 → 放行原生剪切（不拦截），不触发复制动作
       if (hasSelectionInFocusedEditor()) return false
       copyLastAssistantReply()
@@ -226,8 +235,8 @@ export function useComposerShortcutActions(
       e.stopPropagation()
       return true
     }
-    if (action === 'thinking-cycle') cycleThinkingLevel()
-    else cycleModel(action === 'model-forward' ? 'forward' : 'backward')
+    if (action === COMPOSER_ACTION_KEYS['shift+tab']) cycleThinkingLevel()
+    else cycleModel(action === COMPOSER_ACTION_KEYS['ctrl+p'] ? 'forward' : 'backward')
     // §3.4 拦截语义：命中任一键位（含 no-op 行）→ stopPropagation + preventDefault（决策 7）
     e.preventDefault()
     e.stopPropagation()
