@@ -489,6 +489,90 @@ function ensureWhitelistForImported(imported: ProviderImportedItem[]): void {
 }
 
 /**
+ * quota 自动开启的目标：决策用完整数据在主循环收集，写入在主流程成功后统一执行。
+ * 携带结果条目引用——写成功才置 quotaAutoEnabled，前端 toast 据此提示。
+ */
+interface QuotaAutoEnableTarget {
+  item: ProviderImportedItem
+  fetcher: string
+}
+
+/**
+ * 组 1 批处理：models.json 已定义的 provider 逐条应用（分体系处理见 applyProviderEntry），
+ * imported 条目进 quota 自动开启决策收集（凭证为明文 + 命中 api-key 类 preset 才收集）。
+ * 返回产生的条目（未勾选的不产生条目）。
+ */
+async function applyProviderEntries(
+  providers: ParsedProvider[],
+  selectedIds: string[],
+  existingIds: Set<string>,
+  credentialWriter: CredentialWriter | undefined,
+  autoEnableTargets: QuotaAutoEnableTarget[],
+): Promise<ProviderImportedItem[]> {
+  const imported: ProviderImportedItem[] = []
+  for (const provider of providers) {
+    const item = await applyProviderEntry(provider, selectedIds, existingIds, credentialWriter)
+    if (!item) continue
+    imported.push(item)
+    if (item.status === 'imported') {
+      const preset = matchAutoEnablePreset(
+        { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
+        provider._credentialType,
+      )
+      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
+    }
+  }
+  return imported
+}
+
+/**
+ * 组 2 批处理：孤儿凭据逐条应用（sa3 F1，分体系处理见 applyOrphanCredential），
+ * imported 条目进 quota 自动开启决策收集：决策用模板的完整定义（baseUrl/name），
+ * 凭证形态用 oc 的六态判定。返回产生的条目（未勾选的不产生条目）。
+ */
+async function applyOrphanCredentials(
+  orphanCredentials: ParsedOrphanCredential[],
+  selectedIds: string[],
+  existingIds: Set<string>,
+  credentialWriter: CredentialWriter | undefined,
+  autoEnableTargets: QuotaAutoEnableTarget[],
+): Promise<ProviderImportedItem[]> {
+  const imported: ProviderImportedItem[] = []
+  for (const oc of orphanCredentials) {
+    const item = await applyOrphanCredential(oc, selectedIds, existingIds, credentialWriter)
+    if (!item) continue
+    imported.push(item)
+    if (item.status === 'imported') {
+      const tpl = matchBuiltinTemplate(oc.providerId)
+      const preset = tpl
+        ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
+        : undefined
+      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
+    }
+  }
+  return imported
+}
+
+/**
+ * coding-plan 额度显示自动开启（导入即默认同意）落盘：只对本次真实落盘（imported）的条目；
+ * skipped（duplicate）不动——不覆盖用户对既存 provider 的配置。写入必须在本函数返回前
+ * 完成：handler 随后广播 provider 列表，闸门（renderer quota.enabled）直接消费本次写值。
+ * 写成功才在结果条目置 quotaAutoEnabled（写失败不置位，前端不 toast 不实报告）。
+ */
+async function applyQuotaAutoEnable(targets: QuotaAutoEnableTarget[], store: QuotaExtrasWriter | undefined): Promise<void> {
+  for (const target of targets) {
+    if (store && await autoEnableQuotaDisplay(store, target.item.id, target.fetcher)) {
+      target.item.quotaAutoEnabled = true
+    }
+  }
+}
+
+/** 按 status 计数（failedCount / 日志统计共用）。 */
+function countByStatus(items: ProviderImportedItem[], status: ProviderImportedItem['status']): number {
+  return items.filter((i) => i.status === status).length
+}
+
+/**
  * Step2：应用导入（写入 models.json）。
  *
  * 从缓存取完整配置 → apply 时再次查冲突 → 逐个 upsertProvider（剥离 _ 元数据）→ 全成功才删缓存。
@@ -528,46 +612,20 @@ export async function applyImport(
 
   // apply 时再次查冲突（preview 后 models.json 可能被改）
   const existingIds = new Set(getProviderNames())
-  const imported: ProviderImportedItem[] = []
-  // 自动开启额度显示的目标（决策用完整数据在此收集，写入在主流程成功后统一执行；
-  // 携带结果条目引用——写成功才置 quotaAutoEnabled，前端 toast 据此提示）
-  const autoEnableTargets: Array<{ item: ProviderImportedItem; fetcher: string }> = []
+  const autoEnableTargets: QuotaAutoEnableTarget[] = []
 
-  // ══ 组 1：models.json 已定义的 provider（分体系处理）══
-  for (const provider of entry.providers) {
-    const item = await applyProviderEntry(provider, selectedIds, existingIds, credentialWriter)
-    if (!item) continue
-    imported.push(item)
-    if (item.status === 'imported') {
-      const preset = matchAutoEnablePreset(
-        { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
-        provider._credentialType,
-      )
-      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
-    }
-  }
-
-  // ══ 组 2：孤儿凭据（sa3 F1，分体系处理：catalog → auth.json，否则 → models.json 模板）══
-  for (const oc of entry.orphanCredentials) {
-    const item = await applyOrphanCredential(oc, selectedIds, existingIds, credentialWriter)
-    if (!item) continue
-    imported.push(item)
-    if (item.status === 'imported') {
-      // 决策用模板的完整定义（baseUrl/name），凭证形态用 oc 的六态判定
-      const tpl = matchBuiltinTemplate(oc.providerId)
-      const preset = tpl
-        ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
-        : undefined
-      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
-    }
-  }
+  // ══ 组 1 → 组 2 顺序应用：收集 imported 条目与 quota 自动开启目标 ══
+  const imported = [
+    ...(await applyProviderEntries(entry.providers, selectedIds, existingIds, credentialWriter, autoEnableTargets)),
+    ...(await applyOrphanCredentials(entry.orphanCredentials, selectedIds, existingIds, credentialWriter, autoEnableTargets)),
+  ]
 
   // S6：selectedIds 中不在 imported 条目里的 id 补 failed 条目（不在 preview 里的给用户反馈）
   collectMissingIdsAsFailed(selectedIds, imported)
 
   // W4/W5：全成功才删缓存（一次性）；部分失败保留缓存供用户重试
   // （重试时 conflict 检测会让已导入的 skipped，未导入的可继续尝试）
-  const failedCount = imported.filter((i) => i.status === 'failed').length
+  const failedCount = countByStatus(imported, 'failed')
   if (failedCount === 0) {
     deletePreview(importId)
   }
@@ -575,19 +633,12 @@ export async function applyImport(
   // 边界1（wave3 TC5 / C2）：白名单守卫
   ensureWhitelistForImported(imported)
 
-  // coding-plan 额度显示自动开启（导入即默认同意）：只对本次真实落盘（imported）的条目；
-  // skipped（duplicate）不动——不覆盖用户对既存 provider 的配置。写入必须在本函数返回前
-  // 完成：handler 随后广播 provider 列表，闸门（renderer quota.enabled）直接消费本次写值。
-  // 写成功才在结果条目置 quotaAutoEnabled（写失败不置位，前端不 toast 不实报告）。
-  for (const target of autoEnableTargets) {
-    if (quotaExtrasStore && await autoEnableQuotaDisplay(quotaExtrasStore, target.item.id, target.fetcher)) {
-      target.item.quotaAutoEnabled = true
-    }
-  }
+  // coding-plan 额度显示自动开启：写入必须在本函数返回前完成（见 applyQuotaAutoEnable）。
+  await applyQuotaAutoEnable(autoEnableTargets, quotaExtrasStore)
 
   // 日志只记 id/source/status/count（不记 apiKey，DM1）
-  const importedCount = imported.filter((i) => i.status === 'imported').length
-  const skippedCount = imported.filter((i) => i.status === 'skipped').length
+  const importedCount = countByStatus(imported, 'imported')
+  const skippedCount = countByStatus(imported, 'skipped')
   const autoEnabledLog = quotaExtrasStore ? autoEnableTargets.length : 0
   console.log(
     `[provider-importer] apply source=${entry.source} importId=${importId} imported=${importedCount} skipped=${skippedCount} failed=${failedCount} quotaAutoEnabled=${autoEnabledLog}`,
