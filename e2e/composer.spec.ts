@@ -6,9 +6,14 @@
  * 敲 #auth 触发 session 候选而非文件候选，断言永挂。git 可追溯。
  *
  * 覆盖用例：
- * - E2E-CF-1: composer 渲染（输入区可见）
+ * - E2E-CF-1: composer 渲染（输入区可见）+ 工具条左簇任务托盘挂载（D1）
  * - E2E-CF-4: + 菜单只剩「附件」「命令」（# 文件改走 inline，@ 引用废弃）
- * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项（守门已随 file 入口移除）
+ * - E2E-CF-5: landing 态（无 session）+ 菜单也是 附件/命令 两项；托盘同判据隐藏（D1）
+ *
+ * [2026-09-16 composer-task-tray] 工具条结构断言复核：托盘插在 `+ 添加` 菜单之后、
+ * composer.toolbar 挂载点之前（设计 D1），不改变本 spec 原有断言面（输入区 / + 菜单 portal
+ * dialog / landing 判据均不受影响）；新增的两条挂载断言 = 托盘在 composer-bar 的挂载与
+ * 隐藏判据（`v-if="sessionId"`，与 GenStatsTriggers 同口径）。
  *
  * 约束（见 00-overview.md §6）：
  * - CommandPopover portal 到 body，全局查命令 button
@@ -35,10 +40,12 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
     await expect(page).toHaveTitle(/太极|TaiJi/)
   })
 
-  test('E2E-CF-1: composer 渲染（输入区可见可聚焦）', async ({ page }) => {
+  test('E2E-CF-1: composer 渲染（输入区可见可聚焦）+ 任务托盘挂载', async ({ page }) => {
     await activateSession(page)
     await page.getByRole('textbox').click()
     await expect(page.getByRole('textbox')).toBeFocused()
+    // 工具条左簇任务托盘（D1 挂载点）：session 态可见，随 Composer 实例化（per-session 归属）
+    await expect(page.getByTestId('composer-tray')).toBeVisible({ timeout: 5_000 })
   })
 
   test('E2E-CF-4: + 菜单只剩「附件」「命令」（无文件/引用入口）', async ({ page }) => {
@@ -57,6 +64,8 @@ test.describe('Composer 渲染与菜单入口 E2E', () => {
   test('E2E-CF-5: landing 态 + 菜单也是 附件/命令 两项（守门随 file 入口移除）', async ({ page }) => {
     // 不激活 session，保持 landing 态。等 landing composer 渲染
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 10_000 })
+    // 任务托盘与 GenStatsTriggers 同判据（D1）：landing 无 session → 不挂载（零视觉噪音）
+    await expect(page.getByTestId('composer-tray')).toHaveCount(0)
     await page.getByTitle(/添加内容/).click()
     // landing 与 session 态一致：附件/命令两项，无文件/引用
     const menu = page.getByRole('dialog')

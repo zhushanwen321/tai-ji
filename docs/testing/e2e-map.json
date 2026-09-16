@@ -53,7 +53,9 @@
       "summary": "visual-chromium：像素 diff 轨（chromium + vite dev mock），CI L1 固定环节",
       "scope": [
         "packages/renderer/src/**",
-        "e2e/visual/**"
+        "packages/ui/src/**",
+        "e2e/visual/**",
+        "e2e/visual-baselines/**"
       ],
       "layer": "L1",
       "assets": [
@@ -66,13 +68,14 @@
       "run": "npx playwright test --project=visual-chromium",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#c-层playwright-像素-diffci-内形态级",
-      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记"
+      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记。[2026-09-16 composer-task-tray 补 scope] 增补 `e2e/visual-baselines/**`：baseline 目录本身不是资产（不登记 assets），但 `e2e/` 是 asset 族看护根，基线 PNG 变更属本 rule 的触发面却没有 coverage → 按 --check 口径是漏登记（本次更新 composer 基线时实跑检出）。补 scope 而非登记 asset（资产 = 可执行 e2e 本体，基线是快照数据）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨截图主体（composer / shell）经 @taiji/ui 渲染——托盘 TabBar 容器化（sections 双段）与 8 个渲染原语（list-tree / tab-bar / card / stats-line / progress-bar 等）都在 packages/ui，改 packages/ui 会在像素层直接击穿本轨基线却圈不到本 rule（同批缺口：该目录此前不在任何 rule 的 scope 内）。补 scope 即把「@taiji/ui 形态变更」纳入触发面。"
     },
     {
       "id": "E2E-MOCK-01",
       "summary": "行为轨 mock 全量（electron project，mock 构建产物 + _electron.launch，零 token）",
       "scope": [
         "packages/renderer/src/**",
+        "packages/ui/src/**",
         "packages/core/src/**",
         "packages/runtime/src/**",
         "apps/electron/**",
@@ -106,7 +109,7 @@
       "run": "npx playwright test --project=electron",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集"
+      "note": "scope 内 spec 文件精确列出（spec 自身变更也触发自身轨）；e2e/ 下新增 spec 文件不匹配任何 scope，由 --check 门强制显式登记。与 E2E-ELECTRON-01 是超集关系（smoke ⊂ 全量），CI 只跑 smoke 子集。[2026-09-16 composer-task-tray] e2e/workflow-sidebar-sync.spec.ts 语义复核：文件名保留（登记 id 与 scope 不变），断言面随侧栏任务 tab 退役改写为「托盘同步」（workflow/subagent 记录 → 托盘条目/面板桶计数/行点击归宿 drawer workflow tab；原侧栏列表与详情视图断言随组件退役删除），行渲染细节下沉托盘组件测试（packages/renderer/src/__tests__/panel/tray/）——spec 只保留跨进程链路，复核后 scope 命中面不变（packages/renderer/src/** 已覆盖托盘入/退役改动）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨的渲染断言面大量落在 @taiji/ui——gui-components.spec.ts 的 8 渲染原语（card / progress-bar / stats-line / list-tree / tab-bar…）与 v6-shell-baseline 的 shell/抽屉容器都在 packages/ui，改该目录会击穿本轨断言却圈不到本 rule（该目录此前不在任何 rule 的 scope 内）。本轨为 on-diff，补后新增命中面 = packages/ui/** 变更（按改动面执行单 spec，非全量扫跑）。"
     },
     {
       "id": "E2E-REAL-01",
@@ -116,6 +119,7 @@
         "packages/core/src/**",
         "packages/runtime/src/**",
         "apps/electron/**",
+        "extensions/universal/**",
         "e2e/workspace-real.spec.ts",
         "e2e/ask-user-real.spec.ts",
         "e2e/tasks-drawer-real.spec.ts",
@@ -134,7 +138,7 @@
       "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）"
+      "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。"
     },
     {
       "id": "E2E-EQUIV-01",

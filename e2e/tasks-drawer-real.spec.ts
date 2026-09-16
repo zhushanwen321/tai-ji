@@ -10,8 +10,18 @@
  *
  * 三条 case：
  * - R1：extension load 契约（无 LLM）—— pi 能 load goal/todo extension 无报错
- * - R2：todo tool 调用 → 协议格式含 __gui__ list-tree（faux toolCall 脚本化）
- * - R3：goal_control 调用 → 协议格式含 __gui__ card（faux toolCall 脚本化）
+ * - R2：todo tool 调用 → 协议格式含 __gui__ tab-bar 双段（faux toolCall 脚本化）
+ *       + meta icon/badge 契约 + **托盘挂载链路终点**（widgetGui 消费端迁移后的 e2e 覆盖，
+ *       见下方「R2 的托盘断言来源」）
+ * - R3：goal_control 调用 → 协议格式含 __gui__ group（faux toolCall 脚本化）
+ *
+ * R2 的托盘断言来源（2026-09-16 composer-task-tray）：GUI 协议 widget 的渲染终点由对话流
+ * widget pill 迁至 composer 任务托盘（设计 D3/D11），但 **mock 轨无法覆盖该链路**——mock 的
+ * `pushSession` 只调 `events.dispatchSession`（session 通道），而 ViewHostStore 的消费者
+ * （ExtensionHost bridge）经 `onCrossSession` 订阅，route-inbound 的 crossSession 分发腿在
+ * mock 下不存在（修复点在 packages/core/src/transport/mock/index.ts，出 u-e2e 领地）。
+ * 故「extension:widgetGui → ViewHostStore → 托盘 icon/badge/面板」的端到端断言落在本 real 轨
+ * （真 runtime + 真 WS 帧 + 真 route-inbound），断言值取自真实 todo extension 的推送载荷。
  *
  * R1 的 source 断言语义变化（翻轨裁决）：原断言 `sourceInfo.source === 'npm:@zhushanwen/pi-goal'`
  * 绑定 npm 安装装配（symlink ~/.taiji-dev/npm）；faux 轨凭证无关装配下 mandatory 扩展经
@@ -146,18 +156,19 @@ test('R1: pi load goal/todo extension + session.create 成功', async () => {
   }
 })
 
-// ── R2: todo tool 调用 → 验证 todo 协议格式（__gui__ list-tree） ──
+// ── R2: todo tool 调用 → 验证 todo 协议格式（__gui__ tab-bar 双段 + meta） ──
 
 /**
- * WS 驱动 + 监听广播事件。不走 UI 输入（real 模式 UI session 切换需 OS dialog），
- * 改为 WS 发 prompt + 监听 runtime 广播的 tool_call_end 事件，验证真实 extension
- * 返回的 __gui__ GuiComponent 格式（这是 real 轨独有的协议契约验证）。
+ * WS 驱动 + 监听广播事件。协议断言不走 UI 输入（real 模式**新建** session 需 OS 原生目录选择
+ * dialog，不可自动化），改为 WS 发 prompt + 监听 runtime 广播的 tool_call_end 事件，验证真实
+ * extension 返回的 __gui__ GuiComponent 格式（这是 real 轨独有的协议契约验证）。
  *
- * UI 渲染部分由 mock 轨 gui-components.spec.ts 覆盖。tasks drawer UI 已随功能在 main 删除
- * （renderer 无对应 testid），不在其覆盖范围。
+ * 协议断言之后补一段 UI 断言：把该 session 在侧栏激活 → 托盘 widget 区渲染该 widget
+ * （icon/badge 出现 + 面板内容渲染）。这是 widgetGui 消费端迁移（对话流 pill → 托盘）后
+ * 唯一可达的端到端链路（mock 轨缺 crossSession 分发腿，见文件头「R2 的托盘断言来源」）。
  */
-test('R2: todo tool 调用 → 协议格式含 __gui__ list-tree', async () => {
-  test.setTimeout(120_000)
+test('R2: todo tool 调用 → 协议格式含 __gui__ tab-bar 双段 + 托盘挂载', async () => {
+  test.setTimeout(180_000)
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-tasks-'))
   const { page, cleanup } = await launchRealApp({ dataDir, faux: { responses: R2_FAUX_SCRIPT } })
   try {
@@ -222,25 +233,71 @@ test('R2: todo tool 调用 → 协议格式含 __gui__ list-tree', async () => {
     expect(todos[0].text, 'todos item 应有 text').toBeDefined()
     expect(['pending', 'in_progress', 'completed', 'cancelled']).toContain(todos[0].status)
 
-    // ── 协议契约断言 2：GuiComponent 结构化推送（list-tree）──
+    // ── 协议契约断言 2：GuiComponent 结构化推送（tab-bar 双段 + meta icon/badge）──
     // 现行载体是 extension:widgetGui 广播（M17 widget 面板，guiSetWidget → EventAdapter
     // NUL marker 解码 → runtime 广播），不是 tool result details.__gui__（旧协议形态，
     // W21 entry 化 + widget 推送分离后 details 只剩数据字段）。兼容有/无 {v,component} 包装层。
     const widgetGui = events.find((e) => e.type === 'extension:widgetGui')
-    expect(widgetGui, 'todo 调用应触发 extension:widgetGui 广播（SideDrawer 数据源）').toBeDefined()
-    const guiRaw = widgetGui!.payload?.gui
-    const gui = (guiRaw as { component?: { type?: string } })?.component ?? guiRaw
-    expect((gui as { type?: string })?.type, 'widgetGui.gui 应为 list-tree GuiComponent').toBe('list-tree')
-    console.log(`[R2] todo tool 协议契约验证通过：todos=${todos.length} 项，gui type=${(gui as { type?: string }).type}`)
+    expect(widgetGui, 'todo 调用应触发 extension:widgetGui 广播（托盘 widget 区数据源）').toBeDefined()
+    const widgetPayload = widgetGui!.payload as {
+      gui?: unknown
+      meta?: { title?: string; status?: string; icon?: unknown; badge?: string; progress?: { current: number; total: number } }
+    }
+    const guiRaw = widgetPayload.gui
+    const gui = (guiRaw as { component?: unknown })?.component ?? guiRaw
+    const guiNode = gui as {
+      type?: string
+      props?: { tabs?: Array<{ label?: string; active?: boolean }>; sections?: Array<Array<{ type?: string }>> }
+    }
+    // 内容根 = tab-bar（todo buildGui 双段容器化改造：单 list-tree → tab-bar + sections 双段）
+    expect(guiNode.type, 'widgetGui.gui 应为 tab-bar GuiComponent').toBe('tab-bar')
+    const tabs = guiNode.props?.tabs ?? []
+    const sections = guiNode.props?.sections ?? []
+    expect(tabs.length, 'tab-bar 应有 待办/已完成 两段标签').toBe(2)
+    expect(sections.length, 'sections 与 tabs 等长（两段子树）').toBe(2)
+    expect(tabs[0]?.label, '首段标签为待办 + 未完成计数').toMatch(/^待办 \d+$/)
+    expect(tabs[1]?.label, '次段标签为已完成 + 计数').toMatch(/^已完成 \d+$/)
+    expect(tabs[0]?.active, '首段显式 active（宿主初始 tab 依据）').toBe(true)
+    // 段内容 = list-tree（两段同构：行首序号 + status 圆点）
+    expect(sections[0]?.[0]?.type, '待办段内容为 list-tree').toBe('list-tree')
+    expect(sections[1]?.[0]?.type, '已完成段内容为 list-tree').toBe('list-tree')
+
+    // ── 协议契约断言 3：meta（托盘 icon/badge 的上游契约，D4 字段）──
+    expect(widgetPayload.meta?.title).toBe('Todo')
+    expect(widgetPayload.meta?.icon, 'todo 推 icon=list-checks（宿主 registry 可解析）').toBe('list-checks')
+    // badge = 未完成条数（3 条 pending → '3'；与首段 tab 计数同源，防双口径）
+    expect(widgetPayload.meta?.badge).toBe(String(todos.filter((t: { status: string }) => t.status !== 'completed').length))
+    expect(widgetPayload.meta?.progress?.total, 'progress.total = 条目全量').toBe(todos.length)
+    console.log(`[R2] todo tool 协议契约验证通过：todos=${todos.length} 项，gui type=tab-bar，badge=${widgetPayload.meta?.badge}`)
+
+    // ── UI 断言：托盘 widget 区挂载（消费端迁移后的渲染终点，见测试头注）──
+    await page.getByText('tasks-real-sample').click()
+    await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 15_000 })
+    const widgetButton = page.locator('[data-testid="tray-widget-button"][data-widget-key="todo"]')
+    await expect(widgetButton, 'setWidget 推送的 todo widget 应挂到 composer 托盘').toBeVisible({ timeout: 10_000 })
+    // badge = meta.badge；icon 命中宿主 registry（list-checks → glyph，非兜底 paths）
+    await expect(widgetButton.getByTestId('tray-widget-badge')).toHaveText(String(widgetPayload.meta?.badge))
+    await expect(widgetButton.getByTestId('tray-widget-icon-glyph')).toBeVisible()
+    await expect(widgetButton.getByTestId('tray-widget-pulse'), 'idle 态不渲染呼吸点（归零不虚亮）').toHaveCount(0)
+    // 面板：meta head（title/progress）+ tab-bar 双段渲染（本节 protocol 断言的 DOM 终点）
+    await widgetButton.click()
+    const widgetPanel = page.locator('[data-testid="tray-panel"][data-panel-key="widget:todo"]')
+    await expect(widgetPanel).toBeVisible({ timeout: 5_000 })
+    await expect(widgetPanel.getByTestId('tray-widget-panel-title')).toHaveText('Todo')
+    await expect(widgetPanel.getByTestId('tray-widget-panel-label')).toHaveText(`0/${todos.length}`)
+    await expect(widgetPanel.getByTestId('gui-tab-bar')).toBeVisible()
+    await expect(widgetPanel.getByTestId('gui-tab-bar-section').getByTestId('gui-list-tree'))
+      .toContainText('分析根因')
+    console.log('[R2] 托盘挂载链路验证通过：icon/badge/面板 tab-bar 双段渲染')
   } finally {
     await cleanup()
     if (!process.env.PLAYWRIGHT_DEBUG_KEEP_DATA) fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   }
 })
 
-// ── R3: goal_control 调用 → 验证 goal 协议格式（__gui__ card） ──
+// ── R3: goal_control 调用 → 验证 goal 协议格式（__gui__ group 内嵌 card） ──
 
-test('R3: goal_control create → 协议格式含 __gui__ card', async () => {
+test('R3: goal_control create → 协议格式含 __gui__ group', async () => {
   test.setTimeout(120_000)
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-tasks-'))
   const { page, cleanup } = await launchRealApp({ dataDir, faux: { responses: R3_FAUX_SCRIPT } })
