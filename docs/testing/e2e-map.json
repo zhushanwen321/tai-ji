@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ PROBE（subagent-sync-collect 探针）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -308,25 +308,118 @@
       "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
     },
     {
-      "id": "E2E-PROBE-01",
-      "summary": "subagent-sync-collect 探针 v2/v3：崩溃批补发与 kill -9 恢复面（PI_PROBE_FAUX=1 通道）",
+      "id": "E2E-BATCH-01",
+      "summary": "S1 批量基本链：subagents 双任务并行 → 一条 notifyDone 收齐（pi CLI 真机，真 LLM）",
       "scope": [
-        "scripts/probes/subagent-sync-collect/**",
-        "packages/subagent-core/src/execution/service/sync-collect-domain.ts"
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js"
       ],
-      "layer": "L2.5",
+      "layer": "L3",
       "assets": [
-        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/common.mjs" },
-        { "kind": "harness", "ref": "scripts/probes/subagent-sync-collect/faux-script.mjs" },
-        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs" },
-        { "kind": "probe", "ref": "scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs" }
+        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" },
+        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链——pi -ne RPC stdin JSONL 剧本随阶段 5 A1 环境落建后回填可执行命令）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：触发面 = subagent-workflow shell / fan-out 模板改动。asset 锚 = 被验能力本体（非验证剧本——validate 强校验 asset 磁盘存在，剧本未落建前以能力本体登记，落建后同 commit 回填）。验收口径（设计 S1）：一条 notifyDone，status=ok 且 results.length=2、summary 计数正确、Agent Trace 2 条均 ok"
+    },
+    {
+      "id": "E2E-BATCH-02",
+      "summary": "S2 三审真实负载：真实 LLM 三路并行审查收齐（人工验收形态，R3 归档）",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" }
       ],
       "trigger": "on-pi-bump",
       "serial": true,
-      "run": "PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v2-crash-batch-redeliver.mjs && PI_PROBE_FAUX=1 node scripts/probes/subagent-sync-collect/v3-kill9-recovery.mjs",
+      "run": "（人工验收，无脚本化命令——prompt 模型对本仓任一 tech-design 走 subagents 三路审查，父会话保持 idle 观察）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R3 人工验收形态归档：依赖真实模型智能，无法脚本化，不进机器对账执行面；on-pi-bump 表达重验时机信号（模型智能依赖面，与 E2E-RENAME-02 同理），pi bump 后按需人工复跑。通过标准按 G2 口径：三份报告落盘 + notifyDone 一次收齐三路 summary；成员失败时 run 收口 partial 且通知照达即本设计职责内通过（成员存活为观察项，归范围外 relay 线）"
+    },
+    {
+      "id": "E2E-BATCH-03",
+      "summary": "S3 部分失败 + 反向断言：坏 agent 路径 partial / message 拒绝 / agents 数量错配 fail-fast",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js",
+        "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" },
+        { "kind": "harness", "ref": "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链——剧本随阶段 5 A1 同环境落建后回填可执行命令）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 沉淀（partial 语义、message 批量成员拒绝文案 re-dispatch via subagents、agents 数量 fail-fast 均有壳层/模板单测守卫）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+    },
+    {
+      "id": "E2E-BATCH-04",
+      "summary": "S4 中途停止：派发后 workflow abort → run 终态 aborted + 通知到达 + 无孤儿 pi 子进程",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/workflows/fan-out.js"
+      ],
+      "layer": "L3",
+      "assets": [
+        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts" },
+        { "kind": "script", "ref": "packages/subagent-core/workflows/fan-out.js" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链——与 S1 同剧本环境派发后立即 abort 分支，落建后回填可执行命令）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），孤儿进程 ps 核对为通过条件之一（设计 S4）"
+    },
+    {
+      "id": "E2E-BATCH-05",
+      "summary": "S5 collect 退役回归：存量调用无批副作用（pi 静默放行）+ 存量 batchFinalized entry 旧 session 可读",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts",
+        "packages/subagent-core/src/execution/persistence/**",
+        "extensions/universal/session-reader/src/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts" },
+        { "kind": "harness", "ref": "packages/subagent-core/src/execution/persistence/record-store-rebuild.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链——真机带 collect 字段的存量式 subagent start + 含 batchFinalized entry 的旧 session 打开渲染；剧本随阶段 5 A5 落建后回填）",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "收录清单记「packages/runtime 下」按盘面修正为 scripts/probes/subagent-sync-collect/。断言已降级：上游 modeless wave3 E1 移除 crash-redelivery 后补发语义由 extension 侧 E1 恢复钩子承担，断言弱化为容忍形态（批头计数 finished/failed 两形态二选一、kill 时序不可构造时走降级门并注明）。收录裁决：保留 on-pi-bump 重验、不 R3 归档——v2/v3 是 sync-collect 崩溃恢复面唯一机器验收资产；a1-a8/v1 历史探针不入本表（其结论已沉淀 RESULTS.md）"
+      "note": "R2 态：触发面 = collect 退役相关面（schema 退役留痕 / 存量 entry 读侧容忍投影 / session-reader 反查）改动。真机确认项 = pi 静默放行结论（typebox 无 additionalProperties——S5 期门实测：未知字段静默放行且不剥离，退役后语义等价原 async 缺省路径，迁移说明见 docs/CONTEXT.md fan-out 词条）；读侧容忍已有 mock 轨守卫（batch-finalized / rebuild-indexes / permanent-session-legacy-compat 改造后用例断言「存量 entry 可读」），真机轨验旧 session 打开渲染不炸"
+    },
+    {
+      "id": "E2E-BATCH-06",
+      "summary": "S7 断连重放：relay 瞬断 → 通知 at-least-once 可达 + 幂等键去重不双投递（R3 占位，Phase 3 账本化合入后激活）",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/interface/helpers.ts",
+        "packages/subagent-core/src/execution/notify/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "harness", "ref": "extensions/universal/subagent-workflow/src/interface/helpers.ts" },
+        { "kind": "harness", "ref": "packages/subagent-core/src/execution/notify/notify-ledger.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（Phase 3 激活前不执行、无验收脚本——u9 合入时激活为 R2 并回填可执行命令）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R3 占位：触发条件注明「Phase 3 notifyDone 账本化合入后激活」（账本化为同 PR 序列 u9 单元）——激活前本条目不执行。账本基建本体 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），激活后断连注入验收：通知经 ledger 重放最终可达（at-least-once，对齐 C-ext-19）且幂等键去重不双投递（设计 S7）"
     }
   ]
 }

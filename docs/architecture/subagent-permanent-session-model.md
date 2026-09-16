@@ -56,7 +56,7 @@
 
 ### 1.3 设计目标（从使用者体验倒推）
 
-1. **G1 万物可续聊**：对任何**非 workflow-origin** 的 subagent——无论自然完成、被取消、被关闭、宿主重启过、用的哪种引擎——用户（或主 agent）发 message 都能在**同一个 id** 上继续对话；不需要理解任何形态词汇（workflow 编排成员的立即终态化语义维持现状，见 §1.4 out-of-scope）。**准入例外第二类（[round2-notify-fix] 2026-09）**：`collect:"sync"` 批成员硬拒续聊——批通知账本的幂等键以「单轮成员」为前提（跨轮续聊会把轮次通知重新路由进批缓冲、并撞第一轮已销账的批 notifyId，致 round-2 批通知静默丢失——2026-09-14 实测事故，根因链见 subagent-core notifier.ts `buildBatchNotifyId` 注释）；恢复 = close 后重派新 subagent（或免 collect 的 conversation:true 单发）。sync 批语义 = 「一次派发一批」的 one-shot 编排，工具 description 已同步明示。
+1. **G1 万物可续聊**：对任何**非 workflow-origin** 的 subagent——无论自然完成、被取消、被关闭、宿主重启过、用的哪种引擎——用户（或主 agent）发 message 都能在**同一个 id** 上继续对话；不需要理解任何形态词汇（workflow 编排成员的立即终态化语义维持现状，见 §1.4 out-of-scope）。**准入例外第二类（one-shot 批成员）**：批量编排成员（workflow-origin record，含 `subagents` 批量 tool 的 fan-out 成员）硬拒续聊——成员是一次性 one-shot 计算单元，message 通道在 core `subagent-actions-core.ts` 的 messageHandler 处拒绝（成员工具文案同步明示 re-dispatch 指引）；恢复 = 按恢复指引只重派失败项（`subagents` tool）或 conversation:true 单发。
 2. **G2 状态可读**：用户在 UI 上只需要理解两个词：「正在跑」（running）和「空闲」（idle）。「为什么停」作为一句话解释展示，不参与任何资格判定。
 3. **G3 资源有序**：永久会话不等于资源永不释放——进程、worktree、transcript 文件各有明确保留期与回收通道；回收后续聊自动降级为「带历史重开」，用户无感知中断。
    **[阶段 5 验收注记，commit `8ea19681e`] 归档保留分支的资源生命周期裁决**：归档 cleanup keepBranch:true 后，`pi-sub-*` 分支作为重建依据保留（无注册表条目、无 checkout 目录、对账器不触碰），回收通道**随 record 语义存续**——寻回续聊可消费，record 被 idle-gc/用户删除时分支留存（GC 名单不含 git 分支）。显式接受该形态（分支是轻量 ref，量级远小于 worktree 目录与 transcript 文件）；**重审条件**：主仓 `pi-sub-*` 分支数超过阈值（建议 500，idle-gc 归档量观测后校准）或出现分支名冲突事故时，复审「transcript GC 联动回收无 checkout 分支」通道。
