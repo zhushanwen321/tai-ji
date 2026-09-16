@@ -154,9 +154,9 @@ graph TD
 | u6-collect-compat | committed | 1 | 验证记录 `.tmp/dev-flow/collect-compat-u6.md` + 脚本 u6-verify-collect-compat.mts（保留供阶段 5 复验）；⛔ 期门通过：真实存量样本（24 处 + 8 处 batchFinalized）三项验证 24/24 断言过——record-store 重建容忍 / session-reader 反查（result 单查+批量）/ initSession 恢复全链；仓库源码零改动，D6 无需回改 |
 | u8-collect-docs | committed | 1 | commit fb46cd0e8；三门禁重跑全绿（validate-e2e-map 18 rules / select-affected-e2e --check PASS / doc-symbol-drift OK）；7 文档实质抽验（architecture §4 批量编排行 / CONTEXT Fan-out 词条+迁移三句 / E2E-BATCH-01..06）；grep 正面证明 sync 批符号活性表述零残留 |
 | u9-notify-ledger | committed | 1 | commit 12f783120；6 文件 +381/−57；重跑核验 core 3041/0 失败（+8 对账闭合）、shell 80 文件/970（+6 对账闭合）；抽验 wf-done: 幂等键常量 / g4-allow 清零 / workflow-result customType 保持；G4 守卫绿；S7 mock 轨证据 + 真机步骤已备（阶段 5 A6） |
-| u10-probe-cleanup | pending | 0 | — |
+| u10-probe-cleanup | committed | 1 | commit 79d48ada1；18 文件删除（实际数比计划约数 +1）+ TEST-STRATEGY.md 单行更新；grep 终扫仅剩归档记录本体与历史沉淀标注（非活性引用）；双门禁绿（e2e-map-check PASS / validate-e2e-map OK）；工作区清零 |
 
-**u10-probe-cleanup（微单元，u8 移交项）**：删除 `scripts/probes/subagent-sync-collect/` 整目录（17 文件——sync-collect 探针已随 u5 机制退役，E2E-PROBE-01 已摘除），更新 `docs/TEST-STRATEGY.md:155` 归档记录的「待后续清理单元删除」标注为已删；grep 终扫 `subagent-sync-collect` 活性引用零残留（u8 已清文档引用，本单元终扫确认）；门禁 select-affected-e2e --check + validate-e2e-map 绿。依赖：u8、u5（已满足）。
+**阶段 2 收口**：2026-09-16，状态表 10/10 单元 committed，工作区 clean。偏差登记表合计 33 条（全部固化/移交处理，无一打回返工；u5 首任 dev 限流中断一次按接替程序重派）。转入阶段 3 一致性审查。
 
 ## 7 残留风险与变更历史
 
