@@ -1,6 +1,7 @@
 // src/interface/subagents.ts
 //
 // /subagents 命令。薄壳——打开 list overlay（等同原 /subagents list [<id>]）。
+// 同名 tool（批量派发入口，模型调用面）见 interface/tool-subagents.ts——两者无共享状态、无调用关系。
 //
 // 解析：args[0] 直接作可选 <id>（聚焦该 record）。
 // RPC 模式（taiji GUI）：解析 cancel/message/start action 直接执行，不打开 TUI。

@@ -529,15 +529,8 @@ export class SubagentService {
     return this.syncCollect.collectCoordinator;
   }
 
-  /** [modeless 波3·deprecated accepted-no-op] sync 批崩溃恢复（E1）已随 collectMode
-   *  记录态消亡退役：批协调状态 = 协调器内存登记态（executeViaEngine 派发登记），
-   *  随 session 生命周期消亡，崩溃后批次协调不恢复。成员 record 本体仍健全——已
-   *  settle 成员 idle+result（批通知已投递/缓冲随 dispose 转 async 兑底），崩溃在途
-   *  成员由孤儿恢复纠偏 idle+interrupted。调用方（subagent-workflow session-lifecycle
-   *  的 session_start 编排）保留 no-op 调用至波 5 清理。 */
-  recoverSyncCollectBatch(): Promise<void> {
-    return Promise.resolve();
-  }
+  // [collect 退役] 原 recoverSyncCollectBatch（modeless 波3 起为 accepted-no-op）已删：
+  // sync 批机制不再有崩溃恢复面可表达，无调用方（session_start 编排调用点已随波 5 摘除）。
 
   /** [modeless 波3] 当前未闭合批的 sync 成员数（pendingSyncCount 口径，start 响应
    *  回显段消费）：协调器登记态计数（executeViaEngine 派发时点登记 + flush 离场；

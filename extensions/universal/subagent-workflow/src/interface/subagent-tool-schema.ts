@@ -103,20 +103,10 @@ export const SubagentParams = Type.Object({
       "Three-layer priority: this parameter > agent .md frontmatter engine > config.json defaultEngine. " +
       "Non-pi engines do not support fork/worktree (rejected before the subagent is created).",
   })),
-  collect: Type.Optional(StringEnum(["async", "sync"], {
-    description:
-      "Completion-notification routing (NOT a record mode — batch membership is routing bookkeeping only). " +
-      "Omit to use the config default (currently async). " +
-      "'async' = each subagent's completion notifies immediately. " +
-      "'sync' = batch wake-up: when you dispatch >=2 independent subagents whose results you will " +
-      "combine, their completions are held until ALL pending sync members finish, then delivered as " +
-      "ONE batch notification (single wake-up, results inline); when the batch closes, its members " +
-      "are automatically archived. Batch members cannot be messaged — use action:'fork-from' to " +
-      "continue from one instead. You may keep dispatching more sync subagents in later turns — " +
-      "they join the same pending batch. Independent means no member's prompt or work depends on " +
-      "another member's output — dependent tasks must be chained across messages (one start after " +
-      "the prior completes), never batched.",
-  })),
+  // [collect 退役] collect 参数已删除——批量编排的唯一入口是 `subagents` tool（fan-out run
+  // 管道），单数 start 不再有通知路由选项。旧调用形态（显式带 collect）不会被 pi 参数校验
+  // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），迁移期提示见
+  // subagent-tool.ts description 的 start 段。
   // action:"list" → listParam OPTIONAL (all fields optional, defaults apply). Ignored by other actions.
   listParam: Type.Optional(Type.Object({
     includeFinished: Type.Optional(Type.Boolean({
@@ -173,7 +163,7 @@ export const SubagentParams = Type.Object({
   // 源文件只读不续写）；旧记录/状态机不动。pi 引擎限定（非 pi 在 execute 层拒绝）。
   forkFromParam: Type.Optional(Type.Object({
     sourceSubagentId: Type.String({
-      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose conversation history becomes the inherited context of the new subagent. Works for any idle record — disconnected by a session restart, already finished, or previously closed/cancelled. Rejections: still-running sources (message them instead; sync-collect members cannot be messaged — close them first, then fork-from), sources held by another live process, worktree-bound sources, and unknown ids; an unparseable history anchor is guided to action:'message' (same-id reopen) instead.",
+      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose conversation history becomes the inherited context of the new subagent. Works for any idle record — disconnected by a session restart, already finished, or previously closed/cancelled. Rejections: still-running sources (message them instead), sources held by another live process, worktree-bound sources, and unknown ids; an unparseable history anchor is guided to action:'message' (same-id reopen) instead.",
     }),
     prompt: Type.Optional(Type.String({
       description: "Continuation instruction for the new subagent (what to do next on top of the inherited history). When omitted, a standard handover frame is injected: reconstruct done/decided/remaining from the inherited history, then continue to completion. Whitespace-only treated as omitted.",
