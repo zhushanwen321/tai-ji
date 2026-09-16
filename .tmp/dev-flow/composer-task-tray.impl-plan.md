@@ -196,6 +196,11 @@ graph TD
 | D43 | u-retire-sidebar | 注释清扫写法 = 去标识符保语义（[HISTORICAL] 注记改写为描述性表述，不书写已删模块名） | 使 D10 宽口径在领地内零命中；历史细节由 git 承载 | 接受 |
 | D44 | u-retire-sidebar | 保留未动：`lib/subagent-bucket` 的 `filterSubagents`/`countSubagents`/`DEFAULT_SUBAGENT_FILTER` 与 `stores/workflow` 的 `workflowCount`（现零生产消费） | D2/D10 明文「SSOT 模块不随 UI 宿主退役」；设计枚举的视图 2 清单不含 workflowCount | 接受（登记为后续清理候选，不扩权）；**补登（P4 审查）**：`lib/background-task-bucket.countBackgroundTasks` 与 `lib/subagent-bucket.isDoneProjection` 同为 test-only 导出（本次删两消费点后零生产消费，托盘计数由 filterBackgroundTasks 行集长度派生）——裁决 = 保留 SSOT 谓词 + JSDoc 改写如实描述（见 u-fix-docs） |
 | D45 | u-retire-* 批（观察） | u-retire-sidebar 领地清单中 `__tests__/sidebar/*` glob 未覆盖 `components/sidebar/__tests__/`（同类路径歧义第二例） | 派发时以 glob 兜底而非逐文件枚举所致 | 接受（已由 D40 覆盖）；教训：退役单元领地须逐文件枚举，减少 glob |
+| D46 | u-e2e | mock 轨 widgetGui→托盘链路不可达（mock `pushSession` 缺 crossSession 分发腿）→ 消费端断言改挂 real 轨 R2 | mock 不进 route-inbound；同根因使 mock 轨其它 crossSession 消费者恒空态 | 接受（设计 §4 e2e 表已改述；缺口登记 §7 残留风险 5；gui-components 保留 `__gui__` 内联块断言） |
+| D47 | u-e2e | mock fixture 恒终态 → `[flowⁿ]` 亮计数分支在 mock 轨不可达 | 补数据需改 core mock fixture（领地外） | 接受（T1 断言同一判据的否定面 = N2「归零不虚亮」+ 计数与行集同源；计数>0 渲染由托盘组件测试覆盖——即计划要求的单测化路径） |
+| D48 | u-e2e | e2e-map 登记面超派发枚举：VISUAL-01 scope 补 `e2e/visual-baselines/**`（否则提交重生基线 PNG 会让 --check 红）；后续追加 MOCK-01/VISUAL-01 补 `packages/ui/src/**` | `e2e/` 前缀匹配不覆盖 `e2e/visual-baselines/`；packages/ui 承载 8 原语 + 托盘 TabBar，此前不在任何 rule scope（机器选择器抓不到） | 接受（与 REAL-01 补 extensions 同类登记缺口；均经探针实测生效 + 门禁绿） |
+| D49 | u-e2e | 像素基线重生方式偏离「直接 --update-snapshots」字面：托盘进 composer-bar 的 diff 约 0.7% 低于该 spec 1% 容差 → 直接 -u 不重写（基线隐性滞后）；改为先删 PNG 再生 + 加「截图主体在场」断言 | 防「托盘未挂载被静默照成基线」 | 接受（未动容差；机制经 playwright CLI preset 核实） |
+| D50 | u-e2e | real 轨只跑改动面命中的 tasks-drawer-real（未跑 REAL-01 聚合命令的其余 3 spec）；另补跑 P0 smoke 子集作为侧栏收敛的额外证据 | AGENTS.md「按改动面跑、禁全量扫跑」 | 接受（P0 smoke 首跑 1 例时序 flake 已隔离复跑绿，非本次引入） |
 
 ## 6 状态表
 
@@ -213,7 +218,7 @@ graph TD
 | u-retire-native-view | committed | 1 | commit 3b5f35c19「refactor(tray): u-retire-native-view retires the background-tasks native view」（12 文件 / -1329 行）；偏差 D38-D39 登记；core typecheck 红为基线存量（git show HEAD 复现证明） |
 | u-retire-widgetarea | committed | 2 | commit ae10aff90「refactor(tray): u-retire-widgetarea retires the WidgetArea pill」（10 文件 / -844 行）；偏差 D35-D37 登记（D37 经续聊定向修） |
 | u-retire-refs-sweep | committed | 2 | commit 37607c9df「docs(tray): sweep dangling references...」（28 文件）；doc-symbol-drift 绿（改前 2 红）+ validate-constraints 131 条绿 + 18 文件自对账零命中；第二段续聊修 i18n bashTaskHint（zh/en） |
-| u-e2e | committed | 2 | commit de4dad065「test(e2e): u-e2e rewrites affected specs, baselines and map registrations」（7 文件）；mock 轨 9 pass + 像素轨 pass（基线重生）+ **real faux 轨 3 pass**（真 runtime/WS 帧/route-inbound 下托盘 widget 链路端到端实证）+ validate-e2e-map / --check 绿；登记补齐：REAL-01 scope +extensions/universal、VISUAL-01 +baselines 与 +packages/ui/src、MOCK-01 +packages/ui/src；偏差 D1-D7 登记（含 mock crossSession 缺口 B1 → 基础设施债务） |
+| u-e2e | committed | 2 | commit de4dad065「test(e2e): u-e2e rewrites affected specs, baselines and map registrations」（7 文件）+ 工作树追加（e2e-map ui scope 补齐，并入本批 U-1/D-2/D-4 微修）；mock 轨 9 pass + 像素轨 pass（基线重生）+ **real faux 轨 3 pass**（真 runtime/WS 帧/route-inbound 下托盘 widget 链路端到端实证）+ validate-e2e-map / --check 绿；偏差见 D46-D50（含 mock crossSession 缺口 → §7 残留风险 5） |
 | u-fix-tray | committed | 2 | commit 92e824e70「fix(tray): u-fix-tray single data instance, no loading flash, full hot zone」；tray 5 files/99 pass + 邻域 768 pass + 变异验证 3 处（改坏→红）；U1 单例化（provide/inject，无回退）/ U2 判据收窄 / U3 等价修法（reka-ui 不透传 handler） |
 | u-fix-proto | committed | 2 | commit 78ed72ad6「fix(protocol): allow smooth-curve path commands and sync protocol docs」（13 文件）；S/T 放行实测（58/5869 → 0 拒）+ extension-protocol 229 pass + extensions 三连绿 + changeset；D4 字面量与旧 changeset 字符集由主 agent 收口修正 |
 | u-fix-docs | committed | 2 | commit 579b8c021「docs(tray): fix stale counts, bucket shapes and retired-consumer wording」（11 文件）；doc-symbol-drift 绿 + 三包测试绿；主 agent 追加 2 处同类残引（DESIGN.md 波次表 / background-task-sidebar-view G1）与 DESIGN.md composer-bar 组成行收口 |
@@ -225,9 +230,11 @@ graph TD
 0. **文档存量滞后（非本次引入/未闭环者，另行建档）**：① ~~extension-gui-protocol.md §4.3 / §5.2 / guide Helper 表~~（pilot 修复单元 u-fix-proto 已闭环：更新为 setWidgetDual 现行形态 + 导出清单补齐 + §9.3 废弃标注 + guide §4 整列刷新）；② 遗留观察（u-fix-proto 领地内未派发级）：goal/todo 源码注释与 todo/ARCHITECTURE.md 仍写 `guiSetWidget`（实装走 setWidgetDual）——注释级，交后续 doc-sync；③ guide §3.4/§5 与 arch doc §6.3/§6.5 的 `allowComment`/`getAskUserComment` 条目指向包内已不存在的 helper（comment 随 D2 删除）——独立 doc-sync 单元范围；④ docs/testing/00-overview.md:13 覆盖表仍列 6 个已合并的源文件名（04/05/06/07/09/14-*.md 全部 MISSING）——存量滞后，未在任何机器守卫射程内。
 
 1. **探针 P7（浮层溢出/翻转）+ §5 检查点 3（composer.toolbar 布局挤压）**：composer 底部向上弹面板，窗口最小宽度下可能裁剪/挤压——**阶段 5 真机执行并回填设计 §3.6 探针状态位与 §5 检查点；P5/P6 已实施期关闭（设计 §3.6 已回填 ✅）**；降级路径 = 手写 anchored 浮层（设计 §3.6 明示两种仓内成熟范式）。
-2. **探针 P5（TabBar 本地 active）**：vue 更新机制若导致组件重建，active 需提升模块级 per-widgetKey 缓存（代价 0，不改协议）——u-tabbar 行为测试兜底。
+2. **探针 P5（TabBar 本地 active）——已实施期关闭**（TabBar.test.ts 行为测试证明组件被 patch 非重建、本地选择保持；设计 §3.6 已回填 ✅）。降级路径（模块级缓存）仅在**未来 vue 更新机制变化导致重建**时再启用——当前无需动作。
 3. **D14 共存窗口**：P2（托盘）与 P3（退役）之间双入口共存期 ≤1 工作日、不跨 changeset 发版；窗口内穿帮面仅计数口径（同源 store 派生）。恢复路径：P3 前单点摘挂载/revert P2；P3 后 revert P3。
 4. **性能面**：ViewHostStore 推送频次 = tool call 级；托盘只读 meta 派生（O(1)），guiTree 仅面板打开时渲染（设计 §3.5）。
+5. **mock 基础设施缺口（P4/u-e2e 复审登记，修复点出本流水线领地）**：`packages/core/src/transport/mock/index.ts` 的 `pushSession` 只做 `events.dispatchSession`，而 route-inbound 对声明 `crossSession: true` 的帧（`extension:widgetGui` / `extension:status` 等）需额外 `dispatchCrossSession` → mock 轨下 ExtensionHost bridge/RoleStatus 等 crossSession 消费者恒空态。影响 = widgetGui 消费端 e2e 只能由 real（faux）轨覆盖（已落地为 tasks-drawer-real R2）；修复建议 = mock 侧按 ROUTE_TABLE 声明补同款分发腿（一行级）。
+6. **真机门未闭环（阶段 5 执行）**：探针 P7 浮层溢出/翻转 + §5 检查点 3（composer.toolbar 布局挤压）+ A1-A7/N1/N2 场景表 —— 见 §4.2 验收计划表。
 
 **变更历史**：
 

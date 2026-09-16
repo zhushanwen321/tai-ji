@@ -280,10 +280,10 @@ built-in（native 直连，无协议变化）:
 | `e2e/visual/composer.spec.ts`（E2E-VISUAL-01 轨） | composer 区域像素 diff——托盘进 composer-bar 必然触发 baseline 变更 | 改动后更新基线 + 本轨跑一遍 |
 | `e2e/composer.spec.ts`（MOCK 轨） | composer 行为断言可能涉及工具条结构 | 本轨跑一遍，断言随结构更新 |
 | `e2e/workflow-sidebar-sync.spec.ts`（MOCK 轨） | 断言 Flows/Agents tab 与列表——侧栏收敛直接击中 | **改写为托盘断言**（workflow 计数/面板同步 + drawer workflow tab 不回归），单测化路径：列表渲染断言沉淀为 ComposerTray 组件测试 |
-| `e2e/gui-components.spec.ts`（E2E-MOCK-01 轨） | mock 推 `extension:widgetGui ×2` + `__gui__` 渲染链——WidgetArea 退役后 widgetGui 渲染终点变为托盘 | 本轨跑一遍，mock 序列与断言随消费端更新（widget 断言改挂托盘） |
+| `e2e/gui-components.spec.ts`（E2E-MOCK-01 轨） | `__gui__` 对话流内联块渲染链（保留面） | 本轨跑一遍；**widget→托盘消费端断言改挂 real 轨** `tasks-drawer-real.spec.ts` R2——mock 轨不可达（mock `pushSession` 只走 session 通道、缺 route-inbound 的 crossSession 分发腿，`extension:widgetGui` 帧到不了 ExtensionHost bridge；缺口在该 spec 头注登记，属 mock 基础设施债务） |
 | E2E-ELECTRON-01 P0 smoke（v6-shell-baseline 等） | shell 布局含侧栏 tab 数 | CI 自带（L1 always），本地改动后跑 p0-smoke 子集 |
 | `WidgetArea.test.ts` / `Panel.widget-area.test.ts` | 组件退役 | 随 D11 删除；fallback 链断言迁托盘组件测试（`tray-widget.test.ts`）；firstRunning 预览断言无承接对象——托盘以 badge fallback + status 视觉替代该 UI，断言随 `activePreview` computed 一同消亡（实施期核实，守护对象消亡） |
-| `e2e/tasks-drawer-real.spec.ts`（E2E-REAL-01 轨，真实 LLM） | todo `__gui__` 根形态 list-tree → tab-bar（D5 改造）击中 R2/R3 断言（实测 L233 等 5 处引用陈旧） | 改写断言（list-tree → tab-bar + 两段结构）；开发期空载串行跑一次（真实 LLM 轨不进 PR/CI）；E2E-REAL-01 scope 补 `extensions/universal/**`（原 scope 不含 extensions → 机器选择器抓不到该改动面） |
+| `e2e/tasks-drawer-real.spec.ts`（E2E-REAL-01 轨，faux 演员——真 Electron/pi 进程 + 真 WS 帧 + 真 route-inbound，零 token 凭证无关） | todo `__gui__` 根形态 list-tree → tab-bar（D5 改造）击中 R2/R3 断言（实测 5 处引用陈旧）；同时承担**托盘 widget 消费端断言**（icon/badge/面板 tab-bar 双段渲染） | 断言改写 + 新增托盘 UI 段（R2）；**开发期已实跑通过（3 例）**；加 bundle 构建模式 pre-flight（mock 产物在场时 fail-fast 并给重建恢复动作）；E2E-REAL-01 scope 补 `extensions/universal/**`（原 scope 不含 extensions → 机器选择器抓不到该改动面） |
 
 真实 LLM e2e 其余 spec（`workspace-real` / `ask-user-real` / `workflow-thinkinglevel-real`）不在本次影响面（无 runtime/pi 协议行为变化；extension-protocol 为 renderer/ui/core 消费的纯类型+守卫扩展）；`tasks-drawer-real` 见上表（断言级受影响，属开发期实施漏项修复后的登记）。
 
