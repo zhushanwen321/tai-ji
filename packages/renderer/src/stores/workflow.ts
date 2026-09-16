@@ -131,7 +131,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   // ── actions ──
   /**
    * 加载 session 的 workflow 列表（写入该 sid 分区）。
-   * 在 Sidebar 切到 Flows tab 或 session 切换时调用。
+   * 现行调用拓扑：托盘首拉/retry（useTrayCounts，D13 首拉触发迁移）、abort 后刷新
+   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）。
    */
   async function loadWorkflows(sessionId: string): Promise<void> {
     if (!sessionId) return // 空 sid 不写分区
@@ -169,7 +170,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    *
    * runtime 在 workflow 发起/结束时刻推送 session.workflowUpdate 增量信号，前端收到后触发
    * loadWorkflows RPC 拉取完整列表。由 useConnection.routeInbound 在所有 session（含非活跃）
-   * 无条件兜底调用——不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 侧栏卡 running）。
+   * 无条件兜底调用——不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 托盘/详情缺终态）。
    *
    * running 信号特殊处理：workflow tool-call-end 触发 running 信号时，主 session JSONL 的
    * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。

@@ -775,6 +775,8 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 > extension 通过 GUI 渲染协议推送结构化内容块（`GuiComponent`），前端 `GuiComponentRenderer` 按 `type` 路由到对应 Vue 组件渲染。本手册覆盖 7 种 block type 的单测 + 两条渲染路径的 E2E 验证。
 >
 > 协议定义见 `packages/extension-protocol/src/core/types.ts`，helper 见 `helpers.ts`。
+>
+> **[已退役/迁移 2026-09-16]** 本节「路径 A（SideDrawer widget）」消费端描述与 E2E-GUI-3/4 用例已退役：widgetGui 渲染消费端由 SideDrawer 迁至 **composer 任务托盘 widget 区**（`packages/renderer/src/components/panel/tray/`，`TrayWidgetButton`/`TrayWidgetPanel`；SideDrawer 内 `gui-stats-line`/`gui-list-tree` testid 已不存在）。widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 分发链，缺口见 `e2e/gui-components.spec.ts` 头注与 impl-plan 残留风险 5）。路径 B（对话流内联块）现行不变。另：「7 种 block type」= 有专测的 7 原语口径，协议 BUILTIN_MAP 共 8 类（Group 无独立专测文件），两处口径并存时以协议文档为准。
 
 ## 1. 组件与 testid 清单
 
@@ -798,7 +800,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 两条渲染路径都收敛到 `GuiComponentRenderer` 按 `BUILTIN_MAP[type]` 路由到具体 primitive 组件：
 
 - **路径 B（消息流）**：extension tool 返回 `details.__gui__` → runtime event-adapter 随 `message.tool_call_end` 下发 → 前端把 details 存入 toolCall → `Block.vue` 的 guiComponent computed 提取组件 → GuiComponentRenderer 渲染。
-- **路径 A（SideDrawer widget）**：extension 调 `ctx.ui.setWidget(key, [NUL_MARKER + JSON])` → runtime event-adapter 检测 marker、JSON.parse 并 isGuiComponent 校验 → 以 `extension:widgetGui` 帧下发 → 前端 dispatchSession 后由抽屉容器消费，按 widgetKey 挂到对应 tab → GuiComponentRenderer 渲染。
+- **路径 A（SideDrawer widget）[已退役 2026-09-16]**：extension 调 `ctx.ui.setWidget(key, [NUL_MARKER + JSON])` → runtime event-adapter 检测 marker、JSON.parse 并 isGuiComponent 校验 → 以 `extension:widgetGui` 帧下发 → 前端 dispatchSession 后由抽屉容器消费，按 widgetKey 挂到对应 tab → GuiComponentRenderer 渲染。**消费端已迁 composer 任务托盘 widget 区**（现行 = `TrayWidgetButton`/`TrayWidgetPanel` 经 ViewHostStore `getViewIds`/`getView` 消费；SideDrawer 不再挂 widget，上述抽屉消费形态为历史描述，git 可追溯）。
 
 Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSession` 推已解码的 `extension:widgetGui`。
 
@@ -824,8 +826,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 |---|---|---|
 | E2E-GUI-1 | harness smoke | app 加载首窗口 + sidebar 会话按钮可见 |
 | E2E-GUI-2 | 路径 B: tool result `__gui__` → card 嵌套渲染 | `gui-card` + `gui-progress-bar` + `gui-stats-line` 可见，含 'CI Pipeline'/'build'/'7'/'8'/'turns'/'15' |
-| E2E-GUI-3 | 路径 A: widgetGui stats-line → terminal tab | `gui-stats-line` 在 SideDrawer 内可见，含 'turns'/'tokens'/'duration' |
-| E2E-GUI-4 | 路径 A: widgetGui list-tree → browser tab | `gui-list-tree` 在 SideDrawer 内可见，含 'Deploy'/'VPC'/'RDS'/'Redis' |
+| E2E-GUI-3 | ~~路径 A: widgetGui stats-line → terminal tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-stats-line` testid 已不存在（消费端迁托盘 widget 区）；widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 链） |
+| E2E-GUI-4 | ~~路径 A: widgetGui list-tree → browser tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-list-tree` testid 已不存在；归宿同 E2E-GUI-3 |
 
 ### 4.3 每步期望输入输出
 
@@ -843,6 +845,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 
 #### E2E-GUI-3: 路径 A（widgetGui stats-line）
 
+> **[已退役 2026-09-16]** 断言对象（SideDrawer 内 `gui-stats-line`）已随消费端迁移不存在，以下步骤为历史记录（git 可追溯）；现行端到端断言见 `e2e/tasks-drawer-real.spec.ts` R2。
+
 | 步骤 | 操作 | 期望 |
 |---|---|---|
 | 1-2 | 同 E2E-GUI-2 | 流式完成 |
@@ -850,6 +854,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 | 4 | 断言 SideDrawer 内 `gui-stats-line` | 可见，含 'turns' 'tokens' 'duration' |
 
 #### E2E-GUI-4: 路径 A（widgetGui list-tree）
+
+> **[已退役 2026-09-16]** 断言对象（SideDrawer 内 `gui-list-tree`）已随消费端迁移不存在，以下步骤为历史记录（git 可追溯）；现行端到端断言见 `e2e/tasks-drawer-real.spec.ts` R2。
 
 | 步骤 | 操作 | 期望 |
 |---|---|---|

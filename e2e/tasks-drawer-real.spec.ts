@@ -25,9 +25,9 @@
  *
  * R1 的 source 断言语义变化（翻轨裁决）：原断言 `sourceInfo.source === 'npm:@zhushanwen/pi-goal'`
  * 绑定 npm 安装装配（symlink ~/.taiji-dev/npm）；faux 轨凭证无关装配下 mandatory 扩展经
- * dev 源码目录注入（extension-resolver scanBundledExtensions dev 分支），source 是仓库内
- * 源码路径——断言改为「source 路径含 pi-goal 包目录」，保留「真实 extension 被 pi load」
- * 的契约语义（source=extension + 包身份可辨识），不绑定安装来源。
+ * dev 源码目录以 --extension 显式注入（extension-resolver scanBundledExtensions dev 分支），
+ * pi 对 --extension 注入的扩展报 `sourceInfo.source === 'cli'`（见下方 R1 断言；`source`
+ * 仍为 'extension'）——保留「真实 extension 被 pi load」的契约语义，不绑定安装来源。
  */
 import { test, expect } from '@playwright/test'
 import {

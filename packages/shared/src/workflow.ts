@@ -13,7 +13,7 @@
  *
  * RunSnapshot 格式版本：`wf-run-v2`（D-5 版本守卫，v1 旧格式跳过——extension 侧
  * 声明的接受边界，旧 run 历史价值低，不做兼容迁移）。
- * 扩展源码：extensions/universal/subagent-workflow/src/orchestration/jsonl-run-store.ts
+ * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts
  */
 
 /**

@@ -28,7 +28,7 @@ export const fixtureWorkflows: WorkflowRunRecord[] = [
   },
 ]
 
-/** Mock subagent fixture（E2E 验证 Agents tab 渲染）[U6] legacy done 收窄出类型，用归一后两态词 */
+/** Mock subagent fixture（E2E 验证托盘 subagent 面板渲染）[U6] legacy done 收窄出类型，用归一后两态词 */
 export const fixtureSubagents: SubagentRecord[] = [
   {
     subagentId: 'sub-mock-001',

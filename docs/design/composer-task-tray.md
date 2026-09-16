@@ -21,7 +21,7 @@
 
 **设计目标**（从使用者体验倒推）：
 
-1. **视线不离开工作区**：agent 派发了 3 个 subagent + 1 个 workflow + 2 个后台命令时，用户在 composer 工具条上直接看到六个进行中计数；hover 任一 icon 弹出该类任务的完整面板（分桶列表），可就地 kill/cancel/pause/abort，点行开 drawer 详情。
+1. **视线不离开工作区**：agent 派发了 3 个 subagent + 1 个 workflow + 2 个后台命令时，用户在 composer 工具条上直接看到六个进行中计数；hover 任一 icon 弹出该类任务的完整面板（分桶列表），可就地 kill/cancel/abort（pause/resume 已随 workflow 一次性生命周期退役，见 §4 A2b 修正标注），点行开 drawer 详情。
 2. **todo/goal 及未来 widget 统一挂载**：extension 推 setWidget 即在托盘出现（icon + badge + 面板 = 协议渲染），不要求 extension 写任何 taiji 定制代码；未来任何任务型 widget 自动获得挂载位。
 3. **常态归零**：无进行中任务、无活跃 widget 时，托盘不制造任何视觉噪音（空闲但有历史 = dim 常驻可查看；彻底无记录 = 隐藏）。
 4. **入口唯一化**：同一任务类型只有一个**常驻观察入口**（侧栏任务列表退役，托盘为唯一列表/计数面）——drawer 详情 tab 与对话流内联块属内容呈现（深度检视 / 历史记录），不在此列；消灭「侧栏 tab 数 vs 托盘计数不一致」这类双口径穿帮面。
@@ -82,7 +82,7 @@ todo/goal:      extension setWidget → event-adapter → WS extension:widgetGui
 
 ### 3.1 终态（使用者视角）
 
-**场景 A（并行任务进行中）**：用户盯着 composer 写指令，工具条左簇（`[+ 添加]` 右侧）是托盘：`[term²] [bot³] [flow¹]`——三枚 icon 各带一个亮着的 mono 计数与呼吸点（accent）。用户 hover `bot³`，160ms 后弹出面板（宽 400px，锚定 icon 上方）：「进行中 3 | 已结束 5 | 已收起 0」三 tab（默认进行中；已收起 = archived 寻回视图，计数 0 时 dim 不亮），每行 = 引擎 icon + slug + task 摘要 + 耗时，行尾 streaming spinner；**pin 后**行内出现 cancel 按钮（两段式：首击变红确认、再击发令）。点击行 = 开 drawer subagent tab（并排详情，与现状卡片点击同归宿）；kill/abort/pause/resume 同理操作后行状态流转。移开 240ms 收起；点击 icon = pin 固定（Esc 或点外部解除）。用户全程没有离开 composer 视区。
+**场景 A（并行任务进行中）**：用户盯着 composer 写指令，工具条左簇（`[+ 添加]` 右侧）是托盘：`[term²] [bot³] [flow¹]`——三枚 icon 各带一个亮着的 mono 计数与呼吸点（accent）。用户 hover `bot³`，160ms 后弹出面板（宽 400px，锚定 icon 上方）：「进行中 3 | 已结束 5 | 已收起 0」三 tab（默认进行中；已收起 = archived 寻回视图，计数 0 时 dim 不亮），每行 = 引擎 icon + slug + task 摘要 + 耗时，行首状态位 streaming spinner（引擎 icon 位，与状态点互斥同位）；**pin 后**行内出现 cancel 按钮（两段式：首击变红确认、再击发令）。点击行 = 开 drawer subagent tab（并排详情，与现状卡片点击同归宿）；kill/abort 同理操作后行状态流转（workflow 行内仅 abort 两段式——pause/resume 已随扩展 D-2 一次性生命周期移除，见 §4 A2b 修正标注）。移开 240ms 收起；点击 icon = pin 固定（Esc 或点外部解除）。用户全程没有离开 composer 视区。
 
 **场景 B（todo/goal widget）**：同一托盘，built-in 三件右侧：`[☑ 2] [◎ 42%]`——todo icon 带 badge「2」（未完成数），goal icon 带 badge「42%」（token 预算百分比）。hover todo icon：面板头部 = title「Todo」+ 状态点 + 进度「2/5」mini bar（`WidgetMeta` 渲染），body = tab-bar 原语（待办 N | 已完成 M）+ 待办 list-tree；用户点「已完成」tab，面板本地切换（不请求 extension）。AI 清空 todo → widget 清屏 → 托盘 icon 消失。goal 终态（complete）→ 同样消失（终态折叠进 status bar 是 goal extension 现状）。
 
@@ -116,9 +116,9 @@ todo/goal:      extension setWidget → event-adapter → WS extension:widgetGui
 - **效果**：§1 目标 1 成立（视线零转移）。
 
 **D2：built-in 三件 = native 组件直连既有 store（选定）**
-- **采用**：托盘内三枚 icon 与面板由 Vue 原生组件实现，计数/列表/操作直连既有数据链路——bash：`useBackgroundTasks`（per-session 分区，拉取+广播双腿）+ `background-task-bucket` SSOT（二桶 active/ended + all 筛选值；托盘面板两视图「运行中/已结束」由 SSOT 谓词派生）+ kill 两段式；subagent：`subagentStore.recordsOf(sid)` 过滤 `origin!=='workflow'`，**面板三视图（桶界由 subagent-bucket SSOT 谓词派生；running 是筛选值不是桶，同 SSOT 语义）**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = `!isRunningProjection 且 subagentBucket(record) !== 'archived'`（谓词表达——含 idle 与死亡纳管态 running+stopReason，两态都不落进行中）、已收起 = `intent==='archived'`（寻回视图：intent 是意愿维度与 status 正交，现状唯一寻回入口，SubagentFilterBar 退役后由托盘面板第三视图承接，计数 0 时 dim 不亮）；workflow：`workflowStore.recordsOf(sid)`，进行中 = `status ∈ {running,paused}`，已结束 = 其余。操作 RPC 全部已存在（kill / subagent cancel / workflow pause/resume/abort），cancel 的「迟到收口不发 RPC」防误报逻辑自 `useSidebarSubagentActions` 迁入托盘复用。**行点击归宿矩阵**：subagent 行 → `openSubagent` 开 drawer subagent tab（对齐现状）；bash 行 → 设置 `selectedBackgroundTaskId` 开 drawer bashTask tab（对齐现状）；workflow 行 → `setWorkflowView` 开 drawer workflow tab——**归宿变更**（现状侧栏卡片进 Flows 内 detail 视图 2；改 drawer 后并排不遮侧栏，且 drawer WorkflowTab 已复用其 phase 分组逻辑，变更即收敛）。drawer 三 tab 骨架已在（PanelContainer.vue），并排详情范式不变。
+- **采用**：托盘内三枚 icon 与面板由 Vue 原生组件实现，计数/列表/操作直连既有数据链路——bash：`useBackgroundTasks`（per-session 分区，拉取+广播双腿）+ `background-task-bucket` SSOT（二桶 active/ended + all 筛选值；托盘面板两视图「运行中/已结束」由 SSOT 谓词派生）+ kill 两段式；subagent：`subagentStore.recordsOf(sid)` 过滤 `origin!=='workflow'`，**面板三视图（桶界由 subagent-bucket SSOT 谓词派生；running 是筛选值不是桶，同 SSOT 语义）**：进行中 = `isRunningProjection`（running 且无 stopReason）、已结束 = `!isRunningProjection 且 subagentBucket(record) !== 'archived'`（谓词表达——含 idle 与死亡纳管态 running+stopReason，两态都不落进行中）、已收起 = `intent==='archived'`（寻回视图：intent 是意愿维度与 status 正交，现状唯一寻回入口，SubagentFilterBar 退役后由托盘面板第三视图承接，计数 0 时 dim 不亮）；workflow：`workflowStore.recordsOf(sid)`，进行中 = `status === 'running'`（workflow 一次性生命周期 D-2：'paused' legacy 值已删，判据修正见 §4 A2b），已结束 = 其余。操作 RPC abort 已存在（kill / subagent cancel / workflow abort；pause/resume 已随扩展 D-2 移除，见 §4 A2b 修正标注），cancel 的「迟到收口不发 RPC」防误报逻辑自 `useSidebarSubagentActions` 迁入托盘复用。**行点击归宿矩阵**：subagent 行 → `openSubagent` 开 drawer subagent tab（对齐现状）；bash 行 → 设置 `selectedBackgroundTaskId` 开 drawer bashTask tab（对齐现状）；workflow 行 → `setWorkflowView` 开 drawer workflow tab——**归宿变更**（现状侧栏卡片进 Flows 内 detail 视图 2；改 drawer 后并排不遮侧栏，且 drawer WorkflowTab 已复用其 phase 分组逻辑，变更即收敛）。drawer 三 tab 骨架已在（PanelContainer.vue），并排详情范式不变。
 - **被否**：三件也走 GUI 协议（把 bash/sub/wf 状态序列化成 GuiComponent 推送）——它们是 taiji core 数据不是 extension widget，反向协议化需要 runtime 侧造一个假 extension 推送链，纯增复杂度；且行内操作（kill 两段式等）协议无交互原语承载。两视图丢「已收起」寻回（archived 是意愿维度与 status 正交，丢弃 = 用户收起的 subagent 永久寻不回）——不取，三视图保留现状能力。
-- **证据**：`useSidebarCounts.ts`（计数口径现成）、`BackgroundTaskListView.vue` 头注（D10 纪律：分桶/计数/排序全消费 SSOT）、FEATURE-PRIORITIES §2（subagent/workflow 面板 = P0，迁移期必须保数据链路不动只换皮）。
+- **证据**：`useTrayCounts.ts`（计数口径终态宿主；设计期证据指针 `useSidebarCounts.ts` 的计数段已随 D10 迁出，该文件仅存退役说明头注）、`BackgroundTaskListView.vue` 头注（D10 纪律：分桶/计数/排序全消费 SSOT）、FEATURE-PRIORITIES §2（subagent/workflow 面板 = P0，迁移期必须保数据链路不动只换皮）。
 - **效果**：§1 目标 1 的操作面成立；P0 数据链路零改动降低迁移风险。
 
 **D3：协议 widget = ViewHostStore 第三消费端，零新注册协议（选定）**
@@ -140,7 +140,7 @@ interface WidgetMeta {
 }
 ```
 
-  icon fallback 链：`meta.icon(paths 自定义) → meta.icon(key 解析) → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon`。badge fallback：`meta.badge → progress.label ?? String(progress.current) → 无`；badge 视觉态（亮/色）归 `meta.status`（running=accent+呼吸点 / done=success / failed=danger / idle=dim），与 built-in 三件计数同视觉语言。**自定义 paths 的风格强制**：宿主渲染统一 `viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="1.75" stroke-linecap/join="round"`——extension 只能定义形状（path d 数组），线宽/颜色/尺寸由宿主锁死，输出必然是太极纯灰体系的细线 icon（与 @lucide 构成同构）。防御：d 字符白名单正则 `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$`（含 S/s/T/t 平滑曲线命令；首版实现遗漏，经 P1 一致性审查实测对 @lucide 全量 d 串约 1% 误拒后放行）、条数 ≤8、单条 ≤512 字符、总数 ≤2048——超限落兜底 icon + warn；渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。兼容性事实（✅ 核实 `helpers.ts:162-166`）：`isGuiRenderResult` 守卫只校验 `v` 与 `component`，不校验 meta 形状——新增可选 meta 字段对旧宿主/旧 extension 双向透明。
+  icon fallback 链：`meta.icon(paths 自定义) → meta.icon(key 解析) → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon`。badge fallback：`meta.badge → progress.label ?? String(progress.current) → 无`；badge 视觉态（亮/色）归 `meta.status`（running=accent+呼吸点 / done=success / failed=danger / idle=dim），与 built-in 三件计数同视觉语言。**自定义 paths 的风格强制**：宿主渲染统一 `viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="1.75" stroke-linecap/join="round"`——extension 只能定义形状（path d 数组），线宽/颜色/尺寸由宿主锁死，输出必然是太极纯灰体系的细线 icon（与 @lucide 构成同构）。防御：d 字符白名单正则 `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$`（含 S/s/T/t 平滑曲线命令；首版实现遗漏，经 P1 一致性审查实测对 @lucide 全量 d 串约 1% 误拒后放行）、条数 ≤8、单条 ≤512 字符、总数 ≤2048——超限落兜底 icon + warn；渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。兼容性事实（✅ 核实 `helpers.ts:223-227`）：`isGuiRenderResult` 守卫只校验 `v` 与 `component`，不校验 meta 形状——新增可选 meta 字段对旧宿主/旧 extension 双向透明。
 - **被否**：受控封闭枚举（extension 不能自定义形状——违反 §1 裁决记录⑤「允许 extension 自定义形状但风格由宿主锁死」，该裁决是记录在案的产品需求非想象未来）；自由 SVG/emoji 字符串（视觉主权失控 + 注入面）；badge 用 number 类型（goal 的 '42%' 证明字符串更通用）。
 - **证据**：§1 裁决记录⑤（icon 自定义形状是用户记录在案需求）；`progress.label` 已有「extension 全权格式化」先例（types.ts L123）；lucide 即 24×24 stroke paths 集，混排视觉无缝。
 - **效果**：§1 目标 2 成立（extension 两行代码获得风格一致的 icon+badge）。

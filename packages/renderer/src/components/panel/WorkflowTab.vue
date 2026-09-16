@@ -1,7 +1,7 @@
 <!--
   WorkflowTab —— drawer workflow tab：agent call 列表（按 phase 分组）。
 
-  形态对齐 demo.html + spec §11：header（workflow 名 + 暂停/中止）+ phase 分组 +
+  header（workflow 名 + abort 两段式中止）+ phase 分组 +
   agent call 行（status 圆点 + agent + slug + tokens/turns/duration + running/pending）。
   phase 分组逻辑现居本组件（同数据结构 WorkflowRunRecord.agentCalls）——原实现侧
   侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收口本 tab，
@@ -136,7 +136,9 @@ const aborting = ref(false)
 
 /**
  * 当前选中的 workflow record（响应式）。
- * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（兼容 U5/U6 不同调用方式）。
+ * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（两种调用归宿：
+ * 托盘行传 runId（TrayNativePanel 行点击矩阵）、对话流 workflow 内联块传 tool input name
+ * （Block.vue，scriptName 回退为其兜底）。
  */
 const workflow = computed<WorkflowRunRecord | null>(() => {
   const name = selectedWorkflowName.value

@@ -158,7 +158,7 @@
             </div>
           </template>
 
-          <!-- workflow 行：状态点/spinner + scriptName + slug / 进度条 + N/M + 耗时 + pause/resume/abort -->
+          <!-- workflow 行：状态点/spinner + scriptName + slug / 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除） -->
           <template v-else>
             <div
               v-for="record in workflowRows" :key="record.runId"
@@ -247,7 +247,7 @@
  *   计数 0 时 dim 不亮）；
  * - 行：bash = 状态 icon + 命令 + 耗时 + pid/exit + 两段式终止；subagent = 引擎 icon + 状态点/
  *   spinner + agent + slug + turns/tokens/耗时 + task 摘要 + 两段式取消；workflow = 状态点/spinner
- *   + scriptName + slug + 进度条 + N/M + 耗时 + pause/resume/abort（abort 两段式）；
+ *   + scriptName + slug + 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除）；
  * - 空态（D9 可行动空态）：默认桶「进行中」为空 = 一行提示 + 「查看已结束 (N)」显式切桶按钮
  *   （不自动跳转）；其余桶为空仅提示；
  * - 提示条（bash）：损坏（sticky，自愈拍清位）+ 断连（S6 范式，重连边沿自动重拉）。
