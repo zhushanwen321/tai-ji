@@ -23,7 +23,10 @@
  * 覆盖滚动条拖拽 / 键盘 PageUp·Home 等不产生 wheel 事件的上滑路径）。force 强滚 / session
  * 重建后的收敛抑制窗内暂停判据②的翻 false（lastOffset 快照照常维护、恢复分支照常生效）。
  * 「任何程序性跟随不得把用户扯回底部」的核心保护不变：跟随一律走 followIfStuck 的
- * rAF 内重读 stickToBottom guard；force 是唯一例外（用户显式点「回到底部」）。**
+ * rAF 内重读 stickToBottom guard；force 只有两个合法来源，均为用户显式意图——①点「回到底部」
+ * 浮层；②用户主动发送消息的重锚定（feat-new-message-to-bottom：尾部新增 user 消息时脱离态
+ * 也必须回底，业界聊天通用行为；触发判定在 useMessageStreamFollowTriggers，force 不改本单元
+ * 状态机语义）。**
  *
  * 程序性写入回声的逐路径安全性（设计 D7② 推导）：
  * - follow 原语写入：目标恒为底部方向 → offset 递增 → 判据②第一合取不命中；

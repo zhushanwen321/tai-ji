@@ -18,6 +18,13 @@
  * | contentWrapEl RO 其余变化（spacer）         | 跟随       | 不动，不标 |
  * | scrollEl RO（视口 resize）                 | 跟随       | 不动，不标 |
  * | 纯宽度变化（高度未变）                      | 显式 no-op | 不标       |
+ * | 尾部新增 user 消息（用户主动发送，见下）     | 跟随       | 强制回底重锚定** |
+ *
+ *  ** feat-new-message-to-bottom：「不扯用户」保护（INVAR-M4-2′）只约束**到来**的内容
+ *  （assistant 流式 / 工具输出 / system notice）——用户在 composer 主动发送的消息是显式
+ *  用户意图，脱离态也必须回底（业界聊天通用行为：发送即回底，用户要看到自己刚发的消息
+ *  与后续回复）。本行是唯一绕过 stickToBottom guard 的触发，走 followToBottomForce
+ *  （= followToBottom(true)，重置贴底态 + NaN 快照 + 开收敛抑制窗，force 第二合法来源）。
  *
  *  * isPrepend（load-more 前插抑制窗）为真期间：跟随但不标 unread——用户主动翻历史，下方
  *    并无新内容（设计已声明语义差异：现状前插会点亮一次 unread，本矩阵刻意降噪，V9 验收覆盖）。
@@ -55,6 +62,12 @@ interface MessageStreamFollowTriggerDeps {
   followIfStuck: (opts?: { markUnread?: boolean }) => void
   /** D7② RO 活动信号（useVirtuaFollow.notifyRoActivity 透传）：重置收敛抑制窗 120ms 静默计时 */
   notifyRoActivity: () => void
+  /**
+   * 强制回底（useVirtuaFollow.followToBottom(true) 透传）：无视 stickToBottom guard，
+   * 重置贴底态 + NaN 快照 + 开收敛抑制窗。唯一调用点 = 尾部新增 user 消息（用户主动发送，
+   * 触发矩阵末行——force 第二合法来源，与「回到底部」浮层点击同级）。
+   */
+  followToBottomForce: () => void
 }
 
 /**
@@ -172,6 +185,28 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
         return
       }
       deps.followIfStuck()
+    },
+  )
+
+  // ── 用户主动发送 → 强制回底重锚定（触发矩阵末行，唯一绕过 guard 的触发）────────
+  // 判据 = 末条消息「role:id」快照变化 ∧ role==='user'（尾部新增 user 消息）。
+  // appendUser 是全部用户意图路径的共同落点，一处覆盖全部：
+  // - composer 直发（useChat.send → appendUser 乐观插入）
+  // - steer / followUp（pushPending 不进流，投递时 drainN → appendUser 尾插）
+  // - defer 入队 flush 重放（flush → send → appendUser）
+  // - 编辑重发（editAndResend → truncateFrom + appendUser）
+  // 排除面（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
+  // system notice / bashExecution 追加（role ≠ user，仍走 followIfStuck 矩阵）；末条 user
+  // 消息同 id 对象替换（segments 回填等，快照不变）。
+  watch(
+    () => {
+      const list = deps.messages.value
+      const last = list[list.length - 1]
+      return last ? `${last.role}:${last.id}` : null
+    },
+    (cur, prev) => {
+      if (!cur || cur === prev || !cur.startsWith('user:')) return
+      deps.followToBottomForce()
     },
   )
 
