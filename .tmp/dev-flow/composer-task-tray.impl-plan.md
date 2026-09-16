@@ -152,13 +152,18 @@ graph TD
 |---|------|------|------|------|
 | D1 | u-ext-goal | 不补推 badge（设计 §5 P4 标「可选补推」） | 避免百分比双真相源：`progress.label` 已是 extension 全权格式化的 '42%'，再推同值字符串会漂移 | 接受（宿主 badge fallback 链 `progress.label` 派生同值；gui.ts 存 why 注释 + 测试锁定 `meta.badge === undefined` + changeset 正文记录） |
 | D2 | u-ext-goal | 修改 `extensions/universal/goal/src/__tests__/gui.test.ts`（领地清单未逐字列入该路径） | 该文件是 buildGoalGui 专属测试，meta 精确 `toEqual` 断言随新增 icon 字段必红——属派发指令「既有测试文件/断言如需同步更新一并处理」射程 | 接受（改动最小同步：两处 toEqual 加 icon + 新增 1 个 icon 契约用例） |
+| D3 | u-tray-native | i18n 模块注册形态：tray.ts default export 只含 tray 子树，aggregator 用 `panel: { ...panel, ...tray }` 展开并入 panel 命名空间 | 对象字面量不能并列两个 panel 顶层键 | 接受（运行时 key 仍为 `panel.tray.*`；locale-sync / key-usage 双检查绿） |
+| D4 | u-tray-native | 面板新增 `props.pinned`（默认 false）；bash kill 按钮由旧 hover-only（opacity-0 + group-hover）改为 pin 门控恒显 | D8「hover 态不渲染行内按钮、pin 后出现」——pin 状态由外壳管理、行渲染在面板，面板必须消费该位 | 接受；u-tray-shell **必须显式透传 pinned**（否则行内操作永不渲染），已写入其派发契约 |
+| D5 | u-tray-native | `TrayNativePanel.vue` script 403 行超 300 门禁，按登记制 `split-justified: built-in 三件面板同一语义域` 放行至 500 | 单元领地固定两文件；三件行渲染/行内操作/分桶状态同属一个面板语义域 | 接受（登记制 = 2026-09-11 用户裁决机制，已核实 checker 输出 INFO 非错误） |
+| D6 | u-tray-native | 桶标签两套词：bash 用「运行中」（进程域）/ subagent·workflow 用「进行中」（任务域） | 沿用 sidebar.ts 已登记域差异；设计 D2 亦分别写「运行中/已结束」与「进行中/已结束/已收起」 | 接受（裁决登记在两个 locale 文件头） |
+| D7 | u-tray-native | 面板 emits 为空（契约以文件头注释写明，非 defineEmits） | 面板自持数据源与动作：行内操作直连 store/RPC、行点击直连 drawer API，外壳无需回调 | 接受 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u-proto | committed | 1 | commit「feat(tray): u-proto protocol fields...」；vitest 14 files/227 pass + tsc --noEmit ok + plugin-sdk 副本 identical=True + 主 agent 复核重跑同结果 |
-| u-tray-native | pending | 0 | — |
+| u-tray-native | committed | 1 | commit「feat(tray): u-tray-native counts + native panel」；tray vitest 2 files/31 pass + check:i18n 201 pass + typecheck ok + 主 agent 重跑复核同结果；契约：pinned 必须由 u-tray-shell 透传 |
 | u-tabbar | pending | 0 | — |
 | u-tray-widget | pending | 0 | — |
 | u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
@@ -186,3 +191,4 @@ graph TD
 | 2026-09-16 | 设计文档 commit d3e3ab516；计划基线 commit 40dc35b2e |
 | 2026-09-16 | u-proto committed（协议字段 + 白名单校验函数 + plugin-sdk 副本 + changeset + 协议文档；vitest 227 绿，主 agent 重跑复核通过） |
 | 2026-09-16 | u-ext-goal committed（meta.icon='target'，badge 不补推见偏差 D1；vitest 403 绿，主 agent 重跑复核通过） |
+| 2026-09-16 | u-tray-native committed（useTrayCounts + TrayNativePanel + i18n tray 模块；tray vitest 31 绿 + check:i18n 201 绿，主 agent 重跑复核通过；偏差 D3-D7 登记） |
