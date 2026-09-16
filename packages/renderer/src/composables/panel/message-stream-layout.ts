@@ -14,29 +14,36 @@
  */
 
 /**
- * compaction notice 占位高度（[compact-defer-composer-queue §2.2] 升级为通栏活动带）。
- * 强绑定 DOM：ActivityStrip compacting 行（`-mx-5 flex items-center justify-center gap-2
- * border-y border-hairline bg-[var(--accent-soft)] px-5 py-[14px]`，含 `size-3.5` spinner +
- * `text-[length:var(--text-sm)]` 主文案 + 可选「·」+ `text-[length:var(--text-xs)]` 副文案）。
- *   实际高度（getBoundingClientRect 含 border）= py-[14px](14px×2) + 内容行
- *   max(spinner, text-sm×1.5≈19.5px)≈20px + border-y(1px×2) ≈ 50px。
- *   [u6a] 行迁入 ActivityStrip（文档流 block，Virtualizer 之后）；§2.2 将 hairline 由两条
- *   `h-px` span 改为 border-y、system-notice/content-col 摘除（通栏带），高度语义同步变更。
+ * compaction notice 占位高度（compacting 行降级回归横线分隔行后的新值）。
+ * 强绑定 DOM：ActivityStrip compacting 行（四行共用同一结构，[2026-09-16 系统通知渲染升级 U5]）——
+ * `system-notice content-col flex min-w-0 items-center gap-2 py-1.5`，内含
+ * `h-px flex-1` 渐变横线 ×2（`bg-[image:linear-gradient(...)]`，色标 `var(--border-strong)` 18%/82%）+
+ * `size-[13px]` stroke 2.2 spinner + `text-[length:var(--text-sm)] font-[550]` 主文案 +
+ * `rounded-[4px] border border-border-strong px-1.5 leading-[1.8]` 待发 chip
+ * （`font-mono text-[length:var(--text-3xs)]`，`panel.message.compactingQueueChip`）。
+ *   计算值（检查点 1：jsdom 无真实布局，dev 断言实测校准位）= py-1.5(6px×2) + 内容行
+ *   max(chip 10×1.8+2border=20px, 主文案 text-sm×1.5≈19.5px, spinner 13px) = 20px ≈ 32px。
+ *   chip 缺失时实测 ≈31.5px（主文案行高主导），在断言 ±1px 容差内——常量不随 chip 有无分叉。
+ *   [u6a] 行迁入 ActivityStrip（文档流 block，Virtualizer 之后）；[U5] 原通栏活动带形态
+ *   （-mx-5 + accent-soft 底 + border-y + py-[14px] ≈ 50px）随 D4 降级作废，降级后回归
+ *   DESIGN.md §6.1 通知族二分的横线分隔行族。
  *   此常量供 ActivityStrip 行渲染消费 + dev 断言（useConstantHeightAssert）监测——
- *   border-y 计入与否以真机 dev 断言实测校准为准（理论值 50，±2px 内属亚像素/字号抖动）。
  *   改 padding/字号/icon 必须重测并同步此常量（dev 断言会提醒）。
  */
-export const COMPACTING_NOTICE_HEIGHT = 50
+export const COMPACTING_NOTICE_HEIGHT = 32
 
 /**
- * executing bash 瞬时行占位高度（W4 完整形态）。
- * 强绑定 DOM：ActivityStrip bash 行（与 compacting 行同结构：`system-notice flex items-center
- * gap-2 py-1`，`size-3` spinner + `text-[length:var(--text-xs)] leading-snug` 文本 + 两条
- * `h-px` 分隔线）→ 实际高度同 COMPACTING_NOTICE_HEIGHT ≈ 24px。
- * [u6a] 行 DOM 已迁入 ActivityStrip（文档流 block）——此常量供 dev 断言
- * （useConstantHeightAssert）监测高度漂移。改 padding/字号/icon 必须重测并同步（dev 断言会提醒）。
+ * executing bash 瞬时行占位高度（D3 增强规格后与 compacting 行同款新值）。
+ * 强绑定 DOM：ActivityStrip bash 行（与 compacting 行共用同一行结构：`system-notice content-col
+ * flex min-w-0 items-center gap-2 py-1.5` + 两条 `h-px flex-1` 渐变横线 + `size-[13px]` spinner +
+ * `text-[length:var(--text-sm)] font-[550]` 主文案 + `font-mono text-[length:var(--text-xs)]` 命令，
+ * 无 chip 分支）→ 计算值 = py-1.5(12px) + 主文案 text-sm×1.5(≈19.5px) ≈ 31.5 → 32px
+ * （检查点 1 dev 断言实测校准位，±1px 容差）。
+ * [U5] D3 规格升级三项（py-1→py-1.5 / text-xs→text-sm / icon 12→13px）同时改变行高：原值 24
+ * 作废，`useConstantHeightAssert` 对 bash 行有断言绑定，与 COMPACTING 同批重测回写。
+ * 改 padding/字号/icon 必须重测并同步（dev 断言会提醒）。
  */
-export const EXECUTING_BASH_NOTICE_HEIGHT = 24
+export const EXECUTING_BASH_NOTICE_HEIGHT = 32
 
 /**
  * 像素常量（design §4.1 附录 A）：itemSize 是 virta 的初始估算 hint（非强制，virta 自动从
