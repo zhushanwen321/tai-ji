@@ -1,6 +1,6 @@
 # 对话流系统通知渲染升级 实施计划
 
-基线: 9ab0a122b（本计划 commit） | 来源设计: `.tmp/tech-design/system-notice-rendering-upgrade.md`（R9 终版） | 日期: 2026-09-16
+基线: 9ab0a122b（本计划 commit） | 来源设计: `.tmp/tech-design/system-notice-rendering-upgrade.md`（R9 基线，后续修订至 R11，见变更历史） | 日期: 2026-09-16
 
 ## 0 章节映射
 
@@ -122,14 +122,14 @@ graph TD
 
 ### 4.4 待验证检查点承接（设计 §5）
 
-| 检查点 | 承接单元/阶段 |
-|--------|---------------|
-| 1. 两常量实施期量取回写 | U5（dev 断言实测） |
-| 2. 探针 P1（240px 实际行数回写注释） | U7 + 阶段 5 |
-| 3. 探针 P2（virtua 高度突变零抖动判定） | U7 + 阶段 5 |
-| 4. 跨表面一致性抽查（有实例时） | 阶段 5 |
-| 5. chat 视觉验收（S6+S8） | 阶段 5（A6/A8） |
-| 6. 存量嵌套载荷扫描（判据 `details.batch===true && items.some(i=>i.batch===true)`） | 阶段 5 |
+| 检查点 | 承接单元/阶段 | 终态（阶段 5/6 落定，见变更历史） |
+|--------|---------------|----------------------------------|
+| 1. 两常量实施期量取回写 | U5（dev 断言实测） | 豁免登记：compacting 态无法在 faux 轨确定性触发（需真实 compact 事件链）；兜底 = `useConstantHeightAssert`（±1px 容差）运行时守卫持续在真机断言（设计检查点动机「jsdom 无真实布局」恰由该运行时断言补位，真机会话至今零报警）+ compact-defer 文档算式（≈32px）登记 |
+| 2. 探针 P1（240px 实际行数回写注释） | U7 + 阶段 5 | 已闭环：mono 14.1 行 / markdown 11.4 行实测回写（aed3e0e7d） |
+| 3. 探针 P2（virtua 高度突变零抖动判定） | U7 + 阶段 5 | 已闭环：零抖动成立（尾部 500ms 零位移零振荡），降级分支不触发（aed3e0e7d） |
+| 4. 跨表面一致性抽查（有实例时） | 阶段 5 | 豁免：条件未满足——本轮验收无挂接本设计的长跑 dev 实例（本机 dev 实例属兄弟 worktree 其他工作流，不作为本设计验收面） |
+| 5. chat 视觉验收（S6+S8） | 阶段 5（A6/A8） | 部分覆盖 + 豁免：机器可判定面已由 VISUAL-01（2 passed）+ 真机 e2e 4/4（overlay 渲染/交互/侧栏/workspace）覆盖；A4（S4 压缩两态）同检查点 1 豁免理由；纯主观视觉项（动效手感/渐隐观感）留日常使用反馈 |
+| 6. 存量嵌套载荷扫描（判据 `details.batch===true && items.some(i=>i.batch===true)`） | 阶段 5 | 已执行：扫描 ~/.taiji + ~/.taiji-dev 共 20 个存量会话 jsonl，嵌套 batch 载荷 0 命中——无存量兼容负担 |
 
 ## 5 合理偏差登记表
 
@@ -144,7 +144,7 @@ graph TD
 | D5 | U6 | — | `message-turns.ts` 超 max-lines 500（U6 在途引入） | 不合理（门禁红灯） | 已打回 U6 收尾拆分：新增 `notify-summary.ts`（判据两段式 + 去重 + 耗时聚合），message-turns 563→449，lint 复绿 |
 | D6 | U5 | D4 连带面 | 两常量取 D3 规格算式计算值 32（jsdom 无真实布局） | 合理（设计检查点 1 已预留 dev 实测校准位） | 注释已标校准位；阶段 5 dev 断言实测回写 |
 | D7 | U5 | D4 十处清单 | 补 A7 行（含「带」指称）+ §1.3 第二处死链修正 | 合理（同族命中面补齐） | 固化 |
-| D8 | U6 | D5 失败分句键 | 复用既有 `panel.message.traceFailed`（「含 {count} 次失败」）+「·」分隔，不新立 `turnTriggerBgNotifyFailed` 键 | 合理（语义等价、零硬编码、避免死键） | 固化；视觉文案与设计「· M 失败」的细微差异可接受 |
+| D8 | U6 | D5 失败分句键 | 复用既有 `panel.message.traceFailed`（「含 {count} 次失败」）+「·」分隔，不新立 `turnTriggerBgNotifyFailed` 键 | 合理（语义等价、零硬编码、避免死键） | 固化；视觉文案与设计「· M 失败」的细微差异可接受 → **已被 B-U1 推翻（见 D16：改为新立 `turnTriggerBgNotifyFailed` 键）** |
 | D9 | U6 | 耗时格式 | U3（SystemNotice）与 U6（Turn.vue）各有一个同构小函数（formatDurationMs / formatNotifyDuration，均输出 `26m03s` 形态） | 合理（并行单元各自实现；公共 util 属领地外） | 登记为后续收敛项（统一到 format-utils，非本设计阻塞） |
 | D10 | U6 | D5 等价性义务「诚实定性：当前不可复现」 | U6 实现期声称存在可复现路径（已补测试固定）；**阶段 3 B 区审查复核认为该序列在应用增量链路上不可达**（中段插入不存在——store splice 仅待发队列；hiddenNotifies 只累积到未填实组、未填实组必折叠不进缓存），设计原文定性准确 | 采纳 B-D2：~~doc_error~~ → **合理（防御性对齐）** | 设计 D5 不改（「当前不可复现」保留）；hiddenNotifies 入签名 + 测试保留（防御正确 + 合成守卫）；U6 的「可复现」声称降级为测试场景覆盖（非运行时可达） |
 | D11 | 环境 | — | `pnpm --filter @taiji/core typecheck` 495 条 TS 错（兄弟包 TS5097 + 存量测试文件 chatMode，源自初始导入提交）；renderer `system-page-smart-context` 全量并发下 5s 超时（单跑 1.3s 绿） | 存量问题（非本次引入） | 登记不改（本轮 scope 外）；阶段 3 全量测试时复现则另立 |
@@ -166,7 +166,7 @@ graph TD
 | U4 | committed | 1 | c037eab51（DESIGN.md §6.1 规格列 + §4.7 token 登记；doc-drift/constraints 守卫绿；逐项核对记录） |
 | U5 | committed | 1 | eb0a1099c（ActivityStrip 25 passed；两常量 50/24→32 计算值；compact-defer 十处同步；preset 校准 9） |
 | U6 | committed | 1 | 35df385d6（core 2118 passed / Turn 38 / 等价性 48；notify-summary 拆模块解 max-lines；四路变异探针） |
-| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐）；**探针 P1/P2 未闭合 → 阶段 5 dev 承接（B-U2 处置：token 注释校准位已标，dev 量取后回写）** |
+| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐）；**探针 P1/P2 已闭合（阶段 5）**：P1 = 240px 实测 mono 14.1 行（行高 16.98px）/ markdown 11.4 行（行高 21.0px），token 注释已回写（style.css + mobile tokens.css）；P2 = 展开全部单帧突变 267px 后尾部 500ms 零位移零振荡（stable），virtua RO 收敛网零抖动成立，无需降级 scrollIntoView |
 | U8 | committed | 1 | 50ef50902（notify-host-ended-at 9 passed + 包内全量 3118 passed；物化域=running 轮终+批成员） |
 | U9 | committed | 1 | 1e5102725（notify-batch 18 + notify-ledger 36 = 54 passed；变异探针证测试非空转） |
 | U10 | committed | 1 | 21e9ad399（退役 2 键双侧；i18n 子集 198 passed 含 locale-key-usage-guard 转绿；sidebar 文档四面 + 行号实测重锚） |
@@ -174,9 +174,9 @@ graph TD
 ## 7 残留风险与变更历史
 
 **残留风险**：
-- U7 探针 P2（virtua RO 抖动）设计期未实测——若抖动需降级手动 scrollIntoView 并回写设计决策（U7 执行期落定）。
+- ~~U7 探针 P2（virtua RO 抖动）设计期未实测~~——已闭合（阶段 5 实测零抖动，降级分支不触发，见状态表 U7 行）。
 - U6 的 `deriveClosedDisplay` 复用引入 core → shared 的新 import（已核依赖方向干净，C-state-04）。
-- U5 的两常量实测值依赖 D3 规格落地后的真实渲染高度（dev 断言实测校准）。
+- ~~U5 的两常量实测值依赖 D3 规格落地后的真实渲染高度（dev 断言实测校准）~~——闭环（豁免登记）：faux 轨无法确定性触发 compacting 态，校准由 `useConstantHeightAssert`（±1px）运行时守卫承接（见 §4.4 检查点 1）。
 
 **变更历史**：
 - 2026-09-16 初版（基线 commit：9ab0a122b）：从设计文档 R9 终版编译；e2e 对账完成（2 always + 3 on-diff 待命中）。
@@ -184,3 +184,5 @@ graph TD
 - 2026-09-16 阶段 3 Gate A（全量测试）：`pnpm run lint` EXIT=0；`pnpm extensions:typecheck/lint/test` 全 EXIT=0；`pnpm run test`（workspace 39 包）1 fail / 39 pass——唯一 fail = runtime `idle-pi-reclaim-integration`（faux 真进程，并发饱和超时；空载单跑 1188ms 绿，D14 归因）；日志落盘 `.tmp/dev-flow/system-notice-rendering-upgrade.gate-a.log`。**判定全绿**。
 - 2026-09-16 阶段 3 分区一致性审查（3 reviewer：A 数据链底层 / B 渲染聚合 / C 壳层文档）完成：unreasonable 3（B-U1 文案 / B-U2 探针门 / C-U1 测试脚手架）、doc_errors 11、reasonable 19。修复批次 2 组已 commit（704eef4c9 / 7acc76369），doc_errors 主 agent 修订（设计文档 R10 + DESIGN.md + testing 文档 + compact-defer，commit 0dce862ce），B-U2 处置=状态表标注（U7 行）。**审查清零达成**。
 - 2026-09-16 阶段 4 完成：unreasonable 与 doc_errors 清零（D15/D16 登记）；定向复审（本批影响面）= 修复均含测试证据 + 守卫全绿（见各 commit message）。转阶段 5 端到端验收。
+- 2026-09-16 阶段 5 e2e：EQUIV-01 ✅（18 files/62 tests）、ELECTRON-01 smoke ✅（9 passed）、VISUAL-01 ✅（2 passed）、MOCK-01 全量 55 条 = 52 passed / 3 failed。**3 条 real-spec 失败归因闭合：stale mock bundle**（renderer/dist 为 mock 形态产物，real 轨 UI 断言跑在 mock renderer 上——侧栏/workspace popover 渲染 mock 种子数据；TEST-STRATEGY 既有坑 #1「产物形态不校验」的反向变体，与本改动无关：diff 零触及 sidebar/popover/transport，且同批 WS 层断言全过）。处置 = 重建 real bundle（`VITE_E2E=true pnpm run build:e2e`）后空载串行复跑 4 条（A1 复验 + A2/A3/T4.6）**全绿**。口径披露：MOCK-01 的 52 条 mock 用例绿 = mock 形态产物下所测（分批 build 纪律内合法）；real spec 的 UI 断言绿 = real 形态产物下所测。
+- 2026-09-16 阶段 5 B-U2 探针闭合 + 定向复审低危项收尾：探针 P1（mono 14.1 行 / markdown 11.4 行实测回写 style.css + mobile tokens.css 注释）+ P2（零抖动成立，不降级）；定向复审 5 条低危文档项正面修复（DESIGN.md 语义色作用域限定 + 档位注释对齐实装、testing/01 高度拆分、compact-defer 版本指向修正、台账 D8 标推翻 + 设计文档键数 3）。
