@@ -166,7 +166,7 @@ graph TD
 | U4 | committed | 1 | c037eab51（DESIGN.md §6.1 规格列 + §4.7 token 登记；doc-drift/constraints 守卫绿；逐项核对记录） |
 | U5 | committed | 1 | eb0a1099c（ActivityStrip 25 passed；两常量 50/24→32 计算值；compact-defer 十处同步；preset 校准 9） |
 | U6 | committed | 1 | 35df385d6（core 2118 passed / Turn 38 / 等价性 48；notify-summary 拆模块解 max-lines；四路变异探针） |
-| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐）；**探针 P1/P2 已闭合（阶段 5）**：P1 = 240px 实测 mono 14.1 行（行高 16.98px）/ markdown 11.4 行（行高 21.0px），token 注释已回写（style.css + mobile tokens.css）；P2 = 展开全部单帧突变 267px 后尾部 500ms 零位移零振荡（stable），virtua RO 收敛网零抖动成立，无需降级 scrollIntoView |
+| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐）；**探针 P1/P2 已闭合（阶段 5）**：P1 = 240px 实测 mono 14.1 行（行高 16.98px）/ markdown 11.4 行（行高 21.0px），token 注释已回写（注释取整口径 ≈14/≈11）（style.css + mobile tokens.css）；P2 = 展开全部单帧突变 267px 后尾部 500ms 零位移零振荡（stable），virtua RO 收敛网零抖动成立，无需降级 scrollIntoView |
 | U8 | committed | 1 | 50ef50902（notify-host-ended-at 9 passed + 包内全量 3118 passed；物化域=running 轮终+批成员） |
 | U9 | committed | 1 | 1e5102725（notify-batch 18 + notify-ledger 36 = 54 passed；变异探针证测试非空转） |
 | U10 | committed | 1 | 21e9ad399（退役 2 键双侧；i18n 子集 198 passed 含 locale-key-usage-guard 转绿；sidebar 文档四面 + 行号实测重锚） |

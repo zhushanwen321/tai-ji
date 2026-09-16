@@ -58,7 +58,7 @@ AI 继续干别的；测试在后台跑
 | pi 进程内单例表 | `extensions/universal/base-tool-enhance/src/background/task-store.ts:42`（模块级 Map，无订阅 API；:16-29 为 D6-en 不变量注释块） | 实时 | 不出进程；他进程/重启前的任务不在表内 |
 | registry.json | `<piAgentDir>/base-tool-enhance/<sessionId>/registry.json`（extension 侧统一写入口 `registry.ts:179`；runtime reaper 写 orphaned `background-task-reaper.ts:308`；两侧共用 `<registry.json>.lock` proper-lockfile 磁盘协议，跨进程互斥已核实） | 每次状态迁移原子写（tmp+rename，锁内 RMW） | **无变更广播**——reader 需自行发现变化 |
 | outputFile | `<...>/<sessionId>/<task_id>.log`（子进程持 fd 直写，`spawn-background.ts:150`） | 实时（可随时 tail；`output-tail.ts:34-74` 字节窗口从文件末尾读） | stdout/stderr 混流无标记 |
-| 完成通知 | `pi.sendMessage` customType `background-bash`（`notify.ts:155-162`，携结构化 details：命令/exit/耗时）→ `message.customStart` → 对话流 SystemNotice 结构化行（命令 mono + 「后台」chip + exit/耗时 meta；无 details 的旧数据落 content 原文兜底行） | exit 边沿 | 仍只落对话流（一次性边沿通知，非可查询状态）；kill 路径不发（`notify.ts:146`） |
+| 完成通知 | `pi.sendMessage` customType `background-bash`（`notify.ts:155-163`，携结构化 details：命令/exit/耗时）→ `message.customStart` → 对话流 SystemNotice 结构化行（命令 mono + 「后台」chip + exit/耗时 meta；无 details 的旧数据落 content 原文兜底行） | exit 边沿 | 仍只落对话流（一次性边沿通知，非可查询状态）；kill 路径不发（`notify.ts:146`） |
 | reaper | `packages/runtime/src/services/session/background-task-reaper.ts`（runtime 内；启动 5s + session 删除两触发面） | 事件触发 | 无 WS 广播，观测面只有 console.log |
 
 **plugin 区与 widget 系现状**（关键背景）：

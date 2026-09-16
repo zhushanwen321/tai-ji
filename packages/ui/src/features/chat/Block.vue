@@ -44,7 +44,7 @@
           <!-- thinking 块行尾时刻 -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
-        <!-- 展开内容区：copy 按钮在左上角，始终可见（ScrollBox 外层，层级不动） -->
+        <!-- 展开内容区：copy 按钮在左上角，始终可见（BlockScrollBox 外层，层级不动） -->
         <Transition name="block-expand">
         <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.7] text-neutral-mid">
           <Button
@@ -173,13 +173,13 @@
             </div>
             <!-- bash 整体容器：v6 §5 扁平凹槽（无 border + bg-input 深于父级，深度差即边界） -->
             <div v-if="isBashTool" class="rounded-sm bg-bg-input">
-              <!-- 命令头：保持在凹槽内、ScrollBox 之外 = 不随输出滚动（恒吸顶是布局的免费性质，
+              <!-- 命令头：保持在凹槽内、BlockScrollBox 之外 = 不随输出滚动（恒吸顶是布局的免费性质，
                    无需「移入滚动区首位 + sticky + 底色遮盖」三件套，见设计 D6 接入点②） -->
               <div v-if="argPath" class="border-b border-hairline pl-4 py-1.5 font-mono text-[length:var(--text-sm)] text-neutral-fg">
                 {{ argPath }}
               </div>
               <!-- 输出文本区内容守卫：均空时不渲染（只剩命令块，无空白假展开）；
-                   限高滚动 + 行区间信息条由 ScrollBox 统一承担（含原 max-h-80 的 JSON 分支） -->
+                   限高滚动 + 行区间信息条由 BlockScrollBox 统一承担（含原 max-h-80 的 JSON 分支） -->
               <BlockScrollBox v-if="displayContent || outputRaw || parsedJsonOutput" surface="recessed">
                 <div :class="toolResultClass">
                   <AnsiText v-if="outputRaw" :content="outputRaw" />
