@@ -4,6 +4,9 @@
     读 chat store 按 sessionId 分区的消息 → groupTurns 分回合 → 渲染 Turn 列表。
     auto-scroll（spec §8.5 + G2-007）：stickToBottom 判定，上滚脱离锚定不强制拉回，
     非贴底有新内容显「回到底部」浮层，点浮层平滑滚回并恢复锚定。
+    用户主动发送（composer 直发 / steer·followUp 投递 / defer flush / 编辑重发）例外：
+    尾部新增 user 消息时强制回底重锚定（feat-new-message-to-bottom，见
+    useMessageStreamFollowTriggers 触发矩阵末行）。
     空 session 显示欢迎语（G2-004 空态收敛）。
 
     [cw wave w3] 虚拟滚动由手写协调循环切到 virtua/vue <Virtualizer>。
@@ -382,7 +385,8 @@ const { showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSess
     isStreaming: () => lastRenderTurn.value?.isStreaming ?? false,
   })
 
-// [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）
+// [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）。
+// followToBottomForce：用户主动发送（尾部新增 user 消息）强制回底重锚定（feat-new-message-to-bottom）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   messages: currentMessages,
   lastRenderTurn,
@@ -390,6 +394,7 @@ const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   scrollEl,
   followIfStuck,
   notifyRoActivity,
+  followToBottomForce: () => followToBottom(true),
 })
 
 /* TurnRail（w4 wave IF4）：状态 + 事件路由下沉 useMessageStreamRail（script ≤300 行规范）。
