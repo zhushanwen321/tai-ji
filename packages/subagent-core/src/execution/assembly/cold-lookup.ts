@@ -240,9 +240,8 @@ function resurrectColdRecord(
     // [modeless 波1] chatMode 水合丢弃：磁盘残留值不进内存 record（万物可续，
     // message 资格只看引擎 conversation 能力轴，与 record 无关）。
     // [round2-notify-fix 合并注] 分支侧的 chatMode/collectMode 冷水合不再适用：
-    // collectMode 字段已随 modeless 波3 出 record（sync 成员身份迁登记态
-    // collect-coordinator，批协调跨重启不复活），分支针对的「冷水合缺失绕过
-    // messageHandler 硬拒」面结构性消亡。
+    // [collect 退役] 原 sync 批成员身份迁登记态机制已整体删除，collectMode 字段
+    // 出 record，分支针对的「冷水合缺失绕过 messageHandler 硬拒」面结构性消亡。
     // [A3/S3 修复] 引擎域透传：跨重启重建不透传 engine 时 record.engine=undefined，
     // resolveRoundEnginePort 按 record.engine ?? DEFAULT_ENGINE_ID 把 zcode record
     // 错投 pi 引擎（engine_not_found）。engine 属 identity 域经 createRecord 重建；

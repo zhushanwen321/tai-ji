@@ -175,12 +175,13 @@ describe("fan-out.js 入口 fail-fast（D9 错误规格）", () => {
 
   it("tasks 元素含非字符串 → throw（模板入口校验，args-validator 后的纵深）", async () => {
     const stderr = await runProbeExpectThrow({ tasks: ["ok", 42] }, { aggregate: "none" });
-    expect(stderr).toContain("非空字符串数组");
+    expect(stderr).toContain("non-empty string array");
+    expect(stderr).toContain('Correct: {"tasks"');
   });
 
   it("tasks 元素为空白字符串 → throw", async () => {
     const stderr = await runProbeExpectThrow({ tasks: ["ok", "   "] }, { aggregate: "none" });
-    expect(stderr).toContain("非空字符串数组");
+    expect(stderr).toContain("non-empty string array");
   });
 });
 
@@ -281,7 +282,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收口）", () =>
       { tasks: ["t0", "t1"], agents: "/x/one.md" },
       { failIndexes: [0, 1], aggregate: "none" },
     );
-    expect(stderr).toContain("全部任务失败");
+    expect(stderr).toContain("all tasks failed");
     expect(stderr).toContain("2/2");
   });
 });

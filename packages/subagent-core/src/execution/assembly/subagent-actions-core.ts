@@ -539,7 +539,8 @@ export async function messageHandler(
     throw new Error(
       `subagent ${id} is a workflow-origin record — it is managed by its workflow script ` +
       `(results are collected by the workflow run, not by messaging). ` +
-      `Recovery: use action:'list' with includeWorkflow:true to inspect it.`,
+      `Recovery: use action:'list' with includeWorkflow:true to inspect it.` +
+      ` To get these results, re-dispatch via the subagents tool.`,
     );
   }
 

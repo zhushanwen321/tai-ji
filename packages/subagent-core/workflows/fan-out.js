@@ -55,7 +55,7 @@ if (!Array.isArray(tasks) || tasks.length === 0) {
   throw new Error('fan-out: tasks is required (non-empty string array). Correct: {"tasks":["task one","task two"]}');
 }
 if (tasks.some((t) => typeof t !== "string" || t.trim() === "")) {
-  throw new Error("fan-out 参数 tasks 必须是非空字符串数组，实际含非字符串或空白元素");
+  throw new Error('fan-out: tasks must be a non-empty string array (got a non-string or blank element). Correct: {"tasks":["task one","task two"]}');
 }
 
 // S4 路径统一：agents 参数 = 逗号分隔的 agentRef 路径数组（_shared/agent-refs.cjs 共享解析）；
@@ -65,10 +65,10 @@ if (tasks.some((t) => typeof t !== "string" || t.trim() === "")) {
 // scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席即 fail-fast，
 // 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载面。
 if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string") {
-  throw new Error("fan-out: core_module_load_failed: workerData.scriptPath 缺失，无法定位 workflows/_shared/agent-refs.cjs。" +
-    "恢复动作：worker 宿主（WorkerHost）启动 worker 时必须经 workerData 注入 scriptPath" +
-    "（指向本脚本真实路径，注入点见 src/orchestration/worker-host.ts 的 workerData 组装处），" +
-    "禁止依赖 process.cwd() 巧合。");
+  throw new Error("fan-out: core_module_load_failed: workerData.scriptPath is missing; cannot locate workflows/_shared/agent-refs.cjs. " +
+    "Recovery: the worker host (WorkerHost) must inject scriptPath via workerData when launching the worker " +
+    "(the real path of this script; injection point: the workerData assembly in src/orchestration/worker-host.ts). " +
+    "Never rely on process.cwd() coincidence.");
 }
 const SCRIPT_DIR = require("path").dirname(workerData.scriptPath);
 const { parseAgentRefs, agentRefAt } = require(SCRIPT_DIR + "/_shared/agent-refs.cjs");
@@ -139,7 +139,7 @@ for (let i = 0; i < rawResults.length; i++) {
 }
 if (failedCount === tasks.length) {
   // 全部成员失败 → run failed（终态通知带 NOT task completion 指引，D9）
-  throw new Error("fan-out 全部任务失败（" + failedCount + "/" + tasks.length + "）");
+  throw new Error("fan-out: all tasks failed (" + failedCount + "/" + tasks.length + ")");
 }
 log("fan-out 收集完成：ok=" + (tasks.length - failedCount) + " failed=" + failedCount);
 

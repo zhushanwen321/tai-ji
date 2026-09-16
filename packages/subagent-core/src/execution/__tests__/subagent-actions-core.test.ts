@@ -661,6 +661,23 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
+  it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagents 重派指引", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const wfRec = makeExecRecord({ id: "bg-wf", origin: "workflow" });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({ getRecordForAction: vi.fn(() => wfRec), deliverChatMessage }),
+        { subagentId: "bg-wf", text: "hi" },
+      ),
+    );
+    expect(err.errorName).toBe("Error");
+    expect(err.message).toContain("results are collected by the workflow run");
+    expect(err.message).toContain("Recovery: use action:'list' with includeWorkflow:true to inspect it.");
+    // [S3/core-U1] 重派指引（编排者裁定文案，逐字锁定）
+    expect(err.message).toContain("To get these results, re-dispatch via the subagents tool.");
+    expect(deliverChatMessage).not.toHaveBeenCalled();
+  });
+
   // [round2-notify-fix 合并注] 原「collect:'sync' 批成员硬拒续聊」回归锁随 modeless
   // 波1/波3 删除：chatMode/collectMode 字段消亡，sync 批成员批闭合即自动归档、通知走
   // 统一轮终形态（批缓冲路由面消亡），message 对任何归属内 record 直接续聊——被锁的
