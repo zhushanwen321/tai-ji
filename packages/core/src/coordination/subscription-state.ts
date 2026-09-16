@@ -332,9 +332,11 @@ export async function subscribeSession(sessionId: string, fromSeq?: number): Pro
       if (typeof msg.seq === 'number') replayedSeqs.add(msg.seq)
     }
 
-    // stateSnapshot（wave:remove-bandaids）：5 个 state topic
-    // （commands/context/subagents/workflows/state_changed，见 message-bus STATE_TYPE_KEY_MAP）
-    // 的 last-value 数组，逐条 replay 让 routeInbound 兜底分支据此更新对应 store。
+    // stateSnapshot（wave:remove-bandaids）：7 个 state topic（commands/context/subagents/
+    // workflows/state_changed/occupancy/delivery，登记 SSOT = message-bus STATE_TYPE_KEY_MAP；
+    // 本注释原记 5 个，occupancy（session-occupancy P3）与 delivery（投递所有权内核 D5）两次
+    // 新增未同步，u5a 修正）的 last-value 数组，逐条 replay 让 routeInbound 兜底分支据此更新
+    // 对应 store（occupancy → sessionPhase 派生，delivery → 队列区投影）。
     // stateSnapshot 与 snapshot 独立（snapshot 受 fromSeq 增量过滤，stateSnapshot 是
     // last-value 不受影响），同一条消息（同 seq）可能同时出现在两者——ring 内未溢出时
     // snapshot 已回放过，skip 防二连击；ring 溢出后只剩 last-value 的旧消息不在

@@ -957,17 +957,10 @@ describe('createChatStore factory', () => {
     })
   })
 
-  // [u3b/D7 裁决] 前身用例「清指定 session 的 queueStates 快照，其他 session 不受影响」已删：
-  // 快照唯一写方（message.queue_update handler）随 D7 退役（队列区数据源 = session.delivery
-  // 状态帧），经 applyMessageEvent 无法再构造该态——clearQueueState 方法与其调用面
-  //（useChat 转发 / renderer forceQuit）保留至 u5 收口，此处保留其实际可测行为面。
-  describe('clearQueueState（[D7 注记] 快照写方已随 queue_update handler 退役；分区/API 收尾归 u5）', () => {
-    it('无快照 session 幂等 no-op（forceQuit 空队列路径）', () => {
-      expect(sut.store.getQueueState('sq-none')).toBeUndefined()
-      expect(() => sut.store.clearQueueState('sq-none')).not.toThrow()
-      expect(sut.store.getQueueState('sq-none')).toBeUndefined()
-    })
-  })
+  // [u3b/D7 裁决 → u5a 结清] 前身用例「清指定 session 的 queueStates 快照，其他 session 不受
+  // 影响」及「clearQueueState 幂等 no-op」两组已删：快照唯一写方（message.queue_update handler）
+  // 随 D7 退役（队列区数据源 = session.delivery 状态帧），u5a 结清分区与 API 本身——
+  // getQueueState / clearQueueState 已从 store 删除，无方法可测。
 
   describe('appendSystemNotice（追加 system 提示行）', () => {
     it('追加 role=system 消息到会话消息流（sys- 前缀 id + complete 状态）', () => {

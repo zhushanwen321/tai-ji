@@ -320,11 +320,11 @@ describe('FG5 chat store 块类型扩展', () => {
   })
 
   /**
-   * [u3c 退役] queue_update 全族用例（8 条：queueState 置位/清空、drain 驱动 appendUser、
+   * [u3c/u5a 退役] queue_update 全族用例（8 条：queueStates 置位/清空、drain 驱动 appendUser、
    * 重复文本/跨类型计数 diff、message_start 时序、retry/queue session 隔离）随投递所有权内核
    * 整体退役——设计 §3.1 删除面 + §3.4+ 接管归属表：
    * - queue_update 帧降级为内核内部回执（u3b 删除 message.queue_update handler），不再直驱
-   *   renderer UI，也不再写 store.queueStates / 驱动 pendingBuffer 计数腿（pushPending/
+   *   renderer UI，也不再写 store 快照分区（[u5a] 该分区已删除）/ 驱动 pendingBuffer 计数腿（pushPending/
    *   countDrained/drainN）；
    * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
    *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
@@ -332,15 +332,15 @@ describe('FG5 chat store 块类型扩展', () => {
    * + __tests__/useChat.test.ts（session.delivery 帧消费与 morph）+ renderer 队列区新用例
    * （__tests__/panel/queue-bubble-s8.test.ts / __tests__/composables/panel/use-queue-rows.test.ts）。
    */
-  it('queue_update 不再写 store（帧降级为内核内部回执：无 queueStates、无 pendingBuffer 消费）', () => {
+  it('queue_update 不再写 store（帧降级为内核内部回执：零快照、零 pendingBuffer 消费）', () => {
     const store = useChatStore()
     store.pushPending('sx', textToSegments('继续'), 'steer')
     store.applyMessageEvent('sx', {
       type: 'message.queue_update',
       payload: { sessionId: 'sx', steering: ['继续'], followUp: ['下一步'] },
     })
-    // 置位腿退役：queueStates 不再被写
-    expect(store.getQueueState('sx')).toBeUndefined()
+    // 置位腿退役：帧到达不产生任何 store 落点（[u5a] queueStates 分区及其读 API 已删除，
+    // 前身 getQueueState 断言随分区一并移除——无字段可查即结构性保证）
     // drain 腿退役：buffered 条目不再经 queue_update 差集入流（其入流由送达回执承担）
     store.applyMessageEvent('sx', {
       type: 'message.queue_update',

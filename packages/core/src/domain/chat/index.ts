@@ -2,7 +2,7 @@
  * domain/chat —— chat 域内聚模块（P3 strangler 迁移）。
  *
  * 组成：
- * - store-types.ts：共享类型基座（RetryState/QueueState/FinalizeReason）
+ * - store-types.ts：共享类型基座（RetryState/FinalizeReason）
  * - mutations.ts：messages ref 不可变写入 helper（commitMessages/deleteMessages/truncateMessagesFrom/prependHistory）
  * - readers.ts：payload 窄化纯函数（readString/readRecord/.../readChangeSetStatus）
  *

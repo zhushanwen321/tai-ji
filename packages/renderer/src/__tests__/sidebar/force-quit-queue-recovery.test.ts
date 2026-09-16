@@ -12,8 +12,9 @@
  *    防「forceQuit 后、restore 前」窗口内其他注入（drawer / 另一 session forceQuit）覆盖
  *    丢失已宣称收回的文本；槽位无 text 时行为不变（FQ-1 锁定）
  *  - 提示：toast「N 条排队消息已收回草稿」（N=0 不提示）；drain 失败必须出声（FQ-7）
- *  - 配套 [session-dead G1]：core clearQueueState 清 pi queue_update 快照（steer 气泡随 pi
- *    死亡作废，restore 后无 queue_update 帧再清——不清则气泡永久残留）
+ *  - [u5a] 前身配套 [session-dead G1] 的 core clearQueueState（清 pi queue_update 快照）已退役：
+ *    queueStates 分区与读写 API 随投递所有权内核删除，forceQuit 不再有快照可清——pi 槽位滞留
+ *    由下方 drain 回收，队列区展示随 session.delivery 快照帧收敛
  *  - 挂点分型（设计 D4）：仅用户显式强制退出入口编排回收；forceQuit RPC 失败（error envelope）
  *    不回收不提示（保持既有 toastError）
  *
@@ -21,8 +22,8 @@
  * （1s 重投 timer + 熔断计数）——本地队列与重投 timer 已随投递所有权内核整体退役，回收对象
  * 改为内核条目（drain RPC）。
  *
- * 环境：真 composerInjectionStore 单例（断言面），mock useChat（编排接线断言 clearQueueState
- * 调用）+ '@/api/domains/delivery'（drain RPC）+ '@/api'（forceQuit RPC）+ toast（捕获提示）
+ * 环境：真 composerInjectionStore 单例（断言面），mock useChat（编排接线）+ '@/api/domains/delivery'
+ * （drain RPC）+ '@/api'（forceQuit RPC）+ toast（捕获提示）
  * + 侧栏外围 store（对齐 sidebar-ondeletefolder.test.ts 范式降级）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/force-quit-queue-recovery.test.ts
@@ -38,9 +39,6 @@ const apiMock = vi.hoisted(() => ({
 const deliveryMock = vi.hoisted(() => ({
   drainDelivery: vi.fn(),
 }))
-const chatComposable = vi.hoisted(() => ({
-  clearQueueState: vi.fn(),
-}))
 const toastMocks = vi.hoisted(() => ({
   error: vi.fn(),
   info: vi.fn(),
@@ -54,10 +52,7 @@ vi.mock('@/api/domains/delivery', () => ({
   delivery: deliveryMock,
 }))
 vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    abort: vi.fn(),
-    clearQueueState: chatComposable.clearQueueState,
-  }),
+  useChat: () => ({ abort: vi.fn() }),
 }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: toastMocks.error, info: toastMocks.info, warning: toastMocks.warning }),
@@ -143,8 +138,6 @@ describe('onForceQuitSession 队列回收编排（投递所有权内核 u3c / D1
     expect(apiMock.forceQuit).toHaveBeenCalledWith('s1')
     // 行为 1：内核全量回收（forceQuit 后调用，条目文本来自 reply）
     expect(deliveryMock.drainDelivery).toHaveBeenCalledWith('s1')
-    // 配套 [session-dead G1]：清 pi queue_update 快照（steer 气泡随 pi 死亡作废，restore 后无帧再清）
-    expect(chatComposable.clearQueueState).toHaveBeenCalledWith('s1')
     // 行为 2：草稿回收——注入槽位按序拼接文本（消费端光标插入 = 追加语义，见 DOM 测试）
     expect(composerInjectionStore.pendingInjection.value).toMatchObject({
       target: 'current',
@@ -156,7 +149,7 @@ describe('onForceQuitSession 队列回收编排（投递所有权内核 u3c / D1
     expect(toastMocks.info).toHaveBeenCalledWith('2 条排队消息已收回草稿')
   })
 
-  it('FQ-2: forceQuit RPC 失败 → toastError、不 drain 不清快照（挂点分型：失败保持现状语义）', async () => {
+  it('FQ-2: forceQuit RPC 失败 → toastError、不 drain 不回收（挂点分型：失败保持现状语义）', async () => {
     apiMock.forceQuit.mockRejectedValueOnce(new Error('rpc down'))
     const { actions, unmount } = mountActionsHost()
     wrappers.push({ unmount })
@@ -167,7 +160,6 @@ describe('onForceQuitSession 队列回收编排（投递所有权内核 u3c / D1
     expect(deliveryMock.drainDelivery).not.toHaveBeenCalled()
     expect(composerInjectionStore.pendingInjection.value).toBeNull()
     expect(toastMocks.info).not.toHaveBeenCalled()
-    expect(chatComposable.clearQueueState).not.toHaveBeenCalled()
   })
 
   it('FQ-3: 空队列成功 → drain 照常执行，无注入无提示（N=0 不提示）', async () => {
@@ -178,7 +170,6 @@ describe('onForceQuitSession 队列回收编排（投递所有权内核 u3c / D1
 
     expect(apiMock.forceQuit).toHaveBeenCalledWith('s1')
     expect(deliveryMock.drainDelivery).toHaveBeenCalledWith('s1')
-    expect(chatComposable.clearQueueState).toHaveBeenCalledWith('s1')
     expect(composerInjectionStore.pendingInjection.value).toBeNull()
     expect(toastMocks.info).not.toHaveBeenCalled()
   })

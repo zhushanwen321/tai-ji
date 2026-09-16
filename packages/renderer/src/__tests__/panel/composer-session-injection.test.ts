@@ -63,7 +63,6 @@ vi.mock('@/stores/chat', () => ({
     isStreaming: ref(false),
     isActive: () => false,
     getRetryState: () => undefined,
-    getQueueState: () => undefined,
     isCompacting: () => false,
     // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
     sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),

@@ -173,7 +173,6 @@ describe('live overlay（registry tool_call_end）与 reducer 同函数一致性
     return {
       messages: ref(new Map([['s1', shallowRef(initial)]])),
       retryStates: ref(new Map()),
-      queueStates: ref(new Map()),
       applyFileChanges: vi.fn(),
       markChangeSetsSuperseded: vi.fn(),
       finalizeSession: vi.fn(),

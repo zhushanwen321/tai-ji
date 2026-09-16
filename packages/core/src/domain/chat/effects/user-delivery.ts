@@ -14,8 +14,8 @@
  * （设计 §3.1 删除面），确认通道由「队列 FIFO 文本匹配」升级为「内核条目 id 标记匹配」，
  * git 可追溯。
  *
- * 投影落位说明：session.delivery 投影的理想宿主是 chat store 分区（对齐 queueStates
- * 惯例），但 store.ts 不在 u3b 领地——本模块级 ref 为 interim 承载（taste:allow-no-data-owner
+ * 投影落位说明：session.delivery 投影的理想宿主是 chat store 分区（对齐 retryStates
+ * 分区惯例），但 store.ts 不在 u3b 领地——本模块级 ref 为 interim 承载（taste:allow-no-data-owner
  * 同类豁免：内核状态帧是 runtime 投影数据，非本地 UI 输入），store 分区收编归 u3c/u5
  * 评估；per-session 键控 + disposeSession/resetChatModuleStateForTest 双清理点 + 测试
  * reset 钩子已按 ADR-0049 分区纪律对齐。
@@ -57,7 +57,7 @@ const deliveryEntriesBySession = ref<Map<string, DeliveryFrameEntry[]>>(new Map(
 // 与上方投影同批 interim 承载，登记表条目随 u3c/u5 收编评估一并补登）
 const morphSegmentsBySession = new Map<string, Map<string, Segment[]>>()
 
-/** 消费 session.delivery 帧：投影整体替换（空条目集删键，不积累空形态——对齐 queueStates 惯例）。 */
+/** 消费 session.delivery 帧：投影整体替换（空条目集删键，不积累空形态——对齐 retryStates 惯例）。 */
 export function replaceDeliveryProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const next = new Map(deliveryEntriesBySession.value)
   if (entries.length === 0) next.delete(sid)

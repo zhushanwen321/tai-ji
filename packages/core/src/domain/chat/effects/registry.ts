@@ -6,7 +6,7 @@
  * [P4 s5 w2] tasks 路由（routeToolResultToTasks/routeToolStartToTasks）与
  * openTasksPanelOnFirstData 回调已随 tasks 域删除移除。
  *
- * 背景：原 chat-chunk-processor（21 case，更新 messages/retryStates/queueStates）
+ * 背景：原 chat-chunk-processor（21 case，更新 messages/retryStates/queueStates；[u5a] queueStates 维度已退役）
  * 与 useChat.ensureStreamSubscription（9 case，翻 isStreaming + applySnapshot）对同一
  * ServerMessage 流 switch 两次。新增 message.* type 必须两处同步改，易漏。
  *
@@ -227,7 +227,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     clearPrematureTimeoutIds(sid)
     // [HISTORICAL] QueueBubble 快照条件清/僵尸清理（G-023）已随 queue_update 计数腿退役：
     // 队列区数据源 = session.delivery 状态帧（内核 state topic 快照，D7），queueStates
-    // 不再是任何机制的工作前提。store 侧 queueStates 分区与其清理方法的最终退役归 u5
+    // 不再是任何机制的工作前提。store 侧 queueStates 分区与其清理方法已随 u5a 退役（删除）
     // （store.ts 不在 u3b 领地）。
     const prev = messages.value.get(sid)?.value ?? []
     const messageId = readString(payload, 'messageId') ?? `a-${crypto.randomUUID()}`

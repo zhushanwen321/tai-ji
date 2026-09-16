@@ -70,7 +70,6 @@ vi.mock('@/stores/chat', () => ({
     isStreaming: ref(false),
     isActive: () => false,
     getRetryState: () => undefined,
-    getQueueState: () => undefined,
     isCompacting: () => false,
     sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
     // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随

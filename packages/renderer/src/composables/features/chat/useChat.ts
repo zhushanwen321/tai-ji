@@ -42,9 +42,9 @@ import i18n from '@/i18n'
  * 方法引用稳定（模块级函数），组装一次复用。
  */
 const chatApiPort: ChatApiPort = {
-  // 端口适配：ChatApiPort.send 无 images 概念（Cmd+V 富呈现通路绕过端口直调 api/domains/chat），
-  // 发送编排链路仅需 options.clientUuid 透传。旧 send 保留至 u5 协议退役（renderer 活调用方
-  // 已收敛 delivery.submit——见下方 submitDelivery）。
+  // 端口适配：ChatApiPort.send 无 images 概念，发送编排链路仅需 options.clientUuid 透传。
+  // [u5a 保留裁决] wiring 保留——协议条目 message.send 是设计显式保留项（runtime 适配器
+  // 承接 plugin-service 存量调用方，A6 测试锁），本行是它在端口的镜像；core 编排侧已零调用。
   send: (sid, text, options) => chatApi.send(sid, text, undefined, options),
   // [u3c/D1] 统一提交入口：乐观气泡后一律走 delivery.submit，lane 由 runtime 内核判定
   // （renderer 只提交不判定）。clientUuid = 乐观气泡 id（appendUser 产物），内核条目 id /
@@ -55,8 +55,8 @@ const chatApiPort: ChatApiPort = {
   // 懒解引用（调用时才读 sessionApi.subagentAction）：部分测试 vi.mock session 域时
   // 未导出该方法，模块加载期解引用会炸 mock 的导出检查；定向发送才会真正触达。
   subagentAction: (sid, action, params) => sessionApi.subagentAction(sid, action, params),
-  steer: chatApi.steer,
-  followUp: chatApi.followUp,
+  // [u5a 退役] steer / followUp 注入已删除（u3b 统一 submit 化后 core 零调用，chat 域客户端
+  // 封装同批删除）；发送链一律走 submitDelivery（lane 判定在 runtime 内核）。
   abort: chatApi.abort,
   compact: chatApi.compact,
   bash: chatApi.bash,

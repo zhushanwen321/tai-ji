@@ -33,9 +33,14 @@ export interface ChatApiPort {
   /**
    * 发送消息（message.send RPC）。
    *
+   * [u5a 保留裁决] 成员**保留**，不随本单元删除：协议条目 `message.send` 是设计显式保留项
+   * （runtime 侧适配器承接 plugin-service 等存量调用方，A6 测试锁），本成员是它在 chat 端口
+   * 的镜像面。core 编排侧当前零调用（grep `deps.chatApi.send` 仅注释命中——send/steer/
+   * followUp/editAndResend 四通路均已收敛 submitDelivery），壳侧 wiring 保留以维持端口与
+   * 协议条目同构；协议条目删除时本成员同批删。
+   *
    * options.clientUuid（session-occupancy-send-closure D2）：调用方乐观插入的 user message
-   * id（`u-<uuid>`），经 RPC 参数透传，runtime 拒绝时在 send.rejected 广播原样带回——
-   * renderer 兜底 handler 据此消歧发送来源（flush 重放的拒绝不重入队）。可选参数，
+   * id（`u-<uuid>`），经 RPC 参数透传（内核条目 id / 出站裸标记身份源）。可选参数，
    * 不传时 RPC payload 不带 clientUuid 键（向后兼容）。
    */
   send(sessionId: string, promptText: string, options?: { clientUuid?: string }): Promise<void>
@@ -44,7 +49,7 @@ export interface ChatApiPort {
    * lane（direct/steer/queued）由 runtime 内核判定——renderer 只提交不判定。clientUuid =
    * 乐观气泡 id（appendUser 产物 `u-<uuid>`），内核条目 id + 出站裸标记身份源（D2）+
    * resync 判重锚（D5②）。reply 携带初始 lane/条目态（受理确认）；权威状态演进经
-   * session.delivery 状态帧，不经过本返回值驱动 UI。旧 send 保留至 u5 协议退役。
+   * session.delivery 状态帧，不经过本返回值驱动 UI。
    */
   submitDelivery(
     sessionId: string,
@@ -65,10 +70,8 @@ export interface ChatApiPort {
     action: 'cancel' | 'message' | 'start',
     params: { subagentId?: string; text?: string; slug?: string; task?: string },
   ): Promise<void>
-  /** 追加 steer（message.steer，AI 执行中追加上下文）*/
-  steer(sessionId: string, promptText: string): Promise<void>
-  /** 追加 follow-up（message.follow_up，当前回合结束后另起一轮）*/
-  followUp(sessionId: string, promptText: string): Promise<void>
+  // [u5a 退役] `steer` / `followUp` 端口成员已删除：u3b 统一 submit 化后 core 编排侧对
+  // `deps.chatApi.steer` / `followUp` 零调用（grep 实测），chat 域客户端封装同批删除。
   /** 中断当前回合（message.abort）*/
   abort(sessionId: string): Promise<void>
   /** 压缩上下文（session.compact）*/

@@ -465,7 +465,7 @@ export function ensureStreamSubscription(
  *
  * @param deps 依赖注入（chatApi/writeSegments/getChatStore/getSessionStore/toast/t）
  * @returns send/steer/followUp/abort/compact/editAndResend/hydrateHistory/loadMoreHistory/
- *          hasMoreHistory/disposeSession/sendBash/abortBash/clearQueueState
+ *          hasMoreHistory/disposeSession/sendBash/abortBash
  */
 export function createUseChat(deps: UseChatDeps) {
   const chat = deps.getChatStore()
@@ -1021,10 +1021,9 @@ export function createUseChat(deps: UseChatDeps) {
     disposeSession,
     sendBash,
     abortBash,
-    // [session-dead G1 → u3b 注记] forceQuit 后清 pi queue_update 快照——queueStates 分区
-    // 已随 queue_update 计数腿退役不再写入（本转发保持返回面稳定，最终清理归 u5）；
+    // [u5a 退役] 前身 clearQueueState 转发（forceQuit 清 pi queue_update 快照）已删：
+    // queueStates 分区及其读写面随本单元退役，pi 槽位回收由 delivery.drain 承担（u3c）。
     // 队列区数据源 = session.delivery 投影（disposeSession → clearDeliveryProjection 清理）。
-    clearQueueState: (sessionId: string) => chat.clearQueueState(sessionId),
   }
 }
 

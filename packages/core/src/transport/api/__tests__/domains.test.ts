@@ -92,13 +92,11 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', images })
   })
 
-  it('steer / followUp / abort 走对应 type', async () => {
-    await chat.steer('s1', 't')
-    expect(mockCommand.mock.calls[0]).toEqual(['message.steer', { sessionId: 's1', content: 't' }, RPC_BACKSTOP_TIMEOUT_MS])
-    await chat.followUp('s1', 't')
-    expect(mockCommand.mock.calls[1][0]).toBe('message.follow_up')
+  // [u5a 退役] 前身用例「steer / followUp / abort 走对应 type」已删：前两方法的客户端封装随
+  // u5a 退役（u3b 统一 submit 化后零活调用方；协议条目存续原因见 shared/protocol.ts u5a 裁决）。
+  it('abort 走对应 type', async () => {
     await chat.abort('s1')
-    expect(mockCommand.mock.calls[2]).toEqual(['message.abort', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS])
+    expect(mockCommand.mock.calls[0]).toEqual(['message.abort', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS])
   })
 
   it('compact 超时 = COMPACT_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS（校准链不变量）', async () => {

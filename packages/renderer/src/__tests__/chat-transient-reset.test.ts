@@ -58,10 +58,11 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     expect(store.getRetryState(sid)).toBeUndefined()
   })
 
-  it('[u3c 退役] queue_update 不再写入 queueStates——瞬态收口面收敛为 occupancy/retry/streaming', () => {
+  it('[u3c/u5a 退役] queue_update 帧零落点——瞬态收口面收敛为 occupancy/retry/streaming', () => {
     // [HISTORICAL] 前身「断连时 finalizeAllStreaming 清理 queueStates」用例：queue_update 帧
-    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入腿，队列区数据源 =
-    // session.delivery 投影），本用例前提（queue_update 能置 queueStates）结构性不成立。
+    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入腿；u5a 结清分区与
+    // 读写 API 本身），本用例前提（queue_update 能置 queueStates）结构性不成立。
+    // 断言面保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
     // 替代覆盖：内核投影随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
     // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收口用例。
     const store = useChatStore()
@@ -70,7 +71,8 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
       type: 'message.queue_update',
       payload: { sessionId: sid, steering: ['补一条'] },
     })
-    expect(store.getQueueState(sid)).toBeUndefined()
+    expect(store.getMessages(sid)).toHaveLength(0)
+    expect(store.getRetryState(sid)).toBeUndefined()
   })
 
   it('正常 message.complete 不清 compacting（只有 finalizeAllStreaming 全收口）', () => {

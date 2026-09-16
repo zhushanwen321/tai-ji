@@ -24,7 +24,6 @@ function makeCtx(initial: Message[] = []): MessageEffectContext {
   return {
     messages: ref(new Map([[SID, shallowRef(initial)]])),
     retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
     applyFileChanges: vi.fn(),
     markChangeSetsSuperseded: vi.fn(),
     finalizeSession: vi.fn(),

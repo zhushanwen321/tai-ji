@@ -15,13 +15,13 @@ import type {
   Segment,
   SteerFollowUpMode,
 } from '@taiji/shared'
-import type { RetryState, QueueState, FinalizeReason } from './store-types'
+import type { RetryState, FinalizeReason } from './store-types'
 import type { MessagesRef } from './mutations'
 
 /**
  * message.* 事件副作用上下文（store refs + 跨方法回调，模块级函数据此更新）。
  *
- * - messages/retryStates/queueStates：原 ChunkContext，chunk 状态写入目标。
+ * - messages/retryStates：原 ChunkContext，chunk 状态写入目标（[u5a] queueStates 维度退役）。
  * - applyFileChanges/markChangeSetsSuperseded：原 ChunkContext 回调（store 内合并逻辑）。
  * - finalizeSession + clearPendingSend：统一收口出口（替代 setStreaming flag 翻转）。
  */
@@ -29,7 +29,6 @@ export interface MessageEffectContext {
   /** D-1 容器范式：读数组需 `.value.get(sid)?.value ?? []`（内层是 per-session ShallowRef） */
   messages: MessagesRef
   retryStates: { value: Map<string, RetryState> }
-  queueStates: { value: Map<string, QueueState> }
   /** file_changes case 调 store.applyFileChanges（合并逻辑在 store 内） */
   applyFileChanges: (
     sessionId: string,

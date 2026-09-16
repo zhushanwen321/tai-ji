@@ -175,7 +175,6 @@ const DEFAULT_TIMING: Timing = {
   toolGap: 90, // tool_call 各阶段间隔（进度感）
   fileChangesGap: 120, // accumulating → ready 间隔
   retryGap: 800, // auto_retry_start → end 间隔（让指示位可见）
-  steerDrain: 1500, // steer/followUp 入队 → 模拟 drain（pi 投递）间隔，让 QueueBubble 可见
   bashDelay: 2000, // bashStart→bashResult 间隔（loading 态可见）
 }
 /** 运行时时序（对象引用共享给 run-send-stream/branches——注入走原地 merge，消费点运行时读） */
@@ -217,13 +216,6 @@ const cancelled = new Set<string>()
 const timers = new Set<ReturnType<typeof setTimeout>>()
 /** session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义） */
 const DELIVERY_PREVIEW_MAX_CHARS = 80
-/**
- * mock 队列状态镜像（steer/followUp pending）。
- * steer/followUp 入队时 push + emit 全量 queue_update（QueueBubble 渲染），
- * 延迟后 splice 模拟 drain（pi 投递）+ emit 全量（移除该项）→ drainPending 取 segments + appendUser（complete user 进对话流）。
- */
-// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 队列缓冲
-const mockQueues = new Map<string, { steering: string[]; followUp: string[] }>()
 
 /** 清理所有未触发的 timer（测试 teardown / 模块卸载时调用） */
 export function __clearTimers(): void {
@@ -242,48 +234,10 @@ function emit(sessionId: string, msg: ServerMessageUnion): void {
   streamHandlers.get(sessionId)?.forEach((h) => h(msg))
 }
 
-/** emit 全量 queue_update（steering + followUp 镜像），驱动 QueueBubble 渲染 */
-function emitQueueUpdate(sessionId: string): void {
-  const q = mockQueues.get(sessionId)
-  // 发副本而非活引用：drain splice 会原地改 q.steering，按引用 emit 会让订阅方
-  // 已收到的入队帧事后被改空（快照语义）
-  const steering = q?.steering.length ? [...q.steering] : undefined
-  const followUp = q?.followUp.length ? [...q.followUp] : undefined
-  // 两者皆空时仍 emit（空 payload），让 store 侧 queue_update handler delete queueState
-  // pendingMessageCount = steering + followUp 条数和（W8 契约必填，对齐 event-adapter 翻译口径）
-  emit(sessionId, {
-    type: 'message.queue_update',
-    payload: {
-      sessionId,
-      steering,
-      followUp,
-      pendingMessageCount: (q?.steering.length ?? 0) + (q?.followUp.length ?? 0),
-    },
-  })
-}
-
-/**
- * steer/followUp drain（pi 投递）后补发 assistant turn（m4）：message_start → text_delta×N → complete。
- *
- * drain 只 emit queue_update 会让用户消息入流后无后续 assistant——dangling streaming bubble
- * （demo / E2E 下 steer 后看不到回复）。补一个最小 assistant turn 让 mock 与真实 pi 行为同构
- * （pi drain steer 后开新一轮 LLM turn，发 message_start + 流式回复 + complete）。
- * 内容简化为固定文案逐字流式，让 streaming 气泡可见；全程检查 cancelled。
- */
-async function emitDrainAssistantTurn(sessionId: string, steeredText: string): Promise<void> {
-  const messageId = nextId('m')
-  emit(sessionId, { type: 'message.message_start', id: messageId, payload: { sessionId, messageId } })
-  await sleep(TIMING.startGap)
-  const reply = `（mock）已处理："${steeredText}"`
-  for (const ch of reply) {
-    if (cancelled.has(sessionId)) return
-    await sleep(TIMING.chunk)
-    emit(sessionId, { type: 'message.text_delta', id: messageId, payload: { sessionId, messageId, delta: ch } })
-  }
-  if (cancelled.has(sessionId)) return
-  await sleep(TIMING.done)
-  emit(sessionId, { type: 'message.complete', id: messageId, payload: { sessionId, messageId, stopReason: 'complete' } })
-}
+// [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
+// emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
+// 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费腿，u3c 转 session.delivery
+// 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -741,45 +695,35 @@ export const chat = {
   },
 
   /**
-   * steer：ack 后推 queue_update（steering 入队），延迟后模拟 drain（pi 投递：splice 移除 + emit）。
-   * 入队 → QueueBubble 渲染；drain → drainPending 取 segments + appendUser（complete user 进对话流）。
-   * drain 时机简化为固定延迟（真实 pi 在「当前回合工具调用结束后、下次 LLM 调用前」）。
+   * [u5a 收编] cancel / drain / resync 三方法的 mock 实现（前身由 renderer 侧
+   * `api/domains/delivery.ts` 自建临时分支承担——core mock 缺方法致门面三元无法取自 mock，
+   * u5a 补齐后回归「门面只做 real/mock 切换」的既有范式）。
+   *
+   * 协议合法最小响应，**不伪造投递事实**：mock 无服务端内核（条目只由 submitDelivery 帧
+   * 产生，无收回语义），故——
+   * - cancel：cancelled=false → UI 走「已投递不可撤」文案（§3.4 合法分支），不谎报撤销成功、
+   *   不产生「草稿凭空回填」的假象；
+   * - drain：空条目集 → forceQuit 提示 N=0 不显示（与「队列本就没有条目」同形）；
+   * - resync：空去重集 → 无本地残留可去重。
    */
-  async steer(sessionId: string, text: string): Promise<void> {
+  async cancelDelivery(sessionId: string, clientUuid: string): Promise<ServerMessageMap['delivery.cancel']> {
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.steering.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    // 延迟模拟 drain（投递后移除该项）+ 补发 assistant turn（m4：避免 dangling streaming bubble）
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.steering.indexOf(text)
-      if (idx !== -1) cur.steering.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    return { clientUuid, cancelled: false, reason: `mock: no kernel backing for ${sessionId}` }
   },
 
-  /** followUp：ack 后推 queue_update（followUp 入队），延迟后模拟 drain。语义同 steer。 */
-  async followUp(sessionId: string, text: string): Promise<void> {
+  async drainDelivery(sessionId: string): Promise<ServerMessageMap['delivery.drain']> {
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.followUp.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.followUp.indexOf(text)
-      if (idx !== -1) cur.followUp.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    return { sessionId, entries: [] }
   },
+
+  async resyncDelivery(sessionId: string): Promise<ServerMessageMap['delivery.resync']> {
+    await sleep(TIMING.ack)
+    return { sessionId, deduped: [] }
+  },
+
+  // [u5a 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
+  // u3b 统一 submit 化后 core 编排零调用，u3c 后队列区数据源 = session.delivery 帧，本链
+  // 无任何消费方。协议侧 message.steer / message.follow_up 条目存续原因见 shared/protocol.ts。
 
   streamSubscribe(sessionId: string, handler: (msg: ServerMessageUnion) => void): () => void {
     let set = streamHandlers.get(sessionId)

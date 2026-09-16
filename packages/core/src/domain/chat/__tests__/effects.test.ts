@@ -36,7 +36,6 @@ function makeCtx(initial: Message[] = []): MessageEffectContext {
   return {
     messages: ref(new Map([[SID, shallowRef(initial)]])),
     retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
     applyFileChanges: vi.fn(),
     markChangeSetsSuperseded: vi.fn(),
     finalizeSession: vi.fn(),
@@ -334,7 +333,6 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
 
   it('RET-1: queue_update 帧零消费（drainN/appendUser/inflight/reconcilePending 全不触）', () => {
     const ctx = makeCtx()
-    ctx.queueStates.value = new Map([[SID, { steering: ['adjust plan'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.queue_update', { steering: [] }))
 
@@ -343,12 +341,8 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
     expect(ctx.incrementInflight).not.toHaveBeenCalled()
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
   })
-
-  it('RET-2: queueStates 快照不再被写入/删除（快照分区已无生产写方，store 侧退役归 u5）', () => {
-    const ctx = makeCtx()
-    dispatchMessageEvent(ctx, SID, msg('message.queue_update', { steering: ['a', 'b'] }))
-    expect(ctx.queueStates.value.has(SID)).toBe(false)
-  })
+  // [u5a 退役] 前身 RET-2「queueStates 快照不再被写入/删除」已删：快照分区本尊随 u5a 删除
+  // （ctx 无该字段、store 无该分区），「无生产写方」由缺字段结构性保证，用例主体消失。
 })
 
 describe('dispatchMessageEvent message.customStart 完成通知 display 覆写（M2 display 前置）', () => {
@@ -774,14 +768,12 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
   it('无标记帧 + inflight > 0 → ② 纯计数 decrement（乐观气泡已显示，防重复入流）', () => {
     const ctx = makeCtx()
     vi.mocked(ctx.getInflight).mockReturnValue(1)
-    ctx.queueStates.value = new Map([[SID, { steering: ['T'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('T') }))
 
     expect(ctx.decrementInflight).toHaveBeenCalledWith(SID, 1)
     expect(ctx.appendUser).not.toHaveBeenCalled()
-    // 快照分区已无生产写方（queue_update 退役），本 handler 也不再读它
-    expect(ctx.queueStates.value.get(SID)).toEqual({ steering: ['T'] })
+    // [u5a] 前身「快照内容原样保留」哨兵随 queueStates 分区删除而移除（ctx 无该字段）
     // 权威 reducer 喂入无条件保留
     expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
   })
@@ -801,15 +793,14 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
     const ctx = makeCtx()
     const segs: Segment[] = [{ type: 'text', text: 'T' }]
     vi.mocked(ctx.drainN).mockReturnValue([segs])
-    ctx.queueStates.value = new Map([[SID, { steering: ['T', 'T'] }]])
     vi.mocked(ctx.getInflight).mockReturnValue(0)
 
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('T') }))
 
-    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数腿 D7）
+    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数腿 D7；
+    // [u5a] 快照分区删除后不在 ctx 上，断言面收敛为 drainN/appendUser 零调用）
     expect(ctx.drainN).not.toHaveBeenCalled()
     expect(ctx.appendUser).not.toHaveBeenCalled()
-    expect(ctx.queueStates.value.get(SID)).toEqual({ steering: ['T', 'T'] })
   })
 })
 
@@ -820,13 +811,11 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
 describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理腿退役，streaming 链路不变）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('RET: 不再读/写/删 queueStates，不再调 reconcilePending', () => {
+  it('RET: 不再调 reconcilePending（快照/僵尸清理腿退役）', () => {
     const ctx = makeCtx()
-    ctx.queueStates.value = new Map([[SID, { followUp: ['f1'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
 
-    expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
   })
 
@@ -842,9 +831,8 @@ describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理腿退�
 describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基线复位，D10 队列不取消）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('stopReason=aborted → 只 clearInflight；pendingBuffer/queueStates 保留（pi 队列跨 abort 存活）', () => {
+  it('stopReason=aborted → 只 clearInflight；pendingBuffer 保留（pi 队列跨 abort 存活）', () => {
     const ctx = makeCtx()
-    ctx.queueStates.value = new Map([[SID, { followUp: ['f1'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
 
@@ -853,40 +841,35 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     // 确认条目不会再有 message_end，残留会吞掉后续确认配额）。
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
-    expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
+    // [u5a] 前身「快照原样保留」哨兵随 queueStates 分区删除而移除
     // 通用收口照常（清理在 finalizeSession 之外显式做，不替代收口）
     expect(ctx.finalizeSession).toHaveBeenCalledWith(SID, 'aborted')
   })
 
-  it('aborted 且快照无条目 → clearInflight 幂等无副作用', () => {
+  it('aborted 幂等：重复收口无额外副作用', () => {
     const ctx = makeCtx()
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
 
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
-    expect(ctx.queueStates.value.has(SID)).toBe(false)
   })
 
   it('normal（stopReason=stop）不触发清理（finalizeSession 是通用收口，normal/error 不清）', () => {
     const ctx = makeCtx()
-    ctx.queueStates.value = new Map([[SID, { followUp: ['f1'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'stop' }))
 
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).not.toHaveBeenCalled()
-    expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
   })
 
   it('error stopReason 同样不清（abort 是唯一清理出口）', () => {
     const ctx = makeCtx()
-    ctx.queueStates.value = new Map([[SID, { followUp: ['f1'] }]])
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'error', errorMessage: 'x' }))
 
     expect(ctx.reconcilePending).not.toHaveBeenCalled()
     expect(ctx.clearInflight).not.toHaveBeenCalled()
-    expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
   })
 })

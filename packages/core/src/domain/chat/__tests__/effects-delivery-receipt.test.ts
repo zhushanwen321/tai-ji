@@ -43,7 +43,6 @@ function makeCtx(): MessageEffectContext & { inflightOf: () => number } {
   return {
     messages: ref(new Map([[SID, shallowRef([] as Message[])]])),
     retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
     applyFileChanges: vi.fn(),
     markChangeSetsSuperseded: vi.fn(),
     finalizeSession: vi.fn(),

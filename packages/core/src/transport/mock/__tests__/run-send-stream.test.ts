@@ -16,7 +16,7 @@ import { detectBranch } from '../run-send-stream-branches'
 
 const ZERO_TIMING: Timing = {
   ack: 0, startGap: 0, chunk: 0, done: 0, switchCmd: 0,
-  thinkingGap: 0, toolGap: 0, fileChangesGap: 0, retryGap: 0, steerDrain: 0, bashDelay: 0,
+  thinkingGap: 0, toolGap: 0, fileChangesGap: 0, retryGap: 0, bashDelay: 0,
 }
 
 interface Harness {

@@ -227,6 +227,25 @@
       "note": "golden 快照锚定 pi 实装行为（runtime vitest main 组成员，pi-semantics 体系的等价物兄弟件）；pi bump 后 golden diff 是语义漂移的合法信号，按重验后更新快照处理"
     },
     {
+      "id": "E2E-EQUIV-05",
+      "summary": "压缩窗口投递 e2e（投递所有权内核 V1 自动化形态：真 pi + faux LLM，压缩中提交两条 → 压缩窗口零投递 → 压缩结束按序逐条到达 + 标记确认 + delivered）",
+      "scope": [
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+        "extensions/universal/smart-context/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        { "kind": "spec", "ref": "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts" }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "cd packages/runtime && npx vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 触发条件（可判定）：改动 runtime session 服务（投递内核适配 registry / message-dispatcher / 组合根投递触发）或 smart-context 通知与续跑通路时重跑（脚本头注同登记）。serial=true：spawn 真实 pi 进程，按 e2e 执行准则空载串行；与 E2E-EQUIV-01 的 TAIJI_SKIP_REAL_PI=1 子集不同，本 asset 不受该 env 门控（faux 轨 = 真进程 + 假 LLM，凭证无关）。同族资产触发面拆分先例见 E2E-EQUIV-02/03/04（trigger 单值纪律）。【V9/V10/V11 自动化形态评估登记】内核 V9（queued 单条撤销）/ V10（投递中撤销·队列级收回）/ V11（forceQuit 全量回收回草稿）的自动化形态 = renderer 侧 u3c 单测族（L1 常驻件，属单测不属 e2e 资产，故不拆 rule 只在此登记）：`packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts`（V9 × → delivery.cancel + DOM setText 回草稿；V10 不可撤 toast；failed 行 resync）、`packages/renderer/src/__tests__/composables/panel/use-queue-rows.test.ts`（撤销三态 / 重试两态 / 投影过滤）、`packages/renderer/src/__tests__/panel/queue-bubble-s8.test.ts`（in-flight 行 × 可撤 + failed 重试钮 + 三态 chip DOM 断言）、`packages/renderer/src/__tests__/sidebar/force-quit-queue-recovery.test.ts` + `packages/renderer/src/__tests__/composables/use-sidebar-session-actions-forcequit.test.ts`（V11 drain RPC → 草稿注入 → N 条提示）；运行时侧收回-重投语义由内核单测（cancel in-flight 两段式 / 收回-重投）与 registry 单测（cancel/drain/resync + clear_queue 三分处置 fake port 重放）覆盖，pi 队列原语（clear_queue 全量返回）由 P-F9a 探针真机锁定——评估结论 = 等价覆盖成立，不再造重复 L3 撤销脚本"
+    },
+    {
       "id": "E2E-MODELS-01",
       "summary": "M1 models.json 脏数据 → bundled pi 拒载 → sanitize 自愈（真机零 mock）",
       "scope": [

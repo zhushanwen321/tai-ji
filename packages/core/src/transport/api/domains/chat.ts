@@ -1,7 +1,7 @@
 /**
  * Chat 域 —— delivery.submit/cancel/drain/resync + send/abort/streamSubscribe。
  *
- * 依赖方向：command（RPC，delivery 四面 / send/abort/steer/followUp/compact/getHistory）+ events（streamSubscribe 路由）。
+ * 依赖方向：command（RPC，delivery 四面 / send/abort/compact/getHistory）+ events（streamSubscribe 路由）。
  *
  * 注意：streamSubscribe 的 handler 参数类型是 ServerMessageUnion（shared 协议类型），
  * 不臆造 StreamChunk。调用方在 handler 内过滤 message.text_delta 等事件。
@@ -161,16 +161,10 @@ export function resyncDelivery(sessionId: string, clientUuids: string[]): Promis
   return sendCommand('delivery.resync', { sessionId, clientUuids }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-/** 追加 steer（当前回合工具调用结束后、下次 LLM 调用前投递）。
- *  [u3b/D5] renderer 发送链已收敛 delivery.submit，本封装仅存续至 u5 协议退役（无 core 内活调用方）。 */
-export function steer(sessionId: string, text: string): Promise<void> {
-  return sendCommand('message.steer', { sessionId, content: text }, RPC_BACKSTOP_TIMEOUT_MS)
-}
-
-/** 追加 follow-up（当前回合结束后开新轮） */
-export function followUp(sessionId: string, text: string): Promise<void> {
-  return sendCommand('message.follow_up', { sessionId, content: text }, RPC_BACKSTOP_TIMEOUT_MS)
-}
+// [u5a 退役] `steer` / `followUp` 客户端封装已删除：u3b 把发送链收敛到 delivery.submit 后二者
+// 在 core/renderer 零活调用方（grep `chat.steer(` / `chat.followUp(`：仅存于退役前的测试与
+// ChatApiPort 声明）。协议侧 `message.steer` / `message.follow_up` 条目暂留——runtime transport
+// 仍暴露该路由（存量调用方透明承接通道，见 shared/protocol.ts 的 u5a 裁决注释）。
 
 /**
  * 压缩上下文（#6：触发 runtime session.compact）。

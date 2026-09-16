@@ -36,8 +36,6 @@ interface Fixture {
     submitDelivery: ReturnType<typeof vi.fn>
     send: ReturnType<typeof vi.fn>
     subagentAction: ReturnType<typeof vi.fn>
-    steer: ReturnType<typeof vi.fn>
-    followUp: ReturnType<typeof vi.fn>
     abort: ReturnType<typeof vi.fn>
     compact: ReturnType<typeof vi.fn>
     bash: ReturnType<typeof vi.fn>
@@ -61,12 +59,10 @@ function makeFixture(): Fixture {
   const chatApi = {
     // [投递所有权内核 u3b] 统一提交通道（默认 reply = direct/in-flight 受理确认）
     submitDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }),
-    // [u3b 退役注记] send/steer/followUp 为 ChatApiPort 存量成员（协议退役归 u5），
-    // core 发送链已不再调用——mock 保留供「零调用」断言
+    // [u5a 注记] send 为 ChatApiPort 存量成员（协议 message.send 是设计显式保留项），core
+    // 发送链已不再调用——mock 保留供「零调用」断言；steer/followUp 成员随 u5a 删除。
     send: vi.fn().mockResolvedValue(undefined),
     subagentAction: vi.fn().mockResolvedValue(undefined),
-    steer: vi.fn().mockResolvedValue(undefined),
-    followUp: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
     bash: vi.fn().mockResolvedValue(undefined),
@@ -109,12 +105,8 @@ describe('createUseChat factory 行为', () => {
     resetChatModuleStateForTest()
   })
 
-  it('clearQueueState 转发 core store（转发面保持；queueStates 分区已无生产写方，store 侧退役归 u5）', () => {
-    const f = makeFixture()
-    expect(() => f.useChat.clearQueueState('sq-1')).not.toThrow()
-    expect(f.chatStore.getQueueState('sq-1')).toBeUndefined()
-    f.dispose()
-  })
+  // [u5a 退役] 前身「clearQueueState 转发 core store」用例已删：转发面随 store 侧（queueStates
+  // 分区 + clearQueueState 方法）一并删除，无转发可测——pi 槽位回收由 delivery.drain 承担。
 
   it('send 流程：统一 submit——appendUser 乐观气泡 + submitDelivery（content + clientUuid = 气泡 id）', async () => {
     const f = makeFixture()
@@ -138,9 +130,9 @@ describe('createUseChat factory 行为', () => {
     f.emit('s2', msg('s2', 'message.message_start', { messageId: 'a1' }))
     expect(f.chatStore.isActive('s2')).toBe(true)
     await f.useChat.send('s2', textToSegments('more'))
-    // 两次都走统一 submit；chatApi.steer/message.send 零调用（车道判定在 runtime 内核）
+    // 两次都走统一 submit；chatApi.send 零调用（车道判定在 runtime 内核）。
+    // [u5a] 前身同时断言 chatApi.steer 零调用——该成员已随 u5a 删除，断言随之移除。
     expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(2)
-    expect(f.chatApi.steer).not.toHaveBeenCalled()
     expect(f.chatApi.send).not.toHaveBeenCalled()
     f.dispose()
   })

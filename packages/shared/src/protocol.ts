@@ -103,8 +103,18 @@ export type ClientMessageType =
   | 'session.importCandidates' | 'session.import'
   | 'message.send' | 'message.abort' | 'message.steer' | 'message.follow_up'
   // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
-  // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝——send.rejected 退役归 u5）；
-  // 既有 message.send/steer/follow_up 与 send.rejected 条目保留不动（退役归 u5）。
+  // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝）。
+  // [u5a 退役裁决] message.steer / message.follow_up / send.rejected 三条目**保留**：
+  // 设计 D5 的目标面是「renderer 停用」+「无第三方消费者」，实测客户端侧已全部收敛
+  // （core useChat.steer/followUp 已内核化走 delivery.submit；send.rejected 的 renderer
+  // handler 随 u3b 删除，零消费方），但 **runtime 侧仍是活消费方**——
+  // ① `transport/session-message-handler.ts` 仍暴露 'message.steer'/'message.follow_up'
+  //    路由（转发 `services/session/message-dispatcher.ts` 的 steerMessage/followUpMessage，
+  //    存量调用方透明承接通道）；
+  // ② `message-dispatcher.ts` reserveBashSlot 仍在 bash busy 时 publish send.rejected
+  //    （bash 通道属设计 §1.3 Out of Scope）。
+  // 删条目 = runtime tsc + 既有测试红，而 runtime transport/services 不在本单元领地。
+  // 退役条件：runtime 侧 transport 路由 + dispatcher 转发腿一并删除时，三条目同 commit 删。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
@@ -465,13 +475,17 @@ export interface ClientMessageMap {
   // message.send：images 是 Cmd+V 富呈现通路的图片数据（base64，不含 data: 前缀）。
   // runtime 适配层（rpc-client）补 type:'image' 组装成 pi 的 ImageContent。
   // 不带 type 字段（type 是 pi 私有，runtime 适配层负责补）。
-  // clientUuid（session-occupancy-send-closure D2/D5）：客户端生成的幂等 id，runtime 拒绝时在
-  // send.rejected 广播原样带回，renderer 据此消歧发送来源（flush 重放的拒绝不重入队）。
+  // clientUuid（session-occupancy-send-closure D2/D5）：客户端生成的幂等 id（内核条目 id /
+  // 出站裸标记身份源，投递所有权内核 D2）——[u5a 注记] 前身「拒绝时经 send.rejected 广播原样
+  // 带回供 renderer 消歧」的消费腿已退役（内核排队取代拒绝），字段保留为投递身份透传。
   // [HISTORICAL] subagent 可选字段已删除（composer 四符号设计 D2）：曾经的 marker 半成品通道
   // （base64 隐藏注释前缀拼进主 agent prompt，extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标）——定向消息改走 session.subagentAction(message/start)。
   'message.send': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid?: string }
   'message.abort': { sessionId: string }
+  // [u5a 退役裁决] renderer/core 客户端消费方已清零（core `chat.steer`/`chat.followUp` 客户端
+  // 封装随本单元删除），条目存续原因 = runtime transport 侧存量通路（见上方 ClientMessageType
+  // 段的裁决注释）；runtime 侧通路删除时本条目同 commit 删。
   'message.steer': { sessionId: string; content: string }
   'message.follow_up': { sessionId: string; content: string }
   // message.bash：composer 直接执行 bash 命令（不经 LLM turn）。command 原样透传 pi bash RPC，
@@ -1464,13 +1478,14 @@ export interface ServerMessageMapBase {
   'message.stream_warn': { sessionId: string; content: string }
   // send.rejected：runtime 预检拦截（busy 时发送），防御性反馈通道（D-006）。
   // 语义：操作拒绝，区别于 message.error（流终止）。不进对话流，不翻流式态。
-  // useChat 收到后回滚 pendingSend + toast。
+  // [HISTORICAL] 「useChat 收到后回滚 pendingSend + toast」「renderer 按 reason 分型兜底入队」
+  // 的消费腿已全部退役（u3b：内核排队取代拒绝）——renderer 零 handler。
+  // [u5a 退役裁决] 条目仍存续：**唯一生产方 = runtime `message-dispatcher.ts` reserveBashSlot**
+  // （bash 运行中/压缩中执行 bash 的预检拒绝；bash 通道属设计 §1.3 Out of Scope，本次不动），
+  // 用户消息路径的 busy 预检已随 u2 退役（排队取代拒绝）。协议条目与生产方同批删除。
   // reason（session-occupancy-send-closure D2）：'busy' = runtime 预检（generating/bash 忙，存量）；
-  // 'compacting' | 'processing' = pi 侧拒绝经 runtime 转译——前者 manual 压缩中（pi 抛
-  // "Cannot submit a prompt while compaction is in progress"），后者 auto 压缩 / post-run settling
-  // 窗口（pi 抛 "Agent is already processing"）。renderer 按 reason 分型兜底入队（'busy' 兼容存量）。
-  // clientUuid：renderer 发送时经 message.send RPC 透传的客户端幂等 id，拒绝广播原样带回——
-  // 兜底 handler 见 uuid 命中 defer 队列已有条目即跳过重入队（flush 来源消歧，防双条目双投递）。
+  // 'compacting' | 'processing' = pi 侧拒绝经 runtime 转译（用户消息路径已退役，保留字段语义）。
+  // clientUuid：客户端幂等 id 原样带回（message.send 透传），消歧发送来源。
   'send.rejected': { sessionId: string; reason: 'busy' | 'compacting' | 'processing'; message: string; clientUuid?: string }
   // session.exited：pi 进程异常退出（区别于 message.error 的「单次消息失败」）。
   // 前端 routeInbound 收到后标记 session 为 dead 态 + 插入 error 消息 + toast。

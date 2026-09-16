@@ -29,8 +29,8 @@ vi.mock('@/api/domains/delivery', () => ({
 }))
 
 vi.mock('@/composables/features/chat/useChat', () => ({
-  // clearQueueState：session-dead G1 起新增（成功路径清 pi queue_update 快照残留）
-  useChat: () => ({ abort: vi.fn(), clearQueueState: vi.fn() }),
+  // [u5a] 前身 clearQueueState stub（session-dead G1）已删：该 API 随 queueStates 分区退役
+  useChat: () => ({ abort: vi.fn() }),
 }))
 
 vi.mock('@/composables/useToast', () => ({

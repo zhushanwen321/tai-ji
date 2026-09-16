@@ -6,7 +6,7 @@
  *
  * 覆盖（U1）：
  * - disposeSession 清理 messages / hydrated / pendingSend / compactingSessions /
- *   retryStates / queueStates / failedHistory 全部 per-session ref
+ *   retryStates / failedHistory 全部 per-session ref（[u5a] queueStates 分区已退役删除）
  * - disposeSession 清理 streamingTimers / pendingSendTimers 模块级 timer
  *
  * 运行：npx vitest run src/__tests__/stores/chat-dispose-session.test.ts
@@ -39,7 +39,7 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     store.addPendingSend(sid)
     store.setOccupancy(sid, { turn: 'idle', compacting: true, bash: false })
     store.testInternals.armStreamingTimer(sid)
-    // retryStates / queueStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
+    // retryStates 需通过 applyMessageEvent 写入，此处验证清空用 get 判 undefined
     store.markHistoryFailed(sid)
     // changeSetStatuses：key 格式 `${sid}:${messageId}`，disposeSession 按前缀清理（W19 Fix-2）
     store.setChangeSetStatus(sid, 'm1', 'added')
@@ -59,7 +59,6 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     expect(store.isActive(sid)).toBe(false) // pendingSend 清空 → 不再 active
     expect(store.isCompacting(sid)).toBe(false)
     expect(store.getRetryState(sid)).toBeUndefined()
-    expect(store.getQueueState(sid)).toBeUndefined()
     // changeSetStatuses 的 `${sid}:` 前缀条目已清理（W19 Fix-2 抽取的
     // deleteChangeSetStatusesFor 挂点）——此处补上原注释承诺的断言
     expect(store.getChangeSetStatus(sid, 'm1')).toBeUndefined()

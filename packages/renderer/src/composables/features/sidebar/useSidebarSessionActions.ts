@@ -65,7 +65,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   const { error: toastError, info: toastInfo } = useToast()
   const subagentStore = useSubagentStore()
   const workflowStore = useWorkflowStore()
-  const { abort: abortSession, clearQueueState } = useChat()
+  const { abort: abortSession } = useChat()
 
   async function onSelectSession(id: string): Promise<void> {
     try {
@@ -174,10 +174,9 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
       toastError(t('sidebar.forceQuitFailed', { msg }))
       return
     }
-    // [session-dead G1] 清 pi queue_update 快照：steer 直投气泡的旧数据源随 pi 死亡确定性作废，
-    // restore 后无 queue_update 帧会再清它——不清则残留（「状态撒谎」，Gate B 实测）。
-    // 队列区本体（内核条目）由下方 drain 回收，其展示投影随 runtime 快照帧收敛。
-    clearQueueState(id)
+    // [u5a 退役] 前身此处调 clearQueueState 清 pi queue_update 快照（session-dead G1）——
+    // queueStates 分区随投递所有权内核整体退役（本单元删除），无残留可清：队列区唯一数据源
+    // = session.delivery 投影，其本体由下方 drain 回收、展示随 runtime 快照帧收敛。
     let drained: Array<{ content: string }> = []
     try {
       const reply = await delivery.drainDelivery(id)
