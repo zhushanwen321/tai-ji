@@ -115,6 +115,10 @@ export default {
     // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
     turnTriggerBgNotifySummary: '{count} background task(s) completed',
     turnTriggerBgNotifyContinued: 'resumed',
+    // [system-notice-rendering-upgrade U6] boundary-row failure clause (D5 "· M failed", consumed by
+    // Turn.vue): dedicated key, not reusing traceFailed ("{count} failed" belongs to the
+    // TraceCompactorRow compacted-row phrasing — different semantic domain)
+    turnTriggerBgNotifyFailed: '{count} failed',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
     // [premature-timeout] recovery guidance for idle-timeout premature close (Turn.vue, docs/design/timeout-streaming-ui-idle.md §4.2;

@@ -289,14 +289,13 @@ const notifyDots = computed<NotifyOutcome[]>(() => {
 })
 
 /**
- * 失败分句（D5「· M 失败」）：复用既有 `panel.message.traceFailed` 计数句式。
- * 设计未定义该分句的 i18n 键名，U6 领地不含 locales 文件——专用键（如
- * `panel.message.turnTriggerBgNotifyFailed`）请求见 U6 汇报 deviations，由 U3 同批补入后
- * 本处改指（当前 zh 呈现「含 M 次失败」、en 呈现「M failed」，语义等价、无硬编码文案）。
+ * 失败分句（D5「· M 失败」）：专用键 `panel.message.turnTriggerBgNotifyFailed`（zh「{count} 失败」）。
+ * 不复用 TraceCompactorRow 的 `traceFailed`（「含 {count} 次失败」/「{count} failed」）——两者
+ * 语义域不同（收编行子计数 vs 边界行失败分句），复用会致 zh 呈现与设计字面不符。
  */
 const notifyFailedText = computed(() => {
   const failedCount = props.turn.notifySummary?.failedCount ?? 0
-  return failedCount > 0 ? t('panel.message.traceFailed', { count: failedCount }) : ''
+  return failedCount > 0 ? t('panel.message.turnTriggerBgNotifyFailed', { count: failedCount }) : ''
 })
 
 /** 耗时 meta（D5）：去重后含 endedAt 值记录的 max(endedAt) − min(startedAt)；无值不显 */

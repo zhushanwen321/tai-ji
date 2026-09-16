@@ -16,8 +16,8 @@ import { describe, it, expect, vi } from 'vitest'
 // mock vue-i18n 的 useI18n：自包含 t（vue-i18n v10 的 createI18n 返回对象作 test-utils plugin 时报
 // 「must be a function or object with install」，直接 mock useI18n 最可靠）。
 // TraceCompactorRow 真实渲染时 useI18n() 拿到此 mock，文案 + count 插值均可断言（RC-2 i18n provide）。
-// [U6] trigger 行聚合文案键（turnTriggerBgNotifySummary / Continued）由 U3 同批落地 locales——
-// 本文件按既有范式注入 mock 键值，不触碰 i18n locales 文件（U3 领地）。
+// [U6] trigger 行聚合文案键（turnTriggerBgNotifySummary / Continued / Failed）由 U3 同批落地
+// locales——本文件按既有范式注入 mock 键值，不触碰 i18n locales 文件（U3 领地）。
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => {
@@ -27,6 +27,9 @@ vi.mock('vue-i18n', () => ({
         'panel.message.traceFailed': '含 {count} 次失败',
         'panel.message.turnTriggerBgNotifySummary': '{count} 个后台任务完成',
         'panel.message.turnTriggerBgNotifyContinued': '已继续处理',
+        // 边界行失败分句专用键（D5「· M 失败」）：与 TraceCompactorRow 的 traceFailed 不同键，
+        // 文案按设计字面（无「含…次」句式）
+        'panel.message.turnTriggerBgNotifyFailed': '{count} 失败',
         'panel.message.prematureTimeoutNotice': '响应已超时收口。若任务仍在后台进行，完成后将自动恢复显示；确认已停止可重新发送。',
       }
       let s = msgs[key] ?? key
@@ -605,7 +608,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
     expect(icon.classes()).toContain('text-warn')
     expect(wrapper.findComponent(TriangleAlert).exists()).toBe(true)
     const failed = wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]')
-    expect(failed.text()).toContain('含 1 次失败')
+    expect(failed.text()).toContain('1 失败')
   })
 
   it('D5-ICON2: failedCount===0 且 neutralCount>0 → 图标中性（Bell，不冒充成功）', () => {
@@ -631,7 +634,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
       ),
     })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').text()).toBe('3 个后台任务完成')
-    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]').text()).toBe('含 1 次失败')
+    expect(wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]').text()).toBe('1 失败')
     const dots = wrapper.findAll('[data-testid="turn-trigger-bgnotify-dot"]')
     expect(dots.map((d) => d.classes().filter((c) => c.startsWith('bg-'))[0])).toEqual([
       'bg-success',

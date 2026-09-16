@@ -114,6 +114,9 @@ export default {
     // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
     turnTriggerBgNotifySummary: '{count} 个后台任务完成',
     turnTriggerBgNotifyContinued: '已继续处理',
+    // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
+    // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
+    turnTriggerBgNotifyFailed: '{count} 失败',
     // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
     // [premature-timeout] idle 超时误判收口的恢复指引（Turn.vue，docs/design/timeout-streaming-ui-idle.md §4.2；
