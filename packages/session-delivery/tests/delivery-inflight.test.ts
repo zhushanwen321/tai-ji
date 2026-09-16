@@ -195,7 +195,7 @@ describe('A6-inflight sendChecked', () => {
 })
 
 describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () => {
-  it('#2 前两次抛错第三次成功 → 最终 delivered（消息不出队直到成功）', async () => {
+  it('#2 前两次抛错第三次成功 → 受理转 in-flight，confirmDelivered 后 delivered（消息不出队直到成功）', async () => {
     vi.useFakeTimers()
     let calls = 0
     const settled: string[] = []
@@ -223,8 +223,13 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
 
     vi.advanceTimersByTime(100)
     expect(port.sendCalls).toHaveLength(3) // 重试 2 成功
+    // D9⑤：受理成功只转 in-flight（送达口径回调等 confirmDelivered）
+    expect(settled).toEqual([])
+    expect(handle.depth()).toBe(0) // 已受理，不计深度
+    expect(handle.entries().active[0]?.state).toBe('in-flight')
+
+    expect(handle.confirmDelivered(handle.entries().active[0]!.id)).toBe(true)
     expect(settled).toEqual(['delivered'])
-    expect(handle.depth()).toBe(0)
 
     warnSpy.mockRestore()
     handle.dispose()
@@ -257,7 +262,7 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
     vi.useRealTimers()
   })
 
-  it('#2 async port.send reject 同样走重试（Promise 拒绝等价抛错）', async () => {
+  it('#2 async port.send reject 同样走重试（Promise 拒绝等价抛错），受理后 confirmDelivered 落 delivered', async () => {
     vi.useFakeTimers()
     let calls = 0
     const settled: string[] = []
@@ -277,6 +282,10 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
     handle.send(textMsg('hello'))
     await vi.advanceTimersByTimeAsync(100)
     expect(port.sendCalls).toHaveLength(2)
+    // D9⑤：重试后受理成功只转 in-flight
+    expect(settled).toEqual([])
+
+    expect(handle.confirmDelivered(handle.entries().active[0]!.id)).toBe(true)
     expect(settled).toEqual(['delivered'])
 
     warnSpy.mockRestore()
@@ -310,7 +319,7 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
 })
 
 describe('A6-inflight onSettled 终态信号', () => {
-  it('port.send 成功后回调 delivered', () => {
+  it('port.send 成功后条目 in-flight；confirmDelivered 驱动 delivered 回调（D9⑤ 送达口径）', () => {
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort()
     const handle = createDelivery(port, {
@@ -318,7 +327,11 @@ describe('A6-inflight onSettled 终态信号', () => {
     })
 
     handle.send(textMsg('hello'))
+    // 受理 ≠ 送达：受理成功不回调
+    expect(settledCalls).toHaveLength(0)
 
+    const id = handle.entries().active[0]!.id
+    handle.confirmDelivered(id)
     expect(settledCalls).toHaveLength(1)
     expect(settledCalls[0]!.outcome).toBe('delivered')
     expect(settledCalls[0]!.msg.payload.content).toBe('hello')
@@ -346,7 +359,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     handle.dispose()
   })
 
-  it('async port.send resolve 后回调 delivered', async () => {
+  it('async port.send resolve 后条目 in-flight；confirmDelivered 驱动 delivered 回调（D9⑤）', async () => {
     let sendResolve: (() => void) | undefined
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort({
@@ -361,6 +374,10 @@ describe('A6-inflight onSettled 终态信号', () => {
 
     sendResolve!()
     await new Promise((r) => setTimeout(r, 0))
+    expect(settledCalls).toHaveLength(0) // 受理 ≠ 送达
+
+    const id = handle.entries().active[0]!.id
+    handle.confirmDelivered(id)
     expect(settledCalls).toHaveLength(1)
     expect(settledCalls[0]!.outcome).toBe('delivered')
 
