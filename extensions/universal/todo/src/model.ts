@@ -4,6 +4,7 @@
  */
 
 import {
+	type GuiComponent,
 	type GuiRenderResult,
 	guiComponent,
 	guiResult,
@@ -78,27 +79,8 @@ export function todoProgress(todos: Todo[]): { completed: number; total: number 
 	};
 }
 
-/**
- * 把 todos 组装为 GuiRenderResult（v1.1 meta head 架构，对齐 extension-protocol@0.3.0）。
- *
- * - meta（标题/状态/进度）由宿主壳层渲染成唯一 head：进度计数 "N/M" + mini bar
- *   替代 body 内 progress-bar（精简 body），全完成 status=done（head 绿点 + bar 变绿）。
- * - 内容根 = numbered list-tree：行首弱化序号（编辑器行号范式，ListTree 渲染），
- *   id 不再烧进 label——update/delete 锚点由模型经 list action 获取，用户引用
- *   「第 N 项」即可；状态由行尾圆点单一表达（无 icon，v6 单一信息源裁决）。
- *
- * status → 圆点映射：
- *   pending      → 无圆点（常态归零）
- *   in_progress  → running（accent）
- *   completed    → done（success + label 弱化）
- */
-export function buildGui(todos: Todo[]): GuiRenderResult {
-	const { completed, total } = todoProgress(todos);
-	const inProgress = todos.filter((t) => t.status === "in_progress").length;
-
-	const status: WidgetMeta["status"] =
-		total > 0 && completed === total ? "done" : inProgress > 0 ? "running" : "idle";
-
+/** 单段清单：两段共用同一构造（仅过滤条件不同），保住行首序号范式与 status 映射的单一口径。 */
+function todoListTree(todos: Todo[]): GuiComponent {
 	const items: TreeItem[] = todos.map((t) => ({
 		label: t.text,
 		status:
@@ -109,13 +91,58 @@ export function buildGui(todos: Todo[]): GuiRenderResult {
 					: undefined, // pending 无 status
 		depth: 0,
 	}));
+	return guiComponent("list-tree", { numbered: true, items });
+}
+
+/**
+ * 把 todos 组装为 GuiRenderResult（meta head + tab-bar 双段架构）。
+ *
+ * - meta（标题/状态/进度/icon/badge）由宿主壳层（widget 面板 head + 托盘）唯一渲染：
+ *   进度计数 "N/M" + mini bar 替代 body 内 progress-bar（精简 body），全完成 status=done
+ *   （head 绿点 + bar 变绿）；icon 点名 lucide key 'list-checks'（与宿主内置 widgetKey
+ *   映射 'todo'→ListChecks 同图标）——宿主映射只是兜底，显式声明后宿主调整自己的映射表
+ *   也不会换掉 todo 的图标；badge = 未完成条数（托盘 `[☑ 2]`，宿主超长 truncate）。
+ * - 内容根 = tab-bar 双段（tabs/sections 等长 2 段，宿主本地切换、不回传 extension）：
+ *   待办段 = 未完成项（pending + in_progress），已完成段 = completed 项——两段互斥且覆盖
+ *   全量，tab 标签计数与段内容同源（否则「待办 N」与实际行数成双口径）；分段而非堆叠，
+ *   使已完成项不占待办首屏（面板形态裁决，设计 D5）。
+ * - 两段同构 numbered list-tree：行首弱化序号（编辑器行号范式，ListTree 渲染），
+ *   id 不再烧进 label——update/delete 锚点由模型经 list action 获取，用户引用
+ *   「第 N 项」即可；状态由行尾圆点单一表达（无 icon，v6 单一信息源裁决）。
+ *   空段 = items 为空的 list-tree（沿用既有空态语义，不加装饰性占位）。
+ *
+ * status → 圆点映射：
+ *   pending      → 无圆点（常态归零）
+ *   in_progress  → running（accent）
+ *   completed    → done（success + label 弱化）
+ */
+export function buildGui(todos: Todo[]): GuiRenderResult {
+	const { completed, total } = todoProgress(todos);
+	const inProgress = todos.filter((t) => t.status === "in_progress").length;
+	const open = total - completed;
+
+	const status: WidgetMeta["status"] =
+		total > 0 && completed === total ? "done" : inProgress > 0 ? "running" : "idle";
 
 	return guiResult(
-		guiComponent("list-tree", { numbered: true, items }),
+		guiComponent("tab-bar", {
+			tabs: [
+				// 首段带 active：容器化宿主据此建立初始 tab（此后本地切换不被推送重置）
+				{ label: `待办 ${open}`, active: true },
+				{ label: `已完成 ${completed}` },
+			],
+			// 段 = 子树（组件数组，与 tabs 等长一一对应；宿主渲染 active 段的全部子组件）
+			sections: [
+				[todoListTree(todos.filter((t) => t.status !== "completed"))],
+				[todoListTree(todos.filter((t) => t.status === "completed"))],
+			],
+		}),
 		{
 			title: "Todo",
 			status,
 			progress: total > 0 ? { current: completed, total } : undefined,
+			icon: "list-checks",
+			badge: String(open),
 		},
 	);
 }
