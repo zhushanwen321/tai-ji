@@ -199,7 +199,7 @@ subagents:
 - **落点**：shell 的 `src/interface/` 新增 `tool-subagents.ts`（与 `tool-workflow.ts` 同层），注册 + `renderCall`/`renderResult`（TUI）走既有 tool 惯例。
 - **转译**：全部参数确定性映射 → `runWorkflow({ scriptSource: fanOutScript, args: { tasks, agents, aggregate }, budgetTokens: tokens, budgetTimeMs: time, scriptName: "fan-out", slug, model, thinkingLevel }, deps, signal)`；spec 其余字段（scriptPath/description/parameters 等）随 `tool-workflow.ts:456` 先例逐字段对齐组装（parameters 从 script.meta 拷贝供 chokepoint 校验）。
 - **返回**：与 workflow run 同款后台启动文案 + runId + 「results arrive as ONE notification / abort 用 workflow tool / 异常超时做单次 status 查询（恢复出口非轮询）」指引（全文见 §3.1）。
-- **复用与不复制**：reentry guard 复用 workflow tool 的 `reentryRef`（同一管道同一守卫，避免双 guard 语义漂移）；status/abort **不复制**，直接指路 workflow tool 现有动作（runId 同体系）。⛔实施期门：`runWorkflow` await 时长实测——若同步段可感知（>数百 ms），guard 必要性成立；若极快，guard 仍保留（无害且防手误连击）。
+- **复用与不复制**：reentry guard 复用 workflow tool 的 `reentryRef`（同一管道同一守卫，避免双 guard 语义漂移）；status/abort **不复制**，直接指路 workflow tool 现有动作（runId 同体系）。⛔实施期门（已闭合，见 §5 终局结论）：`runWorkflow` await 时长实测——若同步段可感知（>数百 ms），guard 必要性成立；若极快，guard 仍保留（无害且防手误连击）。
 - **不透传 worktree/fork**：批量成员是独立一次性计算单元，fork（继承父上下文）与 worktree（文件隔离）在批量语义下均无已发生需求；模板 agent() 不带这两项，未来有真实场景再加参数。
 
 #### D4：fan-out.js 模板
@@ -223,7 +223,7 @@ subagents:
 
 #### D5：通知体积与注入面导流
 
-- **通知体积**：机制不动（`MAX_RESULT_LENGTH` 8000 字符保持）。体积控制靠 D4 的 schema 约定：summary 内联（数百字）、完整产物落盘走 `fullReportPath` 指针。N 大（>6）时 summary 总量也可能触界——模板在 results 序列化前按序截断保 taskIndex/status 完整，截断行为写入 outcome 顶层 `truncated: true` 标记。⛔实施期门：以 6 任务 × 500 字 summary 实测通知体积，断言截断发生时 `truncated:true` 存在且 taskIndex/status 字段完整；触界则收紧 summary description 字数指引。
+- **通知体积**：机制不动（`MAX_RESULT_LENGTH` 8000 字符保持）。体积控制靠 D4 的 schema 约定：summary 内联（数百字）、完整产物落盘走 `fullReportPath` 指针。N 大（>6）时 summary 总量也可能触界——模板在 results 序列化前按序截断保 taskIndex/status 完整，截断行为写入 outcome 顶层 `truncated: true` 标记。⛔实施期门（已闭合，见 §5 终局结论）：以 6 任务 × 500 字 summary 实测通知体积，断言截断发生时 `truncated:true` 存在且 taskIndex/status 字段完整；触界则收紧 summary description 字数指引。
 - **注入导流**（三处，全部同 commit）：
   1. 单数 `subagent` tool：start action/task description 与 tool description 加分工句——「2+ independent tasks in one dispatch → use the `subagents` tool」（实施核实：该 tool 无 promptGuidelines 数组，落点为 description 各处）；collect 字段随退役删除，描述同步清理。
   2. `subagents` tool description：明确「one-shot batch members（不可 message/续聊），results arrive as one notification」；slug 参数引导模型提供批次标签（「shown on the conversation block and run list — provide a short label for multi-batch scenarios」，缺省生成值仅作用于状态面不到块面）。
@@ -235,7 +235,7 @@ subagents:
 |---|---|
 | schema/壳 | `subagent-tool-schema.ts` 删 collect 字段；startHandler 删 collect 解析与路由；`subagent-tool.ts` route 接线清理。（组合根侧 `recoverSyncCollectBatch` 调用点已随 modeless 波5 摘除——`session-lifecycle.ts` 头注核实，仅剩 core 侧 no-op 方法本体随下行动作删除） |
 | core | `CollectCoordinator`、`SyncCollectDomain`（域 #5 整体）、E9 `convertPendingSyncBufferToAsync`、`store.markBatchFinalized` 写侧（U3 原语）、`sync-rebuild.ts` 缓冲快照兜底、`notifyBatch` + `BatchBudgetParams` + ledger sync-batch 幂等键写侧、`archiveBatchMembers`、config `collectSync` 节读取与 `DEFAULT_COLLECT_SYNC`，以及全部注入点接线——**实施时以 `grep -rn "collect\|Collect" packages/subagent-core/src` 全量核对**，已核实的注入点：`subagent-service.ts:289-291`（closeMembers → archiveBatchMembers 接线）与 `:355/:390`（两处 getCollectCoordinator getter）、`chat-rounds.ts:625-627`（routeRecord / isCollectMember 失败轮分流判据）、`record-lifecycle.ts:39/84`（getCollectCoordinator 显式接口投影）与 `:419`（archiveBatchMembers 本体）、`run-orchestration.ts:150-151`（公共投影）与 `:498-502`（collect 路由派发落点 registerMember） |
-| 存量数据兼容 | **读侧保留**：磁盘上存量 record 的 `batchFinalized` entry、session-reader 反查投影、record-store 重建路径对既有 entry 的容忍解析**不删**（只停写）——旧 session 文件必须可读。⛔实施期门：用一个含 sync 批历史 record 的真实 session 文件验证重建/读取不炸 |
+| 存量数据兼容 | **读侧保留**：磁盘上存量 record 的 `batchFinalized` entry、session-reader 反查投影、record-store 重建路径对既有 entry 的容忍解析**不删**（只停写）——旧 session 文件必须可读。⛔实施期门（已闭合，见 §5 终局结论）：用一个含 sync 批历史 record 的真实 session 文件验证重建/读取不炸 |
 | 测试 | **随删**：行为测试族（`subagent-schema-collect.test`、`collect-coordinator-service`、`collect-mixed-dispatch` 等）。**随改保留**：读侧守卫测试（`batch-finalized` / `rebuild-indexes` / `permanent-session-legacy-compat`——它们守的是 batchFinalized 审计/透传读侧兼容面，改造断言为「存量 entry 可读」而非删除）。structured-output 侧跨包契约测试对照面同步（schema import 点收敛后跑通） |
 | 文档 | `docs/extensions/subagents/architecture.md`（§2.2 sync-collect-domain 行、§4 结果通知行）、`docs/CONTEXT.md` 或 `docs/extensions/glossary.md` 登记「fan-out / 批量派发」词条并移除 sync 批表述、AGENTS.md 及 dev-flow 等 skill 中 sync 批派发提法清扫（`grep -rn "collect" docs/ .agents/` 全文核对） |
 | 迁移顺序 | Phase 1 先落 fan-out + 批量 tool + 导流（模型有替代路径）→ Phase 2 删 collect（同一 PR 序列，两个 commit；schema 删除与 core 退役不拆 release，避免「schema 在、机制亡」的中间态）。迁移说明补两句：① `collect:"async"` 显式指定随字段删除消失——其行为（立即逐条通知）即退役后的缺省路径，**无迁移动作、无功能损失**；② 字段删除后旧调用形态的实测行为与误读风险（见 §4.1 S5） |
@@ -255,7 +255,7 @@ collect 退役后，「结果语义通知」只剩 workflow notifyDone 一条通
 
 #### D8：GUI/TUI 渲染面
 
-批量调用渲染归宿（`Block.vue` 组件挂载按集合分流，`isWorkflow` 分支）：**唯一形态 = 恒折叠单行**——icon + WORKFLOW 前缀 + `input.slug`（批次标签），点击 `openWorkflowDrawer` 打开 drawer 的 workflow tab（批量成员以 agent call 形态入列，点 call 切 subagent tab；`coordination.ts` 核实）。
+批量调用渲染归宿（`Block.vue` 组件挂载按集合分流，`isWorkflow` 分支）：**唯一形态 = 恒折叠单行**——icon + WORKFLOW 前缀 + `input.slug`（批次标签），点击 `openWorkflowDrawer` 打开 drawer 的 workflow tab。[终态同步修订 2026-09-17] 设计初稿「批量成员以 agent call 形态入列，点 call 切 subagent tab」经终态复审证伪：drawer 选中以 `workflowFields.name` 匹配（`openWorkflow(name)`，`name` 为空仅切 tab 不记录选中——Block.vue:470 注释明载），而批量 schema 无 `name` 入参 → **subagents 批量块点击在结构上只能到达 workflow tab 空态，成员入列不可达**（设计期 u3 只核对了 isWorkflow 分支与点击通路，未核对选中链路的 name 匹配前提——设计盲区）。成员查看的现实路径：workflow tool 直跑 fan-out（input.name="fan-out" 命中选中）或 `subagents action:"list"`。「批量块 → drawer 选中 → 成员入列」通路的补齐（renderer 侧 name 匹配放宽或按 runId 选中）超本设计「零 renderer 改动」边界（D1 单收录裁决的前提），登记为待用户裁决的后续项（实施证据：f4-drawer2.png drawer 空态 + 代码链 Block.vue:461-472）。
 
 - **不构造 `details.__gui__`**：`guiComponent` 的渲染点（`Block.vue:155/195`）位于普通 tool 分支（`v-else`）的展开区内，`isWorkflow` 分支恒折叠无展开路径，不消费 `__gui__`——P1.2 构造 list-tree 是死代码（workflow tool 现状构造 `__gui__` 但块面同样不消费，本设计不复制该漂移；`Block.vue:93` 模板注释「+ list-tree GUI」与实现漂移，实施期顺手登记）。
 - **可辨识性规则（分面声明）**：批量 schema 无 `name` 字段。**对话流块面**显示模型 `input.slug`（`workflowFields` 读模型原始 args）——模型传了 slug 才有批次信息，schema description 引导提供；模型未传时块面 = icon + WORKFLOW 前缀零批次信息，登记为可接受形态（runId 在返回文本、drawer 全量列表可定位）。**状态面**：handler 缺省生成 `fan-out-<时间短码>`（spec.slug 层）→ run 投影名 → drawer WorkflowTab run header，多批次并发的状态面辨识由生成值保障——pi 事件流契约无 input 回写通路（hook 只改 output），生成值到不了块面，两面的辨识手段各自独立。**被否谱系**：④「handler 生成值可辨识块面」——被注入时机断层击穿（spec 层生成值无 input 回写通路，恰在要防的「模型未传」场景块面依然零信息）。
@@ -289,7 +289,7 @@ collect 退役后，「结果语义通知」只剩 workflow notifyDone 一条通
 | S2 | **三审场景复现（真实工作负载）**：对本仓库任一 tech-design 文档，prompt 模型走 `subagents` 三路审查（main/impact/simplicity 三个 agent），期间父会话正常 idle | **通过标准（G2 口径，本设计可归因）**：三份报告落盘、notifyDone 一次收齐三路 summary；若期间有成员失败，run 收口 status=partial 且通知照达（对照 collect 时代的通知黑洞——成员死亡不吞通知即本设计职责内的通过）。**观察项（非通过判据）**：父回合结束后成员是否持续推进——其依赖前提（run 管道派发链路不经 kill-on-disconnect 连坐）属范围外 relay 线；若实测成员仍被分钟级全灭，回 relay 线联动定位，不判本设计失败，但 partial+通知照达仍须成立 | G1/G2 |
 | S3 | **部分失败 + 反向断言**：tasks 三条，其中一条 agent 路径故意写不存在的文件；另派一批发起后对其中一个成员发起 `subagent {action:"message"}` | run 收口 status=partial；通知 results 中失败条标 failed + error、另两条 ok；模型能按恢复指引只重派失败条。反向：message 被拒绝，拒绝文案可达且带重派指引（`re-dispatch via subagents`）；agents 数量错配（3 tasks 配 2 agents）→ run failed 带 Correct 示例（fail-fast 生效，非静默换 persona） | G2 |
 | S4 | **中途停止**：S1 派发后立即 `workflow {action:"abort", runId:<返回值>}` | run 终态 aborted；通知到达（非静默）；无孤儿 pi 子进程残留（`ps` 核对） | G2/G3 |
-| S5 | **collect 退役回归**：同一 CLI 环境发「collect:sync」式存量调用（带 collect 字段的 subagent start） | 字段被忽略或显式报错（⛔实施期门实测，**裁决偏好「显式报错」**——错误信息指向 `subagents`，消除「期待聚合通知却收 N 条独立通知」的静默语义误读；若实测为忽略分支，迁移期在 start description 留一句「collect removed → use subagents」，并把该误读后果写入迁移说明）。不产生批缓冲副作用；存量含 batchFinalized entry 的旧 session 文件可正常打开/读取（加载历史会话核对渲染） | G3 |
+| S5 | **collect 退役回归**：同一 CLI 环境发「collect:sync」式存量调用（带 collect 字段的 subagent start） | 字段被忽略或显式报错（⛔实施期门（已闭合，见 §5 终局结论）实测，**裁决偏好「显式报错」**——错误信息指向 `subagents`，消除「期待聚合通知却收 N 条独立通知」的静默语义误读；若实测为忽略分支，迁移期在 start description 留一句「collect removed → use subagents」，并把该误读后果写入迁移说明）。不产生批缓冲副作用；存量含 batchFinalized entry 的旧 session 文件可正常打开/读取（加载历史会话核对渲染） | G3 |
 | S7 | **断连重放（Phase 3 账本化验收）**：S1 派发后、run 收口通知送达前切断 relay 连接（模拟瞬断），恢复连接 | 通知经 ledger 重放最终可达（at-least-once 语义，对照 collect 时代 sync-batch 重放）；重放不双投递（幂等键去重） | G2 |
 | S6 | **采纳率实测**：S1/S2 落地后一周内，grep 真实会话 jsonl 统计「N 任务并行」场景的工具选择分布 | **达标线**：批量场景中 `subagents` 成为模型首选（命中次数 > 「N 次 start + collect 残留习惯」与「workflow 直跑」之和）。**不达标预案（阶梯）**：① 加强单数 tool 导流文案与注入措辞，复测一周；② 仍不达标 → 复审 schema/description 形态（对照 §2.3 机理逐条检查结构信号）。**不可采纳的终局处置（显式裁决）**：不 revert collect 退役——G3 的依据是 collect 自身语义缺陷（§2.2 #2-#6），独立于 G1 采纳率成立；此时批量需求回落 workflow 门面（`workflow run fan-out` 仍可用），并在 docs 登记采纳率失败事实 | G1 |
 
@@ -309,7 +309,7 @@ collect 退役后，「结果语义通知」只剩 workflow notifyDone 一条通
 |---|---|---|---|
 | P1.1 fan-out 模板 | 脚本 + @pi-meta 参数面（tasks/agents/aggregate，无 tasksJson——被否谱系见 D4）+ agents 数量 fail-fast + taskIndex 派发序赋值 + lintScript 约束自查（含 parallel() 入口、禁 bare IIFE） | `packages/subagent-core/workflows/fan-out.js`（新增） | 纯新增脚本，可单独用 workflow run 验收 |
 | P1.2 subagents tool | schema + handler 转译 + 注册 + reentry 共用 + TUI renderCall/Result；slug 缺省时 handler 生成 `fan-out-<时间短码>` 直传 runWorkflow spec.slug（D8 状态面辨识规则——受益面 = drawer run header，无 input 回写通路不到块面）；**不构造 `details.__gui__`**（isWorkflow 块不消费，防死代码——D8）；`WORKFLOW_TOOL_NAMES` 收录（失效兜底正确归类 workflow-record，渲染走 workflow 块分支——D1/D8 裁决）；实施期顺带核对 `run-spec.ts`「≤20 字符」注释与 `SLUG_MAX_LENGTH=35` 的既有不一致（仅登记不扩大处理）；文件头注释与 `interface/subagents.ts`（/subagents 命令壳）互指防混淆 | `extensions/universal/subagent-workflow/src/interface/tool-subagents.ts`（新增）、`index.ts`（注册）、`packages/shared/src/constants.ts`（`WORKFLOW_TOOL_NAMES` 收录） | 行为面主体 |
-| P1.3 渲染归宿核对（预期零代码改动） | 核对 workflow 块单行渲染（WORKFLOW 前缀 · slug）、点击 openWorkflowDrawer 开 drawer workflow tab、成员 agent call 入列可见；确认 `message-turns.ts` 并集判定与 `event-interpreter.ts` WORKFLOW 分支两处零改（P1.2 收录裁决的验证点） | 预期零代码改动（`packages/ui`、`packages/core`、`packages/runtime` 均不动），纯核对 + 截图留档 | 渲染归宿靠既有分支，核对独立于编码 |
+| P1.3 渲染归宿核对（预期零代码改动） | 核对 workflow 块单行渲染（WORKFLOW 前缀 · slug）、点击 openWorkflowDrawer 开 drawer workflow tab；确认 `message-turns.ts` 并集判定与 `event-interpreter.ts` WORKFLOW 分支两处零改（P1.2 收录裁决的验证点）。~~成员 agent call 入列可见~~（终态同步修订：批量块选中链路结构性不可达，见 D8 修订与待裁决项） | 预期零代码改动（`packages/ui`、`packages/core`、`packages/runtime` 均不动），纯核对 + 截图留档 | 渲染归宿靠既有分支，核对独立于编码 |
 | P1.4 导流文案 | 单数 tool description/guidelines、workflow-list 注入器（宿主中立文案） | `subagent-tool-schema.ts`、`injectors/` | 采纳率工程，与 P1.2 同 commit |
 
 Phase 1 验收 = S1/S2/S4 通过。

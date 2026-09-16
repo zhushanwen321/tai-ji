@@ -249,7 +249,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 | **R2 保留为按改动面触发的 e2e 子集** | 依赖真实进程 / 真实 LLM / 特定环境，CI 跑不了或不该跑 | dev-flow 验收计划（L2）/ 触发式回归（L3）/ L2.5 调研线 | **触发条件必填**（见下），登记进 `docs/testing/e2e-map.json`（机器登记 SSOT；结构校验 = `scripts/validate-e2e-map.mjs`，防漏门禁 = `scripts/select-affected-e2e.mjs --check`；本章节表格保留宿主叙述） |
 | **R3 归档为文档** | 退役（守护对象已消亡 / 断言面被更强资产覆盖 / 环境前提永久不可复现） | docs/testing/ 手册对应章节，注明退役原因 | spec 文件删除 + 手册记录「退役原因 + git 可追溯」；禁止只删不记 |
 
-**触发条件必填原则**：R2 资产必须写明「什么改动触发重跑」——可判定的条件（改动路径 glob / 事件如 pi bump / release，条件可判定、路径可 grep）。tech-design 设计文档的「e2e 影响面评估」据此圈定子集，dev-flow 验收计划表承接。写法参考现行 R2 资产：`docs/testing/e2e-map.json` 的 E2E-BATCH-01（scope = 路径 glob 集合 + trigger = on-diff）/ E2E-BATCH-02（trigger = on-pi-bump，R3 人工形态声明先例）。
+**触发条件必填原则**：R2 资产必须写明「什么改动触发重跑」——可判定的条件（改动路径 glob / 事件如 pi bump / release，条件可判定、路径可 grep）。tech-design 设计文档的「e2e 影响面评估」据此圈定子集，dev-flow 验收计划表承接。写法参考：`docs/testing/e2e-map.json` 的 E2E-BATCH-01（现行 R2：scope = 路径 glob 集合 + trigger = on-diff）；trigger 的事件形态参考 E2E-BATCH-02（R3 人工验收，trigger = on-pi-bump 表达重验时机信号）。
 
 > **术语桥接（与逐用例处置标签的编号区分）**：本节三态 R1/R2/R3 是**资产生命周期归宿**；R2（按改动面触发）资产进一步标注执行层——L2 真实 LLM（dev-flow）/ L2.5 faux 轨（真 pi + 假 LLM，凭证无关）/ L3 触发式（发布前、pi bump）。并行调研使用的 R1-R5 是**逐用例处置标签**（R1 毕业单测 / R2 翻 faux 轨 / R3 保留真实 LLM / R4 触发式 / R5 归档），编号撞名但语义不同，阅读时按上下文区分。逐用例的处置判定与触发条件机器登记已落地（2026-09-16）：**SSOT = `docs/testing/e2e-map.json`**（全部 e2e 资产的触发面/层级/运行命令/触发器登记），消费与守卫脚本 = `scripts/select-affected-e2e.mjs`（--base 按 diff 选受影响 rules / --release 选发布与 pi-bump 面 / --layer 过滤 / --check 防漏登记门禁）与 `scripts/validate-e2e-map.mjs`（结构 + asset 磁盘存在校验）；文档此处只定纪律，下方表格为 2026-09-15 行为轨初判登记（逐例权威以 e2e-map.json 为准）。
 
