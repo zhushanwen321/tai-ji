@@ -40,5 +40,3 @@ export { default as MarkdownRenderer } from './MarkdownRenderer.vue'
 export { default as MermaidRenderer } from './MermaidRenderer.vue'
 export { default as BashOutputBlock } from './BashOutputBlock.vue'
 export { default as ChangeSetCard } from './ChangeSetCard.vue'
-// M17 对话流 widget 面板（ViewHostStore 多卡消费端，Panel 消息区与 composer 之间）
-export { default as WidgetArea } from './WidgetArea.vue'

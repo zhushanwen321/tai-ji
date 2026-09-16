@@ -212,10 +212,12 @@ export default {
     workflowPending: '等待中',
     unreadMessages: '抽屉打开期间有 {count} 条新消息',
     // 后台命令 tab（background-task-sidebar-view D5：drawer bashTask 详情）。
-    // 术语裁决（设计 §1）：用户可见命名一律「后台命令」，与 subagent 的「后台任务」区分
+    // 术语裁决（设计 §1）：用户可见命名一律「后台命令」，与 subagent 的「后台任务」区分。
+    // 入口提示（2026-09-16 回写）：入口唯一化后的列表承载 = composer 任务托盘的「后台命令」面板
+    // （原侧栏 L2 视图已退役，设计 composer-task-tray.md D10/D11）。
     tabBashTask: '后台命令',
     noBashTask: '未选中后台命令',
-    bashTaskHint: '在侧边栏「后台命令」列表中点击任务查看详情',
+    bashTaskHint: '在 composer 工具条的任务托盘中打开「后台命令」面板，点击任务查看详情',
     bashTaskStartedAt: '开始 {time}',
     bashTaskRunningFor: '已运行 {duration}',
     bashTaskDuration: '耗时 {duration}',
@@ -395,9 +397,6 @@ export default {
     selectSession: '选择左侧会话开始',
     taskFailed: '任务创建失败：{error}',
     sendFailed: '消息发送失败：{error}',
-  },
-  widget: {
-    details: '详情',
   },
   ambiguous: {
     title: '「{basename}」有 {count} 个匹配，选择要打开的文件',

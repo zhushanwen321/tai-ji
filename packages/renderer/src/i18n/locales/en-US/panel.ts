@@ -213,10 +213,13 @@ export default {
     unreadMessages: '{count} new messages while drawer was open',
     // Background commands tab (background-task-sidebar-view D5: drawer bashTask detail).
     // Term ruling (design §1): user-visible naming is "background commands", distinct from
-    // subagent "background tasks"
+    // subagent "background tasks".
+    // Entry hint (rewritten 2026-09-16): after entry-point consolidation the list surface is
+    // the composer task tray's "Background commands" panel (the former sidebar L2 list is
+    // retired; design composer-task-tray.md D10/D11).
     tabBashTask: 'Background commands',
     noBashTask: 'No background command selected',
-    bashTaskHint: 'Click a task in the sidebar "Background commands" list to view details',
+    bashTaskHint: 'Open the "Background commands" panel in the composer task tray and click a task to view details',
     bashTaskStartedAt: 'Started {time}',
     bashTaskRunningFor: 'Running for {duration}',
     bashTaskDuration: 'Duration {duration}',
@@ -397,9 +400,6 @@ export default {
     selectSession: 'Select a session from the left',
     taskFailed: 'Task creation failed: {error}',
     sendFailed: 'Failed to send message: {error}',
-  },
-  widget: {
-    details: 'Details',
   },
   ambiguous: {
     title: '「{basename}」 has {count} matches, choose a file to open',

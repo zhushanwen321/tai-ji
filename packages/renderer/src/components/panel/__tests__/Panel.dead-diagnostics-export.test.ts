@@ -26,8 +26,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import type { ViewHostSource } from '@taiji/ui/extension-host'
-import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import { DIAGNOSTIC_EXPORT_PRIVACY_NOTICE } from '@taiji/shared'
 import Panel from '../Panel.vue'
 
@@ -88,12 +86,6 @@ vi.mock('@/composables/useExtensionUI', () => ({
   askUserFilter: () => true,
 }))
 
-/** WidgetArea inject 源（dead 态 widgetSessionId=null 不渲染，provide 仅为范式闭合） */
-const emptyWidgetSource: ViewHostSource = {
-  getViewIds: () => [],
-  getView: () => undefined,
-}
-
 const MessageStreamStub = defineComponent({
   name: 'MessageStream',
   render: () => h('div', { 'data-testid': 'message-stream-stub' }),
@@ -115,7 +107,6 @@ function mountPanel(sessionId: string) {
     props: { panelId: 'p1', sessionId, sessionDir: '/tmp/x' },
     global: {
       plugins: [createPinia()],
-      provide: { [VIEW_HOST_SOURCE_KEY as symbol]: emptyWidgetSource },
       stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, AskUserOverlay: true, ConfirmDialog: ConfirmDialogStub },
     },
   })
