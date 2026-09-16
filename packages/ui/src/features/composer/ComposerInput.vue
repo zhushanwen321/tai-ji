@@ -258,16 +258,21 @@ onMounted(() => {
    去掉 reasoning-soft 底色块（旧范式），保留语义色文字 + icon。 */
 .composer-input :deep(.slash-chip) {
   display: inline-flex;
-  align-items: center;
-  /* inline-flex 默认 vertical-align:baseline，chip 底边与文字基线对齐导致偏上。
-     middle 让 chip 中线与文字 x-height 中线对齐，视觉与文字水平居中。 */
-  vertical-align: middle;
+  /* 内部也按基线对齐：icon host（含 svg 的 flex 容器）基线 = svg 底边、label/× 基线 =
+     文字基线，baseline 对齐使三者基线互共线；center 会在各 item 盒高不等时重新引入偏差。 */
+  align-items: baseline;
+  /* vertical-align: baseline：inline-flex 盒子基线 = 首个 flex 项的基线，chip 与正文
+     基线严格共线。不能用 middle——它对齐的是「父基线 + x-height/2」而非基线，
+     badge 相对正文有 1-2px 上下浮动，视觉不水平。 */
+  vertical-align: baseline;
   gap: 4px;
   /* 与后续文字空开约一字符宽（4px），避免 chip 贴紧正文 */
   margin-right: 4px;
   /* 无底色无边框（v6 §9B 统一范式），仅靠 icon + 语义色文字区分类型 */
   color: var(--reasoning);
-  font: 600 11px / 1.4 var(--font-sans);
+  /* 字号走 token 与正文同源：chip 是行内内容，同字号 + 加粗 + 语义色已足够区分；
+   * 写死像素值会脱离 --font-scale-u/mq 缩放体系（用户调大字体后 chip 恒小）。 */
+  font: 600 var(--text-sm) / 1.4 var(--font-sans);
   user-select: none;
 }
 /* skill chip 前后自动空开（D13）：margin-left 4px + margin-right 提至 6px，仅 skill chip
@@ -288,12 +293,13 @@ onMounted(() => {
   color: var(--reasoning);
 }
 .composer-input :deep(.slash-chip .chip-icon svg) {
-  width: 13px;
-  height: 13px;
+  /* 1em 随 chip 字号联动（13px 正文下即 13px），不与文字脱节 */
+  width: 1em;
+  height: 1em;
 }
 .composer-input :deep(.slash-chip .chip-x) {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1;
   opacity: 0.5;
 }
@@ -305,13 +311,14 @@ onMounted(() => {
 /* @ 引用 / # 文件 mention 内联 chip（§9B v6 统一范式：无底无边 + 加粗 + 前缀 icon + 语义色） */
 .composer-input :deep(.mention-chip) {
   display: inline-flex;
-  align-items: center;
-  vertical-align: middle;
+  /* 同 .slash-chip：内部基线互对齐 + 与正文基线共线（middle 是 x-height 中点对齐，会浮动） */
+  align-items: baseline;
+  vertical-align: baseline;
   gap: 4px;
   /* 与后续文字空开约一字符宽（4px），与 slash-chip 对齐 */
   margin-right: 4px;
   /* 无底色无边框（v6 §9B 统一范式） */
-  font: 600 11px / 1.4 var(--font-sans);
+  font: 600 var(--text-sm) / 1.4 var(--font-sans);
   user-select: none;
 }
 .composer-input :deep(.mention-chip.mention-at) {
