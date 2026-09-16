@@ -132,13 +132,16 @@ graph TD
 
 | # | 偏差 | 依据 | 状态 |
 |---|------|------|------|
-| D-1 | 设计 §5 S5 文档同步「分散在各 slice 同 commit」→ 实施拆为「代码伴生项（头注/注释）随各 unit commit + docs/ 集中项（CONTEXT.md/约束修订/e2e-map 登记）收口于 u5」 | S5 本质是 checklist 汇总；集中执行让 check-doc-symbol-drift 与约束校验一次全跑，防遗漏保证更强；u5 验收条款可机械核验 | 待审查确认（初始登记） |
+| D-1 | 设计 §5 S5 文档同步「分散在各 slice 同 commit」→ 实施拆为「代码伴生项（头注/注释）随各 unit commit + docs/ 集中项（CONTEXT.md/约束修订/e2e-map 登记）收口于 u5」 | S5 本质是 checklist 汇总；集中执行让 check-doc-symbol-drift 与约束校验一次全跑，防遗漏保证更强；u5 验收条款可机械核验 | 已接受 |
+| D-2 | 协议侧 state/lane 字面量在 DeliveryFrameEntry 内联双定义（非 import 内核类型）——session-delivery 零依赖包边界，shared 不反向依赖 | u-contracts 决策1；session.occupancy 帧与 event-interpreter 先例同款，逐字面对齐义务注释化，错位由 u3a 装配赋值编译期拦截 | 已接受 |
+| D-3 | delivery.cancel Reply 扩展携带全文 + Segment[] 快照（设计仅明确 drain 携带） | u-contracts 决策3；renderer 刷新后帧仅 preview，V9「文本回草稿」依赖 cancel reply 全文，按 D7/ADR-0043 同款口径，optional 字段不破坏最小消费 | 已接受 |
+| D-4 | lane 'steer' 字面量与 session-delivery「零 pi 词汇」头注释的表面张力 | u-contracts 决策2；投递车道语义名非 pi API 词汇（intent→底层参数翻译在适配器），头注释已补裁决说明 | 已接受 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u-contracts | pending | 0 | - |
+| u-contracts | committed | 1 | commit 3ff81b8f5 之后的流转 commit；两包 typecheck 绿 + session-delivery 73 测试全绿（主 agent 复跑证实） |
 | u1 | pending | 0 | - |
 | u2 | pending | 0 | - |
 | u3b | pending | 0 | - |
@@ -156,6 +159,9 @@ graph TD
 4. 检查点 4：settling 窗口空闲判定精确性——u2 探针实测（保守降级「settling 一律 queued」备用；V10 已不依赖此实测）
 5. 检查点 5：V4 续跑投递文案形态——u4 实施期真机各试一次
 6. get_entries 实装形态（分页/限量）是 transcript 全量扫描唯一实装期不确定点——P-F9b 探针门 + 降级路径覆盖（影响面审 R4 INFO）
+7. **core 包 typecheck 基线存量红**（u-contracts 硬核验时发现）：495 个存量错误（489 × TS5097 import 扩展名写法 + 6 × TS2304/2339 测试 fixture 引用缺失类型 SubagentRecord/chatMode），与本次改动零相关（delivery 相关 0 命中），vitest/esbuild 转译不受影响测试可绿。非本设计 scope 不修，登记基线；**u3b 验收口径据此调整为「typecheck 错误集零扩大（delivery/chat 相关 0 新增）+ 增量测试真实跑绿」**；若阶段 3 全量或 pre-commit 被存量挡住，按「发现即正面修复」升级处置
+8. 两包根入口 index.ts 为显式白名单 re-export，u-contracts 新类型暂不可经根入口命名 import（deep import 被 exports map 挡）——收编动作归属：`packages/session-delivery/src/index.ts` 并入 u1 领地、`packages/shared/src/index.ts` 并入 u3a 领地（各追加一行 export 名单）
 
 **变更历史**：
 - 2026-09-16：计划首版（基于设计 v4 审查通过版）。S3 拆分为 u3a/u3b/u3c（≤5 文件判据）；S5 集中收口登记偏差 D-1。
+- 2026-09-16：u-contracts committed。偏差 D-2/D-3/D-4 登记；残留风险 #7（core 存量红 + u3b 验收口径调整）、#8（index.ts 收编归属：u1 领地 + session-delivery/src/index.ts，u3a 领地 + shared/src/index.ts）。

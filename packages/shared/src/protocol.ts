@@ -3,6 +3,8 @@
 import type { ProviderInfo, SkillInfo, AgentInfo, ModelInfo, SkillDirConfig, ScannedSkillInfo, ScannedAgentInfo, BuiltinProviderTemplate, ProviderId } from './provider'
 import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource } from './session'
 import type { FileChange, ChangeSetStatus, Message } from './message'
+// delivery 域帧 DTO（投递所有权内核 D7/ADR-0043）：segments 快照供草稿恢复
+import type { Segment } from './segments'
 import type { PiMessageEntry, PiToolCallEntryForm } from './pi-entry'
 import type { FileNode } from './file-tree'
 // 领域 DTO 已下沉到各自领域文件（E2 架构候选）：protocol.ts 仅保留 type→payload 映射 SSOT，
@@ -100,6 +102,10 @@ export type ClientMessageType =
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
   | 'message.send' | 'message.abort' | 'message.steer' | 'message.follow_up'
+  // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
+  // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝——send.rejected 退役归 u5）；
+  // 既有 message.send/steer/follow_up 与 send.rejected 条目保留不动（退役归 u5）。
+  | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
   | 'config.refreshProviderCatalogs'
@@ -473,6 +479,25 @@ export interface ClientMessageMap {
   'message.bash': { sessionId: string; command: string; excludeFromContext?: boolean }
   // message.abortBash：取消进行中的 bash 执行（调 pi abort_bash）。
   'message.abortBash': { sessionId: string }
+  // ── delivery 域（投递所有权内核 D1/D5，u-contracts 契约先行；行为实现归 u1/u2/u3a）──
+  // delivery.submit：renderer 统一提交入口（D1——renderer 不做 lane 路由，乐观气泡后一律
+  // submit，lane 判定单一实现归 runtime 内核）。clientUuid 必填（D2 裸标记身份源 + 判重锚）；
+  // images 可选（形态对齐 message.send，D9④ TextPayload.images 协议面）。reply 携带初始
+  // lane 与条目态（D5）；同步失败走 error envelope（内核 FIFO 无界，正常路径无拒绝态）。
+  'delivery.submit': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid: string }
+  // delivery.cancel：单条撤销（V9/V10）。queued 态立即移除；投递中（在底层通道槽位）走
+  // 队列级收回-重投路径（D3 复用对账回收）；已 delivered 或收回失败 = 不可撤（§3.4，
+  // 条目由对账器下轮兜底）。reply 携带全文 + segments 快照（D7/ADR-0043）——renderer
+  // 刷新后从 session.delivery 帧恢复的条目本地无原始 segments，文本回草稿依赖 reply。
+  'delivery.cancel': { sessionId: string; clientUuid: string }
+  // delivery.drain：forceQuit 全量回收（D10——abort 不清队列，仅 forceQuit drain），V11。
+  // reply 返回全部条目文本（发送序）供草稿恢复，含 segments 快照（D7/ADR-0043）。
+  'delivery.drain': { sessionId: string }
+  // delivery.resync：断连/刷新重连后 renderer 重报本地未确认条目（D5），clientUuid 幂等
+  // 去重（内核查 tombstone 判重表，D5②）。reply.deduped = 命中终态判重记录的 uuid（已
+  // delivered/cancelled，renderer 据此丢弃本地残留）；存留条目的权威状态经 session.delivery
+  // 全量快照帧恢复（last-value 单源，reply 不重复携带，防双源分叉）。
+  'delivery.resync': { sessionId: string; clientUuids: string[] }
   'config.getProviders': Record<string, never>
   // 进入 Settings Provider 页时触发远程模型目录刷新（无参：刷新列表内全部 catalog provider）
   'config.refreshProviderCatalogs': Record<string, never>
@@ -786,6 +811,10 @@ export type ServerMessageType =
   // session.occupancy（session-occupancy-send-closure P3）：占用三维快照广播（state topic，
   // last-value 语义——重连/切回 session 自动恢复，不依赖广播时序），renderer sessionPhase 唯一数据源。
   | 'session.occupancy'
+  // session.delivery（投递所有权内核 D5）：队列状态全量快照帧（state topic，last-value 语义，
+  // 与 session.occupancy 同模式——重连/切回 session 自动恢复，不依赖广播时序）。
+  // 数据源 = 内核 entries() 投影视图（D9②，D5③ 修剪规则）。QueueBubble 单一数据源（D7）。
+  | 'session.delivery'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
   // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
@@ -874,6 +903,9 @@ export type ServerMessageType =
   | 'message.stream_error'
   | 'message.stream_warn'
   | 'send.rejected'
+  // delivery.* 四 RPC 的 reply 帧（投递所有权内核 D5，u-contracts）：与 request 同名
+  //（backgroundTask 域 / session.subscribe 同款 payload 消费型同名模式，ADR-0046 配对）。
+  | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.file_changes'
   | 'message.changeSetInvalidated'
   | 'message.customStart'
@@ -1281,6 +1313,66 @@ export interface SessionSetProjectMutationReply {
   projectId: string
 }
 
+// ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────
+
+/**
+ * session.delivery 帧条目（D5）：{clientUuid, preview, state, lane}。
+ *
+ * - clientUuid = 内核条目 id（出站裸标记身份源 D2，resync/收养判重锚 D5②）。
+ * - preview 为文本预览（runtime 侧可能截断），**禁止当全文消费**——草稿恢复一律用
+ *   delivery.cancel / delivery.drain reply 的全文 + segments 快照（D7/ADR-0043）。
+ * - state 四态（无 'cancelled'——D5③ 规定 cancelled 不投影；delivered 有投影窗口，
+ *   仅最近 deliveredWindow 条完整条目出现）。
+ * - state/lane 字面量与 @zhushanwen/session-delivery 内核状态机类型（DeliveryEntryState
+ *   D9① / DeliveryLane D1）逐字面对齐。两包互不依赖（session-delivery 是零依赖包，
+ *   shared 亦不反向依赖），对齐义务由 runtime 适配层赋值兼容守卫（session.occupancy
+ *   帧与 event-interpreter 同款先例）——改动任一侧必须同步另一侧，错位在 u3a 装配处
+ *   编译期红。
+ */
+export interface DeliveryFrameEntry {
+  clientUuid: string
+  preview: string
+  state: 'queued' | 'in-flight' | 'delivered' | 'failed'
+  lane: 'direct' | 'steer' | 'queued'
+}
+
+/** delivery.submit 的 reply（D5）：初始 lane 与条目态（同帧条目字段语义，见 DeliveryFrameEntry）。 */
+export interface DeliverySubmitReply {
+  clientUuid: string
+  state: DeliveryFrameEntry['state']
+  lane: DeliveryFrameEntry['lane']
+}
+
+/** delivery.cancel 的 reply：cancelled=false = 不可撤（已 delivered 或收回失败，§3.4——条目由对账器下轮兜底，前端提示「已投递不可撤」）。 */
+export interface DeliveryCancelReply {
+  clientUuid: string
+  cancelled: boolean
+  /** 撤销成功时携带完整文本与 segments 快照（D7/ADR-0043），供文本回输入框草稿（V9）。 */
+  content?: string
+  segments?: Segment[]
+  /** cancelled=false 时的人类可读原因。 */
+  reason?: string
+}
+
+/** delivery.drain 的 reply 条目（D7/ADR-0043）：全文 + segments 快照，草稿恢复最小单元。 */
+export interface DeliveryDrainReplyEntry {
+  clientUuid: string
+  content: string
+  segments?: Segment[]
+}
+
+/** delivery.drain 的 reply（D10/V11）：全部被回收条目（发送序），forceQuit 后文本回草稿。 */
+export interface DeliveryDrainReply {
+  sessionId: string
+  entries: DeliveryDrainReplyEntry[]
+}
+
+/** delivery.resync 的 reply（D5）：deduped = 命中终态判重记录（D5② tombstone）的 uuid；存留条目权威状态经 session.delivery 快照帧恢复（last-value 单源）。 */
+export interface DeliveryResyncReply {
+  sessionId: string
+  deduped: string[]
+}
+
 export interface ServerMessageMapBase {
   // ── sendInitialState 推送 / domain 订阅（精确）──
   'config.providers': { providers: ProviderInfo[]; scopedModels?: string[] }
@@ -1438,6 +1530,18 @@ export interface ServerMessageMapBase {
   // threshold 模式 turn 内自动压缩则 generating+compacting）。session.compacting/compacted 事件
   // 保留（浮层 reason 文案源），isCompacting 改由本消息派生。
   'session.occupancy': { sessionId: string; turn: 'idle' | 'dispatching' | 'generating' | 'settling'; compacting: boolean; bash: boolean }
+  // session.delivery（投递所有权内核 D5/D9②）：条目状态全量快照（展示投影），state topic
+  // last-value 语义（message-bus 不入 ring，重连/切回经 stateSnapshot 回放自动恢复）。
+  // 数据源 = 内核 entries() 投影视图：活跃条目（queued/in-flight/failed）全量 + delivered
+  // 仅最近 deliveredWindow 条完整条目；cancelled 不投影（D5③）——稳态帧体积有界。
+  // QueueBubble 的单一数据源（D7）；message.queue_update 帧降级为内核内部回执消费，
+  // 不再直驱 UI（renderer 消费退役归 u5）。
+  'session.delivery': { sessionId: string; entries: DeliveryFrameEntry[] }
+  // ── delivery 域四 RPC reply（投递所有权内核 D5，u-contracts；与 ClientMessageMap request 同名配对）──
+  'delivery.submit': DeliverySubmitReply
+  'delivery.cancel': DeliveryCancelReply
+  'delivery.drain': DeliveryDrainReply
+  'delivery.resync': DeliveryResyncReply
   // session.subscribe（wave:runtime-wiring）：session.subscribe RPC 的 reply payload（IF6 契约）。
   // snapshot：订阅时刻 bus ring 内当前事件序列（元素为带 seq 的 ServerMessage），renderer 据此 reconcile。
   // stateSnapshot：6 个 state topic（commands/context/subagents/workflows/state_changed/occupancy）
@@ -2301,6 +2405,13 @@ export interface ReplyPayloadMap {
   'backgroundTask.list': ServerMessageMap['backgroundTask.tasks']
   'backgroundTask.output': ServerMessageMap['backgroundTask.outputResult']
   'backgroundTask.kill': ServerMessageMap['backgroundTask.killResult']
+  // ── delivery 域（投递所有权内核 D5，u-contracts 契约先行；行为实现归 u1/u2/u3a）──
+  // 四 RPC 全部 payload 消费型，reply 与 request 同名（backgroundTask 域同款模式）。
+  // 同步失败走 error envelope（内核 FIFO 无界接受，正常路径无拒绝 reply 态——D5）。
+  'delivery.submit': ServerMessageMap['delivery.submit']
+  'delivery.cancel': ServerMessageMap['delivery.cancel']
+  'delivery.drain': ServerMessageMap['delivery.drain']
+  'delivery.resync': ServerMessageMap['delivery.resync']
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询 reply
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']
