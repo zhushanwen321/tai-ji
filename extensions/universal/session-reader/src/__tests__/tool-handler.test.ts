@@ -30,6 +30,15 @@ import {
   hasRealSession,
 } from './real-data.js'
 
+// fs-guard：TC6 的「~ 前缀展开」语义需要 homedir，但真实 homedir 根在白名单外（禁止向用户
+// 主目录散落文件）。vi.mock 把 homedir 指到用例内 mkdtemp 的 tmp；fakeHome 未注入时回落真实值，
+// real-data.ts 模块初始化时推导 REAL_AGENT_DIR 不受影响（模块初始化先于任何用例执行）。
+const homeState = vi.hoisted(() => ({ fakeHome: undefined as string | undefined }))
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, homedir: () => homeState.fakeHome ?? actual.homedir() }
+})
+
 /**
  * M3 tool-handler 集成测试。
  *
@@ -95,14 +104,21 @@ describe.skipIf(!HAS_REAL)('handleSessionRead', () => {
   })
 
   it('6. export outline materializes a .md file', async () => {
-    const r = await handleSessionRead(
-      { action: 'export', session: E6, format: 'outline' },
-      { agentDir: REAL },
-    )
-    const d = r.details as { path: string; sizeBytes: number }
-    expect(d.path).toMatch(/\.md$/)
-    expect(existsSync(d.path)).toBe(true)
-    expect(d.sizeBytes).toBeGreaterThan(0)
+    // fs-guard：export 写目标 = <agentDir>/tmp/，agentDir 传 REAL 会 mkdir 真实 ~/.pi/agent/tmp
+    // （白名单外）。读侧经 liveSessionDir=[live] 根仍扫真实数据，写侧落 mkdtemp tmp 自建自删。
+    const dir = await mkdtemp(join(tmpdir(), 'tool-handler-export-'))
+    try {
+      const r = await handleSessionRead(
+        { action: 'export', session: E6, format: 'outline' },
+        { agentDir: dir, liveSessionDir: join(REAL, 'sessions') },
+      )
+      const d = r.details as { path: string; sizeBytes: number }
+      expect(d.path).toMatch(/\.md$/)
+      expect(existsSync(d.path)).toBe(true)
+      expect(d.sizeBytes).toBeGreaterThan(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 
   // w1 合并 subagent 候选后，本机 subagent task 文本（含本用例 query 字符串本身，因当前
@@ -643,7 +659,7 @@ describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-conte
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: 'tc-read-1', name: 'read', arguments: { path: '/tmp/log.txt' } },
+            { type: 'toolCall', id: 'tc-read-1', name: 'read', arguments: { path: join(tmpdir(), 'log.txt') } },
           ],
         },
       }),
@@ -667,7 +683,7 @@ describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-conte
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: 'tc-read-2', name: 'read', arguments: { path: '/tmp/out.txt' } },
+            { type: 'toolCall', id: 'tc-read-2', name: 'read', arguments: { path: join(tmpdir(), 'out.txt') } },
           ],
         },
       }),
@@ -724,7 +740,7 @@ describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-conte
         message: {
           role: 'assistant',
           content: [
-            { type: 'toolCall', id: 'tc-read-1', name: 'read', arguments: { path: '/tmp/deploy.txt' } },
+            { type: 'toolCall', id: 'tc-read-1', name: 'read', arguments: { path: join(tmpdir(), 'deploy.txt') } },
           ],
         },
       }),
@@ -933,24 +949,33 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
   })
 
   it('TC6: ~ 前缀展开到 homedir（文件实际在 homedir 下）', async () => {
-    const home = homedir()
-    const tmpUnderHome = await mkdtemp(join(home, '.sr-w2-test-'))
+    // fs-guard：真实 homedir 根在白名单外（禁止在用户主目录根散落 .sr-w2-test-*）——
+    // homedir 经文件头 vi.mock 指到 mkdtemp tmp（白名单内），「~ 前缀展开」断言语义不变
+    const fakeHome = await mkdtemp(join(tmpdir(), 'tool-handler-tc6-home-'))
+    homeState.fakeHome = fakeHome
     try {
-      const fileId = '019e6c96-dddd-eeee-ffff-0000000006c1'
-      const sessionFile = join(tmpUnderHome, 's.jsonl')
-      await writeFile(
-        sessionFile,
-        JSON.stringify({ type: 'session', id: fileId, cwd: '/demo' }) + '\n',
-      )
-      // ~/开头的相对 homedir 路径
-      const tildePath = '~/' + sessionFile.slice(home.length + 1)
-      const r = await handleSessionRead(
-        { action: 'export', session: tildePath, format: 'outline' },
-        { agentDir: dir },
-      )
-      expect((r.details as { path: string }).path).toContain(fileId)
+      const home = homedir()
+      const tmpUnderHome = await mkdtemp(join(home, '.sr-w2-test-'))
+      try {
+        const fileId = '019e6c96-dddd-eeee-ffff-0000000006c1'
+        const sessionFile = join(tmpUnderHome, 's.jsonl')
+        await writeFile(
+          sessionFile,
+          JSON.stringify({ type: 'session', id: fileId, cwd: '/demo' }) + '\n',
+        )
+        // ~/开头的相对 homedir 路径
+        const tildePath = '~/' + sessionFile.slice(home.length + 1)
+        const r = await handleSessionRead(
+          { action: 'export', session: tildePath, format: 'outline' },
+          { agentDir: dir },
+        )
+        expect((r.details as { path: string }).path).toContain(fileId)
+      } finally {
+        await rm(tmpUnderHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      }
     } finally {
-      await rm(tmpUnderHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      homeState.fakeHome = undefined
+      await rm(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })

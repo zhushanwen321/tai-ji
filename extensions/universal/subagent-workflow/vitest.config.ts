@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { defineConfig } from "vitest/config";
+import { taijiTestConfig } from "../../../test-guard/factory.ts";
 
 /**
  * Vitest config for @zhushanwen/pi-subagent-workflow.
@@ -8,7 +8,7 @@ import { defineConfig } from "vitest/config";
  * External Pi SDK packages are aliased to inline mocks or shared type stubs
  * so that vitest's module resolution succeeds without the real packages installed.
  */
-export default defineConfig({
+export default taijiTestConfig({
   test: {
     reporters: ["default", "junit"],
     outputFile: { junit: "./test-results/vitest-junit.xml" },

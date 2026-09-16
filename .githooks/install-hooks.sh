@@ -487,6 +487,30 @@ if echo "$STAGED_FILES" | grep -qE "^extensions/.*/(package\.json|[^/]+\.ts)$|^e
 fi
 
 # ============================================================================
+# 2f. vitest 防线挂载守卫（taijiTestConfig 工厂全覆盖）
+#     scripts/check-vitest-guard.mjs：所有含 vitest 测试的包根，其 vitest.config.ts
+#     必须经仓库根 test-guard/factory 的 taijiTestConfig 包装（globalSetup 钉死
+#     TAIJI_AGENT_DATA_DIR + fs-guard 破坏性 fs 白名单切面）。起因 2026-09-16：
+#     从非包 cwd 误跑 workspace 全仓 vitest，包级防线未加载，测试删光用户真实
+#     ~/.taiji 数据目录——防线已仓库级化 + 根级兜底 config，本守卫拦「新包/新
+#     config 漏挂防线」回归。复用 SKIP_CODE_RULES_CHECK 开关（不新增逃生口）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|mjs)|vitest\.config\.ts)$|^test-guard/|^vitest\.config\.ts$|^scripts/check-vitest-guard\.mjs$"; then
+    print_section "[vitest 防线挂载守卫]"
+
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-vitest-guard.mjs; then
+            echo -e "${RED}[ERROR] vitest 防线挂载守卫未通过——漏挂防线的 config 会让测试直连真实数据目录，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] vitest 防线挂载守卫已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 

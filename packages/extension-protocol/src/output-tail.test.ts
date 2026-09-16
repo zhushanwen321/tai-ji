@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it, expect } from 'vitest'
 import { readOutputTail, type OutputTailLogFn } from './output-tail'
@@ -6,7 +7,8 @@ import { readOutputTail, type OutputTailLogFn } from './output-tail'
 let tmpDir: string
 
 function freshDir(): string {
-  tmpDir = mkdtempSync(join('/tmp', 'ext-protocol-tail-test-'))
+  // fs-guard 白名单：写删目标必须落 os.tmpdir()（macOS 上 /tmp ≠ tmpdir()，硬编码 /tmp 被拦）
+  tmpDir = mkdtempSync(join(tmpdir(), 'ext-protocol-tail-test-'))
   return tmpDir
 }
 
