@@ -124,7 +124,8 @@
   --bash-output-max-height: 240px;
   /* 展开块统一限高（消费域 = BlockScrollBox：thinking 展开区 / bash 凹槽输出区 / 非 bash
      工具输出区；与 --bash-output-max-height 同量级、消费域独立互不替代）。
-     240px ≈ mono 12 行 / markdown 10 行——行数为设计期估算，dev 真机实测后回写本数值与注释 */
+     240px ≈ mono 14 行（行高 16.98px）/ markdown 11 行（行高 21.0px）——dev 真机实测校准
+     （faux 轨 80 行 bash / 40 行 thinking，2026-09-16） */
   --block-scroll-max-height: 240px;
   --composer-btn-size: 30px;
 
