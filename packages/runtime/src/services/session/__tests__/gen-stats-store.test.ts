@@ -75,7 +75,7 @@ describe('aggregateSpeed（D6 加权平均 Σtokens÷Σduration×1000）', () =>
     expect(aggregateSpeed(records)).toBe(80)
   })
 
-  it('单样本即 current 口径（u3 取文件末条 × 本函数）', () => {
+  it('单样本即 current 口径（会话槽/模型末条均按单条加权平均 = 样本本身）', () => {
     expect(aggregateSpeed([[50, 1000]] as SpeedRecord[])).toBe(50)
   })
 

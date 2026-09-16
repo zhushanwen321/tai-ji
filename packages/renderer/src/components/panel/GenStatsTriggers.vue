@@ -5,7 +5,9 @@
     null → 「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
     命中率语义色三档：≥80 success · 50–80 warn · <50 danger（设计 §3.1，项目语义色 token）。
     hover 出各自浮层：速度四行（本次/今日/7天/30天）+ 口径说明；缓存两行（本次/今日加权）
-    + bar + 口径说明。数据纯读 useGenStats 分区（订阅/恢复腿/model 校验兜底全在 composable）。
+    + bar + 口径说明。「本次」= 本会话最近一次请求样本（会话视角，runtime per-session 槽）；
+    今日/7天/30天 = 该模型跨会话全局聚合（模型视角）。数据纯读 useGenStats 分区
+    （订阅/恢复腿/model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
     <!-- 速度触发器 -->
@@ -38,7 +40,7 @@
           <!-- 四行聚合（2×2 grid）：本次 / 今日均值 / 近 7 天 / 近 30 天 -->
           <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
             <div v-for="row in speedRows" :key="row.label" class="flex flex-col gap-0.5">
-              <!-- 「本次」label 带 hover 补句（C4）：current 无窗口过滤，澄清样本来自最近一次请求 -->
+              <!-- 「本次」label 带 hover 补句（C4）：current 无窗口过滤且为会话私有样本，澄清样本来自本会话最近一次请求 -->
               <span
                 class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim"
                 :title="row.note ?? undefined"

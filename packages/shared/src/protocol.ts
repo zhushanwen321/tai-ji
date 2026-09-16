@@ -1559,8 +1559,9 @@ export interface ServerMessageMapBase {
   // [HISTORICAL] D1 协议收敛（context-consistency Phase 1）：无值以「字段缺失」表达，禁止 ?? 0 编码
   // （0 物理上不可能是真值——任何模型 contextWindow > 0）；仅含 sessionId 的帧 = 无值占位帧。
   'context.update': { sessionId: string; usagePercent?: number; inputTokens?: number; contextLimit?: number }
-  // session.stats_update：Composer 生成指标（token 速度 + 缓存命中率，模型视角——该 session 当前
-  // 模型的全局指标，同模型多 session 分区值相同是预期行为）。形状 SSOT = GenStatsFrame
+  // session.stats_update：Composer 生成指标（token 速度 + 缓存命中率；current 为会话私有样本
+  // ——本会话最近一次请求，同模型多 session 各自独立；day/d7/d30 为该模型跨会话全局聚合，
+  // 同模型多 session 聚合值相同是预期行为）。形状 SSOT = GenStatsFrame
   // （gen-stats.ts，设计 §3.4 唯一权威）。无值编码纪律 [HISTORICAL] 与 context.update 同源：
   // null = 无数据，0 = 真实测量值，禁止 ?? 0 编码（0 物理上可能是真值，null/0 必须可区分）。
   'session.stats_update': GenStatsFrame
