@@ -82,23 +82,41 @@ const COPY_SUCCESS_KEY = 'panel.composer.copyLastReply'
 const COPY_FAILED_KEY = 'panel.composer.copyLastReplyFailed'
 
 /**
- * 键位匹配（§3.3 键位表修饰键约束）：shift+tab 仅 shift；ctrl+p 无 shift/alt/meta；
- * ctrl+shift+p 无 alt/meta（先于 ctrl+p 返回前由 shift 分流）；ctrl+x 无 shift/alt/meta。
- * key 统一小写比较（ctrl+shift 组合下部分平台上报大写 'P'）。alt+p 不绑定（决策 6：GUI
- * 不跟进 pi win/WSL 的 alt+p）；meta 系全部不命中（⌘P/⌘⇧P 冒泡给全局快捷键表，决策 7）。
+ * 单条键位规则：主键 + 四修饰键期望态（true = 须按下 / false = 须松开，精确匹配）。
+ * 期望态取值即 §3.3 键位表修饰键约束的数据化：shift+tab 仅 shift；ctrl+p 无 shift/alt/meta；
+ * ctrl+shift+p 无 alt/meta（ctrl+p 按下 shift 分流而来）；ctrl+x 无 shift/alt/meta。
+ * alt+p 不绑定（决策 6：GUI 不跟进 pi win/WSL 的 alt+p）；meta 系全部不命中（⌘P/⌘⇧P
+ * 冒泡给全局快捷键表，决策 7）——两者都不在表内即自然不命中。
  */
+interface ShortcutRule {
+  key: string
+  shift: boolean
+  ctrl: boolean
+  alt: boolean
+  meta: boolean
+  action: ShortcutAction
+}
+
+/** 键位规则表（§3.3 键位表）：数组序 = 匹配优先序（与键位表同序；成员主键互斥，序仅保读法一致） */
+const SHORTCUT_RULES: readonly ShortcutRule[] = [
+  { key: 'tab', shift: true, ctrl: false, alt: false, meta: false, action: COMPOSER_ACTION_KEYS['shift+tab'] },
+  { key: 'p', shift: false, ctrl: true, alt: false, meta: false, action: COMPOSER_ACTION_KEYS['ctrl+p'] },
+  { key: 'p', shift: true, ctrl: true, alt: false, meta: false, action: COMPOSER_ACTION_KEYS['ctrl+shift+p'] },
+  { key: 'x', shift: false, ctrl: true, alt: false, meta: false, action: COMPOSER_ACTION_KEYS['ctrl+x'] },
+]
+
+/** 单规则精确匹配：主键与四修饰键全部与期望态一致才命中 */
+function matchesShortcutRule(e: KeyboardEvent, key: string, rule: ShortcutRule): boolean {
+  return (
+    rule.key === key && rule.shift === e.shiftKey && rule.ctrl === e.ctrlKey && rule.alt === e.altKey && rule.meta === e.metaKey
+  )
+}
+
+/** 键位匹配：key 统一小写比较（ctrl+shift 组合下部分平台上报大写 'P'），取首条命中规则的动作 */
 function matchShortcutAction(e: KeyboardEvent): ShortcutAction | null {
   const key = e.key.toLowerCase()
-  if (key === 'tab') {
-    return e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey ? COMPOSER_ACTION_KEYS['shift+tab'] : null
-  }
-  if (key === 'p' && e.ctrlKey && !e.altKey && !e.metaKey) {
-    return e.shiftKey ? COMPOSER_ACTION_KEYS['ctrl+shift+p'] : COMPOSER_ACTION_KEYS['ctrl+p']
-  }
-  if (key === 'x' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-    return COMPOSER_ACTION_KEYS['ctrl+x']
-  }
-  return null
+  const rule = SHORTCUT_RULES.find((r) => matchesShortcutRule(e, key, r))
+  return rule !== undefined ? rule.action : null
 }
 
 /**
