@@ -258,7 +258,7 @@ describe('createSessionStore', () => {
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [authoritative] }] })
     expect(store.list.value[0].label).toBe('权威名')
 
-    // switchModel 乐观更新：单字段快照立即生效，不依赖 state_changed 广播
+    // switchModel 回执写（U6 弃乐观写，回执后 applySnapshot 本地入参）：单字段快照立即生效，不依赖 state_changed 广播
     store.applySnapshot('s1', { modelId: 'provider/m9' })
     expect(store.list.value[0].modelId).toBe('provider/m9')
     // state_changed 广播随后到达，同值收敛（幂等）

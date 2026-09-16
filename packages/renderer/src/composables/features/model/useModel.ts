@@ -13,13 +13,13 @@
  * - landing 延迟态（useNewTaskFlow）：session 尚未 create，无法调 RPC。本 composable
  *   不处理 pending 记录（那是 useNewTaskFlow 的状态机职责），只暴露「session 已建后 apply」
  *   的能力，供 submitFirstMessage 在 create session 后调用，消除 useNewTaskFlow 与
- *   useComposerModelThinking 中重复的「RPC + 乐观更新」逻辑。
+ *   useComposerModelThinking 中重复的切换编排逻辑。
  *
- * 与 useThinkingLevelSync 的联动：模型切换的乐观更新按 sessionId 经 applySnapshot 写
+ * 与 useThinkingLevelSync 的联动：模型切换的回执写按 sessionId 经 applySnapshot 写
  * sessionStore 对应 session 的 modelId，useThinkingLevelSync 的 watch(currentThinkingLevelMap)
  * 会在 modelId 变化后自动对齐思考等级（同体系直接映射 / 跨体系重置到最高可用档，经 onReset →
  * onThinkingSelect → setThinkingLevel 回到此 composable）。本 composable 只负责单次 RPC +
- * 乐观更新，不破坏该 watch 链。
+ * 回执写，不破坏该 watch 链。
  */
 import { model as modelApi, session as sessionApi } from '@/api'
 import type { ProviderId } from '@taiji/shared'

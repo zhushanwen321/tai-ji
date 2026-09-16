@@ -50,7 +50,7 @@ describe('ModelSelectPopover 纯受控 + store 数据源', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Claude 4')
 
-    // 父组件更新 selected（模拟 Composer 乐观更新后的 props 回传）
+    // 父组件更新 selected（模拟 Composer 切换回执生效后的 props 回传）
     await wrapper.setProps({ selected: 'openai/gpt-4' })
     expect(wrapper.text()).toContain('GPT-4')
     expect(wrapper.text()).not.toContain('Claude 4')

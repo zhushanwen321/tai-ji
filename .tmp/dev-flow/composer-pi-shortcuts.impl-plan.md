@@ -111,7 +111,7 @@ graph TD
 - **风险 R1**：`useComposerKeydown` 的 deps 在 `Composer.vue:419` 组装（现 285/300，checker 口径）——传参必须极简；若引发行数超限，下沉 composer-shell（领地内已含该文件，无需扩领地）。
 - **风险 R2**：`isStaging` 信号源 = composer-shell 的 `staging.activeStaging`（设计 §5 U1 deps 清单已列）——若 staging 结构暴露面不足，允许在 composer-shell 内派生只读 computed，禁止改 core（core 不在领地）。
 - **风险 R3**：subagent 环境间歇 exit 143（本会话 tech-design 复审阶段连发）——dev 派发失败时用 action:message 续跑恢复（上下文保留），连续 2 次失败改串行单发。
-- **残留 R4（阶段 3 审查登记）**：设计 §6 INFO 交接的 core `model-thinking.ts`「RPC + 乐观更新」注释残留 5 处（:88,:90,:331,:366,:450）未清扫——core 不在本流水线领地（设计 §4 renderer-only 裁决），随下次 core 触碰批次顺带清扫，禁止为清扫单独扩领地。
+- **残留 R4（阶段 3 审查登记，2026-09-16 已清理）**：core `model-thinking.ts`「RPC + 乐观更新」注释残留——用户授权后独立小修清除，涟漪扫描合计 11 处（core 5 + renderer useModel.ts 3 + 测试注释 3），统一改为「RPC 回执写」口径；见变更历史末条。
 
 ### 变更历史
 - 2026-09-16 计划创建（设计 docs/design/composer-pi-shortcuts.md 三审 0 must-fix 收敛后）。
@@ -123,3 +123,4 @@ graph TD
 - 2026-09-16 收尾检查：功能分级同步（docs/FEATURE-PRIORITIES.md §4「快捷键与 side drawer」行并入 composer 快捷键；P2 依据 = 键盘入口挂掉后 UI 点选通路无损，模型/档位能力本身仍 P0）；文档资产对照 8 项，仅 FEATURE-PRIORITIES 触发，其余零同步。
 - 2026-09-16 阶段 6 design-code-sync 第 1 轮（终态全量审查，基线 c20b379b1）：11 条 findings（3 must-fix / 5 suggestion / 3 info；零 contested、零 code-right）全部当轮修复。must-fix ×3：基线 SHA 悬空（36a605c1e → e69a01fa8，前者为 rebase 前旧 SHA 不可达）、行数口径声称 299 → 实测 285（checker 口径；三处 = 设计文档 §2.2 + §3.2 决策 1 C 行 + composer-keydown.ts:5 头注释）、A1 证据指针与日志不符（gate-a.log 追加终态段后指针改为双段口径）。suggestion/info ×8：§3.4 事件拦截补选区例外（§3.3 决策 7 同模式涟漪一并收口）、§2.2 core 锚点 :78 → :53-58、决策 8 机制归属（runtime replicated-state markDirty）、§5「瞬态 ref」→「瞬态变量」、test 文件头覆盖矩阵补动作表接线段（F4）、impl-plan R1 行号 418 → 419（F7）与状态表快照标注（F10）、gate-a.log 本机绝对路径清理（F8，规则 22）。核验：5 文件 diff 逐行 ⊆ 领地（注释/文档文本，零行为代码改动）、终态全量 4202/4202 + vue-tsc exit 0 + lint exit 0。
 - 2026-09-16 阶段 6 聚焦复审（第 2 轮，复审对象 = 修复 commit 4376de292）：11 条修复 + 涟漪全部判定「修复成立」（关键项重演验证：e69a01fa8 祖先判定 TRUE、script setup 行数独立复算吻合、全量 vitest 重跑 4202/4202 且 junit 44+37 与台账一致、被改 12 文件族零 /Users/ 残留）；新差距 3 条全 info（gate-a.log 追加段时间戳误标 UTC、存量行数行未标口径、上条目严重度计数笔误），当轮修完（本 commit），不为 info 单独循环。收敛达成：must-fix = 0。
+- 2026-09-16 R4 清理（用户授权的领地外小修）：core `model-thinking.ts`「RPC + 乐观更新」注释残留 5 处 + 同模式涟漪 6 处（renderer useModel.ts 3、session store 测试注释 1、renderer 测试 mock 注释 2）= 11 处统一改「RPC 回执写」口径；真乐观机制（settings toggle / chat 气泡 / sidebar / subagent cancel）零触碰。核验：core 335/335 + renderer 24/24。同日用户裁决保持回执写（oe-audit 意图目标删除锚点条件不触发）。
