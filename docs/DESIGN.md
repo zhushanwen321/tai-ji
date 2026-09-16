@@ -335,6 +335,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 组件尺寸 */
 --content-max-w: 720px;  --composer-btn-size: 30px;
 --bash-output-max-height: 240px;  --bar-fill-soft: 55%;
+--block-scroll-max-height: 240px;  /* 展开块统一限高（thinking / bash / 工具输出，BlockScrollBox 消费）；与 --bash-output-max-height 消费域独立 */
 --panel-bg: var(--surface);  /* panel 内 sticky 浮层底色契约 */
 ```
 
@@ -593,7 +594,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   | 形态 | 判据 | 样式 |
   |---|---|---|
   | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
-  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线 + 居中 text-xs + 12px 图标 |
+  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550 + 从文案 text-xs/mid + 居中 13px 图标（stroke 2.2）+ mono meta 钉右（text-2xs/tabular-nums）+ py-1.5 + chip（mono text-3xs + `border-strong` 描边）；语义色仅成功绿 / 失败 warn 两档 |
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
