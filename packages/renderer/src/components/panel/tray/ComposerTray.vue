@@ -118,7 +118,9 @@
       <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，面板自身 max-h 60vh 内滚动。
            热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
            指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根做不到——
-           reka PopoverContent 不向下透传非 prop 属性/原生监听，fallthrough 落在 Teleport 根被丢弃）。 -->
+           本仓 PopoverContent 包装组件的根是 PopoverPortal/Teleport，未声明为 props/emits 的
+           原生监听在 Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经 PopperContent 的
+           `$attrs` 透传到浮层根）。 -->
       <PopoverContent
         side="top"
         align="start"

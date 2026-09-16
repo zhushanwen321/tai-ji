@@ -714,6 +714,87 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
   })
 })
 
+/**
+ * U2 判据矩阵：`isKindLoading = 在途 && 该类 total === 0`（TrayNativePanel.vue 的 isKindLoading）。
+ * 两个合取项都要有用例约束——「在途」项（loading.X / bash 的 !loaded）被删掉即退化为
+ * `total === 0`，下列否定用例转红（本组用例即该项的变异红区）。
+ */
+describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占位）', () => {
+  it('bash：从未拉到过一次（在途）且无任务 → 加载占位 + 不渲染分桶 tab', async () => {
+    trayState.bashLoaded = false
+    const wrapper = mountPanel('bash')
+    await flushPromises()
+
+    const loading = wrapper.find('[data-testid="tray-panel-loading"]')
+    expect(loading.exists()).toBe(true)
+    expect(loading.text()).toContain(zhTray.tray.loading)
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('subagent：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
+    trayState.subagentLoading = true
+    const wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    const loading = wrapper.find('[data-testid="tray-panel-loading"]')
+    expect(loading.exists()).toBe(true)
+    expect(loading.text()).toContain(zhTray.tray.loading)
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('workflow：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
+    trayState.workflowLoading = true
+    const wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    const loading = wrapper.find('[data-testid="tray-panel-loading"]')
+    expect(loading.exists()).toBe(true)
+    expect(loading.text()).toContain(zhTray.tray.loading)
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bash：已拉到过一次（非在途）且无任务 → 空态，不占位', async () => {
+    const wrapper = mountPanel('bash')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty-hint"]').text()).toBe(
+      msg(zhTray.tray.empty.runningProcess, { name: zhTray.tray.title.bash }),
+    )
+    wrapper.unmount()
+  })
+
+  it('subagent：非在途且无记录 → 空态（可行动空态），不占位', async () => {
+    const wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty-hint"]').text()).toBe(
+      msg(zhTray.tray.empty.running, { name: zhTray.tray.title.subagent }),
+    )
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('workflow：非在途且无记录 → 空态，不占位', async () => {
+    const wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tray-panel-empty-hint"]').text()).toBe(
+      msg(zhTray.tray.empty.running, { name: zhTray.tray.title.workflow }),
+    )
+    expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
 describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', () => {
   it('面板关闭再打开（卸载重挂）不触发重复首拉：loadSubagents / loadWorkflows 各仅外壳挂载一次', async () => {
     const subagentStore = useSubagentStore()
