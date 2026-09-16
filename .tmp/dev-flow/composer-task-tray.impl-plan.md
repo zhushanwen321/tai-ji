@@ -150,7 +150,8 @@ graph TD
 
 | # | 单元 | 偏差 | 原因 | 处置 |
 |---|------|------|------|------|
-| — | — | （初始为空） | — | — |
+| D1 | u-ext-goal | 不补推 badge（设计 §5 P4 标「可选补推」） | 避免百分比双真相源：`progress.label` 已是 extension 全权格式化的 '42%'，再推同值字符串会漂移 | 接受（宿主 badge fallback 链 `progress.label` 派生同值；gui.ts 存 why 注释 + 测试锁定 `meta.badge === undefined` + changeset 正文记录） |
+| D2 | u-ext-goal | 修改 `extensions/universal/goal/src/__tests__/gui.test.ts`（领地清单未逐字列入该路径） | 该文件是 buildGoalGui 专属测试，meta 精确 `toEqual` 断言随新增 icon 字段必红——属派发指令「既有测试文件/断言如需同步更新一并处理」射程 | 接受（改动最小同步：两处 toEqual 加 icon + 新增 1 个 icon 契约用例） |
 
 ## 6 状态表
 
@@ -160,7 +161,7 @@ graph TD
 | u-tray-native | pending | 0 | — |
 | u-tabbar | pending | 0 | — |
 | u-tray-widget | pending | 0 | — |
-| u-ext-goal | pending | 0 | — |
+| u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
 | u-tray-shell | pending | 0 | — |
 | u-ext-todo | pending | 0 | — |
 | u-retire-sidebar | pending | 0 | — |
@@ -184,3 +185,4 @@ graph TD
 | 2026-09-16 | 计划创建（阶段 1）；来源设计 docs/design/composer-task-tray.md（审查循环 R1-R5 收敛后） |
 | 2026-09-16 | 设计文档 commit d3e3ab516；计划基线 commit 40dc35b2e |
 | 2026-09-16 | u-proto committed（协议字段 + 白名单校验函数 + plugin-sdk 副本 + changeset + 协议文档；vitest 227 绿，主 agent 重跑复核通过） |
+| 2026-09-16 | u-ext-goal committed（meta.icon='target'，badge 不补推见偏差 D1；vitest 403 绿，主 agent 重跑复核通过） |

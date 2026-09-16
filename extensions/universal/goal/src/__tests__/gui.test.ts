@@ -3,7 +3,8 @@
  *
  * 覆盖：
  * - 内容根 = group（透明组合容器）：stats-line（status/turn[+tokens]）+ list-tree（criteria）
- * - meta：title=slug、状态点语义（done/failed/idle/running）、token 进度（取整 + 百分比 + 阈值 severity）
+ * - meta：title=slug、状态点语义（done/failed/idle/running）、token 进度（取整 + 百分比 + 阈值 severity）、
+ *   托盘 icon（显式 'target' key）
  * - successCriteria 逐行 list-tree（不压扁/不截断/无 icon/不编号）
  * - token 展示走 formatTokens（无 budget 分支）
  */
@@ -60,10 +61,21 @@ describe("buildGoalGui（v1.1 meta head 架构）", () => {
 			}),
 		);
 		expect(gui.meta).toEqual({
+			icon: "target",
 			title: "fix-auth",
 			status: "running",
 			progress: { current: 4200, total: 10000, label: "42%", severity: "ok" },
 		});
+	});
+
+	it("meta.icon 推显式 'target' key（协议形状 string；badge 不推，宿主从 progress.label 派生）", () => {
+		const gui = buildGoalGui(makeState({ slug: "fix-auth", budget: { tokenBudget: 10000 } }));
+		// 协议形状：string（宿主按 lucide 名解析）或 { paths }（自定义形状）。
+		// goal 只用 key 形态——与宿主内置 widgetKey 映射（'goal'→Target）同款，
+		// 宿主改映射表也不会换掉 goal 图标。
+		expect(gui.meta!.icon).toBe("target");
+		// badge 留空：托盘缺省从 progress.label 派生同值百分比，推一份会变成双真相源
+		expect(gui.meta!.badge).toBeUndefined();
 	});
 
 	it("tokensUsed 浮点 → meta.progress.current 取整（1454.84…1 不进 UI）", () => {
@@ -104,7 +116,7 @@ describe("buildGoalGui（v1.1 meta head 架构）", () => {
 				tokensUsed: 3000,
 			}),
 		);
-		expect(gui.meta).toEqual({ title: expect.any(String), status: "running" });
+		expect(gui.meta).toEqual({ icon: "target", title: expect.any(String), status: "running" });
 		const stats = findChildComp(gui, "stats-line");
 		const items = stats.props.items as { label?: string; value?: string }[];
 		expect(items.find((i) => i.label === "tokens")).toMatchObject({ value: "3k" });
