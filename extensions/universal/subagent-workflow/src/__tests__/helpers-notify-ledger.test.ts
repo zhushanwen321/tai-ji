@@ -284,7 +284,7 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
     expect(msg.display).toBe(true);
     expect(msg.content).toContain("Workflow 'build' done");
     expect(msg.details.notifyId).toBe(`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-fallback`);
-    // D5 单通道：deliverAs 已删
+    // u9 偏差裁决（D7 账本化配套）：deliverAs 已删
     expect(opts).toEqual({ triggerTurn: true });
     // 账本零写入（无绑定）
     expect(mock.entries).toHaveLength(0);

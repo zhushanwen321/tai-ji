@@ -1,10 +1,10 @@
 /**
- * BgNotifier flushPendingNotifications — 单通道 triggerTurn 契约（U2 / D5）。
+ * BgNotifier flushPendingNotifications — 单通道 triggerTurn 契约（U2 / u9 偏差裁决）。
  *
  * 迁移史：deliverAs 从 'followUp' 改为 'steer'（FR-3/AC-3，commit d214d0d83）后，
  * U2 courier 单通道化再收敛——steer / followUp / nextTurn 通道全部删除（nextTurn
  * 唯一 drain 点在 session.prompt() 内，主 agent 长 streaming 场景下无限期滞留，
- * 设计 D5 实测证伪），唯一发送形态 = sendCustomMessage({triggerTurn:true})；busy
+ * 多通道设计实测证伪），唯一发送形态 = sendCustomMessage({triggerTurn:true})；busy
  * 场景由 ledger（settled 边沿 + isIdle 二次复查）或内核 settled 订阅在空闲边沿驱动。
  *
  * 测试方法：mock NotifierHost，捕获 sendMessage 调用参数，断言 options 恰为
@@ -47,7 +47,7 @@ function makeMockHost(): NotifierHost & {
 	};
 }
 
-describe("BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约（U2/D5）", () => {
+describe("BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约（U2 / u9 偏差裁决）", () => {
 	let host: ReturnType<typeof makeMockHost>;
 		let notifier: BgNotifier;
 
@@ -60,7 +60,7 @@ describe("BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约�
 		notifier.dispose();
 	});
 
-	it("flush 时 sendMessage 的 options 恰为 { triggerTurn: true }（无 deliverAs，D5 单通道）", () => {
+	it("flush 时 sendMessage 的 options 恰为 { triggerTurn: true }（无 deliverAs，u9 偏差裁决）", () => {
 		notifier.notify({
 			id: "bg-test-1",
 			status: "closed",
@@ -130,7 +130,7 @@ describe("BgNotifier — isIdle gate 竞态修复", () => {
 		host.isIdle.mockReturnValue(true);
 		vi.advanceTimersByTime(100);
 
-		// idle 后发送，单通道 {triggerTurn:true}（U2/D5：无 deliverAs）
+		// idle 后发送，单通道 {triggerTurn:true}（U2 / u9 偏差裁决：无 deliverAs）
 		expect(host.sendMessageCalls).toHaveLength(1);
 		expect(host.sendMessageCalls[0].options).toEqual({ triggerTurn: true });
 	});
