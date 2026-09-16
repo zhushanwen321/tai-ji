@@ -105,13 +105,21 @@ graph TD
 | u1 | aggregate 失败语义设计未明载（D4 只定「末尾一个 agent() 归约」）——延伸为：归约成员失败不炸 run，status 降 partial、outcome.aggregate 携带 {error}，results 照常收口 | 合理（G2「成员失败不炸 run」的直接延伸，测试覆盖） | 固化；设计文档 D4 如需回写由阶段 6 终态同步处理 |
 | u1 | meta.phases 用带引号形态（checkPhaseConsistency 声明提取只认带引号字符串，unquoted 会误报 2 条 warning） | 合理（lintScript 解析器约束，YAML 内注释已注明原因） | 固化 |
 | u1 | outcome 附带 message 字段（D4 形状未列） | 合理（对齐 parallel.js 既有收口惯例，人类可读摘要行） | 固化 |
+| u2 | 领地外机械联动：`src/__tests__/session-lifecycle.test.ts` +5 行 vi.mock(registerSubagentsTool)（该文件 fake pi 无 registerTool，不补 mock 则 3 个既有用例 TypeError） | 合理（纯新增、diff 已核验、可解释归属） | 固化 |
+| u2 | 互指注释单向落地（blockers）：`interface/subagents.ts` 反向指针一行需改 u2 领地外文件 | 合理（跨领地协调项） | 转入 u4 领地执行 |
+| u2 | D5① 落点：subagent tool 无 promptGuidelines 数组，分工句落 schema description；`subagent-tool.ts` description 的 collect 段与旧「N 并发 start」措辞同步清理 | 合理（延后至 u4 同批，避免同文件双写） | 转入 u4 |
+| u2 | D5③ 注入器条目零改动（parseWorkflowMeta 动态扫 @pi-meta，fan-out 自动收录）；`WORKFLOW_LIST_GUIDE` 加 1 句 pi 壳专属 subagents 导流（设计 D5③ 预留槽位；zsw 注入面不照搬该句） | 合理（宿主中立约束只约束模板条目） | 固化 |
+| u2 | 返回文案两处收紧：runId 用完整 id（恢复出口/abort 需可复制，设计 `wf-17...` 为省略号写法）；首行批次标签用 effective slug（模型未传时兜底 handler 生成值） | 合理（可操作性提升，不改变契约） | 固化 |
+| u2 | slug 空白串（"   "）按「未提供」处理 → 走自动生成 | 合理（设计只定义缺省，空白串边界补全） | 固化 |
+| u2 | 观察项（不改码）：pi 工具执行缺省 parallel，同一消息内第二个 subagents/workflow 调用撞共用 reentry guard 返回 REENTRY_BUSY_MESSAGE 而非排队——与既有 workflow tool 同形态；设计未裁决，不擅自加 executionMode | 合理（保持与 workflow tool 行为一致） | 固化 |
+| u2 | ⛔ 期门关闭：runWorkflow 同步段毫秒级（唯一 await = store.save），guard 意义 = 并发/重复投递防护 → 保留（与设计 D3 一致） | 期门结论 | 固化；真机墙钟实测入阶段 5 A1 |
 
 ## 6 状态表
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
 | u1-fanout-template | committed | 1 | commit 672f0e6c3；vitest 49 passed（fan-out-script 19 + builtin-workflows-structure 30）；extensions:typecheck+lint exit=0；契约抽验（fail-fast L81 / taskIndex 派发序 L117-134 / truncated 保序 L185-216） |
-| u2-batch-tool | pending | 0 | — |
+| u2-batch-tool | committed | 1 | commit fce282acf；vitest 80 文件/972 passed（重跑核验一致）；typecheck+lint exit=0；契约抽验（schema 平铺 L59-76 / 无 __gui__ L102 / ONE notification+SINGLE status L146-147 / reentry 共用 L255,300 / slug 生成 L127） |
 | u3-render-check | pending | 0 | — |
 | u4-collect-shell | pending | 0 | — |
 | u5-collect-core | pending | 0 | — |
