@@ -250,7 +250,7 @@ badge 的视觉态（亮/色/呼吸点）由 `meta.status` 决定，与 built-in
 |---|---|---|---|---|
 | `renderCall(args)` | extension 在 execute 中构造 | `details.__gui__.call` | **M4** tool result block | 单向 |
 | `renderResult(result)` | extension 在 execute 中构造 | `details.__gui__.result` | **M4** tool result block | 单向 |
-| `setWidget(key, factory)` | `guiSetWidget()` helper（直编码） | extension_ui_request（marker 编码进 string[]） | **M17** 对话流 widget 面板 | 单向 |
+| `setWidget(key, factory)` | `guiSetWidget()` helper（直编码） | extension_ui_request（marker 编码进 string[]） | **M17** composer 任务托盘的协议 widget 区 | 单向 |
 | `setStatus(key, text)` | 复用 pi 原生（已有效） | extension_ui_request | **M8** status bar | 单向 |
 | `registerMessageRenderer` | extension 在 sendMessage 中构造 | `message.details.__gui__` | **M5** custom message | 单向 |
 | `ctx.ui.custom(factory)` | `askUserInteract()` helper（extensions/ask-user/） | select 通道 + `ASK_USER_MARKER` + WS 回传 | **M11** companion | **双向** |
@@ -305,7 +305,7 @@ renderResult(result, options, theme) {
 
 widget 通过 `guiSetWidget()` helper **直接编码进 string[]**——不需要 shim extension，不需要 monkey-patch。
 
-**挂载点（M17）**：widget 在 GUI 下渲染到**对话流 widget 面板**（MessageStream 与 composer 之间，对应 TUI「editor 上方常驻面板」）。语义与 pi 原生完全一致：**常驻 + 同 key 覆盖更新 + undefined 清除**。taiji 前端按 widgetKey 分区缓存，**多 widgetKey 分栏并排**（flex wrap：单 widget 占满整行，多 widget 等分/按内容）。任何 extension 推 widget 都走此挂载点（通用承接，不特化）。
+**挂载点（M17）**：widget 在 GUI 下渲染到 **composer 任务托盘的协议 widget 区**（composer 工具条左簇，对应 TUI「editor 上方常驻面板」；2026-09-16 起 — 原「对话流 widget 面板」消费端已随入口唯一化退役，见 [composer-task-tray.md](../design/composer-task-tray.md) D11）。语义与 pi 原生完全一致：**常驻 + 同 key 覆盖更新 + undefined 清除**。taiji 前端按 widgetKey 分区缓存（ViewHostStore per-session 分区），一个 widgetKey = 托盘上的一个 icon 条目（经该条目面板渲染 `guiTree`），条目序 = known-order（todo/goal）优先 + 其余按当前插入序。任何 extension 推 widget 都走此挂载点（通用承接，不特化）。
 
 #### 原理
 
@@ -1108,7 +1108,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 | 渲染入口 | 当前能力 | DOM 结构 | 协议对接改动 |
 |---------|---------|---------|-------------|
 | **tool result** | 纯文本 `{{ result }}` | Block.vue: `<span>{{ result }}</span>` + `font-mono whitespace-pre-wrap` | 加 `GuiComponentRenderer` 分支 + `AnsiRenderer` 兜底 |
-| **widget（M17）** | 对话流 WidgetArea（已实现，Panel.vue 挂载于 MessageStream 与 composer 之间） | WidgetArea.vue: 常驻卡片分栏并排（flex wrap），`widgetKey` 标签 + `GuiComponentRenderer` | `extension:widget`/`extension:widgetGui` 订阅 + 渲染到对话流（MessageStream 与 composer 之间）；widget 不再进 SideDrawer/sidebar |
+| **widget（M17）** | composer 任务托盘的协议 widget 区（已实现；原「对话流 WidgetArea」消费端已于 2026-09-16 退役，见 [D11](../design/composer-task-tray.md)） | 托盘 widget 区：icon 按钮行（`meta` 驱动 icon/badge/状态色）+ 面板内 `GuiComponentRenderer`（`guiTree` 逐项渲染） | `extension:widget`/`extension:widgetGui` 订阅 → ViewHostStore per-session 缓存 → 托盘消费；widget 不再进 SideDrawer/sidebar |
 | **status** | 纯文本 footer | SideDrawer.vue: `<footer><span>key</span><span>text</span></footer>` | 提取 `useExtensionStatus()` composable + 挂载到 Workspace 底部 |
 | **custom message** | BgNotifyCard（结构化）/ SystemNotice（纯文本）| MessageStream.vue: `v-else-if="bgNotify"` | 加 `message.details.__gui__` 检测 + `GuiComponentRenderer` |
 | **dialog** | **不存在** | — | 新建 `ExtensionUIDialog` + `extension.ui_request` handler |
@@ -1153,7 +1153,7 @@ P2 前，非 `ansi-text` 的通用原语降级为 JSON 序列化文本展示（�
 | 渲染入口 | 挂载位置 | 文件 |
 |---------|---------|------|
 | tool result GuiComponent | Block.vue 展开态详情内（`extractGui` 调用 ×2） | `Block.vue:191,198` |
-| widget GuiComponent（M17） | **对话流 WidgetArea**（MessageStream 与 composer 之间，常驻卡片分栏并排；`extension:widgetGui`/`extension:widget` WS 事件 → ViewHostStore per-session 缓存 → WidgetArea 渲染） | `WidgetArea.vue`（已实现）；历史：SideDrawer.vue:332-345（已废弃方向） |
+| widget GuiComponent（M17） | **composer 任务托盘的协议 widget 区**（composer 工具条左簇；`extension:widgetGui`/`extension:widget` WS 事件 → ViewHostStore per-session 缓存 → 托盘 widget 按钮/面板渲染） | `packages/renderer/src/components/panel/tray/TrayWidgetButton.vue` / `TrayWidgetPanel.vue`（已实现）；历史：对话流 pill（`WidgetArea.vue`，已随 2026-09-16 退役删除）、SideDrawer.vue:332-345（已废弃方向） |
 | custom message GuiComponent | MessageStream.vue system 消息分支（`extractGui` 调用 ×1） | `MessageStream.vue:130` |
 | ask-user 富交互 | **Panel.vue inline**（覆盖 composer 位置，与 Composer 互斥） | `Panel.vue:90-97` |
 | ExtensionUIDialog（confirm/select/input） | 全局 portal | `ExtensionUIDialog.vue` |
@@ -1232,6 +1232,7 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 2. todo/goal 走 M17：tool result 不再带 `__gui__`（M4 移除）、不推 custom message（M5 不走）
 3. widget 不进 sidebar（M2 方向废弃，动态 view 发现移除）
 4. M5（custom message 渲染）保留为独立能力，与 M17 正交（subagent-workflow 等已推 `__gui__` message）
+5. **[2026-09-16 后续]** M17 的宿主由「对话流 widget 面板」迁至 **composer 任务托盘的协议 widget 区**（对话流 pill 形态退役，setWidget 语义与数据通道不变；见 [composer-task-tray.md](../design/composer-task-tray.md) D11）
 
 ### v1.1 字段扩展（2026-09-16）
 

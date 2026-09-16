@@ -18,7 +18,7 @@ export interface ViewCacheEntry {
   viewId: string
   pluginId: string
   guiTree: GuiComponent[]
-  /** widget 宿主元数据（v1.1 wire 携带，WidgetArea head 渲染） */
+  /** widget 宿主元数据（v1.1 wire 携带，托盘 widget 面板 head 渲染） */
   meta?: WidgetMeta
   updatedAt: number
 }
@@ -28,8 +28,8 @@ export interface ViewHostSource {
   getView(sessionId: string, viewId: string): ViewCacheEntry | undefined
 
   /**
-   * 枚举该 session 当前缓存的全部 viewId（widgetKey 原值），供 widget 面板类
-   * 消费端（WidgetArea 等）枚举拼装多卡视图。core ViewHostStore 已有同名实现
+   * 枚举该 session 当前缓存的全部 viewId（widgetKey 原值），供 widget 消费端
+   * （composer 任务托盘的协议 widget 区）枚举拼装条目。core ViewHostStore 已有同名实现
    * （view-host-store.ts getViewIds），壳侧 provide 纯透传。
    */
   getViewIds(sessionId: string): string[]

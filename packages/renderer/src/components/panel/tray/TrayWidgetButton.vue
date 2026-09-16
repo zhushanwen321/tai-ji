@@ -18,7 +18,7 @@
   （ViewHostStore 有 entry 即渲染、invalidate 即消失）；组件只把 entry.meta 投影成
   icon/badge/status 视觉（O(1) 派生），guiTree 不经本组件（面板职责）。
 
-  ── 依赖追踪契约（复刻 WidgetArea.vue entries computed 头注）──
+  ── 依赖追踪契约（承自已退役的对话流 widget pill entries computed 头注，托盘为唯一消费端）──
   外壳父级 computed 必须在**同一调用路径内**同时触碰 `getViewIds(sessionId)`（分区键迭代）
   与 `getView(sessionId, viewId)`（分区值读），否则 Vue 不建依赖链 → widget 推送后条目不重算。
   可运行的复刻样例见 __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。

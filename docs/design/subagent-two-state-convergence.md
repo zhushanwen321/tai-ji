@@ -8,6 +8,8 @@
 >
 > **修订记录**：R1（初版，待三审）。R2（Round 1 修复批：三报告全修——主审 2 MF + 2 S、简洁审 1 MF + 1 S、影响面审 4 MF + 3 S。主审/简洁审处置：D4 连带面清单补全五处并分级、E1 判据改双形态兼容（审查建议的纯 `status==='running'` 被部署边界反例击穿，入被否谱系）、最小展示子集并入 U4、SubagentListItem.resumable 改直接删除、P1 矩阵收窄到 SSOT 谓词本体、fixture 前移 U1/U2、SSOT 谓词终态化登记 U6、D5 补桥接形态归一行、GC 等价论证改写为范围扩张。影响面审处置：D3 补内存状态机 status 分支族清单（onMessage 分流/重生回边/supervisor 四分支逐点判定）+ P4 新增、D4 补 collect-coordinator 主路径闭合判据（与 E1 同批 + 判据 SSOT 化）与 W4 唤醒链三处同源化、D6 补回退方向判定与 session-reader 落档、TUI 消费面逐点判定 + A6 grep 范围含 extensions/。机械性修正：§2.1/§3.1/A1 计数 39/29、D3 revive 格引用区间精确化、影响面审报告的 TUI 路径 `tui/` 实为 `interface/`）。R3（Round 2 修复批：主审 R2 复审 2 MF + 2 S + 2 INFO——①待验证③落定为 revive 格清 resumable 前移方案，恢复分支②（replay 限定/round 条件）双不可行入被否谱系，核验点改 revive→markRoundStarted 全链 entry 时序；②D5 归一判据删 result≠∅ 条件（覆盖 §3.4 第 2-5 行含重建孤儿）+ 作用域限定展示契约边界 + U5 adoptEngineDeath 迁移改写 stopReason:'failed' + U6 终态判据加 stopReason 子句（W4 态不再计入，G1 闭环）+ P1 矩阵补 W4 形态；③E1 等价单测补 W4 第四形态与 U5 翻转登记；④P3 断言精确化；⑤行号统一）。R5（Round 4 修复批：主审 R4 终检 2 MF + 3 S——①MF-1：W4 跨重启 readopt 链现状已死（孤儿恢复一律 idle 先于 bootPartition，isBootReadoptable 恒空转），P4-② 改现状行为守卫、D4 W4 行 boot 侧改「死代码顺带清理」、D6a 删「回退版」限定、supervisor.ts bootPartition 头注入随批改写清单；②MF-2：evaluate hasResult 补位判定 = [F5] 看门狗拆弹点，登记「保留或前移，禁止死代码清理」+ 挂账转化不经 noteRunStarted 路径；③S：markReopened 第三 stopReason 写点入盘点（reopened 展示位随清点族退役裁决）、坍缩表补 running+failed 红点第五行、§3.4 补 W4 新型行、文件地图三处批次标注勘误、U5 对冲措辞精确化）。R4（Round 3 修复批：影响面审 R2 复审 3 MF + 2 S——①MF-A：stopReason 子句核验条件设计期落定为「不清」（markRoundStarted :87-91 实测只清两字段），主判据改造为显式迁移项「轮始清点族扩字段」（markRoundStarted 增清 stopReason + revive 格同步清 :901）归属 U6 批，备选 error 字段判据入被否谱系（四写点零清点）；②MF-B：W4 派生谓词两处定义矛盾裁决为全子集单一谓词（丢子句窄版两事故形态入被否谱系）；③MF-C：待验证③修复接线归属 U6 批 + 文件地图补 conversation-continuation.ts / chat-rounds.ts；④SG-A：E1 翻转补 SETTLED_RESCAN_LIMIT 达限退化分支；⑤SG-B：D6a 第 2 行证据锚修正（boot 孤儿纠偏落 idle 等 revive，非 closed 直断）；⑥P1 矩阵补第 2+ 轮在飞型（10 形态）+ A6 计数对齐 + D5 第五归一落点措辞按签名实态微调）。
 
+> **消费面口径更新（2026-09-16）**：本文档 §2/§5 中出现的 renderer 消费点表述（侧边栏 SubagentList / 侧栏「Agents tab」badge / 列表筛选条）记录的是设计期形态——侧栏任务视图随后续「任务观察入口唯一化」整体退役（设计 [composer-task-tray.md](composer-task-tray.md)），现行 subagent 消费面 = composer 任务托盘（`useTrayCounts` 计数 + 托盘 subagent 面板行集）、消息流 forceWorking、drawer SubagentTab（后两者保留不变）。**谓词判据、SSOT 落点与契约收窄结论不受影响**（消费方只是换了宿主；计数仍由同一 `isRunningProjection` 派生）。
+
 ## 1 背景目标
 
 **SCQA**：太极是 AI Agent 桌面工作台，产品核心承诺是「用户可以在不离开当前工作上下文的情况下，掌控所有并行任务的执行状态」（docs/PRODUCT.md）。**C** 2026-09-14 session `01a09f83`（dev-flow 内存泄漏治理，38 个 subagent 派发）实测：侧边栏 badge 显示 10 个「正在跑」，其中 8 个是早已轮终的幽灵——进程已死、result 已携带、stopReason 已写，仅因 conversation 模式被计数谓词永久计入 running。**Q** 用户无法信任侧边栏计数，产品核心承诺被破坏；且这不是孤例 bug——同一份 record 在写面、协议面、读面有三种状态词，每个新消费方都要从四字段组合里自己猜「到底在不在跑」，猜错只是时间问题。**A** 本设计不做局部打补丁，而是把已登记但未完成的 U2 两态迁移收尾：读侧谓词对齐止血 → 写面轮终真实翻 idle → shared 契约收窄，三层一次拉直。
@@ -22,7 +24,7 @@ runtime：scanSubagentEntries（冷启动全量 + live 缓存失效重拉，同�
 renderer：subagent store（Map 分区）──> sidebar badge / 状态点 / 过滤视图 / forceWorking
 ```
 
-用户可见面：侧边栏 SubagentList（badge 计数、状态点、「正在跑」过滤）、消息流 forceWorking（转圈）、SubagentTab（详情/续聊）。
+用户可见面（设计期形态；括号内为 2026-09-16 现状）：侧边栏 SubagentList（badge 计数、状态点、「正在跑」过滤——**已退役，现为 composer 任务托盘的计数与 subagent 面板行集**）、消息流 forceWorking（转圈——保留）、SubagentTab（详情/续聊——保留）。
 
 **设计目标**：
 
@@ -79,10 +81,10 @@ renderer 对「这个 record 真在跑吗」现存四份实现（explorer 核验
 |---|---|---|---|
 | `hasRunning`（stores/subagent.ts:133） | `running && result===undefined && resumable!==true` | useBackgroundWork 后台工作指示 | ✅ 排除 |
 | `isStreamingSubagent`（:180） | 同上（单 record 版） | 虚拟 session forceWorking | ✅ 排除 |
-| `isStreaming`（SubagentList.vue:239） | 同上 | spinner + 取消按钮 | ✅ 排除 |
-| **`isRunningProjection`**（lib/subagent-bucket.ts:47） | `projectSubagentExecutionStatus(status)==='running' && !isDoneProjection` | **badge 计数 + 「正在跑」过滤** | ❌ **计入** |
+| `isStreaming`（原 SubagentList.vue:239，**该组件已随侧栏任务视图退役删除**） | 同上 | spinner + 取消按钮（现由托盘面板行的运行态渲染承接） | ✅ 排除 |
+| **`isRunningProjection`**（lib/subagent-bucket.ts:47） | `projectSubagentExecutionStatus(status)==='running' && !isDoneProjection` | **计数 + 「进行中」过滤（设计期 = 侧栏 badge；现 = composer 任务托盘计数）** | ❌ **计入** |
 
-分叉点在 `isDoneProjection`（:53）= `running && result!==undefined && chatMode===false`——它是**展示判据**（区分 one-shot 轮终绿点 vs chat 等续聊 accent 点），被 badge 经 `!isDone` 反向挪用为占用判据。chatMode=true 的轮终 record 不满足 done → 落回 running 桶。subagent-bucket.ts 头注释声称与 hasRunning「同源」，实际两套谓词早已分叉——**声称的同源性没有任何机器守卫**。
+分叉点在 `isDoneProjection`（:53）= `running && result!==undefined && chatMode===false`——它是**展示判据**（区分 one-shot 轮终绿点 vs chat 等续聊 accent 点），被计数面经 `!isDone` 反向挪用为占用判据。chatMode=true 的轮终 record 不满足 done → 落回 running 桶。subagent-bucket.ts 头注释声称与 hasRunning「同源」，实际两套谓词早已分叉——**声称的同源性没有任何机器守卫**。
 
 另有一个刻意分工的宽松口径（不在漂移面内）：`isRunning`（stores/subagent.ts:159，仅 `status==='running'`）供 SubagentTab 决定是否订阅增量流——注释明载「收紧会断数据通路」（resumable 续轮瞬间仍有真实流活动）。翻边后 settled=idle，该口径自然与严格口径合流，分工保留、分歧消失。
 
@@ -96,8 +98,8 @@ renderer 对「这个 record 真在跑吗」现存四份实现（explorer 核验
        │    └> runtime live：bg-notify → handleSubagentBgNotify → invalidateRecordEntries
        │         → 防抖 → get_entries 增量重拉 → 同一 scanSubagentEntries（live ≡ replay 构造性成立）
        │              └> WS 广播 subagent.records → renderer store
-       │                   ├> useSidebarCounts badge：isRunningProjection ← 幽灵计入 ❌
-       │                   ├> SubagentList 状态点：isStreaming/isDone/isWaiting 三分 ← 正确 ✅
+       │                   ├> 侧栏计数 badge（消费点今为托盘计数）：isRunningProjection ← 幽灵计入 ❌
+       │                   ├> 侧栏任务卡片状态点（组件已退役，今为托盘面板行）：isStreaming/isDone/isWaiting 三分 ← 正确 ✅
        │                   └> useBackgroundWork：hasRunning ← 正确 ✅
        └> .state 收条 + binding 快照：status=idle（磁盘重建单规则「一律 idle」）
             └> 崩溃重启 rebuild → record.status=idle ← 同一事件另一面写出另一个词
@@ -169,9 +171,9 @@ isWaiting(r)    = r.status === 'idle' && r.chatMode !== false   // 等续聊展�
 
 ### 3.3 关键决策与权衡
 
-**D1：Phase 1 止血 = `isRunningProjection` 对齐严格口径，不拓宽 `isDoneProjection`**。选择：`isRunningProjection := status==='running' && result===undefined && resumable!==true`。被否：拓宽 isDoneProjection 为「有 result 即 done」——击穿反例：会把 chat 等续聊的展示从 accent-60 半透明点翻成绿色完成点，污染刻意的展示区分（SubagentList 规则表注释「one-shot 轮终投影 done 用绿点、其余（等续聊/孤儿兜底）用 accent」）。同时修复 legacy 潜在形态：旧 entry 无 chatMode 字段（undefined ≠ false）导致 one-shot 轮终永不 done、永计入 running——对齐严格口径后一并消除。效果：badge 幽灵 8→0（session 01a09f83 数据回放验证 ✅已测：39 条 record 按新判据重算，计数=0）。
+**D1：Phase 1 止血 = `isRunningProjection` 对齐严格口径，不拓宽 `isDoneProjection`**。选择：`isRunningProjection := status==='running' && result===undefined && resumable!==true`。被否：拓宽 isDoneProjection 为「有 result 即 done」——击穿反例：会把 chat 等续聊的展示从 accent-60 半透明点翻成绿色完成点，污染刻意的展示区分（原侧栏任务卡片状态表注释——该组件已随侧栏任务视图退役删除——「one-shot 轮终投影 done 用绿点、其余（等续聊/孤儿兜底）用 accent」）。同时修复 legacy 潜在形态：旧 entry 无 chatMode 字段（undefined ≠ false）导致 one-shot 轮终永不 done、永计入 running——对齐严格口径后一并消除。效果：badge 幽灵 8→0（session 01a09f83 数据回放验证 ✅已测：39 条 record 按新判据重算，计数=0）。
 
-**D2：判据 SSOT 落点 = `lib/subagent-bucket.ts`（纯函数模块）**。选择：`isRunningProjection` 改为占用判据 SSOT，`hasRunning`/`isStreamingSubagent`/`isStreaming` 三处改为 import 消费（hasRunning 保留 origin 过滤参数在调用点）。被否：落 store——subagent-bucket 是纯函数、测试矩阵已在此（subagent-bucket.test.ts 断言表），SubagentList/FilterBar/useSidebarCounts 已是消费方。宽松口径 `isRunning`（SubagentTab 订阅流）**保留原样**——分工注释更新为「翻边后与占用判据天然合流，保留订阅语义」。
+**D2：判据 SSOT 落点 = `lib/subagent-bucket.ts`（纯函数模块）**。选择：`isRunningProjection` 改为占用判据 SSOT，`hasRunning`/`isStreamingSubagent`/`isStreaming` 三处改为 import 消费（hasRunning 保留 origin 过滤参数在调用点）。被否：落 store——subagent-bucket 是纯函数、测试矩阵已在此（subagent-bucket.test.ts 断言表），设计期消费方（侧栏任务卡片 / 筛选条 / 侧栏计数）已在用；三处消费方随侧栏任务视图退役删除，现行消费方 = 托盘（`useTrayCounts` 计数 + 托盘面板行集）。宽松口径 `isRunning`（SubagentTab 订阅流）**保留原样**——分工注释更新为「翻边后与占用判据天然合流，保留订阅语义」。
 
 **D3：Phase 2 写面翻边 = markRoundIdle 写 idle，不合并 markSettled**。选择：markRoundIdleImpl 簿记①从「status 保持 running」改为「status 写 idle」，resumable 不再写（③-⑪簿记保留：result/round+1/closedReason 清除/stopReason/.state 收条/binding 快照/pending 注销）。被否：两原语合并——翻边后差异收敛到簿记面（result+round 推进 vs 中断无 result），合并 churn 大于收益。SP-5 兼容性证据（✅已核验）：升级 gate `canUpgradeToConversation` 查引擎能力不查 status（chat-rounds.ts:798-805）；message 准入走 `tryEnterRunning` CAS（idle→running，execution-record.ts:715-719）；冷升级走 conversation-continuation revive 格（本体在 conversation-continuation.ts:846+，onMessage 按 `status!=='running'` 分流进 revive，不读 running 字面量作 gate；capability-gate.ts:174-195 是升级不支持错误的构造与双写点说明）。
 
@@ -225,7 +227,7 @@ isWaiting(r)    = r.status === 'idle' && r.chatMode !== false   // 等续聊展�
 
 **D7：探针与运行时断言**：
 
-- P1 谓词等价性守卫（⛔实施期门）：subagent-bucket.test.ts 断言表扩为「形态 × 判据」矩阵——10 现实形态（2.1 表 + 孤儿 + legacy 五值归一形态 + **W4 纳管态新旧两型**（R3 补：running+resumable=true 旧型 / running+stopReason=failed 新型）+ **第 2+ 轮在飞型（running + result=∅ + stopReason=Y，R4 影响面审 MF-A 补——钉住轮始清点扩字段后 isOccupied 不误排除）**，全矩阵钉住「同 record 同答案」：W4 两型与桥接形态均不计入、多轮在飞计入）。**矩阵只作用于 SSOT 谓词本体**：hasRunning/isStreamingSubagent/isStreaming 在 U2 后是同一谓词的 import wrapper，不进矩阵（对同一函数重复断言，行数 ×4 守卫力不增），其守卫由各调用点行为测试承担（useSidebarCounts/SubagentList/forceWorking——与 D2「SSOT + 消费方 import」分层一致）。session 01a09f83 的 39 条真实 record 形态作为 fixture 回放（**fixture 脱敏入库随 U1/U2 批**——与断言表扩矩阵同 commit，门所需资产不晚于门），断言 badge 计数=0
+- P1 谓词等价性守卫（⛔实施期门）：subagent-bucket.test.ts 断言表扩为「形态 × 判据」矩阵——10 现实形态（2.1 表 + 孤儿 + legacy 五值归一形态 + **W4 纳管态新旧两型**（R3 补：running+resumable=true 旧型 / running+stopReason=failed 新型）+ **第 2+ 轮在飞型（running + result=∅ + stopReason=Y，R4 影响面审 MF-A 补——钉住轮始清点扩字段后 isOccupied 不误排除）**，全矩阵钉住「同 record 同答案」：W4 两型与桥接形态均不计入、多轮在飞计入）。**矩阵只作用于 SSOT 谓词本体**：hasRunning/isStreamingSubagent/isStreaming 在 U2 后是同一谓词的 import wrapper，不进矩阵（对同一函数重复断言，行数 ×4 守卫力不增），其守卫由各调用点行为测试承担（设计期 = 侧栏计数 / 侧栏任务卡片 / forceWorking；退役后 = `useTrayCounts` / 托盘面板 / forceWorking——与 D2「SSOT + 消费方 import」分层一致）。session 01a09f83 的 39 条真实 record 形态作为 fixture 回放（**fixture 脱敏入库随 U1/U2 批**——与断言表扩矩阵同 commit，门所需资产不晚于门），断言 badge 计数=0
 - P2 live≡replay 等价（⛔实施期门）：扩展既有 apply-entry-equivalence 范式，subagent-record entry 的「轮终翻边 entry 序列」冷启动重放 ≡ live 派生（现构造性成立，测试防回归）
 - P3 SP-5 升级链回归（⛔实施期门）：chat 轮终（idle 形态）→ message → 升级 gate 放行 + status 翻 running——用 capability-gate 既有测试面扩展；R3 断言精确化：revive 过站断言「直通（锚检查 + chatMode gate 跳过）+ **恰一条迁移 entry**（reviveClosedRecord 无条件落，chat-rounds.ts:694 reportRecordTransition——设计内副作用）+ 无其他簿记变更（round/closedReason 不动）」——不作「无副作用」字面断言
 - P4 内存状态机回边守卫（⛔实施期门，R2 新增；R5 主审 MF-1 改写②）：①重生回边场景——轮终 idle record 跨重启 readopt（cold-lookup wasClosed=true 路径）：断言三件套全量 + transition entry 恰一条 + .state 删除；②W4 场景（现状行为守卫）：同进程死亡纳管（adoptEngineDeath）→ 运行时 isAwakeWarrantedShape 唤醒链；跨重启 → 孤儿纠偏 idle 等 revive（**非** readopt——isBootReadoptable 现状空转，见 D4 W4 行）：断言 idle 化 + stopReason=failed 不被兜底覆盖 + message 可续聊复活
@@ -272,7 +274,7 @@ isWaiting(r)    = r.status === 'idle' && r.chatMode !== false   // 等续聊展�
 | U6 契约收窄 | SubagentStatus 2 值 + normalizeSubagentStatus 归一（legacy 四值 + **桥接形态第五归一 `running && resumable===true`**——实际落点为 runtime record 投影处（subagent-extractor.ts:275 上下文有 d.resumable），现签名 `normalizeSubagentStatus(status)` 单参不含 resumable 上下文，投影点扩参承载，见 D5）+ **轮始清点族扩字段**（markRoundStarted 增清 stopReason + revive 格同步清 conversation-continuation.ts:901——D4 adoptEngineDeath 行 MF-A 迁移项本体）+ **待验证③ revive 清 resumable 接线**（chat-rounds.ts:694-698 reviveClosedRecord 落 entry 前清，P4 扩展断言「迁移 entry 必不含 resumable=true」随批）+ **SSOT 谓词终态化**（isOccupied = `status==='running' && stopReason===undefined`）+ STATUS_DOT_RULES 全表坍缩（吸收 U4 最小分支）+ deriveClosedDisplay 迁移 + P1 矩阵全量 | 依赖 U4/U5（两态语义贯通后收类型才无运行时风险）；编译期拦截保证不漏；归一同形窗口与 stopReason 判据窗口的唯一受害批都是本批，修复接线不得外溢 | A3/A4 | 10 |
 | U7 守卫固化 | P2 等价回放测试扩展（消费 U1/U2 批已入库的 01a09f83 形态 fixture，覆盖「轮终翻边 entry 序列」） | 与 U6 分离：守卫是长期资产，不随收窄批次耦合；fixture 已前移，本批只做测试扩展 | A6 | 4 |
 
-**文件改动地图**：`packages/renderer/src/lib/subagent-bucket.ts`（U1/U2/U6）、`stores/subagent.ts` + `components/sidebar/SubagentList.vue` + `composables/features/sidebar/useSidebarCounts.ts`（U2）、`packages/subagent-core/src/execution/persistence/record-store-rounds.ts`（U4 翻边 + U5 adoptEngineDeath 改写 + **U6 轮始清点扩字段本体 :80-82**——R5 主审 S5 勘误：本体在此文件，非 conversation-continuation）、`execution/service/sync-collect-domain.ts` + `execution/assembly/collect-coordinator.ts`（U4 collect 判据族 SSOT 化）、`execution/round-supervisor/domain.ts` + `execution/round-supervisor/service-binding.ts`（U5 谓词全子集化 / 透传删）+ `execution/service/chat-rounds.ts`（U6 revive 清字段接线，reviveClosedRecord）+ `execution/assembly/conversation-continuation.ts`（U6 revive 格同步清 :901 注释随批改写；清点联动调用方 :474）+ `lifecycle-predicates.ts` + `idle-gc.ts` + `supervisor.ts`（U5；bootPartition 头注随批改写——直断时代描述与孤儿恢复现状矛盾；**session-baselines.ts:309-312 编排注释同源改写**——直断时代唯一残留误导点，R5 复审补列）+ `session-records.ts` + `subagent-actions-core.ts`（U5）、`packages/shared/src/subagent.ts` + `packages/runtime/src/services/session/subagent-status.ts` + `packages/runtime/src/services/session/subagent-extractor.ts`（U6/U5）、测试（`src/__tests__/lib/subagent-bucket.test.ts` + `src/__tests__/components/SubagentFilterBar.test.ts` + `src/__tests__/composables/useSidebarCounts.test.ts`，U1/U2/U6）+ apply-entry-equivalence（U7，`packages/core/src/domain/chat/__tests__/`）。
+**文件改动地图**：`packages/renderer/src/lib/subagent-bucket.ts`（U1/U2/U6）、`stores/subagent.ts`（U2）+ `components/sidebar/SubagentList.vue`（U2；**已随侧栏任务视图退役删除**）+ `composables/features/sidebar/useSidebarCounts.ts`（U2；文件保留，其 subagent/workflow 计数段已随后续退役迁出）、`packages/subagent-core/src/execution/persistence/record-store-rounds.ts`（U4 翻边 + U5 adoptEngineDeath 改写 + **U6 轮始清点扩字段本体 :80-82**——R5 主审 S5 勘误：本体在此文件，非 conversation-continuation）、`execution/service/sync-collect-domain.ts` + `execution/assembly/collect-coordinator.ts`（U4 collect 判据族 SSOT 化）、`execution/round-supervisor/domain.ts` + `execution/round-supervisor/service-binding.ts`（U5 谓词全子集化 / 透传删）+ `execution/service/chat-rounds.ts`（U6 revive 清字段接线，reviveClosedRecord）+ `execution/assembly/conversation-continuation.ts`（U6 revive 格同步清 :901 注释随批改写；清点联动调用方 :474）+ `lifecycle-predicates.ts` + `idle-gc.ts` + `supervisor.ts`（U5；bootPartition 头注随批改写——直断时代描述与孤儿恢复现状矛盾；**session-baselines.ts:309-312 编排注释同源改写**——直断时代唯一残留误导点，R5 复审补列）+ `session-records.ts` + `subagent-actions-core.ts`（U5）、`packages/shared/src/subagent.ts` + `packages/runtime/src/services/session/subagent-status.ts` + `packages/runtime/src/services/session/subagent-extractor.ts`（U6/U5）、测试（`src/__tests__/lib/subagent-bucket.test.ts` + `src/__tests__/components/SubagentFilterBar.test.ts`（**已随侧栏任务视图退役删除**）+ `src/__tests__/composables/useSidebarCounts.test.ts`，U1/U2/U6）+ apply-entry-equivalence（U7，`packages/core/src/domain/chat/__tests__/`）。
 
 **待验证检查点与已接受代价**（设计期无法确定，按四要素登记）：
 

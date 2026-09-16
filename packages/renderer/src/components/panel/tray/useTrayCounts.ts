@@ -7,7 +7,8 @@
  *   已收起）」行集与计数。计数恒等于行集长度（同一 computed 派生），杜绝「tab 数字与
  *   列表条数不一致」的双口径穿帮面（§1 设计目标 4）。
  * - **D13 首拉触发迁移**：挂载即 `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
- *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（useListSync 退役后这条腿的归宿）。
+ *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（原侧栏任务列表的首拉腿已随该视图退役，
+ *   迁入此处成为唯一实现）。
  *   历史 record（已结束桶 / dim 常驻判据）依赖首拉：广播腿只覆盖在跑任务，缺此腿切 session
  *   后托盘空/滞后。WS 重连腿仍归 useSidebar.onConnected（D13 明文不迁），本处不重复挂。
  * - **面板错误态 retry 支撑**：按类重拉（bash → useBackgroundTasks.refresh；
@@ -18,16 +19,17 @@
  *   SSOT 谓词分桶（运行中 = active 桶，含 killing「已发令待确认」瞬态；已结束 = exited /
  *   orphaned）——两视图由 `filterBackgroundTasks` 派生，排序同源。
  * - subagent：`subagentStore.recordsOf(sid)` 过滤 `origin !== 'workflow'`（workflow 派发的
- *   record 由 workflow 面板承载，同 useSidebarCounts 口径）+ subagent-bucket SSOT 谓词：
+ *   record 由 workflow 面板承载；该过滤口径原在侧栏任务计数内，已随侧栏任务视图退役、
+ *   托盘为唯一实现）+ subagent-bucket SSOT 谓词：
  *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
  *   进行中）；已结束 = `!isRunningProjection` 且 `subagentBucket(record) !== 'archived'`；
- *   已收起 = `intent === 'archived'`（意愿维度与 status 正交，SubagentFilterBar 退役后的
- *   唯一寻回视图）。
+ *   已收起 = `intent === 'archived'`（意愿维度与 status 正交，已退役的侧栏筛选条原承载的
+ *   寻回入口现由托盘「已收起」视图唯一承载）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status ∈ {running, paused}`，
  *   已结束 = 其余（done）。
  *
- * [迁移语义 D14「复制不抽走」] 计数口径与首拉范式自 useSidebarCounts / useListSync 复制迁入
- * （本窗口内旧入口照常 import 原模块，P3 退役单元才删原件）。谓词本体一律 import SSOT
+ * [迁移语义 D14「复制不抽走」] 计数口径与首拉范式自侧栏任务视图域复制迁入；该域组件 /
+ * composable 已随退役单元删除（原件不在，本文件为唯一实现）。谓词本体一律 import SSOT
  * （lib/subagent-bucket、lib/background-task-bucket），本文件不重写任何判定。
  *
  * 消费方：u-tray-shell（三件 icon 计数/三态）+ TrayNativePanel（分桶列表与 tab 计数）。
@@ -185,7 +187,8 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   // ── D13 首拉触发：挂载即拉 + 切 session 重拉（范式 = useBackgroundTasks 拉取腿）──
   // immediate 覆盖首挂载；切走期间广播腿仍投递（订阅按 sid refCount 收敛在状态根），
-  // 但切回时必须无条件重拉一次——聚合快照以拉取为唯一真相入口（useListSync 原语义）。
+  // 但切回时必须无条件重拉一次——聚合快照以拉取为唯一真相入口（承自原侧栏任务列表
+  // 首拉腿的语义）。
   watch(
     normalizedSid,
     (sid) => {

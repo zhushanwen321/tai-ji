@@ -195,8 +195,8 @@ export interface SubagentRecord {
 }
 
 /**
- * closed 统一终态的展示语义（[U6/D5] 消费方迁移：renderer SubagentList 的 closed
- * 三分行已随 STATUS_DOT_RULES 全表坍缩删除，本函数改由 runtime 归一层消费——legacy
+ * closed 统一终态的展示语义（[U6/D5] 消费方迁移：renderer 侧侧栏任务卡片的 closed 三分行
+ * 及其状态表已随该视图退役一并删除，本函数改由 runtime 归一层消费——legacy
  * closed 归一为 idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
  * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
  * 派生」），closedReason 字段同时保留作诊断位）。

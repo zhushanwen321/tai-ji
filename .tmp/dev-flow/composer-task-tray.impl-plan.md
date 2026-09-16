@@ -185,6 +185,17 @@ graph TD
 | D32 | u-tray-shell | DESIGN.md 只加 1 条 bullet（composer-bar 任务托盘 + 位置），未改「composer-bar 6 元素」原行 | 该行本就不全（缺 GenStatsTriggers / composer.toolbar）；最小必要补充 | 接受 |
 | D33 | u-tray-shell | 测试用真实 TrayNativePanel/TrayWidgetPanel（不 stub）+ 变异验证（6 处改坏→红） | `pinned` 透传必须由真实 DOM 断言（防空断言）；hover 计时期望独立常量化 | 接受（质量加分项） |
 | D34 | （观察，非偏差） | tray 测试 stderr 的 Vue warn「no active effect scope」 | 存量模式：抽样既有 composer-smoke=2 / context-chips-bar=1，非本次引入 | 不处置 |
+| D35 | u-retire-widgetarea | 派发路径修正：Panel 两测试实际位于 `components/panel/__tests__/`（派发文案写的 `__tests__/panel/` 不存在） | 按磁盘现文精确定位 | 接受 |
+| D36 | u-retire-widgetarea | `Panel.widget-area.test.ts` 选「删除」不改造：firstRunning 预览断言**无承接对象**（托盘无该 UI，以 badge fallback + status 视觉替代） | 守护对象随 `activePreview` computed 消亡（e2e-map R3 语义）；fallback 链断言已由 tray-widget.test.ts 承接 | 接受（设计 §4 e2e 表同批修正措辞） |
+| D37 | u-retire-widgetarea | i18n 死键 `panel.widget.details` 双侧删除（**计划领地漏项**，经续聊定向修，领地临时扩展至两个 panel.ts） | locale-key-usage-guard 反查守卫拦截；消费者随 WidgetArea 消亡 | 接受（教训：退役单元领地须显式含所删组件消费的 i18n 键所在 locale 文件） |
+| D38 | u-retire-native-view | 范围略扩：NATIVE_VIEWS / L2_TAB_BADGE 机制整体退役（删两 KEY、`L2TabItem.badge` 字段、L2TabBar badge 渲染、index.ts 导出、bridge 侧 `resetBadgeSource` 与 badge 装配腿） | 两键唯一生产者/消费者对 = background-tasks；N1 明文「NATIVE_VIEWS 路由表为空/移除」；留键 = 零生产者死机制 | 接受（plugin sidebar view 机制本体原样保留） |
+| D39 | u-retire-native-view | 顺带清扫 `useExtensionHostBridge.ts` 内 2 处 WidgetArea 注释 | 该文件不在 widgetarea 领地，不清扫即跨单元死结 | 接受 |
+| D40 | u-retire-sidebar | 领地外必要同步 3 文件：`components/sidebar/__tests__/Sidebar.test.ts`（vi.mock 指向已删模块）、`__tests__/i18n/{i18n-value-smoke,locale-sync-check}.test.ts`（断言死键值；check:i18n 是硬门） | 不改则红；属设计 D10 基线名单点名文件的路径枚举偏差 | 接受（最小等价替换，测试语义不变） |
+| D41 | u-retire-sidebar | `useSidebarSessionActions.ts` 超「仅头注」：删 `onRetryWorkflows`/`onRetrySubagents` 与 store 依赖 | D13 明文「retry 全在退役面内」；不删则未使用 import 触发 lint | 接受（`focusedSessionId` 注入字段保留并注明） |
+| D42 | u-retire-sidebar | i18n 删除面含兄弟单元消费键：`sidebar.backgroundTaskList.*` 10 键（随 BackgroundTaskListView 删除）+ 4 个既有零引用死键 | locale 文件是本单元唯一领地；保留即无人认领死键 | 接受（逐键全仓 grep 证实零消费） |
+| D43 | u-retire-sidebar | 注释清扫写法 = 去标识符保语义（[HISTORICAL] 注记改写为描述性表述，不书写已删模块名） | 使 D10 宽口径在领地内零命中；历史细节由 git 承载 | 接受 |
+| D44 | u-retire-sidebar | 保留未动：`lib/subagent-bucket` 的 `filterSubagents`/`countSubagents`/`DEFAULT_SUBAGENT_FILTER` 与 `stores/workflow` 的 `workflowCount`（现零生产消费） | D2/D10 明文「SSOT 模块不随 UI 宿主退役」；设计枚举的视图 2 清单不含 workflowCount | 接受（登记为后续清理候选，不扩权） |
+| D45 | u-retire-* 批（观察） | u-retire-sidebar 领地清单中 `__tests__/sidebar/*` glob 未覆盖 `components/sidebar/__tests__/`（同类路径歧义第二例） | 派发时以 glob 兜底而非逐文件枚举所致 | 接受（已由 D40 覆盖）；教训：退役单元领地须逐文件枚举，减少 glob |
 
 ## 6 状态表
 
@@ -198,9 +209,10 @@ graph TD
 | u-tray-shell | committed | 1 | commit「feat(tray): u-tray-shell composer tray shell + mount」；tray 5 files/90 pass + check:i18n 203 pass + typecheck(:test) ok + 改动面回归 26 files/278 pass + 变异验证 6 处；主 agent 重跑复核同结果；偏差 D26-D33 登记 |
 | u-ext-todo | committed | 1 | commit「feat(tray): u-ext-todo tab-bar sections」；todo vitest 8 files/144 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果；带出计划级漏项 1（e2e/tasks-drawer-real.spec.ts 断言陈旧）+ 文档滞后 2（见 u-doc-sync） |
 | u-doc-sync | committed | 1 | commit「docs(protocol): sync todo tab-bar shape + tab-bar sections」；doc-symbol-drift 绿 + 逐处 grep 自对账通过（陈旧断言清零）；偏差 D24-D25 登记 |
-| u-retire-sidebar | pending | 0 | — |
-| u-retire-native-view | pending | 0 | — |
-| u-retire-widgetarea | pending | 0 | — |
+| u-retire-sidebar | in-progress（开发完成，待批次提交） | 1 | N1 窄口径零命中 + renderer 355 files/4116 pass + typecheck + check:i18n 198 pass + SegmentedTab 三枚断言 + 15 删除路径 gone=15（主 agent 独立重跑复核同结果）；偏差 D40-D45 登记 |
+| u-retire-native-view | in-progress（开发完成，待批次提交） | 1 | renderer 355 files/4116 pass + core 2106 pass + ui 789 pass + typecheck(:frontend/:ui) 绿 + `rg NATIVE_VIEWS|L2_TAB_BADGE` 零命中；偏差 D38-D39 登记；core typecheck 红为基线存量（git show HEAD 复现证明） |
+| u-retire-widgetarea | in-progress（开发完成，待批次提交） | 2 | ui 789 pass + core 2106 pass + Panel 簇 19 pass + i18n 守卫 198 pass（死键修复后）+ typecheck(:frontend/:ui) 绿；偏差 D35-D37 登记（D37 经续聊定向修） |
+| u-retire-refs-sweep | in-progress（在途：全仓悬空引用清扫——注释 13 文件 + 失效 stub 1 + 文档 8 份） | 0 | 依赖三退役单元；验收 = doc-symbol-drift 绿 + validate-constraints 绿 + 逐处自对账 |
 | u-e2e | pending | 0 | — |
 
 ## 7 残留风险与变更历史
@@ -228,3 +240,4 @@ graph TD
 | 2026-09-16 | u-ext-todo committed（sections 双 tab + icon/badge；todo 144 绿，主 agent 重跑复核通过；偏差 D18-D23 登记；带出计划级漏项 1（tasks-drawer-real spec）→ 设计 §4 e2e 表修正 + u-e2e 领地扩展；文档滞后 2 → 新增 u-doc-sync 单元） |
 | 2026-09-16 | u-doc-sync committed（协议文档 §4.3 示例 + §14.4 覆盖表 + 指南速查表 tab-bar 行；doc-symbol-drift 绿；偏差 D24-D25 登记，存量文档债务入 §7 残留风险 0） |
 | 2026-09-16 | u-tray-shell committed（外壳 + 挂载 + trayLabel + DESIGN.md；tray 90 绿 + 回归 278 绿 + 变异验证 6 处；偏差 D26-D34 登记）→ 阶段 2 全部 11 单元就差退役三件 |
+| 2026-09-16 | W4 三退役单元开发完成（并行派发）；**批次门通过**：N1 窄口径零命中 + renderer 355 files/4116 全绿（主 agent 独立重跑）+ 15 删除路径 gone=15；doc-symbol-drift 报 2 处文档路径引用待清扫（阻塞提交）→ 新开 u-retire-refs-sweep |

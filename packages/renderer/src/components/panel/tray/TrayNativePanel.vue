@@ -255,8 +255,8 @@
  *   （不自动跳转）；其余桶为空仅提示；
  * - 提示条（bash）：损坏（sticky，自愈拍清位）+ 断连（S6 范式，重连边沿自动重拉）。
  *
- * 迁移语义 D14「复制不抽走」：cancel 防误报（useSidebarSubagentActions）、两段式确认、行渲染
- * 形态均以复制件迁入，旧侧栏组件本窗口内不动（P3 退役单元才删原件）。
+ * 迁移语义 D14「复制不抽走」：cancel 防误报（原侧栏列表动作 composable）、两段式确认、行渲染
+ * 形态均以复制件迁入；旧侧栏组件已随退役单元删除，本文件为唯一实现。
  *
  * 脚本分区：props 契约 / 数据面接线（useTrayCounts）/ 分桶视图状态（ADR-0049 per-session
  * 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿矩阵。
@@ -482,8 +482,8 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
   return formatDuration(ms)
 }
 
-// ── subagent 行状态点（表驱动；与 SubagentList STATUS_DOT_RULES 同语义——D14 复制迁移，
-//    P3 退役后本表为唯一实现）：失败红 / 中断灰先于完成绿兜底，顺序即语义 ──
+// ── subagent 行状态点（表驱动；承自侧栏任务卡片状态表的复制迁移件——源组件已随退役批次
+//    删除，本表为唯一实现）：失败红 / 中断灰先于完成绿兜底，顺序即语义 ──
 const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
 type SubagentDotRule = { match: (record: SubagentRecord) => boolean; cls: string }
 const SUBAGENT_DOT_RULES: SubagentDotRule[] = [
@@ -499,7 +499,7 @@ function subagentDotClass(record: SubagentRecord): string {
   return hit ? hit.cls : 'bg-accent'
 }
 
-// ── workflow 行色档（状态点与进度条同源；与 WorkflowList 同语义）──
+// ── workflow 行色档（状态点与进度条同源；承自侧栏 workflow 列表的复制迁移件）──
 function workflowToneClass(record: WorkflowRunRecord): string {
   if (record.status === 'done') return record.reason === 'completed' ? 'bg-success' : 'bg-danger'
   return record.status === 'paused' ? 'bg-warn' : 'bg-accent'
@@ -539,7 +539,7 @@ function onKillClick(entry: BackgroundTaskEntry): void {
   })
 }
 
-// ── 行内操作 2：subagent 两段式取消 + 迟到收口防误报（复制件，自 useSidebarSubagentActions）──
+// ── 行内操作 2：subagent 两段式取消 + 迟到收口防误报（复制件，自原侧栏列表动作 composable）──
 const cancellingSubagentId = ref<string | null>(null)
 function onCancelClick(record: SubagentRecord): void {
   if (cancellingSubagentId.value !== record.subagentId) {

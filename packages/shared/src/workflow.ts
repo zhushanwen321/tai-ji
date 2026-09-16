@@ -21,9 +21,9 @@
  *
  * 'paused' 是 legacy 读侧兼容值：wf-run-v2 快照（随一次性生命周期收窄）只产出
  * running/done 两态，且 runtime workflow-extractor 对 v1 三态快照一律跳过——该值
- * 实际不再出现。保留在联合中是因为 renderer（WorkflowList/WorkflowDetail/Sidebar
- * 的 `status === 'paused'` 分支与 Pause/Resume 按钮链路）仍引用它，移除需连带清理
- * renderer UI，待 renderer 侧 pause/resume 链路退役时一并删除。
+ * 实际不再出现。保留在联合中是因为 renderer（drawer 的 workflow 详情 tab 与 composer
+ * 任务托盘的 workflow 面板：`status === 'paused'` 分支与 Pause/Resume 按钮链路）仍引用
+ * 它，移除需连带清理 renderer UI，待 renderer 侧 pause/resume 链路退役时一并删除。
  */
 export type WorkflowRunStatus = 'running' | 'paused' | 'done'
 

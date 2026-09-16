@@ -1641,7 +1641,8 @@
       "scope": [
         "packages/renderer/src/assets/icons/engine/**",
         "packages/renderer/src/constants/engine-icons.ts",
-        "packages/renderer/src/components/sidebar/SubagentList.vue",
+        "packages/renderer/src/components/panel/tray/TrayNativePanel.vue",
+        "packages/renderer/src/composables/panel/useSubagentTabData.ts",
         "packages/renderer/src/components/panel/SubagentTab.vue"
       ],
       "authority": [

@@ -70,7 +70,7 @@ export interface GuiComponentProps {
     numbered?: boolean
   }
 
-  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（WidgetArea）承担卡壳/head/折叠
+  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（托盘 widget 面板）承担卡壳/head/折叠
    *  后，widget 内容需要多组件组合时的组合根（替代「无头 card」的语义滥用） */
   'group': {
     children: GuiComponent[]

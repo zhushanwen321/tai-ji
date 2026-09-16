@@ -82,7 +82,6 @@ const stubs = {
   AskUserOverlay: { template: '<div data-testid="ask-user-overlay" />' },
   Landing: { template: '<div data-testid="landing">landing</div>' },
   TraceView: { template: '<div data-testid="trace-view" />' },
-  WidgetArea: { template: '<div data-testid="widget-area" />' },
 }
 
 function mountPanel(sessionId: string | null) {

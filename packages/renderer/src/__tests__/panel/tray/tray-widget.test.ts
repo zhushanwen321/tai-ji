@@ -134,8 +134,8 @@ function makeWidgetSource(): MockWidgetSource {
  * 为什么在测试内复刻：本单元领地不含 ComposerTray.vue（归 u-tray-shell），而验收条款 ⑤/⑥
  * （推送后条目重算 / invalidate 后条目消失）必须落在本单元测试。故以同构宿主承载，关键形态
  * 与外壳一致：
- * - entries computed 内**同时**调用 getViewIds（分区键迭代）与 getView（分区值读）——复刻
- *   WidgetArea.vue entries 头注契约，拆开即断链；
+ * - entries computed 内**同时**调用 getViewIds（分区键迭代）与 getView（分区值读）——承自已
+ *   退役的对话流 widget pill entries 头注契约，拆开即断链；
  * - 面板随「打开 key 仍在 entries 内」渲染（entry 消失 → 面板消失，清屏即摘除）。
  */
 const TrayWidgetStrip = defineComponent({

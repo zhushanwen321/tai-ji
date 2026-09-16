@@ -14,11 +14,11 @@
   ── 数据链（D3/D7）──
   条目存在与否由外壳 entries computed 决定（ViewHostStore 有 entry 即渲染、invalidate 即消失）；
   本组件只渲染传入的 entry 切片。guiTree 为空（异常 payload / 清屏竞态）→ 整体零 DOM，不出空壳。
-  依赖追踪契约：外壳 entries computed 必须 `getViewIds` + `getView` 同路径（复刻
-  WidgetArea.vue entries 头注；拆开即断链 → 推送后不重算）。可运行样例见
+  依赖追踪契约：外壳 entries computed 必须 `getViewIds` + `getView` 同路径（承自已退役的对话流
+  widget pill entries 头注；拆开即断链 → 推送后不重算）。可运行样例见
   __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。
 
-  ── 形态（与 WidgetArea 详情卡同视觉语言，退出对话流后迁入托盘）──
+  ── 形态（与原对话流 widget 详情卡同视觉语言，该卡已随 pill 退役、形态迁入托盘）──
   head：状态点（7px，D4 色：running=accent / done=success / failed=danger / idle=dim）+ 标题
   （meta.title ?? viewId）+ 进度计数文本（progress.label ?? current/total）+ mini bar（3px 宽 40px，
   fill 按 severity/status 取色，宽度 clamp 0-100%）；缺 meta（v1 旧 extension）→ 标题回退 viewId、
@@ -64,7 +64,7 @@
       </template>
     </div>
     <!-- body：guiTree 逐项交渲染协议（index key 前提 = 原语均 props-only 无内部状态，
-         原语引入本地状态时需改稳定 key，与 WidgetArea 详情卡同约定） -->
+         原语引入本地状态时需改稳定 key，与已退役的对话流 widget 详情卡同约定） -->
     <div class="flex min-w-0 flex-col gap-1">
       <GuiComponentRenderer
         v-for="(component, i) in guiTree"
@@ -124,7 +124,7 @@ const progressLabel = computed(() => {
   return p.label ?? `${p.current}/${p.total}`
 })
 
-/** 百分比换算因子（no-magic-numbers 具名，同 WidgetArea PCT_SCALE 模式） */
+/** 百分比换算因子（no-magic-numbers 具名，承自已退役 widget 详情卡的 PCT_SCALE 模式） */
 const PCT_SCALE = 100
 
 /** 进度 fill 宽度（0-100 clamp；total<=0 防除零） */

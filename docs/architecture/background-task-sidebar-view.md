@@ -1,10 +1,14 @@
 # background bash 任务侧边栏视图与详情 drawer 技术设计
 
-> **一句话结论**：以 runtime 直读 registry.json（跨进程 SSOT）为数据骨架，新增 per-session 拉取 RPC + 轮询/事件双触发变更广播 + 原生 Vue 视图挂入 plugin 区 L2 tab（contribution 声明 + PluginViewContainer 原生路由），列表带「运行中/已结束/全部」二级状态筛选（对齐 dev-0.9.15 subagent-sidebar-filter 范式），drawer 详情按需 tail 输出文件、kill 回路带 killing-intent 预写（含 base-tool-enhance 一处 enabling 改动：poller 终态化时读回 registry intent，抑制 UI 代杀对 AI 的误唤醒）；不走 extension widget 推送（GuiComponent 零交互、任务列表/详情/kill 均表达不了，见 §3.2）。
+> **一句话结论**：以 runtime 直读 registry.json（跨进程 SSOT）为数据骨架，新增 per-session 拉取 RPC + 轮询/事件双触发变更广播 + 原生 Vue 视图挂入 plugin 区 L2 tab（contribution 声明 + PluginViewContainer 原生路由），列表带「运行中/已结束/全部」二级状态筛选（对齐 dev-0.9.15 subagent-sidebar-filter 范式），drawer 详情按需 tail 输出文件、kill 回路带 killing-intent 预写（含 base-tool-enhance 一处 enabling 改动：poller 终态化时读回 registry intent，抑制 UI 代杀对 AI 的误唤醒）；不走 extension widget 推送（GuiComponent 零交互、任务列表/详情/kill 均表达不了，见 §3.2）。**L2 视图面（挂载方式/角标/列表宿主）已于 2026-09-16 退役，见下方退役说明；数据链路部分现行。**
 
 **层性质声明**：本文档是**技术方案设计**——下一层产物是可实现的接口/数据模型 + 代码任务（impl-plan）。准则 5/6/7（物理数据流 / 错误恢复 / 运行时探针）全适用。
 
 > **实施状态**：已交付（R1-R4 四轮对抗审查收敛全修：R1 kill 回路两处结构性修复；R2 零感知断言收窄 + intent 读回钉死 + Windows 探测规格；R3 改动地图补 extension 加固；R4 用户裁决升级二级筛选 D10——三桶筛选/分桶 SSOT/行内两段式终止/icon 即状态。审查轨迹 git 可追溯）。
+
+> **视图面部分退役（2026-09-16）**：任务观察入口唯一化后，Plugins 区「后台命令」L2 原生视图整体退役——`BackgroundTaskListView.vue`、builtin 的 `sidebar.tab` 贡献声明、`PluginViewContainer` 的 `NATIVE_VIEWS` 原生路由、`L2TabBar`/`L2TabItem` 角标（badge）机制、列表筛选槽与行内两段式终止均不再存在（验收口径 N1：`NATIVE_VIEWS` 路由表移除、退役面 import 零命中）。后台命令的常驻观察入口现为 **composer 任务托盘**（[composer-task-tray.md](../design/composer-task-tray.md)：计数/分桶列表/行内 kill 在该处重新实现，分桶判据仍是同一 SSOT `packages/renderer/src/lib/background-task-bucket.ts`）；drawer「后台命令」详情 tab（`BackgroundTaskDetailPanel`）保留不变。
+>
+> **本文档现行部分**：runtime 数据管道与契约描述——§2 数据面盘点 / §2.3 物理数据流 / D1（数据源）/ D2（变更检测）/ D3（WS 协议）/ D6 + D6-en（kill 回路）/ D7（输出 tail）/ D8（session 隔离）/ D9（契约零新造）/ §3.4 探针 P1-P7 / §5 的 U1-U3、U6 单元与对应文件映射。**退役部分**（§1 目标与 in-scope 中的入口表述、§3.1 成功路径的行内操作入口、D4、D10 的 UI 形态面、§5 的 U4 单元）：入口一律读作「composer 任务托盘」，数据链路与判据不变。
 
 ## 1. 背景目标
 
@@ -12,19 +16,19 @@
 - **S（情境）**：base-tool-enhance extension 让 AI 可把长命令（测试、dev server）转后台执行，任务状态落在 `<piAgentDir>/base-tool-enhance/<sessionId>/registry.json`，输出写 `<task_id>.log`。
 - **C（冲突）**：桌面端用户对后台任务**零可见零可控**——任务只在 AI 调 `bash_output` 时被查询；用户唯一感知是对话流里偶尔出现的 `background-bash` custom 消息；任务卡死时用户不知道 pid、看不到输出、无从终止。
 - **Q（问题）**：如何在桌面端给用户提供后台任务的实时列表 + 执行详情 + 终止能力，且严格按 session 隔离？
-- **A（答案）**：plugin 区新增「后台命令」L2 tab（三桶筛选 + 任务列表，实时状态），点击 item 在 drawer 展示详情（元信息 + 输出尾部 + kill），数据链路走 runtime 读 registry + 变更广播。
+- **A（答案）**：plugin 区新增「后台命令」L2 tab（三桶筛选 + 任务列表，实时状态），点击 item 在 drawer 展示详情（元信息 + 输出尾部 + kill），数据链路走 runtime 读 registry + 变更广播——**列表/计数入口已退役（2026-09-16），现为 composer 任务托盘；drawer 详情与数据链路不变**（见头部退役说明）。
 
-**系统是什么**（给不熟悉的读者）：taiji 是 Electron 桌面工作台，进程链 `Electron main → runtime（Node sidecar，WS server，ELECTRON_RUN_AS_NODE）→ N × pi 子进程（每 session 一个）`。base-tool-enhance 是打包 builtin 的 pi extension，跑在 pi 进程内，override bash 工具提供 `background: true` 参数；任务运行时权威是 pi 进程内单例表（`task-store.ts` 模块级 Map，无订阅 API），持久化权威是 per-sessionId 的 registry.json。侧边栏 plugin 区（`Sidebar.vue` activeTab `plugins`）经 `PluginViewContainer` 渲染 L2 二级 tab，绑定焦点 session——**现状恒空态**（见 §2.2）。
+**系统是什么**（给不熟悉的读者）：taiji 是 Electron 桌面工作台，进程链 `Electron main → runtime（Node sidecar，WS server，ELECTRON_RUN_AS_NODE）→ N × pi 子进程（每 session 一个）`。base-tool-enhance 是打包 builtin 的 pi extension，跑在 pi 进程内，override bash 工具提供 `background: true` 参数；任务运行时权威是 pi 进程内单例表（`task-store.ts` 模块级 Map，无订阅 API），持久化权威是 per-sessionId 的 registry.json。侧边栏 plugin 区（`Sidebar.vue` activeTab `plugins`）经 `PluginViewContainer` 渲染 L2 二级 tab，绑定焦点 session——设计期恒空态（见 §2.2）；本设计的 L2 原生视图面已于 2026-09-16 退役（plugin sidebar view 机制本体保留为插件挂载点，见头部退役说明）。
 
-**术语裁决（R4）**：视图用户可见命名 = **「后台命令」**——「后台任务」一词已被 Agents tab（subagent）的 i18n 占用（`zh-CN/sidebar.ts:136` `subagentList.empty: '暂无后台任务'`），两者是不同对象（subagent = 后台代理进程；本视图 = 后台 bash 命令），命名必须区分。viewId 保持 `background-tasks`（与实体命名一致：extension-protocol `BackgroundTaskRegistryEntry` / background-task.ts 契约域），仅 title/i18n 文案用「后台命令」。
+**术语裁决（R4）**：视图用户可见命名 = **「后台命令」**——「后台任务」一词原被 Agents tab（subagent）的 i18n 占用（`subagentList.empty: '暂无后台任务'`，该 key 已随后续侧栏任务 tab 退役删除，现行任务文案承载 = `zh-CN/tray.ts`），两者是不同对象（subagent = 后台代理进程；本视图 = 后台 bash 命令），命名必须区分。viewId 保持 `background-tasks`（与实体命名一致：extension-protocol `BackgroundTaskRegistryEntry` / background-task.ts 契约域），仅 title/i18n 文案用「后台命令」。
 
 **设计目标**（从使用者体验倒推）：
-1. **G1 可见**：用户切到某 session 的 plugin 区「后台命令」tab，默认只看运行中的任务（运行中/已结束/全部三桶筛选 + 计数预告，对齐 Agents tab 范式），状态实时翻转（running→killing→exited）无需手动刷新；tab 角标与「运行中」桶计数同源（亮 = 有命令在跑 = 默认桶非空）。
+1. **G1 可见**：用户在该 session 的任务观察入口（设计期 = plugin 区「后台命令」L2 tab；现 = composer 任务托盘）默认只看运行中的任务（运行中/已结束/全部三桶筛选 + 计数预告），状态实时翻转（running→killing→exited）无需手动刷新；入口计数（原 L2 tab 角标，现托盘 icon 计数）与「运行中」桶计数同源（亮 = 有命令在跑 = 默认桶非空）。
 2. **G2 可查**：点击任一任务，drawer 展示完整命令、元信息（pid/时间/时长/exitCode/reason）、输出尾部；running 任务输出可跟随刷新。
-3. **G3 可控**：running 任务可**行内两段式终止**（第二行右侧 ✕ → ✓ 确认，无需开 drawer），drawer 内亦有一键终止——**且终止不惊扰 AI**（不触发 AI 新 turn、不产生误导性「失败」通知；主路径保证，残余窗口与收窄口径见 D6-en 边界注）。
+3. **G3 可控**：running 任务可**行内两段式终止**（列表行内 ✕ → ✓ 确认，无需开 drawer；设计期在 L2 列表行、现为托盘面板行），drawer 内亦有一键终止——**且终止不惊扰 AI**（不触发 AI 新 turn、不产生误导性「失败」通知；主路径保证，残余窗口与收窄口径见 D6-en 边界注）。
 4. **G4 隔离**：session A 的列表永不含 session B 的任务；切 session 即切数据分区（含筛选桶分区）；无焦点 session 时空态。
 
-**in-scope**：runtime 读 registry 的新 service、WS 消息域（拉取 RPC + 变更广播）、renderer 原生视图（L2 tab + 三桶筛选 + drawer + 行内终止）、kill 回路、plugin 区 tab 贡献声明与 L2 角标、**base-tool-enhance 的 killing-intent 读回（唯一 extension 改动，见 D6-en）**。
+**in-scope**：runtime 读 registry 的新 service、WS 消息域（拉取 RPC + 变更广播）、renderer 原生视图（L2 tab + 三桶筛选 + drawer + 行内终止）、kill 回路、plugin 区 tab 贡献声明与 L2 角标、**base-tool-enhance 的 killing-intent 读回（唯一 extension 改动，见 D6-en）**——其中 L2 视图面与角标已于 2026-09-16 退役（入口迁 composer 任务托盘，见头部退役说明）。
 **out-of-scope**：不修改 pi；base-tool-enhance 除 D6-en 外的任务执行语义不动（spawn/poller tick 节奏/reaper 触发面均不变）；不做 stdout/stderr 分流展示（output 文件本就混流，见 §2.1）；不做跨 session 聚合视图（G4 明确按发起 session 分区）；不做完整输出查看器（仅尾部预览 + 跟随；tail 语义对齐 `bash_output`，上界 32KB——D3 定案口径，非 bash_output 面向 AI 上下文预算的 50KB；实施期审查修正此处初版误写）。
 
 ## 2. 现状与问题分析
@@ -59,13 +63,13 @@ AI 继续干别的；测试在后台跑
 | reaper | `packages/runtime/src/services/session/background-task-reaper.ts`（runtime 内；启动 5s + session 删除两触发面） | 事件触发 | 无 WS 广播，观测面只有 console.log |
 
 **plugin 区与 widget 系现状**（关键背景）：
-- sidebar plugins tab 的视图清单来自 `ContributionRegistry` 的 `sidebar.tab` 贡献——**只有 builtin 静态声明一条路**（`packages/core/src/extension-host/builtin-contributions.ts`），且 builtin 现无任何 views 声明、`bootstrap.ts:63-71` `loadExternal([])` 恒传空数组 → **plugins tab 现状恒「暂无插件视图」空态**。本设计将是第一个真实 sidebar.tab 视图。
-- todo/goal 刻意不进 sidebar：经 `guiSetWidget`（`extension-protocol/src/core/helpers.ts:65-74`，NUL marker 编码）→ pi stdout `extension_ui_request{setWidget}` → EventAdapter（`event-adapter.ts:415-493`）→ WS `extension:widgetGui` → `ViewHostStore`（`view-host-store.ts:95-110`，(sessionId, viewId) 双键分区）→ **对话流 WidgetArea 消费**（`Panel.vue:78`）。
+- sidebar plugins tab 的视图清单来自 `ContributionRegistry` 的 `sidebar.tab` 贡献——**只有 builtin 静态声明一条路**（`packages/core/src/extension-host/builtin-contributions.ts`），且 builtin 现无任何 views 声明、`bootstrap.ts:63-71` `loadExternal([])` 恒传空数组 → **plugins tab 恒「暂无插件视图」空态**。本设计曾是第一个真实 sidebar.tab 视图，该视图已于 2026-09-16 退役（plugin sidebar view 机制本体保留为插件挂载点）。
+- todo/goal 刻意不进 sidebar：经 `guiSetWidget`（`extension-protocol/src/core/helpers.ts:65-74`，NUL marker 编码）→ pi stdout `extension_ui_request{setWidget}` → EventAdapter（`event-adapter.ts:415-493`）→ WS `extension:widgetGui` → `ViewHostStore`（`view-host-store.ts:95-110`，(sessionId, viewId) 双键分区）→ **composer 任务托盘的 widget 区消费**（widget 区按钮 + 面板；原对话流 pill 形态已于 2026-09-16 退役）。
 - **GuiComponent 词汇表 9 类型全纯展示零交互**（`extension-protocol/src/core/types.ts`；`ListTree.vue` 0 emit）：无 onClick/onSelect/按钮原语；TreeItem.status 三态（running/done/failed）不含 killing/orphaned；无计时原语。事件回传只有 `extension.ui_request` 阻塞模态（confirm/select/input/editor）——不是列表点击。
 - custom 逃生口（`custom` 类型 + `GUI_CUSTOM_REGISTRY_KEY` 编译期注册）机制存在但**生产代码零 provide 者**。
 - **drawer 是硬编码 7-tab 机制**：`core/domain/drawer/types.ts` `SideDrawerTab` 联合类型 + `DrawerPanel.vue` tabs 数组 + `PanelContainer.vue:107-143` v-if chain 三处同步；'drawer.tab' 贡献挂载点仅存在于类型注释、零消费者。
 
-**dev-0.9.15 Agents tab 二级筛选先例（R4 对齐目标，本分支未含——在集成分支 dev-0.9.15，设计 `subagent-sidebar-filter.md` + 实装 `SubagentFilterBar.vue`/`SubagentList.vue`/`lib/subagent-bucket.ts`/`useSubagentBucketFilter.ts`）**：列表顶部迷你凹陷槽三桶（进行中/已结束/全部 + 计数，默认进行中）；分桶判据收独立纯函数 SSOT 模块（禁两处各写 status 判定）；筛选状态经 `useSessionScopedState` 工厂 per-session 分区（**reactive 容器契约**——标量需对象包装且必须 reactive，否则切桶 UI 永不更新；挂载期内记忆、切 tab 卸载重置、不跨启动记忆）；空桶自适应（「进行中」空桶给查看全部一键跳转，全量空态不渲染筛选条）；一级 tab badge 口径与桶判据同源函数（badge 亮 = 默认桶非空，防「badge 点亮而默认视图是历史」语义断裂）；运行中卡片行内两段式 cancel（inline 确认不开弹窗）；三行卡片结构（名称行 + mono 元信息行 + 描述行）——**本设计 item 不照搬三行卡片：采用 SessionItem 两行同构（D10 ⑤，用户裁决：行数精简 + 状态徽标移除）**。
+**（已退役）侧栏 Agents tab 二级筛选先例（R4 对齐目标；设计 `subagent-sidebar-filter.md` + 实装 `lib/subagent-bucket.ts`（**现行**，SSOT 模块保留）/ 侧栏筛选条、任务列表与筛选分区 composable（**已随侧栏任务视图退役，2026-09-16**））**：列表顶部迷你凹陷槽三桶（进行中/已结束/全部 + 计数，默认进行中）；分桶判据收独立纯函数 SSOT 模块（禁两处各写 status 判定）；筛选状态经 `useSessionScopedState` 工厂 per-session 分区（**reactive 容器契约**——标量需对象包装且必须 reactive，否则切桶 UI 永不更新；挂载期内记忆、切 tab 卸载重置、不跨启动记忆）；空桶自适应（「进行中」空桶给查看全部一键跳转，全量空态不渲染筛选条）；一级 tab badge 口径与桶判据同源函数（badge 亮 = 默认桶非空，防「badge 点亮而默认视图是历史」语义断裂）；运行中卡片行内两段式 cancel（inline 确认不开弹窗）；三行卡片结构（名称行 + mono 元信息行 + 描述行）——**本设计 item 不照搬三行卡片：采用 SessionItem 两行同构（D10 ⑤，用户裁决：行数精简 + 状态徽标移除）**。
 
 **根因**：后台任务的全部数据面都在 pi 进程内或落盘文件里，桌面端（runtime/renderer）从来没有一条「读出来给人看」的链路；而现有面向 UI 的唯一 extension 通道（widget 系）是纯展示词汇表，表达不了「列表点击 + 详情 + kill」这类交互。
 
@@ -95,7 +99,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 
 ### 3.1 终态（使用者视角）
 
-**成功路径**（session X，用户正在看别的 session）：
+**成功路径**（session X，用户正在看别的 session；入口按设计期形态书写——L2 tab 与 tab 角标已退役，现由 composer 任务托盘等价承接：icon 计数替代角标、hover 面板行替代 L2 列表行，数据链路与操作语义不变）：
 
 ```text
 用户让 AI「跑一下测试」→ AI 把 pnpm test 转后台执行
@@ -136,10 +140,10 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 | 风险 | **G2/G3 直接不可达**：GuiComponent 零交互（无点击/按钮/事件回传，§2.2 实证）；killing/orphaned 状态表达不了；他进程遗留任务 extension 不推（无变更可观察） | 新增文件轮询（量级：每 watched session 1 次 mtime stat / 2s，可忽略）；三处同步的 drawer 接入点（既有范式，照做即可） | EventAdapter 是「pi 协议唯一适配点」（架构规则），为 UI 刷新扩契约面，漂移守卫成本上升；双数据源一致性是新问题面 |
 | **裁决** | ❌ | ✅ | ❌（作为 B 的可选优化都不必要——B 的事件触发刷新已零成本拿到 exit 边沿时机，见 D2） |
 
-**若用方案 A，§3.1 的例子会变成什么样**：列表能显示（list-tree 近似），但点击行没有任何反应（无点击通道）；「终止任务」按钮不存在（无 button 原语）；计时要么静止（不重推）要么 extension 每秒全量重推 widget（对话流 WidgetArea 同 widgetKey 会被连带重渲）；orphaned/他进程遗留任务不出现。G2/G3 整体失败。
+**若用方案 A，§3.1 的例子会变成什么样**：列表能显示（list-tree 近似），但点击行没有任何反应（无点击通道）；「终止任务」按钮不存在（无 button 原语）；计时要么静止（不重推）要么 extension 每秒全量重推 widget（对话流内同 widgetKey 的 widget 渲染会被连带重渲）；orphaned/他进程遗留任务不出现。G2/G3 整体失败。
 **若用方案 C，§3.1 的例子会变成什么样**：交互能达成（原生组件），但强杀 pi 后该 session 列表冻结在最后一次事件（orphaned 收殓无人广播），除非再补 runtime 侧 registry 广播——即重做 B 的全部内容，C 的事件层变成冗余上叠。
 
-**推荐：方案 B。**「插件规范」的落点在 **view 的贡献声明**（contribution）与 **L2 tab 的宿主机制**沿用，而非渲染载体必须是 GuiComponent（该词汇表为对话流状态展示设计，非交互 UI）；数据链路归 runtime 是 registry SSOT 的自然推论（C1/C2）。
+**推荐：方案 B。**「插件规范」的落点在 **view 的贡献声明**（contribution）与 **L2 tab 的宿主机制**沿用，而非渲染载体必须是 GuiComponent（该词汇表为对话流状态展示设计，非交互 UI）；数据链路归 runtime 是 registry SSOT 的自然推论（C1/C2）。（该落点随后续任务观察入口唯一化退役，收束为 plugin sidebar view 机制本体保留；数据链路结论不受影响。）
 
 ### 3.3 关键决策与权衡
 
@@ -162,16 +166,17 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
   - `backgroundTask.output {sessionId, taskId, maxBytes?}` → 回 `backgroundTask.outputResult {sessionId, taskId, text, truncated, lost}`（读 `<task_id>.log` 尾部，默认 32KB 上界，对齐 bash_output 的 tail 语义）
   - `backgroundTask.kill {sessionId, taskId}` → 回 `backgroundTask.killResult {sessionId, taskId, killed, reason}`（reason 枚举：`killed` / `already-exited` / `identity-unverifiable` / `registry-write-failed`，见 D6）
   - 广播 `backgroundTask:updated {sessionId, tasks, corrupted?}`（Server→Client 冒号 camelCase，对齐 `plugin:statusBarUpdate`/`extension:widgetGui` 命名规则；经 `IMessageBus.publish(sessionId, msg)` session 级定向推；corrupted 语义同 list 回执，自愈拍 corrupted=false）
-  - **所有消息必带 sessionId**（架构规则 7）；renderer 在「切换/激活 session、打开 plugin tab」时主动 `list` 拉取（C6 时序竞争规则——broadcast 只做增量刷新，不做唯一真相）。补充事实（R1 审查核实）：`IMessageBus.subscribe` 返回 `{snapshot, stateSnapshot, lastSeq}`（ring 缓冲重放，`message-bus.ts:182-186`），晚订阅 renderer 对已 publish 的 session 级广播有重放——这是拉取兜底之上的又一层保障，但设计**不依赖**它（snapshot 有限 ring，gap 后仍靠拉取）。
+  - **所有消息必带 sessionId**（架构规则 7）；renderer 在「切换/激活 session（现行触发点 = composer 任务托盘挂载/切 session；设计期含「打开 plugin tab」，随 L2 视图退役消失）」时主动 `list` 拉取（C6 时序竞争规则——broadcast 只做增量刷新，不做唯一真相）。补充事实（R1 审查核实）：`IMessageBus.subscribe` 返回 `{snapshot, stateSnapshot, lastSeq}`（ring 缓冲重放，`message-bus.ts:182-186`），晚订阅 renderer 对已 publish 的 session 级广播有重放——这是拉取兜底之上的又一层保障，但设计**不依赖**它（snapshot 有限 ring，gap 后仍靠拉取）。
 - **被否**：复用 `extension:widgetGui` 通道塞任务数据（污染 widget 语义，ViewHostStore 会把它当 GuiComponent 树缓存）；专设 subscribe/unsubscribe 消息（订阅语义由 list 隐含 + session-destroyed 退订已足够，协议面最小，见 D8 ③）。
 - **证据**：RPC 范式锚点（§2.2）；命名规则（AGENTS.md 规则 16 的 plugin 先例）；message-bus session 级 publish。
 - **效果**：G1 实时性成立（拉取兜底 + 广播增量 + ring 重放）；协议面收敛在单域、无订阅状态机。
 
-**D4：L2 tab 宿主 = contribution 声明 + PluginViewContainer 原生路由表（选定）**
-- **采用**：① `builtin-contributions.ts` 新增 pluginId `base-tool-enhance` 的贡献 `{views: [{id: 'background-tasks', placement: 'sidebar.tab', viewType: 'gui', title: '后台命令'}]}`（viewType 沿用 'gui'，不改 schema；title 用「后台命令」——术语裁决见 §1）；② `PluginViewContainer` 新增模块级 `NATIVE_VIEWS: Record<viewId, Component>` 注册表——`activeView` 命中即渲染原生组件（`BackgroundTaskListView`）替代 ViewHost，不命中走原 GuiComponent 路径（对既有 view 零影响）；③ pluginId `base-tool-enhance` 加入 `BUILTIN_PLUGIN_IDS`（不可关闭，基础设施级）；④ **L2 tab 角标（R4 提为首期）**：`L2TabItem` 加 `badge?: boolean` + L2TabBar 渲染小圆点——点亮条件 = 该 session 「运行中」桶计数 > 0，**与 D10 分桶判据同源函数派生**（subagent D8 同款语义闭环：badge 亮 = 默认桶非空，防「badge 点亮而默认视图是历史」断裂；L1 SegmentedTab badge 视觉范式下沉到 L2）。
+**D4：L2 tab 宿主 = contribution 声明 + PluginViewContainer 原生路由表（选定；**2026-09-16 已整体退役**）**
+- **采用**（原件已删，形态如下）：① `builtin-contributions.ts` 新增 pluginId `base-tool-enhance` 的贡献 `{views: [{id: 'background-tasks', placement: 'sidebar.tab', viewType: 'gui', title: '后台命令'}]}`（viewType 沿用 'gui'，不改 schema；title 用「后台命令」——术语裁决见 §1）；② `PluginViewContainer` 新增模块级 `NATIVE_VIEWS: Record<viewId, Component>` 注册表——`activeView` 命中即渲染原生组件（`BackgroundTaskListView`）替代 ViewHost，不命中走原 GuiComponent 路径（对既有 view 零影响）；③ pluginId `base-tool-enhance` 加入 `BUILTIN_PLUGIN_IDS`（不可关闭，基础设施级）；④ **L2 tab 角标（R4 提为首期）**：`L2TabItem` 加 `badge?: boolean` + L2TabBar 渲染小圆点——点亮条件 = 该 session 「运行中」桶计数 > 0，**与 D10 分桶判据同源函数派生**（subagent D8 同款语义闭环：badge 亮 = 默认桶非空，防「badge 点亮而默认视图是历史」断裂；L1 SegmentedTab badge 视觉范式下沉到 L2）。
+- **退役（2026-09-16）**：任务观察入口唯一化后本决策的四个实现面全部移除——`builtin-contributions` 的 `background-tasks` view 贡献声明、`NATIVE_VIEWS` 原生路由表与 `PluginViewContainer` 命中分支、`L2TabItem.badge` 字段与 L2TabBar 角标渲染、`BackgroundTaskListView.vue` 组件本体。后台命令的列表/计数入口改由 **composer 任务托盘**承载（面板分桶列表 + icon 计数，[composer-task-tray.md](../design/composer-task-tray.md) D10/D11）；plugin sidebar view 机制本体（`PluginViewContainer` 渲染 plugin 贡献视图）保留为插件挂载点。
 - **被否**：① 经 `custom` GuiComponent 类型 + `GUI_CUSTOM_REGISTRY_KEY` 编译期注册（机制存在但零先例，且数据仍须以 widget 树形态从 extension 推——数据链路回退成方案 A）；② 改 contribution schema 加 `viewType: 'native'`（涉及多处类型联合同步，收益仅是语义显式化）。
 - **证据**：`PluginViewContainer.vue:37/117-123` 全部 viewId 路由到 ViewHost 的现状（R1 审查实读核实）；BUILTIN_PLUGIN_IDS 先例（tasks）；builtin-contributions 是 sidebar.tab 唯一贡献源（§2.2）。
-- **效果**：「插件规范」落点成立（声明 + L2 宿主机制沿用）；渲染载体升级为原生组件，G2/G3 交互可达；角标与桶判据同源（G1 增强，R4 提为首期）。
+- **效果**：「插件规范」落点成立（声明 + L2 宿主机制沿用）；渲染载体升级为原生组件，G2/G3 交互可达；角标与桶判据同源（G1 增强，R4 提为首期）。退役后该口径由托盘 icon 计数承接。
 
 **D5：drawer 接入 = 照 4 点既有范式加第 8 个 tab（选定）**
 - **采用**：① `core/domain/drawer/types.ts` `SideDrawerTab` 加 `'bashTask'` + `DrawerControlState` 加 `selectedBackgroundTaskId?: string`（仿 selectedSubagentId 先例）；② `DrawerPanel.vue` tabs 数组加 TabMeta；③ `PanelContainer.vue:107-143` v-if chain 加 `BackgroundTaskDetailPanel`；④ 列表 item 点击 `openDrawerTab('bashTask', {taskId})`（实施形态：经 `DrawerControlState.selectedBackgroundTaskId` 直写后调 `openDrawerTab('bashTask')`，偏差 #17；OpenDrawerOptions 不扩展 taskId）。
@@ -211,7 +216,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - **效果**：G2 的输出跟随成立；实现面一个 RPC + 一个 interval。
 
 **D8：session 隔离与生命周期（选定）**
-- **采用**：① renderer 侧任务状态用 `useSessionScopedState` 工厂建 per-session Map 分区（ADR-0049 范式，`core/src/foundation/use-session-scoped-state.ts:103`），WS handler 一律 `updateFor(capturedSid)`；**WS 消息 listener 收敛为模块级单例注册（refCount 或应用生命周期持有），消费组件（列表视图 + split mode 下 per-pane 多实例的 DetailPanel）只读写分区状态，不各自挂 listener**（AGENTS.md 规则 2：Event bus listener 防重复注册）；**筛选桶状态同样经 `useBackgroundTaskBucketFilter`（D10）按 session 分区，组件纯读，禁 watch(sessionId) 清空**；② 轮询/广播域严格以 sessionId 为键（registry 目录、message-bus publish、store 分区三层同键）；③ **watched 集合生命周期**：session 首次 `backgroundTask.list` RPC 即加入 watched（D3），退订挂 session 销毁汇聚点（session-service `removeSessionEntry`，与 reaper 触发面 A 同挂点，R1 审查建议采纳）——watched 集合上界 = 运行期内被查看过的 session 数，每 session 成本 = 1 次 stat/2s，可忽略；垃圾 sessionId（renderer 传错）同样入集合但 stat ENOENT 按空表静默处理（不告警刷屏，R2 I4）；split mode 双 pane 双 session 并存时 watched 自然是两 pane session 的并集（各自 list 过）；④ `session-destroyed` → renderer 分区清理（`useSidebar.deleteSession` 统一编排既有链路）+ runtime 侧移出 watched；⑤ fork/新 session 的 registry 目录为空 → 空态（C5，正确语义）。
+- **采用**：① renderer 侧任务状态用 `useSessionScopedState` 工厂建 per-session Map 分区（ADR-0049 范式，`core/src/foundation/use-session-scoped-state.ts:103`），WS handler 一律 `updateFor(capturedSid)`；**WS 消息 listener 收敛为模块级单例注册（refCount 或应用生命周期持有），消费组件（列表视图 + split mode 下 per-pane 多实例的 DetailPanel）只读写分区状态，不各自挂 listener**（AGENTS.md 规则 2：Event bus listener 防重复注册）；**筛选桶状态同样按 session 分区，组件纯读，禁 watch(sessionId) 清空**（设计期经独立筛选分区 composable 承载，该模块已随 L2 视图退役删除；同语义现由 composer 任务托盘面板自持）；② 轮询/广播域严格以 sessionId 为键（registry 目录、message-bus publish、store 分区三层同键）；③ **watched 集合生命周期**：session 首次 `backgroundTask.list` RPC 即加入 watched（D3），退订挂 session 销毁汇聚点（session-service `removeSessionEntry`，与 reaper 触发面 A 同挂点，R1 审查建议采纳）——watched 集合上界 = 运行期内被查看过的 session 数，每 session 成本 = 1 次 stat/2s，可忽略；垃圾 sessionId（renderer 传错）同样入集合但 stat ENOENT 按空表静默处理（不告警刷屏，R2 I4）；split mode 双 pane 双 session 并存时 watched 自然是两 pane session 的并集（各自 list 过）；④ `session-destroyed` → renderer 分区清理（`useSidebar.deleteSession` 统一编排既有链路）+ runtime 侧移出 watched；⑤ fork/新 session 的 registry 目录为空 → 空态（C5，正确语义）。
 - **被否**：全局单列表 + 过滤（违背 ADR-0049，切 session 竞态面大）；专设 subscribe/unsubscribe 协议消息（D3 已否）。
 - **证据**：ADR-0049（架构规则 8）+ 规则 2；message-bus per-session seq（`message-bus.ts:180-186`）；ViewHostStore 双键分区同款先例（§2.2）；`removeSessionEntry` 汇聚点先例（reaper 触发面 A）。
 - **效果**：G4 构造性成立（三层同键隔离）；listener 无重复注册面。
@@ -223,22 +228,22 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - **效果**：§5 拆分中无「契约设计」单元，协议层只登记 WS 消息形状。
 
 **D10：列表二级状态筛选 + 行内终止（R4 新增，对齐 dev-0.9.15 subagent-sidebar-filter 范式）（选定）**
-- **采用**：列表顶部迷你凹陷槽三桶筛选——**运行中 / 已结束 / 全部**（带计数预告，默认「运行中」），视觉照搬 Agents tab 二级筛选范式（`bg-bg-input` 凹陷底 + active `bg-bg-elevated` 浮起，h-6，SegmentedTab/L2TabBar 同源）。四个子决策：
-  - **① 分桶判据与状态展示 SSOT**：新建 `renderer/src/lib/background-task-bucket.ts` 纯函数模块（导出 `backgroundTaskBucket / filterBackgroundTasks / countBackgroundTasks / backgroundTaskStatusIcon`），分桶直接复用契约谓词 `isActiveBackgroundTaskState`（`@zhushanwen/extension-protocol`，D9 同源）——**运行中 = running + killing（killing 是「已发令待确认」的活跃瞬态，用户视角仍在终止流程中）；已结束 = exited（含 natural/timeout/killed）+ orphaned**。比 subagent 分桶更干净：无投影微妙性（subagent 的 done 投影陷阱不存在——契约 state 机显式、无「轮终回写 running」形态）。列表过滤、FilterBar 计数、L2 角标（D4 ④）、item icon 色档（⑤，`backgroundTaskStatusIcon(entry)` 返回 IconKind）**四方同源消费，禁两处各写判定**（subagent D3 同款纪律）。
-  - **② 筛选状态分区**：新建 `useBackgroundTaskBucketFilter(sessionId)` composable——`useSessionScopedState<{ value: FilterValue }>(sessionId, () => reactive({ value: 'active' }))`，**标量必须对象包装且必须 reactive 容器**（工厂响应式契约，subagent MF-A 同款死锁级坑：plain object 的 mutate 不触发下游重算）；挂载期内跨 session 切换分区记忆、切 tab 卸载重置默认「运行中」；不跨启动记忆（运行态时间敏感，重启后旧选择大概率过期）。组件纯读，禁 watch 清空（ADR-0049）。
+- **采用**：列表顶部迷你凹陷槽三桶筛选——**运行中 / 已结束 / 全部**（带计数预告，默认「运行中」），视觉照搬二级筛选范式（`bg-bg-input` 凹陷底 + active `bg-bg-elevated` 浮起，h-6，与 SegmentedTab 同源；设计期参照的 Agents tab 与 L2TabBar 均已随后续退役删除，现行承载 = 托盘面板分桶 tab）。四个子决策：
+  - **① 分桶判据与状态展示 SSOT**：新建 `renderer/src/lib/background-task-bucket.ts` 纯函数模块（导出 `backgroundTaskBucket / filterBackgroundTasks / countBackgroundTasks / backgroundTaskStatusIcon`），分桶直接复用契约谓词 `isActiveBackgroundTaskState`（`@zhushanwen/extension-protocol`，D9 同源）——**运行中 = running + killing（killing 是「已发令待确认」的活跃瞬态，用户视角仍在终止流程中）；已结束 = exited（含 natural/timeout/killed）+ orphaned**。比 subagent 分桶更干净：无投影微妙性（subagent 的 done 投影陷阱不存在——契约 state 机显式、无「轮终回写 running」形态）。**四方同源消费（现行消费面：托盘列表过滤 / 托盘分桶计数 / item icon 色档（⑤，`backgroundTaskStatusIcon(entry)` 返回 IconKind）/ 托盘行状态派生），禁两处各写判定**（subagent D3 同款纪律；原消费面中的 FilterBar 计数与 L2 角标已随 L2 视图退役）。
+  - **② 筛选状态分区**（原 `useBackgroundTaskBucketFilter(sessionId)` composable，**已随 L2 视图退役删除**；同语义现由托盘面板自持）：`useSessionScopedState<{ value: FilterValue }>(sessionId, () => reactive({ value: 'active' }))`，**标量必须对象包装且必须 reactive 容器**（工厂响应式契约，subagent MF-A 同款死锁级坑：plain object 的 mutate 不触发下游重算）；挂载期内跨 session 切换分区记忆、切 session 卸载重置默认「运行中」；不跨启动记忆（运行态时间敏感，重启后旧选择大概率过期）。组件纯读，禁 watch 清空（ADR-0049）。
   - **③ 空态三分**：全量空态（registry 空）不渲染筛选条（0 计数槽是纯噪音，subagent D6 同款）；「运行中」空桶 → 自适应空态「没有运行中的后台命令」+ **[查看全部 (N)]** 一键跳转（高频：跑完回来看一眼 → 一键看历史）；「已结束」空桶 → 仅文案。全部桶内：运行中置顶 + 分隔线 + 历史倒序（保留分组可读性）。
-  - **④ 行内两段式终止**：运行中行第二行右侧 hover 出现 ✕ 按钮（仅 running 行；killing 行已发令不重复发）→ 第一次点击变红色 ✓ 确认态 → 再点一次才真正发 `backgroundTask.kill` RPC（与 Agents tab cancel 同交互语言，inline 确认不开弹窗）。G3 快路径：无需开 drawer 即可终止；drawer 内完整「终止任务」按钮保留（两段式同款）。
+  - **④ 行内两段式终止**：运行中行第二行右侧 ✕ 按钮（仅 running 行；killing 行已发令不重复发）→ 第一次点击变红色 ✓ 确认态 → 再点一次才真正发 `backgroundTask.kill` RPC（inline 确认不开弹窗）。行位形态变更：设计期为 L2 列表 hover 出现，现为托盘面板行（pin 态渲染，托盘的 hover-only → pin 门控变更见 composer-task-tray.md 偏差 D4）。G3 快路径：无需开 drawer 即可终止；drawer 内完整「终止任务」按钮保留（两段式同款）。
   - **⑤ item 两行式（SessionItem 同构，用户裁决）**：第一行 = 7px 状态 icon + 命令（truncate）+ 右侧耗时；第二行 = mono 小字（text-3xs dim）`pid N`（终态附 `· exit C`，**C=null（timeout/外部手杀 natural——SIGKILL 终止 exitCode 为 null，`poller.ts:79`）时显示 `exit —`**，对齐 notify「unknown」先例）+ 右侧 hover 终止钮（④）。**状态文字徽标不进列表——icon 即状态**，色档由 `backgroundTaskStatusIcon`（① SSOT）统一导出，**判定顺序固定：state 先分流（running→accent 旋转环 / killing→warn 点 / orphaned→info 点）→ exited 内 reason==='killed' 优先分流 dim 点（killed 的 exitCode 也是 null，若先判 exitCode 会误入 danger）→ 其余 exitCode===0 ? success 点 : danger 点（`exitCode !== 0` 吸收 null——timeout 与非零失败同为 danger 档，色档不区分 reason=timeout，差异由 drawer reason 行与 icon 文字后备承载）**；文字后备双轨：根元素 aria-label（无障碍，SessionItem ariaLabel 同构）+ icon title（视觉 hover）。「成功/失败」徽标与 exit 码信息重复，只留 exit 码。结构锚点：`SessionItem.vue`（7px icon + mt-6px + label/sub 两行 + hover ghost 操作范式）。**被否：① 三行式 subagent 卡片同构（R4 初稿）——命令列表场景信息密度过高（行数冗余，tailSummary 摘要行价值低——输出细节归 drawer）；② 状态文字徽标——icon 已可辨别，徽标冗余且与 exit 码语义重复（用户裁决）；③ 终态时刻进列表第二行——终态时刻归 drawer 元信息，第二行只留 pid + exit。**
 - **被否**：① 平铺全量列表 + 分组分隔线（v1 形态）——被 subagent 设计的同类问题分析击穿：「现在谁在跑」是最高频关注点，历史单调累积（LRU 50）后运行态被流没，关注路径 O(n) 肉眼扫描；筛选默认「运行中」把高频视图变成默认视图；② 筛选下拉/搜索框——单维度二桶语义用不上搜索，且与两级 tab 体系视觉语言异质；③ 排序/按 reason 筛选——无需求证据，不提前抽象（subagent D7 同款克制：Flows tab 不接同一筛选，两处消费才抽象）。
-- **证据**：dev-0.9.15 `docs/design/subagent-sidebar-filter.md`（三轮审查收敛的同问题域设计：O(n) 扫描分析 / badge↔列表断裂 / 空桶自适应 / reactive 容器契约）+ 实装锚点（`SubagentFilterBar.vue` 凹陷槽参数、`subagent-bucket.ts` SSOT 形态、`useSubagentBucketFilter.ts` 分区语义、`SubagentList.vue` 三行卡片与 inline 两段式 cancel）；i18n 术语冲突（`zh-CN/sidebar.ts:136`）。
-- **效果**：G1 增强（默认视图 = 高频关注点 + 计数预告 + badge 语义闭环）；G3 快路径（行内终止）；视觉语言与 Agents tab 一致（两级 tab + 凹陷槽体系零新增形态）。
+- **证据**：dev-0.9.15 `docs/design/subagent-sidebar-filter.md`（三轮审查收敛的同问题域设计：O(n) 扫描分析 / badge↔列表断裂 / 空桶自适应 / reactive 容器契约）+ 实装锚点（`lib/subagent-bucket.ts` SSOT 形态（现行）；凹陷槽参数 / 分区语义 / 三行卡片与 inline 两段式 cancel 的源组件已随侧栏任务视图退役，形态复制迁入托盘面板）；i18n 术语冲突承载（原 `zh-CN/sidebar.ts` 任务死键已随退役删除，现行登记 = `zh-CN/tray.ts` 文件头词表裁决）。
+- **效果**：G1 增强（默认视图 = 高频关注点 + 计数预告 + 计数↔列表语义闭环）；G3 快路径（行内终止）；视觉语言与二级筛选体系一致（凹陷槽 + 分桶 tab 体系零新增形态；原 Agents tab 参照面已退役，现行形态见托盘面板分桶 tab）。
 
 ### 3.4 运行时断言与探针
 
 | # | 断言 | 探针 | 状态 | 失败时的降级/调整路径 |
 |---|---|---|---|---|
 | P1 | registry 每次 tmp+rename 原子写，runtime 无锁读永不读到半截 JSON | runtime 单测：并发写（循环 rename 新文件）× 并发读 1000 次，parse 成功率 100% | ⛔ 实施期门 | 失败 → 读侧按解析失败跳过本拍（§3.1 corrupt 路径），下拍重读；不阻塞方案 |
-| P2 | exit 边沿 → renderer 列表翻转 ≤1s（事件触发路径） | dev 环境：AI 跑 `sleep 3`（显式 background）→ 观察 plugin tab 状态翻转耗时 | ⛔ 实施期门 | 失败 → 事件钩子本就是纯优化（D2），2s 轮询兜底，≤3s 达标即放行 |
+| P2 | exit 边沿 → renderer 列表翻转 ≤1s（事件触发路径） | dev 环境：AI 跑 `sleep 3`（显式 background）→ 观察列表（设计期 = plugin tab，现 = composer 任务托盘的 bash 面板）状态翻转耗时 | ⛔ 实施期门 | 失败 → 事件钩子本就是纯优化（D2），2s 轮询兜底，≤3s 达标即放行 |
 | P3 | 无事件路径（killing 迁移）→ 列表翻转 ≤2s+轮询周期 | dev 环境：bash_kill 一个任务 → 计时列表「终止中」出现时刻 | ⛔ 实施期门 | 失败 → 检查轮询周期配置；轮询是自持机制无替代，此探针失败 = D2 需重审 |
 | P4 | kill 后任务进程树真死（不只父进程） | dev 环境：UI 杀 `sh -c 'sleep 300 & sleep 300'` → `ps aux \| grep sleep` 确认子进程同殁 | ⛔ 实施期门 | 失败 → killProcessTree 平台分支 bug（C3 复用件），修 bug 而非改设计 |
 | P5 | 属主死分支：kill 孤儿 → registry 锁内写 orphaned，列表 ≤3s 翻转 | dev 环境：强杀 pi 进程后 UI kill 遗留任务 | ⛔ 实施期门 | 写失败 → 分支⑤语义（registry-write-failed + 启动期 reaper 兜底），探针失败仅延迟恢复，不破坏正确性 |
@@ -248,6 +253,8 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 ## 4. 验收（真实场景）
 
 前置：`pnpm dev` 真实环境（非 mock；runtime/extension 改动后须重启 dev——runtime 不热重载）。
+
+> **入口替换说明**：下表是 2026-09-06 交付时点的验收记录，步骤中的「插件 tab → 后台命令 tab / L2 列表」入口已退役，**按 composer 任务托盘的 bash 面板等价替换**（托盘 icon 计数替代 tab 角标、hover 面板行替代 L2 列表行）；断言与判据不变（同一 runtime 管道 + `background-task-bucket` SSOT）。
 
 | # | 场景（回溯目标） | 步骤 | 通过标准 |
 |---|---|---|---|
@@ -268,7 +275,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 | U1 runtime BackgroundTaskService | 读 registry（契约复用 RegistryEntry）+ 2s mtime 轮询 + 事件钩子即时检查（共享变更判定）+ service 自写自检 + kill 分支矩阵（D6 五分支 + 身份验证两档）+ output tail；watched 集合生命周期（list 加入 / removeSessionEntry 退订 / 垃圾 sid ENOENT 静默空表） | 数据链路根，纯 runtime 内可单测（vitest，tmp 目录 mkdtempSync 自建自删——测试红线：禁触真实数据目录） | P1/P5 单测 + P4 dev 手测（P4 杀真实进程树，不可单测——测试红线精神） |
 | U2 WS 协议域 | `packages/shared/src/protocol.ts` 登记双向消息类型 + renderer api domain（仿 session.ts） | 协议先行，U3/U4 的消费面契约；单独改动面小、review 快 | 类型检查 + U3 handler 单测 |
 | U3 runtime RPC handler + 广播 | session-message-handler 注册 3 RPC + message-bus session 级 publish + session-service removeSessionEntry 退订挂点 | 传输层与 service 分离（service 不感知 WS）；仿 getCommands 范式 | P2/P3/P6 |
-| U4 renderer 列表视图 | builtin-contributions 声明 + PluginViewContainer NATIVE_VIEWS + L2TabBar badge 扩展 + BackgroundTaskListView（两行式 SessionItem 同构 item + 筛选槽 + 空态三分 + 行内两段式终止）+ background-task-bucket.ts（分桶 SSOT）+ useBackgroundTaskBucketFilter（reactive 容器分区）+ useBackgroundTasks（useSessionScopedState + 模块级单 listener refCount） | UI 消费面闭环（G1 + D10）；「插件规范」落点在本单元 | S1/S3 前半/S6 筛选边界 |
+| U4 renderer 列表视图（**视图面已退役，2026-09-16**） | 设计期交付 = builtin-contributions 声明 + PluginViewContainer NATIVE_VIEWS + L2TabBar badge 扩展 + BackgroundTaskListView（两行式 SessionItem 同构 item + 筛选槽 + 空态三分 + 行内两段式终止）+ background-task-bucket.ts（分桶 SSOT）+ useBackgroundTaskBucketFilter（reactive 容器分区）+ useBackgroundTasks（useSessionScopedState + 模块级单 listener refCount）。**退役后仍在役**：`background-task-bucket.ts`（分桶/色档 SSOT）、`useBackgroundTasks.ts`（per-session 数据面）、L2 列表的形态资产（两行式 item / 三桶筛选槽 / 空态三分 / 行内两段式终止——复制迁入 composer 任务托盘的 bash 面板，见 [composer-task-tray.md](../design/composer-task-tray.md)） | UI 消费面闭环（G1 + D10）；「插件规范」落点在本单元（该落点随视图退役，plugin sidebar view 机制保留） | S1/S3 前半/S6 筛选边界（入口按托盘等价替换） |
 | U5 drawer 详情 | SideDrawerTab 加成员 + DetailPanel（元信息/输出跟随/kill 按钮 + 分支④⑤ toast 文案）+ 4 点接线 | G2/G3 交互闭环；依赖 U2 的 output/kill RPC | S1 后半/S2/S5 |
 | U6 base-tool-enhance intent 读回（D6-en） | `poller.ts` finalize 合并 registry state killing → reason=killed + `armBackgroundTimeout` pid 已死跳过 markKillingIntent（R2-S1 加固，2 行）+ 不变量注释登记（extension 写 registry 必先内存更新）+ 既有 extensions:test 三连回归 | S2 的 reason=killed + AI 零唤醒依赖它；独立于 runtime/renderer 可先行合入（对 AI bash_kill 路径是幂等增强——内存 intent 优先，读回仅在缺省时生效） | P7 + extensions:test |
 | U7 i18n + testid + 文档 | zh-CN/en-US 文案、data-testid 清单登记、feature-map 更新（现 [feature-map.md](feature-map.md)，原 `docs/feature-map/` 目录已并入） | 交付完整性；TEST-STRATEGY 的 testid SSOT 纪律 | lint + 测试三视角用例 |
@@ -280,16 +287,16 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - `packages/runtime/src/transport/session-message-handler.ts`（+3 case）
 - `packages/runtime/src/infra/pi/event-adapter.ts`（+2 个事件钩子转发，纯旁路不改既有翻译）
 - `packages/runtime/src/services/session/session-service.ts`（removeSessionEntry + watched 退订挂点）
-- `packages/core/src/extension-host/builtin-contributions.ts`（+view 声明）
-- `packages/ui/src/extension-host/PluginViewContainer.vue`（+NATIVE_VIEWS）
+- `packages/core/src/extension-host/builtin-contributions.ts`（+view 声明——**已随 2026-09-16 视图退役删除**）
+- `packages/ui/src/extension-host/PluginViewContainer.vue`（+NATIVE_VIEWS 原生路由——**已随 2026-09-16 视图退役删除**）
 - `packages/core/src/domain/drawer/types.ts`、`packages/ui/src/features/drawer/DrawerPanel.vue`、`packages/renderer/src/components/workspace/PanelContainer.vue`（drawer 4 点）
-- `packages/renderer/src/lib/background-task-bucket.ts`（新，D10 分桶 SSOT）、`packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts` + `useBackgroundTaskBucketFilter.ts`、`packages/renderer/src/components/extension/BackgroundTaskListView.vue`（含内联 BackgroundTaskFilterBar，形态对齐 SubagentFilterBar）、`.../BackgroundTaskDetailPanel.vue`（新）
-- `packages/ui/src/extension-host/L2TabBar.vue` + `l2-tab-item.ts`（badge 支持，D4 ④）
+- `packages/renderer/src/lib/background-task-bucket.ts`（新，D10 分桶 SSOT——**现行**，消费方为托盘面板）、`packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts`（**现行**）+ `useBackgroundTaskBucketFilter.ts`（**已随 2026-09-16 视图退役删除**，同语义由托盘面板自持）、`packages/renderer/src/components/extension/BackgroundTaskListView.vue`（含内联筛选槽——**已随 2026-09-16 视图退役删除**，形态迁托盘）、`.../BackgroundTaskDetailPanel.vue`（**现行**）
+- `packages/ui/src/extension-host/L2TabBar.vue` + `l2-tab-item.ts`（badge 支持，D4 ④——**已随 2026-09-16 视图退役删除**）
 - `extensions/universal/base-tool-enhance/src/background/poller.ts`（D6-en intent 读回）、`.../background/spawn-background.ts`（armBackgroundTimeout 加固，R3-S1）、`.../background/task-store.ts`（不变量注释登记落点）
 - i18n locales、`docs/architecture/feature-map.md`（原 `docs/feature-map/`，已并入）
 
 **待验证检查点（设计阶段无法确定，留实施期）**：
-- dev-0.9.15 合入时序：本设计落地的分支若早于 subagent-sidebar-filter 合入 main，BackgroundTaskFilterBar 按 dev-0.9.15 设计参数独立实现（凹陷槽参数一致）；若已合入则评估直接复用组件形态（两处消费才抽象，本设计不提前假设其可复用性）
+- ~~dev-0.9.15 合入时序~~（已关：subagent-sidebar-filter 已合入 main；其筛选条/列表组件形态随后续侧栏任务视图退役删除，桶筛选形态由托盘面板承接）
 - ~~message-bus snapshot 补发~~（R1 审查已用源码关闭：subscribe 返回 snapshot 重放，写入 D3 事实）
 - ~~customType 透传~~（R1 审查已用源码关闭：`event-adapter.ts:657-672` 已透传，钩子挂 EventAdapter 旁路定案）
 - Windows `Get-Process` 身份探测的实际延迟与失败率（D6 分支④③档；影响的是 kill 可用性回退文案，不影响架构）
