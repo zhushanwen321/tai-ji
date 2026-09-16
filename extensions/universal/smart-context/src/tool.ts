@@ -5,8 +5,13 @@
  * （R2 实测 2026-08-22：tool execute 内 await ctx.compact() 不可行——AgentSession.compact
  * 开头的 abort() 会中止当前 agent 循环，挂起的 Promise 永不兑现、session 无 toolResult。
  * 故走 §3.2 降级态：execute 立即返回"压缩已启动"，onComplete/onError 后经
- * pi.sendUserMessage 注入结果消息——此时无进行中回合，abort 为 no-op）。
+ * sendSmartContextNotice 注入结果消息（nextTurn 车道，D4①——随下一次 prompt 注入，
+ * 不自起 run；此刻无进行中回合，compact 内部 abort 为 no-op）。
  * 压缩生成由 session_before_compact 接管 handler 完成（工具只触发，不生成）。
+ *
+ * 掐断的 turn 由 runtime 兜底续跑（设计 D4②）：本工具触发的 manual compact 会 abort 进行中
+ * 的 agent turn（pi F5：manual compact 明文不续跑），runtime 在 compaction_end 判定
+ * 「manual + 非 runtime 发起 + compaction_start 前 turn 被掐断」后经投递内核追加续跑投递。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -14,6 +19,7 @@ import { guardStaleCtx, isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guar
 import { Type } from "typebox";
 
 import { debugLog } from "./compact-handler.js";
+import { sendSmartContextNotice } from "./notices.js";
 import { buildDegradationHintLine } from "./reminder.js";
 import {
 	DEGRADATION_HINT_MIN_COMPACTIONS,
@@ -160,8 +166,8 @@ export function registerCompactContextTool(
 			const compactionCount = countCompactions(getEntries(ctx));
 
 			// R2 降级态：fire-and-forget。工具立即返回"已启动"；压缩完成后（此时无进行中
-			// 回合，compact 内部的 abort 为 no-op）经 sendUserMessage 注入结果（steer：
-			// 下一个 LLM 调用前投递，agent 立即看到结果）
+			// 回合，compact 内部的 abort 为 no-op）经 sendSmartContextNotice 注入结果
+			// （nextTurn：随下一次 prompt 作为 custom role 上下文注入，不自起 run——D4①）
 			const mode = pickMode(config, gating.modelId);
 			ctx.compact({
 				customInstructions:
@@ -170,7 +176,7 @@ export function registerCompactContextTool(
 						: undefined,
 				// E1 实锤崩溃点（9/3 pi-crash log）：两个回调由 compact 的内部 Promise 链异步
 				// 调用，不在 pi runner emit() 的 try/catch 内——session 替换窗口（GUI 切
-				// session/新建/重载高频触发）下 pi.sendUserMessage 命中 stale ctx 同步抛错即
+				// session/新建/重载高频触发）下 sendMessage 命中 stale ctx 同步抛错即
 				// 杀死 pi 进程。守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
 				// stale 错误原样上抛（守卫不吞真实 bug）。
 				onComplete: (r: unknown) => {
@@ -189,7 +195,7 @@ export function registerCompactContextTool(
 							`压缩前 ${formatK(result.tokensBefore ?? 0)} tokens → 压缩后约 ${formatK(result.estimatedTokensAfter ?? 0)} tokens；摘要生成成本：${cost}。`,
 							showHint ? buildDegradationHintLine() : "",
 						].filter((l) => l !== "");
-						pi.sendUserMessage(lines.join("\n"), { deliverAs: "steer" });
+						sendSmartContextNotice(pi, lines.join("\n"), "compact-complete");
 					}, {
 						isCtxStale: deps?.isCtxStale,
 						label: "smart-context:compact-onComplete",
@@ -200,9 +206,10 @@ export function registerCompactContextTool(
 					// 压缩本身的失败信息先落日志（守卫体外——stale 降级时该观测保留）
 					debugLog(`compact_context error: ${err.message}`);
 					guardStaleCtx(() => {
-						pi.sendUserMessage(
+						sendSmartContextNotice(
+							pi,
 							`[smart-context] 压缩失败：${err.message}。上下文未变化，可稍后重试（若反复失败，检查 smart-context 配置或使用 /compact）。`,
-							{ deliverAs: "steer" },
+							"compact-failed",
 						);
 					}, {
 						isCtxStale: deps?.isCtxStale,

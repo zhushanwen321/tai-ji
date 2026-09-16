@@ -38,7 +38,7 @@ vi.mock("../tool.js", () => ({
 
 import smartContextExtension from "../index.js";
 
-/** 最小 fake pi：装配路径只消费 on（事件接线）；registerTool/sendUserMessage 兜底。 */
+/** 最小 fake pi：装配路径只消费 on（事件接线）；registerTool/sendMessage 兜底。 */
 function createMockPi(): {
 	pi: ExtensionAPI
 	events: Map<string, (...args: unknown[]) => void>
@@ -47,7 +47,7 @@ function createMockPi(): {
 	const pi = {
 		registerTool: vi.fn(),
 		on: (event: string, handler: (...args: unknown[]) => void) => events.set(event, handler),
-		sendUserMessage: vi.fn(),
+		sendMessage: vi.fn(),
 	} as unknown as ExtensionAPI;
 	return { pi, events };
 }

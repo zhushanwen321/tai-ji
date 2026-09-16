@@ -2,6 +2,10 @@ import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
+// u4（delivery-ownership-kernel D4②）：compaction 掐断 turn 的续跑判定（新模块，无状态单例）。
+import { createResumeDecision } from './services/session/resume-decision.js'
+// u4 追加项（A5/V5）：reattach restore 包装——先建投递运行时再触发对账（reconcile 无运行时即 no-op）。
+import { createReattachRestore } from './services/session/reattach-delivery-trigger.js'
 import { createCompletionBackflow } from './services/session/completion-backflow.js'
 import { fanOutSettled } from './services/session/agent-settled-fanout.js'
 // D4（rename-session-three-modes）：session-renamed 扇出处理体（label 回写 + 整表广播）。
@@ -644,7 +648,18 @@ async function main(): Promise<void> {
     // SessionService 构造器恒创建，`?.` 为端口缺省（防御）形态的静默 no-op。
     return new EventAdapter(
       sessionId,
-      (events) => interpreter.interpret(events),
+      (events) => {
+        // u4（D4②）：续跑判定观察腿——在 interpreter 之前读事件原文（turn 被 abort 掐断
+        // 的事实来自 turn-end{stopReason:'aborted'} 事件序，不读占用投影：pi 侧
+        // `await abort()` 保证 agent_end 先于 compaction_start 到达，此时 runtime 投影已
+        // 回落 settling/idle）。解释后再收口（settle）：投递发生时压缩态已复位，内核 lane
+        // 判定看到压缩后状态（direct 直投起续跑 run）。resumeDecision 为闭包前向引用
+        // （先声明后构造，与 sessionService 同款：createAdapter 仅在 session 建立时执行，
+        // 引用恒就绪）。
+        resumeDecision.observe(sessionId, events)
+        interpreter.interpret(events)
+        resumeDecision.settle(sessionId)
+      },
       (_sid) => sessionService.backgroundTasks?.checkForChanges(),
       // [定向复审缺陷 2] detach 转调 interpreter.dispose：销毁路径（forceQuit/exit/delete/
       // restore 清场）经 adapter.detach 收口时，清 interpreter 在途 settling 延迟 timer +
@@ -684,9 +699,34 @@ async function main(): Promise<void> {
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
   })
+  // u4（delivery-ownership-kernel D4②）：续跑判定装配——工具压缩（manual）掐断的活跃 turn
+  // 在 compaction_end 判定后经内核 FIFO 追加续跑投递（与用户消息同通道，无第二 prompt 发起方）。
+  // 投递出口 = sessionDelivery.submit（D1 单一判定源：lane 判定归内核，本模块不直连 pi）。
+  const resumeDecision = createResumeDecision({
+    listDeliveryEntries: (sid) => sessionDelivery.entries(sid)?.active,
+    submitResumeDelivery: (sid, content) => { sessionDelivery.submit(sid, { content }) },
+    log: (message) => console.log('[resume-decision]', message),
+  })
+  // u4 D4② 条件②（非 runtime 发起）打标：runtime 自己的 /compact 入口 = sessionService.compact
+  //（transport handleSessionCompact → sessionService → dispatcher.compact → pi compact RPC）。
+  // 该链上的文件不在 u4 领地，组合根实例装饰是领地内唯一落点——RPC 生命周期即标记生命周期
+  //（pi compact RPC 的响应在 compaction_end 之后才回，故 compaction_start 观察时标记恒在场）。
+  // 长期方案（登记 deviations）：dispatcher 侧加显式回调/setter，本装饰随 u5 收口评估移除。
+  const dispatchRuntimeCompact = sessionService.compact.bind(sessionService)
+  sessionService.compact = async (sessionId: string, customInstructions?: string): Promise<void> => {
+    const release = resumeDecision.beginRuntimeCompact(sessionId)
+    try {
+      return await dispatchRuntimeCompact(sessionId, customInstructions)
+    } finally {
+      release()
+    }
+  }
   // session 销毁（主动删 / 进程退出 / restore 清场全部路径）→ 丢弃该 session 的 delivery
   // 队列与订阅（setOnSessionDestroyed 追加式注册，与 server 的 extension timeout 清理腿并存）。
-  sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
+  sessionService.setOnSessionDestroyed((summary) => {
+    sessionDelivery.dispose(summary.id)
+    resumeDecision.dispose(summary.id)
+  })
 
   // HandoffService：fast-handoff 编排层。依赖 sessionService（create/sendMessage/abort/getHistory/getSession）
   // + server（IMessageBroker 广播）+ pm（getClient 取源 session pi 句柄）。与 GitService/FileService 同模式
@@ -1239,7 +1279,15 @@ async function main(): Promise<void> {
   // 偏差 #27：onDeferredBroadcast = 高水位延迟进入/缓解的 reattach:deferred WS 推送出口
   // （u7c 滚动重启 broadcast 注入同形态；renderer 横幅腿 = useRollingRestartStatus）。
   void runStartupReattach({
-    restore: (sessionId) => sessionService.restoreSession(sessionId),
+    // u4 追加项（A5/V5 缺口）：restore 包装 = 恢复成功后**先建投递内核运行时再触发对账**
+    //（reconcile 无运行时即 no-op → 滚动重启后无提交活动时槽位滞留永不收养）。实现与
+    // 顺序论证见 services/session/reattach-delivery-trigger.ts。
+    restore: createReattachRestore({
+      restore: (sessionId) => sessionService.restoreSession(sessionId),
+      ensureDeliveryRuntime: (sessionId) => { sessionDelivery.getOrCreateDelivery(sessionId) },
+      reconcile: (sessionId) => sessionDelivery.reconcile(sessionId, 'pi-restored'),
+      log: (message) => console.warn('[reattach]', message),
+    }),
     waitForOrphanReap: () => orphanReapChain,
     onDeferredBroadcast: (payload) => server.broadcast({ type: 'reattach:deferred', payload }),
   }).catch((e) => {
