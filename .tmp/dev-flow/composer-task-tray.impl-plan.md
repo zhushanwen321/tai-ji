@@ -258,6 +258,7 @@ graph TD
 4. **性能面**：ViewHostStore 推送频次 = tool call 级；托盘只读 meta 派生（O(1)），guiTree 仅面板打开时渲染（设计 §3.5）。
 5. **mock 基础设施缺口（P4/u-e2e 复审登记，修复点出本流水线领地）**：`packages/core/src/transport/mock/index.ts` 的 `pushSession` 只做 `events.dispatchSession`，而 route-inbound 对声明 `crossSession: true` 的帧（`extension:widgetGui` / `extension:status` 等）需额外 `dispatchCrossSession` → mock 轨下 ExtensionHost bridge/RoleStatus 等 crossSession 消费者恒空态。影响 = widgetGui 消费端 e2e 只能由 real（faux）轨覆盖（已落地为 tasks-drawer-real R2）；修复建议 = mock 侧按 ROUTE_TABLE 声明补同款分发腿（一行级）。
 6. ~~**真机门未闭环（阶段 5 执行）**~~——已闭环：阶段 5 全场景执行完毕（N2/A1/A2/A2b/A3/A3b/A4/A5/A6/P7 逐场景记录见 §6.1；Gate A 四段 exit 0 证据 `.tmp/dev-flow/composer-task-tray.gate-a.log`）；P7/检查点 3 已回填设计 §3.6/§5 ✅（ba00f8887）。如实口径注：A3b 的 badge 传播腿真机时序错过、由组件测试覆盖（§6.1 已如实拆分），不影响场景执行完毕的闭环结论。
+7. **独立工单候选（dcs 复审 R4-1 登记，非本流水线引入）**：① `extensions/universal/subagent-workflow/src/interface/commands.ts:164` TUI noop notify 文案「View workflows in the sidebar Flows tab」——Flows tab 已退役，属用户可见文案行为变更（+ 同文件测试断言联动），超出 dcs 修复授权未动；② `packages/core` 的 `domains.test.ts:531` 仍断言 `"pause"` action 类型——workflowAction 已收窄 'abort'，该存量类型错误非本轮引入（core 基线 TS5097 之外），随下一次 core 测试维护一并改。
 
 **变更历史**：
 
