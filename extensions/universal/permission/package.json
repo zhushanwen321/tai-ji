@@ -62,7 +62,7 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@earendil-works/pi-tui": "^0.84.4"
+    "@earendil-works/pi-tui": "^0.85.1"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
@@ -78,7 +78,7 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@earendil-works/pi-tui": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.85.1",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   }
