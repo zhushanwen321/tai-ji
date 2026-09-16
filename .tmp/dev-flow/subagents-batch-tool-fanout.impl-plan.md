@@ -123,7 +123,7 @@ graph TD
 | u4 | ⛔ S5 期门结论 = **静默忽略分支**：typebox 1.3.7（= pi 0.84.4 钉版）Type.Object 不产 additionalProperties → Value.Check/Compile.Check 对未知字段均 true、不剥除；pi agent-loop.js:402 → pi-ai validation.js:280-299 无约束即透传 → collect 字段原样进 core。迁移素材已备（u4 已按裁决偏好在 start description 留迁移期提示句） | 期门结论（非偏好分支） | 固化；真机确认入阶段 5 A5；u8 迁移说明引用 |
 | u4 | 过渡态红点 2 处（core sync-collect-recovery.test.ts ×1、session-reader cross-package-subagent-core.test.ts ×2）：因 recoverSyncCollectBatch 删除，领地外未动 | 合理（跨单元过渡态，归属明确） | **并入 u5 随测试族删改修复**（u5 行已更新） |
 | u4 | 领地外死代码 `bg-notify-render.ts` batch 分支（extractBatch，渲染 notifyBatch 形态）无归属 | 计划缺口（领地表未覆盖） | **并入 u5 删除**（u5 行已更新） |
-| u4 | 领地外 stale 注释 2 处（shell session-lifecycle.ts:375-376、core sync-collect-domain.ts:13） | 合理（文件属 u5 清算面） | **并入 u5**（后者随文件整体删除自然消解） |
+| u6 | 副本路径串改写（D-1）：主文件/manifest 副本中 sessionFile 指针由真实 ~/.taiji 路径改写为临时布局路径（防 session-reader existsSync 泄出读真实数据目录）；保真对照 = 剔除路径串后逐字节全等（113+32 处 span，entry 结构/标记/正文原样） | 合理（红线封闭性要求，数据结构不变） | 固化 |
 | u5 | routeRecord/isCollectMember 删除后成功轮通知收敛为 notifyComplete 单通道（与原 async 直通分支逐行等价，失败轮统一走既有 async 失败单发；closeAfterRound 两分支本就同构） | 合理（删 sync 双路后的必然形态，非行为变更） | 固化 |
 | u5 | sync-collect-recovery.test.ts 未整删：含非 collect 覆盖面（存量 entry 投影白名单/orphan merge/P-rebuild/P-manifest 不变量）——删 7 批机制用例、改造保留 6 例 | 合理（随删/随改指令） | 固化 |
 | u5 | notifier-golden-snapshot 合批 merge 用例保留主体（60s 合批窗口是内核行为、降级形态仍存在），仅删批量渲染锁段；合批 details 降级宿主走 pi 默认渲染兜底 | 合理 | 固化 |
@@ -140,7 +140,7 @@ graph TD
 | u3-render-check | committed | 1 | 核对记录 `.tmp/dev-flow/render-check-u3.md`；三处消费点零改核实（message-turns.ts:699-701 / event-interpreter.ts:1011-1016 / Block.vue:434-435+L99-121 模板区）；三包零 diff 佐证；附带发现（Block.vue:96 注释漂移）登记待阶段 3 |
 | u4-collect-shell | committed | 1 | commit 014721b1b；shell 包 79 文件/965 passed（重跑核验一致，对账 972−5golden−2schema=965 闭合）；typecheck/lint exit=0；红点核验：core sync-collect-recovery.test.ts 1 failed 确认红因（recoverSyncCollectBatch not a function）→ 归 u5；S5 期门结论 = 静默忽略分支（证据链 typebox 探针 + pi-ai validation.js:280-299） |
 | u5-collect-core | committed | 2（首任限流零产出 + 接替完成） | commit 3da148eb7；42 文件 +433/−4126；重跑核验 core 3037/0 失败、shell 964/0、session-reader 407/0（u4 遗留 2 例修复确认）；grep 终扫三类剩余（非 collect 英文动词/读侧保留面/留痕注释，4 处命中抽验均为 [collect 退役] 注释）；extractBatch 零命中；notify-ledger.ts 幸存确认 |
-| u6-collect-compat | pending | 0 | — |
+| u6-collect-compat | committed | 1 | 验证记录 `.tmp/dev-flow/collect-compat-u6.md` + 脚本 u6-verify-collect-compat.mts（保留供阶段 5 复验）；⛔ 期门通过：真实存量样本（24 处 + 8 处 batchFinalized）三项验证 24/24 断言过——record-store 重建容忍 / session-reader 反查（result 单查+批量）/ initSession 恢复全链；仓库源码零改动，D6 无需回改 |
 | u8-collect-docs | pending | 0 | — |
 | u9-notify-ledger | pending | 0 | — |
 
