@@ -305,7 +305,7 @@ async onMessage(msg, ctx) {
 | `setWidgetDual(ctx, key, { gui, text } \| undefined)` | 设置/清除 widget（双模唯一入口） | 内部做 `isGuiCapable` 分派：RPC 编码 NUL 标记 JSON、TUI/json/print 推原生文本行；`undefined` 清屏且模式无关 |
 | `guiSetWidget(ctx, key, result \| undefined)` | 推送 GUI 臂（低层原语） | ⚠️ 无 mode 守卫：TUI/json/print 误调会把 marker 行推进原生 widget（乱码）；正常路径用 `setWidgetDual` |
 | `askUserInteract(ctx, questions, options?)` | 富交互问答 | 借 select 通道 + marker；取消返回 `null`；TUI 抛错 |
-| `getAskUserAnswer / getAskUserOther / getAskUserComment` | 答案解析 | 多选自动 `JSON.parse`；Other/Comment 读 `${header}__*` key |
+| `getAskUserAnswer / getAskUserOther / isAskUserQuestion` | 答案解析与守卫 | `getAskUserAnswer` 多选自动 `JSON.parse`（失败降级 `[raw]`）；`getAskUserOther` 读 `${header}__other` key；`isAskUserQuestion` 收窄 `unknown` 为合法问题对象 |
 | `extractGui(details)` | 提取 `__gui__`（带版本校验） | 前端消费侧用，extension 一般不需要 |
 
 ---

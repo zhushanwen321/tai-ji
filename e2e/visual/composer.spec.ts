@@ -1,8 +1,8 @@
 /**
  * visual baseline: composer 区域 —— C层 Playwright 像素 diff（IF3）。
  *
- * 激活 session（'E2E 文件树测试'）后 main panel 载入 chat workspace，截 composer-box。
- * baseline: e2e/visual-baselines/composer/composer-default.png（git tracked，Q3/D3）。
+ * 激活 session（'API 性能优化'）后 main panel 载入 chat workspace，截 composer-box。
+ * baseline: e2e/visual-baselines/composer.spec/composer-default.png（git tracked，Q3/D3）。
  *
  * activateSession 复用 e2e/v6-shell-baseline.spec.ts 范式。mock 模式（VITE_MOCK=true，无 VITE_E2E）
  * session list 是 fixtureSessions（5 个：重构 auth 模块 / API 性能优化 等），不依赖 e2eTestSession 注入。

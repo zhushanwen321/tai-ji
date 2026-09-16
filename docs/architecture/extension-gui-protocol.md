@@ -901,33 +901,39 @@ export function extractGui(details: Record<string, unknown> | undefined): GuiRen
 ### 9.1 GuiComponent 渲染路由（审查 S2——custom 注册机制）
 
 ```typescript
-// renderer/src/components/panel/message-stream/GuiComponentRenderer.vue
+// packages/ui/src/rendering-protocol/GuiComponentRenderer.vue（渲染包重建后自 renderer 旧路径迁入 packages/ui）
 <script setup lang="ts">
-import type { GuiComponent } from '@zhushanwen/extension-protocol'
-import AnsiText from './gui/AnsiText.vue'
+import { computed, inject } from 'vue'
+import type { Component } from 'vue'
+import type { GuiComponent, GuiComponentType } from '@zhushanwen/extension-protocol'
+import { AnsiText, Card, Columns, Group, ListTree, ProgressBar, StatsLine, TabBar } from './primitives'
+import { GUI_CUSTOM_REGISTRY_KEY } from '@taiji/core/rendering-protocol/custom-registry'
+import { resolveComponent } from '@taiji/core/rendering-protocol'
 
-// 已实现的内置组件映射。P2 阶段逐步补充 card / stats-line / progress-bar 等。
-const BUILTIN_MAP: Record<string, Component> = {
+// 已实现的内置原语映射：8 类全部在册（ansi-text + 7 布局/文本原语），本表无降级分支——
+// 降级 SSOT 在 core resolveComponent（未知 type / 未注册 custom → ansi-text JSON 文本）
+const BUILTIN_MAP: Record<Exclude<GuiComponentType, 'custom'>, Component> = {
   'ansi-text': AnsiText,
-  // P2 待实现: 'card' / 'stats-line' / 'progress-bar' / 'list-tree' / 'columns' / 'tab-bar'
+  'card': Card,
+  'stats-line': StatsLine,
+  'progress-bar': ProgressBar,
+  'list-tree': ListTree,
+  'columns': Columns,
+  'group': Group,
+  'tab-bar': TabBar,
 }
 
-// custom 组件注册表（内置 extension 编译期注册，P2 实现）
-const CUSTOM_MAP = inject<Record<string, Component>>('gui-custom-registry', {})
+// custom 组件注册表（内置 extension 编译期注册；key 权威在 @taiji/core/rendering-protocol）
+const CUSTOM_MAP = inject(GUI_CUSTOM_REGISTRY_KEY, {})
 
 const props = defineProps<{ component: GuiComponent }>()
 
-const resolved = computed(() => {
-  if (props.component.type === 'custom') {
-    const name = (props.component.props as { component?: string }).component
-    return CUSTOM_MAP[name ?? ''] ?? AnsiText
-  }
-  return BUILTIN_MAP[props.component.type] ?? AnsiText  // 未知类型降级
-})
+// core 解析（降级 + props 适配都在 core）：{ type, props } → 本组件纯查表映射成 Vue 组件
+const resolved = computed(() => resolveComponent(props.component, CUSTOM_MAP))
 </script>
 ```
 
-**降级行为**：未注册的 type（P2 前的 card/stats-line 等）一律降级到 `AnsiText`，把 props 序列化为 JSON 文本展示（不崩渲染、不丢信息）。
+**降级行为**：未知 type / 未注册的 custom 由 core `resolveComponent` 统一降级到 `ansi-text`（把 props 序列化为 JSON 文本展示，不崩渲染、不丢信息）——降级判定单点在 core，本组件不含 `?? AnsiText` 分支。
 
 **custom 类型约束**：外部（用户安装的）extension 的 custom 组件无法在前端注册——Vue 组件定义需要编译期打包，不能通过 WS 传输。仅 taiji 内置 extension 可在编译期注册到 `CUSTOM_MAP`。
 
@@ -1206,17 +1212,18 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 
 ### 15.3 前端组件清单与设计
 
-协议需要的前端 Vue 组件（`packages/renderer/src/components/panel/message-stream/gui/`）：
+协议需要的前端 Vue 组件（`packages/ui/src/rendering-protocol/primitives/`；路由组件 `GuiComponentRenderer.vue` 在同目录上级 `packages/ui/src/rendering-protocol/`）：
 
 | 组件 | 对应 GuiComponent type | 状态 | CSS 布局核心 |
 |------|----------------------|------|-------------|
 | `AnsiText.vue` | `ansi-text` | **已实现** | `ansi_up` → `<span>` 着色 |
-| `GuiCard.vue` | `card` | P2 待实现 | `rounded-lg border` + variant + header/body 递归渲染 |
-| `GuiStatsLine.vue` | `stats-line` | P2 待实现 | `flex flex-wrap gap-x-3` + severity 颜色 |
-| `GuiProgressBar.vue` | `progress-bar` | P2 待实现 | `<div>` + inner `<div style="width%">` |
-| `GuiListTree.vue` | `list-tree` | P2 待实现 | 递归 + `padding-left` depth + icon SVG |
-| `GuiColumns.vue` | `columns` | P2 待实现 | `grid` + `grid-template-columns` |
-| `GuiTabBar.vue` | `tab-bar` | P2 待实现 | `flex gap-1` + active 样式 |
+| `Card.vue` | `card` | **已实现** | `rounded-lg border` + variant + header/body 递归渲染 |
+| `StatsLine.vue` | `stats-line` | **已实现** | `flex flex-wrap gap-x-3` + severity 颜色 |
+| `ProgressBar.vue` | `progress-bar` | **已实现** | `<div>` + inner `<div style="width%">` |
+| `ListTree.vue` | `list-tree` | **已实现** | 递归 + `padding-left` depth + icon SVG |
+| `Columns.vue` | `columns` | **已实现** | `grid` + `grid-template-columns` |
+| `Group.vue` | `group` | **已实现** | 垂直组合容器（无视觉样式，子组件递归渲染） |
+| `TabBar.vue` | `tab-bar` | **已实现**（容器化：`sections` 与 `tabs` 等长时渲染 `tabs[active]` 子树） | `flex gap-1` + active 样式 + 分段容器 |
 
 **ask-user 富交互组件**（不在 BUILTIN_MAP，独立集成）：
 
@@ -1224,7 +1231,7 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 |------|------|------|
 | `AskUserOverlay.vue` | `components/extension/ask-user/` | **已实现** |
 
-P2 前，非 `ansi-text` 的通用原语降级为 JSON 序列化文本展示（不崩渲染）。
+降级：未知 type / 未注册的 custom 由 core `resolveComponent` 统一降级为 JSON 序列化文本展示（`ansi-text`，不崩渲染、不丢信息）。
 
 ### 15.4 渲染挂载点
 
@@ -1244,7 +1251,7 @@ P2 前，非 `ansi-text` 的通用原语降级为 JSON 序列化文本展示（�
 |---|---|---|
 | **P0: ANSI 兜底 + 历史路径修复** | tool output ANSI 渲染（ansi_up + Block.vue + outputRaw）+ message-converter.ts details 透传（F1）+ handleToolExecutionUpdate details 提取（S5） | ✅ 已完成 |
 | **P1: 协议包 + ExtensionUIDialog + ask-user 富交互** | extension-protocol 包 + event-adapter widget/ask-user marker 检测 + shared/protocol.ts 类型 + ExtensionUIDialog（confirm/select/input）+ askUserInteract + AskUserOverlay（Panel.vue inline） | ✅ 已完成 |
-| **P2: 通用原语渲染** | GuiCard / GuiStatsLine / GuiProgressBar / GuiListTree / GuiColumns / GuiTabBar Vue 组件 + custom 注册机制 | 待实现 |
+| **P2: 通用原语渲染** | 渲染原语 Vue 组件（`packages/ui/src/rendering-protocol/primitives/`：ansi-text + card / stats-line / progress-bar / list-tree / columns / group / tab-bar）+ custom 注册机制 | ✅ 已完成 |
 | **P3: extension 迁移** | 各 extension 接入协议（用通用原语组合表达领域数据） | 待实现 |
 
 ---
