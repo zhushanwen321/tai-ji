@@ -146,10 +146,13 @@ graph TD
 | D7 | U5 | D4 十处清单 | 补 A7 行（含「带」指称）+ §1.3 第二处死链修正 | 合理（同族命中面补齐） | 固化 |
 | D8 | U6 | D5 失败分句键 | 复用既有 `panel.message.traceFailed`（「含 {count} 次失败」）+「·」分隔，不新立 `turnTriggerBgNotifyFailed` 键 | 合理（语义等价、零硬编码、避免死键） | 固化；视觉文案与设计「· M 失败」的细微差异可接受 |
 | D9 | U6 | 耗时格式 | U3（SystemNotice）与 U6（Turn.vue）各有一个同构小函数（formatDurationMs / formatNotifyDuration，均输出 `26m03s` 形态） | 合理（并行单元各自实现；公共 util 属领地外） | 登记为后续收敛项（统一到 format-utils，非本设计阻塞） |
-| D10 | U6 | D5 等价性义务「诚实定性：当前不可复现」 | 实现期实测**存在可复现路径**（已填实 trigger turn 的尾部序列走全量重扫，签名不含 hiddenNotifies 会复用陈旧 summary）；已补测试固定（变异探针证非空转） | **doc_error**（设计断言被实现证伪） | 需回写设计文档 D5 等价性义务段的定性（阶段 3 一致性审查统一处理）；实现无需改动 |
+| D10 | U6 | D5 等价性义务「诚实定性：当前不可复现」 | U6 实现期声称存在可复现路径（已补测试固定）；**阶段 3 B 区审查复核认为该序列在应用增量链路上不可达**（中段插入不存在——store splice 仅待发队列；hiddenNotifies 只累积到未填实组、未填实组必折叠不进缓存），设计原文定性准确 | 采纳 B-D2：~~doc_error~~ → **合理（防御性对齐）** | 设计 D5 不改（「当前不可复现」保留）；hiddenNotifies 入签名 + 测试保留（防御正确 + 合成守卫）；U6 的「可复现」声称降级为测试场景覆盖（非运行时可达） |
 | D11 | 环境 | — | `pnpm --filter @taiji/core typecheck` 495 条 TS 错（兄弟包 TS5097 + 存量测试文件 chatMode，源自初始导入提交）；renderer `system-page-smart-context` 全量并发下 5s 超时（单跑 1.3s 绿） | 存量问题（非本次引入） | 登记不改（本轮 scope 外）；阶段 3 全量测试时复现则另立 |
 | D12 | 计划勘误 | §4.1 测试命令 | `@taiji/renderer` 实为 `@taiji/frontend`；`@taiji/subagent-core` 实为 `@zhushanwen/subagent-core` | 计划笔误 | 以实跑包名为准（各单元已按实跑执行） |
 | D13 | U10 | — | 退役键的 W4 注释拆半（注释同覆盖存活键 executingBash）→ 退役子句删、存活子句改写移项；sidebar 行号修正面比枚举多两处（notify.ts:143-171 区间漂移 → 144-173，实测重锚） | 合理（同面补齐 + 语义保全） | 固化 |
+| D14 | Gate A | — | `pnpm run test`（workspace 并发）有 1 失败：`packages/runtime/src/__tests__/services/idle-pi-reclaim-integration.test.ts`（faux 真进程端到端，并发下 4791ms 超时；空载单跑 1188ms 绿） | 环境性 flake（项目 AGENTS.md 已登记「真实进程/真实 LLM 用例必须空载串行，跨包并发饱和会越过事件预算」；本改动与该用例无交集） | Gate A 判定为全绿（39/39 包 passes，唯一 fail 经空载单跑证伪）；该用例属 runtime 既有真实进程轨，其执行纪律归项目 e2e 准则 |
+| D15 | 阶段 3 | — | 三区一致性审查 reasonable 共 19 条（A 区 7 / B 区 7 / C 区 5）——实现优于设计或合理演化，不破坏设计目标 | 合理（机制层无回归） | 要点固化：跨包字面量镜像义务（U1↔U2 已注释）、U2 编译期穷尽词表、U8 单谓词落投影边界（交叉格不可达已证）、U9 账本身份键取值论证、ActivityStrip 四行单模板收口、preset 清单重校准 9、TUI/滚动条全局 SSOT 沿用、信息条展开态保入口、形状命中不 gate customType（生产者唯一已证）；逐条见阶段 3 三区审查结论（要点已固化于本表与对应修复 commit） |
+| D16 | 阶段 4 | — | 修复批次两项（B-U1 失败分句键、C-U1 测试脚手架 + C-D3 3xs token）已 commit；顺带修复 tokens.css 存量注释缺陷（small 档 ruleset 被 postcss 吞掉——修复后解析验证 7 个真实 selector） | 合理（正面修复） | 固化 |
 
 **各单元 committed 后状态汇总**：10/10 committed（U1-U10）；工作区干净。进入阶段 3（一致性审查 + 全量测试）。
 
@@ -163,7 +166,7 @@ graph TD
 | U4 | committed | 1 | c037eab51（DESIGN.md §6.1 规格列 + §4.7 token 登记；doc-drift/constraints 守卫绿；逐项核对记录） |
 | U5 | committed | 1 | eb0a1099c（ActivityStrip 25 passed；两常量 50/24→32 计算值；compact-defer 十处同步；preset 校准 9） |
 | U6 | committed | 1 | 35df385d6（core 2118 passed / Turn 38 / 等价性 48；notify-summary 拆模块解 max-lines；四路变异探针） |
-| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐） |
+| U7 | committed | 1 | 12ed93f7f + 96a82818e（BlockScrollBox 9 + Block 回归 39；ui 824；tailwind 实编译验证；键切齐）；**探针 P1/P2 未闭合 → 阶段 5 dev 承接（B-U2 处置：token 注释校准位已标，dev 量取后回写）** |
 | U8 | committed | 1 | 50ef50902（notify-host-ended-at 9 passed + 包内全量 3118 passed；物化域=running 轮终+批成员） |
 | U9 | committed | 1 | 1e5102725（notify-batch 18 + notify-ledger 36 = 54 passed；变异探针证测试非空转） |
 | U10 | committed | 1 | 21e9ad399（退役 2 键双侧；i18n 子集 198 passed 含 locale-key-usage-guard 转绿；sidebar 文档四面 + 行号实测重锚） |
@@ -177,3 +180,7 @@ graph TD
 
 **变更历史**：
 - 2026-09-16 初版（基线 commit：9ab0a122b）：从设计文档 R9 终版编译；e2e 对账完成（2 always + 3 on-diff 待命中）。
+- 2026-09-16 阶段 2 完成：U1-U10 全部 committed（10/10，头提交 21e9ad399）；每单元硬核验（属地 diff + 测试重跑）后流转；偏差 D1-D13 登记。
+- 2026-09-16 阶段 3 Gate A（全量测试）：`pnpm run lint` EXIT=0；`pnpm extensions:typecheck/lint/test` 全 EXIT=0；`pnpm run test`（workspace 39 包）1 fail / 39 pass——唯一 fail = runtime `idle-pi-reclaim-integration`（faux 真进程，并发饱和超时；空载单跑 1188ms 绿，D14 归因）；日志落盘 `.tmp/dev-flow/system-notice-rendering-upgrade.gate-a.log`。**判定全绿**。
+- 2026-09-16 阶段 3 分区一致性审查（3 reviewer：A 数据链底层 / B 渲染聚合 / C 壳层文档）完成：unreasonable 3（B-U1 文案 / B-U2 探针门 / C-U1 测试脚手架）、doc_errors 11、reasonable 19。修复批次 2 组已 commit（704eef4c9 / 7acc76369），doc_errors 主 agent 修订（设计文档 R10 + DESIGN.md + testing 文档 + compact-defer，commit 0dce862ce），B-U2 处置=状态表标注（U7 行）。**审查清零达成**。
+- 2026-09-16 阶段 4 完成：unreasonable 与 doc_errors 清零（D15/D16 登记）；定向复审（本批影响面）= 修复均含测试证据 + 守卫全绿（见各 commit message）。转阶段 5 端到端验收。
