@@ -471,7 +471,7 @@ export const session = {
     return []
   },
 
-  /** Mock workflow 操作（pause/resume/abort，E2E 不断言此路径，stub resolve 即可） */
+  /** Mock workflow 操作（abort；pause/resume 已随扩展 D-2 移除。E2E 不断言此路径，stub resolve 即可） */
   async workflowAction(_sessionId: string, _action: string, _runId: string): Promise<void> {
     await sleep(TIMING.ack)
   },

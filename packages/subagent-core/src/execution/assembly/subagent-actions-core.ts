@@ -493,8 +493,8 @@ export async function cancelHandler(
     throw new Error(`Cannot cancel subagent ${id} (unsupported mode: ${rec.mode})`);
   }
   // [modeless 波1] cancel 语义统一：cancel = 打断在飞轮 + settle interrupted（record
-  // 留 idle 可续聊，不归档——旧 chatMode record 的 close(force:true) 别名分支随
-  // chatMode 消亡删除：cancel 不是归档动作，收起归 close action）。
+  // 留 idle 可续聊，不收口——旧 chatMode record 的 close(force:true) 别名分支随
+  // chatMode 消亡删除：cancel 不是收口动作，收口落账归 close action）。
   // step 3: service.cancel boolean（list-view 契约不变）；false = 已终态（CAS 抢锁失败）。
   // 注意：不嵌入 rec.status——findRecord 快照可能已过期（TOCTOU：cancel 期间 detached
   // 路径 CAS 到 done/failed）。重新查当前状态，避免「status: running」与「already finished」矛盾。
@@ -592,16 +592,16 @@ export async function messageHandler(
 // ============================================================
 
 /**
- * close action handler：收起 subagent（[U5 / §3.2.5] close = 归档（archived）——
- * 列表隐藏可寻回，不终态化；对话模式为主，one-shot 同样支持）。
+ * close action handler：结束 subagent（[U5 / §3.2.5] close = 收口落账——
+ * 会话落 ended 侧，不终态化；对话模式为主，one-shot 同样支持）。
  *
  * force 语义（设计决策 5/10 × [U5] 意愿动作重定义）：
  *   force:false（默认）= 优雅收口——
- *     无在跑轮（timer armed / 无活进程）→ 立即归档收口（回收保活进程 + markArchived）
- *     有活进程在跑轮 → 置 closeAfterRound 挂起，收口轮 settle → 轮次通知送达 → 归档
+ *     无在跑轮（timer armed / 无活进程）→ 立即收口落账（回收保活进程 + markSettledOut）
+ *     有活进程在跑轮 → 置 closeAfterRound 挂起，收口轮 settle → 轮次通知送达 → 收口落账
  *     （顺序约束 [写死]）——返回 {closed:true} 即承诺轮结束后资源已释放
  *   force:true = 立即终止——cancel 语义（abort 轮 + settle interrupted + 放弃轮
- *     标记）+ 随即归档
+ *     标记）+ 随即收口落账
  *
  * 行为分流委托 chatActions.closeSubagent（归属守卫由 chatActions.getRecordForAction 把关）。
  */
@@ -687,7 +687,7 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 2：全态查找（内存 archived + 磁盘重建）。
+  // 守卫 2：全态查找（内存 idle + 磁盘重建）。
   const source = service.queries.lookupRecordAnyState(id);
   if (!source) {
     throw new Error(

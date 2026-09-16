@@ -7,10 +7,6 @@ export default {
   selectSessionHint: '选择会话查看文件',
   sessionListLoadFailed: '会话列表加载失败（{error}）',
   switchSessionFailed: '切换会话失败：{msg}',
-  loadSubagentFailed: '加载子代理历史失败：{msg}',
-  cancelSubagentFailed: '取消子代理失败：{msg}',
-  agentCallFailed: '该 agent call 执行失败，未创建 session，无对话记录可查看',
-  agentCallLoadFailed: '无法加载 agent call 对话流：{msg}',
   workflowOpFailed: '工作流操作失败：{msg}',
   newTaskFailed: '新建任务失败：{msg}',
   deleteSessionFailed: '删除会话失败：{msg}',
@@ -92,8 +88,6 @@ export default {
   segmentedTab: {
     session: '会话',
     file: '文件',
-    subagent: '子代理',
-    workflow: '工作流',
     plugin: '插件',
   },
   projectSwitcher: {
@@ -133,90 +127,18 @@ export default {
     validationMaxLength: '名称不能超过 {max} 个字符',
     validationPattern: '不允许换行符，最大 {max} 个字符',
   },
-  subagentList: {
-    loading: '加载后台任务…',
-    loadFailed: '加载失败（{error}）',
-    retry: '重试',
-    empty: '暂无后台任务',
-    emptyHint: "在对话中让主 agent 调用 {'@'}subagent 工具发起后台任务，运行中的任务会显示在这里",
-    cancel: '取消',
-    cancelConfirm: '确认取消？',
-    alreadyEnded: '任务已结束',
-    turnsUnit: 'turns',
-    tokUnit: 'tok',
-  },
-  // Agents tab 二级筛选（设计 docs/design/subagent-sidebar-filter.md §3.4（已删除，git 可追溯）+ 永久会话模型
-  // §3.2.8 默认可见性翻转 U8b：默认视图 = 全部活跃会话（running + idle，legacy 终态只读
-  // 兼容同显）；「已收起」视图承载归档寻回（场景 3））
-  // [C7 用词登记] 本处「正在跑」与 backgroundTaskList.filter.active 的「运行中」刻意不统一：
-  // 前者任务域——占用中（在飞轮）的子代理会话；后者进程域——仅进程 running 状态的
-  // 后台命令。概念域不同属真差异，勿合并措辞（adversarial-review-fixes §3.4 C7 裁决）。
-  subagentFilter: {
-    active: '全部',
-    running: '正在跑',
-    archived: '已收起',
-    emptyActive: '暂无会话',
-    emptyActiveHint: '已收起的会话可在「已收起」视图中寻回',
-    viewArchived: '查看已收起（{count}）',
-    viewAll: '查看全部（{count}）',
-    emptyRunning: '没有正在跑的会话',
-    emptyRunningHint: '空闲会话随时可以继续对话',
-    emptyArchived: '没有已收起的会话',
-  },
+  // [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：子代理列表 / 子代理筛选栏 / 工作流列表 /
+  // 「后台命令」L2 视图四处死键全量删除——消费组件同批退役，任务文案现行承载 =
+  // composer 任务托盘 `panel.tray.*`（locales/zh-CN/tray.ts）。
+  // [C7 用词登记·迁移] 原「正在跑（任务域，占用中的子代理会话）vs 运行中（进程域，仅进程
+  // running 的后台命令）」两套措辞刻意不统一——该域差异现行登记在两处：tray.ts 文件头
+  // [词表裁决]（`panel.tray.bucket.running` 任务域 / `panel.tray.bucket.runningProcess`
+  // 进程域）+ 本文件 turnProgress 节。概念域不同属真差异，勿合并措辞。
   workflowDetail: {
-    backToList: '返回工作流列表',
-    pause: '暂停',
-    resume: '恢复',
     terminate: '终止',
     terminateConfirm: '确认终止？',
     pendingHint: '等待执行中',
     agentsLabel: '{count} 个代理',
-    modelDefault: '默认',
-    tokenInUnit: 'in',
-    tokenOutUnit: 'out',
     turnsUnit: 'turns',
-  },
-  workflowList: {
-    loading: '加载工作流…',
-    loadFailed: '加载失败（{error}）',
-    retry: '重试',
-    pause: '暂停',
-    resume: '恢复',
-    terminate: '终止',
-    terminateConfirm: '确认终止？',
-    empty: '暂无工作流',
-    emptyHint: '工作流是多步骤自动化脚本，在对话中发起后会显示运行进度',
-    agentsLabel: '{done}/{total}',
-  },
-  // 「后台命令」L2 视图（background-task-sidebar-view D10）。术语裁决（设计 §1）：
-  // 与 subagent 的「后台任务」区分，本视图一律用「后台命令」
-  // [C7 用词登记] 本处「运行中」与 subagentFilter.running 的「正在跑」刻意不统一：
-  // 前者进程域——仅进程 running 状态；后者任务域——占用中的子代理会话。真差异保留。
-  backgroundTaskList: {
-    filter: {
-      active: '运行中',
-      ended: '已结束',
-      all: '全部',
-    },
-    emptyAllTitle: '暂无后台命令',
-    emptyAllHint: '在对话中让 AI 以后台方式运行命令，任务会显示在这里',
-    emptyActive: '没有运行中的后台命令',
-    emptyEnded: '暂无已结束的后台命令',
-    viewAll: '查看全部 ({count})',
-    kill: '终止',
-    killConfirm: '确认终止',
-    pidLabel: 'pid',
-    exitLabel: 'exit',
-    status: {
-      running: '运行中',
-      killing: '终止中',
-      orphaned: '孤儿任务',
-      killed: '已终止',
-      succeeded: '已成功',
-      failed: '已失败',
-    },
-    // S7 损坏错误条 / S6 断连提示条（一致性审查修复批次）
-    corruptBanner: '任务数据损坏，已忽略（.corrupt 保留现场）',
-    disconnectBanner: '连接断开，重连后自动刷新',
   },
 }

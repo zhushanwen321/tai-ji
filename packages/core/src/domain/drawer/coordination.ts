@@ -81,7 +81,7 @@ export function toggleDrawerDock(): void {
 
 /**
  * 打开 subagent tab，展示指定 subagent 的只读对话流（D3：复用 MessageStream）。
- * virtualId 由调用方（chat subagent 块 / sidebar SubagentList / workflow WorkflowTab）用
+ * virtualId 由调用方（chat subagent 块 / composer 任务托盘 / workflow WorkflowTab）用
  * subagentVirtualId(mainSid, subId) 或 agentCallVirtualId(acsId) 算好传入；core 不感知 id 结构。
  * enteredFrom 驱动 SubagentTab 返回按钮显隐（D4）：'workflow'=从 workflow tab 进入显返回；'chat'=无返回。
  */

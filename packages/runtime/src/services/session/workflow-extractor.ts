@@ -42,7 +42,7 @@ import type {
  * packages/subagent-core/src/orchestration/run-snapshot.ts 的 SNAPSHOT_VERSION
  * （export const，当前 'wf-run-v2'；extension 侧 jsonl-run-store.ts 留壳 import 消费）。
  * extension 升级格式时必须同步 bump 此处，否则版本守卫会把新快照全部判为不匹配跳过
- * （renderer WorkflowList 对新 run 显示为空）。
+ * （renderer 侧新 run 无 record，托盘 workflow 面板为空）。
  */
 const SNAPSHOT_VERSION = 'wf-run-v2'
 
@@ -349,7 +349,7 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // 「同版本坏数据」区分开。
   // [review 修复 R4] 不再静默——pi-subagent-workflow 是 mandatory + autoUpgrade 扩展，
   // extension 先发版（npm-* tag 独立管线）而 app 未跟上时，版本守卫会把新 run 全部
-  // 判为不匹配跳过（WorkflowList 对新 run 显示为空），无日志则该版本漂移不可观测。
+  // 判为不匹配跳过（renderer 侧新 run 无 record，托盘 workflow 面板为空），无日志则该版本漂移不可观测。
   if (snapshot.v !== SNAPSHOT_VERSION) {
     console.warn(
       `[workflow-extractor] snapshot version '${String(snapshot.v)}' unsupported (expected '${SNAPSHOT_VERSION}') — ` +
@@ -386,8 +386,7 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
     scriptName: snapshot.spec.scriptName,
     slug: snapshot.spec.slug,
     description: snapshot.spec.description,
-    // v2 两态直接赋值（是 WorkflowRunStatus 三态的子集，无需断言；
-    // 'paused' 是 WorkflowRunStatus 的 legacy 读侧值，v2 快照不产出）
+    // v2 两态直接赋值（与 WorkflowRunStatus 一致，无需断言；一次性生命周期 D-2 只产出 running/done）
     status: snapshot.state.status,
     reason: snapshot.state.reason,
     startedAt: snapshot.meta.startedAt,

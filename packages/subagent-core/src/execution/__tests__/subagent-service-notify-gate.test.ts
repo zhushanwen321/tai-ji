@@ -78,22 +78,20 @@ function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
   return { agentDir, service, store, pi };
 }
 
-describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮标记阻断 / 其余放行）", () => {
-  it("blocks archived (gate ①) and abandoned-round hits (gate ②); allows settled/running without marks", () => {
-    // ① intent=archived 静默（承接原 parent-new/parent-fork 阻断——编排性关闭即自动收起）。
-    expect(notifyGateAllowsDelivery({ intent: "archived" })).toBe(false);
-    // ② 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
+describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + 跨世代丢弃 / 其余放行）", () => {
+  it("blocks abandoned-round hits and cross-epoch inbound; allows settled/running without marks", () => {
+    // 放弃轮标记命中（承接原 cancelled 阻断防双发）：同世代回注轮 ≤ 标记轮 → 丢弃。
     expect(
       notifyGateAllowsDelivery({ lastAbandonedRound: { epoch: 0, round: 2 }, round: 2 }),
     ).toBe(false);
-    // ② 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
+    // 两步判定第一步：回注声明世代 ≠ record 当前世代 → 丢弃。
     expect(
       notifyGateAllowsDelivery(
         { epoch: 1, lastAbandonedRound: { epoch: 0, round: 2 } },
         { epoch: 0, round: 2 },
       ),
     ).toBe(false);
-    // ② 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
+    // 标记槽世代 ≠ 当前世代（reopen 残留）→ 标记自然失效，新世代正常轮放行。
     expect(
       notifyGateAllowsDelivery({ epoch: 1, round: 1, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
@@ -101,12 +99,15 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     expect(
       notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
-    // 无标记无归档（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // [u-arch] gate ①（intent=archived 静默）随收起概念删除退役——编排性关闭的
+    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份守卫 + notifyId
+    // 账本承接。
     expect(notifyGateAllowsDelivery({})).toBe(true);
     expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);
   });
 
-  it("kickOffChatRound 应答回注不注入 archived records（[U5] 编排性关闭自动收起 → gate ①静默）", async () => {
+  it("kickOffChatRound 迟到应答回注不注入已编排性关闭的 record（放弃轮标记 gate 承接，[u-arch] gate ①删除后主防线）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();
@@ -120,19 +121,18 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
       rootSessionId: "root-session",
       controller: new AbortController(),
     });
-    // 模拟 disposeAllRecords 先行编排性关闭（自动收起）后，迟到的 kickOffChatRound
-    // 应答回注。[U5 适配] 新形态 = idle + intent=archived + 放弃轮标记（gate ①②
-    // 双重阻断）——record 补 register 进 store 对齐「store 外 record 无编排性关闭
-    // 可达」的生产形态。
+    // 模拟 disposeAllRecords 先行编排性关闭后，迟到的 kickOffChatRound 应答回注。
+    // [u-arch] 关闭形态 = idle + 放弃轮标记（disposeAllRecords 置标记 → settle 持久化）
+    // ——gate ① 删除后，迟到回注由放弃轮标记 gate 阻断（同世代、回注轮 ≤ 标记轮）。
     // [modeless 波1] 经 Continuation 统一入口驱动：message 派发轮（run 挂起）→
-    // 编排性关闭先行（markArchived——disposeAllRecords 的 store 原语）→ 迟到引擎
-    // 应答被 gate ①静默（intent=archived + 放弃轮标记 gate ②双重阻断）。
+    // 编排性关闭先行（markSettledOut——disposeAllRecords 的 store 原语）→ 迟到引擎
+    // 应答被 gate 阻断。
     record.status = "idle";
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "go");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     record.lastAbandonedRound = { epoch: record.epoch ?? 0, round: record.round ?? 0 };
-    store.markArchived(record);
+    store.markSettledOut(record);
     fake.runs[0]!.settle({ content: "late round text" });
     await Promise.resolve();
     await Promise.resolve();
@@ -142,7 +142,7 @@ describe("T4① notify gate 三元组（[U5 / §3.2.7] 归档静默 / 放弃轮�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，三元组无阻断）", async () => {
+  it("[modeless 波1] 旧终态遗留形态（idle + gc 展示位）message 续聊 → 轮终通知仍送达（revive 清遗留位，gate 无阻断）", async () => {
     const { agentDir, service, store, pi } = setup();
     clearEngines();
     const fake = registerFakePiEngine();

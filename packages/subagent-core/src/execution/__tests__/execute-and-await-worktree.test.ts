@@ -209,7 +209,7 @@ describe("execute(worktree:true) 创建即置 hadWorktree", () => {
 
     const store = getStore(service);
     const rec = store.getMutable(execHandle.subagentId);
-    // [S5] 创建即置（归档 markArchived 清句后，重建守卫判据由本标志承载）
+    // [S5] 创建即置（close 收口 markSettledOut 清句后，重建守卫判据由本标志承载）
     expect(rec?.hadWorktree).toBe(true);
     expect(rec?.worktreeHandle).toBe(handle);
   });

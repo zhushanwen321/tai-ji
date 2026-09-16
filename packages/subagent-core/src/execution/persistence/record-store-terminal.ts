@@ -1,8 +1,8 @@
 // src/execution/persistence/record-store-terminal.ts
 //
-// [H4 三轴拆分 / 终态原语轴] RecordStore 终态/settle/意愿动作原语的实现体：
+// [H4 三轴拆分 / 终态原语轴] RecordStore 终态/settle/收口动作原语的实现体：
 //   - legacy 终态族（markFinalized / markCancelled——workflow D7 例外族专用，U5 退役）；
-//   - settle / 意愿动作族（markSettled / markReactivated / markReopened / markArchived /
+//   - settle / 收口动作族（markSettled / markReopened / markSettledOut /
 //     markIdleEvicted——永久会话模型 §3.2.2/§3.2.5）；
 //   - sync 批终态（markBatchFinalized）与磁盘终态位翻活（markResurrected）；
 //   - binding settle 快照族（settleSnapshotPatch / fullBindingPayload /
@@ -83,12 +83,12 @@ export interface TerminalCtx {
  * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
  * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
  *
- * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 意愿动作
- * 接线退役（正常收口归 markSettled、归档归 markArchived、编排性关闭归新编排）；
+ * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
+ * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
  * `.state` 旧格式由 U3 读侧单规则上行映射（finalized → idle + stopReason=reason）。
  *
  * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
- * @deprecated U5 退役（归 markSettled / markArchived / 编排性关闭新编排承接）。
+ * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
  */
 export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
   const reason = closedReason ?? record.closedReason ?? "gc";
@@ -281,19 +281,8 @@ export function markResurrectedImpl(record: ExecutionRecord, wasClosed: boolean,
 }
 
 /**
- * [U2 更名] 统一语言更名 markIdleEvicted（「内存回收」义），markIdleArchived 本名保留为
- * deprecated 别名（生产点 idle-gc.ts 已迁名；存量测试写序全等断言仍消费，删除随测试
- * 迁名一并处理）。
- *
- * @deprecated 改用 markIdleEvictedImpl。
- */
-export function markIdleArchivedImpl(record: ExecutionRecord, ctx: TerminalCtx): void {
-  markIdleEvictedImpl(record, ctx);
-}
-
-/**
- * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。markIdleArchived 的统一
- * 语言更名（30 天 TTL 内存回收，用户不可见，非终态化——磁盘不动、可重建）。
+ * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
+ * 用户不可见，非终态化——磁盘不动、可重建。
  *
  * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
  * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
@@ -317,7 +306,7 @@ export function markIdleEvictedImpl(record: ExecutionRecord, ctx: TerminalCtx): 
 /**
  * [U7 / §3.2.4 release 出口] 写权声明 release 的锚分派：pi = 子 session 文件
  * （现行键）；zcode = transcriptRef 派生锚基底（markResurrected acquire 的对称
- * 反向）。双锚皆缺（spawn 窗口期归档）无声明可释——静默跳过（acquire 同形态
+ * 反向）。双锚皆缺（spawn 窗口期未确立锚）无声明可释——静默跳过（acquire 同形态
  * 硬拒，对称成立）。
  */
 export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx): void {
@@ -394,27 +383,6 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
     });
   }
   // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
-  ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
-  ctx.reportRecordTransition(record);
-  ctx.notifyChange();
-  return true;
-}
-
-/**
- * 意图原语：message 隐含寻回（§3.2.2 事件表 archived+message → running+active 行、
- * §3.2.5 寻回行——「寻回不需要显式动作」）。intent 翻回 active（markArchived
- * 的对称反向原语，U4 留桩的本单元接线点）。纯列表意愿位：占用位（status）与资格
- * 判据（§3.2.3 三件套）均不涉本原语——续聊链在寻回前后行为一致。
- *
- * manifest 投影随翻回刷新（archived→closed 下行映射归 U8，桥接期经 derived 投影
- * 保持索引在册）。幂等：intent 已 active/undefined 时 no-op（寻回只对 archived 有
- * 语义——挂点调用方已在 archived 分支内）。
- *
- * @returns true = 写面完成（含幂等 no-op）；false = 无（恒 true，签名对称性保留）。
- */
-export function markReactivatedImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
-  if (record.intent !== "archived") return true;
-  record.intent = "active";
   ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
   ctx.reportRecordTransition(record);
   ctx.notifyChange();
@@ -531,36 +499,38 @@ export function persistSettleSnapshot(basePath: string, record: ExecutionRecord,
 }
 
 /**
- * 意图原语：close 收起（意愿动作 §3.2.5 close 行）。intent 翻转 archived +
- * `.alive` release（§3.2.4 release 出口①——归档即放弃写权）。
+ * 意图原语：close 收口落账（收口动作 §3.2.5 close 行）——会话收口的账面落定：
+ * `.alive` release（§3.2.4 release 出口①——收口即放弃写权）+ worktreeHandle 清句
+ * + manifest 投影 + entry 上报。
  *
- * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → intent 翻转 + 归档注销
- * （intent 翻转必须在通知链之后，否则吞掉收口轮通知）。worktree 回收（patch
- * 落盘前移到归档点）与 pending 注销补发的编排留调用方（U5 意愿动作接线）；
- * 本原语只吸收 intent 位 + 写权声明两写面 + worktreeHandle 清句（S5 修复——
- * 归档即绑定消亡，重建守卫据 hadWorktree 触发）。
+ * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → 收口落账 + 注销补发（收口落账
+ * 必须在通知链之后，提前调用会丢收口轮通知）。worktree 回收（patch 落盘前移到
+ * 收口点）与 pending 注销补发的编排留调用方；本原语只吸收写权声明 + worktreeHandle
+ * 清句（S5 修复——收口即绑定消亡，重建守卫据 hadWorktree 触发）两写面。
  *
- * 幂等：intent 恒置 archived、release 对缺失 marker 静默（重复 close 无害）。
- * record 留内存（archived ≠ 内存回收——列表可见性由 intent 承载，占用位不动）。
- * session-reader 的 archived 下行映射（U5-D10，§3.2.8）：本原语经
- * derivedManifestRecord 投影 legacy status="closed"（「已收起」在旧消费者语义里
- * = 结束）+ executionStatus="idle"（两态权威词）双写——旧版 session-reader 按
- * 既有 closed 语义归入已完成分区，行为域内无未知值。
+ * 幂等：release 对缺失 marker 静默、worktree 清句对无 handle no-op（重复 close /
+ * dispose 重复调用无害）。record 留内存 idle（收口 ≠ 内存回收——占用位不动，
+ * message 随时可续聊复活）。
  *
- * @returns true = 归档写面完成（幂等，恒 true）。
+ * session-reader 下行投影（§3.2.8）：本原语经 derivedManifestRecord 投影——
+ * 收口落账 record（idle、无 closedReason）legacy status="running" +
+ * executionStatus="idle"（两态权威词）双写。对外契约只有 running/ended 两态，
+ * 旧版 session-reader 视其为活跃成员（行为变化登记：原「归入已完成分区」的
+ * archived→closed 下行随 intent 概念删除而退役，§3.4 方案 A 裁决）。
+ *
+ * @returns true = 收口落账写面完成（幂等，恒 true）。
  */
-export function markArchivedImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
-  // [S5 修复] worktree 绑定随归档消亡：调用方（archiveRecord / disposeAllRecords）
-  // 已在归档前完成 patch 前移 + worktree 回收，handle 指向已删目录——残留会让
+export function markSettledOutImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
+  // [S5 修复] worktree 绑定随收口消亡：调用方（archiveRecord / disposeAllRecords）
+  // 已在收口前完成 patch 前移 + worktree 回收，handle 指向已删目录——残留会让
   // Continuation 重建守卫（!record.worktreeHandle 判「绑定丢失」）永不触发，续聊
   // spawn cwd 回落已删目录。清句前先置 hadWorktree（此后 entry/binding 的 worktree
   // 投影与重建守卫判据均由本标志承载——与 execute 创建点置位呼应）。幂等：无
-  // handle 时 no-op（重复归档零影响）。
+  // handle 时 no-op（重复收口零影响）。
   if (record.worktreeHandle !== undefined) {
     record.hadWorktree = true;
     record.worktreeHandle = undefined;
   }
-  record.intent = "archived";
   releaseWriteLeaseImpl(record, ctx);
   ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
   ctx.reportRecordTransition(record);

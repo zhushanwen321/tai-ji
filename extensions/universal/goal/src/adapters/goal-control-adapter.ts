@@ -376,7 +376,8 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 						: `Goal reported blocked.\nGoal ID: ${details.goalId}\nReason: ${params.reason?.trim() ?? ""}`;
 
 			// 状态展示不再进 tool result（GUI 渲染字段已移除）：GUI 由 handle* 内的 updateWidget
-			// 经 guiSetWidget 推送（M17 对话流 widget 面板）。
+			// 经 setWidgetDual 推送（GUI 臂 = guiSetWidget/marker 通道，低层原语不单独调用；
+			// 渲染终点 = composer 任务托盘的协议 widget 区）。
 			return { content: [{ type: "text", text }], details };
 		},
 

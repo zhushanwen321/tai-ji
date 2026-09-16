@@ -530,7 +530,7 @@ describe("SubagentService", () => {
     // 让 pending-notifications 清理 registry entry，避免两侧状态不一致。
     // 此组验证该 emit 路径。
 
-    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=archived)（[U5] 编排性关闭=自动收起）", () => {
+    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=completed)（[U5] 编排性关闭=收口落账）", () => {
       const { service, pi } = makeReadyServiceWithPi();
       injectRunningBackground(service, "bg-dispose-1");
       injectRunningBackground(service, "bg-dispose-2");
@@ -538,19 +538,19 @@ describe("SubagentService", () => {
 
       service.dispose();
 
-      // 每个 running record 都 emit 了 pending:unregister（[U5] reason=archived——
-      // 归档点补发注销，承接原 emitUnregister 语义挂载归档原语）
+      // 每个 running record 都 emit 了 pending:unregister（[U5] reason=completed——
+      // 收口点补发注销，承接原 emitUnregister 语义挂载收口落账原语）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-1", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-1", reason: "completed" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-2", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-2", reason: "completed" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-3", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-3", reason: "completed" }),
       );
     });
 

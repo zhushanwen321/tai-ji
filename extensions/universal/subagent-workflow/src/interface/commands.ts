@@ -161,7 +161,7 @@ async function handleRpcMode(
       ctx.ui.notify(`Usage: /workflows ${parsed.verb} <runId>`, "warning");
       return;
     case "noop":
-      ctx.ui.notify("View workflows in the sidebar Flows tab", "info");
+      ctx.ui.notify("View workflows in the composer task tray", "info");
       return;
     default: {
       // exhaustiveness 断言：未来新增 action verb 忘加 case 时 tsc 报错

@@ -528,8 +528,8 @@ describe('session 域 请求-响应', () => {
     await expect(session.getAgentCallFilePath('s1', 'ac1')).resolves.toBe('/p.jsonl')
     expect(mockCommand.mock.calls[2][0]).toBe('session.getAgentCallFilePath')
 
-    await session.workflowAction('s1', 'pause', 'r1')
-    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.workflowAction', { sessionId: 's1', action: 'pause', runId: 'r1' }])
+    await session.workflowAction('s1', 'abort', 'r1')
+    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['session.workflowAction', { sessionId: 's1', action: 'abort', runId: 'r1' }])
 
     await session.subagentAction('s1', 'message', { subagentId: 'sa', text: 'hi' })
     expect(mockCommand.mock.calls[4][1]).toEqual({ sessionId: 's1', action: 'message', subagentId: 'sa', text: 'hi' })

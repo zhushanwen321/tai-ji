@@ -145,7 +145,7 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
 
     expect(cancelMock).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "View subagents in the sidebar Agents tab",
+      "View subagents in the composer task tray",
       "info",
     );
   });
@@ -526,7 +526,7 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
 
     expect(mockedAbortRun).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "View workflows in the sidebar Flows tab",
+      "View workflows in the composer task tray",
       "info",
     );
   });

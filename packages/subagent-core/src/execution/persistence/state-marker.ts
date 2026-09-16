@@ -383,7 +383,7 @@ export interface RecordBinding {
    * 来源身份（H2 S3 修复：引擎子文件身份面 origin 透传）。undefined（存量 binding）
    * = "tool" 语义，消费方零迁移——engine-CLI 化后子 session 文件无 identity entry，
    * 本 sidecar 是磁盘重建面 origin 过滤（subagents list / TUI overlay）的唯一承载，
-   * 漏本字段则归档/重启后 workflow record 逃过投影过滤（Gate B S3 FAIL 根因）。
+   * 漏本字段则收口/重启后 workflow record 逃过投影过滤（Gate B S3 FAIL 根因）。
    */
   origin?: RecordOrigin;
   /**

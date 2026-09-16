@@ -44,7 +44,7 @@ export interface NotifyHostDeps {
 export interface NotifyHost {
   /** background 完成回注（原 Service.notifyComplete）。 */
   notifyComplete(record: ExecutionRecord): void;
-  /** [C-1] close 归档提示通知（原 Service.notifyClosed；[modeless 波1] 全 record）。 */
+  /** [C-1] close 收口落账提示通知（原 Service.notifyClosed；[modeless 波1] 全 record）。 */
   notifyClosed(record: ExecutionRecord, emptyBody?: boolean): void;
   /** pending-notifications 注册（原模块函数 emitPendingRegister，pi 经 deps 取）。 */
   emitPendingRegister(id: string, name?: string): void;
@@ -119,13 +119,14 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
   const notifier: BgNotifier = createNotifier(piAdapter());
 
   /** record → BgNotifyRecord（notifier.notify 入参映射，内部不外露）。
-   *  v4 B-1：守卫放行 closed（终态，含 cancelled）、isIdle（对话模式轮次完成，notify 主 agent G1）
-   *  或 isResumable（running + 无活进程——SP-5 one-shot 成功完成 / MF-6 失败轮回退）。
-   *  正在执行（running + 活进程 + 非 timer-armed）返回 undefined（调用方 notifyComplete 跳过）。
+   *  v4 B-1：守卫放行 legacyClosed（旧终态遗留：idle ∧ closedReason）、isIdle（对话
+   *  模式轮次完成，notify 主 agent G1）或 isResumable（running + 无活进程——SP-5
+   *  one-shot 成功完成 / MF-6 失败轮回退）。正在执行（running + 活进程 + 非
+   *  timer-armed）返回 undefined（调用方 notifyComplete 跳过）。
    *  SP-1: closed 统一终态，closedReason 由 BgNotifyRecord 携带。
-   *  [U5] archived 放行：归档编排的 notifyClosed「已收起」提示载体——归档后 record
-   *  idle 且无 closedReason（新 settle 语义），旧三判据全 false 会吞掉提示；archived
-   *  → closed 载荷（completed 文案族）。 */
+   *  [U5] close 收口落账的 record（idle 且无 closedReason）天然命中 idle 放行子句
+   *  ——notifyClosed「已结束」提示载体不失效；closed 载荷形态由 notifyClosed 入口
+   *  显式固定（本映射只按 record 形态投影，收口落账不动占用位）。 */
   const toNotifyRecord = (
     record: ExecutionRecord,
     opts?: { batchMember?: boolean },
@@ -140,10 +141,9 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     const snap = snapshot(record);
     // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
     // 迁移不变量）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
-    // 不携带 closedReason——gate 三元组（notifier.notifyGateAllowsDelivery）在消费点
-    // 承担归档静默/放弃轮标记阻断，本映射只管载荷形态。
+    // 不携带 closedReason——gate（notifier.notifyGateAllowsDelivery）在消费点
+    // 承担放弃轮标记阻断，本映射只管载荷形态。
     const legacyClosed = record.status === "idle" && record.closedReason !== undefined;
-    const archived = record.intent === "archived";
     // [N1] isResumable 放行：SP-5 one-shot 成功完成后 markRoundIdle 收口——失败轮
     // settle 同形态（[U5] 万物可续），失败通知可达。在跑轮的 record 有活进程，不会被
     // 误放行。
@@ -153,14 +153,14 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // 时前三子句已放行），保留为谓词语义的显式对齐。载荷投影分支不受
     // 影响：轮终收口 idle 统一走 running 载荷（[modeless 波1·SP-5]）。拦截集不变：
     // running + 活进程 + 非 timer-armed 仍静默。
-    if (!legacyClosed && !archived && record.status !== "idle" && !isIdle(record) && !isResumable(record)) {
+    if (!legacyClosed && record.status !== "idle" && !isIdle(record) && !isResumable(record)) {
       return undefined;
     }
-    // legacyClosed/archived → BgNotifyRecord.closed（终态/已收起文案族）；轮终收口
+    // legacyClosed → BgNotifyRecord.closed（旧终态遗留文案族）；轮终收口
     // idle（含失败轮回退）→ running（轮次完成，等待 message 续）。
     // [modeless 波1·SP-5 统一] one-shot 成功轮不再折 closed——统一 idle 留守 +
-    // 轮终通知带 result（closed 载荷只留给 legacy 终态遗留 / 归档提示 / 批成员终态；
-    // record 的 closed 终态通知延到 idle GC 到期归档后的需要时点）。worktree patchFile
+    // 轮终通知带 result（closed 载荷只留给 legacy 终态遗留 / notifyClosed 收口提示
+    // / 批成员终态）。worktree patchFile
     // 的 git apply 提示仍在 closed+completed 分支文案——one-shot worktree 轮终通知
     // 随 SP-5 统一迁移 running 形态，patch 回收指针改由 result 轮次通知后的
     // fork/close 流程承接（GUI 波 4 收口）。
@@ -170,17 +170,16 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // 承载（route 入缓冲路径显式传入 batchMember）——collectMode 字段已出 record，
     // 波 1 临时保留的 record.collectMode 门随之消亡。async 成员按统一轮终形态 running。
     const notifyStatus: BgNotifyRecord["status"] =
-      legacyClosed || archived || opts?.batchMember === true ? "closed" : "running";
+      legacyClosed || opts?.batchMember === true ? "closed" : "running";
     // [U8 / 设计 §3.3 D5 耗时来源] endedAt 物化域 =「running 轮终 + 批成员」——在投影
     // 边界一次合成固定值（进返回对象的数值不随调用方读取时刻增长）。根因：轮终收口
     // markRoundIdle 不写内存 endedAt（「终态冻结信号」不变量），running 轮终载荷的
     // endedAt 恒缺失 → bg-notify 边界行的耗时恒不显；批成员只是载荷形态折 closed，
     // 同缺内存值，一并物化。
-    // 域外两分支不合成新值（原值透传：有则透传、无则保持 undefined）：
-    //   ① archived 归档提示——归档时刻 ≠ 任务结束时刻，合成会把「收起延迟」当耗时
-    //      （过夜后收起可显几十小时）；
-    //   ② legacyClosed 旧终态遗留——保持本映射既有透传语义（有则透传、无则不补）。
-    // 归档提示经 notifyClosed 复用本映射 → 物化判定必须落在投影边界而非各调用点。
+    // 域外分支不合成新值（原值透传：有则透传、无则保持 undefined）：
+    //   legacyClosed 旧终态遗留——保持本映射既有透传语义（有则透传、无则不补）
+    //   （原「archived 归档提示」分支已随 2026-09-16 全链路删除裁决消亡）。
+    // 收口提示经 notifyClosed 复用本映射 → 物化判定必须落在投影边界而非各调用点。
     // 快照已有值优先（settleRoundFailed / drain-drop 两条自带 endedAt 的既有构造路径
     // 保真）；record 内存零触碰——本函数只读快照，不回写 record.endedAt。
     const materializeEndedAt = notifyStatus === "running" || opts?.batchMember === true;
@@ -219,21 +218,23 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       if (notify) notifier.notify(notify);
     },
 
-    /** [C-1] close 归档提示通知（设计 D2：正文空/本轮增量 + sessionFile 指针行）。
+    /** [C-1] close 收口落账提示通知（设计 D2：正文空/本轮增量 + sessionFile 指针行）。
      *
-     *  与 notifyComplete 的差异只在 dedup 身份与轮次统计：归档提示必须与最后一轮的
+     *  与 notifyComplete 的差异只在 dedup 身份与轮次统计：收口提示必须与最后一轮的
      *  轮次通知区分（轮次通知 key=`id:round`），否则同 key 被 60s dedup 吞——close 后
-     *  父 agent 永远收不到带指针行的归档提示（审查 C-1）。故 round 置 undefined（key
+     *  父 agent 永远收不到带指针行的收口提示（审查 C-1）。故 round 置 undefined（key
      *  回退为裸 id），轮数改经 totalRounds 进文案 "completed after N rounds."（C-2）。
      *
-     *  close 归档语义调用（archiveRecord——markArchived 成功后；[modeless 波1] 全
-     *  record 归档均提示，旧 chatMode 门随字段消亡删除——万物可续下「已收起」对
-     *  任何 record 都是有信息的：record 仍在，可寻回复活）。cancel 走 cancelBackground
-     *  自己的注销发射，不经本方法。幂等性：两条 close 路径均由 closeSubagent 的
-     *  status 分流守卫（幂等 no-op）/ CAS 抢锁保证只执行一次，本方法自身不重复发送；
-     *  迟到的轮次收尾 .then 通知与轮次通知同 key=`id:round`，60s 窗内仍被吞，不构成
-     *  第三条。 */
-    /** @param emptyBody true = 归档提示正文置空串（D2 路径②）。W16 P-1 修复后
+     *  close 收口落账语义调用（archiveRecord——markSettledOut 成功后；[modeless 波1]
+     *  全 record 收口均提示——万物可续下「已结束」对任何 record 都是有信息的：
+     *  record 仍在，message 可续聊复活）。本入口固定 closed 载荷（结束文案族——
+     *  收口落账 record 是 idle 无 closedReason，toNotifyRecord 的形态投影会落
+     *  running 轮次载荷，与本提示的「会话已结束」语义不符，故显式覆写）。
+     *  cancel 走 cancelBackground 自己的注销发射，不经本方法。幂等性：两条 close
+     *  路径均由 closeSubagent 的 status 分流守卫（幂等 no-op）/ CAS 抢锁保证只执行
+     *  一次，本方法自身不重复发送；迟到的轮次收尾 .then 通知与轮次通知同
+     *  key=`id:round`，60s 窗内仍被吞，不构成第三条。 */
+    /** @param emptyBody true = 收口提示正文置空串（D2 路径②）。W16 P-1 修复后
      *  close 终态的 doneResult.text 改用 record.result 保真（close 终态
      *  subagent-record entry 的 result 不抹空轮终真实值），「正文空」不再由合成空
      *  text 的副作用承载，改为显式参数——持久化 result 与通知正文两个关注点解耦。 */
@@ -241,6 +242,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       const notify = toNotifyRecord(record);
       if (!notify) return;
       notify.round = undefined;
+      notify.status = "closed";
       if (emptyBody) notify.result = "";
       if (record.round != null) notify.totalRounds = record.round;
       notifier.notify(notify);

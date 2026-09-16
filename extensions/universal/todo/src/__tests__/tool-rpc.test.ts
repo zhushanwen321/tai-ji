@@ -1,7 +1,7 @@
 /**
  * executeTodoAction handler 级测试 —— M17 后的两条路径：
  * 1. tool result 无 __gui__（全模式统一——状态展示不再进 details）
- * 2. refreshDisplay GUI widget 推送（rpc 推 marker 编码 / tui 推纯文本行）
+ * 2. refreshDisplay GUI widget 推送（rpc 推 marker 编码的 tab-bar 双段信封 / tui 推纯文本行）
  *
  * 策略：executeTodoAction 未导出，通过 registerTodoTool + mock pi 捕获
  * 已注册 tool，再以不同 ctx.mode 调 execute。setup 第三参传真实
@@ -100,6 +100,42 @@ const makeRpcCtx = () => makeCtx("rpc", false);
 /** TUI 模式 ctx：hasUI=true。 */
 const makeTuiCtx = () => makeCtx("tui", true);
 
+// ── GUI 信封解析（wire 形状：只声明断言用到的字段）────
+
+interface GuiEnvelope {
+	v: number;
+	component: {
+		type: string;
+		props: {
+			tabs: Array<{ label: string; active?: boolean }>;
+			// 段 = 子树（组件数组），与 tabs 等长一一对应
+			sections: Array<
+				Array<{
+					type: string;
+					props: {
+						numbered?: boolean;
+						items: Array<{ label: string; status?: string; depth?: number }>;
+					};
+				}>
+			>;
+		};
+	};
+	meta: {
+		title: string;
+		icon?: string;
+		badge?: string;
+		progress?: { current: number; total: number };
+	};
+}
+
+/** 取最后一次 setWidget 推送的 marker 编码信封（G-1 / G-4 共用解析） */
+function lastEnvelope(setWidget: Mock<SetWidgetFn>): GuiEnvelope {
+	const call = setWidget.mock.calls.at(-1);
+	const encoded = call?.[1]?.[0];
+	if (!encoded) throw new Error("setWidget 未收到 marker 编码载荷");
+	return JSON.parse(encoded.slice(GUI_WIDGET_MARKER.length)) as GuiEnvelope;
+}
+
 // ── tool result：无 __gui__（M17 后全模式统一）─────────
 
 describe("executeTodoAction — tool result 无 __gui__（全模式）", () => {
@@ -155,7 +191,7 @@ describe("executeTodoAction — tool result 无 __gui__（全模式）", () => {
 // ── refreshDisplay：GUI widget 推送（M17，真实实现）────
 
 describe("refreshDisplay — GUI widget 推送（setup 传真实实现）", () => {
-	it("G-1: rpc + add → setWidget 收到 ('todo', [GUI_WIDGET_MARKER + JSON])，解析后为 v1.1 信封（list-tree + meta）", async () => {
+	it("G-1: rpc + add → setWidget 收到 ('todo', [GUI_WIDGET_MARKER + JSON])，解析后为信封（tab-bar 双段 + meta）", async () => {
 		const { tool } = setup();
 		const { ctx, setWidget } = makeRpcCtx();
 		await tool.execute(
@@ -169,22 +205,48 @@ describe("refreshDisplay — GUI widget 推送（setup 传真实实现）", () =
 		const [key, value] = setWidget.mock.calls[0]!;
 		expect(key).toBe("todo");
 		expect(value).toHaveLength(1);
-		const encoded = value![0]!;
 		// marker 前缀用协议常量断言（不手写编码）
-		expect(encoded.startsWith(GUI_WIDGET_MARKER)).toBe(true);
-		const parsed = JSON.parse(encoded.slice(GUI_WIDGET_MARKER.length)) as {
-			v: number;
-			component: { type: string; props: { numbered: boolean; items: Array<{ label: string }> } };
-			meta: { title: string; progress: { current: number; total: number } };
-		};
-		// v1.1 wire：GuiRenderResult 信封（component + meta 宿主元数据）
+		expect(value![0]!.startsWith(GUI_WIDGET_MARKER)).toBe(true);
+		const parsed = lastEnvelope(setWidget);
+		// wire：GuiRenderResult 信封（component + meta 宿主元数据）
 		expect(parsed.v).toBe(1);
-		expect(parsed.component.type).toBe("list-tree");
-		expect(parsed.component.props.numbered).toBe(true);
-		expect(parsed.component.props.items).toHaveLength(2);
-		expect(parsed.component.props.items[0]).toMatchObject({ label: "task A" });
-		expect(parsed.component.props.items[1]).toMatchObject({ label: "task B" });
-		expect(parsed.meta).toMatchObject({ title: "Todo", progress: { current: 0, total: 2 } });
+		expect(parsed.component.type).toBe("tab-bar");
+		// 两段与 tabs 等长（长度不等宿主即忽略 sections 退化为纯展示）
+		expect(parsed.component.props.tabs.map((t) => t.label)).toEqual(["待办 2", "已完成 0"]);
+		expect(parsed.component.props.sections).toHaveLength(2);
+		const openSection = parsed.component.props.sections[0]!;
+		expect(openSection).toHaveLength(1);
+		expect(openSection[0]!.type).toBe("list-tree");
+		expect(openSection[0]!.props.numbered).toBe(true);
+		expect(openSection[0]!.props.items.map((i) => i.label)).toEqual(["task A", "task B"]);
+		expect(parsed.meta).toMatchObject({
+			title: "Todo",
+			icon: "list-checks",
+			badge: "2",
+			progress: { current: 0, total: 2 },
+		});
+	});
+
+	it("G-4: rpc + update(completed) → 信封待办段剔除该项、已完成段含该项（badge 同步 -1）", async () => {
+		const { tool } = setup();
+		const { ctx, setWidget } = makeRpcCtx();
+		await tool.execute("id", { action: "add", texts: ["task A", "task B"] }, undefined, undefined, ctx);
+		await tool.execute(
+			"id",
+			{ action: "update", updates: [{ id: 1, status: "completed" }] },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const parsed = lastEnvelope(setWidget);
+		expect(parsed.component.props.tabs.map((t) => t.label)).toEqual(["待办 1", "已完成 1"]);
+		expect(parsed.component.props.sections[0]![0]!.props.items.map((i) => i.label)).toEqual([
+			"task B",
+		]);
+		expect(parsed.component.props.sections[1]![0]!.props.items).toEqual([
+			{ label: "task A", status: "done", depth: 0 },
+		]);
+		expect(parsed.meta).toMatchObject({ badge: "1", progress: { current: 1, total: 2 } });
 	});
 
 	it("G-2: rpc + delete 清空列表 → setWidget 收到 ('todo', undefined)（清除语义）", async () => {

@@ -13,11 +13,11 @@
 //      【[u7a 补挂 → U5 现状] arm 链已复活并收敛单点：chat 轮终 armIdleKeepalive
 //      （conversation-continuation.ts settleRoundSuccess）是唯一生产 arm 接线
 //      ——轮终「正在执行 → 保活」翻转边界挂 idle timer，超时处置 =
-//      RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不归档——归档是用户
-//      意愿位）。disarm 面 = 新轮派发（dispatchRoundGuarded）+ cancel/close/
+//      RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不收口——收口是用户
+//      动作）。disarm 面 = 新轮派发（dispatchRoundGuarded）+ cancel/close/
 //      dispose 收口清扫（幂等）。isIdle 谓词（hasIdleTimer）据此生产可真。】
-//      [U2 注记 → 已消化] 两态迁移（running|idle）下「收口清扫」语义由 U5 意愿
-//      动作重写定形（close = 归档编排 / cancel = 中断 settle）。
+//      [U2 注记 → 已消化] 两态迁移（running|idle）下「收口清扫」语义由 U5 收口
+//      动作重写定形（close = 收口落账编排 / cancel = 中断 settle）。
 // 其余四项已删除：职责 2 全局 ceiling / 职责 3 shutdown 收割 / 职责 4 孤儿扫描自
 // 落地起无生产接线；职责 5 activate 互斥的历史接线点（冷路径 resume 前）随协议化
 // 重构消失、仅余自持单测。未来需要时按

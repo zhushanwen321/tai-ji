@@ -69,18 +69,12 @@
     />
     <!-- empty 兜底：无 session 且 flow 未活跃（选会话空态）。
          本兜底当前仅 empty(sessionId===null) 可达；kind==='empty' && sessionId!==null 属
-         类型层防御组合（widget/composer 判据保留），若未来派生规则演化使该组合可达，
+         类型层防御组合（composer 判据保留），若未来派生规则演化使该组合可达，
          主区应渲染空对话态而非本兜底文案。 -->
     <div v-else class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
       <MessageSquare class="size-6 text-neutral-dim opacity-40" />
       <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.panel.selectSession') }}</p>
     </div>
-
-    <!-- M17 对话流 widget 状态带（D 方案：单行 pill + 详情浮层，todo/goal 等常驻状态，
-         ViewHostStore 经 inject 消费）。挂载条件映射（D5）：kind ∈ {trace, conversation,
-         empty-with-session}——null session 无分区可枚举不渲染；dead 主区已被重开占位接管，
-         防状态矛盾；landing 无 session 承接。 -->
-    <WidgetArea v-if="widgetSessionId" :session-id="widgetSessionId" />
 
     <!-- ④ composer companion zone（③ progress-zone 已删——真实任务态未接入，state 恒 null
          自隐藏死代码）。git 状态已移入 SideDrawer git tab（原 zone ⑤ 摘牌），此带仅 composer。
@@ -134,7 +128,6 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
 import { isAskUserQuestion, type AskUserQuestion } from '@zhushanwen/extension-protocol'
-import { WidgetArea } from '@taiji/ui'
 import MessageStream from './MessageStream.vue'
 import Composer from './Composer.vue'
 import TraceView from './trace/TraceView.vue'
@@ -186,13 +179,6 @@ const streamSessionId = computed<string | null>(() => {
 const traceSessionId = computed<string | null>(() =>
   panelView.value.kind === 'trace' ? panelView.value.sessionId : null,
 )
-/** WidgetArea 挂载（D5：kind ∈ {trace, conversation, empty-with-session}）+ session id */
-const widgetSessionId = computed<string | null>(() => {
-  const v = panelView.value
-  if (v.kind === 'trace' || v.kind === 'conversation') return v.sessionId
-  if (v.kind === 'empty' && v.sessionId !== null) return v.sessionId
-  return null
-})
 /** band 内 Composer 渲染（D5）：conversation/trace 恒挂（trace 保留输入面 = session-trace
  *  契约「composer 保留在底部，不打断对话能力」）；empty 绑定会话时挂（直输，防御支现行不可达） */
 const showPanelComposer = computed(() => {

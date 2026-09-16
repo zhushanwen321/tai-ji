@@ -102,6 +102,9 @@ Collection 安装先完整落 `tmp/ext-scan-{timestamp}/`（clone/cp + npm insta
 ### ADR-0038 subagent 只 cancel 无 pause/resume
 subagent 是 single-shot 子进程，控制只支持 cancel（现扩展 message/start），不实现 pause/resume——底层无长驻进程，不做假对称。
 
+### ADR-0067 subagent「已收起」第三状态全链路清除（2026-09-16 用户裁决）
+subagent 对用户的可见状态只有两桶：进行中 / 已结束（判据 = `isRunningProjection` 及其取反）——「已收起」（archived）不以第三状态呈现，全链路清除不残留：renderer 三桶视图与「已收起」过滤器删除；shared/runtime 投影链的 Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；subagent-core markArchived 原语删除，close 的资源收尾职责由 `markSettledOut` 承接（close 收口落账：幂等、worktreeHandle 清句、`.alive` release、manifest 投影，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生，万物可续判据不变）；通知 gate ①（archived 静默守卫）删除，close 注销 reason 词 `archived` → `completed`。机制权威 [docs/architecture/subagent-permanent-session-model.md](../architecture/subagent-permanent-session-model.md)（§3.2.5/§3.2.7 已按删除后现状改写）。登记 C-data-20、C-proc-13。
+
 ### ADR-0015 statusline plugin 封装
 plugin 中转渲染 statusline（`plugin:statusBarUpdate` 通道），plugin 不直写 UI。
 

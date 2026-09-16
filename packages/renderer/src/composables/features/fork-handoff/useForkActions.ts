@@ -5,7 +5,7 @@
  * 跨 api + stores 编排在此层完成（铁律 1：唯一跨 api + stores 的层）。
  *
  * 拆分原因：useSidebar 函数体超 max-lines-per-function(300)，fork 编排逻辑职责内聚，
- * 与 session CRUD / 启动编排正交，适合独立 composable。参照 useSidebarSubagentActions 范式
+ * 与 session CRUD / 启动编排正交，适合独立 composable。参照 useSidebarSessionActions 范式
  * （调用方注入 focusedSessionId ref，内部自行获取 stores/api）。
  */
 import type { Ref } from 'vue'

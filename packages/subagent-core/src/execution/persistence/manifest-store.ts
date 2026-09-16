@@ -35,14 +35,6 @@ export interface ManifestRecord {
    */
   executionStatus?: ExecutionStatus;
   /**
-   * [U8 / §3.2.8 session-reader 前向兼容铁律] 意愿维度下行：'archived' = 已收起
-   * （close 动作）。写侧经 derivedManifestRecord 投影（intent 持久化的 manifest
-   * 锚——binding/entry 面之外的第三持久化点，孤儿 record 重启后意图不丢）；
-   * 读侧 manifestToSubagent 回读。旧版 session-reader 的 RecordManifest 接口无
-   * 本字段，未知字段跳过——无破坏（与 executionStatus 同款过渡锚形态）。
-   */
-  intent?: "active" | "archived";
-  /**
    * [U8 / B-restart manifest 契约面] 实际执行引擎 id（引擎域下行）。zcode record
    * 无子 session 文件（磁盘扫描缺员），manifest 是其重启可见性的兜底承载——
    * 缺 engine 域则 manifest 源投影丢引擎身份，U8b 与重启恢复无法路由读链。

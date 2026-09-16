@@ -290,13 +290,11 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // [U6] closed 遗留诊断位：归一明细仅 closed 分支返回（防 running + closedReason
     // 脏组合的守卫内化到归一层——closed 已不存在于两态词表，原始字面守卫随之退役）。
     closedReason: norm.derivedClosedReason,
-    // [U8 / 永久会话模型 §3.2.8] 意愿 + 展示维度下行投影：intent 字面量守卫（缺省/
-    // 非法 → undefined = active 语义，存量 entry 零迁移）。不对称守卫：closedReason
-    // closed-only（防 running + closedReason 脏组合）；stopReason 有值即投影——string
+    // [U8 / 永久会话模型 §3.2.8] 展示维度下行投影：stopReason 有值即投影——string
     // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。[U6] entry
     // 自带 stopReason 恒优先（A-lite 轮终展示位 / W4 failed 等真实数据），归一合成
-    // （legacy 值映射）仅兜缺失。
-    intent: d.intent === 'active' || d.intent === 'archived' ? d.intent : undefined,
+    // （legacy 值映射）仅兜缺失。[2026-09-16 裁决] intent 意愿维度已全链路删除——
+    // 旧 entry 残留 intent 键在此被忽略（读侧容忍）。
     stopReason: optString(d.stopReason) ?? norm.derivedStopReason,
     turns: optNumber(d.turns),
     totalTokens: optNumber(d.totalTokens),

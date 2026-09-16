@@ -53,9 +53,9 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
  * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
- * （out-of-scope 维持现状）；意愿动作（U5）走 markSettled 只写 stopReason 不写
- * closedReason（不终态化），markArchived 翻 intent 位——closedReason 不再由
- * cancel/close/编排性关闭产出。
+ * （out-of-scope 维持现状）；收口动作（U5）走 markSettled 只写 stopReason 不写
+ * closedReason（不终态化），close 收口落账走 markSettledOut（不动占用位）——
+ * closedReason 不再由 cancel/close/编排性关闭产出。
  */
 export type ExecutionStatus = "running" | "idle";
 
@@ -180,19 +180,11 @@ export type ExecutionMode = "background";
 // ============================================================
 
 /**
- * 意愿维度（§3.2.1 三维正交之一）：用户是否把会话收起来了（列表可见性）。
- *   active   = 默认列表可见（缺省语义——存量 record undefined 零迁移）；
- *   archived = 已收起（close 动作；message 到达自动翻回 active = 隐含寻回）。
- * 谁改它：用户动作（close 收起 / message 寻回），不参与占用判定与资格判定。
- */
-export type Intent = "active" | "archived";
-
-/**
  * 展示维度（§3.2.1）：上一轮为什么停。值域 = 旧 ClosedReason 7 值沿用 + 4 个新展示值
  * + 2 个正常轮终展示值：
  *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
  *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
- *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收起）
+ *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收口）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
  *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
  *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
@@ -585,14 +577,8 @@ export interface ExecutionRecord {
    */
   batchFinalized?: boolean;
 
-  // ── 永久会话模型新维度（§3.2.1 三维正交；u-foundation 类型面，U2 实装写点）──
+  // ── 永久会话模型新维度（§3.2.1；u-foundation 类型面，U2 实装写点）──
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
-  /**
-   * 意愿维度：用户是否把会话收起来了（列表可见性）。undefined = "active"。
-   * 写点：close（收起）置 archived / message 到达自动翻回 active（隐含寻回）——
-   * 经 store 意图原语 markArchived（U2 实装）。
-   */
-  intent?: Intent;
   /**
    * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
    * undefined = 从未收口 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
@@ -639,8 +625,8 @@ export interface ExecutionRecord {
   idleSince?: number;
   /**
    * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
-   * 收口轮的轮次通知送达后归档消费（Continuation settle 分支 / one-shot 主干尾部，
-   * 顺序约束 [写死]——intent 翻转必须在通知链之后）。
+   * 收口轮的轮次通知送达后收口落账消费（Continuation settle 分支 / one-shot 主干尾部，
+   * 顺序约束 [写死]——收口落账必须在通知链之后，提前会丢收口轮通知）。
    * undefined/false = 正常 idle 分流（轮次完成进 idle 等续聊）。
    * 仅 running 时有意义；force:true（立即终止）不走此标志。
    */
@@ -967,13 +953,6 @@ export interface SubagentRecord {
    * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收口 / 旧数据。
    */
   stopReason?: StopReason;
-  /**
-   * 意愿维度（§3.2.1 三维正交之一，U8 additive 投影）：用户是否把会话收起来了。
-   * 与 {@link ExecutionRecord.intent} 同源投影；undefined = "active"（存量零迁移）。
-   * 消费点：manifest 下行映射（derivedManifestRecord——archived → legacy closed，
-   * U5-D10）+ entry/重建面的 intent 载体（GUI 已收起分区 U8b 的数据源）。
-   */
-  intent?: Intent;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
   outcome?: ExecutionOutcome;
   mode: ExecutionMode;

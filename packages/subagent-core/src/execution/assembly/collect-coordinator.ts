@@ -25,9 +25,9 @@
 //   （语义 = "等所有 sync 待收"）。
 //
 //   批闭合自动 close（[modeless 波3]，结构化消灭 E4 诱因面）：flush 投递完成后由
-//   flushBatch 注入方对成员执行归档——成员是「一次性计算单元」，完成通知（批）即终态
-//   通知，无续聊留守语义；「续聊批成员」路径 = fork-from（归档 record 可 fork，已有
-//   能力）。归档在 deps.flushBatch 实现内编排（本聚合零 store/lifecycle 直依）。
+//   flushBatch 注入方对成员执行收口落账——成员是「一次性计算单元」，完成通知（批）即终态
+//   通知，无续聊留守语义；「续聊批成员」路径 = fork-from（已收口 record 可 fork，已有
+//   能力）。收口落账在 deps.flushBatch 实现内编排（本聚合零 store/lifecycle 直依）。
 //
 // [U8 拆批盲窗修复] 闭合满足 → 同宏任务去抖合批 flush（不再立即 flush）：
 //   盲窗机理：终态簿记（markRoundIdle，record 翻 idle）先于 Continuation settle 链的
@@ -140,7 +140,7 @@ export class CollectCoordinator {
   /** [modeless 波3] sync 路由成员登记集（内存，随 session 生命周期消亡）：
    *  派发时点登记（registerMember）→ 终态 route 入缓冲 → flush 离场（批闭合）。
    *  成员身份的唯一权威（collectMode 字段已出 record）；已随批离场（flush 删登记）
-   *  的成员不再参与闭合判定。cancel/归档等「settle 前离场」成员保留登记（record 已非
+   *  的成员不再参与闭合判定。cancel/收口等「settle 前离场」成员保留登记（record 已非
    *  running 不阻止闭合；后续轮若再 route 仍按成员入批——与旧 collectMode 字段残留
    *  语义同构）。 */
   private readonly members = new Set<string>();
@@ -181,7 +181,7 @@ export class CollectCoordinator {
 
   /** [modeless 波3] 当前登记成员数（= 已登记未随批离场的成员总数——pendingSyncCount
    *  口径「未闭合批 sync 成员总数（含本条）」的登记态承载；settle 前离场的 cancel/
-   *  归档成员保留登记，与旧 collectMode 字段残留计数语义同构）。 */
+   *  收口成员保留登记，与旧 collectMode 字段残留计数语义同构）。 */
   get memberCount(): number {
     return this.members.size;
   }

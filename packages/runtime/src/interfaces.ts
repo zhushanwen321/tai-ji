@@ -215,8 +215,8 @@ export interface ISessionService {
    * 找不到返回空串（展示型功能，不 throw）。
    */
   getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string>
-  /** 触发 workflow 生命周期操作（pause/resume/abort，经扩展 slash command，不经 LLM） */
-  workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void>
+  /** 触发 workflow 生命周期操作（abort，经扩展 slash command，不经 LLM） */
+  workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void>
   /**
    * 拉取 session trace 台账快照（session-trace design D4 数据通路 A1）。
    *

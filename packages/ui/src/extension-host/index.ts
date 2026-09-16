@@ -46,7 +46,6 @@ export {
 } from './permission-transport'
 export { default as L2TabBar } from './L2TabBar.vue'
 export type { L2TabItem } from './l2-tab-item'
-export { L2_TAB_BADGE_SOURCE_KEY, NATIVE_VIEWS_KEY } from './l2-tab-item'
 export { default as PluginViewContainer } from './PluginViewContainer.vue'
 export {
   VIEWS_SOURCE_KEY,

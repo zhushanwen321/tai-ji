@@ -35,7 +35,7 @@ import { toRenderItems } from '../message-turns'
 import type { RenderItem } from '../message-turns'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
-import type { Message, Segment, ServerMessage } from '@taiji/shared'
+import type { Message, Segment, ServerMessage, SubagentRecord } from '@taiji/shared'
 import {
   convertPiHistory,
   liftHistoryToEntries,
@@ -1284,7 +1284,6 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
         id: spec.aliasId,
         status: spec.status,
         ...(spec.hasResult ? { result: '(redacted)' } : {}),
-        ...(spec.chatMode !== undefined ? { chatMode: spec.chatMode } : {}),
         ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
       }
     }

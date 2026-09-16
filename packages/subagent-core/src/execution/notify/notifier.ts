@@ -26,25 +26,23 @@ import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "..
 
 import { deriveOutcome } from "../persistence/execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
-import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome, Intent } from "../assembly/types.ts";
+import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../assembly/types.ts";
 
 // ============================================================
-// [T4① / PS-2 → U5 三元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
+// [T4① / PS-2 → U5 二元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
 // Continuation 成功/失败分支双闸共用；原位置 re-export 保持既有 import 路径不变）
 // ============================================================
 
 /**
- * notify 门的 record 状态入参（永久会话模型 §3.2.7 通知 gate 三元组的判据源，
+ * notify 门的 record 状态入参（永久会话模型 §3.2.7 通知 gate 的判据源，
  * 全部从 ExecutionRecord 同名字段直传——调用点 `notifyGateAllowsDelivery(record)`）。
  */
 export interface NotifyGateRecordState {
-  /** 意愿位（gate ①）：archived = 静默（归档后一切回注不打扰）。 */
-  readonly intent?: Intent;
   /** record 当前世代（两步判定的比较基准——非标记槽 epoch，§3.2.7 显式两步）。 */
   readonly epoch?: Epoch;
-  /** 放弃轮标记（gate ②判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
+  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
   readonly lastAbandonedRound?: AbandonedRoundMark | null;
-  /** 当前轮次（gate ②第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
+  /** 当前轮次（gate 第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
    *  越过旧标记；被中断轮不推进，迟到回注轮 ≤ 标记轮被丢弃）。 */
   readonly round?: number;
 }
@@ -63,22 +61,24 @@ export interface NotifyGateInbound {
 }
 
 /**
- * [U5 / §3.2.7 通知 gate 三元组] 轮次完成回注的投递门。
+ * [U5 / §3.2.7 通知 gate] 轮次完成回注的投递门。
  *
- * 三个阻断分支逐一承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
- * 防双发），判据源从「形态枚举（closedReason）」切换为「意愿 + 放弃标记」两维：
+ * 两个阻断维度承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
+ * 防双发），判据源 = 「放弃标记」单维（收口/静默场景由放弃轮标记 + 轮身份守卫 +
+ * notifyId 账本三层承接——原 intent=archived 静默 gate 随 intent 概念删除退役）：
  *
- *   ① intent=archived → 静默（承接原 parent-new/parent-fork 阻断——编排性关闭在新
- *      模型即自动收起；用户 close 后迟到回注不再打扰）；
+ *   ① 回注 epoch ≠ record 当前 epoch → 丢弃（跨世代回注）；
  *   ② 放弃轮标记命中 → 阻断（承接原 cancelled 阻断防双发）。**显式两步**（比较基准
  *      = record 当前 epoch，非标记槽 epoch——reopen 后标记残留旧 epoch，按标记槽比较
  *      会把新世代全部正常轮通知吞掉）：
  *        第一步：回注 epoch ≠ record 当前 epoch → 丢弃；
  *        第二步：同 epoch 时标记非空、标记槽世代 = 当前世代且回注轮 ≤ 标记轮 → 丢弃。
- *   ③ 收口轮豁免：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常送达——
- *      构造性豁免：归档（intent 翻转）编排挂在轮次通知送达之后（§3.2.5 顺序约束
- *      [写死]），settle 时点 intent 尚未 archived、收口轮非放弃轮（close 不置标记），
- *      ①②均不命中——豁免无需独立判据，静默只作用于收口轮之后新产生的回注。
+ *
+ * 收口轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
+ * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收口
+ * 落账编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
+ * running 非放弃轮，①②均不命中。收口后的残余迟到回注由轮身份守卫（Continuation
+ * abortAndClearQueue 废弃轮身份）+ notifyId 账本去重承接。
  *
  * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
  * 后 round 已推进（markRoundIdle +1），回注轮 = record.round > 标记轮 → 放行，重复帧由
@@ -92,10 +92,8 @@ export function notifyGateAllowsDelivery(
   state: NotifyGateRecordState,
   inbound: NotifyGateInbound = {},
 ): boolean {
-  // ① 归档静默。
-  if (state.intent === "archived") return false;
   const currentEpoch = state.epoch ?? 0;
-  // ② 第一步：跨世代回注丢弃（比较基准 = record 当前 epoch）。
+  // ① 第一步：跨世代回注丢弃（比较基准 = record 当前 epoch）。
   const inboundEpoch = inbound.epoch ?? currentEpoch;
   if (inboundEpoch !== currentEpoch) return false;
   // ② 第二步：标记槽在当前世代且回注轮 ≤ 标记轮 → 丢弃（防双发）。标记槽世代 ≠
@@ -174,7 +172,7 @@ export interface BgNotifyRecord {
    */
   dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
-   *  仅归档提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
+   *  仅收口落账提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
@@ -414,8 +412,8 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) failed: ${record.error}`;
       }
       // 成功完成或通用结束：展示结果。
-      // [C-2] close 归档提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
-      // totalRounds 仅 notifyClosed（归档提示）携带；轮次通知不设置（轮次身份由
+      // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
+      // totalRounds 仅 notifyClosed（收口提示）携带；轮次通知不设置（轮次身份由
       // round 承载），文案保持 "completed. Result:" 逐字节（G4 硬约束锚定）。
       const roundsSuffix =
         record.totalRounds != null && record.totalRounds > 0

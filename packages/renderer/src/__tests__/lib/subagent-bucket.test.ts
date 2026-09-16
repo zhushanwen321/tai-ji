@@ -1,19 +1,18 @@
 /**
- * renderer lib/subagent-bucket.test.ts —— 分桶判据 SSOT 模块单测
- * （设计 subagent-sidebar-filter §3.4 / 永久会话模型 §3.2.8 默认可见性翻转，U8b 重写；
- * [modeless 波4] chatMode 比对维度随字段消亡删除，done 展示判据 idle+result 化）。
+ * renderer lib/subagent-bucket.test.ts —— 判据 SSOT 模块单测
+ * （[modeless 波4] chatMode 比对维度随字段消亡删除，done 展示判据 idle+result 化）。
+ *
+ * [两视图裁决 2026-09-16 托盘两态化] 原分桶面（subagentBucket / filterSubagents /
+ * countSubagents / DEFAULT_SUBAGENT_FILTER 及其类型）随托盘「已收起」桶退役删除，
+ * 其用例一并退役——已结束桶判据 = !isRunningProjection（「已收起」机制现已全链路删除，
+ * intent 字段不复存在），口径断言现承载于 `__tests__/panel/tray/useTrayCounts.test.ts`。
+ * 本文件保留两谓词本体的完整断言体系：
  *
  * 三视角：
- * - 白盒：subagentBucket 意愿分桶（intent 缺省 active / archived 收起）、
- *   isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵）、
+ * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）、
  *   isDoneProjection SSOT 直测（idle + 有 result = 完成展示）
- * - 黑盒：filterSubagents 三视图行为（active 全活跃 / running 只看在跑 / archived 已收起）、
- *   countSubagents 计数一致性
- * - 形态：导出符号齐全（DEFAULT_SUBAGENT_FILTER === 'active' 默认视图）
- *
- * [GUI 快修⑤ GUI 侧验收] idle record（U7 冷重启 hydrateReviveBaseline 恢复的
- * turns/tokens 形态）默认可见且计数信号非零的投影面由「idle 归 active 桶」矩阵
- * 承接；列表文本渲染断言见 SubagentList.spec.ts。
+ * - 使用者（黑盒）：01a09f83 真实形态 fixture 回放（严格口径下在跑计数 = 0）
+ * - 形态：两谓词均已导出且为函数
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/lib/subagent-bucket.test.ts
  */
@@ -23,16 +22,7 @@ import {
   type SubagentRecord,
   type SubagentStatus,
 } from '@taiji/shared'
-import {
-  DEFAULT_SUBAGENT_FILTER,
-  isDoneProjection,
-  isRunningProjection,
-  subagentBucket,
-  filterSubagents,
-  countSubagents,
-  type SubagentFilterValue,
-  type SubagentBucket,
-} from '@/lib/subagent-bucket'
+import { isDoneProjection, isRunningProjection } from '@/lib/subagent-bucket'
 import { SESSION_01A09F83_GHOST_FIXTURE, type GhostFixtureSpec } from './subagent-ghost-fixture'
 
 /**
@@ -54,21 +44,6 @@ function makeRecord(status: SubagentStatus, extra: Partial<SubagentRecord> = {})
     ...extra,
   }
 }
-
-describe('subagentBucket 意愿分桶（白盒：intent 维度，status 不参与）', () => {
-  it('intent 缺省（存量 record / 旧扩展投影）→ active（默认列表可见，S8 只读兼容）', () => {
-    for (const status of ALL_STATUSES) {
-      expect(subagentBucket(makeRecord(status)), `status=${status} 缺省 intent 应归 active`).toBe('active')
-    }
-  })
-
-  it("intent='active' → active；intent='archived' → archived（与 status 正交——收起的 idle/running 都归已收起）", () => {
-    for (const status of ALL_STATUSES) {
-      expect(subagentBucket(makeRecord(status, { intent: 'active' }))).toBe('active')
-      expect(subagentBucket(makeRecord(status, { intent: 'archived' }))).toBe('archived')
-    }
-  })
-})
 
 describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口径，two-state-convergence D1；[U6] 判据终态化）', () => {
   it('仅 running 落 true（idle 不算在跑；[U6] 类型收窄后词表已两态）', () => {
@@ -104,6 +79,10 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
     expect(isRunningProjection(makeRecord('running'))).toBe(true)
     expect(isRunningProjection(makeRecord('running', { result: 'x' }))).toBe(true)
   })
+
+  it('idle 记录不参与占用判定（[两视图裁决 2026-09-16] 已结束桶判据 = !isRunningProjection；「已收起」机制已全链路删除，无第三桶维度）', () => {
+    expect(isRunningProjection(makeRecord('idle'))).toBe(false)
+  })
 })
 
 describe('isDoneProjection（白盒 SSOT 直测：idle + 有 result——[modeless 波4] 判据 idle+result 化，chatMode 比对位随字段消亡删除）', () => {
@@ -127,107 +106,14 @@ describe('isDoneProjection（白盒 SSOT 直测：idle + 有 result——[modele
   })
 })
 
-describe('filterSubagents（黑盒：三视图行为）', () => {
-  /** 混合 fixture：1 running-streaming + 1 idle(active) + 1 轮终完成(active) + 1 archived idle */
-  function makeMixedRecords(): SubagentRecord[] {
-    return [
-      makeRecord('running', { subagentId: 'r-stream' }), // streaming → active + running
-      makeRecord('idle', { subagentId: 'r-idle', stopReason: 'completed', turns: 2 }), // active，非 running
-      // 轮终完成 fixture 形态 = U4 翻边后轮终权威形态（idle + result + stopReason）
-      makeRecord('idle', { subagentId: 'r-done-proj', result: 'round output', stopReason: 'completed' }), // active，非 running
-      makeRecord('idle', { subagentId: 'r-archived', intent: 'archived' }), // archived
-    ]
-  }
-
-  it("'active'（默认视图）= 全部非收起：running + idle 全显（可见性翻转核心断言）", () => {
-    const records = makeMixedRecords()
-    const active = filterSubagents(records, 'active')
-    expect(active.map((r) => r.subagentId)).toEqual(['r-stream', 'r-idle', 'r-done-proj'])
-    expect(active.every((r) => subagentBucket(r) === 'active')).toBe(true)
-  })
-
-  it("'running'（只看正在跑）= 占用投影 running：真在跑计入，轮终 / idle 排除", () => {
-    const records = makeMixedRecords()
-    expect(filterSubagents(records, 'running').map((r) => r.subagentId)).toEqual(['r-stream'])
-  })
-
-  it("'archived'（已收起视图，场景 3 寻回入口）= intent archived", () => {
-    const records = makeMixedRecords()
-    expect(filterSubagents(records, 'archived').map((r) => r.subagentId)).toEqual(['r-archived'])
-  })
-
-  it('过滤返回新数组且不变更原数组（无副作用）', () => {
-    const records = makeMixedRecords()
-    const snapshot = [...records]
-    const active = filterSubagents(records, 'active')
-    expect(active).not.toBe(records)
-    expect(records).toEqual(snapshot)
-  })
-
-  it('空数组 → 三视图均返回空', () => {
-    const empty: SubagentRecord[] = []
-    expect(filterSubagents(empty, 'active')).toEqual([])
-    expect(filterSubagents(empty, 'running')).toEqual([])
-    expect(filterSubagents(empty, 'archived')).toEqual([])
-  })
-})
-
-describe('countSubagents（黑盒：计数一致性）', () => {
-  it('三视图计数与 filterSubagents 各视图长度一致（FilterBar 计数预告口径）', () => {
-    const records = [
-      makeRecord('running'), // active + running
-      makeRecord('running', { result: 'round output' }), // active + running（result 是数据非状态）
-      makeRecord('idle', { stopReason: 'completed' }), // active，非 running
-      makeRecord('idle', { intent: 'archived' }), // archived
-    ]
-    const counts = countSubagents(records)
-    expect(counts).toEqual({ active: 3, running: 2, archived: 1 })
-    expect(counts.active).toBe(filterSubagents(records, 'active').length)
-    expect(counts.running).toBe(filterSubagents(records, 'running').length)
-    expect(counts.archived).toBe(filterSubagents(records, 'archived').length)
-  })
-
-  it('空数组 → 三视图全 0', () => {
-    expect(countSubagents([])).toEqual({ active: 0, running: 0, archived: 0 })
-  })
-
-  it('边界：全收起 / 全在跑（[U6] W4 新型 running+failed 不计入——stopReason 子句）', () => {
-    expect(countSubagents([
-      makeRecord('idle', { intent: 'archived' }),
-      makeRecord('idle', { stopReason: 'completed', intent: 'archived' }),
-    ])).toEqual({ active: 0, running: 0, archived: 2 })
-    expect(
-      countSubagents([makeRecord('running'), makeRecord('running', { stopReason: 'failed' })]),
-    ).toEqual({
-      active: 2,
-      running: 1, // W4 新型（running + stopReason=failed）经 [U6] stopReason 子句排除——badge 只计真在跑
-      archived: 0,
-    })
-  })
-})
-
 describe('导出形态（观察者：SSOT 模块公共面齐全）', () => {
-  it("DEFAULT_SUBAGENT_FILTER === 'active'（默认视图 = 全部活跃会话，可见性翻转后 idle 默认可见）", () => {
-    expect(DEFAULT_SUBAGENT_FILTER).toBe('active')
-  })
-
-  it('判据函数均已导出且为函数', () => {
+  it('两判据函数均已导出且为函数（分桶面已随托盘两态化退役，[两视图裁决 2026-09-16]）', () => {
     expect(typeof isDoneProjection).toBe('function')
     expect(typeof isRunningProjection).toBe('function')
-    expect(typeof subagentBucket).toBe('function')
-    expect(typeof filterSubagents).toBe('function')
-    expect(typeof countSubagents).toBe('function')
-  })
-
-  it('类型面：SubagentFilterValue 三值空间（active/running/archived）/ SubagentBucket 二值空间', () => {
-    const filterValues: SubagentFilterValue[] = ['active', 'running', 'archived']
-    const bucketValues: SubagentBucket[] = ['active', 'archived']
-    expect(filterValues).toContain(DEFAULT_SUBAGENT_FILTER)
-    expect(bucketValues).toContain(subagentBucket(makeRecord('running')))
   })
 })
 
-// ── [B3] 全集覆盖矩阵（adversarial-review-fixes §3.3 B3，U8b 重述）──────────────
+// ── [B3] 全集覆盖矩阵（adversarial-review-fixes §3.3 B3）──────────────
 //
 // 护栏语义：Record<SubagentStatus, boolean> 断言表是显式的「枚举 → 占用归属」决策
 // 记录——shared 扩枚举后此表缺新键时，循环取值为 undefined 与实际投影值不等，本矩阵
@@ -261,10 +147,9 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
     expect(SUBAGENT_STATUS_ALL).toContain('running')
   })
 
-  it('[GUI 快修⑤ 投影面] idle record（含 turns/tokens 复活形态）归默认视图（active 桶）——冷重启后统计信号不丢展示位', () => {
+  it('[GUI 快修⑤ 投影面] idle record（含 turns/tokens 复活形态）落已结束桶（非 running）——冷重启后统计信号不丢展示位', () => {
     const revived = makeRecord('idle', { stopReason: 'completed', turns: 4, totalTokens: 88000 })
-    expect(subagentBucket(revived)).toBe('active')
-    expect(filterSubagents([revived], 'active')).toHaveLength(1)
+    expect(isRunningProjection(revived)).toBe(false)
   })
 })
 
@@ -288,7 +173,7 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
     {
       // 形态 2：R4 MF-A 第 2+ 轮在飞型（轮始清点扩字段后的应有形态——markRoundStarted
       // 已清上轮 stopReason，record 与首轮在飞同形）。若清点失效（stale stopReason
-      // 残留）本谓词将误排除——该失效由 core 轮始清点测试守卫（record-store-intent-api），
+      // 残留）本谓词将误排除——该失效由 subagent-core 轮始清点测试守卫，
       // 本行钉住「扩字段后第 2+ 轮在飞不误排除」的renderer侧终态。
       name: '2 第 2+ 轮在飞（轮始清点后：running + result=∅ + stopReason 已清）',
       rec: makeRecord('running'),
@@ -343,11 +228,6 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
   it('形态表恰好 8 行（D7 全量清单——[modeless 波4] 10 行随 chatMode 维度坍缩）', () => {
     expect(MATRIX).toHaveLength(8)
   })
-
-  it('「正在跑」过滤视图与谓词同源（filterSubagents running 视图 = 矩阵 occupied 子集）', () => {
-    const occupied = MATRIX.filter((m) => m.occupied).map((m) => m.rec.subagentId)
-    expect(filterSubagents(MATRIX.map((m) => m.rec), 'running').map((r) => r.subagentId)).toEqual(occupied)
-  })
 })
 
 // ── [P1 ⛔实施期门] session 01a09f83 形态 fixture 回放（two-state-convergence U1/D1/D7）──
@@ -379,9 +259,8 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
     expect(SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.aliasId.startsWith('idle-interrupted-'))).toHaveLength(2)
   })
 
-  it('⛔门：修复后严格口径回放 badge 计数 = 0（幽灵 8→0；filterSubagents running 视图同步为空）', () => {
-    expect(countSubagents(fixtureRecords).running).toBe(0)
-    expect(filterSubagents(fixtureRecords, 'running')).toEqual([])
+  it('⛔门：修复后严格口径回放「真在跑」集合为空（幽灵 8→0；[两视图裁决 2026-09-16] 后计数口径 = isRunningProjection 过滤）', () => {
+    expect(fixtureRecords.filter(isRunningProjection)).toEqual([])
   })
 
   it('完成展示面回放：37 条轮终（idle + result）全落 done 展示（isDoneProjection），2 条中断不落', () => {

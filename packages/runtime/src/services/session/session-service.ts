@@ -1011,7 +1011,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** agent call JSONL 路径（展示型，找不到返回空串；实现迁 session-records.ts）。 */
   async getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string> { return this.records.getAgentCallFilePath(sessionId, agentCallSessionId) }
   /** workflow 生命周期操作（经扩展 slash command，实现迁 session-records.ts）。 */
-  async workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
+  async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
   /** subagent 生命周期/定向消息操作（encodeDirectiveText 编码，实现迁 session-records.ts）。 */
   async subagentAction(
     sessionId: string,

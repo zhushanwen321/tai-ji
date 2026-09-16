@@ -6,7 +6,7 @@
 //   - 失败降级：无 identity 的损坏/异构文件不在扫描集 → 不重建不抛（sessions-index
 //     「损坏静默回退全扫」同款先例）；幸存 manifest 不覆写（幂等补缺）；
 //   - G2 词汇双写：四 manifest 写面（markFinalized/markCancelled/markBatchFinalized/
-//     markIdleArchived）旧 status 三态投影 + executionStatus/closedReason 并存。
+//     markIdleEvicted）旧 status 三态投影 + executionStatus/closedReason 并存。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -284,18 +284,18 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.dispose();
   });
 
-  it("markIdleArchived：归档点补写 running 投影（非终态化语义——磁盘仍 running 可接管）", () => {
+  it("markIdleEvicted：回收点补写 running 投影（非终态化语义——磁盘仍 running 可接管）", () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
     const sessionFile = path.join(sessionsDir, "20260912T000008_idle.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     const record = makeRecord("sa-idle", { sessionFile });
 
-    store.markIdleArchived(record);
+    store.markIdleEvicted(record);
     const manifest = readManifest("sa-idle");
     expect(manifest.status).toBe("running");
     expect(manifest.executionStatus).toBe("running");
     expect(manifest.completedAt).toBeUndefined();
-    // 非终态化：不写 .state（归档 ≠ 放弃可重连性）
+    // 非终态化：不写 .state（回收 ≠ 放弃可重连性）
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     store.dispose();
   });

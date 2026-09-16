@@ -52,7 +52,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
 | Markdown 渲染 | shiki 高亮、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
-| subagent/workflow 面板与派发 | subagent 列表/运行计数、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0） |
+| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar | harness 可扩展能力主体（testing 13） |
 | ask-user overlay | agent 提问浮层、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
@@ -79,7 +79,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | ImportSessionDialog |
-| 后台任务侧边栏 | background task 展示（testing 14） |
+| 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 
 ## 5. P3 — 特定人群/低影响

@@ -9,7 +9,7 @@
     - block 态（selectedKey = `<entryKey>#block-N`）：assistant 子 block 全文
       （thinking/text 正文、toolCall arguments），「← 返回」回父聚合态。
     正文可鼠标框选复制（body 容器 select-text——全局 user-select:none 下的恢复点，
-    与 chat 域 WidgetArea 同款范式）。
+    与 chat 域内容区同款范式）。
   -->
   <div v-if="row" class="flex h-full min-h-0 flex-col" data-testid="trace-inspector">
     <!-- head：返回 + badge（block 态为 block 类型）+ 定位 + copy -->

@@ -125,7 +125,7 @@ tool execute 返回 {content, details:{todos, nextId}}
         ▼  Pi 框架自动序列化为 toolResult entry 落盘
 ```
 
-tool result 不含 GUI 渲染字段（已移除）：状态展示由 widget 单一承载——RPC 模式走 `refreshDisplay` 的 `guiSetWidget` 推送（M17 对话流 widget 面板），TUI 模式走 `renderWidgetLines` 原生文本。
+tool result 不含 GUI 渲染字段（已移除）：状态展示由 widget 单一承载——RPC 模式走 `refreshDisplay` 的 `guiSetWidget` 推送（composer 任务托盘的协议 widget 区），TUI 模式走 `renderWidgetLines` 原生文本。
 
 ```
 session_start / session_tree

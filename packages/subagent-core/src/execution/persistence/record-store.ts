@@ -13,7 +13,7 @@
 //     manifest 投影/缓存戳类型——纯读纯投影，无写面）
 //
 // 职责：
-//   - 持有 running record（归档/回收 record 在 archive 时立即从内存移除）
+//   - 持有 running record（终态/回收 record 在 archive 时立即从内存移除）
 //   - onChange 订阅（TUI widget/list 据此重渲）
 //   - collectRecords：内存(running) ∪ 磁盘(sessions/*.jsonl 重建) ∪ 主 session entry 源
 //     （[U7/B-restart] zcode record 专用缺员补源）∪ manifest(sessions-index.json 补充) 四源合并
@@ -39,13 +39,12 @@
 // ── legacy 例外原语（workflow D7 例外族 / 监督器放弃专用；新调用面禁用）──
 // | markFinalized(record, reason) | closed 终态化（仅 workflow D7 例外族 / 监督器放弃 / 引擎死亡不可接管兜底消费；副作用编排 abort/kill/disarm/CAS/promote 留调用方） | `.state` writeSync 先 → binding（updateRecordBinding）→ entry/archive → manifest writeSync → `.alive` 删（D8 v7 写序） |
 // | markCancelled(record) | cancelled 终态化（仅 workflow D7 例外族 abort 路径；tombstone endedAt） | 同 markFinalized 写序（writeCancelledState） |
-// | markIdleArchived(record) | markIdleEvicted 的 deprecated 转发别名（@deprecated，存量测试消费；生产调用点已迁名） | 完整委托 markIdleEvicted |
 //
 // ── [永久会话模型 / u-foundation 骨架] 新意图原语（设计 subagent-permanent-session-model.md
-//    §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 意愿动作表；签名已定，实现 U2 填肉）──
+//    §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 收口动作表；签名已定，实现 U2 填肉）──
 // | markSettled(record, stopReason) | 轮收口（settle：成功/失败/中断统一落 idle + stopReason；替代 markFinalized/markCancelled 的轮收口角色） | U2 定（usage 快照落 binding + manifest 投影；`.alive` 跨轮保留） |
 // | markReopened(record, transcriptRef) | 带历史重开（新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened，§3.2.3） | U2 定（binding 持久化 epoch/锚） |
-// | markArchived(record) | close 收起（intent 翻转 archived + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
+// | markSettledOut(record) | close 收口落账（worktreeHandle 清句 + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
 // | markIdleEvicted(record) | 内存回收（30 天 TTL，用户不可见，非终态化——磁盘不动、可重建接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
@@ -128,21 +127,19 @@ import {
 } from "./record-store-rebuild.ts";
 import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record-store-rebuild.ts";
 // [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）：markFinalized/markCancelled/
-// markSettled/markArchived 等终态/settle/意愿动作原语实现 + binding settle 快照族——
+// markSettled/markSettledOut 等终态/settle/收口动作原语实现 + binding settle 快照族——
 // 经 TerminalCtx 注入本类写面（七名写函数调用字面只留在本文件，D7 守卫零改动）。
 // 依赖方向单向：store → terminal → {rebuild}（terminal 不回 import store，无环）。
 import {
   MANIFEST_INDENT_SPACES,
-  markArchivedImpl,
   markBatchFinalizedImpl,
   markCancelledImpl,
   markFinalizedImpl,
-  markIdleArchivedImpl,
   markIdleEvictedImpl,
-  markReactivatedImpl,
   markReopenedImpl,
   markResurrectedImpl,
   markSettledImpl,
+  markSettledOutImpl,
 } from "./record-store-terminal.ts";
 import type { TerminalCtx } from "./record-store-terminal.ts";
 // [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）：appendEvent/markRoundStarted/
@@ -349,7 +346,7 @@ export class RecordStore {
   }
 
   /**
-   * 归档：record 已被 completeRecord 设置了终态 status。
+   * 出册：record 已被 completeRecord 设置了终态 status。
    * 立即从内存移除（终态 record 下次读时从 session.jsonl 重建）。
    * cancelled record 由调用方先写终态 sidecar（cancel 路径），此处只负责移除。
    *
@@ -392,7 +389,7 @@ export class RecordStore {
    * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
    * 放大 entry 写面，编排粒度属调用方职责）。
    *
-   * @returns false = id 不在内存（未注册/已归档）——事件丢弃并 debug 留痕。
+   * @returns false = id 不在内存（未注册/已回收）——事件丢弃并 debug 留痕。
    */
   appendEvent(id: string, event: AgentEvent): boolean {
     return appendEventImpl(id, event, this.roundsCtx);
@@ -417,7 +414,7 @@ export class RecordStore {
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
    *      字段已退役（[U5/D4] idle 即 resumable，无簿记动作）；⑥
    *      idleSince 刷新（idle-GC 判据锚）；⑦ **`.alive` 保留**
-   *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 归档]，轮终
+   *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
    *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
@@ -450,12 +447,12 @@ export class RecordStore {
    * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
    * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
    *
- * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 意愿动作
- * 接线退役（正常收口归 markSettled、归档归 markArchived、编排性关闭归新编排）；
+ * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
+ * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
  * `.state` 旧格式由 U3 读侧单规则上行映射（finalized → idle + stopReason=reason）。
    *
    * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
-   * @deprecated U5 退役（归 markSettled / markArchived / 编排性关闭新编排承接）。
+   * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
    */
   markFinalized(record: ExecutionRecord, closedReason?: ClosedReason): boolean {
     return markFinalizedImpl(record, closedReason, this.terminalCtx);
@@ -536,22 +533,8 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：idle-GC 归档（30 天 TTL 内存回收，**非终态化**——record 磁盘仍 running
-   * 可接管；归档 ≠ 放弃可重连性，故不写 `.state`「gc」——那会把「可接管」变「不可
-   * 重连硬拒」，D3a 被否分支）。
-   *
-   * [U2 更名] 统一语言更名 markIdleEvicted（「内存回收」义），本名保留为 deprecated
-   * 别名（生产点 idle-gc.ts 已迁名；存量测试写序全等断言仍消费，删除随测试迁名一并处理）。
-   *
-   * @deprecated 改用 {@link RecordStore.markIdleEvicted}。
-   */
-  markIdleArchived(record: ExecutionRecord): void {
-    markIdleArchivedImpl(record, this.terminalCtx);
-  }
-
-  /**
-   * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。markIdleArchived 的统一
-   * 语言更名（30 天 TTL 内存回收，用户不可见，非终态化——磁盘不动、可重建）。
+   * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
+   * 用户不可见，非终态化——磁盘不动、可重建。
    *
    * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
    * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
@@ -616,22 +599,6 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：message 隐含寻回（§3.2.2 事件表 archived+message → running+active 行、
-   * §3.2.5 寻回行——「寻回不需要显式动作」）。intent 翻回 active（{@link markArchived}
-   * 的对称反向原语，U4 留桩的本单元接线点）。纯列表意愿位：占用位（status）与资格
-   * 判据（§3.2.3 三件套）均不涉本原语——续聊链在寻回前后行为一致。
-   *
-   * manifest 投影随翻回刷新（archived→closed 下行映射归 U8，桥接期经 derived 投影
-   * 保持索引在册）。幂等：intent 已 active/undefined 时 no-op（寻回只对 archived 有
-   * 语义——挂点调用方已在 archived 分支内）。
-   *
-   * @returns true = 写面完成（含幂等 no-op）；false = 无（恒 true，签名对称性保留）。
-   */
-  markReactivated(record: ExecutionRecord): boolean {
-    return markReactivatedImpl(record, this.terminalCtx);
-  }
-
-  /**
    * 意图原语：带历史重开（reopen，锚失效降级路径 §3.2.3）。同 id 不换——新
    * transcriptRef（pi 新 sessionFile / zcode 新 sessionId）+ round 归零 + epoch+1 +
    * stopReason=reopened；首轮 prompt 的历史摘要注入编排留调用方（U4 reopen 降级
@@ -660,30 +627,34 @@ export class RecordStore {
   // record-store-terminal.ts——markRoundIdle 经 persistSettleSnapshot import 消费。
 
   /**
-   * 意图原语：close 收起（意愿动作 §3.2.5 close 行）。intent 翻转 archived +
-   * `.alive` release（§3.2.4 release 出口①——归档即放弃写权）。
+   * 意图原语：close 收口落账（收口动作 §3.2.5 close 行）——会话收口的账面落定：
+   * worktreeHandle 清句 + `.alive` release（§3.2.4 release 出口①——收口即放弃
+   * 写权）+ manifest 投影 + entry 上报。
    *
-   * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → intent 翻转 + 归档注销
-   * （intent 翻转必须在通知链之后，否则吞掉收口轮通知）。worktree 回收（patch
-   * 落盘前移到归档点）与 pending 注销补发的编排留调用方（U5 意愿动作接线）；
-   * 本原语只吸收 intent 位 + 写权声明两写面 + worktreeHandle 清句（S5 修复——
-   * 归档即绑定消亡，重建守卫据 hadWorktree 触发）。
+   * 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → 收口落账 + 注销补发（收口
+   * 落账必须在通知链之后，提前调用会丢收口轮通知）。worktree 回收（patch 落盘
+   * 前移到收口点）与 pending 注销补发的编排留调用方；本原语只吸收写权声明 +
+   * worktreeHandle 清句（S5 修复——收口即绑定消亡，重建守卫据 hadWorktree 触发）
+   * 两写面。
    *
-   * 幂等：intent 恒置 archived、release 对缺失 marker 静默（重复 close 无害）。
-   * record 留内存（archived ≠ 内存回收——列表可见性由 intent 承载，占用位不动）。
-   * session-reader 的 archived 下行映射（U5-D10，§3.2.8）：本原语经
-   * derivedManifestRecord 投影 legacy status="closed"（「已收起」在旧消费者语义里
-   * = 结束）+ executionStatus="idle"（两态权威词）双写——旧版 session-reader 按
-   * 既有 closed 语义归入已完成分区，行为域内无未知值。
+   * 幂等：release 对缺失 marker 静默、worktree 清句对无 handle no-op（重复 close /
+   * dispose 重复调用无害）。record 留内存 idle（收口 ≠ 内存回收——占用位不动，
+   * message 随时可续聊复活）。
    *
-   * @returns true = 归档写面完成（幂等，恒 true）。
+   * session-reader 下行投影（§3.2.8）：收口落账 record（idle、无 closedReason）经
+   * derivedManifestRecord 投影 legacy status="running" + executionStatus="idle"
+   * （两态权威词）双写。对外契约只有 running/ended 两态，旧版 session-reader 视其
+   * 为活跃成员（行为变化登记：原「归入已完成分区」的 archived→closed 下行随
+   * intent 概念删除退役）。
+   *
+   * @returns true = 收口落账写面完成（幂等，恒 true）。
    */
-  markArchived(record: ExecutionRecord): boolean {
-    return markArchivedImpl(record, this.terminalCtx);
+  markSettledOut(record: ExecutionRecord): boolean {
+    return markSettledOutImpl(record, this.terminalCtx);
   }
 
   // [H4 三轴拆分] releaseWriteLease（写权 release 锚分派）已迁 record-store-terminal.ts
-  // （releaseWriteLeaseImpl）——markIdleEvicted/markArchived 实现内部消费。
+  // （releaseWriteLeaseImpl）——markIdleEvicted/markSettledOut 实现内部消费。
 
   // [H4 三轴拆分] terminalManifestRecord / batchManifestRecord /
   // legacyManifestStatusFields / derivedManifestRecord（manifest 投影族）已迁

@@ -25,7 +25,6 @@ import {
   commandStoreModule,
   coreTransportApiModule,
   fileTreeStoreModule,
-  listSyncModule,
   navigationStoreModule,
   panelStoreModule,
   platformShortcutModule,
@@ -33,7 +32,6 @@ import {
   sessionStoreModule,
   sidebarActionMocks,
   sidebarStoreModule,
-  sidebarSubagentActionsModule,
   subagentStoreModule,
   toastErrorMock,
   toastModule,
@@ -55,8 +53,6 @@ vi.mock('@/stores/navigation', () => navigationStoreModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/composables/features/chat/useChat', () => chatComposableModule())
 vi.mock('@/composables/features/chat/useSessionDerivations', () => sessionDerivationsModule())
-vi.mock('@/composables/features/chat/useListSync', () => listSyncModule())
-vi.mock('@/composables/features/sidebar/useSidebarSubagentActions', () => sidebarSubagentActionsModule())
 vi.mock('@/composables/usePlatformShortcut', () => platformShortcutModule())
 vi.mock('@taiji/core/transport/api', () => coreTransportApiModule())
 

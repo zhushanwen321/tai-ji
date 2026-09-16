@@ -1,8 +1,8 @@
 /**
  * visual baseline: composer 区域 —— C层 Playwright 像素 diff（IF3）。
  *
- * 激活 session（'E2E 文件树测试'）后 main panel 载入 chat workspace，截 composer-box。
- * baseline: e2e/visual-baselines/composer/composer-default.png（git tracked，Q3/D3）。
+ * 激活 session（'API 性能优化'）后 main panel 载入 chat workspace，截 composer-box。
+ * baseline: e2e/visual-baselines/composer.spec/composer-default.png（git tracked，Q3/D3）。
  *
  * activateSession 复用 e2e/v6-shell-baseline.spec.ts 范式。mock 模式（VITE_MOCK=true，无 VITE_E2E）
  * session list 是 fixtureSessions（5 个：重构 auth 模块 / API 性能优化 等），不依赖 e2eTestSession 注入。
@@ -36,6 +36,11 @@ test.describe('visual baseline: composer', () => {
     await page.goto(visualBaseURL, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('.app-shell', { state: 'visible', timeout: 30_000 })
     await activateSession(page, 'API 性能优化')
+    // 截图主体在场断言（[2026-09-16 composer-task-tray] 托盘是本次基线变更的驱动元素）：
+    // 只等 composer-box 会把「托盘未挂载」静默照成基线，视觉轨的断言对象必须显式在场。
+    // s3 = 'API 性能优化'，mock 对该 session 有 workflow/subagent 历史记录 → 托盘挂 dim 条目。
+    await expect(page.getByTestId('composer-tray')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')).toBeVisible()
     // settle：等 composer 渲染 + 动画平息
     await page.waitForTimeout(1500)
     await expect(page.getByTestId('composer-box')).toHaveScreenshot('composer-default.png', {

@@ -1,12 +1,11 @@
 /**
- * Workflow store —— workflow 列表 + sidebar 视图层级（列表/详情）+ agentcall 虚拟 key 清理映射。
+ * Workflow store —— workflow 列表 + agentcall 虚拟 key 清理映射。
  *
  * 依赖方向：无（stores 间禁止互相 import）。跨 store 编排（chatStore.setMessages 等）
  * 由调用方通过回调注入，store 内不 import 其他 store。
  *
  * 职责：
- * - 共享 workflow 列表（records）—— Sidebar 管理，所有 panel 只读消费
- * - sidebar 视图层级：detailRunIdMap（视图 2 选中的 workflow runId，仅影响 Sidebar 渲染）
+ * - 共享 workflow 列表（records）—— 所有消费面（composer 任务托盘 / drawer WorkflowTab）只读消费
  * - agentcall 虚拟 key 清理映射（mainSessionAgentCalls）：deleteSession 时清 agentcall 虚拟分区
  *
  * [HISTORICAL] overlay 展示层已于 U7 移除（drawer tab 化）：
@@ -17,8 +16,10 @@
  * （mainSessionAgentCalls + getAgentCallVirtualIdsByMain + clearAgentCallMapping）保留——
  * isVirtualKeyOf 只匹配 subagent: 前缀不匹配 agentcall:，此映射是 agentcall 清理唯一通路
  * （review MUST_FIX 1）。drawer SubagentTab agentcall 分支经 registerAgentCall 登记到此映射。
- * sidebar 视图 2（detailRunIdMap + selectWorkflow/backToWorkflowList/getViewingRunId）保留——
- * 那是 sidebar 内的 workflow 详情视图，与 overlay 无关。
+ * [2026-09-16 侧栏任务 tab 退役] sidebar 视图 2 簇（per-panel 选中 runId 状态 + 选中 /
+ * 返回 / 读取当前详情三支函数）随 Agents/Flows tab 删除——生产消费面（侧栏列表与详情挂载
+ * 分支 + 侧栏子代理动作 composable 的选中与返回 handler）已退役，workflow 详情统一收口
+ * drawer workflow tab。
  *
  * 虚拟 session ID 格式：`agentcall:<sessionId>`（agent call 对话流）
  * chatStore.messages Map 支持任意 string key，直接用虚拟 session ID 注入消息。
@@ -51,13 +52,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const isLoading = ref(false)
   /** 加载错误（M1：loadWorkflows 失败时设错误消息，null = 无错误；records 保留旧数据不清空） */
   const loadError = ref<string | null>(null)
-
-  /**
-   * per-panel 侧边栏视图 2 选中状态（workflow detail）。
-   * key = panelId, value = 该 panel 侧边栏正在查看的 workflow runId。
-   * 仅影响 Sidebar 渲染（列表 vs detail）。
-   */
-  const detailRunIdMap = ref<Map<string, string>>(new Map())
 
   /**
    * [M7 D6] mainSessionId → Set<agentCallVirtualId> 映射。
@@ -107,9 +101,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return partition.get(sessionId)
   }
 
-  /** 该 session 是否有 workflow 仍在 running 或 paused（供 derivedStatus 计算 hasBackgroundWork） */
-  function hasRunningOrPaused(sessionId: string): boolean {
-    return getRecordsBySession(sessionId).some((s) => s.status === 'running' || s.status === 'paused')
+  /** 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork） */
+  function hasRunningWorkflow(sessionId: string): boolean {
+    return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
 
   /** 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发） */
@@ -125,29 +119,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   // ── getters ──
   /**
-   * 响应式视图：指定 session 的 workflow 计数（Sidebar badge 用，读取 recordsOf 分区）。
-   * 旧的无参 workflowCount() 已移除（store 拿不到 focusedSessionId，调用方传 sid）。
+   * 响应式视图：指定 session 的 workflow 计数（读取 recordsOf 分区）。
+   * 旧的无参 workflowCount() 已移除（store 拿不到 focusedSessionId，调用方传 sid）；
+   * 原「Sidebar badge 用」消费面随侧栏任务 tab 退役（现行计数面 = composer 任务托盘
+   * useTrayCounts，该处直接从 recordsOf 分区长度派生，不经本函数）。
    */
   function workflowCount(sessionId: string): number {
     return getRecordsBySession(sessionId).length
   }
 
-  /** 本 panel 当前查看的 runId（侧边栏视图 2 详情态），非详情态返回 null */
-  function getViewingRunId(panelId: string): string | null {
-    return detailRunIdMap.value.get(panelId) ?? null
-  }
-
-  /** 本 panel 当前查看的 workflow record（视图 2 详情态，从 mainSessionId 分区查） */
-  function getCurrentWorkflow(panelId: string, mainSessionId: string): WorkflowRunRecord | null {
-    const rid = getViewingRunId(panelId)
-    if (!rid) return null
-    return getRecordsBySession(mainSessionId).find((w) => w.runId === rid) ?? null
-  }
-
   // ── actions ──
   /**
    * 加载 session 的 workflow 列表（写入该 sid 分区）。
-   * 在 Sidebar 切到 Flows tab 或 session 切换时调用。
+   * 现行调用拓扑：托盘首拉/retry（useTrayCounts，D13 首拉触发迁移）、abort 后刷新
+   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）。
    */
   async function loadWorkflows(sessionId: string): Promise<void> {
     if (!sessionId) return // 空 sid 不写分区
@@ -185,7 +170,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    *
    * runtime 在 workflow 发起/结束时刻推送 session.workflowUpdate 增量信号，前端收到后触发
    * loadWorkflows RPC 拉取完整列表。由 useConnection.routeInbound 在所有 session（含非活跃）
-   * 无条件兜底调用——不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 侧栏卡 running）。
+   * 无条件兜底调用——不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 托盘/详情缺终态）。
    *
    * running 信号特殊处理：workflow tool-call-end 触发 running 信号时，主 session JSONL 的
    * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。
@@ -210,29 +195,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
   }
 
-  /** 清空所有 workflow 分区 + 退出侧边栏视图 2 + 清 agentcall 映射（全局重置场景用） */
+  /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
     partition.recordsBySession.value = new Map()
-    detailRunIdMap.value = new Map()
     // W3-2：清非响应式的 mainSessionAgentCalls（registerAgentCall 写入，deleteSession/clearWorkflows 调本函数清）
     mainSessionAgentCalls.clear()
-  }
-
-  /**
-   * 进入侧边栏视图 2（workflow 详情，sidebar 内展示 phase/agent call）。
-   * 写 detailRunIdMap（sidebar 视图 2 状态）。
-   */
-  function selectWorkflow(panelId: string, runId: string): void {
-    const next = new Map(detailRunIdMap.value)
-    next.set(panelId, runId)
-    detailRunIdMap.value = next
-  }
-
-  /** 视图 2 → 视图 1（从 workflow 详情返回列表）。清 detailRunIdMap。 */
-  function backToWorkflowList(panelId: string): void {
-    const next = new Map(detailRunIdMap.value)
-    next.delete(panelId)
-    detailRunIdMap.value = next
   }
 
   /**
@@ -274,20 +241,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadError,
     // getters
     workflowCount,
-    getViewingRunId,
-    getCurrentWorkflow,
     // per-session 分区读写（ADR-0049 Map 分区派）
     recordsOf,
     getRecordsBySession,
-    hasRunningOrPaused,
+    hasRunningWorkflow,
     applyRecords,
     clearSession,
     // actions
     loadWorkflows,
     triggerWorkflowReload,
     clearWorkflows,
-    selectWorkflow,
-    backToWorkflowList,
     registerAgentCall,
     getAgentCallVirtualIdsByMain,
     clearAgentCallMapping,

@@ -89,9 +89,8 @@ interface HostCalls {
   roundStarts: string[];
   closed: string[];
   gateAllows: boolean;
-  /** [U5] 归档/寻回/重建委托达点。 */
+  /** [U5] 收口落账/重建委托达点。 */
   archived: Array<{ recordId: string; source: string }>;
-  reactivated: string[];
   rebuilt: string[];
   conflictNotices: Array<{ recordId: string; patchFile: string }>;
 }
@@ -139,7 +138,6 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     closed: [],
     gateAllows: true,
     archived: [],
-    reactivated: [],
     rebuilt: [],
     conflictNotices: [],
     ...overrides,
@@ -200,7 +198,7 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     closeNow: async (rec) => {
       calls.closed.push(rec.id);
     },
-    // [U5] 新增 host 成员（closeAfterRound 归档消费 / 寻回 / worktree 重建 / 冲突提示）。
+    // [U5] 新增 host 成员（closeAfterRound 收口落账消费 / worktree 重建 / 冲突提示）。
     archiveAfterClosingRound: async (rec) => {
       calls.order.push(`archive:${rec.id}`);
       calls.archived.push({ recordId: rec.id, source: "test" });
@@ -212,10 +210,6 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
         kind: "rebuilt",
         handle: Object.freeze({ path: "/tmp/wt-rebuilt", branch: `pi-sub-${rec.id}`, baseCommit: "abc", mainCwd: "/tmp/repo" }),
       };
-    },
-    reactivateRecord: (rec) => {
-      calls.reactivated.push(rec.id);
-      record.intent = "active";
     },
     notifyWorktreeConflict: (recordId, patchFile) => {
       calls.conflictNotices.push({ recordId, patchFile });
@@ -546,48 +540,56 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     expect(calls.finalized[0]!.outcome).toEqual({ kind: "failed", reason: "engine_crashed: child died" });
   });
 
-  it("[U5] 成功分支 notifyGate 三元组门：编排性关闭自动收起（archived）后迟到应答不注入（route 不调）", async () => {
+  it("[U5] 成功分支：编排性关闭（settle idle + 放弃轮标记）后迟到应答被入口 status 守卫拦截（不 route）", async () => {
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    // [U5] 编排性关闭自动收起形态（disposeAllRecords：settle interrupted-by-parent +
-    // intent=archived + 放弃轮标记）——迟到的在飞轮应答经 gate ①归档静默拦截。
-    record.intent = "archived";
+    // [U5] 编排性关闭形态（disposeAllRecords：settle interrupted-by-parent 翻 idle +
+    // 在飞轮置放弃轮标记）——迟到的在飞轮应答在 onRunSettled 入口被 status 守卫拦截
+    //（迟到簿记若发生会污染 dispose 的 settle 簿记——round 多跳/result 覆盖，整个
+    // 丢弃才是正确语义）。[u-arch] gate ① 静默删除后「dispose 后迟到应答不注入」由
+    // 三层承接：status 守卫（本用例达点）+ 轮身份守卫（dispose 的 abortAndClearQueue
+    // 废弃轮身份）+ notifyId 账本去重；gate ② 标记的命中形态见下方 cancel 防双发用例。
+    record.status = "idle";
+    record.stopReason = "interrupted-by-parent";
     record.lastAbandonedRound = { epoch: 0, round: 0 };
 
     cont.onRunSettled(makeOutcome({ content: "late round" }));
 
-    await vi.waitFor(() => expect(calls.finalized.length).toBe(1));
-    expect(calls.routed.length).toBe(0); // gate ① 静默——不注入可能已切换的 session
+    expect(calls.finalized.length).toBe(0); // 守卫拦截——迟到簿记不发生
+    expect(calls.routed.length).toBe(0); // 不注入可能已切换的 session
   });
 
-  it("[U5] 失败分支 notifyGate 三元组门：cancel 中断轮放弃标记命中不双发（gate ②防双发）", async () => {
+  it("[U5] 失败分支 notifyGate 门：cancel 中断轮放弃标记命中不双发（防双发）", async () => {
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
     // [U5] cancelBackground 已先行（settle interrupted + 放弃轮标记 {epoch 0, round 1}
-    // ——失败 settle 的 round 推进（=1）不越过标记轮）→ 迟到失败帧经 gate ②标记命中
+    // ——失败 settle 的 round 推进（=1）不越过标记轮）→ 迟到失败帧经 gate 标记命中
     // 丢弃（防双发）。
     record.lastAbandonedRound = { epoch: 0, round: 1 };
 
     cont.onRunSettled(makeOutcome({ content: "", error: "aborted" }));
 
     await vi.waitFor(() => expect(calls.finalized.length).toBe(1));
-    expect(calls.notified.length).toBe(0); // gate ② 阻断——防双发
+    expect(calls.notified.length).toBe(0); // gate 阻断——防双发
   });
 
-  it("[U5] 失败分支 notifyGate 三元组门：编排性关闭（parent-fork）自动收起后迟到帧不注入（防僵尸回执）", async () => {
+  it("[U5] 失败分支：编排性关闭（parent-fork）后迟到帧被入口 status 守卫拦截（防僵尸回执）", async () => {
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
     const cont = new ConversationContinuation(record, host);
-    // [U5] disposeAllRecords(parent-fork) 自动收起形态——gate ①静默（v4 A-6 僵尸
-    // 回执防御的承接面）。
-    record.intent = "archived";
+    // [U5] disposeAllRecords(parent-fork) 编排性关闭形态（settle interrupted-by-parent
+    // 翻 idle + 放弃轮标记）——迟到失败帧在 onRunSettled 入口被 status 守卫拦截
+    //（v4 A-6 僵尸回执防御的承接面；[u-arch] gate ①删除后防线 = status 守卫 +
+    // 轮身份守卫 + notifyId 账本）。
+    record.status = "idle";
+    record.stopReason = "interrupted-by-parent";
     record.lastAbandonedRound = { epoch: 0, round: 0 };
 
     cont.onRunSettled(makeOutcome({ content: "", error: "boom" }));
 
-    await vi.waitFor(() => expect(calls.finalized.length).toBe(1));
+    expect(calls.finalized.length).toBe(0);
     expect(calls.notified.length).toBe(0);
     expect(calls.routed.length).toBe(0);
   });
@@ -991,7 +993,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
   });
 });
 
-describe("集成：close 优雅收口（[U5] §3.2.5 close = 归档：在飞轮不打断，closeAfterRound 挂起 → 轮终通知送达后归档）", () => {
+describe("集成：close 优雅收口（[U5] §3.2.5 close = 收口落账：在飞轮不打断，closeAfterRound 挂起 → 轮终通知送达后收口落账）", () => {
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
@@ -1013,7 +1015,7 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 归档：在飞轮�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("轮在途 close(force:false) → 优雅收口挂起（closeAfterRound=true，不打断在飞轮）→ 轮终通知送达后归档 + intent=archived", async () => {
+  it("轮在途 close(force:false) → 优雅收口挂起（closeAfterRound=true，不打断在飞轮）→ 轮终通知送达后收口落账（idle + closeAfterRound 消费）", async () => {
     const record = makeChatRecord("sa-close-mid", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "long round");
@@ -1022,29 +1024,27 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 归档：在飞轮�
     await service["closeSubagent"](record, false);
 
     // [U5] close = 优雅收口：不打断在飞轮——closeAfterRound 挂起（设计 close 行
-    // 「在飞轮优雅收口后归档」），status 保持 running（轮在飞）。
+    // 「在飞轮优雅收口后收口落账」），status 保持 running（轮在飞）。
     expect(record.status).toBe("running");
     expect(record.closeAfterRound).toBe(true);
-    expect(record.intent).toBeUndefined();
 
-    // 轮终收敛：收口轮 settle → 轮次通知送达（route 过 gate ③豁免）→ 归档消费点。
+    // 轮终收敛：收口轮 settle → 轮次通知送达（route 过 gate ③豁免）→ 收口落账消费点。
     fake.runs[0]!.settle({ content: "closing round text" });
-    await vi.waitFor(() => expect(record.intent).toBe("archived"));
-    // 顺序约束 [写死]：归档前轮次通知已送达（pi.sendMessage 被调——轮次通知先于
-    // intent 翻转，gate ①静默不吞收口轮通知）。
-    expect(pi.sendMessage).toHaveBeenCalled();
     // 收口轮 settle 后 idle + 关闭挂起标志已消费（[two-state-convergence U4/D3]
-    // 轮终翻边 idle——原断言 running 与注释漂移，随批对齐）
+    // 轮终翻边 idle——收口完成信号由 status + closeAfterRound 消费承载）
+    await vi.waitFor(() => expect(record.closeAfterRound).toBeUndefined());
+    // 顺序约束 [写死]：收口落账前轮次通知已送达（pi.sendMessage 被调——轮次通知
+    // 先于收口落账，不吞收口轮通知）。
+    expect(pi.sendMessage).toHaveBeenCalled();
     expect(record.status).toBe("idle");
-    expect(record.closeAfterRound).toBeUndefined();
-    // 「已收起」提示（chatMode 归档通知一条）
+    // 「已结束」提示（chatMode 收口通知一条）
     await vi.waitFor(() => {
       const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(2);
     });
   });
 
-  it("close 归档后 queue 不再派发（archived 静默 + idle 收口），message 寻回翻回 active", async () => {
+  it("close 收口后 queue 不再派发（idle 收口），message 寻回 revive 派发新轮", async () => {
     const record = makeChatRecord("sa-close-queue", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "round");
@@ -1058,21 +1058,23 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 归档：在飞轮�
     ).chatRounds.continuations;
     expect(conts.get(record.id)?.pendingCount).toBe(1);
 
-    // [U5] close 优雅收口挂起（不打断在飞轮、不清队列——轮终后归档消费）。
+    // [U5] close 优雅收口挂起（不打断在飞轮、不清队列——轮终后收口落账消费）。
     await service["closeSubagent"](record, false);
     expect(record.closeAfterRound).toBe(true);
 
-    // 轮终收敛：settle → 通知送达 → 归档（intent=archived）。close 时排队消息已随
-    // 收起意愿作废（clearQueue——不打断在飞轮）→ 轮终 drain 无排队可派发（无续轮）。
+    // 轮终收敛：settle → 通知送达 → 收口落账（closeAfterRound 消费 + idle）。close 时
+    // 排队消息已随 close 意愿作废（clearQueue——不打断在飞轮）→ 轮终 drain 无排队可
+    // 派发（无续轮）。
     fake.runs[0]!.settle({ content: "late" });
-    await vi.waitFor(() => expect(record.intent).toBe("archived"));
+    await vi.waitFor(() => expect(record.closeAfterRound).toBeUndefined());
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(conts.get(record.id)?.pendingCount ?? 0).toBe(0);
     expect(fake.runs.length).toBe(1); // 队列已随 close 作废——无 drain 派发
-    // [U5] 归档后 message = 隐含寻回：intent 翻回 active（markReactivated）+ 续聊
-    //（锚文件由 fake 引擎持有（fixture 目录无实体文件）→ reopen 降级 + fresh 派发承接）
+    // [U5] 收口后 message = 隐含寻回：reviveOrThrow 翻回 running 派发续聊轮（不翻任何
+    // 意愿字段——两态下复活资格本就由 status/锚判据承载；锚文件由 fake 引擎持有
+    //（fixture 目录无实体文件）→ reopen 降级 + fresh 派发承接）
     await service.chatActions.deliverChatMessage(record, "after close");
-    await vi.waitFor(() => expect(record.intent).toBe("active"));
+    await vi.waitFor(() => expect(record.status).toBe("running"));
     await vi.waitFor(() => expect(fake.runs.length).toBe(2));
   });
 });
@@ -1625,13 +1627,13 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     fake.runs[1]!.emitEvent({ type: "turn_end" });
     expect(record.totalTokens).toBe(200);
 
-    // [U5] close 归档 → 收口轮 settle + 归档 entry totalTokens/turns 保真（list /
+    // [U5] close 收口 → 收口落账 entry totalTokens/turns 保真（list /
     // 重启重建源读到的形态；record 不终态化——markRoundIdle 落 idle（
     // [two-state-convergence U4/D3] 翻边），entry status 投影随之）
     fake.runs[1]!.settle({ content: "round two reply" });
     await vi.waitFor(() => expect(record.round).toBe(3));
     await service["closeSubagent"](record, false);
-    await vi.waitFor(() => expect(record.intent).toBe("archived"));
+    // idle record close = 立即收口落账（同步完成）——收口 entry 落账形态即完成信号。
     const finalEntry = entriesFor(record.id).at(-1);
     expect(finalEntry).toMatchObject({ id: record.id, status: "idle", totalTokens: 200, turns: 2 });
   });

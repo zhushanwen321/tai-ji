@@ -581,7 +581,8 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + preset chip(Zap icon + 预设名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs neutral-mid，hover bg-surface-hover + neutral-fg
   - **landing 页布局**（LandingView）：`flex items-center justify-center` 垂直水平居中；问候语 h1（22px font-650 neutral-fg，按时段「上午好呀/下午好呀/晚上好呀，有什么想让我帮忙的吗」）+ landing Composer（max-w 720px）
   - **inline chip 四色**（无底无边 + `font-weight 600` + 前缀 icon 13px + × 删除按钮 hover 染 danger-soft）：`file`=success 绿 / `image`=reasoning 紫 / `slash`=reasoning 紫 / `@`=accent 蓝；四色 chip 都有 × 删除按钮
-  - **composer-bar 6 元素**：`+`添加 / spacer / 上下文容量(hover popover) / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
+  - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 生成指标(GenStatsTriggers) / 上下文容量(hover popover) / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
+  - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏）。条目 = built-in 三件（后台命令 / 子代理 / 工作流，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（并排不遮 composer）。设计文档 `docs/design/composer-task-tray.md`（D1/D6/D8/D9）
   - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 守卫见 §5.12
   - **comp-box 态**：`.has-input`(2px `color-mix(surface-hover 40%)` 透明微环) / `.focused`(border-accent + 3px accent-ring 外环) / `.staging`(border-accent + 3px ring + bg-accent-soft，独立于焦点)
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
@@ -599,11 +600,11 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
-### 6.2 侧栏（5 tab + 容器）
+### 6.2 侧栏（3 tab + 容器）
 
 - 底色 `var(--bg)`；SegmentedTab 见 §5.3；SessionItem 选中态见 §5.4
 - **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）。session 按 workspace（目录）分组，worktree chip 用 `--reasoning` 紫（§3.5.7）
-- **4 内置 tab**（sessions/files/subagents/workflows）+ **第 5 独立 plugin tab**（Puzzle icon，plugin view 收口于此）
+- **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收口于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点
 - **Brand 区**（顶部）：TaijiLogo 28px 旋转（8s，reduced-motion 停，currentColor 适配主题）+ 产品名(base 600) + 版本号(2xs mid) + 可升级按钮（accent + 7px danger 红点角标）
@@ -670,7 +671,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 维度 | 挂载点 | 级别 | 当前状态 |
 |---|---|---|---|
-| **A 结构容器** | A1 侧栏第 5 tab / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
+| **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
 | **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog+ask-user) | L2/L1 | **已实现**（5 闭环） |
 | **D 命令配置** | D1 slash / D2 settings 区段 | L1 | D1 已实现（双轨待统一） |
 | **E 独立 view** | E1 独立 view 路由 | L3 | 未实现（仅 built-in） |
@@ -681,7 +682,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | L2 结构化原语树 | plugin 给 GuiComponent 组合，renderer 原语渲染器 | ✅ |
 | L3 预编译组件 | plugin 给 Vue 组件，编译期打包 | ❌ 仅 built-in |
 
-> **mobile-renderer plugin 子集**（远程化预留）：mobile-renderer（`feat-remote-use` 分支）布局与桌面完全不同（底部 tab/抽屉式，无 drawer/无 sidebar 第 5 tab/无 panel header 按钮组），16 挂载点是**桌面拓扑专属**。mobile 只支持 **B 维度**（对话流 GuiComponent，message-stream 已 copy）+ **D 维度**（slash command），不支持 A 维度（结构容器注入）和 E 维度（独立 view）。mobile 不含 ExtensionHost 层，plugin 渲染降级为 message-stream 内嵌的 GuiComponentRenderer。完整 mobile plugin 拓扑待 `packages/core` 抽取后定义。
+> **mobile-renderer plugin 子集**（远程化预留）：mobile-renderer（`feat-remote-use` 分支）布局与桌面完全不同（底部 tab/抽屉式，无 drawer/无 sidebar Plugins tab（桌面的第 3 枚）/无 panel header 按钮组），16 挂载点是**桌面拓扑专属**。mobile 只支持 **B 维度**（对话流 GuiComponent，message-stream 已 copy）+ **D 维度**（slash command），不支持 A 维度（结构容器注入）和 E 维度（独立 view）。mobile 不含 ExtensionHost 层，plugin 渲染降级为 message-stream 内嵌的 GuiComponentRenderer。完整 mobile plugin 拓扑待 `packages/core` 抽取后定义。
 
 ### 7.3 16 挂载点 Tier 分层
 
@@ -751,7 +752,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 |---|---|
 | C1 | token 反写（style.css + tailwind.config.ts 同步 demo tokens.css 值） |
 | C2 | 对话流（MessageStream/Block/Composer 6 区/ChangeSetCard） |
-| C3 | 侧栏（SegmentedTab/SessionItem/FileTree/第 5 plugin tab） |
+| C3 | 侧栏（SegmentedTab/SessionItem/FileTree/plugin tab；终态 = 三 tab 中的第 3 枚） |
 | C4 | Drawer（一体化 + 形态 B + 7 tab + GitPanel MVP） |
 | C5 | 设置页（FullSettingsOverlay + 11 page + GroupCard） |
 | C6 | Overlays（SearchModal/AskUserOverlay/ConfirmDialog） |

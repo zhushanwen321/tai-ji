@@ -1,9 +1,11 @@
 <!--
   WorkflowTab —— drawer workflow tab：agent call 列表（按 phase 分组）。
 
-  形态对齐 demo.html + spec §11：header（workflow 名 + 暂停/中止）+ phase 分组 +
+  header（workflow 名 + abort 两段式中止）+ phase 分组 +
   agent call 行（status 圆点 + agent + slug + tokens/turns/duration + running/pending）。
-  phase 分组逻辑复用自 sidebar WorkflowDetail.vue（同数据结构 WorkflowRunRecord.agentCalls）。
+  phase 分组逻辑现居本组件（同数据结构 WorkflowRunRecord.agentCalls）——原实现侧
+  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收口本 tab，
+  分组/dot/format 逻辑以本文件为唯一在役出处。
 
   agent call 本质是 subagent（D4）：点 agent call 行 → openSubagent({ virtualId: agentCallVirtualId(call.sessionId),
   enteredFrom:'workflow' }) 切到 subagent tab（D4：从 workflow 进入显返回按钮）。
@@ -25,7 +27,7 @@
     </div>
 
     <template v-else>
-      <!-- header：workflow 名 + slug + 暂停/中止（running 态 Pause+Abort，paused 态 Resume+Abort） -->
+      <!-- header：workflow 名 + slug + 中止（running 态 Abort 两段式） -->
       <div class="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" />
         <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-neutral-fg">
@@ -34,21 +36,8 @@
         <span v-if="workflow.slug" class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ workflow.slug }}
         </span>
-        <div
-          v-if="workflow.status === 'running' || workflow.status === 'paused'"
-          class="flex shrink-0 items-center gap-0.5"
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-5 text-neutral-dim hover:text-neutral-fg"
-            :title="workflow.status === 'running' ? t('sidebar.workflowDetail.pause') : t('sidebar.workflowDetail.resume')"
-            data-testid="drawer-workflow-pause"
-            @click="onAction(workflow.status === 'running' ? 'pause' : 'resume')"
-          >
-            <Pause v-if="workflow.status === 'running'" class="size-3" />
-            <Play v-else class="size-3" />
-          </Button>
+        <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
+        <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
           <Button
             variant="ghost"
             size="icon"
@@ -65,7 +54,7 @@
         </div>
       </div>
 
-      <!-- agent call 列表（按 phase 分组），复用 WorkflowDetail 的分组/dot/format 逻辑 -->
+      <!-- agent call 列表（按 phase 分组），分组/dot/format 逻辑见下方 phaseGroups -->
       <ScrollArea class="min-h-0 flex-1">
         <div class="flex flex-col px-1.5 pb-2">
           <div v-for="group in phaseGroups" :key="group.phase" class="mb-2">
@@ -119,7 +108,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Loader2, Pause, Play, Square, Workflow } from '@lucide/vue'
+import { Check, Loader2, Square, Workflow } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
@@ -130,7 +119,7 @@ import { workflowAction } from '@taiji/core/transport/api/domains/session'
 import { useToast } from '@/composables/useToast'
 import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 
-/** token 数超过此阈值显示 k 单位（复用 WorkflowDetail 阈值） */
+/** token 数超过此阈值显示 k 单位（沿用自退役的侧栏工作流详情视图同值） */
 const TOKEN_K_THRESHOLD = 1000
 const MS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
@@ -147,7 +136,9 @@ const aborting = ref(false)
 
 /**
  * 当前选中的 workflow record（响应式）。
- * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（兼容 U5/U6 不同调用方式）。
+ * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（两种调用归宿：
+ * 托盘行传 runId（TrayNativePanel 行点击矩阵）、对话流 workflow 内联块传 tool input name
+ * （Block.vue，scriptName 回退为其兜底）。
  */
 const workflow = computed<WorkflowRunRecord | null>(() => {
   const name = selectedWorkflowName.value
@@ -160,7 +151,7 @@ const workflow = computed<WorkflowRunRecord | null>(() => {
   return byName.length > 0 ? byName[byName.length - 1] : null
 })
 
-/** phase 分组 + 组内状态聚合（复用自 WorkflowDetail） */
+/** phase 分组 + 组内状态聚合（原从侧栏工作流详情视图迁入，该视图已退役） */
 interface PhaseGroup {
   phase: string
   calls: WorkflowAgentCall[]
@@ -249,8 +240,8 @@ function onAbortClick(): void {
   }
 }
 
-/** workflow 操作（pause/resume/abort）：调 runtime RPC + 刷新列表 */
-async function onAction(action: 'pause' | 'resume' | 'abort'): Promise<void> {
+/** workflow abort：调 runtime RPC + 刷新列表（pause/resume 随扩展 D-2 一次性生命周期移除） */
+async function onAction(action: 'abort'): Promise<void> {
   const wf = workflow.value
   const sid = panelStore.focusedSessionId
   if (!wf || !sid) return

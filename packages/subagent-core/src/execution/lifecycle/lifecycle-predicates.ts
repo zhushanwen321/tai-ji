@@ -16,9 +16,9 @@
 //     idle 派生，[U5/D4]），续聊走 deliverMessage 冷路径 resume（续写原 session
 //     文件）。chat 轮终经 armIdleKeepalive（conversation-continuation.ts，
 //     [u7a 补挂] 唯一生产 arm 接线）挂 idle timer 保活 → isIdle=true——超时处置 =
-//     RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动意愿位/占用位）。
+//     RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动占用位）。
 //     notify 守卫（notify-host.ts）的放行谓词 = 旧终态遗留（idle ∧ closedReason
-//     有值，U2 桥接判据）/ [U5] archived（归档提示载荷）或 isResumable（idle）。
+//     有值，U2 桥接判据）/ idle（收口落账提示/轮次通知载荷）或 isResumable（idle）。
 //   - 正在执行：isIdle=false、isResumable=false（running 直读为假）。
 
 import { hasIdleTimer } from "./lifecycle-manager.ts";

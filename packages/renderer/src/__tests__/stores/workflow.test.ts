@@ -4,14 +4,15 @@
  * 覆盖：
  * - records 初值空数组 + workflowCount
  * - loadWorkflows 成功写入 records + 失败清空
- * - clearWorkflows 清空 records + 退出侧边栏视图 2 + 清 agentcall 映射
- * - selectWorkflow / getViewingRunId / getCurrentWorkflow 视图 2（sidebar 内，非 overlay）
- * - backToWorkflowList 退出视图 2
+ * - clearWorkflows 清空 records + 清 agentcall 映射
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
  *
  * [HISTORICAL] overlay 相关用例（selectAgentCall/backFromAgentCall/isViewing/getViewingAgentCallId/
  * getActiveAgentCallVirtualId）已随 U7 overlay 移除删除。agent call 详情现走 drawer SubagentTab
  * （直接 getAgentCallHistory + setMessages + registerAgentCall），不经 store overlay 状态机。
+ * [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：sidebar 视图 2 用例（选中 runId / 读取当前
+ * workflow / 返回列表三支）随 Agents/Flows tab 删除——同批删除的还有 store 的 per-panel
+ * 选中状态与该三支读写函数（生产消费面全在退役面内）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/workflow.test.ts
  */
@@ -92,39 +93,18 @@ describe('workflow store', () => {
     expect(store.loadError).toBe('rpc error')
   })
 
-  it('clearWorkflows 清空所有分区 + 退出侧边栏视图 2 + 清 agentcall 映射', () => {
+  it('clearWorkflows 清空所有分区 + 清 agentcall 映射', () => {
     const store = useWorkflowStore()
-    store.selectWorkflow('panel-1', 'wf-001')
+    store.applyRecords('sess-1', [makeRecord()])
     // 登记 agentcall 映射（U7 MUST_FIX 1）
     store.registerAgentCall('sess-1', agentCallVirtualId('ac-1'))
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
+    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
     expect(store.getAgentCallVirtualIdsByMain('sess-1')).toContain(agentCallVirtualId('ac-1'))
 
     store.clearWorkflows()
 
     expect(store.getRecordsBySession('sess-1')).toEqual([])
-    expect(store.getViewingRunId('panel-1')).toBeNull()
     expect(store.getAgentCallVirtualIdsByMain('sess-1')).toEqual([])
-  })
-
-  it('selectWorkflow + getViewingRunId + getCurrentWorkflow 视图 2（sidebar 内，非 overlay）', () => {
-    const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-001', scriptName: 'my-flow' })])
-
-    store.selectWorkflow('panel-1', 'wf-001')
-
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
-    expect(store.getCurrentWorkflow('panel-1', 'sess-1')?.scriptName).toBe('my-flow')
-  })
-
-  it('backToWorkflowList 退出视图 2', () => {
-    const store = useWorkflowStore()
-    store.selectWorkflow('panel-1', 'wf-001')
-    expect(store.getViewingRunId('panel-1')).toBe('wf-001')
-
-    store.backToWorkflowList('panel-1')
-
-    expect(store.getViewingRunId('panel-1')).toBeNull()
   })
 })
 

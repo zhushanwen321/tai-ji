@@ -199,7 +199,7 @@ async function executeRpcAction(
       return;
     case "noop":
       // 无 action 或未知 action：GUI 端已屏蔽此 command 入口，此处兜底
-      ctx.ui.notify("View subagents in the sidebar Agents tab", "info");
+      ctx.ui.notify("View subagents in the composer task tray", "info");
       return;
     default: {
       // exhaustiveness 断言：未来新增 action verb 忘加 case 时 tsc 报错

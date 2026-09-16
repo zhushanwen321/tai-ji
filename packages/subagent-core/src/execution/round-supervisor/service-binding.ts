@@ -261,7 +261,7 @@ export function createRoundSupervisorForService(binding: RoundSupervisorBinding)
 
 /**
  * [W4] 注册对账 sweep（发射点枚举⑤）：对「本 session register entry × 对应
- * record/run ∈ 终态集 ∪ 已归档/不存在」差集补发 unregister——appendEntry 权威落盘 +
+ * record/run ∈ 终态集 ∪ 已离场/不存在」差集补发 unregister——appendEntry 权威落盘 +
  * 尽力 emit（写法论证见 reconcile-sweep.ts 头注）。[F2] 判据按类型分流：subagent 走
  * RecordStore，workflow/畸形走 FileRunStore（findStateByIdSync），bash 无收口通道
  * 保守跳过（显式偏差 impl-plan §5）。触发点 = initSession（session
@@ -299,7 +299,7 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
           : "active";
       },
       // [F2] type=workflow 及畸形条目的收口判据（设计 D2 sweep 判据补全——
-      // 「终态集 ∪ 已归档/不存在」对 workflow run 同样成立）。running 映射 active
+      // 「终态集 ∪ 已离场/不存在」对 workflow run 同样成立）。running 映射 active
       // （含全行损坏的保守形态）；done → terminal（reason 即 DoneReason，经
       // closedReasonToPendingReason 未知值兜底）；文件缺失 → missing。
       lookupWorkflowRunState: (runId) => {

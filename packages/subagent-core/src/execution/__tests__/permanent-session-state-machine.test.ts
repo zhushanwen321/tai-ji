@@ -358,10 +358,10 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markArchived / markIdleEvicted 副作用矩阵（意愿位 + 写权声明）──────────
+// ── ⑤ markSettledOut / markIdleEvicted 副作用矩阵（写权声明 + 收口落账写面）──────────
 
-describe("markArchived / markIdleEvicted 副作用矩阵", () => {
-  it("markArchived：intent=archived + .alive release（release 出口①）+ entry 上报", () => {
+describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
+  it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
@@ -370,19 +370,19 @@ describe("markArchived / markIdleEvicted 副作用矩阵", () => {
       JSON.stringify({ pid: process.pid, id: "bg-1", startedAt: Date.now() }),
       "utf-8",
     );
-    expect(store.markArchived(rec)).toBe(true);
-    expect(rec.intent).toBe("archived");
+    expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    expect(store.getMutable("bg-1")).toBe(rec); // archived ≠ 内存回收（占用位不动）
+    expect(store.getMutable("bg-1")).toBe(rec); // 收口 ≠ 内存回收（占用位不动）
   });
 
-  it("markArchived 幂等：重复 close 无害（intent 恒 archived，release 静默）", () => {
+  it("markSettledOut 幂等：重复 close / dispose 重复调用无害（release 静默，恒 true）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
-    store.markArchived(rec);
-    expect(store.markArchived(rec)).toBe(true);
-    expect(rec.intent).toBe("archived");
+    store.markSettledOut(rec);
+    expect(store.markSettledOut(rec)).toBe(true);
+    expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
+    expect(store.getMutable("bg-1")).toBe(rec);
   });
 
   it("markIdleEvicted：内存移除 + manifest 投影 + .alive release 后（写序 archive 先 release 后）", () => {
@@ -402,22 +402,5 @@ describe("markArchived / markIdleEvicted 副作用矩阵", () => {
       fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
     ) as Record<string, unknown>;
     expect(manifest.status).toBe("running"); // 非终态化如实投影（磁盘仍可接管）
-  });
-
-  it("markIdleArchived（deprecated 别名）与 markIdleEvicted 写序全等", () => {
-    const recA = runningRecord();
-    const recB = runningRecord();
-    (recB as { id: string }).id = "bg-2";
-    const storeA = newStore();
-    const storeB = newStore();
-    storeA.register(recA);
-    storeB.register(recB);
-    storeA.markIdleArchived(recA);
-    storeB.markIdleEvicted(recB);
-    expect(storeA.getMutable("bg-1")).toBeUndefined();
-    expect(storeB.getMutable("bg-2")).toBeUndefined();
-    const manifestA = JSON.parse(fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8")) as Record<string, unknown>;
-    const manifestB = JSON.parse(fs.readFileSync(path.join(manifestDir, "bg-2.json"), "utf-8")) as Record<string, unknown>;
-    expect(manifestA.status).toBe(manifestB.status);
   });
 });

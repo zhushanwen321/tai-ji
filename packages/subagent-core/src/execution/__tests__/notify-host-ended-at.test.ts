@@ -4,15 +4,15 @@
 //   1. running 轮终（生产 markRoundIdle 收口形态：status="idle" ∧ 无 closedReason）→
 //      载荷含 number 型 endedAt（物化前恒 undefined——bg-notify 边界行的耗时恒不显）；
 //   2. 批成员（batchMember=true，closed 载荷形态）→ 同样物化；
-//   3. 归档（intent="archived"）不合成新值：无原值保持 undefined、带历史值原值透传
-//      （归档时刻 ≠ 任务结束时刻，「收起延迟」不得混入耗时）；
-//   4. legacyClosed（status="idle" ∧ closedReason 有值）保持原值透传（有则透传、
-//      无则不补）；
-//   5. 快照已有 endedAt 优先于投影时刻（settleRoundFailed / drain-drop 两条自带
+//   3. legacyClosed（status="idle" ∧ closedReason 有值）保持原值透传（有则透传、
+//      无则不补）——原「archived 归档提示」域外分支已随 2026-09-16 全链路删除裁决
+//      消亡（收口提示与任务结束同刻，无「收起延迟」失真源）；
+//   4. 快照已有 endedAt 优先于投影时刻（settleRoundFailed / drain-drop 两条自带
 //      endedAt 的既有构造路径保真）；
-//   6. 投影边界一次完成：返回对象固定，时钟推进不追涨（新投影才取新时钟）；
-//   7. record 内存零触碰：不写回 record.endedAt（「终态冻结信号」不变量）；
-//   8. 归档提示投递链（notifyClosed）复用同一映射且不物化。
+//   5. 投影边界一次完成：返回对象固定，时钟推进不追涨（新投影才取新时钟）；
+//   6. record 内存零触碰：不写回 record.endedAt（「终态冻结信号」不变量）；
+//   7. 收口提示投递链（notifyClosed）复用同一映射：idle 落账形态物化 endedAt，
+//      载荷形态由入口固定 closed。
 //
 // 时钟：vi.useFakeTimers({ toFake: ["Date"] })——只 fake Date，不碰真实定时器
 //（本族零 timer 依赖；notifier 构造点无定时器武装）。
@@ -121,25 +121,7 @@ describe("[U8] 物化域 = running 轮终 + 批成员", () => {
   });
 });
 
-describe("[U8] 域外两分支不合成新值（原值透传）", () => {
-  it("归档提示（intent=archived）无原值 → 保持 undefined", () => {
-    const host = makeHost();
-    const record = makeRecord("sa-archived", { status: "idle", intent: "archived" });
-
-    const notify = host.toNotifyRecord(record);
-
-    expect(notify).toBeDefined();
-    expect(notify!.status).toBe("closed");
-    expect(notify!.endedAt).toBeUndefined();
-  });
-
-  it("归档提示带历史 endedAt → 原值透传（不覆写为归档时刻）", () => {
-    const host = makeHost();
-    const record = makeRecord("sa-archived-hist", { status: "idle", intent: "archived", endedAt: 4242 });
-
-    expect(host.toNotifyRecord(record)!.endedAt).toBe(4242);
-  });
-
+describe("[U8] 域外分支不合成新值（原值透传）", () => {
   it("legacyClosed 无原值 → 不补；有原值 → 透传", () => {
     const host = makeHost();
     const legacy = makeRecord("sa-legacy", { status: "idle", closedReason: "gc" });
@@ -175,27 +157,27 @@ describe("[U8] 投影边界一次完成 + record 内存零触碰", () => {
   it("endedAt 不写回 record 内存（「终态冻结信号」不变量）", () => {
     const host = makeHost();
     const roundTerminal = makeRecord("sa-mem", { status: "idle" });
-    const archived = makeRecord("sa-mem-arch", { status: "idle", intent: "archived" });
+    const legacy = makeRecord("sa-mem-legacy", { status: "idle", closedReason: "gc" });
 
     host.toNotifyRecord(roundTerminal);
     host.toNotifyRecord(roundTerminal, { batchMember: true });
-    host.toNotifyRecord(archived);
+    host.toNotifyRecord(legacy);
 
     expect(roundTerminal.endedAt).toBeUndefined();
-    expect(archived.endedAt).toBeUndefined();
+    expect(legacy.endedAt).toBeUndefined();
   });
 });
 
-describe("[U8] 归档提示投递链不物化（notifyClosed 复用同一映射）", () => {
-  it("送达载荷 endedAt 缺席（归档时刻不得当耗时）", () => {
+describe("[U8] 收口提示投递链复用同一映射（notifyClosed）", () => {
+  it("idle 落账形态送达：endedAt 物化（收口时刻 ≈ 结束时刻）+ 载荷固定 closed", () => {
     const { pi, sent } = makePi();
     const host = makeHost(pi);
 
-    host.notifyClosed(makeRecord("sa-close", { status: "idle", intent: "archived" }));
+    host.notifyClosed(makeRecord("sa-close", { status: "idle" }));
 
     expect(sent).toHaveLength(1);
     const details = sent[0]!.details as BgNotifyRecord;
     expect(details.status).toBe("closed");
-    expect(details.endedAt).toBeUndefined();
+    expect(details.endedAt).toBe(FROZEN_NOW);
   });
 });
