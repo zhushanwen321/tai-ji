@@ -174,6 +174,8 @@ graph TD
 | D21 | u-ext-todo | 未跑本地 pi CLI 真机实测（归阶段 5 A3 真机验收） | 本单元验收条款只含包内 vitest + extensions 三连（与 u-ext-goal 同证据形态） | 接受（wire 层已由 tool-rpc G-1/G-4 在真实 marker 载荷上 JSON.parse 断言覆盖） |
 | D22 | u-ext-todo | 未改 `index.ts` 清屏路径与 `render.ts`（TUI 侧无双段承载） | 清屏语义（探针 P1）零改动；设计射程 = buildGui | 接受（G-2 清屏用例继续锁定） |
 | D23 | u-ext-todo | `buildGui([])` badge 推 `'0'` 无特判（仅测试可达） | 生产路径空清单走清屏；不加无生产效果的分支（YAGNI） | 接受 |
+| D24 | u-doc-sync | refreshDisplay 示例定位修正：派发写的 §3.2 实际位于 §4.3（§3.2 已由 u-proto 同步） | 按符号唯一定位改 §4.3 | 接受 |
+| D25 | u-doc-sync | 登记未改的相邻文档存量滞后（超射程）：① §4.3 helper 示例签名与 §5.2/指南 Helper 表滞后（现走 setWidgetDual + GuiRenderResult）；② 指南 §4 速查表「渲染状态」列整列仍标「P2 待实现」而 8 原语已实现；③ 架构文档 §3.2 list-tree props 未列 `numbered`、GuideComponentProps 未列 `group` | 属存量滞后（非本次引入），改动横跨 3+ 处超领地 | 接受暂不改；入 §7 残留风险登记另行建档 |
 
 ## 6 状态表
 
@@ -186,7 +188,7 @@ graph TD
 | u-ext-goal | committed | 1 | commit「feat(tray): u-ext-goal meta icon」；goal vitest 24 files/403 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果 |
 | u-tray-shell | pending | 0 | — |
 | u-ext-todo | committed | 1 | commit「feat(tray): u-ext-todo tab-bar sections」；todo vitest 8 files/144 pass + extensions:typecheck/lint ok + 主 agent 重跑复核同结果；带出计划级漏项 1（e2e/tasks-drawer-real.spec.ts 断言陈旧）+ 文档滞后 2（见 u-doc-sync） |
-| u-doc-sync | pending | 0 | 新单元（自 u-ext-todo blocker 孵化）：`docs/architecture/extension-gui-protocol.md` §14.4 覆盖表 + §3.2 示例（todo 根 = tab-bar）、`docs/extensions/gui-protocol-guide.md` 原语速查表 tab-bar 行补 `sections`；依赖 u-ext-todo/u-proto |
+| u-doc-sync | committed | 1 | commit「docs(protocol): sync todo tab-bar shape + tab-bar sections」；doc-symbol-drift 绿 + 逐处 grep 自对账通过（陈旧断言清零）；偏差 D24-D25 登记 |
 | u-retire-sidebar | pending | 0 | — |
 | u-retire-native-view | pending | 0 | — |
 | u-retire-widgetarea | pending | 0 | — |
@@ -195,6 +197,8 @@ graph TD
 ## 7 残留风险与变更历史
 
 **残留风险**：
+
+0. **文档存量滞后（非本次引入，另行建档）**：① extension-gui-protocol.md §4.3 helper 示例签名 / §5.2 签名行 / gui-protocol-guide.md Helper 表三处滞后（现实走 setWidgetDual + GuiRenderResult）；② gui-protocol-guide.md §4 速查表「渲染状态」列整列标「P2 待实现」但 8 原语已实现；③ 架构文档 §3.2 list-tree props 缺 `numbered`、GuiComponentProps 缺 `group`（指南称「8 个内置类型」）。均为本次改动前既存，交项目文档债务另行处理。
 
 1. **探针 P7（浮层溢出/翻转）**：composer 底部向上弹面板，窗口最小宽度下可能裁剪——u-tray-shell 实施期首验，降级路径 = 手写 anchored 浮层（设计 §3.6 明示两种仓内成熟范式）。
 2. **探针 P5（TabBar 本地 active）**：vue 更新机制若导致组件重建，active 需提升模块级 per-widgetKey 缓存（代价 0，不改协议）——u-tabbar 行为测试兜底。
@@ -213,3 +217,4 @@ graph TD
 | 2026-09-16 | u-tabbar committed（TabBar 容器化 + 本地 active + 探针 P5 门关闭；ui 806 绿，主 agent 重跑复核通过；偏差 D8-D12 登记，设计 §3.5 同步两行） |
 | 2026-09-16 | u-tray-widget committed（排序/按钮/面板 + 依赖追踪复刻契约测试；tray 64 绿，主 agent 重跑复核通过；偏差 D13-D17 登记） |
 | 2026-09-16 | u-ext-todo committed（sections 双 tab + icon/badge；todo 144 绿，主 agent 重跑复核通过；偏差 D18-D23 登记；带出计划级漏项 1（tasks-drawer-real spec）→ 设计 §4 e2e 表修正 + u-e2e 领地扩展；文档滞后 2 → 新增 u-doc-sync 单元） |
+| 2026-09-16 | u-doc-sync committed（协议文档 §4.3 示例 + §14.4 覆盖表 + 指南速查表 tab-bar 行；doc-symbol-drift 绿；偏差 D24-D25 登记，存量文档债务入 §7 残留风险 0） |

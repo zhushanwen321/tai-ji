@@ -344,19 +344,31 @@ function guiSetWidget(
 ```typescript
 import { guiSetWidget, guiComponent } from '@zhushanwen/extension-protocol'
 
+/** 单段清单：两段共用同一构造（仅过滤条件不同） */
+function todoListTree(todos: Todo[]) {
+  return guiComponent('list-tree', {
+    items: todos.map(t => ({
+      label: t.text,
+      icon: t.status === 'completed' ? 'check' : t.status === 'in_progress' ? 'circle' : 'dot',
+      status: t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'running' : undefined,
+    })),
+  })
+}
+
 function refreshDisplay(ctx: ExtensionContext, todos: Todo[]) {
   if (ctx.mode === 'rpc') {
-    // GUI 模式：结构化 widget（用通用原语组合表达任务列表）
-    guiSetWidget(ctx, 'todo', {
-      type: 'list-tree',
-      props: {
-        items: todos.map(t => ({
-          label: t.text,
-          icon: t.status === 'completed' ? 'check' : t.status === 'in_progress' ? 'circle' : 'dot',
-          status: t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'running' : undefined,
-        })),
-      },
-    })
+    // GUI 模式：内容根 = tab-bar 双段（用通用原语组合表达任务列表）——
+    // 待办段 = 未完成项、已完成段 = completed 项；sections 与 tabs 等长一一对应，
+    // 宿主渲染 active 段并本地持有切换态（§3.2），不回传 extension
+    const open = todos.filter(t => t.status !== 'completed')
+    const completed = todos.filter(t => t.status === 'completed')
+    guiSetWidget(ctx, 'todo', guiComponent('tab-bar', {
+      tabs: [
+        { label: `待办 ${open.length}`, active: true },
+        { label: `已完成 ${completed.length}` },
+      ],
+      sections: [[todoListTree(open)], [todoListTree(completed)]],
+    }))
   } else {
     // TUI 模式：Component factory（已有）
     ctx.ui.setWidget('todo', (tui, theme) => buildTodoWidget(todos, theme))
@@ -1079,7 +1091,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 
 | Extension | 主组件组合 | 需要的通用原语 |
 |-----------|-----------|--------------|
-| pi-todo | `list-tree`（任务项）+ `card`（容器）| `columns`（>8 项时双列）|
+| pi-todo | `tab-bar`（`sections` 双段：待办/已完成 各一段 `list-tree`）| meta `icon`/`badge`（托盘条目，v1.1）|
 | pi-goal | `card` + `stats-line` + `progress-bar` | — |
 | pi-subagents | `card`(bg-notify) + `list-tree`(eventLog) + `stats-line` | — |
 | pi-workflow | `card` + `columns` + `list-tree` | sidebar+main 双列 |

@@ -276,7 +276,7 @@ async onMessage(msg, ctx) {
 | `progress-bar` | 进度条 | `label?` / `current` / `total` / `unit?` / `severity?` | P2 待实现 |
 | `list-tree` | 列表树 | `items: { label, icon?, status?, depth?, children? }[]` | P2 待实现 |
 | `columns` | 双列网格 | `children[]` / `ratios?` | P2 待实现 |
-| `tab-bar` | 标签栏 | `tabs: { label, active?, status? }[]` | P2 待实现 |
+| `tab-bar` | 标签栏 | `tabs: { label, active?, status? }[]` / `sections?: GuiComponent[][]`（与 `tabs` 等长的分段子树容器，宿主渲染 active 段并本地持有切换态） | P2 待实现 |
 | `custom` | 自定义逃生口 | `component`（注册名）/ `props` | P2 待实现 |
 
 `list-tree` 的 `icon` 取值：`'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pause' | 'branch'`；`status` 取值：`'running' | 'done' | 'failed'`。
