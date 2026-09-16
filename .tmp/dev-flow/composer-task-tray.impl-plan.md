@@ -156,7 +156,7 @@ graph TD
 
 | Unit | 状态 | 轮次 | 证据指针 |
 |------|------|------|----------|
-| u-proto | pending | 0 | — |
+| u-proto | committed | 1 | commit「feat(tray): u-proto protocol fields...」；vitest 14 files/227 pass + tsc --noEmit ok + plugin-sdk 副本 identical=True + 主 agent 复核重跑同结果 |
 | u-tray-native | pending | 0 | — |
 | u-tabbar | pending | 0 | — |
 | u-tray-widget | pending | 0 | — |
@@ -182,3 +182,5 @@ graph TD
 | 日期 | 事件 |
 |------|------|
 | 2026-09-16 | 计划创建（阶段 1）；来源设计 docs/design/composer-task-tray.md（审查循环 R1-R5 收敛后） |
+| 2026-09-16 | 设计文档 commit d3e3ab516；计划基线 commit 40dc35b2e |
+| 2026-09-16 | u-proto committed（协议字段 + 白名单校验函数 + plugin-sdk 副本 + changeset + 协议文档；vitest 227 绿，主 agent 重跑复核通过） |

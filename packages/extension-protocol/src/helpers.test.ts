@@ -9,6 +9,7 @@ import {
   isGuiRenderResult,
   extractGui,
   firstContentText,
+  validateWidgetIconPaths,
   GUI_WIDGET_MARKER,
   PROTOCOL_VERSION,
   type GuiContext,
@@ -292,5 +293,68 @@ describe('firstContentText', () => {
 
   it('text 块缺失 text 字段（undefined）→ 空串', () => {
     expect(firstContentText({ content: [{ type: 'text' }] })).toBe('')
+  })
+})
+
+describe('validateWidgetIconPaths（自定义 icon paths 白名单，宿主 fallback 消费）', () => {
+  /** 合法 d 字符集内的 n 字符 path（'M' + 数字填充） */
+  const pathOfChars = (n: number): string => 'M' + '0'.repeat(n - 1)
+
+  describe('合法 paths 通过', () => {
+    it('常规多段 path 全通过且逐条保留', () => {
+      const paths = ['M12 2L2 7', 'M2 7a1 1 0 1 0 2 0', 'M-1.5,2.25h4v-3.5z']
+      const result = validateWidgetIconPaths(paths)
+      expect(result).toEqual({ valid: true, paths })
+      // 返回独立副本：宿主可安全持有校验结果，不被 extension 侧数组改动影响
+      expect(result.valid && result.paths).not.toBe(paths)
+    })
+
+    it('边界内极值通过：8 条 / 单条 512 字符 / 总长 2048 字符', () => {
+      expect(validateWidgetIconPaths(Array.from({ length: 8 }, () => 'M0 0')).valid).toBe(true)
+      expect(validateWidgetIconPaths([pathOfChars(512)]).valid).toBe(true)
+      expect(validateWidgetIconPaths(Array.from({ length: 4 }, () => pathOfChars(512))).valid).toBe(true)
+    })
+  })
+
+  describe('非法字符拒绝', () => {
+    it.each([
+      ['标签注入面', 'M0 0" onload="alert(1)'],
+      ['脚本注入面', 'M0 0</path><script>'],
+      ['指数记法（e/E 不在白名单）', 'M0 0e5'],
+      ['换行', 'M0 0\nL1 1'],
+      ['中文', 'M0 0中文'],
+      ['分号分隔（非白名单标点）', 'M0 0;L1 1'],
+    ])('%s → illegal-char', (_label, path) => {
+      expect(validateWidgetIconPaths([path])).toEqual({ valid: false, reason: 'illegal-char' })
+    })
+
+    it('入参非数组（undefined / null / 字符串）→ not-array', () => {
+      expect(validateWidgetIconPaths(undefined)).toEqual({ valid: false, reason: 'not-array' })
+      expect(validateWidgetIconPaths(null)).toEqual({ valid: false, reason: 'not-array' })
+      expect(validateWidgetIconPaths('M0 0')).toEqual({ valid: false, reason: 'not-array' })
+    })
+
+    it('空数组 / 非 string 条目各自归因', () => {
+      expect(validateWidgetIconPaths([])).toEqual({ valid: false, reason: 'empty' })
+      expect(validateWidgetIconPaths(['M0 0', 42])).toEqual({ valid: false, reason: 'non-string' })
+    })
+  })
+
+  describe('超条数拒绝', () => {
+    it('9 条（上限 8）→ too-many', () => {
+      const paths = Array.from({ length: 9 }, () => 'M0 0')
+      expect(validateWidgetIconPaths(paths)).toEqual({ valid: false, reason: 'too-many' })
+    })
+  })
+
+  describe('超长度拒绝', () => {
+    it('单条 513 字符（上限 512）→ too-long', () => {
+      expect(validateWidgetIconPaths([pathOfChars(513)])).toEqual({ valid: false, reason: 'too-long' })
+    })
+
+    it('总长 2049 字符（上限 2048）→ total-too-long（条数与单条均在限内）', () => {
+      const paths = [...Array.from({ length: 4 }, () => pathOfChars(512)), pathOfChars(1)]
+      expect(validateWidgetIconPaths(paths)).toEqual({ valid: false, reason: 'total-too-long' })
+    })
   })
 })

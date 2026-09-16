@@ -143,6 +143,8 @@ export interface GuiComponentProps {
   /** 标签栏——替代 TUI 的 tab │ 分隔 */
   'tab-bar': {
     tabs: { label: string; active?: boolean; status?: 'done' | 'pending' }[]
+    /** 容器化分段（v1.1 可选字段）：第 i 段 = tabs[i] 激活时渲染的子树，与 tabs 等长 */
+    sections?: GuiComponent[][]
   }
 
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册，见 §9.1） */
@@ -152,6 +154,8 @@ export interface GuiComponentProps {
   }
 }
 ```
+
+> **tab-bar 容器化（v1.1 可选字段）**：`sections` 与 `tabs` 等长时，宿主渲染 `tabs[active]` 对应的分段；**active 归宿主本地**——首次挂载取推送的 `tabs[i].active`，用户点击只切本地索引，extension 的后续推送更新内容但**不重置用户选择**（组件重建除外）。缺省 = 纯展示 tab-bar（现状行为，旧 extension 零改动）；`sections` 与 `tabs` 长度不等时**忽略 sections 退化为纯展示 + warn**。协议不提供 UI→extension 回传通道，故「用户切了 tab」不是 agent 事件（extension 一次推送全量、宿主本地切换零往返）。
 
 > **设计原则**：协议层不包含特定 extension 的领域数据结构（如任务状态枚举、目标生命周期、工作流 reason 码）。这些是 extension 的业务逻辑，不是 UI 层该知道的。extension 用 `card` + `stats-line` + `list-tree` 等通用原语组合表达自己的领域数据。
 
@@ -189,8 +193,52 @@ export const PROTOCOL_VERSION = 1 as const
 export interface GuiRenderResult {
   v: typeof PROTOCOL_VERSION
   component: GuiComponent
+  /** v1.1 扩展：widget 宿主元数据（head + 托盘 icon/badge，见 §3.5）；缺省时宿主 fallback 到 viewId 标题、无状态点/进度/icon */
+  meta?: WidgetMeta
 }
 ```
+
+### 3.5 WidgetMeta——widget 宿主元数据（v1.1）
+
+widget 通道（M17）除 `component` 外可带 `meta`：head（标题/状态点/进度）与托盘条目（icon/badge）都由宿主按此元数据渲染，extension 不需要用 `card` 原语 header 表达这些。
+
+```typescript
+/** widget 宿主元数据——head 渲染契约（title + 状态点 + 进度 + 折叠 chevron）+ 托盘 icon/badge。 */
+export interface WidgetMeta {
+  /** head 标题（todo → "Todo"；goal → slug） */
+  title: string
+  /** head 状态点语义：running=accent / done=success / failed=danger / idle=neutral 弱点（托盘呼吸点同源） */
+  status?: 'running' | 'done' | 'failed' | 'idle'
+  /** head 进度（mini bar + 计数文本）；progress-bar 原语从 body 移入 head 的承载 */
+  progress?: {
+    current: number
+    total: number
+    /** 计数显示文本（head 空间有限，extension 全权格式化：todo "2/5"、goal "42%"）。缺省 `${current}/${total}` */
+    label?: string
+    /** fill 语义色（预算阈值映射）；缺省按 meta.status（done→success，否则 accent） */
+    severity?: 'ok' | 'warn' | 'danger'
+  }
+  /** 托盘 icon：icon key 字符串（宿主按 lucide 名解析）或自定义形状 { paths } */
+  icon?: string | { paths: string[] }
+  /** 托盘 badge：extension 全权格式化的短文本（'2' / '42%' / '!'），建议 ≤6 字符，宿主超长 truncate */
+  badge?: string
+}
+```
+
+**icon/badge 均为 v1.1 可选字段**：旧宿主忽略、旧 extension 不发，双向兼容（`isGuiRenderResult` 只校验 `v` 与 `component`，不校验 meta 形状）。
+
+**自定义形状：形状归 extension、风格归宿主**。`{ paths }` 是 SVG path 的 `d` 字符串数组，extension 只定义形状；宿主渲染统一锁定 `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap/linejoin="round"`——线宽/颜色/尺寸由宿主锁死，输出必然与 @lucide 细线图标同构（不会出现风格失控的自定义 icon）。渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。
+
+**paths 白名单防御（`validateWidgetIconPaths`，协议包导出）**：字符白名单正则 `^[MLCQAZHVmlcqazhv0-9 ,.\-]+$`（d 语法命令字母 + 数字 + 空格/逗号/小数点/负号，刻意不含指数记法等其余字符）、条数 ≤8、单条 ≤512 字符、总长 ≤2048 字符。校验不抛异常，返回判定对象（合法携带 paths 副本 / 非法携带拒绝原因：`not-array` / `empty` / `too-many` / `non-string` / `too-long` / `total-too-long` / `illegal-char`）——宿主据 `!valid` 落兜底 icon + console warn 一次（去重）。
+
+**fallback 链（宿主侧实现契约）**：
+
+| 字段 | 链 |
+|---|---|
+| icon | `meta.icon` 自定义 paths（过白名单）→ `meta.icon` key 解析 → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon |
+| badge | `meta.badge` → `progress.label ?? String(progress.current)` → 无 badge |
+
+badge 的视觉态（亮/色/呼吸点）由 `meta.status` 决定，与 built-in 任务条目同视觉语言。
 
 ---
 
@@ -367,7 +415,7 @@ sendMessage({
 // @zhushanwen/extension-protocol
 
 // ── core 类型 ──
-export type { GuiComponent, GuiComponentType, GuiComponentProps, GuiRenderResult }
+export type { GuiComponent, GuiComponentType, GuiComponentProps, GuiRenderResult, WidgetMeta }
 export type { StatItem, TreeItem, TreeItemIcon }
 export type { GuiContext }
 
@@ -381,6 +429,7 @@ export { isGuiComponent }     // 鸭子类型校验（runtime 用）
 export { guiResult }          // 构造 GuiRenderResult
 export { guiComponent }       // 构造 GuiComponent（带类型推断）
 export { guiSetWidget }       // 设置 GUI widget（marker 编码）
+export { validateWidgetIconPaths }  // 校验 meta.icon 自定义 paths（白名单，见 §3.5）
 export { extractGui }         // 从 details 提取 __gui__（前端用）
 
 // ── extensions/ask-user（富交互，见 §6）──
@@ -411,6 +460,10 @@ function guiSetWidget(
   key: string,
   component: GuiComponent | undefined
 ): void
+
+/** 校验 meta.icon 自定义形状的 paths（白名单字符集 + 条数/长度上限，见 §3.5）；不抛异常 */
+function validateWidgetIconPaths(value: unknown): WidgetIconPathsValidation
+// WidgetIconPathsValidation = { valid: true; paths: string[] } | { valid: false; reason: WidgetIconPathsRejection }
 
 /** 从 details 提取 __gui__，带版本校验 */
 function extractGui(details: Record<string, unknown> | undefined): GuiRenderResult | undefined
@@ -1167,3 +1220,11 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 2. todo/goal 走 M17：tool result 不再带 `__gui__`（M4 移除）、不推 custom message（M5 不走）
 3. widget 不进 sidebar（M2 方向废弃，动态 view 发现移除）
 4. M5（custom message 渲染）保留为独立能力，与 M17 正交（subagent-workflow 等已推 `__gui__` message）
+
+### v1.1 字段扩展（2026-09-16）
+
+**变更**（全部 additive，`PROTOCOL_VERSION` 不变；来源设计 `docs/design/composer-task-tray.md` D4/D5）：
+1. `WidgetMeta` 加 `icon?`（lucide key 或自定义形状 `{ paths }`）与 `badge?`（extension 全权格式化的短文本，宿主超长 truncate 至 6）——见 §3.5；形状归 extension、风格由宿主锁死（线宽/颜色/尺寸固定）
+2. 协议包新增 `validateWidgetIconPaths`（paths 白名单：字符集 + 条数 ≤8 / 单条 ≤512 / 总长 ≤2048），不抛异常返回判定对象，宿主据 `!valid` 落兜底 icon + warn——见 §3.5
+3. `tab-bar` 加 `sections?`（与 `tabs` 等长的分段子树容器），缺省维持纯展示；active 归宿主本地、后续推送不重置用户选择——见 §3.2
+4. 配套同步：`packages/plugin-sdk/src/types.ts` 平行副本（手维护，同 commit）；消费端（协议 widget 的托盘挂载位）在 renderer 侧另行实施

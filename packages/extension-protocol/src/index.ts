@@ -41,10 +41,11 @@ export {
   guiComponent,
   guiSetWidget,
   setWidgetDual,
+  validateWidgetIconPaths,
   extractGui,
   firstContentText,
 } from './core/helpers'
-export type { DualWidgetContent } from './core/helpers'
+export type { DualWidgetContent, WidgetIconPathsValidation, WidgetIconPathsRejection } from './core/helpers'
 
 // ── core：ctx 接口 ──
 export type { GuiContext } from './core/gui-context'
