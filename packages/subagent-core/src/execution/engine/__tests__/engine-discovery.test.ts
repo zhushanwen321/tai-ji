@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SubagentEnginesFile } from "@taiji/extension-protocol";
+import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 import type { EnginePort } from "../port.ts";

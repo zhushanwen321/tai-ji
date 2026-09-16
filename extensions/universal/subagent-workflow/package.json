@@ -59,8 +59,8 @@
     "test:isolated": "env $(env | grep -o '^PI_SUBAGENT_[A-Z_]*' | sed 's/^/-u /' | tr '\n' ' ') vitest run"
   },
   "dependencies": {
-    "@taiji/extension-protocol": "workspace:*",
-    "@taiji/session-delivery": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/session-delivery": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",

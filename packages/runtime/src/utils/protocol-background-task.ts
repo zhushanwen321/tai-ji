@@ -1,5 +1,5 @@
 /**
- * `@taiji/extension-protocol/background-task` 子出口的 runtime 侧统一入口
+ * `@zhushanwen/extension-protocol/background-task` 子出口的 runtime 侧统一入口
  * （纯 named re-export）。
  *
  * 历史（ext-simplify-13）：protocol 包曾缺 `"type": "module"` 声明，其 `export *`
@@ -29,4 +29,4 @@ export {
   type OutputTailLogFn,
   type OutputTailOptions,
   type OutputTailResult,
-} from '@taiji/extension-protocol/background-task'
+} from '@zhushanwen/extension-protocol/background-task'

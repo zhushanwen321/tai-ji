@@ -28,7 +28,7 @@
     "skills/"
   ],
   "dependencies": {
-    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/pi-file-lock": "workspace:*",

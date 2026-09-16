@@ -4,7 +4,7 @@
 
 ## 开篇（SCQA）
 
-- **S（情境）**：`@zhushanwen/pi-plugin-bridge`（v0.2.2，483 行，taiji 组 infrastructure tier）是 2026-09-05 bridge-rewrite（[bridge-rewrite-pi-0.84.md](bridge-rewrite-pi-0.84.md)）的产物：把 runtime PluginService 的插件工具清单经 `ctx.ui.select`+`BRIDGE_MARKER` 通道同步进 pi（`registerTool`），工具 execute 与 pi 事件经同一通道往返 runtime。协议 v2 形状 SSOT 在 `@taiji/extension-protocol` 的 plugin-bridge 模块（marker.ts + types.ts）。
+- **S（情境）**：`@zhushanwen/pi-plugin-bridge`（v0.2.2，483 行，taiji 组 infrastructure tier）是 2026-09-05 bridge-rewrite（[bridge-rewrite-pi-0.84.md](bridge-rewrite-pi-0.84.md)）的产物：把 runtime PluginService 的插件工具清单经 `ctx.ui.select`+`BRIDGE_MARKER` 通道同步进 pi（`registerTool`），工具 execute 与 pi 事件经同一通道往返 runtime。协议 v2 形状 SSOT 在 `@zhushanwen/extension-protocol` 的 plugin-bridge 模块（marker.ts + types.ts）。
 - **C（冲突）**：2026-09-11 过度设计审计将 M21（注入 `Inject*Content` 透传机制）标记为 contested 留待设计裁决，另登记 3 个 low 死面；本轮（2026-09-14）证据刷新追加证实——注入生产端已由 plugin-intercept-injection 设计拍板 **string-only 方案**（管线层逐插件校验恒产出 `string[]`），桥侧结构化透传分支在已登记契约下**结构性不可达**；`commands` 字段双端恒空、`Tool not found` error 形态零供给方、Bridge* 回包形状在 extension-protocol / runtime / plugin-sdk 三处各持一份定义靠注释手工同步；语义层四问扫描另发现 details ok 变体全量重复持久化与 `getSessionId` 不可达 try/catch 两项。
 - **Q（问题）**：如何删净六个死面并让协议形状回归单一定义源，同时保证插件工具调用、事件转发、拦截注入三条 live 链路零回归，且不触碰通道机制的三条硬约束？
 - **A（答案）**：D1 收窄注入映射为 string-only（裁决 contested 项）；D2 双端同 commit 删 `commands` 死字段；D3 删 `isToolNotFound` error 形态死分支；D4 Bridge* 回包形状单源化到 extension-protocol（runtime 与 plugin-sdk 改为 re-export，取代索引原登记的「补一致性测试」方案）；D5 details ok 变体去重（三失败 kind 保留）；D6 `getSessionId` 删不可达防御直呼。
@@ -190,8 +190,8 @@
 ### 6.4 D4：Bridge* 回包形状单源化到 extension-protocol（B3，取代「补测试」）
 
 - **选 a. 单源化（选定）**：三形状（`BridgeSyncPayload`/`BridgeToolExecuteResponse`/`BridgeInterceptResponse`）以 extension-protocol 为唯一定义源——
-  - runtime `plugin-types.ts`：删本地 `BridgeSyncPayload` 定义，改 `export type { ... } from '@taiji/extension-protocol'`（runtime 已依赖该包 package.json:18；13 号 `utils/protocol-background-task.ts` 已有 runtime 引协议先例）；经 SDK re-export 的两形状改指协议源；
-  - plugin-sdk：`BridgeToolExecuteResponse`/`BridgeInterceptResponse` 改 re-export 自协议（`ToolExecuteHandler` 返回类型 ：759-763 的作者契约面保持编译不变）；package.json 增 `@taiji/extension-protocol: workspace:*` 依赖（SDK 为 private 包，协议包零依赖叶节点，无环）；
+  - runtime `plugin-types.ts`：删本地 `BridgeSyncPayload` 定义，改 `export type { ... } from '@zhushanwen/extension-protocol'`（runtime 已依赖该包 package.json:18；13 号 `utils/protocol-background-task.ts` 已有 runtime 引协议先例）；经 SDK re-export 的两形状改指协议源；
+  - plugin-sdk：`BridgeToolExecuteResponse`/`BridgeInterceptResponse` 改 re-export 自协议（`ToolExecuteHandler` 返回类型 ：759-763 的作者契约面保持编译不变）；package.json 增 `@zhushanwen/extension-protocol: workspace:*` 依赖（SDK 为 private 包，协议包零依赖叶节点，无环）；
   - 协议 types.ts:33-35 手工同步注释删除（单源化后失义），「runtime 是实现侧权威」矛盾表述一并清理。**[终态括注]** 实装为正向 SSOT 声明（「本模块是 Bridge* 回包形状的唯一定义源」）取代字面删除——单源化后此处正是声明 SSOT 的位置，正向声明比留白更有导航价值（合理偏差 impl-plan §5 R1，矛盾表述确已消失）。
 - **选 b. 一致性测试（否，即索引原 low 项建议）**：测试冻结重复不消除重复，三处同改税照旧。被取代登记。
 - **选 c. 维持现状（否）**：三处定义 + 双权威矛盾注释，每次形状演进手工同步。

@@ -36,7 +36,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { mapReasonToStatus as mapReasonToStatusImpl } from "@taiji/extension-protocol";
+import { mapReasonToStatus as mapReasonToStatusImpl } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 

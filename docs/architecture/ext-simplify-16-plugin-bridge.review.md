@@ -40,11 +40,11 @@
 |---|---|---|---|
 | 16 | §1 marker.ts 17 行 + types.ts 65 行 | wc 实测 16 / 64 | 部分属实（±1 行，机械性偏差不误导） |
 | 17 | §3.4 协议 types.ts:33-35「runtime 是实现侧权威」注释；:47-51/:49/:41-44/:54-58 形状 | :33-35 注释逐字在（含「逐字段对应…同步此处」）；BridgeSyncPayload :47-51（commands :49）、BridgeToolExecuteResponse :41-44、BridgeInterceptResponse :54-58 全命中 | 属实 |
-| 18 | §3.4「与同文件头『协议 v2 形状 SSOT 在 extension-protocol』自相矛盾（两个权威）」 | 矛盾实体成立，但「同文件头」定位失准：types.ts 文件头（:1-8）无 SSOT 表述，该引语在 **plugin-bridge src/index.ts:4-5**（「协议 v2 形状 SSOT 在 @taiji/extension-protocol…」）及 workspace 文档——跨文件矛盾被写成了同文件矛盾 | 部分属实（不影响 D4 方向；D4 单源化后矛盾整体消失） |
+| 18 | §3.4「与同文件头『协议 v2 形状 SSOT 在 extension-protocol』自相矛盾（两个权威）」 | 矛盾实体成立，但「同文件头」定位失准：types.ts 文件头（:1-8）无 SSOT 表述，该引语在 **plugin-bridge src/index.ts:4-5**（「协议 v2 形状 SSOT 在 @zhushanwen/extension-protocol…」）及 workspace 文档——跨文件矛盾被写成了同文件矛盾 | 部分属实（不影响 D4 方向；D4 单源化后矛盾整体消失） |
 | 19 | §3.4 SDK Bridge* 消费面仅 runtime plugin-types re-export 链一条 | 全仓 grep：interfaces.ts:669/:671（经 plugin-types.js 类型引用）、bridge-interop.ts:13、plugin-service.ts:2——全走 plugin-types 链；无其他 import 方；SDK 为 `"private": true`（package.json:5）、当前零依赖 | 属实 |
 | 20 | §3.4 runtime「BridgeSyncPayload 依赖 service port 不上收」理由失实（:7-8 vs :101-105 纯数据形状） | plugin-types.ts:7-8 原文在；现行定义 :101-105 纯 `tools/commands/success`，无任何 port 引用；SDK types.ts:512「已在 sync 时从 SDK 剥离」注释与 SDK 内零残留互证 | 属实 |
-| 21 | §6.4 D4 依赖三声明：协议零依赖、runtime 已依赖（package.json:18）、SDK 零依赖转一依赖 | extension-protocol package.json 仅 devDependencies（tsup/typescript/vitest）；runtime package.json:18 `"@taiji/extension-protocol": "workspace:*"` 逐字命中；plugin-sdk 无 dependencies 块。且 runtime tsup.config.ts:57 noExternal 已同时含 `@taiji/extension-protocol` 与 `taiji-plugin-sdk`——CP2「零影响」预期成立 | 属实 |
-| 22 | §6.4 runtime 引协议先例（13 号 utils/protocol-background-task.ts） | 该文件 :32 `from '@taiji/extension-protocol/background-task'` 在 | 属实 |
+| 21 | §6.4 D4 依赖三声明：协议零依赖、runtime 已依赖（package.json:18）、SDK 零依赖转一依赖 | extension-protocol package.json 仅 devDependencies（tsup/typescript/vitest）；runtime package.json:18 `"@zhushanwen/extension-protocol": "workspace:*"` 逐字命中；plugin-sdk 无 dependencies 块。且 runtime tsup.config.ts:57 noExternal 已同时含 `@zhushanwen/extension-protocol` 与 `taiji-plugin-sdk`——CP2「零影响」预期成立 | 属实 |
+| 22 | §6.4 runtime 引协议先例（13 号 utils/protocol-background-task.ts） | 该文件 :32 `from '@zhushanwen/extension-protocol/background-task'` 在 | 属实 |
 
 ### 1.3 pi 实装断言（npm ls 实装 0.84.4 ✓）
 
@@ -109,12 +109,12 @@
 
 - **位置**：§6.4（「1 段失实理由注释（plugin-types.ts:7-8）」）。
 - **证据**：plugin-types.ts:3-5 头注释自述「single source of truth = packages/plugin-sdk/src/types.ts（对外发布契约，**零依赖自包含**）」。D4 落地后该句双重失真：①SDK 增加了对 extension-protocol 的依赖（不再零依赖）；②Bridge* 三形状的定义源移至 extension-protocol（SDK 对这些形状不再是 SSOT）。设计只点名了 :7-8 的「service port」理由段，:3-5 的 D28 叙事段漏登记——恰是 C-proc-10 要防的注释漂移。
-- **建议**：u2 的 plugin-types.ts 改动面补 :3-5 注释同步（如「Bridge* 形状 SSOT 在 @taiji/extension-protocol（D4 单源化）；SDK 保留插件作者契约面 re-export」），SDK 侧 types.ts:512 剥离注释经核仍然为真（BridgeSyncPayload 确不在 SDK）无需动。
+- **建议**：u2 的 plugin-types.ts 改动面补 :3-5 注释同步（如「Bridge* 形状 SSOT 在 @zhushanwen/extension-protocol（D4 单源化）；SDK 保留插件作者契约面 re-export」），SDK 侧 types.ts:512 剥离注释经核仍然为真（BridgeSyncPayload 确不在 SDK）无需动。
 
 ### S4：CP1 检查面补「SDK 的 workspace 外消费形态盘点」
 
 - **位置**：§8.3 CP1。
-- **证据**：SDK 是 `"private": true`（package.json:5）无发布面，workspace 内消费面已核实仅 runtime 一条链——D4 依赖方向成立。但 D4 后 SDK 的 `BridgeToolExecuteResponse`/`BridgeInterceptResponse` 变为指向协议包的 re-export：任何能在类型层解析 SDK 的环境，都必须连带可解析 `@taiji/extension-protocol`。若存在 workspace 外以 `file:`/link 形态引用 SDK 的插件开发流（如 dsh-test playground 仓），其类型解析面会变宽。CP1 已有「零依赖断言检查则回退」的兜底，但未点名这个消费形态面。
+- **证据**：SDK 是 `"private": true`（package.json:5）无发布面，workspace 内消费面已核实仅 runtime 一条链——D4 依赖方向成立。但 D4 后 SDK 的 `BridgeToolExecuteResponse`/`BridgeInterceptResponse` 变为指向协议包的 re-export：任何能在类型层解析 SDK 的环境，都必须连带可解析 `@zhushanwen/extension-protocol`。若存在 workspace 外以 `file:`/link 形态引用 SDK 的插件开发流（如 dsh-test playground 仓），其类型解析面会变宽。CP1 已有「零依赖断言检查则回退」的兜底，但未点名这个消费形态面。
 - **建议**：CP1 执行时加一步盘点（grep 仓外已知消费方 / 确认 SDK 引用方清单恒为 workspace 内）；空集即关闭，非空则触发 CP1 的回退方案（SDK 维持本地定义，D4 收窄为 runtime+协议双包单源化）。
 
 ---

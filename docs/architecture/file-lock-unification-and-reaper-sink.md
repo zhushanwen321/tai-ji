@@ -120,7 +120,7 @@ A 的关键约束（不是自由设计）：
 
 | 方案 | 长期架构合理性 | 短期成本 | 风险 |
 |---|---|---|---|
-| A（推荐）双触发面：① 生命周期收殓挂 runtime `onSessionDestroyed` 汇聚点（汇聚点本体 session-service.ts removeSessionEntry，覆盖主动删/进程退出/forceQuit/restore 清场，见 §5 U2-2 DE2 澄清），fire-and-forget 不阻塞销毁收敛链；② 启动期全量兜底扫描挂 startup-background-init 后台序列（与 reapOrphanPiProcesses 同序列，**硬序在其完成后执行**，时序论证见 §2.3）——旧 reaper 全局扫描的三类兜底对象（跨运行遗留孤儿、启动期被收殓 pi 的 detached 任务、从未激活即删的 session）由此等价承接。extension 删 session_start reaper（reconcile 对账保留，见 D3） | 收殓发生在「该 session 的 pi 确认死亡」的精确时点；跨运行遗留有启动期等价兜底；extension 不再做运行期全局扫描/全局锁；registry 契约入 `@taiji/extension-protocol`（跨层契约 SSOT 有 session-manager 先例） | 中（~180 行：判定逻辑移植自 reaper.ts 三分支 + 契约定义 + 双挂点接线） | 扫描成本（启动期一次 readdir + 逐 registry 读取，毫秒级×session 数，fire-and-forget）；新旧共存见 §3.3 过渡窗口 |
+| A（推荐）双触发面：① 生命周期收殓挂 runtime `onSessionDestroyed` 汇聚点（汇聚点本体 session-service.ts removeSessionEntry，覆盖主动删/进程退出/forceQuit/restore 清场，见 §5 U2-2 DE2 澄清），fire-and-forget 不阻塞销毁收敛链；② 启动期全量兜底扫描挂 startup-background-init 后台序列（与 reapOrphanPiProcesses 同序列，**硬序在其完成后执行**，时序论证见 §2.3）——旧 reaper 全局扫描的三类兜底对象（跨运行遗留孤儿、启动期被收殓 pi 的 detached 任务、从未激活即删的 session）由此等价承接。extension 删 session_start reaper（reconcile 对账保留，见 D3） | 收殓发生在「该 session 的 pi 确认死亡」的精确时点；跨运行遗留有启动期等价兜底；extension 不再做运行期全局扫描/全局锁；registry 契约入 `@zhushanwen/extension-protocol`（跨层契约 SSOT 有 session-manager 先例） | 中（~180 行：判定逻辑移植自 reaper.ts 三分支 + 契约定义 + 双挂点接线） | 扫描成本（启动期一次 readdir + 逐 registry 读取，毫秒级×session 数，fire-and-forget）；新旧共存见 §3.3 过渡窗口 |
 | B extension 侧保留 reaper 仅加幂等守卫 | 职责仍错层，全局锁/全局扫描仍在；触发面靠 D1 兜底而非消失 | 低 | 治标 |
 | B' 仅生命周期收殓、无启动期兜底（Round 0 原案） | 跨运行遗留孤儿永久无人收殓——G2「有孤儿时收殓仍然发生」因果链断裂（旧 reaper 立项场景「SIGKILL 后 detached 任务被 init 收养」静默丢失） | 低 | 功能回归 |
 | C 收殓挂 Electron main | pi 生命周期所有者是 runtime，跨层绕路 | 高 | 引入新链路故障面 |
@@ -148,7 +148,7 @@ A 的关键约束（不是自由设计）：
 
 - **D1-A 自实现协议正确性**：mkdir 是 POSIX 原子操作 ✅已测（本次调查第 13 轮通读 proper-lockfile acquireLock 全流程并复刻实验验证）；stale 夺取竞态窗口（两个进程同时判死同时夺取）与 proper-lockfile 现状等同，不引入新风险 ✅已测（协议逐行比对）。**实施期门**：S3 互斥探针不过则 D1 不算完成。
 - **D2-A 挂点选择**：onSessionDestroyed 是既有「单一清理入口」（D6a 设计），且经代码核实覆盖比三路径更多——forceQuit 经 message-dispatcher 手动编排显式调 removeSessionEntry（kill 路径的 exit 事件被双层守卫拦截不走 onSessionExit）✅已测。不挂 pm.onSessionExit 的原因：后者只覆盖进程退出，主动 delete/forceQuit 同样遗留孤儿任务。执行形态：**fire-and-forget**（void + catch warn；实现为入口 async + setImmediate 延后一拍执行同步核心——removeSessionEntry 是同步销毁收敛链，spawnSync `ps`（单条 5s 超时）与同步锁 busy-wait 不占当拍，构造性不阻塞），收殓不得阻塞销毁收敛链（旧设计 fire-and-forget 的理由同样适用）。
-- **D2 registry 契约归属**：放 `@taiji/extension-protocol` 而非新包——runtime 已依赖该包（tsup noExternal 已收录）✅已测，extension 侧 base-tool-enhance 增加对其的依赖（dev workspace + 发布 dependencies，形态同 session-manager 对接先例）。
+- **D2 registry 契约归属**：放 `@zhushanwen/extension-protocol` 而非新包——runtime 已依赖该包（tsup noExternal 已收录）✅已测，extension 侧 base-tool-enhance 增加对其的依赖（dev workspace + 发布 dependencies，形态同 session-manager 对接先例）。
 - **D3 守卫语义**：`oncePerProcess` 按进程去重（模块级 Map），只用于跨 session 副作用操作（见 D3 粒度段）；需要「每 session 一次」的 handler 属另一语义，本设计不提供（避免 clever 机制，出现真实需求再设计）。
 - **D1 备注（排除项）**：subagent relay 链路（zsw）不经 jiti 加载且无 proper-lockfile async 锁使用，不在受影响面；本次调查已 grep 全量 extensions 确认 async 锁调用仅 reaper 一处 ✅已测。
 - **D2 过渡窗口（Round 1 重写，Round 2 限定范围）**：用户机器上 **npm 全局层**旧装残留**不会进入 pi 加载**——taiji spawn pi 用 `--no-extensions` 抑制全局发现（rpc-client.ts）+ extension 全部显式 `--extension` 注入（builtin staged / 项目级路径；数量以 mandatory-extensions.json SSOT 为准——写作时 19、当前 17，S1 脚本按 staged 实际枚举不硬编码），12:22 真实 spawn 命令核实无 npm 全局安装层路径 ✅已测。因此不存在「新旧同图双跑」；旧 reaper 的崩溃机制（其代码自带）也无加载机会。**残余通道如实声明**：`--approve` 会信任项目级 `.pi/extensions`——若用户手动在项目层放置同名 base-tool-enhance 旧拷贝仍可进入加载（已知暴露面，pi 侧 TODO 承认），概率极低但非零；S5 含此检查项。（`--no-extensions` 抑制全局发现的佐证在 rpc-client.ts——一致性审查后行号随波次插行漂移，改文件级引用。）**残留处置**：随升级 release note 给卸载指引（`pi uninstall npm:@zhushanwen/pi-base-tool-enhance`，参照 unified-hooks 废弃先例——pi 0.84.4 实装无 `extension uninstall` 子命令，一致性审查 DE1 核实修正），防旧包与新包在**裸 pi 使用场景**（用户脱离 taiji 独立装过）双重注册 bash 拦截。
@@ -186,9 +186,9 @@ A 的关键约束（不是自由设计）：
 
 | 单元 | 内容 | 文件 | justification / 验收挂钩 |
 |---|---|---|---|
-| U2-1 契约定义 | registry.json schema/目录布局/终态枚举/ownerPiPid 语义入 `@taiji/extension-protocol`（新 section + zod/TS 类型） | `packages/extension-protocol/src/background-task.ts`（新）、index.ts 导出 | 跨层契约 SSOT（P2）；D2 决策 |
+| U2-1 契约定义 | registry.json schema/目录布局/终态枚举/ownerPiPid 语义入 `@zhushanwen/extension-protocol`（新 section + zod/TS 类型） | `packages/extension-protocol/src/background-task.ts`（新）、index.ts 导出 | 跨层契约 SSOT（P2）；D2 决策 |
 | U2-2 runtime 收殓器（双触发面） | 判定逻辑移植（reaper.ts 三分支 + isPidAlive/getProcessStartTimeSec/pid 复用防御，Node 环境实现）；**触发面 A**：onSessionDestroyed 汇聚点挂接，fire-and-forget（void + catch warn，含 spawnSync ps 5s 超时不阻塞销毁链）；**触发面 B**：startup-background-init 新增启动期全量扫描（扫 `<agentDir>/base-tool-enhance/*/registry.json`，**硬序：链式 await reapOrphanPiProcesses 完成后执行**，时序论证见 §2.3），顺带 rmdir stale reaper.lock 残留；写 registry 用统一锁 sync 版 | `packages/runtime/src/services/session/background-task-reaper.ts`（新）、`session-service.ts` 挂接（onSessionDestroyed 汇聚点本体 removeSessionEntry——transport/server.ts 为注册方而非汇聚点，DE2 澄清）、`startup-background-init.ts` 挂接（与孤儿 pi 收殓定时器的链式编排）、装配 | 职责归位 + 兜底等价承接（P2）；S4a/S4b |
-| U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@taiji/extension-protocol` 依赖 | 触发面消失（P2）；S4a/S4b/S6 |
+| U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@zhushanwen/extension-protocol` 依赖 | 触发面消失（P2）；S4a/S4b/S6 |
 | U2-4 文档同步 | base-tool-enhance 设计文档 §3.5 收殓章节标注下沉（历史沿革 + 新链路指引）；release note 段落：npm 旧装残留卸载指引（参照 unified-hooks 先例） | `docs/design/base-tool-enhance.md`（已随 2026-09 docs 清理删除，git 可追溯）、发布说明草稿 | 文档符号漂移守护（C-proc-10）；S5 |
 
 ### 批次 3：pi 环境守卫 + 观测补齐

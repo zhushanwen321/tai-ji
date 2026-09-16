@@ -57,7 +57,7 @@ Source: 10 files in `src/`, ~2085 lines total.
 
 `AnswerValue` (`types.ts`) is the single structured answer model — `{ selected: string[]; other: string | null }`. The old internal/proto double model is gone: proto `AskUserOption.value` equaled `label` (both were the same string), so the proto layer consumes the same single model (`Result.answers: Record<string, AnswerValue>`, key = question text).
 
-Serialization happens **once, at the protocol boundary**: `encodeAnswer(value, { key, multiSelect })` in `answer-codec.ts` converts an `AnswerValue` into proto answers entries, byte-aligned with `@taiji/extension-protocol` helpers' decode contract (`getAskUserAnswer` / `getAskUserOther`):
+Serialization happens **once, at the protocol boundary**: `encodeAnswer(value, { key, multiSelect })` in `answer-codec.ts` converts an `AnswerValue` into proto answers entries, byte-aligned with `@zhushanwen/extension-protocol` helpers' decode contract (`getAskUserAnswer` / `getAskUserOther`):
 
 - 单选：`answers[key] = selected[0]`
 - 多选：`answers[key] = JSON.stringify(selected)`

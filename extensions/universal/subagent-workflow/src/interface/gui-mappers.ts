@@ -1,14 +1,14 @@
 /**
  * GUI 协议映射辅助函数 —— run/subagent 状态字符串 → 协议 TreeItem 状态 + 图标。
  *
- * 协议包 @taiji/extension-protocol 的 list-tree 组件用 TreeItem.status（三态）
+ * 协议包 @zhushanwen/extension-protocol 的 list-tree 组件用 TreeItem.status（三态）
  * + TreeItem.icon 表达运行态。本模块把 workflow/subagent 领域的丰富状态字符串收口
  * 到这两个枚举，供 helpers.ts / tool-workflow.ts / subagent-actions.ts 复用。
  *
- * 参考：@taiji/extension-protocol GuiComponentProps['list-tree']。
+ * 参考：@zhushanwen/extension-protocol GuiComponentProps['list-tree']。
  */
 
-import type { GuiContext, TreeItem, TreeItemIcon } from "@taiji/extension-protocol";
+import type { GuiContext, TreeItem, TreeItemIcon } from "@zhushanwen/extension-protocol";
 
 /**
  * 从 Pi ExtensionContext 构造协议 GuiContext 的最小子集。

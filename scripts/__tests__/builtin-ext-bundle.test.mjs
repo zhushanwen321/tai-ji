@@ -18,11 +18,11 @@ const REPO = process.cwd();
 const STAGED = join(REPO, "apps/electron/resources/extensions/@zhushanwen");
 
 describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
-	it("TC3: bundle 自动 inline 静态 value 依赖（pi-ask-user 含 @taiji/extension-protocol 的 runtime export）", () => {
+	it("TC3: bundle 自动 inline 静态 value 依赖（pi-ask-user 含 @zhushanwen/extension-protocol 的 runtime export）", () => {
 		const idx = join(STAGED, "pi-ask-user/index.js");
 		expect(existsSync(idx), "staged pi-ask-user/index.js 存在").toBe(true);
 		const src = readFileSync(idx, "utf8");
-		// @taiji/extension-protocol 有 runtime value export（PROTOCOL_VERSION/ASK_USER_MARKER），
+		// @zhushanwen/extension-protocol 有 runtime value export（PROTOCOL_VERSION/ASK_USER_MARKER），
 		// esbuild 应将其 inline 进 bundle（非 external）。若 inline 失败，bundle 里不会有这些标识符。
 		expect(src, "protocol runtime value 被 inline").toMatch(/ASK_USER_MARKER|PROTOCOL_VERSION/);
 		// 反证：protocol 不应作为 external import 残留（@taiji 不是 virtualModule）

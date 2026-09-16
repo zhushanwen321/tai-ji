@@ -12,7 +12,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SubagentEnginesFile } from "@taiji/extension-protocol";
+import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { configureCore, resetCoreForTests } from "../../../core/host-services.ts";
 import type { DiscoveryRoot } from "../../../core/host-services.ts";

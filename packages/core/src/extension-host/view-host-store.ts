@@ -14,10 +14,10 @@
  *
  * 契约（IF10）：getView / setView / invalidate(sessionId, viewId?)，invalidate 无 viewId
  * 清空该 session 全部 view（plugin 重载/崩溃时）；session-destroyed → cleanup（ERR4）。
- * GuiComponent 类型从 @taiji/extension-protocol import（P2 同源）。
+ * GuiComponent 类型从 @zhushanwen/extension-protocol import（P2 同源）。
  */
-import { isGuiComponent } from '@taiji/extension-protocol'
-import type { GuiComponent, WidgetMeta } from '@taiji/extension-protocol'
+import { isGuiComponent } from '@zhushanwen/extension-protocol'
+import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import type { InternalEventBus } from './internal-event-bus'
 import type { SessionScopedMap } from './utils/session-scoped-map'
 import type { WidgetPayload } from './types'

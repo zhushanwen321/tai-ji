@@ -1,5 +1,5 @@
 /**
- * @taiji/session-delivery 测试共享 mock 工厂。
+ * @zhushanwen/session-delivery 测试共享 mock 工厂。
  */
 import { vi } from 'vitest'
 import type {

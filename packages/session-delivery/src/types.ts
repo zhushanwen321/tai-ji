@@ -1,5 +1,5 @@
 /**
- * @taiji/session-delivery 类型定义。
+ * @zhushanwen/session-delivery 类型定义。
  *
  * 设计约束：
  * - 零 pi 依赖：不出现 steer/followUp/triggerTurn/streamingBehavior 等 pi 词汇

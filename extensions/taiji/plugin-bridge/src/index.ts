@@ -1,7 +1,7 @@
 // src/index.ts — @zhushanwen/pi-plugin-bridge
 // 插件系统桥（taiji 组，infrastructure）：runtime PluginService 的工具清单经
 // select+BRIDGE_MARKER 通道同步进 pi（registerTool），工具 execute 与 pi 事件
-// 经同一通道往返 runtime。协议 v2 形状 SSOT 在 @taiji/extension-protocol 的
+// 经同一通道往返 runtime。协议 v2 形状 SSOT 在 @zhushanwen/extension-protocol 的
 // plugin-bridge 协议模块（marker.ts + types.ts），本包是 pi 侧
 // 序列化发送方；runtime 侧识别/回包在 bridge-handler（设计 bridge-rewrite-pi-0.84）。
 //
@@ -41,7 +41,7 @@ import {
 	type BridgeErrorResponse,
 	type BridgeSyncPayload,
 	type BridgeRequest,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import type { TSchema } from "typebox";
 import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";

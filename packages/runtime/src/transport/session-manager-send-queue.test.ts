@@ -9,7 +9,7 @@
  * - A5: D7 置位副作用（isGenerating/lastActiveAt/workspaceService.record 在 port.send 成功后发生）
  * - A6: plugin-service 两路径仍走 dispatcher 不变（D7 声明的防误改锁）
  *
- * 内核用真实 @taiji/session-delivery（A1/A5 依赖 busy 排队与 settled 边沿的真实
+ * 内核用真实 @zhushanwen/session-delivery（A1/A5 依赖 busy 排队与 settled 边沿的真实
  * 语义）；SessionService / pi client / workspace 为 mock。内核 timer 依赖 vitest fake timers。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/session-manager-send-queue.test.ts
@@ -23,7 +23,7 @@ import { applySessionOccupancyTransition } from '../services/session/event-inter
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { ISessionService } from '../interfaces.js'
 import type { IManagedSessionView } from '../services/session/types.js'
-import type { DeliveryHandle } from '@taiji/session-delivery'
+import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import type { SessionSummary } from '@taiji/shared'
 
 // ─── harness：真 registry + 真 handler，材料层全 mock ─────────────────────

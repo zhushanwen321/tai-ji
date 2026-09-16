@@ -32,7 +32,7 @@ const mainConfig = defineConfig({
   clean: true,
   sourcemap: false,
   target: 'node20',
-  // D4 关键点：zsw 宿主是 CJS（node>=20），而 @taiji/extension-protocol 的
+  // D4 关键点：zsw 宿主是 CJS（node>=20），而 @zhushanwen/extension-protocol 的
   // npm dist 仅 ESM（.mjs），node 20 下 require() 加载 ESM 不可靠——
   // 运行时面仅常量的 protocol 必须 bundle 进产物（noExternal），
   // 不让它以外部 ESM 依赖形态出现在 CJS require 链上。
@@ -40,7 +40,7 @@ const mainConfig = defineConfig({
   // 点 engine-discovery.ts 仅 pi 壳深路径消费，dist 实测零常量命中；noExternal 为
   // 防御性边界，未来 entry 引入运行时引用时即生效 bundle。）
   // 降级路径（D4 既定）：bundle 边界出问题时改为全量 bundle 闭包内非 node 依赖。
-  noExternal: ['@taiji/extension-protocol'],
+  noExternal: ['@zhushanwen/extension-protocol'],
 })
 
 // ── 档 2：自包含 CJS bundle（host-surface D2） ──────────────────
@@ -58,13 +58,14 @@ const bundleConfig = defineConfig({
   clean: true,
   sourcemap: false,
   target: 'node20',
-  // 全部运行时依赖内联：@taiji/* 用前缀正则（未来新增 workspace 运行时
+  // 全部运行时依赖内联：@zhushanwen/* 用前缀正则（未来新增 workspace 运行时
   // 依赖自动跟随，不静默漏网）；ajv/yaml/proper-lockfile 逐名列出。node 内建
   // 模块（node: 前缀）不受 noExternal 影响，仍保持 external。
+  // [HISTORICAL] 前缀正则原为 /^@taiji\//（extension-protocol/session-delivery
+  // 2026-09-16 改发 @zhushanwen scope——npm 无 taiji org），随包名一并更新；
   // @zhushanwen/subagent-engine-sdk（W12：worktree git 出站卫生经其
-  // buildOutboundChildEnv）是 @zhushanwen 域 workspace 依赖，前缀正则覆盖不到，
-  // 逐名列入。
-  noExternal: [/^@taiji\//, '@zhushanwen/subagent-engine-sdk', 'ajv', 'yaml', 'proper-lockfile'],
+  // buildOutboundChildEnv）由前缀正则覆盖，显式条目保留作冗余声明。
+  noExternal: [/^@zhushanwen\//, '@zhushanwen/subagent-engine-sdk', 'ajv', 'yaml', 'proper-lockfile'],
 })
 
 export default bundleOnly ? bundleConfig : mainConfig

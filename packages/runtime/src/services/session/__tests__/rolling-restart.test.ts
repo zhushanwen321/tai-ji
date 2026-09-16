@@ -39,7 +39,7 @@ import {
 import { createInFlightMirror } from '../inflight-mirror.js'
 import type { InFlightMirror } from '../inflight-mirror.js'
 import type { CrashJournalEvent, WatchdogMemoryPressurePayload } from '@taiji/shared'
-import type { SubagentInFlightReport } from '@taiji/extension-protocol'
+import type { SubagentInFlightReport } from '@zhushanwen/extension-protocol'
 
 const SID = 'sess-rolling-1'
 

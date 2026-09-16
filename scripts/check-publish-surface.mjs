@@ -8,7 +8,7 @@
  * 但发布流程不构建它）即此缺口的事故形态。
  *
  * 动态发现：扫 packages/ 下 private !== true 且 files 含 dist 前缀目录条目的包
- * （当前 7 包：@taiji/extension-protocol / @taiji/session-delivery /
+ * （当前 7 包：@zhushanwen/extension-protocol / @zhushanwen/session-delivery /
  * @zhushanwen/subagent-core / @zhushanwen/subagent-engine-sdk /
  * @zhushanwen/pi-subagent-cli / @zhushanwen/zcode-subagent-cli /
  * @zhushanwen/pi-rpc；未来新增 dist 发布包自动纳入守卫面）。
@@ -103,7 +103,11 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   '@zhushanwen/pi-extension-logger',
   '@zhushanwen/pi-file-lock',
   '@zhushanwen/pi-llm-shared',
-  // packages 组（5）
+  // packages 组（7）
+  // extension-protocol / session-delivery：原 @taiji/* scope（npm 无 taiji org，
+  // 2026-09-16 改发 @zhushanwen），随 npm-extension-protocol-first 首发登记
+  '@zhushanwen/extension-protocol',
+  '@zhushanwen/session-delivery',
   '@zhushanwen/pi-rpc',
   '@zhushanwen/pi-subagent-cli',
   '@zhushanwen/subagent-core',

@@ -32,7 +32,7 @@ import {
   type GuiRenderResult,
   guiResult,
   isGuiCapable,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 // C5②/C5⑦：创作闭环统一走 core barrel（generateWorkflowScript/saveWorkflow/
 // deleteWorkflow/lintScript 均为 barrel 导出面；深路径在 npm/vendored 形态不可达）
 import {

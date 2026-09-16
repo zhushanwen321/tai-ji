@@ -29,7 +29,7 @@ import { SessionMessageHandler, OUTPUT_TAIL_MAX_REQUEST_BYTES, type SessionHandl
 import { BackgroundTaskService, type BackgroundTaskServiceDeps } from '../../services/background-task/background-task-service.js'
 import type { ISessionService } from '../../interfaces.js'
 import type { ClientMessage } from '@taiji/shared'
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 
 // ── fixtures / 装置（对齐 background-task-service.test.ts 形状）──────
 

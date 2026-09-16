@@ -1,4 +1,4 @@
-// @taiji/extension-protocol
+// @zhushanwen/extension-protocol
 // pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零运行时依赖。
 //
 // 包结构：

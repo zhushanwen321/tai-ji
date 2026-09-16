@@ -25,7 +25,7 @@ vi.mock('../request', () => ({
 
 import { list, output, kill } from '../domains/background-task'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 
 function makeEntry(taskId: string, overrides: Partial<BackgroundTaskRegistryEntry> = {}): BackgroundTaskRegistryEntry {
   return {

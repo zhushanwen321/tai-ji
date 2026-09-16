@@ -11,7 +11,7 @@
  */
 import { inject } from 'vue'
 import type { Component } from 'vue'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { PRIMITIVE_RENDER_KEY } from '../primitive-render-key'
 import PrimitiveRouter from './PrimitiveRouter.vue'
 

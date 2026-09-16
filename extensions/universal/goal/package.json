@@ -32,7 +32,7 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@taiji/extension-protocol": "workspace:*"
+    "@zhushanwen/extension-protocol": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {

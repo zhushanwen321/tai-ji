@@ -149,7 +149,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
-import { isAskUserQuestion, type AskUserQuestion } from '@taiji/extension-protocol'
+import { isAskUserQuestion, type AskUserQuestion } from '@zhushanwen/extension-protocol'
 import { WidgetArea } from '@taiji/ui'
 import MessageStream from './MessageStream.vue'
 import Composer from './Composer.vue'

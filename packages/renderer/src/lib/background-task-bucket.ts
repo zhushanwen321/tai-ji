@@ -9,7 +9,7 @@
  * - item 状态 icon 色档（backgroundTaskStatusIcon，D10⑤，u-renderer-list / u-drawer）
  *
  * 分桶判据直接复用契约谓词 `isActiveBackgroundTaskState` / `isTerminalBackgroundTaskState`
- *（@taiji/extension-protocol，D9 同源）：运行中桶 = running + killing（killing 是
+ *（@zhushanwen/extension-protocol，D9 同源）：运行中桶 = running + killing（killing 是
  *「已发令待确认」的活跃瞬态，用户视角仍在终止流程中）；已结束桶 = exited（含
  * natural/timeout/killed）+ orphaned。
  *
@@ -21,7 +21,7 @@
 import {
   isActiveBackgroundTaskState,
   isTerminalBackgroundTaskState,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import type { ServerMessageMap } from '@taiji/shared'
 
 /** 任务条目类型（shared 协议镜像，经 ServerMessageMap 索引取用——偏差登记 #6）。 */

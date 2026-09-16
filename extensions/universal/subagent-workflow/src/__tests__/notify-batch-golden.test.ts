@@ -16,7 +16,7 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createDelivery } from "@taiji/session-delivery";
+import { createDelivery } from "@zhushanwen/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
 import {
   buildBatchNotifyId,

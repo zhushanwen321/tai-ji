@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ListTree from '../primitives/ListTree.vue'
-import type { TreeItem } from '@taiji/extension-protocol'
+import type { TreeItem } from '@zhushanwen/extension-protocol'
 
 describe('ListTree', () => {
   it('递归渲染：parent 含嵌套 children + status 圆点', () => {

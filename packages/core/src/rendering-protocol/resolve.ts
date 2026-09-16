@@ -23,7 +23,7 @@
  * 零运行时 vue：Component 仅为类型（import type 编译期擦除），产物零 vue（TC2 + clarify Q1 方案 a）。
  */
 import type { Component } from 'vue'
-import type { GuiComponent, GuiComponentType } from '@taiji/extension-protocol'
+import type { GuiComponent, GuiComponentType } from '@zhushanwen/extension-protocol'
 import { isCustomRegistered } from './custom-registry'
 
 /** resolve 输出——type 是最终渲染键（降级后恒为 'ansi-text'），props 已适配（降级时为 { content: string }） */

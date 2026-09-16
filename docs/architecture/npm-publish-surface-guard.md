@@ -22,8 +22,8 @@
 | 类别 | 包 | files 声明的产物 | 构建方式 |
 |---|---|---|---|
 | TS 源直发 | 25 个 `@zhushanwen/pi-*` extension（21 活跃 + shared 组 4 个；deprecated 的 pi-unified-hooks 已 ignore——u4/D6，不占发布面；2026-09 ext-simplify-01 删包后 ignore 条目已移除；该包删前被 ignore 排除、删后不在磁盘，31 包计数不变） | `src/`、`index.ts` 等 git 内源文件 | 无构建（pi 加载器直接吃 TS） |
-| dist 发布包 | `@taiji/extension-protocol` | `dist`（无尾斜杠） | tsup，正式/dev 两线均有显式 build 步骤 |
-| dist 发布包 | `@taiji/session-delivery` | `dist`（无尾斜杠） | tsup，**仅正式线**有显式 build 步骤 |
+| dist 发布包 | `@zhushanwen/extension-protocol` | `dist`（无尾斜杠） | tsup，正式/dev 两线均有显式 build 步骤 |
+| dist 发布包 | `@zhushanwen/session-delivery` | `dist`（无尾斜杠） | tsup，**仅正式线**有显式 build 步骤 |
 | dist 发布包 | `@zhushanwen/subagent-core` | `dist/` + `dist.bundle/`（双档） | tsup 两档（`build` / `build:bundle`），发布流程无显式步骤、由 smoke 副作用承载 |
 | dist 发布包 | `@zhushanwen/subagent-engine-sdk` | `src/`（排除 `__tests__`）+ `dist/` | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
 | dist 发布包 | `@zhushanwen/pi-subagent-cli` | `bin/` + `dist/`（CLI 包：bin 是唯一 npm 消费面，不带 src/） | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |

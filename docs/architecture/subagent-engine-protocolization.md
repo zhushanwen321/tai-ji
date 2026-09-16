@@ -504,11 +504,11 @@ core 依赖 SDK；引擎包只依赖 SDK（**不依赖 core**）。
 
 | 依赖项 | 现状 | 处置 |
 |--------|------|------|
-| `execution/assembly/types.ts`（1095 行，import `@taiji/extension-protocol` + `orchestration/models/types.ts` + `model-resolver.ts`） | 环的中心 | **不整块下沉**：只抽「引擎面最小契约」（`AgentEvent`/`EngineHandleData`/`SessionView`/`AgentCallOpts` 等**结构子集**）入 SDK；core 域类型（`ExecutionRecord`/`Turn`/`AgentFailureKind`/`WorktreeHandle`）**留 core**，SDK 用结构等价类型（不 import） |
+| `execution/assembly/types.ts`（1095 行，import `@zhushanwen/extension-protocol` + `orchestration/models/types.ts` + `model-resolver.ts`） | 环的中心 | **不整块下沉**：只抽「引擎面最小契约」（`AgentEvent`/`EngineHandleData`/`SessionView`/`AgentCallOpts` 等**结构子集**）入 SDK；core 域类型（`ExecutionRecord`/`Turn`/`AgentFailureKind`/`WorktreeHandle`）**留 core**，SDK 用结构等价类型（不 import） |
 | `orchestration/models/types.ts`（390 行，反向 import `execution/assembly/types.ts` 成环） | `AgentCallOpts` 住所 | `AgentCallOpts` 的**引擎面子集**移入 SDK（协议 `run.params` 用它）；其余（含 `ExecutionRecord` 引用）留 core；core 侧反向 re-export 保消费面 |
 | `model-resolver.ts` | `types.ts` 依赖 | 留 core（SDK 只收「已解析的 modelRef 字符串」） |
 | `paths.ts`（`resolvePoolDir`，`zcode-engine.ts:64`） | F5 点名但 D7 表未列 | 纯模块（仅 `node:path`）→ **移入 SDK**（引擎侧需自算池/journal 路径） |
-| `@taiji/extension-protocol`（`GuiRenderResult`） | 类型闭包边缘 | 留 core；SDK 侧不引用（引擎不产 GUI 渲染结果） |
+| `@zhushanwen/extension-protocol`（`GuiRenderResult`） | 类型闭包边缘 | 留 core；SDK 侧不引用（引擎不产 GUI 渲染结果） |
 | `data-dir` / `journal-replay` / `kill-chain` | 前表已列 | 按前表拆 seam |
 
 守卫 `check-engine-sdk-boundary.mjs` 的**基线断言**：SDK 源码 + dist 不得出现 core 包名、不得出现

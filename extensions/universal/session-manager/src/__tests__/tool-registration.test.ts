@@ -1,7 +1,7 @@
 // tool-registration.test.ts — U5-A1: 6 tools registered with correct name/description/parameters + SESSION_MANAGER_MARKER import
 
 import { describe, it, expect, vi } from "vitest";
-import { SESSION_MANAGER_MARKER } from "@taiji/extension-protocol";
+import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
 import registerExtension from "../index.ts";
 
 /** Proxy-based mock: capture registerTool calls for assertion. */
@@ -61,7 +61,7 @@ describe("U5-A1 tool-registration", () => {
 		}
 	});
 
-	it("SESSION_MANAGER_MARKER is imported from @taiji/extension-protocol", () => {
+	it("SESSION_MANAGER_MARKER is imported from @zhushanwen/extension-protocol", () => {
 		expect(typeof SESSION_MANAGER_MARKER).toBe("string");
 	});
 

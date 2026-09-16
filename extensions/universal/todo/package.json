@@ -29,7 +29,7 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
-    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependencies": {

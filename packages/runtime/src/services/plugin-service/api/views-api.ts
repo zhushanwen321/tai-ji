@@ -11,7 +11,7 @@
  * Worker 侧：createViewsApi() 返回代理对象，通过 RPC 转发到主线程。
  */
 
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
 import type { PluginRpcClient } from '../plugin-rpc-client.js'
 import { errorWithCode } from '../../../utils/errors.js'

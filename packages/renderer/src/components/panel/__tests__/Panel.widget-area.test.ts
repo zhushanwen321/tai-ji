@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { createPinia } from 'pinia'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import Panel from '../Panel.vue'
 import { VIEW_HOST_SOURCE_KEY, type ViewHostSource } from '@taiji/ui/extension-host'
 

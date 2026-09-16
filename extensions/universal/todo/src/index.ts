@@ -22,7 +22,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { setWidgetDual, type GuiContext } from "@taiji/extension-protocol";
+import { setWidgetDual, type GuiContext } from "@zhushanwen/extension-protocol";
 
 import { registerTodosCommand } from "./commands";
 import { registerTodoEventHandlers, type RefreshDisplayFn } from "./handlers";

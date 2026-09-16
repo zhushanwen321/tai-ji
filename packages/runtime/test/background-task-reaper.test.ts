@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import {
   reapSessionBackgroundTasks,
   reapAllSessionsBackgroundTasks,

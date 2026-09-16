@@ -10,7 +10,7 @@ import {
 	BACKGROUND_TASK_ID_PREFIX,
 	collectActivePendingIds,
 	mapReasonToStatus,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {

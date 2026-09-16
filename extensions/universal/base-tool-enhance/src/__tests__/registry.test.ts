@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@taiji/extension-protocol";
+import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@zhushanwen/extension-protocol";
 
 import {
 	getRegistryPath,

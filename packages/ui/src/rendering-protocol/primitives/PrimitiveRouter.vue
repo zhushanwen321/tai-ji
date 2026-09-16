@@ -13,7 +13,7 @@
  */
 import { computed, inject } from 'vue'
 import type { Component } from 'vue'
-import type { GuiComponent, GuiComponentType } from '@taiji/extension-protocol'
+import type { GuiComponent, GuiComponentType } from '@zhushanwen/extension-protocol'
 import AnsiText from './AnsiText.vue'
 import ProgressBar from './ProgressBar.vue'
 import StatsLine from './StatsLine.vue'

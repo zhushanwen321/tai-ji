@@ -1,7 +1,7 @@
 // forwarding.test.ts — execute 转发 / cancelled 折叠 / observe void 不阻塞 / intercept 注入映射
 
 import { describe, it, expect, vi } from "vitest";
-import { BRIDGE_MARKER } from "@taiji/extension-protocol";
+import { BRIDGE_MARKER } from "@zhushanwen/extension-protocol";
 import registerExtension from "../index.ts";
 
 interface CapturedTool {

@@ -13,7 +13,7 @@ import os from "node:os";
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-import { firstContentText } from "@taiji/extension-protocol";
+import { firstContentText } from "@zhushanwen/extension-protocol";
 
 import type { AgentEventLogEntry, DisplayItem, ExecutionStatus } from "@zhushanwen/subagent-core";
 import { DEFAULT_AGENT_NAME } from "@zhushanwen/subagent-core";

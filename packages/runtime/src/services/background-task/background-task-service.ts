@@ -27,7 +27,7 @@ import { statSync } from 'node:fs'
 import {
   isTerminalBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import {
   isPidAlive,
   killProcessTree,

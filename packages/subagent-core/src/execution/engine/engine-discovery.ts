@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { SUBAGENTS_ENGINES_FILENAME, type SubagentEnginesFile } from "@taiji/extension-protocol";
+import { SUBAGENTS_ENGINES_FILENAME, type SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { listEngines } from "./registry.ts";
 import { discoverAndRegisterEngines, loadedDiscoveryIds } from "./engine-discovery-scan.ts";

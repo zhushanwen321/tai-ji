@@ -7,7 +7,7 @@
 //   - Runtime 编排 Core，产出 Details/Record 给 TUI
 //   - TUI 只读 Record/Details 快照，永不持有可变引用
 
-import type { GuiRenderResult } from "@taiji/extension-protocol";
+import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import type {
   AgentUsage,
   AgentUsageTotal,

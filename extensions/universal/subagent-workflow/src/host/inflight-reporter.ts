@@ -37,7 +37,7 @@
 // （30min 有界），不丢 errs-safe 兜底。
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { SUBAGENT_INFLIGHT_MARKER, callMarkerRpc, isInFlightReportAck } from "@taiji/extension-protocol";
+import { SUBAGENT_INFLIGHT_MARKER, callMarkerRpc, isInFlightReportAck } from "@zhushanwen/extension-protocol";
 import { getInFlightSnapshot } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";

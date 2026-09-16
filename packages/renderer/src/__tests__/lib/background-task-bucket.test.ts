@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest'
 import {
   isActiveBackgroundTaskState,
   isTerminalBackgroundTaskState,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import {
   backgroundTaskBucket,
   filterBackgroundTasks,

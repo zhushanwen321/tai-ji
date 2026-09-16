@@ -289,7 +289,7 @@ pnpm build:e2e && pnpm test:e2e
 | 管线 | 产物 | 触发 tag | Workflow |
 |------|------|----------|----------|
 | Electron 打包 | DMG / EXE / AppImage / manifest | `v*` | `release.yml` |
-| npm 包发布 | `@zhushanwen/pi-*` + `@taiji/extension-protocol` | `npm-*` | `release-npm.yml` |
+| npm 包发布 | `@zhushanwen/pi-*` + `@zhushanwen/extension-protocol` | `npm-*` | `release-npm.yml` |
 
 ## 文档索引
 

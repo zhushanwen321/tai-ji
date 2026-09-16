@@ -8,7 +8,7 @@ import {
 	type AskUserQuestion,
 	getAskUserAnswer,
 	getAskUserOther,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import { createAskUserChannelHandler } from "./channel-handler";

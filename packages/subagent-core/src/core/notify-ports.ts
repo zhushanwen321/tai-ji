@@ -1,6 +1,6 @@
 // src/core/notify-ports.ts
 //
-// 通知域窄端口（D2 计划期细化②）。pi 侧完成通知的两机制——@taiji/session-delivery
+// 通知域窄端口（D2 计划期细化②）。pi 侧完成通知的两机制——@zhushanwen/session-delivery
 // 投递内核工厂 / @zhushanwen/pi-pending-notifications 活跃计数——经本端口结构化注入；
 // HostServices.notify 事件推送按演进纪律②（禁止无真实触点的推测性预留）推迟到 P2
 // zsw 壳首个真实触点（task-notification）再落。
@@ -112,7 +112,7 @@ export interface NotifyDomainPorts {
    *  读侧）持有「被读 entries 所属 session」概念时必须传入，使跨 session 残留不进
    *  差集；与 pending-notifications 实装签名（entries, opts?) 对齐。 */
   countActiveFromEntries?(entries: unknown[], opts?: CountActivePortOptions): number;
-  /** 投递内核工厂。签名与 @taiji/session-delivery 的 createDelivery 结构兼容，
+  /** 投递内核工厂。签名与 @zhushanwen/session-delivery 的 createDelivery 结构兼容，
    *  pi 壳直传其本体即可。缺席 = 消费方降级直发。 */
   createDelivery?(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle;
 }

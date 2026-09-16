@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import type { GuiComponentType } from '@taiji/extension-protocol'
+import type { GuiComponentType } from '@zhushanwen/extension-protocol'
 
 /** 容器原语类型键（card/columns/group）——这 3 类原语递归渲染子组件，是环的来源 */
 export type PrimitiveContainerType = Extract<GuiComponentType, 'card' | 'columns' | 'group'>

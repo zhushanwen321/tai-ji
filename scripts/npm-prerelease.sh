@@ -1,8 +1,8 @@
 #!/bin/bash
 # npm 预发布：创建 dev-npm-* 分支 → changeset prerelease → push 触发 CI → 验证 npm 版本 → 还原
 # Usage: bash scripts/npm-prerelease.sh [package-name]
-#   package-name — 要预发布的包名（如 @taiji/extension-protocol、@zhushanwen/pi-goal）
-#                  省略时默认 @taiji/extension-protocol
+#   package-name — 要预发布的包名（如 @zhushanwen/extension-protocol、@zhushanwen/pi-goal）
+#                  省略时默认 @zhushanwen/extension-protocol
 #
 # 前置条件：
 #   - npm 已创建 @taiji / @zhushanwen scope
@@ -21,7 +21,7 @@ CI_TIMEOUT_MINS=15
 POLL_INTERVAL=15
 
 # 发布的包名（参数化：可预发布任意已发布的 changeset 包）
-PKG_NAME="${1:-@taiji/extension-protocol}"
+PKG_NAME="${1:-@zhushanwen/extension-protocol}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[NPM-PRE]${NC} $*"; }

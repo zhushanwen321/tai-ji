@@ -32,7 +32,7 @@ import {
   PING_WARN_FAIL_COUNT,
 } from '../src/services/session/event-interpreter.js'
 import { translate } from '../src/infra/pi/event-adapter.js'
-import { ASK_USER_MARKER } from '@taiji/extension-protocol'
+import { ASK_USER_MARKER } from '@zhushanwen/extension-protocol'
 import type { ServerMessage } from '@taiji/shared'
 import type { PiTranslatedEvent } from '../src/services/session/types.js'
 import type { PiExtensionUiRequestEvent } from '../src/infra/pi/pi-protocol.js'

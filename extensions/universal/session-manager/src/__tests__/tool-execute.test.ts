@@ -1,7 +1,7 @@
 // tool-execute.test.ts — U5-A2: each tool's execute calls ctx.ui.select with SESSION_MANAGER_MARKER + JSON payload
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SESSION_MANAGER_MARKER } from "@taiji/extension-protocol";
+import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
 import registerExtension from "../index.ts";
 
 /** Capture registered tools and provide a mock ctx.ui.select. */

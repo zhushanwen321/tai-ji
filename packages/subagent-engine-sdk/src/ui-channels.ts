@@ -6,7 +6,7 @@
 // 消逐字等价双副本——core → SDK、pi → SDK 均正向合法）。
 //
 // channel 是扩展协议自定义的业务路由标识，由 NUL 前缀 marker 标记。
-// 已知 marker（来自 @taiji/extension-protocol）：
+// 已知 marker（来自 @zhushanwen/extension-protocol）：
 //   - ASK_USER_MARKER   = "\0TAIJI_ASK_USER"     走 select method，出现在 title
 //     （options[0] = JSON payload {questions, allowCancel}）
 //   - GUI_WIDGET_MARKER = "\0TAIJI_GUI_WIDGET:"  走 setWidget method，出现在 widgetLines[0]

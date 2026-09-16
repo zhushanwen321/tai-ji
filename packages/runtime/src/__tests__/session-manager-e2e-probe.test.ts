@@ -20,7 +20,7 @@ import { translate } from '../infra/pi/event-adapter.js'
 import { EventInterpreter } from '../services/session/event-interpreter.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
-import { SESSION_MANAGER_MARKER, type SessionManagerAction } from '@taiji/extension-protocol'
+import { SESSION_MANAGER_MARKER, type SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEvent } from '../infra/pi/pi-protocol.js'
 import type { ISessionService } from '../interfaces.js'
 

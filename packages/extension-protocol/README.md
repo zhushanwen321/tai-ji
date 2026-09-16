@@ -1,4 +1,4 @@
-# @taiji/extension-protocol
+# @zhushanwen/extension-protocol
 
 pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零运行时依赖。覆盖双模式（TUI/GUI）渲染、session-manager / background-task / pending-entries 协议与跨端共享的行为原语（进程处置 / registry 文件 IO / output tail）。
 
@@ -12,7 +12,7 @@ pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零
   - `subagent-engine/` —— 引擎可发现性（`engines.json` 状态文件 + 引擎配置视图）
 - `pending-entries` —— pending 事件流差集核心（register 去重 + unregister 抵消，纯算法）
 - `background-task` —— base-tool-enhance 后台任务 `registry.json` 文件契约
-- 子出口 `@taiji/extension-protocol/background-task` —— 后台任务行为原语（进程处置 / registry 文件 IO / output tail，含 node 内建依赖，不进 index 桶出口）
+- 子出口 `@zhushanwen/extension-protocol/background-task` —— 后台任务行为原语（进程处置 / registry 文件 IO / output tail，含 node 内建依赖，不进 index 桶出口）
 
 ## 设计原则
 
@@ -23,7 +23,7 @@ pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零
 ## 使用
 
 ```ts
-import { guiComponent, guiResult, extractGui, isGuiCapable } from '@taiji/extension-protocol'
+import { guiComponent, guiResult, extractGui, isGuiCapable } from '@zhushanwen/extension-protocol'
 
 // extension 侧：构造 GUI 组件渲染结果（guiResult 收单个 component，非数组）
 const result = guiResult(guiComponent('stats-line', { items: [{ label: 'turns', value: '12' }] }))

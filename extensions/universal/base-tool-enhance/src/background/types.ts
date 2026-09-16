@@ -8,7 +8,7 @@
  *    条目记 ownerPiPid（M2 只负责写入）
  *
  * 契约改引（u-bte-remove）：registry 持久化形状（RegistryEntry / 状态机 / reason
- * 枚举 / active·terminal 判定）与 @taiji/extension-protocol background-task.ts
+ * 枚举 / active·terminal 判定）与 @zhushanwen/extension-protocol background-task.ts
  * 契约逐字段一致（契约文档头声明基线即本文件 + registry.ts），本地副本已删除、
  * 此处 re-export 并保留包内短名——消费方 import 路径与字段语义零变化。运行时
  * 对象类型（BackgroundTask / KillingIntent）不在契约内（剥离非持久字段前的形状），
@@ -19,18 +19,18 @@ import type { ChildProcess } from "node:child_process";
 import type {
 	BackgroundTaskEndReason as ContractEndReason,
 	BackgroundTaskState as ContractState,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 /** 状态机与 reason 枚举 / 持久化条目 / active·terminal 判定：契约 SSOT re-export。 */
 export type {
 	BackgroundTaskRegistryEntry as RegistryEntry,
 	BackgroundTaskState,
 	BackgroundTaskEndReason,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 export {
 	isActiveBackgroundTaskState as isActiveState,
 	isTerminalBackgroundTaskState as isTerminalState,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 /**
  * killing intent：bash_kill / 后台 timeout 已发令、轮询器 exit 边沿未确认的瞬态标记。

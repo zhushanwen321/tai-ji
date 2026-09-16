@@ -154,7 +154,7 @@ function buildTodoListText(todoList: Todo[], options: { expanded: boolean }, the
 // ── Tool renderResult handler ────────────────────────
 
 import { Text } from "@earendil-works/pi-tui";
-import { firstContentText } from "@taiji/extension-protocol";
+import { firstContentText } from "@zhushanwen/extension-protocol";
 
 export function renderTodoResult(result: unknown, options: { expanded: boolean }, theme: Theme): Text {
 	const r = result as { content: Array<{ type: string; text?: string }>; details?: unknown };

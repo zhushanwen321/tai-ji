@@ -5,7 +5,7 @@
  * value severity 收窄：danger 保留 text-danger，ok/warn 降 text-neutral-fg（弱化非危险态的颜色噪音）。
  * label 可选。
  */
-import type { StatItem } from '@taiji/extension-protocol'
+import type { StatItem } from '@zhushanwen/extension-protocol'
 
 defineProps<{
   items: StatItem[]

@@ -39,7 +39,7 @@ import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/exe
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import type { PiLike } from "@zhushanwen/subagent-core/execution/subagent-service.ts";
-import { createDelivery } from "@taiji/session-delivery";
+import { createDelivery } from "@zhushanwen/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
 
 // 投递内核经通知域窄端口注入（u0-notify）——本测试是真实执行链路回归，

@@ -24,7 +24,7 @@
     "@xterm/xterm": "^5.5.0",
     "@taiji/core": "workspace:*",
     "@taiji/dom-core": "workspace:*",
-    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
     "@taiji/shared": "workspace:*",
     "@taiji/ui": "workspace:*",
     "ansi_up": "^6.0.6",

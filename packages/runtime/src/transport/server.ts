@@ -13,7 +13,7 @@
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, SkillCacheScope } from '@taiji/shared'
 import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
-import type { SessionManagerAction } from '@taiji/extension-protocol'
+import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService } from '../interfaces.js'
 
 /** authService 未注入时的兜底（组合根必传；防御性空实现防 handler 空指针） */

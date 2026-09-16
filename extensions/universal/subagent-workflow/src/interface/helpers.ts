@@ -26,7 +26,7 @@ import {
   type GuiRenderResult,
   guiResult,
   isGuiCapable,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────

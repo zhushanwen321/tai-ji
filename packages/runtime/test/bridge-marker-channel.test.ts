@@ -22,7 +22,7 @@ import {
   BRIDGE_METHODS,
   ASK_USER_MARKER,
   SESSION_MANAGER_MARKER,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import type { PiEvent } from '../src/infra/pi/pi-protocol.js'
 import type { PiTranslatedEvent } from '../src/services/session/types.js'
 import type { IPiEngine } from '../src/services/ports/pi-engine.js'

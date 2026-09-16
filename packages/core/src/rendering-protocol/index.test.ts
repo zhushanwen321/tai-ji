@@ -1,7 +1,7 @@
 /**
  * index.test.ts —— IF3 facade 集成单测（AC1，TC-1~TC-4）。
  *
- * 全部从 './index' 导入（不深导入 './resolve' './custom-registry' '@taiji/extension-protocol'），
+ * 全部从 './index' 导入（不深导入 './resolve' './custom-registry' '@zhushanwen/extension-protocol'），
  * 验证 facade 聚合是唯一入口：
  * - TC-1：re-export 完整可解析（7 ext-protocol 符号 + resolve/custom-registry 面 runtime 值非 undefined）
  * - TC-2：resolveComponent 经 index 四分支冒烟（深度覆盖在 w2 resolve.test.ts）

@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Card from '../primitives/Card.vue'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 
 describe('Card', () => {
   it('header=string + body 嵌套 stats-line 子组件（variant=elevated）', () => {

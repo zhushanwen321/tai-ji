@@ -63,7 +63,7 @@ const BANNED_PREFIXES = ['@earendil-works/']
 const BANNED_EXACT = new Set([
   '@zhushanwen/pi-extension-logger',
   '@zhushanwen/pi-pending-notifications',
-  '@taiji/session-delivery',
+  '@zhushanwen/session-delivery',
   '@zhushanwen/pi-file-lock',
 ])
 // 精确项双口径：裸名精确相等 或 子路径 import（如 ".../pi-extension-logger/sub"）。

@@ -1,5 +1,5 @@
 {
-  "name": "@taiji/session-delivery",
+  "name": "@zhushanwen/session-delivery",
   "version": "0.10.0",
   "description": "Session message delivery kernel: zero-pi-dependency strategy layer for queueing, batching, dedup, and gated flush of messages into pi sessions",
   "main": "src/index.ts",

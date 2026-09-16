@@ -16,7 +16,7 @@ import {
 	guiComponent,
 	guiResult,
 	type DualWidgetContent,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 import { buildPorts } from "../adapters/ports";
 

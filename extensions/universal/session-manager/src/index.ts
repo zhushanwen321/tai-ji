@@ -9,7 +9,7 @@ import {
 	isChannelErrorResult,
 	type MarkerRpcResult,
 	type SessionManagerAction,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
 
@@ -68,7 +68,7 @@ function callSessionManager(
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
 ): Promise<MarkerRpcResult> {
-	// 契约 SSOT：请求体 = 嵌套 { action, params } 形状（协议包 @taiji/extension-protocol
+	// 契约 SSOT：请求体 = 嵌套 { action, params } 形状（协议包 @zhushanwen/extension-protocol
 	// 的 session-manager 模块）。runtime event-adapter 的 marker
 	// 分支按 data.params 提取——若扁平化展开（{action, ...params}）params 会丢失变 {}。
 	const payload = JSON.stringify({ action, params });

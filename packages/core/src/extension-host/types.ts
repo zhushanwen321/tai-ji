@@ -55,7 +55,7 @@ export interface DialogRequest {
 }
 
 /** widget 载荷（IF2/DM3）。guiTree 目前为 unknown[]，W4 ViewHostStore 消费时替换为
- *  @taiji/extension-protocol 的 GuiComponent 类型（wave plan DM3 标注）。
+ *  @zhushanwen/extension-protocol 的 GuiComponent 类型（wave plan DM3 标注）。
  *  meta 为 widget 宿主元数据（v1.1 widgetGui wire 携带，wire 真值 unknown，
  *  ViewHostStore 消费时窄化为 WidgetMeta）。 */
 export interface WidgetPayload {

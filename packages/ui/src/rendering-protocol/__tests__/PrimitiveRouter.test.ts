@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PrimitiveRouter from '../primitives/PrimitiveRouter.vue'
 import { getPrimitiveContainer } from '../primitives/container-registry'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 
 describe('container-registry：barrel 未加载（独立使用场景）', () => {
   it('getPrimitiveContainer 对三种容器类型均返回 undefined', () => {

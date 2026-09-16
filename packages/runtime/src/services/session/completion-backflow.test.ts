@@ -9,7 +9,7 @@
  * - U6_MULTI_RUN: 两次 settled 两次回流（每次投递任务完成各回流一次）
  * - U6_UNIT: 文案构造格式断言（buildBackflowContent 纯函数）
  *
- * 材料形态与 sd-u5 session-manager-send-queue.test.ts 同款：真 @taiji/session-delivery
+ * 材料形态与 sd-u5 session-manager-send-queue.test.ts 同款：真 @zhushanwen/session-delivery
  * 内核 + 真 SessionDeliveryRegistry + 真 CompletionBackflow，仅装配材料（pi client / 内存态 /
  * settled 多播 / exit 多播）为 mock。kernel timer 依赖 vitest fake timers。
  *

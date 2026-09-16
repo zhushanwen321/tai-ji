@@ -19,7 +19,7 @@ import {
   type GuiContext,
   guiResult,
   isGuiCapable,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 import type {
   CancelHandlerResult,

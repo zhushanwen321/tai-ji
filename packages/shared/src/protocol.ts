@@ -788,7 +788,7 @@ export type ServerMessageType =
   | 'session.occupancy'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
-  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @taiji/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
+  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
   | 'session.subagentEngineConfig' | 'session.subagentDefaultEngineSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
   | 'session.subagentEntriesAppended'
@@ -1002,7 +1002,7 @@ export interface SkillCacheInvalidatedPayload {
 }
 
 // ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
-// shared 不依赖 @taiji/extension-protocol（SubagentEngineConfigView / SessionTraceHeaderPayload
+// shared 不依赖 @zhushanwen/extension-protocol（SubagentEngineConfigView / SessionTraceHeaderPayload
 // 同先例：契约 SSOT 在彼处，shared 侧放结构镜像，结构兼容即协议兼容）。任务条目逐字段镜像
 // extension-protocol background-task.ts 的 BackgroundTaskRegistryEntry（D9 数据契约零新造——
 // 字段名/枚举/可选性禁止单侧改名）；镜像 ⇔ 契约的逐字段全等由 core transport api domain

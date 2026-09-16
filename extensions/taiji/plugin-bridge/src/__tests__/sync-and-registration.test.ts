@@ -1,7 +1,7 @@
 // sync-and-registration.test.ts — 启动 sync 循环与 registerTool 注册形状
 
 import { describe, it, expect, vi } from "vitest";
-import { BRIDGE_MARKER } from "@taiji/extension-protocol";
+import { BRIDGE_MARKER } from "@zhushanwen/extension-protocol";
 import registerExtension from "../index.ts";
 
 /**

@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { reactive } from 'vue'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import ViewHost from '../ViewHost.vue'
 import { VIEW_HOST_SOURCE_KEY, type ViewHostSource, type ViewCacheEntry } from '../view-host-source'
 

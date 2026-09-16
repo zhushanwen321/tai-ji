@@ -11,7 +11,7 @@
           "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts、execution/*、orchestration/* 等 15 个文件 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import guiComponent/guiResult/isGuiCapable 等 GUI 原语（interface/helpers.ts、gui-mappers.ts、tool-workflow.ts 等 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
@@ -31,7 +31,7 @@
           "reason": "代码层静态 import countActiveFromEntries（src/host/pi-host.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖。另有 pending 状态投影运行时协作：pending:register/unregister 事件的 emit 端在 subagent-core（notify-host.ts / orchestration/lifecycle.ts / worker-message-pump.ts / round-supervisor/reconcile-sweep.ts 崩溃恢复 sweep 补注销）与 base-tool-enhance（bash 投影），subagent-workflow 自身仅在崩溃恢复时 emit pending:unregister（src/session-lifecycle.ts recoverCrashedRuns 回调）；pending-notifications 消费该事件落盘 session entries（活跃 pending 的唯一状态源）。后台任务完成通知不经该事件——由 subagent-workflow 自有通道承担（notifier.ts 设 display+triggerTurn，bg-notify-render 渲染完成块并唤醒父 agent）"
         },
         {
-          "package": "@taiji/session-delivery",
+          "package": "@zhushanwen/session-delivery",
           "type": "package",
           "reason": "代码层静态 import createDelivery/DeliveryHandle/DeliveryPort（src/execution/notifier.ts top-level import，投递内核装配），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
@@ -53,7 +53,7 @@
       "directory": "extensions/universal/goal",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import GuiComponent/guiComponent/guiResult 等 GUI 类型与构造函数（src/adapters/goal-control-adapter.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
@@ -74,7 +74,7 @@
       "directory": "extensions/universal/todo",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import guiComponent/guiResult/TreeItem 等 GUI 类型与构造函数（src/model.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
@@ -90,7 +90,7 @@
           "reason": "complete action 通过 goalInit slot（globalThis Symbol.for 桥）启动 goal，缺失时降级通知用户"
         },
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import firstContentText（src/tool.ts top-level import，ext-simplify-17 D9 收敛），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
@@ -106,7 +106,7 @@
       "directory": "extensions/universal/ask-user",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import askUserInteract/getAskUserAnswer/getAskUserComment/AskUserQuestion 等交互 API（src/index.ts、channel-handler.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
@@ -127,7 +127,7 @@
       "directory": "extensions/universal/pending-notifications",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import scanPendingEntries/applyPendingDiff（src/state.ts top-level import，ext-simplify-13 E6 差集规则单点委托），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
@@ -219,7 +219,7 @@
       "directory": "extensions/taiji/plugin-bridge",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import BRIDGE_MARKER 与 Bridge* 协议类型（src/index.ts），缺失时模块加载即失败"
         },
@@ -282,7 +282,7 @@
       "directory": "extensions/universal/session-manager",
       "dependsOn": [
         {
-          "package": "@taiji/extension-protocol",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import SESSION_MANAGER_MARKER（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         },

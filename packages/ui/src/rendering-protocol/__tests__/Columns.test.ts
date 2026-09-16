@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Columns from '../primitives/Columns.vue'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 
 describe('Columns', () => {
   it('ratios=[2,1] 时子区域 flex-grow 分别为 2 和 1', () => {

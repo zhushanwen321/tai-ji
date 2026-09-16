@@ -40,7 +40,7 @@
     "@vueuse/core": "^13",
     "@taiji/core": "workspace:*",
     "@taiji/dom-core": "workspace:*",
-    "@taiji/extension-protocol": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
     "@taiji/shared": "workspace:*",
     "ansi_up": "^6.0.6",
     "class-variance-authority": "^0.7.0",

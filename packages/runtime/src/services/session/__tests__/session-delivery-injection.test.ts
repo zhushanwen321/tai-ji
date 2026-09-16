@@ -4,7 +4,7 @@
  * 锁定三件事：① deliverText（sendDirect / 内核 send 两消费入口）在
  * client.prompt 之前经 injector.inject；② notice 在 prompt 成功之后发布
  * （时机契约与 dispatcher 同款）；③ prompt 失败 notice 不发、纯文本 no-op。
- * 真内核（@taiji/session-delivery）+ mock 材料（client/deps/injector spy）。
+ * 真内核（@zhushanwen/session-delivery）+ mock 材料（client/deps/injector spy）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-delivery-injection.test.ts
  */

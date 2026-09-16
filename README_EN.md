@@ -289,7 +289,7 @@ Two independent release pipelines, decoupled by tag prefix:
 | Pipeline | Artifacts | Trigger tag | Workflow |
 |------|------|----------|----------|
 | Electron packaging | DMG / EXE / AppImage / manifest | `v*` | `release.yml` |
-| npm package publishing | `@zhushanwen/pi-*` + `@taiji/extension-protocol` | `npm-*` | `release-npm.yml` |
+| npm package publishing | `@zhushanwen/pi-*` + `@zhushanwen/extension-protocol` | `npm-*` | `release-npm.yml` |
 
 ## Documentation Index
 

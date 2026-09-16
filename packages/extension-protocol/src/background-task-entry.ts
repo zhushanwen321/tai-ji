@@ -1,5 +1,5 @@
 /**
- * `@taiji/extension-protocol/background-task` 子出口聚合——仅 re-export 三个含
+ * `@zhushanwen/extension-protocol/background-task` 子出口聚合——仅 re-export 三个含
  * node 内建依赖的后台任务行为原语模块，无其它逻辑。
  *
  * 为什么是独立子出口：三个原语模块均含 `node:child_process` / `node:fs` 顶层

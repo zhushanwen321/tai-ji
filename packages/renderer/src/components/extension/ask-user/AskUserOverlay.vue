@@ -17,7 +17,7 @@
  * - 多选：value = JSON.stringify(label[])
  * - Other：独立 key `${header}__other`
  *
- * 该编码与 @taiji/extension-protocol helpers.ts 解码契约对齐：
+ * 该编码与 @zhushanwen/extension-protocol helpers.ts 解码契约对齐：
  * getAskUserAnswer 读主 key（label / JSON.stringify(label[])），
  * getAskUserOther 读 `${header}__other`。
  *
@@ -33,7 +33,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import type { AskUserQuestion, AskUserOption } from '@taiji/extension-protocol'
+import type { AskUserQuestion, AskUserOption } from '@zhushanwen/extension-protocol'
 
 const props = withDefaults(defineProps<{
   questions: AskUserQuestion[]
@@ -197,7 +197,7 @@ function showOther(q: AskUserQuestion): boolean {
   return q.options != null && q.allowOther !== false
 }
 
-// ── Submit：构造 answers JSON（与 @taiji/extension-protocol helpers.ts 解码契约对齐）──
+// ── Submit：构造 answers JSON（与 @zhushanwen/extension-protocol helpers.ts 解码契约对齐）──
 // - 有选项：selectedValues 只含真实选项 label（过滤 OTHER_VALUE 占位符），写 answers[key]
 // - Other 自由文本：独立 key `${key}__other`（不再混进 vals 数组替代占位符）
 // - 无选项的纯自由文本问题：只写 `${key}__other`（与 encodeAnswer 契约一致——纯 other 形态

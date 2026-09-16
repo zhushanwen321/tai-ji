@@ -19,7 +19,7 @@ import {
 	guiResult,
 	type TreeItem,
 	type WidgetMeta,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 import { PERCENT_FACTOR, SHORT_ID_LENGTH } from "../constants";
 import { getBudgetSeverity } from "../engine/budget";

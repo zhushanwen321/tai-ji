@@ -113,7 +113,7 @@
   "test": "vitest run"
  },
  "dependencies": {
-  "@taiji/extension-protocol": "workspace:*",
+  "@zhushanwen/extension-protocol": "workspace:*",
   "@taiji/shared": "workspace:*",
   "vue": "^3.5",
   "pinia": "^3"

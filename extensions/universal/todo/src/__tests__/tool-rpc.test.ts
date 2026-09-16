@@ -10,7 +10,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { GUI_WIDGET_MARKER } from "@taiji/extension-protocol";
+import { GUI_WIDGET_MARKER } from "@zhushanwen/extension-protocol";
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 import { makeRefreshDisplay } from "../index";

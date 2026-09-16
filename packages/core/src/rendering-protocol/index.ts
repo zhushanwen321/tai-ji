@@ -25,9 +25,9 @@ export type {
   GuiComponentType,
   GuiComponentProps,
   GuiRenderResult,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 
-export { PROTOCOL_VERSION, extractGui, guiResult } from '@taiji/extension-protocol'
+export { PROTOCOL_VERSION, extractGui, guiResult } from '@zhushanwen/extension-protocol'
 
 // ── 本模块 w2 resolve 面 ──
 export { resolveComponent } from './resolve'

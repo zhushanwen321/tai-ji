@@ -24,7 +24,7 @@ import {
   MAX_TERMINAL_REGISTRY_ENTRIES,
   isTerminalBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import {
   atomicWriteRegistry,
   serializeRegistryFile,

@@ -15,7 +15,7 @@
 import type { ISessionService } from '../interfaces.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { toErrorMessage } from '../utils/errors.js'
-import { SESSION_MANAGER_ACTIONS } from '@taiji/extension-protocol'
+import { SESSION_MANAGER_ACTIONS } from '@zhushanwen/extension-protocol'
 import {
   isSessionManagerCreateParams,
   isSessionManagerSendParams,
@@ -23,7 +23,7 @@ import {
   isSessionManagerStatusParams,
   isSessionManagerListParams,
   isSessionManagerAbortParams,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import type {
   SessionManagerAction,
   SessionManagerParams,
@@ -40,7 +40,7 @@ import type {
   SessionManagerListResult,
   SessionManagerAbortResult,
   SessionManagerErrorResult,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 
 /** send 失败时附带的恢复指引（target 不可达：先查状态再重试投递） */
 const SEND_UNREACHABLE_HINT =

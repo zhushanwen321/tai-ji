@@ -17,7 +17,7 @@ import { mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
-import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } from "@taiji/extension-protocol/background-task";
+import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } from "@zhushanwen/extension-protocol/background-task";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 

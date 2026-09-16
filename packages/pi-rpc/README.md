@@ -23,7 +23,7 @@ pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-
 以下差异是**真差异**（消费方不同 / 迁移契约），不是遗漏，禁止单侧「补齐」到另一侧：
 
 1. **busy 判定位置**（设计 K8）：主 agent 前置预检（GUI 要用户可见反馈 + renderer defer 队列）vs subagent 后置交 pi 裁决（agent 驱动不阻塞）。本包不提供预检，只提供 `classifyPromptRejection` 同精神的共享判读词汇（`StreamingBehavior`）。
-2. **投递策略**：排队/重试归 `@taiji/session-delivery`，按消费方注入（GUI 不排队直拒、subagent 排队续投）——本包不含投递内核。
+2. **投递策略**：排队/重试归 `@zhushanwen/session-delivery`，按消费方注入（GUI 不排队直拒、subagent 排队续投）——本包不含投递内核。
 3. **裸写错误策略**：runtime `sendRaw` 吞错（UI 响应 fire-and-forget，无恢复路径）vs pi-subagent-cli `writeStdinLine` 对 EPIPE throw（驱动冷恢复路径）。本包只提供 `tryWriteStdinLine` 原语 + `isBrokenPipeError` 判别单源，策略归消费方。
 4. **argv 编排顺序**：主 agent 与 subagent 模板的 flag 顺序不同（`buildPiMainAgentArgs` 的 skill/extension 在 tools 段前、基座 flag 前置；`buildPiSubagentSpawnArgs` 的 skill 在 tools 段后、mirror 段末尾）。pi 的 commander 解析对顺序无语义；保留两模板现状是「行为等价提取」迁移契约（快照测试锚定两侧输出与切换前逐字节一致），不是待清理债。
 5. **stdout 行分帧双源现状**：runtime 侧用本包 `attachLfOnlyLineReader`（StringDecoder + 剥 `\r` + 尾行 flush）；pi-subagent-cli 的 stdout pump 用 `@zhushanwen/subagent-engine-sdk` `pumpNdjsonLines`（与 zcode connection 共享的引擎中立单源，S4 簇 5b 已收敛）。两者正常路径行为一致（pi 输出恒 `\n` 定界），不强行合并——合并会让 zcode 间接依赖本包，违反「zcode 不经过此层」。

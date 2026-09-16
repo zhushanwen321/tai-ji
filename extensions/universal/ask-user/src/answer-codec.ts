@@ -1,6 +1,6 @@
 // src/answer-codec.ts
 // AnswerValue → proto answers 条目的单向序列化（协议边界 SSOT）。
-// 与 @taiji/extension-protocol helpers.ts 的解码契约字节级对齐：
+// 与 @zhushanwen/extension-protocol helpers.ts 的解码契约字节级对齐：
 //   - 单选：answers[key] = selected[0]
 //   - 多选：answers[key] = JSON.stringify(selected)
 //   - Other：answers[`${key}__other`] = other

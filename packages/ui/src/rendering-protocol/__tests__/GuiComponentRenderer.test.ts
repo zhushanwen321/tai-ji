@@ -14,7 +14,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import GuiComponentRenderer from '../GuiComponentRenderer.vue'
 import { GUI_CUSTOM_REGISTRY_KEY } from '@taiji/core/rendering-protocol/custom-registry'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 
 describe('GuiComponentRenderer 路由', () => {
   it('ansi-text 类型 → 渲染 AnsiText，lines join 成 content', () => {

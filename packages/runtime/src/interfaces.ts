@@ -36,7 +36,7 @@ import type {
   LlmRetryConfig,
   RenameMode,
 } from '@taiji/shared'
-import type { SubagentEngineConfigView } from '@taiji/extension-protocol'
+import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type { DirScopes } from './services/skill-dir-config.js'
 import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'

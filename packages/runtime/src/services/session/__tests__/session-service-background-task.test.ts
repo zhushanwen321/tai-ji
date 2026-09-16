@@ -41,7 +41,7 @@ import { EventAdapter } from '../../../infra/pi/event-adapter.js'
 import type { IProcessManager } from '../../../services/ports/pi-engine.js'
 import type { IExtensionService } from '../../../interfaces.js'
 import type { WorkspaceService } from '../../workspace/workspace-service.js'
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import type { IMessageBus } from '../../../services/message-bus/message-bus.js'
 import type { ServerMessage } from '@taiji/shared'
 

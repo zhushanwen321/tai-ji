@@ -17,14 +17,14 @@
  * 记录了当时的刻意重复理由。方向反转为「SDK 为 SSOT、runtime re-export」后
  * sync-types.sh 已删除（生成方向不再存在），依赖方向 = runtime → SDK 单向。
  * D4 单源化（ext-simplify-16）后 Bridge* 回包形状定义源上收
- * @taiji/extension-protocol（唯一定义点，下方 re-export 消费），本文件
+ * @zhushanwen/extension-protocol（唯一定义点，下方 re-export 消费），本文件
  * 不再零依赖，但除该类型依赖外仍无运行时依赖。
  */
 
-// D4 单源化：Bridge* 回包形状唯一定义源 = @taiji/extension-protocol。
+// D4 单源化：Bridge* 回包形状唯一定义源 = @zhushanwen/extension-protocol。
 // import 供本文件内 ToolExecuteHandler 返回类型引用；export 保持既有
 // `BridgeInterceptResponse`/`BridgeToolExecuteResponse` 导入面不变。
-import type { BridgeInterceptResponse, BridgeToolExecuteResponse } from '@taiji/extension-protocol'
+import type { BridgeInterceptResponse, BridgeToolExecuteResponse } from '@zhushanwen/extension-protocol'
 
 /**
  * GUI 渲染协议核心类型定义。

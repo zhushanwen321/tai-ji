@@ -6,7 +6,7 @@
  * 状态变更刷新走 Server→Client 广播 backgroundTask:updated——本 domain 只封装 RPC 面，广播订阅归
  * 消费侧 composable（经 events 通道、模块级单 listener，AGENTS 规则 2），不在此处封装。
  *
- * 任务条目形状直接用 @taiji/extension-protocol 的 BackgroundTaskRegistryEntry（D9 数据契约
+ * 任务条目形状直接用 @zhushanwen/extension-protocol 的 BackgroundTaskRegistryEntry（D9 数据契约
  * 零新造，与 bash_output 工具面的 snake_case 契约互不相干）。shared protocol.ts 侧是结构镜像
  *（shared 不依赖 extension-protocol），镜像 ⇔ 契约的逐字段全等由本文件 BackgroundTaskMirrorEqualsContract
  * 编译期守卫——任一侧形状漂移即 tsc 红。
@@ -16,7 +16,7 @@
  * 消费方直接 `import * as backgroundTask from '@taiji/core/transport/api/domains/background-task'`。
  */
 import type { ServerMessageMap } from '@taiji/shared'
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
 

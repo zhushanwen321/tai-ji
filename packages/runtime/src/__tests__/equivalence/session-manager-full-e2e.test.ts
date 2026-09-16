@@ -39,7 +39,7 @@ import {
   persistAgentBinding,
   scanPiSessions,
 } from '../../infra/pi/session-file-utils.js'
-import { SESSION_MANAGER_MARKER } from '@taiji/extension-protocol'
+import { SESSION_MANAGER_MARKER } from '@zhushanwen/extension-protocol'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import type { ISessionService } from '../../interfaces.js'
 import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture, type PiStreamEvent } from './pi-fixture.js'

@@ -2,7 +2,7 @@
 //
 // ask_user channel handler：把 subagent 子进程的 ask_user 请求透传到主进程 UI 渲染。
 //
-// 设计（关键决策）：askUserInteract（@taiji/extension-protocol）只在 RPC 模式可用
+// 设计（关键决策）：askUserInteract（@zhushanwen/extension-protocol）只在 RPC 模式可用
 // （内部 isGuiCapable 检查 mode==='rpc'，TUI 下抛错）。所以 handler 按 ctx.mode 分流：
 //   - RPC：转发器——调 askUserInteract(guiCtx, protoQuestions)，复用 select 通道 +
 //     ASK_USER_MARKER 契约，主进程 ctx.ui.select 经 GUI sidecar 渲染（不进 parseSpawnLine，
@@ -21,7 +21,7 @@ import {
 	type AskUserAnswers,
 	askUserInteract,
 	type AskUserQuestion,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 import { AskUserComponent } from "./component";
 import { encodeAnswer } from "./answer-codec";
@@ -71,7 +71,7 @@ function protoToInternalQuestions(protoQuestions: AskUserQuestion[]): Question[]
  * 内部 Result.answers：key = question 全文，value = 结构化 AnswerValue
  * （selected = option label 数组，other = Other 自由文本）。
  *
- * proto AskUserAnswers 契约（@taiji/extension-protocol）：
+ * proto AskUserAnswers 契约（@zhushanwen/extension-protocol）：
  *   - key = question.header ?? question 全文
  *   - 单选：value = 选中项 label string
  *   - 多选：value = JSON.stringify(选中项 label 数组)

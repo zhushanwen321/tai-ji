@@ -5,7 +5,7 @@
  * tab 项 rounded-sm，active 用 bg-elevated + neutral-fg 浮起（去 accent-soft 蓝染底）；
  * status=done 显 success 点，status=pending 显 neutral-dim 半透明点。
  */
-import type { GuiComponentProps } from '@taiji/extension-protocol'
+import type { GuiComponentProps } from '@zhushanwen/extension-protocol'
 
 defineProps<{
   tabs: GuiComponentProps['tab-bar']['tabs']

@@ -9,7 +9,7 @@
  * - U13: Cancel 取消
  * - D1 编码契约 5 形态：单选 label / 多选 JSON / Other+selected / 纯自由文本仅 __other / 全部未答 {}
  *
- * answers 编码契约（对齐 @taiji/extension-protocol types.ts + AskUserOverlay.vue onSubmit）：
+ * answers 编码契约（对齐 @zhushanwen/extension-protocol types.ts + AskUserOverlay.vue onSubmit）：
  * - 单选：value = 选中项 label（proto 无独立 value 字段，D1 后 label 即选中值）
  * - 多选：value = JSON.stringify(label[])
  * - Other 自由文本：独立 key `${key}__other`（不混进选中值数组）
@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import AskUserOverlay from '@/components/extension/ask-user/AskUserOverlay.vue'
-import type { AskUserQuestion } from '@taiji/extension-protocol'
+import type { AskUserQuestion } from '@zhushanwen/extension-protocol'
 
 // 带描述的选项（验证 opt-desc 字号）
 const optWithDescQ: AskUserQuestion = {

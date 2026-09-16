@@ -27,7 +27,7 @@
  * 本单元不管。
  */
 
-import { killProcessTree } from "@taiji/extension-protocol/background-task";
+import { killProcessTree } from "@zhushanwen/extension-protocol/background-task";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 

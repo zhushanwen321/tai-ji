@@ -6,12 +6,12 @@
  * 壳（P5）在 S2 落地后把真 store 适配注入（S4 TC4），单测注入 mock 实现。
  *
  * ViewCacheEntry 形状对齐 S2 IF10：viewId/pluginId/guiTree/updatedAt。
- * guiTree 用 @taiji/extension-protocol 的权威 GuiComponent 类型（P2 GuiComponentRenderer
+ * guiTree 用 @zhushanwen/extension-protocol 的权威 GuiComponent 类型（P2 GuiComponentRenderer
  * 同源——core types.ts 的 WidgetPayload.guiTree 尚为 unknown[]，S2 W4 落地时替换为
  * GuiComponent[]，本接口按 S2 IF10 契约先行）。
  */
 import type { InjectionKey } from 'vue'
-import type { GuiComponent, WidgetMeta } from '@taiji/extension-protocol'
+import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 
 /** plugin view 的 GuiComponent 树缓存条目（对齐 S2 IF10 ViewCacheEntry）。 */
 export interface ViewCacheEntry {

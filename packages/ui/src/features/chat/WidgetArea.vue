@@ -23,7 +23,7 @@ import { useI18n } from 'vue-i18n'
 import { ChevronDown } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY } from '../../extension-host'
 import type { ViewCacheEntry } from '../../extension-host'
-import type { GuiComponent, WidgetMeta } from '@taiji/extension-protocol'
+import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 // primitives / 渲染协议直接路径（不经顶层 barrel，chat 组件被 barrel 再导出会闭合循环依赖环）
 import { Button } from '../../primitives/button'
 import { Popover, PopoverContent, PopoverTrigger } from '../../primitives/popover'

@@ -10,7 +10,7 @@
  *   - label 格式含 slug（I#3 对齐）
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { GuiRenderResult } from "@taiji/extension-protocol";
+import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import {

@@ -15,7 +15,7 @@
  *   icon 与序号互斥（序号占据 icon 槽位，避免行首双元素）。
  * - 递归 depth 逻辑不变。
  */
-import type { TreeItem, TreeItemIcon } from '@taiji/extension-protocol'
+import type { TreeItem, TreeItemIcon } from '@zhushanwen/extension-protocol'
 import {
   ChevronRight, Check, X, Circle, Dot, Pause, GitBranch,
 } from '@lucide/vue'

@@ -18,7 +18,7 @@
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@taiji/extension-protocol/background-task";
+import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
 
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";

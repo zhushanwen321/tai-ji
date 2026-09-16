@@ -217,14 +217,14 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - **效果**：G4 构造性成立（三层同键隔离）；listener 无重复注册面。
 
 **D9：数据契约零新造（选定）**
-- **采用**：renderer/runtime 间任务形状直接用 `BackgroundTaskRegistryEntry`（`@taiji/extension-protocol` background-task.ts），字段名/枚举零改名（与 bash_output 工具返回的 snake_case 不同——那是 AI 工具面契约，UI 走 extension-protocol 契约，两者各自稳定）。
+- **采用**：renderer/runtime 间任务形状直接用 `BackgroundTaskRegistryEntry`（`@zhushanwen/extension-protocol` background-task.ts），字段名/枚举零改名（与 bash_output 工具返回的 snake_case 不同——那是 AI 工具面契约，UI 走 extension-protocol 契约，两者各自稳定）。
 - **被否**：为 UI 单独造 DTO（两份形状漂移风险；bash_output 的 80 字符截断是 AI 上下文预算考量，UI 不需要）。
 - **证据**：extension-protocol 是跨层 SSOT 的既有定位（background-task.ts 文件头）。
 - **效果**：§5 拆分中无「契约设计」单元，协议层只登记 WS 消息形状。
 
 **D10：列表二级状态筛选 + 行内终止（R4 新增，对齐 dev-0.9.15 subagent-sidebar-filter 范式）（选定）**
 - **采用**：列表顶部迷你凹陷槽三桶筛选——**运行中 / 已结束 / 全部**（带计数预告，默认「运行中」），视觉照搬 Agents tab 二级筛选范式（`bg-bg-input` 凹陷底 + active `bg-bg-elevated` 浮起，h-6，SegmentedTab/L2TabBar 同源）。四个子决策：
-  - **① 分桶判据与状态展示 SSOT**：新建 `renderer/src/lib/background-task-bucket.ts` 纯函数模块（导出 `backgroundTaskBucket / filterBackgroundTasks / countBackgroundTasks / backgroundTaskStatusIcon`），分桶直接复用契约谓词 `isActiveBackgroundTaskState`（`@taiji/extension-protocol`，D9 同源）——**运行中 = running + killing（killing 是「已发令待确认」的活跃瞬态，用户视角仍在终止流程中）；已结束 = exited（含 natural/timeout/killed）+ orphaned**。比 subagent 分桶更干净：无投影微妙性（subagent 的 done 投影陷阱不存在——契约 state 机显式、无「轮终回写 running」形态）。列表过滤、FilterBar 计数、L2 角标（D4 ④）、item icon 色档（⑤，`backgroundTaskStatusIcon(entry)` 返回 IconKind）**四方同源消费，禁两处各写判定**（subagent D3 同款纪律）。
+  - **① 分桶判据与状态展示 SSOT**：新建 `renderer/src/lib/background-task-bucket.ts` 纯函数模块（导出 `backgroundTaskBucket / filterBackgroundTasks / countBackgroundTasks / backgroundTaskStatusIcon`），分桶直接复用契约谓词 `isActiveBackgroundTaskState`（`@zhushanwen/extension-protocol`，D9 同源）——**运行中 = running + killing（killing 是「已发令待确认」的活跃瞬态，用户视角仍在终止流程中）；已结束 = exited（含 natural/timeout/killed）+ orphaned**。比 subagent 分桶更干净：无投影微妙性（subagent 的 done 投影陷阱不存在——契约 state 机显式、无「轮终回写 running」形态）。列表过滤、FilterBar 计数、L2 角标（D4 ④）、item icon 色档（⑤，`backgroundTaskStatusIcon(entry)` 返回 IconKind）**四方同源消费，禁两处各写判定**（subagent D3 同款纪律）。
   - **② 筛选状态分区**：新建 `useBackgroundTaskBucketFilter(sessionId)` composable——`useSessionScopedState<{ value: FilterValue }>(sessionId, () => reactive({ value: 'active' }))`，**标量必须对象包装且必须 reactive 容器**（工厂响应式契约，subagent MF-A 同款死锁级坑：plain object 的 mutate 不触发下游重算）；挂载期内跨 session 切换分区记忆、切 tab 卸载重置默认「运行中」；不跨启动记忆（运行态时间敏感，重启后旧选择大概率过期）。组件纯读，禁 watch 清空（ADR-0049）。
   - **③ 空态三分**：全量空态（registry 空）不渲染筛选条（0 计数槽是纯噪音，subagent D6 同款）；「运行中」空桶 → 自适应空态「没有运行中的后台命令」+ **[查看全部 (N)]** 一键跳转（高频：跑完回来看一眼 → 一键看历史）；「已结束」空桶 → 仅文案。全部桶内：运行中置顶 + 分隔线 + 历史倒序（保留分组可读性）。
   - **④ 行内两段式终止**：运行中行第二行右侧 hover 出现 ✕ 按钮（仅 running 行；killing 行已发令不重复发）→ 第一次点击变红色 ✓ 确认态 → 再点一次才真正发 `backgroundTask.kill` RPC（与 Agents tab cancel 同交互语言，inline 确认不开弹窗）。G3 快路径：无需开 drawer 即可终止；drawer 内完整「终止任务」按钮保留（两段式同款）。

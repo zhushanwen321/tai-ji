@@ -14,7 +14,7 @@
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { readOutputTail } from "@taiji/extension-protocol/background-task";
+import { readOutputTail } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
 
 import { TAIL_MAX_BYTES, TAIL_MAX_LINES } from "./background/output-tail.ts";

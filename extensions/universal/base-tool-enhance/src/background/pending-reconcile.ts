@@ -35,8 +35,8 @@ import {
 	BACKGROUND_TASK_ID_PREFIX,
 	collectActivePendingIds,
 	mapReasonToStatus,
-} from "@taiji/extension-protocol";
-import { isPidAlive } from "@taiji/extension-protocol/background-task";
+} from "@zhushanwen/extension-protocol";
+import { isPidAlive } from "@zhushanwen/extension-protocol/background-task";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 

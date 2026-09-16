@@ -31,7 +31,7 @@ import { join } from 'node:path'
 import { inflightMirror } from '../inflight-mirror.js'
 import { ReclaimSeat } from '../idle-pi-reaper.js'
 import { getRuntimeCheckpointStore, initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
-import type { SubagentInFlightReport } from '@taiji/extension-protocol'
+import type { SubagentInFlightReport } from '@zhushanwen/extension-protocol'
 import type { IPiEngine } from '../../ports/pi-engine.js'
 import { createSetup } from './helpers/session-service-setup.js'
 

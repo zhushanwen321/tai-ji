@@ -12,7 +12,7 @@
  * 状态/icon 映射的正确性已在 mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例
  * 只验证「正确组件 type + items 结构 + 映射联动」。
  */
-import { isGuiCapable } from "@taiji/extension-protocol";
+import { isGuiCapable } from "@zhushanwen/extension-protocol";
 import { describe, expect,it } from "vitest";
 
 import { mapRunIcon,mapRunStatus, toGuiCtx } from "../interface/gui-mappers.ts";

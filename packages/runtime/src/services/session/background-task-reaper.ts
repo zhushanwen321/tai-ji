@@ -5,7 +5,7 @@
  * 职责（G2 职责归位）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，
  * extension 不再做全局扫描/全局锁。判定逻辑移植自 extensions/universal/
  * base-tool-enhance/src/reaper.ts（三分支判定 + pid 复用防御 + registry 损坏隔离 +
- * 错误防御）；行为原语自 ext-simplify-13 起统一取 @taiji/extension-protocol
+ * 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
  * 子出口 `background-task`（pid 探测/处置原语 + registry 文件原语，跨端与 extension
  * 侧单一实现——此前各持一份逐字同构副本靠注释对齐，tail 签名已实际漂移），本文件
  * 只保留编排层：三分支判定、双触发面、统一锁 sync 版锁壳（utils/file-lock.ts
@@ -61,7 +61,7 @@ import {
   MAX_TERMINAL_REGISTRY_ENTRIES,
   isActiveBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 import {
   atomicWriteRegistry,
   getProcessStartTimeSec,

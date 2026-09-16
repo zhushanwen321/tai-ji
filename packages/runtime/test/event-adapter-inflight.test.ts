@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventAdapter, translate } from '../src/infra/pi/event-adapter.js'
 import { inflightMirror } from '../src/services/session/inflight-mirror.js'
-import { SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK } from '@taiji/extension-protocol'
+import { SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK } from '@zhushanwen/extension-protocol'
 import type { PiEvent } from '../src/infra/pi/pi-protocol.js'
 import type { PiEventListener } from '../src/services/ports/pi-engine.js'
 

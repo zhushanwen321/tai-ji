@@ -9,7 +9,7 @@ import {
 	guiResult,
 	type TreeItem,
 	type WidgetMeta,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 
 // ── 数据模型 ─────────────────────────────────────────
 

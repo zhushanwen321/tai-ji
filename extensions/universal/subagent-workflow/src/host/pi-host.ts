@@ -5,7 +5,7 @@
 //
 // 本文件属壳侧（shell），不进 core 切面——对 pi SDK 与 pi 宿主协作件
 // （@earendil-works/pi-coding-agent / @zhushanwen/pi-extension-logger /
-// @zhushanwen/pi-pending-notifications / @taiji/session-delivery）的运行时
+// @zhushanwen/pi-pending-notifications / @zhushanwen/session-delivery）的运行时
 // import 收敛在此层，core 闭包（D9 守卫对象）不得出现这些包。
 //
 // 端口语义：
@@ -22,7 +22,7 @@
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
 //     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
-//   - createDelivery 透传：@taiji/session-delivery 的 createDelivery 与 core
+//   - createDelivery 透传：@zhushanwen/session-delivery 的 createDelivery 与 core
 //     的 Delivery* 结构化类型逐字段结构兼容（DeliveryHandle 的 sendChecked/depth
 //     是结构超集成员，多不碍兼容）——结构兼容由本注入点 typecheck 守护，上游签名
 //     漂移即红（notify-ports.ts「闭包红线」段）。
@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@taiji/session-delivery";
+import { createDelivery } from "@zhushanwen/session-delivery";
 
 import type { DiscoveryRoot, HostServices } from "@zhushanwen/subagent-core";
 import type { LogLevel } from "@zhushanwen/subagent-core";

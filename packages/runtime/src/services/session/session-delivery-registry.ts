@@ -12,8 +12,8 @@
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
  * sd-u6（完成回流）将复用本注册表，禁止自行 createDelivery。
  */
-import { createDelivery } from '@taiji/session-delivery'
-import type { DeliveryHandle } from '@taiji/session-delivery'
+import { createDelivery } from '@zhushanwen/session-delivery'
+import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import { SkillInjector } from './skill-injector.js'

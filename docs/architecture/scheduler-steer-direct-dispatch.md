@@ -4,7 +4,7 @@
 
 ## 开篇（SCQA）
 
-- **S（情境）**：`@zhushanwen/pi-scheduler`（v0.6.0）非 force 任务经 `@taiji/session-delivery` 内核投递：busy 时消息 park 在内核内存队列等 `agent_settled` 边沿、多任务合批、投递终态经 per-message `onSettled` 回调驱动 scheduler 记账（runCount/nextRunAt 推进），防重标记 `queuedInDeliveryAt` + 10min TTL 防止「入队未终态」窗口的重复入队。
+- **S（情境）**：`@zhushanwen/pi-scheduler`（v0.6.0）非 force 任务经 `@zhushanwen/session-delivery` 内核投递：busy 时消息 park 在内核内存队列等 `agent_settled` 边沿、多任务合批、投递终态经 per-message `onSettled` 回调驱动 scheduler 记账（runCount/nextRunAt 推进），防重标记 `queuedInDeliveryAt` + 10min TTL 防止「入队未终态」窗口的重复入队。
 - **C（冲突）**：ext-simplify-08 验收（2026-09-14）观测到 idle 长静默期 interval 任务出现 4 次复现的 **~10min 精确延迟**注入（impl-plan 风险 10）。归因（源码 + 探针实验闭环）：pi extension API `sendMessage` 是 fire-and-forget 返回 `undefined`（0.84.4 与 0.85.1 实装一致），delivery 内核对 void 返回在 `port.send` 同步调用栈内完成全部终态链——`handleSettled` 的 `delete(标记)` 先于 `dispatchViaDelivery` 的 `set(标记)` 执行（空删），标记置位后永久残留，TTL 内每 30s tick 的 dispatch 全被 gate 拦截，**下一轮投递 = 上一轮投递 + 恰好 10min**（600s 整除 30s tick，放行只差毫秒级回调延迟）。引入点 `752ca6433`（2026-08-23 scheduler 迁移 delivery 内核），非 ext-simplify-08 本批。
 - **Q（问题）**：修复路径二选一——微任务化内核 settle 时序（保留全部机制，±1 行）还是拆层（投递模型整体简化）？
 - **A（答案）**：用户裁决拆层：投递语义需求重新定价——提醒类注入不需要「必达 + 合批 + 不打断」，绝大部分场景应**立即 steer 打断**。全任务统一 `{deliverAs:'steer', triggerTurn:true}` 直投 + 受理即记账；delivery 链路与 force 字段整体删除；三条代价（busy 打断 / abort 丢轮 / 无合批）按四要素登记接受。
@@ -113,7 +113,7 @@ schedule_control list：runCount +1、nextRunAt 推进（与注入同 tick，不
 | `src/replay.ts` | 改 | upsert 折叠删 `force: snapshot.force`（旧 JSONL entry 中的 force 字段成为被忽略的多余字段，无害） |
 | `src/importer.ts` | 改 | 旧 store 迁移删 force 读取（旧 force/non-force 任务统一收敛到新直投语义） |
 | `src/__tests__/` | 删+改 | 删：`U4-ONSETTLED`、`U4-PARK_GATE`、`U4-AFTER_RUN_INTENT`（投递链专属）；改：`U4-DISPATCH_INFLIGHT`（守卫保留但断言改直投形态）、`index-generation`（装配断言删 delivery 段）、`index-session-start`、`runtime`（dispatch 用例改 steer 直投断言）、`service`/`tool`/`commands`/`replay`/`importer`/`widget`/`backend` 中 force 相关断言清理；`mock-backend.ts` sendMessage 签名跟随 |
-| `package.json` | 改 | version 0.6.0 → 0.7.0；dependencies 删 `@taiji/session-delivery` |
+| `package.json` | 改 | version 0.6.0 → 0.7.0；dependencies 删 `@zhushanwen/session-delivery` |
 
 错误规格不变量：`sendMessage` throw → failed 记账 + pending 保留 + 不 rethrow（tick 继续其他任务）；rate limit 拦截 → pending 保留（现状语义）；`addTask`/`toggle`/`delete`/advance 记账链零变化。
 

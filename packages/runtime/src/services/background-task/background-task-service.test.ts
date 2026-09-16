@@ -34,7 +34,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, u
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { BackgroundTaskRegistryEntry } from '@taiji/extension-protocol'
+import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import { BackgroundTaskService, type BackgroundTaskServiceDeps } from './background-task-service.js'
 import { readRegistryEntriesWithStatus } from '../session/background-task-reaper.js'
 

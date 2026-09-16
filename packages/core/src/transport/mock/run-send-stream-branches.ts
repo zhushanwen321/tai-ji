@@ -4,7 +4,7 @@
  * 按 detectBranch 分发：默认 read / todo / goal，各分支产出 tool_call start/end
  * （[w21] entry 形态 payload，协议同步 event-adapter 重构载体）+ 分支专属 widget 帧。
  */
-import { guiResult, guiComponent } from "@taiji/extension-protocol";
+import { guiResult, guiComponent } from "@zhushanwen/extension-protocol";
 import type { PiMessageEntry, PiToolCallEntryForm } from "@taiji/shared";
 import type { SendStreamDeps } from "./run-send-stream";
 

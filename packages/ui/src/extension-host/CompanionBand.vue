@@ -17,8 +17,8 @@
  * 静默空态不崩（design-review R3，先例 StatusBar/ViewHost）。
  */
 import { computed, inject, ref, watch } from 'vue'
-import { isAskUserQuestion } from '@taiji/extension-protocol'
-import type { AskUserQuestion } from '@taiji/extension-protocol'
+import { isAskUserQuestion } from '@zhushanwen/extension-protocol'
+import type { AskUserQuestion } from '@zhushanwen/extension-protocol'
 import { createDialogRequestQueue } from './dialog-request-queue'
 import { DIALOG_REQUEST_SOURCE_KEY, UI_RESPONSE_TRANSPORT_KEY, OVERLAY_LIFECYCLE_KEY } from './companion-band-source'
 import type { OverlayState } from './companion-band-source'

@@ -12,7 +12,7 @@
  * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt / isGenerating)。
  */
 import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
-import type { SessionManagerAction } from '@taiji/extension-protocol'
+import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { ScannedSessionMeta } from '../ports/session.js'
 
 /**

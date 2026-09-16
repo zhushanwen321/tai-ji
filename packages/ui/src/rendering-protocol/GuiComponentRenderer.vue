@@ -19,7 +19,7 @@
  */
 import { computed, getCurrentInstance, inject, markRaw, provide } from 'vue'
 import type { Component } from 'vue'
-import type { GuiComponent, GuiComponentType } from '@taiji/extension-protocol'
+import type { GuiComponent, GuiComponentType } from '@zhushanwen/extension-protocol'
 import {
   AnsiText,
   ProgressBar,

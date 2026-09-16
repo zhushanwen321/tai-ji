@@ -189,9 +189,9 @@ npm install -g @earendil-works/pi-coding-agent
 
 这样 `pnpm install` 会把 pi 核心包装到本地 `node_modules`，TS 和 IDE 都能 resolve。代价：本地多装一份 pi（发布时 `files` 字段不含 `node_modules`，不影响产物）。
 
-**`@taiji/extension-protocol`（GUI 协议包）**
+**`@zhushanwen/extension-protocol`（GUI 协议包）**
 
-如果你的 extension 需要 GUI 渲染（在 taiji 桌面端展示结构化组件），会用到 `@taiji/extension-protocol`（提供 `guiComponent`、`guiResult` 等 helper）。**该包尚未发布到 npm**，npm 发布前通过本地路径安装：
+如果你的 extension 需要 GUI 渲染（在 taiji 桌面端展示结构化组件），会用到 `@zhushanwen/extension-protocol`（提供 `guiComponent`、`guiResult` 等 helper）。**该包尚未发布到 npm**，npm 发布前通过本地路径安装：
 
 ```bash
 # 假设 taiji 仓库在 ~/Code/<workspace>/<branch>/（<workspace> = taiji 仓库 workspace root，按本机实际替换）
@@ -208,7 +208,7 @@ pnpm add ~/Code/<workspace>/feat-ask-user-gui/packages/extension-protocol
 | `@earendil-works/pi-coding-agent` | 方案 A 或 B | pi jiti loader（alias 映射） |
 | `@mariozechner/pi-coding-agent` | 同上（旧名 alias） | pi jiti loader（alias 映射） |
 | `typebox` / `@sinclair/typebox` | 同上 | pi bundle 内置 |
-| `@taiji/extension-protocol` | `pnpm add <本地路径>` symlink | extension 自己 bundle（发布后走 npm） |
+| `@zhushanwen/extension-protocol` | `pnpm add <本地路径>` symlink | extension 自己 bundle（发布后走 npm） |
 
 **运行时这些 peer 包不需要 install**——pi 启动时通过 jiti 的 alias 机制把 `@earendil-works/*` 和 `@mariozechner/*` 映射到 pi 内部模块，`typebox` 直接从 pi 的 bundle 解析。extension 的 `peerDependencies` 只是声明依赖关系（供 `isValidPiExtension` 校验 + 未来 npm resolve），不参与运行时加载。
 
@@ -326,7 +326,7 @@ taiji 以 `--mode rpc` 运行 pi，extension 的 `ctx.mode` 为 `"rpc"`。TUI �
 - **`files`**：npm 发布时包含的文件，确保 `index.ts` 和 `src/` 都在内。
 - **TS 无需编译**：pi 用 jiti 加载 TS 源码，直接发布 `.ts` 文件即可。
 
-> **`@taiji/extension-protocol` 的特殊处理**：如果你的 extension 依赖 GUI 协议包，目前它**尚未发布到 npm**。发布前不要把它放进 `dependencies`（会导致安装失败），而是放到 `devDependencies` 并用 `pnpm add <本地路径>` 安装。该包是纯类型 + helper 函数，会被 jiti 直接 inline 到 extension 代码中，运行时不需要单独 resolve。等 `@taiji/extension-protocol` 正式发布到 npm 后，再迁移到 `dependencies`。
+> **`@zhushanwen/extension-protocol` 的特殊处理**：如果你的 extension 依赖 GUI 协议包，目前它**尚未发布到 npm**。发布前不要把它放进 `dependencies`（会导致安装失败），而是放到 `devDependencies` 并用 `pnpm add <本地路径>` 安装。该包是纯类型 + helper 函数，会被 jiti 直接 inline 到 extension 代码中，运行时不需要单独 resolve。等 `@zhushanwen/extension-protocol` 正式发布到 npm 后，再迁移到 `dependencies`。
 
 ### 发布
 

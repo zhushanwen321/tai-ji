@@ -139,7 +139,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 | 4 | get_state 握手/身份读回 | rpc-client.ts:1019-1022 | get-state-handshake.ts:54-96 | 高 |
 | 5 | 「追加消息」busy 语义 | 三层：occupancy 预检拒绝（message-dispatcher.ts:338-351）→ renderer defer 队列 → pi 拒绝转译 classifyPromptRejection（:180-184） | 引擎侧不预检：streamingBehavior 直传交 pi 裁决（stdin-writer.ts:85-101 上游调用链） | **语义同构、决策点位置相反（刻意差异）** |
 | 6 | 杀链 | rpc-client.ts:1079-1115（SIGCONT→SIGTERM→grace→SIGKILL） | spawn-runner.ts / active-children.ts + subagent-core engine/common/kill-chain.ts | 三处同型 |
-| 7 | 投递内核（排队/busy gate/重试） | —（GUI 直连 dispatcher） | — | `@taiji/session-delivery` 已存在（agent-managed session 在用），是公共化的现成先例 |
+| 7 | 投递内核（排队/busy gate/重试） | —（GUI 直连 dispatcher） | — | `@zhushanwen/session-delivery` 已存在（agent-managed session 在用），是公共化的现成先例 |
 
 「追加信息」是用户点名的样板操作：主 agent 侧 = `sendPrompt → 预检 → client.prompt → busy 转译/defer`；subagent 侧 = `deliverChatMessage → Continuation → engine.interact → streamingBehavior`。两侧都在回答同一个问题——「这个会话现在能不能接这条消息，不能的话排队、抢占还是拒绝」——但词汇、判定位置、兜底路径完全独立演化。
 
@@ -397,7 +397,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 │  主 agent: message-dispatcher / session-lifecycle（GUI 实时交互编排）              │
 │  subagent: Continuation + run-orchestration（chat 轮编排）                        │
 ├────────────────────────── 投递语义层（公共内核，已存在，扩展复用）────────────────┤
-│  @taiji/session-delivery：busy gate / 排队 dedupe 合批 / 退避重试 / watchdog   │
+│  @zhushanwen/session-delivery：busy gate / 排队 dedupe 合批 / 退避重试 / watchdog   │
 │  新增「会话占用词汇」共享：isIdle 探针 + StreamingBehavior（pi-rpc）              │
 ├────────────────────────── 引擎中立契约层（已存在，不变）─────────────────────────┤
 │  subagent-engine-sdk：EnginePort / EngineHandleData(sessionRef) / 反向通道         │

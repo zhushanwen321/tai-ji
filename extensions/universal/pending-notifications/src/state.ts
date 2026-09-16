@@ -9,7 +9,7 @@
  *
  * 设计要点：
  * - 差集规则本体（register 首见去重 + unregister 全局抵消 + id 非法跳过）单点在
- *   @taiji/extension-protocol 的 pending-entries（与 bte 对账同源消费，
+ *   @zhushanwen/extension-protocol 的 pending-entries（与 bte 对账同源消费，
  *   ext-simplify-13 E6）；本文件在其上只保留 pending 产品语义：类型归一 /
  *   opts.types / currentSessionId 过滤与写侧判定
  * - session entries 是唯一状态源，本文件无内存状态（历史的内存 registry、session_start
@@ -20,7 +20,7 @@
  *   对齐 goal continuation 守卫语义）；历史 session 文件中遗留的带 expiresAt 的
  *   register entry 无需迁移——差集语义不读该键
  */
-import { applyPendingDiff, scanPendingEntries } from "@taiji/extension-protocol";
+import { applyPendingDiff, scanPendingEntries } from "@zhushanwen/extension-protocol";
 
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务） */
 export type PendingType = "workflow" | "subagent" | "bash";

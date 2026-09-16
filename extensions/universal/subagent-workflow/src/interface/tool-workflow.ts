@@ -28,7 +28,7 @@ import {
   type GuiRenderResult,
   guiResult,
   isGuiCapable,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { type Static, Type } from "typebox";
 
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";

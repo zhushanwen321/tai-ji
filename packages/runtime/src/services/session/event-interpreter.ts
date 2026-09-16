@@ -52,7 +52,7 @@ import { AgentSettledDelayer, ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-
 export { ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-delay.js'
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
-import type { SessionManagerAction } from '@taiji/extension-protocol'
+import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { IFileChangeDiff } from '../ports/file-change-diff.js'
 import type {
   ForceQuitSource,

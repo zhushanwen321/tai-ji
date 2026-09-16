@@ -18,7 +18,7 @@
  * constructor 内的 exit 清理腿（removeSessionEntry 删 session 内存态）——否则 exit 事件到达时
  * getSession 查不到 spawnSource/parentAgentSessionId，失败回流静默失效。
  */
-import type { DeliveryHandle } from '@taiji/session-delivery'
+import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import type { IManagedSessionView } from './types.js'
 
 /** 回流通知的 status 值域（以运行时可得的标志为准，语义在测试中固化）：

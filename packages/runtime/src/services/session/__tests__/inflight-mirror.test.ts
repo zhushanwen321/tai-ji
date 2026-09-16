@@ -20,7 +20,7 @@ import {
   inflightMirror,
 } from '../inflight-mirror.js'
 import type { InFlightMirror } from '../inflight-mirror.js'
-import type { SubagentInFlightReport } from '@taiji/extension-protocol'
+import type { SubagentInFlightReport } from '@zhushanwen/extension-protocol'
 
 const SID = 'sess-mirror-1'
 

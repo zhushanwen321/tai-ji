@@ -1,9 +1,9 @@
 // src/__tests__/answer-codec.test.ts
 // encodeAnswer 单向序列化 round-trip 测试（TC-09）。
-// 反向验证用 @taiji/extension-protocol 的解码 helper（getAskUserAnswer / getAskUserOther）
+// 反向验证用 @zhushanwen/extension-protocol 的解码 helper（getAskUserAnswer / getAskUserOther）
 // ——该 helper 是 proto answers 格式的唯一解码 SSOT，encode 输出必须与其字节级对齐。
 // m1 增量（TC-01）：property-based describe 作为 5 个确定性用例的随机化超集补充。
-import { getAskUserAnswer, getAskUserOther } from "@taiji/extension-protocol";
+import { getAskUserAnswer, getAskUserOther } from "@zhushanwen/extension-protocol";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 

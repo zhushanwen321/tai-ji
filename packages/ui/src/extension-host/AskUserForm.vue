@@ -27,7 +27,7 @@ import { Button } from '../primitives/button'
 import { Input } from '../primitives/input'
 import { Textarea } from '../primitives/textarea'
 import { Checkbox } from '../primitives/checkbox'
-import type { AskUserQuestion, AskUserOption } from '@taiji/extension-protocol'
+import type { AskUserQuestion, AskUserOption } from '@zhushanwen/extension-protocol'
 
 const props = withDefaults(
   defineProps<{

@@ -10,7 +10,7 @@
 //     （single/multi/Other 三种答案形态，经 encodeAnswer 序列化）。
 //   - 取消（askUserInteract/custom 返回 null 或 cancelled）→ {cancelled: true}
 //   - 输入校验（channelPayload 缺失/无 questions）→ {cancelled: true}
-import type { AskUserQuestion } from "@taiji/extension-protocol";
+import type { AskUserQuestion } from "@zhushanwen/extension-protocol";
 import { describe, expect, it } from "vitest";
 
 import { createAskUserChannelHandler } from "../channel-handler";

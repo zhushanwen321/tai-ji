@@ -29,7 +29,7 @@
 - **核心（core）**：与宿主无关的共享实现——引擎抽象、spawn 执行链、workflow 编排运行时。
 - **壳（shell）**：宿主特有的接入层——工具面/命令/视图（pi）、CLI/daemon/通知适配（zcode）。
 - **依赖闭包**：core 的 import 传递闭包中所有非 node 内置依赖。core 可独立发布的判据是闭包内不出现 pi SDK 与 pi 宿主协作件。
-- **双形态包**：同时以 TS 源（供本仓 workspace 内消费）和编译 dist（供 npm 外部消费）发布的包。本仓 `@taiji/extension-protocol`（0.7.0）、`@taiji/session-delivery`（0.3.0）已是此形态。
+- **双形态包**：同时以 TS 源（供本仓 workspace 内消费）和编译 dist（供 npm 外部消费）发布的包。本仓 `@zhushanwen/extension-protocol`（0.7.0）、`@zhushanwen/session-delivery`（0.3.0）已是此形态。
 - **vendor / 分叉点**：zcode 仓为复用 pi 侧逻辑而逐字复制源码的同步方式；「分叉点」是 vendor 文件头注中登记的、两份实现刻意不再一致的位置。
 
 ### 设计目标（从使用者体验倒推）
@@ -105,10 +105,10 @@
 |------|------|------|------|
 | `@zhushanwen/pi-extension-logger` | 非测试 import 共 30 处（execution / orchestration / **shared/resource-discovery.ts**） | 宿主协作件（自身 peer 依赖 pi SDK） | **port 化**：core 内部 log 端口，调用面极薄（全是 getLogger） |
 | `@earendil-works/pi-coding-agent` | 硬触点 5 文件：`engine/common/data-dir.ts` 与 `orchestration/config-loader.ts` 与 `orchestration/skill-discovery.ts` 的 `getAgentDir`（后两处为运行时值导入）、`ui-request-handler-factory.ts` 的 ExtensionContext 类型、`jsonl-run-store.ts` 的类型 | pi SDK 硬依赖 | **port 化 / 留壳**：数据根与发现根参数化（config-loader/skill-discovery 走 discovery/data 根端口）；jsonl-run-store 是 RunStore port 的 pi 实现留壳 |
-| `@taiji/session-delivery` | `notifier.ts` 的 `createDelivery`（运行时投递） | pi 宿主协作件（已发 npm 0.3.0，但语义是 taiji 桌面投递） | **port 化**：通知端口 |
+| `@zhushanwen/session-delivery` | `notifier.ts` 的 `createDelivery`（运行时投递） | pi 宿主协作件（已发 npm 0.3.0，但语义是 taiji 桌面投递） | **port 化**：通知端口 |
 | `@zhushanwen/pi-pending-notifications` | `session-pending.ts` 的 `countActiveFromEntries` | pi 宿主协作件（peer pi SDK，且传递依赖 logger） | **port 化**：并入通知端口 |
 | `@zhushanwen/pi-file-lock` | `worktree-registry.ts` 的 `withFileLock` | 通用件但传递依赖 logger | **去依赖**：worktree-registry 直接用 `proper-lockfile`（runtime 既有依赖） |
-| `@taiji/extension-protocol` | `types.ts` 类型 + `engine-discovery.ts` 常量 | **中立**（已发 npm 0.7.0，无 pi SDK） | **保留** |
+| `@zhushanwen/extension-protocol` | `types.ts` 类型 + `engine-discovery.ts` 常量 | **中立**（已发 npm 0.7.0，无 pi SDK） | **保留** |
 
 **已就绪的资产**（抽包不是重新设计）：①分层目录天然对齐切面（execution / orchestration / interface / injectors 四目录，前三即 core，后二即 pi 壳）；②orchestration 已按端口注入（AgentRunner / RunStore / WorkerHost + LifecycleDeps 的 log/eventBus/streamSink 可选回调——HostServices 的雏形）；③EnginePort/conformance/golden/三层路由全部就位；④双形态包先例（extension-protocol：`main: src/index.ts` + exports dist）；⑤runtime 已建立对 engine reader 的 workspace 复用链（tsup noExternal 已登记该包）。
 
@@ -201,7 +201,7 @@ interface NotifyDomainPorts {
   /** pending 计数：pi 会话 entries 中活跃 register/unregister 差集判定。 */
   countActiveFromEntries?(entries: unknown[]): number;
   /** 投递内核工厂：签名即 core 自持结构化类型（DeliveryPort / DeliveryConfig /
-   *  DeliveryHandle——从 @taiji/session-delivery 的类型面手工转写，闭包红线：
+   *  DeliveryHandle——从 @zhushanwen/session-delivery 的类型面手工转写，闭包红线：
    *  core 不得 import 该包）；结构超集/子集兼容由宿主注入点 typecheck 守护。 */
   createDelivery?(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle;
 }
@@ -263,7 +263,7 @@ interface NotifyDomainPorts {
 
 **D9：core 依赖卫生机器守卫 + dist 持续发布门（选定）**
 
-- **采用**：两道机器守卫（挂 pre-commit / CI invariants / 发布管线）：①**闭包守卫**——新增探针脚本校验 core 的 dependencies + peerDependencies + 源码 import 闭包**不含** `@earendil-works/*`、`@zhushanwen/pi-extension-logger`、`@zhushanwen/pi-pending-notifications`、`@taiji/session-delivery`、`@zhushanwen/pi-file-lock`（pi-file-lock 依据 D3/u0-lock 已从依赖面移除，禁项防回流），防未来回归（新代码把 pi SDK 带回闭包）；实现注记（r3）：optionalDependencies 同禁（npm 会安装，不扫 = 换段绕过），禁项匹配为双口径——裸名精确匹配或子路径前缀（`pkg/sub` 形态同拦）；实现注记（r4 残留收口）：检查项另含版本双源一致性断言（`src/index.ts` CORE_PACKAGE_VERSION ≡ package.json version，多声明/漂移均拦）与 `--self-test` 自测模式（子进程注入 D9-① 与检查点 5 双探针→转红→移除→复绿，V6-① 有牙证据固化为可复现命令）；②**dist 发布回归门**——发布管线（changeset 稳定 + prerelease 通道）内置「build dist → require CJS dist → golden 回放绿」才放行，即 V7 机制的产品化：workspace 消费者永远吃最新 TS 源，npm 消费者吃 tsup dist，一次性验收后若无常设门，tsup 配置漂移 / 依赖升级 / d.ts 缺陷会导致「src 侧全绿、dist 已坏」照常发布（workflows/*.cjs 资产 src=dist 同字节零分歧，分歧面只在 TS 编译产物）。**落地注记（一致性审查回写）**：smoke 门的 require/golden 段在调用方 node 环境执行（CI node 24），node 20 真机 runner 为待接入 TODO；`./engines/zcode/reader` 子入口 dist 依赖 node:sqlite（node≥22.5），node 20 消费者不可加载该子入口（主入口与其余子入口无此依赖）——P2 zcode 侧 2c 接入时需评估宿主 node 版本面或 reader 的 sqlite 惰性加载（注：该子入口已随引擎协议化 H3 删除，本句为成文时注记，见 D5 谱系注记）。smoke 的 require 段为 Node self-reference 形态（dev 与 publishConfig 两面 require 条件映射同构，与 npm 消费者经 exports 的加载路径等价），完整 npm install 形态由 pnpm pack 消费者探针一次性覆盖。
+- **采用**：两道机器守卫（挂 pre-commit / CI invariants / 发布管线）：①**闭包守卫**——新增探针脚本校验 core 的 dependencies + peerDependencies + 源码 import 闭包**不含** `@earendil-works/*`、`@zhushanwen/pi-extension-logger`、`@zhushanwen/pi-pending-notifications`、`@zhushanwen/session-delivery`、`@zhushanwen/pi-file-lock`（pi-file-lock 依据 D3/u0-lock 已从依赖面移除，禁项防回流），防未来回归（新代码把 pi SDK 带回闭包）；实现注记（r3）：optionalDependencies 同禁（npm 会安装，不扫 = 换段绕过），禁项匹配为双口径——裸名精确匹配或子路径前缀（`pkg/sub` 形态同拦）；实现注记（r4 残留收口）：检查项另含版本双源一致性断言（`src/index.ts` CORE_PACKAGE_VERSION ≡ package.json version，多声明/漂移均拦）与 `--self-test` 自测模式（子进程注入 D9-① 与检查点 5 双探针→转红→移除→复绿，V6-① 有牙证据固化为可复现命令）；②**dist 发布回归门**——发布管线（changeset 稳定 + prerelease 通道）内置「build dist → require CJS dist → golden 回放绿」才放行，即 V7 机制的产品化：workspace 消费者永远吃最新 TS 源，npm 消费者吃 tsup dist，一次性验收后若无常设门，tsup 配置漂移 / 依赖升级 / d.ts 缺陷会导致「src 侧全绿、dist 已坏」照常发布（workflows/*.cjs 资产 src=dist 同字节零分歧，分歧面只在 TS 编译产物）。**落地注记（一致性审查回写）**：smoke 门的 require/golden 段在调用方 node 环境执行（CI node 24），node 20 真机 runner 为待接入 TODO；`./engines/zcode/reader` 子入口 dist 依赖 node:sqlite（node≥22.5），node 20 消费者不可加载该子入口（主入口与其余子入口无此依赖）——P2 zcode 侧 2c 接入时需评估宿主 node 版本面或 reader 的 sqlite 惰性加载（注：该子入口已随引擎协议化 H3 删除，本句为成文时注记，见 D5 谱系注记）。smoke 的 require 段为 Node self-reference 形态（dev 与 publishConfig 两面 require 条件映射同构，与 npm 消费者经 exports 的加载路径等价），完整 npm install 形态由 pnpm pack 消费者探针一次性覆盖。
 - **被否**：靠 review 纪律——§2.3 已证明人工纪律守不住漂移。
 - **证据**：本仓探针文化（check-pi-semantics / check-extension-dependencies / check-pi-sync 同族）。
 - **效果**：D1 判据与 D4 双形态契约从文档约束升级为机器约束；目标 1 与目标 5 的长期保障。

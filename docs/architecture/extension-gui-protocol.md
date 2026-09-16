@@ -266,7 +266,7 @@ pi 的 `ctx.ui.setWidget(key, string[])` 在 RPC 模式下原样输出 `widgetLi
 #### helper 实现
 
 ```typescript
-// @taiji/extension-protocol
+// @zhushanwen/extension-protocol
 const GUI_WIDGET_MARKER = '\x00TAIJI_GUI_WIDGET:'  // NUL 开头，不会出现在正常文本中
 
 function guiSetWidget(
@@ -294,7 +294,7 @@ function guiSetWidget(
 协议包提供 `guiSetWidget()` helper，extension 开发者不需要知道底层编码：
 
 ```typescript
-import { guiSetWidget, guiComponent } from '@taiji/extension-protocol'
+import { guiSetWidget, guiComponent } from '@zhushanwen/extension-protocol'
 
 function refreshDisplay(ctx: ExtensionContext, todos: Todo[]) {
   if (ctx.mode === 'rpc') {
@@ -357,14 +357,14 @@ sendMessage({
 
 ---
 
-## 5. 协议包 API（@taiji/extension-protocol）
+## 5. 协议包 API（@zhushanwen/extension-protocol）
 
 独立 npm 包，只含类型定义和辅助函数，零运行时依赖。extension 以 `dependencies` 引入。
 
 ### 5.1 导出清单
 
 ```typescript
-// @taiji/extension-protocol
+// @zhushanwen/extension-protocol
 
 // ── core 类型 ──
 export type { GuiComponent, GuiComponentType, GuiComponentProps, GuiRenderResult }
@@ -550,7 +550,7 @@ function getAskUserComment(answers: AskUserAnswers, question: AskUserQuestion): 
 ### 6.6 extension 怎么用
 
 ```typescript
-import { askUserInteract, type AskUserQuestion, type GuiContext } from '@taiji/extension-protocol'
+import { askUserInteract, type AskUserQuestion, type GuiContext } from '@zhushanwen/extension-protocol'
 
 execute(toolCallId, params, signal, onUpdate, ctx) {
   const questions: AskUserQuestion[] = [
@@ -739,7 +739,7 @@ const msg: Message = {
 `ToolCall.details` 已是 `Record<string, unknown>`，不需改。但前端读 `__gui__` 需类型守卫（审查 S7/C3）：
 
 ```typescript
-// @taiji/extension-protocol 提供
+// @zhushanwen/extension-protocol 提供
 export function extractGui(details: Record<string, unknown> | undefined): GuiRenderResult | undefined {
   const g = details?.__gui__
   if (g && typeof g === 'object' && 'v' in g && 'component' in g) {
@@ -762,7 +762,7 @@ export function extractGui(details: Record<string, unknown> | undefined): GuiRen
 ```typescript
 // renderer/src/components/panel/message-stream/GuiComponentRenderer.vue
 <script setup lang="ts">
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import AnsiText from './gui/AnsiText.vue'
 
 // 已实现的内置组件映射。P2 阶段逐步补充 card / stats-line / progress-bar 等。
@@ -822,7 +822,7 @@ Block.vue 当前结构：折叠态 header（1 行）+ 展开态详情（`<templa
 
 ```typescript
 // Block.vue script 新增 computed
-import { extractGui } from '@taiji/extension-protocol'
+import { extractGui } from '@zhushanwen/extension-protocol'
 
 const guiComponent = computed(() => extractGui(props.tool?.details)?.component)
 
@@ -874,7 +874,7 @@ export function useExtensionStatus(sessionId: Ref<string | null>) {
 
 以 pi-todo 为例：
 
-1. **安装协议包**：`npm install @taiji/extension-protocol`
+1. **安装协议包**：`npm install @zhushanwen/extension-protocol`
 2. **execute 分支**：在 execute 返回处加 `if (ctx.mode === 'rpc')` 分支，构造 `details.__gui__`
 3. **widget 分支**：refreshDisplay 加 `if (ctx.mode === 'rpc')` 分支，调 `guiSetWidget()`
 4. **renderResult 保持**：TUI 的 renderResult 不动，RPC 模式下不会被调用
@@ -882,7 +882,7 @@ export function useExtensionStatus(sessionId: Ref<string | null>) {
 ### 10.2 最小改动模板
 
 ```typescript
-import { guiResult, guiSetWidget, isGuiCapable, guiComponent, PROTOCOL_VERSION } from '@taiji/extension-protocol'
+import { guiResult, guiSetWidget, isGuiCapable, guiComponent, PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 execute(toolCallId, params, signal, onUpdate, ctx) {
   const data = doWork(params)

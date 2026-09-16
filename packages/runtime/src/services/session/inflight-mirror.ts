@@ -33,7 +33,7 @@
  * - 删除 = dropSession（session 删除/回收摘除时调用）。
  */
 
-import type { SubagentInFlightReport } from '@taiji/extension-protocol'
+import type { SubagentInFlightReport } from '@zhushanwen/extension-protocol'
 
 /** errs 判别形态（D5 ④）：已注入且从未收到上报 → 'absent-report'；其余 → null。 */
 export type InFlightErrsShape = 'absent-report' | null

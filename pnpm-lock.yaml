@@ -203,7 +203,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
@@ -269,7 +269,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
@@ -303,7 +303,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
@@ -381,7 +381,7 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.84.4
         version: 0.84.4
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-pending-notifications':
@@ -409,7 +409,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-extension-logger':
@@ -468,7 +468,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
@@ -552,7 +552,7 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-extension-logger':
@@ -664,12 +664,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.84.4
         version: 0.84.4
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
-      '@taiji/session-delivery':
-        specifier: workspace:*
-        version: link:../../../packages/session-delivery
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
@@ -685,6 +682,9 @@ importers:
       '@zhushanwen/pi-subagent-cli':
         specifier: workspace:*
         version: link:../../../packages/pi-subagent-cli
+      '@zhushanwen/session-delivery':
+        specifier: workspace:*
+        version: link:../../../packages/session-delivery
       '@zhushanwen/subagent-core':
         specifier: workspace:*
         version: link:../../../packages/subagent-core
@@ -716,7 +716,7 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.84.4
         version: 0.84.4
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-extension-logger':
@@ -735,12 +735,12 @@ importers:
 
   packages/core:
     dependencies:
-      '@taiji/extension-protocol':
-        specifier: workspace:*
-        version: link:../extension-protocol
       '@taiji/shared':
         specifier: workspace:*
         version: link:../shared
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       pinia:
         specifier: ^3
         version: 3.0.4(typescript@5.9.3)(vue@3.5.39(typescript@5.9.3))
@@ -897,7 +897,7 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
 
@@ -918,9 +918,6 @@ importers:
       '@taiji/dom-core':
         specifier: workspace:*
         version: link:../dom-core
-      '@taiji/extension-protocol':
-        specifier: workspace:*
-        version: link:../extension-protocol
       '@taiji/shared':
         specifier: workspace:*
         version: link:../shared
@@ -945,6 +942,9 @@ importers:
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       ansi_up:
         specifier: ^6.0.6
         version: 6.0.6
@@ -1036,21 +1036,21 @@ importers:
       '@taiji/core':
         specifier: workspace:*
         version: link:../core
-      '@taiji/extension-protocol':
-        specifier: workspace:*
-        version: link:../extension-protocol
-      '@taiji/session-delivery':
-        specifier: workspace:*
-        version: link:../session-delivery
       '@taiji/shared':
         specifier: workspace:*
         version: link:../shared
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       '@zhushanwen/pi-file-lock':
         specifier: workspace:*
         version: link:../../extensions/shared/file-lock
       '@zhushanwen/pi-rpc':
         specifier: workspace:*
         version: link:../pi-rpc
+      '@zhushanwen/session-delivery':
+        specifier: workspace:*
+        version: link:../session-delivery
       '@zhushanwen/subagent-core':
         specifier: workspace:*
         version: link:../subagent-core
@@ -1139,7 +1139,7 @@ importers:
 
   packages/subagent-core:
     dependencies:
-      '@taiji/extension-protocol':
+      '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
       '@zhushanwen/subagent-engine-sdk':
@@ -1210,15 +1210,15 @@ importers:
       '@taiji/dom-core':
         specifier: workspace:*
         version: link:../dom-core
-      '@taiji/extension-protocol':
-        specifier: workspace:*
-        version: link:../extension-protocol
       '@taiji/shared':
         specifier: workspace:*
         version: link:../shared
       '@vueuse/core':
         specifier: ^13
         version: 13.9.0(vue@3.5.39(typescript@5.9.3))
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       ansi_up:
         specifier: ^6.0.6
         version: 6.0.6

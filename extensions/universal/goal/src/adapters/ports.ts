@@ -13,8 +13,8 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { setWidgetDual } from "@taiji/extension-protocol";
-import type { GuiContext } from "@taiji/extension-protocol";
+import { setWidgetDual } from "@zhushanwen/extension-protocol";
+import type { GuiContext } from "@zhushanwen/extension-protocol";
 
 import { ENTRY_TYPE, HISTORY_ENTRY_TYPE } from "../persistence";
 import type { MessagingPort, PersistencePort, SessionPort, UiPort } from "../ports";

@@ -8,7 +8,7 @@
  *  - readTailSummary：exit 边沿的 tail 摘要（存条目 / M3 通知用）
  */
 
-import { readOutputTail as readOutputTailPrimitive } from "@taiji/extension-protocol/background-task";
+import { readOutputTail as readOutputTailPrimitive } from "@zhushanwen/extension-protocol/background-task";
 
 /** pi 内置 bash 同款截断上限（last 2000 lines / 50KB = 51200 bytes，先到为准）。 */
 export const TAIL_MAX_LINES = 2000;

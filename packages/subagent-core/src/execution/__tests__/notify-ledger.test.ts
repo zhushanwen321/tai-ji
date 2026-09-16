@@ -20,7 +20,7 @@
 //     边沿投递 → 回执销账全链路）
 //
 // u-5c 迁移改写（core 依赖闭包禁 pi 系包，验收「零跨包 specifier」）：
-//   - 投递内核由真实 @taiji/session-delivery createDelivery 改为下方内联
+//   - 投递内核由真实 @zhushanwen/session-delivery createDelivery 改为下方内联
 //     内核等价桩（notifier 实际消费的内核行为切片：payload fail-fast / dedupe /
 //     busy gate / 空闲立即投 / 同步 send 失败 warn + 退避重试 / 批量 join 形态），
 //     内核自身全量语义（合批窗口 / checked / watchdog 等）由 session-delivery

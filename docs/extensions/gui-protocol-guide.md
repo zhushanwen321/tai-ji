@@ -19,9 +19,9 @@ taiji 以 `--mode rpc` 运行 pi，pi 的 5 个渲染入口（`renderResult` / `
 ### 2.1 安装协议包
 
 ```bash
-npm install @taiji/extension-protocol
+npm install @zhushanwen/extension-protocol
 # 或
-pnpm add @taiji/extension-protocol
+pnpm add @zhushanwen/extension-protocol
 ```
 
 协议包是纯 TypeScript 类型 + helper 函数，零运行时依赖。
@@ -57,7 +57,7 @@ import {
   guiResult,
   guiComponent,
   type GuiContext,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 
 export const myTool: ToolDefinition = {
   name: 'my_tool',
@@ -124,7 +124,7 @@ export const myTool: ToolDefinition = {
 Widget 是 editor 上下方持续存在的面板（如任务列表）。RPC 模式下 `ctx.ui.setWidget` 的 factory 参数被丢弃，`guiSetWidget()` helper 把 GuiComponent 编码进 `string[]`（NUL 标记 JSON），runtime 解码为结构化 WS 帧。
 
 ```typescript
-import { guiSetWidget, guiComponent, type GuiContext } from '@taiji/extension-protocol'
+import { guiSetWidget, guiComponent, type GuiContext } from '@zhushanwen/extension-protocol'
 
 // 在 tool execute 或 event handler 中：
 async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -174,7 +174,7 @@ ctx.ui.setStatus('my-ext:status', '\x1b[32m● Running\x1b[0m')
 `ctx.ui.custom()` 在 RPC 模式下返回 undefined（崩溃）。`askUserInteract()` helper 复用 select 双向通道 + marker 检测，前端在 Panel.vue inline 渲染富交互对话框（AskUserOverlay），覆盖 composer 位置。
 
 ```typescript
-import { askUserInteract, getAskUserAnswer, type AskUserQuestion, type GuiContext } from '@taiji/extension-protocol'
+import { askUserInteract, getAskUserAnswer, type AskUserQuestion, type GuiContext } from '@zhushanwen/extension-protocol'
 
 async execute(toolCallId, params, signal, onUpdate, ctx) {
   const questions: AskUserQuestion[] = [
@@ -228,7 +228,7 @@ async execute(toolCallId, params, signal, onUpdate, ctx) {
 extension 通过 `ctx.sendMessage()` 发送自定义消息时，在 `details.__gui__` 附带 GuiComponent，前端会渲染为自定义消息卡片。
 
 ```typescript
-import { isGuiCapable, guiResult, guiComponent, type GuiContext } from '@taiji/extension-protocol'
+import { isGuiCapable, guiResult, guiComponent, type GuiContext } from '@zhushanwen/extension-protocol'
 
 // 在 event handler 或 tool execute 中：
 async onMessage(msg, ctx) {
@@ -340,7 +340,7 @@ import {
   guiComponent,
   guiSetWidget,
   type GuiContext,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 
 // 任务状态 → 通用原语的 icon/status 映射
 function toTreeItems(tasks: Task[]) {
@@ -472,7 +472,7 @@ if (isGuiCapable(ctx)) {
 
 改造 extension 前对照确认：
 
-- [ ] 安装 `@taiji/extension-protocol`
+- [ ] 安装 `@zhushanwen/extension-protocol`
 - [ ] `execute()` 内用 `isGuiCapable(ctx)` 做 RPC 分支判断
 - [ ] RPC 分支构造 `guiComponent(type, props)` + `guiResult()` 放进 `details.__gui__`
 - [ ] TUI 分支保留原有 `renderResult` / `ctx.ui.setWidget` / `ctx.ui.custom` 逻辑

@@ -14,7 +14,7 @@
  * ── 协议事实（读代码确认，非猜测）──
  * - event-adapter.ts:378-399：select + ASK_USER_MARKER → 透传 payload
  *   { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
- * - AskUserQuestion（@taiji/extension-protocol）：header/question/context/options/multiSelect/
+ * - AskUserQuestion（@zhushanwen/extension-protocol）：header/question/context/options/multiSelect/
  *   allowOther —— 无 allowComment（commit 74a0b1001 删除字段 + UI + __comment key）。
  *   faux 轨 dev 装配下 mandatory 扩展经源码目录加载（extensions/universal/ask-user =
  *   删 comment 后版本），不再 symlink npm 目录绕开 registry 旧版。

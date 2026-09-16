@@ -3,7 +3,7 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 // 插件系统类型消费薄壳（D28 方向反转，2026-09-05）：
 // 主域 single source of truth = packages/plugin-sdk/src/types.ts（对外发布契约）；
 // Bridge* 回包形状（BridgeSyncPayload / BridgeToolExecuteResponse /
-// BridgeInterceptResponse）single source of truth = @taiji/extension-protocol
+// BridgeInterceptResponse）single source of truth = @zhushanwen/extension-protocol
 // （D4 单源化，runtime 与 plugin-sdk 均经协议包 re-export 消费）。本文件原内联的
 // Worker/AgentAPI/Bridge/Tool 等域类型已上收，此处仅 re-export 保持既有
 // `from './plugin-types.js'` 导入面不变；仅保留一个 runtime 专属内部类型
@@ -51,14 +51,14 @@ export type {
 } from 'taiji-plugin-sdk'
 export { PermissionConstants } from 'taiji-plugin-sdk'
 
-// ── Bridge* 回包形状：SSOT 在 @taiji/extension-protocol ────────
-// D4 单源化：唯一定义源 = @taiji/extension-protocol 的 plugin-bridge 协议模块（marker.ts + types.ts），
+// ── Bridge* 回包形状：SSOT 在 @zhushanwen/extension-protocol ────────
+// D4 单源化：唯一定义源 = @zhushanwen/extension-protocol 的 plugin-bridge 协议模块（marker.ts + types.ts），
 // plugin-sdk 亦经协议包 re-export 消费（plugin-sdk 侧保持零本地定义）。
 export type {
   BridgeSyncPayload,
   BridgeToolExecuteResponse,
   BridgeInterceptResponse,
-} from '@taiji/extension-protocol'
+} from '@zhushanwen/extension-protocol'
 
 // ── Descriptor / Manifest 域 ───────────────────────────────────────
 // 本地子文件定义（sync 时代的历史分层，未上收 SDK 通路）。

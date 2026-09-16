@@ -1,4 +1,4 @@
-# @taiji/session-delivery
+# @zhushanwen/session-delivery
 
 Session 消息投递内核：零 pi 依赖的策略层，负责排队、合批、去重与 gated flush。
 
@@ -11,7 +11,7 @@ Session 消息投递内核：零 pi 依赖的策略层，负责排队、合批�
 ## 接口
 
 ```ts
-import { createDelivery, type DeliveryHandle, type DeliveryPort, type DeliveryConfig } from '@taiji/session-delivery'
+import { createDelivery, type DeliveryHandle, type DeliveryPort, type DeliveryConfig } from '@zhushanwen/session-delivery'
 
 const handle = createDelivery(port, config)
 

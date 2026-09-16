@@ -27,7 +27,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick, reactive } from 'vue'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import WidgetArea from '../WidgetArea.vue'
 import {
   VIEW_HOST_SOURCE_KEY,

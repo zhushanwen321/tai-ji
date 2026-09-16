@@ -19,7 +19,7 @@
     "dev:smoke": "node scripts/dev-smoke.mjs",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "release:npm": "pnpm --filter @taiji/extension-protocol build && changeset publish",
+    "release:npm": "pnpm --filter @zhushanwen/extension-protocol build && changeset publish",
     "extensions:typecheck": "cd extensions && npx tsc --noEmit",
     "extensions:lint": "node scripts/check-stale-ctx-audit-coverage.mjs && npx eslint extensions/",
     "extensions:test": "pnpm -r --filter '@zhushanwen/pi-*' test",

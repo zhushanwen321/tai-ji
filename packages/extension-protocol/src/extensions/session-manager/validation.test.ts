@@ -17,7 +17,7 @@ const ROOT_DIR = resolve(PKG_DIR, '../..')
 describe('U1-A1 marker 常量 + 请求/结果 schema 类型 + 审计 entry schema 单一 SSOT', () => {
   it('U1-A1 tsc --noEmit 编译通过', () => {
     expect(() => {
-      execSync('pnpm --filter @taiji/extension-protocol exec tsc --noEmit', {
+      execSync('pnpm --filter @zhushanwen/extension-protocol exec tsc --noEmit', {
         cwd: ROOT_DIR,
         stdio: 'pipe',
       })
@@ -36,7 +36,7 @@ describe('U1-A1 marker 常量 + 请求/结果 schema 类型 + 审计 entry schem
 describe('U1-A3 extension-protocol lint 全绿', () => {
   it('U1-A3 eslint src/ 无错误', () => {
     expect(() => {
-      execSync('pnpm --filter @taiji/extension-protocol exec eslint src/', {
+      execSync('pnpm --filter @zhushanwen/extension-protocol exec eslint src/', {
         cwd: ROOT_DIR,
         stdio: 'pipe',
       })

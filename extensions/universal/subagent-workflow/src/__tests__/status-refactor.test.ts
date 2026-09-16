@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createDelivery } from "@taiji/session-delivery";
+import { createDelivery } from "@zhushanwen/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
 import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { createNotifier } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";

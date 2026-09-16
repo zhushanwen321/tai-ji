@@ -41,12 +41,12 @@ const sessionDeliveryMock = vi.hoisted(() => ({
 vi.mock("@earendil-works/pi-coding-agent", () => piCodingAgentMock);
 vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/pi-pending-notifications", () => pendingNotificationsMock);
-vi.mock("@taiji/session-delivery", () => sessionDeliveryMock);
+vi.mock("@zhushanwen/session-delivery", () => sessionDeliveryMock);
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@taiji/session-delivery";
+import { createDelivery } from "@zhushanwen/session-delivery";
 
 import { createPiHostServices, createPiNotifyDomainPorts } from "../pi-host.ts";
 

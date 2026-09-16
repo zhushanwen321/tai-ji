@@ -281,7 +281,7 @@ export class PluginService implements IPluginService {
     sessionId: string
     viewId: string
     pluginId: string
-    guiTree: import('@taiji/extension-protocol').GuiComponent[]
+    guiTree: import('@zhushanwen/extension-protocol').GuiComponent[]
     updatedAt: number
   }): void {
     if (this.messageBus) {

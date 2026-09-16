@@ -28,7 +28,7 @@
  * 未来新增写路径（如 maintenance 类）必须保持该顺序，违反即 intent 可丢失。
  */
 
-import { trimTerminalEntries } from "@taiji/extension-protocol/background-task";
+import { trimTerminalEntries } from "@zhushanwen/extension-protocol/background-task";
 
 import {
 	isActiveState,

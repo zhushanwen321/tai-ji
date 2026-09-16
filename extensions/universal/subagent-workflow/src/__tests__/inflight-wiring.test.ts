@@ -54,7 +54,7 @@ import {
   INFLIGHT_REPORT_ACK,
   SUBAGENT_INFLIGHT_MARKER,
   isSubagentInFlightReport,
-} from "@taiji/extension-protocol";
+} from "@zhushanwen/extension-protocol";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 
 process.setMaxListeners(50);

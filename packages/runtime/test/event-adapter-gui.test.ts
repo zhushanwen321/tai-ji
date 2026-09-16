@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { translate } from '../src/infra/pi/event-adapter.js'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER } from '@taiji/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER } from '@zhushanwen/extension-protocol'
 import type { PiTranslatedEvent } from '../src/services/session/types.js'
 import type { PiEvent } from '../src/infra/pi/pi-protocol.js'
 

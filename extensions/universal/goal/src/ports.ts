@@ -6,7 +6,7 @@
  * adapter 层提供实现（包装 ctx / pi）。
  */
 
-import type { DualWidgetContent } from "@taiji/extension-protocol";
+import type { DualWidgetContent } from "@zhushanwen/extension-protocol";
 
 import type { GoalRuntimeState } from "./engine/types";
 

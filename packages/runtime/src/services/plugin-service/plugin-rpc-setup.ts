@@ -24,7 +24,7 @@ import { registerWorkspaceRpcHandlers } from './api/workspace-api.js'
 import { registerCommandRpcHandlers } from './api/commands-api.js'
 import type { CommandRegistration } from './api/commands-api.js'
 import { registerViewRpcHandlers } from './api/views-api.js'
-import type { GuiComponent } from '@taiji/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import type { ToolEntry } from './plugin-types.js'
 
 const MAX_FIND_FILES_RESULTS = 1000

@@ -13,7 +13,7 @@
  * 可查、对账可补），不加同步握手。
  */
 
-import { isPidAlive } from "@taiji/extension-protocol/background-task";
+import { isPidAlive } from "@zhushanwen/extension-protocol/background-task";
 
 import { readTailSummary } from "./output-tail.ts";
 import { readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";

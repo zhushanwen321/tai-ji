@@ -26,7 +26,7 @@
  *  - @earendil-works/*（pi-coding-agent / pi-ai / pi-tui / pi-agent-core 等）
  *  - @mariozechner/*（旧名别名）
  *  - typebox / @sinclair/typebox（pi binary 内提供）
- * 其余（@taiji/extension-protocol、@zhushanwen/pi-* workspace value dep、
+ * 其余（@zhushanwen/extension-protocol、@zhushanwen/pi-* workspace value dep、
  * web-tree-sitter、ajv、croner 等）全部 inline。
  *
  * Usage: node scripts/bundle-extensions.mjs

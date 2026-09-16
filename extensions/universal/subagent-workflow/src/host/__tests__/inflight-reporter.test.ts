@@ -31,7 +31,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/subagent-core", () => ({ getInFlightSnapshot: mockSnapshot }));
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { INFLIGHT_REPORT_ACK, SUBAGENT_INFLIGHT_MARKER } from "@taiji/extension-protocol";
+import { INFLIGHT_REPORT_ACK, SUBAGENT_INFLIGHT_MARKER } from "@zhushanwen/extension-protocol";
 
 import { createInFlightReporter } from "../inflight-reporter.ts";
 
