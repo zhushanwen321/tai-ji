@@ -1,6 +1,6 @@
 # 对话流系统通知渲染升级 实施计划
 
-基线: <待填> | 来源设计: `.tmp/tech-design/system-notice-rendering-upgrade.md`（R9 终版） | 日期: 2026-09-16
+基线: 9ab0a122b（本计划 commit） | 来源设计: `.tmp/tech-design/system-notice-rendering-upgrade.md`（R9 终版） | 日期: 2026-09-16
 
 ## 0 章节映射
 
@@ -162,4 +162,4 @@ graph TD
 - U5 的两常量实测值依赖 D3 规格落地后的真实渲染高度（dev 断言实测校准）。
 
 **变更历史**：
-- 2026-09-16 初版（基线 commit：<待填>）：从设计文档 R9 终版编译；e2e 对账完成（2 always + 3 on-diff 待命中）。
+- 2026-09-16 初版（基线 commit：9ab0a122b）：从设计文档 R9 终版编译；e2e 对账完成（2 always + 3 on-diff 待命中）。
