@@ -516,7 +516,10 @@ export class ConfigService implements IConfigService {
   }
 
   async applyImportProviders(importId: string, selectedIds: string[]): Promise<{ result: ProviderImportResult } | { error: { code: string; message: string } }> {
-    return applyImportImpl(importId, selectedIds, this.credentialWriter)
+    // 第 4 参：providers.json 写通道——导入即默认同意的 coding-plan 额度显示自动开启
+    // （api-key 类 preset + 明文 key 才写 quota.enabled；条件与写入语义见
+    // provider-importer.matchAutoEnablePreset）。未注入（部分测试）时 importer 跳过写入。
+    return applyImportImpl(importId, selectedIds, this.credentialWriter, this.providerExtrasStore)
   }
 
   // ── System prompt config（FR-6/FR-7，ADR-0044，委托 system-prompt-config-helper）──

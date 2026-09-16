@@ -44,6 +44,7 @@ import { isCatalogProvider } from '../../provider-catalog.js'
 import { parseProviders } from '../provider-parser.js'
 import { getProviderNames, upsertProvider } from '../../../infra/pi/pi-provider-store.js'
 import { _resetCacheForTest } from '../preview-cache.js'
+import type { ProviderExtras } from '../../provider-extras-store.js'
 import type { ParsedProvider, ParseResult } from '../provider-parser.js'
 
 // ── fixture helpers ──────────────────────────────────────────
@@ -689,5 +690,209 @@ describe('provider-importer', () => {
       reason: 'raw string failure',
     })
     expect(applyOut.result.failedCount).toBe(1)
+  })
+})
+
+// ══ coding-plan 额度显示自动开启（导入即默认同意）════════════════════
+// 覆盖 matchAutoEnablePreset 四条件（plaintext / preset 命中 / auth 含 api-key /
+// 非 requiresWorkspace）× 组1（custom 定义）组2（孤儿凭据模板）× skipped 不动 ×
+// 未注入跳过 × merge 语义 × best-effort（写失败不阻断导入）。
+
+/** 构造 extras 写通道 fake：modify 记录 (providerId, fn)，fn 默认作用于给定 current 并返回产出。 */
+function fakeExtrasStore(current: ProviderExtras | undefined = undefined) {
+  const modify = vi.fn(async (
+    _providerId: string,
+    fn: (c: ProviderExtras | undefined) => ProviderExtras,
+  ) => fn(current))
+  return { modify }
+}
+
+describe('provider-importer · coding-plan 额度显示自动开启（导入即默认同意）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    _resetCacheForTest()
+    vi.mocked(parseProviders).mockReturnValue(null)
+    vi.mocked(getProviderNames).mockReturnValue([])
+    vi.mocked(upsertProvider).mockImplementation(() => ({}))
+    vi.mocked(isCatalogProvider).mockReturnValue(false)
+  })
+
+  it('组1 custom：baseUrl 命中 kimi preset（api-key 类）+ 明文 key → 写 quota { enabled:true, fetcher }', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-kimi-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0]).toMatchObject({ id: 'kimi-main', status: 'imported', quotaAutoEnabled: true })
+    expect(store.modify).toHaveBeenCalledTimes(1)
+    expect(store.modify.mock.calls[0][0]).toBe('kimi-main')
+    // fetcher 必须显式落盘：catalog provider 无 models.json 条目时 fetch 侧
+    // baseUrl/name 自动匹配读不到定义（与手动配置路径行为一致）
+    const written = store.modify.mock.calls[0][1](undefined)
+    expect(written.quota).toEqual({ enabled: true, fetcher: 'kimi-coding' })
+  })
+
+  it('组1 custom：仅 name 命中（baseUrl 非标准网关）也自动开启', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'glm-main', name: 'my glm service', baseUrl: 'https://gateway.example.com', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    await applyImport(prev.importId, ['glm-main'], undefined, store)
+
+    expect(store.modify).toHaveBeenCalledTimes(1)
+    const written = store.modify.mock.calls[0][1](undefined)
+    expect(written.quota!.fetcher).toBe('zhipu')
+  })
+
+  it('组1 custom：cookie 类 preset（mimo）不自动开启——导入不提取 cookie，开了也是 no-credential', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'mimo-main', baseUrl: 'https://api.xiaomimimo.com/v1', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['mimo-main'], undefined, store)
+
+    expect(store.modify).not.toHaveBeenCalled()
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+  })
+
+  it('组1 custom：preset 未命中（无 baseUrl/name 关联）不写 extras', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([fp()])) // baseUrl example.com，name p1
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    await applyImport(prev.importId, ['p1'], undefined, store)
+
+    expect(store.modify).not.toHaveBeenCalled()
+  })
+
+  it.each(['env', 'command'] as const)('组1 custom：%s 占位凭证不自动开启（quota 凭证链不解占位，开了只会查询失败）', async (credentialType) => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({
+        _sourceName: 'kimi-ph',
+        baseUrl: 'https://api.kimi.com/coding',
+        _credentialType: credentialType,
+        _apiKeyExtracted: true,
+        apiKey: credentialType === 'env' ? '$KIMI_KEY' : '!op read key',
+      }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-ph'], undefined, store)
+
+    // provider 本身照常导入（现状不变），只是不写 quota extras
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(store.modify).not.toHaveBeenCalled()
+  })
+
+  it('skipped（duplicate）不自动开启——不覆盖用户对既存 provider 的配置', async () => {
+    vi.mocked(getProviderNames).mockReturnValue(['kimi-main'])
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0]).toMatchObject({ status: 'skipped' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(store.modify).not.toHaveBeenCalled()
+  })
+
+  it('组2 孤儿凭据：kimi-coding / zai-coding-cn 模板命中 api-key 类 preset → 自动开启；xiaomi（cookie 类）不开启', async () => {
+    vi.mocked(parseProviders).mockReturnValue({
+      providers: [],
+      orphanCredentials: [
+        { providerId: 'kimi-coding', credentialType: 'plaintext', apiKey: 'sk-o1', warnings: [] },
+        { providerId: 'zai-coding-cn', credentialType: 'plaintext', apiKey: 'sk-o2', warnings: [] },
+        { providerId: 'xiaomi', credentialType: 'plaintext', apiKey: 'sk-o3', warnings: [] },
+      ],
+    })
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-coding', 'zai-coding-cn', 'xiaomi'], undefined, store)
+
+    const calls = store.modify.mock.calls
+    expect(calls).toHaveLength(2)
+    const byId = new Map(calls.map(([pid, fn]) => [pid, (fn as (c: unknown) => unknown)(undefined)]))
+    // kimi-coding：模板 baseUrl 'api.kimi.com' 命中 kimi preset
+    expect(byId.get('kimi-coding')).toEqual({ quota: { enabled: true, fetcher: 'kimi-coding' } })
+    // zai-coding-cn：模板 baseUrl 'open.bigmodel.cn' 命中 zhipu preset
+    expect(byId.get('zai-coding-cn')).toEqual({ quota: { enabled: true, fetcher: 'zhipu' } })
+    expect(byId.has('xiaomi')).toBe(false)
+    // 结果条目标记：写成功的两条置 quotaAutoEnabled（前端 toast 依据），xiaomi 不置位
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    const flagById = new Map(applyOut.result.imported.map((i) => [i.id, i.quotaAutoEnabled]))
+    expect(flagById.get('kimi-coding')).toBe(true)
+    expect(flagById.get('zai-coding-cn')).toBe(true)
+    expect(flagById.get('xiaomi')).toBeUndefined()
+  })
+
+  it('merge 语义：保留既有 extras 字段域（authMethod）与既有 quota 字段，只写 enabled + fetcher', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    expect(store.modify).toHaveBeenCalledTimes(1)
+    const written = store.modify.mock.calls[0][1]({ authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } })
+    expect(written.authMethod).toBe('api_key')
+    expect(written.quota).toEqual({ enabled: true, fetcher: 'kimi-coding', credentialSource: 'provider' })
+  })
+
+  it('未注入 store（第 4 参缺省）→ 跳过写入，导入主语义不受影响', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'])
+
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+  })
+
+  it('best-effort：extras 写失败不阻断导入（provider 已落盘，额度可手动配置）', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+    const store = { modify: vi.fn(async () => { throw new Error('disk full') }) }
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
+    // 写失败不置位：前端不得对未生效的自动开启 toast 实报
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(applyOut.result.failedCount).toBe(0)
   })
 })

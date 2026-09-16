@@ -202,6 +202,9 @@ export default {
       commandInjection: '{count} credential(s) use !command (pi runs shell command at runtime), review before use',
       envBundleSkipped: '{count} env bundle credential(s) skipped (Phase 2)',
       orphanImported: '{count} credential(s) imported with built-in template',
+      // coding-plan quota display auto-enabled on import (default consent; only when runtime persisted extras)
+      quotaAutoEnabledOne: 'Auto-enabled Coding Plan quota display for "{name}" — turn it off in Settings',
+      quotaAutoEnabledMany: 'Auto-enabled Coding Plan quota display for {count} providers — turn it off in Settings',
     },
     // ── Built-in provider templates (wave 3 builtin-provider-ui) ──
     builtinTemplate: {
