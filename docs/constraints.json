@@ -394,9 +394,11 @@
     },
     {
       "id": "C-data-08",
-      "summary": "队列按字段分权威：深度 = pi 计数快照；内容 = renderer 提交日志；taiji 扩展禁 sendUserMessage 注入队列；消费按计数 FIFO 禁文本匹配",
+      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目投影：五态 + lane，renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
       "scope": [
         "packages/renderer/src/**",
+        "packages/core/src/**",
+        "packages/runtime/src/**",
         "extensions/**"
       ],
       "authority": [
@@ -2814,6 +2816,35 @@
         {
           "type": "review",
           "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-data-25",
+      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 投影（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描",
+      "scope": [
+        "packages/session-delivery/src/**",
+        "packages/runtime/src/**",
+        "packages/core/src/**",
+        "packages/renderer/src/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0067",
+        "architecture/pi-boundary-reliability.md"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        },
+        {
+          "type": "review",
+          "agent": "review-data-governance"
         }
       ]
     }

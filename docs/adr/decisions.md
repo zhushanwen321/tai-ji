@@ -19,6 +19,18 @@ pi 以独立可执行文件随应用打包（`Resources/pi/pi-<plat>-<arch>`，d
 ### ADR-0064 pi 语义吸收层四支柱
 taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表——模型/思考档位能力只在 `packages/runtime/src/services/model-capability.ts` 一点进入（离线 pi-ai 同源计算 + 在线 get_available_models 对账），renderer/扩展禁止本地推断；② 生效回执——改状态 RPC reply 必回 pi 实际生效值，禁乐观写；③ 确认式送达——结果语义通知走 session-delivery 持久账本 + 幂等键（at-least-once），禁依赖 pi 内存队列；④ 漂移守卫——pi 语义依赖机器登记 + 探针测试 + 版本门禁。另有轮询精简准则：对方会 push 的信息禁周期 pull 兜底。权威源 [docs/architecture/pi-boundary-reliability.md](../architecture/pi-boundary-reliability.md)，登记 C-pi-12/13、C-ext-19、C-proc-08。
 
+### ADR-0067 投递所有权内核：单一所有者 + 两阶段回执
+**背景**：pi 的契约假定「消息进入 transcript 之前所有权属于前端」（steer/followUp 队列只是交接槽位，前端须自己盯它是否被取走、必要时用 `clear_queue` 收回），而 taiji 的消息所有权长期碎在四处——renderer 乐观气泡、renderer defer 队列、renderer pendingBuffer 计数、runtime 投递内核（仅服务 agent 间消息）——四处都不完整：steer 车道 fire-and-forget（入槽后无人跟踪），且车道判定源有三套（renderer 发送路由表 / runtime occupancy / extension 自身视角）互不同步，压缩、中止、进程回收三类窗口轮流暴露同一结构性缺口（消息丢失/滞留/乱序）。
+
+**决策**：全部发送方（composer 用户消息 / session_manager send / completion-backflow / plugin / landing 首发）经 runtime **投递所有权内核**提交——纯逻辑状态机在 `packages/session-delivery`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`：
+1. **lane 判定单一源**：direct（pi 空闲直投）/ steer（并入当前 run 的 turn 边界）/ queued（内核 FIFO 持有）由内核按 runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态判定；renderer 侧发送路由表降级为发送位按钮形态的 UI 预测，extension 不做车道判定。
+2. **两阶段回执**：受理（prompt 受理 / 文本进入 pi 槽位）与送达（`message_end(user)` 命中消息标记 = 已进 transcript）显式分离，只有拿到送达回执的条目转终态，停留受理的由对账器接管。`sendChecked` 的同步 settle 时点维持**受理口径**（agent 间 send 的 `{queued:true}` 契约锚定受理时点，不因送达而阻塞工具调用），记账回调 `onSettled` 为送达口径。
+3. **对账器**：五触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog）在「空闲 + pi 槽位非空」时 `clear_queue` 全收，按消息标记三分处置——reclaim（内核在途条目回队首重投）/ rebuild（带标记但内核无记录，先按标记对 transcript 全量扫描判已送达再决定重建或仅记账）/ adopt（无标记外来文本收养入队）。撤销（`delivery.cancel`）与投递中收回复用同一路径（pi 只有队列级原语，不新造条目级原语）。
+4. **消息身份**：出站文本尾附裸标记 `<!--taiji:msg:<uuid>-->`（与 msg-id-mapper 的 `u-` 前缀标记空间互斥、正交共存），随文本进 transcript 成为逐消息精确身份；判重按 id 匹配（禁计数 FIFO / 文本匹配）；终态 tombstone 在 runtime 存活期内全量保留供 `delivery.resync` 去重，不跨 runtime 重启——reattach 场景判重锚回落 transcript 全量标记扫描。
+5. **UI 单一数据源**：队列区状态帧 = `session.delivery`（内核条目投影：五态 queued/in-flight/delivered/failed/cancelled + lane），`queue_update` 帧降级为内核内部回执；pi 的 steer/followUp/clear_queue/get_state/get_entries/nextTurn 契约原语全部保留复用，零绕过、零重造。
+
+**后果**：消息「按序必达」由结构保证——任一窗口的判定误判从致命降级为一次对账回收，新发送方接入即继承（无需各自发明时序防御）。已接受代价：出站消息文本携带 ~40 字符裸标记进 LLM 上下文与 session 文件（展示层剥离 SSOT = `apply-entry-convert.ts`，live/reload 同点）；判重表不跨 runtime 重启（reattach 走一次 O(transcript) 标记扫描）；删除 session = 显式废弃未送达条目（与既有语义等价）；消息内核 outbox 不落盘——应用整体退出/崩溃时未送达消息需用户重发（不劣于既有 renderer 内存队列形态）。权威域注记见 [pi-boundary-reliability.md 附录 E](../architecture/pi-boundary-reliability.md)。登记 C-data-08、C-data-25。
+
 ### ADR-0063 session 附着不变量 I1-I5
 五条硬不变量防「会话写错文件/丢数据」：I1 runtime 登记路径必须恒等于 pi 实际写目标（`session-attach-assert.ts` 附着后 get_state 对账，不一致即 throw）；I2 对话数据只许存在于 sessions 目录 + 内存（禁入 $TMPDIR）；I3 退出/切换前登记文件须含 pi 已写全部 entry（`__tests__/equivalence/attach-lifecycle.test.ts` 真实 pi 等价测试）；I4 pi 内部行为断言必须带 pi-mono 源码锚点且穷尽全部消费层；I5 会话文件身份是受治理数据。登记 C-data-10。
 
@@ -51,7 +63,7 @@ event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（�
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
-任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器）。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
+任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器）。**范围修订（ADR-0067 投递所有权内核）**：队列区状态不作为独立 cleanup 注册项——现役载体 = 投递内核的 per-session 投影（`session.delivery` 帧消费），清理点在 core `useChat.disposeSession`（随 `deleteSession → triggerSessionCleanups → disposeChat` 编排一并执行），renderer 侧注册清单不新增队列分区项。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
 
 ### ADR-0043 消息模型 Segment[]
 user message content 为 Segment 判别联合（text/skill/file/mention），badge 信息从 composer DOM（getSegmentsFromEl）结构化传递到渲染层；序列化/反序列化各只一处（segmentsToPrompt / parsePiUserContent）；归一化函数在 `packages/shared/src/segments.ts`。assistant/system 仍为纯 string。登记 C-state-02。

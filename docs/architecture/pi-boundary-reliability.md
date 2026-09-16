@@ -434,3 +434,11 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 | D6 | outcome 一等字段在 completeRecord 唯一写入点定形 | 各消费点本地推导（三处同构 switch 已产 bug）；改 closedReason 语义（波及 30 余处消费点与历史兼容） |
 
 三项改造同构于一个原则：**派发契约的两个承诺（start 时承诺可执行的模型、完成后必达通知）都必须有受理确认与单一权威**——即四支柱「能力注册表 / 确认式送达」在派发域的实例化。
+
+## 附录 E：投递所有权内核——交互式投递域的确认式送达实例（2026-09-16）
+
+投递所有权内核（内存状态机 `packages/session-delivery` + runtime 适配与对账 `packages/runtime/src/services/session/session-delivery-registry.ts`，决策见 [ADR-0067](../adr/decisions.md)）是四支柱在**交互式投递域**（composer 用户消息 / agent 间 send / completion-backflow 回流）的实例化，本设计的域边界由此补齐：
+
+- **与 D5「确认式送达」的关系（域面两分，非替代）**：D5 的禁令对准**结果语义通知**（subagent 完成、未来 webhook——持久账本 + 幂等键 + at-least-once）；本内核覆盖**交互式消息**，解决的问题是 pi 契约假定的「消息进 transcript 之前所有权归前端」这一层在 taiji 长期缺失（§2.1 事故 A 的同类结构性空缺，只是发生在用户消息域）。内核按 pi 既有原语（steer/followUp 交接槽位、`queue_update` 受理回执、`message_end(user)` 送达事实、`clear_queue` 回收原语）实现**两阶段回执**：受理（prompt 受理 / 文本入槽位）≠ 送达（`message_end(user)` 命中裸标记 = 已进 transcript）；只拿受理的条目停留 in-flight 并由对账器（五触发点 ×  reclaim/rebuild/adopt 三分处置）兜底。C-ext-19 的禁令在本域的落实形态 = **交互式发送不再由多处各自判定车道**：lane（direct/steer/queued）判定单一源收归 runtime 内核，renderer/extension 侧的车道判定与本地时序防御（defer 队列状态机、S1 拒绝检测、重投 timer）整体退役——登记 C-data-25，条目数据源登记 C-data-08。
+- **结果语义的域内改判注记（C-ext-19 挂账关系重申）**：smart-context 四类通知（含压缩结果 onComplete/onError——**结果语义**）由 `sendUserMessage(deliverAs:'steer')` 改判为 `sendCustomMessage(deliverAs:'nextTurn', triggerTurn:false)`：必达性由 at-most-once 提升为**常驻至被消费**（PS-06：`_pendingNextTurnMessages` 唯一消费点 = 用户驱动 `prompt()`），且不再自起 run。这是**存量通路的域内改判**（字面不违「禁止新建 at-most-once 通道」），**不是** C-ext-19 正向要求的满足——账本化迁移维持附录 B「subagent-workflow 内 workflow 完成通知的账本化迁移」同款挂账口径：pi 进程死亡致 nextTurn 通知丢失的面与改判前相同，随该账本化迁移一并解决。
+- **另三柱不涉本内核**：无模型能力面（能力注册表）、无改状态 RPC 回执（生效回执）、pi 语义依赖经探针族登记（漂移守卫——`clear_queue` 返回值全文、`get_entries` 标记可读、`nextTurn` 注入形态、`compaction_start/end` 的 reason 字段各自有探针锁定）。

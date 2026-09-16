@@ -435,7 +435,7 @@
  },
  {
   "id": "PS-22",
-  "claim": "prompt() 首个确定性拒绝分支：_compactionAbortController !== undefined 即 throw \"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.\"——manual 压缩置位窗口的 pi 侧拒绝原文（session-occupancy-send-closure D2：runtime sendPrompt catch 按原文 includes 转译 send.rejected{reason:'compacting'}，不进 message.error；文案漂移 = 转译失效退化为普通错误气泡）",
+  "claim": "prompt() 首个确定性拒绝分支：_compactionAbortController !== undefined 即 throw \"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.\"——manual 压缩置位窗口的 pi 侧拒绝原文（投递所有权内核适配层 `classifyPromptRejection` 按原文 includes 分类：条目回 queued 待压缩结束重投，不落用户可见错误；文案漂移 = 分类失效退化为普通错误气泡）",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",
@@ -452,7 +452,7 @@
  },
  {
   "id": "PS-23",
-  "claim": "prompt() 第二拒绝分支：isStreaming 为 true 且未传 streamingBehavior 即 throw \"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.\"——isStreaming getter 含 post-run settling（_isAgentRunActive 在 agent_end 后仍 true），故 auto 压缩 / post-run 收尾窗口的裸 prompt 也落此分支（manual 压缩走 PS-22 分支在前）；runtime 转译 send.rejected{reason:'processing'} 的识别依据",
+  "claim": "prompt() 第二拒绝分支：isStreaming 为 true 且未传 streamingBehavior 即 throw \"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.\"——isStreaming getter 含 post-run settling（_isAgentRunActive 在 agent_end 后仍 true），故 auto 压缩 / post-run 收尾窗口的裸 prompt 也落此分支（manual 压缩走 PS-22 分支在前）；投递所有权内核适配层 `classifyPromptRejection` 转译（条目回 queued + occupancy 'reject-processing' 反转）的识别依据",
   "piAnchor": [
    {
     "pkg": "pi-coding-agent",

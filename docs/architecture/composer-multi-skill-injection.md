@@ -133,8 +133,8 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 > 帮我 review 这段代码 <taiji-skill name="code-review-graph" location="…"/> <taiji-skill name="code-simplify" location="…"/>
 >
 > <taiji-skill-data>
-> <skill name="code-review-graph" location="/Users/x/.agents/skills/code-review-graph/SKILL.md">
-> References are relative to /Users/x/.agents/skills/code-review-graph.
+> <skill name="code-review-graph" location="<家目录>/.agents/skills/code-review-graph/SKILL.md">
+> References are relative to <家目录>/.agents/skills/code-review-graph.
 >
 > （SKILL.md 全文…）
 > </skill>
@@ -154,8 +154,8 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 > 帮我 review 这段代码 <taiji-skill name="code-review-graph" location="…"/> <taiji-skill name="code-simplify" location="…"/>
 >
 > <taiji-skill-data>
-> <taiji-skill name="code-review-graph" location="/Users/x/.agents/skills/code-review-graph/SKILL.md"/>
-> <taiji-skill name="code-simplify" location="/Users/x/.agents/skills/code-simplify/SKILL.md"/>
+> <taiji-skill name="code-review-graph" location="<家目录>/.agents/skills/code-review-graph/SKILL.md"/>
+> <taiji-skill name="code-simplify" location="<家目录>/.agents/skills/code-simplify/SKILL.md"/>
 > Use the read tool to load the skill files above before continuing the task
 > </taiji-skill-data>
 > ```
@@ -302,7 +302,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ① **store 去重第三判据失配面扩大（P0-12 登记；R4 修正机制描述）**。`packages/core/src/domain/chat/store.ts` 的 `mergeBaselineWithLive` 第三判据（user 文本多重集）实际比较的是**两侧投影**（`userMessageText`：基线 Array content 走 segmentsToText）——sidecar 命中消息的基线 content 已被 backfillSegments 换回原始 Segment[]，与 live 侧同源**命中**（不双计）；真实失配域 = sidecar 丢失的兜底路径（反解析产物与提交文本存在剥块残留分隔空白等字节差）。store.ts 注释中「pi 文本 ≡ 提交文本」为过时前提（实施期同批更正）。改造后含 skill chip 消息的兜底反解析产物 ≠ 提交文本，判据在该域失配落回「身份+数量对齐」——**现状已存在同类失配**（行首 skill chip 消息，注释明示「skill 展开消息自然失配 → 落回现状」），本设计将触发面从边缘形态扩到主用例。**量级**：仅在 F2 竞态窗口（切入 session 时 getHistory 快照与 live 帧流时序差 + 基线尾部为 assistant）且 sidecar 丢失时短暂双计（badge 版 + 纯文本版各一条）；**恢复路径**：下一轮 reconcile 自动收敛（现状机制，非新增）；**重审条件**：若实跑出现可见双计未收敛，评估归一比对（兜底产物归拢回标记形态再比对）；**判定**：可接受（现状同类边界先例 `store.ts:128-130`）。**R4 注记**：末尾块协议下 pi 落盘文本 = 标记正文 + 末尾展开块，仍 ≠ 提交文本（标记正文），失配面与结论不变。
 
-② **宿主 JSONL 写入量级与跨消息累积（P0-19 登记）**。**量级**：本机实测 SKILL.md 体量 0.9KB~50KB，单条消息注入 N 个 skill = 追加 N×全文；同一 skill 跨消息重复注入**单调累积**（每条挂该 skill 的消息都注入一份全文进历史，每轮请求上下文含全部历史副本），token 成本线性增长（prompt cache 命中时增量主要是 cache read）。**清理通道**：pi compaction 会把旧 skill block 摘掉（普通 skill < 20000 token 不受切点保护，可被摘要——与单条巨大消息的盲区不同）；单条超窗由 D6 预检拦截。**控制旋钮**：单消息内 chip 去重（D2）；跨消息**显式不做去重**——重复插入是用户的显式强调意图，自动跳过会静默违背意图。**重审条件**：用户反馈成本异常时评估跨消息引用提升（如上下文已有同 skill 全文时第二条起降级为标记）。**判定**：可接受。连带：steer 队列回显（`queue_update` 帧的 queuedMessages 全文数组）随注入量膨胀——内存帧不落盘，量级与消息体积同阶，可接受。**R4 补登显示投影**：steer/followUp 入队前已完成注入，QueueBubble 对快照仅剥 defer 标记，skill 标记与包裹块以单行 truncate 原样可见（存量行为非 R4 新增；单行 truncate 天然缓解；重审条件 = 用户反馈排队气泡可读性，届时 QueueBubble 复用反解析投影剥块/还原短标记）。
+② **宿主 JSONL 写入量级与跨消息累积（P0-19 登记）**。**量级**：本机实测 SKILL.md 体量 0.9KB~50KB，单条消息注入 N 个 skill = 追加 N×全文；同一 skill 跨消息重复注入**单调累积**（每条挂该 skill 的消息都注入一份全文进历史，每轮请求上下文含全部历史副本），token 成本线性增长（prompt cache 命中时增量主要是 cache read）。**清理通道**：pi compaction 会把旧 skill block 摘掉（普通 skill < 20000 token 不受切点保护，可被摘要——与单条巨大消息的盲区不同）；单条超窗由 D6 预检拦截。**控制旋钮**：单消息内 chip 去重（D2）；跨消息**显式不做去重**——重复插入是用户的显式强调意图，自动跳过会静默违背意图。**重审条件**：用户反馈成本异常时评估跨消息引用提升（如上下文已有同 skill 全文时第二条起降级为标记）。**判定**：可接受。连带：`queue_update` 帧的 queuedMessages 全文数组随注入量膨胀——帧只在内核内部回执链消费、不再直驱 UI（队列区读 `session.delivery` 帧的 preview 文本），内存帧不落盘，量级与消息体积同阶，可接受。**R4 补登显示投影**：steer/followUp 入队前已完成注入，队列区行（QueueBubble）以 `session.delivery` 帧的 preview（提交原文侧投影）单行 truncate 展示——skill 标记与包裹块不经队列区行呈现（注入文本在 pi 槽位与 transcript 中仍完整存在，展示层剥离 SSOT = `apply-entry-convert.ts`；重审条件 = 用户反馈排队气泡可读性，届时 QueueBubble 复用反解析投影剥块/还原短标记）。
 
 ③ **兜底误还原（D7 边界四要素）**。正文手打 `<taiji-skill` 字样 + 该消息 sidecar 同时丢失时，兜底反解析把手打字样误还原为 chip。**量级**：联合概率极低（需用户精确打出机器标记前缀，且 sidecar 丢失——sidecar 丢失率无历史数据，实施期可经日志观测）；**恢复路径**：不可恢复——偏差**仅限显示层消费**（badge 显示的 name/location 可辨识，pi 已落盘的实际内容不变）；**注意**：若误还原 segment 经编辑重发（§3.5-⑤② 的 draftText 回填路径），序列化回标记 → 注入器真展开，偏差会升级为语义改变——该升级路径只能由 ⑤② 的完整优化项（编辑重发从 Segment[] 重建 chip 而非文本回填）消除（该优化项经评估延期未实施，升级路径仍开放，重审条件不变）；design-code-sync 轮 3（2026-09-10）已单独消除同一路径上的**标记翻倍/重复注入**形态（编辑重发重建时剥离编辑稿里与保留段重复的序列化文本，见 ⑤②），但「误还原 → 真展开」的语义升级本身不受该修复影响；**重审条件**：观测到实际误还原案例时，改用更强唯一性标记（如 name+location+短校验和三属性）；**判定**：可接受（编辑重发升级路径为已登记的低频残余风险，处置见 ⑤②）。
 

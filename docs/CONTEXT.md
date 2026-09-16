@@ -148,6 +148,22 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进（2026-09）**：`streamingMessage` 实体已消亡——流式态 = 末位消息 `status:'streaming'` + turn 级 `isStreaming` 派生；UI 活跃态 SSOT 是 `isActive`（含 pendingSend 空窗期，`packages/core/src/domain/chat/derive-status.ts` W1）。
 
+### 投递所有权内核（delivery-ownership kernel）
+
+用户消息（composer）、agent 消息（session_manager send）、回流消息（completion-backflow）等全部发送方的唯一投递所有者：runtime 侧每 session 单例——纯逻辑状态机在 `packages/session-delivery/`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`。pi 的 steer/followUp 内存队列降级为**交接槽位**（消息从「前端持有」到「进入 transcript」之间的临时存放格），所有权在消息进 transcript 之前属于本内核；renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧，队列区单一数据源），不做车道判定。
+
+**lane（投递车道）**：一条消息交给 pi 的方式，三档——`direct`（pi 空闲，直接 prompt 起新 run）/ `steer`（pi 有活跃 run，入 steeringQueue 等 turn 边界注入）/ `queued`（pi 暂不可收，内核 FIFO 持有等时机）。lane 判定单一源 = runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态；renderer 的 `resolveSendRoute` 降级为发送位按钮形态（send/stop/queue）的 UI 预测，真实车道以 `session.delivery` 帧的 lane 字段为准。
+
+**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。五态经内核投影视图进 `session.delivery` 帧，是队列区行形态的唯一来源。
+
+**两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`，由对账器盯。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
+
+**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在途条目回队首重投，保持原相对序）/ **rebuild**（带标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无标记外来文本——notifyDone / scheduler 提醒等存量注入——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
+
+**裸标记（bare marker）**：出站文本尾附的 `<!--taiji:msg:<uuid>-->`（裸 uuid 形态）作为逐消息身份，随文本进 transcript，供送达回执与判重匹配按 id 精确查找（身份非内容匹配——skill 注入 / BeforeSend 文本改写不影响）。与 msg-id-mapper 的 `u-<uuid>` 前缀标记空间互斥（mapper 只剥 u- 形态且仅覆盖富内容直发通路；裸标记在 steer/followUp 通路不被剥离而存活）——两者正交共存，rich 通路同时携带双标记各司其职。展示层剥离 SSOT = `packages/core/src/domain/chat/apply-entry-convert.ts`（live / reload 同点）。
+
+**tombstone 判重锚**：已终态条目（delivered / cancelled）的轻量记录（id / 终态 / lane / settledAt），在 **runtime 存活期内全量保留、不设数量窗口**——`delivery.resync` 断连重报去重与 reattach 收养判重的查询表；cancelled tombstone 防「撤销确认帧在断连窗口丢失 → 已撤销消息被 resync 复活」。判重表栖身 runtime 进程内存、不跨 runtime 重启，reattach（滚动重启后）判重锚回落 **transcript 全量标记扫描**（按重报集/滞留集 uuid 查找，transcript 是唯一跨进程持久事实源）。
+
 ### Side Drawer（原 Side Inspector）
 
 > **术语演进**：原 `Side Inspector`（terminology R4 计划改 `SideInspector`）在 v3 重构中收敛为 **Side Drawer**。v3 版更通用：不再限于运行时状态面板，而是 header 多 tab 通用容器。

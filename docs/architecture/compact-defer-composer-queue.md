@@ -2,6 +2,8 @@
 
 > 状态：v3，经两轮对抗式审查（round1 三审 2/4/0 MF → round2 聚焦复审 0/2MF 主审收敛；收敛轨迹 6→2 MF，报告见 `.tmp/tech-design/design-review-20260913-compactdefer{,-impact,-simplicity}.md`）。
 > 视觉规格基线 = `docs/page-design/compact-defer-queue-spec.html`（用户裁决的方案 2 demo 已入库；`.tmp/compact-queue-demos/` 的 demo-1/3 为落选过程残留，不入库）。
+>
+> **现行边界（投递所有权内核，[ADR-0067](../adr/decisions.md)，2026-09-16）**：本文的队列**数据源与记账**层已被内核取代——renderer 本地 defer 队列（`useCompactQueue` 分区、flush / S1 拒绝检测 / 1s 重投 timer / 5 次熔断、`PendingBubble`）整体退役；队列状态载体 = runtime 投递内核的 `session.delivery` 状态帧（core `getDeliveryProjectionRef`），composer 队列区（`QueueBubble`）单源读帧，条目态 = 内核五态（queued / in-flight / delivered / failed / cancelled）+ lane，撤销走 `delivery.cancel`、重试走 `delivery.resync`、forceQuit 回收走 `delivery.drain`。**本文仍有效**：队列区位置与形态基线（composer-box 顶部队列区、行截断、`VISIBLE_MAX` 截断 + 「+N」、hover × 撤销）、「压缩中」通栏活动带（`ActivityStrip` compacting 行 + 副文案计数）；occupancy 驱动展示的口径不变。**失效条款**：§2.1 的双数据源归一规则（defer 行仅渲染未提交条目、已提交 send 条目确认前不可见）随本地队列退役——内核条目从提交起全程可见（queued / in-flight 行）；活动带与队列区计数口径 = `session.delivery` 投影中「lane ≠ direct 且 state ≠ delivered」的条目数（过滤唯一定义点 `deliveryQueueEntries`，与队列区行渲染同源）；行内富内容 +N 徽标退役（帧只携带 preview 文本，草稿恢复由 cancel/drain reply 的全文快照承担，ADR-0043）。
 
 ## 1 背景与目标
 
