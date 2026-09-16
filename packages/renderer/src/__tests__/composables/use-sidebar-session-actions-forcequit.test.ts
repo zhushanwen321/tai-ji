@@ -22,11 +22,15 @@ vi.mock('@/api', () => ({
   session: { forceQuit: forceQuitMock },
 }))
 
+// [u3c/D10] forceQuit 全量回收改走内核 drain（delivery.drain RPC）；本文件只锁 RPC 编排，
+// 返回空条目集（文本回收与提示断言见 __tests__/sidebar/force-quit-queue-recovery.test.ts）
+vi.mock('@/api/domains/delivery', () => ({
+  delivery: { drainDelivery: vi.fn(async (sessionId: string) => ({ sessionId, entries: [] })) },
+}))
+
 vi.mock('@/composables/features/chat/useChat', () => ({
-  // clearDeferFlushRetryTimer：session-dead D3 起 createUseChat 返回面新增（onForceQuitSession
-  // 成功路径清 1s 重投 timer + 失败计数），mock 面须与真实返回结构对齐；
   // clearQueueState：session-dead G1 起新增（成功路径清 pi queue_update 快照残留）
-  useChat: () => ({ abort: vi.fn(), clearDeferFlushRetryTimer: vi.fn(), clearQueueState: vi.fn() }),
+  useChat: () => ({ abort: vi.fn(), clearQueueState: vi.fn() }),
 }))
 
 vi.mock('@/composables/useToast', () => ({

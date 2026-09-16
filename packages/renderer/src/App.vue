@@ -60,7 +60,6 @@ import { resolvePlatform } from '@/platform/resolve-platform'
 import { bindForkNoticeEffect } from '@/composables/effects/useForkNoticeEffect'
 import { bindHandoffEffect } from '@/composables/effects/useHandoffEffect'
 import { bindSessionStreamSync } from '@/composables/effects/useSessionStreamSync'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { installInboundFrameGuard, uninstallInboundFrameGuard } from '@/composables/useInboundFrameGuard'
 import { useMemoryPressure } from '@/composables/useMemoryPressure'
 import { hydrateStreamingIdleTimeout } from '@/composables/features/chat/streaming-idle-hydration'
@@ -100,10 +99,9 @@ bindHandoffEffect()
 // 对齐派生态视野（isGenerating 由消息实体 per-session 惰性派生，D-3），消除惰性订阅盲区（非交互 session 终态事件丢失 → 侧栏卡 running）。
 // flush:'sync' 保证 appendSession 同 tick 建订阅（fork-ask 路径 send 前订阅就绪）。onScopeDispose 随 App 卸载退订。
 bindSessionStreamSync()
-// compact-queued-messages：初始化 useCompactQueue 单例。App setup 是全局 effect 作用域，
-// 首次调用绑定 app 级 scope（onScopeDispose 随 App 卸载触发，registerSessionCleanup 常驻，
-// 防模块级 onScopeDispose 警告与过早反注册）。
-useCompactQueue()
+// [u3c] useCompactQueue 单例初始化已随投递所有权内核退役（设计 §3.1 删除面）：队列状态帧
+// 投影的清理由 core 侧 per-session 键控承担（disposeSession / 测试 reset 双清理点，ADR-0049），
+// App 层不再需要挂 app 级 scope 保活旧队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
 // warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。

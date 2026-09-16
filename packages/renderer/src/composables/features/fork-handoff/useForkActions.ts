@@ -79,8 +79,9 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
    * 无订阅者被静默丢弃，agent 回复看不到。同步 appendUser + addPendingSend，与正常 send 路径一致，
    * 让用户消息经 chat store 正常显示 + pending 态填充 ack 空窗。
    *
-   * 直接调 chatApi.send 而非 useChat().send：后者内部 try/catch 吞掉 send 错误（仅 toast），
-   * 此处需要捕获 reject 触发回滚；其 busy→steer 路由对新 fork session 也不适用。
+   * 直接调 chatApi.submitDelivery 而非 useChat().send：后者内部 try/catch 吞掉提交错误（仅 toast），
+   * 此处需要捕获 reject 触发回滚；[u3b/D1] 其 busy→steer 本地路由已退役（lane 判定在内核），
+   * 对本路径不再是差异点——剩余差异只有错误处理与回滚编排。
    * [W1] 错误反馈职责上移调用方：此处只做资源清理（disposeSession + remove + removeFromList），
    * 不 toast、不吞错——rethrow 让 handleForkSend 统一负责 toastError + restoreInput（避免草稿丢失）。
    * 主线 session 全程不参与（不写入、不 streaming、不 split）。
@@ -111,12 +112,21 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     const segments = textToSegments(content)
     const prompt = segmentsToPrompt(segments)
     // [fast-fork] 建立新 session 的流式订阅 + 写入用户消息 + 标记 pending（对齐正常 send 的前置编排，
-    // 但跳过 send 的 busy→steer 检测与错误吞没）。订阅幂等：ensureStreamSubscription 已防重复。
+    // 但跳过 send 的错误吞没——本路径需要捕获 reject 触发回滚）。订阅幂等：ensureStreamSubscription 已防重复。
     ensureStreamSubscription(newId, chat, session)
-    chat.appendUser(newId, segments)
+    // [投递所有权内核 u3c / D-10] 统一提交 + clientUuid 单源：appendUser 返回的 `u-<uuid>` 既是
+    // 本地乐观气泡 id，也作为 delivery.submit 的条目 id（内核出站裸标记身份源 D2 + 回执匹配锚）。
+    // 前身（chatApi.send 不带 clientUuid）的异源窗口：内核自造条目 id ≠ 本地气泡 id——direct
+    // 车道下仅表现为占位记账错位（回执 decrementInflight 落在未挂账的 session 上被钳制），
+    // 非 direct 车道下气泡按 clientUuid 找不到 → morph 不生效 → 气泡与队列条目双显示悬挂。
+    // 迁移后 lane 判定全部形态收敛（新 session 恒 direct 的当前事实不再是前提）。
+    const clientUuid = chat.appendUser(newId, segments)
+    // inflight 占位 +1：对齐 core submitNewMessage 记账（每条统一提交挂 1，送达回执抵消），
+    // 缺席会让本条的 message_end 回执去抵消别条的配额。
+    chat.incrementInflight(newId, 1)
     chat.addPendingSend(newId)
     try {
-      await chatApi.send(newId, prompt)
+      await chatApi.submitDelivery(newId, prompt, clientUuid)
     } catch (e) {
       // send 失败回滚：删除占位 session（runtime + 列表），避免空壳悬挂。
       // 同步拆流式订阅 + 清 chat store 的 per-session 状态（含刚 appendUser 的消息 + pendingSend timer），

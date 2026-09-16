@@ -79,8 +79,10 @@ export default {
   },
   assignProjectFailed: '归入项目失败',
   forceQuitFailed: '强制退出失败：{msg}',
-  // [session-dead 结构性修复 D3] 强制退出后 defer 队列回收进 Composer 草稿的显式提示
+  // [投递所有权内核 u3c / D10] 强制退出后 delivery.drain 回收内核未送达条目进 Composer 草稿的显式提示
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',
+  // drain RPC 失败（pi 已死/传输错误）——回收文本不可再生，必须出声（错误可操作：条目仍在 runtime 内核）
+  forceQuitQueueRecoverFailed: '排队消息回收失败：{msg}',
   // [session-dead 结构性修复 D6/D7 C1 方案一] 长 turn 观测面（Composer 上方常驻条）。
   // 文案纪律（D7）：只陈述事实，禁止判断词（卡死/无响应/异常/建议中止）；操作项中性不预置推荐
   turnProgress: {

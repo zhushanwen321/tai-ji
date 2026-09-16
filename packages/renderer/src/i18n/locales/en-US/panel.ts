@@ -14,7 +14,6 @@ export default {
     send: 'Send',
     stop: 'Stop',
     queueSend: 'Queue to send',
-    commandQueuedRejected: 'Session busy, commands are disabled until it is free',
     sending: 'Sending…',
     sendBusy: 'Session is busy, please wait before sending',
     sendEmptyHint: 'Type something before sending',
@@ -316,19 +315,22 @@ export default {
     loading: 'Loading',
     noMatches: 'No matches',
   },
-  deferQueue: {
+  queueBubble: {
     pendingHint: 'Will be sent when the session is free',
     // [D1] occupancy-typed hover hints (long bash occupation makes "what ends" actionable)
     pendingHintCompacting: 'Will be sent after context compaction completes',
     pendingHintBash: 'Will be sent after the command finishes',
     pendingHintSettling: 'Will be sent after the current turn ends',
+    // Kernel entry state labels (G3: every undelivered message has an explicit shape + state)
+    stateQueued: 'Queued',
+    stateInFlight: 'Sending',
+    stateFailed: 'Failed',
     cancelQueued: 'Cancel queued message',
-    chipBadge: '+{count}',
-    chipBadgeHint: 'Contains {count} attachment/reference chip(s), sent along with the message',
-    // [compact-defer-composer-queue u1] defer row occupancy chip (After compact / After command / Later)
-    deferChipCompacting: 'After compact',
-    deferChipBash: 'After command',
-    deferChipFallback: 'Later',
+    cancelUnavailable: 'Already delivered — cannot be cancelled',
+    cancelUnavailableWithReason: 'Cannot cancel: {reason}',
+    cancelFailed: 'Cancel failed: {msg}',
+    retry: 'Retry sending',
+    retryFailed: 'Retry failed: {msg}',
   },
   contextChips: {
     removeFromContext: 'Remove from context',

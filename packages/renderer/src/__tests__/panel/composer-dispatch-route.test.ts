@@ -1,15 +1,19 @@
 /**
- * Composer D6 统一发送分发器集成测试（session-occupancy u5b，验收②）。
+ * Composer 统一发送分发器集成测试（session-occupancy u5b D6 六行表 → 投递所有权内核 u3b/D1 收敛）。
  *
- * 锁定（对齐 composer-compact-queue.test.ts 结构范本，真 pinia + 真 chatStore + mount Composer）：
- * - 行 3（turn=generating + compacting，threshold turn 内压缩）Enter → steer（QueueBubble 路径），
- *   不误入 defer 队列——优先级倒挂消除的核心用户可见断言（现状 isActive→onSteer 恰好命中，
- *   但判定收口进分发器后由本测试锁定不回退）
- * - 行 2（turn=dispatching）Enter → steer
- * - 行 4（turn=settling）Enter → defer 入队（pending 气泡可见）——投影驱动（现状该态走直发）
- * - 行 6（bash=true 且 turn=idle）Enter → defer 入队（R3-U4 集成直测——core 纯函数层
- *   已覆盖，此处锁 composer-shell 分发器对 bash 维度的消费不回退）
- * - Alt+⏎ 经分发器：steer 路由行 → followUp（下一轮语义保留）；defer → 入队
+ * [u3c 迁移] 原断言「按 D6 行分流到 steer API / defer 入队 / 直发」已随 D1 退役——lane 判定
+ * （direct/steer/queued）收归 runtime 投递所有权内核，renderer 只提交不判定：六行占用形态
+ * （turn 活跃 / compacting / bash / settling）Enter 一律走**统一提交**（useChat.send →
+ * 乐观气泡 + delivery.submit），占用期不再有特殊路径（内核排队/入槽承接）。
+ * 保留的 UI 预测面：Alt+⏎ 在 steer 路由行仍走 followUp（下一轮语义，composer-keydown 按
+ * sendRoute 分流）——sendRoute 仍是发送位形态的数据源，不再是投递决策。
+ *
+ * 锁定：
+ * - 行 3（generating + compacting）/ 行 2（dispatching）/ 行 4（settling）/ 行 6（bash 忙）
+ *   Enter → deps.send 恰一次（steer/followUp 均不被调）
+ * - 行 1（全 idle）Enter → deps.send（与占用期同路径）
+ * - Alt+⏎：steer 路由行（turn 活跃）→ followUp；其余行 → send
+ * - steer 路由行 + 空输入 → 不提交（分发器空输入守卫）
  *
  * occupancy 由 chat.setOccupancy 驱动（store 投影 = composer-shell sendRoute 的数据源）。
  *
@@ -17,10 +21,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, effectScope, ref } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { useChatStore } from '@/stores/chat'
 
 // ── mock useChat（spy 化 send / steer / followUp / compact）+ useToast ──
@@ -102,10 +105,6 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  useCompactQueue()._clearAllForTest()
   resetChatModuleState()
 })
 
@@ -134,8 +133,8 @@ function seedLocalBusy(sid = 's1'): void {
   })
 }
 
-describe('Composer D6 统一发送分发器（路由行为）', () => {
-  it('行 3：generating + compacting（threshold）⏎ → steer，不误入 defer 队列（优先级倒挂消除）', async () => {
+describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，u3b/D1）', () => {
+  it('行 3：generating + compacting（threshold）⏎ → 统一提交（不本地转 steer）', async () => {
     setPhase('generating', true)
     seedLocalBusy()
     const wrapper = mountComposer()
@@ -144,17 +143,15 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
 
     await pressKey(wrapper, {})
 
-    // steer 被调（追加当前回合，压缩后 turn 继续跑——steering 队列压缩完成的下一次 LLM 调用前投递）
-    expect(chatApiMock.steer).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.steer).toHaveBeenCalledWith('s1', textToSegments('补充：别忘了加测试'))
-    // 不误排队（steer 分档正确——无 pending 气泡语义）
-    expect(useCompactQueue().count('s1')).toBe(0)
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    // [D1] 占用期照常提交（内核判 lane），renderer 不再本地转 steer
+    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('补充：别忘了加测试'))
+    expect(chatApiMock.steer).not.toHaveBeenCalled()
     // 输入已清空（提交语义完成）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
-  it('行 2：dispatching ⏎ → steer（turn 活跃定义含 dispatching）', async () => {
+  it('行 2：dispatching ⏎ → 统一提交（turn 活跃不再本地转 steer）', async () => {
     setPhase('dispatching')
     seedLocalBusy()
     const wrapper = mountComposer()
@@ -163,11 +160,11 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
 
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.steer).toHaveBeenCalledTimes(1)
-    expect(useCompactQueue().count('s1')).toBe(0)
+    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
+    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 
-  it('行 4：settling ⏎ → defer 入队（pending 路径，直发不发生）', async () => {
+  it('行 4：settling ⏎ → 统一提交（不再本地 defer 入队，内核 queued 承接）', async () => {
     setPhase('settling')
     const wrapper = mountComposer()
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'settling 中发送')
@@ -175,14 +172,12 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
 
     await pressKey(wrapper, {})
 
-    // 入队（occupancy idle 时自动投递）而非直发（现状该态 isActive=false 走直发被 pi 拒）
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('settling 中发送')
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('settling 中发送'))
     expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
-  it('行 6：bash=true 且 turn=idle ⏎ → defer 入队（R3-U4 集成直测，core 纯函数层外的分发器消费锁定）', async () => {
+  it('行 6：bash=true 且 turn=idle ⏎ → 统一提交（占用期无特殊路径）', async () => {
     setPhase('idle', false, true)
     const wrapper = mountComposer()
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'bash 忙时发送')
@@ -190,14 +185,12 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
 
     await pressKey(wrapper, {})
 
-    // bash 占用即 defer 路由（D6 表行 6）：入队而非直发
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('bash 忙时发送')
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('bash 忙时发送'))
     expect(chatApiMock.steer).not.toHaveBeenCalled()
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
-  it('行 1：全 idle ⏎ → 直发（不排队不 steer）', async () => {
+  it('行 1：全 idle ⏎ → 统一提交（与占用期同路径）', async () => {
     setPhase('idle')
     const wrapper = mountComposer()
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '普通消息')
@@ -209,7 +202,6 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
     // useChat mock 的 send 签名 = (sid, segments)（底层 RPC 的 clientUuid 透传在 core 编排内）
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('普通消息'))
     expect(chatApiMock.steer).not.toHaveBeenCalled()
-    expect(useCompactQueue().count('s1')).toBe(0)
   })
 
   it('Alt+⏎ steer 路由行（generating）→ followUp（下一轮语义保留，非 steer）', async () => {
@@ -223,9 +215,10 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
 
     expect(chatApiMock.followUp).toHaveBeenCalledTimes(1)
     expect(chatApiMock.steer).not.toHaveBeenCalled()
+    expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
-  it('Alt+⏎ defer 路由行（compacting）→ 入队而非 followUp（现状行为保持）', async () => {
+  it('Alt+⏎ non-steer 路由行（compacting）→ 统一提交（sendRoute 仅 UI 预测，非 followUp）', async () => {
     setPhase('idle', true)
     const wrapper = mountComposer()
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '压缩后发')
@@ -234,7 +227,7 @@ describe('Composer D6 统一发送分发器（路由行为）', () => {
     await pressKey(wrapper, { altKey: true })
 
     expect(chatApiMock.followUp).not.toHaveBeenCalled()
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('压缩后发')
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('压缩后发'))
   })
 
   it('steer 路由行 + 空输入 ⏎ → 不提交（分发器空输入守卫）', async () => {

@@ -299,8 +299,8 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
   })
 })
 
-// ── U16：canSubmit 派生守卫（staging 双发锁 / streaming 放行 / 空稿规则）────────
-describe('U16：canSubmit 派生值——staging 只看 isSending，非 staging 看 isBusy', () => {
+// ── U16：canSubmit 派生守卫（staging 双发锁 / 占用期放行 / 空稿规则）────────
+describe('U16：canSubmit 派生值——staging 只看 isSending，非 staging 看「可提交」（占用不拦截）', () => {
   function makeStreaming(sid: string): void {
     const chat = useChatStore()
     chat.applyMessageEvent(sid, {
@@ -345,7 +345,7 @@ describe('U16：canSubmit 派生值——staging 只看 isSending，非 staging 
     expect(wrapper.find('[data-testid="fork-send-btn"]').exists()).toBe(false)
   })
 
-  it('非 staging + isBusy（streaming）+ 有输入 → false（canSend 原守卫不回归）', async () => {
+  it('非 staging + streaming + 有输入 → true（[u3c/D1] canSend 收窄为「可提交」：占用不再拦截）', async () => {
     const sid = 's-can-submit-3'
     makeStreaming(sid)
     const wrapper = mountComposer({ sessionId: sid })
@@ -353,7 +353,10 @@ describe('U16：canSubmit 派生值——staging 只看 isSending，非 staging 
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     const vm = wrapper.vm as unknown as { canSubmit?: boolean }
-    expect(vm.canSubmit).toBe(false)
+    // [u3c/D1] 前身 isBusy（= isActive ∨ isSending）拦截占用期提交——该半边是 renderer 侧车道
+    // 判定的残留，随「renderer 只提交不判定」退役：提交守卫只剩空输入与本地双发锁两类，
+    // 占用期（streaming/compacting/bash）照常提交，lane 由内核判定。
+    expect(vm.canSubmit).toBe(true)
   })
 
   it('fork / handoff staging（allowsEmptySend=true）空稿 → true', async () => {

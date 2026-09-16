@@ -179,7 +179,7 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
     expect(notice).toBeDefined()
   })
 
-  it('④ 恢复窗口发消息不报错：composer 可用（①）+ message.send RPC 经 ws 发出（runtime join 半边见 runtime 单测）', async () => {
+  it('④ 恢复窗口发消息不报错：composer 可用（①）+ delivery.submit RPC 经 ws 发出（runtime join 半边见 runtime 单测）', async () => {
     await initAndConnect()
     const wsSend = vi.mocked((await import('../../../core/src/transport/ws-client')).send)
     const chatStore = useChatStore()
@@ -189,10 +189,11 @@ describe('respawn 过渡态（crash-resilience T4 回流修复）', () => {
 
     // 过渡态（pending）下发送：UI 半边 = 无本地 dead 拦截，消息走既有发送编排链路发出
     //（runtime 侧 ensureActive join 等恢复完成后送达——该半边已有 runtime 单测）
+    // [u3c/D1] 发送链已收敛统一提交：RPC 类型为 delivery.submit（旧 message.send 保留至 u5 协议退役）
     const { useChat } = await import('@/composables/features/chat/useChat')
     await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBeUndefined()
     const sentTypes = wsSend.mock.calls.map((args) => (args[0] as { type?: string }).type)
-    expect(sentTypes).toContain('message.send')
+    expect(sentTypes).toContain('delivery.submit')
   })
 
   it('⑤ 用户强制退出 → 直接终态（过渡态不出现，A7 反向验收）', async () => {

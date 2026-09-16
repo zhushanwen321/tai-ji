@@ -150,8 +150,8 @@ describe('T2.5 busy 时停止按钮始终可见', () => {
   })
 })
 
-describe('T2.2 B 策略：busy 时 Enter → steer（不调 send）', () => {
-  it('busy 时 Enter → 调 steer，不调 send', async () => {
+describe('[u3c/D1] busy 时 Enter → 统一提交（B 策略本地转 steer 已退役）', () => {
+  it('busy 时 Enter → 调 send（lane 判定收归内核），不调 steer', async () => {
     const chat = useChatStore()
     const sid = 's-steer-enter'
     // 制造 busy 态
@@ -162,17 +162,17 @@ describe('T2.2 B 策略：busy 时 Enter → steer（不调 send）', () => {
     const wrapper = mountComposer({ sessionId: sid })
     expect(chat.isActive(sid)).toBe(true)
 
-    // 输入文本（让 hasInput=true，steer guard 放行）
+    // 输入文本（让 hasInput=true）
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '补充内容')
     await wrapper.vm.$nextTick()
 
     // 模拟 Enter 键
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
     await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick() // steer 是 async，需 flush
+    await wrapper.vm.$nextTick() // onSend 是 async，需 flush
 
-    expect(chatApiMock.steer).toHaveBeenCalledWith('s-steer-enter', textToSegments('补充内容'))
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(chatApiMock.send).toHaveBeenCalledWith(sid, textToSegments('补充内容'))
+    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 })
 

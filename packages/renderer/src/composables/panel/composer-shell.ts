@@ -13,8 +13,10 @@
  *   useComposerContextChips / useComposerDragDrop / useComposerRestore / useComposerForkMode /
  *   useComposerHandoffMode / useComposerStaging / useComposerBash / useComposerSubmit / useComposerSend
  * - renderer store/composable：useChatStore / useSessionStore / useSettingsStore / useNewTaskFlow /
- *   useModel / useHandoffActions / useCompactQueue / useSidebar / useToast / useForkModeChannel /
+ *   useModel / useHandoffActions / useSidebar / useToast / useForkModeChannel /
  *   useHandoffModeChannel / useImageAttachment / useI18n
+ *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧投影，
+ *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
  * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
@@ -61,7 +63,6 @@ import { supportedLevelsOf } from '@/composables/features/new-task/supported-lev
 import { useModel } from '@/composables/features/model/useModel'
 import { useHandoffActions } from '@/composables/features/fork-handoff/useHandoffActions'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
-import { useCompactQueue } from './useCompactQueue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
 import { useForkModeChannel } from './useForkModeChannel'
@@ -179,7 +180,6 @@ export function useComposerShell(params: ComposerShellParams) {
   const { send, steer, followUp, abort, compact, sendBash } = useChat()
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
-  const compactQueue = useCompactQueue()
   const sidebar = useSidebar()
   const { signal: forkEnterSignal } = useForkModeChannel()
   const { signal: handoffEnterSignal } = useHandoffModeChannel()
@@ -378,10 +378,15 @@ export function useComposerShell(params: ComposerShellParams) {
     abort,
   })
 
-  /** 忙时（流式/派发/发送中）—— canSend 共用守卫（不含 isCompacting：压缩期允许排队）。
-   *  仅约束普通 send；staging 发送不受 isActive 拦（fork-ask 对源只读，streaming 中合法） */
-  const isBusy = computed(() => isActive.value || isSending.value)
-  const canSend = computed(() => hasInput.value && !isBusy.value)
+  /**
+   * [u3c / D1 语义收窄] canSend = 「可提交」（hasInput ∧ ¬isSending 双发锁）——**占用不再拦截**：
+   * lane 判定收归 runtime 内核（D1），settling/compacting/bash/turn 活跃期发送合法（内核排队/
+   * 入槽），禁令只剩空输入与本地双发锁两类（toast 分型见 core dispatch/send 的 routeStaging）。
+   * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧车道判定的残留
+   * （占用即拦截），随 D1「renderer 只提交不判定」退役（u3b 收 core send.ts 的 canSend 语义，
+   * 壳层派生同批收窄归 u3c）。
+   * 仅约束普通 send；staging 发送不受本守卫拦（fork-ask 对源只读，streaming 中合法）。 */
+  const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
    *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兑底（handleHandoffSend）。
    *  非 staging 态维持原 canSend（hasInput ∧ ¬isBusy）。 */
@@ -419,14 +424,13 @@ export function useComposerShell(params: ComposerShellParams) {
           : t('panel.composer.inputHint')),
   )
 
-  // ── 发送分流（core dispatch/send；D6 统一分发器：staging > steer 路由 > canSend > staging.send >
-  //    defer 路由 > landing > bash > /compact > send）──
+  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 守卫 >
+  //    staging.send > landing（含 bash）> bash > /compact > send（统一 submit））──
   const { onSend } = useComposerSend({
     staging: { hasActiveStaging: staging.hasActiveStaging, send: staging.send, activeStaging: staging.activeStaging },
     getStagingConfig,
     canSend,
     hasInput,
-    getSendRoute: () => sendRoute.value,
     draft,
     inputRef,
     sessionIdRef,
@@ -438,13 +442,40 @@ export function useComposerShell(params: ComposerShellParams) {
     flow,
     localThinkingLevel,
     send,
-    steer,
     compact,
-    enqueueCompact: (sessionId: string, text: string, segments: Segment[]) =>
-      compactQueue.enqueue(sessionId, text, segments),
     toastError,
     t: t as (key: string, params?: Record<string, unknown>) => string,
   })
+
+  /**
+   * [u3c / D7] 队列条目撤销（×）的文本回输入区——delivery.cancel reply 的全文 + segments
+   * 快照落回草稿（ADR-0043 Segment[] 模型）。
+   *
+   * 空输入（无文本且无 chip）→ restoreSegments 整段恢复（text + image/file/skill/session chip，
+   * 与发送失败回滚同通路）；已有输入 → 追加不覆盖：走 composerInjectionStore 单值槽位 +
+   * '\n\n' 累积语义（与 useSidebarSessionActions 的 forceQuit 回收同款）——用户正在输入的内容
+   * 不丢（此前 forceQuit 路径已验证的取舍）。无 segments 快照（异常 reply）→ 纯文本落草稿。
+   * 注入通道不携带 segments，追加分支只回文本（已登记 deviations）。
+   */
+  function restoreToDraft(payload: { text: string; segments?: Segment[] }): void {
+    const text = payload.text
+    const segments = payload.segments
+    const currentText = (inputRef.value?.getText() ?? draft.value).trim()
+    const hasChips = (inputRef.value?.getSegments() ?? []).some((s) => s.type !== 'text')
+    if (currentText.length === 0 && !hasChips) {
+      if (segments && segments.length > 0) restoreSegments(segments)
+      else if (text.trim()) restoreInput(text)
+      return
+    }
+    const sid = sessionIdRef.value
+    if (!sid || !text.trim()) return
+    const pendingText = composerInjectionStore.pendingInjection.value?.text
+    composerInjectionStore.requestInjection({
+      target: 'current',
+      sessionId: sid,
+      text: pendingText ? `${pendingText}\n\n${text}` : text,
+    })
+  }
 
   return {
     // model-thinking
@@ -488,12 +519,15 @@ export function useComposerShell(params: ComposerShellParams) {
     onAbort,
     // send
     onSend,
-    // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）
+    // [u3c] 队列条目撤销回草稿（useQueueRows 的行撤销 handler 注入本回调）
+    restoreToDraft,
+    // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）。
+    // [u3c/D1] sendRoute 保留为**发送位 UI 预测**（不再是投递决策——决策权在内核），
+    // Alt+⏎ 的 followUp 保留语义按它分流（composer-keydown）。
     sendRoute,
     sendButtonState,
     // 派生状态
     hasInput,
-    isBusy,
     canSend,
     canSubmit,
     // 视觉

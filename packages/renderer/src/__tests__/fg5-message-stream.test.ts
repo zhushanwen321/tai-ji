@@ -319,170 +319,34 @@ describe('FG5 chat store 块类型扩展', () => {
     expect(store.getRetryState('sx')).toBeUndefined()
   })
 
-  it('queue_update 设置 queueState（steering/followUp）', () => {
+  /**
+   * [u3c 退役] queue_update 全族用例（8 条：queueState 置位/清空、drain 驱动 appendUser、
+   * 重复文本/跨类型计数 diff、message_start 时序、retry/queue session 隔离）随投递所有权内核
+   * 整体退役——设计 §3.1 删除面 + §3.4+ 接管归属表：
+   * - queue_update 帧降级为内核内部回执（u3b 删除 message.queue_update handler），不再直驱
+   *   renderer UI，也不再写 store.queueStates / 驱动 pendingBuffer 计数腿（pushPending/
+   *   countDrained/drainN）；
+   * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
+   *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
+   * 覆盖去向：core chat __tests__/effects-delivery-receipt.test.ts（回执命中/幂等/direct 豁免）
+   * + __tests__/useChat.test.ts（session.delivery 帧消费与 morph）+ renderer 队列区新用例
+   * （__tests__/panel/queue-bubble-s8.test.ts / __tests__/composables/panel/use-queue-rows.test.ts）。
+   */
+  it('queue_update 不再写 store（帧降级为内核内部回执：无 queueStates、无 pendingBuffer 消费）', () => {
     const store = useChatStore()
+    store.pushPending('sx', textToSegments('继续'), 'steer')
+    store.applyMessageEvent('sx', {
+      type: 'message.queue_update',
+      payload: { sessionId: 'sx', steering: ['继续'], followUp: ['下一步'] },
+    })
+    // 置位腿退役：queueStates 不再被写
     expect(store.getQueueState('sx')).toBeUndefined()
+    // drain 腿退役：buffered 条目不再经 queue_update 差集入流（其入流由送达回执承担）
     store.applyMessageEvent('sx', {
       type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['再快一点'], followUp: ['下一步'] },
+      payload: { sessionId: 'sx', steering: [] },
     })
-    expect(store.getQueueState('sx')).toEqual({ steering: ['再快一点'], followUp: ['下一步'] })
-    // 两字段都缺 → 清空
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx' },
-    })
-    expect(store.getQueueState('sx')).toBeUndefined()
-  })
-
-  it('queue_update 空数组 [] 视为无内容（pi 发 []，需清 queueState）', () => {
-    const store = useChatStore()
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['x'] },
-    })
-    expect(store.getQueueState('sx')?.steering).toEqual(['x'])
-    // pi 发空数组（drain 完成后 _emitQueueUpdate 展开为 []）
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: [], followUp: [] },
-    })
-    expect(store.getQueueState('sx')).toBeUndefined()
-  })
-
-  it('queue_update drain 驱动 appendUser（steer 投递，m1/m2 新 API）', () => {
-    const store = useChatStore()
-    // steer 入队：pushPending 暂存到 buffer（不进 messages）
-    store.pushPending('sx', textToSegments('补充注册页'), 'steer')
     expect(store.getMessages('sx')).toHaveLength(0)
-    expect(store.pendingBuffer.get('sx')).toHaveLength(1)
-    // queue_update 入队（设置 queueState，prev 空故不 drain）
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['补充注册页'] },
-    })
-    expect(store.getMessages('sx')).toHaveLength(0) // 仍未投递
-    // pi drain 投递：queue_update 移除该项 → drainPending + appendUser 追加 complete user
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: [] },
-    })
-    const msgs = store.getMessages('sx')
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0].role).toBe('user')
-    expect(msgs[0].status).toBe('complete')
-    expect(store.pendingBuffer.get('sx') ?? []).toHaveLength(0)
-  })
-
-  it('queue_update drain 驱动 appendUser（followUp 投递）', () => {
-    const store = useChatStore()
-    store.pushPending('sx', textToSegments('下轮任务'), 'follow-up')
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', followUp: ['下轮任务'] },
-    })
-    // drain
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', followUp: [] },
-    })
-    const msgs = store.getMessages('sx')
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0].role).toBe('user')
-    expect(msgs[0].status).toBe('complete')
-    expect(store.pendingBuffer.get('sx') ?? []).toHaveLength(0)
-  })
-
-  it('queue_update 重复文本 drain（B1 回归：计数 diff 精确匹配）', () => {
-    const store = useChatStore()
-    // 连发两条相同文本的 steer（pushPending 两条到 buffer）
-    store.pushPending('sx', textToSegments('继续'), 'steer')
-    store.pushPending('sx', textToSegments('继续'), 'steer')
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['继续', '继续'] },
-    })
-    // pi drain 一条 → 队列剩一条
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['继续'] },
-    })
-    let msgs = store.getMessages('sx')
-    expect(msgs).toHaveLength(1) // 恰好 appendUser 一条
-    expect(store.pendingBuffer.get('sx') ?? []).toHaveLength(1) // buffer 剩一条
-    // 再 drain 最后一条
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: [] },
-    })
-    msgs = store.getMessages('sx')
-    expect(msgs).toHaveLength(2)
-    expect(store.pendingBuffer.get('sx') ?? []).toHaveLength(0)
-  })
-
-  it('message_start 不干预 drain 结果（pi 保证 queue_update(drain) 先到）', () => {
-    const store = useChatStore()
-    // steer 入队
-    store.pushPending('sx', textToSegments('补充'), 'steer')
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['补充'] },
-    })
-    // pi 保证的真实时序：queue_update(drain) 先到 → drainPending + appendUser（complete user）
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: [] },
-    })
-    let msgs = store.getMessages('sx')
-    expect(msgs.some((m) => m.role === 'user' && m.status === 'complete')).toBe(true)
-    expect(store.pendingBuffer.get('sx') ?? []).toHaveLength(0)
-    // message_start 随后到达：建 streaming assistant，不干预已 complete 的 user 消息。
-    // pi 源码（agent-session.ts 注释 "remove it BEFORE emitting"）保证 drain 不晚于 message_start。
-    store.applyMessageEvent('sx', {
-      type: 'message.message_start',
-      payload: { sessionId: 'sx', messageId: 'a1' },
-    })
-    msgs = store.getMessages('sx')
-    // user 消息仍 complete（未被误改）+ message_start 建 streaming assistant
-    expect(msgs.some((m) => m.role === 'user' && m.status === 'complete')).toBe(true)
-    expect(msgs.some((m) => m.role === 'assistant' && m.status === 'streaming')).toBe(true)
-    // queueStates 已清（queue_update 空载删除，message_start 不重加）
-    expect(store.getQueueState('sx')).toBeUndefined()
-  })
-
-  it('跨类型同文本 drain（W5：sendMode 精确匹配，steer 与 followUp 不互误）', () => {
-    const store = useChatStore()
-    // steer「补」和 followUp「补」文本相同（buffer 各一条）
-    store.pushPending('sx', textToSegments('补'), 'steer')
-    store.pushPending('sx', textToSegments('补'), 'follow-up')
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: ['补'], followUp: ['补'] },
-    })
-    // 只 drain steer 那条（followUp 队列不动）
-    store.applyMessageEvent('sx', {
-      type: 'message.queue_update',
-      payload: { sessionId: 'sx', steering: [], followUp: ['补'] },
-    })
-    const msgs = store.getMessages('sx')
-    // steer 那条 appendUser 入流（complete user，无 sendMode——m3 后不驱动配色），
-    // followUp 那条仍在 buffer（sendMode 精确匹配，不误取）
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0].role).toBe('user')
-    expect(msgs[0].status).toBe('complete')
-    const buf = store.pendingBuffer.get('sx') ?? []
-    expect(buf).toHaveLength(1)
-    expect(buf[0].sendMode).toBe('follow-up')
-  })
-
-  it('retry/queue 状态按 session 隔离（互不串扰）', () => {
-    const store = useChatStore()
-    store.applyMessageEvent('sa', { type: 'message.auto_retry_start', payload: { sessionId: 'sa', attempt: 1 } })
-    store.applyMessageEvent('sb', { type: 'message.queue_update', payload: { sessionId: 'sb', steering: ['x'] } })
-    expect(store.getRetryState('sa')?.attempt).toBe(1)
-    expect(store.getRetryState('sb')).toBeUndefined()
-    expect(store.getQueueState('sb')?.steering).toEqual(['x'])
-    expect(store.getQueueState('sa')).toBeUndefined()
   })
 
   // ── W07-C: shared 类型扩展（compaction/branch 作 system 提示行）──

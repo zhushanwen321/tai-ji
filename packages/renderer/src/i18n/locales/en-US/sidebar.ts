@@ -80,8 +80,10 @@ export default {
   },
   assignProjectFailed: 'Failed to assign to project',
   forceQuitFailed: 'Failed to force quit: {msg}',
-  // [session-dead structural fix D3] explicit toast after forceQuit recovers the defer queue into the Composer draft
+  // [delivery-ownership kernel u3c / D10] explicit toast after forceQuit drains undelivered kernel entries into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
+  // drain RPC failure (pi already dead / transport error) — recovered text is not reproducible, must surface
+  forceQuitQueueRecoverFailed: 'Failed to recover queued messages: {msg}',
   // [session-dead structural fix D6/D7 C1 option 1] long-turn progress bar (above Composer).
   // Copy discipline (D7): state facts only, no judgment words (stuck/unresponsive/error); neutral actions, no preset recommendation
   turnProgress: {

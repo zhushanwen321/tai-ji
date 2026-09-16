@@ -53,15 +53,14 @@
         @drop.prevent="onDrop"
       >
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
-             仅 border-b 分隔，Zap/Clock/Hourglass icon + truncate 文本）——6 区第 1 位。
-             [compact-defer-composer-queue u1] defer 行三 props（deferEntries/deferChip/deferHint）
-             由本组件从 useCompactQueue + sessionPhase 算好传入；@remove-defer 撤销未提交条目 -->
+             仅 border-b 分隔）——6 区第 1 位。
+             [u3c/D7 单源化] 行数据 = session.delivery 状态帧投影（useQueueRows），
+             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync -->
         <QueueBubble
-          :state="queueState"
-          :defer-entries="deferEntries"
-          :defer-chip="deferChip"
-          :defer-hint="deferHint"
-          @remove-defer="onRemoveDefer"
+          :rows="queueRows"
+          :hint="queueHint"
+          @cancel="onCancelQueueEntry"
+          @retry="onRetryQueueEntry"
         />
         <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
              经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
@@ -217,7 +216,7 @@ import { useChatStore } from '@/stores/chat'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
-import { useDeferQueueRows } from '@/composables/panel/useDeferQueueRows'
+import { useQueueRows } from '@/composables/panel/useQueueRows'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
@@ -244,9 +243,9 @@ const isActive = computed(() => {
   return chatStore.isActive(props.sessionId)
 })
 
-/** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
+/** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。
+ *  [u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧投影（useQueueRows）。 */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
-const queueState = computed(() => (props.sessionId ? chatStore.getQueueState(props.sessionId) : undefined))
 
 const draft = ref('')
 const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
@@ -259,8 +258,6 @@ const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 
 const sessionIdRef = computed(() => props.sessionId)
 
-// [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
-const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
 const {
   cmdOpen,
   cmdType,
@@ -353,6 +350,8 @@ const {
   onFollowUp,
   onAbort,
   onSend,
+  // [u3c] 队列条目撤销/回收的文本回草稿（useQueueRows 的 restoreDraft 注入）
+  restoreToDraft,
   sendRoute,
   sendButtonState,
   canSubmit,
@@ -362,6 +361,11 @@ const {
   // 传 ComposerInput suppressTriggers——bash 模式下 $/#/@/ 全部不触发浮层（设计 D6 豁免）
   isBashMode,
 } = shell
+
+// [u3c/D7] 队列区行（session.delivery 帧投影）+ 撤销/重试编排（行数约束拆出 useQueueRows；
+// 依赖 shell 的 restoreToDraft，故在解构后调用）
+const { rows: queueRows, hint: queueHint, onCancelEntry: onCancelQueueEntry, onRetryEntry: onRetryQueueEntry } =
+  useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft })
 
 // composer-box 聚焦态 + 聚焦环视觉（v6 §6.1 .focused）：从本组件拆出（script 行数约束，
 // 见 composer-focus-ring.ts）；依赖 shell 的 boxClass/staging，故在解构后调用

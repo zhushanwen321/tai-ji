@@ -115,16 +115,16 @@ graph TD
 
 | 项 | 裁决 | 执行时点 |
 |----|------|----------|
-| E2E-EQUIV-01 受影响 spec（send-queue-e2e、completion-backflow-e2e、pi-protocol-contract） | 跑（空载串行） | u2/u5 committed 后 |
-| E2E-MOCK-01 composer.spec | 跑 | u3c committed 后 |
+| E2E-EQUIV-01 子集（**send-queue-e2e、completion-backflow-e2e、pi-protocol-contract、live-reload、session-manager-full-e2e**） | 跑（空载串行；`TAIJI_SKIP_REAL_PI=1` 凭证无关子集） | u2/u3a/u5 committed 后 |
+| E2E-MOCK-01（mock 行为轨全 project，零 token） | 跑（机器 rule 命中即按机器粒度全跑） | u3c committed 后 |
 | E2E-ELECTRON-01 P0 smoke（@p0-smoke） | 跑（CI 每 PR 固定，本地复跑确认） | 每 unit committed 后 |
 | E2E-ELECTRON-01 state-tearing ST-1/ST-5 | 跑 | u3c committed 后 |
 | 新增：压缩窗口 equivalence e2e（V1/V4 自动化形态） | 跑 + 同 commit 登记 e2e-map.json（R2，trigger = runtime session 服务或 smart-context 变更） | u2+u4 后 |
 | 新增：V9/V10/V11 自动化形态 | 同 commit 登记 e2e-map.json | u3c 后 |
-| E2E-REAL-01 其余 spec | 不跑（改动面外） | - |
+| E2E-REAL-01（workspace/ask-user/tasks-drawer/workflow-thinkinglevel 4 spec） | **不跑**（机器 rule 命中但人工裁决排除：4 spec 的断言面 = workspace 树 / ask-user 交互 / 任务抽屉 / thinking-level 切换，无投递语义断言；投递面已由 E2E-EQUIV-01 子集 + 新增压缩窗口 e2e 覆盖；real 轨耗真实 LLM token 且须空载串行，按「禁止全量扫跑」不纳入） | - |
 | E2E-VISUAL-01 像素轨 | 跑（always 项，CI 已覆盖；QueueBubble morph 后本地确认一次） | u3c committed 后 |
 
-**e2e 机器对账披露**：`node scripts/select-affected-e2e.mjs --base main` 于计划期执行——分支刚切出 main、diff=0，机器仅输出 always 项 2 条（E2E-ELECTRON-01/E2E-VISUAL-01）。人工清单（上表）来自设计 §4 按预期改动面圈定，属 plan.md 允许的人工判断项。**复核点**：u2/u3b/u3c/u5 committed 后各复跑一次机器对账，机器输出有人工清单没有的 rule → 补清单或落「不跑（理由）」；`--check` 防漏登记门禁随 pre-commit 生效。
+**e2e 机器对账披露**：① 计划期 `node scripts/select-affected-e2e.mjs --base main` —— 分支刚切出 main、diff=0，机器仅输出 always 项 2 条（E2E-ELECTRON-01/E2E-VISUAL-01）。② **执行期复核（2026-09-16 21:35，u2+u3b committed 后）**：机器输出 5 条 rule——E2E-ELECTRON-01 / E2E-VISUAL-01（always）+ **E2E-MOCK-01 / E2E-REAL-01 / E2E-EQUIV-01（on-diff 新增命中）**。逐条处置已并入上表：EQUIV-01 子集扩至 5 spec（原 3 spec，补 live-reload 与 session-manager-full-e2e——二者正是 live ≡ reload 守卫，与 D7 单源化直接相关）；MOCK-01 采纳机器粒度全跑（零 token）；REAL-01 落「不跑（理由见上表）」。等 u3c/u5 committed 后各再复跑一次本对账。
 
 **单测化沉淀路径**（e2e 逐步单测化方向）：标记确认/对账回收/收回-重投/收养序列四类核心断言随 u1/u2 以 fake port 重放形态落单测；e2e 仅保留真实 pi 集成面（V1-V7）。
 
@@ -157,11 +157,11 @@ graph TD
 |------|------|------|----------|
 | u-contracts | committed | 1 | commit 3ff81b8f5 之后的流转 commit；两包 typecheck 绿 + session-delivery 73 测试全绿（主 agent 复跑证实） |
 | u1 | committed | 1 | 内核 v2 + 129 测试全绿（56 新增）+ typecheck 绿；两段式 cancel in-flight、confirmDelivered 接受 queued（D3② rebuild/竞态事实优先）、deliveredWindow:0 bug 修复；偏差见变更历史 |
-| u2 | committed | 4 | 主 agent 复跑：runtime 全量 500 files / 5858 passed（0 failed）+ `tsc --noEmit` 零错 + `check_pi_type_leak` exit 0 + u2 十文件 109/109 绿 + 探针 `p-f9-queue-primitives.mjs` exit 0（检查点 4 实测 settling 死窗口成立 → 保守档必需；检查点 3 结论=插件 `{queued}` 语义透明）；残余 20 例由专职收口 dev 迁移完成（四文件 202 绿，迁移逐条附设计依据、无弱化）。偏差 D-13~D-20 |
-| u3b | verified（commit 待落） | 2 | 主 agent 复跑：`pnpm test` 126 files / 2031 passed / 5 todo（0 failed）+ `npx tsc --noEmit` 495 = 基线零扩大；E5a/E5b/E5c 迁移保留全部原判据（恰一条气泡 / `toRaw(content)===segments` 引用恒等 / segmentsToText 保真 / reducer 镜像等价 / id 异源窗断言）；4 个退役腿测试文件删除 + 新增 effects-delivery-receipt.test.ts（9 例）；偏差 D-7~D-12。commit 阻塞：仓库级守卫 check_pi_type_leak 命中 u2 在途文件（见 D-12） |
-| u3a | pending | 0 | - |
-| u4 | pending | 0 | - |
-| u3c | pending | 0 | - |
+| u2 | committed | 4 | commit `eeb53f429`（21 文件）。主 agent 复跑：runtime 全量 500 files / 5858 passed（0 failed）+ `tsc --noEmit` 零错 + `check_pi_type_leak` exit 0 + u2 十文件 109/109 绿 + 探针 `p-f9-queue-primitives.mjs` exit 0（检查点 4 实测 settling 死窗口成立 → 保守档必需；检查点 3 结论=插件 `{queued}` 语义透明）；残余 20 例由专职收口 dev 迁移完成（四文件 202 绿，迁移逐条附设计依据、无弱化）；守卫收口（prompt-outpost 登记换新调用点 + 探针 maxRetries）双绿。偏差 D-13~D-20 |
+| u3b | committed | 2 | commit `0bd885fd0`（25 文件）。主 agent 复跑：`pnpm test` 126 files / 2031 passed / 5 todo（0 failed）+ `npx tsc --noEmit` 495 = 基线零扩大；E5a/E5b/E5c 迁移保留全部原判据（恰一条气泡 / `toRaw(content)===segments` 引用恒等 / segmentsToText 保真 / reducer 镜像等价 / id 异源窗断言）；4 个退役腿测试文件删除 + 新增 effects-delivery-receipt.test.ts（9 例）；偏差 D-7~D-12 |
+| u3a | in-progress | 1 | 派发中（依赖 u2 committed 已满足）|
+| u4 | in-progress | 1 | 派发中（依赖 u2 committed 已满足）|
+| u3c | in-progress | 1 | 派发中（按「u3b 实现已验证在盘」提前启动，见 D-9；目标 = 关闭 renderer 11 个 vue-tsc 过渡错）|
 | u5 | pending | 0 | - |
 
 ## 7 残留风险与变更历史
@@ -186,3 +186,4 @@ graph TD
 - 2026-09-16 20:40：u3b 接替完成（续跑轮次 2）。主 agent 硬核验通过：领地 diff 与申报一致；复跑 core 全量 126 files / 2031 passed / 5 todo（0 failed）、tsc 495 = 基线；抽查实质——E5x 迁移保留/加强断言（`toRaw` 引用恒等、单气泡、inflight 归零、reducer 镜像等价），store.test 退役锁 + 维度转移有 D7 依据，跨包消费面仅 renderer（D-9 登记，u3c 关闭）。偏差 D-7~D-12 登记入 §5。流转 commit 被仓库级守卫 check_pi_type_leak 拦下（命中 u2 在途文件，非 u3b 问题）→ 通知 u2 正面修复后补提交；同时按「u3b 实现已验证在盘」判定 u3c 可并行启动（调度偏差登记于 D-9 说明）。
 - 2026-09-16 20:50：u2 主体完成（续跑轮次 3，报 partial）。主 agent 硬核验：runtime typecheck 零错、守卫 exit 0（PiEventListener 已改内联 lambda）、u2 十文件 109/109 绿、探针 exit 0（检查点 4 结论=settling 死窗口成立 → 保守档为必需；检查点 3 结论=插件 {queued} 语义透明）、文件集与申报一致。**u3b 补提交落地（0bd885fd0，25 文件，hooks 全绿）**。残余：`test/**` 4 文件 20 例锁定旧 dispatcher 语义（prompt 实参形态 / occupancy 置位顺序 / send.rejected 广播 / steer-followUp 直调）未迁移，u2 上下文预算耗尽自报残余债务 → 派专职收口 dev（D-20）。u2 偏差 D-13~D-19 登记入 §5。旁证：`src/__tests__/services/idle-pi-reclaim-integration.test.ts` 首轮全量红、二轮绿（真进程并发抖动嫌疑）——登记为观察项，待三轮数据判 flake。
 - 2026-09-16 21:10：u2 残余收口完成（专职 dev）。主 agent 硬核验：领地干净（只动 `test/**` 四文件，零源码改动）；四文件复跑 202 passed；全量复跑 500 files / 5858 passed（0 failed）；`tsc --noEmit` 零错；抽查迁移实质——`steerMessage/followUpMessage` 直调断言 → 内核车道（`streamingBehavior='steer'/'followUp'` + 调用次数 + 正文包含），「throws when session not active」→ 「resolves + message.error 错因可见」，与设计「send.rejected 全链退役（内核永远不拒绝用户消息）」逐字对得上，无弱化。idle-pi 三轮数据：红/绿/绿（全量复跑绿）→ 按并发抖动归档观察，不进 flake 档案。u2 状态 = committed。
+- 2026-09-16 21:25：u2 提交时被两条守卫拦下，派守卫收口 dev 一次修完并复核：① `check_prompt_outposts` 白名单条目换新调用点（`await client.prompt(text, opts.images, opts.behavior)`，reason 记注入链：唯一调用方传 `injector.inject` 产物、busy-retry 复用注入文本；独立复核确认全文件仅此一处出站点）② 探针 teardown `rmSync` 补 `maxRetries: 5, retryDelay: 20`（F3 规则）。两守卫 exit 0 后 **u2 落地 commit `eeb53f429`（21 文件）**。解锁 u3a、u4 → 已并行派发（u3c 仍在跑，并发 3）。**D-15/D-16（clearQueue 端口收编 / 组合根显式注入）不在 u3a/u4 范围，改归 u5 收口评估**（避免强制波及非领地文件的连带改造）。

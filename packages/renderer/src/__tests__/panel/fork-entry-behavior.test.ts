@@ -182,7 +182,8 @@ describe('U9：forkSessionAsk send 失败自动回滚（disposeSession + session
       cwd: '/tmp',
     } as never)
     const chatApi = (await import('@/api')).chat
-    vi.spyOn(chatApi, 'send' as never).mockRejectedValue(new Error('send failed') as never)
+    // [u3c/D1] fork 首发走统一提交（delivery.submit）——失败注入点随之迁移
+    vi.spyOn(chatApi, 'submitDelivery' as never).mockRejectedValue(new Error('send failed') as never)
 
     // [W1] forkSessionAsk 现在 rethrow 而非吞错 resolve（错误反馈职责上移到调用方）。
     // 资源清理（disposeSession + remove + removeFromList）仍在 catch 内 rethrow 前执行。

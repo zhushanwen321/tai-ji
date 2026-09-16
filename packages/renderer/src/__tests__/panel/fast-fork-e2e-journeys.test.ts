@@ -11,7 +11,7 @@
  * 留 Playwright E2E。本文件用分段断言拼接覆盖：
  *   - Turn 断言 signal 更新（点 fork 提问按钮 → useForkModeChannel.signal 携带 srcSessionId/fromMessageId）
  *   - Composer 手动调 enterForkMode 断言 fork 模式三重视觉
- *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.send 新 session id）
+ *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.submitDelivery 新 session id，u3c/D-10）
  * 非真正跨 mount 实例链通（Turn 与 Composer 未同屏 mount，channel 经 watch 的真实投递未在此验证）。
  *
  * 只 mock 最底层 system boundary：api domain（RPC）+ useChat（流式依赖）。
@@ -50,6 +50,10 @@ const { sessionApiMock, chatApiMock } = vi.hoisted(() => ({
   },
   chatApiMock: {
     send: vi.fn(() => Promise.resolve()),
+    // [u3c/D1] fork 首发走统一提交（clientUuid = appendUser 产物 → 与内核条目 id 同源，D-10）
+    submitDelivery: vi.fn((sessionId: string, _content: string, clientUuid: string) =>
+      Promise.resolve({ clientUuid, state: 'in-flight' as const, lane: 'direct' as const, sessionId }),
+    ),
     steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
     abort: vi.fn(() => Promise.resolve()),
@@ -196,7 +200,7 @@ afterEach(() => {
 // ════════════════════════════════════════════════════════════════════════
 // E2E-L1-1 · fork-ask 完整旅程（P0，最核心）
 // 真实链通：renderer 壳 useChatViewDeps.onForkAsk → useForkModeChannel signal → Composer.enterForkMode →
-//           handleForkSend → useForkActions.forkSessionAsk → sessionApi.fork + chatApi.send
+//           handleForkSend → useForkActions.forkSessionAsk → sessionApi.fork + chatApi.submitDelivery
 // ════════════════════════════════════════════════════════════════════════
 describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → forkSessionAsk）', () => {
   it('每条 assistant 区有 fork 提问按钮（data-testid 始终在 DOM，spec §1 门控已放开）', () => {
@@ -303,9 +307,12 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     // fork RPC 被调 1 次，第 1 参 = 's-src'
     expect(sessionApiMock.fork).toHaveBeenCalledTimes(1)
     expect(sessionApiMock.fork.mock.calls[0][0]).toBe('s-src')
-    // chat.send 被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）
-    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.send.mock.calls[0][0]).toBe('s-forked')
+    // [u3c/D-10] 统一提交被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）；
+    // 第 3 参 clientUuid = 本地乐观气泡 id（消除 fork 首发与内核条目 id 异源窗口）
+    expect(chatApiMock.submitDelivery).toHaveBeenCalledTimes(1)
+    expect(chatApiMock.submitDelivery.mock.calls[0][0]).toBe('s-forked')
+    expect(chatApiMock.submitDelivery.mock.calls[0][2]).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+    expect(chatApiMock.send).not.toHaveBeenCalled()
     // forkMode 自动复位 false（发送后退出 fork 模式）
     expect(vm.forkMode.value).toBe(false)
     // 用户可见：composer-box 已退出 fork-mode class

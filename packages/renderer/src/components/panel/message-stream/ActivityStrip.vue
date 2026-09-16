@@ -88,9 +88,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from '@lucide/vue'
 import type { ExecutingBash } from '@taiji/core'
+import { getDeliveryProjectionRef } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 import { useConstantHeightAssert } from '@/composables/panel/useConstantHeightAssert'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
+import { deliveryQueueEntries } from '@/composables/panel/useQueueRows'
 import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
 
 const props = defineProps<{
@@ -150,13 +151,15 @@ const rows = computed<ActivityRow[]>(() => {
   return list
 })
 
-const queue = useCompactQueue()
-
-/** 待发队列未提交条目计数（副文案口径，[compact-defer-composer-queue §2.2]）：只计
- *  mode === undefined 的未提交条目，与 composer 队列区 defer 行归一规则（§2.1）同源——
- *  flush 提交后已提交条目（mode 已写）不计入（承接面分通道：steer 镜像行 / send 无行）。
- *  count === 0 时副文案与「·」不渲染（活动带仍在，压缩状态本身独立成立）。 */
-const flushCount = computed(() => queue.peek(props.sessionId).filter((m) => m.mode === undefined).length)
+/**
+ * 待发队列条目计数（副文案口径，[u3c/D7] 单源化后与队列区行同一数据源）：
+ * session.delivery 状态帧投影里「非 direct 且未 delivered」的内核条目数——过滤唯一定义点
+ * = deliveryQueueEntries（composables/panel/useQueueRows），与 QueueBubble 行渲染同源不漂移。
+ * count === 0 时副文案与「·」不渲染（活动带仍在，压缩状态本身独立成立）。
+ */
+const flushCount = computed(
+  () => deliveryQueueEntries(getDeliveryProjectionRef().value.get(props.sessionId) ?? []).length,
+)
 
 // dev-only 像素常量漂移检测（随行迁入本组件；compacting 行升级通栏带后 COMPACTING_NOTICE_HEIGHT
 // 已随 §2.2 同步 24 → 50，bash 行结构不变 EXECUTING_BASH_NOTICE_HEIGHT 不动）

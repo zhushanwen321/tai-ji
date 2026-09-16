@@ -58,23 +58,18 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     expect(store.getRetryState(sid)).toBeUndefined()
   })
 
-  it('断连时 finalizeAllStreaming 清理 queueStates', () => {
+  it('[u3c 退役] queue_update 不再写入 queueStates——瞬态收口面收敛为 occupancy/retry/streaming', () => {
+    // [HISTORICAL] 前身「断连时 finalizeAllStreaming 清理 queueStates」用例：queue_update 帧
+    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入腿，队列区数据源 =
+    // session.delivery 投影），本用例前提（queue_update 能置 queueStates）结构性不成立。
+    // 替代覆盖：内核投影随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
+    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收口用例。
     const store = useChatStore()
     const sid = 's-queue'
-
-    // 把 session 标为「队列有内容」（message.queue_update 驱动）
     store.applyMessageEvent(sid, {
       type: 'message.queue_update',
       payload: { sessionId: sid, steering: ['补一条'] },
     })
-    expect(store.getQueueState(sid)).toBeDefined()
-    expect(store.getQueueState(sid)?.steering).toEqual(['补一条'])
-
-    // 模拟断连：finalizeAllStreaming('disconnect')
-    // W3：应清掉 queueStates（当前实现不清，红灯预期）
-    store.finalizeAllStreaming('disconnect')
-
-    // 关键断言：断连后队列态应被清
     expect(store.getQueueState(sid)).toBeUndefined()
   })
 
@@ -105,7 +100,8 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     const store = useChatStore()
     const sid = 's-reset'
 
-    // 置满所有瞬态：streaming + compacting + retry + queue + pendingSend
+    // 置满所有瞬态：streaming + compacting + retry + pendingSend
+    // （[u3c] queueStates 置位腿已随 queue_update 退役，不再计入瞬态面）
     store.applyMessageEvent(sid, {
       type: 'message.message_start',
       payload: { sessionId: sid, messageId: 'a1' },
@@ -115,16 +111,11 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
       type: 'message.auto_retry_start',
       payload: { sessionId: sid, attempt: 1 },
     })
-    store.applyMessageEvent(sid, {
-      type: 'message.queue_update',
-      payload: { sessionId: sid, steering: ['x'] },
-    })
     store.addPendingSend(sid)
 
     expect(store.isGenerating(sid)).toBe(true)
     expect(store.isCompacting(sid)).toBe(true)
     expect(store.getRetryState(sid)).toBeDefined()
-    expect(store.getQueueState(sid)).toBeDefined()
     expect(store.isActive(sid)).toBe(true)
 
     // W3：调用统一收口 helper（resetTransientStates 已在 store API 暴露）
@@ -133,6 +124,5 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     // 关键：全部瞬态一次性清零
     expect(store.isCompacting(sid)).toBe(false)
     expect(store.getRetryState(sid)).toBeUndefined()
-    expect(store.getQueueState(sid)).toBeUndefined()
   })
 })

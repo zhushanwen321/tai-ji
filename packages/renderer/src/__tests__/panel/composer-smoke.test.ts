@@ -18,10 +18,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, effectScope, ref } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import Panel from '@/components/panel/Panel.vue'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
@@ -174,12 +173,6 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
-  // 单例首次创建放 active effect scope（onScopeDispose 注册 cleanup，防 Vue warn），
-  // 并清空所有分区（单例跨用例共享）
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  useCompactQueue()._clearAllForTest()
 })
 
 describe('首屏冒烟（TC19）', () => {

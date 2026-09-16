@@ -143,6 +143,12 @@ export function useSidebar() {
       }
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
+    // [投递所有权内核 u3c / ADR-0049 范围修订] 队列区 per-session 分区的销毁编排**收窄**：
+    // 旧 defer 队列（useCompactQueue 经 useSessionScopedState 注册的 registerSessionCleanup）
+    // 已随其退役从编排清单消失；现役队列状态 = 内核 session.delivery 投影，清理点在 core
+    // useChat.disposeSession 内（clearDeliveryProjection），随本 hook 一并执行——「session
+    // 销毁唯一编排点」仍是 deleteSession → triggerSessionCleanups → 本 hooks，renderer 侧
+    // 不再多注册一个分区清理项。
     disposeChat: (sid) => useChat().disposeSession(sid),
     invalidateStatus: (sid) => invalidateStatusCache(sid),
     // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线：browserDestroy IPC

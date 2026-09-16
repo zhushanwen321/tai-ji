@@ -7,8 +7,10 @@
  * 的 createUseChat factory（IF5/IF6 契约）。本文件仅做三件事：
  *
  * 1. useChat() = createUseChat(rendererDeps)：注入 renderer 侧依赖（chatApi/sessionApi/
- *    useChatStore/useSessionStore/useToast/i18n/useCompactQueue），20 个消费方零 import 改动
+ *    useChatStore/useSessionStore/useToast/i18n），20 个消费方零 import 改动
  *    （对齐 w4 createChatStore + defineStore wrapper 模式）。
+ *    [u3c] getCompactQueue 注入已随 useCompactQueue 退役摘除（队列区数据源 = session.delivery
+ *    帧投影，见 composables/panel/useQueueRows.ts）。
  * 2. ensureStreamSubscription 同名包装：core 版加 deps 参数（TD5），本包装注入 renderer deps，
  *    3 个复用点（useForkActions/useSidebar/useSessionStreamSync）零改动。
  * 3. re-export resetChatModuleState（as alias core 的 resetChatModuleStateForTest）：
@@ -34,7 +36,6 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 
 /**
  * ChatApiPort 实现：组装 api/domains/chat 的函数集（不需新 adapter 文件）。
@@ -42,8 +43,13 @@ import { useCompactQueue } from '@/composables/panel/useCompactQueue'
  */
 const chatApiPort: ChatApiPort = {
   // 端口适配：ChatApiPort.send 无 images 概念（Cmd+V 富呈现通路绕过端口直调 api/domains/chat），
-  // 发送编排链路（submitSegments）仅需 options.clientUuid（session-occupancy D2）透传。
+  // 发送编排链路仅需 options.clientUuid 透传。旧 send 保留至 u5 协议退役（renderer 活调用方
+  // 已收敛 delivery.submit——见下方 submitDelivery）。
   send: (sid, text, options) => chatApi.send(sid, text, undefined, options),
+  // [u3c/D1] 统一提交入口：乐观气泡后一律走 delivery.submit，lane 由 runtime 内核判定
+  // （renderer 只提交不判定）。clientUuid = 乐观气泡 id（appendUser 产物），内核条目 id /
+  // 出站标记身份源 / resync 判重锚。
+  submitDelivery: (sid, content, clientUuid, images) => chatApi.submitDelivery(sid, content, clientUuid, images),
   // `@` 定向消息分流（U2b）：实现在 session 域（session.subagentAction RPC），经端口
   // 暴露给 core useChat 发送链路（ChatApiPort 注释）；mock 层 stub 已随 U5 就位。
   // 懒解引用（调用时才读 sessionApi.subagentAction）：部分测试 vi.mock session 域时
@@ -67,14 +73,13 @@ const tFn = i18n.global.t as (key: string, params?: Record<string, unknown>) => 
 
 /**
  * ensureStreamSubscription 模块级函数所需 renderer deps（TD5）。
- * 每次调用取新 toast 实例（避免 toast 状态陈旧），getCompactQueue 取单例。
+ * 每次调用取新 toast 实例（避免 toast 状态陈旧）。
  */
 function rendererSubDeps(): EnsureStreamSubDeps {
   return {
     chatApi: chatApiPort,
     toast: useToast(),
     t: tFn,
-    getCompactQueue: () => useCompactQueue(),
   }
 }
 
@@ -95,7 +100,6 @@ export function useChat() {
     getSessionStore: () => useSessionStore(),
     toast: useToast(),
     t: tFn,
-    getCompactQueue: () => useCompactQueue(),
   } satisfies UseChatDeps)
 }
 

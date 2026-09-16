@@ -7,8 +7,10 @@
  *   settling（turn=settling 且无 compacting/bash→行出现，R3-U1；文案复用 dispatching key，
  *   P-1 探针 V8 校准点）
  * - P1.5 组件黑盒·通栏活动带 band（compact-defer-composer-queue §2.2 / A4+A7）：compacting 行
- *   摘除 content-col/system-notice、accent-soft 底 + border-y、副文案 count 只计未提交条目、
- *   count=0 隐藏副文案、bash/thinking/settling 行形态不变
+ *   摘除 content-col/system-notice、accent-soft 底 + border-y、副文案 count = 内核投递投影里
+ *   「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue 未提交条目口径随
+ *   队列退役，口径唯一定义点 = useQueueRows.deliveryQueueEntries）、count=0 隐藏副文案、
+ *   bash/thinking/settling 行形态不变
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
  *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；
  *   settling 与 compacting 并存 → 仅 compacting 行（同档位幂等，不重复堆叠）；
@@ -30,7 +32,8 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
+import { getDeliveryProjectionRef } from '@taiji/core'
+import type { DeliveryFrameEntry } from '@taiji/core'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
@@ -38,19 +41,18 @@ const apiMock = vi.hoisted(() => ({
   streamSubscribe: vi.fn(() => () => {}),
 }))
 
-/** useCompactQueue mock：band 副文案 count 口径测试需注入 mode!==undefined 条目（真实队列公开
- *  API 无法写 mode——flush 内部 setEntryMode），故 mock peek 返回可控快照；队列真实行为由
- *  use-compact-queue.test.ts 覆盖。 */
-const queueMock = vi.hoisted(() => ({
-  peek: vi.fn(() => [] as QueuedMessage[]),
-}))
+/** 投递投影注入助手：副文案 count 口径测试直接写 core 投影 ref（帧消费链路由 core useChat 的
+ *  session.delivery handler 承担，本组件只读投影——单源化后已无本地队列 mock 面）。 */
+function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
+  const ref = getDeliveryProjectionRef()
+  const next = new Map(ref.value)
+  next.set(sid, entries)
+  ref.value = next
+}
 
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   chat: { send: apiMock.send, steer: apiMock.steer, streamSubscribe: apiMock.streamSubscribe },
   session: {},
-}))
-vi.mock('@/composables/panel/useCompactQueue', () => ({
-  useCompactQueue: () => ({ peek: queueMock.peek }),
 }))
 // MessageStream 挂载的重依赖 composable（对齐 MessageStream.wire.test.ts 的隔离策略）
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -94,8 +96,8 @@ async function mountStrip(opts: {
 beforeEach(() => {
   setActivePinia(createPinia())
   resetForkNoticeFeed()
-  queueMock.peek.mockReset()
-  queueMock.peek.mockReturnValue([])
+  // 投影是模块级 ref（跨用例共享），逐用例显式重置（新 Map = 无条目）
+  getDeliveryProjectionRef().value = new Map()
 })
 
 describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
@@ -170,11 +172,9 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
 })
 
 describe('ActivityStrip · 通栏活动带 band（compact-defer-composer-queue §2.2 / A4+A7）', () => {
-  /** 构造待发条目（可注入提交通道 mode，模拟 flush 已提交条目——副文案 count 口径过滤） */
-  function queued(id: string, text: string, mode?: 'send' | 'steer'): QueuedMessage {
-    const entry: QueuedMessage = { id, text, segments: [{ type: 'text', text }] }
-    if (mode) entry.mode = mode
-    return entry
+  /** 构造投影条目（lane/state 双维决定是否计入副文案） */
+  function entry(clientUuid: string, state: DeliveryFrameEntry['state'], lane: DeliveryFrameEntry['lane']): DeliveryFrameEntry {
+    return { clientUuid, preview: clientUuid, state, lane }
   }
 
   it('compacting 行通栏带：无 content-col/system-notice、有 accent-soft 底与 border-y hairline', async () => {
@@ -197,12 +197,14 @@ describe('ActivityStrip · 通栏活动带 band（compact-defer-composer-queue �
     wrapper.unmount()
   })
 
-  it('count 口径：只计 mode===undefined 未提交条目（已提交 steer/send 条目不计入副文案）', async () => {
-    queueMock.peek.mockReturnValue([
-      queued('u1', '未提交 A'),
-      queued('s1', '已提交 steer', 'steer'),
-      queued('s2', '已提交 send', 'send'),
-      queued('u2', '未提交 B'),
+  it('count 口径：只计内核投影里「非 direct 且未 delivered」条目（direct 待确认气泡与已送达不计数）', async () => {
+    setProjection(SID, [
+      entry('u1', 'queued', 'queued'),
+      entry('u2', 'in-flight', 'steer'),
+      // direct 车道的乐观气泡原位保留（不进队列区，D7），不计入
+      entry('d1', 'in-flight', 'direct'),
+      // 已送达：transcript 权威已入流，不计入
+      entry('d2', 'delivered', 'steer'),
     ])
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const hint = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
@@ -214,7 +216,7 @@ describe('ActivityStrip · 通栏活动带 band（compact-defer-composer-queue �
   })
 
   it('count=0：副文案与「·」不渲染，活动带仍在（压缩状态本身独立成立，A4）', async () => {
-    queueMock.peek.mockReturnValue([])
+    setProjection(SID, [entry('d1', 'in-flight', 'direct')])
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)

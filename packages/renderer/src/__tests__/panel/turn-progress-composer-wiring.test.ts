@@ -21,9 +21,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { defineComponent, effectScope, ref } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import Panel from '@/components/panel/Panel.vue'
 import { useChatStore } from '@/stores/chat'
 import { TURN_PROGRESS_WARN_THRESHOLD_MS } from '@taiji/core'
@@ -168,10 +167,6 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   sessionList.length = 0
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  useCompactQueue()._clearAllForTest()
 })
 
 describe('中止接线：TurnProgressBar → 既有 abort 链路', () => {

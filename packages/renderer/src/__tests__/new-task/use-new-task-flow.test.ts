@@ -38,8 +38,14 @@ const apiMock = vi.hoisted(() => ({
       }),
   ),
   remove: vi.fn((): Promise<void> => Promise.resolve()),
-  // submitFirstMessage → useChat.send → chatApi.send/streamSubscribe 需要 mock 占位
+  // submitFirstMessage → useChat.send → chatApi.submitDelivery（[u3c/D1] 统一提交）+ streamSubscribe
   chatSend: vi.fn((): Promise<void> => Promise.resolve()),
+  chatSubmitDelivery: vi.fn(async (sessionId: string, _content: string, clientUuid: string) => ({
+    clientUuid,
+    state: 'in-flight' as const,
+    lane: 'direct' as const,
+    sessionId,
+  })),
   streamSubscribe: vi.fn((): (() => void) => () => {}),
   // composer-bash-execute: landing 态 bash 首发 → useChat.sendBash → chatApi.bash
   chatBash: vi.fn((): Promise<void> => Promise.resolve()),
@@ -52,7 +58,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   // 给空返回避免 unhandled rejection
   file: { tree: vi.fn().mockResolvedValue([]), expand: vi.fn().mockResolvedValue([]) },
   git: { status: vi.fn().mockResolvedValue({ isRepo: false }) },
-  chat: { send: apiMock.chatSend, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
+  chat: { send: apiMock.chatSend, submitDelivery: apiMock.chatSubmitDelivery, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
   workspace: { detect: vi.fn().mockResolvedValue({ mode: 'not-repo', isBareMode: false, wsRoot: '', repoRoot: '' }) },
   worktree: { list: vi.fn().mockResolvedValue([]) },
 }))
@@ -240,6 +246,7 @@ describe('useNewTaskFlow 状态机', () => {
   describe('submitFirstMessage bash 首发（landing 态 !/!! 前缀）', () => {
     beforeEach(() => {
       apiMock.chatSend.mockClear()
+      apiMock.chatSubmitDelivery.mockClear()
       apiMock.chatBash.mockClear()
     })
 
@@ -255,7 +262,8 @@ describe('useNewTaskFlow 状态机', () => {
       )
       expect(apiMock.chatBash).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).toHaveBeenCalledWith(expect.any(String), 'echo hi', false)
-      // 关键：不调 chat.send（bash 不走 LLM turn）
+      // 关键：不提交消息（bash 不走 LLM turn）——统一提交入口与旧 send 均未被调
+      expect(apiMock.chatSubmitDelivery).not.toHaveBeenCalled()
       expect(apiMock.chatSend).not.toHaveBeenCalled()
     })
 
@@ -296,13 +304,14 @@ describe('useNewTaskFlow 状态机', () => {
       expect(labelArg!.startsWith('!')).toBe(false)
     })
 
-    it('无 bashCommand → 仍走 chat.send（普通首发，回归防护）', async () => {
+    it('无 bashCommand → 走统一提交（普通首发，回归防护）', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/repo'
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      expect(apiMock.chatSend).toHaveBeenCalledTimes(1)
+      // [u3c/D1] 首发与正常 send 同通路：delivery.submit（clientUuid 三参）
+      expect(apiMock.chatSubmitDelivery).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).not.toHaveBeenCalled()
     })
   })

@@ -14,7 +14,6 @@ export default {
     send: '发送',
     stop: '停止',
     queueSend: '排队发送',
-    commandQueuedRejected: '会话占用中，命令请等待完成后使用',
     sending: '发送中…',
     sendBusy: '会话正在处理中，请稍候再发送',
     sendEmptyHint: '请输入内容后再发送',
@@ -314,19 +313,22 @@ export default {
     loading: '加载中',
     noMatches: '无匹配项',
   },
-  deferQueue: {
+  queueBubble: {
     pendingHint: '占用结束后发送',
     // [D1] 按占用类型分档的 hover 文案（小时级 bash 等长占用下「等什么结束」可操作）
     pendingHintCompacting: '等待上下文压缩完成后发送',
     pendingHintBash: '等待命令执行结束后发送',
     pendingHintSettling: '等待当前回合结束后发送',
+    // 内核条目态文案（G3：每条未送达消息有明确形态与状态）
+    stateQueued: '排队中',
+    stateInFlight: '投递中',
+    stateFailed: '发送失败',
     cancelQueued: '撤销排队',
-    chipBadge: '+{count}',
-    chipBadgeHint: '含 {count} 个附件/引用，将随消息一并发送',
-    // [compact-defer-composer-queue u1] defer 行占用分档 chip（压缩后 / 命令后 / 稍后发送）
-    deferChipCompacting: '压缩后',
-    deferChipBash: '命令后',
-    deferChipFallback: '稍后发送',
+    cancelUnavailable: '消息已投递，无法撤销',
+    cancelUnavailableWithReason: '无法撤销：{reason}',
+    cancelFailed: '撤销失败：{msg}',
+    retry: '重试发送',
+    retryFailed: '重试失败：{msg}',
   },
   contextChips: {
     removeFromContext: '从上下文移除',
