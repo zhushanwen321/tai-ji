@@ -303,6 +303,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）
 --font-scale-u: 1;   /* 用户档位（TokenDebugPage 选：紧凑0.92/标准1.0/偏大1.08/大1.16）*/
 --font-scale-mq: 1;  /* 视口档位（媒体查询：≥2100px ×1.08 / <1400px ×0.95）*/
+--text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
 --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
 --text-xs:   calc(12px * var(--font-scale-u) * var(--font-scale-mq));
 --text-sm:   calc(13px * var(--font-scale-u) * var(--font-scale-mq));
@@ -594,7 +595,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   | 形态 | 判据 | 样式 |
   |---|---|---|
   | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
-  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550 + 从文案 text-xs/mid + 居中 13px 图标（stroke 2.2）+ mono meta 钉右（text-2xs/tabular-nums）+ py-1.5 + chip（mono text-3xs + `border-strong` 描边）；语义色仅成功绿 / 失败 warn 两档 |
+  | 横线分隔行 | 静态元信息（无可交互入口，如 SystemNotice / 压缩中提示） | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550 + 从文案 text-xs/mid + 居中 13px 图标（stroke 2.2，色=中性 / accent[background-bash 结构化行]）+ mono meta 钉右（text-2xs/500/tabular-nums/neutral-dim）+ py-1.5 + chip（mono text-3xs + `border-strong` 描边 + `rounded-[4px] px-1.5 leading-[1.8]`）；语义色落 meta：成功绿 / 失败 warn 两档 |
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
