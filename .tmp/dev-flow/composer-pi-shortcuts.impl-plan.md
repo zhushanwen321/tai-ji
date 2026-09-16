@@ -1,0 +1,98 @@
+# composer-pi-shortcuts 实施计划
+基线: 36a605c1e | 来源设计: docs/design/composer-pi-shortcuts.md | 日期: 2026-09-16
+
+## 0 章节映射
+| 内容 | 设计文档实际位置 |
+|------|------------------|
+| 背景/目标 | §1 背景目标（G1 肌肉记忆平移 / G2 同一入口 / G3 零回归一处显式让位） |
+| 终态/机制 | §3 解决方案（§3.1 终态 / §3.2 决策 1-4 / §3.3 关键决策含决策 6-9 / §3.4 守卫矩阵与事件拦截语义 / §3.5 错误规格表） |
+| 验收场景表 | §4 验收（S1-S13 场景表 + e2e 影响面评估） |
+| 下一层拆分 | §5 下一层拆分（U1-U4） |
+| 待验证检查点 | §5「待验证」：无（①② 已核实销项） |
+
+## 1 目标快照（逐字摘录设计 §1）
+
+> **结论：让 pi TUI 用户的键盘肌肉记忆在太极 GUI 的输入框中原样成立——不新增鼠标操作，不新增第二套切换真相源。**
+
+- G1 pi 肌肉记忆平移：4 个键位在 composer 输入框聚焦时的行为与 pi TUI 语义一致。
+- G2 与鼠标通路等价：键位触发的切换与 popover 点击走**同一**入口（core `useComposerModelThinking` 三分支路由），不产生平行真相源。
+- G3 零回归（一处显式让位除外）：原生编辑行为（剪切/IME）、命令浮层、staging（fork/handoff）等既有键盘语义不被破坏；唯一让位 = composer 内 `shift+tab` 的原生反向焦点导航被档位循环接管（§3.3 决策 9）。
+
+**Out of scope**：用户自定义键位与设置页重录 UI（P1 注册表化）、其他 pi 键位（esc 中断等）、应用级全局键、`super`/⌘ 系绑定。平台差异已裁决：GUI 全平台统一 `ctrl+shift+p`（决策 6）。
+
+## 2 单元列表
+
+| Unit | 职责 | 领地（精确文件路径） | 依赖 | 隔离 | 验收条款 |
+|------|------|----------------------|------|------|----------|
+| U1 | 按 §5 U1-U4 合并实现：① 新建 `useComposerShortcutActions`（键判定/守卫矩阵/决策 8 意图目标续步/动作编排）；② composer-keydown 分发链插入动作表分支；③ composer-shell 组装 deps；④ Composer.vue 传参（≤2 行，行数红线见下）；⑤ i18n toast 文案；⑥ 全量单测（守卫矩阵 + 循环取值 + 意图目标生命周期） | `packages/renderer/src/composables/panel/composer-shortcut-actions.ts`（新）<br>`packages/renderer/src/composables/panel/composer-shortcut-actions.test.ts`（新）<br>`packages/renderer/src/composables/panel/composer-keydown.ts`<br>`packages/renderer/src/composables/panel/composer-keydown.test.ts`<br>`packages/renderer/src/composables/panel/composer-shell.ts`<br>`packages/renderer/src/components/panel/Composer.vue`<br>`packages/renderer/src/i18n/locales/zh-CN.ts`<br>`packages/renderer/src/i18n/locales/en-US.ts`（如 toast key 落子目录结构，以同文件既有组织为准） | —（DAG 根） | plain | V1: 新旧测试全绿（`vitest run`，renderer 包目录）<br>V2: `vue-tsc --noEmit` 零错误<br>V3: Composer.vue `<script setup>` ≤300 行（vue_rules_checker 硬拦）<br>V4: 守卫矩阵 §3.4 每行至少 1 条单测（含 ctrl+x repeat 例外口径）<br>V5: locale-sync guard 测试绿（新增 key 中英同步） |
+
+**合并理由**（dag-authoring 合并判据）：设计 §5 的 U1-U4 同属 renderer panel 单领地、总量 <400 行、相互依赖线性（keydown 接线与 shell 组装都消费 U1 的接口）、subagent 派发成本远大于单元体量——拆 4 个单元产生 3 次纯派发开销与跨单元上下文重建，零并行收益。无共享契约文件需要独立根节点（deps 接口内聚在新文件内导出），U1 即 DAG 根。
+
+**行数红线**：`Composer.vue` `<script setup>` 当前 285/300（vue_rules_checker MAX_SCRIPT_LINES=300 硬拦）。传参超 2 行时必须把组装逻辑下沉 `composer-shell.ts`，禁止顶爆红线。
+
+**行为规格唯一来源**：设计文档 §3.3 键位表 + 决策 6/7/8/9 + §3.4 守卫矩阵 + §3.5 错误规格表。实现与设计冲突时以设计为准；发现设计缺陷走偏差三分类（§5 合理偏差登记表 / 打回修 / 主 agent 改文档）。
+
+## 3 DAG 图
+
+```mermaid
+graph TD
+    U1[U1 完整实现<br/>动作表+接线+组装+i18n+单测] --> V[阶段 3 一致性审查+全量测试]
+    V --> W[阶段 4 修复循环]
+    W --> X[阶段 5 端到端验收 A1-A8]
+    X --> Y[阶段 6 design-code-sync 终态同步]
+```
+
+## 4 测试与验收计划
+
+**增量测试（U1 开发期，dev 自跑）**：
+- `cd packages/renderer && pnpm vitest run`（composer-shortcut-actions.test.ts + composer-keydown.test.ts + 全包回归）
+- `cd packages/renderer && pnpm typecheck`（vue-tsc --noEmit）
+- locale 同步守卫（renderer 包内 i18n 测试，vitest 一并跑）
+
+**全量测试（阶段 3 尾，主 agent 跑）**：
+- `pnpm lint`（含 taste-lint / vue_rules_checker）
+- renderer + core 包 vitest 全量；受影响面以 `git diff --name-only` 圈定（本改动 renderer-only，core 不动则跑 renderer 全量 + core 冒烟）
+
+**验收计划表**（设计 §4 S1-S13 逐行编译）：
+
+| # | 验收项（场景表行） | 方式(L0-L4) | 成本 | 收益 | 组 | 依赖 | 优化判定 |
+|---|--------------------|-------------|------|------|----|------|----------|
+| A1 | 守卫矩阵 §3.4 全行 + 循环取值（含起点规则/仅 off/单模型）+ 意图目标续步/清除（回执等值清/reject 清/sessionId 清/进 staging 清） | L1 单测 | 3 | 9 | 核心 | - | 单测化（设计 §4 明定回归防线主体） |
+| A2 | S1 真机：streaming 中 shift+tab 档位循环，chip 与 popover 同源 | L4 agent | 8 | 8 | 核心 | A1 | 与 A3/A4 同环境合并为一次会话 |
+| A3 | S2+S10 真机：ctrl+p / ctrl+shift+p 双向循环绕回 + RPC 失败 chip 保持旧值 | L4 agent | 8 | 8 | 核心 | A1 | 合并同环境 |
+| A4 | S4+S11 真机：ctrl+x 复制闭环（非流式全文/流式部分文本）+ 空流 no-op | L4 agent | 8 | 8 | 核心 | A1 | 合并同环境 |
+| A5 | S5+S6+S7+S12+S13 守卫类真机：选区剪切/浮层不触发+ctrl+shift+p 预设并存/IME/S13 长按单步+焦点让位 | L4 agent | 8 | 6 | 非核心 | A2 | 合并同环境一次连测 |
+| A6 | S3+S8 真机：landing 态 ctrl+p → 首发生效 + staging 快照生效 | L4 agent | 8 | 6 | 非核心 | A3 | 合并同环境 |
+| A7 | S9 单模型/non-reasoning no-op | L1→L4 抽验 | 2 | 4 | 非核心 | A6 | 可降级：no-op 分支 L1 单测覆盖，真机抽验 1 条 |
+| A8 | composer 像素无回归（本改动零视觉变更） | L1 visual 轨 | 2 | 5 | 非核心 | U1 committed | 可脚本化：`npx playwright test --project=visual-chromium` |
+
+**提速结论**：设计 13 场景若逐条 L4 = 13 次派发；合并后 L4 会话 3 次（A2-A4 核心一次 + A5 + A6），A1 全量下沉 L1 单测（dev 自跑零派发），A7 降级 L1+抽验，A8 脚本化。L0 静态守卫清单：`pnpm lint`（taste-lint/vue_rules_checker）、`vue-tsc --noEmit`、locale-sync guard test、项目 pre-commit 全套（本次提交已验证全绿）。预计节省派发 ~10 轮。
+
+**e2e 影响面圈定**（继承设计 §4 + 机器对账 `select-affected-e2e --base main`，输出 2 条 always L1 轨）：
+
+| rule | 判定 | 时点/理由 |
+|------|------|-----------|
+| E2E-VISUAL-01（visual-chromium，含 composer.spec.ts） | 跑 | U1 committed 后，mock 轨零 token；本改动零视觉变更，防 composer 结构意外变更 |
+| E2E-ELECTRON-01（electron-smoke P0 子集） | 不跑 | P0 smoke 子集不含 composer 键盘场景，改动不触及窗口/shell 结构；CI 每 PR 固定跑兜底 |
+| 真实 LLM 轨（runtime equivalence real-pi / TAIJI_PI_LIVE） | 不跑 | 改动 renderer-only，零 runtime/pi/协议变更（设计 §4 e2e 影响面评估裁决） |
+
+机器对账差异披露：脚本输出仅 2 条 always 轨（按 `git diff main...HEAD` 当前仅设计文档 1 文件；U1 committed 后重跑对账，预期命中不变）；无人工清单独有条目。执行要求：空载串行。
+
+## 5 合理偏差登记表
+
+（初始为空，阶段 3 审查时填写）
+
+## 6 状态表
+
+| Unit | 状态 | 轮次 | 证据指针 |
+|------|------|------|----------|
+| U1 | pending | 0 | — |
+
+## 7 残留风险与变更历史
+
+- **风险 R1**：`useComposerKeydown` 的 deps 在 `Composer.vue:418` 组装（285/300 贴线）——传参必须极简；若引发行数超限，下沉 composer-shell（领地内已含该文件，无需扩领地）。
+- **风险 R2**：`isStaging` 信号源 = composer-shell 的 `staging.activeStaging`（设计 §5 U1 deps 清单已列）——若 staging 结构暴露面不足，允许在 composer-shell 内派生只读 computed，禁止改 core（core 不在领地）。
+- **风险 R3**：subagent 环境间歇 exit 143（本会话 tech-design 复审阶段连发）——dev 派发失败时用 action:message 续跑恢复（上下文保留），连续 2 次失败改串行单发。
+
+### 变更历史
+- 2026-09-16 计划创建（设计 docs/design/composer-pi-shortcuts.md 三审 0 must-fix 收敛后）。
