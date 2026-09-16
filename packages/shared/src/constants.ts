@@ -124,7 +124,7 @@ export const IMAGE_LIMITS = {
 export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
 
 /**
- * ADR-0021 §2/§3 预设可选 skill/agent 目录候选（UI 「可选目录」的固定来源）。
+ * ADR-0021 §2/§3 预设可选 skill/agent/extension 目录候选（UI 「可选目录」的固定来源）。
  *
  * SSOT：services/skill-dir-config.ts（buildDirConfigs 读取端）与 infra/pi/discovery-store.ts
  * （setSkillDirs/setAgentDirs 写入端）共同 import 此常量，消除本地副本漂移风险。
@@ -132,17 +132,23 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  * 语义：用户可勾选启用/可拖排序；勾选的进 discovery.json 数组。强制目录
  * （~/.taiji/...）不在此列（UI 另行只读展示）。preset 成员豁免 existsSync 脏数据过滤
  * ——推荐候选语义，启用后即使此机器不存在也要保留（防 UI 消失回归）。
+ *
+ * [默认勾选] 全部 preset 成员默认勾选（DEFAULT_DISCOVERY_CONFIG，pi + taiji 相关路径）：
+ * 用户打开设置页即见已勾选态，无需手动配置。preset 即「默认启用集合」，新增成员时
+ * 须同步评估 DEFAULT_DISCOVERY_CONFIG。
+ *
+ * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
+ * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
+ * 无法真正移除；且 claude 目录非本产品默认扫描面。用户仍可手动「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
   '~/.pi/agent/skills',
-  '~/.claude/skills',
   '~/.agents/skills',
   '.agents/skills',
 ] as const
 
 export const PRESET_AGENT_DIRS = [
   '~/.pi/agent/agents',
-  '~/.claude/agents',
   '~/.agents/agents',
   '.agents/agents',
 ] as const
@@ -165,6 +171,31 @@ export const PRESET_EXTENSION_DIRS = [
   '.pi/extensions',
   '.taiji/extensions',
 ] as const
+
+/**
+ * discovery.json 默认态（首启 / 文件缺失时的回落值）：全部 preset 目录默认勾选。
+ *
+ * 语义：skill/agent/extension 扫描目录打开设置即默认勾选（pi + taiji 相关路径），
+ * 用户无需手动配置。对应产品默认：pi 原生目录（~/.pi/agent/*、.pi/*）+ taiji/agents
+ * 惯例目录（.agents/*、.taiji/*）。claude 目录已移出预设（见 PRESET_SKILL_DIRS 注）。
+ *
+ * 消费方：discovery-store 的 DEFAULT_DISCOVERY（JsonStore ENOENT 回落）+ core mock fixture。
+ * 数组内顺序 = preset 顺序（project/global 各自内部），与 buildDirConfigs 的展示序一致。
+ */
+export const DEFAULT_DISCOVERY_CONFIG = {
+  skill: {
+    projectPaths: ['.agents/skills'],
+    globalPaths: ['~/.pi/agent/skills', '~/.agents/skills'],
+  },
+  agent: {
+    projectPaths: ['.agents/agents'],
+    globalPaths: ['~/.pi/agent/agents', '~/.agents/agents'],
+  },
+  extension: {
+    projectPaths: ['.pi/extensions', '.taiji/extensions'],
+    globalPaths: ['~/.pi/agent/extensions'],
+  },
+} as const
 
 /**
  * 插件通知/状态栏防毒化限流参数（D7「限流与防毒化」，plugin-trust-hardening S3-W4）。
