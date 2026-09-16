@@ -1,0 +1,81 @@
+# Gate A log — composer-pi-shortcuts 对抗一致性审查 2026-09-16T07:09:50Z
+== diff-range file list (e69a01fa8..HEAD) ==
+.tmp/dev-flow/composer-pi-shortcuts.impl-plan.md
+packages/renderer/src/components/panel/Composer.vue
+packages/renderer/src/composables/panel/composer-keydown.test.ts
+packages/renderer/src/composables/panel/composer-keydown.ts
+packages/renderer/src/composables/panel/composer-shell.ts
+packages/renderer/src/composables/panel/composer-shortcut-actions.test.ts
+packages/renderer/src/composables/panel/composer-shortcut-actions.ts
+packages/renderer/src/i18n/locales/en-US/panel.ts
+packages/renderer/src/i18n/locales/zh-CN/panel.ts
+
+== core zero-change check ==
+packages/core changed files: 0
+(empty above = core untouched)
+
+ ✓ src/__tests__/stores/preset-store.test.ts (4 tests) 23ms
+ ✓ src/__tests__/i18n/panel-context-key-existence.test.ts (3 tests) 2ms
+ ✓ src/__tests__/lib/file-type.test.ts (32 tests) 3ms
+ ✓ src/composables/__tests__/useCrashRecoveryNotice.test.ts (6 tests) 3ms
+ ✓ src/__tests__/terminal/composer-injection-text.test.ts (5 tests) 3ms
+ ✓ src/__tests__/animations/pending-status-class.test.ts (3 tests) 3ms
+stdout | src/__tests__/ws-client-send-boolean.test.ts > ws-client.send 壳侧 import 冒烟（W4 fast-fail 主覆盖在 core invariants） > 壳侧可解析 connect/disconnect/send 且 send 可执行返回 boolean（import 链路未断）
+[ws] connecting to ws://test
+
+ ✓ src/__tests__/types/w3-type-guard.test.ts (4 tests) 3ms
+ ✓ src/__tests__/ws-client-send-boolean.test.ts (1 test) 5ms
+ ✓ src/__tests__/i18n/provider-edit-key-existence.test.ts (8 tests) 4ms
+stderr | src/__tests__/panel/composer-history-cache.test.ts
+[Vue warn] onScopeDispose() is called when there is no active effect scope to be associated with.
+
+ ✓ src/__tests__/panel/composer-history-cache.test.ts (7 tests) 3ms
+ ✓ src/__tests__/animations/remove-persistent-decorations.test.ts (5 tests) 2ms
+ ✓ src/__tests__/i18n/locale-key-usage-guard.test.ts (3 tests) 2ms
+ ✓ src/__tests__/panel/session-file-format.test.ts (5 tests) 2ms
+stderr | src/__tests__/components/button.test.ts
+[Vue warn] onScopeDispose() is called when there is no active effect scope to be associated with.
+
+ ✓ src/__tests__/components/button.test.ts (2 tests) 1ms
+
+ Test Files  360 passed (360)
+      Tests  4201 passed (4201)
+   Start at  15:09:57
+   Duration  48.83s (transform 30.22s, setup 103.07s, import 151.72s, tests 64.58s, environment 76.62s)
+
+JUNIT report written to <workspace>/<worktree>/packages/renderer/test-results/vitest-junit.xml
+
+> @taiji/frontend@0.10.0 typecheck <workspace>/<worktree>/packages/renderer
+> vue-tsc --noEmit
+
+
+> taiji@0.10.0 lint <workspace>/<worktree>
+> eslint . --max-warnings 0
+
+
+== bypass scan (8 changed files) ==
+patterns: test.skip/it.skip/describe.skip/.skipIf/SKIP_*(9)/eslint-disable/@ts-ignore/@ts-expect-error/@ts-nocheck
+result: exit 1 = zero hits = clean
+
+== test counts (vitest junit) ==
+composer-shortcut-actions.test.ts: 43 tests, 0 failures
+composer-keydown.test.ts: 37 tests (5 new wiring + 32 existing), 0 failures
+renderer full: 360 files / 4201 tests / 0 failed
+typecheck: vue-tsc --noEmit exit 0
+root lint: eslint . --max-warnings 0 exit 0
+core zero-change: 0 files under packages/core
+
+== Composer.vue script setup ==
+Composer.vue script setup = lines 200-486 = 287 lines (inclusive-of-tags metric; checker metric 285; limit 300, lint-passed)
+typecheck: vue-tsc --noEmit exit 0
+lint: eslint . --max-warnings 0 exit 0 (both exit codes observed in session)
+
+== FINAL STATE RUN (design-code-sync round-1 fix, comments/docs-only changes) 2026-09-16T17:23+08:00 ==
+command: cd packages/renderer && pnpm vitest run
+ Test Files  360 passed (360)
+      Tests  4202 passed (4202)
+   Duration  85.34s
+command: cd packages/renderer && pnpm typecheck (vue-tsc --noEmit) -> exit 0
+command: pnpm run lint (eslint . --max-warnings 0) -> exit 0
+scope: fixes in this round are comment/doc text only (zero behavioral code change);
+       4202 = 4201 from the first run above + 1 coverage test added by the review-fix batch

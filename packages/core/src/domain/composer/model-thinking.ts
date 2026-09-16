@@ -85,9 +85,9 @@ export interface ModelThinkingDeps {
   pendingPreset?: () => string | null | undefined
   /** landing 态记 pendingModel（壳层从 useNewTaskFlow().setPendingModel 取） */
   setPendingModel: (model: string) => void
-  /** 已建态切模型 RPC + 乐观更新编排（壳层从 useModel().switchModel 取） */
+  /** 已建态切模型 RPC 回执写编排（壳层从 useModel().switchModel 取） */
   switchModel: (sessionId: string, provider: ProviderId, modelId: string) => Promise<void>
-  /** 已建态设思考等级 RPC + 乐观更新（壳层从 useModel().setThinkingLevel 取） */
+  /** 已建态设思考等级 RPC 回执写（壳层从 useModel().setThinkingLevel 取） */
   setThinkingLevel: (sessionId: string, level: string) => Promise<void>
   /** 按 modelId 派生 thinkingLevelMap（透传给 useThinkingLevelSync，壳层从 settingsStore.providers 解析） */
   getThinkingLevelMap: (modelId: string) => Record<string, string | null> | undefined
@@ -328,7 +328,7 @@ export function useComposerModelThinking(
 
   /**
    * 模型切换：staging 活跃时只写快照（不调 RPC，不改源 session）。
-   * session 已建走 deps 注入的编排（RPC + 乐观更新）；
+   * session 已建走 deps 注入的编排（RPC 回执写）；
    * landing 态（sid=null）session 尚未 create，记 pendingModel 供首发提交时经 resolve
    * 终值随 create 透传（D5）。
    *
@@ -363,7 +363,7 @@ export function useComposerModelThinking(
       recordLastUsed(targetModelId)
       return
     }
-    // 已建态：RPC + 乐观更新（编排逻辑归壳层 useModel，ADR-0028）
+    // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
     armed.value = { modelId: targetModelId, at: Date.now(), callId }
     inFlightCallIds.add(callId)
     try {
@@ -447,7 +447,7 @@ export function useComposerModelThinking(
       localThinkingLevel.value = level
       return
     }
-    // 已建态：RPC + 乐观更新（编排逻辑归壳层 useModel，ADR-0028）
+    // 已建态：RPC 回执写（编排逻辑归壳层 useModel，ADR-0028）
     await applyThinkingLevel(sessionId.value, level)
   }
 

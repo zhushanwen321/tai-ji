@@ -64,6 +64,7 @@ import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useCompactQueue } from './useCompactQueue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
+import { useComposerShortcutActions } from './composer-shortcut-actions'
 import { useForkModeChannel } from './useForkModeChannel'
 import { useHandoffModeChannel } from './useHandoffModeChannel'
 import { handleImagePaste } from './useImageAttachment'
@@ -128,6 +129,8 @@ export interface ComposerShellParams {
   drafts: DraftStore
   /** session 是否活跃（流式/派发）—— canSend/visual 守卫 */
   isActive: ComputedRef<boolean>
+  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表守卫——浮层 open 时动作表跳过） */
+  cmdOpen: Readonly<Ref<boolean>>
 }
 
 /**
@@ -168,14 +171,14 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
  * @returns core 模块组装结果 + 派生状态（Composer.vue 解构消费）
  */
 export function useComposerShell(params: ComposerShellParams) {
-  const { sessionIdRef, variantRef, inputRef, composerBoxRef, draft, isSending, drafts, isActive } = params
+  const { sessionIdRef, variantRef, inputRef, composerBoxRef, draft, isSending, drafts, isActive, cmdOpen } = params
   const { t } = useI18n()
   const chatStore = useChatStore()
   const sessionStore = useSessionStore()
   const presetStore = usePresetStore()
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
-  const { error: toastError } = useToast()
+  const { info: toastInfo, error: toastError } = useToast()
   const { send, steer, followUp, abort, compact, sendBash } = useChat()
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
@@ -446,6 +449,31 @@ export function useComposerShell(params: ComposerShellParams) {
     t: t as (key: string, params?: Record<string, unknown>) => string,
   })
 
+  // ── Composer 命令动作表（composer-pi-shortcuts U1③组装；分发链「动作表」分支消费）──
+  // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
+  // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
+  // 重排的显示序，即模型循环序）。models?. 同款防御：测试 mock 的 settingsStore 可能缺字段。
+  const enabledModels = computed(() => (settingsStore.models?.value ?? []).filter((m) => m.enabled !== false))
+  /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
+  const isStaging = computed(() => staging.activeStaging.value !== null)
+  const shortcutActions = useComposerShortcutActions({
+    cmdOpen,
+    sessionId: sessionIdRef,
+    isStaging,
+    currentModelId,
+    currentThinkingLevel,
+    currentSupportedLevels,
+    enabledModels,
+    onModelSelect,
+    onThinkingSelect,
+    getMessages: (sid: string) => chatStore.getMessages(sid),
+    // toast 窄接口适配（U3）：入参 i18n key，此处完成翻译——翻译时刻 = 触发时刻
+    toast: {
+      info: (key: string) => toastInfo(t(key)),
+      error: (key: string) => toastError(t(key)),
+    },
+  })
+
   return {
     // model-thinking
     currentModelId,
@@ -488,6 +516,8 @@ export function useComposerShell(params: ComposerShellParams) {
     onAbort,
     // send
     onSend,
+    // composer 命令动作表（composer-pi-shortcuts：分发链「动作表」分支消费）
+    shortcutActions,
     // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）
     sendRoute,
     sendButtonState,

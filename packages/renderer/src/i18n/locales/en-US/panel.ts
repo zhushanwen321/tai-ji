@@ -35,6 +35,9 @@ export default {
     handoffBusy: 'Reply in progress — wait for it to finish or stop it before handing off',
     handoffExit: 'Exit handoff mode',
     bashPlaceholder: 'Run bash command… (!! prefix excludes from context)',
+    // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)
+    copyLastReply: 'Copied last reply',
+    copyLastReplyFailed: 'Copy failed',
   },
   message: {
     copy: 'Copy',
