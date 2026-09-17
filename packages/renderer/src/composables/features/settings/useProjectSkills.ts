@@ -29,7 +29,9 @@
  *   SkillRegistry 有 chokidar watcher 自动刷新 globalCache，wave3 起前端订阅 config.skillCacheInvalidated
  *   信号实时重拉。globalSkills 为模块级 ref 保证 Composer 重挂后失效信号仍刷新活跃实例。
  * - useProjectSkills 保持实例级 Map<cwd, SkillInfo[]>（按 cwd key 隔离，切 cwd 切分区）。
- *   当前唯一消费者是 landing Composer（单例活跃），per-instance 缓存足够。
+ *   消费者是各 Composer 实例（landing 单例 + panel per-session，split mode 多 panel 多实例）：
+ *   per-instance 缓存下同 cwd 各实例各拉一次 RPC、失效信号逐实例刷新——冗余可接受，
+ *   未来需要跨实例共享再提升到模块级或 store。
  * - 失效信号订阅在模块顶层挂载（只执行一次），project 侧用模块级 signal watch 让订阅与实例数解耦。
  */
 import { computed, ref, watch, type Ref } from 'vue'

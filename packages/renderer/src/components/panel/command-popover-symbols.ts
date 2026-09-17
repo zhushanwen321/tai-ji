@@ -143,8 +143,9 @@ interface SlashCandidateInput {
   kind: string
   icon?: string
   description?: string
-  /** skill 项：SKILL.md 绝对路径（pi sourceInfo.path / landing sourcePath，可得时带上；
-   *  onCmdSelect 按 isSkill 分流后透传 insertSkillChip 落 chip dataset——设计 D3） */
+  /** skill 项：SKILL.md 绝对路径（location = SkillInfo.sourcePath，经 landing slash 链回填，
+   *  可得时带上；panel slash 段已过滤 skill 项无 location 消费；onCmdSelect 按 isSkill 分流
+   *  后透传 insertSkillChip 落 chip dataset——设计 D3） */
   location?: string
 }
 
