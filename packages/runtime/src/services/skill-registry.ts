@@ -147,7 +147,7 @@ const MAX_PROJECT_WATCHERS = 8
  * 不允许任何形态的永久发散到重启）。watcher 正常时成本 = 每 5min 一次 readdir 级扫描，
  * 量级与 chokidar 初始扫描相同，可忽略。
  */
-const FALLBACK_RESCAN_INTERVAL_MS = 5 * 60 * 1000
+const FALLBACK_RESCAN_INTERVAL_MS = 300_000 // 5min（= 5 * 60 * 1000，单值字面量形式对齐 watchdog/npm-installer 惯例）
 
 /**
  * [U2] skill 列表逐项严格相等（兜底重扫的「值变化」收敛判定）。
