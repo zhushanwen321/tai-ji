@@ -101,6 +101,20 @@ function findPkgRoot(absFile) {
 }
 
 /** 去除 // 行注释与块注释（字符串字面量内原样保留）——避免注释里的括号/逗号干扰结构扫描。 */
+/** 行注释消费：跳到行尾换行符处（不含换行本身，由调用方补回换行保持行号）。返回新下标。 */
+function skipLineComment(text, i) {
+  while (i < text.length && text[i] !== '\n') i++
+  return i
+}
+
+/** 块注释消费：跳过到收口符之后（与原内联写法一致，收口判定后的下标自增含在返回值里）。返回新下标。 */
+function skipBlockComment(text, i) {
+  i += 2
+  while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
+  return i + 1
+}
+
+/** 摘除字符串字面量外的全部注释（行注释位补回换行），供后续按行正则扫描。 */
 function stripComments(text) {
   let out = ''
   let quote = null
@@ -120,14 +134,12 @@ function stripComments(text) {
       continue
     }
     if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++
+      i = skipLineComment(text, i)
       out += '\n'
       continue
     }
     if (ch === '/' && text[i + 1] === '*') {
-      i += 2
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
-      i++
+      i = skipBlockComment(text, i)
       continue
     }
     out += ch
@@ -161,6 +173,12 @@ function extractProjectsBody(text) {
 }
 
 /** 把数组体按顶层逗号切成元素（越出嵌套括号/字符串的逗号不算分隔）。 */
+/** 单字符分类表：顶层切分扫描用（Set 命中语义与 === 链逐字一致）。 */
+const QUOTE_CHARS = new Set(['"', "'", '`'])
+const OPEN_BRACKETS = new Set(['[', '{', '('])
+const CLOSE_BRACKETS = new Set([']', '}', ')'])
+
+/** 按括号深度切顶层元素（引号内字符不参与计数），供 projects/coverage 提取用。 */
 function splitTopLevelElements(body) {
   const out = []
   let depth = 0
@@ -173,9 +191,9 @@ function splitTopLevelElements(body) {
       else if (ch === quote) quote = null
       continue
     }
-    if (ch === '"' || ch === "'" || ch === '`') quote = ch
-    else if (ch === '[' || ch === '{' || ch === '(') depth++
-    else if (ch === ']' || ch === '}' || ch === ')') depth--
+    if (QUOTE_CHARS.has(ch)) quote = ch
+    else if (OPEN_BRACKETS.has(ch)) depth++
+    else if (CLOSE_BRACKETS.has(ch)) depth--
     else if (ch === ',' && depth === 0) {
       out.push(body.slice(start, i))
       start = i + 1
