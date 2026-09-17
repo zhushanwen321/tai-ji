@@ -1487,29 +1487,49 @@ else
 fi
 
 # 文档-代码符号漂移守卫（C-proc-10）
-#   staged 命中映射设计文档（docs/design/）或 update 源码模块或守卫脚本自身时触发：
-#   scripts/check-doc-symbol-drift.mjs —— TypeScript AST 提取源码符号表 × 设计文档
-#   反引号符号候选，文档引用已删除/改名符号即拦截。
-#   [HISTORICAL] 2026-08-31：update 路径常量函数化后设计文档 3 处旧常量引用
-#   （UPDATE_DIR / MANUAL_ASSET_DIR×2）悬空存活，无机器信号，靠事后对抗审查才抓出。
+#   触发面：映射设计文档（docs/design/）/ update 源码模块 / 守卫脚本及其单测 /
+#   TEST-STRATEGY.md / docs/testing/，加任意源码文件（.ts/.tsx/.mts/.cts/.mjs/
+#   .cjs/.js/.vue，第三检查的扫描对象）与任意 .md（含 staged 删除——文档删除
+#   提交触发第三检查全仓扫描）：
+#   scripts/check-doc-symbol-drift.mjs 三检查面：
+#   ① 符号漂移：TypeScript AST 提取源码符号表 × 设计文档反引号符号候选，
+#     文档引用已删除/改名符号即拦截（[HISTORICAL] 2026-08-31 update 路径常量
+#     函数化后 3 处旧常量引用悬空，靠对抗审查才抓出）；
+#   ② 路径存在性：活跃测试文档反引号内仓库路径逐一核对磁盘；
+#   ③ [G5] 源码注释内 docs 引用存在性：staged 源码/测试文件注释中的
+#     docs/<path> 相对引用与 <文档名>.md 裸文件名引用，目标不存在即拦截
+#     （staged 含 .md 删除时扩为全仓扫描——被删文档可能被任意源码注释引用）。
+#     起因 2026-09-17：panel-view-derivation 族等注释引用已删除设计文档悬空存活，
+#     无任何机器信号。历史性提及（同行标注「已删除，git 可追溯」等）豁免，
+#     其余走脚本内 COMMENT_DOC_REF_EXEMPT 登记。
+#   守卫脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
 #   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
-DOC_SYMBOL_STAGED=$(git diff --cached --name-only -- docs/design/ apps/electron/main/update/ scripts/check-doc-symbol-drift.mjs TEST-STRATEGY.md docs/testing/)
-if echo "$DOC_SYMBOL_STAGED" | grep -qE "^docs/design/|^apps/electron/main/update/|^scripts/check-doc-symbol-drift\.mjs$|^TEST-STRATEGY\.md$|^docs/testing/"; then
+DOC_SYMBOL_STAGED=$(git diff --cached --name-only -- docs/design/ apps/electron/main/update/ scripts/check-doc-symbol-drift.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs TEST-STRATEGY.md docs/testing/ '*.ts' '*.tsx' '*.mts' '*.cts' '*.mjs' '*.cjs' '*.js' '*.vue' '*.md')
+if echo "$DOC_SYMBOL_STAGED" | grep -qE "^docs/design/|^apps/electron/main/update/|^scripts/check-doc-symbol-drift\.mjs$|^scripts/__tests__/check-doc-symbol-drift\.test\.mjs$|^TEST-STRATEGY\.md$|^docs/testing/|\.(ts|tsx|mts|cts|mjs|cjs|js|vue|md)$"; then
     print_section "[文档-代码符号漂移守卫]"
     if [ ! -f "scripts/check-doc-symbol-drift.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-doc-symbol-drift.mjs（守卫脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-doc-symbol-drift.mjs; then
-        echo -e "${RED}[ERROR] 文档符号/路径漂移：文档引用了源码中不存在的符号或仓库路径（删除/改名未同步文档）——按上方 ✗ 明细修正文档后重试${NC}"
+        echo -e "${RED}[ERROR] 文档符号/路径漂移或源码注释悬空 docs 引用——按上方 ✗ 明细与恢复动作修正后重试${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] 文档-代码符号一致性通过${NC}"
+    if echo "$DOC_SYMBOL_STAGED" | grep -qE "^scripts/check-doc-symbol-drift\.mjs$|^scripts/__tests__/check-doc-symbol-drift\.test\.mjs$"; then
+        echo -e "${BLUE}[INFO] 运行 doc-symbol-drift 守卫逻辑单测...${NC}"
+        if ! npx vitest run scripts/__tests__/check-doc-symbol-drift.test.mjs --silent; then
+            echo -e "${RED}[ERROR] check-doc-symbol-drift 单测失败——按上方失败明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}[OK] doc-symbol-drift 守卫单测通过${NC}"
+    fi
 else
-    echo -e "${GREEN}[OK] 无设计文档/update 源码变更，跳过文档符号漂移守卫${NC}"
+    echo -e "${GREEN}[OK] 无设计文档/源码注释检查面变更，跳过文档符号漂移守卫${NC}"
 fi
 
 # ============================================================================
@@ -1820,7 +1840,7 @@ echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记守卫 / G
 echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对守卫（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
 echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包守卫（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
 echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界守卫（H3/R5：聚合间 import 台账 + 聚合→壳禁则 + 私有互调门）"
-echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移守卫（C-proc-10：设计文档引用已删除/改名符号即拦截）"
+echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移守卫（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含守卫单测）"
 echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路守卫（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"
 echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道守卫（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"

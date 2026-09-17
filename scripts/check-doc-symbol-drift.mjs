@@ -15,6 +15,11 @@
  *   2. 从映射设计文档提取反引号 span 内的符号候选：
  *      蛇形大写（≥2 段，如 UPDATE_DIR）+ get 前缀驼峰（如 getUpdateDir）
  *   3. 候选不在符号表且不在 env 前缀白名单（TAIJI_* / PI_*）→ 报 drift，exit 1
+ *   4. [G5] staged 源码/测试文件（.ts/.vue/.mjs/.js 等）注释内 docs 引用存在性：
+ *      Form A `docs/<path>` 仓库相对引用 + Form B `<文档名>.md` 裸文件名引用，
+ *      目标不存在即拦截（staged 含 .md 删除时扩为全仓扫描——被删文档可能被任意
+ *      源码注释引用，引用面无法局部化）。只扫注释（AST trivia，字符串/模板/
+ *      正则字面量内的 docs/ 字样不进检查面），性能：日常只扫 staged 文件。
  *
  * 书写约定：反引号 = 现行代码符号。历史性提及已删除/改名的符号（如描述事故成因）
  * 不带反引号——带反引号即按现状引用检查，这正是本守卫的判定口径。
@@ -22,13 +27,15 @@
  * 映射表 DOC_MODULE_MAP 是显式登记（文档 → 权威源码模块）。新增设计文档时在
  * 此登记映射，未登记的文档不检查（宁缺勿滥，误报面收敛到声明过的对照对）。
  *
- * 用法：node scripts/check-doc-symbol-drift.mjs（始终检查全部映射文档——触发面
- * 由 pre-commit 按路径控制，检查本身毫秒级无需增量）
+ * 用法：node scripts/check-doc-symbol-drift.mjs（符号/路径检查始终全量——触发面
+ * 由 pre-commit 按路径控制，检查本身毫秒级无需增量；[G5] 注释 docs 引用检查读
+ * git staged，无 staged 源码文件时零扫描。import 消费导出纯函数不触发主流程）
  */
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript')
@@ -288,6 +295,260 @@ function checkPathRefs() {
   return missing
 }
 
+// ─── 第三检查：源码注释内 docs 引用存在性（G5）───────────────────────────
+// [G5] 起因 2026-09-17：源码注释引用已删除设计文档（panel-view-derivation 族等）
+// 悬空存活无任何机器信号，与第二检查拦的「文档引用不存在路径」方向相反：这里是
+// 「源码引用不存在文档」。判定口径（按误报面校准）：
+//   1. Form A `docs/<path>` 相对引用——目标（文件或目录）不存在即悬空；
+//   2. Form B 裸 `<文档名>.md` 引用——须同行含 docs 叙述语境词（FORM_B_CONTEXT_RE）
+//      才视为文档引用（裸 .md 文件名大量出现于运行时产物描述：诊断 zip 的
+//      summary.md、workflow runDir 的 aggregated.md，均为运行时生成物非引用），
+//      目标名字在 git ls-files '*.md'（index 语义）中不存在即悬空；
+//   3. 同行含历史性提及标注（HISTORICAL_MENTION_RE：已删/已废弃/git 可追溯等）
+//      豁免——书写约定允许注释显式标注的已删除文档历史叙述，未标注的照拦；
+//   4. 路径跨行书写不判：行尾连字符断字（本行是断字路径前半段）与本行命中名
+//      前文以连字符结尾（本行是断字路径尾部续行，如 xxx-collect-and- ⏎
+//      reaper-sink.md）——单行均无法解析完整目标。
+// 性能：日常只扫 staged 源码文件；staged 含 .md 删除时全仓扫描（被删文档可能被
+// 任意源码注释引用，引用面无法局部化）。
+// 豁免登记：注释里历史性提及已删除文档但未带标注、且确需保留的，在
+// COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）；禁止为「新代码里
+// 的悬空引用」加豁免——那走改注释。
+
+/** 第三检查扫描的源码/测试扩展名（TS parser 可解析 + .vue 特判分流） */
+const COMMENT_REF_SRC_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js', '.vue'])
+
+/** 全仓扫描（staged 含 .md 删除时触发）按目录名剪枝：依赖/产物/本地档案，无注释检查语义 */
+const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources'])
+
+/** Form A：docs/ 仓库相对引用。左边界断言防 URL 中缀误配（github.com/docs/x），
+ *  与第二检查 REPO_PATH_RE 同口径。 */
+const DOCS_PATH_RE = /(?<![\w@.\-/])docs\/[\w@.\/-]+/g
+/** Form B：裸 .md 文件名引用。不含 /（含路径前缀的非 docs 引用如 packages/x/README.md
+ *  不属 docs 引用面，不检查）；左边界同 Form A。 */
+const MD_NAME_RE = /(?<![\w@.\-/])[\w@.-]+\.md\b/g
+/** 历史性提及标注（同一行出现即豁免）：仓库书写约定允许注释叙述已删除文档的
+ *  历史（描述事故/迁移史须显式标注「已删除/已废弃 + git 可追溯」），未标注的
+ *  悬空引用照拦。 */
+const HISTORICAL_MENTION_RE = /(已删|已废弃|已移除|git 可追溯|历史)/
+/** Form B 上下文门（同一行须含 docs 叙述语境词才视为文档引用）：裸 .md 文件名
+ *  大量出现于运行时产物描述（诊断 zip 的 summary.md、workflow runDir 的
+ *  aggregated.md 等——运行时生成物，非 docs 引用），无语境词不检查。 */
+const FORM_B_CONTEXT_RE = /(设计|权威|指南|手册|规范|文档|参见|详见|依据|方案|§)/
+
+/**
+ * 文件级豁免（key = `<staged相对路径>::<引用字面量>`，value = 理由；`*::` 前缀 =
+ * 全文件生效，用于文件无关的合法引用如上游仓文档参照）。
+ * 与 PATH_REF_EXEMPT 同纪律但 key 带文件——同一悬空文档名在 A 文件是合法历史
+ * 叙述、在 B 文件是真漂移的场景互不误伤。引用改写/目标重建后移除条目。
+ */
+const COMMENT_DOC_REF_EXEMPT = new Map([
+  // ['<文件相对路径>::<引用字面量>', '理由：为何保留对该已删除文档的历史性提及'],
+  ['*::docs/rpc.md', 'pi 上游仓（badlogic/pi-mono）协议文档 docs/rpc.md 参照，非本仓文件（同 PATH_REF_EXEMPT 的 pi 上游先例）'],
+  ['packages/renderer/src/__tests__/composables/markdown-filepath.test.ts::docs/My', 'markdown 链接解析测试叙述中的空格切断反例（docs/My Document.md），非仓库路径引用'],
+  ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
+])
+
+/**
+ * JS/TS 注释区间收集：TS parser AST trivia（leading + trailing comment ranges，
+ * 按 pos 去重——同一注释会同时出现在祖先节点与后继节点的 trivia 起点）。
+ * 用 parser 而非裸 scanner：正则 vs 除号歧义由 parser 上下文解决，正则字面量内
+ * 的 `//` 不会伪注释化（`const re = /a\/\/b/` 不产生假注释吞掉行尾真注释）。
+ * @returns {Array<[number, number]>} [start, end] 原文偏移区间
+ */
+export function extractJsCommentRanges(text) {
+  const sourceFile = ts.createSourceFile('comment-scan.ts', text, ts.ScriptTarget.Latest, false)
+  const seen = new Set()
+  const ranges = []
+  const collect = (pos) => {
+    for (const r of [
+      ...(ts.getLeadingCommentRanges(text, pos) ?? []),
+      ...(ts.getTrailingCommentRanges(text, pos) ?? []),
+    ]) {
+      if (seen.has(r.pos)) continue
+      seen.add(r.pos)
+      ranges.push([r.pos, r.end])
+    }
+  }
+  const visit = (node) => {
+    collect(node.pos)
+    ts.forEachChild(node, visit)
+    collect(node.end)
+  }
+  visit(sourceFile)
+  // EOF 前的文件尾注释挂在 endOfFileToken 的 trivia 上，forEachChild 不保证走到
+  collect(sourceFile.endOfFileToken.pos)
+  return ranges
+}
+
+/**
+ * .vue 注释区间：script 块内容走 JS/TS parser（偏移平移回原文坐标），模板区走
+ * HTML 注释正则（Vue 模板注释只有 <!-- --> 形态）。
+ */
+export function extractVueCommentRanges(text) {
+  const ranges = []
+  for (const m of text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+    const offset = m.index + m[0].indexOf(m[1])
+    for (const [s, e] of extractJsCommentRanges(m[1])) ranges.push([offset + s, offset + e])
+  }
+  for (const m of text.matchAll(/<!--[\s\S]*?-->/g)) {
+    ranges.push([m.index, m.index + m[0].length])
+  }
+  return ranges
+}
+
+/**
+ * 从注释文本提取 docs 引用候选。Form A 先提取并记录 span，Form B 跳过落在
+ * Form A span 内的命中（`docs/<目录>/<文件>.md` 只按 Form A 判定一次）。
+ * @returns {Array<{kind: 'docs-path'|'md-name', target: string, raw: string, offset: number}>}
+ */
+export function extractDocRefsInComment(commentText) {
+  const refs = []
+  const pathSpans = []
+  for (const m of commentText.matchAll(DOCS_PATH_RE)) {
+    // 尾部标点收敛：`docs/<文件>.md.` 尾点与 `docs/<目录>/` 尾斜杠统一去除
+    const p = m[0].replace(/\.+$/, '').replace(/\/+$/, '')
+    if (!p || p === 'docs') continue
+    pathSpans.push([m.index, m.index + m[0].length])
+    refs.push({ kind: 'docs-path', target: p, raw: m[0], offset: m.index })
+  }
+  for (const m of commentText.matchAll(MD_NAME_RE)) {
+    if (pathSpans.some(([s, e]) => m.index >= s && m.index < e)) continue
+    refs.push({ kind: 'md-name', target: m[0], raw: m[0], offset: m.index })
+  }
+  return refs
+}
+
+/**
+ * Form B 裸 .md 文件名的合法名字集：git ls-files '*.md'（读 index——提交预览语义：
+ * staged 删除的文档名字即失效，文档删除提交当场暴露引用悬空；staged 新增即时合法）。
+ * git 不可用时回退 docs/ 递归 + 仓库根一级（降级覆盖，.agents 等非 docs 树收不进）。
+ */
+export function buildDocsMdNameIndex() {
+  const names = new Set()
+  const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, encoding: 'utf-8' })
+  if (res.status === 0 && typeof res.stdout === 'string') {
+    for (const f of res.stdout.split('\0')) {
+      if (f) names.add(path.basename(f))
+    }
+    return names
+  }
+  const walk = (abs) => {
+    let entries
+    try { entries = readdirSync(abs) } catch { return }
+    for (const name of entries) {
+      const full = path.join(abs, name)
+      let st
+      try { st = statSync(full) } catch { continue }
+      if (st.isDirectory()) {
+        if (name === 'node_modules') continue
+        walk(full)
+      } else if (name.endsWith('.md')) {
+        names.add(name)
+      }
+    }
+  }
+  walk(path.join(PROJECT_ROOT, 'docs'))
+  for (const name of readdirSync(PROJECT_ROOT)) {
+    if (name.endsWith('.md')) names.add(name)
+  }
+  return names
+}
+
+/** 全仓源码文件收集（staged 含 .md 删除时用；剪枝 FULL_SCAN_PRUNE_DIRS） */
+export function collectAllSourceFiles() {
+  const out = []
+  const walk = (abs, rel) => {
+    let entries
+    try { entries = readdirSync(abs) } catch { return }
+    for (const name of entries.sort()) {
+      if (FULL_SCAN_PRUNE_DIRS.has(name)) continue
+      const full = path.join(abs, name)
+      const relChild = rel ? `${rel}/${name}` : name
+      let st
+      try { st = statSync(full) } catch { continue }
+      if (st.isDirectory()) walk(full, relChild)
+      else if (COMMENT_REF_SRC_EXTS.has(path.extname(name))) out.push({ rel: relChild, abs: full })
+    }
+  }
+  walk(PROJECT_ROOT, '')
+  return out
+}
+
+/**
+ * 对给定源码文件集扫描注释内 docs 引用，返回悬空违规列表。
+ * @param {Array<{rel: string, abs: string}>} files
+ * @param {Set<string>} docsMdNames Form B 合法名字集
+ * @param {Map<string, string>} exempt 豁免表（缺省 = COMMENT_DOC_REF_EXEMPT；测试注入用）
+ */
+export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF_EXEMPT) {
+  const violations = []
+  for (const { rel, abs } of files) {
+    let text
+    try { text = readFileSync(abs, 'utf-8') } catch { continue }
+    const ranges = rel.endsWith('.vue') ? extractVueCommentRanges(text) : extractJsCommentRanges(text)
+    const seenPerFile = new Set()
+    for (const [s, e] of ranges) {
+      const commentText = text.slice(s, e)
+      const startLine = text.slice(0, s).split('\n').length
+      for (const ref of extractDocRefsInComment(commentText)) {
+        const line = startLine + commentText.slice(0, ref.offset).split('\n').length - 1
+        const key = `${line}\u0000${ref.kind}\u0000${ref.target}`
+        if (seenPerFile.has(key)) continue
+        seenPerFile.add(key)
+        const lineText = (commentText.slice(0, ref.offset).split('\n').pop() + commentText.slice(ref.offset).split('\n')[0]).trim()
+        // 行尾连字符断字：路径跨行书写（换行续行），单行无法解析目标，不判悬空
+        if (ref.raw.endsWith('-')) continue
+        // 换行续行碎片：引用名前文（剥行首装饰与空白）以连字符结尾——本行命中的是
+        // 上一行断字路径的尾部（如 xxx-collect-and- ⏎ reaper-sink.md），非完整引用
+        if (commentText.slice(0, ref.offset).replace(/[\s*]+$/, '').endsWith('-')) continue
+        // 历史性提及豁免：同一行显式标注「已删除/已废弃/git 可追溯」等（书写约定）
+        if (HISTORICAL_MENTION_RE.test(lineText)) continue
+        // Form B 上下文门：无 docs 叙述语境词的裸 .md 文件名是运行时产物描述，不检查
+        if (ref.kind === 'md-name' && !FORM_B_CONTEXT_RE.test(lineText)) continue
+        if (exempt.has(`${rel}::${ref.target}`) || exempt.has(`*::${ref.target}`)) continue
+        const exists = ref.kind === 'docs-path'
+          ? existsSync(path.join(PROJECT_ROOT, ref.target))
+          : docsMdNames.has(ref.target)
+        if (!exists) {
+          violations.push({ file: rel, line, kind: ref.kind, target: ref.target, snippet: lineText.slice(0, 120) })
+        }
+      }
+    }
+  }
+  return violations
+}
+
+/** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本检查面） */
+function gitStagedFiles(diffFilter) {
+  const res = spawnSync('git', ['diff', '--cached', '--name-only', '-z', `--diff-filter=${diffFilter}`], { cwd: PROJECT_ROOT, encoding: 'utf-8' })
+  if (res.status !== 0 || typeof res.stdout !== 'string') return null
+  return res.stdout.split('\0').filter(Boolean)
+}
+
+/**
+ * 第三检查入口：staged 源码/测试文件注释扫描；staged 含 .md 删除时扩为全仓
+ * （被删文档可能被任意源码注释引用，引用面无法局部化）。
+ */
+function checkStagedCommentDocRefs() {
+  const staged = gitStagedFiles('ACMR')
+  const deleted = gitStagedFiles('D')
+  if (staged === null || deleted === null) return { available: false }
+  const stagedSrc = staged.filter((f) => COMMENT_REF_SRC_EXTS.has(path.extname(f)))
+  const deletedMd = deleted.filter((f) => f.endsWith('.md'))
+  const fullScan = deletedMd.length > 0
+  const files = fullScan
+    ? collectAllSourceFiles()
+    : stagedSrc.map((rel) => ({ rel, abs: path.join(PROJECT_ROOT, rel) }))
+  return {
+    available: true,
+    fullScan,
+    deletedMd,
+    fileCount: files.length,
+    violations: checkCommentDocRefs(files, buildDocsMdNameIndex()),
+  }
+}
+
 function main() {
   const drifts = []
   for (const [docRel, modulePaths] of Object.entries(DOC_MODULE_MAP)) {
@@ -309,8 +570,10 @@ function main() {
   }
 
   const missingPaths = checkPathRefs()
+  const commentScan = checkStagedCommentDocRefs()
+  const commentViolations = commentScan.available ? commentScan.violations : []
 
-  if (drifts.length > 0 || missingPaths.length > 0) {
+  if (drifts.length > 0 || missingPaths.length > 0 || commentViolations.length > 0) {
     if (drifts.length > 0) {
       console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
       for (const d of drifts) {
@@ -323,12 +586,30 @@ function main() {
         console.error(`  ✗ ${m.doc}:${m.line}  \`${m.path}\` 文件不存在`)
       }
     }
+    if (commentViolations.length > 0) {
+      const mode = commentScan.fullScan ? '全仓扫描（staged 含 .md 删除）' : 'staged 扫描'
+      console.error(`[doc-comment-refs] 发现 ${commentViolations.length} 处源码注释引用了不存在的 docs 文档（${mode}，扫描 ${commentScan.fileCount} 个源码文件）：`)
+      for (const v of commentViolations) {
+        console.error(`  ✗ ${v.file}:${v.line}  \`${v.target}\` 不存在`)
+        console.error(`    注释引文：${v.snippet}`)
+      }
+      console.error('')
+      console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
+      console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
+    }
     console.error('')
     console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
     console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
     process.exit(1)
   }
-  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用`)
+  const commentPart = commentScan.available
+    ? `注释 docs 引用（${commentScan.fullScan ? '全仓' : 'staged'} ${commentScan.fileCount} 文件）零悬空`
+    : '注释 docs 引用（无 git staged 上下文，跳过）'
+  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}`)
 }
 
-main()
+// 缺省 CLI 形态：全量符号/路径检查 + staged 注释 docs 引用检查（不依赖 cwd）。
+// import 消费导出纯函数时不触发主流程（check-ci-vitest-targets.mjs 同款惯例）。
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] ?? '')).href) {
+  main()
+}
