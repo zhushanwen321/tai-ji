@@ -81,7 +81,7 @@ import type { ContributionRecord } from '@taiji/core'
  *
  * ADR-0060：数据源从 raw-message-tap 旁路改为 events 正规双订阅（route-inbound 单一真相源）：
  * - onGlobal：收无 sid 的 plugin:*（statusBarUpdate/notification/uiRequest 等走 global 通道）
- * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request/ui_timeout
+ * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request
  *   + plugin:uiRequest/plugin:viewUpdate，route-inbound 声明式条目 crossSession 字段分发，
  *   全局单例消费者 ExtensionHost 接收）
  * 经 source filter 后消息集合与旧 raw-tap 全量订阅等价（plugin:* 无 sid + extension.* 带 sid）。

@@ -149,21 +149,6 @@ export function onUIRequest(sessionId: string, handler: (req: ExtensionUIRequest
 }
 
 /**
- * 订阅指定 session 的 extension.ui_timeout 推送，返回取消函数。
- *
- * runtime ExtensionTimeoutManager 在 UI 请求 5 分钟无响应后广播此事件（同时向 pi 发默认响应）。
- * 前端收到后必须出队当前请求——否则对话框残留，用户点击会发送过期的 ui_response。
- */
-export function onUITimeout(sessionId: string, handler: (requestId: string) => void): () => void {
-  return events.on(sessionId, (msg) => {
-    if (msg.type !== 'extension.ui_timeout') return
-    const payload = msg.payload as { sessionId: string; requestId: string }
-    if (payload.sessionId !== sessionId) return
-    handler(payload.requestId)
-  })
-}
-
-/**
  * 订阅指定 session 的 extension.notify 推送，返回取消函数。
  *
  * pi notify 是 fire-and-forget（不等回复），runtime 翻译为 extension.notify WS 帧。

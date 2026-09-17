@@ -13,11 +13,10 @@
  * 超时撤窗：WS plugin:uiRequestExpired（plugin 源 dialog 到期取消，D2）经
  * onUiRequestExpired → requestId 反查 sessionId → queue 按 requestId 出队（不发回传）。
  *
- * [G1 / 2026-09-14 内存审计 §3.4] requestIdSessions respond 路径补删：反查表此前唯一删除点
- * 是 plugin:uiRequestExpired 撤窗广播（plugin 源独有）——pi 源 dialog 的有效清理路径只有
- * respond，而 extension.ui_timeout 是死链（registerTimeout 已不排定时器，§2.1），条目按弹窗数
- * 只增不减。表提升为模块级共享（source 投递写入 / transport respond 删除两工厂共管），
- * respond（sendPiResponse + sendPluginResponse 双通道）即删。
+ * [G1 / 2026-09-14 内存审计 §3.4] requestIdSessions 反查表条目的有效清理路径只有
+ * respond（pi 源 dialog 无撤窗广播——extension UI 请求已无超时机制）。表为模块级共享
+ * （source 投递写入 / transport respond 删除两工厂共管），respond
+ * （sendPiResponse + sendPluginResponse 双通道）即删；plugin 源另有撤窗广播删除点。
  *
  * 分流契约（feature clarify C2/C4）：askUser 请求由 useExtensionUI 消费（Panel inline 独占），
  * 本适配层只投递非 askUser（CompanionBand 独占 dialog）；两者在数据源层分流，零重叠。
@@ -30,7 +29,7 @@ import type {
   UiResponseTransport,
 } from '@taiji/ui/extension-host'
 import type { ExtensionInteractMethod } from '@taiji/shared'
-import { onCrossSession, onGlobal } from '@taiji/core/transport/api'
+import { onGlobal } from '@taiji/core/transport/api'
 import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 
@@ -115,10 +114,9 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
 const requestIdSessions = new Map<string, string>()
 
 /**
- * 创建 DialogRequestSource（bus 'ui-request' + WS extension.ui_timeout / plugin:uiRequestExpired 适配）：
+ * 创建 DialogRequestSource（bus 'ui-request' + WS plugin:uiRequestExpired 适配）：
  * - onUiRequest：无 sessionId 跳过 + console.warn（C2，防 '' 分区脏数据）；
  *   askUser === true 跳过投递（C4 分流，CompanionBand 独占 dialog）
- * - onUiTimeout：WS extension.ui_timeout（C3 保留 WS 路径，不经 bus），事件自带 sessionId
  * - onUiRequestExpired：WS plugin:uiRequestExpired（timeout-plugin-service D2 超时撤窗，
  *   不经 bus——bridge 无此归一项）。按 requestId 反查（onUiRequest 流经时记录 requestId→sessionId
  *   映射，投递时归属 sid，MF-4 反查为主）；Map miss 时 payload 可选 sessionId 兜底（renderer 重启）。
@@ -137,17 +135,6 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))
-      })
-    },
-    onUiTimeout(handler) {
-      // MF-6：extension.ui_timeout 广播 payload 带 sessionId，route-inbound 落 session 通道 +
-      // crossSession 声明条目（crossSession 通道），onGlobal 收不到带 sid 消息——必须订阅
-      // crossSession 通道（onUiTimeout 自身按 payload.sessionId 校验，双保险）。
-      return onCrossSession((msg) => {
-        if (msg.type !== 'extension.ui_timeout') return
-        const payload = msg.payload as { sessionId?: unknown; requestId?: unknown }
-        if (typeof payload.sessionId !== 'string' || typeof payload.requestId !== 'string') return
-        handler({ sessionId: payload.sessionId, requestId: payload.requestId })
       })
     },
     onUiRequestExpired(handler) {

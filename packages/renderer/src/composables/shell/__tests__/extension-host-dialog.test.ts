@@ -3,7 +3,7 @@
  *
  * 覆盖：TC1-TC4 convertToDialogRequest 转换（source 判定 / askUser 改写 / options 归一 /
  * method 超界恢复 + receivedAt）；TC5 无 sessionId 跳过；TC6 投递层 askUser 过滤（C4 分流）；
- * TC7/TC8 回传双通道（plugin.uiResponse / extension.ui_response 复用）；TC9 onUiTimeout WS 订阅；
+ * TC7/TC8 回传双通道（plugin.uiResponse / extension.ui_response 复用）；
  * TC10 onUiRequestExpired 撤窗订阅（D2，requestId 反查 sessionId + miss noop）；
  * TC-G1 respond 路径反查表删除（memory-leak-remediation G1）。
  *
@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { InternalEventBus } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
-import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
+import { dispatchGlobal } from '@taiji/core/transport/api'
 
 vi.mock('@taiji/core/transport/ws-client', () => ({
   send: vi.fn(),
@@ -153,22 +153,6 @@ describe('createDialogRequestSource（C2/C3/C4 分流）', () => {
     unsub()
   })
 
-  it('TC9: onUiTimeout 订阅 crossSession 通道的 extension.ui_timeout（C3 保留 WS 路径）', () => {
-    const source = createDialogRequestSource(bus)
-    const handler = vi.fn()
-    const unsub = source.onUiTimeout(handler)
-
-    // MF-6：extension.ui_timeout 广播带 sessionId，route-inbound 落 session 通道 + crossSession 声明条目
-    // （crossSession 通道）——用 dispatchCrossSession（runtime 真实广播形状，onGlobal 收不到）
-    dispatchCrossSession({ type: 'extension.ui_timeout', payload: { sessionId: 's1', requestId: 'r1' } })
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler).toHaveBeenCalledWith({ sessionId: 's1', requestId: 'r1' })
-
-    dispatchCrossSession({ type: 'extension:notify', payload: { sessionId: 's1', message: 'hi' } })
-    expect(handler).toHaveBeenCalledTimes(1) // 非 timeout 类型零触发
-    unsub()
-  })
-
   it('TC10: onUiRequestExpired 订阅 global 通道 plugin:uiRequestExpired（D2 撤窗，requestId 反查 sessionId）', () => {
     const source = createDialogRequestSource(bus)
     const expiredHandler = vi.fn()
@@ -264,8 +248,7 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
   }
 
   it('TC-G1a: pi respond（sendPiResponse）后表项删除——迟到撤窗广播 miss noop', () => {
-    // [G1] 此前唯一删除点是 plugin:uiRequestExpired 撤窗广播（plugin 源独有）；pi 源 dialog
-    // 的有效清理路径只有 respond，而 extension.ui_timeout 是死链（不排定时器，§2.1）。
+    // [G1] pi 源 dialog 的有效清理路径只有 respond（extension UI 请求无超时撤窗广播）。
     const source = createDialogRequestSource(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = source.onUiRequestExpired(expiredHandler)

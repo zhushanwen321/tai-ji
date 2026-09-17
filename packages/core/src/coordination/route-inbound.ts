@@ -365,8 +365,6 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   'extension:status': { crossSession: true },
   'extension:notify': { crossSession: true },
   'extension.ui_request': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
-  // 带 sid 的 ui 超时广播：DialogRequestQueue onUiTimeout 经 crossSession 通道订阅（MF-6）
-  'extension.ui_timeout': { crossSession: true },
   // plugin:* 带 sid 下行（runtime 广播注入 sessionId）：ExtensionHost 全局单例消费者需同时收
   // session 通道 + crossSession 通道（ViewHostStore / DialogRequestQueue 按 per-session 分区）
   'plugin:uiRequest': { crossSession: true },

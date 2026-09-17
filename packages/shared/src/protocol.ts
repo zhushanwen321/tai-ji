@@ -829,7 +829,7 @@ export type ServerMessageType =
   // auth.result：auth 握手的结果回复（S1-W1，ConnectionManager 传输层生产，见 ClientMessageMap 'auth'）。
   | 'auth.result'
   | 'pong' | 'error'
-  | 'extension.ui_request' | 'extension.ui_timeout' | 'extension.error'
+  | 'extension.ui_request' | 'extension.error'
   | 'extension.discovered' | 'extension.installCancelled'
   | 'extension.recommended'
   | 'extension.pendingRequests'

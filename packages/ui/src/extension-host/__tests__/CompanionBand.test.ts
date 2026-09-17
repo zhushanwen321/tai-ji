@@ -10,7 +10,7 @@
  *  - TC-5b expired 撤窗（plugin:uiRequestExpired → 出队 → band 自隐藏，D2）
  *  - TC-6 未知 method 只读降级（ERR3，无按钮 + console.warn)
  *
- * Mock 策略：MockDialogRequestSource（onUiRequest/onUiTimeout/onUiRequestExpired vi.fn
+ * Mock 策略：MockDialogRequestSource（onUiRequest/onUiRequestExpired vi.fn
  * 存 handler 供触发，同 W1 测试模式）+ MockTransport（sendPiResponse/sendPluginResponse vi.fn），
  * global.provide 注入 DIALOG_REQUEST_SOURCE_KEY / UI_RESPONSE_TRANSPORT_KEY。
  * 不 mock useSessionScopedState（Map 分区是 W1 已验对象，组件测试透传验证集成）。
@@ -40,12 +40,6 @@ class MockDialogRequestSource implements DialogRequestSource {
     this.unsubs.push(unsub)
     return unsub as unknown as () => void
   })
-  onUiTimeout = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
-    this.timeoutHandler = handler
-    const unsub = vi.fn()
-    this.unsubs.push(unsub)
-    return unsub as unknown as () => void
-  })
   onUiRequestExpired = vi.fn((handler: (e: { sessionId: string; requestId: string }) => void): (() => void) => {
     this.expiredHandler = handler
     const unsub = vi.fn()
@@ -54,7 +48,6 @@ class MockDialogRequestSource implements DialogRequestSource {
   })
 
   requestHandler: ((req: DialogRequest) => void) | null = null
-  timeoutHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
   expiredHandler: ((e: { sessionId: string; requestId: string }) => void) | null = null
 
   triggerUiRequest(req: Partial<DialogRequest> & { requestId: string; sessionId: string }): void {
@@ -268,8 +261,8 @@ describe('CompanionBand', () => {
   it('MF-5: unmount 后订阅退订生效（queue 在 setup 顶层创建，onScopeDispose 正常注册）', async () => {
     const { wrapper, source } = mountBand()
     await nextTick()
-    // 队列创建时注册三个订阅（onUiRequest + onUiTimeout + onUiRequestExpired）
-    expect(source.unsubs).toHaveLength(3)
+    // 队列创建时注册两个订阅（onUiRequest + onUiRequestExpired）
+    expect(source.unsubs).toHaveLength(2)
 
     // 首次请求正常入队渲染
     source.triggerUiRequest({ sessionId: 'A', requestId: 'r1', method: 'confirm' })
@@ -277,11 +270,10 @@ describe('CompanionBand', () => {
     expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(true)
 
     wrapper.unmount()
-    // scope dispose → 三个订阅均退订。MF-5 修复前 queue 在 computed getter 内创建，
+    // scope dispose → 两个订阅均退订。MF-5 修复前 queue 在 computed getter 内创建，
     // onScopeDispose 注册静默失败（无 active effect scope），unmount 后 unsub 不会被调。
     expect(source.unsubs[0]).toHaveBeenCalledTimes(1)
     expect(source.unsubs[1]).toHaveBeenCalledTimes(1)
-    expect(source.unsubs[2]).toHaveBeenCalledTimes(1)
   })
 
   it('TC-6 未知 method 只读降级：title/message 展示 + 无按钮 + console.warn（ERR3）', async () => {

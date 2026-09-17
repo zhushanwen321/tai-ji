@@ -282,18 +282,6 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('onUITimeout：命中派发 requestId，异 session 忽略', () => {
-    mockOn.mockReturnValue(vi.fn())
-    const handler = vi.fn()
-    extension.onUITimeout('s1', handler)
-
-    const registered = mockOn.mock.calls[0][1]
-    registered({ type: 'extension.ui_timeout', payload: { sessionId: 's1', requestId: 'req-9' } })
-    expect(handler).toHaveBeenCalledWith('req-9')
-    registered({ type: 'extension.ui_timeout', payload: { sessionId: 'other', requestId: 'x' } })
-    expect(handler).toHaveBeenCalledTimes(1)
-  })
-
   it('onNotify：解包 message/level，异 session / 异 type 忽略', () => {
     mockOn.mockReturnValue(vi.fn())
     const handler = vi.fn()

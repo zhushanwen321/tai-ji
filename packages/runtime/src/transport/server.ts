@@ -249,7 +249,7 @@ export class RuntimeServer implements IMessageBroker {
     //（wave:perf-w09 接口收敛）plugin.setMessageBus 的 wire 已归位组合根（index.ts，
     // 与 sessionService.setMessageBus 并列）——services 间依赖注入不经 transport 层中转。
     // server 保留的 bus 消费只剩自身 transport 职责：sessionHandler ctx（subscribe RPC）、
-    // extensionHandler ctx（ui_timeout publish）、onDisconnect 清理、changeSetInvalidated 定向发布。
+    // onDisconnect 清理、changeSetInvalidated 定向发布。
   }
 
   /** 阶段 2：broker 构造（依赖 services + 连接池，appInfo 缺省 unknown 占位）。 */
@@ -351,11 +351,6 @@ export class RuntimeServer implements IMessageBroker {
       sessionService: this.sessionService,
       extensionService: this.extensionService,
       extensionTimeoutMgr: this.extensionTimeoutMgr,
-      nextPushId: () => this.broker.nextPushId(),
-      // wave:perf-w09（D1-2）：extension.ui_timeout 主通道走 bus.publish；broadcast 是
-      // bus 未装配时的「消息不丢」兜底（对齐 plugin-service 的回退哲学）
-      broadcast: (msg) => this.broker.broadcast(msg),
-      messageBus: this.messageBus,
     })
     this.pluginMessageHandler = new PluginMessageHandler({
       ...messaging,
@@ -559,14 +554,12 @@ export class RuntimeServer implements IMessageBroker {
     }
   }
 
-  // ── Extension timeout delegation ─────────────────────────────────
+  // ── Extension UI request lifecycle delegation ─────────────────────
 
   registerExtensionTimeout(sessionId: string, requestId: string, method: string, payload: Record<string, unknown>): void {
-    // 只注册 timer + 委托：超时后的扩展响应编排（默认值 / RPC / 广播）已下沉到
-    // extensionHandler.handleExtensionTimeout，不再让 transport 层承载扩展响应业务逻辑。
-    this.extensionTimeoutMgr.registerTimeout(sessionId, requestId, method, () => {
-      this.extensionHandler.handleExtensionTimeout(sessionId, requestId, method)
-    })
+    // 只做 session 跟踪登记 + pending 缓存：交互式 UI 请求无超时（2026-07-16 取消），
+    // block 等待用户决策，session 结束由 clearExtensionTimeoutsForSession 统一清理
+    this.extensionTimeoutMgr.trackUiRequest(sessionId, requestId, method)
     // 缓存 pending 请求（ask-user 等阻塞式请求），session 重新激活时推送
     this.extensionTimeoutMgr.cachePendingRequest(sessionId, requestId, method, payload)
   }
