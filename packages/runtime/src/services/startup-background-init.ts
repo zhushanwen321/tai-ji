@@ -203,16 +203,17 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // ⑦b extension 声明的启动配置统一 ensure（机制与容错见 ensureStartupConfigs 注释）。
   await ensureStartupConfigs(extensionService)
 
-  // ⑧ sessions 目录 `.tmp-migrate-*.jsonl` / `.tmp-import-*.jsonl` 标记家族崩溃残留清扫
-  // （W3 残留清理 + import-session D1 扩展）：目录级兜底，补 cleanupMigrateResidues 只在
-  // 附着前/delete 链触发的覆盖缺口（不再被 restore 的 session 其残留会永久留存）。
-  // 同步 readdir/unlink 扫一个本地目录（毫秒级）且在 listen 后的后台序列里执行，不阻塞
-  // 启动路径；函数内部对过期阈值（1h）内的文件不删（防并发误删进行中的归一化临时文件），
-  // 失败逐文件 warn 不上抛。
+  // ⑧ sessions 目录残留清扫（W3 `.tmp-migrate-`/`.tmp-import-` 崩溃残留 + 缓存治理 U9
+  // `<session>.jsonl.model.json` 退役 sidecar 残留）：目录级兜底，补 cleanupMigrateResidues
+  // 只在附着前/delete 链触发的覆盖缺口（不再被 restore 的 session 其残留会永久留存）。
+  // U9 家族年龄无关全删——sidecar 读写点已全部退役（U8），值可从 session JSONL 反向读
+  // 重推导（U7），删除幂等（重复删除走 warn 容错路径不抛出）。同步 readdir/unlink 扫一个
+  // 本地目录（毫秒级）且在 listen 后的后台序列里执行，不阻塞启动路径；tmp 标记家族保持
+  // 过期阈值（1h）内不删（防并发误删进行中的归一化临时文件），失败逐文件 warn 不上抛。
   try {
     const removed = cleanupTmpMigrateResidue(getSessionsDir())
     if (removed > 0) {
-      console.log(`[runtime] cleaned ${removed} stale .tmp-migrate-/.tmp-import- residue file(s) from sessions dir`)
+      console.log(`[runtime] cleaned ${removed} residue file(s) from sessions dir (.tmp-migrate-/.tmp-import- stale tmp + retired .model.json sidecar)`)
     }
   } catch (e) {
     // best-effort：清扫失败不影响主流程（残留仅是磁盘垃圾，下次启动重试）
