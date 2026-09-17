@@ -70,7 +70,25 @@ function sweepFinalizedMessage(m: Message, toolCalls: ToolCall[] | undefined): M
   return m
 }
 
-/** message 仍 streaming → 转终态 + 收口 toolCall。
+/**
+ * error 类收口 reason 的兜底错误文案（errorText 缺失路径）。
+ *
+ * 不变量（M2 error-visibility 追加形态的渲染依据）：凡 streaming 收口产出 error 终态的
+ * assistant 消息，error 字段必非空——渲染层以「error 字段有无」区分纯 error 形态（content
+ * 即错误文本，整条 danger）与追加形态（content 崩溃前正文原色 + error 独立 danger 行）。
+ * 断连 / 超时 / 重启收口不携带 errorText，缺失时若无兜底，崩溃前正常正文会被误判纯 error
+ * 整条染红。兜底单点收口在出口（finalizeStreamingMessage）而非各调用点——新增收口调用
+ * 漏传文案不破坏不变量。文案对齐 runtime 侧用户可见错误文本惯例（中文，随消息持久化）。
+ */
+const REASON_FALLBACK_ERROR_TEXT: Partial<Record<FinalizeReason, string>> = {
+  error: '会话出错，回复已中断。',
+  stream_error: '输出流中断，回复不完整。',
+  timeout: '等待超时，回复已中断。',
+  disconnect: '与运行时的连接已断开，回复已中断。重新连接后可继续。',
+  restart: '运行时已重启，回复已中断。重新连接后可继续。',
+}
+
+/** message 仍 streaming → 转终态 + 收口 toolCall.
  * [M2 error-visibility] 追加形态双通道：
  * errorText 写 Message.error 字段（message.ts:269 注释明确用途对口），content 保持崩溃前正常正文不动。
  * 旧 `${content}\n\n${errorText}` 拼接把 errorText 混进 content，渲染层无法区分哪段是错误。
@@ -83,7 +101,9 @@ function finalizeStreamingMessage(
 ): Message {
   const isErrorReason = reason === 'error' || reason === 'stream_error' || reason === 'timeout' || reason === 'disconnect' || reason === 'restart'
   const finalStatus = isErrorReason ? 'error' : 'complete'
-  const finalError = errorText && m.role === 'assistant' ? errorText : m.error
+  const fallback = isErrorReason ? REASON_FALLBACK_ERROR_TEXT[reason] : undefined
+  // errorText 空串视同缺失（空 error 字段同样破坏形态判定信号），用 || 而非 ??
+  const finalError = m.role === 'assistant' ? (errorText || fallback || m.error) : m.error
   return {
     ...m,
     status: finalStatus,

@@ -201,6 +201,49 @@ describe('finalizeMessages', () => {
     expect(after.toolCalls![0].endTime).toBeTypeOf('number')
   })
 
+  // [M2 error-visibility 不变量] 凡 streaming 收口产出 error 终态的 assistant 消息，
+  // error 字段必非空——渲染层以「error 有无」区分纯 error（整条 danger）与追加形态
+  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 超时 / 重启收口
+  // 不带文案）若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
+  it('TC4e errorText 缺失的 error 类收口：error 字段写 reason 兜底文案（追加形态不变量）', () => {
+    const { sm, messages } = makeMachine()
+    const assistant = streamingAssistant('a1', { content: 'partial' })
+    messages.value = new Map([['s1', shallowRef([assistant])]])
+
+    for (const reason of ['disconnect', 'timeout', 'restart'] as const) {
+      // 重置回 streaming 再收口（sealed 守卫：终态消息二次 finalize 不重写）
+      messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
+      sm.finalizeMessages('s1', reason)
+      const after = messages.value.get('s1')!.value[0]
+      expect(after.status).toBe('error')
+      expect(after.content).toBe('partial') // 崩溃前正文不动
+      expect(typeof after.error).toBe('string')
+      expect(after.error!.length).toBeGreaterThan(0) // 兜底文案非空——不会误判纯 error
+    }
+  })
+
+  it('TC4f errorText 空串视同缺失：error 字段走兜底（空 error 同样破坏形态判定信号）', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
+
+    sm.finalizeMessages('s1', 'error', '')
+
+    const after = messages.value.get('s1')!.value[0]
+    expect(after.status).toBe('error')
+    expect(after.error).toBe('会话出错，回复已中断。')
+  })
+
+  it('TC4g 非 error reason 不写兜底：normal 收口 error 字段保持 undefined', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'full' })])]])
+
+    sm.finalizeMessages('s1', 'normal')
+
+    const after = messages.value.get('s1')!.value[0]
+    expect(after.status).toBe('complete')
+    expect(after.error).toBeUndefined()
+  })
+
   it('TC5 normal 收口：streaming → complete；toolCall → end_not_received 且不设 endTime；无 errorText 不追加', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'full', toolCalls: [runningToolCall('tc1')] })
