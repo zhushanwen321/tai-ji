@@ -145,8 +145,8 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
       expect.stringContaining('clearing partition'),
       'sess-1',
     )
-    // 守卫不是错误态：不设 loadError
-    expect(store.loadErrorOf('session-1')).toBeNull()
+    // 守卫不是错误态：不设 loadError（sid 必须与本用例一致，错 sid 走 ?? null 兜底恒真）
+    expect(store.loadErrorOf('sess-1')).toBeNull()
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {

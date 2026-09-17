@@ -119,6 +119,26 @@ describe('FG6 Overview 进入/退出 + sessionDigest', () => {
     expect(digest.summary).toBe('')
     expect(digest.turnCount).toBe(0)
   })
+
+  it('sessionDigest：error 收尾的 session 摘要取 msg.error 文案（M2 形态 content 恒空）', () => {
+    const chat = useChatStore()
+    const { sessionDigest } = useSessionDerivations()
+    chat.hydrate('s-err', [
+      { id: 'u1', role: 'user', content: 'go', timestamp: Date.now() },
+      // [M2] 错误收尾形态：content 空、错误文本只住 error 字段
+      { id: 'a1', role: 'assistant', content: '', error: 'extension load failed', status: 'error', timestamp: Date.now() },
+    ])
+    const digest = sessionDigest('s-err').value
+    // 摘要语义 = session 怎么收尾：error 收尾必须显示错误文案，空串会丢失关键信息
+    expect(digest.summary).toBe('extension load failed')
+    expect(digest.turnCount).toBe(1)
+    // 有正文的 complete 收尾不受影响（content 优先）
+    chat.hydrate('s-ok', [
+      { id: 'u2', role: 'user', content: 'go', timestamp: Date.now() },
+      { id: 'a2', role: 'assistant', content: 'all done', status: 'complete', timestamp: Date.now() },
+    ])
+    expect(sessionDigest('s-ok').value.summary).toBe('all done')
+  })
 })
 
 describe('formatRelativeTime 四分桶', () => {

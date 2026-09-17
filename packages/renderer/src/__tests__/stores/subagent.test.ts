@@ -562,3 +562,42 @@ describe('subagent store — hasRunning / isStreamingSubagent 窄口径（轮终
     expect(store.isStreamingSubagent('session-1', 'nonexistent')).toBe(false)
   })
 })
+
+describe('subagent store — split 双 session 加载态隔离（P2-3 回归锁）', () => {
+  it('pane A 失败置 loadError 不影响 pane B 的错误/加载态（per-session 分区）', async () => {
+    vi.mocked(sessionApi.getSubagents)
+      .mockRejectedValueOnce(new Error('pane-a rpc down')) // sid-a 失败
+      .mockResolvedValueOnce([makeRecord()]) // sid-b 成功
+
+    const store = useSubagentStore()
+    await store.loadSubagents('sid-a')
+    await store.loadSubagents('sid-b')
+
+    // 各自分区互不串扰：旧全局单值形态下 sid-b 面板也会显示 pane A 的错误
+    expect(store.loadErrorOf('sid-a')).toBe('pane-a rpc down')
+    expect(store.loadErrorOf('sid-b')).toBeNull()
+    expect(store.isLoadingOf('sid-a')).toBe(false)
+    expect(store.isLoadingOf('sid-b')).toBe(false)
+    expect(store.getRecordsBySession('sid-b')).toHaveLength(1)
+  })
+
+  it('load 在途时另一 session 的读取不受影响（isIdle 分区读取）', async () => {
+    let releaseB: (() => void) | undefined
+    vi.mocked(sessionApi.getSubagents)
+      .mockResolvedValueOnce([makeRecord()])
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseB = () => resolve([makeRecord()]) }))
+
+    const store = useSubagentStore()
+    const pA = store.loadSubagents('sid-a') // 立即完成
+    const pB = store.loadSubagents('sid-b') // 挂起（模拟长轮询）
+    await pA
+    await Promise.resolve()
+
+    expect(store.isLoadingOf('sid-a')).toBe(false)
+    expect(store.isLoadingOf('sid-b')).toBe(true)
+    releaseB?.()
+    await pB
+    expect(store.isLoadingOf('sid-b')).toBe(false)
+  })
+})
+

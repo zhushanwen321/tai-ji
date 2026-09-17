@@ -172,7 +172,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
       console.error('[workflow-store] loadWorkflows failed:', e)
       loadErrorBySession.value.set(sessionId, msg)
     } finally {
-      loadingBySession.value.set(sessionId, false)
+      // delete 而非 set(sid, false)：load 在途时 clearSession 已删分区的话，set 会
+      // 为已删 session 重生条目（残留）；get ?? false 缺省读取语义等价（无条目 = 不在途）
+      loadingBySession.value.delete(sessionId)
     }
   }
 
