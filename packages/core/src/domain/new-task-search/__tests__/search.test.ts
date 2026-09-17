@@ -2,8 +2,9 @@
  * useSearch 单测（IF6，core 版）。
  *
  * 覆盖 plan TC-1..TC-6 + DTO 映射：mock 轨 4 类型合并 + 符号占位、loadSeq 乱序守卫、
- * stale cache teardown、file 缓存命中不调端口、双源 reject 静默、WS 超时 race、截断、符号占位恒定。
- * 端口全 vi.fn() 注入（SearchDeps），真实 vue reactivity + 真实 createCommandStore/createFileSearchStore。
+ * file 源直查、双源 reject 静默、WS 超时 race、截断、符号占位恒定。
+ * （TC-3 stale cache teardown / TC-4 缓存命中用例随 fileSearchStore 缓存退役删除——缓存治理 U1 1-3。）
+ * 端口全 vi.fn() 注入（SearchDeps），真实 createCommandStore。
  * 环境：vitest node（无 happy-dom）。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -11,7 +12,6 @@ import { ref } from 'vue'
 import type { FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../../platform/port'
 import { createCommandStore } from '../command-store'
-import { createFileSearchStore } from '../file-search-store'
 import { useSearch } from '../search'
 import type { SearchDeps } from '../search-ports'
 import type { AppCommand, Section, SearchItem } from '../types'
@@ -37,7 +37,6 @@ function makeMockStorage(initial?: Record<string, string>): KVStorage & { store:
 /** 构造 mock SearchDeps（每测试独立实例，断言 per-test） */
 function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
   const commandStore = createCommandStore(makeMockStorage())
-  const fileSearchStore = createFileSearchStore()
   const deps: SearchDeps = {
     ports: {
       isMock: false,
@@ -47,7 +46,6 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
-      watchFileChanges: vi.fn(() => () => {}),
       // t 返回实际本地化标签（mock fixture 用中文标签，与 real 轨 i18n 行为一致）
       t: vi.fn((key: string) => {
         const labels: Record<string, string> = {
@@ -62,7 +60,6 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       }),
     },
     commandStore,
-    fileSearchStore,
     storage: makeMockStorage(),
     fileTree: { loadTree: vi.fn(async () => {}), selectFile: vi.fn() },
     appCommandActions: {
@@ -75,7 +72,6 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
   if (overrides) {
     if (overrides.ports) deps.ports = { ...deps.ports, ...overrides.ports }
     if (overrides.commandStore) deps.commandStore = overrides.commandStore
-    if (overrides.fileSearchStore) deps.fileSearchStore = overrides.fileSearchStore
     if (overrides.storage) deps.storage = overrides.storage
     if (overrides.fileTree) deps.fileTree = { ...deps.fileTree, ...overrides.fileTree }
     if (overrides.appCommandActions) deps.appCommandActions = { ...deps.appCommandActions, ...overrides.appCommandActions }
@@ -152,56 +148,6 @@ describe('TC-2: loadSeq 乱序守卫', () => {
       Promise.resolve('pending'),
     ])
     expect(settled).toBe('pending')
-  })
-})
-
-describe('TC-3: stale cache teardown', () => {
-  it('activeSessionId 从 null → s1 时 watchFileChanges 端口被调（sid=s1）', async () => {
-    const deps = makeDeps()
-    const sid = ref<string | null>(null)
-    useSearch(sid, deps)
-
-    expect(deps.ports.watchFileChanges).not.toHaveBeenCalled()
-    sid.value = 's1'
-    await vi.waitFor(() => {
-      expect(deps.ports.watchFileChanges).toHaveBeenCalledWith('s1', expect.any(Function))
-    })
-  })
-
-  it('切换 sid 时旧 unwatch 被调 + 新 sid 重新订阅', async () => {
-    const deps = makeDeps()
-    const unwatch1 = vi.fn()
-    const unwatch2 = vi.fn()
-    ;(deps.ports.watchFileChanges as ReturnType<typeof vi.fn>)
-      .mockReturnValueOnce(unwatch1)
-      .mockReturnValueOnce(unwatch2)
-    const sid = ref<string | null>('s1')
-    useSearch(sid, deps)
-
-    await vi.waitFor(() => {
-      expect(deps.ports.watchFileChanges).toHaveBeenCalledTimes(1)
-    })
-    sid.value = 's2'
-    await vi.waitFor(() => {
-      expect(deps.ports.watchFileChanges).toHaveBeenCalledTimes(2)
-      expect(unwatch1).toHaveBeenCalled()
-    })
-  })
-})
-
-describe('TC-4: file 缓存命中不调 fileCandidates', () => {
-  it('fileSearchStore.get 返缓存 → fileCandidates 端口零调用，file 分组来自缓存', async () => {
-    const deps = makeDeps()
-    deps.fileSearchStore.set('s1', [fileNode('src/cached.ts')])
-    // 注册应用命令，确保命令源非空（query 走非空分支）
-    deps.commandStore.registerApp([{ id: 'n', name: '新建', action: vi.fn() }])
-
-    const { query } = useSearch(ref<string | null>('s1'), deps)
-    const sections = await query('cached', { activeSessionId: 's1' })
-
-    expect(deps.ports.fileCandidates).not.toHaveBeenCalled()
-    const fileSection = findSection(sections, 'file')
-    expect(fileSection!.items[0]?.title).toBe('cached.ts')
   })
 })
 

@@ -217,7 +217,7 @@ const { t } = useI18n()
 const commandStore = useCommandStore()
 const sessionIdRef = toRef(props, 'sessionId')
 
-/** panel 路 file 候选加载：挂载 / 切 session 拉取（store 缓存幂等，命中不重拉——ADR-0049）。
+/** panel 路 file 候选加载：挂载 / 切 session 现拉（无缓存，缓存治理 U1 1-3 退役——每次现跑 file.search）。
  *  触发时机是挂载 + sid 变化，与 open-fetch 的 open 边沿 landing cwd 路是 D2 双路数据源
  *  （panel 有 sid 走本路；原 command-popover-file-candidates.ts，u20 内联回本组件）。 */
 const { load: loadFileCandidates } = useFileSearch()

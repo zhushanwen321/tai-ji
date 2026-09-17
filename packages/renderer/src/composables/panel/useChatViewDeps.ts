@@ -66,8 +66,8 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
   const { load: loadFileCandidates } = useFileSearch()
 
   /** 当前 session 的本地文件白名单（filePaths 含 / 路径 + localFiles 裸 basename）。
-   *  对齐旧 MarkdownRenderer 的 refreshLocalFiles：sessionId 变化重新 load，
-   *  fileSearchStore 缓存命中走同步路径，否则 fire-and-forget RPC 完成后赋值触发重渲染。
+   *  对齐旧 MarkdownRenderer 的 refreshLocalFiles：sessionId 变化重新 load（无缓存，
+   *  缓存治理 U1 1-3 退役——每次现拉 file.search），fire-and-forget RPC 完成后赋值触发重渲染。
    *  renderMarkdown 消费这两个 Set 作 markdown 路径/basename 链接化白名单。 */
   const filePaths = ref<Set<string>>(new Set())
   const localFiles = ref<Set<string>>(new Set())
