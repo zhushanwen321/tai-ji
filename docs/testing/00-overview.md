@@ -655,6 +655,11 @@ pnpm run dev
 | `e2e/ask-user-real.spec.ts` | A1/A2/A3 | ask-user 协议透传（问题对象无 allowComment）+ overlay 真实渲染（Other 保留）+ UI 交互闭环（overlay 关闭 + pi 恢复 turn） | ✅ 3/3（需 LLM） |
 | `e2e/workflow-thinkinglevel-real.spec.ts` | TC1/TC2/TC3 | workflow agent() thinkingLevel 端到端：state 请求值 / pi 子进程 thinking_level_change / 完整跑通 | ✅ 3/3（需 LLM） |
 | `e2e/workspace-real.spec.ts` | 1 | 跨进程持久化 | ❌ 需真实 runtime 端口 |
+| `e2e/skill-reload-survival.spec.ts` | S1 | 编辑项目 skill 时在飞 workflow run 存活：面板 2s 即时（G1）/ 托盘计数不变 + 无 `connection lost`/`code=143` + 引擎 CLI pid 不变（D2b）/ `[skill-reload]` 三段归因行计数吻合（D8）/ 主 session JSONL 终态 workflow-record（W17）/ session.delete 真杀无孤儿 | 🆕 faux 轨（L2.5，未跑真机——执行归 dev-flow B5b） |
+| `e2e/skill-reload-askuser.spec.ts` | S1b | 双 session 并发 reload 存活：全局 skill 目录变动 → dir=global 归因行列双 sid / preserved 行每 session 一条 / reload 后触发的 ask_user 反向请求送达 overlay 且可应答（D3 槽现读，无静默取消） | 🆕 faux 轨（L2.5，未跑真机——执行归 dev-flow B5b） |
+| `e2e/skill-reload-spawn-race.spec.ts` | S2 | 派发 run 后 <1s 编辑 skill 撞 spawn 窗口竞态：run 确定收口（workflowUpdate 广播）+ 主 session JSONL 末条 workflow-record 可读回（无状态分裂）+ 引擎执行树 ps 归零（无孤儿） | 🆕 faux 轨（L2.5，未跑真机——执行归 dev-flow B5b） |
+
+> skill-reload 三 spec（登记 E2E-SKILLRELOAD-01/02/03，见 [e2e-map.json](./e2e-map.json)）为 faux LLM 轨（L2.5）：被测对象是 reload 非破坏化机制链而非模型智能，LLM 轮次 faux 脚本化 + `TAIJI_FAUX_TPS` 长流式保持 run 在飞，零 token 确定性；共享装配与断言工具在 `e2e/fixtures/skill-reload-real-helpers.ts`（含每条断言的样本来源锚点）。preserved 归因行需 `TAIJI_AGENT_DEBUG=1`（spec 内自设）。
 
 ## 3. 运行
 
