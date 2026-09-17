@@ -181,8 +181,8 @@ describe('W3 scanPiSessions mtime+size 缓存', () => {
     // → 5 真实读/文件（计数 10）。基线（无 project/agent 读）3 文件计数 18 = 3 × 6。
     // composer-model（U1）model 第七读（2026-09-04 预算校准）：scanSessionMeta
     // 同批次新增 readModelBinding(1) 真实读/文件（[缓存治理 U7 起] .model.json sidecar
-    // 不再被读取，改为反向读 session JSONL 真源提取，设计
-    // docs/design/composer-model-session-isolation.md D1 扫描器提取），归因核实：
+    // 不再被读取，改为反向读 session JSONL 真源提取——U7 见
+    // session-file-utils.ts extractLatestModelFromJsonl），归因核实：
     // git show 7c15bad36 对比 HEAD，本分支唯一读取增量为该第七读（+1 读/文件），
     // 实测计数 30 → 36 与 +3 文件 × 2 计数精确吻合 → 6 真实读/文件（计数 12）。
     // 关键约束：缓存命中时（AC-cache-1）readFileSync 不增加，该断言不变。
