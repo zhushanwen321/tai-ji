@@ -41,6 +41,7 @@ export class ProjectStore {
     this.filePath = join(configDir, FILE_NAME)
     this.cache = new WriteBackCache<typeof PARTITION_KEY, string, Project>(
       {
+        partitionPath: () => this.filePath,
         loadPartition: () => this.loadFromFile(),
         persistPartition: (_k, data) => this.persistToFile(data),
       },

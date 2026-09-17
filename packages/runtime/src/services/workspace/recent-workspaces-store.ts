@@ -40,6 +40,7 @@ export class RecentWorkspacesStore {
 
     this.cache = new WriteBackCache<typeof PARTITION_KEY, string, RecentWorkspaceRecord>(
       {
+        partitionPath: () => this.filePath,
         loadPartition: () => this.loadFromFile(),
         persistPartition: (_k, data) => this.persistToFile(data),
       },

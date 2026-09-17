@@ -14,7 +14,7 @@
  * （isEnoent）的直接组合，无业务语义。
  */
 
-import { readFileSync, renameSync, rmSync, mkdirSync, existsSync, statSync } from 'node:fs'
+import { copyFileSync, readFileSync, renameSync, rmSync, mkdirSync, existsSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { atomicWrite } from './fs-utils.js'
 import { isEnoent } from './errors.js'
@@ -182,7 +182,8 @@ export class JsonStore<T> {
     quarantineCorruptFile(this.path, { tag: 'json-store', reason, cause })
   }
 
-  private deleteFile(): void {    try {
+  private deleteFile(): void {
+    try {
       rmSync(this.path, { force: true })
     // eslint-disable-next-line taste/no-silent-catch -- writeEmpty:'delete' 是尽力清理，失败不阻断主流程（同 trash.ts 约定）
     } catch (e) {
@@ -242,6 +243,12 @@ const DEFAULT_FLUSH_MS = 500
 
 export interface WriteBackBacking<K, IK, IV> {
   /**
+   * 分区对应的持久化文件路径（stat 指纹校验与冲突备份用，cache-governance §3.2.4）。
+   * 实现必须与自身 loadPartition/persistPartition 推导同一路径（复用同一路径方法，
+   * 含路径逃逸防御），保证校验/备份对象与实际读写对象一致。
+   */
+  partitionPath(k: K): string
+  /**
    * 首次访问某分区时从盘加载（lazy）。返回该分区的内存 Map。
    * 文件不存在 / 损坏时应返回空 Map（由实现负责 ENOENT 容错）。
    */
@@ -270,10 +277,33 @@ interface Partition<IK, IV> {
   dirty: Set<IK>
   flushTimer: ReturnType<typeof setTimeout> | null
   totalSize: number
+  /** 分区加载时刻的文件指纹（statFingerprint 五元组）。文件不存在 / stat 失败时为 undefined。 */
+  loadRevision: string | undefined
 }
 
 /**
- * 分区化 write-back 缓存。每个分区键 K 对应一个 `{data, dirty, flushTimer, totalSize}`。
+ * WriteBackCache 的分区指纹采集：任何失败都降级为 undefined（下次读侧校验必失配重载，
+ * 安全方向；语义同 JsonStore 的 statRevisionSafely，不跨类共享私有实现）。
+ */
+function statPartitionRevision(path: string): string | undefined {
+  try {
+    return statFingerprint(path)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 分区化 write-back 缓存。每个分区键 K 对应一个
+ * `{data, dirty, flushTimer, totalSize, loadRevision}`。
+ *
+ * 失效机制（cache-governance §3.2.4，分区混合策略「读侧外部优先、写侧内存优先」）：
+ * - 非 dirty 分区每次访问先 stat 比对 loadRevision——外部改动/删除在下一次访问即生效
+ *   （drop + 重新 loadPartition），与 JsonStore revision 档同构；stat 非 ENOENT 失败
+ *   → warn + 按未变更处理（探针失败 ≠ 文件变更）。
+ * - dirty 分区跳过读侧校验（drop 会连未落盘写一起丢，onExternalChange 教训）；
+ *   flush 前比对指纹，发现外部改动 → 先备份磁盘内容为 `<path>.conflict-<ts>` 再照常
+ *   覆写，warn 含原文件与备份双路径 + 恢复指引（消除静默覆盖，G2）。
  *
  * 替代 PluginStorage（分区键 = `${pluginId}:${scope}`）与 SessionDataStore
  * （分区键 = `sessionId`）两套手写 write-back 实现，统一 size 口径（默认
@@ -344,7 +374,11 @@ export class WriteBackCache<K extends string, IK extends string, IV> {
   }
 
   /**
-   * 同步持久化单分区：清 timer → persistPartition → 清 dirty。
+   * 同步持久化单分区：清 timer → 冲突检测（备份外部改动）→ persistPartition → 清 dirty。
+   *
+   * flush 前 stat 比对 loadRevision（cache-governance §3.2.4「写侧内存优先 + 冲突备份
+   * 出声」）：磁盘指纹已变（dirty 窗口内外部改/建了文件）→ 先复制磁盘内容为
+   * `<path>.conflict-<ts>` 备份再照常覆写，warn 含双路径与恢复指引。
    *
    * [W0 异常隔离] persistPartition 失败（盘满 / 权限 / 只读挂载）时：
    * - 不向上抛（flush 被两处 timer 回调同步调用，抛出会变 uncaughtException → 进程 crash）
@@ -360,8 +394,17 @@ export class WriteBackCache<K extends string, IK extends string, IV> {
       partition.flushTimer = null
     }
     try {
+      if (!this.backupExternalConflict(k, partition)) {
+        // 冲突备份失败即中止本次落盘：此时覆写会把外部改动无备份地冲掉（内存写有
+        // dirty 重试、外部改动将无所遁形地丢失），保留 dirty 等条件恢复后重试
+        this.scheduleFlush(k)
+        return
+      }
       this.backing.persistPartition(k, partition.data)
       partition.dirty.clear()
+      // 以写入后指纹刷新 loadRevision：磁盘已是内存投影，非 dirty 读侧校验应命中；
+      // 采集失败降级 undefined → 下次访问失配重载（安全方向，多一次盘读）
+      partition.loadRevision = statPartitionRevision(this.backing.partitionPath(k))
     } catch (e) {
       // 保留 dirty，下次 flush 重试；避免 timer 回调抛错导致 uncaughtException crash
       console.error(`[json-store] flush failed for partition "${k}", will retry:`,
@@ -405,16 +448,98 @@ export class WriteBackCache<K extends string, IK extends string, IV> {
 
   private getPartition(k: K): Partition<IK, IV> {
     let partition = this.partitions.get(k)
+    // 非 dirty 分区读侧校验（cache-governance §3.2.4「外部优先」）：外部改动 / 删除 /
+    // 新建在下一次访问即生效。dirty 分区跳过——drop 会连未落盘写一起丢，外部改动由
+    // flush 前的冲突检测兜底（备份 + warn）。
+    if (partition && partition.dirty.size === 0 && this.partitionStaleOnDisk(k, partition)) {
+      this.dropPartition(k)
+      partition = undefined
+    }
     if (!partition) {
+      // 指纹先于加载采集：若加载窗口内文件又被外部改，指纹旧于内容 → 下次校验失配
+      // 重载（安全方向，同 JsonStore.readFromDisk；反序会把新指纹配旧内容，陈旧值
+      // 被指纹命中固化）
+      const loadRevision = statPartitionRevision(this.backing.partitionPath(k))
       const data = this.backing.loadPartition(k)
       let totalSize = 0
       for (const v of data.values()) {
         totalSize += this.sizeOf(v)
       }
-      partition = { data, dirty: new Set(), flushTimer: null, totalSize }
+      partition = { data, dirty: new Set(), flushTimer: null, totalSize, loadRevision }
       this.partitions.set(k, partition)
     }
     return partition
+  }
+
+  /**
+   * 读侧校验：磁盘指纹相对分区加载时刻已变（外部改写 / 删除 / 新建）返回 true。
+   * ENOENT 视为指纹 undefined，与「加载时文件不存在」的 undefined loadRevision 相等
+   * （文件持续缺失稳定命中，不抖动重载）。
+   */
+  private partitionStaleOnDisk(k: K, partition: Partition<IK, IV>): boolean {
+    let revision: string | undefined
+    try {
+      revision = statFingerprint(this.backing.partitionPath(k))
+    } catch (e: unknown) {
+      if (!isEnoent(e)) {
+        // stat 抛非 ENOENT：探针失败 ≠ 文件变更，不 drop（同 JsonStore 读判定）
+        console.warn(
+          `[json-store] 分区 stat 探针失败，按未变更处理。恢复指引：检查文件权限/挂载，` +
+          `机制本身下次访问自动重试。partition="${k}"`,
+          e instanceof Error ? e.message : e,
+        )
+        return false
+      }
+      // ENOENT：文件被外部删 → 指纹 undefined
+    }
+    return revision !== partition.loadRevision
+  }
+
+  /**
+   * flush 前冲突检测（cache-governance §3.2.4）：磁盘指纹相对 loadRevision 已变
+   * （dirty 窗口内外部改/建了文件）→ 先复制磁盘当前内容为 `<path>.conflict-<ts>`
+   * 备份（与 `.corrupt-<ts>` quarantine 同构留存）再放行覆写，warn 含原文件与备份
+   * 双路径 + 恢复指引。返回 false = 备份失败，调用方须中止本次 persist（保留 dirty）。
+   */
+  private backupExternalConflict(k: K, partition: Partition<IK, IV>): boolean {
+    const path = this.backing.partitionPath(k)
+    let revision: string | undefined
+    try {
+      revision = statFingerprint(path)
+    } catch (e: unknown) {
+      if (isEnoent(e)) {
+        // 文件不存在：无内容可覆盖也无可备份（外部删除先于 flush，非 flush 造成），
+        // 放行覆写重建
+        return true
+      }
+      // 探针失败：无法判定冲突。落盘是 dirty 写的既定义务，不因探针失败无限搁置，
+      // 但必须出声（G2 禁静默覆盖）
+      console.warn(
+        `[json-store] flush 前 stat 探针失败，冲突检测跳过、照常落盘。` +
+        `恢复指引：如怀疑外部改动被覆盖，检查数据目录近期备份。partition="${k}", path=${path}`,
+        e instanceof Error ? e.message : e,
+      )
+      return true
+    }
+    if (revision === partition.loadRevision) return true
+    // ISO 时间戳压缩格式：与 .corrupt-<ts> quarantine 同构（文件名安全，字典序即时间序）
+    const ts = new Date().toISOString().replace(/[:.]/g, '')
+    const backupPath = `${path}.conflict-${ts}`
+    try {
+      copyFileSync(path, backupPath)
+    } catch (e: unknown) {
+      console.error(
+        `[json-store] flush 冲突备份失败，本次落盘中止（保留 dirty 自动重试）。` +
+        `恢复指引：排查磁盘权限/空间后等待重试。partition="${k}", path=${path}, backup=${backupPath}`,
+        e instanceof Error ? e.message : e,
+      )
+      return false
+    }
+    console.warn(
+      `[json-store] flush 检测到外部改动，已先备份再覆写。` +
+      `恢复指引：外部修改从 .conflict 备份找回。原文件=${path}, 备份=${backupPath}, partition="${k}"`,
+    )
+    return true
   }
 
   private dropPartition(k: K): void {

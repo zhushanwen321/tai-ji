@@ -32,6 +32,7 @@ export class PluginStorage {
 
     this.cache = new WriteBackCache<PartitionKey, string, unknown>(
       {
+        partitionPath: (k) => this.getPartitionFilePath(k),
         loadPartition: (k) => this.loadPartition(k),
         persistPartition: (k, data) => this.persistPartition(k, data),
       },
@@ -104,6 +105,12 @@ export class PluginStorage {
   private parsePartitionKey(k: PartitionKey): { pluginId: string; scope: 'global' | 'workspace' } {
     const parts = k.split(':')
     return { pluginId: parts[0], scope: (parts[1] ?? 'global') as 'global' | 'workspace' }
+  }
+
+  /** partitionPath 回调：复用 getFilePath 同一路径推导（含 [SEC-A5] 路径逃逸防御）。 */
+  private getPartitionFilePath(k: PartitionKey): string {
+    const { pluginId, scope } = this.parsePartitionKey(k)
+    return this.getFilePath(pluginId, scope)
   }
 
   private loadPartition(k: PartitionKey): Map<string, unknown> {

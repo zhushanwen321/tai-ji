@@ -114,6 +114,7 @@ export class SessionDataStore {
     this.trashFile = trashFile
     this.cache = new WriteBackCache<string, string, unknown>(
       {
+        partitionPath: (sessionId) => this.resolveSessionFilePath(sessionId),
         loadPartition: (sessionId) => this.loadPartitionSync(sessionId),
         persistPartition: (sessionId, data) => this.persistPartition(sessionId, data),
       },
