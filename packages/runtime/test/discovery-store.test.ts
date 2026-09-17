@@ -248,8 +248,8 @@ describe('discovery-store', () => {
     })
   })
 
-  describe('TTL cache', () => {
-    it('serves cached value within TTL, ignores external file change', () => {
+  describe('external change visibility (revision fingerprint)', () => {
+    it('serves external file change on next read without invalidate; invalidate still forces reread', () => {
       setSkillDirs([glob('v1')])
       writeFileSync(discoveryPath, JSON.stringify({
         version: 2,
@@ -257,9 +257,17 @@ describe('discovery-store', () => {
         agent: { projectPaths: [], globalPaths: [] },
         extension: { projectPaths: [], globalPaths: [] },
       }), 'utf-8')
-      expect(getSkillDirs()).toEqual(['v1'])
-      invalidateDiscoveryCache()
+      // 指纹失配 → 重读：外部改动无需失效即下一次 read 可见
       expect(getSkillDirs()).toEqual(['v2-external'])
+      // invalidate 显式失效路径保持可用
+      writeFileSync(discoveryPath, JSON.stringify({
+        version: 2,
+        skill: { projectPaths: [], globalPaths: ['v3-external'] },
+        agent: { projectPaths: [], globalPaths: [] },
+        extension: { projectPaths: [], globalPaths: [] },
+      }), 'utf-8')
+      invalidateDiscoveryCache()
+      expect(getSkillDirs()).toEqual(['v3-external'])
     })
   })
 })

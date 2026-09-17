@@ -100,12 +100,11 @@ export type { PiSettings } from './pi-settings-store.js'
  */
 let modelsFilePath: string = getModelsPath()
 
-/** models.json 存储：read-through（TTL 缓存 + ENOENT 容错）+ atomicWrite。 */
+/** models.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。 */
 let modelsStore = createModelsStore(modelsFilePath)
 
 function createModelsStore(path: string): JsonStore<PiModelsConfig> {
   return new JsonStore<PiModelsConfig>(path, { providers: {} }, {
-    ttlMs: 3_000,
     deserialize: (raw): PiModelsConfig => {
       if (!raw || typeof raw !== 'object' || typeof (raw as PiModelsConfig).providers !== 'object') {
         console.warn(`[provider-store] ${path} schema 不匹配，使用 fallback`)

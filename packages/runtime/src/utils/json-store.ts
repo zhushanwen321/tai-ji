@@ -3,7 +3,8 @@
  *
  * 收口 runtime 6 类 JSON 存储（models / settings / disabled-packages /
  * permissions / plugin-KV / session-data）的读写样板：read→parse→ENOENT 容错→
- * 默认值、atomicWrite、TTL 缓存、write-back（dirty + 定时 flush + size 跟踪）。
+ * 默认值、atomicWrite、revision 指纹校验（JsonStore）、write-back（dirty +
+ * 定时 flush + size 跟踪，WriteBackCache）。
  *
  * 设计依据：6 个 store 的文件均为 KB 级、读带缓存、写低频，同步 IO 对 event loop
  * 无感（评审证据见 git 历史 runtime-similar-code-review.md P0-A，该文档已删除）。统一同步，
@@ -13,19 +14,16 @@
  * （isEnoent）的直接组合，无业务语义。
  */
 
-import { readFileSync, renameSync, rmSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, mkdirSync, existsSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { atomicWrite } from './fs-utils.js'
 import { isEnoent } from './errors.js'
 
-// ── JsonStore：read-through + TTL 缓存 + 原子写 ─────────────────────────
+// ── JsonStore：read-through + revision 指纹校验 + 原子写 ────────────────
 
-const DEFAULT_TTL_MS = 3_000
 const DEFAULT_INDENT = 2
 
 export interface JsonStoreOptions<T> {
-  /** 读缓存 TTL（ms）。命中且未过期则不碰盘。默认 3000（沿用既有 CACHE_TTL_MS）。 */
-  ttlMs?: number
   /** JSON 序列化缩进。默认 2（统一既有 JSON_INDENT / INDENT_SPACES 两套常量）。 */
   indent?: number
   /**
@@ -43,11 +41,30 @@ export interface JsonStoreOptions<T> {
 
 interface CacheEntry<T> {
   value: T
-  timestamp: number
+  /** 加载时的文件指纹（statFingerprint 五元组）。文件不存在 / stat 失败时为 undefined。 */
+  revision: string | undefined
 }
 
 /**
- * Read-through JSON 文件存储：read 带 TTL 缓存与 ENOENT 容错，write 走 atomicWrite。
+ * 文件指纹（cache-governance §3.2.2，形态对齐 pi getFileRevision）：
+ * `dev:ino:size:mtimeNs:ctimeNs` 五元组。含 inode 与 ctimeNs，严于仓内惯用的
+ * `(mtimeMs,size)` 双键——atomicWrite 的 tmp+rename 会换 inode，双键在极端时序下
+ * 可能漏检，五元组不漏。bigint stat 保证 mtimeNs 纳秒精度（ms 精度下同毫秒内的
+ * 连续写会漏检）。
+ */
+function statFingerprint(path: string): string {
+  const st = statSync(path, { bigint: true })
+  return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`
+}
+
+/**
+ * Read-through JSON 文件存储：read 带 revision 指纹校验（外部改动下一次 read 立即可见）
+ * 与 ENOENT 容错，write 走 atomicWrite。
+ *
+ * 读判定：有缓存时先 stat 比对指纹——一致返缓存（热路径成本 = 一次 stat syscall）；
+ * 指纹变 / 文件被删（ENOENT）→ 重读盘；stat 抛非 ENOENT → warn + 返缓存值
+ * （探针失败 ≠ 文件变更，不否定缓存）。指纹校验保证任何外部写方（pi 子进程写
+ * settings.json、用户手改）的下一次 read 立即可见（cache-governance §2.1 场景 A）。
  *
  * 替代散落在 pi-provider-store / pi-settings-store / pi-extension-settings /
  * plugin-permission-storage 的 read→parse→catch→default 与 write→mkdir→atomicWrite 样板。
@@ -55,7 +72,6 @@ interface CacheEntry<T> {
 export class JsonStore<T> {
   private readonly path: string
   private readonly defaultValue: T
-  private readonly ttlMs: number
   private readonly indent: number
   private readonly deserialize: (raw: unknown) => T
   private readonly shouldDeleteWhen: (value: T) => boolean
@@ -64,26 +80,45 @@ export class JsonStore<T> {
   constructor(path: string, defaultValue: T, opts?: JsonStoreOptions<T>) {
     this.path = path
     this.defaultValue = defaultValue
-    this.ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS
     this.indent = opts?.indent ?? DEFAULT_INDENT
     this.deserialize = opts?.deserialize ?? ((v): T => v as T)
     this.shouldDeleteWhen = opts?.shouldDeleteWhen ?? (() => false)
   }
 
-  /** 读取：缓存命中且未过期则返缓存；否则读盘 + parse + ENOENT→默认值。 */
+  /** 读取：指纹一致返缓存；指纹变 / 文件被删 → 重读盘 + parse + ENOENT→默认值。 */
   read(): T {
-    if (this.cache && !this.isExpired(this.cache)) {
+    const cached = this.cache
+    if (!cached) {
+      this.cache = this.readFromDisk()
       return this.cache.value
     }
-    const value = this.readFromDisk()
-    this.cache = { value, timestamp: Date.now() }
-    return value
+    let revision: string | undefined
+    try {
+      revision = statFingerprint(this.path)
+    } catch (e: unknown) {
+      if (!isEnoent(e)) {
+        // stat 抛非 ENOENT：探针失败 ≠ 文件变更，不否定缓存（批 2 错误规格第 2 行）
+        console.warn(
+          `[json-store] stat 探针失败，返回缓存值。恢复指引：检查文件权限/挂载，` +
+          `机制本身下次 read 自动重试。path=${this.path}`,
+          e instanceof Error ? e.message : e,
+        )
+        return cached.value
+      }
+      // ENOENT：文件被外部删 = 外部写的一种 → 丢缓存重读（readFromDisk 的
+      // ENOENT 容错返默认值）；revision 保持 undefined
+    }
+    if (revision === cached.revision) {
+      return cached.value
+    }
+    this.cache = this.readFromDisk()
+    return this.cache.value
   }
 
-  /** 写入：确保父目录 → atomicWrite + 刷新缓存。若 shouldDeleteWhen 判定为空则删文件。 */
+  /** 写入：确保父目录 → atomicWrite + 以写入后指纹刷新缓存。若 shouldDeleteWhen 判定为空则删文件。 */
   write(value: T): void {
-    this.cache = { value, timestamp: Date.now() }
     if (this.shouldDeleteWhen(value)) {
+      this.cache = { value, revision: undefined } // 文件已删 → 无指纹，下次 read 按 ENOENT 容错
       this.deleteFile()
       return
     }
@@ -91,6 +126,7 @@ export class JsonStore<T> {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const json = JSON.stringify(value, null, this.indent)
     atomicWrite(this.path, json)
+    this.cache = { value, revision: this.statRevisionSafely() }
   }
 
   /** 失效缓存（下次 read 重读盘）。替代散落的 invalidateXxxCache。 */
@@ -104,7 +140,11 @@ export class JsonStore<T> {
 
   // ── Private ────────────────────────────────────────────────────────
 
-  private readFromDisk(): T {
+  private readFromDisk(): CacheEntry<T> {
+    // 指纹在读之前取：若读盘窗口内文件又被改，指纹旧于内容 → 下次 read 判失配
+    // 重读（安全方向）；反过来（读后取指纹）会把新指纹配旧内容，陈旧值被指纹
+    // 命中固化。stat 失败 → undefined 指纹，同样使下次 read 必失配重读。
+    const revision = this.statRevisionSafely()
     let raw: string
     try {
       raw = readFileSync(this.path, 'utf-8')
@@ -115,13 +155,22 @@ export class JsonStore<T> {
       if (!isEnoent(e)) {
         this.quarantine('read failed', e)
       }
-      return this.defaultValue
+      return { value: this.defaultValue, revision }
     }
     try {
-      return this.deserialize(JSON.parse(raw))
+      return { value: this.deserialize(JSON.parse(raw)), revision }
     } catch (e: unknown) {
       this.quarantine('parse failed', e)
-      return this.defaultValue
+      return { value: this.defaultValue, revision }
+    }
+  }
+
+  /** write / 重读路径的指纹采集：任何失败都降级为 undefined（下次 read 必失配重读，安全方向）。 */
+  private statRevisionSafely(): string | undefined {
+    try {
+      return statFingerprint(this.path)
+    } catch {
+      return undefined
     }
   }
 
@@ -133,12 +182,7 @@ export class JsonStore<T> {
     quarantineCorruptFile(this.path, { tag: 'json-store', reason, cause })
   }
 
-  private isExpired(entry: CacheEntry<T>): boolean {
-    return Date.now() - entry.timestamp > this.ttlMs
-  }
-
-  private deleteFile(): void {
-    try {
+  private deleteFile(): void {    try {
       rmSync(this.path, { force: true })
     // eslint-disable-next-line taste/no-silent-catch -- writeEmpty:'delete' 是尽力清理，失败不阻断主流程（同 trash.ts 约定）
     } catch (e) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtemp, rm, readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -70,23 +70,72 @@ describe('JsonStore', () => {
       errorSpy.mockRestore()
     })
 
-    it('serves cached value within TTL', () => {
-      const path = join(tmpDir, 'ttl.json')
+    it('serves cached value without reloading disk while fingerprint matches', () => {
+      const path = join(tmpDir, 'hit.json')
       writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 10_000 })
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
-      writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
+      const loadSpy = vi.spyOn(store as unknown as { readFromDisk: () => unknown }, 'readFromDisk')
       expect(store.read()).toEqual({ v: 1 })
+      // 指纹一致：零盘读，热路径成本 = 一次 stat syscall
+      expect(loadSpy).not.toHaveBeenCalled()
     })
 
-    it('re-reads disk after TTL expires', async () => {
-      const path = join(tmpDir, 'ttl-expire.json')
-      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 20 })
+    it('re-reads disk when external write changes mtime with identical size', () => {
+      const path = join(tmpDir, 'mtime.json')
+      const before = JSON.stringify({ v: 1 })
+      const after = JSON.stringify({ v: 2 })
+      expect(Buffer.byteLength(before)).toBe(Buffer.byteLength(after)) // size 恒定 → 失配必来自 mtime 族
+      writeFileSync(path, before, 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
-      writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
-      await new Promise(resolve => setTimeout(resolve, 30))
+      writeFileSync(path, after, 'utf-8') // 外部原地改写：size 不变、mtime 变
       expect(store.read()).toEqual({ v: 2 })
+    })
+
+    it('re-reads disk when file size changes', () => {
+      const path = join(tmpDir, 'size.json')
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+      writeFileSync(path, JSON.stringify({ v: 22222 }), 'utf-8') // 外部改写：size 变
+      expect(store.read()).toEqual({ v: 22222 })
+    })
+
+    it('serves defaultValue after external file deletion, stably on repeated reads', () => {
+      const path = join(tmpDir, 'gone.json')
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+      unlinkSync(path)
+      // stat ENOENT → 丢缓存 → 读盘 ENOENT 容错 → 默认值（文件被外部删 = 外部写的一种）
+      expect(store.read()).toEqual({ v: 0 })
+      // 文件持续缺失：默认值缓存（revision undefined）稳定命中，不反复触盘读
+      expect(store.read()).toEqual({ v: 0 })
+    })
+
+    it('returns cached value with warn when stat probe fails (non-ENOENT)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const blocker = join(tmpDir, 'blocker')
+      const path = join(blocker, 'f.json')
+      mkdirSync(blocker, { recursive: true })
+      writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
+      expect(store.read()).toEqual({ v: 1 })
+
+      // blocker 目录替换为同名普通文件 → stat(f.json) 抛 ENOTDIR（非 ENOENT，真实 fs 异常）
+      rmSync(blocker, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      writeFileSync(blocker, 'x', 'utf-8')
+
+      const loadSpy = vi.spyOn(store as unknown as { readFromDisk: () => unknown }, 'readFromDisk')
+      expect(store.read()).toEqual({ v: 1 }) // 探针失败 ≠ 文件变更，不否定缓存
+      expect(loadSpy).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const warnMsg = String(warnSpy.mock.calls[0]!.join(' '))
+      expect(warnMsg).toContain('stat 探针失败')
+      expect(warnMsg).toContain(path)
+      expect(warnMsg).toContain('权限')
+      warnSpy.mockRestore()
     })
 
     it('deserialize hook shapes raw value', () => {
@@ -202,12 +251,12 @@ describe('JsonStore', () => {
       expect(readFileSync(path, 'utf-8')).toBe(JSON.stringify({ n: 1 }, null, 4))
     })
 
-    it('after write, cache blocks external changes', () => {
+    it('external changes after write are visible on next read (fingerprint mismatch)', () => {
       const path = join(tmpDir, 'write-cache.json')
-      const store = new JsonStore<{ n: number }>(path, { n: 0 }, { ttlMs: 60_000 })
+      const store = new JsonStore<{ n: number }>(path, { n: 0 })
       store.write({ n: 9 })
       writeFileSync(path, JSON.stringify({ n: 99 }), 'utf-8')
-      expect(store.read()).toEqual({ n: 9 })
+      expect(store.read()).toEqual({ n: 99 })
     })
   })
 
@@ -215,7 +264,7 @@ describe('JsonStore', () => {
     it('forces next read to hit disk', () => {
       const path = join(tmpDir, 'inv.json')
       writeFileSync(path, JSON.stringify({ v: 1 }), 'utf-8')
-      const store = new JsonStore<{ v: number }>(path, { v: 0 }, { ttlMs: 60_000 })
+      const store = new JsonStore<{ v: number }>(path, { v: 0 })
       expect(store.read()).toEqual({ v: 1 })
       writeFileSync(path, JSON.stringify({ v: 2 }), 'utf-8')
       store.invalidate()

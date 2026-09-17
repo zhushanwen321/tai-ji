@@ -85,12 +85,11 @@ function asScopedPaths(k: unknown): ScopedPaths {
 let discoveryStore = createDiscoveryStore(getDiscoveryPath())
 
 /**
- * discovery.json 存储：read-through（TTL 缓存 + ENOENT 容错）+ atomicWrite。
+ * discovery.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。
  * schema guard：认 v2（直接用）+ v1（迁移到 v2 后返回，不再 fallback 清空）。
  */
 function createDiscoveryStore(path: string): JsonStore<DiscoveryConfig> {
   return new JsonStore<DiscoveryConfig>(path, DEFAULT_DISCOVERY, {
-    ttlMs: 3_000,
     deserialize: (raw): DiscoveryConfig => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         console.warn(`[discovery-store] ${path} schema 不匹配，使用 fallback`)
