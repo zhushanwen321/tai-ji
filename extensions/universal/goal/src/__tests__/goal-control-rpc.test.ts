@@ -12,10 +12,20 @@
  * 避免 hand-rolled state 与生产路径不一致。pi/ctx 用最小 fake（对齐 index.test.ts makeFactoryFixture）。
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { registerGoalControlTool, type GoalControlDetails } from "../adapters/goal-control-adapter";
 import { createGoalSession } from "../session";
+
+// ── mock：logger + updateWidget（UI 通道降级用例断言面；其余用例下两者为 no-op，
+//    与真实路径行为等价——fixture 的 setWidget/notify 本就是 no-op）──
+const loggerWarnSpy = vi.hoisted(() => vi.fn());
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+	getLogger: () => ({ warn: loggerWarnSpy, debug: vi.fn(), error: vi.fn() }),
+}));
+vi.mock("../projection/widget", () => ({ updateWidget: vi.fn() }));
+
+import { updateWidget } from "../projection/widget";
 
 // ── Types ─────────────────────────────────────────────
 
@@ -213,5 +223,80 @@ describe("goal_control execute — 非 RPC 模式无 __gui__", () => {
 		});
 		expect("__gui__" in result.details).toBe(false);
 		expect(result.content[0].text).toContain("Goal created");
+	});
+});
+
+// ── 辅助 UI 通道降级（create/complete/blocked 的 updateWidget/notify 在核心副作用
+//    之后调用，UI 故障不得翻转工具结果）──────────────────
+
+describe("goal_control execute — 辅助 UI 通道失败降级", () => {
+	beforeEach(() => {
+		vi.mocked(updateWidget).mockReset();
+		loggerWarnSpy.mockClear();
+	});
+
+	/** 注册 tool 并同时持有 session 引用（断言持久化后的内存 state）。 */
+	function captureToolWithSession(pi: ExtensionAPI): { tool: CapturedTool; session: ReturnType<typeof createGoalSession> } {
+		let captured: CapturedTool | undefined;
+		const capturePi = {
+			...pi,
+			registerTool(tool: CapturedTool): void {
+				captured = tool;
+			},
+		} as unknown as ExtensionAPI;
+		const session = createGoalSession();
+		registerGoalControlTool(capturePi, session);
+		if (!captured) throw new Error("registerGoalControlTool did not register a tool");
+		return { tool: captured, session };
+	}
+
+	it("create + updateWidget 抛错 → 工具调用仍成功返回、状态已创建（warn 留痕非静默）", async () => {
+		vi.mocked(updateWidget).mockImplementation(() => {
+			throw new Error("widget channel broken");
+		});
+		const { pi, ctx } = makeFixture("rpc");
+		const { tool, session } = captureToolWithSession(pi);
+		const result = await tool.execute(
+			"call-ui-fail",
+			{ action: "create", slug: "ui-fail", objective: "survive ui failure", successCriteria: ["tests pass"] },
+			undefined,
+			undefined,
+			ctx,
+		);
+		// 工具成功返回（UI 异常未上抛翻转结果）
+		expect(result.details.action).toBe("create");
+		expect(result.details.status).toBe("active");
+		expect(result.content[0].text).toContain("Goal created");
+		// 核心副作用不受影响：state 已落盘到 session（内存态可见，persist 已在 createGoal 内完成）
+		expect(session.state?.status).toBe("active");
+		expect(session.state?.objective).toBe("survive ui failure");
+		// 降级留痕：warn 而非静默
+		expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+		expect(loggerWarnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("goal_control create"),
+			expect.objectContaining({ detail: expect.objectContaining({ err: "widget channel broken" }) }),
+		);
+	});
+
+	it("complete + updateWidget 抛错 → 工具调用仍成功返回（终态已持久化）", async () => {
+		const { pi, ctx } = makeFixture("rpc");
+		const { tool, session } = captureToolWithSession(pi);
+		await createViaHandler(tool, pi, ctx, { slug: "ui-comp", objective: "to complete" });
+		vi.mocked(updateWidget).mockImplementation(() => {
+			throw new Error("widget channel broken");
+		});
+		const result = await tool.execute(
+			"call-ui-comp",
+			{ action: "complete", evidence: "tests green" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(result.details.status).toBe("complete");
+		expect(session.state?.status).toBe("complete");
+		expect(loggerWarnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("goal_control complete"),
+			expect.objectContaining({ detail: expect.objectContaining({ err: "widget channel broken" }) }),
+		);
 	});
 });

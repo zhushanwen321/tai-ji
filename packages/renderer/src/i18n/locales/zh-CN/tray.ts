@@ -43,6 +43,7 @@ export default {
     /** 行内操作（后台命令） */
     kill: '终止',
     killConfirm: '确认终止',
+    killFailed: '终止后台命令失败：{msg}',
     /** 行内操作（子代理） */
     cancel: '取消',
     cancelConfirm: '确认取消？',

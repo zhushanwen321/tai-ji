@@ -9,6 +9,7 @@
  * （调用方注入 focusedSessionId ref，内部自行获取 stores/api）。
  */
 import type { Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { segmentsToPrompt, textToSegments } from '@taiji/shared'
 import { chat as chatApi, session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
@@ -16,6 +17,7 @@ import { useSessionStore } from '@/stores/session'
 import { ensureStreamSubscription, useChat } from '@/composables/features/chat/useChat'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { pushForkNoticeAsk } from '@/composables/effects/useForkNoticeEffect'
+import { useToast } from '@/composables/useToast'
 
 /**
  * Fork 操作 composable。
@@ -26,6 +28,8 @@ import { pushForkNoticeAsk } from '@/composables/effects/useForkNoticeEffect'
 export function useForkActions(focusedSessionId: Ref<string | null>) {
   const chat = useChatStore()
   const session = useSessionStore()
+  const { t } = useI18n()
+  const { error: toastError } = useToast()
   // [W6] 顶层实例化 useChat：避免在 catch 内每次新建实例（composable 工厂模式反模式）。
   // disposeSession 用于 send 失败时清理新 session 的流式订阅 + per-session 状态。
   const { disposeSession } = useChat()
@@ -154,11 +158,20 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   /**
    * 从末条 assistant 后台 fork（FR-16 ⌘G）：空白 fork 新 session，留在原线。
    * 无末条 assistant 时静默 no-op（无消息可 fork）。
+   *
+   * RPC 失败在函数内 catch + toast：⌘G 快捷键路径调用方 void 丢弃（useGlobalShortcuts），
+   * 裸 reject 成 unhandled 且用户零反馈——形态对齐 useChatViewDeps.onFork 的
+   * catch+toastError 先例（forkSessionAsk 不在此列：其调用方 handleForkSend 统一反馈）。
    */
   async function forkFromLastAssistant(): Promise<void> {
     const last = lastAssistantOfFocused()
     if (!last) return
-    await forkSession(last.sessionId, last.messageId, { includeFrom: true, openInStandby: false })
+    try {
+      await forkSession(last.sessionId, last.messageId, { includeFrom: true, openInStandby: false })
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e)
+      toastError(t('panel.message.forkFailed', { error }))
+    }
   }
 
   /**

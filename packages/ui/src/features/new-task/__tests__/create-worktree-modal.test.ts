@@ -104,6 +104,34 @@ describe('CreateWorktreeModal Enter 提交', () => {
   })
 })
 
+describe('CreateWorktreeModal 仓库检测失败态（≠ not-repo）', () => {
+  it('detectWorkspace 抛错 → 显示检测失败态而非「不在仓库」，console.warn 留痕，依赖仓库的控件禁用', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const deps = makeDeps({
+        detectWorkspace: vi.fn(async () => {
+          throw new Error('detect boom')
+        }),
+      })
+      const wrapper = await mountModal(deps)
+      // 第三态：失败块渲染，not-repo 块不渲染（两态可区分，不误导用户换目录）
+      expect(document.querySelector('[data-testid="repo-detect-failed"]')).not.toBeNull()
+      expect(document.querySelector('[data-testid="repo-not-repo"]')).toBeNull()
+      // 检测失败留痕（warn），非静默
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('detectWorkspace failed'),
+        expect.any(Error),
+      )
+      // 依赖仓库语义的控件禁用（分支输入框），创建按钮因 baseBranch 空保持禁用
+      expect(bySel('[data-testid="worktree-branch-input"]').attributes('disabled')).toBeDefined()
+      expect(bySel('[data-testid="worktree-create-btn"]').attributes('disabled')).toBeDefined()
+      wrapper.unmount()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
 describe('CreateWorktreeModal success 时序契约（切换与创建成功同刻，不依赖定时器）', () => {
   // [HISTORICAL] 旧链路 success emit 挂在 2s 展示定时器上且卸载即取消：用户在窗口内关
   // modal（Esc/点外/切 session）→ 切换静默丢失。现契约：success 同步 emit，定时器只负责 close。

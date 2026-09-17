@@ -33,6 +33,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { type Static, Type } from "typebox";
 
 import { SHORT_ID_LENGTH } from "../constants";
@@ -111,6 +112,26 @@ export const GoalControlParams = Type.Object(
 );
 
 export type GoalControlParamsT = Static<typeof GoalControlParams>;
+
+const logger = getLogger("goal");
+
+/**
+ * 辅助 UI 通道降级包装：updateWidget / notify 失败只 warn 留痕不上抛。
+ *
+ * 调用点全部位于核心副作用（createGoal / finalizeAndPersist / persistState）之后——
+ * 状态已落盘，UI 通道故障不能翻转工具结果（对齐 base-tool-enhance notify.ts 的
+ * 接入点降级先例）。错误串格式化内联（Error message / String），不为此引入
+ * ext-guards 依赖。
+ */
+function runUiChannelSafe(action: GoalControlDetails["action"], goalId: string, fn: () => void): void {
+	try {
+		fn();
+	} catch (err) {
+		logger.warn(`goal_control ${action}: ui channel failed; persisted state unaffected`, {
+			detail: { goalId, err: err instanceof Error ? err.message : String(err) },
+		});
+	}
+}
 
 // ── Details（renderResult 数据来源）──────────────────
 
@@ -212,14 +233,16 @@ export function handleCreate(
 		// createGoal 内部 active 守卫兜底（理论上上面守卫已挡；防御性）
 		throw new Error("Goal already active. Cannot create a new one.");
 	}
-	updateWidget(session, ports.ui);
 
 	const state = session.state!;
 	// slug fallback：未提供时用 goalId 截断作标题（与 buildGoalGui 一致，避免 [undefined]）
 	const slug = state.slug ?? state.goalId.slice(0, SHORT_ID_LENGTH);
 	const budgetNotice: string[] = [];
 	if (budget.tokenBudget) budgetNotice.push(`Token budget: ${budget.tokenBudget}`);
-	ports.ui.notify([`Goal created [${slug}]: ${objective}`, ...budgetNotice].join("\n"), "info");
+	runUiChannelSafe("create", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify([`Goal created [${slug}]: ${objective}`, ...budgetNotice].join("\n"), "info");
+	});
 
 	return { action: "create", goalId: state.goalId, status: state.status, slug };
 }
@@ -251,8 +274,10 @@ export function handleComplete(
 
 	// FR-3.3: 唯一终态序列入口（内部：tickState → finalizeGoal(transition+history) → persist）
 	finalizeAndPersist(state, "complete", ports);
-	updateWidget(session, ports.ui);
-	ports.ui.notify(`Goal completed: ${state.objective}`, "info");
+	runUiChannelSafe("complete", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify(`Goal completed: ${state.objective}`, "info");
+	});
 
 	return { action: "complete", goalId: state.goalId, status: state.status };
 }
@@ -289,8 +314,10 @@ export function handleReportBlocked(
 	state.status = transitionStatus(state.status, "blocked");
 
 	persistState(session, ports);
-	updateWidget(session, ports.ui);
-	ports.ui.notify(`Goal blocked: ${reason}`, "warning");
+	runUiChannelSafe("report_blocked", state.goalId, () => {
+		updateWidget(session, ports.ui);
+		ports.ui.notify(`Goal blocked: ${reason}`, "warning");
+	});
 
 	return { action: "report_blocked", goalId: state.goalId, status: state.status };
 }

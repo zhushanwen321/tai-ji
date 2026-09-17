@@ -321,9 +321,16 @@ async function onJumpParent(): Promise<void> {
   const ref = r.meta.parentSession
   if (typeof ref !== 'string' || !ref) return
   const forkId = typeof r.meta.forkEntryId === 'string' ? r.meta.forkEntryId : undefined
-  const result = await jumpToParentSession(props.sessionId, ref, forkId)
-  if (!result.ok) {
-    toastError(t(result.reason === 'target_not_found' ? 'panel.trace.jumpTargetNotFound' : 'panel.trace.jumpLoadFailed'))
+  try {
+    const result = await jumpToParentSession(props.sessionId, ref, forkId)
+    if (!result.ok) {
+      toastError(t(result.reason === 'target_not_found' ? 'panel.trace.jumpTargetNotFound' : 'panel.trace.jumpLoadFailed'))
+    }
+  } catch (e) {
+    // jumpToParentSession 内部 await selectSession 会 throw（切 session 失败）——裸
+    // reject 成 unhandled 且零反馈；对齐同文件 onRevealFolder 的 catch+toast 先例
+    console.error('[trace] jump to parent session failed:', e)
+    toastError(t('panel.trace.jumpLoadFailed'))
   }
 }
 

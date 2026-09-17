@@ -62,9 +62,22 @@ export function migrateTodo(raw: unknown): Todo {
 	// 三态化降级：历史 cancelled 项映射为 completed（不丢数据，且解除 every(completed) 死锁）
 	if (rawStatus === "cancelled") status = "completed";
 
+	// id/text 契约校验：脏 id（非 number / NaN）会在 reconstructState 的 Math.max 推导
+	// nextId 时产出 NaN 毒化后续 add/update/delete 锚点，脏 text 破坏渲染与 add 的 trim
+	// 契约——按「脏数据明确报错 → 调用方单条跳过」契约，与上方 null/primitive 守卫同型
+	// throw TypeError（调用方 reconstructState 收集降级）。
+	if (typeof record.id !== "number" || Number.isNaN(record.id)) {
+		throw new TypeError(
+			`migrateTodo: invalid id (expected number, got ${typeof record.id}${Number.isNaN(record.id) ? " NaN" : ""})`,
+		);
+	}
+	if (typeof record.text !== "string") {
+		throw new TypeError(`migrateTodo: invalid text (expected string, got ${typeof record.text})`);
+	}
+
 	return {
-		id: record.id as number,
-		text: record.text as string,
+		id: record.id,
+		text: record.text,
 		status,
 	};
 }

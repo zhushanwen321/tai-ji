@@ -32,7 +32,8 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@zhushanwen/extension-protocol": "workspace:*"
+    "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {

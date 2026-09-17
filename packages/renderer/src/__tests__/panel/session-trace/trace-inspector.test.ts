@@ -64,6 +64,13 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
   return { ...actual, revealInFolder: ipcMock.revealInFolder }
 })
 
+// ── mock jumpToParentSession（onJumpParent 编排：throw 路径的用户反馈在本组件层，
+//    编排内部归 useTraceJump.test.ts；本文件只验「组件把失败翻译成可见 toast」）──
+const jumpMock = vi.hoisted(() => ({ jumpToParentSession: vi.fn() }))
+vi.mock('@/composables/features/trace/useTraceJump', () => ({
+  jumpToParentSession: jumpMock.jumpToParentSession,
+}))
+
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
 import {
   _resetTraceStoreForTest,
@@ -72,6 +79,7 @@ import {
   selectTraceEntry,
   useSessionTrace,
 } from '@/composables/features/trace/useSessionTrace'
+import { useToast } from '@/composables/useToast'
 
 const SID = 'sid-inspector-1'
 
@@ -377,6 +385,63 @@ describe('assistant 子 block 详情（聚合态清单 + block 态全文 + TOOL 
     const view = await mountInspector('a1')
     const body = view.find('[data-testid="trace-inspector-body"]')
     expect(body.classes()).toContain('select-text')
+    view.unmount()
+  })
+})
+
+describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toast）', () => {
+  /** header 带 parentSession/forkEntryId 的快照（SESSION 行渲染 jump-parent 按钮）。 */
+  function buildSnapshotWithParent(): ServerMessageMap['session.traceEntries'] {
+    const snap = buildSnapshot()
+    snap.header = {
+      ...snap.header,
+      parentSession: 'sid-fork-src',
+      forkEntryId: 'u1',
+    } as typeof snap.header
+    return snap
+  }
+
+  function clearToasts(): void {
+    const { toasts, remove } = useToast()
+    for (const toast of [...toasts.value]) remove(toast.id)
+  }
+
+  async function mountSessionInspector() {
+    apiMock.getTraceEntries.mockResolvedValue(buildSnapshotWithParent())
+    await readyPartition()
+    selectTraceEntry(SID, 'h0') // header 行 = SESSION kind
+    await nextTick()
+    const view = mount(TraceInspector, { props: { sessionId: SID } })
+    const btn = view.find('[data-testid="trace-inspector-jump-parent"]')
+    expect(btn.exists()).toBe(true)
+    return { view, btn }
+  }
+
+  beforeEach(() => {
+    clearToasts()
+  })
+
+  it('jumpToParentSession throw（selectSession 失败）→ error toast 可见，不 unhandled', async () => {
+    jumpMock.jumpToParentSession.mockRejectedValue(new Error('selectSession boom'))
+    const { view, btn } = await mountSessionInspector()
+    await btn.trigger('click')
+    await vi.waitFor(() => {
+      const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
+      expect(errorToast).toBeDefined()
+      expect(errorToast?.message).toContain('trace 加载超时')
+    })
+    view.unmount()
+  })
+
+  it('jumpToParentSession 返回 ok:false → toast 文案按 reason 分派（target_not_found）', async () => {
+    jumpMock.jumpToParentSession.mockResolvedValue({ ok: false, reason: 'target_not_found' })
+    const { view, btn } = await mountSessionInspector()
+    await btn.trigger('click')
+    await vi.waitFor(() => {
+      const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
+      expect(errorToast).toBeDefined()
+      expect(errorToast?.message).toContain('未找到源 session')
+    })
     view.unmount()
   })
 })

@@ -42,6 +42,7 @@ export default {
     /** Row actions (background commands) */
     kill: 'Stop',
     killConfirm: 'Confirm stop',
+    killFailed: 'Failed to stop background command: {msg}',
     /** Row actions (subagents) */
     cancel: 'Cancel',
     cancelConfirm: 'Confirm cancel?',
