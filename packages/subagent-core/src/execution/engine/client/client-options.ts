@@ -11,7 +11,6 @@ import {
   type EngineRelayEnv,
   type InitializeResult,
   type ModelCatalogEntry,
-  type UiRequestHandler,
 } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
@@ -39,11 +38,6 @@ export interface EngineClientOptions {
   processEnv?: Record<string, string | undefined>;
   /** L3 显式配置（initialize.engineConfig 透传；缺省 {}，不放凭据）。 */
   engineConfig?: Record<string, string>;
-  /**
-   * host/askUser 应答端（[D4-④] 唯一注入入口 = subagent-service init.uiRequestHandler；
-   * W6 拆 HostBridge 时接线）。缺省 → 引擎收 {unsupported:true} 自行降级。
-   */
-  uiRequestHandler?: UiRequestHandler;
   /** 引擎 cmdline 身份谓词覆盖（pidfile 三条件清扫防误杀校验；缺省按 command 词形）。 */
   engineCmdlineMatcher?: (cmdline: string) => boolean;
   /**

@@ -49,7 +49,6 @@ import { readExplicitEngines } from "./config.ts";
 import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine } from "./client/remote-engine.ts";
 import { hasEngine, registerEngineDescriptor, type CliEngineDescriptor } from "./registry.ts";
-import { getHostUiRequestEndpoint } from "./host/host-ui-endpoint.ts";
 import type { EngineCapabilities } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -245,8 +244,8 @@ function buildExplicitDescriptor(
         hostKind: opts.hostKind,
         dataDir,
         envPrefixes: [],
-        // [W6 R3 MF-A] 同上：host/askUser 应答端经壳侧登记处接线。
-        uiRequestHandler: getHostUiRequestEndpoint(),
+        // [W6 R3 MF-A] host/askUser 应答端不经构造参数注入——reverse-router 消费时
+        // 经 host-ui-endpoint 槽现读（D3），本构造点无固化面。
         ...(entry.config !== undefined ? { engineConfig: entry.config } : {}),
         manifestDiagnostics: { capabilities: caps, models: null },
       });

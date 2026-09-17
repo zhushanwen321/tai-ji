@@ -23,7 +23,6 @@ import { getEngineDataDir } from "./common/data-dir.ts";
 import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "./client/remote-engine.ts";
 import type { CliEngineDescriptor } from "./registry.ts";
-import { getHostUiRequestEndpoint } from "./host/host-ui-endpoint.ts";
 import type { EngineCapabilities } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -191,9 +190,8 @@ function buildManifestCliDescriptor(params: {
         hostKind,
         dataDir,
         envPrefixes,
-        // [W6 R3 MF-A] host/askUser 应答端：壳侧登记处在 portFactory 惰性执行期取值
-        //（晚于 session_start 注册，未注册 → undefined → 引擎收 {unsupported:true}）。
-        uiRequestHandler: getHostUiRequestEndpoint(),
+        // [W6 R3 MF-A] host/askUser 应答端不经构造参数注入——reverse-router 消费时
+        // 经 host-ui-endpoint 槽现读（D3），本构造点无固化面。
         manifestDiagnostics: {
           capabilities: caps,
           models: modelCatalog === undefined || modelCatalog === null ? null : modelCatalog.models,

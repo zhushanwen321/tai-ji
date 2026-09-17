@@ -319,7 +319,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
     expect(portFactory).toHaveBeenCalledTimes(1);
   });
 
-  it("cli descriptor 覆盖同 id：旧单例 dispose 触发 + 新 portFactory 重建（与 inproc 覆盖同语义）", () => {
+  it("cli descriptor 覆盖同 id（标识变化）：旧单例 dispose 触发 + 新 portFactory 重建", () => {
     const manifest = makeManifestSnapshot();
     const dispose = vi.fn(() => Promise.resolve());
     const oldPort = makeRemoteEngine("overwrite", manifest);
@@ -333,15 +333,180 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
     });
     getEngine("overwrite");
     const newPort = makeRemoteEngine("overwrite", manifest);
+    // capabilities 变化 = 稳定标识不等价（引擎包升级改能力面的最小形态）——D2b 下
+    // 只有标识变化才走 dispose 分支，等价重注册见 D2b 专属 describe。
     registerEngineDescriptor("overwrite", {
       kind: "cli",
       command: process.execPath,
       args: [],
-      capabilities: manifest.capabilities,
+      capabilities: { ...manifest.capabilities, maxTurns: true },
       portFactory: () => newPort as EnginePort,
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("overwrite")).toBe(newPort);
+  });
+});
+
+// ============================================================
+// D2b：同稳定标识重注册幂等（不 dispose 已实例化单例）
+// ============================================================
+
+describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）", () => {
+  beforeEach(() => {
+    clearEngines();
+  });
+
+  /** 同稳定标识的第二次注册（portFactory 是新闭包——模拟 discovery 重扫/jiti 重载后 factory 重跑）。 */
+  function reregisterEquivalent(
+    id: string,
+    manifest: EngineManifestSnapshot,
+    portFactory: () => EnginePort,
+  ): void {
+    registerEngineDescriptor(id, {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      portFactory,
+      ...(manifest.modelCatalog !== undefined || manifest.displayName !== undefined
+        ? { manifest: { modelCatalog: manifest.modelCatalog, displayName: manifest.displayName } }
+        : {}),
+    });
+  }
+
+  it("同标识重注册：singleton 引用不变、无 dispose 帧、新 portFactory 不被调用", () => {
+    const manifest = makeManifestSnapshot("Stable");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("stable", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    const firstFactory = vi.fn(() => oldPort as EnginePort);
+    reregisterEquivalent("stable", manifest, firstFactory);
+    const singleton = getEngine("stable");
+    expect(firstFactory).toHaveBeenCalledTimes(1);
+
+    // 重注册：portFactory 是全新闭包（discovery 重扫的常态），稳定标识字段全同
+    const secondFactory = vi.fn(() => makeRemoteEngine("stable", manifest) as EnginePort);
+    reregisterEquivalent("stable", manifest, secondFactory);
+
+    expect(getEngine("stable")).toBe(singleton); // 单例保留——reload 存活即此语义
+    expect(dispose).not.toHaveBeenCalled(); // 无 dispose 帧（杀令 B 已拆）
+    expect(secondFactory).not.toHaveBeenCalled(); // 单例在场，新 portFactory 不生效
+  });
+
+  it("同标识重注册但 capabilities 变化：触发 dispose（真换引擎，防泄漏语义保留）", () => {
+    const manifest = makeManifestSnapshot();
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("caps-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("caps-change", manifest, () => oldPort as EnginePort);
+    getEngine("caps-change");
+
+    reregisterEquivalent(
+      "caps-change",
+      { ...manifest, capabilities: { ...manifest.capabilities, interrupt: "native" } },
+      () => makeRemoteEngine("caps-change", manifest) as EnginePort,
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("caps-change")).not.toBe(oldPort);
+  });
+
+  it("同标识重注册但 command 变化：触发 dispose", () => {
+    const manifest = makeManifestSnapshot();
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("cmd-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("cmd-change", manifest, () => oldPort as EnginePort);
+    getEngine("cmd-change");
+
+    registerEngineDescriptor("cmd-change", {
+      kind: "cli",
+      command: "/usr/bin/definitely-another-bin",
+      args: [],
+      capabilities: manifest.capabilities,
+      portFactory: () => makeRemoteEngine("cmd-change", manifest) as EnginePort,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("cmd-change")).not.toBe(oldPort);
+  });
+
+  it("同标识重注册但 args 变化：触发 dispose", () => {
+    const manifest = makeManifestSnapshot();
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("args-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("args-change", manifest, () => oldPort as EnginePort);
+    getEngine("args-change");
+
+    registerEngineDescriptor("args-change", {
+      kind: "cli",
+      command: process.execPath,
+      args: ["--changed"],
+      capabilities: manifest.capabilities,
+      portFactory: () => makeRemoteEngine("args-change", manifest) as EnginePort,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("args-change")).not.toBe(oldPort);
+  });
+
+  it("同标识重注册但 manifest 版本面变化（modelCatalog）：触发 dispose", () => {
+    const manifest = makeManifestSnapshot("Versioned");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("catalog-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("catalog-change", manifest, () => oldPort as EnginePort);
+    getEngine("catalog-change");
+
+    const upgraded: EngineManifestSnapshot = {
+      ...manifest,
+      modelCatalog: {
+        dynamic: true,
+        models: [
+          { id: "glm-4.6", canonicalRef: "zai/glm-4.6" },
+          { id: "glm-5", canonicalRef: "zai/glm-5" }, // 引擎包升级后的新枚举面
+        ],
+      },
+    };
+    reregisterEquivalent("catalog-change", upgraded, () => makeRemoteEngine("catalog-change", upgraded) as EnginePort);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("catalog-change")).not.toBe(oldPort);
+  });
+
+  it("同标识重注册但 kind 变化（inproc → cli）：触发 dispose", () => {
+    const manifest = makeManifestSnapshot();
+    const dispose = vi.fn(() => Promise.resolve());
+    registerEngine("kind-change", () => ({ ...makeFakeEngine("kind-change"), dispose }));
+    const inprocSingleton = getEngine("kind-change");
+
+    registerEngineDescriptor("kind-change", {
+      kind: "cli",
+      command: process.execPath,
+      args: [],
+      capabilities: manifest.capabilities,
+      portFactory: () => makeRemoteEngine("kind-change", manifest) as EnginePort,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("kind-change")).not.toBe(inprocSingleton);
+  });
+
+  it("inproc → inproc 重注册：恒判不等价（工厂闭包捕获宿主模块图状态，不可跨 reload 存活）", () => {
+    const dispose = vi.fn(() => Promise.resolve());
+    registerEngine("inproc-again", () => ({ ...makeFakeEngine("inproc-again"), dispose }));
+    getEngine("inproc-again");
+    registerEngine("inproc-again", () => makeFakeEngine("inproc-again-v2"));
+    expect(dispose).toHaveBeenCalledTimes(1); // 现状语义保留
+    expect(getEngine("inproc-again").id).toBe("inproc-again-v2");
+  });
+
+  it("等价重注册后宿主收割仍可达：disposeEngines 照常 dispose 存活单例", () => {
+    const manifest = makeManifestSnapshot("Harvest");
+    const dispose = vi.fn(() => Promise.resolve());
+    const port = makeRemoteEngine("harvest", manifest);
+    (port as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("harvest", manifest, () => port as EnginePort);
+    getEngine("harvest");
+    reregisterEquivalent("harvest", manifest, () => port as EnginePort); // 等价重注册
+    disposeEngines(); // 宿主停机收割不受 D2b 影响（D6③ 语义不变）
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 });
 
