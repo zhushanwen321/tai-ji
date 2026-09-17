@@ -97,7 +97,6 @@ async function mountContainer() {
         GitPanel: DesktopStub('GitPanel', 'git-panel'),
         CommandDocPanel: DesktopStub('CommandDocPanel', 'doc-panel'),
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
-        BrowserPane: DesktopStub('BrowserPane', 'browser-pane'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
         // bashTask tab 内容面板（background-task-sidebar-view D5③）同样 stub（接线断言面）
         BackgroundTaskDetailPanel: DesktopStub('BackgroundTaskDetailPanel', 'bash-task-detail-panel'),

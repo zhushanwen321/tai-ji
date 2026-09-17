@@ -145,7 +145,6 @@ async function mountContainer() {
         GitPanel: DesktopStub('GitPanel', 'git-panel'),
         CommandDocPanel: DesktopStub('CommandDocPanel', 'doc-panel'),
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
-        BrowserPane: DesktopStub('BrowserPane', 'browser-pane'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
         SubagentTab: DesktopStub('SubagentTab', 'subagent-panel'),
         WorkflowTab: DesktopStub('WorkflowTab', 'workflow-panel'),
