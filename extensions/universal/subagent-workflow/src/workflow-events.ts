@@ -19,6 +19,11 @@
  * WorkflowDomainHandle（state / lazyDeps / getWorkflowDeps / isScriptRunning），
  * tool + command 注册与 pi.__workflowRun 仍留 index.ts。
  *
+ * [skill-reload D3] makeDeps 的三个 volatile 成员（eventBus / log / onRunDone 的
+ * pi 与 GuiContext）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖
+ * 登记），ctx 从 sessionState 条目的 state.ctx 现读（adoption rebind 换新后自动
+ * 跟进）——在飞 pump 持有的旧 deps 对象经属性访问自动路由到新绑定，无需遍历重绑。
+ *
  * 测试入口：既有 index 挂载类测试（index-session-start / process-shutdown-hook /
  * wave0-package-structure 等）经 factory 间接覆盖；mock 锚点是模块解析路径
  * （jsonl-run-store / interface/* / subagent-core 深路径），随迁不改写。
@@ -81,6 +86,12 @@ export interface WorkflowDomainState {
   /** per-session 状态（session_start 时重建）。value = SessionLifecycleResult
    *  （setupSessionLifecycle 装配结果，ctx 必有）。 */
   sessionState: Map<string, SessionLifecycleResult>;
+  /** [skill-reload D3] current pi 的 volatile 登记点：setupWorkflowDomain 每次
+   *  factory 重跑开头覆盖（reload 后新 factory 持新 pi）。makeDeps 的 eventBus /
+   *  log / onRunDone 三 volatile 成员经属性访问从本成员现读——在飞 pump 持有的
+   *  旧 deps 对象因此自动解析到新 pi，无需遍历重绑。undefined = setup 未跑过
+   *  （makeDeps 只能经 setup 之后的事件链创建，命中即时序异常，fail-fast）。 */
+  currentPi: ExtensionAPI | undefined;
 }
 
 function createWorkflowDomainState(): WorkflowDomainState {
@@ -90,6 +101,7 @@ function createWorkflowDomainState(): WorkflowDomainState {
     workerHost: new WorkerHostImpl(),
     registry: new WorkflowScriptRegistryImpl(),
     sessionState: new Map<string, SessionLifecycleResult>(),
+    currentPi: undefined,
   };
 }
 
@@ -110,6 +122,24 @@ function getOrCreateWorkflowDomainState(): WorkflowDomainState {
     Reflect.set(globalThis, WORKFLOW_DOMAIN_SLOT_KEY, state);
   }
   return state;
+}
+
+// [skill-reload D3] makeDeps volatile 成员的 pi 现读源。只读槽不创建——本函数被调
+// 时 domainState 必已存在（makeDeps 只能经 setupWorkflowDomain 之后的事件链创建）。
+// 窗口语义：reload 的 ②invalidate 到新 factory 重跑覆盖登记之间，这里读到的仍是
+// 旧 pi（设计 D5 声明的窗口内 stale 形态，降级守卫在消费侧——notifyDone 的
+// guardStaleCtx / store appendEntry 的 stale guard，本单元不处理）。缺失 = 时序
+// 异常（槽被外力删除或 deps 逃逸到 setup 之前使用），fail-fast 带恢复指向。
+function resolveCurrentPi(): ExtensionAPI {
+  const state = Reflect.get(globalThis, WORKFLOW_DOMAIN_SLOT_KEY) as WorkflowDomainState | undefined;
+  const pi = state?.currentPi;
+  if (!pi) {
+    throw new Error(
+      "workflow deps current pi binding unset: setupWorkflowDomain has not run " +
+        "(slot @zhushanwen/pi-subagents.workflow-domain-state); re-run extension factory to re-register",
+    );
+  }
+  return pi;
 }
 
 /** 组合根侧生产 deps 工厂：SessionLifecycleDeps 全部成员有生产默认实现（住
@@ -180,8 +210,15 @@ export function setupWorkflowDomain(
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
   // factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
+  // [skill-reload D3] current pi 登记点：factory 每次重跑（reload 后新 factory 持新
+  // pi）在此覆盖槽上 volatile 绑定——旧 deps 对象的现读成员（见 makeDeps）自动
+  // 路由到新 pi，这是「不做遍历重绑」的登记侧前提。
+  domainState.currentPi = pi;
   const { lsRef, notifiedRunIds, sessionState, workerHost, registry } = domainState;
 
+  // [skill-reload D3] log 不闭包捕获 factory 期 pi：每次调用从槽现读 current pi
+  // ——reload 后旧 deps.log 的 workflow:log entry 落进新 pi 的权威 session JSONL
+  // （旧 pi 的 session 已随 reload invalidate，写旧 pi 命中 assertActive 即丢日志）。
   function log(
     level: "debug" | "info" | "warn" | "error",
     component: string,
@@ -189,7 +226,7 @@ export function setupWorkflowDomain(
     data?: unknown,
   ): void {
     try {
-      pi.appendEntry("workflow:log", {
+      resolveCurrentPi().appendEntry("workflow:log", {
         timestamp: Date.now(),
         level,
         component,
@@ -202,8 +239,7 @@ export function setupWorkflowDomain(
   }
 
   function makeDeps(
-    state: Pick<SessionLifecycleResult, "store" | "runs" | "sessionDir" | "runner">,
-    sessionCtx?: ExtensionContext,
+    state: Pick<SessionLifecycleResult, "store" | "runs" | "sessionDir" | "runner" | "ctx">,
   ) {
     const deps: LauncherDeps = {
       store: state.store,
@@ -211,13 +247,20 @@ export function setupWorkflowDomain(
       runner: state.runner,
       runs: state.runs,
       registry,
+      // [skill-reload D3] 三个 volatile 成员（eventBus / log / onRunDone 的 pi 与
+      // GuiContext）现读不快照：pi 从槽 currentPi 解析（factory 重跑覆盖登记），ctx
+      // 从 state.ctx 解析（槽上 sessionState 条目字段，adoption rebind 换新后自动
+      // 跟进）。在飞 pump 持有的旧 deps 对象经属性访问自动路由到新 pi/ctx。eventBus
+      // 是值成员必须 getter；log/onRunDone 是函数成员，现读在函数体内达成（函数引用
+      // 稳定，调用方缓存引用也无 stale 面）。
+      //
       // onRunDone 是全部 done 路径的单点汇聚（abortRun + error-recovery），顺序固化为
       // notify → track → evict：notifyDone 先发完整聚合通知（淘汰后聚合根仍在闭包参数
       // run 引用上不受影响），trackNotifiedRunId 有界化去重窗口，最后裁剪 done run 内存。
       // 本轮 run 的 completedAt 在 transition("done") 时同步设为当前时刻=全局最新，
       // 恒在保留端——结构性保证其不被自身触发的裁剪淘汰，无需 protectRunId。
       onRunDone: (run: WorkflowRun) => {
-        notifyDone(pi, run.runId, run, notifiedRunIds, toGuiCtx(sessionCtx));
+        notifyDone(resolveCurrentPi(), run.runId, run, notifiedRunIds, toGuiCtx(state.ctx));
         trackNotifiedRunId(notifiedRunIds, run.runId);
         const evicted = evictDoneRunsBeyondCap(state.runs, MAX_RETAINED_DONE_RUNS);
         if (evicted > 0) {
@@ -228,7 +271,9 @@ export function setupWorkflowDomain(
           });
         }
       },
-      eventBus: pi.events,
+      get eventBus() {
+        return resolveCurrentPi().events;
+      },
       scheduleTimeBudget: (runId: string, budgetTimeMs: number) =>
         scheduleTimeBudget(runId, deps, budgetTimeMs),
       onWorkflowCall: (name: string, args: Record<string, unknown>, parentRun: WorkflowRun) =>
@@ -324,7 +369,7 @@ export function setupWorkflowDomain(
       // 一次性生命周期（D-2）：running run 转 done,failed 落盘（helper 内部自过滤
       // running，单 run 失败不中断其余）。此处不再挂起待恢复。
       try {
-        await terminateRunningRuns(makeDeps(state, ctx), "Session switched: run terminated");
+        await terminateRunningRuns(makeDeps(state), "Session switched: run terminated");
       } catch (err) {
         bestEffort(err, "terminateRunningRuns (session_tree handler)");
       }
@@ -431,7 +476,7 @@ export function setupWorkflowDomain(
       // 内部（单 run 失败不中断其余）；外层 try/catch 兜底防单 session 异常中断后续
       // session 条目的 dispose + delete（对齐原 allSettled 的不中断语义）。
       try {
-        await terminateRunningRuns(makeDeps(state, _ctx), "Session shutdown: run terminated");
+        await terminateRunningRuns(makeDeps(state), "Session shutdown: run terminated");
       } catch (err) {
         bestEffort(err, "terminateRunningRuns (session_shutdown handler)");
       }
@@ -469,7 +514,7 @@ export function setupWorkflowDomain(
     if (!state.storeHealthy) {
       return { ok: false, reason: "Workflow store unavailable (loadAll failed in session_start)" };
     }
-    return { ok: true, deps: makeDeps(state, state.ctx) };
+    return { ok: true, deps: makeDeps(state) };
   };
 
   // ════════════════════════════════════════════════════════════
