@@ -645,7 +645,9 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
     expect(list).toHaveLength(1)
     expect(list[0].role).toBe('assistant')
     expect(list[0].status).toBe('error')
-    expect(list[0].content).toBe('400: Unsupported model mimo-v2-pro')
+    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（无=空）
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('400: Unsupported model mimo-v2-pro')
   })
 
   // [M2 不变量·terminalMessagePatch 出口] pi error stop 但 errorMessage 缺失
@@ -676,7 +678,8 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
     const list = getMsgs(ctx)
     expect(list).toHaveLength(1)
     expect(list[0].status).toBe('error')
-    expect(list[0].content).toBe('会话出错，回复已中断。')
+    expect(list[0].content).toBe('')
+    expect(list[0].error).toBe('会话出错，回复已中断。')
   })
 
   it('非 error stopReason 不消费 errorMessage 字段（正常完成不受影响）', () => {

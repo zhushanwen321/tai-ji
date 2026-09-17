@@ -1166,6 +1166,38 @@ else
 fi
 
 # ============================================================================
+# error 终态消息形态统一守卫（M2 形态统一机器护栏；core/ui/renderer 源码有变更时触发。
+# 无独立 SKIP 开关——R1 后惯例，仅 SKIP_ALL_CHECKS 总闸兜底）
+# ============================================================================
+
+EFI_CHECKER="scripts/check-error-form-invariant.mjs"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    if echo "$STAGED_FILES" | grep -qE "^packages/(core|ui|renderer)/src/"; then
+        print_section "[error-form-invariant 消息错误形态守卫]"
+        echo -e "${BLUE}[INFO] chat 域源码有变更，扫描 error 终态消息字面量形态...${NC}"
+
+        if [ ! -f "$EFI_CHECKER" ]; then
+            echo -e "${RED}[ERROR] 找不到验证脚本: $EFI_CHECKER${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+
+        node "$EFI_CHECKER"
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] error-form-invariant 检查失败：role:'assistant' + status:'error' 字面量必须含 error: 键${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] chat 域源码无变更，跳过 error-form-invariant 守卫${NC}"
+    fi
+fi
+
+# ============================================================================
 # 打包配置预检查（electron-builder.yml / tsup.config.ts / resources/pi 有变更时触发）
 # ============================================================================
 

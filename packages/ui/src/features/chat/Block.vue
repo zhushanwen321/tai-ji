@@ -70,26 +70,16 @@
     <!-- 正文 text 块：全 inline 统一正文样式（text-base/leading-7），颜色跟所属 assistant streaming 态
          （streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟 message 翻转）。
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
-         [M2 error-visibility] status==='error' 形态判定（SSOT §3.3.2）：
-         纯 error（无 msg.error，errorText 即全文）→ 整条 danger（AlertCircle + text-danger）；
-         追加形态（msg.error 有值）→ content 崩溃前正常正文保持原色 + msg.error 独立 danger 行。 -->
+         [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
+         msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
     <div v-else-if="type === 'text'" data-testid="block-text" class="flex items-start gap-2 pb-2 text-[length:var(--text-base)] leading-7" :class="textColorClass">
       <div class="min-w-0 flex-1">
-      <!-- 纯 error：AlertCircle + 整条 danger（正文 text-danger，由 textColorClass 承担） -->
-      <div v-if="isPureError" class="flex items-start gap-1.5">
-        <AlertCircle data-testid="block-text-error-icon" class="mt-1.5 size-3.5 shrink-0 text-danger" />
-        <div class="min-w-0 flex-1">
-          <MarkdownRenderer :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        </div>
-      </div>
-      <template v-else>
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        <!-- 追加形态：msg.error 独立 danger 行（content 保持原色，不误染崩溃前正文） -->
+        <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
         <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
           <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
           <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
         </div>
-      </template>
       </div>
       <!-- text 块行尾时刻 -->
       <span v-if="messageTimestamp" class="w-28 shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
@@ -282,10 +272,11 @@ const props = defineProps<{
    *  由 Turn.vue 传 assistant.status === 'streaming'。thinking/tool/agentgraph 分支不消费此 prop。 */
   streaming?: boolean
   /** 所属 assistant 消息终态（text 分支 error 形态判定，SSOT §3.3.2）：
-   *  status==='error' 且 error 有值 → 追加形态（content 原色 + error 独立 danger 行）；
-   *  status==='error' 且无 error → 纯 error（整条 danger）。thinking/tool 分支不消费。 */
+   *  status==='error' → 追加形态（content 崩溃前正文原色 + error 独立 danger 行）。
+   *  [M2 形态统一] 纯 error 形态已消灭——错误文本只住 error 字段，content 恒为崩溃前
+   *  正文（手动追加的错误消息 content 为空），渲染只有追加形态一种。thinking/tool 分支不消费。 */
   status?: MessageStatus
-  /** 追加形态错误文本（assistant Message.error 字段，status==='error' 时有值）。 */
+  /** 错误文本（assistant Message.error 字段，status==='error' 时有值——收口兜底保证非空）。 */
   error?: string
   /** 所属 assistant message 时刻（epoch ms，行尾时刻显示） */
   messageTimestamp?: number
@@ -304,15 +295,11 @@ const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkD
     collapsed: props.collapsed,
   })
 
-/** 纯 error：status==='error' 且无 msg.error（markSessionError/registry 无 streaming 实体时
- *  手动追加的整条 error 消息，errorText 即 content 全文）。 */
-const isPureError = computed(() => props.status === 'error' && !props.error)
-/** 追加形态：status==='error' 且 msg.error 有值（finalizeMessages 双通道写入的崩溃错误）。 */
+/** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
 const isAppendError = computed(() => props.status === 'error' && !!props.error)
 
-/** text 分支颜色：纯 error 整条 danger；追加形态/正常正文 streaming→neutral-mid、complete→neutral-fg */
+/** text 分支颜色：正常正文 streaming→neutral-mid、complete→neutral-fg（正文永不因 error 整条染红） */
 const textColorClass = computed(() => {
-  if (isPureError.value) return 'text-danger'
   return props.streaming ? 'text-neutral-mid' : 'text-neutral-fg'
 })
 

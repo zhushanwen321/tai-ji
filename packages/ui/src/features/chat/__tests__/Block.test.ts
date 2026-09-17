@@ -63,19 +63,22 @@ describe('block-rendering M0: Block text 分支正文样式（TC-M0-4）', () =>
   })
 })
 
-/* ── error-visibility M2：text 分支 error 形态判定（TC1 纯 error / TC3 追加形态）──
- * - 纯 error（status==='error' 无 msg.error）：整条 danger（AlertCircle + text-danger）
- * - 追加形态（status==='error' 且 msg.error 有值）：content 正常正文保持原色，error 独立 danger 行 */
+/* ── error-visibility M2 [形态统一]：text 分支唯一 error 形态 = 追加形态 ──
+ * 错误文本只住 msg.error，content 恒为崩溃前正文（可为空）——正文永不整条染红，
+ * 错误始终渲染为独立 danger 行（纯 error 形态已随形态统一消灭）。 */
 describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）', () => {
-  it('TC1: 纯 error 消息整条 danger（AlertCircle 图标 + text-danger，无 msg.error）', () => {
-    const wrapper = mountTextBlock({ content: '压缩失败', status: 'error' })
+  it('TC1: 纯错误消息（content 空）→ 正文区空 + msg.error 独立 danger 行', () => {
+    const wrapper = mountTextBlock({ content: '', status: 'error', error: '压缩失败' })
     const textEl = wrapper.find('[data-testid="block-text"]')
-    expect(textEl.classes()).toContain('text-danger') // 整条染 danger
-    expect(textEl.classes()).not.toContain('text-neutral-fg') // 不再是正常正文色
-    expect(wrapper.find('[data-testid="block-text-error-icon"]').exists()).toBe(true) // AlertCircle 图标
-    expect(wrapper.text()).toContain('压缩失败') // errorText 即全文
-    // 追加形态专属的独立 error 行不应出现
-    expect(wrapper.find('[data-testid="block-text-error"]').exists()).toBe(false)
+    // 正文容器保持正常正文色（永不因 error 整条染红）
+    expect(textEl.classes()).toContain('text-neutral-fg')
+    expect(textEl.classes()).not.toContain('text-danger')
+    // 独立 error 行：text-danger + AlertCircle + 错误文本
+    const errorRow = wrapper.find('[data-testid="block-text-error"]')
+    expect(errorRow.exists()).toBe(true)
+    expect(errorRow.classes()).toContain('text-danger')
+    expect(errorRow.find('svg').exists()).toBe(true)
+    expect(wrapper.text()).toContain('压缩失败')
   })
 
   it('TC3: 追加形态——正常正文（content）保持原色，msg.error 渲染独立 danger 行', () => {
@@ -91,8 +94,15 @@ describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）
     expect(errorRow.find('svg').exists()).toBe(true) // AlertCircle 图标
     expect(wrapper.text()).toContain('崩溃前追加的错误')
     expect(wrapper.text()).toContain('正常回复')
-    // 纯 error 专属的整条图标行不应出现（追加形态 content 前无图标）
-    expect(wrapper.find('[data-testid="block-text-error-icon"]').exists()).toBe(false)
+  })
+
+  it('TC4: error 终态缺 error 字段（漏网防御）→ 不整条染红，无 error 行（静默降级不误导）', () => {
+    const wrapper = mountTextBlock({ content: '正常回复', status: 'error' })
+    const textEl = wrapper.find('[data-testid="block-text"]')
+    // 防御形态：正文保持原色（不因缺 error 字段误判整条 danger）
+    expect(textEl.classes()).toContain('text-neutral-fg')
+    expect(textEl.classes()).not.toContain('text-danger')
+    expect(wrapper.find('[data-testid="block-text-error"]').exists()).toBe(false)
   })
 })
 

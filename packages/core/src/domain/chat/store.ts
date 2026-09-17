@@ -1062,10 +1062,12 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       finalizeSession(sessionId, 'error', errorText)
       return
     }
-    // 无 streaming entity → 直接追加 error 消息
+    // 无 streaming entity → 直接追加 error 消息。
+    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（此处无正文=空）——
+    // 渲染端只有追加形态一种 error 形态（正文原色 + error 独立 danger 行）。
     commitMessages(messages, sessionId, [
       ...prev,
-      { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorText, status: 'error', timestamp: Date.now() },
+      { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
     ])
     clearPendingSend(sessionId)
   }
