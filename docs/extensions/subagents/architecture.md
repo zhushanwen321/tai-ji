@@ -53,8 +53,9 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 路径 | 职责 |
 |---|---|
-| `src/index.ts` | 组合根（装配点）：注册 3 tool + 2 command + messageRenderer + `pi.__workflowRun` + session 事件；接线 core 宿主端口（`configureCore` / `configureNotifyDomain`） |
+| `src/index.ts` | 组合根（装配点）：注册 3 tool + 2 command + messageRenderer + `pi.__workflowRun` + 进程级信号 hook；接线 core 宿主端口（`configureCore` / `configureNotifyDomain`）与两个装配 seam（`setupSessionLifecycle` / `setupWorkflowDomain`） |
 | `src/session-lifecycle.ts` | 会话生命周期装配 seam（bootstrap seam）：让测试注入 fake 依赖验证装配行为，不必挂载整个组合根 |
+| `src/workflow-events.ts` | workflow 域事件族装配 seam：per-factory 域状态 + 7 个 `pi.on` handler（session_start / session_compact / model_select / session_tree / session_before_fork / session_before_switch / session_shutdown）+ `makeDeps` / `getWorkflowDeps` 守卫 / `lazyDeps`（`createLazy` 单原语转发） |
 | `src/host/pi-host.ts` | pi 宿主端口实现（`HostServices` 的 pi 侧兑现），核心抽包时的宿主契约落点 |
 | `src/injectors/` | 提示注入器：engine-awareness / model-list / resource-list / subagent-list / workflow-list |
 | `src/interface/` | 注册胶水与展示：`subagent-tool` / `tool-subagents`（批量编排入口，见 §4 批量编排行）/ `tool-workflow-script` / `commands` / `list-view` / `tool-render` / `bg-notify-render` / `gui-mappers` / `subagent-actions` |
