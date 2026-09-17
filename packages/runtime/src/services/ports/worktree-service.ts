@@ -45,6 +45,13 @@ export interface WorktreeCreateResult {
   cwd: string
   /** 新分支名（与入参一致，原始分支名含斜杠）。 */
   branch: string
+  /**
+   * 创建操作实际落在的 repo 根（create 内部 detect 对发起起点的解析结果）。
+   * bare-workspace 模式 = workspace 根（.bare 的父目录），plain-repo 模式 = 仓库根。
+   * 供调用方做与实际操作 repo 对齐的缓存失效键（transport 层失效 git 状态缓存用），
+   * 不进 worktree.created WS 契约（§5.3-3：返回值补齐 repo 根，非破坏性变更）。
+   */
+  repoRoot: string
 }
 
 /** 分支列表结果。 */
