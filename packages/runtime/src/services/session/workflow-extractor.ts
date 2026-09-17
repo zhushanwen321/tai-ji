@@ -24,10 +24,9 @@
  * - packages/subagent-core/src/orchestration/models/types.ts（RunStatus/DoneReason/AgentResult）
  */
 
-import { readFileSync, statSync } from 'node:fs'
-import { parseJsonl } from '../../utils/jsonl.js'
-import { isEnoent } from '../../utils/errors.js'
-import { WORKFLOW_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { readFileSync } from 'node:fs'
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import type {
   WorkflowRunRecord,
   WorkflowAgentCall,
@@ -196,64 +195,26 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   return snapshot as RunSnapshot
 }
 
-/** MB 换算常数（oversize 降级 warn 文案的体积展示，对齐 trace-sync BYTES_PER_MB） */
-// eslint-disable-next-line no-magic-numbers -- 1MB = 1024 * 1024 bytes
-const BYTES_PER_MB = 1024 * 1024
-
-/**
- * extract*FromSessionFile 的结果形状：records + oversize 正交降级标志（与
- * subagent-extractor 的 SubagentFileExtraction 同范式，正交字段先例 = HistoryFileReadResult
- * {messages, truncated} / traceEntries source:'oversize'）。oversize = 主 session JSONL 超
- * READ_PRECHECK_MAX_BYTES（32MB），已降级返回空列表（G3 峰值治理）。
- */
-export interface WorkflowFileExtraction {
-  /** 派生 workflow 列表；oversize 时恒空数组（不做尾读部分提取，设计裁决同 subagent 侧） */
-  records: WorkflowRunRecord[]
-  /** 主 session JSONL 超预检阈值的降级标记（true = 未读文件，records 为降级空列表） */
-  oversize: boolean
-}
-
 /**
  * 从主 session JSONL 文件提取 WorkflowRunRecord[]（冷启动 / getWorkflows RPC 路径）。
  *
- * 读取文件 → parseJsonl → scanWorkflowEntries（与实时增量拉取同一份派生代码）。
+ * 读取/预检/降级语义走 ./session-file-extraction.ts 共享骨架（与 subagent-extractor
+ * 同一实现）；本函数只注入日志标签、降级文案与 scanWorkflowEntries 扫描器。
  *
- * 读失败分级（与 extractSubagentsFromSessionFile 同款，renderer 侧栏 stale 守卫的契约前提）：
- * ENOENT → 空数组（pi session 文件延迟写入的合法窗口）；其他读错误 → 原样上抛（RPC 报错，
- * renderer catch 保留旧分区 + 重试态，不与「真实删空」混淆）。无 workflow record 时返回空数组。
+ * 读失败分级（与 extractSubagentsFromSessionFile 同款，renderer 侧栏 stale 守卫的
+ * 契约前提，由骨架承担）：ENOENT → 空数组（pi session 文件延迟写入的合法窗口）；
+ * 其他读错误 → 原样上抛（RPC 报错，renderer catch 保留旧分区 + 重试态，不与「真实
+ * 删空」混淆）。无 workflow record 时返回空数组。
  *
- * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检：statSync 大小 > READ_PRECHECK_MAX_BYTES
- * （32MB，与 session-file-utils 全量读预检同阈值同标尺）时不读全文，降级返回空列表 +
- * oversize 标记 + warn 留痕（对齐 trace-sync D5④ 的 oversize 降级范式）。预检 stat 失败
- * （含 ENOENT）走原读路径——错误分级语义由 readFileSync 路径原样承担，预检不引入新抛错。
+ * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检（> 32MB 降级空列表 + oversize 标记
+ * + warn 留痕）语义见骨架文件。
  */
-export function extractWorkflowsFromSessionFile(filePath: string): WorkflowFileExtraction {
-  let fileSize = -1
-  try {
-    fileSize = statSync(filePath).size
-  } catch {
-    // 预检失败不改变错误契约：fall through 到读路径，由 readFileSync 产生原分级错误
-    fileSize = -1
-  }
-  if (fileSize > READ_PRECHECK_MAX_BYTES) {
-    console.warn(
-      `[workflow-extractor] session file oversize ` +
-      `(${(fileSize / BYTES_PER_MB).toFixed(1)} MB > ${(READ_PRECHECK_MAX_BYTES / BYTES_PER_MB).toFixed(0)} MB), ` +
-      `skip workflow extraction (degraded to empty list): ${filePath}`,
-    )
-    return { records: [], oversize: true }
-  }
-
-  let content: string
-  try {
-    content = readFileSync(filePath, 'utf-8')
-  } catch (e) {
-    if (isEnoent(e)) return { records: [], oversize: false }
-    throw e
-  }
-
-  const entries = parseJsonl(content)
-  return { records: scanWorkflowEntries(entries), oversize: false }
+export function extractWorkflowsFromSessionFile(filePath: string): SessionFileExtraction<WorkflowRunRecord> {
+  return extractRecordsFromSessionFile(filePath, {
+    warnTag: 'workflow-extractor',
+    subject: 'workflow',
+    scan: scanWorkflowEntries,
+  })
 }
 
 /**

@@ -28,9 +28,7 @@ import { parseWorkflowRpcCommand, type WorkflowRpcAction } from "./command-actio
 import { createWorkflowsView, type ViewActions } from "./views/WorkflowsView.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { LIST_LIMIT } from "./list-shared.ts";
-
-/** runId 截断长度（显示用）。 */
-const RUNID_SHORT = 8;
+import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 
 /** status 显示顺序：running 优先（活跃态在前），再 startedAt 倒序。 */
 const STATUS_ORDER: Record<string, number> = {
@@ -219,7 +217,7 @@ async function openFromList(
 
   // 多 run——select 选择
   const entries = all.map(
-    (r) => `${r.spec.scriptName} [${r.state.status}] (${r.runId.slice(0, RUNID_SHORT)})`,
+    (r) => `${r.spec.scriptName} [${r.state.status}] (${r.runId.slice(0, ID_PREVIEW_LENGTH)})`,
   );
   const selected = await ctx.ui.select("Select workflow:", entries);
   if (!selected) return;

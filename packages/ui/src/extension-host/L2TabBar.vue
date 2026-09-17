@@ -2,6 +2,10 @@
 /**
  * L2TabBar（W4 · T2）——plugin view 二级 tab 栏（v6 l2-tabbar 视觉）。
  *
+ * 与 rendering-protocol/primitives/TabBar.vue 非双轨：概念域不同（本组件 = 宿主交互
+ * 组件，消费本地 L2TabItem + v-model，close/pin 事件上抛；TabBar = rendering-protocol
+ * 协议推送原语，渲染 extension 推送的 GuiComponent），勿合并。
+ *
  * 视觉权威：v6-spec-plugin-rendering.html .l2-tabbar CSS——
  * 容器 bg-bg-input + rounded-sm(6px) + p-[3px] + gap 2px（flex-wrap）；
  * tab 项 padding 3px 4px 3px 8px、font-size var(--text-xs)、neutral-dim →

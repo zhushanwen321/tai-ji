@@ -87,6 +87,7 @@ import type {
   BackgroundBashDetails,
 } from '@taiji/shared'
 import RespawnNoticeBar from './RespawnNoticeBar.vue'
+import { formatDurationHms } from './format-utils'
 
 const { t } = useI18n()
 
@@ -191,7 +192,8 @@ function resolveNotice(message: Message): NoticeView {
  *   生产路径不可达）→ 不渲染 meta，降级只显命令 + chip。
  *
  * `exit N · 耗时` 为技术 token（与压缩 meta 的 `tokens` 同类），不进 i18n 键；自然语言短语
- * （「后台」/「已超时」）走键。
+ * （「后台」/「已超时」）走键。耗时格式消费共享单点 format-utils.formatDurationHms
+ * （与 Turn bg-notify 边界行同源；与 extension notify.ts 同口径，裁决记录见其头注）。
  */
 function bashNotice(d: BackgroundBashDetails): NoticeView {
   let meta: string | undefined
@@ -200,7 +202,7 @@ function bashNotice(d: BackgroundBashDetails): NoticeView {
     meta = t('panel.message.bashTimeout')
     metaClass = META_WARN_CLASS
   } else if (d.exitCode !== null) {
-    meta = `exit ${d.exitCode} · ${formatDurationMs(d.durationMs)}`
+    meta = `exit ${d.exitCode} · ${formatDurationHms(d.durationMs)}`
     metaClass = d.exitCode === 0 ? META_SUCCESS_CLASS : META_WARN_CLASS
   }
   return {
@@ -222,31 +224,5 @@ function formatTokens(n: number): string {
   if (n < K_THRESHOLD) return String(n)
   const k = n / K_THRESHOLD
   return `${k.toFixed(1).replace(/\.0$/, '')}K`
-}
-
-/** 耗时换算常量（秒/分/时 + 分段补零宽度） */
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const MINUTES_PER_HOUR = 60
-const TWO_DIGIT_WIDTH = 2
-
-/**
- * 耗时格式（ms → 45s / 3m12s / 1h02m03s）——与 extension notify.ts 的 formatDurationMs
- * 逐字同构：details.durationMs 与 content 行耗时同源，两处读数必须一致（旧数据无 details
- * 兜底渲染的原文行含同一 duration，跨形态可互证）。
- *
- * 不复用 format-utils 的 formatDuration：其口径是分钟小数（192000 → `3.2min`），服务 trace
- * 块头耗时；本处要秒级精度（「花了多久」可核对），读数形态与原文行保持一致。
- */
-function formatDurationMs(ms: number): string {
-  const totalSec = Math.max(0, Math.round(ms / MS_PER_SECOND))
-  const sec = totalSec % SECONDS_PER_MINUTE
-  const min = Math.floor(totalSec / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR
-  const hour = Math.floor(totalSec / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR))
-  if (hour > 0) {
-    return `${hour}h${String(min).padStart(TWO_DIGIT_WIDTH, '0')}m${String(sec).padStart(TWO_DIGIT_WIDTH, '0')}s`
-  }
-  if (min > 0) return `${min}m${sec}s`
-  return `${totalSec}s`
 }
 </script>

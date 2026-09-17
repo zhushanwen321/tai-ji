@@ -18,7 +18,7 @@ import type {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentFailureKind } from "../../orchestration/models/types.ts";
-import type { ModelInfo, ModelRegistryLike } from "./model-resolver.ts";
+import type { ModelInfo } from "./model-resolver.ts";
 
 // ============================================================
 // 全局常量
@@ -1070,73 +1070,3 @@ export interface RecordSnapshot {
   readonly sessionFile: string | undefined;
 }
 
-// Re-export 用于 ExecuteOptions 的 agent/model 契约
-// ============================================================
-// SDK duck-typed 接口（测试可 mock，session-runner 消费）
-// ============================================================
-
-/** AgentSession 的最小可用接口（duck-typed，与 SDK AgentSession 结构兼容）。 */
-export interface AgentSessionLike {
-  prompt(task: string, options?: unknown): Promise<void>;
-  steer(message: string): Promise<void>;
-  abort(): Promise<void>;
-  dispose(): void;
-  subscribe(fn: (event: unknown) => void): () => void;
-  sessionId: string;
-  readonly sessionManager: {
-    getSessionFile(): string | undefined;
-    getSessionId(): string;
-    /** 写 custom entry（subagent-identity 持久化用）。SDK SessionManager.appendCustomEntry 的 duck-type。 */
-    appendCustomEntry(customType: string, data?: unknown): string;
-  };
-  messages: ReadonlyArray<{
-    role: string;
-    content?: ReadonlyArray<{ type: string; text?: string }>;
-  }>;
-  getAllTools(): Array<{ name: string }>;
-  setActiveToolsByName(names: string[]): void;
-}
-
-/** DefaultResourceLoader 的最小可用接口（duck-typed）。 */
-export interface ResourceLoaderLike {
-  reload(): Promise<void>;
-}
-
-/** createAgentSession 入参的类型化子集（对应 SDK CreateAgentSessionOptions）。 */
-export interface CreateAgentSessionArgs {
-  model: unknown;
-  thinkingLevel?: string;
-  cwd: string;
-  resourceLoader: ResourceLoaderLike;
-  modelRegistry: ModelRegistryLike;
-  sessionManager: unknown;
-}
-
-/** DefaultResourceLoader 构造参数的类型化子集。 */
-export interface ResourceLoaderOptions {
-  cwd: string;
-  agentDir: string;
-  appendSystemPrompt: string[];
-  additionalSkillPaths?: string[];
-}
-
-/** SessionManager 实例的最小接口（duck-typed，fork 路径消费 SDK 静态方法的返回值）。 */
-export interface SessionManagerLike {
-  getLeafId(): string | null;
-  createBranchedSession(leafId: string): string | undefined;
-  getSessionFile(): string | undefined;
-  getSessionId(): string;
-}
-
-/** Pi SDK 动态 import 的形状（getSdk() 获取）。 */
-export interface SdkLike {
-  DefaultResourceLoader: new (opts: ResourceLoaderOptions) => ResourceLoaderLike;
-  SessionManager: {
-    inMemory(cwd?: string): SessionManagerLike;
-    create(cwd: string, sessionDir?: string): SessionManagerLike;
-    open(sessionFile: string, sessionDir?: string, cwdOverride?: string): SessionManagerLike;
-    /** [MF#1] fork 静态方法：从源 session 文件 fork 到目标 cwd，返回 SessionManager。 */
-    forkFrom(sourcePath: string, targetCwd: string, sessionDir?: string): SessionManagerLike;
-  };
-  createAgentSession: (opts: CreateAgentSessionArgs) => Promise<{ session: AgentSessionLike }>;
-}

@@ -164,7 +164,7 @@
               v-for="record in workflowRows" :key="record.runId"
               class="group relative cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-workflow-row"
-              @click="openWorkflowRow(record)" @mouseleave="abortingRunId = null"
+              @click="openWorkflowRow(record)" @mouseleave="clearAbortConfirm"
             >
               <div class="flex items-center gap-2">
                 <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
@@ -180,15 +180,15 @@
                 <template v-if="pinned && record.status === 'running'">
                   <Button
                     variant="ghost" size="icon"
-                    :data-testid="abortingRunId === record.runId ? 'tray-workflow-abort-confirm' : 'tray-workflow-abort'"
-                    :data-confirming="abortingRunId === record.runId ? 'true' : 'false'"
-                    :class="cn('size-5 shrink-0', abortingRunId === record.runId
+                    :data-testid="isAbortConfirming(record.runId) ? 'tray-workflow-abort-confirm' : 'tray-workflow-abort'"
+                    :data-confirming="isAbortConfirming(record.runId) ? 'true' : 'false'"
+                    :class="cn('size-5 shrink-0', isAbortConfirming(record.runId)
                       ? 'border border-danger bg-danger text-neutral-fg'
                       : 'text-neutral-dim hover:text-danger')"
-                    :title="abortingRunId === record.runId ? t('panel.tray.abortConfirm') : t('panel.tray.abort')"
+                    :title="isAbortConfirming(record.runId) ? t('panel.tray.abortConfirm') : t('panel.tray.abort')"
                     @click.stop="onAbortClick(record.runId)"
                   >
-                    <Check v-if="abortingRunId === record.runId" class="size-3" />
+                    <Check v-if="isAbortConfirming(record.runId)" class="size-3" />
                     <Square v-else class="size-3" />
                   </Button>
                 </template>
@@ -270,18 +270,18 @@ import { cn } from '@/lib/utils'
 import { getState } from '@taiji/core/transport/ws-client'
 import { getDrawerControlState, openDrawerTab, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
 import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
-import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
 import { isRunningProjection } from '@/lib/subagent-bucket'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
+import { formatTokens as formatTokensK } from '@/lib/token-format'
 import { resolveEngineIcon } from '@/constants/engine-icons'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
-import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 const props = withDefaults(defineProps<{
@@ -296,7 +296,6 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const { error: toastError, info: toastInfo } = useToast()
 const subagentStore = useSubagentStore()
-const workflowStore = useWorkflowStore()
 
 /**
  * 数据面（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
@@ -426,7 +425,6 @@ const MS_PER_SECOND = 1000
 const SECONDS_PER_HOUR = 3600
 const SECONDS_PER_MINUTE = 60
 const TIME_PAD_WIDTH = 2
-const TOKEN_K_THRESHOLD = 1000
 const PERCENT_BASE = 100
 
 function iconOf(entry: BackgroundTaskEntry): BackgroundTaskIconState {
@@ -457,9 +455,9 @@ function formatSeconds(seconds: number): string {
   }
   return `${seconds}s`
 }
+/** token K 格式化单点在 lib/token-format（与 WorkflowTab 共享）；unit 走 i18n 由本组件注入 */
 function formatTokens(tokens: number): string {
-  if (tokens >= TOKEN_K_THRESHOLD) return `${(tokens / TOKEN_K_THRESHOLD).toFixed(1)}k ${t('panel.tray.tokUnit')}`
-  return `${tokens} ${t('panel.tray.tokUnit')}`
+  return formatTokensK(tokens, t('panel.tray.tokUnit'))
 }
 /** workflow 行耗时：startedAt（ISO）→ completedAt 或当下 */
 function workflowElapsed(record: WorkflowRunRecord): string {
@@ -592,22 +590,8 @@ async function cancelSubagent(record: SubagentRecord): Promise<void> {
 }
 
 // ── 行内操作 3：workflow abort（两段式；pause/resume 随扩展 D-2 一次性生命周期移除）──
-const abortingRunId = ref<string | null>(null)
-function onAbortClick(runId: string): void {
-  if (abortingRunId.value === runId) {
-    abortingRunId.value = null
-    void runWorkflowAction('abort', runId)
-    return
-  }
-  abortingRunId.value = runId
-}
-/** 调 runtime RPC + 刷新列表（不做乐观写——workflow 状态由 runtime 推送权威） */
-async function runWorkflowAction(action: 'abort', runId: string): Promise<void> {
-  try {
-    await sessionApi.workflowAction(props.sessionId, action, runId)
-    void workflowStore.loadWorkflows(props.sessionId)
-  } catch (e) {
-    toastError(t('panel.tray.workflowOpFailed', { msg: toErrorMessage(e) }))
-  }
-}
+// 动作单点在 useWorkflowAction（与 drawer WorkflowTab 共享：两段式确认 + RPC + 刷新 + toast）
+const { isAbortConfirming, onAbortClick, clearAbortConfirm } = useWorkflowAction(
+  () => props.sessionId,
+)
 </script>

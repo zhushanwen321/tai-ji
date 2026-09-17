@@ -30,6 +30,23 @@ export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
 
 type ValidStatus = (typeof VALID_STATUSES)[number];
 
+/**
+ * status 合法性判据（type guard）：migrate 迁移映射 / tool 单条 update / model 批量
+ * update 三处共享的同一校验原语——判定规则单点，错误文案由各调用方按面向对象
+ * （迁移降级 / LLM 单条引导 / 批量 id 定位）自行编排，展示层差异不属规则差异。
+ */
+export function isValidTodoStatus(status: string): status is ValidStatus {
+	return (VALID_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * update text 有效性判据（CT5）：trim 后空串 = 非法（不只判 ===），tool 单条与
+ * model 批量两条 update 路径共享。
+ */
+export function isBlankUpdateText(text: string): boolean {
+	return text.trim().length === 0;
+}
+
 // ── 迁移/兼容 ───────────────────────────────────────
 
 /** 旧格式迁移：verifying → in_progress，failed → pending，cancelled → completed（历史三态化降级），done:boolean → status */
@@ -42,13 +59,12 @@ export function migrateTodo(raw: unknown): Todo {
 		);
 	}
 	const record = raw as Record<string, unknown>;
-	const hasValidStatus =
-		typeof record.status === "string" &&
-		VALID_STATUSES.includes(record.status as ValidStatus);
+	const rawStatusField = record.status;
+	const hasValidStatus = typeof rawStatusField === "string" && isValidTodoStatus(rawStatusField);
 
 	let status: ValidStatus;
 	if (hasValidStatus) {
-		status = record.status as ValidStatus;
+		status = rawStatusField;
 	} else {
 		// 极旧格式 done: boolean
 		const done = typeof record.done === "boolean" ? record.done : undefined;
@@ -250,7 +266,7 @@ export function updateTodos(
 ): UpdateResult {
 	// text 校验统一（CT5）：text 存在则 trim，空串 throw（不静默跳过）
 	for (const u of updates) {
-		if (u.text !== undefined && u.text.trim().length === 0) {
+		if (u.text !== undefined && isBlankUpdateText(u.text)) {
 			throw new Error(`update item id ${u.id}: text cannot be empty or whitespace-only`);
 		}
 	}
@@ -267,7 +283,7 @@ export function updateTodos(
 		if (!u.status && !u.text) {
 			throw new Error(`update item for id ${u.id} has neither status nor text`);
 		}
-		if (u.status && !VALID_STATUSES.includes(u.status as (typeof VALID_STATUSES)[number])) {
+		if (u.status && !isValidTodoStatus(u.status)) {
 			throw new Error(`invalid status '${u.status}' for update item id ${u.id}`);
 		}
 	}
@@ -276,7 +292,9 @@ export function updateTodos(
 		const u = updates.find((u) => u.id === t.id);
 		if (!u) return t;
 		const patch: Partial<Todo> = {};
-		if (u.status) patch.status = u.status as Todo["status"];
+		// status 合法性已由上方校验循环保证（非法即 throw，突变前拦截）；此处
+		// isValidTodoStatus 恒真，仅为 type guard 收窄消除 cast
+		if (u.status && isValidTodoStatus(u.status)) patch.status = u.status;
 		if (u.text !== undefined) patch.text = u.text.trim();
 		return { ...t, ...patch };
 	});

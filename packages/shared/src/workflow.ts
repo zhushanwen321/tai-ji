@@ -74,7 +74,7 @@ export interface WorkflowAgentCall {
  * - runId：RunSnapshot.runId（如 "wf-1783679279983-hlpc46"）
  * - scriptName/slug/description：RunSnapshot.spec（spec.scriptName / spec.slug / spec.description）
  * - status/reason：RunSnapshot.state（state.status / state.reason）
- * - startedAt/completedAt：RunSnapshot.meta（pausedAt 为 legacy 字段，v2 不产出）
+ * - startedAt/completedAt：RunSnapshot.meta
  * - usedTokens/totalCallCount：RunSnapshot.state.budget
  * - agentCalls：RunSnapshot.state.trace[] 逐项映射
  * - stateFilePath：主 session JSONL 的 workflow-state-link.data.path
@@ -96,8 +96,6 @@ export interface WorkflowRunRecord {
   startedAt: string
   /** 完成时间 ISO（meta.completedAt，done 时有值） */
   completedAt?: string
-  /** 暂停时间 ISO（legacy：wf-run-v2 快照无 paused 态，此字段不再产出，恒 undefined） */
-  pausedAt?: string
   /** 已消耗 token（state.budget.usedTokens） */
   usedTokens?: number
   /** agent call 总数（state.budget.totalCallCount） */

@@ -44,6 +44,7 @@ import {
 } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "./gui-mappers.ts";
+import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 import {
   acquireReentryGuard,
   REENTRY_BUSY_MESSAGE,
@@ -104,9 +105,6 @@ const WorkflowParams = Type.Object({
 type WorkflowToolParams = Static<typeof WorkflowParams>;
 
 // ── Constants ────────────────────────────────────────────────
-
-/** runId 截断长度（显示用）。 */
-const RUNID_SHORT = 8;
 
 /**
  * tool 自身顶层键（workflow params schema 键）——workflow 参数名与 tool 键撞名时
@@ -206,7 +204,7 @@ export function buildWorkflowGui(details: WorkflowToolDetails) {
     const statusStr = details.status;
     return guiComponent("list-tree", {
       items: [{
-        label: [details.name, details.slug, details.runId.slice(0, RUNID_SHORT)].filter(Boolean).join(" "),
+        label: [details.name, details.slug, details.runId.slice(0, ID_PREVIEW_LENGTH)].filter(Boolean).join(" "),
         status: mapRunStatus(statusStr),
         icon: mapRunIcon(statusStr),
       }],
@@ -217,7 +215,7 @@ export function buildWorkflowGui(details: WorkflowToolDetails) {
       items: details.runs.map((r) => {
         const statusStr = r.reason ? `${r.status} (${r.reason})` : r.status;
         return {
-          label: [r.name, r.slug, r.runId.slice(0, RUNID_SHORT)].filter(Boolean).join(" "),
+          label: [r.name, r.slug, r.runId.slice(0, ID_PREVIEW_LENGTH)].filter(Boolean).join(" "),
           status: mapRunStatus(statusStr),
           icon: mapRunIcon(statusStr),
         };
@@ -228,7 +226,7 @@ export function buildWorkflowGui(details: WorkflowToolDetails) {
   return guiComponent("stats-line", {
     items: [{
       label: details.action,
-      value: details.runId.slice(0, RUNID_SHORT),
+      value: details.runId.slice(0, ID_PREVIEW_LENGTH),
       severity: "warn" as const,
     }],
   });
@@ -338,7 +336,7 @@ export function registerWorkflowTool(
       const slug = typeof args.slug === "string" && args.slug.trim()
         ? `${theme.fg("dim", " · ")}${theme.fg("accent", String(args.slug))}`
         : "";
-      const runId = args.runId ? ` ${String(args.runId).slice(0, RUNID_SHORT)}` : "";
+      const runId = args.runId ? ` ${String(args.runId).slice(0, ID_PREVIEW_LENGTH)}` : "";
       return new Text(
         theme.fg("toolTitle", theme.bold("workflow ")) +
           theme.fg("muted", action) +
@@ -497,7 +495,7 @@ function actionStatus(deps: LauncherDeps): ToolResult {
     // now 基准），不再随每次 status 查询的墙钟增长。
     const duration = s.startedAt ? ` (${formatRunStatusElapsed(s.startedAt, s.completedAt)})` : "";
     const reasonSuffix = s.reason && s.reason !== "completed" ? ` [${s.reason}]` : "";
-    return `[${s.status}${reasonSuffix}] ${s.name} (${s.runId.slice(0, RUNID_SHORT)})${duration}${s.error ? ` error: ${s.error}` : ""}`;
+    return `[${s.status}${reasonSuffix}] ${s.name} (${s.runId.slice(0, ID_PREVIEW_LENGTH)})${duration}${s.error ? ` error: ${s.error}` : ""}`;
   });
   return {
     content: [{ type: "text", text: lines.join("\n") }],

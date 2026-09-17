@@ -11,7 +11,7 @@
  * 不 mock handleCreate：走真实 createGoal 让 session.state 含完整字段（slug/objective/budget），
  * 避免 hand-rolled state 与生产路径不一致。pi/ctx 用最小 fake（对齐 index.test.ts makeFactoryFixture）。
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { registerGoalControlTool, type GoalControlDetails } from "../adapters/goal-control-adapter";
@@ -43,6 +43,7 @@ interface CapturedTool {
 		onUpdate: unknown,
 		ctx: ExtensionContext,
 	) => Promise<ExecuteResult>;
+	renderCall: (args: Record<string, unknown>, theme: Theme) => unknown;
 }
 
 // ── Fake pi + ctx（最小化，对齐 index.test.ts 的 makeFactoryFixture）──
@@ -298,5 +299,32 @@ describe("goal_control execute — 辅助 UI 通道失败降级", () => {
 			expect.stringContaining("goal_control complete"),
 			expect.objectContaining({ detail: expect.objectContaining({ err: "widget channel broken" }) }),
 		);
+	});
+});
+
+// ── renderCall 非法 args 安全渲染（TUI 渲染先于 schema 校验）──
+
+const stubTheme = {
+	fg: (_color: string, text: string) => text,
+	bold: (text: string) => text,
+} as unknown as Theme;
+
+/** 注册 → 捕获 tool → 以给定 args 调 renderCall，返回渲染文本（width 足够宽避免 wrap）。 */
+function renderedCallText(args: unknown): string {
+	const { pi } = makeFixture("rpc");
+	const tool = captureTool(pi);
+	const node = tool.renderCall(args as Record<string, unknown>, stubTheme) as {
+		render: (width: number) => string[];
+	};
+	return node.render(400).join("\n");
+}
+
+describe("renderCall — 非法 args 安全渲染", () => {
+	it("args 为 null → 占位文本，不抛错", () => {
+		expect(renderedCallText(null)).toContain("(invalid args)");
+	});
+
+	it("action 非字符串 → 不抛错，落 report_blocked 回落分支（与原行为一致）", () => {
+		expect(renderedCallText({ action: 42 })).toContain("report_blocked");
 	});
 });

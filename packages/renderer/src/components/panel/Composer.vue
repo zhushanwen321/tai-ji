@@ -196,7 +196,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, createVNode, nextTick, onBeforeUnmount, onMounted, provide, ref, render, watch, type Ref } from 'vue'
+import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -296,19 +296,6 @@ const popoverQuery = computed(() => {
 const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
-// focusin/focusout 用原生 listener 注册（非 template @focusin）：composer-box 经
-// CommandPopover 的 PopoverAnchor as-child 包裹，Vue template 事件绑定在 clone element 时丢失。
-// ref 指向真实 DOM，addEventListener 稳定生效。
-onMounted(() => {
-  // composerBoxRef 在 CommandPopover PopoverAnchor as-child 包裹下透传丢失（ref 为 null），
-  // 聚焦态改由子组件 ComposerInput emit focus/blur 驱动（见 @focus/@blur 绑定）。
-})
-onBeforeUnmount(() => {
-  composerBoxRef.value?.removeEventListener('focusin', onBoxFocusIn)
-  composerBoxRef.value?.removeEventListener('focusout', onBoxFocusOut)
-})
-/** composer-box 聚焦态：由 ComposerInput @focus/@blur 驱动（composer-box 经 CommandPopover
- *  PopoverAnchor as-child 包裹，ref 透传丢失，改由子组件 ComposerInput emit focus/blur）。 */
 // [u6b] 本地 isCompacting computed 已退役：压缩维度的唯一读口收敛到 shell sendButtonState
 // （occupancy 投影派生，与分发器 sendRoute 同源——双轨收口完成）。
 

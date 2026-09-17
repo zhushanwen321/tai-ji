@@ -410,7 +410,7 @@ export type PluginRpcErrorCode = (typeof PluginRpcErrorCodes)[keyof typeof Plugi
  *
  * 分层标注（IF2）：
  * - @proposed — Hook 机制整体为 Phase 2 扩展面（API 表面仍在演进）
- * - @internal — runtime 内部执行细节（HookResult/HookBlockedResult 等主线程塑形）
+ * - @internal — runtime 内部执行细节（HookResult 等主线程塑形）
  */
 
 /**
@@ -514,12 +514,6 @@ export interface HookResult {
   transformedData?: unknown
   /** 注入语义（仅 onBeforeAgentStart 链路消费）：管线已校验的合法条目，跨插件累积 */
   injectedMessages?: string[]
-}
-
-/** @internal — runtime 内部：Hook 被阻止时的详细结果 */
-export interface HookBlockedResult extends HookResult {
-  blocked: true
-  reason: string
 }
 
 // 本文件内部仍引用以下「已拆分」域的类型（lifecycle/bridge/agent-api 等
@@ -736,34 +730,10 @@ export const PermissionConstants = Object.freeze({
   NOTIFY: 'notify',
 } as const)
 
-/** @stable — 权限常量索引类型（随 PermissionConstants 冻结） */
-export type PermissionConstant = (typeof PermissionConstants)[keyof typeof PermissionConstants]
-
 // @internal — runtime 内部塑形对象（Bridge* 回包形状），定义源在协议包（见文件头 D4 单源化）
 export type { BridgeInterceptResponse, BridgeToolExecuteResponse }
 
 // ── Bridge 类型（插件 Worker ↔ 主进程桥接）─────────────────────────
-
-/** @internal — runtime 内部：Bridge 连接状态 */
-export interface BridgeState {
-  pluginId: string
-  connected: boolean
-  lastSyncAt: number
-}
-
-/** @internal — runtime 内部：插件向主进程同步工具和 hooks 的请求 */
-export interface BridgeSyncRequest {
-  type: 'bridge.sync'
-  tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
-  hooks: HookType[]
-}
-
-/** @internal — runtime 内部：主进程响应 Bridge 同步的结果 */
-export interface BridgeSyncResponse {
-  success: boolean
-  registeredTools: string[]
-  registeredHooks: HookType[]
-}
 
 /** @internal — runtime 内部：主进程调用插件注册的工具 */
 export interface BridgeToolExecuteRequest {
@@ -917,12 +887,3 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
   }
 }
 
-/** @internal — runtime 内部：插件向后端请求前端 UI 弹窗 */
-export interface PluginUIRequest {
-  sessionId: string
-  requestId: string
-  method: 'confirm' | 'select' | 'input'
-  title: string
-  message?: string
-  options?: string[]
-}

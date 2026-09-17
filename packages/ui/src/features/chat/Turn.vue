@@ -210,6 +210,7 @@ import TraceCompactorRow from './TraceCompactorRow.vue'
 import BashOutputBlock from './BashOutputBlock.vue'
 import SystemNotice from './SystemNotice.vue'
 import { useTurnElapsed } from './composables/useTurnElapsed'
+import { formatDurationHms } from './format-utils'
 import { useChatViewDeps } from './chat-view-deps'
 
 const props = withDefaults(
@@ -286,35 +287,12 @@ const notifyFailedText = computed(() => {
   return failedCount > 0 ? t('panel.message.turnTriggerBgNotifyFailed', { count: failedCount }) : ''
 })
 
-/** 耗时 meta（D5）：去重后含 endedAt 值记录的 max(endedAt) − min(startedAt)；无值不显 */
+/** 耗时 meta（D5）：去重后含 endedAt 值记录的 max(endedAt) − min(startedAt)；无值不显。
+ *  格式化单点在 format-utils.formatDurationHms（补零口径 26m03s，design §3.1 样本锚定）。 */
 const notifyDuration = computed(() => {
   const ms = props.turn.notifySummary?.durationMs
-  return ms === undefined ? '' : formatNotifyDuration(ms)
+  return ms === undefined ? '' : formatDurationHms(ms)
 })
-
-/** 耗时格式常数（秒宽 / 分段宽；与秒换算） */
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const MINUTES_PER_HOUR = 60
-const TWO_DIGIT_WIDTH = 2
-
-/**
- * 耗时格式（D5 边界行 meta）：秒内 "45s" → 分 "26m03s" → 时 "1h02m03s"（秒/分补零两位，
- * 对齐 design §3.1 终态样本）。format-utils.formatDuration 输出 "26.1min" 形态，与本行样本
- * 不一致故不复用（与 U3 SystemNotice 的 background-bash 耗时格式同源需求，跨单元统一见 U6 汇报）。
- */
-function formatNotifyDuration(ms: number): string {
-  const totalSec = Math.max(0, Math.round(ms / MS_PER_SECOND))
-  const sec = totalSec % SECONDS_PER_MINUTE
-  const min = Math.floor(totalSec / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR
-  const hour = Math.floor(totalSec / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR))
-  const secText = String(sec).padStart(TWO_DIGIT_WIDTH, '0')
-  if (hour > 0) {
-    return `${hour}h${String(min).padStart(TWO_DIGIT_WIDTH, '0')}m${secText}s`
-  }
-  if (min > 0) return `${min}m${secText}s`
-  return `${totalSec}s`
-}
 
 /**
  * B9：编辑状态变化通知父组件。

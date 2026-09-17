@@ -411,19 +411,6 @@ export default [
       ],
     },
   },
-  // [HISTORICAL] subagent-workflow factory（src/index.ts）是 extension 的唯一装配点：
-  // 注册 3 tool + 2 command + messageRenderer + pi.__workflowRun + 4 个 session 事件 handler
-  // （session_start 单独就 ~100 行：双 Service 装配 + AgentRegistry + store 健康度 + recovery）。
-  // 与 event-adapter/session-service/chat.ts 同质——唯一聚合中心，职责内聚但函数体超 300。
-  // 拆分需先把 session_start handler 及 makeDeps/log/resolveSessionDir 等闭包内函数提取到
-  // 模块级（需透传 pi/sessionState/registry 等大量闭包变量），属独立重构任务。
-  // 短期 max-lines-per-function override 避免阻塞（HEAD 版已 321 行超限，属存量）。
-  {
-    files: ['extensions/universal/subagent-workflow/src/index.ts'],
-    rules: {
-      'max-lines-per-function': 'off',
-    },
-  },
   // pi extensions（extensions/**/*.ts）专用规则块。
   // extensions 是无构建的 TS 源码（pi 运行时直接加载），迁自旧 pi 扩展仓（已废弃，见 git 历史与 AGENTS.md），
   // 与 renderer/runtime 的 Vue/Electron 代码性质不同：

@@ -234,7 +234,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
@@ -248,13 +248,15 @@ import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatDuration, formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { useToolMeta } from './composables/useToolMeta'
 import { useCopy } from './composables/useCopy'
 import { useTailScroll } from './composables/useTailScroll'
+import { useThinkingCollapse } from './composables/useThinkingCollapse'
+import { useLiveToolDuration } from './composables/useLiveToolDuration'
 
 const { t } = useI18n()
 const { copied, copy } = useCopy()
@@ -293,44 +295,14 @@ const props = defineProps<{
 
 /* ── thinking 折叠（streaming-trace-window 验收修正）：working 态也默认折叠（60 字符预览），
  *    与过程块收编理念一致（收编减体积 + thinking 折叠 = 视觉体积最小）；用户可手动展开，展开后保持。
- *    原 SSOT §3.3.3「working→false 展开」导致 streaming 中所有 thinking 全展开，与收编减体积冲突。── */
-const thinkingCollapsed = ref(props.collapsed ?? true)
-const thinkingExpanded = computed(() => !thinkingCollapsed.value)
-/** 用户是否手动 toggle 过（收起/展开均置位）——置位后完成态不回落（显式意图优先，CQ1） */
-const userToggledThinking = ref(false)
-
-function toggleThinking(): void {
-  userToggledThinking.value = true
-  thinkingCollapsed.value = !thinkingCollapsed.value
-}
-
-/** working true→false：未手动操作过的块回落收起（用户手动操作过的保持用户意图不回滚） */
-watch(
-  () => props.working,
-  (working) => {
-    if (working === false && !userToggledThinking.value) {
-      thinkingCollapsed.value = true
-    }
-  },
-)
-
-/** 收起态的正文预览（截断，draft：收起时显一行摘要） */
-const PREVIEW_LIMIT = 60
-const previewText = computed(() => {
-  const c = props.content?.trim() ?? ''
-  if (c.length <= PREVIEW_LIMIT) return c
-  return `${c.slice(0, PREVIEW_LIMIT)}…`
-})
-
-/* ── thinking 尾行视口（2026-08 抖动修复重写）──
- * working 态折叠预览：单行视口显示最新行（横向 CSS 钉右 + 纵向滑入动画，
- * 机制见 useTailScroll 头注释）；非 working 保持 previewText 头部 60 字符静态。
- * 尾 2 行即状态机所需（旧行 + 新行）。 */
-const TAIL_LINE_COUNT = 2
-const thinkingTailLines = computed(() =>
-  props.working ? tailLines(props.content ?? '', TAIL_LINE_COUNT) : [],
-)
-const { displayLines: thinkDisplayLines, contentStyle: thinkScrollStyle } = useTailScroll(thinkingTailLines)
+ *    原 SSOT §3.3.3「working→false 展开」导致 streaming 中所有 thinking 全展开，与收编减体积冲突。──
+ *    状态机拆至 useThinkingCollapse（折叠/手动置位/working 回落/预览/尾行视口一体）。 */
+const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkDisplayLines, thinkScrollStyle } =
+  useThinkingCollapse({
+    content: computed(() => props.content),
+    working: computed(() => props.working),
+    collapsed: props.collapsed,
+  })
 
 /** 纯 error：status==='error' 且无 msg.error（markSessionError/registry 无 streaming 实体时
  *  手动追加的整条 error 消息，errorText 即 content 全文）。 */
@@ -347,35 +319,8 @@ const textColorClass = computed(() => {
 const isFailed = computed(() => props.tool?.status === 'error')
 const isRunning = computed(() => props.tool?.status === 'running')
 
-/** running 工具耗时实时跳动：仅 isRunning 期间挂载 interval，onUnmounted 清理，页面 hidden 停 tick */
-const LIVE_DUR_TICK_MS = 100
-const nowTs = ref(Date.now())
-let liveDurTimer: ReturnType<typeof setInterval> | null = null
-function startLiveDurTick(): void {
-  if (liveDurTimer) return
-  nowTs.value = Date.now()
-  liveDurTimer = setInterval(() => { nowTs.value = Date.now() }, LIVE_DUR_TICK_MS)
-}
-function stopLiveDurTick(): void {
-  if (liveDurTimer) { clearInterval(liveDurTimer); liveDurTimer = null }
-}
-watch(isRunning, (running) => {
-  if (running) startLiveDurTick()
-  else stopLiveDurTick()
-}, { immediate: true })
-onUnmounted(() => { stopLiveDurTick() })
-
-/** tool 块行尾耗时（running 实时算，completed 用 startTime/endTime） */
-const toolDuration = computed(() => {
-  const start = props.tool?.startTime
-  if (typeof start !== 'number') return ''
-  if (isRunning.value) {
-    return formatDuration(nowTs.value - start)
-  }
-  const end = props.tool?.endTime
-  if (typeof end !== 'number' || end <= start) return ''
-  return formatDuration(end - start)
-})
+/** running 工具耗时实时跳动（tick 生命周期 + 终态 startTime/endTime 换算拆至 useLiveToolDuration） */
+const toolDuration = useLiveToolDuration(computed(() => props.tool), isRunning)
 /* end_not_received（流结束未收到 tool_call_end，进程崩溃/WS 断连）原单独分支已并入
  * completed 的 neutral-mid 置灰（同为非 running 非失败的中性态，无需视觉区分）。 */
 const toolName = computed(() => props.tool?.toolName ?? 'tool')
@@ -433,6 +378,7 @@ const outputRaw = computed(() => props.tool?.outputRaw)
 /* ── tool 尾行视口（同 thinking，2026-08 抖动修复重写）──
  * isRunning + 有流式输出时，bash 用 outputRaw 去 ANSI 取尾行；其余 tool 用 displayContent 取尾行。
  * 无流式输出或非 running 保持静态 shortenForHeader(argPath)。 */
+const TAIL_LINE_COUNT = 2
 const toolTailLines = computed(() => {
   if (!isRunning.value) return []
   // bash：outputRaw 缺失（无 ANSI 输出）时回退 displayContent（D3 尾行取数）

@@ -184,6 +184,10 @@ export function validateWidgetIconPaths(value: unknown): WidgetIconPathsValidati
 /**
  * 从 details 中提取 GuiRenderResult。前端统一用此函数读取 __gui__，
  * 集中校验版本号，避免散落的 as 断言。
+ * component 字段校验（质量收敛批升级）：从「仅查存在性」升级为复用 isGuiComponent
+ * 结构校验（type 字符串 + props 对象——含 null 排除；component 不是函数，可调用性
+ * 检查对其无意义）。非法值 → undefined，走调用方既有降级路径（AnsiText/纯文本兜底），
+ * 畸形 component 不再进渲染层。
  */
 export function extractGui(details: Record<string, unknown> | undefined): GuiRenderResult | undefined {
   const g = details?.__gui__
@@ -191,7 +195,7 @@ export function extractGui(details: Record<string, unknown> | undefined): GuiRen
     g &&
     typeof g === 'object' &&
     'v' in g &&
-    'component' in g &&
+    isGuiComponent((g as { component?: unknown }).component) &&
     (g as { v: unknown }).v === PROTOCOL_VERSION
   ) {
     return g as GuiRenderResult

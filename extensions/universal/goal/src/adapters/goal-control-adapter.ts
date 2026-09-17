@@ -409,7 +409,17 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 		},
 
 		renderCall(args: Record<string, unknown>, theme: Theme): Text {
-			const action = args.action as string;
+			// TUI 渲染先于 schema 校验（args 是未经 schema 收窄的原始形态）：非对象整体
+			// 走安全占位（不抛错）；action/slug 逐个 typeof 守卫替代裸断言——非法 action
+			// 落 report_blocked 回落分支（与原行为一致）
+			if (typeof args !== "object" || args === null) {
+				return new Text(
+					theme.fg("toolTitle", theme.bold("goal_control ")) + theme.fg("muted", "(invalid args)"),
+					0,
+					0,
+				);
+			}
+			const action = typeof args.action === "string" ? args.action : "";
 			const slug = typeof args.slug === "string" ? args.slug : "";
 			const actionLabel =
 				action === "create"

@@ -74,11 +74,11 @@ const controlState = useSessionScopedState<DrawerControlState>(
 /**
  * 内部原语命名空间（coordination 层专用，公开 API 之外的薄封装）。
  *
- * ⚠️ 直接调用会跳过瞬时参数写入（selectedCommandName/detailFilePath/browserUrl）——
+ * ⚠️ 直接调用会跳过瞬时参数写入（selectedCommandName/detailFilePath）——
  * 业务代码应使用 coordination 层的 openDrawerTab / closeDrawer / toggleDrawer /
  * setDrawerTab / toggleDrawerDock（C2 契约）。
  *
- * 与 renderer 原 openInternal 的差异：瞬时参数（selectedCommandName/detailFilePath/browserUrl）
+ * 与 renderer 原 openInternal 的差异：瞬时参数（selectedCommandName/detailFilePath）
  * 不在此写入——它们是 coordination 层职责（opts 归 coordination.openDrawerTab），
  * control 保持纯控制态（C4 单向依赖防循环）。
  */

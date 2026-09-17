@@ -29,6 +29,7 @@ import {
   isGuiCapable,
 } from "@zhushanwen/extension-protocol";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
+import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -58,9 +59,6 @@ const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
  * （wf-<Date.now>-<rand>），旧 id 重现概率为零，语义无损。
  */
 export const MAX_NOTIFIED_RUN_IDS = 1000;
-
-/** runId 前 8 字符用于显示（与 buildWorkflowGui 的 label 格式一致）。 */
-const RUN_ID_DISPLAY_LENGTH = 8;
 
 /**
  * notifyDone 的 details 结构（通过 pi.sendMessage 透传给前端）。
@@ -171,7 +169,7 @@ export function notifyDone(
     const statusStr = `${run.state.status}${reason ? ` (${reason})` : ""}`;
     // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）
     const slug = run.spec.slug;
-    const label = [name, slug, runId.slice(0, RUN_ID_DISPLAY_LENGTH)]
+    const label = [name, slug, runId.slice(0, ID_PREVIEW_LENGTH)]
       .filter(Boolean)
       .join(" ");
     details.__gui__ = guiResult(

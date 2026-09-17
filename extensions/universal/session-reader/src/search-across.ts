@@ -163,7 +163,13 @@ export function formatSearchText(
  */
 export const MULTI_SEARCH_MAX_SESSIONS = 10
 
-/** 字节展示/预算换算基数（人话格式化与预算常量共用同一量纲）。 */
+/**
+ * 字节展示/预算换算基数（人话格式化与预算常量共用同一量纲）。
+ *
+ * 本包是独立 npm 发布的 pi extension（仅依赖 pi-ext-guards），不 import taiji 内部
+ * workspace 包（@taiji/shared 的 BYTES_PER_MB 单点不含本包）——量纲基数本地定义，
+ * 数值对齐由注释锚定（1MB = 1024×1024）。
+ */
 const BYTES_PER_KB = 1024
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 

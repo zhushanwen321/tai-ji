@@ -1,7 +1,7 @@
 /**
  * drawer coordination 协同层单测（TC2）。
  *
- * 覆盖：瞬时参数（selectedCommandName/detailFilePath/browserUrl 设置 + consumeBrowserUrl 消费后清空）/ 公开 API 薄封装。
+ * 覆盖：瞬时参数（selectedCommandName/detailFilePath 设置）/ 公开 API 薄封装。
  * [P4 s5 drawer-widget-removal] pendingOpen 置/读/消费、openTasksDrawerOnFirstData 守卫分发、
  * cleanup 注册（清 pendingOpenMap）用例已删——pendingOpen 机制随 tasks 域移除（PluginViewContainer 承接）。
  *
@@ -22,8 +22,6 @@ import {
   toggleDrawerDock,
   selectedCommandName,
   detailFilePath,
-  browserUrl,
-  consumeBrowserUrl,
   _resetDrawerForTest,
 } from '../coordination'
 
@@ -48,22 +46,6 @@ describe('瞬时参数：设置 + 消费后清空', () => {
 
     openDrawerTab('detail', { filePath: 'src/foo.ts' })
     expect(detailFilePath.value).toBe('src/foo.ts')
-
-    openDrawerTab('browser', { url: 'https://example.com' })
-    expect(browserUrl.value).toBe('https://example.com')
-  })
-
-  it('consumeBrowserUrl 读取并清空（消费后为 null，不残留劫持下次打开）', () => {
-    focusSession('A')
-    openDrawerTab('browser', { url: 'https://example.com' })
-    expect(browserUrl.value).toBe('https://example.com')
-
-    const consumed = consumeBrowserUrl()
-    expect(consumed).toBe('https://example.com')
-    expect(browserUrl.value).toBe(null)
-
-    // 未设置时消费返回 null
-    expect(consumeBrowserUrl()).toBe(null)
   })
 
   it('opts 缺省字段不覆盖已有瞬时参数（undefined 不写入）', () => {
@@ -104,13 +86,12 @@ describe('_resetDrawerForTest 测试隔离', () => {
   it('_resetDrawerForTest 清瞬时参数（测试隔离钩子）', () => {
     focusSession('A')
     openDrawerTab('doc', { commandName: '/commit' })
-    openDrawerTab('browser', { url: 'https://example.com' })
-    expect(browserUrl.value).not.toBe(null)
+    openDrawerTab('detail', { filePath: 'src/foo.ts' })
+    expect(detailFilePath.value).not.toBe(null)
 
     _resetDrawerForTest()
 
     expect(selectedCommandName.value).toBe(null)
     expect(detailFilePath.value).toBe(null)
-    expect(browserUrl.value).toBe(null)
   })
 })

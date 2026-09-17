@@ -502,14 +502,16 @@ export class RunOrchestration {
     // fork 不隐含 worktree（UC-1 fork 可独立使用，fork 仅继承上下文，在 parent cwd 跑）。
     // 非 pi 引擎带 worktree 已被上方预检同步拒绝（caps.sandbox='none'），此段实际仅
     // sandbox 能力引擎（pi：caps.sandbox='emulated'）可达。
-    let worktreeHandle: WorktreeHandle | undefined;
     if (typeof opts.worktree === "object") {
-      // 传入的是已创建的 WorktreeHandle
-      worktreeHandle = opts.worktree;
+      // [外部契约面登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
+      // ExecuteOptions.worktree 公共 API 契约的合法成员：本仓零调用，外仓（workflow
+      // 脚本 / 独立引擎消费方）可能消费，分支本体保留。当前实现 handle 注入后**不回填**
+      // record.worktreeHandle、不置 hadWorktree（与下方 true 分支不同）——外仓依赖
+      // record.worktreeHandle 投影（Continuation 隔离 / 收口清理）前须先补回填。
     } else if (opts.worktree === true) {
       // worktree===true（显式要求）——创建新 worktree。与 fork 正交（worktree 文件隔离不依赖 fork 上下文继承）。
       try {
-        worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
+        const worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
         // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：close 收口清句
         //（markSettledOut）后 worktree 投影与 Continuation 重建守卫靠本标志承载。
@@ -534,11 +536,11 @@ export class RunOrchestration {
     // [modeless 波1·四象限坍缩] isPiRoute × chatMode 分派分支消亡——全 record 首轮
     // 经 ChatRounds Continuation 编排（chat 语义：resume 键恒置、轮终 markRoundIdle
     // 留守、失败 MF-6 落 idle 可恢复）。opts/identity 全量透传保 schema/maxTurns 等
-    // 首轮声明（Continuation 续轮按 record 最小重建）。worktreeHandle 已回填 record
-    // （worktreeHandle 分支），Continuation 派发时经 record.worktreeHandle 读取。
+    // 首轮声明（Continuation 续轮按 record 最小重建）。worktree===true 分支已回填
+    // record.worktreeHandle，Continuation 派发时经 record.worktreeHandle 读取；对象形态
+    // 注入不回填（见上方外部契约面登记）。
     void engine;
     void isPiRoute;
-    void worktreeHandle;
     this.deps.startFirstChatRound(record, recordOpts);
     return { mode: "background", subagentId: record.id, sessionFile: record.sessionFile, details: project(record) };
   }

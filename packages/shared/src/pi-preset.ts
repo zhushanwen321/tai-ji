@@ -203,9 +203,7 @@ const EXTENSION_MODES: readonly ExtensionMode[] = ['all', 'allowlist', 'denylist
  *
  * 校验 6 个必填字段的类型 + toolMode/extensionMode 的字面量约束。
  * 可选字段（description/allowedTools/deniedTools/modelOverride/thinkingLevel 等）不强制校验——
- * 消费方按需在取用时再 narrow（与 isMessage/isSessionSummary 同策略，只保证必填字段契约）。
- *
- * 参考 protocol.ts 的 isMessage / isSessionSummary 写法。
+ * 消费方按需在取用时再 narrow，只保证必填字段契约。
  */
 export function isPiLaunchPreset(value: unknown): value is PiLaunchPreset {
   if (!value || typeof value !== 'object') return false

@@ -9,10 +9,9 @@
  * 本文件保留两谓词本体的完整断言体系：
  *
  * 三视角：
- * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）、
- *   isDoneProjection SSOT 直测（idle + 有 result = 完成展示）
+ * - 白盒：isRunningProjection 占用谓词（SUBAGENT_STATUS_ALL 全集 × 占用矩阵 + P1 形态矩阵）
  * - 使用者（黑盒）：01a09f83 真实形态 fixture 回放（严格口径下在跑计数 = 0）
- * - 形态：两谓词均已导出且为函数
+ * - 形态：谓词已导出且为函数
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/lib/subagent-bucket.test.ts
  */
@@ -22,7 +21,7 @@ import {
   type SubagentRecord,
   type SubagentStatus,
 } from '@taiji/shared'
-import { isDoneProjection, isRunningProjection } from '@/lib/subagent-bucket'
+import { isRunningProjection } from '@/lib/subagent-bucket'
 import { SESSION_01A09F83_GHOST_FIXTURE, type GhostFixtureSpec } from './subagent-ghost-fixture'
 
 /**
@@ -85,30 +84,8 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
   })
 })
 
-describe('isDoneProjection（白盒 SSOT 直测：idle + 有 result——[modeless 波4] 判据 idle+result 化，chatMode 比对位随字段消亡删除）', () => {
-  it('idle + result 在场 → true（轮终产出在场 = 完成展示；chat/one-shot 轮终不再区分——万物可续）', () => {
-    expect(isDoneProjection(makeRecord('idle', { result: 'round output' }))).toBe(true)
-  })
-
-  it('idle + result 缺省 → false（重建孤儿 / 中断收口无产出，不宣告完成展示）', () => {
-    expect(isDoneProjection(makeRecord('idle'))).toBe(false)
-    expect(isDoneProjection(makeRecord('idle', { stopReason: 'interrupted' }))).toBe(false)
-  })
-
-  it('running（含桥接期轮终 running + result 形态）→ false（判据 idle 化后 running 恒 false——桥接存量展示过渡态，U6 归一恢复）', () => {
-    expect(isDoneProjection(makeRecord('running', { result: 'round output' }))).toBe(false)
-    expect(isDoneProjection(makeRecord('running', { result: 'x' }))).toBe(false)
-  })
-
-  it('legacy 终态字面值经 runtime 归一后不再出现（[U6] 类型收窄——归一映射形态断言见下方 P1 矩阵）', () => {
-    // 归一后的 legacy 终态形态（idle + stopReason 合成 + result 在场）落完成展示
-    expect(isDoneProjection(makeRecord('idle', { result: 'round output', stopReason: 'completed' }))).toBe(true)
-  })
-})
-
 describe('导出形态（观察者：SSOT 模块公共面齐全）', () => {
-  it('两判据函数均已导出且为函数（分桶面已随托盘两态化退役，[两视图裁决 2026-09-16]）', () => {
-    expect(typeof isDoneProjection).toBe('function')
+  it('谓词函数已导出且为函数（分桶面已随托盘两态化退役，[两视图裁决 2026-09-16]）', () => {
     expect(typeof isRunningProjection).toBe('function')
   })
 })
@@ -261,9 +238,5 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
 
   it('⛔门：修复后严格口径回放「真在跑」集合为空（幽灵 8→0；[两视图裁决 2026-09-16] 后计数口径 = isRunningProjection 过滤）', () => {
     expect(fixtureRecords.filter(isRunningProjection)).toEqual([])
-  })
-
-  it('完成展示面回放：37 条轮终（idle + result）全落 done 展示（isDoneProjection），2 条中断不落', () => {
-    expect(fixtureRecords.filter(isDoneProjection)).toHaveLength(37)
   })
 })

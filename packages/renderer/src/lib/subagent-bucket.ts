@@ -1,12 +1,11 @@
 /**
  * subagent 判据 SSOT 模块（纯函数）。
  *
- * 唯一职责：导出两个投影判据，全仓「真在跑 / 完成展示」的判定只写这一处，禁止消费方
+ * 唯一职责：导出占用投影判据，全仓「真在跑」的判定只写这一处，禁止消费方
  * 重复实现：
  * - **isRunningProjection**——占用谓词，全仓「真在跑」唯一出处（G2）：hasRunning /
  *   isStreamingSubagent（stores/subagent）均为本函数的 import wrapper（U2 判据单一化），
  *   托盘计数（useTrayCounts）与「进行中」分桶视图同源消费，不漂移。
- * - **isDoneProjection**——done 展示公式（idle + 有 result = 完成展示）。
  *
  * [HISTORICAL] 2026-09-16 用户裁决托盘两态化：intent 意愿分桶自 UI 退役。原分桶面
  * （SubagentFilterValue / SubagentBucket / DEFAULT_SUBAGENT_FILTER / subagentBucket /
@@ -37,16 +36,4 @@ import type { SubagentRecord } from '@taiji/shared'
  */
 export function isRunningProjection(record: SubagentRecord): boolean {
   return record.status === 'running' && record.stopReason === undefined
-}
-
-/**
- * done 展示判据（[modeless 波4] 判据 idle+result 化——chatMode 比对位随字段消亡删除）：
- * idle + 有 result = 完成展示（轮终产出在场）。万物可续后 idle 不再细分「完成 vs 等续聊」
- * （chatMode===false 特判删除）——本函数保留作展示公式与测试面，状态点色表已不消费
- * （idle 统一绿兜底，托盘 subagent 行状态点表同语义）。
- * [two-state-convergence D1] 本函数不参与占用判定——占用谓词 isRunningProjection 是
- * 严格口径，不经本函数反向挪用。
- */
-export function isDoneProjection(record: SubagentRecord): boolean {
-  return record.status === 'idle' && record.result !== undefined
 }

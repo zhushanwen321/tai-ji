@@ -355,6 +355,15 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 export const READ_PRECHECK_MAX_BYTES: number = 32 * 1024 * 1024
 
 /**
+ * 字节量纲换算基数（1MB = 1024×1024）：oversize 降级文案与体积展示、内存水位采样等
+ * 字节→MB 换算的单一来源（结构收敛批单点化——此前 runtime 5 处本地常量 3 种字面量
+ * 形态：trace-sync / restore-seeding / mem-pressure / subagent-extractor /
+ * workflow-extractor）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 字节量纲换算基数（1MB = 1024×1024），命名常量自解释
+export const BYTES_PER_MB: number = 1024 * 1024
+
+/**
  * session 历史加载双预算 [D4]。
  *
  * 语义：活跃 session 的 doGetHistory 与离线尾读合并为同一预算逻辑——按「最近

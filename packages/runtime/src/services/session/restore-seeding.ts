@@ -18,7 +18,7 @@ import { homedir } from 'node:os'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { ISessionStore, SessionJsonlLineTransform } from '../ports/session.js'
 import type { ScannedSessionMeta } from '../../infra/pi/session-file-utils.js'
-import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { BYTES_PER_MB, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { cleanupMigrateResidues, normalizeSessionFileInPlace } from '../../infra/pi/session-file-utils.js'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）：⑤档降级形态的「尾部扫 legacy session_end」复用。
 import { forEachReversedLineChunk } from '../../utils/history-reverse-read.js'
@@ -186,9 +186,6 @@ export function normalizeInactiveSessionFileIfNeeded(filePath: string, cwdFellBa
   }
   normalizeSessionFileInPlace(filePath, cleaned)
 }
-
-// eslint-disable-next-line no-magic-numbers -- 字节量纲换算基数（1MB = 1024×1024），命名常量自解释
-const BYTES_PER_MB = 1024 * 1024
 
 /** 字节数 → MB 展示（保留 1 位小数；warn/文案量纲统一）。 */
 function bytesToMbLabel(bytes: number): string {

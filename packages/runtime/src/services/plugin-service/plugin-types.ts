@@ -35,10 +35,6 @@ export type {
   Disposable,
   PluginPermission,
   PluginState,
-  PermissionConstant,
-  BridgeState,
-  BridgeSyncRequest,
-  BridgeSyncResponse,
   BridgeToolExecuteRequest,
   ToolExecuteHandler,
   ToolRegistration,
@@ -47,7 +43,6 @@ export type {
   UiDialogOptions,
   HookEntry,
   Phase2AgentAPI,
-  PluginUIRequest,
 } from 'taiji-plugin-sdk'
 export { PermissionConstants } from 'taiji-plugin-sdk'
 
@@ -94,7 +89,6 @@ export type {
   HookInterceptor,
   HookObserver,
   HookResult,
-  HookBlockedResult,
   PiEventCallback,
 } from './plugin-types/hook-types.js'
 

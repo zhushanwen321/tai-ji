@@ -87,26 +87,6 @@ export function filterBackgroundTasks(
 }
 
 /**
- * 三桶计数（D10① 分桶判据 SSOT 的计数派生）：active / ended / all（all = 全量长度）。
- * 现行消费面 = 无生产消费——托盘 bash 面板的桶计数恒由 {@link filterBackgroundTasks} 的
- * 行集长度派生（useTrayCounts）；本函数保留为分桶判据的公开谓词与测试锚点（SSOT 模块
- * 不随 UI 宿主退役）。
- */
-export function countBackgroundTasks(tasks: BackgroundTaskEntry[]): {
-  active: number
-  ended: number
-  all: number
-} {
-  let active = 0
-  let ended = 0
-  for (const t of tasks) {
-    if (isActiveBackgroundTaskState(t.state)) active += 1
-    else if (isTerminalBackgroundTaskState(t.state)) ended += 1
-  }
-  return { active, ended, all: tasks.length }
-}
-
-/**
  * 状态 icon 色档判定（D10⑤，判定顺序固定——顺序即语义，改动须先改设计）：
  * 1. state 先分流：running → accent 旋转环 / killing → warn 点 / orphaned → info 点；
  * 2. exited 内 reason==='killed' 优先分流 dim 点（killed 的 exitCode 也是 null——

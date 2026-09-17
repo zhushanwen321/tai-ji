@@ -6,7 +6,7 @@
  * getPendingOpenForSid/consumePendingOpen/openTasksDrawerOnFirstData）已随 tasks 域删除移除——
  * PluginViewContainer 承接后无消费方（tasks tab 已从 SideDrawerTab 联合删除）。
  *
- * 瞬时参数（selectedCommandName/detailFilePath/browserUrl）：打开时的瞬时参数，
+ * 瞬时参数（selectedCommandName/detailFilePath）：打开时的瞬时参数，
  * 消费后清空，不构成 session 级持久状态。
  *
  * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）。
@@ -17,7 +17,7 @@ import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from
 import type { SideDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
 
 // ── 不分区的瞬时参数（模块级单例，消费后清空）──
-// 供 renderer 兼容层 re-export（useSideDrawer() 返回形状含这三个 ref + consumeBrowserUrl）。
+// 供 renderer 兼容层 re-export（useSideDrawer() 返回形状含这两个 ref）。
 /** Doc tab 当前展示的命令名（点击用户气泡 slash chip 时设置） */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer doc tab 瞬时参数（消费后清空）
 export const selectedCommandName = ref<string | null>(null)
@@ -28,33 +28,16 @@ export const selectedCommandName = ref<string | null>(null)
  */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer detail tab 瞬时参数（消费后清空）
 export const detailFilePath = ref<string | null>(null)
-/**
- * Browser tab 打开时立即加载的 URL（点击 agent 输出的链接设置）。
- * 由 `openDrawerTab(opts.url)` 写入；SideDrawer/BrowserPane 据此触发导航。
- * 原 renderer 设置方 `useMarkdownInteractions` 外链分支已于 2026-09-11 随死代码删除，
- * 当前无调用方（保留待后续接入）。
- * 用完即清空（消费后置 null），避免残留导致下次打开 browser tab 被旧值劫持。
- */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer browser tab 瞬时参数（消费后清空）
-export const browserUrl = ref<string | null>(null)
-
-/** 消费 browserUrl：读取并清空（BrowserPane 挂载时调，取到非空值触发导航） */
-export function consumeBrowserUrl(): string | null {
-  const url = browserUrl.value
-  browserUrl.value = null
-  return url
-}
 
 // ── 模块级公开 API（C2）──
 
 /**
- * 打开抽屉，可指定初始 tab + Doc tab 的选中命令 / Detail tab 的文件路径 / Browser tab 的 URL。
+ * 打开抽屉，可指定初始 tab + Doc tab 的选中命令 / Detail tab 的文件路径。
  * 瞬时参数写入对应 ref（消费后清空）。
  */
 export function openDrawerTab(tab?: SideDrawerTab, opts?: OpenDrawerOptions): void {
   if (opts?.commandName !== undefined) selectedCommandName.value = opts.commandName
   if (opts?.filePath !== undefined) detailFilePath.value = opts.filePath
-  if (opts?.url !== undefined) browserUrl.value = opts.url
   drawerControl.open(tab)
 }
 
@@ -105,5 +88,4 @@ export function _resetDrawerForTest(): void {
   _resetDrawerControlForTest()
   selectedCommandName.value = null
   detailFilePath.value = null
-  browserUrl.value = null
 }

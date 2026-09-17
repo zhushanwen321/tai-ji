@@ -17,7 +17,8 @@ import { type Static, Type } from "typebox";
 import {
 	addTodos,
 	formatTodoList,
-	type Todo,
+	isBlankUpdateText,
+	isValidTodoStatus,
 	type TodoDetails,
 	updateTodos,
 	VALID_STATUSES,
@@ -122,20 +123,19 @@ export function handleSingleUpdate(state: TodoSessionState, params: TodoParamsT)
 		throw new Error(
 			'update requires at least status or text parameter. Correct: {"action":"update","id":<n>,"status":"in_progress"}',
 		);
-	// text 校验统一（CT5）：trim 后空串 throw（不只判 ===）
-	if (params.text !== undefined && params.text.trim().length === 0)
+	// text/status 校验判据与 model.updateTodos 批量路径共享同一原语（CT5）；文案
+	// 保持单条引导形态（LLM 单条修正提示），展示层差异不属规则差异
+	if (params.text !== undefined && isBlankUpdateText(params.text))
 		throw new Error("text cannot be empty or whitespace-only");
-	if (
-		params.status !== undefined &&
-		!VALID_STATUSES.includes(params.status as (typeof VALID_STATUSES)[number])
-	) {
+	if (params.status !== undefined && !isValidTodoStatus(params.status)) {
 		throw new Error(`status only accepts ${VALID_STATUSES.join(" / ")}`);
 	}
 
 	const todo = state.todos.find((t) => t.id === params.id);
 	if (!todo) throw new Error(`Todo #${params.id} not found`);
 
-	if (params.status !== undefined) todo.status = params.status as Todo["status"];
+	// status 合法性已由上方 isValidTodoStatus 守卫保证；此处恒真分支仅为 type guard 收窄消除 cast
+	if (params.status !== undefined && isValidTodoStatus(params.status)) todo.status = params.status;
 	if (params.text !== undefined) todo.text = params.text.trim();
 
 	const parts: string[] = [`Updated todo #${todo.id}`];
@@ -276,14 +276,24 @@ export function registerTodoTool(
 		},
 
 		renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
-			let text = theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", args.action as string);
-			const texts = args.texts as string[] | undefined;
-			const ids = args.ids as number[] | undefined;
+			// TUI 渲染先于 schema 校验（args 是未经 schema 收窄的原始形态）：非对象整体
+			// 走安全占位，字段逐个 typeof/Array.isArray 守卫替代裸断言——非法形态不抛错
+			if (typeof args !== "object" || args === null) {
+				return new Text(
+					theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", "(invalid args)"),
+					0,
+					0,
+				);
+			}
+			const action = typeof args.action === "string" ? args.action : "";
+			const texts = Array.isArray(args.texts) ? args.texts : undefined;
+			const ids = Array.isArray(args.ids) ? args.ids : undefined;
+			let text = theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", action);
 			if (texts && texts.length > 0) text += ` ${theme.fg("dim", `(${texts.length} items)`)}`;
 			if (ids && ids.length > 0) text += ` ${theme.fg("accent", `#${ids.join(", #")}`)}`;
 			if (args.id !== undefined) text += ` ${theme.fg("accent", `#${args.id}`)}`;
 			if (args.text) text += ` ${theme.fg("dim", `"${args.text}"`)}`;
-			if (args.status) text += ` ${theme.fg("warning", args.status as string)}`;
+			if (typeof args.status === "string" && args.status) text += ` ${theme.fg("warning", args.status)}`;
 			return new Text(text, 0, 0);
 		},
 

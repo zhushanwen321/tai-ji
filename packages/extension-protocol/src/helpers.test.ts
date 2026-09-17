@@ -245,6 +245,19 @@ describe('extractGui', () => {
     expect(extractGui({ __gui__: { v: 1 } })).toBeUndefined()
     expect(extractGui({ __gui__: { component: {} } })).toBeUndefined()
   })
+
+  it('v 匹配但 component 结构非法 → undefined（结构校验升级：非法值走既有降级路径，不进渲染层）', () => {
+    // component 非对象（原始值 / null / 数组无 type）
+    expect(extractGui({ __gui__: { v: 1, component: 'bogus' } })).toBeUndefined()
+    expect(extractGui({ __gui__: { v: 1, component: null } })).toBeUndefined()
+    expect(extractGui({ __gui__: { v: 1, component: 123 } })).toBeUndefined()
+    // component 缺 type / type 非字符串
+    expect(extractGui({ __gui__: { v: 1, component: { props: {} } } })).toBeUndefined()
+    expect(extractGui({ __gui__: { v: 1, component: { type: 42, props: {} } } })).toBeUndefined()
+    // component props 缺失或为 null（isGuiComponent 的 typeof null === 'object' 陷阱排除）
+    expect(extractGui({ __gui__: { v: 1, component: { type: 'stats-line' } } })).toBeUndefined()
+    expect(extractGui({ __gui__: { v: 1, component: { type: 'stats-line', props: null } } })).toBeUndefined()
+  })
 })
 
 describe('isGuiComponent', () => {

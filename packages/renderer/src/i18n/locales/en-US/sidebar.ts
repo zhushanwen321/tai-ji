@@ -7,7 +7,6 @@ export default {
   selectSessionHint: 'Select a session to view files',
   sessionListLoadFailed: 'Failed to load sessions ({error})',
   switchSessionFailed: 'Failed to switch session: {msg}',
-  workflowOpFailed: 'Workflow operation failed: {msg}',
   newTaskFailed: 'Failed to create task: {msg}',
   deleteSessionFailed: 'Failed to delete session: {msg}',
   deleteFolderFailed: 'Failed to delete folder sessions: {msg}',

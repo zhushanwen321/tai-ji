@@ -106,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, Loader2, Square, Workflow } from '@lucide/vue'
 import { Button } from '@taiji/ui'
@@ -115,24 +115,24 @@ import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
 import { agentCallVirtualId } from '@/stores/workflow'
 import { useWorkflowStore } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
-import { workflowAction } from '@taiji/core/transport/api/domains/session'
-import { useToast } from '@/composables/useToast'
+import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
+import { formatTokens } from '@/lib/token-format'
 import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 
-/** token 数超过此阈值显示 k 单位（沿用自退役的侧栏工作流详情视图同值） */
-const TOKEN_K_THRESHOLD = 1000
 const MS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
 
 const { t } = useI18n()
-const { error: toastError } = useToast()
 const panelStore = usePanelStore()
 const workflowStore = useWorkflowStore()
 
 const { selectedWorkflowName } = useDrawerControl()
 
-/** abort 两段式确认态 */
-const aborting = ref(false)
+// abort 两段式确认态：动作单点在 useWorkflowAction（与 tray workflow 面板共享）；
+// aborting computed 保持模板既有形态（按钮 testid/class/title 按 runId 派生）
+const { isAbortConfirming, onAbortClick: onWorkflowAbortClick } = useWorkflowAction(
+  () => panelStore.focusedSessionId,
+)
 
 /**
  * 当前选中的 workflow record（响应式）。
@@ -150,6 +150,9 @@ const workflow = computed<WorkflowRunRecord | null>(() => {
   const byName = records.filter((w) => w.scriptName === name)
   return byName.length > 0 ? byName[byName.length - 1] : null
 })
+
+/** abort 两段式确认态（当前选中 workflow 的） */
+const aborting = computed(() => workflow.value !== null && isAbortConfirming(workflow.value.runId))
 
 /** phase 分组 + 组内状态聚合（原从侧栏工作流详情视图迁入，该视图已退役） */
 interface PhaseGroup {
@@ -203,11 +206,6 @@ function callDotClass(status: WorkflowAgentCall['status']): string {
   }
 }
 
-function formatTokens(tokens: number, unit: string): string {
-  if (tokens >= TOKEN_K_THRESHOLD) return `${(tokens / TOKEN_K_THRESHOLD).toFixed(1)}k ${unit}`
-  return `${tokens} ${unit}`
-}
-
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / MS_PER_SECOND)
   if (seconds >= SECONDS_PER_MINUTE) return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m${seconds % SECONDS_PER_MINUTE}s`
@@ -230,27 +228,9 @@ function onSelectCall(call: WorkflowAgentCall): void {
   openSubagent({ virtualId: agentCallVirtualId(call.sessionId), enteredFrom: 'workflow' })
 }
 
-/** abort 两段式：首次点击进入确认态，二次点击执行 */
+/** abort 两段式：首次点击进入确认态，二次点击执行（动作单点 useWorkflowAction） */
 function onAbortClick(): void {
-  if (aborting.value) {
-    void onAction('abort')
-    aborting.value = false
-  } else {
-    aborting.value = true
-  }
-}
-
-/** workflow abort：调 runtime RPC + 刷新列表（pause/resume 随扩展 D-2 一次性生命周期移除） */
-async function onAction(action: 'abort'): Promise<void> {
   const wf = workflow.value
-  const sid = panelStore.focusedSessionId
-  if (!wf || !sid) return
-  try {
-    await workflowAction(sid, action, wf.runId)
-    void workflowStore.loadWorkflows(sid)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    toastError(t('sidebar.workflowOpFailed', { msg }))
-  }
+  if (wf) onWorkflowAbortClick(wf.runId)
 }
 </script>

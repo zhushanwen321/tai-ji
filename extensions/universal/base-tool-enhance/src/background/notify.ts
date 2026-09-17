@@ -48,6 +48,16 @@ export const BACKGROUND_BASH_CUSTOM_TYPE = "background-bash";
  */
 const PENDING_NAME_LIMIT = 80;
 
+/**
+ * 命令文案截断（pending register 的 name 与完成通知 head 行共用同一口径）：
+ * 超 PENDING_NAME_LIMIT 取前 80 字符 + 省略号。
+ */
+function truncateCommand(command: string): string {
+	return command.length > PENDING_NAME_LIMIT
+		? `${command.slice(0, PENDING_NAME_LIMIT)}…`
+		: command;
+}
+
 /** 模块级「当前 pi 引用」（D17 核心可变状态，见文件头）。 */
 let currentPi: ExtensionAPI | undefined;
 
@@ -100,10 +110,7 @@ export function toPendingReason(
 export function emitPendingRegister(task: BackgroundTask): void {
 	const pi = currentPi;
 	if (pi === undefined) return;
-	const name =
-		task.command.length > PENDING_NAME_LIMIT
-			? `${task.command.slice(0, PENDING_NAME_LIMIT)}…`
-			: task.command;
+	const name = truncateCommand(task.command);
 	try {
 		pi.events.emit("pending:register", { id: task.taskId, type: "bash", name });
 	} catch (err) {
@@ -184,10 +191,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
  */
 export function buildNotificationContent(task: BackgroundTask): string {
 	const duration = formatDurationMs(task.durationMs ?? 0);
-	const command =
-		task.command.length > PENDING_NAME_LIMIT
-			? `${task.command.slice(0, PENDING_NAME_LIMIT)}…`
-			: task.command;
+	const command = truncateCommand(task.command);
 	let head: string;
 	if (task.reason === "timeout") {
 		head = `[background-bash] ${task.taskId} timed out (${duration}): ${command}`;

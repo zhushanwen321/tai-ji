@@ -40,6 +40,7 @@ interface RegisteredTool {
 		onUpdate: unknown,
 		ctx: { mode: TestMode },
 	) => Promise<ExecuteResult>;
+	renderCall?: (args: Record<string, unknown>, theme: Theme, context?: unknown) => unknown;
 }
 
 // pi-coding-agent 的 ExtensionContext 类型声明里没有 mode 字段（运行时实际有），
@@ -77,6 +78,31 @@ const stubTheme = {
 	getThinkingBorderColor: () => (text: string) => text,
 	getBashModeBorderColor: () => (text: string) => text,
 } as unknown as Theme;
+
+// ── renderCall 非法 args 安全渲染（TUI 渲染先于 schema 校验）──
+
+/** 注册 → 捕获 tool → 以非法 args 调 renderCall，返回渲染文本（width 足够宽避免 wrap）。 */
+function renderedCallText(args: unknown): string {
+	const { tool } = setup();
+	if (!tool.renderCall) throw new Error("todo tool did not register renderCall");
+	const node = tool.renderCall(args as Record<string, unknown>, stubTheme) as {
+		render: (width: number) => string[];
+	};
+	return node.render(400).join("\n");
+}
+
+describe("renderCall — 非法 args 安全渲染", () => {
+	it("args 为 null / 原始类型 → 占位文本，不抛错", () => {
+		expect(renderedCallText(null)).toContain("(invalid args)");
+		expect(renderedCallText("bogus")).toContain("(invalid args)");
+	});
+
+	it("字段错型（action 非字符串 / texts、ids 非数组）→ 不抛错，安全回落到标题", () => {
+		const text = renderedCallText({ action: 7, texts: "not-an-array", ids: 3, status: 1 });
+		expect(text).toContain("todo ");
+		expect(text).not.toContain("(invalid args)");
+	});
+});
 
 /** 构造指定 mode 的 ctx，setWidget 为 vi.fn 供断言（refreshDisplay 推送出口）。 */
 function makeCtx(mode: TestMode, hasUI: boolean): {

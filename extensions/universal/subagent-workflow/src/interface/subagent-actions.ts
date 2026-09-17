@@ -31,6 +31,7 @@ import type {
   SubagentToolResult,
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
+import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 
 // ============================================================
 // core 领域内核 re-export（pi 消费面符号与收缩前一致，经 core barrel 统一消费）
@@ -66,9 +67,6 @@ export type {
 // ============================================================
 // 渲染层常量 / 类型（pi TUI 渲染族，按设计留壳）
 // ============================================================
-
-/** subagentId（UUID）在 GUI header 的截断显示长度。 */
-const SUBAGENT_ID_PREVIEW = 8;
 
 /** exhaustiveness 兜底：default 分支把 action 收敛为 never，新增 action 时 tsc 报错。 */
 function assertNever(value: never): string {
@@ -163,7 +161,7 @@ export function buildGuiComponent(
     // 利用 input.domain 的身份信息，让并发 subagent 可区分。
     const d = input.domain;
     return guiComponent("card", {
-      header: d.slug ? `${d.slug}` : d.subagentId.slice(0, SUBAGENT_ID_PREVIEW),
+      header: d.slug ? `${d.slug}` : d.subagentId.slice(0, ID_PREVIEW_LENGTH),
       body: [guiComponent("stats-line", {
         items: [{ value: "running", severity: "ok" }],
       })],

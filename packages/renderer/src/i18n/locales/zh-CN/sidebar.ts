@@ -7,7 +7,6 @@ export default {
   selectSessionHint: '选择会话查看文件',
   sessionListLoadFailed: '会话列表加载失败（{error}）',
   switchSessionFailed: '切换会话失败：{msg}',
-  workflowOpFailed: '工作流操作失败：{msg}',
   newTaskFailed: '新建任务失败：{msg}',
   deleteSessionFailed: '删除会话失败：{msg}',
   deleteFolderFailed: '删除文件夹会话失败：{msg}',

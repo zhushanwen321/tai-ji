@@ -26,7 +26,6 @@ import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
 // capability 预检等消费已随 R4 域迁 service/run-orchestration.ts +
 // service/workflow-dispatch.ts——壳内零消费（机制注释随消费主体迁移）。
 import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
-import type { HostBridgeServiceFace } from "./engine/host/host-bridge.ts";
 // [W6 宿主面下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
 // spawnedChildren 状态镜像公共面（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
@@ -440,7 +439,7 @@ export class SubagentService {
   };
 
   /** [D4 对话 action 面聚合] chat 域 message/close 消费面（壳 subagent-actions 经此访问；
-   *  纯委托同上。PiEngineService 适配器不经此——引擎边界走 piEngineServiceAdapter）。 */
+   *  纯委托同上。引擎不经此——引擎边界走协议 converse，不回调宿主编排面）。 */
   readonly chatActions: SubagentChatActions = {
     getRecordForAction: (id, opts) => this.getRecordForAction(id, opts),
     closeSubagent: (record, force) => this.closeSubagent(record, force),
@@ -622,7 +621,7 @@ export class SubagentService {
   // ── 域 #10 action 网关 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
   // coldLookupDeps 字段（清单① #30，唯一消费方 getRecordForAction 冷查分支）为聚合
   // 内部成员，壳内零消费 → 零转发；壳只保留 getRecordForAction 转发（chatActions 面 +
-  // piEngineServiceAdapter + Continuation handlers 消费点）。
+  // Continuation handlers 消费点）。
 
   /**
    * 按 id 查 record 并做归属校验（message/close action 的统一入口；含 SP-2 冷查复活
@@ -633,7 +632,7 @@ export class SubagentService {
   }
 
   // ── 域 #11 close 三路 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
-  // 消费点：closeSubagent（chatActions 面 + piEngineServiceAdapter + Continuation
+  // 消费点：closeSubagent（chatActions 面 + Continuation
   // handlers 装配回调）。cancelBackground / closeChatIdle 为聚合内部互调成员或已随
   // R4 域迁走（closeChatIdle 的 R3 过渡转发已删——消费方 continuationFor closeNow
   // 回调随域迁 RunOrchestration，经 deps 直指 recordLifecycle；壳内与全仓零剩余
@@ -705,7 +704,7 @@ export class SubagentService {
 
   /**
    * workflow 编排层专用 sync-await 接口（D-A1）。本体已迁 RunOrchestration；壳纯转发
-   *  （SAR / piEngineServiceAdapter 消费）。 */
+   *  （SAR 消费）。 */
   async executeAndAwait(
     opts: ExecuteOptions,
     signal?: AbortSignal,
@@ -784,26 +783,9 @@ export class SubagentService {
 
 
 
-  /** 引擎服务面适配器（HostBridgeServiceFace 结构视图）：闭包持有本实例的编排面。
-   *  [W3] chat 域轮次交接可选面（takeChatRound/runChatRound/resumeChatRound）随
-   *  inproc PiEngine 删除移除——引擎经协议 converse，不再回调宿主编排面。 */
-  private piEngineServiceAdapter(): HostBridgeServiceFace {
-    return {
-      executeAndAwait: (opts, signal, onEvent, stream) => this.executeAndAwait(opts, signal, onEvent, stream),
-      getRecordForAction: (id) => this.getRecordForAction(id),
-      closeSubagent: (record, force) => this.closeSubagent(record, force),
-      cancel: (id) => this.cancel(id),
-      collectRecords: (limit, statusFilter) => this.collectRecords(limit, statusFilter),
-      reportRecordTransition: (record) => this.store.reportRecordTransition(record),
-    };
-  }
-
-  /** [D4 聚合连带] 引擎服务面的显式结构视图（SAR 构造 resolveHostPiEnginePort 时
-   *  传入的 getService 兼容位消费——W3 后该面无引擎侧消费方，保留使 SAR 调用点
-   *  零改动，W8 收口时随签名一并清理）。getter 形态：face 视图（惰性构造）。 */
-  get asEngineService(): HostBridgeServiceFace {
-    return this.piEngineServiceAdapter();
-  }
+  /** [D4 聚合连带] 原引擎服务面适配器（piEngineServiceAdapter + asEngineService getter）
+   *  已删除：SAR 构造 resolveHostPiEnginePort 的 getService 兼容位消费随 W8 收口消失，
+   *  全仓零调用（2026-09 死代码清扫）。引擎经协议 converse，不再回调宿主编排面。 */
 
   // ── 壳生命周期编排与断言（dispose 时序留壳 = R3 检查点③；D4 断言面）（R0 重排）──
 

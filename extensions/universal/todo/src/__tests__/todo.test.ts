@@ -11,6 +11,8 @@ import {
 	addTodos,
 	formatTodoLine,
 	formatTodoList,
+	isBlankUpdateText,
+	isValidTodoStatus,
 	migrateTodo,
 	type Todo,
 	updateTodos,
@@ -35,6 +37,25 @@ describe("Todo data model", () => {
 
 	it("VALID_STATUSES 仅三态（pending/in_progress/completed）", () => {
 		expect(VALID_STATUSES).toEqual(["pending", "in_progress", "completed"]);
+	});
+
+	// 共享校验原语：migrateTodo 迁移映射 / tool 单条 update / model 批量 update
+	// 三处共用的同一判据（校验收敛单点，文案由调用方编排）
+	it("isValidTodoStatus — 三态字面量为真、其余（含历史 verifying）为假", () => {
+		expect(isValidTodoStatus("pending")).toBe(true);
+		expect(isValidTodoStatus("in_progress")).toBe(true);
+		expect(isValidTodoStatus("completed")).toBe(true);
+		expect(isValidTodoStatus("verifying")).toBe(false);
+		expect(isValidTodoStatus("done")).toBe(false);
+		expect(isValidTodoStatus("")).toBe(false);
+	});
+
+	it("isBlankUpdateText — trim 后空串为真（CT5 不只判 ===）、非空为假", () => {
+		expect(isBlankUpdateText("")).toBe(true);
+		expect(isBlankUpdateText("   ")).toBe(true);
+		expect(isBlankUpdateText("\t\n")).toBe(true);
+		expect(isBlankUpdateText("hello")).toBe(false);
+		expect(isBlankUpdateText(" a ")).toBe(false);
 	});
 
 	it("should migrate verifying → in_progress", () => {
