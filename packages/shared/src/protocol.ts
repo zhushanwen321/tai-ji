@@ -311,7 +311,7 @@ export type BatchDeleteResult = {
  * extensions/universal/rename-session/src/pure.ts 的 RenameMode 值域同构——跨包不 import，
  * 本处是协议层声明，供 runtime settings 通路（config.get/setRenameMode）与 renderer
  * 模式 Select 共用；默认 first-stop（三处默认值真相：pure.ts DEFAULT_RENAME_CONFIG /
- * package.json startupConfig.content / runtime worktree-config-helper 镜像）。
+ * package.json startupConfig.content / runtime rename-session-config.ts 镜像）。
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
 

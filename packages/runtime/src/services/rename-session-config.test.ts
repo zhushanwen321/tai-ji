@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
-import { getAutoRenameEnabled, setAutoRenameEnabled, getAutoRenameEnabledPath, ensureAutoRenameDefault, getRenameModel, setRenameModel, getRenameConfigPath, setRenameConfigLockTimingForTest, getRenameMode, setRenameMode } from './worktree-config-helper.js'
+import { getAutoRenameEnabled, setAutoRenameEnabled, getAutoRenameEnabledPath, ensureAutoRenameDefault, getRenameModel, setRenameModel, getRenameConfigPath, setRenameConfigLockTimingForTest, getRenameMode, setRenameMode } from './rename-session-config.js'
 import type { RenameMode } from '@taiji/shared'
 
 describe('auto-rename enabled 标志文件', () => {

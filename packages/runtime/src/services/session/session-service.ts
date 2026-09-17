@@ -136,9 +136,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
    * 惰性恢复共享，join 语义见 RespawnOrchestrator.ensureRestored）。
    */
-  private readonly lifecycle: SessionLifecycle
-  private readonly dispatcher: MessageDispatcher
-  private readonly scanner: SessionScanner
+  // H2 后组装字段在 assembleSubmodules/registerSessionExitHandler 内赋值——TS strict
+  // 的 readonly/definite-assignment 分析不跨方法，故声明为 `!`（先例 server.ts 同款），
+  // 赋值只发生在构造器调用的组装方法内，实例外不可见（private）。
+  private lifecycle!: SessionLifecycle
+  private dispatcher!: MessageDispatcher
+  private scanner!: SessionScanner
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -147,15 +150,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 先于本 Facade 剩余订阅体注册，播种顺序与迁移前逐一等价）；销毁经 onSessionDisposed
    * 由 removeSessionEntry 第 ⑤ 步直调。
    */
-  private readonly projection: SessionStateProjection
+  private projection!: SessionStateProjection
   /** trace/system-prompt 同步域（S4 迁出，构造器内组装 deps——见构造器注释） */
-  private readonly traceSync: TraceSync
+  private traceSync!: TraceSync
   /**
    * 模型/思考等级控制域（S6 迁出至 session-model-control.ts）：switchModel /
    * setThinkingLevel 的 RPC + 回执普查 + 实例失效 + 直写双投影。销毁无域状态（不持
    * per-session Map），无 onSessionDisposed。
    */
-  private readonly modelControl: SessionModelControl
+  private modelControl!: SessionModelControl
   /**
    * ConfigService 引用（组合根注入）。getReplaceSystemPrompt 委托用——
    * spawn pi 时透传用户配置的替换系统提示词。经 setter 注入而非构造参数，与
@@ -243,14 +246,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    *    adapterFactory——EventAdapter 第三参，非本文件领地）；
    * ③ removeSessionEntry 汇聚点 unwatch（D8③，与 reaper 触发面 A 同挂点）。
    */
-  readonly backgroundTasks: BackgroundTaskService
+  backgroundTasks!: BackgroundTaskService
   /**
    * history 读编排域（S6 迁出至 history-rebuild-cache.ts）：getHistory 三分支重建
    * （缓存增量/RPC 全量/尾读降级）+ [u6] 游标翻页 + inflight 合并（getFullHistory 文件
    * 直读已随全量通路退役）。销毁经 onSessionDisposed 由 removeSessionEntry 第 ⑤ 步直调
    * （与 traceSync/projection/records 并列）。
    */
-  private readonly historyReader: SessionHistoryReader
+  private historyReader!: SessionHistoryReader
   /**
    * subagent/workflow 记录域（S6/D2③ 迁出至 session-records.ts）：W18 派生缓存族 +
    * 磁盘读侧/动作/引擎配置。onSessionRegistered 订阅者 = records 自身（构造器组装期
@@ -258,7 +261,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * Facade 订阅体内顺序逐一等价）；销毁经 onSessionDisposed 由 removeSessionEntry
    * 第 ⑤ 步直调（与 traceSync/projection 并列）。
    */
-  private readonly records: SessionRecords
+  private records!: SessionRecords
   /**
    * pi 崩溃自动恢复编排（crash-resilience §3.3 D7，u8-pi-respawn）。构造器内组装（deps 窄
    * 注入，同 traceSync/records 形态），三条挂点：
@@ -271,7 +274,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * messageBus 经 getter 动态读（setMessageBus 晚期注入语义，同 registerDeps 模式——未注入
    * 时 publish no-op）。
    */
-  private readonly respawn: RespawnOrchestrator
+  private respawn!: RespawnOrchestrator
   /**
    * 销毁收敛链编排（T8 有限拆分 2026-09，行为保持抽取）：removeSessionEntry 汇聚链的
    * 编排段（D1 台账 → checkpoint/mirror 摘除 → … → bus.clearSession 全序列 + 跨文件 B5
@@ -280,7 +283,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 与测试 spyOn 锁定面不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
    * 阅读顺序自然）。
    */
-  private readonly entryRemoval: SessionEntryRemovalOrchestrator
+  private entryRemoval!: SessionEntryRemovalOrchestrator
   /**
    * per-sid 最近查看时间戳（idle pi reclamation 设计 D2 #6，u1b）。
    *
@@ -316,6 +319,25 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     private readonly workspaceService: WorkspaceService,
     messageBus?: IMessageBus,
   ) {
+    // 构造器瘦身（H2）：9 子模块组装 + 创建侧订阅接线与 pi 崩溃 exit 编排分离为两个
+    // 私有方法（行为零变化——语句顺序逐行保持，时序不变式钉在各方法 JSDoc）。
+    this.assembleSubmodules(messageBus)
+    this.registerSessionExitHandler()
+  }
+
+  /**
+   * 子模块组装 + 创建侧订阅接线（H2 从构造器抽取，行为零变化——语句顺序逐行保持）。
+   *
+   * 本方法体内语句顺序 = 装配时序契约，重排前逐条核对：
+   * - lifecycle 先于 dispatcher 构造：lifecycle 的 forceQuitFallback 闭包引用
+   *   this.dispatcher，惰性求值（restore 发生在全部组装后，dispatcher 已就绪）；
+   *   projection / records 实例必须先构造后 subscribe。
+   * - onSessionRegistered 订阅顺序（组装根，S3 seam→S5/S6 换订阅者，设计 D2②）：
+   *   projection（W7 播种）→ records（W18 缓存注册）→ reconciler（U6 对账，
+   *   fire-and-forget）→ checkpoint（D3）→ mirror（D5）两个旁路订阅——「播种 →
+   *   record 注册 → 对账」顺序与迁移前 Facade 订阅体内顺序逐一等价，不得重排。
+   */
+  private assembleSubmodules(messageBus?: IMessageBus): void {
     // 子模块注入 this(Facade 半构造时仅存引用,其方法在 Facade 完全构造后才被调用)。
     // registerDeps(S3/D2②):registerSession 装配依赖窄注入——send 闭包对晚期注入状态
     // (messageBus/onMessageComplete)经 getter 每次调用动态读,与原 Facade 内联闭包捕获
@@ -495,6 +517,27 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       clearMessageBusSession: (sessionId) => this.messageBus?.clearSession(sessionId),
     })
 
+  }
+
+  /**
+   * pi 崩溃 exit 编排（H2 从构造器抽取，行为零变化——回调体语句顺序逐行保持）。
+   *
+   * 🔒 时序不变式（SSOT 钉在此处，重排前逐条核对）：
+   * - session.exited 的 messageBus.publish 必须先于 removeSessionEntry——后者内部调
+   *   bus.clearSession 清订阅者集合，clearSession 之后再 publish 等于送空集合，订阅
+   *   renderer 一条也收不到（wave:perf-w07/w09：进程退出标记 dead + toast 丢失）。
+   * - occupancy 'full-reset' 行同样必须在 removeSessionEntry（内部 bus.clearSession）
+   *   之前发布——同因 clearSession 断流，重连 renderer 会回放出永久占用投影
+   *   （session-dead-structural-fixes D2 挂点，u3b）。
+   * - W4 stopped 终态写在 removeSessionEntry 之后：session 是 delete 前缓存的引用，
+   *   persistSessionOutcome 的内部 get 在条目删除后返回 undefined，不能走它（首终态
+   *   优先语义见回调体内注释）。
+   * - respawn.schedule 收尾是设计裁决：本链天然不含 forceQuitSession（dispatcher 手工
+   *   编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 拦截）——
+   *   用户手动强杀的 session 结构性不触发自动恢复（crash-resilience D7，A7 反向验收）；
+   *   启动前守卫（active / in-flight restore / 熔断）在 schedule 内。
+   */
+  private registerSessionExitHandler(): void {
     // 进程崩溃清理:协调 adapter detach / Map 删 / 列表刷新 / session.exited 广播
     this.pm.onSessionExit((sessionId, code, stderr) => {
       const session = this.lifecycle.get(sessionId)

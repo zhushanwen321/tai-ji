@@ -530,7 +530,7 @@ export interface IConfigService {
   /** 设置 rename 触发模式（读改写 extension 配置文件的 mode 字段，非法值归一默认，保留其他字段）。 */
   setRenameMode(mode: RenameMode): void
   /** 读取智能上下文压缩配置快照（extension 配置文件，字段非法回退默认值）。 */
-  getSmartContextConfig(): import('./services/worktree-config-helper.js').SmartContextConfigSnapshot
+  getSmartContextConfig(): import('./services/smart-context-config.js').SmartContextConfigSnapshot
   /** 设置智能上下文压缩开关（读改写 extension 配置文件的 enabled 字段，保留其他字段）。 */
   setSmartContextEnabled(enabled: boolean): void
   /** 设置压缩模型（读改写 compactModel 字段；空串 = 跟随当前会话模型）。 */

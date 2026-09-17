@@ -21,21 +21,13 @@
  *    记 runtime 日志 + 事件上报出口。对账结果不缓存不落盘——每次现查现比
  *    （D2：每附着一次对一次）。
  *
- * ── 缓存键（D2 三维度）──────────────────────────────────────────────
- * 缓存键 = pi 版本 + models.json mtime + builtin-providers.json mtime：pi 升级 /
- * 用户改配置 / 内置目录再生成，任一变化即整表作废（防陈旧 + 防膨胀）。键承担
- * 「批量作废」职责；逐模型缓存条目键含 capability 字段签名（reasoning +
- * thinkingLevelMap 排序序列化），正确性不依赖 mtime 新鲜度——值不可能陈旧。
- * builtin-providers.json 是 import inline 打进 bundle 的（provider-config-helper
- * WC1）：vitest / 打包 CJS 下 __dirname 有效可取源文件 mtime；tsx ESM（无
- * __dirname）或 bundle 内无该文件时 stat 失败 → 该组分退化为 'na'（逐模型签名
- * 仍保证正确性，仅失去该维度的批量作废）。
+ * ── 无缓存直调（缓存治理 U1 1-1）────────────────────────────────────
+ * supportedLevels 无记忆化：computeSupportedLevels 是微秒级纯函数，tui 同款每次
+ * 现调（settings-selector）；签名键记忆化只省微秒级计算却引入缓存容器与批量作废
+ * 键的维护面（pi 版本 + 两个文件 mtime 三维度键），零收益机制整体退役。
  */
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
-import { statSync } from 'node:fs'
-import { join } from 'node:path'
 import type { ProviderInfo } from '@taiji/shared'
-import { getModelsPath } from '../infra/pi/pi-paths.js'
 import type { AvailableModelSnapshot } from '../infra/pi/rpc-client.js'
 import { logger } from '../infra/logger.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -67,93 +59,22 @@ export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
   return getSupportedThinkingLevels(model as unknown as ThinkingLevelModelParam)
 }
 
-// ── 缓存键（D2 三维度）──────────────────────────────────────────────
-
 /**
- * builtin-providers.json 源文件路径。vitest（CJS transform）/ tsup CJS bundle 下
- * __dirname 是 Node 注入的模块变量（正常）；tsx ESM 下 undefined → mtime 组分退化为
- * 'na'（架构规则 #12 ① 的既定降级模式，同 cli/resolver.ts）。
- */
-const builtinProvidersJsonPath = typeof __dirname !== 'undefined'
-  ? join(__dirname, '..', 'generated', 'builtin-providers.json')
-  : undefined
-
-function fileMtimeMs(path: string | undefined): number | null {
-  if (!path) return null
-  try {
-    return statSync(path).mtimeMs
-  } catch {
-    // mtime 不可得（文件不存在 / 不可读 / tsx ESM 下无 __dirname）是既定降级路径：
-    // 键组分退化为 'na'，正确性由逐模型签名兜底（见文件头缓存键说明）
-    return null
-  }
-}
-
-/** 组装缓存键：pi 版本 + models.json mtime + builtin-providers.json mtime（含义见文件头）。 */
-export function buildCapabilityCacheKey(
-  piVersion: string,
-  modelsJsonMtimeMs: number | null,
-  builtinProvidersMtimeMs: number | null,
-): string {
-  return `pi:${piVersion}|models.json:${modelsJsonMtimeMs ?? 'na'}|builtin-providers.json:${builtinProvidersMtimeMs ?? 'na'}`
-}
-
-/** thinkingLevelMap 稳定签名：key 排序后序列化——同内容不同插入序得同签名。 */
-function thinkingLevelMapSignature(map: Record<string, string | null> | null | undefined): string {
-  if (!map) return '{}'
-  return JSON.stringify(Object.keys(map).sort().map(k => [k, map[k] ?? null]))
-}
-
-/**
- * 离线计算缓存 + ProviderInfo.models 标注器（挂入 ModelService，U5 服务面）。
- * compute 可注入——单测断言缓存命中 / 键变更作废行为（计数断言），默认 pi 同源实现。
+ * ProviderInfo.models 标注器（挂入 ModelService，U5 服务面）。
+ * 无状态直调：逐模型现调 computeSupportedLevels（微秒级纯函数，见文件头说明）。
  */
 export class ModelCapabilityRegistry {
-  // @data-owner #20（data-source-registry.md）：supportedLevels 派生缓存唯一写方 =
-  // levelsFor 签名键 miss 时的 compute（值不可能陈旧）；批量作废键见 currentCacheKey。
-  private cacheKey: string | null = null
-  private readonly levelsBySignature = new Map<string, string[]>()
-
-  constructor(
-    private readonly compute: (m: ModelCapabilityInput) => string[] = computeSupportedLevels,
-  ) {}
-
-  /**
-   * 当前缓存键（实时读两个 mtime）。piVersion 由调用方传入——消息层 appInfo.piVersion
-   * 与 pi 实装同源；缺省 'unknown'（缓存正确性不依赖该组分，见文件头）。
-   */
-  currentCacheKey(piVersion: string): string {
-    return buildCapabilityCacheKey(
-      piVersion,
-      fileMtimeMs(getModelsPath()),
-      fileMtimeMs(builtinProvidersJsonPath),
-    )
-  }
-
   /**
    * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
    * 返回浅拷贝的新数组/新对象，不改入参（广播 payload 原引用复用）。
+   * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
+   * interfaces.ts 钉死），直调形态下不消费。
    */
-  attachSupportedLevels(providers: ProviderInfo[], piVersion = 'unknown'): ProviderInfo[] {
-    const key = this.currentCacheKey(piVersion)
-    if (key !== this.cacheKey) {
-      this.cacheKey = key
-      this.levelsBySignature.clear()
-    }
+  attachSupportedLevels(providers: ProviderInfo[], _piVersion = 'unknown'): ProviderInfo[] {
     return providers.map(p => ({
       ...p,
-      models: p.models.map(m => ({ ...m, supportedLevels: this.levelsFor(key, m) })),
+      models: p.models.map(m => ({ ...m, supportedLevels: computeSupportedLevels(m) })),
     }))
-  }
-
-  private levelsFor(cacheKey: string, m: ModelCapabilityInput): string[] {
-    const signature = `${cacheKey}|${m.reasoning === true}|${thinkingLevelMapSignature(m.thinkingLevelMap)}`
-    let levels = this.levelsBySignature.get(signature)
-    if (levels === undefined) {
-      levels = this.compute(m)
-      this.levelsBySignature.set(signature, levels)
-    }
-    return levels
   }
 }
 

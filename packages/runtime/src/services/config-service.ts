@@ -8,7 +8,9 @@
  *
  * 重构说明（Phase 1 拆分）：本文件曾是 Config 域唯一 facade（1059 行，超 ESLint max-lines）。
  * 现已按职责拆到多个 config helper（provider / skill / agent / system-prompt / terminal /
- * app-config-store / worktree-config-helper），本文件退化为构造 + appConfig IO + 单行委托桩，
+ * app-config-store / worktree-config-helper / rename-session-config / smart-context-config，
+ * 后两者与 ext-config-rmw 共享 RMW 基建自 worktree-config-helper 名实拆分迁入），本文件
+ * 退化为构造 + appConfig IO + 单行委托桩，
  * 行为 / 签名 / import 路径零变化（复用 worktree-config-helper 验证的 accessors 注入模式）。
  * IConfigService 接口不动，现有测试不改动即全绿（行为零变化的证据）。
  */
@@ -47,19 +49,23 @@ import {
   setTimeout as setTimeoutImpl,
   getDefaultBaseBranch as getDefaultBaseBranchImpl,
   setDefaultBaseBranch as setDefaultBaseBranchImpl,
+} from './worktree-config-helper.js'
+import {
   getAutoRenameEnabled as getAutoRenameEnabledImpl,
   setAutoRenameEnabled as setAutoRenameEnabledImpl,
   getRenameModel as getRenameModelImpl,
   setRenameModel as setRenameModelImpl,
   getRenameMode as getRenameModeImpl,
   setRenameMode as setRenameModeImpl,
+} from './rename-session-config.js'
+import {
   getSmartContextConfig as getSmartContextConfigImpl,
   setSmartContextEnabled as setSmartContextEnabledImpl,
   setSmartContextCompactModel as setSmartContextCompactModelImpl,
   setSmartContextThresholds as setSmartContextThresholdsImpl,
   setSmartContextExcludedModels as setSmartContextExcludedModelsImpl,
   type SmartContextConfigSnapshot,
-} from './worktree-config-helper.js'
+} from './smart-context-config.js'
 import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl } from './app-config-store.js'
 import {
   getDefaultModel as getDefaultModelImpl,
@@ -274,7 +280,9 @@ export class ConfigService implements IConfigService {
     this.saveAppConfig(config)
   }
 
-  // ── Worktree config（git-cwt-anywhere，委托 worktree-config-helper）──
+  // ── Worktree / rename-session / smart-context config ──────────────
+  // worktree 偏好委托 worktree-config-helper；auto-rename/rename 委托 rename-session-config；
+  // smart-context 委托 smart-context-config（P1-7 名实拆分后各归其位）。
   // loadAppConfig / saveAppConfig 仍为 private，通过 appConfig() 暴露 accessors 注入。
 
   private appConfig(): { load(): Record<string, unknown>; save(config: Record<string, unknown>): void } {

@@ -293,10 +293,11 @@ export default [
     },
   },
   // [HISTORICAL] ConfigService 是 config 域唯一聚合点（settings-message-handler 全部 config.* case 的
-  // 注入端），随功能以纯委托行增长——真实逻辑已在 worktree-config-helper（worktree 偏好 + auto-rename
-  // flag/rename 模型）/ config-merge-helpers（system prompt/terminal 合并）等 helper。rename-model 功能
-  // +8 行触顶（此前已 499/500 计行，任何新增即超限），拆 Skill CRUD 等区块属独立重构任务，
-  // 短期 max-lines override 避免阻塞。
+  // 注入端），随功能以纯委托行增长——真实逻辑已在 worktree-config-helper（worktree 偏好）/
+  // rename-session-config（auto-rename flag/rename 模型）/ smart-context-config（smart-context 快照）/
+  // config-merge-helpers（system prompt/terminal 合并）等 helper（P1-7 名实拆分后 worktree-config-helper
+  // 仅存 worktree 偏好域）。rename-model 功能 +8 行触顶（此前已 499/500 计行，任何新增即超限），
+  // 拆 Skill CRUD 等区块属独立重构任务，短期 max-lines override 避免阻塞。
   {
     files: ['packages/runtime/src/services/config-service.ts'],
     rules: {

@@ -6,8 +6,6 @@
  *   pi-ai getSupportedThinkingLevels 同源值一致（builtin-providers.json fixture
  *   全量直调比对——对 passthrough 实现是恒真基线，computeSupportedLevels 一旦被
  *   塞入 taiji 侧改写逻辑即红，同源契约守卫）；档位过滤语义锚点。
- * - 缓存键：三维度组分（pi 版本 / models.json mtime / builtin-providers.json
- *   mtime）+ 键变更整表作废（注入 compute 计数断言）。
  * - 对账：config_only / reasoning_mismatch / case_twin 三类 drift 纯比对 +
  *   编排路径（runtime 日志 + 事件上报出口 + 降级路径）。
  * - 下发标注：attachSupportedLevels 输出含 supportedLevels、不改入参。
@@ -16,16 +14,12 @@
  * 测试框架：vitest（禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/__tests__/model-capability.test.ts
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, it, expect, vi } from 'vitest'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import builtinData from '../../generated/builtin-providers.json'
 import type { ProviderInfo, ProviderId } from '@taiji/shared'
 import {
   computeSupportedLevels,
-  buildCapabilityCacheKey,
   detectCapabilityDrift,
   runCapabilityReconcile,
   ModelCapabilityRegistry,
@@ -97,65 +91,6 @@ describe('离线计算（pi-ai 同源）', () => {
       .toEqual(['off', 'minimal', 'low', 'medium', 'high'])
     expect(computeSupportedLevels({ reasoning: true, thinkingLevelMap: { xhigh: 'xhigh' } }))
       .toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh'])
-  })
-})
-
-describe('缓存键（D2 三维度）', () => {
-  it('键含 pi 版本 + models.json mtime + builtin-providers.json mtime 三组分', () => {
-    const key = buildCapabilityCacheKey('0.84.1', 1710000000123.5, 1710000009999.25)
-    expect(key).toContain('pi:0.84.1')
-    expect(key).toContain('models.json:1710000000123.5')
-    expect(key).toContain('builtin-providers.json:1710000009999.25')
-  })
-
-  it('mtime 不可得时组分退化为 na', () => {
-    expect(buildCapabilityCacheKey('v', null, null)).toBe('pi:v|models.json:na|builtin-providers.json:na')
-  })
-
-  describe('registry 缓存行为', () => {
-    let dir: string
-    let modelsJsonPath: string
-    let computeCalls: number
-    let registry: ModelCapabilityRegistry
-
-    beforeEach(() => {
-      dir = mkdtempSync(join(tmpdir(), 'model-capability-'))
-      const agentDir = join(dir, 'agent')
-      mkdirSync(agentDir, { recursive: true })
-      modelsJsonPath = join(agentDir, 'models.json')
-      writeFileSync(modelsJsonPath, JSON.stringify({ providers: {} }))
-      process.env.TAIJI_AGENT_DATA_DIR = dir
-      computeCalls = 0
-      registry = new ModelCapabilityRegistry(m => {
-        computeCalls++
-        return computeSupportedLevels(m)
-      })
-    })
-
-    afterEach(() => {
-      delete process.env.TAIJI_AGENT_DATA_DIR
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    })
-
-    it('同键重复 attach 命中缓存（compute 只算一次）；pi 版本变化整表作废重算', () => {
-      const providers = [provider('p', [model('m1', { reasoning: true })])]
-      registry.attachSupportedLevels(providers, '0.84.1')
-      registry.attachSupportedLevels(providers, '0.84.1')
-      expect(computeCalls).toBe(1)
-      registry.attachSupportedLevels(providers, '0.85.0')
-      expect(computeCalls).toBe(2)
-    })
-
-    it('models.json mtime 变化整表作废重算', () => {
-      const providers = [provider('p', [model('m1')])]
-      registry.attachSupportedLevels(providers, '0.84.1')
-      expect(computeCalls).toBe(1)
-      // mtime 前移 2s，保证与当前 stat 值必然不同
-      const future = new Date(Date.now() + 2000)
-      utimesSync(modelsJsonPath, future, future)
-      registry.attachSupportedLevels(providers, '0.84.1')
-      expect(computeCalls).toBe(2)
-    })
   })
 })
 

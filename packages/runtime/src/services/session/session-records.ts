@@ -406,7 +406,7 @@ export class SessionRecords {
    *
    * 🔒 跨进程锁（C-data-09）：config.json 与 agent bash 写（subagent-ext-config skill
    * 指导）、用户手编构成多写方——RMW 全程持 withFileLockSync（lockfile = config.json.lock，
-   * 协议对齐 worktree-config-helper ext-config / settings.json 先例）。锁失败 fail-fast
+   * 协议对齐 ext-config-rmw ext-config / settings.json 先例）。锁失败 fail-fast
    * 抛错（ELOCKED，预算 1s），经 RPC 错误通路返回 GUI。不取锁的 bash/手编写方作为
    * last-write-wins 残余风险由 data-source-registry.md §6 登记。
    */
@@ -428,7 +428,7 @@ export class SessionRecords {
       conf['defaultEngine'] = engineId
       // subagents 目录无需再建：withFileLockSync 取锁前已兜底 mkdir dirname(configPath)
       // （无锁时代这行 mkdir 承重，引入锁后成为死代码）。原子写单点走 fs-utils.atomicWrite
-      // （tmp+rename）；写失败时 .tmp 残留不被清理——与 worktree-config-helper ext-config
+      // （tmp+rename）；写失败时 .tmp 残留不被清理——与 ext-config-rmw ext-config
       // 先例同款取舍，磁盘孤儿文件无害，不在此另复制一份清理逻辑
       atomicWrite(configPath, JSON.stringify(conf, null, JSON_INDENT), `${process.pid}-${Date.now()}`)
     })

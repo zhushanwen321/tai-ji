@@ -56,7 +56,7 @@ const rh = vi.hoisted(() => ({
 vi.mock('./migration/legacy-provider-migration.js', () => ({
   migrateProviderConfig: h.migrateProviderConfig,
 }))
-vi.mock('./worktree-config-helper.js', () => ({
+vi.mock('./rename-session-config.js', () => ({
   ensureAutoRenameDefault: vi.fn(),
 }))
 // ⑦b startupConfig ensure 挂载测试用 mock：真实实现会写 getPiAgentDir()（测试未隔离

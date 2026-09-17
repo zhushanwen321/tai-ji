@@ -584,7 +584,7 @@ vi.mock('../migration/legacy-provider-migration.js', () => ({
   })),
 }))
 
-vi.mock('../worktree-config-helper.js', () => ({
+vi.mock('../rename-session-config.js', () => ({
   ensureAutoRenameDefault: vi.fn(),
 }))
 

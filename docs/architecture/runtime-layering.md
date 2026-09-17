@@ -69,7 +69,7 @@ packages/runtime/src/
 
 | # | 模块 | 性质 | services 层消费方 |
 |---|------|------|------------------|
-| ① | `infra/logger.ts` | 全局日志落盘 + 轮转 + console monkey-patch（terminal-tee），纯横切单例 | quota 族 / migration / worktree-config-helper 等 8 处 |
+| ① | `infra/logger.ts` | 全局日志落盘 + 轮转 + console monkey-patch（terminal-tee），纯横切单例 | quota 族 / migration / rename-session-config 等 8 处 |
 | ② | `infra/pi/pi-paths.ts` | kernel 纯路径函数（getSessionsDir/getPiAgentDir/encodeCwd 等，无 IO） | config / extension / session 族 6 处 |
 | ③ | `infra/git/git-status-parser.ts` + `infra/fs/ignore-parser.ts` | kernel 纯解析/匹配函数 | git-service / file-service |
 | ③b | `infra/crash-journal.ts` | 崩溃台账 writer（append-only JSONL + 轮转，best-effort），logger 同类横切 | 死亡/自愈决策点双写台账行 |
