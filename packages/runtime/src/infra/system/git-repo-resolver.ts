@@ -26,6 +26,13 @@ import { buildOutboundChildEnv } from '../spawn-env.js'
 const GIT_TIMEOUT_MS = 2000
 const GITDIR_PREFIX = 'gitdir:'
 
+/** walk-up 锚点：普通 repo 或 worktree 解析出的 gitDir 与 HEAD 落点 */
+interface GitAnchor {
+  isWorktree: boolean
+  gitDir: string
+  headPath: string | undefined
+}
+
 export class GitRepoResolver implements IGitRepoResolver {
   resolve(cwd: string): RepoObservation {
     const walk = this.walkUp(cwd)
@@ -39,37 +46,48 @@ export class GitRepoResolver implements IGitRepoResolver {
   }
 
   /**
-   * 向上逐级遍历到文件系统根（dirname 不再变化），同时判定 worktree 锚点与 .bare。
-   * 任何 stat/read 失败按「该级不存在」继续向上，绝不抛。
+   * 只负责「找」：向上逐级遍历到文件系统根（dirname 不再变化），返回命中的 .git 锚点
+   * 与 .bare 目录。每级先 .git 后 .bare，两查独立记录互不短路；.bare 命中即停（原 walkUp
+   * 的 early-return 语义）。任何 stat/read 失败按「该级不存在」继续向上，绝不抛。
    */
-  private walkUp(cwd: string): Pick<RepoObservation, 'isWorktree' | 'isBare' | 'gitDir' | 'headPath'> {
-    let gitAnchor: { isWorktree: boolean; gitDir: string; headPath: string | undefined } | undefined
+  private findAnchors(cwd: string): { anchor: GitAnchor | undefined; bareDir: string | undefined } {
+    let anchor: GitAnchor | undefined
+    let bareDir: string | undefined
     let dir = cwd
     while (true) {
-      if (!gitAnchor) {
-        gitAnchor = this.probeGitAnchor(dir)
+      if (!anchor) {
+        anchor = this.probeGitAnchor(dir)
       }
       if (this.probeBare(dir)) {
-        const bareDir = join(dir, '.bare')
-        return {
-          isWorktree: gitAnchor?.isWorktree ?? false,
-          isBare: true,
-          gitDir: gitAnchor?.gitDir ?? bareDir,
-          headPath: gitAnchor?.headPath ?? join(bareDir, 'HEAD'),
-        }
+        bareDir = join(dir, '.bare')
+        break
       }
       const parent = dirname(dir)
       if (parent === dir) break
       dir = parent
     }
-    if (gitAnchor) {
-      return { isWorktree: gitAnchor.isWorktree, isBare: false, gitDir: gitAnchor.gitDir, headPath: gitAnchor.headPath }
+    return { anchor, bareDir }
+  }
+
+  /** 只负责「组装」：.bare 命中优先承接（若此刻尚无 .git 锚点），否则回落 .git 锚点，两处皆无则全空。 */
+  private walkUp(cwd: string): Pick<RepoObservation, 'isWorktree' | 'isBare' | 'gitDir' | 'headPath'> {
+    const { anchor, bareDir } = this.findAnchors(cwd)
+    if (bareDir !== undefined) {
+      return {
+        isWorktree: anchor?.isWorktree ?? false,
+        isBare: true,
+        gitDir: anchor?.gitDir ?? bareDir,
+        headPath: anchor?.headPath ?? join(bareDir, 'HEAD'),
+      }
+    }
+    if (anchor) {
+      return { isWorktree: anchor.isWorktree, isBare: false, gitDir: anchor.gitDir, headPath: anchor.headPath }
     }
     return { isWorktree: false, isBare: false, gitDir: undefined, headPath: undefined }
   }
 
   /** 探测 dir/.git：目录 → 普通 repo；文件且 gitdir: 前缀 → worktree（gitDir 取指针指向）。 */
-  private probeGitAnchor(dir: string): { isWorktree: boolean; gitDir: string; headPath: string | undefined } | undefined {
+  private probeGitAnchor(dir: string): GitAnchor | undefined {
     const gitPath = join(dir, '.git')
     let stat
     try {
@@ -81,7 +99,7 @@ export class GitRepoResolver implements IGitRepoResolver {
       return { isWorktree: false, gitDir: gitPath, headPath: join(gitPath, 'HEAD') }
     }
     if (stat.isFile()) {
-      const notWorktree: { isWorktree: boolean; gitDir: string; headPath: string | undefined } = {
+      const notWorktree: GitAnchor = {
         isWorktree: false,
         gitDir: gitPath,
         headPath: undefined,

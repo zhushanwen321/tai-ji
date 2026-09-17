@@ -475,6 +475,29 @@ function collectAllSourceFiles() {
   return out
 }
 
+/** 行号（1-based）：text 在 offset 处的行 = baseLine + offset 之前的换行数 */
+function lineAt(text, offset, baseLine) {
+  return baseLine + text.slice(0, offset).split('\n').length - 1
+}
+
+/**
+ * 单条引用的跳过判据（返回原因文案）或 null（需继续做存在性判定）。
+ * 五个条件的短路顺序 = 原内联顺序，调用方须先做 seenPerFile 去重。
+ */
+function skipReason({ ref, lineText, precedingText, rel, exempt }) {
+  // 行尾连字符断字：路径跨行书写（换行续行），单行无法解析目标，不判悬空
+  if (ref.raw.endsWith('-')) return '行尾断字'
+  // 换行续行碎片：引用名前文（剥行首装饰与空白）以连字符结尾——本行命中的是
+  // 上一行断字路径的尾部（如 xxx-collect-and- ⏎ reaper-sink.md），非完整引用
+  if (precedingText.replace(/[\s*]+$/, '').endsWith('-')) return '续行碎片'
+  // 历史性提及豁免：同一行显式标注「已删除/已废弃/git 可追溯」等（书写约定）
+  if (HISTORICAL_MENTION_RE.test(lineText)) return '历史性提及'
+  // Form B 上下文门：无 docs 叙述语境词的裸 .md 文件名是运行时产物描述，不检查
+  if (ref.kind === 'md-name' && !FORM_B_CONTEXT_RE.test(lineText)) return 'Form B 无语境'
+  if (exempt.has(`${rel}::${ref.target}`) || exempt.has(`*::${ref.target}`)) return '豁免表'
+  return null
+}
+
 /**
  * 对给定源码文件集扫描注释内 docs 引用，返回悬空违规列表。
  * @param {Array<{rel: string, abs: string}>} files
@@ -490,23 +513,15 @@ export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF
     const seenPerFile = new Set()
     for (const [s, e] of ranges) {
       const commentText = text.slice(s, e)
-      const startLine = text.slice(0, s).split('\n').length
+      const startLine = lineAt(text, s, 1)
       for (const ref of extractDocRefsInComment(commentText)) {
-        const line = startLine + commentText.slice(0, ref.offset).split('\n').length - 1
+        const precedingText = commentText.slice(0, ref.offset)
+        const line = lineAt(commentText, ref.offset, startLine)
         const key = `${line}\u0000${ref.kind}\u0000${ref.target}`
         if (seenPerFile.has(key)) continue
         seenPerFile.add(key)
-        const lineText = (commentText.slice(0, ref.offset).split('\n').pop() + commentText.slice(ref.offset).split('\n')[0]).trim()
-        // 行尾连字符断字：路径跨行书写（换行续行），单行无法解析目标，不判悬空
-        if (ref.raw.endsWith('-')) continue
-        // 换行续行碎片：引用名前文（剥行首装饰与空白）以连字符结尾——本行命中的是
-        // 上一行断字路径的尾部（如 xxx-collect-and- ⏎ reaper-sink.md），非完整引用
-        if (commentText.slice(0, ref.offset).replace(/[\s*]+$/, '').endsWith('-')) continue
-        // 历史性提及豁免：同一行显式标注「已删除/已废弃/git 可追溯」等（书写约定）
-        if (HISTORICAL_MENTION_RE.test(lineText)) continue
-        // Form B 上下文门：无 docs 叙述语境词的裸 .md 文件名是运行时产物描述，不检查
-        if (ref.kind === 'md-name' && !FORM_B_CONTEXT_RE.test(lineText)) continue
-        if (exempt.has(`${rel}::${ref.target}`) || exempt.has(`*::${ref.target}`)) continue
+        const lineText = (precedingText.split('\n').pop() + commentText.slice(ref.offset).split('\n')[0]).trim()
+        if (skipReason({ ref, lineText, precedingText, rel, exempt }) !== null) continue
         const exists = ref.kind === 'docs-path'
           ? existsSync(path.join(PROJECT_ROOT, ref.target))
           : docsMdNames.has(ref.target)
@@ -549,7 +564,8 @@ function checkStagedCommentDocRefs() {
   }
 }
 
-function main() {
+/** 采集 DOC_MODULE_MAP 映射文档中引用了源码导出表/对象键不存在的符号的条目 */
+function collectSymbolDrifts() {
   const drifts = []
   for (const [docRel, modulePaths] of Object.entries(DOC_MODULE_MAP)) {
     const docAbs = path.join(PROJECT_ROOT, docRel)
@@ -568,44 +584,59 @@ function main() {
       drifts.push({ doc: docRel, sym, lines: lineNos, moduleCount: fileCount })
     }
   }
+  return drifts
+}
 
-  const missingPaths = checkPathRefs()
-  const commentScan = checkStagedCommentDocRefs()
+/**
+ * 三层违规报告（符号 / 路径 / 注释）：有违规即 exit 1（pre-commit/CI 只吃退出码与
+ * stderr 文本），无违规直接返回由调用方出 OK 行；三段前缀与「恢复动作：」footer 逐字保留。
+ */
+function reportFailures({ drifts, missingPaths, commentScan }) {
   const commentViolations = commentScan.available ? commentScan.violations : []
-
-  if (drifts.length > 0 || missingPaths.length > 0 || commentViolations.length > 0) {
-    if (drifts.length > 0) {
-      console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
-      for (const d of drifts) {
-        console.error(`  ✗ ${d.doc}:${d.lines.join(',')}  \`${d.sym}\` 不在映射源码模块的导出表/对象键中`)
-      }
+  if (drifts.length === 0 && missingPaths.length === 0 && commentViolations.length === 0) return
+  if (drifts.length > 0) {
+    console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
+    for (const d of drifts) {
+      console.error(`  ✗ ${d.doc}:${d.lines.join(',')}  \`${d.sym}\` 不在映射源码模块的导出表/对象键中`)
     }
-    if (missingPaths.length > 0) {
-      console.error(`[doc-path-refs] 发现 ${missingPaths.length} 处文档引用的仓库路径不存在：`)
-      for (const m of missingPaths) {
-        console.error(`  ✗ ${m.doc}:${m.line}  \`${m.path}\` 文件不存在`)
-      }
+  }
+  if (missingPaths.length > 0) {
+    console.error(`[doc-path-refs] 发现 ${missingPaths.length} 处文档引用的仓库路径不存在：`)
+    for (const m of missingPaths) {
+      console.error(`  ✗ ${m.doc}:${m.line}  \`${m.path}\` 文件不存在`)
     }
-    if (commentViolations.length > 0) {
-      const mode = commentScan.fullScan ? '全仓扫描（staged 含 .md 删除）' : 'staged 扫描'
-      console.error(`[doc-comment-refs] 发现 ${commentViolations.length} 处源码注释引用了不存在的 docs 文档（${mode}，扫描 ${commentScan.fileCount} 个源码文件）：`)
-      for (const v of commentViolations) {
-        console.error(`  ✗ ${v.file}:${v.line}  \`${v.target}\` 不存在`)
-        console.error(`    注释引文：${v.snippet}`)
-      }
-      console.error('')
-      console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
-      console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
+  }
+  if (commentViolations.length > 0) {
+    const mode = commentScan.fullScan ? '全仓扫描（staged 含 .md 删除）' : 'staged 扫描'
+    console.error(`[doc-comment-refs] 发现 ${commentViolations.length} 处源码注释引用了不存在的 docs 文档（${mode}，扫描 ${commentScan.fileCount} 个源码文件）：`)
+    for (const v of commentViolations) {
+      console.error(`  ✗ ${v.file}:${v.line}  \`${v.target}\` 不存在`)
+      console.error(`    注释引文：${v.snippet}`)
     }
     console.error('')
-    console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
-    console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
-    process.exit(1)
+    console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
+    console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
   }
+  console.error('')
+  console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
+  console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
+  process.exit(1)
+}
+
+/** 零违规收尾行（注释面扫描模式随 staged 上下文变化） */
+function reportOk(commentScan) {
   const commentPart = commentScan.available
     ? `注释 docs 引用（${commentScan.fullScan ? '全仓' : 'staged'} ${commentScan.fileCount} 文件）零悬空`
     : '注释 docs 引用（无 git staged 上下文，跳过）'
   console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}`)
+}
+
+function main() {
+  const drifts = collectSymbolDrifts()
+  const missingPaths = checkPathRefs()
+  const commentScan = checkStagedCommentDocRefs()
+  reportFailures({ drifts, missingPaths, commentScan })
+  reportOk(commentScan)
 }
 
 // 缺省 CLI 形态：全量符号/路径检查 + staged 注释 docs 引用检查（不依赖 cwd）。

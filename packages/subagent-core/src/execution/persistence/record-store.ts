@@ -1292,18 +1292,8 @@ export class RecordStore {
     // 1 次（目录本身）。
     // 已知局限（与 mtime 缓存同族）：目录 mtime 粒度粗糙的文件系统（NFS/2s FAT）
     // 可能漏判——APFS 微秒级可靠。
-    let dirMtimeMs: number;
-    try {
-      dirMtimeMs = fs.statSync(this.sessionsDir).mtimeMs;
-    } catch (err) {
-      // 目录不存在（ENOENT）= 无 session 文件（boot 早期/目录被清的合法缺省，静默
-      // 空表）；其余读失败 warn 留痕——冷查链把空表当 not-found 消费，IO 故障静默
-      // 伪装成「无 record」会掩盖持续故障。
-      if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
-      }
-      return [];
-    }
+    const dirMtimeMs = this.statSessionsDirMtime();
+    if (dirMtimeMs === null) return [];
     // [perf L-1] 首扫（dirStamp===null）惰性装载磁盘索引。必须位于 statSync 之后：
     // sessionsDir 不存在的 early-return 不装载映像（防解析产物滞留内存）；首扫时
     // 下方快路径条件必不成立，插在快路径 if 前后等价。
@@ -1318,25 +1308,11 @@ export class RecordStore {
         if (entry.negative) continue;
         out.push(entry.light);
       }
-      return rootSessionFilter === undefined
-        ? out
-        : out.filter((r) => r.rootSessionId === rootSessionFilter);
+      return this.filterByRoot(out, rootSessionFilter);
     }
 
-    let files: string[];
-    try {
-      files = fs.readdirSync(this.sessionsDir)
-        .filter((f) => f.endsWith(".jsonl"))
-        .map((f) => path.join(this.sessionsDir, f));
-    } catch (err) {
-      // 与上方 statSync 同判：ENOENT = 合法缺省静默；其余读失败 warn 留痕
-      // （空表不得伪装 not-found）。
-      this.indexEntries = null; // [perf L-1] 该 early-return 路径同样释放映像（内存卫生）
-      if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
-      }
-      return [];
-    }
+    const files = this.readSessionsDirFiles();
+    if (files === null) return [];
 
     // 修剪：磁盘上已消失的文件（GC/手动删）同步移出缓存与索引。删了条目必须置
     // indexDirty——否则纯修剪轮（无其他探测）flush 第一道门 !dirty return，磁盘索引的
@@ -1357,8 +1333,50 @@ export class RecordStore {
     }
     this.dirStamp = { mtimeMs: dirMtimeMs };
     this.flushIndexAfterScan();
-    if (rootSessionFilter === undefined) return out;
-    return out.filter((r) => r.rootSessionId === rootSessionFilter);
+    return this.filterByRoot(out, rootSessionFilter);
+  }
+
+  /**
+   * sessionsDir 的 mtime；目录不存在/不可读返回 null。
+   * ENOENT = 无 session 文件（boot 早期/目录被清的合法缺省，静默空表）；其余读失败
+   * warn 留痕——冷查链把空表当 not-found 消费，IO 故障静默伪装成「无 record」会掩盖
+   * 持续故障。调用方必须「先 stat（本方法）后装载索引」：目录不存在时不装映像。
+   */
+  private statSessionsDirMtime(): number | null {
+    try {
+      return fs.statSync(this.sessionsDir).mtimeMs;
+    } catch (err) {
+      if (!isMissingFsError(err)) {
+        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * sessionsDir 下全部 .jsonl 绝对路径；读失败返回 null。
+   * 与 statSessionsDirMtime 同判：ENOENT = 合法缺省静默；其余读失败 warn 留痕
+   * （空表不得伪装 not-found），并释放索引映像（内存卫生）。
+   */
+  private readSessionsDirFiles(): string[] | null {
+    try {
+      return fs.readdirSync(this.sessionsDir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => path.join(this.sessionsDir, f));
+    } catch (err) {
+      this.indexEntries = null; // [perf L-1] 该 early-return 路径同样释放映像（内存卫生）
+      if (!isMissingFsError(err)) {
+        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
+      }
+      return null;
+    }
+  }
+
+  /** rootSessionFilter 非空时只保留 rootSessionId 匹配的 record（缺省 = 原数组） */
+  private filterByRoot(records: SubagentRecord[], rootSessionFilter?: string): SubagentRecord[] {
+    return rootSessionFilter === undefined
+      ? records
+      : records.filter((r) => r.rootSessionId === rootSessionFilter);
   }
 
   /**

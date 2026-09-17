@@ -212,96 +212,84 @@ export function buildScriptDryRun(scriptText) {
 
 // ── 主流程 ────────────────────────────────────────────────────────────────
 
-function main(ciYmlPath = DEFAULT_CI_YML) {
-  const ciText = readFileSync(ciYmlPath, 'utf-8')
-  const pkgMap = buildPackageNameMap(ROOT, readFileSync(WORKSPACE_YAML, 'utf-8'))
-
-  const assertions = []
-  const skipped = []
-  const failures = []
-
-  for (const { line, cmd } of extractRunValues(ciText)) {
-    const classified = classifyCommand(cmd)
-    if (!classified) continue
-
-    if (classified.kind === 'unrecognized') {
-      failures.push({
-        line,
+/**
+ * 单条已分类命令的干跑裁决。返回：
+ *   { dryCmd, cwd }                 —— 待干跑的命令与工作目录
+ *   'silent'                        —— 静默放行，不记账（与 vitest run 无关的形态）
+ *   { skip: string }                —— 显式登记跳过
+ *   { failure: { message, fix } }   —— 拒绝静默放行
+ */
+function resolveDryRunTarget(classified, pkgMap, line, cmd) {
+  if (classified.kind === 'unrecognized') {
+    return {
+      failure: {
         message: `ci.yml:${line} 出现 vitest run 但形态不被识别，拒绝静默放行：${classified.text}`,
         fix: '改用 pnpm exec / pnpm --filter <pkg> exec / npx 前缀，或在守卫 classifyCommand 登记该形态',
-      })
-      continue
-    }
-
-    let dryCmd = null
-    let cwd = ROOT
-
-    if (classified.kind === 'direct') {
-      dryCmd = buildDirectDryRun(classified)
-    } else {
-      const pkgJson = classified.filterPkg
-        ? join(ROOT, pkgMap.get(classified.filterPkg) ?? '<unresolved>', 'package.json')
-        : join(ROOT, 'package.json')
-      if (classified.filterPkg && !pkgMap.has(classified.filterPkg)) {
-        failures.push({
-          line,
-          message: `ci.yml:${line} 引用包 ${classified.filterPkg} 但 pnpm-workspace.yaml 扫描不到该包`,
-          fix: '核对包名或更新守卫的 workspace glob 解析',
-        })
-        continue
-      }
-      let scripts
-      try {
-        scripts = JSON.parse(readFileSync(pkgJson, 'utf-8')).scripts ?? {}
-      } catch {
-        failures.push({ line, message: `ci.yml:${line} 的 script 归属包 manifest 不可读：${pkgJson}`, fix: '修复 package.json' })
-        continue
-      }
-      const scriptText = scripts[classified.scriptName]
-      if (typeof scriptText !== 'string') continue // pnpm 内建命令（install 等），非 script 引用
-      if (classified.args !== null) {
-        failures.push({
-          line,
-          message: `ci.yml:${line} 的 script 引用带额外参数，干跑重写无法保证等价：${cmd.trim()}`,
-          fix: '拆成独立步骤，或在本守卫显式登记该形态后再放行',
-        })
-        continue
-      }
-      const outcome = buildScriptDryRun(scriptText)
-      if (outcome.action === 'ignore') continue
-      if (outcome.action === 'skip') {
-        skipped.push(`ci.yml:${line} ${cmd.trim()} → ${outcome.reason}`)
-        continue
-      }
-      dryCmd = outcome.cmd
-      if (classified.filterPkg) cwd = join(ROOT, pkgMap.get(classified.filterPkg))
-    }
-
-    const result = spawnSync('bash', ['-c', dryCmd], {
-      cwd,
-      timeout: DRY_RUN_TIMEOUT_MS,
-      encoding: 'utf-8',
-    })
-    const where = cwd === ROOT ? '<repo-root>' : cwd.replace(ROOT, '<repo-root>/')
-    // 判定以 stdout 文件行数为准，不能只看 exit code：实测 vitest list 空收集时
-    // exit 0 且零输出（与 run 的 "No test files found" exit 1 行为不同）
-    const collected = (result.stdout ?? '').split('\n').filter((l) => l.trim() !== '')
-    if (result.status === 0 && collected.length > 0) {
-      assertions.push(`ci.yml:${line} ${dryCmd}（cwd: ${where}）→ 收集 ${collected.length} 个测试文件 ✓`)
-    } else {
-      const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().split('\n').slice(-8).join('\n')
-      const verdict = result.status === 0 ? '收集为空（0 个测试文件）' : `干跑失败（exit ${result.status ?? 'signal'}）`
-      failures.push({
-        line,
-        message:
-          `ci.yml:${line} 的 vitest run 目标${verdict}：${cmd.trim()}\n` +
-          `    干跑：${dryCmd}（cwd: ${where}）\n${output.split('\n').map((l) => `    | ${l}`).join('\n')}`,
-        fix: '核对目标路径与对应 vitest config 的 include/exclude——目标文件存在但被 exclude 也是空收集（taste-lint 事故形态）',
-      })
+      },
     }
   }
 
-  // ── 输出 ────────────────────────────────────────────────────────────────
+  let cwd = ROOT
+  let dryCmd
+
+  if (classified.kind === 'direct') {
+    dryCmd = buildDirectDryRun(classified)
+  } else {
+    const pkgJson = classified.filterPkg
+      ? join(ROOT, pkgMap.get(classified.filterPkg) ?? '<unresolved>', 'package.json')
+      : join(ROOT, 'package.json')
+    if (classified.filterPkg && !pkgMap.has(classified.filterPkg)) {
+      return {
+        failure: {
+          message: `ci.yml:${line} 引用包 ${classified.filterPkg} 但 pnpm-workspace.yaml 扫描不到该包`,
+          fix: '核对包名或更新守卫的 workspace glob 解析',
+        },
+      }
+    }
+    let scripts
+    try {
+      scripts = JSON.parse(readFileSync(pkgJson, 'utf-8')).scripts ?? {}
+    } catch {
+      return { failure: { message: `ci.yml:${line} 的 script 归属包 manifest 不可读：${pkgJson}`, fix: '修复 package.json' } }
+    }
+    const scriptText = scripts[classified.scriptName]
+    if (typeof scriptText !== 'string') return 'silent' // pnpm 内建命令（install 等），非 script 引用
+    if (classified.args !== null) {
+      return {
+        failure: {
+          message: `ci.yml:${line} 的 script 引用带额外参数，干跑重写无法保证等价：${cmd.trim()}`,
+          fix: '拆成独立步骤，或在本守卫显式登记该形态后再放行',
+        },
+      }
+    }
+    const outcome = buildScriptDryRun(scriptText)
+    if (outcome.action === 'ignore') return 'silent'
+    if (outcome.action === 'skip') return { skip: `ci.yml:${line} ${cmd.trim()} → ${outcome.reason}` }
+    dryCmd = outcome.cmd
+    if (classified.filterPkg) cwd = join(ROOT, pkgMap.get(classified.filterPkg))
+  }
+
+  return { dryCmd, cwd }
+}
+
+/** 干跑一条已裁决命令，返回判定素材（stdout 文件行数 / 尾部输出 / 退出码裁决文案 / 展示用 cwd） */
+function runDryRun(dryCmd, cwd) {
+  const result = spawnSync('bash', ['-c', dryCmd], {
+    cwd,
+    timeout: DRY_RUN_TIMEOUT_MS,
+    encoding: 'utf-8',
+  })
+  const where = cwd === ROOT ? '<repo-root>' : cwd.replace(ROOT, '<repo-root>/')
+  // 判定以 stdout 文件行数为准，不能只看 exit code：实测 vitest list 空收集时
+  // exit 0 且零输出（与 run 的 "No test files found" exit 1 行为不同）
+  const collectedCount = (result.stdout ?? '').split('\n').filter((l) => l.trim() !== '').length
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().split('\n').slice(-8).join('\n')
+  const verdict = result.status === 0 ? '收集为空（0 个测试文件）' : `干跑失败（exit ${result.status ?? 'signal'}）`
+  return { ok: result.status === 0 && collectedCount > 0, collectedCount, output, verdict, where }
+}
+
+/** 输出三段报告；有违规时以 exit 1 收场（pre-commit/CI 只吃退出码与 stderr 文本） */
+function report(assertions, skipped, failures) {
   for (const s of skipped) console.log(`[skip] ${s}`)
   for (const a of assertions) console.log(`[ok] ${a}`)
   if (failures.length > 0) {
@@ -316,6 +304,47 @@ function main(ciYmlPath = DEFAULT_CI_YML) {
     `\n[ci-vitest-targets] OK：ci.yml 全部 vitest run 目标收集非空（断言 ${assertions.length} 处` +
       `${skipped.length > 0 ? `，显式跳过 ${skipped.length} 处` : ''}）`,
   )
+}
+
+function main(ciYmlPath = DEFAULT_CI_YML) {
+  const ciText = readFileSync(ciYmlPath, 'utf-8')
+  const pkgMap = buildPackageNameMap(ROOT, readFileSync(WORKSPACE_YAML, 'utf-8'))
+
+  const assertions = []
+  const skipped = []
+  const failures = []
+
+  for (const { line, cmd } of extractRunValues(ciText)) {
+    const classified = classifyCommand(cmd)
+    if (!classified) continue
+
+    const target = resolveDryRunTarget(classified, pkgMap, line, cmd)
+    if (target === 'silent') continue
+    if (target.skip !== undefined) {
+      skipped.push(target.skip)
+      continue
+    }
+    if (target.failure !== undefined) {
+      failures.push({ line, ...target.failure })
+      continue
+    }
+
+    const { dryCmd, cwd } = target
+    const { ok, collectedCount, output, verdict, where } = runDryRun(dryCmd, cwd)
+    if (ok) {
+      assertions.push(`ci.yml:${line} ${dryCmd}（cwd: ${where}）→ 收集 ${collectedCount} 个测试文件 ✓`)
+    } else {
+      failures.push({
+        line,
+        message:
+          `ci.yml:${line} 的 vitest run 目标${verdict}：${cmd.trim()}\n` +
+          `    干跑：${dryCmd}（cwd: ${where}）\n${output.split('\n').map((l) => `    | ${l}`).join('\n')}`,
+        fix: '核对目标路径与对应 vitest config 的 include/exclude——目标文件存在但被 exclude 也是空收集（taste-lint 事故形态）',
+      })
+    }
+  }
+
+  report(assertions, skipped, failures)
 }
 
 // 缺省 ci.yml 由脚本位置推导（不依赖 cwd）；位置参数仅供 fixture 自测覆盖目标

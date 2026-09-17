@@ -186,29 +186,32 @@ const aggregateFailed = aggregateOut !== undefined &&
 // 先让出、task 文本次之；截断发生置 outcome 顶层 truncated: true
 const RESULTS_BUDGET_CHARS = 8000;
 
+/** 单条投影：keepTask=false 丢 task 文本、keepSummary=false 丢 summary；
+ *  taskIndex/status/fullReportPath/error（归因与恢复面，D9）恒完整。
+ *  task 用 delete 而非不写 key，保持与最小条目形态相同的 key 插入顺序。 */
+function projectEntry(r, keepTask, keepSummary) {
+  const entry = { task: r.task, taskIndex: r.taskIndex, status: r.status };
+  if (keepSummary && typeof r.summary === "string") entry.summary = r.summary;
+  if (typeof r.fullReportPath === "string") entry.fullReportPath = r.fullReportPath;
+  if (r.error !== undefined) entry.error = r.error;
+  if (!keepTask) delete entry.task;
+  return entry;
+}
+
+// 保序降级阶梯：预算耗尽时先丢 summary（体积大头），仍超再让出 task 文本
+const FIT_LADDER = [[true, true], [true, false], [false, false]];
+
 function fitResultsInBudget(items) {
   if (JSON.stringify(items).length <= RESULTS_BUDGET_CHARS) {
     return { results: items, truncated: false };
   }
   const fitted = [];
   let used = 2; // "[]" 边界
-  for (let i = 0; i < items.length; i++) {
-    const r = items[i];
-    let entry = { task: r.task, taskIndex: r.taskIndex, status: r.status };
-    if (typeof r.summary === "string") entry.summary = r.summary;
-    if (typeof r.fullReportPath === "string") entry.fullReportPath = r.fullReportPath;
-    if (r.error !== undefined) entry.error = r.error;
-    if (used + JSON.stringify(entry).length + 1 > RESULTS_BUDGET_CHARS) {
-      // 预算按条目序耗尽：先丢 summary（体积大头）
-      entry = { task: r.task, taskIndex: r.taskIndex, status: r.status };
-      if (typeof r.fullReportPath === "string") entry.fullReportPath = r.fullReportPath;
-      if (r.error !== undefined) entry.error = r.error;
-    }
-    if (used + JSON.stringify(entry).length + 1 > RESULTS_BUDGET_CHARS) {
-      // 仍超：task 文本让出（taskIndex/status/路径/error 恒完整——D9 恢复面）
-      entry = { taskIndex: r.taskIndex, status: r.status };
-      if (typeof r.fullReportPath === "string") entry.fullReportPath = r.fullReportPath;
-      if (r.error !== undefined) entry.error = r.error;
+  for (const r of items) {
+    let entry;
+    for (const [keepTask, keepSummary] of FIT_LADDER) {
+      entry = projectEntry(r, keepTask, keepSummary);
+      if (used + JSON.stringify(entry).length + 1 <= RESULTS_BUDGET_CHARS) break;
     }
     used += JSON.stringify(entry).length + 1;
     fitted.push(entry);
