@@ -40,7 +40,32 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { readRuntimeLogs, type FauxStep } from './launch-app-real'
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/**
+ * 把一个 staged builtin extension bundle 种进 `<dataDir>/agent/extensions/<name>/`
+ * （subagent pi 孙进程的唯一扩展发现通道——TAIJI_EXTENSION_PATHS 只注入主 pi）。
+ * 用 staged 形态而非源码：bundle 自包含（esbuild noExternal，零外部 require），源码形态
+ * 的 workspace 依赖（@zhushanwen/extension-protocol 等）在 mkdtemp 目录解析不到。
+ * staged package.json 的 main 指向 index.ts（builtin 装载链不走 main），此处改指 index.js。
+ */
+export function seedSubagentExtension(dataDir: string, stagedName: string): string {
+  const staged = path.join(REPO_ROOT, 'apps', 'electron', 'resources', 'extensions', '@zhushanwen', stagedName)
+  const bundle = path.join(staged, 'index.js')
+  if (!fs.existsSync(bundle)) {
+    throw new Error(`seedSubagentExtension: staged bundle 缺失 ${bundle}——先跑 node scripts/bundle-extensions.mjs`)
+  }
+  const dest = path.join(dataDir, 'agent', 'extensions', stagedName)
+  fs.mkdirSync(dest, { recursive: true })
+  fs.copyFileSync(bundle, path.join(dest, 'index.js'))
+  const pkg = JSON.parse(fs.readFileSync(path.join(staged, 'package.json'), 'utf8'))
+  pkg.main = 'index.js'
+  fs.writeFileSync(path.join(dest, 'package.json'), JSON.stringify(pkg, null, 2))
+  return dest
+}
 
 /** faux 流控（tokens/s，pi-ai faux 按 chars/4 估 token）：长文本 2400 chars ≈ 60s 单响应 */
 export const FAUX_TPS = 10

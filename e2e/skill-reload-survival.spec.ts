@@ -255,7 +255,12 @@ test('S1: 编辑项目 skill 时在飞 run 存活 + 面板即时 + 归因日志 
     delete process.env.TAIJI_AGENT_DEBUG
     listenWs?.close()
     if (appCleanup) await appCleanup()
-    fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    if (test.info().status === 'passed') {
+      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    } else {
+      // 失败取证：保留现场目录（runtime 日志在 <dataDir>/logs/），归因后手动清理
+      console.log(`[S1] 失败取证：保留 projectDir=${projectDir} dataDir=${dataDir}`)
+    }
   }
 })

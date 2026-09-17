@@ -27,6 +27,7 @@ import {
   waitForExtensionsReady,
 } from './fixtures/launch-app-real'
 import fs from 'node:fs'
+import path from 'node:path'
 import {
   FAUX_TPS,
   SUB_MODEL_A,
@@ -69,6 +70,7 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
   process.env.TAIJI_AGENT_DEBUG = '1'
   let listenWs: import('ws').default | null = null
   let appCleanup: (() => Promise<void>) | null = null
+  let reachedEnd = false // test.info().status 在 finally 不可靠（实测恒 'passed'），用确定性末行标志
   try {
     writeProjectSkill(projectDir, 'demo-a', 'Use this skill when the user asks for demo-alpha tasks.')
     const probeName = 'spawn-race-probe'
@@ -151,7 +153,10 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
     while (Date.now() < doneDeadline && runId === '') {
       const hit = listen.events.find((e) => e.type === 'session.workflowUpdate')
       const update = hit?.payload?.update as { status?: unknown; runId?: unknown } | undefined
-      if (update !== undefined && typeof update.runId === 'string') {
+      // 必须等终态（done/failed）：running 广播先到（run 启动即广播），拿到就 break 会让
+      // 后续 JSONL 读回在 60s 长流式未结束时必然读到 running（假失败）
+      if (update !== undefined && typeof update.runId === 'string'
+        && (update.status === 'done' || update.status === 'failed')) {
         runId = update.runId
         updateStatus = String(update.status)
         break
@@ -188,11 +193,27 @@ test('S2: 派发后 <1s 写 skill 触发 reload → run 确定收口 + JSONL 可
 
     listenWs?.close()
     console.log('[S2] 通过：reload 命中 spawn 窗口 / run 确定收口 / 终态可读回 / 无孤儿')
+    reachedEnd = true
   } finally {
     delete process.env.TAIJI_AGENT_DEBUG
+    // 失败取证放最前（appCleanup 之前）：logs 拷到固定路径，规避后续清理丢失现场
+    if (!reachedEnd) {
+      const keep = `/tmp/s2-failed-${Date.now()}`
+      try {
+        fs.mkdirSync(keep, { recursive: true })
+        fs.cpSync(path.join(dataDir, 'logs'), path.join(keep, 'logs'), { recursive: true })
+        fs.cpSync(path.join(dataDir, 'agent', 'logs'), path.join(keep, 'agent-logs'), { recursive: true })
+        fs.cpSync(path.join(dataDir, 'agent', 'sessions'), path.join(keep, 'agent-sessions'), { recursive: true })
+        console.log(`[S2] 失败取证：logs -> ${keep}（dataDir=${dataDir}）`)
+      } catch (e) {
+        console.log(`[S2] 失败取证拷贝失败：${e}（dataDir=${dataDir}）`)
+      }
+    }
     listenWs?.close()
     if (appCleanup) await appCleanup()
-    fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    if (reachedEnd) {
+      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   }
 })

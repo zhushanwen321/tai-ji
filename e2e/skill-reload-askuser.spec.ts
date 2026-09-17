@@ -33,6 +33,7 @@ import {
   type WsFrame,
 } from './fixtures/launch-app-real'
 import fs from 'node:fs'
+import path from 'node:path'
 import {
   FAUX_TPS,
   SUB_MODEL_A,
@@ -41,6 +42,7 @@ import {
   mainDispatchSteps,
   writeProjectSkill,
   writeUserWorkflowScripts,
+  seedSubagentExtension,
   readExtensionLogs,
   parseLastPreserved,
   waitForLogLine,
@@ -98,8 +100,11 @@ function askSurvivorSteps(): Record<string, import('./fixtures/launch-app-real')
   const streamText = unit.repeat(Math.ceil(PRE_ASK_STREAM_CHARS / unit.length))
   return {
     [SUB_MODEL_A]: [
-      { text: streamText },
-      { toolCalls: [{ name: 'ask_user', args: ASK_USER_TOOL_ARGS }] },
+      // 长流式文本与 ask_user 调用必须同一步（faux 语义：toolCalls 步自动 stopReason=toolUse，
+      // 流式输出完成后同一响应携带 toolCall → pi 执行 ask_user → 下一轮请求消费收尾步）。
+      // 拆成「text 步 + toolCalls 步」不成立：纯 text 步 stop 即 turn 终，后续步永不消费；
+      // text 步显式 toolUse 又无工具内容 = 引擎重派。
+      { text: streamText, toolCalls: [{ name: 'ask_user', args: ASK_USER_TOOL_ARGS }] },
       { text: '已收到应答，反向请求未静默取消。' },
     ],
   }
@@ -124,15 +129,25 @@ async function answerOverlay(page: Page): Promise<void> {
 
 test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid + ask_user 送达可应答', async () => {
   test.setTimeout(420_000)
-  const projectDir = makeTempDir('taiji-skillreload-askuser-proj-')
-  const dataDir = makeTempDir('taiji-skillreload-askuser-data-')
+  // 前缀须短：<dataDir>/run/relay-<pid>.sock 受 macOS UDS 路径 104B 上限约束，
+  // 长前缀（taiji-skillreload-askuser-*）在 os.tmpdir() 深路径下 bind EINVAL，runtime 直接起不来
+  const projectDir = makeTempDir('taiji-sr-ask-proj-')
+  const dataDir = makeTempDir('taiji-sr-ask-data-')
   process.env.TAIJI_AGENT_DEBUG = '1'
   let globalSkillDir: string | null = null
   let listenWsA: import('ws').default | null = null
   let listenWsB: import('ws').default | null = null
   let appCleanup: (() => Promise<void>) | null = null
+  let reachedEnd = false // test.info().status 在 finally 不可靠（实测恒 'passed'），用确定性末行标志
   try {
     writeProjectSkill(projectDir, 'demo-a', 'Use this skill when the user asks for demo-alpha tasks.')
+    // subagent pi 孙进程的 ask_user 工具来自 ask-user extension，孙进程只走
+    // <agentDir>/extensions/ 自动发现（TAIJI_EXTENSION_PATHS 不透传孙进程），必须先种入
+    seedSubagentExtension(dataDir, 'pi-ask-user')
+    // 预创建全局 skill 根目录：setupGlobalWatcher 启动时按 existsSync 过滤 watch 列表，
+    // 启动后才首建的目录不被 watch——本 spec 靠「编辑全局 skill」触发全 session reload，
+    // 目录必须先于 app 启动存在（writeGlobalSkill 是运行中段首次写入）。
+    fs.mkdirSync(path.join(dataDir, 'agent', 'skills'), { recursive: true })
     const [probeA, probeB] = writeUserWorkflowScripts(dataDir, [
       { name: 'askuser-probe-a', source: makeAskRunnerScript('askuser-probe-a') },
       { name: 'askuser-probe-b', source: makeAskRunnerScript('askuser-probe-b') },
@@ -259,8 +274,21 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
     listenWsA?.close()
     listenWsB?.close()
     console.log('[S1b] 通过：双 session 存活 / dir=global 双 sid / dialog 双送达可应答 / 终态 entry')
+    reachedEnd = true
   } finally {
     delete process.env.TAIJI_AGENT_DEBUG
+    // 失败取证放最前（appCleanup 之前）：logs 拷到固定路径，规避后续清理/挂起丢失现场
+    if (!reachedEnd) {
+      const keep = `/tmp/s1b-failed-${Date.now()}`
+      try {
+        fs.mkdirSync(keep, { recursive: true })
+        fs.cpSync(path.join(dataDir, 'logs'), path.join(keep, 'logs'), { recursive: true })
+        fs.cpSync(path.join(dataDir, 'agent', 'logs'), path.join(keep, 'agent-logs'), { recursive: true })
+        console.log(`[S1b] 失败取证：logs -> ${keep}（dataDir=${dataDir}）`)
+      } catch (e) {
+        console.log(`[S1b] 失败取证拷贝失败：${e}（dataDir=${dataDir}）`)
+      }
+    }
     if (globalSkillDir !== null) {
       // 全局 skill 目录写入红线：finally 显式清理（dataDir 整树删除是兜底）
       fs.rmSync(globalSkillDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -268,7 +296,9 @@ test('S1b: 双 session 并发 reload 存活 + 全局 skill 归因行列双 sid +
     listenWsA?.close()
     listenWsB?.close()
     if (appCleanup) await appCleanup()
-    fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    if (reachedEnd) {
+      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   }
 })
