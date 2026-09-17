@@ -129,6 +129,8 @@ ls -la ~/.taiji/run/          # dev 用 ~/.taiji-dev
 lsof | grep relay-.*\.sock
 ```
 
+**listen EINVAL（2026-09-18 B5b 实测）**：socket 路径 `<dataDir>/run/relay-<pid>.sock` 受 macOS unix domain socket 104 字节路径上限约束——dataDir 路径过长（深层临时目录 / 长目录名，实测 106 字节中招）时 bind EINVAL，runtime 起不来且日志仅此一行。短 dataDir（如 `/tmp/<短前缀>`，全路径含 socket 文件名 ≤100 字节）无此问题。e2e spec 的 mkdtemp 前缀必须短（skill-reload-askuser 系列前缀曾因此从中招形态改短）。
+
 机制细节见 relay 模块（源码注释待后续批次补齐）。
 
 ### 9. agent 会话内执行 validate-runtime-bundle 失败："Bundled pi binary not found"
