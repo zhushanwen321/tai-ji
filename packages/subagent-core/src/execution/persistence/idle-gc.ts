@@ -113,11 +113,16 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
   try {
     runs = await workflowRuns.loadAll();
   } catch (err) {
-    // 宿主未 configureCore（core_host_not_configured）/ IO 失败：本轮跳过，
-    // 下轮重试。debug 留痕——这是「workflow 域未启用」的正常形态，warn 会噪声。
-    logger.debug(`[subagents] GC: workflow run store loadAll failed (skipped this cycle): ${
-      err instanceof Error ? err.message : String(err)
-    }`);
+    // 读失败与「域未启用」分通道（2026-09-17 错误处理审查 A11）：宿主未
+    // configureCore（core_host_not_configured）= workflow 域未启用的正常形态，
+    // debug 不噪声；其余（真 IO 故障）warn 留痕——静默跳过会把持续故障伪装成
+    // 「无 run 可回收」，超龄 run 永不终态化且无从归因。两通道均单轮跳过下轮重试。
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("core_host_not_configured")) {
+      logger.debug(`[subagents] GC: workflow run store loadAll skipped (domain not enabled): ${message}`);
+    } else {
+      logger.warn(`[subagents] GC: workflow run store loadAll failed (skipped this cycle): ${message}`);
+    }
     return;
   }
   for (const run of runs) {

@@ -20,6 +20,8 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 
+import { isMissingFsError } from "../persistence/fs-error.ts";
+
 const logger = getLogger("subagents");
 
 /** L3 显式引擎配置条目（config.json engines.<id>，字段级校验后形态）。 */
@@ -37,17 +39,36 @@ export interface ExplicitEngineEntry {
 /**
  * 读 config.json 的 engines 段（已启用条目，键 = 引擎 id）。
  *
- * 容错契约（与 config.json 用户手编文件定位一致，execution/config.ts 同判）：
- * 文件缺失 / 坏 JSON / engines 段非对象 → 静默空表（L3 缺席是常态，不 warn——绝大多数
- * 安装无显式配置）；单条目形态坏 → warn 跳过该条目（不影响其他条目，A12②「其他引擎
- * 正常」的 L3 版）。
+ * 容错契约（与 config.json 用户手编文件定位一致；三态口径对齐 assembly/config.ts
+ * readGlobalConfig 的 D5 设计）：文件不存在（ENOENT）= L3 显式配置缺席（绝大多数
+ * 安装的常态，静默空表）；**坏 JSON / 非 ENOENT 读失败 ≠ 配置缺席**——warn 留痕后
+ * 空表（torn write / 权限故障被静默吞掉会伪装成「无显式配置」，排障无从下手）；
+ * engines 段非对象 → warn 空表；单条目形态坏 → warn 跳过该条目（不影响其他条目，
+ * A12②「其他引擎正常」的 L3 版）。
  */
 export function readExplicitEngines(agentDir: string): Record<string, ExplicitEngineEntry> {
   const configPath = path.join(agentDir, "subagents", "config.json");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch (err) {
+    // ENOENT = 配置文件缺席（合法缺省，静默）；其余读失败 warn 留痕。
+    if (!isMissingFsError(err)) {
+      logger.warn(
+        `[engine-discovery] config.json read failed (falling back to no explicit engines) at ${configPath}: ${errorMessage(err)}`,
+      );
+    }
+    return {};
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    // 坏 JSON（torn write / 手编损坏）warn 留痕 + 空表——缺席降级不阻断引擎发现，
+    // 但故障必须可见（静默会把持续损坏伪装成「用户没有显式配置」）。
+    logger.warn(
+      `[engine-discovery] config.json is not valid JSON (falling back to no explicit engines) at ${configPath}: ${errorMessage(err)}`,
+    );
     return {};
   }
   if (typeof parsed !== "object" || parsed === null) return {};
@@ -142,6 +163,11 @@ function isStringArray(value: unknown): value is string[] {
 function isStringRecord(value: unknown): value is Record<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   return Object.values(value as Record<string, unknown>).every((item) => typeof item === "string");
+}
+
+/** unknown 错误的消息提取（warn 文案用；非 Error 原样字符串化）。 */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** unknown 值的 JSON 类型名（warn 文案用；不用 JSON.stringify——循环引用会炸）。 */

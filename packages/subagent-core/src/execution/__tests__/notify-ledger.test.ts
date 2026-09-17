@@ -425,6 +425,43 @@ describe("NotifyLedger — 四步生命周期（D4/D5）", () => {
     ledger.dispose();
   });
 
+  it("② isIdle 探测异常 ≠ busy（A11 读失败分通道）：挂回 pending + warn 留痕", () => {
+    // 用例级 logCalls sink（覆盖文件级 no-op sink）——探测异常 warn 是本用例
+    // 唯一日志（record 幂等/投递路径未触发其他 warn）。
+    const logCalls: Array<{ level: string; component: string; message: string; data?: unknown }> = [];
+    configureCore({
+      dataRoot: () => "/fake-notify-ledger-data-root",
+      log: (level, component, message, data) => {
+        logCalls.push({ level, component, message, data });
+      },
+    });
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("sa-probe", "content", { notifyId: "sa-probe" });
+    mock.host.isIdle = () => {
+      throw new Error("session state probe failed (mock)");
+    };
+    // 探测异常：放弃本次投递（消息挂回 pending 等下一边沿/看门狗）但不抛错
+    expect(() => ledger.attemptDeliver()).not.toThrow();
+    expect(mock.sentMessages).toHaveLength(0);
+    expect(ledger.pendingCount()).toBe(1);
+    // 异常与 busy 分通道：busy 挂回零日志（上一用例），异常 warn 留痕可归因
+    const warns = logCalls.filter((l) => l.level === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.message).toContain("isIdle probe failed");
+
+    // 探测恢复后下一边沿照常送达（deferred ≠ 丢失）——重绑探测实现（此刻主 agent
+    // 已空闲，setIdle(true) 只翻内部 ref，被覆盖的 host.isIdle 闭包需显式恢复）。
+    mock.setIdle(true);
+    mock.host.isIdle = () => true;
+    fireSettled(mock);
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(ledger.pendingCount()).toBe(0);
+
+    ledger.dispose();
+  });
+
   it("②→③ 回执销账：送达 entry 出现后下一 settled 边沿追加 ack entry，差集为空", () => {
     const mock = makeLedgerHost();
     const ledger = createNotifyLedger(mock.host);

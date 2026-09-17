@@ -441,32 +441,37 @@ export function zcodeAnchorBasePath(ref: { sessionId: string; dbPath: string }):
 /**
  * 写 record 绑定 sidecar（原子写：独占创建 tmp → rename 覆盖目标）。
  *
- * best-effort 记账面：任何 I/O 失败只 warn 不抛——绑定写发生在派发/应答主路径上，
- * 绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。
+ * 大多数调用点（spawn 回填点 / settle 快照）是 best-effort 记账面：I/O 失败只 warn
+ * 不抛——绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。失败经返回值
+ * 上报调用方自行分派处置（markReopened 是硬要求例外——epoch 随 binding 持久化，
+ * 写失败必须拒绝重开，见 record-store-terminal.markReopenedImpl）。
  *
  * @param sessionFile 锚基底路径：pi = 子 session.jsonl 绝对路径（绑定目标 =
  *        `<sessionFile>.record-binding`）；zcode = {@link zcodeAnchorBasePath} 派生基底
  *        （U7 settle 快照收编——扩展名拼接同构，读写两侧共用本函数）。
+ * @returns true = 已落盘；false = 写失败（错误已 warn 留痕，处置归调用方）。
  */
-export function writeRecordBinding(sessionFile: string, binding: RecordBinding): void {
+export function writeRecordBinding(sessionFile: string, binding: RecordBinding): boolean {
   const target = `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`;
   // tmp 名带 pid：多进程共享 sessionsDir 时互不覆盖；wx 独占创建防同进程残留碰撞。
   const tmp = `${target}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tmp, JSON.stringify(binding), { encoding: "utf-8", flag: "wx" });
     fs.renameSync(tmp, target);
+    return true;
   } catch (err) {
     try {
       fs.rmSync(tmp, { force: true });
     } catch (_e) {
       void _e; // tmp 清理失败不追加处理（同为目标目录 IO 故障域）
     }
-    logger.warn("[subagents] record binding write failed (best-effort bookkeeping; dispatch unaffected)", {
+    logger.warn("[subagents] record binding write failed (best-effort bookkeeping; failure reported to caller)", {
       detail: {
         sessionFile,
         error: err instanceof Error ? err.message : String(err),
       },
     });
+    return false;
   }
 }
 

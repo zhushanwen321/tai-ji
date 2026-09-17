@@ -31,6 +31,7 @@ import {
   parseEngineRootsEnv,
   scanEngines,
 } from "../engine-discovery-scan.ts";
+import { readExplicitEngines } from "../config.ts";
 
 // ── fixture helpers ─────────────────────────────────────────────
 
@@ -552,5 +553,35 @@ describe("装载与注册表", () => {
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
     expect(file.engines).toEqual([]);
     expect(listEngines()).toEqual([]);
+  });
+});
+
+// ── L3 config.json 读取分通道（D5 三态口径，2026-09-17 错误处理审查 A7）────────
+
+describe("readExplicitEngines 读失败与合法缺省分通道", () => {
+  it("文件不存在（ENOENT）= L3 显式配置缺席：静默空表，无 warn", () => {
+    const agentDir = path.join(tmpRoot, "agent-absent");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(collectedLogs.filter((l) => l.level === "warn")).toHaveLength(0);
+  });
+
+  it("坏 JSON ≠ 缺席：warn 留痕 + 空表（torn write 不得伪装成「用户无显式配置」）", () => {
+    const agentDir = path.join(tmpRoot, "agent-torn");
+    fs.mkdirSync(path.join(agentDir, "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(agentDir, "subagents", "config.json"), "{ torn");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(
+      collectedLogs.some((l) => l.level === "warn" && l.message.includes("not valid JSON")),
+    ).toBe(true);
+  });
+
+  it("非 ENOENT 读失败（subagents 被文件占据 → ENOTDIR）≠ 缺席：warn 留痕 + 空表", () => {
+    const agentDir = path.join(tmpRoot, "agent-blocked");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, "subagents"), "not a directory");
+    expect(readExplicitEngines(agentDir)).toEqual({});
+    expect(
+      collectedLogs.some((l) => l.level === "warn" && l.message.includes("read failed")),
+    ).toBe(true);
   });
 });

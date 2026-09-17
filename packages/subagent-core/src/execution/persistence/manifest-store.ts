@@ -6,6 +6,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
+import { isMissingFsError } from "./fs-error.ts";
 import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
@@ -172,7 +173,13 @@ export class ManifestStore {
     let files: string[];
     try {
       files = fs.readdirSync(this.dir);
-    } catch {
+    } catch (err) {
+      // 目录不存在（ENOENT）= 无 manifest 可列（外部删除/首启窗口的合法缺省，静默
+      // 空表）；其余读失败（EACCES/EIO 等）best-effort 留痕——静默空表会把 IO 故障
+      // 伪装成 not-found，冷查链（collectRecords orphan 投影）消费方无从分辨。
+      if (!isMissingFsError(err)) {
+        bestEffort(err, `list manifests (readdir ${this.dir})`, "error");
+      }
       return [];
     }
     const names = files.filter((f) => f.endsWith(".json") && !f.includes(".tmp."));

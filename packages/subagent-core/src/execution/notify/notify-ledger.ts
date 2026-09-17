@@ -373,10 +373,15 @@ export function createNotifyLedger(
       const pending = [...items.values()].filter((i) => i.sentAt === undefined);
       if (pending.length === 0) return;
       // 发送前二次复查（D5 零宽容）：busy / 探测异常（session 关闭等）→ 放弃本次，
-      // 消息挂回 pending 等下一边沿 / 看门狗
+      // 消息挂回 pending 等下一边沿 / 看门狗。探测异常 warn 留痕（读失败与 busy 分
+      // 通道——busy 是正常挂回，异常是故障信号；静默吞掉会把持续探测故障伪装成
+      // 「宿主一直 busy」，通知延迟无从归因）。
       try {
         if (!host.isIdle()) return;
-      } catch {
+      } catch (err) {
+        logger.warn("[subagents] notify ledger isIdle probe failed — delivery deferred to next edge/watchdog", {
+          detail: { error: err instanceof Error ? err.message : String(err) },
+        });
         return;
       }
       // [u9] 按送达通道分组（Map 迭代序 = pending 出现序，确定性）：默认通道保持

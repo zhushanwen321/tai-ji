@@ -1060,3 +1060,41 @@ describe('dispatchMessageEvent message.complete abort 清理（steer-bubble u2 /
     expect(ctx.queueStates.value.get(SID)).toEqual({ followUp: ['f1'] })
   })
 })
+
+describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异常帧不断流）', () => {
+  // [设计裁决登记（registry.ts 三处守卫，2026-09-17 错误处理审查 A5）] 正常流经
+  // event-adapter 构造的帧不会产生 undefined/形态不符 entry；守卫静默 return 是
+  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为面：坏帧
+  // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认腿均不触发）。
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('tool_call_start 缺 entry → 不抛错、streaming assistant 无 toolCall/contentBlocks 增量', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', {}))).not.toThrow()
+    const a = lastAssistant(ctx)
+    expect(a.toolCalls ?? []).toHaveLength(0)
+    expect(a.contentBlocks ?? []).toHaveLength(0)
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+  })
+
+  it('tool_call_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与 overlay 双零副作用', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: { type: 'toolCall' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(lastAssistant(ctx).toolCalls ?? []).toHaveLength(0)
+  })
+
+  it('message_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与腿 2 确认双零副作用', () => {
+    const ctx = makeCtx()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', {}))).not.toThrow()
+    expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: { type: 'compaction' } }))).not.toThrow()
+    expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
+    expect(getMsgs(ctx)).toHaveLength(0)
+    // 腿 2（user 投递确认）在形态守卫处短路：确认计数零触碰
+    expect(ctx.incrementInflight).not.toHaveBeenCalled()
+    expect(ctx.decrementInflight).not.toHaveBeenCalled()
+  })
+})

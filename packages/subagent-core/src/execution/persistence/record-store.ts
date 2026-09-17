@@ -165,6 +165,7 @@ import type {
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
+import { isMissingFsError } from "./fs-error.ts";
 import type { RoundSettlementOutcome } from "./finalize-record.ts";
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
@@ -1133,7 +1134,13 @@ export class RecordStore {
       if (!this.isEntryOrphanCandidate(id, d, rootSessionFilter, anchoredIds)) continue;
       this.orphanJudged.add(id);
       const rec = rebuildEntryRecord(id, d);
-      if (rec === null) continue; // 损坏 entry：跳过（orphanJudged 已标记，不重判）
+      if (rec === null) {
+        // 损坏 entry：跳过（orphanJudged 已标记，不重判）——但必须留痕：末条 running
+        // 的 entry 损坏意味着该 record 永远无法被纠偏落 idle（侧栏 spinner 永挂），
+        // 静默 continue 会把身份域损坏伪装成「无孤儿可判」，排障无从下手。
+        logger.warn(`[subagents] recoverEntryOnlyOrphans: corrupt subagent-record entry for ${id} — skipped (not recoverable, will not be re-judged)`);
+        continue;
+      }
       this.finalizeEntryOnlyOrphan(rec);
     }
   }
@@ -1288,7 +1295,13 @@ export class RecordStore {
     let dirMtimeMs: number;
     try {
       dirMtimeMs = fs.statSync(this.sessionsDir).mtimeMs;
-    } catch {
+    } catch (err) {
+      // 目录不存在（ENOENT）= 无 session 文件（boot 早期/目录被清的合法缺省，静默
+      // 空表）；其余读失败 warn 留痕——冷查链把空表当 not-found 消费，IO 故障静默
+      // 伪装成「无 record」会掩盖持续故障。
+      if (!isMissingFsError(err)) {
+        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return [];
     }
     // [perf L-1] 首扫（dirStamp===null）惰性装载磁盘索引。必须位于 statSync 之后：
@@ -1315,8 +1328,13 @@ export class RecordStore {
       files = fs.readdirSync(this.sessionsDir)
         .filter((f) => f.endsWith(".jsonl"))
         .map((f) => path.join(this.sessionsDir, f));
-    } catch {
+    } catch (err) {
+      // 与上方 statSync 同判：ENOENT = 合法缺省静默；其余读失败 warn 留痕
+      // （空表不得伪装 not-found）。
       this.indexEntries = null; // [perf L-1] 该 early-return 路径同样释放映像（内存卫生）
+      if (!isMissingFsError(err)) {
+        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return [];
     }
 

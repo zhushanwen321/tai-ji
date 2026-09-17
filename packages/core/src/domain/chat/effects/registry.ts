@@ -575,7 +575,13 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   'message.tool_call_start': (ctx, sid, payload) => {
     // [D-010 sealed]
     // [W21] 输入从直译平铺 payload 改为 toolCall entry 形态（event-adapter 翻译时重构，
-    // interpreter 补 contentIndex/messageId 锚点）。entry 缺失（异常帧）降级丢弃；
+    // interpreter 补 contentIndex/messageId 锚点）。
+    // [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）]
+    // entry 缺失时静默 return 是有意取舍，不加 warn：正常流经 event-adapter 构造的帧
+    // 不会产生 undefined entry（构造侧已守卫）；单帧异常静默丢弃换取异常帧不断流
+    //（主对话流不因协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，排障
+    // 入口 = 对齐 event-adapter（runtime event-adapter.ts tool-call-start 构造点）日志。
+    // 坏帧行为由 effects.test.ts 坏帧用例锁定（不抛错、零副作用）。
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
     if (entry === undefined) return
@@ -606,6 +612,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // toolResult entry 同构）。overlay 收口（streaming 气泡上的 running toolCall → 终态）
     // 语义保留；权威回填经 ctx.applyEntryFrame 喂 reducer（先于 overlay 早 return——
     // ref 无 owner 时 reducer 喂入照常，ref 收敛归 W22）。
+    // [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）]
+    // entry 缺失/形态不符时静默 return 是有意取舍，不加 warn：正常流经 event-adapter
+    // 构造的帧 entry 恒为 message 形态（构造侧已守卫）；单帧异常静默丢弃换取异常帧
+    // 不断流（主对话流不因协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，
+    // 排障入口 = 对齐 event-adapter（runtime event-adapter.ts tool-call-end 构造点）日志。
+    // 坏帧行为由 effects.test.ts 坏帧用例锁定（不抛错、零副作用）。
     const entry = payload['entry'] as PiMessageEntry | undefined
     if (entry === undefined || entry.type !== 'message') return
     // 状态类全走 reducer（w21）：toolResult entry 喂 per-session reducer state
@@ -654,7 +666,13 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   // ── [W21] message_end —— 重构 entry 喂 reducer（实时 feed 权威载体，reducer 薄封装）──
   'message.message_end': (ctx, sid, payload) => {
     const entry = payload['entry']
-    // entry 形态守卫：message entry（type:'message'）才喂（协议契约，异常帧降级丢弃）
+    // entry 形态守卫：message entry（type:'message'）才喂。
+    // [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）]
+    // 非法形态静默 return 是有意取舍，不加 warn：正常流经 event-adapter 构造的帧
+    // entry 恒为 message 形态（构造侧已守卫）；单帧异常静默丢弃换取异常帧不断流
+    //（主对话流不因协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，
+    // 排障入口 = 对齐 event-adapter（runtime event-adapter.ts handleMessageEnd 构造点）
+    // 日志。坏帧行为由 effects.test.ts 坏帧用例锁定（不抛错、零副作用）。
     if (typeof entry !== 'object' || entry === null || (entry as { type?: unknown }).type !== 'message') return
     // custom role 去双计：pi 对同一条 custom message 双发 message_start + message_end（同一
     // message 对象——agent-loop.ts:112 prompt 路径 / agent-session sendCustomMessage no-trigger

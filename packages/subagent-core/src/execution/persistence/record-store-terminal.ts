@@ -20,7 +20,6 @@
 // 依赖方向单向：terminal → rebuild（投影），rebuild/rounds 不回 import 本文件。
 
 import * as fs from "node:fs";
-import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 
@@ -356,13 +355,15 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
  * writeRecordBinding 在新 sessionFile 旁落盘完整 binding（新锚旁无存量 binding 可
  * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；
  * [U7 / U6-D2 收编] zcode 锚同款落盘（锚键基底派生，见 zcodeAnchorBasePath）。
- * 宿主闭包 reopenRecord 的 engine 分派（run-orchestration 领地，U6b 接线）只构造
- * pi 锚——zcode 腿接线前本分支经内存 idle record 的显式 transcriptRef 可达，写面
- * 就位即 U6b 的依赖锚点。残留 lastAbandonedRound 不迁移（跨 epoch 自然失效，
- * §3.2.7——判定第一步以 record 当前 epoch 为基准丢弃旧世代回注）。`.alive` 写权
- * 声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
+ * **binding 写失败 = 拒绝重开**（§3.4 失败语义）：epoch 未落盘时推进内存世代会让
+ * 二次 reopen 防撞击穿——内存面回滚（transcriptRef/round/epoch/stopReason 还原，
+ * record 保持原 idle 形态可重试）并返回 false，走调用方既有拒绝面（reviveOrThrow
+ * 响亮报错 + Recovery 指引，不崩进程）。残留 lastAbandonedRound 不迁移（跨 epoch
+ * 自然失效，§3.2.7——判定第一步以 record 当前 epoch 为基准丢弃旧世代回注）。
+ * `.alive` 写权声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
  *
- * @returns true = 重开完成；false = CAS 拒绝（record 非 idle）。
+ * @returns true = 重开完成；false = CAS 拒绝（record 非 idle）或 binding 持久化
+ *          失败（内存面已回滚，record 保持重开前形态）。
  */
 export function markReopenedImpl(record: ExecutionRecord, transcriptRef: TranscriptRef, ctx: TerminalCtx): boolean {
   if (record.status !== "idle") {
@@ -371,18 +372,36 @@ export function markReopenedImpl(record: ExecutionRecord, transcriptRef: Transcr
     });
     return false;
   }
+  // 重开前形态快照（binding 写失败时回滚锚点——回滚必须逐字段还原，含 undefined
+  // 字段：epoch/stopReason 重开前可能是 undefined，展开 spread 会把 undefined 变成
+  // 自有属性，直接逐字段赋值）。
+  const prevTranscriptRef = record.transcriptRef;
+  const prevRound = record.round;
+  const prevEpoch = record.epoch;
+  const prevStopReason = record.stopReason;
   record.transcriptRef = transcriptRef;
   record.round = 0;
   record.epoch = (record.epoch ?? 0) + 1;
   record.stopReason = "reopened";
-  if (isPiTranscriptRef(transcriptRef)) {
-    writeRecordBinding(transcriptRef.sessionFile, fullBindingPayload(record, transcriptRef));
-  } else {
-    // [U7 / U6-D2] zcode 锚的 binding 持久化：锚键基底 + 扩展名与 pi 同构
-    // （state-marker.writeRecordBinding 键形态统一），epoch/统计基线随新 sessionId
-    // 键落盘——旧 sessionId 键下 binding 保留（历史锚回溯，与 pi 侧旧文件 binding
-    // 同族）。
-    writeRecordBinding(zcodeAnchorBasePath(transcriptRef), fullBindingPayload(record, transcriptRef));
+  // 锚分派（U7 / U6-D2）：pi = 子 session 文件锚；zcode = transcriptRef 派生锚键
+  // 基底（state-marker.writeRecordBinding 键形态对 pi/zcode 同构）。epoch/统计基线
+  // 随新锚落盘——旧锚下 binding 保留（历史锚回溯，与 pi 侧旧文件 binding 同族）。
+  const anchorBase = isPiTranscriptRef(transcriptRef)
+    ? transcriptRef.sessionFile
+    : zcodeAnchorBasePath(transcriptRef);
+  if (!writeRecordBinding(anchorBase, fullBindingPayload(record, transcriptRef))) {
+    // epoch 随 binding 持久化是硬要求（types.ts Epoch：防撞依赖跨重启单调，丢
+    // epoch 会被二次 reopen 击穿）——拒绝重开 + 回滚（错误详情已由 writeRecordBinding
+    // warn 留痕，此处补拒绝面语境）。
+    record.transcriptRef = prevTranscriptRef;
+    record.round = prevRound;
+    record.epoch = prevEpoch;
+    record.stopReason = prevStopReason;
+    logger.warn(
+      "[subagents] markReopened: binding persistence failed — reopen rejected, record rolled back (retry the message after fixing disk state)",
+      { detail: { id: record.id, anchor: anchorBase } },
+    );
+    return false;
   }
   ctx.reportRecordTransition(record);
   ctx.notifyChange();

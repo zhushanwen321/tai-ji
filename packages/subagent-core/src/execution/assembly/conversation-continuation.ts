@@ -898,10 +898,13 @@ export class ConversationContinuation {
         //（markReopened zcode 锚 + binding 面）待宿主闭包 engine 分派接线后升级。
         this.pendingReopenSummary = summary;
       } else {
-        // pi：CAS false = 竞态防御（此刻仍 idle 的前提下理论不可达），响亮上抛。
+        // pi：false = CAS 拒绝（竞态翻位）或 binding 持久化失败（epoch 硬要求，
+        // markReopened 已回滚内存面）——两者 record 都保持 idle 可重试，响亮上抛
+        //（Recovery 指引同款：重试 message 即可，写失败详情见 markReopened warn）。
         throw new Error(
           `subagent ${record.id} could not be reopened for a fresh transcript (its state changed ` +
-          `while the message was being processed). Recovery: retry the message (action:'message').`,
+          `while the message was being processed, or persisting the reopened generation failed). ` +
+          `Recovery: retry the message (action:'message').`,
         );
       }
     }
