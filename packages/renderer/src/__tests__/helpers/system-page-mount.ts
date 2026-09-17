@@ -31,7 +31,7 @@ export function createSettingsApiMocks() {
     setSmartContextCompactModel: vi.fn(),
     setSmartContextThresholds: vi.fn(),
     setSmartContextExcludedModels: vi.fn(),
-    // streaming-idle Section（SystemPage 常驻 Section）在 mount 时消费，缺导出即 "No export defined"
+    // 消费方：SystemAutoRenameSection / SystemSmartContextSection（SystemPage mount 时消费，缺导出即 "No export defined"）
   }
 }
 
