@@ -45,7 +45,7 @@ vi.mock('@/composables/effects/useForkNoticeEffect', () => ({
 
 import { useForkActions } from '@/composables/features/fork-handoff/useForkActions'
 import { useToast } from '@/composables/useToast'
-import { clearToasts } from '../../helpers/toast-queue'
+import { clearToasts } from '../helpers/toast-queue'
 
 const SID = 'sid-fork-actions'
 
