@@ -1531,3 +1531,80 @@ describe("NotifyLedger — T4③ 重投止损（PS-6）", () => {
     ledger2.dispose();
   });
 });
+
+describe("NotifyLedger — U9 嵌套批展平（flattenBatchItems 恢复，fd3e8ef1f 无痕回退的回归锁）", () => {
+  // 两条 pending 同边沿合并时 mergeItems 产 {batch:true, items}；record 本身又是
+  // wrapper 形态（{batch:true, items}）即嵌套——下游 parseBgNotifyDetails 只解一层，
+  // 全 wrapper 时整批记录静默消失。wrapper 生产方（sync collect 批）虽已退役，存量
+  // 未销账 entry 重放 + 同边沿合并仍可触发，本组锁定展平一层 + 成员补 wrapper
+  // notifyId（回执销账链）两不变量。
+
+  it("两条 wrapper pending 同边沿合并：载荷单层（无嵌套 batch）+ 展平成员带各自批 notifyId", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }] });
+    ledger.record("batch-2", "B finished", { batch: true, items: [{ id: "sa-b", status: "closed" }] });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1); // 默认通道合批为一条注入
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [
+        { id: "sa-a", status: "closed", notifyId: "batch-1" },
+        { id: "sa-b", status: "closed", notifyId: "batch-2" },
+      ],
+    });
+    ledger.dispose();
+  });
+
+  it("wrapper 与单条混合合并：单条原样保留，wrapper 展平补键", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }, { id: "sa-a2", status: "failed" }] });
+    ledger.record("sa-plain", "C finished", { id: "sa-c", status: "closed", agent: "worker" });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [
+        { id: "sa-a", status: "closed", notifyId: "batch-1" },
+        { id: "sa-a2", status: "failed", notifyId: "batch-1" },
+        { id: "sa-c", status: "closed", agent: "worker" },
+      ],
+    });
+    ledger.dispose();
+  });
+
+  it("展平补键保回执销账链：合并送达的 custom_message entry 经 items[].notifyId 双批全销账", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }] });
+    ledger.record("batch-2", "B finished", { batch: true, items: [{ id: "sa-b", status: "closed" }] });
+    fireSettled(mock); // 边沿投递 + 送达落盘（deliverPersists 默认 true）
+
+    ledger.checkReceipts();
+    expect(ledger.waitingReceiptCount()).toBe(0); // 两批整体销账（无 120s 重投/假放弃）
+    expect(unsettledDiff(mock)).toEqual(new Set());
+    ledger.dispose();
+  });
+
+  it("非法 wrapper 形态（items 非数组）原样保留不炸", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-bad", "bad wrapper", { batch: true, items: "not-an-array" });
+    ledger.record("sa-next", "plain", { id: "sa-d", status: "closed" });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [{ batch: true, items: "not-an-array" }, { id: "sa-d", status: "closed" }],
+    });
+    ledger.dispose();
+  });
+});

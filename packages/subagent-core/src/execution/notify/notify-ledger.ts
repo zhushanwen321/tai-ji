@@ -217,7 +217,13 @@ export interface NotifyLedger {
    * pending 复写落盘（同一 ledger entry 通道，notifyId 幂等）供重启 replay。
    * 消费侧配合面仅此只读方法——不改变 attemptDeliver/abandon 既有语义。
    */
-  pendingEntries(): ReadonlyArray<{ notifyId: string; content: string; record: object }>;
+  pendingEntries(): ReadonlyArray<{
+    notifyId: string;
+    content: string;
+    record: object;
+    /** [u9] 送达通道（dispose 复写落盘必须透传，缺省会把它改判默认通道） */
+    deliveryCustomType?: string;
+  }>;
   /** 诊断/测试：已投递待回执条数。 */
   waitingReceiptCount(): number;
   /** U4 诊断：三桶计数快照（副本；增量同时经 extensionLogger 通道落日志）。 */
@@ -271,6 +277,47 @@ function scanSessionLedgerEntries(entries: readonly unknown[]): {
     }
   }
   return { ledger, acked, abandoned };
+}
+
+/**
+ * [U9] 合并投递的 items 构造：批 wrapper record（{batch:true, items}）展平一层，
+ * 其成员 spread 进外层 items 并补 wrapper 身份键；非 wrapper record 原样保留。
+ *
+ * 为什么必须展平：两条 pending 在父 session busy 窗口先后闭合时，同一边沿的合并
+ * 会产出 {batch:true, items:[{batch:true, items:[…]}, …]} 嵌套——下游
+ * parseBgNotifyDetails 只解一层，对 wrapper 逐条 null，全 wrapper 时整条 null、
+ * 整批记录静默消失。当前 wrapper 生产方（sync collect 批）已退役，但 mergeItems
+ * 自身仍产单层批形态，且存量未销账 wrapper entry 重放 + 同边沿合并即可触发嵌套
+ * ——本展平是不变量级防线（fd3e8ef1f merge 曾无痕回退本函数与配套测试，本次恢复）。
+ *
+ * 为什么必须补身份键：改「展平不补键」会切断销账链——合并态的回执匹配面 =
+ * collectDeliveredNotifyIds 经 details.items[].notifyId，成员共享批 notifyId 即该批
+ * 整体回执语义；不补则批账目永不销账 → 120s 重投 + 达上限假放弃。
+ *
+ * 身份键取值 = item.notifyId（账本身份键 = 回执匹配的判据键）：批路径两者恒等，
+ * 账本键才是销账判据，二者万一背离时以销账可达为准。
+ */
+function flattenBatchItems(batch: NotifyLedgerItem[]): unknown[] {
+  const items: unknown[] = [];
+  for (const item of batch) {
+    const members = batchWrapperMembers(item.record);
+    if (members === undefined) {
+      items.push(item.record);
+      continue;
+    }
+    for (const member of members) {
+      items.push(isPlainObject(member) ? { ...member, notifyId: item.notifyId } : member);
+    }
+  }
+  return items;
+}
+
+/** [U9] 批 wrapper record 判定 + 成员取出：{batch:true, items:[…]} → 成员数组；
+ *  其余形态（单条 BgNotifyRecord / 非法载荷）→ undefined（调用方原样保留）。 */
+function batchWrapperMembers(record: unknown): readonly unknown[] | undefined {
+  if (!isPlainObject(record) || record["batch"] !== true) return undefined;
+  const members = record["items"];
+  return Array.isArray(members) ? members : undefined;
 }
 
 /** 收集 wanted 集合中已送达（custom_message entry 出现）的 notifyId。
@@ -496,12 +543,24 @@ export function createNotifyLedger(
       return n;
     },
 
-    pendingEntries(): ReadonlyArray<{ notifyId: string; content: string; record: object }> {
-      const out: Array<{ notifyId: string; content: string; record: object }> = [];
+    pendingEntries(): ReadonlyArray<{
+      notifyId: string;
+      content: string;
+      record: object;
+      /** [u9] 送达通道必须随复写透传：恢复扫描后写覆盖，缺省会把它改判成默认通道
+       *（wf-done 重放走 subagent-bg-notify 而非 workflow-result，W18 失效信号失联）。 */
+      deliveryCustomType?: string;
+    }> {
+      const out: Array<{ notifyId: string; content: string; record: object; deliveryCustomType?: string }> = [];
       for (const item of items.values()) {
         if (item.sentAt !== undefined) continue;
         // 逐条浅拷贝：消费方（dispose 落盘复写）不得持有内部可变态。
-        out.push({ notifyId: item.notifyId, content: item.content, record: { ...item.record } });
+        out.push({
+          notifyId: item.notifyId,
+          content: item.content,
+          record: { ...item.record },
+          ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
+        });
       }
       return out;
     },
@@ -553,7 +612,7 @@ export function createNotifyLedger(
     return {
       content: batch.map((i) => i.content).join("\n\n---\n\n"),
       display: true,
-      details: { batch: true, items: batch.map((i) => i.record) },
+      details: { batch: true, items: flattenBatchItems(batch) },
     };
   }
 
@@ -588,10 +647,16 @@ export function createNotifyLedger(
     items.delete(item.notifyId);
     abandonedIds.add(item.notifyId);
     // 消息含 subagent 标识与恢复指引（S-E 验收面）；notifyId/attempts 等动态值按
-    // D4 约定放 data 参数（msg 近固定 key，限流命中面）。
+    // D4 约定放 data 参数（msg 近固定 key，限流命中面）。恢复指引按送达通道分诊
+    // （错误信息必须可操作）：workflow 收口通知（wf-done）的核对对象是 workflow run，
+    // subagents list 查不到——workflow tool 的 status action 才是可达的核对路径。
+    const recoveryHint =
+      item.deliveryCustomType === "workflow-result"
+        ? 'workflow action:"status" (workflow runs)'
+        : 'subagents action:"list"';
     logger.warn(
       `Subagent "${itemLabel(item)}" notification abandoned - no receipt after ` +
-        `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts; verify manually via subagents action:"list"`,
+        `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts; verify manually via ${recoveryHint}`,
       { notifyId: item.notifyId, attempts: item.attempts },
     );
     maybeStopWatchdog();

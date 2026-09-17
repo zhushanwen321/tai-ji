@@ -865,6 +865,10 @@ export class SubagentService {
           notifyId: item.notifyId,
           content: item.content,
           record: item.record,
+          // 通道字段必须透传（与 ledger.record 同 schema）：恢复扫描按 notifyId 后写
+          // 覆盖，缺省 entry 会把 wf-done 改判成默认通道——workflow-result 失效信号
+          // 失联（W18 不触发，workflows 增量不刷新）。
+          ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
         });
       }
       logger.warn(

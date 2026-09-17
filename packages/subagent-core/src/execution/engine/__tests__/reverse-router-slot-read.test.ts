@@ -159,4 +159,33 @@ describe("D3：reverse-router host/askUser 槽现读（构造期固化已消除�
       await client.dispose();
     }
   });
+
+  it("窗口内旧 handler 抛 assertActive（reload 间隙形态）→ 降级 {cancelled:true}，不崩不误报 unsupported", async () => {
+    // 设计 §5 单测面清单项（D3 检查点补全）：reload 窗口内（invalidate → adoption 完成）
+    // 槽上仍是旧 ctx 的 handler，其应答链触碰旧 pi 命中 assertActive——结构性 catch
+    // 须把该形态降级为 {cancelled:true}（dialog-queue 应答链同款语义）：引擎侧收到
+    // cancelled 后子进程可继续推进（非死锁、非崩溃），warn 留痕供归因。
+    const client = new EngineClient({
+      engineId: "fake",
+      command: process.execPath,
+      args: [
+        FAKE_ENGINE,
+        "--run-actions",
+        JSON.stringify([{ op: "askUser", request: { method: "select", id: "q-stale" } }]),
+      ],
+      hostKind: "test",
+      dataDir,
+      envPrefixes: [],
+    });
+    try {
+      setHostUiRequestEndpoint(async () => {
+        throw new Error("session context is no longer active (assertActive)");
+      });
+      const outcome = await runAskUser(client, "run-1", { method: "select", id: "q-stale" });
+      // 引擎 echo 的应答形态必须是 cancelled（unsupported = 槽空形态；崩 = 无 echo）
+      expect(askUserEcho(outcome)).toContain('"cancelled":true');
+    } finally {
+      await client.dispose();
+    }
+  });
 });

@@ -246,6 +246,50 @@ describe("T4④ shutdown flush blocked → pending persisted for replay", () => 
     expect(ledger2.recoverFromSession()).toBe(1);
   });
 
+  it("rewritten entry carries deliveryCustomType — wf-done replays on workflow-result channel, not default", () => {
+    // 通道保真回归：复写 entry 缺通道字段时，恢复扫描的后写覆盖会把 wf-done 改判成
+    // 默认通道（subagent-bg-notify）——runtime W18 失效信号按 customType==='workflow-result'
+    // 判定，错通道则 workflows 增量不刷新 + 边缘聚合误判 unparsed。
+    const ledger = bindNotifyLedgerHost({
+      appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
+      readSessionEntries: () => [],
+      isIdle: () => false,
+      onAgentSettled: () => {},
+      sendDelivery: (message) => pi.sendMessage(message as never),
+    });
+    expect(
+      ledger.record("wf-done:run-1", "Workflow run finished", { name: "my-flow" }, { deliveryCustomType: "workflow-result" }),
+    ).toBe(true);
+
+    service.dispose();
+
+    // dispose 复写（最后一条 NOTIFY_LEDGER_CUSTOM_TYPE entry）必须携带通道字段
+    const replayEntries = pi.appendEntry.mock.calls.filter(
+      (c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE && (c[1] as { notifyId?: string })?.notifyId === "wf-done:run-1",
+    );
+    expect(replayEntries.length).toBeGreaterThanOrEqual(2);
+    const rewritten = replayEntries[replayEntries.length - 1]?.[1] as { deliveryCustomType?: string };
+    expect(rewritten.deliveryCustomType).toBe("workflow-result");
+
+    // 恢复侧闭环：新 ledger 扫账面（含复写 entry 的后写覆盖），pending 通道保持 workflow-result
+    const host2 = {
+      appendLedgerEntry: vi.fn(),
+      readSessionEntries: () =>
+        pi.appendEntry.mock.calls
+          .filter((c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE)
+          .map((c) => ({ type: "custom", customType: c[0], data: c[1] })),
+      isIdle: () => false,
+      onAgentSettled: () => {},
+      sendDelivery: vi.fn(),
+    };
+    const ledger2 = bindNotifyLedgerHost(host2);
+    expect(ledger2.recoverFromSession()).toBe(1);
+    expect(ledger2.pendingEntries()[0]).toMatchObject({
+      notifyId: "wf-done:run-1",
+      deliveryCustomType: "workflow-result",
+    });
+  });
+
   it("does not rewrite when main agent is idle (flush already delivered)", () => {
     const ledger = bindNotifyLedgerHost({
       appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
