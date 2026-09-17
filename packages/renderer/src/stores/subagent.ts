@@ -23,7 +23,7 @@
  * 现有 import 路径向后兼容。
  */
 import { defineStore } from 'pinia'
-import { getCurrentScope, onScopeDispose, ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import type { SubagentRecord, Message } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
@@ -65,10 +65,22 @@ export const useSubagentStore = defineStore('subagent', () => {
    */
   const partition = createPartitionedRecords<SubagentRecord>()
 
-  /** 加载态（M1：loadSubagents 在途时 true） */
-  const isLoading = ref(false)
-  /** 加载错误（M1：loadSubagents 失败时设错误消息，null = 无错误） */
-  const loadError = ref<string | null>(null)
+  /** 加载态（M1：loadSubagents 在途时 true；per-session Map 分区，ADR-0049 派——
+   * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
+  const loadingBySession = ref(new Map<string, boolean>())
+  /** 加载错误（M1：loadSubagents 失败时设该 sid 分区错误消息；缺省 null = 无错误。
+   * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
+  const loadErrorBySession = ref(new Map<string, string | null>())
+
+  /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
+  function isLoadingOf(sessionId: string): boolean {
+    return loadingBySession.value.get(sessionId) ?? false
+  }
+
+  /** per-session 加载错误读取 */
+  function loadErrorOf(sessionId: string): string | null {
+    return loadErrorBySession.value.get(sessionId) ?? null
+  }
 
   // ── 非响应式资源表（参照 chat.ts streamingTimers 模式）──
   /**
@@ -106,9 +118,18 @@ export const useSubagentStore = defineStore('subagent', () => {
   /**
    * 响应式视图：指定 session 的 subagent 列表（供组件 computed 订阅，对齐 command.ts commandsOf）。
    * 切会话时读不同分区，records 变化自动重算。
+   * opts.excludeOrigin：origin 过滤选项（S1 判据单源化——与 hasRunning 同一参数形态，
+   * 调用方需要把 workflow 派发 record 归 workflow 面板时排除，禁止消费侧各写内联 filter
+   * 形成第二判据）。
    */
-  function recordsOf(sessionId: string): ComputedRef<SubagentRecord[]> {
-    return partition.recordsOf(sessionId)
+  function recordsOf(
+    sessionId: string,
+    opts?: { excludeOrigin?: SubagentRecord['origin'] },
+  ): ComputedRef<SubagentRecord[]> {
+    const base = partition.recordsOf(sessionId)
+    if (opts?.excludeOrigin === undefined) return base
+    const exclude = opts.excludeOrigin
+    return computed(() => base.value.filter((s) => s.origin !== exclude))
   }
 
   /** 非响应式读：指定 session 的 subagent 列表（不写 Map，无则空数组，对齐 command.ts getCommands） */
@@ -149,6 +170,8 @@ export const useSubagentStore = defineStore('subagent', () => {
   function clearSession(sessionId: string): void {
     strikeGuard.reset(sessionId)
     partition.clear(sessionId)
+    loadingBySession.value.delete(sessionId)
+    loadErrorBySession.value.delete(sessionId)
   }
 
   /**
@@ -187,8 +210,8 @@ export const useSubagentStore = defineStore('subagent', () => {
    */
   async function loadSubagents(sessionId: string): Promise<void> {
     if (!sessionId) return // 空 sid 不写分区
-    isLoading.value = true
-    loadError.value = null
+    loadingBySession.value.set(sessionId, true)
+    loadErrorBySession.value.delete(sessionId)
     try {
       const records = await sessionApi.getSubagents(sessionId)
       // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3）：strike 语义单源在
@@ -202,14 +225,14 @@ export const useSubagentStore = defineStore('subagent', () => {
       strikeGuard.reset(sessionId)
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区，设 loadError；strike 重置（「连续 RPC 成功且空」语义纯净，
+      // M1：失败不覆盖现有分区，设该 sid 分区 loadError；strike 重置（「连续 RPC 成功且空」语义纯净，
       // 读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
       strikeGuard.reset(sessionId)
       const msg = toErrorMessage(e)
       console.error('[subagent-store] loadSubagents failed:', e)
-      loadError.value = msg
+      loadErrorBySession.value.set(sessionId, msg)
     } finally {
-      isLoading.value = false
+      loadingBySession.value.set(sessionId, false)
     }
   }
 
@@ -346,8 +369,8 @@ export const useSubagentStore = defineStore('subagent', () => {
   return {
     // state
     recordsBySession: partition.recordsBySession,
-    isLoading,
-    loadError,
+    isLoadingOf,
+    loadErrorOf,
     // getters
     isRunning,
     isStreamingSubagent,

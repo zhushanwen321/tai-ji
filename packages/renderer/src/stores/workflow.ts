@@ -48,10 +48,22 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   const partition = createPartitionedRecords<WorkflowRunRecord>()
 
-  /** 加载态（M1：loadWorkflows 在途时 true，组件据此显示 spinner） */
-  const isLoading = ref(false)
-  /** 加载错误（M1：loadWorkflows 失败时设错误消息，null = 无错误；records 保留旧数据不清空） */
-  const loadError = ref<string | null>(null)
+  /** 加载态（M1：loadWorkflows 在途时 true；per-session Map 分区，ADR-0049 派——
+   * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
+  const loadingBySession = ref(new Map<string, boolean>())
+  /** 加载错误（M1：失败时设该 sid 分区错误消息；缺省 null = 无错误；records 保留旧数据不清空。
+   * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
+  const loadErrorBySession = ref(new Map<string, string | null>())
+
+  /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
+  function isLoadingOf(sessionId: string): boolean {
+    return loadingBySession.value.get(sessionId) ?? false
+  }
+
+  /** per-session 加载错误读取 */
+  function loadErrorOf(sessionId: string): string | null {
+    return loadErrorBySession.value.get(sessionId) ?? null
+  }
 
   /**
    * [M7 D6] mainSessionId → Set<agentCallVirtualId> 映射。
@@ -115,6 +127,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function clearSession(sessionId: string): void {
     strikeGuard.reset(sessionId)
     partition.clear(sessionId)
+    loadingBySession.value.delete(sessionId)
+    loadErrorBySession.value.delete(sessionId)
   }
 
   // ── getters ──
@@ -136,8 +150,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   async function loadWorkflows(sessionId: string): Promise<void> {
     if (!sessionId) return // 空 sid 不写分区
-    isLoading.value = true
-    loadError.value = null
+    loadingBySession.value.set(sessionId, true)
+    loadErrorBySession.value.delete(sessionId)
     try {
       const records = await sessionApi.getWorkflows(sessionId)
       // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3，与 subagent.ts 同款）：
@@ -151,14 +165,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
       strikeGuard.reset(sessionId)
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区（保留旧数据），设 loadError 让组件显示重试态；strike 重置
+      // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError；strike 重置
       //（「连续 RPC 成功且空」语义纯净，读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
       strikeGuard.reset(sessionId)
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[workflow-store] loadWorkflows failed:', e)
-      loadError.value = msg
+      loadErrorBySession.value.set(sessionId, msg)
     } finally {
-      isLoading.value = false
+      loadingBySession.value.set(sessionId, false)
     }
   }
 
@@ -237,8 +251,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   return {
     // state
     recordsBySession: partition.recordsBySession,
-    isLoading,
-    loadError,
+    isLoadingOf,
+    loadErrorOf,
     // getters
     workflowCount,
     // per-session 分区读写（ADR-0049 Map 分区派）

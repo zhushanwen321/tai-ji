@@ -116,8 +116,8 @@ describe('subagent store — loadSubagents', () => {
     // M1 契约：失败不覆盖现有分区数据，设 loadError 供错误态展示
     expect(store.getRecordsBySession('session-1')).toHaveLength(1)
     expect(store.getRecordsBySession('session-1')[0].subagentId).toBe('bg-test-1-111')
-    expect(store.loadError).toBe('network')
-    expect(store.isLoading).toBe(false)
+    expect(store.loadErrorOf('session-1')).toBe('network')
+    expect(store.isLoadingOf('session-1')).toBe(false)
   })
 
   it('sessionId 为空时不写分区', async () => {
@@ -169,7 +169,7 @@ describe('subagent store — loadSubagents 空结果守卫（接线冒烟）', (
       'session-1',
     )
     // 守卫不是错误态：不设 loadError
-    expect(store.loadError).toBeNull()
+    expect(store.loadErrorOf('session-1')).toBeNull()
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {

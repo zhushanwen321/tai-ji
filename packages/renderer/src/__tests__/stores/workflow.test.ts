@@ -90,7 +90,7 @@ describe('workflow store', () => {
 
     // M1 契约：失败不覆盖现有分区数据，设 loadError
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.loadError).toBe('rpc error')
+    expect(store.loadErrorOf('sess-1')).toBe('rpc error')
   })
 
   it('clearWorkflows 清空所有分区 + 清 agentcall 映射', () => {
@@ -146,7 +146,7 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
       'sess-1',
     )
     // 守卫不是错误态：不设 loadError
-    expect(store.loadError).toBeNull()
+    expect(store.loadErrorOf('session-1')).toBeNull()
   })
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {

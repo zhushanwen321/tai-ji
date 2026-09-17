@@ -159,10 +159,11 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   const backgroundTasks = useBackgroundTasks(normalizedSid)
 
   // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
+  // excludeOrigin 选项式（S1 判据单源化，与 hasRunning 同形态；禁止内联 filter 第二判据）
   const subagentRecords = computed(() =>
     subagentStore
-      .recordsOf(normalizedSid.value ?? '')
-      .value.filter((r) => r.origin !== 'workflow'),
+      .recordsOf(normalizedSid.value ?? '', { excludeOrigin: 'workflow' })
+      .value,
   )
   const subagentRunning = computed(() => subagentRecords.value.filter((r) => isRunningProjection(r)))
   // 已结束 = !isRunningProjection（[两视图裁决 2026-09-16]：「已收起」机制已全链路删除，
@@ -241,13 +242,14 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     },
     bashPartition: backgroundTasks.current,
     errors: {
-      subagent: computed(() => subagentStore.loadError),
-      workflow: computed(() => workflowStore.loadError),
+      // per-sid 分区读（ADR-0049）：split 模式 pane A 的加载失败不得遮蔽 pane B 面板
+      subagent: computed(() => subagentStore.loadErrorOf(normalizedSid.value ?? '')),
+      workflow: computed(() => workflowStore.loadErrorOf(normalizedSid.value ?? '')),
     },
     loading: {
       bash: computed(() => !backgroundTasks.current.value.loaded),
-      subagent: computed(() => subagentStore.isLoading),
-      workflow: computed(() => workflowStore.isLoading),
+      subagent: computed(() => subagentStore.isLoadingOf(normalizedSid.value ?? '')),
+      workflow: computed(() => workflowStore.isLoadingOf(normalizedSid.value ?? '')),
     },
     retry,
   }
