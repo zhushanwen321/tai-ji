@@ -1417,7 +1417,7 @@ export class SessionLifecycle implements ISessionRegistry {
     })
 
     // 4. switch_session 附着 fork 产物正式文件 + sidecar 写入（失败清理见 attachForkedFile）
-    await this.attachForkedFile(client, srcSessionId, forkedId, forkedFilePath, forkPresetId, forkProjectId, presetClientOptions)
+    await this.attachForkedFile(client, srcSessionId, forkedId, forkedFilePath, forkPresetId, forkProjectId)
 
     // 5. 初始化 managed session（adapter、入 sessions Map）
     // FR-2 active 路径回传血缘：parentSession + forkEntryId 透传到 IManagedSessionView，
@@ -1574,7 +1574,6 @@ export class SessionLifecycle implements ISessionRegistry {
     forkedFilePath: string,
     forkPresetId: string,
     forkProjectId: string | undefined,
-    presetClientOptions: PresetClientOptions,
   ): Promise<void> {
     try {
       // 4. W1（restore-fork-attach-fix F1）：pi 的 switch_session 永久重绑读写目标
