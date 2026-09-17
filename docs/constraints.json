@@ -2781,6 +2781,7 @@
       "scope": [
         "extensions/universal/subagent-workflow/src/workflow-events.ts",
         "extensions/universal/subagent-workflow/src/session-lifecycle.ts",
+        "extensions/universal/subagent-workflow/src/jsonl-run-store.ts",
         "packages/subagent-core/src/execution/engine/registry.ts",
         "packages/subagent-core/src/execution/engine/client/reverse-router.ts"
       ],
