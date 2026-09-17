@@ -32,24 +32,16 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
 
 interface ServiceInternals {
   store: RecordStore;
@@ -59,7 +51,7 @@ function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike;
+  pi: PiMock;
   fake: FakePiEnginePort;
 } {
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "cancel-close-"));
@@ -102,7 +94,7 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {

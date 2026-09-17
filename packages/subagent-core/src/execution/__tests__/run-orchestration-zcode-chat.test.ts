@@ -35,12 +35,12 @@ import type {
   SessionView,
 } from "../engine/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
@@ -136,10 +136,6 @@ interface ServiceInternals {
   store: RecordStore;
 }
 
-function makePi(): PiLike {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } } as unknown as PiLike;
-}
-
 const EMPTY_REGISTRY: ModelRegistryLike = {
   getAvailable: () => [],
   find: () => undefined,
@@ -154,7 +150,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   let store: RecordStore;
   let zcode: ZcodeColdEngine;
   let piEngine: FakePiEnginePort;
-  let pi: PiLike;
+  let pi: PiMock;
   let prevDataDirEnv: string | undefined;
 
   beforeEach(() => {

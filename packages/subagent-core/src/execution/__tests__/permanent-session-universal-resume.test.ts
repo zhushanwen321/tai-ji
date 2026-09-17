@@ -25,6 +25,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 import { writeFinalizedState, readRecordBinding } from "../persistence/state-marker.ts";
@@ -46,14 +47,6 @@ const IDENTITY_ENV_KEYS = [
 /** 「异进程且存活」的确定性模拟 pid（恒活外部 pid 1，self-pid 排除后本进程 pid
  *  不可用——同 cold-lookup.test.ts FOREIGN_LIVE_PID 手法）。 */
 const FOREIGN_LIVE_PID = 1;
-
-function makePi() {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
 
 /** 写最小合法 subagent session.jsonl（session header + identity entry + assistant
  *  message——transcript 有历史，锚可解析）。 */
@@ -118,7 +111,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   let agentDir: string;
   let sessionsDir: string;
   let service: SubagentService;
-  let pi: ReturnType<typeof makePi>;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {

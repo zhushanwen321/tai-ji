@@ -41,22 +41,14 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { armSettledWatchdog, hasSettledWatchdog, SETTLED_MID_ROUND_NO_PROGRESS_MS, _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { armIdleTimer, hasIdleTimer, _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-recovery-bounds-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}): ExecutionRecord {
@@ -79,7 +71,7 @@ interface ServiceInternals {
   store: RecordStore;
 }
 
-type MockPi = ReturnType<typeof makePi>;
+type MockPi = PiMock;
 
 function setup(): { agentDir: string; service: SubagentService; store: RecordStore; pi: MockPi; fake: FakePiEnginePort } {
   const agentDir = makeTmpAgentDir();
@@ -270,7 +262,7 @@ describe("T2③ hot-path settled watchdog", () => {
     expect(record.lastError).toContain("action:'list'");
     // 失败通知送达（Continuation 独立载荷——正文带失败摘要与恢复指引）
     expect(pi.sendMessage).toHaveBeenCalled();
-    const sendMessageCalls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[{ content?: string }]>;
+    const sendMessageCalls = pi.sendMessage.mock.calls;
     const notifyContent = sendMessageCalls[0]?.[0]?.content ?? "";
     expect(notifyContent).toContain("settled watchdog");
     // [H1 U6] 引擎侧终止意图（watchdog fire 的 cancel 受理断言）随 interact 面退役——

@@ -35,21 +35,14 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
-import { SubagentService, type PiLike } from "../subagent-service.ts";
+import { SubagentService } from "../subagent-service.ts";
 import { endedMessageGuard } from "../assembly/subagent-actions-core.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { isReconnectableFinalReason } from "../assembly/types.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dispose-manifest-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 function makeRecord(overrides: Partial<ExecutionRecord> & { id?: string } = {}): ExecutionRecord {

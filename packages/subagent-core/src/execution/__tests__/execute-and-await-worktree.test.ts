@@ -39,15 +39,12 @@ import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 // ── 辅助：service 构造（与 execute-nesting.test.ts setup 等价）──
 
 function makeEmptyRegistry(): ModelRegistryLike {
   return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
 }
 
 interface SetupResult {

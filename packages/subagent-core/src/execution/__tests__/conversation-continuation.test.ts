@@ -37,12 +37,12 @@ import { bindNotifyLedgerHost } from "../notify/notify-ledger.ts";
 import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import {
   armMidRoundNoProgress,
   getSettledWatchdogPhase,
@@ -805,14 +805,6 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
 // SubagentService 集成面（fake engine 协议替身）
 // ============================================================
 
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
-
 interface ServiceInternals {
   store: RecordStore;
 }
@@ -821,7 +813,7 @@ function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike;
+  pi: PiMock;
   fake: FakePiEnginePort;
 } {
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "cont-integration-"));
@@ -865,7 +857,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -966,9 +958,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     expect(record.status).toBe("idle");
     // 失败通知：独立载荷（正文 = 失败摘要 + 恢复指引），dedup key = id:2
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
-    const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
-      [{ content?: string; details?: { notifyId?: string; round?: number } }]
-    >;
+    const calls = pi.sendMessage.mock.calls;
     const content = calls[0]?.[0]?.content ?? "";
     expect(content).toContain("failed");
     expect(content).toContain("round did not complete: engine_round_crashed: child died");
@@ -998,7 +988,7 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 收口落账：在�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -1040,7 +1030,7 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 收口落账：在�
     expect(record.status).toBe("idle");
     // 「已结束」提示（chatMode 收口通知一条）
     await vi.waitFor(() => {
-      const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      const calls = pi.sendMessage.mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(2);
     });
   });
@@ -1084,7 +1074,7 @@ describe("集成：[S1 P1] cancel 后续聊——被取消轮迟到 run 应答�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -1147,9 +1137,7 @@ describe("集成：[S1 P1] cancel 后续聊——被取消轮迟到 run 应答�
     // [two-state-convergence U4/D3] 新轮轮终翻 idle。
     expect(record.status).toBe("idle");
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
-    const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
-      [{ details?: { notifyId?: string } }]
-    >;
+    const calls = pi.sendMessage.mock.calls;
     expect(calls[0]?.[0]?.details).toMatchObject({ notifyId: "sa-s1-late:2" });
   });
 });
@@ -1260,7 +1248,7 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -1302,9 +1290,7 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     expect(adoptSpy).not.toHaveBeenCalled();
     // 单发：Continuation 失败通知恰一条（不存在 supervisor merged notice 双发面）
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
-    const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
-      [{ content?: string }]
-    >;
+    const calls = pi.sendMessage.mock.calls;
     expect(calls[0]?.[0]?.content).toContain("engine process exited unexpectedly");
   });
 });
@@ -1313,7 +1299,7 @@ describe("集成：stale-child 派发前兜底（红线②）", () => {
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -1363,7 +1349,7 @@ describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断�
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
 
   beforeEach(() => {
@@ -1410,13 +1396,12 @@ describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断�
     expect(record!.result).toContain("round did not complete");
     // 失败通知发出（独立载荷过 notifyGate 门 → notifyHost.notify）
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
-    const calls = (pi.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<
-      [{ content?: string; details?: { notifyId?: string; outcome?: string } }]
-    >;
+    const calls = pi.sendMessage.mock.calls;
     expect(calls[0]?.[0]?.content).toContain(`Subagent "general-purpose" (${record!.id}) failed`);
     expect(calls[0]?.[0]?.content).toContain("round did not complete");
     expect(calls[0]?.[0]?.content).toContain("Recovery");
-    expect(calls[0]?.[0]?.details?.outcome).toBe("failed");
+    const details = calls[0]?.[0]?.details as { outcome?: string } | undefined;
+    expect(details?.outcome).toBe("failed");
   });
 
   it("chat 轮路径零变化：continuation 轮 arm 仍走 onWatchdogFire（fire 不触发 one-shot 处置）", async () => {
@@ -1543,7 +1528,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
-  let pi: PiLike;
+  let pi: PiMock;
   let fake: FakePiEnginePort;
   let entries: SubagentRecordEntryData[];
   let prevDataDirEnv: string | undefined;
@@ -1566,7 +1551,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     service = new SubagentService({ cwd: agentDir, modelService });
     pi = makePi();
     entries = [];
-    (pi.appendEntry as ReturnType<typeof vi.fn>).mockImplementation(
+    pi.appendEntry.mockImplementation(
       (customType: string, data: unknown) => {
         if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
       },

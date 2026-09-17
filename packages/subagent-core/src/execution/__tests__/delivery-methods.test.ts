@@ -26,23 +26,15 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import * as lifecycle from "../lifecycle/lifecycle-manager.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "delivery-test-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(() => {}),
-    events: { emit: vi.fn(() => {}) },
-    sendMessage: vi.fn(() => {}),
-  };
 }
 
 /** chatMode idle record（第一轮已完成，等待续聊）。sessionFile 由调用方覆盖为 agentDir 下路径。 */

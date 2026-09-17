@@ -32,8 +32,8 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 type Baseline = { recordId: string | undefined; depth: number } | null;
 const MAIN_PROCESS: Baseline = null;
@@ -42,14 +42,6 @@ const SIBLING_B: Baseline = { recordId: "sa-B", depth: 1 };
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "parent-guard-"));
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 /** 暴露私有字段供测试注入身份。[D3-⑤] 基线住进 execNesting（公共层

@@ -46,9 +46,9 @@ import { ModelConfigService } from "../../execution/assembly/model-config-servic
 import type { ModelInfo, ModelRegistryLike } from "../../execution/assembly/model-resolver.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
-import type { PiLike } from "../../execution/subagent-service.ts";
 import { clearEngines } from "../../execution/engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
 
 // ── harness ──────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: fals
 interface PumpHarness {
   service: SubagentService;
   store: RecordStore;
-  pi: { appendEntry: ReturnType<typeof vi.fn>; events: { emit: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn> };
+  pi: PiMock;
   fake: FakePiEnginePort;
   run: WorkflowRun;
   postMessage: ReturnType<typeof vi.fn>;
@@ -76,12 +76,8 @@ function makePumpHarness(runId: string): PumpHarness {
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({ modelRegistry: makeEmptyRegistry(), sessionId: "wf-pump-it", ctxModel });
   const service = new SubagentService({ cwd: agentDir, modelService });
-  const pi = {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-  service.initSession({ pi: pi as unknown as PiLike, sessionId: "wf-pump-it" });
+  const pi = makePi();
+  service.initSession({ pi, sessionId: "wf-pump-it" });
   clearEngines();
   const fake = registerFakePiEngine();
 

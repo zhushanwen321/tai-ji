@@ -39,11 +39,12 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import { SubagentService, type PiLike } from "../subagent-service.ts";
+import { SubagentService } from "../subagent-service.ts";
 import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import {
   registerSpawnedChildForRecord,
@@ -60,14 +61,6 @@ const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: fal
 
 function makeEmptyRegistry(): ModelRegistryLike {
   return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
 }
 
 /** 最小 fake 子进程（EventEmitter + killed/pid——hasLiveProcessHandle 消费面）。 */

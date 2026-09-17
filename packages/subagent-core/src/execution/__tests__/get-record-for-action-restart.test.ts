@@ -32,6 +32,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { writeFinalizedState } from "../persistence/state-marker.ts";
 import { ResurrectDeniedError } from "../assembly/types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
@@ -47,24 +48,6 @@ const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_ROOT_CWD",
   "PI_SUBAGENT_FORK_DEPTH",
 ] as const;
-
-/** initSession 注入的最小 pi duck-type（同 subagent-service PiLike 形状，结构匹配即可）。 */
-interface PiStub {
-  appendEntry(customType: string, data?: unknown): void;
-  events: { emit(channel: string, data: unknown): void };
-  sendMessage(
-    message: { customType: string; content: string; display: boolean; details?: unknown },
-    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-  ): void;
-}
-
-function makePi(): PiStub {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
 
 /** 写一个最小合法 session.jsonl（session header + identity entry + 1 条 assistant message）。
  *  不写任何 sidecar（.alive/.cancelled/.finalized）→ sidecar 矩阵分支 4 → running。 */

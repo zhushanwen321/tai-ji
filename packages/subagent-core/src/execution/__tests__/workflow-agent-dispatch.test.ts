@@ -50,7 +50,6 @@ import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
@@ -70,6 +69,7 @@ import type { EngineCapabilities } from "../engine/types.ts";
 import type { EnginePort } from "../engine/port.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
 
@@ -79,20 +79,10 @@ function makeEmptyRegistry(): ModelRegistryLike {
 
 const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
-function makePi() {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
-
-type MockPi = ReturnType<typeof makePi>;
-
 interface DispatchHarness {
   service: SubagentService;
   store: RecordStore;
-  pi: MockPi;
+  pi: PiMock;
   fake: FakePiEnginePort;
   entries: SubagentRecordEntryData[];
   tmpRoot: string;
@@ -120,7 +110,7 @@ function makeHarness(opts: {
     if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
   });
   service.initSession({
-    pi: pi as unknown as PiLike,
+    pi,
     sessionId: "wf-dispatch-it",
     ...(opts.streamSink !== undefined ? { streamSink: opts.streamSink } : {}),
     ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
@@ -584,7 +574,7 @@ describe("D6 toNotifyRecord origin gate", () => {
   it("漏斗层单点：workflow record 完成/失败/关闭全返回 undefined（notifyComplete 零投递）", () => {
     const pi = makePi();
     const host = createNotifyHost({
-      getPi: () => pi as unknown as PiLike,
+      getPi: () => pi,
       listRunning: () => [],
       getIsIdle: () => undefined,
     });

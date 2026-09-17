@@ -25,11 +25,11 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 
@@ -41,18 +41,6 @@ function makeTmpAgentDir(): string {
 
 function makeModelService(agentDir: string): ModelConfigService {
   return new ModelConfigService({ agentDir, cwd: agentDir });
-}
-
-function makePi(): PiLike & {
-  appendEntry: ReturnType<typeof vi.fn<(customType: string, data?: unknown) => void>>;
-  events: { emit: ReturnType<typeof vi.fn<(channel: string, data: unknown) => void>> };
-  sendMessage: ReturnType<typeof vi.fn<(message: Parameters<PiLike["sendMessage"]>[0], options?: Parameters<PiLike["sendMessage"]>[1]) => void>>;
-} {
-  return {
-    appendEntry: vi.fn((customType: string, data?: unknown) => {}),
-    events: { emit: vi.fn((channel: string, data: unknown) => {}) },
-    sendMessage: vi.fn(() => {}),
-  };
 }
 
 describe("SubagentService", () => {
@@ -426,7 +414,7 @@ describe("SubagentService", () => {
     /** 构造已就绪 service（initSession + initModel）并保留 pi 引用以断言 events.emit。 */
     function makeReadyServiceWithPi(): {
       service: SubagentService;
-      pi: ReturnType<typeof makePi>;
+      pi: PiMock;
     } {
       const pi = makePi();
       const service = new SubagentService({ cwd: agentDir, modelService });

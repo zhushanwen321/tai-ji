@@ -22,6 +22,7 @@ import {
   manifestStoreModule,
 } from "./helpers/subagent-service-mocks.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 
 // ── mock modules ──
@@ -57,10 +58,6 @@ function getLastSpawnEnv(): Record<string, string | undefined> {
 
 function makeEmptyRegistry(): ModelRegistryLike {
   return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
 }
 
 const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };

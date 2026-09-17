@@ -40,6 +40,7 @@ vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 import { spawn } from "node:child_process";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
@@ -72,10 +73,6 @@ function registerHangingEngine(): FakePiEnginePort {
 
 function makeEmptyRegistry(): ModelRegistryLike {
   return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
 }
 
 function setup(env: Record<string, string>): { service: SubagentService; store: RecordStore } {

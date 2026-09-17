@@ -114,6 +114,7 @@ import { RELAY_ENV_NODE, RELAY_ENV_SCRIPT, RELAY_ENV_SOCKET } from "@zhushanwen/
 import { SubagentService } from "../subagent-service.ts";
 import { createBackgroundStream } from "../assembly/stream-sink.ts";
 import type { ExtensionMode } from "../assembly/host-mode.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
 const mockCreateStream = vi.mocked(createBackgroundStream);
@@ -141,10 +142,6 @@ function lastSpawnedChild(): FakeChild {
 
 function makeEmptyRegistry(): ModelRegistryLike {
   return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
 }
 
 const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };

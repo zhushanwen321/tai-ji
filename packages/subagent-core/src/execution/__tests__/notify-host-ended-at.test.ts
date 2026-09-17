@@ -30,6 +30,7 @@ import { createNotifyHost, type NotifyHost, type PiLike } from "../notify/notify
 import type { BgNotifyRecord } from "../notify/notifier.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 /** 冻结时钟（投影时刻断言基准）。 */
 const FROZEN_NOW = 1788189209000;
@@ -56,25 +57,6 @@ function makeHost(pi: PiLike | null = null): NotifyHost {
     listRunning: () => [],
     getIsIdle: () => undefined,
   });
-}
-
-interface SentMessage {
-  customType: string;
-  content: string;
-  details?: unknown;
-}
-
-/** pi 替身（投递链用例捕获 sendMessage 载荷）。 */
-function makePi(): { pi: PiLike; sent: SentMessage[] } {
-  const sent: SentMessage[] = [];
-  const pi: PiLike = {
-    appendEntry: () => {},
-    events: { emit: () => {} },
-    sendMessage: (message) => {
-      sent.push(message);
-    },
-  };
-  return { pi, sent };
 }
 
 beforeEach(() => {
@@ -156,13 +138,13 @@ describe("[U8] 投影边界一次完成 + record 内存零触碰", () => {
 
 describe("[U8] 收口提示投递链复用同一映射（notifyClosed）", () => {
   it("idle 落账形态送达：endedAt 物化（收口时刻 ≈ 结束时刻）+ 载荷固定 closed", () => {
-    const { pi, sent } = makePi();
+    const pi = makePi();
     const host = makeHost(pi);
 
     host.notifyClosed(makeRecord("sa-close", { status: "idle" }));
 
-    expect(sent).toHaveLength(1);
-    const details = sent[0]!.details as BgNotifyRecord;
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    const details = pi.sendMessage.mock.calls[0]![0].details as BgNotifyRecord;
     expect(details.status).toBe("closed");
     expect(details.endedAt).toBe(FROZEN_NOW);
   });

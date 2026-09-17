@@ -85,6 +85,7 @@ import {
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -196,10 +197,6 @@ function writeAgentMd(dir: string, engine: string): string {
   return file;
 }
 
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
-}
-
 const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
@@ -220,7 +217,7 @@ interface SetupResult {
   service: SubagentService;
   zcode: FakeEngine;
   piEngine: FakeEngine;
-  pi: ReturnType<typeof makePi>;
+  pi: PiMock;
 }
 
 function setup(agentDir: string): SetupResult {
@@ -866,7 +863,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   }, 10_000);
 
   /** 最后一条 subagent-record entry（register→archive 双写点取终态侧）。 */
-  function lastRecordEntry(pi: ReturnType<typeof makePi>): Record<string, unknown> | undefined {
+  function lastRecordEntry(pi: PiMock): Record<string, unknown> | undefined {
     const calls = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }

@@ -31,11 +31,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentOutcome } from "../engine/types.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetSettledWatchdogsForTest,
@@ -52,19 +52,11 @@ interface ServiceInternals {
   };
 }
 
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
-
 function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  pi: PiMock;
   fake: FakePiEnginePort;
   runOrchestration: ServiceInternals["runOrchestration"];
 } {
@@ -81,7 +73,7 @@ function makeService(): {
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });
   const service = new SubagentService({ cwd: agentDir, modelService });
-  const pi = makePi() as PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  const pi = makePi();
   service.initSession({ pi, sessionId: "root-session" });
   const { store, runOrchestration } = service as unknown as ServiceInternals;
   return { agentDir, service, store, pi, fake, runOrchestration };
