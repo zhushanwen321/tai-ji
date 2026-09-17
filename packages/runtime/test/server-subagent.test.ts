@@ -136,7 +136,10 @@ describe('RuntimeServer message.send（marker 通道废弃后的纯转发）', (
   /** Helper: connect a WS client, auth (S1-W1), and wait for initial state to drain */
   function connectClient(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    ws = new WebSocket(`ws://localhost:${port}`)
+    // 127.0.0.1 显式直连（server 只绑 127.0.0.1）：禁写 ws://localhost——happy-eyeballs 对
+    // localhost 竞速 ::1，满载下与 [::1]:<port> 的 v6only 外部进程撞号时错连被 RST。
+    // 完整根因与实测复现见 server-extension.test.ts connectClient 注释。
+    ws = new WebSocket(`ws://127.0.0.1:${port}`)
     ws.on('open', () => {
     // S1-W1：首条消息 auth，等 auth.result ok 后连接才可用
     ws.send(JSON.stringify({ type: 'auth', payload: { token: TEST_WS_TOKEN } }))

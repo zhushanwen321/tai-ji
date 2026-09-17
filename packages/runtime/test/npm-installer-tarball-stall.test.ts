@@ -134,8 +134,11 @@ async function startServer(): Promise<void> {
     res.writeHead(404)
     res.end('not found')
   })
-  // 不指定 host → 双栈监听，localhost 无论解析为 ::1 或 127.0.0.1 均可达
-  await new Promise<void>((resolve) => server.listen(0, resolve))
+  // 显式绑 127.0.0.1 单栈：不指定 host 会绑成 [::] 双栈，端口号互斥面扩到 v4+v6 两栈，
+  // 满载下跨 worker 端口撞号率放大（同族修复见 server-extension.test.ts connectClient 注释）。
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  // 连接串必须保持 localhost 域名（不可改 127.0.0.1）：installPackage 的 SSRF 校验
+  // validateUrlHost 拦纯 IP host（127.0.0.1 命中私网段 /^127\./），IP 直连会被 Blocked private IP 拒绝。
   baseUrl = `https://localhost:${(server.address() as AddressInfo).port}`
 }
 
