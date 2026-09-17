@@ -149,11 +149,10 @@ if [ -n "$FRONTEND_FILES" ]; then
             # 自动修复
             npx eslint --fix $ESLINT_FILES 2>/dev/null || true
 
-            # 重新检查
-            ESLINT_OUTPUT=$(npx eslint --max-warnings=0 --no-warn-ignored $ESLINT_FILES 2>&1)
-            ESLINT_EXIT_CODE=$?
-
-            if [ $ESLINT_EXIT_CODE -ne 0 ]; then
+            # 重新检查。if ! 形态：set -e 下 `VAR=$(cmd)` 非零退出会先于 EXIT=$? 捕获
+            # 终止脚本（诊断输出随变量一起丢失，实测 eslint 失败 exit 2 零输出）；
+            # if ! 把非零退出限制在条件表达式内，输出可见、失败分支可达。
+            if ! ESLINT_OUTPUT=$(npx eslint --max-warnings=0 --no-warn-ignored $ESLINT_FILES 2>&1); then
                 echo -e "${RED}[ERROR] ESLint 检查失败:${NC}"
                 echo "$ESLINT_OUTPUT"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
@@ -235,9 +234,8 @@ if [ -n "$EXTENSION_FILES" ]; then
     if [ "$SKIP_EXTENSION_LINT" != "1" ]; then
         ESLINT_EXT_FILES=$(echo "$EXTENSION_FILES" | tr '\n' ' ')
         echo -e "${BLUE}[INFO] 运行 ESLint 检查（仅拦 error）...${NC}"
-        ESLINT_EXT_OUTPUT=$(npx eslint --quiet --no-warn-ignored $ESLINT_EXT_FILES 2>&1)
-        ESLINT_EXT_EXIT=$?
-        if [ $ESLINT_EXT_EXIT -ne 0 ]; then
+        # if ! 形态：同前端 ESLint 段——set -e 下 `VAR=$(cmd)` 失败即退出吞诊断输出
+        if ! ESLINT_EXT_OUTPUT=$(npx eslint --quiet --no-warn-ignored $ESLINT_EXT_FILES 2>&1); then
             echo -e "${RED}[ERROR] extensions ESLint 检查失败:${NC}"
             echo "$ESLINT_EXT_OUTPUT"
             echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
@@ -1680,6 +1678,62 @@ else
 fi
 
 # ============================================================================
+# CI vitest 目标非空守卫（G2）
+#   staged 命中 ci.yml / 守卫脚本 / 其单测时触发：scripts/check-ci-vitest-targets.mjs
+#   解析 .github/workflows/ci.yml 全部 `vitest run` 调用（含经 package.json script 一层
+#   间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被 config
+#   exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test files
+#   found，每轮 CI 烧到该步才红）。
+#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   守卫脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+CI_VITEST_STAGED=$(git diff --cached --name-only -- .github/workflows/ci.yml scripts/check-ci-vitest-targets.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs)
+if echo "$CI_VITEST_STAGED" | grep -qE "^\.github/workflows/ci\.yml$|^scripts/check-ci-vitest-targets\.mjs$|^scripts/__tests__/check-ci-vitest-targets\.test\.mjs$"; then
+    print_section "[CI vitest 目标非空守卫]"
+    if [ ! -f "scripts/check-ci-vitest-targets.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-ci-vitest-targets.mjs（守卫脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-ci-vitest-targets.mjs; then
+        echo -e "${RED}[ERROR] CI vitest 目标非空守卫失败——按上方 ✗ 明细核对目标路径与 config 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] CI vitest 目标非空守卫通过（G2）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 ci.yml/守卫变更，跳过 CI vitest 目标守卫${NC}"
+fi
+
+# ============================================================================
+# hook 脚本反模式守卫（G3）
+#   staged 命中 install-hooks.sh / 守卫自身时触发：
+#   .githooks/check_hook_exitcode_antipattern.py —— install-hooks.sh 内 `VAR=$(cmd)`
+#   赋值后紧跟 `EXIT=$?` 捕获的组合在 set -e 下是死代码 + 吞诊断输出（赋值失败即
+#   整脚退出，$? 行永不可达；2026-09 实测 pre-commit 内 ESLint 失败 exit 2 零输出），
+#   一律 if ! VAR=$(cmd) 形态（诊断可见、失败分支可达）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸兜底）。
+# ============================================================================
+
+HOOK_ANTI_STAGED=$(git diff --cached --name-only -- .githooks/install-hooks.sh .githooks/check_hook_exitcode_antipattern.py)
+if echo "$HOOK_ANTI_STAGED" | grep -qE "^\.githooks/install-hooks\.sh$|^\.githooks/check_hook_exitcode_antipattern\.py$"; then
+    print_section "[hook 脚本反模式守卫]"
+    if [ ! -f ".githooks/check_hook_exitcode_antipattern.py" ]; then
+        echo -e "${RED}[ERROR] 找不到 .githooks/check_hook_exitcode_antipattern.py（守卫脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! python3 .githooks/check_hook_exitcode_antipattern.py; then
+        echo -e "${RED}[ERROR] hook 脚本反模式守卫失败——按上方 [FIX] 指引改 if ! VAR=\$(cmd) 形态后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] hook 脚本反模式守卫通过（G3）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 hook 安装脚本变更，跳过 hook 反模式守卫${NC}"
+fi
+
+# ============================================================================
 # 全部通过
 # ============================================================================
 
@@ -1772,6 +1826,8 @@ echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bai
 echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道守卫（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
 echo -e "  ${GREEN}[+]${NC} 数据布局字面量守卫（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"
+echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
+echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

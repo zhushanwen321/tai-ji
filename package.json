@@ -16,6 +16,7 @@
     "build:e2e": "pnpm --filter @taiji/electron build:e2e",
     "test": "pnpm --filter './packages/**' --filter './apps/**' --filter './extensions/**' --no-bail run test",
     "test:e2e": "playwright test",
+    "test:taste-lint": "pnpm exec vitest run --config taste-lint/vitest.config.ts taste-lint",
     "dev:smoke": "node scripts/dev-smoke.mjs",
     "changeset": "changeset",
     "changeset:version": "changeset version",

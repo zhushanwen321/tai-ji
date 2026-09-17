@@ -52,8 +52,11 @@ jobs:
       # 面与 ESLint 同 job 触发（规则改坏时用例先红）。pnpm exec 显式走 workspace 本地
       # node_modules/.bin（node-linker=hoisted 下 vitest 提升到根）；不用 npx——本地无
       # bin 时会静默从 registry 拉最新版运行（行为漂移而非报错，PR #185 review R2 INFO）。
+      # 经专用 script 承接：根 vitest.config.ts exclude 了 taste-lint/**，根 cwd 直接
+      # `vitest run taste-lint` 收集不到任何文件（曾实发 No test files found）——专用
+      # config + 目标非空守卫见 scripts/check-ci-vitest-targets.mjs（G2，invariants）。
       - name: Test - taste-lint rules
-        run: pnpm exec vitest run taste-lint
+        run: pnpm run test:taste-lint
 
   typecheck:
     name: TypeCheck
@@ -267,7 +270,7 @@ jobs:
       # thinking-levels 守卫测试同批追加 check-thinking-levels（纯函数 + tmp mirror CLI 集成，
       # mirror 内复制守卫副本运行、pi-ai 走 node_modules symlink，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -586,6 +589,19 @@ jobs:
       # 新包/新 config 漏挂防线在此红灯。
       - name: Vitest test-guard mount guard
         run: node scripts/check-vitest-guard.mjs
+
+      # G2 CI vitest 目标非空守卫：解析本文件全部 `vitest run` 调用（含经 package.json
+      # script 一层间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被
+      # config exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test
+      # files found，每轮 CI 烧到该步才红）。
+      - name: CI vitest targets non-empty guard (G2)
+        run: node scripts/check-ci-vitest-targets.mjs
+
+      # G3 hook 脚本反模式守卫：install-hooks.sh 内 `VAR=$(cmd)` 赋值后紧跟 `EXIT=$?`
+      # 的组合在 set -e 下是死代码 + 吞诊断输出（赋值失败即整脚退出，$? 行永不可达），
+      # 一律 if ! VAR=$(cmd) 形态（诊断可见、失败分支可达）。
+      - name: Hook script antipattern guard (G3)
+        run: python3 .githooks/check_hook_exitcode_antipattern.py
 
   # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
   # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。

@@ -10,7 +10,8 @@ import { taijiTestConfig } from './test-guard/factory.ts'
 // exclude：e2e/ 是 playwright 领地（非 vitest 执行器）；taste-lint/ 是独立工具链；
 // 各包 **/e2e/ 是真实 pi / 真实 LLM 的门控验收资产（e2e 执行准则：按改动面触发），
 // 从根跑全仓单测时不得误扫——误扫既打红（e2e 产物写包目录被 guard 拦）又有误触发
-// 真实 LLM 消耗的风险。
+// 真实 LLM 消耗的风险。taste-lint/ 由专用 config + script 承接（taste-lint/vitest.config.ts
+// + package.json test:taste-lint，见 ci.yml lint job），exclude 不是豁免不管。
 export default taijiTestConfig({
   test: {
     reporters: ['default', 'junit'],
