@@ -77,7 +77,18 @@ export class ReloadOrchestrator {
    * 不清则永久残留 Set。组合根绑 sessionService.setOnSessionDelete → 此方法。
    */
   clearPending(sessionId: string): void {
-    this.pendingReload.delete(sessionId)
+    // Set.delete 返回值 = 该 sid 是否确在队中：在队才留痕（普通删除 / 从未入队
+    // 的 sid 走此路径是常态，不打 decision 行噪音）。
+    const wasQueued = this.pendingReload.delete(sessionId)
+    if (wasQueued) {
+      // [skill-reload D8-b] queued 行的终态留痕：已落 decision=queued 的 session 被
+      // 删除后永不进 onMessageComplete 消费点，仅静默 delete 会让归因链在
+      // 「queued → 无下文」处断链（对照组：decision-time 已删有 skipped-deleted 行，
+      // 同构场景须同待）。
+      console.log(
+        `[reload-orchestrator] sessionId=${sessionId} decision=skipped-deleted (session deleted while queued)`,
+      )
+    }
   }
 
   /** 单个 session 的 skill 变更处理。 */

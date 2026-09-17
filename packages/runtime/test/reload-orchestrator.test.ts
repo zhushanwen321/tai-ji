@@ -165,4 +165,36 @@ describe('reload-orchestrator D8-b decision 归因日志', () => {
       logSpy.mockRestore()
     }
   })
+
+  it('排队 session 被删除（clearPending）→ 终态 skipped-deleted 留痕；未入队 sid 不打噪音行', async () => {
+    const { ReloadOrchestrator } = await import('../src/services/session/reload-orchestrator.js')
+    const promptReload = vi.fn().mockResolvedValue(undefined)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const orch = new ReloadOrchestrator({
+        sessionService: {
+          isSessionIdle: vi.fn().mockReturnValue(false),
+          promptReload,
+          handleSessionReloaded: vi.fn(),
+        } as never,
+      } as never)
+      await orch.onSkillChange(['sid-queued-gone']) // decision=queued 入队
+      expect(promptReload).not.toHaveBeenCalled()
+      // session 被删除：queued 行必须有终态留痕，归因链 queued → 终态闭合
+      orch.clearPending('sid-queued-gone')
+      expect(logSpy.mock.calls.map(c => c.join(' '))).toContainEqual(
+        expect.stringContaining(
+          'sessionId=sid-queued-gone decision=skipped-deleted (session deleted while queued)',
+        ),
+      )
+      expect(promptReload).not.toHaveBeenCalled() // 删除清理不发 reload
+
+      // 从未入队的 sid 删除（常态路径）：无 decision 行噪音
+      logSpy.mockClear()
+      orch.clearPending('sid-never-queued')
+      expect(logSpy).not.toHaveBeenCalled()
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
 })
