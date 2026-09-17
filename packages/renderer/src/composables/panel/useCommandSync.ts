@@ -22,8 +22,6 @@
  * 分区写入（D2）：拉取写 reply.sessionId 分区，禁止读调用方 props 实时值（ADR-0049）。
  *
  * 失败语义（D3）：catch → console.warn，store 不动、不抛、无 UI。
- *
- * @see docs/architecture/slash-commands-delivery-closure.md §3.4 接口契约
  */
 import { type Ref, watch } from 'vue'
 import { session as sessionApi } from '@/api'

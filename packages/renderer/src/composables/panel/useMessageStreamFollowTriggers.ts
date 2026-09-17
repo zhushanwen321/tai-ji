@@ -1,11 +1,11 @@
 /**
- * useMessageStreamFollowTriggers —— MessageStream 跟随触发编排（chat-pin-bottom-fix D3/D5）。
+ * useMessageStreamFollowTriggers —— MessageStream 跟随触发编排（D3/D5）。
  *
  * useMessageStreamScroll 的继任编排（同构先例：useMessageStreamScroll 当年同为
  * vue_rules_checker ≤300 行规范自 MessageStream.vue 拆出）。D5 减法：isCompacting /
  * isSessionActive 两个 watch 已随 RO 兜底网删除——isCompacting（活动条显隐）由 tailEl RO
  * 增高路径覆盖；isSessionActive 完成滚动由「trace 折叠 → spacer 变化 → 静默跟随」+ clamp
- * 回声覆盖（设计 docs/design/chat-pin-bottom-fix.md §4.3 D5）。
+ * 回声覆盖（D5）。
  *
  * D3 触发矩阵（「跟随」= 贴底则滚底；「标 unread」= 脱离则点亮「回到底部」浮层；所有触发
  * 统一进 follow 原语 followIfStuck——其 rAF 内重读 stickToBottom 的 guard 语义不变）：

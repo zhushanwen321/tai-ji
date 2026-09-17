@@ -20,7 +20,7 @@
       <span>：{{ directive.text }}</span>
     </p>
   </div>
-  <!-- [u8-pi-respawn] pi 崩溃恢复提示条分支（crash-resilience D7）：customType 匹配且
+  <!-- [u8-pi-respawn] pi 崩溃恢复提示条分支（D7）：customType 匹配且
        variant 可解析时渲染 RespawnNoticeBar（restored=T4 文案 / restoreFailed=失败态+重试
        按钮，retry 事件透传壳层）。解析失败 → respawn 为 null → 降级走兜底 system 行
        （消息仍在流中，不静默消失——subagent 定向气泡同款降级语义）。 -->

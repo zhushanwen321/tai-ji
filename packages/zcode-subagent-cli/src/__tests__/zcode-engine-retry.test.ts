@@ -1,6 +1,5 @@
 // zcode-engine-retry.test.ts —— [P0-1 U4/D6] 瞬时失败自动重试一次 + 预算继承测试
-// （设计权威源 docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D6、§5.2
-// F-1/F-4、§10 U4、§11 P-Z4）。全部跑 __fixtures__/fake-appserver.mjs 子进程
+// （设计锚点 D6、F-1/F-4、U4、P-Z4）。全部跑 __fixtures__/fake-appserver.mjs 子进程
 // （scenario 注入；crashAfterSendMs 为 U4 扩展的崩溃收割注入通道），绝不 spawn 真
 // zcode.cjs。覆盖：
 //   - 预算继承纯函数（P-Z4「显式预算下重试轮不重置总预算」的数学本体）：剩余 =

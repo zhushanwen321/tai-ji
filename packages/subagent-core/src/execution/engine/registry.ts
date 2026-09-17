@@ -2,9 +2,7 @@
 //
 // 引擎注册表（P1；W3 协议化改造）。设计权威源（现行）：
 // docs/architecture/subagent-engine-protocolization.md §3.4 发现与注册 / §3.8 D1（EngineDescriptor
-// 双模）+ D4（缺省引擎与 fallback 目标）；实现级规格 impl-plan §2.3。历史权威源
-// docs/architecture/subagent-engine-abstraction.md §3.3.1/§3.3.3（engine_not_found 错误
-// 规格第 1 行）仍然有效。
+// 双模）+ D4（缺省引擎与 fallback 目标）；实现级规格 impl-plan §2.3。
 //
 // 为什么需要注册表：引擎身份是「spawn 细节的归属边界」——上层（配置路由/agent 解析）
 // 按 id 取引擎，不感知实现类；新引擎接入 = 装一个引擎包（manifest 自注册，W4 发现器

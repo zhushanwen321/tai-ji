@@ -1,8 +1,7 @@
 // src/execution/engine/common/journal-replay.ts
 //
-// read 第②级（宿主 event journal 重放）的公共实现（P4，对齐点①接线）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md D6 + §3.3.6「重放等价性」——
-// journal 重放与 live 通路共用同一 reducer（updateFromEvent 范式），不引入第二套
+// read 第②级（宿主 event journal 重放）的公共实现（P4，对齐点①接线）。设计决策
+// （重放等价性）：journal 重放与 live 通路共用同一 reducer（updateFromEvent 范式），不引入第二套
 // 解析器；conformance C5 断言重放 turns 与 live 一致。
 //
 // 为什么放 common：zcode/pi 的 read() ②级降级是同一段逻辑（replayJournal 拿事件流 →

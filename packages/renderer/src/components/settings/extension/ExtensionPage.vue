@@ -1,6 +1,6 @@
 <template>
   <!--
-    Settings · Extension 菜单页（issues.md #5 方案 A · 安装多步流 + 内联候选展开 + 卸载确认）。
+    Settings · Extension 菜单页（方案 A · 安装多步流 + 内联候选展开 + 卸载确认）。
     刷新机制：finishInstall/uninstall 后 runtime 推 config.extensions → onExtensions 订阅（SettingsModal 持有）
     → extensions prop 流入本页，无需本页自建订阅。
     容器职责：header + 加载路径配置 + 装配子组件（安装流 ExtensionInstallFlow / 列表 ExtensionList）。

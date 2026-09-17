@@ -1,7 +1,7 @@
 /**
  * W3 等价锁定：tool-call-index 真实产出（wire 契约 + 提取链路）。
  *
- * 背景（审计 A-01 / docs/architecture/pi-assumption-remediation.md §3.3）：旧实现从
+ * 背景（审计 A-01）：旧实现从
  * `event.message?.content?.[contentIndex]?.id` 提取 toolCallId，但 RPC wire 的 message_update
  * 恒无顶层 message（toJsonEvent 剥离，dist/modes/json-event.js:3-15）——提取恒 undefined，
  * tool-call-index 永不产出。旧单测 mock 自带 message 字段故「测试绿生产死」。

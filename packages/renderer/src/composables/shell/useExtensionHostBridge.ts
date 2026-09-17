@@ -222,7 +222,7 @@ function ensureCommandDeclarationsSync(
  * 挂载点注册态 → ContributionInfo 映射（M16，PluginSettingsPage 数据源）。
  *
  * available = 挂载点已注册（MountPointRegistry SSOT）；未注册 → available=false + reason
- * （置灰 + 原因，04-settings-and-visual.md 场景 E AC3）。纯函数便于单测（TC2）。
+ * （置灰 + 原因，场景 E AC3）。纯函数便于单测（TC2）。
  */
 export function toContributionInfos(
   records: ContributionRecord[],
@@ -362,7 +362,7 @@ export function initExtensionHostBridge(app: App): void {
       return statusBarController.getItems('per-session', sessionId as string)
     },
   })
-  // PluginSettingsPage 数据源（M16，04-settings-and-visual.md §3.1）：onPlugins 委托 api 域
+  // PluginSettingsPage 数据源（M16）：onPlugins 委托 api 域
   // （config.plugins 广播订阅），getContributions 委托 ContributionRegistry + MountPointRegistry
   // （toContributionInfos：未注册挂载点 → 置灰 + 原因，场景 E AC3）。
   app.provide(PluginSettingsDataSourceKey, {

@@ -27,8 +27,6 @@
  *   持有，executeAgentCall 只关心单次 call 生命周期。
  *
  * 层归属：Engine。零 infra 依赖（runner 是 AgentRunner port，budget/trace/call 是 Engine 模型）。
- *
- * 参考：domain-models.md §5 + §失败处理矩阵。
  */
 
 import type { SubagentStream } from "../execution/assembly/stream-sink.ts";

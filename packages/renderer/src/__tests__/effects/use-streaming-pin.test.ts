@@ -11,7 +11,7 @@
  * 消费者只读 pinnedIndexes，watch 回调内已无副作用）。
  *
  * [pin-identity U1] 编辑钉扎入参从 editingTurnIdx（裸索引快照）迁移为 editingTurnKey
- * （turnStableId 身份，docs/design/message-stream-editing-pin-identity.md §3.3 D1）：
+ * （turnStableId 身份）：
  * W2TC4-W2TC6 系列做语义等价迁移（索引快照 → 用 turnStableId 声明身份），并新增三类用例——
  * a 身份反查命中（钉回合非位置，数组重排钉扎跟随）、b 反查 miss 不钉（fail-safe）、
  * c clamp 纵深防御（旧 bug「索引残留越界」的回归证明）。

@@ -137,12 +137,37 @@ const MAX_WATCHER_ERRORS = 5
 const MAX_PROJECT_WATCHERS = 8
 
 /**
+ * [U2 / cache-governance 1-4] 兜底周期重扫间隔（ms）：5min。
+ *
+ * 背景：watcher 存在三种「缓存与磁盘发散且不自愈」的形态——① error 熔断只 close 不恢复
+ * （熔断后该 scope 冻结到重启）；② macOS fs.watch 静默丢事件前科（2026-07-27 实测 ~40%
+ * 触发率，见 WATCH_POLL_INTERVAL_MS 注释）；③ project watcher LRU 驱逐窗口失明。
+ * 兜底语义：固定周期无条件重扫 globalCache + 全部活跃 projectCache cwd 使缓存重新收敛，
+ * 一个机制闭合全部三种发散（cache-governance 设计 §3.1 项 1-4，G5「失效机制故障可自愈」：
+ * 不允许任何形态的永久发散到重启）。watcher 正常时成本 = 每 5min 一次 readdir 级扫描，
+ * 量级与 chokidar 初始扫描相同，可忽略。
+ */
+const FALLBACK_RESCAN_INTERVAL_MS = 5 * 60 * 1000
+
+/**
+ * [U2] skill 列表逐项严格相等（兜底重扫的「值变化」收敛判定）。
+ * SkillInfo 是扁平 DTO（含可选嵌套 sources），同实现扫描产物键序稳定，序列化比对足够精确；
+ * 列表量级小（skill 条目 < 50），成本可忽略。
+ */
+function sameSkillLists(a: SkillInfo[], b: SkillInfo[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, i) => JSON.stringify(item) === JSON.stringify(b[i]))
+}
+
+/**
  * SkillRegistry：全局 + 项目级 skill 缓存 + chokidar 文件监听。
  *
  * 生命周期：
- * - initGlobal()：组合根在 server.start 后调用，扫描全局目录 + 挂全局 watcher。
+ * - initGlobal()：组合根在 server.start 后调用，扫描全局目录 + 挂全局 watcher + 武装兜底重扫定时器。
  * - getProjectSkills(cwd)：按需懒扫描 + 挂项目 watcher，命中缓存直接返回。
- * - dispose()：关闭所有 watcher（测试 / shutdown 时调）。
+ * - 兜底重扫（U2）：固定周期无条件重扫全部缓存 scope，值变化才广播（watcher 熔断/丢事件/
+ *   LRU 驱逐发散的自愈通道，cache-governance G5）。
+ * - dispose()：关闭所有 watcher + 清兜底定时器（测试 / shutdown 时调）。
  */
 export class SkillRegistry {
   private globalCache: SkillInfo[] = []
@@ -172,18 +197,107 @@ export class SkillRegistry {
   private rebuildInFlight: Promise<void> | null = null
   /** 是否已 dispose。置 true 后 getProjectSkills/rebuildGlobal 直接 return，防止 dispose 后 in-flight 写回。 */
   private disposed = false
+  /** [U2] 兜底周期重扫定时器（initGlobal 武装 / dispose 清理；unref 不持有事件循环）。 */
+  private fallbackTimer: NodeJS.Timeout | null = null
+  /** [U2] 兜底重扫防重入：上一轮未完成（scanFn 慢于周期）时跳过本轮 tick，防扫描堆叠。 */
+  private fallbackRescanRunning = false
 
   constructor(private readonly options: SkillRegistryOptions) {
     this.scanFn = options._scanFn ?? this.defaultScanFn.bind(this)
   }
 
   /**
-   * 启动期扫描全局 skill 目录并缓存 + 挂全局 watcher。
+   * 启动期扫描全局 skill 目录并缓存 + 挂全局 watcher + 武装兜底周期重扫定时器（U2）。
    * 必须在 server.start 后调用（组合根 index.ts 编排）。
    */
   async initGlobal(): Promise<void> {
-    this.globalCache = await this.scanFn('')
-    this.setupGlobalWatcher()
+    try {
+      this.globalCache = await this.scanFn('')
+      this.setupGlobalWatcher()
+    } finally {
+      // finally 武装：启动扫描失败时（globalCache 空 + watcher 未挂，组合根对该失败只降级
+      // 不阻塞启动）兜底重扫是唯一自愈通道，下个周期自动补上缓存——G5 自愈语义覆盖
+      // 「启动即故障」形态。
+      this.armFallbackRescan()
+    }
+  }
+
+  // ── [U2] 周期兜底重扫（watcher 熔断 / 静默丢事件 / LRU 驱逐发散的自愈通道）──────
+
+  /**
+   * 武装兜底重扫定时器（幂等，防重复 init 堆叠定时器）。
+   * 触发无条件（不判断 watcher 健康状态——静默丢事件形态下 watcher 看起来健康，判断不可靠）；
+   * 广播有条件（值变化才经 onChange 通知链，见 fallbackRescanGlobal/Project）。
+   * 不重挂 watcher：watch 恢复是批 4 观测器的职责，本兜底只保证缓存收敛。
+   */
+  private armFallbackRescan(): void {
+    if (this.fallbackTimer) return
+    const timer = setInterval(() => {
+      void this.runFallbackRescan()
+    }, FALLBACK_RESCAN_INTERVAL_MS)
+    // 纯兜底周期任务：unref 不持有事件循环（不阻进程退出）；shutdown 由 dispose 显式清理
+    timer.unref()
+    this.fallbackTimer = timer
+  }
+
+  /**
+   * 兜底重扫一轮：globalCache + 全部活跃 projectCache cwd，逐 scope 独立容错
+   * （单 scope scanFn 失败保留该 scope 旧值，不拖垮其他 scope 的收敛）。
+   * 串行执行：readdir 级成本，量级可忽略，串行避免多 cwd 并发扫描的 IO 尖峰。
+   */
+  private async runFallbackRescan(): Promise<void> {
+    if (this.disposed || this.fallbackRescanRunning) return
+    this.fallbackRescanRunning = true
+    try {
+      await this.fallbackRescanGlobal()
+      for (const cwd of this.projectCache.keys()) {
+        await this.fallbackRescanProject(cwd)
+      }
+    } finally {
+      this.fallbackRescanRunning = false
+    }
+  }
+
+  /**
+   * 重扫全局缓存：值有变化才刷新广播。广播链下游 = reloadOrchestrator（global 通知 =
+   * 全部活跃 idle session 的 pi reload）+ renderer 失效重拉，无差别周期广播违背设计
+   * 「watcher 正常时兜底成本可忽略」的成本口径——值比对即收敛判定：相等 = 缓存与磁盘
+   * 已一致，无信息需要传播。scanFn 失败保留旧值（与 rebuildGlobal 同款容错），下周期重试。
+   */
+  private async fallbackRescanGlobal(): Promise<void> {
+    let fresh: SkillInfo[]
+    try {
+      fresh = await this.scanFn('')
+    } catch (e) {
+      console.warn('[skill-registry] fallback rescan: global scan failed, keeping stale cache:', e)
+      return
+    }
+    const changed = !sameSkillLists(this.globalCache, fresh)
+    this.globalCache = fresh
+    if (!changed) return
+    console.warn('[skill-registry] fallback rescan: global cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)')
+    await this.notifyGlobalChange()
+  }
+
+  /**
+   * 重扫单个项目缓存：同 fallbackRescanGlobal 的值变化收敛语义（scope='project' + cwd 广播）。
+   * 扫描期间分区被 invalidateAllProjects 清掉时不复活已清分区（重建交由下次 getProjectSkills）。
+   */
+  private async fallbackRescanProject(cwd: string): Promise<void> {
+    let fresh: SkillInfo[]
+    try {
+      fresh = await this.scanFn(cwd)
+    } catch (e) {
+      console.warn(`[skill-registry] fallback rescan: project:${cwd} scan failed, keeping stale cache:`, e)
+      return
+    }
+    const current = this.projectCache.get(cwd)
+    if (current === undefined) return
+    const changed = !sameSkillLists(current, fresh)
+    this.projectCache.set(cwd, fresh)
+    if (!changed) return
+    console.warn(`[skill-registry] fallback rescan: project:${cwd} cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)`)
+    await this.notifyProjectChange(cwd)
   }
 
   /**
@@ -436,7 +550,7 @@ export class SkillRegistry {
   }
 
   /**
-   * 关闭所有 watcher + 清缓存与 in-flight 状态（全局 + 项目级）。shutdown / 测试清理时调。
+   * 关闭所有 watcher + 清兜底定时器 + 清缓存与 in-flight 状态（全局 + 项目级）。shutdown / 测试清理时调。
    *
    * W-dispose：必须清 projectInFlight——竞态场景下 getProjectSkills 进入 in-flight await scanFn →
    * 期间调 dispose → scanFn resolve → 守卫 projectInFlight.has(cwd) 仍 true → 走 projectCache.set +
@@ -447,6 +561,10 @@ export class SkillRegistry {
    */
   dispose(): void {
     this.disposed = true
+    if (this.fallbackTimer) {
+      clearInterval(this.fallbackTimer)
+      this.fallbackTimer = null
+    }
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer)
     }

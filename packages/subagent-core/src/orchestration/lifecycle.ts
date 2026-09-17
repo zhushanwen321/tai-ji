@@ -32,8 +32,6 @@
  *
  * 层归属：Engine。依赖 LifecycleDeps + WorkerHost via port +
  * WorkflowRun + handleWorker* 函数。
- *
- * 参考：domain-models.md §1（聚合根状态机）。
  */
 
 import { getLogger } from "../core/logger.ts";

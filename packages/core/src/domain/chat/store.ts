@@ -103,7 +103,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
 }
 
 /**
- * [steer-bubble u3 / docs/design/steer-followup-user-bubble-display.md D3]
+ * [steer-bubble u3 / D3]
  * 基线（服务端 getHistory 快照）与 live 分区的两步合并——reconcileHistory 与 hydrate
  * 共用同一函数（设计 U3：live ≡ reload，两条历史刷新入口语义同源）。
  *
@@ -381,7 +381,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const pendingBuffer = ref<Map<string, PendingItem[]>>(new Map())
   /**
-   * [steer-bubble u0 / docs/design/steer-followup-user-bubble-display.md D2]
+   * [steer-bubble u0 / D2]
    * per-session inflight 投递确认计数（Map 分区，对齐 queueStates/pendingBuffer 惯例，
    * 不可变写保证响应式）。
    *
@@ -543,7 +543,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *  由 hydrate 全量重放重建，残留旧累积会造成 W22 对账基线陈旧）。
    *  [steer-bubble D4 豁免声明] 本驱逐回调刻意**不**清 pendingBuffer / queueStates /
    *  inflightCounts——与「disposeSession 同点全清」的既有清理惯例不一致是有意为之
-   *  （docs/design/steer-followup-user-bubble-display.md D4「刻意保留」）：这三者是不可
+   *  （steer-bubble D4「刻意保留」）：这三者是不可
    *  重建状态（segments 暂存与 inflight 确认基线仅存在于前端，清了即永久丢失/漂移），
    *  且驱逐重进后腿 1 暂存与腿 2 判定仍依赖它们；entryStates/anchors/hydrated 是重建型
    *  （hydrate 重放可恢复）才随驱逐清理。断连收口（clearIndependentTransient）同理豁免
@@ -787,7 +787,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /**
    * [W14] 深度结构性对账（D6：深度权威 = pi pendingMessageCount）。
    *
-   * [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4] **投递侧
+   * [steer-bubble u2 / D4] **投递侧
    * （queue_update 每帧）裁剪已移除**：drain 后立即裁到深度会吃掉腿 2（message_end(user)）
    * 还没回填的 segments，且是丢消息的不可逆放大器（F3：断连 prev 缺失时以本帧深度裁空
    * buffer，内容永久删除）。现调用点（均经 ctx 注入 registry，非 queue_update）：

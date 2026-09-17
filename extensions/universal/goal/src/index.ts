@@ -125,7 +125,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 	 * 通道形态（C-ext-06 globalThis slot 惯例）：裸函数直挂——plan 侧使用点以 typeof 守卫
 	 * 读取 `globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]`（plan/src/compact.ts）。
 	 * 不挂 pi API 对象：pi 0.84.4 为每个扩展创建独立 ExtensionAPI，挂 pi 对象的字段
-	 * 跨扩展不可见（设计 docs/design/goal-bridge-cross-extension.md §2.3）。
+	 * 跨扩展不可见。
 	 *
 	 * @param objective 目标描述
 	 * @param budget 预算配置，传 undefined 用默认值

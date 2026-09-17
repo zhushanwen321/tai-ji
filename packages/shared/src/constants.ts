@@ -240,7 +240,7 @@ export const PLUGIN_NOTIFY_LIMITS = {
 } as const
 
 /**
- * 引擎子进程 env 契约常量 SSOT（W12，docs/design/subagent-engine-protocolization.impl-plan.md §2.12）。
+ * 引擎子进程 env 契约常量 SSOT（W12）。
  *
  * 消费形态：@zhushanwen/subagent-engine-sdk 的 src/env.ts 内联镜像本块（构建期生成物，
  * SDK 不得运行时 import @taiji/shared——F9：zsw 宿主链不可依赖 shared）；
@@ -292,12 +292,12 @@ export const ENGINE_LAUNCH_ENV_KEYS = {
  
 export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 
-// ── 崩溃韧性共享契约（docs/design/crash-resilience.md §3.3，实施计划 u-foundation）──
+// ── 崩溃韧性共享契约（实施计划 u-foundation）──
 // 本段是 DAG 根共享契约：u4a（出站守卫）/ u4b（历史预算）/ u4c（读预检）/
 // u5a/u5b（日志保留期）从这里取值，禁止各单元自写魔数。
 
 /**
- * server→client 出站帧告警阈值（默认 8MB）[crash-resilience §3.3 D3]。
+ * server→client 出站帧告警阈值（默认 8MB）[D3]。
  *
  * RPC reply 与 messageBus push 两种通路共用：序列化后超此值写 warn 日志
  * （消息类型、sessionId、字节数），**不截断**——哨兵定位：pi 上游自截（read/bash
@@ -321,7 +321,7 @@ export const OUTBOUND_FRAME_WARN_BYTES: number = 8 * 1024 * 1024
 export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
 
 /**
- * server→client 出站帧截断阈值（默认 32MB）[crash-resilience §3.3 D3]。
+ * server→client 出站帧截断阈值（默认 32MB）[D3]。
  *
  * 按通路分两种守卫形态：reply 通路超限 → 替换为 `payload_too_large` 错误 envelope
  * （前端 pending 对 type:'error' 且 id 命中的 reply 走 reject，Promise 收口不悬挂）；
@@ -339,7 +339,7 @@ export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
 export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 
 /**
- * runtime 全量读预检阈值（默认 32MB）[crash-resilience §3.3 D5]。
+ * runtime 全量读预检阈值（默认 32MB）[D5]。
  *
  * 五条全量读入口统一 statSync 大小预检：① getHistoryFromFilePath（含 subagent 历史
  * 消费方）② 离线尾读 fallback ③ findLastEntryField fallback ④ readSessionJsonlText
@@ -355,7 +355,7 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 export const READ_PRECHECK_MAX_BYTES: number = 32 * 1024 * 1024
 
 /**
- * session 历史加载双预算 [crash-resilience §3.3 D4]。
+ * session 历史加载双预算 [D4]。
  *
  * 语义：活跃 session 的 doGetHistory 与离线尾读合并为同一预算逻辑——按「最近
  * RECENT_TURNS turns 且总字节 ≤ MAX_BYTES」双条件截取，响应携带 truncated /
@@ -387,7 +387,7 @@ export const DEFAULT_LOG_KEEP_DAYS = 7 as const
 /**
  * 读取日志保留天数：env `TAIJI_LOG_KEEP_DAYS` 覆盖 || 默认 7（DEFAULT_LOG_KEEP_DAYS）。
  *
- * [crash-resilience §3.3 D6-⑦] 从 runtime infra/logger.ts:50-55 的模块级常量
+ * [D6-⑦] 从 runtime infra/logger.ts:50-55 的模块级常量
  * `Number(process.env.TAIJI_LOG_KEEP_DAYS) || 7` **等价提升**为共享函数：main（每日
  * 清理定时器）与 runtime（initLogger 清理）两进程同调同一函数——既保留用户 env
  * 旋钮，也不出现两套值域漂移。语义与现状逐字等价：`Number(env)` 结果 falsy

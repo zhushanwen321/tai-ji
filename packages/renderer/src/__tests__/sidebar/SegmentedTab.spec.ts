@@ -4,8 +4,8 @@
  * 覆盖（三 tab 终态）：
  * - 渲染 3 个 tab（sessions/files/plugins）——DOM 断言，且 Agents/Flows 两枚不存在
  * - tab title 含 label（icon-only 模式，label 收进 title）
- * - count 数字渲染：count > 0 显示数字、count = 0 不渲染（sidebar-tab-count-restore 设计决策 4）
- * - badge 蓝点已随数字恢复一并移除（设计决策 1：一态一手段，数字是更精确表达）
+ * - count 数字渲染：count > 0 显示数字、count = 0 不渲染（决策 4）
+ * - badge 蓝点已随数字恢复一并移除（决策 1：一态一手段，数字是更精确表达）
  * - active 态切换
  *
  * [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：两枚任务 tab 及其属性用例（子代理 / 工作流

@@ -1,8 +1,8 @@
 /**
- * useMessageStreamFollowTriggers 单测（chat-pin-bottom-fix U5→V6 修复：RO 回调双 rAF）。
+ * useMessageStreamFollowTriggers 单测（U5→V6 修复：RO 回调双 rAF）。
  *
- * 覆盖（对照 docs/design/chat-pin-bottom-fix.md §4.5 P-timing 降级预案「RO 回调内改为双 rAF
- * （再让一帧）」+ acceptance.md V6 shrink 方向间歇 113px 残留）：
+ * 覆盖（P-timing 降级预案「RO 回调内改为双 rAF
+ * （再让一帧）」+ V6 shrink 方向间歇 113px 残留）：
  * - 双 rAF 核心行为：scrollEl RO 触发后 follow 不立即执行（外层 rAF pending），flush 一帧后才调
  *   followIfStuck——scrollToIndex 落在 virtua 内部 RO 更新测量缓存之后（V6 残留根修验收面）
  * - 连续触发 cancel 合并：同帧两次 RO 触发只产生一次 followIfStuck（外层句柄 cancel-reschedule，

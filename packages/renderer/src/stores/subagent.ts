@@ -235,8 +235,7 @@ export const useSubagentStore = defineStore('subagent', () => {
   /**
    * 拉取单个 subagent 的历史并注入 chatStore（经 setMessages 回调）。
    *
-   * 返回拉取到的 history 数组，供调用方编排使用（drawer-blank-fix：空历史不擦分区，
-   * 设计 docs/design/subagent-drawer-blank.md §6.2）。
+   * 返回拉取到的 history 数组，供调用方编排使用（drawer-blank-fix：空历史不擦分区）。
    *
    * 空结果不写入：history.length === 0 时**不调** setMessages——分区是否种兜底
    * （task 气泡）由编排层依据「分区当前是否为空」决定；无条件写入会把 E-4 已投影的

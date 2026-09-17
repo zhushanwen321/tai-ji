@@ -24,7 +24,7 @@
       </Brand>
 
       <!-- 主操作 nav：新建任务 ⌘N（primary 主操作）/ 导入会话 ⌘I / 搜索 ⌘K（ghost 次操作）。
-           v6-master-spec §6.2 NavItem：primary=accent 实色 / ghost=透明 双层级。 -->
+           NavItem 层级：primary=accent 实色 / ghost=透明 双层级。 -->
       <nav class="flex flex-col gap-1 px-1">
         <Button
           variant="ghost"

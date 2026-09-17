@@ -1,6 +1,6 @@
 /**
  * useGenStats —— Composer 生成指标（token 速度 + 缓存命中率）的 per-session 分区状态源
- * （composer-gen-stats P4，设计 docs/design/composer-gen-stats.md §3.3 D4/D5 + §3.4）。
+ * （composer-gen-stats P4，D4/D5）。
  *
  * 职责（照 useContextUsage 五件套范式：分区 / 订阅 / 恢复腿 / in-flight 去重 / cleanup）：
  * - 分区：useSessionScopedState 建 per-session 分区（Map 分区范式，ADR-0049），值直接存

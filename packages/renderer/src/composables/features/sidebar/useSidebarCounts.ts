@@ -23,14 +23,14 @@ export function useSidebarCounts(focusedSessionId: Ref<string | null>) {
   const fileTreeStore = useFileTreeStore()
 
   /** tab 计数（session / fileTree） */
-  // session tab 计数（设计 sidebar-tab-count-restore §2.3 口径表第 1 行 / §3.1 终态）：
+  // session tab 计数：
   // 侧边栏全量会话数 − 已归档（markedDone）数。为什么是全局口径（不按焦点 session 过滤）：
   // 会话 tab 列表 = 全局列表，数字与列表一致才不穿帮；死会话（dead）计入——列表仍渲染
   // （置灰降权），数字跟随列表。session 列表为空或首载失败时 groups 为空 → 0；重载失败
   // groups 保留旧快照，计数跟随现值（错误态由列表区错误卡承载，计数不重复报错）。
   // 为什么 computed 内逐条调 isMarkedDone：markers 是模块级响应式 Map cache，读 cache.value
   // 即建立依赖，归档 toggle / session 列表广播（groups 变化）任一变化都触发重算；O(n) 遍历
-  // + Map 查询（n = 侧边栏会话数，§3.3 性能账 <0.1ms），不加索引/缓存层（决策 3）。
+  // + Map 查询（n = 侧边栏会话数，<0.1ms 量级），不加索引/缓存层（决策 3）。
   const sessionCount = computed(() => {
     const sessions = sessionStore.list
     return sessions.length - sessions.filter((s) => isMarkedDone(s.id)).length
@@ -38,7 +38,7 @@ export function useSidebarCounts(focusedSessionId: Ref<string | null>) {
   // file tab 计数 = 文件树根层条目数（目录计入），刻意不做递归全量：文件树懒加载
   // （children 未展开前 undefined）决定 renderer 内存中没有全量文件清单，递归计数需
   // eager 拉整树（一次大 IPC + 常驻内存），为一个小数字付出真实开销——根层口径与
-  // 数字删除前用户所见一致，无感知差异（sidebar-tab-count-restore 决策 2）。
+  // 数字删除前用户所见一致，无感知差异。
   const fileCount = computed(() => {
     const sid = focusedSessionId.value
     if (!sid) return 0

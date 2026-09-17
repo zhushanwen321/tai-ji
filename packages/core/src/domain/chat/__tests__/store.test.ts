@@ -164,7 +164,7 @@ describe('createChatStore factory', () => {
         expect(sut.store.getMessages(sid)[0]!.content).toBe('更早')
       })
 
-      // ── [steer-bubble u3 / docs/design/steer-followup-user-bubble-display.md D3]
+      // ── [steer-bubble u3 / D3]
       //    两步合并快照序列：①尾部保护段收集（streaming assistant ∨ 未确认 user）
       //    ②user 正序-尾窗对齐去重（a=min(n,k)，保护段正数 1..a ↔ 基线尾部 k−a+1..k
       //    逐位剔除）。四类快照序列 + 已知边界逐一覆盖（F2：切入刷新不抹已投递气泡、
@@ -634,7 +634,7 @@ describe('createChatStore factory', () => {
 
   // ── [steer-bubble u0/D2] inflight 投递确认计数契约层：state + 增/减/清零 action 面。
   //    本组只锁 store 层语义；调用方接线（腿 1 消费 +m / send 乐观 ±1 / message_end 确认
-  //    −1 / abort 清零）归 u1/u2 单元。设计：docs/design/steer-followup-user-bubble-display.md D2/D4 ──
+  //    −1 / abort 清零）归 u1/u2 单元 ──
   describe('inflight 计数（u0 契约层：已显示待确认的投递数）', () => {
     it('increment/decrement 基本语义：默认步长 1，显式 n 累加（腿 1 实取数 m 形态）', () => {
       const sid = 's1'

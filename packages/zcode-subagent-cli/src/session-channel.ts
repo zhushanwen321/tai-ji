@@ -32,8 +32,7 @@
 // 的崩溃 reason，含 stderr 尾部），不再依赖 turn 等待预算挂满才收割。
 // （onClose 由连接层保证在全部在途 request reject 之后触发。）
 //
-// turn 等待两 timer 状态机（P0-1 根修，设计权威源
-// docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D1/D2）：旧 300s 固定
+// turn 等待两 timer 状态机（P0-1 根修）：旧 300s 固定
 // 墙钟（timer 从 send 起跳、事件不刷新，T001 实测 21% 活跃任务被误杀）替换为——
 //   1. idle 主判定：本 turn 任何事件（session/event、telemetry stream.chunk/
 //      turn.terminal）刷新计时；连续静默达阈值判「执行已不可推进」（活跃事件流

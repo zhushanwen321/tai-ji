@@ -1,7 +1,6 @@
 /**
  * gen-stats-store.ts — Composer 生成指标存储内核（纯函数族，实施计划 u2-store / P2）
  *
- * 设计来源：docs/design/composer-gen-stats.md
  *   - §3.3 D3 存储布局：`<dataDir>/gen-stats/{speed,cache-ratio}/<safe-model>.json`，
  *     文件格式 `{"YYYY-MM-DD": [[v1, v2], ...], ...}`；safeModelFileName = safeBase
  *     （`(provider + '__' + model)` 替换 `[/\\空格:]` → `_`）截断 64 字符 + hash8 后缀

@@ -1,5 +1,5 @@
 /**
- * Git 域 port —— git CLI 执行的唯一 seam（issues.md #1 / code-architecture §3.8）。
+ * Git 域 port —— git CLI 执行的唯一 seam。
  *
  * 🔒 三层架构：services 定义 port，infra/git-executor.ts 实现（execFile 异步、数组参数防注入）。
  * GitService 经此 port 执行 git 子命令，不直接 spawn/exec。

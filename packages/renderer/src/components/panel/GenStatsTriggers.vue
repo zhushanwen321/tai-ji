@@ -1,9 +1,9 @@
 <template>
   <!--
-    composer-gen-stats 双触发器（docs/design/composer-gen-stats.md §3.1 / §3.3 D4/D5）。
+    composer-gen-stats 双触发器（D4/D5）。
     位于上下文容量触发器左侧：左 = TOKEN 速度（t/s），右 = 缓存命中率（%），独立判定
     null → 「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
-    命中率语义色三档：≥80 success · 50–80 warn · <50 danger（设计 §3.1，项目语义色 token）。
+    命中率语义色三档：≥80 success · 50–80 warn · <50 danger（项目语义色 token）。
     hover 出各自浮层：速度四行（本次/今日/7天/30天）+ 口径说明；缓存两行（本次/今日加权）
     + bar + 口径说明。「本次」= 本会话最近一次请求样本（会话视角，runtime per-session 槽）；
     今日/7天/30天 = 该模型跨会话全局聚合（模型视角）。数据纯读 useGenStats 分区

@@ -831,7 +831,7 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
   })
 })
 
-// ── [steer-bubble u1 / docs/design/steer-followup-user-bubble-display.md D1+D2]
+// ── [steer-bubble u1 / D1+D2]
 //    message_end(user) 腿 2 确认制——投递事实驱动的用户气泡兜底显示 ──
 //
 // 与 queue_update TC1-TC4 同为 handler 接线测试：测裁决分支对 ctx 方法/快照的调用与
@@ -949,7 +949,7 @@ describe('dispatchMessageEvent message_end(user) 腿 2 确认制（steer-bubble 
   })
 })
 
-// ── [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4+F4]
+// ── [steer-bubble u2 / D4+F4]
 //    message_start G-023 条件清 + 同点僵尸清理；message.complete abort 只清 inflight ──
 //
 // 条件清保真前提（P3 探针 ✅）：message_start(assistant) 时点快照深度 == pi 真实队列

@@ -1,7 +1,6 @@
 /**
  * usePanelView —— panel 渲染视图派生（renderer 侧事实收集 → derivePanelView）。
  *
- * [权威] docs/design/panel-view-derivation-and-flow-lifecycle.md §3.3 D1/D5（单元 T3）。
  * 职责边界：本 composable 只做「事实收集 + 单点派生」——把 Panel 组件里散落的七个
  * 异构状态源（session 绑定 / 消息有无 / dead / respawn 过渡态 / trace 视图 / ask-user 在场 /
  * flow 活跃）组装为 PanelViewInput，派生收敛到 core 纯函数 derivePanelView

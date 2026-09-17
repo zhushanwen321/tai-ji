@@ -71,7 +71,7 @@ function sweepFinalizedMessage(m: Message, toolCalls: ToolCall[] | undefined): M
 }
 
 /** message 仍 streaming → 转终态 + 收口 toolCall。
- * [M2 error-visibility] 追加形态双通道（SSOT docs/architecture/conversation-error-visibility.md §3.3.2）：
+ * [M2 error-visibility] 追加形态双通道：
  * errorText 写 Message.error 字段（message.ts:269 注释明确用途对口），content 保持崩溃前正常正文不动。
  * 旧 `${content}\n\n${errorText}` 拼接把 errorText 混进 content，渲染层无法区分哪段是错误。
  * 仅 assistant 消息写 error；非 assistant（user 提问等）保持 m.error 原值不写。 */
@@ -200,7 +200,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * resubscribeAll 的 stateSnapshot 回放恢复真实值（G4）。
    *
    * [steer-bubble D4 豁免声明] 本断连收口点刻意**不**清 pendingBuffer 与 inflight 计数
-   * （docs/design/steer-followup-user-bubble-display.md D4「刻意保留」）——与「清理信号
+   * （D4「刻意保留」）——与「清理信号
    * 到达即清全部瞬态」的直觉不一致是有意为之：queueStates 是重建型状态（重连 ring 回放
    * 入队帧即可重建）故随收口清理；pendingBuffer 的 segments 暂存与 inflight 确认基线是
    * **不可重建状态**（仅存在于前端，清了即永久丢失/漂移），断连重连后腿 1 暂存消费与

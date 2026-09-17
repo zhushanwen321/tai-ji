@@ -28,7 +28,7 @@ import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } f
 
 const t = i18n.global.t
 
-// ── [crash-resilience T4 回流修复] 恢复窗口编排（respawn 过渡态）──
+// ── [T4 回流修复] 恢复窗口编排（respawn 过渡态）──
 //
 // Gate B 实测缺陷（0/3 提示条）根因：pi 死亡 → runtime removeSessionEntry → bus.clearSession
 // 清掉 renderer 订阅；自动恢复成功 publish session.restored 时 bus entry 内零订阅者（live 不达）；
@@ -125,7 +125,7 @@ function handleSessionExited(sessionId: string, payload: { code: number | null; 
 }
 
 /**
- * [u8] 处理 session.restored（pi 崩溃自动恢复成功，crash-resilience D7 / T4）。
+ * [u8] 处理 session.restored（pi 崩溃自动恢复成功，D7 / T4）。
  *
  * 对话流插入恢复提示条（T4 文案：在途回合未保留、后台任务/子代理已终止不自动恢复、
  * 可继续发消息）+ 复位 dead 态标记 + 收口过渡态（respawnPending 清除 → panel 派生回

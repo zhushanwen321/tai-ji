@@ -380,7 +380,7 @@ export class SessionHistoryReader {
    * （含 message + custom entry）重建 Message[]，按 clientUuid ↔ userEntryId 映射回填
    * 结构化 Segment[]（image/file/skill badge，读 segments.json sidecar）。
    *
-   * 三分支（04-history-incremental.md §3.3）：
+   * 三分支：
    * 1. 缓存命中 → getEntries(since=lastLeafId) 增量。空增量 = leafId 未变 = 缓存新鲜，
    *    直接返回缓存（R-12 短路：不走尾读 fallback）。pi 侧成本 = findIndex + 空/小窗口序列化，
    *    全量 entry 树序列化（主要卡顿源）被消除。

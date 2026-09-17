@@ -1,5 +1,5 @@
 /**
- * bash 工具同名 override 定义（设计文档 docs/design/base-tool-enhance.md §3.2 方案 B / §3.5）。
+ * bash 工具同名 override 定义。
  *
  * 前台行为 100% 委托 pi 官方工厂 createBashToolDefinition——override 后工具的全部
  * 行为归本包负责，前台语义必须跟随 pi 版本升级而不是自研复刻（自研 spawn 会与

@@ -11,7 +11,6 @@
  *   cookie 从 secrets 文件）
  *
  * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.3
- * 交互重构（D3/D12）：docs/design/coding-plan-quota-config-ux.md §7.3
  */
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'

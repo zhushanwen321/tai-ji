@@ -1,5 +1,5 @@
 /**
- * RespawnNoticeBar.vue 组件测试（[u8-pi-respawn]，crash-resilience §3.3 D7 / 场景 T4）。
+ * RespawnNoticeBar.vue 组件测试（[u8-pi-respawn]，D7 / 场景 T4）。
  *
  * 三视角 DOM 断言（TEST-STRATEGY §3，TruncatedHistoryBar.test.ts 同型）：
  * - restored 形态：T4 文案可见（在途回合未保留 + 后台任务/子代理不自动恢复 + 可继续发消息），

@@ -25,7 +25,7 @@ import type {
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
 import type { UsageStatsResult } from './usage-stats'
-// composer-gen-stats（docs/design/composer-gen-stats.md §3.4）：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
+// composer-gen-stats：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
@@ -67,7 +67,7 @@ export interface CommandSourceInfo {
 export type ClientMessageType =
   | 'session.create' | 'session.delete' | 'session.deleteByCwd' | 'config.sessions' | 'session.switch' | 'session.restore' | 'session.history' | 'session.getCommands' | 'session.getContext'
   | 'session.compact' | 'session.rename' | 'session.fork' | 'session.setProject'
-  // composer-gen-stats（docs/design/composer-gen-stats.md §3.3 D4）：session.getGenStats 拉该 session
+  // composer-gen-stats（D4）：session.getGenStats 拉该 session
   // 当前模型的速度/缓存命中率快照（恢复腿——切 session 主动拉取，规避 broadcast 早于订阅的时序竞争）。
   // reply session.stats_update（payload 消费型，同 session.getContext → context.update 模式）。
   | 'session.getGenStats'
@@ -350,7 +350,7 @@ export interface ClientMessageMap {
   'session.switch': { sessionId: string }
   'session.restore': { sessionId: string }
   'session.forceQuit': { sessionId: string }
-  // session.history 参数（crash-resilience §3.3 D4 中期分页协议，u6-paging-protocol）：
+  // session.history 参数（D4 中期分页协议，u6-paging-protocol）：
   // - 不带 cursor：最近窗口（u4b 双预算现状）——「打开/切入 session」与 hydrate 通路。
   // - 带 cursor：游标翻页——cursor = turn 边界锚点 entryId（renderer 当前窗口最早消息的
   //   piEntryId），返回该锚点之前的最近 limitTurns turns（仍受 maxBytes 字节预算、单 turn
@@ -361,7 +361,7 @@ export interface ClientMessageMap {
   'session.history': { sessionId: string; cursor?: string; limitTurns?: number; maxBytes?: number }
   'session.getCommands': { sessionId: string }
   'session.getContext': { sessionId: string }
-  // session.getGenStats（docs/design/composer-gen-stats.md §3.3 D4）：生成指标恢复腿。
+  // session.getGenStats（D4）：生成指标恢复腿。
   // reply = session.stats_update payload 同形（无任何数据时 speed/cacheRatio 全 null + model 缺省）。
   'session.getGenStats': { sessionId: string }
   'session.getTraceEntries': { sessionId: string }
@@ -798,7 +798,7 @@ export type ServerMessageType =
   | 'message.bashStart' | 'message.bashResult'
   | 'message.complete' | 'message.error' | 'message.status'
   | 'context.update'
-  // composer-gen-stats（docs/design/composer-gen-stats.md §3.3 D4）：生成指标帧——双发送点同形：
+  // composer-gen-stats（D4）：生成指标帧——双发送点同形：
   // ① turn-usage 采样后扩展广播（对该模型全部已知 session 逐 sid 发帧）；② session.getGenStats
   // RPC 的 reply（恢复腿）。payload 形状 SSOT = gen-stats.ts；无值一律 null（null=无数据，
   // 0=真实测量值），与 context.update 的无值编码纪律同源。
@@ -841,7 +841,7 @@ export type ServerMessageType =
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
   | 'session.exited'
-  // crash-resilience §3.3 D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
+  // D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
   // ServerMessageMapBase 两行注释）。
   | 'session.restored' | 'session.restoreFailed'
   | 'app.info'
@@ -1377,7 +1377,7 @@ export interface ServerMessageMapBase {
   // reason: 人类可读的错误原因（含 stderr 尾部截断），供诊断面板展开显示。
   // code: pi 进程退出码（null 表示进程被信号杀死无退出码）。
   'session.exited': { sessionId: string; code: number | null; reason: string }
-  // session.restored / session.restoreFailed（crash-resilience §3.3 D7，u8-pi-respawn）：
+  // session.restored / session.restoreFailed（D7，u8-pi-respawn）：
   // pi 非主动退出后的自动恢复结果推送（恢复编排点 = ProcessManager onSessionExit 链 →
   // pi-respawn.ts 编排；5s 延迟 + 连续 2 次失败熔断）。两者只在「非主动退出触发的自动
   // 恢复」链路产生——用户手动强制退出（forceQuitSession，不经 onSessionExit）与惰性
@@ -1487,7 +1487,7 @@ export interface ServerMessageMapBase {
   //   rpc = 活跃 session（pi get_entries 权威解析 + 文件首行补 header）；
   //   file = 非活跃/降级（JSONL 直读 + sidecar 合并）；
   //   empty = session 未落盘（pi 延迟写入窗口，规则 6——空态标记，前端显示「尚未落盘」）；
-  //   oversize = 文件超 runtime 读取预检阈值（crash-resilience D5④，u4c）——entries 恒空、
+  //   oversize = 文件超 runtime 读取预检阈值（D5④，u4c）——entries 恒空、
   //     oversizeMessage 提供降级文案（体积 + 源文件绝对路径），不与 empty 混淆。
   // header 是 JSONL 首行 type=session 的完整 entry（字段镜像 core TraceSessionHeader——
   // shared 不依赖 core，结构兼容即协议兼容；parentSession 两形态（源文件路径/源 sessionId
@@ -1776,7 +1776,7 @@ export interface ServerMessageMapBase {
   'session.handoffAborted': { srcSessionId: string }
   // session.history：session.history 的成功 reply（显式历史拉取 RPC；wave:perf-w20 后 switch
   // reply 已拆分到 session.switched，不再复用本类型）。session optional 保留向后兼容。
-  // truncated/loadedTurns/totalTurnsEstimate：历史加载双预算窗口契约（crash-resilience §3.3 D4）——
+  // truncated/loadedTurns/totalTurnsEstimate：历史加载双预算窗口契约（D4）——
   // truncated=true 表示窗口外仍有历史；loadedTurns=本次返回的完整 turn 数；
   // totalTurnsEstimate=session 的 turn 总数估计（读到头为精确值，窗口截断时为下界）。
   // [u6] legacy historyTruncated 字段已退役（偏差表 D7 清账：与 truncated 同值并存的双轨收口）。
@@ -1796,7 +1796,7 @@ export interface ServerMessageMapBase {
     sessionId: string
     session: SessionSummary
   }
-  // [u6] session.fullHistory / session.getFullHistory 已退役（crash-resilience §3.3 D4 中期：
+  // [u6] session.fullHistory / session.getFullHistory 已退役（D4 中期：
   // 「加载更早」改走 session.history 游标翻页，全量通路删除——游标翻页完全替代）。
   // model.switched：model.switch reply（settings-message-handler.ts:324-339 reply { sessionId, provider, modelId }，U6 后回传 pi 生效值拆解）。
   // [C-pi-14/ADR-0065] mutation reply（分支一后端可变换）：provider/modelId = pi 生效值，必需不 optional。
@@ -2123,7 +2123,7 @@ export interface ReplyPayloadMap {
   'session.getCommands': ServerMessageMap['session.commands']
   'session.getContext': ServerMessageMap['context.update']
   // session.getGenStats：reply = session.stats_update payload 同形（payload 消费型；
-  // docs/design/composer-gen-stats.md §3.3 D4 恢复腿，runtime 侧 modelId 解析降级链权威）。 
+  // D4 恢复腿，runtime 侧 modelId 解析降级链权威）。
   'session.getGenStats': ServerMessageMap['session.stats_update']
   'session.getTraceEntries': ServerMessageMap['session.traceEntries']
   'session.fetchCurrentSystemPrompt': ServerMessageMap['session.currentSystemPrompt']

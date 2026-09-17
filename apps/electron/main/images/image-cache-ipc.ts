@@ -1,5 +1,5 @@
 /**
- * image-cache IPC handler（crash-resilience §3.3 D6-⑨ / u7-memory-governance）。
+ * image-cache IPC handler（D6-⑨ / u7-memory-governance）。
  *
  * 接收 renderer 经 IMAGE_CACHE_WRITE 通道委托的 toolResult base64 图片，落盘
  * `~/.taiji/cache/images/<sessionId>/<sha256>.<ext>` 并回填路径引用（renderer 是

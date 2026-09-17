@@ -2,7 +2,6 @@
  * 纯函数层：配置 schema / 加载 / 门控判定 / 阈值检查 / 摘要后处理。
  *
  * 无副作用（fs 读取经 llm-shared loadConfig 的缓存封装），全部可单测。
- * 设计文档：docs/extensions/smart-context/design.md（D5 门控矩阵 / D6 阈值保护 / D8 配置 schema）。
  */
 
 import { estimateTokens } from "@earendil-works/pi-coding-agent";

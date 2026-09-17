@@ -22,8 +22,7 @@
 // 直接调 ctx.ui.notify。
 //
 // fileLog 单日文件无 size cap——显式豁免，依据：写入方为每 session 短命 pi 进程
-// + 7 天保留期清理 + DEBUG 档系开发者主动排障；重审触发条件见
-// docs/design/ext-simplify-14-shared-libs.md §7。
+// + 7 天保留期清理 + DEBUG 档系开发者主动排障。
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {

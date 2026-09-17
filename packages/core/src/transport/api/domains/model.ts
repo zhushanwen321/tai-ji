@@ -1,7 +1,6 @@
 /**
  * Model 域 —— 模型列表订阅 + 切换动作。
  *
- * 契约见 contract.md §2.4。
  * - onModels 走订阅（sendInitialState 推 model.list）。ModelInfo 统一用 shared/provider.ts
  *   的定义（runtime aggregateModels 生产的形状），不再本地臆造扁平结构。
  * - switchModel 是动作（确认由 model.switched 推回，本计划暂不订阅 switched，后续真实集成接）。

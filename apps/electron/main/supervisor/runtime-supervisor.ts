@@ -337,7 +337,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    */
   async forceRestartForLiveness(): Promise<void> {
     console.warn('[runtime] Liveness probe failed threshold — forcing restart of half-alive process')
-    // 杀链决策日志（crash-resilience §3.3 D6-⑥ 第三处「supervisor 重启决策」，u5b 同形态：
+    // 杀链决策日志（D6-⑥ 第三处「supervisor 重启决策」，u5b 同形态：
     // action/trigger/target/reason 字段化，经 main-logger 落盘 main-<date>.log）。
     // mainLogger 未 init（单测）时 no-op。pid 必须在 stop() 清 child 前捕获。
     const pid = this.child?.pid

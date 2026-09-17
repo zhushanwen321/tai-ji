@@ -32,8 +32,7 @@
  * - import 路径 `@/composables/panel/useThinkingLevelSync` → core 本域 `./thinking-level-sync`（batch2 已迁入）。
  * 函数签名 / 逻辑 byte-level 保持。
  *
- * [u3 记忆恢复 → U2a authored-only 收窄]（设计 model-thinking-level-memory.md + 其 U2a 回写，
- * 记忆表 = ./model-thinking-memory）：
+ * [u3 记忆恢复 → U2a authored-only 收窄]（记忆表 = ./model-thinking-memory）：
  * - armed 意图持有与设立：onModelSelect staging/已建分支设 {modelId, at, callId}（landing 分支
  *   不设——U2a 删除，landing 记忆档经 resolveLaunchConfig 解析链生效，armed 恢复通道在 landing
  *   结构性不存在，设计 state-truth-sync-architecture D5）；已建态走 try/catch——失败清/成功清

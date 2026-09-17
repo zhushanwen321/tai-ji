@@ -19,6 +19,9 @@ import { tmpdir } from 'node:os'
 import { SessionLifecycle, setMigrationGate, getMigrationGate } from './session-lifecycle.js'
 import { MODEL_NOT_CONFIGURED } from '../../utils/errors.js'
 import { getSessionsDir } from '../../infra/pi/pi-paths.js'
+// [U8a W5 fork 锚] fork 继承不再写 .model.json sidecar（写点退役），继承可见性断言 =
+// 产物 JSONL 反向读（readModelBinding U7 起即反向读实现）
+import { readModelBinding } from '../../infra/pi/session-model-sidecar.js'
 import type { ILifecycleSessionOps, ISessionRegisterDeps } from './session-internal.js'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { IConfigStore } from '../ports/config.js'
@@ -199,6 +202,36 @@ describe('SessionLifecycle × migration gate（D8-3）', () => {
       expect(lifecycle.has(summary.id)).toBe(true)
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     })
+    // [U8a W5 fork 锚迁移] 原 create-fork-anchor 的「fork 继承 sidecar 落盘」断言对象
+    // 随写点退役消失，重设计为反向读可见断言——本文件 fork 走真实 createForkedSessionFile
+    //（anchor 测试 mock 了 session-fork，无法承载产物内容断言）。fork 继承 = 源 path 上
+    // 的 assistant entry 随产物进入新文件，readModelBinding 反向读命中继承值（与 pi
+    // 恢复读路径同源；thinkingLevel 无 entry → pi 默认 'off'）。
+    it('fork 继承反向读可见：源 assistant entry 随产物继承，readModelBinding 命中源模型', async () => {
+      const { lifecycle, svc } = makeEnv()
+      // createForkedSessionFile 写入 getSessionsDir()（测试数据目录 sessions 子目录需先建）
+      mkdirSync(getSessionsDir(), { recursive: true })
+      const dir = mkdtempSync(join(tmpdir(), 'u8a-fork-reverse-read-'))
+      const sourceFile = join(dir, 'source.jsonl')
+      writeFileSync(sourceFile, [
+        { type: 'session', version: 3, id: 's-fork-src', timestamp: '2026-08-16T01:00:00.000Z', cwd: dir },
+        { type: 'message', id: 'u1', parentId: null, timestamp: '2026-08-16T01:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } },
+        { type: 'message', id: 'a1', parentId: 'u1', timestamp: '2026-08-16T01:00:02.000Z', message: { role: 'assistant', provider: 'src-provider', model: 'src-model', content: [{ type: 'text', text: 'hello' }] } },
+      ].map((l) => JSON.stringify(l)).join('\n') + '\n')
+      const source: ScannedSession = { id: 's-fork-src', cwd: dir, filePath: sourceFile, launchPresetId: undefined } as ScannedSession
+      svc.findScannedSession = vi.fn(() => source) as never
+
+      const summary = await lifecycle.forkSession('s-fork-src', 'a1', true, 'forked')
+
+      const forked = lifecycle.get(summary.id)
+      expect(forked?.sessionFilePath).toBeTruthy()
+      expect(readModelBinding(forked!.sessionFilePath)).toEqual({
+        modelId: 'src-provider/src-model',
+        thinkingLevel: 'off',
+      })
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    })
+
     // r2-S1：model 门禁优先级——configStore 无默认 model 且源 session 也不存在时，
     // 错误码必须是 MODEL_NOT_CONFIGURED（先于 source not found 报出），
     // 与 create/restore 的错误优先级一致（见 session-lifecycle.ts forkSession 头部 r5-S2 注释）。

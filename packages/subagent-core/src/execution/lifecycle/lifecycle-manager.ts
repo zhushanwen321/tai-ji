@@ -20,8 +20,7 @@
 //      动作重写定形（close = 收口落账编排 / cancel = 中断 settle）。
 // 其余四项已删除：职责 2 全局 ceiling / 职责 3 shutdown 收割 / 职责 4 孤儿扫描自
 // 落地起无生产接线；职责 5 activate 互斥的历史接线点（冷路径 resume 前）随协议化
-// 重构消失、仅余自持单测。未来需要时按
-// docs/design/v2-defense-ii-iii-resolution.md 重新设计。
+// 重构消失、仅余自持单测。未来需要时按当时需求重新设计（原 v2 防御设计文档已删，git 可追溯）。
 //
 // 本模块不 import subagent-service 等 execution 编排层，避免循环依赖。
 //

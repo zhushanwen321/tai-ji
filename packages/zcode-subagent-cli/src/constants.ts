@@ -87,15 +87,14 @@ export const ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS = 1_500;
  * [R3 → superseded by P0-1] 旧「一轮终态等待」固定墙钟缺省值（ms）。**已被
  * `ZCODE_TURN_IDLE_TIMEOUT_MS`（idle 主判定）+ `ZCODE_TURN_MAX_TIMEOUT_MS`
  * （总上界兜底）两 timer 语义替换，session-channel 不再消费本值**——固定墙钟
- * 「到点=不可推进」判定被 2026-09 T001 深诊击穿（21% 活跃任务被误杀，见设计
- * timeout-zcode-turn-and-settled-watchdog.md §3.1/§4）。符号保留：audit/设计
- * 文档（timeout-audit-2026-09.md 等）以本名记录事故成因，删除即产生悬空引用。
+ * 「到点=不可推进」判定被 2026-09 T001 深诊击穿（21% 活跃任务被误杀；当时的
+ * 设计与 timeout-audit-2026-09.md 等审计文档已删除，git 可追溯——曾以本名记录
+ * 事故成因）。符号保留：作为该事故的代码侧命名锚点。
  */
 export const ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS = 300_000;
 
 // ============================================================
 // [P0-1 U1] turn 等待两 timer（idle 主判定 + 总上界回收兜底）
-// 设计权威源：docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D1/D2
 // ============================================================
 
 /** turn idle 主判定的 env 覆盖通道（>0 覆盖、≤0 关闭、非法值 warn+回落默认）。 */

@@ -3,7 +3,7 @@
  *
  * 设计起源：follow 状态机迁移自早期 useChatScroll（手写 DOM scrollTop 方案），后收敛为单一
  * virtua 路径（cw wave w4 删除手写方案）；本版按 chat-pin-bottom-fix 设计 v7 重构坐标原语与
- * 脱离语义（docs/design/chat-pin-bottom-fix.md §4.3 D1/D2/D7，实施计划 U1）。
+ * 脱离语义（D1/D2/D7，实施计划 U1）。
  *
  * v7 为何把触发从「信号 watch 枚举」换成结果导向的 RO 兜底网（根因 R1，触发编排实装见
  * useMessageStreamFollowTriggers）：信号枚举 + 单次滚动对「滚动目标算完之后发生的高度变化」

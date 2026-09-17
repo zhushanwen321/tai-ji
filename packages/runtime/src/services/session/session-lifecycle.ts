@@ -50,12 +50,12 @@ import { applySessionOccupancyTransition, userStoppedGate } from './event-interp
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
 
-// [arch 技术债登记，R3 ports 依赖倒置待收口] 下方五个 infra/pi 值 import（getSessionsDir /
-// cleanupMigrateResidues + persistModelBinding / hydrateBindingMeta / assertPiSessionFile）
+// [arch 技术债登记，R3 ports 依赖倒置待收口] 下方四个 infra/pi 值 import（getSessionsDir /
+// cleanupMigrateResidues / hydrateBindingMeta / assertPiSessionFile）
 // 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-layering.md 阶段 R3）。
 // 同属本登记的衍生直引面：services/session/restore-seeding.ts（本文件拆出，直引
-// session-file-utils 的 cleanupMigrateResidues / normalizeSessionFileInPlace /
-// persistModelBinding——S2 追加登记，随 R3 同批收口，中期经 services/ports 暴露）。
+// session-file-utils 的 cleanupMigrateResidues / normalizeSessionFileInPlace——S2 追加登记，
+// 随 R3 同批收口，中期经 services/ports 暴露）。
 // 未在本轮直接 port 化的原因：restore/fork 归一化管线是 W1 高危区（tmp+rename 原子覆盖 +
 // 附着断言），包一层 port 接口属于行为敏感重构，应随 R3 阶段统一落地（ISessionStore 等
 // port 扩展 + 专项测试），不在 review 修复批混入。hydrateBindingMeta 是注册表 SSOT 的
@@ -71,10 +71,7 @@ import { clearRemovedSessionData } from '../plugin-service/session-data-store.js
 // 空闲回收占座原语与编排依赖类型（idle-pi-reclamation D6-2/D3，u2）。ReclaimSeat 是
 // reaper 判定循环与 reclaimManagedSession 共享的互斥状态（同实例注入，u3 装配）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
-// persistModelBinding 锚定本模块路径是 mock 链刚需：restore 播种测试以硬编码 factory
-// 替换本模块并经 importActual 取 re-export 的真身委托落盘（勿改为直引
-// session-model-sidecar.js，否则真身链断、写点③⑤ 断言红）。
-import { cleanupMigrateResidues, persistModelBinding } from '../../infra/pi/session-file-utils.js'
+import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
@@ -185,7 +182,8 @@ function nonEmptyStr(v: string | undefined): string | undefined {
 
 /**
  * D1 写点③ 生效值解析（create）：get_state 读回真值优先于请求值（C-pi-13 写点写生效值；
- * pattern 引擎静默换模时读回值才是真值）。hydrate 与 persistModelBinding 两个写点共用。
+ * pattern 引擎静默换模时读回值才是真值）。U8a 后唯一消费点 = create 的 hydrate 播种
+ * （model sidecar 写点已退役，持久层归 pi JSONL）。
  */
 function resolveCreateEffectiveModelId(
   presetClientOptions: PresetClientOptions,
@@ -661,13 +659,14 @@ export class SessionLifecycle implements ISessionRegistry {
   }
 
   /**
-   * create 的绑定落盘段（refreshAll → hydrate → sidecar persist 家族 → model binding）。
+   * create 的绑定落盘段（refreshAll → hydrate → sidecar persist 家族）。
    *
-   * 文件操作时序与提取前一致：只写 sidecar（*.preset.json / *.project.json / *.agent.json /
-   * *.model.json），不创建/触碰 pi session 文件本体。preset/project/agent 三绑定经
+   * 文件操作时序与提取前一致：只写 sidecar（*.preset.json / *.project.json / *.agent.json），
+   * 不创建/触碰 pi session 文件本体。preset/project/agent 三绑定经
    * skipJsonlExistsGuard 放行 existsSync 守卫（V9-④ 根修，理由见 persistCreateSidecars
-   * docstring）；本段 persistModelBinding 前置 if + 内部守卫语义不变——model 面有 turn-end
-   * ensure 补偿（tryPersistModelBinding），不依赖本写点。
+   * docstring）。[缓存治理 U8a W4] model 写点已退役（persistModelBinding 调用删除）：
+   * 现状该写点在 pi 首 flush 前本就被内部 existsSync 守卫跳过（实际补偿方 = turn-end
+   * ensure，W6 中途态），持久层归 pi JSONL + 扫描反向读，本段只负责 hydrate 内存播种。
    */
   private persistCreateBindings(
     session: IManagedSessionView,
@@ -702,19 +701,9 @@ export class SessionLifecycle implements ISessionRegistry {
       thinkingLevel: resolveCreateEffectiveThinkingLevel(presetClientOptions, createMetaOverride),
     }, 'create')
     this.persistCreateSidecars(session, presetId, options)
-    // D1 写点③ create/landing：落盘生效值（读回真值优先）。注意：create 瞬间 pi 尚未首
-    // flush、sessionFilePath 路径有值但 .jsonl 文件不存在（pi 0.84.4 实装：SessionManager
-    // 构造即生成确定性路径），persistModelBinding 内部 existsSync 守卫跳过本写点（偏差
-    // #9①）——从未显式切模型的 session 的 .model.json 由写点③的 turn-end ensure
-    // （tryPersistModelBinding，session-state-projection）补写，V1 文件断言由其满足；
-    // 本段仅在文件已 materialize 的少见时序生效。
-    if (session.sessionFilePath) {
-      persistModelBinding(
-        session.sessionFilePath,
-        resolveCreateEffectiveModelId(presetClientOptions, createMetaOverride) ?? '',
-        resolveCreateEffectiveThinkingLevel(presetClientOptions, createMetaOverride) ?? '',
-      )
-    }
+    // [缓存治理 U8a W4] D1 写点③（model sidecar 落盘）已退役：create 瞬间 pi 尚未首
+    // flush、该写点本就被内部 existsSync 守卫跳过；初始模型信息由 pi 对话落 JSONL
+    //（assistant entry / model_change）+ 扫描反向读提供，此处不再写持久层。
   }
 
   /**
@@ -988,7 +977,7 @@ export class SessionLifecycle implements ISessionRegistry {
     //（pi 行为锚点 = 登记 ⑩：switch_session 永久重绑读写目标，agent-session-runtime.ts:193-209 /
     // session-manager.ts:815-816）。
     // r3 校准：metaOverride 恒提供（读回成功/失败两路径同构），每字段独立走
-    // 「读回值 → sidecar 扫描值 → ''」兜底链。restore 从不播种全局默认：空串经
+    // 「读回值 → 扫描 meta 值 → ''」兜底链。restore 从不播种全局默认：空串经
     // registerSession 的 ?? 短路阻断 modelOverride/fallbackModelId，composer 按 D3
     // 显示占位而非假值，快照收敛自愈。
     // hydrateBindingMeta restore='none' 不覆写播种值（D1 裁决），所以兜底链在此完成不经过 hydrate。
@@ -1515,22 +1504,22 @@ export class SessionLifecycle implements ISessionRegistry {
 
   /**
    * fork 的源 session 当前生效值读取（D6 / state-truth-sync C5）：modelId + thinkingLevel 两字段
-   * （sidecar BINDING_FIELDS `.model.json` 家族同源两字段，字段范围刻意不含 projectId/label 等
+   * （model binding 家族同源两字段，字段范围刻意不含 projectId/label 等
    * ——各有既有继承通道）。
    *
    * 读取链与 resolveForkInheritedBindings 同构（W-RT-5 双源模式）：
    * 1. 活跃源读 runtime 内存实例 meta（switchModel/setThinkingLevel 的 session.modelId/
    *    thinkingLevel 直写 + ReplicatedState 收敛保证它是当前生效值）；
-   * 2. pi 已退出/未恢复源回落扫描 sidecar `.model.json` 值（source 来自 findScannedSession，
-   *    与 restore-seeding seedRestoreMetaOverride 的 sidecar 兜底同源）。
+   * 2. pi 已退出/未恢复源回落扫描 meta 值（source 来自 findScannedSession，缓存治理 U7 起
+   *    反向读 JSONL 真源，与 restore-seeding seedRestoreMetaOverride 的兜底同源）。
    *
    * 空串归一 undefined（restore 播种在源不可知时写 '' 占位，'' 传入 override 档会以
-   * `'' ?? preset` 短路吞掉 preset 档）。两档皆缺（E9：老会话无 sidecar 且实例不在内存）
-   * → undefined，调用方回落源 preset 档（现行为，不劣化）。
+   * `'' ?? preset` 短路吞掉 preset 档）。两档皆缺（E9：源 path 上无任何模型 entry 且实例
+   * 不在内存）→ undefined，调用方回落源 preset 档（现行为，不劣化）。
    *
-   * 已接受代价（设计 D6 / 残留风险 P4）：「切模 → pi 死（未 restore）→ 直接 fork」序列读到
-   * 旧 sidecar 值——fork 不触发源 restore 自愈，陈旧窗口量级限该序列，恢复路径 = fork 后
-   * chip 改选；严格优于现状（现状恒落 preset/默认档）。
+   * [U8a 后] 原「切模 → pi 死（未 restore）→ 直接 fork」读到旧 sidecar 值的已接受代价
+   * （设计 D6 / 残留风险 P4）随 sidecar 读侧退役消除——pi 切模时 model_change 已 append
+   * JSONL，扫描反向读按 (mtimeMs,size) 失效重扫即得真值。
    */
   private resolveForkSourceEffectiveBinding(
     srcSessionId: string,
@@ -1612,15 +1601,10 @@ export class SessionLifecycle implements ISessionRegistry {
       if (forkProjectId) {
         this.sessionStore.persistProjectBinding(forkedFilePath, forkProjectId)
       }
-      // 写 model binding 到 forkedFilePath 的 sidecar（model binding）：fork 继承源模型与思考等级。
-      // effectiveModel/effectiveThinkingLevel = override > preset.modelOverride 生效值（C-RL-6 优先级）。
-      if (presetClientOptions.model) {
-        persistModelBinding(
-          forkedFilePath,
-          presetClientOptions.model,
-          typeof presetClientOptions.thinkingLevel === 'string' ? presetClientOptions.thinkingLevel : '',
-        )
-      }
+      // [缓存治理 U8a W5] model binding sidecar 写点已退役：fork 产物由
+      // createForkedSessionFile 按当前分支 path 过滤生成，源上生效的 model_change /
+      // assistant entry 随产物进入新文件，fork 继承经扫描反向读 JSONL 自动获得，
+      // 此处不再写持久层（已知退化裁决见 cache-governance §3.3.3 边界 2/3）。
     } catch (e) {
       // L5: switchSession 失败时清理孤儿 fork 文件（已写出但 pi 未能加载）
       await this.safeDestroy(forkedId)

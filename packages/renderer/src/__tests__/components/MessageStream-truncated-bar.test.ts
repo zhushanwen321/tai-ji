@@ -1,5 +1,5 @@
 /**
- * [u4d-truncated-ui] MessageStream 历史预算截断顶部条接线测试（crash-resilience §3.3 D4 /
+ * [u4d-truncated-ui] MessageStream 历史预算截断顶部条接线测试（D4 /
  * 场景 T3 / 验收 A5/A6 的单测回归面）。
  *
  * 必测断言（三视角 DOM，挂载真实 MessageStream + 真实 TruncatedHistoryBar）：

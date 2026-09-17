@@ -79,7 +79,7 @@ export class SessionScanner {
       isBareWorkspace: detectBareWorkspaceCached(s.cwd),
       status: (outcome ?? 'idle') as SessionStatus,
       lastActiveAt: s.lastModified,
-      // modelId 来自 scanSessionMeta 第七读的 .model.json sidecar（scan 占位语义）。
+      // modelId 来自 scanSessionMeta 第七读的反向读 JSONL 真源（scan 占位语义）。
       // source:'scan' 标记让合并侧（core mergeViewSnapshot 守卫）能按来源分流——扫描占位
       // 空值不覆盖实例/广播真值（#2 空串覆盖事故防线）；owner 快照的显式空值不受此守卫。
       modelId: s.modelId ?? '',

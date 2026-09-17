@@ -25,7 +25,6 @@
  * 守卫 + dist 冒烟链消费）。
  *
  * 设计权威源：docs/architecture/subagent-core-package-extraction.md §3.3 D5；
- * docs/design/subagent-post-convergence-architecture.md §3.2 B-2 / §3.6 D3/D8/D9；
  * docs/design/subagent-core-sink-design.md（已删，git 可追溯）（sink 下沉收口扩面，2026-08-31）；
  * 宿主接入示例见包 README（§3.4 core_host_not_configured 恢复指引的落点）。
  */

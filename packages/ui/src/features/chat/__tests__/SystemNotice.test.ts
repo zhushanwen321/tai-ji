@@ -118,7 +118,7 @@ describe('SystemNotice subagent 定向气泡（U2b）', () => {
   })
 })
 
-// ── respawn 提示条分支（[u8-pi-respawn]，crash-resilience D7）──────────────
+// ── respawn 提示条分支（[u8-pi-respawn]，D7）──────────────
 //
 // SystemNotice 的 v-else-if respawn 渲染分支：customType = pi-respawn-notice 且
 // parseRespawnNoticeVariant(details) 可解析 → 渲染 RespawnNoticeBar（restored = T4

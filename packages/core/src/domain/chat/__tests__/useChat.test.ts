@@ -558,7 +558,7 @@ describe('send 定向分流（含 subagent 段）', () => {
   })
 })
 
-// ── [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D2 维护点 2]
+// ── [steer-bubble u2 / D2 维护点 2]
 //    send inflight 挂钩：乐观 +1 / catch 回滚 −1 / 挂钩位置约定（busy 转 steer 不挂）──
 
 describe('send inflight 挂钩（steer-bubble u2 / D2 维护点 2）', () => {

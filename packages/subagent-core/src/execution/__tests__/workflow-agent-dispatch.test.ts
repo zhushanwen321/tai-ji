@@ -1,7 +1,7 @@
 // src/execution/__tests__/workflow-agent-dispatch.test.ts
 //
-// [H2 W2] executeWorkflowAgent 统一编排入口单测（设计 subagent-workflow-record-
-// unification.md §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
+// [H2 W2] executeWorkflowAgent 统一编排入口单测（设计锚点：
+// subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
 // gate / D7 成功收口 / adopt 豁免双点）。
 //
 // 锁六组面：

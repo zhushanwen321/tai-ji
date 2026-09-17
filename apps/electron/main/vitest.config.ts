@@ -11,7 +11,7 @@ import { taijiTestConfig, FS_GUARD_PATH, GLOBAL_SETUP_PATH } from '../../../test
 //
 // 分池（形态对齐 packages/runtime/vitest.config.ts 的 projects 先例；vitest 4 调度契约：
 // groups 之间严格串行，先主组后尾组）：
-// - guarded：crash-resilience u5a 起的新增真实文件 IO 测试（logs/__tests__/），挂全套
+// - guarded：u5a 起的新增真实文件 IO 测试（logs/__tests__/），挂全套
 //   fs-guard 防线（仓规测试红线：破坏性 fs 只落白名单 tmp，真实 ~/.taiji 无条件拒绝）。
 // - legacy：存量 40+ 测试文件。**有意不挂 fs-guard**：挂载后暴露存量用例自身的设计缺陷
 //   （如 update-self-healer.test.ts 在 vitest 环境经 getOldBackupPath 的
@@ -28,7 +28,7 @@ export default taijiTestConfig({
       {
         test: {
           name: 'guarded',
-          // images/__tests__/：crash-resilience u7 图片缓存生命周期（真实文件 IO，同挂
+          // images/__tests__/：u7 图片缓存生命周期（真实文件 IO，同挂
           // fs-guard；cache/images 夹具全部 mkdtemp tmpdir 自建自删）
           // diagnostics/__tests__/：crash-forensics u3a 诊断包导出（真实 zip 落盘，同挂
           // fs-guard；夹具 mkdtemp tmpdir 自建自删）

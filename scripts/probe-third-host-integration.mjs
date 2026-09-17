@@ -2,7 +2,7 @@
 // scripts/probe-third-host-integration.mjs
 //
 // S5 第三宿主模拟（G3 核心）+ S1 资产一致性 + S2 floor + S6 原子写统一
-// —— docs/design/subagent-core-sink-design.md §4 验收场景脚本化（u-probe-verify）。
+// —— §4 验收场景脚本化（u-probe-verify）。
 //
 // 第三宿主纪律（G3 的可证伪前提）：本脚本对 subagent-core 的全部消费**仅凭 barrel
 // 导出面**——import 自 dist/index.cjs（构建产物），禁止任何 core 内部深路径 import；

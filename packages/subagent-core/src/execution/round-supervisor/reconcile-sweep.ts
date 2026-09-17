@@ -2,7 +2,7 @@
 //
 // [W4] 注册对账 sweep——死亡窗口投递缺口的补发通道（发射点枚举第 5 处）。
 //
-// 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2「注册对账
+// 设计锚点：D2「注册对账
 // sweep」（R2 增补、R3 钉死判据与写法）。
 //
 // 问题：注销经进程内 pi.events appendEntry 落盘，进程死亡时发射源消失

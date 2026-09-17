@@ -23,7 +23,7 @@ export function encodeCwd(cwd: string): string {
  * extensions/universal/rename-session/src/llm.ts 的 isSubagentSession 嗅探
  * （路径含 `<sep>subagents<sep>` 段 → 判为 subagent 会话并跳过重命名）——改本布局
  * （移动/改名 subagents 段）必须同步该嗅探逻辑，反之亦然；约束登记见
- * docs/constraints.json C-ext-21，设计依据 rename-session-three-modes.md §3.3 D7。
+ * docs/constraints.json C-ext-21。
  *
  * D-004: 用主 cwd 编码——保证同一主 cwd 下所有 subagent 的 session 文件
  * 存放在同一目录，便于 session-file-gc 统一清理。

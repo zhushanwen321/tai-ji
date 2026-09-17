@@ -1,5 +1,5 @@
 /**
- * Renderer 全局错误捕获三件套（crash-resilience §3.3 D2-① / u2-renderer-errors）。
+ * Renderer 全局错误捕获三件套（D2-① / u2-renderer-errors）。
  *
  * E3 教训：renderer 崩溃前零日志——9/9 OOM 崩溃后 `~/.taiji/logs/` 里没有任何
  * renderer 侧现场。本模块在 app 创建后立即安装三个捕获面：

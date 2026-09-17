@@ -224,7 +224,7 @@ describe('EventInterpreter compaction 编排 (M4 事件驱动)', () => {
   })
 })
 
-// ── composer-gen-stats LLM 窗口 D3 矩阵（genstats-speed-llm-window.md §3.3 D3 八行表）──
+// ── composer-gen-stats LLM 窗口 D3 矩阵（八行表）──
 //
 // 锁定 U1 状态机回归：turnStartedAt（LLM 窗口起算锚点）+ llmWindowDurationMs（已结算窗口）+
 // turn-usage 消费（durationMs 改源，一次性清 null）+ turn-start 重锚清除不变量 +

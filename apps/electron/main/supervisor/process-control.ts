@@ -64,7 +64,7 @@ export const KILL_WAIT_MS = 200
  *
  * dev 模式不用（dev 保留 console 转发方便终端调试）。
  *
- * size 轮转（crash-resilience §3.3 D6-⑦）：本文件是该固定名文件的唯一 writer，rename
+ * size 轮转（D6-⑦）：本文件是该固定名文件的唯一 writer，rename
  * 轮转**同进程安全**（对齐 runtime logger rotateMain 语义）。设计 v7 定案：固定名 +
  * writer 持有型 append fd 的文件**不做超龄清理**（unlink 后 fd 写入落孤儿 inode 静默
  * 丢失，恰在崩溃取证时刻失效），治理唯一归 writer 侧 size 轮转——见

@@ -68,21 +68,21 @@ export * from './git'
 export * from './plugin'
 export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS, TAIJI_RUNTIME_PI_RECLAIM_TICK_MS, TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS, DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_TICK_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS } from './constants'
 export type { ProviderApiType } from './constants'
-// 崩溃韧性共享契约 SSOT（docs/design/crash-resilience.md §3.3，实施计划 u-foundation：
+// 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
 // 出站帧守卫阈值 D3 / 全量读预检阈值 D5 / 历史双预算 D4 / 日志保留期 D6-⑦）。
 // 注意：readLogKeepDays 是 Node-only 函数（函数体访问 process.env）——本 barrel 被
 // renderer（浏览器）整包 import，import 本身安全（constants.ts 模块顶层无 process 访问），
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
 export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
-// Electron IPC 通道名 SSOT（crash-resilience u-foundation：renderer-log 上报通道 D2 /
+// Electron IPC 通道名 SSOT（u-foundation：renderer-log 上报通道 D2 /
 // image-cache 落盘通道族首成员 D6-⑨）；既有通道仍内联于 preload/main 不在此收敛，
 // 存量边界说明见 ipc-channels.ts 头注释。
 export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from './ipc-channels'
-// renderer-log 通道 payload 类型（crash-resilience u2：preload ElectronAPI 签名与 main
+// renderer-log 通道 payload 类型（u2：preload ElectronAPI 签名与 main
 // handler 校验共用同一形态声明，防两端漂移；main 侧仍做运行时再校验，见 ipc-payloads.ts 头注释）。
 export type { RendererErrorSource, RendererMemorySnapshot, RendererLogPayload } from './ipc-payloads'
-// image-cache 落盘通道 payload 类型（crash-resilience u7 D6-⑨：core 编排层 / preload
+// image-cache 落盘通道 payload 类型（u7 D6-⑨：core 编排层 / preload
 // ElectronAPI 签名 / main handler 校验三方共用同一形态声明，防漂移）。
 export type {
   ImageCacheWriteImage,
@@ -90,7 +90,7 @@ export type {
   ImageCacheWriteImageResult,
   ImageCacheWriteResult,
 } from './ipc-payloads'
-// debug:run-log-retention 通道返回类型（crash-resilience A9② 验收调试口：preload
+// debug:run-log-retention 通道返回类型（A9② 验收调试口：preload
 // ElectronAPI 签名与 main handler 返回共用同一形态声明，防漂移）。
 export type { DebugRunLogRetentionResult } from './ipc-payloads'
 // diagnostics:export-bundle 通道契约（crash-forensics u3a：请求 payload / 三态返回类型 /
@@ -217,7 +217,7 @@ export type { UpdateSource, UpdateSourcePref, LatestReleaseInfo, ReleaseAsset, U
 export { LAUNCH_RESULT_STATUSES, UPDATE_STALE_RELEASE } from './update'
 // 用量统计类型（W1 数据层）
 export type { UsageMetrics, UsageRow, UsageStatsResult } from './usage-stats'
-// Composer 生成指标类型 SSOT（docs/design/composer-gen-stats.md §3.4；帧 session.stats_update /
+// Composer 生成指标类型 SSOT（帧 session.stats_update /
 // RPC session.getGenStats 的 type→payload 登记在 protocol.ts，形状经 GenStatsFrame 引用防漂移）
 export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsFrame } from './gen-stats'
 // 迁移功能（从其他 agent 迁移配置）类型
@@ -234,8 +234,8 @@ export type {
 // 系统提示音默认映射 SSOT（main + renderer 共享，纯数据/类型无 node 依赖）
 export type { SoundPlatform, SoundKind } from './sound-defaults'
 export { DEFAULT_SUCCESS_PLATFORM, DEFAULT_ERROR_PLATFORM, getDefaultSound } from './sound-defaults'
-// composer 多 skill 注入的标记语法与预算估算 SSOT（设计 docs/design/composer-multi-skill-injection.md
-// §3.3 D3/D6/D7；runtime 注入器、序列化/反解析、scripts 探针三方同源消费，纯文本语法层无 node 依赖）
+// composer 多 skill 注入的标记语法与预算估算 SSOT（D3/D6/D7；
+// runtime 注入器、序列化/反解析、scripts 探针三方同源消费，纯文本语法层无 node 依赖）
 export type { ParsedSkillMarker, ParsedSkillsBlock, SkillDataBlockRange } from './skill-marker'
 export {
   SKILL_MARKER_TAG,

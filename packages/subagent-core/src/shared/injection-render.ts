@@ -4,8 +4,7 @@
 // <available_provider_models>）——从 pi-sw 插件层下沉的平台无关纯函数
 // （convergence D-3）。渲染骨架 escapeXml/renderXmlSection 见同目录
 // xml-injection.ts。pi 侧原函数曾内嵌于三 injector（基线 5557e109b，C5 起改调
-// 本模块，逐字节等价证据见
-// docs/design/subagent-core-convergence.probe-a2-baseline.md）。
+// 本模块，逐字节等价证据见当时 probe a2 基线存档，已删，git 可追溯）。
 //
 // 与 pi-sw 原实现的差异（本模块定约）：
 // - guide 文案必填注入：core 不内嵌任何平台文案，宿主（pi-sw / zsw）各自传入；
@@ -17,8 +16,7 @@
 //   「内置优先保留」两段式）；models 段无预算参数，完整渲染永不截（设计钉死）；
 // - format 内部先排后截：pi 调用链数据已排时重排幂等，不破坏「pi 现调用
 //   形态下输出逐字节等价」（CA2 快照验收前提）。
-//
-// 设计权威源：docs/design/subagent-core-convergence.md §3.2 D-3 / §3.3 红线 5、7。
+// 设计锚点：红线 5（ModelEntry 守卫）与红线 7（分段条目预算），见上方差异定约。
 
 import { escapeXml, renderXmlSection } from "./xml-injection.ts";
 

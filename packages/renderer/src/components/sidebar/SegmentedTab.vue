@@ -1,9 +1,9 @@
 <template>
   <!--
-    展示组件 · segmented 视图切换 tab（v6-master-spec §5.3）。
+    展示组件 · segmented 视图切换 tab。
     icon-only 模式：3 tab 等宽均分（flex-1），只显示 icon，label 收进 title；
     第 3 个 plugins 为挂载点占位（无 plugin 贡献时 ViewHost 空态自隐藏，见下方 tabs 定义）；
-    图标右侧渲染 count 数字（count > 0 才渲染，0 不出数字；sidebar-tab-count-restore 设计 §3.1/决策 4）。
+    图标右侧渲染 count 数字（count > 0 才渲染，0 不出数字）。
     外层凹陷容器 bg-bg-input + rounded-lg + p-[3px]；active = bg-bg-elevated 中性浮起（去蓝染）。
     inactive hover 只提亮文字（text-neutral-fg），不加底色——凹陷槽内加底色会显脏（demo SegmentedTab 同源）。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab（Agents/Flows 退役，任务观察入口唯一化收口到

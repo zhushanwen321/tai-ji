@@ -80,7 +80,7 @@ export default {
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
-    // [u8-pi-respawn] pi crash respawn notice bar (crash-resilience D7 / T4)
+    // [u8-pi-respawn] pi crash respawn notice bar (D7 / T4)
     respawnPending: 'Session engine exited unexpectedly — auto-recovering… You can keep typing; messages are delivered once recovery completes',
     respawnRestored: 'Session engine recovered from a crash. The interrupted turn was not preserved; background tasks and subagents that were running have been terminated and will not resume automatically. You can continue sending messages.',
     respawnFailed: 'Engine recovery failed — retry or create a new session',
@@ -177,7 +177,7 @@ export default {
     resetRemainingMinutes: '{m}m left',
     resetRemainingSoon: '<1m',
     resetEmpty: '--',
-    // composer-gen-stats dual triggers (docs/design/composer-gen-stats.md §3.1 / §3.3 D5)
+    // composer-gen-stats dual triggers (D5)
     genStatsSpeedTitle: 'Token speed',
     genStatsCacheTitle: 'Cache hit rate',
     genStatsCurrent: 'Last turn',

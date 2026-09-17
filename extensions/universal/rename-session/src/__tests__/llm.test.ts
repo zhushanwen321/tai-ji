@@ -259,7 +259,7 @@ describe("RENAME_SYSTEM_PROMPT / RENAME_INSTRUCTION", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 设计 rename-session-three-modes.md D5 空 ref fallback（空 ref → ctx.model 跟随会话主模型；非空无效 ref → 静默跳过 + warn）
+// 空 ref fallback（空 ref → ctx.model 跟随会话主模型；非空无效 ref → 静默跳过 + warn）
 // ────────────────────────────────────────────────────
 
 describe("callRenameLLM D5 空 ref fallback（跟随会话主模型）", () => {
@@ -317,7 +317,7 @@ describe("callRenameLLM D5 空 ref fallback（跟随会话主模型）", () => {
 });
 
 // ────────────────────────────────────────────────────
-// promptText 选项（设计 rename-session-three-modes.md D2 first-prompt：文本从 message_end 载荷取，不走 entries）
+// promptText 选项（first-prompt：文本从 message_end 载荷取，不走 entries）
 // ────────────────────────────────────────────────────
 
 describe("callRenameLLM promptText 选项（first-prompt 载荷取文本）", () => {

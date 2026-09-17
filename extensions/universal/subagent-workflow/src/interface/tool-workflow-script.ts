@@ -17,8 +17,6 @@
  * 置 isError:true）；AbortSignal 的 aborted 检查留宿主层（C4 偏差 #4 已声明）。
  *
  * 层归属：Interface。依赖 Pi SDK + engine script-lint + infra workflow-files。
- *
- * 参考：domain-models.md §FR-5（tool 收口 4→2）。
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";

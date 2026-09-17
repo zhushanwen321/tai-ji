@@ -1,8 +1,8 @@
 /**
- * useSidebarCounts 单测（sidebar-tab-count-restore 口径）。
+ * useSidebarCounts 单测（tab 计数口径）。
  *
  * 覆盖两个留存的 tab 计数：
- * - sessionCount（§2.3 口径表第 1 行 / §3.1 终态）：侧边栏全量会话数 − 已归档（markedDone）
+ * - sessionCount（§2.3 口径）：侧边栏全量会话数 − 已归档（markedDone）
  *   数，全局口径不随焦点 session 变化。
  * - fileCount：焦点 session 文件树根层条目数（目录计入，不递归）；无焦点 session → 0。
  *
@@ -51,11 +51,11 @@ describe('useSidebarCounts fileCount（文件树根层条目数）', () => {
   })
 })
 
-// ── sessionCount（设计 sidebar-tab-count-restore §2.3 口径表第 1 行 / §3.1 终态）──
+// ── sessionCount（§2.3 口径）──
 // 口径 = 侧边栏全量会话数 − 已归档（markedDone）数；死会话计入；全局口径不随焦点变化。
 // markers 隔离：useSessionMarkers 是模块级 cache + localStorage 持久化，跨用例残留会污染
 // 归档断言——沿用 useSessionMarkers.test.ts 的隔离模式（localStorage.clear + __resetCacheForTest）。
-describe('useSidebarCounts sessionCount（sidebar-tab-count-restore 口径）', () => {
+describe('useSidebarCounts sessionCount（tab 计数口径）', () => {
   const MARKERS_STORAGE_KEY = 'taiji:session-markers'
 
   function makeSummary(id: string, status: SessionSummary['status'] = 'idle'): SessionSummary {

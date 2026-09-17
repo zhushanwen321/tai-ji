@@ -21,8 +21,6 @@
  * 9. meta.phases 声明与 phase() 调用不一致 → 运行时分组与声明脱节（warning）
  *
  * 层归属：Engine。
- *
- * 参考：domain-models.md §7（validate 语义）。
  */
 
 /** m4 W2：meta 描述字段长度上限（§5.1 注入段预算约束）。 */

@@ -1,7 +1,7 @@
 // src/execution/__tests__/chat-engine-routing.test.ts
 //
-// U0 chat 工具域引擎路由分叉测试。设计权威源：
-// docs/architecture/subagent-engine-gui-visibility.md §3.3 D4（chat 入口路由分叉）/
+// U0 chat 工具域引擎路由分叉测试。设计锚点：
+// D4（chat 入口路由分叉）/
 // D5（pi 缺省字节级零变化）/ D10（zcode 分支终止链）。
 //
 // 覆盖：
@@ -584,7 +584,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
 // ============================================================
 // U2：probe/守卫兜底 + JournalWriter + engineHandle 回填
-// 设计权威源：docs/architecture/subagent-engine-gui-visibility.md §3.3 D4/D6、§5 U2 行
+// 设计锚点：D4/D6、U2 行
 // ============================================================
 
 describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {

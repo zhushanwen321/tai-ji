@@ -74,7 +74,7 @@ export interface MessageEffectContext {
    */
   applyEntryFrame: (sessionId: string, entry: PiEntry) => void
   /**
-   * [steer-bubble u0 / docs/design/steer-followup-user-bubble-display.md D2] per-session
+   * [steer-bubble u0 / D2] per-session
    * inflight 投递确认计数读写——语义 = **已显示待确认的投递数**（steer/followUp 气泡已
    * 进对话流或 send 乐观插入，其确认帧 message_end(user) 未到）。不变式 ≥ 0（decrement
    * 钳制，配额漂移不产生负值），正常路径逐投递归零。实现在 store（getInflight 等），

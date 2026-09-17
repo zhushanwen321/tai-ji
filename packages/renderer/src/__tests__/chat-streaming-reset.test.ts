@@ -1,5 +1,5 @@
 /**
- * Chat store 流式状态复位回归测试（CLAUDE.md 规则 #3）。
+ * Chat store 流式状态复位回归测试（AGENTS.md 规则 #3）。
  *
  * 锁定 MUST_FIX #1 的修复：message.error 到达时，若最后一条 assistant 仍
  * status:'streaming'（流中途错误 / 进程崩溃），必须将其转为 error 并并入 errorText，

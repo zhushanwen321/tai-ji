@@ -5,8 +5,6 @@
  * （[u9 账本化] 经 core NotifyLedger 四步生命周期，C-ext-19；未 bind 降级直发）。
  *
  * 层归属：Interface（依赖 Pi SDK + Engine WorkflowRun 模型）。
- *
- * 参考：domain-models.md §D-12。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

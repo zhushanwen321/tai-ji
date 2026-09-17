@@ -1,8 +1,7 @@
 /**
  * panel-view —— panel 主区/输入面渲染视图模型 + derivePanelView 派生纯函数。
  *
- * [权威] docs/design/panel-view-derivation-and-flow-lifecycle.md §3.3 D1。
- * 背景（§2.4 根因）：现行 Panel.vue 在组件 computed 里手工组合六个异构状态源
+ * 背景（原始根因）：现行 Panel.vue 在组件 computed 里手工组合六个异构状态源
  * （session 绑定 / 消息有无 / flow 单例态 / dead / ask-user / trace），组合空间无穷举
  * 守卫——每个 bug 来自一个未被考虑的格子（flow 卡 landing → turn 结束后 composer 消失）。
  * 本模块把该组合收敛为单一纯函数：决策可穷举（G3，7 输入 = 2^7 = 128 组合全表单测守卫）、

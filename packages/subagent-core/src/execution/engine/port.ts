@@ -1,8 +1,7 @@
 // src/execution/engine/port.ts
 //
-// EnginePort 接口（P1）。设计权威源：docs/architecture/subagent-engine-abstraction.md
-// §3.3.5「EnginePort 完整签名」——本文件是可编码落地的契约层，后续 wave（公共降级层
-// P2 / zcode 引擎 P3 / 配置路由 P4）以本接口为实现契约，字段级变更须先改设计文档。
+// EnginePort 接口（P1）。本文件是 EnginePort 完整签名的可编码落地契约层，后续 wave（公共降级层
+// P2 / zcode 引擎 P3 / 配置路由 P4）以本接口为实现契约，字段级变更先改本文件签名再改实现。
 //
 // 字段级扩展登记（接上文纪律——先改设计文档再扩接口）：
 //   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机面。权威源：
@@ -11,8 +10,8 @@
 //     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层）。
 //     [池抽象降级 2026-09-13] 原 RunContext.poolKey 字段与 onPoolResolved 回调已删
 //     （两引擎无池化实现，journal 固定落 engines/<id>/shared/，历史头部叙述见 git）。
-//   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面。
-//     权威源：docs/design/timeout-audit-hygiene-batch.md §3.2 D2-2。
+//   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面
+//     （设计定案 D2-2）。
 //   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
 //     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
 //     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：

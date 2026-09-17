@@ -37,7 +37,7 @@
         <Trash2 />
       </Button>
     </div>
-    <!-- 操作失败就近反馈（非静默吞，CLAUDE.md 规则 #3） -->
+    <!-- 操作失败就近反馈（非静默吞，AGENTS.md 规则 #3） -->
     <div v-if="error" class="flex max-w-[220px] items-center gap-1 text-[10px] text-danger">
       <AlertCircle class="size-3 shrink-0" />
       <span class="truncate">{{ error }}</span>

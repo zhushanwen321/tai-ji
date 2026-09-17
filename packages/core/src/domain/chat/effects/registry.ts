@@ -366,7 +366,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 晚于 message_start 乱序」——pi 同步保证不会乱序，且 abort 清空队列时强转会把
     // 「被丢弃」误标成「已投递」。已删除。
     //
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4 + §2 F4]
+    // [steer-bubble u2 / D4 + §2 F4]
     // 无条件清改**条件清**（F4 修复）：先读快照深度（steering + followUp 数组长度和），
     // 深度 == 0（无条目或数组全空）→ 删条目（QueueBubble 随深度归零消失，现状语义）；
     // 深度 > 0 → **保留**——混合提交常态路径下 steering 已 drain、followUp 待 turn 边界
@@ -408,7 +408,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
-    // 消费双通道（SSOT docs/architecture/conversation-error-visibility.md §3.3.2）：
+    // 消费双通道：
     // 有 streaming 气泡 → errorMessage 写最后一条 assistant 的 Message.error 字段（追加形态，
     // content 崩溃前正文不动）；无 streaming 气泡 → 追加纯 error 气泡（errorMessage 即全文）。
     const errorMessage = readString(payload, 'errorMessage')
@@ -448,7 +448,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收口」分支。
     const reason: FinalizeReason = isErrorStop ? 'error' : (stopReason === 'aborted' ? 'aborted' : 'normal')
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4] abort 只清
+    // [steer-bubble u2 / D4] abort 只清
     // inflight（在 finalizeSession 之外显式做——finalizeSession 是通用收口，normal/error
     // 不清）。D4 初版按「pi abort 确定性清队列」假设做三项清，Gate B 实测（2026-08-30）
     // 证伪：pi abort() 不调 clearQueue 也不 emit queue_update，队列跨 abort 存活并在下一

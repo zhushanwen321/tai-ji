@@ -6,7 +6,7 @@
  *               setProvider 动作；system 纯前端 localStorage。
  *
  * 本域是 config/extension 订阅的薄封装，供 SettingsModal 统一从 @/api/settings 消费
- * （Modal 不直接散落 import config/extension）。契约见 contract.md §2.7。
+ * （Modal 不直接散落 import config/extension）。
  *
  * [tc-transport-consolidation u2] 自 renderer 壳迁入时剔除 5 个 Electron IPC 函数
  * （代理/升级设置，经壳 @/lib/ipc 直连 main 进程，不走 runtime WS）——平台门面留壳

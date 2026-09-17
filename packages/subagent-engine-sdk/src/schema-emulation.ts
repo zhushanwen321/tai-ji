@@ -2,9 +2,8 @@
 //
 // schema 仿真降级（引擎侧原语，自 core execution/engine/common/schema-emulation.ts
 // 迁入 @zhushanwen/subagent-engine-sdk，实现体逐字等价）。迁移处置：无 core 内部
-// 依赖 → 直接搬（impl-plan §2.1 原语迁移处置表）。设计权威源：
-// docs/architecture/subagent-engine-abstraction.md D4（native/emulated 硬分流）+ §3.3.3
-// schema_emulation_failed 行 + §5 P2 行。
+// 依赖 → 直接搬（impl-plan §2.1 原语迁移处置表）。设计决策：
+// D4（native/emulated 硬分流，见下方分流段）+ schema_emulation_failed 错误行语义。
 //
 // ─── D4 硬分流（违反 = 历史事故形态） ───────────────────────────────
 // 本模块只服务 capabilities.schemaEnforcement === 'emulated' 的引擎

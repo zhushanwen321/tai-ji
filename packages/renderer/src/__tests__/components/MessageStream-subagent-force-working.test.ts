@@ -34,7 +34,7 @@ vi.mock('virtua/vue', async () => {
       name: 'MockVirtualizer',
       props: {
         data: { type: Array, default: () => [] },
-        // [U3 适配] 吸收 MessageStream U2 起的 :scroll-ref prop（chat-pin-bottom-fix D3），
+        // [U3 适配] 吸收 MessageStream U2 起的 :scroll-ref prop（D3），
         // 与 MessageStream-kind.test.ts mock 同款；不声明则落 reactive attrs 触发挂载期自渲染
         // （本文件无收集器断言，仅契约对齐消除 artifact 源头）。
         scrollRef: { type: Object, default: null },
@@ -239,7 +239,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
 })
 
 /**
- * 占位反例（D6 / docs/design/subagent-nonpi-visibility-followups.md §3.3）：③级投影的
+ * 占位反例（D6）：③级投影的
  * 占位 assistant（content === SUBAGENT_OUTCOME_PLACEHOLDER，仅 result/error 双缺时出现）
  * 不算实质产出——思考行仍触发；真实 content（result/error 文本）= 有产出 → 熄灭。
  * drawer-blank T3 既有断言（上方「末位 turn 无 assistant → thinking 行出现」）不动。

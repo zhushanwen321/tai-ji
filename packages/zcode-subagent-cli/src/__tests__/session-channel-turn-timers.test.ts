@@ -1,7 +1,7 @@
 // session-channel-turn-timers.test.ts —— P0-1 U1 turn 等待两 timer 状态机单测。
 //
-// 设计权威源：docs/design/timeout-zcode-turn-and-settled-watchdog.md §6 D1（idle
-// 主判定 + 宽上界回收兜底）/ D2（env 配置通道）/ §10 U1（lastTerminalStatus +
+// 设计锚点：D1（idle
+// 主判定 + 宽上界回收兜底）/ D2（env 配置通道）/ U1（lastTerminalStatus +
 // lookupTurn 归因放宽）。验收映射：
 //   ① 事件流活跃 → idle 持续刷新不触发（活跃任务零误杀）
 //   ② 静默超 idle 阈值 → TurnTimeoutError（idle 形态）

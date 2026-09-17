@@ -269,7 +269,7 @@ watch(
 )
 
 /**
- * 非 pi 终态回填桥（设计 D2，docs/design/subagent-nonpi-visibility-followups.md）：
+ * 非 pi 终态回填桥（D2）：
  * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收口
  * （running → 非 running）时重拉一次，对话流自动收敛到完整内容。四守卫：
  * cur/prev 任一 null（agentcall / 未选中）跳过；vid 或 subId 变化 = 切换 subagent

@@ -1,6 +1,6 @@
 /**
  * gen-stats-service.ts — Composer 生成指标（token 速度 + 缓存命中率）采样/帧合成/广播服务
- * （composer-gen-stats u3-wiring / P3，设计 docs/design/composer-gen-stats.md §3.3 D2/D4/D7/D8 + §3.4 + §3.5）。
+ * （composer-gen-stats u3-wiring / P3）。
  *
  * 职责边界：存储算法 SSOT 在 gen-stats-store.ts（本文件只调用，不重实现聚合/文件名/GC）；
  * bogus 丢弃判定在本服务采样入口执行（store 只提供阈值常量 + 纯谓词，D7）；sid→modelKey

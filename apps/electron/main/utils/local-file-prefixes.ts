@@ -54,7 +54,7 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
   const prefixes: string[] = [
     ...(opts.appPath ? [opts.appPath] : []),
     // attachments：会话粘贴图片（runtime 持久化）；cache/images：toolResult 图片缓存
-    // （crash-resilience D6-⑨，main 经 IPC 落盘后 renderer 以 local-file:// 引用渲染）。
+    // （D6-⑨，main 经 IPC 落盘后 renderer 以 local-file:// 引用渲染）。
     // 两者均为用户自产图片目录，安全粒度等同 tmpdir，整前缀放行（protocol handler
     // 无状态拿不到 session 上下文，无法按 session 推导）。
     ...(opts.dataDir

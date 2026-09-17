@@ -1,5 +1,5 @@
 /**
- * TruncatedHistoryBar.vue 组件测试（[u4d-truncated-ui]，crash-resilience §3.3 D4）。
+ * TruncatedHistoryBar.vue 组件测试（[u4d-truncated-ui]，D4）。
  *
  * 三视角 DOM 断言（TEST-STRATEGY §3）：
  * - 必测①：truncated=true 形态——「已加载最近 N 轮」文案 + 「加载更早」按钮可见

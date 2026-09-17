@@ -1,11 +1,10 @@
 /**
  * gen-stats.ts — Composer 生成指标（token 速度 + 缓存命中率）类型 SSOT
  *
- * 设计文档 docs/design/composer-gen-stats.md §3.4（接口与数据模型，本文件三接口的唯一权威）。
- * 帧/RPC 协议决策见同文档 §3.3 D4：新帧 session.stats_update + 新 RPC session.getGenStats，
+ * 帧/RPC 协议（D4）：新帧 session.stats_update + 新 RPC session.getGenStats，
  * 登记位置在 protocol.ts（type→payload 映射 SSOT），形状经此处类型引用防漂移。
  *
- * null 编码纪律（§3.3 D4，与 protocol.ts context.update 条目的 [HISTORICAL] 无值编码纪律同源）：
+ * null 编码纪律（D4，与 protocol.ts context.update 条目的 [HISTORICAL] 无值编码纪律同源）：
  * 全帧无值一律 null，禁止 ?? 0 编码——null = 无数据（无样本 / 样本被 bogus guard 丢弃 /
  * provider 未上报 cache 字段），0 = 真实测量值（output 极小 × duration 极长经 round 可合法
  * 得出 0 t/s；冷启动全 miss 可合法得出 0%）。UI 侧 null → 「—」；0 → 显示 0。

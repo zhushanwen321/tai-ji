@@ -19,7 +19,7 @@ import type { IPiEngine } from '../ports/pi-engine.js'
 import type { ISessionStore, SessionJsonlLineTransform } from '../ports/session.js'
 import type { ScannedSessionMeta } from '../../infra/pi/session-file-utils.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
-import { cleanupMigrateResidues, normalizeSessionFileInPlace, persistModelBinding } from '../../infra/pi/session-file-utils.js'
+import { cleanupMigrateResidues, normalizeSessionFileInPlace } from '../../infra/pi/session-file-utils.js'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）：⑤档降级形态的「尾部扫 legacy session_end」复用。
 import { forEachReversedLineChunk } from '../../utils/history-reverse-read.js'
 
@@ -302,41 +302,41 @@ export function readEffectiveModelFromState(stateData: unknown): { modelId?: str
 }
 
 /**
- * restore 路径的生效值播种（U2/D1）：get_state 读回 + metaOverride 组装 + 写点⑤ sidecar 自愈。
+ * restore 路径的生效值播种（U2/D1）：get_state 读回 + metaOverride 组装。
  *
  * r3 校准：metaOverride 恒提供（读回成功/失败两路径同构），每字段独立走
- * 「读回值 → sidecar 扫描值 → ''」兜底链。restore 从不播种全局默认：空串经
+ * 「读回值 → 扫描 meta 值 → ''」兜底链。restore 从不播种全局默认：空串经
  * registerSession 的 ?? 短路阻断 modelOverride/fallbackModelId，composer 按 D3
  * 显示占位而非假值，快照收敛自愈。
  * hydrateBindingMeta restore='none' 不覆写播种值（D1 裁决），所以兜底链在此完成不经过 hydrate。
  *
+ * [缓存治理 U8a W3] 播种不再写任何持久层：持久层唯一写方 = pi（model_change 等 entry
+ * 落 JSONL）。兜底源 target.modelId/thinkingLevel 来自扫描 meta，U7 起经反向读 JSONL
+ * 已是持久层真值，restore 只做内存 metaOverride 播种。
+ *
  * @param client    已附着目标文件的 pi client（switchSession 成功后调用）
  * @param sessionId restore 的 session id（仅用于失败日志，与调用方日志同前缀）
- * @param target    findScannedSession 的扫描 meta（sidecar 兜底值来源）
+ * @param target    findScannedSession 的扫描 meta（兜底值来源，反向读 JSONL 真值）
  * @returns 播种值（恒提供；传给 registerSession 的 metaOverride）
  */
 export async function seedRestoreMetaOverride(
   client: IPiEngine,
   sessionId: string,
-  target: Pick<ScannedSessionMeta, 'filePath' | 'modelId' | 'thinkingLevel'>,
+  target: Pick<ScannedSessionMeta, 'modelId' | 'thinkingLevel'>,
 ): Promise<{ modelId: string; thinkingLevel: string }> {
   try {
     const stateData = await client.getState()
     const readback = readEffectiveModelFromState(stateData)
-    const restoredModelId = readback.modelId ?? target.modelId ?? ''
-    const restoredThinkingLevel = readback.thinkingLevel ?? target.thinkingLevel ?? ''
-    const metaOverride = { modelId: restoredModelId, thinkingLevel: restoredThinkingLevel }
-    // D1 写点⑤ / E6 自愈闭环：读回成功后用真值覆写 sidecar 过期值（restore 窗口外
-    // 切模产生的 .model.json 漂移在此收敛）。catch 分支不写——sidecar 原值保持作下次
-    // restore 的兜底源。persistModelBinding 自带 existsSync + 空值/写失败守卫。
-    persistModelBinding(target.filePath, restoredModelId, restoredThinkingLevel)
-    return metaOverride
+    return {
+      modelId: readback.modelId ?? target.modelId ?? '',
+      thinkingLevel: readback.thinkingLevel ?? target.thinkingLevel ?? '',
+    }
   } catch (e) {
-    // E2: get_state 读回失败 → 每字段回落 sidecar 扫描值（target 来自 findScannedSession，
-    // 含 .model.json 值），仍缺则 '' 占位。与读回成功路径同构：双无值也播种 ''/''，
+    // E2: get_state 读回失败 → 每字段回落扫描 meta 值（target 来自 findScannedSession，
+    // 反向读 JSONL 真值），仍缺则 '' 占位。与读回成功路径同构：双无值也播种 ''/''，
     // 不保持 undefined 走 registerSession 全局默认（D2 被否谱系：全局默认播种让 restore
     // 窗口显示他 session 的假值，违 G4「不知道显示占位」）。
-    console.warn(`[session-lifecycle] restoreSession(${sessionId}): get_state readback failed, falling back to sidecar values`, e)
+    console.warn(`[session-lifecycle] restoreSession(${sessionId}): get_state readback failed, falling back to scanned meta values`, e)
     return {
       modelId: target.modelId ?? '',
       thinkingLevel: target.thinkingLevel ?? '',

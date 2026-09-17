@@ -510,7 +510,7 @@ describe('assistant 聚合行子 block 内联展开（chevron + block 子行 + �
   })
 })
 
-describe('oversize 降级视图（crash-resilience §3.3 D5④，u4c 协议扩展）', () => {
+describe('oversize 降级视图（D5④，u4c 协议扩展）', () => {
   it("source='oversize' → 降级分支渲染文案（体积 + 源文件绝对路径可见），分区透传 oversizeMessage，不落空态", async () => {
     const MB = 1024 * 1024
     const bytes = 35.6 * MB
@@ -546,7 +546,7 @@ describe('oversize 降级视图（crash-resilience §3.3 D5④，u4c 协议扩�
   })
 })
 
-describe('error 态 envelope message 透出（crash-resilience §3.4 回流修复）', () => {
+describe('error 态 envelope message 透出（回流修复）', () => {
   it("status='error' → 渲染分区 errorMessage（envelope 恢复指引：分页入口 + session 文件路径），不只显示 code", async () => {
     // Gate B A11② 场景：活跃大 session 的 get_entries reply 被 D3 传输守卫拦为错误
     // envelope（code=payload_too_large），message 携带恢复指引——此前 UI 只渲染 code，

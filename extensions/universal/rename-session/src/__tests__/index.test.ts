@@ -52,10 +52,10 @@ interface MockSetup {
 	getSessionNameMock: ReturnType<typeof vi.fn>;
 	/** usage 落账入口：index.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
 	appendEntryMock: ReturnType<typeof vi.fn>;
-	/** registerTool mock（设计 rename-session-three-modes.md D3 agent-tool 注册面接线断言用）。 */
+	/** registerTool mock（agent-tool 注册面接线断言用）。 */
 	registerToolMock: ReturnType<typeof vi.fn>;
 	turnEndHandler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>;
-	/** message_end handler（first-prompt 入口，设计 rename-session-three-modes.md D2）。 */
+	/** message_end handler（first-prompt 入口）。 */
 	messageEndHandler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>;
 	/** 工厂注册的 rename_session 工具定义（registerTool 捕获）。 */
 	registeredTool: unknown;
@@ -176,7 +176,7 @@ function fire(setup: MockSetup, ctx: ExtensionContext, message?: unknown): Promi
 }
 
 /**
- * 触发 message_end handler（first-prompt 入口，设计 rename-session-three-modes.md D2）。message 默认为首条 user prompt
+ * 触发 message_end handler（first-prompt 入口）。message 默认为首条 user prompt
  * （text blocks 形态——探针 P1 实测 rpc 模式 user 载荷 content 为 blocks 数组）。
  */
 function fireMessageEnd(setup: MockSetup, ctx: ExtensionContext, message?: unknown): Promise<void> {
@@ -218,7 +218,7 @@ describe("renameSessionExtension", () => {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(resolveModel).mockReset();
 		vi.mocked(callLLM).mockReset();
-		// 工厂注册面在 load 时读一次 config（工具注册判定，设计 rename-session-three-modes.md D1）——工厂调用前必须有可用返回值
+		// 工厂注册面在 load 时读一次 config（工具注册判定）——工厂调用前必须有可用返回值
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		setup = createMockPi();
 		renameSessionExtension(setup.pi);
@@ -230,7 +230,7 @@ describe("renameSessionExtension", () => {
 		expect(setup.pi.on).toHaveBeenCalledWith("message_end", expect.any(Function));
 		expect(setup.turnEndHandler).toBeTypeOf("function");
 		expect(setup.messageEndHandler).toBeTypeOf("function");
-		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（设计 rename-session-three-modes.md D1 求值时点）
+		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（注册面 load 求值时点）
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});
 
@@ -265,7 +265,7 @@ describe("renameSessionExtension", () => {
 	});
 
 	// ────────────────────────────────────────────────────
-	// message_end 入口三模式分派（设计 rename-session-three-modes.md D1 live 读 mode / D2 first-prompt 守卫链）
+	// message_end 入口三模式分派（live 读 mode / first-prompt 守卫链）
 	// ────────────────────────────────────────────────────
 
 	it("TC-M1: first-prompt 模式首条 user message_end → callLLM 发起，prompt 从 event 载荷取（entries 空，finalText 空走两条降级）", async () => {
@@ -280,7 +280,7 @@ describe("renameSessionExtension", () => {
 		const opts = vi.mocked(callLLM).mock.calls[0][1] as {
 			messages: { role: string; content: { type: string; text: string }[] }[];
 		};
-		// 不等回复（设计 rename-session-three-modes.md D2）：finalText 空 → 两条 [user(promptText), user(instruction)]，无 assistant 条目
+		// 不等回复：finalText 空 → 两条 [user(promptText), user(instruction)]，无 assistant 条目
 		expect(opts.messages.map((m) => m.role)).toEqual(["user", "user"]);
 		expect(opts.messages[0].content[0].text).toBe("帮我修复登录超时，并补上单测");
 		// 落库走同一管道（防覆盖重查 → setSessionName → renamed to）
@@ -398,7 +398,7 @@ describe("renameSessionExtension", () => {
 	});
 
 	// ────────────────────────────────────────────────────
-	// turn_end 入口 mode 分派（设计 rename-session-three-modes.md D1 live 读：first-stop 以外的 mode 静默返回）
+	// turn_end 入口 mode 分派（live 读：first-stop 以外的 mode 静默返回）
 	// ────────────────────────────────────────────────────
 
 	it("TC-M10: first-prompt 模式 turn_end（stop + count=1 触发态）→ skip: mode=first-prompt，不发起 LLM 调用", async () => {
@@ -769,7 +769,7 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 });
 
 // ────────────────────────────────────────────────────
-// rename_session 工具注册与 execute 守卫（设计 rename-session-three-modes.md D1 求值时点 / D3 agent-tool 模式）
+// rename_session 工具注册与 execute 守卫（load 求值时点 / agent-tool 模式）
 // ────────────────────────────────────────────────────
 
 /** 注册到的工具定义形态（registerTool 捕获后测试侧调用 execute 用）。 */
@@ -788,7 +788,7 @@ interface RegisteredRenameTool {
 describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 	let setup: MockSetup;
 
-	/** 显式设置 load 时 mode 后重建工厂（注册面只在 load 求值一次，设计 rename-session-three-modes.md D1）。 */
+	/** 显式设置 load 时 mode 后重建工厂（注册面只在 load 求值一次）。 */
 	function setupWithMode(config: RenameSessionConfig): void {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(loadRenameConfig).mockReturnValue(config);
@@ -891,7 +891,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 });
 
 // ────────────────────────────────────────────────────
-// first-prompt 在途去重（设计 rename-session-three-modes.md D2：工厂闭包级——pi extensionCache 缓存 factory，
+// first-prompt 在途去重（工厂闭包级——pi extensionCache 缓存 factory，
 // 每次 session 创建重执行工厂，闭包变量 = per-session 生命周期）
 // ────────────────────────────────────────────────────
 

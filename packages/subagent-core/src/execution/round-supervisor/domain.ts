@@ -2,7 +2,7 @@
 //
 // [W4] 轮次活性监督器——域分类与 record 级判据谓词（单一权威源）。
 //
-// 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2 前置 1
+// 设计锚点：D2 前置 1
 // （轮次域分类）+ 前置 2（record 去向单一裁决表）+ 三态判定表。
 //
 // [modeless 波1·判据去模式] 判定域 = 全部 running record（保守多管不漏）：轮终

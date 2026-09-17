@@ -7,8 +7,7 @@
     section 透明继承 MainPanel 的统一 surface 外壳（border/radius/shadow 只在最外层 MainPanel），
     不再有独立 rounded-lg/border（避免在统一外壳内产生内圆角视觉）。
 
-    主区分支 = usePanelView 派生的 PanelView discriminated union（D1/D5，docs/design/
-    panel-view-derivation-and-flow-lifecycle.md §3.3）：组件层禁止再直接组合
+    主区分支 = usePanelView 派生的 PanelView discriminated union（D1/D5）：组件层禁止再直接组合
     flow/chat/session 状态做渲染判据——全部判据收敛在 derivePanelView 纯函数
     （core 64 组合全表守卫），本模板只消费 kind/input。分支顺序即派生优先级：
     dead > trace > conversation（有消息 MessageStream / 无消息空对话态）> landing > empty。
@@ -82,7 +81,7 @@
          对话历史全程可见，composer 消失输入禁止（不再走全屏 modal）。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
     <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-5 pb-3.5">
-      <!-- [crash-resilience T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
+      <!-- [T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
            数据源 = chat store respawnPending 分区（与 usePanelView 的 isSessionRespawning
            同源）；此时 panelView.kind 恒为 conversation/trace（respawning 抑制 dead），
            对话流 + composer 保持可用，恢复窗口发消息经 runtime join 等恢复完成后送达。

@@ -16,7 +16,7 @@ import type { PluginRpcServer } from './plugin-rpc-server.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 /**
- * 工具执行默认超时（D1：任务级防挂死兜底，docs/design/timeout-plugin-service-granularity.md §6.1）。
+ * 工具执行默认超时（任务级防挂死兜底）。
  *
  * 旧值 30s 固定墙钟误杀长工具（失败模式 A）；新默认可被 ToolRegistration.timeoutMs
  * 声明覆盖（声明通道 U2 落地），声明 <=0 / Infinity 显式 opt-out（见 resolveToolTimeoutMs）。

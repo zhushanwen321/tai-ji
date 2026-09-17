@@ -4,7 +4,6 @@
  * 领域就近（E2 架构候选），前端 + runtime 共享。
  * 文件格式 = JSON 数组（RecentWorkspaceRecord[]），落盘到 <configDir>/recent-workspaces.json。
  *
- * @see code-architecture.md §3
  * @see decisions.md D-005/D-006
  */
 export interface RecentWorkspaceRecord {

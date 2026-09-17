@@ -65,8 +65,6 @@
  * 是 opt-out 通道）；内存侧由 evictDoneRunsBeyondCap 淘汰。W17 后 state 文件
  * 已降级为纯性能缓存（权威数据在 session JSONL 的 workflow-record entry），随 session
  * 文件被用户删除时一并消失。
- *
- * 参考：domain-models.md §Ports（RunStore 定义）、clarification.md D-5。
  */
 
 import * as fs from "node:fs";

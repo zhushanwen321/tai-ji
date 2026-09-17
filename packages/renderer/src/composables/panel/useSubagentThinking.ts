@@ -1,11 +1,10 @@
 /**
- * useSubagentThinking —— subagent drawer 思考中指示（u3-thinking，设计
- * docs/design/subagent-drawer-blank.md §6.3/§7.3）。
+ * useSubagentThinking —— subagent drawer 思考中指示（u3-thinking）。
  *
  * 虚拟 session 收不到 occupancy 帧（sessionPhase.turn 恒 idle），ActivityStrip thinking 行
  * 永远不亮——由 forceWorking 补充驱动：真在跑且末位 turn 还没有 assistant 产出（分区为空或
  * 只有 task user 气泡）时视为「思考中」，调用方经 prop 传给 ActivityStrip（文案复用
- * dispatching key）。不写 occupancy、不动 TurnMeta（§6.3 裁决：occupancy 是 runtime 帧驱动
+ * dispatching key）。不写 occupancy、不动 TurnMeta（occupancy 是 runtime 帧驱动
  * 的单一权威，renderer 伪造写点破坏 SSOT）。
  *
  * 自 MessageStream.vue 抽出（≤300 行规范）：lastRenderTurn 是调用方的局部 computed，

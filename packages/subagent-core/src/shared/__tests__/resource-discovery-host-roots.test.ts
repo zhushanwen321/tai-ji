@@ -4,7 +4,6 @@
 // 覆盖：async 链 realpath 去重（W2①）、project-host 槽位（W2②）、hostRoots 同标签
 // 多根语义（W2④，Map→列表 + 硬编码槽合并原根后置）、单层扫描维持（红线 3）、
 // pi 单条目形态回归快照（回归红线：Map→列表是行为敏感改动）。
-// 设计权威源：docs/design/subagent-core-convergence.md §3.2 D-2 / §3.3 红线 1-4。
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

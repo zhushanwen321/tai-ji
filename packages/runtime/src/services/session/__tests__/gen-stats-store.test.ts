@@ -1,5 +1,5 @@
 /**
- * gen-stats-store 单元测试（实施计划 u2-store / P2，设计 composer-gen-stats.md §3.3 D3/D6/D7/D8）。
+ * gen-stats-store 单元测试（实施计划 u2-store / P2）。
  *
  * 覆盖（u2 验收②）：聚合加权平均对已知样本断言（与 pi-statusline 口径一致，且区分
  * 加权 vs 算术平均）、bogus 50/100 阈值边界语义、GC 删过期日键（本地时区）、

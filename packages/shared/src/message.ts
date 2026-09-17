@@ -23,14 +23,13 @@ export type SteerFollowUpMode = 'steer' | 'follow-up'
 export const COMPLETE_NOTIFY_CUSTOM_TYPES = new Set(['subagent-bg-notify', 'workflow-result'])
 
 /**
- * subagent-directive customType SSOT（composer 四符号 `@` 定向对话，设计
- * docs/architecture/composer-symbol-system.md §3.3.3）。
+ * subagent-directive customType SSOT（composer 四符号 `@` 定向对话）。
  *
  * 用户经 @ subagent chip 发送的定向消息：subagent-workflow extension（/subagents message
  * 命令面）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
  * customType 即本常量，content=定向文本原文，details={subagentId, slug, direction:'user'}，
  * display:false（false 是 pi TUI 渲染语义；taiji 消费侧另行决定显隐，见
- * parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理，§3.3.8）。
+ * parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理）。
  *
  * 与 extension 端写入字符串严格一致（commit 21578c74f），改名需同步 extension + 测试。
  */
@@ -74,7 +73,7 @@ export function parseSubagentDirective(content: unknown, details: unknown): Suba
 }
 
 /**
- * pi-respawn 恢复提示条 customType SSOT（crash-resilience §3.3 D7，u8-pi-respawn）。
+ * pi-respawn 恢复提示条 customType SSOT（D7，u8-pi-respawn）。
  *
  * pi 进程非主动退出后自动恢复（session.restored / session.restoreFailed 推送）时，
  * renderer 在对话流插入的 ephemeral 系统提示条（Message.customType = 本常量）。
@@ -112,7 +111,7 @@ export interface ToolCall {
    *  无此字段时回退到 output（已 stripAnsi 的纯文本）。 */
   outputRaw?: string
   /**
-   * output/outputRaw 是否被 entryStates 条目级截断裁剪 [crash-resilience §3.3 D6-⑧]。
+   * output/outputRaw 是否被 entryStates 条目级截断裁剪 [D6-⑧]。
    * 累积态单条 tool output 超 64KB（ENTRY_TOOL_OUTPUT_MAX_BYTES）时为 true，文本尾部
    * 带截断标记。live（tool_call_end overlay）与 reload（reducer replay）经同一截断函数，
    * 两路径标记一致（D3 代价 C 根治）。可选字段：缺省 = 未截断。
@@ -545,9 +544,8 @@ export interface Message {
    * 消息级错误文本/标记（status:'error' 同源）。
    * - assistant turn：message.error / send.rejected 通道写入错误文本
    * - bash 消息：markBashError abortBash 失败兜底写入错误文本
-   * 前端按值区分渲染（如 BashOutputBlock 消费 'timeout' 显示「超时」而非「已取消」——
-   * 'timeout' 值的原写方 bash timer 收口已随 dormant 契约删除
-   * （docs/design/timeout-streaming-ui-idle.md §5.4 D4），渲染兼容分支保留）。
+ * 前端按值区分渲染（如 BashOutputBlock 消费 'timeout' 显示「超时」而非「已取消」——
+ * 'timeout' 值的原写方 bash timer 收口已随 dormant 契约删除，渲染兼容分支保留）。
    */
   error?: string
   /** 上下文压缩摘要（W07-C，message.compactionSummary） */

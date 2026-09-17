@@ -12,8 +12,6 @@
  * 不可挂起，提前停止用 abort，要新结果开新 run）。
  *
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
- *
- * 参考：domain-models.md §FR-5（tool 收口 4→2）。
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";

@@ -368,7 +368,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await expect(flow.submitFirstMessage(textToSegments('first'))).rejects.toThrow('network down')
     expect(createCtrl.create).toHaveBeenCalledTimes(1)
     expect(flow.currentSessionId.value).toBe('retry-s') // session 已绑定
-    // T2 交接原子化（设计 panel-view-derivation-and-flow-lifecycle.md §3.3 D3）：
+    // T2 交接原子化：
     // 交接（setActiveSession+loadPanel+pushChat）完成即终态定格，send 失败属 session
     // 错误通道（toast），flow 终态不回退 landing
     expect(flow.state.value).toBe('completed')

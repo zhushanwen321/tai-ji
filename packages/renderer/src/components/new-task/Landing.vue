@@ -96,7 +96,7 @@ onMounted(() => {
 /**
  * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图，卸载即终结：
  * 封死「视图消失、状态漂留」的残留路径（flow.state 是 core 模块级单例，视图卸载后
- * 若停留 landing/overlay，无任何承接者能终结它——panel-view-derivation §3.3 D4 的
+ * 若停留 landing/overlay，无任何承接者能终结它——本守卫即 D4 的
  * 出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
  * （completed）与切换（cancelled，selectSession 守卫已 cancel）路径下卸载时已非活跃，
  * 守卫 noop，不产生非法转换。

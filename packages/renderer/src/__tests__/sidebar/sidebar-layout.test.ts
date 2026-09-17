@@ -50,7 +50,7 @@ describe('D4: SessionItem hover 按钮定位', () => {
 
 // ── D5: SegmentedTab count 数字渲染（三 tab 终态）────────────────
 // [HISTORICAL] 原「badge 蓝点位置」用例已改写：badge 随 count 数字恢复一并移除
-// （sidebar-tab-count-restore 设计决策 1，一态一手段——数字是「计数 > 0」的精确表达）。
+// （一态一手段——数字是「计数 > 0」的精确表达）。
 describe('D5: SegmentedTab count 数字渲染', () => {
   it('count > 0 渲染数字 span，badge 蓝点不再存在（数字取代 badge）', () => {
     const wrapper = mount(SegmentedTab, {
