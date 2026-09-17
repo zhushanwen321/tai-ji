@@ -4,8 +4,6 @@ import { taijiTestConfig } from '../../test-guard/factory.ts'
 // 2026-09-02 会话丢失事故双层防线 + 2026-09-16 prod 数据目录删除事故升级为仓库级强制。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     include: ['tests/**/*.test.ts'],
   },
 })

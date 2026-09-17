@@ -46,7 +46,6 @@ import { tryTransition } from "../persistence/execution-record.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { createNotifyHost } from "../notify/notify-host.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SubagentService } from "../subagent-service.ts";
@@ -69,15 +68,10 @@ import type { EngineCapabilities } from "../engine/types.ts";
 import type { EnginePort } from "../engine/port.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 interface DispatchHarness {
   service: SubagentService;
@@ -99,7 +93,7 @@ function makeHarness(opts: {
   const agentDir = path.join(tmpRoot, "agent");
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId: "wf-dispatch-it",
     ctxModel,
   });

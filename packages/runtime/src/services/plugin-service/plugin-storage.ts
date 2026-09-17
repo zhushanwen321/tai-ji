@@ -114,8 +114,7 @@ export class PluginStorage {
   }
 
   private loadPartition(k: PartitionKey): Map<string, unknown> {
-    const { pluginId, scope } = this.parsePartitionKey(k)
-    const filePath = this.getFilePath(pluginId, scope)
+    const filePath = this.getPartitionFilePath(k)
     const data = new Map<string, unknown>()
     try {
       const raw = readFileSync(filePath, 'utf-8')
@@ -133,8 +132,7 @@ export class PluginStorage {
   }
 
   private persistPartition(k: PartitionKey, data: Map<string, unknown>): void {
-    const { pluginId, scope } = this.parsePartitionKey(k)
-    const filePath = this.getFilePath(pluginId, scope)
+    const filePath = this.getPartitionFilePath(k)
     const dir = dirname(filePath)
     mkdirSync(dir, { recursive: true })
     const obj: Record<string, unknown> = {}

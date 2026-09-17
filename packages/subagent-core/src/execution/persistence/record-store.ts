@@ -88,6 +88,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
@@ -1299,7 +1300,7 @@ export class RecordStore {
       // 空表）；其余读失败 warn 留痕——冷查链把空表当 not-found 消费，IO 故障静默
       // 伪装成「无 record」会掩盖持续故障。
       if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
       }
       return [];
     }
@@ -1332,7 +1333,7 @@ export class RecordStore {
       // （空表不得伪装 not-found）。
       this.indexEntries = null; // [perf L-1] 该 early-return 路径同样释放映像（内存卫生）
       if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
       }
       return [];
     }

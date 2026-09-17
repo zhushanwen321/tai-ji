@@ -19,7 +19,7 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { startIdleGc } from "../persistence/idle-gc.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
+import { configureCore, HostNotConfiguredError, resetCoreForTests } from "../../core/host-services.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -230,7 +230,7 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
     });
     const failing = {
       loadAll: async () => {
-        throw new Error("core_host_not_configured");
+        throw new HostNotConfiguredError("[subagent-core] core_host_not_configured");
       },
       save: async () => {},
     };

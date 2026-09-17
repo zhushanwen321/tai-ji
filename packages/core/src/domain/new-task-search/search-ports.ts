@@ -41,7 +41,7 @@ export interface FileReadPort {
 }
 
 /**
- * composer `#` 文件候选端口（AC-4.5：缓存未命中直调，不经 useFileSearch.load 吞错层）。
+ * composer `#` 文件候选端口（AC-4.5：缓存未命中直调，不经壳层 useFileSearch.load 吞错层）。
  * 壳适配 renderer api/domains/composer getFileCandidates。
  */
 export interface FileCandidatesPort {

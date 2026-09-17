@@ -4,8 +4,6 @@ import { taijiTestConfig } from '../../test-guard/factory.ts'
 // 与 core 的 node 环境（真 headless，ADR-0058）形成明确分层。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
   },

@@ -265,18 +265,42 @@ export class SkillRegistry {
    * 已一致，无信息需要传播。scanFn 失败保留旧值（与 rebuildGlobal 同款容错），下周期重试。
    */
   private async fallbackRescanGlobal(): Promise<void> {
+    return this.rescanScope({
+      scan: () => this.scanFn(''),
+      tag: 'global',
+      read: () => this.globalCache,
+      write: (v) => { this.globalCache = v },
+      notify: () => this.notifyGlobalChange(),
+    })
+  }
+
+  /**
+   * 兜底重扫单 scope 的共用收敛骨架（global / project 两腿同款，收敛口径单点）：scanFn
+   * 失败保留该 scope 旧值；读取时分区已不存在（project 腿被 invalidateAllProjects 清掉
+   * → read() 返回 undefined）则不复活已清分区；值变化才落缓存 + 广播（相等 = 缓存与磁盘
+   * 已一致，无信息需传播）。
+   */
+  private async rescanScope(opts: {
+    scan: () => Promise<SkillInfo[]>
+    tag: string
+    read: () => SkillInfo[] | undefined
+    write: (v: SkillInfo[]) => void
+    notify: () => Promise<void>
+  }): Promise<void> {
     let fresh: SkillInfo[]
     try {
-      fresh = await this.scanFn('')
+      fresh = await opts.scan()
     } catch (e) {
-      console.warn('[skill-registry] fallback rescan: global scan failed, keeping stale cache:', e)
+      console.warn(`[skill-registry] fallback rescan: ${opts.tag} scan failed, keeping stale cache:`, e)
       return
     }
-    const changed = !sameSkillLists(this.globalCache, fresh)
-    this.globalCache = fresh
+    const current = opts.read()
+    if (current === undefined) return
+    const changed = !sameSkillLists(current, fresh)
+    opts.write(fresh)
     if (!changed) return
-    console.warn('[skill-registry] fallback rescan: global cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)')
-    await this.notifyGlobalChange()
+    console.warn(`[skill-registry] fallback rescan: ${opts.tag} cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)`)
+    await opts.notify()
   }
 
   /**
@@ -284,20 +308,13 @@ export class SkillRegistry {
    * 扫描期间分区被 invalidateAllProjects 清掉时不复活已清分区（重建交由下次 getProjectSkills）。
    */
   private async fallbackRescanProject(cwd: string): Promise<void> {
-    let fresh: SkillInfo[]
-    try {
-      fresh = await this.scanFn(cwd)
-    } catch (e) {
-      console.warn(`[skill-registry] fallback rescan: project:${cwd} scan failed, keeping stale cache:`, e)
-      return
-    }
-    const current = this.projectCache.get(cwd)
-    if (current === undefined) return
-    const changed = !sameSkillLists(current, fresh)
-    this.projectCache.set(cwd, fresh)
-    if (!changed) return
-    console.warn(`[skill-registry] fallback rescan: project:${cwd} cache diverged from disk, refreshed via onChange (frequent = watcher event path unhealthy, check circuit-break / lost events)`)
-    await this.notifyProjectChange(cwd)
+    return this.rescanScope({
+      scan: () => this.scanFn(cwd),
+      tag: `project:${cwd}`,
+      read: () => this.projectCache.get(cwd),
+      write: (v) => { this.projectCache.set(cwd, v) },
+      notify: () => this.notifyProjectChange(cwd),
+    })
   }
 
   /**

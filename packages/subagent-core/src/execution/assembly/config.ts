@@ -146,19 +146,11 @@ function sanitizeParsedConfig(parsed: Partial<SubagentsGlobalConfig>): Subagents
   };
 }
 
-/** maxConcurrent 校验：正整数，否则默认（S5：委托 sanitizePositiveInt，正整数规则单点化）。 */
+/** maxConcurrent 校验：正整数，否则默认。 */
 function sanitizeMaxConcurrent(value: unknown): number {
-  return sanitizePositiveInt(value, DEFAULT_MAX_CONCURRENT);
-}
-
-/** 正整数校验（与 sanitizeMaxConcurrent 同判）。 */
-function sanitizePositiveInt(value: unknown, fallback: number): number {
-  return isPositiveInt(value) ? (value as number) : fallback;
-}
-
-/** 正整数判定（sanitizePositiveInt 的探测面，坏值 warn 清单复用）。 */
-function isPositiveInt(value: unknown): boolean {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_MAX_CONCURRENT;
 }
 
 /**

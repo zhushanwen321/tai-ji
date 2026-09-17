@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentOutcome } from "../engine/types.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -68,7 +69,7 @@ function makeService(): {
   const fake = registerFakePiEngine();
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+    modelRegistry: emptyRegistry(),
     sessionId: "root-session",
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });

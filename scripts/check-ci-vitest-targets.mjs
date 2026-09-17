@@ -138,10 +138,12 @@ export function buildPackageNameMap(root, yamlText) {
 export function classifyCommand(cmd) {
   const text = stripGithubTemplates(cmd).trim()
   if (/\bvitest\s+run\b/.test(text)) {
-    const m = text.match(/^(pnpm\s+(?:--filter\s+\S+\s+)?exec|npx)\s+vitest\s+run\b(.*)$/)
+    const m = text.match(/^(pnpm\s+(?:--filter\s+(\S+)\s+)?exec|npx)\s+vitest\s+run\b(.*)$/)
     if (m) {
-      const filterPkg = text.match(/^pnpm\s+--filter\s+(\S+)\s+exec\s+vitest/)?.[1] ?? null
-      return { kind: 'direct', runner: m[1].replace(/\s+/g, ' '), filterPkg, rest: m[2] }
+      const filterPkg = m[2] ?? null
+      // runner 从捕获组重建（多空格输入折叠后同值）；npx 无 filter，取折叠后的原前缀
+      const runner = filterPkg ? `pnpm --filter ${filterPkg} exec` : m[1].replace(/\s+/g, ' ')
+      return { kind: 'direct', runner, filterPkg, rest: m[3] }
     }
     return { kind: 'unrecognized', text }
   }
@@ -150,7 +152,7 @@ export function classifyCommand(cmd) {
   if (/[;&|]/.test(text)) return null
   const m = text.match(/^pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(\S+)(?:\s+(.+))?$/)
   if (m) {
-    const filterPkg = text.match(/^pnpm\s+--filter\s+(\S+)\s+/)?.[1] ?? null
+    const filterPkg = m[1] ?? null
     return { kind: 'script', filterPkg, scriptName: m[2], args: m[3] ?? null }
   }
   return null

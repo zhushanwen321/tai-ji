@@ -137,7 +137,7 @@ const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-prov
  * 子进程注入面（workflow agent() / subagent 的 pi 孙进程）：
  * - extensions/faux-llm-ext.ts 复制：协议化引擎的 argv-mirror 读引擎自身 argv（无
  *   主 pi 的显式 --extension），孙进程拿不到 TAIJI_EXTENSION_PATHS 注入——经
- *   <agentDir>/extensions/ 自动发现装载（先例 scripts/probes/subagent-sync-collect）。
+ *   <agentDir>/extensions/ 自动发现装载（此前的探针先例已随 collect 退役删除，git 可追溯）。
  *   主 pi 带 --no-extensions 不受自动发现影响（显式注入不受抑制）。
  * - subagents/config.json（L3 引擎注册）：workflow 域 agent() 走引擎 registry，
  *   pi 引擎 cli descriptor 需显式注册（command=node + pi-subagent-cli bin）。

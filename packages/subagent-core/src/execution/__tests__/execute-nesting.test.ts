@@ -43,10 +43,10 @@ vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 import { spawn } from "node:child_process";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
 import { SubagentService } from "../subagent-service.ts";
 
@@ -56,10 +56,6 @@ const mockSpawn = vi.mocked(spawn);
 // 辅助：service 构造（与旧 setup 等价，但不再装配 fakeSdk）
 // ============================================================
 
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
 interface SetupResult {
   service: SubagentService;
 }
@@ -68,7 +64,7 @@ function setup(): SetupResult {
   const agentDir = "/tmp/nest-it"; // fs 已 mock，路径不需真实存在
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId: "nest-it",
     ctxModel: { id: "m", name: "M", provider: "p", reasoning: false },
   });
@@ -89,8 +85,6 @@ function setupWithFakeEngine(): SetupResult & { fake: FakePiEnginePort } {
   const fake = registerFakePiEngine();
   return { ...base, fake };
 }
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 /** [D3-⑤] execNesting（公共层 ExecutionNestingContext）.run 的 duck-type（绕过
  * import AsyncLocalStorage，足够本组用例——私字段经 Reflect 取，机制与旧 execCtxAls 同构）。 */

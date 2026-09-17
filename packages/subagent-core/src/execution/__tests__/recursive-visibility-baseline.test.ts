@@ -40,10 +40,10 @@ vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 import { spawn } from "node:child_process";
 
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
@@ -71,15 +71,11 @@ function registerHangingEngine(): FakePiEnginePort {
 
 // ── 辅助：service 构造 ──
 
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
 function setup(env: Record<string, string>): { service: SubagentService; store: RecordStore } {
   const agentDir = "/tmp/baseline-it";
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId: "baseline-it",
     ctxModel: { id: "m", name: "M", provider: "p", reasoning: false },
   });
@@ -92,8 +88,6 @@ function setup(env: Record<string, string>): { service: SubagentService; store: 
   const store = Reflect.get(service, "store") as RecordStore;
   return { service, store };
 }
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 /** execCtxAls.run 的 duck-type（绕过 import AsyncLocalStorage）。 */
 interface ExecCtxAls {
@@ -220,7 +214,7 @@ describe("进程级基线兜底（ALS 断裂修复，pi 事件回调模型）", 
     const checkoutPath = "/var/folders/worktree/pi-subagents/--root-project--/branch";
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     modelService.initModel({
-      modelRegistry: makeEmptyRegistry(),
+      modelRegistry: emptyRegistry(),
       sessionId: "baseline-it",
       ctxModel: { id: "m", name: "M", provider: "p", reasoning: false },
     });

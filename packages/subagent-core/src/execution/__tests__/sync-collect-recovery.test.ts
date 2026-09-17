@@ -36,7 +36,7 @@ import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { derivedManifestRecord } from "../persistence/record-store-rebuild.ts";
-import type { SubagentRecord } from "../assembly/types.ts";
+import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 /** 剥身份/relay env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描），
@@ -91,30 +91,7 @@ type AssertPi = ReturnType<typeof makeAssertPi>;
 type WritingPi = ReturnType<typeof makeWritingPi>;
 
 /** 种子成员 record（真实 reportSubagentRecord 入参——序列化/落盘/扫描三层真实）。 */
-function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): SubagentRecord {
-  return {
-    agent: "/agents/worker.md",
-    task: "seed task",
-    slug: "seed",
-    status: "running",
-    mode: "background",
-    startedAt: 1000,
-    rootSessionId: ROOT_SESSION,
-    parentRecordId: undefined,
-    depth: 0,
-    endedAt: undefined,
-    turns: 0,
-    totalTokens: 0,
-    model: "prov/m1",
-    thinkingLevel: undefined,
-    eventLog: [],
-    displayItems: [],
-    result: undefined,
-    error: undefined,
-    sessionFile: undefined,
-    ...overrides,
-  };
-}
+const memberRecord = createMemberRecord({ task: "seed task", slug: "seed", rootSessionId: ROOT_SESSION });
 
 describe("[collect 退役] 存量 entry 读侧守卫 + orphan 覆写 merge（真实文件通路）", () => {
   let agentDir: string;

@@ -17,8 +17,9 @@ import { fileURLToPath } from 'node:url'
 
 const realFs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs')
 
-/** 真实用户数据目录（与 apps/electron/main 的打包态缺省一致，homedir 动态推导）。 */
-const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
+/** 真实用户数据目录（与 apps/electron/main 的打包态缺省一致，homedir 动态推导）。
+ *  导出供 global-setup 第一道 fail-fast 复用（单一来源，防第二份字面量漂移）。 */
+export const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
 
 /**
  * 路径的判定形式全集：resolve 形式（逻辑规范化，不解析 symlink）+ realpath 形式
@@ -45,7 +46,7 @@ function matchesPrefix(p: string, whitelist: string[]): boolean {
 }
 
 /** 注入值合法落点白名单：tmpdir() 与 ~/.taiji-dev（各取 resolve + realpath 双形式）。 */
-export function allowedRootVariants(): string[] {
+function allowedRootVariants(): string[] {
   const roots = [resolve(tmpdir()), resolve(join(homedir(), '.taiji-dev'))]
   return [...new Set(roots.flatMap((r) => pathVariants(r)))]
 }
@@ -87,12 +88,7 @@ function injectedEnvVariants(): string[] {
 }
 
 function whitelistPrefixes(): string[] {
-  const raw = [resolve(tmpdir()), resolve(join(homedir(), '.taiji-dev')), ...injectedEnvVariants()]
-  const prefixes: string[] = []
-  for (const p of raw) {
-    prefixes.push(...pathVariants(p))
-  }
-  return [...new Set(prefixes)]
+  return [...new Set([...allowedRootVariants(), ...injectedEnvVariants()])]
 }
 
 /** 真实数据目录判定形式全集（resolve + realpath，拒绝对 symlink 别名不透明）。 */

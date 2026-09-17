@@ -19,6 +19,8 @@
  *     record startedAt 同 rationale）。**只终态化不补注销**同上：run 的注销发射
  *     身份在 transition("done") 路径（发射点③）与其宿主收口链，GC 不越权补发。
  */
+import { toErrorMessage } from "../../core/error-message.ts";
+import { isHostNotConfiguredError } from "../../core/host-services.ts";
 import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
@@ -117,8 +119,8 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
     // configureCore（core_host_not_configured）= workflow 域未启用的正常形态，
     // debug 不噪声；其余（真 IO 故障）warn 留痕——静默跳过会把持续故障伪装成
     // 「无 run 可回收」，超龄 run 永不终态化且无从归因。两通道均单轮跳过下轮重试。
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("core_host_not_configured")) {
+    const message = toErrorMessage(err);
+    if (isHostNotConfiguredError(err)) {
       logger.debug(`[subagents] GC: workflow run store loadAll skipped (domain not enabled): ${message}`);
     } else {
       logger.warn(`[subagents] GC: workflow run store loadAll failed (skipped this cycle): ${message}`);

@@ -37,6 +37,7 @@ import { bindNotifyLedgerHost } from "../notify/notify-ledger.ts";
 import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { createRecord } from "../persistence/execution-record.ts";
@@ -822,7 +823,7 @@ function makeService(): {
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   // execute() 路径的 pi 链三层解析需要 registry（首轮派发用例消费）
   modelService.initModel({
-    modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+    modelRegistry: emptyRegistry(),
     sessionId: "root-session",
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });
@@ -1544,7 +1545,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     fake = registerFakePiEngine();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     modelService.initModel({
-      modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+      modelRegistry: emptyRegistry(),
       sessionId: "root-session",
       ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
     });

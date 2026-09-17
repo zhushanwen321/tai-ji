@@ -79,11 +79,29 @@ export function resetCoreForTests(): void {
   getHostSlot().current = undefined;
 }
 
+/**
+ * 宿主未 configureCore 即被消费的判别错误（§3.4 core_host_not_configured）。
+ *
+ * 为什么带 `code` 判别符而非只靠 message 子串：消费侧（idle-gc 的 workflow 域
+ * 「未启用 / 真 IO 故障」分通道）曾用错误文案子串做控制流——文案任何调整都会
+ * 静默改判。消费者一律用 isHostNotConfiguredError（结构化判定）。
+ * code 判定而非 instanceof：dist 双形态（主 bundle × 子入口 bundle 各持模块副本）
+ * 下 instanceof 会跨副本失效（同文件 HOST_SLOT_KEY 用 Symbol.for 的同一理由）。
+ */
+export class HostNotConfiguredError extends Error {
+  readonly code = "core_host_not_configured" as const;
+}
+
+/** 判定 err 是否「宿主未配置」错误（结构化 code 判定，跨 bundle 副本稳定）。 */
+export function isHostNotConfiguredError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && Reflect.get(err, "code") === "core_host_not_configured";
+}
+
 const NULL_HOST: HostServices = {
   dataRoot() {
     // §3.4 core_host_not_configured：错误必须可操作——指出缺失动作（configureCore
     // 的调用时机）+ 双宿主接入示例落点。pi 壳接入文件由后续接线单元（u0-wire）创建。
-    throw new Error(
+    throw new HostNotConfiguredError(
       "[subagent-core] core_host_not_configured: HostServices is not configured — " +
         "the host shell must call configureCore(host) during initialization, before any " +
         "core API that needs host services is consumed. " +

@@ -85,6 +85,7 @@ import {
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
+import { CTX_MODEL, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
@@ -196,8 +197,6 @@ function writeAgentMd(dir: string, engine: string): string {
   fs.writeFileSync(file, `---\nname: agent-${engine}\ndescription: test agent\nengine: ${engine}\n---\nbody\n`);
   return file;
 }
-
-const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
 function fakeRegistry(): ModelRegistryLike {
@@ -312,7 +311,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     clearEngines();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     modelService.initModel({
-      modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true } satisfies ModelRegistryLike,
+      modelRegistry: emptyRegistry(),
       sessionId: "test-session",
       ctxModel: CTX_MODEL,
     });

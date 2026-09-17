@@ -498,55 +498,23 @@ interface QuotaAutoEnableTarget {
 }
 
 /**
- * 组 1 批处理：models.json 已定义的 provider 逐条应用（分体系处理见 applyProviderEntry），
- * imported 条目进 quota 自动开启决策收集（凭证为明文 + 命中 api-key 类 preset 才收集）。
- * 返回产生的条目（未勾选的不产生条目）。
+ * 批处理骨架（组 1 provider / 组 2 孤儿凭据共用）：逐条串行应用（applyOne 返回 null =
+ * 未产生条目），imported 条目经 presetOf 派生 quota 自动开启目标收集（凭证为明文 + 命中
+ * api-key 类 preset 才收集）。返回产生的条目（未勾选的不产生条目）。
  */
-async function applyProviderEntries(
-  providers: ParsedProvider[],
-  selectedIds: string[],
-  existingIds: Set<string>,
-  credentialWriter: CredentialWriter | undefined,
+async function applyBatch<TSrc>(
+  sources: TSrc[],
+  applyOne: (src: TSrc) => Promise<ProviderImportedItem | null>,
+  presetOf: (src: TSrc) => QuotaPreset | undefined,
   autoEnableTargets: QuotaAutoEnableTarget[],
 ): Promise<ProviderImportedItem[]> {
   const imported: ProviderImportedItem[] = []
-  for (const provider of providers) {
-    const item = await applyProviderEntry(provider, selectedIds, existingIds, credentialWriter)
+  for (const src of sources) {
+    const item = await applyOne(src)
     if (!item) continue
     imported.push(item)
     if (item.status === 'imported') {
-      const preset = matchAutoEnablePreset(
-        { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
-        provider._credentialType,
-      )
-      if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
-    }
-  }
-  return imported
-}
-
-/**
- * 组 2 批处理：孤儿凭据逐条应用（sa3 F1，分体系处理见 applyOrphanCredential），
- * imported 条目进 quota 自动开启决策收集：决策用模板的完整定义（baseUrl/name），
- * 凭证形态用 oc 的六态判定。返回产生的条目（未勾选的不产生条目）。
- */
-async function applyOrphanCredentials(
-  orphanCredentials: ParsedOrphanCredential[],
-  selectedIds: string[],
-  existingIds: Set<string>,
-  credentialWriter: CredentialWriter | undefined,
-  autoEnableTargets: QuotaAutoEnableTarget[],
-): Promise<ProviderImportedItem[]> {
-  const imported: ProviderImportedItem[] = []
-  for (const oc of orphanCredentials) {
-    const item = await applyOrphanCredential(oc, selectedIds, existingIds, credentialWriter)
-    if (!item) continue
-    imported.push(item)
-    if (item.status === 'imported') {
-      const tpl = matchBuiltinTemplate(oc.providerId)
-      const preset = tpl
-        ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
-        : undefined
+      const preset = presetOf(src)
       if (preset) autoEnableTargets.push({ item, fetcher: preset.fetcher })
     }
   }
@@ -615,9 +583,31 @@ export async function applyImport(
   const autoEnableTargets: QuotaAutoEnableTarget[] = []
 
   // ══ 组 1 → 组 2 顺序应用：收集 imported 条目与 quota 自动开启目标 ══
+  // 组 1：models.json 已定义的 provider 逐条应用（分体系处理见 applyProviderEntry），
+  // preset 决策用 provider 的 baseUrl/name + 凭证形态。
+  // 组 2：孤儿凭据逐条应用（sa3 F1，分体系处理见 applyOrphanCredential），preset 决策用
+  // 模板的完整定义（baseUrl/name），凭证形态用 oc 的六态判定。
   const imported = [
-    ...(await applyProviderEntries(entry.providers, selectedIds, existingIds, credentialWriter, autoEnableTargets)),
-    ...(await applyOrphanCredentials(entry.orphanCredentials, selectedIds, existingIds, credentialWriter, autoEnableTargets)),
+    ...(await applyBatch(
+      entry.providers,
+      (provider) => applyProviderEntry(provider, selectedIds, existingIds, credentialWriter),
+      (provider) => matchAutoEnablePreset(
+        { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
+        provider._credentialType,
+      ),
+      autoEnableTargets,
+    )),
+    ...(await applyBatch(
+      entry.orphanCredentials,
+      (oc) => applyOrphanCredential(oc, selectedIds, existingIds, credentialWriter),
+      (oc) => {
+        const tpl = matchBuiltinTemplate(oc.providerId)
+        return tpl
+          ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
+          : undefined
+      },
+      autoEnableTargets,
+    )),
   ]
 
   // S6：selectedIds 中不在 imported 条目里的 id 补 failed 条目（不在 preview 里的给用户反馈）

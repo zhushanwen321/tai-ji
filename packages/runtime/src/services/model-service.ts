@@ -32,7 +32,7 @@ import { toErrorMessage } from '../utils/errors.js'
 import { toModelInfo } from './model-mapper.js'
 import { isCatalogProvider } from './provider-catalog.js'
 import {
-  ModelCapabilityRegistry,
+  attachSupportedLevels,
   runCapabilityReconcile,
   type CapabilityDrift,
 } from './model-capability.js'
@@ -350,9 +350,6 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   }
 
   // ── 能力注册表服务面（U5，pi-boundary-reliability design D2）──────────
-  /** 离线档位计算缓存（3 维缓存键：pi 版本 + models.json mtime + builtin-providers.json mtime）。 */
-  private readonly capabilityRegistry = new ModelCapabilityRegistry()
-
   /** drift 事件上报出口（WS 协议消息类型属后续单元，宿主经 setCapabilityDriftSink 订阅）。 */
   private capabilityDriftSink: ((drifts: CapabilityDrift[]) => void) | undefined
 
@@ -363,11 +360,11 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
 
   /**
    * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
-   * piVersion 建议传消息层 appInfo.piVersion（与 app.info 同源）；缺省 'unknown'——
-   * 缓存正确性不依赖该组分（逐模型签名兜底，见 model-capability.ts 缓存键说明）。
+   * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
+   * interfaces.ts 钉死），直调形态下不消费。
    */
-  attachSupportedLevels(providers: ProviderInfo[], piVersion?: string): ProviderInfo[] {
-    return this.capabilityRegistry.attachSupportedLevels(providers, piVersion)
+  attachSupportedLevels(providers: ProviderInfo[], _piVersion?: string): ProviderInfo[] {
+    return attachSupportedLevels(providers)
   }
 
   /**

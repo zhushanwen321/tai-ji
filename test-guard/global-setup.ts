@@ -23,14 +23,11 @@
  * （vitest fork worker 继承父进程 env）。
  */
 import { mkdtempSync, rmSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { isInjectedEnvAllowed } from './fs-guard-impl.js'
+import { isInjectedEnvAllowed, REAL_DATA_DIR } from './fs-guard-impl.js'
 
 let testDataDir: string | null = null
-
-/** 真实用户数据目录（与 apps/electron/main 打包态缺省一致，homedir 动态推导，无写死路径）。 */
-const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
 
 export function setup(): void {
   // [HISTORICAL] 2026-09-02 会话丢失事故第一层防线：env 注入的 TAIJI_AGENT_DATA_DIR 指向

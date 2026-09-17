@@ -63,19 +63,13 @@ export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
  * ProviderInfo.models 标注器（挂入 ModelService，U5 服务面）。
  * 无状态直调：逐模型现调 computeSupportedLevels（微秒级纯函数，见文件头说明）。
  */
-export class ModelCapabilityRegistry {
-  /**
-   * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
-   * 返回浅拷贝的新数组/新对象，不改入参（广播 payload 原引用复用）。
-   * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
-   * interfaces.ts 钉死），直调形态下不消费。
-   */
-  attachSupportedLevels(providers: ProviderInfo[], _piVersion = 'unknown'): ProviderInfo[] {
-    return providers.map(p => ({
-      ...p,
-      models: p.models.map(m => ({ ...m, supportedLevels: computeSupportedLevels(m) })),
-    }))
-  }
+// @data-owner #20（data-source-registry.md）：supportedLevels 唯一写入口 = 本纯函数
+// （config.providers reply 与 broadcast 两路同标，投影一次）；无缓存态故无第二写方。
+export function attachSupportedLevels(providers: ProviderInfo[]): ProviderInfo[] {
+  return providers.map(p => ({
+    ...p,
+    models: p.models.map(m => ({ ...m, supportedLevels: computeSupportedLevels(m) })),
+  }))
 }
 
 // ── 在线对账（drift 检测 + 编排）─────────────────────────────────────

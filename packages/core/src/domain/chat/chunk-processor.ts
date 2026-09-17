@@ -18,6 +18,12 @@ export function findLastAssistantIndex(list: Message[]): number {
   return -1
 }
 
+/** 最后一条 assistant message（无则 null）——下标版的载体形态，避免各站点重复 `i < 0 ? null : list[i]` */
+export function findLastAssistantMessage(list: Message[]): Message | null {
+  const i = findLastAssistantIndex(list)
+  return i < 0 ? null : list[i]
+}
+
 /**
  * 按 toolCallId 全局查找所属 assistant message 的下标（ID 锚定，不靠位置）。
  *

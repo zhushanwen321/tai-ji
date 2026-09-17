@@ -30,6 +30,7 @@
 import type { GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, ServerMessage } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
+import { getOrCreate } from '../../utils/collections.js'
 import type { IProcessManager } from '../ports/pi-engine.js'
 import type { GenStatsSample } from './types.js'
 import {
@@ -206,11 +207,7 @@ export class GenStatsService {
     const speedRecord = buildSpeedRecord(s)
     const cacheRecord = buildCacheRecord(s)
     if (!speedRecord && !cacheRecord) return
-    let entry = this.sessionCurrent.get(sid)
-    if (!entry) {
-      entry = {}
-      this.sessionCurrent.set(sid, entry)
-    }
+    const entry = getOrCreate(this.sessionCurrent, sid, (): SessionCurrentEntry => ({}))
     if (speedRecord) entry.speed = { modelKey, record: speedRecord }
     if (cacheRecord) entry.cache = { modelKey, record: cacheRecord }
   }
@@ -308,13 +305,9 @@ export class GenStatsService {
   /**
    * 完整帧构造（唯一出口）：模型全局聚合 + 本会话 current 合并（D6 聚合在 runtime 算好，
    * 前端只拿结论）。三条发送路径（recordSample 广播 / onModelSwitched / 恢复腿）全经此。
-   *
-   * fresh（可选）：采样路径刚写盘的日记录（recordSample → broadcastModel 传入），聚合免
-   * 重读全文件——同一同步临界段内磁盘值 == 内存值；独立路径（onModelSwitched /
-   * getSnapshotForSession）不传，照旧读盘。
    */
-  frameFor(sid: string, modelKey: string | null, fresh?: FreshDayRecords): GenStatsFrame {
-    return this.composeFrame(sid, modelKey, this.modelAggregates(modelKey, fresh))
+  frameFor(sid: string, modelKey: string | null): GenStatsFrame {
+    return this.composeFrame(sid, modelKey, this.modelAggregates(modelKey))
   }
 
   /**

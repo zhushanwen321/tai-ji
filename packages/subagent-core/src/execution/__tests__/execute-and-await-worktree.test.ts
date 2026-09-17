@@ -33,19 +33,15 @@ vi.mock("../persistence/state-marker.ts", () => stateMarkerModule());
 vi.mock("../persistence/manifest-store.ts", () => manifestStoreModule());
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 
 // ── 辅助：service 构造（与 execute-nesting.test.ts setup 等价）──
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
 
 interface SetupResult {
   service: SubagentService;
@@ -56,7 +52,7 @@ function setup(): SetupResult {
   const agentDir = "/tmp/exec-await-worktree-it"; // fs 已 mock，路径不需真实存在
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId: "exec-await-worktree-it",
     ctxModel: { id: "m", name: "M", provider: "p", reasoning: false },
   });
@@ -73,7 +69,6 @@ function setup(): SetupResult {
   return { service, worktreeManager };
 }
 
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 /**
  * 从 service 取出 private store（断言 record 终态用）。

@@ -12,9 +12,5 @@ export default taijiTestConfig({
   test: {
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
     // live 真机测试仅在 TAIJI_PI_LIVE=1 时真正执行（随迁原 core 侧口径）
-    reporters: ["default", "junit"],
-    outputFile: {
-      junit: "./test-results/vitest-junit.xml",
-    },
   },
 });

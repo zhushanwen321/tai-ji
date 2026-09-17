@@ -482,49 +482,36 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
 }
 
 /**
- * 尾读 + 预检分流 + 逆序分块读，倒序找最后一条匹配 entry 的字段值（W2 共用骨架 + D5③）。
+ * 尾读 → stat 预检分流 → 倒序分块/全量倒序单遍扫描骨架（findLastEntryField 与
+ * extractLatestModelFromJsonl 共用）。visit 返回 true = 收集齐，停止扫描。
  *
  * 1. readTailEntries 尾读尾部块（offset=max(0,size-32KB)）
- * 2. 倒序找匹配 predicate 的 entry，命中返回 extract(entry)
- * 3. 尾读未命中（INVAR-tail-2 SR1）→ statSync 大小预检分流：
+ * 2. 尾读未命中/未收集齐（INVAR-tail-2 SR1）→ statSync 大小预检分流：
  *    - ≤ READ_PRECHECK_MAX_BYTES（小文件）：保留原全量 readFileSync + parseJsonl 倒序找
  *      fallback（行为逐字节不变——目标可能在文件头部，如早期命名推出的 session_info）
  *    - > READ_PRECHECK_MAX_BYTES（D5③，crash-resilience §3.3）：**删除全量读 fallback**，
- *      改 forEachReversedLineChunk 逆序分块扫（总读取量 ≤ 阈值），从尾向前找「最后一条
- *      含目标字段的行」命中即止——消除「每次 pi 退出（extractSessionOutcome）未命中尾窗
- *      就全量同步读巨文件」的退出侧内存尖峰恶性循环。上限内未命中（目标在更深历史区）
- *      返回 null：消费方（extractSessionOutcome/extractSessionName）对 null 的既有降级
- *      （outcome=null → idle、name=null）语义保持，非正确性回退
- * 4. 全程未命中 → 返回 null
+ *      改 forEachReversedLineChunk 逆序分块扫（总读取量 ≤ 阈值），从尾向前找命中即止——
+ *      消除「每次 pi 退出（extractSessionOutcome）未命中尾窗就全量同步读巨文件」的
+ *      退出侧内存尖峰恶性循环。上限内未命中（目标在更深历史区）返回未命中：消费方
+ *      （extractSessionOutcome/extractSessionName/extractLatestModelFromJsonl）对未命中
+ *      的既有降级语义保持，非正确性回退
  *
- * 错误对等（INVAR-tail-7）：ENOENT/EACCES/JSON parse 错误与原实现一致返回 null，不引入新 throw。
+ * 错误对等（INVAR-tail-7）：ENOENT/EACCES/JSON parse 错误与原实现一致不抛，直接返回，
+ * 由调用方按各自未命中默认值（null / undefined）处理。
  */
-function findLastEntryField<R>(
-  filePath: string,
-  predicate: (e: Record<string, unknown>) => boolean,
-  extract: (e: Record<string, unknown>) => R,
-): R | null {
+function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unknown>) => boolean): void {
   // 尾读阶段
   const tailEntries = readTailEntries(filePath)
-  if (tailEntries !== null) {
-    for (let i = tailEntries.length - 1; i >= 0; i--) {
-      const entry = tailEntries[i]
-      if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-        return extract(entry as Record<string, unknown>)
-      }
-    }
-  }
+  if (tailEntries !== null && scanEntriesReversed(tailEntries, visit)) return
   // D5③ 预检分流：超阈值禁全量读（原 fallback 的 readFileSync 全量同步读是崩溃收尾
   // 路径上的内存尖峰触发器），改逆序分块扫命中即止。
   let size = -1
   try {
     size = statSync(filePath).size
   } catch {
-    return null // 文件不存在/不可读：与原 readFileSync 抛错 → catch → null 等价（INVAR-tail-7）
+    return // 文件不存在/不可读：与原 readFileSync 抛错 → catch 等价（INVAR-tail-7）
   }
   if (size > READ_PRECHECK_MAX_BYTES) {
-    // 数组包装承载命中值（闭包内赋值，规避 TS 对泛型变量的 CFA 收窄误报）
-    const found: R[] = []
     forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
       // 块内倒序（文件尾方向优先）——「最后一条」= 更靠近文件尾的命中行
       for (let i = chunk.lines.length - 1; i >= 0; i--) {
@@ -537,28 +524,42 @@ function findLastEntryField<R>(
         } catch {
           continue // 损坏行跳过（parseJsonl 同语义；含块边界 UTF-8 残缺的污染行——见工具注释）
         }
-        if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-          found.push(extract(entry as Record<string, unknown>))
+        if (typeof entry === 'object' && entry !== null && visit(entry as Record<string, unknown>)) {
           return false // 命中即止（当前块内更早行不再交付）
         }
       }
     })
-    return found.length > 0 ? found[0] : null
+    return
   }
   // ≤阈值：原全量读 fallback 保留（INVAR-tail-2: 尾读未命中，目标可能在文件头部）
   try {
-    const content = readFileSync(filePath, 'utf-8')
-    const entries = parseJsonl(content)
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i]
-      if (typeof entry === 'object' && entry !== null && predicate(entry as Record<string, unknown>)) {
-        return extract(entry as Record<string, unknown>)
-      }
-    }
+    scanEntriesReversed(parseJsonl(readFileSync(filePath, 'utf-8')), visit)
   } catch {
-    return null
+    return
   }
-  return null
+}
+
+/**
+ * 尾读 + 预检分流 + 逆序分块读，倒序找最后一条匹配 entry 的字段值（W2 共用骨架 + D5③）。
+ *
+ * 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量倒序 / 超阈值
+ * forEachReversedLineChunk 逆序分块）见 scanJsonlFromTail；本条只承载「首个命中即止」
+ * 终止条件与未命中返回 null。
+ *
+ * 全程未命中 → null；错误对等（INVAR-tail-7）见 scanJsonlFromTail。
+ */
+function findLastEntryField<R>(
+  filePath: string,
+  predicate: (e: Record<string, unknown>) => boolean,
+  extract: (e: Record<string, unknown>) => R,
+): R | null {
+  const found: R[] = []
+  scanJsonlFromTail(filePath, (entry) => {
+    if (!predicate(entry)) return false
+    found.push(extract(entry))
+    return true
+  })
+  return found.length > 0 ? found[0] : null
 }
 
 // ── session 模型信息反向读（缓存治理批 3 U7，sidecar model 家族退役第一步）──
@@ -628,12 +629,11 @@ function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unk
  * 分支正序取最后一条（后写覆盖前写），反向读「从尾向前第一条」与之等价。modelId 与
  * thinkingLevel 是 pi 侧两个独立跟踪的变量（单条 entry 只更新其一），各取物理尾方向第一条。
  *
- * 复用 findLastEntryField 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量
- * 倒序 / 超阈值 forEachReversedLineChunk 逆序分块，总读取量 ≤ 32MB 上限）但不直接调它：
- * 单值「命中即止」签名承载不了双维度独立收集（只命中 model 即止会漏掉更早区域的
- * thinking_level_change；分两次调用则尾读/分流成本 ×2）——按同骨架单遍扫描，两维度都在手
- * 才提前止。混合分支文件取物理尾第一条（§3.3.3 已知语义边界 1，显示用途与现状 sidecar
- * 等价或更好）。
+ * 复用 scanJsonlFromTail 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量
+ * 倒序 / 超阈值 forEachReversedLineChunk 逆序分块，总读取量 ≤ 32MB 上限）：单值「命中即止」
+ * 签名承载不了双维度独立收集（只命中 model 即止会漏掉更早区域的 thinking_level_change；
+ * 分两次调用则尾读/分流成本 ×2）——经 visit 回调按同骨架单遍扫描，两维度都在手才提前止。
+ * 混合分支文件取物理尾第一条（§3.3.3 已知语义边界 1，显示用途与现状 sidecar 等价或更好）。
  *
  * 失效语义（数据流图 2 方案 A 成立的关键）：缓存键 = JSONL (mtimeMs, size)，pi append 后
  * 必 miss → 重扫——反向读成本只在文件变化时发生一次。损坏行跳过继续扫（findLastEntryField
@@ -659,50 +659,11 @@ export function extractLatestModelFromJsonl(filePath: string): { modelId: string
     return hits.modelId !== null && hits.thinkingLevel !== null
   }
 
-  // 1. 尾读阶段（findLastEntryField 同骨架）：model_change / assistant / thinking_level_change
-  //    都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口内，命中即不走分流。
-  const tailEntries = readTailEntries(filePath)
-  if (tailEntries !== null) {
-    scanEntriesReversed(tailEntries, collect)
-  }
-  // 2. 尾读未集齐 → stat 预检分流（与 findLastEntryField 同结构）
-  if (hits.modelId !== null && hits.thinkingLevel !== null) {
-    return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel }
-  }
-  let size = -1
-  try {
-    size = statSync(filePath).size
-  } catch {
-    return undefined // 文件不存在/不可读：INVAR-tail-7 错误对等（findLastEntryField 同款）
-  }
-  if (size > READ_PRECHECK_MAX_BYTES) {
-    // 超阈值：逆序分块扫（D5③ 同款，总读取量 ≤ READ_PRECHECK_MAX_BYTES），命中即止
-    forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
-      for (let i = chunk.lines.length - 1; i >= 0; i--) {
-        const line = chunk.lines[i]
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        let entry: unknown
-        try {
-          entry = JSON.parse(trimmed)
-        } catch {
-          continue // 损坏行跳过（错误规格表第 1 行；parseJsonl/findLastEntryField 同语义）
-        }
-        if (typeof entry === 'object' && entry !== null && collect(entry as Record<string, unknown>)) {
-          return false // 双维度集齐，停止迭代（当前块内更早行不再交付）
-        }
-      }
-    })
-  } else {
-    // ≤阈值：全量读 fallback 保留（INVAR-tail-2 SR1：目标可能在文件头部——如早期命名
-    // 推长的旧 session，模型 entry 全在头部的形态）
-    try {
-      scanEntriesReversed(parseJsonl(readFileSync(filePath, 'utf-8')), collect)
-    } catch {
-      return undefined
-    }
-  }
-  // 3. 组装：无模型信息 → undefined；thinkingLevel 无 entry → pi 默认 'off'
+  // 单遍骨架扫描（scanJsonlFromTail）：model_change / assistant / thinking_level_change
+  // 都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口内；双维度集齐即
+  // 提前止（尾读阶段命中即不走 stat 分流）。
+  scanJsonlFromTail(filePath, collect)
+  // 组装：无模型信息 → undefined；thinkingLevel 无 entry → pi 默认 'off'
   if (hits.modelId === null) return undefined
   return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel ?? PI_DEFAULT_THINKING_LEVEL }
 }

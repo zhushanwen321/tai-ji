@@ -456,7 +456,7 @@ export function buildDocsMdNameIndex() {
 }
 
 /** 全仓源码文件收集（staged 含 .md 删除时用；剪枝 FULL_SCAN_PRUNE_DIRS） */
-export function collectAllSourceFiles() {
+function collectAllSourceFiles() {
   const out = []
   const walk = (abs, rel) => {
     let entries

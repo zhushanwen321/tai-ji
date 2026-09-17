@@ -146,6 +146,11 @@ export function getRenameModel(): string {
   }
 }
 
+/** RMW 只覆盖指定字段（锁协议走共享 rmwExtConfigField，与 smart-context-config.ts 的 writeSmartContextField 同形）。 */
+function writeRenameField(apply: (base: Record<string, unknown>) => void): void {
+  rmwExtConfigField(getRenameConfigPath(), renameConfigLockOptions, () => ({ ...RENAME_MODEL_DEFAULT_CONFIG }), apply)
+}
+
 /**
  * 设置 rename 标题生成模型（读改写，只覆盖 model 字段，保留其他字段）。
  * model 为空串 = 清除回未设置；非空但不含 "/"（provider/modelId 格式非法）归一为空串
@@ -162,14 +167,9 @@ export function getRenameModel(): string {
  */
 export function setRenameModel(model: string): void {
   const normalized = model.includes('/') ? model : ''
-  rmwExtConfigField(
-    getRenameConfigPath(),
-    renameConfigLockOptions,
-    () => ({ ...RENAME_MODEL_DEFAULT_CONFIG }),
-    (base) => {
-      base['model'] = { type: 'ref', ref: normalized }
-    },
-  )
+  writeRenameField((base) => {
+    base['model'] = { type: 'ref', ref: normalized }
+  })
 }
 
 // ── rename-session 触发模式（config/rename-session-ext-config.json 的 mode 字段，设计 D1）──
@@ -210,12 +210,7 @@ export function getRenameMode(): RenameMode {
  */
 export function setRenameMode(mode: RenameMode): void {
   const normalized = isRenameMode(mode) ? mode : DEFAULT_RENAME_MODE
-  rmwExtConfigField(
-    getRenameConfigPath(),
-    renameConfigLockOptions,
-    () => ({ ...RENAME_MODEL_DEFAULT_CONFIG }),
-    (base) => {
-      base['mode'] = normalized
-    },
-  )
+  writeRenameField((base) => {
+    base['mode'] = normalized
+  })
 }

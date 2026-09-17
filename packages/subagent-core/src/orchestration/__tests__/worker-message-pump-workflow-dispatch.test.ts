@@ -43,20 +43,14 @@ import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { handleWorkerMessage } from "../worker-message-pump.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../../execution/assembly/model-resolver.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
 import { clearEngines } from "../../execution/engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
 
 // ── harness ──────────────────────────────────────────────────
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 interface PumpHarness {
   service: SubagentService;
@@ -74,7 +68,7 @@ function makePumpHarness(runId: string): PumpHarness {
   process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
   const agentDir = path.join(tmpRoot, "agent");
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
-  modelService.initModel({ modelRegistry: makeEmptyRegistry(), sessionId: "wf-pump-it", ctxModel });
+  modelService.initModel({ modelRegistry: emptyRegistry(), sessionId: "wf-pump-it", ctxModel });
   const service = new SubagentService({ cwd: agentDir, modelService });
   const pi = makePi();
   service.initSession({ pi, sessionId: "wf-pump-it" });

@@ -12,7 +12,7 @@
  *   合并候选 → matchFilter 过滤 → DTO 映射 → 按类型分组（符号占位 D-001）→ Section[]
  *
  * 失败路径：
- *  - file 源 WS reject：error 从 fileCandidates 冒泡（AC-4.5 不经 useFileSearch.load 吞错层）
+ *  - file 源 WS reject：error 从 fileCandidates 冒泡（AC-4.5 不经壳层 useFileSearch.load 吞错层）
  *    → allSettled rejected → 分组空态（MR-4.2 单源静默）
  *  - WS 断连 pending 永不 settle（#17 F-1）：WS 超时 race 10s → reject → allSettled settled
  *    → 分组空态+toast（AC-17.1，不永久挂死）
@@ -142,7 +142,7 @@ export function useSearch(
    * file 源（WS 直查 + #17 超时 race + 源内分级匹配）。
    * 复用 composer # 的同一套匹配管线：FileNode[] → toFileCandidates → filterAndSortFileCandidates
    * （basename 前缀 > path 子串 + 文件优先 + 路径浅优先 + 排序），保证两处文件搜索行为一致。
-   * AC-4.5：直调 fileCandidates（不经 useFileSearch.load 吞错层）；无缓存（缓存治理 U1 1-3
+   * AC-4.5：直调 fileCandidates（不经壳层 useFileSearch.load 吞错层）；无缓存（缓存治理 U1 1-3
    * 退役）——每次现拉，外部建/删文件零陈旧窗。
    * #17：WS 源包 Promise.race timeout（防 pending 永不 settle）。
    */

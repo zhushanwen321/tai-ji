@@ -22,7 +22,7 @@ import {
   computeSupportedLevels,
   detectCapabilityDrift,
   runCapabilityReconcile,
-  ModelCapabilityRegistry,
+  attachSupportedLevels,
 } from '../model-capability.js'
 import { ModelService } from '../model-service.js'
 import { RpcClient, type PiMessage, type AvailableModelSnapshot } from '../../infra/pi/rpc-client.js'
@@ -96,21 +96,19 @@ describe('离线计算（pi-ai 同源）', () => {
 
 describe('attachSupportedLevels 下发标注', () => {
   it('逐模型标注 supportedLevels；reasoning 缺失 → ["off"]（事故 B 形态：UI 不再可选高档）', () => {
-    const registry = new ModelCapabilityRegistry()
     const providers = [provider('p1', [
       model('hand-added-no-reasoning', { thinkingLevelMap: { off: 'off', high: 'high', max: 'max' } }),
       model('reasoning-true', { reasoning: true, thinkingLevelMap: { high: 'high', max: 'max' } }),
     ])]
-    const decorated = registry.attachSupportedLevels(providers)
+    const decorated = attachSupportedLevels(providers)
     expect(decorated[0].models.map(m => m.supportedLevels))
       .toEqual([['off'], ['off', 'minimal', 'low', 'medium', 'high', 'max']])
   })
 
   it('builtin fixture 模型标注值与 pi 直调一致', () => {
-    const registry = new ModelCapabilityRegistry()
     const p = builtinSnapshot[0]
     const source = (p.models ?? []).slice(0, 5)
-    const decorated = registry.attachSupportedLevels([provider(p.id, source.map(m => ({
+    const decorated = attachSupportedLevels([provider(p.id, source.map(m => ({
       id: m.id,
       reasoning: m.reasoning,
       thinkingLevelMap: m.thinkingLevelMap === null ? undefined : m.thinkingLevelMap,
@@ -124,10 +122,9 @@ describe('attachSupportedLevels 下发标注', () => {
   })
 
   it('不改入参：返回新引用，原 ProviderInfo.models 元素无 supportedLevels', () => {
-    const registry = new ModelCapabilityRegistry()
     const m0 = model('m1')
     const providers = [provider('p', [m0])]
-    const decorated = registry.attachSupportedLevels(providers)
+    const decorated = attachSupportedLevels(providers)
     expect(decorated).not.toBe(providers)
     expect(decorated[0].models[0]).not.toBe(m0)
     expect(m0.supportedLevels).toBeUndefined()

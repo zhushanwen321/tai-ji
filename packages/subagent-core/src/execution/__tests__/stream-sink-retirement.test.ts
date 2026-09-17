@@ -109,11 +109,11 @@ vi.mock("../persistence/manifest-store.ts", () => {
 import { spawn } from "node:child_process";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import { RELAY_ENV_NODE, RELAY_ENV_SCRIPT, RELAY_ENV_SOCKET } from "@zhushanwen/subagent-engine-sdk";
 import { SubagentService } from "../subagent-service.ts";
 import { createBackgroundStream } from "../assembly/stream-sink.ts";
 import type { ExtensionMode } from "../assembly/host-mode.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
@@ -140,17 +140,11 @@ function lastSpawnedChild(): FakeChild {
   return result.value as FakeChild;
 }
 
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
 function setupService(mode: ExtensionMode | undefined, sessionId = "retire-it"): SubagentService {
   const agentDir = "/tmp/stream-retire-it";
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId,
     ctxModel,
   });

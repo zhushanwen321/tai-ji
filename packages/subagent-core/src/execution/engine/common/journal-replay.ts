@@ -7,11 +7,11 @@
 // 为什么放 common：zcode/pi 的 read() ②级降级是同一段逻辑（replayJournal 拿事件流 →
 // live reducer 累积 turns → 投影 SessionView）——放引擎各自实现会漂移出两份形状。
 
-import { createRecord, updateFromEvent } from "../../persistence/execution-record.ts";
 import type { AgentEvent } from "../../assembly/types.ts";
-// aggregateUsage / toReplayedTurn 单源 SDK（自 session-view-projection.ts 逐字等价
-// 迁入后收口——双活副本删除，live ≡ replay 的投影语义不再靠双份手工同步）。
-import { aggregateUsage, toReplayedTurn } from "@zhushanwen/subagent-engine-sdk";
+// 投影 + reducer 单源 SDK（本 PR 删除逐字同形的本地副本；core 引擎侧只留
+// replayJournal I/O 与②级降级编排）。core AgentEvent/SessionView 是 SDK 契约
+// 类型的 re-export（protocol contract-types SSOT）——签名逐字兼容。
+import { eventsToSessionView as sdkEventsToSessionView } from "@zhushanwen/subagent-engine-sdk";
 import type { EngineHandle, SessionView } from "../types.ts";
 import { replayJournal } from "./event-journal.ts";
 
@@ -32,28 +32,17 @@ export function replayJournalToSessionView(
   return eventsToSessionView(events, engineId, sessionIdFromHandle(handle));
 }
 
-/** 事件流 → SessionView（live reducer 累积 turns——重放等价性的实现体）。 */
+/** 事件流 → SessionView（live reducer 累积 turns——重放等价性的实现体）。
+ *
+ * 委托 SDK 单源（eventsToSessionView 两侧逐字同形，core 侧副本已删）：reducer
+ * 与 Turn → ReplayedTurn / usage 聚合均在 SDK，core 不再持第二份容器字面量。
+ * 输出投影 {engineId, sessionId?, turns, usage, source:"journal"} 不变。 */
 export function eventsToSessionView(
   events: readonly AgentEvent[],
   engineId: string,
   sessionId?: string,
 ): SessionView {
-  const record = createRecord("journal-replay", {
-    agent: "journal-replay",
-    model: "",
-    mode: "background",
-    task: "",
-    slug: "",
-    startedAt: 0,
-  });
-  for (const ev of events) updateFromEvent(record, ev);
-  return {
-    engineId,
-    ...(sessionId !== undefined ? { sessionId } : {}),
-    turns: record.turns.map(toReplayedTurn),
-    usage: aggregateUsage(record.turns),
-    source: "journal",
-  };
+  return sdkEventsToSessionView(events, engineId, sessionId);
 }
 
 /** handle.sessionRef 的 sessionId 提取（引擎自定义键，运行时 guard）。 */

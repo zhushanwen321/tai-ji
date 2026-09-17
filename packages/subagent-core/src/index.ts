@@ -543,6 +543,12 @@ export {
 export { THINKING_ORDER } from "./shared/model-ref.ts";
 // 定时器上限（壳 tool-workflow.ts OR-1 消费，D3 判定进 barrel）
 export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
+// 入口态 fail-fast 断言（time 上界 / slug 长度）：两个 tool 入口共用的同一份实现
+// （findings g11a-F2；schema 第一道关卡之外，副作用链之前的运行时第二道）。
+export {
+  assertEntryTimeBudget,
+  assertSlugWithinLimit,
+} from "./shared/entry-guards.ts";
 // 资源发现面（W2③）：discoverResources——agent .md / workflow .js 的多源统一发现
 // （ADR-031）——多源扫描 + stem last-writer-wins 合并 + realpath 去重。宿主（zsw
 // 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键，

@@ -10,11 +10,12 @@
 // .readExplicitEngines。同判先例：sessions-index.readIndexFile（ENOENT 静默、其余
 // debug）。
 
+import { errorCodeOf } from "../../shared/fs-error.ts";
+
 /**
  * 判定错误是否为「目标不存在」（Node errno code = ENOENT）。
- * code 经运行时提取（Node fs 错误携 code 字段；不裸断言错误类型）。
+ * code 提取单源 = shared/fs-error.errorCodeOf（与 sessions-index 同一判别原语）。
  */
 export function isMissingFsError(err: unknown): boolean {
-  if (typeof err !== "object" || err === null || !("code" in err)) return false;
-  return Reflect.get(err, "code") === "ENOENT";
+  return errorCodeOf(err) === "ENOENT";
 }

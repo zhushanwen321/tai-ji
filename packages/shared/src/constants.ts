@@ -180,6 +180,20 @@ export const PRESET_EXTENSION_DIRS = [
 ] as const
 
 /**
+ * preset 候选目录按路径形态拆成 discovery.json 两组：`.` 开头（含相对路径）→ projectPaths，
+ * `~` 开头 → globalPaths；各自保持 presets 原序。
+ *
+ * DEFAULT_DISCOVERY_CONFIG 的唯一派生源——消除原先手写的第二份 preset 编码（成员/顺序
+ * 逐项与 PRESET_*_DIRS 相同，仅按 project/global 分组），新增 preset 成员自动进默认勾选。
+ */
+function splitPresetDirs(presets: readonly string[]): { projectPaths: string[]; globalPaths: string[] } {
+  return {
+    projectPaths: presets.filter((p) => p.startsWith('.')),
+    globalPaths: presets.filter((p) => p.startsWith('~')),
+  }
+}
+
+/**
  * discovery.json 默认态（首启 / 文件缺失时的回落值）：全部 preset 目录默认勾选。
  *
  * 语义：skill/agent/extension 扫描目录打开设置即默认勾选（pi + taiji 相关路径），
@@ -190,18 +204,9 @@ export const PRESET_EXTENSION_DIRS = [
  * 数组内顺序 = preset 顺序（project/global 各自内部），与 buildDirConfigs 的展示序一致。
  */
 export const DEFAULT_DISCOVERY_CONFIG = {
-  skill: {
-    projectPaths: ['.agents/skills'],
-    globalPaths: ['~/.pi/agent/skills', '~/.agents/skills'],
-  },
-  agent: {
-    projectPaths: ['.agents/agents'],
-    globalPaths: ['~/.pi/agent/agents', '~/.agents/agents'],
-  },
-  extension: {
-    projectPaths: ['.pi/extensions', '.taiji/extensions'],
-    globalPaths: ['~/.pi/agent/extensions'],
-  },
+  skill: splitPresetDirs(PRESET_SKILL_DIRS),
+  agent: splitPresetDirs(PRESET_AGENT_DIRS),
+  extension: splitPresetDirs(PRESET_EXTENSION_DIRS),
 } as const
 
 /**

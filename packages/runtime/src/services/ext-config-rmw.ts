@@ -17,10 +17,10 @@ import { atomicWrite } from '../utils/fs-utils.js'
 import { withFileLockSync, type SyncFileLockOptions } from '../utils/file-lock.js'
 
 /** JSON 序列化缩进格数（与 extension 侧 llm-shared saveConfig 的 JSON_INDENT 一致）。 */
-export const EXT_CONFIG_JSON_INDENT = 2
+const EXT_CONFIG_JSON_INDENT = 2
 
 /** 并发唯一 tmp 后缀：pid + 36 进制随机段（rename-session / smart-context 两个 RMW 写点共用）。 */
-export function extConfigTmpSuffix(): string {
+function extConfigTmpSuffix(): string {
   // 36 进制、跳过 "0." 前缀取 6 位，与 llm-shared uniqueTmpPath 同形态
   // eslint-disable-next-line no-magic-numbers -- tmp 随机段形态契约，见上行注释
   return `${process.pid}_${Math.random().toString(36).slice(2, 8)}`

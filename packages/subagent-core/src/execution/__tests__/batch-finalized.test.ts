@@ -21,39 +21,15 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { SubagentRecord } from "../assembly/types.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 
 const ROOT_SESSION = "root-batch-finalized";
 
-/** 存量批成员 record 形态（对齐 sync-collect-recovery.test.ts memberRecord——
- *  rebuildEntryRecord 解析门槛字段齐备）。 */
-function memberRecord(overrides: Partial<SubagentRecord> & { id: string }): SubagentRecord {
-  return {
-    agent: "/agents/worker.md",
-    task: "batch task",
-    slug: "batch",
-    status: "running",
-    mode: "background",
-    startedAt: 1000,
-    rootSessionId: ROOT_SESSION,
-    parentRecordId: undefined,
-    depth: 0,
-    endedAt: undefined,
-    turns: 0,
-    totalTokens: 0,
-    model: "prov/m1",
-    thinkingLevel: undefined,
-    eventLog: [],
-    displayItems: [],
-    result: undefined,
-    error: undefined,
-    sessionFile: undefined,
-    ...overrides,
-  };
-}
+/** 存量批成员 record 形态（rebuildEntryRecord 解析门槛字段齐备——共享 fixture 工厂）。 */
+const memberRecord = createMemberRecord({ task: "batch task", slug: "batch", rootSessionId: ROOT_SESSION });
 
 describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍——旧 session 文件必须可读", () => {
   let tmpDir: string;

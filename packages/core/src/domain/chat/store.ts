@@ -13,7 +13,6 @@ import {
   createInitialChatViewState,
   type ChatViewState,
 } from './apply-entry'
-import { clearSessionTimer } from './timers'
 import { createStreamingStateMachine } from './streaming-state-machine'
 import {
   touchLru as lruTouch,
@@ -1045,7 +1044,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   function clearPendingSendTimer(sessionId: string): void {
-    clearSessionTimer(pendingSendTimers, sessionId)
+    const t = pendingSendTimers.get(sessionId)
+    if (t !== undefined) {
+      clearTimeout(t)
+      pendingSendTimers.delete(sessionId)
+    }
   }
 
   /**

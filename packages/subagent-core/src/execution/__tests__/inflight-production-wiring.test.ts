@@ -39,10 +39,10 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { _resetLifecycleState, armIdleTimer, hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
@@ -56,12 +56,6 @@ import {
   type InFlightSnapshot,
 } from "../engine/inflight-snapshot.ts";
 import { EngineClient } from "../engine/client/engine-client.ts";
-
-const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
 
 /** 最小 fake 子进程（EventEmitter + killed/pid——hasLiveProcessHandle 消费面）。 */
 function makeFakeChild(pid = 4242): ChildProcess & EventEmitter {
@@ -85,7 +79,7 @@ function setup(): {
   clearEngines();
   const fake = registerFakePiEngine();
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
-  modelService.initModel({ modelRegistry: makeEmptyRegistry(), sessionId: "root-session", ctxModel: CTX_MODEL });
+  modelService.initModel({ modelRegistry: emptyRegistry(), sessionId: "root-session", ctxModel: CTX_MODEL });
   const service = new SubagentService({ cwd: agentDir, modelService });
   service.initSession({ pi: makePi(), sessionId: "root-session" });
   const store = (service as unknown as ServiceInternals).store;

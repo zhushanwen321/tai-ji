@@ -1018,6 +1018,21 @@ describe('createChatStore factory', () => {
       vi.advanceTimersByTime(30_000)
       expect(sut.store.isGenerating(sid)).toBe(false) // streaming 被 timeout 收口
     })
+
+    it('clearPendingSend 取消挂的 timer（到期不再 finalize）', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' })) // 建 streaming
+      sut.store.addPendingSend(sid)
+      sut.store.clearPendingSend(sid)
+
+      vi.advanceTimersByTime(30_000)
+      expect(sut.store.isGenerating(sid)).toBe(true) // timer 已被清，未被 timeout 收口
+    })
+
+    it('clearPendingSend 幂等：清不存在的 session 不抛错', () => {
+      expect(() => sut.store.clearPendingSend('ghost')).not.toThrow()
+      expect(sut.store.isActive('ghost')).toBe(false)
+    })
   })
 
   describe('LRU（touchLru / evictIfNeeded / evictVirtualKey）', () => {

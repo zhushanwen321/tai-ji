@@ -235,6 +235,21 @@ export function markResurrectedImpl(record: ExecutionRecord, wasClosed: boolean,
 }
 
 /**
+ * 派生 manifest 投影落盘（settle/收口/回收共用的写面单点；写序敏感面，
+ * 调用方负责决定其后是否接 entry 上报 + 通知——见 commitDerivedTransition）。
+ */
+function persistDerivedManifest(record: ExecutionRecord, ctx: TerminalCtx): void {
+  ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
+}
+
+/** persistDerivedManifest + entry 上报 + 通知重渲（settle/收口落账的标准收尾三元组，写序固定）。 */
+function commitDerivedTransition(record: ExecutionRecord, ctx: TerminalCtx): void {
+  persistDerivedManifest(record, ctx);
+  ctx.reportRecordTransition(record);
+  ctx.notifyChange();
+}
+
+/**
  * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
  * 用户不可见，非终态化——磁盘不动、可重建。
  *
@@ -253,7 +268,7 @@ export function markIdleEvictedImpl(record: ExecutionRecord, ctx: TerminalCtx): 
   ctx.archive(record);
   // [U4c / G2] 回收点补写：经状态派生投影（running 如实投影——非终态化语义，
   // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
-  ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
+  persistDerivedManifest(record, ctx);
   releaseWriteLeaseImpl(record, ctx);
 }
 
@@ -337,9 +352,7 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
     });
   }
   // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
-  ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
-  ctx.reportRecordTransition(record);
-  ctx.notifyChange();
+  commitDerivedTransition(record, ctx);
   return true;
 }
 
@@ -506,8 +519,6 @@ export function markSettledOutImpl(record: ExecutionRecord, ctx: TerminalCtx): b
     record.worktreeHandle = undefined;
   }
   releaseWriteLeaseImpl(record, ctx);
-  ctx.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
-  ctx.reportRecordTransition(record);
-  ctx.notifyChange();
+  commitDerivedTransition(record, ctx);
   return true;
 }
