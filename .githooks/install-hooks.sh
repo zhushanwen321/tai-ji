@@ -132,6 +132,37 @@ if ! bash .githooks/check_pnpm_store_layout.sh; then
 fi
 
 # ============================================================================
+# 0.5 gitignored 产物目录入库拦截（.tmp/ 等工作流产物 force-add 防再犯）
+#    全局 AGENTS.md「提交策略」：agent 工作流产物目录禁入 git——gitignore 只对
+#    untracked 生效，force-add 一次即永久跟踪、随 merge 传播（2026-09 实测多个
+#    session 把 .tmp/dev-flow 台账 add -f 入库）。check-ignore 纯规则匹配不看
+#    跟踪态，已跟踪的 ignored 文件再次修改同样拦截。
+# ============================================================================
+if [ -n "$STAGED_FILES" ]; then
+    IGNORED_STAGED=""
+    while IFS= read -r _ignored_f; do
+        [ -z "$_ignored_f" ] && continue
+        # --no-index 必须：add -f 后文件已入 index，默认模式查 index 对已跟踪文件
+        # 不报 ignored（实测 git 2.52），恰好漏掉 force-add 这一最关键拦截场景
+        if git check-ignore -q --no-index "$_ignored_f" 2>/dev/null; then
+            IGNORED_STAGED="${IGNORED_STAGED}${_ignored_f}"$'\n'
+        fi
+    done <<EOF
+$STAGED_FILES
+EOF
+    if [ -n "$IGNORED_STAGED" ]; then
+        print_section "[gitignored 产物目录入库拦截]"
+        echo -e "${RED}[ERROR] 以下 staged 文件命中 .gitignore（工作流产物目录禁入 git）:${NC}"
+        printf '%s' "$IGNORED_STAGED" | sed 's/^/  - /'
+        echo -e "${YELLOW}[FIX] 撤出暂存区: git restore --staged <文件>${NC}"
+        echo -e "${YELLOW}[FIX] 已被历史 commit 跟踪时: git rm -r --cached <路径>（文件留盘，解除跟踪）${NC}"
+        echo -e "${YELLOW}[FIX] 确属合理入库: 在 .gitignore 加 ! 例外条目并注释理由${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+fi
+
+# ============================================================================
 # 1. 前端 ESLint 检查
 # ============================================================================
 
