@@ -2794,6 +2794,27 @@
           "agent": "review-business-logic"
         }
       ]
+    },
+    {
+      "id": "C-proc-21",
+      "summary": "错误处理策略裁决契约：错误路径按业务角色选策略——核心功能 fail-fast（禁吞错/禁静默降级出错误数据，错误日志含恢复动作）；辅助功能在主流程接入点降级（辅助故障不拖垮核心，降级 ≠ 吞错必须 warn 留痕）；用户可见的辅助能力失败必须有可见失败反馈（合理结果 + 失败原因，禁静默空值）。分通道纪律：读失败（非 ENOENT IO 故障）不得与合法缺省同判；静默丢弃必须注释登记为设计裁决 + 测试锁定（登记即可，不强制加日志）。两种伪防御按反缺陷对待：合法产出当错误拦、吞掉损坏状态的错误续跑",
+      "scope": [
+        "packages/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "STANDARDS.md#11-错误处理策略裁决契约"
+      ],
+      "dimensions": [
+        "business-logic",
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
     }
   ]
 }

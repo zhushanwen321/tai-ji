@@ -86,12 +86,7 @@ const cwd = computed(() => flow.currentCwd.value ?? props.currentCwd)
  * Git chip 不显示 + 点 chip 时 idle→branch-popover 非法转换报错。
  * startFlow 幂等（已 landing 不翻 state，只刷新 cwd），idle 态调它会 idle→landing + presetCwd。
  */
-// [review MF-11] 实例计数：flow 是模块级单例，split/drawer 模式下多个 sessionId===null
-// 面板可同时挂载 Landing；计数归零（最后一个实例卸载）才允许终结 flow，否则关闭副面板
-// 会把用户在另一面板正在编辑的草稿（draft/model/segments）一并 cancel 掉。
-let landingInstanceCount = 0
 onMounted(() => {
-  landingInstanceCount++
   if (flow.state.value !== 'landing') {
     flow.startFlow(props.currentCwd ?? undefined)
   } else if (!flow.currentCwd.value && props.currentCwd) {
@@ -99,16 +94,20 @@ onMounted(() => {
   }
 })
 /**
- * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图（挂载 → startFlow 见上），
- * 卸载即终结：封死「视图消失、状态漂留」的未知残留路径（flow.state 是 core 模块级单例，
- * 视图卸载后若停留 landing/overlay，无任何承接者能终结它——设计 panel-view-derivation
- * §3.3 D4 的出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
+ * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图，卸载即终结：
+ * 封死「视图消失、状态漂留」的残留路径（flow.state 是 core 模块级单例，视图卸载后
+ * 若停留 landing/overlay，无任何承接者能终结它——panel-view-derivation §3.3 D4 的
+ * 出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
  * （completed）与切换（cancelled，selectSession 守卫已 cancel）路径下卸载时已非活跃，
- * 守卫 noop，不产生非法转换。多实例下仅最后一个卸载的实例执行 cancel（见上计数注释）。
+ * 守卫 noop，不产生非法转换。
+ *
+ * [不变式] Landing 全仓唯一挂载点 = Panel.vue 的 landing 分支（多面板 split 拓扑
+ * 已于 2026-07-24 删除），由 landing.test.ts 静态断言锁定。若未来重新引入多挂载点
+ * 拓扑，「卸载即 cancel」会误杀其他挂载点正在编辑的草稿（flow 是单例，跨实例协调
+ * 不能靠组件实例变量）——本处卸载语义必须先重新设计。
  */
 onUnmounted(() => {
-  landingInstanceCount = Math.max(0, landingInstanceCount - 1)
-  if (landingInstanceCount === 0 && flow.isActive.value) flow.cancelFlow()
+  if (flow.isActive.value) flow.cancelFlow()
 })
 watch(() => props.currentCwd, (newCwd) => {
   if (!flow.currentCwd.value && newCwd) {

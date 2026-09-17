@@ -95,6 +95,11 @@ export function getBareSetupScript(app: AppConfigAccessors): string {
 }
 
 export function setBareSetupScript(app: AppConfigAccessors, script: string): void {
+  // 与 setSetupScript 同款防线：裸仓 setup 脚本与普通仓脚本同语义（经 shell 执行），
+  // `..` 路径穿越风险面相同，校验与错误信息形态逐字对齐。
+  if (script.includes('..')) {
+    throw new Error('bareSetupScript path cannot contain ..')
+  }
   const config = app.load()
   config['bareSetupScript'] = script
   app.save(config)

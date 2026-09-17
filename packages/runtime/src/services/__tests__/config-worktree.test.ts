@@ -150,4 +150,18 @@ describe('ConfigService worktree config', () => {
       })
     })
   })
+
+  describe('setBareSetupScript', () => {
+    it('写入 bareSetupScript 到 config.json（合法路径不受校验拦截）', () => {
+      vi.mocked(fs.readFileSync).mockReturnValue('{}')
+      configService.setBareSetupScript('custom-hooks/setup-bare.sh')
+      expect(writtenConfig).toEqual({ bareSetupScript: 'custom-hooks/setup-bare.sh' })
+    })
+
+    it('含 .. 的路径拒绝写入（与 setSetupScript 同款校验，A9），且不落盘', () => {
+      vi.mocked(fs.readFileSync).mockReturnValue('{}')
+      expect(() => configService.setBareSetupScript('../evil/setup.sh')).toThrow('bareSetupScript path cannot contain ..')
+      expect(writtenConfig).toBeUndefined()
+    })
+  })
 })

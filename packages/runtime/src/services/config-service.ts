@@ -381,8 +381,20 @@ export class ConfigService implements IConfigService {
 
   // ── Scoped Models（委托 provider-extras-store）──
 
+  /**
+   * 显式守卫 = 恒注入前提（组合根 index.ts 恒注入；构造参数非后置回填，无窗口期）。
+   * 三个消费点（model-service / provider-message-handler / message-broker）全经组合根
+   * 实例；与 provider 无关的局部实例（skill-registry）不触此法。静默返回 [] 会把
+   * 「装配错误」伪装成「白名单为空」的合法状态广播出去，与 write 侧 modifyScopedModels
+   * 的抛错语义也不对称——未注入即构造错误，报错指向恢复动作（同 resolver() 模式）。
+   */
   getScopedModels(): string[] {
-    return this.providerExtrasStore?.getScopedModelsSync() ?? []
+    if (!this.providerExtrasStore) {
+      throw new Error(
+        '[config-service] providerExtrasStore 未注入：getScopedModels 需要 providers.json 存储能力（scoped models 读）。恢复：在组合根构造 ConfigService 时注入 providerExtrasStore；若调用点与 provider 无关，改用不触此法的实例',
+      )
+    }
+    return this.providerExtrasStore.getScopedModelsSync()
   }
 
   async modifyScopedModels(fn: (current: string[]) => string[]): Promise<string[]> {
