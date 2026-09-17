@@ -7,7 +7,8 @@ import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
 import { registerAutoRenameCommand } from "./commands.js";
-import { callRenameLLM, debugLog as llmDebugLog, extractMessageText, isSubagentSession } from "./llm.js";
+import { landTitle } from "./landing.js";
+import { debugLog as llmDebugLog, extractMessageText, isSubagentSession } from "./llm.js";
 import {
 	cleanTitle,
 	countSuccessfulAssistantReplies,
@@ -189,34 +190,9 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 			// 8. fire-and-forget（同 turn_end 契约）：handler 立即 resolve，LLM 调用与 setSessionName
 			//    在后台异步完成。finalMessage 传空 content——first-prompt 语义即「不等回复」，
 			//    finalText 为空串走 buildTitleMessages 两条降级（标题只基于 prompt）
-			void callRenameLLM(ctx, config, { content: [] }, {
-				promptText,
-				// usage 落账回调注入（与 turn_end 路径同款契约）：调用时点 ok:true && usage 后立即、
-				// cleanTitle 前；catch 位于回调实现内部（回调自吞错），appendEntry 抛错只记日志
-				appendUsageEntry: (model, usage) => {
-					try {
-						pi.appendEntry("rename-session", { model, usage });
-					} catch (e) {
-						logger.error("failed to append usage entry", { error: String(e) });
-					}
-				},
-			})
-				.then((title) => {
-					if (!title) return;
-					// 防覆盖（同 turn_end 路径）：落库前重查——LLM 调用窗口（2-30s）内语义名/
-					//    手动命名的竞态由此兜住（skip 文案是 E2E 硬契约）
-					if (pi.getSessionName()) {
-						debugLog("skip: name exists");
-						return;
-					}
-					pi.setSessionName(title);
-					// 落库成功才打「renamed to」（防覆盖 return 在前，竞态命中时本日志不出现）
-					debugLog(`renamed to "${title}"`);
-				})
-				.catch((e) => logger.error("rename LLM failed", { error: String(e) }))
-				.finally(() => {
-					firstPromptInFlight = false;
-				});
+			void landTitle(pi, ctx, config, { content: [] }, { debugLog, promptText }).finally(() => {
+				firstPromptInFlight = false;
+			});
 			// rename 是 best-effort，任何 LLM 失败（网络/提取/auth/model 不可用）都静默跳过保留原 label，
 			// 不进 session history。
 		} catch (e) {
@@ -269,35 +245,9 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 			// 6. LLM 生成标题并落库。pi 运行时的事件链是 await 的（runner.emit → await handler），
 			// 若 await callRenameLLM 会阻塞 agent 进入下一次迭代。这里用 detached promise 脱离 await 链，
 			// 真正实现 fire-and-forget：handler 立即 resolve，LLM 调用与 setSessionName 在后台异步完成。
-			void callRenameLLM(ctx, config, event.message, {
-				// usage 落账回调注入：闭包捕获 pi，把 rename LLM 调用的 usage 以
-				// custom entry 落盘（pi.appendEntry → {type:"custom",customType:"rename-session",
-				// data:{model,usage},timestamp}，不进对话流不进 LLM 上下文）。调用时点
-				// （ok:true && usage 后立即、cleanTitle 前）由 llm.ts 统一规定。
-				appendUsageEntry: (model, usage) => {
-					// catch 必须位于回调实现内部——appendEntry 抛错（session 已切换等）只记
-					// 日志，不影响回调返回与后续 cleanTitle/setSessionName（「标题照常落库」）。
-					try {
-						pi.appendEntry("rename-session", { model, usage });
-					} catch (e) {
-						logger.error("failed to append usage entry", { error: String(e) });
-					}
-				},
-			})
-				.then((title) => {
-					if (!title) return;
-					// 防覆盖：落库前重查——LLM 调用窗口（2-30s）内用户手动命名的竞态由此兜住
-					// （发起前查没有意义，那时查不能防竞态；skip 文案是 E2E 硬契约）
-					if (pi.getSessionName()) {
-						debugLog("skip: name exists");
-						return;
-					}
-					pi.setSessionName(title);
-					// 落库成功才打「renamed to」（移位自 llm.ts：日志必须晚于 setSessionName——
-					// 防覆盖 return 在前，竞态命中时本日志不出现，避免「日志称 renamed 但未落库」）
-					debugLog(`renamed to "${title}"`);
-				})
-				.catch((e) => logger.error("rename LLM failed", { error: String(e) }));
+			// 落库管道（起 LLM → 防覆盖重查 → setSessionName → renamed to 日志）见 landing.ts：
+			// 与 first-prompt 入口共用同一段，usage 落账回调 / skip / renamed to 契约由该处单点保证
+			void landTitle(pi, ctx, config, event.message, { debugLog });
 			// rename 是 best-effort，任何 LLM 失败（网络/提取/auth/model 不可用）都静默跳过保留原 label，
 			// 不进 session history。
 		} catch (e) {

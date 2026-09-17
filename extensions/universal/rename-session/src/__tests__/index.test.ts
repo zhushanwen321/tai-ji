@@ -50,7 +50,7 @@ interface MockSetup {
 	setSessionNameMock: ReturnType<typeof vi.fn>;
 	/** 防覆盖检查读 pi.getSessionName()，非 ctx——默认未命名（undefined）。 */
 	getSessionNameMock: ReturnType<typeof vi.fn>;
-	/** usage 落账入口：index.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
+	/** usage 落账入口：landing.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
 	appendEntryMock: ReturnType<typeof vi.fn>;
 	/** registerTool mock（agent-tool 注册面接线断言用）。 */
 	registerToolMock: ReturnType<typeof vi.fn>;

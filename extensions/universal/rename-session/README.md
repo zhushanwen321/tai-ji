@@ -157,6 +157,7 @@ rename-session/
 ├── skills/rename-session-ext-config/SKILL.md   # 配置指南（pi 内 agent 可发现）
 └── src/
     ├── index.ts          # 工厂入口（message_end/turn_end handler 按模式分派 + rename_session 工具注册 + /auto-rename 命令）
+    ├── landing.ts        # landTitle：两入口共用落库管道（起 LLM → 防覆盖重查 → setSessionName → renamed to 日志 + usage 落账）
     ├── commands.ts       # /auto-rename on|off|status 命令（enable/disable 别名）
     ├── llm.ts            # callRenameLLM / 两段输入构造 / debug 内省 / 超时
     ├── pure.ts           # 纯函数（配置 / 首轮计数 / cleanTitle）
