@@ -4,8 +4,10 @@
  * 随迁内容 = 原组合根 index.ts 的 workflow 域闭包状态与事件 handler（原样搬移，
  * D2 纪律：本文件不改行为；lazyDeps 10 个同构 getter 收敛为 createLazy 单一原语
  * ——守卫/throw/转发语义与错误消息逐字保留）。原闭包变量收编为显式
- * WorkflowDomainState（每次 setupWorkflowDomain 调用新建 = 原 per-factory 闭包
- * 语义，生产每进程实例化一次，两者等价）：
+ * WorkflowDomainState（[skill-reload D2] 提权为 globalThis Symbol 槽 get-or-create
+ * ——pi reload 时 jiti(moduleCache:false) 重求值模块图、模块级状态归零，槽跨
+ * reload 存活，factory 重跑拿到同一 domain state，post-reload adoption 据此接管
+ * 在飞 run）：
  *   1. per-factory 域状态（lsRef / notifiedRunIds / workerHost / registry / sessionState）
  *   2. log（pi.appendEntry 包装）+ makeLifecycleDeps + makeDeps（LauncherDeps 生产装配）
  *   3. 7 个 pi.on handler（session_start / session_compact / model_select /
@@ -91,6 +93,25 @@ function createWorkflowDomainState(): WorkflowDomainState {
   };
 }
 
+// [skill-reload D2] WorkflowDomainState 进程槽：与 SERVICE_SLOT_KEY /
+// DIALOG_QUEUE_KEY 同一防线形态（globalThis[Symbol.for]，跨 jiti 多实例与
+// pi reload 模块重求值存活）。get-or-create 整对象一槽——禁止逐字段筛选提权
+// （sessionState/workerHost/registry/notifiedRunIds/lsRef 是一张对象图，漏提
+// 一项即新旧实例并存、闭包引用分裂，设计被否项）。reload 后 factory 重跑经
+// 此槽拿回同一 domain state，session_shutdown(reload) 跳过清理（D1）保住的
+// 在飞 run / store 由 post-reload session_start(reason=reload) 的 adoption
+// 接管（D4，session-lifecycle.ts）。
+const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
+
+function getOrCreateWorkflowDomainState(): WorkflowDomainState {
+  let state = Reflect.get(globalThis, WORKFLOW_DOMAIN_SLOT_KEY) as WorkflowDomainState | undefined;
+  if (!state) {
+    state = createWorkflowDomainState();
+    Reflect.set(globalThis, WORKFLOW_DOMAIN_SLOT_KEY, state);
+  }
+  return state;
+}
+
 /** 组合根侧生产 deps 工厂：SessionLifecycleDeps 全部成员有生产默认实现（住
  *  session-lifecycle.ts——createOrReuseServices 单例语义 / WorktreeManager 每次
  *  扫描新建 / JsonlRunStore per-session 新建），此处无本地构造可注入；工厂形态
@@ -156,7 +177,10 @@ export function setupWorkflowDomain(
   wiring: { inflightReporter: InFlightReporter },
 ): WorkflowDomainHandle {
   const { inflightReporter } = wiring;
-  const { lsRef, notifiedRunIds, sessionState, workerHost, registry } = createWorkflowDomainState();
+  // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
+  // factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
+  const domainState = getOrCreateWorkflowDomainState();
+  const { lsRef, notifiedRunIds, sessionState, workerHost, registry } = domainState;
 
   function log(
     level: "debug" | "info" | "warn" | "error",
@@ -347,6 +371,18 @@ export function setupWorkflowDomain(
   // ════════════════════════════════════════════════════════════
   //  session_shutdown：dispose subagents + terminate workflows + store 收尾 + cleanup
   //
+  //  [skill-reload D1] 按 reason 分支：pi 的 SessionShutdownReason 枚举
+  //  （quit|reload|new|resume|fork，SDK types.d.ts）里 reload 是唯一「同会话原地
+  //  重建」成员——进程不死、session 不离开，仅 extension 模块图重求值。reload 分支
+  //  跳过全部破坏性动作（a dispose / c terminate / d store.dispose / e sessionState
+  //  清除 / f dialogQueue.rejectAll），只执行 b（inflightReporter.detachSession，
+  //  detach 不是破坏——旧 reporter 是 per-factory 实例，不 detach 会在重试循环里持
+  //  stale ctx 反复 attempt；新 factory 建新 reporter 并覆盖进程级单监听）。存活的
+  //  在飞 run / store 经 D2 槽由 post-reload session_start(reason=reload) 的
+  //  adoption 接管（D4，session-lifecycle.ts）。quit/new/resume/fork = 会话真离开，
+  //  六动作现状全保持；session_tree / session_before_switch 的 terminate 路径不受
+  //  影响（各自独立 handler，真语义）。
+  //
   //  store 收尾：每 session 的 JsonlRunStore 在 terminateRunningRuns 之后 dispose（刷
   //  pending 去抖批 + await in-flight 链，见 W2C5）。R3 声明：SIGTERM/SIGINT 走
   //  组合根 process handler 不触发本路径，pending 去抖丢失等价崩溃链（重启后 kill-9
@@ -354,7 +390,30 @@ export function setupWorkflowDomain(
   //  running 尾巴，ES1 已接受）；不做 best-effort SIGTERM dispose（需同步 IO 改造，
   //  超出 wave 边界）。
   // ════════════════════════════════════════════════════════════
-  pi.on("session_shutdown", async (_event: SessionShutdownEvent, _ctx: ExtensionContext) => {
+  pi.on("session_shutdown", async (event: SessionShutdownEvent, _ctx: ExtensionContext) => {
+    if (event.reason === "reload") {
+      // b 动作保留（理由见上方 D1 分支说明）。
+      inflightReporter.detachSession();
+
+      // [skill-reload D8] reload 分支归因日志：preserved 计数取自跳过清理时的存活
+      // 对象真实统计（runs = 各 session 内存 run 聚合根数；records = run.state.calls
+      // 的 agent 调用数——每 call 对应一条 subagent record；stores = sessionState
+      // 条目数即 store 实例数），供归因演练（S4）与 orchestrator 段日志对账——
+      // 「reload 存活了什么」必须能从这一行直接读出，不靠时间戳猜。
+      let preservedRuns = 0;
+      let preservedRecords = 0;
+      for (const state of sessionState.values()) {
+        preservedRuns += state.runs.size;
+        for (const run of state.runs.values()) {
+          preservedRecords += run.state.calls.size;
+        }
+      }
+      logger.debug(
+        `[workflow-events] session_shutdown reason=reload preserved={runs:${preservedRuns}, records:${preservedRecords}, stores:${sessionState.size}}`,
+      );
+      return;
+    }
+
     // ── subagents 域：dispose SubagentService ──
     getSubagentService()?.dispose();
 
@@ -439,5 +498,5 @@ export function setupWorkflowDomain(
     get log() { return createLazy(resolveDeps, "log"); },
   };
 
-  return { state: { lsRef, notifiedRunIds, workerHost, registry, sessionState }, lazyDeps, getWorkflowDeps, isScriptRunning };
+  return { state: domainState, lazyDeps, getWorkflowDeps, isScriptRunning };
 }

@@ -479,6 +479,13 @@ async function createSessionRunState(
     // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
     // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
     // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
+    //
+    // [skill-reload D9 依赖登记] oncePerProcess 守卫不提权 globalThis（用户裁决）：
+    // 守卫 Map 是模块级状态，pi reload 后归零 → 进程级维护与 kill-9 恢复幂等重跑
+    // 一遍是预期行为（各任务幂等已核实）。「重跑恢复误杀活 run」的风险不由守卫
+    // 存活性承担，而由 session_start(reason==='reload') 的恢复门控结构性消除
+    // （D4：reload reason 一律不跑 recoverCrashedRuns，先于一切——B2 单元落地，
+    // 门控在调用点，与守卫是否重跑无关）。
     await oncePerProcess(
       "subagent-workflow:recover-crashed-runs",
       () =>
