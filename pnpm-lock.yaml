@@ -384,6 +384,9 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-extension-logger':
+        specifier: workspace:*
+        version: link:../../shared/extension-logger
       '@zhushanwen/pi-pending-notifications':
         specifier: workspace:*
         version: link:../pending-notifications
