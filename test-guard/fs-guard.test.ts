@@ -16,19 +16,32 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   closeSync,
   createWriteStream,
+  existsSync,
   mkdtempSync,
   openSync,
+  promises as fsPromises,
+  rm as fsRm,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
-import { open as fspOpen } from 'node:fs/promises'
+import * as fsAll from 'node:fs'
+import { open as fspOpen, rm as fspRm } from 'node:fs/promises'
+import * as fspAll from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isDestructiveAllowed, isRealDataDir } from './fs-guard-impl.js'
+import {
+  FS_ASYNC_FNS,
+  FS_OPEN_FNS,
+  FS_PROMISES_OPEN_FNS,
+  FS_SYNC_FNS,
+  isDestructiveAllowed,
+  isRealDataDir,
+} from './fs-guard-impl.js'
 import { setup } from './global-setup.js'
 
 describe('fs-guard 判定（纯函数）', () => {
@@ -183,5 +196,99 @@ describe('fs-guard 写句柄入口（fd/流写路径防线）', () => {
     const repoPkg = fileURLToPath(new URL('../package.json', import.meta.url))
     const fd = openSync(repoPkg, 'r')
     closeSync(fd)
+  })
+})
+
+/**
+ * G1 防线自检（fs-guard 自己的守卫）：
+ * - 名单完备性：wrap 名单 × 真实模块键集的确定性差集断言，名单单源化后防「Node 升级
+ *   移除 API 后名单残留死名」「名单漏挂/工厂装配回归」「sync/async 名单单侧分叉」
+ *   （2026-09-17 拦截面缺口即后两者叠加形态：FS_ASYNC_FNS 挂了 promises 工厂、
+ *   node:fs 工厂漏挂 callback 版 + promises 访问器透传）。
+ * - 四访问面探针：sync / callback / promises 直引 / fs.promises 访问器，四个到达真实
+ *   fs 层的访问面逐一端到端验证拦截生效——单测断言「wrapper 函数 !== 原函数」只能证明
+ *   装配差异存在，四探针证明的才是「破坏调用确实被 BLOCKED」这一防线本体语义。
+ */
+
+/** 白名单外且必然不存在的诱饵路径（安全红线：测试不得创建它；无 force/recursive）。 */
+function probeBaitPath(): string {
+  return resolve(homedir(), '.taiji-fs-guard-probe', randomUUID())
+}
+
+describe('G1 防线自检——名单完备性（名单 × 真实模块键集差集）', () => {
+  it('node:fs：wrap 名单内每个名字真实存在且均已被 wrapper 替换，promises 访问器已装配', async () => {
+    const actual = await vi.importActual<Record<string, unknown>>('node:fs')
+    const actualPromises = await vi.importActual<Record<string, unknown>>('node:fs/promises')
+    const names = [...FS_SYNC_FNS, ...FS_ASYNC_FNS, ...FS_OPEN_FNS]
+    // Node 升级移除 API 后名单漏清理 → 红（死名静默留在名单里会掩盖漏挂的装配断言）
+    const deadNames = names.filter((n) => !(n in actual))
+    expect(deadNames, `名单含真实模块已不存在的名字，须清理名单: ${deadNames.join(', ')}`).toEqual([])
+    // 名单漏挂 / 工厂装配回归（wrapper 未替换原函数）→ 红
+    const notWrapped = names.filter((n) => fsAll[n] === actual[n])
+    expect(notWrapped, `node:fs 名单成员未被 wrapper 替换（漏挂或装配回归）: ${notWrapped.join(', ')}`).toEqual([])
+    // promises 访问器装配：浅拷贝透传原始 promises 模块正是本次拦截面缺口的形态——
+    // 装配成功后 fs.promises 与真实 promises 模块必须是不同对象，且名单函数逐一被替换
+    expect(fsAll.promises, 'fs.promises 仍是原始模块透传（访问器面未装配）').not.toBe(actualPromises)
+    const accessorNotWrapped = [...FS_ASYNC_FNS].filter(
+      (n) => (fsAll.promises as Record<string, unknown>)[n] === actualPromises[n],
+    )
+    expect(
+      accessorNotWrapped,
+      `fs.promises 访问器面名单函数未被替换: ${accessorNotWrapped.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('node:fs/promises：wrap 名单内每个名字真实存在且均已被 wrapper 替换', async () => {
+    const actualPromises = await vi.importActual<Record<string, unknown>>('node:fs/promises')
+    const names = [...FS_ASYNC_FNS, ...FS_PROMISES_OPEN_FNS]
+    const deadNames = names.filter((n) => !(n in actualPromises))
+    expect(deadNames, `名单含真实模块已不存在的名字，须清理名单: ${deadNames.join(', ')}`).toEqual([])
+    const notWrapped = names.filter((n) => fspAll[n] === actualPromises[n])
+    expect(notWrapped, `node:fs/promises 名单成员未被 wrapper 替换: ${notWrapped.join(', ')}`).toEqual([])
+  })
+
+  it('sync/async 名单对偶：破坏性 API 禁止只挂单侧（名单单侧分叉的哨兵）', () => {
+    // 2026-09-17 缺口的名单级形态：Sync 侧有 XSync 而 callback 侧漏挂 X（或反之）。
+    // 两侧名单必须逐名对偶（open 族单列，不进本断言）。
+    const syncStems = FS_SYNC_FNS.map((s) => s.replace(/Sync$/, '')).sort()
+    expect(syncStems, 'FS_SYNC_FNS 与 FS_ASYNC_FNS 失去逐名对偶，须两侧行单同步挂载').toEqual(
+      [...FS_ASYNC_FNS].sort(),
+    )
+  })
+})
+
+describe('G1 防线自检——四访问面端到端探针（对白名单外不存在诱饵路径的破坏调用必须全被 BLOCKED）', () => {
+  it('sync 面：node:fs rmSync 被拦', () => {
+    const bait = probeBaitPath()
+    expect(existsSync(bait)).toBe(false)
+    expect(() => rmSync(bait)).toThrow(/fs-guard|BLOCKED/)
+    expect(existsSync(bait)).toBe(false)
+  })
+
+  it('callback 面：node:fs rm 被拦（wrapper 同步抛出，回调不得触达真实 fs）', () => {
+    const bait = probeBaitPath()
+    expect(existsSync(bait)).toBe(false)
+    let cbCalled = false
+    expect(() =>
+      fsRm(bait, () => {
+        cbCalled = true
+      }),
+    ).toThrow(/fs-guard|BLOCKED/)
+    expect(cbCalled).toBe(false)
+    expect(existsSync(bait)).toBe(false)
+  })
+
+  it('promises 直引面：node:fs/promises rm 被拦', () => {
+    const bait = probeBaitPath()
+    expect(existsSync(bait)).toBe(false)
+    expect(() => fspRm(bait)).toThrow(/fs-guard|BLOCKED/)
+    expect(existsSync(bait)).toBe(false)
+  })
+
+  it('fs.promises 访问器面：node:fs.promises.rm 被拦（访问器透传即本缺口回归形态）', () => {
+    const bait = probeBaitPath()
+    expect(existsSync(bait)).toBe(false)
+    expect(() => fsPromises.rm(bait)).toThrow(/fs-guard|BLOCKED/)
+    expect(existsSync(bait)).toBe(false)
   })
 })

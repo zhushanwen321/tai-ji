@@ -33,6 +33,14 @@
  * 用户数据仍不可触碰）。旧命名的数据目录不在白名单，同样被拒——
  * 白名单排除式判定，零旧字面量（taiji-full-rename R3/D3）。
  *
+ * 拦截的模块访问面（四面）：node:fs 工厂覆盖 Sync 函数 + callback 版破坏性函数 + open 族
+ * + promises 访问器（fs.promises 指向已 wrap 的 promises 模块，attachPromisesModule 装配）；
+ * node:fs/promises 工厂覆盖 promises 直引。名单单一权威源在 fs-guard-impl.ts
+ * （FS_SYNC_FNS / FS_ASYNC_FNS），两工厂共用防分叉漏挂；[2026-09-17] 缺口复盘：旧版
+ * node:fs 工厂只挂 FS_SYNC_FNS，callback 版十函数与 fs.promises 访问器整面透传
+ * （探针实证 PASSTHROUGH 到真实 fs 层），G1 防线自检（fs-guard.test.ts 名单完备性 +
+ * 四访问面探针）守卫回归。
+ *
  * 边界（有意为之）：
  * - 只拦写/删/移动，不拦读——vitest 模块加载与源码 import 本身就是海量读 IO，拦读会
  *   破坏测试运行时；读操作对用户数据不可造成不可逆损害。
@@ -53,8 +61,17 @@ import { vi } from 'vitest'
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
   const impl = await import('./fs-guard-impl.js')
-  const wrapped = impl.wrapModule(actual as unknown as Record<string, unknown>, impl.FS_SYNC_FNS)
-  return impl.wrapOpenFns(wrapped, actual as unknown as Record<string, unknown>, impl.FS_OPEN_FNS)
+  // Sync 与 callback 两个形态共用单一权威名单（FS_SYNC_FNS / FS_ASYNC_FNS）——
+  // 名单分叉漏挂正是 2026-09-17 拦截面缺口的根因形态
+  const wrapped = impl.wrapModule(
+    actual as unknown as Record<string, unknown>,
+    [...impl.FS_SYNC_FNS, ...impl.FS_ASYNC_FNS],
+  )
+  // fs.promises 访问器必须与直引 node:fs/promises 同防线（浅拷贝透传原始 promises
+  // 模块 = 整面绕过，见 attachPromisesModule 注释）
+  return impl.attachPromisesModule(
+    impl.wrapOpenFns(wrapped, actual as unknown as Record<string, unknown>, impl.FS_OPEN_FNS),
+  )
 })
 
 vi.mock('node:fs/promises', async (importOriginal) => {

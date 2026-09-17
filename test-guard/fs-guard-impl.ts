@@ -232,3 +232,22 @@ export function wrapOpenFns(
   }
   return wrapped
 }
+
+/**
+ * node:fs 模块面的 promises 访问器装配：{...actual} 浅拷贝会把 promises getter 求值出的
+ * 原始模块当普通属性透传——经 fs.promises 到达的破坏性 API 整面绕过拦截（与直引
+ * node:fs/promises 的防线形成双轨）。此处对真实 promises 模块单层 wrap 后覆盖赋值，
+ * 语义 = 经访问器访问与直引同防线。
+ * 数据源取 target.promises（展开时 getter 已求值为真实模块）而非工厂内 import
+ * ('node:fs/promises')：后者会命中 vitest runner 的 mock 注册，引入两工厂执行时序耦合
+ * （promises 工厂被局部覆盖/未注册时静默分叉）。产出的 wrap 与 node:fs/promises 工厂
+ * 是平行且等价的单层实例（同一 FS_ASYNC_FNS 名单 + 同一 impl 的 guardPaths，模块缓存
+ * 共享），非二次包装，防线行为一致。
+ */
+export function attachPromisesModule(target: Record<string, unknown>): Record<string, unknown> {
+  const actualPromises = target.promises
+  if (!actualPromises || typeof actualPromises !== 'object') return target
+  const source = actualPromises as Record<string, unknown>
+  target.promises = wrapOpenFns(wrapModule(source, FS_ASYNC_FNS), source, FS_PROMISES_OPEN_FNS)
+  return target
+}
