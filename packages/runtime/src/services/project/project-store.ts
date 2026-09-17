@@ -18,7 +18,7 @@
 import { join, dirname } from 'node:path'
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import type { Project, ProjectStoreState } from '@taiji/shared'
-import { WriteBackCache } from '../../utils/json-store.js'
+import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEnoent } from '../../utils/errors.js'
 
@@ -106,9 +106,17 @@ export class ProjectStore {
       }
       return map
     } catch (e) {
+      // ENOENT（首启无文件）静默返空；损坏必须隔离（对齐 JsonStore D1c 与
+      // session-data-store/plugin-storage 同款）：静默空 Map 时 loadRevision = 损坏文件
+      // 指纹，下一次 flush 指纹比对判「未变」→ 不触发冲突备份直接覆写，项目列表
+      // 原始内容无痕丢失。quarantine 后 flush 走 ENOENT 放行重建，损坏数据保留
+      // .corrupt-<ts> 副本供人工恢复。
       if (isEnoent(e)) return new Map()
-      console.warn('[project-store] load failed, starting fresh:',
-        e instanceof Error ? e.message : e)
+      quarantineCorruptFile(this.filePath, {
+        tag: 'project-store',
+        reason: 'store file corrupt/unreadable',
+        cause: e,
+      })
       return new Map()
     }
   }

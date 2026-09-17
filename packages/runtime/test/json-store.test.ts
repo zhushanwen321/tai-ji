@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync, readdirSync } from 'node:fs'
+import { mkdtemp, mkdtempSync, rm, readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { JsonStore, WriteBackCache } from '../src/utils/json-store.js'
+import { cleanupAgedBackupResidue, JsonStore, WriteBackCache } from '../src/utils/json-store.js'
 import { atomicWrite } from '../src/utils/fs-utils.js'
 
 const mkdtempP = promisify(mkdtemp)
@@ -664,5 +664,44 @@ describe('WriteBackCache', () => {
       // 两次写合并成一次 flush
       expect(readPart(tmpDir, 'p1')).toEqual({ a: 1, b: 2 })
     })
+  })
+})
+
+describe('cleanupAgedBackupResidue（备份残留按龄回收）', () => {
+  const OLD_ISO = '2020-01-01T000000000Z'
+  const RECENT_ISO = new Date().toISOString().replace(/[:.]/g, '')
+
+  function makeScanRoot(): string {
+    return mkdtempSync(join(tmpdir(), 'aged-backup-'))
+  }
+
+  it('超龄 ISO 后缀备份删除；龄内保留；非 ISO 后缀不动；一层子目录展开命中（plugins/<id>/ 形态）', () => {
+    const root = makeScanRoot()
+    try {
+      const pluginDir = join(root, 'plugins', 'my-plugin')
+      mkdirSync(pluginDir, { recursive: true })
+      // ① 子目录层超龄副本（plugin-storage quarantine 落点形态）
+      writeFileSync(join(pluginDir, `globalState.json.corrupt-${OLD_ISO}`), 'corrupt old')
+      // ② 根层龄内副本（取证窗口内保留）
+      writeFileSync(join(root, `settings.json.conflict-${RECENT_ISO}`), 'conflict recent')
+      // ③ 非 ISO 后缀（用户文件误撞前缀）
+      writeFileSync(join(root, 'notes.corrupt-anything'), 'user file')
+      // ④ 根层超龄副本
+      writeFileSync(join(root, `models.json.conflict-${OLD_ISO}`), 'conflict old')
+
+      const removed = cleanupAgedBackupResidue([root, join(root, 'plugins')])
+
+      expect(removed).toBe(2)
+      expect(existsSync(join(pluginDir, `globalState.json.corrupt-${OLD_ISO}`))).toBe(false)
+      expect(existsSync(join(root, `models.json.conflict-${OLD_ISO}`))).toBe(false)
+      expect(existsSync(join(root, `settings.json.conflict-${RECENT_ISO}`))).toBe(true)
+      expect(existsSync(join(root, 'notes.corrupt-anything'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('目录不存在 no-op（返回 0 不抛）', () => {
+    expect(cleanupAgedBackupResidue([join(tmpdir(), 'no-such-aged-backup-dir')])).toBe(0)
   })
 })

@@ -104,7 +104,10 @@ export class GitChangeTrigger {
     const after = this.observations.readObservation(cwd).branch
     if (lastPushed === after) return false
     this.lastPushedBranch.set(cwd, after)
-    if (source === 'fallback') {
+    // 首刷建锚（lastPushed === undefined）不是「修正」——warn 语义锚定「已知值被
+    // 兜底改写」（高频 = watch 缺陷复发的观测信号）；首个 L2 tick 对静默 repo 必
+    // 走建锚路径，若 warn 会每个启动周期刷一条噪音，稀释该信号。
+    if (source === 'fallback' && lastPushed !== undefined) {
       console.warn(
         `[git-change-trigger] fallback rescan corrected branch: cwd=${cwd} ${formatBranch(lastPushed)} -> ${formatBranch(after)}` +
           '（L2 兜底修正——高频出现说明平台 watch 缺陷复发）',

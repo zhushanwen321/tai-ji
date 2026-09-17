@@ -102,6 +102,23 @@ describe('GitRepoObserver 容量驱逐（oldest-insert + 过期重写移位）',
     expect(fake.calls).toHaveLength(5)
   })
 
+  it('容量驱逐路径同走 onPrune（被驱逐 cwd 的 watcher 同步收缩，防泄漏）', () => {
+    const fake = createFakeResolver()
+    const pruned: Array<Set<string>> = []
+    const observer = new GitRepoObserver({
+      resolver: fake.resolver,
+      maxSize: 2,
+      onPrune: (removed) => pruned.push(removed),
+    })
+
+    observer.readObservation('/a')
+    observer.readObservation('/b')
+    observer.readObservation('/c') // 帽满驱逐 /a —— 必须经 onPrune 通知
+
+    expect(pruned).toEqual([new Set(['/a'])])
+    // 收缩回调只遍历在缓存里的 key：被驱逐的 /a 若不经 onPrune 则永久不可达 forget()
+  })
+
   it('过期重写把条目移到 Map 尾部：容量淘汰按最后写入时间', () => {
     const fake = createFakeResolver()
     const observer = new GitRepoObserver({ resolver: fake.resolver, maxSize: 2 })
