@@ -85,9 +85,15 @@ export class GitRepoObserver implements IGitRepoObserver {
     // 维持「迭代序 = 最后写入时间升序」不变量，first key 恒为最旧条目（原 gitInfoCache 微项 10 同款）。
     // 已知边界（W16 审查 Fix-8 同款）：该不变量以 Date.now 单调为前提，时钟回拨下 first-key 驱逐
     // 可能非最旧——5min TTL 窗口内秒级回拨的影响可忽略，不做补偿。
+    // 驱逐与 pruneCache 的删除同走 onPrune：被驱逐 cwd 从此不可达 forget()/pruneCache
+    //（它们只遍历仍在缓存里的 key），不经 onPrune 通知则其 GitHeadWatcher targets/
+    // FSWatcher 永久驻留进程生命周期（容量驱逐泄漏面）。
     if (this.cache.size >= this.maxSize) {
       const oldest = this.cache.keys().next().value
-      if (oldest !== undefined) this.cache.delete(oldest)
+      if (oldest !== undefined) {
+        this.cache.delete(oldest)
+        this.onPrune?.(new Set([oldest]))
+      }
     }
 
     const obs = this.resolver.resolve(cwd)

@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
-import { errorWithCode, isEnoent, toErrorMessage } from '../../utils/errors.js'
+import { errorWithCode, isEnoent } from '../../utils/errors.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
-import { WriteBackCache } from '../../utils/json-store.js'
+import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
 
 // eslint-disable-next-line no-magic-numbers
 const MB = 1024 * 1024 // 1,048,576 bytes
@@ -86,11 +86,6 @@ export class PluginStorage {
     this.cache!.flushAll()
   }
 
-  onExternalChange(pluginId: string): void {
-    this.cache!.onExternalChange(this.partitionKey(pluginId, 'global'))
-    this.cache!.onExternalChange(this.partitionKey(pluginId, 'workspace'))
-  }
-
   /** 停掉所有待 flush 定时器（shutdown 用）。 */
   dispose(): void {
     this.cache?.dispose()
@@ -123,9 +118,16 @@ export class PluginStorage {
         data.set(key, v)
       }
     } catch (e: unknown) {
-      // 文件不存在（首次访问）或 JSON 解析失败 → 空 Map 是正确回退
+      // ENOENT（首次访问）→ 空 Map 正确回退；损坏/不可读必须隔离（对齐 JsonStore D1c
+      // 与 session-data-store 同款）：静默空 Map 时 loadRevision = 损坏文件指纹，下一次
+      // flush 指纹比对判「未变」→ 不触发冲突备份直接覆写，原始数据无痕丢失。quarantine
+      // 后 flush 走 ENOENT 放行重建，损坏数据保留 .corrupt-<ts> 副本。
       if (!isEnoent(e)) {
-        console.warn(`[plugin-storage] failed to load ${filePath}:`, toErrorMessage(e))
+        quarantineCorruptFile(filePath, {
+          tag: 'plugin-storage',
+          reason: 'storage file corrupt/unreadable',
+          cause: e,
+        })
       }
     }
     return data

@@ -145,7 +145,7 @@ export function invalidateSettingsCache(): void {
 }
 
 /**
- * 读取 settings.json（带 3s 缓存）。
+ * 读取 settings.json（带 revision 指纹缓存，U5——命中以磁盘 stat 指纹未变为前提，无固定 TTL）。
  * 模块外的「读」统一经此函数；缓存让高频读（getDefaultModel 等）不每次触盘。
  */
 export function readSettings(): PiSettings {

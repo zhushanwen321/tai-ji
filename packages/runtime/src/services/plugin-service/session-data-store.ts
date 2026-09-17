@@ -13,8 +13,8 @@
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { readdirSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
-import { WriteBackCache } from '../../utils/json-store.js'
-import { errorWithCode } from '../../utils/errors.js'
+import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
+import { errorWithCode, isEnoent } from '../../utils/errors.js'
 import { PluginRpcErrorCodes } from './plugin-types.js'
 // B5 port 化（C-comm-03）：services 层不得 value import infra/system/trash——经 ITrash
 // port 类型注入，实现（infra trash 函数）由组合根 index.ts 装配（见构造参数 trashFile）。
@@ -284,7 +284,19 @@ export class SessionDataStore {
       const raw = readFileSync(filePath, 'utf-8')
       const parsed = JSON.parse(raw) as Record<string, unknown>
       return new Map(Object.entries(parsed))
-    } catch {
+    } catch (err) {
+      // ENOENT = 首次访问（分区文件未建），空 Map 是正确回退；其余（损坏/不可读）
+      // 必须隔离（对齐 JsonStore D1c）：静默空 Map 时 loadRevision = 损坏文件指纹，
+      // 下一次 flush 指纹比对判「未变」→ 不触发冲突备份直接覆写，原始数据无痕丢失。
+      // quarantine rename 后文件不在原路径 → loadRevision=undefined → flush 走
+      // ENOENT 放行重建，损坏数据保留在 .corrupt-<ts> 副本供人工恢复。
+      if (!isEnoent(err)) {
+        quarantineCorruptFile(filePath, {
+          tag: 'session-data-store',
+          reason: 'partition file corrupt/unreadable',
+          cause: err,
+        })
+      }
       return new Map()
     }
   }

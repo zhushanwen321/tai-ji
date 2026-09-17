@@ -14,8 +14,8 @@
  * （isEnoent）的直接组合，无业务语义。
  */
 
-import { copyFileSync, readFileSync, renameSync, rmSync, mkdirSync, existsSync, statSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { copyFileSync, readFileSync, readdirSync, renameSync, rmSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { atomicWrite } from './fs-utils.js'
 import { isEnoent } from './errors.js'
 
@@ -235,6 +235,53 @@ export function quarantineCorruptFile(filePath: string, opts: QuarantineOptions)
       `rename 失败: ${renameErr instanceof Error ? renameErr.message : renameErr}`,
     )
   }
+}
+
+// ── 备份残留按龄回收（.conflict-/.corrupt- 家族） ─────────────────────
+
+/** ISO 压缩时间戳的后缀形态（`2026-09-18T000557123Z`：toISOString 去冒号/点号）。 */
+const AGED_BACKUP_SUFFIX_RE = /\.(?:conflict|corrupt)-\d{4}-\d{2}-\d{2}T\d{9}Z$/
+
+/** 备份保留窗口：conflict/corrupt 副本是人工恢复的取证文件，7 天内不删。 */
+export const AGED_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * 按龄回收备份残留家族（`<path>.conflict-<ts>` / `<path>.corrupt-<ts>`）。
+ *
+ * 生产者：WriteBackCache flush 的外部冲突备份、quarantineCorruptFile 的损坏隔离。
+ * 两者的保留价值都是「人工对比找回数据」的取证窗口——但没有任何消费方负责清理，
+ * 每次冲突/损坏都新增一个文件，数据目录无限堆积（磁盘垃圾 + 备份目录噪音）。
+ * 与 cleanupTmpMigrateResidue 同款 best-effort 语义：单文件 stat/unlink 失败跳过
+ * 不中断；目录不存在 no-op；误删防线 = 后缀正则严格匹配 ISO 压缩形态 + mtime 按龄闸。
+ *
+ * @param scanDirs 扫描目录集合（数据目录根 + sessions/session-data/plugins 等落点层）
+ * @param maxAgeMs 备份被认为是可回收的最小年龄（默认 7 天）
+ * @returns 实际删除的文件数
+ */
+export function cleanupAgedBackupResidue(scanDirs: readonly string[], maxAgeMs = AGED_BACKUP_MAX_AGE_MS): number {
+  const cutoff = Date.now() - maxAgeMs
+  let removed = 0
+  for (const dir of scanDirs) {
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      continue // 目录不存在/不可读：no-op（启动链兜底，失败不上抛）
+    }
+    for (const name of names) {
+      if (!AGED_BACKUP_SUFFIX_RE.test(name)) continue
+      const filePath = join(dir, name)
+      try {
+        if (statSync(filePath).mtimeMs >= cutoff) continue // 取证窗口内保留
+        unlinkSync(filePath)
+        removed++
+      // eslint-disable-next-line taste/no-silent-catch -- best-effort: 单文件失败跳过，不阻断启动链
+      } catch (e) {
+        console.warn(`[json-store] cleanupAgedBackupResidue: failed to remove backup: ${filePath}`, e)
+      }
+    }
+  }
+  return removed
 }
 
 // ── WriteBackCache：分区化 write-back（内存改 + dirty + 定时 flush + size） ──
