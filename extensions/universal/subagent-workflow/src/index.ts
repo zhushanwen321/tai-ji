@@ -150,6 +150,14 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // 用户体验拍板 2026-08-25：taiji 打开后激活任意 session 的第一时间（含 TUI 等价
   // 场景）GUI 引擎选择器就该有数据；session_start 处保留幂等重写兜底 jiti 双路径/
   // 模块重载场景的刷新）。
+  // [skill-reload D9] oncePerProcess 不提权（用户裁决）：守卫 Map 是 ext-guards
+  // 模块级状态，jiti reload 后归零 → 进程级维护跨 reload 幂等重跑属预期，不为此
+  // 提权 globalThis。factory 期引擎重注册的危险面已由 D2b 消除——
+  // registerEngineDescriptor 稳定标识等价则保留单例不 dispose（幂等重注册，杀令 B
+  // 拆除），本调用点的 discovery 面与上方 registerZcodeEngine 都经此入口；标识变化
+  // （引擎包真升级）仍走现状 dispose。恢复误杀面由 session_start(reason==='reload')
+  // 门控消除（D4，session-lifecycle.ts recoverCrashedRuns 守卫调用点的
+  // [skill-reload D4] 注释有对应登记）。
   syncEnginesFile(getAgentDir());
 
   // ════════════════════════════════════════════════════════════
