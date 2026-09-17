@@ -22,6 +22,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleepReal } from "node:timers/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -193,26 +194,50 @@ describe("idle-gc 同布局（WorkflowRun GC 读对根）", () => {
     }
   }
 
-  it("真实布局 30 天 running run → GC 终态化写回（findStateByIdSync 变 terminal/time_limited）", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    const agentDir = path.join(tmpDir, "agent");
-    const cwd = path.join(tmpDir, "proj");
-    const sessionScopedDir = path.join(agentDir, "sessions", slugOf(cwd));
-    fs.mkdirSync(sessionScopedDir, { recursive: true });
-    const stateDir = resolvePiWorkflowStateDir({ agentDir, cwd });
-    const runStore = new FileRunStore({ stateDir });
-    await runStore.save(
-      makeRun("wf-stale", { startedAt: new Date(Date.now() - 31 * DAY_MS).toISOString() }),
-    );
-    expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "running" });
+  /**
+   * 轮询等待真实 fs IO 落盘翻转（pred 置位提前 return；预算耗尽静默返回，由调用处原断言失败）。
+   *
+   * 为什么固定排空窗口不够：满并行 vitest（全量并发）下多 worker 抢满 CPU，libuv 线程池 fs 回调
+   * 的墙钟延迟无稳定上界——50×setImmediate 排空窗口等不到 save 落盘是 flake 根因（GC 触发本身
+   * 正常）。同仓先例 git-head-watcher.test.ts injectUntilPending：轮询把「迟到」消化在预算内
+   * （10s 预算远小于用例 timeout 30s）。计时用 hrtime 不受 fake timers 影响；睡眠走
+   * node:timers/promises 模块导出，不在 vi.useFakeTimers 的 toFake 替换面内（先例已探针核实）。
+   */
+  async function pollUntilPersisted(pred: () => boolean, timeoutMs = 10_000): Promise<void> {
+    const deadlineMs = Number(process.hrtime.bigint() / 1_000_000n) + timeoutMs;
+    while (!pred()) {
+      if (Number(process.hrtime.bigint() / 1_000_000n) > deadlineMs) return;
+      await sleepReal(50);
+    }
+  }
 
-    stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
-    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-    await flushRealIo();
+  it(
+    "真实布局 30 天 running run → GC 终态化写回（findStateByIdSync 变 terminal/time_limited）",
+    { timeout: 30_000 }, // pollUntilPersisted 预算 10s 的用例级余量（先例 git-head-watcher 同款）
+    async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      const agentDir = path.join(tmpDir, "agent");
+      const cwd = path.join(tmpDir, "proj");
+      const sessionScopedDir = path.join(agentDir, "sessions", slugOf(cwd));
+      fs.mkdirSync(sessionScopedDir, { recursive: true });
+      const stateDir = resolvePiWorkflowStateDir({ agentDir, cwd });
+      const runStore = new FileRunStore({ stateDir });
+      await runStore.save(
+        makeRun("wf-stale", { startedAt: new Date(Date.now() - 31 * DAY_MS).toISOString() }),
+      );
+      expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "running" });
 
-    // 终态已落盘（同目录 append 终态快照行）——GC 读侧与落盘侧同根闭环
-    expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "terminal", reason: "time_limited" });
-  });
+      stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
+      await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+      await flushRealIo();
+      // 满并行下固定排空窗口可能早于 fs save 落盘（GC 已触发，libuv IO 回调被 CPU 饱和推迟）——
+      // 轮询等待落盘翻转；预算耗尽静默返回，落到下方原断言失败（断言语义不放松）。
+      await pollUntilPersisted(() => runStore.findStateByIdSync("wf-stale").kind === "terminal");
+
+      // 终态已落盘（同目录 append 终态快照行）——GC 读侧与落盘侧同根闭环
+      expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "terminal", reason: "time_limited" });
+    },
+  );
 
   it("窗内 running run 不动（GC 判据在正确根上按 startedAt 生效）", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
