@@ -17,8 +17,9 @@
  * 4. repo 观测器（缓存治理批 4 U10）：branch / worktree / bare 判定的单一观测源——内嵌
  *    GitRepoObserver（单 per-cwd 缓存，解析经 IGitRepoResolver），并实现 IGitRepoObserver 作为
  *    观测器的 service 面：GitInfoReader / detectBareWorkspaceCached 两门面经组合根共享同一观测器
- *    实例；invalidateByCwd 的写失效同步打观测器单点。fs.watch HEAD 事件驱动为 U11 范围，
- *    本单元失效语义 = 旧 gitInfoCache/bareCache 的 TTL（5min）+ oldest-insert 容量驱逐。
+ *    实例；invalidateByCwd 的写失效同步打观测器单点。U11 起失效语义 = TTL（5min）+
+ *    oldest-insert 容量驱逐 + watch 驱动失效——fs.watch HEAD 事件链与 60s 周期兜底经
+ *    GitChangeTrigger 统一入口刷新本服务（同打 statusCache 相关键与观测器条目）。
  *
  * W17 起 getStatus 生产接线：组合根实例化并注入 GitService（getStatus 收编）与
  * GitMessageHandler（写操作失效）；W18 再收编 file-change-reconciler 的采集。

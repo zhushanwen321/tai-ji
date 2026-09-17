@@ -161,3 +161,58 @@ describe('GitRepoObserver.pruneCache / invalidateCwd', () => {
     expect(fake.calls).toEqual(['/repo-a', '/repo-b', '/repo-a'])
   })
 })
+
+describe('GitRepoObserver watch 联动回调（缓存治理批 4 U11）', () => {
+  it('onObservationSet：miss 回填时以 (cwd, obs) 通知一次；TTL 内命中不重复通知', () => {
+    const fake = createFakeResolver({ branch: 'main', gitDir: '/repo/.git' })
+    const onObservationSet = vi.fn()
+    const observer = new GitRepoObserver({ resolver: fake.resolver, onObservationSet })
+
+    const obs = observer.readObservation('/repo')
+    expect(onObservationSet).toHaveBeenCalledTimes(1)
+    expect(onObservationSet).toHaveBeenCalledWith('/repo', obs)
+
+    observer.readObservation('/repo') // TTL 内命中：不重新解析、不再通知
+    expect(onObservationSet).toHaveBeenCalledTimes(1)
+  })
+
+  it('onObservationSet：invalidateCwd 后的重解析（watch 刷新链）同样通知', () => {
+    const fake = createFakeResolver({ branch: 'main', gitDir: '/repo/.git' })
+    const onObservationSet = vi.fn()
+    const observer = new GitRepoObserver({ resolver: fake.resolver, onObservationSet })
+
+    observer.readObservation('/repo')
+    observer.invalidateCwd('/repo')
+    observer.readObservation('/repo')
+
+    expect(onObservationSet).toHaveBeenCalledTimes(2)
+  })
+
+  it('onPrune：pruneCache 实际删除的条目通知（活跃条目不通知）；未注入回调时行为不变', () => {
+    const fake = createFakeResolver({ branch: 'main', gitDir: '/x/.git' })
+    const onPrune = vi.fn()
+    const observer = new GitRepoObserver({ resolver: fake.resolver, onPrune })
+
+    observer.readObservation('/live')
+    observer.readObservation('/dead')
+    observer.pruneCache(new Set(['/live']))
+
+    expect(onPrune).toHaveBeenCalledTimes(1)
+    expect(onPrune).toHaveBeenCalledWith(new Set(['/dead']))
+
+    observer.pruneCache(new Set(['/live'])) // 无删除 → 不通知
+    expect(onPrune).toHaveBeenCalledTimes(1)
+  })
+
+  it('未注入回调（U10 既有形态）零行为变化', () => {
+    const fake = createFakeResolver({ branch: 'main', gitDir: '/repo/.git' })
+    const observer = new GitRepoObserver({ resolver: fake.resolver })
+
+    expect(() => {
+      observer.readObservation('/repo')
+      observer.pruneCache(new Set([]))
+      observer.invalidateCwd('/repo')
+      observer.readObservation('/repo')
+    }).not.toThrow()
+  })
+})

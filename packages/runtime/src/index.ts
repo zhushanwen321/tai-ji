@@ -55,8 +55,10 @@ import { PluginService } from './services/plugin-service/plugin-service.js'
 import { GitService } from './services/git-service.js'
 import { GitExecutor } from './infra/git-executor.js'
 import { GitStateService } from './services/git/git-state-service.js'
-import { initSharedRepoObserver, getSharedRepoObserver } from './services/git/repo-observer.js'
+import { initSharedRepoObserver, getSharedRepoObserver, bindSharedRepoObserverCallbacks } from './services/git/repo-observer.js'
+import { GitChangeTrigger } from './services/git/git-change-trigger.js'
 import { GitRepoResolver } from './infra/system/git-repo-resolver.js'
+import { GitHeadWatcher } from './infra/system/git-head-watcher.js'
 import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
@@ -491,9 +493,29 @@ async function main(): Promise<void> {
   // 组合根是唯一合法装配点），再注入 GitStateService。本服务实现 IGitRepoObserver 作为观测器
   // service 面——下方 GitInfoReader 门面注入本服务，与 detectBareWorkspaceCached 模块门面共享
   // 同一份缓存（不得注入其他实例，否则产生第二份镜像）。
+  // 缓存治理批 4 U11：观测器单例追加 HEAD watcher 联动回调——挂载集合跟随观测器缓存写入
+  // （onObservationSet → observe，任何读方把 cwd 带进缓存 watch 即自动跟上）、收缩跟随
+  // pruneCache（onPrune → forget，防死 cwd watcher 泄漏与重试循环）。触发器（最后一公里：
+  // 值变化判定 + leading 节流 + config.sessions 广播）与 watcher 的 watch/L2 兜底两路回调
+  // 都在上方依赖就绪后装配（server 在前、gitStateService 即下方一行，无延迟槽）。
   const gitExecutor = new GitExecutor()
+  // 先装配单例（无回调），再依次构造依赖它的 gitStateService → trigger → watcher，
+  // 最后后置绑定 watcher 联动回调——破「init ← watcher ← trigger ← gitStateService ← init」
+  // 的装配环；同步序列内无 readObservation 发生，回调绑定前的窗口不丢通知。
   initSharedRepoObserver(new GitRepoResolver())
   const gitStateService = new GitStateService({ executor: gitExecutor, repoObserver: getSharedRepoObserver() })
+  const gitChangeTrigger = new GitChangeTrigger({
+    observations: gitStateService,
+    pushSessionList: () => server.broadcastSessionList(),
+  })
+  const gitHeadWatcher = new GitHeadWatcher({
+    onGitEvent: (cwds) => gitChangeTrigger.refresh(cwds, 'watch'),
+    onFallbackTick: (cwds) => gitChangeTrigger.refresh(cwds, 'fallback'),
+  })
+  bindSharedRepoObserverCallbacks({
+    onObservationSet: (cwd, obs) => gitHeadWatcher.observe(cwd, obs),
+    onPrune: (removedCwds) => gitHeadWatcher.forget(removedCwds),
+  })
 
   const fileChangeDiff = new FileChangeDiffAdapter(gitStateService)
 
@@ -1037,6 +1059,11 @@ async function main(): Promise<void> {
       // R1：关闭 SkillRegistry 的 chokidar watcher（global + project），防句柄泄漏阻塞退出。
       shutdownStep('dispose-skill-registry')
       skillRegistry.dispose()
+      // 缓存治理批 4 U11：关 git HEAD watcher（fs.watch 句柄 + debounce/L1 重试/L2 兜底定时器），
+      // 同为「watch 资源收口防阻塞退出」语义；触发器的窗口收尾 timer 随之撤销。
+      shutdownStep('dispose-git-head-watcher')
+      gitHeadWatcher.dispose()
+      gitChangeTrigger?.dispose()
       // sd-u6：退订完成回流（settled / exit 两腿）
       shutdownStep('dispose-completion-backflow')
       completionBackflow.dispose()
