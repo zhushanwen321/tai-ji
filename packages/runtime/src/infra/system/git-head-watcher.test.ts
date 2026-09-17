@@ -134,10 +134,20 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
     watcher.observe(fx.repoCwd, repoObs(fx))
     expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir, reftableDir])
 
-    const tmp = join(reftableDir, `tables.list.tmp-${process.hrtime.bigint()}`)
-    writeFileSync(tmp, 'test')
-    renameSync(tmp, join(reftableDir, 'tables.list'))
-    await waitForReal(() => watcher.hasPendingGitEventsForTests())
+    // macOS FSEvents 满载下单次 rename 的事件可延迟/丢失（设计 §3.4.3 已承认的平台形态，
+    // 产品面由 L2 兜底覆盖）。本用例关注「reftable 目录 watch 已挂上且事件能到达」，不关注
+    // 「恰好第一次到达」——周期性重注入直至 pending 置位，宽限耗尽才判失败。
+    const deadlineMs = Number(process.hrtime.bigint() / 1_000_000n) + 25_000
+    for (;;) {
+      const tmp = join(reftableDir, `tables.list.tmp-${process.hrtime.bigint()}`)
+      writeFileSync(tmp, 'test')
+      renameSync(tmp, join(reftableDir, 'tables.list'))
+      if (watcher.hasPendingGitEventsForTests()) break
+      if (Number(process.hrtime.bigint() / 1_000_000n) > deadlineMs) {
+        throw new Error('reftable watch: 事件在宽限窗内未到达（watch 未生效或平台全部丢失）')
+      }
+      await yieldReal(250)
+    }
     vi.advanceTimersByTime(500)
 
     expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
