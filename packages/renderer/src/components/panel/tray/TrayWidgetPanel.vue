@@ -80,6 +80,7 @@
 import { computed } from 'vue'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { GuiComponentRenderer } from '@taiji/ui/rendering-protocol'
+import { widgetToneDot } from '@/components/panel/tray/tray-tone'
 
 const props = defineProps<{
   /** widget key（= ViewHostStore viewId）：head 标题兜底 */
@@ -97,17 +98,7 @@ const displayTitle = computed(() => {
 })
 
 /** 状态点色（D4）：running=accent / done=success / failed=danger / idle 与无 meta=弱中性点 */
-function statusDotClassOf(status: WidgetMeta['status']): string {
-  switch (status) {
-    case 'running': return 'bg-accent'
-    case 'done': return 'bg-success'
-    case 'failed': return 'bg-danger'
-    case 'idle': return 'bg-neutral-dim'
-    default: return 'bg-neutral-dim'
-  }
-}
-
-const statusDotClass = computed(() => statusDotClassOf(props.meta?.status))
+const statusDotClass = computed(() => widgetToneDot(props.meta?.status))
 
 /** 进度 fill 色：显式 severity 优先（预算阈值），否则 done→success、默认 accent */
 const progressFillClass = computed(() => {

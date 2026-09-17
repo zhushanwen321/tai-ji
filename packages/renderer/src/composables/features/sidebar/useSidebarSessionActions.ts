@@ -11,7 +11,7 @@
  * （useTrayCounts 的 retry + watch(sessionId) 首拉）。
  *
  * 依赖注入说明：useSidebar 的方法（selectSession/newSession/goOverview/loadSessions/renameSession/
- * deleteSession/deleteFolder/focusedSessionId）由调用方注入——useSidebar 非单例（每次调用
+ * deleteSession/deleteFolder）由调用方注入——useSidebar 非单例（每次调用
  * createSessionStore + createUseSession 新建实例），不能在本 composable 内重复调用。
  * renameOpen/targetSessionId 是 RenameSessionDialog 的本地 UI ref，由 Sidebar.vue 创建并注入，
  * onRenameSession 设置这两个 ref 打开 dialog。useChat/useToast/useI18n/useSearchModalDeps/
@@ -31,13 +31,6 @@ import { useI18n } from 'vue-i18n'
 
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
-  /**
-   * 焦点 session id。
-   * [2026-09-16] 本 composable 已无 handler 消费它（原 subagent/workflow 列表 retry 用，
-   * 两列表已随侧栏任务 tab 退役）；字段保留为注入面契约——调用方（Sidebar.vue 与测试）
-   * 按本接口整体传参，删字段需同改全部调用点。
-   */
-  focusedSessionId: Ref<string | null>
   selectSession: (id: string) => Promise<void>
   /** dead session 重开（显式 restore RPC），sidebar 点击 dead session 时分流到此 */
   restoreSession: (id: string) => Promise<void>

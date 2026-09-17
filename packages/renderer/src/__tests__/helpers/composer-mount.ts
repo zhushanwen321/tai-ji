@@ -9,7 +9,7 @@
  *
  * W4：useNewTaskFlow 的 currentCwd 必须是真实 Vue ref（Composer 的
  * useProjectSkills(flow.currentCwd) 对它 watch，裸 { value } 对象触发 Vue warn）——
- * 修复单点落在本 helper 的 composerFlowModule / composerFlowCwdRef，测试文件不再各自维护。
+ * 修复单点落在本 helper 的 composerFlowModule（composer-smoke 的 hoisted 超集另在工厂内联真 ref）。
  *
  * vitest 按测试文件隔离模块图：本 helper 导出在每个测试文件内是独立实例（文件内 mock
  * 工厂与断言共享同一批 vi.fn）。
@@ -19,8 +19,8 @@
  *   insertSlashChip+insertSkillChip / 完整 expose 面带 insertTextAtCursor）
  * - composer-session-injection：sessionStore 需可变 active（vi.hoisted sessionState），
  *   保留本地；本 helper 只提供静态 active: undefined 版
- * - composer-smoke：flow mock 是 hoisted 超集（断言引用字段），只经 composerFlowCwdRef
- *   取真 ref 修 currentCwd，不整体换 composerFlowModule
+ * - composer-smoke：flow mock 是 hoisted 超集（断言引用字段），只在工厂内联真 ref
+ *   修 currentCwd，不整体换 composerFlowModule
  */
 import { ref } from 'vue'
 import { vi } from 'vitest'
@@ -58,14 +58,6 @@ export function composerFlowModule() {
     }),
     resetNewTaskFlow: vi.fn(),
   }
-}
-
-/**
- * W4：flow.currentCwd 真 ref 取用点（composer-smoke 的 hoisted flow 超集专用——hoisted
- * 块先于 import 执行拿不到 vue，只能由 mock 工厂执行期调用本函数取新 ref 实例）。
- */
-export function composerFlowCwdRef() {
-  return ref<string | null>(null)
 }
 
 /** '@/api' mock 工厂（project/model/session/composer/config 五组；config 供 W4 skill 加载）。 */

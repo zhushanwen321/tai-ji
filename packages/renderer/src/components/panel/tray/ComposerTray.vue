@@ -85,14 +85,7 @@
           :aria-label="t(`panel.tray.title.${item.kind}`)"
           :aria-expanded="activeKey === builtinKey(item.kind) ? 'true' : 'false'"
           :aria-pressed="isPinnedOf(builtinKey(item.kind)) ? 'true' : 'false'"
-          :class="
-            cn(
-              'h-7 shrink-0 gap-1 rounded-sm px-1.5',
-              isPinnedOf(builtinKey(item.kind)) || activeKey === builtinKey(item.kind)
-                ? 'bg-surface-hover text-neutral-mid'
-                : 'text-neutral-dim hover:bg-surface-hover hover:text-neutral-mid',
-            )
-          "
+          :class="trayItemButtonClass(isPinnedOf(builtinKey(item.kind)) || activeKey === builtinKey(item.kind))"
           @pointerenter="onHoverStart(builtinKey(item.kind))"
           @pointerleave="onHoverEnd"
           @click="onTogglePin(builtinKey(item.kind))"
@@ -107,46 +100,30 @@
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-pulse"
-            class="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+            :class="TRAY_PULSE_CLASS"
             aria-hidden="true"
           />
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-count"
-            class="font-mono text-[length:var(--text-3xs)] tabular-nums text-accent"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
           >{{ item.running }}</span>
         </Button>
       </PopoverAnchor>
-      <!-- 浮层：锚定 icon 上方；宽 400px 由外壳给，内容区固定高（h-[340px]，小屏 60vh 兜底）
-           内滚动。热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖
-           浮层全幅，指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根
-           做不到——本仓 PopoverContent 包装组件的根是 PopoverPortal/Teleport，未声明为
-           props/emits 的原生监听在 Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经
-           PopperContent 的 `$attrs` 透传到浮层根）。 -->
-      <PopoverContent
-        side="top"
-        align="start"
-        :side-offset="6"
-        class="w-[400px]"
+      <TrayPanelSurface
+        :panel-key="builtinKey(item.kind)"
+        :pinned="isPinnedOf(builtinKey(item.kind))"
+        @panel-enter="onPanelEnter"
+        @panel-leave="onPanelLeave"
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
-        <!-- 固定高：切内部 tab 容器不塌缩，hover 态指针不落空（用户裁决 2026-09-16） -->
-        <div
-          data-testid="tray-panel"
-          :data-panel-key="builtinKey(item.kind)"
-          :data-pinned="isPinnedOf(builtinKey(item.kind)) ? 'true' : 'false'"
-          class="flex h-[340px] max-h-[60vh] flex-col p-1.5"
-          @pointerenter="onPanelEnter"
-          @pointerleave="onPanelLeave"
-        >
-          <TrayNativePanel
-            :session-id="sessionId"
-            :kind="item.kind"
-            :pinned="isPinnedOf(builtinKey(item.kind))"
-          />
-        </div>
-      </PopoverContent>
+        <TrayNativePanel
+          :session-id="sessionId"
+          :kind="item.kind"
+          :pinned="isPinnedOf(builtinKey(item.kind))"
+        />
+      </TrayPanelSurface>
     </Popover>
 
     <!-- 协议 widget 区（D3/D6/D7）：有 entry 即渲染、invalidate 即消失（条目存在性由 entries 决定） -->
@@ -167,33 +144,23 @@
           @toggle-pin="onTogglePin(widgetKey(item.viewId))"
         />
       </PopoverAnchor>
-      <PopoverContent
-        side="top"
-        align="start"
-        :side-offset="6"
-        class="w-[400px]"
+      <TrayPanelSurface
+        :panel-key="widgetKey(item.viewId)"
+        :pinned="isPinnedOf(widgetKey(item.viewId))"
+        @panel-enter="onPanelEnter"
+        @panel-leave="onPanelLeave"
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
-        <!-- 固定高：切内部 tab 容器不塌缩，hover 态指针不落空（用户裁决 2026-09-16）；
-             ScrollArea flex-1 + min-h-0：固定高下内容超出即内部滚动，不足则顶部对齐留白 -->
-        <div
-          data-testid="tray-panel"
-          :data-panel-key="widgetKey(item.viewId)"
-          :data-pinned="isPinnedOf(widgetKey(item.viewId)) ? 'true' : 'false'"
-          class="flex h-[340px] max-h-[60vh] flex-col p-1.5"
-          @pointerenter="onPanelEnter"
-          @pointerleave="onPanelLeave"
-        >
-          <ScrollArea class="min-h-0 flex-1">
-            <TrayWidgetPanel
-              :view-id="item.viewId"
-              :meta="item.entry.meta"
-              :gui-tree="item.entry.guiTree"
-            />
-          </ScrollArea>
-        </div>
-      </PopoverContent>
+        <!-- ScrollArea flex-1 + min-h-0：固定高下内容超出即内部滚动，不足则顶部对齐留白 -->
+        <ScrollArea class="min-h-0 flex-1">
+          <TrayWidgetPanel
+            :view-id="item.viewId"
+            :meta="item.entry.meta"
+            :gui-tree="item.entry.guiTree"
+          />
+        </ScrollArea>
+      </TrayPanelSurface>
     </Popover>
   </div>
 </template>
@@ -209,16 +176,17 @@ import { useI18n } from 'vue-i18n'
 import { Bot, SquareTerminal, Workflow } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { cn } from '@/lib/utils'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
 import type { TrayTaskKind } from '@/components/panel/tray/useTrayCounts'
 import { orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
+import TrayPanelSurface from '@/components/panel/tray/TrayPanelSurface.vue'
 import TrayWidgetButton from '@/components/panel/tray/TrayWidgetButton.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'
+import { TRAY_ITEM_COUNT_CLASS, TRAY_PULSE_CLASS, trayItemButtonClass } from '@/components/panel/tray/tray-item-button'
 
 const props = defineProps<{
   /** 焦点 session id（数据分区键；Composer 侧 `v-if="sessionId"` 保证非空） */

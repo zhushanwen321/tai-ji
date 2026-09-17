@@ -254,7 +254,7 @@ import { formatClock, shortenForHeader, tailLines, stripAnsi } from './format-ut
 import { Button } from '../../primitives/button'
 import { useToolMeta } from './composables/useToolMeta'
 import { useCopy } from './composables/useCopy'
-import { useTailScroll } from './composables/useTailScroll'
+import { TAIL_WINDOW_LINES, useTailScroll } from './composables/useTailScroll'
 import { useThinkingCollapse } from './composables/useThinkingCollapse'
 import { useLiveToolDuration } from './composables/useLiveToolDuration'
 
@@ -378,13 +378,12 @@ const outputRaw = computed(() => props.tool?.outputRaw)
 /* ── tool 尾行视口（同 thinking，2026-08 抖动修复重写）──
  * isRunning + 有流式输出时，bash 用 outputRaw 去 ANSI 取尾行；其余 tool 用 displayContent 取尾行。
  * 无流式输出或非 running 保持静态 shortenForHeader(argPath)。 */
-const TAIL_LINE_COUNT = 2
 const toolTailLines = computed(() => {
   if (!isRunning.value) return []
   // bash：outputRaw 缺失（无 ANSI 输出）时回退 displayContent（D3 尾行取数）
   const raw = isBashTool.value ? (outputRaw.value ?? displayContent.value) : displayContent.value
   if (!raw) return []
-  return tailLines(isBashTool.value ? stripAnsi(raw) : raw, TAIL_LINE_COUNT)
+  return tailLines(isBashTool.value ? stripAnsi(raw) : raw, TAIL_WINDOW_LINES)
 })
 const { displayLines: toolDisplayLines, contentStyle: toolScrollStyle } = useTailScroll(toolTailLines)
 

@@ -13,11 +13,14 @@
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/new-task/landing.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import Landing from '@/components/new-task/Landing.vue'
 import Panel from '@/components/panel/Panel.vue'
 import { useChatStore } from '@/stores/chat'
+import { walkFiles } from '../helpers/walk-files'
 import type { DerivedStatus } from '@/types'
 
 // Landing 绑定 useNewTaskFlow（chip→popover 渲染绑定 #5/#6）。mock 捕获方法调用
@@ -363,26 +366,12 @@ describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）'
 // 脆弱性边界（有意接受）：静态扫描看不到动态渲染形态（<component :is> / h(Landing)），
 // 它是廉价哨兵不是完备证明；`<Landing` 字面量出现在注释/字符串会误报，失败信息自解释。
 describe('[不变式] Landing 唯一挂载点', () => {
-  it('<Landing 模板标签仅出现在 Panel.vue（D4 卸载守卫的前提）', async () => {
-    const fs = await import('node:fs')
-    const path = await import('node:path')
-    const srcRoot = path.resolve(__dirname, '../..')
-    const offenders: string[] = []
-    const walk = (dir: string): void => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          if (entry.name === '__tests__') continue
-          walk(full)
-        } else if (entry.name.endsWith('.vue')) {
-          const isTestFile = entry.name.endsWith('.test.vue') || entry.name.endsWith('.spec.vue')
-          if (!isTestFile && fs.readFileSync(full, 'utf-8').includes('<Landing')) {
-            offenders.push(path.relative(srcRoot, full))
-          }
-        }
-      }
-    }
-    walk(srcRoot)
+  it('<Landing 模板标签仅出现在 Panel.vue（D4 卸载守卫的前提）', () => {
+    const srcRoot = resolve(__dirname, '../..')
+    const offenders = walkFiles(srcRoot, { extensions: ['.vue'], skipDirs: ['__tests__'] })
+      .filter((full) => !full.endsWith('.test.vue') && !full.endsWith('.spec.vue'))
+      .filter((full) => readFileSync(full, 'utf-8').includes('<Landing'))
+      .map((full) => relative(srcRoot, full))
     expect(offenders).toEqual(['components/panel/Panel.vue'])
   })
 })

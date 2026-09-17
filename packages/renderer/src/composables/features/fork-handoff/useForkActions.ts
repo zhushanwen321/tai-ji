@@ -16,6 +16,7 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { ensureStreamSubscription, useChat } from '@/composables/features/chat/useChat'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
+import { findLastAssistantMessage } from '@taiji/core'
 import { pushForkNoticeAsk } from '@/composables/effects/useForkNoticeEffect'
 import { useToast } from '@/composables/useToast'
 
@@ -146,13 +147,8 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   function lastAssistantOfFocused(): { sessionId: string; messageId: string } | null {
     const sid = focusedSessionId.value
     if (!sid) return null
-    const msgs = chat.getMessages(sid)
-    for (let i = msgs.length - 1; i >= 0; i -= 1) {
-      if (msgs[i].role === 'assistant') {
-        return { sessionId: sid, messageId: msgs[i].id }
-      }
-    }
-    return null
+    const last = findLastAssistantMessage(chat.getMessages(sid))
+    return last ? { sessionId: sid, messageId: last.id } : null
   }
 
   /**

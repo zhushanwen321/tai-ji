@@ -30,22 +30,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
-import { computed, nextTick, reactive, shallowReactive } from 'vue'
+import { computed, nextTick, reactive } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
-import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
-import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
+import { ansiLine, makeEntry, makeWidgetSource } from './tray-view-host-mock'
+import type { MockWidgetSource } from './tray-view-host-mock'
+import { makeTrayCountsStub } from './tray-counts-stub'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import ComposerTray from '@/components/panel/tray/ComposerTray.vue'
-import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
+import type { TrayTaskKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
-
-type TrayKind = 'bash' | 'subagent' | 'workflow'
 
 // ── mock：数据面（三件计数/行集；口径与首拉触发在 useTrayCounts.test.ts）──
 interface TrayState {
@@ -98,37 +97,7 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
 /** fixture 数据面（计数/行集由 trayState 注入；`UseTrayCountsReturn` 类型标注 = 契约漂移门） */
 function createTrayFixture(): UseTrayCountsReturn {
   return {
-    counts: computed(() => ({
-      bash: {
-        running: trayState.bashRunning.length,
-        ended: trayState.bashEnded.length,
-        total: trayState.bashRunning.length + trayState.bashEnded.length,
-      },
-      subagent: {
-        running: trayState.subagentRunning.length,
-        ended: trayState.subagentEnded.length,
-        total: trayState.subagentRunning.length + trayState.subagentEnded.length,
-      },
-      workflow: {
-        running: trayState.workflowRunning.length,
-        ended: trayState.workflowEnded.length,
-        total: trayState.workflowRunning.length + trayState.workflowEnded.length,
-      },
-    })),
-    lists: {
-      bash: {
-        running: computed(() => trayState.bashRunning),
-        ended: computed(() => trayState.bashEnded),
-      },
-      subagent: {
-        running: computed(() => trayState.subagentRunning),
-        ended: computed(() => trayState.subagentEnded),
-      },
-      workflow: {
-        running: computed(() => trayState.workflowRunning),
-        ended: computed(() => trayState.workflowEnded),
-      },
-    },
+    ...makeTrayCountsStub(trayState),
     bashPartition: computed(() => ({
       tasks: [],
       loaded: trayState.bashLoaded,
@@ -136,11 +105,6 @@ function createTrayFixture(): UseTrayCountsReturn {
       fetchFailed: false,
     })),
     errors: { subagent: computed(() => null), workflow: computed(() => null) },
-    loading: {
-      bash: computed(() => !trayState.bashLoaded),
-      subagent: computed(() => trayState.subagentLoading),
-      workflow: computed(() => trayState.workflowLoading),
-    },
     retry: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -206,53 +170,7 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord> & { runId: string })
   }
 }
 
-// ── widget 区响应式数据源 mock（同构壳层桥；与 tray-widget.test.ts 同一范式）──
-interface MockWidgetSource {
-  source: ViewHostSource
-  /** 推送/更新一条 widget entry（= event-adapter → ViewHostStore.setView） */
-  push: (entry: ViewCacheEntry) => void
-  /** 清屏一条 widget（= setWidget(key, undefined) → invalidate） */
-  invalidate: (viewId: string) => void
-}
-
-const UPDATED_AT = FIXED_NOW
-
-function ansiLine(text: string): GuiComponent {
-  return { type: 'ansi-text', props: { lines: [text] } }
-}
-
-function makeEntry(viewId: string, guiTree: GuiComponent[], meta?: WidgetMeta): ViewCacheEntry {
-  return { viewId, pluginId: 'ext-x', guiTree, updatedAt: UPDATED_AT, ...(meta ? { meta } : {}) }
-}
-
-function makeWidgetSource(): MockWidgetSource {
-  const partitions = shallowReactive(new Map<string, Map<string, ViewCacheEntry>>())
-
-  function partitionOf(sessionId: string): Map<string, ViewCacheEntry> | undefined {
-    return partitions.get(sessionId)
-  }
-
-  return {
-    source: {
-      getViewIds: (sessionId) => {
-        const partition = partitionOf(sessionId)
-        return partition ? [...partition.keys()] : []
-      },
-      getView: (sessionId, viewId) => partitionOf(sessionId)?.get(viewId),
-    },
-    push: (entry) => {
-      let partition = partitionOf(SID)
-      if (!partition) {
-        partition = reactive(new Map<string, ViewCacheEntry>())
-        partitions.set(SID, partition)
-      }
-      partition.set(entry.viewId, entry)
-    },
-    invalidate: (viewId) => {
-      partitionOf(SID)?.delete(viewId)
-    },
-  }
-}
+// ── widget 区响应式数据源 mock（同构壳层桥；与 tray-widget.test.ts 共用 tray-view-host-mock）──
 
 // ── 挂载与查询工具 ──
 
@@ -375,7 +293,7 @@ afterEach(() => {
 
 describe('ComposerTray built-in 三态（D7 / N2）', () => {
   it('全无记录 → 三按钮都不渲染（DOM 层不存在，而非 opacity:0）', () => {
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     expect(row().find('[data-testid="composer-tray"]').exists()).toBe(true)
     expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
@@ -387,7 +305,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
     for (const kind of ['bash', 'subagent', 'workflow'] as const) {
@@ -405,7 +323,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     const button = builtinButton('bash')
     expect(button.attributes('data-state')).toBe('running')
@@ -421,7 +339,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
   it('三态混合：进行中件亮、仅历史件 dim、无记录件不渲染（同屏）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     // workflow 无记录 → 不渲染；bash 亮；subagent dim
     expect(builtinKinds()).toEqual(['bash', 'subagent'])
@@ -439,7 +357,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
   })
@@ -450,7 +368,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
 describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板不收起）', () => {
   it('hover 160ms 才开面板（159ms 仍不开）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS - 1)
@@ -463,7 +381,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('指针离开后 240ms 收起（239ms 仍在）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -480,7 +398,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('指针移入浮层内不收起（离开 icon 的 240ms 计时器被浮层 pointerenter 取消）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -496,7 +414,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('热区覆盖浮层 padding 带（U3）：内边距在热区元素自身，指针停在其中同样取消收起计时', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -522,7 +440,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('指针离开浮层 → 240ms 后收起（浮层与 icon 同语义）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -535,7 +453,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('hover 打开面板不抢焦点（openAutoFocus 被拦下）：composer 里正在输入时预览不打断', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
     // 模拟 composer 输入区持有焦点
     const typing = document.createElement('input')
     document.body.appendChild(typing)
@@ -554,7 +472,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 
   it('hover 开的面板未 pin：面板 data-pinned=false 且无行内操作按钮', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -573,7 +491,7 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
 describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', () => {
   it('点击 icon = pin：面板常驻（指针移开超过 240ms 仍开），行内操作随之出现', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('click')
     await nextTick()
@@ -592,7 +510,7 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
 
   it('再点 icon 解除（真实点击序列 pointerdown+click：层外拦截不得先解除再被 click 回弹）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await realClick(builtinButton('bash'))
     expect(panelKeys()).toEqual(['native:bash'])
@@ -605,7 +523,7 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
 
   it('Esc 解除（焦点无关：hover 预览态同样响应）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -621,7 +539,7 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
 
   it('点面板外解除（pinned 后点托盘外的任意位置）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('click')
     await nextTick()
@@ -641,7 +559,7 @@ describe('ComposerTray pin（D8：点击 pin / 再点·Esc·点外解除）', ()
   it('点击托盘自身按钮行不算「面板外」：pin 一件后点另一件 icon → 原 pin 不被 pointerdown 悄悄解除', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await realClick(builtinButton('bash'))
     expect(panelNodes()[0].dataset.pinned).toBe('true')
@@ -669,7 +587,7 @@ describe('ComposerTray 互斥（D8：同时至多一个面板）', () => {
   it('开 A 后触发 B → A 收 B 开（hover 切换）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -687,7 +605,7 @@ describe('ComposerTray 互斥（D8：同时至多一个面板）', () => {
   it('pin 住 A 后 hover B → 切到 B 预览（A 收，B 未 pin）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('click')
     await nextTick()
@@ -702,7 +620,7 @@ describe('ComposerTray 互斥（D8：同时至多一个面板）', () => {
   it('未到 160ms 就移开 → 不打开任何面板（指针路过不闪面板）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS - 1)
@@ -720,7 +638,7 @@ describe('ComposerTray 互斥（D8：同时至多一个面板）', () => {
 
 describe('ComposerTray widget 区与面板分流', () => {
   it('推送 widget entry → 按钮出现；顺序 = known-order 优先，未知 key 随后（built-in 恒在最左）', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mountTray(mock)
     expect(widgetKeys()).toEqual([])
 
@@ -739,7 +657,7 @@ describe('ComposerTray widget 区与面板分流', () => {
   })
 
   it('widget 面板内容 = TrayWidgetPanel（meta head + guiTree 正文），推送更新后正文重算', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('v1')], { title: 'Todo', status: 'running', badge: '2' }))
     mountTray(mock)
 
@@ -758,7 +676,7 @@ describe('ComposerTray widget 区与面板分流', () => {
   })
 
   it('widget 面板热区同款（U3）：浮层内（含 padding 带）pointerenter 取消收起，离开浮层 240ms 收起', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('t')], { title: 'Todo' }))
     mountTray(mock)
 
@@ -781,7 +699,7 @@ describe('ComposerTray widget 区与面板分流', () => {
   })
 
   it('清屏（invalidate）→ 条目消失 + 面板一并消失 + pin 不诈尸（重注册不自动弹回）', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('t')], { title: 'Todo' }))
     mock.push(makeEntry('goal', [ansiLine('g')], { title: 'Goal' }))
     mountTray(mock)
@@ -805,7 +723,7 @@ describe('ComposerTray widget 区与面板分流', () => {
 
   it('built-in 该类记录归零（按钮摘除）→ 面板与 pin 一并作废，记录回来也不诈尸', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await realClick(builtinButton('bash'))
     expect(panelKeys()).toEqual(['native:bash'])
@@ -826,7 +744,7 @@ describe('ComposerTray widget 区与面板分流', () => {
   })
 
   it('built-in 面板 vs widget 面板分流：各走各的面板组件，data-panel-key 带命名空间前缀', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mock.push(makeEntry('todo', [ansiLine('t')], { title: 'Todo' }))
     mountTray(mock)
@@ -857,7 +775,7 @@ describe('ComposerTray widget 区与面板分流', () => {
 
 describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）', () => {
   it('切 session：面板与 pin 一并作废，托盘行跟随新 sessionId', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
     mountTray(mock)
 
@@ -889,7 +807,7 @@ describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不�
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
     workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
 
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
     await flushPromises()
 
     expect(trayCountsSwitch.calls).toBe(1) // 唯一实例 = 外壳（面板若自建即为 2+）
@@ -929,7 +847,7 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
   it('subagent：在途（loading）但该类已有数据 → 面板打开首帧即列表，不渲染加载占位', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sa-1', status: 'running' })]
     trayState.subagentLoading = true
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('subagent').trigger('pointerenter')
     await advance(OPEN_MS)
@@ -942,7 +860,7 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
   it('bash：从未成功 list 过但有广播投递的任务 → 直出列表（loading 只吞「无数据的真首拉」）', async () => {
     trayState.bashLoaded = false
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource())
+    mountTray(makeWidgetSource(SID))
 
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)

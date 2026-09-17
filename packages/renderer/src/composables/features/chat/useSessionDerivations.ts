@@ -18,6 +18,7 @@
 import { computed } from 'vue'
 import type { ComputedRef } from 'vue'
 import { normalizeContent } from '@taiji/shared'
+import { findLastAssistantMessage } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -103,13 +104,8 @@ export function useSessionDerivations() {
     if (!c) {
       c = computed(() => {
         const msgs = chat.getMessages(id)
-        let lastAssistant = ''
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-          if (msgs[i].role === 'assistant') {
-            lastAssistant = normalizeContent(msgs[i].content)
-            break
-          }
-        }
+        const last = findLastAssistantMessage(msgs)
+        const lastAssistant = last ? normalizeContent(last.content) : ''
         const turnCount = msgs.filter((m) => m.role === 'user').length
         return { summary: lastAssistant, turnCount }
       })

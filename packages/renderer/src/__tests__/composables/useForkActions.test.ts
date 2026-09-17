@@ -45,14 +45,9 @@ vi.mock('@/composables/effects/useForkNoticeEffect', () => ({
 
 import { useForkActions } from '@/composables/features/fork-handoff/useForkActions'
 import { useToast } from '@/composables/useToast'
+import { clearToasts } from '../../helpers/toast-queue'
 
 const SID = 'sid-fork-actions'
-
-/** 清空 toast 模块级队列（测试无 timer 消费，需显式清） */
-function clearToasts(): void {
-  const { toasts, remove } = useToast()
-  for (const toast of [...toasts.value]) remove(toast.id)
-}
 
 beforeEach(() => {
   vi.clearAllMocks()

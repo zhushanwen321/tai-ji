@@ -13,12 +13,10 @@
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { tailLines } from '../format-utils'
-import { useTailScroll } from './useTailScroll'
+import { TAIL_WINDOW_LINES, useTailScroll } from './useTailScroll'
 
 /** 收起态的正文预览截断长度（draft：收起时显一行摘要） */
 const PREVIEW_LIMIT = 60
-/** working 态尾行视口窗口（与 Block.vue tool 尾行窗口同值；useTailScroll 机制按 2 行窗口设计） */
-const TAIL_LINE_COUNT = 2
 
 export interface UseThinkingCollapseParams {
   /** thinking 正文（props.content） */
@@ -61,7 +59,7 @@ export function useThinkingCollapse(params: UseThinkingCollapseParams) {
    * working 态折叠预览：单行视口显示最新行（横向 CSS 钉右 + 纵向滑入动画，
    * 机制见 useTailScroll 头注释）；非 working 保持 previewText 头部 60 字符静态。 */
   const thinkingTailLines = computed(() =>
-    params.working.value ? tailLines(params.content.value ?? '', TAIL_LINE_COUNT) : [],
+    params.working.value ? tailLines(params.content.value ?? '', TAIL_WINDOW_LINES) : [],
   )
   const { displayLines: thinkDisplayLines, contentStyle: thinkScrollStyle } = useTailScroll(thinkingTailLines)
 

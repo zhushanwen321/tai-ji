@@ -35,19 +35,19 @@ import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
+import { clearToasts } from '../../helpers/toast-queue'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { bindDrawerSessionId, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import { subagentVirtualId } from '@taiji/shared'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
-import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
+import type { TrayTaskKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
+import { makeTrayCountsStub } from './tray-counts-stub'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
-
-type TrayKind = 'bash' | 'subagent' | 'workflow'
 
 // ── 数据面替身（inject 消费点：panel 已不自建实例；U1 用例另用真实 useTrayCounts）──
 interface TrayState {
@@ -94,37 +94,7 @@ const retryMock = vi.hoisted(() => vi.fn<(kind: TrayKind) => Promise<void>>().mo
  * 模块级构造：所有计算属性都从 trayState 惰性派生，用例之间无需重建。
  */
 const trayFixture: UseTrayCountsReturn = {
-  counts: computed(() => ({
-    bash: {
-      running: trayState.bashRunning.length,
-      ended: trayState.bashEnded.length,
-      total: trayState.bashRunning.length + trayState.bashEnded.length,
-    },
-    subagent: {
-      running: trayState.subagentRunning.length,
-      ended: trayState.subagentEnded.length,
-      total: trayState.subagentRunning.length + trayState.subagentEnded.length,
-    },
-    workflow: {
-      running: trayState.workflowRunning.length,
-      ended: trayState.workflowEnded.length,
-      total: trayState.workflowRunning.length + trayState.workflowEnded.length,
-    },
-  })),
-  lists: {
-    bash: {
-      running: computed(() => trayState.bashRunning),
-      ended: computed(() => trayState.bashEnded),
-    },
-    subagent: {
-      running: computed(() => trayState.subagentRunning),
-      ended: computed(() => trayState.subagentEnded),
-    },
-    workflow: {
-      running: computed(() => trayState.workflowRunning),
-      ended: computed(() => trayState.workflowEnded),
-    },
-  },
+  ...makeTrayCountsStub(trayState),
   bashPartition: computed(() => ({
     tasks: [],
     loaded: trayState.bashLoaded,
@@ -134,11 +104,6 @@ const trayFixture: UseTrayCountsReturn = {
   errors: {
     subagent: computed(() => trayState.subagentError),
     workflow: computed(() => trayState.workflowError),
-  },
-  loading: {
-    bash: computed(() => !trayState.bashLoaded),
-    subagent: computed(() => trayState.subagentLoading),
-    workflow: computed(() => trayState.workflowLoading),
   },
   retry: retryMock,
 }
@@ -278,10 +243,6 @@ function rowTexts(wrapper: PanelWrapper, testid: string): string[] {
 }
 
 /** 清空 toast 模块级队列（fake timers 下自动移除不触发，需显式清） */
-function clearToasts(): void {
-  const { toasts, remove } = useToast()
-  for (const toast of [...toasts.value]) remove(toast.id)
-}
 
 beforeEach(() => {
   setActivePinia(createPinia())

@@ -33,6 +33,18 @@ import type {
 
 const t = i18n.global.t
 
+/**
+ * 凭据形态 → 提示 i18n key 表（成员顺序即 toast 顺序）：env/oauth/command/env-bundle
+ * 四态的「providers + orphanCredentials 两源计数 > 0 即 toast」为同构逻辑，表驱动单循环。
+ * missing（仅统计 providers、文案无 count）与 orphan 总数是差异分支，不在此表。
+ */
+const CREDENTIAL_TYPE_HINTS = [
+  { type: 'env', key: 'settings.provider.importToast.envVarNeeded' },
+  { type: 'oauth', key: 'settings.provider.importToast.oauthSkipped' },
+  { type: 'command', key: 'settings.provider.importToast.commandInjection' },
+  { type: 'env-bundle', key: 'settings.provider.importToast.envBundleSkipped' },
+] as const
+
 /** 导入流程状态 */
 type ImportState = 'idle' | 'loading-preview' | 'previewing' | 'applying'
 
@@ -117,29 +129,22 @@ export function useProviderImport() {
     const selectedProviders = importPreview.value?.providers.filter((p) => selectedIds.includes(p.id)) ?? []
     // sa3 F1：组 2 孤儿凭据同样参与凭据形态统计（providerId 是勾选 id）
     const selectedOrphans = importPreview.value?.orphanCredentials?.filter((o) => selectedIds.includes(o.providerId)) ?? []
+    // missing 仅 providers 参与（孤儿凭据恒有 key 或已跳过），文案无 count
     const missingCount = selectedProviders.filter((p) => p.credentialType === 'missing').length
-    const envCount = selectedProviders.filter((p) => p.credentialType === 'env').length + selectedOrphans.filter((o) => o.credentialType === 'env').length
-    const oauthCount = selectedProviders.filter((p) => p.credentialType === 'oauth').length + selectedOrphans.filter((o) => o.credentialType === 'oauth').length
-    const commandCount = selectedProviders.filter((p) => p.credentialType === 'command').length + selectedOrphans.filter((o) => o.credentialType === 'command').length
-    const envBundleCount = selectedProviders.filter((p) => p.credentialType === 'env-bundle').length + selectedOrphans.filter((o) => o.credentialType === 'env-bundle').length
-    const orphanImportedCount = selectedOrphans.length
     if (missingCount > 0) {
       toastInfo(t('settings.provider.importToast.partialKeyMissing'))
     }
-    if (envCount > 0) {
-      toastInfo(t('settings.provider.importToast.envVarNeeded', { count: envCount }))
+    // 表驱动：每类计数 = providers + orphans 两源合计（两源字段名不同，注意映射）
+    for (const { type, key } of CREDENTIAL_TYPE_HINTS) {
+      const count =
+        selectedProviders.filter((p) => p.credentialType === type).length +
+        selectedOrphans.filter((o) => o.credentialType === type).length
+      if (count > 0) {
+        toastInfo(t(key, { count }))
+      }
     }
-    if (oauthCount > 0) {
-      toastInfo(t('settings.provider.importToast.oauthSkipped', { count: oauthCount }))
-    }
-    if (commandCount > 0) {
-      toastInfo(t('settings.provider.importToast.commandInjection', { count: commandCount }))
-    }
-    if (envBundleCount > 0) {
-      toastInfo(t('settings.provider.importToast.envBundleSkipped', { count: envBundleCount }))
-    }
-    if (orphanImportedCount > 0) {
-      toastInfo(t('settings.provider.importToast.orphanImported', { count: orphanImportedCount }))
+    if (selectedOrphans.length > 0) {
+      toastInfo(t('settings.provider.importToast.orphanImported', { count: selectedOrphans.length }))
     }
   }
 

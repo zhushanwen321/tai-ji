@@ -15,7 +15,8 @@
  * mock 策略：
  * - VIEW_HOST_SOURCE_KEY 注入响应式 mock（getViewIds 走分区键迭代 + getView 走分区值读，
  *   同构壳层 useExtensionHostBridge.createReactiveSessionScopedMap：外层 shallowReactive 分区
- *   Map + 内层 reactive 分区 Map）——推送（set）/ 清屏（delete）直接改分区即可驱动重算
+ *   Map + 内层 reactive 分区 Map）——推送（set）/ 清屏（delete）直接改分区即可驱动重算；
+ *   数据源/夹具实现与 composer-tray.test.ts 共享 tray-view-host-mock.ts
  * - 真实 GuiComponentRenderer（经 @taiji/ui/rendering-protocol）：面板正文断言渲染到 DOM 的
  *   真实原语（ansi-text / list-tree），不 stub 渲染器
  * - i18n 走全局 setup mock（__tests__/vitest-i18n-setup.ts）；本单元组件零 i18n 文案（文本全
@@ -30,29 +31,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
-import { computed, defineComponent, h, inject, reactive, ref, shallowReactive } from 'vue'
+import { computed, defineComponent, h, inject, ref } from 'vue'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
-import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
+import type { ViewCacheEntry } from '@taiji/ui/extension-host'
+import { ansiLine, makeEntry, makeWidgetSource } from './tray-view-host-mock'
+import type { MockWidgetSource } from './tray-view-host-mock'
 import TrayWidgetButton from '@/components/panel/tray/TrayWidgetButton.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'
 import { orderTrayWidgetIds } from '@/components/panel/tray/tray-order'
 
 const SID = 's-widget'
-/** 固定 updatedAt（组件不消费，仅满足 ViewCacheEntry 形状；无需 fake timers） */
-const UPDATED_AT = 1_760_000_000_000
 
 function makeMeta(overrides: Partial<WidgetMeta> = {}): WidgetMeta {
   return { title: 'Todo', ...overrides }
-}
-
-function makeEntry(viewId: string, guiTree: GuiComponent[], meta?: WidgetMeta): ViewCacheEntry {
-  return { viewId, pluginId: 'ext-x', guiTree, updatedAt: UPDATED_AT, ...(meta ? { meta } : {}) }
-}
-
-/** 一行 ansi-text 正文（面板 body 的最小可用 payload） */
-function ansiLine(text: string): GuiComponent {
-  return { type: 'ansi-text', props: { lines: [text] } }
 }
 
 // ── 组件直挂（按钮 / 面板：props 驱动，无数据源）──
@@ -84,48 +76,6 @@ function iconSpan(wrapper: VueWrapper): DOMWrapper<Element> {
 interface WidgetEntry {
   viewId: string
   entry: ViewCacheEntry
-}
-
-interface MockWidgetSource {
-  source: ViewHostSource
-  /** 推送/更新一条 widget entry（= event-adapter → ViewHostStore.setView） */
-  push: (entry: ViewCacheEntry) => void
-  /** 清屏一条 widget（= setWidget(key, undefined) → invalidate） */
-  invalidate: (viewId: string) => void
-}
-
-/**
- * 响应式 mock 数据源：同构壳层桥（shallowReactive 外层分区 Map + reactive 内层分区 Map）。
- * 外层 reactive 保证「分区后建」也触发重算（computed 首次求值短路的经典 stale 陷阱），
- * 内层 reactive 保证 set/delete/keys 迭代被追踪——与生产桥的依赖面一致。
- */
-function makeWidgetSource(): MockWidgetSource {
-  const partitions = shallowReactive(new Map<string, Map<string, ViewCacheEntry>>())
-
-  function partitionOf(sessionId: string): Map<string, ViewCacheEntry> | undefined {
-    return partitions.get(sessionId)
-  }
-
-  return {
-    source: {
-      getViewIds: (sessionId) => {
-        const partition = partitionOf(sessionId)
-        return partition ? [...partition.keys()] : []
-      },
-      getView: (sessionId, viewId) => partitionOf(sessionId)?.get(viewId),
-    },
-    push: (entry) => {
-      let partition = partitionOf(SID)
-      if (!partition) {
-        partition = reactive(new Map<string, ViewCacheEntry>())
-        partitions.set(SID, partition)
-      }
-      partition.set(entry.viewId, entry)
-    },
-    invalidate: (viewId) => {
-      partitionOf(SID)?.delete(viewId)
-    },
-  }
 }
 
 /**
@@ -521,7 +471,7 @@ describe('TrayWidgetPanel（meta head + guiTree 正文）', () => {
 
 describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建链）', () => {
   it('推送新 entry → 新条目出现，且顺序 = known-order 优先（未知 key 随后按插入序）', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     const wrapper = mountStrip(mock)
     expect(stripKeys(wrapper)).toEqual([])
 
@@ -539,7 +489,7 @@ describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建�
   })
 
   it('推送更新同一 key → 按钮与面板重算（非缓存 stale），面板随 pin 打开', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('v1')], makeMeta({ title: 'Todo', badge: '1' })))
     const wrapper = mountStrip(mock)
     expect(wrapper.find('[data-testid="tray-widget-badge"]').text()).toBe('1')
@@ -562,7 +512,7 @@ describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建�
 
   it('分区在挂载后才建（首帧短路陷阱）→ 推送仍触发重算', async () => {
     // 挂载顺序刻意颠倒：先 mount（此时无分区、无 entry）再首次 push
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     const wrapper = mountStrip(mock)
     expect(stripKeys(wrapper)).toEqual([])
 
@@ -572,7 +522,7 @@ describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建�
   })
 
   it('清屏（gui:null → invalidate）→ 条目与已打开面板一并消失', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('t')], makeMeta({ title: 'Todo' })))
     mock.push(makeEntry('goal', [ansiLine('g')], makeMeta({ title: 'Goal' })))
     const wrapper = mountStrip(mock)
@@ -587,7 +537,7 @@ describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建�
   })
 
   it('invalidate → 重注册的未知 key 落尾部（「当前插入序」契约在 DOM 上成立）', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('t')], makeMeta()))
     mock.push(makeEntry('goal', [ansiLine('g')], makeMeta()))
     mock.push(makeEntry('alpha', [ansiLine('a')], makeMeta()))
@@ -607,7 +557,7 @@ describe('widget 区依赖追踪（getViewIds + getView 同 computed 路径建�
   })
 
   it('反证：非响应式快照（断链形态）推送后条目不重算——正例断言不是空断言', async () => {
-    const mock = makeWidgetSource()
+    const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('t')], makeMeta({ title: 'Todo' })))
     const wrapper = mountStrip(mock, BrokenStrip)
     expect(stripKeys(wrapper)).toEqual(['todo'])

@@ -21,7 +21,7 @@ import { session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
 import { useToast } from '@/composables/useToast'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { toErrorMessage } from '@taiji/core'
+import { findLastAssistantMessage, toErrorMessage } from '@taiji/core'
 
 /**
  * Handoff 操作 composable。
@@ -90,11 +90,8 @@ export function useHandoffActions(focusedSessionId: Ref<string | null>) {
   function lastAssistantOfFocused(): { sessionId: string } | null {
     const sid = focusedSessionId.value
     if (!sid) return null
-    const msgs = chat.getMessages(sid)
-    for (let i = msgs.length - 1; i >= 0; i -= 1) {
-      if (msgs[i].role === 'assistant') return { sessionId: sid }
-    }
-    return null
+    const last = findLastAssistantMessage(chat.getMessages(sid))
+    return last ? { sessionId: sid } : null
   }
 
   /**

@@ -7,7 +7,7 @@
  */
 
 /** token 数超过此阈值显示 k 单位（沿用自退役的侧栏工作流详情视图同值） */
-export const TOKEN_K_THRESHOLD = 1000
+const TOKEN_K_THRESHOLD = 1000
 
 /** token 数 → K 格式：1500 → `1.5k tokens`，800 → `800 tokens`（unit 由调用方注入） */
 export function formatTokens(tokens: number, unit: string): string {

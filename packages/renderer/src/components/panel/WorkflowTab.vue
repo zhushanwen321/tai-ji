@@ -117,10 +117,8 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { formatTokens } from '@/lib/token-format'
+import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
-
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
@@ -206,10 +204,9 @@ function callDotClass(status: WorkflowAgentCall['status']): string {
   }
 }
 
+/** ms → 耗时（WorkflowTab 口径：无小时档，≥1h 仍累计分钟——现状保留；换算单点在 lib/duration-format） */
 function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / MS_PER_SECOND)
-  if (seconds >= SECONDS_PER_MINUTE) return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m${seconds % SECONDS_PER_MINUTE}s`
-  return `${seconds}s`
+  return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 }
 
 /** agent call 是否终态（completed/failed，显示 token/turns 第二行；running/pending 不显） */

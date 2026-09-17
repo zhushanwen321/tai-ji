@@ -9,8 +9,6 @@ import { resolve } from 'path'
 // - i18n setup：vitest.setup.ts mock vue-i18n useI18n（ui 组件用 useI18n，测试环境需 t）
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     environment: 'happy-dom',
     setupFiles: ['./vitest.setup.ts'],
   },

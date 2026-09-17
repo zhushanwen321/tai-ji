@@ -76,7 +76,7 @@
               v-for="entry in bashRows" :key="entry.taskId"
               class="group/item relative flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
-              @click="openBashTask(entry)" @mouseleave="confirmingKillId = null"
+              @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
             >
               <div class="mt-[6px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
                 <span v-if="iconOf(entry).shape === 'spinner'"
@@ -93,19 +93,15 @@
                   <span class="min-w-0 flex-1 truncate">
                     {{ t('panel.tray.pidLabel') }} {{ entry.pid }}<template v-if="isEnded(entry)"> · {{ t('panel.tray.exitLabel') }} {{ entry.exitCode ?? '—' }}</template>
                   </span>
-                  <Button
-                    v-if="pinned && entry.state === 'running'" variant="ghost" size="icon"
-                    :data-testid="confirmingKillId === entry.taskId ? 'tray-bash-kill-confirm' : 'tray-bash-kill'"
-                    :data-confirming="confirmingKillId === entry.taskId ? 'true' : 'false'"
-                    :class="cn('size-5 shrink-0 rounded-sm', confirmingKillId === entry.taskId
-                      ? 'border border-danger bg-danger text-neutral-fg opacity-100'
-                      : 'text-neutral-dim hover:text-danger')"
-                    :title="confirmingKillId === entry.taskId ? t('panel.tray.killConfirm') : t('panel.tray.kill')"
+                  <TrayConfirmButton
+                    v-if="pinned && entry.state === 'running'"
+                    testid="tray-bash-kill"
+                    :confirming="killConfirm.isConfirming(entry.taskId)"
+                    :title="t('panel.tray.kill')"
+                    :confirm-title="t('panel.tray.killConfirm')"
+                    confirm-opacity
                     @click.stop="onKillClick(entry)"
-                  >
-                    <Check v-if="confirmingKillId === entry.taskId" class="size-3" />
-                    <X v-else class="size-3" />
-                  </Button>
+                  />
                 </div>
               </div>
             </div>
@@ -118,7 +114,7 @@
               class="group relative cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-subagent-row"
               :title="record.slug ? record.agent + ' · ' + record.slug : record.agent"
-              @click="openSubagentRow(record)" @mouseleave="cancellingSubagentId = null"
+              @click="openSubagentRow(record)" @mouseleave="cancelConfirm.clear()"
             >
               <div class="flex items-center gap-2">
                 <component :is="resolveEngineIcon(record.engine).icon" :title="resolveEngineIcon(record.engine).label"
@@ -132,20 +128,14 @@
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
                 <!-- 确认窗口期保留按钮：第一击进入确认态后迟到收口广播不得把确认钮藏掉（可达性优先） -->
-                <Button
-                  v-if="pinned && (isRunningSubagent(record) || cancellingSubagentId === record.subagentId)"
-                  variant="ghost" size="icon"
-                  :data-testid="cancellingSubagentId === record.subagentId ? 'tray-subagent-cancel-confirm' : 'tray-subagent-cancel'"
-                  :data-confirming="cancellingSubagentId === record.subagentId ? 'true' : 'false'"
-                  :class="cn('size-5 shrink-0 rounded-sm', cancellingSubagentId === record.subagentId
-                    ? 'border border-danger bg-danger text-neutral-fg'
-                    : 'text-neutral-dim hover:text-danger')"
-                  :title="cancellingSubagentId === record.subagentId ? t('panel.tray.cancelConfirm') : t('panel.tray.cancel')"
+                <TrayConfirmButton
+                  v-if="pinned && (isRunningSubagent(record) || cancelConfirm.isConfirming(record.subagentId))"
+                  testid="tray-subagent-cancel"
+                  :confirming="cancelConfirm.isConfirming(record.subagentId)"
+                  :title="t('panel.tray.cancel')"
+                  :confirm-title="t('panel.tray.cancelConfirm')"
                   @click.stop="onCancelClick(record)"
-                >
-                  <Check v-if="cancellingSubagentId === record.subagentId" class="size-3" />
-                  <X v-else class="size-3" />
-                </Button>
+                />
               </div>
               <div class="mt-1 flex items-center gap-2 pl-[42px] font-mono text-[length:var(--text-3xs)] text-neutral-dim">
                 <span v-if="record.turns !== undefined">{{ record.turns }} {{ t('panel.tray.turnsUnit') }}</span>
@@ -178,19 +168,16 @@
                 <!-- 行内操作（仅 pin 态）：running 态 abort 两段式。workflow 一次性生命周期
                      （subagent-workflow D-2）：pause/resume 已在扩展侧移除，宿主不再暴露 -->
                 <template v-if="pinned && record.status === 'running'">
-                  <Button
-                    variant="ghost" size="icon"
-                    :data-testid="isAbortConfirming(record.runId) ? 'tray-workflow-abort-confirm' : 'tray-workflow-abort'"
-                    :data-confirming="isAbortConfirming(record.runId) ? 'true' : 'false'"
-                    :class="cn('size-5 shrink-0', isAbortConfirming(record.runId)
-                      ? 'border border-danger bg-danger text-neutral-fg'
-                      : 'text-neutral-dim hover:text-danger')"
-                    :title="isAbortConfirming(record.runId) ? t('panel.tray.abortConfirm') : t('panel.tray.abort')"
+                  <TrayConfirmButton
+                    testid="tray-workflow-abort"
+                    :confirming="isAbortConfirming(record.runId)"
+                    :title="t('panel.tray.abort')"
+                    :confirm-title="t('panel.tray.abortConfirm')"
+                    :rounded="false"
                     @click.stop="onAbortClick(record.runId)"
                   >
-                    <Check v-if="isAbortConfirming(record.runId)" class="size-3" />
-                    <Square v-else class="size-3" />
-                  </Button>
+                    <template #icon><Square class="size-3" /></template>
+                  </TrayConfirmButton>
                 </template>
               </div>
               <div class="mt-1 flex items-center gap-1.5 pl-[21px] font-mono text-[length:var(--text-3xs)] text-neutral-dim">
@@ -263,7 +250,7 @@
  */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, AlertTriangle, Check, Loader2, Square, WifiOff, X } from '@lucide/vue'
+import { AlertCircle, AlertTriangle, Loader2, Square, WifiOff } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
@@ -272,6 +259,8 @@ import { getDrawerControlState, openDrawerTab, openSubagent, openWorkflow } from
 import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import TrayConfirmButton from '@/components/panel/tray/TrayConfirmButton.vue'
+import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
@@ -279,6 +268,7 @@ import { isRunningProjection } from '@/lib/subagent-bucket'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
 import { formatTokens as formatTokensK } from '@/lib/token-format'
+import { formatClockDuration, formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { resolveEngineIcon } from '@/constants/engine-icons'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
@@ -366,28 +356,19 @@ const subagentRows = computed<SubagentRecord[]>(() =>
 const workflowRows = computed<WorkflowRunRecord[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.workflow.ended.value : tray.lists.workflow.running.value,
 )
-const hasRows = computed(() => {
-  if (props.kind === 'bash') return bashRows.value.length > 0
-  if (props.kind === 'subagent') return subagentRows.value.length > 0
-  return workflowRows.value.length > 0
-})
+const hasRows = computed(() => bucketCount(activeBucket.value) > 0)
 
 /**
  * 面板加载态：判据 = **在途且当前 sid 该类无任何数据（total === 0）**。外壳挂载即首拉，hover
  * 打开时数据通常已在——只要有缓存数据就直出列表，不闪加载态（U2：§3.1 场景 A「hover 即得列表」）。
  * bash 的 loaded=false 表示「从未成功拉到过一次」（S6 语义），同样只在无数据时占位。
  */
-const isKindLoading = computed(() => {
-  const counts = tray.counts.value
-  if (props.kind === 'bash') return tray.loading.bash.value && counts.bash.total === 0
-  if (props.kind === 'subagent') return tray.loading.subagent.value && counts.subagent.total === 0
-  return tray.loading.workflow.value && counts.workflow.total === 0
-})
+const isKindLoading = computed(() =>
+  tray.loading[props.kind].value && tray.counts.value[props.kind].total === 0,
+)
 /** 错误态（subagent / workflow 首拉失败；bash 的失败信号由提示条承载，见设计 §3.5） */
 const kindError = computed(() =>
-  props.kind === 'subagent'
-    ? tray.errors.subagent.value
-    : props.kind === 'workflow' ? tray.errors.workflow.value : null,
+  props.kind === 'bash' ? null : tray.errors[props.kind].value,
 )
 
 // ── bash 提示条判据（损坏 = 分区 sticky 位；断连 = 非 connected 且（拉取失败 || 未拉到过））──
@@ -421,10 +402,6 @@ const STATUS_TEXT_KEYS: Record<BackgroundTaskStatusKey, string> = {
   succeeded: 'panel.tray.status.succeeded',
   failed: 'panel.tray.status.failed',
 }
-const MS_PER_SECOND = 1000
-const SECONDS_PER_HOUR = 3600
-const SECONDS_PER_MINUTE = 60
-const TIME_PAD_WIDTH = 2
 const PERCENT_BASE = 100
 
 function iconOf(entry: BackgroundTaskEntry): BackgroundTaskIconState {
@@ -436,24 +413,9 @@ function statusText(entry: BackgroundTaskEntry): string {
 function isEnded(entry: BackgroundTaskEntry): boolean {
   return backgroundTaskBucket(entry) === 'ended'
 }
-/** 秒 → mm:ss（≥1h h:mm:ss；bash 行「00:37」形态） */
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / MS_PER_SECOND))
-  const hours = Math.floor(totalSeconds / SECONDS_PER_HOUR)
-  const minutes = Math.floor((totalSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
-  const seconds = totalSeconds % SECONDS_PER_MINUTE
-  const padded = (n: number) => String(n).padStart(TIME_PAD_WIDTH, '0')
-  return hours > 0 ? `${hours}:${padded(minutes)}:${padded(seconds)}` : `${padded(minutes)}:${padded(seconds)}`
-}
-/** 秒 → 可读耗时（≥1h hNm / ≥1m NmNs / Ns；subagent 与 workflow 行共用） */
+/** 秒 → 可读耗时（≥1h hNm / ≥1m NmNs / Ns；subagent 与 workflow 行共用；换算单点在 lib/duration-format） */
 function formatSeconds(seconds: number): string {
-  if (seconds >= SECONDS_PER_HOUR) {
-    return `${Math.floor(seconds / SECONDS_PER_HOUR)}h${Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)}m`
-  }
-  if (seconds >= SECONDS_PER_MINUTE) {
-    return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m${seconds % SECONDS_PER_MINUTE}s`
-  }
-  return `${seconds}s`
+  return formatCompactDuration(seconds, { hours: true })
 }
 /** token K 格式化单点在 lib/token-format（与 WorkflowTab 共享）；unit 走 i18n 由本组件注入 */
 function formatTokens(tokens: number): string {
@@ -501,7 +463,7 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
   const ms = isEnded(entry)
     ? entry.durationMs ?? (entry.endedAt ?? entry.startedAt) - entry.startedAt
     : now.value - entry.startedAt
-  return formatDuration(ms)
+  return formatClockDuration(ms, { padHours: false })
 }
 
 // ── subagent 行状态点（表驱动；承自侧栏任务卡片状态表的复制迁移件——源组件已随退役批次
@@ -548,42 +510,36 @@ function openWorkflowRow(record: WorkflowRunRecord): void {
 }
 
 // ── 行内操作 1：bash 两段式终止（首击确认态，再击发令；仅 running 行、仅 pin 态渲染）──
-const confirmingKillId = ref<string | null>(null)
-function onKillClick(entry: BackgroundTaskEntry): void {
-  if (confirmingKillId.value !== entry.taskId) {
-    confirmingKillId.value = entry.taskId
-    return
-  }
-  confirmingKillId.value = null
+const killConfirm = useTwoStepConfirm((taskId) => {
   // fire-and-forget：结果经 killing 广播翻转行状态，失败条目停留原状态（下次广播/拉取自愈）；
   // 但用户点击必须有可见反馈——对齐 cancelSubagent / runWorkflowAction 的 toastError 先例
-  void backgroundTaskApi.kill(props.sessionId, entry.taskId).catch((err: unknown) => {
-    console.debug('[tray] background task kill failed', entry.taskId, err)
+  void backgroundTaskApi.kill(props.sessionId, taskId).catch((err: unknown) => {
+    console.debug('[tray] background task kill failed', taskId, err)
     toastError(t('panel.tray.killFailed', { msg: toErrorMessage(err) }))
   })
+})
+function onKillClick(entry: BackgroundTaskEntry): void {
+  killConfirm.toggle(entry.taskId)
 }
 
 // ── 行内操作 2：subagent 两段式取消 + 迟到收口防误报（复制件，自原侧栏列表动作 composable）──
-const cancellingSubagentId = ref<string | null>(null)
+const cancelConfirm = useTwoStepConfirm((subagentId) => {
+  void cancelSubagent(subagentId)
+})
 function onCancelClick(record: SubagentRecord): void {
-  if (cancellingSubagentId.value !== record.subagentId) {
-    cancellingSubagentId.value = record.subagentId
-    return
-  }
-  cancellingSubagentId.value = null
-  void cancelSubagent(record)
+  cancelConfirm.toggle(record.subagentId)
 }
 /**
  * 第二击时任务可能已收口（迟到 isStreaming=false 窗口）——此时**不发** cancel RPC
  * （会被 runtime 拒绝并误报「取消失败」），toast「任务已结束」给出确定反馈。
  */
-async function cancelSubagent(record: SubagentRecord): Promise<void> {
-  if (!subagentStore.isStreamingSubagent(props.sessionId, record.subagentId)) {
+async function cancelSubagent(subagentId: string): Promise<void> {
+  if (!subagentStore.isStreamingSubagent(props.sessionId, subagentId)) {
     toastInfo(t('panel.tray.alreadyEnded'))
     return
   }
   try {
-    await subagentStore.cancelSubagent(props.sessionId, record.subagentId)
+    await subagentStore.cancelSubagent(props.sessionId, subagentId)
   } catch (e) {
     toastError(t('panel.tray.cancelFailed', { msg: toErrorMessage(e) }))
   }

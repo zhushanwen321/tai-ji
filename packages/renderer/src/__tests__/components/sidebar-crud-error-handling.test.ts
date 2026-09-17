@@ -77,7 +77,6 @@ vi.mock('@/stores/workflow', () => ({
   useWorkflowStore: () => ({
     recordsOf: () => ({ value: [] }),
     getRecordsBySession: () => [],
-    hasRunningOrPaused: () => false,
     loadWorkflows: vi.fn(() => Promise.resolve()),
   }),
 }))

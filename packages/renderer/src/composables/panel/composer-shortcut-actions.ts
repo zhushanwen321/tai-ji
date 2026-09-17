@@ -26,12 +26,13 @@
 import { watch, type Ref } from 'vue'
 import { normalizeContent, type Message, type ModelInfo, type ProviderId } from '@taiji/shared'
 import { normalizeSupportedLevels } from '@taiji/core/domain/composer'
+import { findLastAssistantMessage } from '@taiji/core'
 
 /**
  * toast 窄接口：入参 = i18n key，翻译在壳层组装适配时完成（翻译时刻 = 触发时刻，
  * locale 切换后反馈文案跟随；本模块零 i18n 依赖，与分发链纯分派器同风格）。
  */
-interface ComposerShortcutToast {
+export interface ComposerShortcutToast {
   info: (i18nKey: string) => void
   error: (i18nKey: string) => void
 }
@@ -216,14 +217,7 @@ export function useComposerShortcutActions(
   function copyLastAssistantReply(): void {
     const sid = deps.sessionId.value
     if (!sid) return // landing 态无消息流 → no-op
-    const msgs = deps.getMessages(sid)
-    let last: Message | undefined
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'assistant') {
-        last = msgs[i]
-        break
-      }
-    }
+    const last = findLastAssistantMessage(deps.getMessages(sid))
     if (!last) return
     const text = normalizeContent(last.content)
     void navigator.clipboard.writeText(text).then(

@@ -80,6 +80,7 @@ import {
   useSessionTrace,
 } from '@/composables/features/trace/useSessionTrace'
 import { useToast } from '@/composables/useToast'
+import { clearToasts } from '../../helpers/toast-queue'
 
 const SID = 'sid-inspector-1'
 
@@ -398,11 +399,6 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       forkEntryId: 'u1',
     } as typeof snap.header
     return snap
-  }
-
-  function clearToasts(): void {
-    const { toasts, remove } = useToast()
-    for (const toast of [...toasts.value]) remove(toast.id)
   }
 
   async function mountSessionInspector() {

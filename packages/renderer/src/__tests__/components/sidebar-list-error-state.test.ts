@@ -63,7 +63,7 @@ vi.mock('@/stores/subagent', () => ({
 }))
 vi.mock('@/stores/workflow', () => ({
   useWorkflowStore: () => ({
-    recordsOf: () => ({ value: [] }), getRecordsBySession: () => [], hasRunningOrPaused: () => false,
+    recordsOf: () => ({ value: [] }), getRecordsBySession: () => [],
     isLoading: false, loadError: null,
     loadWorkflows: vi.fn(() => Promise.resolve()),
   }),

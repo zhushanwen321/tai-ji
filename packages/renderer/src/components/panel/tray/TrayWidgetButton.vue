@@ -57,12 +57,7 @@
     :aria-label="displayTitle"
     :aria-expanded="expanded ? 'true' : 'false'"
     :aria-pressed="pinned ? 'true' : 'false'"
-    :class="cn(
-      'h-7 shrink-0 gap-1 rounded-sm px-1.5',
-      pinned || expanded
-        ? 'bg-surface-hover text-neutral-mid'
-        : 'text-neutral-dim hover:bg-surface-hover hover:text-neutral-mid',
-    )"
+    :class="trayItemButtonClass(pinned || expanded)"
     @pointerenter="emit('hover-start')"
     @pointerleave="emit('hover-end')"
     @click="emit('toggle-pin')"
@@ -104,14 +99,13 @@
       <span
         v-if="isRunning"
         data-testid="tray-widget-pulse"
-        class="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+        :class="TRAY_PULSE_CLASS"
         aria-hidden="true"
       />
       <span
         v-if="badgeText"
         data-testid="tray-widget-badge"
-        class="font-mono text-[length:var(--text-3xs)] tabular-nums"
-        :class="toneClass"
+        :class="[TRAY_ITEM_COUNT_CLASS, toneClass]"
         :title="badgeFull"
       >
         {{ badgeText }}
@@ -127,7 +121,8 @@ import { CircleCheck, CircleDot, Clock, Flag, Gauge, LayoutGrid, ListChecks, Lis
 import { validateWidgetIconPaths } from '@zhushanwen/extension-protocol'
 import type { WidgetMeta } from '@zhushanwen/extension-protocol'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { TRAY_ITEM_COUNT_CLASS, TRAY_PULSE_CLASS, trayItemButtonClass } from '@/components/panel/tray/tray-item-button'
+import { widgetToneText } from '@/components/panel/tray/tray-tone'
 
 const props = withDefaults(
   defineProps<{
@@ -254,22 +249,9 @@ const badgeText = computed<string | undefined>(() =>
   badgeFull.value === undefined ? undefined : badgeFull.value.slice(0, BADGE_MAX_CHARS),
 )
 
-/** status → 状态色（D4）。无 status（v1 旧 extension）→ 空类名继承按钮中性色。
- *  用 switch 非对象下标：status 来自 extension 推送，脏值（如 'constructor'）在裸对象下标下
- *  会取到原型链函数当 class 用。 */
-function toneOf(status: WidgetMeta['status'] | undefined): string {
-  switch (status) {
-    case 'running': return 'text-accent'
-    case 'done': return 'text-success'
-    case 'failed': return 'text-danger'
-    case 'idle': return 'text-neutral-dim'
-    default: return ''
-  }
-}
-
 const isRunning = computed(() => props.meta?.status === 'running')
 
-const toneClass = computed<string>(() => toneOf(props.meta?.status))
+const toneClass = computed<string>(() => widgetToneText(props.meta?.status))
 
 /** badge 组可见性：running 的呼吸点独立于 badge 文本（无计数也表达「在跑」） */
 const showBadgeGroup = computed(() => isRunning.value || badgeText.value !== undefined)

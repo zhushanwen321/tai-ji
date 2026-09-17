@@ -4,8 +4,6 @@ import { resolve } from 'path'
 
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     environment: 'happy-dom',
     setupFiles: ['./src/__tests__/vitest-i18n-setup.ts'],
     // W1 i18n-frontend-p2：注入 VITE_MOCK=true，让 useSearch 等 mock-mode 分支在测试环境默认走 mock fixture。
