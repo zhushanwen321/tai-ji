@@ -533,3 +533,88 @@ describe('skillRegistry (W2 rebuild)', () => {
     }
   })
 })
+
+describe('skill-registry D8-a watcher 归因日志（[skill-reload] 行）', () => {
+  // G4/S4：watcher 命中必须在 debounce 批边界落一行 `dir= event= affectedSessions=[...]`，
+  // 与 reload-orchestrator 的 decision= 行串因果。fake timers 推进 DEBOUNCE_MS(300)
+  // 断言批合并（高频编辑不逐事件刷屏）与字段形态。
+
+  /** 造一个测试持有的 fake watcher（同 U5 形态：EventEmitter + close stub）。 */
+  const makeFakeWatcher = () => {
+    const fakeWatcher = new EventEmitter()
+    ;(fakeWatcher as unknown as { close: () => Promise<void> }).close = () => Promise.resolve()
+    return fakeWatcher
+  }
+
+  it('project watcher：批内多事件合并为一行，affectedSessions 按 cwd 过滤，窗口内不落日志', async () => {
+    vi.useFakeTimers()
+    const chokidar = await import('chokidar')
+    const { SkillRegistry } = await import('../src/services/skill-registry.js')
+    const cwd = mkdtempSync(join(tmpdir(), 'skill-reg-d8a-p-'))
+    mkdirSync(join(cwd, '.taiji', 'skills'), { recursive: true })
+    const fakeWatcher = makeFakeWatcher()
+    vi.mocked(chokidar.watch).mockReturnValueOnce(fakeWatcher as never)
+    const reg = new SkillRegistry({
+      configStore: { getSkillPaths: () => [], getPiAgentDir: () => '/pi', getSkillPathScopes: () => ({ projectPaths: [], globalPaths: [] }) } as never,
+      configDir: '/cfg',
+      sessionService: {
+        getActiveSessionIds: () => ['sid-1', 'sid-2'],
+        getSessionCwd: (sid: string) => (sid === 'sid-1' ? cwd : undefined),
+      } as never,
+      _scanFn: vi.fn().mockResolvedValue([]),
+    } as never)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await reg.getProjectSkills(cwd)
+      // 同一 debounce 窗口内 3 次事件（change×2 去重 + add×1）
+      fakeWatcher.emit('all', 'change', join(cwd, '.taiji', 'skills', 'a', 'SKILL.md'))
+      fakeWatcher.emit('all', 'add', join(cwd, '.taiji', 'skills', 'b', 'SKILL.md'))
+      fakeWatcher.emit('all', 'change', join(cwd, '.taiji', 'skills', 'c', 'SKILL.md'))
+      // 窗口内不逐事件落日志（D8 设计：高频编辑不刷屏）
+      expect(logSpy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(310) // DEBOUNCE_MS=300 + 余量
+      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-reload]'))
+      // 批合并：3 事件 → 1 行；事件类型 Set 插入序去重（change,add）；affectedSessions 走
+      // getSessionCwd 过滤（sid-1 匹配 cwd，sid-2 不匹配）
+      expect(reloadLines).toEqual([
+        `[skill-reload] dir=project:${cwd} event=change,add affectedSessions=[sid-1]`,
+      ])
+    } finally {
+      logSpy.mockRestore()
+      reg.dispose()
+      vi.useRealTimers()
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('global watcher：dir=global，affectedSessions=全部活跃 session', async () => {
+    vi.useFakeTimers()
+    const chokidar = await import('chokidar')
+    const { SkillRegistry } = await import('../src/services/skill-registry.js')
+    const skillDir = mkdtempSync(join(tmpdir(), 'skill-reg-d8a-g-'))
+    const fakeWatcher = makeFakeWatcher()
+    vi.mocked(chokidar.watch).mockReturnValueOnce(fakeWatcher as never)
+    const reg = new SkillRegistry({
+      configStore: { getSkillPaths: () => [], getPiAgentDir: () => '/pi', getSkillPathScopes: () => ({ projectPaths: [], globalPaths: [skillDir] }) } as never,
+      configDir: '/cfg',
+      sessionService: { getActiveSessionIds: () => ['sid-g1', 'sid-g2'] } as never,
+      _scanFn: vi.fn().mockResolvedValue([]),
+    } as never)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await reg.initGlobal()
+      fakeWatcher.emit('all', 'unlink', join(skillDir, 'gone', 'SKILL.md'))
+      await vi.advanceTimersByTimeAsync(310)
+      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-reload]'))
+      // global 变动影响所有活跃 session（无 cwd 过滤）
+      expect(reloadLines).toEqual([
+        `[skill-reload] dir=global event=unlink affectedSessions=[sid-g1,sid-g2]`,
+      ])
+    } finally {
+      logSpy.mockRestore()
+      reg.dispose()
+      vi.useRealTimers()
+      rmSync(skillDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})

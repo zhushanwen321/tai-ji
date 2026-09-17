@@ -94,3 +94,75 @@ describe('reload-orchestrator (W5)', () => {
     expect(handleSessionReloaded).not.toHaveBeenCalled()
   })
 })
+
+describe('reload-orchestrator D8-b decision 归因日志', () => {
+  // G4/S4：skill 变更 → orchestrator 决策必须可从日志行读出（immediate/queued/
+  // skipped-deleted + queued 的消费点），与 skill-registry 的 dir/event 行串因果。
+
+  it('idle → decision=immediate；running → decision=queued + 消费点 queued-consumed', async () => {
+    const { ReloadOrchestrator } = await import('../src/services/session/reload-orchestrator.js')
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      // idle 分支（独立 mock：勿与 running 分支共用，防调用计数串扰）
+      const idlePromptReload = vi.fn().mockResolvedValue(undefined)
+      const idleOrch = new ReloadOrchestrator({
+        sessionService: {
+          isSessionIdle: vi.fn().mockResolvedValue(true),
+          promptReload: idlePromptReload,
+          handleSessionReloaded: vi.fn(),
+        } as never,
+      } as never)
+      await idleOrch.onSkillChange(['sid-idle'])
+      expect(idlePromptReload).toHaveBeenCalledWith('sid-idle')
+      expect(logSpy.mock.calls.map(c => c.join(' '))).toContainEqual(
+        expect.stringContaining('sessionId=sid-idle decision=immediate'),
+      )
+
+      logSpy.mockClear()
+
+      // running 分支：入队日志 + message.complete 消费日志（同一 sessionId 串因果）
+      const busyPromptReload = vi.fn().mockResolvedValue(undefined)
+      const busyOrch = new ReloadOrchestrator({
+        sessionService: {
+          isSessionIdle: vi.fn().mockReturnValue(false),
+          promptReload: busyPromptReload,
+          handleSessionReloaded: vi.fn(),
+        } as never,
+      } as never)
+      await busyOrch.onSkillChange(['sid-busy'])
+      expect(busyPromptReload).not.toHaveBeenCalled()
+      await busyOrch.onMessageComplete('sid-busy')
+      expect(busyPromptReload).toHaveBeenCalledWith('sid-busy')
+      const lines = logSpy.mock.calls.map(c => c.join(' '))
+      expect(lines).toContainEqual(expect.stringContaining('sessionId=sid-busy decision=queued'))
+      expect(lines).toContainEqual(
+        expect.stringContaining('sessionId=sid-busy decision=queued-consumed'),
+      )
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+
+  it('排队期 session 已删除 → decision=skipped-deleted 且不发 reload', async () => {
+    const { ReloadOrchestrator } = await import('../src/services/session/reload-orchestrator.js')
+    const promptReload = vi.fn().mockResolvedValue(undefined)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const orch = new ReloadOrchestrator({
+        sessionService: {
+          isSessionIdle: vi.fn().mockResolvedValue(true),
+          promptReload,
+          handleSessionReloaded: vi.fn(),
+          hasSession: vi.fn().mockReturnValue(false),
+        } as never,
+      } as never)
+      await orch.onSkillChange(['sid-gone'])
+      expect(promptReload).not.toHaveBeenCalled() // 假跳过：session 已离开，reload 无对象
+      expect(logSpy.mock.calls.map(c => c.join(' '))).toContainEqual(
+        expect.stringContaining('sessionId=sid-gone decision=skipped-deleted'),
+      )
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+})
