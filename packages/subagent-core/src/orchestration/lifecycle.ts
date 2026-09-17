@@ -438,6 +438,20 @@ export async function abortRun(
 
 // ── terminateRunningRuns（session 切换/关闭：终止全部 running run） ────────
 
+/** terminateRunningRuns 的可调项。 */
+export interface TerminateRunningRunsOptions {
+  /**
+   * 是否调 deps.onRunDone（Interface 层完成通知）。缺省 false——session 切换/关闭
+   * 语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的 session
+   * （对齐 session_start 恢复先例）。
+   *
+   * [skill-reload D4] post-reload adoption 失败处置传 true：session 仍在（reload
+   * 是同会话原地重建），run 终止对用户必须可见（G3 不静默消失），onRunDone 是
+   * notifyDone 用户通知的单点汇聚（workflow-events makeDeps 注入）。
+   */
+  notifyDone?: boolean;
+}
+
 /**
  * 终止 deps.runs 中全部 running run（session 切换 / session 关闭时调用）。
  *
@@ -446,13 +460,15 @@ export async function abortRun(
  * 的中间态。
  *
  * per-run 行为：`state.error = reason` → `finalizeRun(run, deps, "failed",
- * {notifyDone:false})`（transition("done","failed") 内部先 releaseRuntime，A4 →
- * save best-effort → `eventBus.emit("pending:unregister", {reason:"failed"})`）。
+ * {notifyDone: options?.notifyDone ?? false})`（transition("done","failed") 内部先
+ * releaseRuntime，A4 → save best-effort → `eventBus.emit("pending:unregister",
+ * {reason:"failed"})`）。
  *
- * **不调 deps.onRunDone**（经 finalizeRun 的 notifyDone:false 承载，D5-②）：
+ * **缺省不调 deps.onRunDone**（经 finalizeRun 的 notifyDone 承载，D5-②）：
  * 对齐 session_start 恢复先例（index.ts kill-9 恢复只发
  * unregister、不发 onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，
- * 注入完成通知只会把消息发给已离开的 session。
+ * 注入完成通知只会把消息发给已离开的 session。例外 = options.notifyDone:true
+ * （adoption 失败处置，见 TerminateRunningRunsOptions）。
  *
  * **不调 discardInFlightCalls**：run 已转终态不再 replay（无恢复路径），在飞 call
  * 缓存清不清都不影响结果；该清理仅 rebuildRuntime 需要（崩溃重试会重放脚本，
@@ -463,10 +479,12 @@ export async function abortRun(
  *
  * @param deps LifecycleDeps（runs/store/eventBus/log）
  * @param reason 终止原因（写入 run.state.error，如 "Session switched: run terminated"）
+ * @param options 可调项（notifyDone 通道；缺省全走现状语义）
  */
 export async function terminateRunningRuns(
   deps: LifecycleDeps,
   reason: string,
+  options?: TerminateRunningRunsOptions,
 ): Promise<void> {
   for (const run of deps.runs.values()) {
     if (run.state.status !== "running") continue;
@@ -480,13 +498,13 @@ export async function terminateRunningRuns(
       disposeSignalAbortListener(run);
       // A4 + C-4: transition 内部 releaseRuntime（cleanup before mutate）；done 终态 →
       // 注销 pending-notification（D5-② 终态 coda 收敛为 finalizeRun 单写点）。
-      // notifyDone: false——**不调 deps.onRunDone**（真差异经参数承载）：对齐
+      // notifyDone 缺省 false——**不调 deps.onRunDone**（真差异经参数承载）：对齐
       // session_start 恢复先例（index.ts kill-9 恢复只发 unregister、不发
       // onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，注入完成
       // 通知只会把消息发给已离开的 session。OR-8 in-flight 收口由 finalizeRun 承载。
       await finalizeRun(run, deps, "failed", {
         context: "terminateRunningRuns",
-        notifyDone: false,
+        notifyDone: options?.notifyDone ?? false,
       });
       deps.log?.("debug", "workflow:lifecycle", "run terminated", { runId: run.runId, reason: run.state.reason });
     } catch (err) {

@@ -146,10 +146,9 @@ function resolveCurrentPi(): ExtensionAPI {
  *  session-lifecycle.ts——createOrReuseServices 单例语义 / WorktreeManager 每次
  *  扫描新建 / JsonlRunStore per-session 新建），此处无本地构造可注入；工厂形态
  *  保留为组合根侧注入点（测试或后续演进可在此覆盖）。
- *  测试注入路径：不挂载 index.ts，直接调 setupSessionLifecycle(pi, ctx, fakeDeps)。 */
-function makeLifecycleDeps(): SessionLifecycleDeps {
-  return {};
-}
+ *  测试注入路径：不挂载 index.ts，直接调 setupSessionLifecycle(pi, ctx, fakeDeps)。
+ *  [skill-reload D4] 唯一本地构造 onAdoptionFailed 依赖 setupWorkflowDomain 闭包
+ *  （makeDeps / sessionState），其定义随迁函数体内部（见 makeDeps 之后）。 */
 
 // ── workflow deps 守卫（单一出口） ─────────────────────────────────────────────
 //
@@ -304,6 +303,26 @@ export function setupWorkflowDomain(
     return false;
   }
 
+  /** [skill-reload D4] onAdoptionFailed 依赖 setupWorkflowDomain 闭包（makeDeps 的
+   *  LauncherDeps 完整形态——workerHost / onRunDone 通知链经 D3 现读自动路由到新
+   *  pi；sessionState 移除依赖 domain state Map），归 workflow 域、session-lifecycle
+   *  seam 无访问通道，经 SessionLifecycleDeps 注入。 */
+  function makeLifecycleDeps(): SessionLifecycleDeps {
+    return {
+      onAdoptionFailed: async (existing, reason) => {
+        // notifyDone: true（D4/r4）——session 仍在（reload 是同会话原地重建），run
+        // 终止对用户必须可见（G3 不静默）；terminate 前的 rebind-first 已在
+        // failAdoption 完成，终态 flush 走新 pi 落权威 JSONL。
+        await terminateRunningRuns(
+          makeDeps(existing),
+          `skill reload adoption failed: ${reason}`,
+          { notifyDone: true },
+        );
+        sessionState.delete(existing.sessionId);
+      },
+    };
+  }
+
   // ════════════════════════════════════════════════════════════
   //  session_start：初始化 subagents + workflow 两域
   //
@@ -312,13 +331,23 @@ export function setupWorkflowDomain(
   //  §3.1/D1/D2 原样搬移）。此处仅接线：lastSessionId 先行赋值（时序与原 handler
   //  开头一致）+ 装配结果写入 per-session sessionState。
   // ════════════════════════════════════════════════════════════
-  pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
+  pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
     lsRef.lastSessionId = ctx.sessionManager.getSessionId();
     // [u7a D5] 初始上报（count=当下绝对计数）：触发时点 = extension 加载完成 / session
     // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子——plugin-bridge 同款
     // 事实）。fire-and-forget 在 await 装配链之前发起，不阻塞也不被阻塞。
     inflightReporter.attachSession(ctx);
-    const result = await setupSessionLifecycle(pi, ctx, makeLifecycleDeps());
+    // [skill-reload D4] adoption 入参接线：reason 是 handler 独占信息（event 参数），
+    // existing 是 sessionState（domainState 闭包）里的既有条目——两者都是
+    // session-lifecycle seam 的 adoption 分流判据，经 SessionStartOptions 传入。
+    // 非 reload 的 session_start 不取 existing（quit 族 session_shutdown 已删条目，
+    // 此处恒 undefined；显式不传也防误接管）。
+    const existing =
+      event.reason === "reload" ? sessionState.get(ctx.sessionManager.getSessionId()) : undefined;
+    const result = await setupSessionLifecycle(pi, ctx, makeLifecycleDeps(), {
+      reason: event.reason,
+      existing,
+    });
     sessionState.set(result.sessionId, result);
   });
 
