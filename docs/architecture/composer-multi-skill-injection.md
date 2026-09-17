@@ -263,7 +263,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **采用**：正文中的 `<taiji-skill/>` 标记**原样保留**（不再原位替换展开）；全部展开内容集中追加在消息末尾的 `<taiji-skill-data>` 包裹块内（块与正文以空行分隔），两种内容形态：
   - **正常形态（预算内）**：块内为去重后的 `<skill name location>全文</skill>` 列表（展开格式仍遵 D5 与 pi 逐字对齐）；
   - **降级形态（超预算/fail-safe，原 D7 降级块统一并入）**：块内为 `<taiji-skill/>` 标记清单 + 指引行（原 `<taiji-skills>` 块内容整体搬入，旧 tag 退役）。
-  - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；get_commands 整体失败（mapping_unavailable）同理：正文留标记、不追加块。
+  - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；映射源整体失败（registry 扫描异常 / 晚绑定未绑定，mapping_unavailable；原 get_commands RPC 失败同 reason）同理：正文留标记、不追加块。
 - **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据面干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
 - **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 SkillRegistry 权威扫描的 `sourcePath`**（D4 修订后权威源；「与 pi 逐字对齐」约束的是展开格式而非数据源；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
 - **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
