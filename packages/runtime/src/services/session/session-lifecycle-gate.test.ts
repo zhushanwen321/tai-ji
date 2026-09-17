@@ -224,8 +224,9 @@ describe('SessionLifecycle × migration gate（D8-3）', () => {
       const summary = await lifecycle.forkSession('s-fork-src', 'a1', true, 'forked')
 
       const forked = lifecycle.get(summary.id)
-      expect(forked?.sessionFilePath).toBeTruthy()
-      expect(readModelBinding(forked!.sessionFilePath)).toEqual({
+      const forkedFilePath = forked?.sessionFilePath
+      expect(forkedFilePath).toBeTruthy()
+      expect(readModelBinding(forkedFilePath!)).toEqual({
         modelId: 'src-provider/src-model',
         thinkingLevel: 'off',
       })

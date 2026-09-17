@@ -14,7 +14,8 @@
  *
  * 场景：
  * a. 从未显式切模的 session：turn end → .model.json 产生且含内存生效值（modelId/thinkingLevel）
- * b. sidecar 已存在（预写不同值）→ turn end 不覆写（值保持预写值）
+ * b1. sidecar 预写但 JSONL 无模型 entry → 覆写（U7 起守卫「缺失才写」读 JSONL 反向读，
+ *     sidecar 预写不再是已有值信号）；b2. JSONL 已有 model_change → 不覆写
  * c. sessionFilePath undefined / JSONL 不存在 / modelId 空 → no-op 不抛
  * d. 同 session 第二次 turn end（含 agent_end 兜底）→ persist 只调一次（打标生效）
  *
@@ -130,20 +131,43 @@ describe('tryPersistModelBinding（D1 写点③延迟 flush 兜底）', () => {
     }
   })
 
-  it('b: sidecar 已存在（预写不同值）→ turn end 不覆写（值保持预写值）', async () => {
+  it('b1: sidecar 预写不同值但 JSONL 无模型 entry → turn end 以内存生效值覆写（U7 起守卫读 JSONL，sidecar 预写不再是「已有值」信号）', async () => {
+    const dir = newDir()
+    try {
+      const { svc, client } = makeEnv()
+      const session = await createInFlushWindow(svc, client)
+      session.thinkingLevel = 'high'
+      const jsonl = materializeSessionFile(dir)
+      session.sessionFilePath = jsonl
+      writeFileSync(jsonl + '.model.json', JSON.stringify({ modelId: 'other/model', thinkingLevel: 'max', version: 1 }), 'utf8')
+
+      svc.handleTurnUsageSideEffects('s1')
+
+      // 守卫「缺失才写」以 JSONL 反向读为准：JSONL 无模型 entry → 补写内存生效值
+      expect(persistModelBinding).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(readFileSync(jsonl + '.model.json', 'utf8'))).toMatchObject({
+        modelId: 'prov/model-x',
+        thinkingLevel: 'high',
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('b2: JSONL 已有模型 entry（pi 侧真源）→ turn end 不覆写（「缺失才写」守卫命中）', async () => {
     const dir = newDir()
     try {
       const { svc, client } = makeEnv()
       const session = await createInFlushWindow(svc, client)
       const jsonl = materializeSessionFile(dir)
       session.sessionFilePath = jsonl
-      const prewritten = { modelId: 'other/model', thinkingLevel: 'max', version: 1 }
-      writeFileSync(jsonl + '.model.json', JSON.stringify(prewritten), 'utf8')
+      // pi 侧显式 setModel 落的 model_change entry（顶级平铺 provider/modelId）
+      writeFileSync(jsonl, '{"type":"session_info"}\n{"type":"model_change","provider":"other","modelId":"other/model","timestamp":"2026-09-17T00:00:01.000Z"}\n', 'utf8')
 
       svc.handleTurnUsageSideEffects('s1')
 
-      // 严格全等比对：内存生效值（prov/model-x）不得覆写已有 sidecar（新鲜度归写点①⑤）
-      expect(JSON.parse(readFileSync(jsonl + '.model.json', 'utf8'))).toEqual(prewritten)
+      expect(persistModelBinding).not.toHaveBeenCalled()
+      expect(existsSync(jsonl + '.model.json')).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }

@@ -789,5 +789,62 @@
    "note": "消费面：rename-session first-prompt 谓词（pure.ts countUserMessages，设计 rename-session-three-modes.md D2）——message_end(user) handler 内 entries 计数 === 0 ⇔ 本条即 session 首条 user；顺序反转则首 turn 标题生成停触发（首条被判非首条）。单测 TC-M1/M3（index.test.ts）以 entries 空/含 user 编码该契约（mock 不验证 pi 侧真实顺序）。pi 升级时重验：_emitExtensionEvent 与 appendMessage 的相对顺序"
   },
   "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-38",
+  "claim": "oauth 刷新失败毒化整轮 provider 可用性全量巡检：checkProviderAuth 对 resolveProviderAuth 的 await 无 catch（同函数 apiKey.check 分支有 try/catch，该支没有），oauth 刷新失败抛 ModelsError(\"oauth\")（dist/auth/resolve.js resolveStoredOAuth 内 oauth.refresh 失败包装）经此原样上抛；model-runtime 的 runAvailabilityRefresh 用 Promise.all 绑 getAvailable/checkAuth×N/credentials.list 三个支做一次全量巡检，任一 provider 的 oauth 刷新失败即整体 reject——该轮 snapshot 整体不落（保留上一轮值，非清空），available/configuredProviders/auth 全部滞后；caller queueAvailabilityRefresh 的 catch 仅记 availabilityError 后 rethrow，无部分成功回退；快照经 getAvailableSnapshot 直通 get_available_models RPC 返回体",
+  "piAnchor": [
+   {
+    "pkg": "pi-ai",
+    "distPath": "dist/models.js",
+    "symbol": "checkProviderAuth 的 resolveProviderAuth await",
+    "note": ":241-242 await resolveProviderAuth(...) 无 catch；oauth 刷新失败 ModelsError 自 dist/auth/resolve.js resolveStoredOAuth 逐层上抛经此穿透"
+   },
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/model-runtime.js",
+    "symbol": "runAvailabilityRefresh 的 Promise.all / queueAvailabilityRefresh catch / getAvailableSnapshot",
+    "note": ":176-183 Promise.all([getAvailable, checkAuth×N, credentials.list])；:207-212 caller catch 记 availabilityError 后 throw；:302-304 getAvailableSnapshot 返回 snapshot.available——该快照即 rpc-mode.js:383-385 get_available_models 的返回体"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：taiji 经 get_available_models（PS-10 读面）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-39",
+  "claim": "agent state.model 未初始化时不是 undefined 而是 DEFAULT_MODEL unknown 占位对象（id/name/api/provider 全 \"unknown\"、baseUrl \"\"、contextWindow/maxTokens 0），createMutableAgentState 以 initialState?.model ?? DEFAULT_MODEL 兜底——读侧对 state.model 的对象真值判定恒真，「是否已有模型」必须比对字段值（如 id === \"unknown\"）而非对象存在性",
+  "piAnchor": [
+   {
+    "pkg": "pi-agent-core",
+    "distPath": "dist/agent.js",
+    "symbol": "DEFAULT_MODEL / createMutableAgentState 的 model 兜底",
+    "note": ":14-25 占位常量（id/name/api/provider=\"unknown\"、baseUrl=\"\"、contextWindow:0、maxTokens:0）；:31 model: initialState?.model ?? DEFAULT_MODEL"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读面同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
+  },
+  "verifiedWith": "0.84.4"
+ },
+ {
+  "id": "PS-40",
+  "claim": "session JSONL append-only 是 taiji 两条消费链的共同前提：①runtime HistoryRebuildCache 增量拉取以「上次 get_entries 响应的 leafId」为 since 游标翻页，前提 = 旧 entry 永不删除/改写（compaction 也是 entry 追加）→ since 游标持续有效、增量 delta 有界；②cache-governance 批 3 sidecar 退役后的 model 反向读（沿文件物理尾逆序扫 model_change/assistant）同以 append-only 为前提——新 append 只会更靠近尾部，尾扫单调收敛且新数据自然可见。pi 若引入加载期以外的就地改写/删除（_rewriteFile 触发面扩大、entry 修剪等），两条链同时失真（游标失效 / 反向读漏读错位）",
+  "piAnchor": [
+   {
+    "pkg": "pi-coding-agent",
+    "distPath": "dist/core/session-manager.js",
+    "symbol": "_persist / appendCompaction / _rewriteFile（append-only 承重面）",
+    "note": "同 PS-18 锚点：_persist :724-753（首写 wx、此后 appendFileSync :753 追加）；appendCompaction :803-818 追加不重写；_rewriteFile :693-705 截断重写仅限加载期（空文件归一 :627 / 版本迁移 :634 / branch 换新文件 :1143）"
+   }
+  ],
+  "guard": {
+   "type": "observe",
+   "note": "消费面：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
+  },
+  "verifiedWith": "0.84.4"
  }
 ]

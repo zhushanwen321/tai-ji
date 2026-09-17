@@ -9,12 +9,15 @@
  * Model binding（model-sidecar 测试）：
  * M1：BINDING_FIELDS 矩阵守卫——modelId/thinkingLevel 四列值符合预期。
  * M2：persistModelBinding 原子写 + JSONL 缺失不创建守卫 + 写失败吞错 + cache invalidation。
- * M3：scanSessionMeta 提取 .model.json（含缺失/损坏 sidecar 容错）。
+ *     [缓存治理 U7/U8a] 读侧已切 JSONL 反向读（readModelBinding 不再消费 sidecar，语义
+ *     权威覆盖见 src/infra/pi/__tests__/session-model-reverse-read.test.ts）——本文件的
+ *     model 断言只锚定写行为（W6 中途态保留）与「JSONL 变化 → 扫描可见」集成。
+ * M3：原 scanSessionMeta 提取 .model.json 容错——断言对象随 U7 读侧切换消失，整块删除。
  * M4：purge 清单含 .model.json。
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, appendFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -254,7 +257,7 @@ describe('persistModelBinding', () => {
     }
   })
 
-  it('M2b: 文件存在时 sidecar 被正确创建且 readModelBinding 回读一致', () => {
+  it('M2b: 文件存在时 sidecar 被正确创建且内容含写入值（U7 起 readModelBinding 不再回读 sidecar）', () => {
     const dir = makeTmpDir('model-a1-')
     try {
       const fp = join(dir, 'test.jsonl')
@@ -270,11 +273,10 @@ describe('persistModelBinding', () => {
       expect(data.modelId).toBe('xiaomi/mimo-v2.5-pro')
       expect(data.thinkingLevel).toBe('high')
       expect(data.version).toBe(1)
-
-      const result = readModelBinding(fp)
-      expect(result).toBeDefined()
-      expect(result!.modelId).toBe('xiaomi/mimo-v2.5-pro')
-      expect(result!.thinkingLevel).toBe('high')
+      // [U7] sidecar 读取来源已退役：readModelBinding 反向读 JSONL，本 fixture 的 JSONL
+      // 无模型 entry → undefined（sidecar 内容不再影响返回值；权威覆盖见
+      // src/infra/pi/__tests__/session-model-reverse-read.test.ts「语义切换锚定」）
+      expect(readModelBinding(fp)).toBeUndefined()
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
@@ -293,7 +295,7 @@ describe('persistModelBinding', () => {
     }
   })
 
-  it('M2d: cache invalidation — persistModelBinding 后 scanPiSessions 能立即读到', () => {
+  it('M2d: [U7 反向读] JSONL append model entry 后 scanPiSessions 重扫可见（外部 pi append 无显式失效，(mtimeMs,size) 变化致 meta 重扫）', () => {
     const dir = makeTmpDir('model-cache-')
     try {
       const origDataDir = process.env.TAIJI_AGENT_DATA_DIR
@@ -310,9 +312,15 @@ describe('persistModelBinding', () => {
       expect(sessions.length).toBe(1)
       expect(sessions[0].modelId).toBeUndefined()
 
-      persistModelBinding(fp, 'provider/model1', 'medium')
+      // [U8a] 持久层唯一写方 = pi：模型信息经 JSONL append 落盘（真实 pi setModel 行为）。
+      // pi 是外部进程不调 taiji 的显式失效——可见性 = 下次真实重扫（force 绕过 1s dir
+      // TTL；(mtimeMs,size) 因 append 变化致 meta 缓存 miss 重扫，反向读命中新值）。
+      // 原「persistModelBinding 后 force:false 立即可见」随写点退役消失（sidecar 写的
+      // 双层失效对 model 字段不再有可观察消费方）。
+      appendFileSync(fp, JSON.stringify({ type: 'model_change', provider: 'provider', modelId: 'model1' }) + '\n', 'utf8')
+      appendFileSync(fp, JSON.stringify({ type: 'thinking_level_change', thinkingLevel: 'medium' }) + '\n', 'utf8')
 
-      sessions = scanPiSessions({ force: false })
+      sessions = scanPiSessions({ force: true })
       expect(sessions.length).toBe(1)
       expect(sessions[0].modelId).toBe('provider/model1')
       expect(sessions[0].thinkingLevel).toBe('medium')
@@ -328,59 +336,10 @@ describe('persistModelBinding', () => {
   })
 })
 
-describe('readModelBinding', () => {
-  it('M3a: sidecar 不存在返回 undefined', () => {
-    const dir = makeTmpDir('model-r1-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      const result = readModelBinding(fp)
-      expect(result).toBeUndefined()
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M3b: JSON 损坏返回 undefined', () => {
-    const dir = makeTmpDir('model-r2-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      writeFileSync(modelSidecarPath(fp), 'not valid json {{{')
-      const result = readModelBinding(fp)
-      expect(result).toBeUndefined()
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M3c: modelId 非字符串返回 undefined', () => {
-    const dir = makeTmpDir('model-r3-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      writeFileSync(modelSidecarPath(fp), JSON.stringify({ modelId: 123, thinkingLevel: 'high', version: 1 }))
-      const result = readModelBinding(fp)
-      expect(result).toBeUndefined()
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M3d: thinkingLevel 非字符串 → thinkingLevel 降级空串，modelId 保留', () => {
-    const dir = makeTmpDir('model-r4-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      writeFileSync(modelSidecarPath(fp), JSON.stringify({ modelId: 'p/m', thinkingLevel: null, version: 1 }))
-      const result = readModelBinding(fp)
-      expect(result?.modelId).toBe('p/m')
-      expect(result?.thinkingLevel).toBe('')
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-})
+// [缓存治理 U7] 原 readModelBinding describe（M3a-M3d：sidecar 缺失/损坏/非法字段容错）
+// 随读侧切 JSONL 反向读整块退役——断言对象（sidecar 内容驱动返回值）已不存在，等价语义
+// （损坏行跳过 / 非法字段跳过 / 无模型信息 → undefined / sidecar 不再是读取来源）由
+// src/infra/pi/__tests__/session-model-reverse-read.test.ts 权威覆盖。
 
 describe('M4: purge 清单含 .model.json', () => {
   it('delete（scanned 分支）驱动 purgeSessionSidecars，.model.json 与其他 sidecar 后缀一并清理', async () => {
