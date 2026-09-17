@@ -648,6 +648,37 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
     expect(list[0].content).toBe('400: Unsupported model mimo-v2-pro')
   })
 
+  // [M2 不变量·terminalMessagePatch 出口] pi error stop 但 errorMessage 缺失
+  // （extras.errorMessage 可 undefined）：error 字段走兜底——缺失会让崩溃前正文
+  // 被 Block.vue 误判纯 error 整条染红。
+  it('streaming 气泡收口且 errorMessage 缺失：error 字段写 reason 兜底文案（不变量）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '崩溃前正文' }))
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const a = lastAssistant(ctx)
+    expect(a.status).toBe('error')
+    expect(a.content).toBe('崩溃前正文')
+    expect(a.error).toBe('会话出错，回复已中断。')
+  })
+
+  // [错误可见性] 秒败 turn 且 errorMessage 缺失：仍追加纯 error 气泡（兜底文案）——
+  // 旧条件 isErrorStop && errorMessage && !changed 在此场景什么都不追加，错误完全静默。
+  it('无 streaming 气泡且 errorMessage 缺失：仍追加兜底纯 error 气泡（错误不得静默）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.complete', {
+      stopReason: 'error',
+      errorMessage: undefined,
+    }))
+    const list = getMsgs(ctx)
+    expect(list).toHaveLength(1)
+    expect(list[0].status).toBe('error')
+    expect(list[0].content).toBe('会话出错，回复已中断。')
+  })
+
   it('非 error stopReason 不消费 errorMessage 字段（正常完成不受影响）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))

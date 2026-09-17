@@ -74,7 +74,7 @@ import {
   readChangeSetStatus,
 } from '../readers'
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
-import { commitMessages, terminalMessagePatch } from '../mutations'
+import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
@@ -446,10 +446,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     if (changed) commitMessages(messages, sid, next)
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收口：错误信息必须以纯 error
     // 气泡落进聊天流，否则 complete 事件被消费后错误只剩 stopReason 标志，用户不可见。
-    if (isErrorStop && errorMessage && !changed) {
+    // errorMessage 缺失（pi extras.errorMessage 可 undefined）走 error reason 兜底文案——
+    // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
+    if (isErrorStop && !changed) {
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorMessage, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
