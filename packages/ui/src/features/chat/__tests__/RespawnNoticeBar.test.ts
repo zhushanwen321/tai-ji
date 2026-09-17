@@ -11,21 +11,18 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-// 覆盖全局 setup 的 t：断言真实文案（与 renderer locales zh-CN 同文）
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string) => {
-      const msgs: Record<string, string> = {
-        'panel.message.respawnRestored':
-          '会话引擎已从崩溃中恢复。中断的回合未保留；崩溃时进行中的后台任务与子代理已终止、不会自动恢复。可继续发消息。',
-        'panel.message.respawnFailed': '引擎恢复失败，点此重试或新建会话',
-        'panel.message.respawnFailedHint': '多次自动恢复未成功',
-        'panel.message.respawnRetry': '重试恢复',
-      }
-      return msgs[key] ?? key
-    },
-  }),
-}))
+// 覆盖全局 setup 的 t：断言真实文案（与 renderer locales zh-CN 同文）；共享口径见 helpers/i18n-mock
+// （本文件字典无命名参数占位符；组件调用 t 不带参数，插值分支不参与）
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
+    'panel.message.respawnRestored':
+      '会话引擎已从崩溃中恢复。中断的回合未保留；崩溃时进行中的后台任务与子代理已终止、不会自动恢复。可继续发消息。',
+    'panel.message.respawnFailed': '引擎恢复失败，点此重试或新建会话',
+    'panel.message.respawnFailedHint': '多次自动恢复未成功',
+    'panel.message.respawnRetry': '重试恢复',
+  })
+})
 
 import { mount } from '@vue/test-utils'
 import RespawnNoticeBar from '../RespawnNoticeBar.vue'

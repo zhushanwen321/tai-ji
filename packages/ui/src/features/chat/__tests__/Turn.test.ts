@@ -18,25 +18,20 @@ import { describe, it, expect, vi } from 'vitest'
 // TraceCompactorRow 真实渲染时 useI18n() 拿到此 mock，文案 + count 插值均可断言（RC-2 i18n provide）。
 // [U6] trigger 行聚合文案键（turnTriggerBgNotifySummary / Continued / Failed）由 U3 同批落地
 // locales——本文件按既有范式注入 mock 键值，不触碰 i18n locales 文件（U3 领地）。
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => {
-      const msgs: Record<string, string> = {
-        'panel.message.traceExpandAll': '展开全部（{count} 步）',
-        'panel.message.traceCollapse': '恢复精简',
-        'panel.message.traceFailed': '含 {count} 次失败',
-        'panel.message.turnTriggerBgNotifySummary': '{count} 个后台任务完成',
-        'panel.message.turnTriggerBgNotifyContinued': '已继续处理',
-        // 边界行失败分句专用键（D5「· M 失败」）：与 TraceCompactorRow 的 traceFailed 不同键，
-        // 文案按设计字面（无「含…次」句式）
-        'panel.message.turnTriggerBgNotifyFailed': '{count} 失败',
-      }
-      let s = msgs[key] ?? key
-      if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v))
-      return s
-    },
-  }),
-}))
+// 共享 mock 口径见 helpers/i18n-mock（g9-F5）。
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
+    'panel.message.traceExpandAll': '展开全部（{count} 步）',
+    'panel.message.traceCollapse': '恢复精简',
+    'panel.message.traceFailed': '含 {count} 次失败',
+    'panel.message.turnTriggerBgNotifySummary': '{count} 个后台任务完成',
+    'panel.message.turnTriggerBgNotifyContinued': '已继续处理',
+    // 边界行失败分句专用键（D5「· M 失败」）：与 TraceCompactorRow 的 traceFailed 不同键，
+    // 文案按设计字面（无「含…次」句式）
+    'panel.message.turnTriggerBgNotifyFailed': '{count} 失败',
+  })
+})
 
 import { mount } from '@vue/test-utils'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'

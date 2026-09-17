@@ -28,6 +28,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, h, provide, reactive, ref } from 'vue'
 import type { PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -219,6 +220,14 @@ function mountPanel(kind: TrayKind, extra: { pinned?: boolean } = {}) {
 }
 
 /**
+ * 模块级挂载点：用例只赋值（不各自收尾卸载），卸载统一由 afterEach 收口。
+ * 失败安全：断言抛错不再跳过卸载（泄漏的组件/interval 会污染后续用例——本文件有用例断言
+ * vi.getTimerCount()），卸载收口不依赖用例走完。范式对齐同目录 tray-widget / composer-tray。
+ * getTimerCount 与 unmount 成对的用例仍保留显式 unmount（卸载即断言的一部分，幂等安全）。
+ */
+let wrapper: VueWrapper
+
+/**
  * 外壳替身（U1 用例）：唯一真实 useTrayCounts 实例创建于此并 provide，面板按 open 挂载/卸载
  * ——复刻真实生命周期「外壳常驻 + 面板随 Popover 开合反复挂载」。
  */
@@ -263,6 +272,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // 先卸载（fake timers 仍在位，组件 interval 回收走 fake clock），再切回真实计时器
+  wrapper?.unmount()
   vi.useRealTimers()
   clearToasts()
   __clearSessionCleanupRegistryForTest()
@@ -275,7 +286,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     trayState.bashEnded = [
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', startedAt: T(53_000), endedAt: T(3_000), durationMs: 50_000 }),
     ]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-native-panel"]').attributes('data-kind')).toBe('bash')
@@ -296,7 +307,6 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     // 实时 tick：advance 1s → 00:38
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:38')
-    wrapper.unmount()
   })
 
   it('bash：切「已结束」→ 终态行显示 exit 码（null 显 —）', async () => {
@@ -307,7 +317,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
       makeTask({ taskId: 'bt-e2', state: 'exited', exitCode: null, reason: 'killed', endedAt: T(1_000), durationMs: 59_000 }),
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
     ]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
     // 切桶前不渲染终态行（默认「运行中」）
     expect(rowTexts(wrapper, 'tray-bash-row')).toHaveLength(1)
@@ -319,13 +329,12 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]).toContain(`${zhTray.tray.exitLabel} —`)
     expect(rows[1]).toContain(`${zhTray.tray.exitLabel} 0`)
-    wrapper.unmount()
   })
 
   it('subagent：两 tab（进行中/已结束，无第三桶）+ 行渲染 agent/slug/摘要/turns/tokens/耗时', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running', engine: 'pi' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-2', status: 'idle', stopReason: 'failed' })]
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-tab-running"]').text()).toContain(zhTray.tray.bucket.running)
@@ -345,7 +354,6 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(row.text()).toContain(`5 ${zhTray.tray.turnsUnit}`)
     expect(row.text()).toContain('10.0k tok')
     expect(row.text()).toContain('1m5s')
-    wrapper.unmount()
   })
 
   it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（done 行无 spinner，状态点替代）', async () => {
@@ -353,7 +361,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
       makeWorkflow({ runId: 'wf-1', status: 'running' }),
       makeWorkflow({ runId: 'wf-2', status: 'done', reason: 'completed' }),
     ]
-    const wrapper = mountPanel('workflow')
+    wrapper = mountPanel('workflow')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-tab-running"]').text()).toContain(zhTray.tray.bucket.running)
@@ -366,7 +374,6 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     // running 行有 spinner，done 行无（状态点替代）
     expect(rows[0].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(true)
     expect(rows[1].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 })
 
@@ -376,7 +383,7 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000) }),
       makeTask({ taskId: 'bt-e2', state: 'exited', exitCode: 1, reason: 'natural', endedAt: T(2_000) }),
     ]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     // 空态可见 + 仍是「运行中」tab（不自动跳）
@@ -393,12 +400,11 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="tray-panel-tab-ended"]').attributes('data-active')).toBe('true')
     expect(rowTexts(wrapper, 'tray-bash-row')).toHaveLength(2)
-    wrapper.unmount()
   })
 
   it('已结束桶为空（有进行中）：仅提示，无切桶按钮', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-panel-tab-ended"]').trigger('click')
@@ -408,7 +414,6 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     )
     expect(wrapper.find('[data-testid="tray-panel-empty-jump-ended"]').exists()).toBe(false)
     expect(rowTexts(wrapper, 'tray-subagent-row')).toHaveLength(0)
-    wrapper.unmount()
   })
 
   it('subagent：已结束记录落已结束桶渲染（[两视图裁决 2026-09-16]，无寻回入口）', async () => {
@@ -416,7 +421,7 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     // 空「进行中」tab 下经「查看已结束」跳转后该记录走「已结束」tab 可见，且无
     // 「查看已收起」寻回按钮（「已收起」机制已全链路删除，第三桶不存在）
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-a1', status: 'idle' })]
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     // 空态（进行中为空）只有「查看已结束」可行动按钮
@@ -429,7 +434,6 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
     expect(wrapper.find('[data-testid="tray-panel-tab-ended"]').attributes('data-active')).toBe('true')
     expect(rowTexts(wrapper, 'tray-subagent-row')).toHaveLength(1)
     expect(wrapper.text()).toContain('Review the code changes')
-    wrapper.unmount()
   })
 })
 
@@ -463,7 +467,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
 
   it('bash kill 两段式：首击进确认态（不发 RPC）、mouseleave 复位、再击才发 kill', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    const wrapper = mountPanel('bash', { pinned: true })
+    wrapper = mountPanel('bash', { pinned: true })
     await flushPromises()
 
     // 首击：确认态（✓ + data-confirming），不发 RPC
@@ -486,7 +490,6 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     expect(backgroundTaskApi.kill).toHaveBeenCalledTimes(1)
     expect(backgroundTaskApi.kill).toHaveBeenCalledWith(SID, 'bt-1')
     expect(wrapper.find('[data-testid="tray-bash-kill"]').attributes('data-confirming')).toBe('false')
-    wrapper.unmount()
   })
 
   it('subagent cancel 两段式正常路径：running 行两击 → store.cancelSubagent(sid, id)', async () => {
@@ -495,7 +498,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     subagentStore.applyRecords(SID, [running])
     trayState.subagentRunning = [running]
     const cancelSpy = vi.spyOn(subagentStore, 'cancelSubagent').mockResolvedValue(undefined)
-    const wrapper = mountPanel('subagent', { pinned: true })
+    wrapper = mountPanel('subagent', { pinned: true })
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-subagent-cancel"]').trigger('click')
@@ -507,7 +510,6 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     await flushPromises()
     expect(cancelSpy).toHaveBeenCalledTimes(1)
     expect(cancelSpy).toHaveBeenCalledWith(SID, 'sub-1')
-    wrapper.unmount()
   })
 
   it('subagent cancel 迟到收口防误报：确认窗口期收口后第二击不发 RPC，toast「任务已结束」', async () => {
@@ -516,7 +518,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     subagentStore.applyRecords(SID, [running])
     trayState.subagentRunning = [running]
     const cancelSpy = vi.spyOn(subagentStore, 'cancelSubagent').mockResolvedValue(undefined)
-    const wrapper = mountPanel('subagent', { pinned: true })
+    wrapper = mountPanel('subagent', { pinned: true })
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-subagent-cancel"]').trigger('click')
@@ -535,14 +537,13 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     expect(cancelSpy).not.toHaveBeenCalled()
     const { toasts } = useToast()
     expect(toasts.value.some((toast) => toast.message === zhTray.tray.alreadyEnded)).toBe(true)
-    wrapper.unmount()
   })
 
   it('workflow：abort 两段式（首击确认不发，再击发 abort）；无 pause/resume 钮（D-2 一次性生命周期）', async () => {
     const workflowStore = useWorkflowStore()
     const loadSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
-    const wrapper = mountPanel('workflow', { pinned: true })
+    wrapper = mountPanel('workflow', { pinned: true })
     await flushPromises()
 
     // D-2：一次性生命周期，宿主不暴露 pause/resume
@@ -559,14 +560,13 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     expect(sessionApi.workflowAction).toHaveBeenCalledTimes(1)
     expect(sessionApi.workflowAction).toHaveBeenLastCalledWith(SID, 'abort', 'wf-1')
     expect(loadSpy).toHaveBeenCalledWith(SID)
-    wrapper.unmount()
   })
 })
 
 describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
   it('bash 行 → drawer bashTask tab（写 selectedBackgroundTaskId）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-bash-row"]').trigger('click')
@@ -575,12 +575,11 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     expect(control.selectedBackgroundTaskId).toBe('bt-1')
     expect(control.activeTab).toBe('bashTask')
     expect(control.isOpen).toBe(true)
-    wrapper.unmount()
   })
 
   it('subagent 行 → drawer subagent tab（virtualId = subagentVirtualId(mainSid, subId)）', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-subagent-row"]').trigger('click')
@@ -590,12 +589,11 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     expect(control.activeTab).toBe('subagent')
     expect(control.enteredFrom).toBe('chat')
     expect(control.isOpen).toBe(true)
-    wrapper.unmount()
   })
 
   it('workflow 行 → drawer workflow tab（以 runId 作选中值）', async () => {
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
-    const wrapper = mountPanel('workflow')
+    wrapper = mountPanel('workflow')
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-workflow-row"]').trigger('click')
@@ -604,14 +602,13 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     expect(control.selectedWorkflowName).toBe('wf-1')
     expect(control.activeTab).toBe('workflow')
     expect(control.isOpen).toBe(true)
-    wrapper.unmount()
   })
 })
 
 describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', () => {
   it('错误态：展示可读文案 + retry 按钮按类重拉', async () => {
     trayState.subagentError = 'rpc-down'
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     const error = wrapper.find('[data-testid="tray-panel-error"]')
@@ -623,23 +620,21 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     await wrapper.find('[data-testid="tray-panel-retry"]').trigger('click')
     await flushPromises()
     expect(retryMock).toHaveBeenCalledWith('subagent')
-    wrapper.unmount()
   })
 
   it('加载态：在途且无数据显示加载文案（bash = 从未拉到过一次）', async () => {
     trayState.bashLoaded = false
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').text()).toContain(zhTray.tray.loading)
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 
   it('bash 断连提示条：断连 + 拉取失败时出现，重连后消失；损坏条独立显示', async () => {
     trayState.bashFetchFailed = true
     wsMock.ref!.value = 'disconnected'
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     const banner = wrapper.find('[data-testid="tray-bash-disconnect-banner"]')
@@ -656,7 +651,6 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     trayState.bashCorrupted = true
     await flushPromises()
     expect(wrapper.find('[data-testid="tray-bash-corrupt-banner"]').text()).toContain(zhTray.tray.corruptBanner)
-    wrapper.unmount()
   })
 })
 
@@ -668,7 +662,7 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
 describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占位）', () => {
   it('bash：从未拉到过一次（在途）且无任务 → 加载占位 + 不渲染分桶 tab', async () => {
     trayState.bashLoaded = false
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     const loading = wrapper.find('[data-testid="tray-panel-loading"]')
@@ -676,12 +670,11 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
     expect(loading.text()).toContain(zhTray.tray.loading)
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 
   it('subagent：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
     trayState.subagentLoading = true
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     const loading = wrapper.find('[data-testid="tray-panel-loading"]')
@@ -689,12 +682,11 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
     expect(loading.text()).toContain(zhTray.tray.loading)
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 
   it('workflow：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
     trayState.workflowLoading = true
-    const wrapper = mountPanel('workflow')
+    wrapper = mountPanel('workflow')
     await flushPromises()
 
     const loading = wrapper.find('[data-testid="tray-panel-loading"]')
@@ -702,22 +694,20 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
     expect(loading.text()).toContain(zhTray.tray.loading)
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 
   it('bash：已拉到过一次（非在途）且无任务 → 空态，不占位', async () => {
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tray-panel-empty-hint"]').text()).toBe(
       msg(zhTray.tray.empty.runningProcess, { name: zhTray.tray.title.bash }),
     )
-    wrapper.unmount()
   })
 
   it('subagent：非在途且无记录 → 空态（可行动空态），不占位', async () => {
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
@@ -725,11 +715,10 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
       msg(zhTray.tray.empty.running, { name: zhTray.tray.title.subagent }),
     )
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(true)
-    wrapper.unmount()
   })
 
   it('workflow：非在途且无记录 → 空态，不占位', async () => {
-    const wrapper = mountPanel('workflow')
+    wrapper = mountPanel('workflow')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
@@ -737,7 +726,6 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
       msg(zhTray.tray.empty.running, { name: zhTray.tray.title.workflow }),
     )
     expect(wrapper.find('[data-testid="tray-panel-tabs"]').exists()).toBe(true)
-    wrapper.unmount()
   })
 })
 
@@ -751,7 +739,7 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', 
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'running' })])
     workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
 
-    const wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
+    wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
     await flushPromises()
 
     // 外壳挂载（= 数据面唯一实例创建点）即首拉，各一次
@@ -778,7 +766,6 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', 
     expect(loadSubSpy).toHaveBeenCalledTimes(1)
     expect(loadWfSpy).toHaveBeenCalledTimes(1)
 
-    wrapper.unmount()
   })
 
   it('缺 TRAY_COUNTS_KEY 时响亮失败（不得静默自建第二数据实例）', () => {
@@ -798,23 +785,21 @@ describe('TrayNativePanel 首帧即列表（U2：有数据不闪加载态）', (
   it('subagent：在途（loading）但该 sid 已有数据 → 直出列表，不渲染加载占位', async () => {
     trayState.subagentLoading = true
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
-    const wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
-    wrapper.unmount()
   })
 
   it('bash：从未拉到过一次但分区已有任务 → 直出列表（提示条语义不受影响）', async () => {
     trayState.bashLoaded = false
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tray-panel-loading"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="tray-bash-row"]')).toHaveLength(1)
-    wrapper.unmount()
   })
 })
 
@@ -829,7 +814,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     trayState.bashEnded = [
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
     ]
-    let wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
     expect(vi.getTimerCount()).toBe(0)
     wrapper.unmount()
@@ -858,7 +843,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
 
   it('subagent / workflow 面板即使有 running 行也零 interval（elapsedLabel 仅 bash 分支消费）', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
-    let wrapper = mountPanel('subagent')
+    wrapper = mountPanel('subagent')
     await flushPromises()
     expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
     expect(vi.getTimerCount()).toBe(0)
@@ -877,7 +862,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     trayState.bashEnded = [
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
     ]
-    const wrapper = mountPanel('bash')
+    wrapper = mountPanel('bash')
     await flushPromises()
     expect(vi.getTimerCount()).toBe(1)
     expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:37')
@@ -919,7 +904,7 @@ describe('TrayNativePanel bash kill 失败用户反馈（错误 toast，不再�
     trayState.bashRunning = [makeTask({ taskId: 'bt-kill-fail' })]
     vi.mocked(backgroundTaskApi.kill).mockRejectedValueOnce(new Error('rpc down'))
     // 行内按钮仅 pin 态渲染（hover 态无行内按钮，与既有两段式用例同前提）
-    const wrapper = mountPanel('bash', { pinned: true })
+    wrapper = mountPanel('bash', { pinned: true })
     await flushPromises()
 
     // 两段式：首击进确认态（不发 RPC），确认按钮第二击发令
@@ -933,6 +918,5 @@ describe('TrayNativePanel bash kill 失败用户反馈（错误 toast，不再�
     const errorToast = toasts.value.find((toast) => toast.type === 'error')
     expect(errorToast).toBeDefined()
     expect(errorToast?.message).toBe(msg(zhTray.tray.killFailed, { msg: 'rpc down' }))
-    wrapper.unmount()
   })
 })

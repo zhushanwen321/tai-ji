@@ -19,23 +19,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // vue-i18n 的 useI18n 覆盖为自包含 t（vitest.setup.ts 默认 mock 直接回 key——
-// 本用例要断言展开/收起与行区间文案，故给真实文案字典 + 命名参数插值；对齐 Turn.test.ts 覆盖范式）
-vi.mock('vue-i18n', () => {
-  const messages: Record<string, string> = {
+// 本用例要断言展开/收起与行区间文案，故给真实文案字典 + 命名参数插值；共享口径见 helpers/i18n-mock）
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
     'panel.message.blockScrollExpandAll': '展开全部',
     'panel.message.collapse': '收起',
     'panel.message.blockScrollLines': '{from}–{to} / {total} 行',
-  }
-  const t = (key: string, named?: Record<string, unknown>): string => {
-    let text = messages[key] ?? key
-    if (named) {
-      for (const [name, value] of Object.entries(named)) {
-        text = text.replace(`{${name}}`, String(value))
-      }
-    }
-    return text
-  }
-  return { useI18n: () => ({ t }) }
+  })
 })
 
 import { mount } from '@vue/test-utils'

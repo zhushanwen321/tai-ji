@@ -37,51 +37,33 @@
         stroke-width="2.2"
         data-testid="turn-trigger-bgnotify-icon"
       />
-      <!-- 主文案：count>0 才渲染计数段（D5）；count===0（全解析失败/中性）只剩图标 + 从文案 -->
-      <span
-        v-if="notifyCount > 0"
-        class="shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg"
-        data-testid="turn-trigger-bgnotify-count"
-      >{{ t('panel.message.turnTriggerBgNotifySummary', { count: notifyCount }) }}</span>
-      <!-- 失败分句（D5「· M 失败」）：仅 failedCount>0 追加 -->
-      <template v-if="notifyFailedText">
-        <span class="shrink-0 text-neutral-faint" data-testid="turn-trigger-bgnotify-sep">·</span>
+      <!-- 主文案/失败分句/状态点列/从文案/耗时 meta：片段数组单点 v-for（g9-F2），段间分隔点
+           唯一渲染点在下方（sep 标记由 script 侧段规格按 D5 样本给出）。 -->
+      <template v-for="seg in notifySegments" :key="seg.id">
         <span
-          class="shrink-0 text-[length:var(--text-xs)] text-neutral-mid"
-          data-testid="turn-trigger-bgnotify-failed"
-        >{{ notifyFailedText }}</span>
-      </template>
-      <!-- 状态点列（D5）：≤8 逐点三色（成功绿 / 失败金 / 中性灰）；>8 只显计数不渲染点列 -->
-      <span
-        v-if="notifyDots.length > 0"
-        class="flex shrink-0 items-center gap-[3px]"
-        data-testid="turn-trigger-bgnotify-dots"
-      >
+          v-if="seg.sep"
+          class="shrink-0 text-neutral-faint"
+          data-testid="turn-trigger-bgnotify-sep"
+        >·</span>
+        <!-- 状态点列（D5）：≤8 逐点三色（成功绿 / 失败金 / 中性灰）；>8 只显计数不渲染点列 -->
         <span
-          v-for="(outcome, i) in notifyDots"
-          :key="i"
-          class="size-1.5 rounded-full"
-          :class="NOTIFY_DOT_CLASS[outcome]"
-          data-testid="turn-trigger-bgnotify-dot"
-        />
-      </span>
-      <!-- 从文案：无主文案时不带前导点（D5） -->
-      <span
-        v-if="notifyCount > 0"
-        class="shrink-0 text-neutral-faint"
-        data-testid="turn-trigger-bgnotify-sep"
-      >·</span>
-      <span
-        class="shrink-0 text-[length:var(--text-xs)] text-neutral-mid"
-        data-testid="turn-trigger-bgnotify-continued"
-      >{{ t('panel.message.turnTriggerBgNotifyContinued') }}</span>
-      <!-- 耗时 meta（D3 meta 规格，钉右）：无含值记录不显 -->
-      <template v-if="notifyDuration">
-        <span class="shrink-0 text-neutral-faint" data-testid="turn-trigger-bgnotify-sep">·</span>
+          v-if="seg.dots"
+          class="flex shrink-0 items-center gap-[3px]"
+          data-testid="turn-trigger-bgnotify-dots"
+        >
+          <span
+            v-for="(outcome, i) in seg.dots"
+            :key="i"
+            class="size-1.5 rounded-full"
+            :class="NOTIFY_DOT_CLASS[outcome]"
+            data-testid="turn-trigger-bgnotify-dot"
+          />
+        </span>
         <span
-          class="shrink-0 font-mono text-[length:var(--text-2xs)] font-medium tabular-nums text-neutral-dim"
-          data-testid="turn-trigger-bgnotify-duration"
-        >{{ notifyDuration }}</span>
+          v-else
+          :class="seg.class"
+          :data-testid="`turn-trigger-bgnotify-${seg.id}`"
+        >{{ seg.text }}</span>
       </template>
       <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
     </div>
@@ -292,6 +274,64 @@ const notifyFailedText = computed(() => {
 const notifyDuration = computed(() => {
   const ms = props.turn.notifySummary?.durationMs
   return ms === undefined ? '' : formatDurationHms(ms)
+})
+
+// ── 边界行片段（g9-F2）──────────────────────────────────────────────────────
+// 段序 = D5 设计样本「N 个后台任务完成 · M 失败 ●●● · 已继续处理 · 26m03s」：计数 / 失败分句 /
+// 状态点列 / 从文案 / 耗时。段集合与各段前置分隔点在 script 侧单点产出（模板只留一个 v-for +
+// 一个分隔点渲染位），不再由模板内 5 段 v-if 各自拼装。
+// 分隔点规则（与既有 DOM 逐字一致）：失败分句与耗时前置点无条件；从文案仅在有主文案时带前导点
+// （D5「无主文案时不带前导点」）；计数与点列段无前置点（点列恒紧贴前段，不单独成段群）。
+
+/** 主文案（D3）：text-sm + 550 字重 + fg 提色 */
+const NOTIFY_COUNT_CLASS = 'shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg'
+/** 失败分句（D3）：text-xs + mid 提色 */
+const NOTIFY_FAILED_CLASS = 'shrink-0 text-[length:var(--text-xs)] text-neutral-mid'
+/** 从文案（D3）：faint 弱化 */
+const NOTIFY_CONTINUED_CLASS = 'shrink-0 text-neutral-faint'
+/** 耗时 meta（D3 meta 规格，钉右）：mono + tabular-nums + dim */
+const NOTIFY_DURATION_CLASS =
+  'shrink-0 font-mono text-[length:var(--text-2xs)] font-medium tabular-nums text-neutral-dim'
+
+/** 边界行片段：id 即 data-testid 后缀（turn-trigger-bgnotify-<id>；dots 段为点列容器） */
+interface NotifySegment {
+  id: 'count' | 'failed' | 'dots' | 'continued' | 'duration'
+  /** 段前置分隔点（D5「·」） */
+  sep: boolean
+  /** 文本段文案（dots 段无） */
+  text?: string
+  /** 文本段 class（dots 段无） */
+  class?: string
+  /** 状态点列段（≤8 逐点三色；>8 由 notifyDots 归空 → 段不产出） */
+  dots?: NotifyOutcome[]
+}
+
+/** 边界行片段数组（渲染序）：空段由 null + filter 剔除，模板不判空 */
+const notifySegments = computed<NotifySegment[]>(() => {
+  const count = notifyCount.value
+  const failed = notifyFailedText.value
+  const dots = notifyDots.value
+  const duration = notifyDuration.value
+  const segments: Array<NotifySegment | null> = [
+    count > 0
+      ? {
+        id: 'count',
+        sep: false,
+        text: t('panel.message.turnTriggerBgNotifySummary', { count }),
+        class: NOTIFY_COUNT_CLASS,
+      }
+      : null,
+    failed ? { id: 'failed', sep: true, text: failed, class: NOTIFY_FAILED_CLASS } : null,
+    dots.length > 0 ? { id: 'dots', sep: false, dots } : null,
+    {
+      id: 'continued',
+      sep: count > 0,
+      text: t('panel.message.turnTriggerBgNotifyContinued'),
+      class: NOTIFY_CONTINUED_CLASS,
+    },
+    duration ? { id: 'duration', sep: true, text: duration, class: NOTIFY_DURATION_CLASS } : null,
+  ]
+  return segments.filter((seg): seg is NotifySegment => seg !== null)
 })
 
 /**

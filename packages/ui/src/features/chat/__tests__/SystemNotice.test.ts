@@ -15,28 +15,22 @@
 import { describe, it, expect, vi } from 'vitest'
 
 // mock vue-i18n 的 useI18n：自包含 t（UI 包的 vitest.setup mock 只回 key，本文件需断言真实文案
-// 形态——tokens 拆段 / 「后台」chip / 「已超时」复用键，口径同 Turn.test.ts 的 RC-2 i18n provide）
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => {
-      const msgs: Record<string, string> = {
-        'panel.message.compacted': '已压缩上下文',
-        'panel.message.compactedTokens': '{tokens} tokens',
-        'panel.message.branchCreated': '已创建分支（自 {from}）',
-        'panel.message.branchCreatedNoFrom': '已创建分支',
-        'panel.message.bashBackgroundChip': '后台',
-        'panel.message.bashTimeout': '已超时',
-        'panel.message.respawnRestored': '会话引擎已从崩溃中恢复。',
-        'panel.message.respawnFailed': '引擎恢复失败，点此重试或新建会话',
-        'panel.message.respawnFailedHint': '多次自动恢复未成功',
-        'panel.message.respawnRetry': '重试恢复',
-      }
-      let s = msgs[key] ?? key
-      if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v))
-      return s
-    },
-  }),
-}))
+// 形态——tokens 拆段 / 「后台」chip / 「已超时」复用键，口径见 helpers/i18n-mock）
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
+    'panel.message.compacted': '已压缩上下文',
+    'panel.message.compactedTokens': '{tokens} tokens',
+    'panel.message.branchCreated': '已创建分支（自 {from}）',
+    'panel.message.branchCreatedNoFrom': '已创建分支',
+    'panel.message.bashBackgroundChip': '后台',
+    'panel.message.bashTimeout': '已超时',
+    'panel.message.respawnRestored': '会话引擎已从崩溃中恢复。',
+    'panel.message.respawnFailed': '引擎恢复失败，点此重试或新建会话',
+    'panel.message.respawnFailedHint': '多次自动恢复未成功',
+    'panel.message.respawnRetry': '重试恢复',
+  })
+})
 
 import { mount } from '@vue/test-utils'
 import { SystemNotice } from '@taiji/ui'

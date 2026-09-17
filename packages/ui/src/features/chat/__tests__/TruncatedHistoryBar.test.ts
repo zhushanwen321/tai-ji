@@ -12,21 +12,15 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-// 覆盖全局 setup 的 t：断言真实文案（与 renderer locales zh-CN 同文）
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => {
-      const msgs: Record<string, string> = {
-        'panel.message.loadedRecentTurns': '已加载最近 {count} 轮',
-        'panel.message.loadEarlier': '加载更早',
-        'common.loading': '加载中…',
-      }
-      let s = msgs[key] ?? key
-      if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v))
-      return s
-    },
-  }),
-}))
+// 覆盖全局 setup 的 t：断言真实文案（与 renderer locales zh-CN 同文）；共享口径见 helpers/i18n-mock
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({
+    'panel.message.loadedRecentTurns': '已加载最近 {count} 轮',
+    'panel.message.loadEarlier': '加载更早',
+    'common.loading': '加载中…',
+  })
+})
 
 import { mount } from '@vue/test-utils'
 import TruncatedHistoryBar from '../TruncatedHistoryBar.vue'
