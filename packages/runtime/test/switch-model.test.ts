@@ -12,15 +12,21 @@
  *
  * 写点单测追加（composer-model-session-isolation 设计 §5 U8 承诺的 model-control 写点覆盖；
  * impl-plan 台账中写点接入属 U1，本组用例是 Gate B 端到端之外的最小单测防线）：
- * 写点①（switchModel）/ 写点②（setThinkingLevel）成功后 persistModelBinding 落盘值 ==
- * get_state 读回的生效值（生效值胜请求值）；空值守卫负例 = sessionFilePath 缺失（pi 未
- * flush 窗口，Gate B 偏差 #9① 形态）时写点①不触发。注意「读回失败」在实现中是 fallback
- * 请求值仍写（自愈设计，session-model-control switchModel catch 分支），非「不写」。
+ * 写点①（switchModel）/ 写点②（setThinkingLevel）成功后读回值 == get_state 读回的生效值
+ * （生效值胜请求值）；空值守卫负例 = sessionFilePath 缺失（pi 未 flush 窗口，Gate B 偏差
+ * #9① 形态）时写点①不触发。注意「读回失败」在实现中是 fallback 请求值仍写（自愈设计，
+ * session-model-control switchModel catch 分支），非「不写」。
+ *
+ * [缓存治理批 3 U7 适配] readModelBinding 读侧已切反向读 JSONL 真源（extractLatestModelFromJsonl），
+ * sidecar 不再是读取来源——pi mock 在 setModel / setThinkingLevel 成功后 append 对应 JSONL
+ * entry（真实 pi 行为：model_change / thinking_level_change 落盘），读回断言语义 = 「反向读
+ * JSONL 可见」；persistModelBinding 的 sidecar 落盘断言（persistBindingCalls 记录）保留——
+ * U8 写点退役前 sidecar 双写共存（读侧已不消费，无害）。
  *
  * 运行：cd packages/runtime && npx vitest run test/switch-model.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, ProviderId } from '@taiji/shared'
@@ -210,7 +216,7 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
   })
 })
 
-describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1）——switchModel/setThinkingLevel → .model.json sidecar 落盘', () => {
+describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1）——switchModel/setThinkingLevel 生效值反向读 JSONL 可见 [U7]', () => {
   let tmpDir: string
 
   beforeEach(() => {
@@ -237,7 +243,12 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
     return sessionFile
   }
 
-  it('写点①: switchModel 成功后 sidecar 落盘 get_state 读回的生效值（生效值胜请求值）', async () => {
+  /** [U7] 模拟 pi 的 JSONL append（真实 pi 在 setModel/setThinkingLevel 成功后写对应 entry）。 */
+  function appendJsonl(sessionFile: string, line: object): void {
+    appendFileSync(sessionFile, JSON.stringify(line) + '\n', 'utf8')
+  }
+
+  it('写点①: switchModel 成功后 get_state 读回的生效值反向读 JSONL 可见（生效值胜请求值），sidecar 写点仍落盘', async () => {
     const ctx = createService()
     const sessionFile = await seedSessionWithFile(ctx, 's1')
     const client = ctx.clientMap.get('s1')!
@@ -248,18 +259,25 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
       model: { provider: 'eff-provider', id: 'eff-model' },
       thinkingLevel: 'high',
     })
+    // [U7] pi 侧生效落盘：setModel 成功后 append model_change；thinking 'high' 是 pi 既有状态
+    vi.mocked(client.setModel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'model_change', provider: 'eff-provider', modelId: 'eff-model' })
+      appendJsonl(sessionFile, { type: 'thinking_level_change', thinkingLevel: 'high' })
+    })
 
     const effective = await ctx.service.switchModel('s1', 'req-provider' as ProviderId, 'req-model')
 
     expect(effective).toBe('eff-provider/eff-model')
-    // 断言目标：落盘值 == get_state 读回生效值（非请求值）
+    // 断言目标：读回值 == get_state 读回生效值（非请求值）——U7 起读侧走 JSONL 反向读
     expect(readModelBinding(sessionFile)).toEqual({
       modelId: 'eff-provider/eff-model',
       thinkingLevel: 'high',
     })
+    // sidecar 写点仍触发（U8 退役前双写共存；读侧已不消费 sidecar）
+    expect(persistBindingCalls.some((c) => c.filePath === sessionFile)).toBe(true)
   })
 
-  it('写点②: setThinkingLevel 成功后 sidecar 落盘钳制生效值（get_state 读回胜请求值）', async () => {
+  it('写点②: setThinkingLevel 成功后钳制生效值反向读 JSONL 可见（get_state 读回胜请求值）', async () => {
     const ctx = createService()
     const sessionFile = await seedSessionWithFile(ctx, 's1')
     const client = ctx.clientMap.get('s1')!
@@ -270,8 +288,15 @@ describe('model-control 写点①②（设计 §5 U8 承诺，写点接入属 U1
       // P3 钳制形态：请求 max，pi 钳到 xhigh
       thinkingLevel: 'xhigh',
     })
+    vi.mocked(client.setModel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'model_change', provider: 'eff-provider', modelId: 'eff-model' })
+    })
     await ctx.service.switchModel('s1', 'eff-provider' as ProviderId, 'eff-model')
 
+    // [U7] pi 侧生效落盘：setThinkingLevel 成功后 append thinking_level_change（钳制值）
+    vi.mocked(client.setThinkingLevel).mockImplementation(async () => {
+      appendJsonl(sessionFile, { type: 'thinking_level_change', thinkingLevel: 'xhigh' })
+    })
     const effective = await ctx.service.setThinkingLevel('s1', 'max')
 
     expect(effective).toBe('xhigh')

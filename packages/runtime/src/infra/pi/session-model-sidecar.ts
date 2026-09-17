@@ -4,14 +4,24 @@
  * 从 session-file-utils.ts 提取（行数合规）：三函数与字段声明随迁，函数体逐字节不变。
  * persistBindingSidecar / readBindingSidecar 公共骨架已下沉 './session-binding-sidecar-io.ts'
  * 叶子模块（preset/project/agent/model 四家族共用；原「本文件从 session-file-utils import
- * 骨架」构成两模块函数级循环引用，被 PR fallow audit 拦截后下沉消除）——本模块单向依赖
- * 叶子，与 session-file-utils 的方向为 file-utils → 本模块，循环不再存在。
+ * 骨架」构成两模块函数级循环引用，被 PR fallow audit 拦截后下沉消除）。
  *
- * 与 preset/project/agent sidecar 家族并列独立：switchModel / setThinkingLevel /
- * create / fork / restore 各写点写生效值，scanner scanSessionMeta 第七读提取进
- * ScannedSessionMeta（设计 docs/design/composer-model-session-isolation.md D1）。
+ * [缓存治理批 3 U7] 读侧数据源切换：readModelBinding 改为反向读 session JSONL 真源
+ * （extractLatestModelFromJsonl，见 session-file-utils.ts），sidecar 文件不再是模型
+ * 绑定的读取来源（写点 persistModelBinding 本单元原样保留，U8 退役——先换读实现、
+ * 后删写点，中途态「旧 sidecar 还在写但没人读」无害）。U8 删本模块时：
+ * ① file-utils 对 readModelBinding 的 import 改为直接消费本模块导出的
+ * extractLatestModelFromJsonl（第七读同模块直调）；② 本条 import 形成的
+ * sidecar → file-utils 函数级循环边随之自然消失（两侧均纯函数声明，循环仅过渡态存在）。
+ *
+ * 与 preset/project/agent sidecar 家族并列独立：写点族（switchModel / setThinkingLevel /
+ * create / fork / restore 播种，U8 退役）写生效值，scanner scanSessionMeta 第七读
+ * 经 readModelBinding 提取进 ScannedSessionMeta（U7 起读侧 = session JSONL 反向读真源）。
  */
-import { persistBindingSidecar, readBindingSidecar } from './session-binding-sidecar-io.js'
+import { persistBindingSidecar } from './session-binding-sidecar-io.js'
+// 过渡态循环边（U7 引入、U8 拆除，见头部注释）：readModelBinding 的反向读实现锚定在
+// session-file-utils（U8 后 scanSessionMeta 第七读的同模块直调终态位置）。
+import { extractLatestModelFromJsonl } from './session-file-utils.js'
 
 /**
  * model binding 的扫描字段声明（ScannedSessionMeta extends 收编）。
@@ -22,13 +32,14 @@ import { persistBindingSidecar, readBindingSidecar } from './session-binding-sid
  */
 export interface ModelBindingFields {
   /**
-   * 该 session 绑定的模型 id（从 .model.json sidecar 读，model binding）。
-   * 'provider/modelId' 格式。undefined 表示无 sidecar（历史 session / create 时未绑定）。
+   * 该 session 生效的模型 id。[U7 起] 反向读 session JSONL（model_change / assistant
+   * entry 最近一条，JSONL 真源），'provider/modelId' 格式。undefined 表示无模型信息
+   * （历史 session path 上无任何模型 entry / 文件不存在）。
    */
   modelId?: string
   /**
-   * 该 session 绑定的思考等级（从 .model.json sidecar 读，model binding）。
-   * undefined 表示无 sidecar（历史 session / create 时未绑定）。
+   * 该 session 生效的思考等级。[U7 起] 反向读 session JSONL（thinking_level_change
+   * 最近一条）；无 entry 时为 pi 默认 'off'。undefined 表示无模型信息（随 modelId）。
    */
   thinkingLevel?: string
 }
@@ -65,22 +76,20 @@ export function persistModelBinding(filePath: string, modelId: string, thinkingL
 }
 
 /**
- * 从 `.model.json` sidecar 读取模型绑定。
+ * 读取 session 生效的模型绑定。[U7 起] 反向读 session JSONL 真源（extractLatestModelFromJsonl）：
+ * 与 pi 恢复读路径（getSessionContextSettings）同源，pi 侧切换 / taiji 侧切换都在下一次
+ * 扫描可见，无 sidecar 二手快照的失真面（G3）。
  *
  * scanSessionMeta 第七读：与 agent/project/preset 同批次提取，结果合并进
- * ScannedSessionMeta.modelId / thinkingLevel，享受 sessionMetaCache 缓存。
+ * ScannedSessionMeta.modelId / thinkingLevel，享受 sessionMetaCache 缓存（键 = JSONL
+ * (mtimeMs, size)，pi append 后必 miss 重扫——反向读成本只在文件变化时发生一次）。
  *
- * @returns { modelId, thinkingLevel }；sidecar 不存在/损坏/字段非法 → undefined
+ * 函数签名与返回形态不变（调用方零改动）；sidecar 文件不再被本函数读取（`.model.json`
+ * 存在与否不影响返回值）。写点 persistModelBinding 本单元原样保留（U8 退役）。
+ *
+ * @returns { modelId, thinkingLevel }；JSONL 无模型信息/文件不存在/损坏 → undefined
+ *          （thinkingLevel 无 entry 时为 pi 默认 'off'，非 undefined）
  */
 export function readModelBinding(filePath: string): { modelId: string; thinkingLevel: string } | undefined {
-  return readBindingSidecar(modelSidecarPath(filePath), (binding) => {
-    const b = binding as Record<string, unknown> | undefined
-    if (b && typeof b.modelId === 'string' && b.modelId !== '') {
-      return {
-        modelId: b.modelId,
-        thinkingLevel: typeof b.thinkingLevel === 'string' ? b.thinkingLevel : '',
-      }
-    }
-    return undefined
-  })
+  return extractLatestModelFromJsonl(filePath)
 }

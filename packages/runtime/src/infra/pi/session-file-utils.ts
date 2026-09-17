@@ -15,9 +15,11 @@ import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { forEachReversedLineChunk } from '../../utils/history-reverse-read.js'
 import { join, dirname, basename } from 'node:path'
 import { getSessionsDir } from './pi-paths.js'
-// model sidecar 家族（单向依赖：本文件经 scanSessionMeta 消费 readModelBinding；该家族
-// 与下方 preset/project/agent 家族共用的 IO 骨架已下沉 './session-binding-sidecar-io.ts'
-// 叶子模块，双方各自单向依赖叶子——原两模块函数级循环引用已消除）。
+// model sidecar 家族（该家族与下方 preset/project/agent 家族共用的 IO 骨架已下沉
+// './session-binding-sidecar-io.ts' 叶子模块）。[缓存治理批 3 U7] 本文件经 scanSessionMeta
+// 消费 readModelBinding，其实现已切为反向读 JSONL 真源（下方 extractLatestModelFromJsonl）；
+// 该模块反向 import 本文件形成函数级循环边——过渡态（两侧均纯函数声明，运行时安全），
+// U8 退役 sidecar 模块时随之拆除（拆除指引见该模块头部注释）。
 import { readModelBinding, type ModelBindingFields } from './session-model-sidecar.js'
 // sidecar IO 骨架 + 扫描缓存治理状态（叶子模块）：骨架原属本文件，model sidecar 家族
 // 拆出后为消除 ⇄ 循环引用下沉；本文件 import 供 preset/project/agent 家族与缓存治理
@@ -281,13 +283,16 @@ export function projectSidecarPath(filePath: string): string {
 
 // model binding sidecar 家族（modelSidecarPath/persistModelBinding/readModelBinding +
 // ModelBindingFields 字段声明）已迁至 './session-model-sidecar.ts'（本文件 max-lines
-// 行数合规）；scanSessionMeta 第七读经该模块的 readModelBinding 供给。
+// 行数合规）；scanSessionMeta 第七读经该模块的 readModelBinding 供给。[U7] readModelBinding
+// 实现已切反向读 JSONL（上方 extractLatestModelFromJsonl），sidecar 文件不再是读取来源。
 // [re-export 登记] persistModelBinding / readModelBinding 经本模块转出是 mock 链刚需：
 // restore 播种测试（session-lifecycle-restore-seeding.test.ts）以硬编码 factory 替换本模块
 // 并经 importActual 取「本模块导出的 persistModelBinding」委托真值落盘，session-lifecycle
 // 的写点 import 也锚定本模块路径——re-export 缺失会使 actual 侧拿到 undefined。
 // readModelBinding 转出（2026-09-04）：session-service tryPersistModelBinding（D1 写点③
 // 兜底）的「缺失才写」守卫消费，services 层 infra value import 白名单只认本模块。
+// [U8 指引] 写点退役时 persistModelBinding re-export 随写点一并删除；readModelBinding
+// 守卫消费（tryPersistModelBinding）同属 W6 退役面。
 export { persistModelBinding, readModelBinding } from './session-model-sidecar.js'
 
 // persistBindingSidecar / readBindingSidecar 公共骨架已迁 './session-binding-sidecar-io.ts'
@@ -577,6 +582,152 @@ function findLastEntryField<R>(
     return null
   }
   return null
+}
+
+// ── session 模型信息反向读（缓存治理批 3 U7，sidecar model 家族退役第一步）──
+
+/**
+ * pi 默认思考等级（pi 实装 dist/core/session-manager.js getSessionContextSettings 的
+ * thinkingLevel 初始值，0.84.4 实锚）。JSONL 无任何 thinking_level_change entry 时，
+ * 会话恢复后 pi 的实际生效值即此——反向读缺省对齐，显示与 pi 同源（G3）。
+ */
+const PI_DEFAULT_THINKING_LEVEL = 'off'
+
+/**
+ * provider/id 拼接为 'provider/modelId' 格式（model binding 的 modelId 形态，与
+ * restore-seeding readEffectiveModelFromState 对 get_state 读回值的拼法同构）。
+ * 字段非法（非 string / 空串）→ null：该 entry 视为不携带模型信息，扫描继续向前。
+ */
+function modelIdPairOf(provider: unknown, id: unknown): string | null {
+  if (typeof provider === 'string' && provider !== '' && typeof id === 'string' && id !== '') {
+    return `${provider}/${id}`
+  }
+  return null
+}
+
+/**
+ * 单 entry 的模型信息提取（extractLatestModelFromJsonl 的解析语义落点）。
+ *
+ * 对齐 pi 实装 getSessionContextSettings（dist/core/session-manager.js:148-160，0.84.4 实锚）：
+ * - model_change entry：provider / modelId 是 entry 顶级平铺字段（pi 唯一显式 setModel 写点）
+ * - assistant message entry：entry.type === 'message' 且 message.role === 'assistant'，
+ *   取 message.provider + message.model
+ */
+function modelEntryValueOf(entry: Record<string, unknown>): string | null {
+  if (entry.type === 'model_change') {
+    return modelIdPairOf(entry.provider, entry.modelId)
+  }
+  if (entry.type === 'message') {
+    const msg = entry.message
+    if (typeof msg === 'object' && msg !== null) {
+      const m = msg as Record<string, unknown>
+      if (m.role === 'assistant') {
+        return modelIdPairOf(m.provider, m.model)
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * entry 数组倒序扫（文件尾方向优先），逐个交给 collect；collect 返回 true（收集齐）即止。
+ * 返回是否提前止（true = 两个维度都在手）。
+ */
+function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unknown>) => boolean): boolean {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (typeof entry === 'object' && entry !== null && collect(entry as Record<string, unknown>)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * 反向读 session JSONL 提取最近生效的模型绑定（U7：scanSessionMeta 第七读 readModelBinding
+ * 的数据源由 `.model.json` sidecar 切换为 JSONL 真源；写点退役在 U8）。
+ *
+ * 解析语义对齐 pi 实装 getSessionContextSettings（见 modelEntryValueOf）；pi 恢复是沿当前
+ * 分支正序取最后一条（后写覆盖前写），反向读「从尾向前第一条」与之等价。modelId 与
+ * thinkingLevel 是 pi 侧两个独立跟踪的变量（单条 entry 只更新其一），各取物理尾方向第一条。
+ *
+ * 复用 findLastEntryField 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量
+ * 倒序 / 超阈值 forEachReversedLineChunk 逆序分块，总读取量 ≤ 32MB 上限）但不直接调它：
+ * 单值「命中即止」签名承载不了双维度独立收集（只命中 model 即止会漏掉更早区域的
+ * thinking_level_change；分两次调用则尾读/分流成本 ×2）——按同骨架单遍扫描，两维度都在手
+ * 才提前止。混合分支文件取物理尾第一条（§3.3.3 已知语义边界 1，显示用途与现状 sidecar
+ * 等价或更好）。
+ *
+ * 失效语义（数据流图 2 方案 A 成立的关键）：缓存键 = JSONL (mtimeMs, size)，pi append 后
+ * 必 miss → 重扫——反向读成本只在文件变化时发生一次。损坏行跳过继续扫（findLastEntryField
+ * 分块路径同语义）；全程无模型信息 → undefined（与「sidecar 不存在」现状语义一致）。
+ * thinkingLevel 无 entry → 返回 pi 默认 'off'（PI_DEFAULT_THINKING_LEVEL 注释）。
+ *
+ * @returns { modelId, thinkingLevel }（readModelBinding 返回形态不变）；无 model_change /
+ *          assistant entry（含文件不存在/损坏）→ undefined
+ */
+export function extractLatestModelFromJsonl(filePath: string): { modelId: string; thinkingLevel: string } | undefined {
+  // 数组式单点对象承载命中值（闭包内赋值，规避 TS 对外层局部变量的 CFA 收窄误报）
+  const hits: { modelId: string | null; thinkingLevel: string | null } = { modelId: null, thinkingLevel: null }
+  const collect = (entry: Record<string, unknown>): boolean => {
+    if (hits.modelId === null) {
+      const modelId = modelEntryValueOf(entry)
+      if (modelId !== null) hits.modelId = modelId
+    }
+    if (hits.thinkingLevel === null
+      && entry.type === 'thinking_level_change'
+      && typeof entry.thinkingLevel === 'string') {
+      hits.thinkingLevel = entry.thinkingLevel
+    }
+    return hits.modelId !== null && hits.thinkingLevel !== null
+  }
+
+  // 1. 尾读阶段（findLastEntryField 同骨架）：model_change / assistant / thinking_level_change
+  //    都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口内，命中即不走分流。
+  const tailEntries = readTailEntries(filePath)
+  if (tailEntries !== null) {
+    scanEntriesReversed(tailEntries, collect)
+  }
+  // 2. 尾读未集齐 → stat 预检分流（与 findLastEntryField 同结构）
+  if (hits.modelId !== null && hits.thinkingLevel !== null) {
+    return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel }
+  }
+  let size = -1
+  try {
+    size = statSync(filePath).size
+  } catch {
+    return undefined // 文件不存在/不可读：INVAR-tail-7 错误对等（findLastEntryField 同款）
+  }
+  if (size > READ_PRECHECK_MAX_BYTES) {
+    // 超阈值：逆序分块扫（D5③ 同款，总读取量 ≤ READ_PRECHECK_MAX_BYTES），命中即止
+    forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
+      for (let i = chunk.lines.length - 1; i >= 0; i--) {
+        const line = chunk.lines[i]
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        let entry: unknown
+        try {
+          entry = JSON.parse(trimmed)
+        } catch {
+          continue // 损坏行跳过（错误规格表第 1 行；parseJsonl/findLastEntryField 同语义）
+        }
+        if (typeof entry === 'object' && entry !== null && collect(entry as Record<string, unknown>)) {
+          return false // 双维度集齐，停止迭代（当前块内更早行不再交付）
+        }
+      }
+    })
+  } else {
+    // ≤阈值：全量读 fallback 保留（INVAR-tail-2 SR1：目标可能在文件头部——如早期命名
+    // 推长的旧 session，模型 entry 全在头部的形态）
+    try {
+      scanEntriesReversed(parseJsonl(readFileSync(filePath, 'utf-8')), collect)
+    } catch {
+      return undefined
+    }
+  }
+  // 3. 组装：无模型信息 → undefined；thinkingLevel 无 entry → pi 默认 'off'
+  if (hits.modelId === null) return undefined
+  return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel ?? PI_DEFAULT_THINKING_LEVEL }
 }
 
 // ── 文件操作 ─────────────────────────────────────────────────
