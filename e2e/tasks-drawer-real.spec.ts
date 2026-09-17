@@ -411,13 +411,12 @@ test('R3: goal_control create → 协议格式含 __gui__ group', async () => {
     // widget 推送分离前的顶层形态假设）
     expect(guiComponentType(gui)).toBe('group')
 
-    // goal slug 契约（GoalCard.displaySlug 来源）
+    // goal slug 契约（GoalCard.displaySlug 来源）。缺失 = 协议回归，必须 fail：
+    // goal_control create 契约确定性回显 slug（goal-control-adapter 返回 { action, goalId, status, slug }），
+    // details.slug 为空说明 tool result details 透传链断裂，不得以日志放行
     const slug = details.slug
-    if (slug) {
-      console.log(`[R3] goal_control 协议契约验证通过，slug=${slug}, gui.type=${guiComponentType(gui)}`)
-    } else {
-      console.log(`[R3] goal_control tool result 无 details.slug，但 __gui__ ${guiComponentType(gui)} OK`)
-    }
+    expect(slug, 'goal_control tool result 的 details.slug 缺失 = 协议回归（create 契约确定性回显 slug，details 透传断裂）').toBeDefined()
+    console.log(`[R3] goal_control 协议契约验证通过，slug=${slug}, gui.type=${guiComponentType(gui)}`)
   } finally {
     await cleanupRealApp(cleanup, dataDir)
   }
