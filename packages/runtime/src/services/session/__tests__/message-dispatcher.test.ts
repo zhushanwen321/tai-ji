@@ -36,6 +36,8 @@ interface HarnessOptions {
   hookModifiedContent?: string
   promptError?: Error
   sessionByClient?: Record<string, unknown>
+  /** [A1 接线] svc.getSession 的返回视图（steer/followUp 的 cwd 透传断言用；缺省 undefined 同既有行为）。 */
+  sessionView?: Record<string, unknown>
 }
 
 /**
@@ -69,7 +71,7 @@ function makeHarness(opts: HarnessOptions = {}): Harness {
     }),
     getSessionByClient: vi.fn(() => opts.sessionByClient as never),
     persistSessionOutcome: vi.fn(),
-    getSession: vi.fn(() => undefined),
+    getSession: vi.fn(() => opts.sessionView as never),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   } as unknown as IDispatcherSessionOps
@@ -113,8 +115,21 @@ describe('MessageDispatcher × SkillInjector 挂载（D9）', () => {
   it('sendPrompt：hook 改写文本时注入器收到改写后文本（hook 之后语义）', async () => {
     const h = makeHarness({ hookModifiedContent: '改写后 <taiji-skill name="a"/>' })
     await h.dispatcher.sendMessage('s1', '用户原文')
-    expect(h.injectMock).toHaveBeenCalledWith(expect.anything(), '改写后 <taiji-skill name="a"/>')
+    expect(h.injectMock).toHaveBeenCalledWith(expect.anything(), '改写后 <taiji-skill name="a"/>', undefined)
     expect(h.client.prompt).toHaveBeenCalledWith('INJECTED::改写后 <taiji-skill name="a"/>', undefined)
+  })
+
+  it('sendPrompt / steer：session cwd 作 inject 第三参透传（A1 接线，D7 project 扫描基准）', async () => {
+    // sendPrompt 走 activeSession.cwd（getSessionByClient 视图）；视图缺失（默认 harness）= undefined（global-only 映射，宁缺毋错）
+    const h = makeHarness({ sessionByClient: { cwd: '/w/s1', occupancy: { turn: 'idle', compacting: false, bash: false } } })
+    await h.dispatcher.sendMessage('s1', '文本')
+    expect(h.injectMock).toHaveBeenCalledWith(expect.anything(), '文本', '/w/s1')
+    // steer / followUp 走 svc.getSession(sessionId)?.cwd
+    const h2 = makeHarness({ sessionView: { cwd: '/w/s2' } })
+    await h2.dispatcher.steerMessage('s1', 'steer 文本')
+    expect(h2.injectMock).toHaveBeenCalledWith(expect.anything(), 'steer 文本', '/w/s2')
+    await h2.dispatcher.followUpMessage('s1', 'followUp 文本')
+    expect(h2.injectMock).toHaveBeenCalledWith(expect.anything(), 'followUp 文本', '/w/s2')
   })
 
   it('sendPrompt：notices 在 prompt 成功后逐条发布，payload 含 clientUuid（从发送文本标记提取）', async () => {

@@ -49,6 +49,9 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import { ExtensionService } from './services/extension-service.js'
 import { SkillRegistry } from './services/skill-registry.js'
+// [A1 接线] skill 注入映射源（D7 切源）：delivery registry 的 SkillInjector 与
+// dispatcher/records 共用 sessionService 的晚绑定源（见下方 bindSkillMappingSource）。
+import { SkillInjector } from './services/session/skill-injector.js'
 import { ReloadOrchestrator } from './services/session/reload-orchestrator.js'
 import { PluginRegistry } from './services/plugin-service/plugin-registry.js'
 import { PluginService } from './services/plugin-service/plugin-service.js'
@@ -712,7 +715,10 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
-  })
+  },
+  // [A1 接线] skill 注入映射源与 dispatcher/records 共源（sessionService.skillSource
+  // 晚绑定占位——下方 SkillRegistry 构造后 bind，三个注入挂点一份映射源，D7 单权威）。
+  new SkillInjector(sessionService.skillMappingSource))
   // session 销毁（主动删 / 进程退出 / restore 清场全部路径）→ 丢弃该 session 的 delivery
   // 队列与订阅（setOnSessionDestroyed 追加式注册，与 server 的 extension timeout 清理腿并存）。
   sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
@@ -832,6 +838,10 @@ async function main(): Promise<void> {
     configDir,
     sessionService,
   })
+  // [A1 接线] skill 注入映射源绑真源（D7 切源收口）：dispatcher/records/delivery 三个
+  // SkillInjector 共享的 LateBoundSkillSource 在此绑定（构造顺序环的收口点，bind 先于
+  // server.start——生产不可达未绑定态；此处先于下方 reloadOrchestrator 的 onChange 绑定）。
+  sessionService.bindSkillMappingSource(skillRegistry)
 
   // TerminalService：drawer 集成终端的 PTY 生命周期管理（node-pty spawn + per-session 映射）。
   // 声明在生命周期挂钩之前（session 销毁回调引用它，TDZ 要求先声明）。

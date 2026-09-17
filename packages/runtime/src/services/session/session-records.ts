@@ -46,7 +46,7 @@ import { withFileLockSync } from '../../utils/file-lock.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEntryNotFoundError } from './trace-sync.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from './replicated-states.config.js'
-import { SkillInjector } from './skill-injector.js'
+import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import type { SessionRegisteredSource } from './session-state-projection.js'
@@ -100,10 +100,17 @@ export interface SessionRecordsDeps {
    * 与派发同源（设计 §3.4 投影面表「冷启动回退源单源化」）。测试注入 fake 隔离
    * 宿主 node_modules 的真实引擎包（零命中断言需要确定性空环境）。
    *
-   * [W8] deprecated 死键 getExtensionPaths 已随构造点同批删除（本文件字段 + 
+   * [W8] deprecated 死键 getExtensionPaths 已随构造点同批删除（本文件字段 +
    * session-service.ts 装配点）——W4 登记的保留期结束。
    */
   discoverEngines?(): string[]
+  /**
+   * [A1 接线] session cwd 查询（subagentAction 的 skill 注入 project 扫描基准，
+   * skill-reload-nondestructive D7）——与 SkillRegistry.getSessionCwd 同源（lifecycle
+   * 视图 cwd）。可选窄接口（形态对齐 SkillRegistrySessionService.getSessionCwd 先例，
+   * 供测试省略）；生产组合根恒接线，缺省时注入退化为 global-only 映射。
+   */
+  getSessionCwd?(sessionId: string): string | undefined
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -138,7 +145,9 @@ export class SessionRecords {
     private readonly deps: SessionRecordsDeps,
     // [A2 D-A2-1] skill 注入器：subagentAction message/start 的定向文本出站前统一
     // 处理（与 MessageDispatcher 同款「默认实例化 + 构造可替换」形态，测试注入 spy）。
-    private readonly injector: SkillInjector = new SkillInjector(),
+    // [A1 接线] 默认源 = 晚绑定占位（SessionService 构造期 registry 尚不存在，组合根
+    // 后绑；测试默认装配无标记文本不触达映射）。
+    private readonly injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
   ) {}
 
   /**
@@ -528,7 +537,8 @@ export class SessionRecords {
       // 原始文本上匹配（encode 只转义 \ 与换行，先 encode 会破坏标记属性的可读性且无必要）；
       // 注入产物的真实换行由随后的 encode 编码回单行。无标记 no-op 零 RPC 原文通过；
       // cancel/workflows 内部命令不挂（设计显式跳过，守卫白名单登记）。
-      const injection = await this.injector.inject(client, params.text)
+      // [A1 接线] session cwd 作 project 扫描基准（D7）。
+      const injection = await this.injector.inject(client, params.text, this.deps.getSessionCwd?.(sessionId))
       await client.prompt(`/subagents message ${params.subagentId} ${encodeDirectiveText(injection.text)}`)
       // [D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败路径
       // throw 不发。定向文本无 u- 标记 → skillNotice 的 clientUuid 缺省（类型可空）。
@@ -539,7 +549,7 @@ export class SessionRecords {
       throw new Error('[session-service] subagentAction start: slug and task are required')
     }
     // [A2 MF-B] 同 message 分支：start 的 task 是用户内容（composer @ 定向首发），encode 前注入。
-    const injection = await this.injector.inject(client, params.task)
+    const injection = await this.injector.inject(client, params.task, this.deps.getSessionCwd?.(sessionId))
     await client.prompt(`/subagents start ${params.slug} ${encodeDirectiveText(injection.text)}`)
     publishSkillNotices(this.deps.getMessageBus(), sessionId, params.task, injection.notices)
   }

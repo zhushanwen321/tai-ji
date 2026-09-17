@@ -85,6 +85,10 @@ import type { ReclaimSeat } from './idle-pi-reaper.js'
 import { RECLAIM_SEAT_WAIT_OBSERVE_MS } from './idle-pi-reaper.js'
 import { RespawnOrchestrator } from './pi-respawn.js'
 import { MessageDispatcher } from './message-dispatcher.js'
+// [A1 接线] skill 注入映射源（skill-reload-nondestructive D7）：records/dispatcher 的
+// SkillInjector 共享同一晚绑定占位，组合根在 SkillRegistry 构造后 bind 真源（构造顺序环
+// 见 LateBoundSkillSource 注释）。
+import { LateBoundSkillSource, SkillInjector, type SkillMappingSource } from './skill-injector.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
 import { SessionScanner } from './session-scanner.js'
 import { AttachmentStore } from './attachment-store.js'
@@ -221,6 +225,18 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 避免破坏 SessionService 的 25+ 测试构造调用点。未注入时所有 bus 调用 no-op（this.messageBus?.*）。
    */
   private messageBus: IMessageBus | null = null
+  /**
+   * [A1 接线] skill 注入映射源的晚绑定占位（skill-reload-nondestructive D7 切源）。
+   *
+   * 为什么是占位而非构造注入：SkillRegistry 与 SessionService 互为依赖（registry 的
+   * 变更通知要 sessionService 的活跃表/cwd，sessionService 的注入器要 registry 的扫描），
+   * 构造顺序无解——SessionService 构造期持本占位组装 records/dispatcher 的 SkillInjector
+   * （两者共享同一实例，bind 后同源），组合根在 SkillRegistry 构造后调
+   * bindSkillMappingSource 绑真源（先于 server.start，生产不可达未绑定态；未绑定读取
+   * → injector 侧 mapping_unavailable notice，D8 禁止静默）。经 setter 而非构造参数，
+   * 同 setMessageBus 模式——避免破坏 SessionService 的 25+ 测试构造调用点。
+   */
+  private readonly skillSource = new LateBoundSkillSource()
   /**
    * 写 2 挂钩的投影专用 bus 视图缓存：getter 每次 publish 都会读，按底层 bus 身份
    * memoize（setMessageBus 晚期注入/替换后自动重建）。
@@ -414,8 +430,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       pm: this.pm,
       sessionStore: this.sessionStore,
       hasSession: (sessionId) => this.lifecycle.has(sessionId),
+      // [A1 接线] subagentAction 的 skill 注入 project 扫描基准（与 getSessionCwd 同源）
+      getSessionCwd: (sessionId) => this.getSessionCwd(sessionId),
       getMessageBus: () => this.messageBus,
-    })
+    }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块
     // 最小规范化（流式 strip + 首行 cwd fallback，见 restore-seeding.normalizeLargeSessionFileMinimal）。
@@ -484,7 +502,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         console.error(`[session-service] mirror preset failed (sessionId=${sessionId}):`, e)
       }
     })
-    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
+    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus, new SkillInjector(this.skillSource))
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
 
     // 后台任务域组装（u-runtime-rpc①②）：广播回调经 this.messageBus 动态读（getter 语义，
@@ -681,6 +699,21 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   setMessageBus(bus: IMessageBus): void {
     this.messageBus = bus
     this.dispatcher.setMessageBus(bus)
+  }
+
+  /**
+   * [A1 接线] 绑定 skill 注入映射源真源（组合根在 SkillRegistry 构造后调用一次，
+   * skill-reload-nondestructive D7）。records/dispatcher 的 SkillInjector 构造期已持
+   * skillSource 占位，bind 后共享同源。getter 供组合根为 delivery registry 组装
+   * 同源 injector（三个注入挂点一份映射源，单权威）。
+   */
+  bindSkillMappingSource(source: SkillMappingSource): void {
+    this.skillSource.bind(source)
+  }
+
+  /** [A1 接线] skillSource 占位的对外只读面（组合根 delivery registry 组装用）。 */
+  get skillMappingSource(): SkillMappingSource {
+    return this.skillSource
   }
 
   /**
