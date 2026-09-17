@@ -48,7 +48,6 @@ import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, r
 // Facade 保留一行委托，语义注释见各新模块。
 import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
-import { persistModelBinding, readModelBinding } from '../../infra/pi/session-file-utils.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
@@ -403,7 +402,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       fetchContext: (sessionId) => this.fetchContext(sessionId),
       persistSessionOutcome: (sessionId, outcome, reason) => this.persistSessionOutcome(sessionId, outcome, reason),
       tryPersistProjectBinding: (session) => this.tryPersistProjectBinding(session),
-      tryPersistModelBinding: (session) => this.tryPersistModelBinding(session),
     })
     // subagent/workflow 记录域（S6 迁出至 session-records.ts）：deps 窄注入——session 存在性
     // 经 lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -1369,38 +1367,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     if (persisted || !projectId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
     this.sessionStore.persistProjectBinding(s.sessionFilePath, projectId)
     ;(s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted = true
-  }
-
-  /**
-   * model binding sidecar 补写兜底（D1 写点③延迟 flush 语义修正，Gate B 端到端实证，
-   * 2026-09-04）。镜像 tryPersistProjectBinding（D14 同款问题同款解法）。
-   *
-   * 背景：写点③（lifecycle create 路径）受 pi 延迟写入窗口约束——create 瞬间
-   * sessionFilePath 路径有值但 .jsonl 文件未 flush（pi 0.84.4 实装：SessionManager
-   * 构造即生成确定性路径），persistModelBinding 内部 existsSync 守卫恒跳过，且 pi flush
-   * 后没有任何补写点。真实 app 实证：新建并对话过的 session 目录里无 .model.json，重启后
-   * composer 回落全局默认（内存生效值丢失）；同 session 内显式切模型（写点①）立即产出
-   * sidecar，证明写点本身工作、缺的只是 create 窗口的补写时机。
-   * [V9-④ 根修注] preset/project/agent 三绑定已放行 create 写点（skipJsonlExistsGuard），
-   * model 写点保留守卫语义不改——本补偿已实测工作（V1 文件断言由其满足），无需扩大
-   * create 时序行为面。
-   *
-   * 本方法在 turn_end（主路径）/ agent_end（兜底）时补写——此时 pi 已完成 flush，文件
-   * 存在，写 sidecar 安全。文件仍不存在 → 跳过（下次兜底）。
-   *
-   * 缺失才写：readModelBinding 命中（写点①⑤写的新值或历史值）→ 视为已有，打标跳过
-   * 不覆写——sidecar 新鲜度归写点①⑤所有，本方法只补「从没写过的空洞」。
-   *
-   * 用 modelBindingSidecarEnsured 标记防重复写（session 级运行时标记，同
-   * projectBindingPersisted 形态，不进 toSummary）。
-   */
-  private tryPersistModelBinding(s: IManagedSessionView): void {
-    const view = s as IManagedSessionView & { modelBindingSidecarEnsured?: boolean }
-    if (view.modelBindingSidecarEnsured || !s.modelId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
-    if (!readModelBinding(s.sessionFilePath)) {
-      persistModelBinding(s.sessionFilePath, s.modelId, s.thinkingLevel ?? '')
-    }
-    view.modelBindingSidecarEnsured = true
   }
 
   /**

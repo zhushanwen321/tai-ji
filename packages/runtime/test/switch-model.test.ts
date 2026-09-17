@@ -14,12 +14,12 @@
  * impl-plan 台账中写点接入属 U1，本组用例是 Gate B 端到端之外的最小单测防线）：
  * switchModel / setThinkingLevel 成功后读回值 == get_state 读回的生效值（生效值胜请求值）。
  *
- * [缓存治理批 3 U7 适配 → U8a 收口] readModelBinding 读侧已切反向读 JSONL 真源
- *（extractLatestModelFromJsonl），pi mock 在 setModel / setThinkingLevel 成功后 append 对应
- * JSONL entry（真实 pi 行为：model_change / thinking_level_change 落盘），断言语义 = 「反向读
- * JSONL 可见」。U8a 写点退役（W1/W2）：persistModelBinding 的 sidecar 落盘断言
- *（persistBindingCalls 记录 + 空值守卫负例）随写点删除一并移除——taiji 不再写任何 model
- * 持久层，持久层唯一写方 = pi JSONL。
+ * [缓存治理批 3 U7 适配 → U8a/U8b 收口] 读侧 = extractLatestModelFromJsonl 反向读 JSONL
+ * 真源，pi mock 在 setModel / setThinkingLevel 成功后 append 对应 JSONL entry（真实 pi
+ * 行为：model_change / thinking_level_change 落盘），断言语义 = 「反向读 JSONL 可见」。
+ * U8 写点退役（W1/W2/W6）：persistModelBinding 的 sidecar 落盘断言（persistBindingCalls
+ * 记录 + 空值守卫负例）与原 readModelBinding 包装随写点删除一并移除——taiji 不再写任何
+ * model 持久层，持久层唯一写方 = pi JSONL。
  *
  * 运行：cd packages/runtime && npx vitest run test/switch-model.test.ts
  */
@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, ProviderId } from '@taiji/shared'
 
-import { readModelBinding } from '../src/infra/pi/session-model-sidecar.js'
+import { extractLatestModelFromJsonl } from '../src/infra/pi/session-file-utils.js'
 
 import type {
   IMessageBroker,
@@ -260,7 +260,7 @@ describe('model-control 生效值链（原 U1 写点覆盖，U8a 写点退役后
     expect(effective).toBe('eff-provider/eff-model')
     // 断言目标：读回值 == get_state 读回生效值（非请求值）——持久层唯一写方 = pi JSONL
     //（U8a W1 后 taiji 不再写 .model.json），列表可见性经扫描反向读达成
-    expect(readModelBinding(sessionFile)).toEqual({
+    expect(extractLatestModelFromJsonl(sessionFile)).toEqual({
       modelId: 'eff-provider/eff-model',
       thinkingLevel: 'high',
     })
@@ -289,7 +289,7 @@ describe('model-control 生效值链（原 U1 写点覆盖，U8a 写点退役后
     const effective = await ctx.service.setThinkingLevel('s1', 'max')
 
     expect(effective).toBe('xhigh')
-    expect(readModelBinding(sessionFile)).toEqual({
+    expect(extractLatestModelFromJsonl(sessionFile)).toEqual({
       modelId: 'eff-provider/eff-model',
       thinkingLevel: 'xhigh',
     })

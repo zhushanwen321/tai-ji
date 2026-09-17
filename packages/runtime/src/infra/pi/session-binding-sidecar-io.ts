@@ -1,12 +1,12 @@
 /**
  * sidecar 家族公共 IO 骨架 + 扫描缓存治理状态（叶子模块）。
  *
- * 为什么存在：session-model-sidecar.ts（model 家族）自 session-file-utils.ts 拆出后
- * 反向复用 persistBindingSidecar / readBindingSidecar 骨架，曾构成两模块的函数级循环
- * 引用（ESM function 声明实例化期绑定，运行时无 TDZ 风险，但 PR fallow audit 按硬
- * 规则拦截循环依赖）。骨架与其私有闭包（sessionMetaCache / scanDirCache 家族）下沉
- * 为本叶子模块，依赖收敛为单向：session-file-utils → 本模块、session-model-sidecar →
- * 本模块（前者另依赖后者，两后继互不依赖）。
+ * 为什么存在：model sidecar 家族（原 session-model-sidecar.ts，缓存治理批 3 U8 随写点
+ * 退役整体删除）自 session-file-utils.ts 拆出后反向复用 persistBindingSidecar /
+ * readBindingSidecar 骨架，曾构成两模块的函数级循环引用（ESM function 声明实例化期绑定，
+ * 运行时无 TDZ 风险，但 PR fallow audit 按硬规则拦截循环依赖）。骨架与其私有闭包
+ * （sessionMetaCache / scanDirCache 家族）下沉为本叶子模块，依赖收敛为单向：
+ * session-file-utils → 本模块（model 家族删除后唯一消费方）。
  *
  * [type-only 反向引用登记] import type { ScannedSessionMeta } from
  * './session-file-utils.js'：缓存容器条目持有上层聚合类型，编译后引用消失、运行时
@@ -81,12 +81,13 @@ export interface PersistBindingSidecarOpts {
  * 故收敛为默认开。确需跳过时必须显式传 { invalidateScanDir: false } 并附注释说明理由。
  *
  * [消费方登记] preset/project/agent 家族在 session-file-utils.ts 消费（骨架原属该文件，
- * 经其 re-export 保持原 import 路径）；model 家族在 session-model-sidecar.ts 直接消费
- * 本模块。骨架随循环消除下沉至此，仅限 sidecar 家族模块消费，不作为公共 API。
+ * 经其 re-export 保持原 import 路径）；model 家族消费方（原 session-model-sidecar.ts）
+ * 已随缓存治理批 3 U8 退役删除。骨架随循环消除下沉至此，仅限 sidecar 家族模块消费，
+ * 不作为公共 API。
  */
 /**
  * sidecar 持久化形状（S12 序列化边界最小约束）：各家族 binding 的公共底座——
- * JSON.stringify 产出的对象（preset/project/agent/model 家族字段各异，由各自
+ * JSON.stringify 产出的对象（preset/project/agent 家族字段各异，由各自
  * 调用方类型进一步收窄；读侧经 readBindingSidecar 的 decode 守卫回调校验）。
  */
 export type PersistedSidecarBinding = Readonly<Record<string, unknown>>
@@ -125,8 +126,8 @@ export function persistBindingSidecar(
  * sidecar 不存在/损坏/守卫不过 → undefined（降级不抛错）。
  *
  * [消费方登记] 同 persistBindingSidecar——preset/project/agent 家族经
- * session-file-utils.ts re-export 消费，model 家族（'./session-model-sidecar.ts'）
- * 直接消费本模块，仅限 sidecar 家族模块消费。
+ * session-file-utils.ts re-export 消费，仅限 sidecar 家族模块消费（model 家族消费方
+ * 已随缓存治理批 3 U8 退役删除）。
  */
 export function readBindingSidecar<T>(sidecarPath: string, decode: (binding: unknown) => T | undefined): T | undefined {
   try {

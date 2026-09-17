@@ -664,9 +664,9 @@ export class SessionLifecycle implements ISessionRegistry {
    * 文件操作时序与提取前一致：只写 sidecar（*.preset.json / *.project.json / *.agent.json），
    * 不创建/触碰 pi session 文件本体。preset/project/agent 三绑定经
    * skipJsonlExistsGuard 放行 existsSync 守卫（V9-④ 根修，理由见 persistCreateSidecars
-   * docstring）。[缓存治理 U8a W4] model 写点已退役（persistModelBinding 调用删除）：
-   * 现状该写点在 pi 首 flush 前本就被内部 existsSync 守卫跳过（实际补偿方 = turn-end
-   * ensure，W6 中途态），持久层归 pi JSONL + 扫描反向读，本段只负责 hydrate 内存播种。
+   * docstring）。[缓存治理 U8 W4/W6] model 写点已整体退役（create 写点 + turn-end 补偿
+   * 均删除）：模型信息的持久层 = pi JSONL（assistant entry / model_change）+ 扫描反向读，
+   * 本段只负责 hydrate 内存播种。
    */
   private persistCreateBindings(
     session: IManagedSessionView,
@@ -715,8 +715,8 @@ export class SessionLifecycle implements ISessionRegistry {
    * 即确定性生成 sessionFile 路径，get_state 透传——路径有值、文件不存在），不再以文件
    * 存在性当 session 有效性判据。规则 #6 禁止的是创建/触碰 pi session .jsonl 本体
    *（openSync('wx') EEXIST 卡死），sidecar 是 taiji 自有文件经 atomicWrite 落盘、不触碰
-   * .jsonl，放行不违反规则 #6。此前守卫恒跳过且无补偿写点（model 面有 turn-end ensure
-   * tryPersistModelBinding 补偿，preset/project/agent 无）→ landing 新建 session 重启后
+   * .jsonl，放行不违反规则 #6。此前守卫恒跳过且无补偿写点（model 面经 turn-end 补偿，
+   * 该写点族已于缓存治理批 3 U8 整体退役）→ landing 新建 session 重启后
    * preset 绑定永久回退 builtin:full / 项目归属丢失 / agent badge 丢失。fork 路径
    * （:persistForkBindings）不传 flag——forkedFilePath 是已写出的新文件，守卫自然通过。
    * session.sessionFilePath 第一层守卫保留：路径 undefined（pi 异常未返回）无法定位

@@ -61,7 +61,6 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 import { extractLatestModelFromJsonl } from '../session-file-utils.js'
-import { readModelBinding } from '../session-model-sidecar.js'
 
 let tmpDir: string
 
@@ -259,20 +258,21 @@ describe('U7 损坏行与边界', () => {
   })
 })
 
-describe('U7 语义切换锚定：sidecar 不再是读取来源', () => {
+describe('U7 语义切换锚定：sidecar 不再是读取来源（U8 后 readModelBinding 已并合入本函数）', () => {
   it('.model.json sidecar 存在且内容有效，但 JSONL 无模型信息 → undefined（旧实现会返回 sidecar 值）', () => {
     const filePath = write('sidecar-ignored.jsonl', [headerLine(), paddingLine(0, 1024)])
     writeFileSync(filePath + '.model.json', JSON.stringify({ modelId: 'stale/stale', thinkingLevel: 'high', version: 1 }), 'utf-8')
 
     // U7 前旧实现（读 sidecar）返回 stale/stale；U7 后反向读 JSONL → undefined
-    expect(readModelBinding(filePath)).toBeUndefined()
+    expect(extractLatestModelFromJsonl(filePath)).toBeUndefined()
   })
 
-  it('readModelBinding 与 extractLatestModelFromJsonl 同源（scanSessionMeta 第七读入口等价）', () => {
+  it('scanSessionMeta 第七读直调本函数（U8 起 sidecar 模块退役，读取入口唯一）', () => {
     const filePath = write('entry-equal.jsonl', [headerLine(), modelChangeLine('prov-e', 'model-e'), thinkingChangeLine('medium')])
 
-    expect(readModelBinding(filePath)).toEqual(extractLatestModelFromJsonl(filePath))
-    expect(readModelBinding(filePath)).toEqual({ modelId: 'prov-e/model-e', thinkingLevel: 'medium' })
+    // U8 前本用例断言 readModelBinding ≡ extractLatestModelFromJsonl；U8 后 readModelBinding
+    // 随模块删除，第七读（scanSessionMeta）就是对本函数的同模块直调——断言值不变
+    expect(extractLatestModelFromJsonl(filePath)).toEqual({ modelId: 'prov-e/model-e', thinkingLevel: 'medium' })
   })
 })
 

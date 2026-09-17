@@ -15,12 +15,6 @@ import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { forEachReversedLineChunk } from '../../utils/history-reverse-read.js'
 import { join, dirname, basename } from 'node:path'
 import { getSessionsDir } from './pi-paths.js'
-// model sidecar 家族（该家族与下方 preset/project/agent 家族共用的 IO 骨架已下沉
-// './session-binding-sidecar-io.ts' 叶子模块）。[缓存治理批 3 U7] 本文件经 scanSessionMeta
-// 消费 readModelBinding，其实现已切为反向读 JSONL 真源（下方 extractLatestModelFromJsonl）；
-// 该模块反向 import 本文件形成函数级循环边——过渡态（两侧均纯函数声明，运行时安全），
-// U8 退役 sidecar 模块时随之拆除（拆除指引见该模块头部注释）。
-import { readModelBinding, type ModelBindingFields } from './session-model-sidecar.js'
 // sidecar IO 骨架 + 扫描缓存治理状态（叶子模块）：骨架原属本文件，model sidecar 家族
 // 拆出后为消除 ⇄ 循环引用下沉；本文件 import 供 preset/project/agent 家族与缓存治理
 // 调用点使用，并 re-export 维持原导出路径（消费方 import 路径零改动）。
@@ -281,20 +275,6 @@ export function projectSidecarPath(filePath: string): string {
   return filePath + '.project.json'
 }
 
-// model binding sidecar 家族（modelSidecarPath/persistModelBinding/readModelBinding +
-// ModelBindingFields 字段声明）已迁至 './session-model-sidecar.ts'（本文件 max-lines
-// 行数合规）；scanSessionMeta 第七读经该模块的 readModelBinding 供给。[U7] readModelBinding
-// 实现已切反向读 JSONL（上方 extractLatestModelFromJsonl），sidecar 文件不再是读取来源。
-// [re-export 登记] persistModelBinding / readModelBinding 经本模块转出是 mock 链刚需：
-// restore 播种测试（session-lifecycle-restore-seeding.test.ts）以硬编码 factory 替换本模块
-// 并经 importActual 取「本模块导出的 persistModelBinding」委托真值落盘，session-lifecycle
-// 的写点 import 也锚定本模块路径——re-export 缺失会使 actual 侧拿到 undefined。
-// readModelBinding 转出（2026-09-04）：session-service tryPersistModelBinding（D1 写点③
-// 兜底）的「缺失才写」守卫消费，services 层 infra value import 白名单只认本模块。
-// [U8 指引] 写点退役时 persistModelBinding re-export 随写点一并删除；readModelBinding
-// 守卫消费（tryPersistModelBinding）同属 W6 退役面。
-export { persistModelBinding, readModelBinding } from './session-model-sidecar.js'
-
 // persistBindingSidecar / readBindingSidecar 公共骨架已迁 './session-binding-sidecar-io.ts'
 // （model sidecar 家族拆出后为消除 ⇄ 循环引用下沉；骨架私有闭包 sessionMetaCache /
 // scanDirCache 家族一并迁入，全仓唯一实例不变）。本文件经 re-export 维持原导出路径，
@@ -425,9 +405,6 @@ export function readAgentBinding(filePath: string): { spawnSource: 'user' | 'age
     return undefined
   })
 }
-
-// persistModelBinding / readModelBinding 已迁 './session-model-sidecar.ts'
-// （scanSessionMeta 第七读经该模块供给，指针注释见 projectSidecarPath 之后）。
 
 /**
  * 将 launch preset 绑定持久化到 sidecar `.preset.json`（设计文档 §4）。
@@ -644,8 +621,8 @@ function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unk
 }
 
 /**
- * 反向读 session JSONL 提取最近生效的模型绑定（U7：scanSessionMeta 第七读 readModelBinding
- * 的数据源由 `.model.json` sidecar 切换为 JSONL 真源；写点退役在 U8）。
+ * 反向读 session JSONL 提取最近生效的模型绑定（scanSessionMeta 第七读的数据源：U7 起由
+ * `.model.json` sidecar 切换为 JSONL 真源，U8 随 sidecar 模块退役改为本模块直调）。
  *
  * 解析语义对齐 pi 实装 getSessionContextSettings（见 modelEntryValueOf）；pi 恢复是沿当前
  * 分支正序取最后一条（后写覆盖前写），反向读「从尾向前第一条」与之等价。modelId 与
@@ -663,7 +640,7 @@ function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unk
  * 分块路径同语义）；全程无模型信息 → undefined（与「sidecar 不存在」现状语义一致）。
  * thinkingLevel 无 entry → 返回 pi 默认 'off'（PI_DEFAULT_THINKING_LEVEL 注释）。
  *
- * @returns { modelId, thinkingLevel }（readModelBinding 返回形态不变）；无 model_change /
+ * @returns { modelId, thinkingLevel }；无 model_change /
  *          assistant entry（含文件不存在/损坏）→ undefined
  */
 export function extractLatestModelFromJsonl(filePath: string): { modelId: string; thinkingLevel: string } | undefined {
@@ -1017,6 +994,27 @@ function removeStaleResiduesInDir(dir: string, cutoff: number): number {
 
 // ── Session 扫描 ─────────────────────────────────────────────
 
+/**
+ * model binding 的扫描字段声明（ScannedSessionMeta extends 收编）。
+ *
+ * [缓存治理批 3 U8] 原 session-model-sidecar.ts 随 sidecar model 家族整体退役（W6 写点
+ * 删除后无消费方），字段声明迁回本文件与 ScannedSessionMeta 同文件；字段本身保留——
+ * 值源 = extractLatestModelFromJsonl 反向读 JSONL 真源（非 sidecar）。
+ */
+export interface ModelBindingFields {
+  /**
+   * 该 session 生效的模型 id。反向读 session JSONL（model_change / assistant
+   * entry 最近一条，JSONL 真源），'provider/modelId' 格式。undefined 表示无模型信息
+   * （历史 session path 上无任何模型 entry / 文件不存在）。
+   */
+  modelId?: string
+  /**
+   * 该 session 生效的思考等级。反向读 session JSONL（thinking_level_change
+   * 最近一条）；无 entry 时为 pi 默认 'off'。undefined 表示无模型信息（随 modelId）。
+   */
+  thinkingLevel?: string
+}
+
 /** scanPiSessions 返回的单条 session 元信息（持久化会话扫描结果）。 */
 export interface ScannedSessionMeta extends ModelBindingFields {
   id: string
@@ -1055,8 +1053,8 @@ export interface ScannedSessionMeta extends ModelBindingFields {
    * 记录 spawn 该 session 的父 agent session。undefined = 非 agent 管理的普通 session。
    */
   parentAgentSessionId?: string
-  // modelId / thinkingLevel 字段声明随 model sidecar 家族迁至 './session-model-sidecar.ts'
-  // （ModelBindingFields，本接口 extends 收编）；BindingFieldKey 的 OptionalKeys 派生对
+  // modelId / thinkingLevel 字段声明 = 上方 ModelBindingFields（本接口 extends 收编，
+  // 值源为 extractLatestModelFromJsonl 反向读）；BindingFieldKey 的 OptionalKeys 派生对
   // extends 字段照常生效，session-binding-fields.ts 注册表不受影响。
 }
 
@@ -1143,9 +1141,10 @@ function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
     projectId,
     spawnSource: agentBinding?.spawnSource,
     parentAgentSessionId: agentBinding?.parentAgentSessionId,
-    // 第七读：model binding sidecar（model binding，'./session-model-sidecar.ts'）——
-    // 无 sidecar 时返回 undefined，对象展开零字段，与逐字段 `?.` 赋 undefined 等价。
-    ...readModelBinding(filePath),
+    // 第七读：model binding（extractLatestModelFromJsonl 同模块直调——U8 起 sidecar
+    // 模块已退役，值源 = 反向读 JSONL 真源）。无模型信息时返回 undefined，对象展开
+    // 零字段，与逐字段 `?.` 赋 undefined 等价。
+    ...extractLatestModelFromJsonl(filePath),
   }
   sessionMetaCache.set(filePath, { mtimeMs: fstat.mtimeMs, size: fstat.size, meta })
   return meta

@@ -1,17 +1,16 @@
 /**
- * Sidecar 绑定测试（agent + model binding）。
+ * Sidecar 绑定测试（agent binding + model 扫描可见性）。
  *
  * Agent binding（u7-sidecar-persist 验收 A3 + A4）：
  * A3：规则 #6 守卫——session JSONL 不存在时 persistAgentBinding 不创建 sidecar。
  * A3b：缓存失效集成——persistAgentBinding 写入后 sessionMetaCache 失效，scanPiSessions 能立即读到 binding。
  * A4：readAgentBinding 降级路径——sidecar 不存在/JSON 损坏/spawnSource 非法 → undefined。
  *
- * Model binding（model-sidecar 测试）：
+ * Model binding（缓存治理批 3 U8 后仅存扫描可见性面）：
  * M1：BINDING_FIELDS 矩阵守卫——modelId/thinkingLevel 四列值符合预期。
- * M2：persistModelBinding 原子写 + JSONL 缺失不创建守卫 + 写失败吞错 + cache invalidation。
- *     [缓存治理 U7/U8a] 读侧已切 JSONL 反向读（readModelBinding 不再消费 sidecar，语义
- *     权威覆盖见 src/infra/pi/__tests__/session-model-reverse-read.test.ts）——本文件的
- *     model 断言只锚定写行为（W6 中途态保留）与「JSONL 变化 → 扫描可见」集成。
+ * M2d：「JSONL append model entry → 扫描反向读可见」集成（持久层唯一写方 = pi，
+ *     无 taiji 侧写点）。persist 侧用例（M2a-M2c / modelSidecarPath）随 W6 写点退役删除，
+ *     反向读语义权威覆盖见 src/infra/pi/__tests__/session-model-reverse-read.test.ts。
  * M3：原 scanSessionMeta 提取 .model.json 容错——断言对象随 U7 读侧切换消失，整块删除。
  * M4：purge 清单含 .model.json。
  */
@@ -28,8 +27,6 @@ import {
   invalidateScanDirCache,
   _resetSessionMetaCacheForTest,
 } from '../infra/pi/session-file-utils.js'
-// model sidecar 家族自 session-file-utils 迁出（max-lines 行数合规），权威源在本模块。
-import { modelSidecarPath, persistModelBinding, readModelBinding } from '../infra/pi/session-model-sidecar.js'
 import { BINDING_FIELDS } from '../infra/pi/session-binding-fields.js'
 import type { SessionLifecycle } from '../services/session/session-lifecycle.js'
 import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../services/session/session-internal.js'
@@ -237,65 +234,8 @@ describe('M1: BINDING_FIELDS 矩阵守卫', () => {
   })
 })
 
-describe('modelSidecarPath', () => {
-  it('返回 filePath + .model.json', () => {
-    expect(modelSidecarPath('/tmp/s.jsonl')).toBe('/tmp/s.jsonl.model.json')
-  })
-})
-
-describe('persistModelBinding', () => {
-  it('M2a: JSONL 不存在时不创建 sidecar（规则 #6 守卫）', () => {
-    const dir = makeTmpDir('model-a3-')
-    try {
-      const nonExistentFile = join(dir, 'nonexistent.jsonl')
-      expect(existsSync(nonExistentFile)).toBe(false)
-      const sidecarPath = modelSidecarPath(nonExistentFile)
-      persistModelBinding(nonExistentFile, 'provider/model1', 'high')
-      expect(existsSync(sidecarPath)).toBe(false)
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M2b: 文件存在时 sidecar 被正确创建且内容含写入值（U7 起 readModelBinding 不再回读 sidecar）', () => {
-    const dir = makeTmpDir('model-a1-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      const sidecarPath = modelSidecarPath(fp)
-      expect(existsSync(sidecarPath)).toBe(false)
-
-      persistModelBinding(fp, 'xiaomi/mimo-v2.5-pro', 'high')
-
-      expect(existsSync(sidecarPath)).toBe(true)
-      const { readFileSync } = require('node:fs')
-      const data = JSON.parse(readFileSync(sidecarPath, 'utf-8'))
-      expect(data.modelId).toBe('xiaomi/mimo-v2.5-pro')
-      expect(data.thinkingLevel).toBe('high')
-      expect(data.version).toBe(1)
-      // [U7] sidecar 读取来源已退役：readModelBinding 反向读 JSONL，本 fixture 的 JSONL
-      // 无模型 entry → undefined（sidecar 内容不再影响返回值；权威覆盖见
-      // src/infra/pi/__tests__/session-model-reverse-read.test.ts「语义切换锚定」）
-      expect(readModelBinding(fp)).toBeUndefined()
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M2c: modelId 为空串时不写 sidecar', () => {
-    const dir = makeTmpDir('model-empty-')
-    try {
-      const fp = join(dir, 'test.jsonl')
-      writeFileSync(fp, '{"type":"session","id":"s1","cwd":"/tmp","timestamp":"2026-01-01"}\n')
-      const sidecarPath = modelSidecarPath(fp)
-      persistModelBinding(fp, '', 'high')
-      expect(existsSync(sidecarPath)).toBe(false)
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-
-  it('M2d: [U7 反向读] JSONL append model entry 后 scanPiSessions 重扫可见（外部 pi append 无显式失效，(mtimeMs,size) 变化致 meta 重扫）', () => {
+describe('M2d: [U7 反向读] JSONL append model entry 后 scanPiSessions 重扫可见', () => {
+  it('外部 pi append 无显式失效，(mtimeMs,size) 变化致 meta 重扫', () => {
     const dir = makeTmpDir('model-cache-')
     try {
       const origDataDir = process.env.TAIJI_AGENT_DATA_DIR

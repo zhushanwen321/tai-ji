@@ -20,8 +20,8 @@ import { SessionLifecycle, setMigrationGate, getMigrationGate } from './session-
 import { MODEL_NOT_CONFIGURED } from '../../utils/errors.js'
 import { getSessionsDir } from '../../infra/pi/pi-paths.js'
 // [U8a W5 fork 锚] fork 继承不再写 .model.json sidecar（写点退役），继承可见性断言 =
-// 产物 JSONL 反向读（readModelBinding U7 起即反向读实现）
-import { readModelBinding } from '../../infra/pi/session-model-sidecar.js'
+// 产物 JSONL 反向读（U8 起 scanSessionMeta 第七读同款直调 extractLatestModelFromJsonl）
+import { extractLatestModelFromJsonl } from '../../infra/pi/session-file-utils.js'
 import type { ILifecycleSessionOps, ISessionRegisterDeps } from './session-internal.js'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { IConfigStore } from '../ports/config.js'
@@ -205,9 +205,9 @@ describe('SessionLifecycle × migration gate（D8-3）', () => {
     // [U8a W5 fork 锚迁移] 原 create-fork-anchor 的「fork 继承 sidecar 落盘」断言对象
     // 随写点退役消失，重设计为反向读可见断言——本文件 fork 走真实 createForkedSessionFile
     //（anchor 测试 mock 了 session-fork，无法承载产物内容断言）。fork 继承 = 源 path 上
-    // 的 assistant entry 随产物进入新文件，readModelBinding 反向读命中继承值（与 pi
-    // 恢复读路径同源；thinkingLevel 无 entry → pi 默认 'off'）。
-    it('fork 继承反向读可见：源 assistant entry 随产物继承，readModelBinding 命中源模型', async () => {
+    // 的 assistant entry 随产物进入新文件，extractLatestModelFromJsonl 反向读命中继承值
+    //（与 pi 恢复读路径同源；thinkingLevel 无 entry → pi 默认 'off'）。
+    it('fork 继承反向读可见：源 assistant entry 随产物继承，extractLatestModelFromJsonl 命中源模型', async () => {
       const { lifecycle, svc } = makeEnv()
       // createForkedSessionFile 写入 getSessionsDir()（测试数据目录 sessions 子目录需先建）
       mkdirSync(getSessionsDir(), { recursive: true })
@@ -226,7 +226,7 @@ describe('SessionLifecycle × migration gate（D8-3）', () => {
       const forked = lifecycle.get(summary.id)
       const forkedFilePath = forked?.sessionFilePath
       expect(forkedFilePath).toBeTruthy()
-      expect(readModelBinding(forkedFilePath!)).toEqual({
+      expect(extractLatestModelFromJsonl(forkedFilePath!)).toEqual({
         modelId: 'src-provider/src-model',
         thinkingLevel: 'off',
       })
