@@ -2777,7 +2777,7 @@
     },
     {
       "id": "C-ext-23",
-      "summary": "skill reload 非破坏语义四支柱（skill-reload-nondestructive D11）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，reload 不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；post-reload session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（R2 按改动面触发）：authority 所列测试文件即四支柱锁定落点（reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
+      "summary": "skill reload 非破坏语义四支柱（skill-reload-nondestructive D11）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，reload 不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；post-reload session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动面触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
       "scope": [
         "extensions/universal/subagent-workflow/src/workflow-events.ts",
         "extensions/universal/subagent-workflow/src/session-lifecycle.ts",

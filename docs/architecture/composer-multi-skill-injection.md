@@ -208,11 +208,10 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **证据**：`segments.ts:96-98`（现序列化点，单点改造）。
 - **效果**：G5 成立（手打行为零变化）；标记自描述支撑 G4 兜底与降级模式（D7）。
 
-**D4：name → 文件路径的权威源 = pi `get_commands`（选定）**
-- **采用**：runtime 展开器解析 skill name 时，以 pi RPC `get_commands` 返回的 `source:"skill"` 项（`PiCommandInfo`，含 SKILL.md 路径）为权威映射，**不用**自建 SkillRegistry 做展开解析。SkillRegistry 职责不变（settings UI / 扫描预览）。
-- **被否**：用 SkillRegistry（自建扫描器）解析——与 pi 的 `loadSkills()` 是两套实现，同名冲突（pi 是 first-writer-wins）、gitignore 处理、名称校验等边缘行为可能漂移，展开错文件用户无感知。
-- **证据**：`rpc-client.ts:727-730`（get_commands 已有调用面）、pi `skills.js:318-346`（first-writer-wins）。
-- **效果**：「复用 pi 的逻辑」落在权威映射与展开格式两处，而非复刻 pi 的发现逻辑。
+**D4：name → 文件路径的权威源 = taiji SkillRegistry（skill-reload-nondestructive D7 修订；本节原选定的 pi `get_commands` 决策已被反转）**
+- **采用（现行）**：runtime 展开器解析 skill name 时，以 taiji SkillRegistry 扫描（`getGlobalSkills() ∪ getProjectSkills(sessionCwd)`，取 `SkillInfo.sourcePath`）为权威映射；**不信任标记自带 location** 的不变式不变——read 路径唯一来自权威扫描。SkillRegistry 职责自本修订起含注入权威映射（在 settings UI / 扫描预览之外）。project 扫描集含 `cwd/.pi/skills`（scan/watch 同源对账）。
+- **被否（本修订否决原选定）**：pi `get_commands` 快照——reload 才刷新的滞后快照，与「skill 变更即时生效、不依赖 pi 生命周期」目标冲突；同名覆盖语义保留与 pi first-set-wins 的对齐（global 先载）。反转的完整论证（扫描集差异 / 失败与陈旧窗口语义）见 skill-reload-nondestructive §3.3 D7 与 [ADR-0050](../adr/decisions.md)。
+- **证据**：`skill-injector.ts`（`SkillMappingSource` / registry 源映射）、`skill-dirs.ts`（project 扫描集）。
 
 **D5：展开格式与 pi 逐字对齐 + 探针守卫（选定；R4 修订：落点从原位替换改为末尾块内集中，见 D11）**
 - **采用**：runtime 展开器产出的 block 格式与 pi `_expandSkillCommand` 逐字一致：`<skill name="..." location="...">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`（body = SKILL.md 全文剥 frontmatter 后 trim；**baseDir = `dirname(SKILL.md path)`**，对齐 pi 实装 `skill.baseDir`，不取 `sourceInfo.baseDir`——见 §5 检查点 1 实施定案）。**R4 起 block 不再原位替换正文**：全部展开 block 集中在消息末尾的 `<taiji-skill-data>` 包裹块内（形态与去重规则见 D11），正文标记原样保留。`stripFrontmatter` 剥离逻辑与 pi `dist/utils/frontmatter.js` 逐字镜像（实施修订：pi 包 exports 白名单仅 `.`/`./rpc-entry`/`./client`，深路径 import 被拦、包根 import 会将 TUI/WASM 静态依赖拖进 tsup bundle——镜像的漂移风险由下方探针守卫兜住）。
@@ -266,7 +265,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
   - **降级形态（超预算/fail-safe，原 D7 降级块统一并入）**：块内为 `<taiji-skill/>` 标记清单 + 指引行（原 `<taiji-skills>` 块内容整体搬入，旧 tag 退役）。
   - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；get_commands 整体失败（mapping_unavailable）同理：正文留标记、不追加块。
 - **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据面干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
-- **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 get_commands 权威映射**（D4，与 pi 逐字对齐的要求一致；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
+- **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 SkillRegistry 权威扫描的 `sourcePath`**（D4 修订后权威源；「与 pi 逐字对齐」约束的是展开格式而非数据源；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
 - **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
 - **LLM 关联指引：正常形态不加文本内指引行（选定）**。理由：对齐信号完备——正文标记带 `name`、块内每个 `<skill>` 也带同名 `name`，citation/脚注模式主流 coding 模型可建立映射；块 tag 名语义化。**观察点**：若实测弱模型漏读末尾块（回答未体现 skill 内容），补救路径 = system-prompt extension 经 hook 注入提示词（一处生效全 session，不污染消息文本）；不回退到文本内指引行。降级形态保留指引行（该形态下 read 是唯一获取通道，指引是必要指令非冗余）。
 - **被否**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议面：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议面语义精度与新旧自识别，判定值得。
@@ -293,7 +292,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 | skill name 无映射（已卸载/未装） | 该标记原样透传（不进末尾块）+ 前端 toast + 消息内联提示 | 重装 skill 或删除该 chip 重发 |
 | SKILL.md 读取失败（权限/损坏） | 同上（透传 + 可见提示） | 检查文件权限；runtime 日志在 `<getDataDir>/logs/`（架构约定，非 `~/.pi/agent/logs/`） |
 | `<taiji-skill/>` 标记被 BeforeSend hook 改写破坏 | 标记残缺不展开，原样透传 + 可见提示 | 检查 plugin 的 BeforeSend hook 是否改写了消息文本。**边界**：pi 侧 `input` hook（注入后运行）改写破坏标记时无检测点（D8 检测域声明） |
-| get_commands RPC 整体失败（映射不可用，实施期补充） | 全部标记原样透传、不追加末尾块（展开与降级清单的 location 数据源均缺失）+ 可见提示；reason=`mapping_unavailable` | 无需恢复；RPC 恢复后下一条消息自动恢复注入 |
+| 映射源不可用（SkillRegistry 扫描异常 / 晚绑定未绑定；原 get_commands RPC 失败同 reason，实施期补充） | 全部标记原样透传、不追加末尾块（展开与降级清单的 location 数据源均缺失）+ 可见提示；reason=`mapping_unavailable` | 无需恢复；扫描恢复（含 5min 兜底重扫自愈）后下一条消息自动恢复注入。watcher 熔断期存在陈旧窗口（窗口内新增 skill 可能 `skill_missing`），窗口 ≤ 兜底周期且不劣于原快照形态（skill-reload-nondestructive D7 陈旧窗口语义） |
 | contextWindow 获取失败（get_session_stats RPC 错误） | fail-safe：降级形态（`<taiji-skill-data>` 内标记清单 + 指引行，D11） | 无需恢复；RPC 恢复后下一条消息自动回到全文注入 |
 | 展开后超窗且降级后仍超窗（正文自身巨大） | 正常发送（降级已最小化注入量）；若真超窗，pi overflow 报错 + 一次 compact-and-retry | 发送前预防：缩短正文 / 减 skill；**发送后救援**（§2.3 失败模式 C）：fork 到该消息之前 / 换大窗口模型 / 新 session——巨大消息无法被 compaction 挤掉，会话内无法自愈 |
 | sidecar 丢失 | 兜底反解析：先剥 `<taiji-skill-data>` 块、再认正文标记还原 chip（含正文保留，D7） | 无需恢复；兜底也失败则该消息显示纯文本（与现状行为一致） |
