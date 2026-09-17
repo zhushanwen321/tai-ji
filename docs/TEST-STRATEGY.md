@@ -62,7 +62,7 @@ node scripts/verify-scheduler-e2e.cjs
 
 > 规则 SSOT = AGENTS.md「测试」节「测试禁止触碰真实数据目录」。双层防线原为 runtime 包私有（2026-09-02 会话丢失事故后固化在 runtime vitest），2026-09-16 升级为仓库级强制——从非包 cwd 误跑 workspace 全仓 vitest 时 runtime 配置不加载、防线整段失效，测试删光 prod 数据目录（2026-09-16 同族事故）。
 
-- **双层防线**：① global-setup 将 `TAIJI_AGENT_DATA_DIR` 钉死 tmp + 对「注入真实 `~/.taiji`」fail-fast 拒跑；② fs-guard（setupFiles 切面）拦截全部破坏性 fs 操作（写/删/移动），白名单 = `os.tmpdir()` + `$TAIJI_AGENT_DATA_DIR`（≠ 真实目录）+ `~/.taiji-dev`（homedir 动态推导），其余目录一律抛错
+- **双层防线**：① global-setup 将 `TAIJI_AGENT_DATA_DIR` 钉死 tmp + 对「注入真实 `~/.taiji` / 非白名单目录」的注入值**自动脱钩**（2026-09-17 前为 fail-fast 拒跑；脱钩 = 删 env 后落 tmp，安全等价且免去人人 `env -u` 的摩擦，判定与 `isInjectedEnvAllowed` 共用）；② fs-guard（setupFiles 切面）拦截全部破坏性 fs 操作（写/删/移动），白名单 = `os.tmpdir()` + `$TAIJI_AGENT_DATA_DIR`（≠ 真实目录）+ `~/.taiji-dev`（homedir 动态推导），其余目录一律抛错
 - **唯一防线入口 = `taijiTestConfig` 工厂**（`test-guard/factory.ts`）：全仓所有 vitest.config.ts 一律经工厂包装，无条件注入 globalSetup + fs-guard（绝对路径注入，不受各包 root 差异影响；防线排最前，用户 setupFiles/globalSetup 追加保留，其余字段只增不改）；根级兜底 vitest.config.ts 同样经工厂包装——从仓库根 cwd 跑 vitest 防线同样生效
 - **漏挂机器守卫**：`scripts/check-vitest-guard.mjs` 静态扫描全部含测试的包根 + test-guard/ + 仓库根兜底 config，校验 config 经工厂包装（特征 = 引用 `test-guard/factory`），漏挂/缺失 exit 1（pre-commit 按路径触发 + CI invariants）；防线元测试收敛在 `test-guard/fs-guard.test.ts`
 - **写删目标约束**：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）

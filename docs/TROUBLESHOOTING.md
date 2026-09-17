@@ -245,6 +245,20 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 全仓入口只有仓库根一个（根级兜底 config 防线齐备）；单包测试永远用上面两种形态，禁 `pnpm exec vitest` / `pnpm vitest`。测试数据目录红线全文见 AGENTS.md「测试」节。
 
+### 18. 宿主 shell 注入 `TAIJI_AGENT_DATA_DIR=~/.taiji` 时的测试行为（自动脱钩，2026-09-17）
+
+**现象（旧行为）**：Electron / dev 宿主 shell 的 env 天然带 `TAIJI_AGENT_DATA_DIR=~/.taiji`（app 自身的数据目录）。在该 shell 里跑 `pnpm test`，或在该 shell 里 `git commit`（pre-commit 钩子内的守卫单测同为 vitest），会被 global-setup 以「指向真实用户数据目录」为由拒跑，必须 `env -u TAIJI_AGENT_DATA_DIR` 才能继续——人人需感知的环境摩擦。
+
+**现状（自动脱钩 + 单行通告）**：`test-guard/global-setup.ts` 检测到注入值指向**真实数据目录**或**非白名单目录**时，不再 `exit 1`，而是删除该 env 并落 tmp 重定向（判定条件与 `isInjectedEnvAllowed` 白名单共用，单一实现）：
+
+```
+[global-setup] 检测到宿主注入的 TAIJI_AGENT_DATA_DIR=/Users/<user>/.taiji（真实用户数据目录）——已自动脱钩，本次测试改用 tmp 重定向
+```
+
+**安全性等价**：测试永远拿不到真实目录（脱钩后一律 tmp 重定向），第二层 fs-guard（setupFiles 切面）仍拦全部白名单外破坏性操作；**合法注入不受影响**——注入 `tmpdir()` 或 `~/.taiji-dev` 之下的路径（CI 自定义 tmp / dev 实例）仍「尊重不覆盖」。
+
+**排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
+
 
 ## 环境变量速查
 

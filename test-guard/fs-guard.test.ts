@@ -122,21 +122,53 @@ describe('注入 env 合法性过滤（taiji-full-rename R3：白名单排除式
   })
 })
 
-describe('global-setup fail-fast（第一层防线，白名单形态）', () => {
-  it('注入指向家目录下非白名单假路径：拒跑退出码 1，错误含恢复动作', () => {
-    const fake = fakeHomePath()
+describe('global-setup 自动脱钩（第一层防线；2026-09-17 前为 fail-fast 拒跑）', () => {
+  it('注入指向真实数据目录：不阻塞，自动脱钩后改用 tmp 重定向并通告', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    withInjectedEnv(fake, () => {
-      try {
+    let created: string | undefined
+    try {
+      withInjectedEnv(join(homedir(), '.taiji'), () => {
         setup()
-        expect(exitSpy).toHaveBeenCalledWith(1)
-        expect(errSpy.mock.calls.some((args) => args.join('').includes('unset TAIJI_AGENT_DATA_DIR'))).toBe(true)
-      } finally {
-        exitSpy.mockRestore()
-        errSpy.mockRestore()
-      }
-    })
+        created = process.env.TAIJI_AGENT_DATA_DIR
+        expect(exitSpy).not.toHaveBeenCalled()
+        expect(created).not.toBe(join(homedir(), '.taiji'))
+        expect(created?.startsWith(tmpdir())).toBe(true)
+        expect(warnSpy.mock.calls.some((args) => args.join('').includes('自动脱钩'))).toBe(true)
+      })
+    } finally {
+      exitSpy.mockRestore()
+      warnSpy.mockRestore()
+      if (created) rmSync(created, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('注入指向家目录下非白名单假路径：同样自动脱钩（原第二道 fail-fast）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let created: string | undefined
+    try {
+      withInjectedEnv(fakeHomePath(), () => {
+        setup()
+        created = process.env.TAIJI_AGENT_DATA_DIR
+        expect(created?.startsWith(tmpdir())).toBe(true)
+        expect(warnSpy.mock.calls.some((args) => args.join('').includes('非白名单目录'))).toBe(true)
+      })
+    } finally {
+      warnSpy.mockRestore()
+      if (created) rmSync(created, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('注入白名单内路径（CI 自定义 tmp）：尊重不覆盖（脱钩不误伤合法注入）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'taiji-injected-'))
+    try {
+      withInjectedEnv(dir, () => {
+        setup()
+        expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(dir)
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 })
 

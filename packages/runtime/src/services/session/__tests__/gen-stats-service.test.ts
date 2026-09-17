@@ -20,7 +20,7 @@
  * 数据目录红线（TEST-STRATEGY / fs-guard）：全部写删目标 = mkdtempSync(
  * join(tmpdir(), 'taiji-gen-stats-')) + TAIJI_AGENT_DATA_DIR env 注入，零共享推导路径触碰。
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run src/services/session/__tests__/gen-stats-service.test.ts
+ * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/gen-stats-service.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'

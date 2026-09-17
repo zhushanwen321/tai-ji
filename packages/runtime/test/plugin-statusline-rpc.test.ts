@@ -19,7 +19,7 @@
  * - 广播 `plugin:statusBarUpdate`（ADR-0015 契约）携带全量 items 快照
  *   （STATUSBAR_COALESCE_MS 合并窗口，trailing-edge debounce）
  *
- * 运行：cd packages/runtime && env -u TAIJI_AGENT_DATA_DIR npx vitest run test/plugin-statusline-rpc.test.ts
+ * 运行：cd packages/runtime && npx vitest run test/plugin-statusline-rpc.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'

@@ -13,10 +13,12 @@
  * 使重定向失效（见 setup 内 fail-fast）；第二层防线 = fs-guard setupFiles 拦截全部
  * 破坏性 fs 操作的白名单外目标（test/fs-guard.ts）。
  *
- * [2026-09-15 一致性审查 B 组] fail-fast 升级为白名单形态：注入值必须落在
- * tmpdir()/~/.taiji-dev 之下（isInjectedEnvAllowed，与 fs-guard 白名单共用判定）才
- * 「尊重不覆盖」，否则拒跑——不再只拒缺省真实目录一个点，指到其他家目录真实路径
- * （含改名前旧数据目录）的注入一律拒跑。
+ * [2026-09-17 自动脱钩] fail-fast 改为**自动脱钩 + 单行通告**：宿主 shell（dev 实例 / Electron
+ * 主进程）会把 `TAIJI_AGENT_DATA_DIR=~/.taiji` 导出到子进程环境，导致任何测试与 pre-commit
+ * 钩子内的守卫单测都必须 `env -u TAIJI_AGENT_DATA_DIR` 才能跑（人人需感知的环境摩擦）。
+ * 安全性不依赖「拒跑」：脱钩后一律落 tmp 重定向，fs-guard 第二层照旧拦全部白名单外破坏
+ * 性操作（拦截能力未变），故改为「不阻塞 + 保留可诊断性」。原两道 fail-fast 的判定条件
+ * （真实数据目录 / 非白名单目录）保留为脱钩触发条件，日志文案含原因与去向。
  *
  * 注意：globalSetup 在隔离进程跑，return 的 teardown 在所有测试结束后调用。
  * process.env 的设置通过 `process.env.X = ...` 直接赋值，对 worker 进程可见
@@ -38,29 +40,22 @@ export function setup(): void {
   if (injected) {
     const resolved = resolve(injected)
     const targetsRealDataDir = resolved === REAL_DATA_DIR || resolved.startsWith(REAL_DATA_DIR + sep)
-    if (targetsRealDataDir) {
-      console.error(
-        `[global-setup] TAIJI_AGENT_DATA_DIR 指向真实用户数据目录，拒绝运行测试：${resolved}\n` +
-          `  恢复动作：unset TAIJI_AGENT_DATA_DIR（回到 tmp 重定向），或改指 dev 数据目录 ` +
-          `~/.taiji-dev（2026-09-02 会话丢失事故防线，见 test/fs-guard.ts 第二层）`,
+    // [2026-09-17] 两道判定（真实数据目录 / 非白名单目录）从 fail-fast 改为自动脱钩：
+    // 判定条件与理由不变（2026-09-02 会话丢失事故 + 2026-09-15 白名单形态），只是处置从
+    // 「exit 1 阻塞」换成「脱钩后落 tmp + 通告」——测试永远拿不到真实目录（安全等价），
+    // 但宿主 env 泄漏不再要求使用者记得 `env -u`。
+    if (targetsRealDataDir || !isInjectedEnvAllowed(resolved)) {
+      delete process.env.TAIJI_AGENT_DATA_DIR
+      console.warn(
+        `[global-setup] 检测到宿主注入的 TAIJI_AGENT_DATA_DIR=${resolved}` +
+          `（${targetsRealDataDir ? '真实用户数据目录' : '非白名单目录'}）——已自动脱钩，` +
+          `本次测试改用 tmp 重定向（2026-09-02 会话丢失事故第一层防线；如需指定数据目录，` +
+          `请注入 tmpdir() 或 ~/.taiji-dev 之下的路径）`,
       )
-      process.exit(1)
+    } else {
+      // 已设且安全（CI 自定义 tmp / dev 实例注入的 ~/.taiji-dev），尊重不覆盖
+      return
     }
-    // [2026-09-15 一致性审查 B 组] 白名单形态 fail-fast（第二道）：上一条前缀判定只覆盖
-    // 缺省真实目录一个点——注入值显式指到其他家目录真实路径（含改名前的旧数据目录，
-    // 物理存在且含用户数据）时旧判定不拦，guard 层旧版又无条件放行注入值，两层防线
-    // 同时失守。改为排除式：注入值必须落在 tmpdir()/~/.taiji-dev 之下才「尊重不覆盖」，
-    // 判定与 fs-guard 白名单过滤共用 isInjectedEnvAllowed（单一实现，防两防线漂移）。
-    if (!isInjectedEnvAllowed(resolved)) {
-      console.error(
-        `[global-setup] TAIJI_AGENT_DATA_DIR 指向非白名单目录，拒绝运行测试：${resolved}\n` +
-          `  合法落点仅限 tmpdir() 或 ~/.taiji-dev 之下。\n` +
-          `  恢复动作：unset TAIJI_AGENT_DATA_DIR（回到 tmp 重定向），或改指 dev 数据目录 ~/.taiji-dev`,
-      )
-      process.exit(1)
-    }
-    // 已设且安全（CI 自定义 tmp / dev 实例注入的 ~/.taiji-dev），尊重不覆盖
-    return
   }
   testDataDir = mkdtempSync(join(tmpdir(), 'taiji-test-data-'))
   process.env.TAIJI_AGENT_DATA_DIR = testDataDir
