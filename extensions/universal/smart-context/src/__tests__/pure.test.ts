@@ -22,7 +22,7 @@ describe("normalizeSmartContextConfig", () => {
 	it("非对象输入回退默认值", () => {
 		const c = normalizeSmartContextConfig(null);
 		expect(c).toEqual(DEFAULT_SMART_CONTEXT_CONFIG);
-		expect(c.reminderThresholds).toEqual([200_000, 400_000, 600_000]);
+		expect(c.reminderThresholds).toEqual([400_000, 500_000, 600_000]);
 	});
 
 	it("阈值过滤非正数并升序、截 3 档；空数组回退默认", () => {
@@ -30,7 +30,7 @@ describe("normalizeSmartContextConfig", () => {
 		expect(c.reminderThresholds).toEqual([100_000, 200_000, 300_000]);
 
 		const c2 = normalizeSmartContextConfig({ reminderThresholds: [] });
-		expect(c2.reminderThresholds).toEqual([200_000, 400_000, 600_000]);
+		expect(c2.reminderThresholds).toEqual([400_000, 500_000, 600_000]);
 	});
 
 	it("excludedModels 只留含 / 的字符串条目并去重（精准匹配要求完整 provider/modelId）", () => {

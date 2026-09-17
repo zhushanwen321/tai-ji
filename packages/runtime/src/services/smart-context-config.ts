@@ -11,7 +11,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPiAgentDir } from '../infra/pi/pi-paths.js'
-import type { SyncFileLockOptions } from '../utils/file-lock.js'
 import { extractRefString, rmwExtConfigField } from './ext-config-rmw.js'
 
 /**
@@ -33,8 +32,8 @@ const SMART_CONTEXT_CONFIG_REL = join('config', 'smart-context-ext-config.json')
 
 /** 3 档提醒阈值默认值工厂（token 绝对数，与 extension 的 DEFAULT_REMINDER_THRESHOLDS 一致）。 */
 function defaultThresholds(): number[] {
-  // eslint-disable-next-line no-magic-numbers -- 200K/400K/600K 是与 pi-smart-context extension 契约对齐的默认档位
-  return [200_000, 400_000, 600_000]
+  // eslint-disable-next-line no-magic-numbers -- 400K/500K/600K 是与 pi-smart-context extension 契约对齐的默认档位
+  return [400_000, 500_000, 600_000]
 }
 
 /** 提醒阈值最大档数（与 extension 的 MAX_THRESHOLD_TIERS 一致）。 */
@@ -55,18 +54,8 @@ function smartContextDefaultBase(): Record<string, unknown> {
 }
 
 /** smart-context 配置文件完整路径（${PI_CODING_AGENT_DIR}/config/smart-context-ext-config.json）。 */
-export function getSmartContextConfigPath(): string {
+function getSmartContextConfigPath(): string {
   return join(getPiAgentDir(), SMART_CONTEXT_CONFIG_REL)
-}
-
-/**
- * 锁参数覆盖（仅测试用）。生产保持 file-lock.ts 默认值，与 setRenameModel 同协议。
- */
-let smartContextLockOptions: SyncFileLockOptions = {}
-
-/** 覆盖 smart-context-ext-config.json 写锁参数（仅测试用）。传 {} 恢复默认。 */
-export function setSmartContextLockTimingForTest(opts: SyncFileLockOptions): void {
-  smartContextLockOptions = opts
 }
 
 /**
@@ -122,7 +111,7 @@ export function getSmartContextConfig(): SmartContextConfigSnapshot {
 
 /** RMW 只覆盖指定字段（锁协议走共享 rmwExtConfigField，与 setRenameModel 结构性对齐）。 */
 function writeSmartContextField(apply: (base: Record<string, unknown>) => void): void {
-  rmwExtConfigField(getSmartContextConfigPath(), smartContextLockOptions, smartContextDefaultBase, apply)
+  rmwExtConfigField(getSmartContextConfigPath(), {}, smartContextDefaultBase, apply)
 }
 
 /** 设置智能上下文压缩开关（只覆盖 enabled 字段，保留其他字段）。 */

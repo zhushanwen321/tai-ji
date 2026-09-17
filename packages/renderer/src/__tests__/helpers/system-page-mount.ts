@@ -110,7 +110,7 @@ export function modelFixtures(): ModelInfo[] {
 }
 
 /** smart-context 默认提醒阈值档（绝对 token 数，与 extension DEFAULT_REMINDER_THRESHOLDS 一致）。 */
-const SMART_CONTEXT_DEFAULT_THRESHOLDS = [200_000, 400_000, 600_000] as const
+const SMART_CONTEXT_DEFAULT_THRESHOLDS = [400_000, 500_000, 600_000] as const
 
 /** smart-context 默认配置 fixture（与 extension 默认值一致）。 */
 export function smartContextFixture(excludedModels: string[] = []): {

@@ -38,7 +38,7 @@ function makePi(): { pi: ExtensionAPI & { sendUserMessage: ReturnType<typeof vi.
 function makeCtx(compactImpl?: (options: CompactOpts) => void): ExtensionContext {
 	return {
 		model: { provider: "zai", id: "glm" },
-		getContextUsage: () => ({ tokens: 250_000, contextWindow: 1_000_000 }),
+		getContextUsage: () => ({ tokens: 450_000, contextWindow: 1_000_000 }),
 		sessionManager: { getEntries: () => [] },
 		compact: compactImpl ?? ((options: CompactOpts) => {
 			options.onComplete({

@@ -23,7 +23,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 |---|---|---|---|
 | `enabled` | boolean | `true` | 总开关 |
 | `compactModel` | `{type:"ref", ref:string}` | `{type:"ref", ref:""}` | 压缩模型（完整 `provider/modelId`）。`ref` 为空 = 跟随当前会话模型（same-model 模式）；等于当前模型同样进 same-model 模式 |
-| `reminderThresholds` | `number[]` | `[200000, 400000, 600000]` | 3 档提醒阈值（token 绝对数，升序） |
+| `reminderThresholds` | `number[]` | `[400000, 500000, 600000]` | 3 档提醒阈值（token 绝对数，升序） |
 | `excludedModels` | `string[]` | `[]` | 排除模型列表，完整 `provider/modelId` 精准等值匹配（如 `"deepseek/deepseek-chat"`），不做前缀匹配 |
 
 ### 配置示例
@@ -32,7 +32,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 {
   "enabled": true,
   "compactModel": { "type": "ref", "ref": "xiaomi-token-plan-cn/mimo-v2.5" },
-  "reminderThresholds": [200000, 400000, 600000],
+  "reminderThresholds": [400000, 500000, 600000],
   "excludedModels": ["deepseek/deepseek-chat"]
 }
 ```
