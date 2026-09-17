@@ -59,8 +59,9 @@ configApi.onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {
  */
 export function useProjectSkills(currentCwd: Ref<string | null>) {
   // 按 cwd 缓存的项目 skill 表（cwd → SkillInfo[]）。实例级 state（每次 useProjectSkills 调用新建），
-  // 命中缓存不重复 RPC，避免闪烁 + 省 RPC。当前唯一消费者是 landing CommandPopover（单例活跃），
-  // per-instance 缓存足够；未来多消费者共享再提升到模块级或 store。
+  // 命中缓存不重复 RPC，避免闪烁 + 省 RPC。消费者是各 Composer 实例（landing 单例 + panel
+  // per-session——split mode 多 panel 多实例，同 cwd 各自缓存各拉一次，失效信号逐实例刷新）；
+  // 未来需要跨实例共享再提升到模块级或 store。
   const skillsByCwd = ref<Map<string, SkillInfo[]>>(new Map())
   // R3（review fix）：in-flight 去重。cwd 快速切 A→B→A 时，若 A 的 RPC 仍 pending，
   // 没有 in-flight 标记会重复触发 loadFor(A)。Set 记录 pending cwd，RPC 完成后删除。

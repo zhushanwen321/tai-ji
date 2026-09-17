@@ -138,14 +138,17 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     expect(bodyItemButtons()).toHaveLength(0)
   })
 
-  it('L5 session 态（variant=panel + sessionId=s1）→ 用 commandStore（3 项 pi 命令）+ 前端注入 compact = 4 项，不被 globalSkills(7) 污染', async () => {
+  // [ADR-0050 修订翻转] panel 态 slash 段过滤 skill 项（双入口消除）：SESSION_CMDS 的 /fix
+  // source='skill'（kind=source）是 pi 真源 skill 命令，不再进 panel slash 段——3 pi 命令中
+  // /commit /review 保留 + compact = 3 项。不被 globalSkills(7) 污染的断言保留。
+  it('L5 session 态（variant=panel + sessionId=s1）→ 用 commandStore + 前端注入 compact，不被 globalSkills(7) 污染；pi 真源 skill 项（/fix source=skill）不进 slash 段', async () => {
     // AC-3：session 态不并入 globalSkills（配置态/运行态不混淆，ADR-0050 D2）
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
       props: { open: true, type: 'slash', variant: 'panel', sessionId: 's1', query: '', globalSkills: LANDING_SKILLS },
     })
     await flushPromises()
-    // 推 session 源命令（3 条 pi 动态命令）
+    // 推 session 源命令（3 条 pi 动态命令：2 extension + 1 skill）
     const msg = {
       type: 'session.commands',
       payload: { sessionId: 's1', commands: SESSION_CMDS },
@@ -155,8 +158,54 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     await nextTick()
 
     const btns = bodyItemButtons()
-    expect(btns).toHaveLength(4) // 3 pi 命令 + 1 前端注入 compact，非 7 条 globalSkills
+    // 2 extension 命令 + 1 前端注入 compact = 3 项；/fix（source=skill）被 skill 段入口吸收
+    expect(btns).toHaveLength(3)
     expect(btns.some((b) => b.textContent?.includes('/compact'))).toBe(true) // 前端注入的 builtin，globalSkills 里没有
+    expect(btns.some((b) => b.textContent?.includes('commit'))).toBe(true)
+    expect(btns.some((b) => b.textContent?.includes('fix'))).toBe(false) // skill 项不进 panel slash 段
+  })
+
+  // L5b [ADR-0050 修订] 双入口消除的正向用例：panel 态 slash 段对 `skill:` 前缀 pi 真源命令
+  // 过滤（pi 的 skill 命令名是裸 `skill:<name>`）；landing 态含 skill 不变（单列形态回归锁）。
+  it('L5b panel 态 slash 段过滤 skill: 前缀项；landing 态 slash 含 skill 不变（回归锁）', async () => {
+    wrapper = mount(CommandPopover, {
+      attachTo: document.body,
+      props: { open: true, type: 'slash', variant: 'panel', sessionId: 's1', query: '' },
+    })
+    await flushPromises()
+    const msg = {
+      type: 'session.commands',
+      payload: {
+        sessionId: 's1',
+        commands: [
+          { name: 'skill:alpha', description: 'A', source: 'skill' },
+          { name: '/commit', description: '提交', source: 'extension' },
+        ],
+      },
+    } as ServerMessage<'session.commands'>
+    events.dispatchSession('s1', msg)
+    await flushPromises()
+    await nextTick()
+
+    const btns = bodyItemButtons()
+    // compact + commit = 2 项；skill:alpha 不进 panel slash 段（skill 段是唯一 skill 入口）
+    expect(btns).toHaveLength(2)
+    expect(btns.some((b) => b.textContent?.includes('alpha'))).toBe(false)
+    expect(btns.some((b) => b.textContent?.includes('commit'))).toBe(true)
+    expect(btns.some((b) => b.textContent?.includes('/compact'))).toBe(true)
+    wrapper?.unmount()
+    wrapper = null
+
+    // 对照：landing 态 slash 含 skill 不变（L1 单列形态，过滤仅限 panel）
+    wrapper = mount(CommandPopover, {
+      attachTo: document.body,
+      props: { open: true, type: 'slash', variant: 'landing', sessionId: undefined, query: '', globalSkills: LANDING_SKILLS },
+    })
+    await flushPromises()
+    await nextTick()
+    const landingBtns = bodyItemButtons()
+    expect(landingBtns).toHaveLength(7)
+    expect(landingBtns.some((b) => b.textContent?.includes('code-review'))).toBe(true)
   })
 
   it('L6 每个命令项含 svg（icon=star 渲染）', async () => {

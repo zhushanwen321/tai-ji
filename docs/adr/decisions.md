@@ -131,8 +131,8 @@ isOpen/activeTab/docked 三控制态经 useSessionScopedState 按 focusedSession
 ### ADR-0032 thinkingLevelMap key/value 语义
 key = UI 档位（含 max），value = 发 pi 的实际 level（max → xhigh）；可用档位按 key 判定，传 pi 必经 resolveThinkingValue 映射（pi 不认识 max 会 clamp）。实装 `core/domain/composer/thinking-levels.ts`。
 
-### ADR-0050 landing slash 命令源按 variant 分支
-landing 合并两源（本地 + pi）、session 内只用 pi 源（CommandPopover variant prop）。
+### ADR-0050 slash/skill 候选源按 variant 分支（panel skill 段权威 = taiji registry）
+skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），但 panel 态 slash 段过滤 skill 项——panel 的 skill 段是唯一 skill 入口（双入口消除；landing 单列形态不过滤）。用户可感知后果两条：①panel `/` 浮层 slash 段不再列 skill 项（skill 只经行中 `/` 的 skill 段入口）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
 
 ### ADR-0028 / ADR-0029 / ADR-0030（digest）搜索域内聚（0028/0029 部分有效）
 多源聚合（命令/文件/会话/recents）收敛于 `core/src/domain/new-task-search/`（search.ts 编排 + match-engine + file-match 单一管线复用于 composer # 与 SearchModal）；mock 反向依赖生产类型，生产类型归 domain types.ts。登记 C-state-07。

@@ -32,8 +32,8 @@
       :session-id="sessionId ?? undefined"
       :cwd="flow.currentCwd?.value ?? null"
       :variant="variant"
-      :project-skills="landingProjectSkills"
-      :global-skills="landingGlobalSkills"
+      :project-skills="projectSkills"
+      :global-skills="globalSkills"
       :selected-skill-names="selectedSkillNames"
       :query="popoverQuery"
       @select="onCmdSelect"
@@ -213,6 +213,7 @@ import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
 import QueueBubble from './QueueBubble.vue'
 import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
@@ -235,9 +236,21 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
-const { projectSkills: landingProjectSkills } = useProjectSkills(flow.currentCwd) // W3 ADR-0051：landing 当前 cwd 项目 skill
-const { globalSkills: landingGlobalSkills } = useGlobalSkills() // W4 FR-5：landing 全局 skill
+// 项目 skill 的 cwd 源（ADR-0050 修订，skill-reload-nondestructive D6）：panel 态 = sessionStore
+// 投影的 session cwd（session 创建时锁定；split mode 各 panel 各自 session → 各自 cwd，
+// Composer 按 props.sessionId 查询天然分流）；landing 态维持 flow.currentCwd（新任务流选定
+// 目录，普通对象内嵌套 ComputedRef 不自动解包须显式 .value，可选链兼容旧 mock 形态）。
+const projectSkillsCwd = computed<string | null>(() => {
+  if (props.variant === 'panel') {
+    if (!props.sessionId) return null
+    return sessionStore.list.find((s) => s.id === props.sessionId)?.cwd ?? null
+  }
+  return flow.currentCwd?.value ?? null
+})
+const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
+const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
 const isActive = computed(() => {
   if (!props.sessionId) return false
   return chatStore.isActive(props.sessionId)

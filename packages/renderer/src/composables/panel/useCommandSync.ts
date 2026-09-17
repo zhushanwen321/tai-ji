@@ -72,9 +72,12 @@ export function useCommandSync(
    * 写入 reply.sessionId 分区（非调用方实时 sid），从结构上消除 ADR-0049 M1 竞态。
    * settle 即清（下次同 sid 触发重新拉取，无条件恢复腿）与引用比对防误删由 factory 内建。
    *
-   * 链路盲区（验收 S3 前提）：拉到的是 pi 内存 skill 注册表的当前值，不是磁盘当前值——
-   * 磁盘 skill 增删须经 chokidar watcher → ReloadOrchestrator → pi ctx.reload() 重扫才进
-   * 注册表（秒级）。reload 未完成时拉到的仍是旧列表，这是降级不是 bug，勿当缺陷修。
+   * 链路时效（ADR-0050 修订后）：本拉取的有效消费面是 slash 命令段——skill 候选已切
+   * taiji SkillRegistry 广播链（config.skillCacheInvalidated → useGlobalSkills/
+   * useProjectSkills 重拉，即时），panel slash 段的 skill: 项也在展示层被过滤，二者均
+   * 不依赖本链路的新鲜度。拉到的内容相对磁盘仍有秒级滞后（pi 内存快照须经 watcher →
+   * reload 重扫才更新），只影响 pi 侧状态（/skill: 注册表 + system prompt 段），
+   * 是降级不是 bug，勿当缺陷修。
    */
   function pull(sid: string): void {
     const { promise } = commandsFetchDedup.run(sid, () =>

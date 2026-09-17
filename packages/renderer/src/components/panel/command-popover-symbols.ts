@@ -9,7 +9,7 @@
  * - session 路：sessionStore（sidebar 同款 groups/list，跨 cwd 全量）
  * - subagent 路：subagentStore per-session 分区（ADR-0049 Map 分区）+ 固定尾部「新建」项
  */
-import type { CommandSourceInfo, SessionSummary, SkillInfo, SubagentRecord } from '@taiji/shared'
+import type { SessionSummary, SkillInfo, SubagentRecord } from '@taiji/shared'
 import { isInternalSkillName, isInternalSlashName } from '@/lib/internal-command-filter'
 import { bareSkillCommandName } from './command-popover-skill-candidates'
 
@@ -149,6 +149,17 @@ interface SlashCandidateInput {
 }
 
 /**
+ * slash 项是否 skill 形态（单点判据）：kind === 'skill'（SessionCommand.kind = pi source，
+ * pi 真源 skill 命令的 source 恒 'skill'）或归一化名带 /skill: 前缀（pi 的 skill 命令名是
+ * 裸 `skill:<name>`，归一化补 / 后命中）。同时驱动：buildSlashCandidates 的 selected 比对/
+ * onSelect 分流/displayName 剥前缀（isSkill 局部量）与 buildPanelSlashCandidates 的 panel
+ * slash 段 skill 项过滤（ADR-0050 修订双入口消除）。
+ */
+function isSkillSlashItem(name: string, kind?: string): boolean {
+  return kind === 'skill' || normalizedSlashName(name).startsWith('/skill:')
+}
+
+/**
  * slash 路候选（行首命令浮层）：query 过滤（子串匹配）+ CmdItem 组装。
  * skill 命令去 /skill: 前缀显名（icon 已表示类型）；displayName 仅用于模板，onSelect 传完整
  * name；声明侧无 icon（schema v2 无 icon 字段）——iconKeyForCommand 按 name/source 推断
@@ -159,7 +170,7 @@ interface SlashCandidateInput {
  * slash 路（`+` 菜单「命令」入口 / 行首浮层）不打 ⇒ 同一 skill 可插两次、runtime 注入两遍
  * SKILL.md 全文。比对键与 skill 通路同口径：剥 `/skill:` / `/` 前缀的裸 skill 名。
  *
- * `isSkill` 判据（`kind === 'skill' || name 带 /skill:`）同时驱动 selected 比对、onSelect 分流
+ * `isSkill` 判据（isSkillSlashItem 单点）同时驱动 selected 比对、onSelect 分流
  * （insertSkillChip）与 displayName 剥前缀——提成局部量后一处判定三处消费。此前 displayName
  * 只看 `c.kind === 'skill'`：kind 非 skill 但名字带 `/skill:` 的项会被判为 skill（裸名比对 +
  * 走 skill chip），显示却仍带 `/skill:` 前缀（最终复审 N-4）。当前产线不可达（pi 的 source 恒
@@ -188,7 +199,7 @@ export function buildSlashCandidates(
   const filtered = q ? all.filter((c) => normalizedSlashName(c.name).toLowerCase().includes(q)) : all
   return filtered.map((c) => {
     const name = normalizedSlashName(c.name)
-    const isSkill = c.kind === 'skill' || name.startsWith('/skill:')
+    const isSkill = isSkillSlashItem(c.name, c.kind)
     return {
       id: c.id,
       name,
@@ -206,24 +217,23 @@ export function buildSlashCandidates(
 
 /**
  * panel 态 slash 候选组装（自 CommandPopover.vue 拆出，≤300 行规范）：
- * compact 固定头部 + merged 过滤内部命令。D3：merged（resolveSlashCommands 合并）会丢
- * pi 真源的 sourceInfo——skill 项的 SKILL.md 路径在此从真源按归一化名回填，
- * 供 onCmdSelect 按 isSkill 分流后透传 insertSkillChip。
+ * compact 固定头部 + merged 过滤内部命令 + skill 项过滤。skill 项过滤（ADR-0050 修订，
+ * skill-reload-nondestructive D6 双入口消除）：pi 真源 skill 命令不再进 panel 的 slash 段
+ * ——panel 的 skill 段是唯一 skill 入口，skill 候选/location 一律走 taiji 源
+ * buildSkillCandidates（location 取 SkillInfo.sourcePath）；landing 态单列形态不适用本过滤
+ * （过滤会把 skill 整体移出浮层 = 回归）。slash 命令族 compact + merged 语义不变——
+ * skill 过滤只是展示段裁剪，不影响合并规则。
  */
 export function buildPanelSlashCandidates(
   merged: ReadonlyArray<SlashCandidateInput>,
-  piCmds: Array<{ name: string; sourceInfo?: CommandSourceInfo }>,
   compactCmd: SlashCandidateInput,
-): Array<SlashCandidateInput & { location?: string }> {
-  const skillLocationByName = new Map<string, string>()
-  for (const c of piCmds) {
-    const path = c.sourceInfo?.path
-    if (path) skillLocationByName.set(normalizedSlashName(c.name), path)
-  }
-  const withLocation = merged
-    .filter((c) => !isInternalSlashName(c.name))
-    .map((c) => ({ ...c, location: skillLocationByName.get(normalizedSlashName(c.name)) }))
-  return [compactCmd, ...withLocation]
+): Array<SlashCandidateInput> {
+  return [
+    compactCmd,
+    ...merged
+      .filter((c) => !isInternalSlashName(c.name))
+      .filter((c) => !isSkillSlashItem(c.name, c.kind)),
+  ]
 }
 
 /**
