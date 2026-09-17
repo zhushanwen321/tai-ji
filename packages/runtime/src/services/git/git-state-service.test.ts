@@ -61,7 +61,11 @@ function createService(executor: IGitExecutor) {
 
 /** stub 观测器（status 链用例不触观测器；类型收窄免构造真实 resolver）。 */
 function makeStubObserver(): GitRepoObserver {
-  const stub = { readObservation: () => { throw new Error('stub observer 不应在 status 链被调用') }, pruneCache: () => {} }
+  const stub = {
+    readObservation: () => { throw new Error('stub observer 不应在 status 链被调用') },
+    pruneCache: () => {},
+    invalidateCwd: () => {},
+  }
   return stub as unknown as GitRepoObserver
 }
 

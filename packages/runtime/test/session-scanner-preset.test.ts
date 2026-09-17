@@ -46,9 +46,9 @@ vi.mock('../src/infra/pi/pi-paths.js', () => ({
 }))
 
 // detectBareWorkspaceCached 经 workspace-detector，mock 避免真实 cwd 探测
+// （pruneBareCache 已随批 4 U10 观测器合并删除：收缩动作收口在 IGitInfoReader.pruneStaleCache 单点）
 vi.mock('../src/services/worktree/workspace-detector.js', () => ({
   detectBareWorkspaceCached: () => false,
-  pruneBareCache: () => undefined,
 }))
 
 import { SessionScanner } from '../src/services/session/session-scanner.js'

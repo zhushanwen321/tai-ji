@@ -22,6 +22,15 @@ import { FileChangeDiffAdapter } from '../src/infra/pi/file-change-diff-adapter.
 import { GitStateService } from '../src/services/git/git-state-service.js'
 import type { GitCommand, GitExecutorResult, IGitExecutor } from '../src/services/ports/git-executor.js'
 
+
+/** stub 观测器：用例不触观测器链，仅满足 GitStateService 必选依赖（类型收窄）。 */
+const stubObserver = {
+  readObservation: () => { throw new Error('stub observer 不应被调用') },
+  pruneCache: () => {},
+  invalidateCwd: () => {},
+} as unknown as import('../src/services/git/repo-observer.js').GitRepoObserver
+
+
 type ExecImpl = (cwd: string, command: GitCommand, args: string[]) => Promise<GitExecutorResult>
 
 /** 手写 fake IGitExecutor：记录全部调用（含 timeoutMs），行为可编程。 */
@@ -44,7 +53,7 @@ function createFakeExecutor() {
 }
 
 function makeAdapter(fake: ReturnType<typeof createFakeExecutor>) {
-  const gitState = new GitStateService({ executor: fake.executor })
+  const gitState = new GitStateService({ executor: fake.executor, repoObserver: stubObserver })
   return new FileChangeDiffAdapter(gitState)
 }
 

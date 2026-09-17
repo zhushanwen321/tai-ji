@@ -16,6 +16,15 @@ import { GitService, GitError, type GitServiceOptions } from '../src/services/gi
 import { GitStateService } from '../src/services/git/git-state-service.js'
 import type { IGitExecutor, GitExecutorResult } from '../src/services/ports/git-executor.js'
 
+
+/** stub 观测器：用例不触观测器链，仅满足 GitStateService 必选依赖（类型收窄）。 */
+const stubObserver = {
+  readObservation: () => { throw new Error('stub observer 不应被调用') },
+  pruneCache: () => {},
+  invalidateCwd: () => {},
+} as unknown as import('../src/services/git/repo-observer.js').GitRepoObserver
+
+
 const executor = { exec: vi.fn() }
 const sessionService = { getSummary: vi.fn() }
 
@@ -37,7 +46,7 @@ function svc(): GitService {
   return new GitService({
     sessionService: sessionService as unknown as GitServiceOptions['sessionService'],
     executor: executor as unknown as IGitExecutor,
-    stateService: new GitStateService({ executor: executor as unknown as IGitExecutor }),
+    stateService: new GitStateService({ executor: executor as unknown as IGitExecutor, repoObserver: stubObserver }),
   })
 }
 
