@@ -9,6 +9,7 @@
 3. **现状基线**：W11 之后——taiji 对 pi JSONL 的直写链路全部消灭（活跃 rename + 兜底直写 W1 删；非活跃 rename W11 切 `withEphemeralPi`；handoff W11 迁 sidecar；patchCwd W11 迁 restore tmp），R1 allowlist 空集、检查无条件化。
 4. **行号口径**：行号为 W1 后实测（按符号名定位）；与 plan 基线行号的偏差——非活跃 rename 直写 `:302→:331`（W1 改动使 renameSession 内行号后移），`persistHandedOff` 实现体 `:464→:455`（append `openSync('a')` 在 `:467`），`patchSessionCwd` `:518→:521`（`atomicWrite` 在 `:543`）。
 5. **快照 RPC 频率量化（P0.5② 终判，W7/W8 实测）**：标量六实例全量接线后，典型操作序列（3 轮对话 + 1 次切模型）的快照 RPC 总量 5-7 次（W7 标量 5 次：播种 3 + 失效 2；W8 补三实例后合计 7 次：get_session_stats 3 + get_state 2 + get_commands 2），p95 0.6-1.7ms（毫秒级，远低于 UI 可感知阈值）；事件风暴被 300ms 防抖聚合（20 次失效 → 1 次拉取，用例实测），无队列堆积。**结论：已量化，无感知，无需降级**——父文档 P0.5 失败预案（防抖拉长 / 批量快照 / 仅活跃 session 拉取）均不启用。
+6. **机器校验（2026-09-17 补）**：本表行内「声明处 `@data-owner #N`」声明由 `scripts/check-doc-symbol-drift.mjs` 检查面 5 反向锁定——源码里必须真存在该注解，且源码注解引用的条目号必须在本表内（双向）。注解与条目号的另一方向（注解 → 条目号存在）由 taste-lint `require-data-owner-annotation` 管，其扫描面现为 renderer + core 全域——**runtime / extensions 侧双向均由检查面 5 覆盖**。起因（两例均在 runtime，逃过 taste-lint 扫描面）：#20 注解随缓存实现体删除时登记表未同步（缓存治理批）、#30 注解从未落到声明处。
 
 ## 1. GUI 数据登记主表（编号顺延，不写死数量）
 

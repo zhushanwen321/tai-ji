@@ -111,6 +111,8 @@ import type { ForceQuitSource, UserStoppedMarkStore } from './types.js'
  * 本 Facade 值导入全部子模块，反向 import 成环），统一经 event-interpreter.ts 的
  * userStoppedGate 门面存取——本构造器经 gate.configure 注入下方 store 实现与 abort 能力。
  */
+// @data-owner #30（data-source-registry.md）：跨 ManagedSession 生命周期存活的用户停止
+// 意图标记（模块级 Map 是存在理由而非偶发形态，D4）；写方唯一 = userStoppedMarkStore。
 const userStoppedMarks = new Map<string, { source: ForceQuitSource; markedAt: number }>()
 
 /** 宿主 Map 的存取实现（gate.configure 注入 + 测试直断言用）。 */

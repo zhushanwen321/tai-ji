@@ -20,6 +20,12 @@
  *      目标不存在即拦截（staged 含 .md 删除时扩为全仓扫描——被删文档可能被任意
  *      源码注释引用，引用面无法局部化）。只扫注释（AST trivia，字符串/模板/
  *      正则字面量内的 docs/ 字样不进检查面），性能：日常只扫 staged 文件。
+ *   5. 数据源登记锚点反向校验：`docs/architecture/data-source-registry.md` 行内
+ *      声称「声明处 `@data-owner #N`」时，源码里必须真存在 `@data-owner #N` 注解。
+ *      [2026-09-17] 起因：缓存治理批删掉缓存实现时，`@data-owner #20` 注解随实现
+ *      体一起消失而登记表未同步（taste-lint 只查反向：注解→条目号存在），无任何
+ *      机器信号；此检查把「登记表声称有注解」变成可机检的失败。注解采集走
+ *      `git grep`（索引级，毫秒级），无 git 上下文时降级跳过。
  *
  * 书写约定：反引号 = 现行代码符号。历史性提及已删除/改名的符号（如描述事故成因）
  * 不带反引号——带反引号即按现状引用检查，这正是本守卫的判定口径。
@@ -591,9 +597,11 @@ function collectSymbolDrifts() {
  * 三层违规报告（符号 / 路径 / 注释）：有违规即 exit 1（pre-commit/CI 只吃退出码与
  * stderr 文本），无违规直接返回由调用方出 OK 行；三段前缀与「恢复动作：」footer 逐字保留。
  */
-function reportFailures({ drifts, missingPaths, commentScan }) {
+function reportFailures({ drifts, missingPaths, commentScan, dataOwner }) {
   const commentViolations = commentScan.available ? commentScan.violations : []
-  if (drifts.length === 0 && missingPaths.length === 0 && commentViolations.length === 0) return
+  const ownerMissing = dataOwner.available ? dataOwner.missing : []
+  const ownerUnknown = dataOwner.available ? (dataOwner.unknown ?? []) : []
+  if (drifts.length === 0 && missingPaths.length === 0 && commentViolations.length === 0 && ownerMissing.length === 0 && ownerUnknown.length === 0) return
   if (drifts.length > 0) {
     console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
     for (const d of drifts) {
@@ -617,6 +625,25 @@ function reportFailures({ drifts, missingPaths, commentScan }) {
     console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
     console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
   }
+  if (ownerMissing.length > 0) {
+    console.error(
+      `[data-owner-anchor] 发现 ${ownerMissing.length} 处登记表声称「声明处 \`@data-owner\`」但源码中零命中：`,
+    )
+    for (const m of ownerMissing) {
+      console.error(`  ✗ ${DATA_OWNER_REGISTRY_REL}:${m.line}  声称 \`@data-owner ${m.entry}\` 存活，但源码里找不到该注解`)
+    }
+    console.error('')
+    console.error('恢复动作：在现行 owner 实现处补回 `@data-owner <条目号>` 注解，或同步修正登记表该行的')
+    console.error('「声明处」叙述（注解随实现体删除时，登记表须同批更新——2026-09-17 缓存治理 #20 事故形态）。')
+  }
+  if (ownerUnknown.length > 0) {
+    console.error(
+      `[data-owner-anchor] 发现 ${ownerUnknown.length} 个源码注解引用的条目号不在登记表内：`,
+    )
+    console.error(`  ✗ ${ownerUnknown.join(', ')}`)
+    console.error('')
+    console.error('恢复动作：先在 docs/architecture/data-source-registry.md 登记对应条目（或改用既有条目号）。')
+  }
   console.error('')
   console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
   console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
@@ -624,19 +651,85 @@ function reportFailures({ drifts, missingPaths, commentScan }) {
 }
 
 /** 零违规收尾行（注释面扫描模式随 staged 上下文变化） */
-function reportOk(commentScan) {
+function reportOk(commentScan, dataOwner) {
   const commentPart = commentScan.available
     ? `注释 docs 引用（${commentScan.fullScan ? '全仓' : 'staged'} ${commentScan.fileCount} 文件）零悬空`
     : '注释 docs 引用（无 git staged 上下文，跳过）'
-  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}`)
+  const ownerPart = dataOwner.available
+    ? `数据源登记锚点（${dataOwner.claims.length} 条「声明处」声明 × 源码 ${dataOwner.annotationCount} 个注解）零悬空`
+    : '数据源登记锚点（无 git 上下文，跳过）'
+  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}；${ownerPart}`)
+}
+
+// ── 检查面 5：数据源登记锚点反向校验（登记表 → 源码注解）──────────────────
+// [2026-09-17] 起因：缓存治理批删掉缓存实现时 `@data-owner #20` 注解随实现体消失，
+// 登记表却仍声称「声明处 `@data-owner #20` 注解」——taste-lint 的 require-data-owner-
+// annotation 只查反向（注解 → 条目号存在），此方向无机器信号。
+const DATA_OWNER_REGISTRY_REL = 'docs/architecture/data-source-registry.md'
+/** 登记表行内「声明处 `@data-owner #N`」声明（带行号定位）。 */
+const DATA_OWNER_CLAIM_RE = /声明处\s*`?@data-owner\s+(#[0-9]+)/g
+/** 源码注解形态：`@data-owner #N`（taste:allow-no-data-owner 豁免族不在此面）。 */
+const DATA_OWNER_ANNOTATION_RE = /@data-owner[ \t]+(#[0-9]+)/g
+
+/** 纯函数：从登记表文本提取「声明处 @data-owner #N」声明（含行号）。 */
+export function extractDataOwnerClaims(mdText) {
+  const claims = []
+  for (const [i, line] of mdText.split('\n').entries()) {
+    DATA_OWNER_CLAIM_RE.lastIndex = 0
+    let m
+    while ((m = DATA_OWNER_CLAIM_RE.exec(line)) !== null) claims.push({ entry: m[1], line: i + 1 })
+  }
+  return claims
+}
+
+/** 纯函数：从源码文本提取实际注解条目号集合。 */
+export function extractDataOwnerAnnotations(text) {
+  const out = new Set()
+  const re = new RegExp(DATA_OWNER_ANNOTATION_RE.source, 'g')
+  let m
+  while ((m = re.exec(text)) !== null) out.add(m[1])
+  return out
+}
+
+/** git grep 采集全仓注解（索引级毫秒级；无 git 上下文降级 available:false）。 */
+function collectDataOwnerAnnotations() {
+  const res = spawnSync(
+    'git',
+    ['grep', '-h', '-o', '-E', '@data-owner[[:space:]]+#[0-9]+', '--', 'packages', 'apps', 'extensions'],
+    { cwd: PROJECT_ROOT, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024 },
+  )
+  if (res.status === 1) return { available: true, entries: new Set() } // 有 git、零命中
+  if (res.status !== 0 || typeof res.stdout !== 'string') return { available: false, entries: new Set() }
+  const entries = new Set()
+  for (const m of res.stdout.matchAll(new RegExp(DATA_OWNER_ANNOTATION_RE.source, 'g'))) entries.add(m[1])
+  return { available: true, entries }
+}
+
+/** 检查面 5：双向锁定—登记表声称的注解必须真在（且注解引用的条目号必须在登记表）。 */
+function checkDataOwnerAnchors() {
+  const docAbs = path.join(PROJECT_ROOT, DATA_OWNER_REGISTRY_REL)
+  if (!existsSync(docAbs)) return { available: false, claims: [], missing: [], unknown: [], annotationCount: 0 }
+  const docText = readFileSync(docAbs, 'utf-8')
+  const claims = extractDataOwnerClaims(docText)
+  const registryEntries = new Set()
+  for (const m of docText.matchAll(/^\|\s*(#[0-9]+)\s*\|/gm)) registryEntries.add(m[1])
+  const { available, entries } = collectDataOwnerAnnotations()
+  return {
+    available,
+    claims,
+    missing: claims.filter((c) => !entries.has(c.entry)),
+    unknown: [...entries].filter((e) => !registryEntries.has(e)),
+    annotationCount: entries.size,
+  }
 }
 
 function main() {
   const drifts = collectSymbolDrifts()
   const missingPaths = checkPathRefs()
   const commentScan = checkStagedCommentDocRefs()
-  reportFailures({ drifts, missingPaths, commentScan })
-  reportOk(commentScan)
+  const dataOwner = checkDataOwnerAnchors()
+  reportFailures({ drifts, missingPaths, commentScan, dataOwner })
+  reportOk(commentScan, dataOwner)
 }
 
 // 缺省 CLI 形态：全量符号/路径检查 + staged 注释 docs 引用检查（不依赖 cwd）。

@@ -20,6 +20,8 @@ import {
   extractDocRefsInComment,
   checkCommentDocRefs,
   buildDocsMdNameIndex,
+  extractDataOwnerClaims,
+  extractDataOwnerAnnotations,
 } from '../check-doc-symbol-drift.mjs'
 
 // ---------- R1 JS/TS 注释区间提取 ----------
@@ -193,5 +195,42 @@ describe('R5 buildDocsMdNameIndex', () => {
     const names = buildDocsMdNameIndex()
     expect(names.has('AGENTS.md')).toBe(true)
     expect(names.has('DESIGN.md')).toBe(true)
+  })
+})
+
+// ---------- R6 数据源登记锚点反向校验（2026-09-17 #20 注解丢失事故）---------
+
+describe('R6 extractDataOwnerClaims', () => {
+  it('提取「声明处 `@data-owner #N`」声明并带行号；非「声明处」语境的提及不算声明', () => {
+    const md = [
+      '| #20 | 模型能力档位 | runtime `attachSupportedLevels`，声明处 `@data-owner #20` 注解） |',
+      '| #30 | 用户停止意图标记 | runtime 内存（模块级 Map，声明处 `@data-owner #30`） |',
+      '| #9 | 反面例：注解 `@data-owner #9` 但未声明为声明处 |',
+    ].join('\n')
+    expect(extractDataOwnerClaims(md)).toEqual([
+      { entry: '#20', line: 1 },
+      { entry: '#30', line: 2 },
+    ])
+  })
+
+  it('无「声明处」前缀的注解提及不产生声明（反向校验只吃声明面，避免误报）', () => {
+    expect(extractDataOwnerClaims('注解 `@data-owner #1` 已删除（历史）')).toEqual([])
+  })
+})
+
+describe('R6 extractDataOwnerAnnotations', () => {
+  it('提取源码注解条目号集合（跨行多注解去重）', () => {
+    const src = [
+      '// @data-owner #25（registry）：注释',
+      'const a = new Map()',
+      '/* @data-owner #26 */',
+      'const b = new Map()',
+      '// @data-owner  #25（重复，应去重）',
+    ].join('\n')
+    expect([...extractDataOwnerAnnotations(src)].sort()).toEqual(['#25', '#26'])
+  })
+
+  it('taste:allow-no-data-owner 豁免族不进入注解集合（不属登记锚点）', () => {
+    expect([...extractDataOwnerAnnotations('// taste:allow-no-data-owner W24-EX-B')]).toEqual([])
   })
 })
