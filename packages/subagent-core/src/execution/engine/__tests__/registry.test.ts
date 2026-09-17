@@ -471,6 +471,25 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
     expect(getEngine("catalog-change")).not.toBe(oldPort);
   });
 
+  it("同标识重注册但 manifest 版本面变化（displayName）：触发 dispose", () => {
+    const manifest = makeManifestSnapshot("Renamed");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("displayname-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("displayname-change", manifest, () => oldPort as EnginePort);
+    getEngine("displayname-change");
+
+    // 仅 displayName 单字段变化，其余字段全同——与 modelCatalog 同一比较式
+    // （stableDescriptorKey(manifest)），独立断言防未来比较式拆分时漏防 displayName
+    const renamed: EngineManifestSnapshot = {
+      ...manifest,
+      displayName: "Renamed-v2",
+    };
+    reregisterEquivalent("displayname-change", renamed, () => makeRemoteEngine("displayname-change", renamed) as EnginePort);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("displayname-change")).not.toBe(oldPort);
+  });
+
   it("同标识重注册但 kind 变化（inproc → cli）：触发 dispose", () => {
     const manifest = makeManifestSnapshot();
     const dispose = vi.fn(() => Promise.resolve());

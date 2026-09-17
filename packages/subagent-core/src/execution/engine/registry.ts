@@ -238,8 +238,10 @@ function stableDescriptorKey(value: unknown): string {
  *   - manifest 余项（modelCatalog + displayName——「manifest 版本面」的实际落点：
  *     发现器不把 package name/version 写进 descriptor，manifest 派生字段即此二者）
  * portFactory 闭包不参与比较：每次 discovery 重跑都是新函数实例，但等价标识下其
- * 产物行为等价；闭包内捕获的 engineConfig（L3 显式配置）同理不在比较面——改
- * config.json 的 engineConfig 不会触发换实例，属既定接受面（command/args 变化会）。
+ * 产物行为等价；闭包内捕获的 engineConfig（L3 显式配置）与 entry.cwd（config.json
+ * 显式登记的引擎工作目录，同经 buildExplicitDescriptor 的 portFactory 闭包消费）
+ * 同理不在比较面——改 config.json 的 engineConfig / cwd 都不会触发换实例，属既定
+ * 接受面（command/args 变化会）。
  *
  * inproc 形态恒判不等价：仅有 factory 闭包、无磁盘来源字段，等价性无从证明；且
  * inproc 工厂闭包捕获宿主模块图状态（ctx 等），物理上不可跨 reload 存活——保留
