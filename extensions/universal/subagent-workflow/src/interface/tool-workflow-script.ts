@@ -41,7 +41,7 @@ import {
 } from "@zhushanwen/subagent-core";
 import type { WorkflowScriptRegistry } from "@zhushanwen/subagent-core";
 import { toGuiCtx } from "./gui-mappers.ts";
-import { renderTextFallback } from "./format.ts";
+import { assertNotAborted, renderTextResult } from "./tool-shared.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Parameter schema ─────────────────────────────────────────
@@ -240,7 +240,7 @@ export function registerWorkflowScriptTool(
       _theme: Theme,
       _context?: unknown,
     ) {
-      return new Text(renderTextFallback(result), 0, 0);
+      return renderTextResult(result);
     },
   });
 }
@@ -248,11 +248,9 @@ export function registerWorkflowScriptTool(
 // ── generate action ──────────────────────────────────────────
 
 export function actionGenerate(params: ScriptParams, signal: AbortSignal | undefined): TextContent {
-  if (signal?.aborted) {
-    // throw（W4b）：pi 只对 execute throw 置 isError:true（返回值 isError 被丢弃）。
-    // AbortSignal 是 pi tool 契约层关注——core 管线不含 signal 检查，宿主自留（C4 偏差 #4）
-    throw new Error("Operation aborted before start");
-  }
+  // throw（W4b）：pi 只对 execute throw 置 isError:true（返回值 isError 被丢弃）。
+  // AbortSignal 是 pi tool 契约层关注——core 管线不含 signal 检查，宿主自留（C4 偏差 #4）
+  assertNotAborted(signal);
   const name = params.name ?? "";
   const script = params.script ?? "";
 

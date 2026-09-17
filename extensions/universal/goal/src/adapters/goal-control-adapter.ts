@@ -119,9 +119,9 @@ const logger = getLogger("goal");
  * 辅助 UI 通道降级包装：updateWidget / notify 失败只 warn 留痕不上抛。
  *
  * 调用点全部位于核心副作用（createGoal / finalizeAndPersist / persistState）之后——
- * 状态已落盘，UI 通道故障不能翻转工具结果（对齐 base-tool-enhance notify.ts 的
- * 接入点降级先例）。错误串格式化内联（Error message / String），不为此引入
- * ext-guards 依赖。
+ * 状态已落盘，UI 通道故障不能翻转工具结果（与 base-tool-enhance notify.ts 的接入点
+ * 降级同构）。错误串格式化内联（Error message / String）而非复用
+ * @zhushanwen/pi-ext-guards 的 toErrorMessage——不为一个一行 helper 引入运行时依赖。
  */
 function runUiChannelSafe(action: GoalControlDetails["action"], goalId: string, fn: () => void): void {
 	try {

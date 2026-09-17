@@ -28,7 +28,8 @@ export interface TodoDetails {
 
 export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
 
-type ValidStatus = (typeof VALID_STATUSES)[number];
+/** 合法状态三态的推导类型（导出供包内其余模块命名收窄后的类型）。 */
+export type ValidStatus = (typeof VALID_STATUSES)[number];
 
 /**
  * status 合法性判据（type guard）：migrate 迁移映射 / tool 单条 update / model 批量
@@ -48,6 +49,17 @@ export function isBlankUpdateText(text: string): boolean {
 }
 
 // ── 迁移/兼容 ───────────────────────────────────────
+
+/**
+ * 历史状态 → 现态映射（旧格式一次性降级）。
+ *
+ * 三态化：cancelled → completed 不丢数据，且解除 every(completed) 死锁。
+ */
+const LEGACY_STATUS: Record<string, ValidStatus> = {
+	verifying: "in_progress",
+	failed: "pending",
+	cancelled: "completed",
+};
 
 /** 旧格式迁移：verifying → in_progress，failed → pending，cancelled → completed（历史三态化降级），done:boolean → status */
 export function migrateTodo(raw: unknown): Todo {
@@ -71,20 +83,19 @@ export function migrateTodo(raw: unknown): Todo {
 		status = done === true ? "completed" : "pending";
 	}
 
-	// 历史状态映射（先转 string 避免类型收窄后无法比较）
-	const rawStatus = record.status as string | undefined;
-	if (rawStatus === "verifying") status = "in_progress";
-	if (rawStatus === "failed") status = "pending";
-	// 三态化降级：历史 cancelled 项映射为 completed（不丢数据，且解除 every(completed) 死锁）
-	if (rawStatus === "cancelled") status = "completed";
+	// 历史状态映射（查表单点：三条互斥 if → 一张表，不再裸 cast）
+	const rawStatus = typeof record.status === "string" ? record.status : undefined;
+	const legacyStatus = rawStatus ? LEGACY_STATUS[rawStatus] : undefined;
+	if (legacyStatus) status = legacyStatus;
 
 	// id/text 契约校验：脏 id（非 number / NaN）会在 reconstructState 的 Math.max 推导
 	// nextId 时产出 NaN 毒化后续 add/update/delete 锚点，脏 text 破坏渲染与 add 的 trim
 	// 契约——按「脏数据明确报错 → 调用方单条跳过」契约，与上方 null/primitive 守卫同型
 	// throw TypeError（调用方 reconstructState 收集降级）。
-	if (typeof record.id !== "number" || Number.isNaN(record.id)) {
+	const id = record.id;
+	if (typeof id !== "number" || Number.isNaN(id)) {
 		throw new TypeError(
-			`migrateTodo: invalid id (expected number, got ${typeof record.id}${Number.isNaN(record.id) ? " NaN" : ""})`,
+			`migrateTodo: invalid id (expected number, got ${typeof id}${Number.isNaN(id) ? " NaN" : ""})`,
 		);
 	}
 	if (typeof record.text !== "string") {
@@ -92,7 +103,7 @@ export function migrateTodo(raw: unknown): Todo {
 	}
 
 	return {
-		id: record.id,
+		id,
 		text: record.text,
 		status,
 	};
@@ -100,7 +111,8 @@ export function migrateTodo(raw: unknown): Todo {
 
 // ── GUI 渲染辅助 ─────────────────────────────────────
 
-/** completed 计数单一来源：buildGui / renderStatusText / renderWidgetLines / component 四个消费点共用口径 */
+/** completed 计数单一来源：renderStatusText / renderWidgetLines / component 三个消费点共用口径
+ * （buildGui 的 tab 计数与段内容改由 openTodos/doneTodos 同源复用，不再经本函数）。 */
 export function todoProgress(todos: Todo[]): { completed: number; total: number } {
 	return {
 		completed: todos.filter((t) => t.status === "completed").length,
@@ -146,9 +158,14 @@ function todoListTree(todos: Todo[]): GuiComponent {
  *   completed    → done（success + label 弱化）
  */
 export function buildGui(todos: Todo[]): GuiRenderResult {
-	const { completed, total } = todoProgress(todos);
-	const inProgress = todos.filter((t) => t.status === "in_progress").length;
-	const open = total - completed;
+	// 先划分段数组，再复用同一批数组产出标签/内容/badge/inProgress——避免
+	// 「total - completed」与「两次 filter」两个口径各自推导同一事实。
+	const openTodos = todos.filter((t) => t.status !== "completed");
+	const doneTodos = todos.filter((t) => t.status === "completed");
+	const total = todos.length;
+	const completed = doneTodos.length;
+	const open = openTodos.length;
+	const inProgress = openTodos.filter((t) => t.status === "in_progress").length;
 
 	const status: WidgetMeta["status"] =
 		total > 0 && completed === total ? "done" : inProgress > 0 ? "running" : "idle";
@@ -162,8 +179,8 @@ export function buildGui(todos: Todo[]): GuiRenderResult {
 			],
 			// 段 = 子树（组件数组，与 tabs 等长一一对应；宿主渲染 active 段的全部子组件）
 			sections: [
-				[todoListTree(todos.filter((t) => t.status !== "completed"))],
-				[todoListTree(todos.filter((t) => t.status === "completed"))],
+				[todoListTree(openTodos)],
+				[todoListTree(doneTodos)],
 			],
 		}),
 		{
@@ -275,28 +292,30 @@ export function updateTodos(
 	if (new Set(ids).size !== ids.length) {
 		throw new Error("duplicate ids in updates");
 	}
+	// 校验遍同时产出 patch（非法输入在任何突变前 throw，文案不变）；突变遍直接消
+	// patch，不再重复判定同一条件（旧实现第二遍 isValidTodoStatus 恒真）
+	const patches = new Map<number, { status?: Todo["status"]; text?: string }>();
 	for (const u of updates) {
-		const todo = currentTodos.find((t) => t.id === u.id);
-		if (!todo) {
+		if (!currentTodos.some((t) => t.id === u.id)) {
 			throw new Error(`Todo #${u.id} not found`);
 		}
 		if (!u.status && !u.text) {
 			throw new Error(`update item for id ${u.id} has neither status nor text`);
 		}
-		if (u.status && !isValidTodoStatus(u.status)) {
-			throw new Error(`invalid status '${u.status}' for update item id ${u.id}`);
+		const patch: { status?: Todo["status"]; text?: string } = {};
+		if (u.status) {
+			if (!isValidTodoStatus(u.status)) {
+				throw new Error(`invalid status '${u.status}' for update item id ${u.id}`);
+			}
+			patch.status = u.status;
 		}
+		if (u.text !== undefined) patch.text = u.text.trim();
+		patches.set(u.id, patch);
 	}
 
 	const updated = currentTodos.map((t) => {
-		const u = updates.find((u) => u.id === t.id);
-		if (!u) return t;
-		const patch: Partial<Todo> = {};
-		// status 合法性已由上方校验循环保证（非法即 throw，突变前拦截）；此处
-		// isValidTodoStatus 恒真，仅为 type guard 收窄消除 cast
-		if (u.status && isValidTodoStatus(u.status)) patch.status = u.status;
-		if (u.text !== undefined) patch.text = u.text.trim();
-		return { ...t, ...patch };
+		const patch = patches.get(t.id);
+		return patch ? { ...t, ...patch } : t;
 	});
 	return {
 		updatedTodos: updated,

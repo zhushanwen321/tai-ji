@@ -13,8 +13,6 @@ import { taijiTestConfig } from '../test-guard/factory.ts'
 export default taijiTestConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     include: ['rules/*.test.mjs', 'lib/*.test.mjs'],
   },
 })

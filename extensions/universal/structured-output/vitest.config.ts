@@ -4,8 +4,6 @@ import { taijiTestConfig } from "../../../test-guard/factory.ts"
 
 export default taijiTestConfig({
   test: {
-    reporters: ["default", "junit"],
-    outputFile: { junit: "./test-results/vitest-junit.xml" },
     include: ["tests/**/*.test.ts"],
   },
   resolve: {

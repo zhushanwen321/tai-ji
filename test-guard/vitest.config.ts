@@ -4,8 +4,6 @@ import { taijiTestConfig } from './factory.ts'
 // 同样经工厂挂防线——实现与元测试同目录，防线语义自洽。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     include: ['*.test.ts'],
   },
 })

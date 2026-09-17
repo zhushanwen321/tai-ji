@@ -30,14 +30,20 @@ import { type Static, Type } from "typebox";
 
 import { MAX_TIMER_DELAY_MS, SLUG_MAX_LENGTH, THINKING_ORDER } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { runWorkflow } from "@zhushanwen/subagent-core";
-import { renderTextFallback } from "./format.ts";
+import { assertEntryTimeBudget, assertSlugWithinLimit, runWorkflow } from "@zhushanwen/subagent-core";
 import {
   acquireReentryGuard,
   REENTRY_BUSY_MESSAGE,
   type ReentryGuardRef,
   releaseReentryGuard,
 } from "./reentry-guard.ts";
+import {
+  assertNotAborted,
+  buildRunSpecFromScript,
+  formatAvailableWorkflowList,
+  optionSlugSuffix,
+  renderTextResult,
+} from "./tool-shared.ts";
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -172,35 +178,23 @@ export async function runSubagentsBatch(
 
   // slug 运行时护栏（与 workflow tool actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
   const providedSlug = params.slug?.trim();
-  if (providedSlug !== undefined && providedSlug.length > SLUG_MAX_LENGTH) {
-    throw new Error(
-      `slug exceeds ${SLUG_MAX_LENGTH} chars (got ${providedSlug.length}). Shorten to a kebab-case label, e.g. "tri-review", "scan-docs".`,
-    );
-  }
+  assertSlugWithinLimit(providedSlug, ["tri-review", "scan-docs"]);
   // 缺省（或空白）时 handler 生成 fan-out-<时间短码>：受益面 = 状态面（drawer run header /
   // run 投影名）；对话流块面显示的是模型 input.slug（无 input 回写通路——D8 分面声明）。
   const slug = providedSlug ? providedSlug : generateBatchSlug();
 
   // OR-1 入口 fail-fast：schema 的 time 是 Type.Number 直通（无上界），超 setTimeout
   // 安全域的值会穿透到 lifecycle 内层防线（assertSafeTimerDelay）——入口拦截让它永不
-  // 进入副作用链，错误带合法上限与实际传入值（LLM 可据消息自纠）。
+  // 进入副作用链（判定与文案单点在 core shared/entry-guards）。
   const time = params.time;
-  if (time !== undefined && time > MAX_TIMER_DELAY_MS) {
-    throw new Error(
-      `time budget ${time} ms exceeds the maximum of ${MAX_TIMER_DELAY_MS} ms (~24.8 days). ` +
-        `Retry with a smaller "time", or omit it for unlimited.`,
-    );
-  }
+  assertEntryTimeBudget(time);
 
   // 执行体脚本按内置名解析（与 workflow tool actionRun 同一条链：registry.get 命中
   // 内置/已保存名；本工具不允许换脚本，故不回落 getPath）。
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
     const all = await deps.registry.loadAll();
-    const available = all
-      .filter((wf) => wf.available)
-      .map((wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`)
-      .join("\n");
+    const available = formatAvailableWorkflowList(all);
     throw new Error(
       `Built-in workflow '${FAN_OUT_SCRIPT_NAME}' is not available — the subagents tool runs it as its batch body. ` +
       `Recovery: verify the @zhushanwen/subagent-core package ships workflows/${FAN_OUT_SCRIPT_NAME}.js (reinstall/repair it), then retry. ` +
@@ -215,19 +209,14 @@ export async function runSubagentsBatch(
   if (params.aggregate !== undefined) args.aggregate = params.aggregate;
 
   const runId = await runWorkflow(
-    {
-      scriptSource: script.toExecutable(),
+    buildRunSpecFromScript(script, {
       args,
       budgetTokens: params.tokens,
       budgetTimeMs: time,
-      scriptName: script.name,
       slug,
-      scriptPath: script.path,
-      description: script.meta.description,
-      parameters: script.meta.parameters,
       model: params.model,
       thinkingLevel: params.thinkingLevel,
-    },
+    }),
     deps,
     signal,
   );
@@ -291,11 +280,9 @@ export function registerSubagentsTool(
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<ToolResult> {
-      if (signal?.aborted) {
-        // throw（W4b 契约）：pi 只对 execute throw 置 isError:true，返回值里的 isError
-        // 被 agent-loop 丢弃——错误一律 throw。
-        throw new Error("Operation aborted before start");
-      }
+      // throw（W4b 契约）：pi 只对 execute throw 置 isError:true，返回值里的 isError
+      // 被 agent-loop 丢弃——错误一律 throw（abort 前置判定收敛在 tool-shared）。
+      assertNotAborted(signal);
       // reentry guard：与 workflow tool 共用（acquire 失败时尚未持有 guard，throw 前无需 release）
       if (!acquireReentryGuard(reentryRef)) {
         throw new Error(REENTRY_BUSY_MESSAGE);
@@ -311,9 +298,7 @@ export function registerSubagentsTool(
       // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow tool 的 renderCall）
       const count = Array.isArray(args.tasks) ? args.tasks.length : 0;
       const bulk = count > 0 ? ` ${count} tasks` : "";
-      const slug = typeof args.slug === "string" && args.slug.trim()
-        ? `${theme.fg("dim", " · ")}${theme.fg("accent", String(args.slug))}`
-        : "";
+      const slug = optionSlugSuffix(args.slug, theme);
       return new Text(
         theme.fg("toolTitle", theme.bold("subagents ")) +
           theme.fg("muted", bulk) +
@@ -324,7 +309,7 @@ export function registerSubagentsTool(
     },
 
     renderResult(result: { content?: Array<{ type: string; text?: string }> }, _options: unknown, _theme: Theme, _context?: unknown) {
-      return new Text(renderTextFallback(result), 0, 0);
+      return renderTextResult(result);
     },
   });
 }

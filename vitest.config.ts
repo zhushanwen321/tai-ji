@@ -14,8 +14,6 @@ import { taijiTestConfig } from './test-guard/factory.ts'
 // + package.json test:taste-lint，见 ci.yml lint job），exclude 不是豁免不管。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     exclude: [...defaultExclude, 'e2e/**', 'taste-lint/**', '**/e2e/**'],
   },
 })

@@ -42,6 +42,7 @@ import {
   findFlattenedArgKeys,
   MAX_TIMER_DELAY_MS,
 } from "@zhushanwen/subagent-core";
+import { assertEntryTimeBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
@@ -51,7 +52,14 @@ import {
   type ReentryGuardRef,
   releaseReentryGuard,
 } from "./reentry-guard.ts";
-import { formatRunStatusElapsed, renderTextFallback } from "./format.ts";
+import { formatRunStatusElapsed } from "./format.ts";
+import {
+  assertNotAborted,
+  buildRunSpecFromScript,
+  formatAvailableWorkflowList,
+  optionSlugSuffix,
+  renderTextResult,
+} from "./tool-shared.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Parameter schema ─────────────────────────────────────────
@@ -289,11 +297,10 @@ export function registerWorkflowTool(
       _ctx: ExtensionContext,
     ): Promise<ToolResult> {
  // P1-2: Honor abort signal up-front
-      if (signal?.aborted) {
-        // throw（W4b）：pi 只对 execute throw 置 isError:true，返回值里的 isError
-        // 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
-        throw new Error("Operation aborted before start");
-      }
+      // throw（W4b）：pi 只对 execute throw 置 isError:true，返回值里的 isError
+      // 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
+      // abort 前置判定收敛在 tool-shared（三处 tool 同源）。
+      assertNotAborted(signal);
  // P1-6: Reentry guard（acquire 失败时尚未持有 guard，throw 前无需 release）
       if (!acquireReentryGuard(reentryRef)) {
         throw new Error(REENTRY_BUSY_MESSAGE);
@@ -333,9 +340,7 @@ export function registerWorkflowTool(
       const action = String(args.action ?? "");
       const name = args.name ? ` ${String(args.name)}` : "";
       // run action 可选 slug：在 name 后追加 · slug（accent 色）
-      const slug = typeof args.slug === "string" && args.slug.trim()
-        ? `${theme.fg("dim", " · ")}${theme.fg("accent", String(args.slug))}`
-        : "";
+      const slug = optionSlugSuffix(args.slug, theme);
       const runId = args.runId ? ` ${String(args.runId).slice(0, ID_PREVIEW_LENGTH)}` : "";
       return new Text(
         theme.fg("toolTitle", theme.bold("workflow ")) +
@@ -349,7 +354,7 @@ export function registerWorkflowTool(
     },
 
     renderResult(result: { content?: Array<{ type: string; text?: string }> }, _options: unknown, _theme: Theme, _context?: unknown) {
-      return new Text(renderTextFallback(result), 0, 0);
+      return renderTextResult(result);
     },
   });
 }
@@ -387,10 +392,7 @@ export async function actionRun(
  // 模糊匹配建议。throw（W4）：pi 只对 execute throw 置 isError:true，
  // 返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
     const all = await deps.registry.loadAll();
-    const available = all.filter((wf) => wf.available);
-    const suggestions = available
-      .map((wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`)
-      .join("\n");
+    const suggestions = formatAvailableWorkflowList(all);
     // [按名解析自救指引] 摘要逐条附绝对路径 location：run 的 name 形参最贴近的
     // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
     // 上下文）——模型按清单里的名字重试（8.6.0 实装 getPath-only 时代的实测失败
@@ -425,42 +427,28 @@ export async function actionRun(
     );
   }
   // slug 运行时护栏（与 subagent startHandler 对称的纵深防御；schema maxLength 是第一道关卡）
-  if (params.slug !== undefined && params.slug.length > SLUG_MAX_LENGTH) {
-    throw new Error(
-      `slug exceeds ${SLUG_MAX_LENGTH} chars (got ${params.slug.length}). Shorten to a kebab-case label, e.g. "fix-login", "extract-urls".`,
-    );
-  }
+  assertSlugWithinLimit(params.slug, ["fix-login", "extract-urls"]);
   const args = params.args ?? {};
   const tokens = params.tokens;
   const time = params.time;
   // OR-1 入口 fail-fast（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §7.2 T3①））：schema 的 time 是
   // Type.Number 直通（无上界）——超 setTimeout 安全域的值会穿透到 lifecycle 内层
-  // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链。错误带合法上限
-  // 与实际传入值，LLM 可据消息自纠（clamp 或省略走 unlimited 语义）。
-  if (time !== undefined && time > MAX_TIMER_DELAY_MS) {
-    throw new Error(
-      `time budget ${time} ms exceeds the maximum of ${MAX_TIMER_DELAY_MS} ms (~24.8 days). ` +
-        `Retry with a smaller "time", or omit it for unlimited.`,
-    );
-  }
+  // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链（判定与文案单点在
+  // core shared/entry-guards；LLM 可据消息自纠：clamp 或省略走 unlimited 语义）。
+  assertEntryTimeBudget(time);
 
  // 构建 RunSpec + 启动（m3：parameters 从 script.meta 拷贝——chokepoint 校验用；
  // 校验失败 → ArgsValidationError 直接 throw 给 pi（W4：err.message 含 §5.3 指引，
  // pi catch 后原文案进 toolResult content 并置 isError:true），其他错误保持传播）
   const runId = await runWorkflow(
-    {
-      scriptSource: script.toExecutable(),
+    buildRunSpecFromScript(script, {
       args,
       budgetTokens: tokens,
       budgetTimeMs: time,
-      scriptName: script.name,
       slug: params.slug,
-      scriptPath: script.path,
-      description: script.meta.description,
-      parameters: script.meta.parameters,
       model: params.model,
       thinkingLevel: params.thinkingLevel,
-    },
+    }),
     deps,
     signal,
   );

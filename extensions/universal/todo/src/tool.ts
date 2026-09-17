@@ -20,6 +20,7 @@ import {
 	isBlankUpdateText,
 	isValidTodoStatus,
 	type TodoDetails,
+	type ValidStatus,
 	updateTodos,
 	VALID_STATUSES,
 } from "./model";
@@ -124,18 +125,22 @@ export function handleSingleUpdate(state: TodoSessionState, params: TodoParamsT)
 			'update requires at least status or text parameter. Correct: {"action":"update","id":<n>,"status":"in_progress"}',
 		);
 	// text/status 校验判据与 model.updateTodos 批量路径共享同一原语（CT5）；文案
-	// 保持单条引导形态（LLM 单条修正提示），展示层差异不属规则差异
+	// 保持单条引导形态（LLM 单条修正提示），展示层差异不属规则差异。校验遍同时产出
+	// 收窄结果 nextStatus——非法输入仍在任何突变前 throw，突变遍不再重复判定同一条件
 	if (params.text !== undefined && isBlankUpdateText(params.text))
 		throw new Error("text cannot be empty or whitespace-only");
-	if (params.status !== undefined && !isValidTodoStatus(params.status)) {
-		throw new Error(`status only accepts ${VALID_STATUSES.join(" / ")}`);
+	let nextStatus: ValidStatus | undefined;
+	if (params.status !== undefined) {
+		if (!isValidTodoStatus(params.status)) {
+			throw new Error(`status only accepts ${VALID_STATUSES.join(" / ")}`);
+		}
+		nextStatus = params.status;
 	}
 
 	const todo = state.todos.find((t) => t.id === params.id);
 	if (!todo) throw new Error(`Todo #${params.id} not found`);
 
-	// status 合法性已由上方 isValidTodoStatus 守卫保证；此处恒真分支仅为 type guard 收窄消除 cast
-	if (params.status !== undefined && isValidTodoStatus(params.status)) todo.status = params.status;
+	if (nextStatus !== undefined) todo.status = nextStatus;
 	if (params.text !== undefined) todo.text = params.text.trim();
 
 	const parts: string[] = [`Updated todo #${todo.id}`];

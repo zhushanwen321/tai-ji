@@ -10,8 +10,6 @@ import { taijiTestConfig } from "../../../test-guard/factory.ts";
  */
 export default taijiTestConfig({
   test: {
-    reporters: ["default", "junit"],
-    outputFile: { junit: "./test-results/vitest-junit.xml" },
     include: ["src/**/__tests__/**/*.test.ts"],
     // [F-R5] 每个测试文件加载前统一删三个 watchdog env（watchdog 预算语义默认关），
     // 根治宿主 shell export 导致的假红；用例内 vi.stubEnv 仍照常叠加生效。

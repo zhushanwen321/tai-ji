@@ -21,8 +21,6 @@ import { taijiTestConfig, FS_GUARD_PATH, GLOBAL_SETUP_PATH } from '../../../test
 //   真实数据目录 fail-fast）对 legacy 池仍生效。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     globalSetup: [GLOBAL_SETUP_PATH],
     projects: [
       {

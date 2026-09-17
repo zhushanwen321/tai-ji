@@ -6,8 +6,6 @@ import { taijiTestConfig } from '../../test-guard/factory.ts'
 // 从本包 cwd 直接跑 vitest 时 scripts/__tests__ 的防线齐备入口（test-guard factory 注入）。
 export default taijiTestConfig({
   test: {
-    reporters: ['default', 'junit'],
-    outputFile: { junit: './test-results/vitest-junit.xml' },
     include: ['scripts/__tests__/**/*.test.mjs'],
   },
 })
