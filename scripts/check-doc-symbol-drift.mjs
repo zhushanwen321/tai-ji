@@ -597,38 +597,48 @@ function collectSymbolDrifts() {
  * 三层违规报告（符号 / 路径 / 注释）：有违规即 exit 1（pre-commit/CI 只吃退出码与
  * stderr 文本），无违规直接返回由调用方出 OK 行；三段前缀与「恢复动作：」footer 逐字保留。
  */
-function reportFailures({ drifts, missingPaths, commentScan, dataOwner }) {
-  const commentViolations = commentScan.available ? commentScan.violations : []
+/** 报告段 1：符号漂移（无违规返回 false） */
+function reportSymbolDrifts(drifts) {
+  if (drifts.length === 0) return false
+  console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
+  for (const d of drifts) {
+    console.error(`  ✗ ${d.doc}:${d.lines.join(',')}  \`${d.sym}\` 不在映射源码模块的导出表/对象键中`)
+  }
+  return true
+}
+
+/** 报告段 2：文档路径引用（无违规返回 false） */
+function reportMissingPaths(missingPaths) {
+  if (missingPaths.length === 0) return false
+  console.error(`[doc-path-refs] 发现 ${missingPaths.length} 处文档引用的仓库路径不存在：`)
+  for (const m of missingPaths) {
+    console.error(`  ✗ ${m.doc}:${m.line}  \`${m.path}\` 文件不存在`)
+  }
+  return true
+}
+
+/** 报告段 3：注释 docs 引用（自带 footer；无违规返回 false） */
+function reportCommentRefs(commentScan) {
+  const violations = commentScan.available ? commentScan.violations : []
+  if (violations.length === 0) return false
+  const mode = commentScan.fullScan ? '全仓扫描（staged 含 .md 删除）' : 'staged 扫描'
+  console.error(`[doc-comment-refs] 发现 ${violations.length} 处源码注释引用了不存在的 docs 文档（${mode}，扫描 ${commentScan.fileCount} 个源码文件）：`)
+  for (const v of violations) {
+    console.error(`  ✗ ${v.file}:${v.line}  \`${v.target}\` 不存在`)
+    console.error(`    注释引文：${v.snippet}`)
+  }
+  console.error('')
+  console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
+  console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
+  return true
+}
+
+/** 报告段 4：数据源登记锚点（两个子段各自带 footer；无违规返回 false） */
+function reportDataOwnerAnchors(dataOwner) {
   const ownerMissing = dataOwner.available ? dataOwner.missing : []
   const ownerUnknown = dataOwner.available ? (dataOwner.unknown ?? []) : []
-  if (drifts.length === 0 && missingPaths.length === 0 && commentViolations.length === 0 && ownerMissing.length === 0 && ownerUnknown.length === 0) return
-  if (drifts.length > 0) {
-    console.error(`[doc-symbol-drift] 发现 ${drifts.length} 个文档引用了源码中不存在的符号：`)
-    for (const d of drifts) {
-      console.error(`  ✗ ${d.doc}:${d.lines.join(',')}  \`${d.sym}\` 不在映射源码模块的导出表/对象键中`)
-    }
-  }
-  if (missingPaths.length > 0) {
-    console.error(`[doc-path-refs] 发现 ${missingPaths.length} 处文档引用的仓库路径不存在：`)
-    for (const m of missingPaths) {
-      console.error(`  ✗ ${m.doc}:${m.line}  \`${m.path}\` 文件不存在`)
-    }
-  }
-  if (commentViolations.length > 0) {
-    const mode = commentScan.fullScan ? '全仓扫描（staged 含 .md 删除）' : 'staged 扫描'
-    console.error(`[doc-comment-refs] 发现 ${commentViolations.length} 处源码注释引用了不存在的 docs 文档（${mode}，扫描 ${commentScan.fileCount} 个源码文件）：`)
-    for (const v of commentViolations) {
-      console.error(`  ✗ ${v.file}:${v.line}  \`${v.target}\` 不存在`)
-      console.error(`    注释引文：${v.snippet}`)
-    }
-    console.error('')
-    console.error('恢复动作：更新引用指向现行文档，或删除悬空叙述；历史性提及已删除文档确需保留的，')
-    console.error('在 scripts/check-doc-symbol-drift.mjs 的 COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）。')
-  }
   if (ownerMissing.length > 0) {
-    console.error(
-      `[data-owner-anchor] 发现 ${ownerMissing.length} 处登记表声称「声明处 \`@data-owner\`」但源码中零命中：`,
-    )
+    console.error(`[data-owner-anchor] 发现 ${ownerMissing.length} 处登记表声称「声明处 \`@data-owner\`」但源码中零命中：`)
     for (const m of ownerMissing) {
       console.error(`  ✗ ${DATA_OWNER_REGISTRY_REL}:${m.line}  声称 \`@data-owner ${m.entry}\` 存活，但源码里找不到该注解`)
     }
@@ -637,13 +647,26 @@ function reportFailures({ drifts, missingPaths, commentScan, dataOwner }) {
     console.error('「声明处」叙述（注解随实现体删除时，登记表须同批更新——2026-09-17 缓存治理 #20 事故形态）。')
   }
   if (ownerUnknown.length > 0) {
-    console.error(
-      `[data-owner-anchor] 发现 ${ownerUnknown.length} 个源码注解引用的条目号不在登记表内：`,
-    )
+    console.error(`[data-owner-anchor] 发现 ${ownerUnknown.length} 个源码注解引用的条目号不在登记表内：`)
     console.error(`  ✗ ${ownerUnknown.join(', ')}`)
     console.error('')
     console.error('恢复动作：先在 docs/architecture/data-source-registry.md 登记对应条目（或改用既有条目号）。')
   }
+  return ownerMissing.length > 0 || ownerUnknown.length > 0
+}
+
+/**
+ * 四段违规报告编排：任一段有违规则全量打印（各段自带内部 footer），最后统一 footer
+ * + exit 1（pre-commit/CI 只吃退出码与 stderr 文本）。段顺序与文案逐字保留。
+ */
+function reportFailures({ drifts, missingPaths, commentScan, dataOwner }) {
+  const anyPrinted = [
+    reportSymbolDrifts(drifts),
+    reportMissingPaths(missingPaths),
+    reportCommentRefs(commentScan),
+    reportDataOwnerAnchors(dataOwner),
+  ].some(Boolean)
+  if (!anyPrinted) return
   console.error('')
   console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
   console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
