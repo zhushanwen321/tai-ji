@@ -578,8 +578,12 @@ export class SkillRegistry {
   private getAffectedSessionIds(cwd?: string): string[] {
     const allIds = this.options.sessionService.getActiveSessionIds()
     if (cwd === undefined) return allIds
-    const getSessionCwd = this.options.sessionService.getSessionCwd
-    return getSessionCwd ? allIds.filter(sid => getSessionCwd(sid) === cwd) : allIds
+    // 经宿主对象调用（保 this）：解绑提取（const fn = svc.fn）后调用会因 this=undefined
+    // 炸 TypeError，且发生在 watcher debounce 定时器里 = uncaughtException 整机崩
+    const sessionService = this.options.sessionService
+    return sessionService.getSessionCwd
+      ? allIds.filter(sid => sessionService.getSessionCwd(sid) === cwd)
+      : allIds
   }
 
   // 测试兼容别名（保持测试用 _notifyGlobalChange 不破坏，内部转发到 notifyGlobalChange）
