@@ -14,13 +14,13 @@
  * 测试 mock 说明：shiki stub 经 vi.doMock('shiki/core') 对整模块图生效（本模块 →
  * markdown.ts → shiki/core），freshModule 动态 import 范式与拆分前等价。
  *
- * 设计依据 .taiji-harness/2026-08-15-perf/08-render-layer.md §3.3 D-5 + plan.md R-19/R-20：
+ * 设计依据（增量渲染 D-5 + R-19/R-20）：
  * - 协议是 MarkdownSegment[]（前缀段引用恒等缓存 + tail 段每帧重建），不是 HTML 字符串对
  *   ——字符串协议会把 mermaid 组件降级成 v-html，推翻现有渲染结构。
  * - 边界判定用行级扫描实现（不手写完整 CommonMark 解析器），未知/无法判定形态一律
  *   fallback-full 降级（唯一兜底出口）。
- * - 正确性判据是「拼接等价」：renderMarkdownSegments(prefix+tail) 与分段渲染在 DOM 层等价
- *   （08 §3.3.3 条件 4），本实现的所有保守拒绝都是为了该判据。
+ * - 正确性判据是「拼接等价」：renderMarkdownSegments(prefix+tail) 与分段渲染在 DOM 层等价，
+ *   本实现的所有保守拒绝都是为了该判据。
  */
 import type { MarkdownEnv, MarkdownSegment } from './markdown'
 import { renderMarkdownSegments } from './markdown'
