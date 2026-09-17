@@ -46,6 +46,7 @@ import { assertEntryTimeBudget, assertSlugWithinLimit } from "@zhushanwen/subage
 import { runSummary } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
   acquireReentryGuard,
   REENTRY_BUSY_MESSAGE,
@@ -173,16 +174,12 @@ interface RunSummary {
  * without unsafe casts.
  */
 export type WorkflowToolDetails =
-  | { action: "run"; runId: string; status: "running" | "not_found" | "invalid_args"; name: string; slug?: string; stateFile?: string; __gui__?: GuiRenderResult }
+  | ({ action: "run"; name: string; __gui__?: GuiRenderResult } & RunStartDetails)
   | { action: "status"; runs: RunSummary[]; __gui__?: GuiRenderResult }
   | { action: "abort"; runId: string; status: string; reason?: string; __gui__?: GuiRenderResult };
 
-/** Result returned by the `workflow` tool's execute. */
-export interface ToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: WorkflowToolDetails | undefined;
-  isError?: boolean;
-}
+/** Result returned by the `workflow` tool's execute（公共骨架见 tool-result.ts）。 */
+type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
 
 // ── GUI 协议 helpers ───────────────────────────────────────
 
@@ -295,7 +292,7 @@ export function registerWorkflowTool(
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
       _ctx: ExtensionContext,
-    ): Promise<ToolResult> {
+    ): Promise<WorkflowExecuteResult> {
  // P1-2: Honor abort signal up-front
       // throw（W4b）：pi 只对 execute throw 置 isError:true，返回值里的 isError
       // 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
@@ -306,7 +303,7 @@ export function registerWorkflowTool(
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
       try {
-        let result: ToolResult;
+        let result: WorkflowExecuteResult;
         // 断言为 WorkflowAction 联合——typebox Static 推断为 any，显式标注让 default
         // 分支的 never 穷尽检查生效（新增 action 时 tsc 报错强制补 case）。
         const action = params.action as WorkflowAction;
@@ -365,7 +362,7 @@ export async function actionRun(
   params: WorkflowToolParams,
   deps: LauncherDeps,
   signal: AbortSignal | undefined,
-): Promise<ToolResult> {
+): Promise<WorkflowExecuteResult> {
   const name = params.name;
   if (!name) {
     throw new Error("run requires 'name' parameter (absolute .js path from <available_workflows> <location>). Correct: {\"action\":\"run\",\"name\":\"<ref>\",\"args\":{...}}");
@@ -469,7 +466,7 @@ export async function actionRun(
 
 // ── status action ────────────────────────────────────────────
 
-function actionStatus(deps: LauncherDeps): ToolResult {
+function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
   const runs = Array.from(deps.runs.values());
   if (runs.length === 0) {
     return {
@@ -499,7 +496,7 @@ async function actionLifecycle(
   action: "abort",
   params: WorkflowToolParams,
   deps: LauncherDeps,
-): Promise<ToolResult> {
+): Promise<WorkflowExecuteResult> {
   const runId = params.runId;
   if (!runId) {
     throw new Error(`'runId' is required for ${action}. Correct: {"action":"${action}","runId":"<id>"} (use action:"status" to find runId)`);

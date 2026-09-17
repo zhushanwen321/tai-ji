@@ -1,5 +1,5 @@
 import { defaultExclude } from 'vitest/config'
-import { taijiTestConfig, FS_GUARD_PATH } from '../../test-guard/factory.ts'
+import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 
 /**
  * [HISTORICAL] 2026-08-20 PR #185 pre-merge 三连 FAIL 根因与分池方案：
@@ -30,7 +30,8 @@ import { taijiTestConfig, FS_GUARD_PATH } from '../../test-guard/factory.ts'
  *
  * 防线（globalSetup env 钉死 + fs-guard 切面）经 test-guard/factory 顶层注入；
  * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
- * 故各 project 显式挂 FS_GUARD_PATH（globalSetup 无此问题，root 级对所有 project 生效）。
+ * 故各 project 经 guardProjectSetup 显式挂 FS_GUARD_PATH（globalSetup 无此问题，root 级
+ * 对所有 project 生效）。新 project 漏挂由 scripts/check-vitest-guard.mjs 第 5 条拦截。
  */
 const REAL_PI_TESTS = [
   // L2.5 二批（2026-09-15）后当前为空：全部「真实 pi + 真实 LLM turn」equivalence 用例已
@@ -49,21 +50,19 @@ export default taijiTestConfig({
     projects: [
       {
         // 主组：除真实 pi 用例外的全部测试，保持默认满并行（与分池前行为一致）
-        test: {
+        test: guardProjectSetup({
           name: 'main',
           include: ['test/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.ts'],
           exclude: [...defaultExclude, ...REAL_PI_TESTS],
-          setupFiles: [FS_GUARD_PATH],
-        },
+        }),
       },
       {
         // 真实 pi 组：文件间串行（maxWorkers 解析为 1），且在主组完整结束后才开跑（见文件头调度契约）
-        test: {
+        test: guardProjectSetup({
           name: 'real-pi',
           include: [...REAL_PI_TESTS],
           fileParallelism: false,
-          setupFiles: [FS_GUARD_PATH],
-        },
+        }),
       },
     ],
   },

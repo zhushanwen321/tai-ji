@@ -43,6 +43,29 @@ const DEFAULTS = {
   outputFile: { junit: './test-results/vitest-junit.xml' },
 }
 
+/** projects 数组内单个 project 的 `test` 片段最小形状（其余字段原样透传）。 */
+type ProjectTestFragment = { setupFiles?: string[] } & Record<string, unknown>
+
+/**
+ * project 级防线挂载助手。
+ *
+ * vitest projects 语义下 project 内 setupFiles **不**继承 root 级（实测 setup 0ms 不
+ * 执行，见 packages/runtime/vitest.config.ts 文件头），故每个需要 fs-guard 切面的
+ * project 都必须在自身的 `test` 片段里显式挂载。本助手把 FS_GUARD_PATH 前置合并进
+ * 调用方声明的片段，消除逐 project 手抄字面量：
+ *
+ * ```ts
+ * projects: [{ test: guardProjectSetup({ name: 'main', include: ['test/**'] }) }]
+ * ```
+ *
+ * 覆盖完整性由 scripts/check-vitest-guard.mjs 第 5 条机器校验（凡声明 projects 的
+ * config，逐一校验 project 条目是否经本助手或显式 FS_GUARD_PATH 覆盖；有意不挂的
+ * project 须在该守卫内登记豁免）。
+ */
+export function guardProjectSetup<T extends ProjectTestFragment>(test: T): T & { setupFiles: string[] } {
+  return { ...test, setupFiles: [FS_GUARD_PATH, ...(test.setupFiles ?? [])] }
+}
+
 export function taijiTestConfig(config: ViteUserConfig = {}): ViteUserConfig {
   const userTest = (config.test ?? {}) as ViteUserConfig['test'] & {
     globalSetup?: string[]

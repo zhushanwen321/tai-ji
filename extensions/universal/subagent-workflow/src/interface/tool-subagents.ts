@@ -44,6 +44,7 @@ import {
   optionSlugSuffix,
   renderTextResult,
 } from "./tool-shared.ts";
+import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -108,8 +109,7 @@ export type SubagentsToolParams = Static<typeof SubagentsParams>;
  * 单形态（无 action 判别式——本工具只有一个动作）。刻意不含 `__gui__`（D8）：
  * 批量块由集合分流走 workflow 块分支，不消费 GUI 描述符。
  */
-export interface SubagentsToolDetails {
-  runId: string;
+export interface SubagentsToolDetails extends RunStartDetails {
   /** 启动即返回（后台运行），恒 "running"。 */
   status: "running";
   /** 执行体模板名（恒 FAN_OUT_SCRIPT_NAME，供程序化消费方核对）。 */
@@ -117,15 +117,10 @@ export interface SubagentsToolDetails {
   /** 生效标签（模型提供的 slug，或 handler 生成的 fan-out-<时间短码>）。 */
   slug: string;
   taskCount: number;
-  /** run 状态快照文件绝对路径（<sessionDir>/workflow-state/<runId>.jsonl）。 */
-  stateFile?: string;
 }
 
-/** Result returned by the `subagents` tool's execute. */
-export interface ToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: SubagentsToolDetails;
-}
+/** Result returned by the `subagents` tool's execute（公共骨架见 tool-result.ts）。 */
+type SubagentsExecuteResult = WorkflowToolResult<SubagentsToolDetails>;
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -166,7 +161,7 @@ export async function runSubagentsBatch(
   params: SubagentsToolParams,
   deps: LauncherDeps,
   signal: AbortSignal | undefined,
-): Promise<ToolResult> {
+): Promise<SubagentsExecuteResult> {
   // D9：tasks 缺失/空数组 → 入口 throw（pi 只对 execute throw 置 isError:true）。
   // 文案带 Correct 示例：弱模型照抄即可自纠。
   const tasks = params.tasks;
@@ -279,7 +274,7 @@ export function registerSubagentsTool(
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
       _ctx: ExtensionContext,
-    ): Promise<ToolResult> {
+    ): Promise<SubagentsExecuteResult> {
       // throw（W4b 契约）：pi 只对 execute throw 置 isError:true，返回值里的 isError
       // 被 agent-loop 丢弃——错误一律 throw（abort 前置判定收敛在 tool-shared）。
       assertNotAborted(signal);
