@@ -2,9 +2,14 @@
  * GitHeadWatcher 单测（缓存治理批 4 U11）：fs.watch HEAD 所在目录的事件链 + 两层恢复链。
  *
  * 策略：
- * - fake timers 只 fake setTimeout/setInterval/clearTimeout/clearInterval/Date——**刻意不 fake
- *   setImmediate**（真实 fs.watch 事件经 libuv 事件循环到达，waitForReal 用 setImmediate 让出
- *   轮询等待；hrtime 不受 fake 影响）。
+ * - fake timers 只 fake setTimeout/setInterval/clearTimeout/clearInterval/Date——驱动 debounce /
+ *   L1 重试 / L2 周期等 timer 语义；真实 fs.watch 事件到达（物理 IO 事实）用重注入轮询等待
+ *   （injectUntilPending），睡眠走 node:timers/promises（不在 vi.useFakeTimers 的 toFake 替换面内，
+ *   已探针核实）。
+ * - fs.watch 事件在满并行 vitest（多 worker CPU 饱和）下墙钟迟到可达秒级且无稳定上界，macOS
+ *   FSEvents 满载下单次 rename 的事件还可能彻底丢失（本目录生产码注释承认的平台形态，产品面由
+ *   L2 周期兜底覆盖）——对「事件在预算内到达」零容忍的一次性等待是 flake 根因，故全部真实 IO
+ *   等待点改为「周期性重注入 + 轮询 pred + 提前 return + 宽预算」。
  * - fixture = mkdtempSync 临时目录下手搭 .git/HEAD（无需 git init——watch 目标是目录）；
  *   「git 原子写 HEAD」用 writeFileSync(tmp) + renameSync(tmp, HEAD) 模拟（正是换 inode 的
  *   rename 形态，watch 目标选目录的核心理由）。
@@ -15,6 +20,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as sleepReal } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHeadWatcher } from './git-head-watcher.js'
 import type { RepoObservation } from '../../services/ports/git-info.js'
@@ -39,30 +45,48 @@ function errnoError(code: string): Error {
   return err
 }
 
-/** 真实 IO 轮询等待（setImmediate 保持真实；hrtime 不受 fake timers 影响）。 */
-async function waitForReal(pred: () => boolean, timeoutMs = 5000): Promise<void> {
-  const startMs = Number(process.hrtime.bigint() / 1_000_000n)
-  for (;;) {
-    if (pred()) return
-    const nowMs = Number(process.hrtime.bigint() / 1_000_000n)
-    if (nowMs - startMs > timeoutMs) throw new Error('waitForReal: real IO timeout')
-    await new Promise<void>((resolve) => setImmediate(resolve))
-  }
+/** 真实时间让出：真实 sleep 至少 ms（sleepReal 是 node:timers/promises 导出，不被 fake timers 替换）。 */
+async function yieldReal(ms: number): Promise<void> {
+  await sleepReal(ms)
 }
 
-/** 真实时间让出：反复让出事件循环直至 hrtime 墙钟走过 ms（不依赖任何断言条件）。 */
-async function yieldReal(ms: number): Promise<void> {
-  const startMs = Number(process.hrtime.bigint() / 1_000_000n)
-  while (Number(process.hrtime.bigint() / 1_000_000n) - startMs < ms) {
-    await new Promise<void>((resolve) => setImmediate(resolve))
+/**
+ * 周期性重注入直至 pred 置位（置位立即返回；预算耗尽才判失败）。
+ *
+ * 为什么「注入 + 等待」必须合成重注入循环：满并行 vitest 下多 worker 抢满 CPU，fs.watch 事件经
+ * libuv/FSEvents 派发的墙钟延迟无稳定上界（全包跑实测超 5s 预算）；macOS FSEvents 满载下单次
+ * rename 的事件还可能彻底丢失。对「事件在预算内到达」零容忍的一次性等待是 flake 根因——重注入
+ * 把「丢失」翻转为下一次尝试，轮询把「迟到」消化在预算内（默认 15s，远大于实测迟到量级、远小于
+ * 用例 timeout 30s）。多次注入只合并进同一 debounce 批次（生产码语义），不改变任何后续断言。
+ *
+ * 计时用 hrtime（不受 fake timers 影响）；真实 sleep 让出 CPU 给 libuv 派发回调，比 setImmediate
+ * busy-poll 在饱和下更快拿到事件。
+ */
+async function injectUntilPending(
+  inject: () => void,
+  pred: () => boolean,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+  const { timeoutMs = 15_000, intervalMs = 50 } = opts
+  const deadlineMs = Number(process.hrtime.bigint() / 1_000_000n) + timeoutMs
+  for (;;) {
+    if (pred()) return
+    inject()
+    if (Number(process.hrtime.bigint() / 1_000_000n) > deadlineMs) {
+      throw new Error(
+        `injectUntilPending: real IO timeout after ${timeoutMs}ms — fs.watch 事件在预算内未入 debounce 批次` +
+          `（watch 未生效 / 事件全部丢失 / 平台限制），检查 fixture 目录存在性与 watcher 挂载状态`,
+      )
+    }
+    await yieldReal(intervalMs)
   }
 }
 
 let outerDir: string
 
 beforeEach(() => {
-  // 刻意排除 setImmediate/clearImmediate：waitForReal 的轮询让出必须走真实事件循环，
-  // libuv 才有机会派发 fs.watch 回调（fake timers 只管 timer 面）。
+  // toFake 只管 timer 面（debounce/L1/L2 语义）；真实 IO 等待的 sleepReal 走 node:timers/promises
+  // 模块导出，不在本替换面内（探针核实），fs.watch 事件派发不受影响。
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
   outerDir = mkdtempSync(join(tmpdir(), 'taiji-git-head-watcher-'))
 })
@@ -99,8 +123,8 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
     expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir])
 
     atomicWriteHead(fx.gitDir)
-    await waitForReal(() => watcher.hasPendingGitEventsForTests())
-    expect(onGitEvent).not.toHaveBeenCalled() // debounce 窗口内未放行
+    await injectUntilPending(() => atomicWriteHead(fx.gitDir), () => watcher.hasPendingGitEventsForTests())
+    expect(onGitEvent).not.toHaveBeenCalled() // debounce 窗口内未放行（fake timer 未推进，结构性成立）
 
     vi.advanceTimersByTime(500)
     expect(onGitEvent).toHaveBeenCalledTimes(1)
@@ -114,8 +138,7 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
     const watcher = new GitHeadWatcher({ onGitEvent, onFallbackTick: vi.fn() })
     watcher.observe(fx.repoCwd, repoObs(fx))
 
-    atomicWriteHead(fx.gitDir)
-    await waitForReal(() => watcher.hasPendingGitEventsForTests())
+    await injectUntilPending(() => atomicWriteHead(fx.gitDir), () => watcher.hasPendingGitEventsForTests())
     atomicWriteHead(fx.gitDir) // 窗口内第二次事件（timer 已排，只合并不重置）
     await yieldReal(100) // 让出真实事件循环，确保第二事件已派发
     vi.advanceTimersByTime(500)
@@ -136,18 +159,16 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
 
     // macOS FSEvents 满载下单次 rename 的事件可延迟/丢失（设计 §3.4.3 已承认的平台形态，
     // 产品面由 L2 兜底覆盖）。本用例关注「reftable 目录 watch 已挂上且事件能到达」，不关注
-    // 「恰好第一次到达」——周期性重注入直至 pending 置位，宽限耗尽才判失败。
-    const deadlineMs = Number(process.hrtime.bigint() / 1_000_000n) + 25_000
-    for (;;) {
-      const tmp = join(reftableDir, `tables.list.tmp-${process.hrtime.bigint()}`)
-      writeFileSync(tmp, 'test')
-      renameSync(tmp, join(reftableDir, 'tables.list'))
-      if (watcher.hasPendingGitEventsForTests()) break
-      if (Number(process.hrtime.bigint() / 1_000_000n) > deadlineMs) {
-        throw new Error('reftable watch: 事件在宽限窗内未到达（watch 未生效或平台全部丢失）')
-      }
-      await yieldReal(250)
-    }
+    // 「恰好第一次到达」——统一走 injectUntilPending 重注入，预算耗尽才判失败。
+    await injectUntilPending(
+      () => {
+        const tmp = join(reftableDir, `tables.list.tmp-${process.hrtime.bigint()}`)
+        writeFileSync(tmp, 'test')
+        renameSync(tmp, join(reftableDir, 'tables.list'))
+      },
+      () => watcher.hasPendingGitEventsForTests(),
+      { timeoutMs: 25_000, intervalMs: 250 },
+    )
     vi.advanceTimersByTime(500)
 
     expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
@@ -222,7 +243,7 @@ describe('GitHeadWatcher L1：error → 清全部 watcher → 5s 定时重试挂
     expect(warnSpy).toHaveBeenCalledTimes(1) // 重试成功无新 warn
 
     atomicWriteHead(fx.gitDir) // 事件驱动已恢复
-    await waitForReal(() => watcher.hasPendingGitEventsForTests())
+    await injectUntilPending(() => atomicWriteHead(fx.gitDir), () => watcher.hasPendingGitEventsForTests())
     vi.advanceTimersByTime(500)
     expect(onGitEvent).toHaveBeenCalledWith(new Set([fx.repoCwd]))
     watcher.dispose()
@@ -271,7 +292,7 @@ describe('GitHeadWatcher L2：60s 周期兜底（无条件运行 + 顺带重挂�
     expect(watcher.watchedDirsForTests()).toEqual([gitDirAbsent])
 
     atomicWriteHead(gitDirAbsent) // 事件驱动经 L2 重挂恢复
-    await waitForReal(() => watcher.hasPendingGitEventsForTests())
+    await injectUntilPending(() => atomicWriteHead(gitDirAbsent), () => watcher.hasPendingGitEventsForTests())
     vi.advanceTimersByTime(500)
     expect(onGitEvent).toHaveBeenCalledWith(new Set([lateCwd]))
     expect(existsSync(join(gitDirAbsent, 'HEAD'))).toBe(true) // fixture 自检：rename 确实发生
