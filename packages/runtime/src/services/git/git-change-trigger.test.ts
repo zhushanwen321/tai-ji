@@ -183,6 +183,19 @@ describe('GitChangeTrigger leading 节流（首变立即放行，2s 窗口只合
 })
 
 describe('GitChangeTrigger 兜底修正 warn（可观测信号）', () => {
+  it('首个 L2 tick 的建锚刷新不 warn（undefined 锚不是「修正」，防每启动周期刷噪音）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = createFakeObservations()
+    fake.stubResolved('/repo', 'main')
+    const { trigger, pushSessionList } = createTrigger(fake)
+
+    trigger.refresh(new Set(['/repo']), 'fallback') // 首刷 = 建锚（无 prior 推送值）
+
+    expect(pushSessionList).toHaveBeenCalledTimes(1) // 建锚仍广播（保守推送）
+    expect(warnSpy).not.toHaveBeenCalled() // 但不 warn——warn 语义锚定「已知值被改写」
+    warnSpy.mockRestore()
+  })
+
   it('source=fallback 且值被修正 → console.warn（高频出现 = 平台 watch 缺陷复发信号）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fake = createFakeObservations()
