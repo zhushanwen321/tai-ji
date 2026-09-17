@@ -261,7 +261,7 @@
  * 脚本分区：props 契约 / 数据面接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
  * per-session 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿矩阵。
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, AlertTriangle, Check, Loader2, Square, WifiOff, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -469,16 +469,34 @@ function workflowElapsed(record: WorkflowRunRecord): string {
 }
 
 // ── running bash 行实时计时（1s tick；仅驱动 elapsedLabel 重算，测试用 fake timers）──
+// tick 仅在有可见 live bash 行时挂载（subagent / workflow 面板恒无消费者，bash 面板无
+// running 行 / 停在已结束桶时同样无）——面板随 Popover 开合反复挂载且 split mode 下多实例
+// 并存，各实例独立 gate：live 行出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush
+// 先于渲染，回调内先同步 now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。
 const NOW_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  tickTimer = setInterval(() => {
+/** 当前可见 bash 行中存在非 ended 行（elapsedLabel 的 now 分支才有消费者；killing 态仍 live） */
+const hasLiveBashRow = computed(() =>
+  props.kind === 'bash' && bashRows.value.some((entry) => !isEnded(entry)),
+)
+watch(hasLiveBashRow, (live) => {
+  if (tickTimer !== null) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+  if (live) {
     now.value = Date.now()
-  }, NOW_TICK_INTERVAL_MS)
-})
+    tickTimer = setInterval(() => {
+      now.value = Date.now()
+    }, NOW_TICK_INTERVAL_MS)
+  }
+}, { immediate: true })
 onBeforeUnmount(() => {
-  if (tickTimer !== null) clearInterval(tickTimer)
+  if (tickTimer !== null) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
 })
 /** 右侧耗时：运行中 = 实时（now - startedAt）；终态 = durationMs（缺省按 endedAt 推算） */
 function elapsedLabel(entry: BackgroundTaskEntry): string {
@@ -539,9 +557,11 @@ function onKillClick(entry: BackgroundTaskEntry): void {
     return
   }
   confirmingKillId.value = null
-  // fire-and-forget：结果经 killing 广播翻转行状态，失败条目停留原状态（下次广播/拉取自愈）
+  // fire-and-forget：结果经 killing 广播翻转行状态，失败条目停留原状态（下次广播/拉取自愈）；
+  // 但用户点击必须有可见反馈——对齐 cancelSubagent / runWorkflowAction 的 toastError 先例
   void backgroundTaskApi.kill(props.sessionId, entry.taskId).catch((err: unknown) => {
     console.debug('[tray] background task kill failed', entry.taskId, err)
+    toastError(t('panel.tray.killFailed', { msg: toErrorMessage(err) }))
   })
 }
 

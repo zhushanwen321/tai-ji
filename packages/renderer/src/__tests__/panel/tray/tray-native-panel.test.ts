@@ -856,3 +856,122 @@ describe('TrayNativePanel 首帧即列表（U2：有数据不闪加载态）', (
     wrapper.unmount()
   })
 })
+
+/**
+ * tick 空转治理：1s interval 仅随「可见 live bash 行」建撤（elapsedLabel 的 now 分支是 tick
+ * 唯一消费者——subagent/workflow 行耗时走数据字段，bash 终态行走 durationMs，均不需 tick）。
+ * 断言手段 = vi.getTimerCount()（fake timers 挂起 timer 数；beforeEach 重设 fake clock 后基线为 0）。
+ */
+describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash 行建撤）', () => {
+  it('bash 无 running 行（空态 / 仅已结束）零 interval；running 行出现即建、收口即撤、卸载无泄漏', async () => {
+    // 仅已结束行：可见行耗时静态（durationMs），无 tick 消费者
+    trayState.bashEnded = [
+      makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
+    ]
+    let wrapper = mountPanel('bash')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(0)
+    wrapper.unmount()
+
+    // 空面板（可行动空态）同样零 interval
+    Object.assign(trayState, createTrayState())
+    wrapper = mountPanel('bash')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(0)
+
+    // running 行出现（数据面推送）：interval 建立，耗时开始实时走
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(1)
+    expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:37')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:38')
+
+    // 行收口（移出 running 行集）：interval 撤销
+    trayState.bashRunning = []
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(0)
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('subagent / workflow 面板即使有 running 行也零 interval（elapsedLabel 仅 bash 分支消费）', async () => {
+    trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
+    let wrapper = mountPanel('subagent')
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="tray-subagent-row"]')).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    wrapper.unmount()
+
+    trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="tray-workflow-row"]')).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('bash 切「已结束」桶停 tick，切回「运行中」桶即恢复且首帧耗时准确（now 先同步再渲染）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    trayState.bashEnded = [
+      makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
+    ]
+    const wrapper = mountPanel('bash')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(1)
+    expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:37')
+
+    // tick 走 5s（00:42）后切到已结束桶：无 live 行 → interval 撤销，now 冻结
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:42')
+    await wrapper.find('[data-testid="tray-panel-tab-ended"]').trigger('click')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(0)
+
+    // 停留期间再走 10s（无 interval，now 不动）；切回运行桶：interval 恢复 + 首帧即 00:52
+    // （watch pre 先于渲染刷新 now；若依赖后续 tick 则首帧仍是 stale 00:42，用例转红）
+    await vi.advanceTimersByTimeAsync(10_000)
+    await wrapper.find('[data-testid="tray-panel-tab-running"]').trigger('click')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(1)
+    expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:52')
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('多实例并存（split mode）各自独立 gate：每实例恰一个 interval，卸载即回收', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    const first = mountPanel('bash')
+    const second = mountPanel('bash')
+    await flushPromises()
+    expect(vi.getTimerCount()).toBe(2)
+
+    first.unmount()
+    expect(vi.getTimerCount()).toBe(1)
+    second.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('TrayNativePanel bash kill 失败用户反馈（错误 toast，不再只 console.debug）', () => {
+  it('kill RPC reject → 第二击后 error toast 可见（终止后台命令失败 + 原因）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-kill-fail' })]
+    vi.mocked(backgroundTaskApi.kill).mockRejectedValueOnce(new Error('rpc down'))
+    // 行内按钮仅 pin 态渲染（hover 态无行内按钮，与既有两段式用例同前提）
+    const wrapper = mountPanel('bash', { pinned: true })
+    await flushPromises()
+
+    // 两段式：首击进确认态（不发 RPC），确认按钮第二击发令
+    await wrapper.find('[data-testid="tray-bash-kill"]').trigger('click')
+    expect(backgroundTaskApi.kill).not.toHaveBeenCalled()
+    await wrapper.find('[data-testid="tray-bash-kill-confirm"]').trigger('click')
+    await flushPromises()
+    expect(backgroundTaskApi.kill).toHaveBeenCalledWith(SID, 'bt-kill-fail')
+
+    const { toasts } = useToast()
+    const errorToast = toasts.value.find((toast) => toast.type === 'error')
+    expect(errorToast).toBeDefined()
+    expect(errorToast?.message).toBe(msg(zhTray.tray.killFailed, { msg: 'rpc down' }))
+    wrapper.unmount()
+  })
+})
