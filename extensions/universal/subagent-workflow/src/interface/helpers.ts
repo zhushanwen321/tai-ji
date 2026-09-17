@@ -96,7 +96,9 @@ interface WorkflowNotifyDetails {
  * D7 账本化配套）。
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
- * 同 runId 的重复收口回调在写账前即拦截（跨 session_shutdown 等边界防重复）；
+ * 同 runId 的重复收口回调拦截（跨 session_shutdown 等边界防重复）；标记在写账成功
+ * （或账本幂等拒绝）后落下——record 抛（reload 窗口 appendEntry assertActive 等）
+ * 不标记，异常由 finalizeRun 围栏接住后重复收口可重试，窗口内不永久丢通知；
  * 持久层幂等由账本 notifyId 承接（内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
  *
  * @param pi ExtensionAPI（仅降级路径直发用）
@@ -112,7 +114,6 @@ export function notifyDone(
   ctx?: GuiContext,
 ): void {
   if (notifiedRunIds.has(runId)) return;
-  notifiedRunIds.add(runId);
 
   const traceNodes = run.state.trace.toArray();
   const name = run.spec.scriptName;
@@ -183,17 +184,23 @@ export function notifyDone(
     );
   }
 
-  // [u9 账本化] ledger 在 → ①写账（record false = 同幂等键已在账/已销账——内存
-  // 去重窗口挤出或重启恢复后的重复收口，跳过投递）→ ②attemptDeliver（courier
-  // 边沿 + isIdle 二次复查，③销账 ④重放在 ledger 内；送达通道经
-  // deliveryCustomType 保持 "workflow-result"）。stale ctx 防御由装配层
-  // sendDelivery 内置（session-lifecycle.ts bindLedgerHostAndRecover），此处无需
-  // 重复包裹。
   const ledger = getBoundNotifyLedger();
   if (ledger) {
+    // [u9 账本化] ledger 在 → ①写账（record false = 同幂等键已在账/已销账——内存
+    // 去重窗口挤出或重启恢复后的重复收口，跳过投递）→ ②attemptDeliver（courier
+    // 边沿 + isIdle 二次复查，③销账 ④重放在 ledger 内；送达通道经
+    // deliveryCustomType 保持 "workflow-result"）。
+    // 内存去重标记在写账**成功后**才落下：record 抛（reload 窗口 appendEntry 命中
+    // assertActive 等）时不标记——异常由 finalizeRun 围栏接住（不崩），账面 entry 未写，
+    // 后续重复收口回调（adoption 快照重发等）可重试写账；提前标记会把「窗口内丢失」
+    // 变成永久丢失（去重阻断 + 账本无 entry 不可重放）。stale ctx 防御由装配层
+    // sendDelivery 内置（session-lifecycle.ts bindLedgerHostAndRecover），此处无需
+    // 重复包裹。
     if (!ledger.record(details.notifyId, content, details, { deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE })) {
+      trackNotifiedRunId(notifiedRunIds, runId);
       return;
     }
+    trackNotifiedRunId(notifiedRunIds, runId);
     ledger.attemptDeliver();
     return;
   }
@@ -205,6 +212,7 @@ export function notifyDone(
   // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection 崩 pi（E1 同机制）。
   // stale 静默降级（完成通知不投递，用户可从 session 历史 / 工具结果看到 workflow
   // 结果，判定见 stale-ctx-audit.md §4），非 stale 错误原样上抛（守卫不吞真实 bug）。
+  trackNotifiedRunId(notifiedRunIds, runId);
   guardStaleCtx(
     () =>
       pi.sendMessage(
@@ -242,8 +250,9 @@ export function notifyDone(
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
  *   在降级形态下钉死）。
  *
- * 调用点：index.ts onRunDone 回调内、notifyDone 之后（notifyDone 内部已 add，
- * 此处 track 的 add 是幂等二次添加）。
+ * 调用点：notifyDone 内部（写账成功/false 后）+ workflow-events onRunDone 回调
+ * （notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口 record 抛等）时
+ * 内外都不标记——去重不阻断，重复收口可重试写账（见 notifyDone 账本分支注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识

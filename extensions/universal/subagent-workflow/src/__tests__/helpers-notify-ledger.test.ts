@@ -196,6 +196,29 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     expect(mock.entries.filter((e) => e.customType === NOTIFY_LEDGER_CUSTOM_TYPE)).toHaveLength(1);
   });
 
+  it("record 抛（reload 窗口 appendEntry assertActive 形态）→ 去重不标记，重调可重试（窗口内不永久丢通知）", () => {
+    const { pi } = makePi();
+    const run = makeRun();
+    const notified = new Set<string>();
+
+    // 第一次：appendLedgerEntry 抛（模拟 reload 窗口 pi.appendEntry 命中 assertActive——
+    // 异常由 finalizeRun 围栏接住不崩，但账面 entry 未写）
+    const origAppend = mock.host.appendLedgerEntry;
+    mock.host.appendLedgerEntry = () => {
+      throw new Error("session context is no longer active (assertActive)");
+    };
+    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified)).toThrow("assertActive");
+    // 关键断言：去重未标记（提前标记 = 去重阻断重试 + 账本无 entry 不可重放 = 永久丢失）
+    expect(notified.has("wf-stale")).toBe(false);
+
+    // 第二次（adoption 后重复收口回调）：appendLedgerEntry 恢复 → 写账 + 投递成功
+    mock.host.appendLedgerEntry = origAppend;
+    notifyDone(pi, "wf-stale", runAsParam(run), notified);
+    expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`]));
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(notified.has("wf-stale")).toBe(true);
+  });
+
   it("③ 回执销账：settled 边沿 ack 后，同 runId 再收口零投递", () => {
     const { pi } = makePi();
     const run = makeRun();

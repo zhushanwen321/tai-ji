@@ -80,8 +80,9 @@ interface BgNotifyRecord {
  *   details 异常 → 返回 undefined 走 Pi 默认渲染（兜底）。
  *
  *   details 形态（单条）：BgNotifyRecord（status/agent/id/result/error）。
- *   [collect 退役] 原批量形态 { batch: true, items }（sync 批通知 notifyBatch 产物）
- *   随批机制删除——details 非单条形态走 Pi 默认渲染兜底。
+ *   [collect 退役] 批量形态的生产方（sync 批通知 notifyBatch）已删除，但 ledger 合并
+ *   投递（同边沿多条 pending 合批）仍会产 { batch: true, items } 批载荷——details
+ *   非单条形态走 Pi 默认渲染兜底（数据不丢，TUI 外观降级）。
  */
 export function renderBgNotifyMessage(
   message: { details?: unknown },
