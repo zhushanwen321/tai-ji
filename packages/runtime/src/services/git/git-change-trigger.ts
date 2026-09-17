@@ -57,6 +57,15 @@ export class GitChangeTrigger {
   private lastPushAt = Number.NEGATIVE_INFINITY
   /** 窗口收尾合并 timer（窗口内已有连发在等待时非 null；连发不重置、不延长窗口）。 */
   private trailingTimer: NodeJS.Timeout | null = null
+  /**
+   * 值变化判定的锚：per-cwd 上次判定变化并承诺推送的 branch（= 前端应已知晓的值）。
+   * 不能用「观测器缓存态」当锚——readObservation 在 TTL 过期时惰性重解析并回填，
+   * 冷缓存（闲置 >TTL 后的首次刷新）下旧值读取本身就解析出**新** branch 并写缓存，
+   * before===after 恒成立，变更被静默吞掉且缓存已被刷成新值，之后 L2 兜底同锚判定
+   * 也判「无变化」——徽章无限期陈旧（冷缓存吞变更形态）。锚必须是跨缓存生命周期
+   * 独立记忆的「上次推送值」。
+   */
+  private readonly lastPushedBranch = new Map<string, string | undefined>()
 
   constructor(deps: GitChangeTriggerDeps) {
     this.observations = deps.observations
@@ -85,18 +94,19 @@ export class GitChangeTrigger {
   }
 
   /**
-   * 单 cwd 刷新：读旧值 → invalidateByCwd → 强制重解析 → 值变化判定。
+   * 单 cwd 刷新：锚（上次推送值）→ invalidateByCwd → 强制重解析 → 值变化判定。
    * 返回该 cwd 的 branch 是否变化；兜底路径的修正 console.warn（高频出现 = 平台 watch
    * 缺陷复发信号，设计 §3.4.4 错误规格表）。
    */
   private refreshOne(cwd: string, source: GitRefreshSource): boolean {
-    const before = this.observations.readObservation(cwd).branch
+    const lastPushed = this.lastPushedBranch.get(cwd)
     this.observations.invalidateByCwd(cwd)
     const after = this.observations.readObservation(cwd).branch
-    if (before === after) return false
+    if (lastPushed === after) return false
+    this.lastPushedBranch.set(cwd, after)
     if (source === 'fallback') {
       console.warn(
-        `[git-change-trigger] fallback rescan corrected branch: cwd=${cwd} ${formatBranch(before)} -> ${formatBranch(after)}` +
+        `[git-change-trigger] fallback rescan corrected branch: cwd=${cwd} ${formatBranch(lastPushed)} -> ${formatBranch(after)}` +
           '（L2 兜底修正——高频出现说明平台 watch 缺陷复发）',
       )
     }

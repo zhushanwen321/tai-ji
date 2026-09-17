@@ -587,6 +587,56 @@ describe('skill-registry D8-a watcher 归因日志（[skill-reload] 行）', () 
     }
   })
 
+  it('F1 类级兜底：定时器同步段（归因日志/受影响 session 计算）抛错 → 降级不崩，rescan 主链照常', async () => {
+    // 44beb27cf 事故的类级防线：实例级修复（经宿主对象调用）只保住 getSessionCwd 一处
+    // 解绑形态；任何后续往 logWatcherBatch / getAffectedSessionIds 同步段加的 throw 都会
+    // 变成 uncaughtException 整机崩（TypeError 无 code，uncaught-policy 不容错）。
+    // 本用例锁定：定时器回调同步段抛错时 console.error 降级 + notifyProjectChange 照常。
+    vi.useFakeTimers()
+    const chokidar = await import('chokidar')
+    const { SkillRegistry } = await import('../src/services/skill-registry.js')
+    const cwd = mkdtempSync(join(tmpdir(), 'skill-reg-f1-'))
+    mkdirSync(join(cwd, '.taiji', 'skills'), { recursive: true })
+    const fakeWatcher = makeFakeWatcher()
+    vi.mocked(chokidar.watch).mockReturnValueOnce(fakeWatcher as never)
+    // 单次抛错：logWatcherBatch 的 getAffectedSessionIds 调用抛（同步段），随后
+    // notifyProjectChange 的同函数调用恢复正常（隔离「归因段 throw」与「通知段正常」）。
+    let failNext = true
+    const reg = new SkillRegistry({
+      configStore: { getSkillPaths: () => [], getPiAgentDir: () => '/pi', getSkillPathScopes: () => ({ projectPaths: [], globalPaths: [] }) } as never,
+      configDir: '/cfg',
+      sessionService: {
+        getActiveSessionIds: () => {
+          if (failNext) {
+            failNext = false
+            throw new TypeError('simulated sync throw in timer callback')
+          }
+          return ['sid-1']
+        },
+        getSessionCwd: () => cwd,
+      } as never,
+      _scanFn: vi.fn().mockResolvedValue([]),
+    } as never)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const events: string[] = []
+    reg.onChange((e) => events.push(e.scope))
+    try {
+      await reg.getProjectSkills(cwd)
+      fakeWatcher.emit('all', 'change', join(cwd, '.taiji', 'skills', 'a', 'SKILL.md'))
+      await vi.advanceTimersByTimeAsync(310) // 若无兜底：uncaughtException 直接 fail 本测试
+      expect(errSpy).toHaveBeenCalledTimes(1)
+      expect(errSpy.mock.calls[0]!.join(' ')).toContain('watcher batch attribution failed')
+      expect(events).toEqual(['project']) // rescan 主链（notifyProjectChange）不被归因失败吞掉
+    } finally {
+      logSpy.mockRestore()
+      errSpy.mockRestore()
+      reg.dispose()
+      vi.useRealTimers()
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
   it('global watcher：dir=global，affectedSessions=全部活跃 session', async () => {
     vi.useFakeTimers()
     const chokidar = await import('chokidar')

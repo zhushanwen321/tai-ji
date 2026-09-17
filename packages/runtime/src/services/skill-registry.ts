@@ -579,11 +579,12 @@ export class SkillRegistry {
     const allIds = this.options.sessionService.getActiveSessionIds()
     if (cwd === undefined) return allIds
     // 经宿主对象调用（保 this）：解绑提取（const fn = svc.fn）后调用会因 this=undefined
-    // 炸 TypeError，且发生在 watcher debounce 定时器里 = uncaughtException 整机崩
+    // 炸 TypeError，且发生在 watcher debounce 定时器里 = uncaughtException 整机崩。
+    // bind 提取而非裸引用：既保 this，又让可选方法的 truthiness narrowing 落到局部
+    // 变量上（可选方法二次属性访问不继承 narrowing，TS2722）。
     const sessionService = this.options.sessionService
-    return sessionService.getSessionCwd
-      ? allIds.filter(sid => sessionService.getSessionCwd(sid) === cwd)
-      : allIds
+    const getSessionCwd = sessionService.getSessionCwd?.bind(sessionService)
+    return getSessionCwd ? allIds.filter(sid => getSessionCwd(sid) === cwd) : allIds
   }
 
   // 测试兼容别名（保持测试用 _notifyGlobalChange 不破坏，内部转发到 notifyGlobalChange）
@@ -744,7 +745,21 @@ export class SkillRegistry {
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
       this.debounceTimers.delete(key)
-      this.logWatcherBatch(key)
+      // watcher 归因日志是辅助功能：其同步段任何 throw 不得升级为 uncaughtException
+      // 整机崩（44beb27cf 事故的类级兜底——实例级修复只保住 getSessionCwd 一处，
+      // 后续往该段加任何会 throw 的代码都会复活整机杀链）。降级 = 跳过本批归因。
+      // rescan 主链（fn）必须在 try 之外：归因失败不得吞掉重扫通知义务；fn 是
+      // async 函数，同步 throw 语义上变成 rejected promise，由全局 unhandledRejection
+      // handler 兜底（只记日志不崩）。
+      try {
+        this.logWatcherBatch(key)
+      } catch (err) {
+        console.error(
+          `[skill-registry] watcher batch attribution failed (degraded, rescan continues): ${
+            err instanceof Error ? err.stack ?? err.message : String(err)
+          }`,
+        )
+      }
       void fn()
     }, DEBOUNCE_MS)
     this.debounceTimers.set(key, timer)
