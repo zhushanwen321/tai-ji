@@ -230,6 +230,21 @@ ls -la ~/.taiji-dev/logs/             # runtime-*.log / pi-<date>-<sessionId>.js
 
 首启缺配置（provider / secrets / 默认模型）时从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单语义补种到 `~/.taiji-dev/` 根（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
 
+### 17. 子包目录 `pnpm exec vitest` 全仓扫跑 + 测试红线「测试禁止触碰真实数据目录」
+
+**现象**：在子包目录（如 `packages/renderer/`）执行 `pnpm exec vitest run`，跑的不是该包测试而是全仓扫描（大量无关包测试启动，甚至触发数据目录防线红灯）。
+
+**根因**（实测，pnpm workspace 行为）：`pnpm exec` 会把 cwd 切回仓库根再执行 bin——vitest 收到的 root 是仓库根，包级 vitest.config.ts（含 `taijiTestConfig` 防线注入）不生效。
+
+**正确跑法**：
+
+```bash
+cd <子包目录> && <repo-root>/node_modules/.bin/vitest run   # cwd 留在包内，包级 config 生效
+vitest run --root <子包目录>                                 # 或从仓库根指定 root
+```
+
+全仓入口只有仓库根一个（根级兜底 config 防线齐备）；单包测试永远用上面两种形态，禁 `pnpm exec vitest` / `pnpm vitest`。测试数据目录红线全文见 AGENTS.md「测试」节。
+
 
 ## 环境变量速查
 

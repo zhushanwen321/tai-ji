@@ -22,60 +22,25 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick, defineComponent, ref } from 'vue'
+import { nextTick, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import {
+  composerChatModule,
+  composerFlowModule,
+  composerApiModule,
+  composerChatStoreModule,
+  composerSessionStoreModule,
+  composerChildStubs,
+} from '../helpers/composer-mount'
 
-// ── mock：composable / api（与现有 Composer 测试范式一致，防真依赖构造报错）──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: { value: null }, setPendingModel: vi.fn() }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
-
-// ── mock chat/session/settings store：最小 stub（Composer 构造期读取 active/isStreaming 等不报错）──
+// ── mock：composable / api / store（公共骨架收敛到 helpers/composer-mount.ts 单源）──
 // command store 保持真实（ setActivePinia 后 useCommandStore() ），便于观察 pendingSlash。
-// 注意：isActive（合并态）驱动 Composer 停止按钮/steer guard，mock 返回 false（非活跃）。
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    getQueueState: () => undefined,
-    isCompacting: () => false,
-    // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
-vi.mock('@/stores/session', () => ({
-  // applySnapshot：features/useModel 回执写调用（切模型/思考等级回执后立即同步）。
-  // 本测试关注 slash 注入，store 更新为 no-op 即可。
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// 注意：isActive（合并态）驱动 Composer 停止按钮/steer guard，helper mock 恒返回 false（非活跃）。
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/stores/chat', () => composerChatStoreModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：defineExpose 暴露 insertSlashChip / insertSkillChip 为独立 vi.fn() spy ──
 // 每个测试 mount 前重新生成 spy：通过 factory 读取最新 spy 引用。
@@ -114,27 +79,11 @@ beforeEach(() => {
   __resetCommandStoreForTesting()
 })
 
-/** 其他子组件空 stub（CommandPopover/AddMenuPopover/各 popover/指示位） */
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  CommandPopover: defineComponent({
-    name: 'CommandPopover',
-    template: '<div><slot /></div>',
-  }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
 /** mount Composer，返回 wrapper + 最近一次 ComposerInput 的 insertSlashChip / insertSkillChip spy */
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
   const wrapper = mount(Composer, {
     props,
-    global: { stubs: otherStubs },
+    global: { stubs: composerChildStubs },
   })
   const spy = composerInputSpies.at(-1)?.insertSlashChip
   const skillSpy = composerInputSpies.at(-1)?.insertSkillChip

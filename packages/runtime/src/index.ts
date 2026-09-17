@@ -55,6 +55,8 @@ import { PluginService } from './services/plugin-service/plugin-service.js'
 import { GitService } from './services/git-service.js'
 import { GitExecutor } from './infra/git-executor.js'
 import { GitStateService } from './services/git/git-state-service.js'
+import { initSharedRepoObserver, getSharedRepoObserver } from './services/git/repo-observer.js'
+import { GitRepoResolver } from './infra/system/git-repo-resolver.js'
 import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
@@ -485,8 +487,13 @@ async function main(): Promise<void> {
   // 在 fileChangeDiff 之前创建——W18 起 FileChangeDiffAdapter 的采集（snapshotStatus/numstat）
   // 委托 GitStateService；GitService（下方，依赖 sessionService）与 GitMessageHandler 的
   // 写操作失效共享同一实例（in-flight 单飞 + sessionId+cwd TTL 缓存 + 非仓库负缓存）。
+  // 缓存治理批 4 U10：先装配共享观测器单例（resolver 含 infra IO，services 层不得实例化——
+  // 组合根是唯一合法装配点），再注入 GitStateService。本服务实现 IGitRepoObserver 作为观测器
+  // service 面——下方 GitInfoReader 门面注入本服务，与 detectBareWorkspaceCached 模块门面共享
+  // 同一份缓存（不得注入其他实例，否则产生第二份镜像）。
   const gitExecutor = new GitExecutor()
-  const gitStateService = new GitStateService({ executor: gitExecutor })
+  initSharedRepoObserver(new GitRepoResolver())
+  const gitStateService = new GitStateService({ executor: gitExecutor, repoObserver: getSharedRepoObserver() })
 
   const fileChangeDiff = new FileChangeDiffAdapter(gitStateService)
 
@@ -661,9 +668,9 @@ async function main(): Promise<void> {
     extensionService,
     configStore,
     sessionStore,
-    // IGitInfoReader：infra 实现（rev-parse 查询 + .git 文件判 worktree + 缓存），注入 session 摘要链。
+    // IGitInfoReader：infra 门面（同步读上方 gitStateService 内建的 repo 观测器缓存），注入 session 摘要链。
     // 与 GitExecutor 同为 git 域 infra，但语义不同（窄查询 vs 通用 exec）——故独立 port（services/ports/git-info.ts）。
-    new GitInfoReader(),
+    new GitInfoReader(gitStateService),
     workspaceService,
     // messageBus：注入 dispatcher 的 session 级事件通道（wave:perf-w09 D1-2 后单通道——
     // dispatcher 只依赖 publish 抽象，bus.publish 是唯一出口，broker 依赖已随接口收敛删除）。
@@ -846,12 +853,12 @@ async function main(): Promise<void> {
 
   // WorktreeService：编排 worktree 创建（bare-workspace / plain-repo 两种模式）。
   // 依赖全注入：GitExecutor（git 子命令）/ ShellRunner（setup 脚本，用 child_process.spawn）/
-  // GitInfoReader（当前分支查询）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
+  // GitInfoReader（当前分支查询，读共享观测器缓存）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
   // 经 server.setServices 注入到 WorktreeMessageHandler（worktree.create 路由）。
   const worktreeService = new WorktreeService({
     gitExecutor: new GitExecutor(),
     shellRunner: new ShellRunner({ spawn }),
-    gitInfoReader: new GitInfoReader(),
+    gitInfoReader: new GitInfoReader(gitStateService),
     configService,
     fs,
   })

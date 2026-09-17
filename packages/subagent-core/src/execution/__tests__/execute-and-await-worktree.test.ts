@@ -111,7 +111,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
     // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）。
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
-    // 捕获 record id（executeAndAwait reject 时不返回 handle；listAllActive 是 running
+    // 捕获 record id（executeAndAwait reject 时不返回 handle；listRunningMutable 是 running
     // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言面）。
     // spy 只观察不替换实现（register 的入册副作用必须保持）。
     const registerSpy = vi.spyOn(store, "register");
@@ -128,7 +128,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
 
     // [U5] 失败 settle 完整执行：archive 零调用 + lastError 落 record（markRoundIdle
     // 簿记⑨——失败原因可达）+ record 留内存（万物可续，可续聊；经 getMutable 断言
-    // ——翻边后 record 落 idle，不再入 listAllActive 的 running 视图）。
+    // ——翻边后 record 落 idle，不再入 listRunningMutable 的 running 视图）。
     expect(archiveSpy).toHaveBeenCalledTimes(0);
     const failedId = registerSpy.mock.calls.at(-1)?.[0]?.id;
     expect(failedId).toBeDefined();

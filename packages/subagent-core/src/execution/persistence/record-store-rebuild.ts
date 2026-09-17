@@ -409,7 +409,7 @@ export function sameStamp(a: Stamp, b: Stamp): boolean {
 }
 
 /** ClosedReason 合法值集合（sidecar 内容校验用：外部损坏/手写垃圾内容 → disconnected）。
- * SSOT = types.ts CLOSED_REASONS 全枚举，此处仅建 Set 索引（避免第二份字面量清单漂移）。 */
+ * SSOT = types.ts CLOSED_REASONS 可写终态原因清单，此处仅建 Set 索引（避免第二份字面量清单漂移）。 */
 const CLOSED_REASONS: ReadonlySet<string> = new Set(CLOSED_REASON_LIST);
 
 /** sidecar 内容是否为合法的 ClosedReason 字面量（disconnected 只作兜底产出，不接受写入）。 */

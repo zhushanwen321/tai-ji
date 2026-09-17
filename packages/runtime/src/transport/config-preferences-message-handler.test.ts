@@ -23,9 +23,15 @@ function mockCtx() {
   const configService = {
     // ④b 用例：非偏好组消息经主 switch 命中未迁移的既有 case（getAutoRenameEnabled）所需 stub
     getAutoRenameEnabled: vi.fn(() => false),
-    // S15 it.each 参数化用例：worktree/默认基分支两组转发所需 stub
+    // 偏好组 10 case 转发所需 stub（worktree 目录 / setup 脚本 / 裸仓脚本 / 超时 / 默认基分支）
     getWorktreeRootDir: vi.fn(() => '/wt'),
     setWorktreeRootDir: vi.fn(),
+    getSetupScript: vi.fn(() => 'custom-hooks/setup-worktree.sh'),
+    setSetupScript: vi.fn(),
+    getBareSetupScript: vi.fn(() => 'custom-hooks/bare-setup.sh'),
+    setBareSetupScript: vi.fn(),
+    getTimeout: vi.fn(() => 90),
+    setTimeout: vi.fn(),
     getDefaultBaseBranch: vi.fn(() => 'main'),
     setDefaultBaseBranch: vi.fn(),
   }
@@ -86,6 +92,48 @@ describe('ConfigPreferencesMessageHandler · 偏好组转发参数化（S15：12
       payload: { baseBranch: 'main' },
       setter: { fn: 'setDefaultBaseBranch', arg: 'develop' },
     },
+    {
+      name: '⑨ config.setSetupScript 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setSetupScript', payload: { script: 'hooks/init.sh' } },
+      replyType: 'config.setupScript',
+      payload: { script: 'custom-hooks/setup-worktree.sh' },
+      setter: { fn: 'setSetupScript', arg: 'hooks/init.sh' },
+    },
+    {
+      name: '⑩ config.getSetupScript 读取转发',
+      msg: { type: 'config.getSetupScript', payload: {} },
+      replyType: 'config.setupScript',
+      payload: { script: 'custom-hooks/setup-worktree.sh' },
+      setter: undefined,
+    },
+    {
+      name: '⑪ config.setBareSetupScript 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setBareSetupScript', payload: { script: 'hooks/bare.sh' } },
+      replyType: 'config.bareSetupScript',
+      payload: { script: 'custom-hooks/bare-setup.sh' },
+      setter: { fn: 'setBareSetupScript', arg: 'hooks/bare.sh' },
+    },
+    {
+      name: '⑫ config.getBareSetupScript 读取转发',
+      msg: { type: 'config.getBareSetupScript', payload: {} },
+      replyType: 'config.bareSetupScript',
+      payload: { script: 'custom-hooks/bare-setup.sh' },
+      setter: undefined,
+    },
+    {
+      name: '⑬ config.setTimeout 写转发（原值透传 + 生效值 reply）',
+      msg: { type: 'config.setTimeout', payload: { timeout: 120 } },
+      replyType: 'config.worktreeTimeout',
+      payload: { timeout: 90 },
+      setter: { fn: 'setTimeout', arg: 120 },
+    },
+    {
+      name: '⑭ config.getTimeout 读取转发',
+      msg: { type: 'config.getTimeout', payload: {} },
+      replyType: 'config.worktreeTimeout',
+      payload: { timeout: 90 },
+      setter: undefined,
+    },
   ])('$name', async ({ msg, replyType, payload, setter }) => {
     const { ctx, replies, configService } = mockCtx()
     const handler = new ConfigPreferencesMessageHandler(ctx)
@@ -137,5 +185,28 @@ describe('ConfigPreferencesMessageHandler · 兜底与不串扰', () => {
     )
     expect(handled).toBe(false)
     expect(replies).toHaveLength(0)
+  })
+})
+
+describe('ConfigPreferencesMessageHandler · setter 校验拒绝路径（config.setTimeout）', () => {
+  it('config.setTimeout 非法值：校验异常上抛（不吞、零 reply、零 sendError）——sendError 由 server.handleMessage catch 层统一负责', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    // 校验本体在 ConfigService.setTimeout（worktree-config-helper：正数且 ≤3600，非法 throw）。
+    // handler 单测以 mock 抛错模拟该拒绝，锚定 handler 层契约：异常原样上抛、不 reply、
+    // 不越层 sendError（错误回包形态由 server.handleMessage 的 catch 统一塑形）。
+    configService.setTimeout.mockImplementation(() => {
+      throw new Error('timeout must be a positive number in (0, 3600], got -1')
+    })
+    const handler = new ConfigPreferencesMessageHandler(ctx)
+    await expect(
+      handler.handle(
+        { type: 'config.setTimeout', payload: { timeout: -1 }, id: 'm8' } as unknown as ClientMessage,
+        WS,
+      ),
+    ).rejects.toThrow(/timeout must be a positive number/)
+    expect(replies).toHaveLength(0)
+    expect(ctx.sendError).not.toHaveBeenCalled()
+    // 抛错即止：生效值回读（getTimeout）不达，无「半写」reply
+    expect(configService.getTimeout).not.toHaveBeenCalled()
   })
 })

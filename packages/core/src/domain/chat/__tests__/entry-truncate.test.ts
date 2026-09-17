@@ -12,13 +12,14 @@
  * - 六类工具 4KB 投影与 64KB 累积截断的层级关系：5KB output 累积态原样保留（投影截断
  *   是 truncate-tool-output.ts 的上层职责，reducer 不越权截到 4KB）
  */
-import { describe, it, expect, vi } from 'vitest'
-import { ref, shallowRef } from 'vue'
+import { describe, it, expect } from 'vitest'
+import type { Message } from '@taiji/shared'
 import type { PiMessageEntry, ServerMessage } from '@taiji/shared'
 import { applyEntry, replayEntries, createInitialChatViewState, normalizePiToolResult } from '../apply-entry'
 import { computeToolCallFill } from '../apply-entry-convert'
 import { ENTRY_TOOL_OUTPUT_MAX_BYTES, truncateEntryToolOutput } from '../apply-entry-utils'
 import { dispatchMessageEvent } from '../effects/registry'
+import { makeCtx as sharedMakeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'
 
 const MARKER = '\n\n[...output truncated...]'
@@ -169,28 +170,14 @@ describe('live ≡ reload 截断层统一（D3 代价 C 根治）', () => {
 })
 
 describe('live overlay（registry tool_call_end）与 reducer 同函数一致性', () => {
+  // sid 固定 's1'；构造实现收敛到 helpers/fixtures.ts（原内联版逐字同构，
+  // initial 放宽 unknown[] 的文件内便捷签名保留，转发时窄化）
   function makeCtx(initial: unknown[]): MessageEffectContext {
-    return {
-      messages: ref(new Map([['s1', shallowRef(initial)]])),
-      retryStates: ref(new Map()),
-      queueStates: ref(new Map()),
-      applyFileChanges: vi.fn(),
-      markChangeSetsSuperseded: vi.fn(),
-      finalizeSession: vi.fn(),
-      clearPendingSend: vi.fn(),
-      drainN: vi.fn(() => []),
-      reconcilePending: vi.fn(),
-      appendUser: vi.fn(),
-      applyEntryFrame: vi.fn(),
-      getInflight: vi.fn(() => 0),
-      incrementInflight: vi.fn(),
-      decrementInflight: vi.fn(),
-      clearInflight: vi.fn(),
-    } as unknown as MessageEffectContext
+    return sharedMakeCtx(initial as Message[], 's1')
   }
 
   function msg(type: string, payload: Record<string, unknown>): ServerMessage {
-    return { type, payload: { sessionId: 's1', ...payload } } as ServerMessage
+    return serverMsg('s1', type, payload)
   }
 
   it('非六类工具大结果：overlay 回填 output ≡ truncateEntryToolOutput 产物 + outputTruncated + images 回填', () => {

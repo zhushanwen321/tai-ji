@@ -1,9 +1,9 @@
 /**
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
- * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布，刻意保持
- * 零依赖自包含（第三方插件作者无需装整个 monorepo）——Bridge* 回包形状定义源
- * 2026-09 D4 后上收协议包，本文件不再零依赖（见下方历史段）。
+ * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布（第三方插件作者无需
+ * 装整个 monorepo）；除 Bridge* 回包形状定义源在 @zhushanwen/extension-protocol
+ * （见下方 D4 单源化说明）外无运行时依赖。
  *
  * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
@@ -352,8 +352,7 @@ export interface PluginContributesStatusBarItem {
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────
 //
-// 本文件仅包含 RPC 层的线协议类型与错误码，无跨域依赖——是 plugin-types
-// 拆分中最独立的一个域。
+// RPC 层的线协议类型与错误码，无跨域依赖。
 
 export interface RpcRequest {
   jsonrpc: '2.0'
@@ -516,9 +515,6 @@ export interface HookResult {
   injectedMessages?: string[]
 }
 
-// 本文件内部仍引用以下「已拆分」域的类型（lifecycle/bridge/agent-api 等
-// 内联类型用到了它们），故在此 import 以供本地使用；对外仍通过文件末尾的
-// `export ... from` 重导出，保证 `from './plugin-types.js'` 不破坏。
 /**
  * 插件系统内部类型定义
  *
@@ -532,13 +528,14 @@ export interface HookResult {
  *   NOT_IMPLEMENTED；已移出稳定面）
  * - @proposed — 演进中 API（Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/
  *   ui/agent/workspace、ToolRegistration、HookEntry、StatusBarItemOptions 等）
- * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等，
- *   其中 BridgeSyncPayload/IPluginServiceDeps 已在 sync 时从 SDK 剥离）
+ * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
+ *   BridgeSyncPayload 定义源在 @zhushanwen/extension-protocol，IPluginServiceDeps
+ *   为 runtime 专属内部类型——两者均不在本 SDK 面）
  */
 
 // ── Descriptor / Manifest 域 ───────────────────────────────────────
-// 已拆分到 ./plugin-types/descriptor-types.ts。此处 re-export 保持
-// 现有 `from './plugin-types.js'` 导入不破坏（NON-BREAKING）。
+// 本域在本文件定义（SSOT）；runtime 侧 plugin-service/plugin-types/descriptor-types.ts
+// 本地定义同构类型（过渡形态，见文件头消费方说明）。
 // ── Worker 类型 ─────────────────────────────────────────────────
 
 /** @internal — runtime 内部：Worker 句柄，仅主进程 Worker 池使用 */
@@ -663,9 +660,6 @@ export interface PluginStateStorage {
   keys(): Promise<string[]>
 }
 
-// ── RPC 线协议域 ──────────────────────────────────────────────────
-// 已拆分到 ./plugin-types/rpc-protocol.ts。此处 re-export 保持
-// 现有 `from './plugin-types.js'` 导入不破坏（NON-BREAKING）。
 // ── Lifecycle 消息类型（Worker ↔ 主线程）────────────────────────
 
 /** @internal — runtime 内部：Worker↔主线程 lifecycle 消息（宿主方向） */
@@ -686,11 +680,9 @@ export type WorkerToHostMessage =
 
 // ── 通用类型 ─────────────────────────────────────────────────────
 
-// D28: Disposable 与 plugin-sdk/src/types.ts 的定义重复。理论上应提升到
-// @taiji/shared 作 single source of truth，但 SDK 通过 sync-types.sh 从本文件
-// 自动生成、且刻意保持零依赖（第三方插件作者无需装整个 monorepo）。若改 re-export
-// 会让 sync 后的 SDK 引入 @taiji/shared 依赖，破坏独立性。故保留独立定义——
-// 这是有意的跨包契约重复，sync 脚本是它的「真相源」。
+// Disposable 在本文件定义（SDK 为 SSOT，runtime 经 taiji-plugin-sdk re-export 消费）。
+// @taiji/shared 无同名定义；本文件是对外发布契约面（除 Bridge* 回包形状经
+// @zhushanwen/extension-protocol 外无依赖），无需跨包提升。
 /**
  * @stable — 可释放资源契约（Disposable 是插件生命周期的基础设施）。
  */
@@ -704,8 +696,6 @@ export type PluginPermission = string
 /** @internal — runtime 内部：插件生命周期状态机 */
 export type PluginState = 'UNLOADED' | 'LOADING' | 'ACTIVATING' | 'ACTIVE' | 'DEACTIVATING' | 'CRASHED' | 'DEPS_MISSING'
 
-// ── RPC Error Codes 域 ────────────────────────────────────────────
-// 已拆分到 ./plugin-types/rpc-protocol.ts。const 必须用 export-from 重导出。
 // ── Permission Constants ─────────────────────────────────────────
 
 /**
@@ -816,8 +806,8 @@ export interface HookEntry {
   priority: number
 }
 
-// HookInterceptor / HookObserver / PiEventCallback 已拆分到
-// ./plugin-types/hook-types.ts，下方 re-export 块统一导出。
+// Hook 域类型在本文件 Hook 类型段落定义（SSOT）；runtime 侧
+// plugin-types/hook-types.ts 经 taiji-plugin-sdk re-export 消费（薄壳）。
 
 // ── Phase 2 AgentAPI（在 Phase 1 基础上增加 tools 和 hooks）─────────
 

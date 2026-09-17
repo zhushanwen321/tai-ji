@@ -126,7 +126,11 @@ export function isReconnectableFinalReason(reason: string | undefined): reason i
  */
 export class ResurrectDeniedError extends Error {}
 
-/** ClosedReason 全枚举值（运行时守卫用——防御性解析外部输入时校验成员资格）。 */
+/**
+ * ClosedReason 中 6 个可写终态原因（运行时守卫用——防御性解析外部输入时校验成员资格）。
+ * disconnected 是读侧兜底产出、无写点（.finalized sidecar 空内容兜底），不在本清单；
+ * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
+ */
 export const CLOSED_REASONS: readonly ClosedReason[] = [
   'parent-shutdown',
   'parent-fork',

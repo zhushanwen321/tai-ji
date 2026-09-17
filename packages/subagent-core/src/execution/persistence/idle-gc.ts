@@ -70,7 +70,7 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
   const timer = setInterval(() => {
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
-    // idle 派生，候选集（idle record）不在 listAllActive 的 running 过滤结果里。
+    // idle 派生，候选集（idle record）不在 listRunningMutable 的 running 过滤结果里。
     for (const record of store.listAllInMemory()) {
       if (!isResumable(record)) continue;
       // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）

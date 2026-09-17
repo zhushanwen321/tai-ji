@@ -20,17 +20,13 @@ import type { ChatStoreInstance } from '../store'
 import { textToSegments, segmentsToText } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { replayEntries } from '../apply-entry'
+import { msg } from './helpers/fixtures'
 
 /** 构造独立 store 实例（effectScope 包裹 onScopeDispose 注册 + 测试隔离）。返回 store + dispose。 */
 function makeStore(): { store: ChatStoreInstance; dispose: () => void } {
   const scope = effectScope(true)
   const store = scope.run(() => createChatStore())!
   return { store, dispose: () => scope.stop() }
-}
-
-/** 构造 ServerMessage（payload 默认带 sessionId） */
-function msg(sid: string, type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: sid, ...payload } } as ServerMessage
 }
 
 /** 构造 complete user 消息（content: string） */

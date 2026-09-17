@@ -25,13 +25,13 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——chat 轮次走协议 seam
 //（registerFakePiEngine 替身，kickOffChatRound 的 notify 门经 engine.run 应答驱动）。
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { bindNotifyLedgerHost, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "../notify/notify-ledger.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { notifyGateAllowsDelivery, SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
@@ -39,29 +39,11 @@ function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-notify-gate-"));
 }
 
-function makePi(): PiLike & {
-  appendEntry: ReturnType<typeof vi.fn>;
-  events: { emit: ReturnType<typeof vi.fn> };
-  sendMessage: ReturnType<typeof vi.fn>;
-  on?: ReturnType<typeof vi.fn>;
-} {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike & {
-    appendEntry: ReturnType<typeof vi.fn>;
-    events: { emit: ReturnType<typeof vi.fn> };
-    sendMessage: ReturnType<typeof vi.fn>;
-    on?: ReturnType<typeof vi.fn>;
-  };
-}
-
 interface ServiceInternals {
   store: RecordStore;
 }
 
-type MockPi = ReturnType<typeof makePi>;
+type MockPi = PiMock;
 
 function setup(initOverrides: Partial<{ isIdle: () => boolean }> = {}): {
   agentDir: string;

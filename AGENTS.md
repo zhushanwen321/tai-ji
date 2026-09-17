@@ -168,4 +168,30 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 跳过检查
 
-cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子包目录>"`，gate 数字与本地一致）[HISTORICAL]。默认禁止跳过检查；`SKIP_*` 变量（SKIP_ALL_CHECKS / SKIP_FRONTEND_LINT / SKIP_EXTENSION_LINT / SKIP_CODE_RULES_CHECK / SKIP_ENV_WHITELIST_CHECK / SKIP_PATH_WHITELIST_CHECK / SKIP_DIRECTORY_RULES_CHECK / SKIP_TOOL_SCHEMA_CHECK / SKIP_CSP_COMPAT_CHECK）仅限线上热修复且须 commit message 说明原因。CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-08 v0.9.3+ CSP `script-src 'self'` 拦截 shiki Oniguruma WASM 致全部 markdown 渲染静默降级纯文本，源码级 eval/WebAssembly 用法与 CSP 指令不一致即拦截；产物级防线在 `postbuild-validate.sh`。
+cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子包目录>"`，gate 数字与本地一致）[HISTORICAL]。默认禁止跳过检查；下表 `SKIP_*` 变量（pre-commit 全部逃生口，SSOT = `.githooks/install-hooks.sh` 生成的钩子本体）仅限线上热修复且须 commit message 说明原因。多数新守卫不设独立开关（R1 后惯例，仅 `SKIP_ALL_CHECKS` 总闸兜底）。
+
+| 变量 | 跳过对象 |
+|------|---------|
+| `SKIP_ALL_CHECKS` | 总闸：pre-commit 全部检查 |
+| `SKIP_FRONTEND_LINT` | 前端 ESLint（renderer staged .vue/.ts） |
+| `SKIP_TYPE_CHECK` | 前端 vue-tsc 类型检查（全量 + 测试 tsconfig） |
+| `SKIP_EXTENSION_LINT` | extensions ESLint/tsc/manifest/结构一致性/files 白名单四段（2b-2e 共用） |
+| `SKIP_CODE_RULES_CHECK` | vue_rules_checker 代码规范 + vitest 防线挂载守卫（共用） |
+| `SKIP_SIDECAR_SESSION_CHECK` | Sidecar session 隔离检查 |
+| `SKIP_CSS_TOKENS_CHECK` | CSS tokens 检查（style.css 组件级样式禁令） |
+| `SKIP_CSS_TOKEN_SSOT_CHECK` | CSS token SSOT 一致性（DESIGN.md 投影 ↔ style.css） |
+| `SKIP_RENDERER_DEPS_CHECK` | Renderer 依赖完整性（import vs package.json） |
+| `SKIP_ENV_WHITELIST_CHECK` | ENV_WHITELIST_PREFIXES SSOT 单一性检查 |
+| `SKIP_TOOL_SCHEMA_CHECK` | Pi extension tool schema 顶层 Object 合规检查 |
+| `SKIP_PATH_WHITELIST_CHECK` | 路径白名单动态化检查 |
+| `SKIP_WS_SEND_CHECK` | ws-client send 直调检查 |
+| `SKIP_NO_SERVICE_CYCLE_CHECK` | runtime services 循环依赖检查 |
+| `SKIP_CSP_COMPAT_CHECK` | CSP 能力一致性检查 |
+| `SKIP_RUNTIME_BUNDLE_CHECK` | Runtime Bundle 验证（runtime 源码变更时） |
+| `SKIP_BOUNDARY_CHECK` | AC7 extension-host 边界检查（core 源码变更时） |
+| `SKIP_PREFLIGHT_CHECK` | 打包配置预检查（electron-builder.yml / tsup.config.ts 变更时） |
+| `SKIP_DIRECTORY_RULES_CHECK` | 目录规范检查（禁 demos/impeccable + 外部 symlink） |
+| `SKIP_I18N_CJK_CHECK` | i18n CJK 残留检测（.vue 模板硬编码中文） |
+| `SKIP_I18N_LOCALE_SYNC_CHECK` | i18n locale 双侧 key 对齐检查 |
+
+CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-08 v0.9.3+ CSP `script-src 'self'` 拦截 shiki Oniguruma WASM 致全部 markdown 渲染静默降级纯文本，源码级 eval/WebAssembly 用法与 CSP 指令不一致即拦截；产物级防线在 `postbuild-validate.sh`。

@@ -155,9 +155,9 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     // 在飞 controller 立即打断
     expect(record.controller?.signal.aborted).toBe(true);
     // record 留内存（settle ≠ 内存回收——旧 session 树内 message 可续聊；
-    // listAllActive 只收 running——settle 后离开 running 集，getMutable 仍可达）
+    // listRunningMutable 只收 running——settle 后离开 running 集，getMutable 仍可达）
     expect(store.getMutable("sa-fork-1")).toBeDefined();
-    expect(store.listAllActive()).toHaveLength(0);
+    expect(store.listRunningMutable()).toHaveLength(0);
   });
 
   it("[U5] onParentNew：running record 编排性收口（interrupted-by-parent）", () => {
@@ -187,8 +187,8 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
       expect(r.status).toBe("idle");
       expect(r.stopReason).toBe("interrupted-by-parent");
     }
-    // settle 后离开 running 集（listAllActive 只收 running），getMutable 全员可达
-    expect(store.listAllActive()).toHaveLength(0);
+    // settle 后离开 running 集（listRunningMutable 只收 running），getMutable 全员可达
+    expect(store.listRunningMutable()).toHaveLength(0);
   });
 
   it("级联收口对每个被关 record 发 pending:unregister（[U5] reason=completed——收口点补发注销）", () => {

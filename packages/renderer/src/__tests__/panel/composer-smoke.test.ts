@@ -21,14 +21,15 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
+import { composerFlowCwdRef } from '../helpers/composer-mount'
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import Panel from '@/components/panel/Panel.vue'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
+// （currentCwd 不入 hoisted 块——W4 要求真 ref，由工厂执行期经 composerFlowCwdRef 注入）
 const flowMock = vi.hoisted(() => ({
   currentSessionId: { value: null as string | null },
   currentSession: { value: null as { launchPresetId?: string } | null },
-  currentCwd: { value: null as string | null },
   currentModel: { value: null as string | null },
   gitInfo: { value: { branch: 'main' } as { branch: string } | null },
   mode: { value: 'plain-repo' as string },
@@ -55,7 +56,7 @@ const flowMock = vi.hoisted(() => ({
 }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => {
   // currentCwd 必须是真 ref：useProjectSkills 对它 watch（plain object 触发 Vue warn）
-  const currentCwdRef = ref<string | null>(null)
+  const currentCwdRef = composerFlowCwdRef()
   return {
     useNewTaskFlow: () => ({ ...flowMock, currentCwd: currentCwdRef }),
     resetNewTaskFlow: vi.fn(),
@@ -76,7 +77,9 @@ const depsMock = vi.hoisted(() => ({
   toast: { error: vi.fn() },
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
-  useNewTaskDeps: () => ({ flow: flowMock, ...depsMock }),
+  // deps.flow 的 currentCwd 同样真 ref（Landing `flow.currentCwd.value` 直读）；与
+  // useNewTaskFlow 工厂各持独立实例——冒烟零跨面写入，语义等价
+  useNewTaskDeps: () => ({ flow: { ...flowMock, currentCwd: composerFlowCwdRef() }, ...depsMock }),
 }))
 
 // ── useExtensionUI mock（Panel 的 ask-user 订阅，ask-user-inline 范式）──

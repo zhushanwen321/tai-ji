@@ -15,7 +15,7 @@ import type { IScannerSessionOps } from './session-internal.js'
 import type { ISessionStore } from '../ports/session.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
 import type { ScannedSession } from './types.js'
-import { detectBareWorkspaceCached, pruneBareCache } from '../worktree/workspace-detector.js'
+import { detectBareWorkspaceCached } from '../worktree/workspace-detector.js'
 
 export class SessionScanner {
   constructor(
@@ -56,11 +56,12 @@ export class SessionScanner {
     return result
   }
 
-  /** Prune git-info + bare-workspace cache entries for cwds no longer represented in any session. */
+  /** Prune stale repo-observer cache entries for cwds no longer represented in any session. */
   private pruneGitCache(allSummaries: SessionSummary[]): void {
     const cwds = new Set(allSummaries.map(s => s.cwd))
+    // 收缩动作打观测器单点：gitInfoCache/bareCache 已合并为观测器单一缓存，
+    // pruneStaleCache（门面）一次调用即覆盖 branch/worktree/bare 全部条目
     this.gitInfoReader.pruneStaleCache(cwds)
-    pruneBareCache(cwds)
   }
 
   private scannedToSummary(s: ScannedSession): SessionSummary {

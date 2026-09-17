@@ -58,7 +58,7 @@ import { startIdleGc } from "../persistence/idle-gc.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）。
 import { disarmIdleTimer } from "../lifecycle/lifecycle-manager.ts";
-import { isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import { doFinalizeRecord } from "../persistence/finalize-record.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
@@ -155,9 +155,9 @@ export class RecordLifecycle {
   disposeAllRecords(reason: ClosedReason): number {
     const stopReason: StopReason =
       reason === "parent-shutdown" ? "interrupted-by-restart" : "interrupted-by-parent";
-    const activeRecords = this.deps.getStore().listAllActive();
+    const runningRecords = this.deps.getStore().listRunningMutable();
     let count = 0;
-    for (const record of activeRecords) {
+    for (const record of runningRecords) {
       // [嵌套连带关闭留痕] 活跃的嵌套子（depth>0）随父轮末回收被连带关闭 = 其在跑
       // 工作丢失且宿主注册表无独立接管（U6「每轮=新进程」的结构性限制，2026-09-14
       // 嵌套载体实测：子 workflow 尚未跑完即被 parent-shutdown 关闭，父方对失败无感
@@ -291,7 +291,7 @@ export class RecordLifecycle {
    *                           Continuation settle 分支 / one-shot 主干尾部，
    *                           顺序约束 [写死]——intent 翻转必须在通知链之后，
    *                           否则 gate ①归档静默吞掉收口轮通知）
-   *   running + force:false + 无活进程（isIdle/isResumable）
+   *   running + force:false + 无活进程（hasArmedIdleTimer/isResumable）
    *                         → 立即归档收口（archiveIdleRecord）
    *   idle                  → 立即归档收口（幂等——已 archived 时 markSettledOut no-op）
    *
@@ -309,8 +309,8 @@ export class RecordLifecycle {
         return;
       }
       const inFlightRound = this.deps.hasActiveContinuationRound(record.id);
-      if (!inFlightRound && (isIdle(record) || isResumable(record))) {
-        // 无在跑轮（[M5] isIdle timer armed 保活 / isResumable 轮终进程已回收——
+      if (!inFlightRound && (hasArmedIdleTimer(record) || isResumable(record))) {
+        // 无在跑轮（[M5] hasArmedIdleTimer = timer armed 保活 / isResumable 轮终进程已回收——
         // chat 轮间与 one-shot 完成态同判；在飞轮判据以 Continuation activeRunId
         // 为权威——进程镜像对协议轮有 spawn 窗误判面）：立即归档收口
         //（archiveIdleRecord 内回收保活进程 + disarm timer）。
@@ -393,7 +393,7 @@ export class RecordLifecycle {
   /**
    * 无在跑轮 record 的手动收起（close action 的 idle / 无活进程分支）。
    *
-   * [M5] 保留保活进程回收语义：isIdle（timer armed 保活）必须先显式回收进程 +
+   * [M5] 保留保活进程回收语义：hasArmedIdleTimer（timer armed 保活）必须先显式回收进程 +
    * disarm timer——否则归档后无人再杀它。随后走 {@link archiveRecord} 归档编排
    * （不终态化——record 留内存 idle + archived，message 寻回可续聊）。
    */

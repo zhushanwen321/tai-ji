@@ -107,7 +107,9 @@ function makePumpHarness(runId: string): PumpHarness {
     workflowAgentDispatch: (opts: AgentCallOpts, parentRunId: string, signal?: AbortSignal) =>
       service.executeWorkflowAgent(opts, parentRunId, signal),
   } as unknown as LifecycleDeps;
-  return { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, run, postMessage, deps, tmpRoot };
+  const harness = { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, run, postMessage, deps, tmpRoot };
+  openHarnesses.push({ service, tmpRoot });
+  return harness;
 }
 
 function makeHandlers(): WorkerHandlers {
@@ -133,11 +135,20 @@ function findAgentResultPost(postMessage: ReturnType<typeof vi.fn>, callId: numb
 
 let prevDataDirEnv: string | undefined;
 
+/** 在途 harness 登记处：makePumpHarness 创建即登记，顶层 afterEach 统一释放（tmp 不泄漏）。 */
+const openHarnesses: Array<{ service: SubagentService; tmpRoot: string }> = [];
+
 beforeEach(() => {
   prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
 });
 
 afterEach(() => {
+  for (const h of openHarnesses) {
+    h.service.dispose();
+    fs.rmSync(h.tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+  openHarnesses.length = 0;
+  clearEngines();
   vi.restoreAllMocks();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
   else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;

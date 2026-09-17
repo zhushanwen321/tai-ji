@@ -39,29 +39,12 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
 /** 与 startGcTimer 内部常量一致（1h 扫描 / 30 天 TTL）。 */
 const GC_INTERVAL_MS = 60 * 60 * 1000;
 const IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-/** initSession 注入的最小 pi duck-type（同 subagent-service PiLike 形状，结构匹配即可）。 */
-interface PiStub {
-  appendEntry(customType: string, data?: unknown): void;
-  events: { emit(channel: string, data: unknown): void };
-  sendMessage(
-    message: { customType: string; content: string; display: boolean; details?: unknown },
-    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-  ): void;
-}
-
-function makePi(): PiStub {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
 
 /** 构造 idle + 指定 idleSince 的 record（GC 扫描的目标态——[U5/D4] GC 判据
  *  isResumable 已改 idle 派生，候选 = idle 形态）。 */

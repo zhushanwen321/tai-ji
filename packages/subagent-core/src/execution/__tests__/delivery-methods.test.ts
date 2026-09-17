@@ -57,7 +57,7 @@ function makeIdleRecord(id = "sa-chat"): ExecutionRecord {
     startedAt: 1000,
     rootSessionId: "root-session",
   });
-  // v4 B-1：idle 折入 running。"等待续聊"态现为 status="running"（isIdle/isResumable 派生谓词区分）。
+  // v4 B-1：idle 折入 running。"等待续聊"态现为 status="running"（hasArmedIdleTimer/isResumable 派生谓词区分）。
   record.status = "running";
   record.round = 1;
   record.controller = new AbortController();

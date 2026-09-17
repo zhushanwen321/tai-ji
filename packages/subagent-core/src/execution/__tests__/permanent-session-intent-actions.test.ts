@@ -87,7 +87,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 
 import { encodeCwd } from "../assembly/path-encoding.ts";
-import { WorktreeManager } from "../worktree/worktree-manager.ts";
+import type { ContinuationHost } from "../assembly/conversation-continuation.ts";
+import { WorktreeManager, type WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 
 const mockExecFile = vi.mocked(
   execFile as unknown as (
@@ -300,11 +301,14 @@ function makeLifecycleDeps(overrides: Partial<RecordLifecycleDeps> = {}): {
           calls.cleanupHandles.push(h.branch);
         },
       }) as unknown as WorktreeManagerType),
-    getModelService: () => ({ getAgentDir: () => "/tmp/agent-dir" }) as never,
+    // 部分 mock：仅实现用例消费的成员——cast 锚定具体槽位类型（接口成员改名即编译红，
+    // 不用 as never 擦除）。
+    getModelService: () =>
+      ({ getAgentDir: () => "/tmp/agent-dir" }) as unknown as ReturnType<RecordLifecycleDeps["getModelService"]>,
     getNotifyHost: () => ({
       emitPendingUnregister: (id: string, reason: string) => calls.unregistered.push({ id, reason }),
       notifyClosed: vi.fn(),
-    }) as never,
+    }) as unknown as ReturnType<RecordLifecycleDeps["getNotifyHost"]>,
     getSessionsDir: () => "/tmp/sessions",
     getPi: () => null,
     onRecordFinalizedCleanup: () => {},
@@ -359,7 +363,9 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
   it("closeAfterRound 挂起轮 settle：order = finalize → route → archive（收口落账不吞收口轮通知）", async () => {
     const record = makeIntentRecord("sa-order-close", { status: "running" });
     const order: string[] = [];
-    const host = {
+    // typed host（对齐 conversation-continuation.test.ts makeHost）：缺成员/多成员均编译红，
+    // 退役字段（routeRecord/isCollectMember/upgradeGateAllows）不再回潜。
+    const host: ContinuationHost = {
       dispatchChatRound: vi.fn(),
       finalizeRoundOutcome: async () => {
         order.push("finalize");
@@ -372,7 +378,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
-      upgradeGateAllows: () => true,
+      engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
       markRoundStarted: vi.fn(),
@@ -387,10 +393,10 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       notifyWorktreeConflict: vi.fn(),
     };
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
     record.closeAfterRound = true; // close 优雅收口挂起
 
-    cont.onRunSettled({ content: "closing round", engineId: "pi" } as never);
+    cont.onRunSettled({ content: "closing round", engineId: "pi" });
 
     await vi.waitFor(() => expect(order).toEqual(["finalize", "route", "archive"]));
     // 收口后标志消费
@@ -400,14 +406,14 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
   it("无挂起（正常轮 settle）：不触发收口消费", async () => {
     const record = makeIntentRecord("sa-order-normal", { status: "running" });
     const archived: string[] = [];
-    const host = {
+    const host: ContinuationHost = {
       dispatchChatRound: vi.fn(),
       finalizeRoundOutcome: async () => {},
       notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
-      upgradeGateAllows: () => true,
+      engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
       markRoundStarted: vi.fn(),
@@ -415,13 +421,13 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       archiveAfterClosingRound: async (rec: ExecutionRecord) => {
         archived.push(rec.id);
       },
-      rebuildWorktree: async () => ({ kind: "degrade-reopen", reason: "n/a" }) as never,
+      rebuildWorktree: async () => ({ kind: "degrade-reopen", reason: "n/a" }),
       notifyWorktreeConflict: vi.fn(),
     };
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
 
-    cont.onRunSettled({ content: "normal round", engineId: "pi" } as never);
+    cont.onRunSettled({ content: "normal round", engineId: "pi" });
 
     await vi.waitFor(() => expect(host.notifyComplete).toHaveBeenCalled());
     await new Promise((r) => {
@@ -450,26 +456,25 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
     expect(store.getMutable("sa-reactivate")).toBe(record); // 收口 ≠ 内存回收
 
     // message 复活：onMessage → status !== running → reviveOrThrow 翻 running。
-    const host = {
+    const handle = Object.freeze({ path: "/tmp/wt-reactivate", branch: "pi-sub-sa-reactivate", baseCommit: "abc", mainCwd: "/repo" });
+    const host: ContinuationHost = {
       dispatchChatRound: vi.fn(),
       finalizeRoundOutcome: async () => {},
-      routeRecord: vi.fn(),
-      isCollectMember: vi.fn(() => false),
+      notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
-      upgradeGateAllows: () => true,
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
       markRoundStarted: vi.fn(),
       closeNow: async () => {},
       archiveAfterClosingRound: async () => {},
-      rebuildWorktree: async () => ({ kind: "rebuilt", handle: undefined }) as never,
+      rebuildWorktree: async () => ({ kind: "rebuilt", handle }),
       notifyWorktreeConflict: vi.fn(),
     };
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
     cont.onMessage("revive after close");
     await vi.waitFor(() => expect(record.status).toBe("running"));
     expect(host.reviveClosedRecord).toHaveBeenCalled();
@@ -507,24 +512,31 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
 // ============================================================
 
 describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分支", () => {
-  /** mock host + order 账本（对齐 conversation-continuation.test.ts makeHost 形态）。 */
-  function makeTestRig(record: ExecutionRecord, rebuildImpl: (rec: ExecutionRecord) => Promise<unknown>) {
+  /**
+   * mock host + order 账本（对齐 conversation-continuation.test.ts makeHost 形态）。
+   * typed ContinuationHost：缺成员/多成员/退役字段均编译红；gateAllows 缺省 true，
+   * gate=false 用例经第三参注入。
+   */
+  function makeTestRig(
+    record: ExecutionRecord,
+    rebuildImpl: (rec: ExecutionRecord) => Promise<WorktreeRebuildOutcome>,
+    gateAllows = true,
+  ) {
     const calls = {
       dispatched: [] as Array<{ task: string; resume: unknown }>,
       notified: [] as Array<{ error?: string }>,
       conflicts: [] as Array<{ recordId: string; patchFile: string }>,
     };
-    const host = {
-      dispatchChatRound: (rec: ExecutionRecord, input: { task: string; resume?: unknown }) => {
+    const host: ContinuationHost = {
+      dispatchChatRound: (_rec, input) => {
         calls.dispatched.push({ task: input.task, resume: input.resume });
-        void rec;
       },
       finalizeRoundOutcome: async () => {},
       notifyComplete: vi.fn(),
-      notifyRecord: (n: { error?: string }) => calls.notified.push(n),
+      notifyRecord: (n) => calls.notified.push(n),
       killStaleChild: async () => {},
       killRoundChild: vi.fn(),
-      upgradeGateAllows: () => true,
+      engineSupportsConversation: () => gateAllows,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
       markRoundStarted: vi.fn(),
@@ -543,7 +555,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const record = makeIntentRecord("sa-wt-rb", { hadWorktree: true, worktreeHandle: undefined });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "rebuilt", handle }));
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
 
     cont.onMessage("continue after restart");
 
@@ -557,7 +569,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const record = makeIntentRecord("sa-wt-cf", { hadWorktree: true, patchFile: "/backup/sa-wt-cf.patch" });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "conflict", handle, patchFile: "/backup/sa-wt-cf.patch" }));
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
 
     cont.onMessage("continue after conflict");
 
@@ -576,7 +588,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     const record = makeIntentRecord("sa-wt-dr", { hadWorktree: true });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "degrade-reopen", reason: "branch gone" }));
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
     const epochBefore = record.epoch ?? 0;
     const roundBefore = record.round ?? 0;
 
@@ -598,7 +610,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
       throw new Error("git worktree failed: disk full");
     });
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
-    const cont = new ConversationContinuation(record, host as never);
+    const cont = new ConversationContinuation(record, host);
 
     cont.onMessage("continue after io error");
 
@@ -607,6 +619,23 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     expect(calls.notified[0]!.error).toContain("git worktree failed: disk full");
     expect(calls.notified[0]!.error).toContain("Recovery");
     expect(calls.dispatched).toHaveLength(0); // 派发作废
+  });
+
+  it("gate=false 时 running 直派路径跳过 gate（engineSupportsConversation 只驻 reviveOrThrow——本 describe 族用例可达性的行为锚）", async () => {
+    // [modeless 波1] fixture 行为锁定：makeTestRig 族的 record 恒 running（轮间直派），
+    // message 资格 gate（conversation 位）不在该路径——gate=false 也照常派发，
+    // 防将来 gate 被挪进 dispatch 路径时本族 mock 形态静默变语义。
+    const record = makeIntentRecord("sa-gate-skip", { status: "running" });
+    const { host, calls } = makeTestRig(record, async () => ({ kind: "degrade-reopen", reason: "n/a" }), false);
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("running dispatch bypasses gate");
+
+    await vi.waitFor(() => expect(calls.dispatched).toHaveLength(1));
+    expect(calls.dispatched[0]!.task).toBe("running dispatch bypasses gate");
+    expect(calls.notified).toEqual([]); // gate=false 不产生失败通知（gate 未参与 running 直派）
+    expect(record.status).toBe("running");
   });
 });
 

@@ -311,7 +311,7 @@ function assertReferenceParity({ hostDbPath, indexDbPath, shaped, direct, derive
   const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
   if (!sameSet(direct, [...ref.direct]) || !sameSet(derived, [...ref.derived])) {
     throw new CleanupAbortError(
-      `I1 参照断言失败：工具自算直接集/派生集与 counts.sql W5 参照 SQL 不一致。\n` +
+      `I1 参照断言失败：工具自算直接集/派生集与参照 SQL 权威文本（docs/architecture/zcode-session-db-isolation.md §3.2 D7）不一致。\n` +
         `  自算 direct=[${direct.join(",")}] derived=[${derived.join(",")}]\n` +
         `  参照 direct=[${[...ref.direct].join(",")}] derived=[${[...ref.derived].join(",")}]`,
     );

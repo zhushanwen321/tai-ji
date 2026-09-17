@@ -14,7 +14,7 @@
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/useChat.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, Segment } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
@@ -158,6 +158,12 @@ describe('useChat 流式状态机', () => {
 })
 
 describe('useChat pendingSend 合并态（空窗期）', () => {
+  // fake timers 统一恢复：放用例尾部会在断言失败时跳过恢复 → 向后续用例泄漏 fake timers
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
   it('send 置 pendingSend → isActive 立即为 true（不等 message_start）', async () => {
     const chat = useChatStore()
     const { send } = useChat()
@@ -258,7 +264,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     vi.advanceTimersByTime(1_000)
     expect(chat.pendingSend.has('s-timeout')).toBe(false)
     expect(chat.isActive('s-timeout')).toBe(false)
-    vi.useRealTimers()
   })
 
   it('finalizeAllStreaming 强制收口所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
@@ -286,7 +291,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.pendingSend.has('s-normal')).toBe(false)
     // streaming entity 仍存在（未被 pendingSend timer 误清）
     expect(chat.isGenerating('s-normal')).toBe(true)
-    vi.useRealTimers()
   })
 
   it('steer API 失败回滚 pending + toast 提示（W1：不留孤儿气泡，不 unhandled reject）', async () => {

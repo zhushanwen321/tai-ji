@@ -1,10 +1,9 @@
 /* ============================================================
-   taiji Mobile · Design Tokens（v6 太极，2026-08-02 定稿反写）
+   taiji Mobile · Design Tokens（v6 太极）
    ────────────────────────────────────────────────────────────
-   提取自 packages/renderer/src/style.css 的 tokens 段（:root 玄 + 皓 light + 字体槽位），
-   供 mobile 壳端到端消费：tailwind.config.ts 把 bg-bg/border-[var(--border)] 等
-   映射到这些 CSS 变量。M1d-02 修复：此前 mobile 包内无任何变量定义，
-   App.vue 的语义 token 类解析为 undefined var（透明背景/无效边框）。
+   packages/renderer/src/style.css tokens 段（:root 玄 + 皓 light + 字体槽位）的
+   mobile 镜像副本，供 mobile 壳端到端消费：tailwind.config.ts 把
+   bg-bg/border-[var(--border)] 等映射到这些 CSS 变量。
 
    真值源仍是 renderer style.css（SSOT: docs/DESIGN.md §4）；
    双壳收敛时抽共享 tokens.css，此文件与其同构（改动须同步两处）。

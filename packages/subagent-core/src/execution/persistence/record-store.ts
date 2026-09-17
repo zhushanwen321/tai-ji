@@ -824,9 +824,8 @@ export class RecordStore {
       .map((r) => toSnapshot(r));
   }
 
-  /** SP-4: 列出所有活跃 record（running + idle）的可变引用。
-   *  供 SubagentService.disposeAllRecords 做级联关闭。 */
-  listAllActive(): ExecutionRecord[] {
+  /** 列出全部 running record 的可变引用（disposeAllRecords 级联关闭等编排消费；只读快照走 listRunning）。 */
+  listRunningMutable(): ExecutionRecord[] {
     return [...this.records.values()]
       .filter((r) => r.status === "running");
   }
@@ -834,7 +833,7 @@ export class RecordStore {
   /**
    * 列出全部内存 record（running + idle）的可变引用——idle-GC 专用扫描面。
    * [two-state-convergence U5/D4] GC 判据改 idle 派生后，候选集 = idle record
-   * （listAllActive 的 running 过滤会把它们挡在扫描外，GC 将恒空转）——本方法
+   * （listRunningMutable 的 running 过滤会把它们挡在扫描外，GC 将恒空转）——本方法
    * 提供不过滤的枚举面，判据（isResumable = idle）在消费方收拢，单一权威不变。
    */
   listAllInMemory(): ExecutionRecord[] {

@@ -135,7 +135,7 @@ export function generateBatchSlug(now: number = Date.now()): string {
 }
 
 /** 启动返回文案（设计 §3.1 成功路径原文：一条通知 + 单次 status 恢复出口 + abort 指引）。 */
-export function subagentsStartupText(
+function subagentsStartupText(
   slug: string,
   runId: string,
   taskCount: number,

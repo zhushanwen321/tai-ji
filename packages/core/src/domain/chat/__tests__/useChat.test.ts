@@ -19,11 +19,7 @@ import { createChatStore } from '../store'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import type { UseChatDeps } from '../useChat'
-
-/** 构造 ServerMessage（payload 默认带 sessionId，对齐 w4 store.test.ts msg helper） */
-function msg(sid: string, type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: sid, ...payload } } as ServerMessage
-}
+import { msg } from './helpers/fixtures'
 
 interface Fixture {
   useChat: ReturnType<typeof createUseChat>

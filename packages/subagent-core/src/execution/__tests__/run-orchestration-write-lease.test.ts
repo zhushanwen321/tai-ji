@@ -193,7 +193,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       // 成功应答映射（workflow 域 AgentResult.content 承载正文）
       expect(result.content).toBe("wf done");
       // [two-state-convergence U4] 轮终翻边 idle——record 经 getMutable 断言
-      //（listAllActive 是 running 过滤视图，不再含轮终收口 record）。
+      //（listRunningMutable 是 running 过滤视图，不再含轮终收口 record）。
       const rec = h.store.getMutable(result.sessionId ?? "");
       expect(rec).toBeDefined();
       expect(rec!.sessionFile).toBe(sessionFile);

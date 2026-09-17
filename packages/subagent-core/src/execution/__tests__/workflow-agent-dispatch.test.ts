@@ -127,7 +127,9 @@ function makeHarness(opts: {
   });
   clearEngines();
   const fake = registerFakePiEngine();
-  return { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, entries, tmpRoot };
+  const harness = { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, entries, tmpRoot };
+  openHarnesses.push({ service, tmpRoot });
+  return harness;
 }
 
 function baseOpts(over: Partial<AgentCallOpts> = {}): AgentCallOpts {
@@ -188,11 +190,20 @@ function registerStrictEngine(): void {
 
 let prevDataDirEnv: string | undefined;
 
+/** 在途 harness 登记处：makeHarness 创建即登记，顶层 afterEach 统一释放（tmp 不泄漏）。 */
+const openHarnesses: Array<{ service: SubagentService; tmpRoot: string }> = [];
+
 beforeEach(() => {
   prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
 });
 
 afterEach(() => {
+  for (const h of openHarnesses) {
+    h.service.dispose();
+    fs.rmSync(h.tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+  openHarnesses.length = 0;
+  clearEngines();
   _resetSettledWatchdogsForTest();
   vi.restoreAllMocks();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];

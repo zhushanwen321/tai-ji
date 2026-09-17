@@ -111,7 +111,7 @@ export class ViewHostStore {
       this.notifyListeners()
       return
     }
-    const guiTree = this.narrowGuiTree(widget.guiTree)
+    const guiTree = this.narrowGuiTree(widget.guiTree, widget.viewId)
     const meta = this.narrowMeta(widget.meta)
     this.setView(sessionId, widget.viewId, {
       viewId: widget.viewId,
@@ -131,16 +131,23 @@ export class ViewHostStore {
     return typeof obj.title === 'string' ? (raw as WidgetMeta) : undefined
   }
 
-  /** 窄化 unknown[] → GuiComponent[]：isGuiComponent 直存；string 行包装 ansi-text（clarify Q1）。 */
-  private narrowGuiTree(raw: unknown[]): GuiComponent[] {
+  /**
+   * 窄化 unknown[] → GuiComponent[]：isGuiComponent 直存；string 行包装 ansi-text（clarify Q1）；
+   * 其余形状（非法对象等）丢弃不阻断其余项，console.warn 留痕（viewId + 位置 + 实际形状，
+   * STANDARDS §11.2 静默丢弃必须登记）供 extension 作者定位坏数据。
+   */
+  private narrowGuiTree(raw: unknown[], viewId: string): GuiComponent[] {
     const result: GuiComponent[] = []
-    for (const item of raw) {
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i]
       if (isGuiComponent(item)) {
         result.push(item)
       } else if (typeof item === 'string') {
         result.push({ type: 'ansi-text', props: { lines: [item] } })
+      } else {
+        const shape = Array.isArray(item) ? 'array' : typeof item
+        console.warn(`[view-host-store] view "${viewId}" guiTree[${i}] 非法形状已丢弃（期待 GuiComponent 对象或 string 行，收到 ${shape}）；其余合法项已保留`)
       }
-      // 其他形状（非法对象等）丢弃——不静默吞，调用方 setView 仍会更新（保留合法项）
     }
     return result
   }

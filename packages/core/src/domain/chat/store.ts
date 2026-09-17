@@ -539,14 +539,17 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *  D-3：deleteStreamingFlag 注入——deleteMessageKey 删 key 时同步清 streaming flag 派生缓存。
    *  W19 review Fix-2：deleteChangeSetStatusesFor 注入——删 messages 分区时同步清该 sid 的
    *  changeSetStatuses 前缀条目（此前仅 disposeSession 清理，LRU 驱逐不清 → map 泄漏）。
-   *  W21：同回调内联清 entryStates 分区（reducer 累积态随 messages 分区同生共死——驱逐重进后
-   *  由 hydrate 全量重放重建，残留旧累积会造成 W22 对账基线陈旧）。
+   *  W21：同回调内联清 entryStates 分区（reducer 累积态随 messages 分区同生共死——
+   *  entryStates 是实时侧累积态：hydrate 只重建 messages ref（entry 重放在 runtime
+   *  wire 层消费、不回填本 Map），清空后由下一条实时 entry 从空态重新累积；残留旧
+   *  累积会与重建后的 messages 分区错位（W22 对账基线陈旧））。
    *  [steer-bubble D4 豁免声明] 本驱逐回调刻意**不**清 pendingBuffer / queueStates /
    *  inflightCounts——与「disposeSession 同点全清」的既有清理惯例不一致是有意为之
    *  （steer-bubble D4「刻意保留」）：这三者是不可
    *  重建状态（segments 暂存与 inflight 确认基线仅存在于前端，清了即永久丢失/漂移），
-   *  且驱逐重进后腿 1 暂存与腿 2 判定仍依赖它们；entryStates/anchors/hydrated 是重建型
-   *  （hydrate 重放可恢复）才随驱逐清理。断连收口（clearIndependentTransient）同理豁免
+   *  且驱逐重进后腿 1 暂存与腿 2 判定仍依赖它们；entryStates/hydrated 是重建型
+   *  （entryStates 清后实时帧重新累积、hydrated 清后 hydrate 重注入）才随驱逐清理。
+   *  断连收口（clearIndependentTransient）同理豁免
    *  pendingBuffer 与 inflight，见该处注释。后续维护勿按惯例顺手补清。 */
   const lruEvictDeps = makeLruEvictDeps(
     messages,

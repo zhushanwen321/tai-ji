@@ -7,7 +7,7 @@
 import { displayAgentName } from "../../shared/agent-ref.ts";
 import { snapshot } from "../persistence/execution-record.ts";
 import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
-import { hasLiveProcessHandle, isIdle, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import type { BgNotifier, NotifierHost } from "./notifier.ts";
 import { createNotifier } from "./notifier.ts";
 import type { BgNotifyRecord } from "./notifier.ts";
@@ -114,7 +114,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
   const notifier: BgNotifier = createNotifier(piAdapter());
 
   /** record → BgNotifyRecord（notifier.notify 入参映射，内部不外露）。
-   *  v4 B-1：守卫放行 closed（终态，含 cancelled）、isIdle（对话模式轮次完成，notify 主 agent G1）
+   *  v4 B-1：守卫放行 closed（终态，含 cancelled）、hasArmedIdleTimer（对话模式轮次完成，notify 主 agent G1）
    *  或 isResumable（running + 无活进程——SP-5 one-shot 成功完成 / MF-6 失败轮回退）。
    *  正在执行（running + 活进程 + 非 timer-armed）返回 undefined（调用方 notifyComplete 跳过）。
    *  SP-1: closed 统一终态，closedReason 由 BgNotifyRecord 携带。
@@ -146,7 +146,7 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // 时前三子句已放行），保留为谓词语义的显式对齐。载荷投影分支不受
     // 影响：轮终收口 idle 统一走 running 载荷（[modeless 波1·SP-5]）。拦截集不变：
     // running + 活进程 + 非 timer-armed 仍静默。
-    if (!legacyClosed && record.status !== "idle" && !isIdle(record) && !isResumable(record)) {
+    if (!legacyClosed && record.status !== "idle" && !hasArmedIdleTimer(record) && !isResumable(record)) {
       return undefined;
     }
     // legacyClosed → BgNotifyRecord.closed（旧终态遗留文案族）；轮终收口

@@ -14,19 +14,28 @@
  * 3. invalidate(sessionId)（D4-3）：写操作后调用，清该 session 的缓存与在飞条目。在飞条目被标记
  *    dead——完成后不回写缓存，防止「失效后旧值复活」竞态。
  *
+ * 4. repo 观测器（缓存治理批 4 U10）：branch / worktree / bare 判定的单一观测源——内嵌
+ *    GitRepoObserver（单 per-cwd 缓存，解析经 IGitRepoResolver），并实现 IGitRepoObserver 作为
+ *    观测器的 service 面：GitInfoReader / detectBareWorkspaceCached 两门面经组合根共享同一观测器
+ *    实例；invalidateByCwd 的写失效同步打观测器单点。fs.watch HEAD 事件驱动为 U11 范围，
+ *    本单元失效语义 = 旧 gitInfoCache/bareCache 的 TTL（5min）+ oldest-insert 容量驱逐。
+ *
  * W17 起 getStatus 生产接线：组合根实例化并注入 GitService（getStatus 收编）与
  * GitMessageHandler（写操作失效）；W18 再收编 file-change-reconciler 的采集。
  *
  * 🔒 三层架构：本文件属 services（编排 + 缓存策略），IO 经 IGitExecutor port；
  * 解析复用 infra 纯函数（git-status-parser / file-change-reconciler 的 parseGitStatusPorcelain、
- * xyToStatus——无 IO 纯计算，与 git-service.ts import infra/git/git-status-parser 同款豁免）。
+ * xyToStatus——无 IO 纯计算，与 git-service.ts import infra/git/git-status-parser 同款豁免）；
+ * 观测器解析 IO 经 IGitRepoResolver（infra/system/git-repo-resolver）注入。
  */
 import type { FileChangeStatus, GitStatusResult } from '@taiji/shared'
 import { parseGitStatus, deriveCounts, parseNumstatEntries } from '../../infra/git/git-status-parser.js'
 import { parseGitStatusPorcelain, xyToStatus } from '../../infra/pi/file-change-reconciler.js'
 import { GitExecutorError } from '../ports/git-executor.js'
 import type { GitCommand, GitExecutorResult, IGitExecutor } from '../ports/git-executor.js'
+import type { IGitRepoObserver, RepoObservation } from '../ports/git-info.js'
 import type { IGitStateService, NumstatEntry, StatusSnapshot } from '../ports/git-state.js'
+import type { GitRepoObserver } from './repo-observer.js'
 
 // D3-1 超时定案：snapshotStatus/numstat 沿用 reconciler 现状 5000ms；getStatus 沿用
 // git-executor 默认 8000ms（显式传参防 executor 默认值变化时语义漂移）。
@@ -54,6 +63,12 @@ interface InflightGetStatus {
 
 export interface GitStateServiceOptions {
   executor: IGitExecutor
+  /**
+   * repo 观测器（branch/worktree/bare 单源缓存），必传：单源语义要求调用方显式选择缓存实例。
+   * 生产由组合根注入共享单例（getSharedRepoObserver()）——GitInfoReader / detectBareWorkspaceCached
+   * 两门面读的是同一实例，注入别的实例会产生第二份镜像（违背单源）；测试注入独立实例隔离。
+   */
+  repoObserver: GitRepoObserver
   /** 测试可注入短 TTL（默认 2000ms）。 */
   statusTtlMs?: number
   /** 测试可注入小容量帽（默认 500，对齐 git-info-reader 惯例）。 */
@@ -65,8 +80,10 @@ export interface GitStateServiceOptions {
 /** getStatus 成功聚合结果才缓存；null 哨兵 = 降级路径（非仓库/不可用/超时），调用方转 notRepoResult。 */
 type GetStatusOutcome = GitStatusResult | null
 
-export class GitStateService implements IGitStateService {
+export class GitStateService implements IGitStateService, IGitRepoObserver {
   private readonly executor: IGitExecutor
+  /** 具体类型：写失效钩子（invalidateByCwd）需触达 port 面之外的 invalidateCwd。 */
+  private readonly repoObserver: GitRepoObserver
   private readonly statusTtlMs: number
   private readonly statusCacheMaxSize: number
   private readonly notRepoTtlMs: number
@@ -86,6 +103,7 @@ export class GitStateService implements IGitStateService {
 
   constructor(opts: GitStateServiceOptions) {
     this.executor = opts.executor
+    this.repoObserver = opts.repoObserver
     this.statusTtlMs = opts.statusTtlMs ?? STATUS_TTL_MS
     this.statusCacheMaxSize = opts.statusCacheMaxSize ?? STATUS_CACHE_MAX_SIZE
     this.notRepoTtlMs = opts.notRepoTtlMs ?? NOT_REPO_TTL_MS
@@ -275,9 +293,25 @@ export class GitStateService implements IGitStateService {
     this.dropKeysWith((key) => key.startsWith(`${sessionId}${KEY_SEP}`))
   }
 
-  /** perf W17：session-less 写操作（checkoutCwd）按 cwd 后缀失效，覆盖共享该 cwd 的所有 session。 */
+  /**
+   * perf W17：session-less 写操作（checkoutCwd）按 cwd 后缀失效，覆盖共享该 cwd 的所有 session。
+   * 批 4 U10：写失效同步打观测器单点（checkout 换分支后 readGitInfo 下一次读即新值——旧
+   * gitInfoCache 无任何写失效通道，此处为合并后的结构性补齐）。
+   */
   invalidateByCwd(cwd: string): void {
     this.dropKeysWith((key) => key.endsWith(`${KEY_SEP}${cwd}`))
+    this.repoObserver.invalidateCwd(cwd)
+  }
+
+  // ── repo 观测器 service 面（IGitRepoObserver）────────────────────────────
+  // 组合根把本服务作为观测器实例注入 GitInfoReader 门面；委托保持单一缓存所有权在内嵌 observer。
+
+  readObservation(cwd: string): RepoObservation {
+    return this.repoObserver.readObservation(cwd)
+  }
+
+  pruneCache(existingCwds: Set<string>): void {
+    this.repoObserver.pruneCache(existingCwds)
   }
 
   /**

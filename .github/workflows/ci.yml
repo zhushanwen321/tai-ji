@@ -27,6 +27,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,6 +62,7 @@ jobs:
   typecheck:
     name: TypeCheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,6 +111,7 @@ jobs:
     # 测试阶段新杆，需同步压。shard 线性有效（文件互相独立）。
     name: Test (runtime, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -161,6 +164,7 @@ jobs:
     # ubuntu 实测 209s → 2 分片预期 ~120s/片（含 boot）。
     name: Test (renderer, shard ${{ matrix.shard-index }}/${{ matrix.shard-total }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -203,6 +207,7 @@ jobs:
   test-main:
     name: Test (main)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -226,6 +231,7 @@ jobs:
   test-extensions:
     name: Test (extensions)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -283,6 +289,7 @@ jobs:
   e2e-visual:
     name: E2E Visual (mock)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -336,6 +343,7 @@ jobs:
   e2e-behavior:
     name: E2E Behavior P0 smoke (mock)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -375,6 +383,7 @@ jobs:
   invariants:
     name: Invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -613,6 +622,7 @@ jobs:
   build:
     name: Build
     needs: [lint, typecheck, test-runtime, test-renderer, test-main, test-extensions, e2e-visual, e2e-behavior]
+    timeout-minutes: 20
     uses: ./.github/workflows/build.yml
     with:
       upload-artifacts: false

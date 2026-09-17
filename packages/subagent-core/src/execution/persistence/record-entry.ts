@@ -52,7 +52,7 @@ export interface SubagentRecordEntryData {
   /** 短标签（≤35 字符）。 */
   slug: string;
   status: ExecutionStatus;
-  /** L2 关闭原因（仅 status="closed" 时有意义）。 */
+  /** L2 关闭原因（旧终态兼容位——写侧仅 workflow D7 例外族/监督器放弃产出；读侧回落链见 stopReason）。 */
   closedReason?: ClosedReason;
   /**
    * [U3 / §3.2.4] 展示停因（上一轮为什么停，值域 StopReason）。additive 字段：

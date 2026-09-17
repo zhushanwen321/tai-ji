@@ -23,40 +23,17 @@
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/effects.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, shallowRef } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { dispatchMessageEvent } from '../effects/registry'
+import { makeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'
 import type { Message, PiBranchSummaryEntry, PiCompactionEntry, PiCustomMessageEntry, Segment, ServerMessage } from '@taiji/shared'
 
 const SID = 's-test'
 
-/** 构造 ctx：真实 vue ref + 回调 mock（D-1 容器：分区值为 ShallowRef<Message[]>） */
-function makeCtx(initial: Message[] = []): MessageEffectContext {
-  return {
-    messages: ref(new Map([[SID, shallowRef(initial)]])),
-    retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
-    applyFileChanges: vi.fn(),
-    markChangeSetsSuperseded: vi.fn(),
-    finalizeSession: vi.fn(),
-    clearPendingSend: vi.fn(),
-    // m2→W14：queue_update drain 接线 drainN（计数 FIFO）+ appendUser + 深度对账 reconcilePending
-    drainN: vi.fn(() => []),
-    reconcilePending: vi.fn(),
-    appendUser: vi.fn(),
-    // w21：entry 载体帧喂 reducer 的接入点（store.applyEntryFrame 注入）
-    applyEntryFrame: vi.fn(),
-    // steer-bubble u1/D2：inflight 确认计数读写（message_end 腿 2 裁决输入，store 注入）
-    getInflight: vi.fn(() => 0),
-    incrementInflight: vi.fn(),
-    decrementInflight: vi.fn(),
-    clearInflight: vi.fn(),
-  }
-}
-
+/** ServerMessage 便捷构造（sid 固定文件常量；实现收敛到 helpers/fixtures.ts） */
 function msg(type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: SID, ...payload } } as ServerMessage
+  return serverMsg(SID, type, payload)
 }
 
 /** [w21] toolCall entry 形态构造（payload.entry——event-adapter 重构载体） */

@@ -19,22 +19,11 @@ import { describe, it, expect } from 'vitest'
 import { computeToolCallFill } from '../apply-entry-convert'
 import { applyEntry, createInitialChatViewState, replayEntries } from '../apply-entry'
 import type { PiEntry, PiMessageEntry } from '../apply-entry'
+import { msgEntry } from './helpers/fixtures'
 
-// ── 测试数据工厂（同 apply-entry.test.ts 惯例：ISO timestamp / uuid 风格 id）──────────
-
-function msgEntry(
-  id: string,
-  body: Record<string, unknown>,
-  overrides?: { parentId?: string | null; timestamp?: string },
-): PiMessageEntry {
-  return {
-    type: 'message',
-    id,
-    parentId: overrides?.parentId ?? null,
-    timestamp: overrides?.timestamp ?? '2026-09-13T10:00:00.000Z',
-    message: body,
-  }
-}
+// ── 测试数据工厂（同 apply-entry.test.ts 惯例：ISO timestamp / uuid 风格 id；
+//    msgEntry 构造收敛到 helpers/fixtures.ts 单源——本文件原默认 timestamp
+//    '2026-09-13' 未被任何调用触达，全部调用显式传 overrides）──────────
 
 const ISO = (ms: number): string => new Date(ms).toISOString()
 

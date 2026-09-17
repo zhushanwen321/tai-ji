@@ -13,11 +13,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { ServerMessage } from '@taiji/shared'
 import { createMessageCoalescer } from '../delta-coalescer'
-
-/** 构造 ServerMessage（payload 默认带 sessionId，对齐 useChat.test.ts 的 msg helper） */
-function msg(sid: string, type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: sid, ...payload } } as ServerMessage
-}
+import { msg } from './helpers/fixtures'
 
 /**
  * 排一个在「coalescer 的 flush-microtask 之后」resolve 的 microtask：

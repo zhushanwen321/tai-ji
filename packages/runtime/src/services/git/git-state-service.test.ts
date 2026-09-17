@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitStatusResult } from '@taiji/shared'
 import { GitExecutorError } from '../ports/git-executor.js'
 import type { GitCommand, GitExecutorResult, IGitExecutor } from '../ports/git-executor.js'
+import { GitRepoObserver } from './repo-observer.js'
 import { GitStateService } from './git-state-service.js'
 
 /**
@@ -55,7 +56,13 @@ function createFakeExecutor() {
 
 /** 构造被测服务（TTL 用真实短值 + fake timers 推进）。 */
 function createService(executor: IGitExecutor) {
-  return new GitStateService({ executor, statusTtlMs: 2000, notRepoTtlMs: 60_000 })
+  return new GitStateService({ executor, repoObserver: makeStubObserver(), statusTtlMs: 2000, notRepoTtlMs: 60_000 })
+}
+
+/** stub 观测器（status 链用例不触观测器；类型收窄免构造真实 resolver）。 */
+function makeStubObserver(): GitRepoObserver {
+  const stub = { readObservation: () => { throw new Error('stub observer 不应在 status 链被调用') }, pruneCache: () => {} }
+  return stub as unknown as GitRepoObserver
 }
 
 const NOT_REPO_STDERR = 'fatal: not a git repository (or any of the parent directories): .git'
@@ -556,6 +563,7 @@ describe('GitStateService.getStatus', () => {
     const fake = createFakeExecutor()
     const svc = new GitStateService({
       executor: fake.executor,
+      repoObserver: makeStubObserver(),
       statusTtlMs: 2000,
       notRepoTtlMs: 60_000,
       statusCacheMaxSize: 2,
@@ -579,5 +587,64 @@ describe('GitStateService.getStatus', () => {
     await svc.getStatus('sid-2', '/repo')
     expect(fake.calls).toHaveLength(15) // key2 被驱逐后重执行
     expect(statusCacheOf(svc).size).toBe(2)
+  })
+})
+
+describe('GitStateService repo 观测器（缓存治理批 4 U10）', () => {
+  /** 计数 resolver：每次解析记录 cwd（行为式断言观测器缓存的命中/失效）。 */
+  function createCountingResolver() {
+    const calls: string[] = []
+    return {
+      calls,
+      resolver: {
+        resolve(cwd: string) {
+          calls.push(cwd)
+          return { branch: 'main', isWorktree: false, isBare: false, gitDir: '/repo/.git', headPath: '/repo/.git/HEAD' }
+        },
+      },
+    }
+  }
+
+  it('readObservation 走观测器缓存：同 cwd 二次读取命中（IGitRepoObserver service 面，门面经此共享单源）', () => {
+    const fake = createFakeExecutor()
+    const { resolver, calls } = createCountingResolver()
+    const svc = new GitStateService({ executor: fake.executor, repoObserver: new GitRepoObserver({ resolver }) })
+
+    svc.readObservation('/repo')
+    svc.readObservation('/repo')
+    expect(calls).toEqual(['/repo'])
+  })
+
+  it('invalidateByCwd 同步打观测器单点：观测条目被失效，下一次读取重新解析（旧 gitInfoCache 无写失效通道，结构性补齐）', () => {
+    const fake = createFakeExecutor()
+    const { resolver, calls } = createCountingResolver()
+    const svc = new GitStateService({ executor: fake.executor, repoObserver: new GitRepoObserver({ resolver }) })
+
+    svc.readObservation('/repo')
+    svc.invalidateByCwd('/repo')
+    svc.readObservation('/repo')
+    expect(calls).toEqual(['/repo', '/repo'])
+  })
+
+  it('pruneCache 委托观测器收缩：空活跃集合清空后重新解析', () => {
+    const fake = createFakeExecutor()
+    const { resolver, calls } = createCountingResolver()
+    const svc = new GitStateService({ executor: fake.executor, repoObserver: new GitRepoObserver({ resolver }) })
+
+    svc.readObservation('/repo')
+    svc.pruneCache(new Set<string>())
+    svc.readObservation('/repo')
+    expect(calls).toEqual(['/repo', '/repo'])
+  })
+
+  it('invalidate(sessionId) 不触观测器（sessionId 键无 cwd 可定位，观测器条目由 TTL 收敛）', () => {
+    const fake = createFakeExecutor()
+    const { resolver, calls } = createCountingResolver()
+    const svc = new GitStateService({ executor: fake.executor, repoObserver: new GitRepoObserver({ resolver }) })
+
+    svc.readObservation('/repo')
+    svc.invalidate('sid-1')
+    svc.readObservation('/repo')
+    expect(calls).toEqual(['/repo'])
   })
 })
