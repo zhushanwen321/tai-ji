@@ -244,6 +244,68 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
     })
 
+    it('互斥强制结算的恢复与后续切换串行：恢复(原)完成前新切换目标不得写入（无交错）', async () => {
+      // 场景（runTaskNow 直连路径）：互斥命中触发 mutex-forced 强制结算恢复；若恢复
+      // fire-and-forget，恢复先同步清记录再 await setModel(原)，紧随的需切模型任务 B 的
+      // setModel(目标) 与之并发、完成顺序不定（恢复后完成则 B 的 turn 用错模型）。修复后
+      // 互斥分支 await 强制结算——锁定「恢复(原)记账并完成前，新切换不得发起」的顺序契约。
+      //
+      // 状态构造说明：公开行为下 reconcile 在 ticksOpen 递增过窗口的同一 tick 内即结算
+      //（idle 恢复 / 非 idle 转推迟），互斥分支命中的「in-flight 过窗口残留」是防御分支——
+      // 此处直接注入该内部状态（extensions 测试目录豁免 unsafe-cast 规则，ask-user 等先例）。
+      const taskA = await addModelTask('job-a', TASK_M)
+      await runtime.dispatchTask(taskA)
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // A 的事件全部丢失；把在途标记推过对账窗口（> MODEL_SWITCH_RECONCILE_TICKS = 2）
+      const internal = runtime as unknown as { pendingModelSwitch: { ticksOpen: number } | null }
+      expect(internal.pendingModelSwitch).not.toBeNull()
+      internal.pendingModelSwitch!.ticksOpen = 3
+
+      // 恢复(ORIG) 的 setModel 在「已记账未完成」态挂起（模拟真实 RPC 在途窗口）
+      let releaseRestore: (() => void) | undefined
+      const restoreInFlight = new Promise<void>(resolve => {
+        releaseRestore = resolve
+      })
+      let gatedCalls = 0
+      vi.spyOn(ops, 'setModelByRef').mockImplementation(async (ref: string) => {
+        ops.setModelCalls.push(ref)
+        if (ops.setModelResult) ops.currentRef = ref
+        if (gatedCalls++ === 0) await restoreInFlight // 首个调用 = mutex-forced 恢复
+        return ops.setModelResult
+      })
+
+      // B（需切模型）直连 dispatch：命中互斥 → 强制结算恢复（挂起）→ await
+      const taskB = await addModelTask('job-b', OTHER_M)
+      let bSettled = false
+      let bResult: boolean | undefined
+      void runtime.dispatchTask(taskB).then(ok => {
+        bSettled = true
+        bResult = ok
+      })
+      await flushAsync()
+
+      // 恢复已发起（ORIG 已记账）但未完成：B 未被放行、OTHER_M 未写入（无交错核心断言）
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+      expect(bSettled).toBe(false)
+      expect(backend.sentMessages).toHaveLength(1) // 仅 A 的消息，B 未 dispatch
+
+      // 放行恢复 → 互斥分支才继续 skip（B 返回 false，pending 留待下 tick 重试）
+      releaseRestore!()
+      await flushAsync()
+      expect(bSettled).toBe(true)
+      expect(bResult).toBe(false)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG]) // B 被 skip，未切换
+      expect(backend.sentMessages).toHaveLength(1)
+
+      // 恢复完成后 B 重试：新切换目标写入在恢复之后（调用序断言）
+      const okRetry = await runtime.dispatchTask(taskB)
+      expect(okRetry).toBe(true)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
+      expect(ops.currentRef).toBe(OTHER_M)
+      expect(backend.sentMessages).toHaveLength(2)
+    })
+
     it('同 tick 双任务顺序：A 恢复过期强制开放 + B 到期切换 → B 生效不被 A 回滚', async () => {
       // A dispatch（记录在途）后事件全部丢失
       const taskA = await addModelTask('job-a', TASK_M)

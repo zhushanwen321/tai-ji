@@ -100,8 +100,8 @@ function cancelledCreateResult(): {
 }
 
 /**
- * schedule tool handler（execute 六步流：预校验 → headless 分支 → 交互 → abort 检查 →
- * 取消 → 确认创建）。
+ * schedule tool handler（execute 流：预校验 → headless 分支 → abort 早退 → 交互 →
+ * abort 兜底检查 → 取消 → 确认创建；设计 §5 U2 中 abort 检查先于交互）。
  *
  * 业务失败 → throw（pi 只对 execute throw 置 isError:true——W4）；用户取消不是错误，
  * 正常返回 cancelled result（D5）。service 未初始化等初始化异常不在此 catch——穿透到
@@ -138,6 +138,14 @@ export async function handleSchedule(
     const toolResult = toToolResult(result)
     toolResult.content[0]!.text += UNCONFIRMED_NOTICE
     return toolResult
+  }
+
+  // abort 早退（设计 §5 U2：abort 检查先于交互）：signal 已 aborted 时 TUI 分支的
+  // addEventListener('abort') 永不触发（会挂出注定取消的表单）、rpc 分支会多发起一次
+  // 注定取消的 select——直接走取消语义。交互后的 abort 兜底检查保留（覆盖交互挂起
+  // 期间收到 abort 的路径）。
+  if (signal?.aborted) {
+    return cancelledCreateResult()
   }
 
   // 步骤 3 交互分支：TUI 挂 ScheduleCreateComponent（ctx.ui.custom）；

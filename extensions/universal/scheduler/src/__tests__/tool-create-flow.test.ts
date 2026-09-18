@@ -210,6 +210,37 @@ describe('handleSchedule 六步流', () => {
     expect(backend.appendedOps).toHaveLength(0)
   })
 
+  it('abort 早退：signal 预先 aborted → rpc 不发 select / TUI 不挂表单，直接 cancelled', async () => {
+    // 六步流 abort 检查先于交互（设计 §5 U2）：修复前 signal 已 aborted 时 TUI 分支的
+    // addEventListener('abort') 永不触发（挂出注定取消的表单）、rpc 分支多发起一次注定
+    // 取消的 select。本用例反证两条分支均未触达交互。
+    // rpc 分支：select 若被调用会回确认 FormResult → 走创建（反证早退未生效）
+    const abortedRpc = new AbortController()
+    abortedRpc.abort()
+    const select = selectReturning(formResult())
+    const ctxRpc = createMockCtx({ select })
+
+    const resultRpc = await handleSchedule(
+      pi, service, { prompt: 'x', schedule: '5m' }, ctxRpc, abortedRpc.signal,
+    )
+    expect(select).not.toHaveBeenCalled()
+    expect(resultRpc.details).toEqual({ cancelled: true })
+    expect(backend.appendedOps).toHaveLength(0)
+
+    // TUI 分支：custom 若被调用会挂出表单并回确认 → 走创建（反证早退未生效）
+    const abortedTui = new AbortController()
+    abortedTui.abort()
+    const custom = vi.fn(async () => formResult())
+    const ctxTui = createMockCtx({ mode: 'tui', custom })
+
+    const resultTui = await handleSchedule(
+      pi, service, { prompt: 'x', schedule: '5m' }, ctxTui, abortedTui.signal,
+    )
+    expect(custom).not.toHaveBeenCalled()
+    expect(resultTui.details).toEqual({ cancelled: true })
+    expect(backend.appendedOps).toHaveLength(0)
+  })
+
   it('TUI 取消：custom resolve null → cancelled result 且未创建', async () => {
     const custom = vi.fn(async () => null)
     const ctx = createMockCtx({ mode: 'tui', custom })

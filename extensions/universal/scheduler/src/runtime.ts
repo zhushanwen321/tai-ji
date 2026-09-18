@@ -404,7 +404,11 @@ export class SchedulerRuntime {
         // 的任务不受互斥影响——检查只在本分支）。「dispatch 写新记录前先强制结算旧记录」
         // 的落地：本分支结构性永不写新记录（杜绝新旧叠写），同时把已过窗口的 in-flight
         // 残留先强制开放转移，保证新任务在旧记录结算后 ≤1 tick 内接管、不被过期残留无限阻塞。
-        this.forceSettleExpiredInFlight()
+        // 强制结算的恢复必须 await（顺序约束，与 tickScheduler 的对账 await 同构）：恢复
+        // setModel(原) 完成后才放行 skip——fire-and-forget 会让恢复与紧随的需切模型任务
+        // setModel(目标) 并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
+        // turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
+        await this.forceSettleExpiredInFlight()
         logger.warn('model switch in progress, skipping this tick (pending retry next tick)', {
           taskId: task.id,
           targetModelRef: task.model,
@@ -549,16 +553,21 @@ export class SchedulerRuntime {
    * 互斥命中时对已过窗口的 in-flight 残留做强制开放转移（idle 恢复 / 非 idle 转
    * awaiting-restore）；未过窗口或已在 awaiting-restore 的记录不动（其结算由事件与
    * tick 对账通道负责）。
+   *
+   * 返回 Promise 而非 fire-and-forget：idle 恢复路径透传 restoreExpectedModel，调用方
+   * （dispatchTaskInner 互斥分支）必须 await——恢复 setModel(原) 与后续新任务的
+   * setModel(目标) 不得并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
+   * turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
    */
-  private forceSettleExpiredInFlight(): void {
+  private forceSettleExpiredInFlight(): Promise<void> {
     const ps = this.pendingModelSwitch
-    if (!ps || !this.modelOps) return
-    if (ps.phase !== 'in-flight' || ps.ticksOpen <= MODEL_SWITCH_RECONCILE_TICKS) return
+    if (!ps || !this.modelOps) return Promise.resolve()
+    if (ps.phase !== 'in-flight' || ps.ticksOpen <= MODEL_SWITCH_RECONCILE_TICKS) return Promise.resolve()
     if (this.modelOps.isIdle()) {
-      void this.restoreExpectedModel('mutex-forced')
-    } else {
-      ps.phase = 'awaiting-restore'
+      return this.restoreExpectedModel('mutex-forced')
     }
+    ps.phase = 'awaiting-restore'
+    return Promise.resolve()
   }
 
   /**
