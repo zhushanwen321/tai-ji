@@ -63,6 +63,9 @@ export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
 }
 
 /** 分区容器（useSessionScopedState 响应式契约要求 reactive 容器：mutate 才触发下游 computed 失效）。 */
+// @data-owner #36 —— #36 plan 审阅态的 renderer 消费分区（WS 帧 + 首拉 reply 双路喂入；
+// 权威源/唯一写入口/空值语义见登记表主表 #36 行，非第二写方）。阶段指示 = derivePlanStage
+// 纯推导（renderer 展示派生 SSOT），分区不落阶段字段。
 interface PlanPartition {
   /** 最后一条 plan-state entry 的派生投影（D1）；null = 无 plan 状态（首拉空响应/无值） */
   view: PlanStateView | null
