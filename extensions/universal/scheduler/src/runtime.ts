@@ -85,6 +85,7 @@ export class SchedulerRuntime {
       prompt,
       kind,
       schedule,
+      model: options.model,
       enabled: true,
       createdAt: now,
       nextRunAt,

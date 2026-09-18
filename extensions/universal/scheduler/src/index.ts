@@ -116,25 +116,32 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   })
 
   // 注册 schedule tool
-  // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取 params 转调
-  // handler。错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
+  // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
+  // 转调 handleSchedule 六步流（预校验 → headless 分支 → 交互确认 → 取消 → 创建）。
+  // pi 转传供 channel-error 时禁用本会话 schedule 工具（setActiveTools）。
+  // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
   // isError 被 agent-loop 丢弃）；getService() 未初始化异常穿透到这里，包装
   // 'Error: Scheduler not initialized' 格式（R3 格式保持）。
   pi.registerTool({
     name: 'schedule',
     label: 'Schedule',
-    description: 'Create a scheduled task that fires a message at intervals or cron schedule.',
+    description:
+      'Create a scheduled task that fires a message at intervals or cron schedule. ' +
+      'The call first opens a confirmation form pre-filled with your draft (time/model/prompt); ' +
+      'the task is created only after the user confirms it. Only initiate when the user asks ' +
+      'for a scheduled task. If the user cancels the form, the task is NOT created — do not ' +
+      'assume a configuration and do not retry.',
     parameters: ScheduleParams,
     promptGuidelines: scheduleGuidelines,
     async execute(
       _toolCallId: string,
       params: ScheduleParamsT,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate,
-      _ctx: ExtensionContext,
+      ctx: ExtensionContext,
     ) {
       try {
-        return await handleSchedule(getService(), params)
+        return await handleSchedule(pi, getService(), params, ctx, signal)
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }

@@ -159,11 +159,11 @@ describe('pi-scheduler SDK contract', () => {
     const fakeCtx = createFakeCtx()
     await events.get('session_start')!({ type: 'session_start', reason: 'startup' }, fakeCtx)
 
-    // 非法 cron 表达式：service.create 失败 → toToolResult throw service message 本体
-    //（无 'Error:' 前缀——前缀格式仅 index.ts 的初始化异常兜底使用）
+    // 非法 cron 表达式：U2 六步流预校验（§3.5 第三行）先于 service.create 拦截，
+    // throw 可自修复文案（经 index.ts execute catch 包装 'Error: ' 前缀进 toolResult）
     await expect(
       tools[0]!.execute('call-err', { prompt: 'x', schedule: 'invalid-cron-expr-xxx' }, undefined, undefined, fakeCtx),
-    ).rejects.toThrow('Invalid schedule')
+    ).rejects.toThrow('unrecognized schedule')
   })
 
   it('schedule_control tool 业务失败同样 throw（W4）', async () => {
