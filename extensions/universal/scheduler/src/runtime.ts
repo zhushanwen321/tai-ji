@@ -440,7 +440,7 @@ export class SchedulerRuntime {
 
     try {
       await this.backend.sendMessage(
-        { content: task.prompt, customType: 'pi-scheduler:dispatched', display: true },
+        { content: task.prompt, customType: `${DISPATCH_CUSTOM_TYPE_PREFIX}dispatched`, display: true },
         { deliverAs: 'steer', triggerTurn: true },
       )
     } catch {

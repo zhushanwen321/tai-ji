@@ -156,7 +156,7 @@ describe('handleSchedule 六步流', () => {
   // ── 步骤 3+6 rpc 交互：确认创建（draft 透传 / FormResult 值创建 / model 入快照） ──
 
   it('rpc 确认：select 携带 marker + draft，FormResult 最终值创建且 model 透传入 entry 快照', async () => {
-    const form = formResult({ kind: 'once', schedule: '0 0 9 19 9 *', model: 'prov-b/m2' })
+    const form = formResult({ kind: 'once', schedule: '0 9 19 9 *', model: 'prov-b/m2' })
     const select = selectReturning(form)
     const ctx = createMockCtx({ select, model: stubModel('prov-a', 'm1') })
 

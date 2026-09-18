@@ -157,8 +157,9 @@ export function onUIRequest(sessionId: string, handler: (req: ExtensionUIRequest
 /**
  * 订阅指定 session 的 extension.ui_timeout 推送，返回取消函数。
  *
- * runtime ExtensionTimeoutManager 在 UI 请求 5 分钟无响应后广播此事件（同时向 pi 发默认响应）。
- * 前端收到后必须出队当前请求——否则对话框残留，用户点击会发送过期的 ui_response。
+ * extension.ui_timeout 自 registerTimeout 停排定时器后为死链，出队保留为防御路径
+ * （见 extension-host-dialog.ts 头注）：收到后按 requestId 出队，否则对话框残留，
+ * 用户点击会发送过期的 ui_response。
  */
 export function onUITimeout(sessionId: string, handler: (requestId: string) => void): () => void {
   return events.on(sessionId, (msg) => {

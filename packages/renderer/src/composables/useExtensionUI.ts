@@ -94,7 +94,7 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
  *
  * DialogRequest 是 parseUiRequest/parseExtensionUiRequest 经 ...payload 展开构造的——
  * runtime extension.ui_request 原始 payload（含 askUser/askUserQuestions/allowCancel/message/
- * options 等）保留在索引签名里（event-adapter.ts:397-399 广播 askUser:true）。
+ * options 等）保留在索引签名里（event-adapter.ts:723 payload 标记 askUser:true / :731 extensionUiRequestBroadcast）。
  * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
@@ -155,10 +155,9 @@ export function useExtensionUI(
         store.addRequest(eventSid, adapted)
       }),
     )
-    // C3 保留 WS/RPC 路径：超时出队（runtime ExtensionTimeoutManager 5 分钟无响应后广播
-    // extension.ui_timeout，同时已向 pi 发默认响应。前端必须出队超时请求，否则对话框残留，
-    // 用户点击会发送过期的 ui_response）。按 requestId 精确移除：pi 无串行保证，
-    // 队列可能同时有多个 pending，超时的不一定在队首。M1 竞态修复：用订阅时捕获的 sid。
+    // C3 保留 WS/RPC 路径：超时出队。extension.ui_timeout 自 registerTimeout 停排定时器后
+    // 为死链，出队保留为防御路径（见 extension-host-dialog.ts 头注）。按 requestId 精确移除：
+    // pi 无串行保证，队列可能同时有多个 pending，超时的不一定在队首。M1 竞态修复：用订阅时捕获的 sid。
     unsubFns.push(
       onUITimeout(sid, (requestId) => {
         store.removeRequest(sid, requestId)

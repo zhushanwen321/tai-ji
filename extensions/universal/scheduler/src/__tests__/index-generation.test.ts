@@ -17,7 +17,8 @@
 // 捕获注入回调与装配事实。InstrumentedRuntime 全部行为继承父类，不影响装配链本身
 // （F1 停旧 timer 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
 // steer 直投模型（scheduler-steer-direct-dispatch）：装配点不再创建 delivery handle，
-// runtime 构造仅收 backend + isCtxStale 两参。
+// runtime 构造收 backend + isCtxStale? + modelOps? 三参（U4：modelOps 缺省 = 无模型
+// 切换能力降级）。
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

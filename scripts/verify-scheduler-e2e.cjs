@@ -43,7 +43,7 @@
  *
  * 用法：
  *   node scripts/verify-scheduler-e2e.cjs              # 默认跑全部 A 类
- *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S17 / V / aclass / bclass / all）
+ *   node scripts/verify-scheduler-e2e.cjs S1           # 单场景（S1..S19 / V / aclass / bclass / all）
  *   SCHED_E2E_MODEL=faux/faux-1-b node scripts/verify-scheduler-e2e.cjs  # 覆盖测试模型（仅限 faux/ 演员）
  *
  * 退出码：0 = 全过；1 = 任一失败；2 = 脚本异常
@@ -1826,7 +1826,7 @@ async function main() {
   const toRun = selectScenarioList(arg)
   if (!toRun) {
     console.log(`${TAG} unknown scenario: ${arg}`)
-    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S17|aclass|bclass|all|v]`)
+    console.log(`${TAG} usage: node verify-scheduler-e2e.cjs [S1..S19|aclass|bclass|all|v]`)
     return 2
   }
 
@@ -1851,7 +1851,7 @@ async function main() {
   const counts = collectSummaryCounts(results)
   printSummary(counts, vResults)
 
-  // 任一已跑场景 FAIL = exit 1；aclass 聚合跑全 6 个且全过 = exit 0
+  // 任一已跑场景 FAIL = exit 1；aclass 聚合跑全 8 个且全过 = exit 0
   // （单场景跑成功也返回 0，便于分场景驱动；gate 用 aclass 聚合判定）
   const code = results.length > 0 && counts.aFail.length === 0 ? 0 : 1
   console.log(`${TAG} exit code: ${code}`)
