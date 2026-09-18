@@ -90,6 +90,13 @@ export interface RecordEntriesCache {
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
 type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
+/** workflow 增量信号形状（session.workflowUpdate payload.update；status/reason/步骤数任一变化一条）。 */
+interface WorkflowUpdateSignal {
+  runId: string
+  status: string
+  reason?: string
+}
+
 /**
  * SessionRecords 装配依赖（窄注入，S5/D2 风格：deps 面构造期固定，messageBus 经
  * getter 每次调用动态读——与 Facade setter 晚期注入语义逐字等价）。
@@ -297,48 +304,33 @@ export class SessionRecords {
    *   null（entry 被外部清空）同样构成变化，publish 缺省 View 收敛 GUI。
    */
   private applyRecordEntries(cache: RecordEntriesCache, entries: unknown[], sessionId: string): void {
-    const subagents = scanSubagentEntries(entries)
-    let subagentsChanged = false
-    for (const record of subagents) {
-      const prev = cache.subagents.get(record.subagentId)
-      if (prev === undefined || !subagentRecordEquals(prev, record)) subagentsChanged = true
-      cache.subagents.set(record.subagentId, record)
-    }
-
-    const workflows = scanWorkflowEntries(entries)
-    const workflowUpdates: Array<{ runId: string; status: string; reason?: string }> = []
-    for (const record of workflows) {
-      const prev = cache.workflows.get(record.runId)
-      // [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
-      // 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
-      // GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
-      // 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
-      // entry append 节流（缺省 60s）约束，不会刷屏。
-      if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
-          prev.agentCalls.length !== record.agentCalls.length) {
-        workflowUpdates.push({ runId: record.runId, status: record.status, reason: record.reason })
-      }
-      cache.workflows.set(record.runId, record)
-    }
-
-    // D1④ plan 派生：与 subagent/workflow 同批扫描（同一份 entries，零额外 RPC），
-    // diff 基线 = cache.planState。null → 缺省 View 的归一在发布帧完成（缓存基线保持
-    // null | View 双态：null 参与比对见 planStateEquals）。
+    // 三家族（subagents / workflows / plan）同批扫描 + merge（同一份 entries，零额外 RPC），
+    // 分支与合并语义下沉到下方模块级 merge helper（顺序敏感投影链——各 helper 内判定
+    // 顺序与拆分前逐一等价，见各 helper 注释）。merge 先于 publish 守卫执行（已销毁
+    // session 也完成缓存 merge，只拦发布——见下方 hasSession 守卫）。
+    const subagentsChanged = mergeSubagentRecords(cache.subagents, scanSubagentEntries(entries))
+    const workflowUpdates = collectWorkflowUpdates(cache.workflows, scanWorkflowEntries(entries))
+    // D1④ plan 派生：diff 基线 = cache.planState。null → 缺省 View 的归一在发布帧完成
+    // （缓存基线保持 null | View 双态：null 参与比对见 planStateEquals）。
     const planState = scanPlanStateEntries(entries)
-    let planStateChanged = false
-    const prevPlan = cache.planState
-    if (planState === null) {
-      if (prevPlan !== null) {
-        // 基线非 null 而派生 null（plan-state entry 消失）→ 发布缺省 View 收敛 GUI
-        planStateChanged = true
-        cache.planState = null
-      }
-    } else {
-      if (prevPlan === null || !planStateEquals(prevPlan, planState)) planStateChanged = true
-      cache.planState = planState
-    }
+    const planStateChanged = mergePlanState(cache, planState)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
+    this.publishRecordChanges(cache, sessionId, subagentsChanged, workflowUpdates, planStateChanged, planState)
+  }
+
+  /**
+   * merge 完成后的变化发布（subagents 全量帧 / workflows 增量信号 / plan 全量帧，帧形态
+   * 与发布顺序与拆分前逐一等价；每帧独立读 getMessageBus——晚期注入语义不变）。
+   */
+  private publishRecordChanges(
+    cache: RecordEntriesCache,
+    sessionId: string,
+    subagentsChanged: boolean,
+    workflowUpdates: WorkflowUpdateSignal[],
+    planStateChanged: boolean,
+    planState: PlanStateView | null,
+  ): void {
     if (subagentsChanged) {
       this.deps.getMessageBus()?.publish(sessionId, {
         type: 'session.subagents',
@@ -636,6 +628,65 @@ export class SessionRecords {
       this.recordEntriesCaches.delete(sessionId)
     }
   }
+}
+
+// ── record 家族 merge helpers（applyRecordEntries 拆出：每家族「merge 进派生缓存 + 返回
+// 变化信号」一个副作用单元；与下方 equals helpers 同为 diff 基线语义的一体两面）──
+
+/**
+ * subagent 记录 merge 进派生缓存（同 id 后到覆盖），返回是否有变化（新增或字段级 diff——
+ * 逐条经 subagentRecordEquals，任一记录变化即整帧重发）。
+ */
+function mergeSubagentRecords(subagents: Map<string, SubagentRecord>, records: SubagentRecord[]): boolean {
+  let changed = false
+  for (const record of records) {
+    const prev = subagents.get(record.subagentId)
+    if (prev === undefined || !subagentRecordEquals(prev, record)) changed = true
+    subagents.set(record.subagentId, record)
+  }
+  return changed
+}
+
+/**
+ * workflow 记录 merge 进派生缓存（同 runId 后到覆盖），收集需发增量信号的 run
+ * （新增 / status / reason / agentCalls 步骤数任一变化一条）。
+ *
+ * [GUI 步骤实时可见 2026-09-14] agent 步骤数变化也发增量信号：running 中 trace
+ * 逐步落盘（core dispatch 启动即 save），若只比 status/reason（恒 'running'），
+ * GUI 详情的 agentCalls 在整个 run 期间收不到任何 reload 触发——步骤只在
+ * 下次 status 变化时一次性涌现，实时性失效。步骤级信号频率受 core 端
+ * entry append 节流（缺省 60s）约束，不会刷屏。
+ */
+function collectWorkflowUpdates(workflows: Map<string, WorkflowRunRecord>, records: WorkflowRunRecord[]): WorkflowUpdateSignal[] {
+  const updates: WorkflowUpdateSignal[] = []
+  for (const record of records) {
+    const prev = workflows.get(record.runId)
+    if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
+        prev.agentCalls.length !== record.agentCalls.length) {
+      updates.push({ runId: record.runId, status: record.status, reason: record.reason })
+    }
+    workflows.set(record.runId, record)
+  }
+  return updates
+}
+
+/**
+ * plan 派生 merge（单例状态，D1④）：cache.planState 基线与本次派生比对后更新基线，
+ * 返回是否有变化。派生 null 而基线非 null（plan-state entry 消失）→ 基线归 null 并视为
+ * 变化（发布缺省 View 收敛 GUI）；派生非 null 恒写基线，基线 null 或字段级不等
+ * （planStateEquals）时视为变化。
+ */
+function mergePlanState(cache: RecordEntriesCache, planState: PlanStateView | null): boolean {
+  const prevPlan = cache.planState
+  if (planState === null) {
+    if (prevPlan !== null) {
+      cache.planState = null
+      return true
+    }
+    return false
+  }
+  cache.planState = planState
+  return prevPlan === null || !planStateEquals(prevPlan, planState)
 }
 
 /**

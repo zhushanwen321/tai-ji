@@ -78,12 +78,10 @@ export function scanPlanStateEntries(entries: unknown[]): PlanStateView | null {
  * 单条 entry → PlanStateView（type/customType/data 逐层守卫，非 plan-state entry 或坏
  * data 返回 null）。字段映射规则：
  * - 四必填字段：isActive 严格 `=== true`（其他形态归 false——View 契约是 boolean，防御
- *   extension 侧异常写入）；三个 string 字段空串归一 null——entry 域「无文件/无需求」的
- *   历史形态是空串，View 域归一为 null 单一表达（shared PlanStateView 的 `string | null`
- *   值域），消费方判式单一（`=== null` 即「无」，不混空串分支）。
+ *   extension 侧异常写入）；三个 string 字段空串归一 null（normalizeNonEmptyString）。
  * - 三 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
- *   显式 undefined——「旧 entry 派生出无新字段区」的字面语义）；skills 要求 string[]、
- *   docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量。
+ *   显式 undefined——「旧 entry 派生出无新字段区」的字面语义），下沉到
+ *   applyOptionalPlanFields（守卫判定顺序与拆分前逐一等价）。
  */
 function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   if (typeof entry !== 'object' || entry === null) return null
@@ -95,11 +93,28 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
 
   const view: PlanStateView = {
     isActive: d.isActive === true,
-    planFilePath: typeof d.planFilePath === 'string' && d.planFilePath !== '' ? d.planFilePath : null,
-    requirement: typeof d.requirement === 'string' && d.requirement !== '' ? d.requirement : null,
-    templateName: typeof d.templateName === 'string' && d.templateName !== '' ? d.templateName : null,
+    planFilePath: normalizeNonEmptyString(d.planFilePath),
+    requirement: normalizeNonEmptyString(d.requirement),
+    templateName: normalizeNonEmptyString(d.templateName),
   }
-  // D4 optional 透传：守卫通过才挂键（optional 字段缺省不设，禁显式 undefined 占位）
+  applyOptionalPlanFields(view, d)
+  return view
+}
+
+/**
+ * string 字段读取 + 空串归一 null（parsePlanStateEntry 三个必填 string 字段共用）：
+ * entry 域「无文件/无需求」的历史形态是空串，View 域归一为 null 单一表达
+ * （shared PlanStateView 的 `string | null` 值域），消费方判式单一（`=== null` 即「无」）。
+ */
+function normalizeNonEmptyString(v: unknown): string | null {
+  return typeof v === 'string' && v !== '' ? v : null
+}
+
+/**
+ * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
+ * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量。
+ */
+function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {
   if (isStringArray(d.skills)) {
     view.skills = d.skills
   }
@@ -109,7 +124,6 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   if (d.reviewState === 'awaiting' || d.reviewState === 'revising') {
     view.reviewState = d.reviewState
   }
-  return view
 }
 
 /** string[] 守卫（skills 透传前置条件，空数组合法——extension 侧语义由其自行定义）。 */
