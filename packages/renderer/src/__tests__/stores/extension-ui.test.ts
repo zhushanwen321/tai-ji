@@ -2,7 +2,7 @@
  * extension-ui store 单测 —— TC1：ask-user/dialog pending 的 session 级 SSOT。
  *
  * 覆盖：
- * - hasPendingAskUser / hasPendingDialog 查询（核心：derivedStatus 入口）
+ * - hasPendingBlockingOverlay / hasPendingDialog 查询（核心：derivedStatus 入口）
  * - addRequest requestId dedup（迁移自 useExtensionUI push 去重）
  * - removeRequest（respond/cancel/timeout 出队）
  * - clearSession（deleteSession 分区释放）
@@ -44,33 +44,33 @@ function makeDialog(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIReq
   }
 }
 
-describe('useExtensionUIStore — hasPendingAskUser / hasPendingDialog', () => {
+describe('useExtensionUIStore — hasPendingBlockingOverlay / hasPendingDialog', () => {
   it('session 有 ask-user pending 返回 true，无返回 false；hasPendingDialog 查非 ask-user', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
     store.addRequest('sess-A', makeDialog({ requestId: 'r2', method: 'confirm' }))
 
-    // r1 是 askUser → hasPendingAskUser(sess-A) === true
-    expect(store.hasPendingAskUser('sess-A')).toBe(true)
+    // r1 是 askUser → hasPendingBlockingOverlay(sess-A) === true
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
     // sess-B 无任何 pending
-    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(false)
     // r2 非 askUser → hasPendingDialog(sess-A) === true
     expect(store.hasPendingDialog('sess-A')).toBe(true)
     // sess-B 无 dialog
     expect(store.hasPendingDialog('sess-B')).toBe(false)
   })
 
-  it('只有 dialog（无 ask-user）时 hasPendingAskUser 返回 false', () => {
+  it('只有 dialog（无 ask-user）时 hasPendingBlockingOverlay 返回 false', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeDialog({ requestId: 'r1', method: 'input' }))
 
-    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
     expect(store.hasPendingDialog('sess-A')).toBe(true)
   })
 
   it('未知 session 查询返回 false', () => {
     const store = useExtensionUIStore()
-    expect(store.hasPendingAskUser('never')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('never')).toBe(false)
     expect(store.hasPendingDialog('never')).toBe(false)
   })
 })
@@ -106,8 +106,8 @@ describe('useExtensionUIStore — removeRequest', () => {
     // 只剩 r2（非 ask-user dialog）
     expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
     expect(store.getRequestsBySession('sess-A')[0].requestId).toBe('r2')
-    // r2 非 askUser → hasPendingAskUser 现在 false
-    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    // r2 非 askUser → hasPendingBlockingOverlay 现在 false
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
     expect(store.hasPendingDialog('sess-A')).toBe(true)
   })
 
@@ -119,13 +119,13 @@ describe('useExtensionUIStore — removeRequest', () => {
     expect(store.getRequestsBySession('sess-A')).toHaveLength(1)
   })
 
-  it('移除后队列空 → hasPendingAskUser / hasPendingDialog 均 false', () => {
+  it('移除后队列空 → hasPendingBlockingOverlay / hasPendingDialog 均 false', () => {
     const store = useExtensionUIStore()
     store.addRequest('sess-A', makeAskUser({ requestId: 'r1', askUser: true }))
     store.removeRequest('sess-A', 'r1')
 
     expect(store.getRequestsBySession('sess-A')).toEqual([])
-    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
     expect(store.hasPendingDialog('sess-A')).toBe(false)
   })
 })
@@ -139,10 +139,10 @@ describe('useExtensionUIStore — clearSession', () => {
     store.clearSession('sess-A')
 
     expect(store.getRequestsBySession('sess-A')).toEqual([])
-    expect(store.hasPendingAskUser('sess-A')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
     // sess-B 不受影响
     expect(store.getRequestsBySession('sess-B')).toHaveLength(1)
-    expect(store.hasPendingAskUser('sess-B')).toBe(true)
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(true)
   })
 
   it('清除不存在的 session 是 no-op', () => {
@@ -159,8 +159,8 @@ describe('useExtensionUIStore — clearAllPending', () => {
 
     store.clearAllPending()
 
-    expect(store.hasPendingAskUser('sess-A')).toBe(false)
-    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(false)
     expect(store.getRequestsBySession('sess-A')).toEqual([])
     expect(store.getRequestsBySession('sess-B')).toEqual([])
   })
@@ -219,8 +219,8 @@ describe('useExtensionUIStore — per-sessionId 分区隔离', () => {
     expect(store.getRequestsBySession('sess-B')[0].requestId).toBe('r2')
 
     // 查询也按分区隔离
-    expect(store.hasPendingAskUser('sess-A')).toBe(true)
-    expect(store.hasPendingAskUser('sess-B')).toBe(false)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(false)
     expect(store.hasPendingDialog('sess-A')).toBe(false)
     expect(store.hasPendingDialog('sess-B')).toBe(true)
   })
@@ -239,7 +239,7 @@ describe('useExtensionUIStore — applyRecords 整体替换', () => {
     ])
 
     expect(store.getRequestsBySession('sess-A')).toHaveLength(2)
-    expect(store.hasPendingAskUser('sess-A')).toBe(true)
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
     expect(store.hasPendingDialog('sess-A')).toBe(true)
   })
 })

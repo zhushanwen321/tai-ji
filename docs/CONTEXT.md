@@ -135,7 +135,11 @@ session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、sk
 
 ### Marker RPC（select+marker 通道原语，2026-09-14）
 
-extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter；错误回包形状单源为 `ChannelErrorResult`。
+extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter / schedule-create（见下节）；错误回包形状单源为 `ChannelErrorResult`。
+
+### Schedule Create（schedule 创建确认，2026-09-18）
+
+`schedule` 工具创建路径的「先确认后创建」交互：agent 提交预填草稿，用户可视化确认/调整后任务才创建，取消 = 不创建（D5：agent 收到明确 cancelled 语义，不猜测、不重试）。协议 SSOT = `packages/extension-protocol/src/extensions/scheduler-create/`（marker `SCHEDULE_CREATE_MARKER = '\x00TAIJI_SCHEDULE_CREATE'`，复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc` 传输核）。双协议形态：GUI 走 select 通道（runtime event-adapter 第 4 marker 分支翻译为 `extension.ui_request` 帧，`scheduleCreate: true` + `scheduleDraft` payload；renderer `ScheduleCreateOverlay` 与 AskUserOverlay 同点互斥挂载）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent` 多 tab 表单。两侧共享同一契约类型：草稿 `ScheduleDraft`（extension → 前端，LLM 参数即预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（前端 → extension，`action: 'create'`；取消不走此形状——select resolve undefined）。时间折叠单点（D2）：一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转 helper `dateToOnceCron` / `onceCronToDate`，GUI/TUI 共用禁止双实现。
 
 ### Tool Approval
 工具权限审批。Agent 执行危险操作（如写入文件、运行命令）前请求用户许可。用户回复是三选一：Allow（本次允许）/ Deny（拒绝）/ Always Allow（永久允许该工具）。

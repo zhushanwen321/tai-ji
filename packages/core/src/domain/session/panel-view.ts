@@ -50,7 +50,14 @@ export interface PanelViewInput {
   isSessionRespawning: boolean
   /** session-trace 视图态（per-session 分区，替换对话流位置） */
   isTraceView: boolean
-  /** ask-user 阻塞应答请求待答（与 composer 互斥） */
+  /**
+   * 有 pending 富交互 overlay 请求待答（与 composer 互斥）。
+   * 布尔语义扩展（schedule-create-confirm-modal U6）：原「ask-user 等待布尔」扩为
+   * 「ask-user ∨ schedule-create」——两类请求同走 overlay 替换 composer 的输入面，
+   * Panel 拿到请求后按标记（askUser / scheduleCreate）分流挂载，组合表不扩维
+   * （union input 第三值兜底路线默认不做）。字段名沿用 hasAskUserRequest
+   * （ask-user 通道先在，改名牵动 128 组合全表构造，语义以本注释为准）。
+   */
   hasAskUserRequest: boolean
   /** 新建任务流程活跃（ACTIVE_STATES：landing + 六 overlay，flow-state.ts） */
   isFlowActive: boolean
@@ -65,6 +72,8 @@ export type PanelView =
   | { kind: 'dead'; sessionId: string }
   /** trace 保留输入面：session-trace 契约「composer 保留在底部，不打断对话能力」（D5） */
   | { kind: 'trace'; sessionId: string; input: 'ask-user' | 'composer' }
+  // input='ask-user' 值语义已扩展为「富交互 overlay 替换 composer」（ask-user ∨ schedule-create，
+  // 见 PanelViewInput.hasAskUserRequest 注释）；值名沿用不扩维，具体 overlay 由渲染层按请求标记分流。
   | { kind: 'conversation'; sessionId: string; input: 'ask-user' | 'composer' }
   | { kind: 'landing' }
   | { kind: 'empty'; sessionId: string | null }

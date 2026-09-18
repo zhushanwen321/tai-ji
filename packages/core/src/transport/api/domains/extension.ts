@@ -131,6 +131,10 @@ export interface ExtensionUIRequest {
   askUser?: boolean
   askUserQuestions?: unknown[]  // AskUserQuestion[]，前端用类型守卫收窄
   allowCancel?: boolean
+  // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在，
+  // runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select）
+  scheduleCreate?: boolean
+  scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
   /** 请求入队时刻（ms，由 useExtensionUI 在 push 时打戳）。用于倒计时基准 */
   receivedAt?: number
 }

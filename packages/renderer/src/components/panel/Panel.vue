@@ -102,15 +102,25 @@
            非本 session 不渲染（不连坐）。恢复动作 = 用户切走再切回本会话。 -->
       <InboundFrameDroppedNotice v-if="sessionId" :session-id="sessionId" />
       <!-- ask-user 渲染 ⟺ (conversation || trace) && input==='ask-user'（D5）：dead 态被
-           派生优先级吞掉（kind==='dead'），保留 W6「dead 不渲染 ask-user」语义；trace 同样
+           派生优先级吞掉（kind==='dead'），保留 W6「dead 不渲染 ask-user」语义；+ overlayKind 分型：trace 同样
            承接 ask-user（session-trace 契约「不打断对话能力」，V4）；landing/empty 无 session，
-           ask-user 依附具体会话，天然不可达。 -->
+           overlay 依附具体会话，天然不可达。input==='ask-user' 布尔语义已扩为富交互 overlay
+           （ask-user ∨ schedule-create），overlayKind 按请求标记分型分流，ask-user 请求行为与扩义前一致。 -->
       <AskUserOverlay
-        v-if="(panelView.kind === 'conversation' || panelView.kind === 'trace') && panelView.input === 'ask-user'"
+        v-if="overlayBandActive && overlayKind === 'ask-user'"
         :questions="askUserQuestions"
-        :allow-cancel="currentAskUserRequest?.allowCancel"
+        :allow-cancel="currentOverlayRequest?.allowCancel"
         @submit="onAskUserSubmit"
         @cancel="onAskUserCancel"
+      />
+      <!-- schedule-create 渲染（U6 分流挂载）：同一 overlay 输入面按请求标记互斥分流（与上方
+           AskUserOverlay 构成 v-if/v-else-if 互斥对），draft 经 isScheduleDraft 守卫收窄
+           （守卫失败不挂载，正常路径不可达——runtime event-adapter 已用同一守卫预检，非法 draft 降级普通 select）。 -->
+      <ScheduleCreateOverlay
+        v-else-if="overlayBandActive && overlayKind === 'schedule-create'"
+        :draft="scheduleDraft!"
+        @submit="onScheduleCreateSubmit"
+        @cancel="onScheduleCreateCancel"
       />
       <!-- Composer 渲染 ⟺ conversation || trace || (empty && sessionId!==null)（D5）：
            会话中恒常驻（G1），trace 态 composer 保留（session-trace 契约「composer 保留在
@@ -126,13 +136,14 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, AlertCircle, RotateCcw, Trash2, LoaderCircle } from '@lucide/vue'
-import { isAskUserQuestion, type AskUserQuestion } from '@zhushanwen/extension-protocol'
+import { isAskUserQuestion, isScheduleDraft, type AskUserQuestion, type ScheduleDraft } from '@zhushanwen/extension-protocol'
 import MessageStream from './MessageStream.vue'
 import Composer from './Composer.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'
 import Landing from '@/components/new-task/Landing.vue'
 import AskUserOverlay from '@/components/extension/ask-user/AskUserOverlay.vue'
+import ScheduleCreateOverlay from '@/components/extension/scheduler/ScheduleCreateOverlay.vue'
 import InboundFrameDroppedNotice from '@/components/ui/InboundFrameDroppedNotice.vue'
 import DiagnosticsExportAction from './DiagnosticsExportAction.vue'
 import { usePanelView } from '@/composables/features/panel/usePanelView'
@@ -164,8 +175,10 @@ const restoreErrorCode = ref<string | null>(null)
  * 渲染视图单源（usePanelView：事实收集 + derivePanelView 单点派生）。
  * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入面存在性；
  * 「landing 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
+ * currentOverlayRequest 本地别名：currentAskUserRequest 语义已扩为「队列第一个富交互
+ * overlay 请求」（ask-user ∨ schedule-create），按请求标记分流挂载对应 overlay。
  */
-const { panelView, hasMessages, currentAskUserRequest, respond, cancel } = usePanelView(
+const { panelView, hasMessages, currentAskUserRequest: currentOverlayRequest, respond, cancel } = usePanelView(
   computed(() => props.sessionId),
 )
 
@@ -191,19 +204,62 @@ const showPanelComposer = computed(() => {
  *  askUserQuestions 字段由 runtime event-adapter 从 select 通道透传，
  *  用 isAskUserQuestion 守卫过滤掉结构异常的元素，避免渲染 undefined。 */
 const askUserQuestions = computed<AskUserQuestion[]>(() => {
-  const req = currentAskUserRequest.value
+  const req = currentOverlayRequest.value
   if (!req?.askUser || !req.askUserQuestions) return []
   return req.askUserQuestions.filter(isAskUserQuestion)
 })
 /** ask-user Submit：answers JSON string 回传给 pi（select method）。 */
 function onAskUserSubmit(answers: string): void {
-  const req = currentAskUserRequest.value
+  const req = currentOverlayRequest.value
   if (!req) return
   respond(req.requestId, answers)
 }
 /** ask-user Cancel：等价 respond(requestId, null)。 */
 function onAskUserCancel(): void {
-  const req = currentAskUserRequest.value
+  const req = currentOverlayRequest.value
+  if (!req) return
+  cancel(req.requestId)
+}
+
+/** schedule-create draft（isScheduleDraft 守卫收窄 unknown → ScheduleDraft；非法/无标记 → null）。
+ *  守卫失败不挂载（正常路径不可达，runtime event-adapter 同守卫预检后非法降级普通 select）。 */
+const scheduleDraft = computed<ScheduleDraft | null>(() => {
+  const req = currentOverlayRequest.value
+  if (!req?.scheduleCreate) return null
+  return isScheduleDraft(req.scheduleDraft) ? req.scheduleDraft : null
+})
+
+/**
+ * overlay 输入面带有效性（conversation/trace 且派生为 overlay 替换 composer）。
+ * 抽出公共判据供双 overlay 分支复用（v-if/v-else-if 互斥对的第一段）。
+ */
+const overlayBandActive = computed(() =>
+  (panelView.value.kind === 'conversation' || panelView.value.kind === 'trace')
+  && panelView.value.input === 'ask-user',
+)
+
+/**
+ * 当前 overlay 请求分型（互斥三值，分流挂载判据单点）：
+ * ask-user 请求标记优先；schedule-create 请求须 draft 守卫通过才算可挂载。
+ * 判据收敛在 script（手动 .value 读取）而非模板表达式——模板直接解引用请求对象
+ * 会在「{ value } 形态的测试替身」下失真（unwrap 语义只对真 ref 生效）。
+ */
+const overlayKind = computed<'ask-user' | 'schedule-create' | null>(() => {
+  const req = currentOverlayRequest.value
+  if (req?.askUser === true) return 'ask-user'
+  if (req?.scheduleCreate === true && scheduleDraft.value !== null) return 'schedule-create'
+  return null
+})
+
+/** schedule-create Submit：FormResult JSON string 回传给 pi（select method，与 ask-user 同通道）。 */
+function onScheduleCreateSubmit(result: string): void {
+  const req = currentOverlayRequest.value
+  if (!req) return
+  respond(req.requestId, result)
+}
+/** schedule-create Cancel：等价 respond(requestId, null)（select resolve undefined → cancelled 语义）。 */
+function onScheduleCreateCancel(): void {
+  const req = currentOverlayRequest.value
   if (!req) return
   cancel(req.requestId)
 }

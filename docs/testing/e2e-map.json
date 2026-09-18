@@ -565,7 +565,7 @@
     },
     {
       "id": "E2E-SCHED-01",
-      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S17 契约）",
+      "summary": "pi-scheduler 端到端真实环境实测（真 pi 进程 + 真 scheduler extension + faux LLM 演员，S1-S19 契约，含 schedule-create 确认交互应答）",
       "scope": [
         "extensions/universal/scheduler/**",
         "scripts/verify-scheduler-e2e.cjs"
@@ -582,7 +582,7 @@
       "run": "node scripts/verify-scheduler-e2e.cjs",
       "owner": "extensions/universal/scheduler",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
+      "note": "收录清单原记 L2，按脚本头注「[L2.5 faux 翻轨，2026-09-15]」登记为 L2.5；断言面在扩展写盘 entry 形态与工具回显（非模型智能）。2026-09-18 U7 起驱动器具备 extension_ui_request→extension_ui_response 应答循环（schedule-create 确认/取消可配置 uiActor，S18 确认 / S19 取消；既有场景默认 auto-confirm）。spawn 真实 pi 进程族，按 e2e 执行准则空载串行"
     },
     {
       "id": "E2E-BATCH-01",

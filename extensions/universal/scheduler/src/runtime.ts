@@ -19,6 +19,64 @@ const RATE_LIMIT_PER_MINUTE = 6
 const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
+// U4 dispatch 模型切换（设计 D3 修订版）：
+// - dispatch 注入消息的 customType 标记前缀（dispatchTaskInner 的 sendMessage 与
+//   handleMessageStart 的归属匹配共用单点，字面漂移会静默断开事件恢复链路）
+const DISPATCH_CUSTOM_TYPE_PREFIX = 'pi-scheduler:'
+// - 在途标记强制开放的 tick 计数（D3 在途标记生命周期：超过 2 个 tick 未关闭即视为事件丢失）
+const MODEL_SWITCH_RECONCILE_TICKS = 2
+
+/**
+ * 模型控制面（U4 dispatch 模型切换，依赖反转）：runtime 只见 'provider/id' 字符串 ref
+ * （与 ScheduledTask.model 同域，tool.ts draft 组装 modelRef 的产出形态），pi 的 Model
+ * 对象解析（modelRegistry.find → setModel）封在生产装配闭包（index.ts session_start）。
+ *
+ * 契约：setModelByRef 不 throw、失败（解析无命中 / pi setModel false / 意外异常）返回 false。
+ *
+ * 缺省（不注入）= 无模型切换能力：task.model 非空时降级为照常 dispatch（日志，模型字段
+ * 不阻塞核心调度），纯 runtime 单测与旧装配路径行为不变。
+ */
+export interface SchedulerModelOps {
+  /** 会话当前模型的 'provider/id' 引用（ctx.model；undefined = 会话无模型） */
+  getCurrentModelRef(): string | undefined
+  /** 切换会话模型；false = 解析失败 / pi setModel false（无可用 API key 等） */
+  setModelByRef(ref: string): Promise<boolean>
+  /** 会话是否 idle（not streaming，ctx.isIdle） */
+  isIdle(): boolean
+}
+
+/**
+ * 未决模型切换记录（设计 D3 状态机三要素之一，纯内存态）。模型语义异常不进持久化词表
+ * （replay 守卫对 advance.status 硬校验 'success'，旁路字段会炸重放推进）。
+ *
+ * phase 生命周期（在途标记三分）：
+ * - 'in-flight'：等待 dispatched turn 的 turn_end 恢复；ticksOpen 计数超过
+ *   MODEL_SWITCH_RECONCILE_TICKS → 事件丢失，对账强制开放
+ * - 'awaiting-restore'：非 idle 推迟 / 强制开放转推迟；比对决策已在窗口内锁定，
+ *   执行不受窗口过期限制——tick 重入 idle 即兑现（不设墙钟上界）
+ * - 恢复成功 / restore-failed（setModel(原) false）→ 记录清除（终态只留日志）
+ */
+interface PendingModelSwitch {
+  taskId: string
+  /** 会话期望模型（dispatch 切换前抓取的原模型 'provider/id'） */
+  expectedModelRef: string
+  targetModelRef: string
+  phase: 'in-flight' | 'awaiting-restore'
+  ticksOpen: number
+}
+
+/**
+ * message_start 的 custom message 形状守卫（unknown 收窄，无断言）：
+ * role:'custom' 且 customType 以 pi-scheduler: 开头（dispatch 注入标记，P-MODEL-④）。
+ */
+function matchesDispatchCustomType(message: unknown): boolean {
+  if (typeof message !== 'object' || message === null) return false
+  if (!('role' in message) || !('customType' in message)) return false
+  if (message.role !== 'custom') return false
+  return (
+    typeof message.customType === 'string' && message.customType.startsWith(DISPATCH_CUSTOM_TYPE_PREFIX)
+  )
+}
 // HISTORY_LIMIT 单点在 types.ts（ext-simplify-08 L5）——与 replay.ts 的 advance 折叠共用
 // STALE_CTX_MARKER（文案兜底分诊词）已迁移到 ext-guards 共享守卫（guardStaleCtx 内部
 // 引用，本文件不再直接持有）。语义：G1 模块级代际检测（isCtxStale）为主判；文案子串
@@ -37,6 +95,15 @@ export class SchedulerRuntime {
   private readonly isCtxStale: (() => boolean) | undefined
   // R3-S1：同任务 dispatch 在途标记（Set<taskId>），见 dispatchTask 注释
   private readonly dispatchesInFlight = new Set<string>()
+  // U4 dispatch 模型切换（设计 D3 修订版）：模型控制面（缺省 undefined = 无切换能力，降级）
+  private readonly modelOps: SchedulerModelOps | undefined
+  // 未决模型切换记录（同时至多一条——互斥窗口保证「切换→dispatch→恢复」周期单在途）
+  private pendingModelSwitch: PendingModelSwitch | null = null
+  // 归属状态机 run 窗口（P-MODEL-③④：turnIndex per-run 归零，禁止裸 turnIndex 跨 run 当 id）：
+  // agent_start 起算（重置 turn 序态）、agent_end / agent_settled 封口
+  private runWindowActive = false
+  private currentTurnIndex = -1
+  private dispatchedTurnIndex: number | null = null
 
   /**
    * 依赖反转构造：backend 承担 appendEntry/pi.sendMessage/时间源，runtime 只持有内存态。
@@ -45,10 +112,14 @@ export class SchedulerRuntime {
    * isCtxStale（G1 代际检测，S9/R3-M1）：返回 true 表示本 runtime 建立时的 session 已被
    * 替换。index.ts 装配点注入（模块级代数比对，R3-M1），使 stale 分诊不依赖 pi 错误文案；
    * 缺省（不注入）恒视为非 stale——纯 runtime 单测与旧装配路径行为不变。
+   *
+   * modelOps（U4）：模型控制面，session_start 装配点注入；缺省 = 无模型切换能力
+   * （task.model 非空时降级照常 dispatch）。
    */
-  constructor(backend: SchedulerBackend, isCtxStale?: () => boolean) {
+  constructor(backend: SchedulerBackend, isCtxStale?: () => boolean, modelOps?: SchedulerModelOps) {
     this.backend = backend
     this.isCtxStale = isCtxStale
+    this.modelOps = modelOps
   }
 
   // ── 任务 CRUD ──
@@ -85,6 +156,7 @@ export class SchedulerRuntime {
       prompt,
       kind,
       schedule,
+      model: options.model,
       enabled: true,
       createdAt: now,
       nextRunAt,
@@ -221,6 +293,15 @@ export class SchedulerRuntime {
   }
 
   async tickScheduler(): Promise<void> {
+    // U4 对账兜底（设计 D3）：严格先于本 tick 的 dispatch 循环。顺序约束：否则出现
+    // 「B dispatch 先切 Y → 对账持 A 旧记录把 Y 静默切回」的交错（Y 从未生效、全序列
+    // 无报错，G4 被绕过）。恢复执行时 await 完成，保证恢复 setModel 完成后 dispatch 循环
+    // 才开 setModel（fire-and-forget 会让两个 setModel 并发竞态，打破顺序约束本身）。
+    // 无未决记录的绝大多数 tick 同步返回、不引入 microtask 断点——dispatch 的同步段
+    // 契约（in-flight 守卫在 tickScheduler() 未 await 时同步可见）保持不变。
+    const reconciling = this.reconcileModelSwitch()
+    if (reconciling) await reconciling
+
     const now = this.backend.now()
 
     // 1. 过期清理（must-fix 2 / CL9：append delete 抵消残留 upsert，防 resume 复活已过期任务）
@@ -294,19 +375,89 @@ export class SchedulerRuntime {
    * sendMessage 抛错（同步异常，session 关闭等）时记录 failed 状态但不 rethrow，
    * 让 tick 继续处理其他任务。
    *
+   * U4 模型切换（设计 D3 修订版）：task.model 非空且 ≠ 会话当前模型时，sendMessage 前
+   * 按序执行「记未决切换记录 → setModel(task.model) → sendMessage」。busy 亦照常 setModel
+   * （P-MODEL-② 证伪「busy 切换不生效」——steer 消息消费时在同一 run 内开新 turn，turn
+   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效）。失败降级（分级，不阻塞核心
+   * 调度）：modelOps 缺省 / 会话无当前模型 / setModel false → 日志 + 放弃切换，照常 dispatch。
+   *
    * 持久化（append-only）：recurring 成功推进 nextRunAt → append advance（status='success' CL8）；
    * once 成功 → append delete。失败 dispatch 不 append（CL7 重试语义，transient 失败 nextRunAt 未推进）。
+   * 模型切换语义不进任何持久化词表（U4 (c)：appendExecutionRecord/advance/delete 行为不变）。
    */
   private async dispatchTaskInner(task: ScheduledTask): Promise<boolean> {
-    // 检查速率限制
+    // 检查速率限制（U4 (b)：rate-limit 拒绝路径保持在任何 setModel 之前，无模型残留）
     if (!this.hasDispatchCapacity(this.backend.now())) return false
+
+    const modelOps = this.modelOps
+    if (task.model && modelOps && task.model !== modelOps.getCurrentModelRef()) {
+      const current = modelOps.getCurrentModelRef()
+      if (!current) {
+        // 会话无当前模型：期望模型无处记录、恢复不可定义 → 放弃切换照常 dispatch（分级降级）
+        logger.warn('cannot record expected model for switch (session has no current model)', {
+          taskId: task.id,
+          targetModelRef: task.model,
+        })
+      } else if (this.pendingModelSwitch) {
+        // 互斥窗口（设计 D3，理由 = 切换秩序）：未决记录未关闭时，其他需切模型任务命中即
+        // skip 本轮 + pending 留待下 tick 重试（复用现状 skip 语义，不建真队列；不需切模型
+        // 的任务不受互斥影响——检查只在本分支）。「dispatch 写新记录前先强制结算旧记录」
+        // 的落地：本分支结构性永不写新记录（杜绝新旧叠写），同时把已过窗口的 in-flight
+        // 残留先强制开放转移，保证新任务在旧记录结算后 ≤1 tick 内接管、不被过期残留无限阻塞。
+        // 强制结算的恢复必须 await（顺序约束，与 tickScheduler 的对账 await 同构）：恢复
+        // setModel(原) 完成后才放行 skip——fire-and-forget 会让恢复与紧随的需切模型任务
+        // setModel(目标) 并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
+        // turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
+        await this.forceSettleExpiredInFlight()
+        logger.warn('model switch in progress, skipping this tick (pending retry next tick)', {
+          taskId: task.id,
+          targetModelRef: task.model,
+        })
+        return false
+      } else {
+        const switched = await modelOps.setModelByRef(task.model)
+        if (switched) {
+          // ① 记未决切换记录（会话期望模型 + 在途标记，内存态）→ ② setModel 已受理，
+          // ③ sendMessage 受理后等事件恢复（message_start 归属 → turn_end + isIdle 复核）
+          this.pendingModelSwitch = {
+            taskId: task.id,
+            expectedModelRef: current,
+            targetModelRef: task.model,
+            phase: 'in-flight',
+            ticksOpen: 0,
+          }
+          this.dispatchedTurnIndex = null
+        } else {
+          // setModel false（无可用 API key 等）→ 按「恢复失败」同族处理：日志 + 放弃本次
+          // 切换，任务照常 dispatch（模型字段不阻塞核心调度）
+          logger.warn('model switch failed (setModel false), dispatch continues with current model', {
+            taskId: task.id,
+            targetModelRef: task.model,
+          })
+        }
+      }
+    }
 
     try {
       await this.backend.sendMessage(
-        { content: task.prompt, customType: 'pi-scheduler:dispatched', display: true },
+        { content: task.prompt, customType: `${DISPATCH_CUSTOM_TYPE_PREFIX}dispatched`, display: true },
         { deliverAs: 'steer', triggerTurn: true },
       )
     } catch {
+      // U4 (a)：接管副作用——同步抛错路径先恢复原模型（异常路径不得把会话留在目标任务
+      // 模型上），再走现状 failed 记账。记录先关后恢复（防 await 期间并发重入）。
+      const ps = this.pendingModelSwitch
+      if (ps && modelOps) {
+        this.pendingModelSwitch = null
+        this.dispatchedTurnIndex = null
+        const restored = await modelOps.setModelByRef(ps.expectedModelRef)
+        if (!restored) {
+          logger.warn(
+            'model restore failed after send error (restore-failed): manual switch back required',
+            { expectedModelRef: ps.expectedModelRef, targetModelRef: ps.targetModelRef, taskId: ps.taskId },
+          )
+        }
+      }
       task.lastStatus = 'failed'
       task.pending = false
       appendExecutionRecord(task, this.backend.now(), 'failed')
@@ -354,6 +505,155 @@ export class SchedulerRuntime {
     const oneMinuteAgo = now - MS_PER_MINUTE
     this.dispatchTimestamps = this.dispatchTimestamps.filter(t => t > oneMinuteAgo)
     return this.dispatchTimestamps.length < RATE_LIMIT_PER_MINUTE
+  }
+
+  // ── 模型切换：对账兜底与归属状态机（U4，设计 D3 修订版）──
+
+  /**
+   * 未决模型切换记录的对账探测（tickScheduler 开头调用，严格先于 dispatch 循环）。
+   * 同步推进状态机，仅在需要执行恢复时返回 Promise（调用方 await——顺序约束）。
+   * 对账守卫前置：仅当存在未决记录才比对恢复——无记录时「模型 ≠ 期望」是用户自主行为，
+   * 不动作（否则用户在任务间隙手动切模型会被静默回滚）。
+   * - in-flight：ticksOpen 计数超 MODEL_SWITCH_RECONCILE_TICKS → 恢复回调永不执行（事件
+   *   丢失），强制开放：idle 即恢复（返回恢复 Promise）；非 idle 转 awaiting-restore
+   *   （P-MODEL-② 证实 setModel 不影响 in-flight turn，但保守口径维持非 idle 推迟）。
+   *   窗口内继续等事件。
+   * - awaiting-restore：比对决策已在窗口内锁定，执行不受窗口过期限制——idle 重入即兑现
+   *   （tick 为天然重入点，不设墙钟上界：任务级正常路径无墙钟超时）。
+   */
+  private reconcileModelSwitch(): Promise<void> | undefined {
+    const ps = this.pendingModelSwitch
+    if (!ps) return undefined
+    if (this.isCtxStale?.()) {
+      // stale 代际失效（session 替换）：未决记录随代际丢弃，不触碰旧 ctx（同现有守卫路径）
+      this.pendingModelSwitch = null
+      return undefined
+    }
+    const ops = this.modelOps
+    if (!ops) return undefined
+    if (ps.phase === 'in-flight') {
+      ps.ticksOpen += 1
+      if (ps.ticksOpen <= MODEL_SWITCH_RECONCILE_TICKS) return undefined
+      logger.warn('model switch in-flight mark expired, forcing reconciliation', {
+        taskId: ps.taskId,
+        expectedModelRef: ps.expectedModelRef,
+        targetModelRef: ps.targetModelRef,
+      })
+      if (!ops.isIdle()) {
+        ps.phase = 'awaiting-restore'
+        return undefined
+      }
+      return this.restoreExpectedModel('reconcile-forced')
+    }
+    if (!ops.isIdle()) return undefined
+    return this.restoreExpectedModel('reconcile-idle')
+  }
+
+  /**
+   * 互斥命中时对已过窗口的 in-flight 残留做强制开放转移（idle 恢复 / 非 idle 转
+   * awaiting-restore）；未过窗口或已在 awaiting-restore 的记录不动（其结算由事件与
+   * tick 对账通道负责）。
+   *
+   * 返回 Promise 而非 fire-and-forget：idle 恢复路径透传 restoreExpectedModel，调用方
+   * （dispatchTaskInner 互斥分支）必须 await——恢复 setModel(原) 与后续新任务的
+   * setModel(目标) 不得并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
+   * turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
+   */
+  private forceSettleExpiredInFlight(): Promise<void> {
+    const ps = this.pendingModelSwitch
+    if (!ps || !this.modelOps) return Promise.resolve()
+    if (ps.phase !== 'in-flight' || ps.ticksOpen <= MODEL_SWITCH_RECONCILE_TICKS) return Promise.resolve()
+    if (this.modelOps.isIdle()) {
+      return this.restoreExpectedModel('mutex-forced')
+    }
+    ps.phase = 'awaiting-restore'
+    return Promise.resolve()
+  }
+
+  /**
+   * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收口）：
+   * 当前模型已等于期望（用户已手动切回）→ 清记录不动作；setModel(原) false →
+   * restore-failed 终态（日志含恢复动作：会话停留在任务模型，需手动切回）+ 清记录。
+   * 记录先关后恢复——防 await setModel 期间 turn_end 与 tick 对账并发重入。
+   */
+  private async restoreExpectedModel(reason: string): Promise<void> {
+    const ps = this.pendingModelSwitch
+    if (!ps || !this.modelOps) return
+    this.pendingModelSwitch = null
+    this.dispatchedTurnIndex = null
+    if (this.modelOps.getCurrentModelRef() === ps.expectedModelRef) return
+    const restored = await this.modelOps.setModelByRef(ps.expectedModelRef)
+    if (!restored) {
+      logger.warn('model restore failed (restore-failed): session stays on task model, manual switch back required', {
+        taskId: ps.taskId,
+        expectedModelRef: ps.expectedModelRef,
+        targetModelRef: ps.targetModelRef,
+        reason,
+      })
+    }
+  }
+
+  // 归属状态机事件入口（index.ts 的 pi.on 转发；方法内不触碰捕获的 pi/ctx——恢复动作
+  // 经构造注入的 modelOps，stale 代际由 isCtxStale 入口检查拦下：清状态机、不执行恢复）。
+
+  /** agent run 开始：重置 run 窗口与 turn 序态（P-MODEL-③：turnIndex per-run 归零） */
+  handleAgentStart(): void {
+    if (this.isCtxStale?.()) return
+    this.runWindowActive = true
+    this.currentTurnIndex = -1
+  }
+
+  /** turn 开始：监听器维护「当前 turnIndex」（message_start 序态关联的基准，P-MODEL-④）。
+   *  turnIndex 缺省（pi 契约恒有；测试仿真可无参调 handler）→ 忽略本次序态更新。 */
+  handleTurnStart(turnIndex: number | undefined): void {
+    if (this.isCtxStale?.()) return
+    if (typeof turnIndex !== 'number') return
+    this.currentTurnIndex = turnIndex
+  }
+
+  /**
+   * message_start 归属匹配（P-MODEL-④ 实测序态 turn_start(n) → message_start(custom) →
+   * … → turn_end(n)）：customType 前缀命中 → 记 dispatchedTurnIndex = 当前 turnIndex。
+   * 仅在未决记录在场且 run 窗口活跃时归属——避免陈旧索引在记录关闭后意外匹配后续 turn，
+   * 以及裸 turnIndex 跨 run 当 id。
+   */
+  handleMessageStart(message: unknown): void {
+    if (this.isCtxStale?.()) return
+    if (!this.pendingModelSwitch || !this.runWindowActive) return
+    if (!matchesDispatchCustomType(message)) return
+    this.dispatchedTurnIndex = this.currentTurnIndex
+  }
+
+  /**
+   * turn_end 恢复挂点（设计 D3 修订版）：turnIndex === dispatchedTurnIndex → isIdle 复核——
+   * idle 即恢复；非 idle（用户长 run 的后续 turn 在途）推迟（phase 转 awaiting-restore，
+   * tick 重入 idle 即兑现）。裸 turn_end 挂点会在用户 run 未结束时提前恢复、把该 run 后续
+   * turn 切回原模型，禁止（P-MODEL-② 实测形态）。turnIndex 缺省（同 handleTurnStart）不匹配。
+   */
+  handleTurnEnd(turnIndex: number | undefined): void {
+    if (this.isCtxStale?.()) return
+    const ps = this.pendingModelSwitch
+    if (
+      !ps ||
+      typeof turnIndex !== 'number' ||
+      this.dispatchedTurnIndex === null ||
+      turnIndex !== this.dispatchedTurnIndex
+    ) {
+      return
+    }
+    if (this.modelOps?.isIdle()) {
+      void this.restoreExpectedModel('turn-end')
+    } else {
+      ps.phase = 'awaiting-restore'
+    }
+  }
+
+  /** agent_end / agent_settled 封口 run 窗口（窗口外 turnIndex 不作归属 id） */
+  handleRunClosed(): void {
+    if (this.isCtxStale?.()) return
+    this.runWindowActive = false
+    this.currentTurnIndex = -1
+    this.dispatchedTurnIndex = null
   }
 
   /**

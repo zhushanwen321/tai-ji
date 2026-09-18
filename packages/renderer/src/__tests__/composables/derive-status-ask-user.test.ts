@@ -1,6 +1,6 @@
 /**
  * CW wave `session-active-ssot` T3：useSessionDerivations 把 extensionUIStore 的
- * hasPendingAskUser 注入 deriveStatus 的响应式接线（renderer 专属集成段）。
+ * hasPendingBlockingOverlay 注入 deriveStatus 的响应式接线（renderer 专属集成段）。
  *
  * deriveStatus 纯函数本体（含 hasAskUserPending 分支/优先级/默认 false）在 core
  * domain/chat/__tests__/derive-status.test.ts 已复刻全 9 态矩阵——原 describe#1 的
@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-describe('T3: useSessionDerivations 注入 extensionUIStore.hasPendingAskUser（集成）', () => {
+describe('T3: useSessionDerivations 注入 extensionUIStore.hasPendingBlockingOverlay（集成）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   it('extensionUIStore 有 ask-user pending → derivedStatus 响应式 = waiting；respond 后回落 done', async () => {

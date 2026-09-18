@@ -4,24 +4,28 @@
  * pi extension 调 ctx.ui.select/confirm/input → runtime 推 extension.ui_request
  * → core MessageBusBridge 归一为 bus 'ui-request' 事件（plugin:uiRequest + extension.ui_request
  * 双源合一）→ 本 composable 订阅 bus、写入 extensionUIStore（session 级 pending SSOT）→
- * 渲染层（Panel inline ask-user）从 store 分区派生 → 用户操作 → sendExtensionUIResponse 回传（带 method）→ pi Promise resolve。
+ * 渲染层（Panel inline overlay）从 store 分区派生 → 用户操作 → sendExtensionUIResponse
+ * 回传（带 method）→ pi Promise resolve。
  *
  * 状态归属（CW wave `session-active-ssot` T2）：pending 队列已提升到 extensionUIStore
- *（session 级 SSOT），让 deriveStatus 经 hasPendingAskUser 能查到 ask-user 等待状态。
+ *（session 级 SSOT），让 deriveStatus 经 hasPendingBlockingOverlay 能查到阻塞 overlay
+ *（ask-user ∨ schedule-create）等待状态。
  * 本 composable 只负责：①订阅编排（per-panel 实例各自订阅）；②filter 分流读取
  *（store 存全量 pending，currentAskUserRequest 在 computed 里按 filter 取）。
  *
  * 订阅模型（slice `companion-band-mount` wave1，IF2）：
  * - bus 'ui-request' 订阅走**模块级 refCount**（项目规则 #2 防重复注册）——首个实例订阅时
- *   单次 bus.on，末个实例注销时 unsub；实例 handler 只处理 askUser 请求（C4 分流，
- *   dialog 请求由 CompanionBand wave 消费 bus 直连，不经 store）
+ *   单次 bus.on，末个实例注销时 unsub；实例 handler 只处理富交互 overlay 请求
+ *   （C4 分流：askUser / scheduleCreate 两类，普通 dialog 请求由 CompanionBand wave 消费
+ *   bus 直连，不经 store）
  * - 事件 sessionId 缺失（无 sid 的 ui-request）→ 跳过入 store（warn，C2）
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
  * - getPendingRequests（切回拉取）保留 RPC 路径（C3）
  *
- * filter 仅用于读取分流 + 入队第二道闸（askUser 硬过滤之后）：store 存全量 pending，
- * 多个 composable 实例（Panel 入 askUser 读取）各按 filter 读同一份 store 分区。
- * dialog 请求（非 askUser）已由 CompanionBand 消费 bus 直连（wave1 起），不再经 store。
+ * filter 仅用于读取分流 + 入队第二道闸（富交互 overlay 硬过滤之后）：store 存全量 pending，
+ * 多个 composable 实例各按 filter 读同一份 store 分区。默认 overlayFilter（ask-user ∨
+ * schedule-create，Panel inline 渲染面）；dialog 请求（非 overlay 类）已由 CompanionBand
+ * 消费 bus 直连（wave1 起），不再经 store。
  */
 import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
@@ -33,8 +37,19 @@ import { useExtensionUIStore } from '@/stores/extension-ui'
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
 
-/** ask-user 富交互请求过滤器（Panel 用） */
+/** ask-user 富交互请求过滤器（ask-user 类过滤器原语，overlayFilter 的组合成分） */
 export const askUserFilter: UIRequestFilter = (req) => req.askUser === true
+
+/** schedule 创建确认富交互请求过滤器（schedule-create 类过滤器原语，overlayFilter 的组合成分） */
+export const scheduleCreateFilter: UIRequestFilter = (req) => req.scheduleCreate === true
+
+/**
+ * 富交互 overlay 请求过滤器（Panel inline 渲染用）：ask-user ∨ schedule-create。
+ * 两类请求同走 Panel inline overlay 挂载（互斥替换 composer），Panel 按请求标记
+ * 分流到 AskUserOverlay / ScheduleCreateOverlay；普通 dialog 请求仍由 CompanionBand
+ * 消费 bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
+ */
+export const overlayFilter: UIRequestFilter = (req) => askUserFilter(req) || scheduleCreateFilter(req)
 
 // ── 模块级 refCount bus 订阅（项目规则 #2：多实例共享单次注册，防事件处理翻倍） ──
 // split 双 panel 多实例各自订阅同一 bus 事件，若每实例直接 bus.on 则同一事件被 N 个
@@ -79,7 +94,7 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
  *
  * DialogRequest 是 parseUiRequest/parseExtensionUiRequest 经 ...payload 展开构造的——
  * runtime extension.ui_request 原始 payload（含 askUser/askUserQuestions/allowCancel/message/
- * options 等）保留在索引签名里（event-adapter.ts:397-399 广播 askUser:true）。
+ * options 等）保留在索引签名里（event-adapter.ts:723 payload 标记 askUser:true / :731 extensionUiRequestBroadcast）。
  * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
@@ -96,13 +111,17 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     ...(request.askUser !== undefined ? { askUser: request.askUser as boolean } : {}),
     ...(request.askUserQuestions !== undefined ? { askUserQuestions: request.askUserQuestions as unknown[] } : {}),
     ...(request.allowCancel !== undefined ? { allowCancel: request.allowCancel as boolean } : {}),
+    // schedule 创建确认扩展字段搬运（白名单漏补 = 字段静默剥离，overlay 渲染拿不到草稿）；
+    // scheduleDraft 值域 unknown（isScheduleDraft 守卫在消费端收窄），无需断言
+    ...(request.scheduleCreate !== undefined ? { scheduleCreate: request.scheduleCreate as boolean } : {}),
+    ...(request.scheduleDraft !== undefined ? { scheduleDraft: request.scheduleDraft } : {}),
     receivedAt: Date.now(),
   }
 }
 
 export function useExtensionUI(
   sessionId: Ref<string | null>,
-  filter?: UIRequestFilter,
+  filter: UIRequestFilter = overlayFilter,
 ) {
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
@@ -119,9 +138,10 @@ export function useExtensionUI(
     if (!sid) return
     // bus 订阅（IF2）：ui-request 事件按**事件 sid** 入 store 分区（M1 竞态语义——
     // 切 session 后旧 sid 迟到事件写旧分区，不污染新分区；事件自带归属，无需捕获订阅时 sid）。
-    // C4 分流：askUser 硬过滤先行（bus 路径只入 askUser，dialog 由 CompanionBand 消费 bus），
-    // filter 是第二道闸（askUserFilter 放行——非 askUser 不再经 store）。
-    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——ask-user 渲染依赖 session 分区。
+    // C4 分流：富交互 overlay 硬过滤先行（askUser / scheduleCreate 两类入 store——
+    // 分别渲染 AskUserOverlay / ScheduleCreateOverlay；普通 dialog 由 CompanionBand 消费 bus，
+    // extension-host-dialog 侧对称排除两类，零重叠契约），filter 是第二道闸。
+    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——overlay 渲染依赖 session 分区。
     unsubFns.push(
       subscribeBus((e) => {
         const eventSid = e.sessionId
@@ -129,7 +149,7 @@ export function useExtensionUI(
           console.warn('[useExtensionUI] ui-request 事件缺少 sessionId，跳过入队:', e.request.requestId)
           return
         }
-        if (e.request.askUser !== true) return // C4：只入 askUser
+        if (e.request.askUser !== true && e.request.scheduleCreate !== true) return // C4：只入富交互 overlay 类
         const adapted = toExtensionUIRequest(eventSid, e.request)
         if (filter && !filter(adapted)) return // filter 第二道闸
         store.addRequest(eventSid, adapted)
@@ -159,15 +179,22 @@ export function useExtensionUI(
     unsubFns = []
   })
 
-  // ── 分流渲染：ask-user 走 Panel inline，其余由 CompanionBand（bus 直连）──
-  // 从 store 分区派生：store 存全量 pending，computed 内按 askUser 取 + filter 过滤。
+  // ── 分流渲染：富交互 overlay（ask-user / schedule-create）走 Panel inline，其余由 CompanionBand（bus 直连）──
+  // 从 store 分区派生：store 存全量 pending，computed 内按 overlay 谓词取 + filter 过滤。
   // 读 sessionId.value 建立响应式依赖，sid 变化时重算读新分区。
-  /** 队列中第一个 ask-user 富交互请求（Panel inline 渲染用）；无则 undefined */
+  /**
+   * 队列中第一个富交互 overlay 请求（ask-user ∨ schedule-create，Panel inline 渲染用）；无则 undefined。
+   * 命名沿用 currentAskUserRequest（ask-user 通道先在；符号保留使既有消费方/mock 零适配），
+   * schedule-create 加入后语义扩为「当前 overlay 请求」，消费方（usePanelView/Panel）按请求
+   * 标记（askUser / scheduleCreate）分流挂载对应 overlay 组件。
+   */
   const currentAskUserRequest = computed(() => {
     const sid = sessionId.value
     if (!sid) return undefined
     const records = store.recordsOf(sid).value
-    return (filter ? records.filter(filter) : records).find(r => r.askUser === true)
+    return (filter ? records.filter(filter) : records).find(
+      (r) => r.askUser === true || r.scheduleCreate === true,
+    )
   })
 
   /** 用户回复指定请求（按 requestId 精确定位，不假设队首） */

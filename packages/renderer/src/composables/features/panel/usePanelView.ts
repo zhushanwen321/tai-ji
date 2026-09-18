@@ -22,13 +22,15 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useSessionTrace } from '@/composables/features/trace/useSessionTrace'
-import { useExtensionUI, askUserFilter } from '@/composables/useExtensionUI'
+import { useExtensionUI } from '@/composables/useExtensionUI'
 
 /**
- * 派生 panel 渲染视图 + ask-user 应答消费面。
+ * 派生 panel 渲染视图 + 富交互 overlay 应答消费面。
  *
- * currentAskUserRequest/respond/cancel 一并透出：ask-user overlay 的渲染数据
- * （questions/allowCancel）与应答回调同源于 useExtensionUI，Panel 不再重复订阅。
+ * currentAskUserRequest/respond/cancel 一并透出：overlay 的渲染数据
+ * （ask-user questions / schedule-create draft）与应答回调同源于 useExtensionUI，
+ * Panel 不再重复订阅。currentAskUserRequest 语义 = 队列第一个富交互 overlay 请求
+ * （ask-user ∨ schedule-create），Panel 按请求标记分流挂载对应 overlay 组件。
  * 必须在组件 setup（或 active effectScope）内调用——useExtensionUI 内部注册
  * watch + onScopeDispose（per-sessionId 订阅生命周期）。
  */
@@ -37,7 +39,7 @@ export function usePanelView(sessionId: Ref<string | null>): {
   panelView: ComputedRef<PanelView>
   /** 绑定会话是否有消息（conversation 分支子视图选择：MessageStream vs 空对话态） */
   hasMessages: ComputedRef<boolean>
-  /** 队列中第一个 ask-user 请求（overlay 渲染数据源；无则 undefined） */
+  /** 队列中第一个富交互 overlay 请求（ask-user ∨ schedule-create；无则 undefined） */
   currentAskUserRequest: ReturnType<typeof useExtensionUI>['currentAskUserRequest']
   /** ask-user 应答（answers JSON string 回传 pi） */
   respond: ReturnType<typeof useExtensionUI>['respond']
@@ -48,7 +50,9 @@ export function usePanelView(sessionId: Ref<string | null>): {
   const sessionStore = useSessionStore()
   const flow = useNewTaskFlow()
   const { partition: tracePartition } = useSessionTrace()
-  const { currentAskUserRequest, respond, cancel } = useExtensionUI(sessionId, askUserFilter)
+  // filter 走 useExtensionUI 默认值 overlayFilter（ask-user ∨ schedule-create，富交互 overlay
+  // 渲染面）；普通 dialog 请求由硬过滤 + CompanionBand 侧排除，不经 store。
+  const { currentAskUserRequest, respond, cancel } = useExtensionUI(sessionId)
 
   /** 绑定会话是否有消息（getMessages 计数 > 0；null session 恒 false） */
   const hasMessages = computed(() =>
@@ -71,7 +75,9 @@ export function usePanelView(sessionId: Ref<string | null>): {
   /** session-trace 视图态（per-session 分区 view 字段；分区键 focusedSessionId，单 panel 下 == props.sessionId） */
   const isTraceView = computed(() => tracePartition.value.view === 'trace')
 
-  /** 单点派生：全部渲染判据收敛于此，组件层只消费 kind/input */
+  /** 单点派生：全部渲染判据收敛于此，组件层只消费 kind/input。
+   *  hasAskUserRequest 布尔语义 = 有 pending 富交互 overlay 请求（ask-user ∨ schedule-create，
+   *  core PanelViewInput 注释为准）——currentAskUserRequest 的 find 谓词同源扩义。 */
   const panelView = computed<PanelView>(() =>
     derivePanelView({
       sessionId: sessionId.value,

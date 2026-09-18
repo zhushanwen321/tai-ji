@@ -261,6 +261,23 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 **排障**：输出里出现该通告 = 当前 shell 带宿主 env（正常现象，无需处理）；确需显式指定数据目录时，注入白名单内路径。
 
+### 19. e2e real 轨用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
+
+**现象**：`e2e/*-real.spec.ts`（launch-app-real）跑出诡异失败——sidebar 列出大量不存在于临时数据目录的会话（mock 假数据），新建 session 的条目永远不出现；同 spec 的纯 WS 断言用例（不经 UI）却全绿。
+
+**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 轨与 real 轨共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
+
+**排障动作**：
+
+```bash
+# real 轨前重建 real 形态产物（无 VITE_MOCK）
+VITE_E2E=true pnpm run build:e2e
+# real 轨跑完、要跑 mock 轨（launch-app 形态）前再重建 mock 形态产物
+VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
+```
+
+判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。改进方向（未实施）：launch-app-real 在 launch 前探针校验产物形态，fail-fast 给重建命令。
+
 
 ## 环境变量速查
 

@@ -18,8 +18,9 @@
  * （source 投递写入 / transport respond 删除两工厂共管），respond
  * （sendPiResponse + sendPluginResponse 双通道）即删；plugin 源另有撤窗广播删除点。
  *
- * 分流契约（feature clarify C2/C4）：askUser 请求由 useExtensionUI 消费（Panel inline 独占），
- * 本适配层只投递非 askUser（CompanionBand 独占 dialog）；两者在数据源层分流，零重叠。
+ * 分流契约（feature clarify C2/C4）：富交互 overlay 请求（askUser / scheduleCreate）由
+ * useExtensionUI 消费（Panel inline 独占，挂 AskUserOverlay / ScheduleCreateOverlay），
+ * 本适配层只投递其余请求（CompanionBand 独占 dialog）；两类在数据源层分流，零重叠。
  */
 import type { InternalEvent, InternalEventBus } from '@taiji/core'
 import type {
@@ -131,7 +132,11 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
           console.warn('[dialog-adapters] ui-request 事件缺少 sessionId，跳过投递:', e.request.requestId)
           return
         }
-        if (e.request.askUser === true) return // C4：askUser 由 useExtensionUI 消费（Panel inline）
+        // C4：富交互 overlay 类（askUser / scheduleCreate）由 useExtensionUI 消费
+        // （Panel inline 挂 AskUserOverlay / ScheduleCreateOverlay），本侧对称排除——
+        // 漏排除则同一请求被转成空壳 select dialog 入队（用户误点 = respond null = 误触取消）
+        // 并与 overlay 双 UI 并存，违反双消费方「零重叠」契约。
+        if (e.request.askUser === true || e.request.scheduleCreate === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))
