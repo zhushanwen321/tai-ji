@@ -1,6 +1,6 @@
 # @zhushanwen/pi-base-tool-enhance
 
-同名 override pi 内置 bash 工具的增强层：前台行为 100% 委托 pi 官方工厂（`createBashToolDefinition`），增量提供 background 模式、强制后台白名单与双模式可配置超时。能力面：测试类命令 force-test 白名单命中自动转后台（模式登记于 force-patterns.ts）、网络类挂死保护（可配置前台默认超时）、工具报错审计（tool_error 审计 hook，entry customType 为 `unified-hooks:tool-error`）。
+同名 override pi 内置 bash 工具的增强层：前台行为 100% 委托 pi 官方工厂（`createBashToolDefinition`），增量提供 background 模式、强制后台白名单与双模式可配置超时。能力面：测试类命令 force-test 白名单命中自动转后台（模式登记于 force-patterns.ts）、前台挂死保护（可配置前台默认超时，对一切未显式填 timeout 的前台命令生效——典型挂死场景是网络类命令）、工具报错审计（tool_error 审计 hook，entry customType 为 `unified-hooks:tool-error`）。
 
 设计决策沉淀在包内源码注释与本文档。
 
@@ -26,6 +26,6 @@
 
 完成通知经 pending-notifications（`type:"bash"`，process 生命周期档）+ sendMessage steer 注入当前 session。
 
-## 退役条件（sunset，D18）
+## 退役条件（sunset）
 
 pi 上游出现原生 background bash（或等价长时命令异步化）能力时评估退役本包；届时前台行为已收敛在 `createBashToolDefinition` 委托面，迁移成本可控。不登记此条件则 3 年后冗余层无人敢删（override 层与上游能力双轨漂移）。

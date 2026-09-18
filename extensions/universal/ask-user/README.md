@@ -57,7 +57,7 @@ If you recommend an option, prefix its label with `(Recommended)` and list it fi
 | `questions` | 1-4 entries | schema (`minItems`/`maxItems`) |
 | `options` | 2-4 entries | schema |
 | `question` | ≤1000 chars, no control chars (incl. `\n`), unique within the call | schema description + `validate.ts` |
-| `header` | ≤12 chars; required when `questions.length > 1` | `validate.ts` (length + non-empty) |
+| `header` | ≤12 chars (always); non-empty and unique when `questions.length > 1` | `validate.ts` (length; non-empty + uniqueness in multi-question mode) |
 | `options[].label` | non-empty, unique within the question | `validate.ts` |
 
 Validation failures make the tool `throw` with a message that names the violation and tells you how to fix it — correct the parameters and retry. (Pi converts a thrown error into an `isError: true` tool result; business outcomes like answers and cancellation are returned normally.)
@@ -80,11 +80,12 @@ A question with no answer reports as `(no answer)`.
 | No interactive UI (headless) | `throw`, tool **disabled for the session** | Proceed with a defensible decision stated in text, or wait for the user — **do not retry** |
 | Agent aborted (goal cancelled / context compacted) | `cancelled: true` | The text identifies it as an agent abort, not a user cancel. Do not assume an answer; do not retry ask_user — propagate the abort, or wait for new instructions if the decision is still required. |
 | User cancels (Esc → confirm, or Cancel button) | `cancelled: true` | Wait for new instructions, or re-ask with refined options if the decision is still required |
-| Unexpected error during interaction | `throw` (Pi shows it as `isError: true`) | Retry once with corrected parameters, or proceed with a defensible decision |
+| Unexpected error during interaction (TUI) | `throw` (Pi shows it as `isError: true`) | Tool stays enabled — retry with corrected parameters, or proceed with a defensible decision |
+| Unexpected error during interaction (RPC/GUI) | `throw` + tool **disabled for the session** | Same as the headless row — do not retry |
 
 Business outcomes (answers / cancellation) are returned as normal results; only validation failures and unexpected exceptions `throw` — Pi marks a thrown error `isError: true` with empty `details`.
 
-The headless branch physically removes the tool from the session (`setActiveTools`) — this is deliberate, so a function-calling loop cannot keep retrying `ask_user` in a non-interactive context.
+The headless and RPC-failure branches physically remove the tool from the session (`setActiveTools`) — this is deliberate, so a function-calling loop cannot keep retrying `ask_user` in a non-interactive context. The TUI branch does not disable: an interaction failure there is usually transient, so the tool stays enabled for a retry.
 
 ## Features
 
@@ -92,7 +93,7 @@ The headless branch physically removes the tool from the session (`setActiveTool
 - **Split-pane preview** (≥84 cols): option list left, selected option detail right. The right pane is **plain-text** option detail (label + description), not a Markdown renderer.
 - **Inline free-text editor**: select "Other" → Enter → type a custom answer. Multi-line aware, soft-wrapped. No comment mode — this editor is the only free-form input.
 - **Multi-select**: `multiSelect: true` → toggle checkboxes with Space, Enter to confirm.
-- **Esc confirm-to-cancel**: Esc on the first question opens a confirm overlay (a second Esc cancels; any other key stays).
+- **Esc confirm-to-cancel**: in options mode, Esc on the first question opens a confirm overlay (a second Esc cancels; any other key stays). Elsewhere Esc means back, not cancel: on later question tabs it steps back one tab, on the Submit tab it returns to the last question, and in the Other editor it saves the draft and returns to the option list.
 - **Headless-safe**: disables the tool and throws when no UI is available.
 
 ## File structure
@@ -104,6 +105,7 @@ extensions/universal/ask-user/
 ├── README.md                 # this file — usage contract for LLM callers + overview
 ├── ARCHITECTURE.md           # internals: dependency graph, state machine, defensive flow
 ├── vitest.config.ts
+├── tsconfig.json             # typecheck config (not in the npm files allowlist)
 └── src/
     ├── index.ts              # Tool factory: registerTool + execute (6-step defensive flow) + renderCall/renderResult
     ├── types.ts              # Input schema, Result schema, shared state types (QuestionState/ThemeLike) — dependency leaf
