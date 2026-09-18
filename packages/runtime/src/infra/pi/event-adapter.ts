@@ -32,6 +32,8 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
+// plan-state customType 常量单源在 plan-state-extractor（D1①：runtime 侧常量，shared 无此字面量）
+import { PLAN_STATE_CUSTOM_TYPE } from '../../services/session/plan-state-extractor.js'
 import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
@@ -1261,9 +1263,10 @@ function handleCompactionEnd(event: PiCompactionEndEvent, _sid: string): PiTrans
  *
  * pi 只对 extension appendEntry 发射本事件（agent-session.ts appendEntry 回调唯一发射点，
  * message entry 不发射——W25 契约测试固化）。customType 过滤：只对 subagent-record /
- * workflow-record 自描述 entry 产出失效信号（interpreter → sessionService markDirty → 防抖
- * get_entries 增量重拉，唯一数据写路径），其他 custom type（含未来新增的 extension 自有
- * entry）no-op——避免无关 entry 触发拉取。
+ * workflow-record / plan-state 自描述 entry 产出失效信号（interpreter → sessionService
+ * markDirty → 防抖 get_entries 增量重拉，唯一数据写路径；plan-state 第三员为 plan 模式
+ * 重设计 D1① 扩容），其他 custom type（含未来新增的 extension 自有 entry）no-op——
+ * 避免无关 entry 触发拉取。
  *
  * 事件 payload（entry 对象）不进任何数据缓存：失效信号只携带 customType，数据本体由
  * get_entries 权威拉取获得（ReplicatedState「事件只做失效」核心不变量）。
@@ -1276,6 +1279,9 @@ function handleEntryAppended(event: PiEntryAppendedEvent, _sid: string): PiTrans
   }
   if (entry.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
     return [{ kind: 'record-entry-appended', customType: WORKFLOW_RECORD_CUSTOM_TYPE }]
+  }
+  if (entry.customType === PLAN_STATE_CUSTOM_TYPE) {
+    return [{ kind: 'record-entry-appended', customType: PLAN_STATE_CUSTOM_TYPE }]
   }
   return [{ kind: 'noop' }]
 }
@@ -1306,8 +1312,9 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // compaction_start/compaction_end 在 M4 移出此列（改事件驱动，interpreter 唯一编排 compaction 生命周期）。
 // agent_start 在 M5 移出此列——其 hook 分支在 translate() 内单独消费（onPiEvent/agent_start hook，
 // 消费方是插件 executeHooks，S1）。若放回 NULL_EVENTS 会被此处 short-circuit，hook 分支不可达。
-// [W18] entry_appended 移出此列——对 subagent-record / workflow-record customType 产出失效信号
-// （handleEntryAppended：subagent/workflow 派生缓存 markDirty → 防抖 get_entries 增量重拉），
+// [W18] entry_appended 移出此列——对 subagent-record / workflow-record / plan-state
+// customType 产出失效信号（handleEntryAppended：subagent/workflow/plan 派生缓存 markDirty →
+// 防抖 get_entries 增量重拉；plan-state 第三员为 plan 模式重设计 D1① 扩容），
 // 其他 custom type no-op（W21 TODO(W18) 锚点在此兑现；message entry 不发射本事件，W25 契约）。
 // [W21] message_end 移出此列——重构 message entry 喂前端 reducer（handleMessageEnd，实时 feed
 // 权威载体）。pi 上游未来若为常规 message append 补发射 entry_appended：只换喂入源头

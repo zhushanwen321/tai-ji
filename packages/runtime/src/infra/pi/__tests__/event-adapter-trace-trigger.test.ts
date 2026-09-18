@@ -98,4 +98,15 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
       { kind: 'trace-trigger', trigger: 'entry_appended' },
     ])
   })
+
+  it('entry_appended 对 plan-state 同样双产物（plan 模式重设计 D1① 白名单第三员）', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 'plan-state' } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
+    expect(events).toEqual([
+      { kind: 'record-entry-appended', customType: 'plan-state' },
+      { kind: 'trace-trigger', trigger: 'entry_appended' },
+    ])
+  })
 })
