@@ -31,7 +31,7 @@ Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433
 
 ```bash
 # Download and open the DMG (or download it from the Releases page in a browser and install by double-clicking)
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 
 # If the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads, needed for browser downloads):
@@ -42,7 +42,7 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0
 
 ```bash
 # Download the AppImage, make it executable, and launch it
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -51,10 +51,10 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0
 
 ```powershell
 # PowerShell (recommended; avoids the parameter conflicts caused by curl being an alias in PowerShell)
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 
 # Command Prompt / cmd.exe (uses the system-bundled curl.exe, included by default since Windows 10 1803+):
-# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### International download (GitHub)
@@ -65,7 +65,7 @@ Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/t
 
 ```bash
 # Download and open the DMG
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 
 # If the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads, needed for browser downloads):
@@ -76,7 +76,7 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-
 
 ```bash
 # Download the AppImage, make it executable, and launch it
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -85,10 +85,10 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-
 
 ```powershell
 # PowerShell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 
 # Command Prompt / cmd.exe (uses the system-bundled curl.exe, included by default since Windows 10 1803+):
-# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.2/TaiJi-0.10.2-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 <!-- INSTALL:END -->
