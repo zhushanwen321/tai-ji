@@ -272,7 +272,7 @@ AGENTS.md 文档索引涉及的资产，逐一定性「改/不改/怎么改」�
 
 **P-S1 思考等级端到端保真（回溯 G4 + 事故 B）**
 场景：设置页新添加一个模型（思考策略选 high-max 预设），保存后回到 composer 对其设「最高」，连续使用 5 分钟。
-通过标准：保存后读 `~/.taiji/pi/agent/models.json`，该模型含 `"reasoning": true`；composer 档位选择器展示的可用档与 pi `get_available_thinking_levels` 实值一致（reasoning:false 模型仅「关」可选）；设「最高」后 UI 立即显示 pi 生效档（无 30s 后回跳）；pi session 文件 `thinking_level_change` entry 值与 UI 显示一致。
+通过标准：保存后读 `~/.taiji/agent/models.json`，该模型含 `"reasoning": true`；composer 档位选择器展示的可用档与 pi `get_available_thinking_levels` 实值一致（reasoning:false 模型仅「关」可选）；设「最高」后 UI 立即显示 pi 生效档（无 30s 后回跳）；pi session 文件 `thinking_level_change` entry 值与 UI 显示一致。
 
 **P-S2 回执保真负面路径（回溯 D3）**
 场景：对 mimo 族模型（支持止于 high）设「最高（max）」。

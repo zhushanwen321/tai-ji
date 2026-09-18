@@ -6,7 +6,6 @@ import sidebar from './zh-CN/sidebar'
 import panel from './zh-CN/panel'
 import tray from './zh-CN/tray'
 import workspace from './zh-CN/workspace'
-import overview from './zh-CN/overview'
 import newTask from './zh-CN/newTask'
 import shell from './zh-CN/shell'
 import extensionUI from './zh-CN/extensionUI'
@@ -25,7 +24,6 @@ export default {
   // 顶层键唯一性约束下不能并列两个 panel 键）
   panel: { ...panel, ...tray },
   workspace,
-  overview,
   newTask,
   shell,
   extensionUI,

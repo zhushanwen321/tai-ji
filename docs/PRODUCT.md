@@ -13,7 +13,6 @@ product
 - Agent 自动拆分为多个 SubAgent 并行执行
 - 用户需要监控各 SubAgent 的执行状态、查看已完成的结果、回应需要确认的告警
 - 在分屏模式下同时查看主线对话和某个 SubAgent 的详细执行过程
-- 通过 Overview 快速鸟瞰不同 Session 的任务总览
 
 ## Product Purpose
 
@@ -79,7 +78,7 @@ product
 ## Design Principles
 
 1. **默认极简，渐进展开**
-   默认只显示 Session 列表 + 对话区域。Tab 栏、右侧面板、抽屉都不常驻。更深层的 SubAgent 信息通过 Anchor 下拉切换 → 抽屉展示任务树 → Overview 全局鸟瞰，逐层展开。留白即设计。
+   默认只显示 Session 列表 + 对话区域。Tab 栏、右侧面板、抽屉都不常驻。更深层的 SubAgent 信息通过 Anchor 下拉切换 → 抽屉展示任务树，逐层展开。留白即设计。
 
 2. **通知驱动，不打扰**
    让 Agent 来通知用户，而不是用户去翻找。Header 通知角标 → Toast 弹出 → 对话内联系统消息，三级通知层级按需触发。
@@ -128,11 +127,11 @@ product
 - slash 命令：自然语言匹配（预留字段）、新增 ws 协议类型（复用已有）、Skill 管理（独立 SkillPane）
 - Tree：Summarize(branch summary)、Label 编辑、直接写入 JSONL
 - Agent 配置：OverrideParams、ToolPermissions（默认全部允许）
-- 搜索：文件内容全文搜索（需 ripgrep 二进制，打包分发成本高）、符号搜索真实数据（需 LSP/tree-sitter，zero base）、危险命令分级与二次确认（当前无真正危险命令）、会话跳转进概览视图（只切换 active session）。`[from: 2026-06-30-search-modal §requirements §8]`
+- 搜索：文件内容全文搜索（需 ripgrep 二进制，打包分发成本高）、符号搜索真实数据（需 LSP/tree-sitter，zero base）、危险命令分级与二次确认（当前无真正危险命令）、会话跳转（只切换 active session，进侧栏列表）。`[from: 2026-06-30-search-modal §requirements §8]`
 - 前端：原生 HTML 表单元素、Emoji、硬编码颜色、魔数间距
 - 数据持久化：不引入 SQLite（用户配置/记录数据量极小，JSON + atomicWrite 足够；SQLite 引入原生依赖与 Electron 打包冲突）；不做跨机器同步（单机本地记录）；冷启动从空数据开始不做历史迁移（YAGNI，老用户升级代价低）。`[from: 2026-07-03-recent-workspaces §requirements §7]`
 - 与 pi 的关系：不改 pi 侧任何东西（太极数据目录 `~/.taiji/` 与 pi `~/.pi/agent/` 完全隔离）；不清理 pi session 文件（太极独立持久化解耦对 pi session 扫描的依赖）。`[from: 2026-07-03-recent-workspaces §requirements §7]`
 
 **DEFERRED 到后续 Phase**：
-- SubAgent 拆分/Tab/任务树（P5）、RPC 桥接交互式通信（P6）、Overview 全局鸟瞰（P4）、Drawer 右侧面板（P5）、分屏模式（P4）
+- SubAgent 拆分/Tab/任务树（P5）、RPC 桥接交互式通信（P6）、Drawer 右侧面板（P5）、分屏模式（P4）
 - Plugin Phase 2+：完整 agentAPI、Pi 事件桥接、权限检查+Worker 沙箱、安装/卸载 UI、插件间通信隔离、热重载、脚手架 SDK

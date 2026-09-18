@@ -1,7 +1,6 @@
 export default {
   newTask: 'New task',
   search: 'Search',
-  overview: 'Overview',
   developer: 'Developer',
   settingsTitle: 'Settings',
   selectSessionHint: 'Select a session to view files',

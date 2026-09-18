@@ -20,7 +20,6 @@ const sidebarMocks = vi.hoisted(() => ({
   newSession: vi.fn(),
   focusedSessionId: { value: null },
   focusedSession: { value: null },
-  goOverview: vi.fn(),
   loadSessions: loadSessionsMock,
   syncSessionToPanel: vi.fn(),
 }))

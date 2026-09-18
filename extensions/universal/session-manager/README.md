@@ -8,11 +8,11 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 - 请求体为嵌套形状 `{ action, params }`（形状 SSOT 在 `@zhushanwen/extension-protocol`）；**不要扁平化展开**——runtime event-adapter 按 `data.params` 提取，扁平化会导致 params 丢失
 - 应答方是 taiji runtime 的 `SessionManagerHandler`（select value 通道回写 JSON 字符串；取消/超时返回 null）
 
-## 工具（6 个 action）
+## 工具（6 个工具，每工具 1 个 action）
 
 | 工具 | action | 说明 |
 |------|--------|------|
-| `create_managed_session` | create | 在指定 cwd 创建子 session（可选 label）；服务端注入 `spawnSource: 'agent'` 与父 session id，`.agent.json` sidecar 落盘供重启恢复 |
+| `create_managed_session` | create | 在指定 cwd 创建子 session（可选 label；可选 `prompt` 作初始 prompt，create+send 原子完成）；服务端注入 `spawnSource: 'agent'` 与父 session id，`.agent.json` sidecar 落盘供重启恢复 |
 | `send_to_session` | send | 向子 session 发送 prompt（异步处理） |
 | `read_session_history` | history | 读子 session 对话历史（可选 tailTurns 截尾部 N 个 turn） |
 | `list_my_sessions` | list | 列出本 agent 管理的 session（无过滤参数，自动限定发起方 agent） |
@@ -21,7 +21,13 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 
 ## 运行要求
 
-应答端（runtime handler）在 taiji 桌面应用内；独立 pi CLI 环境无 handler 时工具将等待至超时（create/history 60s、其余 30s）并返回 cancelled。
+应答端（runtime handler）在 taiji 桌面应用内；独立 pi CLI 环境无 handler 应答，工具会等待至超时（create/history 60s、其余 30s）后返回 isError 错误结果（文案 `cancelled or timed out`——pi 实装对取消与超时不可区分，见 protocol `callMarkerRpc`）。
+
+## 安装
+
+```bash
+pi install npm:@zhushanwen/pi-session-manager
+```
 
 ## 测试
 

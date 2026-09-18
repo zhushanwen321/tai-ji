@@ -2,7 +2,7 @@
  * focusedSessionId 派生测试 —— 单 panel 下 session 切换时 UI 焦点 session 跟随。
  *
  * split 功能移除（单 panel 化）后，focusedSessionId 直接读 layout.value.sessionId
- * （panel store 暴露的 focusedSessionId computed）。sidebar 高亮 / 文件树 / overview 均读
+ * （panel store 暴露的 focusedSessionId computed）。sidebar 高亮 / 文件树均读
  * focusedSessionId，不再读 session.activeId（activeId 收敛为导航语义）。
  *
  * 历史 bug 背景：此前 sidebar 高亮读 session.activeId，loadSession 只改 panel layout，

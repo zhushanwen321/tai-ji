@@ -7,7 +7,7 @@
  *   info('goal blocked', { sessionLabel: '修通知 · taiji' })
  *
  * ToastContainer 组件负责渲染，挂载点在 main-panel 内两分支：PanelContainer 的
- * main-area（chat 主区，右上角，不遮 drawer/composer）与 MainPanel（overview/settings
+ * main-area（chat 主区，右上角，不遮 drawer/composer）与 MainPanel（settings
  * view 兜底）。
  *
  * 在列上限（D7 S3-W4 限流与防毒化）：在列 toast 达到 UI_TOAST_LIMITS.MAX_IN_FLIGHT

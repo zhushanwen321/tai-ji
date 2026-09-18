@@ -1,6 +1,6 @@
 # scheduler
 
-定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）、强制触发（force）与过期策略（expires）。任务随 owner session 持久化，resume 后继续触发。
+定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。任务随 owner session 持久化，resume 后继续触发。
 
 ## 产品定位
 
@@ -49,7 +49,7 @@ session_start
 |----|---------|---------|
 | `upsert` | 创建 / 更新任务 | task 全快照（含 nextRunAt 初值、ownerSessionFile） |
 | `advance` | dispatch 成功后 | 推进后的 nextRunAt、本次执行 at / status |
-| `toggle` | 启用 / 停用 | enabled |
+| `toggle` | 启用 / 停用 | enabled（enable 时若重算了 nextRunAt 则随 op 一并携带，防 resume 回退到过期值） |
 | `delete` | 删除；once 触发后自动 delete | taskId |
 
 - fork 出的 session 重放时按 `ownerSessionFile` 过滤，不加载、不执行继承的任务副本（原 session resume 照常）
@@ -80,7 +80,7 @@ session_start
 - 单引号 `'...'` 或双引号 `"..."` 内的内容作为一个 token，引号字符本身被剥离
 - 含空格的多词参数（cron 表达式、prompt）**必须加引号**，否则会被拆成多个 token
 
-例如 cron 表达式 `0 9 * * 1-5` 含空格，必须写成 `'/schedule cron '0 9 * * 1-5' standup'`；prompt `check build` 同理写成 `'/schedule 5m 'check build''`。
+例如 cron 表达式 `0 9 * * 1-5` 含空格，必须写成 `/schedule cron '0 9 * * 1-5' standup`；prompt `check build` 同理写成 `/schedule 5m 'check build'`。引号只包住含空格的那个参数本身，不要在外层再套引号（嵌套引号会拆出错误 token，导致 Invalid schedule）。
 
 ### 子命令补全
 
@@ -99,7 +99,7 @@ session_start
 | `h` / `hr` / `hour` / `hours` | 时 | 3,600,000 ms |
 | `d` / `day` / `days` | 天 | 86,400,000 ms |
 
-例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败 → 创建任务报 `INVALID_SCHEDULE`。
+例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败 → 创建任务报 `Invalid schedule: "..."`。
 
 ### cron（时间点调度）
 
@@ -112,14 +112,13 @@ session_start
 
 ## 选项语义
 
-`schedule` tool 的 `kind` / `name` / `expires` / `force` 参数（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
+任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。下表为 `schedule` tool 的选项语义（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
 
 | 选项 | 取值 | 语义 |
 |------|------|------|
 | `kind` | `recurring`（默认）/ `once` | recurring 每次触发后按 schedule 重算下次时间；once 触发一次后自动删除 |
 | `name` | 字符串 | 任务可读名称，缺省从 prompt 自动生成（≤30 字原样，超长截前 27 字加省略号） |
 | `expires` | duration 字符串 / `never` | recurring 任务的过期时间：`now + duration`；`never` 永不过期；缺省 7 天。**once 任务忽略 expires 参数**（触发即删，传不传都不生效） |
-| `force` | `true` / `false`（默认） | `true` 时即使 agent 忙（非 idle 或有 pending 消息）也强制 dispatch；`false` 时忙则延迟到下次 tick |
 
 ## 示例
 
@@ -141,10 +140,10 @@ session_start
 /schedule cron '0 9 * * 1-5' standup
 ```
 
-**force 立即触发**（tool 调用：即使忙也执行）：
+**立即执行**（schedule_control tool 调用：马上 dispatch 现有任务）：
 
 ```json
-{"prompt": "deploy staging", "schedule": "*/10 * * * *", "force": true}
+{"action": "run", "id": "<task-id>"}
 ```
 
 **永不过期**（tool 调用：长期 recurring 任务不设 7 天默认过期）：
@@ -158,19 +157,19 @@ session_start
 | 限制/行为 | 值 | 说明 |
 |-----------|-----|------|
 | 任务上限 | **50**（`MAX_TASKS`） | 超过抛 `Task limit reached (50)`，需先删除任务 |
-| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/schedule run` 超限返回 `DISPATCH_SKIPPED`；tick 自动 dispatch 超限静默跳过 |
+| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/schedule run` 超限返回 not dispatched（disabled, rate-limited, or dispatch in flight）；tick 自动 dispatch 超限静默跳过 |
 | tick 间隔 | **30s**（`TICK_INTERVAL_MS`） | 到期任务在下一个 tick 被 dispatch；实际触发时间可能比计划晚最多 30s |
 | 默认过期 | **7 天**（`DEFAULT_EXPIRY_MS`） | recurring 任务缺省 `expires` 时；`expires: 'never'` 关闭 |
 | once 任务 | 触发后自动删除 | 不参与后续调度 |
 | cron 失效 | 任务停用 + `lastStatus=failed` + `lastError='cron expression invalid'` | 不会用 `now()` 兜底导致每 tick 重触发死循环 |
-| 忙时 dispatch | 非 force 任务经 session delivery 内核 park 模式：忙时消息入队等待（等 agent 空闲的 settled 边沿 / 下个 tick flush 投递），不丢弃 | force=true 绕过内核队列直投 |
+| 忙时 dispatch | steer 直投（scheduler-steer-direct-dispatch） | busy 时消息插入当前 turn、idle 时开新 turn（`{deliverAs:'steer', triggerTurn:true}`），受理即记账不排队；同任务 in-flight 守卫防双投 |
 | history | 保留最近 **20** 条执行记录 | 超出丢弃最旧；重放折叠时同样裁剪 |
 | 持久化 | custom entry append 到 session JSONL（dispatch 成功后立即 append advance 记录执行） | 任务随 owner session 持久化，resume 后重放恢复，无需额外写盘 |
 | 交付语义 | **at-least-once**（至少一次） | dispatch 成功后内存更新 nextRunAt 并 append advance；append 之前若进程崩溃可能重复注入一次（无精确一次保证，可接受） |
 | 延迟写入窗口 | 新 session 首 turn 内建任务后进程崩溃可能丢失 | pi 延迟写入：首条 assistant 消息前不 flush。窗口窄、概率极低、无恢复手段 |
 | 触发条件 | pi 进程需存活且 session 打开 | 电脑睡眠 / pi 进程未运行 = 不触发（非系统 cron，无后台守护） |
 
-错误语义：创建时 schedule 解析失败 → `INVALID_SCHEDULE`；`run`/`toggle`/`delete` 引用不存在的 id → `TASK_NOT_FOUND`；`run` 时任务 disabled / rate-limited / 同任务已在投递队列（TTL 窗口内）→ `DISPATCH_SKIPPED`（message 含 `disabled, rate-limited, or already queued for delivery`）。
+错误语义（失败经 message 文案 / tool throw 承载，无错误码）：创建时 schedule 解析失败 → `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`
 
 ## 数据存储位置
 
@@ -187,7 +186,7 @@ custom entry 物理追加到 JSONL，不修改、不删除——pi 依赖 JSONL 
 - `toggle` → 切换 enabled
 - `delete` → 该任务标记消失（once 触发后自动 delete，重放即不见）
 
-末态 = per taskId 最后一个非 delete op 的结果。
+末态 = per taskId 全序列折叠的结果：最后一次 delete 之后若无后续 upsert 则任务不存在；advance / toggle 为增量 op，叠加在其 upsert 快照之上。
 
 ### 不进入 LLM context
 
@@ -199,14 +198,14 @@ pi 的 context 构建对 custom entry 无 case（被过滤）——任务数据�
 
 ### 旧版迁移
 
-升级前任务存在 cwd 共享的旧 store（`~/.pi/agent/scheduler/<cwd>/scheduler.json`）。升级后首个检测到旧文件的 session 原子 `rename` 为 `scheduler.json.imported`，逐任务 appendEntry upsert 到自己的 JSONL，然后删除 `.imported`（⚠️ 删除时机依赖 flush：resumed session 已落盘可立即删；新 session（pi 延迟写入，entries 仅内存）延迟到首个 `turn_end`（该轮 message_end 已全部持久化，flush 必已发生）确认 flush 后删，`session_shutdown` 兜底；未 flush 保留 `.imported` 供崩溃恢复重导入，避免源文件销毁 + 数据未落盘的双重丢失）：
+升级前任务存在 cwd 共享的旧 store（`~/.pi/agent/scheduler/` 下按 cwd 路径展开的 `scheduler.json`；导入时同时探测 `getAgentDir()` 下的同形路径）。升级后首个检测到旧文件的 session 原子 `rename` 为 `scheduler.json.imported`，逐任务 appendEntry upsert 到自己的 JSONL，然后删除 `.imported`（⚠️ 删除时机依赖 flush：resumed session 已落盘可立即删；新 session（pi 延迟写入，entries 仅内存）延迟到首个 `turn_end`（该轮 message_end 已全部持久化，flush 必已发生）确认 flush 后删，`session_shutdown` 兜底；未 flush 保留 `.imported` 供崩溃恢复重导入，避免源文件销毁 + 数据未落盘的双重丢失）：
 
 - **归属**：旧任务无 owner 信息，**归属首个完成导入的 session**（无更好近似）
 - **过期任务立即触发**：导入后若 nextRunAt 已过期，**首个 tick 立即 dispatch**（once 立即注入、recurring 补跑）
 
 ### entry 累积
 
-recurring 长期 session 的 scheduler entry 会持续累积（每次 dispatch append 一条 advance）。量级可控：约 100B/条，1h 任务运行一年约 8760 条 ≈ 876KB。且 custom entry 不进 LLM context，不影响 token / 模型上下文。**不做物理裁剪**（append-only 约束 + advance 是 nextRunAt 正确性的必要记录，不可省）。未来若成问题，方向是等 pi 提供 compaction hook，不是本 extension 自建裁剪。
+recurring 长期 session 的 scheduler entry 会持续累积（每次 dispatch append 一条 advance）。量级可控：约 250B/条，1h 任务运行一年约 8760 条 ≈ 2MB。且 custom entry 不进 LLM context，不影响 token / 模型上下文。**不做物理裁剪**（append-only 约束 + advance 是 nextRunAt 正确性的必要记录，不可省）。未来若成问题，方向是等 pi 提供 compaction hook，不是本 extension 自建裁剪。
 
 ## 依赖的 pi 行为清单
 
@@ -214,7 +213,7 @@ recurring 长期 session 的 scheduler entry 会持续累积（每次 dispatch a
 
 1. **`pi.appendEntry` / `ctx.sessionManager.getEntries()` 存在且 custom entry 不进 LLM context**：custom entry 在 pi 的 context 构建（`sessionEntryToContextMessages`）中无 case，被 flatMap 过滤，任务数据零污染对话上下文。若 pi 未来把 custom entry 纳入 context，会污染 token / 模型输入
 2. **fork（`forkFrom`）全文件复制 custom entry**：forkFrom 是全文件复制（含被放弃分支的 entries，无 fork 点概念），不是 fork 点路径复制。本扩展靠 owner 过滤兜底两条复制路径。若 pi 改为按分支选择性复制，fork 隔离逻辑需重新评估
-3. **`getEntries()` 返回全量 entries（不按当前分支过滤）**：实测 `getEntries()` 返回全部 fileEntries（session-manager.js:980-982），navigate 只改 leafId 指针不改 entries。因此任务不随 navigate 消失。若 pi 改为按 leafId / 分支过滤 getEntries，切换分支会导致任务丢失
+3. **`getEntries()` 返回全量 entries（不按当前分支过滤）**：实测 `getEntries()` 返回全部 fileEntries（session-manager.js:982-984），navigate 只改 leafId 指针不改 entries。因此任务不随 navigate 消失。若 pi 改为按 leafId / 分支过滤 getEntries，切换分支会导致任务丢失
 4. **navigate / 切换分支不改任务 entries**：navigate 只移动 leafId 指针，不增删 custom entry，任务 entries 跨分支稳定存在。若 pi 未来在 navigate 时裁剪 entries，任务持久性会破坏
 
 任一条行为变更都需重新验证 design 的 D1 / D2 断言与验收场景（尤其 resume、fork 场景）。

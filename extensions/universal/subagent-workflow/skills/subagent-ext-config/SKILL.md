@@ -16,8 +16,8 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 | 环境 | 路径 |
 |------|------|
 | 独立 pi CLI | `~/.pi/agent/subagents/config.json` |
-| taiji dev | `~/.taiji-dev/pi/agent/subagents/config.json` |
-| taiji prod | `~/.taiji/pi/agent/subagents/config.json` |
+| taiji dev | `~/.taiji-dev/agent/subagents/config.json` |
+| taiji prod | `~/.taiji/agent/subagents/config.json` |
 
 **动态推导（推荐）**：agentDir 由 pi 核心 `getAgentDir()` 决定（读 `PI_CODING_AGENT_DIR`，默认 `~/.pi/agent`）；taiji 通过 `TAIJI_AGENT_DATA_DIR` 隔离数据目录。排查时先查这两个 env 变量组合出实际路径（`<agentDir>/subagents/config.json`），不要假设单一环境——写错环境的配置文件改了也不生效。
 

@@ -31,7 +31,6 @@ const sidebarMocks = vi.hoisted(() => ({
   newSession: vi.fn(),
   focusedSessionId: { value: null },
   focusedSession: { value: null },
-  goOverview: vi.fn(),
   loadSessions: vi.fn(() => Promise.resolve()),
   syncSessionToPanel: vi.fn(),
 }))

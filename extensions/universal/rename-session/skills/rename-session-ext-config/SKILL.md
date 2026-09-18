@@ -11,7 +11,7 @@ description: "配置 @zhushanwen/pi-rename-session（会话自动重命名）时
 
 `<agentDir>/config/rename-session-ext-config.json`
 
-- `<agentDir>` = pi agent 目录（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境为 `~/.taiji/pi/agent`）
+- `<agentDir>` = pi agent 目录（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境为 `~/.taiji/agent`）
 - 走 llm-shared 泛型 config（config/ 子目录 + getAgentDir 派生 + mtime+size 缓存 + 原子写）
 - 文件缺失/坏 JSON 返回默认值，不抛错
 

@@ -7,7 +7,7 @@
  */
 /** 导航历史栈条目（plan-frontend §4） */
 export type NavEntry = {
-  view: 'chat' | 'overview' | 'settings'
+  view: 'chat' | 'settings'
   sessionId?: string
   activeTab?: string
 }

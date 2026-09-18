@@ -17,7 +17,7 @@
 
 ## 术语/拓扑定义
 
-v3 UI 结构术语（Sidebar / Workspace / Panel / Overview / L0-L4 拓扑）的现行载体：[docs/CONTEXT.md](../../CONTEXT.md)「v3 UI 结构术语」章节。
+v3 UI 结构术语（Sidebar / Workspace / Panel / L0-L4 拓扑）的现行载体：[docs/CONTEXT.md](../../CONTEXT.md)「v3 UI 结构术语」章节。
 
 ## 视觉设计权威
 

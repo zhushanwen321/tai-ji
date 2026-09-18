@@ -2,7 +2,6 @@
   <!--
     容器组件 · L1 Sidebar（sidebar/spec.md 四态）。
     分层（自上而下）：Brand → 主操作 nav（新建 ⌘N / 导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Plugins）→ 子视图区 → 用户区。
-    注：v6 D14 nav 重构移除 Overview 入口按钮，go-overview 仅经 SearchModal 命令面板可达（useAppCommands 注册）。
     折叠态 C：整体隐藏（width:0 + opacity:0），spec §收起态。
     File View 内容 G2-003 defer。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：Agents（子代理列表）/ Flows（工作流列表 +
@@ -110,7 +109,7 @@
             v-if="focusedSessionId"
             :session-id="focusedSessionId"
           />
-          <!-- 无焦点 session 时（Overview 态）空态占位，与 files tab 同范式 -->
+          <!-- 无焦点 session 时空态占位，与 files tab 同范式 -->
           <div
             v-else
             class="flex flex-col items-center justify-center gap-2 py-10 text-center"
@@ -127,7 +126,7 @@
             :session-label="currentSession?.label"
             :branch="currentSession?.gitBranch"
           />
-          <!-- 无 active session（如 Overview 态）→ 文件视图空态占位 -->
+          <!-- 无 active session（无聚焦态）→ 文件视图空态占位 -->
           <div
             v-else
             class="flex flex-col items-center justify-center gap-2 py-10 text-center"
@@ -217,7 +216,7 @@ const session = useSessionStore()
 const sidebar = useSidebarStore()
 const { error: toastError } = useToast()
 const openSettings = inject<() => void>('openSettings', () => {})
-const { selectSession, restoreSession, newSession, goOverview, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
+const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
 const piVersion = ref('')
 const versionLabel = computed(() => piVersion.value ? `v${__APP_VERSION__} · pi v${piVersion.value}` : `v${__APP_VERSION__}`)
 const renameOpen = ref(false)
@@ -231,7 +230,7 @@ function onSessionImported(payload: ImportSessionImportedPayload): void {
 const { sessionCount, fileCount } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
-const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, goOverview, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
+const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
 // [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以
 // v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是

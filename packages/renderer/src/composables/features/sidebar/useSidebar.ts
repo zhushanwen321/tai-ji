@@ -301,11 +301,6 @@ export function useSidebar() {
     sessionStore.updateProjectId(sessionId, projectId)
   }
 
-  /** 进入 Overview：push view:'overview'（ADR-0023，sidebar 持久，main 被覆盖） */
-  function goOverview(): void {
-    navigation.push({ view: 'overview' })
-  }
-
   /** 切换折叠态（C）。展开/折叠 toggle，spec §收起态。 */
   function toggleCollapse(): void {
     sidebar.collapsed = !sidebar.collapsed
@@ -323,7 +318,6 @@ export function useSidebar() {
     try {
       registerAppCommands({
         newSession: () => { void newSession() },
-        goOverview,
       })
       // D14（2026-08-04）：project 列表迁 runtime 持久化。init 必须在 newSession 之前——
       // createSessionFlow 读 activeProjectId 做归属透传，未 init 时 active 是默认项目（归属丢失）。
@@ -393,7 +387,6 @@ export function useSidebar() {
     restoreSession,
     newSession,
     retryHistory,
-    goOverview,
     loadSessions,
     initApp,
     onConnected,

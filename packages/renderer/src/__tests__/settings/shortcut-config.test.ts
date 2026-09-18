@@ -44,22 +44,17 @@ describe('U12: 快捷键配置（降级只读展示）', () => {
 
     registerAppCommands({
       newSession: vi.fn(),
-      goOverview: vi.fn(),
     })
 
     const cmds = appCmdsMock.registerApp.mock.calls[0]![0] as Array<{ id: string; shortcut?: string }>
     const newSession = cmds.find((c) => c.id === 'new-session')
     const toggleSidebar = cmds.find((c) => c.id === 'toggle-sidebar')
-    const goOverview = cmds.find((c) => c.id === 'go-overview')
 
     expect(newSession).toBeDefined()
     // shortcut 格式随平台变化（Mac=⌘N，其他=Ctrl+N），断言包含主键即可
     expect(newSession?.shortcut).toContain('N')
     expect(toggleSidebar).toBeDefined()
     expect(toggleSidebar?.shortcut).toContain('B')
-    expect(goOverview).toBeDefined()
-    // go-overview 无快捷键（只注册命令）
-    expect(goOverview?.shortcut).toBeUndefined()
 
     // sidebarStore 被使用（toggleCollapsed 绑定），不报错即说明注册成功
     expect(sidebarStore).toBeDefined()
@@ -67,5 +62,5 @@ describe('U12: 快捷键配置（降级只读展示）', () => {
 
   // （原用例 2「appCommands 可被 SystemPage 筛选展示」已删：在测试内复刻 SystemPage 的
   //  filter 白名单再 filter——断言的是测试自己写的 filter，实现改坏时不红，恒真风险；
-  //  原用例 3 i18n 文案断言与 settings-i18n.test.ts 重复，go-overview 增量已并入该文件。）
+  //  原用例 3 i18n 文案断言与 settings-i18n.test.ts 重复。）
 })

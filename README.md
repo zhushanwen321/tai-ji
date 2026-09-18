@@ -1,18 +1,24 @@
-<p align="center"><img src="docs/assets/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
+<p align="center"><img src="docs/assets/logo/assets/qianwen/logo-square.png" width="96" alt="TaiJi logo" /></p>
 
-# 太极 TaiJi
+<h1 align="center">太极 TaiJi</h1>
 
-[简体中文](README.md) ｜ [English](README_EN.md)
+<p align="center"><strong>面向长时间、多任务协作的 AI Agent 桌面工作台</strong></p>
 
-AI Agent 桌面工作台（macOS / Windows / Linux），基于 Electron + Vue 3 + Node.js Runtime 架构。
+<p align="center">
+  <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
+</p>
 
-通过 [pi](https://github.com/badlogic/pi-mono)（npm 包名 `@earendil-works/pi-coding-agent`）的子进程 RPC 协议与各类 AI Agent 通信，提供多 session 管理、双 Panel split view、subagent/workflow 编排、目标驱动自治循环、定时调度等能力，面向长时间、多任务的 Agent 协作场景。18 个 Agent 扩展随应用打包内置，开箱即用。
+太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 18 个扩展，支持接入各类模型服务。
+
+<p align="center">
+  <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面：侧栏多会话管理与 Agent 对话流，思考、工具调用、文件编辑实时可见" width="900" />
+</p>
 
 > 开发约定、关键规则与调试纪律见 [AGENTS.md](AGENTS.md)。
 
 ## 安装
 
-当前最新版本：**v0.10.0**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
+当前最新版本：**v0.10.1**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
 
 <!-- INSTALL:BEGIN -->
 <!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外的版本号不会被打扰。 -->
@@ -24,15 +30,18 @@ AI Agent 桌面工作台（macOS / Windows / Linux），基于 Electron + Vue 3 
 #### macOS（Apple Silicon）
 
 ```bash
+# 下载并打开 DMG（也可到 Releases 页用浏览器下载 dmg，双击安装）
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
-```
 
-也可直接到 [GitCode Releases](https://gitcode.com/qq_18433817/tai-ji/releases) 用浏览器下载 dmg 双击安装。
+# 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
+# xattr -cr /Applications/TaiJi.app
+```
 
 #### Linux
 
 ```bash
+# 下载、赋可执行权限并启动 AppImage
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -40,16 +49,12 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0
 
 #### Windows
 
-PowerShell（用 Invoke-WebRequest，避免 curl 在 PowerShell 是别名导致的参数冲突）：
-
 ```powershell
+# PowerShell（推荐；避免 curl 在 PowerShell 是别名导致的参数冲突）
 Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
-```
 
-命令提示符（cmd.exe，需系统自带 curl.exe，Win10 1803+ 默认含）：
-
-```cmd
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
+# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### 国外下载（GitHub）
@@ -59,13 +64,18 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0
 #### macOS（Apple Silicon）
 
 ```bash
+# 下载并打开 DMG
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
+
+# 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
+# xattr -cr /Applications/TaiJi.app
 ```
 
 #### Linux
 
 ```bash
+# 下载、赋可执行权限并启动 AppImage
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -73,135 +83,75 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-
 
 #### Windows
 
-PowerShell：
-
 ```powershell
+# PowerShell
 Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+
+# 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
+# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
-
-命令提示符（cmd.exe）：
-
-```cmd
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
-```
-
-> macOS 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
->
-> ```bash
-> xattr -cr /Applications/TaiJi.app
-> ```
 
 <!-- INSTALL:END -->
 
 ---
 
-## 核心能力
+## 它能做什么
 
-### 会话与工作台
+### Agent 执行
 
-- **多 session 管理** — 侧栏会话列表，⌘/Ctrl+N 新建；session 树状分支（fork / clone）为 pi 原生能力，可从任意 assistant 消息分叉（⌘/Ctrl+G fork、⌘/Ctrl+⇧+G fork 模式、⌘/Ctrl+J handoff）
-- **双 Panel split view** — 单 Panel 为默认态，打开第二个 session 即分屏；支持 focus mode 聚焦当前会话
-- **Overview** — 独立的多会话鸟瞰视图（卡片网格 + 筛选 + 后台 agent 聚合）
-- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话前进后退、⌘/Ctrl+⇧+P 预设切换；快捷键均可在设置中重录
+- **并行 Subagent**：把独立任务派给多个子 agent 同时跑，主对话只留结论。输入框上方的任务托盘汇总运行中的子任务，点开可在抽屉查看它的完整对话和产出。每个子任务带预算与轮次上限，超出即停。
+- **Workflow 编排**：用 chain、parallel 等模板把多个 subagent 组成有状态工作流，上游输出自动传给下游，中断后可从断点恢复。任务托盘实时显示每个节点的状态。
+- **Todo 与 Goal**：Agent 会把任务拆成 todo 清单逐项完成；需要长时间运行的目标走 goal 模式，先定验收标准和预算，达成后自动收尾。
+- **定时任务**：Agent 可以创建 cron 或 interval 定时任务，到点自动唤醒会话执行，适合定时提醒、周期巡检、定时跑批。任务支持暂停、删除和手动触发一次。
+- **上下文管理**：会话变长时 Agent 可以自主压缩上下文（同模型生成摘要，尽量命中前缀缓存），接近阈值会主动提醒。输入框旁悬停即可查看当前上下文占用。
+- **会话操作**：⌘G 从最近的回复分叉出新会话，⌘J 把当前上下文交接给新会话，⌘I 导入已有会话。输入框支持 / 命令、# 引用会话、$ 引用文件、@ 派 subagent。所有会话以 JSONL 格式落盘，点击标题栏文件名即复制路径，pi 生态工具可以直接读取。
 
-### 对话流
+### 执行过程可见
 
-- **流式渲染** — markdown 增量渲染、回合折叠、thinking 展开收起
-- **GUI Widget 面板** — todo / goal 等以独立 widget 面板呈现，带统一 meta 头行（标题、状态点、进度 N/M、迷你进度条），Agent 侧状态与展示层单通道同步
-- **结构化交互** — ask-user 多问题结构化输入（分栏预览 + 内联编辑）、JSON Schema 校验的结构化输出
+- **实时对话流**：思考、工具调用、文件编辑逐步流出；每轮结束折叠成一行摘要（耗时、思考与工具次数），点开可查看完整过程。
+- **Trace 视图**：以台账形式列出会话的全部执行记录，支持按类型筛选和全文搜索，也可以只看上下文边界，检查压缩发生在哪里、哪些内容进入了上下文。
+- **任务状态条**：todo 和 goal 的进度以状态条形式固定显示在对话流中。
+- **结构化问答**：Agent 需要确认时弹出表单，可以包含多个问题、选项和自由输入，答案按结构回传给 Agent。
+- **后台任务**：耗时较长的命令可以转到后台执行，结束后自动通知并继续处理；抽屉中有专门页面集中查看输出。
 
-### 文件 / 终端 / Git
+### 工作台
 
-- **文件树** — 虚拟化渲染（扁平可见行），大仓库下保持流畅；文件状态角标与行数统计
-- **终端** — 命令式缓冲区渲染，版本化重放，会话级持久分区
-- **Git** — 分支与变更状态展示，worktree 创建/切换/清理
+- **文件树**：侧栏文件面板，大目录下依然流畅，改动过的文件带 git 标记。
+- **终端**：抽屉内置终端，每个会话独立保留现场。
+- **Git 与 worktree**：查看当前分支和文件变更；支持创建、切换、清理 worktree，让多个任务在不同目录并行进行。
+- **浏览器面板**：抽屉内置浏览器，可以直接查看 Agent 操作网页的过程。
 
-### 内置扩展（18 个，随应用打包）
+### 设置与控制
+
+- **系统提示词**：在设置中整段替换 Agent 的系统提示词，手动保存，修改前自动快照，可随时还原或恢复默认。
+- **工具权限**：在输入框旁切换工具权限档位，从只读到全工具。
+- **模型接入**：内置常用 provider 目录，填写 API key 即可使用；模型和思考档位在输入框旁切换，各 provider 的配额可在设置中查看。
+- **设置中心**：包含 Provider、外观、技能、Agent、扩展、System Prompt、终端、预设、worktree、更新、系统、用量 12 个分区。
+- **自动更新**：自动检测新版本，确认后重启升级。
+## pi 扩展
+
+taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个随应用打包内置，开箱即用。以下 16 个扩展功能自足、可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
 
 | 扩展 | 用途 |
 |------|------|
-| `pi-permission` | 四档权限模式（yolo / auto / approve / strict）+ 三层审批管道 |
-| `pi-subagent-workflow` | 统一 subagent 执行 + 多 agent workflow 编排（parallel / chain 等有状态工作流） |
-| `pi-goal` | `/goal` 持久目标驱动自治循环，证据验收 |
-| `pi-todo` | AI 驱动的 todo 列表（会话持久化 + `/todos`） |
-| `pi-ask-user` | 结构化多问题输入工具 |
-| `pi-structured-output` | 结构化输出（JSON Schema + Ajv 校验） |
-| `pi-scheduler` | 定时任务调度（cron / interval，once / recurring） |
-| `pi-session-reader` | 读取 / 查询 session 历史（树、家族、执行树、搜索、导出） |
-| `pi-rename-session` | 首轮对话后自动生成会话标题 |
-| `pi-pending-notifications` | 跨扩展异步操作注册 / 查询（长任务期间防消息注入） |
-| `pi-agent-ext` | 内部命令（host 触发 reload `/__taiji_reload__` + Trace 视图现取 system prompt `/__taiji_get_system_prompt__`） |
-| `pi-system-prompt` | 系统提示词注入（AGENTS.md / settings 追加段） |
-| `pi-msg-id-mapper` | client UUID ↔ user entry ID 映射 |
-| `pi-system-prompt-trace` | system prompt 建立或变化时写入 taiji:system-prompt 留痕 entry |
-| `pi-smart-context` | Agent 自决上下文压缩（compact_context 工具 + 双模式摘要接管 + 分档提醒） |
-| `pi-session-manager` | Agent 托管子会话（创建 / 发送 / 历史 / 状态 / 列表 / 中止） |
-| `pi-base-tool-enhance` | bash 工具增强（前台委托 pi 官方工厂 + 后台模式 + 工具错误审计） |
-| `pi-plugin-bridge` | 插件系统桥（plugin 工具注册进 pi + 事件 / 拦截经 marker 通道中转） |
+| [`pi-subagent-workflow`](extensions/universal/subagent-workflow/README.md) | 统一 subagent 执行 + 多 agent workflow 编排（parallel / chain 等有状态工作流） |
+| [`pi-goal`](extensions/universal/goal/README.md) | `/goal` 持久目标驱动自治循环，证据验收 |
+| [`pi-todo`](extensions/universal/todo/README.md) | AI 驱动的 todo 列表（会话持久化 + `/todos`） |
+| [`pi-ask-user`](extensions/universal/ask-user/README.md) | 结构化多问题输入（分栏预览 + 内联编辑） |
+| [`pi-permission`](extensions/universal/permission/README.md) | 四档权限模式（yolo / auto / approve / strict）+ 三层判定管道（AST / 规则 / AI 分类） |
+| [`pi-scheduler`](extensions/universal/scheduler/README.md) | 定时任务调度（cron / interval，once / recurring） |
+| [`pi-session-reader`](extensions/universal/session-reader/README.md) | 读取 / 查询 session 历史（树、家族、执行树、搜索、导出） |
+| [`pi-session-manager`](extensions/universal/session-manager/README.md) | Agent 托管子会话（创建 / 发送 / 历史 / 状态 / 列表 / 中止） |
+| [`pi-rename-session`](extensions/universal/rename-session/README.md) | 首轮对话后自动生成会话标题 |
+| [`pi-smart-context`](extensions/universal/smart-context/README.md) | Agent 自决上下文压缩（compact_context 工具 + 双模式摘要接管 + 分档提醒） |
+| [`pi-structured-output`](extensions/universal/structured-output/README.md) | 结构化输出（JSON Schema + Ajv 校验） |
+| [`pi-pending-notifications`](extensions/universal/pending-notifications/README.md) | 跨扩展异步操作注册 / 查询（长任务期间防消息注入） |
+| [`pi-base-tool-enhance`](extensions/universal/base-tool-enhance/README.md) | bash 工具增强（前台委托 pi 官方工厂 + 后台模式 + 工具错误审计） |
+| [`pi-plan`](extensions/universal/plan/README.md) | 轻量 plan 模式 |
+| [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | 缓存前缀指纹采集 + 归因分析 |
+| [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner 实操指南 + `cw_query` 只读查询工具 |
 
-其中 8 个基础设级（`pi-pending-notifications` / `pi-session-reader` / `pi-structured-output` / `pi-agent-ext` / `pi-system-prompt` / `pi-msg-id-mapper` / `pi-base-tool-enhance` / `pi-plugin-bridge`）常驻不可禁用，其余 10 个可在设置中禁用。另有 `pi-cache-probe`（缓存前缀指纹采集 + 归因分析）、`pi-cw-tool`（cw 2.0 runner 实操指南 + cw_query 只读查询工具）、`pi-plan`（轻量 plan 模式）3 个包经 npm 发布，可按需安装。
-
-### 模型与设置
-
-- **Provider 管理** — 多 provider 配置、内置 provider 目录、API key 管理
-- **配额展示** — 各 provider / 模型的用量配额查询
-- **设置中心** — 全屏 overlay，覆盖 Provider / 扩展 / 技能 / 终端 / 预设 / worktree / 系统更新等 11 个菜单域
-- **自动更新** — 周期检测新版本，确认后重启升级；Release Notes 中英双语
-
-## 架构
-
-```
-┌──────────────────────────────────────────────────┐
-│                  Electron 主进程                   │
-│  窗口管理 · Runtime 子进程生命周期 · 全局快捷键   │
-└─────────────┬────────────────────┬────────────────┘
-              │ IPC                │ spawn
-              ▼                    ▼
-┌──────────────────┐   ┌──────────────────────────┐
-│   Preload 桥接    │   │   Runtime (Node.js 子进程) │
-│ electronAPI 暴露  │   │  WebSocket Server (ws)    │
-└────────┬─────────┘   │  pi RPC 适配 · 事件翻译    │
-         │             └────────────┬───────────────┘
-         │                          │ child_process RPC
-         ▼                          ▼
-┌──────────────────────────────────────────────────┐
-│        渲染进程 (Vue 3 + Vite · 太极纯灰暗色)      │
-│  Pinia 状态 · taiji ui 组件 · ws-client · event-bus │
-└──────────────────────────────────────────────────┘
-```
-
-五个核心模块：
-
-| 模块 | 路径 | 职责 |
-|------|------|------|
-| **主进程** | `apps/electron/main/` | BrowserWindow 生命周期、runtime spawn/stop、全局快捷键（supervisor / window / gateway 三编排子系统） |
-| **Preload** | `apps/electron/preload/` | `contextIsolation` 安全桥接，暴露 `window.electronAPI` |
-| **前端** | `packages/renderer/` | Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + @taiji/ui（太极纯灰暗色设计系统） |
-| **Runtime** | `packages/runtime/` | WebSocket 服务，三层架构（transport/services/infra），通过 pi RPC 协议与 Agent 通信 |
-| **共享类型** | `packages/shared/` | 前端与 runtime 间的 TypeScript 类型定义（pnpm workspace） |
-
-渲染进程有两条出口通道：**WS**（→ Runtime，业务/数据）与 **IPC**（→ Main，窗口/进程/OS 特权）。渲染进程不直接调 `window.electronAPI`，统一走 [`lib/ipc.ts`](packages/renderer/src/lib/ipc.ts) 门面。
-
-### 为什么是 Electron
-
-1. **渲染稳定性** — Chromium 的 CSS/布局渲染结果与 Chrome DevTools 完全一致，不存在 WebView2/WebKit 的平台差异
-2. **视觉锐利度** — 字体渲染、亚像素抗锯齿、GPU 合成行为完全可控，跨平台表现一致
-3. **生态成熟度** — electron-builder、DevTools 扩展、崩溃上报等工具链完善
-4. **Node.js 原生能力** — 主进程直接使用 Node API（child_process、fs、net），不需要 Rust 后端进程或 FFI
-
-### 双扩展机制
-
-太极有两套独立的扩展机制：
-
-**pi Extension** — 运行在 pi 子进程内，经 `--extension` 参数加载，负责 Agent 能力扩展（工具、命令、事件钩子）。源码在本仓 `extensions/` 目录（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个经 esbuild bundle 后随应用打包内置。开发文档：
-
-- [扩展开发指南](docs/extensions/development-guide.md) — 单一权威源：结构、生命周期、发布
-- [扩展强约束](docs/extensions/extension-conventions.md) — 必须遵守的约定
-- [本地开发调试](docs/extensions/local-dev-guide.md) — `TAIJI_EXTENSION_PATHS` live link、日志查看
-- [GUI 协议接入](docs/extensions/gui-protocol-guide.md) — TUI extension 的 TUI/GUI 双模改造
-- [术语表](docs/extensions/glossary.md) / [Agent 编写指南](docs/extensions/agent-authoring-guide.md)
-
-**Plugin System** — 运行在 taiji Runtime 侧的插件沙箱，负责 UI 与宿主能力扩展（tools、hooks、slash commands、status bar items、message decorations、settings 表单）。trusted 插件与 sandbox 插件两级隔离（Worker Thread / 独立 fork 子进程），单个插件崩溃不影响其他插件或主进程。开发用 [`packages/plugin-sdk`](packages/plugin-sdk/)（类型 + mock），脚手架 `create-taiji-plugin`。
+其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用，离开 taiji 宿主无功能。18 个内置扩展 = 上表 16 个中的 13 个 + 这 5 个；`pi-plan` / `pi-cache-probe` / `pi-cw-tool` 未内置，经 npm 安装或 `--extension` 加载。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
 ## 快速开始（开发）
 
@@ -240,7 +190,7 @@ pnpm build:e2e && pnpm test:e2e
 |------|------|--------|
 | `TAIJI_MOCK` | 设为 `1` 跳过 runtime 子进程启动，使用 Mock 数据 | — |
 | `VITE_MOCK` | 设为 `true` 在 ws-client 层拦截所有 WS 消息 | — |
-| `TAIJI_AGENT_DATA_DIR` | 自定义数据目录（dev 模式默认 `~/.taiji-dev`，与 pi 的 `~/.pi/agent/` 完全隔离） | `~/.taiji` |
+| `TAIJI_AGENT_DATA_DIR` | 自定义数据目录，与 pi 的 `~/.pi/agent/` 完全隔离（dev 模式强制 `~/.taiji-dev`，此变量不生效） | `~/.taiji` |
 
 ## 技术栈
 
@@ -257,31 +207,6 @@ pnpm build:e2e && pnpm test:e2e
 | 后端通信 | ws (WebSocket) + pi 子进程 RPC |
 | 打包 | electron-builder 26 |
 
-## 项目结构
-
-```
-├── apps/electron/            # Electron 壳
-│   ├── main/                 # 主进程（supervisor / window / gateway / shortcuts）
-│   └── preload/              # 安全桥接（electronAPI）
-├── packages/                 # pnpm workspace 包
-│   ├── renderer/             # Vue 前端（components / composables / stores / lib）
-│   ├── runtime/              # Node.js Runtime（transport / services / infra + plugins）
-│   ├── shared/               # 前后端共享类型
-│   ├── ui/                   # taiji ui 组件库（@taiji/ui）
-│   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation）
-│   ├── dom-core/             # composer DOM 层
-│   ├── mobile-renderer/      # 移动端渲染入口
-│   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
-│   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   └── create-taiji-plugin/    # 插件项目脚手架
-├── extensions/               # 21 个 @zhushanwen/pi-* pi 扩展源码 + shared/ 共享库
-├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
-├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
-├── resources/                # pi binary + 内置 statusline 插件
-├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
-└── .agents/                  # 项目级 agent / skill（merge / review 等）
-```
-
 ## 发布
 
 两条独立发布管线，通过 tag 前缀解耦：
@@ -289,7 +214,8 @@ pnpm build:e2e && pnpm test:e2e
 | 管线 | 产物 | 触发 tag | Workflow |
 |------|------|----------|----------|
 | Electron 打包 | DMG / EXE / AppImage / manifest | `v*` | `release.yml` |
-| npm 包发布 | `@zhushanwen/pi-*` + `@zhushanwen/extension-protocol` | `npm-*` | `release-npm.yml` |
+| npm 包发布 | `@zhushanwen/pi-*` 扩展 + 引擎 / SDK 包（`pi-rpc` / `subagent-core` / `subagent-engine-sdk` / `pi-subagent-cli` / `zcode-subagent-cli` / `session-delivery` / `extension-protocol`） | `npm-*` | `release-npm.yml` |
+| npm 预发布 | dev dist-tag 测试版 | `dev-npm-*` 分支 / 本地 `npm-prerelease.sh` | `release-npm-dev.yml` |
 
 ## 文档索引
 

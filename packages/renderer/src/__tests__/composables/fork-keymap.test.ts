@@ -34,7 +34,6 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
     loadSessions: vi.fn(),
     selectSession: vi.fn(),
     newSession: vi.fn(),
-    goOverview: vi.fn(),
     toggleCollapse: vi.fn(),
     syncSessionToPanel: vi.fn(),
     renameSession: vi.fn(),
@@ -47,7 +46,6 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({
     derivedStatus: vi.fn(() => 'idle'),
-    sessionDigest: vi.fn(() => ''),
     invalidateStatusCache: vi.fn(),
   }),
   invalidateStatusCache: vi.fn(),

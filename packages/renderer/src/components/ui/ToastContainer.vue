@@ -3,7 +3,7 @@
     定位契约：absolute 右上角锚定最近 positioned 祖先（非视口 fixed）——右上角避开 composer，
     锚在 chat 主区（main-area）内时 drawer 打开随主区收窄左移，恒不遮 drawer。
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
-    （overview/settings view 兜底）。
+    （settings view 兜底）。
   -->
   <TransitionGroup
     tag="div"

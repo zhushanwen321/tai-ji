@@ -5,7 +5,7 @@
  *   先于 panel.loadSession；hydrate 首次触发二次跳过；focusedSessionId 派生）
  * TC-2 deleteSession 代理 core（S3 hooks 调用 + wasActive 回退）
  * TC-3 loadSessions 双分支（成功填 groups / 失败 setListLoadError）
- * TC-4 返回签名对齐 useSidebar（含全字段 + toggleCollapse/goOverview 行为）
+ * TC-4 返回签名对齐 useSidebar（含全字段 + toggleCollapse 行为）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useSidebar.test.ts
  */
@@ -14,7 +14,6 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { SessionGroup, SessionSummary, SubagentRecord } from '@taiji/shared'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useSessionStore } from '@/stores/session'
-import { useNavigationStore } from '@/stores/navigation'
 import { useSubagentStore } from '@/stores/subagent'
 import { useChatStore } from '@/stores/chat'
 
@@ -249,12 +248,12 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     expect(useSessionStore().listLoadError).toBe('rpc down')
   })
 
-  it('TC-4 返回签名对齐 useSidebar（含全字段）+ toggleCollapse/goOverview 行为', () => {
+  it('TC-4 返回签名对齐 useSidebar（含全字段）+ toggleCollapse 行为', () => {
     const sidebar = useSidebar()
     const keys = Object.keys(sidebar)
     const expected = [
       'focusedSessionId', 'focusedSession', 'selectSession', 'newSession', 'retryHistory',
-      'goOverview', 'loadSessions', 'initApp', 'onConnected', 'toggleCollapse',
+      'loadSessions', 'initApp', 'onConnected', 'toggleCollapse',
       'syncSessionToPanel', 'renameSession', 'deleteSession', 'deleteFolder',
       'forkSession', 'forkSessionAsk', 'forkFromLastAssistant', 'enterForkModeFromLastAssistant',
       'handoff', 'abortHandoff', 'handoffFromLastAssistant', 'enterHandoffModeFromLastAssistant',
@@ -268,11 +267,6 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     const before = sidebarStore.collapsed
     sidebar.toggleCollapse()
     expect(sidebarStore.collapsed).toBe(!before)
-
-    // goOverview → navigation.push({view:'overview'})
-    const navigation = useNavigationStore()
-    sidebar.goOverview()
-    expect(navigation.current.view).toBe('overview')
   })
 
   it('TC-5 重连 onConnected 对聚焦 session 重拉 subagent/workflow（首连不拉；分区数据刷新用户可见）', async () => {

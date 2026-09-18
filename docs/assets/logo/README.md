@@ -10,9 +10,9 @@
 | 文件 | 用途 |
 |------|------|
 | `logo.svg` | 最终 logo（potrace 自动追踪 + 后处理，6 条 path） |
-| `logo.png` | logo.svg 渲染的位图版（根 README 门面图） |
-| `logo-square.svg` | 1:1 方版（app icon 用） |
-| `logo-square.png` | 方版 PNG（electron-builder icon 源） |
+| `logo.png` | logo.svg 渲染的位图版（竖向场景） |
+| `logo-square.svg` | 1:1 方版（矢量源） |
+| `logo-square.png` | 方版 PNG（根 README 门面图 + electron-builder icon 源） |
 
 ## 已落地产物
 

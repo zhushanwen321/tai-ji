@@ -13,7 +13,7 @@
  * - C-W3-3：FileChangeWatchPort（stale cache 防护端口化）已随 fileSearchStore 缓存退役
  *   整体删除（缓存治理 U1 1-3）——缓存不存在则失效编排失去对象。
  * - C-W3-4：recents localStorage → storage 端口（KVStorage async）。
- * - C-W3-5：AppCommandActionsPort 四项 action 全注入 + isMac 平台标志注入（D8 收编）。
+ * - C-W3-5：AppCommandActionsPort 三项 action 全注入 + isMac 平台标志注入（D8 收编）。
  */
 import type { FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../platform/port'
@@ -65,16 +65,14 @@ export interface SessionSelectPort {
 }
 
 /**
- * 应用命令 actions 端口（C-W3-5 四项全注入，打破循环 import 先例）。
+ * 应用命令 actions 端口（C-W3-5 三项全注入，打破循环 import 先例）。
  * 壳适配 renderer useSidebar/useSidebar initApp 注入：
  * - newSession：useSidebar().newSession（新建任务）
- * - goOverview：useSidebar().goOverview（进入概览）
  * - toggleSidebar：useSidebarStore().toggleCollapsed（原 useAppCommands 直调，收编端口）
  * - requestPresetOpen：usePresetStore().requestOpen（原 useAppCommands 直调，收编端口）
  */
 export interface AppCommandActionsPort {
   newSession(): void
-  goOverview(): void
   toggleSidebar(): void
   requestPresetOpen(): void
 }

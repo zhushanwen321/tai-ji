@@ -1,7 +1,7 @@
 /**
  * useAppCommands —— 应用内置命令注册（#2 D-004 命令注册表的应用命令区填充）。
  *
- * 职责：构建应用级命令列表（新建/收起侧栏/概览），注册到 commandStore.appCommands，
+ * 职责：构建应用级命令列表（新建/收起侧栏），注册到 commandStore.appCommands，
  * 供 core useCommandRegistry（packages/core/src/domain/new-task-search/command-registry.ts）聚合进搜索命令源
  * + core useSearchJump.confirmCommand（packages/core/src/domain/new-task-search/search-jump.ts）按 name 查找执行 action
  * （renderer 版同名 useCommandRegistry.ts / useSearchJump.ts 已随域迁移删除，2026-09-11）。
@@ -30,13 +30,11 @@ const t = i18n.global.t
 export interface AppCommandActions {
   /** 新建任务（useSidebar.newSession） */
   newSession: () => void
-  /** 进入概览（useSidebar.goOverview） */
-  goOverview: () => void
 }
 
 /**
  * 构建并注册应用内置命令。
- * @param actions newSession/goOverview（调用方 useSidebar.initApp 注入）
+ * @param actions newSession（调用方 useSidebar.initApp 注入）
  */
 export function registerAppCommands(actions: AppCommandActions): void {
   const sidebarStore = useSidebarStore()
@@ -69,7 +67,6 @@ export function registerAppCommands(actions: AppCommandActions): void {
   const appCommands: AppCommand[] = [
     { id: 'new-session', name: t('settings.command.new-session'), shortcut: resolveShortcut('new-session', 'n'), action: actions.newSession },
     { id: 'toggle-sidebar', name: t('settings.command.toggle-sidebar'), shortcut: resolveShortcut('toggle-sidebar', 'b'), action: () => sidebarStore.toggleCollapsed() },
-    { id: 'go-overview', name: t('settings.command.go-overview'), action: actions.goOverview },
     // FR-16：Cmd+Shift+P 打开预设选择 Popover
     { id: 'open-preset-select', name: t('settings.command.open-preset-select', '选择启动预设'), shortcut: resolveShortcut('open-preset-select', 'shift+p'), action: () => presetStore.requestOpen() },
   ]

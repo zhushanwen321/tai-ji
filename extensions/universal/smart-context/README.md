@@ -10,8 +10,8 @@
   - cross-model：调用 pi 原生 `compact()` 仅换模型与凭证——split-turn / fileOps / previousSummary 原生组装
 - **3 档阈值提醒**（默认 400K/500K/600K）：`agent_settled` 越档检查，每档一次、多档合并、压缩后重置，followUp 投递；措辞是数据投递不是指令
 - **排除模型**（精准 `provider/modelId` 匹配）：工具拒绝 + 不提醒 + 回落 pi 原生生成；切换跨界时注入一条可用性通知，downshift（切小窗模型将触线）时建议先压缩
-- **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示
-- **subagent 进程**自动静默（`PI_SUBAGENT_ROOT_SESSION_ID` 标记）
+- **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断（本 session 内停止接管）、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示（累计压缩 ≥2 次后附加）
+- **subagent 进程**自动静默（`TAIJI_AGENT_SUBAGENT` 标记）
 
 ## 行为门控
 
@@ -23,7 +23,13 @@
 | compactModel 未配置/无效 | 放行（same-model 不依赖该配置） | 生效 | same-model 生效；cross-model 回退当前模型，压缩不失败 |
 | 模型切换跨界（model_select） | 常驻不变 | 注入一条可用性变化通知（仅跨界时） | 按新模型即时重判 |
 
-行为正确性由 execute / handler 现场校验兜底，每次事件回调重新读配置（热加载，改完下一 turn 生效，无需重启）。
+行为正确性由 execute / handler 现场校验兜底，每次事件回调重新读配置（热加载，改完下一次压缩 / 提醒 / 工具调用即生效，无需重启）。
+
+## 安装
+
+```bash
+pi install npm:@zhushanwen/pi-smart-context
+```
 
 ## 配置
 

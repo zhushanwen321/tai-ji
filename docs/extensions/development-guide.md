@@ -828,7 +828,7 @@ export function setHub(hub: Hub): void {
 **[规范]** 配置路径的权威约定见 [extension-conventions.md「配置路径约定 [强制]」](./extension-conventions.md#配置路径约定强制)，要点：
 
 - 统一放 `<agentDir>/config/`，文件名 `<extension简名>-ext-config.json`；
-- `<agentDir>` = pi 的 `getAgentDir()`（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境 `~/.taiji/pi/agent`）；
+- `<agentDir>` = pi 的 `getAgentDir()`（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境 `~/.taiji/agent`）；
 - 路径必须经 `@zhushanwen/pi-llm-shared` 的 `getConfigPath(pkgName)` 生成，调用方不自拼文件名，禁止语义名/无后缀简写/`<名>-config.json` 变体。
 
 ### 8.2 加载模式 🔵

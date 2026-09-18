@@ -9,7 +9,7 @@
 | `logo.svg` | **最终 logo** (矢量, 竖向 0.7:1)，双鱼太极，6 条 potrace path |
 | `logo.png` | **logo.svg 渲染的位图版本** (857x1224)，用于 Markdown/竖向场景 |
 | `logo-square.svg` | **正方形版 logo** (矢量, 1:1)，用外层 g 缩放+居中，几何与 v1 一致 |
-| `logo-square.png` | **正方形版 PNG** (1200x1200)，用于 App icon / favicon / 头像 |
+| `logo-square.png` | **正方形版 PNG** (1200x1200)，主体居中，用于根 README 门面图 / App icon / favicon / 头像 |
 
 ## 使用方法
 

@@ -12,11 +12,11 @@
  *   providePlatform 之后——AppShell 时序保证）
  * - storage：getPlatform().storage（recents 持久化，C-W3-4）
  * - fileTree：fileTreeStore.selectFile + useFileTree().loadTree（FileTreePort）
- * - appCommandActions：newSession/goOverview（壳传入）+ toggleSidebar（useSidebarStore）
+ * - appCommandActions：newSession（壳传入）+ toggleSidebar（useSidebarStore）
  *   + requestPresetOpen（usePresetStore）（C-W3-5）
  *
- * 参数注入（与 useAppCommands 的 actions 注入破环同模式）：selectSession/newSession/
- * goOverview 是 useSidebar 实例方法（Sidebar 已实例化），由调用方传入避免重复实例化。
+ * 参数注入（与 useAppCommands 的 actions 注入破环同模式）：selectSession/newSession
+ * 是 useSidebar 实例方法（Sidebar 已实例化），由调用方传入避免重复实例化。
  */
 import { getPlatform } from '@taiji/core'
 import type { SearchDeps } from '@taiji/core'
@@ -36,7 +36,6 @@ import i18n from '@/i18n'
 export interface SearchModalShellDeps {
   selectSession: (id: string) => Promise<void>
   newSession: () => void
-  goOverview: () => void
 }
 
 export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
@@ -70,7 +69,6 @@ export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
     },
     appCommandActions: {
       newSession: shell.newSession,
-      goOverview: shell.goOverview,
       toggleSidebar: () => sidebarStore.toggleCollapsed(),
       requestPresetOpen: () => presetStore.requestOpen(),
     },

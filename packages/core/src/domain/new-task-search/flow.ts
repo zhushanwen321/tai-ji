@@ -225,7 +225,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    *
    * 终态时序（D3 交接原子化）：交接三步（setActiveSession + loadPanel + pushChat）完成
    * 即 transition('completed')，早于 send——send 成败属于 session 的错误通道（useChat
-   * W2 吞错 toast），与 flow 状态机无关（设计 panel-view-derivation-and-flow-lifecycle.md §3.3 D3）。
+   * W2 吞错 toast），与 flow 状态机无关（设计 D3 裁决）。
    *
    * bash 首发（composer-bash-execute）：landing 态输入 !/!! 前缀时，Composer 提取 bashCommand
    * 传入，session 创建 + panel 载入流程不变，仅发送阶段改调 chat.sendBash（不走 LLM turn，
@@ -357,7 +357,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 「流程状态机只守自己不变量」的正确语义。send 成败属于 session 的错误通道（useChat
    * W2 内部吞错只 toast），与 flow 状态机无关，flow 终态不应依赖它——send 链路未来任何
    * 演化（恢复 throw、新增前置抛错点）都不再影响 flow 终态（时序正确性 + 防御加固，
-   * 设计 panel-view-derivation-and-flow-lifecycle.md §3.3 D3）。
+   * 设计 D3 裁决）。
    */
   async function handoverAndSend(
     newSid: string,

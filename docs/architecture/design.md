@@ -143,7 +143,7 @@ Session 级消息必须按 `sessionId` 路由到 session 通道，无 `sessionId
 
 ## D7. 命名债 ✅ 已执行完毕
 
-sidecar→runtime、Pane→Panel、SystemChatMessage→SystemNotification、Drawer→SideInspector、Overview→PanelGrid 等改名已完成（术语现状见 [context.md](context.md)）。原则保留：命名债是认知信号，「挪目录」须同时「正注释」，否则只换皮不治本。
+sidecar→runtime、Pane→Panel、SystemChatMessage→SystemNotification、Drawer→SideInspector 等改名已完成（术语现状见 [context.md](context.md)）。原则保留：命名债是认知信号，「挪目录」须同时「正注释」，否则只换皮不治本。
 
 ---
 
