@@ -10,6 +10,10 @@
  * - schedule-create 确认等待期 turn 活跃 → 警示条不渲染（TurnProgressBar 豁免经 store getter
  *   扩义联动，消费方 ②；漏接则等待超 10min 被误挂超时警示 + abort 入口）
  * - submit/cancel 经 respond/cancel 回传 select 通道
+ * - 排队接管序列（P-INLINE DOM 层）：同 session 先后到达 ask-user 与 schedule-create →
+ *   先到者挂载 → respond/cancel 出队 → 后到者接管挂载（两方向各一）
+ * - cron 预览与提交解耦：前端解析子集（支持 5/6 段 + 周域英文名）解析失败仅非阻塞警示，
+ *   不拦合法草稿提交（G1 预填草稿可直接确认；once 未选时刻仍拦 = 未补全非预览失败）
  *
  * mock 策略：vi.mock useExtensionUI（范式同 ask-user-inline.test.ts），vi.hoisted 状态每用例设值。
  *
@@ -26,23 +30,30 @@ import { TURN_PROGRESS_WARN_THRESHOLD_MS } from '@taiji/core'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
 // ── vi.hoisted：mock 状态在 vi.mock 工厂执行前就绪，且可在 it 中改值 ──
+// overlayReq 由工厂初始化为真实 ref：排队接管序列用例在 mount 后推进队列（出队 → 后到者
+// 接管），依赖 ref 响应性驱动 Panel 重渲染（plain object 无响应性，仅 mount 前设值可行）。
 const mockState = vi.hoisted(() => ({
-  overlayReq: { value: undefined as ExtensionUIRequest | undefined },
+  overlayReq: undefined as unknown as import('vue').Ref<ExtensionUIRequest | undefined>,
   respond: vi.fn(),
   cancel: vi.fn(),
 }))
 
-vi.mock('@/composables/useExtensionUI', () => ({
-  useExtensionUI: () => ({
-    currentAskUserRequest: mockState.overlayReq,
-    respond: mockState.respond,
-    cancel: mockState.cancel,
-  }),
-  askUserFilter: (req: { askUser?: boolean }) => req.askUser === true,
-  scheduleCreateFilter: (req: { scheduleCreate?: boolean }) => req.scheduleCreate === true,
-  overlayFilter: (req: { askUser?: boolean; scheduleCreate?: boolean }) =>
-    req.askUser === true || req.scheduleCreate === true,
-}))
+vi.mock('@/composables/useExtensionUI', async () => {
+  const { ref } = await import('vue')
+  const currentReq = ref<ExtensionUIRequest | undefined>(undefined)
+  mockState.overlayReq = currentReq
+  return {
+    useExtensionUI: () => ({
+      currentAskUserRequest: currentReq,
+      respond: mockState.respond,
+      cancel: mockState.cancel,
+    }),
+    askUserFilter: (req: { askUser?: boolean }) => req.askUser === true,
+    scheduleCreateFilter: (req: { scheduleCreate?: boolean }) => req.scheduleCreate === true,
+    overlayFilter: (req: { askUser?: boolean; scheduleCreate?: boolean }) =>
+      req.askUser === true || req.scheduleCreate === true,
+  }
+})
 
 // stub 子组件（AskUserOverlay / ScheduleCreateOverlay / TurnProgressBar 真实挂载，断言其形态）
 const stubs = {
@@ -169,5 +180,126 @@ describe('Panel overlay 分流挂载（schedule-create ∨ ask-user 互斥）', 
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('P-INLINE 排队接管序列（DOM 层：先到先渲染 → 出队 → 后到接管）', () => {
+  it('ask-user 先到挂载 → respond 出队 → 后到 schedule-create 接管挂载', async () => {
+    mockState.overlayReq.value = askUserReq
+    const wrapper = mountPanel('session-A')
+
+    // 先到者渲染
+    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="schedule-create-overlay"]').exists()).toBe(false)
+
+    // 模拟应答出队（Panel 应答入口 = useExtensionUI.respond）+ store 队首推进到后到请求
+    mockState.respond('req-ask', '["Postgres"]')
+    mockState.overlayReq.value = scheduleCreateReq
+    await nextTick()
+
+    // 后到者接管：互斥换挂，Composer 仍被 overlay 覆盖
+    expect(mockState.respond).toHaveBeenCalledWith('req-ask', '["Postgres"]')
+    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="schedule-create-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
+  })
+
+  it('schedule-create 先到挂载 → cancel 出队 → 后到 ask-user 接管挂载', async () => {
+    mockState.overlayReq.value = scheduleCreateReq
+    const wrapper = mountPanel('session-A')
+
+    expect(wrapper.find('[data-testid="schedule-create-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(false)
+
+    // 真实 DOM 取消（emit cancel → Panel handler → useExtensionUI.cancel）+ 队首推进
+    await wrapper.find('[data-testid="schedule-create-cancel"]').trigger('click')
+    expect(mockState.cancel).toHaveBeenCalledWith('req-sc')
+    mockState.overlayReq.value = askUserReq
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="schedule-create-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ask-user-overlay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
+  })
+})
+
+describe('cron 预览与提交解耦（前端解析子集不拦合法草稿，G1）', () => {
+  const draftReqWithSchedule = (schedule: string, kind: 'once' | 'recurring' = 'recurring'): ExtensionUIRequest => ({
+    sessionId: 'session-A',
+    requestId: 'req-sc',
+    method: 'select',
+    scheduleCreate: true,
+    scheduleDraft: { ...scheduleDraft, kind, schedule },
+  })
+
+  function assertSubmittable(wrapper: ReturnType<typeof mountPanel>): void {
+    expect(
+      wrapper.find('[data-testid="schedule-create-submit"]').attributes('disabled'),
+    ).toBeUndefined()
+  }
+
+  it('周域英文名 draft（0 9 * * MON）→ 预览命中、可直接提交且 schedule 原样回传', async () => {
+    mockState.overlayReq.value = draftReqWithSchedule('0 9 * * MON')
+    const wrapper = mountPanel('session-A')
+
+    // 预览解析成功（英文名域映射数字后命中）：显示下次运行列表，无警示
+    const previewText = wrapper.find('[data-testid="schedule-create-preview"]').text()
+    expect(previewText).toContain('下次运行')
+    expect(previewText).not.toContain('无法预览')
+    assertSubmittable(wrapper)
+
+    await wrapper.find('[data-testid="schedule-create-submit"]').trigger('click')
+    expect(mockState.respond).toHaveBeenCalledTimes(1)
+    const [, result] = mockState.respond.mock.calls[0] as [string, string]
+    expect(JSON.parse(result)).toMatchObject({ action: 'create', kind: 'recurring', schedule: '0 9 * * MON' })
+  })
+
+  it('6 段含秒 draft（0 0 9 * * *）→ 跳过秒段预览命中、可直接提交且表达式原样回传', async () => {
+    mockState.overlayReq.value = draftReqWithSchedule('0 0 9 * * *')
+    const wrapper = mountPanel('session-A')
+
+    const previewText = wrapper.find('[data-testid="schedule-create-preview"]').text()
+    expect(previewText).toContain('下次运行')
+    expect(previewText).not.toContain('无法预览')
+    assertSubmittable(wrapper)
+
+    await wrapper.find('[data-testid="schedule-create-submit"]').trigger('click')
+    const [, result] = mockState.respond.mock.calls[0] as [string, string]
+    expect(JSON.parse(result)).toMatchObject({ schedule: '0 0 9 * * *' })
+  })
+
+  it('真非法表达式 → 非阻塞警示（表达式由创建端验证）且仍可提交（由后端拒）', async () => {
+    mockState.overlayReq.value = draftReqWithSchedule('nonsense expr here')
+    const wrapper = mountPanel('session-A')
+
+    // 预览失败：非阻塞警示文案（zh locale），但不拦提交（canSubmit 与预览解耦）
+    expect(wrapper.find('[data-testid="schedule-create-preview"]').text())
+      .toContain('无法预览：表达式将由创建端验证')
+    assertSubmittable(wrapper)
+
+    await wrapper.find('[data-testid="schedule-create-submit"]').trigger('click')
+    expect(mockState.respond).toHaveBeenCalledTimes(1)
+    const [, result] = mockState.respond.mock.calls[0] as [string, string]
+    expect(JSON.parse(result)).toMatchObject({ schedule: 'nonsense expr here' })
+  })
+
+  it('once 清空时刻后禁止提交（未补全非预览失败；预览区提示选择时刻，重选后恢复）', async () => {
+    // onceCronToDate 还原失败（周域非 *）→ 组件既有行为落默认下一整点（草稿可直接确认，G1）
+    mockState.overlayReq.value = draftReqWithSchedule('0 9 * * MON', 'once')
+    const wrapper = mountPanel('session-A')
+    assertSubmittable(wrapper)
+
+    // 用户清空时刻 = 未补全：once 提交体需要时间值，仍拦（区别于 recurring 预览失败）
+    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('')
+    await nextTick()
+    expect(wrapper.find('[data-testid="schedule-create-preview"]').text()).toContain('请选择执行时间')
+    expect(
+      wrapper.find('[data-testid="schedule-create-submit"]').attributes('disabled'),
+    ).toBeDefined()
+
+    // 重新选定时刻 → 恢复可提交
+    await wrapper.find('[data-testid="schedule-create-once-input"]').setValue('2030-01-01T09:00')
+    await nextTick()
+    assertSubmittable(wrapper)
   })
 })

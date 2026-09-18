@@ -13,8 +13,10 @@
  *
  * 时间折叠单点（D2）：once 模式提交前经 dateToOnceCron 折叠为一次性 cron，初值由
  * onceCronToDate 还原——两 helper 收口 @zhushanwen/extension-protocol（U1），GUI/TUI 共用。
- * 下次运行预览为纯前端轻量计算（5 段 cron 分钟步进穷举 + duration 步进），不引入 croner 等
- * renderer 新依赖。文案全走 i18n（extensionUI.scheduleCreate* 段，locale-sync 守卫 U8 零 CJK）；
+ * 下次运行预览为纯前端轻量计算（cron 分钟步进穷举 + duration 步进），不引入 croner 等
+ * renderer 新依赖；解析是后端 croner 的子集（5/6 段 + 周域英文名），预览失败仅显示非阻塞
+ * 警示、不禁止提交（表达式由创建端 parseSchedule/croner 验证，G1 预填草稿可直接确认）。
+ * 文案全走 i18n（extensionUI.scheduleCreate* 段，locale-sync 守卫 U8 零 CJK）；
  * 星期名按当前 locale 经 Intl 输出。
  */
 import { computed, nextTick, ref, watch } from 'vue'
@@ -165,14 +167,19 @@ function parseCronPart(part: string, rangeIdx: number): CronField | 'invalid' {
   const max = CRON_FIELD_MAX[rangeIdx] ?? CRON_MINUTE_MAX
   const out = new Set<number>()
   for (const seg of part.split(',')) {
-    const step = seg.match(/^\*\/(\d+)$/)
+    // 周域英文名归一为数字（后端权威 croner 接受 MON-SUN；前端预览子集等价映射），
+    // 替换后复用既有数字/范围/步进逻辑（MON-FRI → 1-5、MON,WED → 1,3）
+    const norm = rangeIdx === CRON_DOW_FIELD_INDEX
+      ? seg.replace(DOW_NAME_RE, (m) => String(DOW_NAME_TO_NUMBER[m.toLowerCase()] ?? m))
+      : seg
+    const step = norm.match(/^\*\/(\d+)$/)
     if (step) {
       const st = Number(step[1])
       if (st < 1) return 'invalid'
       for (let v = min; v <= max; v += st) out.add(v)
       continue
     }
-    const rng = seg.match(/^(\d+)-(\d+)$/)
+    const rng = norm.match(/^(\d+)-(\d+)$/)
     if (rng) {
       const a = Number(rng[1])
       const b = Number(rng[2])
@@ -180,8 +187,8 @@ function parseCronPart(part: string, rangeIdx: number): CronField | 'invalid' {
       for (let v = a; v <= b; v++) out.add(v)
       continue
     }
-    if (!/^\d+$/.test(seg)) return 'invalid'
-    const n = Number(seg)
+    if (!/^\d+$/.test(norm)) return 'invalid'
+    const n = Number(norm)
     if (n < min || n > max) return 'invalid'
     out.add(n)
   }
@@ -203,13 +210,16 @@ function cronMatches(cursor: Date, fields: CronField[]): boolean {
   return true
 }
 
-/** 5 段 cron 下次运行（分钟步进穷举，上界 366 天，无命中返回 null） */
+/** 5/6 段 cron 下次运行（分钟步进穷举，上界 366 天，无命中返回 null）。
+ *  6 段 = 首段秒（croner 语义）：预览为分钟粒度，跳过秒段算后续字段（秒段非 0/* 时
+ *  实际触发在命中分钟内的第 N 秒，预览显示到分钟，不承诺秒级精度）。 */
 function cronNextRuns(expr: string, count: number, from: Date): Date[] | null {
   const parts = expr.trim().split(/\s+/)
-  if (parts.length !== CRON_FIELD_COUNT) return null
+  if (parts.length !== CRON_FIELD_COUNT && parts.length !== CRON_FIELD_COUNT_WITH_SECONDS) return null
+  const fieldOffset = parts.length === CRON_FIELD_COUNT_WITH_SECONDS ? 1 : 0
   const fields: CronField[] = []
-  for (let i = 0; i < parts.length; i++) {
-    const f = parseCronPart(parts[i], i)
+  for (let i = 0; i < CRON_FIELD_COUNT; i++) {
+    const f = parseCronPart(parts[i + fieldOffset]!, i)
     if (f === 'invalid') return null
     fields.push(f)
   }
@@ -232,6 +242,11 @@ const MS_PER_MINUTE = 60_000
 /** cron 协议常量：5 段表达式（分 时 日 月 周）+ 周域索引（第 5 域）+ 每周 7 天 */
 const CRON_FIELD_COUNT = 5
 const CRON_DOW_FIELD_INDEX = 4
+/** 6 段含秒形态（秒 分 时 日 月 周；croner 接受，后端 normalize 5 段补秒后同为 6 段） */
+const CRON_FIELD_COUNT_WITH_SECONDS = 6
+/** 周域英文名域（croner 接受 MON-SUN，大小写不敏感）→ 数字（0=周日，与数字域语义一致） */
+const DOW_NAME_TO_NUMBER: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+const DOW_NAME_RE = /\b(sun|mon|tue|wed|thu|fri|sat)\b/gi
 const DAYS_PER_WEEK = 7
 const MS_PER_HOUR = 3_600_000
 const MS_PER_DAY = 86_400_000
@@ -293,10 +308,20 @@ const scheduleSummary = computed<string>(() => {
   return t('extensionUI.scheduleCreateSummaryRecurring', { detail: activeCronChip.value ? t(activeCronChip.value.labelKey) : expr })
 })
 
+// canSubmit 与预览解耦：预览是前端轻量解析子集（后端权威 = 创建端 parseSchedule/croner），
+// 预览失败不禁止提交——表达式由创建端验证（非法时后端拒，G1 预填草稿可直接确认）。
+// once 未选时刻除外：提交体需要时间值，属「未补全」而非「预览失败」。
 const canSubmit = computed(() =>
-  nextRuns.value !== null
-  && promptText.value.trim().length > 0
-  && (props.draft.models.length === 0 || selectedModel.value !== undefined),
+  promptText.value.trim().length > 0
+  && (props.draft.models.length === 0 || selectedModel.value !== undefined)
+  && (kind.value === 'recurring' || onceDate.value !== null),
+)
+
+/** 预览不可用时的非阻塞警示文案（once 未选时刻 / recurring 前端子集解析不了） */
+const previewUnavailableHint = computed(() =>
+  kind.value === 'once'
+    ? t('extensionUI.scheduleCreatePreviewNoTime')
+    : t('extensionUI.scheduleCreatePreviewUnavailable'),
 )
 
 const footNote = computed(() =>
@@ -436,7 +461,7 @@ function onSubmit(): void {
               <span class="text-accent">{{ formatRel(d) }}</span>
             </div>
           </template>
-          <div v-else class="text-danger">{{ t('extensionUI.scheduleCreatePreviewError') }}</div>
+          <div v-else class="text-warn">{{ previewUnavailableHint }}</div>
         </div>
       </div>
 
