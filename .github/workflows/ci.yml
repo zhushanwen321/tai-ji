@@ -622,7 +622,6 @@ jobs:
   build:
     name: Build
     needs: [lint, typecheck, test-runtime, test-renderer, test-main, test-extensions, e2e-visual, e2e-behavior]
-    timeout-minutes: 20
     uses: ./.github/workflows/build.yml
     with:
       upload-artifacts: false
