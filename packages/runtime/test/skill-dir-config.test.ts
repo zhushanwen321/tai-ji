@@ -5,7 +5,7 @@
  * 重点验证 ADR §5 脏数据过滤 + v2 scope 分组顺序 [project.enabled → global.enabled → project.preset → global.preset]。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join, basename } from 'node:path'
 import type { SkillDirConfig } from '@taiji/shared'
@@ -156,7 +156,11 @@ describe('skill-dir-config buildDirConfigs', () => {
   it('已启用的非 preset 绝对路径（如历史遗留 claude 绝对路径）不再是预设成员，移除后不再重现', () => {
     // 用户报告的回归场景：preset 含 claude 时，用户删除该行后 buildDirConfigs 会把未启用候选补回
     // （永远删不掉）。移出预设后，遗留的已启用 claude 条目仍可见可删，且删除后不再补回。
-    const claudeAbs = '~/.claude/skills'
+    // 路径必须真实存在（非 preset 启用条目走 existsSync 脏数据过滤），且自建自删——
+    // 禁止依赖真实 ~/.claude（CI Linux runner 无此目录，条目被过滤后 find 返回 undefined，
+    // 2026-09-18 CI 实发）。
+    const claudeAbs = join(tmpRealDir, '.claude', 'skills')
+    mkdirSync(claudeAbs, { recursive: true })
     const configs = buildDirConfigs(PRESET_SKILL_DIRS, { projectPaths: [], globalPaths: [claudeAbs] })
     // 存量启用条目仍展示（用户可见、可手动删）
     expect(configs.find(c => c.path === claudeAbs)!.enabled).toBe(true)
