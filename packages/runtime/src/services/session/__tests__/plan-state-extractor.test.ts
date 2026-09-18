@@ -7,13 +7,16 @@
  * - 多 entry 取最后一条（单例状态，extension reconstructPlanState 逆序取首同构）；
  * - reset entry（isActive=false + skills/reviewState 清空 + docs 保留）派生保留 docs；
  * - 冷路径 extractPlanStateFromSessionFile（ENOENT 缺省 View / 真实临时 JSONL 派生一致）。
+ * - oversize 降级（稀疏文件 > READ_PRECHECK_MAX_BYTES：warn 留痕 + 缺省 View）与错误契约
+ *   （EISDIR / ENAMETOOLONG 原样上抛，statSync 预检失败 fall-through 不吞错）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/plan-state-extractor.test.ts
  */
-import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtempSync, writeFileSync, rmSync, openSync, closeSync, ftruncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 import { INACTIVE_PLAN_STATE_VIEW, extractPlanStateFromSessionFile, scanPlanStateEntries } from '../plan-state-extractor.js'
 
 /** plan-state entry fixture（照 session-records.test.ts entry helper 形态；data 无 v 字段——D4 否决版本轴）。 */
@@ -174,5 +177,50 @@ describe('extractPlanStateFromSessionFile：冷路径', () => {
   it('空 JSONL（无任何 plan entry）→ 未激活缺省 View', () => {
     const filePath = makeTmpJsonl([{ type: 'message', id: 'm1' }])
     expect(extractPlanStateFromSessionFile(filePath)).toEqual(INACTIVE_PLAN_STATE_VIEW)
+  })
+
+  // [MF-12] G3 峰值治理冷路径降级契约：oversize 不全文扫描、不 throw、不部分提取——
+  // 回归为 throw 会把 getPlanState RPC 打成 error envelope，回归为漏 warn 则静默吞失败。
+  it('oversize（> READ_PRECHECK_MAX_BYTES）：warn 留痕 + 降级未激活缺省 View（不全文扫描）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'plan-state-extractor-oversize-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, 'session.jsonl')
+    // 稀疏文件（ftruncate 只拉长度不写数据块，APFS/ext4 秒级）——绕开 32MB 物理写入
+    const fd = openSync(filePath, 'w')
+    try {
+      ftruncateSync(fd, READ_PRECHECK_MAX_BYTES + 1)
+    } finally {
+      closeSync(fd)
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(extractPlanStateFromSessionFile(filePath)).toEqual({
+        isActive: false,
+        planFilePath: null,
+        requirement: null,
+        templateName: null,
+      })
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]![0])).toContain('oversize')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  // 错误契约：非 ENOENT 读错误原样上抛（RPC 报错），不降级缺省 View（会把「读失败」
+  // 与「从未进过 plan」混淆）。
+  it('路径为目录：statSync 预检通过（目录项非 oversize），EISDIR 经 readFileSync 原样上抛', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'plan-state-extractor-dir-'))
+    tmpDirs.push(dir)
+    expect(() => extractPlanStateFromSessionFile(dir)).toThrowError(/EISDIR/)
+  })
+
+  it('statSync 预检失败 fall-through：文件名超 NAME_MAX（ENAMETOOLONG）双抛，仍经 readFileSync 原样上抛', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'plan-state-extractor-statfail-'))
+    tmpDirs.push(dir)
+    // > NAME_MAX 255：statSync 与 readFileSync 均拒——预检 catch（fileSize = -1）
+    // fall-through 到读路径后错误契约不变（非 ENOENT 不吞）
+    const longPath = join(dir, 'x'.repeat(300))
+    expect(() => extractPlanStateFromSessionFile(longPath)).toThrowError(/ENAMETOOLONG/)
   })
 })
