@@ -8,7 +8,7 @@
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a> | <a href="https://github.com/zhushanwen321/tai-ji/releases">Download</a>
 </p>
 
-An AI Agent desktop workbench (macOS / Windows / Linux) built on an Electron + Vue 3 + Node.js Runtime architecture. It communicates with all kinds of AI Agents over the child-process RPC protocol of [pi](https://github.com/badlogic/pi-mono) (npm package `@earendil-works/pi-coding-agent`), providing multi-session management, dual-Panel split view, subagent/workflow orchestration, goal-driven autonomous loops, and scheduled tasks. 18 Agent extensions ship bundled with the app, ready out of the box.
+TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks in parallel, watch the AI think, edit files, and run commands in real time, and branch off to retry or fan out whenever you need. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel (npm package `@earendil-works/pi-coding-agent`), with 18 extensions bundled and ready out of the box.
 
 <p align="center">
   <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window — multi-session sidebar plus live agent conversation stream with thinking, tool calls, and file edits" width="900" />
@@ -95,31 +95,34 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ---
 
-## Core Capabilities
+## What It Can Do
 
-### Sessions & Workbench
+### Multiple sessions, one window
 
-- **Multi-session management** — session list in the sidebar, ⌘/Ctrl+N to create; session tree branching (fork / clone) is a native pi capability, letting you branch from any assistant message (⌘/Ctrl+G fork, ⌘/Ctrl+⇧+G fork mode, ⌘/Ctrl+J handoff)
-- **Dual-Panel split view** — a single Panel is the default state; opening a second session splits the view. Focus mode is supported to concentrate on the current session
-- **Overview** — a standalone bird's-eye view across sessions (card grid + filtering + background agent aggregation)
-- **Global efficiency entry points** — ⌘/Ctrl+K global search, ⌘/Ctrl+I import session, ⌘/Ctrl+B collapse sidebar, ⌘/Ctrl+, settings, ⌘/Ctrl+[ ] session back/forward, ⌘/Ctrl+⇧+P preset switching; new session / collapse sidebar / preset switching can be remapped in settings, the rest are fixed
+- **Session sidebar** — sessions grouped by project, with a green dot marking tasks that are still running; new session (⌘/Ctrl+N), search (⌘/Ctrl+K), and import (⌘/Ctrl+I) sit at the top of the sidebar
+- **Branch & retry** — not happy with a reply? ⌘/Ctrl+G forks a new session from the agent's latest reply so you can try a different direction while the original stays intact; ⌘/Ctrl+J packages the current context and hands it off to a fresh session
+- **Sidebar panels** — beyond sessions, switch to the file tree, subagent list, workflow status, and plugin panels right inside the sidebar
+- **Global search** — one ⌘/Ctrl+K entry to search commands, project files, code symbols, and sessions
 
-### Conversation Flow
+### An agent you can watch
 
-- **Streaming rendering** — incremental markdown rendering, turn collapsing, thinking block expand/collapse
-- **GUI widget panels** — todo / goal and similar state render as dedicated widget panels with a unified meta header row (title, status dot, N/M progress, mini progress bar); Agent-side state syncs to the presentation layer over a single channel
-- **Structured interaction** — ask-user multi-question structured input (split-pane preview + inline editing), structured output validated by JSON Schema
+- **Everything in real time** — thinking, tool calls, and file edits stream in as they happen; each working turn collapses into a one-line summary (duration / thinking rounds / tool calls) you can expand to replay the whole thing
+- **Trace view** — flip from the conversation to a structured Trace and inspect exactly what the agent executed, entry by entry
+- **Task & goal status strip** — the agent's todo list and set goals show live progress as a persistent status strip
+- **Structured prompts** — when the agent needs a decision it presents a structured form (multiple questions, options, free-form input) instead of guessing back and forth in chat
+- **Background tasks never drop** — long-running commands move to the background and notify you on completion, then processing continues automatically
 
 ### Files / Terminal / Git
 
-- **File tree** — virtualized rendering (flattened visible rows) that stays smooth on large repositories; file status badges and line counts
-- **Terminal** — command-style buffer rendering, versioned replay, session-level persistent partitions
-- **Git** — branch and change status display; worktree create/switch/cleanup
+- **File tree** — browse project files in the sidebar, smooth even on large repositories; modified files are marked right on the name
+- **Built-in terminal** — expand a real terminal from the right side at any time; each session keeps its own state, ready when you switch back
+- **Git panel** — current branch and file changes at a glance; create / switch / clean up worktrees so parallel tasks each get their own working directory without interference
 
-### Models & Settings
+### Models & control
 
-- **Provider management** — multi-provider configuration, built-in provider catalog, API key management
-- **Quota display** — usage quota queries per provider / model
+- **Bring your own models** — a built-in provider catalog: paste an API key and go; switch model and thinking level right next to the input box
+- **Live usage** — generation speed and remaining context shown inline while chatting; per-provider / per-model quotas available in settings
+- **Tool modes** — switch the agent's tool permission level next to the input box, from read-only analysis to full tool access
 - **Settings center** — full-screen overlay covering 12 menu domains: provider / appearance / skills / agent / extensions / system prompt / terminal / presets / worktree / updates / system / usage
 - **Auto update** — periodic checks for new versions; after confirmation the app restarts to upgrade. Release Notes are bilingual (English / Chinese)
 

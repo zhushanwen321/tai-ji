@@ -8,7 +8,7 @@
   <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
 </p>
 
-基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台（macOS / Windows / Linux）。通过 [pi](https://github.com/badlogic/pi-mono)（npm 包名 `@earendil-works/pi-coding-agent`）的子进程 RPC 协议与各类 AI Agent 通信，提供多 session 管理、双 Panel split view、subagent/workflow 编排、目标驱动自治循环、定时调度等能力。18 个 Agent 扩展随应用打包内置，开箱即用。
+太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口：同时推进多个任务，实时看着 AI 思考、改文件、跑命令，随时分叉重试或并行铺开。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 18 个扩展，支持接入各类模型服务。
 
 <p align="center">
   <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面 — 侧栏多会话管理 + Agent 对话流：思考、工具调用、文件编辑全程实时可见" width="900" />
@@ -95,33 +95,36 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ---
 
-## 核心能力
+## 它能做什么
 
-### 会话与工作台
+### 多会话，一个窗口
 
-- **多 session 管理** — 侧栏会话列表，⌘/Ctrl+N 新建；session 树状分支（fork / clone）为 pi 原生能力，可从任意 assistant 消息分叉（⌘/Ctrl+G fork、⌘/Ctrl+⇧+G fork 模式、⌘/Ctrl+J handoff）
-- **双 Panel split view** — 单 Panel 为默认态，打开第二个 session 即分屏；支持 focus mode 聚焦当前会话
-- **Overview** — 独立的多会话鸟瞰视图（卡片网格 + 筛选 + 后台 agent 聚合）
-- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+I 导入会话、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话后退/前进、⌘/Ctrl+⇧+P 预设切换；新建会话 / 折叠侧栏 / 预设切换三项可在设置中重录，其余为固定快捷键
+- **会话侧栏** — 会话按项目分组，绿点标出正在运行的任务；新建（⌘N）、搜索（⌘K）、导入历史会话（⌘I）都在侧栏顶部
+- **分叉重试** — 对 AI 的回复不满意？⌘G 从它最近的回复分叉出一个新会话换个方向重来，原会话原样保留；⌘J 则把当前上下文打包交接给新会话继续推进
+- **侧栏多面板** — 会话之外，侧栏里直接切换文件树、subagent 列表、workflow 状态和插件面板
+- **全局搜索** — ⌘K 一个入口搜命令、项目文件、代码符号和会话
 
-### 对话流
+### 看得见的 Agent
 
-- **流式渲染** — markdown 增量渲染、回合折叠、thinking 展开收起
-- **GUI Widget 面板** — todo / goal 等以独立 widget 面板呈现，带统一 meta 头行（标题、状态点、进度 N/M、迷你进度条），Agent 侧状态与展示层单通道同步
-- **结构化交互** — ask-user 多问题结构化输入（分栏预览 + 内联编辑）、JSON Schema 校验的结构化输出
+- **全程实时可见** — AI 的思考、工具调用、文件编辑逐步流式呈现；每轮工作自动折叠成一行摘要（耗时 / 思考轮数 / 工具次数），点开即可回看全过程
+- **Trace 视图** — 对话流之外一键切换到结构化 Trace，逐条检视 Agent 实际执行了什么
+- **任务与目标状态条** — Agent 拆解出的 todo 清单和设定的目标以常驻状态条实时显示进度
+- **结构化问答** — Agent 需要你拍板时给出结构化表单（多个问题、选项、自定义输入），而不是在聊天里来回猜
+- **后台任务不丢** — 长耗时命令转入后台，完成时自动通知并继续处理
 
 ### 文件 / 终端 / Git
 
-- **文件树** — 虚拟化渲染（扁平可见行），大仓库下保持流畅；文件状态角标与行数统计
-- **终端** — 命令式缓冲区渲染，版本化重放，会话级持久分区
-- **Git** — 分支与变更状态展示，worktree 创建/切换/清理
+- **文件树** — 侧栏内浏览项目文件，大仓库也流畅；哪些文件被改过直接标在文件名上
+- **内置终端** — 从右侧随时展开一个真终端，每个会话各自保留现场，切回来接着用
+- **Git 面板** — 当前分支与文件变更一目了然；支持 worktree 创建 / 切换 / 清理，多个任务各占一个工作目录互不干扰
 
-### 模型与设置
+### 模型与控制
 
-- **Provider 管理** — 多 provider 配置、内置 provider 目录、API key 管理
-- **配额展示** — 各 provider / 模型的用量配额查询
-- **设置中心** — 全屏 overlay，覆盖 Provider / 外观 / 技能 / Agent / 扩展 / System Prompt / 终端 / 预设 / worktree / 更新 / 系统 / 用量 12 个菜单域
-- **自动更新** — 周期检测新版本，确认后重启升级；Release Notes 中英双语
+- **多模型接入** — 预置主流 provider 目录，填入 API key 即用；模型和思考档位在输入框旁一键切换
+- **实时用量** — 对话中实时显示生成速率、上下文余量；各 provider / 模型的配额在设置中随时可查
+- **工具模式** — 输入框旁切换 Agent 的工具权限档位，从只读分析到全工具放行
+- **设置中心** — Provider / 外观 / 技能 / Agent / 扩展 / System Prompt / 终端 / 预设 / worktree / 更新 / 系统 / 用量 12 个分区
+- **自动更新** — 新版本自动检测，确认后重启升级，Release Notes 中英双语
 
 ## pi 扩展
 
