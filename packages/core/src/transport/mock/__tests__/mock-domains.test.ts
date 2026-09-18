@@ -142,6 +142,34 @@ describe('mock session domain', () => {
     expect(r.deleted).toContain(forked.id)
   })
 
+  it('create/fork override 生效面（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
+    // create 四参 override：presetId→launchPresetId / projectId / modelOverride→modelId / thinkingOverride→thinkingLevel
+    const created = await session.create('/tmp/ov', 'ov-src', 'preset-x', 'proj-x', 'test/model-x', 'high')
+    expect(created.launchPresetId).toBe('preset-x')
+    expect(created.projectId).toBe('proj-x')
+    expect(created.modelId).toBe('test/model-x')
+    expect(created.thinkingLevel).toBe('high')
+    // server-push 同源的 list 快照可断言（fixture 已带 override）
+    const groups = await session.list()
+    const found = groups.flatMap((g) => g.sessions).find((s) => s.id === created.id)
+    expect(found).toMatchObject({ modelId: 'test/model-x', projectId: 'proj-x', launchPresetId: 'preset-x', thinkingLevel: 'high' })
+    // fork：override 覆盖（ADR-0056 Staging Mode）+ projectId 继承父归属 + 血缘键
+    // parentSession 用源 sessionId（FR-20 fallback 键形态：mock 无 sessionFile）+ forkEntryId
+    const forked = await session.fork(created.id, {
+      label: 'ov-fork',
+      modelOverride: 'test/model-y',
+      thinkingOverride: 'low',
+      piEntryId: 'pi-entry-1',
+    })
+    expect(forked.modelId).toBe('test/model-y')
+    expect(forked.thinkingLevel).toBe('low')
+    expect(forked.projectId).toBe('proj-x')
+    expect(forked.parentSession).toBe(created.id)
+    expect(forked.forkEntryId).toBe('pi-entry-1')
+    await session.remove(created.id)
+    await session.remove(forked.id)
+  })
+
   it('getCommands / getContext / getSubagents(s3 fixture) / getWorkflows / 空历史与 stub 动作', async () => {
     const cmds = await session.getCommands('s1')
     expect(cmds.commands.length).toBeGreaterThan(0)
@@ -152,9 +180,16 @@ describe('mock session domain', () => {
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
     expect((await session.getWorkflows('s3')).length).toBeGreaterThan(0)
     expect(await session.getWorkflows('other')).toEqual([])
-    await expect(session.workflowAction('s3', 'pause', 'r1')).resolves.toBeUndefined()
+    // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
+    expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
+    expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
+    expect(await session.getAgentCallFilePath('s1', 'ac1')).toBe('')
+    // workflowAction 仅 'abort'（pause/resume 已随扩展 D-2 移除，real 域参数为 'abort' 字面量）
+    await expect(session.workflowAction('s3', 'abort', 'r1')).resolves.toBeUndefined()
     await expect(session.subagentAction('s3', 'message', { text: 'hi' })).resolves.toBeUndefined()
     await expect(session.handoff('s1', 'ok')).resolves.toBeUndefined()
+    // options（modelOverride/thinkingOverride）mock 不仿真（无 HandoffService），签名对齐 resolve
+    await expect(session.handoff('s1', 'ok', { modelOverride: 'x/m', thinkingOverride: 'high' })).resolves.toBeUndefined()
     await expect(session.abortHandoff('s1')).resolves.toBeUndefined()
     await expect(session.forceQuit('s1')).resolves.toBeUndefined()
   })
@@ -338,6 +373,9 @@ describe('mock config domain', () => {
     await waitFor(() => skills.length > 0 && agents.length > 0 && skillDirs.length > 0 && agentDirs.length > 0 && extDirs.length > 0)
     await config.scanSkills(['x'])
     await config.scanAgents(['x'])
+    // [G4 锚定] 返回类型补齐：real 返回扫描结果，mock 无文件系统扫描恒 []
+    expect(await config.scanSkills(['x'])).toEqual([])
+    expect(await config.scanAgents(['x'])).toEqual([])
     await config.scanSessionSkills('/cwd')
     expect(await config.getGlobalSkills()).toEqual(skills[0])
     expect(await config.getProjectSkills('/cwd')).toEqual([])
@@ -364,9 +402,12 @@ describe('mock config domain', () => {
     await config.setDefaultModel('p2' as ProviderId, 'm')
     await waitFor(() => defaults.some((d) => d.defaultModel === 'p2/m'))
     un1()
-    const { preview } = await config.previewImportProviders('pi')
-    expect(preview.providers).toHaveLength(1)
+    // real 域返回成功/错误联合（错误以 envelope 返回）；mock 恒成功，断言前按 discriminant 收窄
+    const imported = await config.previewImportProviders('pi')
+    if (!('preview' in imported)) throw new Error('mock previewImportProviders 恒成功，不应返回 error')
+    expect(imported.preview.providers).toHaveLength(1)
     const applied = await config.applyImportProviders('id', ['demo-provider'])
+    if (!('result' in applied)) throw new Error('mock applyImportProviders 恒成功，不应返回 error')
     expect(applied.result.imported).toHaveLength(1)
     const sp = await config.getSystemPrompt()
     expect(sp.corrupted).toBe(false)
@@ -382,6 +423,13 @@ describe('mock config domain', () => {
     await config.setTerminalConfig({ ...tc.config, fontSize: 16 })
     await waitFor(() => tcSeen.length > 0)
     un3()
+    // retry 配置 stub（[G4 锚定补齐]）：set 回显 configured=true；get 恒 configured=false
+    //（mock 不持久化不广播，保真度登记 docs/TEST-STRATEGY.md §5）
+    const rcSet = await config.setRetryConfig({ enabled: false, maxRetries: 5, baseDelayMs: 100 })
+    expect(rcSet).toEqual({ config: { enabled: false, maxRetries: 5, baseDelayMs: 100 }, configured: true })
+    const rc = await config.getRetryConfig()
+    expect(rc.configured).toBe(false)
+    expect(typeof config.onRetryConfig(() => {})).toBe('function')
   })
 })
 
@@ -424,18 +472,23 @@ describe('mock model / extension / plugin / composer / search domain', () => {
     un()
   })
 
-  it('plugin.onPlugins 空订阅 + settings 转发 + composer 候选', async () => {
+  it('plugin.onPlugins 空订阅 + 权限 stub + settings 转发 + composer 候选', async () => {
     const plugins: unknown[][] = []
     const un = plugin.onPlugins((p) => plugins.push(p))
     await waitFor(() => plugins.length > 0)
     expect(plugins[0]).toEqual([])
     un()
+    // [G4 锚定补齐] 权限审批/回收 stub：mock 无插件运行时，ack resolve 即可
+    await expect(plugin.approvePermissions('p1', ['fs.read'])).resolves.toBeUndefined()
+    await expect(plugin.revokePermissions('p1')).resolves.toBeUndefined()
     expect(typeof settings.onProviders).toBe('function')
     expect(settings.listProviders).toBe(config.listProviders)
-    const mentions = await composer.getMentionCandidates()
-    expect(mentions.length).toBeGreaterThan(0)
-    const files = await composer.getFileCandidates()
+    // getMentionCandidates 对齐 real 已废弃语义（恒 []）；getFileCandidates 与 real 同签名（sessionId）
+    expect(await composer.getMentionCandidates()).toEqual([])
+    const files = await composer.getFileCandidates('s1')
     expect(files.every((f) => f.type === 'dir' || f.type === 'file')).toBe(true)
+    // landing cwd 路 stub（现消费方直连 real domain，mock 保持签名同构）
+    expect(await composer.getFileCandidatesByCwd('/any')).toEqual({ files: [], truncated: false })
   })
 
   it('search：空查询返回 recent+suggested；有查询按四类过滤', async () => {
@@ -466,10 +519,10 @@ describe('mock workspace / quota / project / preset domain', () => {
     expect(await quota.configure({ providerId: 'p', enabled: true })).toEqual({ ok: true })
   })
 
-  it('project：load 空态 + save 透传', async () => {
+  it('project：load 空态 + save ack（[G4 锚定] 对齐 real void 契约，原返回透传偏差已收口）', async () => {
     expect(await project.load()).toEqual({ projects: [], activeProjectId: '' })
     const state = { projects: [], activeProjectId: 'p1' }
-    expect(await project.save(state)).toEqual(state)
+    await expect(project.save(state)).resolves.toBeUndefined()
   })
 
   it('preset：CRUD + default', async () => {

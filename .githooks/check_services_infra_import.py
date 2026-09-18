@@ -59,6 +59,11 @@ ALLOWED_MODULES = {
     # terminal-service / plugin-host-process 消费 buildOutboundChildEnv 组装子进程 env
     # （env-propagation-boundary 设计 C-proc-09），同族随 R3 收编
     "spawn-env",
+    # git-repo-resolver（2026-09-17）：无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、
+    # 查询不 reject），同 mem-pressure 裁决形态——IGitRepoResolver port 已存在且注入可用，
+    # value import 仅为注入缺省实例服务（repo-observer sharedRepoObserver 单例 +
+    # git-state-service fallback 两处构造点），为此定义 factory port 只增加无意义间接层
+    "git-repo-resolver",
 }
 
 # value import 行（import { X } from '...infra/...'；import type 豁免）

@@ -1,7 +1,7 @@
 // agent-event-invariants.ts —— AgentEvent 产出不变量断言器（conformance C3 的实现体）。
 //
-// 设计权威源：docs/architecture/subagent-engine-abstraction.md §3.3.7「AgentEvent 产出
-// 不变量」五条（全部引擎必须满足）。任何 adapter 的 conformance 套件（golden 回放层 /
+// 设计不变量：AgentEvent 产出不变量五条（全部引擎必须满足），本断言器是它们的实现体。
+// 任何 adapter 的 conformance 套件（golden 回放层 /
 // 合成样本）都经本断言器校验——负例守护（A12「套件有牙」）靠注入坏序列证明它转红。
 //
 // 为什么独立成模块（非内联在测试文件）：pi/zcode 两套 golden 回放 + 负例元测试共用

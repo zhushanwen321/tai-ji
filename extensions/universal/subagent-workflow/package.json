@@ -25,6 +25,7 @@
     "src/index.ts",
     "src/jsonl-run-store.ts",
     "src/session-lifecycle.ts",
+    "src/workflow-events.ts",
     "src/host/",
     "src/injectors/",
     "src/interface/"

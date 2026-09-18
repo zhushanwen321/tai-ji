@@ -65,6 +65,9 @@ export class ReloadOrchestrator {
   async onMessageComplete(sessionId: string): Promise<void> {
     if (!this.pendingReload.has(sessionId)) return
     this.pendingReload.delete(sessionId)
+    // [skill-reload D8-b] pending 队列消费点：queued 决策的兑现时刻（G4 归因——
+    // 排队行与消费行按 sessionId 串成完整因果）。
+    console.log(`[reload-orchestrator] sessionId=${sessionId} decision=queued-consumed (message.complete)`)
     await this.doReload(sessionId)
   }
 
@@ -74,21 +77,40 @@ export class ReloadOrchestrator {
    * 不清则永久残留 Set。组合根绑 sessionService.setOnSessionDelete → 此方法。
    */
   clearPending(sessionId: string): void {
-    this.pendingReload.delete(sessionId)
+    // Set.delete 返回值 = 该 sid 是否确在队中：在队才留痕（普通删除 / 从未入队
+    // 的 sid 走此路径是常态，不打 decision 行噪音）。
+    const wasQueued = this.pendingReload.delete(sessionId)
+    if (wasQueued) {
+      // [skill-reload D8-b] queued 行的终态留痕：已落 decision=queued 的 session 被
+      // 删除后永不进 onMessageComplete 消费点，仅静默 delete 会让归因链在
+      // 「queued → 无下文」处断链（对照组：decision-time 已删有 skipped-deleted 行，
+      // 同构场景须同待）。
+      console.log(
+        `[reload-orchestrator] sessionId=${sessionId} decision=skipped-deleted (session deleted while queued)`,
+      )
+    }
   }
 
   /** 单个 session 的 skill 变更处理。 */
   private async handleSkillChangeForSession(sessionId: string): Promise<void> {
     // 排队期 session 被删除（deleteSession）→ 跳过
     if (this.options.sessionService.hasSession && !this.options.sessionService.hasSession(sessionId)) {
+      // [skill-reload D8-b] 假跳过归因：affected 集合取自变更时刻，消费时 session 已
+      // 离开——必须留痕，否则 S4 归因链在「变更 → 无 reload 行」处断链。
+      console.log(`[reload-orchestrator] sessionId=${sessionId} decision=skipped-deleted`)
       this.pendingReload.delete(sessionId)
       return
     }
     const idle = await this.options.sessionService.isSessionIdle(sessionId)
     if (idle) {
+      // [skill-reload D8-b] idle 立即 reload（与 skill-registry 的 dir/event 行按
+      // sessionId 串因果——console.log 对齐 reap-orphan-pi kill decision 先例）
+      console.log(`[reload-orchestrator] sessionId=${sessionId} decision=immediate`)
       // idle：已无 flag（否则 isGenerating 还 true），直接 reload
       await this.doReload(sessionId)
     } else {
+      // [skill-reload D8-b] running 入队（消费点见 onMessageComplete 的 queued-consumed 行）
+      console.log(`[reload-orchestrator] sessionId=${sessionId} decision=queued`)
       // running：设 flag，等 message.complete
       this.pendingReload.add(sessionId)
     }

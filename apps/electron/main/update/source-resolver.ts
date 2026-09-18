@@ -1,8 +1,7 @@
 /**
- * auto 模式源顺序解析器（update-multi-source D4）。
+ * auto 模式源顺序解析器（多源改造 D4）。
  *
- * 设计：docs/design/update-multi-source.md §6.4（决策 D4）/ §4.2②（检查流中的位置）/
- * §7.2（source-resolver.ts 行）。消费方：ReleaseChecker 构造注入 `{ resolveSourceOrder }`。
+ * 消费方：ReleaseChecker 构造注入 `{ resolveSourceOrder }`。
  *
  * 决策表（settings 来源偏好 → 源优先级序列）：
  *   - 显式偏好 github/gitcode → [该源, 对侧]（偏好语义 = 优先级而非独占，D3：

@@ -1,8 +1,7 @@
 // src/execution/engine/engines/zcode/zcode-engine.ts
 //
 // ZcodeEngine：zcode 的 EnginePort 实现（2026-09 起单一 app-server 形态）。
-// 设计权威源：docs/architecture/subagent-engine-abstraction.md D10 / §3.3.4 /
-// §3.3.5；docs/architecture/zcode-engine-appserver-resident.md §3.3 D1（每引擎实例一条
+// 设计权威源：docs/architecture/zcode-engine-appserver-resident.md §3.3 D1（每引擎实例一条
 // 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机面）。
 //
 // 2026-09 breaking 重构（用户拍板，理由与代价见设计文档修订节）：
@@ -564,8 +563,7 @@ export class ZcodeEngine implements EnginePort {
   }
 
   /**
-   * D3 abort 链执行体（双入口分岔，P0-1 U2 参数化——设计
-   * timeout-zcode-turn-and-settled-watchdog.md §6 D3 v1.1）：
+   * D3 abort 链执行体（双入口分岔，P0-1 U2 参数化，D3 v1.1）：
    * - **用户取消入口**（`escalateOn: "turn-settled"`，现状语义零改动；fire-and-forget——
    *   与 turn promise 并行推进）：stop 帧（超时 ZCODE_APPSERVER_STOP_TIMEOUT_MS）→
    *   grace 窗口内 turn 落定即止（不杀共享进程）→ 超窗 killChain（conn.shutdown 全序：

@@ -17,25 +17,13 @@
  */
 import { describe, it, expect } from 'vitest'
 import { applyEntry, createInitialChatViewState, replayEntries } from '../apply-entry'
-import type { PiEntry, PiMessageEntry } from '../apply-entry'
+import type { PiEntry } from '../apply-entry'
+import { msgEntry } from './helpers/fixtures'
 
-// ── fixture（与 apply-entry.test.ts 同风格独立手写，不跨测试文件共享字面量）──────────
+// ── fixture（msgEntry 构造收敛到 helpers/fixtures.ts 单源；混合全类型序列仍为本文件
+//    手写字面量——它承载 fold 维度的序列形态语义，不跨文件共享）──────────
 
 const ISO = (ms: number): string => new Date(ms).toISOString()
-
-function msgEntry(
-  id: string,
-  body: Record<string, unknown>,
-  overrides?: { parentId?: string | null; timestamp?: string },
-): PiMessageEntry {
-  return {
-    type: 'message',
-    id,
-    parentId: overrides?.parentId ?? null,
-    timestamp: overrides?.timestamp ?? '2026-08-19T10:00:00.000Z',
-    message: body,
-  }
-}
 
 /**
  * 混合全类型序列：custom（client-msg-id）/ user / assistant（toolCalls + 无 id → e<N>

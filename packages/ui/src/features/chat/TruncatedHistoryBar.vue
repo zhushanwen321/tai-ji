@@ -1,6 +1,6 @@
 <template>
   <!--
-    [u4d-truncated-ui] 历史预算截断顶部条（crash-resilience §3.3 D4 / 场景 T3）。
+    [u4d-truncated-ui] 历史预算截断顶部条（D4 / 场景 T3）。
     显隐由壳层（MessageStream）v-if 控制：store 截断窗口状态 truncated=false 时本组件
     结构性不挂载（A6 回归：普通 session 无任何截断提示）。
     文案 N = loadedTurns（u4b session.history 窗口契约）；「加载更早」走 [u6] 游标翻页

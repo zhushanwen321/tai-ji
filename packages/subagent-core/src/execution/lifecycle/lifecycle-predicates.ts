@@ -15,11 +15,11 @@
 //   - 等待续聊：轮完成后进程已回收 → U4 翻边后轮终真实写 idle（isResumable 即
 //     idle 派生，[U5/D4]），续聊走 deliverMessage 冷路径 resume（续写原 session
 //     文件）。chat 轮终经 armIdleKeepalive（conversation-continuation.ts，
-//     [u7a 补挂] 唯一生产 arm 接线）挂 idle timer 保活 → isIdle=true——超时处置 =
-//     RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动意愿位/占用位）。
+//     [u7a 补挂] 唯一生产 arm 接线）挂 idle timer 保活 → hasArmedIdleTimer=true——
+//     超时处置 = RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动占用位）。
 //     notify 守卫（notify-host.ts）的放行谓词 = 旧终态遗留（idle ∧ closedReason
-//     有值，U2 桥接判据）/ [U5] archived（归档提示载荷）或 isResumable（idle）。
-//   - 正在执行：isIdle=false、isResumable=false（running 直读为假）。
+//     有值，U2 桥接判据）/ idle（收口落账提示/轮次通知载荷）或 isResumable（idle）。
+//   - 正在执行：hasArmedIdleTimer=false、isResumable=false（running 直读为假）。
 
 import { hasIdleTimer } from "./lifecycle-manager.ts";
 // [W6 拆依赖] 活进程句柄读点改经 core 侧 spawnedChildren 状态镜像公共面
@@ -41,15 +41,17 @@ export function hasLiveProcessHandle(recordId: string): boolean {
 }
 
 /**
- * 对话模式等待续聊态（旧 idle 收敛后的派生谓词）。
+ * 轮终保活 idle timer 是否 armed（chat 轮间等待续聊的保活态谓词）。
  *
  * 判据：该 record 有 armed idle timer（lifecycle-manager.hasIdleTimer）。
+ * 与 record.status === "idle"（isResumable 直读）正交——两态模型下 status idle
+ * 是收口态，本谓词是 timer armed 保活态，勿混用。
  *
  * [u7a 补挂后现状] arm 链已复活（chat 轮终 armIdleKeepalive——轮终保活，超时 =
  * [U5] idleTimeoutRecycle 进程回收），本谓词生产可真：closeSubagent 的「无在跑轮」
  * 分流（Path A timer armed）与 notify 合批 hasRunningBackground 消费。
  */
-export function isIdle(record: ExecutionRecord): boolean {
+export function hasArmedIdleTimer(record: ExecutionRecord): boolean {
   return hasIdleTimer(record.id);
 }
 

@@ -19,14 +19,12 @@
  * bashTask tab（2026-09 background-task-sidebar-view D5①）：后台命令详情（命令全文/元信息/输出尾部跟随/终止）。 */
 export type SideDrawerTab = 'terminal' | 'browser' | 'git' | 'doc' | 'detail' | 'subagent' | 'workflow' | 'bashTask'
 
-/** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab）/ URL（Browser tab） */
+/** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab） */
 export interface OpenDrawerOptions {
   /** Doc tab 当前展示的命令名（如 '/commit'），CommandDocPanel 据此 + commandStore/skills 解析文档 */
   commandName?: string
   /** Detail tab 打开后立即展示的文件路径（变更集卡点击文件行时传入，强制 diff 模式） */
   filePath?: string
-  /** Browser tab 打开后立即加载的 URL（点击 agent 输出的 http(s) 链接时传入） */
-  url?: string
 }
 
 /** per-session 控制态（ADR-0053 Map 分区） */

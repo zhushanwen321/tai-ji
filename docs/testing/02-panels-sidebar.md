@@ -775,6 +775,8 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 > extension 通过 GUI 渲染协议推送结构化内容块（`GuiComponent`），前端 `GuiComponentRenderer` 按 `type` 路由到对应 Vue 组件渲染。本手册覆盖 7 种 block type 的单测 + 两条渲染路径的 E2E 验证。
 >
 > 协议定义见 `packages/extension-protocol/src/core/types.ts`，helper 见 `helpers.ts`。
+>
+> **[已退役/迁移 2026-09-16]** 本节「路径 A（SideDrawer widget）」消费端描述与 E2E-GUI-3/4 用例已退役：widgetGui 渲染消费端由 SideDrawer 迁至 **composer 任务托盘 widget 区**（`packages/renderer/src/components/panel/tray/`，`TrayWidgetButton`/`TrayWidgetPanel`；SideDrawer 内 `gui-stats-line`/`gui-list-tree` testid 已不存在）。widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 分发链，缺口见 `e2e/gui-components.spec.ts` 头注与 impl-plan 残留风险 5）。路径 B（对话流内联块）现行不变。另：「7 种 block type」= 有专测的 7 原语口径，协议 BUILTIN_MAP 共 8 类（Group 无独立专测文件），两处口径并存时以协议文档为准。
 
 ## 1. 组件与 testid 清单
 
@@ -798,7 +800,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 两条渲染路径都收敛到 `GuiComponentRenderer` 按 `BUILTIN_MAP[type]` 路由到具体 primitive 组件：
 
 - **路径 B（消息流）**：extension tool 返回 `details.__gui__` → runtime event-adapter 随 `message.tool_call_end` 下发 → 前端把 details 存入 toolCall → `Block.vue` 的 guiComponent computed 提取组件 → GuiComponentRenderer 渲染。
-- **路径 A（SideDrawer widget）**：extension 调 `ctx.ui.setWidget(key, [NUL_MARKER + JSON])` → runtime event-adapter 检测 marker、JSON.parse 并 isGuiComponent 校验 → 以 `extension:widgetGui` 帧下发 → 前端 dispatchSession 后由抽屉容器消费，按 widgetKey 挂到对应 tab → GuiComponentRenderer 渲染。
+- **路径 A（SideDrawer widget）[已退役 2026-09-16]**：extension 调 `ctx.ui.setWidget(key, [NUL_MARKER + JSON])` → runtime event-adapter 检测 marker、JSON.parse 并 isGuiComponent 校验 → 以 `extension:widgetGui` 帧下发 → 前端 dispatchSession 后由抽屉容器消费，按 widgetKey 挂到对应 tab → GuiComponentRenderer 渲染。**消费端已迁 composer 任务托盘 widget 区**（现行 = `TrayWidgetButton`/`TrayWidgetPanel` 经 ViewHostStore `getViewIds`/`getView` 消费；SideDrawer 不再挂 widget，上述抽屉消费形态为历史描述，git 可追溯）。
 
 Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSession` 推已解码的 `extension:widgetGui`。
 
@@ -824,8 +826,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 |---|---|---|
 | E2E-GUI-1 | harness smoke | app 加载首窗口 + sidebar 会话按钮可见 |
 | E2E-GUI-2 | 路径 B: tool result `__gui__` → card 嵌套渲染 | `gui-card` + `gui-progress-bar` + `gui-stats-line` 可见，含 'CI Pipeline'/'build'/'7'/'8'/'turns'/'15' |
-| E2E-GUI-3 | 路径 A: widgetGui stats-line → terminal tab | `gui-stats-line` 在 SideDrawer 内可见，含 'turns'/'tokens'/'duration' |
-| E2E-GUI-4 | 路径 A: widgetGui list-tree → browser tab | `gui-list-tree` 在 SideDrawer 内可见，含 'Deploy'/'VPC'/'RDS'/'Redis' |
+| E2E-GUI-3 | ~~路径 A: widgetGui stats-line → terminal tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-stats-line` testid 已不存在（消费端迁托盘 widget 区）；widgetGui 端到端断言归宿 = real 轨 `e2e/tasks-drawer-real.spec.ts` R2（mock 轨不可达 crossSession 链） |
+| E2E-GUI-4 | ~~路径 A: widgetGui list-tree → browser tab~~ **[已退役 2026-09-16]** | SideDrawer 内 `gui-list-tree` testid 已不存在；归宿同 E2E-GUI-3 |
 
 ### 4.3 每步期望输入输出
 
@@ -843,6 +845,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 
 #### E2E-GUI-3: 路径 A（widgetGui stats-line）
 
+> **[已退役 2026-09-16]** 断言对象（SideDrawer 内 `gui-stats-line`）已随消费端迁移不存在，以下步骤为历史记录（git 可追溯）；现行端到端断言见 `e2e/tasks-drawer-real.spec.ts` R2。
+
 | 步骤 | 操作 | 期望 |
 |---|---|---|
 | 1-2 | 同 E2E-GUI-2 | 流式完成 |
@@ -850,6 +854,8 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 | 4 | 断言 SideDrawer 内 `gui-stats-line` | 可见，含 'turns' 'tokens' 'duration' |
 
 #### E2E-GUI-4: 路径 A（widgetGui list-tree）
+
+> **[已退役 2026-09-16]** 断言对象（SideDrawer 内 `gui-list-tree`）已随消费端迁移不存在，以下步骤为历史记录（git 可追溯）；现行端到端断言见 `e2e/tasks-drawer-real.spec.ts` R2。
 
 | 步骤 | 操作 | 期望 |
 |---|---|---|
@@ -876,7 +882,7 @@ npx playwright test                            # 跑全部 E2E
 ---
 
 
-> 覆盖范围：侧边栏 SegmentedTab 的 Agents/Flows 两个新 tab；subagent 列表加载、卡片渲染、点击进入对话流、返回主 session；workflow 空态占位。
+> 覆盖范围（**已退役，2026-09-16**）：本节记录的是侧边栏 Agents/Flows 两个任务 tab（[HISTORICAL] 侧栏收敛三 tab 后两枚 tab 与列表组件整体退役，观察入口迁 composer 任务托盘）。**现行对照**：runtime 侧数据链路（`session.getSubagents` / `session.getSubagentHistory` / subagent-extractor）与本节 §4 的 extractor 后备查找规则仍然现行；UI 面现行承载 = 托盘 subagent 面板（`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`，测试 `packages/renderer/src/__tests__/panel/tray/`）、drawer subagent 详情 tab（保留不变）。
 >
 > 先读 [00 总览](00-overview.md) 了解双轨制和三视角模型。执行计划原见 test-plan-subagent-workflow.md（已退役，git 历史 `eb884da68` 前版本可查）。
 
@@ -884,41 +890,41 @@ npx playwright test                            # 跑全部 E2E
 
 ### 主流程概述
 
-Agents tab 激活时前端经 `session.getSubagents` WS RPC 请求 runtime；runtime 读取主 session JSONL，提取 subagent 工具调用/结果/bg-notify 组装 `SubagentRecord[]` 返回，前端渲染卡片列表。点击 subagent 卡片后，前端保存原 session id，经 `session.getSubagentHistory` 拉取 subagent JSONL 转为 `Message[]`，hydrate 到 `subagent:<id>` 虚拟 session 并切换 Panel 渲染对话流；点击返回则恢复原 session。
+数据链路（现行）：托盘挂载 / 切 session 时前端经 `session.getSubagents` WS RPC 请求 runtime；runtime 读取主 session JSONL，提取 subagent 工具调用/结果/bg-notify 组装 `SubagentRecord[]` 返回，托盘 subagent 面板渲染行集与计数。点击 subagent 行（原卡片）后，前端保存原 session id，经 `session.getSubagentHistory` 拉取 subagent JSONL 转为 `Message[]`，hydrate 到 `subagent:<id>` 虚拟 session 并切换 Panel 渲染对话流；点击返回则恢复原 session。
 
-Workflow tab 当前仅为空态占位（无后端逻辑）。
+Flows tab 与 workflow 空态占位已随退役删除（workflow 观察入口 = 托盘 workflow 面板）。
 
 ### 架构分层
 
 | 层 | 文件 | 职责 |
 |---|---|---|
-| 展示组件 | `SubagentList.vue` | 渲染 SubagentRecord[] 卡片，点击 emit select |
-| 展示组件 | `SegmentedTab.vue` | 4 tab 等宽均分 + badge 点 |
+| 展示组件（**已退役删除**）| `components/sidebar/SubagentList.vue` | 原渲染 SubagentRecord[] 卡片，点击 emit select；现行形态 = 托盘 subagent 面板行 |
+| 展示组件 | `components/sidebar/SegmentedTab.vue` | tab 条（**现为 3 tab**：会话/文件/Plugins） |
 | Store | `stores/subagent.ts` | subagent 视图状态（原 useSubagentView composable 已并入 store 层） |
-| Store | `stores/sidebar.ts` | `activeTab` 状态（sessions/files/subagents/workflows） |
+| Store | `stores/sidebar.ts` | `activeTab` 状态（`'sessions'\|'files'\|'plugins'`，任务 tab 已退役） |
 | Mock domain | `packages/core/src/transport/mock/index.ts` | 返回空数组（mock 无真实 subagent 数据） |
 | Runtime extractor | `services/session/subagent-extractor.ts` | 解析主 session JSONL → SubagentRecord[] |
 | Runtime service | `packages/runtime/src/services/session/` | getSubagents/getSubagentHistory |
 
 ## §2 组件结构概述
 
-`Sidebar.vue` 的 SegmentedTab 含 4 个等宽 tab（会话/文件/Agents/Flows，Agents tab 带 subagentCount badge 点）。Agents tab 激活时渲染 `SubagentList.vue`（容器 `data-testid="subagent-list"`）：有记录时渲染卡片列表（`subagent-card`，含 running 态 spinner `subagent-card-spinner`、状态点、agent 名、id 前缀、turns/tokens/elapsed summary、task 描述）；无记录时渲染 `subagent-list-empty` 空态（Bot 图标 +「暂无后台任务」引导文案），另有加载失败/加载中态（`subagent-list-error` / `subagent-list-loading`）。Flows tab 激活时渲染 `workflow-list-empty` 空态占位。
+`Sidebar.vue` 的 SegmentedTab 现为 3 个等宽 tab（会话/文件/Plugins；原 Agents/Flows 两枚任务 tab 与各自 badge 已退役）。subagent 列的现行宿主 = composer 任务托盘：托盘 icon 计数（三态：进行中亮计数 / 仅历史 dim / 全无隐藏）+ hover 面板行集（分桶 tab `进行中/已结束` 两桶——判据 = `isRunningProjection` 及其取反；原「已收起」第三桶已随 2026-09-16 裁决随 intent 位删除退役，行内两段式取消）；原 `subagent-list` / `subagent-card` / `subagent-list-empty` 等容器随组件退役删除。
 
 Panel 层：进入 subagent 视图时 PanelHeader 显示返回入口 + subagent label（`${record.agent} · ${subagentId 前缀}`），MessageStream 以 `subagent:<id>` 虚拟 sessionId 透明复用，无需特殊处理。
 
-## §3 data-testid 清单
+## §3 data-testid 清单（**已退役，2026-09-16 —— 所属组件已删除，仅作历史对照**）
 
-testid 以组件 template 内 data-testid 属性为准（下表均已核实有效）。
+testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agents/Flows tab 与列表组件退役全部消失；现行 subagent 观察面 testid = 托盘组件的 `tray-*` 族（`tray-native-panel` / `tray-panel-tab-*` / `tray-subagent-row` / `tray-subagent-cancel[-confirm]` 等，以下表所属现行组件为准：`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`）。
 
-| testid | 所在组件 | 触发/可见条件 |
+| testid | 原所在组件 | 原触发/可见条件 |
 |--------|---------|--------------|
-| `subagent-list` | SubagentList.vue | Agents tab 激活时（恒定，容器） |
-| `subagent-card` | SubagentList.vue | `subagents.length > 0`，每条记录一个 |
-| `subagent-card-spinner` | SubagentList.vue | `record.status === 'running'` |
-| `subagent-list-empty` | SubagentList.vue | `subagents.length === 0` |
-| `subagent-list-loading` / `subagent-list-error` / `subagent-list-retry` | SubagentList.vue | 加载中 / 加载失败 / 重试按钮 |
-| `workflow-list-empty` | Sidebar.vue | workflows tab 激活时（恒定） |
-| `file-view-no-session` | Sidebar.vue | files tab + 无 active session |
+| `subagent-list` | SubagentList.vue（已删除） | Agents tab 激活时（恒定，容器） |
+| `subagent-card` | SubagentList.vue（已删除） | `subagents.length > 0`，每条记录一个 |
+| `subagent-card-spinner` | SubagentList.vue（已删除） | `record.status === 'running'` |
+| `subagent-list-empty` | SubagentList.vue（已删除） | `subagents.length === 0` |
+| `subagent-list-loading` / `subagent-list-error` / `subagent-list-retry` | SubagentList.vue（已删除） | 加载中 / 加载失败 / 重试按钮 |
+| `workflow-list-empty` | Sidebar.vue（已删除分支） | workflows tab 激活时（恒定） |
+| `file-view-no-session` | Sidebar.vue（现行） | files tab + 无 active session |
 
 > 注：PanelHeader 现无 `subagent-back-btn` / `panel-session-spinner` testid（v6 重构后已移除），返回入口与加载态需用文本/角色锚点。
 
@@ -930,8 +936,8 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 
 ## §4 关键链路概述
 
-- **加载列表**：Sidebar watch activeTab + activeId，tab 为 subagents 时经 `session.getSubagents` RPC → runtime 定位 session 文件 → extractor 解析 JSONL（提取 toolCalls / toolResults / bgNotifies / listItems）组装 `SubagentRecord[]` 回包 → 前端更新列表与 badge。
-- **选中 subagent**：卡片 emit select → 记录原 session id → 经 `session.getSubagentHistory` 拉取 subagent JSONL 转 `Message[]` → `chatStore.hydrate('subagent:<id>', messages)` → Panel 切到虚拟 session 渲染。
+- **加载列表**：托盘挂载 / 切 session 时（原触发点 = Sidebar watch activeTab + activeId）经 `session.getSubagents` RPC → runtime 定位 session 文件 → extractor 解析 JSONL（提取 toolCalls / toolResults / bgNotifies / listItems）组装 `SubagentRecord[]` 回包 → 前端更新托盘行集与计数（计数恒由行集长度派生）。WS 重连腿仍归 `useSidebar.onConnected` 重拉。
+- **选中 subagent**：托盘行点击 → 记录原 session id → 经 `session.getSubagentHistory` 拉取 subagent JSONL 转 `Message[]` → `chatStore.hydrate('subagent:<id>', messages)` → Panel 切到虚拟 session 渲染（原卡片 emit select 同链）。
 - **返回主 session**：恢复原 sessionId，Panel header 与消息流还原。
 
 ### sessionFile 后备查找（background 模式）
@@ -950,36 +956,33 @@ mock 层 `getSubagents` 返回空数组，故 mock 轨只能测空态。已有 v
 
 ```bash
 cd packages/renderer && npx vitest run src/__tests__/sidebar/SegmentedTab.spec.ts
-cd packages/renderer && npx vitest run src/__tests__/sidebar/SubagentList.spec.ts
+cd packages/renderer && npx vitest run src/__tests__/panel/tray/
 cd packages/runtime && npx vitest run test/subagent-extractor.test.ts
 cd packages/runtime && npx vitest run test/subagent-service.test.ts
 ```
 
-**测试矩阵**：
+**测试矩阵**（原 `SubagentList.spec.ts` 四行随组件退役删除；现行 subagent 列表交互断言 = 托盘组件测试）：
 
 | 用例 | 文件 | 层 | 覆盖点 |
 |------|------|---|--------|
-| SegmentedTab 4 tab 渲染 | `SegmentedTab.spec.ts` | 集成 | 4 个 Button 存在 + label/title |
+| SegmentedTab 三 tab 渲染 | `SegmentedTab.spec.ts` | 集成 | 会话/文件/Plugins 三枚 Button 存在 + label/title |
 | 计数显示 | `SegmentedTab.spec.ts` | 集成 | count > 0 显示数字 |
-| badge 显示/隐藏 | `SegmentedTab.spec.ts` | 集成 | subagentCount > 0 → 蓝点 |
+| badge 蓝点已移除 / Agents·Flows 两枚 tab 不存在 | `SegmentedTab.spec.ts` | 集成 | 数字为唯一计数手段；任务观察入口已迁 composer 任务托盘 |
 | 点击 tab 触发 | `SegmentedTab.spec.ts` | 集成 | emit update:modelValue |
 | encodeCwd 各平台 | `subagent-extractor.test.ts` | 单元 | mac/win/linux 路径编码 |
 | 同步提取 | `subagent-extractor.test.ts` | 单元 | syncResponse → status/turns/tokens |
 | 后台提取 + bg-notify | `subagent-extractor.test.ts` | 单元 | bgResponse + bg-notify 合并 |
 | sessionFile 后备查找 | `subagent-extractor.test.ts` | 单元 | null → 扫描目录匹配时间戳 |
 | 空文件/不存在 | `subagent-extractor.test.ts` | 单元 | 返回 [] |
-| SubagentList 卡片渲染 | `SubagentList.spec.ts` | 集成 | 卡片 DOM + 文本 |
-| 空状态渲染 | `SubagentList.spec.ts` | 集成 | subagent-list-empty |
-| 点击卡片 select | `SubagentList.spec.ts` | 集成 | emit select(subagentId) |
-| spinner 显示 | `SubagentList.spec.ts` | 集成 | running → Loader2 |
+| 托盘 subagent 行渲染 / 空态 / 点击开 drawer / 运行态 spinner | `__tests__/panel/tray/tray-native-panel.test.ts` | 集成 | `tray-subagent-row` 等托盘 testid（原卡片断言等价面） |
 
 ### 三视角覆盖核验
 
 | 视角 | 覆盖用例 |
 |------|---------|
 | 构建者（白盒） | encodeCwd / extractor 数据组装 / service 路由 |
-| 使用者（黑盒 DOM） | 卡片渲染 / 空态渲染 / 点击 select / 返回按钮 |
-| 观察者（首屏冒烟） | SegmentedTab 4 tab 存在 / SubagentList 容器存在 |
+| 使用者（黑盒 DOM） | 托盘行渲染 / 空态渲染 / 行点击 / 返回按钮 |
+| 观察者（首屏冒烟） | SegmentedTab 三 tab 存在 / 托盘 subagent 条目存在 |
 
 ## §6 非 MOCK 模式测试（real-track 手工 E2E）
 
@@ -999,12 +1002,12 @@ pnpm dev → Electron (--remote-debugging-port=9222)
 |------|------|------|
 | R-1 | 启动 `pnpm dev`，等 Electron 窗口渲染 | CDP 9222 可连，首窗加载 session 列表 |
 | R-2 | 点 sessions tab → 选 chat_project cwd 的 session | session 激活，panel 显示对话流 |
-| R-3 | 点 Agents tab | 列表加载，出现 subagent 卡片 |
-| R-4 | 检查卡片内容 | agent=general-purpose，status=done（绿点），task 描述可见 |
-| R-5 | 点 subagent 卡片 | panel 切换到对话流，header 显示返回按钮 + subagent label |
+| R-3 | hover composer 工具条的 subagent 托盘 icon（原：点 Agents tab） | 面板打开，出现 subagent 行集（进行中/已结束两桶分桶 tab，2026-09-16 裁决后无第三桶） |
+| R-4 | 检查行内容 | agent=general-purpose，status=done（绿点），task 描述可见 |
+| R-5 | 点 subagent 行 | panel 切换到对话流，header 显示返回按钮 + subagent label |
 | R-6 | 点返回按钮 | panel 恢复原 session |
-| R-7 | 点 Flows tab | 空态「暂无工作流」 |
-| R-8 | 切到无 subagent 的 session → Agents tab | 空态「暂无后台任务」 |
+| R-7 | 检查托盘 workflow icon | 有 run 时亮计数、面板打开可见行集（原 Flows tab 空态占位已退役） |
+| R-8 | 切到无 subagent 的 session | 托盘 subagent icon 不渲染（全无记录）或 dim 常驻（仅有历史）；面板空态可行动 |
 | R-9 | devtools console 无报错 | 无 `Cannot read property` / `WebSocket` 类错误 |
 
 ### 详细执行步骤
@@ -1026,7 +1029,7 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 若要做成 `npx playwright test` 自动化 spec，需要：
 1. 准备一个含 subagent 工具调用的 fixture session JSONL 文件
 2. real-track fixture 启动时把 fixture 拷入临时数据目录
-3. spec 中 activateSession → 切 tab → 断言
+3. spec 中 activateSession → 打开托盘条目 → 断言
 
 当前因 dev 数据目录已有真实数据且数据准备复杂度高，优先用手工 CDP 验证。
 
@@ -1036,9 +1039,9 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 |------|------|------|--------|
 | mock getSubagents 返回空数组 | mock E2E 无法测列表渲染 | 手工 real-track CDP 测试 | P2 |
 | 无自动化 real-track spec | CI 不跑 subagent E2E | 手工冒烟清单 + vitest 单测保底 | P2 |
-| workflow tab 无后端逻辑 | 无法测 workflow 数据渲染 | 当前为空态占位，Phase 3 补充 | P3 |
-| subagent badge 只按 count 判断 | running 状态不够精确 | 后续按 status 判断（代码注释已标注） | P3 |
-| 实时流式未接入 | 后台 subagent 完成不会实时更新列表 | 需刷新 tab 重拉，Phase 2 补 bg-notify WS 推送 | P2 |
+| （已关）原「workflow tab 无后端逻辑」 | — | workflow 观察入口现为托盘 workflow 面板（有后端链路），空态占位已退役 | — |
+| （已关）原「subagent badge 只按 count 判断」 | — | 计数口径现由 `useTrayCounts` 按 SSOT 谓词派生（`isRunningProjection` + origin 过滤） | — |
+| 实时流式未接入 | 后台 subagent 完成不会实时更新列表 | 现行推送链 = subagent 广播 + 托盘挂载/切 session 首拉兜底（原「刷新 tab 重拉」已退役） | P2 |
 
 ## §9 设计文档溯源
 
@@ -1051,32 +1054,34 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 ---
 
 
-> 覆盖：plugin 区「后台命令」L2 视图（BackgroundTaskListView：三桶筛选 + 两行式 item + 行内两段式终止）与 drawer bashTask tab（BackgroundTaskDetailPanel：元信息 / 输出跟随 / 终止）。
+> 覆盖：drawer bashTask tab（BackgroundTaskDetailPanel：元信息 / 输出跟随 / 终止）——**现行**；plugin 区「后台命令」L2 列表视图（BackgroundTaskListView：三桶筛选 + 两行式 item + 行内两段式终止）**已于 2026-09-16 随任务观察入口唯一化退役**，其列表形态迁 composer 任务托盘的 bash 面板（本节下方相关 testid 表已标退役，现行列表侧 testid 以托盘组件为准）。
 >
-> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10）。先读 [00 总览](00-overview.md)。
+> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10；含视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)。先读 [00 总览](00-overview.md)。
 
 ## §1 功能概述
 
 AI 把 bash 命令转后台执行后，任务落在 per-session registry.json。本功能提供用户可见可控面：
 
-- **列表**（Sidebar plugins tab →「后台命令」L2 tab）：三桶筛选（运行中/已结束/全部 + 计数，默认运行中）、两行式 item（状态 icon + 命令 + 耗时 / pid · exit）、running 行行内两段式终止（✕ → ✓）、点击行开 drawer；
+- **列表**（现行 = composer 任务托盘的 bash 面板；原 = Sidebar plugins tab →「后台命令」L2 tab，已退役）：两桶筛选（运行中/已结束 + 计数，默认运行中；无「全部」桶）、两行式 item（状态 icon + 命令 + 耗时 / pid · exit）、running 行行内两段式终止（✕ → ✓）、点击行开 drawer；
 - **drawer 详情**（bashTask tab，第 8 tab）：命令全文（可复制）、元信息行（taskId · pid · 开始 · 时长 · exit · reason）、输出尾部（running 时 2s 跟随）、两段式终止按钮 + 回执分支 toast。
 
-数据链路：runtime `BackgroundTaskService` 直读 registry（拉取 RPC + 变更广播），renderer `useBackgroundTasks` per-session 分区。测试框架（vitest 用例）见 `packages/renderer/src/__tests__/components/background-task-list-view.test.ts` 与 `background-task-detail-panel.test.ts`。
+数据链路：runtime `BackgroundTaskService` 直读 registry（拉取 RPC + 变更广播），renderer `useBackgroundTasks` per-session 分区。测试框架（vitest 用例）：drawer 侧 `packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`；列表侧原组件测试文件（background-task-list-view.test.ts，renderer 组件测试目录下）已随视图退役删除，现行列表/计数断言 = `packages/renderer/src/__tests__/panel/tray/`（tray-native-panel / useTrayCounts）。
 
 ## §2 组件结构概述
 
-列表侧：`PluginViewContainer.vue`（NATIVE_VIEWS 路由，viewId='background-tasks'）挂 `BackgroundTaskListView.vue`（容器 `background-task-list`）：全量空态 `bg-task-empty`；有任务时渲染三桶筛选槽 `bg-task-filterbar`（`bg-task-filter-active|ended|all`，`data-active` 标当前桶）与 ScrollArea 列表——运行中空桶 `bg-task-bucket-empty`（含「查看全部」`bg-task-view-all`）、已结束空桶 `bg-task-bucket-empty-ended`、任务行 `bg-task-item`（点击开 drawer；行内含「全部」桶分段边界 `bg-task-group-divider`、状态 icon `bg-task-icon`、pid·exit 第二行 `bg-task-meta`、running 行行内两段式终止按钮 `bg-task-kill`→确认态切换为 `bg-task-kill-confirm`）。另有损坏/断连横幅 `bg-task-corrupt-banner` / `bg-task-disconnect-banner`。
+列表侧（**已退役，2026-09-16**）：原由 `PluginViewContainer.vue`（NATIVE_VIEWS 路由，viewId='background-tasks'）挂 `BackgroundTaskListView.vue`（容器 `background-task-list`），含全量空态、三桶筛选槽、两行式任务行与行内两段式终止、损坏/断连横幅。该路由表、视图组件与筛选分区 composable 均已删除；同一形态（两桶筛选槽 + 两行式 item + 行内两段式终止 + 可行动空态）现由 composer 任务托盘的 bash 面板承载（`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`，testid `tray-bash-*` / `tray-panel-*`）：托盘为运行中/已结束两桶（无「全部」桶），面板内恒渲染筛选槽与单一空态（默认桶空 → 「查看已结束 (N)」显式切桶），无原「全量空态不渲染筛选条」分支（全量无记录时托盘条目整体不渲染，面板不可达）；分桶判据仍是同一 SSOT（`packages/renderer/src/lib/background-task-bucket.ts`）。
 
-Drawer 侧：`DrawerPanel.vue` tab 栏新增 bashTask 值（`drawer-tab-bashTask`，复用既有 `drawer-tab-{key}` 模板），`PanelContainer.vue` v-if 分支挂 `BackgroundTaskDetailPanel.vue`（容器 `bash-task-detail`）：命令全文 `bash-task-command` + 复制按钮 `bash-task-copy`、元信息行 `bash-task-meta`（状态色点 `bash-task-status-dot` + taskid/pid/started/duration/exit/reason 各 span）、输出区三态互斥（`bash-task-output` 有内容且 running 时 2s 跟随 / `bash-task-output-unavailable` 文件已清理 / `bash-task-output-empty` loaded 且空）、running 时的两段式终止按钮 `bash-task-kill`（`data-armed="true"` 为确认态）。
+Drawer 侧（现行）：`DrawerPanel.vue` tab 栏 bashTask 值（`drawer-tab-bashTask`，复用既有 `drawer-tab-{key}` 模板），`PanelContainer.vue` v-if 分支挂 `BackgroundTaskDetailPanel.vue`（容器 `bash-task-detail`）：命令全文 `bash-task-command` + 复制按钮 `bash-task-copy`、元信息行 `bash-task-meta`（状态色点 `bash-task-status-dot` + taskid/pid/started/duration/exit/reason 各 span）、输出区三态互斥（`bash-task-output` 有内容且 running 时 2s 跟随 / `bash-task-output-unavailable` 文件已清理 / `bash-task-output-empty` loaded 且空）、running 时的两段式终止按钮 `bash-task-kill`（`data-armed="true"` 为确认态）。
 
 ## §3 data-testid 清单
 
-testid 以组件 template 内 data-testid 属性为准（下表均已核实有效）。
+testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有效；列表表为已退役组件的历史对照）。
 
-### 列表（BackgroundTaskListView.vue）
+### 列表（BackgroundTaskListView.vue —— 已退役删除，下表仅作历史对照）
 
-| testid | 触发/可见条件 |
+> 所属组件已随 L2 视图退役（2026-09-16），下列 testid 不再存在。现行列表侧 testid 见托盘组件（`TrayNativePanel.vue`）：`tray-native-panel`（`data-kind="bash"`）、`tray-panel-tabs` / `tray-panel-tab-{running|ended}` / `tray-panel-tab-count-*`、`tray-bash-row`、`tray-bash-icon`、`tray-bash-meta`、`tray-bash-kill` 与确认态 `tray-bash-kill-confirm`、`tray-bash-corrupt-banner` / `tray-bash-disconnect-banner`、`tray-panel-error` / `tray-panel-retry` / `tray-panel-loading`。
+
+| 原 testid | 原触发/可见条件（历史） |
 |--------|--------------|
 | `background-task-list` | 视图挂载时恒显（容器） |
 | `bg-task-empty` | 全量空态（loaded 且 0 条；此时不渲染筛选条） |
@@ -1112,13 +1117,13 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 
 ### 测试注意
 
-- running 计时用 fake timers（列表 1s tick / drawer 输出跟随 2s interval）；
+- running 计时用 fake timers（列表 1s tick / drawer 输出跟随 2s interval；托盘面板行同款）；
 - 杀进程是 mock RPC，不会真杀——行内终止断言两段式状态机（testid 切换）而非进程消失；
-- i18n key 全表见 `packages/renderer/src/i18n/locales/{zh-CN,en-US}/{panel,sidebar}.ts`（`panel.sideDrawer.bashTask*` 21 个 + `sidebar.backgroundTaskList.*` 18 个）；文案断言用 override `t(key)` 注入而非依赖 locale 文件（组件测试既有形态）。
+- i18n key：drawer 侧见 `packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`（`panel.sideDrawer.bashTask*`）；列表/计数侧见 `tray.ts`（`panel.tray.*`，聚合器展开并入 panel 命名空间）——原 `sidebar.backgroundTaskList.*` 20 键（filter 3 + 直属字符串 9 + status 6 + 横幅 2）已随 L2 视图退役删除。文案断言用 override `t(key)` 注入而非依赖 locale 文件（组件测试既有形态）。
 
 ## §4 相关文档
 
-- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7）
-- SideDrawer 宿主：[02-panels-sidebar.md](02-panels-sidebar.md)（bashTask tab 为第 8 tab）
-- 侧栏面板范式：[02-panels-sidebar.md](02-panels-sidebar.md)（Agents tab 同构先例）
-- 组件测试：`packages/renderer/src/__tests__/components/background-task-list-view.test.ts`（12 用例）/ `background-task-detail-panel.test.ts`（13 用例）
+- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
+- SideDrawer 宿主：bashTask tab 为第 8 tab（drawer 4 点接线见 background-task-sidebar-view.md D5）
+- 列表面范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
+- 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（16 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）

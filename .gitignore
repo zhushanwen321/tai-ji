@@ -35,6 +35,8 @@ resources/plugins/*/index.js
 # pi extension 相关内容（如 extension-dependencies.json）不在 .pi/ 下，是 npm 包。
 .pi/*
 !.pi/workflows/
+# workflow-script generate 的临时草稿目录（机器生成，不入库；save 后才落到 .pi/workflows/）
+/.pi/workflows/.tmp/
 
 
 # Electron binary cache (immutable, shared across worktrees)

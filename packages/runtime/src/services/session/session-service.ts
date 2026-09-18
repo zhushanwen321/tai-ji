@@ -48,7 +48,6 @@ import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, r
 // Facade 保留一行委托，语义注释见各新模块。
 import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
-import { persistModelBinding, readModelBinding } from '../../infra/pi/session-file-utils.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
@@ -86,6 +85,10 @@ import type { ReclaimSeat } from './idle-pi-reaper.js'
 import { RECLAIM_SEAT_WAIT_OBSERVE_MS } from './idle-pi-reaper.js'
 import { RespawnOrchestrator } from './pi-respawn.js'
 import { MessageDispatcher } from './message-dispatcher.js'
+// [A1 接线] skill 注入映射源（skill-reload-nondestructive D7）：records/dispatcher 的
+// SkillInjector 共享同一晚绑定占位，组合根在 SkillRegistry 构造后 bind 真源（构造顺序环
+// 见 LateBoundSkillSource 注释）。
+import { LateBoundSkillSource, SkillInjector, type SkillMappingSource } from './skill-injector.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
 import { SessionScanner } from './session-scanner.js'
 import { AttachmentStore } from './attachment-store.js'
@@ -112,6 +115,8 @@ import type { ForceQuitSource, UserStoppedMarkStore } from './types.js'
  * 本 Facade 值导入全部子模块，反向 import 成环），统一经 event-interpreter.ts 的
  * userStoppedGate 门面存取——本构造器经 gate.configure 注入下方 store 实现与 abort 能力。
  */
+// @data-owner #30（data-source-registry.md）：跨 ManagedSession 生命周期存活的用户停止
+// 意图标记（模块级 Map 是存在理由而非偶发形态，D4）；写方唯一 = userStoppedMarkStore。
 const userStoppedMarks = new Map<string, { source: ForceQuitSource; markedAt: number }>()
 
 /** 宿主 Map 的存取实现（gate.configure 注入 + 测试直断言用）。 */
@@ -136,9 +141,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
    * 惰性恢复共享，join 语义见 RespawnOrchestrator.ensureRestored）。
    */
-  private readonly lifecycle: SessionLifecycle
-  private readonly dispatcher: MessageDispatcher
-  private readonly scanner: SessionScanner
+  // H2 后组装字段在 assembleSubmodules/registerSessionExitHandler 内赋值——TS strict
+  // 的 readonly/definite-assignment 分析不跨方法，故声明为 `!`（先例 server.ts 同款），
+  // 赋值只发生在构造器调用的组装方法内，实例外不可见（private）。
+  private lifecycle!: SessionLifecycle
+  private dispatcher!: MessageDispatcher
+  private scanner!: SessionScanner
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -147,15 +155,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 先于本 Facade 剩余订阅体注册，播种顺序与迁移前逐一等价）；销毁经 onSessionDisposed
    * 由 removeSessionEntry 第 ⑤ 步直调。
    */
-  private readonly projection: SessionStateProjection
+  private projection!: SessionStateProjection
   /** trace/system-prompt 同步域（S4 迁出，构造器内组装 deps——见构造器注释） */
-  private readonly traceSync: TraceSync
+  private traceSync!: TraceSync
   /**
    * 模型/思考等级控制域（S6 迁出至 session-model-control.ts）：switchModel /
    * setThinkingLevel 的 RPC + 回执普查 + 实例失效 + 直写双投影。销毁无域状态（不持
    * per-session Map），无 onSessionDisposed。
    */
-  private readonly modelControl: SessionModelControl
+  private modelControl!: SessionModelControl
   /**
    * ConfigService 引用（组合根注入）。getReplaceSystemPrompt 委托用——
    * spawn pi 时透传用户配置的替换系统提示词。经 setter 注入而非构造参数，与
@@ -218,6 +226,18 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private messageBus: IMessageBus | null = null
   /**
+   * [A1 接线] skill 注入映射源的晚绑定占位（skill-reload-nondestructive D7 切源）。
+   *
+   * 为什么是占位而非构造注入：SkillRegistry 与 SessionService 互为依赖（registry 的
+   * 变更通知要 sessionService 的活跃表/cwd，sessionService 的注入器要 registry 的扫描），
+   * 构造顺序无解——SessionService 构造期持本占位组装 records/dispatcher 的 SkillInjector
+   * （两者共享同一实例，bind 后同源），组合根在 SkillRegistry 构造后调
+   * bindSkillMappingSource 绑真源（先于 server.start，生产不可达未绑定态；未绑定读取
+   * → injector 侧 mapping_unavailable notice，D8 禁止静默）。经 setter 而非构造参数，
+   * 同 setMessageBus 模式——避免破坏 SessionService 的 25+ 测试构造调用点。
+   */
+  private readonly skillSource = new LateBoundSkillSource()
+  /**
    * 写 2 挂钩的投影专用 bus 视图缓存：getter 每次 publish 都会读，按底层 bus 身份
    * memoize（setMessageBus 晚期注入/替换后自动重建）。
    */
@@ -243,14 +263,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    *    adapterFactory——EventAdapter 第三参，非本文件领地）；
    * ③ removeSessionEntry 汇聚点 unwatch（D8③，与 reaper 触发面 A 同挂点）。
    */
-  readonly backgroundTasks: BackgroundTaskService
+  backgroundTasks!: BackgroundTaskService
   /**
    * history 读编排域（S6 迁出至 history-rebuild-cache.ts）：getHistory 三分支重建
    * （缓存增量/RPC 全量/尾读降级）+ [u6] 游标翻页 + inflight 合并（getFullHistory 文件
    * 直读已随全量通路退役）。销毁经 onSessionDisposed 由 removeSessionEntry 第 ⑤ 步直调
    * （与 traceSync/projection/records 并列）。
    */
-  private readonly historyReader: SessionHistoryReader
+  private historyReader!: SessionHistoryReader
   /**
    * subagent/workflow 记录域（S6/D2③ 迁出至 session-records.ts）：W18 派生缓存族 +
    * 磁盘读侧/动作/引擎配置。onSessionRegistered 订阅者 = records 自身（构造器组装期
@@ -258,7 +278,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * Facade 订阅体内顺序逐一等价）；销毁经 onSessionDisposed 由 removeSessionEntry
    * 第 ⑤ 步直调（与 traceSync/projection 并列）。
    */
-  private readonly records: SessionRecords
+  private records!: SessionRecords
   /**
    * pi 崩溃自动恢复编排（crash-resilience §3.3 D7，u8-pi-respawn）。构造器内组装（deps 窄
    * 注入，同 traceSync/records 形态），三条挂点：
@@ -271,7 +291,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * messageBus 经 getter 动态读（setMessageBus 晚期注入语义，同 registerDeps 模式——未注入
    * 时 publish no-op）。
    */
-  private readonly respawn: RespawnOrchestrator
+  private respawn!: RespawnOrchestrator
   /**
    * 销毁收敛链编排（T8 有限拆分 2026-09，行为保持抽取）：removeSessionEntry 汇聚链的
    * 编排段（D1 台账 → checkpoint/mirror 摘除 → … → bus.clearSession 全序列 + 跨文件 B5
@@ -280,7 +300,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 与测试 spyOn 锁定面不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
    * 阅读顺序自然）。
    */
-  private readonly entryRemoval: SessionEntryRemovalOrchestrator
+  private entryRemoval!: SessionEntryRemovalOrchestrator
   /**
    * per-sid 最近查看时间戳（idle pi reclamation 设计 D2 #6，u1b）。
    *
@@ -316,6 +336,25 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     private readonly workspaceService: WorkspaceService,
     messageBus?: IMessageBus,
   ) {
+    // 构造器瘦身（H2）：9 子模块组装 + 创建侧订阅接线与 pi 崩溃 exit 编排分离为两个
+    // 私有方法（行为零变化——语句顺序逐行保持，时序不变式钉在各方法 JSDoc）。
+    this.assembleSubmodules(messageBus)
+    this.registerSessionExitHandler()
+  }
+
+  /**
+   * 子模块组装 + 创建侧订阅接线（H2 从构造器抽取，行为零变化——语句顺序逐行保持）。
+   *
+   * 本方法体内语句顺序 = 装配时序契约，重排前逐条核对：
+   * - lifecycle 先于 dispatcher 构造：lifecycle 的 forceQuitFallback 闭包引用
+   *   this.dispatcher，惰性求值（restore 发生在全部组装后，dispatcher 已就绪）；
+   *   projection / records 实例必须先构造后 subscribe。
+   * - onSessionRegistered 订阅顺序（组装根，S3 seam→S5/S6 换订阅者，设计 D2②）：
+   *   projection（W7 播种）→ records（W18 缓存注册）→ reconciler（U6 对账，
+   *   fire-and-forget）→ checkpoint（D3）→ mirror（D5）两个旁路订阅——「播种 →
+   *   record 注册 → 对账」顺序与迁移前 Facade 订阅体内顺序逐一等价，不得重排。
+   */
+  private assembleSubmodules(messageBus?: IMessageBus): void {
     // 子模块注入 this(Facade 半构造时仅存引用,其方法在 Facade 完全构造后才被调用)。
     // registerDeps(S3/D2②):registerSession 装配依赖窄注入——send 闭包对晚期注入状态
     // (messageBus/onMessageComplete)经 getter 每次调用动态读,与原 Facade 内联闭包捕获
@@ -381,7 +420,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       fetchContext: (sessionId) => this.fetchContext(sessionId),
       persistSessionOutcome: (sessionId, outcome, reason) => this.persistSessionOutcome(sessionId, outcome, reason),
       tryPersistProjectBinding: (session) => this.tryPersistProjectBinding(session),
-      tryPersistModelBinding: (session) => this.tryPersistModelBinding(session),
     })
     // subagent/workflow 记录域（S6 迁出至 session-records.ts）：deps 窄注入——session 存在性
     // 经 lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -392,8 +430,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       pm: this.pm,
       sessionStore: this.sessionStore,
       hasSession: (sessionId) => this.lifecycle.has(sessionId),
+      // [A1 接线] subagentAction 的 skill 注入 project 扫描基准（与 getSessionCwd 同源）
+      getSessionCwd: (sessionId) => this.getSessionCwd(sessionId),
       getMessageBus: () => this.messageBus,
-    })
+    }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块
     // 最小规范化（流式 strip + 首行 cwd fallback，见 restore-seeding.normalizeLargeSessionFileMinimal）。
@@ -462,7 +502,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         console.error(`[session-service] mirror preset failed (sessionId=${sessionId}):`, e)
       }
     })
-    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
+    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus, new SkillInjector(this.skillSource))
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
 
     // 后台任务域组装（u-runtime-rpc①②）：广播回调经 this.messageBus 动态读（getter 语义，
@@ -495,6 +535,27 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       clearMessageBusSession: (sessionId) => this.messageBus?.clearSession(sessionId),
     })
 
+  }
+
+  /**
+   * pi 崩溃 exit 编排（H2 从构造器抽取，行为零变化——回调体语句顺序逐行保持）。
+   *
+   * 🔒 时序不变式（SSOT 钉在此处，重排前逐条核对）：
+   * - session.exited 的 messageBus.publish 必须先于 removeSessionEntry——后者内部调
+   *   bus.clearSession 清订阅者集合，clearSession 之后再 publish 等于送空集合，订阅
+   *   renderer 一条也收不到（wave:perf-w07/w09：进程退出标记 dead + toast 丢失）。
+   * - occupancy 'full-reset' 行同样必须在 removeSessionEntry（内部 bus.clearSession）
+   *   之前发布——同因 clearSession 断流，重连 renderer 会回放出永久占用投影
+   *   （session-dead-structural-fixes D2 挂点，u3b）。
+   * - W4 stopped 终态写在 removeSessionEntry 之后：session 是 delete 前缓存的引用，
+   *   persistSessionOutcome 的内部 get 在条目删除后返回 undefined，不能走它（首终态
+   *   优先语义见回调体内注释）。
+   * - respawn.schedule 收尾是设计裁决：本链天然不含 forceQuitSession（dispatcher 手工
+   *   编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 拦截）——
+   *   用户手动强杀的 session 结构性不触发自动恢复（crash-resilience D7，A7 反向验收）；
+   *   启动前守卫（active / in-flight restore / 熔断）在 schedule 内。
+   */
+  private registerSessionExitHandler(): void {
     // 进程崩溃清理:协调 adapter detach / Map 删 / 列表刷新 / session.exited 广播
     this.pm.onSessionExit((sessionId, code, stderr) => {
       const session = this.lifecycle.get(sessionId)
@@ -638,6 +699,21 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   setMessageBus(bus: IMessageBus): void {
     this.messageBus = bus
     this.dispatcher.setMessageBus(bus)
+  }
+
+  /**
+   * [A1 接线] 绑定 skill 注入映射源真源（组合根在 SkillRegistry 构造后调用一次，
+   * skill-reload-nondestructive D7）。records/dispatcher 的 SkillInjector 构造期已持
+   * skillSource 占位，bind 后共享同源。getter 供组合根为 delivery registry 组装
+   * 同源 injector（三个注入挂点一份映射源，单权威）。
+   */
+  bindSkillMappingSource(source: SkillMappingSource): void {
+    this.skillSource.bind(source)
+  }
+
+  /** [A1 接线] skillSource 占位的对外只读面（组合根 delivery registry 组装用）。 */
+  get skillMappingSource(): SkillMappingSource {
+    return this.skillSource
   }
 
   /**
@@ -1011,7 +1087,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /** agent call JSONL 路径（展示型，找不到返回空串；实现迁 session-records.ts）。 */
   async getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string> { return this.records.getAgentCallFilePath(sessionId, agentCallSessionId) }
   /** workflow 生命周期操作（经扩展 slash command，实现迁 session-records.ts）。 */
-  async workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
+  async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
   /** subagent 生命周期/定向消息操作（encodeDirectiveText 编码，实现迁 session-records.ts）。 */
   async subagentAction(
     sessionId: string,
@@ -1326,38 +1402,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     if (persisted || !projectId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
     this.sessionStore.persistProjectBinding(s.sessionFilePath, projectId)
     ;(s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted = true
-  }
-
-  /**
-   * model binding sidecar 补写兜底（D1 写点③延迟 flush 语义修正，Gate B 端到端实证，
-   * 2026-09-04）。镜像 tryPersistProjectBinding（D14 同款问题同款解法）。
-   *
-   * 背景：写点③（lifecycle create 路径）受 pi 延迟写入窗口约束——create 瞬间
-   * sessionFilePath 路径有值但 .jsonl 文件未 flush（pi 0.84.4 实装：SessionManager
-   * 构造即生成确定性路径），persistModelBinding 内部 existsSync 守卫恒跳过，且 pi flush
-   * 后没有任何补写点。真实 app 实证：新建并对话过的 session 目录里无 .model.json，重启后
-   * composer 回落全局默认（内存生效值丢失）；同 session 内显式切模型（写点①）立即产出
-   * sidecar，证明写点本身工作、缺的只是 create 窗口的补写时机。
-   * [V9-④ 根修注] preset/project/agent 三绑定已放行 create 写点（skipJsonlExistsGuard），
-   * model 写点保留守卫语义不改——本补偿已实测工作（V1 文件断言由其满足），无需扩大
-   * create 时序行为面。
-   *
-   * 本方法在 turn_end（主路径）/ agent_end（兜底）时补写——此时 pi 已完成 flush，文件
-   * 存在，写 sidecar 安全。文件仍不存在 → 跳过（下次兜底）。
-   *
-   * 缺失才写：readModelBinding 命中（写点①⑤写的新值或历史值）→ 视为已有，打标跳过
-   * 不覆写——sidecar 新鲜度归写点①⑤所有，本方法只补「从没写过的空洞」。
-   *
-   * 用 modelBindingSidecarEnsured 标记防重复写（session 级运行时标记，同
-   * projectBindingPersisted 形态，不进 toSummary）。
-   */
-  private tryPersistModelBinding(s: IManagedSessionView): void {
-    const view = s as IManagedSessionView & { modelBindingSidecarEnsured?: boolean }
-    if (view.modelBindingSidecarEnsured || !s.modelId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
-    if (!readModelBinding(s.sessionFilePath)) {
-      persistModelBinding(s.sessionFilePath, s.modelId, s.thinkingLevel ?? '')
-    }
-    view.modelBindingSidecarEnsured = true
   }
 
   /**

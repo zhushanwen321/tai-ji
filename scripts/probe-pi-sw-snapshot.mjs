@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/probe-pi-sw-snapshot.mjs
 //
-// ⛔1 实施前基线探针（docs/design/subagent-core-sink-design.md §3.3 D10 / §5.4 ⛔1）：
+// ⛔1 实施前基线探针（D10 / §5.4 ⛔1）：
 // 对真实 pi agentDir 产出两份快照，作为 subagent-core sink 收口 wave（u-probe-verify）
 // 「实施前后 diff 逐项一致」的外部事实锚。
 //

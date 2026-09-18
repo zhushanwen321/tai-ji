@@ -98,6 +98,11 @@ vi.mock("../interface/bg-notify-render.ts", () => ({
 vi.mock("../interface/tool-workflow.ts", () => ({
   registerWorkflowTool: mockRegisterWorkflowTool,
 }));
+// subagents 批量 tool（u2）：与其余注册调用同一处理——本文件的 fake pi 无
+// registerTool（挂载用例只需 factory 跑到 session 生命周期装配）。
+vi.mock("../interface/tool-subagents.ts", () => ({
+  registerSubagentsTool: vi.fn(),
+}));
 vi.mock("../interface/tool-workflow-script.ts", () => ({
   registerWorkflowScriptTool: vi.fn(),
 }));

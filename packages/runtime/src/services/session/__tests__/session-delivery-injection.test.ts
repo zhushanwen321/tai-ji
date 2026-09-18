@@ -122,10 +122,11 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     // skillNotice 零发布；occupancy 帧是 D2 挂点迁移后的合法投影输出（'dispatching'），
     // 不在本断言否定面内（顺序契约用例已单独锁定）
     expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
-    // 真 SkillInjector：无标记在 parseSkillMarkers 短路，mock client 无 getCommands
-    // 也不发起 RPC（若发起即 TypeError 翻红）
+    // 真 SkillInjector：无标记在 parseSkillMarkers 短路，不触达映射源与任何 RPC
+    //（映射源若被读取即翻红——stub 计数断言在下方）
     const { createSessionDeliveryRegistry: createReal } = await import('../session-delivery-registry.js')
     const { SkillInjector } = await import('../skill-injector.js')
+    let sourceReads = 0
     const realClient = { prompt: vi.fn(async () => ({})) }
     const real = createReal(
       {
@@ -135,9 +136,21 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
         recordWorkspace: () => {},
         getMessageBus: () => null,
       },
-      new SkillInjector(),
+      // [A1 接线] D7 切源后 SkillInjector 构造必传映射源（空扫描 stub：本用例只走
+      // 无标记 no-op 短路，读取计数恒 0）
+      new SkillInjector({
+        getGlobalSkills: () => {
+          sourceReads++
+          return []
+        },
+        getProjectSkills: async () => {
+          sourceReads++
+          return []
+        },
+      }),
     )
     await real.sendDirect('s1', '纯文本无标记')
+    expect(sourceReads).toBe(0)
     expect(realClient.prompt).toHaveBeenCalledWith('纯文本无标记', undefined, undefined)
   })
 })

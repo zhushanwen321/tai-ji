@@ -139,28 +139,28 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("[U5] onParentFork：running record 自动收起（settle idle + interrupted-by-parent + intent=archived + 放弃轮标记，不终态化留内存可寻回）", () => {
+  it("[U5] onParentFork：running record 编排性收口（settle idle + interrupted-by-parent + 放弃轮标记，不终态化留内存可续聊）", () => {
     const record = makeRunningRecord("sa-fork-1");
     store.register(record);
 
     const count = service.onParentFork();
 
     expect(count).toBe(1);
-    // [U5 / §3.2.5 编排性关闭行] settle 回 idle（不终态化）+ intent 翻转 archived
+    // [U5 / §3.2.5 编排性关闭行] settle 回 idle（不终态化）+ markSettledOut 收口落账
+    //（2026-09-16 裁决：意愿字段已全链路删除，收口不写任何 intent 位）
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
     expect(record.closedReason).toBeUndefined();
-    expect(record.intent).toBe("archived");
     expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
     // 在飞 controller 立即打断
     expect(record.controller?.signal.aborted).toBe(true);
-    // record 留内存（archived ≠ 内存回收——旧 session 树内 message 可寻回续聊；
-    // listAllActive 只收 running——settle 后离开 running 集，getMutable 仍可达）
+    // record 留内存（settle ≠ 内存回收——旧 session 树内 message 可续聊；
+    // listRunningMutable 只收 running——settle 后离开 running 集，getMutable 仍可达）
     expect(store.getMutable("sa-fork-1")).toBeDefined();
-    expect(store.listAllActive()).toHaveLength(0);
+    expect(store.listRunningMutable()).toHaveLength(0);
   });
 
-  it("[U5] onParentNew：running record 自动收起（interrupted-by-parent）", () => {
+  it("[U5] onParentNew：running record 编排性收口（interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-new-1");
     store.register(record);
 
@@ -169,11 +169,10 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     expect(count).toBe(1);
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
-    expect(record.intent).toBe("archived");
     expect(store.getMutable("sa-new-1")).toBeDefined();
   });
 
-  it("多个 running record 全部级联收起，返回 count 与 record 数一致", () => {
+  it("多个 running record 全部级联收口，返回 count 与 record 数一致", () => {
     const records = [
       makeRunningRecord("sa-multi-1"),
       makeRunningRecord("sa-multi-2"),
@@ -187,13 +186,12 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     for (const r of records) {
       expect(r.status).toBe("idle");
       expect(r.stopReason).toBe("interrupted-by-parent");
-      expect(r.intent).toBe("archived");
     }
-    // settle 后离开 running 集（listAllActive 只收 running），getMutable 全员可达
-    expect(store.listAllActive()).toHaveLength(0);
+    // settle 后离开 running 集（listRunningMutable 只收 running），getMutable 全员可达
+    expect(store.listRunningMutable()).toHaveLength(0);
   });
 
-  it("级联收起对每个被关 record 发 pending:unregister（[U5] reason=archived——归档点补发注销）", () => {
+  it("级联收口对每个被关 record 发 pending:unregister（[U5] reason=completed——收口点补发注销）", () => {
     const record = makeRunningRecord("sa-pending-1");
     store.register(record);
 
@@ -201,17 +199,17 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
 
     expect(eventsEmit).toHaveBeenCalledWith("pending:unregister", {
       id: "sa-pending-1",
-      reason: "archived",
+      reason: "completed",
     });
   });
 
-  it("幂等：无活跃 record 返回 0；级联后再次调用返回 0（record 已归档）", () => {
+  it("幂等：无活跃 record 返回 0；级联后再次调用返回 0（record 已收口离场）", () => {
     expect(service.onParentNew()).toBe(0);
 
     const record = makeRunningRecord("sa-idem-1");
     store.register(record);
     expect(service.onParentFork()).toBe(1);
-    expect(service.onParentFork()).toBe(0); // 已 closed + archived，不重复关
+    expect(service.onParentFork()).toBe(0); // 已收口离场，不重复关
   });
 });
 
@@ -280,7 +278,7 @@ describe("SP-4 index.ts 事件接线", () => {
     expect(registered.has("session_before_tree")).toBe(false);
   });
 
-  it("[M2] session_before_switch(reason:'new') 触发 /new 级联：record 自动收起（[U5] interrupted-by-parent + archived）", () => {
+  it("[M2] session_before_switch(reason:'new') 触发 /new 级联：record 编排性收口（[U5] interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-wire-new-1");
     store.register(record);
     const onParentNewSpy = vi.spyOn(service, "onParentNew");
@@ -293,7 +291,6 @@ describe("SP-4 index.ts 事件接线", () => {
     expect(onParentNewSpy).toHaveBeenCalledTimes(1);
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
-    expect(record.intent).toBe("archived");
     expect(store.getMutable("sa-wire-new-1")).toBeDefined();
   });
 
@@ -316,7 +313,7 @@ describe("SP-4 index.ts 事件接线", () => {
     expect(store.getMutable("sa-wire-resume-1")).toBe(record);
   });
 
-  it("session_before_fork 触发 /fork 级联：record 自动收起（[U5] interrupted-by-parent + archived）", () => {
+  it("session_before_fork 触发 /fork 级联：record 编排性收口（[U5] interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-wire-fork-1");
     store.register(record);
     const onParentForkSpy = vi.spyOn(service, "onParentFork");
@@ -329,7 +326,6 @@ describe("SP-4 index.ts 事件接线", () => {
     expect(onParentForkSpy).toHaveBeenCalledTimes(1);
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
-    expect(record.intent).toBe("archived");
     expect(store.getMutable("sa-wire-fork-1")).toBeDefined();
   });
 

@@ -1,12 +1,17 @@
 /**
  * useSidebarSessionActions —— Sidebar session 操作 handler 集合（从 Sidebar.vue 提取，减行用）。
  *
- * 职责：session 选择/新建/重命名/删除 + folder 删除 + branch 停止 + 列表重试 + SearchModal
- * 接线（searchDeps/onOpenSearchDrawer，复用 selectSession/newSession/goOverview 注入）的事件处理。
- * 对称于 useSidebarSubagentActions。跨 store 编排（chat abort / subagent / workflow load）在此层完成。
+ * 职责：session 选择/新建/重命名/删除 + folder 删除 + branch 停止 + 强制退出 + 列表重试
+ * + SearchModal 接线（searchDeps/onOpenSearchDrawer，复用 selectSession/newSession/goOverview
+ * 注入）的事件处理。跨 store 编排（chat abort / 队列回收）在此层完成。
+ *
+ * [2026-09-16 侧栏任务 tab 退役] 原 subagent/workflow 列表 retry handler
+ * （onRetrySubagents/onRetryWorkflows）与随之的 subagent/workflow store 依赖已删除——
+ * 两列表的挂载面（Agents/Flows tab）退役后无调用方，列表重拉腿现归 composer 任务托盘
+ * （useTrayCounts 的 retry + watch(sessionId) 首拉）。
  *
  * 依赖注入说明：useSidebar 的方法（selectSession/newSession/goOverview/loadSessions/renameSession/
- * deleteSession/deleteFolder/focusedSessionId）由调用方注入——useSidebar 非单例（每次调用
+ * deleteSession/deleteFolder）由调用方注入——useSidebar 非单例（每次调用
  * createSessionStore + createUseSession 新建实例），不能在本 composable 内重复调用。
  * renameOpen/targetSessionId 是 RenameSessionDialog 的本地 UI ref，由 Sidebar.vue 创建并注入，
  * onRenameSession 设置这两个 ref 打开 dialog。useChat/useToast/useI18n/useSearchModalDeps/
@@ -19,16 +24,13 @@ import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import { useSearchModalDeps } from '@/composables/features/search/useSearchModalDeps'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
-import { useSubagentStore } from '@/stores/subagent'
 import { useSessionStore } from '@/stores/session'
-import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { useI18n } from 'vue-i18n'
 
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
-  focusedSessionId: Ref<string | null>
   selectSession: (id: string) => Promise<void>
   /** dead session 重开（显式 restore RPC），sidebar 点击 dead session 时分流到此 */
   restoreSession: (id: string) => Promise<void>
@@ -48,7 +50,6 @@ export interface UseSidebarSessionActionsOptions {
 
 export function useSidebarSessionActions(options: UseSidebarSessionActionsOptions) {
   const {
-    focusedSessionId,
     selectSession,
     restoreSession,
     newSession,
@@ -63,8 +64,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   } = options
   const { t } = useI18n()
   const { error: toastError, info: toastInfo } = useToast()
-  const subagentStore = useSubagentStore()
-  const workflowStore = useWorkflowStore()
   const { abort: abortSession, clearDeferFlushRetryTimer, clearQueueState } = useChat()
   // [session-dead 结构性修复 D3] forceQuit 队列回收的清队/注入通路（单例，App.vue scope 常驻）
   const compactQueue = useCompactQueue()
@@ -232,18 +231,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     void loadSessions()
   }
 
-  /** M1：重试加载 workflow 列表 */
-  function onRetryWorkflows(): void {
-    const sid = focusedSessionId.value
-    if (sid) void workflowStore.loadWorkflows(sid)
-  }
-
-  /** M1：重试加载 subagent 列表 */
-  function onRetrySubagents(): void {
-    const sid = focusedSessionId.value
-    if (sid) void subagentStore.loadSubagents(sid)
-  }
-
   /** [w5] SearchModal deps 组装（SearchDeps 壳适配）+ drawer/toast 接线（C-NT-3/C-W4-5）：file 跳转开 detail tab；confirm 失败 toast（复用顶部 toastError）。 */
   const searchDeps = useSearchModalDeps({
     selectSession,
@@ -268,8 +255,6 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onConfirmRename,
     onAssignProject,
     onRetryLoadSessions,
-    onRetryWorkflows,
-    onRetrySubagents,
     searchDeps,
     onOpenSearchDrawer,
   }

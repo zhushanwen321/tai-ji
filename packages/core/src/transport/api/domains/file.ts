@@ -1,5 +1,5 @@
 /**
- * File 域 —— file.tree/expand/read WS 封装（issues.md #3 / code-architecture §3.8）。
+ * File 域 —— file.tree/expand/read WS 封装。
  *
  * 请求-响应形态（对称 git.ts）：
  * - file.tree → 'file.tree:result' 同步 reply

@@ -457,6 +457,9 @@ function patchConsole(): void {
 function formatArgs(args: unknown[]): string {
   return args.map((a) => {
     if (typeof a === 'string') return a
+    // Error 实例必须落 stack（uncaughtException 兜底的排障命脉）：message/stack
+    // 不可枚举，JSON.stringify(Error) 恒为 "{}"，崩溃堆栈会整体丢失
+    if (a instanceof Error) return a.stack ?? a.message
     try {
       return JSON.stringify(a)
     } catch {

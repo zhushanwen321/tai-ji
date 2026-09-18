@@ -91,32 +91,6 @@ describe("renderBgNotifyMessage", () => {
     expect(joined).toContain("boom");
   });
 
-  it("批量 → 施加 customMessageBg + 边框，每条 agent 可见", () => {
-    const { theme, bgColors } = makeTheme();
-    const comp = renderBgNotifyMessage(
-      {
-        details: {
-          batch: true,
-          items: [
-            { status: "closed", agent: "alpha", id: "1", result: "r1" },
-            { status: "closed", agent: "beta", id: "2", error: "e2" },
-          ],
-        },
-      },
-      { expanded: false },
-      theme,
-    );
-    expect(comp).toBeDefined();
-    const lines = comp!.render(80);
-    const joined = lines.join("\n");
-    expect(bgColors).toContain("customMessageBg");
-    expect(joined).toContain("alpha");
-    expect(joined).toContain("beta");
-    // 边框
-    expect(lines[0]).toContain("╭");
-    expect(lines[lines.length - 1]).toContain("╰");
-  });
-
   it("closed + closedReason=cancelled → 内容含 cancelled（v4 B-1 cancelled 折入 closed）", () => {
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
@@ -299,22 +273,25 @@ describe("renderBgNotifyMessage", () => {
     expect(bgColors).toContain("customMessageBg");
   });
 
-  it("批量场景边框完整：所有中间行含 │", () => {
+  it("[collect 退役] 多行单条（result + patch + error 分行）边框完整：所有中间行含 │", () => {
+    // 原批量形态 { batch: true, items }（sync 批通知产物）随 notifyBatch 删除——
+    // 边框回归面改用单条 record 的多行渲染载荷驱动。
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {
         details: {
-          batch: true,
-          items: [
-            { status: "closed", agent: "alpha", id: "1", result: "r1" },
-            { status: "closed", agent: "beta", id: "2", error: "e2" },
-            { status: "closed", closedReason: "cancelled", agent: "gamma", id: "3" },
-          ],
+          status: "closed",
+          outcome: "completed",
+          agent: "alpha",
+          id: "1",
+          result: "line one\nline two",
+          patchFile: ".tmp/patch/sa-1.patch",
         },
       },
       { expanded: false },
       theme,
     );
+    expect(comp).toBeDefined();
     const lines = comp!.render(80);
     // 顶底边框
     expect(lines[0]).toContain("╭");
@@ -327,3 +304,4 @@ describe("renderBgNotifyMessage", () => {
     }
   });
 });
+

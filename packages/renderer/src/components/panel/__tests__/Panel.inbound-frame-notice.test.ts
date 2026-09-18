@@ -6,7 +6,7 @@
  * 走真实链路的可见性闭环：installInboundFrameGuard（App 装配层等价动作）→ core 丢帧回调
  * → 终止阀投影 → 真实 Panel 会话视图 → 提示条可见；切走切回 → 重试订阅恰好一次 + 提示消失。
  *
- * Mock 策略（Panel.widget-area.test.ts 同款最小闭合集）：
+ * Mock 策略（Panel 挂载测试最小闭合集，同 Panel.dead-diagnostics-export.test.ts）：
  * - mock core：捕获 onInboundFrameDropped 回调（用真实 useInboundFrameGuard 消费它）+
  *   retryInboundDroppedSession/subscribeSession 调用断言；
  * - mock '@/lib/ipc'（reportRendererLog）——上报面非本用例关注点（unit 文件已覆盖）；
@@ -22,7 +22,6 @@ import { defineComponent, h, ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { InboundFrameDroppedInfo } from '@taiji/core'
 import { ROOT_PANEL_ID, usePanelStore } from '@/stores/panel'
-import { VIEW_HOST_SOURCE_KEY, type ViewHostSource } from '@taiji/ui/extension-host'
 import Panel from '../Panel.vue'
 import {
   _resetInboundFrameGuardForTest,
@@ -57,7 +56,7 @@ const chatMock = vi.hoisted(() => ({
   isActive: vi.fn(() => false),
   isCompacting: vi.fn(() => false),
   isRespawnPending: vi.fn(() => false),
-  // occupancy 投影读口（turn-progress 消费；缺省全 idle，对齐 store.getOccupancy 无记录缺省）
+  // occupancy 投影读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
   getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
   failedHistory: new Map<string, boolean>(),
 }))
@@ -93,12 +92,6 @@ vi.mock('@/composables/useExtensionUI', () => ({
   askUserFilter: () => true,
 }))
 
-/** WidgetArea inject 源（无 view：不干扰提示条断言） */
-const emptyWidgetSource: ViewHostSource = {
-  getViewIds: () => [],
-  getView: () => undefined,
-}
-
 const MessageStreamStub = defineComponent({
   name: 'MessageStream',
   render: () => h('div', { 'data-testid': 'message-stream-stub' }),
@@ -109,7 +102,6 @@ function mountPanel(sessionId: string) {
     props: { panelId: 'p1', sessionId, sessionDir: '/tmp/x' },
     global: {
       plugins: [createPinia()],
-      provide: { [VIEW_HOST_SOURCE_KEY as symbol]: emptyWidgetSource },
       stubs: { MessageStream: MessageStreamStub, Composer: true, Landing: true, AskUserOverlay: true },
     },
   })

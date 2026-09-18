@@ -33,9 +33,9 @@ export interface ScannedSessionMeta {
   spawnSource?: 'user' | 'agent'
   /** 父 agent session id（从 .agent.json sidecar 读，agent-managed-session，与 infra/pi/session-file-utils 版本对齐）。 */
   parentAgentSessionId?: string
-  /** session 绑定的模型 id（从 .model.json sidecar 读，model binding，与 infra/pi/session-file-utils 版本对齐）。 */
+  /** session 绑定的模型 id（反向读 session JSONL 真源提取，model binding，与 infra/pi/session-file-utils 版本对齐）。 */
   modelId?: string
-  /** session 绑定的思考等级（从 .model.json sidecar 读，model binding，与 infra/pi/session-file-utils 版本对齐）。 */
+  /** session 绑定的思考等级（反向读 session JSONL 真源提取，model binding，与 infra/pi/session-file-utils 版本对齐）。 */
   thinkingLevel?: string
 }
 

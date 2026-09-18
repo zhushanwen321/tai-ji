@@ -98,15 +98,15 @@ describe('pi-provider-store — models.json', () => {
       expect(readModels()).toEqual({ providers: {} })
     })
 
-    it('serves cached value within TTL', () => {
+    it('serves external file change on next read (revision fingerprint)', () => {
       writeModels({ providers: { anthropic } })
-      // 外部改盘，缓存应挡住
+      // 外部改盘：指纹失配 → 下一次 read 重读，外部改动立即可见
       writeFileSync(
         join(tmpDir, 'agent', 'models.json'),
         JSON.stringify({ providers: { openai: { models: [{ id: 'gpt' }] } } }),
         'utf-8',
       )
-      expect(getProviderNames()).toEqual(['anthropic'])
+      expect(getProviderNames()).toEqual(['openai'])
     })
 
     it('re-reads disk after refreshModels', () => {

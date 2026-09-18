@@ -1,5 +1,5 @@
 /**
- * useSidebar config.sessions 订阅单测（#7 方案 A；CLAUDE.md 规则 #2 防重复注册）。
+ * useSidebar config.sessions 订阅单测（#7 方案 A；AGENTS.md 规则 #2 防重复注册）。
  *
  * 覆盖：
  * - config.sessions 广播 → session store applySnapshot 整表更新列表（不重载历史）

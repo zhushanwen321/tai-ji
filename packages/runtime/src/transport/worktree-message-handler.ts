@@ -11,10 +11,10 @@
  * - workspace.detectBare → 向后兼容别名，等价于 workspace.detect
  *
  * 写操作失效（perf 03 §5 worktree 检查点闭环，2026-08-17）：worktree.add 创建新分支，
- * 同 repo 各 cwd 的 getStatus branches 列表随之变化。worktree.create 成功后、reply 前对
- * 发起请求的 cwd（payload.workspaceHint，缺省与 service.detect 同用 process.cwd()）调
+ * 同 repo 各 cwd 的 getStatus branches 列表随之变化。worktree.create 成功后、reply 前以
+ * create 返回值携带的 repo 根（create 内部 detect 对发起起点的解析结果，缓存治理 1-6）调
  * gitService.invalidateStatusCache({ cwd })（内部即 GitStateService.invalidateByCwd，
- * 覆盖共享该 cwd 的所有 session）——语义对齐 git-message-handler U2 六写操作：成功后
+ * 覆盖共享该 repo 上下文的所有 session）——语义对齐 git-message-handler U2 六写操作：成功后
  * reply 前失效，失败路径不失效（状态未变）。gitService 为 null（server 未注入，仅测试
  * /防御场景）时跳过失效，成功 reply 行为不变。
  *
@@ -71,14 +71,18 @@ export class WorktreeMessageHandler {
         try {
           const result = await this.ctx.worktreeService.create({ branch, baseBranch, locationMode, workspaceHint })
           // perf 03 §5 worktree 检查点闭环（2026-08-17）：worktree.add 创建新分支，共享发起
-          // cwd 的 session 面板 branches 列表随之变化——按 cwd 失效（内部走 GitStateService
+          // repo 上下文的 session 面板 branches 列表随之变化——按 cwd 失效（内部走 GitStateService
           // invalidateByCwd，覆盖该 cwd 全部 session 缓存），不残留 2s TTL 陈旧窗口。必须在
           // reply 之前（前端收到 worktree.created 后可能立即刷新 git zone）；失败路径不失效
-          //（状态未变，对齐 U2 六写操作语义）。requestCwd 与 service.detect 起点同式
-          //（workspaceHint ?? process.cwd()），保证失效的 cwd 与实际操作的 repo 上下文一致。
-          const requestCwd = workspaceHint ?? process.cwd()
-          this.ctx.gitService?.invalidateStatusCache({ cwd: requestCwd })
-          return this.ctx.reply(ws, msg.id, 'worktree.created', result)
+          //（状态未变，对齐 U2 六写操作语义）。
+          //
+          // 失效键 = create 内部 detect 对同一发起起点解析出的 repo 根（缓存治理 1-6，取自
+          // service 返回值）：statusCache 的 session cwd 键是 repo/workspace 根，invalidateByCwd
+          // 按 cwd 精确后缀匹配——workspaceHint 指向深层子目录时用 hint 原值失效会与缓存键
+          // 错位、失效落空。从返回值取解析结果消除「靠同式解析约定对齐、无结构性保证」。
+          // repoRoot 仅供 runtime 内部失效使用，不进 worktree.created WS 契约——reply 挑字段。
+          this.ctx.gitService?.invalidateStatusCache({ cwd: result.repoRoot })
+          return this.ctx.reply(ws, msg.id, 'worktree.created', { cwd: result.cwd, branch: result.branch })
         } catch (e) {
           return this.sendWorktreeError(ws, msg.id, e)
         }

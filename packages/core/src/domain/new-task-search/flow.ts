@@ -459,6 +459,25 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     pendingPreset.value = presetId
   }
 
+  /**
+   * adoptWorktreeCwd —— CreateWorktreeModal 创建成功即回灌新 worktree cwd（不待 modal 关闭）。
+   *
+   * 与 selectWorkspace 的差异：只写 pendingCwd + 热更新最近工作区，**不 transition**——
+   * modal 成功屏展示期间 state 保持 worktree-modal，关闭（2s 定时器 / 用户提前关）统一走
+   * closeOverlay → landing，状态机出口唯一。
+   * [HISTORICAL] 旧链路 success emit 挂在 modal 的 2s 展示定时器上：用户在窗口内关 modal
+   * （Esc/点外/X/切 session）→ modal 卸载清 timer → 切换静默丢失（chip 留旧目录，且首发提交
+   * create 落旧目录）。根修：切换与「创建成功」同刻发生，与 modal 生命周期解耦。
+   * 守卫：仅 worktree-modal 态生效（modal 仅在该态挂载，防御性）；同值 noop（对齐 selectWorkspace）。
+   */
+  function adoptWorktreeCwd(cwd: string): void {
+    if (state.value !== 'worktree-modal') return
+    if (cwd === currentCwd.value) return
+    pendingCwd.value = cwd
+    // 热更新最近工作区列表（对齐 selectWorkspace：record 写 runtime，刷新回补 store）
+    void workspaceState.record(cwd)
+  }
+
   // ── compose 子模块（分支 + 选目录）── 传 computed 值的 getter，解耦于父内部 ──
   // branch 子模块需要飞行标记 setter + 守卫失败回 idle 的 transitionUnchecked，
   // 由父编排器从独占 controller 中按需注入（setter 不再模块级 export，无法被子模块直接 import）。
@@ -545,6 +564,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     openBranchPopover: branch.openBranchPopover,
     openPresetPopover,
     selectWorkspace: dirSelect.selectWorkspace,
+    adoptWorktreeCwd,
     openDirDialog: dirSelect.openDirDialog,
     selectBranch: branch.selectBranch,
     confirmDirtySwitch: branch.confirmDirtySwitch,

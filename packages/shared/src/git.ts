@@ -1,6 +1,5 @@
 // ── Git 领域 DTO（#1 git 全栈 / #12 契约地基）──────────────────────
-// 迁移自 protocol.ts 第 3 块。依据 code-architecture.md §3.1/§3.6/§3.7/§3.8/§4.1/§4.2
-// + spec-w11.md FR-12/G-R2-01。本契约仅定义类型；runtime 实现（git-service /
+// 迁移自 protocol.ts 第 3 块。本契约仅定义类型；runtime 实现（git-service /
 // IGitExecutor / git-message-handler）属 Wave 1a。
 
 /** git.status 的返回结构（FR-12/G-R2-01）。cwd 非 git 仓库时 isRepo=false，其余字段为默认值。

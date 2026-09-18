@@ -1,7 +1,6 @@
 /**
  * Mock git domain —— 与 @/api/domains/git 同接口签名（Wave 1a 创建 real 侧后由 api/index 接线）。
  *
- * 依据：issues.md #4 方案 A + code-architecture.md §6.3 点4 + spec-w11.md FR-12/G-R2-07。
  * 返回固定 GitStatusResult fixture（覆盖 GitZone 四态：clean/staged/dirty/conflict 的数据源），
  * 让 GitZone 在 mock 模式下可验证渲染，无需真实 git 仓库。
  *

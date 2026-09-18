@@ -46,7 +46,7 @@ import { withFileLockSync } from '../../utils/file-lock.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { isEntryNotFoundError } from './trace-sync.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from './replicated-states.config.js'
-import { SkillInjector } from './skill-injector.js'
+import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import type { SessionRegisteredSource } from './session-state-projection.js'
@@ -100,10 +100,17 @@ export interface SessionRecordsDeps {
    * 与派发同源（设计 §3.4 投影面表「冷启动回退源单源化」）。测试注入 fake 隔离
    * 宿主 node_modules 的真实引擎包（零命中断言需要确定性空环境）。
    *
-   * [W8] deprecated 死键 getExtensionPaths 已随构造点同批删除（本文件字段 + 
+   * [W8] deprecated 死键 getExtensionPaths 已随构造点同批删除（本文件字段 +
    * session-service.ts 装配点）——W4 登记的保留期结束。
    */
   discoverEngines?(): string[]
+  /**
+   * [A1 接线] session cwd 查询（subagentAction 的 skill 注入 project 扫描基准，
+   * skill-reload-nondestructive D7）——与 SkillRegistry.getSessionCwd 同源（lifecycle
+   * 视图 cwd）。可选窄接口（形态对齐 SkillRegistrySessionService.getSessionCwd 先例，
+   * 供测试省略）；生产组合根恒接线，缺省时注入退化为 global-only 映射。
+   */
+  getSessionCwd?(sessionId: string): string | undefined
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -138,7 +145,9 @@ export class SessionRecords {
     private readonly deps: SessionRecordsDeps,
     // [A2 D-A2-1] skill 注入器：subagentAction message/start 的定向文本出站前统一
     // 处理（与 MessageDispatcher 同款「默认实例化 + 构造可替换」形态，测试注入 spy）。
-    private readonly injector: SkillInjector = new SkillInjector(),
+    // [A1 接线] 默认源 = 晚绑定占位（SessionService 构造期 registry 尚不存在，组合根
+    // 后绑；测试默认装配无标记文本不触达映射）。
+    private readonly injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
   ) {}
 
   /**
@@ -306,9 +315,10 @@ export class SessionRecords {
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空 + extractor 侧 warn 留痕
-    // （「会话过大」标记）；侧栏面板降级提示的协议/UI 接线（shared protocol + core +
-    // renderer）跨包超出本单元领地，见 impl-plan 偏差登记。
+    // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空（extraction 骨架内
+    // console.warn 留痕）。oversize 正交标志在此解构时被丢弃、全仓无消费方——
+    // 「会话过大」侧栏降级提示的协议/UI 接线未实施（impl-plan 偏差登记），
+    // oversize 超限时 subagent 面板表现为空列表。
     const { records } = extractSubagentsFromSessionFile(target.filePath)
     return records
   }
@@ -406,7 +416,7 @@ export class SessionRecords {
    *
    * 🔒 跨进程锁（C-data-09）：config.json 与 agent bash 写（subagent-ext-config skill
    * 指导）、用户手编构成多写方——RMW 全程持 withFileLockSync（lockfile = config.json.lock，
-   * 协议对齐 worktree-config-helper ext-config / settings.json 先例）。锁失败 fail-fast
+   * 协议对齐 ext-config-rmw ext-config / settings.json 先例）。锁失败 fail-fast
    * 抛错（ELOCKED，预算 1s），经 RPC 错误通路返回 GUI。不取锁的 bash/手编写方作为
    * last-write-wins 残余风险由 data-source-registry.md §6 登记。
    */
@@ -428,7 +438,7 @@ export class SessionRecords {
       conf['defaultEngine'] = engineId
       // subagents 目录无需再建：withFileLockSync 取锁前已兜底 mkdir dirname(configPath)
       // （无锁时代这行 mkdir 承重，引入锁后成为死代码）。原子写单点走 fs-utils.atomicWrite
-      // （tmp+rename）；写失败时 .tmp 残留不被清理——与 worktree-config-helper ext-config
+      // （tmp+rename）；写失败时 .tmp 残留不被清理——与 ext-config-rmw ext-config
       // 先例同款取舍，磁盘孤儿文件无害，不在此另复制一份清理逻辑
       atomicWrite(configPath, JSON.stringify(conf, null, JSON_INDENT), `${process.pid}-${Date.now()}`)
     })
@@ -442,7 +452,8 @@ export class SessionRecords {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return []
-    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + extractor 侧 warn）
+    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + 骨架 warn；
+    // oversize 标志同样在此丢弃、无消费方）。
     const { records } = extractWorkflowsFromSessionFile(target.filePath)
     return records
   }
@@ -479,12 +490,12 @@ export class SessionRecords {
   }
 
   /**
-   * 触发 workflow 生命周期操作（pause/resume/abort）。
+   * 触发 workflow 生命周期操作（abort；pause/resume 已随扩展 D-2 一次性生命周期移除）。
    * 经 client.prompt("/workflows <action> <runId>") 调扩展 slash command，
    * pi 检测 / 开头直接执行 command handler（不经 LLM）。
    * 扩展侧 RPC 分支已实现（commands.ts ctx.mode==='rpc'）。
    */
-  async workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void> {
+  async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> {
     const client = this.deps.pm.getClient(sessionId)
     if (!client) throw new Error(`Session ${sessionId} not active`)
     await client.prompt(`/workflows ${action} ${runId}`)
@@ -526,7 +537,8 @@ export class SessionRecords {
       // 原始文本上匹配（encode 只转义 \ 与换行，先 encode 会破坏标记属性的可读性且无必要）；
       // 注入产物的真实换行由随后的 encode 编码回单行。无标记 no-op 零 RPC 原文通过；
       // cancel/workflows 内部命令不挂（设计显式跳过，守卫白名单登记）。
-      const injection = await this.injector.inject(client, params.text)
+      // [A1 接线] session cwd 作 project 扫描基准（D7）。
+      const injection = await this.injector.inject(client, params.text, this.deps.getSessionCwd?.(sessionId))
       await client.prompt(`/subagents message ${params.subagentId} ${encodeDirectiveText(injection.text)}`)
       // [D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败路径
       // throw 不发。定向文本无 u- 标记 → skillNotice 的 clientUuid 缺省（类型可空）。
@@ -537,7 +549,7 @@ export class SessionRecords {
       throw new Error('[session-service] subagentAction start: slug and task are required')
     }
     // [A2 MF-B] 同 message 分支：start 的 task 是用户内容（composer @ 定向首发），encode 前注入。
-    const injection = await this.injector.inject(client, params.task)
+    const injection = await this.injector.inject(client, params.task, this.deps.getSessionCwd?.(sessionId))
     await client.prompt(`/subagents start ${params.slug} ${encodeDirectiveText(injection.text)}`)
     publishSkillNotices(this.deps.getMessageBus(), sessionId, params.task, injection.notices)
   }
@@ -563,8 +575,9 @@ export class SessionRecords {
  * 结构固定（shared SubagentRecord），逐字段比对而非 JSON.stringify（顺序无关、无序列化抖动）。
  * origin 在比对面（R3-1②）：活 record 的 origin 实际不变，但本函数管 publish 去重——
  * 投影白名单新增/演化字段时漏比对会静默吞掉 publish diff，补齐防未来字段漏更。
- * [U8 / §3.2.8] intent/stopReason/engine 域进基线：close 收起/寻回翻边、settle 停因、
- * zcode 续聊换锚（engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。
+ * [U8 / §3.2.8] stopReason/engine 域进基线：settle 停因、zcode 续聊换锚
+ * （engineHandle.sessionRef 每轮变）任一变化都必须触发 publish。[2026-09-16 裁决]
+ * intent 比对位随「已收起」机制全链路删除（旧 entry 残留键被投影层忽略）。
  * [U8b / GUI 快修①] result 补入：轮终迁移恰翻该字段（result 写入），缺比对会把
  * 「轮终等待续聊」的显示信号静默吞掉（去重层判相等 → 不 publish → GUI 停留在旧形态）。
  * [modeless 波4] chatMode 比对维度随字段消亡删除（旧 entry 残留键被投影层忽略，
@@ -617,19 +630,19 @@ function recordStatsEquals(a: SubagentRecord, b: SubagentRecord): boolean {
 }
 
 /**
- * [状态展示组] 状态 + 终态/展示信号六字段：status / error / closedReason + 轮终
- * result + intent / stopReason / origin——publish
+ * [状态展示组] 状态 + 终态/展示信号五字段：status / error / closedReason + 轮终
+ * result + stopReason / origin——publish
  * 去重的全部「显示形态」信号集中于此组，翻任一字段即触发 publish。
  * [U5/D4] resumable 比对位已随字段退役删除——轮终翻转由 status 位天然触发
  * （U4 翻边后轮终写 idle）；[modeless 波4] chatMode 比对位随字段消亡删除（旧 entry
- * 残留键投影层忽略）；result 仍需显式比对（running 期覆盖写场景）。
+ * 残留键投影层忽略）；result 仍需显式比对（running 期覆盖写场景）；
+ * [2026-09-16 裁决] intent 比对位随「已收起」机制全链路删除。
  */
 function recordStateEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.status === b.status
     && a.error === b.error
     && a.closedReason === b.closedReason
     && a.result === b.result
-    && a.intent === b.intent
     && a.stopReason === b.stopReason
     && a.origin === b.origin
 }

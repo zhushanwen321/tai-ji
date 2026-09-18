@@ -31,11 +31,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentOutcome } from "../engine/types.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
+import { emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetSettledWatchdogsForTest,
@@ -52,19 +53,11 @@ interface ServiceInternals {
   };
 }
 
-function makePi(): PiLike {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  } as unknown as PiLike;
-}
-
 function makeService(): {
   agentDir: string;
   service: SubagentService;
   store: RecordStore;
-  pi: PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  pi: PiMock;
   fake: FakePiEnginePort;
   runOrchestration: ServiceInternals["runOrchestration"];
 } {
@@ -76,12 +69,12 @@ function makeService(): {
   const fake = registerFakePiEngine();
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true },
+    modelRegistry: emptyRegistry(),
     sessionId: "root-session",
     ctxModel: { id: "m", name: "M", provider: "prov", reasoning: false },
   });
   const service = new SubagentService({ cwd: agentDir, modelService });
-  const pi = makePi() as PiLike & { events: { emit: ReturnType<typeof vi.fn> } };
+  const pi = makePi();
   service.initSession({ pi, sessionId: "root-session" });
   const { store, runOrchestration } = service as unknown as ServiceInternals;
   return { agentDir, service, store, pi, fake, runOrchestration };
@@ -193,7 +186,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       // 成功应答映射（workflow 域 AgentResult.content 承载正文）
       expect(result.content).toBe("wf done");
       // [two-state-convergence U4] 轮终翻边 idle——record 经 getMutable 断言
-      //（listAllActive 是 running 过滤视图，不再含轮终收口 record）。
+      //（listRunningMutable 是 running 过滤视图，不再含轮终收口 record）。
       const rec = h.store.getMutable(result.sessionId ?? "");
       expect(rec).toBeDefined();
       expect(rec!.sessionFile).toBe(sessionFile);

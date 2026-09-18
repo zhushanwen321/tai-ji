@@ -19,6 +19,7 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { startIdleGc } from "../persistence/idle-gc.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { configureCore, HostNotConfiguredError, resetCoreForTests } from "../../core/host-services.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -37,6 +38,7 @@ afterEach(() => {
   stop = undefined;
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
+  resetCoreForTests();
 });
 
 function makeStore(): RecordStore {
@@ -217,16 +219,52 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
     expect(saved).toEqual([]);
   });
 
-  it("loadAll 抛错（宿主未 configureCore）→ 单轮跳过不炸 interval", async () => {
+  it("loadAll 抛错（宿主未 configureCore）→ 单轮跳过不炸 interval（域未启用 = debug 不 warn）", async () => {
+    // [A11] 用例级 logCalls sink：域未启用走 debug 通道（正常形态不噪声），断言零 warn。
+    const logCalls: Array<{ level: string; message: string }> = [];
+    configureCore({
+      dataRoot: () => "/fake-idle-gc-data-root",
+      log: (level, _component, message) => {
+        logCalls.push({ level, message });
+      },
+    });
     const failing = {
       loadAll: async () => {
-        throw new Error("core_host_not_configured");
+        throw new HostNotConfiguredError("[subagent-core] core_host_not_configured");
       },
       save: async () => {},
     };
     stop = startIdleGc(makeStore(), failing);
     await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS * 2 + 1);
-    // 两次扫描周期都存活（未抛出即通过）。
+    // 两次扫描周期都存活（未抛出即通过）；域未启用不产生 warn。
+    expect(logCalls.filter((l) => l.level === "warn")).toHaveLength(0);
+  });
+
+  it("loadAll 抛真 IO 故障（非 core_host_not_configured）→ warn 留痕 + 单轮跳过存活（A11 分通道）", async () => {
+    // [A11] 读失败与「域未启用」分通道：真 IO 故障 warn 可归因（静默会把持续故障
+    // 伪装成「无 run 可回收」），但 GC interval 不被拖垮（下轮重试）。
+    const logCalls: Array<{ level: string; message: string }> = [];
+    configureCore({
+      dataRoot: () => "/fake-idle-gc-data-root",
+      log: (level, _component, message) => {
+        logCalls.push({ level, message });
+      },
+    });
+    const failing = {
+      loadAll: async () => {
+        throw new Error("EIO: disk unavailable (mock)");
+      },
+      save: async () => {},
+    };
+    stop = startIdleGc(makeStore(), failing);
+    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+    const warns = logCalls.filter((l) => l.level === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.message).toContain("loadAll failed");
+    expect(warns[0]?.message).toContain("EIO");
+    // 第二轮仍存活（下轮重试语义）
+    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS);
+    expect(logCalls.filter((l) => l.level === "warn")).toHaveLength(2);
   });
 
   it("save 抛错 → 吞错留痕，不阻断其余 run", async () => {

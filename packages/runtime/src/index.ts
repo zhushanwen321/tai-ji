@@ -49,12 +49,19 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import { ExtensionService } from './services/extension-service.js'
 import { SkillRegistry } from './services/skill-registry.js'
+// [A1 接线] skill 注入映射源（D7 切源）：delivery registry 的 SkillInjector 与
+// dispatcher/records 共用 sessionService 的晚绑定源（见下方 bindSkillMappingSource）。
+import { SkillInjector } from './services/session/skill-injector.js'
 import { ReloadOrchestrator } from './services/session/reload-orchestrator.js'
 import { PluginRegistry } from './services/plugin-service/plugin-registry.js'
 import { PluginService } from './services/plugin-service/plugin-service.js'
 import { GitService } from './services/git-service.js'
 import { GitExecutor } from './infra/git-executor.js'
 import { GitStateService } from './services/git/git-state-service.js'
+import { initSharedRepoObserver, getSharedRepoObserver, bindSharedRepoObserverCallbacks } from './services/git/repo-observer.js'
+import { GitChangeTrigger } from './services/git/git-change-trigger.js'
+import { GitRepoResolver } from './infra/system/git-repo-resolver.js'
+import { GitHeadWatcher } from './infra/system/git-head-watcher.js'
 import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
@@ -485,8 +492,38 @@ async function main(): Promise<void> {
   // 在 fileChangeDiff 之前创建——W18 起 FileChangeDiffAdapter 的采集（snapshotStatus/numstat）
   // 委托 GitStateService；GitService（下方，依赖 sessionService）与 GitMessageHandler 的
   // 写操作失效共享同一实例（in-flight 单飞 + sessionId+cwd TTL 缓存 + 非仓库负缓存）。
+  // 缓存治理批 4 U10：先装配共享观测器单例（resolver 含 infra IO，services 层不得实例化——
+  // 组合根是唯一合法装配点），再注入 GitStateService。本服务实现 IGitRepoObserver 作为观测器
+  // service 面——下方 GitInfoReader 门面注入本服务，与 detectBareWorkspaceCached 模块门面共享
+  // 同一份缓存（不得注入其他实例，否则产生第二份镜像）。
+  // 缓存治理批 4 U11：观测器单例追加 HEAD watcher 联动回调——挂载集合跟随观测器缓存写入
+  // （onObservationSet → observe，任何读方把 cwd 带进缓存 watch 即自动跟上）、收缩跟随
+  // pruneCache（onPrune → forget，防死 cwd watcher 泄漏与重试循环）。触发器（最后一公里：
+  // 值变化判定 + leading 节流 + config.sessions 广播）与 watcher 的 watch/L2 兜底两路回调
+  // 都在上方依赖就绪后装配（server 在前、gitStateService 即下方一行，无延迟槽）。
   const gitExecutor = new GitExecutor()
-  const gitStateService = new GitStateService({ executor: gitExecutor })
+  // 先装配单例（无回调），再依次构造依赖它的 gitStateService → trigger → watcher，
+  // 最后后置绑定 watcher 联动回调——破「init ← watcher ← trigger ← gitStateService ← init」
+  // 的装配环；同步序列内无 readObservation 发生，回调绑定前的窗口不丢通知。
+  initSharedRepoObserver(new GitRepoResolver())
+  const gitStateService = new GitStateService({ executor: gitExecutor, repoObserver: getSharedRepoObserver() })
+  const gitChangeTrigger = new GitChangeTrigger({
+    observations: gitStateService,
+    pushSessionList: () => server.broadcastSessionList(),
+  })
+  const gitHeadWatcher = new GitHeadWatcher({
+    onGitEvent: (cwds) => gitChangeTrigger.refresh(cwds, 'watch'),
+    onFallbackTick: (cwds) => gitChangeTrigger.refresh(cwds, 'fallback'),
+  })
+  bindSharedRepoObserverCallbacks({
+    onObservationSet: (cwd, obs) => gitHeadWatcher.observe(cwd, obs),
+    // onPrune 收缩联动两面：watcher 挂载集合 + trigger 锚记忆（被驱逐 cwd 的
+    // lastPushedBranch 锚一并删除，防无界增长；重新进入观测走建锚路径）
+    onPrune: (removedCwds) => {
+      gitHeadWatcher.forget(removedCwds)
+      gitChangeTrigger.forget(removedCwds)
+    },
+  })
 
   const fileChangeDiff = new FileChangeDiffAdapter(gitStateService)
 
@@ -661,9 +698,9 @@ async function main(): Promise<void> {
     extensionService,
     configStore,
     sessionStore,
-    // IGitInfoReader：infra 实现（rev-parse 查询 + .git 文件判 worktree + 缓存），注入 session 摘要链。
+    // IGitInfoReader：infra 门面（同步读上方 gitStateService 内建的 repo 观测器缓存），注入 session 摘要链。
     // 与 GitExecutor 同为 git 域 infra，但语义不同（窄查询 vs 通用 exec）——故独立 port（services/ports/git-info.ts）。
-    new GitInfoReader(),
+    new GitInfoReader(gitStateService),
     workspaceService,
     // messageBus：注入 dispatcher 的 session 级事件通道（wave:perf-w09 D1-2 后单通道——
     // dispatcher 只依赖 publish 抽象，bus.publish 是唯一出口，broker 依赖已随接口收敛删除）。
@@ -683,7 +720,10 @@ async function main(): Promise<void> {
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,
-  })
+  },
+  // [A1 接线] skill 注入映射源与 dispatcher/records 共源（sessionService.skillSource
+  // 晚绑定占位——下方 SkillRegistry 构造后 bind，三个注入挂点一份映射源，D7 单权威）。
+  new SkillInjector(sessionService.skillMappingSource))
   // session 销毁（主动删 / 进程退出 / restore 清场全部路径）→ 丢弃该 session 的 delivery
   // 队列与订阅（setOnSessionDestroyed 追加式注册，与 server 的 extension timeout 清理腿并存）。
   sessionService.setOnSessionDestroyed((summary) => sessionDelivery.dispose(summary.id))
@@ -803,6 +843,10 @@ async function main(): Promise<void> {
     configDir,
     sessionService,
   })
+  // [A1 接线] skill 注入映射源绑真源（D7 切源收口）：dispatcher/records/delivery 三个
+  // SkillInjector 共享的 LateBoundSkillSource 在此绑定（构造顺序环的收口点，bind 先于
+  // server.start——生产不可达未绑定态；此处先于下方 reloadOrchestrator 的 onChange 绑定）。
+  sessionService.bindSkillMappingSource(skillRegistry)
 
   // TerminalService：drawer 集成终端的 PTY 生命周期管理（node-pty spawn + per-session 映射）。
   // 声明在生命周期挂钩之前（session 销毁回调引用它，TDZ 要求先声明）。
@@ -846,12 +890,12 @@ async function main(): Promise<void> {
 
   // WorktreeService：编排 worktree 创建（bare-workspace / plain-repo 两种模式）。
   // 依赖全注入：GitExecutor（git 子命令）/ ShellRunner（setup 脚本，用 child_process.spawn）/
-  // GitInfoReader（当前分支查询）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
+  // GitInfoReader（当前分支查询，读共享观测器缓存）/ ConfigService（worktreeRootDir 配置）/ fs（existsSync，检测 .bare 与目录冲突）。
   // 经 server.setServices 注入到 WorktreeMessageHandler（worktree.create 路由）。
   const worktreeService = new WorktreeService({
     gitExecutor: new GitExecutor(),
     shellRunner: new ShellRunner({ spawn }),
-    gitInfoReader: new GitInfoReader(),
+    gitInfoReader: new GitInfoReader(gitStateService),
     configService,
     fs,
   })
@@ -1030,6 +1074,11 @@ async function main(): Promise<void> {
       // R1：关闭 SkillRegistry 的 chokidar watcher（global + project），防句柄泄漏阻塞退出。
       shutdownStep('dispose-skill-registry')
       skillRegistry.dispose()
+      // 缓存治理批 4 U11：关 git HEAD watcher（fs.watch 句柄 + debounce/L1 重试/L2 兜底定时器），
+      // 同为「watch 资源收口防阻塞退出」语义；触发器的窗口收尾 timer 随之撤销。
+      shutdownStep('dispose-git-head-watcher')
+      gitHeadWatcher.dispose()
+      gitChangeTrigger?.dispose()
       // sd-u6：退订完成回流（settled / exit 两腿）
       shutdownStep('dispose-completion-backflow')
       completionBackflow.dispose()

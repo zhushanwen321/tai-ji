@@ -46,8 +46,6 @@ export interface MessageEffectContext {
   finalizeSession: (sessionId: string, reason: FinalizeReason, errorText?: string) => void
   /** message_start 清空窗（替代 setStreaming 隐式清 dispatching）。 */
   clearPendingSend: (sessionId: string) => void
-  /** message_start 挂载 streaming 超时兜底 timer（防 complete 永不到的 pi 静默卡死）。 */
-  armStreamingTimer: (sessionId: string) => void
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。
    * m2 阶段 queue_update 投递时经 drainN 计数 FIFO 取 segments 后 appendUser 进对话流。
@@ -76,7 +74,7 @@ export interface MessageEffectContext {
    */
   applyEntryFrame: (sessionId: string, entry: PiEntry) => void
   /**
-   * [steer-bubble u0 / docs/design/steer-followup-user-bubble-display.md D2] per-session
+   * [steer-bubble u0 / D2] per-session
    * inflight 投递确认计数读写——语义 = **已显示待确认的投递数**（steer/followUp 气泡已
    * 进对话流或 send 乐观插入，其确认帧 message_end(user) 未到）。不变式 ≥ 0（decrement
    * 钳制，配额漂移不产生负值），正常路径逐投递归零。实现在 store（getInflight 等），
@@ -91,17 +89,6 @@ export interface MessageEffectContext {
   decrementInflight: (sessionId: string, n?: number) => void
   /** inflight 清零（abort（message.complete{aborted}）挂点，D4：确认基线随队列作废）。幂等。 */
   clearInflight: (sessionId: string) => void
-  /**
-   * [premature-timeout §5.2 D2] 读并清 per-session timeout 打标 id 快照（恢复消费口，时机①）。
-   * message.complete handler 恢复分支据此定位「仍处 timeout error 态」的误判收口实体；
-   * 无快照返回空集。实现在 streaming-state-machine（finalizeMessages 现场记录）。
-   */
-  takePrematureTimeoutIds: (sessionId: string) => ReadonlySet<string>
-  /**
-   * [premature-timeout §5.2 D2] 清 per-session 打标快照（message_start 新 turn 作废旧标，时机③——
-   * 防跨 turn 错配：旧 turn 打标未恢复，新 turn 开始后其 complete 不得恢复旧气泡）。幂等。
-   */
-  clearPrematureTimeoutIds: (sessionId: string) => void
 }
 
 /**

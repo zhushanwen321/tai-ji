@@ -1,4 +1,5 @@
 import type { Entry } from './parser.js'
+import { BYTES_PER_KB } from './units.js'
 import { extractToolCalls, formatToolCallSummary, type ToolCallInfo } from './toolcall.js'
 import type { Turn } from './turns.js'
 import type { TreeView } from './tree.js'
@@ -7,8 +8,6 @@ import type { TreeView } from './tree.js'
 // 模块常量（渲染口径：截断宽度 / 换算基数 / 降级档位）
 // ---------------------------------------------------------------------------
 
-/** bytes→KB 换算基数（omitted 字节 / read 结果规模的 KB 显示）。 */
-const BYTES_PER_KB = 1024
 /** userBrief 截断字符数（TurnBrief.userBrief 文档口径「截 60 字符」）。 */
 const USER_BRIEF_MAX_CHARS = 60
 /** assistantBrief 截断字符数（TurnBrief.assistantBrief 文档口径「截 80 字符」）。 */

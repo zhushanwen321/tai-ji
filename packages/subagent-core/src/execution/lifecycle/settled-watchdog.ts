@@ -2,8 +2,8 @@
 //
 // [T2-③ / LC-1] 会话轮 settled 等待两段式守护（回收层「上界族 + 无进展检测」共享原语）。
 //
-// 设计：docs/design/timeout-zcode-turn-and-settled-watchdog.md §6-D9 / §7（两段式重锚定，
-// P0-4 核心）。等待 agent_settled 的窗口拆两段，判定语义与被保护对象逐段匹配：
+// 设计（两段式重锚定，
+// P0-4 核心）：等待 agent_settled 的窗口拆两段，判定语义与被保护对象逐段匹配：
 //
 //   中段（prompt → agent_end）：工作段，输出即进展——无进展检测
 //     （armMidRoundNoProgress，锚点：prompt 发出时 arm；有效协议事件行刷新；
@@ -357,8 +357,8 @@ export function _resetSettledWatchdogsForTest(): void {
 
 // ── [W4] 协议事件面接线 API ────────────────────────────────────────────
 //
-// 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2 前置 1 +
-// D5「settled-watchdog 生产接线重接」：两段守护的 refresh 源随 chat 域 cli 化改挂
+// 设计（D2 前置 1 +
+// D5「settled-watchdog 生产接线重接」）：两段守护的 refresh 源随 chat 域 cli 化改挂
 // 协议事件流（arm 点 = 轮开跑；中段刷新源 = host/streamDelta 与 run 事件通道
 // 事件；kill/终态 = 既有杀链）。旧 inproc stdout-pump 接线（session-runner.ts）已随
 // W3 删件移除，下面三个命名入口是协议事件面的唯一驱动入口。

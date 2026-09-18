@@ -102,6 +102,9 @@ Collection 安装先完整落 `tmp/ext-scan-{timestamp}/`（clone/cp + npm insta
 ### ADR-0038 subagent 只 cancel 无 pause/resume
 subagent 是 single-shot 子进程，控制只支持 cancel（现扩展 message/start），不实现 pause/resume——底层无长驻进程，不做假对称。
 
+### ADR-0067 subagent「已收起」第三状态全链路清除（2026-09-16 用户裁决）
+subagent 对用户的可见状态只有两桶：进行中 / 已结束（判据 = `isRunningProjection` 及其取反）——「已收起」（archived）不以第三状态呈现，全链路清除不残留：renderer 三桶视图与「已收起」过滤器删除；shared/runtime 投影链的 Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；subagent-core markArchived 原语删除，close 的资源收尾职责由 `markSettledOut` 承接（close 收口落账：幂等、worktreeHandle 清句、`.alive` release、manifest 投影，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生，万物可续判据不变）；通知 gate ①（archived 静默守卫）删除，close 注销 reason 词 `archived` → `completed`。机制权威 [docs/architecture/subagent-permanent-session-model.md](../architecture/subagent-permanent-session-model.md)（§3.2.5/§3.2.7 已按删除后现状改写）。登记 C-data-20、C-proc-13。
+
 ### ADR-0015 statusline plugin 封装
 plugin 中转渲染 statusline（`plugin:statusBarUpdate` 通道），plugin 不直写 UI。
 
@@ -128,8 +131,8 @@ isOpen/activeTab/docked 三控制态经 useSessionScopedState 按 focusedSession
 ### ADR-0032 thinkingLevelMap key/value 语义
 key = UI 档位（含 max），value = 发 pi 的实际 level（max → xhigh）；可用档位按 key 判定，传 pi 必经 resolveThinkingValue 映射（pi 不认识 max 会 clamp）。实装 `core/domain/composer/thinking-levels.ts`。
 
-### ADR-0050 landing slash 命令源按 variant 分支
-landing 合并两源（本地 + pi）、session 内只用 pi 源（CommandPopover variant prop）。
+### ADR-0050 slash/skill 候选源按 variant 分支（panel skill 段权威 = taiji registry）
+skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），但 panel 态 slash 段过滤 skill 项——panel 的 skill 段是唯一 skill 入口（双入口消除；landing 单列形态不过滤）。用户可感知后果两条：①panel `/` 浮层 slash 段不再列 skill 项（skill 只经行中 `/` 的 skill 段入口）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
 
 ### ADR-0028 / ADR-0029 / ADR-0030（digest）搜索域内聚（0028/0029 部分有效）
 多源聚合（命令/文件/会话/recents）收敛于 `core/src/domain/new-task-search/`（search.ts 编排 + match-engine + file-match 单一管线复用于 composer # 与 SearchModal）；mock 反向依赖生产类型，生产类型归 domain types.ts。登记 C-state-07。

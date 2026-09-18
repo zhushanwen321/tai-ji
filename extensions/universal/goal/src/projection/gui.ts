@@ -6,7 +6,8 @@
  *
  * 与 projection/widget.ts 的分工：
  * - widget.ts：TUI 模式渲染（ANSI 字符串，经 ctx.ui.setWidget）
- * - gui.ts：RPC 模式渲染（结构化 GuiComponent 描述符，经 guiSetWidget 推送给 M17 对话流 widget 面板）
+ * - gui.ts：RPC 模式渲染（结构化 GuiComponent 描述符，经 setWidgetDual 推送——GUI 臂 =
+ *   guiSetWidget/marker 通道，低层原语不单独调用；渲染终点 = composer 任务托盘的协议 widget 区）
  *
  * 预算阈值经 engine/budget.ts 的 getBudgetSeverity 单源化（H4）：
  * buildGoalGui（percent→severity）与 widget.getBudgetColor（percent→color）共用阈值。
@@ -70,7 +71,7 @@ function metaStatus(status: GoalStatus): WidgetMeta["status"] {
 /**
  * 构造 goal 的 GUI 渲染描述符（v1.1 meta head 架构）。
  *
- * - meta（标题=slug / 状态点 / token 进度）由宿主壳层渲染成唯一 head；
+ * - meta（托盘 icon / 标题=slug / 状态点 / token 进度）由宿主壳层渲染成唯一 head；
  *   有预算时进度计数用百分比 + 预算阈值 severity（70/90 warn/danger 单源）。
  * - 内容根 = group（透明组合容器）：stats-line（status/turn，无预算时补 token
  *   绝对值）+ list-tree（criteria 逐行，无 icon——所有行同 icon 是无信息量装饰，
@@ -114,6 +115,11 @@ export function buildGoalGui(state: GoalRuntimeState): GuiRenderResult {
 	}
 
 	const meta: WidgetMeta = {
+		// 点名 lucide key "target"（与宿主内置 widgetKey 映射 "goal"→Target 同图标）：
+		// 宿主映射只是兜底，extension 显式声明后，宿主调整自己的映射表也不会换掉 goal 的图标。
+		// 不推 badge：托盘 badge 缺省由 progress.label 派生（"42%"），推一份同值字符串会把
+		// 百分比格式变成两个真相源。
+		icon: "target",
 		title: slug,
 		status: metaStatus(state.status),
 		...(hasBudget

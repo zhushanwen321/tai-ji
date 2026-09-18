@@ -57,7 +57,7 @@ vi.mock('../src/services/migration/legacy-provider-migration.js', () => ({
     enabled: { migratedEnabled: false, fullDisabledWarn: false },
   })),
 }))
-vi.mock('../src/services/worktree-config-helper.js', () => ({ ensureAutoRenameDefault: vi.fn() }))
+vi.mock('../src/services/rename-session-config.js', () => ({ ensureAutoRenameDefault: vi.fn() }))
 vi.mock('../src/services/extension-startup-config.js', () => ({
   ensureDeclaredStartupConfigs: vi.fn(() => ({ ensured: 0, skipped: 0, failed: 0 })),
 }))

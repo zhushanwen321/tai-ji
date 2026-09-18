@@ -12,8 +12,9 @@
  * 运行：cd packages/runtime && npx vitest run src/services/startup-background-init.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { runStartupBackgroundInit, resolveReclaimConfig } from './startup-background-init.js'
 import { getMigrationGate } from './session/session-lifecycle.js'
 import { getSessionsDir, getPiAgentDir } from '../infra/pi/pi-paths.js'
@@ -56,7 +57,7 @@ const rh = vi.hoisted(() => ({
 vi.mock('./migration/legacy-provider-migration.js', () => ({
   migrateProviderConfig: h.migrateProviderConfig,
 }))
-vi.mock('./worktree-config-helper.js', () => ({
+vi.mock('./rename-session-config.js', () => ({
   ensureAutoRenameDefault: vi.fn(),
 }))
 // ⑦b startupConfig ensure 挂载测试用 mock：真实实现会写 getPiAgentDir()（测试未隔离
@@ -250,6 +251,51 @@ describe('先 listen 后初始化（D8-1，index.ts 源码顺序断言）', () =
     expect(startCall).toBeGreaterThan(-1)
     expect(initCall).toBeGreaterThan(-1)
     expect(initCall).toBeGreaterThan(startCall)
+  })
+})
+
+describe('⑧ sessions 残留清扫家族扩展（缓存治理 U9：退役 .model.json sidecar）', () => {
+  let dataDir: string
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'u9-startup-sidecar-residue-'))
+    process.env.TAIJI_AGENT_DATA_DIR = dataDir
+  })
+
+  afterEach(() => {
+    delete process.env.TAIJI_AGENT_DATA_DIR
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('启动序列执行后 sessions 目录 *.model.json 零残留，JSONL 主文件不受影响（设计验收挂点）', async () => {
+    const sessionsDir = join(dataDir, 'agent', 'sessions')
+    const subDir = join(sessionsDir, '--Users-x-proj--')
+    mkdirSync(subDir, { recursive: true })
+    const rootJsonl = join(sessionsDir, 'sess-root.jsonl')
+    const rootSidecar = rootJsonl + '.model.json'
+    const subJsonl = join(subDir, 'sess-sub.jsonl')
+    const subSidecar = subJsonl + '.model.json'
+    writeFileSync(rootJsonl, '{"type":"session","id":"sess-root","cwd":"/x"}\n', 'utf-8')
+    writeFileSync(rootSidecar, '{"modelId":"a/b"}', 'utf-8')
+    writeFileSync(subJsonl, '{"type":"session","id":"sess-sub","cwd":"/y"}\n', 'utf-8')
+    writeFileSync(subSidecar, '{"modelId":"c/d"}', 'utf-8')
+
+    const { deps } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
+
+    // 启动后零残留断言（两层目录均无 .model.json）
+    for (const dir of [sessionsDir, subDir]) {
+      expect(readdirSync(dir).filter((name) => name.endsWith('.model.json'))).toEqual([])
+    }
+    // JSONL 主文件不受影响
+    expect(existsSync(rootJsonl)).toBe(true)
+    expect(existsSync(subJsonl)).toBe(true)
+  })
+
+  it('sessions 目录无残留时启动序列正常完成（零操作不抛）', async () => {
+    mkdirSync(join(dataDir, 'agent', 'sessions'), { recursive: true })
+    const { deps } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
   })
 })
 

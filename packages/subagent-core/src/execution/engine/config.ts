@@ -9,7 +9,8 @@
 //   - `enabled: false` → 该引擎不装载（A12⑤：不进清单 + 派发报错含恢复指引）。
 //
 // 与 execution/config.ts 的关系：那边是全局配置的 sanitize 权威（maxConcurrent /
-// defaultEngine / engineRouting / collectSync），其 SubagentsGlobalConfig 类型不含
+// defaultEngine / engineRouting；[collect 退役] 原 collectSync 节已删），其
+// SubagentsGlobalConfig 类型不含
 // engines 键（sanitize 未知键忽略）。本模块只取 engines 段并逐条目校验——独立解析
 // 避免 execution/config.ts 类型面为发现器扩键（发现器消费 raw 形态，字段级容错在本
 // 模块内做，坏条目 warn 跳过、不影响其他条目）。
@@ -17,7 +18,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
+
+import { isMissingFsError } from "../persistence/fs-error.ts";
 
 const logger = getLogger("subagents");
 
@@ -36,17 +40,36 @@ export interface ExplicitEngineEntry {
 /**
  * 读 config.json 的 engines 段（已启用条目，键 = 引擎 id）。
  *
- * 容错契约（与 config.json 用户手编文件定位一致，execution/config.ts 同判）：
- * 文件缺失 / 坏 JSON / engines 段非对象 → 静默空表（L3 缺席是常态，不 warn——绝大多数
- * 安装无显式配置）；单条目形态坏 → warn 跳过该条目（不影响其他条目，A12②「其他引擎
- * 正常」的 L3 版）。
+ * 容错契约（与 config.json 用户手编文件定位一致；三态口径对齐 assembly/config.ts
+ * readGlobalConfig 的 D5 设计）：文件不存在（ENOENT）= L3 显式配置缺席（绝大多数
+ * 安装的常态，静默空表）；**坏 JSON / 非 ENOENT 读失败 ≠ 配置缺席**——warn 留痕后
+ * 空表（torn write / 权限故障被静默吞掉会伪装成「无显式配置」，排障无从下手）；
+ * engines 段非对象 → warn 空表；单条目形态坏 → warn 跳过该条目（不影响其他条目，
+ * A12②「其他引擎正常」的 L3 版）。
  */
 export function readExplicitEngines(agentDir: string): Record<string, ExplicitEngineEntry> {
   const configPath = path.join(agentDir, "subagents", "config.json");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch (err) {
+    // ENOENT = 配置文件缺席（合法缺省，静默）；其余读失败 warn 留痕。
+    if (!isMissingFsError(err)) {
+      logger.warn("[engine-discovery] config.json read failed (falling back to no explicit engines)", {
+        detail: { path: configPath, error: toErrorMessage(err) },
+      });
+    }
+    return {};
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    // 坏 JSON（torn write / 手编损坏）warn 留痕 + 空表——缺席降级不阻断引擎发现，
+    // 但故障必须可见（静默会把持续损坏伪装成「用户没有显式配置」）。
+    logger.warn("[engine-discovery] config.json is not valid JSON (falling back to no explicit engines)", {
+      detail: { path: configPath, error: toErrorMessage(err) },
+    });
     return {};
   }
   if (typeof parsed !== "object" || parsed === null) return {};

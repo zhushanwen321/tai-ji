@@ -1,7 +1,7 @@
 // src/execution/__tests__/workflow-agent-dispatch.test.ts
 //
-// [H2 W2] executeWorkflowAgent 统一编排入口单测（设计 subagent-workflow-record-
-// unification.md §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
+// [H2 W2] executeWorkflowAgent 统一编排入口单测（设计锚点：
+// subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
 // gate / D7 成功收口 / adopt 豁免双点）。
 //
 // 锁六组面：
@@ -46,11 +46,9 @@ import { tryTransition } from "../persistence/execution-record.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { createNotifyHost } from "../notify/notify-host.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { PiLike } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
@@ -70,29 +68,15 @@ import type { EngineCapabilities } from "../engine/types.ts";
 import type { EnginePort } from "../engine/port.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 辅助：service 构造（notify-gate / routing 测试同款范式）──
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
-function makePi() {
-  return {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-}
-
-type MockPi = ReturnType<typeof makePi>;
 
 interface DispatchHarness {
   service: SubagentService;
   store: RecordStore;
-  pi: MockPi;
+  pi: PiMock;
   fake: FakePiEnginePort;
   entries: SubagentRecordEntryData[];
   tmpRoot: string;
@@ -109,7 +93,7 @@ function makeHarness(opts: {
   const agentDir = path.join(tmpRoot, "agent");
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
   modelService.initModel({
-    modelRegistry: makeEmptyRegistry(),
+    modelRegistry: emptyRegistry(),
     sessionId: "wf-dispatch-it",
     ctxModel,
   });
@@ -120,14 +104,16 @@ function makeHarness(opts: {
     if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
   });
   service.initSession({
-    pi: pi as unknown as PiLike,
+    pi,
     sessionId: "wf-dispatch-it",
     ...(opts.streamSink !== undefined ? { streamSink: opts.streamSink } : {}),
     ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
   });
   clearEngines();
   const fake = registerFakePiEngine();
-  return { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, entries, tmpRoot };
+  const harness = { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, entries, tmpRoot };
+  openHarnesses.push({ service, tmpRoot });
+  return harness;
 }
 
 function baseOpts(over: Partial<AgentCallOpts> = {}): AgentCallOpts {
@@ -188,11 +174,20 @@ function registerStrictEngine(): void {
 
 let prevDataDirEnv: string | undefined;
 
+/** 在途 harness 登记处：makeHarness 创建即登记，顶层 afterEach 统一释放（tmp 不泄漏）。 */
+const openHarnesses: Array<{ service: SubagentService; tmpRoot: string }> = [];
+
 beforeEach(() => {
   prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
 });
 
 afterEach(() => {
+  for (const h of openHarnesses) {
+    h.service.dispose();
+    fs.rmSync(h.tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+  openHarnesses.length = 0;
+  clearEngines();
   _resetSettledWatchdogsForTest();
   vi.restoreAllMocks();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
@@ -471,7 +466,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const run = soleRun(fake);
     const record = runningRecord(store);
 
-    // 模拟 close 路径赢家（close 收起 markArchived 终态写点的抢先形态：closed + user-close）
+    // 模拟 close 路径赢家（close 收口前的终态写点抢先形态：closed + user-close）
     expect(tryTransition(record, "closed", "user-close")).toBe(true);
 
     run.settle({ content: "done" });
@@ -573,7 +568,7 @@ describe("D6 toNotifyRecord origin gate", () => {
   it("漏斗层单点：workflow record 完成/失败/关闭全返回 undefined（notifyComplete 零投递）", () => {
     const pi = makePi();
     const host = createNotifyHost({
-      getPi: () => pi as unknown as PiLike,
+      getPi: () => pi,
       listRunning: () => [],
       getIsIdle: () => undefined,
     });

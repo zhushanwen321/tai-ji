@@ -69,11 +69,12 @@ packages/runtime/src/
 
 | # | 模块 | 性质 | services 层消费方 |
 |---|------|------|------------------|
-| ① | `infra/logger.ts` | 全局日志落盘 + 轮转 + console monkey-patch（terminal-tee），纯横切单例 | quota 族 / migration / worktree-config-helper 等 8 处 |
+| ① | `infra/logger.ts` | 全局日志落盘 + 轮转 + console monkey-patch（terminal-tee），纯横切单例 | quota 族 / migration / rename-session-config 等 8 处 |
 | ② | `infra/pi/pi-paths.ts` | kernel 纯路径函数（getSessionsDir/getPiAgentDir/encodeCwd 等，无 IO） | config / extension / session 族 6 处 |
 | ③ | `infra/git/git-status-parser.ts` + `infra/fs/ignore-parser.ts` | kernel 纯解析/匹配函数 | git-service / file-service |
 | ③b | `infra/crash-journal.ts` | 崩溃台账 writer（append-only JSONL + 轮转，best-effort），logger 同类横切 | 死亡/自愈决策点双写台账行 |
 | ③c | `infra/mem-pressure.ts` | os 级内存压力即时查询（无状态只读，永不 reject） | startup-reattach（watchdog 链） |
+| ③d | `infra/system/git-repo-resolver.ts` | 无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、查询不 reject）；IGitRepoResolver port 已存在，value import 仅为注入缺省实例（sharedRepoObserver 单例 + git-state-service fallback） | git/repo-observer、git/git-state-service |
 
 ### ④ node:fs 直用——基线债登记（非合规例外）
 

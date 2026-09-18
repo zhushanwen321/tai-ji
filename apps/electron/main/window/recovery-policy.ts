@@ -1,5 +1,5 @@
 /**
- * renderer 崩溃自动恢复熔断计数器（crash-resilience §3.3 D2-③ / u3-renderer-recovery）。
+ * renderer 崩溃自动恢复熔断计数器（D2-③ / u3-renderer-recovery）。
  *
  * 设计语义（D2 原文）：render-process-gone 后按窗口自动 reload，熔断计数器以 windowId
  * 为键，60 秒滑动窗口内 ≤3 次；超限停自动 reload 改加载静态错误页（手动重试）；

@@ -4,6 +4,9 @@
     读 chat store 按 sessionId 分区的消息 → groupTurns 分回合 → 渲染 Turn 列表。
     auto-scroll（spec §8.5 + G2-007）：stickToBottom 判定，上滚脱离锚定不强制拉回，
     非贴底有新内容显「回到底部」浮层，点浮层平滑滚回并恢复锚定。
+    用户主动发送（composer 直发 / steer·followUp 投递 / defer flush / 编辑重发）例外：
+    尾部新增 user 消息时强制回底重锚定（feat-new-message-to-bottom，见
+    useMessageStreamFollowTriggers 触发矩阵末行）。
     空 session 显示欢迎语（G2-004 空态收敛）。
 
     [cw wave w3] 虚拟滚动由手写协调循环切到 virtua/vue <Virtualizer>。
@@ -24,14 +27,14 @@
       <p class="text-[length:var(--text-base)] text-neutral-mid">{{ t('panel.message.startConversation') }}</p>
     </div>
 
-    <!-- [chat-pin-bottom-fix D3] 静态无样式 wrapper：RO 兜底网的观察目标（Virtualizer spacer
+    <!-- [D3] 静态无样式 wrapper：RO 兜底网的观察目标（Virtualizer spacer
          高度 + 尾部块 tailEl 高度都投影到本元素盒尺寸，见 useMessageStreamFollowTriggers）。
          本元素【永不】获得 position/transform/尺寸样式——不得成为 containing block，否则空态
          欢迎语（absolute inset-0）与 load-more 浮层（absolute top-0，均留在本 wrapper 外）
          锚定漂移（§4.4 结构护栏③）。 -->
     <div ref="contentWrapEl">
       <!-- <Virtualizer> 取代手写 spacer + visibleItems absolute 循环。
-           滚动容器经 :scroll-ref 显式指定为本 scrollEl（chat-pin-bottom-fix D3 / P-wrap 门，
+           滚动容器经 :scroll-ref 显式指定为本 scrollEl（D3 / P-wrap 门，
            virtua 0.50.0 scrollRef prop 实装支持）——wrapper 加入后 parentElement 不再是 scrollEl。
            - :data 全量 renderItems（turn + system 穿插）
            - :shift 顶部插入（load-more-history）时 true（virta 原生 reverse scroll adjustment，design §2.4）
@@ -86,7 +89,7 @@
         </template>
       </Virtualizer>
 
-      <!-- [chat-pin-bottom-fix D2] 尾部块容器：Virtualizer 之后的两个文档流块收编于此
+      <!-- [D2] 尾部块容器：Virtualizer 之后的两个文档流块收编于此
            （仍在滚动容器文档流内）。高度经 RO 实测注入 useVirtuaFollow endOffset
            （offset=tailHeight 即真实底部）。新增尾部文档流块必须放进本容器（§4.4 结构护栏），
            且本容器保持无定位/无尺寸样式（tailHeight = 视觉尾部总高的前提）。 -->
@@ -121,7 +124,7 @@
          显隐 = store 截断窗口状态（u4b session.history truncated，经 useChat.hasMoreHistory 派生）；
          条内文案 N = loadedTurns，「加载更早」走 [u6] 游标翻页通路（useLoadMoreHistory）。
          ref 供 dev-only 断言：实测高度 vs LOAD_MORE_RESERVED_HEIGHT 常量漂移检测（见 useConstantHeightAssert）。
-         [chat-pin-bottom-fix D3] 留在 contentWrapEl wrapper 外：absolute 锚定 scrollEl
+         [D3] 留在 contentWrapEl wrapper 外：absolute 锚定 scrollEl
          （nearest positioned ancestor），wrapper 永不得成为 containing block（见 wrapper 注释）。 -->
     <div
       v-if="showLoadMore && renderItems.length > 0"
@@ -299,7 +302,7 @@ const isSessionActive = useSessionActive(sessionId, forceWorking)
 const vlistRef = shallowRef<VirtualizerHandle | null>(null)
 
 /** [cw wave w3] 滚动容器 el（::-webkit-scrollbar 自定义 + pt-5 留白）。消费方：
- *  <Virtualizer :scroll-ref>（chat-pin-bottom-fix D3）/ useMessageStreamFollowTriggers 视口 RO /
+ *  <Virtualizer :scroll-ref>（D3）/ useMessageStreamFollowTriggers 视口 RO /
  *  useMessageStreamRail（closest('section') 算 panelRightEdge）。 */
 const scrollEl = ref<HTMLElement | null>(null)
 
@@ -366,7 +369,7 @@ const { pinnedIndexes } = useStreamingPin({
   editingTurnKey,
 })
 
-/** [cw wave w3] auto-scroll follow 状态机（chat-pin-bottom-fix D1/D2/D7）：onScroll 复合判据
+/** [cw wave w3] auto-scroll follow 状态机（D1/D2/D7）：onScroll 复合判据
  *  （INVAR-M4-2′）/ onWheel 恒即时脱离 / followIfStuck rAF 重读 guard。virta 单一 scrollTop owner。 */
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
 // [D2 数学不变量] endOffset = tailEl 实测总高：scrollEl pt-20 + pb-8 = 28px 与 virtua
@@ -382,7 +385,8 @@ const { showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSess
     isStreaming: () => lastRenderTurn.value?.isStreaming ?? false,
   })
 
-// [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）
+// [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）。
+// followToBottomForce：用户主动发送（尾部新增 user 消息）强制回底重锚定（feat-new-message-to-bottom）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   messages: currentMessages,
   lastRenderTurn,
@@ -390,6 +394,7 @@ const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   scrollEl,
   followIfStuck,
   notifyRoActivity,
+  followToBottomForce: () => followToBottom(true),
 })
 
 /* TurnRail（w4 wave IF4）：状态 + 事件路由下沉 useMessageStreamRail（script ≤300 行规范）。
@@ -422,7 +427,7 @@ function onVirtuaScrollEnd(): void {
   // design.md IF7 预留：showJumpButton 稳定判定（virta @scrollEnd 触发，目前 showJumpButton 已是 computed，留空 no-op）
 }
 
-// [chat-pin-bottom-fix D5 force 内联] 挂载即滚到底（force=true，不受 guard）；store watch / RO
+// [D5 force 内联] 挂载即滚到底（force=true，不受 guard）；store watch / RO
 // 触发编排已迁 useMessageStreamFollowTriggers（isCompacting/isSessionActive watch 随 RO 网删除）。
 onMounted(() => {
   followToBottom(true)
@@ -438,7 +443,7 @@ watch(
     // 分支恒置 null，二者幂等。把「session 切换路径的 key 残留」从依赖卸载 emit 可达性变为
     // 结构性不可能（E4 的 session 路径被消除；旧 editingTurnIdx 索引在此残留即越界崩溃 E-now-1）。
     editingTurnKey.value = null
-    // [chat-pin-bottom-fix D7] :key 重建：同步置 NaN 快照 + 开收敛抑制窗（早于 nextTick force，
+    // [D7] :key 重建：同步置 NaN 快照 + 开收敛抑制窗（早于 nextTick force，
     // 消除「重建 scrollTop 归零回声与 force 写入送达先后」时序分叉）
     onSessionRebuild()
     nextTick(() => followToBottom(true))

@@ -71,3 +71,19 @@
 | 中文任务 | 帮我写一个防抖函数并加单测 | javascript-防抖函数实现与测试 |  |  |  |
 | 英文任务 | Refactor the config loader to support env overrides | refactor-config-loader-env-overrides |  |  |  |
 | 跟进型 | 继续刚才的，改成支持 leading 选项 | debounce-leading-选项支持 |  |  |  |
+
+## 2026-09-16 13:52:10 run
+
+| 场景 | prompt | 实际标题 | 词组形态 | 语义相关 | 语言跟随 |
+|---|---|---|---|---|---|
+| 中文任务 | 帮我写一个防抖函数并加单测 | 防抖函数实现与单元测试 |  |  |  |
+| 英文任务 | Refactor the config loader to support env overrides | config-loader-refactoring-discussion |  |  |  |
+| 跟进型 | 继续刚才的，改成支持 leading 选项 | debounce-leading-option |  |  |  |
+
+## 2026-09-16 16:40:58 run
+
+| 场景 | prompt | 实际标题 | 词组形态 | 语义相关 | 语言跟随 |
+|---|---|---|---|---|---|
+| 中文任务 | 帮我写一个防抖函数并加单测 | 防抖函数实现与单测 |  |  |  |
+| 英文任务 | Refactor the config loader to support env overrides | refactor-config-loader-env-overrides |  |  |  |
+| 跟进型 | 继续刚才的，改成支持 leading 选项 | debounce-leading-选项支持 |  |  |  |

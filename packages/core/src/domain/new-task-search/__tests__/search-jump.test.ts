@@ -3,14 +3,13 @@
  *
  * 覆盖 plan TC-7..TC-10：app 命令执行 + recents、slash 注入 pendingSlash、command action 抛错、
  * file 分支成败（selectFile + drawerTab）、session 反查成败、symbol 占位。
- * 端口全 vi.fn() 注入；真实 createCommandStore/createFileSearchStore。
+ * 端口全 vi.fn() 注入；真实 createCommandStore。
  * 环境：vitest node。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../../platform/port'
 import { createCommandStore } from '../command-store'
-import { createFileSearchStore } from '../file-search-store'
 import { useSearchJump } from '../search-jump'
 import type { SearchDeps } from '../search-ports'
 import type { AppCommand, SearchItem } from '../types'
@@ -35,7 +34,6 @@ function makeMockStorage(initial?: Record<string, string>): KVStorage & { store:
 /** 构造 mock SearchDeps */
 function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
   const commandStore = createCommandStore(makeMockStorage())
-  const fileSearchStore = createFileSearchStore()
   const deps: SearchDeps = {
     ports: {
       isMock: false,
@@ -45,11 +43,9 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
-      watchFileChanges: vi.fn(() => () => {}),
       t: vi.fn((key: string) => key),
     },
     commandStore,
-    fileSearchStore,
     storage: makeMockStorage(),
     fileTree: { loadTree: vi.fn(async () => {}), selectFile: vi.fn() },
     appCommandActions: {

@@ -6,9 +6,6 @@
  * - readiness 是「保存并测试」按钮禁用状态的唯一依据；密文字段取「草稿 ∨ 已保存」并集，
  *   明文的 Workspace 只看草稿（D13）
  * - cookie 输入去掩码（D7）：cookieInput 永远只放用户真实输入，保存成功后清空
- *
- * 设计文档：docs/design/coding-plan-quota-config-ux.md
- * （§7.2 齐备性判定规则 / §7.4 证据来源 / §6.10 D9 错误文案 i18n 化）
  */
 import { ref, computed, watch, type Ref } from 'vue'
 import type {

@@ -14,7 +14,7 @@
  *   - manifest URL releases/latest/download/ 别名 → 胜出源 assets 的
  *     browser_download_url 直链（§4.2⑤，fixture 以 manifest.json 资产提供）
  *
- * 覆盖验收条款（docs/design/update-network-resilience.impl-plan.md §2 u5 行）：
+ * 覆盖验收条款：
  * ① 两处 fetch 点均经 upgradeFetch（mock 断言调用次数与 proxyUrl 参数）
  * ② 「代理失败→直连重试一次」通道维度编排保留（现位于适配层 fetchSourceRelease）
  * ③ manifest fallback 路径同源接入（digest 缺失时 manifest 也经 upgradeFetch）

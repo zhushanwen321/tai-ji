@@ -1,6 +1,5 @@
 /**
- * D1 协议收敛不变量（context-consistency Phase 1，w10 测试族扩展——断言定义见
- * docs/todo/context-consistency-equivalence-test.md §2 层 2）。
+ * D1 协议收敛不变量（context-consistency Phase 1，w10 测试族扩展）。
  *
  * W1 任意触发路径产出的 session.state_changed 帧永不含 usage 三字段（序列化后断言 key 不存在）
  * W2 context.update 帧要么含全部三字段（真值），要么只含 sessionId（无值占位）——无部分字段 / 全 0

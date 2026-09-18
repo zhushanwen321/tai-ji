@@ -202,6 +202,9 @@ export default {
       commandInjection: '{count} credential(s) use !command (pi runs shell command at runtime), review before use',
       envBundleSkipped: '{count} env bundle credential(s) skipped (Phase 2)',
       orphanImported: '{count} credential(s) imported with built-in template',
+      // coding-plan quota display auto-enabled on import (default consent; only when runtime persisted extras)
+      quotaAutoEnabledOne: 'Auto-enabled Coding Plan quota display for "{name}" — turn it off in Settings',
+      quotaAutoEnabledMany: 'Auto-enabled Coding Plan quota display for {count} providers — turn it off in Settings',
     },
     // ── Built-in provider templates (wave 3 builtin-provider-ui) ──
     builtinTemplate: {
@@ -553,7 +556,7 @@ export default {
     loadRecommendedFailed: 'Failed to load recommended extensions: {msg}',
     autoUpgradeFailed: 'Failed to set auto-upgrade: {msg}',
     cancelInstallTempHint: ' (temp files may not be cleaned)',
-    // Plugin contributions sub-page (M16, 04-settings-and-visual.md scenario E)
+    // Plugin contributions sub-page (M16, scenario E)
     contributionsEntry: 'Plugin Contributions',
     contributionsTitle: 'Plugin Contributions',
     contributionsDesc: 'View plugin mount point contributions and availability',
@@ -675,12 +678,6 @@ export default {
     llmRetryUnitMs: 'ms',
     llmRetryEmptyAsZero: 'empty = 0',
     llmRetryTimeoutPlaceholder: 'empty = follow global',
-    // ── Streaming idle timeout (SystemStreamingIdleSection, timeout-streaming-ui-idle §4.3) ──
-    streamingIdleTitle: 'Chat Streaming',
-    streamingIdleLabel: 'Streaming idle timeout (minutes)',
-    streamingIdleDesc: 'If a streaming bubble receives no new content for this long, it is finalized with a recovery hint; it auto-restores when the task actually finishes. Applies to turns started after saving',
-    streamingIdleUnitMin: 'min',
-    streamingIdleInvalid: 'Enter a value between {min} and {max}',
     saved: 'Saved',
     saveFailed: 'Save failed',
     shortcutTitle: 'Shortcuts',

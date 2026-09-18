@@ -17,7 +17,6 @@ import type {
   DisplayItem,
   ExecutionMode,
   ExecutionStatus,
-  Intent,
   RecordOrigin,
   StopReason,
   SubagentRecord,
@@ -53,7 +52,7 @@ export interface SubagentRecordEntryData {
   /** 短标签（≤35 字符）。 */
   slug: string;
   status: ExecutionStatus;
-  /** L2 关闭原因（仅 status="closed" 时有意义）。 */
+  /** L2 关闭原因（旧终态兼容位——写侧仅 workflow D7 例外族/监督器放弃产出；读侧回落链见 stopReason）。 */
   closedReason?: ClosedReason;
   /**
    * [U3 / §3.2.4] 展示停因（上一轮为什么停，值域 StopReason）。additive 字段：
@@ -61,13 +60,6 @@ export interface SubagentRecordEntryData {
    * （stopReason ?? closedReason）归一。
    */
   stopReason?: StopReason;
-  /**
-   * [U8 / §3.2.1] 意愿维度（close 收起 / message 寻回的迁移写点携带）。additive
-   * 字段：undefined（存量 entry）= "active" 语义零迁移。GUI「已收起」分区（U8b）
-   * 与 manifest 下行映射（archived → legacy closed，U5-D10）的持久化载体——
-   * 漏本字段则重启后归档意图静默丢失。
-   */
-  intent?: Intent;
   mode: ExecutionMode;
   startedAt: number;
   /** 根 Pi session ID（session 隔离过滤用）。 */
@@ -114,9 +106,10 @@ export interface SubagentRecordEntryData {
   // [modeless 波3·已删除字段] collectMode entry 字段停写删除（collect = 派发时路由
   // 选项，成员身份 = 协调器登记态）；旧 entry 残留键读侧自然忽略，零迁移。
   /**
-   * 离开批终局标记（subagent-sync-collect 设计 §3.1.3，U1 foundation）。两出口统一
-   * 落标（批闭合 flush / E9 dispose 转换，均 appendEntry 持久化）。undefined =
-   * 未离开批 / 旧 entry 零迁移。消费方：U5 E1 重建扫描只收无标记成员（防双重通知）。
+   * 离开批终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**：原写点
+   * 批闭合 flush / E9 dispose 转换已随 sync 批机制删除）。undefined = 未离开批 /
+   * 退役后新 entry。旧 session 文件的标记 entry 必须容忍解析（读侧守卫：
+   * batch-finalized.test.ts / sync-collect-recovery.test.ts）。
    */
   batchFinalized?: boolean;
   /**
@@ -146,9 +139,6 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     status: record.status,
     closedReason: record.closedReason,
     stopReason: record.stopReason,
-    // [U8] 意愿维度随快照持久化（undefined 经 JSON.stringify 自然缺省，旧 entry
-    // 序列化字节不变——零迁移）。
-    intent: record.intent,
     mode: record.mode,
     startedAt: record.startedAt,
     rootSessionId: record.rootSessionId,

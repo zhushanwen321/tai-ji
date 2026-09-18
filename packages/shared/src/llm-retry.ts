@@ -1,11 +1,11 @@
 /**
- * LLM 重试配置域（设计 docs/design/llm-retry-settings.md §3.4 类型 + §3.3 D8 数值合法域）。
+ * LLM 重试配置域（类型 + D8 数值合法域）。
  * 校验域定在 shared：renderer 表单与 runtime 写入侧共用同一套域常量，杜绝两端漂移。
  */
 
 /** provider 层（单请求级）重试配置；undefined = 采纳 pi 默认语义。 */
 export interface LlmRetryProviderConfig {
-  /** 未设 = 跟随全局 httpIdleTimeoutMs；禁止 0（0 会原样透传成 0ms 立即超时，见设计 §2.2） */
+  /** 未设 = 跟随全局 httpIdleTimeoutMs；禁止 0（0 会原样透传成 0ms 立即超时） */
   timeoutMs?: number
   /** 未设 = 0（不重试） */
   maxRetries?: number

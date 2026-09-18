@@ -2,7 +2,7 @@
 //
 // [W4] 注册对账 sweep——死亡窗口投递缺口的补发通道（发射点枚举第 5 处）。
 //
-// 设计权威源：docs/design/chat-domain-v1x-liveness-governance.md §3.2 D2「注册对账
+// 设计锚点：D2「注册对账
 // sweep」（R2 增补、R3 钉死判据与写法）。
 //
 // 问题：注销经进程内 pi.events appendEntry 落盘，进程死亡时发射源消失
@@ -10,7 +10,7 @@
 // pending_notifications 工具虚报活跃。
 //
 // 补发机制：对「本 session 的 register entry × 对应 record 状态 ∈ 终态集 ∪ record
-// 已归档/不存在」的差集补发 unregister。**已归档**（archive 从内存移除、磁盘有
+// 已离场/不存在」的差集补发 unregister。**已离场**（archive 从内存移除、磁盘有
 // finalized sidecar → 读侧重建 closed）与**不存在**（畸形条目对不上任何 record）
 // 同视同终态——「查不到即补注销」判据兜底链才闭合。
 //
@@ -52,7 +52,7 @@ export type SupervisedRecordState =
   | "active"
   /** 终态（closed，含 closedReason——映射 pending reason 用）。 */
   | { terminal: true; closedReason: string | undefined }
-  /** 已归档/不存在（视同终态，补注销）。 */
+  /** 已离场/不存在（视同终态，补注销）。 */
   | "missing";
 
 /** sweep 依赖注入（全部单测可替身）。 */

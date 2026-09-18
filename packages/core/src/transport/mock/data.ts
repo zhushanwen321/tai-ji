@@ -153,7 +153,9 @@ export const fixtureMessages: Record<string, Message[]> = {
     {
       id: 'a2',
       role: 'assistant',
-      content: '提交时遇到文件锁，写入失败。请确认没有外部进程占用后重试。',
+      // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（演示场景：崩溃前正文为空）
+      content: '',
+      error: '提交时遇到文件锁，写入失败。请确认没有外部进程占用后重试。',
       status: 'error',
       timestamp: NOW - 2 * MINUTE,
       toolCalls: [

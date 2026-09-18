@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A6 场景：first-prompt 模式 —— 发出首条请求即得名，不等回复（设计 rename-session-three-modes.md V2 / D2）。
+ * A6 场景：first-prompt 模式 —— 发出首条请求即得名，不等回复。
  *
  * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）。
  * 环境：config 写 mode:"first-prompt"、模型留空（设计 D5：空 ref 跟随会话主模型 = faux）。
@@ -18,7 +18,7 @@
  *   ④ 后续 round 不再改名：第二轮 prompt 后无新 LLM request / 无新 session_info /
  *      正向证据 `firstPrompt skip: userCount=1`（堵「handler 未被调用」的假通过）
  *
- * rename 完成 vs assistant 完成的相对次序仅观察记录、不做 gate（设计 rename-session-three-modes.md D8：两个独立 LLM 调用的
+ * rename 完成 vs assistant 完成的相对次序仅观察记录、不做 gate（两个独立 LLM 调用的
  * 完成序受 provider 排班影响；faux 下两者均即时返回，次序由调用发起序决定）。
  */
 
@@ -94,7 +94,7 @@ export async function runA6() {
 			const info = await pi.waitSessionInfoEntry(10_000);
 			assert(info !== null, "session_info 未落盘（rename 未落库）");
 			assertLogTitleMatches(renameRes.message, info.name);
-			// 完成序观察记录（不 gate，设计 rename-session-three-modes.md D8）：rename 落库日志 vs 最终 assistant message_end
+			// 完成序观察记录（不 gate）：rename 落库日志 vs 最终 assistant message_end
 			const stopEndT = lastStopAssistantEndT(pi.timeline.all());
 			if (stopEndT !== null) {
 				const order = renameRes.t < stopEndT ? "早于" : "晚于";

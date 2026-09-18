@@ -1,80 +1,61 @@
 /**
- * GitInfoReader 缓存测试（perf 微项 10：LRU 淘汰 O(n)→O(1)）。
+ * GitInfoReader 门面单测（缓存治理批 4 U10）：门面只做「观测器缓存 → GitInfo 旧形状」投影，
+ * 自身零缓存零 IO。观测器策略（TTL/LRU/prune）由 repo-observer.test.ts 覆盖，walk-up 解析由
+ * git-repo-resolver.test.ts 覆盖。
  *
- * 观察手段：vi.mock node:child_process 的 execSync，计数缓存 miss 时的真实探测；
- * readGitInfoUncached 内的 statSync 走真实 fs（路径不存在 → isWorktree=false，快速 ENOENT）。
+ * observer 用手写 fake（记录调用），验证投影映射与 prune 委托。
  *
- * 覆盖三点：
- * 1. TTL 内命中缓存（零新探测）
- * 2. 容量满时驱逐最老条目（first-key O(1) 淘汰）
- * 3. 过期重写移位后淘汰按「最后写入时间」——与原 O(n) 扫描 ts 最小的语义精确等价
- *
- * 测试框架 vitest，运行命令 npx vitest run。
+ * 测试框架 vitest，运行命令：cd packages/runtime && npx vitest run src/infra/system/git-info-reader.test.ts
  */
-import { execSync } from 'node:child_process'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GitInfoReader, __resetGitInfoCacheForTests } from './git-info-reader.js'
+import { describe, expect, it, vi } from 'vitest'
+import type { IGitRepoObserver, RepoObservation } from '../../services/ports/git-info.js'
+import { GitInfoReader } from './git-info-reader.js'
 
-vi.mock('node:child_process', () => ({ execSync: vi.fn(() => 'main\n') }))
+const NON_REPO: RepoObservation = { branch: undefined, isWorktree: false, isBare: false, gitDir: undefined, headPath: undefined }
 
-const execSyncMock = vi.mocked(execSync)
+function fakeObserver(obs: RepoObservation): IGitRepoObserver {
+  return {
+    readObservation: vi.fn(() => obs),
+    pruneCache: vi.fn(),
+  }
+}
 
-describe('GitInfoReader.readGitInfo 缓存（微项 10：LRU O(1) 淘汰）', () => {
-  beforeEach(() => {
-    __resetGitInfoCacheForTests()
-    execSyncMock.mockClear()
+describe('GitInfoReader.readGitInfo（观测器缓存 → GitInfo 投影）', () => {
+  it('repo（gitDir + branch 均在）→ 投影 {branch, isWorktree}', () => {
+    const observer = fakeObserver({ branch: 'feat-x', isWorktree: true, isBare: false, gitDir: '/ws/.bare/wt', headPath: '/ws/.bare/wt/HEAD' })
+    const reader = new GitInfoReader(observer)
+
+    expect(reader.readGitInfo('/ws/feat-x')).toEqual({ branch: 'feat-x', isWorktree: true })
+    expect(observer.readObservation).toHaveBeenCalledWith('/ws/feat-x')
   })
 
-  it('TTL 内二次读取命中缓存：零新探测', () => {
-    const reader = new GitInfoReader()
-    const first = reader.readGitInfo('/git-info-repo')
-    const second = reader.readGitInfo('/git-info-repo')
-    expect(first).toEqual({ branch: 'main', isWorktree: false })
-    expect(second).toEqual(first)
-    expect(execSyncMock).toHaveBeenCalledTimes(1)
+  it('非 repo（gitDir undefined）→ undefined（摘要字段留空）', () => {
+    const reader = new GitInfoReader(fakeObserver(NON_REPO))
+    expect(reader.readGitInfo('/not-a-repo')).toBeUndefined()
   })
 
-  it('容量满时 O(1) 驱逐最老条目（first-key 淘汰）', () => {
-    const reader = new GitInfoReader()
-    reader.readGitInfo('/lru-repo-0')
-    // 填满缓存（模块常量 CACHE_MAX_SIZE=500）：第 501 个 key 插入时驱逐最老的 /lru-repo-0
-    for (let i = 1; i <= 500; i++) reader.readGitInfo(`/lru-repo-${i}`)
-    expect(execSyncMock).toHaveBeenCalledTimes(501)
-
-    // 被驱逐的最老条目：重新读取 → 缓存 miss → 重新探测
-    reader.readGitInfo('/lru-repo-0')
-    expect(execSyncMock).toHaveBeenCalledTimes(502)
-    // 未驱逐条目 TTL 内命中：零新探测
-    reader.readGitInfo('/lru-repo-250')
-    expect(execSyncMock).toHaveBeenCalledTimes(502)
+  it('branch undefined（rev-parse 失败 / 未出生分支 / git 不可用）→ undefined，即使 gitDir 存在', () => {
+    const observer = fakeObserver({ branch: undefined, isWorktree: false, isBare: true, gitDir: '/ws/.bare', headPath: '/ws/.bare/HEAD' })
+    const reader = new GitInfoReader(observer)
+    expect(reader.readGitInfo('/ws')).toBeUndefined()
   })
 
-  it('过期重写把条目移到 Map 尾部：容量淘汰按最后写入时间（与原 ts 扫描语义等价）', () => {
-    vi.useFakeTimers()
-    try {
-      const reader = new GitInfoReader()
-      reader.readGitInfo('/lru-a') // t0 写入
-      reader.readGitInfo('/lru-b') // t0 写入
-      vi.advanceTimersByTime(5 * 60 * 1000 + 1) // TTL（5min）过期
-      reader.readGitInfo('/lru-a') // 过期重算 → delete+set 移尾（最后写入时间更新）
-      // 填满剩余容量（当前 2 条 → 再插 498 到 500）
-      for (let i = 0; i < 498; i++) reader.readGitInfo(`/lru-fill-${i}`)
-      expect(execSyncMock).toHaveBeenCalledTimes(501) // 2 + 1（a 重算）+ 498
+  it('bare workspace 根形态：branch 有效时正常投影（isWorktree=false）', () => {
+    // workspace 根在更上层 repo 之内的边界：walk-up 命中 .bare，rev-parse 从 cwd 起算仍可解析
+    const observer = fakeObserver({ branch: 'main', isWorktree: false, isBare: true, gitDir: '/repo/inner/.bare', headPath: '/repo/inner/.bare/HEAD' })
+    const reader = new GitInfoReader(observer)
+    expect(reader.readGitInfo('/repo/inner')).toEqual({ branch: 'main', isWorktree: false })
+  })
+})
 
-      // 新 key 触发淘汰：first key 是 /lru-b（最后写入时间最旧——虽比 /lru-a 后插入，
-      // 但 /lru-a 过期重写过更"新"），与原 O(n) 扫描 ts 最小的语义精确等价
-      reader.readGitInfo('/lru-new')
-      expect(execSyncMock).toHaveBeenCalledTimes(502)
+describe('GitInfoReader.pruneStaleCache（收缩动作打观测器单点）', () => {
+  it('签名保留，动作整体委托观测器 pruneCache（branch/worktree/bare 同一缓存）', () => {
+    const observer = fakeObserver(NON_REPO)
+    const reader = new GitInfoReader(observer)
 
-      // /lru-a 未被驱逐（重写过，较新）：TTL 内命中（注意此断言须在 /lru-b 重读之前——
-      // b 重读会让缓存回到满容量，届时 first key（a）才会被挤出）
-      reader.readGitInfo('/lru-a')
-      expect(execSyncMock).toHaveBeenCalledTimes(502)
-      // /lru-b 被驱逐：重新读取重算
-      reader.readGitInfo('/lru-b')
-      expect(execSyncMock).toHaveBeenCalledTimes(503)
-    } finally {
-      vi.useRealTimers()
-    }
+    const cwds = new Set(['/a', '/b'])
+    reader.pruneStaleCache(cwds)
+    expect(observer.pruneCache).toHaveBeenCalledTimes(1)
+    expect(observer.pruneCache).toHaveBeenCalledWith(cwds)
   })
 })

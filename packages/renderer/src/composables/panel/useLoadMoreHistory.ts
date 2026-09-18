@@ -5,7 +5,7 @@
  * - loadingMore：加载中 ref（驱动按钮 disabled + spinner + 文案切换）。
  * - showLoadMore：是否还有更早历史可加载（[u6] 由 store 截断窗口状态 truncated 派生，非默认 true）。
  * - handleLoadMore：防重入的加载调用（loadingMore/showLoadMore 守卫）——[u6] 走
- *   useChat.loadMoreHistory 游标翻页（crash-resilience §3.3 D4 中期，原 getFullHistory
+ *   useChat.loadMoreHistory 游标翻页（D4 中期形态，原 getFullHistory
  *   全量通路已退役），游标 = 分区最旧消息的文件侧身份，runtime 返回锚点之前的最近窗口。
  *
  * 滚动锚定（P-paging 前半）：handleLoadMore 期间 isPrepend=true 喂 `<Virtualizer :shift>`，

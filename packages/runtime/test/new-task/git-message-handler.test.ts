@@ -22,6 +22,15 @@ import { GitStateService } from '../../src/services/git/git-state-service.js'
 import type { IGitExecutor, GitCommand, GitExecutorResult } from '../../src/services/ports/git-executor.js'
 import type { ClientMessage } from '@taiji/shared'
 
+
+/** stub 观测器：用例不触观测器链，仅满足 GitStateService 必选依赖（类型收窄）。 */
+const stubObserver = {
+  readObservation: () => { throw new Error('stub observer 不应被调用') },
+  pruneCache: () => {},
+  invalidateCwd: () => {},
+} as unknown as import('../../src/services/git/repo-observer.js').GitRepoObserver
+
+
 interface Captured {
   replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[]
   errors: { id: string | undefined; code: string; message: string; details?: Record<string, unknown> }[]
@@ -280,7 +289,7 @@ describe('W17 审查 Fix-2 全链：checkout(sessionId) 按 cwd 失效（同 wor
       return { stdout: '', stderr: '', exitCode: 0 } // checkout 等
     })
     const executor: IGitExecutor = { exec }
-    const stateService = new GitStateService({ executor, statusTtlMs: 60_000 })
+    const stateService = new GitStateService({ executor, repoObserver: stubObserver, statusTtlMs: 60_000 })
     const summaries: Record<string, { cwd: string }> = { 'sid-a': { cwd: '/repo' }, 'sid-b': { cwd: '/repo' } }
     const gitService = new GitService({
       sessionService: { getSummary: (sid: string) => summaries[sid] },

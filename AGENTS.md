@@ -113,11 +113,11 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 **先读 [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md)（分层/mock/回归基线 SSOT）+ [docs/testing/](docs/testing/) 对应功能文档**，复用已有 testid/调用链/踩坑经验。红线：vitest（禁 `node:test` / `tsx --test`，配置在子包 vitest.config.ts，从子包目录运行）；timer 测试用 fake timers；派编码 subagent 时 task 写明测试框架。**三视角缺一不可 [HISTORICAL]**（构建者白盒 + 使用者黑盒 + 观察者形态；每条用例至少一个用户可见 DOM 断言；spec 结构条目 = 渲染断言清单）——细则见 docs/TEST-STRATEGY.md §3。
 
-**e2e 执行准则（SSOT）**：e2e / 真实进程 / 真实 LLM 用例（runtime equivalence real-pi 池、`TAIJI_PI_LIVE` 真机、playwright real 轨、sync-collect 探针等）只在**开发阶段按改动面**执行——改了哪个域跑对应子集，清单由 tech-design 设计文档的「e2e 影响面评估」圈定、dev-flow 验收计划表承接，且必须空载串行跑（跨包/跨套件并发会饱和 CPU，真实 LLM 轮次延迟会越过事件预算——2026-09-15 send-queue-e2e 120s 超时事故）。**禁止全量扫跑；PR / merge / CI 门禁一律不跑真实 LLM e2e**（`TAIJI_SKIP_REAL_PI=1` 跑 unit 轨，CI 与本地同口径；mock 轨零 token 用例除外——L1 CI 固定环节：e2e-visual 像素轨 + e2e-behavior P0 smoke 轨，2026-09-15 行为轨接线）。e2e 失败先读 junit failure 详情归因（`waitForEvent` 的 seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不归因直接重试、禁止放宽断言或膨胀预算换绿灯。**长期方向：e2e 逐步单测化**——能以 mock / fixture 重放等价覆盖的 e2e 项随改动沉淀为单测，merge 门禁的回归防线由单测承担。**每条 e2e 资产必居三态之一**（R1 毕业进 CI / R2 按改动面触发且触发条件必填 / R3 归档进 docs/testing/），禁止第四态「既不跑也不归档」——三态定义、行为轨 spec 逐条归宿标注与新资产流转规则见 [TEST-STRATEGY.md「e2e 资产归宿纪律」](docs/TEST-STRATEGY.md)。**按改动面圈定跑哪些 e2e 的机器对账入口 = `node scripts/select-affected-e2e.mjs --base <ref>`**（登记 SSOT = [docs/testing/e2e-map.json](docs/testing/e2e-map.json)；`--check` 防漏登记门禁，结构校验 `node scripts/validate-e2e-map.mjs`）。
+**e2e 执行准则（SSOT）**：e2e / 真实进程 / 真实 LLM 用例（runtime equivalence real-pi 池、`TAIJI_PI_LIVE` 真机、playwright real 轨等）只在**开发阶段按改动面**执行——改了哪个域跑对应子集，清单由 tech-design 设计文档的「e2e 影响面评估」圈定、dev-flow 验收计划表承接，且必须空载串行跑（跨包/跨套件并发会饱和 CPU，真实 LLM 轮次延迟会越过事件预算——2026-09-15 send-queue-e2e 120s 超时事故）。**禁止全量扫跑；PR / merge / CI 门禁一律不跑真实 LLM e2e**（`TAIJI_SKIP_REAL_PI=1` 跑 unit 轨，CI 与本地同口径；mock 轨零 token 用例除外——L1 CI 固定环节：e2e-visual 像素轨 + e2e-behavior P0 smoke 轨，2026-09-15 行为轨接线）。e2e 失败先读 junit failure 详情归因（`waitForEvent` 的 seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不归因直接重试、禁止放宽断言或膨胀预算换绿灯。**长期方向：e2e 逐步单测化**——能以 mock / fixture 重放等价覆盖的 e2e 项随改动沉淀为单测，merge 门禁的回归防线由单测承担。**每条 e2e 资产必居三态之一**（R1 毕业进 CI / R2 按改动面触发且触发条件必填 / R3 归档进 docs/testing/），禁止第四态「既不跑也不归档」——三态定义、行为轨 spec 逐条归宿标注与新资产流转规则见 [TEST-STRATEGY.md「e2e 资产归宿纪律」](docs/TEST-STRATEGY.md)。**按改动面圈定跑哪些 e2e 的机器对账入口 = `node scripts/select-affected-e2e.mjs --base <ref>`**（登记 SSOT = [docs/testing/e2e-map.json](docs/testing/e2e-map.json)；`--check` 防漏登记门禁，结构校验 `node scripts/validate-e2e-map.mjs`）。
 
 **用例级耗时报告**：vitest 包的 config 统一配 `reporters: ["default", "junit"]` + `outputFile: { junit: "./test-results/vitest-junit.xml" }`（`test-results/` 已 gitignore），每次 run 自动落盘用例级耗时，慢用例排查用 grep/sort，勿临时加 reporter flag：`grep -o '<testcase classname="[^"]*" name="[^"]*" time="[0-9.]*"' test-results/vitest-junit.xml | sed -E 's/.*classname="([^"]*)" name="([^"]*)" time="([0-9.]+)".*/\3s \1 > \2/' | sort -rn | head -15`。已有自定义 reporters 的包（如 runtime 的 cw-acceptance-markers-reporter）**追加** `junit` 项而非覆盖；v4 json reporter 的文件级 `duration` 恒 null（用例级有值），程序化消费用 junit `time` 属性。示范实现：`packages/subagent-core/vitest.config.ts`；新建 vitest 包默认带上，存量包改动其测试时顺手补。
 
-**测试禁止触碰真实数据目录 [HISTORICAL]**（2026-09-02 会话丢失事故：测试在 env 带 `TAIJI_AGENT_DATA_DIR=~/.taiji` 时运行，`rmSync(getSessionsDir())` 删光全部活跃会话，三个 pi 进程追加写入 ENOENT 崩溃——appendFileSync flags `'a'` 本可自建文件，ENOENT 根因是父目录被 recursive 删除）。双层防线已固化在 runtime vitest：① `test/global-setup.ts` 对「注入的 `TAIJI_AGENT_DATA_DIR` 指向真实 `~/.taiji`」fail-fast 拒跑；② `test/fs-guard.ts`（setupFiles 切面）拦截全部破坏性 fs 操作（写/删/移动），**白名单 = `os.tmpdir()` + `$TAIJI_AGENT_DATA_DIR`（≠ 真实目录）+ `~/.taiji-dev`（homedir 动态推导），其余目录一律抛错**。约束：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）；renderer/core 等其他包新增或改造 vitest 配置时必须挂同款 setupFiles。
+**测试禁止触碰真实数据目录 [HISTORICAL]**（2026-09-02 会话丢失事故：测试在 env 带 `TAIJI_AGENT_DATA_DIR=~/.taiji` 时运行，`rmSync(getSessionsDir())` 删光全部活跃会话，三个 pi 进程追加写入 ENOENT 崩溃——appendFileSync flags `'a'` 本可自建文件，ENOENT 根因是父目录被 recursive 删除；2026-09-16 同族事故：从非包 cwd 误跑 workspace 全仓 vitest 绕过包级防线删光 prod 数据目录）。双层防线（① global-setup 将 `TAIJI_AGENT_DATA_DIR` 钉死 tmp + 对「注入真实 `~/.taiji` / 非白名单目录」的注入值**自动脱钩**（2026-09-17 前为 fail-fast 拒跑；脱钩=删 env 后落 tmp，安全等价且免去 `env -u` 摩擦，判定与 `isInjectedEnvAllowed` 共用）；② fs-guard（setupFiles 切面）拦截全部破坏性 fs 操作（写/删/移动），**白名单 = `os.tmpdir()` + `$TAIJI_AGENT_DATA_DIR`（≠ 真实目录）+ `~/.taiji-dev`（homedir 动态推导），其余目录一律抛错**）经 `test-guard/factory.ts` 的 `taijiTestConfig` 工厂统一注入**全仓所有 vitest 配置**（用户 setupFiles/globalSetup 追加保留；含根级兜底 config——从仓库根 cwd 跑 vitest 防线同样生效），漏挂由 `scripts/check-vitest-guard.mjs` 机器守卫拦截（pre-commit + CI invariants）。约束：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）；**禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）**。
 
 ## 前端编码规范
 
@@ -168,4 +168,30 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 跳过检查
 
-cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子包目录>"`，gate 数字与本地一致）[HISTORICAL]。默认禁止跳过检查；`SKIP_*` 变量（SKIP_ALL_CHECKS / SKIP_FRONTEND_LINT / SKIP_EXTENSION_LINT / SKIP_CODE_RULES_CHECK / SKIP_ENV_WHITELIST_CHECK / SKIP_PATH_WHITELIST_CHECK / SKIP_DIRECTORY_RULES_CHECK / SKIP_TOOL_SCHEMA_CHECK / SKIP_CSP_COMPAT_CHECK）仅限线上热修复且须 commit message 说明原因。CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-08 v0.9.3+ CSP `script-src 'self'` 拦截 shiki Oniguruma WASM 致全部 markdown 渲染静默降级纯文本，源码级 eval/WebAssembly 用法与 CSP 指令不一致即拦截；产物级防线在 `postbuild-validate.sh`。
+cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子包目录>"`，gate 数字与本地一致）[HISTORICAL]。默认禁止跳过检查；下表 `SKIP_*` 变量（pre-commit 全部逃生口，SSOT = `.githooks/install-hooks.sh` 生成的钩子本体）仅限线上热修复且须 commit message 说明原因。多数新守卫不设独立开关（R1 后惯例，仅 `SKIP_ALL_CHECKS` 总闸兜底）。
+
+| 变量 | 跳过对象 |
+|------|---------|
+| `SKIP_ALL_CHECKS` | 总闸：pre-commit 全部检查 |
+| `SKIP_FRONTEND_LINT` | 前端 ESLint（renderer staged .vue/.ts） |
+| `SKIP_TYPE_CHECK` | 前端 vue-tsc 类型检查（全量 + 测试 tsconfig） |
+| `SKIP_EXTENSION_LINT` | extensions ESLint/tsc/manifest/结构一致性/files 白名单四段（2b-2e 共用） |
+| `SKIP_CODE_RULES_CHECK` | vue_rules_checker 代码规范 + vitest 防线挂载守卫（共用） |
+| `SKIP_SIDECAR_SESSION_CHECK` | Sidecar session 隔离检查 |
+| `SKIP_CSS_TOKENS_CHECK` | CSS tokens 检查（style.css 组件级样式禁令） |
+| `SKIP_CSS_TOKEN_SSOT_CHECK` | CSS token SSOT 一致性（DESIGN.md 投影 ↔ style.css） |
+| `SKIP_RENDERER_DEPS_CHECK` | Renderer 依赖完整性（import vs package.json） |
+| `SKIP_ENV_WHITELIST_CHECK` | ENV_WHITELIST_PREFIXES SSOT 单一性检查 |
+| `SKIP_TOOL_SCHEMA_CHECK` | Pi extension tool schema 顶层 Object 合规检查 |
+| `SKIP_PATH_WHITELIST_CHECK` | 路径白名单动态化检查 |
+| `SKIP_WS_SEND_CHECK` | ws-client send 直调检查 |
+| `SKIP_NO_SERVICE_CYCLE_CHECK` | runtime services 循环依赖检查 |
+| `SKIP_CSP_COMPAT_CHECK` | CSP 能力一致性检查 |
+| `SKIP_RUNTIME_BUNDLE_CHECK` | Runtime Bundle 验证（runtime 源码变更时） |
+| `SKIP_BOUNDARY_CHECK` | AC7 extension-host 边界检查（core 源码变更时） |
+| `SKIP_PREFLIGHT_CHECK` | 打包配置预检查（electron-builder.yml / tsup.config.ts 变更时） |
+| `SKIP_DIRECTORY_RULES_CHECK` | 目录规范检查（禁 demos/impeccable + 外部 symlink） |
+| `SKIP_I18N_CJK_CHECK` | i18n CJK 残留检测（.vue 模板硬编码中文） |
+| `SKIP_I18N_LOCALE_SYNC_CHECK` | i18n locale 双侧 key 对齐检查 |
+
+CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-08 v0.9.3+ CSP `script-src 'self'` 拦截 shiki Oniguruma WASM 致全部 markdown 渲染静默降级纯文本，源码级 eval/WebAssembly 用法与 CSP 指令不一致即拦截；产物级防线在 `postbuild-validate.sh`。

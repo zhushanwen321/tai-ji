@@ -484,19 +484,44 @@ describe.skipIf(!FAUX_PI_READY)(
         // ── 阶段 2：无 CLI --model 附着（= P1 修复后的生产 spawn 形态）→ entry 终态恢复 ──
         // （faux 轨 model:null = 不拼 --model——空 agentDir 下 pi 以 model=unknown 占位
         // 冷启动，附着后由 model_change entry 恢复真值；全程无 LLM turn，队列空）
-        let fx2: PiFixture | null = await spawnPiFixture({ model: null, fauxResponses: [] })
-        fixture = fx2
-        try {
-          await fx2.sendCommand('switch_session', { sessionPath: targetFile! }, SWITCH_TIMEOUT_MS)
-          const state2 = await fx2.sendCommand('get_state')
-          const model2 = state2.data?.model as { provider?: string; id?: string } | undefined
-          expect(model2?.provider).toBe(targetProvider)
-          expect(model2?.id).toBe(targetModelId)
-        } finally {
-          await fx2.dispose()
-          fixture = null
-          fx2 = null
+        //
+        // 满载 flake 加固 [HISTORICAL]（coverage-gate 满载实测 `expected 'unknown' to be
+        // 'faux'` 一次；隔离 5/5 恒绿 = 满载时序 flake）：满载下附着恢复可被静默跳过——
+        // 恢复链在 createRuntime 内同步完成（rpc-mode.js:476-481 reply 前已 await 全链），
+        // 时序未收敛时走静默 fallback（sdk.js:87-95）→ get_state 返回 unknown 占位
+        //（pi-agent-core dist/agent.js:14-31），隔离复跑稳定通过。占位**进程内不可自愈**
+        //（实锤）：_refreshCurrentModelFromRegistry 按 unknown 占位 provider/id 回查注册表
+        // 必查空（agent-session.js:1970-1980），进程内不存在可收敛的状态迁移——禁止改
+        // 轮询等待。跳过的精确交错未定，候选机制（待探针实测）：注册路径的临时条目缺口 /
+        // 单 provider 补丁作废在途全量巡检；重采样（全新进程重试）对任何交错形态均有效，
+        // 故改为有限次 re-spawn 重试：每次尝试都是全新 pi 进程，恢复语义独立执行。
+        // 重试条件 = 「精确匹配失败即重试」的补集语义（非 unknown 锚定），系有意取舍：
+        // 竞态精确形态未定前不做窄锚定；代价仅是真回归时多烧 2 次 spawn（~1.2s）即红，
+        // 3 次耗尽后终态断言必红，不掩盖回归。
+        const RESTORE_ATTACH_MAX_ATTEMPTS = 3
+        const restoreAttempts: string[] = []
+        let restored = false
+        for (let attempt = 1; attempt <= RESTORE_ATTACH_MAX_ATTEMPTS && !restored; attempt++) {
+          let fx2: PiFixture | null = await spawnPiFixture({ model: null, fauxResponses: [] })
+          fixture = fx2
+          try {
+            await fx2.sendCommand('switch_session', { sessionPath: targetFile! }, SWITCH_TIMEOUT_MS)
+            const state2 = await fx2.sendCommand('get_state')
+            const model2 = state2.data?.model as { provider?: string; id?: string } | undefined
+            if (model2?.provider === targetProvider && model2?.id === targetModelId) {
+              restored = true
+            } else {
+              restoreAttempts.push(`attempt ${attempt}: model=${JSON.stringify(model2)}`)
+            }
+          } finally {
+            await fx2.dispose()
+            fixture = null
+            fx2 = null
+          }
         }
+        // 全部尝试耗尽才失败：断言仍是精确的 provider/id 匹配（上方成功条件），此处只换
+        // 诊断信息——附全部尝试读到的 model 形态，区分「竞态恒命中」与「恢复语义本身回归」。
+        expect(restored, `无 --model 附着 ${RESTORE_ATTACH_MAX_ATTEMPTS} 次均未恢复到 ${targetProvider}/${targetModelId}（pi 恢复竞态恒命中或恢复语义回归）；各次读到的 model：\n${restoreAttempts.join('\n')}`).toBe(true)
 
         // ── 阶段 3：对照（bug 形态锁定）——带 CLI --model 附着同一文件 → CLI 压过 entry ──
         // pi 优先级语义的行为级锚：未来 pi 改变「CLI model 恒优先」语义时此处先红，

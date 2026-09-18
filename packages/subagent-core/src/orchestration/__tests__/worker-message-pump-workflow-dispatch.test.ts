@@ -43,25 +43,19 @@ import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { handleWorkerMessage } from "../worker-message-pump.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
-import type { ModelInfo, ModelRegistryLike } from "../../execution/assembly/model-resolver.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
-import type { PiLike } from "../../execution/subagent-service.ts";
 import { clearEngines } from "../../execution/engine/registry.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "../../execution/__tests__/helpers/fake-engine-port.ts";
+import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
 
 // ── harness ──────────────────────────────────────────────────
-
-function makeEmptyRegistry(): ModelRegistryLike {
-  return { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true };
-}
-
-const ctxModel: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
 
 interface PumpHarness {
   service: SubagentService;
   store: RecordStore;
-  pi: { appendEntry: ReturnType<typeof vi.fn>; events: { emit: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn> };
+  pi: PiMock;
   fake: FakePiEnginePort;
   run: WorkflowRun;
   postMessage: ReturnType<typeof vi.fn>;
@@ -74,14 +68,10 @@ function makePumpHarness(runId: string): PumpHarness {
   process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
   const agentDir = path.join(tmpRoot, "agent");
   const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
-  modelService.initModel({ modelRegistry: makeEmptyRegistry(), sessionId: "wf-pump-it", ctxModel });
+  modelService.initModel({ modelRegistry: emptyRegistry(), sessionId: "wf-pump-it", ctxModel });
   const service = new SubagentService({ cwd: agentDir, modelService });
-  const pi = {
-    appendEntry: vi.fn(),
-    events: { emit: vi.fn() },
-    sendMessage: vi.fn(),
-  };
-  service.initSession({ pi: pi as unknown as PiLike, sessionId: "wf-pump-it" });
+  const pi = makePi();
+  service.initSession({ pi, sessionId: "wf-pump-it" });
   clearEngines();
   const fake = registerFakePiEngine();
 
@@ -107,7 +97,9 @@ function makePumpHarness(runId: string): PumpHarness {
     workflowAgentDispatch: (opts: AgentCallOpts, parentRunId: string, signal?: AbortSignal) =>
       service.executeWorkflowAgent(opts, parentRunId, signal),
   } as unknown as LifecycleDeps;
-  return { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, run, postMessage, deps, tmpRoot };
+  const harness = { service, store: Reflect.get(service, "store") as RecordStore, pi, fake, run, postMessage, deps, tmpRoot };
+  openHarnesses.push({ service, tmpRoot });
+  return harness;
 }
 
 function makeHandlers(): WorkerHandlers {
@@ -133,11 +125,20 @@ function findAgentResultPost(postMessage: ReturnType<typeof vi.fn>, callId: numb
 
 let prevDataDirEnv: string | undefined;
 
+/** 在途 harness 登记处：makePumpHarness 创建即登记，顶层 afterEach 统一释放（tmp 不泄漏）。 */
+const openHarnesses: Array<{ service: SubagentService; tmpRoot: string }> = [];
+
 beforeEach(() => {
   prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
 });
 
 afterEach(() => {
+  for (const h of openHarnesses) {
+    h.service.dispose();
+    fs.rmSync(h.tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+  openHarnesses.length = 0;
+  clearEngines();
   vi.restoreAllMocks();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
   else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;
@@ -176,7 +177,10 @@ describe("pump → executeWorkflowAgent 端到端", () => {
 
     // 2. 引擎应答 → worker 协议回包 + trace node 终态摘要
     //    （settle 后链路含 journal.close 的真 fs await，用 waitFor 收敛）
-    h.fake.runs[0]!.settle({ content: "ok", sessionId: "sess-1", sessionFile: "/tmp/sess-1.jsonl", durationMs: 5 });
+    // sessionFile 落 os.tmpdir() 白名单（fs-guard 防线要求），禁写 /tmp 根：
+    // settle 链路含 writeAliveMarker 真实写 `<sessionFile>.alive`，/tmp 根不在白名单会被拦截。
+    const sessionFile = path.join(h.tmpRoot, "sess-1.jsonl");
+    h.fake.runs[0]!.settle({ content: "ok", sessionId: "sess-1", sessionFile, durationMs: 5 });
     await vi.waitFor(() => {
       expect(findAgentResultPost(h.postMessage, 1)).toBeDefined();
     });
@@ -191,7 +195,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const node = h.run.state.trace.find(1);
     expect(node?.status).toBe("completed");
     expect(node?.result?.content).toBe("ok");
-    expect(node?.result?.sessionFile).toBe("/tmp/sess-1.jsonl");
+    expect(node?.result?.sessionFile).toBe(sessionFile);
     expect(node?.completedAt).toBeDefined();
     expect(h.run.state.calls.get(1)?.status).toBe("done");
 

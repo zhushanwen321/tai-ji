@@ -26,8 +26,8 @@ import { createWindow } from '../window/window-factory.js'
 const { showSpy, showInactiveSpy, captureOnce } = vi.hoisted(() => ({
   showSpy: vi.fn(),
   showInactiveSpy: vi.fn(),
-  // 按事件名捕获：merge 后 window-factory 还有 once('closed')（crash-resilience 的
-  // windows Map 清理钩）注册在 ready-to-show 之后，单一 cb 槽会被覆盖——S10 必须取
+  // 按事件名捕获：merge 后 window-factory 还有 once('closed')（windows Map 清理钩）
+  // 注册在 ready-to-show 之后，单一 cb 槽会被覆盖——S10 必须取
   // ready-to-show 自己的回调，不能拿“最后一个 once”。
   captureOnce: { cbs: {} as Record<string, () => void> },
 }))

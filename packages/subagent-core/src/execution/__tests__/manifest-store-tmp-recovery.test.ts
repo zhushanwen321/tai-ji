@@ -118,3 +118,41 @@ describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 });
+
+// [A11] listAllSync 目录级读失败分通道：ENOENT = 合法缺省（静默空表）；非 ENOENT
+// （ENOTDIR/EACCES 等）= 真 IO 故障（error 留痕——collectRecords orphan 投影把空表
+// 当 not-found 消费，静默会伪装掉持续故障）。
+describe("[A11] listAllSync 目录读失败分通道", () => {
+  let dir: string;
+  let store: ManifestStore;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-listall-"));
+    store = new ManifestStore(dir);
+    loggerMock.warn.mockClear();
+    loggerMock.error.mockClear();
+    loggerMock.debug.mockClear();
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("manifest 目录不存在（ENOENT）→ 空表且零告警（合法缺省静默）", () => {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    expect(store.listAllSync()).toEqual([]);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+    expect(loggerMock.error).not.toHaveBeenCalled();
+  });
+
+  it("目录位被文件占据（ENOTDIR）→ 空表 + error 留痕（IO 故障可诊断）", () => {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    fs.writeFileSync(dir, "not a directory");
+    expect(store.listAllSync()).toEqual([]);
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.stringContaining("list manifests"),
+      expect.anything(),
+    );
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+});

@@ -25,6 +25,7 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
+import { errorCodeOf } from "../../shared/fs-error.ts";
 
 import type { ExecutionMode, RecordOrigin } from "../assembly/types.ts";
 
@@ -207,11 +208,6 @@ type ValidIndexTop = {
   version: number;
   entries: Record<string, unknown>;
 };
-
-/** unknown → Node fs 错误码（非 Error 或无 code → undefined）。 */
-function errorCodeOf(err: unknown): string | undefined {
-  return err instanceof Error && "code" in err && typeof err.code === "string" ? err.code : undefined;
-}
 
 /** 读索引文件文本。读失败 → null：ENOENT = 正常首跑保持静默；其余读失败（EACCES 等
  * 长期权限异常）留 debug 线索——空索引回退本身可自愈，但权限类异常不会自己消失，需可诊断。 */

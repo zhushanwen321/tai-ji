@@ -1,8 +1,8 @@
 // zcode-engine-dispose.test.ts —— P0-1 U5 dispose 收割（引擎集成面，fake-appserver
 // 子进程，绝不 spawn 真 zcode.cjs）。
 //
-// 设计权威源：docs/design/timeout-zcode-turn-and-settled-watchdog.md §3.4（退化
-// 路径）、§6 D7（dispose 收割兜底）、§11 P-Z3。真实现场（真实环境的 close 吞没）
+// 设计锚点：退化
+// 路径、dispose 收割兜底（D7）、P-Z3。真实现场（真实环境的 close 吞没）
 // 归 Gate B；本文件验证引擎层可注入的集成行为：
 //   ① dispose 时在途 turn 收敛为明确失败（不挂满 turn 预算）且不触发重试轮
 //     （u-z4 disposed 标志衔接：收割 ≠ 瞬时崩溃——boot 1 / create×1 机械证据）；

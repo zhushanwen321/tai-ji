@@ -1,7 +1,7 @@
 /**
  * GUI 组件渲染 E2E —— Playwright + Electron + mock 轨。
  *
- * 验证 GUI 渲染协议（tool result 路径）全链路：
+ * 验证 GUI 渲染协议的**对话流内**链路（tool result 路径）：
  *
  * 路径 B（tool result __gui__）:
  *   mock tool_call_end 携带 details.__gui__ → Block.vue extractGui 提取
@@ -11,8 +11,23 @@
  * tab 渲染）已删除：SideDrawer 内 gui-stats-line / gui-list-tree testid 已不存在
  * （widgetGui 渲染链路改版），断言永挂。git 可追溯。
  *
+ * [改写 2026-09-16 composer-task-tray] widgetGui 的渲染消费端由「对话流 WidgetArea pill」
+ * 迁至「composer 任务托盘 widget 区」（设计 docs/design/composer-task-tray.md D3/D11；
+ * 托盘为 widget 唯一消费端，pill 组件与 `widget-area`/`widget-pill` testid 已退役）。
+ * **本 spec 不再承载 widgetGui 消费端断言**，原因是 mock 轨不可达该链路：
+ * mock 推帧走 `packages/core/src/transport/mock/index.ts` 的 `pushSession`
+ * （只调 `events.dispatchSession`，session 通道），而 ViewHostStore 的消费者
+ * （ExtensionHost bridge，useExtensionHostBridge）经 `onCrossSession` 订阅、由
+ * route-inbound 的 crossSession 分发腿投递——mock 不进 route-inbound，故 mock 轨下
+ * `extension:widgetGui` 永远到不了 ViewHostStore（同现象可用 status-bar 空态独立复核）。
+ * 修复点（出 e2e 领地，登记为 blocker）= pushSession 增补 route-inbound 同款
+ * crossSession 分发腿；修复前 widgetGui 消费端的端到端断言落在 **real 轨**
+ * `e2e/tasks-drawer-real.spec.ts` R2（真 runtime + 真 WS 帧 + 真 route-inbound：断言
+ * 托盘 widget icon/badge 出现 + 面板 tab-bar 双段渲染）。
+ * 保留面：对话流内联 `__gui__`（tool call 记录，设计明文不退役）——下方路径 B 用例不变。
+ *
  * mock 轨数据流：VITE_MOCK=true → chat.send → run-send-stream 自动推送
- * tool_call_end(含 __gui__) + extension:widgetGui × 2。
+ * tool_call_end(含 __gui__) + extension:widgetGui × 2（后者当前不可达托盘，见上）。
  *
  * 运行：npx playwright test e2e/gui-components.spec.ts
  */

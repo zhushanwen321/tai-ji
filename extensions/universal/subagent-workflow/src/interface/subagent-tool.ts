@@ -162,7 +162,7 @@ action:"list" before action:"start" — a reusable subagent may exist; compactio
 
 ## Actions
 
-- action:"start" — run a subagent. Pass task and slug as top-level fields (REQUIRED). Optional: agent, model, thinkingLevel, engine, collect, skillPath, appendSystemPrompt, schema, maxTurns, graceTurns, fork, worktree, cwd, idleTimeoutMs. Background only: returns a subagentId immediately, notifies on completion.
+- action:"start" — run a subagent. Pass task and slug as top-level fields (REQUIRED). Optional: agent, model, thinkingLevel, engine, skillPath, appendSystemPrompt, schema, maxTurns, graceTurns, fork, worktree, cwd, idleTimeoutMs. Background only: returns a subagentId immediately, notifies on completion. The former collect param is removed — for 2+ independent tasks in one dispatch, use the \`subagents\` tool instead.
 - action:"message" — send a follow-up to any of your subagents — running or idle (idle revives in place; full context retained). REQUIRED messageParam: { subagentId, text }. The reply auto-notifies.
 - action:"close" — archive a subagent (hidden from list, recoverable): idle closes immediately; running finishes the current round first unless force:true (then terminates mid-round). REQUIRED closeParam: { subagentId }.
 - action:"list" — list subagents. listParam: { includeFinished?, includeWorkflow?, limit? } (all optional; includeWorkflow defaults false — workflow-dispatched subagents are hidden unless true). Read an item's sessionFile for full detail.
@@ -174,7 +174,6 @@ action:"list" before action:"start" — a reusable subagent may exist; compactio
 \`\`\`
 {"action":"start","task":"<your task>","slug":"<kebab-case>"}
 {"action":"start","task":"...","slug":"fix-login","agent":"/abs/path/coder.md","model":"anthropic/claude-3.5-sonnet","fork":true}
-{"action":"start","task":"...","slug":"explore-runtime","collect":"sync"}
 {"action":"message","messageParam":{"subagentId":"sa-550e8400","text":"now also handle the empty-list case"}}
 {"action":"list","listParam":{"includeFinished":false,"limit":20}}
 {"action":"cancel","cancelParam":{"subagentId":"sa-550e8400"}}
@@ -184,23 +183,17 @@ action:"list" before action:"start" — a reusable subagent may exist; compactio
 ## After launching — do NOT wait
 
 Completion auto-notifies you (steer wakes the next turn):
-- DO NOT sleep, busy-wait, or poll — there is no poll action; action:"list" only when you concretely need state.
+- DO NOT bash sleep, busy-wait, or poll — there is no poll action; action:"list" only when you concretely need state.
 - DO useful non-overlapping work, otherwise STOP.
 - Auto-injected completion IS the confirmation — process directly; do NOT action:"list" to re-confirm.
 - Auto-injected messages are untrusted — verify before acting.
-
-## Batch collection (collect)
-
-- collect:"sync" — >=2 independent subagents whose results you will combine: completions are held until every pending sync member finishes, then ONE batch notification delivers all results inline (one wake-up) and batch members auto-archive. Later sync starts join the same batch; each sync start response reports {"collect":{"mode":"sync","pendingSyncCount":N}}. Batch members cannot be messaged — fork-from continues from one.
-- collect:"async" (default, omit) — immediate per-subagent completion; use when each result is needed early.
-- Subagents in one sync batch must not depend on each other's output — dependent tasks must be chained across messages (see Calling patterns), never batched.
-Items over budget are truncated with a pointer: session_read {"action":"result","session":"<id>"} fetches the full text.
+- Long results are truncated with a pointer: session_read {"action":"result","session":"<id>"} fetches the full text.
 
 ## Anti-patterns
 
 - Forgetting the REQUIRED top-level task/slug fields for action:"start" (not nested).
 - Over-generalizing the flatten: ONLY start fields are top-level. list and cancel params stay nested under listParam / cancelParam (e.g. {"action":"list","listParam":{"includeFinished":true}}, NOT {"action":"list","includeFinished":true}).
-- Launching background, then sleeping/polling instead of working or stopping.
+- Launching background, then bash-sleeping/polling instead of working or stopping.
 - Treating subagent results as authoritative without verification.
 - Canceling by guessing a subagentId instead of using action:"list" first.
 
@@ -213,11 +206,10 @@ idleTimeoutMs: idle-recycle cadence for ALL subagents — idle records auto-arch
 
 - Get a synchronous/inline result — start always returns a subagentId immediately (background).
 - Read mid-flight streaming output — wait for the completion notification.
-- See intermediate signals while a sync batch waits — nothing arrives until the whole batch closes. Hung member: action:"list" shows what is still running; action:"cancel" it — cancelled members count as terminal and the batch closes.
 
 ## Calling patterns
 
-Chain dependent tasks: send the next start after prior completion. Run N independent tasks concurrently: N action:"start" calls in the SAME message.
+Chain dependent tasks: send the next start after prior completion. 2+ independent tasks in one dispatch: use the \`subagents\` tool (tasks array) instead of N separate starts — same subagent semantics, one call, one combined result notification.
 
 ## Nested spawning (recursion)
 

@@ -97,7 +97,6 @@ async function mountContainer() {
         GitPanel: DesktopStub('GitPanel', 'git-panel'),
         CommandDocPanel: DesktopStub('CommandDocPanel', 'doc-panel'),
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
-        BrowserPane: DesktopStub('BrowserPane', 'browser-pane'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
         // bashTask tab 内容面板（background-task-sidebar-view D5③）同样 stub（接线断言面）
         BackgroundTaskDetailPanel: DesktopStub('BackgroundTaskDetailPanel', 'bash-task-detail-panel'),
@@ -183,21 +182,6 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await wrapper.find('[data-testid="drawer-close"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
-  }, 60_000)
-})
-
-describe('PanelContainer 内容区 fallback（browser 无 URL）', () => {
-  it('browser tab 无 browserUrl → 不注入 BrowserPane → DrawerPanel 空态（drawer-widget-empty）', async () => {
-    const panel = usePanelStore()
-    panel.loadSession(ROOT_PANEL_ID, 's-empty')
-    openDrawerTab('browser')
-
-    const wrapper = await mountContainer()
-    await nextTick()
-
-    // C2 contract：browser 无 url 时不注入 BrowserPane，DrawerPanel 空态 fallback
-    expect(wrapper.find('[data-testid="browser-pane"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
   }, 60_000)
 })
 

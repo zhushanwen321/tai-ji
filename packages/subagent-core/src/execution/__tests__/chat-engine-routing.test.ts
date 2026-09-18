@@ -1,7 +1,7 @@
 // src/execution/__tests__/chat-engine-routing.test.ts
 //
-// U0 chat 工具域引擎路由分叉测试。设计权威源：
-// docs/architecture/subagent-engine-gui-visibility.md §3.3 D4（chat 入口路由分叉）/
+// U0 chat 工具域引擎路由分叉测试。设计锚点：
+// D4（chat 入口路由分叉）/
 // D5（pi 缺省字节级零变化）/ D10（zcode 分支终止链）。
 //
 // 覆盖：
@@ -85,6 +85,8 @@ import {
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
+import { CTX_MODEL, emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -196,12 +198,6 @@ function writeAgentMd(dir: string, engine: string): string {
   return file;
 }
 
-function makePi() {
-  return { sendMessage: vi.fn(), appendEntry: vi.fn(), events: { emit: vi.fn() } };
-}
-
-const CTX_MODEL: ModelInfo = { id: "m", name: "M", provider: "p", reasoning: false };
-
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
 function fakeRegistry(): ModelRegistryLike {
   // [U1] getAvailable 与 find 必须同源：assertCanonicalModelRef 以 getAvailable 为
@@ -220,7 +216,7 @@ interface SetupResult {
   service: SubagentService;
   zcode: FakeEngine;
   piEngine: FakeEngine;
-  pi: ReturnType<typeof makePi>;
+  pi: PiMock;
 }
 
 function setup(agentDir: string): SetupResult {
@@ -315,7 +311,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     clearEngines();
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
     modelService.initModel({
-      modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => true } satisfies ModelRegistryLike,
+      modelRegistry: emptyRegistry(),
       sessionId: "test-session",
       ctxModel: CTX_MODEL,
     });
@@ -584,7 +580,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
 // ============================================================
 // U2：probe/守卫兜底 + JournalWriter + engineHandle 回填
-// 设计权威源：docs/architecture/subagent-engine-gui-visibility.md §3.3 D4/D6、§5 U2 行
+// 设计锚点：D4/D6、U2 行
 // ============================================================
 
 describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
@@ -866,7 +862,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   }, 10_000);
 
   /** 最后一条 subagent-record entry（register→archive 双写点取终态侧）。 */
-  function lastRecordEntry(pi: ReturnType<typeof makePi>): Record<string, unknown> | undefined {
+  function lastRecordEntry(pi: PiMock): Record<string, unknown> | undefined {
     const calls = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }

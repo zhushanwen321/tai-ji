@@ -117,6 +117,7 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'stop-idle-reaper',
   'flush-stores',
   'dispose-skill-registry',
+  'dispose-git-head-watcher',
   'dispose-completion-backflow',
   'deinit-relay-server',
   'server-stop',

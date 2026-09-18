@@ -1,5 +1,5 @@
 /**
- * recovery-policy 单测（crash-resilience u3-renderer-recovery 验收条款：
+ * recovery-policy 单测（u3-renderer-recovery 验收条款：
  * 滑窗 3 次熔断 / 第 4 次不 reload / 过期恢复 / 多窗口隔离 / 时间注入）。
  *
  * 被测对象是纯逻辑（时钟经 nowMs 参数注入、零 IO 零 electron 依赖），

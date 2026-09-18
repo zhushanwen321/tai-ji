@@ -146,7 +146,6 @@ const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'terminal.ack': 'stream',
   'plugin:uiRequest': 'stream',
   'extension.ui_request': 'stream',
-  'extension.ui_timeout': 'stream',
   'extension:widget': 'stream',
   'extension:widgetGui': 'stream',
   'extension:status': 'stream',

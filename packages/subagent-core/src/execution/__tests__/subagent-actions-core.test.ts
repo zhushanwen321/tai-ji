@@ -154,9 +154,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 的引擎轴资格判据读 service.engineSupportsConversation
     //（stub 缺省放行 = pi 默认引擎语义；拒绝面专项见 conversation-continuation.test.ts）。
     engineSupportsConversation: vi.fn(() => true),
-    // [U2] startHandler 缺省 collect 解析读真实 config（偏差#3 接线）：stub 缺省 async
-    //（本文件不测 collect 语义，专项见 start-collect-guard.test.ts）。
-    getCollectSyncDefault: vi.fn(() => "async" as const),
     ...over,
   };
   return {
@@ -165,9 +162,6 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
     // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
     engineSupportsConversation: m.engineSupportsConversation,
-    // [U2 偏差#3 接线] startHandler 经平铺访问器读 config 缺省 collect（真实 service
-    // 为平铺方法 subagent-service.ts:1786，非 queries 聚合面成员），stub 须同构挂载。
-    getCollectSyncDefault: m.getCollectSyncDefault,
     queries: {
       findRecord: m.findRecord,
       lookupRecordAnyState: m.lookupRecordAnyState,
@@ -664,6 +658,23 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     // 文案 = engineConversationMessageUnsupportedError 单源（错误码前缀 + 拒绝依据）
     expect(err.errorName).toBe("EngineError");
     expect(err.message).toContain("cannot continue this subagent by message");
+    expect(deliverChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagents 重派指引", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const wfRec = makeExecRecord({ id: "bg-wf", origin: "workflow" });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({ getRecordForAction: vi.fn(() => wfRec), deliverChatMessage }),
+        { subagentId: "bg-wf", text: "hi" },
+      ),
+    );
+    expect(err.errorName).toBe("Error");
+    expect(err.message).toContain("results are collected by the workflow run");
+    expect(err.message).toContain("Recovery: use action:'list' with includeWorkflow:true to inspect it.");
+    // [S3/core-U1] 重派指引（编排者裁定文案，逐字锁定）
+    expect(err.message).toContain("To get these results, re-dispatch via the subagents tool.");
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,5 @@
 /**
- * Electron IPC 通道名 SSOT（renderer → main 方向，crash-resilience u-foundation）。
+ * Electron IPC 通道名 SSOT（renderer → main 方向，u-foundation）。
  *
  * 现状边界：本文件只登记**新增**通道名。preload.ts / main gateway 既有通道
  * （'runtime-port' / 'browser:create' / 'update:check' / 'sound:list' 等）仍为
@@ -15,7 +15,7 @@
  */
 
 /**
- * renderer → main 日志上报通道 [crash-resilience §3.3 D2]。
+ * renderer → main 日志上报通道 [D2]。
  *
  * invoke 通道：renderer 错误三件套（app.config.errorHandler / window.onerror /
  * unhandledrejection）捕获后经此上报；payload 含错误栈 + performance.memory 快照 +
@@ -27,7 +27,7 @@
 export const RENDERER_LOG = 'renderer-log' as const
 
 /**
- * toolResult 图片落盘通道 [crash-resilience §3.3 D6-⑨]。
+ * toolResult 图片落盘通道 [D6-⑨]。
  *
  * invoke 通道：renderer 无 fs，toolResult 的 base64 图片经此委托 main 异步写盘
  * `~/.taiji/cache/images/<sessionId>/<sha256(data)>.<ext>`（ext 按 mimeType
@@ -39,7 +39,7 @@ export const RENDERER_LOG = 'renderer-log' as const
 export const IMAGE_CACHE_WRITE = 'image-cache:write' as const
 
 /**
- * logs 保留期清理手动触发通道 [crash-resilience A9② 验收调试口]。
+ * logs 保留期清理手动触发通道 [A9② 验收调试口]。
  *
  * invoke 通道：renderer（dev 控制台 / 调试脚本）经此触发 main 侧 `runLogRetentionNow()`
  * 立即执行一次 logs/ 超龄清理扫描（main-logger init 与每日定时器走同一函数），返回

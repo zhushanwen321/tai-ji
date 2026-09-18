@@ -87,7 +87,7 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // - session.occupancy / session.state_changed / context.update / session.commands /
 //   session.subagents / session.workflowUpdate / session.stats_update / session.skillNotice /
 //   backgroundTask:updated / terminal.alive / terminal.exit / terminal.ack /
-//   extension.ui_timeout / subagent.directive：标量/小列表状态帧。
+//   subagent.directive：标量/小列表状态帧。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
 // - extension:widget / widgetGui / status / notify / setEditorText：extension 上报小载荷。

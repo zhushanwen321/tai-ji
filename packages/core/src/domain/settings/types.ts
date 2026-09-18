@@ -48,6 +48,22 @@ export interface FontScales {
   drawer?: FontScaleTier
 }
 
+/**
+ * 分区字号默认档位（SSOT）：sidebar=大（×1.15），chat/drawer=标准（×1）。
+ *
+ * 三处消费点必须都从这里取缺省值，禁止再写死 'medium' 字面量：
+ *   1. DEFAULT_SYSTEM.fontScales（新用户 / 无 fontScales 存量数据的落库默认）
+ *   2. applySystemToDom（ui 包，部分缺省区域的 data-fs-* 回落）
+ *   3. AppearancePage 区域 Select（部分缺省区域的显示回落）
+ * getSystem 是浅合并（{ ...DEFAULT_SYSTEM, ...parsed }），老数据整体覆盖 fontScales 时
+ * 可能缺个别区域 key——故 2/3 的逐区域回落同样必须走本常量，而非假设对象完整。
+ */
+export const DEFAULT_FONT_SCALES: Required<FontScales> = {
+  sidebar: 'large',
+  chat: 'medium',
+  drawer: 'medium',
+}
+
 /** 配色主题：由 settings-shell spec §4 System 菜单定义，默认 cold-blue */
 export type ColorTheme = string
 
@@ -65,5 +81,6 @@ export const DEFAULT_SYSTEM: SystemSettings = {
   theme: 'dark',
   themePreset: 'cold-blue',
   fontSize: 'medium',
+  fontScales: { ...DEFAULT_FONT_SCALES },
   completionSound: true,
 }

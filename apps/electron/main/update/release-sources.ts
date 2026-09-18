@@ -1,16 +1,16 @@
 /**
  * Release 源适配层（多源改造 D1/D2）：GitHub / GitCode 双源 fetch + normalize 单点。
  *
- * 设计：docs/design/update-multi-source.md
- * - §6.1 D1：源抽象收敛在本模块——fetchSourceRelease / fetchLatestRelease /
+ * 设计：
+ * - D1：源抽象收敛在本模块——fetchSourceRelease / fetchLatestRelease /
  *   fetchReleaseByTag 按源分派（github / gitcode 两个适配实现），输出统一 normalize
  *   后的结构；checker 保持编排门面。
- * - §6.2 D2：GitCode 字段差异在 normalize 层补齐（逐字段规格见 normalizeSourceRelease）。
- * - §7.2：github 分支迁移自 release-checker.ts 的 doFetchGitHubLatestRelease
+ * - D2：GitCode 字段差异在 normalize 层补齐（逐字段规格见 normalizeSourceRelease）。
+ * - github 分支迁移自 release-checker.ts 的 doFetchGitHubLatestRelease
  *   （URL / headers / 形状守卫 / HTTP status 分流语义）；两源共用 upgradeFetch 双引擎
  *   + 代理通道参数（代理优先 + 网络失败降直连重试一次，对齐 fetchGitHubLatestRelease 编排）。
  *
- * M0 探针输入（impl-plan §0.1 实测，2026-09-07）：
+ * M0 探针输入（实测，2026-09-07）：
  * - P1：GitCode 附件（type=attach）browser_download_url 落域 gitcode.com
  *   （by-tag 直链形态 releases/download/{tag}/{file}）→ 白名单精确登记一项。
  * - P6：GitCode prerelease 为 boolean、draft/published_at/html_url 为 null、release_status 'none'

@@ -15,8 +15,8 @@
             "ref": ""
           },
           "reminderThresholds": [
-            200000,
             400000,
+            500000,
             600000
           ],
           "excludedModels": []

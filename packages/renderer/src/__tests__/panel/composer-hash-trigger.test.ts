@@ -497,17 +497,19 @@ describe('slash 浮层打开主动拉（SL 组）', () => {
       props: { open: false, type: 'slash', sessionId: 's1', query: '' },
     })
     await nextTick()
-    // 合并语义：useCommandSync 挂载即拉（dev-0.9.9 帧丢失兜底），先让它完成并清计数
+    // 合并语义：useCommandSync 挂载即拉（dev-0.9.9 帧丢失兜底），先让它完成并清计数。
+    // [ADR-0050 修订] fixture 用 extension 命令——panel slash 段过滤 skill 项（双入口消除），
+    // source='skill' 的回填不再出现在 DOM；本用例测试对象是拉取链路本身，与 skill 语义无关。
     await flushPromises()
     getCommandsMock.mockReset()
-    getCommandsMock.mockResolvedValueOnce({ sessionId: 's1', commands: [{ name: '/demo-skill', source: 'skill', description: '演示' }] })
+    getCommandsMock.mockResolvedValueOnce({ sessionId: 's1', commands: [{ name: '/demo-cmd', source: 'extension', description: '演示' }] })
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(getCommandsMock).toHaveBeenCalledTimes(1)
     expect(getCommandsMock).toHaveBeenCalledWith('s1')
     // 回填 commandStore 后浮层渲染新命令（用户可见 DOM）
     const rows = bodyRows()
-    expect(rows.some((r) => (r.textContent ?? '').includes('demo-skill'))).toBe(true)
+    expect(rows.some((r) => (r.textContent ?? '').includes('demo-cmd'))).toBe(true)
   })
 
   it('SL2 landing 态（无 sessionId）打开不拉 getCommands', async () => {

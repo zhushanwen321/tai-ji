@@ -19,11 +19,6 @@
     <!-- retry/queue 指示位（spec C10，#13，composer 上方独立行）：
          auto_retry_end / message_start 到达时 store 自动清 → state=undefined → 组件 v-if 消失 -->
     <RetryIndicator :state="retryState" />
-    <!-- [remove-turn-progress-bar §2.2 warn 化] turn 进展观测条挂载点已上移 Panel.vue
-         composer-band（overlay/composer 互斥对之外）：ask_user 等待期 Composer 整体卸载，
-         留在本组件内会随等待期一起消失。warn 化后为组件内部自判渲染（snapshot &&
-         snapshot.warn，常态/ask_user 豁免期零 DOM；旧 awaitingUser 分型文案已随本设计
-         删除）。挂载点/abort 接线见 Panel.vue。 -->
     <!-- 命令浮层（§2d @/#//）：anchor = composer-box（slot），reka-ui Popover portal body。
          composer-box 内 focus 算 inside 不触发 dismiss，键盘路由见 onKeydown。
          cwd：landing 态 $ 候选的 cwd 通道（landing-composer-session-file-symbols D2；
@@ -37,8 +32,8 @@
       :session-id="sessionId ?? undefined"
       :cwd="flow.currentCwd?.value ?? null"
       :variant="variant"
-      :project-skills="landingProjectSkills"
-      :global-skills="landingGlobalSkills"
+      :project-skills="projectSkills"
+      :global-skills="globalSkills"
       :selected-skill-names="selectedSkillNames"
       :query="popoverQuery"
       @select="onCmdSelect"
@@ -110,6 +105,9 @@
       <div class="composer-bar flex flex-wrap items-center justify-end gap-0 px-2.5 pb-2 mt-1">
         <!-- + 添加内容（左锚定，spec §1 ①，click 出浮层：附件 / 命令；# 文件改走 inline 触发） -->
         <AddMenuPopover @select="onAddSelect" />
+        <!-- 任务托盘（设计 docs/design/composer-task-tray.md D1：`+` 之后、composer.toolbar 之前）。
+             landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。 -->
+        <ComposerTray v-if="sessionId" :session-id="sessionId" />
         <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
              plugin 贡献工具栏视图 → ViewHost 渲染。empty="hidden"：无贡献时零 DOM 不影响布局。
              见 02-extension-host-wiring.md 重构 2。 -->
@@ -198,13 +196,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, createVNode, nextTick, onBeforeUnmount, onMounted, provide, ref, render, watch, type Ref } from 'vue'
+import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
+import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
 import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import GenStatsTriggers from './GenStatsTriggers.vue'
@@ -214,6 +213,7 @@ import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
 import QueueBubble from './QueueBubble.vue'
 import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
@@ -236,9 +236,21 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
-const { projectSkills: landingProjectSkills } = useProjectSkills(flow.currentCwd) // W3 ADR-0051：landing 当前 cwd 项目 skill
-const { globalSkills: landingGlobalSkills } = useGlobalSkills() // W4 FR-5：landing 全局 skill
+// 项目 skill 的 cwd 源（ADR-0050 修订，skill-reload-nondestructive D6）：panel 态 = sessionStore
+// 投影的 session cwd（session 创建时锁定；split mode 各 panel 各自 session → 各自 cwd，
+// Composer 按 props.sessionId 查询天然分流）；landing 态维持 flow.currentCwd（新任务流选定
+// 目录，普通对象内嵌套 ComputedRef 不自动解包须显式 .value，可选链兼容旧 mock 形态）。
+const projectSkillsCwd = computed<string | null>(() => {
+  if (props.variant === 'panel') {
+    if (!props.sessionId) return null
+    return sessionStore.list.find((s) => s.id === props.sessionId)?.cwd ?? null
+  }
+  return flow.currentCwd?.value ?? null
+})
+const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
+const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
 const isActive = computed(() => {
   if (!props.sessionId) return false
   return chatStore.isActive(props.sessionId)
@@ -297,19 +309,6 @@ const popoverQuery = computed(() => {
 const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
-// focusin/focusout 用原生 listener 注册（非 template @focusin）：composer-box 经
-// CommandPopover 的 PopoverAnchor as-child 包裹，Vue template 事件绑定在 clone element 时丢失。
-// ref 指向真实 DOM，addEventListener 稳定生效。
-onMounted(() => {
-  // composerBoxRef 在 CommandPopover PopoverAnchor as-child 包裹下透传丢失（ref 为 null），
-  // 聚焦态改由子组件 ComposerInput emit focus/blur 驱动（见 @focus/@blur 绑定）。
-})
-onBeforeUnmount(() => {
-  composerBoxRef.value?.removeEventListener('focusin', onBoxFocusIn)
-  composerBoxRef.value?.removeEventListener('focusout', onBoxFocusOut)
-})
-/** composer-box 聚焦态：由 ComposerInput @focus/@blur 驱动（composer-box 经 CommandPopover
- *  PopoverAnchor as-child 包裹，ref 透传丢失，改由子组件 ComposerInput emit focus/blur）。 */
 // [u6b] 本地 isCompacting computed 已退役：压缩维度的唯一读口收敛到 shell sendButtonState
 // （occupancy 投影派生，与分发器 sendRoute 同源——双轨收口完成）。
 
@@ -328,6 +327,7 @@ const shell = useComposerShell({
   isSending,
   drafts,
   isActive,
+  cmdOpen,
 })
 const {
   currentModelId,
@@ -421,6 +421,7 @@ const onKeydown = useComposerKeydown({
   inputRef: shellInputRef,
   staging,
   sendRoute,
+  shortcutActions: shell.shortcutActions,
   handleArrowUp,
   handleArrowDown,
   onFollowUp,

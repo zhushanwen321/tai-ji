@@ -1,7 +1,6 @@
 /**
  * @zhushanwen/pi-smart-context 入口：事件接线 + 门控。
  *
- * 设计文档：docs/extensions/smart-context/design.md
  * - session_start：session 级闭包状态重建（规范 Session 隔离：fired 档位/熔断计数不跨 session）
  * - subagent 进程（R6）：不注册工具、不提醒（宁缺勿污）
  * - session_before_compact：双模式接管（compact-handler）

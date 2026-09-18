@@ -1,6 +1,7 @@
 // src/interface/subagents.ts
 //
 // /subagents 命令。薄壳——打开 list overlay（等同原 /subagents list [<id>]）。
+// 同名 tool（批量派发入口，模型调用面）见 interface/tool-subagents.ts——两者无共享状态、无调用关系。
 //
 // 解析：args[0] 直接作可选 <id>（聚焦该 record）。
 // RPC 模式（taiji GUI）：解析 cancel/message/start action 直接执行，不打开 TUI。
@@ -199,7 +200,7 @@ async function executeRpcAction(
       return;
     case "noop":
       // 无 action 或未知 action：GUI 端已屏蔽此 command 入口，此处兜底
-      ctx.ui.notify("View subagents in the sidebar Agents tab", "info");
+      ctx.ui.notify("View subagents in the composer task tray", "info");
       return;
     default: {
       // exhaustiveness 断言：未来新增 action verb 忘加 case 时 tsc 报错

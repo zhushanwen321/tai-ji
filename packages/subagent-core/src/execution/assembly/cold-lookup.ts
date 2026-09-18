@@ -240,15 +240,20 @@ function resurrectColdRecord(
     // [modeless 波1] chatMode 水合丢弃：磁盘残留值不进内存 record（万物可续，
     // message 资格只看引擎 conversation 能力轴，与 record 无关）。
     // [round2-notify-fix 合并注] 分支侧的 chatMode/collectMode 冷水合不再适用：
-    // collectMode 字段已随 modeless 波3 出 record（sync 成员身份迁登记态
-    // collect-coordinator，批协调跨重启不复活），分支针对的「冷水合缺失绕过
-    // messageHandler 硬拒」面结构性消亡。
+    // [collect 退役] 原 sync 批成员身份迁登记态机制已整体删除，collectMode 字段
+    // 出 record，分支针对的「冷水合缺失绕过 messageHandler 硬拒」面结构性消亡。
     // [A3/S3 修复] 引擎域透传：跨重启重建不透传 engine 时 record.engine=undefined，
     // resolveRoundEnginePort 按 record.engine ?? DEFAULT_ENGINE_ID 把 zcode record
     // 错投 pi 引擎（engine_not_found）。engine 属 identity 域经 createRecord 重建；
     // engineHandle 是可变回填域（run resolve 后回填的形态，不在 createRecord 签名），
     // 与 sessionFile 同列水合。
     engine: found.engine,
+    // [A3/S3 修复] 来源身份透传（同 engine 惯例走 createRecord 而非水合）：workflow 批
+    // 成员收口归档出内存后，message 冷复活漏传 origin 会让守卫读 undefined 放行，
+    // 成员真的收到消息并回话（违反 one-shot 批成员契约，S3 反向断言）。tool 来源
+    // record 两字段本就 undefined，透传无害。
+    origin: found.origin,
+    parentRunId: found.parentRunId,
     controller: new AbortController(),
   });
   record.sessionFile = found.sessionFile;
@@ -264,8 +269,8 @@ function resurrectColdRecord(
   // [review round2] 跨重启 worktree 绑定丢失防护：原 record 创建时启用了 worktree 隔离
   //（session entry 的 worktree 标志），但 WorktreeHandle 不可序列化、重建后恒缺失。
   // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
-  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收起
-  // markArchived 不触本守卫；旧 closeChatIdle 语义已改优雅收口归档，泄漏的 worktree
+  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收口落账
+  // markSettledOut 不触本守卫；旧 closeChatIdle 语义已改优雅收口，泄漏的 worktree
   // 由 reaper 兜底回收）。
   // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
   record.hadWorktree = found.worktree === true;
@@ -295,7 +300,7 @@ function resurrectColdRecord(
  *
  *  [U4] allowReconnect 参数退役保留：两态下 idle 全候选（万物可续），message 专属的
  *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见面随之统一为
- *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口/归档，符合新语义）。
+ *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口落账，符合新语义）。
  *  参数保留是因调用方 record-access.ts 的签名面（领地外）不做破坏性变更。
  *
  *  @returns 重建的 record；磁盘也无则 undefined

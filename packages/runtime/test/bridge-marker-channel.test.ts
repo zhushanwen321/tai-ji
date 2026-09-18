@@ -344,12 +344,12 @@ describe('ExtensionTimeoutManager.addBridgeRequest', () => {
     expect(mgr.isBridgeRequest('req-b')).toBe(true)
   })
 
-  it('registerTimeout 不再登记 bridge 请求（旧 bridge: 前缀分支已删，防回归）', () => {
+  it('trackUiRequest 不登记 bridge 请求（旧 bridge: 前缀分支已删，防回归）', () => {
     const mgr = new ExtensionTimeoutManager()
-    // 旧通道入参形态（防御性锁定）：registerTimeout 只服务 extension-ui kind，
+    // 旧通道入参形态（防御性锁定）：trackUiRequest 只服务 extension-ui kind，
     // bridge 登记责任单落在 BridgeHandler 入口的 addBridgeRequest——误传 bridge:
     // method 不得再进 bridgeRequestIds（否则前端误发拦截依据出现第二来源）
-    mgr.registerTimeout('sess-x', 'req-old-style', 'bridge:sync', () => {})
+    mgr.trackUiRequest('sess-x', 'req-old-style', 'bridge:sync')
     expect(mgr.isBridgeRequest('req-old-style')).toBe(false)
   })
 })

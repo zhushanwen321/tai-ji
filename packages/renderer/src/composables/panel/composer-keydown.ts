@@ -2,8 +2,9 @@
  * composer-keydown.ts —— Composer 键盘分发（complexity-debt U02，从 Composer.vue onKeydown 拆出）。
  *
  * 定位：纯 UI 事件分派器（无自有状态，全部依赖经 deps 只读注入）。拆分为文件级 composable
- * 而非 Composer.vue 同文件局部函数的原因：Composer.vue <script setup> 实测 299 行贴
- * vue_rules_checker.py MAX_SCRIPT_LINES=300 硬拦，同文件提取无机械余量。目录归属对齐
+ * 而非 Composer.vue 同文件局部函数的原因：Composer.vue <script setup> 实测 285 行（口径 =
+ * vue_rules_checker.py 计数：script 体行数，不含 <script setup>/</script> 两个标签行；
+ * 含标签 287），距上限 MAX_SCRIPT_LINES=300 余 15 行，同文件提取余量有限。目录归属对齐
  * composer-shell.ts（同目录、文件名不带 use 前缀、导出函数带 use 前缀的既有约定）。
  *
  * ADR-0049 判定：不持有 per-session 状态（无按 sessionId 分区的 ref/Map/Set；sendRoute
@@ -14,6 +15,10 @@
  * sendRoute 决定 Alt+⏎ 的 followUp 保留语义）：
  *   浮层 open → 浮层内部路由（handleKeydown 真值短路 return）
  *   IME 组合中 → 放行不拦截
+ *   命令动作表（composer-shortcut-actions，composer-pi-shortcuts 设计）→ 四键位
+ *     shift+tab / ctrl+p / ctrl+shift+p / ctrl+x：命中任一键位（含 no-op 行）即
+ *     stopPropagation + preventDefault 拦截（决策 7：阻断 window 层 open-preset-select
+ *     双触发；浮层 open 时动作表自身入口守卫跳过），未命中原样放行
  *   Esc → staging.handleEsc（fork/handoff 互斥路由，内部自管 preventDefault）
  *   裸 ↑/↓ → preventDefault → moveCaretVertical 垂直移光标；at-edge 时 ↑ 历史 / ↓ 历史
  *   修饰键 + ↑/↓ → 放行原生（选区扩展/按词移动/段首段尾跳转）
@@ -44,6 +49,12 @@ export interface ComposerKeydownDeps {
   staging: Pick<ComposerShellReturn['staging'], 'handleEsc' | 'activeStaging'>
   /** 当前 session 的发送路由（D6 表 direct/steer/defer；Alt+⏎ steer 行保留 followUp 语义） */
   sendRoute: ComputedRef<SendRoute>
+  /**
+   * 命令动作表处理器（composer-shortcut-actions，composer-pi-shortcuts U1）：四键位命中
+   * （含 no-op 行）返回 true = 已 stopPropagation + preventDefault；浮层 open 时其入口守卫
+   * 自行跳过（§3.4 首行），本链只按返回真值短路
+   */
+  shortcutActions: (e: KeyboardEvent) => boolean
   /** ↑ 到顶 → 历史上一条（core input/history） */
   handleArrowUp: () => void
   /** ↓ 到底 → 历史下一条（core input/history） */
@@ -107,7 +118,9 @@ function createEnterDispatcher(
 
 /**
  * 构建 Composer 键盘分发器（ComposerInput @keydown 绑定消费）。
- * 处理顺序：浮层路由 → IME 守卫 → staging Esc → 裸箭头导航 → Enter 分派；落空放行原生。
+ * 处理顺序：浮层路由 → IME 守卫 → 命令动作表 → staging Esc → 裸箭头导航 → Enter 分派；
+ * 落空放行原生。动作表插在 IME 之后（IME 组合中的按键绝不触发动作）、staging Esc 之前
+ * （动作表只判定自己的 4 键，与 Esc 无交集，无顺序耦合——composer-pi-shortcuts §3.4）。
  */
 export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent) => void {
   const {
@@ -116,6 +129,7 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
     inputRef,
     staging,
     sendRoute,
+    shortcutActions,
     handleArrowUp,
     handleArrowDown,
     onFollowUp,
@@ -126,6 +140,8 @@ export function useComposerKeydown(deps: ComposerKeydownDeps): (e: KeyboardEvent
   return function onKeydown(e: KeyboardEvent): void {
     if (cmdOpen.value && commandPopoverRef.value?.handleKeydown(e)) return
     if (e.isComposing) return // IME 组合中不拦截（与 useContenteditableInput 守卫一致）
+    // 命令动作表（composer-pi-shortcuts）：命中四键位（含 no-op 行）即拦截短路
+    if (shortcutActions(e)) return
     // Staging Esc 路由：经 staging.handleEsc → activeStaging.handleEsc（fork/handoff 互斥下不会同时活跃）
     if (staging.handleEsc(e)) return
     if (handleBareArrowNav(e)) return

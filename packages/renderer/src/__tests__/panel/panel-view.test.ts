@@ -1,8 +1,7 @@
 /**
  * Panel 渲染分支派生测试（panel-view switch 重写，单元 T3）。
  *
- * [权威] docs/design/panel-view-derivation-and-flow-lifecycle.md §3.3 D1/D2/D5：
- * Panel 主区与输入面判据收敛为 usePanelView → derivePanelView 单点派生，本文件锁
+ * Panel 主区与输入面判据收敛为 usePanelView → derivePanelView 单点派生（D1/D2/D5），本文件锁
  * renderer 装配层的派生消费行为（core 纯函数的 64 组合表在
  * packages/core/src/domain/session/__tests__/panel-view.test.ts，V5）。
  *
@@ -17,7 +16,7 @@
  * - PV5 ask-user：请求到达 → AskUserOverlay 替换 Composer；应答出队 → Composer 恢复
  * - PV6 trace 输入面保留（D5/V4，一致性审查 R-U1）：trace 视图 → TraceView 替换对话流
  *   位置 + Composer 保留；trace + ask-user 请求 → overlay 承接应答
- * - PV7 respawn 过渡态（crash-resilience T4）：dead + respawnPending → 过渡条 + Composer
+ * - PV7 respawn 过渡态（T4）：dead + respawnPending → 过渡条 + Composer
  *   保持（dead 占位被抑制）；收口后回落 dead 占位
  *
  * mock 策略：vi.hoisted 模块级可变对象（对齐 ask-user-inline.test.ts / landing.test.ts
@@ -82,7 +81,6 @@ const stubs = {
   AskUserOverlay: { template: '<div data-testid="ask-user-overlay" />' },
   Landing: { template: '<div data-testid="landing">landing</div>' },
   TraceView: { template: '<div data-testid="trace-view" />' },
-  WidgetArea: { template: '<div data-testid="widget-area" />' },
 }
 
 function mountPanel(sessionId: string | null) {
@@ -228,7 +226,7 @@ describe('PV4: dead 占位（W6：dead 不应答，派生优先级 dead > ask-us
   })
 })
 
-describe('PV7: respawn 过渡态（crash-resilience T4：恢复窗口不进终态页）', () => {
+describe('PV7: respawn 过渡态（T4：恢复窗口不进终态页）', () => {
   it('dead + respawnPending → 过渡条渲染 + Composer 保持（dead 占位被抑制）', () => {
     const sessionStore = useSessionStore()
     const chat = useChatStore()
@@ -263,7 +261,7 @@ describe('PV7: respawn 过渡态（crash-resilience T4：恢复窗口不进终�
   })
 
   it('message_start 收口语义（恢复窗口发消息的 join 路径：dead 复位 + T4 条）→ 对话流恢复，不进终态页', async () => {
-    // [crash-resilience T4 回流修复] Gate B A7 缺陷：恢复窗口内发消息经 runtime 惰性恢复
+    // [T4 回流修复] Gate B A7 缺陷：恢复窗口内发消息经 runtime 惰性恢复
     // join 完成，无 session.restored 帧 → 此前过渡态无收口信号，超时回落 dead 终态页。
     // 修复后 useChat 的 message_start 收口 gate 执行同构三件套（clear + T4 条 + revive），
     // 本用例锁定收口后的用户可见 DOM 终态（gate 链路见 respawn-pending.test.ts ⑧）。

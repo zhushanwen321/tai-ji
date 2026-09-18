@@ -19,11 +19,7 @@ import { createChatStore } from '../store'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import type { UseChatDeps } from '../useChat'
-
-/** 构造 ServerMessage（payload 默认带 sessionId，对齐 w4 store.test.ts msg helper） */
-function msg(sid: string, type: string, payload: Record<string, unknown> = {}): ServerMessage {
-  return { type, payload: { sessionId: sid, ...payload } } as ServerMessage
-}
+import { msg } from './helpers/fixtures'
 
 interface Fixture {
   useChat: ReturnType<typeof createUseChat>
@@ -558,7 +554,7 @@ describe('send 定向分流（含 subagent 段）', () => {
   })
 })
 
-// ── [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D2 维护点 2]
+// ── [steer-bubble u2 / D2 维护点 2]
 //    send inflight 挂钩：乐观 +1 / catch 回滚 −1 / 挂钩位置约定（busy 转 steer 不挂）──
 
 describe('send inflight 挂钩（steer-bubble u2 / D2 维护点 2）', () => {

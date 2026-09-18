@@ -16,7 +16,7 @@ import { createDelivery } from '@zhushanwen/session-delivery'
 import type { DeliveryHandle } from '@zhushanwen/session-delivery'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
-import { SkillInjector } from './skill-injector.js'
+import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
@@ -66,8 +66,10 @@ function toStreamingBehavior(intent: 'interrupt-at-turn-boundary' | 'after-run')
 export function createSessionDeliveryRegistry(
   deps: SessionDeliveryDeps,
   // [A2 D-A2-1] skill 注入器：deliverText 出站前统一处理（与 MessageDispatcher 同款
-  // 「默认实例化 + 可替换」形态，测试注入 spy）。
-  injector: SkillInjector = new SkillInjector(),
+  // 「默认实例化 + 可替换」形态，测试注入 spy）。[A1 接线] 默认源 = 晚绑定占位
+  //（组合根构造 delivery registry 时 registry 已可直传；本默认服务测试装配与
+  // server.ts 的退化兜底装配——无标记文本不触达映射）。
+  injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
 ): SessionDeliveryRegistry {
   // @data-owner #15（docs/architecture/data-source-registry.md）：sessionId → handle 注册表，
   // handle 内的投递队列 = delivery outbox（内存、非持久，session 删除时 dispose 清空）
@@ -96,7 +98,9 @@ export function createSessionDeliveryRegistry(
     // client.prompt（显式投递开 turn 的 agent_start 事件回流时环已停，不会被收敛环误掐）。
     userStoppedGate.consumeForExplicitDelivery(sessionId)
     const client = await deps.ensureActive(sessionId)
-    const injection = await injector.inject(client, content)
+    // [A1 接线] session cwd 作 project 扫描基准（D7）——session 视图缺失时 undefined =
+    // global-only 映射（宁缺毋错，不猜 cwd）。
+    const injection = await injector.inject(client, content, deps.getSession(sessionId)?.cwd)
     await client.prompt(injection.text, undefined, streamingBehavior)
     // [A2 D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败
     // throw 不发（调用方错误通路覆盖）。

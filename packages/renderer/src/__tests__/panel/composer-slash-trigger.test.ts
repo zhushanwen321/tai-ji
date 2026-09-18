@@ -118,7 +118,7 @@ describe('ComposerInput slash-trigger（U1-U5）', () => {
 // ─────────────────────── U6-U8 CommandPopover query 过滤 ───────────────────────
 
 /**
- * 3 条 mock slash 命令（pi get_commands 真实返回的 extension/skill 动态命令）。
+ * 3 条 mock slash 命令（pi get_commands 真实返回的 extension 动态命令）。
  * pi getCommands 返回的 name 不带 / 前缀（真实行为，已由 runtime 日志确认：
  * 'goal' / 'todos' / 'skill:xxx'），CommandPopover.items 会归一化补 / 前缀显示。
  * mock 用无前缀形式覆盖归一化逻辑，避免像旧 fixture 全带 / 掩盖 bug。
@@ -126,11 +126,16 @@ describe('ComposerInput slash-trigger（U1-U5）', () => {
  * compact 不在此列——pi get_commands 不返回 builtin（builtin 仅服务 pi TUI
  * autocomplete，不通过 RPC 暴露），由 CommandPopover slashCommands computed 在
  * 前端注入。U7 断言 4 项 = 3 pi 命令 + 1 前端注入 compact。
+ *
+ * [ADR-0050 修订] 本组 fixture 不含 skill 项：panel slash 段过滤 skill 项（双入口消除）
+ * 后 source='skill' 的 pi 命令不进列表；本组用例的测试对象是键盘导航/越界收敛（与 skill
+ * 语义无关），凑数第三条用 extension source 保持 4 项列表形态不变。panel slash 段的
+ * skill 过滤断言由 command-popover-landing.test.ts L5b / composer-skill-trigger.test.ts P5 覆盖。
  */
 const MOCK_CMDS = [
   { name: 'commit', source: 'extension' },
   { name: 'review', source: 'extension' },
-  { name: 'fix', source: 'skill' },
+  { name: 'fix', source: 'extension' },
 ]
 
 /** 推 session.commands 到 sessionId 订阅者（CommandPopover 用 events.on(sessionId) 订阅）。

@@ -464,7 +464,7 @@ describe('extractWorkflowsFromSessionFile', () => {
   //   （编译期跟随权威源，无字面量可漂移），故守卫字面量处跟随迁移至 core 定义点，
   //   另以留壳断言防版本字面量在 extension 侧重新本地化分叉
   // - 源 2（副本）：runtime workflow-extractor.ts 的本地副本——漏改则版本守卫把新快照
-  //   全部判为不匹配跳过（renderer WorkflowList 全空）
+  //   全部判为不匹配跳过（renderer 侧 workflow 列表全空）
   // - 源 3（消费方）：session-reader（独立发 npm 的 sibling 扩展）两处版本判定——
   //   discovery/workflows.ts isNew + core/workflow.ts NEW 分支。漏改则 family/workflows
   //   腿对新 run 静默丢全部 calls sessionFile、workflow overview 对新 run 返 null

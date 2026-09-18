@@ -132,6 +132,13 @@ export interface GuiComponentProps {
   /** 列表树——替代 TUI 的 ⎿ ├─ └─ 缩进 */
   'list-tree': {
     items: TreeItem[]
+    numbered?: boolean                    // 行首弱化序号（扁平有序清单用；自带编号的文本不要开）
+  }
+
+  /** 垂直组合容器——无视觉样式的透明分组。宿主壳层（托盘 widget 面板）承担卡壳/head/折叠
+   *  后，widget 内容需要多组件组合时的组合根（替代「无头 card」的语义滥用） */
+  'group': {
+    children: GuiComponent[]
   }
 
   /** 双列网格——替代 TUI 的 │ 列分隔 */
@@ -143,6 +150,8 @@ export interface GuiComponentProps {
   /** 标签栏——替代 TUI 的 tab │ 分隔 */
   'tab-bar': {
     tabs: { label: string; active?: boolean; status?: 'done' | 'pending' }[]
+    /** 容器化分段（v1.1 可选字段）：第 i 段 = tabs[i] 激活时渲染的子树，与 tabs 等长 */
+    sections?: GuiComponent[][]
   }
 
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册，见 §9.1） */
@@ -152,6 +161,8 @@ export interface GuiComponentProps {
   }
 }
 ```
+
+> **tab-bar 容器化（v1.1 可选字段）**：`sections` 与 `tabs` 等长时，宿主渲染 `tabs[active]` 对应的分段；**active 归宿主本地**——首次挂载取推送的 `tabs[i].active`，用户点击只切本地索引，extension 的后续推送更新内容但**不重置用户选择**（组件重建除外）。缺省 = 纯展示 tab-bar（现状行为，旧 extension 零改动）；`sections` 与 `tabs` 长度不等时**忽略 sections 退化为纯展示 + warn**。协议不提供 UI→extension 回传通道，故「用户切了 tab」不是 agent 事件（extension 一次推送全量、宿主本地切换零往返）。
 
 > **设计原则**：协议层不包含特定 extension 的领域数据结构（如任务状态枚举、目标生命周期、工作流 reason 码）。这些是 extension 的业务逻辑，不是 UI 层该知道的。extension 用 `card` + `stats-line` + `list-tree` 等通用原语组合表达自己的领域数据。
 
@@ -189,8 +200,52 @@ export const PROTOCOL_VERSION = 1 as const
 export interface GuiRenderResult {
   v: typeof PROTOCOL_VERSION
   component: GuiComponent
+  /** v1.1 扩展：widget 宿主元数据（head + 托盘 icon/badge，见 §3.5）；缺省时宿主 fallback 到 viewId 标题、无状态点/进度/icon */
+  meta?: WidgetMeta
 }
 ```
+
+### 3.5 WidgetMeta——widget 宿主元数据（v1.1）
+
+widget 通道（M17）除 `component` 外可带 `meta`：head（标题/状态点/进度）与托盘条目（icon/badge）都由宿主按此元数据渲染，extension 不需要用 `card` 原语 header 表达这些。
+
+```typescript
+/** widget 宿主元数据——head 渲染契约（title + 状态点 + 进度 + 折叠 chevron）+ 托盘 icon/badge。 */
+export interface WidgetMeta {
+  /** head 标题（todo → "Todo"；goal → slug） */
+  title: string
+  /** head 状态点语义：running=accent / done=success / failed=danger / idle=neutral 弱点（托盘呼吸点同源） */
+  status?: 'running' | 'done' | 'failed' | 'idle'
+  /** head 进度（mini bar + 计数文本）；progress-bar 原语从 body 移入 head 的承载 */
+  progress?: {
+    current: number
+    total: number
+    /** 计数显示文本（head 空间有限，extension 全权格式化：todo "2/5"、goal "42%"）。缺省 `${current}/${total}` */
+    label?: string
+    /** fill 语义色（预算阈值映射）；缺省按 meta.status（done→success，否则 accent） */
+    severity?: 'ok' | 'warn' | 'danger'
+  }
+  /** 托盘 icon：icon key 字符串（宿主按 lucide 名解析）或自定义形状 { paths } */
+  icon?: string | { paths: string[] }
+  /** 托盘 badge：extension 全权格式化的短文本（'2' / '42%' / '!'），建议 ≤6 字符，宿主超长 truncate */
+  badge?: string
+}
+```
+
+**icon/badge 均为 v1.1 可选字段**：旧宿主忽略、旧 extension 不发，双向兼容（`isGuiRenderResult` 只校验 `v` 与 `component`，不校验 meta 形状）。
+
+**自定义形状：形状归 extension、风格归宿主**。`{ paths }` 是 SVG path 的 `d` 字符串数组，extension 只定义形状；宿主渲染统一锁定 `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap/linejoin="round"`——线宽/颜色/尺寸由宿主锁死，输出必然与 @lucide 细线图标同构（不会出现风格失控的自定义 icon）。渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。
+
+**paths 白名单防御（`validateWidgetIconPaths`，协议包导出）**：字符白名单正则 `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$`——精确等于「SVG `d` 命令字母全集（`M` `L` `C` `Q` `A` `Z` `H` `V` `S` `T` 及其小写形态）+ 数字 + 空格/逗号/小数点/负号」，命令字母之外任何字符（含指数记法的 `e`/`E`）一律拒。`S`/`s`/`T`/`t`（平滑曲线命令）在列：@lucide/vue 全量 1746 图标 5869 条 `d` 串中约 1% 用到，不收则合法形状被误拒。条数 ≤8、单条 ≤512 字符、总长 ≤2048 字符。校验不抛异常，返回判定对象（合法携带 paths 副本 / 非法携带拒绝原因：`not-array` / `empty` / `too-many` / `non-string` / `too-long` / `total-too-long` / `illegal-char`）——宿主据 `!valid` 落兜底 icon + console warn 一次（去重）。
+
+**fallback 链（宿主侧实现契约）**：
+
+| 字段 | 链 |
+|---|---|
+| icon | `meta.icon` 自定义 paths（过白名单）→ `meta.icon` key 解析 → 宿主内置 widgetKey 映射（'todo'→ListChecks、'goal'→Target）→ 通用 widget icon |
+| badge | `meta.badge` → `progress.label ?? String(progress.current)` → 无 badge |
+
+badge 的视觉态（亮/色/呼吸点）由 `meta.status` 决定，与 built-in 任务条目同视觉语言。
 
 ---
 
@@ -202,7 +257,7 @@ export interface GuiRenderResult {
 |---|---|---|---|---|
 | `renderCall(args)` | extension 在 execute 中构造 | `details.__gui__.call` | **M4** tool result block | 单向 |
 | `renderResult(result)` | extension 在 execute 中构造 | `details.__gui__.result` | **M4** tool result block | 单向 |
-| `setWidget(key, factory)` | `guiSetWidget()` helper（直编码） | extension_ui_request（marker 编码进 string[]） | **M17** 对话流 widget 面板 | 单向 |
+| `setWidget(key, factory)` | `setWidgetDual()` helper（内部 `guiSetWidget` 直编码 GUI 臂） | extension_ui_request（marker 编码进 string[]） | **M17** composer 任务托盘的协议 widget 区 | 单向 |
 | `setStatus(key, text)` | 复用 pi 原生（已有效） | extension_ui_request | **M8** status bar | 单向 |
 | `registerMessageRenderer` | extension 在 sendMessage 中构造 | `message.details.__gui__` | **M5** custom message | 单向 |
 | `ctx.ui.custom(factory)` | `askUserInteract()` helper（extensions/ask-user/） | select 通道 + `ASK_USER_MARKER` + WS 回传 | **M11** companion | **双向** |
@@ -255,13 +310,13 @@ renderResult(result, options, theme) {
 
 ### 4.3 widget（setWidget）
 
-widget 通过 `guiSetWidget()` helper **直接编码进 string[]**——不需要 shim extension，不需要 monkey-patch。
+widget 通过协议包的 widget helper **直接编码进 string[]**——不需要 shim extension，不需要 monkey-patch。extension 侧统一走 `setWidgetDual()`（双模唯一入口），`guiSetWidget()` 是它内部的 GUI 臂原语。
 
-**挂载点（M17）**：widget 在 GUI 下渲染到**对话流 widget 面板**（MessageStream 与 composer 之间，对应 TUI「editor 上方常驻面板」）。语义与 pi 原生完全一致：**常驻 + 同 key 覆盖更新 + undefined 清除**。taiji 前端按 widgetKey 分区缓存，**多 widgetKey 分栏并排**（flex wrap：单 widget 占满整行，多 widget 等分/按内容）。任何 extension 推 widget 都走此挂载点（通用承接，不特化）。
+**挂载点（M17）**：widget 在 GUI 下渲染到 **composer 任务托盘的协议 widget 区**（composer 工具条左簇，对应 TUI「editor 上方常驻面板」；2026-09-16 起 — 原「对话流 widget 面板」消费端已随入口唯一化退役，见 [composer-task-tray.md](../design/composer-task-tray.md) D11）。语义与 pi 原生完全一致：**常驻 + 同 key 覆盖更新 + undefined 清除**。taiji 前端按 widgetKey 分区缓存（ViewHostStore per-session 分区），一个 widgetKey = 托盘上的一个 icon 条目（经该条目面板渲染 `guiTree`），条目序 = known-order（todo/goal）优先 + 其余按当前插入序。任何 extension 推 widget 都走此挂载点（通用承接，不特化）。
 
 #### 原理
 
-pi 的 `ctx.ui.setWidget(key, string[])` 在 RPC 模式下原样输出 `widgetLines`（rpc-mode.js:122-135 零预处理）。helper 把 GuiComponent 的 JSON 用协议 marker 前缀编码进单行 string[]，runtime event-adapter 检测 marker 后解码。
+pi 的 `ctx.ui.setWidget(key, string[])` 在 RPC 模式下原样输出 `widgetLines`（rpc-mode.js:122-135 零预处理）。helper 把 `GuiRenderResult` 信封（`{ v, component, meta? }`，非裸 GuiComponent）的 JSON 用协议 marker 前缀编码进单行 string[]，runtime event-adapter 检测 marker 后解码为结构化 WS 帧。
 
 #### helper 实现
 
@@ -269,50 +324,100 @@ pi 的 `ctx.ui.setWidget(key, string[])` 在 RPC 模式下原样输出 `widgetLi
 // @zhushanwen/extension-protocol
 const GUI_WIDGET_MARKER = '\x00TAIJI_GUI_WIDGET:'  // NUL 开头，不会出现在正常文本中
 
-function guiSetWidget(
-  ctx: ExtensionContext,
-  key: string,
-  component: GuiComponent | undefined
-): void {
-  if (component) {
-    // RPC 模式：编码进 string[]（pi 原样透传）
-    const encoded = [GUI_WIDGET_MARKER + JSON.stringify(stripUndefined(component))]
+/** 推送 GUI 臂：marker 编码 GuiRenderResult 信封进单行 string[]；undefined 清除 */
+function guiSetWidget(ctx: GuiContext, key: string, result: GuiRenderResult | undefined): void {
+  if (!ctx.ui?.setWidget) return
+  if (result) {
+    const encoded = [GUI_WIDGET_MARKER + JSON.stringify(stripUndefined(result))]
     ctx.ui.setWidget(key, encoded)
   } else {
     ctx.ui.setWidget(key, undefined)  // 清除
   }
 }
+
+/** 双模推送唯一入口：undefined 清屏（模式无关）、RPC 走 guiSetWidget、TUI/json/print 推原生文本行 */
+function setWidgetDual(ctx: GuiContext, key: string, content: DualWidgetContent | undefined): void {
+  if (!ctx.ui?.setWidget) return
+  if (content === undefined) {
+    ctx.ui.setWidget(key, undefined)
+    return
+  }
+  if (isGuiCapable(ctx)) {
+    guiSetWidget(ctx, key, content.gui)
+  } else {
+    ctx.ui.setWidget(key, content.text)
+  }
+}
 ```
 
-**为什么不需要 shim**（审查结论）：extension 本就要改代码调 `guiSetWidget()`，helper 内部直接调原生 `ctx.ui.setWidget(key, [MARKER+JSON])` 就能走通整条链路。shim 的唯一潜在价值是透明拦截未引入协议包的第三方 extension，但第三方传的是 string[]（ANSI 文本），不触发 GuiComponent 分支，shim 无所作为。
+**⚠️ `guiSetWidget` 无 mode 守卫（不是 no-op）**：它只查 `ctx.ui?.setWidget` 是否存在——TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式判定与分支只由 `setWidgetDual` 内部经 `isGuiCapable(ctx)` 单点承担，extension 不得自行复写 isGui 判定（全仓只此一处说明，见协议包 `helpers.ts` 的「守卫单点化」块）。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
+
+**为什么不需要 shim**（审查结论）：extension 本就要改代码调协议 helper，helper 内部直接调原生 `ctx.ui.setWidget(key, [MARKER+JSON])` 就能走通整条链路。shim 的唯一潜在价值是透明拦截未引入协议包的第三方 extension，但第三方传的是 string[]（ANSI 文本），不触发 GuiRenderResult 分支，shim 无所作为。
 
 **runtime 侧解码**：event-adapter.ts 的 setWidget 分支检测 marker 前缀（详见 §8.1）。
 
 
 #### extension 怎么用
 
-协议包提供 `guiSetWidget()` helper，extension 开发者不需要知道底层编码：
+协议包提供 `setWidgetDual()`（双模唯一入口）与 `guiResult()`，extension 开发者不需要知道底层编码。下面的例子与 pi-todo 实装同形（`sections` 双段 + 无 item icon + 四件 meta）：
 
 ```typescript
-import { guiSetWidget, guiComponent } from '@zhushanwen/extension-protocol'
+import {
+  guiComponent, guiResult, setWidgetDual,
+  type GuiContext, type GuiRenderResult, type TreeItem, type WidgetMeta,
+} from '@zhushanwen/extension-protocol'
+
+/** 单段清单：两段共用同一构造（仅过滤条件不同）——numbered 序号，状态由行尾圆点单一表达（无 icon） */
+function todoListTree(todos: Todo[]) {
+  return guiComponent('list-tree', {
+    numbered: true,
+    items: todos.map((t): TreeItem => ({
+      label: t.text,
+      status: t.status === 'in_progress' ? 'running' : t.status === 'completed' ? 'done' : undefined,
+      depth: 0,
+    })),
+  })
+}
+
+/** 组装 GuiRenderResult：内容根（tab-bar 双段）+ meta（宿主壳层 head 与托盘 icon/badge 的唯一来源） */
+function buildGui(todos: Todo[]): GuiRenderResult {
+  const completed = todos.filter(t => t.status === 'completed').length
+  const inProgress = todos.filter(t => t.status === 'in_progress').length
+  const open = todos.length - completed
+  const status: WidgetMeta['status'] =
+    todos.length > 0 && completed === todos.length ? 'done' : inProgress > 0 ? 'running' : 'idle'
+
+  return guiResult(
+    guiComponent('tab-bar', {
+      tabs: [
+        { label: `待办 ${open}`, active: true },   // 首段带 active：宿主建初始 tab，此后本地切换不被推送重置
+        { label: `已完成 ${completed}` },
+      ],
+      // 段 = 子树数组，与 tabs 等长一一对应（宿主渲染 active 段；§3.2）
+      sections: [
+        [todoListTree(todos.filter(t => t.status !== 'completed'))],
+        [todoListTree(todos.filter(t => t.status === 'completed'))],
+      ],
+    }),
+    {
+      title: 'Todo',
+      status,
+      progress: todos.length > 0 ? { current: completed, total: todos.length } : undefined,
+      icon: 'list-checks',        // lucide key；也可给自定义形状 { paths: [...] }（§3.5 白名单）
+      badge: String(open),        // 托盘 [☑ N]；缺省由 progress.label 派生
+    },
+  )
+}
 
 function refreshDisplay(ctx: ExtensionContext, todos: Todo[]) {
-  if (ctx.mode === 'rpc') {
-    // GUI 模式：结构化 widget（用通用原语组合表达任务列表）
-    guiSetWidget(ctx, 'todo', {
-      type: 'list-tree',
-      props: {
-        items: todos.map(t => ({
-          label: t.text,
-          icon: t.status === 'completed' ? 'check' : t.status === 'in_progress' ? 'circle' : 'dot',
-          status: t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'running' : undefined,
-        })),
-      },
-    })
-  } else {
-    // TUI 模式：Component factory（已有）
-    ctx.ui.setWidget('todo', (tui, theme) => buildTodoWidget(todos, theme))
+  if (todos.length === 0) {
+    setWidgetDual(ctx as GuiContext, 'todo', undefined)   // 清空 → 托盘条目消失（模式无关）
+    return
   }
+  setWidgetDual(ctx as GuiContext, 'todo', {
+    gui: buildGui(todos),                             // RPC：marker 通道推 GuiRenderResult
+    text: renderWidgetLines(todos, ctx.ui.theme),     // TUI/json/print：pi 原生文本行
+  })
 }
 ```
 
@@ -367,8 +472,11 @@ sendMessage({
 // @zhushanwen/extension-protocol
 
 // ── core 类型 ──
-export type { GuiComponent, GuiComponentType, GuiComponentProps, GuiRenderResult }
-export type { StatItem, TreeItem, TreeItemIcon }
+export type {
+  GuiComponent, GuiComponentType, GuiComponentProps, GuiRenderResult,
+  StatItem, TreeItem, TreeItemIcon, WidgetMeta,
+}
+export type { DualWidgetContent, WidgetIconPathsValidation, WidgetIconPathsRejection }
 export type { GuiContext }
 
 // ── core 常量 ──
@@ -378,26 +486,37 @@ export { GUI_WIDGET_MARKER }
 // ── core helper ──
 export { isGuiCapable }       // 检测 RPC 模式
 export { isGuiComponent }     // 鸭子类型校验（runtime 用）
-export { guiResult }          // 构造 GuiRenderResult
+export { isGuiRenderResult }  // v1.1 信封守卫（event-adapter 区分信封与 v1 裸 component）
+export { guiResult }          // 构造 GuiRenderResult（component + 可选 meta）
 export { guiComponent }       // 构造 GuiComponent（带类型推断）
-export { guiSetWidget }       // 设置 GUI widget（marker 编码）
+export { guiSetWidget }       // 推送 GUI 臂（marker 编码 GuiRenderResult；无 mode 守卫）
+export { setWidgetDual }      // 双模 widget 推送唯一入口（内部做 isGuiCapable 分派）
+export { validateWidgetIconPaths }  // 校验 meta.icon 自定义 paths（白名单，见 §3.5）
 export { extractGui }         // 从 details 提取 __gui__（前端用）
+export { firstContentText }   // toolResult content[0] 文本提取（renderResult 文本兜底共用内核）
+
+// ── core：select + marker 通道 RPC 原语（失败折叠契约 + 错误回包形状单源）──
+export type { MarkerRpcResult, MarkerRpcOptions, ChannelErrorResult }
+export { callMarkerRpc, isChannelErrorResult, formatChannelErrorText }
 
 // ── extensions/ask-user（富交互，见 §6）──
 export type { AskUserQuestion, AskUserOption, AskUserAnswers }
 export { ASK_USER_MARKER }
 export { askUserInteract }    // 双向交互（select+marker 通道）
-export { getAskUserAnswer, getAskUserOther, getAskUserComment }  // 答案解析
+export { getAskUserAnswer, getAskUserOther, isAskUserQuestion }  // 答案解析与守卫
 ```
+
+包出口不止上面这些：session-manager / plugin-bridge / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费面结构性不触达 node 内建。
 
 ### 5.2 辅助函数签名
 
 ```typescript
-/** 检测当前环境是否支持 GUI 渲染（RPC 模式返回 true） */
+/** 检测当前环境是否支持 GUI 渲染（RPC 模式返回 true；TUI/json/print 走 pi 原生渲染） */
 function isGuiCapable(ctx: GuiContext): boolean
 
-/** 构造 GuiRenderResult，放进 details.__gui__ */
-function guiResult(component: GuiComponent): GuiRenderResult
+/** 构造 GuiRenderResult，放进 details.__gui__ 或 widget 双模载荷的 gui 臂：
+ *  v = PROTOCOL_VERSION + 递归 strip undefined；meta 可选（head / 托盘 icon+badge，见 §3.5） */
+function guiResult(component: GuiComponent, meta?: WidgetMeta): GuiRenderResult
 
 /** 构造 GuiComponent，带类型推断 */
 function guiComponent<T extends GuiComponentType>(
@@ -405,18 +524,40 @@ function guiComponent<T extends GuiComponentType>(
   props: GuiComponentProps[T]
 ): GuiComponent<T>
 
-/** 设置 GUI widget（RPC 模式编码 marker 进 string[]，TUI 模式 no-op） */
+/** 推送 widget 的 GUI 臂：marker 编码 GuiRenderResult 信封进 string[]，undefined 清除。
+ *  ⚠️ 无 mode 守卫（仅查 ctx.ui?.setWidget 存在性）——TUI/json/print 误调会推 marker 行造成乱码；
+ *  正常路径一律走 setWidgetDual（模式分派单点，见 §4.3） */
 function guiSetWidget(
   ctx: GuiContext,
   key: string,
-  component: GuiComponent | undefined
+  result: GuiRenderResult | undefined
 ): void
+
+/** 双模 widget 推送唯一入口：content undefined → 清屏（模式无关）；有内容 →
+ *  isGuiCapable(ctx) 分派 gui 臂（marker 通道）/ text 臂（pi 原生文本行） */
+function setWidgetDual(
+  ctx: GuiContext,
+  key: string,
+  content: DualWidgetContent | undefined
+): void
+// DualWidgetContent = { gui: GuiRenderResult; text: string[] }
+
+/** 校验 meta.icon 自定义形状的 paths（白名单字符集 + 条数/长度上限，见 §3.5）；不抛异常 */
+function validateWidgetIconPaths(value: unknown): WidgetIconPathsValidation
+// WidgetIconPathsValidation = { valid: true; paths: string[] } | { valid: false; reason: WidgetIconPathsRejection }
+// WidgetIconPathsRejection = 'not-array' | 'empty' | 'too-many' | 'non-string' | 'too-long' | 'total-too-long' | 'illegal-char'
 
 /** 从 details 提取 __gui__，带版本校验 */
 function extractGui(details: Record<string, unknown> | undefined): GuiRenderResult | undefined
 
 /** 鸭子类型校验（runtime event-adapter 用） */
 function isGuiComponent(value: unknown): value is GuiComponent
+
+/** v1.1 信封守卫：v === PROTOCOL_VERSION 且 component 为合法 GuiComponent（meta 不校验深度） */
+function isGuiRenderResult(value: unknown): value is GuiRenderResult
+
+/** pi toolResult 通用形状提取：content[0] 为 text 块时取其 text，否则空串 */
+function firstContentText(result: { content: Array<{ type: string; text?: string }> }): string
 ```
 
 ---
@@ -760,33 +901,39 @@ export function extractGui(details: Record<string, unknown> | undefined): GuiRen
 ### 9.1 GuiComponent 渲染路由（审查 S2——custom 注册机制）
 
 ```typescript
-// renderer/src/components/panel/message-stream/GuiComponentRenderer.vue
+// packages/ui/src/rendering-protocol/GuiComponentRenderer.vue（渲染包重建后自 renderer 旧路径迁入 packages/ui）
 <script setup lang="ts">
-import type { GuiComponent } from '@zhushanwen/extension-protocol'
-import AnsiText from './gui/AnsiText.vue'
+import { computed, inject } from 'vue'
+import type { Component } from 'vue'
+import type { GuiComponent, GuiComponentType } from '@zhushanwen/extension-protocol'
+import { AnsiText, Card, Columns, Group, ListTree, ProgressBar, StatsLine, TabBar } from './primitives'
+import { GUI_CUSTOM_REGISTRY_KEY } from '@taiji/core/rendering-protocol/custom-registry'
+import { resolveComponent } from '@taiji/core/rendering-protocol'
 
-// 已实现的内置组件映射。P2 阶段逐步补充 card / stats-line / progress-bar 等。
-const BUILTIN_MAP: Record<string, Component> = {
+// 已实现的内置原语映射：8 类全部在册（ansi-text + 7 布局/文本原语），本表无降级分支——
+// 降级 SSOT 在 core resolveComponent（未知 type / 未注册 custom → ansi-text JSON 文本）
+const BUILTIN_MAP: Record<Exclude<GuiComponentType, 'custom'>, Component> = {
   'ansi-text': AnsiText,
-  // P2 待实现: 'card' / 'stats-line' / 'progress-bar' / 'list-tree' / 'columns' / 'tab-bar'
+  'card': Card,
+  'stats-line': StatsLine,
+  'progress-bar': ProgressBar,
+  'list-tree': ListTree,
+  'columns': Columns,
+  'group': Group,
+  'tab-bar': TabBar,
 }
 
-// custom 组件注册表（内置 extension 编译期注册，P2 实现）
-const CUSTOM_MAP = inject<Record<string, Component>>('gui-custom-registry', {})
+// custom 组件注册表（内置 extension 编译期注册；key 权威在 @taiji/core/rendering-protocol）
+const CUSTOM_MAP = inject(GUI_CUSTOM_REGISTRY_KEY, {})
 
 const props = defineProps<{ component: GuiComponent }>()
 
-const resolved = computed(() => {
-  if (props.component.type === 'custom') {
-    const name = (props.component.props as { component?: string }).component
-    return CUSTOM_MAP[name ?? ''] ?? AnsiText
-  }
-  return BUILTIN_MAP[props.component.type] ?? AnsiText  // 未知类型降级
-})
+// core 解析（降级 + props 适配都在 core）：{ type, props } → 本组件纯查表映射成 Vue 组件
+const resolved = computed(() => resolveComponent(props.component, CUSTOM_MAP))
 </script>
 ```
 
-**降级行为**：未注册的 type（P2 前的 card/stats-line 等）一律降级到 `AnsiText`，把 props 序列化为 JSON 文本展示（不崩渲染、不丢信息）。
+**降级行为**：未知 type / 未注册的 custom 由 core `resolveComponent` 统一降级到 `ansi-text`（把 props 序列化为 JSON 文本展示，不崩渲染、不丢信息）——降级判定单点在 core，本组件不含 `?? AnsiText` 分支。
 
 **custom 类型约束**：外部（用户安装的）extension 的 custom 组件无法在前端注册——Vue 组件定义需要编译期打包，不能通过 WS 传输。仅 taiji 内置 extension 可在编译期注册到 `CUSTOM_MAP`。
 
@@ -834,10 +981,12 @@ const ansiContent = computed(() => props.tool?.outputRaw)
 
 ### 9.3 SideDrawer widget 渲染
 
-- 新增 `extension:widgetGui` WS 订阅（SideDrawer.vue 约 288 行旁加 `onMessage`）
-- 新增 `activeGuiComponent` ref，与 `activeLines` 互斥
-- `mapWidgetKeyToTab` 扩展：识别 pi-todo/goal/workflow 的 widgetKey 路由到对应 tab
-- 模板加 `v-else-if="activeGuiComponent"` 分支渲染 `<GuiComponentRenderer>`
+> **[已废弃] 本方案未采用**：widget 现挂 **composer 任务托盘的协议 widget 区**（见 §4.3 / §15.1 / §15.4），不进 SideDrawer/sidebar；以下为原设计草案，仅供追溯。
+
+- ~~新增 `extension:widgetGui` WS 订阅（SideDrawer.vue 约 288 行旁加 `onMessage`）~~
+- ~~新增 `activeGuiComponent` ref，与 `activeLines` 互斥~~
+- ~~`mapWidgetKeyToTab` 扩展：识别 pi-todo/goal/workflow 的 widgetKey 路由到对应 tab~~
+- ~~模板加 `v-else-if="activeGuiComponent"` 分支渲染 `<GuiComponentRenderer>`~~
 
 ### 9.4 全局 Status Bar（审查 C5——状态提升）
 
@@ -876,13 +1025,13 @@ export function useExtensionStatus(sessionId: Ref<string | null>) {
 
 1. **安装协议包**：`npm install @zhushanwen/extension-protocol`
 2. **execute 分支**：在 execute 返回处加 `if (ctx.mode === 'rpc')` 分支，构造 `details.__gui__`
-3. **widget 分支**：refreshDisplay 加 `if (ctx.mode === 'rpc')` 分支，调 `guiSetWidget()`
+3. **widget 分支**：refreshDisplay 改调 `setWidgetDual()`（双模唯一入口，模式分派由 helper 内部承担）——原 TUI 的 `ctx.ui.setWidget(factory)` 调用由 `text` 臂取代
 4. **renderResult 保持**：TUI 的 renderResult 不动，RPC 模式下不会被调用
 
 ### 10.2 最小改动模板
 
 ```typescript
-import { guiResult, guiSetWidget, isGuiCapable, guiComponent, PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
+import { guiResult, isGuiCapable, guiComponent, PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 execute(toolCallId, params, signal, onUpdate, ctx) {
   const data = doWork(params)
@@ -1026,7 +1175,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 
 | Extension | 主组件组合 | 需要的通用原语 |
 |-----------|-----------|--------------|
-| pi-todo | `list-tree`（任务项）+ `card`（容器）| `columns`（>8 项时双列）|
+| pi-todo | `tab-bar`（`sections` 双段：待办/已完成 各一段 `list-tree`）| meta `icon`/`badge`（托盘条目，v1.1）|
 | pi-goal | `card` + `stats-line` + `progress-bar` | — |
 | pi-subagents | `card`(bg-notify) + `list-tree`(eventLog) + `stats-line` | — |
 | pi-workflow | `card` + `columns` + `list-tree` | sidebar+main 双列 |
@@ -1043,7 +1192,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 | 渲染入口 | 当前能力 | DOM 结构 | 协议对接改动 |
 |---------|---------|---------|-------------|
 | **tool result** | 纯文本 `{{ result }}` | Block.vue: `<span>{{ result }}</span>` + `font-mono whitespace-pre-wrap` | 加 `GuiComponentRenderer` 分支 + `AnsiRenderer` 兜底 |
-| **widget（M17）** | 对话流 WidgetArea（已实现，Panel.vue 挂载于 MessageStream 与 composer 之间） | WidgetArea.vue: 常驻卡片分栏并排（flex wrap），`widgetKey` 标签 + `GuiComponentRenderer` | `extension:widget`/`extension:widgetGui` 订阅 + 渲染到对话流（MessageStream 与 composer 之间）；widget 不再进 SideDrawer/sidebar |
+| **widget（M17）** | composer 任务托盘的协议 widget 区（已实现；原「对话流 WidgetArea」消费端已于 2026-09-16 退役，见 [D11](../design/composer-task-tray.md)） | 托盘 widget 区：icon 按钮行（`meta` 驱动 icon/badge/状态色）+ 面板内 `GuiComponentRenderer`（`guiTree` 逐项渲染） | `extension:widget`/`extension:widgetGui` 订阅 → ViewHostStore per-session 缓存 → 托盘消费；widget 不再进 SideDrawer/sidebar |
 | **status** | 纯文本 footer | SideDrawer.vue: `<footer><span>key</span><span>text</span></footer>` | 提取 `useExtensionStatus()` composable + 挂载到 Workspace 底部 |
 | **custom message** | BgNotifyCard（结构化）/ SystemNotice（纯文本）| MessageStream.vue: `v-else-if="bgNotify"` | 加 `message.details.__gui__` 检测 + `GuiComponentRenderer` |
 | **dialog** | **不存在** | — | 新建 `ExtensionUIDialog` + `extension.ui_request` handler |
@@ -1063,17 +1212,18 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 
 ### 15.3 前端组件清单与设计
 
-协议需要的前端 Vue 组件（`packages/renderer/src/components/panel/message-stream/gui/`）：
+协议需要的前端 Vue 组件（`packages/ui/src/rendering-protocol/primitives/`；路由组件 `GuiComponentRenderer.vue` 在同目录上级 `packages/ui/src/rendering-protocol/`）：
 
 | 组件 | 对应 GuiComponent type | 状态 | CSS 布局核心 |
 |------|----------------------|------|-------------|
 | `AnsiText.vue` | `ansi-text` | **已实现** | `ansi_up` → `<span>` 着色 |
-| `GuiCard.vue` | `card` | P2 待实现 | `rounded-lg border` + variant + header/body 递归渲染 |
-| `GuiStatsLine.vue` | `stats-line` | P2 待实现 | `flex flex-wrap gap-x-3` + severity 颜色 |
-| `GuiProgressBar.vue` | `progress-bar` | P2 待实现 | `<div>` + inner `<div style="width%">` |
-| `GuiListTree.vue` | `list-tree` | P2 待实现 | 递归 + `padding-left` depth + icon SVG |
-| `GuiColumns.vue` | `columns` | P2 待实现 | `grid` + `grid-template-columns` |
-| `GuiTabBar.vue` | `tab-bar` | P2 待实现 | `flex gap-1` + active 样式 |
+| `Card.vue` | `card` | **已实现** | `rounded-lg border` + variant + header/body 递归渲染 |
+| `StatsLine.vue` | `stats-line` | **已实现** | `flex flex-wrap gap-x-3` + severity 颜色 |
+| `ProgressBar.vue` | `progress-bar` | **已实现** | `<div>` + inner `<div style="width%">` |
+| `ListTree.vue` | `list-tree` | **已实现** | 递归 + `padding-left` depth + icon SVG |
+| `Columns.vue` | `columns` | **已实现** | `grid` + `grid-template-columns` |
+| `Group.vue` | `group` | **已实现** | 垂直组合容器（无视觉样式，子组件递归渲染） |
+| `TabBar.vue` | `tab-bar` | **已实现**（容器化：`sections` 与 `tabs` 等长时渲染 `tabs[active]` 子树） | `flex gap-1` + active 样式 + 分段容器 |
 
 **ask-user 富交互组件**（不在 BUILTIN_MAP，独立集成）：
 
@@ -1081,14 +1231,14 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 |------|------|------|
 | `AskUserOverlay.vue` | `components/extension/ask-user/` | **已实现** |
 
-P2 前，非 `ansi-text` 的通用原语降级为 JSON 序列化文本展示（不崩渲染）。
+降级：未知 type / 未注册的 custom 由 core `resolveComponent` 统一降级为 JSON 序列化文本展示（`ansi-text`，不崩渲染、不丢信息）。
 
 ### 15.4 渲染挂载点
 
 | 渲染入口 | 挂载位置 | 文件 |
 |---------|---------|------|
 | tool result GuiComponent | Block.vue 展开态详情内（`extractGui` 调用 ×2） | `Block.vue:191,198` |
-| widget GuiComponent（M17） | **对话流 WidgetArea**（MessageStream 与 composer 之间，常驻卡片分栏并排；`extension:widgetGui`/`extension:widget` WS 事件 → ViewHostStore per-session 缓存 → WidgetArea 渲染） | `WidgetArea.vue`（已实现）；历史：SideDrawer.vue:332-345（已废弃方向） |
+| widget GuiComponent（M17） | **composer 任务托盘的协议 widget 区**（composer 工具条左簇；`extension:widgetGui`/`extension:widget` WS 事件 → ViewHostStore per-session 缓存 → 托盘 widget 按钮/面板渲染） | `packages/renderer/src/components/panel/tray/TrayWidgetButton.vue` / `TrayWidgetPanel.vue`（已实现）；历史：对话流 pill（`WidgetArea.vue`，已随 2026-09-16 退役删除）、SideDrawer.vue:332-345（已废弃方向） |
 | custom message GuiComponent | MessageStream.vue system 消息分支（`extractGui` 调用 ×1） | `MessageStream.vue:130` |
 | ask-user 富交互 | **Panel.vue inline**（覆盖 composer 位置，与 Composer 互斥） | `Panel.vue:90-97` |
 | ExtensionUIDialog（confirm/select/input） | 全局 portal | `ExtensionUIDialog.vue` |
@@ -1101,7 +1251,7 @@ P2 前，非 `ansi-text` 的通用原语降级为 JSON 序列化文本展示（�
 |---|---|---|
 | **P0: ANSI 兜底 + 历史路径修复** | tool output ANSI 渲染（ansi_up + Block.vue + outputRaw）+ message-converter.ts details 透传（F1）+ handleToolExecutionUpdate details 提取（S5） | ✅ 已完成 |
 | **P1: 协议包 + ExtensionUIDialog + ask-user 富交互** | extension-protocol 包 + event-adapter widget/ask-user marker 检测 + shared/protocol.ts 类型 + ExtensionUIDialog（confirm/select/input）+ askUserInteract + AskUserOverlay（Panel.vue inline） | ✅ 已完成 |
-| **P2: 通用原语渲染** | GuiCard / GuiStatsLine / GuiProgressBar / GuiListTree / GuiColumns / GuiTabBar Vue 组件 + custom 注册机制 | 待实现 |
+| **P2: 通用原语渲染** | 渲染原语 Vue 组件（`packages/ui/src/rendering-protocol/primitives/`：ansi-text + card / stats-line / progress-bar / list-tree / columns / group / tab-bar）+ custom 注册机制 | ✅ 已完成 |
 | **P3: extension 迁移** | 各 extension 接入协议（用通用原语组合表达领域数据） | 待实现 |
 
 ---
@@ -1167,3 +1317,12 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 2. todo/goal 走 M17：tool result 不再带 `__gui__`（M4 移除）、不推 custom message（M5 不走）
 3. widget 不进 sidebar（M2 方向废弃，动态 view 发现移除）
 4. M5（custom message 渲染）保留为独立能力，与 M17 正交（subagent-workflow 等已推 `__gui__` message）
+5. **[2026-09-16 后续]** M17 的宿主由「对话流 widget 面板」迁至 **composer 任务托盘的协议 widget 区**（对话流 pill 形态退役，setWidget 语义与数据通道不变；见 [composer-task-tray.md](../design/composer-task-tray.md) D11）
+
+### v1.1 字段扩展（2026-09-16）
+
+**变更**（全部 additive，`PROTOCOL_VERSION` 不变；来源设计 `docs/design/composer-task-tray.md` D4/D5）：
+1. `WidgetMeta` 加 `icon?`（lucide key 或自定义形状 `{ paths }`）与 `badge?`（extension 全权格式化的短文本，宿主超长 truncate 至 6）——见 §3.5；形状归 extension、风格由宿主锁死（线宽/颜色/尺寸固定）
+2. 协议包新增 `validateWidgetIconPaths`（paths 白名单：字符集 + 条数 ≤8 / 单条 ≤512 / 总长 ≤2048），不抛异常返回判定对象，宿主据 `!valid` 落兜底 icon + warn——见 §3.5
+3. `tab-bar` 加 `sections?`（与 `tabs` 等长的分段子树容器），缺省维持纯展示；active 归宿主本地、后续推送不重置用户选择——见 §3.2
+4. 配套同步：`packages/plugin-sdk/src/types.ts` 平行副本（手维护，同 commit）；消费端（协议 widget 的托盘挂载位）在 renderer 侧另行实施

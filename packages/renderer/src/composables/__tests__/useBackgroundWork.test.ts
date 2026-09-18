@@ -89,9 +89,9 @@ describe('useBackgroundWork', () => {
     expect(hasBackgroundWork('s1')).toBe(true)
   })
 
-  it('TC3: workflow paused → true（paused 不续跑主 agent，仍算未完成）', () => {
+  it('TC3: workflow running → true（运行中的 run 算未完成）', () => {
     const wf = useWorkflowStore()
-    wf.applyRecords('s1', [makeWorkflow({ status: 'paused' })])
+    wf.applyRecords('s1', [makeWorkflow({ status: 'running' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(true)
   })
@@ -268,7 +268,7 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
     expect(derivedStatus(sessionId).value).toBe('done')
   })
 
-  it('workflow paused → derivedStatus = working（paused 也算 background work）', async () => {
+  it('workflow running → derivedStatus = working（运行中算 background work）', async () => {
     const { useSessionDerivations, invalidateStatusCache } = await import(
       '@/composables/features/chat/useSessionDerivations'
     )
@@ -278,8 +278,8 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
     const wf = useWorkflowStore()
     const sessionId = 's-tc9b'
 
-    // workflow paused → working（hasBackgroundWork=true，paused 视为未完成）
-    wf.applyRecords(sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'paused' })])
+    // workflow running → working（hasBackgroundWork=true）
+    wf.applyRecords(sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'running' })])
     expect(derivedStatus(sessionId).value).toBe('working')
 
     // workflow done → 回落 done

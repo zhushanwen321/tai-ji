@@ -25,7 +25,7 @@ import type {
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
 import type { UsageStatsResult } from './usage-stats'
-// composer-gen-stats（docs/design/composer-gen-stats.md §3.4）：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
+// composer-gen-stats：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
@@ -67,7 +67,7 @@ export interface CommandSourceInfo {
 export type ClientMessageType =
   | 'session.create' | 'session.delete' | 'session.deleteByCwd' | 'config.sessions' | 'session.switch' | 'session.restore' | 'session.history' | 'session.getCommands' | 'session.getContext'
   | 'session.compact' | 'session.rename' | 'session.fork' | 'session.setProject'
-  // composer-gen-stats（docs/design/composer-gen-stats.md §3.3 D4）：session.getGenStats 拉该 session
+  // composer-gen-stats（D4）：session.getGenStats 拉该 session
   // 当前模型的速度/缓存命中率快照（恢复腿——切 session 主动拉取，规避 broadcast 早于订阅的时序竞争）。
   // reply session.stats_update（payload 消费型，同 session.getContext → context.update 模式）。
   | 'session.getGenStats'
@@ -147,7 +147,6 @@ export type ClientMessageType =
   | 'config.setSetupScript' | 'config.getSetupScript'
   | 'config.setBareSetupScript' | 'config.getBareSetupScript'
   | 'config.setTimeout' | 'config.getTimeout'
-  | 'config.setStreamingIdleTimeout' | 'config.getStreamingIdleTimeout'
   | 'config.setDefaultBaseBranch' | 'config.getDefaultBaseBranch'
   | 'config.setAutoRenameEnabled' | 'config.getAutoRenameEnabled'
   | 'config.setRenameModel' | 'config.getRenameModel'
@@ -312,7 +311,7 @@ export type BatchDeleteResult = {
  * extensions/universal/rename-session/src/pure.ts 的 RenameMode 值域同构——跨包不 import，
  * 本处是协议层声明，供 runtime settings 通路（config.get/setRenameMode）与 renderer
  * 模式 Select 共用；默认 first-stop（三处默认值真相：pure.ts DEFAULT_RENAME_CONFIG /
- * package.json startupConfig.content / runtime worktree-config-helper 镜像）。
+ * package.json startupConfig.content / runtime rename-session-config.ts 镜像）。
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
 
@@ -351,7 +350,7 @@ export interface ClientMessageMap {
   'session.switch': { sessionId: string }
   'session.restore': { sessionId: string }
   'session.forceQuit': { sessionId: string }
-  // session.history 参数（crash-resilience §3.3 D4 中期分页协议，u6-paging-protocol）：
+  // session.history 参数（D4 中期分页协议，u6-paging-protocol）：
   // - 不带 cursor：最近窗口（u4b 双预算现状）——「打开/切入 session」与 hydrate 通路。
   // - 带 cursor：游标翻页——cursor = turn 边界锚点 entryId（renderer 当前窗口最早消息的
   //   piEntryId），返回该锚点之前的最近 limitTurns turns（仍受 maxBytes 字节预算、单 turn
@@ -362,7 +361,7 @@ export interface ClientMessageMap {
   'session.history': { sessionId: string; cursor?: string; limitTurns?: number; maxBytes?: number }
   'session.getCommands': { sessionId: string }
   'session.getContext': { sessionId: string }
-  // session.getGenStats（docs/design/composer-gen-stats.md §3.3 D4）：生成指标恢复腿。
+  // session.getGenStats（D4）：生成指标恢复腿。
   // reply = session.stats_update payload 同形（无任何数据时 speed/cacheRatio 全 null + model 缺省）。
   'session.getGenStats': { sessionId: string }
   'session.getTraceEntries': { sessionId: string }
@@ -426,7 +425,7 @@ export interface ClientMessageMap {
   'session.getWorkflows': { sessionId: string }
   'session.getAgentCallHistory': { sessionId: string; agentCallSessionId: string }
   'session.getAgentCallFilePath': { sessionId: string; agentCallSessionId: string }
-  'session.workflowAction': { sessionId: string; action: 'pause' | 'resume' | 'abort'; runId: string }
+  'session.workflowAction': { sessionId: string; action: 'abort'; runId: string }
   // session.subagentAction：subagent 生命周期/定向消息操作（cancel/message/start，对称 workflowAction
   // 的扩展 slash command 转发）。runtime 经 client.prompt("/subagents <action> ...") 调扩展（不经 LLM）。
   // 字段按 action 取用：cancel 用 subagentId，message 用 subagentId+text，start 用 slug+task
@@ -642,12 +641,6 @@ export interface ClientMessageMap {
   'config.setTimeout': { timeout: number }
   /** config.getTimeout：读取 worktree 创建超时时间配置（前端读取）。 */
   'config.getTimeout': Record<string, never>
-  /** config.setStreamingIdleTimeout：设置对话流式空闲超时阈值（秒，前端写入）。
-   *  clamp 校验语义（docs/design/timeout-streaming-ui-idle.md §5.3 D3 单一权威口径）：
-   *  合法域 [60, 3600] 秒，越界不拒绝而是 clamp 到边界，reply 返回 clamp 后生效值。 */
-  'config.setStreamingIdleTimeout': { timeout: number }
-  /** config.getStreamingIdleTimeout：读取对话流式空闲超时阈值（秒，未配置时回默认 1800）。 */
-  'config.getStreamingIdleTimeout': Record<string, never>
   /** config.setDefaultBaseBranch：设置默认基分支（前端写入）。 */
   'config.setDefaultBaseBranch': { baseBranch: string }
   /** config.getDefaultBaseBranch：读取默认基分支配置（前端读取）。 */
@@ -805,7 +798,7 @@ export type ServerMessageType =
   | 'message.bashStart' | 'message.bashResult'
   | 'message.complete' | 'message.error' | 'message.status'
   | 'context.update'
-  // composer-gen-stats（docs/design/composer-gen-stats.md §3.3 D4）：生成指标帧——双发送点同形：
+  // composer-gen-stats（D4）：生成指标帧——双发送点同形：
   // ① turn-usage 采样后扩展广播（对该模型全部已知 session 逐 sid 发帧）；② session.getGenStats
   // RPC 的 reply（恢复腿）。payload 形状 SSOT = gen-stats.ts；无值一律 null（null=无数据，
   // 0=真实测量值），与 context.update 的无值编码纪律同源。
@@ -836,7 +829,7 @@ export type ServerMessageType =
   // auth.result：auth 握手的结果回复（S1-W1，ConnectionManager 传输层生产，见 ClientMessageMap 'auth'）。
   | 'auth.result'
   | 'pong' | 'error'
-  | 'extension.ui_request' | 'extension.ui_timeout' | 'extension.error'
+  | 'extension.ui_request' | 'extension.error'
   | 'extension.discovered' | 'extension.installCancelled'
   | 'extension.recommended'
   | 'extension.pendingRequests'
@@ -848,7 +841,7 @@ export type ServerMessageType =
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
   | 'session.exited'
-  // crash-resilience §3.3 D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
+  // D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
   // ServerMessageMapBase 两行注释）。
   | 'session.restored' | 'session.restoreFailed'
   | 'app.info'
@@ -899,7 +892,6 @@ export type ServerMessageType =
   | 'config.setupScript'
   | 'config.bareSetupScript'
   | 'config.worktreeTimeout'
-  | 'config.streamingIdleTimeout'
   | 'config.defaultBaseBranch'
   | 'config.autoRenameEnabled'
   | 'config.renameModel'
@@ -1385,7 +1377,7 @@ export interface ServerMessageMapBase {
   // reason: 人类可读的错误原因（含 stderr 尾部截断），供诊断面板展开显示。
   // code: pi 进程退出码（null 表示进程被信号杀死无退出码）。
   'session.exited': { sessionId: string; code: number | null; reason: string }
-  // session.restored / session.restoreFailed（crash-resilience §3.3 D7，u8-pi-respawn）：
+  // session.restored / session.restoreFailed（D7，u8-pi-respawn）：
   // pi 非主动退出后的自动恢复结果推送（恢复编排点 = ProcessManager onSessionExit 链 →
   // pi-respawn.ts 编排；5s 延迟 + 连续 2 次失败熔断）。两者只在「非主动退出触发的自动
   // 恢复」链路产生——用户手动强制退出（forceQuitSession，不经 onSessionExit）与惰性
@@ -1495,7 +1487,7 @@ export interface ServerMessageMapBase {
   //   rpc = 活跃 session（pi get_entries 权威解析 + 文件首行补 header）；
   //   file = 非活跃/降级（JSONL 直读 + sidecar 合并）；
   //   empty = session 未落盘（pi 延迟写入窗口，规则 6——空态标记，前端显示「尚未落盘」）；
-  //   oversize = 文件超 runtime 读取预检阈值（crash-resilience D5④，u4c）——entries 恒空、
+  //   oversize = 文件超 runtime 读取预检阈值（D5④，u4c）——entries 恒空、
   //     oversizeMessage 提供降级文案（体积 + 源文件绝对路径），不与 empty 混淆。
   // header 是 JSONL 首行 type=session 的完整 entry（字段镜像 core TraceSessionHeader——
   // shared 不依赖 core，结构兼容即协议兼容；parentSession 两形态（源文件路径/源 sessionId
@@ -1535,7 +1527,7 @@ export interface ServerMessageMapBase {
     fetchedAt: string
   }
   // session.workflowActionDone：workflow 操作完成确认（session.workflowAction RPC reply）
-  'session.workflowActionDone': { sessionId: string; action: 'pause' | 'resume' | 'abort'; runId: string }
+  'session.workflowActionDone': { sessionId: string; action: 'abort'; runId: string }
   // session.subagentActionDone：subagent 操作完成确认（session.subagentAction RPC reply）。
   // 字段按 action 回显目标标识：cancel/message 回 subagentId，start 回 slug（text/task 不回显——
   // ack 型 payload，回显长文本无消费方）。
@@ -1559,8 +1551,9 @@ export interface ServerMessageMapBase {
   // [HISTORICAL] D1 协议收敛（context-consistency Phase 1）：无值以「字段缺失」表达，禁止 ?? 0 编码
   // （0 物理上不可能是真值——任何模型 contextWindow > 0）；仅含 sessionId 的帧 = 无值占位帧。
   'context.update': { sessionId: string; usagePercent?: number; inputTokens?: number; contextLimit?: number }
-  // session.stats_update：Composer 生成指标（token 速度 + 缓存命中率，模型视角——该 session 当前
-  // 模型的全局指标，同模型多 session 分区值相同是预期行为）。形状 SSOT = GenStatsFrame
+  // session.stats_update：Composer 生成指标（token 速度 + 缓存命中率；current 为会话私有样本
+  // ——本会话最近一次请求，同模型多 session 各自独立；day/d7/d30 为该模型跨会话全局聚合，
+  // 同模型多 session 聚合值相同是预期行为）。形状 SSOT = GenStatsFrame
   // （gen-stats.ts，设计 §3.4 唯一权威）。无值编码纪律 [HISTORICAL] 与 context.update 同源：
   // null = 无数据，0 = 真实测量值，禁止 ?? 0 编码（0 物理上可能是真值，null/0 必须可区分）。
   'session.stats_update': GenStatsFrame
@@ -1674,8 +1667,6 @@ export interface ServerMessageMapBase {
   'config.bareSetupScript': { script: string }
   /** config.worktreeTimeout：config.getTimeout 的 reply。 */
   'config.worktreeTimeout': { timeout: number }
-  /** config.streamingIdleTimeout：config.get/setStreamingIdleTimeout 的 reply（clamp 后生效值，秒）。 */
-  'config.streamingIdleTimeout': { timeout: number }
   /** config.defaultBaseBranch：config.getDefaultBaseBranch 的 reply。 */
   'config.defaultBaseBranch': { baseBranch: string }
   /** config.autoRenameEnabled：config.getAutoRenameEnabled 的 reply。 */
@@ -1785,7 +1776,7 @@ export interface ServerMessageMapBase {
   'session.handoffAborted': { srcSessionId: string }
   // session.history：session.history 的成功 reply（显式历史拉取 RPC；wave:perf-w20 后 switch
   // reply 已拆分到 session.switched，不再复用本类型）。session optional 保留向后兼容。
-  // truncated/loadedTurns/totalTurnsEstimate：历史加载双预算窗口契约（crash-resilience §3.3 D4）——
+  // truncated/loadedTurns/totalTurnsEstimate：历史加载双预算窗口契约（D4）——
   // truncated=true 表示窗口外仍有历史；loadedTurns=本次返回的完整 turn 数；
   // totalTurnsEstimate=session 的 turn 总数估计（读到头为精确值，窗口截断时为下界）。
   // [u6] legacy historyTruncated 字段已退役（偏差表 D7 清账：与 truncated 同值并存的双轨收口）。
@@ -1805,7 +1796,7 @@ export interface ServerMessageMapBase {
     sessionId: string
     session: SessionSummary
   }
-  // [u6] session.fullHistory / session.getFullHistory 已退役（crash-resilience §3.3 D4 中期：
+  // [u6] session.fullHistory / session.getFullHistory 已退役（D4 中期：
   // 「加载更早」改走 session.history 游标翻页，全量通路删除——游标翻页完全替代）。
   // model.switched：model.switch reply（settings-message-handler.ts:324-339 reply { sessionId, provider, modelId }，U6 后回传 pi 生效值拆解）。
   // [C-pi-14/ADR-0065] mutation reply（分支一后端可变换）：provider/modelId = pi 生效值，必需不 optional。
@@ -2132,7 +2123,7 @@ export interface ReplyPayloadMap {
   'session.getCommands': ServerMessageMap['session.commands']
   'session.getContext': ServerMessageMap['context.update']
   // session.getGenStats：reply = session.stats_update payload 同形（payload 消费型；
-  // docs/design/composer-gen-stats.md §3.3 D4 恢复腿，runtime 侧 modelId 解析降级链权威）。 
+  // D4 恢复腿，runtime 侧 modelId 解析降级链权威）。
   'session.getGenStats': ServerMessageMap['session.stats_update']
   'session.getTraceEntries': ServerMessageMap['session.traceEntries']
   'session.fetchCurrentSystemPrompt': ServerMessageMap['session.currentSystemPrompt']
@@ -2187,8 +2178,6 @@ export interface ReplyPayloadMap {
   'config.getBareSetupScript': ServerMessageMap['config.bareSetupScript']
   'config.setTimeout': ServerMessageMap['config.worktreeTimeout']
   'config.getTimeout': ServerMessageMap['config.worktreeTimeout']
-  'config.setStreamingIdleTimeout': ServerMessageMap['config.streamingIdleTimeout']
-  'config.getStreamingIdleTimeout': ServerMessageMap['config.streamingIdleTimeout']
   'config.setDefaultBaseBranch': ServerMessageMap['config.defaultBaseBranch']
   'config.getDefaultBaseBranch': ServerMessageMap['config.defaultBaseBranch']
   'config.setAutoRenameEnabled': ServerMessageMap['config.autoRenameEnabled']
@@ -2337,34 +2326,6 @@ export interface ReplyPayloadMap {
  * extension.ts / git.ts / plugin.ts，本文件顶部 import 引用，ServerMessageMapBase 照常引用。
  */
 
-// ── 运行时类型守卫 ─────────────────────────────────────────────
-
-/** 运行时检查值是否为 Message（含必需字段 id/role/content/status/timestamp）。 */
-export function isMessage(value: unknown): value is Message {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v.id === 'string' &&
-    (v.role === 'user' || v.role === 'assistant' || v.role === 'system') &&
-    (typeof v.content === 'string' || Array.isArray(v.content)) &&
-    (v.status === 'streaming' || v.status === 'complete' || v.status === 'error') &&
-    typeof v.timestamp === 'number'
-  )
-}
-
-/** 运行时检查值是否为 SessionSummary（含必需字段 id/label/cwd/status/modelId）。 */
-export function isSessionSummary(value: unknown): value is SessionSummary {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v.id === 'string' &&
-    typeof v.label === 'string' &&
-    typeof v.cwd === 'string' &&
-    typeof v.status === 'string' &&
-    typeof v.modelId === 'string'
-  )
-}
-
 /**
  * session 级 view-ready 快照 DTO（W13 data-source-governance P2.1，D7 原则）。
  *
@@ -2414,17 +2375,4 @@ export interface SessionViewSnapshot {
    * （runtime 实例广播 / 乐观更新，D1b 整字段覆盖含显式空值）。
    */
   source?: SessionDataSource
-}
-
-/** 运行时检查值是否为 SubagentRecord（含必需字段 subagentId/agent/slug/task/status）。 */
-export function isSubagentRecord(value: unknown): value is SubagentRecord {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v.subagentId === 'string' &&
-    typeof v.agent === 'string' &&
-    typeof v.slug === 'string' &&
-    typeof v.task === 'string' &&
-    typeof v.status === 'string'
-  )
 }

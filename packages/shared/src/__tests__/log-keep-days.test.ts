@@ -1,5 +1,5 @@
 /**
- * readLogKeepDays() 单测（crash-resilience u-foundation，设计 §3.3 D6-⑦）。
+ * readLogKeepDays() 单测（u-foundation，设计 §3.3 D6-⑦）。
  *
  * 守护：env TAIJI_LOG_KEEP_DAYS 覆盖 || 默认 7 的语义与 runtime infra/logger.ts:50-55
  * 现状（KEEP_DAYS = Number(process.env.TAIJI_LOG_KEEP_DAYS) || DEFAULT_KEEP_DAYS）逐字

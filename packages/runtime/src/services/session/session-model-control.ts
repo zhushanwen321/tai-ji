@@ -13,11 +13,6 @@ import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import type { SessionReplicatedStates } from './session-state-projection.js'
 import { toErrorMessage } from '../../utils/errors.js'
-// persistModelBinding 实现已迁至 infra/pi/session-model-sidecar（max-lines 行数合规）；
-// 本文件保持经 session-file-utils 的 re-export 导入——services 层 infra 直引白名单以
-// session-file-utils 锚定（三层守卫 check_services_infra_import），且 restore 播种测试的
-// mock factory 锚定同一导入面。
-import { persistModelBinding } from '../../infra/pi/session-file-utils.js'
 import { logger } from '../../infra/logger.js'
 
 /**
@@ -71,9 +66,7 @@ export class SessionModelControl {
     // 请求值 ≠ 生效值——set 后 get_state 读回实际生效模型，双写缓存与返回值都用生效值
     //（与 setThinkingLevel 的 set→get_state→effective 同款模式，PS-03/PS-01）。
     // get_state 失败 fallback 请求值（旧行为），不反噬切模型主链路。
-    const effective = await this.readEffectiveModelState(sessionId, client, newModelId, session.thinkingLevel ?? '')
-    const effectiveModelId = effective.modelId
-    const effectiveThinkingLevel = effective.thinkingLevel
+    const effectiveModelId = await this.readEffectiveModelId(sessionId, client, newModelId)
     // W7：switchModel RPC 成功响应 = modelId 实例的失效源（RPC 响应驱动，「事件只做失效」的
     // 补充合法形态，D7）。markDirty 防抖重拉 get_state，实例快照与 pi 权威值收敛（行为级
     // 验收：模型名 1s 内更新）。失败路径（上方 throw）不失效——pi 侧未生效，实例保持旧快照。
@@ -90,15 +83,8 @@ export class SessionModelControl {
     // 实例快照收敛后主路径照常读快照（与直写同值，无冲突）。U6：直写 get_state 读回的
     // 生效值（pi pattern 换模时 ≠ 请求值），缓存不再携带未生效的请求模型。
     session.modelId = effectiveModelId
-    // 持久化 model binding sidecar（switchModel 生效后写入 .model.json）。
-    if (session.sessionFilePath) {
-      try {
-        persistModelBinding(session.sessionFilePath, effectiveModelId, effectiveThinkingLevel)
-      } catch (e) {
-        // best-effort：sidecar 写失败不阻塞 switchModel 主链路——重启后 get_state 读回自愈
-        console.warn(`[session-service] persistModelBinding failed after switchModel: ${toErrorMessage(e)}`)
-      }
-    }
+    // 持久层唯一写方 = pi（model_change entry 落 JSONL，缓存治理 U8a W1 写点退役）——
+    // 会话列表经 scanSessionMeta 反向读 JSONL 在下次刷新可见，本方法只负责内存直写投影。
     // session-trace（A33）：lifecycle RPC 成功后主动补拉——model_change 的 append 无通用事件
     //（design D4：model_change / label 无事件，这些动作由 runtime 自身发起，RPC 成功后补拉覆盖）。
     // fire-and-forget：补拉失败不影响切模型主流程（syncTraceEntries 内部吞错）。
@@ -110,26 +96,23 @@ export class SessionModelControl {
   }
 
   /**
-   * switchModel 的 get_state 回执普查读回（U6）：一次 get_state 同时读回生效模型与
-   * thinkingLevel。字段缺失/非法/get_state 抛错一律保持请求值 fallback（旧行为），
-   * 不反噬切模型主链路（thinkingLevel 供 sidecar 持久化使用）。
+   * switchModel 的 get_state 回执普查读回（U6）：读回实际生效模型。字段缺失/非法/
+   * get_state 抛错一律保持请求值 fallback（旧行为），不反噬切模型主链路。
+   * thinkingLevel 不在此读回——其持久层由 pi 落 JSONL，内存快照经 thinkingLevel 实例
+   * markDirty 重拉 get_state 收敛（U8a 前 sidecar 持久化是该读回的唯一消费者）。
    */
-  private async readEffectiveModelState(
+  private async readEffectiveModelId(
     sessionId: string,
     client: IPiEngine,
     fallbackModelId: string,
-    fallbackThinkingLevel: string,
-  ): Promise<{ modelId: string; thinkingLevel: string }> {
+  ): Promise<string> {
     try {
       const state = await client.getState()
-      const modelId = SessionModelControl.parseStateModelRef(state) ?? fallbackModelId
-      // 同次 get_state 读回 thinkingLevel（pi 生效思考等级），用于 sidecar 持久化
-      const thinkingLevel = typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : fallbackThinkingLevel
-      return { modelId, thinkingLevel }
+      return SessionModelControl.parseStateModelRef(state) ?? fallbackModelId
     } catch (e) {
       // 读回失败保持请求值（下游 markDirty 防抖重拉 get_state 仍会收敛到权威值）
       console.warn(`[session-service] switchModel get_state read-back failed for ${sessionId}, keeping requested model: ${toErrorMessage(e)}`)
-      return { modelId: fallbackModelId, thinkingLevel: fallbackThinkingLevel }
+      return fallbackModelId
     }
   }
 
@@ -182,15 +165,8 @@ export class SessionModelControl {
     // 见 switchModel）。值未变时 pi 不发事件、不写 entry（PS-04），此直写是唯一同步点；
     // 值变场景事件随后到达，直写保证防抖窗口内的即时性。
     if (session) session.thinkingLevel = effective
-    // 持久化 model binding sidecar（setThinkingLevel 生效后写入 .model.json）。
-    if (session?.sessionFilePath) {
-      try {
-        persistModelBinding(session.sessionFilePath, session.modelId, effective)
-      } catch (e) {
-        // best-effort：sidecar 写失败不阻塞 setThinkingLevel 主链路——重启后 get_state 读回自愈
-        console.warn(`[session-service] persistModelBinding failed after setThinkingLevel: ${toErrorMessage(e)}`)
-      }
-    }
+    // 持久层唯一写方 = pi（thinking_level_change entry 落 JSONL，缓存治理 U8a W2 写点退役），
+    // 本方法只负责内存直写投影。
     return effective
   }
 }

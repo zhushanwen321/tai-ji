@@ -1,4 +1,5 @@
-import { defineConfig, defaultExclude } from 'vitest/config'
+import { defaultExclude } from 'vitest/config'
+import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 
 /**
  * [HISTORICAL] 2026-08-20 PR #185 pre-merge 三连 FAIL 根因与分池方案：
@@ -26,6 +27,11 @@ import { defineConfig, defaultExclude } from 'vitest/config'
  * broadcast-getstate / completion-backflow / pi-protocol-contract / send-queue-e2e /
  * session-manager-full-e2e / tool-call-index / usage-queue-commands-invalidation /
  * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组。
+ *
+ * 防线（globalSetup env 钉死 + fs-guard 切面）经 test-guard/factory 顶层注入；
+ * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
+ * 故各 project 经 guardProjectSetup 显式挂 FS_GUARD_PATH（globalSetup 无此问题，root 级
+ * 对所有 project 生效）。新 project 漏挂由 scripts/check-vitest-guard.mjs 第 5 条拦截。
  */
 const REAL_PI_TESTS = [
   // L2.5 二批（2026-09-15）后当前为空：全部「真实 pi + 真实 LLM turn」equivalence 用例已
@@ -34,49 +40,29 @@ const REAL_PI_TESTS = [
   // 的真实轨 describe 已于 2026-09 测试舰队审查删除，纯 mock 文件的过期登记已清）。
 ] as const
 
-export default defineConfig({
+export default taijiTestConfig({
   test: {
     // cw 验收标记行 reporter：e2e-mock 型验收（如 trace-runtime A31）要求 stdout 含
     // `<验收id> PASS|FAIL` 标记行；--reporter=json 时自静默（vitest 型验收 stdout 须纯 JSON）。
     // root 级 reporters 对 projects 分池（main/real-pi 两组）的所有测试输出生效。
     reporters: ['default', './test/cw-acceptance-markers-reporter.ts', 'junit'],
     outputFile: { junit: './test-results/vitest-junit.xml' },
-    // [HISTORICAL] globalSetup 在 vitest 启动最早期把 TAIJI_AGENT_DATA_DIR 指向 tmp 目录，
-    // 保证所有 store 的 eager 初始化（如 discovery-store.ts:33 `createDiscoveryStore(getDiscoveryPath())`）
-    // 不指向用户真实数据目录 ~/.taiji。
-    //
-    // 背景：2026-07-26 事故，pi-provider-store.test.ts beforeEach 漏调 setDiscoveryPath，
-    // setSkillPaths 经模块级 discoveryStore 写真实数据目录下 agent/discovery.json，
-    // 写入的是 tmp 路径（测试结束 rm 后失效），用户重启 app 发现 skill 扫描路径「凭空消失」。
-    // 此 globalSetup 是结构性兜底——下次有人漏调 set*Path 时，eager 初始化也不会污染用户数据。
-    // projects 模式下 root 级 globalSetup 经 getRootProject() 仍在所有项目前执行一次（vitest 源码
-    // initializeGlobalSetup 强制纳入 core project）。
-    globalSetup: ['./test/global-setup.ts'],
-    // [HISTORICAL] 2026-09-02 会话丢失事故第二层防线：worker 级 fs-guard 切面——破坏性
-    // fs 操作（写/删/移动）只允许落在白名单（os.tmpdir() / $TAIJI_AGENT_DATA_DIR /
-    // ~/.taiji-dev），真实 ~/.taiji 无条件拒绝。注意：vitest projects 模式下
-    // root 级 setupFiles **不**被 project 继承（与 globalSetup 不同——后者经 getRootProject
-    // 对所有项目生效，前者实测 setup 0ms 完全不执行），必须逐 project 显式挂载；
-    // 幂等 patch，同 worker 多文件重复执行 setupFiles 无副作用。
-    setupFiles: ['./test/fs-guard.ts'],
     projects: [
       {
         // 主组：除真实 pi 用例外的全部测试，保持默认满并行（与分池前行为一致）
-        test: {
+        test: guardProjectSetup({
           name: 'main',
           include: ['test/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.ts'],
           exclude: [...defaultExclude, ...REAL_PI_TESTS],
-          setupFiles: ['./test/fs-guard.ts'],
-        },
+        }),
       },
       {
         // 真实 pi 组：文件间串行（maxWorkers 解析为 1），且在主组完整结束后才开跑（见文件头调度契约）
-        test: {
+        test: guardProjectSetup({
           name: 'real-pi',
           include: [...REAL_PI_TESTS],
           fileParallelism: false,
-          setupFiles: ['./test/fs-guard.ts'],
-        },
+        }),
       },
     ],
   },

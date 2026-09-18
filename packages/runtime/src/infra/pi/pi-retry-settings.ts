@@ -1,5 +1,5 @@
 /**
- * PiRetrySettings — ILlmRetrySettings port 的 infra 实现（设计 docs/design/llm-retry-settings.md）。
+ * PiRetrySettings — ILlmRetrySettings port 的 infra 实现。
  *
  * settings.json retry 域的读写全部经 pi-settings-store（唯一读写层 + 跨进程锁 + retry
  * 字段域 scope merge，D1a/D1b/D2）；读侧缺省合并/写侧 D3 嵌套 merge 的纯函数在

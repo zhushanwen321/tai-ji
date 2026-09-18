@@ -1,7 +1,6 @@
 /**
  * u7b-open-manual-dir 验收测试：gateway update-handlers 的 update:openManualDir
- * （设计 docs/design/update-network-resilience.md §3.3 D9「设置页手动通道：首次点击
- * 先 mkdirSync 确保目录存在，再 shell.openPath(manualDir)」）。
+ * （设置页手动通道：首次点击先 mkdirSync 确保目录存在，再 shell.openPath(manualDir)）。
  *
  * 覆盖：
  *   - 首次点击幂等建目录：目录不存在 → mkdirSync(recursive) 创建 + openPath 打开

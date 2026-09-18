@@ -12,8 +12,11 @@
     // live≡reload 等价性验证，rootDir "./src" 与跨包源 import 冲突；抬到 packages 层同时满足
     // TS2209 的包根消歧（package.json exports map 解析需要 rootDir）。
     // skipLibCheck 对齐 subagent-core：跳过依赖包 .d.ts 内部错误（undici-types 相对路径解析等）。
+    // allowImportingTsExtensions：跨包直读的 runtime/subagent-core/engine-sdk 源码普遍以
+    // .ts 后缀 import（subagent-core 自己的 tsconfig 同开此 flag），noEmit 满足其使用前置。
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "rootDir": "../../",
     "outDir": "dist"
   },

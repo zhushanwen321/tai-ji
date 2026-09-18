@@ -20,13 +20,19 @@
  * 行为等价性：
  * - 状态更新顺序与原 applyChunk 逐 case 一致（handler 内先更新 chunk 状态，后收口，
  *   对应原 useChat 先 appendAssistantChunk 再 switch 翻 flag 的顺序）。
- * - 收口时机：message_start 挂载超时兜底 timer、complete/error/stream_error 调
- *   finalizeSession 收口（status 由 streaming 派生 isGenerating，非手动 flag）。
+ * - 收口时机：complete/error/stream_error 调 finalizeSession 收口
+ *   （status 由 streaming 派生 isGenerating，非手动 flag）。
+ * - [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）] 消息类 handler
+ *   （构造点 = event-adapter tool-call-start / tool-call-end / handleMessageEnd）在 entry
+ *   缺失或形态不符时静默 return 是有意取舍，不加 warn：正常流经 event-adapter 构造的帧
+ *   不会产生坏 entry（构造侧已守卫）；单帧异常静默丢弃换取异常帧不断流（主对话流不因
+ *   协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，排障入口 = 对齐
+ *   event-adapter（runtime event-adapter.ts）对应构造点日志。坏帧行为由 effects.test.ts
+ *   坏帧用例锁定（不抛错、零副作用）。各 handler 只留一行指针。
  *
  * 设计：dispatchMessageEvent(ctx, sessionId, msg) 查 messageEffects 表执行 handler；
  * 非 message.* 或未注册 type 直接 no-op。MessageEffectContext 含 store refs
- * 上下文 + finalizeSession/clearPendingSend/armStreamingTimer 回调（由 store 注入，
- * 完成收口与超时兜底）。
+ * 上下文 + finalizeSession/clearPendingSend 回调（由 store 注入，完成收口）。
  *
  * [W21 data-source-governance] entry 形态实时 feed：message.message_end /
  * message.tool_call_start / message.tool_call_end 的 handler 输入从「直译事件 payload」
@@ -56,7 +62,6 @@ import { truncateEntryToolOutput } from '../apply-entry-utils'
 import type { RetryState, QueueState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
-import { recoverPrematureTimeoutMessages } from './complete-recovery'
 import {
   readString,
   readNumber,
@@ -69,7 +74,7 @@ import {
   readChangeSetStatus,
 } from '../readers'
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
-import { commitMessages, terminalMessagePatch } from '../mutations'
+import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
@@ -360,12 +365,7 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收口 + isGenerating 派生）──
   'message.message_start': (ctx, sid, payload) => {
-    const { messages, queueStates, clearPendingSend, armStreamingTimer, reconcilePending, clearPrematureTimeoutIds } = ctx
-    // [premature-timeout §5.2 D2 时机③] 新 turn 开始 → 旧 turn 的 timeout 打标作废
-    //（防跨 turn 错配：turn A 超时打标未恢复 → 用户发新 prompt → 本帧到达 → 清 A 标，
-    // turn B 的 complete 不命中任何标记，无误恢复旧气泡——设计 §5.2 反例重演第 2 条）。
-    // 快照与实体字段的清扫都在 clearPrematureTimeoutIds 内闭环（streaming-state-machine）。
-    clearPrematureTimeoutIds(sid)
+    const { messages, queueStates, clearPendingSend, reconcilePending } = ctx
     // G-023: message_start 清 QueueBubble。只清 queueStates 显示态——pending→complete 的
     // 转换完全由 queue_update 的 countDrained 精确驱动（pi 保证 queue_update(drain) 先于
     // message_start 到达，见 agent-session.ts:515-536 注释 "remove it BEFORE emitting"）。
@@ -373,7 +373,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 晚于 message_start 乱序」——pi 同步保证不会乱序，且 abort 清空队列时强转会把
     // 「被丢弃」误标成「已投递」。已删除。
     //
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4 + §2 F4]
+    // [steer-bubble u2 / D4 + §2 F4]
     // 无条件清改**条件清**（F4 修复）：先读快照深度（steering + followUp 数组长度和），
     // 深度 == 0（无条目或数组全空）→ 删条目（QueueBubble 随深度归零消失，现状语义）；
     // 深度 > 0 → **保留**——混合提交常态路径下 steering 已 drain、followUp 待 turn 边界
@@ -405,8 +405,6 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     ])
     // 空窗结束：clearPendingSend（接管 dispatching 语义）
     clearPendingSend(sid)
-    // 挂载 streaming 超时兜底 timer：防 message.complete 永不到的 pi 静默卡死。
-    armStreamingTimer(sid)
   },
 
   'message.complete': (ctx, sid, payload) => {
@@ -417,7 +415,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
-    // 消费双通道（SSOT docs/architecture/conversation-error-visibility.md §3.3.2）：
+    // 消费双通道：
     // 有 streaming 气泡 → errorMessage 写最后一条 assistant 的 Message.error 字段（追加形态，
     // content 崩溃前正文不动）；无 streaming 气泡 → 追加纯 error 气泡（errorMessage 即全文）。
     const errorMessage = readString(payload, 'errorMessage')
@@ -441,30 +439,26 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const next = prev.map((m, i) => {
       if (m.role !== 'assistant' || m.status !== 'streaming') return m
       changed = true
-      // 终态字段 patch 单源（与 complete-recovery 恢复分支同语义，S4-A6）：
+      // 终态字段 patch 单源（S4-A6）：
       // usage/error/content 只作用于末位 assistant，见 terminalMessagePatch 注释
       return terminalMessagePatch(m, i, { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload })
     })
-    // ── [premature-timeout §5.2 D2] 误判收口自愈：恢复分支（实现见 ./complete-recovery.ts）──
     if (changed) commitMessages(messages, sid, next)
-    const recovered = recoverPrematureTimeoutMessages({
-      messages, sessionId: sid, base: changed ? next : prev, stopReason, errorMessage, finalContent, payload, lastAssistantIdx,
-      takePrematureTimeoutIds: ctx.takePrematureTimeoutIds,
-    })
     // 秒败 turn（message_start 丢失/未广播）无 streaming 气泡可收口：错误信息必须以纯 error
     // 气泡落进聊天流，否则 complete 事件被消费后错误只剩 stopReason 标志，用户不可见。
-    // [premature-timeout] 恢复命中时抑制追加——errorMessage 已按追加形态双通道写进命中实体，
-    // 再追加纯 error 气泡会重复展示同一错误。
-    if (isErrorStop && errorMessage && !changed && !recovered) {
+    // errorMessage 缺失（pi extras.errorMessage 可 undefined）走 error reason 兜底文案——
+    // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
+    if (isErrorStop && !changed) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorMessage, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收口」分支。
     const reason: FinalizeReason = isErrorStop ? 'error' : (stopReason === 'aborted' ? 'aborted' : 'normal')
-    // [steer-bubble u2 / docs/design/steer-followup-user-bubble-display.md D4] abort 只清
+    // [steer-bubble u2 / D4] abort 只清
     // inflight（在 finalizeSession 之外显式做——finalizeSession 是通用收口，normal/error
     // 不清）。D4 初版按「pi abort 确定性清队列」假设做三项清，Gate B 实测（2026-08-30）
     // 证伪：pi abort() 不调 clearQueue 也不 emit queue_update，队列跨 abort 存活并在下一
@@ -491,9 +485,10 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'error', errorText)
     // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
     if (!hasStreaming) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: errorText, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
       ])
     }
   },
@@ -508,9 +503,10 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'stream_error', streamErrContent)
     // 无前置 streaming entity 时需手动追加
     if (!hasStreaming) {
+      // [M2 形态统一] 错误文本只住 error 字段，content 空
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: streamErrContent, status: 'error', timestamp: Date.now() },
+        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
       ])
     }
   },
@@ -591,7 +587,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   'message.tool_call_start': (ctx, sid, payload) => {
     // [D-010 sealed]
     // [W21] 输入从直译平铺 payload 改为 toolCall entry 形态（event-adapter 翻译时重构，
-    // interpreter 补 contentIndex/messageId 锚点）。entry 缺失（异常帧）降级丢弃；
+    // interpreter 补 contentIndex/messageId 锚点）。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-start]
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
     if (entry === undefined) return
@@ -622,6 +619,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // toolResult entry 同构）。overlay 收口（streaming 气泡上的 running toolCall → 终态）
     // 语义保留；权威回填经 ctx.applyEntryFrame 喂 reducer（先于 overlay 早 return——
     // ref 无 owner 时 reducer 喂入照常，ref 收敛归 W22）。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-end]
     const entry = payload['entry'] as PiMessageEntry | undefined
     if (entry === undefined || entry.type !== 'message') return
     // 状态类全走 reducer（w21）：toolResult entry 喂 per-session reducer state
@@ -670,7 +668,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   // ── [W21] message_end —— 重构 entry 喂 reducer（实时 feed 权威载体，reducer 薄封装）──
   'message.message_end': (ctx, sid, payload) => {
     const entry = payload['entry']
-    // entry 形态守卫：message entry（type:'message'）才喂（协议契约，异常帧降级丢弃）
+    // entry 形态守卫：message entry（type:'message'）才喂。
+    // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter handleMessageEnd]
     if (typeof entry !== 'object' || entry === null || (entry as { type?: unknown }).type !== 'message') return
     // custom role 去双计：pi 对同一条 custom message 双发 message_start + message_end（同一
     // message 对象——agent-loop.ts:112 prompt 路径 / agent-session sendCustomMessage no-trigger

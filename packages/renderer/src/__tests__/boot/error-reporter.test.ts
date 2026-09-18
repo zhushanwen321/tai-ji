@@ -1,5 +1,5 @@
 /**
- * boot/error-reporter 三件套单测（crash-resilience u2-renderer-errors 验收条款）。
+ * boot/error-reporter 三件套单测（u2-renderer-errors 验收条款）。
  *
  * 覆盖（三视角）：
  * - 使用者黑盒（DOM 断言）：mount 含「正常子组件 + 渲染即抛子组件」的宿主——mount 不抛、

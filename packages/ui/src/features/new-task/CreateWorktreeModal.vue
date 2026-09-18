@@ -30,7 +30,8 @@ import { INVALID_BRANCH_REGEX } from '@taiji/shared'
 
 interface WorktreeError { code?: WorktreeErrorCode; message?: string; cwd?: string; exitCode?: number; stderr?: string }
 type ModalPhase = 'form' | 'progress' | 'success' | 'error' | 'exists'
-type RepoMode = 'bare-workspace' | 'plain-repo' | 'not-repo'
+/** detect-failed：detectWorkspace 抛错（RPC/IO 故障），语义上 ≠「不是 Git 仓库」 */
+type RepoMode = 'bare-workspace' | 'plain-repo' | 'not-repo' | 'detect-failed'
 type LocationMode = 'workspace' | 'repo-dir' | 'dedicated-dir'
 interface BranchItem { name: string; group: 'quick' | 'remote' | 'local' }
 
@@ -80,6 +81,11 @@ const dirPreview = computed(() => { const n = trimmedName.value; return n ? n.re
 const isBareMode = computed(() => repoMode.value === 'bare-workspace')
 const isPlainRepoMode = computed(() => repoMode.value === 'plain-repo')
 const isNotRepoMode = computed(() => repoMode.value === 'not-repo')
+const isDetectFailedMode = computed(() => repoMode.value === 'detect-failed')
+/** 检测成功拿到仓库（bare/plain）——分支加载与创建位置radio的准入条件 */
+const isRepoDetected = computed(() => isBareMode.value || isPlainRepoMode.value)
+/** 仓库不可用（确认不是 repo 或检测失败）：禁用依赖 repo 语义的表单控件 */
+const isRepoUnavailable = computed(() => isNotRepoMode.value || isDetectFailedMode.value)
 const dedicatedDirPreview = computed(() => `~/worktrees/${dirPreview.value || '...'}`)
 
 const allBranchItems = computed<BranchItem[]>(() => {
@@ -117,11 +123,13 @@ onMounted(async () => {
     defaultBranch.value = result.defaultBranch || 'main'
     baseBranch.value = `origin/${defaultBranch.value}`
     locationMode.value = result.mode === 'bare-workspace' ? 'workspace' : 'dedicated-dir'
-  } catch {
-    repoMode.value = 'not-repo'
+  } catch (e) {
+    // 检测失败 ≠ 不是 Git 仓库：归 not-repo 会误导用户去换目录——留痕 + 独立失败态
+    console.warn('[CreateWorktreeModal] detectWorkspace failed:', e)
+    repoMode.value = 'detect-failed'
   } finally { repoDetectLoading.value = false }
   const repoCwd = repoPath.value || cwd
-  if (repoMode.value !== 'not-repo') {
+  if (isRepoDetected.value) {
     try {
       const branches = await listBranches(repoCwd)
       if (cancelled.value) return
@@ -183,14 +191,22 @@ async function runCreate(branch: string, base: string): Promise<void> {
   try {
     const result = await createWorktree({ branch, baseBranch: base, locationMode: locationMode.value, workspaceHint: repoPath.value || pendingCwd.value || undefined })
     if (cancelled.value) return
-    phase.value = 'success'; scheduleSuccessEmit(result.cwd)
+    // 创建成功 ⇒ chip 切换同刻发生：success 事件立即 emit（不挂定时器），父层据此回灌
+    // pendingCwd。2s 成功屏只承担展示 + 延迟关闭（scheduleCloseEmit）——窗口内用户关 modal
+    // （Esc/点外/X/切 session）最多丢「延迟关闭」，不会丢切换。
+    // [HISTORICAL] 旧链路 success emit 挂在 2s 定时器上且卸载即取消，窗口内关 modal
+    // → 切换静默丢失（chip 留旧目录，首发 create 也落旧目录）。
+    phase.value = 'success'
+    emit('success', { cwd: result.cwd })
+    scheduleCloseEmit()
   } catch (e) {
     if (cancelled.value) return
     const err = (e as WorktreeError) ?? {}; lastError.value = err
     phase.value = err.code === 'WORKTREE_EXISTS' ? 'exists' : 'error'
   }
 }
-function scheduleSuccessEmit(cwd: string): void { clearSuccessTimer(); successTimer.value = setTimeout(() => { emit('success', { cwd }); emit('close') }, SUCCESS_EMIT_DELAY_MS) }
+/** 成功屏展示窗后仅负责关闭（切换已在 success 事件同步完成）。 */
+function scheduleCloseEmit(): void { clearSuccessTimer(); successTimer.value = setTimeout(() => emit('close'), SUCCESS_EMIT_DELAY_MS) }
 function clearSuccessTimer(): void { if (successTimer.value != null) { clearTimeout(successTimer.value); successTimer.value = null } }
 async function onRetry(): Promise<void> { await runCreate(trimmedName.value, baseBranch.value) }
 function onCleanup(): void { emit('close') }
@@ -225,6 +241,10 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
             <span class="flex-1 truncate font-mono text-[13px] text-neutral-fg">{{ repoPath }}</span>
             <Button type="button" variant="ghost" data-testid="repo-change-btn" class="h-auto shrink-0 px-2 py-0.5 text-[12px] text-accent hover:text-accent" @click="onChangeRepo">{{ t('newTask.createWorktree.repoChange') }}</Button>
           </div>
+          <div v-else-if="isDetectFailedMode" data-testid="repo-detect-failed" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 opacity-60">
+            <AlertTriangle class="size-4 shrink-0 text-warn" />
+            <span class="text-[13px] text-neutral-mid">{{ t('newTask.createWorktree.repoDetectFailed') }}</span>
+          </div>
           <div v-else data-testid="repo-not-repo" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 opacity-60">
             <AlertTriangle class="size-4 shrink-0 text-warn" />
             <span class="text-[13px] text-neutral-mid">{{ t('newTask.createWorktree.repoNotRepo') }}</span>
@@ -234,7 +254,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
         <!-- 分支名 -->
         <div class="space-y-1.5">
           <Label for="worktree-branch-input">{{ t('newTask.createWorktree.branchLabel') }}</Label>
-          <Input id="worktree-branch-input" ref="inputRef" v-model="branchName" data-testid="worktree-branch-input" :placeholder="t('newTask.createWorktree.branchPlaceholder')" autocomplete="off" :class="showFormatError ? '!border-destructive' : ''" :disabled="isNotRepoMode" />
+          <Input id="worktree-branch-input" ref="inputRef" v-model="branchName" data-testid="worktree-branch-input" :placeholder="t('newTask.createWorktree.branchPlaceholder')" autocomplete="off" :class="showFormatError ? '!border-destructive' : ''" :disabled="isRepoUnavailable" />
           <p v-if="showFormatError" data-testid="worktree-branch-error" class="text-[12px] text-danger">{{ t('newTask.createWorktree.branchValidation') }}</p>
         </div>
 
@@ -249,7 +269,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
           <p class="text-[12px] text-neutral-dim">{{ t('newTask.createWorktree.baseLabel') }}</p>
           <Popover :open="basePopoverOpen" @update:open="onBasePopoverOpenChange">
             <PopoverTrigger as-child>
-              <Button type="button" variant="ghost" data-testid="worktree-base-trigger" class="h-auto w-full justify-between rounded-md border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-neutral-fg hover:bg-surface-hover" :disabled="isNotRepoMode || branchesLoading">
+              <Button type="button" variant="ghost" data-testid="worktree-base-trigger" class="h-auto w-full justify-between rounded-md border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-neutral-fg hover:bg-surface-hover" :disabled="isRepoUnavailable || branchesLoading">
                 <span class="flex items-center gap-2 truncate"><GitBranch class="size-3.5 shrink-0 text-neutral-dim" /><span class="truncate">{{ baseDisplayLabel }}</span></span>
                 <ChevronDown class="size-3.5 shrink-0 text-neutral-dim" />
               </Button>

@@ -2,7 +2,7 @@
 /**
  * validate-constraints.mjs — docs/constraints.json（SSOT）结构校验
  *
- * [HISTORICAL] 前身 render-constraints.mjs 还生成 docs/constraints.md 人读视图；
+ * [HISTORICAL] 前身 render-constraints.mjs 还生成人读视图 constraints.md；
  * 2026-09-13 裁决删除人读视图（json 本身即人读，生成物徒增一份 json/md 同步面），
  * 本脚本收敛为纯结构校验。pre-commit 在 constraints.json 变更时触发。
  *

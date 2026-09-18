@@ -1,5 +1,5 @@
 /**
- * relay 子进程注册表（E 方案，subagent-realtime-channel.md §3.1/§4.2/§3.3）。
+ * relay 子进程注册表。
  *
  * 职责：socket 连接 → 握手帧校验（版本协商 + 归属校验）→ spawn 真实 pi（argv/env/cwd
  * 全从握手帧，env 剥离 TAIJI_SUBAGENT_RELAY_* 防孙进程嵌套误导）→ 双向字节泵（down 帧 →

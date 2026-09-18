@@ -425,6 +425,43 @@ describe("NotifyLedger — 四步生命周期（D4/D5）", () => {
     ledger.dispose();
   });
 
+  it("② isIdle 探测异常 ≠ busy（A11 读失败分通道）：挂回 pending + warn 留痕", () => {
+    // 用例级 logCalls sink（覆盖文件级 no-op sink）——探测异常 warn 是本用例
+    // 唯一日志（record 幂等/投递路径未触发其他 warn）。
+    const logCalls: Array<{ level: string; component: string; message: string; data?: unknown }> = [];
+    configureCore({
+      dataRoot: () => "/fake-notify-ledger-data-root",
+      log: (level, component, message, data) => {
+        logCalls.push({ level, component, message, data });
+      },
+    });
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("sa-probe", "content", { notifyId: "sa-probe" });
+    mock.host.isIdle = () => {
+      throw new Error("session state probe failed (mock)");
+    };
+    // 探测异常：放弃本次投递（消息挂回 pending 等下一边沿/看门狗）但不抛错
+    expect(() => ledger.attemptDeliver()).not.toThrow();
+    expect(mock.sentMessages).toHaveLength(0);
+    expect(ledger.pendingCount()).toBe(1);
+    // 异常与 busy 分通道：busy 挂回零日志（上一用例），异常 warn 留痕可归因
+    const warns = logCalls.filter((l) => l.level === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.message).toContain("isIdle probe failed");
+
+    // 探测恢复后下一边沿照常送达（deferred ≠ 丢失）——重绑探测实现（此刻主 agent
+    // 已空闲，setIdle(true) 只翻内部 ref，被覆盖的 host.isIdle 闭包需显式恢复）。
+    mock.setIdle(true);
+    mock.host.isIdle = () => true;
+    fireSettled(mock);
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(ledger.pendingCount()).toBe(0);
+
+    ledger.dispose();
+  });
+
   it("②→③ 回执销账：送达 entry 出现后下一 settled 边沿追加 ack entry，差集为空", () => {
     const mock = makeLedgerHost();
     const ledger = createNotifyLedger(mock.host);
@@ -1094,6 +1131,185 @@ describe("MF-5: settled 监听单例化（多次 bind 物理监听数不增）",
   });
 });
 
+// ─── [u9] per-entry 送达通道（NotifyRecordOptions.deliveryCustomType） ──
+//
+// notifyDone 账本化（C-ext-19 迁移）的机制面：外部结果语义通知携带自己的送达
+// customType（如 workflow 收口通知的 "workflow-result"——runtime W18 失效信号
+// 按该类型识别），core 对具体值不可知（测试用任意自定义通道字符串）。
+
+describe("NotifyLedger — per-entry 送达通道（u9 deliveryCustomType）", () => {
+  beforeEach(() => {
+    _resetNotifyLedgerForTest();
+  });
+  afterEach(() => {
+    _resetNotifyLedgerForTest();
+  });
+
+  it("record 带 deliveryCustomType：送达 customType 用指定通道（单条形态 details 原样）", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("wf-done:run-1", "content", { notifyId: "wf-done:run-1", runId: "run-1" }, {
+      deliveryCustomType: "test-external-channel",
+    });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]?.customType).toBe("test-external-channel");
+    // details = record 本体（不因通道扩展变形）
+    expect(mock.sentMessages[0]?.details).toEqual({ notifyId: "wf-done:run-1", runId: "run-1" });
+
+    ledger.dispose();
+  });
+
+  it("混合 pending 分组投递：默认通道组合并、外部通道组逐条，互不混批", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    // 混合入账：默认通道 2 条（合并面）+ 外部通道 2 条（逐条面）
+    ledger.record("sa-1", "c-sa-1", { notifyId: "sa-1" });
+    ledger.record("wf-1", "c-wf-1", { notifyId: "wf-1" }, { deliveryCustomType: "test-external-channel" });
+    ledger.record("sa-2", "c-sa-2", { notifyId: "sa-2" });
+    ledger.record("wf-2", "c-wf-2", { notifyId: "wf-2" }, { deliveryCustomType: "test-external-channel" });
+    ledger.attemptDeliver();
+
+    // 默认通道组合并成 1 条（既有 D5 行为）+ 外部通道组逐条 2 条 = 共 3 次投递
+    expect(mock.sentMessages).toHaveLength(3);
+    const merged = mock.sentMessages.find((m) => m.customType === NOTIFY_CUSTOM_TYPE);
+    expect(merged?.content).toBe("c-sa-1\n\n---\n\nc-sa-2");
+    expect((merged?.details as { batch: boolean }).batch).toBe(true);
+    const externals = mock.sentMessages.filter((m) => m.customType === "test-external-channel");
+    expect(externals.map((m) => m.content)).toEqual(["c-wf-1", "c-wf-2"]);
+    // 逐条形态：details 保持 record 原样（无 batch 包装）
+    for (const msg of externals) {
+      expect((msg.details as { batch?: boolean }).batch).toBeUndefined();
+    }
+    // 全部条目标 sent
+    expect(ledger.pendingCount()).toBe(0);
+    expect(ledger.waitingReceiptCount()).toBe(4);
+
+    ledger.dispose();
+  });
+
+  it("③ 回执销账：外部通道 custom_message entry 命中 details.notifyId → ack", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("wf-ack-1", "content", { notifyId: "wf-ack-1" }, { deliveryCustomType: "test-external-channel" });
+    ledger.attemptDeliver();
+    expect(unsettledDiff(mock)).toEqual(new Set(["wf-ack-1"]));
+
+    // settled 边沿：回执扫描接受域含外部通道 → 销账
+    fireSettled(mock);
+    expect(unsettledDiff(mock)).toEqual(new Set());
+    expect(mock.entries.some((e) => e.customType === NOTIFY_ACK_CUSTOM_TYPE)).toBe(true);
+
+    ledger.dispose();
+  });
+
+  it("③ 通道域外的 custom_message 撞键不误销账（回执接受域边界）", () => {
+    const mock = makeLedgerHost();
+    // 关闭送达自动落盘：隔离出「正确回执缺席」的纯域外撞键场景
+    mock.deliverPersists.value = false;
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("wf-iso", "content", { notifyId: "wf-iso" }, { deliveryCustomType: "test-external-channel" });
+    ledger.attemptDeliver();
+
+    // 无关通道的 custom_message details 携带同 notifyId——不在接受域，不销账
+    mock.sessionEntries.push({
+      type: "custom_message",
+      customType: "unrelated-channel",
+      content: "impostor",
+      display: true,
+      details: { notifyId: "wf-iso" },
+    });
+    fireSettled(mock);
+    expect(unsettledDiff(mock)).toEqual(new Set(["wf-iso"]));
+    expect(ledger.waitingReceiptCount()).toBe(1);
+
+    // 正确通道的回执到达后照常销账
+    mock.sessionEntries.push({
+      type: "custom_message",
+      customType: "test-external-channel",
+      content: "real",
+      display: true,
+      details: { notifyId: "wf-iso" },
+    });
+    fireSettled(mock);
+    expect(unsettledDiff(mock)).toEqual(new Set());
+
+    ledger.dispose();
+  });
+
+  it("④ 恢复重放保留送达通道：entry data 带 deliveryCustomType → 重放 customType 不回退默认", () => {
+    const mock = makeLedgerHost();
+    // 模拟重启前落盘：外部通道条目入账未投（v1 entry + deliveryCustomType）
+    mock.sessionEntries.push({
+      type: "custom",
+      customType: NOTIFY_LEDGER_CUSTOM_TYPE,
+      data: {
+        v: 1,
+        notifyId: "wf-replay",
+        content: "c-replay",
+        record: { notifyId: "wf-replay" },
+        deliveryCustomType: "test-external-channel",
+      },
+    });
+
+    const ledger = createNotifyLedger(mock.host);
+    expect(ledger.recoverFromSession()).toBe(1);
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]?.customType).toBe("test-external-channel");
+    expect(mock.sentMessages[0]?.details).toMatchObject({ notifyId: "wf-replay" });
+
+    ledger.dispose();
+  });
+
+  it("恢复对存量 entry 零迁移：无 deliveryCustomType 的旧格式 entry 按默认通道重放", () => {
+    const mock = makeLedgerHost();
+    mock.sessionEntries.push({
+      type: "custom",
+      customType: NOTIFY_LEDGER_CUSTOM_TYPE,
+      data: { v: 1, notifyId: "s-legacy", content: "c-legacy", record: { notifyId: "s-legacy" } },
+    });
+
+    const ledger = createNotifyLedger(mock.host);
+    expect(ledger.recoverFromSession()).toBe(1);
+    expect(mock.sentMessages[0]?.customType).toBe(NOTIFY_CUSTOM_TYPE);
+
+    ledger.dispose();
+  });
+
+  it("compaction 补写保留 deliveryCustomType（降级重写不丢通道）", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("wf-cp", "content", { notifyId: "wf-cp" }, { deliveryCustomType: "test-external-channel" });
+
+    // compaction 清掉全部 entry → 按内存态补写
+    mock.sessionEntries.length = 0;
+    expect(ledger.compactionCheck()).toBe(1);
+
+    const rewritten = mock.entries.find((e) => e.customType === NOTIFY_LEDGER_CUSTOM_TYPE);
+    expect(rewritten?.data?.["deliveryCustomType"]).toBe("test-external-channel");
+
+    ledger.dispose();
+  });
+
+  it("默认行为零变化：无 options 的 record 走 NOTIFY_CUSTOM_TYPE 通道（回归锚）", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("sa-default", "content", { notifyId: "sa-default" });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages[0]?.customType).toBe(NOTIFY_CUSTOM_TYPE);
+
+    ledger.dispose();
+  });
+});
+
 // ─── 常量等值钉住（notify-ledger 与 notifier/渲染器共用字符串） ──
 
 describe("notify-ledger 常量锚", () => {
@@ -1313,5 +1529,82 @@ describe("NotifyLedger — T4③ 重投止损（PS-6）", () => {
     fireSettled(mock2);
     expect(mock2.sentMessages).toHaveLength(0);
     ledger2.dispose();
+  });
+});
+
+describe("NotifyLedger — U9 嵌套批展平（flattenBatchItems 恢复，fd3e8ef1f 无痕回退的回归锁）", () => {
+  // 两条 pending 同边沿合并时 mergeItems 产 {batch:true, items}；record 本身又是
+  // wrapper 形态（{batch:true, items}）即嵌套——下游 parseBgNotifyDetails 只解一层，
+  // 全 wrapper 时整批记录静默消失。wrapper 生产方（sync collect 批）虽已退役，存量
+  // 未销账 entry 重放 + 同边沿合并仍可触发，本组锁定展平一层 + 成员补 wrapper
+  // notifyId（回执销账链）两不变量。
+
+  it("两条 wrapper pending 同边沿合并：载荷单层（无嵌套 batch）+ 展平成员带各自批 notifyId", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }] });
+    ledger.record("batch-2", "B finished", { batch: true, items: [{ id: "sa-b", status: "closed" }] });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1); // 默认通道合批为一条注入
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [
+        { id: "sa-a", status: "closed", notifyId: "batch-1" },
+        { id: "sa-b", status: "closed", notifyId: "batch-2" },
+      ],
+    });
+    ledger.dispose();
+  });
+
+  it("wrapper 与单条混合合并：单条原样保留，wrapper 展平补键", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }, { id: "sa-a2", status: "failed" }] });
+    ledger.record("sa-plain", "C finished", { id: "sa-c", status: "closed", agent: "worker" });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [
+        { id: "sa-a", status: "closed", notifyId: "batch-1" },
+        { id: "sa-a2", status: "failed", notifyId: "batch-1" },
+        { id: "sa-c", status: "closed", agent: "worker" },
+      ],
+    });
+    ledger.dispose();
+  });
+
+  it("展平补键保回执销账链：合并送达的 custom_message entry 经 items[].notifyId 双批全销账", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-1", "A finished", { batch: true, items: [{ id: "sa-a", status: "closed" }] });
+    ledger.record("batch-2", "B finished", { batch: true, items: [{ id: "sa-b", status: "closed" }] });
+    fireSettled(mock); // 边沿投递 + 送达落盘（deliverPersists 默认 true）
+
+    ledger.checkReceipts();
+    expect(ledger.waitingReceiptCount()).toBe(0); // 两批整体销账（无 120s 重投/假放弃）
+    expect(unsettledDiff(mock)).toEqual(new Set());
+    ledger.dispose();
+  });
+
+  it("非法 wrapper 形态（items 非数组）原样保留不炸", () => {
+    const mock = makeLedgerHost();
+    const ledger = createNotifyLedger(mock.host);
+
+    ledger.record("batch-bad", "bad wrapper", { batch: true, items: "not-an-array" });
+    ledger.record("sa-next", "plain", { id: "sa-d", status: "closed" });
+    ledger.attemptDeliver();
+
+    expect(mock.sentMessages).toHaveLength(1);
+    expect(mock.sentMessages[0]!.details).toEqual({
+      batch: true,
+      items: [{ batch: true, items: "not-an-array" }, { id: "sa-d", status: "closed" }],
+    });
+    ledger.dispose();
   });
 });

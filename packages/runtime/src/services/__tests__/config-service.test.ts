@@ -209,3 +209,13 @@ describe('ConfigService.checkEnvVars（I3，wave-env-check TC2）', () => {
 //   A1-3（providers.json 标注 + $/非空/空 推断）
 // - 'status 派生与 models 合并' → config-service-listproviders.test.ts TC5/TC7
 //   （connected/not_configured 双源 + custom models 兜底）
+
+describe('ConfigService.getScopedModels（A8 恒注入守卫）', () => {
+  it('未注入 providerExtrasStore → 抛带恢复指引 Error（不静默返回 []，与 write 侧 modifyScopedModels 对称）', () => {
+    // 构造参数缺省 providerExtrasStore（生产组合根恒注入，此形态只出现在测试/装配遗漏）
+    const svc = new ConfigService('/tmp/project', {} as unknown as IConfigStore)
+    expect(() => svc.getScopedModels()).toThrow(
+      /providerExtrasStore 未注入.*恢复：在组合根构造 ConfigService 时注入 providerExtrasStore/,
+    )
+  })
+})

@@ -19,6 +19,15 @@ import { GitExecutorError } from '../../src/services/ports/git-executor.js'
 import type { IGitExecutor, GitExecutorResult } from '../../src/services/ports/git-executor.js'
 import { GitStateService } from '../../src/services/git/git-state-service.js'
 
+
+/** stub 观测器：用例不触观测器链，仅满足 GitStateService 必选依赖（类型收窄）。 */
+const stubObserver = {
+  readObservation: () => { throw new Error('stub observer 不应被调用') },
+  pruneCache: () => {},
+  invalidateCwd: () => {},
+} as unknown as import('../../src/services/git/repo-observer.js').GitRepoObserver
+
+
 const executor = { exec: vi.fn() }
 const sessionService = { getSummary: vi.fn() }
 
@@ -28,7 +37,7 @@ function svc(): GitService {
     executor: executor as unknown as IGitExecutor,
     // perf W17 收编：getStatus 走真 GitStateService（共享 executor mock）——下方 getStatus
     // 用例即为「收编后行为等价」回归（分支列表 / per-file 行数 / -uall 参数语义不变）
-    stateService: new GitStateService({ executor: executor as unknown as IGitExecutor }),
+    stateService: new GitStateService({ executor: executor as unknown as IGitExecutor, repoObserver: stubObserver }),
   })
 }
 

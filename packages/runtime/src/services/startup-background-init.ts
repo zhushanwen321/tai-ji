@@ -26,8 +26,10 @@ import { migrateProviderConfig } from './migration/legacy-provider-migration.js'
 import { setMigrationGate } from './session/session-lifecycle.js'
 import { cleanupTmpMigrateResidue } from '../infra/pi/session-file-utils.js'
 import { getSessionsDir, getPiAgentDir } from '../infra/pi/pi-paths.js'
+import { cleanupAgedBackupResidue } from '../utils/json-store.js'
+import { join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
-import { ensureAutoRenameDefault } from './worktree-config-helper.js'
+import { ensureAutoRenameDefault } from './rename-session-config.js'
 import { ensureDeclaredStartupConfigs } from './extension-startup-config.js'
 import { ORPHAN_REAP_DELAY_MS, reapOrphanPiProcesses } from './reap-orphan-pi.js'
 import { reapAllSessionsBackgroundTasks } from './session/background-task-reaper.js'
@@ -203,20 +205,42 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // ⑦b extension 声明的启动配置统一 ensure（机制与容错见 ensureStartupConfigs 注释）。
   await ensureStartupConfigs(extensionService)
 
-  // ⑧ sessions 目录 `.tmp-migrate-*.jsonl` / `.tmp-import-*.jsonl` 标记家族崩溃残留清扫
-  // （W3 残留清理 + import-session D1 扩展）：目录级兜底，补 cleanupMigrateResidues 只在
-  // 附着前/delete 链触发的覆盖缺口（不再被 restore 的 session 其残留会永久留存）。
-  // 同步 readdir/unlink 扫一个本地目录（毫秒级）且在 listen 后的后台序列里执行，不阻塞
-  // 启动路径；函数内部对过期阈值（1h）内的文件不删（防并发误删进行中的归一化临时文件），
-  // 失败逐文件 warn 不上抛。
+  // ⑧ sessions 目录残留清扫（W3 `.tmp-migrate-`/`.tmp-import-` 崩溃残留 + 缓存治理 U9
+  // `<session>.jsonl.model.json` 退役 sidecar 残留）：目录级兜底，补 cleanupMigrateResidues
+  // 只在附着前/delete 链触发的覆盖缺口（不再被 restore 的 session 其残留会永久留存）。
+  // U9 家族年龄无关全删——sidecar 读写点已全部退役（U8），值可从 session JSONL 反向读
+  // 重推导（U7），删除幂等（重复删除走 warn 容错路径不抛出）。同步 readdir/unlink 扫一个
+  // 本地目录（毫秒级）且在 listen 后的后台序列里执行，不阻塞启动路径；tmp 标记家族保持
+  // 过期阈值（1h）内不删（防并发误删进行中的归一化临时文件），失败逐文件 warn 不上抛。
   try {
     const removed = cleanupTmpMigrateResidue(getSessionsDir())
     if (removed > 0) {
-      console.log(`[runtime] cleaned ${removed} stale .tmp-migrate-/.tmp-import- residue file(s) from sessions dir`)
+      console.log(`[runtime] cleaned ${removed} residue file(s) from sessions dir (.tmp-migrate-/.tmp-import- stale tmp + retired .model.json sidecar)`)
     }
   } catch (e) {
     // best-effort：清扫失败不影响主流程（残留仅是磁盘垃圾，下次启动重试）
     console.warn('[runtime] tmp-migrate/tmp-import residue cleanup failed:', e)
+  }
+
+  // ⑧b 备份残留按龄回收（`.conflict-<ts>` 冲突备份 + `.corrupt-<ts>` 损坏隔离副本）：
+  // 两者都是人工恢复取证文件，但无任何消费方清理——每次冲突/损坏新增一份，数据目录
+  // 无限堆积。按龄（默认 7 天）回收，正则严格匹配 ISO 压缩后缀防误删。覆盖 JsonStore/
+  // WriteBackCache 的落点层：数据目录根（models/settings 等单文件 store）、sessions、
+  // session-data、plugins。best-effort，失败不影响主流程。
+  try {
+    const dataDir = getDataDir()
+    const removedBackups = cleanupAgedBackupResidue([
+      dataDir,
+      getSessionsDir(),
+      join(dataDir, 'session-data'),
+      join(dataDir, 'plugins'),
+    ])
+    if (removedBackups > 0) {
+      console.log(`[runtime] recycled ${removedBackups} aged backup file(s) (.conflict-/.corrupt- residue beyond retention window)`)
+    }
+  } catch (e) {
+    // best-effort：回收失败不影响主流程（残留仅是磁盘垃圾，下次启动重试）
+    console.warn('[runtime] aged backup residue cleanup failed:', e)
   }
 
   // ⑩ 空闲 pi 回收 reaper 启动（idle-pi-reclamation D4，u3b）：对齐 ⑨ 的 fire-and-forget

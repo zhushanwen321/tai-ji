@@ -1,5 +1,5 @@
 /**
- * renderer-log-handler 单测（crash-resilience u2-renderer-errors 验收条款）。
+ * renderer-log-handler 单测（u2-renderer-errors 验收条款）。
  *
  * 覆盖：
  * - windowId 限流：100 条/窗口全落盘、超限丢弃、窗口翻转落汇总行（含 dropped count）

@@ -7,8 +7,8 @@
  *               bash 消息被正确标 error（旧实现 { value: chat.messages } 写入丢失）。
  * M1 [MAJOR]：finalizeMessagesImpl 跳过 bashExecution 消息，assistant error 不会误杀
  *             共存中的 streaming bash（bashResult 到达时仍能找到 streaming bash 收口）。
- * M2 [MAJOR]：finalizeSession 恢复 clearStreamingTimer，message.complete 后 streaming
- *             timer 被清除（10min 后不再误触发 finalizeSession('timeout')）。
+ * M2 [MAJOR]：message.complete 驱动 finalizeSession 正常收口——isGenerating 复位、
+ *             message 终态 complete，推进 10min 无二次收口（无 timeout warn）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/chat-bash-review-fix.test.ts
  */
@@ -162,14 +162,14 @@ describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀�
   })
 })
 
-describe('M2: finalizeSession 恢复 clearStreamingTimer —— message.complete 后 streaming timer 清除', () => {
+describe('M2: message.complete 正常收口 —— 状态复位且推进 10min 无二次收口', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     setActivePinia(createPinia())
   })
   afterEach(() => vi.useRealTimers())
 
-  it('message.complete 收口后，推进 10min 不再触发 finalizeSession("timeout")', () => {
+  it('message.complete 收口后状态复位，推进 10min 无二次收口', () => {
     const store = useChatStore()
     const sid = 's-m2'
     store.applyMessageEvent(sid, {
@@ -187,14 +187,13 @@ describe('M2: finalizeSession 恢复 clearStreamingTimer —— message.complete
     expect(store.getMessages(sid)[0].status).toBe('complete')
 
     // spy console.warn：finalizeSession 异常 reason 会打 dev warn（timeout 会命中此分支）。
-    // message.complete 走 normal，不打 warn。若 10min 后 timer 仍触发 finalizeSession('timeout')，
-    // 会打一次 '[chat] finalizeSession ... reason=timeout' warn。
+    // message.complete 走 normal，不打 warn。断言推进 10min 后无任何异常收口 warn（无二次收口）。
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    // 推进 10min + 1s（streaming 超时阈值 600_000ms）
+    // 推进 10min + 1s（远超正常收口所需时间）
     vi.advanceTimersByTime(600_000 + 1_000)
 
-    // 核心断言：clearStreamingTimer 已生效，timer 不再触发 timeout 收口
+    // 核心断言：推进 10min 后无 timeout 收口，消息保持 complete（未被二次收口为 error）
     const timeoutWarns = warnSpy.mock.calls.filter((c) => String(c[0]).includes('reason=timeout'))
     expect(timeoutWarns).toHaveLength(0)
     // 消息仍 complete（未被二次收口为 error）

@@ -215,8 +215,8 @@ export interface ISessionService {
    * 找不到返回空串（展示型功能，不 throw）。
    */
   getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string>
-  /** 触发 workflow 生命周期操作（pause/resume/abort，经扩展 slash command，不经 LLM） */
-  workflowAction(sessionId: string, action: 'pause' | 'resume' | 'abort', runId: string): Promise<void>
+  /** 触发 workflow 生命周期操作（abort，经扩展 slash command，不经 LLM） */
+  workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void>
   /**
    * 拉取 session trace 台账快照（session-trace design D4 数据通路 A1）。
    *
@@ -465,6 +465,11 @@ export interface IConfigService {
    * apply 成功后立即删缓存（一次性，防 importId 复用）。apply 时再次查冲突（preview 后 models.json 可能被改），
    * 同名 provider 标 skipped（不覆写）。
    *
+   * coding-plan 额度显示自动开启（导入即默认同意）：本次真实落盘（imported）且命中 api-key 类
+   * QuotaPreset、凭证为明文的条目，写 providers.json extras quota { enabled: true, fetcher }
+   * ——浮层 coding-plan 区即刻显示；用户可在设置里关闭。cookie 类（mimo/opencode-go）与
+   * env/command 占位凭证不自动开启（查询条件不齐备），需手动配置。
+   *
    * @param importId previewImportProviders 返回的 importId。
    * @param selectedIds 用户勾选导入的 provider id 列表（对应源里的 provider 名）。
    * @returns 成功 { result }；缓存过期/不存在 { error: { code: 'PREVIEW_EXPIRED', message } }。
@@ -508,10 +513,6 @@ export interface IConfigService {
   getTimeout(): number
   /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。 */
   setTimeout(timeout: number): void
-  /** 读取对话流式空闲超时阈值（config.json.streamingIdleTimeout，秒），默认 1800 秒（timeout-streaming-ui-idle §5.3 D3）。 */
-  getStreamingIdleTimeout(): number
-  /** 写入对话流式空闲超时阈值：clamp 到 [60, 3600] 秒后落盘，返回生效值。 */
-  setStreamingIdleTimeout(timeout: number): number
   /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
   getDefaultBaseBranch(): string
   /** 写入默认基分支到 config.json.defaultBaseBranch。 */
@@ -529,7 +530,7 @@ export interface IConfigService {
   /** 设置 rename 触发模式（读改写 extension 配置文件的 mode 字段，非法值归一默认，保留其他字段）。 */
   setRenameMode(mode: RenameMode): void
   /** 读取智能上下文压缩配置快照（extension 配置文件，字段非法回退默认值）。 */
-  getSmartContextConfig(): import('./services/worktree-config-helper.js').SmartContextConfigSnapshot
+  getSmartContextConfig(): import('./services/smart-context-config.js').SmartContextConfigSnapshot
   /** 设置智能上下文压缩开关（读改写 extension 配置文件的 enabled 字段，保留其他字段）。 */
   setSmartContextEnabled(enabled: boolean): void
   /** 设置压缩模型（读改写 compactModel 字段；空串 = 跟随当前会话模型）。 */

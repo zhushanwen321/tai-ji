@@ -18,6 +18,7 @@
 import { computed } from 'vue'
 import type { ComputedRef } from 'vue'
 import { normalizeContent } from '@taiji/shared'
+import { findLastAssistantMessage } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -94,7 +95,9 @@ export function useSessionDerivations() {
 
   /**
    * 响应式派生指定 session 的鸟瞰摘要（Overview 卡片用）。
-   * - summary：末条 assistant 文本（content），无则空串（卡片不渲染摘要区）
+   * - summary：末条 assistant 文本（content）；error 收尾（content 空、错误文本住
+   *   msg.error 的 [M2] 形态）时用 error 文案——摘要语义是「session 怎么收尾的」，
+   *   错误收尾显示空串会丢失最关键信息。无则空串（卡片不渲染摘要区）
    * - turnCount：user 消息数（回合 = user + 其后 assistant 序列）
    * [W3] 同 id 复用缓存的 ComputedRef（与 derivedStatus 同模式）。
    */
@@ -103,13 +106,11 @@ export function useSessionDerivations() {
     if (!c) {
       c = computed(() => {
         const msgs = chat.getMessages(id)
-        let lastAssistant = ''
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-          if (msgs[i].role === 'assistant') {
-            lastAssistant = normalizeContent(msgs[i].content)
-            break
-          }
-        }
+        const last = findLastAssistantMessage(msgs)
+        const contentText = last ? normalizeContent(last.content) : ''
+        // [M2] error 收尾形态：content 恒空（错误文本只住 msg.error），摘要取 error 文案
+        const errorText = last?.status === 'error' && last.error ? last.error : ''
+        const lastAssistant = contentText || errorText
         const turnCount = msgs.filter((m) => m.role === 'user').length
         return { summary: lastAssistant, turnCount }
       })

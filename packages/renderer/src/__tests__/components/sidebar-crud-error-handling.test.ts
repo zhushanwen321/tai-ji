@@ -77,14 +77,7 @@ vi.mock('@/stores/workflow', () => ({
   useWorkflowStore: () => ({
     recordsOf: () => ({ value: [] }),
     getRecordsBySession: () => [],
-    hasRunningOrPaused: () => false,
-    workflowCount: () => 0,
-    getCurrentWorkflow: () => null,
-    selectWorkflow: vi.fn(),
-    backToWorkflowList: vi.fn(),
     loadWorkflows: vi.fn(() => Promise.resolve()),
-    selectAgentCall: vi.fn(() => Promise.resolve()),
-    backFromAgentCall: vi.fn(),
   }),
 }))
 vi.mock('@/stores/navigation', () => ({
@@ -103,7 +96,6 @@ vi.mock('@/composables/features/command/useCommandStore', () => ({
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
 }))
-vi.mock('@/composables/features/chat/useListSync', () => ({ useListSync: vi.fn() }))
 
 // ── mock api/events（onMounted 的 loadSessions / app.info 订阅）──
 vi.mock('@taiji/core/transport/api', () => ({

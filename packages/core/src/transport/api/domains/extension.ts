@@ -4,13 +4,11 @@
  * widget/status 订阅不在本域——SideDrawer 直接经 useSessionEvents.onMessage 消费
  * extension:widget / extension:widgetGui / extension:status（features 层 session 通道）。
  *
- * 安装多步流（D-4 内联候选选择，issues.md #5 方案 A）：
+ * 安装多步流（D-4 内联候选选择）：
  * - npm：install(source) → runtime 直接装，config.extensions 推回 → onExtensions 刷新（单步）
  * - dir/git：installDir/installGit → runtime 发现候选回 extension.discovered → UI 内联展开
  *   → finishInstall(selected) → config.extensions 推回 → onExtensions 刷新（多步）
  * - cancelInstall(tempDir) → 清理临时目录（放弃安装）
- *
- * 契约见 contract.md §2.5 / code-architecture.md §3.2/§4.3/§4.9。
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）+ ws-client.send（extension.ui_response
  * fire-and-forget；tc u2 迁移时自壳 ../transport 改锚——transport.send 是 ws-client.send 纯透传，
@@ -147,21 +145,6 @@ export function onUIRequest(sessionId: string, handler: (req: ExtensionUIRequest
     const payload = msg.payload as ExtensionUIRequest
     if (payload.sessionId !== sessionId) return
     handler(payload)
-  })
-}
-
-/**
- * 订阅指定 session 的 extension.ui_timeout 推送，返回取消函数。
- *
- * runtime ExtensionTimeoutManager 在 UI 请求 5 分钟无响应后广播此事件（同时向 pi 发默认响应）。
- * 前端收到后必须出队当前请求——否则对话框残留，用户点击会发送过期的 ui_response。
- */
-export function onUITimeout(sessionId: string, handler: (requestId: string) => void): () => void {
-  return events.on(sessionId, (msg) => {
-    if (msg.type !== 'extension.ui_timeout') return
-    const payload = msg.payload as { sessionId: string; requestId: string }
-    if (payload.sessionId !== sessionId) return
-    handler(payload.requestId)
   })
 }
 

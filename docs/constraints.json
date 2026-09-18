@@ -1641,7 +1641,8 @@
       "scope": [
         "packages/renderer/src/assets/icons/engine/**",
         "packages/renderer/src/constants/engine-icons.ts",
-        "packages/renderer/src/components/sidebar/SubagentList.vue",
+        "packages/renderer/src/components/panel/tray/TrayNativePanel.vue",
+        "packages/renderer/src/composables/panel/useSubagentTabData.ts",
         "packages/renderer/src/components/panel/SubagentTab.vue"
       ],
       "authority": [
@@ -1932,29 +1933,6 @@
       ]
     },
     {
-      "id": "C-comm-13",
-      "summary": "chat 流式 UI 判死必须 idle 语义：streaming timer 只由活动刷新计时（message 帧挂 refresh，stream_warn 除外），禁固定墙钟；活跃性定义含编排期子代理产出——subagent.stream_delta 帧经 route-inbound 桥接刷新父 session timer，禁止旁路帧不经 chat store 的静默检测；timeout 收口必须打标（Message.prematureTimeout）并允许迟到 message.complete 自愈恢复真实终态；阈值经 settings 配置链读写持久化（默认 1800s、clamp 60–3600s 单一权威 DEFAULT_STREAMING_IDLE_TIMEOUT_MS），禁新增 env 死配置口",
-      "scope": [
-        "packages/core/src/domain/chat/**",
-        "packages/core/src/coordination/**",
-        "packages/renderer/src/composables/effects/**",
-        "packages/shared/src/subagent-frame.ts"
-      ],
-      "authority": [
-        "../packages/core/src/domain/chat/timers.ts",
-        "../AGENTS.md"
-      ],
-      "dimensions": [
-        "business-logic"
-      ],
-      "enforcement": [
-        {
-          "type": "review",
-          "agent": "review-business-logic"
-        }
-      ]
-    },
-    {
       "id": "C-proc-11",
       "summary": "npm 发布面一致性：dist 发布包 files 白名单 ↔ 构建产出双向对齐——files 条目须磁盘存在且非空（幽灵条目拦截，npm pack 对幽灵条目静默跳过）、包内顶层 dist* 产物目录须被 files 覆盖（漏声明方向反向覆盖），由 check-publish-surface.mjs 在发布门（release workflow publish 前）与 CI PR invariants 双点强制（刻意不挂 pre-commit：dist 产物被 gitignore，干净 checkout 必红）；新增产物档须同批挂 workflow 构建步骤 + files 白名单条目 + 守卫覆盖（三者缺一不可）；自包含档命名约定 dist.bundle 且须内联全部运行时依赖（静态 require 探针，裸名外部说明符红）；非发布用途构建目录禁用 dist 前缀（否则反向覆盖检查误红，改名即可）；非 workspace 包机制上不经 changeset 发布线（changesets 按 workspace 发现包），防手滑 npm publish 一律 private:true",
       "scope": [
@@ -2108,7 +2086,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只归档不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已归档/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只归档不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 归档点 markArchived 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道 8 条、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；版本 major 恒 1，增量以可选载荷向后兼容（无 minor 协商位）。②轮次活性权威在 core 编排层：round-supervisor 三态判定（该等/该唤醒=通知主 agent 决策/该放弃）仍是 run 域（非 chatMode）record 治理主体，chatMode 豁免维持（对话容器治理者=用户；引擎死亡接管 gate chatMode!==true 保留；引擎镜像置死只作触发信号不作持续判据、引擎重建不解管；30 天 idle-gc 只回收内存不终态化）；chatMode 续聊轮活性 = 每轮 run 应答驱动——中段无进展刷新源为 run 事件通道既有事件（AgentEvent 9 员含 activity 变体；zcode 侧工具执行期活性经 session-channel onActivity 发射），收尾段 settle 交棒 = Continuation onRunSettled 内调 noteRoundSettledFromProtocol（run 应答驱动，先于轮终簿记）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc/监督器放弃链均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已离场/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=守卫失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 守卫口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；idle-gc 对 resumable record 以 startedAt 为锚只回收不补注销（注销统一交 sweep）；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器仍 30 天可续）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort RPC 超时走三级阶梯（快超时探测×事件窗×abort-pending 三信号判据；有界重试→用户显式强关→真冻结直杀，每级有终点无无界分支）；冻结静默窗未实测（P3）前裸事件新鲜度不得单独作直杀判据；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 收口落账点 markSettledOut 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收口 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2215,7 +2193,7 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收口：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 腿 / zcode 锚键腿）/ markReopened（锚失效同 id 带历史重开）/ markArchived（收起归档）/ markIdleEvicted（30 天内存回收，原 markIdleArchived）/ markReactivated / markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
+      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收口：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 腿 / zcode 锚键腿）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 收口落账：worktreeHandle 清句 + .alive release + manifest 投影，幂等恒 true）/ markIdleEvicted（30 天内存回收）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。守卫两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化面全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
@@ -2798,6 +2776,33 @@
       ]
     },
     {
+      "id": "C-ext-23",
+      "summary": "skill reload 非破坏语义四支柱（skill-reload-nondestructive D11）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，reload 不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；post-reload session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动面触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/workflow-events.ts",
+        "extensions/universal/subagent-workflow/src/session-lifecycle.ts",
+        "extensions/universal/subagent-workflow/src/jsonl-run-store.ts",
+        "packages/subagent-core/src/execution/engine/registry.ts",
+        "packages/subagent-core/src/execution/engine/client/reverse-router.ts"
+      ],
+      "authority": [
+        "../extensions/universal/subagent-workflow/src/__tests__/workflow-events-reload-branch.test.ts",
+        "../extensions/universal/subagent-workflow/src/__tests__/adoption.test.ts",
+        "../packages/subagent-core/src/execution/engine/__tests__/registry.test.ts",
+        "../packages/subagent-core/src/execution/engine/__tests__/reverse-router-slot-read.test.ts"
+      ],
+      "dimensions": [
+        "extension-api",
+        "lifecycle"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
       "id": "C-state-17",
       "summary": "legacy 消息渲染兼容：不含 contentBlocks 的历史消息走 groupByLegacyFields 分组，渲染行为不变；新增消息字段不得破坏 legacy 路径",
       "scope": [
@@ -2809,6 +2814,27 @@
       ],
       "dimensions": [
         "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-21",
+      "summary": "错误处理策略裁决契约：错误路径按业务角色选策略——核心功能 fail-fast（禁吞错/禁静默降级出错误数据，错误日志含恢复动作）；辅助功能在主流程接入点降级（辅助故障不拖垮核心，降级 ≠ 吞错必须 warn 留痕）；用户可见的辅助能力失败必须有可见失败反馈（合理结果 + 失败原因，禁静默空值）。分通道纪律：读失败（非 ENOENT IO 故障）不得与合法缺省同判；静默丢弃必须注释登记为设计裁决 + 测试锁定（登记即可，不强制加日志）。两种伪防御按反缺陷对待：合法产出当错误拦、吞掉损坏状态的错误续跑",
+      "scope": [
+        "packages/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "STANDARDS.md#11-错误处理策略裁决契约"
+      ],
+      "dimensions": [
+        "business-logic",
+        "arch-boundary"
       ],
       "enforcement": [
         {

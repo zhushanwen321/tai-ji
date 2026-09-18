@@ -495,7 +495,7 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
   })
 
   it('⑩f 全量 crossSession 声明条目 type 字面量逐项命中（防拼写回归）', () => {
-    // 逐项锁 route-inbound.ts 的 8 个 crossSession 声明条目 type（ROUTE_TABLE 虽已导出，
+    // 逐项锁 route-inbound.ts 的 7 个 crossSession 声明条目 type（ROUTE_TABLE 虽已导出，
     // 但遍历其键会自我引用，锁不住源码侧拼写漂移——测试内字面量逐项断言才能钉住）。
     // 任一成员拼写漂移（如 extension.ui_request 误写成冒号）→ dispatchCrossSession 不再被调
     const literals = [
@@ -504,7 +504,6 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
       'extension:status',
       'extension:notify',
       'extension.ui_request',
-      'extension.ui_timeout',
       'plugin:uiRequest',
       'plugin:viewUpdate',
     ]
@@ -672,61 +671,5 @@ describe('configureRouteInbound — 缺省真实模块直连（D3）', () => {
     await expect(replyPromise).resolves.toEqual({ commands: [] })
     // 清理模块级 pendingMap（真实单例状态，防泄漏到其他用例）
     realPending.rejectAll(new Error('test cleanup'))
-  })
-})
-
-describe('configureRouteInbound — subagent.stream_delta 桥接（[idle-refresh] §5.1 D1）', () => {
-  beforeEach(() => {
-    resetSubscriptionStates()
-  })
-
-  it('subagent.stream_delta 帧（未注册 type，恒走默认兜底路径）→ onSubagentStreamDelta 收原始 frame + dispatchSession 照常', () => {
-    const ports = makePorts()
-    const effects = makeEffects({ onSubagentStreamDelta: vi.fn() })
-    const dispatcher = configureRouteInbound(ports, effects)
-    const frame = { type: 'subagent.stream_delta', payload: { sessionId: 'subagent:s1:bg-1', recordId: 'bg-1', lines: ['x'] } } as unknown as ServerMessage
-    dispatcher(frame)
-    // 帧透传（父 sid 解析与 refresh 由 effects 实现方完成，core 不做业务解析）
-    expect(effects.onSubagentStreamDelta).toHaveBeenCalledWith(frame)
-    // 既有 FALLBACK 语义不受影响（session 通道照常分发）
-    expect(ports.events.dispatchSession).toHaveBeenCalledWith('subagent:s1:bg-1', frame)
-  })
-
-  it('tee 双形态：虚拟 id 与主 sid 帧都到达回调（payload.sessionId 原样透传）', () => {
-    const ports = makePorts()
-    const effects = makeEffects({ onSubagentStreamDelta: vi.fn() })
-    const dispatcher = configureRouteInbound(ports, effects)
-    dispatcher({ type: 'subagent.stream_delta', payload: { sessionId: 'subagent:s1:bg-1', recordId: 'bg-1', lines: ['a'] } } as unknown as ServerMessage)
-    dispatcher({ type: 'subagent.stream_delta', payload: { sessionId: 's1', recordId: 'bg-1', lines: ['a'] } } as unknown as ServerMessage)
-    expect(effects.onSubagentStreamDelta).toHaveBeenCalledTimes(2)
-  })
-
-  it('非 subagent.stream_delta 的未注册 type 帧 → 回调不调（no-op）', () => {
-    const ports = makePorts()
-    const effects = makeEffects({ onSubagentStreamDelta: vi.fn() })
-    const dispatcher = configureRouteInbound(ports, effects)
-    dispatcher(sessionMsg('message.text_delta', { delta: 'x' }))
-    dispatcher(sessionMsg('message.status', { status: 'sent' }))
-    expect(effects.onSubagentStreamDelta).not.toHaveBeenCalled()
-  })
-
-  it('seq gap drop 的 subagent.stream_delta 帧 → 回调不调（与 dispatchSession 同 gate）', async () => {
-    const ports = makePorts()
-    const effects = makeEffects({ onSubagentStreamDelta: vi.fn() })
-    const dispatcher = configureRouteInbound(ports, effects)
-    ;(ports.subscribe as ReturnType<typeof vi.fn>).mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 10 })
-    await subscribeSession('s1')
-    dispatcher(sessionMsg('subagent.stream_delta', { recordId: 'bg-1', lines: ['x'] }, { seq: 8 }))
-    expect(effects.onSubagentStreamDelta).not.toHaveBeenCalled()
-    expect(ports.events.dispatchSession).not.toHaveBeenCalled()
-  })
-
-  it('未注册 onSubagentStreamDelta 回调时跳过（undefined 可选，行为与现状一致）', () => {
-    const ports = makePorts()
-    const dispatcher = configureRouteInbound(ports, makeEffects())
-    expect(() =>
-      dispatcher({ type: 'subagent.stream_delta', payload: { sessionId: 'subagent:s1:bg-1', recordId: 'bg-1', lines: ['x'] } } as unknown as ServerMessage),
-    ).not.toThrow()
-    expect(ports.events.dispatchSession).toHaveBeenCalledTimes(1)
   })
 })

@@ -13,8 +13,7 @@
  *      （正常 release 必有 sha256 或非零 size，二者全缺视为可疑，拒绝）
  *   6. rename .downloading 到最终文件名，返回 { filePath }
  *
- * u4（update-network-resilience 设计 docs/design/update-network-resilience.md）：
- * 双引擎降级编排接入——
+ * u4 双引擎降级编排接入——
  * - 入口 flag 分流（D5：enginePreference='curl' 直接 curl 整文件）+ probe 经
  *   upgradeFetch（D7：usedEngine='curl' 本次放弃多段）+ 多段/单段失败按 D4 分类降级
  *   （连接建立失败置 flag；瞬时类/流中断只降级不记忆；HTTP/磁盘/总超时不降级）

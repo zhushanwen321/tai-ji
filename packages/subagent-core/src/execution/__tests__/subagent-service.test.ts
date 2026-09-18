@@ -25,11 +25,11 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
-import type { PiLike } from "../subagent-service.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
 
@@ -41,18 +41,6 @@ function makeTmpAgentDir(): string {
 
 function makeModelService(agentDir: string): ModelConfigService {
   return new ModelConfigService({ agentDir, cwd: agentDir });
-}
-
-function makePi(): PiLike & {
-  appendEntry: ReturnType<typeof vi.fn<(customType: string, data?: unknown) => void>>;
-  events: { emit: ReturnType<typeof vi.fn<(channel: string, data: unknown) => void>> };
-  sendMessage: ReturnType<typeof vi.fn<(message: Parameters<PiLike["sendMessage"]>[0], options?: Parameters<PiLike["sendMessage"]>[1]) => void>>;
-} {
-  return {
-    appendEntry: vi.fn((customType: string, data?: unknown) => {}),
-    events: { emit: vi.fn((channel: string, data: unknown) => {}) },
-    sendMessage: vi.fn(() => {}),
-  };
 }
 
 describe("SubagentService", () => {
@@ -426,7 +414,7 @@ describe("SubagentService", () => {
     /** 构造已就绪 service（initSession + initModel）并保留 pi 引用以断言 events.emit。 */
     function makeReadyServiceWithPi(): {
       service: SubagentService;
-      pi: ReturnType<typeof makePi>;
+      pi: PiMock;
     } {
       const pi = makePi();
       const service = new SubagentService({ cwd: agentDir, modelService });
@@ -530,7 +518,7 @@ describe("SubagentService", () => {
     // 让 pending-notifications 清理 registry entry，避免两侧状态不一致。
     // 此组验证该 emit 路径。
 
-    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=archived)（[U5] 编排性关闭=自动收起）", () => {
+    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=completed)（[U5] 编排性关闭=收口落账）", () => {
       const { service, pi } = makeReadyServiceWithPi();
       injectRunningBackground(service, "bg-dispose-1");
       injectRunningBackground(service, "bg-dispose-2");
@@ -538,19 +526,19 @@ describe("SubagentService", () => {
 
       service.dispose();
 
-      // 每个 running record 都 emit 了 pending:unregister（[U5] reason=archived——
-      // 归档点补发注销，承接原 emitUnregister 语义挂载归档原语）
+      // 每个 running record 都 emit 了 pending:unregister（[U5] reason=completed——
+      // 收口点补发注销，承接原 emitUnregister 语义挂载收口落账原语）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-1", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-1", reason: "completed" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-2", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-2", reason: "completed" }),
       );
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
-        expect.objectContaining({ id: "bg-dispose-3", reason: "archived" }),
+        expect.objectContaining({ id: "bg-dispose-3", reason: "completed" }),
       );
     });
 

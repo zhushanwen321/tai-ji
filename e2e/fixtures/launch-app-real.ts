@@ -23,6 +23,8 @@
  *
  * 注意：real E2E 需要单独 build real renderer bundle（VITE_MOCK 不传），
  * 与 mock bundle 输出冲突（同 renderer/dist）→ mock/real E2E 分批 build + 跑。
+ * 该约束由 launchRealApp 的 pre-flight 强制（assertRealRendererBundle）：产物是 mock 构建
+ * 时 fail-fast 并给出重建命令，不再以「等不到 target session」的 30s 超时呈现。
  */
 import { test as base, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import path from 'node:path'
@@ -42,6 +44,48 @@ const ELECTRON_EXECUTABLE = requireFromElectronDir('electron') as string
 const RUNTIME_START_TIMEOUT_MS = 30_000
 /** waitForRuntime 轮询 runtime.port 文件的间隔 */
 const RUNTIME_PORT_POLL_INTERVAL_MS = 300
+
+// ── pre-flight：renderer 产物形态 ────────────────────────────────────────
+
+/** renderer 产物 assets 目录（main 进程 loadFile 目标；mock/real 轨共用同一 outDir）。 */
+const RENDERER_DIST_ASSETS = path.join(REPO_ROOT, 'apps', 'electron', 'renderer', 'dist', 'assets')
+
+/**
+ * mock 构建的标记串：mock fixture session 名（packages/core/src/transport/mock/data.ts
+ * fixtureSessions 的 s4.label）。real 构建（不传 VITE_MOCK）下 mock 模块链随
+ * `import.meta.env.VITE_MOCK === 'true'` 死分支摇除——实测（2026-09-16，138 个 assets/*.js）：
+ * mock 构建命中 1 个文件，real 构建（VITE_E2E 传与不传两档）零命中。故本串是
+ * 「当前产物是 mock 构建」的判据（而非 mock 代码是否存在）。
+ */
+const MOCK_BUNDLE_MARKER = 'Promise 代码评审'
+
+/**
+ * pre-flight：确认当前 renderer 产物是 real bundle（mock 产物在场即 fail-fast）。
+ *
+ * 背景：mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define），
+ * e2e globalSetup 只查产物存在、不查构建形态。若先跑 mock 轨再跑 real 轨，real spec 的
+ * UI 段会因 renderer 渲染的是 mock fixture 数据而超时（30s `locator.click` 等不到 WS 建的
+ * session），失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的响亮失败。
+ */
+function assertRealRendererBundle(): void {
+  if (!fs.existsSync(RENDERER_DIST_ASSETS)) {
+    throw new Error(
+      `[launch-real] renderer 产物缺失（${RENDERER_DIST_ASSETS}）——先构建 real bundle：` +
+      'VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）',
+    )
+  }
+  // assets 约 8MB / 138 个 js——逐文件 includes 约几十毫秒，launch 次数个位数，不必加缓存
+  const mockAsset = fs
+    .readdirSync(RENDERER_DIST_ASSETS)
+    .filter((f) => f.endsWith('.js'))
+    .find((f) => fs.readFileSync(path.join(RENDERER_DIST_ASSETS, f), 'utf8').includes(MOCK_BUNDLE_MARKER))
+  if (mockAsset) {
+    throw new Error(
+      `[launch-real] detected mock renderer bundle（assets/${mockAsset} 含 mock fixture 标记）；` +
+      'rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK），再重跑本 spec',
+    )
+  }
+}
 
 // ── faux LLM 轨装配 ─────────────────────────────────────────────────────
 
@@ -93,7 +137,7 @@ const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-prov
  * 子进程注入面（workflow agent() / subagent 的 pi 孙进程）：
  * - extensions/faux-llm-ext.ts 复制：协议化引擎的 argv-mirror 读引擎自身 argv（无
  *   主 pi 的显式 --extension），孙进程拿不到 TAIJI_EXTENSION_PATHS 注入——经
- *   <agentDir>/extensions/ 自动发现装载（先例 scripts/probes/subagent-sync-collect）。
+ *   <agentDir>/extensions/ 自动发现装载（此前的探针先例已随 collect 退役删除，git 可追溯）。
  *   主 pi 带 --no-extensions 不受自动发现影响（显式注入不受抑制）。
  * - subagents/config.json（L3 引擎注册）：workflow 域 agent() 走引擎 registry，
  *   pi 引擎 cli descriptor 需显式注册（command=node + pi-subagent-cli bin）。
@@ -168,6 +212,9 @@ export async function launchRealApp(opts: RealLaunchOptions = {}): Promise<{
   dataDir: string
   cleanup: () => Promise<void>
 }> {
+  // pre-flight（先于任何副作用）：产物是 mock 构建则立即失败，并给重建命令
+  assertRealRendererBundle()
+
   // 复用传入 dataDir（重启场景）或新建临时目录
   const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-'))
   fs.mkdirSync(dataDir, { recursive: true })

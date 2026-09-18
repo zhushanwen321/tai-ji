@@ -6,7 +6,7 @@
  * - T1/T2: bus 事件入队（askUser=true）与非 askUser 负向分流（C4）
  * - T3: per-sessionId 分区隔离（U1 bus 版）
  * - T4: 按 requestId 精确 respond/cancel（U2 bus 版）
- * - T5/T6: onUITimeout/getPendingRequests 保留 WS/RPC 路径（C3，U3/TC4 bus 版）
+ * - T6: getPendingRequests 保留 RPC 路径（C3，U3/TC4 bus 版）
  * - T7: 同实例切 session 隔离（AC-1/AC-2 bus 版）
  * - T8: filter 第二道闸语义（askUserFilter 放行；dialog 通道已随 CompanionBand 迁移删除）
  * - T9: 模块级 refCount 注册/注销（项目规则 #2）
@@ -21,22 +21,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 
 // ── mock extension api domain ──
-// onUIRequest 已移除（bus 订阅替代）；onUITimeout/getPendingRequests/sendExtensionUIResponse 保留 WS/RPC（C3）。
-const uiTimeoutHandlers = new Map<string, Array<(requestId: string) => void>>()
-
+// onUIRequest 已移除（bus 订阅替代）；getPendingRequests/sendExtensionUIResponse 保留 RPC（C3）。
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  onUITimeout: (sid: string, handler: (requestId: string) => void) => {
-    const arr = uiTimeoutHandlers.get(sid) ?? []
-    arr.push(handler)
-    uiTimeoutHandlers.set(sid, arr)
-    return () => {
-      const cur = uiTimeoutHandlers.get(sid)
-      if (!cur) return
-      const idx = cur.indexOf(handler)
-      if (idx !== -1) cur.splice(idx, 1)
-      if (cur.length === 0) uiTimeoutHandlers.delete(sid)
-    }
-  },
   sendExtensionUIResponse: vi.fn(),
   onNotify: () => () => {},
   // [B9 agentcall LRU 联动] stores/chat 新装配链（agentcall-lru-linkage → workflow store
@@ -97,17 +83,12 @@ function mkDialogReq(requestId: string, method: 'confirm' | 'select' | 'input' =
 function emitBusUIRequest(sid: string, request: unknown): void {
   mockBus.emit({ kind: 'ui-request', sessionId: sid, request } as never)
 }
-/** 触发某 session 的 ui_timeout 事件（WS mock） */
-function emitUITimeout(sid: string, requestId: string): void {
-  uiTimeoutHandlers.get(sid)?.forEach((h) => h(requestId))
-}
 
 beforeEach(() => {
   // 模块级 refCount 订阅残留重置（防跨测试串扰）+ 新 pinia + 新 bus 实例
   __resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
-  uiTimeoutHandlers.clear()
   vi.mocked(sendExtensionUIResponse).mockClear()
   vi.mocked(getPendingRequests).mockResolvedValue([])
 })
@@ -195,19 +176,8 @@ describe('useExtensionUI T4 按 requestId 精确 respond/cancel', () => {
   })
 })
 
-describe('useExtensionUI T5/T6 C3 保留 WS/RPC 路径', () => {
-  it('T5: ui_timeout 仍走 WS 订阅，按 requestId 精确出队', () => {
-    const { currentAskUserRequest } = useExtensionUI(ref('sessionA'))
-    emitBusUIRequest('sessionA', mkAskUserReq('r-keep'))
-    emitBusUIRequest('sessionA', mkAskUserReq('r-timeout'))
-
-    emitUITimeout('sessionA', 'r-timeout')
-
-    expect(currentAskUserRequest.value?.requestId).toBe('r-keep')
-    expect(useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)).toEqual(['r-keep'])
-  })
-
-  it('T6: getPendingRequests 拉取结果入 store（WS/RPC 保留）', async () => {
+describe('useExtensionUI T6 C3 保留 RPC 路径', () => {
+  it('T6: getPendingRequests 拉取结果入 store（RPC 保留）', async () => {
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkAskUserReq('r1'),
       mkAskUserReq('r2'),

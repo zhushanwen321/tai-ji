@@ -8,8 +8,6 @@ import { getLogger } from "../core/logger.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
 import { bestEffort } from "./assembly/best-effort.ts";
-// [R2] 域 #5 聚合转发 getter 返回类型标注（值装配已迁聚合，仅 type 引用）。
-import type { CollectCoordinator } from "./assembly/collect-coordinator.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写面迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
@@ -28,7 +26,6 @@ import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
 // capability 预检等消费已随 R4 域迁 service/run-orchestration.ts +
 // service/workflow-dispatch.ts——壳内零消费（机制注释随消费主体迁移）。
 import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
-import type { HostBridgeServiceFace } from "./engine/host/host-bridge.ts";
 // [W6 宿主面下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
 // spawnedChildren 状态镜像公共面（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
@@ -43,7 +40,6 @@ import type { ModelConfigService } from "./assembly/model-config-service.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "./assembly/model-resolver.ts";
 import { type NotifyHost, type PiLike, createNotifyHost } from "./notify/notify-host.ts";
 // [T4④ / PS-5] flush 被门拦时的未投递 pending 落盘账本（persistUndeliveredNotificationsForReplay 消费）
-// [R2] BatchBudgetParams / BgNotifyRecord 类型引用已随域 #5 聚合迁至 service/sync-collect-domain.ts（壳内零消费）。
 // [H1 U2] notify 门迁 notifier.ts（Continuation 双闸共用），此处 re-export 保持既有
 // import 路径（测试消费面 `from "../subagent-service.ts"` 不变）。
 // [R4] notifyGateAllowsDelivery 的值消费（kickOffChatRound / onOneShotSettledWatchdog
@@ -103,9 +99,6 @@ import {
   SessionBaselines,
   type SubagentServiceSessionInit,
 } from "./service/session-baselines.ts";
-// [H3/R2] 域 #5 聚合（sync 批自闭合语义：collectCoordinator 装配 + E9 转账 + E1 恢复）——
-// 检查点① flushBatch 显式依赖注入随聚合落地；C-1/C-2 跨聚合边收敛为其显式接口。
-import { SyncCollectDomain } from "./service/sync-collect-domain.ts";
 // [H3/R3] 域 #3/#4/#8/#10/#11/#13/#17/#18 聚合（record 读建面 + 终态迁移写面）——壳经
 // 转发方法透传，对外签名零变化。[计划变更 D-R3-1] G1 ≤700 与八域体量（833 物理行）
 // 冲突，拆两文件（dev agent 停线报告、主 agent 核验追认）：record-access.ts（#3/#8/#10/#13 读建面）+ record-lifecycle.ts
@@ -154,8 +147,8 @@ export type { SubagentServiceSessionInit };
 // 含 [MF-3] 注释）SSOT 已随域 #2 聚合迁至 service/session-baselines.ts；[R6/D-R3-2]
 // ENV_SELF_RECORD_ID 因跨聚合消费（record-access）归位 service/service-constants.ts
 // 常量叶子文件——壳经顶部 import 消费（reconcile sweep 装配闭包的判据）。
-// [R2] SETTLED_RESCAN_LIMIT 常量 SSOT 已随域 #5 聚合迁至 service/sync-collect-domain.ts
-//（唯一消费主体 armSettledRescan）。
+// [collect 退役] 原 SETTLED_RESCAN_LIMIT 常量（域 #5 sync 批 settled 有界重扫——
+// 唯一消费主体 armSettledRescan）已随批机制整体删除。
 // [R3] ResolvedIdentity 接口本体（resolveIdentity 产物）已随读建面迁
 // service/record-access.ts——壳经顶部 type import 消费（R4 领地 execute/executeAndAwait/
 // workflow 派发链的局部类型标注不变）。
@@ -194,8 +187,8 @@ export class SubagentService {
    *  实例封装，原私有通知簇四方法与模块函数的搬移落点——notify-host.ts）。
    *  deps 惰性求值（pi/session 级状态运行时可变），行为与原 constructor 内
    *  createNotifier(this.piAdapter()) 逐字节等价。session_start revive，shutdown dispose。
-   *  [sync-collect 合并] toNotifyRecord/notify/notifyBatch 随批路由需要由 host 导出
-   *  （collectCoordinator 闭包与 E9/E1 直发路径消费，见 notify-host.ts 接口注释）。 */
+   *  [collect 退役] 原 toNotifyRecord/notify/notifyBatch 随批路由的 host 导出中
+   *  notifyBatch 已删——成功轮完成通知收敛为 notifyComplete 单通道。 */
   private readonly notifyHost: NotifyHost = createNotifyHost({
     getPi: () => this.pi,
     listRunning: () => this.store.listRunning(),
@@ -268,30 +261,14 @@ export class SubagentService {
     this.recordsDir = recordsDir;
     this.manifestStore = new ManifestStore(recordsDir);
     // [U1 偏差 3 收尾 / D8 v7] 第 4 参 manifestDir 接线（与 manifestStore 同源同一
-    // recordsDir，构造点同语句保证不漂移）：终态原语（markFinalized/markCancelled/
-    // markBatchFinalized）的 manifest 面走 writeAtomicFileSync 同步落盘——停机窗
+    // recordsDir，构造点同语句保证不漂移）：终态原语（markFinalized/markCancelled）
+    // 的 manifest 面走 writeAtomicFileSync 同步落盘——停机窗
     // fire-and-forget 竞态构造性消灭；生产构造点恒传 manifestDir（见下方构造
     // 调用），缺省降级异步分支仅纯内存测试形态可达。
     this.store = new RecordStore(sessionsDir, this.manifestStore, this.pi ?? undefined, recordsDir);
     // [W4 发射点② / U5 收口项②] markRoundIdle 簿记⑧的 pending 注销闭包接线（唯一
     // 装配点——轮终注销由 store 统一发射，调用方薄壳不再双轨重复发）。
     this.store.setPendingUnregister((id, status) => this.notifyHost.emitPendingUnregister(id, status));
-    // [R2] 域 #5 聚合：sync 批自闭合语义（collectCoordinator 装配 + E9 dispose 转账 +
-    // E1 崩溃恢复 + settled 有界重扫 + collectSync 配置读取）。deps 全晚绑定闭包（构造期
-    // 零求值——store/notifyHost/baselines 基线字段等运行时可变态经闭包
-    // 现读，形态先例 = D4 late-bound getter 与 R1 装配）；[检查点①] flushBatch 显式依赖
-    // 注入随聚合落地：CollectCoordinator 在聚合构造器内装配，flushBatch 闭包的外部状态
-    // 经 deps getter 现读，service 整实例零注入。
-    this.syncCollect = new SyncCollectDomain({
-      getStore: () => this.store,
-      getNotifyHost: () => this.notifyHost,
-      // [modeless 波3] 批闭合自动 close（flush 投递后归档成员——一次性计算单元终态
-      // 收口，无续聊留守；归档编排本体在 RecordLifecycle.archiveBatchMembers，静默
-      // 变体：不发「已收起」提示，批通知即成员终态通知）。
-      closeMembers: (ids) => this.recordLifecycle.archiveBatchMembers(ids),
-      getSessionRootId: () => this.sessionRootId,
-      getCollectSyncSection: () => this.modelService.getGlobalConfig().collectSync,
-    });
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
     // 为 #1 留壳共享依赖经 getter 现读同一实例；sessionRootId/sessionId/mainSessionFile/
@@ -352,7 +329,6 @@ export class SubagentService {
       getSessionRootId: () => this.sessionRootId,
       getExecNesting: () => this.execNesting,
       getRoundSupervisor: () => this.roundSupervisor,
-      getCollectCoordinator: () => this.collectCoordinator,
       resolveIdentity: (opts, pre) => this.recordAccess.resolveIdentity(opts, pre),
       resolveIdentityForEngine: (engine, engineModel, agent, agentConfig, opts) =>
         this.recordAccess.resolveIdentityForEngine(engine, engineModel, agent, agentConfig, opts),
@@ -387,7 +363,6 @@ export class SubagentService {
       getStreamSink: () => this.streamSink,
       getUiObservability: () => this.uiObservability,
       getRoundSupervisor: () => this.roundSupervisor,
-      getCollectCoordinator: () => this.collectCoordinator,
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
       idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
@@ -464,7 +439,7 @@ export class SubagentService {
   };
 
   /** [D4 对话 action 面聚合] chat 域 message/close 消费面（壳 subagent-actions 经此访问；
-   *  纯委托同上。PiEngineService 适配器不经此——引擎边界走 piEngineServiceAdapter）。 */
+   *  纯委托同上。引擎不经此——引擎边界走协议 converse，不回调宿主编排面）。 */
   readonly chatActions: SubagentChatActions = {
     getRecordForAction: (id, opts) => this.getRecordForAction(id, opts),
     closeSubagent: (record, force) => this.closeSubagent(record, force),
@@ -514,43 +489,11 @@ export class SubagentService {
   private assertReady(): void {
     this.baselines.assertReady();
   }
-  // ── 域 #5 SyncCollectDomain 聚合转发（R2 抽取；本体 execution/service/sync-collect-domain.ts）──
 
-  /** [R2] 域 #5 聚合实例：sync 批自闭合语义（collectCoordinator 装配 + E9 dispose 转账 +
-   *  E1 崩溃恢复 + settled 有界重扫 + collectSync 配置读取）的唯一宿主与唯一写者
-   *  （r0-inventory 清单① #26-#28）。deps 全晚绑定闭包（装配见构造器；检查点①
-   *  flushBatch 显式依赖注入随聚合落地），壳经下方 getter/方法透传，对外签名零变化。 */
-  private readonly syncCollect: SyncCollectDomain;
-
-  // collectCoordinator 读路径透传（R1 打样模式 2·strangler 转发壳）：壳内既有 route
-  // 调用点（#11 cancel / #14 引擎编排 / Continuation 装配）零改动；无写路径（构造期
-  // readonly 装配，聚合单写者）。
-  private get collectCoordinator(): CollectCoordinator {
-    return this.syncCollect.collectCoordinator;
-  }
-
-  /** [modeless 波3·deprecated accepted-no-op] sync 批崩溃恢复（E1）已随 collectMode
-   *  记录态消亡退役：批协调状态 = 协调器内存登记态（executeViaEngine 派发登记），
-   *  随 session 生命周期消亡，崩溃后批次协调不恢复。成员 record 本体仍健全——已
-   *  settle 成员 idle+result（批通知已投递/缓冲随 dispose 转 async 兑底），崩溃在途
-   *  成员由孤儿恢复纠偏 idle+interrupted。调用方（subagent-workflow session-lifecycle
-   *  的 session_start 编排）保留 no-op 调用至波 5 清理。 */
-  recoverSyncCollectBatch(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  /** [modeless 波3] 当前未闭合批的 sync 成员数（pendingSyncCount 口径，start 响应
-   *  回显段消费）：协调器登记态计数（executeViaEngine 派发时点登记 + flush 离场；
-   *  含本条——登记先于 start 响应构造）。 */
-  pendingSyncMemberCount(): number {
-    return this.syncCollect.memberCount;
-  }
-
-  /** collectSync.default 当前生效值（startHandler 缺省 collect 解析用；本体与配置读取
-   *  链已迁聚合）。[D3+] 壳终态保留面（subagent-actions-core 消费）。 */
-  getCollectSyncDefault(): "async" | "sync" {
-    return this.syncCollect.getCollectSyncDefault();
-  }
+  // [collect 退役] 原域 #5 SyncCollectDomain 聚合（sync 批缓冲/E9 dispose 转账/
+  // collectSync 配置读取/collectCoordinator 转发面，含 recoverSyncCollectBatch 与
+  // pendingSyncMemberCount/getCollectSyncDefault）已整体删除——批机制不再存在，
+  // start 派发统一走 async 逐条通知路径。
 
   // ── 域 #3/#4/#8/#10/#11/#13/#17/#18 RecordAccess + RecordLifecycle 聚合转发（R3 抽取；
   // 本体 execution/service/record-access.ts + record-lifecycle.ts）──
@@ -562,8 +505,8 @@ export class SubagentService {
 
   /** [R3] 终态迁移写面聚合实例（域 #4 回收面 / #11 close 三路 / #17 cancel / #18
    *  finalize 簇的唯一宿主——D5「store 与终态迁移入口的唯一宿主」，H4 落点）。
-   *  deps 全晚绑定闭包（装配见构造器；C-5 跨域汇聚经回调、collectCoordinator 经 #5
-   *  显式投影现读），壳经下方同名方法透传，对外签名零变化。 */
+   *  deps 全晚绑定闭包（装配见构造器；C-5 跨域汇聚经回调），壳经下方同名方法透传，
+   *  对外签名零变化。 */
   private readonly recordLifecycle: RecordLifecycle;
 
   // ── 域 #3 孤儿/manifest 恢复 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
@@ -678,7 +621,7 @@ export class SubagentService {
   // ── 域 #10 action 网关 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
   // coldLookupDeps 字段（清单① #30，唯一消费方 getRecordForAction 冷查分支）为聚合
   // 内部成员，壳内零消费 → 零转发；壳只保留 getRecordForAction 转发（chatActions 面 +
-  // piEngineServiceAdapter + Continuation handlers 消费点）。
+  // Continuation handlers 消费点）。
 
   /**
    * 按 id 查 record 并做归属校验（message/close action 的统一入口；含 SP-2 冷查复活
@@ -689,7 +632,7 @@ export class SubagentService {
   }
 
   // ── 域 #11 close 三路 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
-  // 消费点：closeSubagent（chatActions 面 + piEngineServiceAdapter + Continuation
+  // 消费点：closeSubagent（chatActions 面 + Continuation
   // handlers 装配回调）。cancelBackground / closeChatIdle 为聚合内部互调成员或已随
   // R4 域迁走（closeChatIdle 的 R3 过渡转发已删——消费方 continuationFor closeNow
   // 回调随域迁 RunOrchestration，经 deps 直指 recordLifecycle；壳内与全仓零剩余
@@ -761,7 +704,7 @@ export class SubagentService {
 
   /**
    * workflow 编排层专用 sync-await 接口（D-A1）。本体已迁 RunOrchestration；壳纯转发
-   *  （SAR / piEngineServiceAdapter 消费）。 */
+   *  （SAR 消费）。 */
   async executeAndAwait(
     opts: ExecuteOptions,
     signal?: AbortSignal,
@@ -840,26 +783,9 @@ export class SubagentService {
 
 
 
-  /** 引擎服务面适配器（HostBridgeServiceFace 结构视图）：闭包持有本实例的编排面。
-   *  [W3] chat 域轮次交接可选面（takeChatRound/runChatRound/resumeChatRound）随
-   *  inproc PiEngine 删除移除——引擎经协议 converse，不再回调宿主编排面。 */
-  private piEngineServiceAdapter(): HostBridgeServiceFace {
-    return {
-      executeAndAwait: (opts, signal, onEvent, stream) => this.executeAndAwait(opts, signal, onEvent, stream),
-      getRecordForAction: (id) => this.getRecordForAction(id),
-      closeSubagent: (record, force) => this.closeSubagent(record, force),
-      cancel: (id) => this.cancel(id),
-      collectRecords: (limit, statusFilter) => this.collectRecords(limit, statusFilter),
-      reportRecordTransition: (record) => this.store.reportRecordTransition(record),
-    };
-  }
-
-  /** [D4 聚合连带] 引擎服务面的显式结构视图（SAR 构造 resolveHostPiEnginePort 时
-   *  传入的 getService 兼容位消费——W3 后该面无引擎侧消费方，保留使 SAR 调用点
-   *  零改动，W8 收口时随签名一并清理）。getter 形态：face 视图（惰性构造）。 */
-  get asEngineService(): HostBridgeServiceFace {
-    return this.piEngineServiceAdapter();
-  }
+  /** [D4 聚合连带] 原引擎服务面适配器（piEngineServiceAdapter + asEngineService getter）
+   *  已删除：SAR 构造 resolveHostPiEnginePort 的 getService 兼容位消费随 W8 收口消失，
+   *  全仓零调用（2026-09 死代码清扫）。引擎经协议 converse，不再回调宿主编排面。 */
 
   // ── 壳生命周期编排与断言（dispose 时序留壳 = R3 检查点③；D4 断言面）（R0 重排）──
 
@@ -896,15 +822,8 @@ export class SubagentService {
     // [R4 / C-4 兑现 / 2026-09-13 接线] 原直调 this.continuations.clear() 的跨聚合写边
     // 收敛为聚合显式接口（字段所有权随 Continuation 协作面迁 ChatRounds）。
     this.chatRounds.clearContinuations();
-    // [E9] 批未闭合时缓冲终态成员逐条转 async 写账 + 落 batchFinalized（设计 §3.1.5 E9）。
-    // 必须在 disposeAllRecords 之前——它会把活跃 record（含 SP-5 成功回退的
-    // running+resumable 缓冲成员）全部 archive 清内存，之后再 getFullRecord 落标只剩
-    // 冷 idToFile（无目录扫描则 miss → 跳过落标 → E1 重建误收已转换成员）；先转换取
-    // 内存命中，与 flushBatch 出口①同款通路。同样在 flushPendingNotifications 之前
-    //（转换条目加入本次 flush）与 notifier/store dispose 之前（写账与 appendEntry
-    // 通道仍可用）。仍在跑成员不在此处理——后续 disposeAllRecords 按现有退出路径关闭。
-    // [R2] 本体迁 SyncCollectDomain.convertPendingSyncBufferToAsync（E9 转账时序逐行等价）。
-    this.syncCollect.convertPendingSyncBufferToAsync();
+    // [collect 退役] 原 E9 批缓冲 dispose 转账（convertPendingSyncBufferToAsync）已随
+    // sync 批机制整体删除——无批缓冲可转账，仍在跑成员由 disposeAllRecords 关闭。
     // SP-4: 级联关闭所有活跃 record（parent-shutdown reason）
     // 在 abort/kill 之后执行：先终止子进程，再清理 record 状态。
     this.disposeAllRecords("parent-shutdown");
@@ -946,6 +865,10 @@ export class SubagentService {
           notifyId: item.notifyId,
           content: item.content,
           record: item.record,
+          // 通道字段必须透传（与 ledger.record 同 schema）：恢复扫描按 notifyId 后写
+          // 覆盖，缺省 entry 会把 wf-done 改判成默认通道——workflow-result 失效信号
+          // 失联（W18 不触发，workflows 增量不刷新）。
+          ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
         });
       }
       logger.warn(

@@ -177,7 +177,8 @@ describe('WorktreeService.create() bare-workspace', () => {
     const service = new WorktreeService(deps)
 
     const result = await service.create({ branch: 'feat/new-feature', workspaceHint: '/project' })
-    expect(result).toEqual({ cwd: '/project/feat-new-feature', branch: 'feat/new-feature' })
+    // repoRoot（缓存治理 1-6）：bare-workspace 模式 = workspace 根，供 transport 层失效键使用
+    expect(result).toEqual({ cwd: '/project/feat-new-feature', branch: 'feat/new-feature', repoRoot: '/project' })
     expect(deps.gitExecutor.exec).toHaveBeenCalledWith(
       '/project/.bare',
       'worktree',
@@ -223,6 +224,8 @@ describe('WorktreeService.create() plain-repo', () => {
     const result = await service.create({ branch: 'feat/new-feature', workspaceHint: '/home/user/my-repo/src' })
     expect(result.cwd).toBe('/home/user/worktrees/my-repo/feat-new-feature')
     expect(result.branch).toBe('feat/new-feature')
+    // repoRoot（缓存治理 1-6）：plain-repo 模式 = 仓库根（hint 为子目录时与 hint 原值不同）
+    expect(result.repoRoot).toBe('/home/user/my-repo')
     expect(deps.configService.getWorktreeRootDir).toHaveBeenCalled()
   })
 

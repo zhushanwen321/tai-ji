@@ -6,6 +6,8 @@
     - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只 header 红）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
+    - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
+      渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
     - failed：无鲜红全展开（红框已删），改中性灰默认 + hover 染 warn，错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
@@ -42,7 +44,7 @@
           <!-- thinking 块行尾时刻 -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
-        <!-- 展开内容区：copy 按钮在左上角，始终可见 -->
+        <!-- 展开内容区：copy 按钮在左上角，始终可见（BlockScrollBox 外层，层级不动） -->
         <Transition name="block-expand">
         <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.7] text-neutral-mid">
           <Button
@@ -55,8 +57,11 @@
             <Check v-if="copied === `thinking-${thinkingId ?? 'block'}`" class="size-3 text-success" />
             <CopyIcon v-else class="size-3" />
           </Button>
-          <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
-          <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
+          <!-- G5/D6：thinking 展开区统一块内滚动（240px 限高 + 渐隐 + 行区间信息条 + streaming 吸底） -->
+          <BlockScrollBox>
+            <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
+            <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
+          </BlockScrollBox>
         </div>
         </Transition>
       </div>
@@ -65,26 +70,16 @@
     <!-- 正文 text 块：全 inline 统一正文样式（text-base/leading-7），颜色跟所属 assistant streaming 态
          （streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟 message 翻转）。
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
-         [M2 error-visibility] status==='error' 形态判定（SSOT §3.3.2）：
-         纯 error（无 msg.error，errorText 即全文）→ 整条 danger（AlertCircle + text-danger）；
-         追加形态（msg.error 有值）→ content 崩溃前正常正文保持原色 + msg.error 独立 danger 行。 -->
+         [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
+         msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
     <div v-else-if="type === 'text'" data-testid="block-text" class="flex items-start gap-2 pb-2 text-[length:var(--text-base)] leading-7" :class="textColorClass">
       <div class="min-w-0 flex-1">
-      <!-- 纯 error：AlertCircle + 整条 danger（正文 text-danger，由 textColorClass 承担） -->
-      <div v-if="isPureError" class="flex items-start gap-1.5">
-        <AlertCircle data-testid="block-text-error-icon" class="mt-1.5 size-3.5 shrink-0 text-danger" />
-        <div class="min-w-0 flex-1">
-          <MarkdownRenderer :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        </div>
-      </div>
-      <template v-else>
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        <!-- 追加形态：msg.error 独立 danger 行（content 保持原色，不误染崩溃前正文） -->
+        <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
         <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
           <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
           <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
         </div>
-      </template>
       </div>
       <!-- text 块行尾时刻 -->
       <span v-if="messageTimestamp" class="w-28 shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
@@ -168,16 +163,21 @@
             </div>
             <!-- bash 整体容器：v6 §5 扁平凹槽（无 border + bg-input 深于父级，深度差即边界） -->
             <div v-if="isBashTool" class="rounded-sm bg-bg-input">
+              <!-- 命令头：保持在凹槽内、BlockScrollBox 之外 = 不随输出滚动（恒吸顶是布局的免费性质，
+                   无需「移入滚动区首位 + sticky + 底色遮盖」三件套，见设计 D6 接入点②） -->
               <div v-if="argPath" class="border-b border-hairline pl-4 py-1.5 font-mono text-[length:var(--text-sm)] text-neutral-fg">
                 {{ argPath }}
               </div>
-              <!-- 输出文本区内容守卫：均空时不渲染该 div（只剩命令块，无空白假展开） -->
-              <div v-if="displayContent || outputRaw || parsedJsonOutput" class="tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 py-1.5 select-text text-neutral-mid">
-                <AnsiText v-if="outputRaw" :content="outputRaw" />
-                <!-- JSON output（如 bash 执行 cw 命令的结构化输出）格式化缩进，限高滚动避免撑爆对话流 -->
-                <pre v-else-if="parsedJsonOutput" class="m-0 max-h-80 overflow-auto whitespace-pre">{{ parsedJsonOutput }}</pre>
-                <span v-else>{{ displayContent }}</span>
-              </div>
+              <!-- 输出文本区内容守卫：均空时不渲染（只剩命令块，无空白假展开）；
+                   限高滚动 + 行区间信息条由 BlockScrollBox 统一承担（含原 max-h-80 的 JSON 分支） -->
+              <BlockScrollBox v-if="displayContent || outputRaw || parsedJsonOutput" surface="recessed">
+                <div :class="toolResultClass">
+                  <AnsiText v-if="outputRaw" :content="outputRaw" />
+                  <!-- JSON output（如 bash 执行 cw 命令的结构化输出）格式化缩进 -->
+                  <pre v-else-if="parsedJsonOutput" class="m-0 whitespace-pre">{{ parsedJsonOutput }}</pre>
+                  <span v-else>{{ displayContent }}</span>
+                </div>
+              </BlockScrollBox>
             </div>
             <!-- 非 bash：meta 条 + 输出 -->
             <template v-else>
@@ -188,15 +188,18 @@
                   class="text-neutral-dim"
                 >{{ item.text }}</span>
               </div>
-              <div
-                class="tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 select-text"
-                :class="isFailed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'"
-              >
-                <GuiComponentRenderer v-if="guiComponent" :component="guiComponent" />
-                <AnsiText v-else-if="outputRaw" :content="outputRaw" />
-                <pre v-else-if="parsedJsonOutput" class="m-0 max-h-80 overflow-auto whitespace-pre">{{ parsedJsonOutput }}</pre>
-                <span v-else>{{ displayContent }}</span>
+              <!-- GUI 协议输出自管理高度，不包 BlockScrollBox（设计 D6 接入点③） -->
+              <div v-if="guiComponent" :class="toolResultClass">
+                <GuiComponentRenderer :component="guiComponent" />
               </div>
+              <!-- 文本 / ANSI / JSON 输出：统一块内滚动（G5/D6） -->
+              <BlockScrollBox v-else>
+                <div :class="toolResultClass">
+                  <AnsiText v-if="outputRaw" :content="outputRaw" />
+                  <pre v-else-if="parsedJsonOutput" class="m-0 whitespace-pre">{{ parsedJsonOutput }}</pre>
+                  <span v-else>{{ displayContent }}</span>
+                </div>
+              </BlockScrollBox>
             </template>
             <!-- [D6-⑨ u7] toolResult 图片（bash/非 bash 分支共用的统一出口；路径引用渲染
                  + 帽满占位/降级 badge，见 ToolResultImages） -->
@@ -221,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
@@ -232,15 +235,18 @@ import { openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
+import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatDuration, formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { useToolMeta } from './composables/useToolMeta'
 import { useCopy } from './composables/useCopy'
-import { useTailScroll } from './composables/useTailScroll'
+import { TAIL_WINDOW_LINES, useTailScroll } from './composables/useTailScroll'
+import { useThinkingCollapse } from './composables/useThinkingCollapse'
+import { useLiveToolDuration } from './composables/useLiveToolDuration'
 
 const { t } = useI18n()
 const { copied, copy } = useCopy()
@@ -266,10 +272,11 @@ const props = defineProps<{
    *  由 Turn.vue 传 assistant.status === 'streaming'。thinking/tool/agentgraph 分支不消费此 prop。 */
   streaming?: boolean
   /** 所属 assistant 消息终态（text 分支 error 形态判定，SSOT §3.3.2）：
-   *  status==='error' 且 error 有值 → 追加形态（content 原色 + error 独立 danger 行）；
-   *  status==='error' 且无 error → 纯 error（整条 danger）。thinking/tool 分支不消费。 */
+   *  status==='error' → 追加形态（content 崩溃前正文原色 + error 独立 danger 行）。
+   *  [M2 形态统一] 纯 error 形态已消灭——错误文本只住 error 字段，content 恒为崩溃前
+   *  正文（手动追加的错误消息 content 为空），渲染只有追加形态一种。thinking/tool 分支不消费。 */
   status?: MessageStatus
-  /** 追加形态错误文本（assistant Message.error 字段，status==='error' 时有值）。 */
+  /** 错误文本（assistant Message.error 字段，status==='error' 时有值——收口兜底保证非空）。 */
   error?: string
   /** 所属 assistant message 时刻（epoch ms，行尾时刻显示） */
   messageTimestamp?: number
@@ -279,89 +286,28 @@ const props = defineProps<{
 
 /* ── thinking 折叠（streaming-trace-window 验收修正）：working 态也默认折叠（60 字符预览），
  *    与过程块收编理念一致（收编减体积 + thinking 折叠 = 视觉体积最小）；用户可手动展开，展开后保持。
- *    原 SSOT §3.3.3「working→false 展开」导致 streaming 中所有 thinking 全展开，与收编减体积冲突。── */
-const thinkingCollapsed = ref(props.collapsed ?? true)
-const thinkingExpanded = computed(() => !thinkingCollapsed.value)
-/** 用户是否手动 toggle 过（收起/展开均置位）——置位后完成态不回落（显式意图优先，CQ1） */
-const userToggledThinking = ref(false)
+ *    原 SSOT §3.3.3「working→false 展开」导致 streaming 中所有 thinking 全展开，与收编减体积冲突。──
+ *    状态机拆至 useThinkingCollapse（折叠/手动置位/working 回落/预览/尾行视口一体）。 */
+const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkDisplayLines, thinkScrollStyle } =
+  useThinkingCollapse({
+    content: computed(() => props.content),
+    working: computed(() => props.working),
+    collapsed: props.collapsed,
+  })
 
-function toggleThinking(): void {
-  userToggledThinking.value = true
-  thinkingCollapsed.value = !thinkingCollapsed.value
-}
-
-/** working true→false：未手动操作过的块回落收起（用户手动操作过的保持用户意图不回滚） */
-watch(
-  () => props.working,
-  (working) => {
-    if (working === false && !userToggledThinking.value) {
-      thinkingCollapsed.value = true
-    }
-  },
-)
-
-/** 收起态的正文预览（截断，draft：收起时显一行摘要） */
-const PREVIEW_LIMIT = 60
-const previewText = computed(() => {
-  const c = props.content?.trim() ?? ''
-  if (c.length <= PREVIEW_LIMIT) return c
-  return `${c.slice(0, PREVIEW_LIMIT)}…`
-})
-
-/* ── thinking 尾行视口（2026-08 抖动修复重写）──
- * working 态折叠预览：单行视口显示最新行（横向 CSS 钉右 + 纵向滑入动画，
- * 机制见 useTailScroll 头注释）；非 working 保持 previewText 头部 60 字符静态。
- * 尾 2 行即状态机所需（旧行 + 新行）。 */
-const TAIL_LINE_COUNT = 2
-const thinkingTailLines = computed(() =>
-  props.working ? tailLines(props.content ?? '', TAIL_LINE_COUNT) : [],
-)
-const { displayLines: thinkDisplayLines, contentStyle: thinkScrollStyle } = useTailScroll(thinkingTailLines)
-
-/** 纯 error：status==='error' 且无 msg.error（markSessionError/registry 无 streaming 实体时
- *  手动追加的整条 error 消息，errorText 即 content 全文）。 */
-const isPureError = computed(() => props.status === 'error' && !props.error)
-/** 追加形态：status==='error' 且 msg.error 有值（finalizeMessages 双通道写入的崩溃错误）。 */
+/** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
 const isAppendError = computed(() => props.status === 'error' && !!props.error)
 
-/** text 分支颜色：纯 error 整条 danger；追加形态/正常正文 streaming→neutral-mid、complete→neutral-fg */
+/** text 分支颜色：正常正文 streaming→neutral-mid、complete→neutral-fg（正文永不因 error 整条染红） */
 const textColorClass = computed(() => {
-  if (isPureError.value) return 'text-danger'
   return props.streaming ? 'text-neutral-mid' : 'text-neutral-fg'
 })
 
 const isFailed = computed(() => props.tool?.status === 'error')
 const isRunning = computed(() => props.tool?.status === 'running')
 
-/** running 工具耗时实时跳动：仅 isRunning 期间挂载 interval，onUnmounted 清理，页面 hidden 停 tick */
-const LIVE_DUR_TICK_MS = 100
-const nowTs = ref(Date.now())
-let liveDurTimer: ReturnType<typeof setInterval> | null = null
-function startLiveDurTick(): void {
-  if (liveDurTimer) return
-  nowTs.value = Date.now()
-  liveDurTimer = setInterval(() => { nowTs.value = Date.now() }, LIVE_DUR_TICK_MS)
-}
-function stopLiveDurTick(): void {
-  if (liveDurTimer) { clearInterval(liveDurTimer); liveDurTimer = null }
-}
-watch(isRunning, (running) => {
-  if (running) startLiveDurTick()
-  else stopLiveDurTick()
-}, { immediate: true })
-onUnmounted(() => { stopLiveDurTick() })
-
-/** tool 块行尾耗时（running 实时算，completed 用 startTime/endTime） */
-const toolDuration = computed(() => {
-  const start = props.tool?.startTime
-  if (typeof start !== 'number') return ''
-  if (isRunning.value) {
-    return formatDuration(nowTs.value - start)
-  }
-  const end = props.tool?.endTime
-  if (typeof end !== 'number' || end <= start) return ''
-  return formatDuration(end - start)
-})
+/** running 工具耗时实时跳动（tick 生命周期 + 终态 startTime/endTime 换算拆至 useLiveToolDuration） */
+const toolDuration = useLiveToolDuration(computed(() => props.tool), isRunning)
 /* end_not_received（流结束未收到 tool_call_end，进程崩溃/WS 断连）原单独分支已并入
  * completed 的 neutral-mid 置灰（同为非 running 非失败的中性态，无需视觉区分）。 */
 const toolName = computed(() => props.tool?.toolName ?? 'tool')
@@ -369,6 +315,17 @@ const isBashTool = computed(() => toolName.value === 'bash')
 const result = computed(() => props.tool?.output)
 /** 展示用内容：output 优先，failed 时兜底 tool.error（如 read ENOENT 输出为空但 error 有值） */
 const displayContent = computed(() => result.value || (isFailed.value ? (props.tool?.error ?? '') : ''))
+/** 输出区容器 class（bash 凹槽 / 非 bash / GUI 分支共用）：
+ *  - py-1.5：bash 凹槽内的竖向留白（既有形态；非 bash 输出区无此留白）
+ *  - hover:text-neutral-fg：非 bash 失败态提升可读性（既有形态，bash 无） */
+const TOOL_RESULT_CLASS = 'tool-result font-mono text-[length:var(--text-sm)] leading-snug whitespace-pre-wrap pl-4 select-text text-neutral-mid'
+const toolResultClass = computed(() => [
+  TOOL_RESULT_CLASS,
+  {
+    'py-1.5': isBashTool.value,
+    'hover:text-neutral-fg': !isBashTool.value && isFailed.value,
+  },
+])
 
 /** JSON.stringify 缩进空格数（具名常量避 no-magic-numbers） */
 const JSON_INDENT = 2
@@ -413,7 +370,7 @@ const toolTailLines = computed(() => {
   // bash：outputRaw 缺失（无 ANSI 输出）时回退 displayContent（D3 尾行取数）
   const raw = isBashTool.value ? (outputRaw.value ?? displayContent.value) : displayContent.value
   if (!raw) return []
-  return tailLines(isBashTool.value ? stripAnsi(raw) : raw, TAIL_LINE_COUNT)
+  return tailLines(isBashTool.value ? stripAnsi(raw) : raw, TAIL_WINDOW_LINES)
 })
 const { displayLines: toolDisplayLines, contentStyle: toolScrollStyle } = useTailScroll(toolTailLines)
 

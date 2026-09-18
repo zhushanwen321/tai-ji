@@ -3,14 +3,18 @@
  *
  * 验证 restoreSession 在 switchSession 成功后 get_state 读回生效 model+thinkingLevel，
  * 通过 registerSession 新参 metaOverride 播种。r3 校准：metaOverride 恒提供（读回成功/
- * 失败两路径同构），每字段独立走「读回值 → sidecar 扫描值 → ''」兜底链——restore 任何
+ * 失败两路径同构），每字段独立走「读回值 → 扫描 meta 值 → ''」兜底链——restore 任何
  * 情况不播种全局默认（D2 被否谱系：全局默认播种 = restore 窗口显示他 session 的假值，违 G4）。
+ *
+ * [缓存治理 U8a W3/W4] restore 播种不再写任何持久层（原写点⑤ sidecar 自愈已退役，
+ * 持久层唯一写方 = pi JSONL；兜底扫描 meta 值 U7 起即反向读 JSONL 真值）。原写点③/⑤
+ * 正断言随写点退役改写为「磁盘零写入」负守卫。
  *
  * 测试场景（r3 校准后）：
  * 1. 读回成功全字段 → 播种真值
- * 2. 读回成功部分字段 → 缺字段回落 sidecar 值再 '' 占位
- * 3. 读回失败 + sidecar 部分字段 → 有值字段播种 sidecar 值、缺字段播种 ''
- * 4. 读回失败 + sidecar 双无值 → metaOverride {modelId:'', thinkingLevel:''}（不回落全局默认）
+ * 2. 读回成功部分字段 → 缺字段回落扫描 meta 值再 '' 占位
+ * 3. 读回失败 + 扫描 meta 部分字段 → 有值字段播种扫描值、缺字段播种 ''
+ * 4. 读回失败 + 扫描 meta 双无值 → metaOverride {modelId:'', thinkingLevel:''}（不回落全局默认）
  * 5. hydrateBindingMeta restore='none' 不覆写播种值（D1 生效验证）
  *
  * 运行：cd packages/runtime && pnpm vitest run src/__tests__/session-lifecycle-restore-seeding.test.ts
@@ -119,7 +123,6 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
   let SessionLifecycle: typeof import('../services/session/session-lifecycle.js').SessionLifecycle
   let assertPiSessionFileMock: ReturnType<typeof vi.fn>
   let normalizeSessionFileInPlaceMock: ReturnType<typeof vi.fn>
-  let persistModelBindingMock: ReturnType<typeof vi.fn>
   let tmpDir: string
 
   beforeEach(async () => {
@@ -131,25 +134,14 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     vi.doMock('../infra/pi/session-attach-assert.js', () => ({
       assertPiSessionFile: assertPiSessionFileMock,
     }))
-    // mock normalizeSessionFileInPlace（归一化 noop）；persistModelBinding 记录调用
-    // 并委托真实实现（写点③⑤ 测试需要真实 sidecar 落盘断言，tmpDir 内自建自删）。
-    // persistBindingSidecar / readBindingSidecar：model sidecar 家族迁 session-model-sidecar.ts
-    // 后，persistModelBinding 真身（经 re-export 委托）依赖这两个骨架导出——mock 面必须
-    // 转发真实实现，否则真身链访问 mock 缺失导出时 vitest getter 抛错、被播种 catch 吞掉
-    // （播种值漂移 + 写点③⑤ 不落盘）。
+    // mock normalizeSessionFileInPlace（归一化 noop）。[U8a W3/W4] persistModelBinding
+    // 及其骨架转发已随写点退役移除——session-lifecycle / restore-seeding 对本模块的
+    // 消费面只剩 cleanupMigrateResidues + normalizeSessionFileInPlace。
     normalizeSessionFileInPlaceMock = vi.fn()
-    const actual = await vi.importActual<typeof import('../infra/pi/session-file-utils.js')>('../infra/pi/session-file-utils.js')
-    persistModelBindingMock = vi.fn(actual.persistModelBinding)
-    vi.doMock('../infra/pi/session-file-utils.js', async (importOriginal) => {
-      const sidecarActual = await importOriginal<typeof import('../infra/pi/session-file-utils.js')>()
-      return {
-        normalizeSessionFileInPlace: normalizeSessionFileInPlaceMock,
-        cleanupMigrateResidues: vi.fn(),
-        persistModelBinding: persistModelBindingMock,
-        persistBindingSidecar: sidecarActual.persistBindingSidecar,
-        readBindingSidecar: sidecarActual.readBindingSidecar,
-      }
-    })
+    vi.doMock('../infra/pi/session-file-utils.js', () => ({
+      normalizeSessionFileInPlace: normalizeSessionFileInPlaceMock,
+      cleanupMigrateResidues: vi.fn(),
+    }))
     // mock session-binding-fields（hydrateBindingMeta 实际行为——restore='none' 时 skip modelId/thinkingLevel）
     vi.doMock('../infra/pi/session-binding-fields.js', () => ({
       hydrateBindingMeta: vi.fn((session: Record<string, unknown>, meta: Record<string, unknown>, entry: string) => {
@@ -220,10 +212,10 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     expect(session!.thinkingLevel).toBe('high')
   })
 
-  it('场景 2: get_state 读回失败 → 兜底 sidecar 扫描值', async () => {
+  it('场景 2: get_state 读回失败 → 兜底扫描 meta 值', async () => {
     const { session } = await runRestore(
       new Error('get_state timeout'),
-      // sidecar 扫描值（findScannedSession 返回的 modelId/thinkingLevel）
+      // 扫描 meta 值（findScannedSession 返回的 modelId/thinkingLevel，反向读 JSONL 真值）
       { modelId: 'zai-coding-cn/glm-5.3-flash', thinkingLevel: 'max' },
     )
 
@@ -232,8 +224,8 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     expect(session!.thinkingLevel).toBe('max')
   })
 
-  it('场景 2a: 读回仅 thinkingLevel，modelId 回落 sidecar 值（r3 校准按字段链）', async () => {
-    // get_state 只返回 thinkingLevel（无 model/modelId 字段）→ modelId 走 sidecar 扫描值
+  it('场景 2a: 读回仅 thinkingLevel，modelId 回落扫描 meta 值（r3 校准按字段链）', async () => {
+    // get_state 只返回 thinkingLevel（无 model/modelId 字段）→ modelId 走扫描 meta 值
     const { session } = await runRestore(
       { sessionId: 'test-session-id', sessionFile: '/test/sessions/test-session-id.jsonl', thinkingLevel: 'high' },
       { modelId: 'zai-coding-cn/glm-5.3-flash' },
@@ -271,7 +263,7 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     const svc = makeSvc({
       findScannedSession: vi.fn(() => makeScannedSession({
         filePath: sessionFilePath,
-        // sidecar 无值（历史 session 无 .model.json）
+        // 扫描 meta 无值（历史 session path 上无任何模型 entry）
         modelId: undefined,
         thinkingLevel: undefined,
       })),
@@ -387,7 +379,7 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     expect(session.modelId).toBe('default-p/default-m')
   })
 
-  it('D1 写点③: create 后 .model.json 存在且含生效值（get_state 读回真值优先于请求值）', async () => {
+  it('[U8a W4] create 不再写 model sidecar（写点③退役）：磁盘零写入，读回生效值只进内存播种', async () => {
     const sessionFilePath = join(tmpDir, 'created-id.jsonl')
     writeFileSync(sessionFilePath, '{"type":"session","cwd":"/test"}\n')
 
@@ -402,33 +394,35 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
       { record: vi.fn() } as unknown as WorkspaceService, makeRegisterDeps(),
     )
     // 请求值（Landing Chip override）与 pi 读回生效值不同——pattern 引擎静默换模场景，
-    // 真值必须胜出（C-pi-13 写点写生效值）
+    // 内存播种仍取读回真值（C-pi-13）
     await lifecycle.create(tmpDir, 'test', { modelOverride: 'requested/model', thinkingOverride: 'low' })
 
-    const sidecarPath = sessionFilePath + '.model.json'
-    expect(existsSync(sidecarPath)).toBe(true)
-    const data = JSON.parse(readFileSync(sidecarPath, 'utf-8'))
-    expect(data.modelId).toBe('real-p/real-model')
-    expect(data.thinkingLevel).toBe('max')
+    // 持久层零写入：无 sidecar 产物（初始模型信息由 pi 对话落 JSONL + 扫描反向读提供）
+    expect(existsSync(sessionFilePath + '.model.json')).toBe(false)
+    expect(lifecycle.get('created-id')?.modelId).toBe('real-p/real-model')
   })
 
-  it('D1 写点⑤/E6 自愈: restore 读回成功后过期 .model.json 被覆写为读回值', async () => {
+  it('[U8a W3] restore 读回成功不再覆写 .model.json（写点⑤退役）：播种只进内存 metaOverride', async () => {
     const sessionFilePath = join(tmpDir, 'test-session-id.jsonl')
     const sidecarPath = sessionFilePath + '.model.json'
-    // 预置过期 sidecar（restore 窗口外切模产生的漂移值）
+    // 预置历史 sidecar（W6 中途态仍可能存在的旧文件）——restore 后必须原样保留
     writeFileSync(sidecarPath, JSON.stringify({ modelId: 'stale/model', thinkingLevel: 'stale-level', version: 1 }))
 
-    await runRestore({
+    const { session } = await runRestore({
       sessionId: 'test-session-id',
       sessionFile: sessionFilePath,
       model: { id: 'fresh', provider: 'fp' },
       thinkingLevel: 'high',
     })
 
-    expect(existsSync(sidecarPath)).toBe(true)
+    // 读回真值照常播种内存 metaOverride（D2 链路不回退）
+    expect(session).toBeDefined()
+    expect(session!.modelId).toBe('fp/fresh')
+    expect(session!.thinkingLevel).toBe('high')
+    // 持久层零写入：旧 sidecar 不被覆写（读回失败兜底已由扫描 meta 反向读承担）
     const data = JSON.parse(readFileSync(sidecarPath, 'utf-8'))
-    expect(data.modelId).toBe('fp/fresh')
-    expect(data.thinkingLevel).toBe('high')
+    expect(data.modelId).toBe('stale/model')
+    expect(data.thinkingLevel).toBe('stale-level')
   })
 })
 

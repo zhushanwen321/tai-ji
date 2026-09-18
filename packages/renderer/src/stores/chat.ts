@@ -21,8 +21,8 @@
  * useChatStore 仍在 renderer，零消费方 churn）。
  *
  * 历史：原文件 906 行（defineStore setup 函数体 + 10 个模块级 helper），w4 全部迁 core。
- * re-export（DEFAULT_STREAMING_IDLE_TIMEOUT_MS / LRU_MAX_SESSIONS / RetryState / QueueState /
- * FinalizeReason）保持消费方兼容（chat-streaming-timeout.test.ts / chat-lru.test.ts /
+ * re-export（LRU_MAX_SESSIONS / RetryState / QueueState /
+ * FinalizeReason）保持消费方兼容（chat-lru.test.ts /
  * RetryIndicator.vue / QueueBubble.vue 等）。
  */
 import { defineStore } from 'pinia'
@@ -32,5 +32,5 @@ import { agentCallLruLinkage } from '@/composables/features/chat/agentcall-lru-l
 export const useChatStore = defineStore('chat', () => createChatStore(agentCallLruLinkage()))
 
 // re-export 供外部消费（测试 / 组件读常量与类型），保持原 chat.ts 的 export 形状
-export { DEFAULT_STREAMING_IDLE_TIMEOUT_MS, LRU_MAX_SESSIONS } from '@taiji/core'
+export { LRU_MAX_SESSIONS } from '@taiji/core'
 export type { RetryState, QueueState, FinalizeReason } from '@taiji/core'

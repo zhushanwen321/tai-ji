@@ -1,5 +1,5 @@
 /**
- * toolResult 图片缓存生命周期（crash-resilience §3.3 D6-⑨ / u7-memory-governance，main 侧）。
+ * toolResult 图片缓存生命周期（D6-⑨ / u7-memory-governance，main 侧）。
  *
  * 目录形态：`<dataDir>/cache/images/<sessionId>/<sha256(data)>.<ext>`（路径推导 SSOT =
  * shared paths.ts getImageCacheDir / getImageCacheRoot，穿越校验同款）。

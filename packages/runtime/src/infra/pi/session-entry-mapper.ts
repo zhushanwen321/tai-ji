@@ -7,7 +7,6 @@
  * - entryIds：与 messages 平行对齐的来源 entry id（替代旧 __entryId 注入，M1 不再塞消息体）。
  * - customDataEntries：纯数据 custom entry（type:'custom'，不进 LLM 上下文），按需读取。
  *
- * 设计依据：docs/architecture/conversation-history-unified-converter.md §3.3.1。
  * M1 只建 mapper + 类型 + SSOT，不接入 rebuildHistoryFromEntries / getHistoryFromFilePath（M2/M3 才接入）。
  *
  * 映射逻辑整体迁移自 session-history.ts mapEntriesToPiMessages（逻辑不重新发明），差异：

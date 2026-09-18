@@ -35,6 +35,9 @@ export default {
     handoffBusy: '正在回复中，请等待当前回复完成或先停止后再交接',
     handoffExit: '退出交接模式',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
+    // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
+    copyLastReply: '已复制最后回复',
+    copyLastReplyFailed: '复制失败',
   },
   message: {
     copy: '复制',
@@ -48,6 +51,11 @@ export default {
     thinkingHeader: '## 思考',
     expand: '展开',
     collapse: '收起',
+    // [system-notice-rendering-upgrade U3] 展开块内滚动信息条与展开按钮（BlockScrollBox 消费，U7）：
+    // 行区间含单位词（'{from}–{to} / {total} 行'）；展开态专用「展开全部」——既有 expand 键
+    // 无「全部」语义（收起态复用 collapse，不另立键）
+    blockScrollLines: '{from}–{to} / {total} 行',
+    blockScrollExpandAll: '展开全部',
     thinkingBlock: '思考',
     imagePlaceholder: '图片缓存已满',
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
@@ -65,12 +73,13 @@ export default {
     viewCommandDoc: '查看命令文档',
     compressing: '压缩中',
     autoCompressing: '正在自动压缩上下文',
-    // [compact-defer-composer-queue u1] 压缩中活动带副文案（u3 消费；u1 负责新增 key）
-    compactingFlushHint: '完成后自动发送 {count} 条待发消息',
+    // [system-notice-rendering-upgrade U3] 压缩中「待发 N」chip（ActivityStrip 消费，D4；
+    // 形态从副文案长句变 chip，计数口径不变）
+    compactingQueueChip: '待发 {count}',
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
-    // [u8-pi-respawn] pi 崩溃恢复提示条（crash-resilience D7 / T4 文案）
+    // [u8-pi-respawn] pi 崩溃恢复提示条（D7 / T4 文案）
     respawnPending: '会话引擎异常退出，正在自动恢复…可继续发消息，恢复完成后送达',
     respawnRestored: '会话引擎已从崩溃中恢复。中断的回合未保留；崩溃时进行中的后台任务与子代理已终止、不会自动恢复。可继续发消息。',
     respawnFailed: '引擎恢复失败，点此重试或新建会话',
@@ -81,8 +90,10 @@ export default {
     railInProgress: '进行中…',
     startConversation: '开始对话，或从左侧选择一个会话',
     scrollToBottom: '回到底部',
-    compacted: '已压缩上下文{tokens}',
-    compactedTokens: '（{tokens} tokens）',
+    // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
+    // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
+    compacted: '已压缩上下文',
+    compactedTokens: '{tokens} tokens',
     branchCreated: '已创建分支（自 {from}）',
     branchCreatedNoFrom: '已创建分支',
     thinkCount: '思考 ×{count}',
@@ -99,12 +110,19 @@ export default {
     bashNoContext: '不进上下文',
     bashCancel: '取消',
     bashUnknownCommand: '(未知命令)',
-    // [W4 turn-attribution] 后台续跑 turn 起点行（Turn.vue trigger==='bg-notify'）与 bash 执行中瞬时行前缀（MessageStream.vue）
-    turnTriggerBgNotify: '后台任务完成 · 已继续处理',
+    // [system-notice-rendering-upgrade U3] background-bash 结构化行的「后台」chip（D2）
+    bashBackgroundChip: '后台',
+    // [system-notice-rendering-upgrade U3] 边界行拆主/从两段（D5，U6 消费）：计数主文案 +
+    // 「已继续处理」从文案。值不带前导点——点号由消费侧按「有主文案才加」条件渲染
+    // （设计 D5「无主文案时不带前导点」，分离号与文案两段）
+    turnTriggerBgNotifySummary: '{count} 个后台任务完成',
+    turnTriggerBgNotifyContinued: '已继续处理',
+    // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
+    // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
+    turnTriggerBgNotifyFailed: '{count} 失败',
+    // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
-    // [premature-timeout] idle 超时误判收口的恢复指引（Turn.vue，docs/design/timeout-streaming-ui-idle.md §4.2；
     // 不写死阈值数字——阈值用户可调，写死会漂移）
-    prematureTimeoutNotice: '响应已超时收口。若任务仍在后台进行，完成后将自动恢复显示；确认已停止可重新发送。',
   },
   git: {
     commit: '提交',
@@ -157,19 +175,19 @@ export default {
     resetRemainingMinutes: '剩{m}m',
     resetRemainingSoon: '<1m',
     resetEmpty: '--',
-    // composer-gen-stats 双触发器（docs/design/composer-gen-stats.md §3.1 / §3.3 D5）
+    // composer-gen-stats 双触发器（D5）
     genStatsSpeedTitle: 'TOKEN 速度',
     genStatsCacheTitle: '缓存命中率',
     genStatsCurrent: '本次',
-    // 「本次」label 的 hover 补句（C4）：current 无窗口过滤，样本可能来自较早的记录
-    genStatsCurrentNote: '来自最近一次请求的记录',
+    // 「本次」label 的 hover 补句（C4）：current 无窗口过滤且为会话私有样本（本会话最近一次请求）
+    genStatsCurrentNote: '本会话最近一次请求的记录',
     genStatsCurrentReq: '本次请求',
     genStatsDay: '今日均值（此模型）',
     genStatsD7: '近 7 天',
     genStatsD30: '近 30 天',
-    genStatsDayShort: '今日加权',
-    genStatsSpeedNote: 'output tokens ÷ 生成耗时，按模型分文件累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
-    genStatsCacheNote: 'cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
+    genStatsDayShort: '今日加权（此模型）',
+    genStatsSpeedNote: '「本次」为本会话最近一次请求；今日/7 天/30 天为该模型跨会话累计（加权平均）；按单次 LLM 请求耗时计算，不含工具执行时间',
+    genStatsCacheNote: '「本次」为本会话最近一次请求；今日加权为该模型跨会话累计；cacheRead ÷ (input + cacheRead + cacheWrite)；模型不支持缓存时恒为 0%',
     genStatsNoData: '暂无数据',
   },
   sideDrawer: {
@@ -212,10 +230,12 @@ export default {
     workflowPending: '等待中',
     unreadMessages: '抽屉打开期间有 {count} 条新消息',
     // 后台命令 tab（background-task-sidebar-view D5：drawer bashTask 详情）。
-    // 术语裁决（设计 §1）：用户可见命名一律「后台命令」，与 subagent 的「后台任务」区分
+    // 术语裁决（设计 §1）：用户可见命名一律「后台命令」，与 subagent 的「后台任务」区分。
+    // 入口提示（2026-09-16 回写）：入口唯一化后的列表承载 = composer 任务托盘的「后台命令」面板
+    // （原侧栏 L2 视图已退役，设计 composer-task-tray.md D10/D11）。
     tabBashTask: '后台命令',
     noBashTask: '未选中后台命令',
-    bashTaskHint: '在侧边栏「后台命令」列表中点击任务查看详情',
+    bashTaskHint: '在 composer 工具条的任务托盘中打开「后台命令」面板，点击任务查看详情',
     bashTaskStartedAt: '开始 {time}',
     bashTaskRunningFor: '已运行 {duration}',
     bashTaskDuration: '耗时 {duration}',
@@ -395,9 +415,6 @@ export default {
     selectSession: '选择左侧会话开始',
     taskFailed: '任务创建失败：{error}',
     sendFailed: '消息发送失败：{error}',
-  },
-  widget: {
-    details: '详情',
   },
   ambiguous: {
     title: '「{basename}」有 {count} 个匹配，选择要打开的文件',

@@ -297,7 +297,8 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()
 
-    // 首连（initApp 路径）不含 subagent/workflow 重拉——列表首拉归 useListSync
+    // 首连（initApp 路径）不含 subagent/workflow 重拉——列表首拉归挂载消费方
+    // （现行 = composer 任务托盘 useTrayCounts 的 watch(sessionId) 拉取腿）
     await sidebar.onConnected()
     expect(getSubagentsMock).not.toHaveBeenCalled()
     expect(getWorkflowsMock).not.toHaveBeenCalled()

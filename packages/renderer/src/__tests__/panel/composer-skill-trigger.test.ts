@@ -6,9 +6,12 @@
  *   触发 skill-only 浮层（场景 6④）；`/usr` 输到第二个 `/` 浮层关闭（场景 6①）；
  *   行首 `/` 仍命令浮层（场景 6② 回归）；`#`/`$`/`@` 无变化（场景 6③ 回归）；
  *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据面）
- * - P 组 CommandPopover（真实组件）：panel 态从 commandStore 过滤 source:"skill" 且剥
- *   `skill:` 前缀；已选项「已选」禁选（onSelect 守卫）；landing 态 global+project 合并；
- *   select payload 携带 location（sourceInfo.path）
+ * - P 组 CommandPopover（真实组件）：panel 态 taiji 源（globalSkills ∪ projectSkills props，
+ *   ADR-0050 修订切源）合并去重序 + `__` 过滤 + pi 真源 skill 推送不影响；已选项「已选」
+ *   禁选（onSelect 守卫）；location 取 SkillInfo.sourcePath；panel slash 段过滤 skill: 项
+ *   （双入口消除）；landing 态合并回归
+ * - P7/P8 组 panel cwd 接线（ADR-0050 修订，Composer 层）：sessionStore 投影的 session cwd
+ *   → useProjectSkills(cwd) 拉取 → CommandPopover projectSkills prop；landing 态不受影响
  * - W9/W10 组 SearchModal ⌘K 注入（第三条 skill 入口）：pendingSlash.isSkill → insertSkillChip
  *   （裸名 + location + 多共存）；isSkill 缺省 → 维持 insertSlashChip 命令通路（回归锁）
  *
@@ -41,6 +44,8 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn() }),
   resetNewTaskFlow: vi.fn(),
 }))
+// P7 用：getProjectSkills 可控 mock（vi.hoisted 提升供断言/改返回值）
+const getProjectSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
@@ -50,7 +55,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   },
   config: {
     getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
+    getProjectSkills: getProjectSkillsMock,
     onSkillCacheInvalidated: () => () => {},
   },
 }))
@@ -58,6 +63,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 import Composer from '@/components/panel/Composer.vue'
 import { useCommandStore, __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -68,7 +74,8 @@ beforeEach(() => {
 /** stub 选中 payload（模块级可变：W6 在点击前设置，点击时 emit 给 Composer.onCmdSelect） */
 let currentPick: Record<string, unknown> | null = null
 
-/** CommandPopover stub：props 反映到 data-* 供 DOM 断言；cp-pick 按钮模拟选中项 emit select */
+/** CommandPopover stub：props 反映到 data-* 供 DOM 断言；cp-pick 按钮模拟选中项 emit select。
+ *  globalSkills/projectSkills 反映到 data-*（P7/P8 cwd 接线断言面）。 */
 const CommandPopoverStub = defineComponent({
   name: 'CommandPopover',
   props: {
@@ -77,6 +84,8 @@ const CommandPopoverStub = defineComponent({
     sessionId: { type: String, default: undefined },
     query: { type: String, default: '' },
     selectedSkillNames: { type: Array, default: () => [] },
+    globalSkills: { type: Array, default: () => [] },
+    projectSkills: { type: Array, default: () => [] },
   },
   emits: ['select'],
   methods: {
@@ -88,7 +97,7 @@ const CommandPopoverStub = defineComponent({
     },
   },
   template:
-    '<div data-testid="cp" :data-open="String(open)" :data-type="type" :data-query="query" :data-selected="(selectedSkillNames || []).join(\',\')"><button data-testid="cp-pick" @click="emitPick" /><slot /></div>',
+    '<div data-testid="cp" :data-open="String(open)" :data-type="type" :data-query="query" :data-selected="(selectedSkillNames || []).join(\',\')" :data-globalskills="(globalSkills || []).map((s) => s.name).join(\',\')" :data-projectskills="(projectSkills || []).map((s) => s.name).join(\',\')"><button data-testid="cp-pick" @click="emitPick" /><slot /></div>',
 })
 
 const SIMPLE = { template: '<div />' }
@@ -103,9 +112,9 @@ const composerStubs = {
   QueueBubble: SIMPLE,
 }
 
-function mountComposer() {
+function mountComposer(variant: 'panel' | 'landing' = 'panel') {
   return mount(Composer, {
-    props: { sessionId: 's1', variant: 'panel' },
+    props: { sessionId: variant === 'panel' ? 's1' : null, variant },
     global: { stubs: composerStubs },
   })
 }
@@ -400,7 +409,7 @@ describe('SearchModal ⌘K 注入分流（pendingSlash isSkill → skill 通路�
 
 // ─────────────────────── P 组：CommandPopover skill-only 候选（真实组件） ───────────────────────
 
-/** 推 session.commands 到 sessionId 订阅者（同 slash-trigger 测试机械） */
+/** 推 session.commands 到 sessionId 订阅者（pi 真源推送机械；P1/P5 断言其不影响 taiji 源候选） */
 function pushCommands(sessionId: string, commands: Array<Record<string, unknown>>): void {
   const msg = {
     type: 'session.commands',
@@ -415,12 +424,12 @@ function bodyRows(): HTMLElement[] {
   return Array.from((list ?? document.body).querySelectorAll('.cmd-row')) as HTMLElement[]
 }
 
-/** SkillInfo fixture（landing 候选源形状） */
+/** SkillInfo fixture（taiji 源候选形状：sourcePath 即 location 权威来源） */
 function skillInfo(name: string, sourcePath?: string): SkillInfo {
   return { id: `pi-${name}`, name, description: `${name} desc`, enabled: true, source: 'global', triggers: [], sourcePath }
 }
 
-describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）', () => {
+describe('CommandPopover skill-only 候选（D1 taiji 源 + D2 已选禁选，ADR-0050 修订）', () => {
   let wrapper: ReturnType<typeof mount> | null = null
 
   afterEach(() => {
@@ -429,24 +438,34 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
     document.body.innerHTML = ''
   })
 
-  it('P1 panel 态：只列 source=skill 项、剥 skill: 前缀、__ 内部项过滤', async () => {
+  it('P1 panel 态：taiji 源合并（global 优先、project 补独有、去重序）+ `__` 过滤 + pi 真源 skill 推送不影响', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
-      props: { open: true, type: 'skill', sessionId: 's1', query: '' },
+      props: {
+        open: true,
+        type: 'skill',
+        sessionId: 's1',
+        query: '',
+        globalSkills: [skillInfo('global-a', '/g/a/SKILL.md'), skillInfo('shared'), skillInfo('__taiji_reload')],
+        projectSkills: [skillInfo('shared'), skillInfo('proj-b')],
+      },
     })
     await flushPromises()
+    // pi 真源 skill 命令推送：panel skill 段已切 taiji 源，候选不受 pi 快照影响
     pushCommands('s1', [
-      { name: 'skill:alpha', description: 'A', source: 'skill' },
+      { name: 'skill:pi-only', description: 'pi scan', source: 'skill' },
       { name: 'commit', description: 'ext', source: 'extension' },
-      { name: 'skill:beta', source: 'skill' },
-      { name: 'skill:__taiji_reload', source: 'skill' },
     ])
     await flushPromises()
     await nextTick()
     const rows = bodyRows()
-    expect(rows).toHaveLength(2)
-    expect(rows[0].textContent).toContain('alpha')
-    expect(rows[1].textContent).toContain('beta')
+    // 去重序：global 优先（global-a、shared），project 补独有（proj-b）；shared 不重复
+    expect(rows).toHaveLength(3)
+    expect(rows[0].textContent).toContain('global-a')
+    expect(rows[1].textContent).toContain('shared')
+    expect(rows[2].textContent).toContain('proj-b')
+    // pi 真源项不进候选；__ 内部项过滤
+    expect(bodyRows().some((r) => r.textContent?.includes('pi-only'))).toBe(false)
     expect(bodyRows().some((r) => r.textContent?.includes('commit'))).toBe(false)
     expect(bodyRows().some((r) => r.textContent?.includes('__taiji_reload'))).toBe(false)
   })
@@ -454,13 +473,15 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
   it('P2 D2 已选禁选：已选项显示「已选」且禁选（不 emit select），未选项正常选', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
-      props: { open: true, type: 'skill', sessionId: 's1', query: '', selectedSkillNames: ['alpha'] },
+      props: {
+        open: true,
+        type: 'skill',
+        sessionId: 's1',
+        query: '',
+        selectedSkillNames: ['alpha'],
+        globalSkills: [skillInfo('alpha'), skillInfo('beta')],
+      },
     })
-    await flushPromises()
-    pushCommands('s1', [
-      { name: 'skill:alpha', source: 'skill' },
-      { name: 'skill:beta', source: 'skill' },
-    ])
     await flushPromises()
     await nextTick()
     const rows = bodyRows()
@@ -475,15 +496,17 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
     expect(wrapper.emitted('select')![0][0]).toMatchObject({ type: 'skill', name: 'beta' })
   })
 
-  it('P3 panel 态 select payload 携带 location（sourceInfo.path）', async () => {
+  it('P3 panel 态 select payload 携带 location（SkillInfo.sourcePath）', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
-      props: { open: true, type: 'skill', sessionId: 's1', query: '' },
+      props: {
+        open: true,
+        type: 'skill',
+        sessionId: 's1',
+        query: '',
+        globalSkills: [skillInfo('alpha', '/s/alpha/SKILL.md')],
+      },
     })
-    await flushPromises()
-    pushCommands('s1', [
-      { name: 'skill:alpha', source: 'skill', sourceInfo: { path: '/s/alpha/SKILL.md', source: 'skill' } },
-    ])
     await flushPromises()
     await nextTick()
     bodyRows()[0].click()
@@ -495,7 +518,7 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
     })
   })
 
-  it('P5 slash 浮层（行首命令浮层）skill 项 select payload 携带 isSkill + location（D3 透传链）', async () => {
+  it('P5 panel 态 slash 段过滤 skill: 项（ADR-0050 修订双入口消除）：skill 项不列、命令项照常', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
       props: { open: true, type: 'slash', sessionId: 's1', query: '' },
@@ -508,28 +531,19 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
     await flushPromises()
     await nextTick()
     const rows = bodyRows()
-    // skill 项（icon 星标紫）+ 命令项混列
-    const skillRow = rows.find((r) => r.textContent?.includes('alpha'))
+    // compact + commit = 2 项；skill:alpha 不进 panel slash 段（skill 段是唯一 skill 入口）
+    expect(rows).toHaveLength(2)
+    expect(rows.some((r) => r.textContent?.includes('alpha'))).toBe(false)
     const cmdRow = rows.find((r) => r.textContent?.includes('commit'))
-    expect(skillRow).toBeTruthy()
     expect(cmdRow).toBeTruthy()
-    skillRow!.click()
-    await nextTick()
-    expect(wrapper.emitted('select')![0][0]).toMatchObject({
-      type: 'slash',
-      name: '/skill:alpha',
-      isSkill: true,
-      location: '/s/alpha/SKILL.md',
-    })
-    // 命令项：isSkill false、无 location（G3 红线：命令通路零变化）
     cmdRow!.click()
     await nextTick()
-    expect(wrapper.emitted('select')![1][0]).toMatchObject({
+    expect(wrapper.emitted('select')![0][0]).toMatchObject({
       type: 'slash',
       name: '/commit',
       isSkill: false,
     })
-    expect((wrapper.emitted('select')![1][0] as Record<string, unknown>).location).toBeUndefined()
+    expect((wrapper.emitted('select')![0][0] as Record<string, unknown>).location).toBeUndefined()
   })
 
   it('P4 landing 态：globalSkills + projectSkills 合并（global 优先、project 补独有、去重）', async () => {
@@ -555,5 +569,45 @@ describe('CommandPopover skill-only 候选（D1 数据源 + D2 已选禁选）',
     rows[0].click()
     await nextTick()
     expect(wrapper.emitted('select')![0][0]).toMatchObject({ type: 'skill', name: 'global-a', location: '/g/a/SKILL.md' })
+  })
+})
+
+// ─────────────── P7/P8 组：panel cwd 接线（ADR-0050 修订——session cwd → projectSkills）───────────────
+// Composer 层垂直切片：sessionStore 投影的 session cwd（split mode 各 panel 各自 session）
+// → useProjectSkills(cwd) 拉取 → CommandPopover projectSkills prop；landing 态不受影响。
+
+describe('panel cwd 接线（session cwd → project skill，ADR-0050 修订）', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+    getProjectSkillsMock.mockReset()
+    getProjectSkillsMock.mockResolvedValue([])
+  })
+
+  it('P7 panel 态：sessionStore 含 s1(cwd=/w/x) → getProjectSkills(/w/x) → CommandPopover 收到项目 skill', async () => {
+    const sessionStore = useSessionStore()
+    sessionStore.appendSession({
+      id: 's1',
+      label: 's1',
+      cwd: '/w/x',
+      status: 'idle',
+      lastActiveAt: Date.now(),
+      modelId: '',
+      tokenCount: 0,
+    })
+    getProjectSkillsMock.mockResolvedValue([skillInfo('proj-x', '/w/x/.agents/skills/proj-x/SKILL.md')])
+    const wrapper = mountComposer()
+    await flushPromises()
+    // cwd 接线断言：拉取参数是 session cwd（非 flow.currentCwd——mock 恒 null）
+    expect(getProjectSkillsMock).toHaveBeenCalledWith('/w/x')
+    expect(cp(wrapper).attributes('data-projectskills')).toBe('proj-x')
+    wrapper.unmount()
+  })
+
+  it('P8 landing 态不受影响：cwd 取 flow.currentCwd（null）→ 不拉项目 skill、prop 空', async () => {
+    const wrapper = mountComposer('landing')
+    await flushPromises()
+    expect(getProjectSkillsMock).not.toHaveBeenCalled()
+    expect(cp(wrapper).attributes('data-projectskills')).toBe('')
+    wrapper.unmount()
   })
 })

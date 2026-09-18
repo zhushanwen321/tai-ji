@@ -1,5 +1,5 @@
 /**
- * relay live ≡ reload 等价性断言（E-4，subagent-realtime-channel.md §2.4 / §9 E-重开）。
+ * relay live ≡ reload 等价性断言。
  *
  * 不变量：同一 subagent 任务的 drawer 对话流，两条供数腿喂同一个 core reducer 产出全等 state——
  * - live 腿：真实 RelayTee（infra/relay/relay-tee.ts，生产 tee 翻译层）消费合成 child stdout

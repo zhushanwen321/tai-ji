@@ -151,7 +151,7 @@ if (isDev) {
   app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), '.taiji-dev'), 'electron'))
 }
 
-// ── main 日志落盘（crash-resilience D6-①）────────────────────────
+// ── main 日志落盘（D6-①）────────────────────────
 // initMainLogger：建 <dataDir>/logs/ + 启动保留期清理（一次 + 每日复扫定时器）+
 // 内存水位定时器（5min）。必须晚于上面 isDev 块的 TAIJI_AGENT_DATA_DIR 隔离
 // （getDataDir() 动态推导，dev 实例日志须落 ~/.taiji-dev 而非 prod 目录）；

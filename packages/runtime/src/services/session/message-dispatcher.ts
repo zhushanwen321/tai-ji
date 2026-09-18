@@ -24,7 +24,7 @@ import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
 import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
-import { SkillInjector, type SkillNotice } from './skill-injector.js'
+import { LateBoundSkillSource, SkillInjector, type SkillNotice } from './skill-injector.js'
 import { publishSkillNotices as publishSkillNoticesShared } from './skill-notice-publisher.js'
 import { AbortLiveness } from './abort-liveness.js'
 import type { AbortSource } from './abort-liveness.js'
@@ -143,7 +143,9 @@ export class MessageDispatcher {
     private messageBus?: IMessageBus,
     // [composer-multi-skill-injection D9] skill 注入器：三入口统一调用（hook 之后、
     // client 发送之前）；构造注入便于测试替换 spy（每入口恰好单次调用的结构化幂等）。
-    private readonly injector: SkillInjector = new SkillInjector(),
+    // [A1 接线] 默认源 = 晚绑定占位（SessionService 构造期 registry 尚不存在，组合根
+    // 后绑；测试默认装配无标记文本不触达映射）。
+    private readonly injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
   ) {
     this.abortLiveness = new AbortLiveness({
       getClient: (sessionId) => this.pm.getClient(sessionId),
@@ -238,7 +240,9 @@ export class MessageDispatcher {
     // [composer-multi-skill-injection D9] 注入器：BeforeSend hook 之后、client.prompt 之前
     // 统一处理（展开 / 预检降级 / 失效透传）。hook 审核的是用户原文，注入器处理改写后文本；
     // hook 若破坏标记完整性，注入器内部走残缺透传 + notice（D8）。每入口恰好单次调用。
-    const injection = await this.injector.inject(client, promptText)
+    // [A1 接线] activeSession.cwd 作 project 扫描基准（D7）——session 未托管（view 缺失）
+    // 时 undefined = global-only 映射（宁缺毋错，不猜 cwd）。
+    const injection = await this.injector.inject(client, promptText, activeSession?.cwd)
     try {
       await client.prompt(injection.text, images)
     } catch (e) {
@@ -950,8 +954,8 @@ export class MessageDispatcher {
     const client = this.getClientOrThrow(sessionId, 'steer')
     // [composer-multi-skill-injection D9] 注入器：入队前统一处理（与 sendPrompt 同构）。
     // steer 路径现状无 BeforeSend hook 调用点（hook 仅注册在 sendMessage 骨架），
-    // 「hook 之后」约束在此自然成立。
-    const injection = await this.injector.inject(client, content)
+    // 「hook 之后」约束在此自然成立。[A1 接线] session cwd 作 project 扫描基准（D7）。
+    const injection = await this.injector.inject(client, content, this.svc.getSession(sessionId)?.cwd)
     await client.steer(injection.text)
     this.publishSkillNotices(sessionId, content, injection.notices)
   }
@@ -959,7 +963,8 @@ export class MessageDispatcher {
   async followUpMessage(sessionId: string, content: string): Promise<void> {
     const client = this.getClientOrThrow(sessionId, 'followUp')
     // [composer-multi-skill-injection D9] 同 steerMessage：入队前统一处理，恰一次调用。
-    const injection = await this.injector.inject(client, content)
+    // [A1 接线] session cwd 作 project 扫描基准（D7）。
+    const injection = await this.injector.inject(client, content, this.svc.getSession(sessionId)?.cwd)
     await client.followUp(injection.text)
     this.publishSkillNotices(sessionId, content, injection.notices)
   }

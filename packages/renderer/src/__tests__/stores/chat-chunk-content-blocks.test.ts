@@ -29,7 +29,6 @@ function makeCtx(initial: Message[] = []): MessageEffectContext {
     markChangeSetsSuperseded: vi.fn(),
     finalizeSession: vi.fn(),
     clearPendingSend: vi.fn(),
-    armStreamingTimer: vi.fn(),
     // m2→W14：queue_update drain 接线 drainN（计数 FIFO）+ appendUser + 深度对账 reconcilePending
     //（对齐 core __tests__/effects.test.ts 形态；本套用例不触发 queue_update，返回空数组即可）
     drainN: vi.fn(() => []),

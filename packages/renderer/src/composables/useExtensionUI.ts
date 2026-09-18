@@ -17,7 +17,7 @@
  *   dialog 请求由 CompanionBand wave 消费 bus 直连，不经 store）
  * - 事件 sessionId 缺失（无 sid 的 ui-request）→ 跳过入 store（warn，C2）
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
- * - onUITimeout（超时出队）+ getPendingRequests（切回拉取）保留 WS/RPC 路径（C3）
+ * - getPendingRequests（切回拉取）保留 RPC 路径（C3）
  *
  * filter 仅用于读取分流 + 入队第二道闸（askUser 硬过滤之后）：store 存全量 pending，
  * 多个 composable 实例（Panel 入 askUser 读取）各按 filter 读同一份 store 分区。
@@ -27,7 +27,7 @@ import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
-import { onUITimeout, sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
@@ -133,15 +133,6 @@ export function useExtensionUI(
         const adapted = toExtensionUIRequest(eventSid, e.request)
         if (filter && !filter(adapted)) return // filter 第二道闸
         store.addRequest(eventSid, adapted)
-      }),
-    )
-    // C3 保留 WS/RPC 路径：超时出队（runtime ExtensionTimeoutManager 5 分钟无响应后广播
-    // extension.ui_timeout，同时已向 pi 发默认响应。前端必须出队超时请求，否则对话框残留，
-    // 用户点击会发送过期的 ui_response）。按 requestId 精确移除：pi 无串行保证，
-    // 队列可能同时有多个 pending，超时的不一定在队首。M1 竞态修复：用订阅时捕获的 sid。
-    unsubFns.push(
-      onUITimeout(sid, (requestId) => {
-        store.removeRequest(sid, requestId)
       }),
     )
     // C3 保留：拉取 runtime 缓存的 pending 请求（切换 session 后重新订阅时，runtime 会推送缓存的请求）

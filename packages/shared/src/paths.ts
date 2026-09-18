@@ -142,7 +142,7 @@ export function getAttachmentsDir(sessionId: string, dataDir?: string): string {
 }
 
 /**
- * toolResult 图片缓存根目录（`<dataDir>/cache/images`）[crash-resilience §3.3 D6-⑨]。
+ * toolResult 图片缓存根目录（`<dataDir>/cache/images`）[D6-⑨]。
  *
  * 纯缓存语义（可随时丢弃、可幂等重建）；落盘执行方 = main 进程（IPC IMAGE_CACHE_WRITE），
  * 级联/孤儿/软上限清理均为此目录下的文件系统级动作（runtime session 删除链同样直接
@@ -156,7 +156,7 @@ export function getImageCacheRoot(dataDir?: string): string {
 }
 
 /**
- * 单 session 的图片缓存目录（`<getImageCacheRoot()>/<sessionId>`）[crash-resilience §3.3 D6-⑨]。
+ * 单 session 的图片缓存目录（`<getImageCacheRoot()>/<sessionId>`）[D6-⑨]。
  *
  * 路径穿越防护与 getAttachmentsDir 同款：sessionId 必须匹配 `^[A-Za-z0-9_-]+$`，
  * 否则 throw（cache/images 内子目录名即 sessionId，孤儿扫描据此反查 pi sessions 目录）。

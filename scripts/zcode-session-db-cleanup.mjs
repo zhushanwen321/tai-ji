@@ -9,14 +9,14 @@
 //
 // 实现纪律（设计 §3.2 D7 四不变量）：
 // - 白名单只来自结构化 entry 解析（JSON.parse 逐行），禁止文本/正则提取；
-// - I2 时间戳跨源交叉验证（唯一常量 I2_TOLERANCE_MS，counts.sql ④⑤ 的 10000 字面量须同步本处）；
+// - I2 时间戳跨源交叉验证（唯一常量 I2_TOLERANCE_MS）；
 // - 删除面：宿主库 PRAGMA foreign_keys=ON + FK 依赖序（session 行删除，级联清理引用表），
 //   input_history 无 FK 显式删；索引库零 FK → 四冲突源只读预检（命中两侧同时剔除）；
 // - 跨库顺序恒「先宿主后索引」，索引侧失败落残留清单 w5-residue-<ts>.json，
 //   --replay-residue 补删（含 R9-4 防篡改前置断言）。
 //
-// 本文件参照 SQL 段与 docs/design/probes/zcode-session-db/counts.sql W5 节保持逐字同义
-// （I1 参照断言的权威文本），两处任一改动须同步另一处。
+// 本文件 referenceDeletionSetImpl 是 I1 参照断言的权威文本（原 probe 文档 counts.sql
+// W5 参照 SQL 的同义实装，该文档已删除、git 可追溯）。
 
 import { DatabaseSync } from "node:sqlite";
 import * as fs from "node:fs";
@@ -305,13 +305,13 @@ function appendPrecheckAnomalies(anomalies, indexHits, nonChildChildren) {
   }
 }
 
-/** I1 参照断言：工具自算删除集 == counts.sql W5 参照 SQL 结果。 */
+/** I1 参照断言：工具自算删除集 == 参照 SQL（referenceDeletionSetImpl）结果。 */
 function assertReferenceParity({ hostDbPath, indexDbPath, shaped, direct, derived }) {
   const ref = referenceDeletionSetImpl(hostDbPath, indexDbPath, shaped);
   const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
   if (!sameSet(direct, [...ref.direct]) || !sameSet(derived, [...ref.derived])) {
     throw new CleanupAbortError(
-      `I1 参照断言失败：工具自算直接集/派生集与 counts.sql W5 参照 SQL 不一致。\n` +
+      `I1 参照断言失败：工具自算直接集/派生集与参照 SQL 权威文本（docs/architecture/zcode-session-db-isolation.md §3.2 D7）不一致。\n` +
         `  自算 direct=[${direct.join(",")}] derived=[${derived.join(",")}]\n` +
         `  参照 direct=[${[...ref.direct].join(",")}] derived=[${[...ref.derived].join(",")}]`,
     );
@@ -346,7 +346,7 @@ export function analyze({ whitelistRows, hostDbPath, indexDbPath }) {
   const derived = derivedRows.map((r) => r.id).filter((id) => !indexHits.has(id));
   appendPrecheckAnomalies(anomalies, indexHits, nonChildChildren);
 
-  // I1 参照断言：工具自算删除集 == counts.sql W5 参照 SQL 结果
+  // I1 参照断言：工具自算删除集 == 参照 SQL（referenceDeletionSetImpl）结果
   assertReferenceParity({ hostDbPath, indexDbPath, shaped, direct, derived });
 
   return {

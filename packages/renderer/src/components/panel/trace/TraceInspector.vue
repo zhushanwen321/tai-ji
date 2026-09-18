@@ -9,7 +9,7 @@
     - block 态（selectedKey = `<entryKey>#block-N`）：assistant 子 block 全文
       （thinking/text 正文、toolCall arguments），「← 返回」回父聚合态。
     正文可鼠标框选复制（body 容器 select-text——全局 user-select:none 下的恢复点，
-    与 chat 域 WidgetArea 同款范式）。
+    与 chat 域内容区同款范式）。
   -->
   <div v-if="row" class="flex h-full min-h-0 flex-col" data-testid="trace-inspector">
     <!-- head：返回 + badge（block 态为 block 类型）+ 定位 + copy -->
@@ -321,9 +321,16 @@ async function onJumpParent(): Promise<void> {
   const ref = r.meta.parentSession
   if (typeof ref !== 'string' || !ref) return
   const forkId = typeof r.meta.forkEntryId === 'string' ? r.meta.forkEntryId : undefined
-  const result = await jumpToParentSession(props.sessionId, ref, forkId)
-  if (!result.ok) {
-    toastError(t(result.reason === 'target_not_found' ? 'panel.trace.jumpTargetNotFound' : 'panel.trace.jumpLoadFailed'))
+  try {
+    const result = await jumpToParentSession(props.sessionId, ref, forkId)
+    if (!result.ok) {
+      toastError(t(result.reason === 'target_not_found' ? 'panel.trace.jumpTargetNotFound' : 'panel.trace.jumpLoadFailed'))
+    }
+  } catch (e) {
+    // jumpToParentSession 内部 await selectSession 会 throw（切 session 失败）——裸
+    // reject 成 unhandled 且零反馈；对齐同文件 onRevealFolder 的 catch+toast 先例
+    console.error('[trace] jump to parent session failed:', e)
+    toastError(t('panel.trace.jumpLoadFailed'))
   }
 }
 
