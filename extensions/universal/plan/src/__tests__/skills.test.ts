@@ -20,11 +20,15 @@ import { parsePlanArgs, registerPlanCommand, resolveSkills } from "../command.js
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
-/** fake skill 命令条目（SlashCommandInfo 形态：source === 'skill' + sourceInfo.path） */
+/**
+ * fake skill 命令条目（SlashCommandInfo 形态：source === 'skill' + sourceInfo.path）。
+ * name 带 pi 命名空间前缀（`skill:<name>`）——真实 pi.getCommands() 枚举 skill 类
+ * 命令即此形态（A3② 真机实测），E1 归一化比对的靶子。
+ */
 const SKILL_COMMANDS = [
-  { name: "tech-design", source: "skill", sourceInfo: { path: "/skills/tech-design/SKILL.md" } },
-  { name: "dev-flow", source: "skill", sourceInfo: { path: "/skills/dev-flow/SKILL.md" } },
-  { name: "code review", source: "skill", sourceInfo: { path: "/skills/code review/SKILL.md" } },
+  { name: "skill:tech-design", source: "skill", sourceInfo: { path: "/skills/tech-design/SKILL.md" } },
+  { name: "skill:dev-flow", source: "skill", sourceInfo: { path: "/skills/dev-flow/SKILL.md" } },
+  { name: "skill:code review", source: "skill", sourceInfo: { path: "/skills/code review/SKILL.md" } },
   { name: "plan", source: "extension", sourceInfo: { path: "/extensions/universal/plan" } },
 ];
 
@@ -72,12 +76,13 @@ describe("parsePlanArgs（--skills 解析容错定则）", () => {
   });
 });
 
-describe("resolveSkills（E1 技能枚举比对）", () => {
+describe("resolveSkills（E1 技能枚举比对，双向剥 skill: 前缀归一）", () => {
   const pi = {
     getCommands: vi.fn(() => SKILL_COMMANDS),
   } as unknown as ExtensionAPI;
 
-  it("resolves mounted skills with their sourceInfo path", () => {
+  it("resolves prefixed enum entries from bare-name input (short name in resolved)", () => {
+    // 无前缀输入命中带前缀枚举（设计面：用户输入自然技能名，A3② 回归靶）
     const resolution = resolveSkills(pi, ["tech-design", "code review"]);
     expect(resolution.ok).toBe(true);
     if (resolution.ok) {
@@ -88,17 +93,38 @@ describe("resolveSkills（E1 技能枚举比对）", () => {
     }
   });
 
+  it("resolves explicit 'skill:'-prefixed input too (both directions normalize)", () => {
+    const resolution = resolveSkills(pi, ["skill:tech-design", "skill:dev-flow"]);
+    expect(resolution.ok).toBe(true);
+    if (resolution.ok) {
+      // resolved 用归一后的短名（无前缀）
+      expect(resolution.resolved).toEqual([
+        { name: "tech-design", skillPath: "/skills/tech-design/SKILL.md" },
+        { name: "dev-flow", skillPath: "/skills/dev-flow/SKILL.md" },
+      ]);
+    }
+  });
+
   it("only compares entries with source === 'skill'", () => {
     const resolution = resolveSkills(pi, ["plan"]);
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
       expect(resolution.missing).toEqual(["plan"]);
-      expect(resolution.available).toEqual(["tech-design", "dev-flow", "code review"]);
+      // available 维持枚举原形态（带前缀，错误信息里可直接复制为 pi 命令）
+      expect(resolution.available).toEqual(["skill:tech-design", "skill:dev-flow", "skill:code review"]);
     }
   });
 
   it("unknown skill reports missing together with the available list", () => {
     const resolution = resolveSkills(pi, ["tech-design", "tech-desig"]);
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) {
+      expect(resolution.missing).toEqual(["tech-desig"]);
+    }
+  });
+
+  it("prefixed-but-unknown input reports the normalized short name as missing", () => {
+    const resolution = resolveSkills(pi, ["skill:tech-desig"]);
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
       expect(resolution.missing).toEqual(["tech-desig"]);
@@ -150,13 +176,27 @@ describe("E1 fail-fast via /plan handler", () => {
     expect(pi.appendEntry).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
 
-    // 回复列出可用技能清单与纠正命令
+    // 回复列出可用技能清单与纠正命令（清单维持枚举原形态，可直接复制为 pi 命令）
     expect(pi.sendUserMessage).toHaveBeenCalledOnce();
     const message = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(message).toContain("tech-desig");
     expect(message).toContain("tech-design");
     expect(message).toContain("dev-flow");
     expect(message).toContain("--skills");
+    expect(message).toContain("skill:tech-design");
+    expect(message).toContain("skill:dev-flow");
+  });
+
+  it("prefixed skill input ('--skills skill:x') enters plan mode with normalized short names", async () => {
+    await handler("重构 auth --skills skill:tech-design", ctx);
+
+    // 进入计划模式，state 落归一化短名
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ isActive: true, skills: ["tech-design"] }),
+    );
+    const prompt = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt).toContain("/skills/tech-design/SKILL.md");
   });
 
   it("flag with no value also fail-fasts", async () => {

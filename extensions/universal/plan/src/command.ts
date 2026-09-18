@@ -46,17 +46,30 @@ export type SkillResolution =
   | { ok: false; available: string[]; missing: string[] };
 
 /**
+ * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
+ * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
+ * 这是 pi 的实现细节，不得泄漏到用户输入面——设计面（tech-design §步骤①）用户输入
+ * 自然技能名（`--skills tech-design`）。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
+ */
+function normalizeSkillName(name: string): string {
+  return name.startsWith("skill:") ? name.slice("skill:".length) : name;
+}
+
+/**
  * E1 校验：pi.getCommands() 过滤 source === "skill" 枚举比对（技能枚举与路径
- * 经 pi 取得，不自扫描目录——D2）。名字精确匹配（trim 后）。
+ * 经 pi 取得，不自扫描目录——D2）。比对前双向剥 `skill:` 前缀归一（trim 由
+ * parsePlanArgs 保证）：resolved/missing 用归一后的短名；available 维持枚举
+ * 原形态（错误信息里用户可直接复制为 pi 命令）。
  */
 export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
   const skillCommands = pi.getCommands().filter((c) => c.source === "skill");
-  const byName = new Map(skillCommands.map((c) => [c.name, c.sourceInfo.path]));
+  const byShortName = new Map(skillCommands.map((c) => [normalizeSkillName(c.name), c.sourceInfo.path]));
   const available = skillCommands.map((c) => c.name);
   const resolved: SkillRef[] = [];
   const missing: string[] = [];
-  for (const name of requested) {
-    const skillPath = byName.get(name);
+  for (const raw of requested) {
+    const name = normalizeSkillName(raw);
+    const skillPath = byShortName.get(name);
     if (skillPath === undefined) {
       missing.push(name);
     } else {
