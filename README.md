@@ -97,32 +97,34 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ## 它能做什么
 
-### 多会话，一个窗口
+### Agent 执行内核
 
-- **会话侧栏** — 会话按项目分组，绿点标出正在运行的任务；新建（⌘N）、搜索（⌘K）、导入历史会话（⌘I）都在侧栏顶部
-- **分叉重试** — 对 AI 的回复不满意？⌘G 从它最近的回复分叉出一个新会话换个方向重来，原会话原样保留；⌘J 则把当前上下文打包交接给新会话继续推进
-- **侧栏多面板** — 会话之外，侧栏里直接切换文件树、subagent 列表、workflow 状态和插件面板
-- **全局搜索** — ⌘K 一个入口搜命令、项目文件、代码符号和会话
+- **并行 Subagent** — 重活派给子 agent 并行跑，主对话保持干净。侧栏 Subagent 面板总览全部子任务状态，点开任一个在右侧抽屉里看它的完整对话与产出；预算与轮次护栏兜底，跑飞了自动刹住
+- **Workflow 编排** — 把多个 subagent 串成 chain、并成 parallel 等有状态工作流：上游产出自动流转给下游，崩溃后可恢复续跑。侧栏 Workflow 面板实时看每个节点的执行进度
+- **Todo 与 Goal** — Agent 自动把任务拆成 todo 清单，完成一项勾一项；更大的目标走 goal 自治循环：你定验收标准，Agent 拿证据交付，预算烧完自动收尾而不是无限烧下去
+- **上下文自动管理** — 会话变长时 Agent 可自主压缩上下文（同模型摘要保留细节，前缀缓存尽量命中），接近阈值时主动提醒你；输入框旁随时 hover 查看当前上下文占用
+- **会话即资产** — 任何会话可分叉（⌘G 换方向重来）、交接（⌘J 打包上下文给新会话）、导入（⌘I 收录历史会话）；输入框里 `/` 唤命令、`#` 引用其他会话、`$` 引用文件、`@` 派 subagent。会话全部落盘为标准 JSONL，标题栏一键复制路径，pi 生态工具可直接读取
 
-### 看得见的 Agent
+### 执行过程看得见
 
-- **全程实时可见** — AI 的思考、工具调用、文件编辑逐步流式呈现；每轮工作自动折叠成一行摘要（耗时 / 思考轮数 / 工具次数），点开即可回看全过程
-- **Trace 视图** — 对话流之外一键切换到结构化 Trace，逐条检视 Agent 实际执行了什么
-- **任务与目标状态条** — Agent 拆解出的 todo 清单和设定的目标以常驻状态条实时显示进度
-- **结构化问答** — Agent 需要你拍板时给出结构化表单（多个问题、选项、自定义输入），而不是在聊天里来回猜
-- **后台任务不丢** — 长耗时命令转入后台，完成时自动通知并继续处理
+- **全程实时流** — 思考、工具调用、文件编辑边跑边出，markdown 增量渲染；每轮工作自动折叠成一行摘要（已工作 27s · 思考 ×3 · 工具 ×3），点开回看全过程
+- **Trace 台账** — 对话流之外一键切到 Trace：全量执行记录逐条列示，按类型筛选、全文搜索、一键只看上下文边界——压缩发生在哪、哪些内容进入了上下文，一目了然
+- **任务状态条** — todo / goal 进度以常驻状态条挂在对话流里，不用追问「干到哪了」
+- **结构化问答** — Agent 需要你拍板时弹结构化表单：多个问题、选项、自由输入分栏预览，答案原样回传，不在聊天里来回猜
+- **后台任务不丢** — 长耗时命令转后台跑，完成自动通知并继续处理；抽屉后台任务页集中查看输出
 
-### 文件 / 终端 / Git
+### 工作台
 
-- **文件树** — 侧栏内浏览项目文件，大仓库也流畅；哪些文件被改过直接标在文件名上
-- **内置终端** — 从右侧随时展开一个真终端，每个会话各自保留现场，切回来接着用
-- **Git 面板** — 当前分支与文件变更一目了然；支持 worktree 创建 / 切换 / 清理，多个任务各占一个工作目录互不干扰
+- **文件树** — 侧栏文件面板，万级目录流畅滚动，改过的文件直接带 git 角标
+- **内置终端** — 抽屉里的真终端，按会话各留现场，切回来接着用
+- **Git 面板** — 当前分支与文件变更一目了然；worktree 创建 / 切换 / 清理，多个任务各占一个工作目录并行不冲突
+- **浏览器面板** — 抽屉内嵌浏览器，Agent 操作的网页你可以亲眼看着它点
 
-### 模型与控制
+### 控制与自定义
 
-- **多模型接入** — 预置主流 provider 目录，填入 API key 即用；模型和思考档位在输入框旁一键切换
-- **实时用量** — 对话中实时显示生成速率、上下文余量；各 provider / 模型的配额在设置中随时可查
-- **工具模式** — 输入框旁切换 Agent 的工具权限档位，从只读分析到全工具放行
+- **系统提示词自定义** — 设置中整段替换 Agent 的系统提示词：显式保存不误触、改前快照随时还原、一键恢复默认
+- **工具权限档位** — 输入框旁切换 Agent 的工具权限，从只读分析到全工具放行
+- **多模型接入** — 预置主流 provider 目录，填 API key 即用；模型与思考档位在输入框旁一键切换，各 provider / 模型的配额随时可查
 - **设置中心** — Provider / 外观 / 技能 / Agent / 扩展 / System Prompt / 终端 / 预设 / worktree / 更新 / 系统 / 用量 12 个分区
 - **自动更新** — 新版本自动检测，确认后重启升级，Release Notes 中英双语
 
@@ -150,29 +152,6 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner 实操指南 + `cw_query` 只读查询工具 |
 
 其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用，离开 taiji 宿主无功能。18 个内置扩展 = 上表 16 个中的 13 个 + 这 5 个；`pi-plan` / `pi-cache-probe` / `pi-cw-tool` 未内置，经 npm 安装或 `--extension` 加载。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
-
-## 架构
-
-<p align="center">
-  <img src="docs/assets/architecture.drawio.png" alt="TaiJi 架构：Electron 主进程 / Preload 桥接 / Runtime（Node.js 子进程）/ 渲染进程 / pi CLI 子进程" width="820" />
-</p>
-
-架构图源文件：[`docs/assets/architecture.drawio`](docs/assets/architecture.drawio)（PNG 为内嵌源导出，可在 draw.io 中打开继续编辑）。
-
-核心模块：
-
-| 模块 | 路径 | 职责 |
-|------|------|------|
-| **主进程** | `apps/electron/main/` | BrowserWindow 生命周期、runtime spawn/stop、全局快捷键（supervisor / window / gateway 三编排子系统） |
-| **Preload** | `apps/electron/preload/` | `contextIsolation` 安全桥接，暴露 `window.electronAPI` |
-| **前端** | `packages/renderer/` | Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + @taiji/ui（太极纯灰暗色设计系统） |
-| **Runtime** | `packages/runtime/` | WebSocket 服务，三层架构（transport/services/infra），通过 pi RPC 协议与 Agent 通信 |
-| **共享类型** | `packages/shared/` | 前端与 runtime 间的 TypeScript 类型定义（pnpm workspace） |
-| **pi CLI** | 外部依赖 `@earendil-works/pi-coding-agent` | Agent 执行核心，由 Runtime 以子进程方式拉起，经 RPC 通信并加载 18 个内置扩展 |
-
-渲染进程有两条出口通道：**WS**（→ Runtime，业务/数据）与 **IPC**（→ Main，窗口/进程/OS 特权）。渲染进程不直接调 `window.electronAPI`，统一走 [`lib/ipc.ts`](packages/renderer/src/lib/ipc.ts) 门面。
-
----
 
 ## 快速开始（开发）
 
