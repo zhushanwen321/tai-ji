@@ -1,12 +1,18 @@
 <p align="center"><img src="docs/assets/logo/assets/qianwen/logo-square.png" width="96" alt="TaiJi logo" /></p>
 
-# TaiJi
+<h1 align="center">TaiJi</h1>
 
-[简体中文](README.md) | [English](README_EN.md)
+<p align="center"><strong>An AI Agent desktop workbench for long-running, multi-task collaboration</strong></p>
 
-An AI Agent desktop workbench (macOS / Windows / Linux) built on an Electron + Vue 3 + Node.js Runtime architecture.
+<p align="center">
+  <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a> | <a href="https://github.com/zhushanwen321/tai-ji/releases">Download</a>
+</p>
 
-It communicates with all kinds of AI Agents over the child-process RPC protocol of [pi](https://github.com/badlogic/pi-mono) (npm package `@earendil-works/pi-coding-agent`), providing multi-session management, dual-Panel split view, subagent/workflow orchestration, goal-driven autonomous loops, scheduled tasks, and more — designed for long-running, multi-task Agent collaboration. 18 Agent extensions ship bundled with the app, ready out of the box.
+An AI Agent desktop workbench (macOS / Windows / Linux) built on an Electron + Vue 3 + Node.js Runtime architecture. It communicates with all kinds of AI Agents over the child-process RPC protocol of [pi](https://github.com/badlogic/pi-mono) (npm package `@earendil-works/pi-coding-agent`), providing multi-session management, dual-Panel split view, subagent/workflow orchestration, goal-driven autonomous loops, and scheduled tasks. 18 Agent extensions ship bundled with the app, ready out of the box.
+
+<p align="center">
+  <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window — multi-session sidebar plus live agent conversation stream with thinking, tool calls, and file edits" width="900" />
+</p>
 
 > For development conventions, key rules, and debugging discipline, see [AGENTS.md](AGENTS.md).
 
@@ -24,15 +30,18 @@ Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433
 #### macOS (Apple Silicon)
 
 ```bash
+# Download and open the DMG (or download it from the Releases page in a browser and install by double-clicking)
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
-```
 
-You can also download the dmg from [GitCode Releases](https://gitcode.com/qq_18433817/tai-ji/releases) in a browser and install it by double-clicking.
+# If the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads, needed for browser downloads):
+# xattr -cr /Applications/TaiJi.app
+```
 
 #### Linux
 
 ```bash
+# Download the AppImage, make it executable, and launch it
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -40,16 +49,12 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0
 
 #### Windows
 
-PowerShell (uses Invoke-WebRequest to avoid the parameter conflicts caused by curl being an alias in PowerShell):
-
 ```powershell
+# PowerShell (recommended; avoids the parameter conflicts caused by curl being an alias in PowerShell)
 Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
-```
 
-Command Prompt (cmd.exe; requires the system-bundled curl.exe, included by default since Windows 10 1803+):
-
-```cmd
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# Command Prompt / cmd.exe (uses the system-bundled curl.exe, included by default since Windows 10 1803+):
+# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### International download (GitHub)
@@ -59,13 +64,18 @@ Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/t
 #### macOS (Apple Silicon)
 
 ```bash
+# Download and open the DMG
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
+
+# If the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads, needed for browser downloads):
+# xattr -cr /Applications/TaiJi.app
 ```
 
 #### Linux
 
 ```bash
+# Download the AppImage, make it executable, and launch it
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -73,23 +83,13 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 #### Windows
 
-PowerShell:
-
 ```powershell
+# PowerShell
 Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+
+# Command Prompt / cmd.exe (uses the system-bundled curl.exe, included by default since Windows 10 1803+):
+# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
-
-Command Prompt (cmd.exe):
-
-```cmd
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
-```
-
-> On macOS, if the app is reported as "damaged" or "cannot verify the developer" on launch, run (usually unnecessary for curl downloads; needed for browser downloads):
->
-> ```bash
-> xattr -cr /Applications/TaiJi.app
-> ```
 
 <!-- INSTALL:END -->
 
@@ -203,6 +203,8 @@ TaiJi has two independent extension mechanisms:
 
 **Plugin System** — a plugin sandbox running on the taiji Runtime side; extends UI and host capabilities (tools, hooks, slash commands, status bar items, message decorations, settings forms). Two-level isolation for trusted and sandbox plugins (Worker Thread / separate forked child process) — a single plugin crash does not affect other plugins or the main process. Develop against [`packages/plugin-sdk`](packages/plugin-sdk/) (types + mock), scaffolded by `create-taiji-plugin`.
 
+---
+
 ## Quick Start (Development)
 
 **Prerequisites**: Node.js >= 22.19 (24 recommended, see `.nvmrc`), pnpm >= 10
@@ -273,7 +275,7 @@ Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debuggin
 │   ├── mobile-renderer/      # 移动端渲染入口
 │   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
 │   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   └── create-taiji-plugin/    # 插件项目脚手架
+│   └── create-taiji-plugin/   # 插件项目脚手架
 ├── extensions/               # 21 @zhushanwen/pi-* pi extension sources + shared/ library
 ├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
 ├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）

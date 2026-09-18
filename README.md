@@ -1,12 +1,18 @@
 <p align="center"><img src="docs/assets/logo/assets/qianwen/logo-square.png" width="96" alt="TaiJi logo" /></p>
 
-# 太极 TaiJi
+<h1 align="center">太极 TaiJi</h1>
 
-[简体中文](README.md) ｜ [English](README_EN.md)
+<p align="center"><strong>面向长时间、多任务协作的 AI Agent 桌面工作台</strong></p>
 
-AI Agent 桌面工作台（macOS / Windows / Linux），基于 Electron + Vue 3 + Node.js Runtime 架构。
+<p align="center">
+  <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
+</p>
 
-通过 [pi](https://github.com/badlogic/pi-mono)（npm 包名 `@earendil-works/pi-coding-agent`）的子进程 RPC 协议与各类 AI Agent 通信，提供多 session 管理、双 Panel split view、subagent/workflow 编排、目标驱动自治循环、定时调度等能力，面向长时间、多任务的 Agent 协作场景。18 个 Agent 扩展随应用打包内置，开箱即用。
+基于 Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台（macOS / Windows / Linux）。通过 [pi](https://github.com/badlogic/pi-mono)（npm 包名 `@earendil-works/pi-coding-agent`）的子进程 RPC 协议与各类 AI Agent 通信，提供多 session 管理、双 Panel split view、subagent/workflow 编排、目标驱动自治循环、定时调度等能力。18 个 Agent 扩展随应用打包内置，开箱即用。
+
+<p align="center">
+  <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面 — 侧栏多会话管理 + Agent 对话流：思考、工具调用、文件编辑全程实时可见" width="900" />
+</p>
 
 > 开发约定、关键规则与调试纪律见 [AGENTS.md](AGENTS.md)。
 
@@ -24,15 +30,18 @@ AI Agent 桌面工作台（macOS / Windows / Linux），基于 Electron + Vue 3 
 #### macOS（Apple Silicon）
 
 ```bash
+# 下载并打开 DMG（也可到 Releases 页用浏览器下载 dmg，双击安装）
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
-```
 
-也可直接到 [GitCode Releases](https://gitcode.com/qq_18433817/tai-ji/releases) 用浏览器下载 dmg 双击安装。
+# 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
+# xattr -cr /Applications/TaiJi.app
+```
 
 #### Linux
 
 ```bash
+# 下载、赋可执行权限并启动 AppImage
 curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -40,16 +49,12 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0
 
 #### Windows
 
-PowerShell（用 Invoke-WebRequest，避免 curl 在 PowerShell 是别名导致的参数冲突）：
-
 ```powershell
+# PowerShell（推荐；避免 curl 在 PowerShell 是别名导致的参数冲突）
 Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
-```
 
-命令提示符（cmd.exe，需系统自带 curl.exe，Win10 1803+ 默认含）：
-
-```cmd
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
+# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### 国外下载（GitHub）
@@ -59,13 +64,18 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0
 #### macOS（Apple Silicon）
 
 ```bash
+# 下载并打开 DMG
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
+
+# 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
+# xattr -cr /Applications/TaiJi.app
 ```
 
 #### Linux
 
 ```bash
+# 下载、赋可执行权限并启动 AppImage
 curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
@@ -73,23 +83,13 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 #### Windows
 
-PowerShell：
-
 ```powershell
+# PowerShell
 Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+
+# 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
+# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
-
-命令提示符（cmd.exe）：
-
-```cmd
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
-```
-
-> macOS 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
->
-> ```bash
-> xattr -cr /Applications/TaiJi.app
-> ```
 
 <!-- INSTALL:END -->
 
@@ -203,6 +203,8 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 **Plugin System** — 运行在 taiji Runtime 侧的插件沙箱，负责 UI 与宿主能力扩展（tools、hooks、slash commands、status bar items、message decorations、settings 表单）。trusted 插件与 sandbox 插件两级隔离（Worker Thread / 独立 fork 子进程），单个插件崩溃不影响其他插件或主进程。开发用 [`packages/plugin-sdk`](packages/plugin-sdk/)（类型 + mock），脚手架 `create-taiji-plugin`。
 
+---
+
 ## 快速开始（开发）
 
 **前置条件**: Node.js >= 22.19（推荐 24，见 `.nvmrc`），pnpm >= 10
@@ -273,7 +275,7 @@ pnpm build:e2e && pnpm test:e2e
 │   ├── mobile-renderer/      # 移动端渲染入口
 │   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
 │   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   └── create-taiji-plugin/    # 插件项目脚手架
+│   └── create-taiji-plugin/   # 插件项目脚手架
 ├── extensions/               # 21 个 @zhushanwen/pi-* pi 扩展源码 + shared/ 共享库
 ├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
 ├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）

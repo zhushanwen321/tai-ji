@@ -62,6 +62,8 @@ src-electron/
 
 # Ad-hoc screenshots (debugging artifacts, not source)
 screenshot.png
+# Exception: curated README facade screenshot (tracked asset)
+!docs/assets/screenshot/screenshot.png
 
 # CW v1 subagent dispatch payloads (临时入参文件，派发完即废弃)
 .cw-rsu-*.json
