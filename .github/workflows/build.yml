@@ -49,7 +49,7 @@ jobs:
       PI_VERSION: '0.84.4'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # CI/release 构建均不依赖 git 历史（版本号来自 package.json/workflow input，
           # generate-manifest.sh 不用 git）。release.yml 的 changelog 生成在其独立
@@ -307,7 +307,7 @@ jobs:
     name: Main tests (macOS)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
