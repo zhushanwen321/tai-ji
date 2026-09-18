@@ -88,6 +88,21 @@ export async function scheduleCreateInteract(
 /** 形状错留痕里回包预览的截断长度（与 callMarkerRpc 的 RESPONSE_PREVIEW_LENGTH 同规范） */
 const RESPONSE_PREVIEW_LENGTH = 200
 
+/** 形状守卫公共前置：非 null 的普通对象（排除数组；JSON.parse 产物均为 JSON 值） */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 可选字符串字段：undefined（JSON.stringify 丢弃的可选字段）或 string */
+function isOptionalString(v: unknown): boolean {
+  return v === undefined || typeof v === 'string'
+}
+
+/** 字符串数组字段（models 白名单逐项校验） */
+function isStringArray(v: unknown): boolean {
+  return Array.isArray(v) && v.every((m) => typeof m === 'string')
+}
+
 /**
  * 类型守卫：验证 unknown 是否为合法的 ScheduleDraft。
  * 用于 runtime event-adapter 判定 marker select 的 payload 是否为本协议 draft
@@ -95,17 +110,16 @@ const RESPONSE_PREVIEW_LENGTH = 200
  * 字段白名单校验（与 isAskUserQuestion 同构）：可选字段校验类型，未知附加字段忽略。
  */
 export function isScheduleDraft(value: unknown): value is ScheduleDraft {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-  const d = value as Record<string, unknown>
+  if (!isPlainRecord(value)) return false
+  const d = value
   return (d.kind === 'once' || d.kind === 'recurring')
     && typeof d.schedule === 'string'
-    && (d.model === undefined || typeof d.model === 'string')
+    && isOptionalString(d.model)
     && typeof d.prompt === 'string'
-    && (d.name === undefined || typeof d.name === 'string')
-    && (d.expires === undefined || typeof d.expires === 'string')
-    && Array.isArray(d.models)
-    && d.models.every((m) => typeof m === 'string')
-    && (d.currentModel === undefined || typeof d.currentModel === 'string')
+    && isOptionalString(d.name)
+    && isOptionalString(d.expires)
+    && isStringArray(d.models)
+    && isOptionalString(d.currentModel)
 }
 
 /** 回传形状守卫（模块内消费：scheduleCreateInteract 收窄 parsed 回包） */
@@ -156,25 +170,27 @@ const ONCE_CRON_MAX_YEAR_LOOKAHEAD = 8
  * 非 5 段 / 星期位非 * / 数字段含非数字或越界（分 0-59 / 时 0-23 / 日 1-31 /
  * 月 1-12）→ null（循环 cron 等非一次性形态不做时刻还原）。
  */
+/** 一次性 cron 前 4 段（分 时 日 月）数字解析：全为纯数字 → 数值元组，否则 null（星期位 * 已由调用方校验，不入本解析） */
+function parseOnceCronNumbers(parts: string[]): [number, number, number, number] | null {
+  const [minute, hour, day, month] = parts
+  if (![minute, hour, day, month].every((seg) => /^\d+$/.test(seg))) return null
+  return [Number(minute), Number(hour), Number(day), Number(month)]
+}
+
+/** 一次性 cron 数字段越界判定：分/时/日/月任一超出合法区间即非法 */
+function isOnceCronValueOutOfRange(m: number, h: number, d: number, mon: number): boolean {
+  return m > CRON_MINUTE_MAX || h > CRON_HOUR_MAX
+    || d < CRON_DAY_MIN || d > CRON_DAY_MAX
+    || mon < CRON_MONTH_MIN || mon > CRON_MONTH_MAX
+}
+
 export function onceCronToDate(cron: string, now: Date = new Date()): Date | null {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== ONCE_CRON_FIELD_COUNT || parts[4] !== '*') return null
-  const [minute, hour, day, month] = parts
-  if (
-    !/^\d+$/.test(minute) || !/^\d+$/.test(hour) ||
-    !/^\d+$/.test(day) || !/^\d+$/.test(month)
-  ) {
-    return null
-  }
-  const m = Number(minute)
-  const h = Number(hour)
-  const d = Number(day)
-  const mon = Number(month)
-  if (
-    m > CRON_MINUTE_MAX || h > CRON_HOUR_MAX ||
-    d < CRON_DAY_MIN || d > CRON_DAY_MAX ||
-    mon < CRON_MONTH_MIN || mon > CRON_MONTH_MAX
-  ) return null
+  const numbers = parseOnceCronNumbers(parts)
+  if (numbers === null) return null
+  const [m, h, d, mon] = numbers
+  if (isOnceCronValueOutOfRange(m, h, d, mon)) return null
   const startYear = now.getFullYear()
   for (let year = startYear; year <= startYear + ONCE_CRON_MAX_YEAR_LOOKAHEAD; year++) {
     const candidate = new Date(year, mon - 1, d, h, m, 0, 0)
