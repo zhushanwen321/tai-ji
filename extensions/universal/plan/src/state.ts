@@ -59,6 +59,9 @@ export type PlanAbortControllers = Map<string, AbortController>;
  * 发挂起 select 前新建 controller 并登记。禁复用已 abort 的 controller——
  * pi 实装对已 abort 的 signal 在 createDialogPromise 首行短路立即 resolve undefined，
  * 复用会让退出后再入 plan 的 submit-review 瞬时静默取消。
+ * pi 实装锚点：dist/modes/rpc/rpc-mode.js:48（0.84.4）——createDialogPromise 首行
+ * `opts?.signal?.aborted` 即 `return Promise.resolve(defaultValue)`，select 的
+ * defaultValue = undefined（E10 生命周期设计依据）。
  */
 export function freshAbortController(
   controllers: PlanAbortControllers,

@@ -506,6 +506,9 @@ async function executeSubmitReview(
     case "revise": {
       // 显式 deliverAs: 'steer' 必须传——pi 的 sendUserMessage 在 isStreaming 时
       // 无 deliverAs 直接 throw；有 deliverAs 时 steer 排队至下一次 LLM 调用
+      // （pi 实装锚点：dist/core/agent-session.js:859-868（0.84.4）——isStreaming 分支
+      // 无 streamingBehavior :862 throw、steer 走 :868 _queueSteer；sendUserMessage
+      // 以 streamingBehavior=deliverAs 委托 prompt :1161/:1185）
       pi.sendUserMessage(formatReviewComments("revise", response.comments), { deliverAs: "steer" });
       state.reviewState = "revising";
       persistPlanState(pi, state);

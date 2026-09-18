@@ -569,7 +569,11 @@ export class SessionMessageHandler {
     // ensureActive——崩溃恢复后懒重生未发生的窗口一步到位，不要求用户先发消息；恢复失败
     // → 下方 error envelope，前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：
     // `/` 前缀 prompt 被 pi 先行执行为 extension command、不产用户消息、streaming 中可用
-    // （主审 R2 复核实证）；刻意绕过 dispatcher busy 预检——照 workflowAction（session-records.ts
+    // （主审 R2 复核实证）；pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——
+    // prompt 对 `/` 前缀先行尝试 extension command（源码注释明言 execute immediately,
+    // even during streaming），handled 即 return 不产用户消息；命令解析
+    // _tryExecuteExtensionCommand :954。本断言双承重：此写入路径 +
+    // .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过 dispatcher busy 预检——照 workflowAction（session-records.ts
     // workflowAction）先例，审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发
     // 让 extension 侧 abort handler（先 controller.abort 再 resetPlanState）落地。
     // 退出结果经投影链 session.planState 广播推回（isActive=false），此处只回 message.status
