@@ -99,8 +99,8 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ### Agent execution
 
-- **Parallel subagents**: dispatch independent tasks to multiple subagents at once and keep the main conversation for conclusions only. The sidebar Subagents panel lists every subtask; click one to read its full conversation and output in the drawer. Each subtask runs under a budget and turn limit and stops when either is exceeded.
-- **Workflow orchestration**: compose subagents into stateful workflows with templates like chain and parallel. Upstream output flows downstream automatically, and an interrupted run resumes from where it stopped. The sidebar Workflows panel shows the state of every node.
+- **Parallel subagents**: dispatch independent tasks to multiple subagents at once and keep the main conversation for conclusions only. The task tray above the input box collects running subtasks; open one to read its full conversation and output in the drawer. Each subtask runs under a budget and turn limit and stops when either is exceeded.
+- **Workflow orchestration**: compose subagents into stateful workflows with templates like chain and parallel. Upstream output flows downstream automatically, and an interrupted run resumes from where it stopped. The task tray shows the state of every node.
 - **Todo & goal**: the agent breaks work into a todo list and completes items one by one. Long-running goals run in goal mode: set acceptance criteria and a budget up front, and the agent wraps up once they are met.
 - **Scheduled tasks**: the agent can create cron or interval tasks that wake a session automatically at the scheduled time, for daily reminders, periodic checks, or recurring batch runs. Tasks can be paused, deleted, or triggered once manually.
 - **Context management**: when a session grows long the agent can compact its own context (same-model summaries, keeping the prefix cache warm) and warns you as thresholds approach. Hover next to the input box to check current usage.
