@@ -202,7 +202,7 @@ describe('GitHeadWatcher watch 事件链（HEAD 目录 + 500ms debounce）', () 
   })
 })
 
-describe('GitHeadWatcher L1：error → 清全部 watcher → 5s 定时重试挂载', () => {
+describe('GitHeadWatcher L1：error → 按失败 dir 收窄拆除 → 5s 定时补挂缺失', () => {
   it('watch 构造即抛（路径不存在）→ 同步 warn + 5s 重试；重试再失败再次 warn（持续重试不冻结）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const onGitEvent = vi.fn()
@@ -223,23 +223,26 @@ describe('GitHeadWatcher L1：error → 清全部 watcher → 5s 定时重试挂
     warnSpy.mockRestore()
   })
 
-  it('运行中 error 事件（注入 emit）→ 清全部 watcher + 5s 重试挂载成功，事件驱动恢复', { timeout: 30_000 }, async () => {
+  it('运行中 error 事件（注入 emit）→ 只拆失败 dir 的 watcher，健康 watcher 不动；5s 补挂缺失成功，事件驱动恢复', { timeout: 30_000 }, async () => {
     const fx = makeRepo()
+    const fxB = makeRepo('repo-b')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const onGitEvent = vi.fn()
     const watcher = new GitHeadWatcher({ onGitEvent, onFallbackTick: vi.fn() })
     watcher.observe(fx.repoCwd, repoObs(fx))
-    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir])
+    watcher.observe(fxB.repoCwd, repoObs(fxB))
+    expect(watcher.watchedDirsForTests().sort()).toEqual([fx.gitDir, fxB.gitDir].sort())
 
     // 注入运行中 error（macOS FSEvents 对「watch 目录被删」不保证派发 error——静默丢事件
     // 形态走 L2 兜底，故此处用 A6 验收同款的测试钩子注入，确定性覆盖 L1 运行中分支）
     watcher.watcherForTests(fx.gitDir)?.emit('error', errnoError('EPERM'))
     expect(warnSpy).toHaveBeenCalledTimes(1)
     expect(warnSpy.mock.calls[0][0]).toContain('(EPERM)')
-    expect(watcher.watchedDirsForTests()).toEqual([]) // 清全部 git watcher
+    // 收窄拆除：只有失败 dir 的 watcher 被清，健康 repo 的 watcher 原样存活
+    expect(watcher.watchedDirsForTests()).toEqual([fxB.gitDir])
 
-    vi.advanceTimersByTime(5000) // L1 定时重试挂载 → 成功
-    expect(watcher.watchedDirsForTests()).toEqual([fx.gitDir])
+    vi.advanceTimersByTime(5000) // L1 定时补挂缺失（不拆健康 watcher）→ 成功
+    expect(watcher.watchedDirsForTests().sort()).toEqual([fx.gitDir, fxB.gitDir].sort())
     expect(warnSpy).toHaveBeenCalledTimes(1) // 重试成功无新 warn
 
     atomicWriteHead(fx.gitDir) // 事件驱动已恢复

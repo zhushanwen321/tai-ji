@@ -94,6 +94,16 @@ export class GitChangeTrigger {
   }
 
   /**
+   * 收缩锚记忆（repo-observer onPrune 联动——与 GitHeadWatcher.forget 同一回调接线）：
+   * 被驱逐/修剪 cwd 的锚删除，防 Map 随历史 cwd 无界增长。锚删除后该 cwd 若重新进入
+   * 观测，refreshOne 走建锚路径（lastPushed === undefined）重新承诺推送，语义与进程
+   * 刚启动时一致。
+   */
+  forget(cwds: ReadonlySet<string>): void {
+    for (const cwd of cwds) this.lastPushedBranch.delete(cwd)
+  }
+
+  /**
    * 单 cwd 刷新：锚（上次推送值）→ invalidateByCwd → 强制重解析 → 值变化判定。
    * 返回该 cwd 的 branch 是否变化；兜底路径的修正 console.warn（高频出现 = 平台 watch
    * 缺陷复发信号，设计 §3.4.4 错误规格表）。

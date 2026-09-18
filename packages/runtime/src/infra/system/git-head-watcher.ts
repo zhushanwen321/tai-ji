@@ -13,9 +13,11 @@
  *   watchFile 轮询降级不移植——兜底已内建，不引入第二套轮询机制）。
  *
  * 两层恢复链（设计 G5，对齐 SkillRegistry 教训）：
- * - L1：任一 watcher error（构造即抛或运行中 error 事件）→ 清**全部** git watcher → 5s 定时
- *   重试挂载（tui scheduleGitWatcherRetry 同构）——绝不允许「熔断后冻结到重启」；重试再失败
- *   自然形成 5s 间隔的持续重试循环。
+ * - L1：watcher error（构造即抛或运行中 error 事件）→ **按失败 dir 收窄拆除**（只拆失败
+ *   watcher 自身及其 dir 关联，健康 watcher 不动——单个坏目录不再引发全量重挂 churn）→
+ *   5s 定时补挂缺失目标（remountMissing，不拆健康的；tui scheduleGitWatcherRetry 同构）——
+ *   绝不允许「熔断后冻结到重启」；重试再失败自然形成 5s 间隔的持续重试循环。失败 dir
+ *   缺席的防御形态（不可归因）才回落清全部。
  * - L2：60s 周期兜底，**无条件运行不依赖 watch 存活**，同时覆盖 ①静默丢事件（macOS fs.watch
  *   前科）②watch 持续失败（EMFILE 类）③bareCache 盲区（.bare 建/删无 HEAD 事件）；每次
  *   周期顺带重挂已失效 watcher（吸收原三层方案慢速重试职责，恢复事件驱动的节奏提前到 60s）。
@@ -207,10 +209,10 @@ export class GitHeadWatcher {
         this.scheduleRefresh(cwds)
       })
     } catch (e) {
-      this.handleWatchError(e)
+      this.handleWatchError(e, dir)
       return
     }
-    watcher.on('error', (err: NodeJS.ErrnoException) => this.handleWatchError(err))
+    watcher.on('error', (err: NodeJS.ErrnoException) => this.handleWatchError(err, dir))
     this.watchers.set(dir, watcher)
   }
 
@@ -227,24 +229,54 @@ export class GitHeadWatcher {
     }, this.debounceMs)
   }
 
-  // ── L1：error → 清全部 watcher → 5s 定时重试挂载 ─────────────────────
+  // ── L1：error → 按失败 dir 收窄拆除 → 5s 定时补挂缺失 ────────────────
 
-  private handleWatchError(err?: unknown): void {
+  /**
+   * error 处置：failedDir 已知（构造抛/运行中 error 都带 dir）→ 只拆失败 watcher 自身
+   * 与其 dir→cwd 关联，健康 watcher 不动（原实现清全部——单个坏目录引发全量重挂
+   * churn，且 EMFILE 形态下 5s 周期反复拆健康 watcher）；failedDir 缺席（防御形态，
+   * 不可归因）才回落清全部。重试只补挂缺失目标（remountMissing）。
+   */
+  private handleWatchError(err?: unknown, failedDir?: string): void {
     if (this.disposed) return
-    this.closeAllWatchers()
-    this.dirCwds.clear()
+    if (failedDir !== undefined) {
+      const watcher = this.watchers.get(failedDir)
+      if (watcher) {
+        this.watchers.delete(failedDir)
+        this.closeQuietly(watcher)
+      }
+      this.dirCwds.delete(failedDir)
+    } else {
+      this.closeAllWatchers()
+      this.dirCwds.clear()
+    }
     console.warn(
-      `[git-head-watcher] fs.watch error${extractErrno(err)} — cleared all git watchers, retrying mount in ${this.retryDelayMs}ms` +
+      `[git-head-watcher] fs.watch error${extractErrno(err)} — cleared ${failedDir !== undefined ? `watcher for ${failedDir}` : 'all git watchers'}, retrying mount in ${this.retryDelayMs}ms` +
         '（EMFILE 类按日志检查进程 fd 上限；重试持续失败期间缓存新鲜度由 L2 周期兜底维持）',
     )
     if (this.retryTimer) return
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
-      this.remountAll()
+      this.remountMissing()
     }, this.retryDelayMs)
   }
 
-  /** 重放登记的全部 watch 目标（L1 定时重试与 L2 顺带重挂共用；幂等）。 */
+  /**
+   * 只补挂缺失的 watch 目标（L1 失败重试路径；ensureWatch 幂等——watchers 已有该
+   * dir 直接跳过，健康 watcher 不拆不重建）。静默死亡的 watcher（macOS 目录被删无
+   * error 事件）不经此路径自愈，由 L2 周期 remountAll 全量重放覆盖，上界不变（60s）。
+   */
+  private remountMissing(): void {
+    if (this.disposed) return
+    for (const [cwd, entries] of this.targets) {
+      for (const entry of entries) this.ensureWatch(entry, cwd)
+    }
+  }
+
+  /**
+   * 重放登记的全部 watch 目标（L2 顺带重挂专用：先全拆再重放——close-all 是静默死亡
+   * watcher 的唯一自愈手段，其代价为每周期一次挂载重建，60s 周期有界）。幂等。
+   */
   private remountAll(): void {
     if (this.disposed) return
     this.closeAllWatchers()

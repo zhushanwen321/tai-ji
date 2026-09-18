@@ -517,7 +517,12 @@ async function main(): Promise<void> {
   })
   bindSharedRepoObserverCallbacks({
     onObservationSet: (cwd, obs) => gitHeadWatcher.observe(cwd, obs),
-    onPrune: (removedCwds) => gitHeadWatcher.forget(removedCwds),
+    // onPrune 收缩联动两面：watcher 挂载集合 + trigger 锚记忆（被驱逐 cwd 的
+    // lastPushedBranch 锚一并删除，防无界增长；重新进入观测走建锚路径）
+    onPrune: (removedCwds) => {
+      gitHeadWatcher.forget(removedCwds)
+      gitChangeTrigger.forget(removedCwds)
+    },
   })
 
   const fileChangeDiff = new FileChangeDiffAdapter(gitStateService)

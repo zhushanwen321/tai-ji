@@ -230,3 +230,38 @@ describe('GitChangeTrigger 兜底修正 warn（可观测信号）', () => {
     warnSpy.mockRestore()
   })
 })
+
+describe('GitChangeTrigger forget（锚记忆收缩，onPrune 联动）', () => {
+  it('forget 删除被驱逐 cwd 的锚：重新进入观测走建锚路径（同值也再广播一次，fallback 不 warn）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = createFakeObservations()
+    fake.stubResolved('/repo', 'main')
+    fake.stubResolved('/other', 'dev')
+    const { trigger, pushSessionList } = createTrigger(fake)
+    trigger.refresh(new Set(['/repo', '/other']), 'watch') // 双锚建立
+    expect(pushSessionList).toHaveBeenCalledTimes(1)
+    pushSessionList.mockClear()
+
+    trigger.forget(new Set(['/repo'])) // 观测器驱逐 /repo（onPrune 联动）
+
+    vi.advanceTimersByTime(2000) // 越过节流窗口
+    // 同值重刷：/repo 锚已删（undefined ≠ main → 建锚再广播一次）；/other 锚在，不变化
+    trigger.refresh(new Set(['/repo', '/other']), 'fallback')
+    expect(pushSessionList).toHaveBeenCalledTimes(1)
+    expect(warnSpy).not.toHaveBeenCalled() // 建锚语义（undefined 锚）不 warn
+    warnSpy.mockRestore()
+  })
+
+  it('forget 未登记的 cwd 无操作', () => {
+    const fake = createFakeObservations()
+    fake.stubResolved('/repo', 'main')
+    const { trigger, pushSessionList } = createTrigger(fake)
+    trigger.refresh(new Set(['/repo']), 'watch')
+    pushSessionList.mockClear()
+
+    trigger.forget(new Set(['/never-seen']))
+    vi.advanceTimersByTime(2000)
+    trigger.refresh(new Set(['/repo']), 'watch') // /repo 锚未受影响
+    expect(pushSessionList).not.toHaveBeenCalled()
+  })
+})
