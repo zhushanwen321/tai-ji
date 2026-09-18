@@ -274,10 +274,17 @@ function resolveDryRunTarget(classified, pkgMap, line, cmd) {
 
 /** 干跑一条已裁决命令，返回判定素材（stdout 文件行数 / 尾部输出 / 退出码裁决文案 / 展示用 cwd） */
 function runDryRun(dryCmd, cwd) {
+  // pnpm run/exec 会把 workspace bin 目录注入 PATH（hoisted 布局 → 根 node_modules/.bin；
+  // 包内 bin → <pkg>/node_modules/.bin），裸 `bash -c` 只继承守卫进程的 PATH——CI runner
+  // 无全局 vitest 时 script 展开形态（如 test:main = `cd main && vitest run`）在裸 PATH 下
+  // exit 127（2026-09-18 CI Invariants 实发）。干跑补齐 pnpm 同款 bin 前缀，保证与被验证
+  // 命令在 CI 里的真实解析语义一致。
+  const binPrepend = `${join(cwd, 'node_modules', '.bin')}:${join(ROOT, 'node_modules', '.bin')}:`
   const result = spawnSync('bash', ['-c', dryCmd], {
     cwd,
     timeout: DRY_RUN_TIMEOUT_MS,
     encoding: 'utf-8',
+    env: { ...process.env, PATH: `${binPrepend}${process.env.PATH ?? ''}` },
   })
   const where = cwd === ROOT ? '<repo-root>' : cwd.replace(ROOT, '<repo-root>/')
   // 判定以 stdout 文件行数为准，不能只看 exit code：实测 vitest list 空收集时
