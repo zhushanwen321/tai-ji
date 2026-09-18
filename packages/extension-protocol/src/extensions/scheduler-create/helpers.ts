@@ -133,20 +133,32 @@ export function dateToOnceCron(date: Date): string {
   return `${date.getMinutes()} ${date.getHours()} ${date.getDate()} ${date.getMonth() + 1} *`
 }
 
+// 一次性 cron 固定 5 段（分 时 日 月 *），第 5 段为星期通配符
+const ONCE_CRON_FIELD_COUNT = 5
+// cron 各字段合法上/下界（分/时/日/月，与 croner 的标准 cron 语义一致）
+const CRON_MINUTE_MAX = 59
+const CRON_HOUR_MAX = 23
+const CRON_DAY_MIN = 1
+const CRON_DAY_MAX = 31
+const CRON_MONTH_MIN = 1
+const CRON_MONTH_MAX = 12
+// 年份顺延上界：覆盖闰年周期（4 年）与 2100 类非闰世纪年跳变
+const ONCE_CRON_MAX_YEAR_LOOKAHEAD = 8
+
 /**
  * 一次性 cron（5 段 `分 时 日 月 *`）→ 本地墙钟时刻。
  *
  * cron 不含年份，还原为「下一次发生的该时刻」：以 now 为基准取当年，当年已过
  * 或该年不存在此日（如非闰年的 2/29——Date 构造对越界日静默滚动，解构回验字段
- * 一致性即「该年存在此日」判定）则向后顺延年份（至多 8 年，覆盖闰年周期与
- * 2100 类非闰世纪年跳变），供表单时间初值还原。
+ * 一致性即「该年存在此日」判定）则向后顺延年份（至多 ONCE_CRON_MAX_YEAR_LOOKAHEAD
+ * 年，覆盖闰年周期与 2100 类非闰世纪年跳变），供表单时间初值还原。
  *
  * 非 5 段 / 星期位非 * / 数字段含非数字或越界（分 0-59 / 时 0-23 / 日 1-31 /
  * 月 1-12）→ null（循环 cron 等非一次性形态不做时刻还原）。
  */
 export function onceCronToDate(cron: string, now: Date = new Date()): Date | null {
   const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5 || parts[4] !== '*') return null
+  if (parts.length !== ONCE_CRON_FIELD_COUNT || parts[4] !== '*') return null
   const [minute, hour, day, month] = parts
   if (
     !/^\d+$/.test(minute) || !/^\d+$/.test(hour) ||
@@ -158,9 +170,13 @@ export function onceCronToDate(cron: string, now: Date = new Date()): Date | nul
   const h = Number(hour)
   const d = Number(day)
   const mon = Number(month)
-  if (m > 59 || h > 23 || d < 1 || d > 31 || mon < 1 || mon > 12) return null
+  if (
+    m > CRON_MINUTE_MAX || h > CRON_HOUR_MAX ||
+    d < CRON_DAY_MIN || d > CRON_DAY_MAX ||
+    mon < CRON_MONTH_MIN || mon > CRON_MONTH_MAX
+  ) return null
   const startYear = now.getFullYear()
-  for (let year = startYear; year <= startYear + 8; year++) {
+  for (let year = startYear; year <= startYear + ONCE_CRON_MAX_YEAR_LOOKAHEAD; year++) {
     const candidate = new Date(year, mon - 1, d, h, m, 0, 0)
     if (candidate.getMonth() !== mon - 1 || candidate.getDate() !== d) continue
     if (candidate.getTime() >= now.getTime()) return candidate
