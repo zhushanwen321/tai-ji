@@ -512,8 +512,9 @@ export class RunOrchestration {
     // record 先创建，worktree 失败时可 finalizeFailed（record 已在 store 中）。
     // worktree 必须显式开启：worktree===true 创建新 worktree；worktree===undefined/false 不创建。
     // fork 不隐含 worktree（UC-1 fork 可独立使用，fork 仅继承上下文，在 parent cwd 跑）。
-    // 非 pi 引擎带 worktree 已被上方预检同步拒绝（caps.sandbox='none'），此段实际仅
-    // sandbox 能力引擎（pi：caps.sandbox='emulated'）可达。
+    // 带 worktree 的任务经上方预检 gate 过滤（caps.sandbox='none' 同步拒绝），此段
+    // 仅 sandbox 声明非 none 的引擎可达（现行 pi/zcode 均为 'emulated'——worktree
+    // 创建/patch/回收执行者是下方 core 层 worktree-manager，引擎侧只消费 task.cwd）。
     if (typeof opts.worktree === "object") {
       // [外部契约面登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
       // ExecuteOptions.worktree 公共 API 契约的合法成员：本仓零调用，外仓（workflow

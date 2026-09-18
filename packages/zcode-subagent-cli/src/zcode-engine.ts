@@ -192,8 +192,9 @@ export class ZcodeEngine implements EnginePort {
       personaInjection: "prompt",
       // app-server 推送流实时流出（session/event payload.delta → text_delta）
       eventGranularity: "stream",
-      // 首期未接 worktree 隔离（公共层 worktree-manager 接入后升 emulated）
-      sandbox: "none",
+      // 无 OS sandbox；worktree 隔离由公共层 worktree-manager 承担（引擎侧仅消费
+      // task.cwd → session/create 的 workspacePath）= emulated（pi 同款声明语义）
+      sandbox: "emulated",
       // sqlite 三级 JOIN 完整重建 turns（reader 实测）
       sessionRead: "full",
       // --resume 冷启动可用（实测）
