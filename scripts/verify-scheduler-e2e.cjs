@@ -625,25 +625,41 @@ function countNumberedRunLines(text) {
   return matches ? matches.length : 0
 }
 
+/** ScheduleDraft 顶层形状守卫：非 null 的普通对象（排除数组）。 */
+function isDraftPayloadObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** ScheduleDraft 可选字段守卫：undefined（未提供）或 string。 */
+function isOptionalString(v) {
+  return v === undefined || typeof v === 'string'
+}
+
+/** ScheduleDraft kind 字段守卫：'once' 或 'recurring'。 */
+function isScheduleDraftKind(kind) {
+  return kind === 'once' || kind === 'recurring'
+}
+
 /**
  * 对象是否为合法 ScheduleDraft 形状（cjs 端口；字段判定与
  * packages/extension-protocol/src/extensions/scheduler-create/helpers.ts 的
  * isScheduleDraft 一致，改动须同步）。驱动器用于断言请求帧 payload 的协议形状。
+ * 判定顺序与端口源一致（顶层形状 → kind → 各字段），不可调换。
  * @param {unknown} value
  * @returns {boolean}
  */
 function isScheduleDraftShape(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  if (!isDraftPayloadObject(value)) return false
   const d = value
-  return (d.kind === 'once' || d.kind === 'recurring')
+  return isScheduleDraftKind(d.kind)
     && typeof d.schedule === 'string'
-    && (d.model === undefined || typeof d.model === 'string')
+    && isOptionalString(d.model)
     && typeof d.prompt === 'string'
-    && (d.name === undefined || typeof d.name === 'string')
-    && (d.expires === undefined || typeof d.expires === 'string')
+    && isOptionalString(d.name)
+    && isOptionalString(d.expires)
     && Array.isArray(d.models)
     && d.models.every((m) => typeof m === 'string')
-    && (d.currentModel === undefined || typeof d.currentModel === 'string')
+    && isOptionalString(d.currentModel)
 }
 
 /**
@@ -1399,6 +1415,56 @@ async function runS14(piBin) {
 // ── A 类：创建确认交互场景（U7 新增，设计 §3.4 协议契约 / §4 e2e 影响面）──
 
 /**
+ * S18 ① 请求帧契约校验：恰 1 次 marker select，options[0] 是合法 ScheduleDraft
+ * 且 schedule/prompt 反映 faux 参数（1h / confirm-draft-prompt）。
+ * @param {Array<{ id: string, options: string[] }>} reqs getScheduleCreateRequests 产物
+ * @returns {{ ok: boolean, desc: string }} ok=契约成立；desc=请求侧诊断（未取到 draft 时 '(none)'）
+ */
+function checkScheduleCreateDraftContract(reqs) {
+  const baseOk = reqs.length === 1 && reqs[0].options.length >= 1
+  let desc = '(none)'
+  if (!baseOk) return { ok: false, desc }
+  try {
+    const draft = JSON.parse(reqs[0].options[0])
+    const ok = isScheduleDraftShape(draft)
+      && draft.schedule === '1h'
+      && draft.prompt === 'confirm-draft-prompt'
+    desc = `kind=${draft.kind} schedule=${draft.schedule} prompt=${String(draft.prompt).slice(0, 40)} models=${Array.isArray(draft.models) ? draft.models.length : '?'}`
+    return { ok, desc }
+  } catch (_) {
+    // options[0] 非 JSON，或 draft 解析为 null 后属性访问失败 → 契约不成立，诊断维持 '(none)'
+    return { ok: false, desc }
+  }
+}
+
+/** S18 ② tool result 回显断言：45m 下次运行 + 改后 prompt 进自动任务名。 */
+function echoesEditedValues(blob) {
+  return /Next run:\s+in\s+45m/.test(blob)
+    && blob.includes('Task "user-edited-prompt"')
+}
+
+/** 恰 1 条 upsert entry 时取其 task 字段，否则 null。 */
+function getSingleUpsertTask(upserts) {
+  return upserts.length === 1 && upserts[0].data.task ? upserts[0].data.task : null
+}
+
+/** 落库 task 是否 = S18 用户裁定值（interval 45m + user-edited-prompt + once）。 */
+function isEditedValueTask(task) {
+  return !!task
+    && task.prompt === 'user-edited-prompt'
+    && task.kind === 'once'
+    && !!task.schedule
+    && task.schedule.mode === 'interval'
+    && task.schedule.intervalMs === 45 * 60 * 1000
+}
+
+/** S18 ③ 落库 task 的诊断摘要（缺失字段以 '?' 占位）。 */
+function describeUpsertTask(task) {
+  return `(prompt=${task ? String(task.prompt).slice(0, 40) : '?'} kind=${task ? task.kind : '?'} `
+    + `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'})`
+}
+
+/**
  * S18：确认创建路径（用户改配置后确认）。
  *
  * faux 触发 schedule（draft: 1h / once / confirm-draft-prompt）→ extension_ui_request
@@ -1434,22 +1500,10 @@ async function runS18(piBin) {
     if (!turnEnd.ok) return fail('S18', 'turn did not end (timeout) — select 交互未闭环')
 
     const reqs = getScheduleCreateRequests(s.getCaptured())
-    let draftDesc = '(none)'
-    let draftOk = reqs.length === 1 && reqs[0].options.length >= 1
-    if (draftOk) {
-      try {
-        const draft = JSON.parse(reqs[0].options[0])
-        draftOk = isScheduleDraftShape(draft)
-          && draft.schedule === '1h'
-          && draft.prompt === 'confirm-draft-prompt'
-        draftDesc = `kind=${draft.kind} schedule=${draft.schedule} prompt=${String(draft.prompt).slice(0, 40)} models=${Array.isArray(draft.models) ? draft.models.length : '?'}`
-      } catch (_) {
-        draftOk = false
-      }
-    }
-    if (!draftOk) {
+    const contract = checkScheduleCreateDraftContract(reqs)
+    if (!contract.ok) {
       s.kill()
-      return fail('S18', `schedule-create request contract broken (count=${reqs.length}, draft=${draftDesc})`)
+      return fail('S18', `schedule-create request contract broken (count=${reqs.length}, draft=${contract.desc})`)
     }
 
     const entries = await s.getEntries()
@@ -1460,27 +1514,20 @@ async function runS18(piBin) {
     s.kill()
 
     // ② tool result 回显裁定值：45m 的下次运行 + 改后 prompt 进自动任务名
-    const echoEdited = /Next run:\s+in\s+45m/.test(blob)
-      && blob.includes('Task "user-edited-prompt"')
+    const echoEdited = echoesEditedValues(blob)
     // ③ 落库 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
-    const task = upserts.length === 1 && upserts[0].data.task ? upserts[0].data.task : null
-    const taskOk = !!task
-      && task.prompt === 'user-edited-prompt'
-      && task.kind === 'once'
-      && !!task.schedule
-      && task.schedule.mode === 'interval'
-      && task.schedule.intervalMs === 45 * 60 * 1000
+    const task = getSingleUpsertTask(upserts)
+    const taskOk = isEditedValueTask(task)
 
-    const pass = draftOk && echoEdited && taskOk
+    const pass = contract.ok && echoEdited && taskOk
     return {
       name: 'S18',
       status: pass ? 'PASS' : 'FAIL',
       evidence:
-        `request draft=${draftDesc}; ` +
+        `request draft=${contract.desc}; ` +
         `echo edited values (45m + user-edited-prompt)=${echoEdited}; ` +
         `upsert task = edited values=${taskOk} ` +
-        `(prompt=${task ? String(task.prompt).slice(0, 40) : '?'} kind=${task ? task.kind : '?'} ` +
-        `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'}); ` +
+        describeUpsertTask(task) + '; ' +
         `upserts=${upserts.length}; jsonl=[${s.getJsonlSnippet()}]`,
     }
   } finally {
