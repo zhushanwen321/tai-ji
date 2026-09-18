@@ -32,7 +32,7 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -733,6 +733,39 @@ function tryTranslateAskUserSelect(
 }
 
 /**
+ * scheduler 创建确认请求检测（第 4 marker 分支，设计 scheduler-create-confirm-modal §3.4）：
+ * select title 为 SCHEDULE_CREATE_MARKER → options[0] 是 JSON payload
+ * （scheduleCreateInteract helper 序列化的 ScheduleDraft）。
+ * 检测成功后透传 scheduleDraft（isScheduleDraft 守卫收窄），前端路由到 ScheduleCreateOverlay；
+ * 检测失败（非合法 JSON / draft 缺字段）返回 undefined，由调用方降级为普通 select
+ * （与 ask-user 分支同款兜底，S2）。
+ */
+function tryTranslateScheduleCreateSelect(
+  event: PiExtensionUiRequestEvent,
+  sid: string,
+  requestId: string,
+  dialogMethod: ExtensionInteractMethod,
+): PiTranslatedEvent[] | undefined {
+  const draft = parseSelectOptionsPayload(event)
+  if (!isScheduleDraft(draft)) {
+    return undefined
+  }
+  const requestPayload = {
+    sessionId: sid,
+    requestId,
+    method: 'select',              // 仍是 select（复用回传通道）
+    scheduleCreate: true,          // 标记 schedule 创建确认，前端据此路由到 ScheduleCreateOverlay
+    scheduleDraft: draft,          // 守卫收窄后的草稿对象透传（前端无需再 JSON.parse）
+  }
+  return [
+    // 与 ask-user 分支同构：extension-ui kind 事件使 EventInterpreter 暂停 watchdog，
+    // 并通知 server 跟踪请求 + 缓存 pending 请求（block 等用户响应，不超时——S4）。
+    { kind: 'extension-ui', requestId, sessionId: sid, method: dialogMethod, payload: requestPayload },
+    extensionUiRequestBroadcast(requestPayload),
+  ]
+}
+
+/**
  * 普通 select / confirm / input / editor（无 marker 命中，或 ask-user 检测失败降级到此）。
  * [HISTORICAL] options 透传修复：pi select 严格传 string[]（types.ts select 签名 +
  * rpc-mode.js 原样透传），旧代码把 rawOptions 断言为 Array<{label,value}> 后 .map(o=>o.label)
@@ -785,6 +818,11 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
     const askEvents = tryTranslateAskUserSelect(event, sid, requestId, dialogMethod)
     if (askEvents) return askEvents
     // 检测失败（非合法 JSON / questions 空）→ 降级普通 select（下方分支）
+  }
+  if (method === 'select' && event.title === SCHEDULE_CREATE_MARKER) {
+    const scheduleEvents = tryTranslateScheduleCreateSelect(event, sid, requestId, dialogMethod)
+    if (scheduleEvents) return scheduleEvents
+    // 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（下方分支）
   }
   return translatePlainDialogRequest(event, sid, requestId, dialogMethod)
 }
