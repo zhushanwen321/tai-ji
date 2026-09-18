@@ -8,7 +8,8 @@
  * 回传（带 method）→ pi Promise resolve。
  *
  * 状态归属（CW wave `session-active-ssot` T2）：pending 队列已提升到 extensionUIStore
- *（session 级 SSOT），让 deriveStatus 经 hasPendingAskUser 能查到 ask-user 等待状态。
+ *（session 级 SSOT），让 deriveStatus 经 hasPendingBlockingOverlay 能查到阻塞 overlay
+ *（ask-user ∨ schedule-create）等待状态。
  * 本 composable 只负责：①订阅编排（per-panel 实例各自订阅）；②filter 分流读取
  *（store 存全量 pending，currentAskUserRequest 在 computed 里按 filter 取）。
  *

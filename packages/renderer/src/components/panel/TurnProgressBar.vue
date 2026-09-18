@@ -68,7 +68,7 @@ const extensionUIStore = useExtensionUIStore()
 const { snapshot, snoozeWarn } = useTurnProgress(
   computed(() => props.sessionId),
   chatStore,
-  { getAwaitingUser: (sid) => extensionUIStore.hasPendingAskUser(sid) },
+  { getAwaitingUser: (sid) => extensionUIStore.hasPendingBlockingOverlay(sid) },
 )
 
 /** 时长换算常量（no-magic-numbers：展示粒度分/时的进率单一声明处）。 */

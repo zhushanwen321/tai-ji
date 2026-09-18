@@ -8,15 +8,16 @@
  * 原 ask-user pending 状态困在 useExtensionUI composable 的 Panel 实例局部作用域
  *（useSessionScopedState reactive 数组），store/deriveStatus 读不到，导致 ask-user 提问
  * 等待期间对话流收起（bug）。本 store 把 pending 提升为 session 级 store SSOT，供
- * derivedStatus computed 经 hasPendingAskUser 非响应式查询当前 session 是否有 ask-user 在等。
+ * derivedStatus computed 经 hasPendingBlockingOverlay 非响应式查询当前 session 是否有
+ * 阻塞 overlay 在等。
  *
  * 范式（镜像 subagent.ts / command.ts，ADR-0049 Map 分区派）：
  * - requestsBySession: ref<Map<sessionId, ExtensionUIRequest[]>> —— per-sessionId 分区
  * - recordsOf(sessionId): ComputedRef —— 响应式视图，组件订阅用
  * - getRequestsBySession(sessionId): ExtensionUIRequest[] —— 非响应式读（无则空数组）
- * - hasPendingAskUser / hasPendingDialog: 非响应式 getter，供 derivedStatus computed 内调
- *   （hasPendingAskUser 语义 = 有 pending 富交互 overlay：ask-user ∨ schedule-create，
- *   见函数注释）
+ * - hasPendingBlockingOverlay / hasPendingDialog: 非响应式 getter，供 derivedStatus
+ *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 富交互 overlay：
+ *   ask-user ∨ schedule-create，见函数注释）
  * - applyRecords / addRequest / removeRequest: 不可变 Map 写（new Map(...).set(...)）
  * - clearSession: deleteSession 精确释放分区（防泄漏）
  * - clearAllPending: runtime 重连全局清理（R3/T5）
@@ -61,14 +62,13 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
    * 10min 被误挂「turn 超时」警示）；③ usePanelView 挂载判据（经 currentAskUserRequest
    * computed，同谓词扩义）。
    *
-   * 命名说明：设计裁决本 getter 改名「有 pending 阻塞 overlay」（hasPendingBlockingOverlay），
-   * 现符号名沿用（ask-user 通道先在；改名需机械适配多处既有测试 mock，留待测试资产单元
-   * 统一处理），语义以本注释为准。
+   * 命名说明（设计裁决已落地，2026-09-18）：语义是「有 pending 阻塞 overlay 请求」
+   * （ask-user ∨ schedule-create 两通道共用同一阻塞语义），符号名 hasPendingBlockingOverlay。
    *
    * 非响应式普通函数：供 derivedStatus computed 内调用，computed 通过其引用的响应式
    * requestsBySession 建立依赖（写入时不可变替换 ref，触发重算）。
    */
-  function hasPendingAskUser(sessionId: string): boolean {
+  function hasPendingBlockingOverlay(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
       (r) => r.askUser === true || r.scheduleCreate === true,
     )
@@ -77,7 +77,7 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
   /**
    * 该 session 是否有非 overlay 类的简单原语 dialog pending（供外部消费者查询；当前无消费方，
    * 公共接口保留）。对称判据：askUser 与 scheduleCreate 两类富交互 overlay 都不归 dialog
-   * （漏排 scheduleCreate 会把它误归 dialog 类，与 hasPendingAskUser 双真）。
+   * （漏排 scheduleCreate 会把它误归 dialog 类，与 hasPendingBlockingOverlay 双真）。
    */
   function hasPendingDialog(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
@@ -133,7 +133,7 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     recordsOf,
     // 非响应式读 / getter
     getRequestsBySession,
-    hasPendingAskUser,
+    hasPendingBlockingOverlay,
     hasPendingDialog,
     // 写操作（不可变 Map 替换）
     applyRecords,

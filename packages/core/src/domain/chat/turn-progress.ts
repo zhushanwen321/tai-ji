@@ -73,7 +73,7 @@ export interface UseTurnProgressOptions {
   /**
    * ask_user 豁免信号（D6 豁免态）注入点：每 tick 轮询读取（非响应式——展示刷新由
    * 秒级 tick 驱动，信号出现后 ≤1 tick 生效）。renderer 接线 =
-   * `extensionUIStore.hasPendingAskUser`（既有非响应式 getter，与 deriveStatus 同模式）。
+   * `extensionUIStore.hasPendingBlockingOverlay`（既有非响应式 getter，与 deriveStatus 同模式）。
    */
   getAwaitingUser?: (sessionId: string) => boolean
   /** 时钟注入（测试 fake timers 用；默认 Date.now）。 */

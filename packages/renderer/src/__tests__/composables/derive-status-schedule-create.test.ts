@@ -2,7 +2,7 @@
  * useSessionDerivations × schedule-create waiting 联动测试（schedule-create-confirm-modal U6，
  * 消费方 ①；对照 derive-status-ask-user.test.ts）。
  *
- * extensionUIStore.hasPendingAskUser 谓词扩义（askUser ∨ scheduleCreate）后，deriveStatus
+ * extensionUIStore.hasPendingBlockingOverlay 谓词扩义（askUser ∨ scheduleCreate）后，deriveStatus
  * 经同一 getter 自动联动：schedule-create 确认等待同样使 session 状态点进入 waiting
  * （agent block 等用户确认，非空闲）。锁 store 注入 → 派生值响应式迁移的用户可见链路。
  *

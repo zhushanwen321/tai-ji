@@ -57,7 +57,7 @@ export function useSessionDerivations() {
   // 未访问 session 的终态（done/error/stopped）来自 runtime session_end 元数据。
   const session = useSessionStore()
   // RK3：subagent/workflow/extensionUI store 在 useSessionDerivations 外层闭包取（Pinia 单例引用稳定）。
-  // computed 体内实际调用 hasBackgroundWork/hasPendingAskUser，建立对各自 records Map 的响应式依赖。
+  // computed 体内实际调用 hasBackgroundWork/hasPendingBlockingOverlay，建立对各自 records Map 的响应式依赖。
   // 别名 hasSessionBackgroundWork：与 derivedStatus computed 体内同名局部变量解耦（避免 shadow）。
   const { hasBackgroundWork: hasSessionBackgroundWork } = useBackgroundWork()
   const extensionUIStore = useExtensionUIStore()
@@ -85,7 +85,7 @@ export function useSessionDerivations() {
         // hasAskUserPending：富交互 overlay 请求 pending（ask-user ∨ schedule-create，
         // store getter 谓词扩义自动联动）→ waiting 态（T3 + schedule-create U6）。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        const hasAskUserPending = extensionUIStore.hasPendingAskUser(id)
+        const hasAskUserPending = extensionUIStore.hasPendingBlockingOverlay(id)
         return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasAskUserPending)
       })
       statusCache.set(id, c)
