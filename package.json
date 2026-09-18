@@ -32,7 +32,7 @@
     "@changesets/cli": "^2.29.0",
     "@earendil-works/pi-ai": "0.84.4",
     "@earendil-works/pi-coding-agent": "0.84.4",
-    "@earendil-works/pi-tui": "0.84.4",
+    "@earendil-works/pi-tui": "0.85.1",
     "@playwright/test": "^1.61.1",
     "eslint": "^10.3.0",
     "eslint-plugin-vue": "^10.9.1",
@@ -44,7 +44,7 @@
     "overrides": {
       "@earendil-works/pi-coding-agent": "0.84.4",
       "@earendil-works/pi-ai": "0.84.4",
-      "@earendil-works/pi-tui": "0.84.4",
+      "@earendil-works/pi-tui": "0.85.1",
       "@earendil-works/pi-agent-core": "0.84.4"
     },
     "onlyBuiltDependencies": [
