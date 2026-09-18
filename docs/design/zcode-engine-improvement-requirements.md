@@ -59,7 +59,7 @@
 1. **core 从不把 worktree path 写进 cwd**：全仓 `handle.path` / `worktreeHandle.path` 消费点只有 worktree-manager 自身 git 操作与诊断投影，无任何 `cwd: handle.path` 赋值。
 2. **两引擎 server 都不还原 `ctx.cwd`**：`pi-subagent-cli/src/server.ts` 与 `zcode-subagent-cli/src/server.ts` 的 fullTask 还原都只有 `ctx.model`（`...(ctx.model !== undefined ? { model: ctx.model } : {})`）；pi 的 server 测试还显式断言 task 不含 cwd。
 
-【推断】（静态断链推出，证据充分，建议一次 `worktree: true` 的 pi 任务 + worktree 内 `git status` 真机验证）：pi 协议化后 worktree 任务实际未把子进程放进 worktree——spawn cwd 落回引擎 CLI 进程 cwd（主仓），collectPatch 对空 worktree 恒产出空 patch。即 **pi 的 `sandbox: "emulated"` 声明与实际行为不符，worktree 参数在两引擎上当前都不可用**（pi 静默失效，zcode 被 gate 拒绝）。
+【推断】（静态断链推出，证据充分）：pi 协议化后 worktree 任务实际未把子进程放进 worktree——spawn cwd 落回引擎 CLI 进程 cwd（主仓），collectPatch 对空 worktree 恒产出空 patch。即 **pi 的 `sandbox: "emulated"` 声明与实际行为不符，worktree 参数在两引擎上当前都不可用**（pi 静默失效，zcode 被 gate 拒绝）。→ **已定级为确认 bug 并修复**（cwd 传导三跳 + reaper pid 连带缺口，见 R2 进展）。
 
 「上提到 core」的影响面：core 组装点（`run-orchestration.ts` 的 `taskSpecWithModel`，runAndFinalize 与 chat 轮共用单源）解析 handle → `cwd: handle.path`；两引擎 server 各补一行 `ctx.cwd` 还原（+ 对应 server 测试断言翻转）；capability-gate 的 worktree 判据退役或改判「core 层能力恒放行」；manifest/引擎类 sandbox 位统一调整。zcode 常驻进程不受影响：进程 cwd 恒为 engineDataDir 是设计使然，任务级工作区走 `session/create` 的 `workspacePath`（已吃 `task.cwd`，`zcode-engine.ts:1377-1379`），续聊重建每轮 create 新 session 天然跟随新 cwd。残余风险【推断】：同一常驻 app-server 并发多 workspacePath 的服务端隔离行为未验证。
 
@@ -121,7 +121,7 @@ read-only 守卫判据是 `taskType === "subagent_child"`（两处：send/snapsh
 | A2 | 死常量 `ZCODE_APPSERVER_TURN_DEFAULT_TIMEOUT_MS`（300s 墙钟修复后无消费方） | `constants.ts:94` |
 | A3 | ctxModel 继承被忽略 + 恒显式传 model 压掉用户 `defaultModelSelection`（见 Q3） | `zcode-engine.ts:1008-1018` |
 | A4 | fork-from 拒绝文案对 zcode 有事实性偏差（说「never started / transcript collected」不属实） | `subagent-actions-core.ts:703` |
-| A5 | **pi worktree 实际未生效**（见 Q4 断链证据）：声明 `sandbox:"emulated"` 与行为不符，worktree 任务 spawn cwd 落回主仓【推断，建议真机验证后定级】 | `server.ts` ctx 还原 / core cwd 组装点 |
+| A5 | ~~**pi worktree 实际未生效**~~：**已修复**——cwd 传导三跳补齐（`withWorktreeCwd` 合流 + wire additive + 两引擎 server 还原）+ reaper pid 连带缺口（create/reconstruct 直接写宿主 pid，见 R2） | `run-orchestration.ts` / `remote-engine.ts` / 两引擎 `server.ts` / `worktree-manager.ts` |
 | A6 | thinking 直播流断点（见 Q8）：pi 三层缺口 + zcode 无 GUI 生产者 | 见 Q8 表 |
 
 ### B. 设计取舍构成的体验差异（改造需独立立项）
@@ -154,13 +154,13 @@ read-only 守卫判据是 `taskType === "subagent_child"`（两处：send/snapsh
 - 验收：zcode record 锚失效场景下 message 重开，round 归零 + epoch 推进与 pi 同构；单测覆盖 zcode 锚分支。
 - 影响面：`chat-rounds.ts` 单闭包 + 单测（约 30 行）。无依赖。
 
-### R2 [P1] worktree 能力上提 core（A5 + Q4）
+### R2 [P1] worktree 能力上提 core（A5 + Q4）——**cwd 传导部分已修复**
 
 - 动机：① 修复 pi worktree 静默失效（当前是「假支持」）；② zcode 解锁 worktree；③ 能力位收敛为 core 层单一事实。
-- 内容：core 组装点把 handle.path 写进 taskSpec.cwd；两引擎 server 还原 ctx.cwd（+测试断言翻转）；capability-gate worktree 判据退役/改判；sandbox 位声明统一调整；pi 真机验证 worktree 生效（A5 定级依据）。
-- 验收：`worktree: true` 的 pi 任务子进程 cwd = worktree 路径且 patch 非空；zcode 任务带 worktree 不再被 gate 拒且 `session/create` workspacePath = worktree 路径；worktree 清理链（finalize/reaper/reconstruct）行为不变。
-- 影响面：`run-orchestration.ts`（组装单源）/ `host-task-spec.ts`（透传语义）/ 两引擎 `server.ts` + server 测试 / `capability-gate.ts` + 测试 / 两引擎类与 manifest 的 sandbox 位 / `docs/architecture/subagent-engine-protocolization.md` 能力位表。
-- 依赖：建议先做 pi 真机验证确认 A5，再动架构。
+- **已落地（pi worktree 断链修复）**：core 侧 `run-orchestration.ts` 新增 `withWorktreeCwd`（taskSpecWithModel 单源合流——`WorktreeHandle.path` → `task.cwd`，worktree 优先于显式 cwd）；wire 收敛为「有值才上 `ctx.cwd`」（`remote-engine.ts` additive，`RunContextParams.cwd` 改 optional）；pi/zcode 两引擎 server 补 `ctx.cwd` additive 还原；连带修复 reaper 误删缺口——worktree 注册表条目 pid 从「0 占位 + 子进程补全（补全链已随 inproc 引擎删除）」改为直接写宿主进程 pid（create 与 reconstruct 两处），孤儿判据锚定宿主死活。端到端锚点：protocol-e2e 的 fake-pi cwd 探针（wire ctx.cwd → 引擎还原 → 子进程 spawn cwd 三跳互证）。
+- **剩余（gate 位调整）**：capability-gate 的 worktree 判据退役/改判、manifest 与引擎类 sandbox 位统一（zcode 从 none 升 emulated 或摘除判据）、pi 真机 `worktree: true` 任务验证 patch 非空。
+- 验收（剩余部分）：zcode 任务带 worktree 不再被 gate 拒且 `session/create` workspacePath = worktree 路径；worktree 清理链（finalize/reaper/reconstruct）行为不变。
+- 影响面（剩余部分）：`capability-gate.ts` + 测试 / 两引擎类与 manifest 的 sandbox 位 / 本文档与 `docs/architecture/subagent-engine-protocolization.md` 能力位表（cwd 行已补）。
 
 ### R3 [P1→P3] zcode 续聊升 native（session/resume 替换 cold 注入）（B1 + Q2）
 
@@ -217,7 +217,7 @@ read-only 守卫判据是 `taskType === "subagent_child"`（两处：send/snapsh
 ## 4. 实施顺序建议
 
 1. **R5 + R1**（小改，先行清账：死常量/文案/reopen 分派）；
-2. **R2**（先 pi 真机验证 A5 定级，再上提 core——修复「假支持」是正确性问题）；
+2. **R2**（cwd 传导已落地；剩余 = gate 位调整 + pi 真机 patch 非空验证——修复「假支持」是正确性问题）；
 3. **R4**（轻量体验补齐）；
 4. **R6 + R9 合并设计**（帧协议一次定形，pi 落地先行、zcode 生产者随后）；
 5. **R3**（大改，独立 tech-design；与 R1 锚生命周期衔接）；
@@ -225,7 +225,7 @@ read-only 守卫判据是 `taskType === "subagent_child"`（两处：send/snapsh
 
 ## 5. 未核实清单（诚实边界）
 
-- A5「pi worktree 实际未生效」为静态断链推断，需一次真机 `worktree: true` 任务验证。
+- ~~A5「pi worktree 实际未生效」~~：已确认 bug 并修复（静态断链 + 修复后全测试绿 + protocol-e2e cwd 探针端到端锚定）；pi 真机 `worktree: true` 任务的 patch 非空验证仍待做（R2 剩余）。
 - restoreWarning 的构造点未定位（消费/清除语义已核实；推断为 resume 后模型解析失败时设置）。
 - 同一常驻 app-server 并发多 workspacePath 的服务端隔离行为未验证（R2 残余风险）。
 - zcode 版本升级（bundle 偏移失效）后，Q1/Q2/Q5/Q6/Q7 的上游结论需按锚点字符串重验。
