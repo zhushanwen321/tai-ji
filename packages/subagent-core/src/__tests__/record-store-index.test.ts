@@ -560,7 +560,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(sa1?.endedAt).toBe(3000); // tombstone 的精确结束时间，非 mtime 近似
   });
 
-  it("S1TC15: [R4/D6-③] 存量索引空串归一回归——索引直查路径 model:\"\" 条目产出 model undefined 的 record", { timeout: 15_000 }, async () => {
+  chmodProbeIt("S1TC15: [R4/D6-③] 存量索引空串归一回归——索引直查路径 model:\"\" 条目产出 model undefined 的 record", { timeout: 15_000 }, async () => {
     const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
 
     const storeA = new RecordStore(sessionsDir);
