@@ -133,7 +133,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-goal`](extensions/universal/goal/README.md) | `/goal` 持久目标驱动自治循环，证据验收 |
 | [`pi-todo`](extensions/universal/todo/README.md) | AI 驱动的 todo 列表（会话持久化 + `/todos`） |
 | [`pi-ask-user`](extensions/universal/ask-user/README.md) | 结构化多问题输入（分栏预览 + 内联编辑） |
-| [`pi-permission`](extensions/universal/permission/README.md) | 四档权限模式（yolo / auto / approve / strict）+ 审批管道 |
+| [`pi-permission`](extensions/universal/permission/README.md) | 四档权限模式（yolo / auto / approve / strict）+ 三层判定管道（AST / 规则 / AI 分类） |
 | [`pi-scheduler`](extensions/universal/scheduler/README.md) | 定时任务调度（cron / interval，once / recurring） |
 | [`pi-session-reader`](extensions/universal/session-reader/README.md) | 读取 / 查询 session 历史（树、家族、执行树、搜索、导出） |
 | [`pi-session-manager`](extensions/universal/session-manager/README.md) | Agent 托管子会话（创建 / 发送 / 历史 / 状态 / 列表 / 中止） |
@@ -234,7 +234,7 @@ pnpm build:e2e && pnpm test:e2e
 ├── packages/                 # pnpm workspace 包
 │   ├── renderer/             # Vue 前端（components / composables / stores / lib）
 │   ├── runtime/              # Node.js Runtime（transport / services / infra + plugins）
-│   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation）
+│   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation 等）
 │   ├── ui/                   # taiji ui 组件库（@taiji/ui）
 │   ├── shared/               # 前后端共享类型
 │   ├── dom-core/             # composer DOM 层
@@ -253,7 +253,7 @@ pnpm build:e2e && pnpm test:e2e
 ├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
 ├── resources/                # 内置插件（statusline）
 ├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
-└── .agents/                  # 项目级 agent / skill（merge / review 等）
+└── .agents/                  # 项目级 agent / skill（merge / pr-cr-fix 等）
 ```
 
 ## 发布

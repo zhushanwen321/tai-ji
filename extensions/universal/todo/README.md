@@ -81,7 +81,7 @@ todo 扩展**自己不调用 `appendEntry`**。状态快照随 Pi 框架自动�
 
 | 层 | 触发 | 规则 |
 |----|------|------|
-| **status line** | 每次 tool execute / session 恢复 | 空列表不显示；全完成 `✓ c/t`（绿）；否则 `☑ c/t` |
+| **status line** | 每次 tool execute / session 恢复 / before_agent_start（有 pending 时） | 空列表不显示；全完成 `✓ c/t`（绿）；否则 `☑ c/t` |
 | **widget**（侧边） | 有 todo 时 | ≤8 项单列；≥9 项双列（规避 Pi 的 10 行 widget 截断） |
 | **tool result** | tool 返回时 | collapsed 显示前 5 项 + `... N more`；expanded 全显示 |
 

@@ -26,7 +26,7 @@
 
 ## Plan File
 
-Plan Mode 的产出物，存储在 `.taiji-harness/{slug}/plan.md`（slug 截断 30 字符）。含 YAML frontmatter 与模板章节。`/plan` 不带参数时自动扫描 `.taiji-harness/` 下既有 plan 文件，提供续写 / 执行 / 新建选项。
+Plan Mode 的产出物，存储在 `.taiji-harness/{slug}/plan.md`（slug 截断 30 字符）。含 YAML frontmatter 与模板章节。`/plan` 不带参数时自动扫描 `.taiji-harness/` 下既有 plan 文件，提供续写 / 执行 / 新建选项；无既有 plan 文件时直接进入 plan mode（slug 为 `untitled`）。
 
 ## 模板
 

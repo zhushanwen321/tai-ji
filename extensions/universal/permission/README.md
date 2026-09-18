@@ -11,7 +11,7 @@ Pi permission 扩展 — 四档权限模式（yolo / auto / approve / strict）+
 - **用户自定义规则**：OpenCode wildcard 语法，last-match-wins 语义
 - **AI Classifier**：auto 模式下用 LLM 评估未知命令风险（low/medium/high）
 - **用户审批 UI**：TUI（自定义 Component）/ RPC（select 对话框）/ headless（fail-closed deny）
-- **Reject-with-Reason**：用户拒绝时可输入真实理由（回传 agent 辅助理解）
+- **Reject-with-Reason**：用户拒绝时可输入真实理由（回传 agent 辅助理解；RPC 分支完整支持，TUI 分支暂为固定文案，见已知限制）
 - **fail-closed**：任何异常路径 → block（绝不静默放行）
 
 ## 安装
@@ -28,8 +28,6 @@ ln -s /path/to/taiji/extensions/universal/permission \
 ## 配置
 
 配置文件位置：`<agentDir>/config/permission-ext-config.json`（`<agentDir>` = pi agent 目录，`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；首次运行自动创建默认配置）。
-
-可通过 `PI_CODING_AGENT_DIR` 环境变量覆盖基础路径。
 
 ### 配置结构
 
@@ -103,7 +101,7 @@ ln -s /path/to/taiji/extensions/universal/permission \
 
 内置规则分两类，均代码硬编码，用户不可改：
 
-- **白名单（builtin-safe）**：50 条无条件安全命令（24 Codex 移植 + 26 本扩展扩充：`cat`/`cd`/`echo`/`ls`/`grep`/`pwd`/`diff`/`jq`/`du`/`file`/`ps` 等）+ 9 条带 flag 子检查的条件安全命令（`base64`/`find`/`rg`/`git`/`sed`/`sort`/`iconv`/`shuf`/`date`）。规则遍历无 deny/allow 命中时（ask），白名单兜底 allow（不跑 AI）。
+- **白名单（builtin-safe）**：50 条无条件安全命令（24 Codex 移植 + 26 本扩展扩充：`arch`/`column`/`comm`/`diff`/`dirname`/`du`/`df`/`file`/`jq`/`ps` 等）+ 9 条带 flag 子检查的条件安全命令（`base64`/`find`/`rg`/`git`/`sed`/`sort`/`iconv`/`shuf`/`date`）。规则遍历无 deny/allow 命中时（ask），白名单兜底 allow（不跑 AI）。
 - **危险规则（builtin-danger）**：12 条正则规则（`rm -rf`、`sudo`、`chmod 777`、`curl ... | sh`、`git push --force`、`git reset --hard` 等）。pattern 是 RegExp 源字符串（含 `\b`/`\s`），用 `new RegExp(pattern, 'i')` 编译，`action` 固定 `deny`。
 
 完整清单与每条规则的 pattern/示例见下方「规则系统」第 2、3 节。
@@ -157,15 +155,15 @@ wc / whereis / who / whoami / which
 
 | 命令 | 安全条件 | 命中危险即不放行 |
 |------|----------|------------------|
-| `base64` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / `-o*`（合并 flag 如 `-ob64.txt`） |
+| `base64` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / 短 flag 簇含 `o`（`-fo` / `-of` / `-ob64.txt` 等合并写法） |
 | `find` | 不含执行/删除/写文件 flag | 禁 `-exec` / `-execdir` / `-ok` / `-okdir` / `-delete` / `-fls` / `-fprint` / `-fprint0` / `-fprintf` |
 | `rg` | 不含执行外部工具 flag | 禁 `--pre` / `--pre=*` / `--hostname-bin` / `--hostname-bin=*` / `--search-zip` / `-z` |
 | `git` | 子命令属于 `status`/`log`/`diff`/`show`/`branch` 且只读 | 见下文 git 子表 |
 | `sed` | 仅 `sed -n {N\|M,N}p [file]`（argv 长度 ≤ 4） | 其余形式不放行 |
-| `sort` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / `-o*`（合并 flag） |
-| `iconv` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / `-o*`（合并 flag 如 `-fo`） |
-| `shuf` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / `-o*`（合并 flag 如 `-fo`） |
-| `date` | 不含设置时间 flag | 禁 `-s` / `--set` / `--set=*`（`-s` 设置系统时间需 root） |
+| `sort` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / 短 flag 簇含 `o`（`-fo` 等合并写法） |
+| `iconv` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / 短 flag 簇含 `o`（`-fo` 等合并写法） |
+| `shuf` | 不含写文件 flag | 禁 `-o` / `--output` / `--output=*` / 短 flag 簇含 `o`（`-fo` 等合并写法） |
+| `date` | 不含设置时间 flag | 禁 `-s` / `--set` / `--set=*` / 短 flag 簇含 `s`（`-ds` 等合并写法；`-s` 设置系统时间需 root） |
 
 **git 子命令安全判定细则**：
 
@@ -347,7 +345,7 @@ publish 规则在后，last-match-wins 时 deny 胜出。
 - **路径**：`<agentDir>/config/permission-ext-config.json`（`<agentDir>` 可用 `PI_CODING_AGENT_DIR` 环境变量覆盖，默认 `~/.pi/agent`）
 - **首次创建**：扩展启动时若文件不存在，自动写入默认配置（`mode: "yolo"`、空 `userRules`）
 - **权限**：`0o600`（原子写：先写 `.tmp` 再 rename，避免半写状态）
-- **编辑方式**：`/permission rule` 打开 overlay 编辑器（TUI 支持列表查看/模板新增/自定义表单；RPC 模式支持列表查看/模板新增/删除已有规则，不支持改字段）；也可直接手动编辑 JSON 文件
+- **编辑方式**：`/permission rule` 打开 overlay 编辑器（TUI 支持列表查看/模板新增/自定义表单/删除规则；RPC 模式支持列表查看/模板新增/删除已有规则，不支持改字段）；也可直接手动编辑 JSON 文件
 - **热重载**：每次 tool_call 都重读配置，用 `mtimeMs + size` 双 key 缓存检测变化（防 APFS 等 mtime 精度截断）。编辑保存后下一次命令即生效，无需重启
 
 ### 11. 调试技巧
@@ -356,7 +354,7 @@ publish 规则在后，last-match-wins 时 deny 胜出。
 - 查看决策来源：`PermissionDecision.source`（`mode` / `rule` / `ai` / `user`），区分是模式直接放行、规则命中、AI 分类还是人工审批（AST 分析不直接产生决策，只改变后续评估路径）
 - 查看命中规则：`PermissionDecision.matchedRule`（命中时携带 Rule 对象），从 `id` 可判断是 `builtin-safe`（白名单虚拟规则）、`bd-<n>`（内置危险）还是 `user-<n>`（用户规则）
 - 故意写一条 `deny` + 带 `description` 的用户规则触发拦截，从 tool_result 的 block reason 文案反查命中的是哪条规则
-- 规则 pattern 编译失败不会静默跳过：`resolvePattern` 无容错，非法 pattern 抛出的异常由 tool_call handler 兜底 fail-closed block（该次调用被拦）。实际触发面极窄——用户规则加载时 source 归一化为 `user`，走 wildcard 编译（特殊字符自动转义，几乎不会失败）；只有手写配置写出非法正则且恰好命中 `builtin-danger` 分支才会抛异常。怀疑某条规则没生效时先检查 JSON 语法与 wildcard 写法
+- 规则 pattern 编译失败不会静默跳过：`resolvePattern` 无容错，非法 pattern 抛出的异常由 tool_call handler 兜底 fail-closed block（该次调用被拦）。实际触发面极窄——`source` 非 `user`/`builtin-safe`/`builtin-danger` 时归一化为 `user`，走 wildcard 编译（特殊字符自动转义，几乎不会失败）；只有手写配置把 `source` 写成 `builtin-danger` 且 pattern 恰为非法正则时才会抛异常。怀疑某条规则没生效时先检查 JSON 语法与 wildcard 写法
 
 ## AI Classifier
 
@@ -387,7 +385,7 @@ auto 模式下层 3 用 LLM 评估未知命令风险：
 ## 已知限制
 
 - **TUI Reject-with-Reason**：当前 RPC 分支已完整接入 `ctx.ui.input` 采集拒绝理由；TUI 分支因 pi-tui Input 组件集成成本较高，暂保留简化 deny（固定文案），后续迭代补齐内联文本输入。
-- **headless 模式**：json/print 模式无交互 UI，所有审批请求 fail-closed deny（不阻塞自动化流程，但 strict/approve 模式下无法放行）。
+- **headless 模式**：json/print 模式无交互 UI——strict/approve 的审批请求立即 fail-closed deny；auto 模式不弹审批、纯等 AI classifier 判定（AI 失败/超时/ask → fail-closed deny），不阻塞自动化流程。
 - **wasm 加载**：AST 分析依赖 tree-sitter-bash wasm，加载失败时 fail-closed（clean=false, parseError=true）。
 - **并发**：tool_call handler 用 approvalChain 串行化（Pi 不保证 handler 串行，但权限检查涉及共享 UI 对话框）。
 

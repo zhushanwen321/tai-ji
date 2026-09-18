@@ -2,9 +2,17 @@
 
 Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain / parallel / scatter-gather / map-reduce），单包统一执行链 + 分层配额（ADR-030）。
 
+## 工具面（3 tools）
+
+| 工具 | action 集合 | 关键参数 |
+|------|------------|---------|
+| `subagent` | `start` / `list` / `cancel` / `message` / `close` / `fork-from`（6 个） | start：`task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`collect`、`maxTurns`、`idleTimeoutMs` 等 16 字段拍平顶层；`message` / `close` / `cancel` / `fork-from`：`subagentId` 必填（`message` 另需 `text`） |
+| `workflow` | `run` / `status` / `abort`（3 个） | 见「Workflow 生命周期」节 |
+| `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
+
 ## 内置 Agents
 
-按「读/写 × 视角」正交切分，10 个角色零重叠（C1 起随 `@zhushanwen/subagent-core` 的 `agents/` 资产分发，`<available_subagents>` 的 `<location>` 指向 core 包目录）：
+按「读/写 × 视角」正交切分，10 个角色零重叠（C1 起随 `@zhushanwen/subagent-core` 的 `agents/` 资产分发，`<available_subagents>` 的 `<location>` 指向 core 包 `agents/` 内各 agent `.md` 的绝对路径）：
 
 | Agent | 角色 | 读/写 |
 |-------|------|-------|
@@ -33,7 +41,7 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 
 orchestrator 是纯协调器角色：拆解任务 → 委派 subagent → 汇总结果，自身不做执行类工作。orchestrator agent 自身也可递归委派子 orchestrator，实现分层任务拆解（深度受 `Depth: N/10` 护栏保护）。
 
-**工具约束（C1/D-5）**：内置模板不携带 `tools:` frontmatter 白名单，subagent 不以 `--tools` 白名单启动——工具约束回归宿主默认工具面，orchestrator 靠角色职责（职责边界段）约束自身只做协调。想要白名单的用户在 `<workspace>/.agents/agents/` 放同名 `.md` 覆写（project 级源稳定遮蔽内置，是唯一逃生门），或沿用 pi CLI 的 `--tools` 白名单（临时验证）：
+**工具约束（C1/D-5）**：内置模板不携带 `tools:` frontmatter 白名单，subagent 不以 `--tools` 白名单启动——工具约束回归宿主默认工具面，orchestrator 靠角色职责（职责边界段）约束自身只做协调。想要白名单的用户在 `<workspace>/.agents/agents/` 放同名 `.md` 覆写（发现优先级 project 级最高，稳定遮蔽内置），或临时用 pi CLI 的 `--tools` 白名单验证：
 
 ```bash
 pi --tools todo,goal_control,workflow,subagent,ask_user
@@ -49,13 +57,11 @@ pi --tools todo,goal_control,workflow,subagent,ask_user
 
 ### 递归深度
 
-系统内置 `n = 10` 深度护栏（fork 链 + 嵌套取 max），超过抛 `ForkDepthExceededError`。实测建议控制在 **3-4 层**以内——更深层会因上下文逐层压缩导致信息失真。
+系统内置 `n = 10` 深度护栏（`MAX_FORK_DEPTH`，fork 链与通用嵌套两个计数器共享上限、取严者生效）：fork 链超限抛 `ForkDepthExceededError`，通用嵌套护栏报 `nested_spawn_rejected`。实测建议控制在 **3-4 层**以内——更深层会因上下文逐层压缩导致信息失真。
 
 ## Workflow 生命周期（one-shot）
 
-Workflow run 是一次性执行，状态机两态：`running → done`（`done` 唯一终态，reason 区分 completed / aborted / failed / budget_limited / time_limited）。`workflow` tool 仅 3 个 action：`run` / `status` / `abort`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。
-
-Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.
+Workflow run 是一次性执行，状态机两态：`running → done`（`done` 唯一终态，reason 区分 completed / aborted / failed / budget_limited / time_limited）。`workflow` tool 仅 3 个 action：`run` / `status` / `abort`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。一次性执行、无 pause/resume：提前停止只有 abort 一条路，要新结果就重新 run。
 
 - **abort 是唯一的提前停止方式**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）。不存在 pause/resume action，调用会被 pi schema 校验拒绝（`Validation failed for tool "workflow"`）；`/workflows pause|resume <id>` 返回 removed 提示
 - **session 切换/关闭时**，所有 running run 当即作废转 `done,failed`（state.error 为 `Session switched: run terminated` / `Session shutdown: run terminated`），已投入的 token 作废；需要结果就重新 run
@@ -64,7 +70,7 @@ Runs are one-shot: there is no pause/resume — to stop a run early use abort; f
 
 ## 性能：sessions-index.json 持久化索引
 
-冷启动首扫的 identity 探测结论持久化为 `<enc>/sessions-index.json`（stat 戳自校验、tmp(pid)+rename 原子写、60s 节流、损坏/版本不符静默回退全量探测），真实目录（1744 jsonl / 671MB）实测冷扫描中位数 972.8ms → 80.6ms（12.1x，预算 ≤300ms）。可复现验收脚本：`bench/cold-scan.bench.ts`（冷扫描计时 + 输出等价断言）、`bench/concurrent-scan.bench.ts`（3 实例并发 + 随机变异四判定）。
+冷启动首扫的 identity 探测结论持久化为 `<enc>/sessions-index.json`（`<enc>` = agentDir 下 `subagents/` 内按 cwd 编码的目录段，索引落 sessions 目录同级；stat 戳自校验、tmp(pid+seq)+rename 原子写、60s 节流、损坏/版本不符静默回退全量探测），真实目录（1744 jsonl / 671MB）实测冷扫描中位数 972.8ms → 80.6ms（12.1x，预算 ≤300ms）。可复现验收脚本：`bench/cold-scan.bench.ts`（冷扫描计时 + 输出等价断言）、`bench/concurrent-scan.bench.ts`（3 实例并发 + 随机变异四判定）。
 
 ## 安装
 

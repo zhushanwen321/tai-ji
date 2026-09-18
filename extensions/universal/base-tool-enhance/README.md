@@ -4,7 +4,15 @@
 
 设计决策沉淀在包内源码注释与本文档。
 
+## 安装
+
+```sh
+pi install npm:@zhushanwen/pi-base-tool-enhance
+```
+
 ## 配置
+
+配置指南另见随包注册的 skill：`base-tool-enhance-ext-config`（`package.json` `pi.skills` 注册，内容与本节一致，含热重载时机与白名单命中语义详述）。
 
 `<pi agentDir>/config/base-tool-enhance-ext-config.json`（读时刷新热重载，坏键回退默认不拒载）：
 

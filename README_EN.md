@@ -133,7 +133,7 @@ TaiJi's Agent capabilities are implemented through the pi extension mechanism; s
 | [`pi-goal`](extensions/universal/goal/README.md) | `/goal` persistent goal-driven autonomous loop with evidence-based acceptance |
 | [`pi-todo`](extensions/universal/todo/README.md) | AI-driven todo list (session persistence + `/todos`) |
 | [`pi-ask-user`](extensions/universal/ask-user/README.md) | Structured multi-question input (split-pane preview + inline editing) |
-| [`pi-permission`](extensions/universal/permission/README.md) | Four permission modes (yolo / auto / approve / strict) + approval pipeline |
+| [`pi-permission`](extensions/universal/permission/README.md) | Four permission modes (yolo / auto / approve / strict) + three-layer decision pipeline (AST / rules / AI classifier) |
 | [`pi-scheduler`](extensions/universal/scheduler/README.md) | Scheduled task scheduling (cron / interval, once / recurring) |
 | [`pi-session-reader`](extensions/universal/session-reader/README.md) | Read / query session history (trees, family, execution tree, search, export) |
 | [`pi-session-manager`](extensions/universal/session-manager/README.md) | Agent-managed child sessions (create / send / history / status / list / abort) |
@@ -234,7 +234,7 @@ Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debuggin
 ├── packages/                 # pnpm workspace packages
 │   ├── renderer/             # Vue frontend (components / composables / stores / lib)
 │   ├── runtime/              # Node.js runtime (transport / services / infra + plugins)
-│   ├── core/                 # Frontend core layer (coordination / domain / extension-host / foundation)
+│   ├── core/                 # Frontend core layer (coordination / domain / extension-host / foundation, etc.)
 │   ├── ui/                   # taiji ui component library (@taiji/ui)
 │   ├── shared/               # Shared frontend-runtime types
 │   ├── dom-core/             # composer DOM layer
@@ -253,7 +253,7 @@ Debugging the dev app: once `pnpm dev` is running, Electron opens a CDP debuggin
 ├── scripts/                  # Build / verification / release scripts (preflight / postbuild / verify-* / bundle-extensions)
 ├── resources/                # Built-in plugins (statusline)
 ├── docs/                     # Docs (architecture / design SSOT / extension guides / testing / ADR / troubleshooting)
-└── .agents/                  # Project-level agents / skills (merge / review, etc.)
+└── .agents/                  # Project-level agents / skills (merge / pr-cr-fix, etc.)
 ```
 
 ## Release

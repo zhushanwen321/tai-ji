@@ -15,9 +15,9 @@
 | `outline` | `session` | turn 级概览（约 1500 token）；`granularity: "entry"` 平铺到 entry、`allBranches` 含废弃侧分支 |
 | `expand` | `session` + `turn`（如 `"T013"`） | 单 turn 的 entry 列表 |
 | `detail` | `session` + `turns`（如 `"T013-T015"` 或 `"T013"`） | turn 全文；`includeToolResult` / `includeThinking` 控制是否包含噪音（默认省略） |
-| `search` | `session` + `pattern` | 全文 grep（子串或正则）；`session` 可传逗号分隔 ≤10 个完整 id 做跨 session 搜索；`scope` 过滤 `user` / `assistant` / `toolResult` |
-| `export` | `session` | 物化到文件；`format`: `outline`（默认）/ `full` / `family` |
-| `extract` | `session` + `what` | 按类型抽取素材：`user-messages` / `commands` / `files` / `commits` / `tool-results`；`tool` 按工具名过滤 commands/tool-results |
+| `search` | `session` + `pattern` | 全文 grep（子串或正则）；`session` 可传逗号分隔 ≤10 个完整 id 做跨 session 搜索；`scope` 过滤 `all`（默认）/ `user` / `assistant` / `toolResult` |
+| `export` | `session` | 物化到文件；`format`: `outline`（默认）/ `full` / `family`；`includeToolResult` / `allBranches` 亦作用于本 action |
+| `extract` | `session` + `what` | 按类型抽取素材：`user-messages` / `commands` / `files` / `commits` / `tool-results`；`tool` 按工具名过滤 commands/tool-results；可选 `turns` 限定范围（按全量分段序号，含 compaction 周期/旁支，与 outline 的 leaf turn 序号不一致） |
 | `workflow` | `session` | workflow run 概览（status / budget / steps）；`runId` 聚焦单个 run；step 的 call sessionId 可跳转 outline/detail |
 | `result` | `session` | 取 subagent 最终结果正文（与其完成通知同内容）；单个 id 或逗号分隔 ≤10 个批量；`limit` 限每条字符数（默认 8000，超长截断并附全文文件指引） |
 | `doctor` | — | 环境自检：host 环境判定（纯 pi / taiji）+ 候选 session 根目录诊断；`includeSubagents: true` 附带扫描 subagent 根文件数 |

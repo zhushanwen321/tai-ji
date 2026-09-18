@@ -39,7 +39,7 @@ pi install npm:@zhushanwen/pi-rename-session
 |---|---|---|---|
 | `enabled` | `boolean` | `false` | 自动重命名开关（受 flag 文件覆盖，见下） |
 | `model` | `ModelSelector` | `{ "type": "ref", "ref": "" }` | 标题生成模型，仅支持精确指定 `{type:"ref", ref:"provider/modelId"}`；**空 ref 跟随会话主模型**（开箱即用），非空但解析失败（配错）才静默跳过 |
-| `mode` | `"first-prompt" \| "first-stop" \| "agent-tool"` | `"first-stop"` | 触发模式（三值互斥）：首条请求即命名 / 首个成功 round 末命名（现状）/ agent 自主经 `rename_session` 工具命名。事件面每次事件 live 读（GUI 切换对活跃 session 的自动命名即时生效）；工具注册面只在 pi 进程启动加载 extension 时求值一次（切换后已存活 session 的工具清单不回溯，残留工具由 execute 内 live mode 守卫拒绝并给恢复指引） |
+| `mode` | `"first-prompt" \| "first-stop" \| "agent-tool"` | `"first-stop"` | 触发模式（三值互斥）：首条请求即命名 / 首个成功 round 末命名（现状）/ agent 自主经 `rename_session` 工具命名。事件面每次事件 live 读（GUI 切换对活跃 session 的自动命名即时生效）；工具注册面在 extension 工厂执行时求值（每 session 创建一次——taiji 每 session 一个 pi 进程；原生 pi CLI 同进程 /fork、/session 新建 session 亦重新求值），session 存活期内不回溯（pi 无 unregisterTool），切换后已存活 session 的残留工具由 execute 内 live mode 守卫拒绝并给恢复指引 |
 | `maxTitleLength` | `number` | `50` | 标题最大长度（Unicode 码点数，须正整数） |
 | `thinkingLevel` | `ModelThinkingLevel` | `"off"` | 标题 LLM 的 thinking 级别（`off` = 不传 reasoning，provider 默认） |
 
@@ -57,15 +57,15 @@ pi install npm:@zhushanwen/pi-rename-session
 
 ```
 /auto-rename          # 查看当前状态
-/auto-rename on       # 开启（创建 flag 文件）
-/auto-rename off      # 关闭（写 config.enabled=false + 删 flag，双写同步）
+/auto-rename on       # 开启（创建 flag 文件；enable 别名等效）
+/auto-rename off      # 关闭（写 config.enabled=false + 删 flag，双写同步；disable 别名等效）
 ```
 
 ## 工作原理
 
 三个入口共用同一条落库管道（`callRenameLLM` → 防覆盖重查 → `setSessionName`），按 `mode` 分派：
 
-1. **入口分派（事件面 live 读 mode）**：`message_end` 入口（first-prompt）过滤 `role === "user"`；`turn_end` 入口（first-stop）按下方流程；`agent-tool` 模式不激活自动命名逻辑（两 handler 常驻注册、命中即静默返回），改为 extension load 时注册 `rename_session` 工具。
+1. **入口分派（事件面 live 读 mode）**：`message_end` 入口（first-prompt）过滤 `role === "user"`；`turn_end` 入口（first-stop）按下方流程；`agent-tool` 模式不激活自动命名逻辑（两 handler 常驻注册、命中即静默返回），改为 extension 工厂执行时（每 session 创建一次）注册 `rename_session` 工具。
 2. **开关 + subagent 过滤**（自动路径共用）：开关关闭（flag 不存在且 `enabled=false`）直接返回；session 路径含 `subagents` 段视为子进程 session，跳过。
 3. **O(1) 快速路径（first-stop）**：只有 `stopReason === "stop"` 的 turn 才继续——**rename 一定在 round 末触发**（最终 turn 的 message 即最终 assistant 回复，final text 零遍历可得），不会在首个 iteration 中途命名。first-prompt 入口的对应守卫：首条 user 判定 = handler 执行时 `getEntries()` 中 user message 计数 === 0（pi 的 extension handler 先于该条 message 的 entries append 执行，本条即 session 首条 user；steering/follow-up 消息到达时首条已入 entries，天然不重复触发）。
 4. **首 round 判定（first-stop）**：session entries 中成功（stop）assistant 回复数 === 1 才触发（后续 round 不重复 rename；error 轮的 assistant 回复不计数，延迟到下一个成功轮）。
@@ -95,7 +95,7 @@ rename 是 best-effort 副作用，任何失败静默跳过、绝不阻断 agent
 
 所有日志经 `@zhushanwen/pi-extension-logger` 输出，两个通道：
 
-- **appendEntry（session entry，常开）**：`logger.warn` / `logger.error` 写入 session JSONL 的 custom entry（`type: "custom"`、`customType: "rename-session:log"`），不进 LLM 上下文、不显 TUI。`data.message` 由 logger 自动补 `[rename-session]` 前缀，格式为 `msg + 结构化 data`（error 等详情在 entry `data.data` 字段，不冒号拼接进 message）。
+- **appendEntry（session entry，常开）**：`logger.warn` / `logger.error` 写入 session JSONL 的 custom entry（`type: "custom"`、`customType: "rename-session:log"`），不进 LLM 上下文、不显 TUI。`data.message` 由 logger 自动补 `[rename-session]` 前缀，格式为 `msg + 结构化 data`（error 等详情在 entry `data.data` 字段，不冒号拼接进 message）。extension-logger 对同 key 重复文案有 60s 窗口 ×10 条限流（超限抑制，窗口过期后补一条聚合摘要；文案含变量值如 `count=<n>` 时 key 不同，不触及）。
 - **文件日志（`TAIJI_AGENT_DEBUG=1` 时）**：`<agentDir>/logs/rename-session-<date>.log`。
 
 下列 debug 日志（仅 `TAIJI_AGENT_DEBUG=1` 时经 `logger.warn` 发出）的**文案字面值是 E2E 断言硬契约**（断言对象 = appendEntry entry 的 message 内容；变更须同步 `e2e/` 场景脚本与单测）：

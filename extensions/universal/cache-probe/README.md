@@ -10,7 +10,7 @@
 
 ## entry schema v2（数据量精简，长期采集友好）
 
-- hash 为 sha256 前 16 hex；**baseline entry** 存全量 9 hash + cwd + startReason（约 250B）；**normal entry** 只存变化项增量（约 120B）；无变化 turn 零写入
+- hash 为 sha256 前 16 hex；**baseline entry** 存全量 9 hash + cwd + startReason（实测单行约 550B，随 cwd 长度浮动）；**normal entry** 只存变化项增量（单部位变化实测单行约 200B）；无变化 turn 零写入
 - `seq` = 进程内 before_agent_start 触发计数，随 entry 落盘供人工排序诊断；当前无自动消费方（analyze.py 不读 seq）
 
 ## 挂载方式（长期采集）
@@ -28,14 +28,18 @@ pi --continue --extension <repo>/extensions/universal/cache-probe/index.ts "<pro
 ## 归因分析
 
 ```bash
-python3 extensions/universal/cache-probe/analyze.py ~/.pi/agent/sessions ~/.taiji/pi/sessions
+# pi CLI 会话 + taiji runtime 会话（<dataDir>/agent/sessions，getSessionsDir 口径）
+python3 extensions/universal/cache-probe/analyze.py ~/.pi/agent/sessions ~/.taiji/agent/sessions
+# 可选 --since YYYY-MM-DD：只分析 mtime 在该日期之后的 session
 ```
 
 输出五部分：扫描概览 / 命中率基线 / 归因矩阵 / 进程边界漂移 / GO-NO-GO 决策建议。
 
+归因解读：第 3 部分只统计间隔 <30min、模型未切换、探针覆盖的 turn 首笔 miss，按前缀是否变化分档——「前缀变化（可修）」档指向可固化的前缀漂移；「前缀未变仍 miss」档指向服务端淘汰 / 链盲区（不可修）。第 5 部分：归因矩阵有效 turn 满 200 后，按「前缀变化贡献的 miss token 占比」给倾向——占比 ≥50% → GO，≤30% → NO-GO，之间为混合成因需人工决策。
+
 ## 已知限制（实测查明）
 
-- pi CLI 启动路径（`--session` / `--continue`）的 session_start reason 恒为 `startup`（`resume` 仅运行时 switch session 出现）——跨进程识别靠 baseline 标记 + 时间戳 gap，漂移检测靠 hash 对比，均不受影响。
+- pi CLI 启动路径（`--session` / `--continue` / `--resume`）的 session_start reason 恒为 `startup`（pi 侧只做 SessionManager.open/continueRecent，不走运行时 switch 路径；`resume` / `new` / `fork` 仅运行时 switch/fork 出现，`reload` 仅 /reload 出现）——跨进程识别靠 baseline 标记 + 时间戳 gap，漂移检测靠 hash 对比，均不受影响。
 - 同进程内修改 AGENTS.md 不进 system prompt（pi 启动快照），contextFiles 漂移只出现在跨进程边界——pi 的行为，不是探针缺陷。
 - 真实环境实测发现：extension 链（如 subagent-workflow）存在每 turn 级的 system prompt 动态注入，由 spFull 单独捕获——这正是它存在的价值。
 
