@@ -149,15 +149,11 @@
           <BackgroundTaskDetailPanel
             v-else-if="drawerTab === 'bashTask' && bashTaskSelected"
           />
-          <!-- plan tab（plan 模式重设计 u1-drawer-tab G2）：空面板骨架，无条件注入（tab 激活
-               即渲染，不经空态 fallback——与 bashTask 的「未选中不注入」相反，骨架是 tab 的
-               常驻容器）。PlanDocsPanel（L2 文档 tab + markdown 渲染 + 划选评论）归
-               u1-docs-panel 接线，本骨架只交付 tab 激活容器与挂点。 -->
-          <div
-            v-else-if="drawerTab === 'plan'"
-            class="flex h-full min-h-0 flex-col overflow-hidden"
-            data-testid="plan-docs-panel-skeleton"
-          />
+          <!-- plan tab（plan 模式重设计 u1-drawer-tab + u1-docs-panel）：无条件注入（tab 激活
+               即渲染，不经空态 fallback——与 bashTask 的「未选中不注入」相反）。u1-docs-panel
+               起由 PlanDocsPanel 承载（L2 文档 tab + file.read 正文 + 划选评论），面板内部
+               docs 空时自渲染空态（D10），替代 u1-drawer-tab 的过渡空骨架。 -->
+          <PlanDocsPanel v-else-if="drawerTab === 'plan'" :session-id="panelSessionId" />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -211,6 +207,7 @@ import { useSessionTrace, clearTraceSelection } from '@/composables/features/tra
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
 import PlanModeBanner from '@/components/panel/plan/PlanModeBanner.vue'
 import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
+import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'

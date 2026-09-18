@@ -30,4 +30,24 @@ export default {
     noPlan: 'No plan artifacts yet',
     planHint: 'Documents produced by the agent appear here after entering plan mode',
   },
+  docs: {
+    // Docs panel (plan-mode redesign u1-docs-panel: L2 doc tabs + meta + body)
+    sourceLabel: 'Source',
+    revisingBadge: 'Revising',
+    // E2: registered doc file missing (file.read failed) → error placeholder + re-produce hint, entry kept
+    notFound: 'Document not found or deleted',
+    notFoundHint: 'The file may have been moved or deleted. Ask the agent to re-produce it, or mention it in the conversation',
+  },
+  comment: {
+    // Selection comments (u1-docs-panel: select text → popover → draft, D6 lifecycle)
+    trigger: 'Comment',
+    placeholder: 'Write your comment; the agent consumes each one during revision…',
+    cancel: 'Cancel',
+    add: 'Add comment',
+    delete: 'Delete',
+    // Design §3.1 failure path: comments disabled while revising (no concurrent-revision semantics);
+    // popover still shows, button unavailable
+    revisingDisabled: 'Revising in progress — comments are temporarily disabled',
+    draftsTitle: 'Comment drafts ({count})',
+  },
 }

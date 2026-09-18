@@ -30,4 +30,23 @@ export default {
     noPlan: '暂无计划产物',
     planHint: '进入计划模式后，agent 产出的文档会显示在这里',
   },
+  docs: {
+    // 文档面板（plan 模式重设计 u1-docs-panel：L2 文档 tab + meta + 正文）
+    sourceLabel: '来源',
+    revisingBadge: '修订中',
+    // E2：docs 登记的文件不存在（file.read 失败）→ 占位错误态 + agent 可重新产出提示，条目不清
+    notFound: '文档不存在或已删除',
+    notFoundHint: '该文件可能已被移动或删除。可让 agent 重新产出，或在对话中说明处理方式',
+  },
+  comment: {
+    // 划选评论（u1-docs-panel：划选文字 → 浮条 → 评论草稿，D6 生命周期）
+    trigger: '评论',
+    placeholder: '写下你的评论，agent 修订时会逐条消费…',
+    cancel: '取消',
+    add: '添加评论',
+    delete: '删除',
+    // 设计 §3.1 失败路径：修订中评论禁用（避免并发修订语义），浮条仍现、按钮不可用
+    revisingDisabled: '修订中，暂不能添加评论',
+    draftsTitle: '评论草稿（{count}）',
+  },
 }
