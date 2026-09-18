@@ -161,36 +161,51 @@ const CRON_DOW_MAX = 7
 const CRON_FIELD_MIN = [0, 0, 1, 1, 0]
 const CRON_FIELD_MAX = [CRON_MINUTE_MAX, CRON_HOUR_MAX, CRON_DAY_MAX, CRON_MONTH_MAX, CRON_DOW_MAX]
 
+/** 周域段英文名归一为数字（后端权威 croner 接受 MON-SUN；前端预览子集等价映射），
+ *  替换后复用既有数字/范围/步进逻辑（MON-FRI → 1-5、MON,WED → 1,3）；非周域原样返回 */
+function normalizeDowSegment(seg: string, rangeIdx: number): string {
+  if (rangeIdx !== CRON_DOW_FIELD_INDEX) return seg
+  return seg.replace(DOW_NAME_RE, (m) => String(DOW_NAME_TO_NUMBER[m.toLowerCase()] ?? m))
+}
+
+/** 步进段（\*\/n，如 \*\/5 每 5 分钟）：n≥1 时从 min 步进填充至 max；n<1 非法 */
+function addStepValues(out: Set<number>, min: number, max: number, step: number): boolean {
+  if (step < 1) return false
+  for (let v = min; v <= max; v += step) out.add(v)
+  return true
+}
+
+/** `a-b` 范围段：越界或倒序非法；合法则整段填充 */
+function addRangeValues(out: Set<number>, a: number, b: number, min: number, max: number): boolean {
+  if (a < min || b > max || a > b) return false
+  for (let v = a; v <= b; v++) out.add(v)
+  return true
+}
+
+/** 单值段：越界非法；合法则填充 */
+function addSingleValue(out: Set<number>, n: number, min: number, max: number): boolean {
+  if (n < min || n > max) return false
+  out.add(n)
+  return true
+}
+
+/** 单段（逗号分隔后）解析：步进 / 范围 / 单值三分支依次匹配，非法返回 false */
+function parseCronSegment(out: Set<number>, seg: string, min: number, max: number): boolean {
+  const step = seg.match(/^\*\/(\d+)$/)
+  if (step) return addStepValues(out, min, max, Number(step[1]))
+  const rng = seg.match(/^(\d+)-(\d+)$/)
+  if (rng) return addRangeValues(out, Number(rng[1]), Number(rng[2]), min, max)
+  if (!/^\d+$/.test(seg)) return false
+  return addSingleValue(out, Number(seg), min, max)
+}
+
 function parseCronPart(part: string, rangeIdx: number): CronField | 'invalid' {
   if (part === '*') return null
   const min = CRON_FIELD_MIN[rangeIdx] ?? 0
   const max = CRON_FIELD_MAX[rangeIdx] ?? CRON_MINUTE_MAX
   const out = new Set<number>()
   for (const seg of part.split(',')) {
-    // 周域英文名归一为数字（后端权威 croner 接受 MON-SUN；前端预览子集等价映射），
-    // 替换后复用既有数字/范围/步进逻辑（MON-FRI → 1-5、MON,WED → 1,3）
-    const norm = rangeIdx === CRON_DOW_FIELD_INDEX
-      ? seg.replace(DOW_NAME_RE, (m) => String(DOW_NAME_TO_NUMBER[m.toLowerCase()] ?? m))
-      : seg
-    const step = norm.match(/^\*\/(\d+)$/)
-    if (step) {
-      const st = Number(step[1])
-      if (st < 1) return 'invalid'
-      for (let v = min; v <= max; v += st) out.add(v)
-      continue
-    }
-    const rng = norm.match(/^(\d+)-(\d+)$/)
-    if (rng) {
-      const a = Number(rng[1])
-      const b = Number(rng[2])
-      if (a < min || b > max || a > b) return 'invalid'
-      for (let v = a; v <= b; v++) out.add(v)
-      continue
-    }
-    if (!/^\d+$/.test(norm)) return 'invalid'
-    const n = Number(norm)
-    if (n < min || n > max) return 'invalid'
-    out.add(n)
+    if (!parseCronSegment(out, normalizeDowSegment(seg, rangeIdx), min, max)) return 'invalid'
   }
   return out
 }
