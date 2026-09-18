@@ -67,7 +67,7 @@ agent_end 设置 pendingSteerMessage
 | **completion-steer** | 首次全部 completed | 注入「检查交付质量」steer（一次性，`completionSteered` 防重） |
 | **auto-clear** | 全部 completed 后再过 2 轮 | 自动清空 todos + 重置标记 |
 
-`agent_end` 内：completion-steer **不短路**（继续往下），auto-clear 命中（`handled`）则短路 return。详见 `ARCHITECTURE.md`。
+`agent_end` 内：completion-steer **不短路**（继续往下）；auto-clear 命中（`handleAutoClear` 返回 true）则清空并刷新显示。详见 `ARCHITECTURE.md`。
 
 ## 持久化机制
 
@@ -75,7 +75,7 @@ todo 扩展**自己不调用 `appendEntry`**。状态快照随 Pi 框架自动�
 
 1. 每次 todo tool 调用，`execute` 返回的 `details.todos` / `details.nextId` 被 Pi 自动序列化为一条 `toolResult` entry
 2. `session_start` / `session_tree` 时，`reconstructState` 回放**最后一条** todo toolResult 重建状态（纯读——Pi 的 getEntries 返回 filter-copy，splice 无效，不做 entry GC）
-3. 向后兼容：`migrateTodo` 把旧五态（`verifying→in_progress`、`failed→pending`）和极旧的 `done:boolean` 降级映射到三态
+3. 向后兼容：`migrateTodo` 把旧状态（`verifying→in_progress`、`failed→pending`、`cancelled→completed`）和极旧的 `done:boolean` 降级映射到三态
 
 ## 三层渲染
 

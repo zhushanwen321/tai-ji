@@ -1,6 +1,6 @@
 # scheduler
 
-定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）、强制触发（force）与过期策略（expires）。任务随 owner session 持久化，resume 后继续触发。
+定时任务调度扩展：按 duration（`5m` / `2h` / `1d`）间隔或 cron 表达式，在指定时间向 agent 注入消息。支持一次性提醒（once）与过期策略（expires）。任务随 owner session 持久化，resume 后继续触发。
 
 ## 产品定位
 
@@ -99,7 +99,7 @@ session_start
 | `h` / `hr` / `hour` / `hours` | 时 | 3,600,000 ms |
 | `d` / `day` / `days` | 天 | 86,400,000 ms |
 
-例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败 → 创建任务报 `INVALID_SCHEDULE`。
+例如：`5m`、`2h`、`1d`、`30seconds`、`2hours`。非法输入（裸数字、未知单位、空串、负值）解析失败 → 创建任务报 `Invalid schedule: "..."`。
 
 ### cron（时间点调度）
 
@@ -112,14 +112,13 @@ session_start
 
 ## 选项语义
 
-`schedule` tool 的 `kind` / `name` / `expires` / `force` 参数（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
+任务创建与管理由两个 tool 承担：`schedule`（`prompt` / `schedule` / `kind` / `name` / `expires`）与 `schedule_control`（`action`: list / toggle / delete / run，附 `id` / `enabled`）。下表为 `schedule` tool 的选项语义（`/schedule` 命令的 `once`/`cron` 前缀对应 kind）：
 
 | 选项 | 取值 | 语义 |
 |------|------|------|
 | `kind` | `recurring`（默认）/ `once` | recurring 每次触发后按 schedule 重算下次时间；once 触发一次后自动删除 |
 | `name` | 字符串 | 任务可读名称，缺省从 prompt 自动生成（≤30 字原样，超长截前 27 字加省略号） |
 | `expires` | duration 字符串 / `never` | recurring 任务的过期时间：`now + duration`；`never` 永不过期；缺省 7 天。**once 任务忽略 expires 参数**（触发即删，传不传都不生效） |
-| `force` | `true` / `false`（默认） | `true` 时即使 agent 忙（非 idle 或有 pending 消息）也强制 dispatch；`false` 时忙则延迟到下次 tick |
 
 ## 示例
 
@@ -141,10 +140,10 @@ session_start
 /schedule cron '0 9 * * 1-5' standup
 ```
 
-**force 立即触发**（tool 调用：即使忙也执行）：
+**立即执行**（schedule_control tool 调用：马上 dispatch 现有任务）：
 
 ```json
-{"prompt": "deploy staging", "schedule": "*/10 * * * *", "force": true}
+{"action": "run", "id": "<task-id>"}
 ```
 
 **永不过期**（tool 调用：长期 recurring 任务不设 7 天默认过期）：
@@ -158,19 +157,19 @@ session_start
 | 限制/行为 | 值 | 说明 |
 |-----------|-----|------|
 | 任务上限 | **50**（`MAX_TASKS`） | 超过抛 `Task limit reached (50)`，需先删除任务 |
-| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/schedule run` 超限返回 `DISPATCH_SKIPPED`；tick 自动 dispatch 超限静默跳过 |
+| 触发频率上限 | **6 次/分钟**（`RATE_LIMIT_PER_MINUTE`） | 滑动 60s 窗口。`/schedule run` 超限返回 not dispatched（disabled, rate-limited, or dispatch in flight）；tick 自动 dispatch 超限静默跳过 |
 | tick 间隔 | **30s**（`TICK_INTERVAL_MS`） | 到期任务在下一个 tick 被 dispatch；实际触发时间可能比计划晚最多 30s |
 | 默认过期 | **7 天**（`DEFAULT_EXPIRY_MS`） | recurring 任务缺省 `expires` 时；`expires: 'never'` 关闭 |
 | once 任务 | 触发后自动删除 | 不参与后续调度 |
 | cron 失效 | 任务停用 + `lastStatus=failed` + `lastError='cron expression invalid'` | 不会用 `now()` 兜底导致每 tick 重触发死循环 |
-| 忙时 dispatch | 非 force 任务经 session delivery 内核 park 模式：忙时消息入队等待（等 agent 空闲的 settled 边沿 / 下个 tick flush 投递），不丢弃 | force=true 绕过内核队列直投 |
+| 忙时 dispatch | steer 直投（scheduler-steer-direct-dispatch） | busy 时消息插入当前 turn、idle 时开新 turn（`{deliverAs:'steer', triggerTurn:true}`），受理即记账不排队；同任务 in-flight 守卫防双投 |
 | history | 保留最近 **20** 条执行记录 | 超出丢弃最旧；重放折叠时同样裁剪 |
 | 持久化 | custom entry append 到 session JSONL（dispatch 成功后立即 append advance 记录执行） | 任务随 owner session 持久化，resume 后重放恢复，无需额外写盘 |
 | 交付语义 | **at-least-once**（至少一次） | dispatch 成功后内存更新 nextRunAt 并 append advance；append 之前若进程崩溃可能重复注入一次（无精确一次保证，可接受） |
 | 延迟写入窗口 | 新 session 首 turn 内建任务后进程崩溃可能丢失 | pi 延迟写入：首条 assistant 消息前不 flush。窗口窄、概率极低、无恢复手段 |
 | 触发条件 | pi 进程需存活且 session 打开 | 电脑睡眠 / pi 进程未运行 = 不触发（非系统 cron，无后台守护） |
 
-错误语义：创建时 schedule 解析失败 → `INVALID_SCHEDULE`；`run`/`toggle`/`delete` 引用不存在的 id → `TASK_NOT_FOUND`；`run` 时任务 disabled / rate-limited / 同任务已在投递队列（TTL 窗口内）→ `DISPATCH_SKIPPED`（message 含 `disabled, rate-limited, or already queued for delivery`）。
+错误语义（失败经 message 文案 / tool throw 承载，无错误码）：创建时 schedule 解析失败 → `Invalid schedule: "..."`；`run`/`toggle`/`delete` 引用不存在的 id → `Task <id> not found.`；`run` 时任务 disabled / rate-limited / 同任务 dispatch 在途 → `Task <id> not dispatched (disabled, rate-limited, or dispatch in flight).`；任务数超上限 → `Task limit reached (50). Delete a task first.`
 
 ## 数据存储位置
 

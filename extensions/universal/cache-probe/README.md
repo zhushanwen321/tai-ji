@@ -6,11 +6,11 @@
 
 - `src/index.ts` — 探针工厂（9 个指纹 hash：7 个输入侧来自 `systemPromptOptions` + `getAllTools()`，`spFull`/`toolsSent` 来自 `before_provider_request` 的最终 payload）
 - `src/fingerprint.ts` — 指纹纯函数层（stable stringify / hash / entry 构建）
-- `analyze.py` — 归因分析脚本（只读，单数据源扫 session 文件）
+- `analyze.py` — 归因分析脚本（只读，扫一个或多个 session 目录）
 
 ## entry schema v2（数据量精简，长期采集友好）
 
-- hash 为 sha256 前 16 hex；**baseline entry** 存全量 9 hash + cwd（约 250B）；**normal entry** 只存变化项增量（约 120B）；无变化 turn 零写入
+- hash 为 sha256 前 16 hex；**baseline entry** 存全量 9 hash + cwd + startReason（约 250B）；**normal entry** 只存变化项增量（约 120B）；无变化 turn 零写入
 - `seq` = 进程内 before_agent_start 触发计数，随 entry 落盘供人工排序诊断；当前无自动消费方（analyze.py 不读 seq）
 
 ## 挂载方式（长期采集）

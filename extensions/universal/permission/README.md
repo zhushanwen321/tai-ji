@@ -218,7 +218,7 @@ wc / whereis / who / whoami / which
 - `tool` 缺失 → `*`（匹配所有工具）
 - `pattern` 缺失 → `*`（匹配所有命令）
 - `action` 非 `allow`/`deny`/`ask` → 该规则被丢弃（不影响其他规则）
-- `source` 非 `user` → 归一化为 `user`
+- `source` 为 `user`/`builtin-safe`/`builtin-danger` 时原样保留，其他值归一化为 `user`
 
 ### 5. 规则字段详解
 
@@ -228,7 +228,7 @@ wc / whereis / who / whoami / which
 | `tool` | string | 是 | 工具名匹配，wildcard 语法。`bash` 精确匹配 bash 工具；`*` 匹配所有工具（含 Read/Write/Edit）；也可写具体工具名如 `read`、`write` |
 | `pattern` | string | 是 | 命令/目标匹配，wildcard 语法。bash 工具对 `argv.join(' ')` 匹配；非 bash 工具对文件路径匹配（path 缺省时对工具名） |
 | `action` | `"allow"` \| `"deny"` \| `"ask"` | 是 | 决策动作，详见第 8 节 |
-| `source` | `"user"` | 是 | 规则来源，用户规则固定 `user`（写成其他值也会被归一化回 `user`） |
+| `source` | `"user"` | 是 | 规则来源，用户规则建议 `user`；`user`/`builtin-safe`/`builtin-danger` 原样保留，其他值归一化回 `user` |
 | `description` | string | 否 | 人类可读描述，在 matchedRule 与拒绝理由中展示 |
 
 **tool 字段语义补充**：
@@ -347,7 +347,7 @@ publish 规则在后，last-match-wins 时 deny 胜出。
 - **路径**：`<agentDir>/config/permission-ext-config.json`（`<agentDir>` 可用 `PI_CODING_AGENT_DIR` 环境变量覆盖，默认 `~/.pi/agent`）
 - **首次创建**：扩展启动时若文件不存在，自动写入默认配置（`mode: "yolo"`、空 `userRules`）
 - **权限**：`0o600`（原子写：先写 `.tmp` 再 rename，避免半写状态）
-- **编辑方式**：`/permission rule` 打开 overlay 编辑器（TUI 支持列表查看/模板新增/自定义表单；RPC 模式仅支持删除已有规则）；也可直接手动编辑 JSON 文件
+- **编辑方式**：`/permission rule` 打开 overlay 编辑器（TUI 支持列表查看/模板新增/自定义表单；RPC 模式支持列表查看/模板新增/删除已有规则，不支持改字段）；也可直接手动编辑 JSON 文件
 - **热重载**：每次 tool_call 都重读配置，用 `mtimeMs + size` 双 key 缓存检测变化（防 APFS 等 mtime 精度截断）。编辑保存后下一次命令即生效，无需重启
 
 ### 11. 调试技巧

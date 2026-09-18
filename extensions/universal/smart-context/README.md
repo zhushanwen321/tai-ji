@@ -11,7 +11,7 @@
 - **3 档阈值提醒**（默认 200K/400K/600K）：`agent_settled` 越档检查，每档一次、多档合并、压缩后重置，followUp 投递；措辞是数据投递不是指令
 - **排除模型**（精准 `provider/modelId` 匹配）：工具拒绝 + 不提醒 + 回落 pi 原生生成；切换跨界时注入一条可用性通知，downshift（切小窗模型将触线）时建议先压缩
 - **健壮性**：摘要收缩校验、max-tokens 截断 fail-closed、接管失败 3 次熔断、transcript 回查指针、压缩后最近文件内容重注入（≤5 文件/50K）、多轮压缩降智提示
-- **subagent 进程**自动静默（`PI_SUBAGENT_ROOT_SESSION_ID` 标记）
+- **subagent 进程**自动静默（`TAIJI_AGENT_SUBAGENT` 标记）
 
 ## 行为门控
 

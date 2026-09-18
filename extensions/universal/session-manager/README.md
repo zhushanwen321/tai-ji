@@ -12,7 +12,7 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 
 | 工具 | action | 说明 |
 |------|--------|------|
-| `create_managed_session` | create | 在指定 cwd 创建子 session（可选 label）；服务端注入 `spawnSource: 'agent'` 与父 session id，`.agent.json` sidecar 落盘供重启恢复 |
+| `create_managed_session` | create | 在指定 cwd 创建子 session（可选 label；可选 `prompt` 作初始 prompt，create+send 原子完成）；服务端注入 `spawnSource: 'agent'` 与父 session id，`.agent.json` sidecar 落盘供重启恢复 |
 | `send_to_session` | send | 向子 session 发送 prompt（异步处理） |
 | `read_session_history` | history | 读子 session 对话历史（可选 tailTurns 截尾部 N 个 turn） |
 | `list_my_sessions` | list | 列出本 agent 管理的 session（无过滤参数，自动限定发起方 agent） |

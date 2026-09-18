@@ -17,7 +17,7 @@ description: "配置 @zhushanwen/pi-permission（四档权限模式 + AI 风险�
 
 `<agentDir>/config/permission-ext-config.json`
 
-- `<agentDir>` = pi agent 目录（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境为 `~/.taiji/pi/agent`）
+- `<agentDir>` = pi agent 目录（`PI_CODING_AGENT_DIR` 覆盖，默认 `~/.pi/agent`；taiji 隔离环境为 `~/.taiji/agent`）
 - 走 llm-shared 泛型 config（config/ 子目录 + getAgentDir 派生 + mtime+size 缓存 + 原子写）
 - 文件缺失/坏 JSON 返回默认值，不抛错；首次加载自动创建默认配置文件
 - [HISTORICAL] 旧路径 `<agentDir>/permission-config.json`（agentDir 根）：**session_start hook 运行时迁移**到新路径（幂等，过渡性，Added in v1.0.0, remove after v2.0.0）
