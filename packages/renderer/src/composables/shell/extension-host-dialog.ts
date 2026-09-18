@@ -134,6 +134,10 @@ export function createDialogRequestSource(bus: InternalEventBus): DialogRequestS
           return
         }
         if (e.request.askUser === true) return // C4：askUser 由 useExtensionUI 消费（Panel inline）
+        // C4（plan 模式重设计 D5）：planReview 审批请求由 PlanReviewBar 消费（useExtensionUI
+        // planReviewFilter 实例入 store 枚举 + respond 回传）——不落 CompanionBand 原始 dialog
+        // 渲染 marker 控制符 title。
+        if (e.request.planReview === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))

@@ -1477,6 +1477,12 @@ export interface ServerMessageMapBase {
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
+    // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
+    // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
+    // planReviewDocs 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
+    // 前端消费时收窄为 PlanDocMeta[]。
+    planReview?: boolean
+    planReviewDocs?: unknown[]
   }
   // session 通道推送（runtime session-service / index.ts 生产，W04 收紧）
   // compacting：compaction_start → interpreter 广播（唯一发送点 event-interpreter.handleCompactionStart），

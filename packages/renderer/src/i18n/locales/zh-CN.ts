@@ -13,6 +13,7 @@ import search from './zh-CN/search'
 import composable from './zh-CN/composable'
 import importSession from './zh-CN/importSession'
 import rollingRestart from './zh-CN/rollingRestart'
+import plan from './zh-CN/plan'
 
 export default {
   common,
@@ -30,4 +31,5 @@ export default {
   composable,
   importSession,
   rollingRestart,
+  plan,
 }

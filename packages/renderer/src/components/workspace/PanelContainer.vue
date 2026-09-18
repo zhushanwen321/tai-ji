@@ -38,6 +38,10 @@
       @open-git="openDrawerTab('git')"
       @toggle-drawer="toggleDrawer()"
     />
+    <!-- M1 计划模式横幅（plan 模式重设计 u1-banner）：header 下、对话流之上的独立 flex 行，
+         覆盖位互斥定则（impl-plan §0 待验证检查点）——AskUserOverlay/Composer 都在 Panel 内部，
+         本行在 split-area 之外，天然不重叠。isActive=false 时组件内部 v-if 不渲染。 -->
+    <PlanModeBanner :session-id="panelSessionId" />
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
@@ -160,6 +164,9 @@
         </DrawerPanel>
       </div>
     </div>
+    <!-- 审批条（plan 模式重设计 u1-banner）：主面板底部独立行（drawer 底部集成归 u1-drawer-tab，
+         届时迁挂载点不动组件）。显示驱动公式在组件内（D5 四分支，isActive=false 不渲染 DOM）。 -->
+    <PlanReviewBar :session-id="panelSessionId" />
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项） -->
     <StatusBar :session-id="leaf.sessionId ?? null" />
@@ -192,6 +199,8 @@ import { useDrawerSplitWidth } from '@/composables/features/drawer/useDrawerSpli
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
+import PlanModeBanner from '@/components/panel/plan/PlanModeBanner.vue'
+import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
 import Panel from '@/components/panel/Panel.vue'
 import PanelHeader from '@/components/panel/PanelHeader.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'

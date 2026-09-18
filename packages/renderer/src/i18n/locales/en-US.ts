@@ -13,6 +13,7 @@ import search from './en-US/search'
 import composable from './en-US/composable'
 import importSession from './en-US/importSession'
 import rollingRestart from './en-US/rollingRestart'
+import plan from './en-US/plan'
 
 export default {
   common,
@@ -30,4 +31,5 @@ export default {
   composable,
   importSession,
   rollingRestart,
+  plan,
 }
