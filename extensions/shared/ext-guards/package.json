@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-ext-guards",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Shared runtime-environment guards for Pi extensions — oncePerProcess(key, fn) dedupes cross-session side-effect operations against pi factory re-invocation and handler accumulation (shared library, not a Pi extension, zero dependencies).",
   "type": "module",
   "main": "src/index.ts",
