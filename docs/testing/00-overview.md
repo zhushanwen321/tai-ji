@@ -446,8 +446,8 @@ VITE_E2E=true VITE_MOCK=true pnpm --filter @taiji/frontend run build
 ls apps/electron/resources/pi/pi-darwin-arm64  # macOS arm64
 
 # 2. 确认 dev 数据目录有 provider 配置
-ls ~/.taiji-dev/pi/agent/models.json
-ls ~/.taiji-dev/pi/agent/settings.json
+ls ~/.taiji-dev/agent/models.json
+ls ~/.taiji-dev/agent/settings.json
 
 # 3. 确认 1420 端口没被占用（Vite dev server）
 lsof -i :1420 -P | grep node  # 应无输出
@@ -493,7 +493,7 @@ pnpm run dev
 | 5 | 回复内容 | 是对「你好」的合理回复（非错误信息） |
 
 **失败排查**：
-- 转菊花一直蓝色不回复 → pi 没连上 LLM provider → 查 `~/.taiji-dev/pi/agent/models.json` 配置
+- 转菊花一直蓝色不回复 → pi 没连上 LLM provider → 查 `~/.taiji-dev/agent/models.json` 配置
 - 回复报错 → 查 runtime 日志 `tail -f ~/.taiji-dev/logs/runtime-*.log`
 - session 卡死 → pi 子进程异常 → 查 `~/.taiji-dev/logs/pi-*.jsonl`
 
@@ -570,7 +570,7 @@ pnpm run dev
 
 | 步骤 | 操作 | 期望 |
 |---|---|---|
-| 1 | 临时改 `~/.taiji-dev/pi/agent/models.json` 为无效 API key | — |
+| 1 | 临时改 `~/.taiji-dev/agent/models.json` 为无效 API key | — |
 | 2 | 发消息 | 消息流出现错误提示（不是 UI 卡死） |
 | 3 | session 状态 | 转菊花消失，回到 idle 态 |
 | 4 | 恢复 API key 后再发消息 | 正常回复 |
@@ -723,7 +723,7 @@ async function waitForExtensionsReady(dataDir: string, timeoutMs = 90_000, minCo
 
 `resource-discovery.ts` 的 project 级扫描路径是 `<workspaceRoot>/.pi/workflows/`，而 `findWorkspaceRoot(sample-project)` 因祖先目录有 `.bare`（bare+worktree workspace）会**跳转到 workspace 根**——project 级 `sample-project/.pi/workflows/` 不会被发现。
 
-**唯一可靠路径**：user-pi 源 `<agentDir>/workflows/` = `<dataDir>/pi/agent/workflows/`（`PI_CODING_AGENT_DIR` 指向）。makePresetDataDir 把 fixture script 复制到此。
+**唯一可靠路径**：user-pi 源 `<agentDir>/workflows/` = `<dataDir>/agent/workflows/`（`PI_CODING_AGENT_DIR` 指向）。makePresetDataDir 把 fixture script 复制到此。
 
 ### 5.5 `state.calls[0].sessionId`（sa- 前缀）不是 pi session id
 

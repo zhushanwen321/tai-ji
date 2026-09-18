@@ -102,7 +102,7 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 - **多 session 管理** — 侧栏会话列表，⌘/Ctrl+N 新建；session 树状分支（fork / clone）为 pi 原生能力，可从任意 assistant 消息分叉（⌘/Ctrl+G fork、⌘/Ctrl+⇧+G fork 模式、⌘/Ctrl+J handoff）
 - **双 Panel split view** — 单 Panel 为默认态，打开第二个 session 即分屏；支持 focus mode 聚焦当前会话
 - **Overview** — 独立的多会话鸟瞰视图（卡片网格 + 筛选 + 后台 agent 聚合）
-- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话前进后退、⌘/Ctrl+⇧+P 预设切换；快捷键均可在设置中重录
+- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+I 导入会话、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话前进后退、⌘/Ctrl+⇧+P 预设切换；快捷键均可在设置中重录
 
 ### 对话流
 
@@ -116,59 +116,45 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 - **终端** — 命令式缓冲区渲染，版本化重放，会话级持久分区
 - **Git** — 分支与变更状态展示，worktree 创建/切换/清理
 
-### 内置扩展（18 个，随应用打包）
-
-| 扩展 | 用途 |
-|------|------|
-| `pi-permission` | 四档权限模式（yolo / auto / approve / strict）+ 三层审批管道 |
-| `pi-subagent-workflow` | 统一 subagent 执行 + 多 agent workflow 编排（parallel / chain 等有状态工作流） |
-| `pi-goal` | `/goal` 持久目标驱动自治循环，证据验收 |
-| `pi-todo` | AI 驱动的 todo 列表（会话持久化 + `/todos`） |
-| `pi-ask-user` | 结构化多问题输入工具 |
-| `pi-structured-output` | 结构化输出（JSON Schema + Ajv 校验） |
-| `pi-scheduler` | 定时任务调度（cron / interval，once / recurring） |
-| `pi-session-reader` | 读取 / 查询 session 历史（树、家族、执行树、搜索、导出） |
-| `pi-rename-session` | 首轮对话后自动生成会话标题 |
-| `pi-pending-notifications` | 跨扩展异步操作注册 / 查询（长任务期间防消息注入） |
-| `pi-agent-ext` | 内部命令（host 触发 reload `/__taiji_reload__` + Trace 视图现取 system prompt `/__taiji_get_system_prompt__`） |
-| `pi-system-prompt` | 系统提示词注入（AGENTS.md / settings 追加段） |
-| `pi-msg-id-mapper` | client UUID ↔ user entry ID 映射 |
-| `pi-system-prompt-trace` | system prompt 建立或变化时写入 taiji:system-prompt 留痕 entry |
-| `pi-smart-context` | Agent 自决上下文压缩（compact_context 工具 + 双模式摘要接管 + 分档提醒） |
-| `pi-session-manager` | Agent 托管子会话（创建 / 发送 / 历史 / 状态 / 列表 / 中止） |
-| `pi-base-tool-enhance` | bash 工具增强（前台委托 pi 官方工厂 + 后台模式 + 工具错误审计） |
-| `pi-plugin-bridge` | 插件系统桥（plugin 工具注册进 pi + 事件 / 拦截经 marker 通道中转） |
-
-其中 8 个基础设级（`pi-pending-notifications` / `pi-session-reader` / `pi-structured-output` / `pi-agent-ext` / `pi-system-prompt` / `pi-msg-id-mapper` / `pi-base-tool-enhance` / `pi-plugin-bridge`）常驻不可禁用，其余 10 个可在设置中禁用。另有 `pi-cache-probe`（缓存前缀指纹采集 + 归因分析）、`pi-cw-tool`（cw 2.0 runner 实操指南 + cw_query 只读查询工具）、`pi-plan`（轻量 plan 模式）3 个包经 npm 发布，可按需安装。
-
 ### 模型与设置
 
 - **Provider 管理** — 多 provider 配置、内置 provider 目录、API key 管理
 - **配额展示** — 各 provider / 模型的用量配额查询
-- **设置中心** — 全屏 overlay，覆盖 Provider / 扩展 / 技能 / 终端 / 预设 / worktree / 系统更新等 11 个菜单域
+- **设置中心** — 全屏 overlay，覆盖 Provider / 外观 / 技能 / Agent / 扩展 / System Prompt / 终端 / 预设 / worktree / 更新 / 系统 / 用量 12 个菜单域
 - **自动更新** — 周期检测新版本，确认后重启升级；Release Notes 中英双语
+
+## pi 扩展
+
+taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个随应用打包内置，开箱即用。以下 16 个扩展功能自足、可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
+
+| 扩展 | 用途 |
+|------|------|
+| [`pi-subagent-workflow`](extensions/universal/subagent-workflow/README.md) | 统一 subagent 执行 + 多 agent workflow 编排（parallel / chain 等有状态工作流） |
+| [`pi-goal`](extensions/universal/goal/README.md) | `/goal` 持久目标驱动自治循环，证据验收 |
+| [`pi-todo`](extensions/universal/todo/README.md) | AI 驱动的 todo 列表（会话持久化 + `/todos`） |
+| [`pi-ask-user`](extensions/universal/ask-user/README.md) | 结构化多问题输入（分栏预览 + 内联编辑） |
+| [`pi-permission`](extensions/universal/permission/README.md) | 四档权限模式（yolo / auto / approve / strict）+ 审批管道 |
+| [`pi-scheduler`](extensions/universal/scheduler/README.md) | 定时任务调度（cron / interval，once / recurring） |
+| [`pi-session-reader`](extensions/universal/session-reader/README.md) | 读取 / 查询 session 历史（树、家族、执行树、搜索、导出） |
+| [`pi-session-manager`](extensions/universal/session-manager/README.md) | Agent 托管子会话（创建 / 发送 / 历史 / 状态 / 列表 / 中止） |
+| [`pi-rename-session`](extensions/universal/rename-session/README.md) | 首轮对话后自动生成会话标题 |
+| [`pi-smart-context`](extensions/universal/smart-context/README.md) | Agent 自决上下文压缩（compact_context 工具 + 双模式摘要接管 + 分档提醒） |
+| [`pi-structured-output`](extensions/universal/structured-output/README.md) | 结构化输出（JSON Schema + Ajv 校验） |
+| [`pi-pending-notifications`](extensions/universal/pending-notifications/README.md) | 跨扩展异步操作注册 / 查询（长任务期间防消息注入） |
+| [`pi-base-tool-enhance`](extensions/universal/base-tool-enhance/README.md) | bash 工具增强（前台委托 pi 官方工厂 + 后台模式 + 工具错误审计） |
+| [`pi-plan`](extensions/universal/plan/README.md) | 轻量 plan 模式 |
+| [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | 缓存前缀指纹采集 + 归因分析 |
+| [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner 实操指南 + `cw_query` 只读查询工具 |
+
+其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用，离开 taiji 宿主无功能。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
 ## 架构
 
-```
-┌──────────────────────────────────────────────────┐
-│                  Electron 主进程                   │
-│  窗口管理 · Runtime 子进程生命周期 · 全局快捷键   │
-└─────────────┬────────────────────┬────────────────┘
-              │ IPC                │ spawn
-              ▼                    ▼
-┌──────────────────┐   ┌──────────────────────────┐
-│   Preload 桥接    │   │   Runtime (Node.js 子进程) │
-│ electronAPI 暴露  │   │  WebSocket Server (ws)    │
-└────────┬─────────┘   │  pi RPC 适配 · 事件翻译    │
-         │             └────────────┬───────────────┘
-         │                          │ child_process RPC
-         ▼                          ▼
-┌──────────────────────────────────────────────────┐
-│        渲染进程 (Vue 3 + Vite · 太极纯灰暗色)      │
-│  Pinia 状态 · taiji ui 组件 · ws-client · event-bus │
-└──────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/architecture.drawio.png" alt="TaiJi 架构：Electron 主进程 / Preload 桥接 / Runtime（Node.js 子进程）/ 渲染进程 / pi CLI 子进程" width="820" />
+</p>
+
+架构图源文件：[`docs/assets/architecture.drawio`](docs/assets/architecture.drawio)（PNG 为内嵌源导出，可在 draw.io 中打开继续编辑）。
 
 五个核心模块：
 
@@ -181,27 +167,6 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 | **共享类型** | `packages/shared/` | 前端与 runtime 间的 TypeScript 类型定义（pnpm workspace） |
 
 渲染进程有两条出口通道：**WS**（→ Runtime，业务/数据）与 **IPC**（→ Main，窗口/进程/OS 特权）。渲染进程不直接调 `window.electronAPI`，统一走 [`lib/ipc.ts`](packages/renderer/src/lib/ipc.ts) 门面。
-
-### 为什么是 Electron
-
-1. **渲染稳定性** — Chromium 的 CSS/布局渲染结果与 Chrome DevTools 完全一致，不存在 WebView2/WebKit 的平台差异
-2. **视觉锐利度** — 字体渲染、亚像素抗锯齿、GPU 合成行为完全可控，跨平台表现一致
-3. **生态成熟度** — electron-builder、DevTools 扩展、崩溃上报等工具链完善
-4. **Node.js 原生能力** — 主进程直接使用 Node API（child_process、fs、net），不需要 Rust 后端进程或 FFI
-
-### 双扩展机制
-
-太极有两套独立的扩展机制：
-
-**pi Extension** — 运行在 pi 子进程内，经 `--extension` 参数加载，负责 Agent 能力扩展（工具、命令、事件钩子）。源码在本仓 `extensions/` 目录（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个经 esbuild bundle 后随应用打包内置。开发文档：
-
-- [扩展开发指南](docs/extensions/development-guide.md) — 单一权威源：结构、生命周期、发布
-- [扩展强约束](docs/extensions/extension-conventions.md) — 必须遵守的约定
-- [本地开发调试](docs/extensions/local-dev-guide.md) — `TAIJI_EXTENSION_PATHS` live link、日志查看
-- [GUI 协议接入](docs/extensions/gui-protocol-guide.md) — TUI extension 的 TUI/GUI 双模改造
-- [术语表](docs/extensions/glossary.md) / [Agent 编写指南](docs/extensions/agent-authoring-guide.md)
-
-**Plugin System** — 运行在 taiji Runtime 侧的插件沙箱，负责 UI 与宿主能力扩展（tools、hooks、slash commands、status bar items、message decorations、settings 表单）。trusted 插件与 sandbox 插件两级隔离（Worker Thread / 独立 fork 子进程），单个插件崩溃不影响其他插件或主进程。开发用 [`packages/plugin-sdk`](packages/plugin-sdk/)（类型 + mock），脚手架 `create-taiji-plugin`。
 
 ---
 
@@ -268,18 +233,24 @@ pnpm build:e2e && pnpm test:e2e
 ├── packages/                 # pnpm workspace 包
 │   ├── renderer/             # Vue 前端（components / composables / stores / lib）
 │   ├── runtime/              # Node.js Runtime（transport / services / infra + plugins）
-│   ├── shared/               # 前后端共享类型
-│   ├── ui/                   # taiji ui 组件库（@taiji/ui）
 │   ├── core/                 # 前端核心层（coordination / domain / extension-host / foundation）
+│   ├── ui/                   # taiji ui 组件库（@taiji/ui）
+│   ├── shared/               # 前后端共享类型
 │   ├── dom-core/             # composer DOM 层
 │   ├── mobile-renderer/      # 移动端渲染入口
 │   ├── plugin-sdk/           # 插件开发 SDK（类型 + mock）
 │   ├── extension-protocol/   # Extension GUI 渲染协议（TUI/GUI 双模类型）
-│   └── create-taiji-plugin/   # 插件项目脚手架
+│   ├── subagent-core/        # subagent 执行核心（跨引擎共享的编排 / 预算 / 通道层）
+│   ├── subagent-engine-sdk/  # 引擎协议 SDK（NDJSON stdio 契约与引擎原语）
+│   ├── pi-subagent-cli/      # pi 引擎 CLI（engine-protocol v1）
+│   ├── zcode-subagent-cli/   # zcode 引擎 CLI（app-server RPC）
+│   ├── pi-rpc/               # pi 子进程 RPC 共享层
+│   ├── session-delivery/     # 会话消息投递内核（队列 / 批量 / 去重 / 门控 flush）
+│   └── create-taiji-plugin/  # 插件项目脚手架
 ├── extensions/               # 21 个 @zhushanwen/pi-* pi 扩展源码 + shared/ 共享库
 ├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
 ├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
-├── resources/                # pi binary + 内置 statusline 插件
+├── resources/                # 内置插件与 statusline
 ├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
 └── .agents/                  # 项目级 agent / skill（merge / review 等）
 ```
@@ -291,7 +262,8 @@ pnpm build:e2e && pnpm test:e2e
 | 管线 | 产物 | 触发 tag | Workflow |
 |------|------|----------|----------|
 | Electron 打包 | DMG / EXE / AppImage / manifest | `v*` | `release.yml` |
-| npm 包发布 | `@zhushanwen/pi-*` + `@zhushanwen/extension-protocol` | `npm-*` | `release-npm.yml` |
+| npm 包发布 | `@zhushanwen/pi-*` 扩展 + 引擎 / SDK 包（`pi-rpc` / `subagent-core` / `subagent-engine-sdk` / `pi-subagent-cli` / `zcode-subagent-cli` / `session-delivery` / `extension-protocol`） | `npm-*` | `release-npm.yml` |
+| npm 预发布 | dev dist-tag 测试版 | `dev-npm-*` 分支 / 本地 `npm-prerelease.sh` | `release-npm-dev.yml` |
 
 ## 文档索引
 

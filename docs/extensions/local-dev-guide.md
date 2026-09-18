@@ -43,7 +43,7 @@ dev 模式（`pnpm dev`）下，taiji 的数据目录自动设为 `~/.taiji-dev/
 
 | 内容 | dev 路径 | 生产路径 |
 |------|----------|----------|
-| extension 配置 | `~/.taiji-dev/pi/agent/` | `~/.taiji/pi/agent/` |
+| extension 配置 | `~/.taiji-dev/agent/` | `~/.taiji/agent/` |
 | runtime 日志 | `~/.taiji-dev/logs/runtime-YYYY-MM-DD.log` | `~/.taiji/logs/...` |
 | pi 事件流 | `~/.taiji-dev/logs/pi-YYYY-MM-DD-<sessionId>.jsonl` | 同上 |
 
@@ -272,8 +272,8 @@ extension 内的 `console.log` / `console.error` 会进 pi 的 stdout/stderr，�
 |--------|------|----------|----------|
 | 1（高） | `npm` | `apps/electron/package.json` dependencies（dev） | 项目内置依赖 |
 | 2 | `user` | `TAIJI_EXTENSION_PATHS` 环境变量 | **本地开发（本方案）** |
-| 3 | `settings` | `~/.taiji-dev/pi/agent/npm/node_modules/` | Settings UI 安装的 npm 包 |
-| 4 | `third-party` | `~/.taiji-dev/pi/agent/extensions/` | 本地目录/Git 安装（cp 副本） |
+| 3 | `settings` | `~/.taiji-dev/agent/npm/node_modules/` | Settings UI 安装的 npm 包 |
+| 4 | `third-party` | `~/.taiji-dev/agent/extensions/` | 本地目录/Git 安装（cp 副本） |
 | 5（低） | `bundled` | `resources/pi/agent/extensions/` | 仓库内置 |
 
 如果你的 extension 被 settings 源的同名包覆盖，改一下 `package.json` 的 `name` 字段区分。
