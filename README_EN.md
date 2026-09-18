@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/logo/assets/qianwen/logo.png" width="96" alt="TaiJi logo" /></p>
+<p align="center"><img src="docs/assets/logo/assets/qianwen/logo-square.png" width="96" alt="TaiJi logo" /></p>
 
 # TaiJi
 
