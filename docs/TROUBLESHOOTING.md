@@ -230,6 +230,23 @@ ls -la ~/.taiji-dev/logs/             # runtime-*.log / pi-<date>-<sessionId>.js
 
 首启缺配置（provider / secrets / 默认模型）时从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单语义补种到 `~/.taiji-dev/` 根（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
 
+### 17. e2e real 轨用例失败：sidebar 出现 mock 假会话数据（e2e 产物形态错误，2026-09-18）
+
+**现象**：`e2e/*-real.spec.ts`（launch-app-real）跑出诡异失败——sidebar 列出大量不存在于临时数据目录的会话（mock 假数据），新建 session 的条目永远不出现；同 spec 的纯 WS 断言用例（不经 UI）却全绿。
+
+**真相**：playwright global-setup 构建产物时恒定注入 `VITE_MOCK=true`（mock 形态 bundle）。mock 轨与 real 轨共享同一份 `apps/electron/dist` 产物，谁最后构建产物就是谁的形态——real spec 跑在 mock bundle 上时 renderer 走 `mock://localhost`（连接日志可证），根本不连 runtime。
+
+**排障动作**：
+
+```bash
+# real 轨前重建 real 形态产物（无 VITE_MOCK）
+VITE_E2E=true pnpm run build:e2e
+# real 轨跑完、要跑 mock 轨（launch-app 形态）前再重建 mock 形态产物
+VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
+```
+
+判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。改进方向（未实施）：launch-app-real 在 launch 前探针校验产物形态，fail-fast 给重建命令。
+
 
 ## 环境变量速查
 
