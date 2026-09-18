@@ -415,11 +415,13 @@ async function executeSubmitReview(
   projectDir: string,
   controllers: PlanAbortControllers,
 ): Promise<ActionResult> {
-  // E6 双守卫：状态门优先于内容门（退出后任何动作都不该发生）
+  // E6 双守卫：状态门优先于内容门（退出后任何动作都不该发生）。
+  // 文本语义按 A9 真机事故收紧：旧文「Wrap up the current task directly」被 LLM
+  // 误读为「已批准，开始实施」——未激活 ≠ 批准，必须显式禁止实施并指向等待用户。
   if (!state.isActive) {
     return reviewErrorResult(
       "inactive",
-      "Plan mode has already exited — there is no active plan to review. Wrap up the current task directly.",
+      "Plan mode is not active (it already exited, or no plan was started). No plan has been approved — do not implement any changes. Briefly tell the user that plan mode is no longer active, then wait for further user instructions.",
     );
   }
   if (state.docs.length === 0) {
@@ -470,12 +472,14 @@ async function executeSubmitReview(
   controllers.delete(sessionId);
 
   if (choice === undefined) {
-    // abort 联动路径（/plan abort）：resetPlanState 已由命令 handler 执行，本分支
-    // 只需正常返回让 turn 结束；TUI 手动取消路径：reviewState 保持 awaiting，
-    // 降级态显示「等待 agent 重新提交审批」，由提示词纪律驱动重挂
+    // 取消分支覆盖两条路径：abort 联动（/plan abort，resetPlanState 已由命令
+    // handler 执行，本分支正常返回让 turn 结束）与 TUI 手动取消（reviewState
+    // 保持 awaiting）。语义按 A9 真机事故收紧：旧文「dismissed → 重挂」被 LLM
+    // 当成批准信号，重挂撞 inactive 守卫后开始实施源码改动——取消 ≠ 批准，
+    // 禁止重挂、禁止实施，停止审批循环等用户指示。
     return reviewErrorResult(
       "cancelled",
-      "The review dialog was dismissed. Stay in plan mode; call plan(action='submit-review') again to re-hang the review.",
+      "The review was cancelled — the user dismissed the approval dialog or exited plan mode. This is NOT an approval. Do not implement any changes. Stop the review loop: briefly tell the user you have stopped, then wait for further user instructions.",
     );
   }
 

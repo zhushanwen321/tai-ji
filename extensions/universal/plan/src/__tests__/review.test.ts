@@ -136,7 +136,11 @@ describe("submit-review E6 双守卫", () => {
     const { exec, ctx } = setup();
     const res = await exec({ action: "submit-review" });
     expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
-    expect(res.content[0].text).toContain("Plan mode has already exited");
+    // A9 收紧语义：未激活 ≠ 批准——禁止实施、等用户指示（禁「wrap up」类歧义表述）
+    expect(res.content[0].text).toContain("not active");
+    expect(res.content[0].text).toContain("No plan has been approved");
+    expect(res.content[0].text).toContain("do not implement any changes");
+    expect(res.content[0].text).toContain("wait for further user instructions");
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
@@ -354,13 +358,20 @@ describe("三 decision 消费（taiji 形态）", () => {
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 
-  it("dismissed select (undefined) → cancelled result, stays in plan mode", async () => {
+  it("dismissed select (undefined) → cancelled result: not an approval, stop the review loop", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
 
     const res = await exec({ action: "submit-review" });
 
     expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
+    // A9 收紧语义：取消 ≠ 批准——禁止实施、停止审批循环（旧文曾指示 re-hang，
+    // 被 LLM 误读为批准后开始实施）
+    expect(res.content[0].text).toContain("cancelled");
+    expect(res.content[0].text).toContain("NOT an approval");
+    expect(res.content[0].text).toContain("Do not implement any changes");
+    expect(res.content[0].text).toContain("Stop the review loop");
+    expect(res.content[0].text).toContain("wait for further user instructions");
     // 未消费 decision、未重置状态
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
