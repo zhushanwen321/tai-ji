@@ -5,6 +5,7 @@
 // - core/                  通用协议层（所有 extension 共用：GuiComponent + 布局原语 + 传输编码 + 双模 widget helper）
 // - extensions/            有运行时定制逻辑的 extension（marker + helper）
 //   - ask-user/            富交互（select 通道 + marker）
+//   - scheduler-create/    scheduler 创建确认（select 通道 + marker）
 // - pending-entries        pending 事件流差集核心（纯算法，落盘形态语义）
 // - background-task        base-tool-enhance 后台任务 registry.json 文件契约（src 平级文件）
 //
@@ -62,6 +63,24 @@ export {
   getAskUserOther,
   isAskUserQuestion,
 } from './extensions/ask-user/helpers'
+
+// ── ./extensions/scheduler-create：scheduler 创建确认（select 通道 + marker，本包内子目录；实现在 extensions/universal/scheduler + runtime event-adapter 第 4 marker 分支）──
+export type {
+  ScheduleKind,
+  ScheduleDraft,
+  ScheduleFormResult,
+} from './extensions/scheduler-create/types'
+export { SCHEDULE_CREATE_MARKER } from './extensions/scheduler-create/marker'
+export {
+  scheduleCreateInteract,
+  isScheduleDraft,
+  dateToOnceCron,
+  onceCronToDate,
+} from './extensions/scheduler-create/helpers'
+export type {
+  ScheduleCreateInteractResult,
+  ScheduleCreateInteractOptions,
+} from './extensions/scheduler-create/helpers'
 
 // ── session-manager 协议（agent-managed session：select 通道 + marker；实现在 extensions/universal/session-manager）──
 export type {
