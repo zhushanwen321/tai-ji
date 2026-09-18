@@ -97,8 +97,15 @@ export class SchedulerRuntime {
   private readonly dispatchesInFlight = new Set<string>()
   // U4 dispatch 模型切换（设计 D3 修订版）：模型控制面（缺省 undefined = 无切换能力，降级）
   private readonly modelOps: SchedulerModelOps | undefined
-  // 未决模型切换记录（同时至多一条——互斥窗口保证「切换→dispatch→恢复」周期单在途）
+  // 未决模型切换记录（同时至多一条——互斥窗口 + 模型 op 串行队列共同保证「切换→dispatch→
+  // 恢复」周期单在途、单 setModel 在途）
   private pendingModelSwitch: PendingModelSwitch | null = null
+  // 模型 op 串行队列尾（MF-2 收口）：调度器发起的全部 setModel（dispatch 切换 / 期望模型
+  // 恢复 / 错误路径恢复）单点经 serializeModelOp 入队——「setModel 起步 → 记录创建 /
+  // 恢复收口」全程持队，任何后继 setModel 发起点先排队前置等待，两个 setModel 并发
+  // 结构性不可能（完成顺序不定 → turn 静默跑错模型的交错被消除）。链条引用恒吞错
+  // 自愈（见 serializeModelOp），前序 op 失败不阻断后继。
+  private modelOpChain: Promise<void> = Promise.resolve()
   // 归属状态机 run 窗口（P-MODEL-③④：turnIndex per-run 归零，禁止裸 turnIndex 跨 run 当 id）：
   // agent_start 起算（重置 turn 序态）、agent_end / agent_settled 封口
   private runWindowActive = false
@@ -296,7 +303,8 @@ export class SchedulerRuntime {
     // U4 对账兜底（设计 D3）：严格先于本 tick 的 dispatch 循环。顺序约束：否则出现
     // 「B dispatch 先切 Y → 对账持 A 旧记录把 Y 静默切回」的交错（Y 从未生效、全序列
     // 无报错，G4 被绕过）。恢复执行时 await 完成，保证恢复 setModel 完成后 dispatch 循环
-    // 才开 setModel（fire-and-forget 会让两个 setModel 并发竞态，打破顺序约束本身）。
+    // 才开 setModel；更广的「任意两个 setModel 不并发」由模型 op 串行队列（modelOpChain）
+    // 结构保证——含 turn_end 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
     // 无未决记录的绝大多数 tick 同步返回、不引入 microtask 断点——dispatch 的同步段
     // 契约（in-flight 守卫在 tickScheduler() 未 await 时同步可见）保持不变。
     const reconciling = this.reconcileModelSwitch()
@@ -376,9 +384,13 @@ export class SchedulerRuntime {
    * 让 tick 继续处理其他任务。
    *
    * U4 模型切换（设计 D3 修订版）：task.model 非空且 ≠ 会话当前模型时，sendMessage 前
-   * 按序执行「记未决切换记录 → setModel(task.model) → sendMessage」。busy 亦照常 setModel
+   * 按序执行「互斥校验 → setModel(task.model) → 记未决切换记录 → sendMessage」，切换段
+   * 整体入模型 op 串行队列（modelOpChain——与恢复 setModel 互斥，MF-2）。busy 亦照常 setModel
    * （P-MODEL-② 证伪「busy 切换不生效」——steer 消息消费时在同一 run 内开新 turn，turn
-   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效）。失败降级（分级，不阻塞核心
+   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（0.84.4）：
+   * dist/core/agent-session.js:1258 setModel 同步写 agent.state.model + :304 每个 turn
+   * 准备时从 agent.state.model 取模型快照——setModel 先于下一 turn 准备即生效）。
+   * 失败降级（分级，不阻塞核心
    * 调度）：modelOps 缺省 / 会话无当前模型 / setModel false → 日志 + 放弃切换，照常 dispatch。
    *
    * 持久化（append-only）：recurring 成功推进 nextRunAt → append advance（status='success' CL8）；
@@ -391,50 +403,77 @@ export class SchedulerRuntime {
 
     const modelOps = this.modelOps
     if (task.model && modelOps && task.model !== modelOps.getCurrentModelRef()) {
-      const current = modelOps.getCurrentModelRef()
-      if (!current) {
-        // 会话无当前模型：期望模型无处记录、恢复不可定义 → 放弃切换照常 dispatch（分级降级）
-        logger.warn('cannot record expected model for switch (session has no current model)', {
-          taskId: task.id,
-          targetModelRef: task.model,
-        })
-      } else if (this.pendingModelSwitch) {
+      // 串行段闭包内使用：task.model 的属性收窄不进异步闭包，入口处捕获为 const
+      const targetModelRef = task.model
+      let skipped = false
+      if (this.pendingModelSwitch) {
         // 互斥窗口（设计 D3，理由 = 切换秩序）：未决记录未关闭时，其他需切模型任务命中即
         // skip 本轮 + pending 留待下 tick 重试（复用现状 skip 语义，不建真队列；不需切模型
         // 的任务不受互斥影响——检查只在本分支）。「dispatch 写新记录前先强制结算旧记录」
         // 的落地：本分支结构性永不写新记录（杜绝新旧叠写），同时把已过窗口的 in-flight
         // 残留先强制开放转移，保证新任务在旧记录结算后 ≤1 tick 内接管、不被过期残留无限阻塞。
         // 强制结算的恢复必须 await（顺序约束，与 tickScheduler 的对账 await 同构）：恢复
-        // setModel(原) 完成后才放行 skip——fire-and-forget 会让恢复与紧随的需切模型任务
-        // setModel(目标) 并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
-        // turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
+        // setModel(原) 完成后才放行 skip——恢复与紧随的需切模型任务 setModel(目标) 不得
+        // 并发（串行由模型 op 队列结构保证，本 await 是调用方顺序语义：skip 放行前恢复
+        // 已收口）；本分支随后即 skip，await 无额外延迟代价。
         await this.forceSettleExpiredInFlight()
+        skipped = true
+      } else {
+        // 模型 op 串行段（MF-2 收口，互斥窗口全程覆盖「setModel 起步 → 记录创建」）：
+        // 前序模型 op（turn_end 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
+        // 排队等待期间未决记录与当前模型均可能变化，禁止按排队前快照盲切（旧快照的
+        // expectedModelRef 会把恢复锚点记错），串行段内重新校验后再切换。后来的需切模型
+        // 任务同样排队、出队时重新校验命中互斥 skip——双记录叠写 / 两个 setModel 并发
+        // 结构性不可能。
+        await this.serializeModelOp(async () => {
+          const currentNow = modelOps.getCurrentModelRef()
+          if (currentNow === undefined) {
+            // 会话无当前模型：期望模型无处记录、恢复不可定义 → 放弃切换照常 dispatch（分级降级）
+            logger.warn('cannot record expected model for switch (session has no current model)', {
+              taskId: task.id,
+              targetModelRef,
+            })
+            return
+          }
+          if (this.pendingModelSwitch) {
+            // 排队期间前序 dispatch 已建未决记录 → 互斥命中：skip 留待下 tick，不叠写
+            skipped = true
+            return
+          }
+          if (targetModelRef === currentNow) {
+            // 排队期间恢复已兑现（会话已回期望模型 = 本任务目标）→ 无需切换
+            return
+          }
+          const switched = await modelOps.setModelByRef(targetModelRef)
+          if (switched) {
+            // setModel 受理 → 记未决切换记录（会话期望模型 + 在途标记，内存态）；
+            // sendMessage 受理后等事件恢复（message_start 归属 → turn_end + isIdle 复核）。
+            // 记录创建收在同一串行段内：互斥窗口对后继模型任务即时可见，无「已切未记」
+            // 的放行缺口。
+            this.pendingModelSwitch = {
+              taskId: task.id,
+              expectedModelRef: currentNow,
+              targetModelRef,
+              phase: 'in-flight',
+              ticksOpen: 0,
+            }
+            this.dispatchedTurnIndex = null
+          } else {
+            // setModel false（无可用 API key 等）→ 按「恢复失败」同族处理：日志 + 放弃本次
+            // 切换，任务照常 dispatch（模型字段不阻塞核心调度）
+            logger.warn('model switch failed (setModel false), dispatch continues with current model', {
+              taskId: task.id,
+              targetModelRef,
+            })
+          }
+        })
+      }
+      if (skipped) {
         logger.warn('model switch in progress, skipping this tick (pending retry next tick)', {
           taskId: task.id,
-          targetModelRef: task.model,
+          targetModelRef,
         })
         return false
-      } else {
-        const switched = await modelOps.setModelByRef(task.model)
-        if (switched) {
-          // ① 记未决切换记录（会话期望模型 + 在途标记，内存态）→ ② setModel 已受理，
-          // ③ sendMessage 受理后等事件恢复（message_start 归属 → turn_end + isIdle 复核）
-          this.pendingModelSwitch = {
-            taskId: task.id,
-            expectedModelRef: current,
-            targetModelRef: task.model,
-            phase: 'in-flight',
-            ticksOpen: 0,
-          }
-          this.dispatchedTurnIndex = null
-        } else {
-          // setModel false（无可用 API key 等）→ 按「恢复失败」同族处理：日志 + 放弃本次
-          // 切换，任务照常 dispatch（模型字段不阻塞核心调度）
-          logger.warn('model switch failed (setModel false), dispatch continues with current model', {
-            taskId: task.id,
-            targetModelRef: task.model,
-          })
-        }
       }
     }
 
@@ -450,13 +489,18 @@ export class SchedulerRuntime {
       if (ps && modelOps) {
         this.pendingModelSwitch = null
         this.dispatchedTurnIndex = null
-        const restored = await modelOps.setModelByRef(ps.expectedModelRef)
-        if (!restored) {
-          logger.warn(
-            'model restore failed after send error (restore-failed): manual switch back required',
-            { expectedModelRef: ps.expectedModelRef, targetModelRef: ps.targetModelRef, taskId: ps.taskId },
-          )
-        }
+        // 恢复 setModel 入模型 op 串行队列（与其他 setModel 发起点互斥，不并发）；排队后
+        // 复核「当前 == 期望」：等待期间已切回则不动作
+        await this.serializeModelOp(async () => {
+          if (modelOps.getCurrentModelRef() === ps.expectedModelRef) return
+          const restored = await modelOps.setModelByRef(ps.expectedModelRef)
+          if (!restored) {
+            logger.warn(
+              'model restore failed after send error (restore-failed): manual switch back required',
+              { expectedModelRef: ps.expectedModelRef, targetModelRef: ps.targetModelRef, taskId: ps.taskId },
+            )
+          }
+        })
       }
       task.lastStatus = 'failed'
       task.pending = false
@@ -516,7 +560,9 @@ export class SchedulerRuntime {
    * 不动作（否则用户在任务间隙手动切模型会被静默回滚）。
    * - in-flight：ticksOpen 计数超 MODEL_SWITCH_RECONCILE_TICKS → 恢复回调永不执行（事件
    *   丢失），强制开放：idle 即恢复（返回恢复 Promise）；非 idle 转 awaiting-restore
-   *   （P-MODEL-② 证实 setModel 不影响 in-flight turn，但保守口径维持非 idle 推迟）。
+   *   （P-MODEL-② 证实 setModel 不影响 in-flight turn，但保守口径维持非 idle 推迟。
+   *   pi 实装锚点（0.84.4）：dist/core/agent-session.js:304 turn 模型在准备时一次性
+   *   快照，setModel 只写 state 不回写已在途 turn 的已快照模型）。
    *   窗口内继续等事件。
    * - awaiting-restore：比对决策已在窗口内锁定，执行不受窗口过期限制——idle 重入即兑现
    *   （tick 为天然重入点，不设墙钟上界：任务级正常路径无墙钟超时）。
@@ -557,7 +603,8 @@ export class SchedulerRuntime {
    * 返回 Promise 而非 fire-and-forget：idle 恢复路径透传 restoreExpectedModel，调用方
    * （dispatchTaskInner 互斥分支）必须 await——恢复 setModel(原) 与后续新任务的
    * setModel(目标) 不得并发（runTaskNow 直连路径下完成顺序不定，恢复后完成则该任务
-   * turn 用错模型）；本分支随后即 skip，await 无额外延迟代价。
+   * turn 用错模型；串行由模型 op 队列结构保证，本 await 是调用方顺序语义：skip 放行前
+   * 恢复已收口）；本分支随后即 skip，await 无额外延迟代价。
    */
   private forceSettleExpiredInFlight(): Promise<void> {
     const ps = this.pendingModelSwitch
@@ -571,26 +618,50 @@ export class SchedulerRuntime {
   }
 
   /**
+   * 模型 op 入队（串行化原语，MF-2）：op 排到 modelOpChain 尾，前序 op 完成（含失败）
+   * 后才执行；返回本 op 的结果 Promise 供调用方 await。链尾引用恒吞错自愈（重置为
+   * resolved），保证前序 op 失败不阻断后继、也不向链条泄漏 rejection（失败只回给本 op
+   * 调用方）。op 内禁止再入队（会死锁）——现有 op（切换 / 恢复）只调
+   * modelOps.setModelByRef，无重入。
+   */
+  private serializeModelOp<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.modelOpChain.then(op)
+    this.modelOpChain = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  /**
    * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收口）：
    * 当前模型已等于期望（用户已手动切回）→ 清记录不动作；setModel(原) false →
    * restore-failed 终态（日志含恢复动作：会话停留在任务模型，需手动切回）+ 清记录。
    * 记录先关后恢复——防 await setModel 期间 turn_end 与 tick 对账并发重入。
+   * 恢复 setModel 本体经模型 op 串行队列（serializeModelOp，MF-2）：turn_end 挂点的
+   * fire-and-forget 调用由此变为安全——在途恢复持队，后续任何 setModel 发起点
+   * （dispatch 切换 / 对账恢复）排队等待，两个 setModel 并发结构性不可能（完成顺序
+   * 不定 → turn 静默跑错模型的交错被消除）。「当前 == 期望」复核移入串行段：排队
+   * 等待期间用户已手动切回则不动作（与既有清记录不动作语义一致）。
    */
-  private async restoreExpectedModel(reason: string): Promise<void> {
+  private restoreExpectedModel(reason: string): Promise<void> {
     const ps = this.pendingModelSwitch
-    if (!ps || !this.modelOps) return
+    const ops = this.modelOps
+    if (!ps || !ops) return Promise.resolve()
     this.pendingModelSwitch = null
     this.dispatchedTurnIndex = null
-    if (this.modelOps.getCurrentModelRef() === ps.expectedModelRef) return
-    const restored = await this.modelOps.setModelByRef(ps.expectedModelRef)
-    if (!restored) {
-      logger.warn('model restore failed (restore-failed): session stays on task model, manual switch back required', {
-        taskId: ps.taskId,
-        expectedModelRef: ps.expectedModelRef,
-        targetModelRef: ps.targetModelRef,
-        reason,
-      })
-    }
+    return this.serializeModelOp(async () => {
+      if (ops.getCurrentModelRef() === ps.expectedModelRef) return
+      const restored = await ops.setModelByRef(ps.expectedModelRef)
+      if (!restored) {
+        logger.warn('model restore failed (restore-failed): session stays on task model, manual switch back required', {
+          taskId: ps.taskId,
+          expectedModelRef: ps.expectedModelRef,
+          targetModelRef: ps.targetModelRef,
+          reason,
+        })
+      }
+    })
   }
 
   // 归属状态机事件入口（index.ts 的 pi.on 转发；方法内不触碰捕获的 pi/ctx——恢复动作

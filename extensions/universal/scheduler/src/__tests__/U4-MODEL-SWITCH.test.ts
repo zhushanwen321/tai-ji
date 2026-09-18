@@ -6,6 +6,8 @@
  * - 归属与恢复：message_start customType 前缀匹配 + run 窗口内 turnIndex 序态关联；
  *   turn_end(dispatchedTurnIndex) + isIdle 复核推迟；agent_end/agent_settled 封口 run 窗口
  * - 互斥：切换在途时其他需切模型任务 skip + pending 留待下 tick 重试
+ * - 串行化（MF-2）：turn_end 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
+ *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
  * - 对账兜底：严格先于同 tick dispatch 循环；在途标记 2 tick 过期强制开放；未决记录守卫
  *   （无记录时模型漂移 = 用户自主行为不动作）
  * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
@@ -60,6 +62,12 @@ class ModelOpsMock implements SchedulerModelOps {
 /** 纯 microtask 冲刷：handleTurnEnd 的恢复是 fire-and-forget async，断言前等待其 await 链完成 */
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve()
+}
+
+/** 放宽轮数的 microtask 冲刷：gate 释放后的「mock 续跑 → 队列推进 → dispatch 收尾」链
+ * 跨多个 await 边界（≥8 轮），固定 5 轮会卡在结算中途误报未完成。 */
+async function flushAsyncRounds(rounds: number): Promise<void> {
+  for (let i = 0; i < rounds; i++) await Promise.resolve()
 }
 
 /** dispatch 注入的 custom message 形状（P-MODEL-④ 实测 payload） */
@@ -306,6 +314,79 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(backend.sentMessages).toHaveLength(2)
     })
 
+    it('切换 setModel 在途未建记录时并发第二个 model 任务 → 不并发第二 setModel、不叠写记录', async () => {
+      // 同根 SUG 回归（互斥窗口全程覆盖）：pendingModelSwitch 在 setModelByRef 受理之后才
+      // 创建，「setModel 起步 → 记录创建」的 await 窗口内第二个需切模型任务可经 runTaskNow
+      // 直连进入同一分支（互斥检查读到 null）→ 双记录叠写 + 两个 setModel 交错。修复后
+      // 切换段整体入模型 op 队列，后继任务排队、出队时重新校验命中互斥 skip。
+      const taskA = await addModelTask('job-a', TASK_M)
+      // A 的切换 setModel 挂起在「已发起未受理」态（记录尚未创建的窗口）
+      let releaseSwitch: (() => void) | undefined
+      const switchGate = new Promise<void>(resolve => {
+        releaseSwitch = resolve
+      })
+      let gatedCalls = 0
+      vi.spyOn(ops, 'setModelByRef').mockImplementation(async (ref: string) => {
+        ops.setModelCalls.push(ref)
+        if (ops.setModelResult) ops.currentRef = ref
+        if (gatedCalls++ === 0) await switchGate // 首次 = A 的切换
+        return ops.setModelResult
+      })
+
+      let aSettled = false
+      void runtime.dispatchTask(taskA).then(ok => {
+        aSettled = true
+      })
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M])
+      // 窗口内证据：setModel 已发起、未决记录尚未创建
+      expect(
+        (runtime as unknown as { pendingModelSwitch: unknown }).pendingModelSwitch,
+      ).toBeNull()
+      expect(aSettled).toBe(false)
+
+      // B 并发直连 dispatch：此刻互斥检查读到 null（修复前在此放行第二 setModel）
+      const taskB = await addModelTask('job-b', OTHER_M)
+      let bSettled = false
+      let bResult: boolean | undefined
+      void runtime.dispatchTask(taskB).then(ok => {
+        bSettled = true
+        bResult = ok
+      })
+      await flushAsync()
+
+      // B 的 setModel 未并发发起（排队等 A 的切换段出队）
+      expect(ops.setModelCalls).toEqual([TASK_M])
+      expect(bSettled).toBe(false)
+
+      // 放行 A 切换 → A 建记录并完成 dispatch；B 出队后重新校验命中互斥 → skip 不叠写
+      //（mock 续跑→opA 建记录→队列推进→opB skip→双 dispatch 收尾 ≥8 轮，放宽冲刷）
+      releaseSwitch!()
+      await flushAsyncRounds(30)
+      expect(aSettled).toBe(true)
+      expect(bSettled).toBe(true)
+      expect(bResult).toBe(false)
+      expect(ops.setModelCalls).toEqual([TASK_M]) // 全程仅一次切换调用（无并发第二 setModel）
+      expect(backend.sentMessages).toHaveLength(1) // 仅 A dispatch
+
+      // 记录未被 B 叠写：仍是 A 的记录（expected = ORIG 而非 TASK_M）
+      const internal = runtime as unknown as {
+        pendingModelSwitch: { taskId: string; expectedModelRef: string; targetModelRef: string } | null
+      }
+      expect(internal.pendingModelSwitch).not.toBeNull()
+      expect(internal.pendingModelSwitch!.taskId).toBe(taskA.id)
+      expect(internal.pendingModelSwitch!.expectedModelRef).toBe(ORIG)
+      expect(internal.pendingModelSwitch!.targetModelRef).toBe(TASK_M)
+
+      // A 结算后 B 重试成功（系统收敛，目标模型生效）
+      injectDispatchTurn(0)
+      await flushAsync()
+      const okRetry = await runtime.dispatchTask(taskB)
+      expect(okRetry).toBe(true)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
+      expect(ops.currentRef).toBe(OTHER_M)
+    })
+
     it('同 tick 双任务顺序：A 恢复过期强制开放 + B 到期切换 → B 生效不被 A 回滚', async () => {
       // A dispatch（记录在途）后事件全部丢失
       const taskA = await addModelTask('job-a', TASK_M)
@@ -331,6 +412,71 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(taskB.lastStatus).toBe('success')
 
       // B 的恢复链路随后正常闭环
+      injectDispatchTurn(0)
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M, ORIG])
+    })
+  })
+
+  describe('模型 op 串行化（MF-2 回归）', () => {
+    it('turn_end 恢复在途时新需切模型任务 dispatch → 新 setModel 排队等恢复完成（先恢复后切换）', async () => {
+      // MF-2 回归：handleTurnEnd 的恢复是 fire-and-forget（先同步清记录再 await setModel(原)）。
+      // 修复前恢复在途窗口内 pendingModelSwitch 已为 null → 新 dispatch 的互斥检查放行，
+      // setModel(目标) 与在途 setModel(原) 并发、完成顺序不定（恢复后完成则该任务 turn
+      // 静默跑错模型）。修复后恢复持模型 op 队列，后继 setModel 排队等其完成。
+      const taskA = await addModelTask('job-a', TASK_M)
+      await runtime.dispatchTask(taskA)
+      expect(ops.setModelCalls).toEqual([TASK_M])
+
+      // 恢复(ORIG) 的 setModel 挂起在「已记账未完成」态（模拟真实 RPC 在途窗口）
+      let releaseRestore: (() => void) | undefined
+      const restoreGate = new Promise<void>(resolve => {
+        releaseRestore = resolve
+      })
+      // gate 按 ref 定位（不用调用序号）：spy 在 A 的 dispatch 之后安装，restore 是 spy
+      // 观测的首个调用，调用序号计数会把 gate 错挂到后继 dispatch 切换上
+      vi.spyOn(ops, 'setModelByRef').mockImplementation(async (ref: string) => {
+        ops.setModelCalls.push(ref)
+        if (ops.setModelResult) ops.currentRef = ref
+        if (ref === ORIG) await restoreGate // turn_end 恢复挂起在「已发起未完成」态
+        return ops.setModelResult
+      })
+
+      // A 的 turn 正常结束且 idle → fire-and-forget 恢复启动并挂起
+      injectDispatchTurn(0)
+      await flushAsync()
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+      // 记录已同步清（先关后恢复不变）——修复前正是这个窗口放行了并发 setModel
+      expect(
+        (runtime as unknown as { pendingModelSwitch: unknown }).pendingModelSwitch,
+      ).toBeNull()
+
+      // B（需切模型）直连 dispatch：恢复在途、记录已清
+      const taskB = await addModelTask('job-b', OTHER_M)
+      let bSettled = false
+      let bResult: boolean | undefined
+      void runtime.dispatchTask(taskB).then(ok => {
+        bSettled = true
+        bResult = ok
+      })
+      await flushAsync()
+
+      // B 的 setModel 未并发发起：仍在排队等恢复（顺序约束核心断言）
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
+      expect(bSettled).toBe(false)
+      expect(backend.sentMessages).toHaveLength(1) // 仅 A 的消息，B 未 dispatch
+
+      // 放行恢复 → B 的 setModel 才发起（调用序 = 恢复先完成），B 正常 dispatch
+      //（restore 续跑→队列推进→opB 切换→记录→dispatch 收尾 ≥8 轮，放宽冲刷）
+      releaseRestore!()
+      await flushAsyncRounds(30)
+      expect(bSettled).toBe(true)
+      expect(bResult).toBe(true)
+      expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
+      expect(ops.currentRef).toBe(OTHER_M)
+      expect(backend.sentMessages).toHaveLength(2)
+
+      // B 的恢复链路随后正常闭环（终态回 ORIG）
       injectDispatchTurn(0)
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M, ORIG])
