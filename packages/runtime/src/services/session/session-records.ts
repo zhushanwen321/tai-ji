@@ -77,8 +77,9 @@ export interface RecordEntriesCache {
   workflows: Map<string, WorkflowRunRecord>
   /**
    * plan 状态派生缓存（最后一条 plan-state entry 的投影，D1④）——publish diff 基线：
-   * null = 从未派生过或派生结果为「无 plan-state entry」（该形态不 publish，GUI 端
-   * isActive:false 是缺省语义，与 extension DEFAULT_PLAN_STATE 同构）。
+   * null = 从未派生过，或全量重建发现 plan-state entry 被外部清空（收敛归 null，见
+   * mergePlanState 的 isFullRebuild 分支——增量批的「本批无 plan entry」不归 null，
+   * 保持既有基线，GUI 端 isActive:false 是缺省语义）。
    */
   planState: PlanStateView | null
   /** 防抖定时器（null = 未在等待）。 */
@@ -241,7 +242,7 @@ export class SessionRecords {
       // 两轮：第 1 轮按 cursor 增量；Entry not found 丢 cursor 后第 2 轮全量自愈
       const MAX_REFRESH_ROUNDS = 2
       for (let round = 0; round < MAX_REFRESH_ROUNDS; round++) {
-        let fetched: { entries: unknown[]; leafId: string | undefined }
+        let fetched: { entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }
         try {
           fetched = await this.fetchRecordEntriesRound(client, cache)
         } catch (e) {
@@ -255,7 +256,7 @@ export class SessionRecords {
           console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
           return
         }
-        this.applyRecordEntries(cache, fetched.entries, sessionId)
+        this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
         if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
         return
       }
@@ -265,8 +266,11 @@ export class SessionRecords {
   }
 
   /**
-   * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量。
-   * 全量重建时派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）。
+   * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量（fullRebuild 随返回值上浮，
+   * 供 plan 收敛语义分流，见 mergePlanState）。
+   * 全量重建时 Map 族派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）；plan 基线
+   * **不**在此复位：「重建前基线」正是 entry 被外部清空时收敛发布的 diff 依据，复位会把
+   * 基线抹成 null 使收敛分支失去触发条件，语义由 mergePlanState 的 isFullRebuild 分支承接。
    *
    * 响应收窄（u-s4 EntriesSinceResult 同款先例）：entries 零字段消费——整体透传
    * scanSubagentEntries / scanWorkflowEntries（unknown[] 形参）。
@@ -274,18 +278,15 @@ export class SessionRecords {
   private async fetchRecordEntriesRound(
     client: IPiEngine,
     cache: RecordEntriesCache,
-  ): Promise<{ entries: unknown[]; leafId: string | undefined }> {
+  ): Promise<{ entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }> {
     if (cache.cursor !== null) {
       const inc = await client.getEntries(cache.cursor) as EntriesSinceResult
-      return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined }
+      return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined, fullRebuild: false }
     }
     const full = await client.getEntries() as EntriesSinceResult
     cache.subagents.clear()
     cache.workflows.clear()
-    // D1④ 全量重建第三族：plan 基线一并复位（纯派生语义——全量扫描结果就是新基线，
-    // 复位后由 applyRecordEntries 重新赋值；漏复位会把增量前基线误当 diff 基线吞 publish）
-    cache.planState = null
-    return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined }
+    return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined, fullRebuild: true }
   }
 
   /**
@@ -299,11 +300,17 @@ export class SessionRecords {
    * - plan（D1④）：单例状态（最后一条 plan-state entry 派生），与缓存基线 planStateEquals
    *   比对，有变化 publish session.planState 全量帧——plan 无「增量信号」形态，广播 payload
    *   即完整 PlanStateView（shared 协议 `{ sessionId, planState }`）；diff 基线与 subagents
-   *   同语义（漏比对会静默吞 GUI 更新，D1 明示义务 b）。派生 null（无 plan-state entry）
-   *   且基线亦 null 时不 publish（GUI 端 isActive:false 是缺省语义）；基线非 null 而本次
-   *   null（entry 被外部清空）同样构成变化，publish 缺省 View 收敛 GUI。
+   *   同语义（漏比对会静默吞 GUI 更新，D1 明示义务 b）。派生 null（本批/本次扫描无
+   *   plan-state entry）按全量/增量分流收敛语义（mergePlanState）：增量批保持基线不发布
+   *   （append-only 下 null = 本批无 plan 新信息，非「entry 被清空」）；全量重建基线非 null
+   *   才视为 entry 被外部清空，publish 缺省 View 收敛 GUI（基线 null 的首次全量不发布）。
    */
-  private applyRecordEntries(cache: RecordEntriesCache, entries: unknown[], sessionId: string): void {
+  private applyRecordEntries(
+    cache: RecordEntriesCache,
+    entries: unknown[],
+    sessionId: string,
+    isFullRebuild: boolean,
+  ): void {
     // 三家族（subagents / workflows / plan）同批扫描 + merge（同一份 entries，零额外 RPC），
     // 分支与合并语义下沉到下方模块级 merge helper（顺序敏感投影链——各 helper 内判定
     // 顺序与拆分前逐一等价，见各 helper 注释）。merge 先于 publish 守卫执行（已销毁
@@ -313,7 +320,7 @@ export class SessionRecords {
     // D1④ plan 派生：diff 基线 = cache.planState。null → 缺省 View 的归一在发布帧完成
     // （缓存基线保持 null | View 双态：null 参与比对见 planStateEquals）。
     const planState = scanPlanStateEntries(entries)
-    const planStateChanged = mergePlanState(cache, planState)
+    const planStateChanged = mergePlanState(cache, planState, isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
     this.publishRecordChanges(cache, sessionId, subagentsChanged, workflowUpdates, planStateChanged, planState)
@@ -672,14 +679,22 @@ function collectWorkflowUpdates(workflows: Map<string, WorkflowRunRecord>, recor
 
 /**
  * plan 派生 merge（单例状态，D1④）：cache.planState 基线与本次派生比对后更新基线，
- * 返回是否有变化。派生 null 而基线非 null（plan-state entry 消失）→ 基线归 null 并视为
- * 变化（发布缺省 View 收敛 GUI）；派生非 null 恒写基线，基线 null 或字段级不等
- * （planStateEquals）时视为变化。
+ * 返回是否有变化。
+ *
+ * [MF-1] 派生 null（本批/本次扫描窗口内无 plan-state entry）按 isFullRebuild 分流——
+ * JSONL append-only 下 entry 不会消失，「null = entry 被清空」的收敛只对全量重建路径
+ * 合法（全集扫描即新真值）；增量批（cursor delta）的 null 仅表示本批无 plan 新信息
+ * （subagent/workflow record entry 触发的重拉批必然不含 plan entry），必须保持基线
+ * 不发布，否则活跃 plan 的 GUI（横幅/审批条/产物面板）会被无关 record 增量重拉静默
+ * 打回未激活。派生非 null 恒写基线，基线 null 或字段级不等（planStateEquals）时视为
+ * 变化。
  */
-function mergePlanState(cache: RecordEntriesCache, planState: PlanStateView | null): boolean {
+function mergePlanState(cache: RecordEntriesCache, planState: PlanStateView | null, isFullRebuild: boolean): boolean {
   const prevPlan = cache.planState
   if (planState === null) {
-    if (prevPlan !== null) {
+    // 增量批：null = 本批无 plan 新信息，保持基线不发布（基线归 null 会误发未激活帧）。
+    // 全量重建：基线非 null 且全集无 plan entry = entry 被外部清空 → 归 null 并收敛发布。
+    if (isFullRebuild && prevPlan !== null) {
       cache.planState = null
       return true
     }

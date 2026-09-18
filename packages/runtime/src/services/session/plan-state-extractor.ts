@@ -47,7 +47,7 @@ const BYTES_PER_MB = 1024 * 1024
 /**
  * 「未激活」缺省 View（无 entry / ENOENT / oversize 降级共用，对齐 extension
  * DEFAULT_PLAN_STATE 的 View 域投影）。导出给 SessionRecords 的 publish 归一
- * （派生 null → 缺省 View 发布帧，见 applyRecordEntries）。
+ * （全量重建发现 entry 被外部清空 → 缺省 View 发布帧，见 mergePlanState）。
  */
 export const INACTIVE_PLAN_STATE_VIEW: PlanStateView = {
   isActive: false,

@@ -917,4 +917,66 @@ describe('plan-state 投影（D1③④）', () => {
       templateName: null,
     })
   })
+
+  // [MF-1 回归] JSONL append-only 下 entry 不会消失，增量批（cursor delta）的
+  // 「无 plan-state entry」= 本批无 plan 新信息，非「entry 被清空」——误判会把活跃 plan
+  // 的 GUI（横幅/审批条/产物面板）被无关 subagent/workflow record 增量重拉静默打回未激活。
+  it('增量批无 plan-state entry：保持基线不 publish（非全量路径收敛语义不适用）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // 首拉（全量）：发布 awaiting 基线
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 增量 delta 只含 subagent-record（plan 实际仍活跃）——不 publish
+    client.getEntries.mockClear()
+    client.getEntries.mockResolvedValue({
+      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e2')], leafId: 'e2' },
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(client.getEntries).toHaveBeenCalledWith('e1') // 确认走的是增量路径（非全量重建）
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+
+    // 第三拉：同值 plan entry 重现——若基线曾被误清为 null，此处会多 publish 一次；
+    // 恰 1 帧 = 基线保持（planStateEquals diff 基线未被增量批破坏的间接证伪）
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e3')], leafId: 'e3' },
+    })
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+    expect(publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')).toHaveLength(1)
+  })
+
+  it('全量重建 entry 消失：恰发布一次 session.planState 且为未激活缺省 View（收敛语义收归全量路径）', async () => {
+    const { records, publish, client } = makeRecords()
+    const fire = registerSession(records)
+    // 首拉（全量）：发布 awaiting 基线
+    client.getEntries.mockResolvedValue({
+      data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
+    })
+    fire('s1')
+    records.invalidateRecordEntries('s1', 'plan-state')
+    await flushDebounce()
+
+    // 游标失效自愈（session 文件被外部改写）：丢 cursor 全量重拉，全集中 plan-state entry 已消失
+    client.getEntries.mockImplementation(async (since?: string) => {
+      if (since !== undefined) throw new Error('Entry not found: e1')
+      return { data: { entries: [subagentRecordEntry('sa-1', 'done', 'e2')], leafId: 'e2' } } as GetEntriesResult
+    })
+    records.invalidateRecordEntries('s1', 'subagent-record')
+    await flushDebounce()
+    expect(client.getEntries).toHaveBeenCalledWith('e1') // 第 1 轮增量（Entry not found）
+    expect(client.getEntries).toHaveBeenCalledWith() // 第 2 轮丢 cursor 全量重建
+
+    const planMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+    expect(planMsgs).toHaveLength(2) // awaiting 基线帧 + 收敛帧，恰一次收敛
+    expect((planMsgs[1]![1] as { payload: { planState: Record<string, unknown> } }).payload.planState)
+      .toEqual({ isActive: false, planFilePath: null, requirement: null, templateName: null })
+  })
 })
