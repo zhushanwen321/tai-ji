@@ -150,3 +150,49 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
     expect(empty.text()).toContain('panel.sideDrawer.bashTaskHint')
   })
 })
+
+// plan tab（plan 模式重设计 u1-drawer-tab）：tabs 加第 9 个 TabMeta（key='plan'，i18n key
+// 落 plan 域文件 plan.drawer.*，icon 与 PlanModeBanner 同源 SquareCheckBig）。内容面板由壳层
+// （PanelContainer）slot 注入空骨架（PlanDocsPanel 归 u1-docs-panel），本组件只负责 tab 元信息。
+describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
+  it('plan tab 按钮 DOM 存在（9 tab 常驻，既有 8 tab 无回归）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
+    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+    }
+  })
+
+  it('plan tab 标题引用 plan 域 i18n key（title 属性 = tab.label）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    // ui 包测试环境的 vue-i18n mock 返回 key 本身（DrawerPanel.test 文件头 mock 策略），
+    // title 属性断言即「label 引用了 plan.drawer.tabPlan key」
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').attributes('title')).toBe('plan.drawer.tabPlan')
+  })
+
+  it('plan tab icon 为 SquareCheckBig（与 PlanModeBanner 同源 icon 体系，svg 在按钮内渲染）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    // icon 经 <component :is> 渲染为 svg（lucide 组件根元素），存在性断言注册生效
+    expect(wrapper.find('[data-testid="drawer-tab-plan"] svg').exists()).toBe(true)
+  })
+
+  it('plan tab 点击 emit set-tab plan', async () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    await wrapper.find('[data-testid="drawer-tab-plan"]').trigger('click')
+    expect(wrapper.emitted('set-tab')).toEqual([['plan']])
+  })
+
+  it('activeTab=plan：应用选中样式（bg-surface-hover）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'plan' }) })
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').classes()).toContain('bg-surface-hover')
+  })
+
+  it('plan 无内容面板 slot：空态 fallback 渲染 plan 域 i18n key（t mock 返回 key，断言 key 引用）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'plan' }) })
+    const empty = wrapper.find('[data-testid="drawer-widget-empty"]')
+    expect(empty.exists()).toBe(true)
+    // emptyText/emptyHint 引用 plan.drawer.noPlan / planHint（文案由 u1-docs-panel 阶段消费）
+    expect(empty.text()).toContain('plan.drawer.noPlan')
+    expect(empty.text()).toContain('plan.drawer.planHint')
+  })
+})

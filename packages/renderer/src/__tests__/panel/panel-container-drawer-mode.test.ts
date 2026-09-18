@@ -33,6 +33,7 @@ import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
   bindDrawerSessionId,
   openDrawerTab,
+  setDrawerTab,
   getDrawerControlState,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
@@ -229,6 +230,45 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
     // bashTask tab 按钮随 SideDrawerTab 扩展常驻（DrawerPanel D5②）
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
+  }, 60_000)
+})
+
+// plan tab 接线（plan 模式重设计 u1-drawer-tab：v-if chain 加分支 + 空面板骨架常驻注入）
+describe('PanelContainer plan tab 接线（u1-drawer-tab）', () => {
+  it('plan tab 激活 → 注入空面板骨架（常驻容器，不经空态 fallback）；plan tab 按钮常驻', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-plan-skeleton')
+    openDrawerTab('plan')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    // 骨架注入（u1-drawer-tab 交付面；PlanDocsPanel 内容归 u1-docs-panel）
+    expect(wrapper.find('[data-testid="plan-docs-panel-skeleton"]').exists()).toBe(true)
+    // 无条件注入语义：骨架存在时空态 fallback 不渲染（与 bashTask「未选中不注入」相反）
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+    // plan tab 按钮随 SideDrawerTab 第 9 员常驻（DrawerPanel TabMeta）
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
+    // 既有 8 tab 无回归
+    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+    }
+  }, 60_000)
+
+  it('切走 tab（git）→ plan 骨架卸载（v-if 按 tab 激活切换）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-plan-switch')
+    openDrawerTab('plan')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-panel-skeleton"]').exists()).toBe(true)
+
+    // 切到 git tab → plan 骨架卸载、git 面板注入（v-if chain 互斥）
+    setDrawerTab('git')
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-panel-skeleton"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
   }, 60_000)
 })
 

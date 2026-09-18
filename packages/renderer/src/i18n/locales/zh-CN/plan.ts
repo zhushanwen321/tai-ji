@@ -23,4 +23,11 @@ export default {
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
     waitingResubmit: '等待 agent 重新提交审批',
   },
+  drawer: {
+    // plan tab（plan 模式重设计 u1-drawer-tab）：drawer「计划产物」tab。
+    // key 落 plan 域文件——tab 语义属 plan 模式域，不并入 panel.sideDrawer
+    tabPlan: '计划产物',
+    noPlan: '暂无计划产物',
+    planHint: '进入计划模式后，agent 产出的文档会显示在这里',
+  },
 }

@@ -149,6 +149,15 @@
           <BackgroundTaskDetailPanel
             v-else-if="drawerTab === 'bashTask' && bashTaskSelected"
           />
+          <!-- plan tab（plan 模式重设计 u1-drawer-tab G2）：空面板骨架，无条件注入（tab 激活
+               即渲染，不经空态 fallback——与 bashTask 的「未选中不注入」相反，骨架是 tab 的
+               常驻容器）。PlanDocsPanel（L2 文档 tab + markdown 渲染 + 划选评论）归
+               u1-docs-panel 接线，本骨架只交付 tab 激活容器与挂点。 -->
+          <div
+            v-else-if="drawerTab === 'plan'"
+            class="flex h-full min-h-0 flex-col overflow-hidden"
+            data-testid="plan-docs-panel-skeleton"
+          />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -196,6 +205,7 @@ import { useSessionDerivations } from '@/composables/features/chat/useSessionDer
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth } from '@/composables/features/drawer/useDrawerSplitWidth'
+import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
@@ -303,6 +313,11 @@ function statusOf(l: PanelLeaf) {
  *  值等价）。 */
 bindDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSessionId))
 const { isOpen: drawerOpen, activeTab: drawerTab, docked: drawerDocked } = useDrawerControl()
+
+// drawer「计划产物」tab 自动打开接线（plan 模式重设计 u1-drawer-tab）：plan 激活/首份产物
+// 边界经 ADR-0053 pendingOpen 语义打开 drawer（同宿主横幅/审批条的消费源 = planStore 焦点
+// 分区，本容器是三者的共同 setup 宿主）。
+usePlanDrawerSync()
 
 /** bashTask tab 选中态（D5①：selectedBackgroundTaskId undefined=未选中 → 不注入本面板，
  *  DrawerPanel 空态 fallback 承载；core per-session 分区直读，写入方 = 列表 item 点击 D5④） */

@@ -23,4 +23,11 @@ export default {
     revising: 'The agent is revising docs based on your comments; versions update here when done',
     waitingResubmit: 'Waiting for the agent to resubmit for review',
   },
+  drawer: {
+    // plan tab (plan-mode redesign u1-drawer-tab): drawer "plan artifacts" tab.
+    // Keys live in the plan domain file — tab semantics belong to plan mode, not panel.sideDrawer
+    tabPlan: 'Plan Artifacts',
+    noPlan: 'No plan artifacts yet',
+    planHint: 'Documents produced by the agent appear here after entering plan mode',
+  },
 }
