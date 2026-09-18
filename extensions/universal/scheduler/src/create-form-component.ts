@@ -199,6 +199,16 @@ function editorRender(e: EditorState, theme: ThemeLike): string {
 	return e.text.slice(0, e.cursor) + theme.inverse(char) + e.text.slice(e.cursor + char.length)
 }
 
+/** 编辑态单键 → 编辑器操作查找表（退格/DEL/光标移动；Esc/Enter 语义键不在表内，由 handleEditorInput 先行处理）。 */
+const EDITOR_KEY_OPS = [
+	['backspace', editorBackspace],
+	['delete', editorDelete],
+	['left', editorMoveLeft],
+	['right', editorMoveRight],
+	['home', editorMoveHome],
+	['end', editorMoveEnd],
+] as const
+
 // ── 本地墙钟格式化/解析（datetime 掩码形态 "YYYY-MM-DD HH:mm"，本地时区）──
 
 /** 两位数字宽度（pad2 的 padStart 宽度） */
@@ -576,28 +586,7 @@ export class ScheduleCreateComponent implements Component {
 		inner.push(t.bold('确认创建'))
 		inner.push('')
 
-		const onceDate = this.currentOnceDate()
-		const rows: Array<[label: string, value: string, ok: boolean]> = [
-			['模式', this.kind === 'recurring' ? '循环' : '一次性', this.confirmed[0]],
-			[
-				'时间',
-				this.kind === 'once'
-					? onceDate
-						? `${formatAbs(onceDate)}（一次性）`
-						: t.fg('warning', '未设置')
-					: this.cronText + (this.timeValid() ? '' : t.fg('warning', '（表达式无效）')),
-				this.confirmed[1] && this.timeValid(),
-			],
-			['模型', this.selectedModel() ?? t.fg('dim', '（跟随会话当前模型）'), this.confirmed[ANSWER_MODEL] && this.answerValid(ANSWER_MODEL)],
-			[
-				'提示词',
-				this.prompt.trim()
-					? truncateToWidth(this.prompt.trim(), Math.max(SUMMARY_MIN_WIDTH, innerWidth - SUMMARY_RESERVE_WIDTH), '…')
-					: t.fg('warning', '（为空）'),
-				this.confirmed[ANSWER_PROMPT] && this.answerValid(ANSWER_PROMPT),
-			],
-		]
-		for (const [label, value, ok] of rows) {
+		for (const [label, value, ok] of this.submitRows(innerWidth)) {
 			inner.push(`  ${ok ? t.fg('success', '✓') : t.fg('warning', '✗')} ${t.fg('dim', label)}  ${value}`)
 		}
 
@@ -608,6 +597,40 @@ export class ScheduleCreateComponent implements Component {
 		if (!this.canSubmit()) {
 			inner.push(`  ${t.fg('warning', '✗')} ${t.fg('dim', '仍有未完成的配置项（见上方 ✗ 行），补全后才能提交')}`)
 		}
+		this.renderSubmitButtons(inner)
+	}
+
+	/** Submit tab 四行汇总（模式/时间/模型/提示词）：label + value + 确认门 ok。 */
+	private submitRows(innerWidth: number): Array<[label: string, value: string, ok: boolean]> {
+		const t = this.theme
+		const onceDate = this.currentOnceDate()
+		return [
+			['模式', this.kind === 'recurring' ? '循环' : '一次性', this.confirmed[0]],
+			['时间', this.submitTimeValue(onceDate), this.confirmed[1] && this.timeValid()],
+			['模型', this.selectedModel() ?? t.fg('dim', '（跟随会话当前模型）'), this.confirmed[ANSWER_MODEL] && this.answerValid(ANSWER_MODEL)],
+			['提示词', this.submitPromptValue(innerWidth), this.confirmed[ANSWER_PROMPT] && this.answerValid(ANSWER_PROMPT)],
+		]
+	}
+
+	/** 时间行 value：once 显示确认时刻（未设置则警示），recurring 显示表达式 + 无效标记。 */
+	private submitTimeValue(onceDate: Date | null): string {
+		const t = this.theme
+		if (this.kind === 'once') {
+			return onceDate ? `${formatAbs(onceDate)}（一次性）` : t.fg('warning', '未设置')
+		}
+		return this.cronText + (this.timeValid() ? '' : t.fg('warning', '（表达式无效）'))
+	}
+
+	/** 提示词行 value：非空截断为摘要，空则警示。 */
+	private submitPromptValue(innerWidth: number): string {
+		const trimmed = this.prompt.trim()
+		if (!trimmed) return this.theme.fg('warning', '（为空）')
+		return truncateToWidth(trimmed, Math.max(SUMMARY_MIN_WIDTH, innerWidth - SUMMARY_RESERVE_WIDTH), '…')
+	}
+
+	/** Submit tab 底部按钮区：确认/取消 两 cell 按焦点与提交门着色。 */
+	private renderSubmitButtons(inner: string[]): void {
+		const t = this.theme
 		const submitLabel = '[确认创建]'
 		const submitCell =
 			this.submitFocus === 0
@@ -669,14 +692,7 @@ export class ScheduleCreateComponent implements Component {
 
 		// ② Esc：非首 tab 回退；首 tab 两段取消
 		if (matchesKey(data, 'escape')) {
-			if (this.tab > 0) {
-				this.gotoTab(this.tab - 1)
-			} else if (this.pendingCancel) {
-				this.cancel()
-			} else {
-				this.pendingCancel = true
-				this.rerender()
-			}
+			this.handleEscapeKey()
 			return
 		}
 
@@ -704,6 +720,18 @@ export class ScheduleCreateComponent implements Component {
 		}
 	}
 
+	/** Esc 键：非首 tab 回退上一 tab；首 tab 走两段取消（pendingCancel 二次确认）。 */
+	private handleEscapeKey(): void {
+		if (this.tab > 0) {
+			this.gotoTab(this.tab - 1)
+		} else if (this.pendingCancel) {
+			this.cancel()
+		} else {
+			this.pendingCancel = true
+			this.rerender()
+		}
+	}
+
 	private handleVerticalNav(delta: number): void {
 		switch (this.tab) {
 			case TAB_KIND:
@@ -726,46 +754,12 @@ export class ScheduleCreateComponent implements Component {
 
 	private handleEnter(): void {
 		switch (this.tab) {
-			case TAB_KIND: {
-				this.kind = this.kindCursor === 0 ? 'recurring' : 'once'
-				if (this.kind === 'once') {
-					// 切到一次性：保留 draft 还原/已选时刻；无值则预选首个预设（demo 行为）
-					if (this.onceDate === null) {
-						this.onceDate = onceDateForPreset(0)
-						this.oncePresetIndex = 0
-					}
-					this.timeCursor = this.oncePresetIndex ?? ONCE_PRESETS.length
-				} else {
-					const presetIndex = CRON_PRESETS.findIndex((p) => p.cron === this.cronText)
-					this.timeCursor = presetIndex >= 0 ? presetIndex : CRON_PRESETS.length
-				}
-				this.confirmed[0] = true
-				this.leaveTabForward()
+			case TAB_KIND:
+				this.enterKindTab()
 				return
-			}
-			case TAB_TIME: {
-				const customIndex = tab1ItemCount(this.kind) - 1
-				if (this.timeCursor === customIndex) {
-					if (this.kind === 'recurring') {
-						this.cronEdit = newEditor(this.cronText, 'cron')
-					} else {
-						const current = this.currentOnceDate()
-						this.onceEdit = newEditor(current ? formatLocal(current) : MASK_EMPTY, 'datetime')
-					}
-					this.rerender()
-					return
-				}
-				if (this.kind === 'recurring') {
-					this.cronText = CRON_PRESETS[this.timeCursor]!.cron
-				} else {
-					this.onceDate = onceDateForPreset(this.timeCursor)
-					this.oncePresetIndex = this.timeCursor
-					this.onceEdit = null
-				}
-				this.confirmed[1] = true
-				this.leaveTabForward()
+			case TAB_TIME:
+				this.enterTimeTab()
 				return
-			}
 			case TAB_MODEL: {
 				this.confirmed[ANSWER_MODEL] = true
 				this.leaveTabForward()
@@ -777,14 +771,74 @@ export class ScheduleCreateComponent implements Component {
 				this.rerender()
 				return
 			}
-			case SUBMIT_TAB: {
-				if (this.submitFocus === 0) {
-					if (this.canSubmit()) this.submit()
-				} else {
-					this.cancel()
-				}
+			case SUBMIT_TAB:
+				this.enterSubmitTab()
 				return
-			}
+		}
+	}
+
+	/** Kind tab Enter：按光标位定 kind，同步时间 tab 光标，确认并前进。 */
+	private enterKindTab(): void {
+		this.kind = this.kindCursor === 0 ? 'recurring' : 'once'
+		if (this.kind === 'once') {
+			this.syncOnceTimeCursor()
+		} else {
+			this.syncRecurringTimeCursor()
+		}
+		this.confirmed[0] = true
+		this.leaveTabForward()
+	}
+
+	/** 切到一次性：保留 draft 还原/已选时刻；无值则预选首个预设（demo 行为）。 */
+	private syncOnceTimeCursor(): void {
+		if (this.onceDate === null) {
+			this.onceDate = onceDateForPreset(0)
+			this.oncePresetIndex = 0
+		}
+		this.timeCursor = this.oncePresetIndex ?? ONCE_PRESETS.length
+	}
+
+	/** 切到循环：匹配既有 cron 预设定位光标，未命中落自定义项。 */
+	private syncRecurringTimeCursor(): void {
+		const presetIndex = CRON_PRESETS.findIndex((p) => p.cron === this.cronText)
+		this.timeCursor = presetIndex >= 0 ? presetIndex : CRON_PRESETS.length
+	}
+
+	/** Time tab Enter：自定义项进入编辑态；预设项直接落值，确认并前进。 */
+	private enterTimeTab(): void {
+		const customIndex = tab1ItemCount(this.kind) - 1
+		if (this.timeCursor === customIndex) {
+			this.beginTimeEdit()
+			return
+		}
+		if (this.kind === 'recurring') {
+			this.cronText = CRON_PRESETS[this.timeCursor]!.cron
+		} else {
+			this.onceDate = onceDateForPreset(this.timeCursor)
+			this.oncePresetIndex = this.timeCursor
+			this.onceEdit = null
+		}
+		this.confirmed[1] = true
+		this.leaveTabForward()
+	}
+
+	/** 时间 tab 自定义项 Enter：按 kind 打开 cron 插入式 / datetime 掩码式编辑器。 */
+	private beginTimeEdit(): void {
+		if (this.kind === 'recurring') {
+			this.cronEdit = newEditor(this.cronText, 'cron')
+		} else {
+			const current = this.currentOnceDate()
+			this.onceEdit = newEditor(current ? formatLocal(current) : MASK_EMPTY, 'datetime')
+		}
+		this.rerender()
+	}
+
+	/** Submit tab Enter：焦点在确认且提交门通过 → submit；焦点在取消 → cancel。 */
+	private enterSubmitTab(): void {
+		if (this.submitFocus === 0) {
+			if (this.canSubmit()) this.submit()
+		} else {
+			this.cancel()
 		}
 	}
 
@@ -804,59 +858,61 @@ export class ScheduleCreateComponent implements Component {
 			this.saveEditor(e)
 			return
 		}
-		if (matchesKey(data, 'backspace')) {
-			editorBackspace(e)
-			this.rerender()
-			return
-		}
-		if (matchesKey(data, 'delete')) {
-			editorDelete(e)
-			this.rerender()
-			return
-		}
-		if (matchesKey(data, 'left')) {
-			editorMoveLeft(e)
-			this.rerender()
-			return
-		}
-		if (matchesKey(data, 'right')) {
-			editorMoveRight(e)
-			this.rerender()
-			return
-		}
-		if (matchesKey(data, 'home')) {
-			editorMoveHome(e)
-			this.rerender()
-			return
-		}
-		if (matchesKey(data, 'end')) {
-			editorMoveEnd(e)
-			this.rerender()
-			return
-		}
+		if (this.applyEditorKeyOp(e, data)) return
 		if (e.mode === 'datetime') {
-			// 掩码态只吃数字：parseKey 命中的数字键转字符输入，其余 no-op
-			const keyId = parseKey(data)
-			if (keyId !== undefined && /^[0-9]$/.test(keyId)) {
-				editorTypeChar(e, keyId)
-				this.rerender()
-			}
+			this.handleDatetimeEditorKey(e, data)
 			return
 		}
-		// cron / free：parseKey 单字符（ASCII）或未识别序列按码点插入（中文/emoji paste 路径）
+		this.handleInsertEditorKey(e, data)
+	}
+
+	/** 编辑态单键（退格/DEL/光标移动）：命中查找表则执行编辑器操作并重渲染。 */
+	private applyEditorKeyOp(e: EditorState, data: string): boolean {
+		for (const [key, op] of EDITOR_KEY_OPS) {
+			if (matchesKey(data, key)) {
+				op(e)
+				this.rerender()
+				return true
+			}
+		}
+		return false
+	}
+
+	/** datetime 掩码态输入：只吃数字键（parseKey 命中转逐位覆盖），其余 no-op。 */
+	private handleDatetimeEditorKey(e: EditorState, data: string): void {
+		// 掩码态只吃数字：parseKey 命中的数字键转字符输入，其余 no-op
+		const keyId = parseKey(data)
+		if (keyId !== undefined && /^[0-9]$/.test(keyId)) {
+			editorTypeChar(e, keyId)
+			this.rerender()
+		}
+	}
+
+	/** cron/free 编辑态插入输入：parseKey 命中键走单字符插入，未识别序列走码点插入（中文/emoji paste 路径）。 */
+	private handleInsertEditorKey(e: EditorState, data: string): void {
 		const keyId = parseKey(data)
 		if (keyId !== undefined) {
-			if (matchesKey(data, 'space')) {
-				editorTypeChar(e, ' ')
-				this.rerender()
-				return
-			}
-			if (keyId.length === 1 && keyId >= ' ' && keyId <= '~') {
-				editorTypeChar(e, keyId)
-				this.rerender()
-			}
+			this.insertParsedKey(e, data, keyId)
 			return
 		}
+		this.insertCodepoints(e, data)
+	}
+
+	/** parseKey 命中的键：space 特判转空格，单个可打印 ASCII 直接插入。 */
+	private insertParsedKey(e: EditorState, data: string, keyId: string): void {
+		if (matchesKey(data, 'space')) {
+			editorTypeChar(e, ' ')
+			this.rerender()
+			return
+		}
+		if (keyId.length === 1 && keyId >= ' ' && keyId <= '~') {
+			editorTypeChar(e, keyId)
+			this.rerender()
+		}
+	}
+
+	/** 未识别输入序列按码点逐个尝试插入（cron 白名单字符 / prompt 非控制字符），有变更才重渲染。 */
+	private insertCodepoints(e: EditorState, data: string): void {
 		let changed = false
 		for (const c of Array.from(data)) {
 			if (e.mode === 'cron' ? CRON_CHARS.test(c) : PROMPT_CHAR(c)) {
