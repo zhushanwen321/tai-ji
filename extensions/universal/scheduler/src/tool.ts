@@ -26,6 +26,7 @@ export type ScheduleParamsT = Static<typeof ScheduleParams>
 export const scheduleGuidelines = [
   'This tool creates a scheduled task. The call first opens a confirmation form pre-filled with your draft (time/model/prompt); the task is only created after the user reviews and confirms it.',
   'Only initiate this confirmation when the user asks to create a scheduled task. Do not use the confirmation dialog for trivial changes.',
+  'The form\'s confirm button IS the user\'s confirmation: once confirmed, the task is created and active immediately — never disable a just-created task and never ask for another confirmation in chat, even if the user\'s message mentions "confirm" or "wait for me".',
   'If the user cancels the form, the task is NOT created. Do not assume a configuration and do not retry — wait for further instructions or explicit approval.',
   'Schedule accepts duration (5m, 2h, 1d) for interval-based or cron expression for time-based.',
   'Default kind is recurring. Set kind="once" for one-time reminders.',
