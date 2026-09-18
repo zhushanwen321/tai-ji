@@ -313,7 +313,7 @@ export class ZcodeEngine implements EnginePort {
       requestedModel !== undefined && requestedModel !== ""
         ? resolveZcodeModelRef(requestedModel, this.deps.sources)
         : undefined;
-    this.warnIgnoredCtxModel(task, ctx, modelRef);
+    this.warnIgnoredCtxModel(task, ctx);
     // [RX2-F1] 非常见档位出声一行（不拦截透传）；放主编排而非 attemptAppServerTurn——
     // schema 重试轮会二次进 attempt，warn 只应随任务出声一次
     this.warnThoughtLevelUncommon(task, ctx);
@@ -1021,18 +1021,17 @@ export class ZcodeEngine implements EnginePort {
    * task.model 走正常解析链、ctx 本就无模型属预期缺省，均不出声（避免噪音）。
    * [R4/G3] 文案更新：缺席 model 时 create 不携带 model 键（缺省模型由 zcode 自身
    * 解析——用户 defaultModelSelection 优先），不再声称「实际使用引擎缺省模型
-   * <fallback>」（恒传时代的表述，与缺席不携带的新行为不符）。
+   * <fallback>」（恒传时代的表述，与缺席不携带的新行为不符）。modelRef 参数已随
+   * R4 条件携带移除——warn 可达即缺席态（显式 task.model 在 requested 非空早退处
+   * 返回），无第三形态。
    */
-  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext, modelRef: string | undefined): void {
+  private warnIgnoredCtxModel(task: AgentCallOpts, ctx: RunContext): void {
     if (ctx.ctxModel === undefined) return;
     const requested = task.model?.trim();
     if (requested !== undefined && requested !== "") return;
-    const resolution = modelRef !== undefined
-      ? `显式解析为 ${modelRef}`
-      : `create 不携带 model 键，缺省模型由 zcode 自身解析（用户 defaultModelSelection 优先）`;
     logger.warn(
       `[zcode-engine] ctx.ctxModel（${ctx.ctxModel.id}）被忽略——ctxModel 是 pi 链路兜底，zcode 不消费；` +
-        `task.model 未显式指定，${resolution}`,
+        `task.model 未显式指定，create 不携带 model 键，缺省模型由 zcode 自身解析（用户 defaultModelSelection 优先）`,
       { taskId: ctx.taskId },
     );
   }
