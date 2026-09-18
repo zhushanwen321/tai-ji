@@ -524,7 +524,10 @@ export function buildFileCacheEntry(
   };
 }
 
-/** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。 */
+/** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。
+ *  [R4/D6-③] base 直查路径同批归一（存量索引 "" 条目）：索引命中分支把 `...hit` 展开为
+ *  IdentityHeaderRecon 直入本函数，R4 升级前旧写侧落盘的 `model:""` 条目（loadIndex 守卫
+ *  接受 "" 合法 string）经此水合——与 entry/manifest/孤儿合并三水合点同批 modelOrUndefined。 */
 export function buildRecord(
   base: IdentityHeaderRecon | ReconstructedRecord,
   m: SidecarMatrix,
@@ -548,7 +551,7 @@ export function buildRecord(
       endedAt: undefined,
       turns: base.turnCount,
       totalTokens: base.totalTokens,
-      model: base.model,
+      model: modelOrUndefined(base.model),
       thinkingLevel: base.thinkingLevel,
       task: base.task,
       currentActivity: undefined,
@@ -577,7 +580,7 @@ export function buildRecord(
       endedAt: undefined,
       turns: 0,
       totalTokens: 0,
-      model: base.model,
+      model: modelOrUndefined(base.model),
       thinkingLevel: base.thinkingLevel,
       task: base.task,
       currentActivity: undefined,
