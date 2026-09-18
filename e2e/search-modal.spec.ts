@@ -141,33 +141,28 @@ test.describe('搜索浮层 E2E', () => {
   })
 
   test('SM-E2E-7（slash 命令注入活跃 composer）：搜 commit → confirm → composer 含 commit chip @p0-smoke', async ({ page }) => {
-    // [DIAG-TEMPORARY] CI 定位插桩：4 检查点截图 + main 标题探针（诊断后整体回退）
-    const diag = async (n: string): Promise<void> => {
-      await page.screenshot({ path: `test-results/sm7-${n}.png` }).catch(() => {})
-      console.log(`[sm7-diag:${n}] main-h1=`, await page.locator('main h1').allTextContents(),
-        '| composer-count=', await page.getByTestId('composer-box').count(),
-        '| chip-count=', await page.getByTestId('composer-box').locator('.slash-chip').count())
-    }
     // 前置：激活 session（panel composer 可见）
     await activateSession(page)
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
-    await diag('1-activated')
 
     // 唤起搜索
     await openSearch(page)
-    await diag('2-modal')
     // 输入 commit（mock SEARCH_MOCK.command 含 'commit'，commandKind:'slash'，对齐 pi 格式无 / 前缀）
     await page.getByTestId('search-input').pressSequentially('commit')
     // 等命令分组出现 + 含 commit 项
     await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('search-section-命令')).toContainText('commit')
-    await diag('3-typed')
+    // Enter 消费的是**当前选中项**：逐字输入期间防抖窗口内的前缀结果可能仍在前（'c'/'o'/'co'
+    // 子串命中概览 sub 'Mission Control'，概览 app 命令排名在 commit 前 + 默认选中首项），
+    // 此时 Enter 会确认概览 → goOverview 跳概览页（2026-09-18 CI 实发，SM-E2E-8 搜 review
+    // 无前缀碰撞故恒绿）。等选中项收敛为 commit 再按 Enter——断言的是 Enter 真正消费的信号。
+    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
+      .toContainText('commit', { timeout: 5_000 })
 
     // Enter confirm 第一项（commit 应排前）
     await page.getByTestId('search-input').press('Enter')
     // 搜索浮层关闭（confirm ok:true）
     await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
-    await diag('4-closed')
 
     // composer 输入区含 commit chip（slash-chip 内 chip-label 文本）
     const composer = page.getByTestId('composer-box')
