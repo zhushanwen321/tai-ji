@@ -18,7 +18,7 @@
 
 ## 安装
 
-当前最新版本：**v0.10.0**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
+当前最新版本：**v0.10.1**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
 
 <!-- INSTALL:BEGIN -->
 <!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外的版本号不会被打扰。 -->
@@ -31,7 +31,7 @@
 
 ```bash
 # 下载并打开 DMG（也可到 Releases 页用浏览器下载 dmg，双击安装）
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 
 # 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
@@ -42,7 +42,7 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0
 
 ```bash
 # 下载、赋可执行权限并启动 AppImage
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -51,10 +51,10 @@ curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0
 
 ```powershell
 # PowerShell（推荐；避免 curl 在 PowerShell 是别名导致的参数冲突）
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 
 # 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
-# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 ### 国外下载（GitHub）
@@ -65,7 +65,7 @@ Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download
 
 ```bash
 # 下载并打开 DMG
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-mac-arm64.dmg -o /tmp/TaiJi.dmg \
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-mac-arm64.dmg -o /tmp/TaiJi.dmg \
   && open /tmp/TaiJi.dmg
 
 # 若启动时提示「已损坏」或「无法验证开发者」，执行（curl 下载通常不需要，浏览器下载需要）：
@@ -76,7 +76,7 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 ```bash
 # 下载、赋可执行权限并启动 AppImage
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-x86_64.AppImage -o ~/TaiJi.AppImage \
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-x86_64.AppImage -o ~/TaiJi.AppImage \
   && chmod +x ~/TaiJi.AppImage \
   && ~/TaiJi.AppImage
 ```
@@ -85,10 +85,10 @@ curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-
 
 ```powershell
 # PowerShell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 
 # 命令提示符 / cmd.exe（系统自带 curl.exe，Win10 1803+ 默认含）：
-# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.0/TaiJi-0.10.0-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
+# curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.1/TaiJi-0.10.1-setup-x64.exe -o "%TEMP%\TaiJi-setup.exe" && "%TEMP%\TaiJi-setup.exe"
 ```
 
 <!-- INSTALL:END -->
@@ -102,7 +102,7 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 - **多 session 管理** — 侧栏会话列表，⌘/Ctrl+N 新建；session 树状分支（fork / clone）为 pi 原生能力，可从任意 assistant 消息分叉（⌘/Ctrl+G fork、⌘/Ctrl+⇧+G fork 模式、⌘/Ctrl+J handoff）
 - **双 Panel split view** — 单 Panel 为默认态，打开第二个 session 即分屏；支持 focus mode 聚焦当前会话
 - **Overview** — 独立的多会话鸟瞰视图（卡片网格 + 筛选 + 后台 agent 聚合）
-- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+I 导入会话、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话前进后退、⌘/Ctrl+⇧+P 预设切换；快捷键均可在设置中重录
+- **全局效率入口** — ⌘/Ctrl+K 全局搜索、⌘/Ctrl+I 导入会话、⌘/Ctrl+B 折叠侧栏、⌘/Ctrl+, 设置、⌘/Ctrl+[ ] 会话后退/前进、⌘/Ctrl+⇧+P 预设切换；新建会话 / 折叠侧栏 / 预设切换三项可在设置中重录，其余为固定快捷键
 
 ### 对话流
 
@@ -146,7 +146,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | 缓存前缀指纹采集 + 归因分析 |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner 实操指南 + `cw_query` 只读查询工具 |
 
-其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用，离开 taiji 宿主无功能。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
+其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用，离开 taiji 宿主无功能。18 个内置扩展 = 上表 16 个中的 13 个 + 这 5 个；`pi-plan` / `pi-cache-probe` / `pi-cw-tool` 未内置，经 npm 安装或 `--extension` 加载。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
 ## 架构
 
@@ -156,7 +156,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 
 架构图源文件：[`docs/assets/architecture.drawio`](docs/assets/architecture.drawio)（PNG 为内嵌源导出，可在 draw.io 中打开继续编辑）。
 
-五个核心模块：
+核心模块：
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
@@ -165,6 +165,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | **前端** | `packages/renderer/` | Vue 3 + TypeScript + Pinia + Tailwind CSS v3 + @taiji/ui（太极纯灰暗色设计系统） |
 | **Runtime** | `packages/runtime/` | WebSocket 服务，三层架构（transport/services/infra），通过 pi RPC 协议与 Agent 通信 |
 | **共享类型** | `packages/shared/` | 前端与 runtime 间的 TypeScript 类型定义（pnpm workspace） |
+| **pi CLI** | 外部依赖 `@earendil-works/pi-coding-agent` | Agent 执行核心，由 Runtime 以子进程方式拉起，经 RPC 通信并加载 18 个内置扩展 |
 
 渲染进程有两条出口通道：**WS**（→ Runtime，业务/数据）与 **IPC**（→ Main，窗口/进程/OS 特权）。渲染进程不直接调 `window.electronAPI`，统一走 [`lib/ipc.ts`](packages/renderer/src/lib/ipc.ts) 门面。
 
@@ -207,7 +208,7 @@ pnpm build:e2e && pnpm test:e2e
 |------|------|--------|
 | `TAIJI_MOCK` | 设为 `1` 跳过 runtime 子进程启动，使用 Mock 数据 | — |
 | `VITE_MOCK` | 设为 `true` 在 ws-client 层拦截所有 WS 消息 | — |
-| `TAIJI_AGENT_DATA_DIR` | 自定义数据目录（dev 模式默认 `~/.taiji-dev`，与 pi 的 `~/.pi/agent/` 完全隔离） | `~/.taiji` |
+| `TAIJI_AGENT_DATA_DIR` | 自定义数据目录，与 pi 的 `~/.pi/agent/` 完全隔离（dev 模式强制 `~/.taiji-dev`，此变量不生效） | `~/.taiji` |
 
 ## 技术栈
 
@@ -250,7 +251,7 @@ pnpm build:e2e && pnpm test:e2e
 ├── extensions/               # 21 个 @zhushanwen/pi-* pi 扩展源码 + shared/ 共享库
 ├── e2e/                      # Playwright E2E spec + 视觉基线（visual-baselines）
 ├── scripts/                  # 构建 / 验证 / 发布脚本（preflight / postbuild / verify-* / bundle-extensions）
-├── resources/                # 内置插件与 statusline
+├── resources/                # 内置插件（statusline）
 ├── docs/                     # 文档（架构 / 设计 SSOT / 扩展指南 / 测试 / ADR / 排查）
 └── .agents/                  # 项目级 agent / skill（merge / review 等）
 ```
